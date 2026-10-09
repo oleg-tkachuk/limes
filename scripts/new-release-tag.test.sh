@@ -38,11 +38,22 @@ check() { # name, want, got
     fi
 }
 
+# succeeds: the script exits 0. release.yaml runs it under set -e, so a
+# nonzero exit fails the release even when the output is right.
+succeeds() { # name
+    if ! "$script" "$before" >/dev/null; then
+        printf 'FAIL %s: exit status is not 0\n' "$1"
+        failures=$((failures + 1))
+    fi
+}
+
 : >"$before"
 check "no tag on HEAD" "" "$("$script" "$before")"
+succeeds "no tag on HEAD"
 
 git tag baseline
 check "a tag that is no version" "" "$("$script" "$before")"
+succeeds "a tag that is no version"
 
 git tag v0.2.0
 check "the tag this run pushed" "v0.2.0" "$("$script" "$before")"
@@ -52,6 +63,7 @@ check "a tag an earlier run pushed and never published" "v0.2.0" "$("$script" "$
 
 echo v0.2.0 >>"$RELEASED"
 check "a tag an earlier run pushed and published" "" "$("$script" "$before")"
+succeeds "a tag an earlier run pushed and published"
 
 git tag v0.2.1
 check "a new tag beside an old one" "v0.2.1" "$("$script" "$before")"
