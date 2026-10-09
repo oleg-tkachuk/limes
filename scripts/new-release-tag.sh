@@ -23,9 +23,10 @@ before="${1:?usage: new-release-tag.sh <tags-before-file>}"
 new() { git tag --points-at HEAD | grep -E "$RELEASE_TAG" | grep -vxF -f "$before" || true; }
 
 # unpublished prints the release tags on HEAD that have no GitHub release.
+# grep finding none exits 1, which pipefail would make this function's status.
 unpublished() {
     local tag
-    git tag --points-at HEAD | grep -E "$RELEASE_TAG" | while read -r tag; do
+    { git tag --points-at HEAD | grep -E "$RELEASE_TAG" || true; } | while read -r tag; do
         gh release view "$tag" >/dev/null 2>&1 || echo "$tag"
     done
 }
