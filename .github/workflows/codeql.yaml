@@ -10,8 +10,8 @@ on:
   push:
     branches: [main]
     paths-ignore: &docs
-      # Documentation only. Mirrors INERT in scripts/ci-relevant.sh;
-      # scripts/ci-relevant.test.sh fails when the two disagree.
+      # Documentation only. Mirrors INERT in .github/scripts/ci-relevant.sh;
+      # .github/scripts/ci-relevant.test.sh fails when the two disagree.
       - "**/*.md"
       - "docs/**"
       - LICENSE

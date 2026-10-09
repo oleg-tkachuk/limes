@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-script="$(git rev-parse --show-toplevel)/scripts/new-release-tag.sh"
+script="$(git rev-parse --show-toplevel)/.github/scripts/new-release-tag.sh"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 

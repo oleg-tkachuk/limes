@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-script="$(git rev-parse --show-toplevel)/scripts/warm-go-proxy.sh"
+script="$(git rev-parse --show-toplevel)/.github/scripts/warm-go-proxy.sh"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 

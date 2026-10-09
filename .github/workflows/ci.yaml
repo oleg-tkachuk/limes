@@ -27,17 +27,13 @@ env:
   # refuses to load the module. Bumping go.mod means checking this.
   # renovate: datasource=github-releases depName=golangci/golangci-lint
   GOLANGCI_LINT_VERSION: "v2.14.0"
-  # renovate: datasource=go depName=golang.org/x/vuln
-  GOVULNCHECK_VERSION: "v1.8.0"
   # renovate: datasource=github-releases depName=mikefarah/yq
   YQ_VERSION: "v4.53.6"
-  # renovate: datasource=go depName=github.com/rhysd/actionlint
-  ACTIONLINT_VERSION: "v1.7.12"
   # renovate: datasource=pypi depName=zizmor
   ZIZMOR_VERSION: "1.30.1"
 
 jobs:
-  # Whether anything the checks below read has changed. scripts/ci-relevant.sh
+  # Whether anything the checks below read has changed. .github/scripts/ci-relevant.sh
   # holds the list of documentation paths that change nothing.
   changes:
     name: Changed paths
@@ -81,11 +77,11 @@ jobs:
           zero=0000000000000000000000000000000000000000
           if [ -z "$from" ] || [ "$from" = "$zero" ] || ! git cat-file -e "${from}^{commit}" 2>/dev/null; then
             printf '%s\n' "no usable base (${from:-none}) — running everything"
-            relevant="$(./scripts/ci-relevant.sh --all)"
+            relevant="$(./.github/scripts/ci-relevant.sh --all)"
           else
             changed="$(git diff --name-only "$from" "$to")"
             printf '%s\n' "$changed"
-            relevant="$(printf '%s\n' "$changed" | ./scripts/ci-relevant.sh)"
+            relevant="$(printf '%s\n' "$changed" | ./.github/scripts/ci-relevant.sh)"
           fi
 
           printf '%s\n' "relevant=$relevant" >>"$GITHUB_OUTPUT"
@@ -128,9 +124,9 @@ jobs:
             ~/.cache/go-build
             ~/go/pkg/mod
             ~/.cache/golangci-lint
-          key: go-${{ runner.os }}-verify-${{ hashFiles('go.sum') }}-${{ github.sha }}
+          key: go-${{ runner.os }}-verify-${{ hashFiles('go.sum', 'tools/go.sum') }}-${{ github.sha }}
           restore-keys: |
-            go-${{ runner.os }}-verify-${{ hashFiles('go.sum') }}-
+            go-${{ runner.os }}-verify-${{ hashFiles('go.sum', 'tools/go.sum') }}-
             go-${{ runner.os }}-verify-
 
       - name: Set up golangci-lint
@@ -141,14 +137,8 @@ jobs:
           # Its cache lives in the Go caches above.
           skip-cache: true
 
-      - name: Set up govulncheck
-        run: |
-          set -euo pipefail
-          go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
-          printf '%s\n' "$(go env GOPATH)/bin" >>"$GITHUB_PATH"
-
       # The runner image ships a yq, but not a version this repository chose.
-      # scripts/ci-relevant.test.sh reads codeql.yaml through it.
+      # .github/scripts/ci-relevant.test.sh reads codeql.yaml through it.
       - name: Set up yq
         run: |
           set -euo pipefail
@@ -215,11 +205,9 @@ jobs:
           go-version-file: go.mod
           cache: false
 
+      # The version tools/go.mod pins, as `task verify:workflows` runs it.
       - name: actionlint
-        run: |
-          set -euo pipefail
-          go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
-          "$(go env GOPATH)/bin/actionlint"
+        run: go tool -modfile=tools/go.mod actionlint
 
   audit:
     name: Workflow audit
