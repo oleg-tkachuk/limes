@@ -275,22 +275,17 @@ func checkPurge(t *testing.T, f fixture) {
 }
 
 // listAll pages through ListByPrincipal and returns the ids in the order read.
+// A store whose page hands back its own cursor fails here rather than hanging.
 func (f fixture) listAll(t *testing.T, req limes.ListByPrincipalRequest) []uuid.UUID {
 	t.Helper()
 	var ids []uuid.UUID
-	for {
-		page, next, err := f.Store.ListByPrincipal(f.Ctx, req)
+	for c, err := range limes.AllByPrincipal(f.Ctx, f.Store, req) {
 		if err != nil {
 			t.Fatalf("ListByPrincipal: %v", err)
 		}
-		for _, c := range page {
-			ids = append(ids, c.ID)
-		}
-		if next == "" {
-			return ids
-		}
-		req.Cursor = next
+		ids = append(ids, c.ID)
 	}
+	return ids
 }
 
 func checkListPages(t *testing.T, f fixture) {

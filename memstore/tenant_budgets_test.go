@@ -140,6 +140,17 @@ func TestListTenantBudgetsPages(t *testing.T) {
 		t.Fatalf("paged %v, want %v", got, want)
 	}
 
+	var walked []uuid.UUID
+	for s, err := range limes.AllTenantBudgets(ctx, u, limes.ListTenantBudgetsRequest{Limit: pageSize}) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		walked = append(walked, s.TenantID)
+	}
+	if !slices.Equal(walked, want) {
+		t.Fatalf("AllTenantBudgets walked %v, want %v", walked, want)
+	}
+
 	for _, bad := range []string{"garbage", limes.TenantBudgetCursor{Utilisation: "x", TenantID: half}.Encode()} {
 		if _, _, err := u.ListTenantBudgets(ctx, limes.ListTenantBudgetsRequest{Cursor: bad}); !errors.Is(err, limes.ErrInvalidRequest) {
 			t.Errorf("cursor %q: err = %v, want ErrInvalidRequest", bad, err)

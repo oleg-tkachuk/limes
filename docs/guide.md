@@ -419,6 +419,19 @@ Instantiate `UsageStore[struct{}]` and always pass `nil` for the callback.
 Everything works identically; you forgo the atomic-side-effect
 guarantee.
 
+The two listings, `ListByPrincipal` and `ListTenantBudgets`, are pages with an
+opaque cursor, so an API can hand a page token to its client. To read a whole
+listing in one go, range over `AllByPrincipal` or `AllTenantBudgets`: they
+walk the pages for you, stop fetching when the loop breaks, and refuse a page
+that returns the cursor it was fetched with (`ErrCursorRepeated`).
+
+```go
+for c, err := range limes.AllByPrincipal(ctx, store, req) {
+    if err != nil { /* yielded once; the walk ends */ }
+    // …
+}
+```
+
 ## Key rotation
 
 1. Publish the new public key alongside the old (`SetKey`, or add it to the
