@@ -2,7 +2,6 @@
 
 [![ci](https://github.com/oleg-tkachuk/limes/actions/workflows/ci.yaml/badge.svg?branch=main)](https://github.com/oleg-tkachuk/limes/actions/workflows/ci.yaml)
 [![release](https://img.shields.io/github/v/release/oleg-tkachuk/limes?sort=semver)](https://github.com/oleg-tkachuk/limes/releases/latest)
-[![go reference](https://pkg.go.dev/badge/github.com/oleg-tkachuk/limes.svg)](https://pkg.go.dev/github.com/oleg-tkachuk/limes)
 [![go](https://img.shields.io/github/go-mod/go-version/oleg-tkachuk/limes)](go.mod)
 [![license](https://img.shields.io/github/license/oleg-tkachuk/limes)](LICENSE)
 
@@ -152,7 +151,6 @@ fixtures regenerated in the same commit.
 |----------|--------|
 | [docs/guide.md](docs/guide.md) | each concern in turn: verification, caveats, delegation, DPoP, Biscuit, metering, revocation, storage contracts, key rotation |
 | [docs/diagrams.md](docs/diagrams.md) | the contract boundary, a capability's lifecycle, the verification gates, delegation, Biscuit copies, the charge path, revocation |
-| [pkg.go.dev](https://pkg.go.dev/github.com/oleg-tkachuk/limes) | the API reference |
 | [CONTRIBUTING.md](.github/CONTRIBUTING.md) | building, testing and how a change lands |
 | [SECURITY.md](.github/SECURITY.md) | reporting a vulnerability |
 
