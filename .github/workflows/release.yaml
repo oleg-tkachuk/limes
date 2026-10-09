@@ -76,10 +76,12 @@ jobs:
           # another run wrote is not something to restore into it.
           package-manager-cache: false
 
-      # The lockfile pins semantic-release and its preset, so this installs
-      # the versions committed here rather than a marketplace action's own.
+      # .github/release/package-lock.json pins semantic-release and its preset,
+      # so this installs the versions committed here rather than a marketplace
+      # action's own.
       - name: Install semantic-release
         if: steps.head.outputs.release == 'true'
+        working-directory: .github/release
         run: npm ci
 
       # What HEAD carried before this run, so the step after it can tell a tag
@@ -88,8 +90,11 @@ jobs:
         if: steps.head.outputs.release == 'true'
         run: git tag --points-at HEAD >"$RUNNER_TEMP/tags-before"
 
+      # Run where its config and lockfile live; git finds the repository from
+      # there.
       - name: Compute and push the tag
         if: steps.head.outputs.release == 'true'
+        working-directory: .github/release
         run: npx semantic-release --no-ci
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -10,7 +10,7 @@ import { createRequire } from "node:module";
 import { analyzeCommits } from "@semantic-release/commit-analyzer";
 
 const require = createRequire(import.meta.url);
-const config = require("../release.config.cjs");
+const config = require("./release.config.cjs");
 
 // [commit message, release wanted]
 const cases = [

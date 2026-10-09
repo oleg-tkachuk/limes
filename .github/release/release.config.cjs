@@ -11,7 +11,7 @@
 // and docs/style/refactor/test/build/ci/chore release nothing. `security` is a
 // patch: the preset knows no such type. The module is pre-1.0, where a
 // breaking change is a minor; that rule goes when it reaches 1.0.
-// scripts/release-rules.test.mjs pins all of it.
+// release-rules.test.mjs pins all of it.
 
 const PRESET = "conventionalcommits";
 const SECURITY_IS_A_PATCH = { type: "security", release: "patch" };
@@ -27,6 +27,6 @@ module.exports = {
   tagFormat: "v${version}",
   repositoryUrl: "https://github.com/oleg-tkachuk/limes.git",
   plugins: [["@semantic-release/commit-analyzer", analyzer]],
-  // Read by scripts/release-rules.test.mjs; semantic-release ignores it.
+  // Read by release-rules.test.mjs; semantic-release ignores it.
   analyzer,
 };

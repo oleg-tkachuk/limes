@@ -166,6 +166,7 @@ jobs:
           package-manager-cache: false
 
       - name: Install the release tooling
+        working-directory: .github/release
         run: npm ci
 
       - name: Set up Task

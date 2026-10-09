@@ -5,7 +5,7 @@
 Go (the version in `go.mod`), [Task](https://taskfile.dev),
 [golangci-lint](https://golangci-lint.run) and
 [govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck); Node and
-`npm ci` for the release-rule test; `yq` for the CI-relevance test.
+`npm ci --prefix .github/release` for the release-rule test; `yq` for the CI-relevance test.
 
 ```bash
 task verify-all
