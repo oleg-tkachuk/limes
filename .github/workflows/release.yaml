@@ -60,12 +60,12 @@ jobs:
 
       # The checkout above is main's head, which can be newer than the commit
       # whose CI dispatched this run. Only that commit is released; a newer
-      # head is released by its own CI run. See scripts/release-head-check.sh.
+      # head is released by its own CI run. See .github/scripts/release-head-check.sh.
       - name: Release only the commit CI passed
         id: head
         env:
           SHA: ${{ github.event.client_payload.sha }}
-        run: ./scripts/release-head-check.sh "$SHA" >>"$GITHUB_OUTPUT"
+        run: ./.github/scripts/release-head-check.sh "$SHA" >>"$GITHUB_OUTPUT"
 
       - name: Set up Node
         if: steps.head.outputs.release == 'true'
@@ -101,7 +101,7 @@ jobs:
 
       # Read from git rather than parsing semantic-release's prose. A tag on
       # HEAD with no release, left by a run that failed after pushing it, is
-      # published by a re-run — see scripts/new-release-tag.sh.
+      # published by a re-run — see .github/scripts/new-release-tag.sh.
       #
       # Notes for people, built from merged pull requests and shaped by
       # .github/release.yml. Then the Go proxy is told of the tag, so
@@ -113,11 +113,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          tag="$(./scripts/new-release-tag.sh "$RUNNER_TEMP/tags-before")"
+          tag="$(./.github/scripts/new-release-tag.sh "$RUNNER_TEMP/tags-before")"
           if [ -z "$tag" ]; then
             printf '%s\n' "no new tag from this run — no release was due"
             exit 0
           fi
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --generate-notes --verify-tag
-          ./scripts/warm-go-proxy.sh "$tag" ||
+          ./.github/scripts/warm-go-proxy.sh "$tag" ||
             echo "::warning::the Go proxy did not take $tag yet; it will on its own"

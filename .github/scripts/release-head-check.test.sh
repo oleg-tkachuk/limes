@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-script="$(git rev-parse --show-toplevel)/scripts/release-head-check.sh"
+script="$(git rev-parse --show-toplevel)/.github/scripts/release-head-check.sh"
 work="$(mktemp -d "${TMPDIR:-/tmp}/release-head-check.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 

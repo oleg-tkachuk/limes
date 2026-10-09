@@ -163,7 +163,7 @@ fixtures regenerated in the same commit.
 | [storetest/](storetest), [metertest/](metertest) | conformance suites to run from your own store's tests |
 | [example/](example) | the five-minute walkthrough as a runnable program |
 | [testdata/](testdata) | golden tokens, and the Biscuit vocabulary and cases shared with SDKs in other languages |
-| [scripts/](scripts) | the workflows' release and CI helpers, each with its test |
+| [tools/](tools) | the developer tools, pinned in a module of their own and run with `go tool -modfile=tools/go.mod` |
 
 ## License
 

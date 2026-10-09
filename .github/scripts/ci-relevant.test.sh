@@ -7,7 +7,7 @@
 set -euo pipefail
 
 root="$(git rev-parse --show-toplevel)"
-script="$root/scripts/ci-relevant.sh"
+script="$root/.github/scripts/ci-relevant.sh"
 
 failures=0
 check() { # name, want, changed paths

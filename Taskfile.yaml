@@ -14,12 +14,17 @@ silent: true
 vars:
   # Shared task library — github.com/oleg-tkachuk/taskfiles, pinned.
   TASKLIB: 'https://github.com/oleg-tkachuk/taskfiles.git//%s?ref=v11.1.2'
+  # The developer tools' own module; see its go.mod.
+  TOOLS_MODFILE: tools/go.mod
 
 includes:
   go:
     taskfile: '{{printf .TASKLIB "go"}}'
     dir: .
     flatten: true
+    # Its vuln runs a govulncheck from PATH; the one below runs the version
+    # tools/go.mod pins.
+    excludes: [vuln]
     vars: { PROJECT_NAME: limes }
 
 tasks:
@@ -28,20 +33,31 @@ tasks:
       - task --list
 
   verify-all:
-    desc: "gofmt + golangci-lint + the unit suite + govulncheck + the workflow scripts — what CI runs"
+    desc: "gofmt + golangci-lint + the unit suite + govulncheck + actionlint + the workflow scripts — what CI runs"
     cmds:
       - task: fmt:check
       - task: lint
       - task: test
       - task: vuln
+      - task: verify:workflows
       - task: verify:scripts
       - task: verify:release-rules
+
+  vuln:
+    desc: "govulncheck — vulnerabilities this module's code actually reaches"
+    cmds:
+      - go tool -modfile={{.TOOLS_MODFILE}} govulncheck ./...
+
+  verify:workflows:
+    desc: "actionlint over the workflows"
+    cmds:
+      - go tool -modfile={{.TOOLS_MODFILE}} actionlint
 
   verify:scripts:
     desc: "Test the shell scripts the workflows run"
     cmds:
       - for: [ci-relevant, new-release-tag, release-head-check, warm-go-proxy]
-        cmd: bash scripts/{{.ITEM}}.test.sh
+        cmd: bash .github/scripts/{{.ITEM}}.test.sh
 
   verify:release-rules:
     desc: "Fail when a commit type cuts a different release than it should"
