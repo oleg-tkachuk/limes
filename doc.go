@@ -1,4 +1,4 @@
-// Package capability is an object-capability authorisation primitive designed
+// Package limes is an object-capability authorisation primitive designed
 // for agentic workloads.
 //
 // A Capability is a short-lived, signed token granting its bearer a specific
