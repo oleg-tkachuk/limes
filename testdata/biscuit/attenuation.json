@@ -1,0 +1,22 @@
+{
+  "_comment": "A cross-language attenuation. seed.biscuit is minted from the golden key and clock: ops get/list/put under corpus/, planes data and mcp, unbound, expiring 2026-01-01T01:00:00Z. attenuated.biscuit is that seed attenuated with the arguments below; an SDK attenuating the seed with the same arguments must produce a token the verifier reads as the capability below. LIMES_WRITE_BISCUIT=1 go test -run TestGenerateBiscuitFixtures regenerates both. Biscuit blocks use fresh random keys, so regenerating changes the bytes but not the meaning.",
+  "attenuate": {
+    "ops": ["get"],
+    "resource_prefixes": ["corpus/public/"],
+    "planes": ["data"],
+    "expires_at": "2026-01-01T00:30:00Z",
+    "bind_jkt": "nhJL-4fvkZxa3j-NAU29y8N1wqcS_E-ZMtKfgT23tV0",
+    "max_requests": 25,
+    "max_budget_nanos": 1500000000
+  },
+  "expect": {
+    "ops": ["get"],
+    "resource_prefixes": ["corpus/public/"],
+    "resource_uris": [],
+    "planes": ["data"],
+    "expires_at": "2026-01-01T00:30:00Z",
+    "confirmation_jkt": "nhJL-4fvkZxa3j-NAU29y8N1wqcS_E-ZMtKfgT23tV0",
+    "copy_max_requests": 25,
+    "copy_max_budget_nanos": 1500000000
+  }
+}

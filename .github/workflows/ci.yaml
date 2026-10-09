@@ -1,0 +1,311 @@
+name: CI
+
+# The whole pipeline: the module's gate, an audit of these workflows, and — on
+# a green push to main — a dispatch to release.yaml.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # A run by hand has no diff to classify, so it runs every check. It never
+  # dispatches a release: that job requires a push event.
+  workflow_dispatch:
+
+# Nothing at the top level — each job asks for what it needs.
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Pinned tools, one place each. A floating tool changes what the gate checks
+# with no commit of ours in between.
+env:
+  # renovate: datasource=github-releases depName=go-task/task
+  TASK_VERSION: "3.54.0"
+  # Must be BUILT with a Go no older than the `go` directive in go.mod, or it
+  # refuses to load the module. Bumping go.mod means checking this.
+  # renovate: datasource=github-releases depName=golangci/golangci-lint
+  GOLANGCI_LINT_VERSION: "v2.14.0"
+  # renovate: datasource=go depName=golang.org/x/vuln
+  GOVULNCHECK_VERSION: "v1.8.0"
+  # renovate: datasource=github-releases depName=mikefarah/yq
+  YQ_VERSION: "v4.53.6"
+  # renovate: datasource=go depName=github.com/rhysd/actionlint
+  ACTIONLINT_VERSION: "v1.7.12"
+  # renovate: datasource=pypi depName=zizmor
+  ZIZMOR_VERSION: "1.30.1"
+
+jobs:
+  # Whether anything the checks below read has changed. scripts/ci-relevant.sh
+  # holds the list of documentation paths that change nothing.
+  changes:
+    name: Changed paths
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The diff below needs both ends of it.
+          fetch-depth: 0
+
+      - name: Classify the diff
+        id: filter
+        env:
+          # A pull request has both ends of its own diff; a push reports the
+          # branch's previous head.
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${BASE:-}" ]; then
+            from="$BASE"
+            to="$HEAD"
+          else
+            from="${BEFORE:-}"
+            to="$AFTER"
+          fi
+
+          # A push that created the branch reports all zeros, a force-push can
+          # name a commit this clone does not have, and a run by hand has no
+          # diff at all. None of them is a diff, so all mean everything.
+          zero=0000000000000000000000000000000000000000
+          if [ -z "$from" ] || [ "$from" = "$zero" ] || ! git cat-file -e "${from}^{commit}" 2>/dev/null; then
+            printf '%s\n' "no usable base (${from:-none}) — running everything"
+            relevant="$(./scripts/ci-relevant.sh --all)"
+          else
+            changed="$(git diff --name-only "$from" "$to")"
+            printf '%s\n' "$changed"
+            relevant="$(printf '%s\n' "$changed" | ./scripts/ci-relevant.sh)"
+          fi
+
+          printf '%s\n' "relevant=$relevant" >>"$GITHUB_OUTPUT"
+          if [ "$relevant" = false ]; then
+            printf '%s\n' "documentation only — the checks below will report as skipped"
+          fi
+
+  # `task verify-all`, exactly as a developer runs it.
+  verify:
+    name: Verify
+    needs: [changes]
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The toolchain directive in go.mod decides the Go, so govulncheck checks
+      # the standard library this module is built with.
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          # The cache below replaces setup-go's, which only main should write.
+          cache: false
+
+      # Refreshed by every push to main (the key carries the commit), and
+      # restored by a pull request from the newest main entry. Only main
+      # writes, so a pull request cannot seed what main builds from.
+      - name: Restore the Go caches
+        id: go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+            ~/.cache/golangci-lint
+          key: go-${{ runner.os }}-verify-${{ hashFiles('go.sum') }}-${{ github.sha }}
+          restore-keys: |
+            go-${{ runner.os }}-verify-${{ hashFiles('go.sum') }}-
+            go-${{ runner.os }}-verify-
+
+      - name: Set up golangci-lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          install-only: true
+          # Its cache lives in the Go caches above.
+          skip-cache: true
+
+      - name: Set up govulncheck
+        run: |
+          set -euo pipefail
+          go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
+          printf '%s\n' "$(go env GOPATH)/bin" >>"$GITHUB_PATH"
+
+      # The runner image ships a yq, but not a version this repository chose.
+      # scripts/ci-relevant.test.sh reads codeql.yaml through it.
+      - name: Set up yq
+        run: |
+          set -euo pipefail
+          sudo curl -fsSL -o /usr/local/bin/yq \
+            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          sudo chmod +x /usr/local/bin/yq
+          yq --version
+
+      # verify:release-rules runs the pinned commit analyzer against
+      # release.config.cjs. Node 24, as release.yaml runs it.
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Install the release tooling
+        run: npm ci
+
+      - name: Set up Task
+        uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+        with:
+          version: ${{ env.TASK_VERSION }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # --yes accepts the first-fetch trust prompt for the shared task library
+      # include; unattended, that prompt is a hang rather than a question.
+      - name: task verify-all
+        run: task --yes verify-all
+
+      - name: Save the Go caches
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+            ~/.cache/golangci-lint
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
+
+  # Two jobs over the same files, and the halves do not overlap. actionlint
+  # covers whether a workflow is correct at all — schema, expression syntax,
+  # `needs:` naming a job that exists, and shellcheck over every `run:` block.
+  # zizmor covers security: unpinned actions, leaked credentials, injectable
+  # expressions.
+  syntax:
+    name: Workflow syntax
+    needs: [changes]
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: actionlint
+        run: |
+          set -euo pipefail
+          go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
+          "$(go env GOPATH)/bin/actionlint"
+
+  audit:
+    name: Workflow audit
+    needs: [changes]
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # These workflows are the part of the repository that runs with a token,
+      # so they are audited as code rather than trusted as config. Exceptions
+      # live in .github/zizmor.yml, each with the reason it stands.
+      - name: zizmor
+        env:
+          # Without a token zizmor runs offline and skips the audits that need
+          # the API — resolving an action's ref among them.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          pipx run "zizmor==${ZIZMOR_VERSION}" \
+            --config .github/zizmor.yml --persona=regular --format=plain .github/workflows/
+
+  # The one check a ruleset requires. A skipped job was not reached by the
+  # change, which is a pass; a failure or a cancellation anywhere is not.
+  checks:
+    name: All checks passed
+    needs: [changes, verify, syntax, audit]
+    if: always()
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require every job to have passed or been skipped
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          set -euo pipefail
+          printf 'results: %s\n' "$RESULTS"
+          for result in $RESULTS; do
+            case "$result" in
+              success | skipped) ;;
+              *)
+                printf '%s\n' "a required job ended as ${result}"
+                exit 1
+                ;;
+            esac
+          done
+
+  dispatch-release:
+    name: Dispatch release
+    needs: [changes, verify, syntax, audit]
+    # Not for a documentation-only push: its code is byte-identical to the
+    # commit before it. Its commits are not lost — semantic-release counts them
+    # in the next release a code change dispatches.
+    if: >-
+      always() &&
+      needs.changes.outputs.relevant == 'true' &&
+      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled')
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: write # POST /repos/{owner}/{repo}/dispatches needs write
+    steps:
+      - name: Dispatch the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # --input rather than -f: client_payload is nested and the form
+          # syntax cannot express that. Both values come from Actions itself
+          # and arrive through env, so nothing here is substituted into the
+          # script before the shell runs.
+          gh api "repos/${GITHUB_REPOSITORY}/dispatches" --input - <<JSON
+          {
+            "event_type": "release",
+            "client_payload": {
+              "sha": "${GITHUB_SHA}",
+              "ci_run_id": "${GITHUB_RUN_ID}"
+            }
+          }
+          JSON
+          printf '%s\n' "dispatched release for ${GITHUB_SHA}"

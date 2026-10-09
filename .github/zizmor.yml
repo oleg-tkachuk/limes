@@ -1,0 +1,13 @@
+# zizmor configuration.
+#
+# One audit is relaxed for one file, with the reason stated. Everything else
+# runs: actions are pinned to commit SHAs, no workflow input reaches a shell,
+# and every job asks for the narrowest token it needs.
+rules:
+  artipacked:
+    ignore:
+      # release.yaml is the one checkout in this repository that genuinely
+      # needs its credentials: semantic-release pushes the tag it creates.
+      # Every other checkout sets persist-credentials: false, which is what
+      # this audit asks for.
+      - release.yaml

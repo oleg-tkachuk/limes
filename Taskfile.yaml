@@ -1,0 +1,57 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+version: "3"
+
+# limes — the module's gates.
+#
+#   task --list
+#   task verify-all      # before pushing; CI runs the same task
+#
+# One Go module at the root, so the shared library's Go verbs are flattened in:
+# `task test`, not `task go:test`.
+
+silent: true
+
+vars:
+  # Shared task library — github.com/oleg-tkachuk/taskfiles, pinned.
+  TASKLIB: 'https://github.com/oleg-tkachuk/taskfiles.git//%s?ref=v11.1.2'
+
+includes:
+  go:
+    taskfile: '{{printf .TASKLIB "go"}}'
+    dir: .
+    flatten: true
+    vars: { PROJECT_NAME: limes }
+
+tasks:
+  default:
+    cmds:
+      - task --list
+
+  verify-all:
+    desc: "gofmt + golangci-lint + the unit suite + govulncheck + the workflow scripts — what CI runs"
+    cmds:
+      - task: fmt:check
+      - task: lint
+      - task: test
+      - task: vuln
+      - task: verify:scripts
+      - task: verify:release-rules
+
+  verify:scripts:
+    desc: "Test the shell scripts the workflows run"
+    cmds:
+      - for: [ci-relevant, new-release-tag, release-head-check, warm-go-proxy]
+        cmd: bash scripts/{{.ITEM}}.test.sh
+
+  verify:release-rules:
+    desc: "Fail when a commit type cuts a different release than it should"
+    preconditions:
+      - sh: test -d node_modules/@semantic-release/commit-analyzer
+        msg: "the release tooling is not installed — npm ci"
+    cmds:
+      - node scripts/release-rules.test.mjs
+
+  example:
+    desc: "Run the quickstart walkthrough end to end"
+    cmds:
+      - go run ./example

@@ -1,0 +1,29 @@
+# Shapes the notes GitHub generates for a release — release.yaml calls
+# `gh release create --generate-notes`, and this decides what they contain.
+#
+# Categories match on pull-request labels, so a change merged without one falls
+# through to "Other Changes" rather than disappearing.
+changelog:
+  exclude:
+    labels:
+      - duplicate
+      - invalid
+      - wontfix
+      - question
+    authors:
+      - renovate[bot]
+      - dependabot[bot]
+      - github-actions[bot]
+  categories:
+    - title: Features
+      labels:
+        - enhancement
+    - title: Bug Fixes
+      labels:
+        - bug
+    - title: Documentation
+      labels:
+        - documentation
+    - title: Other Changes
+      labels:
+        - "*"

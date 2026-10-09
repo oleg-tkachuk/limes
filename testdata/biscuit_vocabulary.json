@@ -1,0 +1,21 @@
+{
+  "_comment": "The Biscuit attenuation vocabulary (biscuit.go). This module and every SDK that attenuates its tokens test their names against this file, so a fact renamed on one side fails the other's tests. An attenuation block holds only the facts below, one term each; any other fact, and any rule or check, makes the verifier refuse the whole token. Amounts are nanos, billionths of the capability's unit.",
+  "encoding": "base64url, no padding",
+  "authority": {
+    "_comment": "The authority block holds one fact: the capability JWT, whose claim root_claim is the base64url Ed25519 public key that roots the Biscuit's signature chain.",
+    "fact": "limes_capability",
+    "root_claim": "limes_bsk"
+  },
+  "facts": {
+    "limes_op": "string",
+    "limes_resource_prefix": "string",
+    "limes_resource_uri": "string",
+    "limes_plane": "string",
+    "limes_expires": "date",
+    "limes_bind": "string",
+    "limes_max_requests": "integer",
+    "limes_max_budget_nanos": "integer"
+  },
+  "replace_together": [["limes_resource_prefix", "limes_resource_uri"]],
+  "bind_thumbprint_bytes": 32
+}

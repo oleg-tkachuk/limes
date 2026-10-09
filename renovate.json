@@ -1,0 +1,73 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":dependencyDashboard"],
+  "labels": ["dependencies"],
+  "description": [
+    "Go and npm: minor/patch only, grouped into one PR per manager per month. Majors are crossed by hand, per the upstream CHANGELOG.",
+    "Vulnerability remediation is ungrouped and unscheduled — it should not wait for the monthly window.",
+    "The tools the workflows pin carry a `# renovate:` comment naming their datasource; the shared task library's tag is read from Taskfile.yaml."
+  ],
+  "enabledManagers": ["github-actions", "gomod", "npm", "custom.regex"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "A tool version pinned in a workflow's env, under a `# renovate: datasource=… depName=…` comment.",
+      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      "matchStrings": ["# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)\\s+[A-Z_]+: \"?(?<currentValue>[^\"\\s]+)\"?"]
+    },
+    {
+      "customType": "regex",
+      "description": "The shared task library's tag.",
+      "managerFilePatterns": ["/^Taskfile\\.yaml$/"],
+      "matchStrings": ["https://github\\.com/(?<depName>oleg-tkachuk/taskfiles)\\.git//%s\\?ref=(?<currentValue>v[0-9.]+)"],
+      "datasourceTemplate": "github-tags"
+    }
+  ],
+  "postUpdateOptions": ["gomodTidy"],
+  "schedule": ["before 6am on monday"],
+  "prHourlyLimit": 2,
+  "packageRules": [
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions",
+      "description": "Actions run with repository write scopes on release, so keeping them current is supply-chain hygiene."
+    },
+    {
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "go dependencies",
+      "schedule": ["before 6am on the first day of the month"]
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "release tooling",
+      "schedule": ["before 6am on the first day of the month"]
+    },
+    {
+      "matchManagers": ["custom.regex"],
+      "groupName": "pinned tools"
+    },
+    {
+      "matchManagers": ["gomod", "npm"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false,
+      "description": "Majors are crossed by hand: a Go major is an import-path change, and the release tooling's majors change how a version is computed."
+    },
+    {
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["golang", "toolchain"],
+      "groupName": "go toolchain",
+      "schedule": ["at any time"],
+      "description": "A Go patch release usually fixes standard-library advisories that govulncheck reports as reachable; it should not wait for the monthly window."
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": ["dependencies", "security"],
+    "schedule": ["at any time"],
+    "prCreation": "immediate",
+    "groupName": null
+  },
+  "osvVulnerabilityAlerts": true
+}
