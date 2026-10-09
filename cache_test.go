@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,24 +35,27 @@ func (s *slowBiscuitLookup) IsBiscuitRevoked(context.Context, [][]byte) (bool, e
 // The Biscuit cache shares concurrent misses for one token as the
 // capability cache does.
 func TestBiscuitRevocationCacheCoalescesConcurrentMisses(t *testing.T) {
-	up := &slowBiscuitLookup{release: make(chan struct{})}
-	c := NewCachedBiscuitRevocationChecker(up, cacheTTL)
-	ids := [][]byte{[]byte("a"), []byte("b")}
+	synctest.Test(t, func(t *testing.T) {
+		up := &slowBiscuitLookup{release: make(chan struct{})}
+		c := NewCachedBiscuitRevocationChecker(up, cacheTTL)
+		ids := [][]byte{[]byte("a"), []byte("b")}
 
-	var wg sync.WaitGroup
-	for range 20 {
-		wg.Go(func() {
-			if r, err := c.IsBiscuitRevoked(context.Background(), ids); err != nil || !r {
-				t.Errorf("IsBiscuitRevoked = %v, %v", r, err)
-			}
-		})
-	}
-	time.Sleep(20 * time.Millisecond)
-	close(up.release)
-	wg.Wait()
-	if n := up.calls.Load(); n != 1 {
-		t.Errorf("upstream calls = %d, want 1", n)
-	}
+		var wg sync.WaitGroup
+		for range 20 {
+			wg.Go(func() {
+				if r, err := c.IsBiscuitRevoked(context.Background(), ids); err != nil || !r {
+					t.Errorf("IsBiscuitRevoked = %v, %v", r, err)
+				}
+			})
+		}
+		// Every caller has joined the one lookup once all of them are blocked.
+		synctest.Wait()
+		close(up.release)
+		wg.Wait()
+		if n := up.calls.Load(); n != 1 {
+			t.Errorf("upstream calls = %d, want 1", n)
+		}
+	})
 }
 
 // Sweep drops what has expired and keeps what has not, in both caches.
@@ -180,38 +184,40 @@ func (p *panickingLookup) IsRevoked(context.Context, uuid.UUID) (bool, error) {
 // never with a "live" answer nobody gave — and leaves the key free for the
 // next check.
 func TestRevocationCacheLookupPanicReleasesWaiters(t *testing.T) {
-	up := &panickingLookup{entered: make(chan struct{}), release: make(chan struct{})}
-	c := NewCachedRevocationChecker(up, cacheTTL)
-	id := uuid.New()
+	synctest.Test(t, func(t *testing.T) {
+		up := &panickingLookup{entered: make(chan struct{}), release: make(chan struct{})}
+		c := NewCachedRevocationChecker(up, cacheTTL)
+		id := uuid.New()
 
-	go func() {
-		defer func() { _ = recover() }()
-		_, _ = c.IsRevoked(context.Background(), id)
-	}()
-	<-up.entered
+		go func() {
+			defer func() { _ = recover() }()
+			_, _ = c.IsRevoked(context.Background(), id)
+		}()
+		<-up.entered
 
-	type answer struct {
-		revoked bool
-		err     error
-	}
-	waiter := make(chan answer)
-	go func() {
+		type answer struct {
+			revoked bool
+			err     error
+		}
+		waiter := make(chan answer)
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), checkDeadline)
+			defer cancel()
+			r, err := c.IsRevoked(ctx, id)
+			waiter <- answer{r, err}
+		}()
+		// The waiter has joined once it blocks.
+		synctest.Wait()
+		close(up.release)
+
+		got := <-waiter
+		if got.err == nil || errors.Is(got.err, context.DeadlineExceeded) {
+			t.Errorf("waiter on a panicked lookup = %v, %v; want released with an error", got.revoked, got.err)
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), checkDeadline)
 		defer cancel()
-		r, err := c.IsRevoked(ctx, id)
-		waiter <- answer{r, err}
-	}()
-	// The waiter has joined once it blocks; give it the chance to.
-	time.Sleep(20 * time.Millisecond)
-	close(up.release)
-
-	got := <-waiter
-	if got.err == nil || errors.Is(got.err, context.DeadlineExceeded) {
-		t.Errorf("waiter on a panicked lookup = %v, %v; want released with an error", got.revoked, got.err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), checkDeadline)
-	defer cancel()
-	if _, err := c.IsRevoked(ctx, id); err != nil {
-		t.Errorf("check after the panic = %v; want a fresh lookup", err)
-	}
+		if _, err := c.IsRevoked(ctx, id); err != nil {
+			t.Errorf("check after the panic = %v; want a fresh lookup", err)
+		}
+	})
 }

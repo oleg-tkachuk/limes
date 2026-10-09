@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,24 +28,27 @@ func (s *slowLookup) IsRevoked(context.Context, uuid.UUID) (bool, error) {
 }
 
 func TestRevocationCacheCoalescesConcurrentMisses(t *testing.T) {
-	up := &slowLookup{release: make(chan struct{})}
-	c := NewCachedRevocationChecker(up, time.Minute)
-	id := uuid.New()
+	synctest.Test(t, func(t *testing.T) {
+		up := &slowLookup{release: make(chan struct{})}
+		c := NewCachedRevocationChecker(up, time.Minute)
+		id := uuid.New()
 
-	var wg sync.WaitGroup
-	for range 20 {
-		wg.Go(func() {
-			if r, err := c.IsRevoked(context.Background(), id); err != nil || !r {
-				t.Errorf("IsRevoked = %v, %v", r, err)
-			}
-		})
-	}
-	time.Sleep(20 * time.Millisecond)
-	close(up.release)
-	wg.Wait()
-	if n := up.calls.Load(); n != 1 {
-		t.Errorf("upstream calls = %d, want 1", n)
-	}
+		var wg sync.WaitGroup
+		for range 20 {
+			wg.Go(func() {
+				if r, err := c.IsRevoked(context.Background(), id); err != nil || !r {
+					t.Errorf("IsRevoked = %v, %v", r, err)
+				}
+			})
+		}
+		// Every caller has joined the one lookup once all of them are blocked.
+		synctest.Wait()
+		close(up.release)
+		wg.Wait()
+		if n := up.calls.Load(); n != 1 {
+			t.Errorf("upstream calls = %d, want 1", n)
+		}
+	})
 }
 
 // ctxLookup blocks until released and then reports its caller's context
@@ -65,38 +69,40 @@ func (l *ctxLookup) IsRevoked(ctx context.Context, _ uuid.UUID) (bool, error) {
 // One client hanging up must not fail everyone else verifying the same
 // capability at that moment.
 func TestRevocationCacheLeaderCancellationDoesNotFailWaiters(t *testing.T) {
-	up := &ctxLookup{release: make(chan struct{})}
-	c := NewCachedRevocationChecker(up, time.Minute)
-	id := uuid.New()
+	synctest.Test(t, func(t *testing.T) {
+		up := &ctxLookup{release: make(chan struct{})}
+		c := NewCachedRevocationChecker(up, time.Minute)
+		id := uuid.New()
 
-	leaderCtx, cancel := context.WithCancel(context.Background())
-	leaderDone := make(chan error, 1)
-	go func() {
-		_, err := c.IsRevoked(leaderCtx, id)
-		leaderDone <- err
-	}()
-	for up.calls.Load() == 0 {
-		time.Sleep(time.Millisecond)
-	}
+		leaderCtx, cancel := context.WithCancel(context.Background())
+		leaderDone := make(chan error, 1)
+		go func() {
+			_, err := c.IsRevoked(leaderCtx, id)
+			leaderDone <- err
+		}()
+		// The leader is in the lookup once it blocks there.
+		synctest.Wait()
 
-	waiterDone := make(chan struct{})
-	var revoked bool
-	var waiterErr error
-	go func() {
-		revoked, waiterErr = c.IsRevoked(context.Background(), id)
-		close(waiterDone)
-	}()
-	time.Sleep(20 * time.Millisecond)
-	cancel()
-	close(up.release)
+		waiterDone := make(chan struct{})
+		var revoked bool
+		var waiterErr error
+		go func() {
+			revoked, waiterErr = c.IsRevoked(context.Background(), id)
+			close(waiterDone)
+		}()
+		// The waiter has joined once it blocks.
+		synctest.Wait()
+		cancel()
+		close(up.release)
 
-	if err := <-leaderDone; !errors.Is(err, context.Canceled) {
-		t.Errorf("leader err = %v, want context.Canceled", err)
-	}
-	<-waiterDone
-	if waiterErr != nil || !revoked {
-		t.Fatalf("waiter = %v, %v; want its own upstream answer (true, nil)", revoked, waiterErr)
-	}
+		if err := <-leaderDone; !errors.Is(err, context.Canceled) {
+			t.Errorf("leader err = %v, want context.Canceled", err)
+		}
+		<-waiterDone
+		if waiterErr != nil || !revoked {
+			t.Fatalf("waiter = %v, %v; want its own upstream answer (true, nil)", revoked, waiterErr)
+		}
+	})
 }
 
 func TestRevocationCacheIsBoundedAndHonoursClock(t *testing.T) {
