@@ -1,0 +1,14 @@
+# actionlint configuration.
+#
+# One label, declared because actionlint's built-in list is behind GitHub: it
+# refuses `ubuntu-26.04` ("label is unknown") while the runner exists and is
+# what every job in the workflows pins. v1.7.12 is the newest
+# release, so there is no version to bump to.
+#
+# Under `self-hosted-runner` because that is the only key actionlint offers for
+# a label it does not know. Nothing here is self-hosted.
+#
+# Delete this when a release knows the label.
+self-hosted-runner:
+  labels:
+    - ubuntu-26.04

@@ -34,3 +34,6 @@ go.work.sum
 
 # Task state and the shared library it fetches
 .task/
+
+# Release tooling (npm ci)
+node_modules/

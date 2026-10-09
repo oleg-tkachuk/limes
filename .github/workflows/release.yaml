@@ -1,0 +1,118 @@
+name: Release
+
+# Dispatched by ci.yaml once the checks on a push to main have passed.
+#
+# A release is a vX.Y.Z tag — the Go proxy reads the tag, so nothing else is
+# published — and the GitHub release that announces it. Nothing is tagged when
+# no release was due.
+#
+# workflow_run is the obvious trigger and is refused by zizmor's
+# dangerous-triggers audit. A plain `push` trigger would not help: GitHub
+# starts no workflow run from an event GITHUB_TOKEN caused.
+# repository_dispatch is one of the documented exceptions that always create a
+# run, so CI dispatches this with its own GITHUB_TOKEN — no extra credential,
+# no dangerous trigger.
+#
+# Deliberately no workflow_dispatch: it would let a release be cut from an
+# untested main with one click, which is what the gate in ci.yaml prevents.
+on:
+  repository_dispatch:
+    types: [release]
+
+permissions: {}
+
+concurrency:
+  # Two dispatches close together would both compute "next version" from the
+  # same last tag and could push conflicting ones. Never cancel-in-progress: a
+  # run killed mid-push can leave a tag with no release behind it.
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Tag and publish the release
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: write # semantic-release pushes the tag; gh creates the release
+    steps:
+      # No persist-credentials: false — semantic-release pushes the tag it
+      # creates, so this is the one checkout here that needs its credentials.
+      #
+      # Deliberately no `ref:`. A repository_dispatch run checks out the head
+      # of the default branch, which is a BRANCH — and semantic-release has to
+      # be on one of its configured release branches to release at all. The
+      # dispatched sha is printed below instead.
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # semantic-release derives the next version from the commit history.
+          fetch-depth: 0
+
+      # A dispatched run is not linked to its trigger in the UI the way a
+      # workflow_run is, so without this the run says nothing about where it
+      # came from.
+      - name: Say what dispatched this
+        env:
+          SHA: ${{ github.event.client_payload.sha }}
+          CI_RUN: ${{ github.event.client_payload.ci_run_id }}
+        run: printf 'dispatched by CI run %s for commit %s\n' "${CI_RUN:-unknown}" "${SHA:-unknown}"
+
+      # The checkout above is main's head, which can be newer than the commit
+      # whose CI dispatched this run. Only that commit is released; a newer
+      # head is released by its own CI run. See scripts/release-head-check.sh.
+      - name: Release only the commit CI passed
+        id: head
+        env:
+          SHA: ${{ github.event.client_payload.sha }}
+        run: ./scripts/release-head-check.sh "$SHA" >>"$GITHUB_OUTPUT"
+
+      - name: Set up Node
+        if: steps.head.outputs.release == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          # No dependency cache: this job holds a write token, and a cache
+          # another run wrote is not something to restore into it.
+          package-manager-cache: false
+
+      # The lockfile pins semantic-release and its preset, so this installs
+      # the versions committed here rather than a marketplace action's own.
+      - name: Install semantic-release
+        if: steps.head.outputs.release == 'true'
+        run: npm ci
+
+      # What HEAD carried before this run, so the step after it can tell a tag
+      # it pushed from one an earlier dispatch to the same commit pushed.
+      - name: Note the tags already on HEAD
+        if: steps.head.outputs.release == 'true'
+        run: git tag --points-at HEAD >"$RUNNER_TEMP/tags-before"
+
+      - name: Compute and push the tag
+        if: steps.head.outputs.release == 'true'
+        run: npx semantic-release --no-ci
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Read from git rather than parsing semantic-release's prose. A tag on
+      # HEAD with no release, left by a run that failed after pushing it, is
+      # published by a re-run — see scripts/new-release-tag.sh.
+      #
+      # Notes for people, built from merged pull requests and shaped by
+      # .github/release.yml. Then the Go proxy is told of the tag, so
+      # `go get …@latest` and the README's badge see it now rather than
+      # whenever the proxy next refreshes; the release stands without it.
+      - name: Publish the release
+        if: steps.head.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="$(./scripts/new-release-tag.sh "$RUNNER_TEMP/tags-before")"
+          if [ -z "$tag" ]; then
+            printf '%s\n' "no new tag from this run — no release was due"
+            exit 0
+          fi
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --generate-notes --verify-tag
+          ./scripts/warm-go-proxy.sh "$tag" ||
+            echo "::warning::the Go proxy did not take $tag yet; it will on its own"

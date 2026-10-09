@@ -1,0 +1,76 @@
+name: CodeQL
+
+# Static analysis of the Go module and of these workflows, reported as code
+# scanning alerts. Separate from ci.yaml: an alert is triaged on the Security
+# tab rather than blocking a merge.
+
+# A change that touches only documentation analyses nothing new; paths-ignore
+# skips the run. The weekly schedule still covers everything.
+on:
+  push:
+    branches: [main]
+    paths-ignore: &docs
+      # Documentation only. Mirrors INERT in scripts/ci-relevant.sh;
+      # scripts/ci-relevant.test.sh fails when the two disagree.
+      - "**/*.md"
+      - "docs/**"
+      - LICENSE
+      - NOTICE
+      - .gitignore
+      - "**/*.png"
+      - "**/*.jpg"
+      - "**/*.jpeg"
+      - "**/*.svg"
+      - "**/*.gif"
+  pull_request:
+    paths-ignore: *docs
+  schedule:
+    # Weekly, so new queries reach code that has not changed.
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    # A plain name: GitHub appends the matrix value, "(go)".
+    name: Analyze
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [go, actions]
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        if: matrix.language == 'go'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Initialise CodeQL
+        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.language == 'go' && 'manual' || 'none' }}
+
+      - name: Build the module
+        if: matrix.language == 'go'
+        run: go build ./...
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          category: /language:${{ matrix.language }}

@@ -1,0 +1,7 @@
+{
+  "name": "@semantic-release/npm",
+  "version": "0.0.0-unused",
+  "private": true,
+  "description": "Stands in for @semantic-release/npm, which semantic-release depends on but this repository never loads: release.config.cjs names its plugins, so the default list that holds it is not used. The real package bundles the npm CLI and with it http-cache-semantics, which has an advisory with no fixed release (GHSA-ch52-4w7c-c8xp).",
+  "main": "index.js"
+}
