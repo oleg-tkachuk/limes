@@ -296,3 +296,27 @@ func Example_revoke() {
 	// <nil>
 	// true
 }
+
+func ExampleAllByPrincipal() {
+	ctx := context.Background()
+	s := newExampleStack()
+	for range 3 {
+		s.issue()
+	}
+
+	// One page per capability, to show the walk crossing pages.
+	const pageSize = 1
+	n := 0
+	for _, err := range limes.AllByPrincipal(ctx, s.records, limes.ListByPrincipalRequest{
+		TenantID: s.tenantID, PrincipalType: limes.PrincipalAgent, Subject: "research-orchestrator",
+		Limit: pageSize,
+	}) {
+		if err != nil {
+			log.Fatal(err)
+		}
+		n++
+	}
+	fmt.Println(n)
+	// Output:
+	// 3
+}
