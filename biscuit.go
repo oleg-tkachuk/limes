@@ -61,7 +61,7 @@ var ErrCopyCountersNotMetered = fmt.Errorf("%w: copy limits need a verifier with
 // ErrBiscuitAttenuation — an attenuation block the verifier cannot honour:
 // outside the vocabulary, malformed, or widening its parent. Matches
 // ErrInvalidSignature, so consumers that map only that sentinel refuse it.
-var ErrBiscuitAttenuation error = &popError{"capability: invalid Biscuit attenuation"}
+var ErrBiscuitAttenuation error = &popError{"limes: invalid Biscuit attenuation"}
 
 // IsBiscuit reports whether token is in the Biscuit form rather than a JWT:
 // a JWT has exactly two dots, base64url has none.
@@ -76,21 +76,21 @@ func IsBiscuit(token string) bool {
 func (i *Issuer) Biscuit(c Capability) (string, error) {
 	rootPub, rootPriv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		return "", fmt.Errorf("capability: biscuit root key: %w", err)
+		return "", fmt.Errorf("limes: biscuit root key: %w", err)
 	}
 	sealed := c
 	sealed.BiscuitRoot = base64.RawURLEncoding.EncodeToString(rootPub)
 	inner, err := i.signer.Sign(sealed)
 	if err != nil {
-		return "", fmt.Errorf("capability: sign sealed token: %w", err)
+		return "", fmt.Errorf("limes: sign sealed token: %w", err)
 	}
 	b := biscuit.NewBuilder(rootPriv)
 	if err := b.AddAuthorityFact(biscuitFact(biscuitFactCapability, biscuit.String(inner))); err != nil {
-		return "", fmt.Errorf("capability: biscuit authority: %w", err)
+		return "", fmt.Errorf("limes: biscuit authority: %w", err)
 	}
 	token, err := b.Build()
 	if err != nil {
-		return "", fmt.Errorf("capability: build biscuit: %w", err)
+		return "", fmt.Errorf("limes: build biscuit: %w", err)
 	}
 	return serializeBiscuit(token)
 }
@@ -164,11 +164,11 @@ func Attenuate(token string, a Attenuation) (string, error) {
 		errs = append(errs, add(biscuitFactMaxBudget, biscuit.Integer(a.MaxBudget)))
 	}
 	if err := errors.Join(errs...); err != nil {
-		return "", fmt.Errorf("capability: attenuation block: %w", err)
+		return "", fmt.Errorf("limes: attenuation block: %w", err)
 	}
 	next, err := b.Append(rand.Reader, block.Build())
 	if err != nil {
-		return "", fmt.Errorf("capability: append attenuation: %w", err)
+		return "", fmt.Errorf("limes: append attenuation: %w", err)
 	}
 	return serializeBiscuit(next)
 }
@@ -463,7 +463,7 @@ func limitNarrows(what string, n, own int64, outer []CopyCeiling, of func(CopyCe
 }
 
 func biscuitFact(name string, term biscuit.Term) biscuit.Fact {
-	return biscuit.Fact{Predicate: biscuit.Predicate{Name: name, IDs: []biscuit.Term{term}}}
+	return biscuit.Fact{Name: name, IDs: []biscuit.Term{term}}
 }
 
 func parseBiscuit(token string) (*biscuit.Biscuit, error) {
@@ -484,7 +484,7 @@ func parseBiscuit(token string) (*biscuit.Biscuit, error) {
 func serializeBiscuit(b *biscuit.Biscuit) (string, error) {
 	raw, err := b.Serialize()
 	if err != nil {
-		return "", fmt.Errorf("capability: serialize biscuit: %w", err)
+		return "", fmt.Errorf("limes: serialize biscuit: %w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(raw), nil
 }

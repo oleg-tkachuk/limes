@@ -3,6 +3,7 @@ package limes
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,33 +12,33 @@ import (
 // Errors exposed to callers. Mapped to transport errors by the consumer —
 // not here. Verifier returns these so callers can switch.
 var (
-	ErrInvalidSignature  = errors.New("capability: invalid signature")
-	ErrExpired           = errors.New("capability: expired")
-	ErrNotYetValid       = errors.New("capability: not yet valid")
-	ErrRevoked           = errors.New("capability: revoked")
-	ErrCaveatViolation   = errors.New("capability: caveat violation")
-	ErrAudienceMismatch  = errors.New("capability: audience mismatch")
-	ErrBudgetExceeded    = errors.New("capability: budget exceeded")
-	ErrDelegationTooWide = errors.New("capability: child wider than parent")
+	ErrInvalidSignature  = errors.New("limes: invalid signature")
+	ErrExpired           = errors.New("limes: expired")
+	ErrNotYetValid       = errors.New("limes: not yet valid")
+	ErrRevoked           = errors.New("limes: revoked")
+	ErrCaveatViolation   = errors.New("limes: caveat violation")
+	ErrAudienceMismatch  = errors.New("limes: audience mismatch")
+	ErrBudgetExceeded    = errors.New("limes: budget exceeded")
+	ErrDelegationTooWide = errors.New("limes: child wider than parent")
 	// ErrUnitCodeMismatch — a delegated child capability declared a
 	// different unit_code than its parent. We don't auto-convert
 	// between currencies; charges flow through the system in their
 	// declared unit and cross-currency delegation is rejected at
 	// issuance.
-	ErrUnitCodeMismatch = errors.New("capability: unit_code mismatch between parent and child")
+	ErrUnitCodeMismatch = errors.New("limes: unit_code mismatch between parent and child")
 	// ErrInvalidRequest is an Issue or Delegate request that is malformed in
 	// itself: a missing tenant, an empty audience entry, a negative TTL, a
 	// thumbprint that is not one, a not-before past the expiry, caveats that
 	// do not validate. Nothing was minted. Every such error matches it, so a
 	// caller maps the whole family to its "bad request" without listing it.
-	ErrInvalidRequest = errors.New("capability: invalid request")
+	ErrInvalidRequest = errors.New("limes: invalid request")
 	// ErrUnknownTenant is an issuance for a tenant that does not exist —
 	// typically one whose provisioning has not finished. The Store returns it.
-	ErrUnknownTenant = errors.New("capability: unknown tenant")
+	ErrUnknownTenant = errors.New("limes: unknown tenant")
 	// ErrTenantDeleted is an issuance for a tenant in the trash: it exists,
 	// so its rows may be restored, but nothing new is minted for it. The
 	// Store returns it.
-	ErrTenantDeleted = errors.New("capability: tenant deleted")
+	ErrTenantDeleted = errors.New("limes: tenant deleted")
 )
 
 // requestError is one of the ErrInvalidRequest family with a name of its own.
@@ -69,12 +70,7 @@ var AllowedUnitCodes = []string{"USD", "EUR", "UAH", "GBP", AbstractUnitCode}
 // means-default semantics should resolve through NormaliseUnitCode
 // first.
 func IsAllowedUnitCode(u string) bool {
-	for _, allowed := range AllowedUnitCodes {
-		if allowed == u {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(AllowedUnitCodes, u)
 }
 
 // NormaliseUnitCode applies the empty-means-default policy and
@@ -85,7 +81,7 @@ func NormaliseUnitCode(u string) (string, error) {
 		return DefaultUnitCode, nil
 	}
 	if !IsAllowedUnitCode(u) {
-		return "", fmt.Errorf("capability: unknown unit_code %q (allowed: %v)", u, AllowedUnitCodes)
+		return "", fmt.Errorf("limes: unknown unit_code %q (allowed: %v)", u, AllowedUnitCodes)
 	}
 	return u, nil
 }

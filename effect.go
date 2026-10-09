@@ -28,7 +28,7 @@ const (
 // define. A declaration may name a built-in operation's effect, never change
 // it: a write declared a read would shed IdempotencyKeyRequired. It is a
 // programming error in the consumer, so it matches ErrInvalidRequest.
-var ErrEffectConflict error = &requestError{"capability: declared effect conflicts with the operation"}
+var ErrEffectConflict error = &requestError{"limes: declared effect conflicts with the operation"}
 
 // String names the effect for logs and errors.
 func (e Effect) String() string {

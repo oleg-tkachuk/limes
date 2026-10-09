@@ -134,7 +134,7 @@ type lookupCall struct {
 
 // errLookupAbandoned is what callers sharing a lookup receive when it ended
 // without an answer — it panicked — rather than a "not revoked" nobody gave.
-var errLookupAbandoned = errors.New("capability: revocation lookup ended without an answer")
+var errLookupAbandoned = errors.New("limes: revocation lookup ended without an answer")
 
 func newTTLCache[K comparable](cfg cacheConfig) *ttlCache[K] {
 	return &ttlCache[K]{cfg: cfg, entries: make(map[K]cacheEntry), inflight: make(map[K]*lookupCall)}

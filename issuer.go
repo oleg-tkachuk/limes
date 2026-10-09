@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -59,13 +60,13 @@ type IssuerConfig struct {
 // NewIssuer validates wiring and returns a ready Issuer.
 func NewIssuer(cfg IssuerConfig) (*Issuer, error) {
 	if cfg.Signer == nil {
-		return nil, errors.New("capability: IssuerConfig.Signer required")
+		return nil, errors.New("limes: IssuerConfig.Signer required")
 	}
 	if cfg.Store == nil {
-		return nil, errors.New("capability: IssuerConfig.Store required")
+		return nil, errors.New("limes: IssuerConfig.Store required")
 	}
 	if cfg.IssuerName == "" {
-		return nil, errors.New("capability: IssuerConfig.IssuerName required")
+		return nil, errors.New("limes: IssuerConfig.IssuerName required")
 	}
 	if cfg.DefaultTTL == 0 {
 		cfg.DefaultTTL = defaultIssueTTL
@@ -153,11 +154,11 @@ func (i *Issuer) Issue(ctx context.Context, req IssueRequest) (Capability, strin
 	}
 
 	if err := i.store.Insert(ctx, cap, req.IssuedBy); err != nil {
-		return Capability{}, "", fmt.Errorf("capability: persist issuance: %w", err)
+		return Capability{}, "", fmt.Errorf("limes: persist issuance: %w", err)
 	}
 	token, err := i.signer.Sign(cap)
 	if err != nil {
-		return Capability{}, "", fmt.Errorf("capability: sign: %w", err)
+		return Capability{}, "", fmt.Errorf("limes: sign: %w", err)
 	}
 	return cap, token, nil
 }
@@ -193,10 +194,8 @@ func validateAudience(aud []string) error {
 	if len(aud) == 0 {
 		return invalidRequest("non-empty Audience required")
 	}
-	for _, a := range aud {
-		if a == "" {
-			return invalidRequest("Audience contains an empty entry")
-		}
+	if slices.Contains(aud, "") {
+		return invalidRequest("Audience contains an empty entry")
 	}
 	return nil
 }
@@ -261,14 +260,14 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 
 	now := i.clock().UTC()
 	if !now.Before(req.Parent.ExpiresAt) {
-		return Capability{}, "", fmt.Errorf("capability: delegate from parent %s: %w", req.Parent.ID, ErrExpired)
+		return Capability{}, "", fmt.Errorf("limes: delegate from parent %s: %w", req.Parent.ID, ErrExpired)
 	}
 	revoked, err := i.store.IsRevoked(ctx, req.Parent.ID)
 	if err != nil {
-		return Capability{}, "", fmt.Errorf("capability: delegate revocation lookup: %w", err)
+		return Capability{}, "", fmt.Errorf("limes: delegate revocation lookup: %w", err)
 	}
 	if revoked {
-		return Capability{}, "", fmt.Errorf("capability: delegate from parent %s: %w", req.Parent.ID, ErrRevoked)
+		return Capability{}, "", fmt.Errorf("limes: delegate from parent %s: %w", req.Parent.ID, ErrRevoked)
 	}
 
 	expires, err := i.expiry(now, req.TTL)
@@ -299,18 +298,18 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 	}
 
 	if err := Narrows(req.Parent, child); err != nil {
-		return Capability{}, "", fmt.Errorf("capability: delegate %w", err)
+		return Capability{}, "", fmt.Errorf("limes: delegate %w", err)
 	}
 
 	// A delegation is requested by whoever holds the parent — that is not a
 	// caller-supplied fact, it is what delegation means, so it is derived
 	// rather than accepted as an argument.
 	if err := i.store.Insert(ctx, child, req.Parent.Subject); err != nil {
-		return Capability{}, "", fmt.Errorf("capability: persist delegation: %w", err)
+		return Capability{}, "", fmt.Errorf("limes: persist delegation: %w", err)
 	}
 	token, err := i.signer.Sign(child)
 	if err != nil {
-		return Capability{}, "", fmt.Errorf("capability: sign delegation: %w", err)
+		return Capability{}, "", fmt.Errorf("limes: sign delegation: %w", err)
 	}
 	return child, token, nil
 }
@@ -324,7 +323,7 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 func GenerateEd25519Keypair() (kid string, pub ed25519.PublicKey, priv ed25519.PrivateKey, err error) {
 	pub, priv, err = ed25519.GenerateKey(nil)
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("capability: generate keypair: %w", err)
+		return "", nil, nil, fmt.Errorf("limes: generate keypair: %w", err)
 	}
 	kid = fmt.Sprintf("%x", pub[:8])
 	return kid, pub, priv, nil

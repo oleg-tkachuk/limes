@@ -780,11 +780,11 @@ func (s *UsageStore[TX]) Reserve(_ context.Context, req limes.ReserveRequest) (l
 	}
 
 	h := hold{
+		id:    uuid.New(),
 		capID: req.CapabilityID, ancestors: ancestorIDs(ancestors), tenantID: req.TenantID,
 		amount: req.Amount, unit: unit, op: req.Op, actor: req.Actor,
 		expires: s.nowFn().Add(ttl), copies: slices.Clone(req.Copies),
 	}
-	h.id = uuid.New()
 	s.applyHoldLocked(h, +1)
 	s.holds[h.id] = h
 	return h.reservation(), nil

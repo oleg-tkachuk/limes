@@ -33,7 +33,7 @@ func TestRevokeIsIdempotent(t *testing.T) {
 		t.Fatalf("Insert: %v", err)
 	}
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := s.Revoke(ctx, limes.RevokeRequest{ID: id, Reason: "leak", Actor: "op"}); err != nil {
 			t.Fatalf("Revoke #%d: %v", i+1, err)
 		}
@@ -138,7 +138,7 @@ func TestBumpRequestUnlimited(t *testing.T) {
 	ctx := context.Background()
 	u := NewUsage[struct{}](nil)
 	id := uuid.New()
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		if _, err := u.Bump(ctx, limes.BumpRequest{CapabilityID: id, MaxRequests: 0}); err != nil {
 			t.Fatalf("unlimited bump %d: %v", i, err)
 		}

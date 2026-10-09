@@ -20,27 +20,27 @@ import (
 // silently working with one form and breaking on the other.
 func LoadPrivateKey(path string) (ed25519.PrivateKey, error) {
 	if path == "" {
-		return nil, errors.New("capability: empty private key path")
+		return nil, errors.New("limes: empty private key path")
 	}
 	raw, err := os.ReadFile(path) // #nosec G304 — operator-supplied path
 	if err != nil {
-		return nil, fmt.Errorf("capability: read private key %q: %w", path, err)
+		return nil, fmt.Errorf("limes: read private key %q: %w", path, err)
 	}
 	block, _ := pem.Decode(raw)
 	if block == nil {
-		return nil, fmt.Errorf("capability: %q is not PEM-encoded", path)
+		return nil, fmt.Errorf("limes: %q is not PEM-encoded", path)
 	}
 	if block.Type != "PRIVATE KEY" {
-		return nil, fmt.Errorf("capability: %q has PEM type %q (want PRIVATE KEY)",
+		return nil, fmt.Errorf("limes: %q has PEM type %q (want PRIVATE KEY)",
 			path, block.Type)
 	}
 	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
-		return nil, fmt.Errorf("capability: parse PKCS#8 in %q: %w", path, err)
+		return nil, fmt.Errorf("limes: parse PKCS#8 in %q: %w", path, err)
 	}
 	priv, ok := parsed.(ed25519.PrivateKey)
 	if !ok {
-		return nil, fmt.Errorf("capability: %q holds %T, not ed25519.PrivateKey",
+		return nil, fmt.Errorf("limes: %q holds %T, not ed25519.PrivateKey",
 			path, parsed)
 	}
 	return priv, nil
