@@ -45,7 +45,7 @@ func (s *meteringCopyStore[TX]) CopyUsage(ctx context.Context, revocationIDs [][
 	return s.copies.CopyUsage(ctx, revocationIDs)
 }
 
-// Bump emits paladin.capability.request.bumps with outcome=
+// Bump emits limes.request.bumps with outcome=
 // allowed | limit_exceeded.
 func (s *MeteringStore[TX]) Bump(ctx context.Context, req BumpRequest) (int64, error) {
 	count, err := s.Inner.Bump(ctx, req)
@@ -58,7 +58,7 @@ func (s *MeteringStore[TX]) Bump(ctx context.Context, req BumpRequest) (int64, e
 	return count, err
 }
 
-// Charge emits paladin.capability.charge.{amount,decisions,current_spend}.
+// Charge emits limes.charge.{amount,decisions,current_spend}.
 //
 // Outcome accounting:
 //
@@ -89,7 +89,7 @@ func (s *MeteringStore[TX]) Charge(
 	return receipt, err
 }
 
-// Refund emits paladin.capability.refund.amount.
+// Refund emits limes.refund.amount.
 func (s *MeteringStore[TX]) Refund(ctx context.Context, req RefundRequest) (Nanos, error) {
 	refunded, err := s.Inner.Refund(ctx, req)
 	if err == nil && refunded > 0 {
@@ -98,7 +98,7 @@ func (s *MeteringStore[TX]) Refund(ctx context.Context, req RefundRequest) (Nano
 	return refunded, err
 }
 
-// Reserve emits paladin.capability.reservation.decisions.
+// Reserve emits limes.reservation.decisions.
 func (s *MeteringStore[TX]) Reserve(ctx context.Context, req ReserveRequest) (Reservation, error) {
 	r, err := s.Inner.Reserve(ctx, req)
 	switch {

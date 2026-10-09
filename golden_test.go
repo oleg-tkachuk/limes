@@ -96,7 +96,7 @@ func TestGoldenTokenRejectsWrongAudience(t *testing.T) {
 		t.Fatalf("verifier: %v", err)
 	}
 
-	if _, err := verifier.Verify(context.Background(), string(raw), "paladin-admin"); err == nil {
-		t.Fatal("a token minted for paladin-data must not verify for paladin-admin")
+	if _, err := verifier.Verify(context.Background(), string(raw), "limes-admin"); err == nil {
+		t.Fatal("a token minted for limes-data must not verify for limes-admin")
 	}
 }

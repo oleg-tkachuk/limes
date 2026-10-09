@@ -15,7 +15,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const dpopURL = "https://data.example.com/paladin.data.v1.ObjectService/GetObject"
+const dpopURL = "https://data.example.com/example.data.v1.ObjectService/GetObject"
 
 func dpopKeys(t *testing.T) map[string]crypto.Signer {
 	t.Helper()
@@ -82,7 +82,7 @@ func TestDPoPRefusals(t *testing.T) {
 		"another key":        {fresh(other, "POST", dpopURL, "the-token", now), nil, ErrDPoPInvalid},
 		"another method":     {fresh(key, "GET", dpopURL, "the-token", now), nil, ErrDPoPInvalid},
 		"another path":       {fresh(key, "POST", "https://data.example.com/other", "the-token", now), nil, ErrDPoPInvalid},
-		"another host":       {fresh(key, "POST", "https://evil.example.com/paladin.data.v1.ObjectService/GetObject", "the-token", now), nil, ErrDPoPInvalid},
+		"another host":       {fresh(key, "POST", "https://evil.example.com/example.data.v1.ObjectService/GetObject", "the-token", now), nil, ErrDPoPInvalid},
 		"another token":      {fresh(key, "POST", dpopURL, "a-stolen-token", now), nil, ErrDPoPInvalid},
 		"stale":              {fresh(key, "POST", dpopURL, "the-token", now.Add(-2*time.Minute)), nil, ErrDPoPInvalid},
 		"from the future":    {fresh(key, "POST", dpopURL, "the-token", now.Add(2*time.Minute)), nil, ErrDPoPInvalid},
@@ -114,17 +114,17 @@ func TestDPoPPathOnlyIgnoresHostButNotPath(t *testing.T) {
 	c := boundCap(t, key)
 	v := &DPoPVerifier{Replay: NewMemoryReplayCache(0), Now: func() time.Time { return now }}
 	proof, _ := NewDPoPProof(key, "POST", dpopURL, "tok", now)
-	req := DPoPRequest{Proof: proof, Method: "POST", URL: "http://10.0.0.7:8080/paladin.data.v1.ObjectService/GetObject", MatchPathOnly: true, Token: "tok"}
+	req := DPoPRequest{Proof: proof, Method: "POST", URL: "http://10.0.0.7:8080/example.data.v1.ObjectService/GetObject", MatchPathOnly: true, Token: "tok"}
 	if err := v.Check(context.Background(), c, req); err != nil {
 		t.Fatalf("path-only match behind a proxy: %v", err)
 	}
-	proof, _ = NewDPoPProof(key, "POST", "https://gw.example.com/paladin-api/paladin.data.v1.ObjectService/GetObject", "tok", now)
+	proof, _ = NewDPoPProof(key, "POST", "https://gw.example.com/api/example.data.v1.ObjectService/GetObject", "tok", now)
 	req.Proof = proof
 	if err := v.Check(context.Background(), c, req); err != nil {
 		t.Fatalf("path-only match behind a prefix-stripping proxy: %v", err)
 	}
 	proof, _ = NewDPoPProof(key, "POST", dpopURL, "tok", now)
-	req.Proof, req.URL = proof, "http://10.0.0.7:8080/paladin.data.v1.ObjectService/DeleteObject"
+	req.Proof, req.URL = proof, "http://10.0.0.7:8080/example.data.v1.ObjectService/DeleteObject"
 	if err := v.Check(context.Background(), c, req); !errors.Is(err, ErrDPoPInvalid) {
 		t.Fatalf("path-only with another path: err = %v, want ErrDPoPInvalid", err)
 	}

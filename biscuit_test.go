@@ -20,7 +20,7 @@ func biscuitFixture(t *testing.T) (*Issuer, *StandardVerifier, *memStore, Capabi
 	verifier, err := NewStandardVerifier(VerifierConfig{
 		Keys:           NewStaticKeyResolver(map[string]ed25519.PublicKey{"k1": pub}),
 		Revocations:    NewCachedRevocationChecker(store, -1),
-		TrustedIssuers: []string{"paladin-test"},
+		TrustedIssuers: []string{"limes-test"},
 		AcceptBiscuit:  true,
 
 		BiscuitRevocations: NewCachedBiscuitRevocationChecker(store, -1),

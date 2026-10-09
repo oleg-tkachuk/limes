@@ -41,27 +41,27 @@ func initMetrics() {
 		meter := otel.Meter("github.com/oleg-tkachuk/limes")
 
 		capChargeAmount, _ = meter.Float64Counter(
-			"paladin.capability.charge.amount",
+			"limes.charge.amount",
 			metric.WithDescription("Cumulative amount charged against capability budgets, by tenant and unit_code."),
 		)
 		capChargeDecisions, _ = meter.Int64Counter(
-			"paladin.capability.charge.decisions",
+			"limes.charge.decisions",
 			metric.WithDescription("Charge attempts bucketed by outcome: allowed / cap_exceeded / tenant_exceeded."),
 		)
 		capRequestBumps, _ = meter.Int64Counter(
-			"paladin.capability.request.bumps",
+			"limes.request.bumps",
 			metric.WithDescription("Per-capability request-count bumps, bucketed by outcome: allowed / limit_exceeded."),
 		)
 		capRefundAmount, _ = meter.Float64Counter(
-			"paladin.capability.refund.amount",
+			"limes.refund.amount",
 			metric.WithDescription("Cumulative amount refunded from recorded charges."),
 		)
 		capReservations, _ = meter.Int64Counter(
-			"paladin.capability.reservation.decisions",
+			"limes.reservation.decisions",
 			metric.WithDescription("Reservation attempts bucketed by outcome: allowed / cap_exceeded / tenant_exceeded."),
 		)
 		capCurrentSpend, _ = meter.Float64Histogram(
-			"paladin.capability.charge.current_spend",
+			"limes.charge.current_spend",
 			metric.WithDescription("Per-capability spend after each successful charge, by tenant and unit_code."),
 		)
 	})

@@ -14,17 +14,20 @@ import (
 	"github.com/google/uuid"
 )
 
-// The cross-language attenuation (testdata/biscuit/attenuation.json):
-// this module mints a seed Biscuit, the Python SDK attenuates it, and the
-// verifier here must accept what the SDK wrote and narrow it as asked.
+// The cross-language attenuation (testdata/biscuit/attenuation.json): this
+// module mints a seed Biscuit, and an SDK in another language attenuates it
+// with the case's arguments; the verifier must accept the result and narrow it
+// as the case expects. attenuated.biscuit is the same attenuation made here,
+// so the case is checked from this side too; an SDK checks its own against a
+// copy of these files.
 const (
-	biscuitFixtureDir    = "biscuit"
-	biscuitSeedFile      = "seed.biscuit"
-	biscuitPythonFile    = "python.biscuit"
-	biscuitCaseFile      = "attenuation.json"
-	biscuitWriteSeedEnv  = "LIMES_WRITE_BISCUIT_SEED"
-	biscuitWriteSeedFlag = "1"
-	biscuitSeedTTL       = time.Hour
+	biscuitFixtureDir     = "biscuit"
+	biscuitSeedFile       = "seed.biscuit"
+	biscuitAttenuatedFile = "attenuated.biscuit"
+	biscuitCaseFile       = "attenuation.json"
+	biscuitWriteEnv       = "LIMES_WRITE_BISCUIT"
+	biscuitWriteFlag      = "1"
+	biscuitSeedTTL        = time.Hour
 )
 
 func biscuitFixturePath(name string) string {
@@ -59,11 +62,12 @@ func goldenBiscuitVerifier(t *testing.T) *StandardVerifier {
 	return v
 }
 
-// TestGenerateBiscuitSeed mints seed.biscuit. Regenerate it only together with
-// python.biscuit, which is attenuated from it.
-func TestGenerateBiscuitSeed(t *testing.T) {
-	if os.Getenv(biscuitWriteSeedEnv) != biscuitWriteSeedFlag {
-		t.Skipf("set %s=%s to (re)generate the fixture", biscuitWriteSeedEnv, biscuitWriteSeedFlag)
+// TestGenerateBiscuitFixtures mints seed.biscuit and attenuates it into
+// attenuated.biscuit with the case's arguments. Regenerating the seed
+// invalidates every SDK's attenuation of the old one.
+func TestGenerateBiscuitFixtures(t *testing.T) {
+	if os.Getenv(biscuitWriteEnv) != biscuitWriteFlag {
+		t.Skipf("set %s=%s to (re)generate the fixtures", biscuitWriteEnv, biscuitWriteFlag)
 	}
 	signer, err := NewEd25519Signer(goldenKID, ed25519.NewKeyFromSeed(goldenSeed[:]))
 	if err != nil {
@@ -93,9 +97,44 @@ func TestGenerateBiscuitSeed(t *testing.T) {
 	if err := os.WriteFile(biscuitFixturePath(biscuitSeedFile), []byte(token+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+
+	c := readBiscuitCase(t)
+	attenuated, err := Attenuate(token, Attenuation{
+		Ops:              c.Attenuate.Ops,
+		ResourcePrefixes: c.Attenuate.ResourcePrefixes,
+		Planes:           c.Attenuate.Planes,
+		ExpiresAt:        c.Attenuate.ExpiresAt,
+		ConfirmationJKT:  c.Attenuate.BindJKT,
+		MaxRequests:      c.Attenuate.MaxRequests,
+		MaxBudget:        Nanos(c.Attenuate.MaxBudget),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(biscuitFixturePath(biscuitAttenuatedFile), []byte(attenuated+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readBiscuitCase(t *testing.T) biscuitCase {
+	t.Helper()
+	var c biscuitCase
+	if err := json.Unmarshal([]byte(readBiscuitFixture(t, biscuitCaseFile)), &c); err != nil {
+		t.Fatalf("parse case: %v", err)
+	}
+	return c
 }
 
 type biscuitCase struct {
+	Attenuate struct {
+		Ops              []Op      `json:"ops"`
+		ResourcePrefixes []string  `json:"resource_prefixes"`
+		Planes           []string  `json:"planes"`
+		ExpiresAt        time.Time `json:"expires_at"`
+		BindJKT          string    `json:"bind_jkt"`
+		MaxRequests      int64     `json:"max_requests"`
+		MaxBudget        int64     `json:"max_budget_nanos"`
+	} `json:"attenuate"`
 	Expect struct {
 		Ops              []Op      `json:"ops"`
 		ResourcePrefixes []string  `json:"resource_prefixes"`
@@ -108,13 +147,10 @@ type biscuitCase struct {
 	} `json:"expect"`
 }
 
-// A token the Python SDK attenuated is accepted, narrowed exactly as the
-// shared case says — decoded, not just accepted.
-func TestPythonAttenuationVerifies(t *testing.T) {
-	var c biscuitCase
-	if err := json.Unmarshal([]byte(readBiscuitFixture(t, biscuitCaseFile)), &c); err != nil {
-		t.Fatalf("parse case: %v", err)
-	}
+// The attenuated seed is accepted, narrowed exactly as the shared case says —
+// decoded, not just accepted.
+func TestSharedAttenuationVerifies(t *testing.T) {
+	c := readBiscuitCase(t)
 	v := goldenBiscuitVerifier(t)
 	ctx := context.Background()
 
@@ -122,10 +158,10 @@ func TestPythonAttenuationVerifies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	token := readBiscuitFixture(t, biscuitPythonFile)
+	token := readBiscuitFixture(t, biscuitAttenuatedFile)
 	got, err := v.Verify(ctx, token, AudiencePlaneData)
 	if err != nil {
-		t.Fatalf("the Python-attenuated token is refused: %v", err)
+		t.Fatalf("the attenuated token is refused: %v", err)
 	}
 	if got.ID != seed.ID {
 		t.Errorf("ID = %s, want the seed's %s", got.ID, seed.ID)

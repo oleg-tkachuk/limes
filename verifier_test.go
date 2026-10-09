@@ -93,7 +93,7 @@ func buildIssuerVerifier(t *testing.T) (*Issuer, *StandardVerifier, *memStore, e
 	issuer, err := NewIssuer(IssuerConfig{
 		Signer:     signer,
 		Store:      store,
-		IssuerName: "paladin-test",
+		IssuerName: "limes-test",
 		DefaultTTL: 15 * time.Minute,
 	})
 	if err != nil {
@@ -104,7 +104,7 @@ func buildIssuerVerifier(t *testing.T) (*Issuer, *StandardVerifier, *memStore, e
 	v, err := NewStandardVerifier(VerifierConfig{
 		Keys:           keys,
 		Revocations:    cache,
-		TrustedIssuers: []string{"paladin-test"},
+		TrustedIssuers: []string{"limes-test"},
 	})
 	if err != nil {
 		t.Fatalf("verifier: %v", err)
@@ -178,14 +178,14 @@ func TestVerify_Expired(t *testing.T) {
 	issuer, _ := NewIssuer(IssuerConfig{
 		Signer:     signer,
 		Store:      store,
-		IssuerName: "paladin-test",
+		IssuerName: "limes-test",
 		Now:        clock.Now,
 		DefaultTTL: time.Minute,
 	})
 	verifier, _ := NewStandardVerifier(VerifierConfig{
 		Keys:           keys,
 		Revocations:    cache,
-		TrustedIssuers: []string{"paladin-test"},
+		TrustedIssuers: []string{"limes-test"},
 		Now:            clock.Now,
 		Leeway:         time.Second,
 	})
@@ -236,7 +236,7 @@ func TestVerify_UntrustedIssuer(t *testing.T) {
 	rogueIssuer, _ := NewIssuer(IssuerConfig{
 		Signer:     signer,
 		Store:      store,
-		IssuerName: "paladin-rogue",
+		IssuerName: "limes-rogue",
 	})
 	_, token, _ := rogueIssuer.Issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
@@ -250,7 +250,7 @@ func TestVerify_UntrustedIssuer(t *testing.T) {
 	verifier, _ := NewStandardVerifier(VerifierConfig{
 		Keys:           keys,
 		Revocations:    cache,
-		TrustedIssuers: []string{"paladin-test"}, // rogue not in set
+		TrustedIssuers: []string{"limes-test"}, // rogue not in set
 	})
 	_, err := verifier.Verify(context.Background(), token, AudiencePlaneData)
 	if !errors.Is(err, ErrInvalidSignature) {

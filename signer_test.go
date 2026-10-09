@@ -28,7 +28,7 @@ func TestSign_RoundTrip(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	cap := Capability{
 		ID:     uuid.New(),
-		Issuer: "paladin-test",
+		Issuer: "limes-test",
 		Subject: Principal{
 			Type:     PrincipalAgent,
 			TenantID: tenantID,

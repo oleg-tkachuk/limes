@@ -43,8 +43,8 @@ func validClaims(tenant uuid.UUID) map[string]any {
 	return map[string]any{
 		"iss": "iss", "sub": "s", "aud": []string{"data"},
 		"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(), "jti": uuid.NewString(),
-		"paladin_principal": map[string]any{"TenantID": tenant, "Subject": "s"},
-		"paladin_caveats":   map[string]any{"Ops": []string{"get"}},
+		"limes_principal": map[string]any{"TenantID": tenant, "Subject": "s"},
+		"limes_caveats":   map[string]any{"Ops": []string{"get"}},
 	}
 }
 
@@ -76,7 +76,7 @@ func TestVerifyRejectsTenantlessAndOversizedTokens(t *testing.T) {
 	}
 
 	big := validClaims(uuid.New())
-	big["paladin_caveats"] = map[string]any{"Ops": []string{"get"}, "ResourceURIs": []string{strings.Repeat("x", 4096)}}
+	big["limes_caveats"] = map[string]any{"Ops": []string{"get"}, "ResourceURIs": []string{strings.Repeat("x", 4096)}}
 	if _, err := v.Verify(ctx, resign(t, priv, hdr, big), "data"); err == nil || !strings.Contains(err.Error(), "limit") {
 		t.Errorf("oversized token: Verify = %v, want a size rejection", err)
 	}

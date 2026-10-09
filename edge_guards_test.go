@@ -149,7 +149,7 @@ func TestForgedSignatureRejected(t *testing.T) {
 }
 
 // An untrusted issuer must be refused even when the signature is valid — a
-// multi-tenant control plane deploying several Paladin instances depends on it.
+// multi-tenant control plane deploying several issuers depends on it.
 func TestUntrustedIssuerRejected(t *testing.T) {
 	priv := ed25519.NewKeyFromSeed(goldenSeed[:])
 	pub := priv.Public().(ed25519.PublicKey)
@@ -157,7 +157,7 @@ func TestUntrustedIssuerRejected(t *testing.T) {
 
 	verifier, err := NewStandardVerifier(VerifierConfig{
 		Keys:        NewStaticKeyResolver(map[string]ed25519.PublicKey{goldenKID: pub}),
-		Revocations: revLookup{}, TrustedIssuers: []string{"some-other-paladin"}, Now: goldenClock,
+		Revocations: revLookup{}, TrustedIssuers: []string{"some-other-issuer"}, Now: goldenClock,
 	})
 	if err != nil {
 		t.Fatalf("verifier: %v", err)

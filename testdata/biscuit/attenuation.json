@@ -1,5 +1,5 @@
 {
-  "_comment": "A cross-language attenuation. seed.biscuit is minted by capability/ (PALADIN_WRITE_BISCUIT_SEED=1 go test -run TestGenerateBiscuitSeed) from its golden key and clock: ops get/list/put under corpus/, planes data and mcp, unbound, expiring 2026-01-01T01:00:00Z. python.biscuit is that seed attenuated by the Python SDK with the arguments below (PALADIN_WRITE_BISCUIT_FIXTURE=1 pytest tests/test_biscuit.py); capability/ verifies it and expects the capability below. Both tokens use fresh random keys, so regenerating changes the bytes but not the meaning.",
+  "_comment": "A cross-language attenuation. seed.biscuit is minted from the golden key and clock: ops get/list/put under corpus/, planes data and mcp, unbound, expiring 2026-01-01T01:00:00Z. attenuated.biscuit is that seed attenuated with the arguments below; an SDK attenuating the seed with the same arguments must produce a token the verifier reads as the capability below. LIMES_WRITE_BISCUIT=1 go test -run TestGenerateBiscuitFixtures regenerates both. Biscuit blocks use fresh random keys, so regenerating changes the bytes but not the meaning.",
   "attenuate": {
     "ops": ["get"],
     "resource_prefixes": ["corpus/public/"],

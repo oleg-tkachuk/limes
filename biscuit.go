@@ -42,15 +42,15 @@ import (
 
 // Facts of the attenuation vocabulary. Each takes one term.
 const (
-	biscuitFactCapability     = "paladin_capability"       // authority only: the sealed JWT
-	biscuitFactOp             = "paladin_op"               // string: an Op the token keeps
-	biscuitFactResourcePrefix = "paladin_resource_prefix"  // string
-	biscuitFactResourceURI    = "paladin_resource_uri"     // string
-	biscuitFactPlane          = "paladin_plane"            // string: an audience the token keeps
-	biscuitFactExpires        = "paladin_expires"          // date: an earlier expiry
-	biscuitFactBind           = "paladin_bind"             // string: a JWK thumbprint
-	biscuitFactMaxRequests    = "paladin_max_requests"     // integer: a copy's own request limit
-	biscuitFactMaxBudget      = "paladin_max_budget_nanos" // integer: a copy's own budget, in nanos
+	biscuitFactCapability     = "limes_capability"       // authority only: the sealed JWT
+	biscuitFactOp             = "limes_op"               // string: an Op the token keeps
+	biscuitFactResourcePrefix = "limes_resource_prefix"  // string
+	biscuitFactResourceURI    = "limes_resource_uri"     // string
+	biscuitFactPlane          = "limes_plane"            // string: an audience the token keeps
+	biscuitFactExpires        = "limes_expires"          // date: an earlier expiry
+	biscuitFactBind           = "limes_bind"             // string: a JWK thumbprint
+	biscuitFactMaxRequests    = "limes_max_requests"     // integer: a copy's own request limit
+	biscuitFactMaxBudget      = "limes_max_budget_nanos" // integer: a copy's own budget, in nanos
 )
 
 // ErrCopyCountersNotMetered — a Biscuit sets a copy's own request or budget
@@ -337,7 +337,7 @@ func (c CopyCeiling) set() bool { return c.MaxRequests > 0 || c.MaxBudget > 0 }
 func readBlockFacts(blk decodedBlock, boundJKT string) (blockFacts, error) {
 	var f blockFacts
 	if blk.others != 0 {
-		return f, errors.New("rules and checks are not supported; use the paladin_* facts")
+		return f, errors.New("rules and checks are not supported; use the limes_* facts")
 	}
 	for _, fact := range blk.facts {
 		if err := f.read(fact, boundJKT); err != nil {
@@ -352,7 +352,7 @@ func (f *blockFacts) read(fact decodedFact, boundJKT string) error {
 	switch fact.name {
 	case biscuitFactOp:
 		if !isString {
-			return errors.New("paladin_op takes a string")
+			return errors.New("limes_op takes a string")
 		}
 		f.ops = append(f.ops, Op(s))
 	case biscuitFactResourcePrefix, biscuitFactResourceURI:
@@ -367,20 +367,20 @@ func (f *blockFacts) read(fact decodedFact, boundJKT string) error {
 		}
 	case biscuitFactPlane:
 		if !isString {
-			return errors.New("paladin_plane takes a string")
+			return errors.New("limes_plane takes a string")
 		}
 		f.planes = append(f.planes, s)
 	case biscuitFactExpires:
 		t, ok := fact.term.(time.Time)
 		if !ok {
-			return errors.New("paladin_expires takes a date")
+			return errors.New("limes_expires takes a date")
 		}
 		if f.expires.IsZero() || t.Before(f.expires) {
 			f.expires = t
 		}
 	case biscuitFactBind:
 		if !isString || validateThumbprint(s) != nil {
-			return errors.New("paladin_bind takes a JWK thumbprint")
+			return errors.New("limes_bind takes a JWK thumbprint")
 		}
 		if boundJKT != "" && boundJKT != s {
 			return errors.New("a key-bound token cannot be rebound offline")

@@ -23,7 +23,7 @@ func TestReadBlockFacts(t *testing.T) {
 		"bind not a thumbprint": {facts: []decodedFact{fact(biscuitFactBind, "key")}},
 		"limit not positive":    {facts: []decodedFact{fact(biscuitFactMaxRequests, int64(0))}},
 		"budget not an integer": {facts: []decodedFact{fact(biscuitFactMaxBudget, "1")}},
-		"unknown fact":          {facts: []decodedFact{fact("paladin_admin", "yes")}},
+		"unknown fact":          {facts: []decodedFact{fact("limes_admin", "yes")}},
 	}
 	for name, blk := range refused {
 		if _, err := readBlockFacts(blk, ""); err == nil {
@@ -56,7 +56,7 @@ func TestReadBlockFactsBudgetIsNanos(t *testing.T) {
 	if err != nil || f.ceiling.MaxBudget != 1_500 {
 		t.Errorf("budget = %s, %v; want 1500 nanos", f.ceiling.MaxBudget, err)
 	}
-	if _, err := readBlockFacts(decodedBlock{facts: []decodedFact{{name: "paladin_max_budget_micros", term: int64(1_500)}}}, ""); err == nil {
+	if _, err := readBlockFacts(decodedBlock{facts: []decodedFact{{name: "limes_max_budget_micros", term: int64(1_500)}}}, ""); err == nil {
 		t.Error("the micros budget fact was read")
 	}
 }

@@ -89,7 +89,7 @@ type jwtHeader struct {
 
 // jwtClaims is the payload. We follow JWT conventions for standard
 // claims (iss/sub/aud/iat/nbf/exp/jti) and prefix capability-specific
-// claims with `paladin_` (part of the frozen wire format; see README).
+// claims with `limes_` (part of the frozen wire format; see README).
 // The unmarshal path tolerates unknown fields.
 type jwtClaims struct {
 	// Standard JWT claims.
@@ -101,11 +101,11 @@ type jwtClaims struct {
 	ExpiresAt int64    `json:"exp"`
 	ID        string   `json:"jti"`
 
-	// Paladin capability claims.
-	PaladinPrincipal *Principal `json:"paladin_principal,omitempty"`
-	PaladinCaveats   Caveats    `json:"paladin_caveats"`
-	PaladinParentID  string     `json:"paladin_parent_id,omitempty"`
-	PaladinGen       int64      `json:"paladin_gen,omitempty"`
+	// Capability claims.
+	Principal  *Principal `json:"limes_principal,omitempty"`
+	Caveats    Caveats    `json:"limes_caveats"`
+	ParentID   string     `json:"limes_parent_id,omitempty"`
+	Generation int64      `json:"limes_gen,omitempty"`
 
 	// Confirmation is RFC 7800's `cnf`, omitted for an unbound capability so
 	// such tokens keep the frozen format byte for byte.
@@ -113,7 +113,7 @@ type jwtClaims struct {
 
 	// BiscuitRoot roots the signature chain of the Biscuit this token is
 	// sealed in; omitted on every ordinary token.
-	BiscuitRoot string `json:"paladin_bsk,omitempty"`
+	BiscuitRoot string `json:"limes_bsk,omitempty"`
 }
 
 type cnfClaim struct {
@@ -141,21 +141,21 @@ func (s *ed25519Signer) Sign(c Capability) (string, error) {
 
 	header := jwtHeader{Alg: algEdDSA, Kid: s.keyID, Typ: TokenType}
 	claims := jwtClaims{
-		Issuer:           c.Issuer,
-		Subject:          c.Subject.Subject,
-		Audience:         c.Audience,
-		IssuedAt:         c.IssuedAt.Unix(),
-		ExpiresAt:        c.ExpiresAt.Unix(),
-		ID:               c.ID.String(),
-		PaladinPrincipal: &c.Subject,
-		PaladinCaveats:   c.Caveats,
-		PaladinGen:       c.Generation,
+		Issuer:     c.Issuer,
+		Subject:    c.Subject.Subject,
+		Audience:   c.Audience,
+		IssuedAt:   c.IssuedAt.Unix(),
+		ExpiresAt:  c.ExpiresAt.Unix(),
+		ID:         c.ID.String(),
+		Principal:  &c.Subject,
+		Caveats:    c.Caveats,
+		Generation: c.Generation,
 	}
 	if !c.NotBefore.IsZero() {
 		claims.NotBefore = c.NotBefore.Unix()
 	}
 	if c.ParentID != uuid.Nil {
-		claims.PaladinParentID = c.ParentID.String()
+		claims.ParentID = c.ParentID.String()
 	}
 	claims.BiscuitRoot = c.BiscuitRoot
 	if c.ConfirmationJKT != "" {
@@ -189,7 +189,7 @@ func (s *ed25519Signer) Sign(c Capability) (string, error) {
 // verifier requires it, so a different kind of EdDSA JWT signed by the same
 // key — an ID token, another product's token — cannot be presented as a
 // capability.
-const TokenType = "paladin-cap+jwt" //nolint:gosec // G101: a JWT type label, not a credential
+const TokenType = "limes-cap+jwt" //nolint:gosec // G101: a JWT type label, not a credential
 
 // tokenParts is a compact token split into its three segments.
 type tokenParts struct {
@@ -240,16 +240,16 @@ func parseClaims(seg string) (*Capability, error) {
 		ID:         id,
 		Issuer:     claims.Issuer,
 		Audience:   claims.Audience,
-		Caveats:    claims.PaladinCaveats,
+		Caveats:    claims.Caveats,
 		IssuedAt:   time.Unix(claims.IssuedAt, 0).UTC(),
 		ExpiresAt:  time.Unix(claims.ExpiresAt, 0).UTC(),
-		Generation: claims.PaladinGen,
+		Generation: claims.Generation,
 	}
 	if claims.NotBefore != 0 {
 		cap.NotBefore = time.Unix(claims.NotBefore, 0).UTC()
 	}
-	if claims.PaladinPrincipal != nil {
-		cap.Subject = *claims.PaladinPrincipal
+	if claims.Principal != nil {
+		cap.Subject = *claims.Principal
 	} else {
 		cap.Subject = Principal{Subject: claims.Subject}
 	}
@@ -257,8 +257,8 @@ func parseClaims(seg string) (*Capability, error) {
 		cap.ConfirmationJKT = claims.Confirmation.JKT
 	}
 	cap.BiscuitRoot = claims.BiscuitRoot
-	if claims.PaladinParentID != "" {
-		pid, err := uuid.Parse(claims.PaladinParentID)
+	if claims.ParentID != "" {
+		pid, err := uuid.Parse(claims.ParentID)
 		if err != nil {
 			return nil, fmt.Errorf("capability: parse parent_id: %w", err)
 		}

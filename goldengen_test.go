@@ -30,8 +30,8 @@ var goldenSeed = [32]byte{
 
 const (
 	goldenKID      = "golden-kid"
-	goldenIssuer   = "paladin-golden"
-	goldenAudience = "paladin-data"
+	goldenIssuer   = "limes-golden"
+	goldenAudience = "limes-data"
 	goldenSubject  = "golden-agent"
 	goldenTenant   = "11111111-1111-1111-1111-111111111111"
 

@@ -165,9 +165,9 @@ func TestBiscuitCopyIgnoresExpiryAndRevocation(t *testing.T) {
 	}
 }
 
-// A token the Python SDK attenuated is refused once the copy it was
-// attenuated from is revoked: it carries the same ids the server lists.
-func TestPythonAttenuationRevokedThroughItsSeed(t *testing.T) {
+// The shared attenuated token is refused once the copy it was attenuated from
+// is revoked: it carries the same ids the server lists.
+func TestSharedAttenuationRevokedThroughItsSeed(t *testing.T) {
 	ctx := context.Background()
 	copies := map[string]bool{}
 	v := goldenBiscuitVerifier(t)
@@ -180,20 +180,20 @@ func TestPythonAttenuationRevokedThroughItsSeed(t *testing.T) {
 		return false
 	})
 	seed := readBiscuitFixture(t, biscuitSeedFile)
-	python := readBiscuitFixture(t, biscuitPythonFile)
+	attenuated := readBiscuitFixture(t, biscuitAttenuatedFile)
 	seedCopy, err := v.BiscuitCopy(ctx, seed)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pyCopy, err := v.BiscuitCopy(ctx, python)
+	attCopy, err := v.BiscuitCopy(ctx, attenuated)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pyCopy.CapabilityID != seedCopy.CapabilityID || bytes.Equal(pyCopy.RevocationID, seedCopy.RevocationID) {
-		t.Fatalf("python copy %+v, seed copy %+v", pyCopy, seedCopy)
+	if attCopy.CapabilityID != seedCopy.CapabilityID || bytes.Equal(attCopy.RevocationID, seedCopy.RevocationID) {
+		t.Fatalf("attenuated copy %+v, seed copy %+v", attCopy, seedCopy)
 	}
 	copies[string(seedCopy.RevocationID)] = true
-	if _, err := v.Verify(ctx, python, AudiencePlaneData); !errors.Is(err, ErrRevoked) {
+	if _, err := v.Verify(ctx, attenuated, AudiencePlaneData); !errors.Is(err, ErrRevoked) {
 		t.Fatalf("err = %v, want ErrRevoked", err)
 	}
 }
@@ -227,7 +227,7 @@ func TestVerifierNeedsBiscuitRevocationsToAcceptBiscuits(t *testing.T) {
 	cfg := VerifierConfig{
 		Keys:           NewStaticKeyResolver(map[string]ed25519.PublicKey{"k1": pub}),
 		Revocations:    revLookup{},
-		TrustedIssuers: []string{"paladin-test"},
+		TrustedIssuers: []string{"limes-test"},
 		AcceptBiscuit:  true,
 	}
 	if _, err := NewStandardVerifier(cfg); !errors.Is(err, errNoBiscuitRevocations) {
