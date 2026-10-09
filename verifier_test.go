@@ -19,8 +19,8 @@ type memStore struct {
 	caps     map[uuid.UUID]Capability
 	revoked  map[uuid.UUID]bool
 	copies   map[string]bool // revoked Biscuit copies, by revocation id
-	getCalls int64
-	revCalls int64
+	getCalls atomic.Int64
+	revCalls atomic.Int64
 }
 
 func newMemStore() *memStore {
@@ -36,7 +36,7 @@ func (m *memStore) Insert(_ context.Context, c Capability, _ Principal) error {
 	return nil
 }
 func (m *memStore) Get(_ context.Context, id uuid.UUID) (Capability, error) {
-	atomic.AddInt64(&m.getCalls, 1)
+	m.getCalls.Add(1)
 	c, ok := m.caps[id]
 	if !ok {
 		return Capability{}, errors.New("not found")
@@ -51,7 +51,7 @@ func (m *memStore) GetRecord(ctx context.Context, id uuid.UUID) (Record, error) 
 	return Record{Capability: c}, nil
 }
 func (m *memStore) IsRevoked(_ context.Context, id uuid.UUID) (bool, error) {
-	atomic.AddInt64(&m.revCalls, 1)
+	m.revCalls.Add(1)
 	return m.revoked[id], nil
 }
 func (m *memStore) Revoke(_ context.Context, args RevokeRequest) error {
@@ -384,20 +384,20 @@ func TestCache_HitsAndMisses(t *testing.T) {
 
 	// First call → miss → upstream.
 	_, _ = cache.IsRevoked(ctx, id)
-	if got := atomic.LoadInt64(&store.revCalls); got != 1 {
+	if got := store.revCalls.Load(); got != 1 {
 		t.Fatalf("expected 1 upstream call, got %d", got)
 	}
 
 	// Second call within TTL → hit, no upstream.
 	_, _ = cache.IsRevoked(ctx, id)
-	if got := atomic.LoadInt64(&store.revCalls); got != 1 {
+	if got := store.revCalls.Load(); got != 1 {
 		t.Fatalf("expected still 1 upstream call after cache hit, got %d", got)
 	}
 
 	// Invalidate forces a refetch.
 	cache.Invalidate(id)
 	_, _ = cache.IsRevoked(ctx, id)
-	if got := atomic.LoadInt64(&store.revCalls); got != 2 {
+	if got := store.revCalls.Load(); got != 2 {
 		t.Fatalf("expected 2 upstream calls after invalidate, got %d", got)
 	}
 }

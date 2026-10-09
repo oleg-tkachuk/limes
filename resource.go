@@ -1,6 +1,9 @@
 package limes
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // MatchResource reports whether uri falls under prefix, matched at a path-
 // segment boundary: "corpus/public" covers "corpus/public" and
@@ -40,10 +43,8 @@ func (c Caveats) AllowsResource(uri string) bool {
 	if uri == "" {
 		return false
 	}
-	for _, exact := range c.ResourceURIs {
-		if exact == uri {
-			return true
-		}
+	if slices.Contains(c.ResourceURIs, uri) {
+		return true
 	}
 	for _, prefix := range c.ResourcePrefixes {
 		if MatchResource(prefix, uri) {

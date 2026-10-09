@@ -15,7 +15,7 @@ import (
 // set recent enough to trust: the endpoint has been failing for longer than
 // MaxStale, or never answered. The verifier turns it into
 // ErrInvalidSignature — an issuer we cannot reach verifies nothing.
-var ErrJWKSUnavailable = errors.New("capability: JWKS unavailable")
+var ErrJWKSUnavailable = errors.New("limes: JWKS unavailable")
 
 // RemoteJWKSConfig defaults, documented on its fields.
 const (
@@ -78,7 +78,7 @@ type RemoteJWKSResolver struct {
 // PublicKey call does, so constructing a verifier never blocks on the network.
 func NewRemoteJWKSResolver(cfg RemoteJWKSConfig) (*RemoteJWKSResolver, error) {
 	if cfg.URL == "" {
-		return nil, errors.New("capability: RemoteJWKSConfig.URL required")
+		return nil, errors.New("limes: RemoteJWKSConfig.URL required")
 	}
 	if cfg.Client == nil {
 		cfg.Client = &http.Client{Timeout: defaultJWKSFetchTimeout}
@@ -102,7 +102,7 @@ func NewRemoteJWKSResolver(cfg RemoteJWKSConfig) (*RemoteJWKSResolver, error) {
 	// with no fetch having failed, and a refresh due inside the rate limit
 	// would wait it out anyway.
 	if cfg.MinRefreshInterval > cfg.RefreshInterval || cfg.RefreshInterval > cfg.MaxStale {
-		return nil, fmt.Errorf("capability: RemoteJWKSConfig needs MinRefreshInterval (%s) ≤ RefreshInterval (%s) ≤ MaxStale (%s)",
+		return nil, fmt.Errorf("limes: RemoteJWKSConfig needs MinRefreshInterval (%s) ≤ RefreshInterval (%s) ≤ MaxStale (%s)",
 			cfg.MinRefreshInterval, cfg.RefreshInterval, cfg.MaxStale)
 	}
 	return &RemoteJWKSResolver{cfg: cfg, fetching: make(chan struct{}, 1)}, nil

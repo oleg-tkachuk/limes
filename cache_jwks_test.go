@@ -33,13 +33,11 @@ func TestRevocationCacheCoalescesConcurrentMisses(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 20 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if r, err := c.IsRevoked(context.Background(), id); err != nil || !r {
 				t.Errorf("IsRevoked = %v, %v", r, err)
 			}
-		}()
+		})
 	}
 	time.Sleep(20 * time.Millisecond)
 	close(up.release)

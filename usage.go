@@ -362,12 +362,9 @@ type RefundRequest struct {
 	Amount Nanos
 }
 
-// TenantBudget is the snapshot view of the tenant aggregate cap.
-//
-// Amounts here and throughout the package are float64 at the API boundary.
-// Implementations should store them exactly (a decimal column, integer minor
-// units) so that sums do not drift; the boundary type is a known limitation
-// tracked for a format change, not an invitation to store floats.
+// TenantBudget is the snapshot view of the tenant aggregate cap. Amounts are
+// Nanos, exact; a store keeps them exactly too (an integer or decimal column),
+// so that sums do not drift.
 type TenantBudget struct {
 	TenantID        uuid.UUID
 	MaxBudgetAmount Nanos
@@ -500,27 +497,27 @@ type CopyUsageReader interface {
 var (
 	// ErrInvalidAmount — a charge or refund amount that is negative, NaN
 	// or infinite. Refunds are explicit; a negative charge is not one.
-	ErrInvalidAmount = errors.New("capability: invalid amount")
+	ErrInvalidAmount = errors.New("limes: invalid amount")
 
 	// ErrChargeNotFound — Refund named a charge with no ledger row.
-	ErrChargeNotFound = errors.New("capability: charge not found")
+	ErrChargeNotFound = errors.New("limes: charge not found")
 
 	// ErrRefundExceedsCharge — Refund would return more than the charge
 	// took, counting earlier refunds of the same charge.
-	ErrRefundExceedsCharge = errors.New("capability: refund exceeds charge")
+	ErrRefundExceedsCharge = errors.New("limes: refund exceeds charge")
 
 	// ErrReservationNotFound — Settle named a reservation that does not
 	// exist, was released, or has expired. One already settled is not an
 	// error: Settle returns its charge again (ChargeReceipt.Replayed).
-	ErrReservationNotFound = errors.New("capability: reservation not found")
+	ErrReservationNotFound = errors.New("limes: reservation not found")
 
 	// ErrRequestLimitExceeded — capability used MaxRequests times,
 	// next attempt was blocked.
-	ErrRequestLimitExceeded = errors.New("capability: request limit exceeded")
+	ErrRequestLimitExceeded = errors.New("limes: request limit exceeded")
 
 	// ErrUsageNotFound — no usage row exists for this capability.
 	// Get-only; bump/charge always inserts on first hit.
-	ErrUsageNotFound = errors.New("capability: usage row not found")
+	ErrUsageNotFound = errors.New("limes: usage row not found")
 
 	// ErrTenantBudgetExceeded — the tenant aggregate cap has been
 	// hit. Distinct from ErrBudgetExceeded so admin tooling can
@@ -528,18 +525,18 @@ var (
 	// out of budget". Operators handle differently — tenant lift
 	// is an admin RPC; capability lift requires re-issuing the
 	// caveat.
-	ErrTenantBudgetExceeded = errors.New("capability: tenant aggregate budget exceeded")
+	ErrTenantBudgetExceeded = errors.New("limes: tenant aggregate budget exceeded")
 
 	// ErrTenantBudgetNotFound — Get-only; the tenant has no cap
 	// configured AND has never been charged. Distinct from "cap = 0"
 	// (which means "configured but unlimited").
-	ErrTenantBudgetNotFound = errors.New("capability: tenant budget row not found")
+	ErrTenantBudgetNotFound = errors.New("limes: tenant budget row not found")
 
 	// ErrTenantBudgetVersionMismatch — SetTenantBudget's OCC guard refused the
 	// write: the stored resource_version is not the one the caller read, so
 	// someone else changed the cap in between. The caller re-reads and decides,
 	// rather than silently overwriting a change it never saw.
-	ErrTenantBudgetVersionMismatch = errors.New("capability: tenant budget resource_version mismatch")
+	ErrTenantBudgetVersionMismatch = errors.New("limes: tenant budget resource_version mismatch")
 )
 
 // Validate reports whether p is an OverrunPolicy this package defines.

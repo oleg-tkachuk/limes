@@ -12,7 +12,7 @@ import (
 // CIDR, an operation name that is not well formed. It is a request error, not
 // an authorisation decision — the capability was never minted — so it also
 // matches ErrInvalidRequest.
-var ErrInvalidCaveats error = &requestError{"capability: invalid caveats"}
+var ErrInvalidCaveats error = &requestError{"limes: invalid caveats"}
 
 // builtinOps is the closed set this package defines. Consumers add their own
 // operations as namespaced names ("tool:search", "mcp:github/create_issue");

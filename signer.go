@@ -69,10 +69,10 @@ type ed25519Signer struct {
 // this package is pure crypto + encoding.
 func NewEd25519Signer(keyID string, priv ed25519.PrivateKey) (Signer, error) {
 	if keyID == "" {
-		return nil, errors.New("capability: signer key ID required")
+		return nil, errors.New("limes: signer key ID required")
 	}
 	if len(priv) != ed25519.PrivateKeySize {
-		return nil, fmt.Errorf("capability: ed25519 private key wrong length %d", len(priv))
+		return nil, fmt.Errorf("limes: ed25519 private key wrong length %d", len(priv))
 	}
 	return &ed25519Signer{keyID: keyID, priv: priv}, nil
 }
@@ -124,19 +124,19 @@ type cnfClaim struct {
 // dotted concatenation, returns the compact form.
 func (s *ed25519Signer) Sign(c Capability) (string, error) {
 	if c.ID == uuid.Nil {
-		return "", errors.New("capability: ID required")
+		return "", errors.New("limes: ID required")
 	}
 	if c.Issuer == "" {
-		return "", errors.New("capability: Issuer required")
+		return "", errors.New("limes: Issuer required")
 	}
 	if c.Subject.TenantID == uuid.Nil {
-		return "", errors.New("capability: Subject.TenantID required")
+		return "", errors.New("limes: Subject.TenantID required")
 	}
 	if len(c.Caveats.Ops) == 0 {
-		return "", errors.New("capability: at least one Op required")
+		return "", errors.New("limes: at least one Op required")
 	}
 	if c.ExpiresAt.Before(c.IssuedAt) || c.ExpiresAt.IsZero() {
-		return "", errors.New("capability: ExpiresAt must be after IssuedAt")
+		return "", errors.New("limes: ExpiresAt must be after IssuedAt")
 	}
 
 	header := jwtHeader{Alg: algEdDSA, Kid: s.keyID, Typ: TokenType}
@@ -164,11 +164,11 @@ func (s *ed25519Signer) Sign(c Capability) (string, error) {
 
 	headerJSON, err := json.Marshal(header)
 	if err != nil {
-		return "", fmt.Errorf("capability: marshal header: %w", err)
+		return "", fmt.Errorf("limes: marshal header: %w", err)
 	}
 	claimsJSON, err := json.Marshal(claims)
 	if err != nil {
-		return "", fmt.Errorf("capability: marshal claims: %w", err)
+		return "", fmt.Errorf("limes: marshal claims: %w", err)
 	}
 
 	signingInput := strings.Join([]string{
@@ -180,7 +180,7 @@ func (s *ed25519Signer) Sign(c Capability) (string, error) {
 	// message itself); we pass crypto.Hash(0) per the stdlib contract.
 	sig, err := s.priv.Sign(nil, []byte(signingInput), crypto.Hash(0))
 	if err != nil {
-		return "", fmt.Errorf("capability: sign: %w", err)
+		return "", fmt.Errorf("limes: sign: %w", err)
 	}
 	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig), nil
 }
@@ -200,7 +200,7 @@ func splitToken(token string) (tokenParts, error) {
 	h, rest, ok1 := strings.Cut(token, ".")
 	c, sig, ok2 := strings.Cut(rest, ".")
 	if !ok1 || !ok2 || strings.Contains(sig, ".") {
-		return tokenParts{}, errors.New("capability: token must have 3 segments")
+		return tokenParts{}, errors.New("limes: token must have 3 segments")
 	}
 	return tokenParts{header: h, claims: c, sig: sig}, nil
 }
@@ -210,14 +210,14 @@ func (p tokenParts) signingInput() string { return p.header + "." + p.claims }
 func parseHeader(seg string) (jwtHeader, error) {
 	raw, err := base64.RawURLEncoding.DecodeString(seg)
 	if err != nil {
-		return jwtHeader{}, fmt.Errorf("capability: decode header: %w", err)
+		return jwtHeader{}, fmt.Errorf("limes: decode header: %w", err)
 	}
 	var h jwtHeader
 	if err := json.Unmarshal(raw, &h); err != nil {
-		return jwtHeader{}, fmt.Errorf("capability: parse header: %w", err)
+		return jwtHeader{}, fmt.Errorf("limes: parse header: %w", err)
 	}
 	if h.Alg != algEdDSA {
-		return jwtHeader{}, fmt.Errorf("capability: unexpected alg %q (want EdDSA)", h.Alg)
+		return jwtHeader{}, fmt.Errorf("limes: unexpected alg %q (want EdDSA)", h.Alg)
 	}
 	return h, nil
 }
@@ -225,16 +225,16 @@ func parseHeader(seg string) (jwtHeader, error) {
 func parseClaims(seg string) (*Capability, error) {
 	raw, err := base64.RawURLEncoding.DecodeString(seg)
 	if err != nil {
-		return nil, fmt.Errorf("capability: decode claims: %w", err)
+		return nil, fmt.Errorf("limes: decode claims: %w", err)
 	}
 	var claims jwtClaims
 	if err := json.Unmarshal(raw, &claims); err != nil {
-		return nil, fmt.Errorf("capability: parse claims: %w", err)
+		return nil, fmt.Errorf("limes: parse claims: %w", err)
 	}
 
 	id, err := uuid.Parse(claims.ID)
 	if err != nil {
-		return nil, fmt.Errorf("capability: parse jti: %w", err)
+		return nil, fmt.Errorf("limes: parse jti: %w", err)
 	}
 	cap := &Capability{
 		ID:         id,
@@ -260,7 +260,7 @@ func parseClaims(seg string) (*Capability, error) {
 	if claims.ParentID != "" {
 		pid, err := uuid.Parse(claims.ParentID)
 		if err != nil {
-			return nil, fmt.Errorf("capability: parse parent_id: %w", err)
+			return nil, fmt.Errorf("limes: parse parent_id: %w", err)
 		}
 		cap.ParentID = pid
 	}

@@ -65,12 +65,12 @@ const (
 // consumer that maps only that sentinel still refuses them.
 var (
 	// ErrDPoPRequired — the capability is key-bound and no proof came with it.
-	ErrDPoPRequired error = &popError{"capability: DPoP proof required"}
+	ErrDPoPRequired error = &popError{"limes: DPoP proof required"}
 	// ErrDPoPInvalid — a proof came, and it does not prove possession for
 	// this token, method, URL and moment.
-	ErrDPoPInvalid error = &popError{"capability: invalid DPoP proof"}
+	ErrDPoPInvalid error = &popError{"limes: invalid DPoP proof"}
 	// ErrDPoPReplayed — a proof's jti was already used inside the window.
-	ErrDPoPReplayed error = &popError{"capability: DPoP proof replayed"}
+	ErrDPoPReplayed error = &popError{"limes: DPoP proof replayed"}
 )
 
 type popError struct{ msg string }
@@ -109,16 +109,16 @@ func PublicJWK(pub crypto.PublicKey) (DPoPJWK, error) {
 		return DPoPJWK{Kty: jwkKtyOKP, Crv: jwkCrvEd25519, X: b64(k)}, nil
 	case *ecdsa.PublicKey:
 		if k.Curve != elliptic.P256() {
-			return DPoPJWK{}, errors.New("capability: DPoP EC keys must be P-256")
+			return DPoPJWK{}, errors.New("limes: DPoP EC keys must be P-256")
 		}
 		raw, err := k.Bytes() // 0x04 || X || Y
 		if err != nil {
-			return DPoPJWK{}, fmt.Errorf("capability: DPoP EC key: %w", err)
+			return DPoPJWK{}, fmt.Errorf("limes: DPoP EC key: %w", err)
 		}
 		x, y := raw[1:1+p256CoordinateBytes], raw[1+p256CoordinateBytes:]
 		return DPoPJWK{Kty: jwkKtyEC, Crv: jwkCrvP256, X: b64(x), Y: b64(y)}, nil
 	}
-	return DPoPJWK{}, fmt.Errorf("capability: unsupported DPoP key type %T", pub)
+	return DPoPJWK{}, fmt.Errorf("limes: unsupported DPoP key type %T", pub)
 }
 
 // Thumbprint is the key's RFC 7638 SHA-256 thumbprint, base64url — the value
@@ -132,7 +132,7 @@ func (j DPoPJWK) Thumbprint() (string, error) {
 	case jwkKtyEC:
 		canonical = fmt.Sprintf(`{"crv":%q,"kty":%q,"x":%q,"y":%q}`, j.Crv, jwkKtyEC, j.X, j.Y)
 	default:
-		return "", fmt.Errorf("capability: unsupported JWK kty %q", j.Kty)
+		return "", fmt.Errorf("limes: unsupported JWK kty %q", j.Kty)
 	}
 	sum := sha256.Sum256([]byte(canonical))
 	return b64(sum[:]), nil
@@ -190,7 +190,7 @@ func NewDPoPProof(key crypto.Signer, method, rawURL, token string, now time.Time
 	}
 	jti := make([]byte, dpopJTIBytes)
 	if _, err := rand.Read(jti); err != nil {
-		return "", fmt.Errorf("capability: DPoP jti: %w", err)
+		return "", fmt.Errorf("limes: DPoP jti: %w", err)
 	}
 	htu, err := canonicalHTU(rawURL)
 	if err != nil {
@@ -215,25 +215,25 @@ func signDPoP(key crypto.Signer, input []byte) ([]byte, error) {
 	case ed25519.PublicKey:
 		sig, err := key.Sign(rand.Reader, input, crypto.Hash(0))
 		if err != nil {
-			return nil, fmt.Errorf("capability: DPoP sign: %w", err)
+			return nil, fmt.Errorf("limes: DPoP sign: %w", err)
 		}
 		return sig, nil
 	case *ecdsa.PublicKey:
 		digest := sha256.Sum256(input)
 		der, err := key.Sign(rand.Reader, digest[:], crypto.SHA256)
 		if err != nil {
-			return nil, fmt.Errorf("capability: DPoP sign: %w", err)
+			return nil, fmt.Errorf("limes: DPoP sign: %w", err)
 		}
 		var rs struct{ R, S *big.Int }
 		if rest, err := asn1.Unmarshal(der, &rs); err != nil || len(rest) > 0 {
-			return nil, errors.New("capability: DPoP sign: malformed ECDSA signature")
+			return nil, errors.New("limes: DPoP sign: malformed ECDSA signature")
 		}
 		sig := make([]byte, es256SignatureBytes)
 		rs.R.FillBytes(sig[:p256CoordinateBytes])
 		rs.S.FillBytes(sig[p256CoordinateBytes:])
 		return sig, nil
 	}
-	return nil, fmt.Errorf("capability: unsupported DPoP key type %T", key.Public())
+	return nil, fmt.Errorf("limes: unsupported DPoP key type %T", key.Public())
 }
 
 func verifyDPoPSignature(pub crypto.PublicKey, alg string, input, sig []byte) bool {
@@ -257,7 +257,7 @@ func verifyDPoPSignature(pub crypto.PublicKey, alg string, input, sig []byte) bo
 func canonicalHTU(raw string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return "", fmt.Errorf("capability: DPoP htu: %w", err)
+		return "", fmt.Errorf("limes: DPoP htu: %w", err)
 	}
 	u.RawQuery, u.Fragment, u.RawFragment = "", "", ""
 	return u.String(), nil

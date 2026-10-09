@@ -44,7 +44,7 @@ func MarshalJWKS(keys map[string]ed25519.PublicKey) ([]byte, error) {
 	for _, kid := range slices.Sorted(maps.Keys(keys)) {
 		pub := keys[kid]
 		if len(pub) != ed25519.PublicKeySize {
-			return nil, fmt.Errorf("capability: public key %q wrong size for Ed25519", kid)
+			return nil, fmt.Errorf("limes: public key %q wrong size for Ed25519", kid)
 		}
 		doc.Keys = append(doc.Keys, JWK{
 			Kty: "OKP",
@@ -66,7 +66,7 @@ func MarshalJWKS(keys map[string]ed25519.PublicKey) ([]byte, error) {
 func ParseJWKS(raw []byte) (map[string]ed25519.PublicKey, error) {
 	var doc JWKSDocument
 	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("capability: parse JWKS: %w", err)
+		return nil, fmt.Errorf("limes: parse JWKS: %w", err)
 	}
 	out := make(map[string]ed25519.PublicKey, len(doc.Keys))
 	for _, k := range doc.Keys {

@@ -3,6 +3,7 @@ package limes
 import (
 	"fmt"
 	"net/netip"
+	"slices"
 )
 
 // caveatError is a caveat-violation sentinel that also matches
@@ -16,11 +17,11 @@ func (e *caveatError) Is(target error) bool { return target == ErrCaveatViolatio
 
 // Request-time caveat rejections. Each also matches ErrCaveatViolation.
 var (
-	ErrOpNotAllowed           error = &caveatError{"capability: operation not allowed"}
-	ErrResourceNotAllowed     error = &caveatError{"capability: resource not allowed"}
-	ErrSourceIPNotAllowed     error = &caveatError{"capability: source IP not allowed"}
-	ErrIdempotencyKeyRequired error = &caveatError{"capability: idempotency key required"}
-	ErrTaintedReadNotAllowed  error = &caveatError{"capability: tainted read not allowed"}
+	ErrOpNotAllowed           error = &caveatError{"limes: operation not allowed"}
+	ErrResourceNotAllowed     error = &caveatError{"limes: resource not allowed"}
+	ErrSourceIPNotAllowed     error = &caveatError{"limes: source IP not allowed"}
+	ErrIdempotencyKeyRequired error = &caveatError{"limes: idempotency key required"}
+	ErrTaintedReadNotAllowed  error = &caveatError{"limes: tainted read not allowed"}
 )
 
 // CheckRequest describes one operation a bearer is attempting, in the terms
@@ -118,10 +119,5 @@ func (c Caveats) CheckSource(addr netip.Addr) error {
 }
 
 func containsOp(set []Op, want Op) bool {
-	for _, op := range set {
-		if op == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(set, want)
 }

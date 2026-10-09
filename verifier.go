@@ -28,7 +28,7 @@ type KeyResolver interface {
 // verifier converts it to ErrInvalidSignature for caller-facing errors;
 // keeping the typed return lets ops dashboards distinguish "we don't
 // know this kid" from "signature mismatch".
-var ErrUnknownKID = errors.New("capability: unknown kid")
+var ErrUnknownKID = errors.New("limes: unknown kid")
 
 // StaticKeyResolver is the in-memory implementation used in tests and
 // single-node deploys. Maps kid → public key; concurrency-safe via a
@@ -154,13 +154,13 @@ type StandardVerifier struct {
 // NewStandardVerifier validates wiring and builds the verifier.
 func NewStandardVerifier(cfg VerifierConfig) (*StandardVerifier, error) {
 	if cfg.Keys == nil {
-		return nil, errors.New("capability: VerifierConfig.Keys required")
+		return nil, errors.New("limes: VerifierConfig.Keys required")
 	}
 	if cfg.Revocations == nil {
-		return nil, errors.New("capability: VerifierConfig.Revocations required")
+		return nil, errors.New("limes: VerifierConfig.Revocations required")
 	}
 	if len(cfg.TrustedIssuers) == 0 {
-		return nil, errors.New("capability: VerifierConfig.TrustedIssuers required")
+		return nil, errors.New("limes: VerifierConfig.TrustedIssuers required")
 	}
 	if cfg.AcceptBiscuit && cfg.BiscuitRevocations == nil {
 		return nil, errNoBiscuitRevocations
@@ -233,7 +233,7 @@ func (v *StandardVerifier) Verify(ctx context.Context, token string, audience st
 	// rejections short-circuit before hitting the cache / store.
 	revoked, err := v.cfg.Revocations.IsRevoked(ctx, cap.ID)
 	if err != nil {
-		return Capability{}, fmt.Errorf("capability: revocation lookup: %w", err)
+		return Capability{}, fmt.Errorf("limes: revocation lookup: %w", err)
 	}
 	if revoked {
 		return Capability{}, ErrRevoked
@@ -243,7 +243,7 @@ func (v *StandardVerifier) Verify(ctx context.Context, token string, audience st
 	if biscuitIDs != nil {
 		revoked, err := v.cfg.BiscuitRevocations.IsBiscuitRevoked(ctx, biscuitIDs)
 		if err != nil {
-			return Capability{}, fmt.Errorf("capability: biscuit revocation lookup: %w", err)
+			return Capability{}, fmt.Errorf("limes: biscuit revocation lookup: %w", err)
 		}
 		if revoked {
 			return Capability{}, ErrRevoked

@@ -92,7 +92,7 @@ type Store interface {
 // Verifiers map it to an invalid-token response: a syntactically valid token
 // whose record is absent was forged or purged, which is an authentication
 // failure, not a missing entity.
-var ErrNotFound = errors.New("capability: not found")
+var ErrNotFound = errors.New("limes: not found")
 
 // Record is a capability as the Store holds it.
 type Record struct {
@@ -116,7 +116,7 @@ type Revocation struct {
 }
 
 // ErrAlreadyExists is Store.Insert given an id already on record.
-var ErrAlreadyExists = errors.New("capability: already exists")
+var ErrAlreadyExists = errors.New("limes: already exists")
 
 // Page sizes of ListByPrincipal: Limit 0 or below means DefaultListLimit,
 // and anything above MaxListLimit is clamped to it.

@@ -152,4 +152,4 @@ func biscuitCacheKey(ids [][]byte) [sha256.Size]byte {
 
 // errNoBiscuitRevocations is returned by NewStandardVerifier when Biscuits
 // are accepted with nothing to check their copies against.
-var errNoBiscuitRevocations = errors.New("capability: VerifierConfig.BiscuitRevocations required when AcceptBiscuit is set")
+var errNoBiscuitRevocations = errors.New("limes: VerifierConfig.BiscuitRevocations required when AcceptBiscuit is set")
