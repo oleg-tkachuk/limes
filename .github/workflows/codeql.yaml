@@ -40,6 +40,7 @@ jobs:
     # A plain name: GitHub appends the matrix value, "(go)".
     name: Analyze
     runs-on: ubuntu-26.04
+    timeout-minutes: 30
     permissions:
       contents: read
       security-events: write
@@ -65,10 +66,17 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.language == 'go' && 'manual' || 'none' }}
+          # The default suite plus the security queries of lower precision: a
+          # capability library is worth the extra alerts to triage.
+          queries: security-extended
 
+      # The tests too, compiled by a test run that runs nothing, so CodeQL
+      # sees their code.
       - name: Build the module
         if: matrix.language == 'go'
-        run: go build ./...
+        run: |
+          go build ./...
+          go test -count=1 -run '^$' ./...
 
       - name: Analyze
         uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
