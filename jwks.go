@@ -2,11 +2,16 @@ package limes
 
 import (
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"maps"
+	"net/http"
 	"slices"
+	"strconv"
+	"strings"
+	"time"
 )
 
 // JWKSDocument is the on-the-wire shape served at the issuer's JWKS
@@ -84,4 +89,51 @@ func ParseJWKS(raw []byte) (map[string]ed25519.PublicKey, error) {
 		out[k.Kid] = ed25519.PublicKey(decoded)
 	}
 	return out, nil
+}
+
+// JWKSHandler serves keys() as a JWK Set document (RFC 7517), the way the
+// RemoteJWKSResolver on the other end reads it: under its registered media
+// type (§8.5), with a strong ETag of its bytes that answers If-None-Match
+// with 304 (RFC 9110 §13.1.2), and fresh for maxAge (RFC 9111 §5.2.2.1).
+// Keep maxAge below the time between publishing a new key and signing with
+// it, and between withdrawing an old key and the end of its tokens' TTL.
+func JWKSHandler(keys func() map[string]ed25519.PublicKey, maxAge time.Duration) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", http.MethodGet+", "+http.MethodHead)
+			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+			return
+		}
+		doc, err := MarshalJWKS(keys())
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		sum := sha256.Sum256(doc)
+		etag := `"` + base64.RawURLEncoding.EncodeToString(sum[:]) + `"`
+		h := w.Header()
+		h.Set("ETag", etag)
+		h.Set(headerCacheControl, fmt.Sprintf("public, %s=%d", directiveMaxAge, int64(maxAge/time.Second)))
+		if etagMatches(r.Header.Values("If-None-Match"), etag) {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		h.Set("Content-Type", mediaTypeJWKSet)
+		h.Set("Content-Length", strconv.Itoa(len(doc)))
+		_, _ = w.Write(doc)
+	})
+}
+
+// etagMatches is If-None-Match's weak comparison (RFC 9110 §13.1.2): any
+// listed tag, W/ or not, equal to etag, or "*".
+func etagMatches(ifNoneMatch []string, etag string) bool {
+	for _, line := range ifNoneMatch {
+		for tag := range strings.SplitSeq(line, ",") {
+			tag = strings.TrimPrefix(strings.TrimSpace(tag), "W/")
+			if tag == "*" || tag == etag {
+				return true
+			}
+		}
+	}
+	return false
 }

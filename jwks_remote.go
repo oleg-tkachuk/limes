@@ -35,7 +35,9 @@ type RemoteJWKSConfig struct {
 	// Client performs the fetch. Default: a client with a 10s timeout.
 	Client *http.Client
 	// RefreshInterval is how long a fetched key set is used before it is
-	// re-fetched. Default 5m.
+	// re-fetched, unless the response's Cache-Control says a shorter time
+	// (RFC 9111): its max-age, less its Age, never below
+	// MinRefreshInterval. Default 5m.
 	RefreshInterval time.Duration
 	// MinRefreshInterval rate-limits fetches. A token with an unknown kid
 	// triggers a refetch (that is how a newly published key is picked up),
@@ -69,7 +71,8 @@ type RemoteJWKSResolver struct {
 	mu          sync.RWMutex
 	keys        map[string]ed25519.PublicKey
 	etag        string
-	fetchedAt   time.Time // last time the set was confirmed current
+	fetchedAt   time.Time     // last time the set was confirmed current
+	freshFor    time.Duration // how long after fetchedAt it stays current
 	lastAttempt time.Time
 	lastErr     error
 }
@@ -110,12 +113,12 @@ func NewRemoteJWKSResolver(cfg RemoteJWKSConfig) (*RemoteJWKSResolver, error) {
 
 // PublicKey implements KeyResolver.
 func (r *RemoteJWKSResolver) PublicKey(ctx context.Context, kid string) (ed25519.PublicKey, error) {
-	key, ok, fetchedAt := r.lookup(kid)
-	if !ok || r.cfg.Now().Sub(fetchedAt) >= r.cfg.RefreshInterval {
+	key, ok, fetchedAt, freshFor := r.lookup(kid)
+	if !ok || r.cfg.Now().Sub(fetchedAt) >= freshFor {
 		if err := r.refresh(ctx); err != nil {
 			return nil, err
 		}
-		key, ok, fetchedAt = r.lookup(kid)
+		key, ok, fetchedAt, _ = r.lookup(kid)
 	}
 
 	if fetchedAt.IsZero() || r.cfg.Now().Sub(fetchedAt) > r.cfg.MaxStale {
@@ -130,11 +133,22 @@ func (r *RemoteJWKSResolver) PublicKey(ctx context.Context, kid string) (ed25519
 	return key, nil
 }
 
-func (r *RemoteJWKSResolver) lookup(kid string) (ed25519.PublicKey, bool, time.Time) {
+func (r *RemoteJWKSResolver) lookup(kid string) (ed25519.PublicKey, bool, time.Time, time.Duration) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	k, ok := r.keys[kid]
-	return k, ok, r.fetchedAt
+	return k, ok, r.fetchedAt, r.freshFor
+}
+
+// freshness is how long a response keeps the set current: what its
+// Cache-Control says, within MinRefreshInterval..RefreshInterval, or
+// RefreshInterval when it says nothing.
+func (r *RemoteJWKSResolver) freshness(h http.Header) time.Duration {
+	d, ok := responseFreshness(h)
+	if !ok {
+		return r.cfg.RefreshInterval
+	}
+	return min(max(d, r.cfg.MinRefreshInterval), r.cfg.RefreshInterval)
 }
 
 // refresh fetches the document unless a fetch was attempted within
@@ -158,7 +172,7 @@ func (r *RemoteJWKSResolver) refresh(ctx context.Context) error {
 		return nil
 	}
 
-	keys, newETag, notModified, err := r.fetch(ctx, etag)
+	keys, newETag, header, notModified, err := r.fetch(ctx, etag)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -168,6 +182,7 @@ func (r *RemoteJWKSResolver) refresh(ctx context.Context) error {
 		return nil
 	}
 	r.fetchedAt = now
+	r.freshFor = r.freshness(header)
 	if !notModified {
 		r.keys = keys
 		r.etag = newETag
@@ -175,37 +190,44 @@ func (r *RemoteJWKSResolver) refresh(ctx context.Context) error {
 	return nil
 }
 
-func (r *RemoteJWKSResolver) fetch(ctx context.Context, etag string) (keys map[string]ed25519.PublicKey, newETag string, notModified bool, err error) {
+// JWKS media types (RFC 7517 §8.5), the registered one first: some servers
+// still label a key set as plain JSON.
+const (
+	mediaTypeJWKSet = "application/jwk-set+json"
+	acceptJWKSet    = mediaTypeJWKSet + ", application/json;q=0.9"
+)
+
+func (r *RemoteJWKSResolver) fetch(ctx context.Context, etag string) (keys map[string]ed25519.PublicKey, newETag string, header http.Header, notModified bool, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.cfg.URL, nil)
 	if err != nil {
-		return nil, "", false, err
+		return nil, "", nil, false, err
 	}
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", acceptJWKSet)
 	if etag != "" {
 		req.Header.Set("If-None-Match", etag)
 	}
 	resp, err := r.cfg.Client.Do(req)
 	if err != nil {
-		return nil, "", false, err
+		return nil, "", nil, false, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	switch {
 	case resp.StatusCode == http.StatusNotModified && etag != "":
-		return nil, etag, true, nil
+		return nil, etag, resp.Header, true, nil
 	case resp.StatusCode != http.StatusOK:
-		return nil, "", false, fmt.Errorf("JWKS fetch: HTTP %d", resp.StatusCode)
+		return nil, "", nil, false, fmt.Errorf("JWKS fetch: HTTP %d", resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, r.cfg.MaxDocumentBytes+1))
 	if err != nil {
-		return nil, "", false, fmt.Errorf("JWKS read: %w", err)
+		return nil, "", nil, false, fmt.Errorf("JWKS read: %w", err)
 	}
 	if int64(len(body)) > r.cfg.MaxDocumentBytes {
-		return nil, "", false, fmt.Errorf("JWKS document exceeds %d bytes", r.cfg.MaxDocumentBytes)
+		return nil, "", nil, false, fmt.Errorf("JWKS document exceeds %d bytes", r.cfg.MaxDocumentBytes)
 	}
 	keys, err = ParseJWKS(body)
 	if err != nil {
-		return nil, "", false, err
+		return nil, "", nil, false, err
 	}
-	return keys, resp.Header.Get("ETag"), false, nil
+	return keys, resp.Header.Get("ETag"), resp.Header, false, nil
 }
