@@ -5,7 +5,8 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
-	"slices"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -193,13 +194,34 @@ func setNotBefore(c *Capability, nbf time.Time) error {
 	return nil
 }
 
-// validateAudience requires a non-empty audience of non-empty entries.
+// validateAudience requires a non-empty audience whose every entry is a
+// resource indicator as RFC 8707 §2 defines one: an absolute URI with no
+// fragment, naming the service the token is for.
 func validateAudience(aud []string) error {
 	if len(aud) == 0 {
 		return invalidRequest("non-empty Audience required")
 	}
-	if slices.Contains(aud, "") {
-		return invalidRequest("Audience contains an empty entry")
+	for _, a := range aud {
+		if err := ValidateResourceIndicator(a); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateResourceIndicator reports whether s is an RFC 8707 resource
+// indicator: an absolute URI (RFC 3986 §4.3) — a URL or a URN — with no
+// fragment.
+func ValidateResourceIndicator(s string) error {
+	u, err := url.Parse(s)
+	if err != nil {
+		return invalidRequest("audience %q: %v", s, err)
+	}
+	if !u.IsAbs() || u.Host == "" && u.Opaque == "" && u.Path == "" {
+		return invalidRequest("audience %q is not an absolute URI (RFC 8707)", s)
+	}
+	if u.Fragment != "" || strings.Contains(s, "#") {
+		return invalidRequest("audience %q has a fragment (RFC 8707)", s)
 	}
 	return nil
 }

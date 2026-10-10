@@ -47,7 +47,7 @@ func TestIssueRejectsMalformedRequests(t *testing.T) {
 		return IssueRequest{
 			IssuedBy: Principal{Subject: "op"},
 			Subject:  Principal{TenantID: uuid.New(), Subject: "a"},
-			Audience: []string{"data"},
+			Audience: []string{audienceData},
 			Caveats:  Caveats{Ops: []Op{OpGet}},
 			TTL:      time.Minute,
 		}
@@ -75,7 +75,7 @@ func issueRoot(t *testing.T, issuer *Issuer, caveats Caveats) Capability {
 	c, _, err := issuer.Issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{TenantID: uuid.New(), Subject: "root"},
-		Audience: []string{"data"},
+		Audience: []string{audienceData},
 		Caveats:  caveats,
 		TTL:      time.Hour,
 	})
@@ -144,6 +144,21 @@ func TestIssuedIDsAreVersion7(t *testing.T) {
 	for name, id := range map[string]uuid.UUID{"issued": parent.ID, "delegated": child.ID} {
 		if v := id.Version(); v != v7 {
 			t.Errorf("%s id %s is version %d, want %d", name, id, v, v7)
+		}
+	}
+}
+
+// RFC 8707 §2: an audience is a resource indicator, an absolute URI without
+// a fragment.
+func TestValidateResourceIndicator(t *testing.T) {
+	for _, ok := range []string{"https://data.example.com", "https://api.example.com/v1/objects", "urn:example:resource:x", "http://localhost:8080"} {
+		if err := ValidateResourceIndicator(ok); err != nil {
+			t.Errorf("ValidateResourceIndicator(%q) = %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "data", "/relative", "https://data.example.com/#frag", "https://data.example.com#", "//data.example.com", "https:"} {
+		if err := ValidateResourceIndicator(bad); !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("ValidateResourceIndicator(%q) = %v, want ErrInvalidRequest", bad, err)
 		}
 	}
 }

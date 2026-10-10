@@ -1,5 +1,5 @@
 {
-  "_comment": "A cross-language attenuation. seed.biscuit is minted from the golden key and clock: ops get/list/put under corpus/, planes data and mcp, unbound, expiring 2026-01-01T01:00:00Z. attenuated.biscuit is that seed attenuated with the arguments below; an SDK attenuating the seed with the same arguments must produce a token the verifier reads as the capability below. The copy is bound to the Ed25519 key whose 32-byte seed is bind_key_seed (hex), so an SDK can sign the DPoP proof the bound copy needs; bind_jkt is that key's RFC 7638 thumbprint. LIMES_WRITE_BISCUIT=1 go test -run TestGenerateBiscuitFixtures regenerates both. Biscuit blocks use fresh random keys, so regenerating changes the bytes but not the meaning.",
+  "_comment": "A cross-language attenuation. seed.biscuit is minted from the golden key and clock: ops get/list/put under corpus/, planes https://data.example.com and https://mcp.example.com, unbound, expiring 2026-01-01T01:00:00Z. attenuated.biscuit is that seed attenuated with the arguments below; an SDK attenuating the seed with the same arguments must produce a token the verifier reads as the capability below. The copy is bound to the Ed25519 key whose 32-byte seed is bind_key_seed (hex), so an SDK can sign the DPoP proof the bound copy needs; bind_jkt is that key's RFC 7638 thumbprint. LIMES_WRITE_BISCUIT=1 go test -run TestGenerateBiscuitFixtures regenerates both. Biscuit blocks use fresh random keys, so regenerating changes the bytes but not the meaning.",
   "attenuate": {
     "ops": [
       "get"
@@ -8,7 +8,7 @@
       "corpus/public/"
     ],
     "planes": [
-      "data"
+      "https://data.example.com"
     ],
     "expires_at": "2026-01-01T00:30:00Z",
     "bind_jkt": "GthiVAKYfvzTvluEbZguBa9-bN3Lpi4MXOI4A_TxLpo",
@@ -25,7 +25,7 @@
     ],
     "resource_uris": [],
     "planes": [
-      "data"
+      "https://data.example.com"
     ],
     "expires_at": "2026-01-01T00:30:00Z",
     "confirmation_jkt": "GthiVAKYfvzTvluEbZguBa9-bN3Lpi4MXOI4A_TxLpo",

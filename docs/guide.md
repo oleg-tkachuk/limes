@@ -25,6 +25,10 @@ case errors.Is(err, limes.ErrInvalidSignature): // forged, or no valid proof of 
 }
 ```
 
+An audience is a resource indicator (RFC 8707): an absolute URI with no
+fragment, naming the service the token is for. `Issue` and `Delegate` refuse
+any other.
+
 `Authorize` is `Verify` — the token itself — followed by every caveat that
 needs no state: the operation, the resource, the idempotency key, the tainted
 read and the client's address. Request and budget limits are counted by the
@@ -180,7 +184,7 @@ verifier, _ := limes.NewStandardVerifier(limes.VerifierConfig{
     DPoP: &limes.DPoPVerifier{Replay: limes.NewMemoryReplayCache(0)},
 })
 cap, err := verifier.Verify(ctx, limes.VerifyRequest{
-    Token: token, Audience: "my-service",
+    Token: token, Audience: "https://my-service.example.com",
     DPoP:  limes.DPoPProof{Proof: proof, Method: "POST", URL: url},
 })
 ```
@@ -224,7 +228,7 @@ worker, _ := limes.Attenuate(full, limes.Attenuation{
 })
 
 // A verifier built with AcceptBiscuit: true returns the narrowed Capability.
-c, err := verifier.Verify(ctx, limes.VerifyRequest{Token: worker, Audience: "my-service"})
+c, err := verifier.Verify(ctx, limes.VerifyRequest{Token: worker, Audience: "https://my-service.example.com"})
 ```
 
 An attenuation block may restrict operations, resources, planes, the expiry,

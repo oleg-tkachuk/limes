@@ -412,7 +412,7 @@ func (m *mutableClock) Now() time.Time { return m.now }
 
 // The audiences the tests mount verifiers on.
 const (
-	audienceData  = "data"
-	audienceAdmin = "admin"
-	audienceMCP   = "mcp"
+	audienceData  = "https://data.example.com"
+	audienceAdmin = "https://admin.example.com"
+	audienceMCP   = "https://mcp.example.com"
 )

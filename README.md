@@ -77,7 +77,7 @@ cap, token, _ := issuer.Issue(ctx, limes.IssueRequest{
         Subject: "research-orchestrator",
         Agent:   &limes.AgentPrincipal{AgentType: "my-agent", RunID: runID},
     },
-    Audience: []string{"my-service"},
+    Audience: []string{"https://my-service.example.com"},
     TTL:      15 * time.Minute,
     Caveats: limes.Caveats{
         Ops:              []limes.Op{limes.OpGet, limes.OpShare},
@@ -90,7 +90,7 @@ cap, token, _ := issuer.Issue(ctx, limes.IssueRequest{
 
 // On every call: verify locally and enforce the caveats in one step, then meter.
 cap, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
-    VerifyRequest: limes.VerifyRequest{Token: token, Audience: "my-service"},
+    VerifyRequest: limes.VerifyRequest{Token: token, Audience: "https://my-service.example.com"},
     CheckRequest:  limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/report.pdf"},
 })
 _, err = usage.Charge(ctx, limes.ChargeRequest{

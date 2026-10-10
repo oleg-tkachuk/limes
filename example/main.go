@@ -64,7 +64,7 @@ func main() {
 				AgentType: "example-agent", Model: "demo", RunID: uuid.New(),
 			},
 		},
-		Audience: []string{"my-service"},
+		Audience: []string{"https://my-service.example.com"},
 		TTL:      15 * time.Minute,
 		Caveats: limes.Caveats{
 			Ops:              []limes.Op{limes.OpGet, limes.OpShare},
@@ -78,13 +78,13 @@ func main() {
 	fmt.Printf("issued   %s  (%d bytes)\n", parent.ID, len(parentToken))
 
 	// 4. Verify on every call. Local — no round trip to the issuer.
-	if _, err := verifier.Verify(ctx, limes.VerifyRequest{Token: parentToken, Audience: "my-service"}); err != nil {
+	if _, err := verifier.Verify(ctx, limes.VerifyRequest{Token: parentToken, Audience: "https://my-service.example.com"}); err != nil {
 		log.Fatalf("verify: %v", err)
 	}
 	fmt.Println("verified ok")
 
 	// A token minted for one audience must not verify for another.
-	if _, err := verifier.Verify(ctx, limes.VerifyRequest{Token: parentToken, Audience: "another-service"}); err == nil {
+	if _, err := verifier.Verify(ctx, limes.VerifyRequest{Token: parentToken, Audience: "https://another-service.example.com"}); err == nil {
 		log.Fatal("audience gate did not hold")
 	}
 	fmt.Println("verified rejected for the wrong audience")
@@ -99,7 +99,7 @@ func main() {
 				AgentType: "example-agent", ParentAgentID: parent.ID,
 			},
 		},
-		Audience: []string{"my-service"},
+		Audience: []string{"https://my-service.example.com"},
 		TTL:      2 * time.Minute,
 		Caveats: limes.Caveats{
 			Ops:              []limes.Op{limes.OpGet},         // dropped OpShare
@@ -119,7 +119,7 @@ func main() {
 		Subject: limes.Principal{
 			Type: limes.PrincipalAgent, TenantID: tenantID, Subject: "greedy-worker",
 		},
-		Audience: []string{"my-service"},
+		Audience: []string{"https://my-service.example.com"},
 		TTL:      time.Minute,
 		Caveats: limes.Caveats{
 			Ops:             []limes.Op{limes.OpGet},
@@ -157,7 +157,7 @@ func main() {
 	}
 	fmt.Println("revoked  parent + cascaded to the child")
 
-	if _, err := verifier.Verify(ctx, limes.VerifyRequest{Token: parentToken, Audience: "my-service"}); !errors.Is(err, limes.ErrRevoked) {
+	if _, err := verifier.Verify(ctx, limes.VerifyRequest{Token: parentToken, Audience: "https://my-service.example.com"}); !errors.Is(err, limes.ErrRevoked) {
 		log.Fatalf("revoked token should fail with ErrRevoked, got %v", err)
 	}
 	fmt.Println("verified now rejects the revoked token")
