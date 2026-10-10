@@ -131,6 +131,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"MalformedRequestsAreRefused", checkMalformed[TX]},
 		{"OverrunRecordCrossesEveryCeiling", checkOverrunRecord[TX]},
 		{"SettleReplaysAndRecordsAnOverrun", checkSettle[TX]},
+		{"SettleOfNoReservationIsNotFound", checkSettleNil[TX]},
 		{"OverrunRecordCrossesACopyBudget", checkCopyOverrun[TX]},
 		{"TenantBudgetReadsAgree", checkTenantBudgetReads[TX]},
 		{"ReservationsReadBack", checkReservations[TX]},
@@ -385,6 +386,22 @@ func checkSettle[TX any](t *testing.T, f fixture[TX]) {
 	}
 	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{ReservationID: other.ID, Amount: 0}, nil); !errors.Is(err, limes.ErrReservationNotFound) {
 		t.Errorf("settling a released reservation: err = %v, want ErrReservationNotFound", err)
+	}
+}
+
+// checkSettleNil holds a store to keeping direct charges apart from settled
+// reservations: a direct charge has no reservation, and a store that files it
+// under the zero id would replay it to a Settle that names none.
+func checkSettleNil[TX any](t *testing.T, f fixture[TX]) {
+	if _, err := f.charge(limes.ChargeRequest{Amount: one}, nil); err != nil {
+		t.Fatal(err)
+	}
+	r, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{ReservationID: uuid.Nil, Amount: one, MaxBudget: childBudget}, nil)
+	if !errors.Is(err, limes.ErrReservationNotFound) {
+		t.Fatalf("Settle of the zero reservation id = %+v, %v; want ErrReservationNotFound", r, err)
+	}
+	if got := f.spent(t, f.child); got != one {
+		t.Errorf("child spent %v after a refused settle, want 1", got)
 	}
 }
 

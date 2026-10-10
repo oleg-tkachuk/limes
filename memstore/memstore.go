@@ -834,6 +834,11 @@ func (s *UsageStore[TX]) Settle(
 	if err := req.Overrun.Validate(); err != nil {
 		return limes.ChargeReceipt{}, err
 	}
+	// A direct charge is filed under the zero reservation id, so the zero id
+	// must not reach the replay lookup below.
+	if req.ReservationID == uuid.Nil {
+		return limes.ChargeReceipt{}, limes.ErrReservationNotFound
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
