@@ -171,7 +171,7 @@ jkt, _ := limes.KeyThumbprint(agentKey.Public()) // Ed25519 or P-256
 cap, token, _ := issuer.Issue(ctx, limes.IssueRequest{ /* … */ ConfirmationJKT: jkt})
 
 // Client: a fresh proof per request, signed over its method, URL and token.
-proof, _ := limes.NewDPoPProof(agentKey, "POST", url, token, time.Now())
+proof, _ := limes.NewDPoPProof(agentKey, limes.DPoPProofRequest{Method: "POST", URL: url, Token: token, Now: time.Now()})
 
 // Server: the verifier checks the proof of every key-bound capability.
 verifier, _ := limes.NewStandardVerifier(limes.VerifierConfig{
@@ -183,6 +183,13 @@ cap, err := verifier.Verify(ctx, limes.VerifyRequest{
     DPoP:  limes.DPoPProof{Proof: proof, Method: "POST", URL: url},
 })
 ```
+
+Behind several replicas, give the `DPoPVerifier` server nonces
+(`Nonces: limes.NewHMACNonces(lifetime, key)`, the same key on every replica):
+a proof must then carry a nonce the server issued, so it cannot be signed ahead
+of time, and a refusal with `ErrDPoPNonceRequired` is answered with
+`verifier.DPoPNonce(ctx)` in the `DPoP-Nonce` header for the client to retry
+with (RFC 9449 §8).
 
 A verifier with no `DPoP` refuses every key-bound capability with
 `ErrDPoPRequired` instead of accepting it as a bearer token, so a binding

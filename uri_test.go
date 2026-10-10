@@ -80,7 +80,7 @@ func TestDPoPMatchesNormalizedURIs(t *testing.T) {
 		{"https://data.example.com/v1/obj", "https://data.example.com:8443/v1/obj", false},
 	} {
 		v := &DPoPVerifier{Replay: NewMemoryReplayCache(0), Now: func() time.Time { return now }}
-		proof, err := NewDPoPProof(key, dpopMethod, tc.proofURL, "tok", now)
+		proof, err := NewDPoPProof(key, DPoPProofRequest{Method: dpopMethod, URL: tc.proofURL, Token: "tok", Now: now})
 		if err != nil {
 			t.Fatal(err)
 		}

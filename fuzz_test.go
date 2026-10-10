@@ -59,7 +59,7 @@ func FuzzParseJWKS(f *testing.F) {
 func FuzzDPoPCheck(f *testing.F) {
 	now := time.Unix(1_800_000_000, 0)
 	key := ed25519.NewKeyFromSeed(goldenSeed[:])
-	proof, err := NewDPoPProof(key, dpopMethod, dpopURL, "tok", now)
+	proof, err := NewDPoPProof(key, DPoPProofRequest{Method: dpopMethod, URL: dpopURL, Token: "tok", Now: now})
 	if err != nil {
 		f.Fatal(err)
 	}

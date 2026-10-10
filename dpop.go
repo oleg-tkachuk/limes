@@ -120,6 +120,8 @@ type dpopClaims struct {
 	HTU string `json:"htu"`
 	IAT int64  `json:"iat"`
 	ATH string `json:"ath,omitempty"`
+	// Nonce is the server-provided nonce (RFC 9449 §8), when one was asked.
+	Nonce string `json:"nonce,omitempty"`
 }
 
 // DPoPJWK is the public key a proof carries in its header: an Ed25519 (OKP)
@@ -206,10 +208,23 @@ func AccessTokenHash(token string) string {
 	return b64(sum[:])
 }
 
+// DPoPProofRequest is the request a proof is signed for.
+type DPoPProofRequest struct {
+	// Method and URL are the request's.
+	Method string
+	URL    string
+	// Token is the capability the request presents.
+	Token string
+	// Nonce is the last DPoP-Nonce the server sent, empty before it has
+	// sent one.
+	Nonce string
+	// Now is the proof's iat.
+	Now time.Time
+}
+
 // NewDPoPProof signs a proof for one request. key is any crypto.Signer whose
-// public key is Ed25519 or ECDSA P-256; method and rawURL are the request's; token is
-// the capability the request presents.
-func NewDPoPProof(key crypto.Signer, method, rawURL, token string, now time.Time) (string, error) {
+// public key is Ed25519 or ECDSA P-256.
+func NewDPoPProof(key crypto.Signer, req DPoPProofRequest) (string, error) {
 	jwk, err := PublicJWK(key.Public())
 	if err != nil {
 		return "", err
@@ -222,13 +237,14 @@ func NewDPoPProof(key crypto.Signer, method, rawURL, token string, now time.Time
 	if _, err := rand.Read(jti); err != nil {
 		return "", fmt.Errorf("limes: DPoP jti: %w", err)
 	}
-	htu, err := canonicalHTU(rawURL)
+	htu, err := canonicalHTU(req.URL)
 	if err != nil {
 		return "", err
 	}
 	header, _ := json.Marshal(dpopHeader{Typ: DPoPTokenType, Alg: alg, JWK: &jwk})
 	claims, _ := json.Marshal(dpopClaims{
-		JTI: b64(jti), HTM: strings.ToUpper(method), HTU: htu, IAT: now.Unix(), ATH: AccessTokenHash(token),
+		JTI: b64(jti), HTM: strings.ToUpper(req.Method), HTU: htu, IAT: req.Now.Unix(),
+		ATH: AccessTokenHash(req.Token), Nonce: req.Nonce,
 	})
 	input := b64(header) + "." + b64(claims)
 	sig, err := signDPoP(key, []byte(input))
@@ -323,6 +339,11 @@ type DPoPVerifier struct {
 	Replay ReplayCache
 	// Now is the clock; default the verifier's.
 	Now func() time.Time
+	// Nonces, when set, requires every proof to carry a nonce it issued
+	// (RFC 9449 §8); a proof without one is refused with
+	// ErrDPoPNonceRequired, and StandardVerifier.DPoPNonce gives the nonce
+	// to send back.
+	Nonces DPoPNonces
 	// MatchPathOnly compares only the path of DPoPProof.URL, and lets the
 	// proof's path carry extra leading segments — for a server behind a
 	// proxy, which cannot know the scheme, host or mount prefix its clients
@@ -390,6 +411,9 @@ func (v *DPoPVerifier) check(ctx context.Context, c Capability, token string, p 
 	iat := time.Unix(claims.IAT, 0)
 	if d := now().Sub(iat); d > window || d < -window {
 		return fmt.Errorf("%w: issued at %s, outside the %s window", ErrDPoPInvalid, iat.UTC(), window)
+	}
+	if v.Nonces != nil && !v.Nonces.Valid(ctx, claims.Nonce) {
+		return ErrDPoPNonceRequired
 	}
 	if v.Replay.Seen(ctx, claims.JTI, iat.Add(window)) {
 		return ErrDPoPReplayed

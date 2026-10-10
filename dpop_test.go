@@ -24,7 +24,7 @@ const (
 // issued at now.
 func withProof(t *testing.T, key crypto.Signer, token, audience string, now time.Time) VerifyRequest {
 	t.Helper()
-	proof, err := NewDPoPProof(key, dpopMethod, dpopURL, token, now)
+	proof, err := NewDPoPProof(key, DPoPProofRequest{Method: dpopMethod, URL: dpopURL, Token: token, Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestDPoPAcceptsAProofFromTheBoundKey(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			c := boundCap(t, key)
 			v := &DPoPVerifier{Replay: NewMemoryReplayCache(0), Now: func() time.Time { return now }}
-			proof, err := NewDPoPProof(key, "post", dpopURL+"?x=1", "the-token", now)
+			proof, err := NewDPoPProof(key, DPoPProofRequest{Method: "post", URL: dpopURL+"?x=1", Token: "the-token", Now: now})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -80,7 +80,7 @@ func TestDPoPRefusals(t *testing.T) {
 	key, other := keys["Ed25519"], keys["P-256"]
 	c := boundCap(t, key)
 	fresh := func(k crypto.Signer, method, url, token string, at time.Time) string {
-		p, err := NewDPoPProof(k, method, url, token, at)
+		p, err := NewDPoPProof(k, DPoPProofRequest{Method: method, URL: url, Token: token, Now: at})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -123,17 +123,17 @@ func TestDPoPPathOnlyIgnoresHostButNotPath(t *testing.T) {
 	key := dpopKeys(t)["Ed25519"]
 	c := boundCap(t, key)
 	v := &DPoPVerifier{Replay: NewMemoryReplayCache(0), Now: func() time.Time { return now }, MatchPathOnly: true}
-	proof, _ := NewDPoPProof(key, "POST", dpopURL, "tok", now)
+	proof, _ := NewDPoPProof(key, DPoPProofRequest{Method: "POST", URL: dpopURL, Token: "tok", Now: now})
 	req := DPoPProof{Proof: proof, Method: "POST", URL: "http://10.0.0.7:8080/example.data.v1.ObjectService/GetObject"}
 	if err := v.check(context.Background(), c, "tok", req); err != nil {
 		t.Fatalf("path-only match behind a proxy: %v", err)
 	}
-	proof, _ = NewDPoPProof(key, "POST", "https://gw.example.com/api/example.data.v1.ObjectService/GetObject", "tok", now)
+	proof, _ = NewDPoPProof(key, DPoPProofRequest{Method: "POST", URL: "https://gw.example.com/api/example.data.v1.ObjectService/GetObject", Token: "tok", Now: now})
 	req.Proof = proof
 	if err := v.check(context.Background(), c, "tok", req); err != nil {
 		t.Fatalf("path-only match behind a prefix-stripping proxy: %v", err)
 	}
-	proof, _ = NewDPoPProof(key, "POST", dpopURL, "tok", now)
+	proof, _ = NewDPoPProof(key, DPoPProofRequest{Method: "POST", URL: dpopURL, Token: "tok", Now: now})
 	req.Proof, req.URL = proof, "http://10.0.0.7:8080/example.data.v1.ObjectService/DeleteObject"
 	if err := v.check(context.Background(), c, "tok", req); !errors.Is(err, ErrDPoPInvalid) {
 		t.Fatalf("path-only with another path: err = %v, want ErrDPoPInvalid", err)
@@ -232,7 +232,7 @@ func TestDPoPProofFromAnOpaqueSigner(t *testing.T) {
 	for name, key := range dpopKeys(t) {
 		t.Run(name, func(t *testing.T) {
 			c := boundCap(t, key)
-			proof, err := NewDPoPProof(opaqueSigner{key}, "POST", dpopURL, "tok", now)
+			proof, err := NewDPoPProof(opaqueSigner{key}, DPoPProofRequest{Method: "POST", URL: dpopURL, Token: "tok", Now: now})
 			if err != nil {
 				t.Fatal(err)
 			}

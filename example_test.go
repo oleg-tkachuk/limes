@@ -233,7 +233,7 @@ func ExampleNewDPoPProof() {
 	fmt.Println(errors.Is(err, limes.ErrDPoPRequired))
 
 	// The client signs a fresh proof per request.
-	proof, _ := limes.NewDPoPProof(agentKey, method, url, token, time.Now())
+	proof, _ := limes.NewDPoPProof(agentKey, limes.DPoPProofRequest{Method: method, URL: url, Token: token, Now: time.Now()})
 	req := limes.VerifyRequest{
 		Token: token, Audience: exampleAudience,
 		DPoP: limes.DPoPProof{Proof: proof, Method: method, URL: url},

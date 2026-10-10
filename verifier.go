@@ -330,6 +330,16 @@ func (v *StandardVerifier) Verify(ctx context.Context, req VerifyRequest) (Capab
 	return *cap, nil
 }
 
+// DPoPNonce is the nonce to send in the DPoP-Nonce header — with a
+// response refused by ErrDPoPNonceRequired, and with any other for the
+// client's next proof. Empty when the verifier issues none.
+func (v *StandardVerifier) DPoPNonce(ctx context.Context) (string, error) {
+	if v.cfg.DPoP == nil || v.cfg.DPoP.Nonces == nil {
+		return "", nil
+	}
+	return v.cfg.DPoP.Nonces.Nonce(ctx)
+}
+
 // Authorize implements Verifier.
 func (v *StandardVerifier) Authorize(ctx context.Context, req AuthorizeRequest) (Capability, error) {
 	c, err := v.Verify(ctx, req.VerifyRequest)

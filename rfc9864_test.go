@@ -36,7 +36,7 @@ func TestWritesTheFullySpecifiedAlgorithm(t *testing.T) {
 	}
 
 	key := dpopKeys(t)["Ed25519"]
-	proof, err := NewDPoPProof(key, dpopMethod, dpopURL, token, time.Now())
+	proof, err := NewDPoPProof(key, DPoPProofRequest{Method: dpopMethod, URL: dpopURL, Token: token, Now: time.Now()})
 	if err != nil {
 		t.Fatal(err)
 	}
