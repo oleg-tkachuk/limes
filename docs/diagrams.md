@@ -33,7 +33,7 @@ flowchart LR
         cache["CachedRevocationChecker<br/>TTL · single-flight"]
         bcache["CachedBiscuitRevocationChecker<br/>TTL · per token"]
         attenuate["<b>Attenuate</b><br/>offline · no key"]
-        metering["MeteringStore[TX]<br/>WithMetering · OTel counters"]
+        metering["WithMetering<br/>OTel counters · WithMeterProvider"]
         static["StaticKeyResolver<br/>SetKey · RemoveKey"]
         remote["RemoteJWKSResolver<br/>ETag · MaxStale"]
         dpop["DPoPVerifier<br/>VerifierConfig.DPoP · NewDPoPProof"]

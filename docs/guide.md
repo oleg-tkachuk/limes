@@ -385,6 +385,23 @@ price that is not known yet is not a price of zero: hold the estimate and
 settle when it is known, or let the hold lapse and count against the ceilings
 until `ReleaseExpired` runs.
 
+## Observe the meter
+
+`WithMetering` wraps a `UsageStore` in OpenTelemetry instruments — charges,
+refunds, reservations and request bumps, each attempt by outcome (`allowed`,
+`overrun`, `cap_exceeded`, `tenant_exceeded`, `limit_exceeded`, `error`), and
+every amount by its `unit_code`:
+
+```go
+usage, err := limes.WithMetering(store,
+    limes.WithMeterProvider(provider), // default: the global provider
+    limes.WithTenantAttribute(),       // opt-in: one series per tenant
+)
+```
+
+A replayed charge or settle moved nothing and is not counted. `tenant_id` is
+off by default because it multiplies every series by the number of tenants.
+
 ## Check your own store
 
 Much of each contract lives in request fields and in which sentinel comes

@@ -96,7 +96,8 @@ type Meter[TX any] interface {
 	// remains, which makes a full refund idempotent; a partial refund that
 	// would take the total refunded past the charge returns
 	// ErrRefundExceedsCharge and changes nothing. An unknown charge ID
-	// returns ErrChargeNotFound. Returns the amount actually refunded.
+	// returns ErrChargeNotFound. The receipt carries the amount actually
+	// refunded.
 	//
 	// A charge counted in a tenant accounting period that has since been
 	// closed (SetTenantBudget with ResetSpend) is refunded to the
@@ -106,7 +107,7 @@ type Meter[TX any] interface {
 	// For a cost only known afterwards, prefer Reserve/Settle: a
 	// reservation lapses on its own if the caller never settles it, where
 	// an estimate charged up front stays charged.
-	Refund(ctx context.Context, req RefundRequest) (refunded Nanos, err error)
+	Refund(ctx context.Context, req RefundRequest) (RefundReceipt, error)
 
 	// Reserve holds req.Amount against the capability, each ancestor and
 	// the tenant aggregate, checking every ceiling against spend plus
@@ -318,6 +319,23 @@ type ChargeReceipt struct {
 	// Overrun reports that the charge crossed at least one ceiling, which
 	// only OverrunRecord allows.
 	Overrun bool
+	// TenantID and UnitCode are the charge's tenant and unit, so a caller
+	// holding only a receipt — of a Settle, say, whose request names only the
+	// reservation — can attribute it.
+	TenantID uuid.UUID
+	UnitCode string
+}
+
+// RefundReceipt is the result of Meter.Refund.
+type RefundReceipt struct {
+	// ChargeID is the charge refunded from.
+	ChargeID uuid.UUID
+	// Refunded is the amount this call returned; zero when nothing was
+	// left to refund.
+	Refunded Nanos
+	// TenantID and UnitCode are the charge's.
+	TenantID uuid.UUID
+	UnitCode string
 }
 
 // DefaultReservationTTL is how long a reservation lasts when the request

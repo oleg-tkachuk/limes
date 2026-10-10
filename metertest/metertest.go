@@ -452,8 +452,8 @@ func checkRefundAcrossReset[TX any](t *testing.T, f fixture[TX]) {
 	if _, err := f.charge(limes.ChargeRequest{Amount: amount}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if refunded, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: before.ChargeID}); err != nil || refunded != amount {
-		t.Fatalf("refund of the earlier period's charge = %v, %v; want %v", refunded, err, amount)
+	if r, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: before.ChargeID}); err != nil || r.Refunded != amount {
+		t.Fatalf("refund of the earlier period's charge = %+v, %v; want %v", r, err, amount)
 	}
 	if got := f.tenantSpent(t); got != amount {
 		t.Errorf("tenant spent %v in the new period, want %v: the refund came out of a period that never counted it", got, amount)
@@ -846,11 +846,15 @@ func checkRefund[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	refund := func(amount limes.Nanos) (limes.Nanos, error) {
+	if r.TenantID != f.Tenant || r.UnitCode != unit {
+		t.Errorf("charge receipt names tenant %s in %q, want %s in %q", r.TenantID, r.UnitCode, f.Tenant, unit)
+	}
+	refund := func(amount limes.Nanos) (limes.RefundReceipt, error) {
 		return f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: r.ChargeID, Amount: amount})
 	}
-	if got, err := refund(one); err != nil || got != one {
-		t.Fatalf("partial refund = %v, %v; want 1", got, err)
+	if got, err := refund(one); err != nil || got.Refunded != one || got.ChargeID != r.ChargeID ||
+		got.TenantID != f.Tenant || got.UnitCode != unit {
+		t.Fatalf("partial refund = %+v, %v; want 1 of charge %s, tenant %s in %q", got, err, r.ChargeID, f.Tenant, unit)
 	}
 	if _, err := refund(3 * one); !errors.Is(err, limes.ErrRefundExceedsCharge) {
 		t.Errorf("refunding past what is left: err = %v, want ErrRefundExceedsCharge", err)

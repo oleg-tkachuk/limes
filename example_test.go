@@ -312,8 +312,8 @@ func Example_charge() {
 	_, err = charge("999")
 	fmt.Println(errors.Is(err, limes.ErrBudgetExceeded))
 
-	refunded, err := s.usage.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID})
-	fmt.Println(err, refunded)
+	refund, err := s.usage.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID})
+	fmt.Println(err, refund.Refunded)
 	// Output:
 	// <nil> 0.35
 	// true

@@ -608,7 +608,7 @@ func (s *UsageStore[TX]) appendLocked(entry LedgerEntry) {
 func (s *UsageStore[TX]) replayLocked(e LedgerEntry) limes.ChargeReceipt {
 	return limes.ChargeReceipt{
 		ChargeID: e.ID, Spent: s.usage[e.CapabilityID].SpentAmount,
-		Replayed: true, Overrun: e.Overrun,
+		Replayed: true, Overrun: e.Overrun, TenantID: e.TenantID, UnitCode: e.UnitCode,
 	}
 }
 
@@ -710,7 +710,9 @@ func (s *UsageStore[TX]) chargeLocked(
 		tenantPeriod: s.periods[req.TenantID],
 	}
 	s.appendLocked(entry)
-	return limes.ChargeReceipt{ChargeID: entry.ID, Spent: stagedSpent, Overrun: overrun}, nil
+	return limes.ChargeReceipt{
+		ChargeID: entry.ID, Spent: stagedSpent, Overrun: overrun, TenantID: req.TenantID, UnitCode: unit,
+	}, nil
 }
 
 // tenantLocked returns the tenant's aggregate row, or a new one without a
@@ -1010,29 +1012,30 @@ func (s *UsageStore[TX]) ReleaseExpired(_ context.Context) (int64, error) {
 }
 
 // Refund returns spend from one ledger entry to the counters it debited.
-func (s *UsageStore[TX]) Refund(_ context.Context, req limes.RefundRequest) (limes.Nanos, error) {
+func (s *UsageStore[TX]) Refund(_ context.Context, req limes.RefundRequest) (limes.RefundReceipt, error) {
 	if err := limes.ValidateAmount(req.Amount); err != nil {
-		return 0, err
+		return limes.RefundReceipt{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	i, ok := s.byCharge[req.ChargeID]
 	if !ok {
-		return 0, limes.ErrChargeNotFound
+		return limes.RefundReceipt{}, limes.ErrChargeNotFound
 	}
 	e := &s.ledger[i]
+	receipt := limes.RefundReceipt{ChargeID: e.ID, TenantID: e.TenantID, UnitCode: e.UnitCode}
 	remaining := e.Amount - e.Refunded
 	amount := req.Amount
 	if amount == 0 {
 		amount = remaining
 	}
 	if amount > remaining {
-		return 0, fmt.Errorf("%w: %v requested, %v of %v left",
+		return limes.RefundReceipt{}, fmt.Errorf("%w: %v requested, %v of %v left",
 			limes.ErrRefundExceedsCharge, amount, remaining, e.Amount)
 	}
 	if amount == 0 {
-		return 0, nil
+		return receipt, nil
 	}
 	for _, id := range append([]uuid.UUID{e.CapabilityID}, e.Ancestors...) {
 		if u, ok := s.usage[id]; ok {
@@ -1054,7 +1057,8 @@ func (s *UsageStore[TX]) Refund(_ context.Context, req limes.RefundRequest) (lim
 		}
 	}
 	e.Refunded += amount
-	return amount, nil
+	receipt.Refunded = amount
+	return receipt, nil
 }
 
 func (s *UsageStore[TX]) GetUsage(_ context.Context, capID uuid.UUID) (limes.Usage, error) {

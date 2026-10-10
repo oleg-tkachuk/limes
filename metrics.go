@@ -2,7 +2,8 @@ package limes
 
 import (
 	"context"
-	"sync"
+	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
@@ -10,123 +11,173 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-// OpenTelemetry instruments for the capability runtime counters,
-// created lazily so a consumer that never wires a MeterProvider (tests,
-// sidecar tools) does not pay for instrument creation.
+// OpenTelemetry instruments of a metered UsageStore (WithMetering).
 //
 // Cardinality:
 //
-//   - tenant_id is the only high-cardinality label. Capability id is
-//     deliberately omitted — a deployment with thousands of capabilities
-//     would blow the exporter's series count.
-//   - unit_code is bounded by ISO 4217 (IsUnitCode). Amounts are
-//     only meaningful per unit: summing USD and EUR is not a number, so
-//     every amount instrument carries the unit as an attribute and has
-//     no fixed metric unit of its own.
-//   - outcome is a bounded enum: allowed / cap_exceeded / tenant_exceeded
-//     for charges, allowed / limit_exceeded for request bumps.
-var (
-	capMetricsOnce sync.Once
+//   - tenant_id is the one unbounded attribute, so it is opt-in
+//     (WithTenantAttribute): a deployment with many tenants multiplies every
+//     series by their number. Capability id is never an attribute.
+//   - unit_code is bounded by ISO 4217 (IsUnitCode). Amounts are only
+//     meaningful per unit: summing USD and EUR is not a number, so every
+//     amount carries its unit and no instrument has a fixed unit of its own.
+//   - outcome is one of the outcome* constants below.
 
-	capChargeAmount    metric.Float64Counter   // total charged, by tenant + unit
-	capChargeDecisions metric.Int64Counter     // allow/deny per attempt
-	capRequestBumps    metric.Int64Counter     // allow/deny per attempt
-	capRefundAmount    metric.Float64Counter   // total refunded
-	capReservations    metric.Int64Counter     // allow/deny per reservation
-	capCurrentSpend    metric.Float64Histogram // distribution of post-charge spend
+// instrumentationScope names the meter the instruments are created on.
+const instrumentationScope = "github.com/oleg-tkachuk/limes"
+
+// Instrument names, as an exporter shows them.
+const (
+	metricChargeAmount    = "limes.charge.amount"
+	metricChargeDecisions = "limes.charge.decisions"
+	metricRequestBumps    = "limes.request.bumps"
+	metricRefundAmount    = "limes.refund.amount"
+	metricReservations    = "limes.reservation.decisions"
+	metricCurrentSpend    = "limes.charge.current_spend"
 )
 
-func initMetrics() {
-	capMetricsOnce.Do(func() {
-		meter := otel.Meter("github.com/oleg-tkachuk/limes")
+// Attribute keys.
+const (
+	attrOutcome  = "outcome"
+	attrTenantID = "tenant_id"
+	attrUnitCode = "unit_code"
+)
 
-		capChargeAmount, _ = meter.Float64Counter(
-			"limes.charge.amount",
-			metric.WithDescription("Cumulative amount charged against capability budgets, by tenant and unit_code."),
-		)
-		capChargeDecisions, _ = meter.Int64Counter(
-			"limes.charge.decisions",
-			metric.WithDescription("Charge attempts bucketed by outcome: allowed / cap_exceeded / tenant_exceeded."),
-		)
-		capRequestBumps, _ = meter.Int64Counter(
-			"limes.request.bumps",
-			metric.WithDescription("Per-capability request-count bumps, bucketed by outcome: allowed / limit_exceeded."),
-		)
-		capRefundAmount, _ = meter.Float64Counter(
-			"limes.refund.amount",
-			metric.WithDescription("Cumulative amount refunded from recorded charges."),
-		)
-		capReservations, _ = meter.Int64Counter(
-			"limes.reservation.decisions",
-			metric.WithDescription("Reservation attempts bucketed by outcome: allowed / cap_exceeded / tenant_exceeded."),
-		)
-		capCurrentSpend, _ = meter.Float64Histogram(
-			"limes.charge.current_spend",
-			metric.WithDescription("Per-capability spend after each successful charge, by tenant and unit_code."),
-		)
-	})
+// Outcomes of a metered call.
+const (
+	// outcomeAllowed — every ceiling admitted it.
+	outcomeAllowed = "allowed"
+	// outcomeOverrun — committed past a ceiling under OverrunRecord.
+	outcomeOverrun = "overrun"
+	// outcomeCapExceeded — a capability's, an ancestor's or a copy's ceiling
+	// refused it.
+	outcomeCapExceeded = "cap_exceeded"
+	// outcomeTenantExceeded — the tenant aggregate refused it.
+	outcomeTenantExceeded = "tenant_exceeded"
+	// outcomeLimitExceeded — a request limit refused a Bump.
+	outcomeLimitExceeded = "limit_exceeded"
+	// outcomeError — it failed for any other reason: a malformed request, a
+	// failed onCharged, a store error.
+	outcomeError = "error"
+)
+
+// MeteringOption configures WithMetering.
+type MeteringOption func(*meteringConfig)
+
+type meteringConfig struct {
+	provider metric.MeterProvider
+	tenant   bool
 }
 
-func tenantAttrs(tenantID uuid.UUID, attrs ...attribute.KeyValue) []attribute.KeyValue {
-	if tenantID != uuid.Nil {
-		attrs = append(attrs, attribute.String("tenant_id", tenantID.String()))
-	}
-	return attrs
+// WithMeterProvider creates the instruments on p rather than on the global
+// provider (otel.GetMeterProvider).
+func WithMeterProvider(p metric.MeterProvider) MeteringOption {
+	return func(c *meteringConfig) { c.provider = p }
 }
 
-// recordChargeAttempt is called once per Charge regardless of outcome. The
-// instruments count units as float64, the metrics contract; the amounts are
-// exact up to that boundary.
-func recordChargeAttempt(ctx context.Context, tenantID uuid.UUID, unit string, amount, postSpend Nanos, outcome string) {
-	initMetrics()
-	if capChargeDecisions == nil {
-		return
+// WithTenantAttribute labels every measurement with tenant_id. Off by
+// default: it multiplies each series by the number of tenants.
+func WithTenantAttribute() MeteringOption {
+	return func(c *meteringConfig) { c.tenant = true }
+}
+
+// meteringInstruments are one metered store's instruments.
+type meteringInstruments struct {
+	tenant bool
+
+	chargeAmount    metric.Float64Counter   // total charged, by unit
+	chargeDecisions metric.Int64Counter     // charge attempts, by outcome
+	requestBumps    metric.Int64Counter     // bump attempts, by outcome
+	refundAmount    metric.Float64Counter   // total refunded, by unit
+	reservations    metric.Int64Counter     // reservation attempts, by outcome
+	currentSpend    metric.Float64Histogram // capability spend after each charge
+}
+
+func newMeteringInstruments(cfg meteringConfig) (*meteringInstruments, error) {
+	provider := cfg.provider
+	if provider == nil {
+		provider = otel.GetMeterProvider()
 	}
-	capChargeDecisions.Add(ctx, 1, metric.WithAttributes(
-		tenantAttrs(tenantID, attribute.String("outcome", outcome))...))
-	if outcome != "allowed" {
-		return
+	meter := provider.Meter(instrumentationScope)
+	in := &meteringInstruments{tenant: cfg.tenant}
+	var errs [6]error
+	in.chargeAmount, errs[0] = meter.Float64Counter(metricChargeAmount,
+		metric.WithDescription("Amount charged against capability budgets, by unit_code."))
+	in.chargeDecisions, errs[1] = meter.Int64Counter(metricChargeDecisions,
+		metric.WithDescription("Charge and settle attempts, by outcome."))
+	in.requestBumps, errs[2] = meter.Int64Counter(metricRequestBumps,
+		metric.WithDescription("Request-count bumps, by outcome."))
+	in.refundAmount, errs[3] = meter.Float64Counter(metricRefundAmount,
+		metric.WithDescription("Amount refunded from recorded charges, by unit_code."))
+	in.reservations, errs[4] = meter.Int64Counter(metricReservations,
+		metric.WithDescription("Reservation attempts, by outcome."))
+	in.currentSpend, errs[5] = meter.Float64Histogram(metricCurrentSpend,
+		metric.WithDescription("A capability's spend after each charge, by unit_code."))
+	if err := errors.Join(errs[:]...); err != nil {
+		return nil, fmt.Errorf("limes: metering instruments: %w", err)
 	}
-	var amountOpts []attribute.KeyValue
-	if unit != "" {
-		amountOpts = append(amountOpts, attribute.String("unit_code", unit))
+	return in, nil
+}
+
+// attrs is the attribute set of one measurement: the tenant when enabled,
+// then kv.
+func (in *meteringInstruments) attrs(tenantID uuid.UUID, kv ...attribute.KeyValue) metric.MeasurementOption {
+	if in.tenant && tenantID != uuid.Nil {
+		kv = append(kv, attribute.String(attrTenantID, tenantID.String()))
 	}
-	amountAttrs := metric.WithAttributes(tenantAttrs(tenantID, amountOpts...)...)
-	if capChargeAmount != nil {
-		capChargeAmount.Add(ctx, amount.Float64(), amountAttrs)
-	}
-	if capCurrentSpend != nil {
-		capCurrentSpend.Record(ctx, postSpend.Float64(), amountAttrs)
+	return metric.WithAttributes(kv...)
+}
+
+// chargeOutcome classifies a charge or settle that was not replayed.
+func chargeOutcome(receipt ChargeReceipt, err error) string {
+	switch {
+	case err == nil && receipt.Overrun:
+		return outcomeOverrun
+	case err == nil:
+		return outcomeAllowed
+	case errors.Is(err, ErrTenantBudgetExceeded):
+		return outcomeTenantExceeded
+	case errors.Is(err, ErrBudgetExceeded):
+		return outcomeCapExceeded
+	default:
+		return outcomeError
 	}
 }
 
-// recordRequestBump is called once per Bump regardless of outcome.
-func recordRequestBump(ctx context.Context, tenantID uuid.UUID, outcome string) {
-	initMetrics()
-	if capRequestBumps == nil {
+// recordCharge counts one charge or settle attempt and, when it committed,
+// its amount and the capability's spend after it, in the receipt's unit. The
+// instruments count float64, the metrics contract; amounts are exact up to
+// that boundary.
+func (in *meteringInstruments) recordCharge(ctx context.Context, tenantID uuid.UUID, amount Nanos, receipt ChargeReceipt, err error) {
+	outcome := chargeOutcome(receipt, err)
+	in.chargeDecisions.Add(ctx, 1, in.attrs(tenantID, attribute.String(attrOutcome, outcome)))
+	if err != nil {
 		return
 	}
-	capRequestBumps.Add(ctx, 1, metric.WithAttributes(
-		tenantAttrs(tenantID, attribute.String("outcome", outcome))...))
+	unit := in.attrs(receipt.TenantID, attribute.String(attrUnitCode, receipt.UnitCode))
+	in.chargeAmount.Add(ctx, amount.Float64(), unit)
+	in.currentSpend.Record(ctx, receipt.Spent.Float64(), unit)
 }
 
-// recordRefund is called once per committed refund. The refund request names
-// only the charge, so neither tenant nor unit is known here without a lookup
-// this decorator deliberately does not make.
-func recordRefund(ctx context.Context, amount Nanos) {
-	initMetrics()
-	if capRefundAmount == nil {
-		return
+// recordBump counts one Bump attempt.
+func (in *meteringInstruments) recordBump(ctx context.Context, tenantID uuid.UUID, err error) {
+	outcome := outcomeAllowed
+	switch {
+	case errors.Is(err, ErrRequestLimitExceeded):
+		outcome = outcomeLimitExceeded
+	case err != nil:
+		outcome = outcomeError
 	}
-	capRefundAmount.Add(ctx, amount.Float64())
+	in.requestBumps.Add(ctx, 1, in.attrs(tenantID, attribute.String(attrOutcome, outcome)))
 }
 
-// recordReservation is called once per Reserve regardless of outcome.
-func recordReservation(ctx context.Context, tenantID uuid.UUID, outcome string) {
-	initMetrics()
-	if capReservations == nil {
-		return
-	}
-	capReservations.Add(ctx, 1, metric.WithAttributes(
-		tenantAttrs(tenantID, attribute.String("outcome", outcome))...))
+// recordRefund counts one committed refund, in the charge's unit.
+func (in *meteringInstruments) recordRefund(ctx context.Context, r RefundReceipt) {
+	in.refundAmount.Add(ctx, r.Refunded.Float64(), in.attrs(r.TenantID, attribute.String(attrUnitCode, r.UnitCode)))
+}
+
+// recordReservation counts one Reserve attempt.
+func (in *meteringInstruments) recordReservation(ctx context.Context, tenantID uuid.UUID, err error) {
+	outcome := chargeOutcome(ChargeReceipt{}, err)
+	in.reservations.Add(ctx, 1, in.attrs(tenantID, attribute.String(attrOutcome, outcome)))
 }
