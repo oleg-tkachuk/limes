@@ -93,6 +93,26 @@ type jwtClaims struct {
 	BiscuitRoot string `json:"limes_bsk,omitempty"`
 }
 
+// MaxIJSONInteger is the largest integer a token carries: 2^53 − 1, the
+// largest an IEEE 754 double holds exactly. RFC 7493 (I-JSON) §2.2 keeps
+// numbers within it so that every JSON reader — JavaScript's among them —
+// reads the same value; larger amounts travel as decimal strings (Nanos).
+const MaxIJSONInteger = 1<<53 - 1
+
+// checkIJSONIntegers refuses claims whose integers lie outside what I-JSON
+// lets a reader rely on.
+func checkIJSONIntegers(c jwtClaims) error {
+	for name, n := range map[string]int64{
+		"iat": c.IssuedAt, "nbf": c.NotBefore, "exp": c.ExpiresAt,
+		"limes_gen": c.Generation, "max_requests": c.Caveats.MaxRequests,
+	} {
+		if n < -MaxIJSONInteger || n > MaxIJSONInteger {
+			return fmt.Errorf("limes: %s %d is outside the I-JSON integer range (RFC 7493)", name, n)
+		}
+	}
+	return nil
+}
+
 // strictClaims is how a token's header and claims are read. Unknown members
 // are refused, not skipped: a caveat this verifier does not know is one it
 // cannot enforce, and must not pass as one it did. Duplicate names are
@@ -218,6 +238,9 @@ func parseClaims(seg string) (*Capability, error) {
 	var claims jwtClaims
 	if err := json.Unmarshal(raw, &claims, strictClaims); err != nil {
 		return nil, fmt.Errorf("limes: parse claims: %w", err)
+	}
+	if err := checkIJSONIntegers(claims); err != nil {
+		return nil, err
 	}
 	// sub repeats the principal for JWT tooling; two subjects would be read
 	// differently by a parser that takes one and a parser that takes the other.

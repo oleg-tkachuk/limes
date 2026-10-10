@@ -118,8 +118,8 @@ func (i *Issuer) Issue(ctx context.Context, req IssueRequest) (Capability, strin
 	if req.IssuedBy.Subject == "" {
 		return Capability{}, "", invalidRequest("IssuedBy is required")
 	}
-	if req.Generation < 0 {
-		return Capability{}, "", invalidRequest("Generation %d is negative", req.Generation)
+	if req.Generation < 0 || req.Generation > MaxIJSONInteger {
+		return Capability{}, "", invalidRequest("Generation %d is outside 0..%d", req.Generation, MaxIJSONInteger)
 	}
 	if err := validateAudience(req.Audience); err != nil {
 		return Capability{}, "", err

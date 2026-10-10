@@ -83,8 +83,8 @@ func (c Caveats) Validate() error {
 			return err
 		}
 	}
-	if c.MaxRequests < 0 {
-		return fmt.Errorf("%w: max_requests %d is negative", ErrInvalidCaveats, c.MaxRequests)
+	if c.MaxRequests < 0 || c.MaxRequests > MaxIJSONInteger {
+		return fmt.Errorf("%w: max_requests %d is outside 0..%d", ErrInvalidCaveats, c.MaxRequests, MaxIJSONInteger)
 	}
 	if c.MaxBudgetAmount < 0 || c.MaxBudgetAmount > MaxNanos {
 		return fmt.Errorf("%w: max_budget_amount %s is outside 0..%s",
