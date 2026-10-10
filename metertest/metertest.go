@@ -9,9 +9,12 @@
 //	}
 //
 // The checks cover what a charge does at its ceilings and when it arrives
-// again: rejection that moves nothing, idempotency on ExternalRef and on a
-// settled reservation, ChargeByRef, OverrunRecord past every ceiling, and the
-// validation of the request. They need a real ledger, not a fake.
+// again: rejection that moves nothing — by the capability's, an ancestor's or
+// the tenant's ceiling, by a failed onCharged, under concurrent charges —
+// idempotency on ExternalRef and on a settled reservation, ChargeByRef,
+// OverrunRecord past every ceiling, refunds, holds and their expiry, request
+// counts, units, the tenant aggregate and its listing, and the validation of
+// the request. They need a real ledger, not a fake.
 package metertest
 
 import (
@@ -21,6 +24,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -42,6 +46,9 @@ type Env[TX any] struct {
 	// (uuid.Nil for a root) and budget, so the Meter finds its lineage and
 	// its ceiling, and returns its id.
 	NewCapability func(parent uuid.UUID, maxBudget limes.Nanos) (uuid.UUID, error)
+	// Advance moves the store's clock forward by d. Optional: without it,
+	// the checks of reservation expiry are skipped.
+	Advance func(d time.Duration)
 }
 
 // The ceilings every check works under: a root, a child narrower than it,
@@ -136,6 +143,15 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"RefundOfAClosedPeriodLeavesTheTenantPeriod", checkRefundAcrossReset[TX]},
 		{"EveryCounterKeepsOneUnit", checkOneUnit[TX]},
 		{"DeleteReleasesHolds", checkDeleteReleasesHolds[TX]},
+		{"ConcurrentChargesKeepTheCeiling", checkConcurrentCeiling[TX]},
+		{"AnAncestorCeilingBoundsItsChildren", checkAncestorCeiling[TX]},
+		{"TheTenantCeilingBoundsEveryCapability", checkTenantCeiling[TX]},
+		{"AFailedCallbackMovesNothing", checkCallbackRollback[TX]},
+		{"BumpCountsTheChain", checkBump[TX]},
+		{"RefundReturnsToEveryCounter", checkRefund[TX]},
+		{"AHoldCountsAgainstCharges", checkHoldBlocksCharge[TX]},
+		{"AnExpiredHoldIsReleased", checkExpiry[TX]},
+		{"ListTenantBudgetsPagesMostAtRiskFirst", checkListTenantBudgets[TX]},
 		{"OverrunRecordCrossesACopyBudget", checkCopyOverrun[TX]},
 		{"TenantBudgetReadsAgree", checkTenantBudgetReads[TX]},
 		{"ReservationsReadBack", checkReservations[TX]},
@@ -691,5 +707,259 @@ func checkSumsExactly[TX any](t *testing.T, f fixture[TX]) {
 	}
 	if got := f.spent(t, f.root); got != 7*tenth {
 		t.Errorf("seven tenths spent as %s", got)
+	}
+}
+
+// checkConcurrentCeiling holds a store to checking and moving a ceiling as
+// one step: charges racing to the last of a budget must not all see room for
+// themselves. A read-then-write without a lock is the bug this catches.
+func checkConcurrentCeiling[TX any](t *testing.T, f fixture[TX]) {
+	var (
+		wg       sync.WaitGroup
+		accepted atomic.Int64
+	)
+	for range concurrentDeliveries {
+		wg.Go(func() {
+			_, err := f.charge(limes.ChargeRequest{Amount: 2 * one}, nil)
+			switch {
+			case err == nil:
+				accepted.Add(1)
+			case !errors.Is(err, limes.ErrBudgetExceeded):
+				t.Errorf("charge: %v", err)
+			}
+		})
+	}
+	wg.Wait()
+	// 20 fits ten charges of 2, and twenty arrive.
+	if got, want := accepted.Load(), int64(childBudget/(2*one)); got != want {
+		t.Errorf("%d charges of 2 accepted under a ceiling of 20, want %d", got, want)
+	}
+	if got := f.spent(t, f.child); got != childBudget {
+		t.Errorf("child spent %v, want exactly its ceiling %v", got, childBudget)
+	}
+}
+
+// checkAncestorCeiling holds a store to reading each ancestor's ceiling from
+// its record: two children each within their own budget must not sum past
+// their parent's.
+func checkAncestorCeiling[TX any](t *testing.T, f fixture[TX]) {
+	sibling, err := f.NewCapability(f.root, childBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.charge(limes.ChargeRequest{Amount: 15 * one}, nil); err != nil {
+		t.Fatal(err)
+	}
+	// 15 + 15 is within each child's 20, past the root's 25.
+	_, err = f.charge(limes.ChargeRequest{CapabilityID: sibling, Amount: 15 * one}, nil)
+	if !errors.Is(err, limes.ErrBudgetExceeded) {
+		t.Fatalf("a sibling's charge past the root's ceiling: err = %v, want ErrBudgetExceeded", err)
+	}
+	if f.spent(t, sibling) != 0 || f.spent(t, f.root) != 15*one {
+		t.Error("a charge refused by an ancestor's ceiling moved spend")
+	}
+}
+
+// checkTenantCeiling holds a store to the tenant aggregate: capabilities each
+// within their own budgets must not sum past the tenant's.
+func checkTenantCeiling[TX any](t *testing.T, f fixture[TX]) {
+	other, err := f.NewCapability(uuid.Nil, rootBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.charge(limes.ChargeRequest{CapabilityID: f.root, MaxBudget: rootBudget, Amount: 20 * one}, nil); err != nil {
+		t.Fatal(err)
+	}
+	// 20 + 20 is within each root's 25, past the tenant's 30.
+	_, err = f.charge(limes.ChargeRequest{CapabilityID: other, MaxBudget: rootBudget, Amount: 20 * one}, nil)
+	if !errors.Is(err, limes.ErrTenantBudgetExceeded) {
+		t.Fatalf("a charge past the tenant's ceiling: err = %v, want ErrTenantBudgetExceeded", err)
+	}
+	if f.spent(t, other) != 0 || f.tenantSpent(t) != 20*one {
+		t.Error("a charge refused by the tenant's ceiling moved spend")
+	}
+}
+
+// checkCallbackRollback holds a store to the atomicity of onCharged: its
+// error is returned as it is, and no counter, ledger row or ExternalRef
+// survives it.
+func checkCallbackRollback[TX any](t *testing.T, f fixture[TX]) {
+	boom := errors.New("side effect failed")
+	if _, err := f.charge(limes.ChargeRequest{Amount: one, ExternalRef: "call-1"}, func(context.Context, TX) error { return boom }); !errors.Is(err, boom) {
+		t.Fatalf("charge with a failing callback: err = %v, want the callback's", err)
+	}
+	if f.spent(t, f.child) != 0 || f.spent(t, f.root) != 0 || f.tenantSpent(t) != 0 {
+		t.Error("a charge whose callback failed moved spend")
+	}
+	if _, err := f.Usage.ChargeByRef(f.Ctx, f.child, "call-1"); !errors.Is(err, limes.ErrChargeNotFound) {
+		t.Errorf("the failed charge's ref: err = %v, want ErrChargeNotFound", err)
+	}
+	// The ref is free again: a retry charges.
+	if r, err := f.charge(limes.ChargeRequest{Amount: one, ExternalRef: "call-1"}, nil); err != nil || r.Replayed {
+		t.Errorf("the retry = %+v, %v; want a fresh charge", r, err)
+	}
+
+	res, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
+		CapabilityID: f.child, TenantID: f.Tenant, Amount: 2 * one, MaxBudget: childBudget, UnitCode: unit,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{ReservationID: res.ID, Amount: 2 * one, MaxBudget: childBudget},
+		func(context.Context, TX) error { return boom }); !errors.Is(err, boom) {
+		t.Fatalf("settle with a failing callback: err = %v, want the callback's", err)
+	}
+	if _, err := f.Usage.GetReservation(f.Ctx, res.ID); err != nil {
+		t.Errorf("the reservation after a failed settle: %v; want it still open", err)
+	}
+	if got := f.spent(t, f.child); got != one {
+		t.Errorf("child spent %v after a failed settle, want 1", got)
+	}
+}
+
+// checkBump holds a store to counting requests on the capability and every
+// ancestor, and to refusing past the capability's own limit without counting.
+func checkBump[TX any](t *testing.T, f fixture[TX]) {
+	const limit = 2
+	bump := func() (int64, error) {
+		return f.Usage.Bump(f.Ctx, limes.BumpRequest{CapabilityID: f.child, TenantID: f.Tenant, MaxRequests: limit})
+	}
+	for want := int64(1); want <= limit; want++ {
+		if n, err := bump(); err != nil || n != want {
+			t.Fatalf("bump = %d, %v; want %d", n, err, want)
+		}
+	}
+	if _, err := bump(); !errors.Is(err, limes.ErrRequestLimitExceeded) {
+		t.Fatalf("a bump past the limit: err = %v, want ErrRequestLimitExceeded", err)
+	}
+	for _, id := range []uuid.UUID{f.child, f.root} {
+		if u, err := f.Usage.GetUsage(f.Ctx, id); err != nil || u.RequestCount != limit {
+			t.Errorf("requests of %s = %+v, %v; want %d", id, u, err, limit)
+		}
+	}
+}
+
+// checkRefund holds a store to the Refund contract: back to every counter
+// the charge moved, never past what it took, and a full refund idempotent.
+func checkRefund[TX any](t *testing.T, f fixture[TX]) {
+	r, err := f.charge(limes.ChargeRequest{Amount: 3 * one}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refund := func(amount limes.Nanos) (limes.Nanos, error) {
+		return f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: r.ChargeID, Amount: amount})
+	}
+	if got, err := refund(one); err != nil || got != one {
+		t.Fatalf("partial refund = %v, %v; want 1", got, err)
+	}
+	if _, err := refund(3 * one); !errors.Is(err, limes.ErrRefundExceedsCharge) {
+		t.Errorf("refunding past what is left: err = %v, want ErrRefundExceedsCharge", err)
+	}
+	for range 2 { // the rest, then nothing: a full refund is idempotent
+		if _, err := refund(0); err != nil {
+			t.Fatalf("full refund: %v", err)
+		}
+	}
+	if f.spent(t, f.child) != 0 || f.spent(t, f.root) != 0 || f.tenantSpent(t) != 0 {
+		t.Error("a full refund left spend on a counter the charge moved")
+	}
+	if _, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: uuid.New()}); !errors.Is(err, limes.ErrChargeNotFound) {
+		t.Errorf("refund of an unknown charge: err = %v, want ErrChargeNotFound", err)
+	}
+}
+
+// checkHoldBlocksCharge holds a store to counting holds against charges as
+// spend is counted.
+func checkHoldBlocksCharge[TX any](t *testing.T, f fixture[TX]) {
+	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
+		CapabilityID: f.child, TenantID: f.Tenant, Amount: 15 * one, MaxBudget: childBudget, UnitCode: unit,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.charge(limes.ChargeRequest{Amount: 10 * one}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
+		t.Errorf("a charge past the ceiling with the hold: err = %v, want ErrBudgetExceeded", err)
+	}
+	if _, err := f.charge(limes.ChargeRequest{Amount: 5 * one}, nil); err != nil {
+		t.Errorf("a charge within the ceiling with the hold: %v", err)
+	}
+}
+
+// checkExpiry holds a store to letting a reservation lapse: past its TTL it
+// cannot be settled, still counts until ReleaseExpired runs, and then does not.
+func checkExpiry[TX any](t *testing.T, f fixture[TX]) {
+	if f.Advance == nil {
+		t.Skip("Env.Advance is not set")
+	}
+	const ttl = time.Minute
+	res, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
+		CapabilityID: f.child, TenantID: f.Tenant, Amount: 15 * one, MaxBudget: childBudget, UnitCode: unit, TTL: ttl,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Advance(2 * ttl)
+	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{ReservationID: res.ID, Amount: one, MaxBudget: childBudget}, nil); !errors.Is(err, limes.ErrReservationNotFound) {
+		t.Errorf("settling an expired reservation: err = %v, want ErrReservationNotFound", err)
+	}
+	if _, err := f.charge(limes.ChargeRequest{Amount: 10 * one}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
+		t.Errorf("before ReleaseExpired the hold still counts: err = %v, want ErrBudgetExceeded", err)
+	}
+	if n, err := f.Usage.ReleaseExpired(f.Ctx); err != nil || n != 1 {
+		t.Fatalf("ReleaseExpired = %d, %v; want 1", n, err)
+	}
+	if _, err := f.charge(limes.ChargeRequest{Amount: 10 * one}, nil); err != nil {
+		t.Errorf("after ReleaseExpired: %v", err)
+	}
+}
+
+// checkListTenantBudgets holds a store to ListTenantBudgets' order, filters
+// and paging: most at risk first, then by tenant id, a page at a time.
+func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
+	// The fixture's tenant has a ceiling of 30 and nothing spent; three more
+	// have ceilings, and one of them is unlimited.
+	if _, err := f.charge(limes.ChargeRequest{CapabilityID: f.root, MaxBudget: rootBudget, Amount: 15 * one}, nil); err != nil {
+		t.Fatal(err)
+	}
+	unlimited := uuid.New()
+	if _, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{TenantID: unlimited, UnitCode: unit}); err != nil {
+		t.Fatal(err)
+	}
+	all := map[uuid.UUID]bool{}
+	var order []limes.TenantBudgetSummary
+	cursor := ""
+	for {
+		page, next, err := f.Usage.ListTenantBudgets(f.Ctx, limes.ListTenantBudgetsRequest{Limit: 1, Cursor: cursor})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page) > 1 {
+			t.Fatalf("a page of %d rows under a limit of 1", len(page))
+		}
+		for _, row := range page {
+			all[row.TenantID] = true
+			order = append(order, row)
+		}
+		if next == "" {
+			break
+		}
+		cursor = next
+	}
+	if !all[f.Tenant] || !all[unlimited] {
+		t.Fatalf("paging skipped a tenant: %v", all)
+	}
+	for i := 1; i < len(order); i++ {
+		if order[i].UtilisationPct > order[i-1].UtilisationPct {
+			t.Errorf("row %d at %v%% follows one at %v%%; want most at risk first", i, order[i].UtilisationPct, order[i-1].UtilisationPct)
+		}
+	}
+	const half = 50
+	risky, _, err := f.Usage.ListTenantBudgets(f.Ctx, limes.ListTenantBudgetsRequest{ThresholdPct: half})
+	if err != nil || len(risky) != 1 || risky[0].TenantID != f.Tenant || risky[0].UtilisationPct != half {
+		t.Errorf("tenants at 50%% or more = %+v, %v; want only %s at 50%%", risky, err, f.Tenant)
+	}
+	unl, _, err := f.Usage.ListTenantBudgets(f.Ctx, limes.ListTenantBudgetsRequest{UnlimitedOnly: true})
+	if err != nil || slices.ContainsFunc(unl, func(s limes.TenantBudgetSummary) bool { return s.TenantID == f.Tenant }) ||
+		!slices.ContainsFunc(unl, func(s limes.TenantBudgetSummary) bool { return s.TenantID == unlimited }) {
+		t.Errorf("unlimited tenants = %+v, %v; want %s and not %s", unl, err, unlimited, f.Tenant)
 	}
 }
