@@ -198,7 +198,9 @@ const (
 )
 
 func (r *RemoteJWKSResolver) fetch(ctx context.Context, etag string) (keys map[string]ed25519.PublicKey, newETag string, header http.Header, notModified bool, err error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.cfg.URL, nil)
+	// The URL is the operator's configuration, or a jwks_uri DiscoverIssuer
+	// read from the issuer it was pointed at and held to https.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.cfg.URL, nil) //nolint:gosec // G704: see above
 	if err != nil {
 		return nil, "", nil, false, err
 	}
@@ -206,7 +208,7 @@ func (r *RemoteJWKSResolver) fetch(ctx context.Context, etag string) (keys map[s
 	if etag != "" {
 		req.Header.Set("If-None-Match", etag)
 	}
-	resp, err := r.cfg.Client.Do(req)
+	resp, err := r.cfg.Client.Do(req) //nolint:gosec // G704: the configured URL
 	if err != nil {
 		return nil, "", nil, false, err
 	}
