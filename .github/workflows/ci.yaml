@@ -161,7 +161,7 @@ jobs:
 
       - name: Install the release tooling
         working-directory: .github/release
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Set up Task
         uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
