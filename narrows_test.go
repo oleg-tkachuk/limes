@@ -24,6 +24,12 @@ func TestMatchResourceRespectsSegmentBoundaries(t *testing.T) {
 		{"corpus/public/", "corpus/public", false},
 		{"object://t/c/", "object://t/c/k", true},
 		{"", "anything", false},
+		// A dot segment names a place only a resolver can tell: never a match.
+		{"corpus/public", "corpus/public/../private/secret", false},
+		{"corpus/public", "corpus/public/./x", false},
+		{"corpus/public", "corpus/public/%2e%2E/private", false},
+		{"corpus/public", "corpus/public/..", false},
+		{"corpus/public", "corpus/public/..x", true},
 	}
 	for _, tc := range cases {
 		if got := MatchResource(tc.prefix, tc.uri); got != tc.want {
@@ -225,4 +231,18 @@ func FuzzNarrowsKeepsTheWindow(f *testing.F) {
 			t.Fatalf("child starts %s, before parent %s", c.NotBefore, p.NotBefore)
 		}
 	})
+}
+
+// A request naming a resource through a dot segment is refused by a
+// restricted capability, prefix or exact URI alike.
+func TestAllowsResourceRefusesDotSegments(t *testing.T) {
+	c := Caveats{Ops: []Op{OpGet}, ResourcePrefixes: []string{"corpus/public"}, ResourceURIs: []string{"exact/one"}}
+	for _, uri := range []string{"corpus/public/../private/x", "exact/one/..", "corpus/public/./a"} {
+		if c.AllowsResource(uri) {
+			t.Errorf("AllowsResource(%q) = true", uri)
+		}
+		if err := c.Check(CheckRequest{Op: OpGet, Resource: uri}); !errors.Is(err, ErrResourceNotAllowed) {
+			t.Errorf("Check(%q) = %v, want ErrResourceNotAllowed", uri, err)
+		}
+	}
 }

@@ -28,6 +28,10 @@ func TestCaveatsValidate(t *testing.T) {
 		"bad unit":             {Ops: []Op{OpGet}, UnitCode: "XYZ"},
 		"bad cidr":             {Ops: []Op{OpGet}, SourceIPCIDR: []string{"10.0.0.0/33"}},
 		"control in uri":       {Ops: []Op{OpGet}, ResourceURIs: []string{"a\x00b"}},
+		"dot-dot in prefix":    {Ops: []Op{OpGet}, ResourcePrefixes: []string{"a/../b"}},
+		"dot in uri":           {Ops: []Op{OpGet}, ResourceURIs: []string{"a/./b"}},
+		"encoded dot-dot":      {Ops: []Op{OpGet}, ResourcePrefixes: []string{"a/%2E%2e/b"}},
+		"leading dot-dot":      {Ops: []Op{OpGet}, ResourceURIs: []string{"../b"}},
 	}
 	for name, c := range bad {
 		if err := c.Validate(); !errors.Is(err, ErrInvalidCaveats) {

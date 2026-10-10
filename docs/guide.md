@@ -74,7 +74,11 @@ case errors.Is(err, limes.ErrTaintedReadNotAllowed):
 Resource prefixes match at a `/` segment boundary: `corpus/public` covers
 `corpus/public/x` but not `corpus/public-secret`. An operation that cannot name
 its resource (`Resource: ""`) is refused by a resource-restricted capability —
-for an operation over a set, pass the prefix that bounds the set.
+for an operation over a set, pass the prefix that bounds the set. A resource
+with a `.` or `..` segment, plain or percent-encoded, is refused by a
+resource-restricted capability and by `Validate`: what it names depends on how
+you resolve it, not on its text. Pass the resource as your storage will
+address it.
 `AllowTaintedRead` can only act on a taint signal you supply; if you track
 none, it protects nothing, and you should say so.
 
