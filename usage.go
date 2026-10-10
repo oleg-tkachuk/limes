@@ -491,7 +491,9 @@ func DecodeTenantBudgetCursor(s string) (TenantBudgetCursor, error) {
 	if !ok || pct == "" {
 		return TenantBudgetCursor{}, invalidRequest("tenant budget cursor %q", s)
 	}
-	if _, err := strconv.ParseFloat(pct, 64); err != nil {
+	// A utilisation is a finite, non-negative decimal: NaN and the
+	// infinities, or a hex float, would order differently in every store.
+	if v, err := strconv.ParseFloat(pct, 64); err != nil || !decimalAmount.MatchString(pct) || v < 0 {
 		return TenantBudgetCursor{}, invalidRequest("tenant budget cursor %q", s)
 	}
 	tenant, err := uuid.Parse(id)
