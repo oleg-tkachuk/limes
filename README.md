@@ -167,7 +167,7 @@ read its claims under the wrong schema.
 | [storetest/](storetest), [metertest/](metertest) | conformance suites to run from your own store's tests |
 | [example/](example) | the five-minute walkthrough as a runnable program |
 | [testdata/](testdata) | golden tokens, and the Biscuit vocabulary and cases shared with SDKs in other languages |
-| [tools/](tools) | the developer tools, pinned in a module of their own and run with `go tool -modfile=tools/go.mod` |
+| [tools/](tools) | the developer tools, pinned in modules of their own and run with `go tool -modfile=tools/go.mod` (yq: `tools/yq/go.mod`) |
 
 ## License
 

@@ -413,10 +413,15 @@ from your store's tests — `storetest` for a `Store` (and a
 func TestMeterContract(t *testing.T) {
     metertest.Run(t, func(t *testing.T) metertest.Env[MyTx] {
         return metertest.Env[MyTx]{Ctx: ctx, Usage: newStore(t), Tenant: tenant,
-            NewCapability: recordCapability}
+            NewCapability: recordCapability,
+            Advance: clock.Advance} // optional: runs the reservation-expiry checks
     })
 }
 ```
+
+The checks include charges racing one ceiling, so run them against the
+database itself: a store that reads a counter and writes it back outside one
+statement or lock overspends, and fails them.
 
 `memstore` runs the same checks, and so do the PostgreSQL stores of
 [Paladin](https://github.com/oleg-tkachuk/paladin), the module's first consumer.
