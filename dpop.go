@@ -282,15 +282,14 @@ func verifyDPoPSignature(pub crypto.PublicKey, alg string, input, sig []byte) bo
 	return false
 }
 
-// canonicalHTU is the URL as RFC 9449 compares it: scheme, host and path,
-// without query or fragment.
+// canonicalHTU is the htu a proof carries for rawURL: the URI as RFC 9449
+// compares it (normalizeURI), without query or fragment.
 func canonicalHTU(raw string) (string, error) {
-	u, err := url.Parse(raw)
+	htu, err := normalizeURI(raw)
 	if err != nil {
 		return "", fmt.Errorf("limes: DPoP htu: %w", err)
 	}
-	u.RawQuery, u.Fragment, u.RawFragment = "", "", ""
-	return u.String(), nil
+	return htu, nil
 }
 
 // DPoPProof is a request's proof of possession and the request it must
@@ -398,26 +397,25 @@ func (v *DPoPVerifier) check(ctx context.Context, c Capability, token string, p 
 	return nil
 }
 
+// htuMatches compares a proof's htu with the request URL after RFC 3986
+// syntax- and scheme-based normalisation, as RFC 9449 §4.3 requires.
 func htuMatches(htu, requestURL string, pathOnly bool) bool {
-	want, err := url.Parse(requestURL)
-	if err != nil {
-		return false
-	}
-	got, err := url.Parse(htu)
-	if err != nil {
-		return false
-	}
 	if pathOnly {
+		got, err1 := url.Parse(htu)
+		want, err2 := url.Parse(requestURL)
+		if err1 != nil || err2 != nil {
+			return false
+		}
+		g, w := normalizePath(got.EscapedPath()), normalizePath(want.EscapedPath())
 		// A proxy may mount the service under a prefix it strips before
 		// forwarding, so the client's path may carry segments the server
-		// never sees. The server's path must still be the whole tail.
-		return got.Path == want.Path ||
-			(strings.HasPrefix(want.Path, "/") && strings.HasSuffix(got.Path, want.Path))
+		// never sees. The server's path must still be the whole tail, from a
+		// segment boundary.
+		return g == w || strings.HasSuffix(g, w) && strings.HasPrefix(w, "/")
 	}
-	if got.Path != want.Path {
-		return false
-	}
-	return strings.EqualFold(got.Scheme, want.Scheme) && strings.EqualFold(got.Host, want.Host)
+	got, err1 := normalizeURI(htu)
+	want, err2 := normalizeURI(requestURL)
+	return err1 == nil && err2 == nil && got == want
 }
 
 func decodeSegment(seg string, v any) error {

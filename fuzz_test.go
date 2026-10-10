@@ -94,3 +94,21 @@ func FuzzOpenBiscuit(f *testing.F) {
 		_, _, _ = openBiscuit(token)
 	})
 }
+
+// FuzzNormalizeURI holds the htu normalisation to being a normal form:
+// normalising what it returns changes nothing.
+func FuzzNormalizeURI(f *testing.F) {
+	for _, s := range []string{"https://A.example:443/a/./b/../%7e?q#f", "http://[::1]:80", "https://h/%zz/.."} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, raw string) {
+		once, err := normalizeURI(raw)
+		if err != nil {
+			return
+		}
+		twice, err := normalizeURI(once)
+		if err != nil || twice != once {
+			t.Fatalf("%q normalises to %q, which normalises to %q, %v", raw, once, twice, err)
+		}
+	})
+}
