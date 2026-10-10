@@ -38,6 +38,7 @@ flowchart LR
         remote["RemoteJWKSResolver<br/>ETag · MaxStale"]
         dpop["DPoPVerifier<br/>VerifierConfig.DPoP · NewDPoPProof"]
         suites["storetest · metertest<br/>conformance suites"]
+        endpoints["HTTP endpoints<br/>JWKSHandler · MetadataHandler<br/>RevocationHandler · IntrospectionHandler"]
     end
 
     subgraph contracts ["contracts the consumer implements"]
@@ -72,6 +73,7 @@ flowchart LR
     remote -. "implements" .-> keys
     remote -- "HTTP GET" --> jwks
     verifier -. "key-bound tokens" .-> dpop --> replay
+    endpoints -. "serve" .-> verifier
     suites -. "check" .-> store
     suites -. "check" .-> usage
     store --> impl
@@ -86,7 +88,7 @@ flowchart LR
     classDef external fill:#FCE7F3,stroke:#DB2777,color:#831843
     class caller client
     class issuer,signer,narrows,verifier,caveats role
-    class cache,metering,static,remote,bcache,attenuate,dpop,suites optional
+    class cache,metering,static,remote,bcache,attenuate,dpop,suites,endpoints optional
     class store,usage,keys,impl,brev,cusage,replay store
     class jwks,otel external
 ```
@@ -157,7 +159,7 @@ flowchart TB
     nbf{"now + Leeway ≥ NotBefore"}
     exp{"now − Leeway ≤ ExpiresAt"}
     aud{"audience ∈ Audience"}
-    pop{"key-bound?<br/>DPoP proof from that key"}
+    pop{"scheme matches the binding<br/>key-bound: DPoP proof from that key"}
     rev{"RevocationLookup.IsRevoked<br/>this capability or an ancestor"}
     ok(["Capability"])
 
