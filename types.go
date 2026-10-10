@@ -253,9 +253,8 @@ type CopyCeiling struct {
 // Caveats is a typed bag of restrictions. Empty values are interpreted
 // as "no restriction on that axis"; explicit bounds are AND-combined.
 //
-// The json tags are the token's wire format — the fields of its RFC 9396
-// authorization detail (AuthorizationDetail), Ops as the common "actions"
-// field — so renaming a Go field changes nothing a token carries. A verifier refuses a
+// The json tags are the token's wire format (the limes_caveats claim), so
+// renaming a field changes nothing a token carries. A verifier refuses a
 // member it does not know: a caveat it cannot enforce must not pass as one
 // it did.
 //
@@ -267,7 +266,7 @@ type Caveats struct {
 	// Ops is the set of operations the capability authorises. The
 	// issuer rejects an empty set: a capability that allows nothing is
 	// a mistake, not a credential.
-	Ops []Op `json:"actions"`
+	Ops []Op `json:"ops"`
 
 	// ResourcePrefixes restricts the capability to URIs under any prefix
 	// in the slice, matched at a "/" segment boundary (MatchResource):
