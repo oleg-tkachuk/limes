@@ -72,7 +72,7 @@ type jwtHeader struct {
 type jwtClaims struct {
 	// Standard JWT claims.
 	Issuer    string   `json:"iss"`
-	Subject   string   `json:"sub"` // Capability.Authority (RFC 8693)
+	Subject   string   `json:"sub"` // Principal.Subject, for JWT tooling
 	Audience  []string `json:"aud"`
 	IssuedAt  int64    `json:"iat"`
 	NotBefore int64    `json:"nbf,omitzero"`
@@ -86,9 +86,6 @@ type jwtClaims struct {
 	AuthorizationDetails []AuthorizationDetail `json:"authorization_details"`
 	ParentID             string                `json:"limes_parent_id,omitempty"`
 	Generation           int64                 `json:"limes_gen,omitzero"`
-
-	// Actor is RFC 8693's `act`, on a delegated capability only.
-	Actor *Actor `json:"act,omitzero"`
 
 	// Confirmation is RFC 7800's `cnf`, omitted for an unbound capability.
 	Confirmation *cnfClaim `json:"cnf,omitzero"`
@@ -148,18 +145,11 @@ func (s *ed25519Signer) Sign(_ context.Context, c Capability) (string, error) {
 	if c.ExpiresAt.Before(c.IssuedAt) || c.ExpiresAt.IsZero() {
 		return "", errors.New("limes: ExpiresAt must be after IssuedAt")
 	}
-	if err := checkActor(c.Actor, c.Subject.Subject); err != nil {
-		return "", err
-	}
-	if (c.Actor == nil) != (c.OnBehalfOf == "") {
-		return "", errors.New("limes: OnBehalfOf and Actor are set together, on a delegated capability")
-	}
 
 	header := jwtHeader{Alg: algEd25519, Kid: s.keyID, Typ: TokenType}
 	claims := jwtClaims{
 		Issuer:     c.Issuer,
-		Subject:    c.Authority(),
-		Actor:      c.Actor,
+		Subject:    c.Subject.Subject,
 		Audience:   c.Audience,
 		IssuedAt:   c.IssuedAt.Unix(),
 		ExpiresAt:  c.ExpiresAt.Unix(),
@@ -260,14 +250,9 @@ func parseClaims(seg string) (*Capability, error) {
 			return nil, fmt.Errorf("limes: max_requests %d is outside the I-JSON integer range (RFC 7493)", d.MaxRequests)
 		}
 	}
-	// sub is the authority the token acts on (RFC 8693): the principal's own
-	// on a root capability, and the act claim's current actor is the
-	// principal on a delegated one. Anything else names two subjects, which
-	// two parsers would read two ways.
-	if err := checkActor(claims.Actor, claims.Principal.Subject); err != nil {
-		return nil, err
-	}
-	if claims.Actor == nil && claims.Subject != claims.Principal.Subject {
+	// sub repeats the principal for JWT tooling; two subjects would be read
+	// differently by a parser that takes one and a parser that takes the other.
+	if claims.Subject != claims.Principal.Subject {
 		return nil, fmt.Errorf("limes: sub %q differs from limes_principal.subject %q", claims.Subject, claims.Principal.Subject)
 	}
 
@@ -292,9 +277,6 @@ func parseClaims(seg string) (*Capability, error) {
 		cap.NotBefore = time.Unix(claims.NotBefore, 0).UTC()
 	}
 	cap.Subject = claims.Principal
-	if claims.Actor != nil {
-		cap.Actor, cap.OnBehalfOf = claims.Actor, claims.Subject
-	}
 	if claims.Confirmation != nil {
 		cap.ConfirmationJKT = claims.Confirmation.JKT
 	}

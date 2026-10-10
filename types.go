@@ -194,14 +194,6 @@ type Capability struct {
 	NotBefore time.Time
 	ExpiresAt time.Time
 
-	// OnBehalfOf and Actor describe a delegation as RFC 8693 §4.1 does (see
-	// actor.go): OnBehalfOf is the subject of the root capability whose
-	// authority the chain carries — the token's `sub` — and Actor the `act`
-	// claim, this capability's holder first. Both are empty on a root
-	// capability; Delegate sets them.
-	OnBehalfOf string
-	Actor      *Actor
-
 	// ParentID, if non-zero, points at the parent capability whose
 	// holder delegated this one. Narrowing is checked once, at
 	// delegation. At use, the lineage matters twice: revoking any
