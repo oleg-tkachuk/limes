@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -72,11 +73,22 @@ func AmountFromFloat(f float64) (Nanos, error) {
 	return n, err
 }
 
+// maxExponentDigits bounds the exponent of an amount written in scientific
+// notation. Three digits reach far past every amount Nanos holds, and keep
+// 1e999999 from costing the big.Rat it would build.
+const maxExponentDigits = 3
+
+// decimalAmount is the one form an amount is written in: digits, an optional
+// fraction, an optional exponent. A sign is read only to refuse it as
+// negative. big.Rat reads far more — fractions, hex, binary and octal
+// floats, underscores — none of which is a decimal amount.
+var decimalAmount = regexp.MustCompile(`^-?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]{1,` +
+	strconv.Itoa(maxExponentDigits) + `})?$`)
+
 // parseDecimal reads s as a decimal number of units and rounds it to the
 // nearest nano, halves to even, reporting whether that was exact.
 func parseDecimal(s string) (Nanos, bool, error) {
-	// big.Rat also reads "a/b"; an amount is a decimal, never a fraction.
-	if strings.ContainsRune(s, '/') {
+	if !decimalAmount.MatchString(s) {
 		return 0, false, fmt.Errorf("%w: %q is not a decimal amount", ErrInvalidAmount, s)
 	}
 	r, ok := new(big.Rat).SetString(s)

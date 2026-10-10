@@ -23,7 +23,13 @@ func TestParseAmountIsExact(t *testing.T) {
 }
 
 func TestParseAmountRefusesWhatItCannotCountExactly(t *testing.T) {
-	for _, in := range []string{"-0.01", "0.0000000001", "1000000000", "1/3", "abc", "", "NaN"} {
+	for _, in := range []string{
+		"-0.01", "0.0000000001", "1000000000", "1/3", "abc", "", "NaN",
+		// big.Rat reads these; an amount is a plain decimal.
+		"0x1p-2", "0x10", "0b1", "0o7", "1_000", "+1", ".5", "5.", " 1", "Inf",
+		// An exponent long enough to cost real work, or to round to zero.
+		"1e999999", "1e-999999", "1e1000",
+	} {
 		if _, err := ParseAmount(in); !errors.Is(err, ErrInvalidAmount) {
 			t.Errorf("ParseAmount(%q): err = %v, want ErrInvalidAmount", in, err)
 		}
@@ -148,4 +154,24 @@ func TestNanosText(t *testing.T) {
 	if err := n.UnmarshalText([]byte("0.0000000001")); !errors.Is(err, ErrInvalidAmount) {
 		t.Errorf("text finer than a nano: err = %v, want ErrInvalidAmount", err)
 	}
+}
+
+// FuzzParseAmount checks that whatever ParseAmount accepts is in range and
+// reads back from its own String exactly.
+func FuzzParseAmount(f *testing.F) {
+	for _, s := range []string{"0", "1.5", "1e-7", "999999999.999999999", "0x1p-2", "1e999", "-1"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		n, err := ParseAmount(s)
+		if err != nil {
+			return
+		}
+		if n < 0 || n > MaxNanos {
+			t.Fatalf("ParseAmount(%q) = %d, outside 0..MaxNanos", s, int64(n))
+		}
+		if back, err := ParseAmount(n.String()); err != nil || back != n {
+			t.Fatalf("%q read as %s, which reads back as %d, %v", s, n, int64(back), err)
+		}
+	})
 }
