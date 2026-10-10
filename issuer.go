@@ -135,8 +135,12 @@ func (i *Issuer) Issue(ctx context.Context, req IssueRequest) (Capability, strin
 	if err != nil {
 		return Capability{}, "", err
 	}
+	id, err := uuid.NewV7()
+	if err != nil {
+		return Capability{}, "", fmt.Errorf("limes: capability id: %w", err)
+	}
 	cap := Capability{
-		ID:              uuid.New(),
+		ID:              id,
 		Issuer:          i.issuerName,
 		Subject:         req.Subject,
 		Audience:        req.Audience,
@@ -277,9 +281,13 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 	if expires.After(req.Parent.ExpiresAt) {
 		expires = req.Parent.ExpiresAt
 	}
+	id, err := uuid.NewV7()
+	if err != nil {
+		return Capability{}, "", fmt.Errorf("limes: capability id: %w", err)
+	}
 
 	child := Capability{
-		ID:              uuid.New(),
+		ID:              id,
 		Issuer:          i.issuerName,
 		Subject:         req.Subject,
 		Audience:        req.Audience,

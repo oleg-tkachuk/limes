@@ -123,3 +123,27 @@ func TestDelegateRefusesRevokedOrExpiredParent(t *testing.T) {
 		t.Errorf("delegate from revoked parent = %v, want ErrRevoked", err)
 	}
 }
+
+// A capability's id is a UUIDv7, as Capability.ID promises: sortable by
+// issuance, so a store's index on it stays tight. Delegated ones too.
+func TestIssuedIDsAreVersion7(t *testing.T) {
+	issuer, _, _, _ := buildIssuerVerifier(t)
+	ctx := context.Background()
+	parent, _, err := issuer.Issue(ctx, IssueRequest{
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{TenantID: uuid.New(), Subject: "a"},
+		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, _, err := issuer.Delegate(ctx, DelegateRequest{Parent: parent, InheritCaveats: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const v7 uuid.Version = 7
+	for name, id := range map[string]uuid.UUID{"issued": parent.ID, "delegated": child.ID} {
+		if v := id.Version(); v != v7 {
+			t.Errorf("%s id %s is version %d, want %d", name, id, v, v7)
+		}
+	}
+}
