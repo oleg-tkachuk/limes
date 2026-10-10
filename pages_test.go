@@ -2,6 +2,7 @@ package limes
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"slices"
 	"testing"
@@ -197,5 +198,27 @@ func TestAllTenantBudgets(t *testing.T) {
 	}
 	if want := []uuid.UUID{idA, idB, idC, idD}; !slices.Equal(ids, want) {
 		t.Errorf("tenants = %v, want %v", ids, want)
+	}
+}
+
+// A cursor holds a utilisation a store computed: a finite, non-negative
+// decimal. NaN and the infinities order differently in every store, so they
+// are refused rather than passed to a query.
+func TestDecodeTenantBudgetCursorRefusesNonFinite(t *testing.T) {
+	tenant := uuid.New()
+	ok := TenantBudgetCursor{Utilisation: "42.5", TenantID: tenant}
+	if got, err := DecodeTenantBudgetCursor(ok.Encode()); err != nil || got != ok {
+		t.Fatalf("round trip = %+v, %v; want %+v", got, err, ok)
+	}
+	for _, pct := range []string{"NaN", "Inf", "-Inf", "+Inf", "infinity", "-1", "1e999", "0x1p3"} {
+		c := TenantBudgetCursor{Utilisation: pct, TenantID: tenant}.Encode()
+		if _, err := DecodeTenantBudgetCursor(c); !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("utilisation %q: err = %v, want ErrInvalidRequest", pct, err)
+		}
+	}
+	for _, raw := range []string{"!!", base64.RawURLEncoding.EncodeToString([]byte("42.5")), base64.RawURLEncoding.EncodeToString([]byte("42.5|not-a-uuid"))} {
+		if _, err := DecodeTenantBudgetCursor(raw); !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("cursor %q: err = %v, want ErrInvalidRequest", raw, err)
+		}
 	}
 }

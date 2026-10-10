@@ -27,7 +27,7 @@ func limitedBiscuit(t *testing.T) (*StandardVerifier, Capability, string) {
 	cap, _, err := issuer.Issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{TenantID: uuid.New(), Subject: "agent"},
-		Audience: []string{AudiencePlaneData},
+		Audience: []string{audienceData},
 		Caveats: Caveats{
 			Ops: []Op{OpGet}, MaxRequests: copyTestCapRequests,
 			MaxBudgetAmount: copyTestCapBudget, UnitCode: DefaultUnitCode,
@@ -37,7 +37,7 @@ func limitedBiscuit(t *testing.T) (*StandardVerifier, Capability, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := issuer.Biscuit(cap)
+	token, err := issuer.Biscuit(context.Background(), cap)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestCopyLimitsArriveAsCopies(t *testing.T) {
 	plain, _ := Attenuate(outer, Attenuation{Ops: []Op{OpGet}}) // sets no limit
 	inner, _ := Attenuate(plain, Attenuation{MaxRequests: 10})
 
-	got, err := v.Verify(ctx, inner, AudiencePlaneData)
+	got, err := v.Verify(ctx, VerifyRequest{Token: inner, Audience: audienceData})
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestCopyLimitsArriveAsCopies(t *testing.T) {
 	// The root Biscuit carries no copy limit; a copy that sets none keeps
 	// the ones above it.
 	for tok, want := range map[string]int{root: 0, plain: 1} {
-		got, err := v.Verify(ctx, tok, AudiencePlaneData)
+		got, err := v.Verify(ctx, VerifyRequest{Token: tok, Audience: audienceData})
 		if err != nil || len(got.Copies) != want {
 			t.Errorf("copies = %+v, err = %v; want %d", got, err, want)
 		}
@@ -121,7 +121,7 @@ func TestCopyLimitsNarrow(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = v.Verify(ctx, tok, AudiencePlaneData)
+			_, err = v.Verify(ctx, VerifyRequest{Token: tok, Audience: audienceData})
 			if tc.ok && err != nil {
 				t.Fatalf("refused: %v", err)
 			}
@@ -135,7 +135,7 @@ func TestCopyLimitsNarrow(t *testing.T) {
 	_, unlimited, _, _, token := biscuitFixture(t)
 	unlimited.cfg.MeterCopies = true
 	tok, _ := Attenuate(token, Attenuation{MaxRequests: 1 << 40, MaxBudget: MaxNanos})
-	if _, err := unlimited.Verify(ctx, tok, AudiencePlaneData); err != nil {
+	if _, err := unlimited.Verify(ctx, VerifyRequest{Token: tok, Audience: audienceData}); err != nil {
 		t.Fatalf("under no limit: %v", err)
 	}
 }
@@ -147,12 +147,12 @@ func TestCopyLimitsNeedMeterCopies(t *testing.T) {
 	v.cfg.MeterCopies = false
 	ctx := context.Background()
 	limited, _ := Attenuate(root, Attenuation{MaxRequests: 5})
-	_, err := v.Verify(ctx, limited, AudiencePlaneData)
+	_, err := v.Verify(ctx, VerifyRequest{Token: limited, Audience: audienceData})
 	if !errors.Is(err, ErrCopyCountersNotMetered) || !errors.Is(err, ErrInvalidSignature) {
 		t.Fatalf("err = %v, want ErrCopyCountersNotMetered", err)
 	}
 	plain, _ := Attenuate(root, Attenuation{Ops: []Op{OpGet}})
-	if _, err := v.Verify(ctx, plain, AudiencePlaneData); err != nil {
+	if _, err := v.Verify(ctx, VerifyRequest{Token: plain, Audience: audienceData}); err != nil {
 		t.Fatalf("a copy without limits: %v", err)
 	}
 }
@@ -182,7 +182,7 @@ func TestCopyLimitsMalformed(t *testing.T) {
 				t.Fatal(err)
 			}
 			tok, _ := serializeBiscuit(next)
-			if _, err := v.Verify(context.Background(), tok, AudiencePlaneData); !errors.Is(err, ErrBiscuitAttenuation) {
+			if _, err := v.Verify(context.Background(), VerifyRequest{Token: tok, Audience: audienceData}); !errors.Is(err, ErrBiscuitAttenuation) {
 				t.Errorf("%s %s: err = %v, want ErrBiscuitAttenuation", fact, name, err)
 			}
 		}
@@ -195,11 +195,11 @@ func TestCopiesAreNeverSigned(t *testing.T) {
 	issuer, v, _, cap, _ := biscuitFixture(t)
 	withCopies := cap
 	withCopies.Copies = []CopyCeiling{{RevocationID: []byte("x"), MaxRequests: 1}}
-	jwt, err := issuer.signer.Sign(withCopies)
+	jwt, err := issuer.signer.Sign(context.Background(), withCopies)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := v.Verify(context.Background(), jwt, AudiencePlaneData)
+	got, err := v.Verify(context.Background(), VerifyRequest{Token: jwt, Audience: audienceData})
 	if err != nil {
 		t.Fatal(err)
 	}

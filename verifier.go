@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/netip"
 	"slices"
 	"sync"
 	"time"
@@ -139,6 +140,57 @@ type VerifierConfig struct {
 	// its own. Required when AcceptBiscuit is set; wrap the store in a
 	// CachedBiscuitRevocationChecker.
 	BiscuitRevocations BiscuitRevocationLookup
+
+	// DPoP checks the proof of possession a key-bound capability (one with
+	// a ConfirmationJKT) must come with. Without it the verifier refuses
+	// every key-bound capability with ErrDPoPRequired, rather than accept
+	// one as a bearer token.
+	DPoP *DPoPVerifier
+}
+
+// Verifier validates tokens. A deployment typically resolves keys through a
+// cached JWKS (RemoteJWKSResolver) and checks revocation through a short-TTL
+// cache (CachedRevocationChecker), so revocation propagates quickly without
+// hammering the store.
+type Verifier interface {
+	// Verify checks the token itself: its signature, issuer and tenant, its
+	// validity window, its audience, the proof of possession a key-bound
+	// capability needs, and revocation. It returns the capability the token
+	// grants.
+	Verify(ctx context.Context, req VerifyRequest) (Capability, error)
+
+	// Authorize is Verify followed by every caveat that can be checked
+	// without state: the operation, the resource, the idempotency key, the
+	// tainted read (Caveats.Check), and the client's address
+	// (Caveats.CheckSource). The request and budget limits are stateful:
+	// the Meter enforces them, through Bump and Charge, inside the
+	// consumer's own transaction.
+	Authorize(ctx context.Context, req AuthorizeRequest) (Capability, error)
+}
+
+// VerifyRequest is a token as it arrived, and what it arrived for.
+type VerifyRequest struct {
+	// Token is the capability token, a JWT or a Biscuit.
+	Token string
+	// Audience is the service the call is hitting: the token's audience
+	// must include it.
+	Audience string
+	// DPoP is the request's proof of possession, needed when the
+	// capability is key-bound and ignored when it is not.
+	DPoP DPoPProof
+	// Scheme is the Authorization scheme the token came under
+	// (ParseAuthorization). Set, it must match the binding: DPoP for a
+	// key-bound capability, Bearer for any other.
+	Scheme AuthScheme
+}
+
+// AuthorizeRequest is a VerifyRequest and the operation it is presented for.
+type AuthorizeRequest struct {
+	VerifyRequest
+	CheckRequest
+	// ClientAddr is the client address the consumer observed. A capability
+	// constrained to source networks refuses the zero address.
+	ClientAddr netip.Addr
 }
 
 // StandardVerifier is the production verifier — signature first, then
@@ -168,6 +220,16 @@ func NewStandardVerifier(cfg VerifierConfig) (*StandardVerifier, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
+	if cfg.DPoP != nil {
+		if cfg.DPoP.Replay == nil {
+			return nil, errNoReplayCache
+		}
+		dpop := *cfg.DPoP // the caller's stays theirs
+		if dpop.Now == nil {
+			dpop.Now = cfg.Now
+		}
+		cfg.DPoP = &dpop
+	}
 	if cfg.Leeway == 0 {
 		cfg.Leeway = defaultLeeway
 	}
@@ -186,41 +248,15 @@ func NewStandardVerifier(cfg VerifierConfig) (*StandardVerifier, error) {
 // Order matters: nothing in the claims is read until the signature over
 // them has verified, so a forged token costs a header decode and one
 // signature check, and no claim-parsing path is reachable by an attacker.
-func (v *StandardVerifier) Verify(ctx context.Context, token string, audience string) (Capability, error) {
-	if len(token) > v.cfg.MaxTokenBytes {
-		return Capability{}, fmt.Errorf("%w: token is %d bytes (limit %d)",
-			ErrInvalidSignature, len(token), v.cfg.MaxTokenBytes)
+// The checks that need no I/O come before the revocation lookup.
+func (v *StandardVerifier) Verify(ctx context.Context, req VerifyRequest) (Capability, error) {
+	token, audience := req.Token, req.Audience
+	if audience == "" {
+		return Capability{}, fmt.Errorf("%w: no audience to verify against", ErrAudienceMismatch)
 	}
-
-	var cap *Capability
-	var biscuitIDs [][]byte // set for a Biscuit, from its verified chain
-	if IsBiscuit(token) {
-		if !v.cfg.AcceptBiscuit {
-			return Capability{}, fmt.Errorf("%w: Biscuit tokens are not accepted here", ErrInvalidSignature)
-		}
-		var err error
-		if cap, biscuitIDs, err = v.verifyBiscuit(ctx, token, v.cfg.MeterCopies); err != nil {
-			return Capability{}, err
-		}
-	} else {
-		var err error
-		if cap, err = v.verifySigned(ctx, token); err != nil {
-			return Capability{}, err
-		}
-		// The token sealed inside a Biscuit, lifted out to shed the
-		// Biscuit's attenuation.
-		if cap.BiscuitRoot != "" {
-			return Capability{}, fmt.Errorf("%w: token is sealed in a Biscuit; present the Biscuit", ErrInvalidSignature)
-		}
-	}
-
-	// 4) Time window. Leeway absorbs clock skew on both ends.
-	now := v.cfg.Now()
-	if !cap.NotBefore.IsZero() && now.Add(v.cfg.Leeway).Before(cap.NotBefore) {
-		return Capability{}, ErrNotYetValid
-	}
-	if cap.ExpiresAt.IsZero() || now.Add(-v.cfg.Leeway).After(cap.ExpiresAt) {
-		return Capability{}, ErrExpired
+	cap, biscuitIDs, err := v.verifyToken(ctx, token)
+	if err != nil {
+		return Capability{}, err
 	}
 
 	// 5) Audience match.
@@ -229,28 +265,144 @@ func (v *StandardVerifier) Verify(ctx context.Context, token string, audience st
 			ErrAudienceMismatch, cap.Audience, audience)
 	}
 
-	// 6) Revocation of this capability or any ancestor. Last so cheap
-	// rejections short-circuit before hitting the cache / store.
-	revoked, err := v.cfg.Revocations.IsRevoked(ctx, cap.ID)
-	if err != nil {
-		return Capability{}, fmt.Errorf("limes: revocation lookup: %w", err)
+	// 6) Proof of possession, for a key-bound capability — over the token
+	// as presented, the Biscuit when it is one — under the scheme its
+	// binding calls for.
+	if err := checkScheme(req.Scheme, cap.ConfirmationJKT != ""); err != nil {
+		return Capability{}, err
 	}
-	if revoked {
-		return Capability{}, ErrRevoked
-	}
-	// 7) Revocation of this copy of a Biscuit, or a copy it was attenuated
-	// from.
-	if biscuitIDs != nil {
-		revoked, err := v.cfg.BiscuitRevocations.IsBiscuitRevoked(ctx, biscuitIDs)
-		if err != nil {
-			return Capability{}, fmt.Errorf("limes: biscuit revocation lookup: %w", err)
+	if cap.ConfirmationJKT != "" {
+		if v.cfg.DPoP == nil {
+			return Capability{}, fmt.Errorf("%w: capability is key-bound and this verifier has no DPoP configured", ErrDPoPRequired)
 		}
-		if revoked {
-			return Capability{}, ErrRevoked
+		if err := v.cfg.DPoP.check(ctx, *cap, token, req.DPoP); err != nil {
+			return Capability{}, err
 		}
 	}
 
+	// 7) Revocation. Last so cheap rejections short-circuit before hitting
+	// the cache / store.
+	if err := v.checkRevoked(ctx, cap.ID, biscuitIDs); err != nil {
+		return Capability{}, err
+	}
 	return *cap, nil
+}
+
+// Introspect checks token as Verify does, except for the two checks that
+// belong to the request it came with — its audience and its proof of
+// possession — which the resource server that received it makes: what an
+// RFC 7662 introspection endpoint reports on.
+func (v *StandardVerifier) Introspect(ctx context.Context, token string) (Capability, error) {
+	cap, biscuitIDs, err := v.verifyToken(ctx, token)
+	if err != nil {
+		return Capability{}, err
+	}
+	if err := v.checkRevoked(ctx, cap.ID, biscuitIDs); err != nil {
+		return Capability{}, err
+	}
+	return *cap, nil
+}
+
+// verifyToken checks the token itself: identify's checks, and its validity
+// window. It returns the capability and, for a Biscuit, its revocation ids.
+func (v *StandardVerifier) verifyToken(ctx context.Context, token string) (*Capability, [][]byte, error) {
+	cap, biscuitIDs, err := v.identify(ctx, token)
+	if err != nil {
+		return nil, nil, err
+	}
+	// 4) Time window. Leeway absorbs clock skew on both ends.
+	now := v.cfg.Now()
+	if !cap.NotBefore.IsZero() && now.Add(v.cfg.Leeway).Before(cap.NotBefore) {
+		return nil, nil, ErrNotYetValid
+	}
+	if cap.ExpiresAt.IsZero() || now.Add(-v.cfg.Leeway).After(cap.ExpiresAt) {
+		return nil, nil, ErrExpired
+	}
+	return cap, biscuitIDs, nil
+}
+
+// identify checks that token is one this verifier's issuers signed — its
+// size, signature, issuer and tenant, and a Biscuit's chain — whatever its
+// validity window: what a token must prove before it may be revoked.
+func (v *StandardVerifier) identify(ctx context.Context, token string) (*Capability, [][]byte, error) {
+	if token == "" {
+		return nil, nil, fmt.Errorf("%w: no token", ErrInvalidSignature)
+	}
+	if len(token) > v.cfg.MaxTokenBytes {
+		return nil, nil, fmt.Errorf("%w: token is %d bytes (limit %d)",
+			ErrInvalidSignature, len(token), v.cfg.MaxTokenBytes)
+	}
+
+	var cap *Capability
+	var biscuitIDs [][]byte // set for a Biscuit, from its verified chain
+	if IsBiscuit(token) {
+		if !v.cfg.AcceptBiscuit {
+			return nil, nil, fmt.Errorf("%w: Biscuit tokens are not accepted here", ErrInvalidSignature)
+		}
+		var err error
+		if cap, biscuitIDs, err = v.verifyBiscuit(ctx, token, v.cfg.MeterCopies); err != nil {
+			return nil, nil, err
+		}
+	} else {
+		var err error
+		if cap, err = v.verifySigned(ctx, token); err != nil {
+			return nil, nil, err
+		}
+		// The token sealed inside a Biscuit, lifted out to shed the
+		// Biscuit's attenuation.
+		if cap.BiscuitRoot != "" {
+			return nil, nil, fmt.Errorf("%w: token is sealed in a Biscuit; present the Biscuit", ErrInvalidSignature)
+		}
+	}
+	return cap, biscuitIDs, nil
+}
+
+// checkRevoked refuses a capability revoked itself or through an ancestor,
+// and a Biscuit copy revoked itself or through the copy it was attenuated
+// from.
+func (v *StandardVerifier) checkRevoked(ctx context.Context, id uuid.UUID, biscuitIDs [][]byte) error {
+	revoked, err := v.cfg.Revocations.IsRevoked(ctx, id)
+	if err != nil {
+		return fmt.Errorf("limes: revocation lookup: %w", err)
+	}
+	if revoked {
+		return ErrRevoked
+	}
+	if biscuitIDs != nil {
+		revoked, err := v.cfg.BiscuitRevocations.IsBiscuitRevoked(ctx, biscuitIDs)
+		if err != nil {
+			return fmt.Errorf("limes: biscuit revocation lookup: %w", err)
+		}
+		if revoked {
+			return ErrRevoked
+		}
+	}
+	return nil
+}
+
+// DPoPNonce is the nonce to send in the DPoP-Nonce header — with a
+// response refused by ErrDPoPNonceRequired, and with any other for the
+// client's next proof. Empty when the verifier issues none.
+func (v *StandardVerifier) DPoPNonce(ctx context.Context) (string, error) {
+	if v.cfg.DPoP == nil || v.cfg.DPoP.Nonces == nil {
+		return "", nil
+	}
+	return v.cfg.DPoP.Nonces.Nonce(ctx)
+}
+
+// Authorize implements Verifier.
+func (v *StandardVerifier) Authorize(ctx context.Context, req AuthorizeRequest) (Capability, error) {
+	c, err := v.Verify(ctx, req.VerifyRequest)
+	if err != nil {
+		return Capability{}, err
+	}
+	if err := c.Caveats.CheckSource(req.ClientAddr); err != nil {
+		return Capability{}, err
+	}
+	if err := c.Caveats.Check(req.CheckRequest); err != nil {
+		return Capability{}, err
+	}
+	return c, nil
 }
 
 // verifyBiscuit checks a Biscuit's sealed token as verifySigned does, then its

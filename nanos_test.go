@@ -23,7 +23,13 @@ func TestParseAmountIsExact(t *testing.T) {
 }
 
 func TestParseAmountRefusesWhatItCannotCountExactly(t *testing.T) {
-	for _, in := range []string{"-0.01", "0.0000000001", "1000000000", "1/3", "abc", "", "NaN"} {
+	for _, in := range []string{
+		"-0.01", "0.0000000001", "1000000000", "1/3", "abc", "", "NaN",
+		// big.Rat reads these; an amount is a plain decimal.
+		"0x1p-2", "0x10", "0b1", "0o7", "1_000", "+1", ".5", "5.", " 1", "Inf",
+		// An exponent long enough to cost real work, or to round to zero.
+		"1e999999", "1e-999999", "1e1000",
+	} {
 		if _, err := ParseAmount(in); !errors.Is(err, ErrInvalidAmount) {
 			t.Errorf("ParseAmount(%q): err = %v, want ErrInvalidAmount", in, err)
 		}
@@ -75,44 +81,44 @@ func TestAmountFromFloatRoundsTheDecimalAFloatStandsFor(t *testing.T) {
 	}
 }
 
-// A token's amount is the bytes a float64 encoded before amounts were
-// Nanos: whatever such a float held reads back to its nano, and a Nanos
-// that a float could hold encodes to the same bytes, so the token format
-// does not move.
-func TestNanosJSONMatchesTheFloatEncoding(t *testing.T) {
+// In JSON an amount is a decimal in a string, so that a reader whose numbers
+// are float64 cannot round it: every Nanos round-trips exactly, including the
+// eighteen-digit ones a float64 cannot hold.
+func TestNanosJSONIsAString(t *testing.T) {
 	r := rand.New(rand.NewPCG(3, 4))
-	const microNanos = 1_000 // below a micro, a float64 encodes with an exponent
-	for range 200_000 {
-		// Fifteen significant digits: what a float64 holds exactly.
-		n := Nanos(r.Int64N(999_999_999_999_999) * microNanos)
-		// The float a caller held for that decimal: the nearest one.
-		f, err := strconv.ParseFloat(n.String(), 64)
+	const samples = 20_000 // random amounts across the whole range
+	for range samples {
+		n := Nanos(r.Int64N(int64(MaxNanos) + 1))
+		b, err := json.Marshal(n)
 		if err != nil {
 			t.Fatal(err)
 		}
-		old, err := json.Marshal(f)
-		if err != nil {
-			t.Fatal(err)
-		}
-		got, err := json.Marshal(n)
-		if err != nil || string(got) != string(old) {
-			t.Fatalf("Nanos %d encodes %s, float64 encoded %s", int64(n), got, old)
+		if want := strconv.Quote(n.String()); string(b) != want {
+			t.Fatalf("Nanos %d encodes %s, want %s", int64(n), b, want)
 		}
 		var back Nanos
-		if err := json.Unmarshal(old, &back); err != nil || back != n {
-			t.Fatalf("float64 bytes %s read back as %d, %v; want %d", old, int64(back), err, int64(n))
+		if err := json.Unmarshal(b, &back); err != nil || back != n {
+			t.Fatalf("%s read back as %d, %v; want %d", b, int64(back), err, int64(n))
 		}
 	}
 }
 
-func TestNanosJSONReadsFloatNoiseAndExponents(t *testing.T) {
-	cases := map[string]Nanos{"0.30000000000000004": 300_000_000, "1e-07": 100, "1.5": 1_500_000_000}
-	for in, want := range cases {
+// A JSON number is refused, as is a string ParseAmount refuses: an amount is
+// read exactly or not at all.
+func TestNanosJSONRefusesNumbersAndInexactStrings(t *testing.T) {
+	for _, in := range []string{`1.5`, `0`, `null`, `"0.30000000000000004"`, `"0x1p-2"`, `"-1"`, `""`, `"1.5`} {
 		var n Nanos
-		if err := json.Unmarshal([]byte(in), &n); err != nil || n != want {
-			t.Errorf("Unmarshal(%s) = %d, %v; want %d", in, int64(n), err, int64(want))
+		if err := json.Unmarshal([]byte(in), &n); !errors.Is(err, ErrInvalidAmount) && !isSyntaxError(err) {
+			t.Errorf("Unmarshal(%s) = %d, %v; want ErrInvalidAmount", in, int64(n), err)
 		}
 	}
+}
+
+// isSyntaxError reports whether err is encoding/json refusing malformed
+// input before Nanos sees it.
+func isSyntaxError(err error) bool {
+	var syntax *json.SyntaxError
+	return errors.As(err, &syntax)
 }
 
 func mustParse(t *testing.T, s string) Nanos {
@@ -147,5 +153,36 @@ func TestNanosText(t *testing.T) {
 	}
 	if err := n.UnmarshalText([]byte("0.0000000001")); !errors.Is(err, ErrInvalidAmount) {
 		t.Errorf("text finer than a nano: err = %v, want ErrInvalidAmount", err)
+	}
+}
+
+// FuzzParseAmount checks that whatever ParseAmount accepts is in range and
+// reads back from its own String exactly.
+func FuzzParseAmount(f *testing.F) {
+	for _, s := range []string{"0", "1.5", "1e-7", "999999999.999999999", "0x1p-2", "1e999", "-1"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		n, err := ParseAmount(s)
+		if err != nil {
+			return
+		}
+		if n < 0 || n > MaxNanos {
+			t.Fatalf("ParseAmount(%q) = %d, outside 0..MaxNanos", s, int64(n))
+		}
+		if back, err := ParseAmount(n.String()); err != nil || back != n {
+			t.Fatalf("%q read as %s, which reads back as %d, %v", s, n, int64(back), err)
+		}
+	})
+}
+
+// String writes a negative amount — never a valid one, but printed in
+// errors — with its sign, the most negative one included.
+func TestNanosStringNegative(t *testing.T) {
+	cases := map[Nanos]string{-1: "-0.000000001", -1_500_000_000: "-1.5", math.MinInt64: "-9223372036.854775808"}
+	for n, want := range cases {
+		if got := n.String(); got != want {
+			t.Errorf("Nanos(%d).String() = %s, want %s", int64(n), got, want)
+		}
 	}
 }

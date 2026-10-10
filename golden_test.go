@@ -39,7 +39,7 @@ func TestGoldenTokenStillVerifies(t *testing.T) {
 		t.Fatalf("verifier: %v", err)
 	}
 
-	cap, err := verifier.Verify(context.Background(), token, goldenAudience)
+	cap, err := verifier.Verify(context.Background(), VerifyRequest{Token: token, Audience: goldenAudience})
 	if err != nil {
 		t.Fatalf("golden token no longer verifies — the wire format changed: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestGoldenTokenRejectsWrongAudience(t *testing.T) {
 		t.Fatalf("verifier: %v", err)
 	}
 
-	if _, err := verifier.Verify(context.Background(), string(raw), "limes-admin"); err == nil {
+	if _, err := verifier.Verify(context.Background(), VerifyRequest{Token: string(raw), Audience: "limes-admin"}); err == nil {
 		t.Fatal("a token minted for limes-data must not verify for limes-admin")
 	}
 }

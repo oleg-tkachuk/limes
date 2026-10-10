@@ -5,12 +5,12 @@ import (
 	"crypto"
 	"crypto/ed25519"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
 )
 
@@ -31,32 +31,10 @@ type Signer interface {
 
 	// Sign emits a compact JWT for the supplied capability. The cap's
 	// IssuedAt / NotBefore / ExpiresAt must already be populated; Sign
-	// does not normalise times.
-	Sign(c Capability) (string, error)
+	// does not normalise times. ctx bounds the signing, which for a key
+	// held in a KMS or an HSM is a call over the network.
+	Sign(ctx context.Context, c Capability) (string, error)
 }
-
-// Verifier validates tokens. A deployment typically resolves keys through
-// a cached JWKS (RemoteJWKSResolver) and checks the revocation list through
-// a short-TTL cache (CachedRevocationChecker) so revocation propagates
-// quickly without hammering the store.
-type Verifier interface {
-	// Verify decodes the token, checks the signature against the
-	// known JWKS, applies time / audience / revocation gates, and
-	// returns the typed Capability on success.
-	//
-	// The audience parameter is the plane the call is hitting — the
-	// verifier rejects tokens whose Capability.Audience does not
-	// include it. Use one of the AudiencePlane* constants.
-	Verify(ctx context.Context, token string, audience string) (Capability, error)
-}
-
-// AudiencePlane* constants are the audiences Paladin, the reference
-// consumer, mounts its verifiers on. Other consumers choose their own.
-const (
-	AudiencePlaneData  = "data"
-	AudiencePlaneAdmin = "admin"
-	AudiencePlaneMCP   = "mcp"
-)
 
 // ed25519Signer is the Ed25519-backed Signer.
 type ed25519Signer struct {
@@ -89,32 +67,64 @@ type jwtHeader struct {
 
 // jwtClaims is the payload. We follow JWT conventions for standard
 // claims (iss/sub/aud/iat/nbf/exp/jti) and prefix capability-specific
-// claims with `limes_` (part of the frozen wire format; see README).
-// The unmarshal path tolerates unknown fields.
+// claims with `limes_`. The verifier reads it strictly (strictClaims): no
+// member it does not know, none twice, every name in its exact case.
 type jwtClaims struct {
 	// Standard JWT claims.
 	Issuer    string   `json:"iss"`
-	Subject   string   `json:"sub"` // canonical principal string
+	Subject   string   `json:"sub"` // Capability.Authority (RFC 8693)
 	Audience  []string `json:"aud"`
 	IssuedAt  int64    `json:"iat"`
-	NotBefore int64    `json:"nbf,omitempty"`
+	NotBefore int64    `json:"nbf,omitzero"`
 	ExpiresAt int64    `json:"exp"`
 	ID        string   `json:"jti"`
 
 	// Capability claims.
-	Principal  *Principal `json:"limes_principal,omitempty"`
-	Caveats    Caveats    `json:"limes_caveats"`
-	ParentID   string     `json:"limes_parent_id,omitempty"`
-	Generation int64      `json:"limes_gen,omitempty"`
+	Principal Principal `json:"limes_principal"`
+	// AuthorizationDetails carries the caveats as RFC 9396 §9.1 has a JWT
+	// carry authorization details: one entry, of AuthorizationDetailsType.
+	AuthorizationDetails []AuthorizationDetail `json:"authorization_details"`
+	ParentID             string                `json:"limes_parent_id,omitempty"`
+	Generation           int64                 `json:"limes_gen,omitzero"`
 
-	// Confirmation is RFC 7800's `cnf`, omitted for an unbound capability so
-	// such tokens keep the frozen format byte for byte.
-	Confirmation *cnfClaim `json:"cnf,omitempty"`
+	// Actor is RFC 8693's `act`, on a delegated capability only.
+	Actor *Actor `json:"act,omitzero"`
+
+	// Confirmation is RFC 7800's `cnf`, omitted for an unbound capability.
+	Confirmation *cnfClaim `json:"cnf,omitzero"`
 
 	// BiscuitRoot roots the signature chain of the Biscuit this token is
 	// sealed in; omitted on every ordinary token.
 	BiscuitRoot string `json:"limes_bsk,omitempty"`
 }
+
+// MaxIJSONInteger is the largest integer a token carries: 2^53 − 1, the
+// largest an IEEE 754 double holds exactly. RFC 7493 (I-JSON) §2.2 keeps
+// numbers within it so that every JSON reader — JavaScript's among them —
+// reads the same value; larger amounts travel as decimal strings (Nanos).
+const MaxIJSONInteger = 1<<53 - 1
+
+// checkIJSONIntegers refuses claims whose integers lie outside what I-JSON
+// lets a reader rely on.
+func checkIJSONIntegers(c jwtClaims) error {
+	for name, n := range map[string]int64{
+		"iat": c.IssuedAt, "nbf": c.NotBefore, "exp": c.ExpiresAt,
+		"limes_gen": c.Generation,
+	} {
+		if n < -MaxIJSONInteger || n > MaxIJSONInteger {
+			return fmt.Errorf("limes: %s %d is outside the I-JSON integer range (RFC 7493)", name, n)
+		}
+	}
+	return nil
+}
+
+// strictClaims is how a token's header and claims are read. Unknown members
+// are refused, not skipped: a caveat this verifier does not know is one it
+// cannot enforce, and must not pass as one it did. Duplicate names are
+// refused and names match in their exact case — both by default in the
+// encoding/json/v2 semantics — so no two parsers can read one signed token
+// two ways.
+var strictClaims = json.RejectUnknownMembers(true)
 
 type cnfClaim struct {
 	JKT string `json:"jkt"`
@@ -122,7 +132,7 @@ type cnfClaim struct {
 
 // Sign implements Signer. Encodes the header + claims, signs the
 // dotted concatenation, returns the compact form.
-func (s *ed25519Signer) Sign(c Capability) (string, error) {
+func (s *ed25519Signer) Sign(_ context.Context, c Capability) (string, error) {
 	if c.ID == uuid.Nil {
 		return "", errors.New("limes: ID required")
 	}
@@ -138,18 +148,26 @@ func (s *ed25519Signer) Sign(c Capability) (string, error) {
 	if c.ExpiresAt.Before(c.IssuedAt) || c.ExpiresAt.IsZero() {
 		return "", errors.New("limes: ExpiresAt must be after IssuedAt")
 	}
+	if err := checkActor(c.Actor, c.Subject.Subject); err != nil {
+		return "", err
+	}
+	if (c.Actor == nil) != (c.OnBehalfOf == "") {
+		return "", errors.New("limes: OnBehalfOf and Actor are set together, on a delegated capability")
+	}
 
-	header := jwtHeader{Alg: algEdDSA, Kid: s.keyID, Typ: TokenType}
+	header := jwtHeader{Alg: algEd25519, Kid: s.keyID, Typ: TokenType}
 	claims := jwtClaims{
 		Issuer:     c.Issuer,
-		Subject:    c.Subject.Subject,
+		Subject:    c.Authority(),
+		Actor:      c.Actor,
 		Audience:   c.Audience,
 		IssuedAt:   c.IssuedAt.Unix(),
 		ExpiresAt:  c.ExpiresAt.Unix(),
 		ID:         c.ID.String(),
-		Principal:  &c.Subject,
-		Caveats:    c.Caveats,
+		Principal:  c.Subject,
 		Generation: c.Generation,
+
+		AuthorizationDetails: []AuthorizationDetail{NewAuthorizationDetail(c.Caveats)},
 	}
 	if !c.NotBefore.IsZero() {
 		claims.NotBefore = c.NotBefore.Unix()
@@ -188,8 +206,9 @@ func (s *ed25519Signer) Sign(c Capability) (string, error) {
 // TokenType is the JWT "typ" header every capability token carries. The
 // verifier requires it, so a different kind of EdDSA JWT signed by the same
 // key — an ID token, another product's token — cannot be presented as a
-// capability.
-const TokenType = "limes-cap+jwt" //nolint:gosec // G101: a JWT type label, not a credential
+// capability. It names the format's version: a token of another version is
+// refused here, before a claim of it is read under the wrong schema.
+const TokenType = "limes-cap-v2+jwt" //nolint:gosec // G101: a JWT type label, not a credential
 
 // tokenParts is a compact token split into its three segments.
 type tokenParts struct {
@@ -213,11 +232,13 @@ func parseHeader(seg string) (jwtHeader, error) {
 		return jwtHeader{}, fmt.Errorf("limes: decode header: %w", err)
 	}
 	var h jwtHeader
-	if err := json.Unmarshal(raw, &h); err != nil {
+	if err := json.Unmarshal(raw, &h, strictClaims); err != nil {
 		return jwtHeader{}, fmt.Errorf("limes: parse header: %w", err)
 	}
-	if h.Alg != algEdDSA {
-		return jwtHeader{}, fmt.Errorf("limes: unexpected alg %q (want EdDSA)", h.Alg)
+	// Only the fully-specified identifier (RFC 9864): a capability token is
+	// this module's own, and none was ever written with another under typ v2.
+	if h.Alg != algEd25519 {
+		return jwtHeader{}, fmt.Errorf("limes: unexpected alg %q (want %s)", h.Alg, algEd25519)
 	}
 	return h, nil
 }
@@ -228,19 +249,41 @@ func parseClaims(seg string) (*Capability, error) {
 		return nil, fmt.Errorf("limes: decode claims: %w", err)
 	}
 	var claims jwtClaims
-	if err := json.Unmarshal(raw, &claims); err != nil {
+	if err := json.Unmarshal(raw, &claims, strictClaims); err != nil {
 		return nil, fmt.Errorf("limes: parse claims: %w", err)
+	}
+	if err := checkIJSONIntegers(claims); err != nil {
+		return nil, err
+	}
+	for _, d := range claims.AuthorizationDetails {
+		if d.MaxRequests < 0 || d.MaxRequests > MaxIJSONInteger {
+			return nil, fmt.Errorf("limes: max_requests %d is outside the I-JSON integer range (RFC 7493)", d.MaxRequests)
+		}
+	}
+	// sub is the authority the token acts on (RFC 8693): the principal's own
+	// on a root capability, and the act claim's current actor is the
+	// principal on a delegated one. Anything else names two subjects, which
+	// two parsers would read two ways.
+	if err := checkActor(claims.Actor, claims.Principal.Subject); err != nil {
+		return nil, err
+	}
+	if claims.Actor == nil && claims.Subject != claims.Principal.Subject {
+		return nil, fmt.Errorf("limes: sub %q differs from limes_principal.subject %q", claims.Subject, claims.Principal.Subject)
 	}
 
 	id, err := uuid.Parse(claims.ID)
 	if err != nil {
 		return nil, fmt.Errorf("limes: parse jti: %w", err)
 	}
+	caveats, err := capabilityDetail(claims.AuthorizationDetails)
+	if err != nil {
+		return nil, err
+	}
 	cap := &Capability{
 		ID:         id,
 		Issuer:     claims.Issuer,
 		Audience:   claims.Audience,
-		Caveats:    claims.Caveats,
+		Caveats:    caveats,
 		IssuedAt:   time.Unix(claims.IssuedAt, 0).UTC(),
 		ExpiresAt:  time.Unix(claims.ExpiresAt, 0).UTC(),
 		Generation: claims.Generation,
@@ -248,10 +291,9 @@ func parseClaims(seg string) (*Capability, error) {
 	if claims.NotBefore != 0 {
 		cap.NotBefore = time.Unix(claims.NotBefore, 0).UTC()
 	}
-	if claims.Principal != nil {
-		cap.Subject = *claims.Principal
-	} else {
-		cap.Subject = Principal{Subject: claims.Subject}
+	cap.Subject = claims.Principal
+	if claims.Actor != nil {
+		cap.Actor, cap.OnBehalfOf = claims.Actor, claims.Subject
 	}
 	if claims.Confirmation != nil {
 		cap.ConfirmationJKT = claims.Confirmation.JKT

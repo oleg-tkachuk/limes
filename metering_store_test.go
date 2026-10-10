@@ -2,117 +2,185 @@ package limes_test
 
 import (
 	"context"
-	"sync"
-	"sync/atomic"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/metric/noop"
+	"go.opentelemetry.io/otel/attribute"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/memstore"
 )
 
-// countingProvider counts every measurement any of its instruments takes.
-type countingProvider struct {
-	noop.MeterProvider
-	n *atomic.Int64
-}
-
-func (p countingProvider) Meter(string, ...metric.MeterOption) metric.Meter {
-	return countingMeter{n: p.n}
-}
-
-type countingMeter struct {
-	noop.Meter
-	n *atomic.Int64
-}
-
-func (m countingMeter) Int64Counter(string, ...metric.Int64CounterOption) (metric.Int64Counter, error) {
-	return countingInt64{n: m.n}, nil
-}
-
-func (m countingMeter) Float64Counter(string, ...metric.Float64CounterOption) (metric.Float64Counter, error) {
-	return countingFloat64{n: m.n}, nil
-}
-
-func (m countingMeter) Float64Histogram(string, ...metric.Float64HistogramOption) (metric.Float64Histogram, error) {
-	return countingHistogram{n: m.n}, nil
-}
-
-type countingInt64 struct {
-	noop.Int64Counter
-	n *atomic.Int64
-}
-
-func (c countingInt64) Add(context.Context, int64, ...metric.AddOption) { c.n.Add(1) }
-
-type countingFloat64 struct {
-	noop.Float64Counter
-	n *atomic.Int64
-}
-
-func (c countingFloat64) Add(context.Context, float64, ...metric.AddOption) { c.n.Add(1) }
-
-type countingHistogram struct {
-	noop.Float64Histogram
-	n *atomic.Int64
-}
-
-func (c countingHistogram) Record(context.Context, float64, ...metric.RecordOption) { c.n.Add(1) }
-
-// measurements is the count of every measurement taken in this test binary.
-// OpenTelemetry binds the decorator's instruments to the first provider set,
-// so the tests share one provider, set once, and read deltas of its count.
-var (
-	measurements     atomic.Int64
-	measurementsOnce sync.Once
+// Instrument names and attributes as an exporter reads them.
+const (
+	metricChargeAmount    = "limes.charge.amount"
+	metricChargeDecisions = "limes.charge.decisions"
+	metricRequestBumps    = "limes.request.bumps"
+	metricRefundAmount    = "limes.refund.amount"
+	metricReservations    = "limes.reservation.decisions"
+	attrOutcome           = "outcome"
+	attrUnit              = "unit_code"
+	attrTenant            = "tenant_id"
 )
 
-func countMeasurements() *atomic.Int64 {
-	measurementsOnce.Do(func() { otel.SetMeterProvider(countingProvider{n: &measurements}) })
-	return &measurements
+// meteredStore is a metered memstore whose measurements reader collects.
+func meteredStore(t *testing.T, opts ...limes.MeteringOption) (limes.UsageStore[struct{}], *sdkmetric.ManualReader) {
+	t.Helper()
+	reader := sdkmetric.NewManualReader()
+	opts = append(opts, limes.WithMeterProvider(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))))
+	usage, err := limes.WithMetering[struct{}](memstore.NewUsage[struct{}](nil), opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return usage, reader
+}
+
+// point is one data point of a sum: its value and attributes.
+type point struct {
+	value float64
+	attrs attribute.Set
+}
+
+// points collects every sum data point of the named instrument.
+func points(t *testing.T, reader *sdkmetric.ManualReader, name string) []point {
+	t.Helper()
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatal(err)
+	}
+	var out []point
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != name {
+				continue
+			}
+			switch data := m.Data.(type) {
+			case metricdata.Sum[int64]:
+				for _, dp := range data.DataPoints {
+					out = append(out, point{float64(dp.Value), dp.Attributes})
+				}
+			case metricdata.Sum[float64]:
+				for _, dp := range data.DataPoints {
+					out = append(out, point{dp.Value, dp.Attributes})
+				}
+			}
+		}
+	}
+	return out
+}
+
+// valueAt is the value of the point whose attribute key is value, or 0.
+func valueAt(ps []point, key, value string) float64 {
+	for _, p := range ps {
+		if v, ok := p.attrs.Value(attribute.Key(key)); ok && v.AsString() == value {
+			return p.value
+		}
+	}
+	return 0
 }
 
 // A replayed charge or settle moved nothing, so the decorator counts nothing:
 // counting it again would report spend twice.
-func TestMeteringStoreCountsNoReplay(t *testing.T) {
-	count := countMeasurements()
+func TestMeteringCountsNoReplay(t *testing.T) {
+	usage, reader := meteredStore(t)
 	ctx := context.Background()
-	usage := limes.WithMetering[struct{}](memstore.NewUsage[struct{}](nil))
 	tenant, capID := uuid.New(), uuid.New()
 	charge := limes.ChargeRequest{CapabilityID: capID, TenantID: tenant, Amount: limes.MustParseAmount("1"), ExternalRef: "call-1"}
-
-	before := count.Load()
-	if _, err := usage.Charge(ctx, charge, nil); err != nil {
+	for range 2 {
+		if _, err := usage.Charge(ctx, charge, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res, err := usage.Reserve(ctx, limes.ReserveRequest{CapabilityID: capID, TenantID: tenant, Amount: limes.MustParseAmount("1")})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if count.Load() == before {
-		t.Fatal("a charge took no measurement")
+	settle := limes.SettleRequest{ReservationID: res.ID, Amount: limes.MustParseAmount("1")}
+	for range 2 {
+		if _, err := usage.Settle(ctx, settle, nil); err != nil {
+			t.Fatal(err)
+		}
 	}
-	after := count.Load()
-	if r, err := usage.Charge(ctx, charge, nil); err != nil || !r.Replayed {
-		t.Fatalf("repeated charge = %+v, %v; want a replay", r, err)
+	if got := valueAt(points(t, reader, metricChargeDecisions), attrOutcome, "allowed"); got != 2 {
+		t.Errorf("%v charges counted, want 2: one charge and one settle, no replay", got)
 	}
-	if got := count.Load(); got != after {
-		t.Errorf("a replayed charge took %d measurements", got-after)
-	}
+}
 
-	res, err := usage.Reserve(ctx, limes.ReserveRequest{CapabilityID: capID, TenantID: tenant, Amount: limes.MustParseAmount("1")})
+// Every amount carries its unit, the settle's included, though its request
+// names only the reservation; and every refused or failed attempt is
+// counted under its outcome.
+func TestMeteringLabelsAmountsAndOutcomes(t *testing.T) {
+	usage, reader := meteredStore(t)
+	ctx := context.Background()
+	tenant, capID := uuid.New(), uuid.New()
+	eur := func(s string) limes.ChargeRequest {
+		return limes.ChargeRequest{CapabilityID: capID, TenantID: tenant, Amount: limes.MustParseAmount(s), MaxBudget: limes.MustParseAmount("5"), UnitCode: "EUR"}
+	}
+	r, err := usage.Charge(ctx, eur("2"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := usage.Charge(ctx, eur("9"), nil); !errors.Is(err, limes.ErrBudgetExceeded) {
+		t.Fatalf("charge past the ceiling: %v", err)
+	}
+	over := eur("9")
+	over.Overrun = limes.OverrunRecord
+	if _, err := usage.Charge(ctx, over, nil); err != nil {
+		t.Fatal(err)
+	}
+	boom := errors.New("side effect failed")
+	failing := eur("0.1")
+	failing.CapabilityID = uuid.New() // a capability with room, so the callback runs
+	if _, err := usage.Charge(ctx, failing, func(context.Context, struct{}) error { return boom }); !errors.Is(err, boom) {
+		t.Fatal(err)
+	}
+	res, err := usage.Reserve(ctx, limes.ReserveRequest{CapabilityID: uuid.New(), TenantID: tenant, Amount: limes.MustParseAmount("1"), UnitCode: "EUR"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := usage.Settle(ctx, limes.SettleRequest{ReservationID: res.ID, Amount: limes.MustParseAmount("1")}, nil); err != nil {
 		t.Fatal(err)
 	}
-	after = count.Load()
-	if r, err := usage.Settle(ctx, limes.SettleRequest{ReservationID: res.ID, Amount: limes.MustParseAmount("1")}, nil); err != nil || !r.Replayed {
-		t.Fatalf("repeated settle = %+v, %v; want a replay", r, err)
+	if _, err := usage.Refund(ctx, limes.RefundRequest{ChargeID: r.ChargeID}); err != nil {
+		t.Fatal(err)
 	}
-	if got := count.Load(); got != after {
-		t.Errorf("a replayed settle took %d measurements", got-after)
+
+	decisions := points(t, reader, metricChargeDecisions)
+	for outcome, want := range map[string]float64{"allowed": 2, "cap_exceeded": 1, "overrun": 1, "error": 1} {
+		if got := valueAt(decisions, attrOutcome, outcome); got != want {
+			t.Errorf("%s charges = %v, want %v", outcome, got, want)
+		}
+	}
+	// 2 charged, 9 recorded past the ceiling, 1 settled: all in EUR.
+	if got := valueAt(points(t, reader, metricChargeAmount), attrUnit, "EUR"); got != 12 {
+		t.Errorf("EUR charged = %v, want 12", got)
+	}
+	if got := valueAt(points(t, reader, metricRefundAmount), attrUnit, "EUR"); got != 2 {
+		t.Errorf("EUR refunded = %v, want 2", got)
+	}
+	for _, name := range []string{metricChargeDecisions, metricChargeAmount, metricRefundAmount} {
+		for _, p := range points(t, reader, name) {
+			if p.attrs.HasValue(attribute.Key(attrTenant)) {
+				t.Errorf("%s carries tenant_id without WithTenantAttribute", name)
+			}
+		}
+	}
+}
+
+// WithTenantAttribute labels measurements with the tenant.
+func TestMeteringTenantAttributeIsOptIn(t *testing.T) {
+	usage, reader := meteredStore(t, limes.WithTenantAttribute())
+	ctx := context.Background()
+	tenant := uuid.New()
+	if _, err := usage.Bump(ctx, limes.BumpRequest{CapabilityID: uuid.New(), TenantID: tenant, MaxRequests: 1}); err != nil {
+		t.Fatal(err)
+	}
+	ps := points(t, reader, metricRequestBumps)
+	if got := valueAt(ps, attrTenant, tenant.String()); got != 1 {
+		t.Errorf("bumps for tenant %s = %v, want 1", tenant, got)
 	}
 }
 
@@ -124,19 +192,27 @@ type hiddenCopies struct {
 
 // The decorator reads copy counters exactly when the store it wraps does.
 func TestWithMeteringKeepsCopyUsage(t *testing.T) {
-	if limes.WithMetering[struct{}](nil) != nil {
-		t.Fatal("WithMetering(nil) must stay nil")
+	if _, err := limes.WithMetering[struct{}](nil); err == nil {
+		t.Fatal("WithMetering(nil) wrapped nothing without an error")
 	}
 	inner := memstore.NewUsage[struct{}](nil)
-	if _, ok := limes.WithMetering[struct{}](inner).(limes.CopyUsageReader); !ok {
+	wrap := func(u limes.UsageStore[struct{}]) limes.UsageStore[struct{}] {
+		t.Helper()
+		m, err := limes.WithMetering(u)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	if _, ok := wrap(inner).(limes.CopyUsageReader); !ok {
 		t.Error("wrapping a store that reads copy counters hid them")
 	}
-	if _, ok := limes.WithMetering[struct{}](hiddenCopies{inner}).(limes.CopyUsageReader); ok {
+	if _, ok := wrap(hiddenCopies{inner}).(limes.CopyUsageReader); ok {
 		t.Error("wrapping a store that reads no copy counters claimed to read them")
 	}
 
 	ctx := context.Background()
-	usage := limes.WithMetering[struct{}](inner)
+	usage := wrap(inner)
 	copyID := []byte("copy-1")
 	copies := []limes.CopyCeiling{{RevocationID: copyID, MaxRequests: 10}}
 	if _, err := usage.Bump(ctx, limes.BumpRequest{CapabilityID: uuid.New(), TenantID: uuid.New(), Copies: copies}); err != nil {
@@ -151,17 +227,16 @@ func TestWithMeteringKeepsCopyUsage(t *testing.T) {
 // Every method reaches the store the decorator wraps, and the ones that move
 // a counter are measured.
 func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
-	count := countMeasurements()
+	usage, reader := meteredStore(t)
 	ctx := context.Background()
-	usage := limes.WithMetering[struct{}](memstore.NewUsage[struct{}](nil))
 	tenant, capID := uuid.New(), uuid.New()
-	measured := func(name string, call func() error) {
+	measured := func(name, metric string, call func() error) {
 		t.Helper()
-		before := count.Load()
+		before := len(points(t, reader, metric))
 		if err := call(); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		if count.Load() == before {
+		if len(points(t, reader, metric)) == before && before == 0 {
 			t.Errorf("%s took no measurement", name)
 		}
 	}
@@ -169,25 +244,31 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 	if _, err := usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{TenantID: tenant, MaxBudgetAmount: limes.MustParseAmount("10")}); err != nil {
 		t.Fatal(err)
 	}
-	measured("Bump", func() error {
+	measured("Bump", metricRequestBumps, func() error {
 		_, err := usage.Bump(ctx, limes.BumpRequest{CapabilityID: capID, TenantID: tenant})
 		return err
 	})
 	var receipt limes.ChargeReceipt
-	measured("Charge", func() (err error) {
+	measured("Charge", metricChargeAmount, func() (err error) {
 		receipt, err = usage.Charge(ctx, limes.ChargeRequest{CapabilityID: capID, TenantID: tenant, Amount: limes.MustParseAmount("2"), ExternalRef: "r"}, nil)
 		return err
 	})
-	measured("Refund", func() error {
+	measured("Refund", metricRefundAmount, func() error {
 		_, err := usage.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("1")})
 		return err
 	})
 	var res limes.Reservation
-	measured("Reserve", func() (err error) {
+	measured("Reserve", metricReservations, func() (err error) {
 		res, err = usage.Reserve(ctx, limes.ReserveRequest{CapabilityID: capID, TenantID: tenant, Amount: limes.MustParseAmount("1")})
 		return err
 	})
 
+	if got, err := usage.GetReservation(ctx, res.ID); err != nil || got.ID != res.ID {
+		t.Errorf("GetReservation = %+v, %v", got, err)
+	}
+	if got, err := usage.ListReservations(ctx, capID); err != nil || len(got) != 1 || got[0].ID != res.ID {
+		t.Errorf("ListReservations = %+v, %v", got, err)
+	}
 	if err := usage.Release(ctx, res.ID); err != nil {
 		t.Errorf("Release: %v", err)
 	}

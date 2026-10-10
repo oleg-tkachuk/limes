@@ -126,6 +126,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"UnknownIDs", checkUnknown},
 		{"RevokeIsIdempotentAndReachesDescendants", checkRevoke},
 		{"CascadeRecordsEveryDescendant", checkCascade},
+		{"RevocationReachesEveryGeneration", checkDeepChain},
 		{"PurgeExpiredDropsEntriesNotRecords", checkPurge},
 		{"ListByPrincipalPages", checkListPages},
 		{"ListByPrincipalFilters", checkListFilters},
@@ -257,6 +258,38 @@ func checkCascade(t *testing.T, f fixture) {
 	}
 }
 
+// checkDeepChain holds a store to the whole delegation chain, not its first
+// link: a store that joins a capability to its parent once, rather than
+// walking to the root, passes the one-level checks above and misses a
+// grandchild. A cascade must also stay below where it started.
+func checkDeepChain(t *testing.T, f fixture) {
+	root := f.live(t, "agent:root", uuid.Nil)
+	mid := f.live(t, "agent:mid", root.ID)
+	leaf := f.live(t, "agent:leaf", mid.ID)
+	f.revoke(t, root.ID, false)
+	if !f.revoked(t, leaf.ID) {
+		t.Error("revoking a root must stop its grandchild")
+	}
+
+	top := f.live(t, "agent:top", uuid.Nil)
+	from := f.live(t, "agent:from", top.ID)
+	sibling := f.live(t, "agent:sibling", top.ID)
+	below := f.live(t, "agent:below", from.ID)
+	under := f.live(t, "agent:under", below.ID)
+	f.revoke(t, from.ID, true)
+	for _, c := range []limes.Capability{from, below, under} {
+		rec, err := f.Store.GetRecord(f.Ctx, c.ID)
+		if err != nil || rec.Revocation == nil {
+			t.Errorf("GetRecord(%s) = %+v, %v; want a revocation entry written by the cascade", c.Subject.Subject, rec.Revocation, err)
+		}
+	}
+	for _, c := range []limes.Capability{top, sibling} {
+		if f.revoked(t, c.ID) {
+			t.Errorf("a cascade from %s reached %s, which is not below it", from.Subject.Subject, c.Subject.Subject)
+		}
+	}
+}
+
 func checkPurge(t *testing.T, f fixture) {
 	expired := f.insert(t, f.newCapability("agent:old", uuid.Nil, f.now.Add(-expiredAgo)))
 	live := f.live(t, "agent:new", uuid.Nil)
@@ -317,7 +350,7 @@ func checkListPages(t *testing.T, f fixture) {
 	if !slices.Equal(sizes, []int{pageSize, pageSize, listed - 2*pageSize}) {
 		t.Errorf("page sizes = %v", sizes)
 	}
-	slices.SortFunc(want, func(a, b uuid.UUID) int { return compareUUID(a, b) })
+	slices.SortFunc(want, compareUUID)
 	if !slices.Equal(got, want) {
 		t.Errorf("listed %v, want every capability once in ascending id order %v", got, want)
 	}

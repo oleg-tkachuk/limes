@@ -1,26 +1,51 @@
 # Guide
 
 Using limes, one concern at a time. [README.md](../README.md) has the five-minute
-start, and [diagrams.md](diagrams.md) draws each path described here.
+start, [diagrams.md](diagrams.md) draws each path described here, and
+[standards.md](standards.md) maps each to the RFC it follows.
 
-## Verify on every call
+## Authorize every call
 
 ```go
-cap, err := verifier.Verify(ctx, token, "my-service")
+scheme, token, err := limes.ParseAuthorization(r.Header.Get(limes.AuthorizationHeader))
+cap, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
+    VerifyRequest: limes.VerifyRequest{
+        Token: token, Scheme: scheme, Audience: "https://data.example.com",
+        // Needed when the capability is key-bound; ignored when it is not.
+        DPoP: limes.DPoPProof{Proof: r.Header.Get(limes.DPoPHeader), Method: r.Method, URL: requestURL},
+    },
+    CheckRequest: limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/report.pdf"},
+    ClientAddr:   clientAddr,
+})
+// verifier.ErrorResponse(ctx, err, scheme) answers a refusal the RFC 6750 /
+// RFC 9449 / RFC 9457 way; or branch on the sentinel yourself:
 switch {
 case errors.Is(err, limes.ErrExpired):          // TTL elapsed
 case errors.Is(err, limes.ErrRevoked):          // pulled mid-flight
 case errors.Is(err, limes.ErrAudienceMismatch): // token for another service
-case errors.Is(err, limes.ErrInvalidSignature): // forged
+case errors.Is(err, limes.ErrCaveatViolation):  // not allowed to do this
+case errors.Is(err, limes.ErrInvalidSignature): // forged, or no valid proof of possession
 }
 ```
+
+An audience is a resource indicator (RFC 8707): an absolute URI with no
+fragment, naming the service the token is for. `Issue` and `Delegate` refuse
+any other.
+
+`Authorize` is `Verify` — the token itself — followed by every caveat that
+needs no state: the operation, the resource, the idempotency key, the tainted
+read and the client's address. Request and budget limits are counted by the
+`Meter` (below), inside your own transaction. Call `Verify` alone only where
+there is no operation to check, such as before a delegation.
 
 Verification is **local** — the signature is checked against the resolved key,
 with no round trip to the issuer, and nothing in the claims is read until it
 has. Every rejection is a distinct sentinel; map each to whatever status your
 transport uses. This module does not decide your HTTP or RPC codes.
 
-The token must carry `typ: limes-cap+jwt` and a tenant, and may be at most
+The token must carry `typ: limes-cap-v2+jwt` and a tenant, its claims must
+hold no member the verifier does not know (a caveat it could not enforce),
+none twice and none in another case, and may be at most
 `VerifierConfig.MaxTokenBytes` long (16 KiB unless set). When several issuers share a verifier, set
 `KeyIssuers` (kid → issuer) so one issuer's key cannot sign for another.
 Verifiers running apart from the issuer resolve keys with
@@ -51,7 +76,9 @@ revocation, so never authorise a request on either: that is `Verify`.
 ## Enforce the caveats on every operation
 
 Verification proves the token is genuine; it does not know what the bearer is
-about to do. Ask the caveats, through the one definition the module ships:
+about to do. `Authorize` asks the caveats for you; code that checks a second
+operation under a capability it already verified asks them directly, through
+the same one definition:
 
 ```go
 if err := cap.Caveats.CheckSource(clientAddr); err != nil { /* per connection */ }
@@ -74,7 +101,11 @@ case errors.Is(err, limes.ErrTaintedReadNotAllowed):
 Resource prefixes match at a `/` segment boundary: `corpus/public` covers
 `corpus/public/x` but not `corpus/public-secret`. An operation that cannot name
 its resource (`Resource: ""`) is refused by a resource-restricted capability —
-for an operation over a set, pass the prefix that bounds the set.
+for an operation over a set, pass the prefix that bounds the set. A resource
+with a `.` or `..` segment, plain or percent-encoded, is refused by a
+resource-restricted capability and by `Validate`: what it names depends on how
+you resolve it, not on its text. Pass the resource as your storage will
+address it.
 `AllowTaintedRead` can only act on a taint signal you supply; if you track
 none, it protects nothing, and you should say so.
 
@@ -136,6 +167,13 @@ total, not 40.00.
 This is the property that makes the model safe to hand to an agent: it can
 attenuate itself, but never escalate.
 
+
+A delegated token says whose authority it carries and who acts on it, as
+OAuth Token Exchange does (RFC 8693 §4.1): its `sub` is the subject of the
+root capability (`Capability.OnBehalfOf`), and its `act` claim names the
+holder, nesting the holders it was delegated through (`Capability.Actor`).
+`Narrows` refuses a child acting on another authority, and a chain stops at
+`MaxDelegationDepth`.
 ## Bind a capability to a key (DPoP)
 
 A capability is a bearer token unless it is bound: whoever holds it can use
@@ -148,17 +186,35 @@ jkt, _ := limes.KeyThumbprint(agentKey.Public()) // Ed25519 or P-256
 cap, token, _ := issuer.Issue(ctx, limes.IssueRequest{ /* … */ ConfirmationJKT: jkt})
 
 // Client: a fresh proof per request, signed over its method, URL and token.
-proof, _ := limes.NewDPoPProof(agentKey, "POST", url, token, time.Now())
+proof, _ := limes.NewDPoPProof(agentKey, limes.DPoPProofRequest{Method: "POST", URL: url, Token: token, Now: time.Now()})
 
-// Server, after Verify:
-dpop := &limes.DPoPVerifier{Replay: limes.NewMemoryReplayCache(0)}
-err := dpop.Check(ctx, cap, limes.DPoPRequest{Proof: proof, Method: "POST", URL: url, Token: token})
+// Server: the verifier checks the proof of every key-bound capability.
+verifier, _ := limes.NewStandardVerifier(limes.VerifierConfig{
+    /* … */
+    DPoP: &limes.DPoPVerifier{Replay: limes.NewMemoryReplayCache(0)},
+})
+cap, err := verifier.Verify(ctx, limes.VerifyRequest{
+    Token: token, Audience: "https://my-service.example.com",
+    DPoP:  limes.DPoPProof{Proof: proof, Method: "POST", URL: url},
+})
 ```
+
+Behind several replicas, give the `DPoPVerifier` server nonces
+(`Nonces: limes.NewHMACNonces(lifetime, key)`, the same key on every replica):
+a proof must then carry a nonce the server issued, so it cannot be signed ahead
+of time, and a refusal with `ErrDPoPNonceRequired` is answered with
+`verifier.DPoPNonce(ctx)` in the `DPoP-Nonce` header for the client to retry
+with (RFC 9449 §8).
+
+A verifier with no `DPoP` refuses every key-bound capability with
+`ErrDPoPRequired` instead of accepting it as a bearer token, so a binding
+cannot be lost to a forgotten call. Behind a proxy that rewrites the host or
+strips a mount prefix, set `DPoPVerifier.MatchPathOnly`.
 
 The token carries the thumbprint as `cnf.jkt` (RFC 7800), omitted when
 unbound, so unbound tokens are byte-for-byte what they were. A delegated
 child inherits its parent's binding or takes the sub-agent's own key, and
-`Narrows` refuses a child that drops it. `Check` refuses a proof from another
+`Narrows` refuses a child that drops it. `Verify` refuses a proof from another
 key, for another method, URL or token, outside a minute of the verifier's
 clock, or seen before; every refusal matches `ErrInvalidSignature`. The
 replay cache is in-process: behind several replicas, a proof replayed to a
@@ -172,7 +228,7 @@ of the same capability (Biscuit v3) can be narrowed by whoever holds it, with
 no key and no network, and a narrowing can never be undone:
 
 ```go
-full, _ := issuer.Biscuit(cap) // same ID, caveats and expiry as cap
+full, _ := issuer.Biscuit(ctx, cap) // same ID, caveats and expiry as cap
 
 // An agent, offline, hands a worker a smaller token:
 worker, _ := limes.Attenuate(full, limes.Attenuation{
@@ -182,7 +238,7 @@ worker, _ := limes.Attenuate(full, limes.Attenuation{
 })
 
 // A verifier built with AcceptBiscuit: true returns the narrowed Capability.
-c, err := verifier.Verify(ctx, worker, limes.AudiencePlaneData)
+c, err := verifier.Verify(ctx, limes.VerifyRequest{Token: worker, Audience: "https://my-service.example.com"})
 ```
 
 An attenuation block may restrict operations, resources, planes, the expiry,
@@ -266,11 +322,13 @@ on your side needs rounding, summing apart or correcting.
   `Float64()` is for display and metrics only.
 - **Range.** Up to `MaxNanos`, just under a billion units. A charge that
   would take a counter past it is refused with `ErrInvalidAmount`.
-- **Units.** `UnitCode` is an ISO 4217 code: USD, EUR, UAH or GBP, or XXX,
-  ISO 4217's code for "no currency", for a budget that is not money.
+- **Units.** `UnitCode` is any ISO 4217 code in upper case (`IsUnitCode`);
+  XXX, ISO 4217's code for "no currency", is the one for a budget that is not
+  money.
 
-In a token the budget is still a plain JSON number of units
-(`"MaxBudgetAmount": 1.5`), read and written without a float in between.
+In a token the budget is a decimal in a JSON string (`"max_budget": "1.5"`),
+so a reader whose numbers are float64 — JavaScript's `JSON.parse` among them —
+cannot round it.
 
 
 ## Reserve before a cost is known
@@ -319,7 +377,9 @@ delivered at least once. Two things change for such a cost.
 
 **It may arrive twice.** Name it with the id your records already give it, and
 the capability is charged once per name; a repeat returns the first receipt
-with `Replayed` set and runs no callback:
+with `Replayed` set and runs no callback. A name arriving again with a
+different amount, unit or tenant is `ErrExternalRefConflict`: one name is one
+cost.
 
 ```go
 receipt, err := usage.Charge(ctx, limes.ChargeRequest{
@@ -347,6 +407,23 @@ price that is not known yet is not a price of zero: hold the estimate and
 settle when it is known, or let the hold lapse and count against the ceilings
 until `ReleaseExpired` runs.
 
+## Observe the meter
+
+`WithMetering` wraps a `UsageStore` in OpenTelemetry instruments — charges,
+refunds, reservations and request bumps, each attempt by outcome (`allowed`,
+`overrun`, `cap_exceeded`, `tenant_exceeded`, `limit_exceeded`, `error`), and
+every amount by its `unit_code`:
+
+```go
+usage, err := limes.WithMetering(store,
+    limes.WithMeterProvider(provider), // default: the global provider
+    limes.WithTenantAttribute(),       // opt-in: one series per tenant
+)
+```
+
+A replayed charge or settle moved nothing and is not counted. `tenant_id` is
+off by default because it multiplies every series by the number of tenants.
+
 ## Check your own store
 
 Much of each contract lives in request fields and in which sentinel comes
@@ -358,10 +435,15 @@ from your store's tests — `storetest` for a `Store` (and a
 func TestMeterContract(t *testing.T) {
     metertest.Run(t, func(t *testing.T) metertest.Env[MyTx] {
         return metertest.Env[MyTx]{Ctx: ctx, Usage: newStore(t), Tenant: tenant,
-            NewCapability: recordCapability}
+            NewCapability: recordCapability,
+            Advance: clock.Advance} // optional: runs the reservation-expiry checks
     })
 }
 ```
+
+The checks include charges racing one ceiling, so run them against the
+database itself: a store that reads a counter and writes it back outside one
+statement or lock overspends, and fails them.
 
 `memstore` runs the same checks, and so do the PostgreSQL stores of
 [Paladin](https://github.com/oleg-tkachuk/paladin), the module's first consumer.

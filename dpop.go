@@ -11,14 +11,17 @@ import (
 	"crypto/sha256"
 	"encoding/asn1"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/go-json-experiment/json"
+	"github.com/go-json-experiment/json/jsontext"
 )
 
 // Proof of possession, after RFC 9449 (DPoP).
@@ -38,8 +41,14 @@ const DPoPTokenType = "dpop+jwt"
 // DefaultDPoPWindow is how far a proof's iat may be from the verifier's clock.
 const DefaultDPoPWindow = time.Minute
 
-// JWS algorithms and JWK members a proof may use (RFC 7518, RFC 8037).
+// JWS algorithms and JWK members (RFC 7518, RFC 8037, RFC 9864).
 const (
+	// algEd25519 is Ed25519 as RFC 9864 fully specifies it: what tokens,
+	// JWKS entries and proofs this module writes carry.
+	algEd25519 = "Ed25519"
+	// algEdDSA is the polymorphic identifier RFC 9864 deprecates. A DPoP
+	// proof or a JWKS entry from a client or tool that predates it is still
+	// read; nothing here writes it.
 	algEdDSA      = "EdDSA"
 	algES256      = "ES256"
 	jwkKtyOKP     = "OKP"
@@ -84,12 +93,35 @@ type dpopHeader struct {
 	JWK *DPoPJWK `json:"jwk"`
 }
 
+// jwkPrivateMembers are the JWK members that carry private key material
+// (RFC 7518 §6.2.2, §6.3.2, §6.4; RFC 8037 §2): "d" for EC and OKP keys, the
+// RSA CRT members, and "k" for a symmetric key.
+var jwkPrivateMembers = []string{"d", "p", "q", "dp", "dq", "qi", "oth", "k"}
+
+// jwkHasPrivateMember reports whether the header segment's jwk carries any
+// private key member — which DPoPJWK, holding the public members alone, would
+// silently drop.
+func jwkHasPrivateMember(headerSeg string) bool {
+	var h struct {
+		JWK map[string]jsontext.Value `json:"jwk"`
+	}
+	if decodeSegment(headerSeg, &h) != nil {
+		return true // unreadable: refuse rather than assume
+	}
+	return slices.ContainsFunc(jwkPrivateMembers, func(m string) bool {
+		_, ok := h.JWK[m]
+		return ok
+	})
+}
+
 type dpopClaims struct {
 	JTI string `json:"jti"`
 	HTM string `json:"htm"`
 	HTU string `json:"htu"`
 	IAT int64  `json:"iat"`
 	ATH string `json:"ath,omitempty"`
+	// Nonce is the server-provided nonce (RFC 9449 §8), when one was asked.
+	Nonce string `json:"nonce,omitempty"`
 }
 
 // DPoPJWK is the public key a proof carries in its header: an Ed25519 (OKP)
@@ -176,15 +208,28 @@ func AccessTokenHash(token string) string {
 	return b64(sum[:])
 }
 
+// DPoPProofRequest is the request a proof is signed for.
+type DPoPProofRequest struct {
+	// Method and URL are the request's.
+	Method string
+	URL    string
+	// Token is the capability the request presents.
+	Token string
+	// Nonce is the last DPoP-Nonce the server sent, empty before it has
+	// sent one.
+	Nonce string
+	// Now is the proof's iat.
+	Now time.Time
+}
+
 // NewDPoPProof signs a proof for one request. key is any crypto.Signer whose
-// public key is Ed25519 or ECDSA P-256; method and rawURL are the request's; token is
-// the capability the request presents.
-func NewDPoPProof(key crypto.Signer, method, rawURL, token string, now time.Time) (string, error) {
+// public key is Ed25519 or ECDSA P-256.
+func NewDPoPProof(key crypto.Signer, req DPoPProofRequest) (string, error) {
 	jwk, err := PublicJWK(key.Public())
 	if err != nil {
 		return "", err
 	}
-	alg := algEdDSA
+	alg := algEd25519
 	if jwk.Kty == jwkKtyEC {
 		alg = algES256
 	}
@@ -192,13 +237,14 @@ func NewDPoPProof(key crypto.Signer, method, rawURL, token string, now time.Time
 	if _, err := rand.Read(jti); err != nil {
 		return "", fmt.Errorf("limes: DPoP jti: %w", err)
 	}
-	htu, err := canonicalHTU(rawURL)
+	htu, err := canonicalHTU(req.URL)
 	if err != nil {
 		return "", err
 	}
 	header, _ := json.Marshal(dpopHeader{Typ: DPoPTokenType, Alg: alg, JWK: &jwk})
 	claims, _ := json.Marshal(dpopClaims{
-		JTI: b64(jti), HTM: strings.ToUpper(method), HTU: htu, IAT: now.Unix(), ATH: AccessTokenHash(token),
+		JTI: b64(jti), HTM: strings.ToUpper(req.Method), HTU: htu, IAT: req.Now.Unix(),
+		ATH: AccessTokenHash(req.Token), Nonce: req.Nonce,
 	})
 	input := b64(header) + "." + b64(claims)
 	sig, err := signDPoP(key, []byte(input))
@@ -239,7 +285,7 @@ func signDPoP(key crypto.Signer, input []byte) ([]byte, error) {
 func verifyDPoPSignature(pub crypto.PublicKey, alg string, input, sig []byte) bool {
 	switch k := pub.(type) {
 	case ed25519.PublicKey:
-		return alg == algEdDSA && ed25519.Verify(k, input, sig)
+		return (alg == algEd25519 || alg == algEdDSA) && ed25519.Verify(k, input, sig)
 	case *ecdsa.PublicKey:
 		if alg != algES256 || len(sig) != es256SignatureBytes {
 			return false
@@ -252,31 +298,26 @@ func verifyDPoPSignature(pub crypto.PublicKey, alg string, input, sig []byte) bo
 	return false
 }
 
-// canonicalHTU is the URL as RFC 9449 compares it: scheme, host and path,
-// without query or fragment.
+// canonicalHTU is the htu a proof carries for rawURL: the URI as RFC 9449
+// compares it (normalizeURI), without query or fragment.
 func canonicalHTU(raw string) (string, error) {
-	u, err := url.Parse(raw)
+	htu, err := normalizeURI(raw)
 	if err != nil {
 		return "", fmt.Errorf("limes: DPoP htu: %w", err)
 	}
-	u.RawQuery, u.Fragment, u.RawFragment = "", "", ""
-	return u.String(), nil
+	return htu, nil
 }
 
-// DPoPRequest is the request a proof must match.
-type DPoPRequest struct {
+// DPoPProof is a request's proof of possession and the request it must
+// match: what VerifyRequest.DPoP carries for a key-bound capability.
+type DPoPProof struct {
 	// Proof is the DPoP header's value; empty when the request had none.
 	Proof string
 	// Method is the HTTP method, e.g. "POST".
 	Method string
-	// URL is the request URL. When MatchPathOnly is set, only its path is
-	// compared, and the proof's path may carry extra leading segments — for
-	// a server behind a proxy, which cannot know the scheme, host or mount
-	// prefix its clients address it by.
-	URL           string
-	MatchPathOnly bool
-	// Token is the capability token the request presents.
-	Token string
+	// URL is the request URL, as the server saw it (see
+	// DPoPVerifier.MatchPathOnly).
+	URL string
 }
 
 // ReplayCache remembers proof ids for as long as a proof could be accepted.
@@ -287,45 +328,59 @@ type ReplayCache interface {
 	Seen(ctx context.Context, jti string, expires time.Time) bool
 }
 
-// DPoPVerifier checks proofs for key-bound capabilities.
+// DPoPVerifier is how a StandardVerifier checks the proofs of key-bound
+// capabilities (VerifierConfig.DPoP).
 type DPoPVerifier struct {
 	// Window bounds |now − iat|. Default DefaultDPoPWindow.
 	Window time.Duration
 	// Replay refuses a jti seen before. Required: without it a captured
-	// proof is good for the whole window.
+	// proof is good for the whole window, and NewStandardVerifier refuses
+	// the configuration.
 	Replay ReplayCache
-	// Now is the clock; default time.Now.
+	// Now is the clock; default the verifier's.
 	Now func() time.Time
+	// Nonces, when set, requires every proof to carry a nonce it issued
+	// (RFC 9449 §8); a proof without one is refused with
+	// ErrDPoPNonceRequired, and StandardVerifier.DPoPNonce gives the nonce
+	// to send back.
+	Nonces DPoPNonces
+	// MatchPathOnly compares only the path of DPoPProof.URL, and lets the
+	// proof's path carry extra leading segments — for a server behind a
+	// proxy, which cannot know the scheme, host or mount prefix its clients
+	// address it by.
+	MatchPathOnly bool
 }
 
-// Check verifies req's proof against the capability. A capability that is
-// not key-bound needs no proof and passes. A key-bound one passes only with a
-// proof that: is a dpop+jwt signed by the key its header carries; whose key's
-// thumbprint is the capability's; that names this method and URL and this
-// token's hash; that was issued within the window; and whose jti is new.
-func (v *DPoPVerifier) Check(ctx context.Context, c Capability, req DPoPRequest) error {
-	if c.ConfirmationJKT == "" {
-		return nil
-	}
-	if req.Proof == "" {
+// errNoReplayCache is a DPoPVerifier configured without the replay cache it
+// requires.
+var errNoReplayCache = errors.New("limes: DPoPVerifier.Replay required")
+
+// check verifies p against the key-bound capability c presented as token. It
+// passes only with a proof that: is a dpop+jwt signed by the key its header
+// carries; whose key's thumbprint is the capability's; that names this method
+// and URL and this token's hash; that was issued within the window; and whose
+// jti is new.
+func (v *DPoPVerifier) check(ctx context.Context, c Capability, token string, p DPoPProof) error {
+	if p.Proof == "" {
 		return ErrDPoPRequired
 	}
 	window := v.Window
 	if window <= 0 {
 		window = DefaultDPoPWindow
 	}
-	now := time.Now
-	if v.Now != nil {
-		now = v.Now
-	}
+	now := v.Now
 
-	parts, err := splitToken(req.Proof)
+	parts, err := splitToken(p.Proof)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrDPoPInvalid, err)
 	}
 	var header dpopHeader
 	if err := decodeSegment(parts.header, &header); err != nil || header.Typ != DPoPTokenType || header.JWK == nil {
 		return fmt.Errorf("%w: header", ErrDPoPInvalid)
+	}
+	// RFC 9449 §4.3: the jwk must not contain a private key.
+	if jwkHasPrivateMember(parts.header) {
+		return fmt.Errorf("%w: jwk carries a private key", ErrDPoPInvalid)
 	}
 	thumb, err := header.JWK.Thumbprint()
 	if err != nil || thumb != c.ConfirmationJKT {
@@ -344,21 +399,21 @@ func (v *DPoPVerifier) Check(ctx context.Context, c Capability, req DPoPRequest)
 	if err := decodeSegment(parts.claims, &claims); err != nil || claims.JTI == "" {
 		return fmt.Errorf("%w: claims", ErrDPoPInvalid)
 	}
-	if !strings.EqualFold(claims.HTM, req.Method) {
-		return fmt.Errorf("%w: method %q, proof names %q", ErrDPoPInvalid, req.Method, claims.HTM)
+	if !strings.EqualFold(claims.HTM, p.Method) {
+		return fmt.Errorf("%w: method %q, proof names %q", ErrDPoPInvalid, p.Method, claims.HTM)
 	}
-	if !htuMatches(claims.HTU, req.URL, req.MatchPathOnly) {
+	if !htuMatches(claims.HTU, p.URL, v.MatchPathOnly) {
 		return fmt.Errorf("%w: URL does not match the proof's htu", ErrDPoPInvalid)
 	}
-	if claims.ATH != AccessTokenHash(req.Token) {
+	if claims.ATH != AccessTokenHash(token) {
 		return fmt.Errorf("%w: proof is for another token", ErrDPoPInvalid)
 	}
 	iat := time.Unix(claims.IAT, 0)
 	if d := now().Sub(iat); d > window || d < -window {
 		return fmt.Errorf("%w: issued at %s, outside the %s window", ErrDPoPInvalid, iat.UTC(), window)
 	}
-	if v.Replay == nil {
-		return fmt.Errorf("%w: no replay cache configured", ErrDPoPInvalid)
+	if v.Nonces != nil && !v.Nonces.Valid(ctx, claims.Nonce) {
+		return ErrDPoPNonceRequired
 	}
 	if v.Replay.Seen(ctx, claims.JTI, iat.Add(window)) {
 		return ErrDPoPReplayed
@@ -366,26 +421,25 @@ func (v *DPoPVerifier) Check(ctx context.Context, c Capability, req DPoPRequest)
 	return nil
 }
 
+// htuMatches compares a proof's htu with the request URL after RFC 3986
+// syntax- and scheme-based normalisation, as RFC 9449 §4.3 requires.
 func htuMatches(htu, requestURL string, pathOnly bool) bool {
-	want, err := url.Parse(requestURL)
-	if err != nil {
-		return false
-	}
-	got, err := url.Parse(htu)
-	if err != nil {
-		return false
-	}
 	if pathOnly {
+		got, err1 := url.Parse(htu)
+		want, err2 := url.Parse(requestURL)
+		if err1 != nil || err2 != nil {
+			return false
+		}
+		g, w := normalizePath(got.EscapedPath()), normalizePath(want.EscapedPath())
 		// A proxy may mount the service under a prefix it strips before
 		// forwarding, so the client's path may carry segments the server
-		// never sees. The server's path must still be the whole tail.
-		return got.Path == want.Path ||
-			(strings.HasPrefix(want.Path, "/") && strings.HasSuffix(got.Path, want.Path))
+		// never sees. The server's path must still be the whole tail, from a
+		// segment boundary.
+		return g == w || strings.HasSuffix(g, w) && strings.HasPrefix(w, "/")
 	}
-	if got.Path != want.Path {
-		return false
-	}
-	return strings.EqualFold(got.Scheme, want.Scheme) && strings.EqualFold(got.Host, want.Host)
+	got, err1 := normalizeURI(htu)
+	want, err2 := normalizeURI(requestURL)
+	return err1 == nil && err2 == nil && got == want
 }
 
 func decodeSegment(seg string, v any) error {

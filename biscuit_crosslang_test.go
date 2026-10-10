@@ -3,6 +3,7 @@ package limes
 import (
 	"context"
 	"crypto/ed25519"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -53,6 +54,7 @@ func goldenBiscuitVerifier(t *testing.T) *StandardVerifier {
 		Now:            goldenClock,
 		AcceptBiscuit:  true,
 		MeterCopies:    true,
+		DPoP:           &DPoPVerifier{Replay: NewMemoryReplayCache(0)},
 
 		BiscuitRevocations: revLookup{},
 	})
@@ -83,14 +85,14 @@ func TestGenerateBiscuitFixtures(t *testing.T) {
 	cap, _, err := issuer.Issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.MustParse(goldenTenant), Subject: goldenSubject},
-		Audience: []string{AudiencePlaneData, AudiencePlaneMCP},
+		Audience: []string{audienceData, audienceMCP},
 		Caveats:  Caveats{Ops: []Op{OpGet, OpList, OpPut}, ResourcePrefixes: []string{"corpus/"}},
 		TTL:      biscuitSeedTTL,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := issuer.Biscuit(cap)
+	token, err := issuer.Biscuit(context.Background(), cap)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,6 +101,10 @@ func TestGenerateBiscuitFixtures(t *testing.T) {
 	}
 
 	c := readBiscuitCase(t)
+	jkt, err := KeyThumbprint(c.bindKey(t).Public())
+	if err != nil || jkt != c.Attenuate.BindJKT {
+		t.Fatalf("bind_jkt = %q, the thumbprint of bind_key_seed's key is %q (%v)", c.Attenuate.BindJKT, jkt, err)
+	}
 	attenuated, err := Attenuate(token, Attenuation{
 		Ops:              c.Attenuate.Ops,
 		ResourcePrefixes: c.Attenuate.ResourcePrefixes,
@@ -114,6 +120,17 @@ func TestGenerateBiscuitFixtures(t *testing.T) {
 	if err := os.WriteFile(biscuitFixturePath(biscuitAttenuatedFile), []byte(attenuated+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// bindKey is the key the case binds the attenuated copy to, from its seed:
+// an SDK signs its DPoP proofs with the same key.
+func (c biscuitCase) bindKey(t *testing.T) ed25519.PrivateKey {
+	t.Helper()
+	seed, err := hex.DecodeString(c.Attenuate.BindKeySeed)
+	if err != nil || len(seed) != ed25519.SeedSize {
+		t.Fatalf("bind_key_seed %q is not %d hex bytes: %v", c.Attenuate.BindKeySeed, ed25519.SeedSize, err)
+	}
+	return ed25519.NewKeyFromSeed(seed)
 }
 
 func readBiscuitCase(t *testing.T) biscuitCase {
@@ -132,6 +149,7 @@ type biscuitCase struct {
 		Planes           []string  `json:"planes"`
 		ExpiresAt        time.Time `json:"expires_at"`
 		BindJKT          string    `json:"bind_jkt"`
+		BindKeySeed      string    `json:"bind_key_seed"`
 		MaxRequests      int64     `json:"max_requests"`
 		MaxBudget        int64     `json:"max_budget_nanos"`
 	} `json:"attenuate"`
@@ -154,12 +172,16 @@ func TestSharedAttenuationVerifies(t *testing.T) {
 	v := goldenBiscuitVerifier(t)
 	ctx := context.Background()
 
-	seed, err := v.Verify(ctx, readBiscuitFixture(t, biscuitSeedFile), AudiencePlaneMCP)
+	seed, err := v.Verify(ctx, VerifyRequest{Token: readBiscuitFixture(t, biscuitSeedFile), Audience: audienceMCP})
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	token := readBiscuitFixture(t, biscuitAttenuatedFile)
-	got, err := v.Verify(ctx, token, AudiencePlaneData)
+	key := c.bindKey(t)
+	if jkt, err := KeyThumbprint(key.Public()); err != nil || jkt != c.Attenuate.BindJKT {
+		t.Fatalf("bind_key_seed's thumbprint = %q, %v; want bind_jkt %q", jkt, err, c.Attenuate.BindJKT)
+	}
+	got, err := v.Verify(ctx, withProof(t, key, token, audienceData, goldenClock()))
 	if err != nil {
 		t.Fatalf("the attenuated token is refused: %v", err)
 	}
@@ -190,7 +212,7 @@ func TestSharedAttenuationVerifies(t *testing.T) {
 		t.Errorf("Copies = %+v, want one with %d requests and %d nanos",
 			got.Copies, want.CopyMaxRequests, want.CopyMaxBudget)
 	}
-	if _, err := v.Verify(ctx, token, AudiencePlaneMCP); err == nil {
+	if _, err := v.Verify(ctx, VerifyRequest{Token: token, Audience: audienceMCP}); err == nil {
 		t.Error("the plane the attenuation dropped is still accepted")
 	}
 }

@@ -69,9 +69,10 @@ func TestRevocationCachesSweep(t *testing.T) {
 	old := uuid.New()
 	_, _ = caps.IsRevoked(ctx, old)
 	_, _ = copies.IsBiscuitRevoked(ctx, [][]byte{[]byte("old")})
-	now = now.Add(cacheTTL)
+	now = now.Add(cacheTTL / 2)
 	_, _ = caps.IsRevoked(ctx, uuid.New())
 	_, _ = copies.IsBiscuitRevoked(ctx, [][]byte{[]byte("new")})
+	now = now.Add(cacheTTL / 2) // the old ones expire, the new ones live on
 
 	if n := caps.Sweep(); n != 1 || len(caps.cache.entries) != 1 {
 		t.Errorf("capability cache Sweep = %d, %d left; want 1 dropped, 1 left", n, len(caps.cache.entries))
@@ -220,4 +221,42 @@ func TestRevocationCacheLookupPanicReleasesWaiters(t *testing.T) {
 			t.Errorf("check after the panic = %v; want a fresh lookup", err)
 		}
 	})
+}
+
+// countingLookup counts its calls and revokes nothing.
+type countingLookup struct{ calls atomic.Int32 }
+
+func (c *countingLookup) IsRevoked(context.Context, uuid.UUID) (bool, error) {
+	c.calls.Add(1)
+	return false, nil
+}
+
+// A cache full of live answers makes room by dropping its oldest one, not
+// every one: a flood of new ids must not send every caller of every cached
+// id back upstream at once.
+func TestRevocationCacheEvictsTheOldestWhenFull(t *testing.T) {
+	const bound = 4
+	ctx := context.Background()
+	up := &countingLookup{}
+	c := NewCachedRevocationChecker(up, time.Hour, WithMaxEntries(bound))
+	ids := make([]uuid.UUID, bound)
+	for i := range ids {
+		ids[i] = uuid.New()
+		_, _ = c.IsRevoked(ctx, ids[i])
+	}
+	_, _ = c.IsRevoked(ctx, uuid.New()) // one past the bound
+	before := up.calls.Load()
+	for _, id := range ids[1:] {
+		_, _ = c.IsRevoked(ctx, id)
+	}
+	if n := up.calls.Load() - before; n != 0 {
+		t.Errorf("%d of the newer answers were dropped to make room for one", n)
+	}
+	_, _ = c.IsRevoked(ctx, ids[0])
+	if n := up.calls.Load() - before; n != 1 {
+		t.Errorf("the oldest answer was kept past the bound (%d upstream calls, want 1)", n)
+	}
+	if n := len(c.cache.entries); n > bound {
+		t.Errorf("cache holds %d entries, bound %d", n, bound)
+	}
 }

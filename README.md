@@ -77,7 +77,7 @@ cap, token, _ := issuer.Issue(ctx, limes.IssueRequest{
         Subject: "research-orchestrator",
         Agent:   &limes.AgentPrincipal{AgentType: "my-agent", RunID: runID},
     },
-    Audience: []string{"my-service"},
+    Audience: []string{"https://my-service.example.com"},
     TTL:      15 * time.Minute,
     Caveats: limes.Caveats{
         Ops:              []limes.Op{limes.OpGet, limes.OpShare},
@@ -88,9 +88,11 @@ cap, token, _ := issuer.Issue(ctx, limes.IssueRequest{
     },
 })
 
-// On every call: verify locally, enforce the caveats, meter.
-cap, err := verifier.Verify(ctx, token, "my-service")
-err = cap.Caveats.Check(limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/report.pdf"})
+// On every call: verify locally and enforce the caveats in one step, then meter.
+cap, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
+    VerifyRequest: limes.VerifyRequest{Token: token, Audience: "https://my-service.example.com"},
+    CheckRequest:  limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/report.pdf"},
+})
 _, err = usage.Charge(ctx, limes.ChargeRequest{
     CapabilityID: cap.ID, TenantID: tenantID, Amount: limes.MustParseAmount("0.35"),
     MaxBudget: cap.Caveats.MaxBudgetAmount, UnitCode: "USD",
@@ -104,11 +106,11 @@ _, err = usage.Charge(ctx, limes.ChargeRequest{
 
 | | |
 |---|---|
-| **Verify** | Local Ed25519 (EdDSA) JWT verification against a resolved key — static, or an issuer's JWKS fetched and cached by `RemoteJWKSResolver`. Every rejection is a distinct sentinel error; mapping it to a status code is yours. |
-| **Enforce** | `Caveats.Check` per operation: allowed ops, resource prefixes matched at `/` boundaries, idempotency keys for writes, tainted reads. `Caveats.CheckSource` per connection. |
+| **Verify** | Local Ed25519 JWT verification (`alg: Ed25519`, RFC 9864) against a resolved key — static, or an issuer's JWKS fetched and cached by `RemoteJWKSResolver`. Every rejection is a distinct sentinel error; mapping it to a status code is yours. |
+| **Enforce** | `Authorize` verifies and checks every stateless caveat in one call: allowed ops, resource prefixes matched at `/` boundaries, idempotency keys for writes, tainted reads, source networks. |
 | **Delegate** | `Issuer.Delegate` issues a child that may only be narrower; anything wider is `ErrDelegationTooWide`. |
 | **Attenuate offline** | The Biscuit v3 form of a capability can be narrowed by its holder with no key and no network; each copy can get its own limits and be revoked on its own. |
-| **Bind to a key** | RFC 9449 DPoP: a key-bound capability is refused without a fresh proof from that key. |
+| **Bind to a key** | RFC 9449 DPoP: `Verify` refuses a key-bound capability without a fresh proof from that key. |
 | **Meter** | Requests and spend count against the capability, every ancestor and the tenant, atomically with your own side effect. Reserve an estimate, settle the actual cost, refund a charge. Amounts are exact integers of billionths of a unit. |
 | **Revoke** | One call stops a capability and everything delegated from it; verifiers learn of it within a cache TTL, or at once on `Clear`. |
 
@@ -140,16 +142,19 @@ passes: `feat` is a minor, `fix` a patch. The module is pre-1.0, so a breaking
 change is a minor too — **the Go API may change between minor versions**; read
 the release notes before bumping.
 
-The token wire format — claims, `typ: limes-cap+jwt`, the Biscuit facts — is a
-separate promise: a token is a credential that outlives the process that issued
-it, so the format changes only as a deliberate breaking change, with the golden
-fixtures regenerated in the same commit.
+The token wire format — claims, `typ: limes-cap-v2+jwt`, the Biscuit facts —
+is a separate promise: a token is a credential that outlives the process that
+issued it, so the format changes only as a deliberate breaking change that
+moves the version in `typ`, with the golden fixtures regenerated in the same
+commit. A verifier refuses a token of another version outright, rather than
+read its claims under the wrong schema.
 
 ## Documentation
 
 | Document | Covers |
 |----------|--------|
 | [docs/guide.md](docs/guide.md) | each concern in turn: verification, caveats, delegation, DPoP, Biscuit, metering, revocation, storage contracts, key rotation |
+| [docs/standards.md](docs/standards.md) | the RFCs implemented — JWT, DPoP, RAR, token exchange, resource indicators, JWKS, metadata, revocation, introspection — and the choices made within them |
 | [docs/diagrams.md](docs/diagrams.md) | the contract boundary, a capability's lifecycle, the verification gates, delegation, Biscuit copies, the charge path, revocation |
 | [CONTRIBUTING.md](.github/CONTRIBUTING.md) | building, testing and how a change lands |
 | [SECURITY.md](.github/SECURITY.md) | reporting a vulnerability |
@@ -163,7 +168,7 @@ fixtures regenerated in the same commit.
 | [storetest/](storetest), [metertest/](metertest) | conformance suites to run from your own store's tests |
 | [example/](example) | the five-minute walkthrough as a runnable program |
 | [testdata/](testdata) | golden tokens, and the Biscuit vocabulary and cases shared with SDKs in other languages |
-| [tools/](tools) | the developer tools, pinned in a module of their own and run with `go tool -modfile=tools/go.mod` |
+| [tools/](tools) | the developer tools, pinned in modules of their own and run with `go tool -modfile=tools/go.mod` (yq: `tools/yq/go.mod`) |
 
 ## License
 

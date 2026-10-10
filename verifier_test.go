@@ -70,6 +70,13 @@ func (m *memStore) RevokeBiscuit(_ context.Context, args RevokeBiscuitRequest) e
 	m.copies[string(args.RevocationID)] = true
 	return nil
 }
+func (m *memStore) GetBiscuitRevocation(_ context.Context, id []byte) (BiscuitRevocation, error) {
+	if !m.copies[string(id)] {
+		return BiscuitRevocation{}, ErrNotFound
+	}
+	return BiscuitRevocation{RevocationID: id}, nil
+}
+
 func (m *memStore) PurgeExpired(context.Context, time.Duration) (int64, error) {
 	return 0, nil
 }
@@ -105,6 +112,7 @@ func buildIssuerVerifier(t *testing.T) (*Issuer, *StandardVerifier, *memStore, e
 		Keys:           keys,
 		Revocations:    cache,
 		TrustedIssuers: []string{"limes-test"},
+		DPoP:           &DPoPVerifier{Replay: NewMemoryReplayCache(0)},
 	})
 	if err != nil {
 		t.Fatalf("verifier: %v", err)
@@ -126,7 +134,7 @@ func TestIssue_VerifyHappyPath(t *testing.T) {
 			TenantID: uuid.New(),
 			Subject:  "agent-1",
 		},
-		Audience: []string{AudiencePlaneData},
+		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet, OpList}},
 		TTL:      time.Minute,
 	})
@@ -134,7 +142,7 @@ func TestIssue_VerifyHappyPath(t *testing.T) {
 		t.Fatalf("issue: %v", err)
 	}
 
-	got, err := verifier.Verify(ctx, token, AudiencePlaneData)
+	got, err := verifier.Verify(ctx, VerifyRequest{Token: token, Audience: audienceData})
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
@@ -151,11 +159,11 @@ func TestVerify_AudienceMismatch(t *testing.T) {
 	ctx := context.Background()
 	_, token, _ := issuer.Issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New()},
-		Audience: []string{AudiencePlaneData},
+		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "agent"},
+		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 	})
-	_, err := verifier.Verify(ctx, token, AudiencePlaneAdmin)
+	_, err := verifier.Verify(ctx, VerifyRequest{Token: token, Audience: audienceAdmin})
 	if !errors.Is(err, ErrAudienceMismatch) {
 		t.Fatalf("expected ErrAudienceMismatch, got %v", err)
 	}
@@ -193,13 +201,13 @@ func TestVerify_Expired(t *testing.T) {
 	ctx := context.Background()
 	_, token, _ := issuer.Issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New()},
-		Audience: []string{AudiencePlaneData},
+		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "agent"},
+		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 	})
 
 	clock.now = frozen.Add(time.Hour) // jump past expiry
-	_, err := verifier.Verify(ctx, token, AudiencePlaneData)
+	_, err := verifier.Verify(ctx, VerifyRequest{Token: token, Audience: audienceData})
 	if !errors.Is(err, ErrExpired) {
 		t.Fatalf("expected ErrExpired, got %v", err)
 	}
@@ -212,14 +220,14 @@ func TestVerify_Revoked(t *testing.T) {
 	ctx := context.Background()
 	cap, token, _ := issuer.Issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New()},
-		Audience: []string{AudiencePlaneData},
+		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "agent"},
+		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 	})
 	if err := store.Revoke(ctx, RevokeRequest{ID: cap.ID, Reason: "test"}); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
-	_, err := verifier.Verify(ctx, token, AudiencePlaneData)
+	_, err := verifier.Verify(ctx, VerifyRequest{Token: token, Audience: audienceData})
 	if !errors.Is(err, ErrRevoked) {
 		t.Fatalf("expected ErrRevoked, got %v", err)
 	}
@@ -240,8 +248,8 @@ func TestVerify_UntrustedIssuer(t *testing.T) {
 	})
 	_, token, _ := rogueIssuer.Issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New()},
-		Audience: []string{AudiencePlaneData},
+		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "agent"},
+		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 	})
 
@@ -252,7 +260,7 @@ func TestVerify_UntrustedIssuer(t *testing.T) {
 		Revocations:    cache,
 		TrustedIssuers: []string{"limes-test"}, // rogue not in set
 	})
-	_, err := verifier.Verify(context.Background(), token, AudiencePlaneData)
+	_, err := verifier.Verify(context.Background(), VerifyRequest{Token: token, Audience: audienceData})
 	if !errors.Is(err, ErrInvalidSignature) {
 		t.Fatalf("expected ErrInvalidSignature, got %v", err)
 	}
@@ -268,8 +276,8 @@ func TestDelegate_NarrowsAndPersists(t *testing.T) {
 
 	parent, _, err := issuer.Issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID},
-		Audience: []string{AudiencePlaneData, AudiencePlaneMCP},
+		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID, Subject: "parent"},
+		Audience: []string{audienceData, audienceMCP},
 		Caveats: Caveats{
 			Ops:              []Op{OpGet, OpList, OpSearch},
 			ResourcePrefixes: []string{"object://acme/"},
@@ -284,7 +292,7 @@ func TestDelegate_NarrowsAndPersists(t *testing.T) {
 	child, childToken, err := issuer.Delegate(ctx, DelegateRequest{
 		Parent:   parent,
 		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID, Subject: "child"},
-		Audience: []string{AudiencePlaneData},
+		Audience: []string{audienceData},
 		Caveats: Caveats{
 			Ops:              []Op{OpGet},
 			ResourcePrefixes: []string{"object://acme/run-42/"},
@@ -301,7 +309,7 @@ func TestDelegate_NarrowsAndPersists(t *testing.T) {
 	if _, ok := store.caps[child.ID]; !ok {
 		t.Errorf("child not persisted")
 	}
-	if _, err := verifier.Verify(ctx, childToken, AudiencePlaneData); err != nil {
+	if _, err := verifier.Verify(ctx, VerifyRequest{Token: childToken, Audience: audienceData}); err != nil {
 		t.Fatalf("verify child: %v", err)
 	}
 }
@@ -315,16 +323,16 @@ func TestDelegate_RejectsWidening(t *testing.T) {
 	tenantID := uuid.New()
 	parent, _, _ := issuer.Issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID},
-		Audience: []string{AudiencePlaneData},
+		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID, Subject: "parent"},
+		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 		TTL:      time.Hour,
 	})
 
 	_, _, err := issuer.Delegate(ctx, DelegateRequest{
 		Parent:   parent,
-		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID},
-		Audience: []string{AudiencePlaneData, AudiencePlaneAdmin}, // wider!
+		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID, Subject: "parent"},
+		Audience: []string{audienceData, audienceAdmin}, // wider!
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 	})
 	if !errors.Is(err, ErrDelegationTooWide) {
@@ -342,8 +350,8 @@ func TestDelegate_RefusesACopyWithLimitsOfItsOwn(t *testing.T) {
 	tenantID := uuid.New()
 	parent, _, err := issuer.Issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID},
-		Audience: []string{AudiencePlaneData},
+		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID, Subject: "parent"},
+		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet}, MaxRequests: 100},
 		TTL:      time.Hour,
 	})
@@ -408,3 +416,10 @@ type mutableClock struct {
 }
 
 func (m *mutableClock) Now() time.Time { return m.now }
+
+// The audiences the tests mount verifiers on.
+const (
+	audienceData  = "https://data.example.com"
+	audienceAdmin = "https://admin.example.com"
+	audienceMCP   = "https://mcp.example.com"
+)

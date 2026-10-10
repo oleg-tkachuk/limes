@@ -174,13 +174,13 @@ func TestRefundReturnsSpendToEveryCounterOnce(t *testing.T) {
 	// A partial refund, then a refund of "the rest": the second must return
 	// exactly what the first left, and a third must return nothing — a
 	// retried full refund is a no-op, not a second credit.
-	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("2")}); err != nil || got != 2*unit {
+	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("2")}); err != nil || got.Refunded != 2*unit {
 		t.Fatalf("partial refund = %v, %v; want 2, nil", got, err)
 	}
-	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID}); err != nil || got != 3*unit {
+	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID}); err != nil || got.Refunded != 3*unit {
 		t.Fatalf("remainder refund = %v, %v; want 3, nil", got, err)
 	}
-	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID}); err != nil || got != 0 {
+	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID}); err != nil || got.Refunded != 0 {
 		t.Fatalf("repeated full refund = %v, %v; want 0, nil", got, err)
 	}
 	if _, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("1")}); !errors.Is(err, limes.ErrRefundExceedsCharge) {
@@ -253,5 +253,32 @@ func TestRevokeBiscuit(t *testing.T) {
 	}
 	if got, _ := s.IsBiscuitRevoked(ctx, [][]byte{copyID}); got {
 		t.Error("revoked copy outlived its purged capability")
+	}
+}
+
+// A hold of a capability no longer on record cannot be settled or released
+// by anyone, so PurgeOrphans releases it with the counters, or the tenant's
+// ceiling stays short by it for good.
+func TestPurgeOrphansReleasesHolds(t *testing.T) {
+	ctx := context.Background()
+	records := New[struct{}]()
+	u := NewUsage(records)
+	tenant, gone := uuid.New(), uuid.New() // gone was never recorded
+	const held = 3 * limes.NanosPerUnit
+	res, err := u.Reserve(ctx, limes.ReserveRequest{CapabilityID: gone, TenantID: tenant, Amount: held})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := u.PurgeOrphans(ctx); err != nil || n != 1 {
+		t.Fatalf("PurgeOrphans = %d, %v; want the one orphan row", n, err)
+	}
+	if _, err := u.GetReservation(ctx, res.ID); !errors.Is(err, limes.ErrReservationNotFound) {
+		t.Errorf("the orphan's hold: err = %v, want ErrReservationNotFound", err)
+	}
+	if b, err := u.GetTenantBudget(ctx, tenant); err != nil || b.ReservedAmount != 0 {
+		t.Errorf("tenant after the purge = %+v, %v; want nothing held", b, err)
+	}
+	if _, err := u.GetUsage(ctx, gone); !errors.Is(err, limes.ErrUsageNotFound) {
+		t.Errorf("the orphan's usage row: err = %v, want ErrUsageNotFound", err)
 	}
 }

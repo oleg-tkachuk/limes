@@ -83,8 +83,8 @@ func (c Caveats) Validate() error {
 			return err
 		}
 	}
-	if c.MaxRequests < 0 {
-		return fmt.Errorf("%w: max_requests %d is negative", ErrInvalidCaveats, c.MaxRequests)
+	if c.MaxRequests < 0 || c.MaxRequests > MaxIJSONInteger {
+		return fmt.Errorf("%w: max_requests %d is outside 0..%d", ErrInvalidCaveats, c.MaxRequests, MaxIJSONInteger)
 	}
 	if c.MaxBudgetAmount < 0 || c.MaxBudgetAmount > MaxNanos {
 		return fmt.Errorf("%w: max_budget_amount %s is outside 0..%s",
@@ -110,6 +110,9 @@ func validResource(kind, s string) error {
 		if unicode.IsControl(r) {
 			return fmt.Errorf("%w: %s %q contains a control character", ErrInvalidCaveats, kind, s)
 		}
+	}
+	if HasDotSegment(s) {
+		return fmt.Errorf("%w: %s %q has a \".\" or \"..\" segment", ErrInvalidCaveats, kind, s)
 	}
 	return nil
 }

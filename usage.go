@@ -83,7 +83,9 @@ type Meter[TX any] interface {
 	// With req.ExternalRef set, Charge is idempotent on (CapabilityID,
 	// ExternalRef): a charge whose pair is already in the ledger moves
 	// nothing, does not run onCharged, and returns that charge's receipt
-	// with Replayed set. With req.Overrun = OverrunRecord, a charge that
+	// with Replayed set. The pair names one cost: arriving again with a
+	// different Amount, UnitCode or TenantID it returns
+	// ErrExternalRefConflict and moves nothing. With req.Overrun = OverrunRecord, a charge that
 	// would cross a ceiling is committed anyway and the receipt reports it
 	// (ChargeReceipt.Overrun); see OverrunPolicy.
 	Charge(ctx context.Context, req ChargeRequest, onCharged func(ctx context.Context, tx TX) error) (ChargeReceipt, error)
@@ -94,12 +96,18 @@ type Meter[TX any] interface {
 	// remains, which makes a full refund idempotent; a partial refund that
 	// would take the total refunded past the charge returns
 	// ErrRefundExceedsCharge and changes nothing. An unknown charge ID
-	// returns ErrChargeNotFound. Returns the amount actually refunded.
+	// returns ErrChargeNotFound. The receipt carries the amount actually
+	// refunded.
+	//
+	// A charge counted in a tenant accounting period that has since been
+	// closed (SetTenantBudget with ResetSpend) is refunded to the
+	// capability, its ancestors and its copies, but not to the tenant
+	// aggregate: the current period never counted it.
 	//
 	// For a cost only known afterwards, prefer Reserve/Settle: a
 	// reservation lapses on its own if the caller never settles it, where
 	// an estimate charged up front stays charged.
-	Refund(ctx context.Context, req RefundRequest) (refunded Nanos, err error)
+	Refund(ctx context.Context, req RefundRequest) (RefundReceipt, error)
 
 	// Reserve holds req.Amount against the capability, each ancestor and
 	// the tenant aggregate, checking every ceiling against spend plus
@@ -121,7 +129,8 @@ type Meter[TX any] interface {
 	// Settle is idempotent on the reservation: settling one already
 	// settled moves nothing, does not run onCharged, and returns the
 	// receipt of the charge that settled it, with Replayed set. An unknown,
-	// released or expired reservation returns ErrReservationNotFound.
+	// released or expired reservation returns ErrReservationNotFound, and so
+	// does the zero id, which names none — never a direct charge.
 	Settle(ctx context.Context, req SettleRequest, onCharged func(ctx context.Context, tx TX) error) (ChargeReceipt, error)
 
 	// GetCharge returns one charge of the ledger, by the ChargeID its
@@ -161,13 +170,20 @@ type TenantBudgets interface {
 	// GetTenantBudget returns the tenant-aggregate snapshot. Returns
 	// ErrTenantBudgetNotFound when no row exists (tenant has no cap
 	// configured AND has never been charged).
+	//
+	// The aggregate counts from the tenant's first charge or reservation,
+	// whether or not a ceiling has been set: Charge and Reserve create the
+	// row, with no ceiling and ResourceVersion 0, when it is missing. A
+	// ceiling set afterwards is measured against that spend and those holds.
 	GetTenantBudget(ctx context.Context, tenantID uuid.UUID) (TenantBudget, error)
 
 	// SetTenantBudget upserts the tenant cap. ResetSpend=true rolls
 	// the accounting period and zeroes the spend — operators call
 	// this on each billing close. ResetSpend=false adjusts the cap
 	// mid-cycle without affecting accumulated spend. A ceiling outside
-	// 0..MaxNanos returns ErrInvalidAmount and changes nothing.
+	// 0..MaxNanos returns ErrInvalidAmount and changes nothing. A UnitCode
+	// other than the row's returns ErrUnitCodeMismatch while anything is
+	// held in the old unit, or spent in it and not reset.
 	SetTenantBudget(ctx context.Context, req SetTenantBudgetRequest) (TenantBudget, error)
 
 	// ListTenantBudgets returns tenant budget rows, with the consumer's
@@ -189,11 +205,14 @@ type TenantBudgets interface {
 
 // UsageHousekeeping reclaims usage rows of capabilities that are gone.
 type UsageHousekeeping interface {
-	// Delete drops the row. Called when the capability is reaped.
+	// Delete drops the row. Called when the capability is reaped. It
+	// releases the capability's open reservations first, returning their
+	// holds to its ancestors and its tenant: nothing could settle or release
+	// them afterwards.
 	Delete(ctx context.Context, capID uuid.UUID) error
 
 	// PurgeOrphans deletes usage rows whose capability record no longer
-	// exists. Implementations may bound the work per call; the caller
+	// exists, releasing their reservations as Delete does. Implementations may bound the work per call; the caller
 	// loops until it returns 0.
 	PurgeOrphans(ctx context.Context) (int64, error)
 
@@ -230,8 +249,10 @@ type ChargeRequest struct {
 	// 0 = unlimited.
 	MaxBudget Nanos
 	// UnitCode is the currency or unit; empty means DefaultUnitCode. No
-	// conversion happens: a charge in a unit other than the counter's is a
-	// configuration error the caller must prevent.
+	// conversion happens: a charge in a unit other than one a counter it
+	// moves already counts in — the capability's, an ancestor's, the
+	// tenant's — returns ErrUnitCodeMismatch and moves nothing. So does a
+	// reservation.
 	UnitCode string
 	// Op and Actor are stamped on the ledger row for attribution only;
 	// both may be empty and neither affects enforcement.
@@ -298,6 +319,23 @@ type ChargeReceipt struct {
 	// Overrun reports that the charge crossed at least one ceiling, which
 	// only OverrunRecord allows.
 	Overrun bool
+	// TenantID and UnitCode are the charge's tenant and unit, so a caller
+	// holding only a receipt — of a Settle, say, whose request names only the
+	// reservation — can attribute it.
+	TenantID uuid.UUID
+	UnitCode string
+}
+
+// RefundReceipt is the result of Meter.Refund.
+type RefundReceipt struct {
+	// ChargeID is the charge refunded from.
+	ChargeID uuid.UUID
+	// Refunded is the amount this call returned; zero when nothing was
+	// left to refund.
+	Refunded Nanos
+	// TenantID and UnitCode are the charge's.
+	TenantID uuid.UUID
+	UnitCode string
 }
 
 // DefaultReservationTTL is how long a reservation lasts when the request
@@ -376,7 +414,8 @@ type TenantBudget struct {
 	PeriodEnd      *time.Time
 	UpdatedAt      time.Time
 	// ResourceVersion is the OCC token a caller passes back to Set. Zero
-	// means the row has never been written.
+	// means no ceiling has ever been set — the row, if there is one, holds
+	// only what Charge and Reserve counted.
 	ResourceVersion int64
 }
 
@@ -396,8 +435,8 @@ type SetTenantBudgetRequest struct {
 	// window.
 	ResetSpend bool
 	// ExpectedVersion is the OCC guard, checked in the same statement as the
-	// write. 0 asserts the row does not exist yet and is itself a conflict if
-	// it does. Without this two operators editing the same cap overwrote each
+	// write. 0 asserts no ceiling has been set yet (the row is missing, or
+	// holds only counted spend) and is itself a conflict if one has. Without this two operators editing the same cap overwrote each
 	// other and neither was told.
 	ExpectedVersion int64
 }
@@ -452,7 +491,9 @@ func DecodeTenantBudgetCursor(s string) (TenantBudgetCursor, error) {
 	if !ok || pct == "" {
 		return TenantBudgetCursor{}, invalidRequest("tenant budget cursor %q", s)
 	}
-	if _, err := strconv.ParseFloat(pct, 64); err != nil {
+	// A utilisation is a finite, non-negative decimal: NaN and the
+	// infinities, or a hex float, would order differently in every store.
+	if v, err := strconv.ParseFloat(pct, 64); err != nil || !decimalAmount.MatchString(pct) || v < 0 {
 		return TenantBudgetCursor{}, invalidRequest("tenant budget cursor %q", s)
 	}
 	tenant, err := uuid.Parse(id)
@@ -538,6 +579,12 @@ var (
 	// rather than silently overwriting a change it never saw.
 	ErrTenantBudgetVersionMismatch = errors.New("limes: tenant budget resource_version mismatch")
 )
+
+// ErrExternalRefConflict — Charge named an ExternalRef its capability already
+// charged under, for a different amount, unit or tenant. One reference names
+// one cost; replaying the first receipt would report the second as booked.
+// Matches ErrInvalidRequest.
+var ErrExternalRefConflict error = &requestError{"limes: external ref already names a different charge"}
 
 // Validate reports whether p is an OverrunPolicy this package defines.
 // Implementations call it before touching state, so an unknown policy is never

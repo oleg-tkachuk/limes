@@ -50,7 +50,7 @@ func TestRevokingABiscuitCopy(t *testing.T) {
 		"the copy it came from":      {root, nil},
 		"a sibling attenuated apart": {sibling, nil},
 	} {
-		if _, err := v.Verify(ctx, tc.token, AudiencePlaneData); !errors.Is(err, tc.want) {
+		if _, err := v.Verify(ctx, VerifyRequest{Token: tc.token, Audience: audienceData}); !errors.Is(err, tc.want) {
 			t.Errorf("%s: err = %v, want %v", name, err, tc.want)
 		}
 	}
@@ -65,25 +65,25 @@ func TestRevokingTheRootBiscuitLeavesTheJWT(t *testing.T) {
 	cap, jwt, err := issuer.Issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{TenantID: uuid.New(), Subject: "agent"},
-		Audience: []string{AudiencePlaneData},
+		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 		TTL:      time.Hour,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	root, err := issuer.Biscuit(cap)
+	root, err := issuer.Biscuit(context.Background(), cap)
 	if err != nil {
 		t.Fatal(err)
 	}
-	narrowed, _ := Attenuate(root, Attenuation{Planes: []string{AudiencePlaneData}})
+	narrowed, _ := Attenuate(root, Attenuation{Planes: []string{audienceData}})
 
 	revokeCopy(t, v, store, root)
 
-	if _, err := v.Verify(ctx, narrowed, AudiencePlaneData); !errors.Is(err, ErrRevoked) {
+	if _, err := v.Verify(ctx, VerifyRequest{Token: narrowed, Audience: audienceData}); !errors.Is(err, ErrRevoked) {
 		t.Errorf("attenuated Biscuit: err = %v, want ErrRevoked", err)
 	}
-	if _, err := v.Verify(ctx, jwt, AudiencePlaneData); err != nil {
+	if _, err := v.Verify(ctx, VerifyRequest{Token: jwt, Audience: audienceData}); err != nil {
 		t.Errorf("JWT: %v, want it still valid", err)
 	}
 }
@@ -121,7 +121,7 @@ func TestBiscuitCopyRefusesWhatVerifyRefuses(t *testing.T) {
 	_, jwt, err := issuer.Issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{TenantID: uuid.New(), Subject: "agent"},
-		Audience: []string{AudiencePlaneData},
+		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 		TTL:      time.Hour,
 	})
@@ -133,7 +133,7 @@ func TestBiscuitCopyRefusesWhatVerifyRefuses(t *testing.T) {
 	tampered := base64.RawURLEncoding.EncodeToString(raw)
 
 	stranger, _, _, _ := buildIssuerVerifier(t) // another key, same issuer name
-	foreign, err := stranger.Biscuit(cap)
+	foreign, err := stranger.Biscuit(context.Background(), cap)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,8 @@ func TestSharedAttenuationRevokedThroughItsSeed(t *testing.T) {
 		t.Fatalf("attenuated copy %+v, seed copy %+v", attCopy, seedCopy)
 	}
 	copies[string(seedCopy.RevocationID)] = true
-	if _, err := v.Verify(ctx, attenuated, AudiencePlaneData); !errors.Is(err, ErrRevoked) {
+	req := withProof(t, readBiscuitCase(t).bindKey(t), attenuated, audienceData, goldenClock())
+	if _, err := v.Verify(ctx, req); !errors.Is(err, ErrRevoked) {
 		t.Fatalf("err = %v, want ErrRevoked", err)
 	}
 }
@@ -215,7 +216,7 @@ func TestBiscuitRevocationLookupFailsClosed(t *testing.T) {
 	_, v, _, _, root := biscuitFixture(t)
 	boom := errors.New("database down")
 	v.cfg.BiscuitRevocations = failingBiscuitLookup{boom}
-	if _, err := v.Verify(context.Background(), root, AudiencePlaneData); !errors.Is(err, boom) {
+	if _, err := v.Verify(context.Background(), VerifyRequest{Token: root, Audience: audienceData}); !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want the lookup's error", err)
 	}
 }

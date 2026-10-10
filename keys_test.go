@@ -7,6 +7,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
 	"errors"
 	"os"
@@ -73,27 +74,44 @@ func TestLoadPrivateKey(t *testing.T) {
 	}
 }
 
-func TestMustLoadOrGenerate(t *testing.T) {
+func TestLoadOrGenerateKey(t *testing.T) {
 	priv, der := ed25519PKCS8(t)
 	path := writePEM(t, "PRIVATE KEY", der)
 
-	kid, pub, got, generated, err := MustLoadOrGenerate(path, "")
-	if err != nil || generated || !got.Equal(priv) || !pub.Equal(priv.Public()) || kid == "" {
-		t.Fatalf("from a file = %q, generated %v, %v; want the file's key under a derived kid", kid, generated, err)
+	k, err := LoadOrGenerateKey(path, "")
+	if err != nil || k.Generated || !k.Private.Equal(priv) || !k.Public.Equal(priv.Public()) ||
+		k.KeyID != DeriveKeyID(k.Public) {
+		t.Fatalf("from a file = %+v, %v; want the file's key under its derived kid", k, err)
 	}
-	if kid, _, _, _, _ := MustLoadOrGenerate(path, "named"); kid != "named" {
-		t.Errorf("a named kid read back as %q", kid)
+	if k, _ := LoadOrGenerateKey(path, "named"); k.KeyID != "named" {
+		t.Errorf("a named kid read back as %q", k.KeyID)
 	}
-	if _, _, _, _, err := MustLoadOrGenerate(filepath.Join(t.TempDir(), "absent.pem"), ""); err == nil {
+	if _, err := LoadOrGenerateKey(filepath.Join(t.TempDir(), "absent.pem"), ""); err == nil {
 		t.Error("a path that cannot be read must fail, not fall back to a fresh key")
 	}
 
-	kid, pub, got, generated, err = MustLoadOrGenerate("", "eph")
-	if err != nil || !generated || kid != "eph" || len(got) != ed25519.PrivateKeySize || !pub.Equal(got.Public()) {
-		t.Fatalf("without a path = %q, generated %v, %v; want a fresh key under the kid given", kid, generated, err)
+	k, err = LoadOrGenerateKey("", "eph")
+	if err != nil || !k.Generated || k.KeyID != "eph" || len(k.Private) != ed25519.PrivateKeySize || !k.Public.Equal(k.Private.Public()) {
+		t.Fatalf("without a path = %+v, %v; want a fresh key under the kid given", k, err)
 	}
-	if kid, _, _, _, _ := MustLoadOrGenerate("", ""); kid == "" {
-		t.Error("a generated key must get a kid of its own")
+	if k, _ := LoadOrGenerateKey("", ""); k.KeyID != DeriveKeyID(k.Public) {
+		t.Error("a generated key must get its derived kid")
+	}
+}
+
+// The derived kid is the key's RFC 7638 thumbprint — the RFC 8037 §A.3
+// example — so any JOSE tool computes the same one.
+func TestDeriveKeyIDIsTheThumbprint(t *testing.T) {
+	x, err := base64.RawURLEncoding.DecodeString("11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := DeriveKeyID(ed25519.PublicKey(x)), "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k"; got != want {
+		t.Errorf("DeriveKeyID = %s, want %s", got, want)
+	}
+	kid, pub, _, err := GenerateEd25519Keypair()
+	if err != nil || kid != DeriveKeyID(pub) {
+		t.Errorf("GenerateEd25519Keypair kid = %q, %v; want DeriveKeyID's", kid, err)
 	}
 }
 

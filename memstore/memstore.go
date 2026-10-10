@@ -13,8 +13,9 @@
 //     no implementation in the module could show that a failed side effect
 //     leaves counters unmutated.
 //
-// It is NOT a production store: everything is a map behind one mutex, nothing
-// survives a restart, and ListByPrincipal ignores paging beyond Limit.
+// It is NOT a production store: everything is a map behind one mutex, which
+// is held while onCharged runs, nothing survives a restart, and the charges
+// ledger is kept whole for as long as the store lives.
 package memstore
 
 import (
@@ -54,21 +55,37 @@ type Store[TX any] struct {
 //
 // TX is the consumer's transaction handle. This store has no transactions of
 // its own, so it never constructs one unless given a factory; it only threads
-// the handle back to onCharged. See contracts/module-api.md §1.2.
+// the handle back to onCharged.
 type UsageStore[TX any] struct {
 	mu sync.Mutex
 
-	usage     map[uuid.UUID]limes.Usage
-	budgets   map[uuid.UUID]limes.TenantBudget
-	ledger    []LedgerEntry
-	records   *Store[TX] // lineage and ceilings of ancestors; nil = none known
-	holds     map[uuid.UUID]hold
-	nowFn     func() time.Time
-	txFactory func() TX
+	usage   map[uuid.UUID]limes.Usage
+	budgets map[uuid.UUID]limes.TenantBudget
+	ledger  []LedgerEntry
+	// The ledger's indexes, each to a position in ledger: by charge id, by
+	// (capability, external ref) and by the reservation a charge settled.
+	byCharge      map[uuid.UUID]int
+	byRef         map[refKey]int
+	byReservation map[uuid.UUID]int
+	records       *Store[TX] // lineage and ceilings of ancestors; nil = none known
+	holds         map[uuid.UUID]hold
+	nowFn         func() time.Time
+	txFactory     func() TX
 
 	// copies counts each Biscuit copy that set limits of its own, by its
 	// block's revocation id.
 	copies map[string]copyCounter
+
+	// periods counts each tenant's accounting periods: SetTenantBudget with
+	// ResetSpend starts the next one. A ledger entry records the period it
+	// was counted in, so a refund leaves a later period's spend alone.
+	periods map[uuid.UUID]uint64
+}
+
+// refKey is what ChargeRequest.ExternalRef makes a charge idempotent on.
+type refKey struct {
+	capID uuid.UUID
+	ref   string
 }
 
 // copyCounter is one Biscuit copy's own counters.
@@ -105,6 +122,10 @@ type LedgerEntry struct {
 	ReservationID uuid.UUID
 	// Overrun reports that the charge crossed a ceiling (OverrunRecord).
 	Overrun bool
+
+	// tenantPeriod is the tenant's accounting period the charge was counted
+	// in (UsageStore.periods).
+	tenantPeriod uint64
 }
 
 // New returns an empty store. TX is inferred from the call site:
@@ -132,8 +153,13 @@ func NewUsage[TX any](records *Store[TX]) *UsageStore[TX] {
 		budgets: map[uuid.UUID]limes.TenantBudget{},
 		holds:   map[uuid.UUID]hold{},
 		copies:  map[string]copyCounter{},
-		records: records,
-		nowFn:   time.Now,
+		periods: map[uuid.UUID]uint64{},
+
+		byCharge:      map[uuid.UUID]int{},
+		byRef:         map[refKey]int{},
+		byReservation: map[uuid.UUID]int{},
+		records:       records,
+		nowFn:         time.Now,
 	}
 }
 
@@ -265,8 +291,9 @@ func (s *Store[TX]) exists(id uuid.UUID) bool {
 	return ok
 }
 
-// maxLineageDepth matches the depth guard of the relational store.
-const maxLineageDepth = 64
+// maxLineageDepth is how far up a lineage the store walks: as deep as a
+// delegation chain may go.
+const maxLineageDepth = limes.MaxDelegationDepth
 
 // Revoke is idempotent. CascadeChildren walks the delegation tree by ParentID
 // so revoking an orchestrator takes the sub-agents it spawned with it.
@@ -510,9 +537,11 @@ func (s *UsageStore[TX]) Charge(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if req.ExternalRef != "" {
-		if e, ok := s.findLocked(func(e LedgerEntry) bool {
-			return e.CapabilityID == req.CapabilityID && e.ExternalRef == req.ExternalRef
-		}); ok {
+		if e, ok := entryLocked(s, s.byRef, refKey{req.CapabilityID, req.ExternalRef}); ok {
+			if e.Amount != req.Amount || e.UnitCode != unit || e.TenantID != req.TenantID {
+				return limes.ChargeReceipt{}, fmt.Errorf("%w: %q was %s %s for tenant %s",
+					limes.ErrExternalRefConflict, req.ExternalRef, e.Amount, e.UnitCode, e.TenantID)
+			}
 			return s.replayLocked(e), nil
 		}
 	}
@@ -526,9 +555,7 @@ func (s *UsageStore[TX]) ChargeByRef(_ context.Context, capID uuid.UUID, externa
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	e, ok := s.findLocked(func(e LedgerEntry) bool {
-		return e.CapabilityID == capID && e.ExternalRef == externalRef
-	})
+	e, ok := entryLocked(s, s.byRef, refKey{capID, externalRef})
 	if !ok {
 		return limes.ChargeRecord{}, limes.ErrChargeNotFound
 	}
@@ -539,7 +566,7 @@ func (s *UsageStore[TX]) ChargeByRef(_ context.Context, capID uuid.UUID, externa
 func (s *UsageStore[TX]) GetCharge(_ context.Context, chargeID uuid.UUID) (limes.ChargeRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	e, ok := s.findLocked(func(e LedgerEntry) bool { return e.ID == chargeID })
+	e, ok := entryLocked(s, s.byCharge, chargeID)
 	if !ok {
 		return limes.ChargeRecord{}, limes.ErrChargeNotFound
 	}
@@ -554,13 +581,27 @@ func (e LedgerEntry) record() limes.ChargeRecord {
 	}
 }
 
-// findLocked returns the first ledger entry match accepts. s.mu must be held.
-func (s *UsageStore[TX]) findLocked(match func(LedgerEntry) bool) (LedgerEntry, bool) {
-	i := slices.IndexFunc(s.ledger, match)
-	if i < 0 {
+// entryLocked returns the ledger entry index files under key. s.mu must be
+// held.
+func entryLocked[TX any, K comparable](s *UsageStore[TX], index map[K]int, key K) (LedgerEntry, bool) {
+	i, ok := index[key]
+	if !ok {
 		return LedgerEntry{}, false
 	}
 	return s.ledger[i], true
+}
+
+// appendLocked adds entry to the ledger and its indexes. s.mu must be held.
+func (s *UsageStore[TX]) appendLocked(entry LedgerEntry) {
+	i := len(s.ledger)
+	s.ledger = append(s.ledger, entry)
+	s.byCharge[entry.ID] = i
+	if entry.ExternalRef != "" {
+		s.byRef[refKey{entry.CapabilityID, entry.ExternalRef}] = i
+	}
+	if entry.ReservationID != uuid.Nil {
+		s.byReservation[entry.ReservationID] = i
+	}
 }
 
 // replayLocked is the receipt for a charge already in the ledger, returned
@@ -568,7 +609,7 @@ func (s *UsageStore[TX]) findLocked(match func(LedgerEntry) bool) (LedgerEntry, 
 func (s *UsageStore[TX]) replayLocked(e LedgerEntry) limes.ChargeReceipt {
 	return limes.ChargeReceipt{
 		ChargeID: e.ID, Spent: s.usage[e.CapabilityID].SpentAmount,
-		Replayed: true, Overrun: e.Overrun,
+		Replayed: true, Overrun: e.Overrun, TenantID: e.TenantID, UnitCode: e.UnitCode,
 	}
 }
 
@@ -612,7 +653,7 @@ func (s *UsageStore[TX]) chargeLocked(
 
 	u := s.usage[req.CapabilityID]
 	if err := s.checkCeilingsLocked(ceilingCheck{
-		amount: req.Amount, released: released, maxBudget: req.MaxBudget,
+		amount: req.Amount, released: released, maxBudget: req.MaxBudget, unit: unit,
 		capID: req.CapabilityID, tenantID: req.TenantID, ancestors: ancestors, copies: req.Copies,
 	}, crossed); err != nil {
 		return limes.ChargeReceipt{Spent: u.SpentAmount}, err
@@ -648,12 +689,11 @@ func (s *UsageStore[TX]) chargeLocked(
 		}
 		s.usage[id] = au
 	}
-	if b, ok := s.budgets[req.TenantID]; ok {
-		b.SpentAmount += req.Amount
-		b.ReservedAmount = max0(b.ReservedAmount - released)
-		b.UpdatedAt = s.nowFn()
-		s.budgets[req.TenantID] = b
-	}
+	b := s.tenantLocked(req.TenantID, unit)
+	b.SpentAmount += req.Amount
+	b.ReservedAmount = max0(b.ReservedAmount - released)
+	b.UpdatedAt = s.nowFn()
+	s.budgets[req.TenantID] = b
 	copyIDs := make([][]byte, 0, len(req.Copies))
 	for _, c := range req.Copies {
 		cc := s.copies[string(c.RevocationID)]
@@ -668,9 +708,23 @@ func (s *UsageStore[TX]) chargeLocked(
 		TenantID: req.TenantID, Amount: req.Amount, UnitCode: unit,
 		Op: req.Op, Actor: req.Actor, At: s.nowFn(), Copies: copyIDs,
 		ExternalRef: req.ExternalRef, ReservationID: reservationID, Overrun: overrun,
+		tenantPeriod: s.periods[req.TenantID],
 	}
-	s.ledger = append(s.ledger, entry)
-	return limes.ChargeReceipt{ChargeID: entry.ID, Spent: stagedSpent, Overrun: overrun}, nil
+	s.appendLocked(entry)
+	return limes.ChargeReceipt{
+		ChargeID: entry.ID, Spent: stagedSpent, Overrun: overrun, TenantID: req.TenantID, UnitCode: unit,
+	}, nil
+}
+
+// tenantLocked returns the tenant's aggregate row, or a new one without a
+// ceiling. The aggregate counts from the first charge or hold, not from the
+// first SetTenantBudget, so a ceiling set later is measured against what the
+// tenant has already spent and holds. s.mu must be held.
+func (s *UsageStore[TX]) tenantLocked(tenantID uuid.UUID, unit string) limes.TenantBudget {
+	if b, ok := s.budgets[tenantID]; ok {
+		return b
+	}
+	return limes.TenantBudget{TenantID: tenantID, UnitCode: unit, PeriodStart: s.nowFn()}
 }
 
 // ceilingCheck is an amount measured against every ceiling. released is
@@ -678,6 +732,7 @@ func (s *UsageStore[TX]) chargeLocked(
 type ceilingCheck struct {
 	amount, released limes.Nanos
 	maxBudget        limes.Nanos // the capability's own, from its token
+	unit             string      // normalised
 	capID, tenantID  uuid.UUID
 	ancestors        []limes.Capability
 	copies           []limes.CopyCeiling
@@ -689,6 +744,9 @@ type ceilingCheck struct {
 // to crossed, which returns the error to stop on or nil to carry on.
 // s.mu must be held.
 func (s *UsageStore[TX]) checkCeilingsLocked(c ceilingCheck, crossed func(error) error) error {
+	if err := s.checkUnitsLocked(c); err != nil {
+		return err
+	}
 	if err := s.checkRangeLocked(c); err != nil {
 		return err
 	}
@@ -719,6 +777,26 @@ func (s *UsageStore[TX]) checkCeilingsLocked(c ceilingCheck, crossed func(error)
 		if err := crossed(limes.ErrTenantBudgetExceeded); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// checkUnitsLocked refuses an amount in a unit other than one a counter it
+// would move already counts in. Like the range, it is not a ceiling an
+// overrun may cross: the sum would mean nothing. s.mu must be held.
+func (s *UsageStore[TX]) checkUnitsLocked(c ceilingCheck) error {
+	differs := func(have string) bool { return have != "" && have != c.unit }
+	if differs(s.usage[c.capID].UnitCode) {
+		return fmt.Errorf("%w: capability %s counts in %s, not %s",
+			limes.ErrUnitCodeMismatch, c.capID, s.usage[c.capID].UnitCode, c.unit)
+	}
+	for _, a := range c.ancestors {
+		if have := s.usage[a.ID].UnitCode; differs(have) {
+			return fmt.Errorf("%w: ancestor %s counts in %s, not %s", limes.ErrUnitCodeMismatch, a.ID, have, c.unit)
+		}
+	}
+	if b, ok := s.budgets[c.tenantID]; ok && differs(b.UnitCode) {
+		return fmt.Errorf("%w: tenant %s counts in %s, not %s", limes.ErrUnitCodeMismatch, c.tenantID, b.UnitCode, c.unit)
 	}
 	return nil
 }
@@ -773,7 +851,7 @@ func (s *UsageStore[TX]) Reserve(_ context.Context, req limes.ReserveRequest) (l
 
 	refuse := func(err error) error { return err }
 	if err := s.checkCeilingsLocked(ceilingCheck{
-		amount: req.Amount, maxBudget: req.MaxBudget,
+		amount: req.Amount, maxBudget: req.MaxBudget, unit: unit,
 		capID: req.CapabilityID, tenantID: req.TenantID, ancestors: ancestors, copies: req.Copies,
 	}, refuse); err != nil {
 		return limes.Reservation{}, err
@@ -801,10 +879,9 @@ func (s *UsageStore[TX]) applyHoldLocked(h hold, sign limes.Nanos) {
 		}
 		s.usage[id] = u
 	}
-	if b, ok := s.budgets[h.tenantID]; ok {
-		b.ReservedAmount = max0(b.ReservedAmount + sign*h.amount)
-		s.budgets[h.tenantID] = b
-	}
+	b := s.tenantLocked(h.tenantID, h.unit)
+	b.ReservedAmount = max0(b.ReservedAmount + sign*h.amount)
+	s.budgets[h.tenantID] = b
 	for _, c := range h.copies {
 		cc := s.copies[string(c.RevocationID)]
 		cc.capID = h.capID
@@ -825,12 +902,17 @@ func (s *UsageStore[TX]) Settle(
 	if err := req.Overrun.Validate(); err != nil {
 		return limes.ChargeReceipt{}, err
 	}
+	// A direct charge is filed under the zero reservation id, so the zero id
+	// must not reach the replay lookup below.
+	if req.ReservationID == uuid.Nil {
+		return limes.ChargeReceipt{}, limes.ErrReservationNotFound
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	h, ok := s.holds[req.ReservationID]
 	if !ok {
-		if e, settled := s.findLocked(func(e LedgerEntry) bool { return e.ReservationID == req.ReservationID }); settled {
+		if e, settled := entryLocked(s, s.byReservation, req.ReservationID); settled {
 			return s.replayLocked(e), nil
 		}
 	}
@@ -931,29 +1013,30 @@ func (s *UsageStore[TX]) ReleaseExpired(_ context.Context) (int64, error) {
 }
 
 // Refund returns spend from one ledger entry to the counters it debited.
-func (s *UsageStore[TX]) Refund(_ context.Context, req limes.RefundRequest) (limes.Nanos, error) {
+func (s *UsageStore[TX]) Refund(_ context.Context, req limes.RefundRequest) (limes.RefundReceipt, error) {
 	if err := limes.ValidateAmount(req.Amount); err != nil {
-		return 0, err
+		return limes.RefundReceipt{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	i := slices.IndexFunc(s.ledger, func(e LedgerEntry) bool { return e.ID == req.ChargeID })
-	if i < 0 {
-		return 0, limes.ErrChargeNotFound
+	i, ok := s.byCharge[req.ChargeID]
+	if !ok {
+		return limes.RefundReceipt{}, limes.ErrChargeNotFound
 	}
 	e := &s.ledger[i]
+	receipt := limes.RefundReceipt{ChargeID: e.ID, TenantID: e.TenantID, UnitCode: e.UnitCode}
 	remaining := e.Amount - e.Refunded
 	amount := req.Amount
 	if amount == 0 {
 		amount = remaining
 	}
 	if amount > remaining {
-		return 0, fmt.Errorf("%w: %v requested, %v of %v left",
+		return limes.RefundReceipt{}, fmt.Errorf("%w: %v requested, %v of %v left",
 			limes.ErrRefundExceedsCharge, amount, remaining, e.Amount)
 	}
 	if amount == 0 {
-		return 0, nil
+		return receipt, nil
 	}
 	for _, id := range append([]uuid.UUID{e.CapabilityID}, e.Ancestors...) {
 		if u, ok := s.usage[id]; ok {
@@ -961,7 +1044,9 @@ func (s *UsageStore[TX]) Refund(_ context.Context, req limes.RefundRequest) (lim
 			s.usage[id] = u
 		}
 	}
-	if b, ok := s.budgets[e.TenantID]; ok {
+	// A charge of a period since closed is history: the current period's
+	// spend never counted it, so it has nothing to give back.
+	if b, ok := s.budgets[e.TenantID]; ok && e.tenantPeriod == s.periods[e.TenantID] {
 		b.SpentAmount = max0(b.SpentAmount - amount)
 		b.UpdatedAt = s.nowFn()
 		s.budgets[e.TenantID] = b
@@ -973,7 +1058,8 @@ func (s *UsageStore[TX]) Refund(_ context.Context, req limes.RefundRequest) (lim
 		}
 	}
 	e.Refunded += amount
-	return amount, nil
+	receipt.Refunded = amount
+	return receipt, nil
 }
 
 func (s *UsageStore[TX]) GetUsage(_ context.Context, capID uuid.UUID) (limes.Usage, error) {
@@ -1040,6 +1126,12 @@ func (s *UsageStore[TX]) SetTenantBudget(_ context.Context, args limes.SetTenant
 	if err != nil {
 		return limes.TenantBudget{}, err
 	}
+	// A reset closes the spend, never the holds still open in the old unit.
+	if exists && b.UnitCode != "" && normalised != b.UnitCode &&
+		(b.ReservedAmount > 0 || (b.SpentAmount > 0 && !args.ResetSpend)) {
+		return limes.TenantBudget{}, fmt.Errorf("%w: tenant %s has %s counted in %s",
+			limes.ErrUnitCodeMismatch, args.TenantID, b.SpentAmount+b.ReservedAmount, b.UnitCode)
+	}
 
 	b.TenantID = args.TenantID
 	b.MaxBudgetAmount = args.MaxBudgetAmount
@@ -1048,6 +1140,7 @@ func (s *UsageStore[TX]) SetTenantBudget(_ context.Context, args limes.SetTenant
 	if args.ResetSpend {
 		b.SpentAmount = 0
 		b.PeriodStart = s.nowFn()
+		s.periods[args.TenantID]++
 	}
 	if b.PeriodStart.IsZero() {
 		b.PeriodStart = s.nowFn()
@@ -1126,9 +1219,24 @@ func (r budgetRow) before(o budgetRow) bool {
 	return uuidLess(r.tenant, o.tenant)
 }
 
+// releaseHoldsLocked releases every hold of a capability gone reports as
+// gone. s.mu must be held.
+func (s *UsageStore[TX]) releaseHoldsLocked(gone func(capID uuid.UUID) bool) {
+	for id, h := range s.holds {
+		if gone(h.capID) {
+			s.applyHoldLocked(h, -1)
+			delete(s.holds, id)
+		}
+	}
+}
+
+// Delete drops the capability's counters and releases its holds first:
+// nothing could settle or release them once it is gone, and they would keep
+// counting against its ancestors and its tenant.
 func (s *UsageStore[TX]) Delete(_ context.Context, capID uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.releaseHoldsLocked(func(id uuid.UUID) bool { return id == capID })
 	delete(s.usage, capID)
 	maps.DeleteFunc(s.copies, func(_ string, c copyCounter) bool { return c.capID == capID })
 	return nil
@@ -1137,6 +1245,9 @@ func (s *UsageStore[TX]) Delete(_ context.Context, capID uuid.UUID) error {
 func (s *UsageStore[TX]) PurgeOrphans(_ context.Context) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Holds first: releasing one writes its ancestors' rows, which the loop
+	// below then purges if they are orphans too.
+	s.releaseHoldsLocked(func(id uuid.UUID) bool { return s.records == nil || !s.records.exists(id) })
 	var n int64
 	for id := range s.usage {
 		if s.records == nil || !s.records.exists(id) {

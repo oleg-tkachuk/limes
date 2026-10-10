@@ -5,6 +5,7 @@
   "description": [
     "Go and npm: minor/patch only, grouped into one PR per manager per month. Majors are crossed by hand, per the upstream CHANGELOG.",
     "Vulnerability remediation is ungrouped and unscheduled — it should not wait for the monthly window.",
+    "A release is proposed only once it is three days old: a compromised or broken one is usually pulled within that window, and an approved pull request merges and releases on green.",
     "The tools the workflows pin carry a `# renovate:` comment naming their datasource; the shared task library's tag is read from Taskfile.yaml."
   ],
   "enabledManagers": ["github-actions", "gomod", "npm", "custom.regex"],
@@ -24,6 +25,7 @@
     }
   ],
   "postUpdateOptions": ["gomodTidy"],
+  "minimumReleaseAge": "3 days",
   "schedule": ["before 6am on monday"],
   "prHourlyLimit": 2,
   "packageRules": [
@@ -55,6 +57,12 @@
       "description": "Majors are crossed by hand: a Go major is an import-path change, and the release tooling's majors change how a version is computed."
     },
     {
+      "matchManagers": ["custom.regex"],
+      "matchDepNames": ["go-floor"],
+      "allowedVersions": "<1.27",
+      "description": "GO_FLOOR_VERSION follows patches of the go directive in go.mod only; raising the floor is a decision, made in go.mod and ci.yaml together."
+    },
+    {
       "matchManagers": ["gomod"],
       "matchDepTypes": ["golang", "toolchain"],
       "groupName": "go toolchain",
@@ -67,6 +75,7 @@
     "labels": ["dependencies", "security"],
     "schedule": ["at any time"],
     "prCreation": "immediate",
+    "minimumReleaseAge": null,
     "groupName": null
   },
   "osvVulnerabilityAlerts": true

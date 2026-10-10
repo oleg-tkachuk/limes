@@ -31,10 +31,15 @@ concurrency:
 jobs:
   release:
     name: Tag and publish the release
+    # Only CI's own dispatch, sent with its GITHUB_TOKEN. Any write token can
+    # send a repository_dispatch; the step below also asks the API whether the
+    # run it names passed, rather than trust the payload.
+    if: github.event.sender.login == 'github-actions[bot]'
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: write # semantic-release pushes the tag; gh creates the release
+      actions: read # the dispatching CI run and its jobs
     steps:
       # No persist-credentials: false — semantic-release pushes the tag it
       # creates, so this is the one checkout here that needs its credentials.
@@ -57,6 +62,13 @@ jobs:
           SHA: ${{ github.event.client_payload.sha }}
           CI_RUN: ${{ github.event.client_payload.ci_run_id }}
         run: printf 'dispatched by CI run %s for commit %s\n' "${CI_RUN:-unknown}" "${SHA:-unknown}"
+
+      - name: Require the dispatching CI run to have passed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.event.client_payload.sha }}
+          CI_RUN: ${{ github.event.client_payload.ci_run_id }}
+        run: ./.github/scripts/ci-run-check.sh "$CI_RUN" "$SHA"
 
       # The checkout above is main's head, which can be newer than the commit
       # whose CI dispatched this run. Only that commit is released; a newer
@@ -82,7 +94,9 @@ jobs:
       - name: Install semantic-release
         if: steps.head.outputs.release == 'true'
         working-directory: .github/release
-        run: npm ci
+        # No package's install script runs while this job's write token sits
+        # in the checkout.
+        run: npm ci --ignore-scripts
 
       # What HEAD carried before this run, so the step after it can tell a tag
       # it pushed from one an earlier dispatch to the same commit pushed.

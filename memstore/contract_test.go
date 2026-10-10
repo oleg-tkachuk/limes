@@ -2,6 +2,7 @@ package memstore
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,10 +20,13 @@ func TestMeterContract(t *testing.T) {
 		t.Helper()
 		records := New[struct{}]()
 		tenant := uuid.New()
+		var offset atomic.Int64 // how far Advance has moved the clock
+		now := func() time.Time { return time.Now().Add(time.Duration(offset.Load())) }
 		return metertest.Env[struct{}]{
-			Ctx:    context.Background(),
-			Usage:  NewUsage(records),
-			Tenant: tenant,
+			Ctx:     context.Background(),
+			Usage:   NewUsage(records).WithClock(now),
+			Tenant:  tenant,
+			Advance: func(d time.Duration) { offset.Add(int64(d)) },
 			NewCapability: func(parent uuid.UUID, maxBudget limes.Nanos) (uuid.UUID, error) {
 				c := limes.Capability{
 					ID: uuid.New(), ParentID: parent, ExpiresAt: time.Now().Add(contractTTL),

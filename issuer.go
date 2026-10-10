@@ -5,7 +5,8 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
-	"slices"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -117,8 +118,11 @@ func (i *Issuer) Issue(ctx context.Context, req IssueRequest) (Capability, strin
 	if req.IssuedBy.Subject == "" {
 		return Capability{}, "", invalidRequest("IssuedBy is required")
 	}
-	if req.Generation < 0 {
-		return Capability{}, "", invalidRequest("Generation %d is negative", req.Generation)
+	if req.Subject.Subject == "" {
+		return Capability{}, "", invalidRequest("Subject.Subject is required: it is the token's sub")
+	}
+	if req.Generation < 0 || req.Generation > MaxIJSONInteger {
+		return Capability{}, "", invalidRequest("Generation %d is outside 0..%d", req.Generation, MaxIJSONInteger)
 	}
 	if err := validateAudience(req.Audience); err != nil {
 		return Capability{}, "", err
@@ -135,8 +139,12 @@ func (i *Issuer) Issue(ctx context.Context, req IssueRequest) (Capability, strin
 	if err != nil {
 		return Capability{}, "", err
 	}
+	id, err := uuid.NewV7()
+	if err != nil {
+		return Capability{}, "", fmt.Errorf("limes: capability id: %w", err)
+	}
 	cap := Capability{
-		ID:              uuid.New(),
+		ID:              id,
 		Issuer:          i.issuerName,
 		Subject:         req.Subject,
 		Audience:        req.Audience,
@@ -156,7 +164,7 @@ func (i *Issuer) Issue(ctx context.Context, req IssueRequest) (Capability, strin
 	if err := i.store.Insert(ctx, cap, req.IssuedBy); err != nil {
 		return Capability{}, "", fmt.Errorf("limes: persist issuance: %w", err)
 	}
-	token, err := i.signer.Sign(cap)
+	token, err := i.signer.Sign(ctx, cap)
 	if err != nil {
 		return Capability{}, "", fmt.Errorf("limes: sign: %w", err)
 	}
@@ -189,13 +197,34 @@ func setNotBefore(c *Capability, nbf time.Time) error {
 	return nil
 }
 
-// validateAudience requires a non-empty audience of non-empty entries.
+// validateAudience requires a non-empty audience whose every entry is a
+// resource indicator as RFC 8707 §2 defines one: an absolute URI with no
+// fragment, naming the service the token is for.
 func validateAudience(aud []string) error {
 	if len(aud) == 0 {
 		return invalidRequest("non-empty Audience required")
 	}
-	if slices.Contains(aud, "") {
-		return invalidRequest("Audience contains an empty entry")
+	for _, a := range aud {
+		if err := ValidateResourceIndicator(a); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateResourceIndicator reports whether s is an RFC 8707 resource
+// indicator: an absolute URI (RFC 3986 §4.3) — a URL or a URN — with no
+// fragment.
+func ValidateResourceIndicator(s string) error {
+	u, err := url.Parse(s)
+	if err != nil {
+		return invalidRequest("audience %q: %v", s, err)
+	}
+	if !u.IsAbs() || u.Host == "" && u.Opaque == "" && u.Path == "" {
+		return invalidRequest("audience %q is not an absolute URI (RFC 8707)", s)
+	}
+	if u.Fragment != "" || strings.Contains(s, "#") {
+		return invalidRequest("audience %q has a fragment (RFC 8707)", s)
 	}
 	return nil
 }
@@ -204,7 +233,10 @@ func validateAudience(aud []string) error {
 // holds. The issuer enforces narrowing (Narrows) before persisting so a
 // runtime widening attempt fails before any token is emitted.
 type DelegateRequest struct {
-	Parent   Capability
+	Parent Capability
+	// Subject is who the child authorises; its TenantID defaults to the
+	// parent's. Empty, the child is a narrower copy for the parent's own
+	// subject.
 	Subject  Principal
 	Audience []string
 	Caveats  Caveats
@@ -238,6 +270,10 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 	if len(req.Parent.Copies) > 0 {
 		return Capability{}, "", fmt.Errorf("%w: parent is a Biscuit copy with limits of its own; attenuate it instead",
 			ErrDelegationTooWide)
+	}
+	// No subject named: a narrower copy for the parent's own holder.
+	if req.Subject.Subject == "" {
+		req.Subject = req.Parent.Subject
 	}
 	if req.Subject.TenantID == uuid.Nil {
 		req.Subject.TenantID = req.Parent.Subject.TenantID
@@ -277,9 +313,19 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 	if expires.After(req.Parent.ExpiresAt) {
 		expires = req.Parent.ExpiresAt
 	}
+	id, err := uuid.NewV7()
+	if err != nil {
+		return Capability{}, "", fmt.Errorf("limes: capability id: %w", err)
+	}
 
+	actor, err := delegatedActor(req.Parent, req.Subject.Subject)
+	if err != nil {
+		return Capability{}, "", err
+	}
 	child := Capability{
-		ID:              uuid.New(),
+		OnBehalfOf:      req.Parent.Authority(),
+		Actor:           actor,
+		ID:              id,
 		Issuer:          i.issuerName,
 		Subject:         req.Subject,
 		Audience:        req.Audience,
@@ -293,7 +339,18 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 	if child.ConfirmationJKT == "" {
 		child.ConfirmationJKT = req.Parent.ConfirmationJKT
 	}
-	if err := setNotBefore(&child, req.NotBefore); err != nil {
+	// A child starts no earlier than its parent, as it ends no later. The
+	// parent may start after now — a not-before ahead, or an issuer replica
+	// whose clock runs ahead of this one — and the child then waits for it.
+	nbf := req.NotBefore
+	childStart := nbf
+	if childStart.IsZero() {
+		childStart = now
+	}
+	if ps := validFrom(req.Parent); childStart.Before(ps) {
+		nbf = ps
+	}
+	if err := setNotBefore(&child, nbf); err != nil {
 		return Capability{}, "", err
 	}
 
@@ -307,7 +364,7 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 	if err := i.store.Insert(ctx, child, req.Parent.Subject); err != nil {
 		return Capability{}, "", fmt.Errorf("limes: persist delegation: %w", err)
 	}
-	token, err := i.signer.Sign(child)
+	token, err := i.signer.Sign(ctx, child)
 	if err != nil {
 		return Capability{}, "", fmt.Errorf("limes: sign delegation: %w", err)
 	}
@@ -315,16 +372,20 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 }
 
 // GenerateEd25519Keypair is a convenience for boot wiring: returns a new
-// Ed25519 keypair plus the kid you should associate with it. kid is
-// derived from the public key bytes (first 16 hex chars of the raw key)
-// so two boot paths producing the same key never end up with different
-// kids — useful when a deploy upgrades the persisted key set without
-// touching the JWKS doc.
+// Ed25519 keypair plus the kid to publish it under, DeriveKeyID's.
 func GenerateEd25519Keypair() (kid string, pub ed25519.PublicKey, priv ed25519.PrivateKey, err error) {
 	pub, priv, err = ed25519.GenerateKey(nil)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("limes: generate keypair: %w", err)
 	}
-	kid = fmt.Sprintf("%x", pub[:8])
-	return kid, pub, priv, nil
+	return DeriveKeyID(pub), pub, priv, nil
+}
+
+// DeriveKeyID is the kid of a key published with none named: its RFC 7638
+// thumbprint. The same key always gets the same kid, wherever it is derived,
+// and two keys never share one.
+func DeriveKeyID(pub ed25519.PublicKey) string {
+	// An Ed25519 key always has a JWK and a thumbprint; nothing here fails.
+	thumb, _ := DPoPJWK{Kty: jwkKtyOKP, Crv: jwkCrvEd25519, X: b64(pub)}.Thumbprint()
+	return thumb
 }
