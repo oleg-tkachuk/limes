@@ -47,9 +47,9 @@ func MarshalJWKS(keys map[string]ed25519.PublicKey) ([]byte, error) {
 			return nil, fmt.Errorf("limes: public key %q wrong size for Ed25519", kid)
 		}
 		doc.Keys = append(doc.Keys, JWK{
-			Kty: "OKP",
-			Crv: "Ed25519",
-			Alg: "EdDSA",
+			Kty: jwkKtyOKP,
+			Crv: jwkCrvEd25519,
+			Alg: algEdDSA,
 			Kid: kid,
 			X:   base64.RawURLEncoding.EncodeToString(pub),
 		})
@@ -70,10 +70,10 @@ func ParseJWKS(raw []byte) (map[string]ed25519.PublicKey, error) {
 	}
 	out := make(map[string]ed25519.PublicKey, len(doc.Keys))
 	for _, k := range doc.Keys {
-		if k.Kty != "OKP" || k.Crv != "Ed25519" || k.Kid == "" {
+		if k.Kty != jwkKtyOKP || k.Crv != jwkCrvEd25519 || k.Kid == "" {
 			continue
 		}
-		if k.Alg != "" && k.Alg != "EdDSA" {
+		if k.Alg != "" && k.Alg != algEdDSA {
 			continue
 		}
 		decoded, err := base64.RawURLEncoding.DecodeString(k.X)
