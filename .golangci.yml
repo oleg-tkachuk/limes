@@ -1,0 +1,35 @@
+# golangci-lint v2. The default "standard" set, plus the linters that catch
+# what a security library most needs caught: an error compared or wrapped
+# wrongly, a request without a context, a switch that misses a case, a
+# risky crypto or file call.
+version: "2"
+
+linters:
+  enable:
+    - bodyclose
+    - contextcheck
+    - errorlint
+    - exhaustive
+    - gocritic
+    - gosec
+    - nilerr
+    - noctx
+    - usestdlibvars
+  settings:
+    exhaustive:
+      # A default: arm states what the unlisted cases do.
+      default-signifies-exhaustive: true
+    govet:
+      enable-all: true
+      disable:
+        # Field order is chosen for reading, not for padding.
+        - fieldalignment
+        # err shadowed in a nested scope is idiomatic Go.
+        - shadow
+  exclusions:
+    presets:
+      - std-error-handling
+    rules:
+      # Tests build fixtures with fixed seeds and write files on purpose.
+      - path: _test\.go
+        linters: [gosec]

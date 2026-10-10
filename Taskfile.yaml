@@ -25,7 +25,8 @@ includes:
     # Its vuln runs a govulncheck from PATH; the one below runs the version
     # tools/go.mod pins.
     excludes: [vuln]
-    vars: { PROJECT_NAME: limes }
+    # GO_TEST_FLAGS spelled out, so a bump of the library cannot drop -race.
+    vars: { PROJECT_NAME: limes, GO_TEST_FLAGS: -race -short }
 
 tasks:
   default:
@@ -33,9 +34,10 @@ tasks:
       - task --list
 
   verify-all:
-    desc: "gofmt + golangci-lint + the unit suite + govulncheck + actionlint + the workflow scripts — what CI runs"
+    desc: "gofmt + go mod tidy + golangci-lint + the unit suite + govulncheck + actionlint + the workflow scripts — what CI runs"
     cmds:
       - task: fmt:check
+      - task: verify:tidy
       - task: lint
       - task: test
       - task: vuln
@@ -47,6 +49,14 @@ tasks:
     desc: "govulncheck — vulnerabilities this module's code actually reaches"
     cmds:
       - go tool -modfile={{.TOOLS_MODFILE}} govulncheck ./...
+
+  verify:tidy:
+    desc: "Fail when either module's go.mod or go.sum is not what go mod tidy writes, or a download differs from go.sum"
+    cmds:
+      - go mod tidy -diff
+      - go mod verify
+      - cmd: go mod tidy -diff
+        dir: tools
 
   verify:workflows:
     desc: "actionlint over the workflows"

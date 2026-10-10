@@ -174,3 +174,14 @@ func FuzzParseAmount(f *testing.F) {
 		}
 	})
 }
+
+// String writes a negative amount — never a valid one, but printed in
+// errors — with its sign, the most negative one included.
+func TestNanosStringNegative(t *testing.T) {
+	cases := map[Nanos]string{-1: "-0.000000001", -1_500_000_000: "-1.5", math.MinInt64: "-9223372036.854775808"}
+	for n, want := range cases {
+		if got := n.String(); got != want {
+			t.Errorf("Nanos(%d).String() = %s, want %s", int64(n), got, want)
+		}
+	}
+}

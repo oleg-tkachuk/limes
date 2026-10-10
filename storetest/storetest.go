@@ -350,7 +350,7 @@ func checkListPages(t *testing.T, f fixture) {
 	if !slices.Equal(sizes, []int{pageSize, pageSize, listed - 2*pageSize}) {
 		t.Errorf("page sizes = %v", sizes)
 	}
-	slices.SortFunc(want, func(a, b uuid.UUID) int { return compareUUID(a, b) })
+	slices.SortFunc(want, compareUUID)
 	if !slices.Equal(got, want) {
 		t.Errorf("listed %v, want every capability once in ascending id order %v", got, want)
 	}

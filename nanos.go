@@ -121,9 +121,11 @@ func parseDecimal(s string) (Nanos, bool, error) {
 // String writes n as a decimal number of units with no trailing zeros:
 // "1.5", "0.000000001", "25".
 func (n Nanos) String() string {
-	sign, abs := "", uint64(n)
+	// The magnitude, as uint64: negating in two's complement makes it right
+	// for every negative n, math.MinInt64 included.
+	sign, abs := "", uint64(n) //nolint:gosec // G115: a negative n is negated below
 	if n < 0 {
-		sign, abs = "-", uint64(-n)
+		sign, abs = "-", -abs
 	}
 	units, frac := abs/NanosPerUnit, abs%NanosPerUnit
 	if frac == 0 {
