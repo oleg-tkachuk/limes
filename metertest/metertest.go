@@ -139,6 +139,63 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 	for _, c := range checks {
 		t.Run(c.name, func(t *testing.T) { c.run(t, newFixture(t, setup)) })
 	}
+	// Checks that need the tenant as setup leaves it, with no ceiling yet.
+	bare := []struct {
+		name string
+		run  func(*testing.T, Env[TX])
+	}{
+		{"TenantAggregateCountsBeforeACeiling", checkTenantCountsBeforeACeiling[TX]},
+	}
+	for _, c := range bare {
+		t.Run(c.name, func(t *testing.T) { c.run(t, setup(t)) })
+	}
+}
+
+// checkTenantCountsBeforeACeiling holds a store to counting the tenant
+// aggregate from the first charge and hold: a ceiling set afterwards must see
+// them, or the spend before it is free and the holds before it are not held.
+func checkTenantCountsBeforeACeiling[TX any](t *testing.T, env Env[TX]) {
+	const (
+		spent   = 5 * one
+		held    = 8 * one
+		ceiling = 10 * one
+	)
+	id, err := env.NewCapability(uuid.Nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.Usage.Charge(env.Ctx, limes.ChargeRequest{
+		CapabilityID: id, TenantID: env.Tenant, Amount: spent, UnitCode: unit,
+	}, nil); err != nil {
+		t.Fatalf("charge: %v", err)
+	}
+	reserve := func() error {
+		_, err := env.Usage.Reserve(env.Ctx, limes.ReserveRequest{
+			CapabilityID: id, TenantID: env.Tenant, Amount: held, UnitCode: unit,
+		})
+		return err
+	}
+	if err := reserve(); err != nil {
+		t.Fatalf("reserve: %v", err)
+	}
+	b, err := env.Usage.GetTenantBudget(env.Ctx, env.Tenant)
+	if err != nil || b.SpentAmount != spent || b.ReservedAmount != held || b.MaxBudgetAmount != 0 || b.ResourceVersion != 0 {
+		t.Fatalf("GetTenantBudget before any ceiling = %+v, %v; want %v spent, %v held, no ceiling, version 0", b, err, spent, held)
+	}
+	set, err := env.Usage.SetTenantBudget(env.Ctx, limes.SetTenantBudgetRequest{
+		TenantID: env.Tenant, MaxBudgetAmount: ceiling, UnitCode: unit,
+	})
+	if err != nil || set.SpentAmount != spent || set.ReservedAmount != held {
+		t.Fatalf("SetTenantBudget = %+v, %v; want the ceiling over %v spent and %v held", set, err, spent, held)
+	}
+	if err := reserve(); !errors.Is(err, limes.ErrTenantBudgetExceeded) {
+		t.Errorf("a hold past the new ceiling: err = %v, want ErrTenantBudgetExceeded", err)
+	}
+	if _, err := env.Usage.Charge(env.Ctx, limes.ChargeRequest{
+		CapabilityID: id, TenantID: env.Tenant, Amount: one, UnitCode: unit,
+	}, nil); !errors.Is(err, limes.ErrTenantBudgetExceeded) {
+		t.Errorf("a charge past the new ceiling: err = %v, want ErrTenantBudgetExceeded", err)
+	}
 }
 
 func checkRejectionMovesNothing[TX any](t *testing.T, f fixture[TX]) {

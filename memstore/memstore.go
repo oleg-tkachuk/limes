@@ -648,12 +648,11 @@ func (s *UsageStore[TX]) chargeLocked(
 		}
 		s.usage[id] = au
 	}
-	if b, ok := s.budgets[req.TenantID]; ok {
-		b.SpentAmount += req.Amount
-		b.ReservedAmount = max0(b.ReservedAmount - released)
-		b.UpdatedAt = s.nowFn()
-		s.budgets[req.TenantID] = b
-	}
+	b := s.tenantLocked(req.TenantID, unit)
+	b.SpentAmount += req.Amount
+	b.ReservedAmount = max0(b.ReservedAmount - released)
+	b.UpdatedAt = s.nowFn()
+	s.budgets[req.TenantID] = b
 	copyIDs := make([][]byte, 0, len(req.Copies))
 	for _, c := range req.Copies {
 		cc := s.copies[string(c.RevocationID)]
@@ -671,6 +670,17 @@ func (s *UsageStore[TX]) chargeLocked(
 	}
 	s.ledger = append(s.ledger, entry)
 	return limes.ChargeReceipt{ChargeID: entry.ID, Spent: stagedSpent, Overrun: overrun}, nil
+}
+
+// tenantLocked returns the tenant's aggregate row, or a new one without a
+// ceiling. The aggregate counts from the first charge or hold, not from the
+// first SetTenantBudget, so a ceiling set later is measured against what the
+// tenant has already spent and holds. s.mu must be held.
+func (s *UsageStore[TX]) tenantLocked(tenantID uuid.UUID, unit string) limes.TenantBudget {
+	if b, ok := s.budgets[tenantID]; ok {
+		return b
+	}
+	return limes.TenantBudget{TenantID: tenantID, UnitCode: unit, PeriodStart: s.nowFn()}
 }
 
 // ceilingCheck is an amount measured against every ceiling. released is
@@ -801,10 +811,9 @@ func (s *UsageStore[TX]) applyHoldLocked(h hold, sign limes.Nanos) {
 		}
 		s.usage[id] = u
 	}
-	if b, ok := s.budgets[h.tenantID]; ok {
-		b.ReservedAmount = max0(b.ReservedAmount + sign*h.amount)
-		s.budgets[h.tenantID] = b
-	}
+	b := s.tenantLocked(h.tenantID, h.unit)
+	b.ReservedAmount = max0(b.ReservedAmount + sign*h.amount)
+	s.budgets[h.tenantID] = b
 	for _, c := range h.copies {
 		cc := s.copies[string(c.RevocationID)]
 		cc.capID = h.capID

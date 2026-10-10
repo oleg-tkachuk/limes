@@ -161,6 +161,11 @@ type TenantBudgets interface {
 	// GetTenantBudget returns the tenant-aggregate snapshot. Returns
 	// ErrTenantBudgetNotFound when no row exists (tenant has no cap
 	// configured AND has never been charged).
+	//
+	// The aggregate counts from the tenant's first charge or reservation,
+	// whether or not a ceiling has been set: Charge and Reserve create the
+	// row, with no ceiling and ResourceVersion 0, when it is missing. A
+	// ceiling set afterwards is measured against that spend and those holds.
 	GetTenantBudget(ctx context.Context, tenantID uuid.UUID) (TenantBudget, error)
 
 	// SetTenantBudget upserts the tenant cap. ResetSpend=true rolls
@@ -376,7 +381,8 @@ type TenantBudget struct {
 	PeriodEnd      *time.Time
 	UpdatedAt      time.Time
 	// ResourceVersion is the OCC token a caller passes back to Set. Zero
-	// means the row has never been written.
+	// means no ceiling has ever been set — the row, if there is one, holds
+	// only what Charge and Reserve counted.
 	ResourceVersion int64
 }
 
@@ -396,8 +402,8 @@ type SetTenantBudgetRequest struct {
 	// window.
 	ResetSpend bool
 	// ExpectedVersion is the OCC guard, checked in the same statement as the
-	// write. 0 asserts the row does not exist yet and is itself a conflict if
-	// it does. Without this two operators editing the same cap overwrote each
+	// write. 0 asserts no ceiling has been set yet (the row is missing, or
+	// holds only counted spend) and is itself a conflict if one has. Without this two operators editing the same cap overwrote each
 	// other and neither was told.
 	ExpectedVersion int64
 }
