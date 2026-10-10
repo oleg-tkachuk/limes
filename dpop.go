@@ -351,6 +351,11 @@ type DPoPVerifier struct {
 	MatchPathOnly bool
 }
 
+// DPoPSigningAlgorithms are the JWS algorithms a DPoP proof may be signed
+// with, as a challenge advertises them (RFC 9449 §7.1): the fully-specified
+// names (RFC 9864). The deprecated "EdDSA" is still read, never advertised.
+func DPoPSigningAlgorithms() []string { return []string{algEd25519, algES256} }
+
 // errNoReplayCache is a DPoPVerifier configured without the replay cache it
 // requires.
 var errNoReplayCache = errors.New("limes: DPoPVerifier.Replay required")

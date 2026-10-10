@@ -9,18 +9,12 @@ the test that holds it there.
 | [RFC 7519](https://www.rfc-editor.org/rfc/rfc7519), [RFC 8725](https://www.rfc-editor.org/rfc/rfc8725) | The capability token: a JWT, explicitly typed | `Signer`, `StandardVerifier.Verify` |
 | [RFC 9864](https://www.rfc-editor.org/rfc/rfc9864) | `alg: Ed25519` instead of the deprecated `EdDSA` | tokens, JWKS, DPoP |
 | [RFC 7493](https://www.rfc-editor.org/rfc/rfc7493) | I-JSON: the claims every JSON reader reads alike | claim parsing |
-| [RFC 9396](https://www.rfc-editor.org/rfc/rfc9396) | Caveats as `authorization_details` | `AuthorizationDetail` |
-| [RFC 8693](https://www.rfc-editor.org/rfc/rfc8693) | Delegation as the `act` claim | `Issuer.Delegate`, `Capability.Actor` |
-| [RFC 8707](https://www.rfc-editor.org/rfc/rfc8707) | Audiences as resource indicators | `ValidateResourceIndicator` |
 | [RFC 9449](https://www.rfc-editor.org/rfc/rfc9449), [RFC 7800](https://www.rfc-editor.org/rfc/rfc7800) | Proof of possession (DPoP), `cnf.jkt`, nonces, the `DPoP` scheme | `DPoPVerifier`, `NewDPoPProof`, `HMACNonces` |
 | [RFC 3986](https://www.rfc-editor.org/rfc/rfc3986) | URI normalisation for `htu` | DPoP checks |
 | [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110), [RFC 6750](https://www.rfc-editor.org/rfc/rfc6750) | The `Authorization` header and `WWW-Authenticate` challenges | `ParseAuthorization`, `ErrorResponse` |
 | [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) | Problem details bodies | `ErrorResponse`, `WriteErrorResponse` |
 | [RFC 7517](https://www.rfc-editor.org/rfc/rfc7517), [RFC 7638](https://www.rfc-editor.org/rfc/rfc7638), [RFC 8037](https://www.rfc-editor.org/rfc/rfc8037) | JWK Sets, thumbprints, Ed25519 keys | `MarshalJWKS`, `JWKSHandler`, `DeriveKeyID` |
 | [RFC 9111](https://www.rfc-editor.org/rfc/rfc9111) | How long a fetched JWK Set stays fresh | `RemoteJWKSResolver` |
-| [RFC 8414](https://www.rfc-editor.org/rfc/rfc8414), [RFC 8615](https://www.rfc-editor.org/rfc/rfc8615) | Issuer metadata at a well-known URI | `IssuerMetadata`, `DiscoverIssuer` |
-| [RFC 7009](https://www.rfc-editor.org/rfc/rfc7009) | Token revocation endpoint | `RevocationHandler` |
-| [RFC 7662](https://www.rfc-editor.org/rfc/rfc7662) | Token introspection endpoint | `IntrospectionHandler` |
 | [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562) | UUIDv7 capability ids | `Issuer.Issue` |
 | [RFC 4648](https://www.rfc-editor.org/rfc/rfc4648) §5 | base64url without padding, everywhere | — |
 | ISO 4217 | Budget units | `IsUnitCode` |
@@ -29,7 +23,7 @@ the test that holds it there.
 
 **RFC 7519, RFC 8725.** A capability token is a JWS-signed JWT. Following
 the JWT best current practice, it is explicitly typed — `typ:
-limes-cap-v2+jwt` (§3.11), so no other JWT signed by the same key passes as a
+limes-cap-v3+jwt` (§3.11), so no other JWT signed by the same key passes as a
 capability — the algorithm is fixed by the verifier rather than read from the
 token (§3.1), and `iss` and `aud` are always checked (§3.8, §3.9). The
 version is part of `typ`: a token of another format version is refused
@@ -44,7 +38,9 @@ predate the RFC. Issuer metadata advertises `Ed25519` and `ES256` only.
 `TestCapabilityTokenRefusesThePolymorphicAlgorithm`,
 `TestReadsTheDeprecatedAlgorithmFromOthers`.
 
-**RFC 7493 (I-JSON).** The claims are read with the semantics of
+**RFC 7493 (I-JSON).** The claims — the standard ones, and the
+capability's own under `limes_` (`limes_principal`, `limes_caveats`,
+`limes_parent_id`) — are read with the semantics of
 `encoding/json/v2`: no member twice (§2.3), names in their exact case, UTF-8
 only (§2.1), and no member the format does not define — a caveat a verifier
 does not know is one it cannot enforce. Every integer is within ±(2^53 − 1)
@@ -52,38 +48,6 @@ does not know is one it cannot enforce. Every integer is within ±(2^53 − 1)
 strings (`"max_budget": "1.5"`). A reader in any language therefore reads the
 token the issuer signed. *Held by* `TestVerifyReadsClaimsStrictly`,
 `TestTokenIntegersStayWithinIJSON`, `TestTokenClaimsAreUTF8`.
-
-## What a token grants
-
-**RFC 9396 (Rich Authorization Requests).** The caveats travel as the one
-entry of the `authorization_details` claim (§9.1), of type
-`AuthorizationDetailsType`. The operations are the common `actions` field
-(§2.2); every other caveat is a field of this type. A token holding no such
-entry, two, or one of another type is refused: another type would grant
-something this module cannot enforce. `MarshalAuthorizationDetails` and
-`ParseAuthorizationDetails` move the same object to and from an
-authorization server that speaks RAR; issuer metadata lists the type under
-`authorization_details_types_supported` (§10). *Held by*
-`TestAuthorizationDetailsRoundTrip`, `TestParseAuthorizationDetailsIsStrict`.
-
-**RFC 8707 (Resource Indicators).** Every audience is a resource indicator:
-an absolute URI — a URL or a URN — with no fragment (§2). `Issue` and
-`Delegate` refuse any other, so `"data"` on one deployment and `"data"` on
-another cannot be the same audience. The verifier compares the audience it is
-mounted on with the token's exactly. *Held by*
-`TestValidateResourceIndicator`.
-
-**RFC 8693 (Token Exchange).** A delegation is expressed as §4.1 expresses
-one: the delegated token's `sub` is the subject of the root capability whose
-authority the chain carries (`Capability.OnBehalfOf`), and its `act` claim
-names the current holder, nesting the earlier holders — outermost first
-(`Capability.Actor`). A root token has no `act`, and its `sub` is its own
-subject. The act claim's current actor must be the token's principal, and the
-nesting stops at `MaxDelegationDepth`. `Narrows` refuses a child acting on
-another authority. The parent link `limes_parent_id` stays, because
-revocation walks it. *Held by* `TestDelegationIsExpressedAsAnActClaim`,
-`TestNarrowsKeepsTheAuthority`, `TestVerifyHoldsTheActClaimToThePrincipal`,
-`TestDelegateStopsAtTheDepthBound`.
 
 ## Proof of possession
 
@@ -166,41 +130,6 @@ longer than `RefreshInterval`, never shorter than `MinRefreshInterval`;
 `TestRemoteJWKSHonoursTheResponse`, `TestRemoteJWKSClampsFreshness`,
 `TestJWKSHandler`.
 
-## The issuer
-
-**RFC 8414, RFC 8615.** An issuer identifier is an https URL with no query or
-fragment (§2). Its metadata — `issuer`, `jwks_uri`, the revocation and
-introspection endpoints, `dpop_signing_alg_values_supported` (RFC 9449 §5.1)
-and `authorization_details_types_supported` — is served by `MetadataHandler`
-at the well-known URI §3.1 derives, the suffix between the host and the path.
-`DiscoverIssuer` fetches it from the identifier alone, ignores members it does
-not know (§3.2), and refuses a document whose `issuer` is not the identifier
-it asked for (§3.3). *Held by* `TestMetadataURL`, `TestNewIssuerMetadata`,
-`TestDiscoverIssuer`.
-
-**RFC 7009.** `RevocationHandler` takes a form-encoded POST with `token` from
-a client the consumer's `ClientAuthenticator` accepts, and revokes the token
-if the consumer's `ClientAuthorizer` lets that client. It answers 200 whether
-the token was valid or not (§2.2), and for one the client may not revoke, so
-revoking teaches a client nothing about a token. An expired token can still
-be revoked: the endpoint proves only that the token is genuine. A Biscuit is
-revoked as that copy alone when a `BiscuitRevocationStore` is wired, and with
-its whole capability otherwise. The hint is ignored, as §2.1 permits. A store
-that cannot revoke is answered 503 (§2.2.1).
-
-**RFC 7662.** `IntrospectionHandler` answers `{"active": false}` and nothing
-more for a token that is invalid, expired, revoked, or one the client may not
-see (§2.2, §4); for any other, its claims, `token_type` (`DPoP` for a bound
-token), `cnf` (RFC 9449 §6.2), `act` and `authorization_details` (RFC 9396
-§9.2). The audience and the proof of possession are the calling resource
-server's to check, so introspection checks neither.
-
-Both endpoints refuse anything but a form POST and answer with RFC 6749 §5.2
-error objects (`invalid_client`, `invalid_request`); every response is
-`Cache-Control: no-store`. *Held by* `TestRevocationHandler`,
-`TestRevocationHandlerRevokesOneBiscuitCopy`,
-`TestRevocationHandlerRevokesAnExpiredToken`, `TestIntrospectionHandler`.
-
 ## Identifiers and encodings
 
 **RFC 9562.** A capability id is a UUIDv7, so ids sort by issuance and a
@@ -212,6 +141,26 @@ of a budget that is not money.
 
 ## Not adopted
 
+limes is not an OAuth authorization server, and its tokens are read by
+limes alone. The standards below serve interoperability with that
+ecosystem; they were adopted in v0.3.0 and removed again, since nothing on
+either side reads them. Each can return when something does.
+
+- **RFC 9396 (Rich Authorization Requests).** Caveats travel in
+  `limes_caveats`, not as an `authorization_details` entry.
+- **RFC 8693 (Token Exchange).** Delegation is followed through
+  `limes_parent_id`; a delegated token's `sub` is its own principal's, and it
+  has no `act` claim.
+- **RFC 8707 (Resource Indicators).** An audience is any non-empty string the
+  services agree on, not necessarily an absolute URI.
+- **RFC 8414 (Authorization Server Metadata).** Its well-known document
+  describes an OAuth authorization server and requires members — such as
+  `response_types_supported` — that limes has nothing to put in. Verifiers
+  are configured with the JWKS URL.
+- **RFC 7009 and RFC 7662 (revocation and introspection endpoints).**
+  Revocation is `Store.Revoke`, and a resource server verifies a token
+  itself; an HTTP surface for either is the consumer's to build.
+
 - **The `Idempotency-Key` header** is an IETF draft
   (draft-ietf-httpapi-idempotency-key-header), not an RFC. The caveat
   `IdempotencyKeyRequired` takes whether a request carried a key from the
@@ -219,4 +168,4 @@ of a budget that is not money.
 - **Biscuit** has a specification of its own (biscuitsec.org), not an RFC; the
   Biscuit form follows its v3 format through `biscuit-go`.
 - **OAuth scopes** (RFC 6749 §3.3) are not used: what a token allows is its
-  authorization details, which say more than a list of scope strings.
+  caveats, which say more than a list of scope strings.

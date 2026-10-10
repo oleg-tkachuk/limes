@@ -134,7 +134,7 @@ func TestVerifierRejectsChildOfRevokedParent(t *testing.T) {
 	parent, _, err := issuer.Issue(ctx, limes.IssueRequest{
 		IssuedBy: limes.Principal{Subject: "op"},
 		Subject:  limes.Principal{TenantID: uuid.New(), Subject: "orchestrator"},
-		Audience: []string{lineageAudience},
+		Audience: []string{"data"},
 		Caveats:  limes.Caveats{Ops: []limes.Op{limes.OpGet}},
 		TTL:      time.Hour,
 	})
@@ -145,16 +145,13 @@ func TestVerifierRejectsChildOfRevokedParent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := verifier.Verify(ctx, limes.VerifyRequest{Token: childToken, Audience: lineageAudience}); err != nil {
+	if _, err := verifier.Verify(ctx, limes.VerifyRequest{Token: childToken, Audience: "data"}); err != nil {
 		t.Fatalf("child before revoke: %v", err)
 	}
 	if err := records.Revoke(ctx, limes.RevokeRequest{ID: parent.ID}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := verifier.Verify(ctx, limes.VerifyRequest{Token: childToken, Audience: lineageAudience}); !errors.Is(err, limes.ErrRevoked) {
+	if _, err := verifier.Verify(ctx, limes.VerifyRequest{Token: childToken, Audience: "data"}); !errors.Is(err, limes.ErrRevoked) {
 		t.Fatalf("child after parent revoke: err = %v, want ErrRevoked", err)
 	}
 }
-
-// lineageAudience is the resource the lineage tests' tokens are for.
-const lineageAudience = "https://data.example.com"

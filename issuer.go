@@ -5,8 +5,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
-	"net/url"
-	"strings"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -118,9 +117,6 @@ func (i *Issuer) Issue(ctx context.Context, req IssueRequest) (Capability, strin
 	if req.IssuedBy.Subject == "" {
 		return Capability{}, "", invalidRequest("IssuedBy is required")
 	}
-	if req.Subject.Subject == "" {
-		return Capability{}, "", invalidRequest("Subject.Subject is required: it is the token's sub")
-	}
 	if req.Generation < 0 || req.Generation > MaxIJSONInteger {
 		return Capability{}, "", invalidRequest("Generation %d is outside 0..%d", req.Generation, MaxIJSONInteger)
 	}
@@ -197,34 +193,13 @@ func setNotBefore(c *Capability, nbf time.Time) error {
 	return nil
 }
 
-// validateAudience requires a non-empty audience whose every entry is a
-// resource indicator as RFC 8707 §2 defines one: an absolute URI with no
-// fragment, naming the service the token is for.
+// validateAudience requires a non-empty audience of non-empty entries.
 func validateAudience(aud []string) error {
 	if len(aud) == 0 {
 		return invalidRequest("non-empty Audience required")
 	}
-	for _, a := range aud {
-		if err := ValidateResourceIndicator(a); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// ValidateResourceIndicator reports whether s is an RFC 8707 resource
-// indicator: an absolute URI (RFC 3986 §4.3) — a URL or a URN — with no
-// fragment.
-func ValidateResourceIndicator(s string) error {
-	u, err := url.Parse(s)
-	if err != nil {
-		return invalidRequest("audience %q: %v", s, err)
-	}
-	if !u.IsAbs() || u.Host == "" && u.Opaque == "" && u.Path == "" {
-		return invalidRequest("audience %q is not an absolute URI (RFC 8707)", s)
-	}
-	if u.Fragment != "" || strings.Contains(s, "#") {
-		return invalidRequest("audience %q has a fragment (RFC 8707)", s)
+	if slices.Contains(aud, "") {
+		return invalidRequest("Audience contains an empty entry")
 	}
 	return nil
 }
@@ -233,10 +208,7 @@ func ValidateResourceIndicator(s string) error {
 // holds. The issuer enforces narrowing (Narrows) before persisting so a
 // runtime widening attempt fails before any token is emitted.
 type DelegateRequest struct {
-	Parent Capability
-	// Subject is who the child authorises; its TenantID defaults to the
-	// parent's. Empty, the child is a narrower copy for the parent's own
-	// subject.
+	Parent   Capability
 	Subject  Principal
 	Audience []string
 	Caveats  Caveats
@@ -270,10 +242,6 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 	if len(req.Parent.Copies) > 0 {
 		return Capability{}, "", fmt.Errorf("%w: parent is a Biscuit copy with limits of its own; attenuate it instead",
 			ErrDelegationTooWide)
-	}
-	// No subject named: a narrower copy for the parent's own holder.
-	if req.Subject.Subject == "" {
-		req.Subject = req.Parent.Subject
 	}
 	if req.Subject.TenantID == uuid.Nil {
 		req.Subject.TenantID = req.Parent.Subject.TenantID
@@ -318,13 +286,7 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 		return Capability{}, "", fmt.Errorf("limes: capability id: %w", err)
 	}
 
-	actor, err := delegatedActor(req.Parent, req.Subject.Subject)
-	if err != nil {
-		return Capability{}, "", err
-	}
 	child := Capability{
-		OnBehalfOf:      req.Parent.Authority(),
-		Actor:           actor,
 		ID:              id,
 		Issuer:          i.issuerName,
 		Subject:         req.Subject,

@@ -28,10 +28,6 @@ case errors.Is(err, limes.ErrInvalidSignature): // forged, or no valid proof of 
 }
 ```
 
-An audience is a resource indicator (RFC 8707): an absolute URI with no
-fragment, naming the service the token is for. `Issue` and `Delegate` refuse
-any other.
-
 `Authorize` is `Verify` — the token itself — followed by every caveat that
 needs no state: the operation, the resource, the idempotency key, the tainted
 read and the client's address. Request and budget limits are counted by the
@@ -43,7 +39,7 @@ with no round trip to the issuer, and nothing in the claims is read until it
 has. Every rejection is a distinct sentinel; map each to whatever status your
 transport uses. This module does not decide your HTTP or RPC codes.
 
-The token must carry `typ: limes-cap-v2+jwt` and a tenant, its claims must
+The token must carry `typ: limes-cap-v3+jwt` and a tenant, its claims must
 hold no member the verifier does not know (a caveat it could not enforce),
 none twice and none in another case, and may be at most
 `VerifierConfig.MaxTokenBytes` long (16 KiB unless set). When several issuers share a verifier, set
@@ -167,13 +163,6 @@ total, not 40.00.
 This is the property that makes the model safe to hand to an agent: it can
 attenuate itself, but never escalate.
 
-
-A delegated token says whose authority it carries and who acts on it, as
-OAuth Token Exchange does (RFC 8693 §4.1): its `sub` is the subject of the
-root capability (`Capability.OnBehalfOf`), and its `act` claim names the
-holder, nesting the holders it was delegated through (`Capability.Actor`).
-`Narrows` refuses a child acting on another authority, and a chain stops at
-`MaxDelegationDepth`.
 ## Bind a capability to a key (DPoP)
 
 A capability is a bearer token unless it is bound: whoever holds it can use
@@ -194,7 +183,7 @@ verifier, _ := limes.NewStandardVerifier(limes.VerifierConfig{
     DPoP: &limes.DPoPVerifier{Replay: limes.NewMemoryReplayCache(0)},
 })
 cap, err := verifier.Verify(ctx, limes.VerifyRequest{
-    Token: token, Audience: "https://my-service.example.com",
+    Token: token, Audience: "my-service",
     DPoP:  limes.DPoPProof{Proof: proof, Method: "POST", URL: url},
 })
 ```
@@ -238,7 +227,7 @@ worker, _ := limes.Attenuate(full, limes.Attenuation{
 })
 
 // A verifier built with AcceptBiscuit: true returns the narrowed Capability.
-c, err := verifier.Verify(ctx, limes.VerifyRequest{Token: worker, Audience: "https://my-service.example.com"})
+c, err := verifier.Verify(ctx, limes.VerifyRequest{Token: worker, Audience: "my-service"})
 ```
 
 An attenuation block may restrict operations, resources, planes, the expiry,

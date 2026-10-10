@@ -77,7 +77,7 @@ cap, token, _ := issuer.Issue(ctx, limes.IssueRequest{
         Subject: "research-orchestrator",
         Agent:   &limes.AgentPrincipal{AgentType: "my-agent", RunID: runID},
     },
-    Audience: []string{"https://my-service.example.com"},
+    Audience: []string{"my-service"},
     TTL:      15 * time.Minute,
     Caveats: limes.Caveats{
         Ops:              []limes.Op{limes.OpGet, limes.OpShare},
@@ -90,7 +90,7 @@ cap, token, _ := issuer.Issue(ctx, limes.IssueRequest{
 
 // On every call: verify locally and enforce the caveats in one step, then meter.
 cap, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
-    VerifyRequest: limes.VerifyRequest{Token: token, Audience: "https://my-service.example.com"},
+    VerifyRequest: limes.VerifyRequest{Token: token, Audience: "my-service"},
     CheckRequest:  limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/report.pdf"},
 })
 _, err = usage.Charge(ctx, limes.ChargeRequest{
@@ -142,7 +142,7 @@ passes: `feat` is a minor, `fix` a patch. The module is pre-1.0, so a breaking
 change is a minor too — **the Go API may change between minor versions**; read
 the release notes before bumping.
 
-The token wire format — claims, `typ: limes-cap-v2+jwt`, the Biscuit facts —
+The token wire format — claims, `typ: limes-cap-v3+jwt`, the Biscuit facts —
 is a separate promise: a token is a credential that outlives the process that
 issued it, so the format changes only as a deliberate breaking change that
 moves the version in `typ`, with the golden fixtures regenerated in the same
@@ -154,7 +154,7 @@ read its claims under the wrong schema.
 | Document | Covers |
 |----------|--------|
 | [docs/guide.md](docs/guide.md) | each concern in turn: verification, caveats, delegation, DPoP, Biscuit, metering, revocation, storage contracts, key rotation |
-| [docs/standards.md](docs/standards.md) | the RFCs implemented — JWT, DPoP, RAR, token exchange, resource indicators, JWKS, metadata, revocation, introspection — and the choices made within them |
+| [docs/standards.md](docs/standards.md) | the RFCs implemented — JWT, DPoP, JWKS, HTTP challenges and problem details — the choices made within them, and the OAuth standards deliberately left out |
 | [docs/diagrams.md](docs/diagrams.md) | the contract boundary, a capability's lifecycle, the verification gates, delegation, Biscuit copies, the charge path, revocation |
 | [CONTRIBUTING.md](.github/CONTRIBUTING.md) | building, testing and how a change lands |
 | [SECURITY.md](.github/SECURITY.md) | reporting a vulnerability |

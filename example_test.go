@@ -18,7 +18,7 @@ import (
 // The issuer's name, and the audience every example's tokens are minted for.
 const (
 	exampleIssuerName = "example-issuer"
-	exampleAudience   = "https://my-service.example.com"
+	exampleAudience   = "my-service"
 )
 
 // exampleStack is an issuer and a verifier over one in-memory store — the

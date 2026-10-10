@@ -38,7 +38,7 @@ flowchart LR
         remote["RemoteJWKSResolver<br/>ETag · MaxStale"]
         dpop["DPoPVerifier<br/>VerifierConfig.DPoP · NewDPoPProof"]
         suites["storetest · metertest<br/>conformance suites"]
-        endpoints["HTTP endpoints<br/>JWKSHandler · MetadataHandler<br/>RevocationHandler · IntrospectionHandler"]
+        endpoints["HTTP<br/>JWKSHandler · ErrorResponse"]
     end
 
     subgraph contracts ["contracts the consumer implements"]

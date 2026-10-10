@@ -291,9 +291,8 @@ func (s *Store[TX]) exists(id uuid.UUID) bool {
 	return ok
 }
 
-// maxLineageDepth is how far up a lineage the store walks: as deep as a
-// delegation chain may go.
-const maxLineageDepth = limes.MaxDelegationDepth
+// maxLineageDepth matches the depth guard of the relational store.
+const maxLineageDepth = 64
 
 // Revoke is idempotent. CascadeChildren walks the delegation tree by ParentID
 // so revoking an orchestrator takes the sub-agents it spawned with it.

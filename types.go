@@ -194,14 +194,6 @@ type Capability struct {
 	NotBefore time.Time
 	ExpiresAt time.Time
 
-	// OnBehalfOf and Actor describe a delegation as RFC 8693 §4.1 does (see
-	// actor.go): OnBehalfOf is the subject of the root capability whose
-	// authority the chain carries — the token's `sub` — and Actor the `act`
-	// claim, this capability's holder first. Both are empty on a root
-	// capability; Delegate sets them.
-	OnBehalfOf string
-	Actor      *Actor
-
 	// ParentID, if non-zero, points at the parent capability whose
 	// holder delegated this one. Narrowing is checked once, at
 	// delegation. At use, the lineage matters twice: revoking any
@@ -261,9 +253,8 @@ type CopyCeiling struct {
 // Caveats is a typed bag of restrictions. Empty values are interpreted
 // as "no restriction on that axis"; explicit bounds are AND-combined.
 //
-// The json tags are the token's wire format — the fields of its RFC 9396
-// authorization detail (AuthorizationDetail), Ops as the common "actions"
-// field — so renaming a Go field changes nothing a token carries. A verifier refuses a
+// The json tags are the token's wire format (the limes_caveats claim), so
+// renaming a field changes nothing a token carries. A verifier refuses a
 // member it does not know: a caveat it cannot enforce must not pass as one
 // it did.
 //
@@ -275,7 +266,7 @@ type Caveats struct {
 	// Ops is the set of operations the capability authorises. The
 	// issuer rejects an empty set: a capability that allows nothing is
 	// a mistake, not a credential.
-	Ops []Op `json:"actions"`
+	Ops []Op `json:"ops"`
 
 	// ResourcePrefixes restricts the capability to URIs under any prefix
 	// in the slice, matched at a "/" segment boundary (MatchResource):

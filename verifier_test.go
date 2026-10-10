@@ -70,13 +70,6 @@ func (m *memStore) RevokeBiscuit(_ context.Context, args RevokeBiscuitRequest) e
 	m.copies[string(args.RevocationID)] = true
 	return nil
 }
-func (m *memStore) GetBiscuitRevocation(_ context.Context, id []byte) (BiscuitRevocation, error) {
-	if !m.copies[string(id)] {
-		return BiscuitRevocation{}, ErrNotFound
-	}
-	return BiscuitRevocation{RevocationID: id}, nil
-}
-
 func (m *memStore) PurgeExpired(context.Context, time.Duration) (int64, error) {
 	return 0, nil
 }
@@ -159,7 +152,7 @@ func TestVerify_AudienceMismatch(t *testing.T) {
 	ctx := context.Background()
 	_, token, _ := issuer.Issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "agent"},
+		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New()},
 		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 	})
@@ -201,7 +194,7 @@ func TestVerify_Expired(t *testing.T) {
 	ctx := context.Background()
 	_, token, _ := issuer.Issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "agent"},
+		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New()},
 		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 	})
@@ -220,7 +213,7 @@ func TestVerify_Revoked(t *testing.T) {
 	ctx := context.Background()
 	cap, token, _ := issuer.Issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "agent"},
+		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New()},
 		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 	})
@@ -248,7 +241,7 @@ func TestVerify_UntrustedIssuer(t *testing.T) {
 	})
 	_, token, _ := rogueIssuer.Issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "agent"},
+		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New()},
 		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 	})
@@ -276,7 +269,7 @@ func TestDelegate_NarrowsAndPersists(t *testing.T) {
 
 	parent, _, err := issuer.Issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID, Subject: "parent"},
+		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID},
 		Audience: []string{audienceData, audienceMCP},
 		Caveats: Caveats{
 			Ops:              []Op{OpGet, OpList, OpSearch},
@@ -323,7 +316,7 @@ func TestDelegate_RejectsWidening(t *testing.T) {
 	tenantID := uuid.New()
 	parent, _, _ := issuer.Issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID, Subject: "parent"},
+		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID},
 		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 		TTL:      time.Hour,
@@ -331,7 +324,7 @@ func TestDelegate_RejectsWidening(t *testing.T) {
 
 	_, _, err := issuer.Delegate(ctx, DelegateRequest{
 		Parent:   parent,
-		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID, Subject: "parent"},
+		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID},
 		Audience: []string{audienceData, audienceAdmin}, // wider!
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 	})
@@ -350,7 +343,7 @@ func TestDelegate_RefusesACopyWithLimitsOfItsOwn(t *testing.T) {
 	tenantID := uuid.New()
 	parent, _, err := issuer.Issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID, Subject: "parent"},
+		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID},
 		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet}, MaxRequests: 100},
 		TTL:      time.Hour,
@@ -419,7 +412,7 @@ func (m *mutableClock) Now() time.Time { return m.now }
 
 // The audiences the tests mount verifiers on.
 const (
-	audienceData  = "https://data.example.com"
-	audienceAdmin = "https://admin.example.com"
-	audienceMCP   = "https://mcp.example.com"
+	audienceData  = "data"
+	audienceAdmin = "admin"
+	audienceMCP   = "mcp"
 )

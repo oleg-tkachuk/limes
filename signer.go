@@ -72,7 +72,7 @@ type jwtHeader struct {
 type jwtClaims struct {
 	// Standard JWT claims.
 	Issuer    string   `json:"iss"`
-	Subject   string   `json:"sub"` // Capability.Authority (RFC 8693)
+	Subject   string   `json:"sub"` // Principal.Subject, for JWT tooling
 	Audience  []string `json:"aud"`
 	IssuedAt  int64    `json:"iat"`
 	NotBefore int64    `json:"nbf,omitzero"`
@@ -80,15 +80,10 @@ type jwtClaims struct {
 	ID        string   `json:"jti"`
 
 	// Capability claims.
-	Principal Principal `json:"limes_principal"`
-	// AuthorizationDetails carries the caveats as RFC 9396 §9.1 has a JWT
-	// carry authorization details: one entry, of AuthorizationDetailsType.
-	AuthorizationDetails []AuthorizationDetail `json:"authorization_details"`
-	ParentID             string                `json:"limes_parent_id,omitempty"`
-	Generation           int64                 `json:"limes_gen,omitzero"`
-
-	// Actor is RFC 8693's `act`, on a delegated capability only.
-	Actor *Actor `json:"act,omitzero"`
+	Principal  Principal `json:"limes_principal"`
+	Caveats    Caveats   `json:"limes_caveats"`
+	ParentID   string    `json:"limes_parent_id,omitempty"`
+	Generation int64     `json:"limes_gen,omitzero"`
 
 	// Confirmation is RFC 7800's `cnf`, omitted for an unbound capability.
 	Confirmation *cnfClaim `json:"cnf,omitzero"`
@@ -109,7 +104,7 @@ const MaxIJSONInteger = 1<<53 - 1
 func checkIJSONIntegers(c jwtClaims) error {
 	for name, n := range map[string]int64{
 		"iat": c.IssuedAt, "nbf": c.NotBefore, "exp": c.ExpiresAt,
-		"limes_gen": c.Generation,
+		"limes_gen": c.Generation, "max_requests": c.Caveats.MaxRequests,
 	} {
 		if n < -MaxIJSONInteger || n > MaxIJSONInteger {
 			return fmt.Errorf("limes: %s %d is outside the I-JSON integer range (RFC 7493)", name, n)
@@ -148,26 +143,18 @@ func (s *ed25519Signer) Sign(_ context.Context, c Capability) (string, error) {
 	if c.ExpiresAt.Before(c.IssuedAt) || c.ExpiresAt.IsZero() {
 		return "", errors.New("limes: ExpiresAt must be after IssuedAt")
 	}
-	if err := checkActor(c.Actor, c.Subject.Subject); err != nil {
-		return "", err
-	}
-	if (c.Actor == nil) != (c.OnBehalfOf == "") {
-		return "", errors.New("limes: OnBehalfOf and Actor are set together, on a delegated capability")
-	}
 
 	header := jwtHeader{Alg: algEd25519, Kid: s.keyID, Typ: TokenType}
 	claims := jwtClaims{
 		Issuer:     c.Issuer,
-		Subject:    c.Authority(),
-		Actor:      c.Actor,
+		Subject:    c.Subject.Subject,
 		Audience:   c.Audience,
 		IssuedAt:   c.IssuedAt.Unix(),
 		ExpiresAt:  c.ExpiresAt.Unix(),
 		ID:         c.ID.String(),
 		Principal:  c.Subject,
+		Caveats:    c.Caveats,
 		Generation: c.Generation,
-
-		AuthorizationDetails: []AuthorizationDetail{NewAuthorizationDetail(c.Caveats)},
 	}
 	if !c.NotBefore.IsZero() {
 		claims.NotBefore = c.NotBefore.Unix()
@@ -208,7 +195,7 @@ func (s *ed25519Signer) Sign(_ context.Context, c Capability) (string, error) {
 // key — an ID token, another product's token — cannot be presented as a
 // capability. It names the format's version: a token of another version is
 // refused here, before a claim of it is read under the wrong schema.
-const TokenType = "limes-cap-v2+jwt" //nolint:gosec // G101: a JWT type label, not a credential
+const TokenType = "limes-cap-v3+jwt" //nolint:gosec // G101: a JWT type label, not a credential
 
 // tokenParts is a compact token split into its three segments.
 type tokenParts struct {
@@ -255,19 +242,9 @@ func parseClaims(seg string) (*Capability, error) {
 	if err := checkIJSONIntegers(claims); err != nil {
 		return nil, err
 	}
-	for _, d := range claims.AuthorizationDetails {
-		if d.MaxRequests < 0 || d.MaxRequests > MaxIJSONInteger {
-			return nil, fmt.Errorf("limes: max_requests %d is outside the I-JSON integer range (RFC 7493)", d.MaxRequests)
-		}
-	}
-	// sub is the authority the token acts on (RFC 8693): the principal's own
-	// on a root capability, and the act claim's current actor is the
-	// principal on a delegated one. Anything else names two subjects, which
-	// two parsers would read two ways.
-	if err := checkActor(claims.Actor, claims.Principal.Subject); err != nil {
-		return nil, err
-	}
-	if claims.Actor == nil && claims.Subject != claims.Principal.Subject {
+	// sub repeats the principal for JWT tooling; two subjects would be read
+	// differently by a parser that takes one and a parser that takes the other.
+	if claims.Subject != claims.Principal.Subject {
 		return nil, fmt.Errorf("limes: sub %q differs from limes_principal.subject %q", claims.Subject, claims.Principal.Subject)
 	}
 
@@ -275,15 +252,11 @@ func parseClaims(seg string) (*Capability, error) {
 	if err != nil {
 		return nil, fmt.Errorf("limes: parse jti: %w", err)
 	}
-	caveats, err := capabilityDetail(claims.AuthorizationDetails)
-	if err != nil {
-		return nil, err
-	}
 	cap := &Capability{
 		ID:         id,
 		Issuer:     claims.Issuer,
 		Audience:   claims.Audience,
-		Caveats:    caveats,
+		Caveats:    claims.Caveats,
 		IssuedAt:   time.Unix(claims.IssuedAt, 0).UTC(),
 		ExpiresAt:  time.Unix(claims.ExpiresAt, 0).UTC(),
 		Generation: claims.Generation,
@@ -292,9 +265,6 @@ func parseClaims(seg string) (*Capability, error) {
 		cap.NotBefore = time.Unix(claims.NotBefore, 0).UTC()
 	}
 	cap.Subject = claims.Principal
-	if claims.Actor != nil {
-		cap.Actor, cap.OnBehalfOf = claims.Actor, claims.Subject
-	}
 	if claims.Confirmation != nil {
 		cap.ConfirmationJKT = claims.Confirmation.JKT
 	}
