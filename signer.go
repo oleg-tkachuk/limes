@@ -195,7 +195,7 @@ func (s *ed25519Signer) Sign(_ context.Context, c Capability) (string, error) {
 // key — an ID token, another product's token — cannot be presented as a
 // capability. It names the format's version: a token of another version is
 // refused here, before a claim of it is read under the wrong schema.
-const TokenType = "limes-cap-v2+jwt" //nolint:gosec // G101: a JWT type label, not a credential
+const TokenType = "limes-cap-v3+jwt" //nolint:gosec // G101: a JWT type label, not a credential
 
 // tokenParts is a compact token split into its three segments.
 type tokenParts struct {

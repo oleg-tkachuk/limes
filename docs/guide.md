@@ -39,7 +39,7 @@ with no round trip to the issuer, and nothing in the claims is read until it
 has. Every rejection is a distinct sentinel; map each to whatever status your
 transport uses. This module does not decide your HTTP or RPC codes.
 
-The token must carry `typ: limes-cap-v2+jwt` and a tenant, its claims must
+The token must carry `typ: limes-cap-v3+jwt` and a tenant, its claims must
 hold no member the verifier does not know (a caveat it could not enforce),
 none twice and none in another case, and may be at most
 `VerifierConfig.MaxTokenBytes` long (16 KiB unless set). When several issuers share a verifier, set

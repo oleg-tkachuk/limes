@@ -57,8 +57,9 @@ func TestVerifyRequiresCapabilityTyp(t *testing.T) {
 	if _, err := v.Verify(ctx, VerifyRequest{Token: good, Audience: "data"}); err != nil {
 		t.Fatalf("well-formed token rejected: %v", err)
 	}
-	// limes-cap+jwt is the previous format, read under another schema.
-	for _, typ := range []string{"JWT", "", "at+jwt", "limes-cap+jwt"} {
+	// Earlier formats, whose claims a v3 reader would read under another
+	// schema: v1 (Go field names) and v2 (authorization_details, act).
+	for _, typ := range []string{"JWT", "", "at+jwt", "limes-cap+jwt", "limes-cap-v2+jwt"} {
 		tok := resign(t, priv, map[string]any{"alg": algEd25519, "kid": "k1", "typ": typ}, validClaims(uuid.New()))
 		if _, err := v.Verify(ctx, VerifyRequest{Token: tok, Audience: "data"}); !errors.Is(err, ErrInvalidSignature) {
 			t.Errorf("typ %q: Verify = %v, want ErrInvalidSignature", typ, err)
