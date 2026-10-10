@@ -117,20 +117,22 @@ const (
 	OpManage  Op = "manage" // admin-tier (tenant CRUD, policy authoring)
 )
 
-// Principal identifies the subject the capability is issued to. Agent
+// Principal identifies the subject the capability is issued to. Its json
+// tags, and AgentPrincipal's, are the token's wire format (the
+// limes_principal claim). Agent
 // principals have a richer shape than service principals: they carry
 // the run / tool-call lineage that audit and cost attribution need.
 type Principal struct {
 	// Type discriminates the principal kind.
-	Type PrincipalType
+	Type PrincipalType `json:"type"`
 	// TenantID is required for every principal — capability without
 	// tenant scope is malformed and the verifier rejects it.
-	TenantID uuid.UUID
+	TenantID uuid.UUID `json:"tenant_id"`
 	// Subject is the stable identity (user UUID, agent run ID, service
 	// account name). Format depends on Type.
-	Subject string
+	Subject string `json:"subject"`
 	// Agent fields are populated only for Type == PrincipalAgent.
-	Agent *AgentPrincipal
+	Agent *AgentPrincipal `json:"agent,omitzero"`
 }
 
 // PrincipalType discriminates Principal.Type.
@@ -149,20 +151,20 @@ type AgentPrincipal struct {
 	// AgentType is a human-meaningful label ("research-orchestrator",
 	// "code-reviewer-bot"). Used for grouping, dashboards, anomaly
 	// baselines.
-	AgentType string
+	AgentType string `json:"agent_type,omitempty"`
 	// AgentVersion pins the build / git-sha of the agent runtime.
-	AgentVersion string
+	AgentVersion string `json:"agent_version,omitempty"`
 	// RunID is a UUID minted by the agent host at session start.
-	RunID uuid.UUID
+	RunID uuid.UUID `json:"run_id,omitzero"`
 	// ParentAgentID is set when this agent was spawned by another via
 	// `OpShare`. Empty for top-level agents.
-	ParentAgentID uuid.UUID
+	ParentAgentID uuid.UUID `json:"parent_agent_id,omitzero"`
 	// Model identifies the LLM behind the agent ("example-model-1",
 	// "gpt-5-pro"). Used for cost attribution.
-	Model string
+	Model string `json:"model,omitempty"`
 	// MCPClient is the agent host's user-agent ("example-host@1.4.0",
 	// "cursor@0.44"). Useful for compatibility tracking.
-	MCPClient string
+	MCPClient string `json:"mcp_client,omitempty"`
 }
 
 // Capability is the in-memory representation of a verified token. The
@@ -254,6 +256,11 @@ type CopyCeiling struct {
 // Caveats is a typed bag of restrictions. Empty values are interpreted
 // as "no restriction on that axis"; explicit bounds are AND-combined.
 //
+// The json tags are the token's wire format (the limes_caveats claim), so
+// renaming a field changes nothing a token carries. A verifier refuses a
+// member it does not know: a caveat it cannot enforce must not pass as one
+// it did.
+//
 // A child capability may only narrow caveats — set a tighter prefix,
 // drop ops, lower the budget, shorten TTL. The verifier enforces this
 // at delegation time, not just at use time, so attempts to widen are
@@ -262,36 +269,34 @@ type Caveats struct {
 	// Ops is the set of operations the capability authorises. The
 	// issuer rejects an empty set: a capability that allows nothing is
 	// a mistake, not a credential.
-	Ops []Op
+	Ops []Op `json:"ops"`
 
 	// ResourcePrefixes restricts the capability to URIs under any prefix
 	// in the slice, matched at a "/" segment boundary (MatchResource):
 	// "a/b" covers "a/b" and "a/b/c" but not "a/bc". Empty slice =
 	// unrestricted within the tenant; an empty ENTRY is invalid.
-	ResourcePrefixes []string
+	ResourcePrefixes []string `json:"resource_prefixes,omitempty"`
 
 	// ResourceURIs pins the capability to specific URIs. Used by
 	// hand-off flows where the parent passes exactly the artifacts the
 	// child needs.
-	ResourceURIs []string
+	ResourceURIs []string `json:"resource_uris,omitempty"`
 
 	// MaxRequests caps the total number of times the capability may
 	// be used. 0 = unlimited within the TTL.
-	MaxRequests int
+	MaxRequests int64 `json:"max_requests,omitzero"`
 
 	// MaxBudgetAmount is the cost budget the capability authorises, in
 	// the currency identified by UnitCode, exact to the nano. The Meter
 	// counts spend against it; once exhausted, a charge returns
 	// ErrBudgetExceeded.
-	//
-	// Renamed from MaxBudgetUSD — same field, no longer USD-pinned.
-	MaxBudgetAmount Nanos
+	MaxBudgetAmount Nanos `json:"max_budget,omitzero"`
 
 	// UnitCode pins the currency or unit: an ISO 4217 code, USD/EUR/UAH/GBP,
 	// or XXX ("no currency") for a budget that is not money. Empty value is
 	// interpreted as the default ("USD") at the application boundary; the
 	// in-memory shape is happy to carry either form.
-	UnitCode string
+	UnitCode string `json:"unit_code,omitempty"`
 
 	// AllowTaintedRead permits non-mutating operations on resources the
 	// consumer has flagged with prompt-injection / PII / secrets signals.
@@ -299,16 +304,16 @@ type Caveats struct {
 	// taint signal the consumer supplies in CheckRequest.ResourceTainted
 	// — a consumer that tracks no taint flags gets no protection from
 	// this caveat, and should say so rather than imply it.
-	AllowTaintedRead bool
+	AllowTaintedRead bool `json:"allow_tainted_read,omitzero"`
 
 	// IdempotencyKeyRequired forces the bearer to send an explicit
 	// idempotency key on mutating operations (CheckRequest.Mutating).
 	// Enforced by Caveats.Check from CheckRequest.HasIdempotencyKey.
-	IdempotencyKeyRequired bool
+	IdempotencyKeyRequired bool `json:"idempotency_key_required,omitzero"`
 
 	// SourceIPCIDR optionally pins the capability to clients whose
 	// observed IP is in the listed CIDRs. Empty = unconstrained.
 	// Enforced by Caveats.CheckSource; delegation requires each child
 	// network to lie inside a parent network.
-	SourceIPCIDR []string
+	SourceIPCIDR []string `json:"source_ip_cidr,omitempty"`
 }

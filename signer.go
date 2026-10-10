@@ -5,12 +5,12 @@ import (
 	"crypto"
 	"crypto/ed25519"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
 )
 
@@ -67,32 +67,39 @@ type jwtHeader struct {
 
 // jwtClaims is the payload. We follow JWT conventions for standard
 // claims (iss/sub/aud/iat/nbf/exp/jti) and prefix capability-specific
-// claims with `limes_` (part of the frozen wire format; see README).
-// The unmarshal path tolerates unknown fields.
+// claims with `limes_`. The verifier reads it strictly (strictClaims): no
+// member it does not know, none twice, every name in its exact case.
 type jwtClaims struct {
 	// Standard JWT claims.
 	Issuer    string   `json:"iss"`
-	Subject   string   `json:"sub"` // canonical principal string
+	Subject   string   `json:"sub"` // Principal.Subject, for JWT tooling
 	Audience  []string `json:"aud"`
 	IssuedAt  int64    `json:"iat"`
-	NotBefore int64    `json:"nbf,omitempty"`
+	NotBefore int64    `json:"nbf,omitzero"`
 	ExpiresAt int64    `json:"exp"`
 	ID        string   `json:"jti"`
 
 	// Capability claims.
-	Principal  *Principal `json:"limes_principal,omitempty"`
-	Caveats    Caveats    `json:"limes_caveats"`
-	ParentID   string     `json:"limes_parent_id,omitempty"`
-	Generation int64      `json:"limes_gen,omitempty"`
+	Principal  Principal `json:"limes_principal"`
+	Caveats    Caveats   `json:"limes_caveats"`
+	ParentID   string    `json:"limes_parent_id,omitempty"`
+	Generation int64     `json:"limes_gen,omitzero"`
 
-	// Confirmation is RFC 7800's `cnf`, omitted for an unbound capability so
-	// such tokens keep the frozen format byte for byte.
-	Confirmation *cnfClaim `json:"cnf,omitempty"`
+	// Confirmation is RFC 7800's `cnf`, omitted for an unbound capability.
+	Confirmation *cnfClaim `json:"cnf,omitzero"`
 
 	// BiscuitRoot roots the signature chain of the Biscuit this token is
 	// sealed in; omitted on every ordinary token.
 	BiscuitRoot string `json:"limes_bsk,omitempty"`
 }
+
+// strictClaims is how a token's header and claims are read. Unknown members
+// are refused, not skipped: a caveat this verifier does not know is one it
+// cannot enforce, and must not pass as one it did. Duplicate names are
+// refused and names match in their exact case — both by default in the
+// encoding/json/v2 semantics — so no two parsers can read one signed token
+// two ways.
+var strictClaims = json.RejectUnknownMembers(true)
 
 type cnfClaim struct {
 	JKT string `json:"jkt"`
@@ -125,7 +132,7 @@ func (s *ed25519Signer) Sign(_ context.Context, c Capability) (string, error) {
 		IssuedAt:   c.IssuedAt.Unix(),
 		ExpiresAt:  c.ExpiresAt.Unix(),
 		ID:         c.ID.String(),
-		Principal:  &c.Subject,
+		Principal:  c.Subject,
 		Caveats:    c.Caveats,
 		Generation: c.Generation,
 	}
@@ -166,8 +173,9 @@ func (s *ed25519Signer) Sign(_ context.Context, c Capability) (string, error) {
 // TokenType is the JWT "typ" header every capability token carries. The
 // verifier requires it, so a different kind of EdDSA JWT signed by the same
 // key — an ID token, another product's token — cannot be presented as a
-// capability.
-const TokenType = "limes-cap+jwt" //nolint:gosec // G101: a JWT type label, not a credential
+// capability. It names the format's version: a token of another version is
+// refused here, before a claim of it is read under the wrong schema.
+const TokenType = "limes-cap-v2+jwt" //nolint:gosec // G101: a JWT type label, not a credential
 
 // tokenParts is a compact token split into its three segments.
 type tokenParts struct {
@@ -191,7 +199,7 @@ func parseHeader(seg string) (jwtHeader, error) {
 		return jwtHeader{}, fmt.Errorf("limes: decode header: %w", err)
 	}
 	var h jwtHeader
-	if err := json.Unmarshal(raw, &h); err != nil {
+	if err := json.Unmarshal(raw, &h, strictClaims); err != nil {
 		return jwtHeader{}, fmt.Errorf("limes: parse header: %w", err)
 	}
 	if h.Alg != algEdDSA {
@@ -206,8 +214,13 @@ func parseClaims(seg string) (*Capability, error) {
 		return nil, fmt.Errorf("limes: decode claims: %w", err)
 	}
 	var claims jwtClaims
-	if err := json.Unmarshal(raw, &claims); err != nil {
+	if err := json.Unmarshal(raw, &claims, strictClaims); err != nil {
 		return nil, fmt.Errorf("limes: parse claims: %w", err)
+	}
+	// sub repeats the principal for JWT tooling; two subjects would be read
+	// differently by a parser that takes one and a parser that takes the other.
+	if claims.Subject != claims.Principal.Subject {
+		return nil, fmt.Errorf("limes: sub %q differs from limes_principal.subject %q", claims.Subject, claims.Principal.Subject)
 	}
 
 	id, err := uuid.Parse(claims.ID)
@@ -226,11 +239,7 @@ func parseClaims(seg string) (*Capability, error) {
 	if claims.NotBefore != 0 {
 		cap.NotBefore = time.Unix(claims.NotBefore, 0).UTC()
 	}
-	if claims.Principal != nil {
-		cap.Subject = *claims.Principal
-	} else {
-		cap.Subject = Principal{Subject: claims.Subject}
-	}
+	cap.Subject = claims.Principal
 	if claims.Confirmation != nil {
 		cap.ConfirmationJKT = claims.Confirmation.JKT
 	}

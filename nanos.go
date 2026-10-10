@@ -16,9 +16,9 @@ import (
 // appears only at the edges, for display (Float64) and for a caller whose
 // prices arrive as floats (AmountFromFloat).
 //
-// In JSON, and so in a capability token, an amount is a plain decimal number
-// of units ("MaxBudgetAmount": 1.5), written and read without a float64 in
-// between.
+// In JSON, and so in a capability token, an amount is a decimal number of
+// units in a string ("max_budget": "1.5"), written and read without a float64
+// in between.
 type Nanos int64
 
 // NanosPerUnit is how many nanos make one unit.
@@ -140,18 +140,19 @@ func (n Nanos) Float64() float64 {
 	return float64(units) + float64(frac)/NanosPerUnit
 }
 
-// MarshalJSON writes n as a decimal number of units.
-func (n Nanos) MarshalJSON() ([]byte, error) { return []byte(n.String()), nil }
+// MarshalJSON writes n as a JSON string holding a decimal number of units,
+// "1.5": a string, so that a reader whose numbers are float64 — JavaScript's
+// JSON.parse among them — cannot round it.
+func (n Nanos) MarshalJSON() ([]byte, error) { return strconv.AppendQuote(nil, n.String()), nil }
 
-// UnmarshalJSON reads a JSON number of units: exactly, when it has at most
-// nine decimals. A token issued while amounts were float64 may carry the
-// float's noise past the ninth decimal (0.30000000000000004); that is rounded
-// to the nearest nano, which is the amount it was issued for.
+// UnmarshalJSON reads what MarshalJSON writes, exactly, as ParseAmount does:
+// a JSON string, never a number.
 func (n *Nanos) UnmarshalJSON(b []byte) error {
-	if string(b) == "null" {
-		return nil
+	s, err := strconv.Unquote(string(b))
+	if err != nil || len(b) == 0 || b[0] != '"' {
+		return fmt.Errorf("%w: %s is not a JSON string", ErrInvalidAmount, b)
 	}
-	v, _, err := parseDecimal(string(b))
+	v, err := ParseAmount(s)
 	if err != nil {
 		return err
 	}

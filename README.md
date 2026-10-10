@@ -142,10 +142,12 @@ passes: `feat` is a minor, `fix` a patch. The module is pre-1.0, so a breaking
 change is a minor too — **the Go API may change between minor versions**; read
 the release notes before bumping.
 
-The token wire format — claims, `typ: limes-cap+jwt`, the Biscuit facts — is a
-separate promise: a token is a credential that outlives the process that issued
-it, so the format changes only as a deliberate breaking change, with the golden
-fixtures regenerated in the same commit.
+The token wire format — claims, `typ: limes-cap-v2+jwt`, the Biscuit facts —
+is a separate promise: a token is a credential that outlives the process that
+issued it, so the format changes only as a deliberate breaking change that
+moves the version in `typ`, with the golden fixtures regenerated in the same
+commit. A verifier refuses a token of another version outright, rather than
+read its claims under the wrong schema.
 
 ## Documentation
 

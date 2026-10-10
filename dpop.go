@@ -11,7 +11,6 @@ import (
 	"crypto/sha256"
 	"encoding/asn1"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -20,6 +19,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/go-json-experiment/json"
+	"github.com/go-json-experiment/json/jsontext"
 )
 
 // Proof of possession, after RFC 9449 (DPoP).
@@ -95,7 +97,7 @@ var jwkPrivateMembers = []string{"d", "p", "q", "dp", "dq", "qi", "oth", "k"}
 // silently drop.
 func jwkHasPrivateMember(headerSeg string) bool {
 	var h struct {
-		JWK map[string]json.RawMessage `json:"jwk"`
+		JWK map[string]jsontext.Value `json:"jwk"`
 	}
 	if decodeSegment(headerSeg, &h) != nil {
 		return true // unreadable: refuse rather than assume

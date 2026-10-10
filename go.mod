@@ -15,6 +15,10 @@ toolchain go1.27.2
 
 require (
 	github.com/biscuit-auth/biscuit-go/v2 v2.2.0
+	// The upstream of encoding/json/v2, which Go 1.26 still keeps behind
+	// GOEXPERIMENT; replace it with the standard library once the go
+	// directive reaches the release that ships it.
+	github.com/go-json-experiment/json v0.0.0-20260820222146-c27c302e5fc3
 	github.com/google/uuid v1.6.0
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/metric v1.47.0

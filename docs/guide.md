@@ -35,7 +35,9 @@ with no round trip to the issuer, and nothing in the claims is read until it
 has. Every rejection is a distinct sentinel; map each to whatever status your
 transport uses. This module does not decide your HTTP or RPC codes.
 
-The token must carry `typ: limes-cap+jwt` and a tenant, and may be at most
+The token must carry `typ: limes-cap-v2+jwt` and a tenant, its claims must
+hold no member the verifier does not know (a caveat it could not enforce),
+none twice and none in another case, and may be at most
 `VerifierConfig.MaxTokenBytes` long (16 KiB unless set). When several issuers share a verifier, set
 `KeyIssuers` (kid → issuer) so one issuer's key cannot sign for another.
 Verifiers running apart from the issuer resolve keys with
@@ -301,8 +303,9 @@ on your side needs rounding, summing apart or correcting.
 - **Units.** `UnitCode` is an ISO 4217 code: USD, EUR, UAH or GBP, or XXX,
   ISO 4217's code for "no currency", for a budget that is not money.
 
-In a token the budget is still a plain JSON number of units
-(`"MaxBudgetAmount": 1.5`), read and written without a float in between.
+In a token the budget is a decimal in a JSON string (`"max_budget": "1.5"`),
+so a reader whose numbers are float64 — JavaScript's `JSON.parse` among them —
+cannot round it.
 
 
 ## Reserve before a cost is known
