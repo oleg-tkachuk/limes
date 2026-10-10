@@ -326,16 +326,20 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 }
 
 // GenerateEd25519Keypair is a convenience for boot wiring: returns a new
-// Ed25519 keypair plus the kid you should associate with it. kid is
-// derived from the public key bytes (first 16 hex chars of the raw key)
-// so two boot paths producing the same key never end up with different
-// kids — useful when a deploy upgrades the persisted key set without
-// touching the JWKS doc.
+// Ed25519 keypair plus the kid to publish it under, DeriveKeyID's.
 func GenerateEd25519Keypair() (kid string, pub ed25519.PublicKey, priv ed25519.PrivateKey, err error) {
 	pub, priv, err = ed25519.GenerateKey(nil)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("limes: generate keypair: %w", err)
 	}
-	kid = fmt.Sprintf("%x", pub[:8])
-	return kid, pub, priv, nil
+	return DeriveKeyID(pub), pub, priv, nil
+}
+
+// DeriveKeyID is the kid of a key published with none named: its RFC 7638
+// thumbprint. The same key always gets the same kid, wherever it is derived,
+// and two keys never share one.
+func DeriveKeyID(pub ed25519.PublicKey) string {
+	// An Ed25519 key always has a JWK and a thumbprint; nothing here fails.
+	thumb, _ := DPoPJWK{Kty: jwkKtyOKP, Crv: jwkCrvEd25519, X: b64(pub)}.Thumbprint()
+	return thumb
 }
