@@ -106,7 +106,7 @@ _, err = usage.Charge(ctx, limes.ChargeRequest{
 
 | | |
 |---|---|
-| **Verify** | Local Ed25519 (EdDSA) JWT verification against a resolved key — static, or an issuer's JWKS fetched and cached by `RemoteJWKSResolver`. Every rejection is a distinct sentinel error; mapping it to a status code is yours. |
+| **Verify** | Local Ed25519 JWT verification (`alg: Ed25519`, RFC 9864) against a resolved key — static, or an issuer's JWKS fetched and cached by `RemoteJWKSResolver`. Every rejection is a distinct sentinel error; mapping it to a status code is yours. |
 | **Enforce** | `Authorize` verifies and checks every stateless caveat in one call: allowed ops, resource prefixes matched at `/` boundaries, idempotency keys for writes, tainted reads, source networks. |
 | **Delegate** | `Issuer.Delegate` issues a child that may only be narrower; anything wider is `ErrDelegationTooWide`. |
 | **Attenuate offline** | The Biscuit v3 form of a capability can be narrowed by its holder with no key and no network; each copy can get its own limits and be revoked on its own. |

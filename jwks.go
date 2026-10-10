@@ -15,7 +15,8 @@ import (
 // a short TTL so capability verification stays local without an extra
 // RPC per request.
 //
-// Format: RFC 7517 with kty=OKP and crv=Ed25519 (RFC 8037).
+// Format: RFC 7517 with kty=OKP and crv=Ed25519 (RFC 8037), alg=Ed25519
+// (RFC 9864).
 //
 // Serve capability keys from their own document, separate from any IdP
 // JWKS: capability tokens use a distinct algorithm, issuer set and
@@ -32,7 +33,7 @@ type JWK struct {
 	Kty string `json:"kty"`           // "OKP"
 	Crv string `json:"crv"`           // "Ed25519"
 	Kid string `json:"kid"`           // matches jwtHeader.Kid
-	Alg string `json:"alg,omitempty"` // "EdDSA"
+	Alg string `json:"alg,omitempty"` // "Ed25519" (RFC 9864); "EdDSA" is read
 	X   string `json:"x"`             // base64url-encoded raw public key
 }
 
@@ -49,7 +50,7 @@ func MarshalJWKS(keys map[string]ed25519.PublicKey) ([]byte, error) {
 		doc.Keys = append(doc.Keys, JWK{
 			Kty: jwkKtyOKP,
 			Crv: jwkCrvEd25519,
-			Alg: algEdDSA,
+			Alg: algEd25519,
 			Kid: kid,
 			X:   base64.RawURLEncoding.EncodeToString(pub),
 		})
@@ -73,7 +74,7 @@ func ParseJWKS(raw []byte) (map[string]ed25519.PublicKey, error) {
 		if k.Kty != jwkKtyOKP || k.Crv != jwkCrvEd25519 || k.Kid == "" {
 			continue
 		}
-		if k.Alg != "" && k.Alg != algEdDSA {
+		if k.Alg != "" && k.Alg != algEd25519 && k.Alg != algEdDSA {
 			continue
 		}
 		decoded, err := base64.RawURLEncoding.DecodeString(k.X)

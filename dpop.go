@@ -41,8 +41,14 @@ const DPoPTokenType = "dpop+jwt"
 // DefaultDPoPWindow is how far a proof's iat may be from the verifier's clock.
 const DefaultDPoPWindow = time.Minute
 
-// JWS algorithms and JWK members a proof may use (RFC 7518, RFC 8037).
+// JWS algorithms and JWK members (RFC 7518, RFC 8037, RFC 9864).
 const (
+	// algEd25519 is Ed25519 as RFC 9864 fully specifies it: what tokens,
+	// JWKS entries and proofs this module writes carry.
+	algEd25519 = "Ed25519"
+	// algEdDSA is the polymorphic identifier RFC 9864 deprecates. A DPoP
+	// proof or a JWKS entry from a client or tool that predates it is still
+	// read; nothing here writes it.
 	algEdDSA      = "EdDSA"
 	algES256      = "ES256"
 	jwkKtyOKP     = "OKP"
@@ -208,7 +214,7 @@ func NewDPoPProof(key crypto.Signer, method, rawURL, token string, now time.Time
 	if err != nil {
 		return "", err
 	}
-	alg := algEdDSA
+	alg := algEd25519
 	if jwk.Kty == jwkKtyEC {
 		alg = algES256
 	}
@@ -263,7 +269,7 @@ func signDPoP(key crypto.Signer, input []byte) ([]byte, error) {
 func verifyDPoPSignature(pub crypto.PublicKey, alg string, input, sig []byte) bool {
 	switch k := pub.(type) {
 	case ed25519.PublicKey:
-		return alg == algEdDSA && ed25519.Verify(k, input, sig)
+		return (alg == algEd25519 || alg == algEdDSA) && ed25519.Verify(k, input, sig)
 	case *ecdsa.PublicKey:
 		if alg != algES256 || len(sig) != es256SignatureBytes {
 			return false

@@ -124,7 +124,7 @@ func (s *ed25519Signer) Sign(_ context.Context, c Capability) (string, error) {
 		return "", errors.New("limes: ExpiresAt must be after IssuedAt")
 	}
 
-	header := jwtHeader{Alg: algEdDSA, Kid: s.keyID, Typ: TokenType}
+	header := jwtHeader{Alg: algEd25519, Kid: s.keyID, Typ: TokenType}
 	claims := jwtClaims{
 		Issuer:     c.Issuer,
 		Subject:    c.Subject.Subject,
@@ -202,8 +202,10 @@ func parseHeader(seg string) (jwtHeader, error) {
 	if err := json.Unmarshal(raw, &h, strictClaims); err != nil {
 		return jwtHeader{}, fmt.Errorf("limes: parse header: %w", err)
 	}
-	if h.Alg != algEdDSA {
-		return jwtHeader{}, fmt.Errorf("limes: unexpected alg %q (want EdDSA)", h.Alg)
+	// Only the fully-specified identifier (RFC 9864): a capability token is
+	// this module's own, and none was ever written with another under typ v2.
+	if h.Alg != algEd25519 {
+		return jwtHeader{}, fmt.Errorf("limes: unexpected alg %q (want %s)", h.Alg, algEd25519)
 	}
 	return h, nil
 }
