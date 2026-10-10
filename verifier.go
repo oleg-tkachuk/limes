@@ -178,6 +178,10 @@ type VerifyRequest struct {
 	// DPoP is the request's proof of possession, needed when the
 	// capability is key-bound and ignored when it is not.
 	DPoP DPoPProof
+	// Scheme is the Authorization scheme the token came under
+	// (ParseAuthorization). Set, it must match the binding: DPoP for a
+	// key-bound capability, Bearer for any other.
+	Scheme AuthScheme
 }
 
 // AuthorizeRequest is a VerifyRequest and the operation it is presented for.
@@ -296,7 +300,11 @@ func (v *StandardVerifier) Verify(ctx context.Context, req VerifyRequest) (Capab
 	}
 
 	// 6) Proof of possession, for a key-bound capability — over the token
-	// as presented, the Biscuit when it is one.
+	// as presented, the Biscuit when it is one — under the scheme its
+	// binding calls for.
+	if err := checkScheme(req.Scheme, cap.ConfirmationJKT != ""); err != nil {
+		return Capability{}, err
+	}
 	if cap.ConfirmationJKT != "" {
 		if v.cfg.DPoP == nil {
 			return Capability{}, fmt.Errorf("%w: capability is key-bound and this verifier has no DPoP configured", ErrDPoPRequired)

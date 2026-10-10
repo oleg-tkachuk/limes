@@ -6,9 +6,10 @@ start, and [diagrams.md](diagrams.md) draws each path described here.
 ## Authorize every call
 
 ```go
+scheme, token, err := limes.ParseAuthorization(r.Header.Get(limes.AuthorizationHeader))
 cap, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
     VerifyRequest: limes.VerifyRequest{
-        Token: token, Audience: "my-service",
+        Token: token, Scheme: scheme, Audience: "https://data.example.com",
         // Needed when the capability is key-bound; ignored when it is not.
         DPoP: limes.DPoPProof{Proof: r.Header.Get(limes.DPoPHeader), Method: r.Method, URL: requestURL},
     },
