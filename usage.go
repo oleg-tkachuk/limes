@@ -96,6 +96,11 @@ type Meter[TX any] interface {
 	// ErrRefundExceedsCharge and changes nothing. An unknown charge ID
 	// returns ErrChargeNotFound. Returns the amount actually refunded.
 	//
+	// A charge counted in a tenant accounting period that has since been
+	// closed (SetTenantBudget with ResetSpend) is refunded to the
+	// capability, its ancestors and its copies, but not to the tenant
+	// aggregate: the current period never counted it.
+	//
 	// For a cost only known afterwards, prefer Reserve/Settle: a
 	// reservation lapses on its own if the caller never settles it, where
 	// an estimate charged up front stays charged.

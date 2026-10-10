@@ -132,6 +132,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"OverrunRecordCrossesEveryCeiling", checkOverrunRecord[TX]},
 		{"SettleReplaysAndRecordsAnOverrun", checkSettle[TX]},
 		{"SettleOfNoReservationIsNotFound", checkSettleNil[TX]},
+		{"RefundOfAClosedPeriodLeavesTheTenantPeriod", checkRefundAcrossReset[TX]},
 		{"OverrunRecordCrossesACopyBudget", checkCopyOverrun[TX]},
 		{"TenantBudgetReadsAgree", checkTenantBudgetReads[TX]},
 		{"ReservationsReadBack", checkReservations[TX]},
@@ -402,6 +403,39 @@ func checkSettleNil[TX any](t *testing.T, f fixture[TX]) {
 	}
 	if got := f.spent(t, f.child); got != one {
 		t.Errorf("child spent %v after a refused settle, want 1", got)
+	}
+}
+
+// checkRefundAcrossReset holds a store to keeping accounting periods apart: a
+// charge counted before the tenant's spend was reset is not in the new
+// period's spend, so refunding it must not take it out of that spend.
+func checkRefundAcrossReset[TX any](t *testing.T, f fixture[TX]) {
+	const amount = 9 * one
+	before, err := f.charge(limes.ChargeRequest{Amount: amount}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
+		TenantID: f.Tenant, MaxBudgetAmount: tenantBudget, UnitCode: unit,
+		ResetSpend: true, ExpectedVersion: b.ResourceVersion,
+	}); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	if _, err := f.charge(limes.ChargeRequest{Amount: amount}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if refunded, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: before.ChargeID}); err != nil || refunded != amount {
+		t.Fatalf("refund of the earlier period's charge = %v, %v; want %v", refunded, err, amount)
+	}
+	if got := f.tenantSpent(t); got != amount {
+		t.Errorf("tenant spent %v in the new period, want %v: the refund came out of a period that never counted it", got, amount)
+	}
+	if got := f.spent(t, f.child); got != amount {
+		t.Errorf("child spent %v, want %v: the refund still returns to the capability", got, amount)
 	}
 }
 

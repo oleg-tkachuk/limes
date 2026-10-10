@@ -69,6 +69,11 @@ type UsageStore[TX any] struct {
 	// copies counts each Biscuit copy that set limits of its own, by its
 	// block's revocation id.
 	copies map[string]copyCounter
+
+	// periods counts each tenant's accounting periods: SetTenantBudget with
+	// ResetSpend starts the next one. A ledger entry records the period it
+	// was counted in, so a refund leaves a later period's spend alone.
+	periods map[uuid.UUID]uint64
 }
 
 // copyCounter is one Biscuit copy's own counters.
@@ -105,6 +110,10 @@ type LedgerEntry struct {
 	ReservationID uuid.UUID
 	// Overrun reports that the charge crossed a ceiling (OverrunRecord).
 	Overrun bool
+
+	// tenantPeriod is the tenant's accounting period the charge was counted
+	// in (UsageStore.periods).
+	tenantPeriod uint64
 }
 
 // New returns an empty store. TX is inferred from the call site:
@@ -132,6 +141,7 @@ func NewUsage[TX any](records *Store[TX]) *UsageStore[TX] {
 		budgets: map[uuid.UUID]limes.TenantBudget{},
 		holds:   map[uuid.UUID]hold{},
 		copies:  map[string]copyCounter{},
+		periods: map[uuid.UUID]uint64{},
 		records: records,
 		nowFn:   time.Now,
 	}
@@ -667,6 +677,7 @@ func (s *UsageStore[TX]) chargeLocked(
 		TenantID: req.TenantID, Amount: req.Amount, UnitCode: unit,
 		Op: req.Op, Actor: req.Actor, At: s.nowFn(), Copies: copyIDs,
 		ExternalRef: req.ExternalRef, ReservationID: reservationID, Overrun: overrun,
+		tenantPeriod: s.periods[req.TenantID],
 	}
 	s.ledger = append(s.ledger, entry)
 	return limes.ChargeReceipt{ChargeID: entry.ID, Spent: stagedSpent, Overrun: overrun}, nil
@@ -975,7 +986,9 @@ func (s *UsageStore[TX]) Refund(_ context.Context, req limes.RefundRequest) (lim
 			s.usage[id] = u
 		}
 	}
-	if b, ok := s.budgets[e.TenantID]; ok {
+	// A charge of a period since closed is history: the current period's
+	// spend never counted it, so it has nothing to give back.
+	if b, ok := s.budgets[e.TenantID]; ok && e.tenantPeriod == s.periods[e.TenantID] {
 		b.SpentAmount = max0(b.SpentAmount - amount)
 		b.UpdatedAt = s.nowFn()
 		s.budgets[e.TenantID] = b
@@ -1062,6 +1075,7 @@ func (s *UsageStore[TX]) SetTenantBudget(_ context.Context, args limes.SetTenant
 	if args.ResetSpend {
 		b.SpentAmount = 0
 		b.PeriodStart = s.nowFn()
+		s.periods[args.TenantID]++
 	}
 	if b.PeriodStart.IsZero() {
 		b.PeriodStart = s.nowFn()
