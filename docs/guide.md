@@ -1,7 +1,8 @@
 # Guide
 
 Using limes, one concern at a time. [README.md](../README.md) has the five-minute
-start, and [diagrams.md](diagrams.md) draws each path described here.
+start, [diagrams.md](diagrams.md) draws each path described here, and
+[standards.md](standards.md) maps each to the RFC it follows.
 
 ## Authorize every call
 
@@ -16,6 +17,8 @@ cap, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
     CheckRequest: limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/report.pdf"},
     ClientAddr:   clientAddr,
 })
+// verifier.ErrorResponse(ctx, err, scheme) answers a refusal the RFC 6750 /
+// RFC 9449 / RFC 9457 way; or branch on the sentinel yourself:
 switch {
 case errors.Is(err, limes.ErrExpired):          // TTL elapsed
 case errors.Is(err, limes.ErrRevoked):          // pulled mid-flight
