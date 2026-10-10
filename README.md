@@ -154,7 +154,7 @@ read its claims under the wrong schema.
 | Document | Covers |
 |----------|--------|
 | [docs/guide.md](docs/guide.md) | each concern in turn: verification, caveats, delegation, DPoP, Biscuit, metering, revocation, storage contracts, key rotation |
-| [docs/standards.md](docs/standards.md) | the RFCs implemented — JWT, DPoP, RAR, token exchange, resource indicators, JWKS, metadata, revocation, introspection — and the choices made within them |
+| [docs/standards.md](docs/standards.md) | the RFCs implemented — JWT, DPoP, JWKS, HTTP challenges and problem details — the choices made within them, and the OAuth standards deliberately left out |
 | [docs/diagrams.md](docs/diagrams.md) | the contract boundary, a capability's lifecycle, the verification gates, delegation, Biscuit copies, the charge path, revocation |
 | [CONTRIBUTING.md](.github/CONTRIBUTING.md) | building, testing and how a change lands |
 | [SECURITY.md](.github/SECURITY.md) | reporting a vulnerability |
