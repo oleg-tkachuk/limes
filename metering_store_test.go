@@ -263,6 +263,12 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 		return err
 	})
 
+	if got, err := usage.GetReservation(ctx, res.ID); err != nil || got.ID != res.ID {
+		t.Errorf("GetReservation = %+v, %v", got, err)
+	}
+	if got, err := usage.ListReservations(ctx, capID); err != nil || len(got) != 1 || got[0].ID != res.ID {
+		t.Errorf("ListReservations = %+v, %v", got, err)
+	}
 	if err := usage.Release(ctx, res.ID); err != nil {
 		t.Errorf("Release: %v", err)
 	}
