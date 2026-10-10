@@ -218,9 +218,14 @@ func checkExternalRefChargesOnce[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil || first.Replayed {
 		t.Fatalf("first charge = %+v, %v", first, err)
 	}
-	again, err := f.charge(limes.ChargeRequest{Amount: 5 * one, ExternalRef: "call-1"}, onCharged)
+	again, err := f.charge(limes.ChargeRequest{Amount: 2 * one, ExternalRef: "call-1"}, onCharged)
 	if err != nil || !again.Replayed || again.ChargeID != first.ChargeID || again.Spent != 2*one {
 		t.Fatalf("repeated charge = %+v, %v; want a replay of %s at spend 2", again, err, first.ChargeID)
+	}
+	// The same name for a different cost is the caller's bug; replaying the
+	// first receipt would hide it.
+	if r, err := f.charge(limes.ChargeRequest{Amount: 5 * one, ExternalRef: "call-1"}, onCharged); !errors.Is(err, limes.ErrExternalRefConflict) {
+		t.Fatalf("the ref again for another amount = %+v, %v; want ErrExternalRefConflict", r, err)
 	}
 	if fanOuts != 1 {
 		t.Errorf("onCharged ran %d times, want once", fanOuts)

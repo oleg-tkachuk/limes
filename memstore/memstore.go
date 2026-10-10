@@ -523,6 +523,10 @@ func (s *UsageStore[TX]) Charge(
 		if e, ok := s.findLocked(func(e LedgerEntry) bool {
 			return e.CapabilityID == req.CapabilityID && e.ExternalRef == req.ExternalRef
 		}); ok {
+			if e.Amount != req.Amount || e.UnitCode != unit || e.TenantID != req.TenantID {
+				return limes.ChargeReceipt{}, fmt.Errorf("%w: %q was %s %s for tenant %s",
+					limes.ErrExternalRefConflict, req.ExternalRef, e.Amount, e.UnitCode, e.TenantID)
+			}
 			return s.replayLocked(e), nil
 		}
 	}

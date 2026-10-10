@@ -83,7 +83,9 @@ type Meter[TX any] interface {
 	// With req.ExternalRef set, Charge is idempotent on (CapabilityID,
 	// ExternalRef): a charge whose pair is already in the ledger moves
 	// nothing, does not run onCharged, and returns that charge's receipt
-	// with Replayed set. With req.Overrun = OverrunRecord, a charge that
+	// with Replayed set. The pair names one cost: arriving again with a
+	// different Amount, UnitCode or TenantID it returns
+	// ErrExternalRefConflict and moves nothing. With req.Overrun = OverrunRecord, a charge that
 	// would cross a ceiling is committed anyway and the receipt reports it
 	// (ChargeReceipt.Overrun); see OverrunPolicy.
 	Charge(ctx context.Context, req ChargeRequest, onCharged func(ctx context.Context, tx TX) error) (ChargeReceipt, error)
@@ -550,6 +552,12 @@ var (
 	// rather than silently overwriting a change it never saw.
 	ErrTenantBudgetVersionMismatch = errors.New("limes: tenant budget resource_version mismatch")
 )
+
+// ErrExternalRefConflict — Charge named an ExternalRef its capability already
+// charged under, for a different amount, unit or tenant. One reference names
+// one cost; replaying the first receipt would report the second as booked.
+// Matches ErrInvalidRequest.
+var ErrExternalRefConflict error = &requestError{"limes: external ref already names a different charge"}
 
 // Validate reports whether p is an OverrunPolicy this package defines.
 // Implementations call it before touching state, so an unknown policy is never
