@@ -202,6 +202,19 @@ func TestDelegateStartsNoEarlierThanItsParent(t *testing.T) {
 	if child.NotBefore.Before(parent.NotBefore) {
 		t.Errorf("child starts %s, before its parent at %s", child.NotBefore, parent.NotBefore)
 	}
+
+	// A parent from an issuer replica whose clock runs ahead: issued, with no
+	// not-before, a few seconds after this replica's now.
+	const skew = 5 * time.Second
+	ahead := parent
+	ahead.NotBefore, ahead.IssuedAt = time.Time{}, now.Add(skew)
+	child, _, err = iss.Delegate(context.Background(), DelegateRequest{Parent: ahead, InheritCaveats: true})
+	if err != nil {
+		t.Fatalf("Delegate from a parent issued %s ahead: %v", skew, err)
+	}
+	if child.NotBefore.Before(ahead.IssuedAt) {
+		t.Errorf("child starts %s, before its parent was issued at %s", child.NotBefore, ahead.IssuedAt)
+	}
 }
 
 // FuzzNarrowsKeepsTheWindow checks the same property for time: whatever

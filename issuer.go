@@ -293,10 +293,16 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 	if child.ConfirmationJKT == "" {
 		child.ConfirmationJKT = req.Parent.ConfirmationJKT
 	}
-	// A child starts no earlier than its parent, as it ends no later.
+	// A child starts no earlier than its parent, as it ends no later. The
+	// parent may start after now — a not-before ahead, or an issuer replica
+	// whose clock runs ahead of this one — and the child then waits for it.
 	nbf := req.NotBefore
-	if nbf.Before(req.Parent.NotBefore) {
-		nbf = req.Parent.NotBefore
+	childStart := nbf
+	if childStart.IsZero() {
+		childStart = now
+	}
+	if ps := validFrom(req.Parent); childStart.Before(ps) {
+		nbf = ps
 	}
 	if err := setNotBefore(&child, nbf); err != nil {
 		return Capability{}, "", err
