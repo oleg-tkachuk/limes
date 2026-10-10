@@ -31,7 +31,7 @@ var goldenSeed = [32]byte{
 const (
 	goldenKID      = "golden-kid"
 	goldenIssuer   = "limes-golden"
-	goldenAudience = "https://data.limes.example"
+	goldenAudience = "limes-data"
 	goldenSubject  = "golden-agent"
 	goldenTenant   = "11111111-1111-1111-1111-111111111111"
 
