@@ -251,46 +251,12 @@ func NewStandardVerifier(cfg VerifierConfig) (*StandardVerifier, error) {
 // The checks that need no I/O come before the revocation lookup.
 func (v *StandardVerifier) Verify(ctx context.Context, req VerifyRequest) (Capability, error) {
 	token, audience := req.Token, req.Audience
-	if token == "" {
-		return Capability{}, fmt.Errorf("%w: no token", ErrInvalidSignature)
-	}
 	if audience == "" {
 		return Capability{}, fmt.Errorf("%w: no audience to verify against", ErrAudienceMismatch)
 	}
-	if len(token) > v.cfg.MaxTokenBytes {
-		return Capability{}, fmt.Errorf("%w: token is %d bytes (limit %d)",
-			ErrInvalidSignature, len(token), v.cfg.MaxTokenBytes)
-	}
-
-	var cap *Capability
-	var biscuitIDs [][]byte // set for a Biscuit, from its verified chain
-	if IsBiscuit(token) {
-		if !v.cfg.AcceptBiscuit {
-			return Capability{}, fmt.Errorf("%w: Biscuit tokens are not accepted here", ErrInvalidSignature)
-		}
-		var err error
-		if cap, biscuitIDs, err = v.verifyBiscuit(ctx, token, v.cfg.MeterCopies); err != nil {
-			return Capability{}, err
-		}
-	} else {
-		var err error
-		if cap, err = v.verifySigned(ctx, token); err != nil {
-			return Capability{}, err
-		}
-		// The token sealed inside a Biscuit, lifted out to shed the
-		// Biscuit's attenuation.
-		if cap.BiscuitRoot != "" {
-			return Capability{}, fmt.Errorf("%w: token is sealed in a Biscuit; present the Biscuit", ErrInvalidSignature)
-		}
-	}
-
-	// 4) Time window. Leeway absorbs clock skew on both ends.
-	now := v.cfg.Now()
-	if !cap.NotBefore.IsZero() && now.Add(v.cfg.Leeway).Before(cap.NotBefore) {
-		return Capability{}, ErrNotYetValid
-	}
-	if cap.ExpiresAt.IsZero() || now.Add(-v.cfg.Leeway).After(cap.ExpiresAt) {
-		return Capability{}, ErrExpired
+	cap, biscuitIDs, err := v.verifyToken(ctx, token)
+	if err != nil {
+		return Capability{}, err
 	}
 
 	// 5) Audience match.
@@ -314,28 +280,104 @@ func (v *StandardVerifier) Verify(ctx context.Context, req VerifyRequest) (Capab
 		}
 	}
 
-	// 7) Revocation of this capability or any ancestor. Last so cheap
-	// rejections short-circuit before hitting the cache / store.
-	revoked, err := v.cfg.Revocations.IsRevoked(ctx, cap.ID)
+	// 7) Revocation. Last so cheap rejections short-circuit before hitting
+	// the cache / store.
+	if err := v.checkRevoked(ctx, cap.ID, biscuitIDs); err != nil {
+		return Capability{}, err
+	}
+	return *cap, nil
+}
+
+// Introspect checks token as Verify does, except for the two checks that
+// belong to the request it came with — its audience and its proof of
+// possession — which the resource server that received it makes: what an
+// RFC 7662 introspection endpoint reports on.
+func (v *StandardVerifier) Introspect(ctx context.Context, token string) (Capability, error) {
+	cap, biscuitIDs, err := v.verifyToken(ctx, token)
 	if err != nil {
-		return Capability{}, fmt.Errorf("limes: revocation lookup: %w", err)
+		return Capability{}, err
+	}
+	if err := v.checkRevoked(ctx, cap.ID, biscuitIDs); err != nil {
+		return Capability{}, err
+	}
+	return *cap, nil
+}
+
+// verifyToken checks the token itself: identify's checks, and its validity
+// window. It returns the capability and, for a Biscuit, its revocation ids.
+func (v *StandardVerifier) verifyToken(ctx context.Context, token string) (*Capability, [][]byte, error) {
+	cap, biscuitIDs, err := v.identify(ctx, token)
+	if err != nil {
+		return nil, nil, err
+	}
+	// 4) Time window. Leeway absorbs clock skew on both ends.
+	now := v.cfg.Now()
+	if !cap.NotBefore.IsZero() && now.Add(v.cfg.Leeway).Before(cap.NotBefore) {
+		return nil, nil, ErrNotYetValid
+	}
+	if cap.ExpiresAt.IsZero() || now.Add(-v.cfg.Leeway).After(cap.ExpiresAt) {
+		return nil, nil, ErrExpired
+	}
+	return cap, biscuitIDs, nil
+}
+
+// identify checks that token is one this verifier's issuers signed — its
+// size, signature, issuer and tenant, and a Biscuit's chain — whatever its
+// validity window: what a token must prove before it may be revoked.
+func (v *StandardVerifier) identify(ctx context.Context, token string) (*Capability, [][]byte, error) {
+	if token == "" {
+		return nil, nil, fmt.Errorf("%w: no token", ErrInvalidSignature)
+	}
+	if len(token) > v.cfg.MaxTokenBytes {
+		return nil, nil, fmt.Errorf("%w: token is %d bytes (limit %d)",
+			ErrInvalidSignature, len(token), v.cfg.MaxTokenBytes)
+	}
+
+	var cap *Capability
+	var biscuitIDs [][]byte // set for a Biscuit, from its verified chain
+	if IsBiscuit(token) {
+		if !v.cfg.AcceptBiscuit {
+			return nil, nil, fmt.Errorf("%w: Biscuit tokens are not accepted here", ErrInvalidSignature)
+		}
+		var err error
+		if cap, biscuitIDs, err = v.verifyBiscuit(ctx, token, v.cfg.MeterCopies); err != nil {
+			return nil, nil, err
+		}
+	} else {
+		var err error
+		if cap, err = v.verifySigned(ctx, token); err != nil {
+			return nil, nil, err
+		}
+		// The token sealed inside a Biscuit, lifted out to shed the
+		// Biscuit's attenuation.
+		if cap.BiscuitRoot != "" {
+			return nil, nil, fmt.Errorf("%w: token is sealed in a Biscuit; present the Biscuit", ErrInvalidSignature)
+		}
+	}
+	return cap, biscuitIDs, nil
+}
+
+// checkRevoked refuses a capability revoked itself or through an ancestor,
+// and a Biscuit copy revoked itself or through the copy it was attenuated
+// from.
+func (v *StandardVerifier) checkRevoked(ctx context.Context, id uuid.UUID, biscuitIDs [][]byte) error {
+	revoked, err := v.cfg.Revocations.IsRevoked(ctx, id)
+	if err != nil {
+		return fmt.Errorf("limes: revocation lookup: %w", err)
 	}
 	if revoked {
-		return Capability{}, ErrRevoked
+		return ErrRevoked
 	}
-	// 8) Revocation of this copy of a Biscuit, or a copy it was attenuated
-	// from.
 	if biscuitIDs != nil {
 		revoked, err := v.cfg.BiscuitRevocations.IsBiscuitRevoked(ctx, biscuitIDs)
 		if err != nil {
-			return Capability{}, fmt.Errorf("limes: biscuit revocation lookup: %w", err)
+			return fmt.Errorf("limes: biscuit revocation lookup: %w", err)
 		}
 		if revoked {
-			return Capability{}, ErrRevoked
+			return ErrRevoked
 		}
 	}
-
-	return *cap, nil
+	return nil
 }
 
 // DPoPNonce is the nonce to send in the DPoP-Nonce header — with a
