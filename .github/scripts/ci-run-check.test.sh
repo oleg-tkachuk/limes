@@ -72,7 +72,7 @@ check "no sha" fail "$good" "$(jobs_tsv success)" "$RUN_ID" ""
 
 # The required jobs are the names of the jobs dispatch-release needs.
 want="$("$script" --print-required | sort)"
-got="$(yq '.jobs.dispatch-release.needs[] as $id | .jobs[$id].name' "$root/.github/workflows/ci.yaml" | sort)"
+got="$(go tool -modfile="$root/tools/yq/go.mod" yq '.jobs.dispatch-release.needs[] as $id | .jobs[$id].name' "$root/.github/workflows/ci.yaml" | sort)"
 if [ "$want" != "$got" ]; then
     printf 'FAIL REQUIRED_JOBS differs from dispatch-release.needs:\n%s\n' "$(diff <(echo "$want") <(echo "$got") || true)"
     failures=$((failures + 1))

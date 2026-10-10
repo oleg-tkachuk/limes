@@ -57,6 +57,8 @@ tasks:
       - go mod verify
       - cmd: go mod tidy -diff
         dir: tools
+      - cmd: go mod tidy -diff
+        dir: tools/yq
 
   verify:workflows:
     desc: "actionlint over the workflows"

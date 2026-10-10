@@ -34,7 +34,7 @@ check "a file type nobody listed" true "something.new"
 # codeql.yaml's paths-ignore, as globs, against INERT. GitHub's ** is the
 # script's *, which already crosses "/".
 want="$("$script" --print-inert | sort)"
-got="$(yq '.on.push.paths-ignore[]' "$root/.github/workflows/codeql.yaml" | sed 's#\*\*#*#g' | sed 's#^\*/##' | sort)"
+got="$(go tool -modfile="$root/tools/yq/go.mod" yq '.on.push.paths-ignore[]' "$root/.github/workflows/codeql.yaml" | sed 's#\*\*#*#g' | sed 's#^\*/##' | sort)"
 if [ "$want" != "$got" ]; then
     printf 'FAIL codeql.yaml paths-ignore differs from INERT:\n%s\n' "$(diff <(echo "$want") <(echo "$got") || true)"
     failures=$((failures + 1))

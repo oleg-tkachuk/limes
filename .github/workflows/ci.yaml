@@ -27,8 +27,6 @@ env:
   # refuses to load the module. Bumping go.mod means checking this.
   # renovate: datasource=github-releases depName=golangci/golangci-lint
   GOLANGCI_LINT_VERSION: "v2.14.0"
-  # renovate: datasource=github-releases depName=mikefarah/yq
-  YQ_VERSION: "v4.53.6"
   # renovate: datasource=pypi depName=zizmor
   ZIZMOR_VERSION: "1.30.1"
   # The newest patch of the oldest Go the module supports: the `go` directive
@@ -128,9 +126,9 @@ jobs:
             ~/.cache/go-build
             ~/go/pkg/mod
             ~/.cache/golangci-lint
-          key: go-${{ runner.os }}-verify-${{ hashFiles('go.sum', 'tools/go.sum') }}-${{ github.sha }}
+          key: go-${{ runner.os }}-verify-${{ hashFiles('go.sum', 'tools/go.sum', 'tools/yq/go.sum') }}-${{ github.sha }}
           restore-keys: |
-            go-${{ runner.os }}-verify-${{ hashFiles('go.sum', 'tools/go.sum') }}-
+            go-${{ runner.os }}-verify-${{ hashFiles('go.sum', 'tools/go.sum', 'tools/yq/go.sum') }}-
             go-${{ runner.os }}-verify-
 
       - name: Set up golangci-lint
@@ -140,16 +138,6 @@ jobs:
           install-only: true
           # Its cache lives in the Go caches above.
           skip-cache: true
-
-      # The runner image ships a yq, but not a version this repository chose.
-      # .github/scripts/ci-relevant.test.sh reads codeql.yaml through it.
-      - name: Set up yq
-        run: |
-          set -euo pipefail
-          sudo curl -fsSL -o /usr/local/bin/yq \
-            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
-          sudo chmod +x /usr/local/bin/yq
-          yq --version
 
       # verify:release-rules runs the pinned commit analyzer against
       # release.config.cjs. Node 24, as release.yaml runs it.
