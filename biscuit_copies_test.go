@@ -37,7 +37,7 @@ func limitedBiscuit(t *testing.T) (*StandardVerifier, Capability, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := issuer.Biscuit(cap)
+	token, err := issuer.Biscuit(context.Background(), cap)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestCopiesAreNeverSigned(t *testing.T) {
 	issuer, v, _, cap, _ := biscuitFixture(t)
 	withCopies := cap
 	withCopies.Copies = []CopyCeiling{{RevocationID: []byte("x"), MaxRequests: 1}}
-	jwt, err := issuer.signer.Sign(withCopies)
+	jwt, err := issuer.signer.Sign(context.Background(), withCopies)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -72,7 +72,7 @@ func TestRevokingTheRootBiscuitLeavesTheJWT(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root, err := issuer.Biscuit(cap)
+	root, err := issuer.Biscuit(context.Background(), cap)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestBiscuitCopyRefusesWhatVerifyRefuses(t *testing.T) {
 	tampered := base64.RawURLEncoding.EncodeToString(raw)
 
 	stranger, _, _, _ := buildIssuerVerifier(t) // another key, same issuer name
-	foreign, err := stranger.Biscuit(cap)
+	foreign, err := stranger.Biscuit(context.Background(), cap)
 	if err != nil {
 		t.Fatal(err)
 	}

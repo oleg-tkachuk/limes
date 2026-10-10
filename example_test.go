@@ -190,7 +190,7 @@ func ExampleAttenuate() {
 	s := newExampleStack()
 	c, _ := s.issue()
 
-	full, err := s.issuer.Biscuit(c)
+	full, err := s.issuer.Biscuit(context.Background(), c)
 	if err != nil {
 		log.Fatal(err)
 	}

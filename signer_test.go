@@ -1,6 +1,7 @@
 package limes
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
@@ -52,7 +53,7 @@ func TestSign_RoundTrip(t *testing.T) {
 		},
 	}
 
-	token, err := signer.Sign(cap)
+	token, err := signer.Sign(context.Background(), cap)
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
@@ -120,7 +121,7 @@ func TestSign_RejectsInvalid(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			c := base()
 			mut(&c)
-			if _, err := signer.Sign(c); err == nil {
+			if _, err := signer.Sign(context.Background(), c); err == nil {
 				t.Fatalf("expected error, got nil")
 			}
 		})
@@ -145,7 +146,7 @@ func TestSign_TamperDetection(t *testing.T) {
 		IssuedAt:  now,
 		ExpiresAt: now.Add(time.Minute),
 	}
-	token, _ := signer.Sign(cap)
+	token, _ := signer.Sign(context.Background(), cap)
 
 	// Flip a byte in the middle of the payload segment.
 	mid := len(token) / 2
@@ -306,5 +307,62 @@ func TestNarrows_AcceptsValidNarrowing(t *testing.T) {
 	}
 	if err := Narrows(parent, child); err != nil {
 		t.Fatalf("expected narrowing OK, got %v", err)
+	}
+}
+
+// ctxSigner records the context it was asked to sign under, as a KMS-backed
+// signer would use it for its call.
+type ctxSigner struct {
+	Signer
+	got []context.Context
+}
+
+func (s *ctxSigner) Sign(ctx context.Context, c Capability) (string, error) {
+	s.got = append(s.got, ctx)
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return s.Signer.Sign(ctx, c)
+}
+
+type ctxKey struct{}
+
+// The issuer signs under the caller's context, so a slow or cancelled KMS
+// call is bounded by the request that asked for it.
+func TestIssuerSignsUnderTheCallersContext(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inner, err := NewEd25519Signer("k1", priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer := &ctxSigner{Signer: inner}
+	issuer, err := NewIssuer(IssuerConfig{Signer: signer, Store: newMemStore(), IssuerName: "limes-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.WithValue(context.Background(), ctxKey{}, "request")
+	req := IssueRequest{
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{TenantID: uuid.New(), Subject: "a"},
+		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}},
+	}
+	c, _, err := issuer.Issue(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := issuer.Biscuit(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	for i, got := range signer.got {
+		if got.Value(ctxKey{}) != "request" {
+			t.Errorf("signature %d was made under another context", i)
+		}
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, _, err := issuer.Issue(cancelled, req); !errors.Is(err, context.Canceled) {
+		t.Errorf("Issue under a cancelled context: err = %v, want context.Canceled", err)
 	}
 }

@@ -1,6 +1,7 @@
 package limes
 
 import (
+	"context"
 	"crypto"
 	"crypto/ed25519"
 	"encoding/base64"
@@ -30,8 +31,9 @@ type Signer interface {
 
 	// Sign emits a compact JWT for the supplied capability. The cap's
 	// IssuedAt / NotBefore / ExpiresAt must already be populated; Sign
-	// does not normalise times.
-	Sign(c Capability) (string, error)
+	// does not normalise times. ctx bounds the signing, which for a key
+	// held in a KMS or an HSM is a call over the network.
+	Sign(ctx context.Context, c Capability) (string, error)
 }
 
 // ed25519Signer is the Ed25519-backed Signer.
@@ -98,7 +100,7 @@ type cnfClaim struct {
 
 // Sign implements Signer. Encodes the header + claims, signs the
 // dotted concatenation, returns the compact form.
-func (s *ed25519Signer) Sign(c Capability) (string, error) {
+func (s *ed25519Signer) Sign(_ context.Context, c Capability) (string, error) {
 	if c.ID == uuid.Nil {
 		return "", errors.New("limes: ID required")
 	}

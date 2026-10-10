@@ -204,7 +204,7 @@ of the same capability (Biscuit v3) can be narrowed by whoever holds it, with
 no key and no network, and a narrowing can never be undone:
 
 ```go
-full, _ := issuer.Biscuit(cap) // same ID, caveats and expiry as cap
+full, _ := issuer.Biscuit(ctx, cap) // same ID, caveats and expiry as cap
 
 // An agent, offline, hands a worker a smaller token:
 worker, _ := limes.Attenuate(full, limes.Attenuation{

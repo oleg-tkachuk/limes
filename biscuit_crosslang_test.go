@@ -92,7 +92,7 @@ func TestGenerateBiscuitFixtures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := issuer.Biscuit(cap)
+	token, err := issuer.Biscuit(context.Background(), cap)
 	if err != nil {
 		t.Fatal(err)
 	}

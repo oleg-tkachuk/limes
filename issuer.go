@@ -156,7 +156,7 @@ func (i *Issuer) Issue(ctx context.Context, req IssueRequest) (Capability, strin
 	if err := i.store.Insert(ctx, cap, req.IssuedBy); err != nil {
 		return Capability{}, "", fmt.Errorf("limes: persist issuance: %w", err)
 	}
-	token, err := i.signer.Sign(cap)
+	token, err := i.signer.Sign(ctx, cap)
 	if err != nil {
 		return Capability{}, "", fmt.Errorf("limes: sign: %w", err)
 	}
@@ -318,7 +318,7 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 	if err := i.store.Insert(ctx, child, req.Parent.Subject); err != nil {
 		return Capability{}, "", fmt.Errorf("limes: persist delegation: %w", err)
 	}
-	token, err := i.signer.Sign(child)
+	token, err := i.signer.Sign(ctx, child)
 	if err != nil {
 		return Capability{}, "", fmt.Errorf("limes: sign delegation: %w", err)
 	}

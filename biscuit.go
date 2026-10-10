@@ -1,6 +1,7 @@
 package limes
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
@@ -73,14 +74,14 @@ func IsBiscuit(token string) bool {
 // same capability — same ID, caveats, expiry and binding, revoked together
 // with it — in a token its holder can attenuate offline. One copy can also be
 // revoked on its own; see BiscuitRevocationStore.
-func (i *Issuer) Biscuit(c Capability) (string, error) {
+func (i *Issuer) Biscuit(ctx context.Context, c Capability) (string, error) {
 	rootPub, rootPriv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return "", fmt.Errorf("limes: biscuit root key: %w", err)
 	}
 	sealed := c
 	sealed.BiscuitRoot = base64.RawURLEncoding.EncodeToString(rootPub)
-	inner, err := i.signer.Sign(sealed)
+	inner, err := i.signer.Sign(ctx, sealed)
 	if err != nil {
 		return "", fmt.Errorf("limes: sign sealed token: %w", err)
 	}
