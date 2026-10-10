@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"net/netip"
 	"slices"
+	"time"
 )
 
 // Narrows reports whether `child` is a narrowing of `parent`: every operation
 // child allows is allowed by parent; every resource child can touch is
-// reachable by parent; the budget / request count / lifetime are no larger;
+// reachable by parent; the budget / request count are no larger, and the
+// validity window starts no earlier and ends no later;
 // the audience is a subset; tainted-read is no broader. Issuer.Delegate runs
 // this check before signing the child token, so a misuse fails at issue time,
 // not later.
@@ -30,6 +32,15 @@ func Narrows(parent, child Capability) error {
 			ErrDelegationTooWide, child.ExpiresAt, parent.ExpiresAt)
 	}
 
+	// Start: child cannot begin before parent. A capability with no
+	// NotBefore starts when it was issued; one with neither, at any time.
+	// Compared to the second, the precision a token carries times in, so a
+	// parent read back from its token compares equal to itself.
+	if ps := validFrom(parent).Truncate(time.Second); !ps.IsZero() && validFrom(child).Before(ps) {
+		return fmt.Errorf("%w: child starts %s, before parent %s",
+			ErrDelegationTooWide, validFrom(child), ps)
+	}
+
 	// Tenant: must match. Cross-tenant delegation is impossible — a
 	// capability is forever pinned to its issuing tenant.
 	if child.Subject.TenantID != parent.Subject.TenantID {
@@ -44,6 +55,15 @@ func Narrows(parent, child Capability) error {
 	}
 
 	return narrowsCaveats(parent.Caveats, child.Caveats)
+}
+
+// validFrom is when c starts to be valid: its NotBefore, or its IssuedAt
+// without one. Zero for neither — valid from any time.
+func validFrom(c Capability) time.Time {
+	if !c.NotBefore.IsZero() {
+		return c.NotBefore
+	}
+	return c.IssuedAt
 }
 
 // narrowsCaveats compares the typed caveat bag. Every restriction in

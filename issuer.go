@@ -293,7 +293,12 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 	if child.ConfirmationJKT == "" {
 		child.ConfirmationJKT = req.Parent.ConfirmationJKT
 	}
-	if err := setNotBefore(&child, req.NotBefore); err != nil {
+	// A child starts no earlier than its parent, as it ends no later.
+	nbf := req.NotBefore
+	if nbf.Before(req.Parent.NotBefore) {
+		nbf = req.Parent.NotBefore
+	}
+	if err := setNotBefore(&child, nbf); err != nil {
 		return Capability{}, "", err
 	}
 

@@ -1,6 +1,8 @@
 package limes
 
 import (
+	"context"
+	"crypto/ed25519"
 	"errors"
 	"testing"
 	"time"
@@ -135,6 +137,92 @@ func FuzzNarrowsNeverWidens(f *testing.F) {
 			if child.AllowsResource(uri) && !parent.AllowsResource(uri) {
 				t.Fatalf("child %+v reaches %q, parent %+v does not", child, uri, parent)
 			}
+		}
+	})
+}
+
+// A child starting before its parent is valid at a moment the parent is not:
+// Narrows compares the whole window, its start as well as its end.
+func TestNarrowsRefusesAnEarlierStart(t *testing.T) {
+	start := time.Now().Add(time.Hour)
+	cases := []struct {
+		name        string
+		parentStart time.Time
+		childStart  time.Time
+		ok          bool
+	}{
+		{"child with no start under a parent that starts later", start, time.Time{}, false},
+		{"child issued after its parent started", start.Add(-time.Hour), time.Time{}, true},
+		{"child starting before its parent", start, start.Add(-time.Minute), false},
+		{"child starting with its parent", start, start, true},
+		{"child starting after its parent", start, start.Add(time.Minute), true},
+		{"any child of a parent with no start", time.Time{}, time.Time{}, true},
+	}
+	for _, tc := range cases {
+		p, c := narrowFixture(Caveats{Ops: []Op{OpGet}}, Caveats{Ops: []Op{OpGet}})
+		p.ExpiresAt = start.Add(2 * time.Hour)
+		c.ExpiresAt = p.ExpiresAt
+		p.NotBefore, c.NotBefore = tc.parentStart, tc.childStart
+		if tc.childStart.IsZero() {
+			c.IssuedAt = start.Add(-time.Minute) // issued before start, after start - 1h
+		}
+		err := Narrows(p, c)
+		if (err == nil) != tc.ok {
+			t.Errorf("%s: Narrows = %v, want ok=%v", tc.name, err, tc.ok)
+		}
+		if err != nil && !errors.Is(err, ErrDelegationTooWide) {
+			t.Errorf("%s: err %v does not match ErrDelegationTooWide", tc.name, err)
+		}
+	}
+}
+
+// Delegate starts a child no earlier than its parent, as it ends one no later.
+func TestDelegateStartsNoEarlierThanItsParent(t *testing.T) {
+	now := goldenClock()
+	iss := testIssuer(t, goldenKID, ed25519.NewKeyFromSeed(goldenSeed[:]), func() time.Time { return now })
+	parent, _, err := iss.Issue(context.Background(), IssueRequest{
+		IssuedBy: Principal{Subject: "test-operator"},
+		Subject:  Principal{Type: PrincipalService, TenantID: uuid.MustParse(goldenTenant), Subject: "svc"},
+		Audience: []string{goldenAudience}, Caveats: Caveats{Ops: []Op{OpGet}},
+		NotBefore: now.Add(time.Minute), TTL: time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, _, err := iss.Delegate(context.Background(), DelegateRequest{Parent: parent, InheritCaveats: true})
+	if err != nil {
+		t.Fatalf("Delegate: %v", err)
+	}
+	if child.NotBefore.Before(parent.NotBefore) {
+		t.Errorf("child starts %s, before its parent at %s", child.NotBefore, parent.NotBefore)
+	}
+}
+
+// FuzzNarrowsKeepsTheWindow checks the same property for time: whatever
+// Narrows accepts, the child is valid at no moment the parent is not.
+func FuzzNarrowsKeepsTheWindow(f *testing.F) {
+	f.Add(int8(0), int8(10), int8(1), int8(9))
+	f.Add(int8(5), int8(10), int8(0), int8(10))
+	f.Add(int8(-1), int8(3), int8(-1), int8(4))
+	f.Fuzz(func(t *testing.T, ps, pe, cs, ce int8) {
+		base := time.Unix(1_700_000_000, 0).UTC()
+		at := func(n int8) time.Time {
+			if n < 0 {
+				return time.Time{} // no start
+			}
+			return base.Add(time.Duration(n) * time.Minute)
+		}
+		p, c := narrowFixture(Caveats{Ops: []Op{OpGet}}, Caveats{Ops: []Op{OpGet}})
+		p.NotBefore, p.ExpiresAt = at(ps), base.Add(time.Duration(pe)*time.Minute)
+		c.NotBefore, c.ExpiresAt = at(cs), base.Add(time.Duration(ce)*time.Minute)
+		if Narrows(p, c) != nil {
+			return
+		}
+		if c.ExpiresAt.After(p.ExpiresAt) {
+			t.Fatalf("child ends %s, after parent %s", c.ExpiresAt, p.ExpiresAt)
+		}
+		if !p.NotBefore.IsZero() && (c.NotBefore.IsZero() || c.NotBefore.Before(p.NotBefore)) {
+			t.Fatalf("child starts %s, before parent %s", c.NotBefore, p.NotBefore)
 		}
 	})
 }
