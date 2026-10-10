@@ -41,6 +41,13 @@ func Narrows(parent, child Capability) error {
 			ErrDelegationTooWide, validFrom(child), ps)
 	}
 
+	// Authority: a delegation acts on the authority of the root it started
+	// from (RFC 8693 §4.1), and no step of it may change whose that is.
+	if child.Authority() != parent.Authority() {
+		return fmt.Errorf("%w: child acts on behalf of %q, parent on behalf of %q",
+			ErrDelegationTooWide, child.Authority(), parent.Authority())
+	}
+
 	// Tenant: must match. Cross-tenant delegation is impossible — a
 	// capability is forever pinned to its issuing tenant.
 	if child.Subject.TenantID != parent.Subject.TenantID {

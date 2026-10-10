@@ -164,6 +164,13 @@ total, not 40.00.
 This is the property that makes the model safe to hand to an agent: it can
 attenuate itself, but never escalate.
 
+
+A delegated token says whose authority it carries and who acts on it, as
+OAuth Token Exchange does (RFC 8693 §4.1): its `sub` is the subject of the
+root capability (`Capability.OnBehalfOf`), and its `act` claim names the
+holder, nesting the holders it was delegated through (`Capability.Actor`).
+`Narrows` refuses a child acting on another authority, and a chain stops at
+`MaxDelegationDepth`.
 ## Bind a capability to a key (DPoP)
 
 A capability is a bearer token unless it is bound: whoever holds it can use

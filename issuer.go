@@ -118,6 +118,9 @@ func (i *Issuer) Issue(ctx context.Context, req IssueRequest) (Capability, strin
 	if req.IssuedBy.Subject == "" {
 		return Capability{}, "", invalidRequest("IssuedBy is required")
 	}
+	if req.Subject.Subject == "" {
+		return Capability{}, "", invalidRequest("Subject.Subject is required: it is the token's sub")
+	}
 	if req.Generation < 0 || req.Generation > MaxIJSONInteger {
 		return Capability{}, "", invalidRequest("Generation %d is outside 0..%d", req.Generation, MaxIJSONInteger)
 	}
@@ -230,7 +233,10 @@ func ValidateResourceIndicator(s string) error {
 // holds. The issuer enforces narrowing (Narrows) before persisting so a
 // runtime widening attempt fails before any token is emitted.
 type DelegateRequest struct {
-	Parent   Capability
+	Parent Capability
+	// Subject is who the child authorises; its TenantID defaults to the
+	// parent's. Empty, the child is a narrower copy for the parent's own
+	// subject.
 	Subject  Principal
 	Audience []string
 	Caveats  Caveats
@@ -264,6 +270,10 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 	if len(req.Parent.Copies) > 0 {
 		return Capability{}, "", fmt.Errorf("%w: parent is a Biscuit copy with limits of its own; attenuate it instead",
 			ErrDelegationTooWide)
+	}
+	// No subject named: a narrower copy for the parent's own holder.
+	if req.Subject.Subject == "" {
+		req.Subject = req.Parent.Subject
 	}
 	if req.Subject.TenantID == uuid.Nil {
 		req.Subject.TenantID = req.Parent.Subject.TenantID
@@ -308,7 +318,13 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 		return Capability{}, "", fmt.Errorf("limes: capability id: %w", err)
 	}
 
+	actor, err := delegatedActor(req.Parent, req.Subject.Subject)
+	if err != nil {
+		return Capability{}, "", err
+	}
 	child := Capability{
+		OnBehalfOf:      req.Parent.Authority(),
+		Actor:           actor,
 		ID:              id,
 		Issuer:          i.issuerName,
 		Subject:         req.Subject,
