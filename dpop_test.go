@@ -59,7 +59,7 @@ func TestDPoPAcceptsAProofFromTheBoundKey(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			c := boundCap(t, key)
 			v := &DPoPVerifier{Replay: NewMemoryReplayCache(0), Now: func() time.Time { return now }}
-			proof, err := NewDPoPProof(key, DPoPProofRequest{Method: "post", URL: dpopURL+"?x=1", Token: "the-token", Now: now})
+			proof, err := NewDPoPProof(key, DPoPProofRequest{Method: "post", URL: dpopURL + "?x=1", Token: "the-token", Now: now})
 			if err != nil {
 				t.Fatal(err)
 			}

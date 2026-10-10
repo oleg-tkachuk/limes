@@ -16,9 +16,9 @@ import (
 // FuzzParseClaims holds the claims reader to its strictness: whatever it
 // accepts names a capability, and its sub is its principal's.
 func FuzzParseClaims(f *testing.F) {
-	f.Add([]byte(`{"iss":"i","sub":"s","aud":["data"],"iat":1,"exp":2,"jti":"0190a5c3-0000-7000-8000-000000000000","limes_principal":{"tenant_id":"11111111-1111-1111-1111-111111111111","subject":"s"},"limes_caveats":{"ops":["get"],"max_budget":"1.5"}}`))
+	f.Add([]byte(`{"iss":"i","sub":"s","aud":["data"],"iat":1,"exp":2,"jti":"0190a5c3-0000-7000-8000-000000000000","limes_principal":{"tenant_id":"11111111-1111-1111-1111-111111111111","subject":"s"},"authorization_details":[{"type":"https://github.com/oleg-tkachuk/limes/capability","actions":["get"],"max_budget":"1.5"}]}`))
 	f.Add([]byte(`{"iss":"a","iss":"b"}`))
-	f.Add([]byte(`{"limes_caveats":{"Ops":["get"]}}`))
+	f.Add([]byte(`{"authorization_details":[{"type":"x","ACTIONS":["get"]}]}`))
 	f.Fuzz(func(t *testing.T, raw []byte) {
 		c, err := parseClaims(b64(raw))
 		if err != nil {

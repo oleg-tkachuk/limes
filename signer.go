@@ -80,10 +80,12 @@ type jwtClaims struct {
 	ID        string   `json:"jti"`
 
 	// Capability claims.
-	Principal  Principal `json:"limes_principal"`
-	Caveats    Caveats   `json:"limes_caveats"`
-	ParentID   string    `json:"limes_parent_id,omitempty"`
-	Generation int64     `json:"limes_gen,omitzero"`
+	Principal Principal `json:"limes_principal"`
+	// AuthorizationDetails carries the caveats as RFC 9396 §9.1 has a JWT
+	// carry authorization details: one entry, of AuthorizationDetailsType.
+	AuthorizationDetails []AuthorizationDetail `json:"authorization_details"`
+	ParentID             string                `json:"limes_parent_id,omitempty"`
+	Generation           int64                 `json:"limes_gen,omitzero"`
 
 	// Confirmation is RFC 7800's `cnf`, omitted for an unbound capability.
 	Confirmation *cnfClaim `json:"cnf,omitzero"`
@@ -104,7 +106,7 @@ const MaxIJSONInteger = 1<<53 - 1
 func checkIJSONIntegers(c jwtClaims) error {
 	for name, n := range map[string]int64{
 		"iat": c.IssuedAt, "nbf": c.NotBefore, "exp": c.ExpiresAt,
-		"limes_gen": c.Generation, "max_requests": c.Caveats.MaxRequests,
+		"limes_gen": c.Generation,
 	} {
 		if n < -MaxIJSONInteger || n > MaxIJSONInteger {
 			return fmt.Errorf("limes: %s %d is outside the I-JSON integer range (RFC 7493)", name, n)
@@ -153,8 +155,9 @@ func (s *ed25519Signer) Sign(_ context.Context, c Capability) (string, error) {
 		ExpiresAt:  c.ExpiresAt.Unix(),
 		ID:         c.ID.String(),
 		Principal:  c.Subject,
-		Caveats:    c.Caveats,
 		Generation: c.Generation,
+
+		AuthorizationDetails: []AuthorizationDetail{NewAuthorizationDetail(c.Caveats)},
 	}
 	if !c.NotBefore.IsZero() {
 		claims.NotBefore = c.NotBefore.Unix()
@@ -242,6 +245,11 @@ func parseClaims(seg string) (*Capability, error) {
 	if err := checkIJSONIntegers(claims); err != nil {
 		return nil, err
 	}
+	for _, d := range claims.AuthorizationDetails {
+		if d.MaxRequests < 0 || d.MaxRequests > MaxIJSONInteger {
+			return nil, fmt.Errorf("limes: max_requests %d is outside the I-JSON integer range (RFC 7493)", d.MaxRequests)
+		}
+	}
 	// sub repeats the principal for JWT tooling; two subjects would be read
 	// differently by a parser that takes one and a parser that takes the other.
 	if claims.Subject != claims.Principal.Subject {
@@ -252,11 +260,15 @@ func parseClaims(seg string) (*Capability, error) {
 	if err != nil {
 		return nil, fmt.Errorf("limes: parse jti: %w", err)
 	}
+	caveats, err := capabilityDetail(claims.AuthorizationDetails)
+	if err != nil {
+		return nil, err
+	}
 	cap := &Capability{
 		ID:         id,
 		Issuer:     claims.Issuer,
 		Audience:   claims.Audience,
-		Caveats:    claims.Caveats,
+		Caveats:    caveats,
 		IssuedAt:   time.Unix(claims.IssuedAt, 0).UTC(),
 		ExpiresAt:  time.Unix(claims.ExpiresAt, 0).UTC(),
 		Generation: claims.Generation,
