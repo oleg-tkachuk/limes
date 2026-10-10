@@ -255,3 +255,30 @@ func TestRevokeBiscuit(t *testing.T) {
 		t.Error("revoked copy outlived its purged capability")
 	}
 }
+
+// A hold of a capability no longer on record cannot be settled or released
+// by anyone, so PurgeOrphans releases it with the counters, or the tenant's
+// ceiling stays short by it for good.
+func TestPurgeOrphansReleasesHolds(t *testing.T) {
+	ctx := context.Background()
+	records := New[struct{}]()
+	u := NewUsage(records)
+	tenant, gone := uuid.New(), uuid.New() // gone was never recorded
+	const held = 3 * limes.NanosPerUnit
+	res, err := u.Reserve(ctx, limes.ReserveRequest{CapabilityID: gone, TenantID: tenant, Amount: held})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := u.PurgeOrphans(ctx); err != nil || n != 1 {
+		t.Fatalf("PurgeOrphans = %d, %v; want the one orphan row", n, err)
+	}
+	if _, err := u.GetReservation(ctx, res.ID); !errors.Is(err, limes.ErrReservationNotFound) {
+		t.Errorf("the orphan's hold: err = %v, want ErrReservationNotFound", err)
+	}
+	if b, err := u.GetTenantBudget(ctx, tenant); err != nil || b.ReservedAmount != 0 {
+		t.Errorf("tenant after the purge = %+v, %v; want nothing held", b, err)
+	}
+	if _, err := u.GetUsage(ctx, gone); !errors.Is(err, limes.ErrUsageNotFound) {
+		t.Errorf("the orphan's usage row: err = %v, want ErrUsageNotFound", err)
+	}
+}

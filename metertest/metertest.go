@@ -135,6 +135,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"SettleOfNoReservationIsNotFound", checkSettleNil[TX]},
 		{"RefundOfAClosedPeriodLeavesTheTenantPeriod", checkRefundAcrossReset[TX]},
 		{"EveryCounterKeepsOneUnit", checkOneUnit[TX]},
+		{"DeleteReleasesHolds", checkDeleteReleasesHolds[TX]},
 		{"OverrunRecordCrossesACopyBudget", checkCopyOverrun[TX]},
 		{"TenantBudgetReadsAgree", checkTenantBudgetReads[TX]},
 		{"ReservationsReadBack", checkReservations[TX]},
@@ -482,6 +483,31 @@ func checkOneUnit[TX any](t *testing.T, f fixture[TX]) {
 		TenantID: f.Tenant, MaxBudgetAmount: tenantBudget, UnitCode: otherUnit, ExpectedVersion: b.ResourceVersion,
 	}); !errors.Is(err, limes.ErrUnitCodeMismatch) {
 		t.Errorf("re-denominating a tenant with %s spent: err = %v, want ErrUnitCodeMismatch", unit, err)
+	}
+}
+
+// checkDeleteReleasesHolds holds a store to releasing what a reaped
+// capability held: nothing can settle or release a hold of a capability that
+// is gone, so a hold left behind counts against its ancestors and its tenant
+// until the store is rebuilt.
+func checkDeleteReleasesHolds[TX any](t *testing.T, f fixture[TX]) {
+	res, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
+		CapabilityID: f.child, TenantID: f.Tenant, Amount: 3 * one, MaxBudget: childBudget, UnitCode: unit,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Usage.Delete(f.Ctx, f.child); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, err := f.Usage.GetReservation(f.Ctx, res.ID); !errors.Is(err, limes.ErrReservationNotFound) {
+		t.Errorf("the deleted capability's hold: err = %v, want ErrReservationNotFound", err)
+	}
+	if u, err := f.Usage.GetUsage(f.Ctx, f.root); err != nil || u.ReservedAmount != 0 {
+		t.Errorf("root after deleting its child = %+v, %v; want nothing held", u, err)
+	}
+	if b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant); err != nil || b.ReservedAmount != 0 {
+		t.Errorf("tenant after deleting the child = %+v, %v; want nothing held", b, err)
 	}
 }
 

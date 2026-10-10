@@ -1188,9 +1188,24 @@ func (r budgetRow) before(o budgetRow) bool {
 	return uuidLess(r.tenant, o.tenant)
 }
 
+// releaseHoldsLocked releases every hold of a capability gone reports as
+// gone. s.mu must be held.
+func (s *UsageStore[TX]) releaseHoldsLocked(gone func(capID uuid.UUID) bool) {
+	for id, h := range s.holds {
+		if gone(h.capID) {
+			s.applyHoldLocked(h, -1)
+			delete(s.holds, id)
+		}
+	}
+}
+
+// Delete drops the capability's counters and releases its holds first:
+// nothing could settle or release them once it is gone, and they would keep
+// counting against its ancestors and its tenant.
 func (s *UsageStore[TX]) Delete(_ context.Context, capID uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.releaseHoldsLocked(func(id uuid.UUID) bool { return id == capID })
 	delete(s.usage, capID)
 	maps.DeleteFunc(s.copies, func(_ string, c copyCounter) bool { return c.capID == capID })
 	return nil
@@ -1199,6 +1214,9 @@ func (s *UsageStore[TX]) Delete(_ context.Context, capID uuid.UUID) error {
 func (s *UsageStore[TX]) PurgeOrphans(_ context.Context) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Holds first: releasing one writes its ancestors' rows, which the loop
+	// below then purges if they are orphans too.
+	s.releaseHoldsLocked(func(id uuid.UUID) bool { return s.records == nil || !s.records.exists(id) })
 	var n int64
 	for id := range s.usage {
 		if s.records == nil || !s.records.exists(id) {
