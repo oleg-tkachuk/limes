@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -82,6 +83,27 @@ type dpopHeader struct {
 	Typ string   `json:"typ"`
 	Alg string   `json:"alg"`
 	JWK *DPoPJWK `json:"jwk"`
+}
+
+// jwkPrivateMembers are the JWK members that carry private key material
+// (RFC 7518 §6.2.2, §6.3.2, §6.4; RFC 8037 §2): "d" for EC and OKP keys, the
+// RSA CRT members, and "k" for a symmetric key.
+var jwkPrivateMembers = []string{"d", "p", "q", "dp", "dq", "qi", "oth", "k"}
+
+// jwkHasPrivateMember reports whether the header segment's jwk carries any
+// private key member — which DPoPJWK, holding the public members alone, would
+// silently drop.
+func jwkHasPrivateMember(headerSeg string) bool {
+	var h struct {
+		JWK map[string]json.RawMessage `json:"jwk"`
+	}
+	if decodeSegment(headerSeg, &h) != nil {
+		return true // unreadable: refuse rather than assume
+	}
+	return slices.ContainsFunc(jwkPrivateMembers, func(m string) bool {
+		_, ok := h.JWK[m]
+		return ok
+	})
 }
 
 type dpopClaims struct {
@@ -326,6 +348,10 @@ func (v *DPoPVerifier) Check(ctx context.Context, c Capability, req DPoPRequest)
 	var header dpopHeader
 	if err := decodeSegment(parts.header, &header); err != nil || header.Typ != DPoPTokenType || header.JWK == nil {
 		return fmt.Errorf("%w: header", ErrDPoPInvalid)
+	}
+	// RFC 9449 §4.3: the jwk must not contain a private key.
+	if jwkHasPrivateMember(parts.header) {
+		return fmt.Errorf("%w: jwk carries a private key", ErrDPoPInvalid)
 	}
 	thumb, err := header.JWK.Thumbprint()
 	if err != nil || thumb != c.ConfirmationJKT {

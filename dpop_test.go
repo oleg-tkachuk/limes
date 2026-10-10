@@ -278,3 +278,31 @@ func BenchmarkMemoryReplayCacheFull(b *testing.B) {
 		c.Seen(ctx, fmt.Sprint("new", i), now.Add(time.Hour))
 	}
 }
+
+// RFC 9449 §4.3: a proof whose jwk carries a private key is refused, though
+// the signature checks out — the holder has published the key the binding
+// rests on.
+func TestDPoPRefusesAPrivateJWK(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := boundCap(t, priv)
+	jwk, err := PublicJWK(priv.Public())
+	if err != nil {
+		t.Fatal(err)
+	}
+	header := fmt.Sprintf(`{"typ":%q,"alg":%q,"jwk":{"kty":%q,"crv":%q,"x":%q,"d":%q}}`,
+		DPoPTokenType, algEdDSA, jwk.Kty, jwk.Crv, jwk.X, b64(priv.Seed()))
+	claims := fmt.Sprintf(`{"jti":"j1","htm":"POST","htu":%q,"iat":%d,"ath":%q}`,
+		dpopURL, now.Unix(), AccessTokenHash("the-token"))
+	input := b64([]byte(header)) + "." + b64([]byte(claims))
+	proof := input + "." + b64(ed25519.Sign(priv, []byte(input)))
+
+	v := &DPoPVerifier{Replay: NewMemoryReplayCache(0), Now: func() time.Time { return now }}
+	err = v.Check(context.Background(), c, DPoPRequest{Proof: proof, Method: "POST", URL: dpopURL, Token: "the-token"})
+	if !errors.Is(err, ErrDPoPInvalid) {
+		t.Fatalf("a proof carrying its private key: err = %v, want ErrDPoPInvalid", err)
+	}
+}
