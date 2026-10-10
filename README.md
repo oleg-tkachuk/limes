@@ -88,9 +88,11 @@ cap, token, _ := issuer.Issue(ctx, limes.IssueRequest{
     },
 })
 
-// On every call: verify locally, enforce the caveats, meter.
-cap, err := verifier.Verify(ctx, token, "my-service")
-err = cap.Caveats.Check(limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/report.pdf"})
+// On every call: verify locally and enforce the caveats in one step, then meter.
+cap, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
+    VerifyRequest: limes.VerifyRequest{Token: token, Audience: "my-service"},
+    CheckRequest:  limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/report.pdf"},
+})
 _, err = usage.Charge(ctx, limes.ChargeRequest{
     CapabilityID: cap.ID, TenantID: tenantID, Amount: limes.MustParseAmount("0.35"),
     MaxBudget: cap.Caveats.MaxBudgetAmount, UnitCode: "USD",
@@ -105,10 +107,10 @@ _, err = usage.Charge(ctx, limes.ChargeRequest{
 | | |
 |---|---|
 | **Verify** | Local Ed25519 (EdDSA) JWT verification against a resolved key — static, or an issuer's JWKS fetched and cached by `RemoteJWKSResolver`. Every rejection is a distinct sentinel error; mapping it to a status code is yours. |
-| **Enforce** | `Caveats.Check` per operation: allowed ops, resource prefixes matched at `/` boundaries, idempotency keys for writes, tainted reads. `Caveats.CheckSource` per connection. |
+| **Enforce** | `Authorize` verifies and checks every stateless caveat in one call: allowed ops, resource prefixes matched at `/` boundaries, idempotency keys for writes, tainted reads, source networks. |
 | **Delegate** | `Issuer.Delegate` issues a child that may only be narrower; anything wider is `ErrDelegationTooWide`. |
 | **Attenuate offline** | The Biscuit v3 form of a capability can be narrowed by its holder with no key and no network; each copy can get its own limits and be revoked on its own. |
-| **Bind to a key** | RFC 9449 DPoP: a key-bound capability is refused without a fresh proof from that key. |
+| **Bind to a key** | RFC 9449 DPoP: `Verify` refuses a key-bound capability without a fresh proof from that key. |
 | **Meter** | Requests and spend count against the capability, every ancestor and the tenant, atomically with your own side effect. Reserve an estimate, settle the actual cost, refund a charge. Amounts are exact integers of billionths of a unit. |
 | **Revoke** | One call stops a capability and everything delegated from it; verifiers learn of it within a cache TTL, or at once on `Clear`. |
 

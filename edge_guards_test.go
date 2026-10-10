@@ -76,13 +76,13 @@ func TestRetiredButPublishedKeyStillVerifies(t *testing.T) {
 		t.Fatalf("verifier: %v", err)
 	}
 
-	if _, err := verifier.Verify(context.Background(), oldToken, goldenAudience); err != nil {
+	if _, err := verifier.Verify(context.Background(), VerifyRequest{Token: oldToken, Audience: goldenAudience}); err != nil {
 		t.Fatalf("token under a retired-but-published key must still verify: %v", err)
 	}
 
 	// Step 2: new signing key issues tokens that also verify.
 	newToken := mintToken(t, testIssuer(t, "new-kid", newPriv, goldenClock))
-	if _, err := verifier.Verify(context.Background(), newToken, goldenAudience); err != nil {
+	if _, err := verifier.Verify(context.Background(), VerifyRequest{Token: newToken, Audience: goldenAudience}); err != nil {
 		t.Fatalf("token under the new key must verify: %v", err)
 	}
 }
@@ -106,7 +106,7 @@ func TestWithdrawnKeyStopsVerifying(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verifier: %v", err)
 	}
-	if _, err := verifier.Verify(context.Background(), oldToken, goldenAudience); err == nil {
+	if _, err := verifier.Verify(context.Background(), VerifyRequest{Token: oldToken, Audience: goldenAudience}); err == nil {
 		t.Fatal("a token under a withdrawn key must stop verifying")
 	}
 }
@@ -143,7 +143,7 @@ func TestForgedSignatureRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verifier: %v", err)
 	}
-	if _, err := verifier.Verify(context.Background(), token, goldenAudience); !errors.Is(err, ErrInvalidSignature) {
+	if _, err := verifier.Verify(context.Background(), VerifyRequest{Token: token, Audience: goldenAudience}); !errors.Is(err, ErrInvalidSignature) {
 		t.Fatalf("want ErrInvalidSignature for a forged token, got %v", err)
 	}
 }
@@ -162,7 +162,7 @@ func TestUntrustedIssuerRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verifier: %v", err)
 	}
-	if _, err := verifier.Verify(context.Background(), token, goldenAudience); err == nil {
+	if _, err := verifier.Verify(context.Background(), VerifyRequest{Token: token, Audience: goldenAudience}); err == nil {
 		t.Fatal("a token from an untrusted issuer must not verify")
 	}
 }

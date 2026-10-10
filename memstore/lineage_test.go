@@ -145,13 +145,13 @@ func TestVerifierRejectsChildOfRevokedParent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := verifier.Verify(ctx, childToken, "data"); err != nil {
+	if _, err := verifier.Verify(ctx, limes.VerifyRequest{Token: childToken, Audience: "data"}); err != nil {
 		t.Fatalf("child before revoke: %v", err)
 	}
 	if err := records.Revoke(ctx, limes.RevokeRequest{ID: parent.ID}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := verifier.Verify(ctx, childToken, "data"); !errors.Is(err, limes.ErrRevoked) {
+	if _, err := verifier.Verify(ctx, limes.VerifyRequest{Token: childToken, Audience: "data"}); !errors.Is(err, limes.ErrRevoked) {
 		t.Fatalf("child after parent revoke: err = %v, want ErrRevoked", err)
 	}
 }

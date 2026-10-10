@@ -3,17 +3,32 @@
 Using limes, one concern at a time. [README.md](../README.md) has the five-minute
 start, and [diagrams.md](diagrams.md) draws each path described here.
 
-## Verify on every call
+## Authorize every call
 
 ```go
-cap, err := verifier.Verify(ctx, token, "my-service")
+cap, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
+    VerifyRequest: limes.VerifyRequest{
+        Token: token, Audience: "my-service",
+        // Needed when the capability is key-bound; ignored when it is not.
+        DPoP: limes.DPoPProof{Proof: r.Header.Get(limes.DPoPHeader), Method: r.Method, URL: requestURL},
+    },
+    CheckRequest: limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/report.pdf"},
+    ClientAddr:   clientAddr,
+})
 switch {
 case errors.Is(err, limes.ErrExpired):          // TTL elapsed
 case errors.Is(err, limes.ErrRevoked):          // pulled mid-flight
 case errors.Is(err, limes.ErrAudienceMismatch): // token for another service
-case errors.Is(err, limes.ErrInvalidSignature): // forged
+case errors.Is(err, limes.ErrCaveatViolation):  // not allowed to do this
+case errors.Is(err, limes.ErrInvalidSignature): // forged, or no valid proof of possession
 }
 ```
+
+`Authorize` is `Verify` — the token itself — followed by every caveat that
+needs no state: the operation, the resource, the idempotency key, the tainted
+read and the client's address. Request and budget limits are counted by the
+`Meter` (below), inside your own transaction. Call `Verify` alone only where
+there is no operation to check, such as before a delegation.
 
 Verification is **local** — the signature is checked against the resolved key,
 with no round trip to the issuer, and nothing in the claims is read until it
@@ -51,7 +66,9 @@ revocation, so never authorise a request on either: that is `Verify`.
 ## Enforce the caveats on every operation
 
 Verification proves the token is genuine; it does not know what the bearer is
-about to do. Ask the caveats, through the one definition the module ships:
+about to do. `Authorize` asks the caveats for you; code that checks a second
+operation under a capability it already verified asks them directly, through
+the same one definition:
 
 ```go
 if err := cap.Caveats.CheckSource(clientAddr); err != nil { /* per connection */ }
@@ -154,15 +171,26 @@ cap, token, _ := issuer.Issue(ctx, limes.IssueRequest{ /* … */ ConfirmationJKT
 // Client: a fresh proof per request, signed over its method, URL and token.
 proof, _ := limes.NewDPoPProof(agentKey, "POST", url, token, time.Now())
 
-// Server, after Verify:
-dpop := &limes.DPoPVerifier{Replay: limes.NewMemoryReplayCache(0)}
-err := dpop.Check(ctx, cap, limes.DPoPRequest{Proof: proof, Method: "POST", URL: url, Token: token})
+// Server: the verifier checks the proof of every key-bound capability.
+verifier, _ := limes.NewStandardVerifier(limes.VerifierConfig{
+    /* … */
+    DPoP: &limes.DPoPVerifier{Replay: limes.NewMemoryReplayCache(0)},
+})
+cap, err := verifier.Verify(ctx, limes.VerifyRequest{
+    Token: token, Audience: "my-service",
+    DPoP:  limes.DPoPProof{Proof: proof, Method: "POST", URL: url},
+})
 ```
+
+A verifier with no `DPoP` refuses every key-bound capability with
+`ErrDPoPRequired` instead of accepting it as a bearer token, so a binding
+cannot be lost to a forgotten call. Behind a proxy that rewrites the host or
+strips a mount prefix, set `DPoPVerifier.MatchPathOnly`.
 
 The token carries the thumbprint as `cnf.jkt` (RFC 7800), omitted when
 unbound, so unbound tokens are byte-for-byte what they were. A delegated
 child inherits its parent's binding or takes the sub-agent's own key, and
-`Narrows` refuses a child that drops it. `Check` refuses a proof from another
+`Narrows` refuses a child that drops it. `Verify` refuses a proof from another
 key, for another method, URL or token, outside a minute of the verifier's
 clock, or seen before; every refusal matches `ErrInvalidSignature`. The
 replay cache is in-process: behind several replicas, a proof replayed to a
@@ -186,7 +214,7 @@ worker, _ := limes.Attenuate(full, limes.Attenuation{
 })
 
 // A verifier built with AcceptBiscuit: true returns the narrowed Capability.
-c, err := verifier.Verify(ctx, worker, limes.AudiencePlaneData)
+c, err := verifier.Verify(ctx, limes.VerifyRequest{Token: worker, Audience: "my-service"})
 ```
 
 An attenuation block may restrict operations, resources, planes, the expiry,

@@ -285,20 +285,16 @@ func canonicalHTU(raw string) (string, error) {
 	return u.String(), nil
 }
 
-// DPoPRequest is the request a proof must match.
-type DPoPRequest struct {
+// DPoPProof is a request's proof of possession and the request it must
+// match: what VerifyRequest.DPoP carries for a key-bound capability.
+type DPoPProof struct {
 	// Proof is the DPoP header's value; empty when the request had none.
 	Proof string
 	// Method is the HTTP method, e.g. "POST".
 	Method string
-	// URL is the request URL. When MatchPathOnly is set, only its path is
-	// compared, and the proof's path may carry extra leading segments — for
-	// a server behind a proxy, which cannot know the scheme, host or mount
-	// prefix its clients address it by.
-	URL           string
-	MatchPathOnly bool
-	// Token is the capability token the request presents.
-	Token string
+	// URL is the request URL, as the server saw it (see
+	// DPoPVerifier.MatchPathOnly).
+	URL string
 }
 
 // ReplayCache remembers proof ids for as long as a proof could be accepted.
@@ -309,39 +305,44 @@ type ReplayCache interface {
 	Seen(ctx context.Context, jti string, expires time.Time) bool
 }
 
-// DPoPVerifier checks proofs for key-bound capabilities.
+// DPoPVerifier is how a StandardVerifier checks the proofs of key-bound
+// capabilities (VerifierConfig.DPoP).
 type DPoPVerifier struct {
 	// Window bounds |now − iat|. Default DefaultDPoPWindow.
 	Window time.Duration
 	// Replay refuses a jti seen before. Required: without it a captured
-	// proof is good for the whole window.
+	// proof is good for the whole window, and NewStandardVerifier refuses
+	// the configuration.
 	Replay ReplayCache
-	// Now is the clock; default time.Now.
+	// Now is the clock; default the verifier's.
 	Now func() time.Time
+	// MatchPathOnly compares only the path of DPoPProof.URL, and lets the
+	// proof's path carry extra leading segments — for a server behind a
+	// proxy, which cannot know the scheme, host or mount prefix its clients
+	// address it by.
+	MatchPathOnly bool
 }
 
-// Check verifies req's proof against the capability. A capability that is
-// not key-bound needs no proof and passes. A key-bound one passes only with a
-// proof that: is a dpop+jwt signed by the key its header carries; whose key's
-// thumbprint is the capability's; that names this method and URL and this
-// token's hash; that was issued within the window; and whose jti is new.
-func (v *DPoPVerifier) Check(ctx context.Context, c Capability, req DPoPRequest) error {
-	if c.ConfirmationJKT == "" {
-		return nil
-	}
-	if req.Proof == "" {
+// errNoReplayCache is a DPoPVerifier configured without the replay cache it
+// requires.
+var errNoReplayCache = errors.New("limes: DPoPVerifier.Replay required")
+
+// check verifies p against the key-bound capability c presented as token. It
+// passes only with a proof that: is a dpop+jwt signed by the key its header
+// carries; whose key's thumbprint is the capability's; that names this method
+// and URL and this token's hash; that was issued within the window; and whose
+// jti is new.
+func (v *DPoPVerifier) check(ctx context.Context, c Capability, token string, p DPoPProof) error {
+	if p.Proof == "" {
 		return ErrDPoPRequired
 	}
 	window := v.Window
 	if window <= 0 {
 		window = DefaultDPoPWindow
 	}
-	now := time.Now
-	if v.Now != nil {
-		now = v.Now
-	}
+	now := v.Now
 
-	parts, err := splitToken(req.Proof)
+	parts, err := splitToken(p.Proof)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrDPoPInvalid, err)
 	}
@@ -370,21 +371,18 @@ func (v *DPoPVerifier) Check(ctx context.Context, c Capability, req DPoPRequest)
 	if err := decodeSegment(parts.claims, &claims); err != nil || claims.JTI == "" {
 		return fmt.Errorf("%w: claims", ErrDPoPInvalid)
 	}
-	if !strings.EqualFold(claims.HTM, req.Method) {
-		return fmt.Errorf("%w: method %q, proof names %q", ErrDPoPInvalid, req.Method, claims.HTM)
+	if !strings.EqualFold(claims.HTM, p.Method) {
+		return fmt.Errorf("%w: method %q, proof names %q", ErrDPoPInvalid, p.Method, claims.HTM)
 	}
-	if !htuMatches(claims.HTU, req.URL, req.MatchPathOnly) {
+	if !htuMatches(claims.HTU, p.URL, v.MatchPathOnly) {
 		return fmt.Errorf("%w: URL does not match the proof's htu", ErrDPoPInvalid)
 	}
-	if claims.ATH != AccessTokenHash(req.Token) {
+	if claims.ATH != AccessTokenHash(token) {
 		return fmt.Errorf("%w: proof is for another token", ErrDPoPInvalid)
 	}
 	iat := time.Unix(claims.IAT, 0)
 	if d := now().Sub(iat); d > window || d < -window {
 		return fmt.Errorf("%w: issued at %s, outside the %s window", ErrDPoPInvalid, iat.UTC(), window)
-	}
-	if v.Replay == nil {
-		return fmt.Errorf("%w: no replay cache configured", ErrDPoPInvalid)
 	}
 	if v.Replay.Seen(ctx, claims.JTI, iat.Add(window)) {
 		return ErrDPoPReplayed

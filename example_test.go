@@ -51,6 +51,7 @@ func newExampleStack() exampleStack {
 		TrustedIssuers:     []string{exampleIssuerName},
 		AcceptBiscuit:      true,
 		BiscuitRevocations: records,
+		DPoP:               &limes.DPoPVerifier{Replay: limes.NewMemoryReplayCache(0)},
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -118,9 +119,9 @@ func ExampleIssuer_Issue() {
 		log.Fatal(err)
 	}
 
-	got, err := verifier.Verify(ctx, token, exampleAudience)
+	got, err := verifier.Verify(ctx, limes.VerifyRequest{Token: token, Audience: exampleAudience})
 	fmt.Println(err == nil, got.ID == c.ID)
-	_, err = verifier.Verify(ctx, token, "another-service")
+	_, err = verifier.Verify(ctx, limes.VerifyRequest{Token: token, Audience: "another-service"})
 	fmt.Println(errors.Is(err, limes.ErrAudienceMismatch))
 	// Output:
 	// true true
@@ -202,7 +203,7 @@ func ExampleAttenuate() {
 		log.Fatal(err)
 	}
 
-	got, err := s.verifier.Verify(ctx, narrow, exampleAudience)
+	got, err := s.verifier.Verify(ctx, limes.VerifyRequest{Token: narrow, Audience: exampleAudience})
 	fmt.Println(err, got.ID == c.ID, got.Caveats.Ops, got.Caveats.ResourcePrefixes)
 	// Output:
 	// <nil> true [get] [corpus/public/2026/]
@@ -210,25 +211,64 @@ func ExampleAttenuate() {
 
 func ExampleNewDPoPProof() {
 	ctx := context.Background()
+	s := newExampleStack()
 	const method, url = "POST", "https://data.example.com/objects/get"
 
+	// The capability is bound to a key the agent keeps.
 	_, agentKey, _ := ed25519.GenerateKey(rand.Reader)
 	jkt, _ := limes.KeyThumbprint(agentKey.Public())
-	bound := limes.Capability{ConfirmationJKT: jkt}
-	token := "the-capability-token"
+	_, token, err := s.issuer.Issue(ctx, limes.IssueRequest{
+		IssuedBy: limes.Principal{Subject: "operator@example.com"},
+		Subject:  limes.Principal{Type: limes.PrincipalAgent, TenantID: s.tenantID, Subject: "worker"},
+		Audience: []string{exampleAudience}, TTL: 15 * time.Minute,
+		Caveats:         limes.Caveats{Ops: []limes.Op{limes.OpGet}},
+		ConfirmationJKT: jkt,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Without a proof the token is refused: a copy of it is useless.
+	_, err = s.verifier.Verify(ctx, limes.VerifyRequest{Token: token, Audience: exampleAudience})
+	fmt.Println(errors.Is(err, limes.ErrDPoPRequired))
 
 	// The client signs a fresh proof per request.
 	proof, _ := limes.NewDPoPProof(agentKey, method, url, token, time.Now())
-
-	// The server checks it after Verify.
-	dpop := &limes.DPoPVerifier{Replay: limes.NewMemoryReplayCache(0)}
-	req := limes.DPoPRequest{Proof: proof, Method: method, URL: url, Token: token}
-	fmt.Println(dpop.Check(ctx, bound, req))
+	req := limes.VerifyRequest{
+		Token: token, Audience: exampleAudience,
+		DPoP: limes.DPoPProof{Proof: proof, Method: method, URL: url},
+	}
+	_, err = s.verifier.Verify(ctx, req)
+	fmt.Println(err)
 
 	// The same proof a second time is a replay.
-	fmt.Println(errors.Is(dpop.Check(ctx, bound, req), limes.ErrInvalidSignature))
+	_, err = s.verifier.Verify(ctx, req)
+	fmt.Println(errors.Is(err, limes.ErrDPoPReplayed))
+	// Output:
+	// true
+	// <nil>
+	// true
+}
+
+func ExampleStandardVerifier_Authorize() {
+	ctx := context.Background()
+	s := newExampleStack()
+	_, token := s.issue()
+
+	// One call: the token, then every caveat that needs no state.
+	authorize := func(op limes.Op, resource string) error {
+		_, err := s.verifier.Authorize(ctx, limes.AuthorizeRequest{
+			VerifyRequest: limes.VerifyRequest{Token: token, Audience: exampleAudience},
+			CheckRequest:  limes.CheckRequest{Op: op, Resource: resource},
+		})
+		return err
+	}
+	fmt.Println(authorize(limes.OpGet, "corpus/public/report.pdf"))
+	fmt.Println(errors.Is(authorize(limes.OpDelete, "corpus/public/report.pdf"), limes.ErrOpNotAllowed))
+	fmt.Println(errors.Is(authorize(limes.OpGet, "corpus/private/x"), limes.ErrResourceNotAllowed))
 	// Output:
 	// <nil>
+	// true
 	// true
 }
 
@@ -290,7 +330,7 @@ func Example_revoke() {
 	})
 	fmt.Println(err)
 
-	_, err = s.verifier.Verify(ctx, token, exampleAudience)
+	_, err = s.verifier.Verify(ctx, limes.VerifyRequest{Token: token, Audience: exampleAudience})
 	fmt.Println(errors.Is(err, limes.ErrRevoked))
 	// Output:
 	// <nil>

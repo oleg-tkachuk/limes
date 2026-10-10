@@ -28,7 +28,7 @@ flowchart LR
         issuer["<b>Issuer</b><br/>Issue · Delegate · Biscuit"]
         signer["<b>Signer</b><br/>NewEd25519Signer · JWT EdDSA"]
         narrows["<b>Narrows</b><br/>child ⊆ parent"]
-        verifier["<b>StandardVerifier</b><br/>Verify(token, audience) · BiscuitCopy"]
+        verifier["<b>StandardVerifier</b><br/>Authorize · Verify · BiscuitCopy"]
         caveats["<b>Caveats</b><br/>Check · CheckSource · MatchResource"]
         cache["CachedRevocationChecker<br/>TTL · single-flight"]
         bcache["CachedBiscuitRevocationChecker<br/>TTL · per token"]
@@ -36,7 +36,7 @@ flowchart LR
         metering["MeteringStore[TX]<br/>WithMetering · OTel counters"]
         static["StaticKeyResolver<br/>SetKey · RemoveKey"]
         remote["RemoteJWKSResolver<br/>ETag · MaxStale"]
-        dpop["DPoPVerifier<br/>Check(proof) · NewDPoPProof"]
+        dpop["DPoPVerifier<br/>VerifierConfig.DPoP · NewDPoPProof"]
         suites["storetest · metertest<br/>conformance suites"]
     end
 
@@ -71,7 +71,7 @@ flowchart LR
     static -. "implements" .-> keys
     remote -. "implements" .-> keys
     remote -- "HTTP GET" --> jwks
-    caller -. "key-bound tokens" .-> dpop --> replay
+    verifier -. "key-bound tokens" .-> dpop --> replay
     suites -. "check" .-> store
     suites -. "check" .-> usage
     store --> impl
@@ -125,9 +125,8 @@ sequenceDiagram
     I-->>W: child token
 
     W->>S: request + child token
-    S->>S: Verify(token, audience)
+    S->>S: Authorize(token, audience, op, resource, addr)
     S->>St: IsRevoked(child) — via CachedRevocationChecker
-    S->>S: Caveats.CheckSource(addr) · Caveats.Check(op, resource)
     S->>St: Bump · Charge, or Reserve then Settle
     St-->>S: ChargeReceipt{ChargeID, Spent}
     S-->>W: response
@@ -141,8 +140,8 @@ sequenceDiagram
 ## Verification gates
 
 `StandardVerifier.Verify` reads nothing from the claims until the signature
-over them has verified, and asks the revocation store last so that cheap
-rejections never reach it. Every exit is a sentinel the caller maps to its own
+over them has verified, checks a key-bound capability's proof of possession,
+and asks the revocation store last so that cheap rejections never reach it. Every exit is a sentinel the caller maps to its own
 transport status.
 
 ```mermaid
@@ -158,6 +157,7 @@ flowchart TB
     nbf{"now + Leeway ≥ NotBefore"}
     exp{"now − Leeway ≤ ExpiresAt"}
     aud{"audience ∈ Audience"}
+    pop{"key-bound?<br/>DPoP proof from that key"}
     rev{"RevocationLookup.IsRevoked<br/>this capability or an ancestor"}
     ok(["Capability"])
 
@@ -168,7 +168,8 @@ flowchart TB
     revoked["ErrRevoked"]
 
     tok --> size -- yes --> hdr -- yes --> key -- found --> sig -- valid --> claims -- yes --> iss -- yes --> tenant -- yes --> nbf
-    nbf -- yes --> exp -- yes --> aud -- yes --> rev -- no --> ok
+    nbf -- yes --> exp -- yes --> aud -- yes --> pop -- "unbound, or valid proof" --> rev -- no --> ok
+    pop -- "no proof, or invalid" --> bad
     size -- no --> bad
     hdr -- no --> bad
     key -- "unknown kid" --> bad
@@ -255,13 +256,15 @@ The sealed token presented on its own is refused, so it cannot be lifted out
 to shed an attenuation. `ErrBiscuitAttenuation` and
 `ErrCopyCountersNotMetered` both match `ErrInvalidSignature`.
 
-A key-bound capability (`ConfirmationJKT` set) passes one more gate after
-`Verify`: `DPoPVerifier.Check` wants a proof signed by that key over the
-request's method, URL and token, issued within `DefaultDPoPWindow` and not
-seen before by the `ReplayCache`. Every refusal matches `ErrInvalidSignature`.
+A key-bound capability (`ConfirmationJKT` set) needs a proof signed by that
+key over the request's method, URL and token, issued within
+`DefaultDPoPWindow` and not seen before by the `ReplayCache`; a verifier with
+no `DPoPVerifier` refuses it outright. Every refusal matches
+`ErrInvalidSignature`.
 
 Verification proves the token is genuine. What the bearer may do with it is a
-second, separate step, `Caveats.Check`, evaluated per operation:
+second step, `Caveats.Check`, evaluated per operation — `Authorize` runs it,
+with `Caveats.CheckSource`, after `Verify`:
 
 ```mermaid
 flowchart LR

@@ -22,6 +22,7 @@ func biscuitFixture(t *testing.T) (*Issuer, *StandardVerifier, *memStore, Capabi
 		Revocations:    NewCachedRevocationChecker(store, -1),
 		TrustedIssuers: []string{"limes-test"},
 		AcceptBiscuit:  true,
+		DPoP:           &DPoPVerifier{Replay: NewMemoryReplayCache(0)},
 
 		BiscuitRevocations: NewCachedBiscuitRevocationChecker(store, -1),
 	})
@@ -31,7 +32,7 @@ func biscuitFixture(t *testing.T) (*Issuer, *StandardVerifier, *memStore, Capabi
 	cap, _, err := issuer.Issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{TenantID: uuid.New(), Subject: "agent"},
-		Audience: []string{AudiencePlaneData, AudiencePlaneMCP},
+		Audience: []string{audienceData, audienceMCP},
 		Caveats: Caveats{
 			Ops:              []Op{OpGet, OpList, OpPut},
 			ResourcePrefixes: []string{"corpus/"},
@@ -53,7 +54,7 @@ func TestBiscuitVerifiesAsItsCapability(t *testing.T) {
 	if !IsBiscuit(token) {
 		t.Fatal("Biscuit form not recognised")
 	}
-	got, err := v.Verify(context.Background(), token, AudiencePlaneData)
+	got, err := v.Verify(context.Background(), VerifyRequest{Token: token, Audience: audienceData})
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
@@ -68,13 +69,13 @@ func TestBiscuitAttenuationNarrowsOffline(t *testing.T) {
 	narrowed, err := Attenuate(token, Attenuation{
 		Ops:              []Op{OpGet},
 		ResourcePrefixes: []string{"corpus/public/"},
-		Planes:           []string{AudiencePlaneData},
+		Planes:           []string{audienceData},
 		ExpiresAt:        soon,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := v.Verify(context.Background(), narrowed, AudiencePlaneData)
+	got, err := v.Verify(context.Background(), VerifyRequest{Token: narrowed, Audience: audienceData})
 	if err != nil {
 		t.Fatalf("verify narrowed: %v", err)
 	}
@@ -93,7 +94,7 @@ func TestBiscuitAttenuationNarrowsOffline(t *testing.T) {
 	if !got.ExpiresAt.Equal(soon.UTC().Truncate(time.Second)) {
 		t.Errorf("expires = %v, want %v", got.ExpiresAt, soon)
 	}
-	if _, err := v.Verify(context.Background(), narrowed, AudiencePlaneMCP); !errors.Is(err, ErrAudienceMismatch) {
+	if _, err := v.Verify(context.Background(), VerifyRequest{Token: narrowed, Audience: audienceMCP}); !errors.Is(err, ErrAudienceMismatch) {
 		t.Errorf("dropped plane: err = %v, want ErrAudienceMismatch", err)
 	}
 
@@ -102,10 +103,10 @@ func TestBiscuitAttenuationNarrowsOffline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := v.Verify(context.Background(), again, AudiencePlaneData); err != nil || len(got.Caveats.ResourceURIs) != 1 {
+	if got, err := v.Verify(context.Background(), VerifyRequest{Token: again, Audience: audienceData}); err != nil || len(got.Caveats.ResourceURIs) != 1 {
 		t.Fatalf("two blocks: %+v, %v", got, err)
 	}
-	if got, err := v.Verify(context.Background(), token, AudiencePlaneMCP); err != nil || len(got.Caveats.Ops) != 3 {
+	if got, err := v.Verify(context.Background(), VerifyRequest{Token: token, Audience: audienceMCP}); err != nil || len(got.Caveats.Ops) != 3 {
 		t.Fatalf("original after attenuation: %v", err)
 	}
 }
@@ -116,7 +117,7 @@ func TestBiscuitAttenuationExpiryIsEnforced(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v.Verify(context.Background(), past, AudiencePlaneData); !errors.Is(err, ErrExpired) {
+	if _, err := v.Verify(context.Background(), VerifyRequest{Token: past, Audience: audienceData}); !errors.Is(err, ErrExpired) {
 		t.Fatalf("err = %v, want ErrExpired", err)
 	}
 }
@@ -126,7 +127,7 @@ func TestBiscuitAttenuationCannotWiden(t *testing.T) {
 	cases := map[string]Attenuation{
 		"an op the token lacks":   {Ops: []Op{OpDelete}},
 		"a resource outside":      {ResourcePrefixes: []string{"other/"}},
-		"a plane the token lacks": {Planes: []string{AudiencePlaneAdmin}},
+		"a plane the token lacks": {Planes: []string{audienceAdmin}},
 		"a later expiry":          {ExpiresAt: time.Now().Add(48 * time.Hour)},
 	}
 	for name, a := range cases {
@@ -135,7 +136,7 @@ func TestBiscuitAttenuationCannotWiden(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := v.Verify(context.Background(), wide, AudiencePlaneData)
+			got, err := v.Verify(context.Background(), VerifyRequest{Token: wide, Audience: audienceData})
 			if name == "a later expiry" {
 				// A later expiry is not a widening the token can express: the
 				// earlier one stands.
@@ -169,7 +170,7 @@ func TestBiscuitRefusesWhatItCannotEnforce(t *testing.T) {
 		t.Fatal(err)
 	}
 	tok, _ := serializeBiscuit(withCheck)
-	if _, err := v.Verify(context.Background(), tok, AudiencePlaneData); !errors.Is(err, ErrBiscuitAttenuation) {
+	if _, err := v.Verify(context.Background(), VerifyRequest{Token: tok, Audience: audienceData}); !errors.Is(err, ErrBiscuitAttenuation) {
 		t.Fatalf("datalog check: err = %v, want ErrBiscuitAttenuation", err)
 	}
 
@@ -178,7 +179,7 @@ func TestBiscuitRefusesWhatItCannotEnforce(t *testing.T) {
 	_ = blk.AddFact(biscuitFact("right", biscuit.String("everything")))
 	withFact, _ := b.Append(rand.Reader, blk.Build())
 	tok, _ = serializeBiscuit(withFact)
-	if _, err := v.Verify(context.Background(), tok, AudiencePlaneData); !errors.Is(err, ErrBiscuitAttenuation) {
+	if _, err := v.Verify(context.Background(), VerifyRequest{Token: tok, Audience: audienceData}); !errors.Is(err, ErrBiscuitAttenuation) {
 		t.Fatalf("foreign fact: err = %v, want ErrBiscuitAttenuation", err)
 	}
 }
@@ -193,7 +194,7 @@ func TestBiscuitCannotBeStrippedOrForged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v.Verify(context.Background(), inner, AudiencePlaneData); !errors.Is(err, ErrInvalidSignature) {
+	if _, err := v.Verify(context.Background(), VerifyRequest{Token: inner, Audience: audienceData}); !errors.Is(err, ErrInvalidSignature) {
 		t.Fatalf("sealed token alone: err = %v, want ErrInvalidSignature", err)
 	}
 
@@ -204,27 +205,27 @@ func TestBiscuitCannotBeStrippedOrForged(t *testing.T) {
 	_ = bb.AddAuthorityFact(biscuitFact(biscuitFactCapability, biscuit.String(inner)))
 	forged, _ := bb.Build()
 	tok, _ := serializeBiscuit(forged)
-	if _, err := v.Verify(context.Background(), tok, AudiencePlaneData); !errors.Is(err, ErrInvalidSignature) {
+	if _, err := v.Verify(context.Background(), VerifyRequest{Token: tok, Audience: audienceData}); !errors.Is(err, ErrInvalidSignature) {
 		t.Fatalf("re-wrapped: err = %v, want ErrInvalidSignature", err)
 	}
 
 	// A Biscuit around an ordinary token (no root claim) is refused too.
 	_, plain, _ := issuer.Issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "op"}, Subject: cap.Subject,
-		Audience: []string{AudiencePlaneData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour,
+		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour,
 	})
 	bb = biscuit.NewBuilder(priv)
 	_ = bb.AddAuthorityFact(biscuitFact(biscuitFactCapability, biscuit.String(plain)))
 	wrapped, _ := bb.Build()
 	tok, _ = serializeBiscuit(wrapped)
-	if _, err := v.Verify(context.Background(), tok, AudiencePlaneData); !errors.Is(err, ErrInvalidSignature) {
+	if _, err := v.Verify(context.Background(), VerifyRequest{Token: tok, Audience: audienceData}); !errors.Is(err, ErrInvalidSignature) {
 		t.Fatalf("wrapped plain token: err = %v, want ErrInvalidSignature", err)
 	}
 
 	// Tampering with any byte breaks the chain.
 	raw, _ := base64.RawURLEncoding.DecodeString(narrowed)
 	raw[len(raw)-3] ^= 1
-	if _, err := v.Verify(context.Background(), base64.RawURLEncoding.EncodeToString(raw), AudiencePlaneData); err == nil {
+	if _, err := v.Verify(context.Background(), VerifyRequest{Token: base64.RawURLEncoding.EncodeToString(raw), Audience: audienceData}); err == nil {
 		t.Fatal("tampered Biscuit accepted")
 	}
 }
@@ -235,7 +236,7 @@ func TestBiscuitRevokedWithItsCapability(t *testing.T) {
 	if err := store.Revoke(context.Background(), RevokeRequest{ID: cap.ID, Reason: "test"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v.Verify(context.Background(), narrowed, AudiencePlaneData); !errors.Is(err, ErrRevoked) {
+	if _, err := v.Verify(context.Background(), VerifyRequest{Token: narrowed, Audience: audienceData}); !errors.Is(err, ErrRevoked) {
 		t.Fatalf("err = %v, want ErrRevoked", err)
 	}
 }
@@ -248,13 +249,16 @@ func TestBiscuitOfflineBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := v.Verify(context.Background(), bound, AudiencePlaneData)
+	if _, err := v.Verify(context.Background(), VerifyRequest{Token: bound, Audience: audienceData}); !errors.Is(err, ErrDPoPRequired) {
+		t.Fatalf("bound offline, no proof: err = %v, want ErrDPoPRequired", err)
+	}
+	got, err := v.Verify(context.Background(), withProof(t, keys["Ed25519"], bound, audienceData, time.Now()))
 	if err != nil || got.ConfirmationJKT != jkt {
 		t.Fatalf("bound offline: %q, %v", got.ConfirmationJKT, err)
 	}
 	other, _ := KeyThumbprint(keys["P-256"].Public())
 	rebound, _ := Attenuate(bound, Attenuation{ConfirmationJKT: other})
-	if _, err := v.Verify(context.Background(), rebound, AudiencePlaneData); !errors.Is(err, ErrBiscuitAttenuation) {
+	if _, err := v.Verify(context.Background(), VerifyRequest{Token: rebound, Audience: audienceData}); !errors.Is(err, ErrBiscuitAttenuation) {
 		t.Fatalf("rebinding offline: err = %v, want ErrBiscuitAttenuation", err)
 	}
 }
@@ -262,7 +266,7 @@ func TestBiscuitOfflineBinding(t *testing.T) {
 func TestVerifierRefusesBiscuitUnlessEnabled(t *testing.T) {
 	_, plainVerifier, _, _ := buildIssuerVerifier(t)
 	_, _, _, _, token := biscuitFixture(t)
-	if _, err := plainVerifier.Verify(context.Background(), token, AudiencePlaneData); !errors.Is(err, ErrInvalidSignature) {
+	if _, err := plainVerifier.Verify(context.Background(), VerifyRequest{Token: token, Audience: audienceData}); !errors.Is(err, ErrInvalidSignature) {
 		t.Fatalf("err = %v, want ErrInvalidSignature", err)
 	}
 }
@@ -274,7 +278,7 @@ func TestBiscuitAttenuationChainsNeverWiden(t *testing.T) {
 	r := mathrand.New(mathrand.NewPCG(7, 11))
 	ops := []Op{OpGet, OpList, OpPut, OpDelete, OpShare}
 	prefixes := []string{"corpus/", "corpus/public/", "corpus/public/a", "other/", "corpus-x/", "corpus/private/"}
-	planes := []string{AudiencePlaneData, AudiencePlaneMCP, AudiencePlaneAdmin}
+	planes := []string{audienceData, audienceMCP, audienceAdmin}
 	pick := func(from []string) []string {
 		var out []string
 		for _, s := range from {
@@ -312,7 +316,7 @@ func TestBiscuitAttenuationChainsNeverWiden(t *testing.T) {
 			tok = next
 		}
 		for _, plane := range planes {
-			got, err := v.Verify(context.Background(), tok, plane)
+			got, err := v.Verify(context.Background(), VerifyRequest{Token: tok, Audience: plane})
 			if err != nil {
 				continue
 			}

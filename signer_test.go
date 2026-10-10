@@ -40,7 +40,7 @@ func TestSign_RoundTrip(t *testing.T) {
 				Model:        "example-model-1",
 			},
 		},
-		Audience:   []string{AudiencePlaneData, AudiencePlaneMCP},
+		Audience:   []string{audienceData, audienceMCP},
 		IssuedAt:   now,
 		ExpiresAt:  now.Add(15 * time.Minute),
 		Generation: 1,
@@ -140,7 +140,7 @@ func TestSign_TamperDetection(t *testing.T) {
 		ID:        uuid.New(),
 		Issuer:    "i",
 		Subject:   Principal{TenantID: uuid.New(), Type: PrincipalAgent},
-		Audience:  []string{AudiencePlaneData},
+		Audience:  []string{audienceData},
 		Caveats:   Caveats{Ops: []Op{OpGet}},
 		IssuedAt:  now,
 		ExpiresAt: now.Add(time.Minute),
@@ -175,7 +175,7 @@ func TestNarrows_RejectsWidening(t *testing.T) {
 		ID:       uuid.New(),
 		Issuer:   "i",
 		Subject:  Principal{TenantID: tenantID, Type: PrincipalAgent},
-		Audience: []string{AudiencePlaneData},
+		Audience: []string{audienceData},
 		Caveats: Caveats{
 			Ops:              []Op{OpGet, OpList},
 			ResourcePrefixes: []string{"object://acme/"},
@@ -191,7 +191,7 @@ func TestNarrows_RejectsWidening(t *testing.T) {
 			c.Caveats.Ops = append(c.Caveats.Ops, OpDelete)
 		},
 		"extra audience": func(c *Capability) {
-			c.Audience = append(c.Audience, AudiencePlaneAdmin)
+			c.Audience = append(c.Audience, audienceAdmin)
 		},
 		"longer ttl": func(c *Capability) {
 			c.ExpiresAt = now.Add(time.Hour)
@@ -245,7 +245,7 @@ func TestNarrows_RejectsCrossCurrency(t *testing.T) {
 		ID:       uuid.New(),
 		Issuer:   "i",
 		Subject:  Principal{TenantID: tenantID, Type: PrincipalAgent},
-		Audience: []string{AudiencePlaneData},
+		Audience: []string{audienceData},
 		Caveats: Caveats{
 			Ops:             []Op{OpGet},
 			MaxBudgetAmount: MustParseAmount("10.0"),
@@ -279,7 +279,7 @@ func TestNarrows_AcceptsValidNarrowing(t *testing.T) {
 		ID:       uuid.New(),
 		Issuer:   "i",
 		Subject:  Principal{TenantID: tenantID, Type: PrincipalAgent},
-		Audience: []string{AudiencePlaneData, AudiencePlaneMCP},
+		Audience: []string{audienceData, audienceMCP},
 		Caveats: Caveats{
 			Ops:              []Op{OpGet, OpList, OpSearch},
 			ResourcePrefixes: []string{"object://acme/"},
@@ -293,7 +293,7 @@ func TestNarrows_AcceptsValidNarrowing(t *testing.T) {
 		ID:       uuid.New(),
 		Issuer:   "i",
 		Subject:  Principal{TenantID: tenantID, Type: PrincipalAgent},
-		Audience: []string{AudiencePlaneData},
+		Audience: []string{audienceData},
 		Caveats: Caveats{
 			Ops:              []Op{OpGet},
 			ResourcePrefixes: []string{"object://acme/run-42/"},

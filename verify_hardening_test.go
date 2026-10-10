@@ -54,12 +54,12 @@ func TestVerifyRequiresCapabilityTyp(t *testing.T) {
 	ctx := context.Background()
 
 	good := resign(t, priv, map[string]any{"alg": "EdDSA", "kid": "k1", "typ": TokenType}, validClaims(uuid.New()))
-	if _, err := v.Verify(ctx, good, "data"); err != nil {
+	if _, err := v.Verify(ctx, VerifyRequest{Token: good, Audience: "data"}); err != nil {
 		t.Fatalf("well-formed token rejected: %v", err)
 	}
 	for _, typ := range []string{"JWT", "", "at+jwt"} {
 		tok := resign(t, priv, map[string]any{"alg": "EdDSA", "kid": "k1", "typ": typ}, validClaims(uuid.New()))
-		if _, err := v.Verify(ctx, tok, "data"); !errors.Is(err, ErrInvalidSignature) {
+		if _, err := v.Verify(ctx, VerifyRequest{Token: tok, Audience: "data"}); !errors.Is(err, ErrInvalidSignature) {
 			t.Errorf("typ %q: Verify = %v, want ErrInvalidSignature", typ, err)
 		}
 	}
@@ -71,13 +71,13 @@ func TestVerifyRejectsTenantlessAndOversizedTokens(t *testing.T) {
 	ctx := context.Background()
 	hdr := map[string]any{"alg": "EdDSA", "kid": "k1", "typ": TokenType}
 
-	if _, err := v.Verify(ctx, resign(t, priv, hdr, validClaims(uuid.Nil)), "data"); !errors.Is(err, ErrInvalidSignature) {
+	if _, err := v.Verify(ctx, VerifyRequest{Token: resign(t, priv, hdr, validClaims(uuid.Nil)), Audience: "data"}); !errors.Is(err, ErrInvalidSignature) {
 		t.Errorf("tenantless token: Verify = %v, want ErrInvalidSignature", err)
 	}
 
 	big := validClaims(uuid.New())
 	big["limes_caveats"] = map[string]any{"Ops": []string{"get"}, "ResourceURIs": []string{strings.Repeat("x", 4096)}}
-	if _, err := v.Verify(ctx, resign(t, priv, hdr, big), "data"); err == nil || !strings.Contains(err.Error(), "limit") {
+	if _, err := v.Verify(ctx, VerifyRequest{Token: resign(t, priv, hdr, big), Audience: "data"}); err == nil || !strings.Contains(err.Error(), "limit") {
 		t.Errorf("oversized token: Verify = %v, want a size rejection", err)
 	}
 }
@@ -91,12 +91,12 @@ func TestVerifyEnforcesKeyIssuerBinding(t *testing.T) {
 	ctx := context.Background()
 	hdr := map[string]any{"alg": "EdDSA", "kid": "k1", "typ": TokenType}
 
-	if _, err := v.Verify(ctx, resign(t, priv, hdr, validClaims(uuid.New())), "data"); err != nil {
+	if _, err := v.Verify(ctx, VerifyRequest{Token: resign(t, priv, hdr, validClaims(uuid.New())), Audience: "data"}); err != nil {
 		t.Fatalf("bound issuer rejected: %v", err)
 	}
 	claims := validClaims(uuid.New())
 	claims["iss"] = "other" // trusted, but not for this key
-	if _, err := v.Verify(ctx, resign(t, priv, hdr, claims), "data"); !errors.Is(err, ErrInvalidSignature) {
+	if _, err := v.Verify(ctx, VerifyRequest{Token: resign(t, priv, hdr, claims), Audience: "data"}); !errors.Is(err, ErrInvalidSignature) {
 		t.Errorf("cross-issuer signature: Verify = %v, want ErrInvalidSignature", err)
 	}
 }

@@ -1,7 +1,6 @@
 package limes
 
 import (
-	"context"
 	"crypto"
 	"crypto/ed25519"
 	"encoding/base64"
@@ -34,29 +33,6 @@ type Signer interface {
 	// does not normalise times.
 	Sign(c Capability) (string, error)
 }
-
-// Verifier validates tokens. A deployment typically resolves keys through
-// a cached JWKS (RemoteJWKSResolver) and checks the revocation list through
-// a short-TTL cache (CachedRevocationChecker) so revocation propagates
-// quickly without hammering the store.
-type Verifier interface {
-	// Verify decodes the token, checks the signature against the
-	// known JWKS, applies time / audience / revocation gates, and
-	// returns the typed Capability on success.
-	//
-	// The audience parameter is the plane the call is hitting — the
-	// verifier rejects tokens whose Capability.Audience does not
-	// include it. Use one of the AudiencePlane* constants.
-	Verify(ctx context.Context, token string, audience string) (Capability, error)
-}
-
-// AudiencePlane* constants are the audiences Paladin, the reference
-// consumer, mounts its verifiers on. Other consumers choose their own.
-const (
-	AudiencePlaneData  = "data"
-	AudiencePlaneAdmin = "admin"
-	AudiencePlaneMCP   = "mcp"
-)
 
 // ed25519Signer is the Ed25519-backed Signer.
 type ed25519Signer struct {
