@@ -98,3 +98,38 @@ func TestDiscoverIssuer(t *testing.T) {
 		t.Errorf("a handler for invalid metadata: err = %v", err)
 	}
 }
+
+func TestMetadataEdges(t *testing.T) {
+	ctx := context.Background()
+	m, err := NewIssuerMetadata("https://issuer.example.com", "https://issuer.example.com/jwks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := MetadataHandler(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(ctx, http.MethodPost, "/", nil))
+	if rec.Code != http.StatusMethodNotAllowed || rec.Header().Get("Allow") == "" {
+		t.Errorf("POST = %d, want 405 with Allow", rec.Code)
+	}
+
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"issuer":"` + strings.Repeat("x", maxMetadataBytes) + `"}`))
+	}))
+	defer srv.Close()
+	if _, err := DiscoverIssuer(ctx, srv.Client(), srv.URL); !errors.Is(err, ErrInvalidMetadata) {
+		t.Errorf("an oversized document: err = %v, want ErrInvalidMetadata", err)
+	}
+	if _, err := DiscoverIssuer(ctx, nil, "http://issuer.example.com"); !errors.Is(err, ErrInvalidMetadata) {
+		t.Errorf("an http issuer: err = %v, want ErrInvalidMetadata", err)
+	}
+	bad := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`not json`))
+	}))
+	defer bad.Close()
+	if _, err := DiscoverIssuer(ctx, bad.Client(), bad.URL); !errors.Is(err, ErrInvalidMetadata) {
+		t.Errorf("a document that is not JSON: err = %v, want ErrInvalidMetadata", err)
+	}
+}
