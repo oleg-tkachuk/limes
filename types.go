@@ -3,10 +3,10 @@ package limes
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/text/currency"
 )
 
 // Errors exposed to callers. Mapped to transport errors by the consumer —
@@ -26,7 +26,7 @@ var (
 	// ancestor's, a tenant's) already counts in. Nothing converts between
 	// currencies, so cross-currency delegation is refused at issuance and a
 	// cross-currency charge at the Meter.
-	ErrUnitCodeMismatch = errors.New("limes: unit_code mismatch between parent and child")
+	ErrUnitCodeMismatch = errors.New("limes: unit_code mismatch")
 	// ErrInvalidRequest is an Issue or Delegate request that is malformed in
 	// itself: a missing tenant, an empty audience entry, a negative TTL, a
 	// thumbprint that is not one, a not-before past the expiry, caveats that
@@ -62,27 +62,24 @@ const DefaultUnitCode = "USD"
 // credits, anything metered: ISO 4217's XXX, "no currency involved".
 const AbstractUnitCode = "XXX"
 
-// AllowedUnitCodes is the canonical set accepted for caveat / charge /
-// tenant-budget unit_code fields: ISO 4217 codes, the abstract XXX among them.
-var AllowedUnitCodes = []string{"USD", "EUR", "UAH", "GBP", AbstractUnitCode}
-
-// IsAllowedUnitCode reports whether u is in AllowedUnitCodes. Empty
-// string is NOT treated as valid here — callers that want the empty-
-// means-default semantics should resolve through NormaliseUnitCode
-// first.
-func IsAllowedUnitCode(u string) bool {
-	return slices.Contains(AllowedUnitCodes, u)
+// IsUnitCode reports whether u is an ISO 4217 currency code, in its
+// canonical upper-case spelling: "USD", "JPY", "XXX". Empty is NOT one —
+// callers that want the empty-means-default semantics resolve through
+// NormaliseUnitCode first.
+func IsUnitCode(u string) bool {
+	unit, err := currency.ParseISO(u)
+	return err == nil && unit.String() == u
 }
 
 // NormaliseUnitCode applies the empty-means-default policy and
 // validates the result. Returns the canonical unit string and an
-// error when the supplied non-empty value is unknown.
+// error when the supplied non-empty value is not an ISO 4217 code.
 func NormaliseUnitCode(u string) (string, error) {
 	if u == "" {
 		return DefaultUnitCode, nil
 	}
-	if !IsAllowedUnitCode(u) {
-		return "", fmt.Errorf("limes: unknown unit_code %q (allowed: %v)", u, AllowedUnitCodes)
+	if !IsUnitCode(u) {
+		return "", fmt.Errorf("limes: unit_code %q is not an ISO 4217 code in upper case", u)
 	}
 	return u, nil
 }
@@ -292,8 +289,8 @@ type Caveats struct {
 	// ErrBudgetExceeded.
 	MaxBudgetAmount Nanos `json:"max_budget,omitzero"`
 
-	// UnitCode pins the currency or unit: an ISO 4217 code, USD/EUR/UAH/GBP,
-	// or XXX ("no currency") for a budget that is not money. Empty value is
+	// UnitCode pins the currency or unit: an ISO 4217 code (IsUnitCode),
+	// XXX ("no currency") for a budget that is not money. Empty value is
 	// interpreted as the default ("USD") at the application boundary; the
 	// in-memory shape is happy to carry either form.
 	UnitCode string `json:"unit_code,omitempty"`

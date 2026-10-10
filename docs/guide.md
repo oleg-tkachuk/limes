@@ -300,8 +300,9 @@ on your side needs rounding, summing apart or correcting.
   `Float64()` is for display and metrics only.
 - **Range.** Up to `MaxNanos`, just under a billion units. A charge that
   would take a counter past it is refused with `ErrInvalidAmount`.
-- **Units.** `UnitCode` is an ISO 4217 code: USD, EUR, UAH or GBP, or XXX,
-  ISO 4217's code for "no currency", for a budget that is not money.
+- **Units.** `UnitCode` is any ISO 4217 code in upper case (`IsUnitCode`);
+  XXX, ISO 4217's code for "no currency", is the one for a budget that is not
+  money.
 
 In a token the budget is a decimal in a JSON string (`"max_budget": "1.5"`),
 so a reader whose numbers are float64 — JavaScript's `JSON.parse` among them —

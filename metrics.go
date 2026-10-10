@@ -19,7 +19,7 @@ import (
 //   - tenant_id is the only high-cardinality label. Capability id is
 //     deliberately omitted — a deployment with thousands of capabilities
 //     would blow the exporter's series count.
-//   - unit_code is a small closed set (AllowedUnitCodes). Amounts are
+//   - unit_code is bounded by ISO 4217 (IsUnitCode). Amounts are
 //     only meaningful per unit: summing USD and EUR is not a number, so
 //     every amount instrument carries the unit as an attribute and has
 //     no fixed metric unit of its own.

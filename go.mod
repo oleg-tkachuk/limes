@@ -25,6 +25,8 @@ require (
 	google.golang.org/protobuf v1.36.12
 )
 
+require golang.org/x/text v0.43.0
+
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect

@@ -169,47 +169,40 @@ func TestUntrustedIssuerRejected(t *testing.T) {
 
 // ─── unit codes and sentinel distinguishability ────────────────────────────
 
-// NormaliseUnitCode / IsAllowedUnitCode are published API. They gate the
+// NormaliseUnitCode / IsUnitCode are published API. They gate the
 // empty-means-default rule and the comparison behind ErrUnitCodeMismatch.
 func TestNormaliseUnitCode(t *testing.T) {
-	t.Run("empty resolves to the default", func(t *testing.T) {
-		got, err := NormaliseUnitCode("")
-		if err != nil || got != DefaultUnitCode {
-			t.Errorf("got %q, %v; want %q, nil", got, err, DefaultUnitCode)
-		}
-	})
-	t.Run("every allowed code round-trips", func(t *testing.T) {
-		for _, u := range AllowedUnitCodes {
-			got, err := NormaliseUnitCode(u)
-			if err != nil || got != u {
-				t.Errorf("NormaliseUnitCode(%q) = %q, %v", u, got, err)
-			}
-		}
-	})
-	t.Run("unknown code errors", func(t *testing.T) {
-		if _, err := NormaliseUnitCode("XYZ"); err == nil {
-			t.Error("want an error for an unknown unit")
-		}
-	})
-}
-
-// The asymmetry is deliberate: NormaliseUnitCode("") is the default, but
-// IsAllowedUnitCode("") is false. Callers wanting empty-means-default must
-// normalise first, and pinning this stops someone "fixing" the inconsistency.
-func TestIsAllowedUnitCodeAsymmetry(t *testing.T) {
-	if IsAllowedUnitCode("") {
-		t.Error(`IsAllowedUnitCode("") must be false`)
+	cases := []struct {
+		in, want string
+		ok       bool
+	}{
+		{"", DefaultUnitCode, true},
+		{"USD", "USD", true},
+		{"EUR", "EUR", true},
+		{"UAH", "UAH", true},
+		{"JPY", "JPY", true}, // any ISO 4217 code, not a list of four
+		{"CHF", "CHF", true},
+		{AbstractUnitCode, AbstractUnitCode, true},
+		{"usd", "", false}, // one spelling per unit, so counters compare
+		{"XYZ", "", false},
+		{"BTC", "", false},
+		{"US", "", false},
+		{"UNIT", "", false},
 	}
-	if got, _ := NormaliseUnitCode(""); got != DefaultUnitCode {
-		t.Error(`NormaliseUnitCode("") must yield the default`)
-	}
-	for _, u := range AllowedUnitCodes {
-		if !IsAllowedUnitCode(u) {
-			t.Errorf("IsAllowedUnitCode(%q) = false", u)
+	for _, tc := range cases {
+		got, err := NormaliseUnitCode(tc.in)
+		if (err == nil) != tc.ok || got != tc.want {
+			t.Errorf("NormaliseUnitCode(%q) = %q, %v; want %q, ok=%v", tc.in, got, err, tc.want, tc.ok)
+		}
+		if tc.in != "" && IsUnitCode(tc.in) != tc.ok {
+			t.Errorf("IsUnitCode(%q) = %v, want %v", tc.in, !tc.ok, tc.ok)
 		}
 	}
-	if IsAllowedUnitCode("XYZ") {
-		t.Error(`IsAllowedUnitCode("XYZ") must be false`)
+	// The asymmetry is deliberate: "" normalises to the default but is not a
+	// unit code itself, so empty-means-default is a choice made by
+	// normalising first.
+	if IsUnitCode("") {
+		t.Error(`IsUnitCode("") must be false`)
 	}
 }
 
