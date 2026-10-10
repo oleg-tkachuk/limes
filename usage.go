@@ -180,7 +180,9 @@ type TenantBudgets interface {
 	// the accounting period and zeroes the spend — operators call
 	// this on each billing close. ResetSpend=false adjusts the cap
 	// mid-cycle without affecting accumulated spend. A ceiling outside
-	// 0..MaxNanos returns ErrInvalidAmount and changes nothing.
+	// 0..MaxNanos returns ErrInvalidAmount and changes nothing. A UnitCode
+	// other than the row's returns ErrUnitCodeMismatch while anything is
+	// held in the old unit, or spent in it and not reset.
 	SetTenantBudget(ctx context.Context, req SetTenantBudgetRequest) (TenantBudget, error)
 
 	// ListTenantBudgets returns tenant budget rows, with the consumer's
@@ -243,8 +245,10 @@ type ChargeRequest struct {
 	// 0 = unlimited.
 	MaxBudget Nanos
 	// UnitCode is the currency or unit; empty means DefaultUnitCode. No
-	// conversion happens: a charge in a unit other than the counter's is a
-	// configuration error the caller must prevent.
+	// conversion happens: a charge in a unit other than one a counter it
+	// moves already counts in — the capability's, an ancestor's, the
+	// tenant's — returns ErrUnitCodeMismatch and moves nothing. So does a
+	// reservation.
 	UnitCode string
 	// Op and Actor are stamped on the ledger row for attribution only;
 	// both may be empty and neither affects enforcement.

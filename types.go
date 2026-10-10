@@ -20,11 +20,12 @@ var (
 	ErrAudienceMismatch  = errors.New("limes: audience mismatch")
 	ErrBudgetExceeded    = errors.New("limes: budget exceeded")
 	ErrDelegationTooWide = errors.New("limes: child wider than parent")
-	// ErrUnitCodeMismatch — a delegated child capability declared a
-	// different unit_code than its parent. We don't auto-convert
-	// between currencies; charges flow through the system in their
-	// declared unit and cross-currency delegation is rejected at
-	// issuance.
+	// ErrUnitCodeMismatch — two units that would have to be one: a
+	// delegated child declaring a unit_code other than its parent's, or an
+	// amount in a unit other than the one a counter (a capability's, an
+	// ancestor's, a tenant's) already counts in. Nothing converts between
+	// currencies, so cross-currency delegation is refused at issuance and a
+	// cross-currency charge at the Meter.
 	ErrUnitCodeMismatch = errors.New("limes: unit_code mismatch between parent and child")
 	// ErrInvalidRequest is an Issue or Delegate request that is malformed in
 	// itself: a missing tenant, an empty audience entry, a negative TTL, a

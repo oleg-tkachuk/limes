@@ -54,8 +54,9 @@ const (
 	rootBudget   = 25 * one
 	childBudget  = 20 * one
 	tenantBudget = 30 * one
-	// unit is the currency every amount is in.
-	unit = limes.DefaultUnitCode
+	// unit is the currency every amount is in; otherUnit is one it is not.
+	unit      = limes.DefaultUnitCode
+	otherUnit = "EUR"
 	// concurrentDeliveries is how many times one cost arrives at once.
 	concurrentDeliveries = 20
 )
@@ -133,6 +134,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"SettleReplaysAndRecordsAnOverrun", checkSettle[TX]},
 		{"SettleOfNoReservationIsNotFound", checkSettleNil[TX]},
 		{"RefundOfAClosedPeriodLeavesTheTenantPeriod", checkRefundAcrossReset[TX]},
+		{"EveryCounterKeepsOneUnit", checkOneUnit[TX]},
 		{"OverrunRecordCrossesACopyBudget", checkCopyOverrun[TX]},
 		{"TenantBudgetReadsAgree", checkTenantBudgetReads[TX]},
 		{"ReservationsReadBack", checkReservations[TX]},
@@ -441,6 +443,45 @@ func checkRefundAcrossReset[TX any](t *testing.T, f fixture[TX]) {
 	}
 	if got := f.spent(t, f.child); got != amount {
 		t.Errorf("child spent %v, want %v: the refund still returns to the capability", got, amount)
+	}
+}
+
+// checkOneUnit holds a store to counting each counter in one unit: an amount
+// in another is not comparable with what is there, and adding it would sum
+// two currencies as one.
+func checkOneUnit[TX any](t *testing.T, f fixture[TX]) {
+	if _, err := f.charge(limes.ChargeRequest{Amount: one}, nil); err != nil {
+		t.Fatal(err)
+	}
+	other := limes.ChargeRequest{CapabilityID: f.child, TenantID: f.Tenant, Amount: one, MaxBudget: childBudget, UnitCode: otherUnit}
+	if _, err := f.Usage.Charge(f.Ctx, other, nil); !errors.Is(err, limes.ErrUnitCodeMismatch) {
+		t.Errorf("a charge in %s on a %s counter: err = %v, want ErrUnitCodeMismatch", otherUnit, unit, err)
+	}
+	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
+		CapabilityID: f.child, TenantID: f.Tenant, Amount: one, MaxBudget: childBudget, UnitCode: otherUnit,
+	}); !errors.Is(err, limes.ErrUnitCodeMismatch) {
+		t.Errorf("a hold in %s on a %s counter: err = %v, want ErrUnitCodeMismatch", otherUnit, unit, err)
+	}
+	// A fresh capability has no unit of its own yet, but its tenant does.
+	fresh, err := f.NewCapability(uuid.Nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other.CapabilityID, other.MaxBudget = fresh, 0
+	if _, err := f.Usage.Charge(f.Ctx, other, nil); !errors.Is(err, limes.ErrUnitCodeMismatch) {
+		t.Errorf("a charge in %s under a %s tenant: err = %v, want ErrUnitCodeMismatch", otherUnit, unit, err)
+	}
+	if f.spent(t, f.child) != one || f.spent(t, fresh) != 0 || f.tenantSpent(t) != one {
+		t.Error("a refused charge in another unit moved spend")
+	}
+	b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
+		TenantID: f.Tenant, MaxBudgetAmount: tenantBudget, UnitCode: otherUnit, ExpectedVersion: b.ResourceVersion,
+	}); !errors.Is(err, limes.ErrUnitCodeMismatch) {
+		t.Errorf("re-denominating a tenant with %s spent: err = %v, want ErrUnitCodeMismatch", unit, err)
 	}
 }
 

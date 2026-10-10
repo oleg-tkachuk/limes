@@ -626,7 +626,7 @@ func (s *UsageStore[TX]) chargeLocked(
 
 	u := s.usage[req.CapabilityID]
 	if err := s.checkCeilingsLocked(ceilingCheck{
-		amount: req.Amount, released: released, maxBudget: req.MaxBudget,
+		amount: req.Amount, released: released, maxBudget: req.MaxBudget, unit: unit,
 		capID: req.CapabilityID, tenantID: req.TenantID, ancestors: ancestors, copies: req.Copies,
 	}, crossed); err != nil {
 		return limes.ChargeReceipt{Spent: u.SpentAmount}, err
@@ -703,6 +703,7 @@ func (s *UsageStore[TX]) tenantLocked(tenantID uuid.UUID, unit string) limes.Ten
 type ceilingCheck struct {
 	amount, released limes.Nanos
 	maxBudget        limes.Nanos // the capability's own, from its token
+	unit             string      // normalised
 	capID, tenantID  uuid.UUID
 	ancestors        []limes.Capability
 	copies           []limes.CopyCeiling
@@ -714,6 +715,9 @@ type ceilingCheck struct {
 // to crossed, which returns the error to stop on or nil to carry on.
 // s.mu must be held.
 func (s *UsageStore[TX]) checkCeilingsLocked(c ceilingCheck, crossed func(error) error) error {
+	if err := s.checkUnitsLocked(c); err != nil {
+		return err
+	}
 	if err := s.checkRangeLocked(c); err != nil {
 		return err
 	}
@@ -744,6 +748,26 @@ func (s *UsageStore[TX]) checkCeilingsLocked(c ceilingCheck, crossed func(error)
 		if err := crossed(limes.ErrTenantBudgetExceeded); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// checkUnitsLocked refuses an amount in a unit other than one a counter it
+// would move already counts in. Like the range, it is not a ceiling an
+// overrun may cross: the sum would mean nothing. s.mu must be held.
+func (s *UsageStore[TX]) checkUnitsLocked(c ceilingCheck) error {
+	differs := func(have string) bool { return have != "" && have != c.unit }
+	if differs(s.usage[c.capID].UnitCode) {
+		return fmt.Errorf("%w: capability %s counts in %s, not %s",
+			limes.ErrUnitCodeMismatch, c.capID, s.usage[c.capID].UnitCode, c.unit)
+	}
+	for _, a := range c.ancestors {
+		if have := s.usage[a.ID].UnitCode; differs(have) {
+			return fmt.Errorf("%w: ancestor %s counts in %s, not %s", limes.ErrUnitCodeMismatch, a.ID, have, c.unit)
+		}
+	}
+	if b, ok := s.budgets[c.tenantID]; ok && differs(b.UnitCode) {
+		return fmt.Errorf("%w: tenant %s counts in %s, not %s", limes.ErrUnitCodeMismatch, c.tenantID, b.UnitCode, c.unit)
 	}
 	return nil
 }
@@ -798,7 +822,7 @@ func (s *UsageStore[TX]) Reserve(_ context.Context, req limes.ReserveRequest) (l
 
 	refuse := func(err error) error { return err }
 	if err := s.checkCeilingsLocked(ceilingCheck{
-		amount: req.Amount, maxBudget: req.MaxBudget,
+		amount: req.Amount, maxBudget: req.MaxBudget, unit: unit,
 		capID: req.CapabilityID, tenantID: req.TenantID, ancestors: ancestors, copies: req.Copies,
 	}, refuse); err != nil {
 		return limes.Reservation{}, err
@@ -1070,6 +1094,12 @@ func (s *UsageStore[TX]) SetTenantBudget(_ context.Context, args limes.SetTenant
 	normalised, err := limes.NormaliseUnitCode(unit)
 	if err != nil {
 		return limes.TenantBudget{}, err
+	}
+	// A reset closes the spend, never the holds still open in the old unit.
+	if exists && b.UnitCode != "" && normalised != b.UnitCode &&
+		(b.ReservedAmount > 0 || (b.SpentAmount > 0 && !args.ResetSpend)) {
+		return limes.TenantBudget{}, fmt.Errorf("%w: tenant %s has %s counted in %s",
+			limes.ErrUnitCodeMismatch, args.TenantID, b.SpentAmount+b.ReservedAmount, b.UnitCode)
 	}
 
 	b.TenantID = args.TenantID
