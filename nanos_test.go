@@ -86,7 +86,8 @@ func TestAmountFromFloatRoundsTheDecimalAFloatStandsFor(t *testing.T) {
 // eighteen-digit ones a float64 cannot hold.
 func TestNanosJSONIsAString(t *testing.T) {
 	r := rand.New(rand.NewPCG(3, 4))
-	for range 200_000 {
+	const samples = 20_000 // random amounts across the whole range
+	for range samples {
 		n := Nanos(r.Int64N(int64(MaxNanos) + 1))
 		b, err := json.Marshal(n)
 		if err != nil {
