@@ -13,8 +13,9 @@
 //     no implementation in the module could show that a failed side effect
 //     leaves counters unmutated.
 //
-// It is NOT a production store: everything is a map behind one mutex, nothing
-// survives a restart, and ListByPrincipal ignores paging beyond Limit.
+// It is NOT a production store: everything is a map behind one mutex, which
+// is held while onCharged runs, nothing survives a restart, and the charges
+// ledger is kept whole for as long as the store lives.
 package memstore
 
 import (
@@ -54,17 +55,22 @@ type Store[TX any] struct {
 //
 // TX is the consumer's transaction handle. This store has no transactions of
 // its own, so it never constructs one unless given a factory; it only threads
-// the handle back to onCharged. See contracts/module-api.md §1.2.
+// the handle back to onCharged.
 type UsageStore[TX any] struct {
 	mu sync.Mutex
 
-	usage     map[uuid.UUID]limes.Usage
-	budgets   map[uuid.UUID]limes.TenantBudget
-	ledger    []LedgerEntry
-	records   *Store[TX] // lineage and ceilings of ancestors; nil = none known
-	holds     map[uuid.UUID]hold
-	nowFn     func() time.Time
-	txFactory func() TX
+	usage   map[uuid.UUID]limes.Usage
+	budgets map[uuid.UUID]limes.TenantBudget
+	ledger  []LedgerEntry
+	// The ledger's indexes, each to a position in ledger: by charge id, by
+	// (capability, external ref) and by the reservation a charge settled.
+	byCharge      map[uuid.UUID]int
+	byRef         map[refKey]int
+	byReservation map[uuid.UUID]int
+	records       *Store[TX] // lineage and ceilings of ancestors; nil = none known
+	holds         map[uuid.UUID]hold
+	nowFn         func() time.Time
+	txFactory     func() TX
 
 	// copies counts each Biscuit copy that set limits of its own, by its
 	// block's revocation id.
@@ -74,6 +80,12 @@ type UsageStore[TX any] struct {
 	// ResetSpend starts the next one. A ledger entry records the period it
 	// was counted in, so a refund leaves a later period's spend alone.
 	periods map[uuid.UUID]uint64
+}
+
+// refKey is what ChargeRequest.ExternalRef makes a charge idempotent on.
+type refKey struct {
+	capID uuid.UUID
+	ref   string
 }
 
 // copyCounter is one Biscuit copy's own counters.
@@ -142,8 +154,12 @@ func NewUsage[TX any](records *Store[TX]) *UsageStore[TX] {
 		holds:   map[uuid.UUID]hold{},
 		copies:  map[string]copyCounter{},
 		periods: map[uuid.UUID]uint64{},
-		records: records,
-		nowFn:   time.Now,
+
+		byCharge:      map[uuid.UUID]int{},
+		byRef:         map[refKey]int{},
+		byReservation: map[uuid.UUID]int{},
+		records:       records,
+		nowFn:         time.Now,
 	}
 }
 
@@ -520,9 +536,7 @@ func (s *UsageStore[TX]) Charge(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if req.ExternalRef != "" {
-		if e, ok := s.findLocked(func(e LedgerEntry) bool {
-			return e.CapabilityID == req.CapabilityID && e.ExternalRef == req.ExternalRef
-		}); ok {
+		if e, ok := entryLocked(s, s.byRef, refKey{req.CapabilityID, req.ExternalRef}); ok {
 			if e.Amount != req.Amount || e.UnitCode != unit || e.TenantID != req.TenantID {
 				return limes.ChargeReceipt{}, fmt.Errorf("%w: %q was %s %s for tenant %s",
 					limes.ErrExternalRefConflict, req.ExternalRef, e.Amount, e.UnitCode, e.TenantID)
@@ -540,9 +554,7 @@ func (s *UsageStore[TX]) ChargeByRef(_ context.Context, capID uuid.UUID, externa
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	e, ok := s.findLocked(func(e LedgerEntry) bool {
-		return e.CapabilityID == capID && e.ExternalRef == externalRef
-	})
+	e, ok := entryLocked(s, s.byRef, refKey{capID, externalRef})
 	if !ok {
 		return limes.ChargeRecord{}, limes.ErrChargeNotFound
 	}
@@ -553,7 +565,7 @@ func (s *UsageStore[TX]) ChargeByRef(_ context.Context, capID uuid.UUID, externa
 func (s *UsageStore[TX]) GetCharge(_ context.Context, chargeID uuid.UUID) (limes.ChargeRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	e, ok := s.findLocked(func(e LedgerEntry) bool { return e.ID == chargeID })
+	e, ok := entryLocked(s, s.byCharge, chargeID)
 	if !ok {
 		return limes.ChargeRecord{}, limes.ErrChargeNotFound
 	}
@@ -568,13 +580,27 @@ func (e LedgerEntry) record() limes.ChargeRecord {
 	}
 }
 
-// findLocked returns the first ledger entry match accepts. s.mu must be held.
-func (s *UsageStore[TX]) findLocked(match func(LedgerEntry) bool) (LedgerEntry, bool) {
-	i := slices.IndexFunc(s.ledger, match)
-	if i < 0 {
+// entryLocked returns the ledger entry index files under key. s.mu must be
+// held.
+func entryLocked[TX any, K comparable](s *UsageStore[TX], index map[K]int, key K) (LedgerEntry, bool) {
+	i, ok := index[key]
+	if !ok {
 		return LedgerEntry{}, false
 	}
 	return s.ledger[i], true
+}
+
+// appendLocked adds entry to the ledger and its indexes. s.mu must be held.
+func (s *UsageStore[TX]) appendLocked(entry LedgerEntry) {
+	i := len(s.ledger)
+	s.ledger = append(s.ledger, entry)
+	s.byCharge[entry.ID] = i
+	if entry.ExternalRef != "" {
+		s.byRef[refKey{entry.CapabilityID, entry.ExternalRef}] = i
+	}
+	if entry.ReservationID != uuid.Nil {
+		s.byReservation[entry.ReservationID] = i
+	}
 }
 
 // replayLocked is the receipt for a charge already in the ledger, returned
@@ -683,7 +709,7 @@ func (s *UsageStore[TX]) chargeLocked(
 		ExternalRef: req.ExternalRef, ReservationID: reservationID, Overrun: overrun,
 		tenantPeriod: s.periods[req.TenantID],
 	}
-	s.ledger = append(s.ledger, entry)
+	s.appendLocked(entry)
 	return limes.ChargeReceipt{ChargeID: entry.ID, Spent: stagedSpent, Overrun: overrun}, nil
 }
 
@@ -883,7 +909,7 @@ func (s *UsageStore[TX]) Settle(
 
 	h, ok := s.holds[req.ReservationID]
 	if !ok {
-		if e, settled := s.findLocked(func(e LedgerEntry) bool { return e.ReservationID == req.ReservationID }); settled {
+		if e, settled := entryLocked(s, s.byReservation, req.ReservationID); settled {
 			return s.replayLocked(e), nil
 		}
 	}
@@ -991,8 +1017,8 @@ func (s *UsageStore[TX]) Refund(_ context.Context, req limes.RefundRequest) (lim
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	i := slices.IndexFunc(s.ledger, func(e LedgerEntry) bool { return e.ID == req.ChargeID })
-	if i < 0 {
+	i, ok := s.byCharge[req.ChargeID]
+	if !ok {
 		return 0, limes.ErrChargeNotFound
 	}
 	e := &s.ledger[i]
