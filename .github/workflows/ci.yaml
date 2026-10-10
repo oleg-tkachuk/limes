@@ -31,6 +31,10 @@ env:
   YQ_VERSION: "v4.53.6"
   # renovate: datasource=pypi depName=zizmor
   ZIZMOR_VERSION: "1.30.1"
+  # The newest patch of the oldest Go the module supports: the `go` directive
+  # in go.mod, which is what binds a consumer. The floor job checks they agree.
+  # renovate: datasource=golang-version depName=go-floor
+  GO_FLOOR_VERSION: "1.26.9"
 
 jobs:
   # Whether anything the checks below read has changed. .github/scripts/ci-relevant.sh
@@ -180,6 +184,47 @@ jobs:
             ~/.cache/golangci-lint
           key: ${{ steps.go-cache.outputs.cache-primary-key }}
 
+  # verify-all runs on the toolchain go.mod pins. A consumer builds this module
+  # with their own Go, as old as the `go` directive allows, so the suite runs
+  # on that floor as well — with GOTOOLCHAIN=local, so it cannot quietly
+  # switch to a newer one.
+  floor:
+    name: Test on the oldest supported Go
+    needs: [changes]
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_FLOOR_VERSION }}
+          cache: false
+
+      - name: Require GO_FLOOR_VERSION to match the go directive
+        run: |
+          set -euo pipefail
+          directive="$(go mod edit -json | jq -r .Go)"
+          if [ "${GO_FLOOR_VERSION%.*}" != "${directive%.*}" ]; then
+            printf 'GO_FLOOR_VERSION %s is not a patch of the go.mod directive %s\n' "$GO_FLOOR_VERSION" "$directive"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -race ./...
+
   # Two jobs over the same files, and the halves do not overlap. actionlint
   # covers whether a workflow is correct at all — schema, expression syntax,
   # `needs:` naming a job that exists, and shellcheck over every `run:` block.
@@ -240,7 +285,7 @@ jobs:
   # change, which is a pass; a failure or a cancellation anywhere is not.
   checks:
     name: All checks passed
-    needs: [changes, verify, syntax, audit]
+    needs: [changes, verify, floor, syntax, audit]
     if: always()
     runs-on: ubuntu-26.04
     timeout-minutes: 5
@@ -264,7 +309,7 @@ jobs:
 
   dispatch-release:
     name: Dispatch release
-    needs: [changes, verify, syntax, audit]
+    needs: [changes, verify, floor, syntax, audit]
     # Not for a documentation-only push: its code is byte-identical to the
     # commit before it. Its commits are not lost — semantic-release counts them
     # in the next release a code change dispatches.

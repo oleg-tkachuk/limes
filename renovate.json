@@ -55,6 +55,12 @@
       "description": "Majors are crossed by hand: a Go major is an import-path change, and the release tooling's majors change how a version is computed."
     },
     {
+      "matchManagers": ["custom.regex"],
+      "matchDepNames": ["go-floor"],
+      "allowedVersions": "<1.27",
+      "description": "GO_FLOOR_VERSION follows patches of the go directive in go.mod only; raising the floor is a decision, made in go.mod and ci.yaml together."
+    },
+    {
       "matchManagers": ["gomod"],
       "matchDepTypes": ["golang", "toolchain"],
       "groupName": "go toolchain",

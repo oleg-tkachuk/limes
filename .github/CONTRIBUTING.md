@@ -2,7 +2,8 @@
 
 ## Building and testing
 
-Go (the version in `go.mod`), [Task](https://taskfile.dev) and
+Go (the `toolchain` in `go.mod`; the `go` directive is the oldest Go the
+module supports, and CI runs the suite on it too), [Task](https://taskfile.dev) and
 [golangci-lint](https://golangci-lint.run); Node and
 `npm ci --prefix .github/release` for the release-rule test; `yq` for the
 CI-relevance test. govulncheck and actionlint are pinned in `tools/go.mod` and

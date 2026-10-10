@@ -463,7 +463,7 @@ func limitNarrows(what string, n, own int64, outer []CopyCeiling, of func(CopyCe
 }
 
 func biscuitFact(name string, term biscuit.Term) biscuit.Fact {
-	return biscuit.Fact{Name: name, IDs: []biscuit.Term{term}}
+	return biscuit.Fact{Predicate: biscuit.Predicate{Name: name, IDs: []biscuit.Term{term}}}
 }
 
 func parseBiscuit(token string) (*biscuit.Biscuit, error) {
