@@ -21,9 +21,9 @@ type RevocationLookup interface {
 // that did not perform it.
 const DefaultRevocationCacheTTL = 2 * time.Second
 
-// DefaultRevocationCacheEntries bounds the cache. Past it, expired entries
-// are dropped and, if that frees nothing, the cache is reset: a flood of
-// distinct ids costs extra lookups, never unbounded memory.
+// DefaultRevocationCacheEntries bounds the cache. Past it, the oldest entry
+// makes room for the new one: a flood of distinct ids costs extra lookups,
+// never unbounded memory, and never the answers cached for everyone else.
 const DefaultRevocationCacheEntries = 100_000
 
 // CachedRevocationChecker is a small in-memory cache for IsRevoked answers.
@@ -104,7 +104,8 @@ func (c *CachedRevocationChecker) Invalidate(id uuid.UUID) { c.cache.invalidate(
 func (c *CachedRevocationChecker) Clear() { c.cache.clear() }
 
 // Sweep drops every expired entry and returns how many it dropped.
-// Optional housekeeping — lookups skip stale entries anyway.
+// Optional housekeeping — lookups skip stale entries, and every new answer
+// drops the expired ones before it.
 func (c *CachedRevocationChecker) Sweep() int { return c.cache.sweep() }
 
 // ttlCache caches a yes/no answer per key for a TTL, bounded in size, with
@@ -116,6 +117,11 @@ type ttlCache[K comparable] struct {
 	mu       sync.Mutex
 	entries  map[K]cacheEntry
 	inflight map[K]*lookupCall
+	// order holds the entries in the order they were cached, which every
+	// entry sharing one TTL makes the order they expire in. A key cached
+	// again leaves its earlier place behind; popping one checks it is still
+	// the entry's own.
+	order []queued[K]
 	// epoch counts invalidations. A lookup that started before one may
 	// have read the state it invalidated, so its answer is not cached.
 	epoch uint64
@@ -123,6 +129,12 @@ type ttlCache[K comparable] struct {
 
 type cacheEntry struct {
 	revoked bool
+	expires time.Time
+}
+
+// queued is a key's place in ttlCache.order.
+type queued[K comparable] struct {
+	key     K
 	expires time.Time
 }
 
@@ -188,22 +200,35 @@ func (c *ttlCache[K]) finish(key K, call *lookupCall, epoch uint64) {
 	}
 	if call.err == nil && c.epoch == epoch {
 		c.makeRoomLocked()
-		c.entries[key] = cacheEntry{revoked: call.revoked, expires: c.cfg.now().Add(c.cfg.ttl)}
+		expires := c.cfg.now().Add(c.cfg.ttl)
+		c.entries[key] = cacheEntry{revoked: call.revoked, expires: expires}
+		c.order = append(c.order, queued[K]{key: key, expires: expires})
 	}
 	c.mu.Unlock()
 	close(call.done)
 }
 
 // makeRoomLocked keeps the cache under maxEntries: expired entries go
-// first and, if that frees nothing, everything does.
+// first and, if that frees nothing, the oldest live one does.
 func (c *ttlCache[K]) makeRoomLocked() {
-	if len(c.entries) < c.cfg.maxEntries {
-		return
-	}
 	c.sweepLocked()
-	if len(c.entries) >= c.cfg.maxEntries {
-		clear(c.entries)
+	for len(c.entries) >= c.cfg.maxEntries && c.popLocked() {
 	}
+}
+
+// popLocked drops the oldest place in order, and its entry if the place is
+// still the entry's own. It reports whether there was a place to drop.
+func (c *ttlCache[K]) popLocked() bool {
+	if len(c.order) == 0 {
+		return false
+	}
+	q := c.order[0]
+	c.order[0] = queued[K]{} // let the key go
+	c.order = c.order[1:]
+	if e, ok := c.entries[q.key]; ok && e.expires.Equal(q.expires) {
+		delete(c.entries, q.key)
+	}
+	return true
 }
 
 // invalidate drops key's entry and detaches a lookup of it in flight, so the
@@ -224,6 +249,7 @@ func (c *ttlCache[K]) clear() {
 	c.epoch++
 	clear(c.entries)
 	clear(c.inflight)
+	c.order = nil
 	c.mu.Unlock()
 }
 
@@ -233,14 +259,16 @@ func (c *ttlCache[K]) sweep() int {
 	return c.sweepLocked()
 }
 
+// sweepLocked drops every expired entry, oldest first, and returns how many
+// it dropped. It stops at the first place not yet expired: every place after
+// it expires later.
 func (c *ttlCache[K]) sweepLocked() int {
 	now := c.cfg.now()
 	dropped := 0
-	for k, e := range c.entries {
-		if !e.expires.After(now) {
-			delete(c.entries, k)
-			dropped++
-		}
+	for len(c.order) > 0 && !c.order[0].expires.After(now) {
+		before := len(c.entries)
+		c.popLocked()
+		dropped += before - len(c.entries)
 	}
 	return dropped
 }
