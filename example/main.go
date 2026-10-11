@@ -1,5 +1,6 @@
 // Command example is the quickstart walkthrough as a runnable program:
-// issue → verify → delegate → revoke, against the in-memory reference store.
+// issue → verify → delegate → charge → revoke, against the in-memory
+// reference store.
 //
 // It deliberately mentions no object storage and no database. If this program
 // needs either to run, the module has broken its central promise.
@@ -150,9 +151,11 @@ func main() {
 		ID: parent.ID, Reason: "example finished", Actor: "operator", CascadeChildren: true,
 	}), "revoke")
 
-	childRevoked, err := records.IsRevoked(ctx, child.ID)
-	must(err, "is-revoked")
-	if !childRevoked {
+	// The child stops either way — IsRevoked walks the chain — but only the
+	// cascade writes a revocation entry of its own, naming it in the audit.
+	rec, err := records.GetRecord(ctx, child.ID)
+	must(err, "get-record")
+	if rec.Revocation == nil {
 		log.Fatal("cascade did not reach the delegated child")
 	}
 	fmt.Println("revoked  parent + cascaded to the child")
