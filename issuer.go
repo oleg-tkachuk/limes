@@ -24,10 +24,10 @@ import (
 // admin reads would find nothing behind it, and Revoke, which refuses an id
 // not on record, could not stop it. Persist-first means the token in the caller's hand is always
 // reflected in storage; a failed sign just means the row is unused
-// (cleaned up by housekeeping at the natural expiry).
+// (removed by Store.Purge once it has expired).
 type Issuer struct {
 	signer *Signer
-	store  Store
+	store  IssuanceStore
 	clock  func() time.Time
 
 	issuerName string
@@ -43,8 +43,9 @@ type IssuerConfig struct {
 	// a KMS or an HSM.
 	Signer *Signer
 
-	// Store persists issuance + revocation rows.
-	Store Store
+	// Store records what the issuer mints and answers whether a parent is
+	// revoked. Any Store is one.
+	Store IssuanceStore
 
 	// IssuerName is the value placed in the `iss` claim. Verifiers
 	// require this to be in their TrustedIssuers list.
@@ -166,7 +167,7 @@ func (i *Issuer) Issue(ctx context.Context, req IssueRequest) (Capability, strin
 		return Capability{}, "", err
 	}
 
-	if err := i.store.Insert(ctx, cap, req.IssuedBy); err != nil {
+	if err := i.store.Insert(ctx, InsertRequest{Capability: cap, IssuedBy: req.IssuedBy}); err != nil {
 		return Capability{}, "", fmt.Errorf("limes: persist issuance: %w", err)
 	}
 	token, err := i.signer.Sign(ctx, cap)
@@ -346,7 +347,7 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 	// A delegation is requested by whoever holds the parent — that is not a
 	// caller-supplied fact, it is what delegation means, so it is derived
 	// rather than accepted as an argument.
-	if err := i.store.Insert(ctx, child, parent.Subject); err != nil {
+	if err := i.store.Insert(ctx, InsertRequest{Capability: child, IssuedBy: parent.Subject}); err != nil {
 		return Capability{}, "", fmt.Errorf("limes: persist delegation: %w", err)
 	}
 	token, err := i.signer.Sign(ctx, child)

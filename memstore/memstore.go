@@ -193,7 +193,8 @@ func (s *UsageStore[TX]) Ledger() []LedgerEntry {
 // issuedBy is recorded alongside the capability so the in-memory store answers
 // the same attribution questions the relational one does — a test double that
 // silently drops the initiator would let an unattributed issuance pass.
-func (s *Store[TX]) Insert(_ context.Context, c limes.Capability, issuedBy limes.Principal) error {
+func (s *Store[TX]) Insert(_ context.Context, req limes.InsertRequest) error {
+	c, issuedBy := req.Capability, req.IssuedBy
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.caps[c.ID]; ok {
@@ -232,19 +233,6 @@ func (s *Store[TX]) revokeLocked(id uuid.UUID, r limes.Revocation) {
 func (s *Store[TX]) isRevokedItselfLocked(id uuid.UUID) bool {
 	_, ok := s.revoked[id]
 	return ok
-}
-
-// Get returns limes.ErrNotFound when absent. Callers treat that as
-// forgery, not as a missing entity — a syntactically valid token with no
-// record was minted by someone else.
-func (s *Store[TX]) Get(_ context.Context, id uuid.UUID) (limes.Capability, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	c, ok := s.caps[id]
-	if !ok {
-		return limes.Capability{}, limes.ErrNotFound
-	}
-	return c, nil
 }
 
 // IsRevoked answers for the whole delegation chain: a capability is revoked
@@ -369,35 +357,46 @@ func (s *Store[TX]) GetBiscuitRevocation(_ context.Context, revocationID []byte)
 	return r, nil
 }
 
-func (s *Store[TX]) PurgeExpired(_ context.Context, expiredFor time.Duration) (int64, error) {
+// Purge implements limes.Store, oldest expiry first.
+func (s *Store[TX]) Purge(_ context.Context, req limes.PurgeRequest) (limes.PurgeResult, error) {
+	if err := req.Validate(); err != nil {
+		return limes.PurgeResult{}, err
+	}
+	limit := req.Limit
+	if limit == 0 {
+		limit = limes.DefaultPurgeLimit
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cutoff := s.nowFn().Add(-expiredFor)
-	var n int64
-	for id, c := range s.caps {
-		if c.ExpiresAt.IsZero() || !c.ExpiresAt.Before(cutoff) {
-			continue
+	cutoff := s.nowFn().Add(-req.ExpiredFor)
+	var due []limes.Capability
+	for _, c := range s.caps {
+		if !c.ExpiresAt.IsZero() && c.ExpiresAt.Before(cutoff) {
+			due = append(due, c)
 		}
-		if _, ok := s.revoked[id]; ok {
-			delete(s.revoked, id)
-			n++
-		}
-		before := len(s.revokedCopies)
-		maps.DeleteFunc(s.revokedCopies, func(_ string, r limes.BiscuitRevocation) bool { return r.CapabilityID == id })
-		n += int64(before - len(s.revokedCopies))
 	}
-	return n, nil
+	sort.Slice(due, func(i, j int) bool { return due[i].ExpiresAt.Before(due[j].ExpiresAt) })
+	if len(due) > limit {
+		due = due[:limit]
+	}
+	for _, c := range due {
+		delete(s.caps, c.ID)
+		delete(s.revoked, c.ID)
+		delete(s.issuedBy, c.ID)
+		maps.DeleteFunc(s.revokedCopies, func(_ string, r limes.BiscuitRevocation) bool { return r.CapabilityID == c.ID })
+	}
+	return limes.PurgeResult{Purged: int64(len(due))}, nil
 }
 
-func (s *Store[TX]) ListByPrincipal(_ context.Context, req limes.ListByPrincipalRequest) ([]limes.Capability, string, error) {
+func (s *Store[TX]) ListByPrincipal(_ context.Context, req limes.ListByPrincipalRequest) (limes.Page[limes.Capability], error) {
 	if err := req.Validate(); err != nil {
-		return nil, "", err
+		return limes.Page[limes.Capability]{}, err
 	}
 	var after uuid.UUID
 	if req.Cursor != "" {
 		var err error
 		if after, err = uuid.Parse(req.Cursor); err != nil {
-			return nil, "", fmt.Errorf("%w: memstore: cursor %q", limes.ErrInvalidRequest, req.Cursor)
+			return limes.Page[limes.Capability]{}, fmt.Errorf("%w: memstore: cursor %q", limes.ErrInvalidRequest, req.Cursor)
 		}
 	}
 	s.mu.Lock()
@@ -422,10 +421,10 @@ func (s *Store[TX]) ListByPrincipal(_ context.Context, req limes.ListByPrincipal
 	sort.Slice(out, func(i, j int) bool { return uuidLess(out[i].ID, out[j].ID) })
 	limit := int(limes.PageLimit(req.Limit))
 	if len(out) <= limit {
-		return out, "", nil
+		return limes.Page[limes.Capability]{Items: out}, nil
 	}
 	out = out[:limit]
-	return out, out[len(out)-1].ID.String(), nil
+	return limes.Page[limes.Capability]{Items: out, Next: out[len(out)-1].ID.String()}, nil
 }
 
 // maxUtilisationPct is where TenantBudgetSummary.UtilisationPct is clamped:
@@ -1155,15 +1154,15 @@ func (s *UsageStore[TX]) SetTenantBudget(_ context.Context, args limes.SetTenant
 	return b, nil
 }
 
-func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTenantBudgetsRequest) ([]limes.TenantBudgetSummary, string, error) {
+func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTenantBudgetsRequest) (limes.Page[limes.TenantBudgetSummary], error) {
 	if err := args.Validate(); err != nil {
-		return nil, "", err
+		return limes.Page[limes.TenantBudgetSummary]{}, err
 	}
 	var after *budgetRow
 	if args.Cursor != "" {
 		c, err := limes.DecodeTenantBudgetCursor(args.Cursor)
 		if err != nil {
-			return nil, "", err
+			return limes.Page[limes.TenantBudgetSummary]{}, err
 		}
 		pct, _ := strconv.ParseFloat(c.Utilisation, 64) // DecodeTenantBudgetCursor checked it
 		after = &budgetRow{pct: pct, tenant: c.TenantID}
@@ -1207,7 +1206,7 @@ func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTen
 			TenantID: r.tenant, Budget: r.budget, UtilisationPct: min(r.pct, maxUtilisationPct),
 		})
 	}
-	return out, next, nil
+	return limes.Page[limes.TenantBudgetSummary]{Items: out, Next: next}, nil
 }
 
 // budgetRow is a tenant budget in ListTenantBudgets' order.
@@ -1280,6 +1279,7 @@ func max0(n limes.Nanos) limes.Nanos {
 // implement the contract either.
 var (
 	_ limes.Store                = (*Store[struct{}])(nil)
+	_ limes.IssuanceStore        = (*Store[struct{}])(nil)
 	_ limes.UsageStore[struct{}] = (*UsageStore[struct{}])(nil)
 )
 

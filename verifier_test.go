@@ -33,22 +33,15 @@ func newMemStore() *memStore {
 	}
 }
 
-func (m *memStore) Insert(_ context.Context, c Capability, _ Principal) error {
-	m.caps[c.ID] = c
+func (m *memStore) Insert(_ context.Context, req InsertRequest) error {
+	m.caps[req.Capability.ID] = req.Capability
 	return nil
 }
-func (m *memStore) Get(_ context.Context, id uuid.UUID) (Capability, error) {
+func (m *memStore) GetRecord(_ context.Context, id uuid.UUID) (Record, error) {
 	m.getCalls.Add(1)
 	c, ok := m.caps[id]
 	if !ok {
-		return Capability{}, errors.New("not found")
-	}
-	return c, nil
-}
-func (m *memStore) GetRecord(ctx context.Context, id uuid.UUID) (Record, error) {
-	c, err := m.Get(ctx, id)
-	if err != nil {
-		return Record{}, err
+		return Record{}, errors.New("not found")
 	}
 	return Record{Capability: c}, nil
 }
@@ -72,11 +65,11 @@ func (m *memStore) RevokeBiscuit(_ context.Context, args RevokeBiscuitRequest) e
 	m.copies[string(args.RevocationID)] = true
 	return nil
 }
-func (m *memStore) PurgeExpired(context.Context, time.Duration) (int64, error) {
-	return 0, nil
+func (m *memStore) Purge(context.Context, PurgeRequest) (PurgeResult, error) {
+	return PurgeResult{}, nil
 }
-func (m *memStore) ListByPrincipal(context.Context, ListByPrincipalRequest) ([]Capability, string, error) {
-	return nil, "", nil
+func (m *memStore) ListByPrincipal(context.Context, ListByPrincipalRequest) (Page[Capability], error) {
+	return Page[Capability]{}, nil
 }
 
 // buildIssuerVerifier wires a fresh keypair, signer, store, cache, and

@@ -35,7 +35,8 @@
 // Three contracts are required; a consumer that implements them needs nothing
 // else:
 //
-//   - [Store] — capability records and revocations. IsRevoked answers for the
+//   - [Store] — capability records and revocations; an [Issuer] needs only its
+//     [IssuanceStore] half. IsRevoked answers for the
 //     capability's whole delegation chain. No transactions required; an
 //     in-memory map is a valid implementation.
 //   - [UsageStore] — request and spend counters and the charges ledger; the

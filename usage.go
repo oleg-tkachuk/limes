@@ -35,7 +35,7 @@ type UsageStore[TX any] interface {
 // caller — must admit the increment. So an orchestrator holding 25.00 that
 // delegates 2.00 to each of a hundred workers can still spend 25.00 in total,
 // not 200.00. Narrowing at delegation bounds each child; this bounds the sum.
-// An ancestor whose record is gone (purged after expiry) no longer bounds
+// An ancestor whose record is gone (Store.Purge, after expiry) no longer bounds
 // anything — its children expired with it, since a child cannot outlive its
 // parent.
 //
@@ -201,7 +201,7 @@ type TenantBudgets interface {
 	// the next one, empty on the last page. Spend moves between pages, so
 	// a tenant may show on two of them, or on none; a cursor is a place in
 	// the order, not a snapshot.
-	ListTenantBudgets(ctx context.Context, req ListTenantBudgetsRequest) ([]TenantBudgetSummary, string, error)
+	ListTenantBudgets(ctx context.Context, req ListTenantBudgetsRequest) (Page[TenantBudgetSummary], error)
 }
 
 // UsageHousekeeping reclaims usage rows of capabilities that are gone.

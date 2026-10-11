@@ -24,7 +24,7 @@ type fakeLister struct {
 	reqs  []ListByPrincipalRequest
 }
 
-func (f *fakeLister) ListByPrincipal(_ context.Context, req ListByPrincipalRequest) ([]Capability, string, error) {
+func (f *fakeLister) ListByPrincipal(_ context.Context, req ListByPrincipalRequest) (Page[Capability], error) {
 	f.asked = append(f.asked, req.Cursor)
 	f.reqs = append(f.reqs, req)
 	p := f.pages[req.Cursor]
@@ -32,17 +32,17 @@ func (f *fakeLister) ListByPrincipal(_ context.Context, req ListByPrincipalReque
 	for _, id := range p.ids {
 		caps = append(caps, Capability{ID: id})
 	}
-	return caps, p.next, p.err
+	return Page[Capability]{Items: caps, Next: p.next}, p.err
 }
 
-func (f *fakeLister) ListTenantBudgets(_ context.Context, req ListTenantBudgetsRequest) ([]TenantBudgetSummary, string, error) {
+func (f *fakeLister) ListTenantBudgets(_ context.Context, req ListTenantBudgetsRequest) (Page[TenantBudgetSummary], error) {
 	f.asked = append(f.asked, req.Cursor)
 	p := f.pages[req.Cursor]
 	rows := make([]TenantBudgetSummary, 0, len(p.ids))
 	for _, id := range p.ids {
 		rows = append(rows, TenantBudgetSummary{TenantID: id})
 	}
-	return rows, p.next, p.err
+	return Page[TenantBudgetSummary]{Items: rows, Next: p.next}, p.err
 }
 
 // The cursors of a three-page listing.

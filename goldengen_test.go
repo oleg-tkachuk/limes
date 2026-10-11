@@ -49,20 +49,17 @@ func goldenClock() time.Time {
 // genStore is a no-op Store — issuance only needs Insert to succeed.
 type genStore struct{}
 
-func (genStore) Insert(context.Context, Capability, Principal) error { return nil }
-func (genStore) Get(context.Context, uuid.UUID) (Capability, error) {
-	return Capability{}, errors.New("not found")
-}
+func (genStore) Insert(context.Context, InsertRequest) error { return nil }
 func (genStore) GetRecord(context.Context, uuid.UUID) (Record, error) {
 	return Record{}, errors.New("not found")
 }
 func (genStore) IsRevoked(context.Context, uuid.UUID) (bool, error) { return false, nil }
 func (genStore) Revoke(context.Context, RevokeRequest) error        { return nil }
-func (genStore) PurgeExpired(context.Context, time.Duration) (int64, error) {
-	return 0, nil
+func (genStore) Purge(context.Context, PurgeRequest) (PurgeResult, error) {
+	return PurgeResult{}, nil
 }
-func (genStore) ListByPrincipal(context.Context, ListByPrincipalRequest) ([]Capability, string, error) {
-	return nil, "", nil
+func (genStore) ListByPrincipal(context.Context, ListByPrincipalRequest) (Page[Capability], error) {
+	return Page[Capability]{}, nil
 }
 
 func TestGenerateGoldenToken(t *testing.T) {

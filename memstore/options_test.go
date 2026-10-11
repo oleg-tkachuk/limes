@@ -28,8 +28,8 @@ func TestWithTxFactoryThreadsTheHandle(t *testing.T) {
 	}
 }
 
-// The record store's clock decides what PurgeExpired counts as expired.
-func TestStoreWithClockDrivesPurgeExpired(t *testing.T) {
+// The record store's clock decides what Purge counts as expired.
+func TestStoreWithClockDrivesPurge(t *testing.T) {
 	ctx := context.Background()
 	now := time.Unix(1_800_000_000, 0)
 	s := New[struct{}]().WithClock(func() time.Time { return now })
@@ -38,17 +38,17 @@ func TestStoreWithClockDrivesPurgeExpired(t *testing.T) {
 		ID: uuid.New(), ExpiresAt: now.Add(time.Minute),
 		Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: tenant, Subject: "a"},
 	}
-	if err := s.Insert(ctx, c, limes.Principal{Subject: "op"}); err != nil {
+	if err := s.Insert(ctx, limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "op"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Revoke(ctx, limes.RevokeRequest{ID: c.ID}); err != nil {
 		t.Fatal(err)
 	}
-	if n, _ := s.PurgeExpired(ctx, 0); n != 0 {
-		t.Fatalf("purged %d before the capability expired", n)
+	if got, _ := s.Purge(ctx, limes.PurgeRequest{}); got.Purged != 0 {
+		t.Fatalf("purged %d before the capability expired", got.Purged)
 	}
 	now = now.Add(2 * time.Minute)
-	if n, _ := s.PurgeExpired(ctx, 0); n != 1 {
-		t.Fatalf("purged %d once the clock passed its expiry, want 1", n)
+	if got, _ := s.Purge(ctx, limes.PurgeRequest{}); got.Purged != 1 {
+		t.Fatalf("purged %d once the clock passed its expiry, want 1", got.Purged)
 	}
 }

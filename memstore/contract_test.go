@@ -34,7 +34,7 @@ func TestMeterContract(t *testing.T) {
 					Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: tenant, Subject: "agent"},
 					Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, MaxBudgetAmount: maxBudget},
 				}
-				return c.ID, records.Insert(context.Background(), c, limes.Principal{Subject: "issuer"})
+				return c.ID, records.Insert(context.Background(), limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "issuer"}})
 			},
 		}
 	})
@@ -78,7 +78,7 @@ func TestMeterContractUsesTheTenantHooks(t *testing.T) {
 					Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: tenant, Subject: "agent"},
 					Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, MaxBudgetAmount: maxBudget},
 				}
-				return c.ID, records.Insert(ctx, c, limes.Principal{Subject: "issuer"})
+				return c.ID, records.Insert(ctx, limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "issuer"}})
 			},
 		}
 	})
@@ -111,7 +111,7 @@ type recordingUsage struct {
 	r *listRecorder
 }
 
-func (u *recordingUsage) ListTenantBudgets(ctx context.Context, req limes.ListTenantBudgetsRequest) ([]limes.TenantBudgetSummary, string, error) {
+func (u *recordingUsage) ListTenantBudgets(ctx context.Context, req limes.ListTenantBudgetsRequest) (limes.Page[limes.TenantBudgetSummary], error) {
 	if ctx.Value(listScope{}) != nil {
 		u.r.inside.Add(1)
 	} else {

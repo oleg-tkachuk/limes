@@ -29,7 +29,7 @@ func TestRevokeIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	s := New[struct{}]()
 	id := uuid.New()
-	if err := s.Insert(ctx, mkCap(id, uuid.Nil, uuid.New(), "a"), limes.Principal{Subject: "test-operator"}); err != nil {
+	if err := s.Insert(ctx, limes.InsertRequest{Capability: mkCap(id, uuid.Nil, uuid.New(), "a"), IssuedBy: limes.Principal{Subject: "test-operator"}}); err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
 
@@ -57,7 +57,7 @@ func TestRevokeCascadesToDescendants(t *testing.T) {
 		mkCap(child, root, tenant, "worker"),
 		mkCap(grandchild, child, tenant, "sub-worker"),
 	} {
-		if err := s.Insert(ctx, c, limes.Principal{Subject: "test-operator"}); err != nil {
+		if err := s.Insert(ctx, limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "test-operator"}}); err != nil {
 			t.Fatalf("Insert: %v", err)
 		}
 	}
@@ -83,9 +83,9 @@ func TestRevokingAParentRevokesItsChildrenWithoutCascade(t *testing.T) {
 	s := New[struct{}]()
 	tenant := uuid.New()
 	root, child, grandchild := uuid.New(), uuid.New(), uuid.New()
-	_ = s.Insert(ctx, mkCap(root, uuid.Nil, tenant, "parent"), limes.Principal{Subject: "test-operator"})
-	_ = s.Insert(ctx, mkCap(child, root, tenant, "child"), limes.Principal{Subject: "test-operator"})
-	_ = s.Insert(ctx, mkCap(grandchild, child, tenant, "grandchild"), limes.Principal{Subject: "test-operator"})
+	_ = s.Insert(ctx, limes.InsertRequest{Capability: mkCap(root, uuid.Nil, tenant, "parent"), IssuedBy: limes.Principal{Subject: "test-operator"}})
+	_ = s.Insert(ctx, limes.InsertRequest{Capability: mkCap(child, root, tenant, "child"), IssuedBy: limes.Principal{Subject: "test-operator"}})
+	_ = s.Insert(ctx, limes.InsertRequest{Capability: mkCap(grandchild, child, tenant, "grandchild"), IssuedBy: limes.Principal{Subject: "test-operator"}})
 
 	if err := s.Revoke(ctx, limes.RevokeRequest{ID: child}); err != nil {
 		t.Fatalf("Revoke: %v", err)
@@ -101,7 +101,7 @@ func TestRevokingAParentRevokesItsChildrenWithoutCascade(t *testing.T) {
 // An absent record is forgery, not a missing entity (contracts §1.1).
 func TestGetAbsentReturnsErrNotFound(t *testing.T) {
 	s := New[struct{}]()
-	_, err := s.Get(context.Background(), uuid.New())
+	_, err := s.GetRecord(context.Background(), uuid.New())
 	if !errors.Is(err, limes.ErrNotFound) {
 		t.Fatalf("want limes.ErrNotFound, got %v", err)
 	}
@@ -217,7 +217,7 @@ func TestRevokeBiscuit(t *testing.T) {
 	ctx := context.Background()
 	s := New[struct{}]()
 	id := uuid.New()
-	if err := s.Insert(ctx, mkCap(id, uuid.Nil, uuid.New(), "a"), limes.Principal{Subject: "op"}); err != nil {
+	if err := s.Insert(ctx, limes.InsertRequest{Capability: mkCap(id, uuid.Nil, uuid.New(), "a"), IssuedBy: limes.Principal{Subject: "op"}}); err != nil {
 		t.Fatal(err)
 	}
 	copyID, other := []byte("copy"), []byte("other")
@@ -248,7 +248,7 @@ func TestRevokeBiscuit(t *testing.T) {
 	}
 
 	s.nowFn = func() time.Time { return time.Now().Add(2 * time.Hour) }
-	if _, err := s.PurgeExpired(ctx, 0); err != nil {
+	if _, err := s.Purge(ctx, limes.PurgeRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := s.IsBiscuitRevoked(ctx, [][]byte{copyID}); got {

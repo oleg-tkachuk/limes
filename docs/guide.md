@@ -551,13 +551,21 @@ without the flag: `IsRevoked` answers for the whole chain. `CascadeChildren`
 also writes a revocation entry per descendant, so the audit trail names each
 capability that was stopped.
 
+Records do not stay forever. A housekeeping job calls
+`Store.Purge(ctx, limes.PurgeRequest{ExpiredFor: retention})` on a timer, and
+again while a batch comes back full (`Limit`, `DefaultPurgeLimit` unless
+set): it removes the capabilities expired for longer than the retention, with
+their revocation entries, then `UsageHousekeeping.PurgeOrphans` releases what
+the meter still holds for them. A child never outlives its parent, so no
+ancestor of a live capability is ever purged.
+
 ## Bring your own storage
 
 Implement these and you are done:
 
 | Interface | Stores | Transactions needed? |
 |---|---|---|
-| `Store` | Capability records + revocations | No |
+| `Store` = `IssuanceStore` + admin | Capability records + revocations; an `Issuer` needs only `IssuanceStore` (`Insert`, `IsRevoked`) | No |
 | `BiscuitRevocationStore` | Revoked Biscuit copies (only if you accept Biscuits) | No |
 | `CopyUsageReader` | Reads Biscuit copies' own counters (only to show them) | No |
 | `UsageStore[TX]` = `Meter[TX]` + `TenantBudgets` + `UsageHousekeeping` | Request and spend counters, the charges ledger, tenant ceilings; `Delete` and `PurgeOrphans` release a reaped capability's holds | Only for atomic side effects |
