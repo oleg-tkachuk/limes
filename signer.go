@@ -99,15 +99,27 @@ type jwtClaims struct {
 // reads the same value; larger amounts travel as decimal strings (Nanos).
 const MaxIJSONInteger = 1<<53 - 1
 
+// The integer claims' names, as their json tags spell them, for errors.
+const (
+	claimIssuedAt    = "iat"
+	claimNotBefore   = "nbf"
+	claimExpiresAt   = "exp"
+	claimGeneration  = "limes_gen"
+	claimMaxRequests = "max_requests"
+)
+
 // checkIJSONIntegers refuses claims whose integers lie outside what I-JSON
-// lets a reader rely on.
+// lets a reader rely on, naming the first in claim order.
 func checkIJSONIntegers(c jwtClaims) error {
-	for name, n := range map[string]int64{
-		"iat": c.IssuedAt, "nbf": c.NotBefore, "exp": c.ExpiresAt,
-		"limes_gen": c.Generation, "max_requests": c.Caveats.MaxRequests,
+	for _, claim := range []struct {
+		name string
+		n    int64
+	}{
+		{claimIssuedAt, c.IssuedAt}, {claimNotBefore, c.NotBefore}, {claimExpiresAt, c.ExpiresAt},
+		{claimGeneration, c.Generation}, {claimMaxRequests, c.Caveats.MaxRequests},
 	} {
-		if n < -MaxIJSONInteger || n > MaxIJSONInteger {
-			return fmt.Errorf("limes: %s %d is outside the I-JSON integer range (RFC 7493)", name, n)
+		if claim.n < -MaxIJSONInteger || claim.n > MaxIJSONInteger {
+			return fmt.Errorf("limes: %s %d is outside the I-JSON integer range (RFC 7493)", claim.name, claim.n)
 		}
 	}
 	return nil
@@ -165,6 +177,10 @@ func (s *ed25519Signer) Sign(_ context.Context, c Capability) (string, error) {
 	claims.BiscuitRoot = c.BiscuitRoot
 	if c.ConfirmationJKT != "" {
 		claims.Confirmation = &cnfClaim{JKT: c.ConfirmationJKT}
+	}
+	// Nothing is signed that the verifier would refuse to read.
+	if err := checkIJSONIntegers(claims); err != nil {
+		return "", err
 	}
 
 	headerJSON, err := json.Marshal(header)
