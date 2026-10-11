@@ -334,7 +334,8 @@ func checkListPages(t *testing.T, f fixture) {
 	var sizes []int
 	var got []uuid.UUID
 	for {
-		page, next, err := f.Store.ListByPrincipal(f.Ctx, req)
+		pagePage, err := f.Store.ListByPrincipal(f.Ctx, req)
+		page, next := pagePage.Items, pagePage.Next
 		if err != nil {
 			t.Fatalf("ListByPrincipal: %v", err)
 		}
@@ -396,7 +397,7 @@ func checkListMalformed(t *testing.T, f fixture) {
 	} {
 		req := base
 		mutate(&req)
-		if _, _, err := f.Store.ListByPrincipal(f.Ctx, req); !errors.Is(err, limes.ErrInvalidRequest) {
+		if _, err := f.Store.ListByPrincipal(f.Ctx, req); !errors.Is(err, limes.ErrInvalidRequest) {
 			t.Errorf("%s: err = %v, want ErrInvalidRequest", name, err)
 		}
 	}

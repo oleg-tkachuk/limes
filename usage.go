@@ -201,7 +201,7 @@ type TenantBudgets interface {
 	// the next one, empty on the last page. Spend moves between pages, so
 	// a tenant may show on two of them, or on none; a cursor is a place in
 	// the order, not a snapshot.
-	ListTenantBudgets(ctx context.Context, req ListTenantBudgetsRequest) ([]TenantBudgetSummary, string, error)
+	ListTenantBudgets(ctx context.Context, req ListTenantBudgetsRequest) (Page[TenantBudgetSummary], error)
 }
 
 // UsageHousekeeping reclaims usage rows of capabilities that are gone.

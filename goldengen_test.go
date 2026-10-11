@@ -61,8 +61,8 @@ func (genStore) Revoke(context.Context, RevokeRequest) error        { return nil
 func (genStore) PurgeExpired(context.Context, time.Duration) (int64, error) {
 	return 0, nil
 }
-func (genStore) ListByPrincipal(context.Context, ListByPrincipalRequest) ([]Capability, string, error) {
-	return nil, "", nil
+func (genStore) ListByPrincipal(context.Context, ListByPrincipalRequest) (Page[Capability], error) {
+	return Page[Capability]{}, nil
 }
 
 func TestGenerateGoldenToken(t *testing.T) {

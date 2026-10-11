@@ -78,10 +78,10 @@ type Store interface {
 	PurgeExpired(ctx context.Context, expiredFor time.Duration) (int64, error)
 
 	// ListByPrincipal lists the capabilities issued to one principal, in
-	// ascending id order, a page at a time: it returns at most Limit of
-	// them and a cursor that is empty on the last page and otherwise
-	// fetches the next one. The cursor is opaque.
-	ListByPrincipal(ctx context.Context, req ListByPrincipalRequest) ([]Capability, string, error)
+	// ascending id order, a page at a time: at most Limit of them, and the
+	// cursor of the next page, empty on the last. The cursor is the store's
+	// own and opaque.
+	ListByPrincipal(ctx context.Context, req ListByPrincipalRequest) (Page[Capability], error)
 }
 
 // ErrNotFound is the typed not-found return from Store.Get. It lives in the

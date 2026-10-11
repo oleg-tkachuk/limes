@@ -389,15 +389,15 @@ func (s *Store[TX]) PurgeExpired(_ context.Context, expiredFor time.Duration) (i
 	return n, nil
 }
 
-func (s *Store[TX]) ListByPrincipal(_ context.Context, req limes.ListByPrincipalRequest) ([]limes.Capability, string, error) {
+func (s *Store[TX]) ListByPrincipal(_ context.Context, req limes.ListByPrincipalRequest) (limes.Page[limes.Capability], error) {
 	if err := req.Validate(); err != nil {
-		return nil, "", err
+		return limes.Page[limes.Capability]{}, err
 	}
 	var after uuid.UUID
 	if req.Cursor != "" {
 		var err error
 		if after, err = uuid.Parse(req.Cursor); err != nil {
-			return nil, "", fmt.Errorf("%w: memstore: cursor %q", limes.ErrInvalidRequest, req.Cursor)
+			return limes.Page[limes.Capability]{}, fmt.Errorf("%w: memstore: cursor %q", limes.ErrInvalidRequest, req.Cursor)
 		}
 	}
 	s.mu.Lock()
@@ -422,10 +422,10 @@ func (s *Store[TX]) ListByPrincipal(_ context.Context, req limes.ListByPrincipal
 	sort.Slice(out, func(i, j int) bool { return uuidLess(out[i].ID, out[j].ID) })
 	limit := int(limes.PageLimit(req.Limit))
 	if len(out) <= limit {
-		return out, "", nil
+		return limes.Page[limes.Capability]{Items: out}, nil
 	}
 	out = out[:limit]
-	return out, out[len(out)-1].ID.String(), nil
+	return limes.Page[limes.Capability]{Items: out, Next: out[len(out)-1].ID.String()}, nil
 }
 
 // maxUtilisationPct is where TenantBudgetSummary.UtilisationPct is clamped:
@@ -1155,15 +1155,15 @@ func (s *UsageStore[TX]) SetTenantBudget(_ context.Context, args limes.SetTenant
 	return b, nil
 }
 
-func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTenantBudgetsRequest) ([]limes.TenantBudgetSummary, string, error) {
+func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTenantBudgetsRequest) (limes.Page[limes.TenantBudgetSummary], error) {
 	if err := args.Validate(); err != nil {
-		return nil, "", err
+		return limes.Page[limes.TenantBudgetSummary]{}, err
 	}
 	var after *budgetRow
 	if args.Cursor != "" {
 		c, err := limes.DecodeTenantBudgetCursor(args.Cursor)
 		if err != nil {
-			return nil, "", err
+			return limes.Page[limes.TenantBudgetSummary]{}, err
 		}
 		pct, _ := strconv.ParseFloat(c.Utilisation, 64) // DecodeTenantBudgetCursor checked it
 		after = &budgetRow{pct: pct, tenant: c.TenantID}
@@ -1207,7 +1207,7 @@ func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTen
 			TenantID: r.tenant, Budget: r.budget, UtilisationPct: min(r.pct, maxUtilisationPct),
 		})
 	}
-	return out, next, nil
+	return limes.Page[limes.TenantBudgetSummary]{Items: out, Next: next}, nil
 }
 
 // budgetRow is a tenant budget in ListTenantBudgets' order.

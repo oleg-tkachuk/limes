@@ -599,7 +599,8 @@ func checkTenantBudgetReads[TX any](t *testing.T, f fixture[TX]) {
 			t.Errorf("SetTenantBudget(%s): err = %v, want ErrInvalidAmount", ceiling, err)
 		}
 	}
-	listed, _, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{})
+	listedPage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{})
+	listed := listedPage.Items
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -970,7 +971,7 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 		"a threshold past 100%": {ThresholdPct: 101},
 		"a negative threshold":  {ThresholdPct: -1},
 	} {
-		if _, _, err := f.Usage.ListTenantBudgets(f.listCtx(), req); !errors.Is(err, limes.ErrInvalidRequest) {
+		if _, err := f.Usage.ListTenantBudgets(f.listCtx(), req); !errors.Is(err, limes.ErrInvalidRequest) {
 			t.Errorf("ListTenantBudgets with %s: err = %v, want ErrInvalidRequest", name, err)
 		}
 	}
@@ -990,7 +991,8 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 	var order []limes.TenantBudgetSummary
 	cursor := ""
 	for {
-		page, next, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Limit: 1, Cursor: cursor})
+		pagePage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Limit: 1, Cursor: cursor})
+		page, next := pagePage.Items, pagePage.Next
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1015,11 +1017,13 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 		}
 	}
 	const half = 50
-	risky, _, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{ThresholdPct: half})
+	riskyPage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{ThresholdPct: half})
+	risky := riskyPage.Items
 	if err != nil || len(risky) != 1 || risky[0].TenantID != f.Tenant || risky[0].UtilisationPct != half {
 		t.Errorf("tenants at 50%% or more = %+v, %v; want only %s at 50%%", risky, err, f.Tenant)
 	}
-	unl, _, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{UnlimitedOnly: true})
+	unlPage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{UnlimitedOnly: true})
+	unl := unlPage.Items
 	if err != nil || slices.ContainsFunc(unl, func(s limes.TenantBudgetSummary) bool { return s.TenantID == f.Tenant }) ||
 		!slices.ContainsFunc(unl, func(s limes.TenantBudgetSummary) bool { return s.TenantID == unlimited }) {
 		t.Errorf("unlimited tenants = %+v, %v; want %s and not %s", unl, err, unlimited, f.Tenant)

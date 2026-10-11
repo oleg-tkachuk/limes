@@ -278,8 +278,8 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 	if b, err := usage.GetTenantBudget(ctx, tenant); err != nil || b.SpentAmount != limes.NanosPerUnit {
 		t.Errorf("GetTenantBudget = %+v, %v", b, err)
 	}
-	if l, _, err := usage.ListTenantBudgets(ctx, limes.ListTenantBudgetsRequest{}); err != nil || len(l) != 1 {
-		t.Errorf("ListTenantBudgets = %+v, %v", l, err)
+	if lPage, err := usage.ListTenantBudgets(ctx, limes.ListTenantBudgetsRequest{}); err != nil || len(lPage.Items) != 1 {
+		t.Errorf("ListTenantBudgets = %+v, %v", lPage, err)
 	}
 	if c, err := usage.GetCharge(ctx, receipt.ChargeID); err != nil || c.Refunded != limes.NanosPerUnit {
 		t.Errorf("GetCharge = %+v, %v", c, err)

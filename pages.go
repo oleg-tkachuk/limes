@@ -6,6 +6,14 @@ import (
 	"iter"
 )
 
+// Page is one page of a list: its items, and the cursor that fetches the
+// next page — empty on the last one. The cursor is the store's own, opaque
+// to the caller.
+type Page[T any] struct {
+	Items []T
+	Next  string
+}
+
 // ErrCursorRepeated is a page that hands back the cursor it was fetched with.
 // Following it would fetch the same page forever, so the walk stops there.
 var ErrCursorRepeated = errors.New("limes: a page returned the cursor it was fetched with")
@@ -13,17 +21,15 @@ var ErrCursorRepeated = errors.New("limes: a page returned the cursor it was fet
 // CapabilityLister lists a principal's capabilities a page at a time. Every
 // Store is one.
 type CapabilityLister interface {
-	// ListByPrincipal returns one page and the cursor of the next, empty
-	// on the last page (Store.ListByPrincipal).
-	ListByPrincipal(ctx context.Context, req ListByPrincipalRequest) ([]Capability, string, error)
+	// ListByPrincipal returns one page (Store.ListByPrincipal).
+	ListByPrincipal(ctx context.Context, req ListByPrincipalRequest) (Page[Capability], error)
 }
 
 // TenantBudgetLister lists tenant budgets a page at a time. Every
 // TenantBudgets is one.
 type TenantBudgetLister interface {
-	// ListTenantBudgets returns one page and the cursor of the next,
-	// empty on the last page (TenantBudgets.ListTenantBudgets).
-	ListTenantBudgets(ctx context.Context, req ListTenantBudgetsRequest) ([]TenantBudgetSummary, string, error)
+	// ListTenantBudgets returns one page (TenantBudgets.ListTenantBudgets).
+	ListTenantBudgets(ctx context.Context, req ListTenantBudgetsRequest) (Page[TenantBudgetSummary], error)
 }
 
 // AllByPrincipal walks ListByPrincipal page by page, from req.Cursor, and
@@ -36,7 +42,7 @@ type TenantBudgetLister interface {
 // client — and this is for a caller that wants the whole list in one go.
 func AllByPrincipal(ctx context.Context, l CapabilityLister, req ListByPrincipalRequest) iter.Seq2[Capability, error] {
 	return func(yield func(Capability, error) bool) {
-		walkPages(ctx, req.Cursor, func(ctx context.Context, cursor string) ([]Capability, string, error) {
+		walkPages(ctx, req.Cursor, func(ctx context.Context, cursor string) (Page[Capability], error) {
 			req.Cursor = cursor
 			return l.ListByPrincipal(ctx, req)
 		}, yield)
@@ -49,7 +55,7 @@ func AllByPrincipal(ctx context.Context, l CapabilityLister, req ListByPrincipal
 // TenantBudgets.ListTenantBudgets.
 func AllTenantBudgets(ctx context.Context, l TenantBudgetLister, req ListTenantBudgetsRequest) iter.Seq2[TenantBudgetSummary, error] {
 	return func(yield func(TenantBudgetSummary, error) bool) {
-		walkPages(ctx, req.Cursor, func(ctx context.Context, cursor string) ([]TenantBudgetSummary, string, error) {
+		walkPages(ctx, req.Cursor, func(ctx context.Context, cursor string) (Page[TenantBudgetSummary], error) {
 			req.Cursor = cursor
 			return l.ListTenantBudgets(ctx, req)
 		}, yield)
@@ -61,7 +67,7 @@ func AllTenantBudgets(ctx context.Context, l TenantBudgetLister, req ListTenantB
 func walkPages[T any](
 	ctx context.Context,
 	cursor string,
-	page func(ctx context.Context, cursor string) ([]T, string, error),
+	page func(ctx context.Context, cursor string) (Page[T], error),
 	yield func(T, error) bool,
 ) {
 	var zero T
@@ -70,12 +76,13 @@ func walkPages[T any](
 			yield(zero, err)
 			return
 		}
-		items, next, err := page(ctx, cursor)
+		p, err := page(ctx, cursor)
 		if err != nil {
 			yield(zero, err)
 			return
 		}
-		for _, item := range items {
+		next := p.Next
+		for _, item := range p.Items {
 			if !yield(item, nil) {
 				return
 			}

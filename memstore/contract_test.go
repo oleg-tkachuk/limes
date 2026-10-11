@@ -111,7 +111,7 @@ type recordingUsage struct {
 	r *listRecorder
 }
 
-func (u *recordingUsage) ListTenantBudgets(ctx context.Context, req limes.ListTenantBudgetsRequest) ([]limes.TenantBudgetSummary, string, error) {
+func (u *recordingUsage) ListTenantBudgets(ctx context.Context, req limes.ListTenantBudgetsRequest) (limes.Page[limes.TenantBudgetSummary], error) {
 	if ctx.Value(listScope{}) != nil {
 		u.r.inside.Add(1)
 	} else {

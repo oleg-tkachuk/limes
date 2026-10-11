@@ -50,7 +50,8 @@ func TestListTenantBudgets(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, _, err := u.ListTenantBudgets(ctx, tc.req)
+			gotPage, err := u.ListTenantBudgets(ctx, tc.req)
+			got := gotPage.Items
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -68,7 +69,8 @@ func TestListTenantBudgets(t *testing.T) {
 			}
 		})
 	}
-	got, _, _ := u.ListTenantBudgets(ctx, limes.ListTenantBudgetsRequest{Limit: 1})
+	page, _ := u.ListTenantBudgets(ctx, limes.ListTenantBudgetsRequest{Limit: 1})
+	got := page.Items
 	if got[0].UtilisationPct != maxUtilisationPct {
 		t.Errorf("a tenant past its ceiling reads %v%%, want %d%%", got[0].UtilisationPct, maxUtilisationPct)
 	}
@@ -121,7 +123,8 @@ func TestListTenantBudgetsPages(t *testing.T) {
 	var got []uuid.UUID
 	req := limes.ListTenantBudgetsRequest{Limit: pageSize}
 	for pages := 0; ; pages++ {
-		page, next, err := u.ListTenantBudgets(ctx, req)
+		pagePage, err := u.ListTenantBudgets(ctx, req)
+		page, next := pagePage.Items, pagePage.Next
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -152,7 +155,7 @@ func TestListTenantBudgetsPages(t *testing.T) {
 	}
 
 	for _, bad := range []string{"garbage", limes.TenantBudgetCursor{Utilisation: "x", TenantID: half}.Encode()} {
-		if _, _, err := u.ListTenantBudgets(ctx, limes.ListTenantBudgetsRequest{Cursor: bad}); !errors.Is(err, limes.ErrInvalidRequest) {
+		if _, err := u.ListTenantBudgets(ctx, limes.ListTenantBudgetsRequest{Cursor: bad}); !errors.Is(err, limes.ErrInvalidRequest) {
 			t.Errorf("cursor %q: err = %v, want ErrInvalidRequest", bad, err)
 		}
 	}

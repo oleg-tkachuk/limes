@@ -75,8 +75,8 @@ func (m *memStore) RevokeBiscuit(_ context.Context, args RevokeBiscuitRequest) e
 func (m *memStore) PurgeExpired(context.Context, time.Duration) (int64, error) {
 	return 0, nil
 }
-func (m *memStore) ListByPrincipal(context.Context, ListByPrincipalRequest) ([]Capability, string, error) {
-	return nil, "", nil
+func (m *memStore) ListByPrincipal(context.Context, ListByPrincipalRequest) (Page[Capability], error) {
+	return Page[Capability]{}, nil
 }
 
 // buildIssuerVerifier wires a fresh keypair, signer, store, cache, and
