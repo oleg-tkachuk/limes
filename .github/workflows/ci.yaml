@@ -139,7 +139,7 @@ jobs:
           # Its cache lives in the Go caches above.
           skip-cache: true
 
-      # verify:release-rules runs the pinned commit analyzer against
+      # verify:release-rules runs the pinned commit analyzer and notes generator against
       # release.config.cjs. Node 24, as release.yaml runs it.
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0

@@ -112,19 +112,26 @@ jobs:
         run: npx semantic-release --no-ci
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # release-notes-file.cjs writes the notes generated from the
+          # commits here, breaking changes first.
+          RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes.md
 
       # Read from git rather than parsing semantic-release's prose. A tag on
       # HEAD with no release, left by a run that failed after pushing it, is
       # published by a re-run — see .github/scripts/new-release-tag.sh.
       #
-      # Notes for people, built from merged pull requests and shaped by
-      # .github/release.yml. Then the Go proxy is told of the tag, so
+      # Notes for people: the ones semantic-release generated from the
+      # commits — breaking changes first, whatever the pull requests' labels —
+      # then GitHub's list of merged pull requests, shaped by
+      # .github/release.yml. A re-run publishing an earlier run's tag has no
+      # generated notes and gets the list alone. Then the Go proxy is told of the tag, so
       # `go get …@latest` and the README's badge see it now rather than
       # whenever the proxy next refreshes; the release stands without it.
       - name: Publish the release
         if: steps.head.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes.md
         run: |
           set -euo pipefail
           tag="$(./.github/scripts/new-release-tag.sh "$RUNNER_TEMP/tags-before")"
@@ -132,6 +139,10 @@ jobs:
             printf '%s\n' "no new tag from this run — no release was due"
             exit 0
           fi
-          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --generate-notes --verify-tag
+          notes=()
+          if [ -s "$RELEASE_NOTES_FILE" ]; then
+            notes=(--notes-file "$RELEASE_NOTES_FILE")
+          fi
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --generate-notes --verify-tag "${notes[@]}"
           ./.github/scripts/warm-go-proxy.sh "$tag" ||
             echo "::warning::the Go proxy did not take $tag yet; it will on its own"

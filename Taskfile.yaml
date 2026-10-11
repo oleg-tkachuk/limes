@@ -72,12 +72,13 @@ tasks:
         cmd: bash .github/scripts/{{.ITEM}}.test.sh
 
   verify:release-rules:
-    desc: "Fail when a commit type cuts a different release than it should"
+    desc: "Fail when a commit type cuts a different release than it should, or a breaking change is missing from the notes"
     preconditions:
       - sh: test -d .github/release/node_modules/@semantic-release/commit-analyzer
         msg: "the release tooling is not installed — npm ci --ignore-scripts --prefix .github/release"
     cmds:
       - node .github/release/release-rules.test.mjs
+      - node .github/release/release-notes.test.mjs
 
   example:
     desc: "Run the quickstart walkthrough end to end"
