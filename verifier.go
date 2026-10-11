@@ -118,11 +118,11 @@ type VerifierConfig struct {
 	Now func() time.Time
 
 	// Leeway widens the nbf / exp window to absorb clock skew between
-	// issuer and verifier. Default 30s when zero.
+	// issuer and verifier. Default 30s when zero; negative is refused.
 	Leeway time.Duration
 
 	// MaxTokenBytes rejects longer tokens before decoding them. Default
-	// DefaultMaxTokenBytes when zero.
+	// DefaultMaxTokenBytes when zero; negative is refused.
 	MaxTokenBytes int
 
 	// AcceptBiscuit accepts the Biscuit form (Issuer.Biscuit, Attenuate)
@@ -229,6 +229,12 @@ func NewStandardVerifier(cfg VerifierConfig) (*StandardVerifier, error) {
 			dpop.Now = cfg.Now
 		}
 		cfg.DPoP = &dpop
+	}
+	if cfg.Leeway < 0 {
+		return nil, fmt.Errorf("limes: VerifierConfig.Leeway %s is negative", cfg.Leeway)
+	}
+	if cfg.MaxTokenBytes < 0 {
+		return nil, fmt.Errorf("limes: VerifierConfig.MaxTokenBytes %d is negative", cfg.MaxTokenBytes)
 	}
 	if cfg.Leeway == 0 {
 		cfg.Leeway = defaultLeeway

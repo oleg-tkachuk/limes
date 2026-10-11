@@ -49,7 +49,7 @@ type IssuerConfig struct {
 
 	// DefaultTTL caps the lifetime when IssueRequest.TTL is zero.
 	// Default 15 minutes when zero — short enough that revocation
-	// propagation latency rarely matters.
+	// propagation latency rarely matters. Negative is refused.
 	DefaultTTL time.Duration
 
 	// Now is the clock; tests override.
@@ -66,6 +66,9 @@ func NewIssuer(cfg IssuerConfig) (*Issuer, error) {
 	}
 	if cfg.IssuerName == "" {
 		return nil, errors.New("limes: IssuerConfig.IssuerName required")
+	}
+	if cfg.DefaultTTL < 0 {
+		return nil, fmt.Errorf("limes: IssuerConfig.DefaultTTL %s is negative", cfg.DefaultTTL)
 	}
 	if cfg.DefaultTTL == 0 {
 		cfg.DefaultTTL = defaultIssueTTL
