@@ -51,6 +51,10 @@ type Env[TX any] struct {
 	// Advance moves the store's clock forward by d. Optional: without it,
 	// the checks of reservation expiry are skipped.
 	Advance func(d time.Duration)
+	// DeleteCapability removes a capability's record, as Store.Purge does
+	// once it has expired. Optional: without it, the check of PurgeOrphans
+	// is skipped.
+	DeleteCapability func(id uuid.UUID) error
 	// NewTenant creates another tenant the store can charge, for the checks
 	// that need more than one. Optional: without it, a random id, which a
 	// store that refers to its tenants refuses.
@@ -193,6 +197,9 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"TenantBudgetReadsAgree", checkTenantBudgetReads[TX]},
 		{"ReservationsReadBack", checkReservations[TX]},
 		{"SumsExactly", checkSumsExactly[TX]},
+		{"ReservationsPage", checkReservationsPage[TX]},
+		{"HousekeepingRefusesANegativeLimit", checkHousekeepingLimits[TX]},
+		{"PurgeOrphansReleasesWhatARemovedCapabilityHeld", checkPurgeOrphans[TX]},
 	}
 	for _, c := range checks {
 		t.Run(c.name, func(t *testing.T) { c.run(t, newFixture(t, setup)) })
@@ -443,7 +450,7 @@ func checkSettle[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil || !again.Replayed || !again.Overrun || again.ChargeID != r.ChargeID || again.Spent != 24*one {
 		t.Errorf("settling again = %+v, %v; want a replay of %s", again, err, r.ChargeID)
 	}
-	if err := f.Usage.Release(f.Ctx, res.ID); err != nil {
+	if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{ReservationID: res.ID}); err != nil {
 		t.Errorf("releasing a settled reservation: %v", err)
 	}
 	other, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
@@ -452,7 +459,7 @@ func checkSettle[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil {
 		t.Fatalf("reserve nothing: %v", err)
 	}
-	if err := f.Usage.Release(f.Ctx, other.ID); err != nil {
+	if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{ReservationID: other.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{ReservationID: other.ID, Amount: 0}, nil); !errors.Is(err, limes.ErrReservationNotFound) {
@@ -674,12 +681,12 @@ func checkReservations[TX any](t *testing.T, f fixture[TX]) {
 	}
 	list := func(capID uuid.UUID) []uuid.UUID {
 		t.Helper()
-		rs, err := f.Usage.ListReservations(f.Ctx, capID)
+		rs, err := f.Usage.ListReservations(f.Ctx, limes.ListReservationsRequest{CapabilityID: capID})
 		if err != nil {
 			t.Fatalf("ListReservations: %v", err)
 		}
 		ids := []uuid.UUID{}
-		for _, r := range rs {
+		for _, r := range rs.Items {
 			ids = append(ids, r.ID)
 		}
 		return ids
@@ -694,7 +701,7 @@ func checkReservations[TX any](t *testing.T, f fixture[TX]) {
 	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{ReservationID: first.ID, Amount: held, MaxBudget: childBudget}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.Usage.Release(f.Ctx, second.ID); err != nil {
+	if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{ReservationID: second.ID}); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []uuid.UUID{first.ID, second.ID, uuid.New()} {
@@ -869,7 +876,8 @@ func checkCallbackRollback[TX any](t *testing.T, f fixture[TX]) {
 func checkBump[TX any](t *testing.T, f fixture[TX]) {
 	const limit = 2
 	bump := func() (int64, error) {
-		return f.Usage.Bump(f.Ctx, limes.BumpRequest{CapabilityID: f.child, TenantID: f.Tenant, MaxRequests: limit})
+		r, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{CapabilityID: f.child, TenantID: f.Tenant, MaxRequests: limit})
+		return r.Requests, err
 	}
 	for want := int64(1); want <= limit; want++ {
 		if n, err := bump(); err != nil || n != want {
@@ -955,8 +963,8 @@ func checkExpiry[TX any](t *testing.T, f fixture[TX]) {
 	if _, err := f.charge(limes.ChargeRequest{Amount: 10 * one}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Errorf("before ReleaseExpired the hold still counts: err = %v, want ErrBudgetExceeded", err)
 	}
-	if n, err := f.Usage.ReleaseExpired(f.Ctx); err != nil || n != 1 {
-		t.Fatalf("ReleaseExpired = %d, %v; want 1", n, err)
+	if r, err := f.Usage.ReleaseExpired(f.Ctx, limes.ReleaseExpiredRequest{}); err != nil || r.Released != 1 {
+		t.Fatalf("ReleaseExpired = %+v, %v; want 1 released", r, err)
 	}
 	if _, err := f.charge(limes.ChargeRequest{Amount: 10 * one}, nil); err != nil {
 		t.Errorf("after ReleaseExpired: %v", err)
@@ -1027,5 +1035,82 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil || slices.ContainsFunc(unl, func(s limes.TenantBudgetSummary) bool { return s.TenantID == f.Tenant }) ||
 		!slices.ContainsFunc(unl, func(s limes.TenantBudgetSummary) bool { return s.TenantID == unlimited }) {
 		t.Errorf("unlimited tenants = %+v, %v; want %s and not %s", unl, err, unlimited, f.Tenant)
+	}
+}
+
+// checkReservationsPage holds a store to paging a capability's reservations
+// in their order, and to refusing a negative page size.
+func checkReservationsPage[TX any](t *testing.T, f fixture[TX]) {
+	const holds = 3
+	var want []uuid.UUID
+	for i := range holds {
+		r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
+			CapabilityID: f.child, TenantID: f.Tenant, Amount: one, MaxBudget: childBudget, UnitCode: unit,
+			TTL: time.Duration(i+1) * time.Minute,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want = append(want, r.ID)
+	}
+	var got []uuid.UUID
+	cursor := ""
+	for range holds + 1 {
+		page, err := f.Usage.ListReservations(f.Ctx, limes.ListReservationsRequest{CapabilityID: f.child, Limit: 1, Cursor: cursor})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range page.Items {
+			got = append(got, r.ID)
+		}
+		if page.Next == "" {
+			break
+		}
+		cursor = page.Next
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("paged one at a time, the holds = %v, want %v soonest first", got, want)
+	}
+	if _, err := f.Usage.ListReservations(f.Ctx, limes.ListReservationsRequest{CapabilityID: f.child, Limit: -1}); !errors.Is(err, limes.ErrInvalidRequest) {
+		t.Errorf("ListReservations with a negative limit: err = %v, want ErrInvalidRequest", err)
+	}
+}
+
+// checkHousekeepingLimits holds a store to refusing a negative batch.
+func checkHousekeepingLimits[TX any](t *testing.T, f fixture[TX]) {
+	if _, err := f.Usage.ReleaseExpired(f.Ctx, limes.ReleaseExpiredRequest{Limit: -1}); !errors.Is(err, limes.ErrInvalidRequest) {
+		t.Errorf("ReleaseExpired with a negative limit: err = %v, want ErrInvalidRequest", err)
+	}
+	if _, err := f.Usage.PurgeOrphans(f.Ctx, limes.PurgeOrphansRequest{Limit: -1}); !errors.Is(err, limes.ErrInvalidRequest) {
+		t.Errorf("PurgeOrphans with a negative limit: err = %v, want ErrInvalidRequest", err)
+	}
+}
+
+// checkPurgeOrphans holds a store to deleting the usage of a capability no
+// longer on record, and to returning what it held to its ancestor.
+func checkPurgeOrphans[TX any](t *testing.T, f fixture[TX]) {
+	if f.DeleteCapability == nil {
+		t.Skip("Env.DeleteCapability not set")
+	}
+	if _, err := f.charge(limes.ChargeRequest{Amount: one}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
+		CapabilityID: f.child, TenantID: f.Tenant, Amount: one, MaxBudget: childBudget, UnitCode: unit,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.DeleteCapability(f.child); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.Usage.PurgeOrphans(f.Ctx, limes.PurgeOrphansRequest{})
+	if err != nil || got.Purged < 1 {
+		t.Fatalf("PurgeOrphans = %+v, %v; want the removed capability's row", got, err)
+	}
+	if _, err := f.Usage.GetUsage(f.Ctx, f.child); !errors.Is(err, limes.ErrUsageNotFound) {
+		t.Errorf("the removed capability's usage outlived PurgeOrphans: %v", err)
+	}
+	if u, err := f.Usage.GetUsage(f.Ctx, f.root); err != nil || u.ReservedAmount != 0 {
+		t.Errorf("the root still holds %v for its removed child, %v; want 0", u.ReservedAmount, err)
 	}
 }

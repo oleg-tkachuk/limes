@@ -2,11 +2,8 @@ package limes
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 	"time"
 	"unicode"
 
@@ -14,11 +11,13 @@ import (
 )
 
 // UsageStore is everything a consumer implements for runtime accounting. It
-// is the union of three narrower contracts so that code which only meters
-// (an interceptor, a handler) can depend on Meter alone, and code which only
-// administers tenant ceilings can depend on TenantBudgets alone.
+// is the union of narrower contracts so that code which only meters (an
+// interceptor, a handler) can depend on Meter alone, a reporter on
+// MeterReader, and code which only administers tenant ceilings on
+// TenantBudgets.
 type UsageStore[TX any] interface {
 	Meter[TX]
+	MeterReader
 	TenantBudgets
 	UsageHousekeeping
 }
@@ -57,7 +56,7 @@ type Meter[TX any] interface {
 	// each ancestor, and returns the capability's new count. When any
 	// ceiling in the chain would be crossed it returns
 	// ErrRequestLimitExceeded and nothing is mutated.
-	Bump(ctx context.Context, req BumpRequest) (newCount int64, err error)
+	Bump(ctx context.Context, req BumpRequest) (BumpReceipt, error)
 
 	// Charge adds req.Amount to the spend counters of the capability, of
 	// each ancestor and of the tenant aggregate, writes one charges-ledger
@@ -133,6 +132,14 @@ type Meter[TX any] interface {
 	// does the zero id, which names none — never a direct charge.
 	Settle(ctx context.Context, req SettleRequest, onCharged func(ctx context.Context, tx TX) error) (ChargeReceipt, error)
 
+	// Release ends a reservation without charging. Idempotent: releasing
+	// one that is gone is a no-op.
+	Release(ctx context.Context, req ReleaseRequest) error
+}
+
+// MeterReader reads back what the Meter recorded: charges, reservations and
+// counters. A reporter or an admin view depends on it alone.
+type MeterReader interface {
 	// GetCharge returns one charge of the ledger, by the ChargeID its
 	// receipt carried — the id Refund takes. ErrChargeNotFound when there
 	// is none.
@@ -149,14 +156,11 @@ type Meter[TX any] interface {
 	// is settled or released.
 	GetReservation(ctx context.Context, reservationID uuid.UUID) (Reservation, error)
 
-	// ListReservations returns every reservation GetReservation would
-	// return that was made against the capability itself — not its
-	// delegated children — soonest to expire first.
-	ListReservations(ctx context.Context, capID uuid.UUID) ([]Reservation, error)
-
-	// Release ends a reservation without charging. Idempotent: releasing
-	// one that is gone is a no-op.
-	Release(ctx context.Context, reservationID uuid.UUID) error
+	// ListReservations returns, a page at a time, every reservation
+	// GetReservation would return that was made against the capability
+	// itself — not its delegated children — soonest to expire first. It
+	// refuses what ListReservationsRequest.Validate refuses.
+	ListReservations(ctx context.Context, req ListReservationsRequest) (Page[Reservation], error)
 
 	// GetUsage returns the current snapshot. Returns ErrUsageNotFound when no
 	// row exists for the capability — typically means it's never been
@@ -212,16 +216,17 @@ type UsageHousekeeping interface {
 	// them afterwards.
 	Delete(ctx context.Context, capID uuid.UUID) error
 
-	// PurgeOrphans deletes usage rows whose capability record no longer
-	// exists, releasing their reservations as Delete does. Implementations may bound the work per call; the caller
-	// loops until it returns 0.
-	PurgeOrphans(ctx context.Context) (int64, error)
+	// PurgeOrphans deletes the usage rows of capabilities no longer on
+	// record (Store.Purge), releasing their reservations as Delete does, at
+	// most req.Limit of them; the caller loops while a batch comes back
+	// full.
+	PurgeOrphans(ctx context.Context, req PurgeOrphansRequest) (PurgeOrphansResult, error)
 
-	// ReleaseExpired releases every reservation past its expiry and
-	// returns how many it released. Run on a timer: until it runs, an
-	// expired hold keeps counting against the ceilings, which errs towards
-	// refusing spend, never towards allowing too much.
-	ReleaseExpired(ctx context.Context) (int64, error)
+	// ReleaseExpired releases the reservations past their expiry, at most
+	// req.Limit of them. Run on a timer: until it runs, an expired hold
+	// keeps counting against the ceilings, which errs towards refusing
+	// spend, never towards allowing too much.
+	ReleaseExpired(ctx context.Context, req ReleaseExpiredRequest) (ReleaseExpiredResult, error)
 }
 
 // BumpRequest is the input to Meter.Bump.
@@ -486,45 +491,6 @@ func (r ListTenantBudgetsRequest) Validate() error {
 	return nil
 }
 
-// TenantBudgetCursor is a place in ListTenantBudgets' order: the last row's
-// utilisation, in the decimal text its store computed it in, and tenant id.
-type TenantBudgetCursor struct {
-	Utilisation string
-	TenantID    uuid.UUID
-}
-
-// tenantBudgetCursorSep separates the cursor's two fields; neither a decimal
-// nor a uuid contains it.
-const tenantBudgetCursorSep = "|"
-
-// Encode is the cursor as ListTenantBudgets hands it out: opaque, URL-safe.
-func (c TenantBudgetCursor) Encode() string {
-	return base64.RawURLEncoding.EncodeToString([]byte(c.Utilisation + tenantBudgetCursorSep + c.TenantID.String()))
-}
-
-// DecodeTenantBudgetCursor reads a cursor Encode wrote. Anything else is an
-// ErrInvalidRequest.
-func DecodeTenantBudgetCursor(s string) (TenantBudgetCursor, error) {
-	raw, err := base64.RawURLEncoding.DecodeString(s)
-	if err != nil {
-		return TenantBudgetCursor{}, invalidRequest("tenant budget cursor %q", s)
-	}
-	pct, id, ok := strings.Cut(string(raw), tenantBudgetCursorSep)
-	if !ok || pct == "" {
-		return TenantBudgetCursor{}, invalidRequest("tenant budget cursor %q", s)
-	}
-	// A utilisation is a finite, non-negative decimal: NaN and the
-	// infinities, or a hex float, would order differently in every store.
-	if v, err := strconv.ParseFloat(pct, 64); err != nil || !decimalAmount.MatchString(pct) || v < 0 {
-		return TenantBudgetCursor{}, invalidRequest("tenant budget cursor %q", s)
-	}
-	tenant, err := uuid.Parse(id)
-	if err != nil {
-		return TenantBudgetCursor{}, invalidRequest("tenant budget cursor %q", s)
-	}
-	return TenantBudgetCursor{Utilisation: pct, TenantID: tenant}, nil
-}
-
 // Usage is the snapshot view of a capability's runtime counters.
 type Usage struct {
 	CapabilityID uuid.UUID
@@ -632,4 +598,63 @@ func ValidateExternalRef(ref string) error {
 		}
 	}
 	return nil
+}
+
+// BumpReceipt is what a Bump counted.
+type BumpReceipt struct {
+	// Requests is the capability's request count after this one.
+	Requests int64
+}
+
+// ReleaseRequest names the reservation to release.
+type ReleaseRequest struct {
+	ReservationID uuid.UUID
+}
+
+// ListReservationsRequest asks for one page of a capability's reservations.
+type ListReservationsRequest struct {
+	CapabilityID uuid.UUID
+	// Limit is the page size; see PageLimit. Negative is refused.
+	Limit int32
+	// Cursor is the one the previous page returned; empty for the first.
+	Cursor string
+}
+
+// Validate refuses a request with no capability or a negative page size.
+func (r ListReservationsRequest) Validate() error {
+	switch {
+	case r.CapabilityID == uuid.Nil:
+		return invalidRequest("list reservations: capability id required")
+	case r.Limit < 0:
+		return invalidRequest("list reservations: limit %d is negative", r.Limit)
+	}
+	return nil
+}
+
+// DefaultHousekeepingLimit is how many rows one housekeeping batch handles
+// when the request names no limit.
+const DefaultHousekeepingLimit = 1_000
+
+// PurgeOrphansRequest is one batch of UsageHousekeeping.PurgeOrphans.
+type PurgeOrphansRequest struct {
+	// Limit bounds the rows deleted. Zero: DefaultHousekeepingLimit;
+	// negative is refused.
+	Limit int
+}
+
+// PurgeOrphansResult is what one PurgeOrphans deleted.
+type PurgeOrphansResult struct {
+	Purged int64
+}
+
+// ReleaseExpiredRequest is one batch of UsageHousekeeping.ReleaseExpired.
+type ReleaseExpiredRequest struct {
+	// Limit bounds the reservations released. Zero:
+	// DefaultHousekeepingLimit; negative is refused.
+	Limit int
+}
+
+// ReleaseExpiredResult is what one ReleaseExpired released.
+type ReleaseExpiredResult struct {
+	Released int64
 }

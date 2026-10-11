@@ -45,7 +45,7 @@ flowchart LR
     subgraph contracts ["contracts the consumer implements"]
         direction TB
         store["<b>Store</b> = IssuanceStore + admin<br/>Insert · IsRevoked · GetRecord · Revoke<br/>Purge · ListByPrincipal"]
-        usage["<b>UsageStore[TX]</b><br/>Meter[TX]: Bump · Charge · Reserve · Settle · Refund · Release<br/>GetUsage · GetCharge · ChargeByRef · GetReservation · ListReservations<br/>TenantBudgets · UsageHousekeeping"]
+        usage["<b>UsageStore[TX]</b><br/>Meter[TX]: Bump · Charge · Reserve · Settle · Refund · Release<br/>MeterReader: GetUsage · GetCharge · ChargeByRef · GetReservation · ListReservations<br/>TenantBudgets · UsageHousekeeping"]
         keys["<b>KeyResolver</b><br/>PublicKey(kid)"]
         brev["<b>BiscuitRevocationStore</b><br/>IsBiscuitRevoked · RevokeBiscuit<br/>GetBiscuitRevocation"]
         cusage["<b>CopyUsageReader</b><br/>CopyUsage(revocation ids)"]
@@ -97,7 +97,7 @@ flowchart LR
     class jwks,otel external
 ```
 
-Every read names what it reads — `Store.Get`, `Meter.GetUsage`,
+Every read names what it reads — `Store.GetRecord`, `MeterReader.GetUsage`,
 `TenantBudgets.GetTenantBudget` — so one type may implement `Store` and
 `UsageStore` together, or each apart as `memstore` does. `TX` is the
 consumer's transaction handle; the module only threads it back through

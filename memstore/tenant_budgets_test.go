@@ -154,7 +154,7 @@ func TestListTenantBudgetsPages(t *testing.T) {
 		t.Fatalf("AllTenantBudgets walked %v, want %v", walked, want)
 	}
 
-	for _, bad := range []string{"garbage", limes.TenantBudgetCursor{Utilisation: "x", TenantID: half}.Encode()} {
+	for _, bad := range []string{"garbage", tenantBudgetCursor{utilisation: "x", tenantID: half}.encode()} {
 		if _, err := u.ListTenantBudgets(ctx, limes.ListTenantBudgetsRequest{Cursor: bad}); !errors.Is(err, limes.ErrInvalidRequest) {
 			t.Errorf("cursor %q: err = %v, want ErrInvalidRequest", bad, err)
 		}

@@ -423,7 +423,8 @@ tenant's — exactly as spend does, so two callers cannot both hold the last
 budget. `Settle` charges the actual cost in place of the hold; above the hold,
 the excess must fit, or the hold stays for you to settle lower or `Release`.
 A hold never settled lapses after its TTL (`DefaultReservationTTL`, five
-minutes, unless the request says): run `ReleaseExpired` on a timer. Settling
+minutes, unless the request says): run `ReleaseExpired` on a timer, again
+while a batch comes back full (`DefaultHousekeepingLimit` unless set). Settling
 the zero reservation id is `ErrReservationNotFound`. The receipt names the
 charge's tenant and unit, on a refusal too, so a caller holding only the
 reservation id can attribute it.
@@ -568,7 +569,7 @@ Implement these and you are done:
 | `Store` = `IssuanceStore` + admin | Capability records + revocations; an `Issuer` needs only `IssuanceStore` (`Insert`, `IsRevoked`) | No |
 | `BiscuitRevocationStore` | Revoked Biscuit copies (only if you accept Biscuits) | No |
 | `CopyUsageReader` | Reads Biscuit copies' own counters (only to show them) | No |
-| `UsageStore[TX]` = `Meter[TX]` + `TenantBudgets` + `UsageHousekeeping` | Request and spend counters, the charges ledger, tenant ceilings; `Delete` and `PurgeOrphans` release a reaped capability's holds | Only for atomic side effects |
+| `UsageStore[TX]` = `Meter[TX]` + `MeterReader` + `TenantBudgets` + `UsageHousekeeping` | Request and spend counters, the charges ledger, tenant ceilings; `Delete` and `PurgeOrphans` release a reaped capability's holds | Only for atomic side effects |
 | `KeyResolver` | Public verification keys | No |
 | `dpop.ReplayCache` | DPoP proof ids seen, per key: `Seen(ctx, dpop.ReplayEntry)` reports a key past its share as seen, and returns an error when its store cannot answer — an outage, not a refused proof (only for key-bound tokens; `dpop.MemoryReplayCache` ships for one process — behind several replicas, implement it over a shared store) | No |
 | `dpop.Nonces` | Server-provided DPoP nonces (optional; `dpop.HMACNonces` ships and needs no store) | No |
@@ -587,8 +588,8 @@ missing tenant id, an empty audience entry, a negative TTL, a malformed
 thumbprint, invalid caveats. Anything else they return is the store's or the
 signer's failure, not the caller's.
 
-Every input is a `…Request` and every read names what it reads (`Get`,
-`GetUsage`, `GetTenantBudget`), so one type may implement `Store` and
+Every input is a `…Request`, every list a `Page`, and every read names what
+it reads (`GetRecord`, `GetUsage`, `GetTenantBudget`), so one type may implement `Store` and
 `UsageStore` together, or each apart as `memstore` does.
 
 `UsageStore` is generic in `TX` — *your* transaction type. Have none?

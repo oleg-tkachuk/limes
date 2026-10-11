@@ -88,10 +88,10 @@ func TestReleaseAndExpiryFreeTheHold(t *testing.T) {
 	ctx := context.Background()
 	u, capID, tenant, now := reservationFixture(t)
 	r, _ := u.Reserve(ctx, limes.ReserveRequest{CapabilityID: capID, TenantID: tenant, Amount: limes.MustParseAmount("4"), MaxBudget: limes.MustParseAmount("10")})
-	if err := u.Release(ctx, r.ID); err != nil {
+	if err := u.Release(ctx, limes.ReleaseRequest{ReservationID: r.ID}); err != nil {
 		t.Fatal(err)
 	}
-	if err := u.Release(ctx, r.ID); err != nil {
+	if err := u.Release(ctx, limes.ReleaseRequest{ReservationID: r.ID}); err != nil {
 		t.Fatalf("repeated release: %v", err)
 	}
 	if got, _ := u.GetUsage(ctx, capID); got.ReservedAmount != 0 {
@@ -103,8 +103,8 @@ func TestReleaseAndExpiryFreeTheHold(t *testing.T) {
 	if _, err := u.Settle(ctx, limes.SettleRequest{ReservationID: r.ID, Amount: limes.MustParseAmount("1"), MaxBudget: limes.MustParseAmount("10")}, nil); !errors.Is(err, limes.ErrReservationNotFound) {
 		t.Fatalf("settle after expiry: err = %v, want ErrReservationNotFound", err)
 	}
-	if n, _ := u.ReleaseExpired(ctx); n != 1 {
-		t.Fatalf("ReleaseExpired released %d, want 1", n)
+	if r, _ := u.ReleaseExpired(ctx, limes.ReleaseExpiredRequest{}); r.Released != 1 {
+		t.Fatalf("ReleaseExpired released %d, want 1", r.Released)
 	}
 	if got, _ := u.GetUsage(ctx, capID); got.ReservedAmount != 0 {
 		t.Fatalf("held after expiry sweep = %v", got.ReservedAmount)
