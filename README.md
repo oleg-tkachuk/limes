@@ -67,7 +67,7 @@ issuer, _ := limes.NewIssuer(limes.IssuerConfig{
     Signer: signer, Store: records, IssuerName: "my-issuer",
 })
 verifier, _ := limes.NewStandardVerifier(limes.VerifierConfig{
-    Keys:           limes.NewStaticKeyResolver(map[string]ed25519.PublicKey{kid: pub}),
+    Keys:           jwks.NewStatic(map[string]ed25519.PublicKey{kid: pub}),
     Revocations:    records,
     TrustedIssuers: []string{"my-issuer"},
 })
@@ -108,7 +108,7 @@ _, err = usage.Charge(ctx, limes.ChargeRequest{
 
 | Feature | What it does |
 |---|---|
-| **Verify** | Local Ed25519 JWT verification (`alg: Ed25519`, RFC 9864) against a resolved key — static, or an issuer's JWKS fetched by `RemoteJWKSResolver`, which revalidates by ETag and honours `Cache-Control`. Claims are read strictly: no unknown or duplicate member, integers within I-JSON's range. Rejections match sentinel errors (`errors.Is`) in families — `ErrUnauthenticated` over `ErrInvalidToken` and `ErrProofOfPossession` — and kinds that must not tell an attacker which check failed share `ErrInvalidToken`. |
+| **Verify** | Local Ed25519 JWT verification (`alg: Ed25519`, RFC 9864) against a resolved key — static, or an issuer's JWKS fetched by `jwks.Remote`, which revalidates by ETag and honours `Cache-Control`. Claims are read strictly: no unknown or duplicate member, integers within I-JSON's range. Rejections match sentinel errors (`errors.Is`) in families — `ErrUnauthenticated` over `ErrInvalidToken` and `ErrProofOfPossession` — and kinds that must not tell an attacker which check failed share `ErrInvalidToken`. |
 | **Enforce** | `Authorize` verifies and checks every stateless caveat in one call: allowed ops, resource prefixes matched at `/` boundaries (a `.` or `..` segment never matches), idempotency keys for writes, tainted reads, source networks. Request and budget limits are the `Meter`'s. |
 | **Delegate** | `Issuer.Delegate` issues a child that may only be narrower — operations, resources, limits, audience, and a validity window that starts no earlier and ends no later than the parent's; anything wider is `ErrDelegationTooWide`. |
 | **Attenuate offline** | The Biscuit v3 form of a capability can be narrowed by its holder with no key and no network; each copy can get its own limits and be revoked on its own. |

@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/oleg-tkachuk/limes/jwks"
 )
 
 // Issuer mints capabilities. Two responsibilities, in this order:
@@ -352,20 +354,11 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 }
 
 // GenerateEd25519Keypair is a convenience for boot wiring: returns a new
-// Ed25519 keypair plus the kid to publish it under, DeriveKeyID's.
+// Ed25519 keypair plus the kid to publish it under, jwks.KeyID's.
 func GenerateEd25519Keypair() (kid string, pub ed25519.PublicKey, priv ed25519.PrivateKey, err error) {
 	pub, priv, err = ed25519.GenerateKey(nil)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("limes: generate keypair: %w", err)
 	}
-	return DeriveKeyID(pub), pub, priv, nil
-}
-
-// DeriveKeyID is the kid of a key published with none named: its RFC 7638
-// thumbprint. The same key always gets the same kid, wherever it is derived,
-// and two keys never share one.
-func DeriveKeyID(pub ed25519.PublicKey) string {
-	// An Ed25519 key always has a JWK and a thumbprint; nothing here fails.
-	thumb, _ := DPoPJWK{Kty: jwkKtyOKP, Crv: jwkCrvEd25519, X: b64(pub)}.Thumbprint()
-	return thumb
+	return jwks.KeyID(pub), pub, priv, nil
 }

@@ -13,6 +13,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/oleg-tkachuk/limes/jwks"
 )
 
 // keyFileMode is how the tests write a key file: readable by its owner only.
@@ -80,7 +82,7 @@ func TestLoadOrGenerateKey(t *testing.T) {
 
 	k, err := LoadOrGenerateKey(path, "")
 	if err != nil || k.Generated || !k.Private.Equal(priv) || !k.Public.Equal(priv.Public()) ||
-		k.KeyID != DeriveKeyID(k.Public) {
+		k.KeyID != jwks.KeyID(k.Public) {
 		t.Fatalf("from a file = %+v, %v; want the file's key under its derived kid", k, err)
 	}
 	if k, _ := LoadOrGenerateKey(path, "named"); k.KeyID != "named" {
@@ -94,7 +96,7 @@ func TestLoadOrGenerateKey(t *testing.T) {
 	if err != nil || !k.Generated || k.KeyID != "eph" || len(k.Private) != ed25519.PrivateKeySize || !k.Public.Equal(k.Private.Public()) {
 		t.Fatalf("without a path = %+v, %v; want a fresh key under the kid given", k, err)
 	}
-	if k, _ := LoadOrGenerateKey("", ""); k.KeyID != DeriveKeyID(k.Public) {
+	if k, _ := LoadOrGenerateKey("", ""); k.KeyID != jwks.KeyID(k.Public) {
 		t.Error("a generated key must get its derived kid")
 	}
 }
@@ -106,12 +108,12 @@ func TestDeriveKeyIDIsTheThumbprint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := DeriveKeyID(ed25519.PublicKey(x)), "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k"; got != want {
-		t.Errorf("DeriveKeyID = %s, want %s", got, want)
+	if got, want := jwks.KeyID(ed25519.PublicKey(x)), "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k"; got != want {
+		t.Errorf("jwks.KeyID = %s, want %s", got, want)
 	}
 	kid, pub, _, err := GenerateEd25519Keypair()
-	if err != nil || kid != DeriveKeyID(pub) {
-		t.Errorf("GenerateEd25519Keypair kid = %q, %v; want DeriveKeyID's", kid, err)
+	if err != nil || kid != jwks.KeyID(pub) {
+		t.Errorf("GenerateEd25519Keypair kid = %q, %v; want jwks.KeyID's", kid, err)
 	}
 }
 
@@ -119,7 +121,7 @@ func TestStaticKeyResolverRotation(t *testing.T) {
 	ctx := context.Background()
 	_, pubA, _, _ := GenerateEd25519Keypair()
 	_, pubB, _, _ := GenerateEd25519Keypair()
-	r := NewStaticKeyResolver(map[string]ed25519.PublicKey{"a": pubA})
+	r := jwks.NewStatic(map[string]ed25519.PublicKey{"a": pubA})
 
 	r.SetKey("b", pubB)
 	if keys := r.Keys(); len(keys) != 2 || !keys["b"].Equal(pubB) {
@@ -132,8 +134,8 @@ func TestStaticKeyResolverRotation(t *testing.T) {
 	}
 
 	r.RemoveKey("a")
-	if _, err := r.PublicKey(ctx, "a"); !errors.Is(err, ErrUnknownKID) {
-		t.Errorf("a removed kid: err = %v, want ErrUnknownKID", err)
+	if _, err := r.PublicKey(ctx, "a"); !errors.Is(err, jwks.ErrUnknownKID) {
+		t.Errorf("a removed kid: err = %v, want jwks.ErrUnknownKID", err)
 	}
 	if got, err := r.PublicKey(ctx, "b"); err != nil || !got.Equal(pubB) {
 		t.Errorf("the kid left = %v, %v", got, err)

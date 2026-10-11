@@ -1,4 +1,4 @@
-package limes
+package jwks
 
 import (
 	"context"
@@ -9,60 +9,64 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/oleg-tkachuk/limes/internal/httpx"
 )
 
-// ErrJWKSUnavailable is returned by RemoteJWKSResolver when it holds no key
+// ErrUnavailable is returned by Remote when it holds no key
 // set recent enough to trust: the endpoint has been failing for longer than
 // MaxStale, or never answered. The verifier refuses the token with it — an
 // issuer we cannot reach verifies nothing — and, being the server's fault
 // rather than the token's, it matches no ErrUnauthenticated sentinel.
-var ErrJWKSUnavailable = errors.New("limes: JWKS unavailable")
+var ErrUnavailable = errors.New("jwks: key set unavailable")
 
-// RemoteJWKSConfig defaults, documented on its fields.
+// RemoteConfig defaults, for a field left zero.
 const (
-	defaultJWKSFetchTimeout       = 10 * time.Second
-	defaultJWKSRefreshInterval    = 5 * time.Minute
-	defaultJWKSMinRefreshInterval = 10 * time.Second
-	defaultJWKSMaxStale           = time.Hour
-	defaultJWKSMaxDocumentBytes   = 1 << 20
+	DefaultFetchTimeout       = 10 * time.Second
+	DefaultRefreshInterval    = 5 * time.Minute
+	DefaultMinRefreshInterval = 10 * time.Second
+	DefaultMaxStale           = time.Hour
+	DefaultMaxDocumentBytes   = 1 << 20
 )
 
-// RemoteJWKSConfig configures a RemoteJWKSResolver. Only URL is required.
+// RemoteConfig configures a Remote. Only URL is required.
 // The intervals must nest: MinRefreshInterval ≤ RefreshInterval ≤ MaxStale.
-type RemoteJWKSConfig struct {
+type RemoteConfig struct {
 	// URL of the issuer's JWKS document, e.g.
 	// https://issuer.example/.well-known/jwks.json.
 	URL string
-	// Client performs the fetch. Default: a client with a 10s timeout.
+	// Client performs the fetch. Default: a client with a
+	// DefaultFetchTimeout timeout.
 	Client *http.Client
 	// RefreshInterval is how long a fetched key set is used before it is
 	// re-fetched, unless the response's Cache-Control says a shorter time
 	// (RFC 9111): its max-age, less its Age, never below
-	// MinRefreshInterval. Default 5m.
+	// MinRefreshInterval. Default DefaultRefreshInterval.
 	RefreshInterval time.Duration
 	// MinRefreshInterval rate-limits fetches. A token with an unknown kid
 	// triggers a refetch (that is how a newly published key is picked up),
 	// but at most once per this interval, so a stream of tokens with
 	// made-up kids cannot turn the verifier into a request amplifier
-	// against the issuer. Default 10s.
+	// against the issuer. Default DefaultMinRefreshInterval.
 	MinRefreshInterval time.Duration
 	// MaxStale is how long the last good key set keeps being served while
 	// fetches fail. Past it the resolver fails closed with
-	// ErrJWKSUnavailable. Default 1h — comfortably longer than the
+	// ErrUnavailable. Default DefaultMaxStale — comfortably longer than the
 	// capability TTLs, shorter than a key's useful life after withdrawal.
 	MaxStale time.Duration
-	// MaxDocumentBytes caps the response body. Default 1 MiB.
+	// MaxDocumentBytes caps the response body. Default
+	// DefaultMaxDocumentBytes.
 	MaxDocumentBytes int64
 	// Now is the clock; tests override.
 	Now func() time.Time
 }
 
-// RemoteJWKSResolver is a KeyResolver backed by an issuer's JWKS endpoint,
+// Remote is a KeyResolver backed by an issuer's JWKS endpoint,
 // for verifiers that run apart from the issuer. It caches the key set,
 // revalidates with ETag, picks up a rotated-in key on first sight of its kid,
 // and keeps serving the last good set through a bounded outage.
-type RemoteJWKSResolver struct {
-	cfg RemoteJWKSConfig
+type Remote struct {
+	cfg RemoteConfig
 
 	// fetching holds one token while a fetch is in flight. It is a channel
 	// rather than a mutex so that a caller waiting behind another's fetch
@@ -78,26 +82,26 @@ type RemoteJWKSResolver struct {
 	lastErr     error
 }
 
-// NewRemoteJWKSResolver validates the config. It does not fetch: the first
+// NewRemote validates the config. It does not fetch: the first
 // PublicKey call does, so constructing a verifier never blocks on the network.
-func NewRemoteJWKSResolver(cfg RemoteJWKSConfig) (*RemoteJWKSResolver, error) {
+func NewRemote(cfg RemoteConfig) (*Remote, error) {
 	if cfg.URL == "" {
-		return nil, errors.New("limes: RemoteJWKSConfig.URL required")
+		return nil, errors.New("jwks: RemoteConfig.URL required")
 	}
 	if cfg.Client == nil {
-		cfg.Client = &http.Client{Timeout: defaultJWKSFetchTimeout}
+		cfg.Client = &http.Client{Timeout: DefaultFetchTimeout}
 	}
 	if cfg.RefreshInterval <= 0 {
-		cfg.RefreshInterval = defaultJWKSRefreshInterval
+		cfg.RefreshInterval = DefaultRefreshInterval
 	}
 	if cfg.MinRefreshInterval <= 0 {
-		cfg.MinRefreshInterval = defaultJWKSMinRefreshInterval
+		cfg.MinRefreshInterval = DefaultMinRefreshInterval
 	}
 	if cfg.MaxStale <= 0 {
-		cfg.MaxStale = defaultJWKSMaxStale
+		cfg.MaxStale = DefaultMaxStale
 	}
 	if cfg.MaxDocumentBytes <= 0 {
-		cfg.MaxDocumentBytes = defaultJWKSMaxDocumentBytes
+		cfg.MaxDocumentBytes = DefaultMaxDocumentBytes
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
@@ -106,14 +110,14 @@ func NewRemoteJWKSResolver(cfg RemoteJWKSConfig) (*RemoteJWKSResolver, error) {
 	// with no fetch having failed, and a refresh due inside the rate limit
 	// would wait it out anyway.
 	if cfg.MinRefreshInterval > cfg.RefreshInterval || cfg.RefreshInterval > cfg.MaxStale {
-		return nil, fmt.Errorf("limes: RemoteJWKSConfig needs MinRefreshInterval (%s) ≤ RefreshInterval (%s) ≤ MaxStale (%s)",
+		return nil, fmt.Errorf("jwks: RemoteConfig needs MinRefreshInterval (%s) ≤ RefreshInterval (%s) ≤ MaxStale (%s)",
 			cfg.MinRefreshInterval, cfg.RefreshInterval, cfg.MaxStale)
 	}
-	return &RemoteJWKSResolver{cfg: cfg, fetching: make(chan struct{}, 1)}, nil
+	return &Remote{cfg: cfg, fetching: make(chan struct{}, 1)}, nil
 }
 
 // PublicKey implements KeyResolver.
-func (r *RemoteJWKSResolver) PublicKey(ctx context.Context, kid string) (ed25519.PublicKey, error) {
+func (r *Remote) PublicKey(ctx context.Context, kid string) (ed25519.PublicKey, error) {
 	key, ok, fetchedAt, freshFor := r.lookup(kid)
 	if !ok || r.cfg.Now().Sub(fetchedAt) >= freshFor {
 		if err := r.refresh(ctx); err != nil {
@@ -126,7 +130,7 @@ func (r *RemoteJWKSResolver) PublicKey(ctx context.Context, kid string) (ed25519
 		r.mu.RLock()
 		lastErr := r.lastErr
 		r.mu.RUnlock()
-		return nil, fmt.Errorf("%w: %s: %w", ErrJWKSUnavailable, r.cfg.URL, lastErr)
+		return nil, fmt.Errorf("%w: %s: %w", ErrUnavailable, r.cfg.URL, lastErr)
 	}
 	if !ok {
 		return nil, ErrUnknownKID
@@ -134,7 +138,7 @@ func (r *RemoteJWKSResolver) PublicKey(ctx context.Context, kid string) (ed25519
 	return key, nil
 }
 
-func (r *RemoteJWKSResolver) lookup(kid string) (ed25519.PublicKey, bool, time.Time, time.Duration) {
+func (r *Remote) lookup(kid string) (ed25519.PublicKey, bool, time.Time, time.Duration) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	k, ok := r.keys[kid]
@@ -144,7 +148,7 @@ func (r *RemoteJWKSResolver) lookup(kid string) (ed25519.PublicKey, bool, time.T
 // freshness is how long a response keeps the set current: what its
 // Cache-Control says, within MinRefreshInterval..RefreshInterval, or
 // RefreshInterval when it says nothing.
-func (r *RemoteJWKSResolver) freshness(h http.Header) time.Duration {
+func (r *Remote) freshness(h http.Header) time.Duration {
 	d, ok := responseFreshness(h)
 	if !ok {
 		return r.cfg.RefreshInterval
@@ -156,7 +160,7 @@ func (r *RemoteJWKSResolver) freshness(h http.Header) time.Duration {
 // MinRefreshInterval. Failures are recorded, not returned: the caller decides
 // from the age of the set it still holds. It returns only ctx's error, when
 // the caller gave up waiting behind another fetch.
-func (r *RemoteJWKSResolver) refresh(ctx context.Context) error {
+func (r *Remote) refresh(ctx context.Context) error {
 	select {
 	case r.fetching <- struct{}{}:
 	case <-ctx.Done():
@@ -198,15 +202,15 @@ const (
 	acceptJWKSet    = mediaTypeJWKSet + ", application/json;q=0.9"
 )
 
-func (r *RemoteJWKSResolver) fetch(ctx context.Context, etag string) (keys map[string]ed25519.PublicKey, newETag string, header http.Header, notModified bool, err error) {
+func (r *Remote) fetch(ctx context.Context, etag string) (keys map[string]ed25519.PublicKey, newETag string, header http.Header, notModified bool, err error) {
 	// The URL is the operator's configuration, not a request's input.
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.cfg.URL, nil) //nolint:gosec // G704: see above
 	if err != nil {
 		return nil, "", nil, false, err
 	}
-	req.Header.Set(headerAccept, acceptJWKSet)
+	req.Header.Set(httpx.HeaderAccept, acceptJWKSet)
 	if etag != "" {
-		req.Header.Set(headerIfNoneMatch, etag)
+		req.Header.Set(httpx.HeaderIfNoneMatch, etag)
 	}
 	resp, err := r.cfg.Client.Do(req) //nolint:gosec // G704: the configured URL
 	if err != nil {
@@ -227,7 +231,7 @@ func (r *RemoteJWKSResolver) fetch(ctx context.Context, etag string) (keys map[s
 	if int64(len(body)) > r.cfg.MaxDocumentBytes {
 		return nil, "", nil, false, fmt.Errorf("JWKS document exceeds %d bytes", r.cfg.MaxDocumentBytes)
 	}
-	keys, skipped, err := parseJWKS(body)
+	keys, skipped, err := parse(body)
 	if err != nil {
 		return nil, "", nil, false, err
 	}
@@ -236,5 +240,5 @@ func (r *RemoteJWKSResolver) fetch(ctx context.Context, etag string) (keys map[s
 	if len(keys) == 0 && skipped > 0 {
 		return nil, "", nil, false, fmt.Errorf("JWKS document has %d entries and no usable Ed25519 key", skipped)
 	}
-	return keys, resp.Header.Get(headerETag), resp.Header, false, nil
+	return keys, resp.Header.Get(httpx.HeaderETag), resp.Header, false, nil
 }

@@ -34,9 +34,9 @@
 //     union of [Meter], [TenantBudgets] and [UsageHousekeeping]. Every charge
 //     and request also counts against each ancestor. Generic in TX, the
 //     consumer's transaction handle; see "No-transaction mode" below.
-//   - [KeyResolver] — public verification keys. [StaticKeyResolver] ships as a
+//   - [KeyResolver] — public verification keys. [jwks.Static] ships as a
 //     working implementation and supports rotation via SetKey / RemoveKey;
-//     [RemoteJWKSResolver] fetches an issuer's JWKS for verifiers that run
+//     [jwks.Remote] fetches an issuer's JWKS for verifiers that run
 //     apart from it.
 //
 // Three more are needed only with the feature they serve:

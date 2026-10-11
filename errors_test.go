@@ -13,6 +13,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/oleg-tkachuk/limes/jwks"
 )
 
 // The families a sentinel may belong to, as errors.Is reads them.
@@ -56,14 +58,14 @@ var sentinelMatrix = map[string]sentinelCase{
 	"ErrCopyCountersNotMetered": {
 		ErrCopyCountersNotMetered, []string{famUnauthenticated, famToken}, ReasonInvalidBiscuit, http.StatusUnauthorized,
 	},
-	"ErrUnknownKID":             {ErrUnknownKID, nil, "", http.StatusInternalServerError},
+	"jwks.ErrUnknownKID":        {jwks.ErrUnknownKID, nil, "", http.StatusInternalServerError},
 	"ErrProofOfPossession":      {ErrProofOfPossession, []string{famUnauthenticated, famProof}, "", http.StatusUnauthorized},
 	"ErrDPoPRequired":           {ErrDPoPRequired, []string{famUnauthenticated, famProof}, ReasonProofRequired, http.StatusUnauthorized},
 	"ErrDPoPInvalid":            {ErrDPoPInvalid, []string{famUnauthenticated, famProof}, ReasonProofInvalid, http.StatusUnauthorized},
 	"ErrDPoPReplayed":           {ErrDPoPReplayed, []string{famUnauthenticated, famProof}, ReasonProofReplayed, http.StatusUnauthorized},
 	"ErrDPoPNonceRequired":      {ErrDPoPNonceRequired, []string{famUnauthenticated, famProof}, ReasonProofInvalid, http.StatusUnauthorized},
 	"ErrAuthSchemeMismatch":     {ErrAuthSchemeMismatch, []string{famUnauthenticated, famProof}, ReasonProofRequired, http.StatusUnauthorized},
-	"ErrJWKSUnavailable":        {ErrJWKSUnavailable, nil, ReasonKeysUnavailable, http.StatusServiceUnavailable},
+	"jwks.ErrUnavailable":       {jwks.ErrUnavailable, nil, ReasonKeysUnavailable, http.StatusServiceUnavailable},
 	"ErrMalformedAuthorization": {ErrMalformedAuthorization, nil, ReasonMalformedAuthorization, http.StatusBadRequest},
 
 	"ErrCaveatViolation":        {ErrCaveatViolation, []string{famCaveat}, "", http.StatusForbidden},
@@ -122,9 +124,30 @@ func TestSentinelMatrix(t *testing.T) {
 	}
 }
 
-// Every exported sentinel of the package is in the matrix.
+// sentinelPackages are the directories whose exported sentinels the matrix
+// must hold, and the qualifier their names take in it.
+var sentinelPackages = map[string]string{".": "", "jwks": "jwks."}
+
+// Every exported sentinel of the module's packages is in the matrix, and so
+// is every sentinel the refusal table names.
 func TestSentinelMatrixIsComplete(t *testing.T) {
-	files, err := filepath.Glob("*.go")
+	for _, rule := range refusalRules {
+		found := false
+		for _, c := range sentinelMatrix {
+			found = found || c.err == rule.sentinel //nolint:errorlint // the same sentinel, not a match
+		}
+		if !found {
+			t.Errorf("%v is in refusalRules but not in sentinelMatrix", rule.sentinel)
+		}
+	}
+	for dir, qualifier := range sentinelPackages {
+		checkPackageSentinels(t, dir, qualifier)
+	}
+}
+
+func checkPackageSentinels(t *testing.T, dir, qualifier string) {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,8 +168,8 @@ func TestSentinelMatrixIsComplete(t *testing.T) {
 			for _, spec := range gen.Specs {
 				for _, ident := range spec.(*ast.ValueSpec).Names {
 					if ident.IsExported() && strings.HasPrefix(ident.Name, "Err") {
-						if _, ok := sentinelMatrix[ident.Name]; !ok {
-							t.Errorf("%s (%s) is not in sentinelMatrix", ident.Name, file)
+						if _, ok := sentinelMatrix[qualifier+ident.Name]; !ok {
+							t.Errorf("%s%s (%s) is not in sentinelMatrix", qualifier, ident.Name, file)
 						}
 					}
 				}
@@ -174,8 +197,8 @@ func TestVerifyTellsAnUnknownKidFromAResolverOutage(t *testing.T) {
 		unauthorised bool
 		status       int
 	}{
-		"unknown kid":         {ErrUnknownKID, true, http.StatusUnauthorized},
-		"keys unavailable":    {fmt.Errorf("fetch: %w", ErrJWKSUnavailable), false, http.StatusServiceUnavailable},
+		"unknown kid":         {jwks.ErrUnknownKID, true, http.StatusUnauthorized},
+		"keys unavailable":    {fmt.Errorf("fetch: %w", jwks.ErrUnavailable), false, http.StatusServiceUnavailable},
 		"the resolver failed": {outage, false, http.StatusInternalServerError},
 	} {
 		t.Run(name, func(t *testing.T) {

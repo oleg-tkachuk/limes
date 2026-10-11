@@ -34,11 +34,11 @@ flowchart LR
         bcache["CachedBiscuitRevocationChecker<br/>per token · TTL · bounded · single-flight"]
         attenuate["<b>Attenuate</b><br/>offline · no key"]
         metering["WithMetering<br/>OTel counters · spend histogram<br/>WithMeterProvider · WithTenantAttribute"]
-        static["StaticKeyResolver<br/>SetKey · RemoveKey"]
-        remote["RemoteJWKSResolver<br/>ETag · Cache-Control · MaxStale"]
+        static["jwks.Static<br/>SetKey · RemoveKey"]
+        remote["jwks.Remote<br/>ETag · Cache-Control · MaxStale"]
         dpop["DPoPVerifier<br/>VerifierConfig.DPoP · NewDPoPProof"]
         suites["storetest · metertest<br/>conformance suites"]
-        jwksh["JWKSHandler<br/>ETag · max-age"]
+        jwksh["jwks.Handler<br/>ETag · max-age"]
         nonce["HMACNonces<br/>stateless DPoP nonces"]
     end
 
@@ -182,7 +182,7 @@ flowchart TB
     mism["ErrAudienceMismatch"]
     wrong["ErrAuthSchemeMismatch"]
     dpopErr["ErrProofOfPossession<br/>ErrDPoPRequired · ErrDPoPInvalid<br/>ErrDPoPNonceRequired · ErrDPoPReplayed"]
-    keysDown["ErrJWKSUnavailable<br/>(503, the server's fault)"]
+    keysDown["jwks.ErrUnavailable<br/>(503, the server's fault)"]
     revoked["ErrRevoked"]
     biscuit["the Biscuit path below"]
 
@@ -220,8 +220,8 @@ flowchart TB
 
 An unknown kid, an untrusted issuer, a kid bound to another issuer and a
 missing tenant all match `ErrInvalidToken`; an unknown kid also matches
-`ErrUnknownKID`, and the rest carry nothing more to branch on. An unreachable
-JWKS is the server's fault, not the token's: it is `ErrJWKSUnavailable` alone,
+`jwks.ErrUnknownKID`, and the rest carry nothing more to branch on. An unreachable
+JWKS is the server's fault, not the token's: it is `jwks.ErrUnavailable` alone,
 which `ErrorResponse` answers with 503. The DPoP refusals and
 `ErrAuthSchemeMismatch` match `ErrProofOfPossession` — the token may be
 genuine, the proof is what failed — and every refusal of the credentials,
@@ -359,7 +359,7 @@ error's own text never reaches the client.
 
 | Refusal | Status | `WWW-Authenticate` |
 |---|---|---|
-| `ErrJWKSUnavailable` | 503 | none |
+| `jwks.ErrUnavailable` | 503 | none |
 | `ErrMalformedAuthorization` | 400 | `error="invalid_request"` under the client's scheme (Bearer when unknown) |
 | `ErrDPoPNonceRequired` | 401 | `DPoP error="use_dpop_nonce"`, and a fresh `DPoP-Nonce` |
 | `ErrDPoPRequired` · `ErrDPoPInvalid` · `ErrDPoPReplayed`, and any other `ErrProofOfPossession` | 401 | `DPoP error="invalid_dpop_proof", algs="Ed25519 ES256"` |
@@ -734,13 +734,13 @@ Revoked Biscuit copies travel the same way, on their own list and cache; one
 signal clears both.
 
 A verifier that runs apart from the issuer resolves keys with
-`RemoteJWKSResolver`. It asks for `application/jwk-set+json`, keeps a set as
+`jwks.Remote`. It asks for `application/jwk-set+json`, keeps a set as
 long as the response's `Cache-Control` says — `max-age` less `Age`, zero for
 `no-cache` or `no-store` — within `MinRefreshInterval` and `RefreshInterval`
 (`RefreshInterval` when the response says nothing), revalidates with an ETag,
 refetches on an unknown kid at most once per `MinRefreshInterval`, and fails
-closed with `ErrJWKSUnavailable` when it has never fetched a set, or once the
+closed with `jwks.ErrUnavailable` when it has never fetched a set, or once the
 last good set is older than `MaxStale`. A document with entries but no usable
 Ed25519 key counts as a failed fetch, so the last good set stays in service;
-two entries under one kid are both dropped. The issuer serves the set with `JWKSHandler`: a strong ETag
+two entries under one kid are both dropped. The issuer serves the set with `jwks.Handler`: a strong ETag
 answering `If-None-Match` with 304, and `Cache-Control: public, max-age`.

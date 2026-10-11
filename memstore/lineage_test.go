@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/jwks"
 )
 
 // tree inserts a root with the given caveats and n children each holding
@@ -126,7 +127,7 @@ func TestVerifierRejectsChildOfRevokedParent(t *testing.T) {
 	records := New[struct{}]()
 	issuer, _ := limes.NewIssuer(limes.IssuerConfig{Signer: signer, Store: records, IssuerName: "iss"})
 	verifier, _ := limes.NewStandardVerifier(limes.VerifierConfig{
-		Keys:           limes.NewStaticKeyResolver(map[string]ed25519.PublicKey{kid: pub}),
+		Keys:           jwks.NewStatic(map[string]ed25519.PublicKey{kid: pub}),
 		Revocations:    records,
 		TrustedIssuers: []string{"iss"},
 	})

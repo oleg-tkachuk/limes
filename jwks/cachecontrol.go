@@ -1,10 +1,12 @@
-package limes
+package jwks
 
 import (
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/oleg-tkachuk/limes/internal/httpx"
 )
 
 // The response freshness a JWKS fetch honours, after RFC 9111. The standard
@@ -12,40 +14,19 @@ import (
 // the two directives a key-set cache acts on, and the Age header, and nothing
 // else.
 
-// HTTP header names the module reads or writes (RFC 9110, RFC 9111 §5),
-// spelled once.
-const (
-	headerAccept        = "Accept"
-	headerAge           = "Age"
-	headerAllow         = "Allow"
-	headerCacheControl  = "Cache-Control"
-	headerContentLength = "Content-Length"
-	headerContentType   = "Content-Type"
-	headerETag          = "ETag"
-	headerIfNoneMatch   = "If-None-Match"
-)
-
-// Cache-Control directives (RFC 9111 §5.2).
-const (
-	directiveMaxAge  = "max-age"
-	directiveNoCache = "no-cache"
-	directiveNoStore = "no-store"
-	directivePublic  = "public"
-)
-
 // responseFreshness is how long a response stays fresh by its own headers:
 // max-age less the Age it has already spent in caches (RFC 9111 §4.2.1,
 // §4.2.3), zero for no-cache or no-store (§5.2.2.4, §5.2.2.5). ok is false
 // when the response says nothing, and the caller's default applies.
 func responseFreshness(h http.Header) (freshness time.Duration, ok bool) {
 	maxAge, found := -1, false
-	for _, line := range h.Values(headerCacheControl) {
+	for _, line := range h.Values(httpx.HeaderCacheControl) {
 		for directive := range strings.SplitSeq(line, ",") {
 			name, value, _ := strings.Cut(strings.TrimSpace(directive), "=")
 			switch strings.ToLower(name) {
-			case directiveNoCache, directiveNoStore:
+			case httpx.DirectiveNoCache, httpx.DirectiveNoStore:
 				return 0, true
-			case directiveMaxAge:
+			case httpx.DirectiveMaxAge:
 				if found {
 					continue // §4.2.1: the first max-age stands
 				}
@@ -61,7 +42,7 @@ func responseFreshness(h http.Header) (freshness time.Duration, ok bool) {
 	if !found {
 		return 0, false
 	}
-	age, ok := deltaSeconds(h.Get(headerAge))
+	age, ok := deltaSeconds(h.Get(httpx.HeaderAge))
 	if !ok {
 		age = 0
 	}

@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/oleg-tkachuk/limes/jwks"
 )
 
 // The wire-format guard.
@@ -28,7 +30,7 @@ func TestGoldenTokenStillVerifies(t *testing.T) {
 	pub := priv.Public().(ed25519.PublicKey)
 
 	verifier, err := NewStandardVerifier(VerifierConfig{
-		Keys:           NewStaticKeyResolver(map[string]ed25519.PublicKey{goldenKID: pub}),
+		Keys:           jwks.NewStatic(map[string]ed25519.PublicKey{goldenKID: pub}),
 		Revocations:    revLookup{},
 		TrustedIssuers: []string{goldenIssuer},
 		// Pinned to the issuance instant so nbf/exp stay inside the window
@@ -87,7 +89,7 @@ func TestGoldenTokenRejectsWrongAudience(t *testing.T) {
 	pub := priv.Public().(ed25519.PublicKey)
 
 	verifier, err := NewStandardVerifier(VerifierConfig{
-		Keys:           NewStaticKeyResolver(map[string]ed25519.PublicKey{goldenKID: pub}),
+		Keys:           jwks.NewStatic(map[string]ed25519.PublicKey{goldenKID: pub}),
 		Revocations:    revLookup{},
 		TrustedIssuers: []string{goldenIssuer},
 		Now:            goldenClock,

@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/jwks"
 	"github.com/oleg-tkachuk/limes/memstore"
 )
 
@@ -46,7 +47,7 @@ func main() {
 	must(err, "issuer")
 
 	verifier, err := limes.NewStandardVerifier(limes.VerifierConfig{
-		Keys:           limes.NewStaticKeyResolver(map[string]ed25519.PublicKey{kid: pub}),
+		Keys:           jwks.NewStatic(map[string]ed25519.PublicKey{kid: pub}),
 		Revocations:    records,
 		TrustedIssuers: []string{"example-issuer"},
 	})

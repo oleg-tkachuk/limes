@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/oleg-tkachuk/limes/internal/jose"
 )
 
 // RFC 7493 §2.2: a number in a token is an integer a double holds exactly,
@@ -31,7 +33,7 @@ func TestTokenIntegersStayWithinIJSON(t *testing.T) {
 
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	v := verifierFor(t, pub, VerifierConfig{})
-	hdr := map[string]any{"alg": algEd25519, "kid": "k1", "typ": TokenType}
+	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenType}
 	for name, mod := range map[string]func(map[string]any){
 		"exp":       func(c map[string]any) { c["exp"] = int64(MaxIJSONInteger) + 1 },
 		"limes_gen": func(c map[string]any) { c["limes_gen"] = int64(MaxIJSONInteger) + 1 },
@@ -49,7 +51,7 @@ func TestTokenIntegersStayWithinIJSON(t *testing.T) {
 
 // RFC 7493 §2.1: a token's JSON is UTF-8; one that is not is refused.
 func TestTokenClaimsAreUTF8(t *testing.T) {
-	if _, err := parseClaims(b64([]byte("{\"iss\":\"\xff\"}"))); err == nil {
+	if _, err := parseClaims(jose.B64([]byte("{\"iss\":\"\xff\"}"))); err == nil {
 		t.Error("claims with invalid UTF-8 were read")
 	}
 }
