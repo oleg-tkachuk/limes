@@ -2,6 +2,7 @@ package memstore
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -43,10 +44,13 @@ func TestMeterContract(t *testing.T) {
 // the one ListTenantBudgets ran under.
 type listScope struct{}
 
+// tenantScope marks the context TenantCtx hands out with the tenant it was
+// asked for, so the test can tell a write ran under that tenant's context.
+type tenantScope struct{}
+
 // A store that scopes each tenant's rows gets its tenants, their contexts and
 // the context of a read across tenants from the Env, and the checks use them.
 func TestMeterContractUsesTheTenantHooks(t *testing.T) {
-	var tenants, scoped atomic.Int64
 	base := t.Context()
 	listCtx := context.WithValue(base, listScope{}, true)
 	listed := &listRecorder{}
@@ -60,12 +64,12 @@ func TestMeterContractUsesTheTenantHooks(t *testing.T) {
 			Usage:  listed.wrap(NewUsage(records)),
 			Tenant: tenant,
 			NewTenant: func() (uuid.UUID, error) {
-				tenants.Add(1)
-				return uuid.New(), nil
+				id := uuid.New()
+				listed.issued.Store(id, true)
+				return id, nil
 			},
-			TenantCtx: func(uuid.UUID) context.Context {
-				scoped.Add(1)
-				return ctx
+			TenantCtx: func(tenant uuid.UUID) context.Context {
+				return context.WithValue(ctx, tenantScope{}, tenant)
 			},
 			ListCtx: listCtx,
 			NewCapability: func(parent uuid.UUID, maxBudget limes.Nanos) (uuid.UUID, error) {
@@ -78,8 +82,9 @@ func TestMeterContractUsesTheTenantHooks(t *testing.T) {
 			},
 		}
 	})
-	if tenants.Load() == 0 || scoped.Load() == 0 {
-		t.Errorf("NewTenant ran %d times and TenantCtx %d; want both used", tenants.Load(), scoped.Load())
+	if listed.scopedWrites.Load() == 0 || listed.strayWrites.Load() != 0 {
+		t.Errorf("SetTenantBudget for a tenant from NewTenant ran %d times under its TenantCtx and %d otherwise; want every such write under it",
+			listed.scopedWrites.Load(), listed.strayWrites.Load())
 	}
 	if listed.outside.Load() != 0 || listed.inside.Load() == 0 {
 		t.Errorf("ListTenantBudgets ran %d times under ListCtx and %d outside it; want every list under it",
@@ -88,9 +93,13 @@ func TestMeterContractUsesTheTenantHooks(t *testing.T) {
 }
 
 // listRecorder counts the ListTenantBudgets calls made under ListCtx and
-// outside it.
+// outside it, and the SetTenantBudget calls for a tenant NewTenant issued
+// made under that tenant's TenantCtx and otherwise.
 type listRecorder struct {
 	inside, outside atomic.Int64
+	// issued holds the tenants NewTenant handed out.
+	issued                    sync.Map
+	scopedWrites, strayWrites atomic.Int64
 }
 
 func (r *listRecorder) wrap(u *UsageStore[struct{}]) limes.UsageStore[struct{}] {
@@ -109,4 +118,17 @@ func (u *recordingUsage) ListTenantBudgets(ctx context.Context, req limes.ListTe
 		u.r.outside.Add(1)
 	}
 	return u.UsageStore.ListTenantBudgets(ctx, req)
+}
+
+// SetTenantBudget for a tenant NewTenant issued must run under that tenant's
+// TenantCtx; one for the Env's own Tenant runs under Ctx.
+func (u *recordingUsage) SetTenantBudget(ctx context.Context, req limes.SetTenantBudgetRequest) (limes.TenantBudget, error) {
+	if _, ok := u.r.issued.Load(req.TenantID); ok {
+		if scope, _ := ctx.Value(tenantScope{}).(uuid.UUID); scope == req.TenantID {
+			u.r.scopedWrites.Add(1)
+		} else {
+			u.r.strayWrites.Add(1)
+		}
+	}
+	return u.UsageStore.SetTenantBudget(ctx, req)
 }
