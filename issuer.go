@@ -245,7 +245,7 @@ type DelegateRequest struct {
 
 // Delegate mints a child capability narrower than the supplied parent.
 // The parent must already be a verified Capability — callers run it
-// through Verifier.Verify first; the Issuer trusts its in-memory shape.
+// through StandardVerifier.Verify first; the Issuer trusts its in-memory shape.
 // It does not trust it to be current, though: a parent that has expired,
 // or that the store reports revoked (itself or any ancestor), delegates
 // nothing; nor does a Biscuit copy with limits of its own (Parent.Copies),

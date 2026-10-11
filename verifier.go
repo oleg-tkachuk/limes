@@ -95,26 +95,6 @@ type VerifierConfig struct {
 	DPoP *dpop.Verifier
 }
 
-// Verifier validates tokens. A deployment typically resolves keys through a
-// cached JWKS (jwks.Remote) and checks revocation through a short-TTL
-// cache (CachedRevocationChecker), so revocation propagates quickly without
-// hammering the store.
-type Verifier interface {
-	// Verify checks the token itself: its signature, issuer and tenant, its
-	// validity window, its audience, the proof of possession a key-bound
-	// capability needs, and revocation. It returns the capability the token
-	// grants.
-	Verify(ctx context.Context, req VerifyRequest) (Capability, error)
-
-	// Authorize is Verify followed by every caveat that can be checked
-	// without state: the operation, the resource, the idempotency key, the
-	// tainted read (Caveats.Check), and the client's address
-	// (Caveats.CheckSource). The request and budget limits are stateful:
-	// the Meter enforces them, through Bump and Charge, inside the
-	// consumer's own transaction.
-	Authorize(ctx context.Context, req AuthorizeRequest) (Capability, error)
-}
-
 // VerifyRequest is a token as it arrived, and what it arrived for.
 type VerifyRequest struct {
 	// Token is the capability token, a JWT or a Biscuit.
@@ -141,7 +121,11 @@ type AuthorizeRequest struct {
 }
 
 // StandardVerifier is the production verifier — signature first, then
-// claims, then issuer / tenant / time / audience / revocation gates.
+// claims, then issuer / tenant / time / audience / revocation gates. A
+// deployment typically resolves keys through a cached JWKS (jwks.Remote) and
+// checks revocation through a short-TTL cache (CachedRevocationChecker), so
+// revocation propagates quickly without hammering the store. A consumer that
+// mocks it declares the narrow interface it needs.
 //
 // Verification is independent of the persistence layer apart from the
 // revocation lookup, so the verifier scales horizontally without contention
@@ -187,8 +171,10 @@ func NewStandardVerifier(cfg VerifierConfig) (*StandardVerifier, error) {
 	return &StandardVerifier{cfg: cfg}, nil
 }
 
-// Verify implements Verifier. Returns the typed Capability on success.
-// Errors return one of the package's typed sentinels so the caller can
+// Verify checks the token itself: its signature, issuer and tenant, its
+// validity window, its audience, the proof of possession a key-bound
+// capability needs, and revocation. It returns the capability the token
+// grants; a refusal is one of the package's sentinels, so the caller can
 // branch on the failure mode.
 //
 // Order matters: nothing in the claims is read until the signature over
@@ -298,7 +284,11 @@ func (v *StandardVerifier) DPoPNonce(ctx context.Context) (string, error) {
 	return v.cfg.DPoP.Nonce(ctx)
 }
 
-// Authorize implements Verifier.
+// Authorize is Verify followed by every caveat that can be checked without
+// state: the operation, the resource, the idempotency key, the tainted read
+// (Caveats.Check), and the client's address (Caveats.CheckSource). The
+// request and budget limits are stateful: the Meter enforces them, through
+// Bump and Charge, inside the consumer's own transaction.
 func (v *StandardVerifier) Authorize(ctx context.Context, req AuthorizeRequest) (Capability, error) {
 	c, err := v.Verify(ctx, req.VerifyRequest)
 	if err != nil {
