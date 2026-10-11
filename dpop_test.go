@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/oleg-tkachuk/limes/internal/jose"
 )
 
 const (
@@ -300,11 +302,11 @@ func TestDPoPRefusesAPrivateJWK(t *testing.T) {
 		t.Fatal(err)
 	}
 	header := fmt.Sprintf(`{"typ":%q,"alg":%q,"jwk":{"kty":%q,"crv":%q,"x":%q,"d":%q}}`,
-		DPoPTokenType, algEdDSA, jwk.Kty, jwk.Crv, jwk.X, b64(priv.Seed()))
+		DPoPTokenType, jose.AlgEdDSA, jwk.Kty, jwk.Crv, jwk.X, jose.B64(priv.Seed()))
 	claims := fmt.Sprintf(`{"jti":"j1","htm":"POST","htu":%q,"iat":%d,"ath":%q}`,
 		dpopURL, now.Unix(), AccessTokenHash("the-token"))
-	input := b64([]byte(header)) + "." + b64([]byte(claims))
-	proof := input + "." + b64(ed25519.Sign(priv, []byte(input)))
+	input := jose.B64([]byte(header)) + "." + jose.B64([]byte(claims))
+	proof := input + "." + jose.B64(ed25519.Sign(priv, []byte(input)))
 
 	v := &DPoPVerifier{Replay: NewMemoryReplayCache(0), Now: func() time.Time { return now }}
 	err = v.check(context.Background(), c, "the-token", DPoPProof{Proof: proof, Method: "POST", URL: dpopURL})
@@ -356,9 +358,9 @@ func TestDPoPReadsMethodAndTimeAsTheRFCsDo(t *testing.T) {
 	c := boundCap(t, priv)
 	jwk, _ := PublicJWK(priv.Public())
 	sign := func(claims string) string {
-		header := fmt.Sprintf(`{"typ":%q,"alg":%q,"jwk":{"kty":%q,"crv":%q,"x":%q}}`, DPoPTokenType, algEd25519, jwk.Kty, jwk.Crv, jwk.X)
-		input := b64([]byte(header)) + "." + b64([]byte(claims))
-		return input + "." + b64(ed25519.Sign(priv, []byte(input)))
+		header := fmt.Sprintf(`{"typ":%q,"alg":%q,"jwk":{"kty":%q,"crv":%q,"x":%q}}`, DPoPTokenType, jose.AlgEd25519, jwk.Kty, jwk.Crv, jwk.X)
+		input := jose.B64([]byte(header)) + "." + jose.B64([]byte(claims))
+		return input + "." + jose.B64(ed25519.Sign(priv, []byte(input)))
 	}
 	claims := func(jti, iat string) string {
 		return fmt.Sprintf(`{"jti":%q,"htm":"POST","htu":%q,"iat":%s,"ath":%q}`, jti, dpopURL, iat, AccessTokenHash("tok"))

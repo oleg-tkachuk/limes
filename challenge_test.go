@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/oleg-tkachuk/limes/internal/httpx"
 )
 
 func TestErrorResponse(t *testing.T) {
@@ -117,7 +119,7 @@ func TestWriteErrorResponse(t *testing.T) {
 	rec := httptest.NewRecorder()
 	WriteErrorResponse(rec, v.ErrorResponse(context.Background(), ErrExpired, AuthSchemeBearer))
 	if rec.Code != http.StatusUnauthorized || rec.Header().Get("Content-Type") != MediaTypeProblem ||
-		len(rec.Header().Values(WWWAuthenticateHeader)) != 2 || rec.Header().Get(headerCacheControl) != directiveNoStore {
+		len(rec.Header().Values(WWWAuthenticateHeader)) != 2 || rec.Header().Get(httpx.HeaderCacheControl) != httpx.DirectiveNoStore {
 		t.Fatalf("response = %d %v", rec.Code, rec.Header())
 	}
 	var p Problem

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/oleg-tkachuk/limes/internal/httpx"
 )
 
 // How a protected resource answers a request this module refused: a status,
@@ -175,10 +177,10 @@ func WriteErrorResponse(w http.ResponseWriter, resp ErrorResponse) {
 		http.Error(w, http.StatusText(resp.Status), resp.Status)
 		return
 	}
-	h.Set(headerContentType, MediaTypeProblem)
-	h.Set(headerContentLength, strconv.Itoa(len(body)))
+	h.Set(httpx.HeaderContentType, MediaTypeProblem)
+	h.Set(httpx.HeaderContentLength, strconv.Itoa(len(body)))
 	// No store: a refusal is about this request's credentials.
-	h.Set(headerCacheControl, directiveNoStore)
+	h.Set(httpx.HeaderCacheControl, httpx.DirectiveNoStore)
 	w.WriteHeader(resp.Status)
 	_, _ = w.Write(body)
 }

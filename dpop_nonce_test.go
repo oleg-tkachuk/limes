@@ -6,6 +6,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/oleg-tkachuk/limes/internal/jose"
 )
 
 func nonceKey(b byte) []byte { return bytes.Repeat([]byte{b}, HMACNonceKeyBytes) }
@@ -50,7 +52,7 @@ func TestHMACNonces(t *testing.T) {
 		}
 	}
 	n.now = func() time.Time { return now }
-	for _, bad := range []string{"", "not base64!", b64([]byte("short")), nonce[:len(nonce)-2] + "AA"} {
+	for _, bad := range []string{"", "not base64!", jose.B64([]byte("short")), nonce[:len(nonce)-2] + "AA"} {
 		if n.Valid(ctx, bad) {
 			t.Errorf("Valid(%q) = true", bad)
 		}
@@ -95,7 +97,7 @@ func TestVerifyRequiresTheServerNonce(t *testing.T) {
 		}
 		return VerifyRequest{Token: token, Audience: audienceData, DPoP: DPoPProof{Proof: p, Method: dpopMethod, URL: dpopURL}}
 	}
-	for name, nonce := range map[string]string{"no nonce": "", "a forged nonce": b64(make([]byte, 40))} {
+	for name, nonce := range map[string]string{"no nonce": "", "a forged nonce": jose.B64(make([]byte, 40))} {
 		if _, err := v.Verify(ctx, proof(nonce)); !errors.Is(err, ErrDPoPNonceRequired) || !errors.Is(err, ErrProofOfPossession) {
 			t.Errorf("%s: err = %v, want ErrDPoPNonceRequired", name, err)
 		}

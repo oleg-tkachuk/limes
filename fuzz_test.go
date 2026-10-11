@@ -10,6 +10,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/oleg-tkachuk/limes/internal/httpx"
+	"github.com/oleg-tkachuk/limes/internal/jose"
 )
 
 // The parsers below read bytes an attacker chooses. Each must refuse what it
@@ -23,7 +26,7 @@ func FuzzParseClaims(f *testing.F) {
 	f.Add([]byte(`{"iss":"a","iss":"b"}`))
 	f.Add([]byte(`{"limes_caveats":{"Ops":["get"]}}`))
 	f.Fuzz(func(t *testing.T, raw []byte) {
-		c, err := parseClaims(b64(raw))
+		c, err := parseClaims(jose.B64(raw))
 		if err != nil {
 			return
 		}
@@ -150,8 +153,8 @@ func FuzzResponseFreshness(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, cacheControl, age string) {
 		h := http.Header{}
-		h.Set(headerCacheControl, cacheControl)
-		h.Set(headerAge, age)
+		h.Set(httpx.HeaderCacheControl, cacheControl)
+		h.Set(httpx.HeaderAge, age)
 		freshness, ok := responseFreshness(h)
 		if freshness < 0 || freshness > maxDeltaSeconds*time.Second || !ok && freshness != 0 {
 			t.Fatalf("Cache-Control %q, Age %q read as %v, %v", cacheControl, age, freshness, ok)

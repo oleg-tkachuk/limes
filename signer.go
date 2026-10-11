@@ -12,6 +12,8 @@ import (
 
 	"github.com/go-json-experiment/json"
 	"github.com/google/uuid"
+
+	"github.com/oleg-tkachuk/limes/internal/jose"
 )
 
 // Signer mints capability tokens with an Ed25519 key; verifiers pick up
@@ -97,7 +99,7 @@ type jwtClaims struct {
 // largest an IEEE 754 double holds exactly. RFC 7493 (I-JSON) §2.2 keeps
 // numbers within it so that every JSON reader — JavaScript's among them —
 // reads the same value; larger amounts travel as decimal strings (Nanos).
-const MaxIJSONInteger = 1<<53 - 1
+const MaxIJSONInteger = jose.MaxIJSONInteger
 
 // The integer claims' names, as their json tags spell them, for errors.
 const (
@@ -156,7 +158,7 @@ func (s *ed25519Signer) Sign(_ context.Context, c Capability) (string, error) {
 		return "", errors.New("limes: ExpiresAt must be after IssuedAt")
 	}
 
-	header := jwtHeader{Alg: algEd25519, Kid: s.keyID, Typ: TokenType}
+	header := jwtHeader{Alg: jose.AlgEd25519, Kid: s.keyID, Typ: TokenType}
 	claims := jwtClaims{
 		Issuer:     c.Issuer,
 		Subject:    c.Subject.Subject,
@@ -213,22 +215,6 @@ func (s *ed25519Signer) Sign(_ context.Context, c Capability) (string, error) {
 // refused here, before a claim of it is read under the wrong schema.
 const TokenType = "limes-cap-v3+jwt" //nolint:gosec // G101: a JWT type label, not a credential
 
-// tokenParts is a compact token split into its three segments.
-type tokenParts struct {
-	header, claims, sig string
-}
-
-func splitToken(token string) (tokenParts, error) {
-	h, rest, ok1 := strings.Cut(token, ".")
-	c, sig, ok2 := strings.Cut(rest, ".")
-	if !ok1 || !ok2 || strings.Contains(sig, ".") {
-		return tokenParts{}, errors.New("limes: token must have 3 segments")
-	}
-	return tokenParts{header: h, claims: c, sig: sig}, nil
-}
-
-func (p tokenParts) signingInput() string { return p.header + "." + p.claims }
-
 func parseHeader(seg string) (jwtHeader, error) {
 	raw, err := base64.RawURLEncoding.DecodeString(seg)
 	if err != nil {
@@ -241,8 +227,8 @@ func parseHeader(seg string) (jwtHeader, error) {
 	// Only the fully-specified identifier (RFC 9864): a capability token is
 	// this module's own, and none was ever written with another under this
 	// TokenType.
-	if h.Alg != algEd25519 {
-		return jwtHeader{}, fmt.Errorf("limes: unexpected alg %q (want %s)", h.Alg, algEd25519)
+	if h.Alg != jose.AlgEd25519 {
+		return jwtHeader{}, fmt.Errorf("limes: unexpected alg %q (want %s)", h.Alg, jose.AlgEd25519)
 	}
 	return h, nil
 }
@@ -301,14 +287,14 @@ func parseClaims(seg string) (*Capability, error) {
 // that displays a token; production code goes through Verifier.Verify,
 // which never reads a claim before the signature has checked out.
 func Decode(token string) (Capability, error) {
-	parts, err := splitToken(token)
+	parts, err := jose.Split(token)
 	if err != nil {
 		return Capability{}, err
 	}
-	if _, err := parseHeader(parts.header); err != nil {
+	if _, err := parseHeader(parts.Header); err != nil {
 		return Capability{}, err
 	}
-	c, err := parseClaims(parts.claims)
+	c, err := parseClaims(parts.Payload)
 	if err != nil {
 		return Capability{}, err
 	}
@@ -320,22 +306,22 @@ func Decode(token string) (Capability, error) {
 // are NOT applied here — Verify in the production verifier wraps this
 // call with the full check chain.
 func VerifySignature(token string, pub ed25519.PublicKey) error {
-	parts, err := splitToken(token)
+	parts, err := jose.Split(token)
 	if err != nil {
 		return err
 	}
 	return verifyParts(parts, pub)
 }
 
-func verifyParts(parts tokenParts, pub ed25519.PublicKey) error {
+func verifyParts(parts jose.Parts, pub ed25519.PublicKey) error {
 	if len(pub) != ed25519.PublicKeySize {
 		return fmt.Errorf("%w: public key wrong length %d", ErrInvalidToken, len(pub))
 	}
-	sig, err := base64.RawURLEncoding.DecodeString(parts.sig)
+	sig, err := base64.RawURLEncoding.DecodeString(parts.Signature)
 	if err != nil {
 		return fmt.Errorf("%w: decode sig: %w", ErrInvalidToken, err)
 	}
-	if !ed25519.Verify(pub, []byte(parts.signingInput()), sig) {
+	if !ed25519.Verify(pub, []byte(parts.SigningInput()), sig) {
 		return ErrInvalidToken
 	}
 	return nil

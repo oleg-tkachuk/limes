@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/oleg-tkachuk/limes/internal/httpx"
 )
 
 // RFC 9111: max-age less Age, no-cache and no-store as zero, an invalid
@@ -36,10 +38,10 @@ func TestResponseFreshness(t *testing.T) {
 	for _, tc := range cases {
 		h := http.Header{}
 		if tc.cacheControl != "" {
-			h.Set(headerCacheControl, tc.cacheControl)
+			h.Set(httpx.HeaderCacheControl, tc.cacheControl)
 		}
 		if tc.age != "" {
-			h.Set(headerAge, tc.age)
+			h.Set(httpx.HeaderAge, tc.age)
 		}
 		got, ok := responseFreshness(h)
 		if got != tc.want || ok != tc.ok {
@@ -62,7 +64,7 @@ func TestRemoteJWKSHonoursTheResponse(t *testing.T) {
 		fetches.Add(1)
 		accept.Store(r.Header.Get("Accept"))
 		doc, _ := MarshalJWKS(map[string]ed25519.PublicKey{kid: pub})
-		w.Header().Set(headerCacheControl, "max-age="+maxAge)
+		w.Header().Set(httpx.HeaderCacheControl, "max-age="+maxAge)
 		_, _ = w.Write(doc)
 	}))
 	defer srv.Close()
@@ -104,7 +106,7 @@ func TestRemoteJWKSClampsFreshness(t *testing.T) {
 	for cc, want := range map[string]time.Duration{"max-age=1": 10 * time.Second, "max-age=86400": time.Minute, "": time.Minute, "no-store": 10 * time.Second} {
 		h := http.Header{}
 		if cc != "" {
-			h.Set(headerCacheControl, cc)
+			h.Set(httpx.HeaderCacheControl, cc)
 		}
 		if got := r.freshness(h); got != want {
 			t.Errorf("freshness(%q) = %v, want %v", cc, got, want)
@@ -122,7 +124,7 @@ func TestJWKSHandler(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/jwks", nil))
 	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != mediaTypeJWKSet ||
-		rec.Header().Get(headerCacheControl) != "public, max-age=300" {
+		rec.Header().Get(httpx.HeaderCacheControl) != "public, max-age=300" {
 		t.Fatalf("GET = %d %v", rec.Code, rec.Header())
 	}
 	keys, err := ParseJWKS(rec.Body.Bytes())
@@ -202,7 +204,7 @@ func TestJWKSHandlerClampsANegativeMaxAge(t *testing.T) {
 	h := JWKSHandler(func() map[string]ed25519.PublicKey { return nil }, -time.Second)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/jwks", nil))
-	if got := rec.Header().Get(headerCacheControl); got != "public, max-age=0" {
+	if got := rec.Header().Get(httpx.HeaderCacheControl); got != "public, max-age=0" {
 		t.Errorf("Cache-Control = %q, want max-age=0", got)
 	}
 }

@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/oleg-tkachuk/limes/internal/httpx"
 )
 
 // ErrJWKSUnavailable is returned by RemoteJWKSResolver when it holds no key
@@ -204,9 +206,9 @@ func (r *RemoteJWKSResolver) fetch(ctx context.Context, etag string) (keys map[s
 	if err != nil {
 		return nil, "", nil, false, err
 	}
-	req.Header.Set(headerAccept, acceptJWKSet)
+	req.Header.Set(httpx.HeaderAccept, acceptJWKSet)
 	if etag != "" {
-		req.Header.Set(headerIfNoneMatch, etag)
+		req.Header.Set(httpx.HeaderIfNoneMatch, etag)
 	}
 	resp, err := r.cfg.Client.Do(req) //nolint:gosec // G704: the configured URL
 	if err != nil {
@@ -236,5 +238,5 @@ func (r *RemoteJWKSResolver) fetch(ctx context.Context, etag string) (keys map[s
 	if len(keys) == 0 && skipped > 0 {
 		return nil, "", nil, false, fmt.Errorf("JWKS document has %d entries and no usable Ed25519 key", skipped)
 	}
-	return keys, resp.Header.Get(headerETag), resp.Header, false, nil
+	return keys, resp.Header.Get(httpx.HeaderETag), resp.Header, false, nil
 }

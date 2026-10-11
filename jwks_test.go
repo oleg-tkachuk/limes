@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"fmt"
 	"testing"
+
+	"github.com/oleg-tkachuk/limes/internal/jose"
 )
 
 // TestJWKS_RoundTrip confirms MarshalJWKS produces something ParseJWKS
@@ -65,11 +67,11 @@ func TestJWKS_SkipsNonEd25519(t *testing.T) {
 func TestParseJWKSIsStrict(t *testing.T) {
 	_, a, _, _ := GenerateEd25519Keypair()
 	_, b, _, _ := GenerateEd25519Keypair()
-	upper := fmt.Sprintf(`{"KEYS":[{"KTY":"OKP","CRV":"Ed25519","KID":"k","X":%q}]}`, b64(a))
+	upper := fmt.Sprintf(`{"KEYS":[{"KTY":"OKP","CRV":"Ed25519","KID":"k","X":%q}]}`, jose.B64(a))
 	if keys, err := ParseJWKS([]byte(upper)); err != nil || len(keys) != 0 {
 		t.Errorf("members in another case = %v, %v; want no key", keys, err)
 	}
-	dup := fmt.Sprintf(`{"keys":[{"kty":"OKP","crv":"Ed25519","kid":"k","x":%q},{"kty":"OKP","crv":"Ed25519","kid":"k","x":%q},{"kty":"OKP","crv":"Ed25519","kid":"other","x":%q}]}`, b64(a), b64(b), b64(b))
+	dup := fmt.Sprintf(`{"keys":[{"kty":"OKP","crv":"Ed25519","kid":"k","x":%q},{"kty":"OKP","crv":"Ed25519","kid":"k","x":%q},{"kty":"OKP","crv":"Ed25519","kid":"other","x":%q}]}`, jose.B64(a), jose.B64(b), jose.B64(b))
 	keys, err := ParseJWKS([]byte(dup))
 	if err != nil {
 		t.Fatal(err)

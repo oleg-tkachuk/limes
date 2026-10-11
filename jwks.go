@@ -14,6 +14,9 @@ import (
 	"time"
 
 	jsonv2 "github.com/go-json-experiment/json"
+
+	"github.com/oleg-tkachuk/limes/internal/httpx"
+	"github.com/oleg-tkachuk/limes/internal/jose"
 )
 
 // JWKSDocument is the on-the-wire shape served at the issuer's JWKS
@@ -54,9 +57,9 @@ func MarshalJWKS(keys map[string]ed25519.PublicKey) ([]byte, error) {
 			return nil, fmt.Errorf("limes: public key %q wrong size for Ed25519", kid)
 		}
 		doc.Keys = append(doc.Keys, JWK{
-			Kty: jwkKtyOKP,
-			Crv: jwkCrvEd25519,
-			Alg: algEd25519,
+			Kty: jose.KtyOKP,
+			Crv: jose.CrvEd25519,
+			Alg: jose.AlgEd25519,
 			Kid: kid,
 			X:   base64.RawURLEncoding.EncodeToString(pub),
 		})
@@ -92,11 +95,11 @@ func parseJWKS(raw []byte) (map[string]ed25519.PublicKey, int, error) {
 	for _, k := range doc.Keys {
 		// A kid named twice is used for neither key: which one signs is not
 		// for the reader to guess.
-		if k.Kty != jwkKtyOKP || k.Crv != jwkCrvEd25519 || k.Kid == "" || seen[k.Kid] > 1 {
+		if k.Kty != jose.KtyOKP || k.Crv != jose.CrvEd25519 || k.Kid == "" || seen[k.Kid] > 1 {
 			skipped++
 			continue
 		}
-		if k.Alg != "" && k.Alg != algEd25519 && k.Alg != algEdDSA {
+		if k.Alg != "" && k.Alg != jose.AlgEd25519 && k.Alg != jose.AlgEdDSA {
 			skipped++
 			continue
 		}
@@ -120,7 +123,7 @@ func parseJWKS(raw []byte) (map[string]ed25519.PublicKey, int, error) {
 func JWKSHandler(keys func() map[string]ed25519.PublicKey, maxAge time.Duration) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			w.Header().Set(headerAllow, http.MethodGet+", "+http.MethodHead)
+			w.Header().Set(httpx.HeaderAllow, http.MethodGet+", "+http.MethodHead)
 			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 			return
 		}
@@ -132,14 +135,14 @@ func JWKSHandler(keys func() map[string]ed25519.PublicKey, maxAge time.Duration)
 		sum := sha256.Sum256(doc)
 		etag := `"` + base64.RawURLEncoding.EncodeToString(sum[:]) + `"`
 		h := w.Header()
-		h.Set(headerETag, etag)
-		h.Set(headerCacheControl, fmt.Sprintf("%s, %s=%d", directivePublic, directiveMaxAge, int64(max(maxAge, 0)/time.Second)))
-		if etagMatches(r.Header.Values(headerIfNoneMatch), etag) {
+		h.Set(httpx.HeaderETag, etag)
+		h.Set(httpx.HeaderCacheControl, fmt.Sprintf("%s, %s=%d", httpx.DirectivePublic, httpx.DirectiveMaxAge, int64(max(maxAge, 0)/time.Second)))
+		if etagMatches(r.Header.Values(httpx.HeaderIfNoneMatch), etag) {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
-		h.Set(headerContentType, mediaTypeJWKSet)
-		h.Set(headerContentLength, strconv.Itoa(len(doc)))
+		h.Set(httpx.HeaderContentType, mediaTypeJWKSet)
+		h.Set(httpx.HeaderContentLength, strconv.Itoa(len(doc)))
 		_, _ = w.Write(doc)
 	})
 }

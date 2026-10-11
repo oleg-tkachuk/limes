@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/oleg-tkachuk/limes/internal/jose"
 )
 
 // Issuer mints capabilities. Two responsibilities, in this order:
@@ -365,7 +367,5 @@ func GenerateEd25519Keypair() (kid string, pub ed25519.PublicKey, priv ed25519.P
 // thumbprint. The same key always gets the same kid, wherever it is derived,
 // and two keys never share one.
 func DeriveKeyID(pub ed25519.PublicKey) string {
-	// An Ed25519 key always has a JWK and a thumbprint; nothing here fails.
-	thumb, _ := DPoPJWK{Kty: jwkKtyOKP, Crv: jwkCrvEd25519, X: b64(pub)}.Thumbprint()
-	return thumb
+	return jose.Ed25519Thumbprint(pub)
 }

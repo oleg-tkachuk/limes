@@ -6,7 +6,6 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
-	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/asn1"
@@ -23,6 +22,8 @@ import (
 
 	"github.com/go-json-experiment/json"
 	"github.com/go-json-experiment/json/jsontext"
+
+	"github.com/oleg-tkachuk/limes/internal/jose"
 )
 
 // Proof of possession, after RFC 9449 (DPoP).
@@ -42,28 +43,9 @@ const DPoPTokenType = "dpop+jwt"
 // DefaultDPoPWindow is how far a proof's iat may be from the verifier's clock.
 const DefaultDPoPWindow = time.Minute
 
-// JWS algorithms and JWK members (RFC 7518, RFC 8037, RFC 9864).
 const (
-	// algEd25519 is Ed25519 as RFC 9864 fully specifies it: what tokens,
-	// JWKS entries and proofs this module writes carry.
-	algEd25519 = "Ed25519"
-	// algEdDSA is the polymorphic identifier RFC 9864 deprecates. A DPoP
-	// proof or a JWKS entry from a client or tool that predates it is still
-	// read; nothing here writes it.
-	algEdDSA      = "EdDSA"
-	algES256      = "ES256"
-	jwkKtyOKP     = "OKP"
-	jwkKtyEC      = "EC"
-	jwkCrvEd25519 = "Ed25519"
-	jwkCrvP256    = "P-256"
-)
-
-const (
-	// p256CoordinateBytes is the size of a P-256 point coordinate, and of
-	// each half of an ES256 signature.
-	p256CoordinateBytes = 32
 	// es256SignatureBytes is a JWS ES256 signature: r || s, not DER.
-	es256SignatureBytes = 2 * p256CoordinateBytes
+	es256SignatureBytes = 2 * jose.P256CoordinateBytes
 	// dpopJTIBytes is the randomness in a proof's jti.
 	dpopJTIBytes = 16
 	// defaultReplayCacheEntries bounds a MemoryReplayCache built with no
@@ -126,84 +108,16 @@ type dpopClaims struct {
 
 // DPoPJWK is the public key a proof carries in its header: an Ed25519 (OKP)
 // or P-256 (EC) key.
-type DPoPJWK struct {
-	Kty string `json:"kty"`
-	Crv string `json:"crv"`
-	X   string `json:"x"`
-	Y   string `json:"y,omitempty"`
-}
+type DPoPJWK = jose.JWK
 
 // PublicJWK describes pub, an ed25519.PublicKey or a P-256 *ecdsa.PublicKey,
 // as a JWK.
 func PublicJWK(pub crypto.PublicKey) (DPoPJWK, error) {
-	switch k := pub.(type) {
-	case ed25519.PublicKey:
-		return DPoPJWK{Kty: jwkKtyOKP, Crv: jwkCrvEd25519, X: b64(k)}, nil
-	case *ecdsa.PublicKey:
-		if k.Curve != elliptic.P256() {
-			return DPoPJWK{}, errors.New("limes: DPoP EC keys must be P-256")
-		}
-		raw, err := k.Bytes() // 0x04 || X || Y
-		if err != nil {
-			return DPoPJWK{}, fmt.Errorf("limes: DPoP EC key: %w", err)
-		}
-		x, y := raw[1:1+p256CoordinateBytes], raw[1+p256CoordinateBytes:]
-		return DPoPJWK{Kty: jwkKtyEC, Crv: jwkCrvP256, X: b64(x), Y: b64(y)}, nil
-	}
-	return DPoPJWK{}, fmt.Errorf("limes: unsupported DPoP key type %T", pub)
-}
-
-// Thumbprint is the key's RFC 7638 SHA-256 thumbprint, base64url — the value
-// a key-bound capability carries as its ConfirmationJKT.
-func (j DPoPJWK) Thumbprint() (string, error) {
-	// RFC 7638 §3.2: the required members only, in lexicographic order, as
-	// JSON with no whitespace. The structs' field order is that order.
-	var canonical []byte
-	var err error
-	switch j.Kty {
-	case jwkKtyOKP:
-		canonical, err = json.Marshal(struct {
-			Crv string `json:"crv"`
-			Kty string `json:"kty"`
-			X   string `json:"x"`
-		}{j.Crv, jwkKtyOKP, j.X})
-	case jwkKtyEC:
-		canonical, err = json.Marshal(struct {
-			Crv string `json:"crv"`
-			Kty string `json:"kty"`
-			X   string `json:"x"`
-			Y   string `json:"y"`
-		}{j.Crv, jwkKtyEC, j.X, j.Y})
-	default:
-		return "", fmt.Errorf("limes: unsupported JWK kty %q", j.Kty)
-	}
+	j, err := jose.PublicJWK(pub)
 	if err != nil {
-		return "", fmt.Errorf("limes: JWK thumbprint: %w", err)
+		return DPoPJWK{}, fmt.Errorf("limes: DPoP key: %w", err)
 	}
-	sum := sha256.Sum256(canonical)
-	return b64(sum[:]), nil
-}
-
-func (j DPoPJWK) publicKey() (crypto.PublicKey, error) {
-	x, err := base64.RawURLEncoding.DecodeString(j.X)
-	if err != nil {
-		return nil, err
-	}
-	switch {
-	case j.Kty == jwkKtyOKP && j.Crv == jwkCrvEd25519:
-		if len(x) != ed25519.PublicKeySize {
-			return nil, errors.New("Ed25519 key wrong length")
-		}
-		return ed25519.PublicKey(x), nil
-	case j.Kty == jwkKtyEC && j.Crv == jwkCrvP256:
-		y, err := base64.RawURLEncoding.DecodeString(j.Y)
-		if err != nil || len(x) != p256CoordinateBytes || len(y) != p256CoordinateBytes {
-			return nil, errors.New("P-256 key malformed")
-		}
-		raw := append(append([]byte{4}, x...), y...)
-		return ecdsa.ParseUncompressedPublicKey(elliptic.P256(), raw)
-	}
-	return nil, fmt.Errorf("unsupported JWK %s/%s", j.Kty, j.Crv)
+	return j, nil
 }
 
 // KeyThumbprint is PublicJWK followed by Thumbprint: what to put in an
@@ -219,7 +133,7 @@ func KeyThumbprint(pub crypto.PublicKey) (string, error) {
 // AccessTokenHash is the proof's `ath`: base64url(SHA-256(token)).
 func AccessTokenHash(token string) string {
 	sum := sha256.Sum256([]byte(token))
-	return b64(sum[:])
+	return jose.B64(sum[:])
 }
 
 // DPoPProofRequest is the request a proof is signed for.
@@ -244,9 +158,9 @@ func NewDPoPProof(key crypto.Signer, req DPoPProofRequest) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	alg := algEd25519
-	if jwk.Kty == jwkKtyEC {
-		alg = algES256
+	alg := jose.AlgEd25519
+	if jwk.Kty == jose.KtyEC {
+		alg = jose.AlgES256
 	}
 	jti := make([]byte, dpopJTIBytes)
 	if _, err := rand.Read(jti); err != nil {
@@ -258,15 +172,15 @@ func NewDPoPProof(key crypto.Signer, req DPoPProofRequest) (string, error) {
 	}
 	header, _ := json.Marshal(dpopHeader{Typ: DPoPTokenType, Alg: alg, JWK: &jwk})
 	claims, _ := json.Marshal(dpopClaims{
-		JTI: b64(jti), HTM: req.Method, HTU: htu, IAT: float64(req.Now.Unix()),
+		JTI: jose.B64(jti), HTM: req.Method, HTU: htu, IAT: float64(req.Now.Unix()),
 		ATH: AccessTokenHash(req.Token), Nonce: req.Nonce,
 	})
-	input := b64(header) + "." + b64(claims)
+	input := jose.B64(header) + "." + jose.B64(claims)
 	sig, err := signDPoP(key, []byte(input))
 	if err != nil {
 		return "", err
 	}
-	return input + "." + b64(sig), nil
+	return input + "." + jose.B64(sig), nil
 }
 
 // signDPoP signs through the crypto.Signer interface alone, so a key held
@@ -290,8 +204,8 @@ func signDPoP(key crypto.Signer, input []byte) ([]byte, error) {
 			return nil, errors.New("limes: DPoP sign: malformed ECDSA signature")
 		}
 		sig := make([]byte, es256SignatureBytes)
-		rs.R.FillBytes(sig[:p256CoordinateBytes])
-		rs.S.FillBytes(sig[p256CoordinateBytes:])
+		rs.R.FillBytes(sig[:jose.P256CoordinateBytes])
+		rs.S.FillBytes(sig[jose.P256CoordinateBytes:])
 		return sig, nil
 	}
 	return nil, fmt.Errorf("limes: unsupported DPoP key type %T", key.Public())
@@ -300,14 +214,14 @@ func signDPoP(key crypto.Signer, input []byte) ([]byte, error) {
 func verifyDPoPSignature(pub crypto.PublicKey, alg string, input, sig []byte) bool {
 	switch k := pub.(type) {
 	case ed25519.PublicKey:
-		return (alg == algEd25519 || alg == algEdDSA) && ed25519.Verify(k, input, sig)
+		return (alg == jose.AlgEd25519 || alg == jose.AlgEdDSA) && ed25519.Verify(k, input, sig)
 	case *ecdsa.PublicKey:
-		if alg != algES256 || len(sig) != es256SignatureBytes {
+		if alg != jose.AlgES256 || len(sig) != es256SignatureBytes {
 			return false
 		}
 		digest := sha256.Sum256(input)
-		r := new(big.Int).SetBytes(sig[:p256CoordinateBytes])
-		s := new(big.Int).SetBytes(sig[p256CoordinateBytes:])
+		r := new(big.Int).SetBytes(sig[:jose.P256CoordinateBytes])
+		s := new(big.Int).SetBytes(sig[jose.P256CoordinateBytes:])
 		return ecdsa.Verify(k, digest[:], r, s)
 	}
 	return false
@@ -371,7 +285,7 @@ type DPoPVerifier struct {
 // DPoPSigningAlgorithms are the JWS algorithms a DPoP proof may be signed
 // with, as a challenge advertises them (RFC 9449 §7.1): the fully-specified
 // names (RFC 9864). The deprecated "EdDSA" is still read, never advertised.
-func DPoPSigningAlgorithms() []string { return []string{algEd25519, algES256} }
+func DPoPSigningAlgorithms() []string { return []string{jose.AlgEd25519, jose.AlgES256} }
 
 // errNoReplayCache is a DPoPVerifier configured without the replay cache it
 // requires.
@@ -392,33 +306,33 @@ func (v *DPoPVerifier) check(ctx context.Context, c Capability, token string, p 
 	}
 	now := v.Now
 
-	parts, err := splitToken(p.Proof)
+	parts, err := jose.Split(p.Proof)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrDPoPInvalid, err)
 	}
 	var header dpopHeader
-	if err := decodeSegment(parts.header, &header); err != nil || header.Typ != DPoPTokenType || header.JWK == nil {
+	if err := decodeSegment(parts.Header, &header); err != nil || header.Typ != DPoPTokenType || header.JWK == nil {
 		return fmt.Errorf("%w: header", ErrDPoPInvalid)
 	}
 	// RFC 9449 §4.3: the jwk must not contain a private key.
-	if jwkHasPrivateMember(parts.header) {
+	if jwkHasPrivateMember(parts.Header) {
 		return fmt.Errorf("%w: jwk carries a private key", ErrDPoPInvalid)
 	}
 	thumb, err := header.JWK.Thumbprint()
 	if err != nil || thumb != c.ConfirmationJKT {
 		return fmt.Errorf("%w: key is not the one the capability is bound to", ErrDPoPInvalid)
 	}
-	pub, err := header.JWK.publicKey()
+	pub, err := header.JWK.PublicKey()
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrDPoPInvalid, err)
 	}
-	sig, err := base64.RawURLEncoding.DecodeString(parts.sig)
-	if err != nil || !verifyDPoPSignature(pub, header.Alg, []byte(parts.signingInput()), sig) {
+	sig, err := base64.RawURLEncoding.DecodeString(parts.Signature)
+	if err != nil || !verifyDPoPSignature(pub, header.Alg, []byte(parts.SigningInput()), sig) {
 		return fmt.Errorf("%w: signature", ErrDPoPInvalid)
 	}
 
 	var claims dpopClaims
-	if err := decodeSegment(parts.claims, &claims); err != nil || claims.JTI == "" {
+	if err := decodeSegment(parts.Payload, &claims); err != nil || claims.JTI == "" {
 		return fmt.Errorf("%w: claims", ErrDPoPInvalid)
 	}
 	// RFC 9110 §9.1: a method is case-sensitive.
@@ -484,8 +398,6 @@ func decodeSegment(seg string, v any) error {
 	}
 	return json.Unmarshal(raw, v)
 }
-
-func b64(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 
 // MemoryReplayCache is a bounded in-process ReplayCache. A deployment with
 // several replicas behind a balancer that does not pin a client to one

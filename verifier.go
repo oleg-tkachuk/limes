@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/oleg-tkachuk/limes/internal/jose"
 )
 
 // KeyResolver resolves a JWKS `kid` to the public key the verifier
@@ -394,11 +396,11 @@ func (v *StandardVerifier) verifyBiscuit(ctx context.Context, token string, mete
 // run in Verify on the capability the token finally grants.
 func (v *StandardVerifier) verifySigned(ctx context.Context, token string) (*Capability, error) {
 	// 1) Header: structure, algorithm, type, key id.
-	parts, err := splitToken(token)
+	parts, err := jose.Split(token)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
-	header, err := parseHeader(parts.header)
+	header, err := parseHeader(parts.Header)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
@@ -424,7 +426,7 @@ func (v *StandardVerifier) verifySigned(ctx context.Context, token string) (*Cap
 	}
 
 	// 3) Claims, now known to be the issuer's.
-	cap, err := parseClaims(parts.claims)
+	cap, err := parseClaims(parts.Payload)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/oleg-tkachuk/limes/internal/jose"
 )
 
 // RFC 9864 deprecates the polymorphic "EdDSA": everything this module writes
@@ -17,13 +19,13 @@ import (
 func TestWritesTheFullySpecifiedAlgorithm(t *testing.T) {
 	issuer, _, _, pub := buildIssuerVerifier(t)
 	_, token := issueFor(t, issuer)
-	parts, err := splitToken(token)
+	parts, err := jose.Split(token)
 	if err != nil {
 		t.Fatal(err)
 	}
-	h, err := parseHeader(parts.header)
-	if err != nil || h.Alg != algEd25519 {
-		t.Errorf("token alg = %q, %v; want %q", h.Alg, err, algEd25519)
+	h, err := parseHeader(parts.Header)
+	if err != nil || h.Alg != jose.AlgEd25519 {
+		t.Errorf("token alg = %q, %v; want %q", h.Alg, err, jose.AlgEd25519)
 	}
 
 	doc, err := MarshalJWKS(map[string]ed25519.PublicKey{"k1": pub})
@@ -31,8 +33,8 @@ func TestWritesTheFullySpecifiedAlgorithm(t *testing.T) {
 		t.Fatal(err)
 	}
 	var set JWKSDocument
-	if err := json.Unmarshal(doc, &set); err != nil || set.Keys[0].Alg != algEd25519 {
-		t.Errorf("JWKS alg = %+v, %v; want %q", set, err, algEd25519)
+	if err := json.Unmarshal(doc, &set); err != nil || set.Keys[0].Alg != jose.AlgEd25519 {
+		t.Errorf("JWKS alg = %+v, %v; want %q", set, err, jose.AlgEd25519)
 	}
 
 	key := dpopKeys(t)["Ed25519"]
@@ -40,10 +42,10 @@ func TestWritesTheFullySpecifiedAlgorithm(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pp, _ := splitToken(proof)
+	pp, _ := jose.Split(proof)
 	var ph dpopHeader
-	if err := decodeSegment(pp.header, &ph); err != nil || ph.Alg != algEd25519 {
-		t.Errorf("proof alg = %q, %v; want %q", ph.Alg, err, algEd25519)
+	if err := decodeSegment(pp.Header, &ph); err != nil || ph.Alg != jose.AlgEd25519 {
+		t.Errorf("proof alg = %q, %v; want %q", ph.Alg, err, jose.AlgEd25519)
 	}
 }
 
@@ -62,7 +64,7 @@ func issueFor(t *testing.T, issuer *Issuer) (Capability, string) {
 func TestCapabilityTokenRefusesThePolymorphicAlgorithm(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	v := verifierFor(t, pub, VerifierConfig{})
-	tok := resign(t, priv, map[string]any{"alg": algEdDSA, "kid": "k1", "typ": TokenType}, validClaims(uuid.New()))
+	tok := resign(t, priv, map[string]any{"alg": jose.AlgEdDSA, "kid": "k1", "typ": TokenType}, validClaims(uuid.New()))
 	if _, err := v.Verify(context.Background(), VerifyRequest{Token: tok, Audience: audienceData}); !errors.Is(err, ErrInvalidToken) {
 		t.Fatalf("a token naming EdDSA: err = %v, want ErrInvalidToken", err)
 	}
@@ -72,13 +74,13 @@ func TestCapabilityTokenRefusesThePolymorphicAlgorithm(t *testing.T) {
 // names EdDSA; both are read.
 func TestReadsTheDeprecatedAlgorithmFromOthers(t *testing.T) {
 	pub, _, _ := ed25519.GenerateKey(nil)
-	doc := fmt.Sprintf(`{"keys":[{"kty":"OKP","crv":"Ed25519","kid":"old","alg":"EdDSA","x":%q}]}`, b64(pub))
+	doc := fmt.Sprintf(`{"keys":[{"kty":"OKP","crv":"Ed25519","kid":"old","alg":"EdDSA","x":%q}]}`, jose.B64(pub))
 	keys, err := ParseJWKS([]byte(doc))
 	if err != nil || !keys["old"].Equal(pub) {
 		t.Errorf("a JWKS entry naming EdDSA = %v, %v; want it read", keys, err)
 	}
 	_, priv, _ := ed25519.GenerateKey(nil)
-	if !verifyDPoPSignature(priv.Public(), algEdDSA, []byte("in"), ed25519.Sign(priv, []byte("in"))) {
+	if !verifyDPoPSignature(priv.Public(), jose.AlgEdDSA, []byte("in"), ed25519.Sign(priv, []byte("in"))) {
 		t.Error("a proof signed under EdDSA was refused")
 	}
 }
