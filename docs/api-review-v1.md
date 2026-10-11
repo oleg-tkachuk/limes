@@ -70,7 +70,7 @@ Adding a method to any of these after 1.0 breaks every implementation.
 |---|---|---|
 | E1 | The hierarchy (`caveatError` → `ErrCaveatViolation`, `popError` → `ErrInvalidSignature`, `requestError` → `ErrInvalidRequest`) is spread over 12 files; two tables encode the match order. | One table — sentinel, family, `Reason`, permanent, status — from which `reasonRules` and `refusals` are derived, and a golden test of the `errors.Is` matrix. apidiff guards identifiers, not these relations. |
 | E2 | Five unrelated not-found sentinels (`ErrNotFound`, `ErrChargeNotFound`, `ErrReservationNotFound`, `ErrUsageNotFound`, `ErrTenantBudgetNotFound`). | All match `ErrNotFound`, as the request errors match `ErrInvalidRequest`. Additive. |
-| E3 | `Delegate` returns `ErrExpired`/`ErrRevoked` about the *parent*; `ReasonOf` reports them as if the presented token were refused. | Wrap them in a delegation error, or document. |
+| E3 | `Delegate` returns `ErrExpired`/`ErrRevoked` about the *parent*; `ReasonOf` reports them as if the presented token were refused. | Kept: in a delegation the parent *is* the presented capability, and with decision 3 a verified one, so `expired` or `revoked` is the right reason. |
 | E4 | Decided: a family of their own (decision 4). Proof-of-possession refusals match `ErrInvalidSignature`, so nonce and scheme refusals are carved back out through aliases and table order. | A separate `ErrProofOfPossession` family. Breaks consumers that map only `ErrInvalidSignature` — which the docs promise today. |
 
 ## 5. Unexport — no consumer needs them
