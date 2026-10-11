@@ -237,7 +237,9 @@ child inherits its parent's binding or takes the sub-agent's own key, and
 key, for another method, URL or token, outside `DPoPVerifier.Window` (a
 minute by default) of the verifier's clock, or seen before; every refusal
 matches `ErrInvalidSignature`. `MemoryReplayCache` is in-process and bounded
-(100 000 ids unless told otherwise; full, it refuses rather than forgets):
+— 100 000 ids, and `DefaultReplayEntriesPerKey` (1 000) per key, so one
+key-bound token cannot fill it and lock the others out; full, it refuses
+rather than forgets:
 behind several replicas, a proof replayed to a different one inside the
 window is caught only by server nonces or a `ReplayCache` over a shared
 store.
@@ -606,7 +608,7 @@ log. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
 | `DefaultRevocationCacheTTL` · `DefaultRevocationCacheEntries` | 2 seconds · 100 000 (`WithMaxEntries`; a TTL below zero disables the cache) |
 | `RemoteJWKSConfig` | 10s fetch timeout · `RefreshInterval` 5m · `MinRefreshInterval` 10s · `MaxStale` 1h · 1 MiB document |
 | `DPoPVerifier.Window` | `DefaultDPoPWindow`, 1 minute |
-| `NewMemoryReplayCache(0)` | 100 000 ids |
+| `NewMemoryReplayCache(0)` | 100 000 ids; `DefaultReplayEntriesPerKey`, 1 000, per key (`WithEntriesPerKey`) |
 | `NewHMACNonces(0, key)` | `DefaultDPoPNonceLifetime`, 5 minutes; keys of at least `HMACNonceKeyBytes`, 32 |
 | `DefaultReservationTTL` | 5 minutes |
 | `MaxExternalRefBytes` | 200 |

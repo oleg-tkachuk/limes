@@ -322,10 +322,12 @@ type DPoPProof struct {
 
 // ReplayCache remembers proof ids for as long as a proof could be accepted.
 type ReplayCache interface {
-	// Seen records jti until expires and reports whether it was already
-	// recorded. An implementation that cannot tell — its store is
-	// unreachable — reports true: an unanswerable check refuses the proof.
-	Seen(ctx context.Context, jti string, expires time.Time) bool
+	// Seen records the proof id jti of the key with thumbprint jkt until
+	// expires, and reports whether it was already recorded. An
+	// implementation that cannot tell — its store is unreachable, or the
+	// key has used its share of the store — reports true: an unanswerable
+	// check refuses the proof.
+	Seen(ctx context.Context, jkt, jti string, expires time.Time) bool
 }
 
 // DPoPVerifier is how a StandardVerifier checks the proofs of key-bound
@@ -420,7 +422,7 @@ func (v *DPoPVerifier) check(ctx context.Context, c Capability, token string, p 
 	if v.Nonces != nil && !v.Nonces.Valid(ctx, claims.Nonce) {
 		return ErrDPoPNonceRequired
 	}
-	if v.Replay.Seen(ctx, claims.JTI, iat.Add(window)) {
+	if v.Replay.Seen(ctx, thumb, claims.JTI, iat.Add(window)) {
 		return ErrDPoPReplayed
 	}
 	return nil
@@ -462,48 +464,90 @@ func b64(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 // MemoryReplayCache is a bounded in-process ReplayCache. A deployment with
 // several replicas behind a balancer that does not pin a client to one
 // replica can see a proof replayed on another replica within the window;
-// keep the window short, or back ReplayCache with a shared store.
+// keep the window short, use server nonces (DPoPVerifier.Nonces), or back
+// ReplayCache with a shared store.
+//
+// Every key gets a share of the cache of its own (WithEntriesPerKey), so the
+// holder of one key-bound token cannot fill it with proofs and lock every
+// other key out: past its share, only that key's proofs are refused.
 type MemoryReplayCache struct {
 	mu         sync.Mutex
-	seen       map[string]time.Time
-	expiries   expiryHeap // the ids in seen, soonest to expire first
+	seen       map[replayKey]time.Time
+	perKey     map[string]int // live ids per key thumbprint
+	expiries   expiryHeap     // the ids in seen, soonest to expire first
 	maxEntries int
+	maxPerKey  int
 	now        func() time.Time
 }
 
-// NewMemoryReplayCache bounds the cache at maxEntries (≤ 0: 100 000).
-func NewMemoryReplayCache(maxEntries int) *MemoryReplayCache {
+// replayKey is one proof id of one key.
+type replayKey struct{ jkt, jti string }
+
+// DefaultReplayEntriesPerKey is how many live proof ids one key may hold in
+// a MemoryReplayCache: a thousand requests a window from one key.
+const DefaultReplayEntriesPerKey = 1_000
+
+// ReplayCacheOption configures a MemoryReplayCache.
+type ReplayCacheOption func(*MemoryReplayCache)
+
+// WithEntriesPerKey bounds the live proof ids of one key; ≤ 0 keeps the
+// default. It is never more than the whole cache.
+func WithEntriesPerKey(n int) ReplayCacheOption {
+	return func(c *MemoryReplayCache) {
+		if n > 0 {
+			c.maxPerKey = n
+		}
+	}
+}
+
+// NewMemoryReplayCache bounds the cache at maxEntries (≤ 0: 100 000), and
+// each key at DefaultReplayEntriesPerKey unless an option says otherwise.
+func NewMemoryReplayCache(maxEntries int, opts ...ReplayCacheOption) *MemoryReplayCache {
 	if maxEntries <= 0 {
 		maxEntries = defaultReplayCacheEntries
 	}
-	return &MemoryReplayCache{seen: map[string]time.Time{}, maxEntries: maxEntries, now: time.Now}
+	c := &MemoryReplayCache{
+		seen: map[replayKey]time.Time{}, perKey: map[string]int{},
+		maxEntries: maxEntries, maxPerKey: DefaultReplayEntriesPerKey, now: time.Now,
+	}
+	for _, o := range opts {
+		o(c)
+	}
+	c.maxPerKey = min(c.maxPerKey, c.maxEntries)
+	return c
 }
 
 // Seen implements ReplayCache. Expired ids are dropped as they lapse, soonest
-// first, so a full cache costs a lookup rather than a scan. When it is full
-// of live ids, the new id is refused as a replay rather than accepted
-// unrecorded — a full cache errs towards refusing.
-func (c *MemoryReplayCache) Seen(_ context.Context, jti string, expires time.Time) bool {
+// first, so a full cache costs a lookup rather than a scan. A key past its
+// share, or a cache full of live ids, refuses the new id as a replay rather
+// than accept it unrecorded — a full cache errs towards refusing.
+func (c *MemoryReplayCache) Seen(_ context.Context, jkt, jti string, expires time.Time) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.now()
 	for len(c.expiries) > 0 && !c.expiries[0].expires.After(now) {
-		delete(c.seen, heap.Pop(&c.expiries).(replayEntry).jti)
+		k := heap.Pop(&c.expiries).(replayEntry).key
+		delete(c.seen, k)
+		if c.perKey[k.jkt]--; c.perKey[k.jkt] <= 0 {
+			delete(c.perKey, k.jkt)
+		}
 	}
-	if _, ok := c.seen[jti]; ok {
+	k := replayKey{jkt: jkt, jti: jti}
+	if _, ok := c.seen[k]; ok {
 		return true
 	}
-	if len(c.seen) >= c.maxEntries {
+	if c.perKey[jkt] >= c.maxPerKey || len(c.seen) >= c.maxEntries {
 		return true
 	}
-	c.seen[jti] = expires
-	heap.Push(&c.expiries, replayEntry{jti: jti, expires: expires})
+	c.seen[k] = expires
+	c.perKey[jkt]++
+	heap.Push(&c.expiries, replayEntry{key: k, expires: expires})
 	return false
 }
 
 // replayEntry is one id a MemoryReplayCache holds, and when it lapses.
 type replayEntry struct {
-	jti     string
+	key     replayKey
 	expires time.Time
 }
 
