@@ -8,81 +8,24 @@ import (
 	"maps"
 	"net/netip"
 	"slices"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes/internal/jose"
+	"github.com/oleg-tkachuk/limes/jwks"
 )
 
 // KeyResolver resolves a JWKS `kid` to the public key the verifier
-// should use. StaticKeyResolver holds keys in memory; RemoteJWKSResolver
+// should use. jwks.Static holds keys in memory; jwks.Remote
 // fetches them from an issuer's JWKS endpoint with a cache.
 type KeyResolver interface {
 	// PublicKey returns the Ed25519 public key for the given kid.
-	// Returns ErrUnknownKID if the key set does not contain the kid,
+	// Returns jwks.ErrUnknownKID if the key set does not contain the kid,
 	// which the verifier reads as the token's fault (ErrInvalidToken).
 	// Any other error is the resolver's: the verifier refuses the token
 	// with it as it is, the server's fault rather than the token's.
 	PublicKey(ctx context.Context, kid string) (ed25519.PublicKey, error)
-}
-
-// ErrUnknownKID is the typed not-found return from KeyResolver. The
-// verifier wraps it in ErrInvalidToken for caller-facing errors, and it
-// stays matchable, so ops dashboards can tell "we don't know this kid" from
-// "signature mismatch".
-var ErrUnknownKID = errors.New("limes: unknown kid")
-
-// StaticKeyResolver is the in-memory implementation used in tests and
-// single-node deploys. Maps kid → public key; concurrency-safe via a
-// sync.RWMutex so rotation can swap a kid without restarting callers.
-type StaticKeyResolver struct {
-	mu   sync.RWMutex
-	keys map[string]ed25519.PublicKey
-}
-
-// NewStaticKeyResolver builds a resolver from a kid → public key map.
-// The map is copied to defend against caller mutation.
-func NewStaticKeyResolver(keys map[string]ed25519.PublicKey) *StaticKeyResolver {
-	return &StaticKeyResolver{keys: maps.Clone(keys)}
-}
-
-// PublicKey implements KeyResolver.
-func (r *StaticKeyResolver) PublicKey(_ context.Context, kid string) (ed25519.PublicKey, error) {
-	r.mu.RLock()
-	k, ok := r.keys[kid]
-	r.mu.RUnlock()
-	if !ok {
-		return nil, ErrUnknownKID
-	}
-	return k, nil
-}
-
-// SetKey adds or replaces a kid → key mapping. Rotation step 1: publish
-// the new key alongside the old.
-func (r *StaticKeyResolver) SetKey(kid string, key ed25519.PublicKey) {
-	r.mu.Lock()
-	if r.keys == nil {
-		r.keys = make(map[string]ed25519.PublicKey)
-	}
-	r.keys[kid] = key
-	r.mu.Unlock()
-}
-
-// RemoveKey withdraws a kid. Rotation step 3: call it only once the longest
-// outstanding TTL signed under that key has elapsed.
-func (r *StaticKeyResolver) RemoveKey(kid string) {
-	r.mu.Lock()
-	delete(r.keys, kid)
-	r.mu.Unlock()
-}
-
-// Keys returns a snapshot of the current key set, e.g. for MarshalJWKS.
-func (r *StaticKeyResolver) Keys() map[string]ed25519.PublicKey {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return maps.Clone(r.keys)
 }
 
 // DefaultMaxTokenBytes bounds the token a verifier will look at. A capability
@@ -152,7 +95,7 @@ type VerifierConfig struct {
 }
 
 // Verifier validates tokens. A deployment typically resolves keys through a
-// cached JWKS (RemoteJWKSResolver) and checks revocation through a short-TTL
+// cached JWKS (jwks.Remote) and checks revocation through a short-TTL
 // cache (CachedRevocationChecker), so revocation propagates quickly without
 // hammering the store.
 type Verifier interface {
@@ -416,7 +359,7 @@ func (v *StandardVerifier) verifySigned(ctx context.Context, token string) (*Cap
 	if err != nil {
 		// An unknown kid is the token's fault; a resolver that cannot
 		// answer — the issuer's keys out of reach, a store down — is ours.
-		if errors.Is(err, ErrUnknownKID) {
+		if errors.Is(err, jwks.ErrUnknownKID) {
 			return nil, fmt.Errorf("%w: kid %q: %w", ErrInvalidToken, header.Kid, err)
 		}
 		return nil, fmt.Errorf("limes: resolve kid %q: %w", header.Kid, err)

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/oleg-tkachuk/limes/jwks"
 )
 
 // memStore is a goroutine-safe in-memory Store stub, so the verifier's
@@ -99,7 +101,7 @@ func buildIssuerVerifier(t *testing.T) (*Issuer, *StandardVerifier, *memStore, e
 		t.Fatalf("issuer: %v", err)
 	}
 	cache := NewCachedRevocationChecker(store, -1) // disable cache for deterministic tests
-	keys := NewStaticKeyResolver(map[string]ed25519.PublicKey{"k1": pub})
+	keys := jwks.NewStatic(map[string]ed25519.PublicKey{"k1": pub})
 	v, err := NewStandardVerifier(VerifierConfig{
 		Keys:           keys,
 		Revocations:    cache,
@@ -168,7 +170,7 @@ func TestVerify_Expired(t *testing.T) {
 	signer, _ := NewEd25519Signer("k1", priv)
 	store := newMemStore()
 	cache := NewCachedRevocationChecker(store, -1)
-	keys := NewStaticKeyResolver(map[string]ed25519.PublicKey{"k1": pub})
+	keys := jwks.NewStatic(map[string]ed25519.PublicKey{"k1": pub})
 
 	// Inject a clock that returns a fixed past time at issue, then
 	// jumps an hour ahead at verify.
@@ -246,7 +248,7 @@ func TestVerify_UntrustedIssuer(t *testing.T) {
 	})
 
 	cache := NewCachedRevocationChecker(store, -1)
-	keys := NewStaticKeyResolver(map[string]ed25519.PublicKey{"k1": pub})
+	keys := jwks.NewStatic(map[string]ed25519.PublicKey{"k1": pub})
 	verifier, _ := NewStandardVerifier(VerifierConfig{
 		Keys:           keys,
 		Revocations:    cache,

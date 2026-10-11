@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/jwks"
 	"github.com/oleg-tkachuk/limes/memstore"
 )
 
@@ -46,7 +47,7 @@ func newExampleStack() exampleStack {
 		log.Fatal(err)
 	}
 	verifier, err := limes.NewStandardVerifier(limes.VerifierConfig{
-		Keys:               limes.NewStaticKeyResolver(map[string]ed25519.PublicKey{kid: pub}),
+		Keys:               jwks.NewStatic(map[string]ed25519.PublicKey{kid: pub}),
 		Revocations:        records,
 		TrustedIssuers:     []string{exampleIssuerName},
 		AcceptBiscuit:      true,
@@ -96,7 +97,7 @@ func ExampleIssuer_Issue() {
 		Signer: signer, Store: records, IssuerName: exampleIssuerName,
 	})
 	verifier, _ := limes.NewStandardVerifier(limes.VerifierConfig{
-		Keys:           limes.NewStaticKeyResolver(map[string]ed25519.PublicKey{kid: pub}),
+		Keys:           jwks.NewStatic(map[string]ed25519.PublicKey{kid: pub}),
 		Revocations:    records,
 		TrustedIssuers: []string{exampleIssuerName},
 	})

@@ -5,13 +5,11 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
-	"net/http"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/oleg-tkachuk/limes/internal/httpx"
 	"github.com/oleg-tkachuk/limes/internal/jose"
 )
 
@@ -32,29 +30,6 @@ func FuzzParseClaims(f *testing.F) {
 		}
 		if c.Caveats.MaxBudgetAmount < 0 || c.Caveats.MaxBudgetAmount > MaxNanos {
 			t.Fatalf("accepted a budget of %d", int64(c.Caveats.MaxBudgetAmount))
-		}
-	})
-}
-
-// FuzzParseJWKS holds ParseJWKS to keys a verifier can use: every key it
-// returns is an Ed25519 public key under a kid.
-func FuzzParseJWKS(f *testing.F) {
-	pub := ed25519.NewKeyFromSeed(goldenSeed[:]).Public().(ed25519.PublicKey)
-	doc, err := MarshalJWKS(map[string]ed25519.PublicKey{goldenKID: pub})
-	if err != nil {
-		f.Fatal(err)
-	}
-	f.Add(doc)
-	f.Add([]byte(`{"keys":[{"kty":"OKP","crv":"Ed25519","kid":"k","x":"AA"}]}`))
-	f.Fuzz(func(t *testing.T, raw []byte) {
-		keys, err := ParseJWKS(raw)
-		if err != nil {
-			return
-		}
-		for kid, k := range keys {
-			if kid == "" || len(k) != ed25519.PublicKeySize {
-				t.Fatalf("kid %q with a %d-byte key", kid, len(k))
-			}
 		}
 	})
 }
@@ -140,24 +115,6 @@ func FuzzParseAuthorization(f *testing.F) {
 		again, cred, err := ParseAuthorization(string(scheme) + " " + credential)
 		if err != nil || again != scheme || cred != credential {
 			t.Fatalf("%q reads back as %q %q, %v", header, again, cred, err)
-		}
-	})
-}
-
-// FuzzResponseFreshness holds the Cache-Control reader to a freshness the
-// resolver can clamp: never negative, never past what delta-seconds can say,
-// and zero when the response says nothing.
-func FuzzResponseFreshness(f *testing.F) {
-	for _, s := range [][2]string{{"public, max-age=60", "10"}, {`max-age="5", max-age=9`, ""}, {"no-cache", "x"}, {"max-age=99999999999", "-1"}} {
-		f.Add(s[0], s[1])
-	}
-	f.Fuzz(func(t *testing.T, cacheControl, age string) {
-		h := http.Header{}
-		h.Set(httpx.HeaderCacheControl, cacheControl)
-		h.Set(httpx.HeaderAge, age)
-		freshness, ok := responseFreshness(h)
-		if freshness < 0 || freshness > maxDeltaSeconds*time.Second || !ok && freshness != 0 {
-			t.Fatalf("Cache-Control %q, Age %q read as %v, %v", cacheControl, age, freshness, ok)
 		}
 	})
 }

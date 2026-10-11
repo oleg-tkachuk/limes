@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"testing"
 	"time"
+
+	"github.com/oleg-tkachuk/limes/jwks"
 )
 
 // RFC 8037 appendix A: the Ed25519 public key and its RFC 7638 thumbprint.
@@ -46,7 +48,7 @@ func TestConfigDefaults(t *testing.T) {
 	}
 
 	v, err := NewStandardVerifier(VerifierConfig{
-		Keys:           NewStaticKeyResolver(map[string]ed25519.PublicKey{"k1": pub}),
+		Keys:           jwks.NewStatic(map[string]ed25519.PublicKey{"k1": pub}),
 		Revocations:    newMemStore(),
 		TrustedIssuers: []string{goldenIssuer},
 	})
@@ -55,16 +57,6 @@ func TestConfigDefaults(t *testing.T) {
 	}
 	if v.cfg.Leeway != 30*time.Second {
 		t.Errorf("verifier leeway = %s, want 30s", v.cfg.Leeway)
-	}
-
-	r, err := NewRemoteJWKSResolver(RemoteJWKSConfig{URL: "https://issuer.example.com/jwks"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.cfg.Client.Timeout != 10*time.Second || r.cfg.RefreshInterval != 5*time.Minute ||
-		r.cfg.MinRefreshInterval != 10*time.Second || r.cfg.MaxStale != time.Hour || r.cfg.MaxDocumentBytes != 1<<20 {
-		t.Errorf("remote JWKS defaults = timeout %s, refresh %s, min refresh %s, max stale %s, max bytes %d",
-			r.cfg.Client.Timeout, r.cfg.RefreshInterval, r.cfg.MinRefreshInterval, r.cfg.MaxStale, r.cfg.MaxDocumentBytes)
 	}
 
 	if c := NewMemoryReplayCache(0); c.maxEntries != 100_000 {
@@ -89,7 +81,7 @@ func TestConfigRefusesNegatives(t *testing.T) {
 	}
 
 	base := VerifierConfig{
-		Keys:           NewStaticKeyResolver(map[string]ed25519.PublicKey{"k1": pub}),
+		Keys:           jwks.NewStatic(map[string]ed25519.PublicKey{"k1": pub}),
 		Revocations:    newMemStore(),
 		TrustedIssuers: []string{goldenIssuer},
 	}

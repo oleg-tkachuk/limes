@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+
+	"github.com/oleg-tkachuk/limes/jwks"
 )
 
 // pemTypePrivateKey is the PEM type of a PKCS#8 private key (RFC 7468 §10).
@@ -61,7 +63,7 @@ type SigningKey struct {
 
 // LoadOrGenerateKey reads the key at path (LoadPrivateKey) or, when path is
 // empty, generates an ephemeral one. kid names it; empty derives one
-// (DeriveKeyID). A path that cannot be read is an error, never a reason to
+// (jwks.KeyID). A path that cannot be read is an error, never a reason to
 // fall back to a fresh key. Log a generated key loudly: an operator who
 // forgot to mount the file finds out on the first restart otherwise.
 func LoadOrGenerateKey(path, kid string) (SigningKey, error) {
@@ -80,7 +82,7 @@ func LoadOrGenerateKey(path, kid string) (SigningKey, error) {
 	}
 	pub := priv.Public().(ed25519.PublicKey)
 	if kid == "" {
-		kid = DeriveKeyID(pub)
+		kid = jwks.KeyID(pub)
 	}
 	return SigningKey{KeyID: kid, Public: pub, Private: priv, Generated: generated}, nil
 }

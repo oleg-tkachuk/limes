@@ -1,4 +1,4 @@
-package limes
+package jwks
 
 import (
 	"net/http"

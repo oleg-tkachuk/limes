@@ -1,4 +1,4 @@
-package limes
+package jwks
 
 import (
 	"context"
@@ -50,10 +50,10 @@ func TestResponseFreshness(t *testing.T) {
 	}
 }
 
-// The resolver asks for the registered JWK Set media type and keeps a set
+// The resolver asks for the registered entry Set media type and keeps a set
 // only as long as the response's Cache-Control allows, within its bounds.
 func TestRemoteJWKSHonoursTheResponse(t *testing.T) {
-	kid, pub, _, err := GenerateEd25519Keypair()
+	kid, pub, _, err := generateKeypair()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,13 +63,13 @@ func TestRemoteJWKSHonoursTheResponse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fetches.Add(1)
 		accept.Store(r.Header.Get("Accept"))
-		doc, _ := MarshalJWKS(map[string]ed25519.PublicKey{kid: pub})
+		doc, _ := Marshal(map[string]ed25519.PublicKey{kid: pub})
 		w.Header().Set(httpx.HeaderCacheControl, "max-age="+maxAge)
 		_, _ = w.Write(doc)
 	}))
 	defer srv.Close()
 	clock := &stepClock{t: time.Unix(1_800_000_000, 0)}
-	r, err := NewRemoteJWKSResolver(RemoteJWKSConfig{
+	r, err := NewRemote(RemoteConfig{
 		URL: srv.URL, Now: clock.Now,
 		MinRefreshInterval: 10 * time.Second, RefreshInterval: 5 * time.Minute, MaxStale: time.Hour,
 	})
@@ -97,7 +97,7 @@ func TestRemoteJWKSHonoursTheResponse(t *testing.T) {
 
 // A max-age outside the resolver's bounds is clamped to them.
 func TestRemoteJWKSClampsFreshness(t *testing.T) {
-	r, err := NewRemoteJWKSResolver(RemoteJWKSConfig{
+	r, err := NewRemote(RemoteConfig{
 		URL: "https://issuer.example/jwks", MinRefreshInterval: 10 * time.Second, RefreshInterval: time.Minute, MaxStale: time.Hour,
 	})
 	if err != nil {
@@ -115,11 +115,11 @@ func TestRemoteJWKSClampsFreshness(t *testing.T) {
 }
 
 func TestJWKSHandler(t *testing.T) {
-	kid, pub, _, err := GenerateEd25519Keypair()
+	kid, pub, _, err := generateKeypair()
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := JWKSHandler(func() map[string]ed25519.PublicKey { return map[string]ed25519.PublicKey{kid: pub} }, 5*time.Minute)
+	h := Handler(func() map[string]ed25519.PublicKey { return map[string]ed25519.PublicKey{kid: pub} }, 5*time.Minute)
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/jwks", nil))
@@ -127,7 +127,7 @@ func TestJWKSHandler(t *testing.T) {
 		rec.Header().Get(httpx.HeaderCacheControl) != "public, max-age=300" {
 		t.Fatalf("GET = %d %v", rec.Code, rec.Header())
 	}
-	keys, err := ParseJWKS(rec.Body.Bytes())
+	keys, err := Parse(rec.Body.Bytes())
 	if err != nil || !keys[kid].Equal(pub) {
 		t.Fatalf("served set = %v, %v", keys, err)
 	}
@@ -151,7 +151,7 @@ func TestJWKSHandler(t *testing.T) {
 	// The resolver reads what the handler serves, and revalidates by ETag.
 	srv := httptest.NewServer(h)
 	defer srv.Close()
-	r, err := NewRemoteJWKSResolver(RemoteJWKSConfig{URL: srv.URL})
+	r, err := NewRemote(RemoteConfig{URL: srv.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestJWKSHandler(t *testing.T) {
 // read, say — is a failed fetch, not an empty key set: the last good set
 // keeps serving within MaxStale, as for any other failure.
 func TestRemoteJWKSKeepsTheSetWhenNoKeyIsUsable(t *testing.T) {
-	kid, pub, _, err := GenerateEd25519Keypair()
+	kid, pub, _, err := generateKeypair()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,12 +174,12 @@ func TestRemoteJWKSKeepsTheSetWhenNoKeyIsUsable(t *testing.T) {
 			_, _ = w.Write([]byte(`{"keys":[{"kty":"OKP","crv":"Ed448","kid":"k2","x":"AA"}]}`))
 			return
 		}
-		doc, _ := MarshalJWKS(map[string]ed25519.PublicKey{kid: pub})
+		doc, _ := Marshal(map[string]ed25519.PublicKey{kid: pub})
 		_, _ = w.Write(doc)
 	}))
 	defer srv.Close()
 	clock := &stepClock{t: time.Unix(1_800_000_000, 0)}
-	r, err := NewRemoteJWKSResolver(RemoteJWKSConfig{URL: srv.URL, Now: clock.Now})
+	r, err := NewRemote(RemoteConfig{URL: srv.URL, Now: clock.Now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestRemoteJWKSKeepsTheSetWhenNoKeyIsUsable(t *testing.T) {
 		t.Fatalf("after a response with no usable key: %v, %v; want the last good key", got, err)
 	}
 	// An empty set is an issuer withdrawing every key, and is taken as such.
-	if keys, skipped, err := parseJWKS([]byte(`{"keys":[]}`)); err != nil || len(keys) != 0 || skipped != 0 {
+	if keys, skipped, err := parse([]byte(`{"keys":[]}`)); err != nil || len(keys) != 0 || skipped != 0 {
 		t.Errorf("an empty set = %v, %d, %v", keys, skipped, err)
 	}
 }
@@ -201,7 +201,7 @@ func TestRemoteJWKSKeepsTheSetWhenNoKeyIsUsable(t *testing.T) {
 // A negative max-age would write an invalid Cache-Control; it is served as
 // zero.
 func TestJWKSHandlerClampsANegativeMaxAge(t *testing.T) {
-	h := JWKSHandler(func() map[string]ed25519.PublicKey { return nil }, -time.Second)
+	h := Handler(func() map[string]ed25519.PublicKey { return nil }, -time.Second)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/jwks", nil))
 	if got := rec.Header().Get(httpx.HeaderCacheControl); got != "public, max-age=0" {

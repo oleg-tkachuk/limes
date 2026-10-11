@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/oleg-tkachuk/limes/internal/httpx"
+	"github.com/oleg-tkachuk/limes/jwks"
 )
 
 func TestErrorResponse(t *testing.T) {
@@ -56,7 +57,7 @@ func TestErrorResponse(t *testing.T) {
 		{"store outage", errors.New("dial tcp: refused"), AuthSchemeBearer, http.StatusInternalServerError, nil, false},
 		// An issuer's JWKS out of reach is the server's trouble, not a bad
 		// token: the client may retry, and must not discard its token.
-		{"keys unavailable", fmt.Errorf("limes: resolve kid %q: %w", "k", ErrJWKSUnavailable), AuthSchemeBearer,
+		{"keys unavailable", fmt.Errorf("limes: resolve kid %q: %w", "k", jwks.ErrUnavailable), AuthSchemeBearer,
 			http.StatusServiceUnavailable, nil, false},
 	}
 	for _, tc := range cases {

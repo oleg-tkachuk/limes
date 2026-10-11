@@ -3,7 +3,6 @@ package limes
 import (
 	"context"
 	"crypto/ed25519"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -12,12 +11,13 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes/internal/jose"
+	"github.com/oleg-tkachuk/limes/jwks"
 )
 
 // RFC 9864 deprecates the polymorphic "EdDSA": everything this module writes
 // names Ed25519, and a capability token naming anything else is refused.
 func TestWritesTheFullySpecifiedAlgorithm(t *testing.T) {
-	issuer, _, _, pub := buildIssuerVerifier(t)
+	issuer, _, _, _ := buildIssuerVerifier(t)
 	_, token := issueFor(t, issuer)
 	parts, err := jose.Split(token)
 	if err != nil {
@@ -26,15 +26,6 @@ func TestWritesTheFullySpecifiedAlgorithm(t *testing.T) {
 	h, err := parseHeader(parts.Header)
 	if err != nil || h.Alg != jose.AlgEd25519 {
 		t.Errorf("token alg = %q, %v; want %q", h.Alg, err, jose.AlgEd25519)
-	}
-
-	doc, err := MarshalJWKS(map[string]ed25519.PublicKey{"k1": pub})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var set JWKSDocument
-	if err := json.Unmarshal(doc, &set); err != nil || set.Keys[0].Alg != jose.AlgEd25519 {
-		t.Errorf("JWKS alg = %+v, %v; want %q", set, err, jose.AlgEd25519)
 	}
 
 	key := dpopKeys(t)["Ed25519"]
@@ -75,7 +66,7 @@ func TestCapabilityTokenRefusesThePolymorphicAlgorithm(t *testing.T) {
 func TestReadsTheDeprecatedAlgorithmFromOthers(t *testing.T) {
 	pub, _, _ := ed25519.GenerateKey(nil)
 	doc := fmt.Sprintf(`{"keys":[{"kty":"OKP","crv":"Ed25519","kid":"old","alg":"EdDSA","x":%q}]}`, jose.B64(pub))
-	keys, err := ParseJWKS([]byte(doc))
+	keys, err := jwks.Parse([]byte(doc))
 	if err != nil || !keys["old"].Equal(pub) {
 		t.Errorf("a JWKS entry naming EdDSA = %v, %v; want it read", keys, err)
 	}

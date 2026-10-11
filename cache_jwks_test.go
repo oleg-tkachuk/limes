@@ -2,8 +2,6 @@ package limes
 
 import (
 	"context"
-	"crypto/ed25519"
-	"encoding/base64"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -149,40 +147,6 @@ func TestRevocationCacheClearForgetsEveryAnswer(t *testing.T) {
 }
 
 // ─── JWKS ──────────────────────────────────────────────────────────────────
-
-func TestMarshalJWKSIsDeterministic(t *testing.T) {
-	keys := map[string]ed25519.PublicKey{}
-	for range 8 {
-		kid, pub, _, _ := GenerateEd25519Keypair()
-		keys[kid] = pub
-	}
-	first, err := MarshalJWKS(keys)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for range 10 {
-		again, _ := MarshalJWKS(keys)
-		if string(again) != string(first) {
-			t.Fatal("MarshalJWKS output differs between calls")
-		}
-	}
-}
-
-func TestParseJWKSSkipsMalformedEntries(t *testing.T) {
-	kid, pub, _, _ := GenerateEd25519Keypair()
-	doc := `{"keys":[
-		{"kty":"OKP","crv":"Ed25519","kid":"broken","x":"!!!"},
-		{"kty":"OKP","crv":"Ed25519","kid":"short","x":"AAAA"},
-		{"kty":"OKP","crv":"Ed25519","kid":"` + kid + `","x":"` + base64.RawURLEncoding.EncodeToString(pub) + `"}
-	]}`
-	keys, err := ParseJWKS([]byte(doc))
-	if err != nil {
-		t.Fatalf("ParseJWKS: %v", err)
-	}
-	if len(keys) != 1 || !keys[kid].Equal(pub) {
-		t.Fatalf("keys = %v, want only the valid entry", keys)
-	}
-}
 
 // twoRoundLookup blocks its first call until first is closed and answers it
 // with the caller's context error; every later call blocks until second.

@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes/internal/jose"
+	"github.com/oleg-tkachuk/limes/jwks"
 )
 
 // ─── verifier ──────────────────────────────────────────────────────────────
@@ -28,7 +29,7 @@ func resign(t *testing.T, priv ed25519.PrivateKey, header map[string]any, claims
 
 func verifierFor(t *testing.T, pub ed25519.PublicKey, cfg VerifierConfig) *StandardVerifier {
 	t.Helper()
-	cfg.Keys = NewStaticKeyResolver(map[string]ed25519.PublicKey{"k1": pub})
+	cfg.Keys = jwks.NewStatic(map[string]ed25519.PublicKey{"k1": pub})
 	cfg.Revocations = NewCachedRevocationChecker(newMemStore(), -1)
 	if cfg.TrustedIssuers == nil {
 		cfg.TrustedIssuers = []string{"iss"}

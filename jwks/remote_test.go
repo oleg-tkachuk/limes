@@ -1,4 +1,4 @@
-package limes
+package jwks
 
 import (
 	"context"
@@ -20,6 +20,9 @@ type jwksServer struct {
 	fetches atomic.Int32
 }
 
+// checkDeadline bounds a check that must not hang.
+const checkDeadline = time.Second
+
 func (s *jwksServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.fetches.Add(1)
 	s.mu.Lock()
@@ -28,7 +31,7 @@ func (s *jwksServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "down", http.StatusServiceUnavailable)
 		return
 	}
-	doc, err := MarshalJWKS(s.keys)
+	doc, err := Marshal(s.keys)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -65,9 +68,9 @@ func (c *stepClock) Advance(d time.Duration) {
 	c.mu.Unlock()
 }
 
-func newRemoteFixture(t *testing.T) (*jwksServer, *RemoteJWKSResolver, *stepClock, string, ed25519.PublicKey) {
+func newRemoteFixture(t *testing.T) (*jwksServer, *Remote, *stepClock, string, ed25519.PublicKey) {
 	t.Helper()
-	kid, pub, _, err := GenerateEd25519Keypair()
+	kid, pub, _, err := generateKeypair()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +78,7 @@ func newRemoteFixture(t *testing.T) (*jwksServer, *RemoteJWKSResolver, *stepCloc
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
 	clock := &stepClock{t: time.Unix(1_800_000_000, 0)}
-	r, err := NewRemoteJWKSResolver(RemoteJWKSConfig{
+	r, err := NewRemote(RemoteConfig{
 		URL: ts.URL, Client: ts.Client(), Now: clock.Now,
 		RefreshInterval: time.Minute, MinRefreshInterval: 10 * time.Second, MaxStale: time.Hour,
 	})
@@ -126,7 +129,7 @@ func TestRemoteJWKSPicksUpRotatedKeyAndRateLimitsUnknownKids(t *testing.T) {
 		t.Fatalf("fetches = %d, want 1: unknown kids inside MinRefreshInterval must not refetch", n)
 	}
 
-	newKid, newPub, _, _ := GenerateEd25519Keypair()
+	newKid, newPub, _, _ := generateKeypair()
 	srv.set(func() { srv.keys[newKid] = newPub })
 	clock.Advance(11 * time.Second)
 	got, err := r.PublicKey(ctx, newKid)
@@ -151,8 +154,8 @@ func TestRemoteJWKSServesStaleThenFailsClosed(t *testing.T) {
 	}
 
 	clock.Advance(31 * time.Minute)
-	if _, err := r.PublicKey(ctx, kid); !errors.Is(err, ErrJWKSUnavailable) {
-		t.Fatalf("past MaxStale err = %v, want ErrJWKSUnavailable", err)
+	if _, err := r.PublicKey(ctx, kid); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("past MaxStale err = %v, want ErrUnavailable", err)
 	}
 
 	srv.set(func() { srv.fail = false })
@@ -163,12 +166,12 @@ func TestRemoteJWKSServesStaleThenFailsClosed(t *testing.T) {
 }
 
 func TestRemoteJWKSNeverReachedFailsClosed(t *testing.T) {
-	r, err := NewRemoteJWKSResolver(RemoteJWKSConfig{URL: "http://127.0.0.1:1/jwks.json"})
+	r, err := NewRemote(RemoteConfig{URL: "http://127.0.0.1:1/jwks.json"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.PublicKey(context.Background(), "any"); !errors.Is(err, ErrJWKSUnavailable) {
-		t.Fatalf("err = %v, want ErrJWKSUnavailable", err)
+	if _, err := r.PublicKey(context.Background(), "any"); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("err = %v, want ErrUnavailable", err)
 	}
 }
 
@@ -184,7 +187,7 @@ func TestRemoteJWKSWaiterHonoursItsContext(t *testing.T) {
 	}))
 	t.Cleanup(ts.Close)
 	t.Cleanup(func() { close(release) })
-	r, err := NewRemoteJWKSResolver(RemoteJWKSConfig{URL: ts.URL, Client: ts.Client()})
+	r, err := NewRemote(RemoteConfig{URL: ts.URL, Client: ts.Client()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,16 +217,16 @@ func TestRemoteJWKSWaiterHonoursItsContext(t *testing.T) {
 func TestRemoteJWKSRefusesIntervalsThatDoNotNest(t *testing.T) {
 	const url = "https://issuer.example.com/jwks"
 	cases := map[string]struct {
-		cfg RemoteJWKSConfig
+		cfg RemoteConfig
 		ok  bool
 	}{
-		"defaults":                      {RemoteJWKSConfig{URL: url}, true},
-		"equal":                         {RemoteJWKSConfig{URL: url, MinRefreshInterval: time.Minute, RefreshInterval: time.Minute, MaxStale: time.Minute}, true},
-		"stale before due a refresh":    {RemoteJWKSConfig{URL: url, RefreshInterval: time.Hour, MaxStale: time.Minute}, false},
-		"refresh inside the rate limit": {RemoteJWKSConfig{URL: url, MinRefreshInterval: time.Minute, RefreshInterval: time.Second}, false},
+		"defaults":                      {RemoteConfig{URL: url}, true},
+		"equal":                         {RemoteConfig{URL: url, MinRefreshInterval: time.Minute, RefreshInterval: time.Minute, MaxStale: time.Minute}, true},
+		"stale before due a refresh":    {RemoteConfig{URL: url, RefreshInterval: time.Hour, MaxStale: time.Minute}, false},
+		"refresh inside the rate limit": {RemoteConfig{URL: url, MinRefreshInterval: time.Minute, RefreshInterval: time.Second}, false},
 	}
 	for name, tc := range cases {
-		if _, err := NewRemoteJWKSResolver(tc.cfg); (err == nil) != tc.ok {
+		if _, err := NewRemote(tc.cfg); (err == nil) != tc.ok {
 			t.Errorf("%s: err = %v, want ok = %v", name, err, tc.ok)
 		}
 	}

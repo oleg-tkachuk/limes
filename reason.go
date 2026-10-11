@@ -3,6 +3,8 @@ package limes
 import (
 	"errors"
 	"slices"
+
+	"github.com/oleg-tkachuk/limes/jwks"
 )
 
 // Reason is a stable, machine-readable name for why a presented capability
@@ -54,7 +56,7 @@ type refusalRule struct {
 // ErrInvalidToken.
 var refusalRules = []refusalRule{
 	{ErrMalformedAuthorization, ReasonMalformedAuthorization, true, answerMalformed},
-	{ErrJWKSUnavailable, ReasonKeysUnavailable, false, answerKeysUnavailable},
+	{jwks.ErrUnavailable, ReasonKeysUnavailable, false, answerKeysUnavailable},
 
 	// A nonce challenge asks for a proof signed afresh, and a token under the
 	// wrong scheme for the same token sent under DPoP; neither stands. RFC
