@@ -34,7 +34,7 @@ tasks:
       - task --list
 
   verify-all:
-    desc: "gofmt + go mod tidy + golangci-lint + the unit suite + govulncheck + actionlint + the workflow scripts — what CI runs"
+    desc: "gofmt + go mod tidy + golangci-lint + the unit suite + govulncheck + actionlint + the workflow scripts + the release rules — what CI runs"
     cmds:
       - task: fmt:check
       - task: verify:tidy
@@ -75,7 +75,7 @@ tasks:
     desc: "Fail when a commit type cuts a different release than it should"
     preconditions:
       - sh: test -d .github/release/node_modules/@semantic-release/commit-analyzer
-        msg: "the release tooling is not installed — npm ci --prefix .github/release"
+        msg: "the release tooling is not installed — npm ci --ignore-scripts --prefix .github/release"
     cmds:
       - node .github/release/release-rules.test.mjs
 

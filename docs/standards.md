@@ -33,7 +33,8 @@ before any claim is read under the wrong schema.
 `alg: Ed25519`. The polymorphic `EdDSA` is deprecated by RFC 9864; a
 capability token naming it is refused, while a DPoP proof or a JWKS entry
 naming it is still read, since those come from clients and tools that may
-predate the RFC. Issuer metadata advertises `Ed25519` and `ES256` only.
+predate the RFC. DPoP challenges advertise `algs="Ed25519 ES256"`
+(`DPoPSigningAlgorithms`); `EdDSA` is never advertised.
 *Held by* `TestWritesTheFullySpecifiedAlgorithm`,
 `TestCapabilityTokenRefusesThePolymorphicAlgorithm`,
 `TestReadsTheDeprecatedAlgorithmFromOthers`.
@@ -66,7 +67,9 @@ and a `jti` not seen before.
   empty path as `/`, unreserved characters' percent-encodings decoded and
   every other one in upper case, dot segments removed (§5.2.4); no query or
   fragment. A URI with userinfo is refused (RFC 9110 §4.2.4). Behind a proxy,
-  `DPoPVerifier.MatchPathOnly` compares the normalised paths alone.
+  `DPoPVerifier.MatchPathOnly` compares the normalised paths alone, and lets
+  the proof's path carry extra leading segments, as a proxy's mount prefix
+  adds.
 - **Nonces (§8, §9).** With `DPoPVerifier.Nonces` set, every proof must carry
   a nonce the server issued; one without is refused with
   `ErrDPoPNonceRequired` (`use_dpop_nonce`), and
@@ -98,9 +101,9 @@ answers alike, and `WriteErrorResponse` writes them:
 | Refusal | Status | Challenge |
 |---|---|---|
 | malformed `Authorization` | 400 | `Bearer error="invalid_request"` |
-| no nonce, or a stale one | 401 | `DPoP error="use_dpop_nonce"`, with a fresh `DPoP-Nonce` |
+| no nonce, or a stale one | 401 | `DPoP error="use_dpop_nonce", algs="Ed25519 ES256"`, with a fresh `DPoP-Nonce` |
 | no proof, an invalid or replayed one | 401 | `DPoP error="invalid_dpop_proof", algs="Ed25519 ES256"` |
-| invalid, expired, revoked token; wrong audience or scheme | 401 | `error="invalid_token"` under the scheme presented |
+| invalid, expired, not-yet-valid, revoked token; wrong audience or scheme; an unreachable JWKS | 401 | `error="invalid_token"` under the scheme presented (`Bearer` when unknown) |
 | a caveat refuses the operation | 403 | `error="insufficient_scope"` |
 | a request or budget limit is exhausted | 403 | none |
 | anything else | 500 | none |

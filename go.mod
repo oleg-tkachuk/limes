@@ -5,8 +5,9 @@
 // or to a database: if a storage SDK or a database driver ever appears in the
 // resolved graph, isolation_test.go fails `task verify-all`.
 //
-// Persistence is the consumer's concern — the module publishes Store,
-// UsageStore[TX] and KeyResolver contracts and nothing more.
+// Persistence is the consumer's concern — the module publishes the storage
+// contracts (Store, UsageStore[TX], KeyResolver and the optional ones) and no
+// implementation beyond memstore.
 module github.com/oleg-tkachuk/limes
 
 go 1.26.0
