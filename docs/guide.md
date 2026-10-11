@@ -498,6 +498,11 @@ func TestMeterContract(t *testing.T) {
 }
 ```
 
+A store that refers to its tenants, or scopes each tenant's rows, also sets
+`NewTenant` (another tenant it can charge), `TenantCtx` (the context a write
+for a tenant runs under) and `ListCtx` (the context of a read across tenants).
+Without them the checks that need a second tenant use a random id and `Ctx`.
+
 The checks include charges racing one ceiling, so run them against the
 database itself: a store that reads a counter and writes it back outside one
 statement or lock overspends, and fails them.

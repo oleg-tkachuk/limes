@@ -50,6 +50,40 @@ type Env[TX any] struct {
 	// Advance moves the store's clock forward by d. Optional: without it,
 	// the checks of reservation expiry are skipped.
 	Advance func(d time.Duration)
+	// NewTenant creates another tenant the store can charge, for the checks
+	// that need more than one. Optional: without it, a random id, which a
+	// store that refers to its tenants refuses.
+	NewTenant func() (uuid.UUID, error)
+	// TenantCtx is the context a write for tenant runs under, when the store
+	// scopes each tenant's rows. Optional: without it, Ctx.
+	TenantCtx func(tenant uuid.UUID) context.Context
+	// ListCtx is the context ListTenantBudgets runs under: a read across
+	// tenants. Optional: without it, Ctx.
+	ListCtx context.Context
+}
+
+// newTenant is another tenant, from NewTenant when the Env has one.
+func (e Env[TX]) newTenant() (uuid.UUID, error) {
+	if e.NewTenant == nil {
+		return uuid.New(), nil
+	}
+	return e.NewTenant()
+}
+
+// tenantCtx is the context a write for tenant runs under.
+func (e Env[TX]) tenantCtx(tenant uuid.UUID) context.Context {
+	if e.TenantCtx == nil {
+		return e.Ctx
+	}
+	return e.TenantCtx(tenant)
+}
+
+// listCtx is the context a read across tenants runs under.
+func (e Env[TX]) listCtx() context.Context {
+	if e.ListCtx == nil {
+		return e.Ctx
+	}
+	return e.ListCtx
 }
 
 // The ceilings every check works under: a root, a child narrower than it,
@@ -557,7 +591,7 @@ func checkTenantBudgetReads[TX any](t *testing.T, f fixture[TX]) {
 			t.Errorf("SetTenantBudget(%s): err = %v, want ErrInvalidAmount", ceiling, err)
 		}
 	}
-	listed, _, err := f.Usage.ListTenantBudgets(f.Ctx, limes.ListTenantBudgetsRequest{})
+	listed, _, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -928,15 +962,18 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 	if _, err := f.charge(limes.ChargeRequest{CapabilityID: f.root, MaxBudget: rootBudget, Amount: 15 * one}, nil); err != nil {
 		t.Fatal(err)
 	}
-	unlimited := uuid.New()
-	if _, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{TenantID: unlimited, UnitCode: unit}); err != nil {
+	unlimited, err := f.newTenant()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Usage.SetTenantBudget(f.tenantCtx(unlimited), limes.SetTenantBudgetRequest{TenantID: unlimited, UnitCode: unit}); err != nil {
 		t.Fatal(err)
 	}
 	all := map[uuid.UUID]bool{}
 	var order []limes.TenantBudgetSummary
 	cursor := ""
 	for {
-		page, next, err := f.Usage.ListTenantBudgets(f.Ctx, limes.ListTenantBudgetsRequest{Limit: 1, Cursor: cursor})
+		page, next, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Limit: 1, Cursor: cursor})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -961,11 +998,11 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 		}
 	}
 	const half = 50
-	risky, _, err := f.Usage.ListTenantBudgets(f.Ctx, limes.ListTenantBudgetsRequest{ThresholdPct: half})
+	risky, _, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{ThresholdPct: half})
 	if err != nil || len(risky) != 1 || risky[0].TenantID != f.Tenant || risky[0].UtilisationPct != half {
 		t.Errorf("tenants at 50%% or more = %+v, %v; want only %s at 50%%", risky, err, f.Tenant)
 	}
-	unl, _, err := f.Usage.ListTenantBudgets(f.Ctx, limes.ListTenantBudgetsRequest{UnlimitedOnly: true})
+	unl, _, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{UnlimitedOnly: true})
 	if err != nil || slices.ContainsFunc(unl, func(s limes.TenantBudgetSummary) bool { return s.TenantID == f.Tenant }) ||
 		!slices.ContainsFunc(unl, func(s limes.TenantBudgetSummary) bool { return s.TenantID == unlimited }) {
 		t.Errorf("unlimited tenants = %+v, %v; want %s and not %s", unl, err, unlimited, f.Tenant)
