@@ -430,16 +430,22 @@ func (v *DPoPVerifier) check(ctx context.Context, c Capability, token string, p 
 
 // htuMatches compares a proof's htu with the request URL after RFC 3986
 // syntax- and scheme-based normalisation, as RFC 9449 §4.3 requires. Under
-// pathOnly it compares the normalised paths alone, and neither URL need be
-// absolute.
+// pathOnly it compares the normalised paths alone: the htu must still be an
+// absolute URI, and the request URL must have a path.
 func htuMatches(htu, requestURL string, pathOnly bool) bool {
 	if pathOnly {
-		got, err1 := url.Parse(htu)
-		want, err2 := url.Parse(requestURL)
-		if err1 != nil || err2 != nil {
+		// The proof's htu is still a URI a request could have been made to:
+		// absolute, with a host, normalised.
+		normalised, err := normalizeURI(htu)
+		if err != nil {
 			return false
 		}
-		g, w := normalizePath(got.EscapedPath()), normalizePath(want.EscapedPath())
+		got, err1 := url.Parse(normalised)
+		want, err2 := url.Parse(requestURL)
+		if err1 != nil || err2 != nil || want.EscapedPath() == "" {
+			return false
+		}
+		g, w := got.EscapedPath(), normalizePath(want.EscapedPath())
 		// A proxy may mount the service under a prefix it strips before
 		// forwarding, so the client's path may carry segments the server
 		// never sees. The server's path must still be the whole tail, from a
