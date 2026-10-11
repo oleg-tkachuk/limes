@@ -164,9 +164,14 @@ final package before it is reshaped there.
    `ErrNotFound` (E2); `Delegate`'s parent errors wrapped (E3); one table from
    which `reasonRules` and `refusals` derive, and a golden `errors.Is` matrix
    (E1).
-2. **Packages** — `jwks` and `dpop` split out (decision 7), with `ReplayCache`
-   and `DPoPNonces` returning errors and `Seen` taking a request (I2); `inspect`
-   (decision 5); the unexport list (section 5) and the merges (section 6).
+2. **Packages**, in three pull requests:
+   - 2a — `jwks` (decision 7), over `internal/jose` and `internal/httpx`,
+     which also merge the two thumbprint computations (section 6);
+   - 2b — `dpop` (decision 7), with `ReplayCache` and `DPoPNonces` returning
+     errors and `Seen` taking a request (I2); a leaf returns its own errors
+     and the verifier adds the family;
+   - 2c — `inspect` (decision 5), the unexport list (section 5) and the
+     remaining merges (section 6).
 3. **Configuration** — one constructor shape, exported `Default*` constants,
    negative values refused, "disabled" an explicit field (P3, P4).
 4. **Issuance** — `VerifiedCapability` (decision 3); a concrete signer over

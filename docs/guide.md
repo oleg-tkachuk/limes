@@ -27,7 +27,7 @@ case errors.Is(err, limes.ErrAudienceMismatch): // token for another service
 case errors.Is(err, limes.ErrCaveatViolation):  // not allowed to do this
 case errors.Is(err, limes.ErrProofOfPossession): // no valid proof that the bearer holds the key
 case errors.Is(err, limes.ErrInvalidToken): // forged, or not this verifier's to accept
-case errors.Is(err, limes.ErrJWKSUnavailable):  // the issuer's keys out of reach: the server's trouble, not the token's
+case errors.Is(err, jwks.ErrUnavailable):  // the issuer's keys out of reach: the server's trouble, not the token's
 }
 // Every refusal of the token or its proof also matches ErrUnauthenticated —
 // the one check for "answer 401".
@@ -53,20 +53,20 @@ none twice and none in another case, and may be at most
 `VerifierConfig.MaxTokenBytes` long (16 KiB unless set). When several issuers share a verifier, set
 `KeyIssuers` (kid → issuer) so one issuer's key cannot sign for another.
 Verifiers running apart from the issuer resolve keys with
-`RemoteJWKSResolver`. It fetches the issuer's JWKS on first use, keeps it as
+`jwks.Remote`. It fetches the issuer's JWKS on first use, keeps it as
 long as the response's `Cache-Control` allows within `MinRefreshInterval`
 (10s) and `RefreshInterval` (5m), revalidates by ETag, picks up a rotated-in
 kid on first sight (at most once per `MinRefreshInterval`), and fails closed
-with `ErrJWKSUnavailable` when it has never fetched a set, or once the last
+with `jwks.ErrUnavailable` when it has never fetched a set, or once the last
 good set is older than `MaxStale` (1h). A document whose entries are all
 unusable counts as a failed fetch, so the last good set stays in service
-rather than every key being withdrawn at once. `ErrJWKSUnavailable` is the
+rather than every key being withdrawn at once. `jwks.ErrUnavailable` is the
 server's fault, not the token's, so it matches no `ErrUnauthenticated`
 sentinel. The three intervals must
 nest, or construction fails:
 
 ```go
-keys, err := limes.NewRemoteJWKSResolver(limes.RemoteJWKSConfig{
+keys, err := jwks.NewRemote(jwks.RemoteConfig{
     URL: "https://issuer.example.com/.well-known/jwks.json",
 })
 verifier, err := limes.NewStandardVerifier(limes.VerifierConfig{
@@ -74,16 +74,16 @@ verifier, err := limes.NewStandardVerifier(limes.VerifierConfig{
 })
 ```
 
-The issuer serves that document with `JWKSHandler` — `application/jwk-set+json`,
+The issuer serves that document with `jwks.Handler` — `application/jwk-set+json`,
 a strong ETag answering `If-None-Match` with 304, `Cache-Control: public,
 max-age` (a negative `maxAge` is served as 0) — over a function returning its keys, such as
-`StaticKeyResolver.Keys`:
+`jwks.Static.Keys`:
 
 ```go
-mux.Handle("/.well-known/jwks.json", limes.JWKSHandler(resolver.Keys, time.Minute))
+mux.Handle("/.well-known/jwks.json", jwks.Handler(resolver.Keys, time.Minute))
 ```
 
-`MarshalJWKS` writes the same document for a server of your own; `ParseJWKS`
+`jwks.Marshal` writes the same document for a server of your own; `jwks.Parse`
 reads one back, for a resolver of your own. It skips an entry it cannot use — a foreign
 `kty` or `alg`, no kid, a malformed key — rather than refusing the set, so one bad
 entry does not take every other key out of service mid-rotation. Two entries
@@ -592,7 +592,7 @@ for c, err := range limes.AllByPrincipal(ctx, store, req) {
 ## Key rotation
 
 1. Publish the new public key alongside the old (`SetKey`, or add it to the
-   served JWKS — `MarshalJWKS` output is sorted by kid, so it is stable).
+   served JWKS — `jwks.Marshal` output is sorted by kid, so it is stable).
 2. Switch the issuer to sign with the new key — no sooner than the
    `max-age` the JWKS is served with, so every verifier has fetched it.
 3. Withdraw the old key (`RemoveKey`) only after the **longest outstanding
@@ -606,7 +606,7 @@ Load a signing key with `LoadPrivateKey` (PEM, PKCS#8 only) or
 `LoadOrGenerateKey(path, kid)`, which generates an ephemeral key only when the
 path is empty — an unreadable path is an error, never a fresh key — and
 reports it in `SigningKey.Generated` so you can log it loudly. A key with no
-kid named gets `DeriveKeyID`'s: its RFC 7638 thumbprint, the same wherever it
+kid named gets `jwks.KeyID`'s: its RFC 7638 thumbprint, the same wherever it
 is derived.
 
 ## Answer a refusal
@@ -640,7 +640,7 @@ log. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
 | `VerifierConfig.Leeway` | 30 seconds |
 | `VerifierConfig.MaxTokenBytes` | `DefaultMaxTokenBytes`, 16 KiB |
 | `DefaultRevocationCacheTTL` · `DefaultRevocationCacheEntries` | 2 seconds · 100 000, the oldest dropped first past it (`WithMaxEntries`; a TTL below zero disables the cache) |
-| `RemoteJWKSConfig` | 10s fetch timeout · `RefreshInterval` 5m · `MinRefreshInterval` 10s · `MaxStale` 1h · 1 MiB document |
+| `jwks.RemoteConfig` | `jwks.DefaultFetchTimeout` 10s · `DefaultRefreshInterval` 5m · `DefaultMinRefreshInterval` 10s · `DefaultMaxStale` 1h · `DefaultMaxDocumentBytes` 1 MiB |
 | `DPoPVerifier.Window` | `DefaultDPoPWindow`, 1 minute |
 | `NewMemoryReplayCache(0)` | 100 000 ids; `DefaultReplayEntriesPerKey`, 1 000, per key (`WithEntriesPerKey`) |
 | `NewHMACNonces(0, key)` | `DefaultDPoPNonceLifetime`, 5 minutes; `HMACNonceClockSkew`, 5 seconds, for a nonce issued ahead of this replica's clock; keys of at least `HMACNonceKeyBytes`, 32 |

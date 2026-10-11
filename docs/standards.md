@@ -13,8 +13,8 @@ the test that holds it there.
 | [RFC 3986](https://www.rfc-editor.org/rfc/rfc3986) | URI normalisation for `htu` | DPoP checks |
 | [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110), [RFC 6750](https://www.rfc-editor.org/rfc/rfc6750) | The `Authorization` header and `WWW-Authenticate` challenges | `ParseAuthorization`, `ErrorResponse` |
 | [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) | Problem details bodies | `ErrorResponse`, `WriteErrorResponse` |
-| [RFC 7517](https://www.rfc-editor.org/rfc/rfc7517), [RFC 7638](https://www.rfc-editor.org/rfc/rfc7638), [RFC 8037](https://www.rfc-editor.org/rfc/rfc8037) | JWK Sets, thumbprints, Ed25519 keys | `MarshalJWKS`, `JWKSHandler`, `DeriveKeyID` |
-| [RFC 9111](https://www.rfc-editor.org/rfc/rfc9111) | How long a fetched JWK Set stays fresh | `RemoteJWKSResolver` |
+| [RFC 7517](https://www.rfc-editor.org/rfc/rfc7517), [RFC 7638](https://www.rfc-editor.org/rfc/rfc7638), [RFC 8037](https://www.rfc-editor.org/rfc/rfc8037) | JWK Sets, thumbprints, Ed25519 keys | `jwks.Marshal`, `jwks.Handler`, `jwks.KeyID` |
+| [RFC 9111](https://www.rfc-editor.org/rfc/rfc9111) | How long a fetched JWK Set stays fresh | `jwks.Remote` |
 | [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562) | UUIDv7 capability ids | `Issuer.Issue` |
 | [RFC 4648](https://www.rfc-editor.org/rfc/rfc4648) §5 | base64url without padding, everywhere | — |
 | ISO 4217 | Budget units | `IsUnitCode` |
@@ -36,6 +36,7 @@ naming it is still read, since those come from clients and tools that may
 predate the RFC. DPoP challenges advertise `algs="Ed25519 ES256"`
 (`DPoPSigningAlgorithms`); `EdDSA` is never advertised.
 *Held by* `TestWritesTheFullySpecifiedAlgorithm`,
+`TestMarshalWritesTheFullySpecifiedAlgorithm`,
 `TestCapabilityTokenRefusesThePolymorphicAlgorithm`,
 `TestReadsTheDeprecatedAlgorithmFromOthers`.
 
@@ -125,16 +126,16 @@ the values keep to the characters RFC 6750 §3 allows. *Held by*
 
 ## Keys
 
-**RFC 7517, RFC 8037, RFC 7638.** `MarshalJWKS` writes a JWK Set of OKP
-Ed25519 keys; `ParseJWKS` skips an entry it cannot use rather than refuse the
+**RFC 7517, RFC 8037, RFC 7638.** `jwks.Marshal` writes a JWK Set of OKP
+Ed25519 keys; `jwks.Parse` skips an entry it cannot use rather than refuse the
 set, and uses no key whose kid two entries name; a document that is not JSON,
-or names a member twice, is refused. `DeriveKeyID` makes a key's kid its RFC 7638 thumbprint, which any JOSE
+or names a member twice, is refused. `jwks.KeyID` makes a key's kid its RFC 7638 thumbprint, which any JOSE
 tool computes alike.
 
 **Serving and fetching (RFC 7517 §8.5, RFC 9110 §13, RFC 9111).**
-`JWKSHandler` serves a set as `application/jwk-set+json`, with a strong ETag
+`jwks.Handler` serves a set as `application/jwk-set+json`, with a strong ETag
 answering `If-None-Match` with 304 and `Cache-Control: max-age`.
-`RemoteJWKSResolver` asks for that media type first, revalidates by ETag, and
+`jwks.Remote` asks for that media type first, revalidates by ETag, and
 keeps a set as long as the response's `max-age` less its `Age` says — never
 longer than `RefreshInterval`, never shorter than `MinRefreshInterval`;
 `no-cache` and `no-store` count as zero. *Held by* `TestResponseFreshness`,
