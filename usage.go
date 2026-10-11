@@ -431,14 +431,15 @@ type SetTenantBudgetRequest struct {
 	// window. Nil = open-ended (typical for "just set the cap, I'll
 	// roll later").
 	PeriodEnd *time.Time
-	// ResetSpend=true zeroes the spend and rolls period_start to
+	// ResetSpend=true zeroes the spend and rolls PeriodStart to
 	// now. false leaves the counter alone — the cap changes mid-
 	// window.
 	ResetSpend bool
-	// ExpectedVersion is the OCC guard, checked in the same statement as the
-	// write. 0 asserts no ceiling has been set yet (the row is missing, or
-	// holds only counted spend) and is itself a conflict if one has. Without this two operators editing the same cap overwrote each
-	// other and neither was told.
+	// ExpectedVersion is the optimistic-concurrency guard, checked
+	// atomically with the write. 0 asserts no ceiling has been set yet (the
+	// budget is missing, or holds only counted spend) and is itself a
+	// conflict if one has, so two operators editing one ceiling cannot
+	// overwrite each other unseen.
 	ExpectedVersion int64
 }
 
