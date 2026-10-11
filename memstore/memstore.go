@@ -27,6 +27,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -451,7 +452,7 @@ func (s *UsageStore[TX]) lineage(capID uuid.UUID) []limes.Capability {
 // Bump returns ErrRequestLimitExceeded WITHOUT mutating when the
 // increment would cross the capability's ceiling or any ancestor's. A
 // rejected call must be safe to retry.
-func (s *UsageStore[TX]) Bump(_ context.Context, req limes.BumpRequest) (int64, error) {
+func (s *UsageStore[TX]) Bump(_ context.Context, req limes.BumpRequest) (limes.BumpReceipt, error) {
 	ancestors := s.lineage(req.CapabilityID)
 
 	s.mu.Lock()
@@ -460,16 +461,16 @@ func (s *UsageStore[TX]) Bump(_ context.Context, req limes.BumpRequest) (int64, 
 	next := u.RequestCount + 1
 	for _, c := range req.Copies {
 		if c.MaxRequests > 0 && s.copies[string(c.RevocationID)].requests+1 > c.MaxRequests {
-			return u.RequestCount, fmt.Errorf("%w: copy %x", limes.ErrRequestLimitExceeded, c.RevocationID)
+			return limes.BumpReceipt{Requests: u.RequestCount}, fmt.Errorf("%w: copy %x", limes.ErrRequestLimitExceeded, c.RevocationID)
 		}
 	}
 	if req.MaxRequests > 0 && next > req.MaxRequests {
-		return u.RequestCount, limes.ErrRequestLimitExceeded
+		return limes.BumpReceipt{Requests: u.RequestCount}, limes.ErrRequestLimitExceeded
 	}
 	for _, a := range ancestors {
 		limit := int64(a.Caveats.MaxRequests)
 		if limit > 0 && s.usage[a.ID].RequestCount+1 > limit {
-			return u.RequestCount, fmt.Errorf("%w: ancestor %s", limes.ErrRequestLimitExceeded, a.ID)
+			return limes.BumpReceipt{Requests: u.RequestCount}, fmt.Errorf("%w: ancestor %s", limes.ErrRequestLimitExceeded, a.ID)
 		}
 	}
 	for _, a := range ancestors {
@@ -487,7 +488,7 @@ func (s *UsageStore[TX]) Bump(_ context.Context, req limes.BumpRequest) (int64, 
 	u.CapabilityID = req.CapabilityID
 	u.RequestCount = next
 	s.usage[req.CapabilityID] = u
-	return next, nil
+	return limes.BumpReceipt{Requests: next}, nil
 }
 
 // hold is one open reservation and every counter it holds against.
@@ -969,26 +970,72 @@ func (s *UsageStore[TX]) GetReservation(_ context.Context, reservationID uuid.UU
 }
 
 // ListReservations returns the capability's own holds, soonest to expire first.
-func (s *UsageStore[TX]) ListReservations(_ context.Context, capID uuid.UUID) ([]limes.Reservation, error) {
+func (s *UsageStore[TX]) ListReservations(_ context.Context, req limes.ListReservationsRequest) (limes.Page[limes.Reservation], error) {
+	if err := req.Validate(); err != nil {
+		return limes.Page[limes.Reservation]{}, err
+	}
+	var after *reservationPlace
+	if req.Cursor != "" {
+		p, err := parseReservationPlace(req.Cursor)
+		if err != nil {
+			return limes.Page[limes.Reservation]{}, err
+		}
+		after = &p
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := []limes.Reservation{}
 	for _, h := range s.holds {
-		if h.capID == capID {
+		if h.capID == req.CapabilityID && (after == nil || after.before(placeOf(h.reservation()))) {
 			out = append(out, h.reservation())
 		}
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if !out[i].ExpiresAt.Equal(out[j].ExpiresAt) {
-			return out[i].ExpiresAt.Before(out[j].ExpiresAt)
-		}
-		return uuidLess(out[i].ID, out[j].ID)
-	})
-	return out, nil
+	// Soonest to expire first, ties by id.
+	sort.Slice(out, func(i, j int) bool { return placeOf(out[i]).before(placeOf(out[j])) })
+	limit := int(limes.PageLimit(req.Limit))
+	if len(out) <= limit {
+		return limes.Page[limes.Reservation]{Items: out}, nil
+	}
+	out = out[:limit]
+	return limes.Page[limes.Reservation]{Items: out, Next: placeOf(out[len(out)-1]).String()}, nil
+}
+
+// reservationPlace is a reservation's place in ListReservations' order, and
+// memstore's cursor: its expiry and id.
+type reservationPlace struct {
+	expires time.Time
+	id      uuid.UUID
+}
+
+func placeOf(r limes.Reservation) reservationPlace { return reservationPlace{r.ExpiresAt, r.ID} }
+
+func (p reservationPlace) before(q reservationPlace) bool {
+	if !p.expires.Equal(q.expires) {
+		return p.expires.Before(q.expires)
+	}
+	return uuidLess(p.id, q.id)
+}
+
+// reservationCursorSep separates a cursor's expiry from its id.
+const reservationCursorSep = "_"
+
+func (p reservationPlace) String() string {
+	return strconv.FormatInt(p.expires.UnixNano(), 10) + reservationCursorSep + p.id.String()
+}
+
+func parseReservationPlace(cursor string) (reservationPlace, error) {
+	ns, id, ok := strings.Cut(cursor, reservationCursorSep)
+	n, err1 := strconv.ParseInt(ns, 10, 64)
+	u, err2 := uuid.Parse(id)
+	if !ok || err1 != nil || err2 != nil {
+		return reservationPlace{}, fmt.Errorf("%w: memstore: cursor %q", limes.ErrInvalidRequest, cursor)
+	}
+	return reservationPlace{time.Unix(0, n), u}, nil
 }
 
 // Release ends a reservation without charging. Idempotent.
-func (s *UsageStore[TX]) Release(_ context.Context, reservationID uuid.UUID) error {
+func (s *UsageStore[TX]) Release(_ context.Context, req limes.ReleaseRequest) error {
+	reservationID := req.ReservationID
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if h, ok := s.holds[reservationID]; ok {
@@ -999,19 +1046,29 @@ func (s *UsageStore[TX]) Release(_ context.Context, reservationID uuid.UUID) err
 }
 
 // ReleaseExpired releases every hold past its expiry.
-func (s *UsageStore[TX]) ReleaseExpired(_ context.Context) (int64, error) {
+func (s *UsageStore[TX]) ReleaseExpired(_ context.Context, req limes.ReleaseExpiredRequest) (limes.ReleaseExpiredResult, error) {
+	limit, err := housekeepingLimit(req.Limit)
+	if err != nil {
+		return limes.ReleaseExpiredResult{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.nowFn()
-	var n int64
-	for id, h := range s.holds {
+	var due []hold
+	for _, h := range s.holds {
 		if !h.expires.After(now) {
-			s.applyHoldLocked(h, -1)
-			delete(s.holds, id)
-			n++
+			due = append(due, h)
 		}
 	}
-	return n, nil
+	sort.Slice(due, func(i, j int) bool { return due[i].expires.Before(due[j].expires) })
+	if len(due) > limit {
+		due = due[:limit]
+	}
+	for _, h := range due {
+		s.applyHoldLocked(h, -1)
+		delete(s.holds, h.id)
+	}
+	return limes.ReleaseExpiredResult{Released: int64(len(due))}, nil
 }
 
 // Refund returns spend from one ledger entry to the counters it debited.
@@ -1248,23 +1305,54 @@ func (s *UsageStore[TX]) Delete(_ context.Context, capID uuid.UUID) error {
 	return nil
 }
 
-func (s *UsageStore[TX]) PurgeOrphans(_ context.Context) (int64, error) {
+func (s *UsageStore[TX]) PurgeOrphans(_ context.Context, req limes.PurgeOrphansRequest) (limes.PurgeOrphansResult, error) {
+	limit, err := housekeepingLimit(req.Limit)
+	if err != nil {
+		return limes.PurgeOrphansResult{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Holds first: releasing one writes its ancestors' rows, which the loop
-	// below then purges if they are orphans too.
-	s.releaseHoldsLocked(func(id uuid.UUID) bool { return s.records == nil || !s.records.exists(id) })
-	var n int64
+	gone := func(id uuid.UUID) bool { return s.records == nil || !s.records.exists(id) }
+	// Every capability with a row or a hold that is no longer on record, in
+	// a fixed order so batches are repeatable.
+	orphans := map[uuid.UUID]bool{}
 	for id := range s.usage {
-		if s.records == nil || !s.records.exists(id) {
-			delete(s.usage, id)
-			n++
+		if gone(id) {
+			orphans[id] = true
 		}
 	}
-	maps.DeleteFunc(s.copies, func(_ string, c copyCounter) bool {
-		return s.records == nil || !s.records.exists(c.capID)
-	})
-	return n, nil
+	for _, h := range s.holds {
+		if gone(h.capID) {
+			orphans[h.capID] = true
+		}
+	}
+	ids := slices.SortedFunc(maps.Keys(orphans), func(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) })
+	if len(ids) > limit {
+		ids = ids[:limit]
+	}
+	batch := map[uuid.UUID]bool{}
+	for _, id := range ids {
+		batch[id] = true
+	}
+	// Holds first: releasing one writes its ancestors' rows, which a later
+	// batch purges if they are orphans too.
+	s.releaseHoldsLocked(func(id uuid.UUID) bool { return batch[id] })
+	for id := range batch {
+		delete(s.usage, id)
+	}
+	maps.DeleteFunc(s.copies, func(_ string, c copyCounter) bool { return batch[c.capID] })
+	return limes.PurgeOrphansResult{Purged: int64(len(ids))}, nil
+}
+
+// housekeepingLimit resolves a batch limit, refusing a negative one.
+func housekeepingLimit(limit int) (int, error) {
+	if limit < 0 {
+		return 0, fmt.Errorf("%w: memstore: housekeeping limit %d is negative", limes.ErrInvalidRequest, limit)
+	}
+	if limit == 0 {
+		return limes.DefaultHousekeepingLimit, nil
+	}
+	return limit, nil
 }
 
 func max0(n limes.Nanos) limes.Nanos {

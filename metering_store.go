@@ -53,10 +53,10 @@ func (s *meteringCopyStore[TX]) CopyUsage(ctx context.Context, revocationIDs [][
 }
 
 // Bump emits limes.request.bumps.
-func (s *meteringStore[TX]) Bump(ctx context.Context, req BumpRequest) (int64, error) {
-	count, err := s.inner.Bump(ctx, req)
+func (s *meteringStore[TX]) Bump(ctx context.Context, req BumpRequest) (BumpReceipt, error) {
+	receipt, err := s.inner.Bump(ctx, req)
 	s.in.recordBump(ctx, req.TenantID, err)
-	return count, err
+	return receipt, err
 }
 
 // Charge emits limes.charge.{decisions,amount,current_spend}. A replay moved
@@ -103,8 +103,8 @@ func (s *meteringStore[TX]) GetReservation(ctx context.Context, reservationID uu
 	return s.inner.GetReservation(ctx, reservationID)
 }
 
-func (s *meteringStore[TX]) ListReservations(ctx context.Context, capID uuid.UUID) ([]Reservation, error) {
-	return s.inner.ListReservations(ctx, capID)
+func (s *meteringStore[TX]) ListReservations(ctx context.Context, req ListReservationsRequest) (Page[Reservation], error) {
+	return s.inner.ListReservations(ctx, req)
 }
 
 func (s *meteringStore[TX]) GetCharge(ctx context.Context, chargeID uuid.UUID) (ChargeRecord, error) {
@@ -135,14 +135,14 @@ func (s *meteringStore[TX]) Delete(ctx context.Context, capID uuid.UUID) error {
 	return s.inner.Delete(ctx, capID)
 }
 
-func (s *meteringStore[TX]) PurgeOrphans(ctx context.Context) (int64, error) {
-	return s.inner.PurgeOrphans(ctx)
+func (s *meteringStore[TX]) PurgeOrphans(ctx context.Context, req PurgeOrphansRequest) (PurgeOrphansResult, error) {
+	return s.inner.PurgeOrphans(ctx, req)
 }
 
-func (s *meteringStore[TX]) Release(ctx context.Context, reservationID uuid.UUID) error {
-	return s.inner.Release(ctx, reservationID)
+func (s *meteringStore[TX]) Release(ctx context.Context, req ReleaseRequest) error {
+	return s.inner.Release(ctx, req)
 }
 
-func (s *meteringStore[TX]) ReleaseExpired(ctx context.Context) (int64, error) {
-	return s.inner.ReleaseExpired(ctx)
+func (s *meteringStore[TX]) ReleaseExpired(ctx context.Context, req ReleaseExpiredRequest) (ReleaseExpiredResult, error) {
+	return s.inner.ReleaseExpired(ctx, req)
 }

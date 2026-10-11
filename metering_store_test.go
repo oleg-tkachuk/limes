@@ -266,10 +266,10 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 	if got, err := usage.GetReservation(ctx, res.ID); err != nil || got.ID != res.ID {
 		t.Errorf("GetReservation = %+v, %v", got, err)
 	}
-	if got, err := usage.ListReservations(ctx, capID); err != nil || len(got) != 1 || got[0].ID != res.ID {
+	if got, err := usage.ListReservations(ctx, limes.ListReservationsRequest{CapabilityID: capID}); err != nil || len(got.Items) != 1 || got.Items[0].ID != res.ID {
 		t.Errorf("ListReservations = %+v, %v", got, err)
 	}
-	if err := usage.Release(ctx, res.ID); err != nil {
+	if err := usage.Release(ctx, limes.ReleaseRequest{ReservationID: res.ID}); err != nil {
 		t.Errorf("Release: %v", err)
 	}
 	if u, err := usage.GetUsage(ctx, capID); err != nil || u.RequestCount != 1 || u.SpentAmount != limes.NanosPerUnit {
@@ -287,14 +287,14 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 	if c, err := usage.ChargeByRef(ctx, capID, "r"); err != nil || c.ChargeID != receipt.ChargeID {
 		t.Errorf("ChargeByRef = %+v, %v", c, err)
 	}
-	if n, err := usage.ReleaseExpired(ctx); err != nil || n != 0 {
+	if n, err := usage.ReleaseExpired(ctx, limes.ReleaseExpiredRequest{}); err != nil || n.Released != 0 {
 		t.Errorf("ReleaseExpired = %d, %v", n, err)
 	}
 	if err := usage.Delete(ctx, uuid.New()); err != nil {
 		t.Errorf("Delete of a row never written: %v", err)
 	}
 	// The store knows no records, so the capability's usage is an orphan.
-	if n, err := usage.PurgeOrphans(ctx); err != nil || n != 1 {
+	if n, err := usage.PurgeOrphans(ctx, limes.PurgeOrphansRequest{}); err != nil || n.Purged != 1 {
 		t.Errorf("PurgeOrphans = %d, %v; want the one orphan", n, err)
 	}
 	if _, err := usage.GetUsage(ctx, capID); err == nil {

@@ -115,17 +115,17 @@ func TestBumpRequestRejectsWithoutMutating(t *testing.T) {
 	id := uuid.New()
 
 	for i := int64(1); i <= 2; i++ {
-		n, err := u.Bump(ctx, limes.BumpRequest{CapabilityID: id, MaxRequests: 2})
-		if err != nil || n != i {
-			t.Fatalf("bump %d: n=%d err=%v", i, n, err)
+		r, err := u.Bump(ctx, limes.BumpRequest{CapabilityID: id, MaxRequests: 2})
+		if err != nil || r.Requests != i {
+			t.Fatalf("bump %d: n=%d err=%v", i, r.Requests, err)
 		}
 	}
 	n, err := u.Bump(ctx, limes.BumpRequest{CapabilityID: id, MaxRequests: 2})
 	if !errors.Is(err, limes.ErrRequestLimitExceeded) {
 		t.Fatalf("want ErrRequestLimitExceeded, got %v", err)
 	}
-	if n != 2 {
-		t.Errorf("returned count = %d, want the unchanged 2", n)
+	if n.Requests != 2 {
+		t.Errorf("returned count = %d, want the unchanged 2", n.Requests)
 	}
 	got, _ := u.GetUsage(ctx, id)
 	if got.RequestCount != 2 {
@@ -269,8 +269,8 @@ func TestPurgeOrphansReleasesHolds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n, err := u.PurgeOrphans(ctx); err != nil || n != 1 {
-		t.Fatalf("PurgeOrphans = %d, %v; want the one orphan row", n, err)
+	if r, err := u.PurgeOrphans(ctx, limes.PurgeOrphansRequest{}); err != nil || r.Purged != 1 {
+		t.Fatalf("PurgeOrphans = %+v, %v; want the one orphan row", r, err)
 	}
 	if _, err := u.GetReservation(ctx, res.ID); !errors.Is(err, limes.ErrReservationNotFound) {
 		t.Errorf("the orphan's hold: err = %v, want ErrReservationNotFound", err)

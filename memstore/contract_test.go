@@ -24,10 +24,11 @@ func TestMeterContract(t *testing.T) {
 		var offset atomic.Int64 // how far Advance has moved the clock
 		now := func() time.Time { return time.Now().Add(time.Duration(offset.Load())) }
 		return metertest.Env[struct{}]{
-			Ctx:     context.Background(),
-			Usage:   NewUsage(records).WithClock(now),
-			Tenant:  tenant,
-			Advance: func(d time.Duration) { offset.Add(int64(d)) },
+			Ctx:              context.Background(),
+			Usage:            NewUsage(records).WithClock(now),
+			Tenant:           tenant,
+			Advance:          func(d time.Duration) { offset.Add(int64(d)) },
+			DeleteCapability: removeRecord(records),
 			NewCapability: func(parent uuid.UUID, maxBudget limes.Nanos) (uuid.UUID, error) {
 				c := limes.Capability{
 					ID: uuid.New(), ParentID: parent, ExpiresAt: time.Now().Add(contractTTL),
@@ -131,4 +132,16 @@ func (u *recordingUsage) SetTenantBudget(ctx context.Context, req limes.SetTenan
 		}
 	}
 	return u.UsageStore.SetTenantBudget(ctx, req)
+}
+
+// removeRecord removes a capability's record, as Purge does once it has
+// expired, for metertest's check of PurgeOrphans.
+func removeRecord(records *Store[struct{}]) func(uuid.UUID) error {
+	return func(id uuid.UUID) error {
+		records.mu.Lock()
+		defer records.mu.Unlock()
+		delete(records.caps, id)
+		delete(records.issuedBy, id)
+		return nil
+	}
 }

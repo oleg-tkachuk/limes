@@ -138,7 +138,7 @@ func TestCopyBudgetReservations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := u.Release(ctx, r2.ID); err != nil {
+	if err := u.Release(ctx, limes.ReleaseRequest{ReservationID: r2.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if got := u.copies["copy"].reserved; got != 0 {
@@ -167,7 +167,7 @@ func TestCopyCountersPurgedWithTheirCapability(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := u.PurgeOrphans(ctx); err != nil {
+	if _, err := u.PurgeOrphans(ctx, limes.PurgeOrphansRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := u.copies["orphan"]; ok {
