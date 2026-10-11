@@ -20,8 +20,10 @@ type meteringStore[TX any] struct {
 // are created on the global MeterProvider unless WithMeterProvider names
 // another, and carry no tenant unless WithTenantAttribute asks for it.
 //
-// The result implements CopyUsageReader exactly when inner does, so wrapping
-// a store never hides what it can read.
+// The result implements every interface of this package that inner does —
+// today the one optional interface, CopyUsageReader — so wrapping a store
+// never hides what it can do. A decorator forwards a fixed list of optional
+// interfaces, and a test fails when the list misses one the store has.
 func Instrument[TX any](inner UsageStore[TX], opts ...InstrumentOption) (UsageStore[TX], error) {
 	if inner == nil {
 		return nil, errors.New("limes: Instrument needs a UsageStore")
