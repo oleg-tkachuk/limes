@@ -53,8 +53,8 @@ type cacheConfig struct {
 // CachedBiscuitRevocationChecker.
 type CacheOption func(*cacheConfig)
 
-// WithCacheClock replaces time.Now; tests use it to step through expiry.
-func WithCacheClock(now func() time.Time) CacheOption {
+// withCacheClock replaces time.Now; tests use it to step through expiry.
+func withCacheClock(now func() time.Time) CacheOption {
 	return func(c *cacheConfig) { c.now = now }
 }
 

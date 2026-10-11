@@ -111,7 +111,7 @@ func validResource(kind, s string) error {
 			return fmt.Errorf("%w: %s %q contains a control character", ErrInvalidCaveats, kind, s)
 		}
 	}
-	if HasDotSegment(s) {
+	if hasDotSegment(s) {
 		return fmt.Errorf("%w: %s %q has a \".\" or \"..\" segment", ErrInvalidCaveats, kind, s)
 	}
 	return nil

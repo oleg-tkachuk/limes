@@ -261,7 +261,7 @@ func TestCachedBiscuitRevocationChecker(t *testing.T) {
 	t.Run("serves a fresh answer, then asks again once it expires", func(t *testing.T) {
 		now := time.Unix(0, 0)
 		up := &countingBiscuitLookup{revoked: true}
-		c := NewCachedBiscuitRevocationChecker(up, ttl, WithCacheClock(func() time.Time { return now }))
+		c := NewCachedBiscuitRevocationChecker(up, ttl, withCacheClock(func() time.Time { return now }))
 		for range 3 {
 			if got, _ := c.IsBiscuitRevoked(ctx, ids); !got {
 				t.Fatal("want revoked")

@@ -107,7 +107,7 @@ func TestRevocationCacheIsBoundedAndHonoursClock(t *testing.T) {
 	store := newMemStore()
 	now := time.Unix(1_800_000_000, 0)
 	c := NewCachedRevocationChecker(store, time.Second,
-		WithMaxEntries(10), WithCacheClock(func() time.Time { return now }))
+		WithMaxEntries(10), withCacheClock(func() time.Time { return now }))
 	ctx := context.Background()
 
 	for range 100 {

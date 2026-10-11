@@ -120,8 +120,8 @@ func TestWriteErrorResponse(t *testing.T) {
 	_, v, _, _ := buildIssuerVerifier(t)
 	rec := httptest.NewRecorder()
 	WriteErrorResponse(rec, v.ErrorResponse(context.Background(), ErrExpired, AuthSchemeBearer))
-	if rec.Code != http.StatusUnauthorized || rec.Header().Get("Content-Type") != MediaTypeProblem ||
-		len(rec.Header().Values(WWWAuthenticateHeader)) != 2 || rec.Header().Get(httpx.HeaderCacheControl) != httpx.DirectiveNoStore {
+	if rec.Code != http.StatusUnauthorized || rec.Header().Get("Content-Type") != mediaTypeProblem ||
+		len(rec.Header().Values(headerWWWAuthenticate)) != 2 || rec.Header().Get(httpx.HeaderCacheControl) != httpx.DirectiveNoStore {
 		t.Fatalf("response = %d %v", rec.Code, rec.Header())
 	}
 	var p Problem

@@ -159,7 +159,7 @@ func (s *ed25519Signer) Sign(_ context.Context, c Capability) (string, error) {
 		return "", errors.New("limes: ExpiresAt must be after IssuedAt")
 	}
 
-	header := jwtHeader{Alg: jose.AlgEd25519, Kid: s.keyID, Typ: TokenType}
+	header := jwtHeader{Alg: jose.AlgEd25519, Kid: s.keyID, Typ: tokenType}
 	claims := jwtClaims{
 		Issuer:     c.Issuer,
 		Subject:    c.Subject.Subject,
@@ -209,12 +209,12 @@ func (s *ed25519Signer) Sign(_ context.Context, c Capability) (string, error) {
 	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig), nil
 }
 
-// TokenType is the JWT "typ" header every capability token carries. The
+// tokenType is the JWT "typ" header every capability token carries. The
 // verifier requires it, so a different kind of EdDSA JWT signed by the same
 // key — an ID token, another product's token — cannot be presented as a
 // capability. It names the format's version: a token of another version is
 // refused here, before a claim of it is read under the wrong schema.
-const TokenType = "limes-cap-v3+jwt" //nolint:gosec // G101: a JWT type label, not a credential
+const tokenType = "limes-cap-v3+jwt" //nolint:gosec // G101: a JWT type label, not a credential
 
 func parseHeader(seg string) (jwtHeader, error) {
 	raw, err := base64.RawURLEncoding.DecodeString(seg)
@@ -227,7 +227,7 @@ func parseHeader(seg string) (jwtHeader, error) {
 	}
 	// Only the fully-specified identifier (RFC 9864): a capability token is
 	// this module's own, and none was ever written with another under this
-	// TokenType.
+	// tokenType.
 	if h.Alg != jose.AlgEd25519 {
 		return jwtHeader{}, fmt.Errorf("limes: unexpected alg %q (want %s)", h.Alg, jose.AlgEd25519)
 	}
