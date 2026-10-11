@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/oleg-tkachuk/limes/dpop"
 	"github.com/oleg-tkachuk/limes/internal/jose"
 	"github.com/oleg-tkachuk/limes/jwks"
 )
@@ -89,9 +90,9 @@ type VerifierConfig struct {
 
 	// DPoP checks the proof of possession a key-bound capability (one with
 	// a ConfirmationJKT) must come with. Without it the verifier refuses
-	// every key-bound capability with ErrDPoPRequired, rather than accept
+	// every key-bound capability with dpop.ErrRequired, rather than accept
 	// one as a bearer token.
-	DPoP *DPoPVerifier
+	DPoP *dpop.Verifier
 }
 
 // Verifier validates tokens. A deployment typically resolves keys through a
@@ -123,7 +124,7 @@ type VerifyRequest struct {
 	Audience string
 	// DPoP is the request's proof of possession, needed when the
 	// capability is key-bound and ignored when it is not.
-	DPoP DPoPProof
+	DPoP dpop.Proof
 	// Scheme is the Authorization scheme the token came under
 	// (ParseAuthorization). Set, it must match the binding: DPoP for a
 	// key-bound capability, Bearer for any other.
@@ -168,7 +169,7 @@ func NewStandardVerifier(cfg VerifierConfig) (*StandardVerifier, error) {
 	}
 	if cfg.DPoP != nil {
 		if cfg.DPoP.Replay == nil {
-			return nil, errNoReplayCache
+			return nil, dpop.ErrNoReplayCache
 		}
 		dpop := *cfg.DPoP // the caller's stays theirs
 		if dpop.Now == nil {
@@ -259,10 +260,14 @@ func (v *StandardVerifier) Verify(ctx context.Context, req VerifyRequest) (Capab
 	}
 	if cap.ConfirmationJKT != "" {
 		if v.cfg.DPoP == nil {
-			return Capability{}, fmt.Errorf("%w: capability is key-bound and this verifier has no DPoP configured", ErrDPoPRequired)
+			return Capability{}, fmt.Errorf("%w: capability is key-bound and this verifier has no DPoP configured",
+				proofRefusal(dpop.ErrRequired))
 		}
-		if err := v.cfg.DPoP.check(ctx, *cap, token, req.DPoP); err != nil {
-			return Capability{}, err
+		if err := v.cfg.DPoP.Verify(ctx, dpop.Request{Proof: req.DPoP, Token: token, JKT: cap.ConfirmationJKT}); err != nil {
+			if isProofRefusal(err) {
+				return Capability{}, proofRefusal(err)
+			}
+			return Capability{}, fmt.Errorf("limes: proof of possession: %w", err)
 		}
 	}
 
@@ -291,13 +296,13 @@ func (v *StandardVerifier) Verify(ctx context.Context, req VerifyRequest) (Capab
 }
 
 // DPoPNonce is the nonce to send in the DPoP-Nonce header — with a
-// response refused by ErrDPoPNonceRequired, and with any other for the
+// response refused by dpop.ErrNonceRequired, and with any other for the
 // client's next proof. Empty when the verifier issues none.
 func (v *StandardVerifier) DPoPNonce(ctx context.Context) (string, error) {
-	if v.cfg.DPoP == nil || v.cfg.DPoP.Nonces == nil {
+	if v.cfg.DPoP == nil {
 		return "", nil
 	}
-	return v.cfg.DPoP.Nonces.Nonce(ctx)
+	return v.cfg.DPoP.Nonce(ctx)
 }
 
 // Authorize implements Verifier.
@@ -391,3 +396,21 @@ func (v *StandardVerifier) verifySigned(ctx context.Context, token string) (*Cap
 
 	return cap, nil
 }
+
+// proofRefusals are the dpop errors that refuse a proof; any other error
+// from dpop.Verifier is a failure of its replay cache or nonces.
+var proofRefusals = []error{dpop.ErrRequired, dpop.ErrInvalid, dpop.ErrReplayed, dpop.ErrNonceRequired}
+
+func isProofRefusal(err error) bool {
+	for _, r := range proofRefusals {
+		if errors.Is(err, r) {
+			return true
+		}
+	}
+	return false
+}
+
+// proofRefusal is a dpop refusal as this module reads it: a refusal of the
+// credentials (ErrProofOfPossession, and so ErrUnauthenticated), with the
+// dpop sentinel still matchable.
+func proofRefusal(err error) error { return fmt.Errorf("%w: %w", ErrProofOfPossession, err) }

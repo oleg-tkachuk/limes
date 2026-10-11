@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/oleg-tkachuk/limes/internal/rfc3986"
 )
 
 // The Authorization request header, after RFC 9110 §11.6.2 and RFC 9449
@@ -69,7 +71,7 @@ func isToken68(s string) bool {
 	}
 	for i := 0; i < len(body); i++ {
 		c := body[i]
-		if !isUnreserved(c) && c != '+' && c != '/' {
+		if !rfc3986.IsUnreserved(c) && c != '+' && c != '/' {
 			return false
 		}
 	}

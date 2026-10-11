@@ -13,6 +13,7 @@ import (
 	biscuit "github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/google/uuid"
 
+	"github.com/oleg-tkachuk/limes/dpop"
 	"github.com/oleg-tkachuk/limes/jwks"
 )
 
@@ -24,7 +25,7 @@ func biscuitFixture(t *testing.T) (*Issuer, *StandardVerifier, *memStore, Capabi
 		Revocations:    NewCachedRevocationChecker(store, -1),
 		TrustedIssuers: []string{"limes-test"},
 		AcceptBiscuit:  true,
-		DPoP:           &DPoPVerifier{Replay: NewMemoryReplayCache(0)},
+		DPoP:           &dpop.Verifier{Replay: dpop.NewMemoryReplayCache(0)},
 
 		BiscuitRevocations: NewCachedBiscuitRevocationChecker(store, -1),
 	})
@@ -246,19 +247,19 @@ func TestBiscuitRevokedWithItsCapability(t *testing.T) {
 func TestBiscuitOfflineBinding(t *testing.T) {
 	_, v, _, _, token := biscuitFixture(t)
 	keys := dpopKeys(t)
-	jkt, _ := KeyThumbprint(keys["Ed25519"].Public())
+	jkt, _ := dpop.Thumbprint(keys["Ed25519"].Public())
 	bound, err := Attenuate(token, Attenuation{ConfirmationJKT: jkt})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v.Verify(context.Background(), VerifyRequest{Token: bound, Audience: audienceData}); !errors.Is(err, ErrDPoPRequired) {
-		t.Fatalf("bound offline, no proof: err = %v, want ErrDPoPRequired", err)
+	if _, err := v.Verify(context.Background(), VerifyRequest{Token: bound, Audience: audienceData}); !errors.Is(err, dpop.ErrRequired) {
+		t.Fatalf("bound offline, no proof: err = %v, want dpop.ErrRequired", err)
 	}
 	got, err := v.Verify(context.Background(), withProof(t, keys["Ed25519"], bound, audienceData, time.Now()))
 	if err != nil || got.ConfirmationJKT != jkt {
 		t.Fatalf("bound offline: %q, %v", got.ConfirmationJKT, err)
 	}
-	other, _ := KeyThumbprint(keys["P-256"].Public())
+	other, _ := dpop.Thumbprint(keys["P-256"].Public())
 	rebound, _ := Attenuate(bound, Attenuation{ConfirmationJKT: other})
 	if _, err := v.Verify(context.Background(), VerifyRequest{Token: rebound, Audience: audienceData}); !errors.Is(err, ErrBiscuitAttenuation) {
 		t.Fatalf("rebinding offline: err = %v, want ErrBiscuitAttenuation", err)

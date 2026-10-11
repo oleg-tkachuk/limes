@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/oleg-tkachuk/limes/dpop"
 	"github.com/oleg-tkachuk/limes/jwks"
 )
 
@@ -106,7 +107,7 @@ func buildIssuerVerifier(t *testing.T) (*Issuer, *StandardVerifier, *memStore, e
 		Keys:           keys,
 		Revocations:    cache,
 		TrustedIssuers: []string{"limes-test"},
-		DPoP:           &DPoPVerifier{Replay: NewMemoryReplayCache(0)},
+		DPoP:           &dpop.Verifier{Replay: dpop.NewMemoryReplayCache(0)},
 	})
 	if err != nil {
 		t.Fatalf("verifier: %v", err)

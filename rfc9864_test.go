@@ -28,16 +28,6 @@ func TestWritesTheFullySpecifiedAlgorithm(t *testing.T) {
 		t.Errorf("token alg = %q, %v; want %q", h.Alg, err, jose.AlgEd25519)
 	}
 
-	key := dpopKeys(t)["Ed25519"]
-	proof, err := NewDPoPProof(key, DPoPProofRequest{Method: dpopMethod, URL: dpopURL, Token: token, Now: time.Now()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	pp, _ := jose.Split(proof)
-	var ph dpopHeader
-	if err := decodeSegment(pp.Header, &ph); err != nil || ph.Alg != jose.AlgEd25519 {
-		t.Errorf("proof alg = %q, %v; want %q", ph.Alg, err, jose.AlgEd25519)
-	}
 }
 
 func issueFor(t *testing.T, issuer *Issuer) (Capability, string) {
@@ -69,9 +59,5 @@ func TestReadsTheDeprecatedAlgorithmFromOthers(t *testing.T) {
 	keys, err := jwks.Parse([]byte(doc))
 	if err != nil || !keys["old"].Equal(pub) {
 		t.Errorf("a JWKS entry naming EdDSA = %v, %v; want it read", keys, err)
-	}
-	_, priv, _ := ed25519.GenerateKey(nil)
-	if !verifyDPoPSignature(priv.Public(), jose.AlgEdDSA, []byte("in"), ed25519.Sign(priv, []byte("in"))) {
-		t.Error("a proof signed under EdDSA was refused")
 	}
 }

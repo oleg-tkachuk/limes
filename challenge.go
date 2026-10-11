@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/oleg-tkachuk/limes/dpop"
 	"github.com/oleg-tkachuk/limes/internal/httpx"
 )
 
@@ -143,7 +144,7 @@ func challenge(scheme AuthScheme, code, description string, withAlgs bool) strin
 		params = append(params, authParam(authParamError, code), authParam(authParamErrorDescription, description))
 	}
 	if withAlgs {
-		params = append(params, authParam(authParamAlgs, strings.Join(DPoPSigningAlgorithms(), " ")))
+		params = append(params, authParam(authParamAlgs, strings.Join(dpop.SigningAlgorithms(), " ")))
 	}
 	if len(params) == 0 {
 		return string(scheme)
@@ -170,7 +171,7 @@ func WriteErrorResponse(w http.ResponseWriter, resp ErrorResponse) {
 		h.Add(WWWAuthenticateHeader, c)
 	}
 	if resp.DPoPNonce != "" {
-		h.Set(DPoPNonceHeader, resp.DPoPNonce)
+		h.Set(dpop.NonceHeader, resp.DPoPNonce)
 	}
 	body, err := json.Marshal(resp.Problem)
 	if err != nil {
