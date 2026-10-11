@@ -116,3 +116,21 @@ func validResource(kind, s string) error {
 	}
 	return nil
 }
+
+// Validate reports whether p names a principal a capability can be issued
+// to: one of the principal kinds, spelled as the constants spell it, and
+// agent details only on an agent. The kind is part of the token, so a kind
+// outside the set would be signed and then read by every verifier as it
+// pleased.
+func (p Principal) Validate() error {
+	switch p.Type {
+	case PrincipalUser, PrincipalAgent, PrincipalService:
+	default:
+		return invalidRequest("principal type %q is not one of %q, %q, %q",
+			p.Type, PrincipalUser, PrincipalAgent, PrincipalService)
+	}
+	if p.Agent != nil && p.Type != PrincipalAgent {
+		return invalidRequest("principal of type %q carries agent details", p.Type)
+	}
+	return nil
+}

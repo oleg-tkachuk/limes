@@ -117,6 +117,9 @@ func (i *Issuer) Issue(ctx context.Context, req IssueRequest) (Capability, strin
 	if req.Subject.TenantID == uuid.Nil {
 		return Capability{}, "", invalidRequest("Issue requires Subject.TenantID")
 	}
+	if err := req.Subject.Validate(); err != nil {
+		return Capability{}, "", err
+	}
 	if req.IssuedBy.Subject == "" {
 		return Capability{}, "", invalidRequest("IssuedBy is required")
 	}
@@ -257,6 +260,9 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 	}
 	if req.Subject.TenantID == uuid.Nil {
 		req.Subject.TenantID = req.Parent.Subject.TenantID
+	}
+	if err := req.Subject.Validate(); err != nil {
+		return Capability{}, "", err
 	}
 	if len(req.Audience) == 0 {
 		req.Audience = append([]string(nil), req.Parent.Audience...)

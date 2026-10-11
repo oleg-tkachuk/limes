@@ -43,7 +43,7 @@ func validClaims(tenant uuid.UUID) map[string]any {
 	return map[string]any{
 		"iss": "iss", "sub": "s", "aud": []string{"data"},
 		"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(), "jti": uuid.NewString(),
-		"limes_principal": map[string]any{"tenant_id": tenant, "subject": "s"},
+		"limes_principal": map[string]any{"type": "agent", "tenant_id": tenant, "subject": "s"},
 		"limes_caveats":   map[string]any{"ops": []string{"get"}},
 	}
 }

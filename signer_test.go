@@ -345,7 +345,7 @@ func TestIssuerSignsUnderTheCallersContext(t *testing.T) {
 	}
 	ctx := context.WithValue(context.Background(), ctxKey{}, "request")
 	req := IssueRequest{
-		IssuedBy: Principal{Subject: "op"}, Subject: Principal{TenantID: uuid.New(), Subject: "a"},
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}},
 	}
 	c, _, err := issuer.Issue(ctx, req)

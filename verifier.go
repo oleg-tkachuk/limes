@@ -437,6 +437,9 @@ func (v *StandardVerifier) verifySigned(ctx context.Context, token string) (*Cap
 	if cap.Subject.TenantID == uuid.Nil {
 		return nil, fmt.Errorf("%w: capability has no tenant", ErrInvalidSignature)
 	}
+	if err := cap.Subject.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidSignature, err)
+	}
 
 	return cap, nil
 }
