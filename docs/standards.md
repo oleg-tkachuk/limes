@@ -9,7 +9,7 @@ the test that holds it there.
 | [RFC 7519](https://www.rfc-editor.org/rfc/rfc7519), [RFC 8725](https://www.rfc-editor.org/rfc/rfc8725) | The capability token: a JWT, explicitly typed | `Signer`, `StandardVerifier.Verify` |
 | [RFC 9864](https://www.rfc-editor.org/rfc/rfc9864) | `alg: Ed25519` instead of the deprecated `EdDSA` | tokens, JWKS, DPoP |
 | [RFC 7493](https://www.rfc-editor.org/rfc/rfc7493) | I-JSON: the claims every JSON reader reads alike | claim parsing |
-| [RFC 9449](https://www.rfc-editor.org/rfc/rfc9449), [RFC 7800](https://www.rfc-editor.org/rfc/rfc7800) | Proof of possession (DPoP), `cnf.jkt`, nonces, the `DPoP` scheme | `DPoPVerifier`, `NewDPoPProof`, `HMACNonces` |
+| [RFC 9449](https://www.rfc-editor.org/rfc/rfc9449), [RFC 7800](https://www.rfc-editor.org/rfc/rfc7800) | Proof of possession (DPoP), `cnf.jkt`, nonces, the `DPoP` scheme | `dpop.Verifier`, `dpop.Sign`, `dpop.HMACNonces` |
 | [RFC 3986](https://www.rfc-editor.org/rfc/rfc3986) | URI normalisation for `htu` | DPoP checks |
 | [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110), [RFC 6750](https://www.rfc-editor.org/rfc/rfc6750) | The `Authorization` header and `WWW-Authenticate` challenges | `ParseAuthorization`, `ErrorResponse` |
 | [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) | Problem details bodies | `ErrorResponse`, `WriteErrorResponse` |
@@ -34,7 +34,7 @@ before any claim is read under the wrong schema.
 capability token naming it is refused, while a DPoP proof or a JWKS entry
 naming it is still read, since those come from clients and tools that may
 predate the RFC. DPoP challenges advertise `algs="Ed25519 ES256"`
-(`DPoPSigningAlgorithms`); `EdDSA` is never advertised.
+(`dpop.SigningAlgorithms`); `EdDSA` is never advertised.
 *Held by* `TestWritesTheFullySpecifiedAlgorithm`,
 `TestMarshalWritesTheFullySpecifiedAlgorithm`,
 `TestCapabilityTokenRefusesThePolymorphicAlgorithm`,
@@ -56,7 +56,7 @@ token the issuer signed. *Held by* `TestVerifyReadsClaimsStrictly`,
 
 **RFC 9449 (DPoP), RFC 7800.** A key-bound capability carries the RFC 7638
 thumbprint of its key as `cnf.jkt`. `Verify` itself refuses it without a
-valid proof — a verifier with no `DPoPVerifier` refuses every key-bound token
+valid proof — a verifier with no `dpop.Verifier` refuses every key-bound token
 — so a binding cannot be lost to a forgotten call. The proof is checked as
 §4.3 lists: `typ: dpop+jwt`, an asymmetric algorithm, a signature by the key
 in its header, that key's thumbprint equal to `cnf.jkt`, no private key in
@@ -69,15 +69,15 @@ and a `jti` not seen before.
   empty path as `/`, unreserved characters' percent-encodings decoded and
   every other one in upper case, dot segments removed (§5.2.4); no query or
   fragment. A URI with userinfo is refused (RFC 9110 §4.2.4). Behind a proxy,
-  `DPoPVerifier.MatchPathOnly` compares the normalised paths alone, and lets
+  `dpop.Verifier.MatchPathOnly` compares the normalised paths alone, and lets
   the proof's path carry extra leading segments, as a proxy's mount prefix
   adds.
-- **Nonces (§8, §9).** With `DPoPVerifier.Nonces` set, every proof must carry
+- **Nonces (§8, §9).** With `dpop.Verifier.Nonces` set, every proof must carry
   a nonce the server issued; one without is refused with
-  `ErrDPoPNonceRequired` (`use_dpop_nonce`), and
+  `dpop.ErrNonceRequired` (`use_dpop_nonce`), and
   `StandardVerifier.DPoPNonce` gives the nonce to send in `DPoP-Nonce`.
-  `HMACNonces` issues them statelessly — its issuance time and an HMAC of it
-  — so replicas sharing a key, with clocks within `HMACNonceClockSkew` of each
+  `dpop.HMACNonces` issues them statelessly — its issuance time and an HMAC of it
+  — so replicas sharing a key, with clocks within `dpop.HMACNonceClockSkew` of each
   other, share nonces without sharing state, and keys rotate by putting the
   new one first.
 - **The scheme (§7.1, §7.2).** `ParseAuthorization` reads
@@ -85,18 +85,18 @@ and a `jti` not seen before.
   §11.6.2, token68). Given the scheme, `Verify` refuses a key-bound token
   presented as `Bearer` — the downgrade §7.2 names — and an unbound one
   presented as `DPoP`.
-- **Replay.** `MemoryReplayCache` remembers `jti`s for one process, keyed by
+- **Replay.** `dpop.MemoryReplayCache` remembers `jti`s for one process, keyed by
   the proof key's thumbprint, each key within its own share
-  (`WithEntriesPerKey`, default `DefaultReplayEntriesPerKey`), so one key
+  (`dpop.WithEntriesPerKey`, default `dpop.DefaultReplayEntriesPerKey`), so one key
   cannot crowd another's proofs out. Across replicas, nonces or a shared
-  `ReplayCache` close the window.
+  `dpop.ReplayCache` close the window.
 
 *Held by* `TestDPoPRefusals`, `TestDPoPRefusesAPrivateJWK`,
 `TestVerifyEnforcesProofOfPossession`, `TestBiscuitProofIsOverTheBiscuit`,
-`TestNormalizeURI`, `TestRemoveDotSegments`, `TestDPoPMatchesNormalizedURIs`,
+`TestNormalize`, `TestRemoveDotSegments`, `TestDPoPMatchesNormalizedURIs`,
 `TestHMACNonces`, `TestVerifyRequiresTheServerNonce`,
 `TestParseAuthorization`, `TestVerifyHoldsTheSchemeToTheBinding`, and the
-fuzz targets `FuzzDPoPCheck`, `FuzzNormalizeURI`, `FuzzParseAuthorization`
+fuzz targets `FuzzDPoPCheck`, `FuzzNormalize`, `FuzzParseAuthorization`
 and `FuzzHMACNonceValid`.
 
 ## Refusing a request

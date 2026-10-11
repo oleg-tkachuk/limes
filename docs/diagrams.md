@@ -15,8 +15,8 @@ process.
 The module ships the primitive and its contracts; the consumer supplies the
 storage behind them. `memstore` is the in-memory reference implementation; a
 store over a database is the consumer's own. The two Biscuit contracts are
-needed only by a consumer that accepts the Biscuit form, and `ReplayCache` and
-`DPoPNonces` only by one that binds capabilities to keys. `storetest` and `metertest` check a
+needed only by a consumer that accepts the Biscuit form, and `dpop.ReplayCache` and
+`dpop.Nonces` only by one that binds capabilities to keys. `storetest` and `metertest` check a
 store against its contract from the store's own tests.
 
 ```mermaid
@@ -36,10 +36,10 @@ flowchart LR
         metering["WithMetering<br/>OTel counters · spend histogram<br/>WithMeterProvider · WithTenantAttribute"]
         static["jwks.Static<br/>SetKey · RemoveKey"]
         remote["jwks.Remote<br/>ETag · Cache-Control · MaxStale"]
-        dpop["DPoPVerifier<br/>VerifierConfig.DPoP · NewDPoPProof"]
+        dpop["dpop.Verifier<br/>VerifierConfig.DPoP · dpop.Sign"]
         suites["storetest · metertest<br/>conformance suites"]
         jwksh["jwks.Handler<br/>ETag · max-age"]
-        nonce["HMACNonces<br/>stateless DPoP nonces"]
+        nonce["dpop.HMACNonces<br/>stateless DPoP nonces"]
     end
 
     subgraph contracts ["contracts the consumer implements"]
@@ -49,8 +49,8 @@ flowchart LR
         keys["<b>KeyResolver</b><br/>PublicKey(kid)"]
         brev["<b>BiscuitRevocationStore</b><br/>IsBiscuitRevoked · RevokeBiscuit<br/>GetBiscuitRevocation"]
         cusage["<b>CopyUsageReader</b><br/>CopyUsage(revocation ids)"]
-        replay["<b>ReplayCache</b><br/>Seen(ctx, jkt, jti, expires) · MemoryReplayCache ships"]
-        nonces["<b>DPoPNonces</b><br/>Nonce · Valid"]
+        replay["<b>dpop.ReplayCache</b><br/>Seen(ctx, ReplayEntry) · MemoryReplayCache ships"]
+        nonces["<b>dpop.Nonces</b><br/>Nonce · Valid"]
     end
 
     impl[("memstore · PostgreSQL · …")]
@@ -171,7 +171,7 @@ flowchart TB
     exp{"now − Leeway ≤ ExpiresAt"}
     aud{"Audience ∈ token's audience"}
     scheme{"Scheme, if set, matches the binding<br/>DPoP for a key-bound token, Bearer otherwise"}
-    pop{"key-bound: a DPoPVerifier is configured<br/>and the proof checks out"}
+    pop{"key-bound: a dpop.Verifier is configured<br/>and the proof checks out"}
     rev{"RevocationLookup.IsRevoked<br/>this capability or an ancestor"}
     brev{"Biscuit: IsBiscuitRevoked<br/>any block of this copy"}
     ok(["Capability"])
@@ -181,7 +181,7 @@ flowchart TB
     expired["ErrExpired"]
     mism["ErrAudienceMismatch"]
     wrong["ErrAuthSchemeMismatch"]
-    dpopErr["ErrProofOfPossession<br/>ErrDPoPRequired · ErrDPoPInvalid<br/>ErrDPoPNonceRequired · ErrDPoPReplayed"]
+    dpopErr["ErrProofOfPossession<br/>dpop.ErrRequired · dpop.ErrInvalid<br/>dpop.ErrNonceRequired · dpop.ErrReplayed"]
     keysDown["jwks.ErrUnavailable<br/>(503, the server's fault)"]
     revoked["ErrRevoked"]
     biscuit["the Biscuit path below"]
@@ -298,13 +298,15 @@ one this verifier accepts.
 ## Proof of possession
 
 A key-bound capability (`ConfirmationJKT` set) needs a DPoP proof (RFC 9449)
-for every request; a verifier with no `DPoPVerifier` refuses it outright with
-`ErrDPoPRequired`. The proof is checked in this order, and every refusal
-matches `ErrProofOfPossession`:
+for every request; a verifier with no `dpop.Verifier` refuses it outright with
+`dpop.ErrRequired`. The `dpop` package checks the proof in this order and
+returns its own sentinel; the verifier wraps each refusal in
+`ErrProofOfPossession`, and passes a replay cache or nonce store that cannot
+answer through as an outage:
 
 ```mermaid
 flowchart TB
-    p(["DPoPProof<br/>Proof · Method · URL"])
+    p(["dpop.Proof<br/>Proof · Method · URL"])
     has{"proof present"}
     shape{"three segments · typ dpop+jwt<br/>a jwk with no private member"}
     jkt{"the jwk's RFC 7638 thumbprint<br/>= ConfirmationJKT"}
@@ -312,15 +314,15 @@ flowchart TB
     htm{"htm = Method, exactly<br/>(a method is case-sensitive)"}
     htu{"htu = URL after RFC 3986 normalisation<br/>or, under MatchPathOnly, its path a suffix"}
     ath{"ath = hash of the token as presented"}
-    iat{"|now − iat| ≤ Window<br/>(DefaultDPoPWindow, 1 minute)<br/>iat may be fractional"}
+    iat{"|now − iat| ≤ Window<br/>(dpop.DefaultWindow, 1 minute)<br/>iat may be fractional"}
     nonce{"Nonces set → a nonce they issued"}
     jti{"ReplayCache.Seen(jkt, jti, iat + Window)"}
     ok(["proof accepted"])
 
-    req["ErrDPoPRequired"]
-    inv["ErrDPoPInvalid"]
-    nn["ErrDPoPNonceRequired<br/>answer with a fresh DPoP-Nonce"]
-    rp["ErrDPoPReplayed"]
+    req["dpop.ErrRequired"]
+    inv["dpop.ErrInvalid"]
+    nn["dpop.ErrNonceRequired<br/>answer with a fresh DPoP-Nonce"]
+    rp["dpop.ErrReplayed"]
 
     p --> has -- yes --> shape -- yes --> jkt -- yes --> psig -- yes --> htm -- yes --> htu -- yes --> ath -- yes --> iat -- yes --> nonce -- yes --> jti -- "new" --> ok
     has -- no --> req
@@ -344,9 +346,9 @@ flowchart TB
     class req,inv,nn,rp external
 ```
 
-`HMACNonces` makes a nonce of its issuance time and an HMAC of it, so replicas
+`dpop.HMACNonces` makes a nonce of its issuance time and an HMAC of it, so replicas
 holding the same keys accept each other's nonces with no shared state, given
-clocks within `HMACNonceClockSkew`. `MemoryReplayCache` gives each key a share
+clocks within `dpop.HMACNonceClockSkew`. `dpop.MemoryReplayCache` gives each key a share
 of its own, so one key past its share has only its own proofs refused; a full
 cache refuses rather than forgets.
 
@@ -361,8 +363,8 @@ error's own text never reaches the client.
 |---|---|---|
 | `jwks.ErrUnavailable` | 503 | none |
 | `ErrMalformedAuthorization` | 400 | `error="invalid_request"` under the client's scheme (Bearer when unknown) |
-| `ErrDPoPNonceRequired` | 401 | `DPoP error="use_dpop_nonce"`, and a fresh `DPoP-Nonce` |
-| `ErrDPoPRequired` · `ErrDPoPInvalid` · `ErrDPoPReplayed`, and any other `ErrProofOfPossession` | 401 | `DPoP error="invalid_dpop_proof", algs="Ed25519 ES256"` |
+| `dpop.ErrNonceRequired` | 401 | `DPoP error="use_dpop_nonce"`, and a fresh `DPoP-Nonce` |
+| `dpop.ErrRequired` · `dpop.ErrInvalid` · `dpop.ErrReplayed`, and any other `ErrProofOfPossession` | 401 | `DPoP error="invalid_dpop_proof", algs="Ed25519 ES256"` |
 | `ErrAuthSchemeMismatch` · `ErrInvalidToken` · `ErrExpired` · `ErrNotYetValid` · `ErrRevoked` · `ErrAudienceMismatch`, and any other `ErrUnauthenticated` | 401 | `error="invalid_token"` under the client's scheme (Bearer when unknown) |
 | any `ErrCaveatViolation` | 403 | `error="insufficient_scope"` |
 | `ErrBudgetExceeded` · `ErrTenantBudgetExceeded` · `ErrRequestLimitExceeded` | 403 | none |
