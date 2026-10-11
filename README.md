@@ -141,9 +141,10 @@ commit together with, say, an outbox write; with no transactions, use
 ## Versioning
 
 Releases are `vX.Y.Z` tags, cut from Conventional Commits on `main` when CI
-passes: `feat` is a minor, `fix` a patch. The module is pre-1.0, so a breaking
-change is a minor too — **the Go API may change between minor versions**; read
-the release notes before bumping.
+passes: `feat` is a minor; `fix`, `perf` and `security` a patch. The module is
+pre-1.0, so a breaking change is a minor too — **the Go API may change between
+minor versions**; read the release notes, which list breaking changes first,
+before bumping.
 
 The token wire format — claims, `typ: limes-cap-v3+jwt`, the Biscuit facts —
 is a separate promise: a token is a credential that outlives the process that

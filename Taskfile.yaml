@@ -34,7 +34,7 @@ tasks:
       - task --list
 
   verify-all:
-    desc: "gofmt + go mod tidy + golangci-lint + the unit suite + govulncheck + actionlint + the workflow scripts + the release rules — what CI runs"
+    desc: "gofmt + go mod tidy/verify + golangci-lint + the unit suite + govulncheck + actionlint + the workflow scripts + the release rules and notes — what CI runs"
     cmds:
       - task: fmt:check
       - task: verify:tidy
@@ -51,7 +51,7 @@ tasks:
       - go tool -modfile={{.TOOLS_MODFILE}} govulncheck ./...
 
   verify:tidy:
-    desc: "Fail when either module's go.mod or go.sum is not what go mod tidy writes, or a download differs from go.sum"
+    desc: "Fail when any module's go.mod or go.sum (root, tools, tools/yq) is not what go mod tidy writes, or a download differs from go.sum"
     cmds:
       - go mod tidy -diff
       - go mod verify
