@@ -217,8 +217,9 @@ func validateAudience(aud []string) error {
 // holds. The issuer enforces narrowing (Narrows) before persisting so a
 // runtime widening attempt fails before any token is emitted.
 type DelegateRequest struct {
-	// Parent is the verified capability the child narrows.
-	Parent Capability
+	// Parent is the capability the child narrows, as the verifier accepted
+	// it: only StandardVerifier.Verify and Authorize make one.
+	Parent VerifiedCapability
 	// Subject is who the child authorises; its TenantID defaults to the
 	// parent's.
 	Subject Principal
@@ -243,35 +244,36 @@ type DelegateRequest struct {
 	ConfirmationJKT string
 }
 
-// Delegate mints a child capability narrower than the supplied parent.
-// The parent must already be a verified Capability — callers run it
-// through StandardVerifier.Verify first; the Issuer trusts its in-memory shape.
-// It does not trust it to be current, though: a parent that has expired,
+// Delegate mints a child capability narrower than the supplied parent, which
+// the verifier accepted (VerifiedCapability), so its caveats are the ones its
+// token carries. It does not trust it to be current, though: a parent that
+// has expired,
 // or that the store reports revoked (itself or any ancestor), delegates
 // nothing; nor does a Biscuit copy with limits of its own (Parent.Copies),
 // which returns ErrDelegationTooWide.
 func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability, string, error) {
-	if req.Parent.ID == uuid.Nil {
-		return Capability{}, "", invalidRequest("Delegate requires Parent.ID")
+	parent := req.Parent.c
+	if parent.ID == uuid.Nil {
+		return Capability{}, "", invalidRequest("Delegate requires a Parent the verifier accepted")
 	}
 	// A child counts against the capability and its ancestors, never against
 	// a Biscuit copy's own counters, so a copy with limits of its own would
 	// shed them by delegating. Its holder attenuates it instead.
-	if len(req.Parent.Copies) > 0 {
+	if len(parent.Copies) > 0 {
 		return Capability{}, "", fmt.Errorf("%w: parent is a Biscuit copy with limits of its own; attenuate it instead",
 			ErrDelegationTooWide)
 	}
 	if req.Subject.TenantID == uuid.Nil {
-		req.Subject.TenantID = req.Parent.Subject.TenantID
+		req.Subject.TenantID = parent.Subject.TenantID
 	}
 	if err := req.Subject.Validate(); err != nil {
 		return Capability{}, "", err
 	}
 	if len(req.Audience) == 0 {
-		req.Audience = append([]string(nil), req.Parent.Audience...)
+		req.Audience = append([]string(nil), parent.Audience...)
 	}
 	if req.InheritCaveats {
-		req.Caveats = req.Parent.Caveats
+		req.Caveats = parent.Caveats
 	}
 	if err := validateAudience(req.Audience); err != nil {
 		return Capability{}, "", err
@@ -284,23 +286,23 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 	}
 
 	now := i.clock().UTC()
-	if !now.Before(req.Parent.ExpiresAt) {
-		return Capability{}, "", fmt.Errorf("limes: delegate from parent %s: %w", req.Parent.ID, ErrExpired)
+	if !now.Before(parent.ExpiresAt) {
+		return Capability{}, "", fmt.Errorf("limes: delegate from parent %s: %w", parent.ID, ErrExpired)
 	}
-	revoked, err := i.store.IsRevoked(ctx, req.Parent.ID)
+	revoked, err := i.store.IsRevoked(ctx, parent.ID)
 	if err != nil {
 		return Capability{}, "", fmt.Errorf("limes: delegate revocation lookup: %w", err)
 	}
 	if revoked {
-		return Capability{}, "", fmt.Errorf("limes: delegate from parent %s: %w", req.Parent.ID, ErrRevoked)
+		return Capability{}, "", fmt.Errorf("limes: delegate from parent %s: %w", parent.ID, ErrRevoked)
 	}
 
 	expires, err := i.expiry(now, req.TTL)
 	if err != nil {
 		return Capability{}, "", err
 	}
-	if expires.After(req.Parent.ExpiresAt) {
-		expires = req.Parent.ExpiresAt
+	if expires.After(parent.ExpiresAt) {
+		expires = parent.ExpiresAt
 	}
 	id, err := uuid.NewV7()
 	if err != nil {
@@ -315,12 +317,12 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 		Caveats:         req.Caveats.clone(),
 		IssuedAt:        now,
 		ExpiresAt:       expires,
-		ParentID:        req.Parent.ID,
+		ParentID:        parent.ID,
 		Generation:      1,
 		ConfirmationJKT: req.ConfirmationJKT,
 	}
 	if child.ConfirmationJKT == "" {
-		child.ConfirmationJKT = req.Parent.ConfirmationJKT
+		child.ConfirmationJKT = parent.ConfirmationJKT
 	}
 	// A child starts no earlier than its parent, as it ends no later. The
 	// parent may start after now — a not-before ahead, or an issuer replica
@@ -330,21 +332,21 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 	if childStart.IsZero() {
 		childStart = now
 	}
-	if ps := validFrom(req.Parent); childStart.Before(ps) {
+	if ps := validFrom(parent); childStart.Before(ps) {
 		nbf = ps
 	}
 	if err := setNotBefore(&child, nbf); err != nil {
 		return Capability{}, "", err
 	}
 
-	if err := Narrows(req.Parent, child); err != nil {
+	if err := Narrows(parent, child); err != nil {
 		return Capability{}, "", fmt.Errorf("limes: delegate %w", err)
 	}
 
 	// A delegation is requested by whoever holds the parent — that is not a
 	// caller-supplied fact, it is what delegation means, so it is derived
 	// rather than accepted as an argument.
-	if err := i.store.Insert(ctx, child, req.Parent.Subject); err != nil {
+	if err := i.store.Insert(ctx, child, parent.Subject); err != nil {
 		return Capability{}, "", fmt.Errorf("limes: persist delegation: %w", err)
 	}
 	token, err := i.signer.Sign(ctx, child)

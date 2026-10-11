@@ -141,7 +141,7 @@ func TestIssue_VerifyHappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
-	if got.ID != cap.ID {
+	if got.Capability().ID != cap.ID {
 		t.Errorf("verified ID mismatch")
 	}
 }
@@ -285,7 +285,7 @@ func TestDelegate_NarrowsAndPersists(t *testing.T) {
 	}
 
 	child, childToken, err := issuer.Delegate(ctx, DelegateRequest{
-		Parent:   parent,
+		Parent:   asVerified(parent),
 		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID, Subject: "child"},
 		Audience: []string{audienceData},
 		Caveats: Caveats{
@@ -325,7 +325,7 @@ func TestDelegate_RejectsWidening(t *testing.T) {
 	})
 
 	_, _, err := issuer.Delegate(ctx, DelegateRequest{
-		Parent:   parent,
+		Parent:   asVerified(parent),
 		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID},
 		Audience: []string{audienceData, audienceAdmin}, // wider!
 		Caveats:  Caveats{Ops: []Op{OpGet}},
@@ -355,7 +355,7 @@ func TestDelegate_RefusesACopyWithLimitsOfItsOwn(t *testing.T) {
 	}
 	delegate := func(from Capability) error {
 		_, _, err := issuer.Delegate(ctx, DelegateRequest{
-			Parent:         from,
+			Parent:         asVerified(from),
 			Subject:        Principal{Type: PrincipalAgent, TenantID: tenantID, Subject: "child"},
 			InheritCaveats: true,
 		})

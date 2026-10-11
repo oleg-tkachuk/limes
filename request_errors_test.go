@@ -91,7 +91,7 @@ func TestIssueKeepsTheStoreErrorApartFromTheRequest(t *testing.T) {
 			}
 			parent := Capability{ID: uuid.New(), Subject: validIssue().Subject, Audience: []string{goldenAudience},
 				Caveats: Caveats{Ops: []Op{OpGet}}, ExpiresAt: time.Now().Add(time.Hour)}
-			_, _, err = iss.Delegate(context.Background(), DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: parent, InheritCaveats: true, TTL: time.Minute})
+			_, _, err = iss.Delegate(context.Background(), DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true, TTL: time.Minute})
 			if !errors.Is(err, tc.want) || errors.Is(err, ErrInvalidRequest) {
 				t.Errorf("delegate err = %v, want %v and not ErrInvalidRequest", err, tc.want)
 			}
@@ -105,10 +105,10 @@ func TestDelegateRefusesAMalformedRequestAsInvalid(t *testing.T) {
 		Caveats: Caveats{Ops: []Op{OpGet}}, ExpiresAt: time.Now().Add(time.Hour)}
 	for name, req := range map[string]DelegateRequest{
 		"no parent":              {InheritCaveats: true},
-		"an empty audience":      {Parent: parent, Audience: []string{""}, InheritCaveats: true},
-		"invalid caveats":        {Parent: parent},
-		"a malformed thumbprint": {Parent: parent, InheritCaveats: true, ConfirmationJKT: "nope"},
-		"a negative TTL":         {Parent: parent, InheritCaveats: true, TTL: -time.Second},
+		"an empty audience":      {Parent: asVerified(parent), Audience: []string{""}, InheritCaveats: true},
+		"invalid caveats":        {Parent: asVerified(parent)},
+		"a malformed thumbprint": {Parent: asVerified(parent), InheritCaveats: true, ConfirmationJKT: "nope"},
+		"a negative TTL":         {Parent: asVerified(parent), InheritCaveats: true, TTL: -time.Second},
 	} {
 		t.Run(name, func(t *testing.T) {
 			// A valid subject, so each case is refused for its own fault.

@@ -160,7 +160,7 @@ func TestAuthorize(t *testing.T) {
 				if err != nil {
 					t.Fatalf("err = %v", err)
 				}
-				if c.ID == uuid.Nil {
+				if c.Capability().ID == uuid.Nil {
 					t.Fatal("no capability returned")
 				}
 				return

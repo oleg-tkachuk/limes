@@ -368,3 +368,19 @@ func (p Principal) clone() Principal {
 	}
 	return p
 }
+
+// clone is c with slices and pointers of its own.
+func (c Capability) clone() Capability {
+	c.Subject = c.Subject.clone()
+	c.Audience = slices.Clone(c.Audience)
+	c.Caveats = c.Caveats.clone()
+	if c.Copies != nil {
+		copies := make([]CopyCeiling, len(c.Copies))
+		for i, cc := range c.Copies {
+			cc.RevocationID = slices.Clone(cc.RevocationID)
+			copies[i] = cc
+		}
+		c.Copies = copies
+	}
+	return c
+}

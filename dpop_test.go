@@ -63,17 +63,17 @@ func TestKeyBindingSurvivesTheTokenAndDelegation(t *testing.T) {
 		t.Fatalf("bound token without a proof: err = %v, want dpop.ErrRequired", err)
 	}
 	got, err := verifier.Verify(ctx, withProof(t, key, token, audienceData, time.Now()))
-	if err != nil || got.ConfirmationJKT != jkt {
-		t.Fatalf("verified binding = %q, %v; want %q", got.ConfirmationJKT, err, jkt)
+	if err != nil || got.Capability().ConfirmationJKT != jkt {
+		t.Fatalf("verified binding = %q, %v; want %q", got.Capability().ConfirmationJKT, err, jkt)
 	}
 
-	child, _, err := issuer.Delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: parent, InheritCaveats: true})
+	child, _, err := issuer.Delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true})
 	if err != nil || child.ConfirmationJKT != jkt {
 		t.Fatalf("child without its own key: binding %q, %v; want the parent's", child.ConfirmationJKT, err)
 	}
 	subKey := dpopKeys(t)["P-256"]
 	subJKT, _ := dpop.Thumbprint(subKey.Public())
-	child, _, err = issuer.Delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: parent, InheritCaveats: true, ConfirmationJKT: subJKT})
+	child, _, err = issuer.Delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true, ConfirmationJKT: subJKT})
 	if err != nil || child.ConfirmationJKT != subJKT {
 		t.Fatalf("child bound to the sub-agent's key: %q, %v", child.ConfirmationJKT, err)
 	}

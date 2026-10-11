@@ -71,25 +71,25 @@ func TestCopyLimitsArriveAsCopies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
-	if len(got.Copies) != 2 {
-		t.Fatalf("copies = %+v, want two: the blocks that set limits", got.Copies)
+	if len(got.Capability().Copies) != 2 {
+		t.Fatalf("copies = %+v, want two: the blocks that set limits", got.Capability().Copies)
 	}
-	in, out := got.Copies[0], got.Copies[1]
+	in, out := got.Capability().Copies[0], got.Capability().Copies[1]
 	if !bytes.Equal(in.RevocationID, lastRevocationID(t, inner)) || in.MaxRequests != 10 || in.MaxBudget != 0 {
 		t.Errorf("innermost = %+v", in)
 	}
 	if !bytes.Equal(out.RevocationID, lastRevocationID(t, outer)) || out.MaxRequests != 50 || out.MaxBudget != 4*NanosPerUnit {
 		t.Errorf("outermost = %+v", out)
 	}
-	if got.Caveats.MaxRequests != cap.Caveats.MaxRequests || got.Caveats.MaxBudgetAmount != cap.Caveats.MaxBudgetAmount {
-		t.Errorf("capability caveats changed: %+v", got.Caveats)
+	if got.Capability().Caveats.MaxRequests != cap.Caveats.MaxRequests || got.Capability().Caveats.MaxBudgetAmount != cap.Caveats.MaxBudgetAmount {
+		t.Errorf("capability caveats changed: %+v", got.Capability().Caveats)
 	}
 
 	// The root Biscuit carries no copy limit; a copy that sets none keeps
 	// the ones above it.
 	for tok, want := range map[string]int{root: 0, plain: 1} {
 		got, err := v.Verify(ctx, VerifyRequest{Token: tok, Audience: audienceData})
-		if err != nil || len(got.Copies) != want {
+		if err != nil || len(got.Capability().Copies) != want {
 			t.Errorf("copies = %+v, err = %v; want %d", got, err, want)
 		}
 	}
@@ -203,8 +203,8 @@ func TestCopiesAreNeverSigned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Copies != nil {
-		t.Fatalf("copies = %+v, want none", got.Copies)
+	if got.Capability().Copies != nil {
+		t.Fatalf("copies = %+v, want none", got.Capability().Copies)
 	}
 }
 

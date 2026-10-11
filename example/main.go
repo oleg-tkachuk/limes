@@ -81,7 +81,8 @@ func main() {
 	fmt.Printf("issued   %s  (%d bytes)\n", parent.ID, len(parentToken))
 
 	// 4. Verify on every call. Local — no round trip to the issuer.
-	if _, err := verifier.Verify(ctx, limes.VerifyRequest{Token: parentToken, Audience: "my-service"}); err != nil {
+	verified, err := verifier.Verify(ctx, limes.VerifyRequest{Token: parentToken, Audience: "my-service"})
+	if err != nil {
 		log.Fatalf("verify: %v", err)
 	}
 	fmt.Println("verified ok")
@@ -95,7 +96,7 @@ func main() {
 	// 5. Delegate to a sub-agent — strictly narrower, without calling back to
 	//    any admin API. An orchestrator can attenuate, never escalate.
 	child, _, err := issuer.Delegate(ctx, limes.DelegateRequest{
-		Parent: parent,
+		Parent: verified, // what the verifier accepted, not the issuer's copy
 		Subject: limes.Principal{
 			Type: limes.PrincipalAgent, TenantID: tenantID, Subject: "sub-worker",
 			Agent: &limes.AgentPrincipal{
@@ -118,7 +119,7 @@ func main() {
 	// Widening is refused — this is the property that makes the model safe to
 	// hand to an agent.
 	_, _, err = issuer.Delegate(ctx, limes.DelegateRequest{
-		Parent: parent,
+		Parent: verified,
 		Subject: limes.Principal{
 			Type: limes.PrincipalAgent, TenantID: tenantID, Subject: "greedy-worker",
 		},

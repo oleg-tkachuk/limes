@@ -92,10 +92,11 @@ cap, token, _ := issuer.Issue(ctx, limes.IssueRequest{
 })
 
 // On every call: verify locally and enforce the caveats in one step, then meter.
-cap, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
+granted, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
     VerifyRequest: limes.VerifyRequest{Token: token, Audience: "my-service"},
     CheckRequest:  limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/report.pdf"},
 })
+cap := granted.Capability()
 _, err = usage.Charge(ctx, limes.ChargeRequest{
     CapabilityID: cap.ID, TenantID: tenantID, Amount: limes.MustParseAmount("0.35"),
     MaxBudget: cap.Caveats.MaxBudgetAmount, UnitCode: "USD",
