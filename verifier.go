@@ -19,16 +19,17 @@ import (
 // fetches them from an issuer's JWKS endpoint with a cache.
 type KeyResolver interface {
 	// PublicKey returns the Ed25519 public key for the given kid.
-	// Returns ErrUnknownKID if the key set does not contain the kid;
-	// the verifier maps that to ErrInvalidSignature so an unknown
-	// kid never short-circuits to "trusted".
+	// Returns ErrUnknownKID if the key set does not contain the kid,
+	// which the verifier reads as the token's fault (ErrInvalidSignature).
+	// Any other error is the resolver's: the verifier refuses the token
+	// with it as it is, the server's fault rather than the token's.
 	PublicKey(ctx context.Context, kid string) (ed25519.PublicKey, error)
 }
 
 // ErrUnknownKID is the typed not-found return from KeyResolver. The
-// verifier converts it to ErrInvalidSignature for caller-facing errors;
-// keeping the typed return lets ops dashboards distinguish "we don't
-// know this kid" from "signature mismatch".
+// verifier wraps it in ErrInvalidSignature for caller-facing errors, and it
+// stays matchable, so ops dashboards can tell "we don't know this kid" from
+// "signature mismatch".
 var ErrUnknownKID = errors.New("limes: unknown kid")
 
 // StaticKeyResolver is the in-memory implementation used in tests and
@@ -411,10 +412,12 @@ func (v *StandardVerifier) verifySigned(ctx context.Context, token string) (*Cap
 	// 2) Key and signature — the cryptographic gate.
 	pub, err := v.cfg.Keys.PublicKey(ctx, header.Kid)
 	if err != nil {
-		// Every key failure is an invalid signature; the resolver's error
-		// stays wrapped, so ErrorResponse can tell an issuer outage
-		// (ErrJWKSUnavailable) from a token's fault.
-		return nil, fmt.Errorf("%w: kid %q: %w", ErrInvalidSignature, header.Kid, err)
+		// An unknown kid is the token's fault; a resolver that cannot
+		// answer — the issuer's keys out of reach, a store down — is ours.
+		if errors.Is(err, ErrUnknownKID) {
+			return nil, fmt.Errorf("%w: kid %q: %w", ErrInvalidSignature, header.Kid, err)
+		}
+		return nil, fmt.Errorf("limes: resolve kid %q: %w", header.Kid, err)
 	}
 	if err := verifyParts(parts, pub); err != nil {
 		return nil, err

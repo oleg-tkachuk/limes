@@ -13,8 +13,9 @@ import (
 
 // ErrJWKSUnavailable is returned by RemoteJWKSResolver when it holds no key
 // set recent enough to trust: the endpoint has been failing for longer than
-// MaxStale, or never answered. The verifier turns it into
-// ErrInvalidSignature — an issuer we cannot reach verifies nothing.
+// MaxStale, or never answered. The verifier refuses the token with it — an
+// issuer we cannot reach verifies nothing — and, being the server's fault
+// rather than the token's, it matches no ErrUnauthenticated sentinel.
 var ErrJWKSUnavailable = errors.New("limes: JWKS unavailable")
 
 // RemoteJWKSConfig defaults, documented on its fields.

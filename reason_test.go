@@ -15,7 +15,7 @@ func TestReasonOf(t *testing.T) {
 	}{
 		{"forged", fmt.Errorf("%w: bad", ErrInvalidSignature), ReasonInvalidSignature, true},
 		{"unknown kid stays a bad signature", fmt.Errorf("%w: kid %q: %w", ErrInvalidSignature, "k1", ErrUnknownKID), ReasonInvalidSignature, true},
-		{"keys unreachable", fmt.Errorf("%w: kid %q: %w", ErrInvalidSignature, "k1", ErrJWKSUnavailable), ReasonKeysUnavailable, false},
+		{"keys unreachable", fmt.Errorf("limes: resolve kid %q: %w", "k1", ErrJWKSUnavailable), ReasonKeysUnavailable, false},
 		{"expired", ErrExpired, ReasonExpired, true},
 		{"not yet valid", ErrNotYetValid, ReasonNotYetValid, false},
 		{"revoked", fmt.Errorf("wrapped: %w", ErrRevoked), ReasonRevoked, true},

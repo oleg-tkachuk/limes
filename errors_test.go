@@ -2,7 +2,9 @@ package limes
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -150,5 +152,49 @@ func TestSentinelMatrixIsComplete(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// failingResolver answers every kid with err.
+type failingResolver struct{ err error }
+
+func (r failingResolver) PublicKey(context.Context, string) (ed25519.PublicKey, error) {
+	return nil, r.err
+}
+
+// Only an unknown kid is the token's fault. A resolver that cannot answer —
+// the issuer's key set out of reach, a store down — is the server's, and the
+// verifier says so rather than calling the token invalid.
+func TestVerifyTellsAnUnknownKidFromAResolverOutage(t *testing.T) {
+	issuer, configured, _, _ := buildIssuerVerifier(t)
+	_, token := issueFor(t, issuer)
+	outage := errors.New("key store down")
+	for name, tc := range map[string]struct {
+		resolverErr  error
+		unauthorised bool
+		status       int
+	}{
+		"unknown kid":         {ErrUnknownKID, true, http.StatusUnauthorized},
+		"keys unavailable":    {fmt.Errorf("fetch: %w", ErrJWKSUnavailable), false, http.StatusServiceUnavailable},
+		"the resolver failed": {outage, false, http.StatusInternalServerError},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := configured.cfg
+			cfg.Keys = failingResolver{tc.resolverErr}
+			v, err := NewStandardVerifier(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = v.Verify(context.Background(), VerifyRequest{Token: token, Audience: audienceData})
+			if !errors.Is(err, tc.resolverErr) {
+				t.Errorf("err = %v, want it to keep %v", err, tc.resolverErr)
+			}
+			if got := errors.Is(err, ErrUnauthenticated); got != tc.unauthorised {
+				t.Errorf("errors.Is(err, ErrUnauthenticated) = %v, want %v", got, tc.unauthorised)
+			}
+			if status := v.ErrorResponse(context.Background(), err, AuthSchemeBearer).Status; status != tc.status {
+				t.Errorf("ErrorResponse status = %d, want %d", status, tc.status)
+			}
+		})
 	}
 }
