@@ -25,6 +25,8 @@ func TestReasonOf(t *testing.T) {
 		{"proof missing", ErrDPoPRequired, ReasonProofRequired, false},
 		{"proof invalid", fmt.Errorf("%w: htm", ErrDPoPInvalid), ReasonProofInvalid, false},
 		{"proof replayed", ErrDPoPReplayed, ReasonProofReplayed, false},
+		{"nonce challenge", ErrDPoPNonceRequired, ReasonProofInvalid, false},
+		{"wrong scheme", fmt.Errorf("%w: Bearer", ErrAuthSchemeMismatch), ReasonProofRequired, false},
 		{"op", fmt.Errorf("%w: %q", ErrOpNotAllowed, "put"), ReasonOpNotAllowed, true},
 		{"resource", ErrResourceNotAllowed, ReasonResourceNotAllowed, true},
 		{"source", ErrSourceIPNotAllowed, ReasonSourceNotAllowed, true},
