@@ -965,6 +965,15 @@ func checkExpiry[TX any](t *testing.T, f fixture[TX]) {
 // checkListTenantBudgets holds a store to ListTenantBudgets' order, filters
 // and paging: most at risk first, then by tenant id, a page at a time.
 func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
+	for name, req := range map[string]limes.ListTenantBudgetsRequest{
+		"a negative limit":      {Limit: -1},
+		"a threshold past 100%": {ThresholdPct: 101},
+		"a negative threshold":  {ThresholdPct: -1},
+	} {
+		if _, _, err := f.Usage.ListTenantBudgets(f.listCtx(), req); !errors.Is(err, limes.ErrInvalidRequest) {
+			t.Errorf("ListTenantBudgets with %s: err = %v, want ErrInvalidRequest", name, err)
+		}
+	}
 	// The fixture's tenant has a ceiling of 30 and nothing spent; three more
 	// have ceilings, and one of them is unlimited.
 	if _, err := f.charge(limes.ChargeRequest{CapabilityID: f.root, MaxBudget: rootBudget, Amount: 15 * one}, nil); err != nil {

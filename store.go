@@ -116,8 +116,9 @@ type Revocation struct {
 // ErrAlreadyExists is Store.Insert given an id already on record.
 var ErrAlreadyExists = errors.New("limes: already exists")
 
-// Page sizes of ListByPrincipal: Limit 0 or below means DefaultListLimit,
-// and anything above MaxListLimit is clamped to it.
+// Page sizes of a list: Limit 0 means DefaultListLimit, anything above
+// MaxListLimit is clamped to it, and a negative Limit is the request's
+// error (Validate).
 const (
 	DefaultListLimit = 50
 	MaxListLimit     = 500
@@ -126,7 +127,7 @@ const (
 // PageLimit is the page size a store serves for a requested limit.
 func PageLimit(requested int32) int32 {
 	switch {
-	case requested <= 0:
+	case requested <= 0: // a negative limit was refused by Validate
 		return DefaultListLimit
 	case requested > MaxListLimit:
 		return MaxListLimit
@@ -176,6 +177,8 @@ func (r ListByPrincipalRequest) Validate() error {
 		return invalidRequest("list: principal type required")
 	case r.Subject == "":
 		return invalidRequest("list: subject required")
+	case r.Limit < 0:
+		return invalidRequest("list: limit %d is negative", r.Limit)
 	}
 	return nil
 }

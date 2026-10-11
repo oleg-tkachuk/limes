@@ -2,8 +2,11 @@ package limes
 
 import (
 	"crypto/ed25519"
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes/jwks"
 )
@@ -72,5 +75,31 @@ func TestConfigRefusesNegatives(t *testing.T) {
 		if _, err := NewStandardVerifier(cfg); err == nil {
 			t.Errorf("NewStandardVerifier accepted a negative %s", name)
 		}
+	}
+}
+
+// A key binding with no kid in it refuses every token; it is an error, not
+// a configuration to run with.
+func TestVerifierRefusesAnEmptyKeyIssuerBinding(t *testing.T) {
+	_, configured, _, _ := buildIssuerVerifier(t)
+	cfg := configured.cfg
+	cfg.KeyIssuers = map[string]string{}
+	if _, err := NewStandardVerifier(cfg); err == nil {
+		t.Error("NewStandardVerifier accepted an empty KeyIssuers")
+	}
+}
+
+// A negative page size is the request's error, not the default page.
+func TestListRequestsRefuseANegativeLimit(t *testing.T) {
+	list := ListByPrincipalRequest{TenantID: uuid.New(), PrincipalType: PrincipalAgent, Subject: "a", Limit: -1}
+	if err := list.Validate(); !errors.Is(err, ErrInvalidRequest) {
+		t.Errorf("ListByPrincipalRequest with Limit -1: Validate = %v, want ErrInvalidRequest", err)
+	}
+	budgets := ListTenantBudgetsRequest{Limit: -1}
+	if err := budgets.Validate(); !errors.Is(err, ErrInvalidRequest) {
+		t.Errorf("ListTenantBudgetsRequest with Limit -1: Validate = %v, want ErrInvalidRequest", err)
+	}
+	if err := (ListTenantBudgetsRequest{ThresholdPct: maxThresholdPct + 1}).Validate(); !errors.Is(err, ErrInvalidRequest) {
+		t.Errorf("a threshold past 100%%: Validate = %v, want ErrInvalidRequest", err)
 	}
 }

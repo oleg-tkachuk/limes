@@ -1156,6 +1156,9 @@ func (s *UsageStore[TX]) SetTenantBudget(_ context.Context, args limes.SetTenant
 }
 
 func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTenantBudgetsRequest) ([]limes.TenantBudgetSummary, string, error) {
+	if err := args.Validate(); err != nil {
+		return nil, "", err
+	}
 	var after *budgetRow
 	if args.Cursor != "" {
 		c, err := limes.DecodeTenantBudgetCursor(args.Cursor)

@@ -51,7 +51,8 @@ run too), its claims must
 hold no member the verifier does not know (a caveat it could not enforce),
 none twice and none in another case, and may be at most
 `VerifierConfig.MaxTokenBytes` long (16 KiB unless set). When several issuers share a verifier, set
-`KeyIssuers` (kid → issuer) so one issuer's key cannot sign for another.
+`KeyIssuers` (kid → issuer) so one issuer's key cannot sign for another; an
+empty map, which would refuse every token, is refused.
 Verifiers running apart from the issuer resolve keys with
 `jwks.Remote`. It fetches the issuer's JWKS on first use, keeps it as
 long as the response's `Cache-Control` allows within `MinRefreshInterval`
@@ -608,12 +609,12 @@ Skipping the wait in step 3 invalidates tokens agents are still holding. Since
 TTLs here are minutes, the wait is short — which is part of why short TTLs are
 the default posture (`IssuerConfig.DefaultTTL`, fifteen minutes).
 
-Load a signing key with `LoadPrivateKey` (PEM, PKCS#8 only) or
-`LoadOrGenerateKey(path, kid)`, which generates an ephemeral key only when the
-path is empty — an unreadable path is an error, never a fresh key — and
-reports it in `SigningKey.Generated` so you can log it loudly. A key with no
-kid named gets `jwks.KeyID`'s: its RFC 7638 thumbprint, the same wherever it
-is derived.
+Load a signing key with `LoadKey(path, kid)` (PEM, PKCS#8 only); an
+unreadable path, or none, is an error, never a fresh key. `GenerateKey` makes
+an ephemeral one, marked `SigningKey.Generated` so you can log it loudly — a
+deployment that may run without a key file chooses between the two itself. A
+key with no kid named gets `jwks.KeyID`'s: its RFC 7638 thumbprint, the same
+wherever it is derived.
 
 ## Answer a refusal
 
@@ -642,8 +643,8 @@ log. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
 
 | Setting | Default |
 |---|---|
-| `IssuerConfig.DefaultTTL` | 15 minutes |
-| `VerifierConfig.Leeway` | 30 seconds |
+| `IssuerConfig.DefaultTTL` | `DefaultIssueTTL`, 15 minutes |
+| `VerifierConfig.Leeway` | `DefaultLeeway`, 30 seconds |
 | `VerifierConfig.MaxTokenBytes` | `DefaultMaxTokenBytes`, 16 KiB |
 | `RevocationCacheConfig` · `BiscuitRevocationCacheConfig` | `DefaultRevocationCacheTTL` 2 seconds · `DefaultRevocationCacheEntries` 100 000, the oldest dropped first past it; a negative TTL or bound is refused — for no cache, give the verifier the store itself |
 | `jwks.RemoteConfig` | `jwks.DefaultFetchTimeout` 10s · `DefaultRefreshInterval` 5m · `DefaultMinRefreshInterval` 10s · `DefaultMaxStale` 1h · `DefaultMaxDocumentBytes` 1 MiB |

@@ -392,6 +392,7 @@ func checkListMalformed(t *testing.T, f fixture) {
 		"no principal type": func(r *limes.ListByPrincipalRequest) { r.PrincipalType = "" },
 		"no subject":        func(r *limes.ListByPrincipalRequest) { r.Subject = "" },
 		"bad cursor":        func(r *limes.ListByPrincipalRequest) { r.Cursor = "not-a-cursor" },
+		"negative limit":    func(r *limes.ListByPrincipalRequest) { r.Limit = -1 },
 	} {
 		req := base
 		mutate(&req)

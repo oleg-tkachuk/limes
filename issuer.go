@@ -34,8 +34,8 @@ type Issuer struct {
 	defaultTTL time.Duration
 }
 
-// defaultIssueTTL is IssuerConfig.DefaultTTL when unset.
-const defaultIssueTTL = 15 * time.Minute
+// DefaultIssueTTL is IssuerConfig.DefaultTTL when it is zero.
+const DefaultIssueTTL = 15 * time.Minute
 
 // IssuerConfig is the wiring for NewIssuer.
 type IssuerConfig struct {
@@ -51,8 +51,8 @@ type IssuerConfig struct {
 	IssuerName string
 
 	// DefaultTTL caps the lifetime when IssueRequest.TTL is zero.
-	// Default 15 minutes when zero — short enough that revocation
-	// propagation latency rarely matters. Negative is refused.
+	// Zero: DefaultIssueTTL, short enough that revocation propagation
+	// latency rarely matters. Negative is refused.
 	DefaultTTL time.Duration
 
 	// Now is the clock; tests override.
@@ -74,7 +74,7 @@ func NewIssuer(cfg IssuerConfig) (*Issuer, error) {
 		return nil, fmt.Errorf("limes: IssuerConfig.DefaultTTL %s is negative", cfg.DefaultTTL)
 	}
 	if cfg.DefaultTTL == 0 {
-		cfg.DefaultTTL = defaultIssueTTL
+		cfg.DefaultTTL = DefaultIssueTTL
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
