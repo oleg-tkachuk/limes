@@ -36,8 +36,9 @@ import (
 
 // Env is one store under test, fresh for each check.
 type Env[TX any] struct {
-	// Ctx is the context every call runs under — scoped to Tenant, if the
-	// store needs that.
+	// Ctx is the context every call for Tenant runs under — scoped to it, if
+	// the store needs that. A write for a tenant from NewTenant runs under
+	// TenantCtx, and ListTenantBudgets under ListCtx, when the Env sets them.
 	Ctx context.Context
 	// Usage is the store under test, with no usage recorded.
 	Usage limes.UsageStore[TX]
@@ -54,8 +55,9 @@ type Env[TX any] struct {
 	// that need more than one. Optional: without it, a random id, which a
 	// store that refers to its tenants refuses.
 	NewTenant func() (uuid.UUID, error)
-	// TenantCtx is the context a write for tenant runs under, when the store
-	// scopes each tenant's rows. Optional: without it, Ctx.
+	// TenantCtx is the context a write for tenant — one NewTenant created —
+	// runs under, when the store scopes each tenant's rows; Tenant's own
+	// calls run under Ctx. Optional: without it, Ctx.
 	TenantCtx func(tenant uuid.UUID) context.Context
 	// ListCtx is the context ListTenantBudgets runs under: a read across
 	// tenants. Optional: without it, Ctx.
