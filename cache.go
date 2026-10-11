@@ -33,7 +33,8 @@ const DefaultRevocationCacheEntries = 100_000
 // A cached answer about a capability is also an answer about its ancestors,
 // so revoking a parent reaches a child's cached "live" entry only when that
 // entry expires — within the TTL, like any other revocation seen from
-// another process.
+// another process — or when Clear drops it. There is no per-id drop: the
+// cache does not know which entries are a revoked id's descendants.
 //
 // Concurrent misses for the same id share one upstream call.
 type CachedRevocationChecker struct {
@@ -93,11 +94,6 @@ func (c *CachedRevocationChecker) IsRevoked(ctx context.Context, id uuid.UUID) (
 	return c.cache.get(ctx, id, func(ctx context.Context) (bool, error) { return c.upstream.IsRevoked(ctx, id) })
 }
 
-// Invalidate drops a single entry. Other processes catch up within the TTL
-// unless they are told — see Clear, which a consumer wires to a revocation
-// notification so they are.
-func (c *CachedRevocationChecker) Invalidate(id uuid.UUID) { c.cache.invalidate(id) }
-
 // Clear drops every entry. A consumer that learns of a revocation from
 // elsewhere — a database notification, a message bus — calls it so the next
 // check goes upstream at once instead of waiting out the TTL. It drops
@@ -120,11 +116,11 @@ type ttlCache[K comparable] struct {
 	entries  map[K]cacheEntry
 	inflight map[K]*lookupCall
 	// order holds the entries in the order they were cached, which every
-	// entry sharing one TTL makes the order they expire in. A key cached
-	// again leaves its earlier place behind; popping one checks it is still
-	// the entry's own.
+	// entry sharing one TTL makes the order they expire in: one place per
+	// entry, since a key is cached again only once its place has expired
+	// and been dropped.
 	order []queued[K]
-	// epoch counts invalidations. A lookup that started before one may
+	// epoch counts clears. A lookup that started before one may
 	// have read the state it invalidated, so its answer is not cached.
 	epoch uint64
 }
@@ -195,7 +191,7 @@ func (c *ttlCache[K]) get(ctx context.Context, key K, lookup func(context.Contex
 }
 
 // finish publishes call's answer to its waiters and caches it, unless it
-// failed or an invalidation happened while it ran.
+// failed or a clear happened while it ran.
 func (c *ttlCache[K]) finish(key K, call *lookupCall, epoch uint64) {
 	c.mu.Lock()
 	if c.inflight[key] == call {
@@ -206,9 +202,6 @@ func (c *ttlCache[K]) finish(key K, call *lookupCall, epoch uint64) {
 		expires := c.cfg.now().Add(c.cfg.ttl)
 		c.entries[key] = cacheEntry{revoked: call.revoked, expires: expires}
 		c.order = append(c.order, queued[K]{key: key, expires: expires})
-		if len(c.order) > orderSlack*c.cfg.maxEntries {
-			c.compactLocked()
-		}
 	}
 	c.mu.Unlock()
 	close(call.done)
@@ -220,23 +213,6 @@ func (c *ttlCache[K]) makeRoomLocked() {
 	c.sweepLocked()
 	for len(c.entries) >= c.cfg.maxEntries && c.popLocked() {
 	}
-}
-
-// orderSlack is how many places per bounded entry the eviction order may
-// hold before it is compacted: places left by invalidated or re-cached
-// entries accumulate until then.
-const orderSlack = 2
-
-// compactLocked drops every place in order that is no longer its entry's
-// own, keeping the rest in order. c.mu must be held.
-func (c *ttlCache[K]) compactLocked() {
-	kept := make([]queued[K], 0, len(c.entries))
-	for _, q := range c.order {
-		if e, ok := c.entries[q.key]; ok && e.expires.Equal(q.expires) {
-			kept = append(kept, q)
-		}
-	}
-	c.order = kept
 }
 
 // popLocked drops the oldest place in order, and its entry if the place is
@@ -254,19 +230,8 @@ func (c *ttlCache[K]) popLocked() bool {
 	return true
 }
 
-// invalidate drops key's entry and detaches a lookup of it in flight, so the
-// next check asks upstream rather than taking an answer read before now.
-// The epoch is shared: lookups of other keys in flight go uncached too,
-// which costs them one extra lookup and keeps the bookkeeping to a counter.
-func (c *ttlCache[K]) invalidate(key K) {
-	c.mu.Lock()
-	c.epoch++
-	delete(c.entries, key)
-	delete(c.inflight, key)
-	c.mu.Unlock()
-}
-
-// clear drops every entry and detaches every lookup in flight.
+// clear drops every entry and detaches every lookup in flight, so the next
+// check asks upstream rather than taking an answer read before now.
 func (c *ttlCache[K]) clear() {
 	c.mu.Lock()
 	c.epoch++

@@ -395,11 +395,11 @@ func TestCache_HitsAndMisses(t *testing.T) {
 		t.Fatalf("expected still 1 upstream call after cache hit, got %d", got)
 	}
 
-	// Invalidate forces a refetch.
-	cache.Invalidate(id)
+	// Clear forces a refetch.
+	cache.Clear()
 	_, _ = cache.IsRevoked(ctx, id)
 	if got := store.revCalls.Load(); got != 2 {
-		t.Fatalf("expected 2 upstream calls after invalidate, got %d", got)
+		t.Fatalf("expected 2 upstream calls after Clear, got %d", got)
 	}
 }
 

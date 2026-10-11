@@ -108,8 +108,8 @@ func (v *StandardVerifier) BiscuitCopy(ctx context.Context, token string) (Biscu
 // CachedBiscuitRevocationChecker caches IsBiscuitRevoked answers per token —
 // keyed by its whole list of revocation ids — under the same TTL, bound and
 // sharing of concurrent misses as CachedRevocationChecker, and is cleared the
-// same way. It has no Invalidate: a revoked id is part of the key of every
-// token carrying it, so only Clear reaches them all.
+// same way: a revoked id is part of the key of every token carrying it, so
+// only Clear reaches them all.
 type CachedBiscuitRevocationChecker struct {
 	upstream BiscuitRevocationLookup
 	cache    *ttlCache[[sha256.Size]byte]

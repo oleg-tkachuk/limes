@@ -140,7 +140,7 @@ sequenceDiagram
     S-->>W: response
 
     Op->>St: Store.Revoke(RevokeRequest{ID: parent, CascadeChildren})
-    Note over S,St: the next IsRevoked for the child answers true<br/>once the cache entry expires, or at once after Clear<br/>(Invalidate reaches only the id it names)
+    Note over S,St: the next IsRevoked for the child answers true<br/>once the cache entry expires, or at once after Clear
     W->>S: request + child token
     S-->>W: ErrRevoked
 ```
@@ -693,7 +693,7 @@ flowchart LR
     notify{{"consumer's revocation signal<br/>e.g. a Postgres channel"}}
     bop(["RevokeBiscuit(RevokeBiscuitRequest{CapabilityID, RevocationID})"])
     blist[("<b>BiscuitRevocationStore</b><br/>revoked block ids")]
-    bcache["<b>CachedBiscuitRevocationChecker</b><br/>answer per token, cached for TTL<br/>bounded · no Invalidate, only Clear"]
+    bcache["<b>CachedBiscuitRevocationChecker</b><br/>answer per token, cached for TTL<br/>bounded · dropped by Clear"]
     v1["StandardVerifier"]
     v2["StandardVerifier"]
 
@@ -702,7 +702,7 @@ flowchart LR
     store --> chain --> cache
     cache --> v1
     cache --> v2
-    notify -. "Clear() · Invalidate(id), that id only" .-> cache
+    notify -. "Clear()" .-> cache
     bop --> blist --> bcache
     bcache --> v1
     bcache --> v2
@@ -724,7 +724,8 @@ Revoking a capability stops everything delegated from it whether or not
 `CascadeChildren` is set, because `IsRevoked` walks the ancestors; the flag
 only adds the per-descendant entries that name each stopped capability. Without
 a revocation signal, a verifier learns of a revocation within the cache TTL.
-A `Clear` or `Invalidate` also detaches any lookup in flight, whose answer may
+Each cache is dropped whole: an answer cached for a descendant is also an
+answer about the revoked ancestor. A `Clear` also detaches any lookup in flight, whose answer may
 predate the revocation, so it is neither cached nor shared with later checks.
 Revoked Biscuit copies travel the same way, on their own list and cache; one
 signal clears both.
