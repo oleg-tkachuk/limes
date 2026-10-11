@@ -103,7 +103,8 @@ answers alike, and `WriteErrorResponse` writes them:
 | malformed `Authorization` | 400 | `Bearer error="invalid_request"` |
 | no nonce, or a stale one | 401 | `DPoP error="use_dpop_nonce", algs="Ed25519 ES256"`, with a fresh `DPoP-Nonce` |
 | no proof, an invalid or replayed one | 401 | `DPoP error="invalid_dpop_proof", algs="Ed25519 ES256"` |
-| invalid, expired, not-yet-valid, revoked token; wrong audience or scheme; an unreachable JWKS | 401 | `error="invalid_token"` under the scheme presented (`Bearer` when unknown) |
+| invalid, expired, not-yet-valid, revoked token; wrong audience or scheme | 401 | `error="invalid_token"` under the scheme presented (`Bearer` when unknown) |
+| the issuer's JWKS unreachable past `MaxStale` | 503 | none |
 | a caveat refuses the operation | 403 | `error="insufficient_scope"` |
 | a request or budget limit is exhausted | 403 | none |
 | anything else | 500 | none |

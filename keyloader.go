@@ -9,14 +9,17 @@ import (
 	"os"
 )
 
+// pemTypePrivateKey is the PEM type of a PKCS#8 private key (RFC 7468 §10).
+const pemTypePrivateKey = "PRIVATE KEY"
+
 // LoadPrivateKey reads an Ed25519 private key from a PEM-encoded
 // PKCS#8 file at the supplied path. Production wires this against a
 // Secret-mounted RO volume; dev calls GenerateEd25519Keypair instead
 // and skips this path entirely.
 //
 // Only PKCS#8 under PEM type "PRIVATE KEY" is read — not a raw seed, not
-// another PEM type — because that is OpenSSL's default output. Wrong format is loud — better than
-// silently working with one form and breaking on the other.
+// another PEM type — because that is OpenSSL's default output. A wrong
+// format is loud rather than read one way here and another there.
 func LoadPrivateKey(path string) (ed25519.PrivateKey, error) {
 	if path == "" {
 		return nil, errors.New("limes: empty private key path")
@@ -29,7 +32,7 @@ func LoadPrivateKey(path string) (ed25519.PrivateKey, error) {
 	if block == nil {
 		return nil, fmt.Errorf("limes: %q is not PEM-encoded", path)
 	}
-	if block.Type != "PRIVATE KEY" {
+	if block.Type != pemTypePrivateKey {
 		return nil, fmt.Errorf("limes: %q has PEM type %q (want PRIVATE KEY)",
 			path, block.Type)
 	}

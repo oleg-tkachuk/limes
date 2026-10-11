@@ -13,6 +13,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"net/url"
 	"slices"
@@ -115,11 +116,11 @@ func jwkHasPrivateMember(headerSeg string) bool {
 }
 
 type dpopClaims struct {
-	JTI string `json:"jti"`
-	HTM string `json:"htm"`
-	HTU string `json:"htu"`
-	IAT int64  `json:"iat"`
-	ATH string `json:"ath,omitempty"`
+	JTI string  `json:"jti"`
+	HTM string  `json:"htm"`
+	HTU string  `json:"htu"`
+	IAT float64 `json:"iat"` // NumericDate: seconds, possibly fractional (RFC 7519 §2)
+	ATH string  `json:"ath,omitempty"`
 	// Nonce is the server-provided nonce (RFC 9449 §8), when one was asked.
 	Nonce string `json:"nonce,omitempty"`
 }
@@ -156,17 +157,31 @@ func PublicJWK(pub crypto.PublicKey) (DPoPJWK, error) {
 // Thumbprint is the key's RFC 7638 SHA-256 thumbprint, base64url — the value
 // a key-bound capability carries as its ConfirmationJKT.
 func (j DPoPJWK) Thumbprint() (string, error) {
-	// RFC 7638: the required members only, lexicographic order, no spaces.
-	var canonical string
+	// RFC 7638 §3.2: the required members only, in lexicographic order, as
+	// JSON with no whitespace. The structs' field order is that order.
+	var canonical []byte
+	var err error
 	switch j.Kty {
 	case jwkKtyOKP:
-		canonical = fmt.Sprintf(`{"crv":%q,"kty":%q,"x":%q}`, j.Crv, jwkKtyOKP, j.X)
+		canonical, err = json.Marshal(struct {
+			Crv string `json:"crv"`
+			Kty string `json:"kty"`
+			X   string `json:"x"`
+		}{j.Crv, jwkKtyOKP, j.X})
 	case jwkKtyEC:
-		canonical = fmt.Sprintf(`{"crv":%q,"kty":%q,"x":%q,"y":%q}`, j.Crv, jwkKtyEC, j.X, j.Y)
+		canonical, err = json.Marshal(struct {
+			Crv string `json:"crv"`
+			Kty string `json:"kty"`
+			X   string `json:"x"`
+			Y   string `json:"y"`
+		}{j.Crv, jwkKtyEC, j.X, j.Y})
 	default:
 		return "", fmt.Errorf("limes: unsupported JWK kty %q", j.Kty)
 	}
-	sum := sha256.Sum256([]byte(canonical))
+	if err != nil {
+		return "", fmt.Errorf("limes: JWK thumbprint: %w", err)
+	}
+	sum := sha256.Sum256(canonical)
 	return b64(sum[:]), nil
 }
 
@@ -210,7 +225,8 @@ func AccessTokenHash(token string) string {
 
 // DPoPProofRequest is the request a proof is signed for.
 type DPoPProofRequest struct {
-	// Method and URL are the request's.
+	// Method and URL are the request's, the method exactly as sent: it is
+	// case-sensitive (RFC 9110 §9.1).
 	Method string
 	URL    string
 	// Token is the capability the request presents.
@@ -243,7 +259,7 @@ func NewDPoPProof(key crypto.Signer, req DPoPProofRequest) (string, error) {
 	}
 	header, _ := json.Marshal(dpopHeader{Typ: DPoPTokenType, Alg: alg, JWK: &jwk})
 	claims, _ := json.Marshal(dpopClaims{
-		JTI: b64(jti), HTM: strings.ToUpper(req.Method), HTU: htu, IAT: req.Now.Unix(),
+		JTI: b64(jti), HTM: req.Method, HTU: htu, IAT: float64(req.Now.Unix()),
 		ATH: AccessTokenHash(req.Token), Nonce: req.Nonce,
 	})
 	input := b64(header) + "." + b64(claims)
@@ -322,10 +338,12 @@ type DPoPProof struct {
 
 // ReplayCache remembers proof ids for as long as a proof could be accepted.
 type ReplayCache interface {
-	// Seen records jti until expires and reports whether it was already
-	// recorded. An implementation that cannot tell — its store is
-	// unreachable — reports true: an unanswerable check refuses the proof.
-	Seen(ctx context.Context, jti string, expires time.Time) bool
+	// Seen records the proof id jti of the key with thumbprint jkt until
+	// expires, and reports whether it was already recorded. An
+	// implementation that cannot tell — its store is unreachable, or the
+	// key has used its share of the store — reports true: an unanswerable
+	// check refuses the proof.
+	Seen(ctx context.Context, jkt, jti string, expires time.Time) bool
 }
 
 // DPoPVerifier is how a StandardVerifier checks the proofs of key-bound
@@ -404,7 +422,8 @@ func (v *DPoPVerifier) check(ctx context.Context, c Capability, token string, p 
 	if err := decodeSegment(parts.claims, &claims); err != nil || claims.JTI == "" {
 		return fmt.Errorf("%w: claims", ErrDPoPInvalid)
 	}
-	if !strings.EqualFold(claims.HTM, p.Method) {
+	// RFC 9110 §9.1: a method is case-sensitive.
+	if claims.HTM != p.Method {
 		return fmt.Errorf("%w: method %q, proof names %q", ErrDPoPInvalid, p.Method, claims.HTM)
 	}
 	if !htuMatches(claims.HTU, p.URL, v.MatchPathOnly) {
@@ -413,14 +432,18 @@ func (v *DPoPVerifier) check(ctx context.Context, c Capability, token string, p 
 	if claims.ATH != AccessTokenHash(token) {
 		return fmt.Errorf("%w: proof is for another token", ErrDPoPInvalid)
 	}
-	iat := time.Unix(claims.IAT, 0)
+	if math.IsNaN(claims.IAT) || math.IsInf(claims.IAT, 0) || math.Abs(claims.IAT) > MaxIJSONInteger {
+		return fmt.Errorf("%w: iat %v", ErrDPoPInvalid, claims.IAT)
+	}
+	sec, frac := math.Modf(claims.IAT)
+	iat := time.Unix(int64(sec), int64(frac*float64(time.Second)))
 	if d := now().Sub(iat); d > window || d < -window {
 		return fmt.Errorf("%w: issued at %s, outside the %s window", ErrDPoPInvalid, iat.UTC(), window)
 	}
 	if v.Nonces != nil && !v.Nonces.Valid(ctx, claims.Nonce) {
 		return ErrDPoPNonceRequired
 	}
-	if v.Replay.Seen(ctx, claims.JTI, iat.Add(window)) {
+	if v.Replay.Seen(ctx, thumb, claims.JTI, iat.Add(window)) {
 		return ErrDPoPReplayed
 	}
 	return nil
@@ -428,16 +451,22 @@ func (v *DPoPVerifier) check(ctx context.Context, c Capability, token string, p 
 
 // htuMatches compares a proof's htu with the request URL after RFC 3986
 // syntax- and scheme-based normalisation, as RFC 9449 §4.3 requires. Under
-// pathOnly it compares the normalised paths alone, and neither URL need be
-// absolute.
+// pathOnly it compares the normalised paths alone: the htu must still be an
+// absolute URI, and the request URL must have a path.
 func htuMatches(htu, requestURL string, pathOnly bool) bool {
 	if pathOnly {
-		got, err1 := url.Parse(htu)
-		want, err2 := url.Parse(requestURL)
-		if err1 != nil || err2 != nil {
+		// The proof's htu is still a URI a request could have been made to:
+		// absolute, with a host, normalised.
+		normalised, err := normalizeURI(htu)
+		if err != nil {
 			return false
 		}
-		g, w := normalizePath(got.EscapedPath()), normalizePath(want.EscapedPath())
+		got, err1 := url.Parse(normalised)
+		want, err2 := url.Parse(requestURL)
+		if err1 != nil || err2 != nil || want.EscapedPath() == "" {
+			return false
+		}
+		g, w := got.EscapedPath(), normalizePath(want.EscapedPath())
 		// A proxy may mount the service under a prefix it strips before
 		// forwarding, so the client's path may carry segments the server
 		// never sees. The server's path must still be the whole tail, from a
@@ -462,48 +491,90 @@ func b64(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 // MemoryReplayCache is a bounded in-process ReplayCache. A deployment with
 // several replicas behind a balancer that does not pin a client to one
 // replica can see a proof replayed on another replica within the window;
-// keep the window short, or back ReplayCache with a shared store.
+// keep the window short, use server nonces (DPoPVerifier.Nonces), or back
+// ReplayCache with a shared store.
+//
+// Every key gets a share of the cache of its own (WithEntriesPerKey), so the
+// holder of one key-bound token cannot fill it with proofs and lock every
+// other key out: past its share, only that key's proofs are refused.
 type MemoryReplayCache struct {
 	mu         sync.Mutex
-	seen       map[string]time.Time
-	expiries   expiryHeap // the ids in seen, soonest to expire first
+	seen       map[replayKey]time.Time
+	perKey     map[string]int // live ids per key thumbprint
+	expiries   expiryHeap     // the ids in seen, soonest to expire first
 	maxEntries int
+	maxPerKey  int
 	now        func() time.Time
 }
 
-// NewMemoryReplayCache bounds the cache at maxEntries (≤ 0: 100 000).
-func NewMemoryReplayCache(maxEntries int) *MemoryReplayCache {
+// replayKey is one proof id of one key.
+type replayKey struct{ jkt, jti string }
+
+// DefaultReplayEntriesPerKey is how many live proof ids one key may hold in
+// a MemoryReplayCache: a thousand requests a window from one key.
+const DefaultReplayEntriesPerKey = 1_000
+
+// ReplayCacheOption configures a MemoryReplayCache.
+type ReplayCacheOption func(*MemoryReplayCache)
+
+// WithEntriesPerKey bounds the live proof ids of one key; ≤ 0 keeps the
+// default. It is never more than the whole cache.
+func WithEntriesPerKey(n int) ReplayCacheOption {
+	return func(c *MemoryReplayCache) {
+		if n > 0 {
+			c.maxPerKey = n
+		}
+	}
+}
+
+// NewMemoryReplayCache bounds the cache at maxEntries (≤ 0: 100 000), and
+// each key at DefaultReplayEntriesPerKey unless an option says otherwise.
+func NewMemoryReplayCache(maxEntries int, opts ...ReplayCacheOption) *MemoryReplayCache {
 	if maxEntries <= 0 {
 		maxEntries = defaultReplayCacheEntries
 	}
-	return &MemoryReplayCache{seen: map[string]time.Time{}, maxEntries: maxEntries, now: time.Now}
+	c := &MemoryReplayCache{
+		seen: map[replayKey]time.Time{}, perKey: map[string]int{},
+		maxEntries: maxEntries, maxPerKey: DefaultReplayEntriesPerKey, now: time.Now,
+	}
+	for _, o := range opts {
+		o(c)
+	}
+	c.maxPerKey = min(c.maxPerKey, c.maxEntries)
+	return c
 }
 
 // Seen implements ReplayCache. Expired ids are dropped as they lapse, soonest
-// first, so a full cache costs a lookup rather than a scan. When it is full
-// of live ids, the new id is refused as a replay rather than accepted
-// unrecorded — a full cache errs towards refusing.
-func (c *MemoryReplayCache) Seen(_ context.Context, jti string, expires time.Time) bool {
+// first, so a full cache costs a lookup rather than a scan. A key past its
+// share, or a cache full of live ids, refuses the new id as a replay rather
+// than accept it unrecorded — a full cache errs towards refusing.
+func (c *MemoryReplayCache) Seen(_ context.Context, jkt, jti string, expires time.Time) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.now()
 	for len(c.expiries) > 0 && !c.expiries[0].expires.After(now) {
-		delete(c.seen, heap.Pop(&c.expiries).(replayEntry).jti)
+		k := heap.Pop(&c.expiries).(replayEntry).key
+		delete(c.seen, k)
+		if c.perKey[k.jkt]--; c.perKey[k.jkt] <= 0 {
+			delete(c.perKey, k.jkt)
+		}
 	}
-	if _, ok := c.seen[jti]; ok {
+	k := replayKey{jkt: jkt, jti: jti}
+	if _, ok := c.seen[k]; ok {
 		return true
 	}
-	if len(c.seen) >= c.maxEntries {
+	if c.perKey[jkt] >= c.maxPerKey || len(c.seen) >= c.maxEntries {
 		return true
 	}
-	c.seen[jti] = expires
-	heap.Push(&c.expiries, replayEntry{jti: jti, expires: expires})
+	c.seen[k] = expires
+	c.perKey[jkt]++
+	heap.Push(&c.expiries, replayEntry{key: k, expires: expires})
 	return false
 }
 
 // replayEntry is one id a MemoryReplayCache holds, and when it lapses.
 type replayEntry struct {
-	jti     string
+	key     replayKey
 	expires time.Time
 }
 

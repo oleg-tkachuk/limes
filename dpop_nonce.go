@@ -19,8 +19,7 @@ import (
 // retry with. A proof must then carry a nonce the server issued, so it
 // cannot be signed ahead of time; its iat must still fall within the
 // DPoPVerifier's window. HMACNonces needs no state shared between replicas,
-// only the same keys; a replica whose clock runs behind the one that issued a
-// nonce refuses it until its own clock reaches the second of issuance.
+// only the same keys, and clocks within HMACNonceClockSkew of each other.
 
 // DPoPNonceHeader is the HTTP response header a nonce travels in (RFC 9449
 // §8).
@@ -49,6 +48,10 @@ const (
 	// DefaultDPoPNonceLifetime is how long a nonce is accepted when
 	// NewHMACNonces is given no lifetime.
 	DefaultDPoPNonceLifetime = 5 * time.Minute
+	// HMACNonceClockSkew is how far ahead of a replica's clock a nonce's
+	// issuance may lie: another replica's clock may run ahead, and the
+	// issuance is kept to the second.
+	HMACNonceClockSkew = 5 * time.Second
 	// nonceTimeBytes holds a nonce's issuance time, in Unix seconds.
 	nonceTimeBytes = 8
 )
@@ -93,7 +96,7 @@ func (n *HMACNonces) Nonce(context.Context) (string, error) {
 }
 
 // Valid implements DPoPNonces: a nonce one of the keys signed, issued no
-// longer than the lifetime ago and not in the future.
+// longer than the lifetime ago and no more than HMACNonceClockSkew ahead.
 func (n *HMACNonces) Valid(_ context.Context, nonce string) bool {
 	raw, err := base64.RawURLEncoding.DecodeString(nonce)
 	if err != nil || len(raw) != nonceTimeBytes+sha256.Size {
@@ -109,7 +112,7 @@ func (n *HMACNonces) Valid(_ context.Context, nonce string) bool {
 	}
 	issued := time.Unix(int64(binary.BigEndian.Uint64(issuedBytes)), 0) //nolint:gosec // G115: signed by us, so in range
 	age := n.now().Sub(issued)
-	return age >= 0 && age <= n.lifetime
+	return age >= -HMACNonceClockSkew && age <= n.lifetime
 }
 
 func mac(key, msg []byte) []byte {

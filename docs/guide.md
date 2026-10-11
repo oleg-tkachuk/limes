@@ -237,7 +237,9 @@ child inherits its parent's binding or takes the sub-agent's own key, and
 key, for another method, URL or token, outside `DPoPVerifier.Window` (a
 minute by default) of the verifier's clock, or seen before; every refusal
 matches `ErrInvalidSignature`. `MemoryReplayCache` is in-process and bounded
-(100 000 ids unless told otherwise; full, it refuses rather than forgets):
+— 100 000 ids, and `DefaultReplayEntriesPerKey` (1 000) per key, so one
+key-bound token cannot fill it and lock the others out; full, it refuses
+rather than forgets:
 behind several replicas, a proof replayed to a different one inside the
 window is caught only by server nonces or a `ReplayCache` over a shared
 store.
@@ -590,8 +592,9 @@ if err != nil {
 A malformed `Authorization` header is 400; a bad token or proof is 401, with a
 `Bearer` or `DPoP` challenge naming the error code (and `algs` for DPoP); a
 refused operation is 403 `insufficient_scope`; an exhausted budget or request
-limit is 403 with no challenge; anything else, a store outage included, is
-500. A refusal for want of a nonce carries a fresh one in `DPoP-Nonce`. The
+limit is 403 with no challenge; an issuer's key set out of reach past
+`MaxStale` is 503 — the server's trouble, not the token's; anything else, a
+store outage included, is 500. A refusal for want of a nonce carries a fresh one in `DPoP-Nonce`. The
 body is `application/problem+json` with a type per kind of refusal and fixed
 text — the error's own message, which can name kids or stores, stays in your
 log. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
@@ -606,7 +609,7 @@ log. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
 | `DefaultRevocationCacheTTL` · `DefaultRevocationCacheEntries` | 2 seconds · 100 000 (`WithMaxEntries`; a TTL below zero disables the cache) |
 | `RemoteJWKSConfig` | 10s fetch timeout · `RefreshInterval` 5m · `MinRefreshInterval` 10s · `MaxStale` 1h · 1 MiB document |
 | `DPoPVerifier.Window` | `DefaultDPoPWindow`, 1 minute |
-| `NewMemoryReplayCache(0)` | 100 000 ids |
+| `NewMemoryReplayCache(0)` | 100 000 ids; `DefaultReplayEntriesPerKey`, 1 000, per key (`WithEntriesPerKey`) |
 | `NewHMACNonces(0, key)` | `DefaultDPoPNonceLifetime`, 5 minutes; keys of at least `HMACNonceKeyBytes`, 32 |
 | `DefaultReservationTTL` | 5 minutes |
 | `MaxExternalRefBytes` | 200 |

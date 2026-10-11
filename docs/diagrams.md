@@ -49,7 +49,7 @@ flowchart LR
         keys["<b>KeyResolver</b><br/>PublicKey(kid)"]
         brev["<b>BiscuitRevocationStore</b><br/>IsBiscuitRevoked · RevokeBiscuit<br/>GetBiscuitRevocation"]
         cusage["<b>CopyUsageReader</b><br/>CopyUsage(revocation ids)"]
-        replay["<b>ReplayCache</b><br/>Seen(ctx, jti, expires) · MemoryReplayCache ships"]
+        replay["<b>ReplayCache</b><br/>Seen(ctx, jkt, jti, expires) · MemoryReplayCache ships"]
         nonces["<b>DPoPNonces</b><br/>Nonce · Valid"]
     end
 
@@ -303,12 +303,12 @@ flowchart TB
     shape{"three segments · typ dpop+jwt<br/>a jwk with no private member"}
     jkt{"the jwk's RFC 7638 thumbprint<br/>= ConfirmationJKT"}
     psig{"signature by that key<br/>Ed25519 (or EdDSA) · ES256"}
-    htm{"htm = Method (any case)"}
+    htm{"htm = Method, exactly<br/>(a method is case-sensitive)"}
     htu{"htu = URL after RFC 3986 normalisation<br/>or, under MatchPathOnly, its path a suffix"}
     ath{"ath = hash of the token as presented"}
-    iat{"|now − iat| ≤ Window<br/>(DefaultDPoPWindow, 1 minute)"}
+    iat{"|now − iat| ≤ Window<br/>(DefaultDPoPWindow, 1 minute)<br/>iat may be fractional"}
     nonce{"Nonces set → a nonce they issued"}
-    jti{"ReplayCache.Seen(jti, iat + Window)"}
+    jti{"ReplayCache.Seen(key, jti, iat + Window)"}
     ok(["proof accepted"])
 
     req["ErrDPoPRequired"]
@@ -339,8 +339,10 @@ flowchart TB
 ```
 
 `HMACNonces` makes a nonce of its issuance time and an HMAC of it, so replicas
-holding the same keys accept each other's nonces with no shared state; a full
-`MemoryReplayCache` refuses rather than forgets.
+holding the same keys accept each other's nonces with no shared state, given
+clocks within `HMACNonceClockSkew`. `MemoryReplayCache` gives each key a share
+of its own, so one key past its share has only its own proofs refused; a full
+cache refuses rather than forgets.
 
 ## Answering a refusal
 
@@ -357,6 +359,7 @@ error's own text never reaches the client.
 | `ErrAuthSchemeMismatch` · `ErrInvalidSignature` · `ErrExpired` · `ErrNotYetValid` · `ErrRevoked` · `ErrAudienceMismatch` | 401 | `error="invalid_token"` under the client's scheme (Bearer when unknown) |
 | `ErrCaveatViolation` | 403 | `error="insufficient_scope"` |
 | `ErrBudgetExceeded` · `ErrTenantBudgetExceeded` · `ErrRequestLimitExceeded` | 403 | none |
+| `ErrJWKSUnavailable` (matched first, though it is wrapped in `ErrInvalidSignature`) | 503 | none |
 | anything else — a store outage, `ErrEffectConflict` | 500 | none |
 
 A verifier with DPoP configured adds a bare `DPoP algs="…"` challenge beside a

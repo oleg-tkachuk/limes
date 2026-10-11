@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -49,5 +51,26 @@ func TestTokenIntegersStayWithinIJSON(t *testing.T) {
 func TestTokenClaimsAreUTF8(t *testing.T) {
 	if _, err := parseClaims(b64([]byte("{\"iss\":\"\xff\"}"))); err == nil {
 		t.Error("claims with invalid UTF-8 were read")
+	}
+}
+
+// The issuer signs nothing its own verifier would refuse: an integer outside
+// the I-JSON range fails the signing, not the next verification.
+func TestSignRefusesIntegersOutsideIJSON(t *testing.T) {
+	issuer, _, _, _ := buildIssuerVerifier(t)
+	_, _, err := issuer.Issue(context.Background(), IssueRequest{
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{TenantID: uuid.New(), Subject: "a"},
+		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}},
+		NotBefore: time.Unix(-(MaxIJSONInteger + 1), 0),
+	})
+	if err == nil {
+		t.Fatal("a not-before past the I-JSON range was signed")
+	}
+	// Several out of range: the first in claim order is the one reported.
+	c := jwtClaims{IssuedAt: MaxIJSONInteger + 1, ExpiresAt: MaxIJSONInteger + 1}
+	for range 20 {
+		if err := checkIJSONIntegers(c); err == nil || !strings.Contains(err.Error(), claimIssuedAt) {
+			t.Fatalf("checkIJSONIntegers = %v, want the iat reported", err)
+		}
 	}
 }

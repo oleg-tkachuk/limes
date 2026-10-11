@@ -12,13 +12,25 @@ import (
 // the two directives a key-set cache acts on, and the Age header, and nothing
 // else.
 
-// HTTP caching names (RFC 9111 §5.1, §5.2.2).
+// HTTP header names the module reads or writes (RFC 9110, RFC 9111 §5),
+// spelled once.
 const (
-	headerAge          = "Age"
-	headerCacheControl = "Cache-Control"
-	directiveMaxAge    = "max-age"
-	directiveNoCache   = "no-cache"
-	directiveNoStore   = "no-store"
+	headerAccept        = "Accept"
+	headerAge           = "Age"
+	headerAllow         = "Allow"
+	headerCacheControl  = "Cache-Control"
+	headerContentLength = "Content-Length"
+	headerContentType   = "Content-Type"
+	headerETag          = "ETag"
+	headerIfNoneMatch   = "If-None-Match"
+)
+
+// Cache-Control directives (RFC 9111 §5.2).
+const (
+	directiveMaxAge  = "max-age"
+	directiveNoCache = "no-cache"
+	directiveNoStore = "no-store"
+	directivePublic  = "public"
 )
 
 // responseFreshness is how long a response stays fresh by its own headers:
@@ -34,9 +46,11 @@ func responseFreshness(h http.Header) (freshness time.Duration, ok bool) {
 			case directiveNoCache, directiveNoStore:
 				return 0, true
 			case directiveMaxAge:
-				// §1.2.2: delta-seconds, unquoted or (§5.2) a quoted-string.
-				n, err := strconv.Atoi(strings.Trim(value, `"`))
-				if err != nil || n < 0 {
+				if found {
+					continue // §4.2.1: the first max-age stands
+				}
+				n, ok := deltaSeconds(strings.Trim(value, `"`))
+				if !ok {
 					// §4.2.1: an invalid max-age makes the response stale.
 					return 0, true
 				}
@@ -47,9 +61,26 @@ func responseFreshness(h http.Header) (freshness time.Duration, ok bool) {
 	if !found {
 		return 0, false
 	}
-	age, err := strconv.Atoi(h.Get(headerAge))
-	if err != nil || age < 0 {
+	age, ok := deltaSeconds(h.Get(headerAge))
+	if !ok {
 		age = 0
 	}
 	return time.Duration(max(maxAge-age, 0)) * time.Second, true
+}
+
+// maxDeltaSeconds is what RFC 9111 §1.2.2 reads a delta-seconds too large to
+// hold as: 2^31.
+const maxDeltaSeconds = 1 << 31
+
+// deltaSeconds reads an RFC 9111 §1.2.2 delta-seconds: digits only, and any
+// value past maxDeltaSeconds read as it.
+func deltaSeconds(s string) (int, bool) {
+	if s == "" || strings.Trim(s, "0123456789") != "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n > maxDeltaSeconds {
+		return maxDeltaSeconds, true // only digits, so too large
+	}
+	return n, true
 }

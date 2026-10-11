@@ -3,6 +3,7 @@ package limes
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"fmt"
 	"testing"
 )
 
@@ -55,5 +56,25 @@ func TestJWKS_SkipsNonEd25519(t *testing.T) {
 	}
 	if len(out) != 0 {
 		t.Errorf("expected 0 entries (all non-Ed25519), got %d", len(out))
+	}
+}
+
+// A key set is read with JSON's own rules — names in their exact case — and
+// a kid named twice is used for neither key: which one signs is not for the
+// reader to guess.
+func TestParseJWKSIsStrict(t *testing.T) {
+	_, a, _, _ := GenerateEd25519Keypair()
+	_, b, _, _ := GenerateEd25519Keypair()
+	upper := fmt.Sprintf(`{"KEYS":[{"KTY":"OKP","CRV":"Ed25519","KID":"k","X":%q}]}`, b64(a))
+	if keys, err := ParseJWKS([]byte(upper)); err != nil || len(keys) != 0 {
+		t.Errorf("members in another case = %v, %v; want no key", keys, err)
+	}
+	dup := fmt.Sprintf(`{"keys":[{"kty":"OKP","crv":"Ed25519","kid":"k","x":%q},{"kty":"OKP","crv":"Ed25519","kid":"k","x":%q},{"kty":"OKP","crv":"Ed25519","kid":"other","x":%q}]}`, b64(a), b64(b), b64(b))
+	keys, err := ParseJWKS([]byte(dup))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := keys["k"]; ok || !keys["other"].Equal(b) {
+		t.Errorf("a kid named twice = %v; want it dropped and the rest kept", keys)
 	}
 }

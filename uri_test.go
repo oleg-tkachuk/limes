@@ -93,3 +93,26 @@ func TestDPoPMatchesNormalizedURIs(t *testing.T) {
 		}
 	}
 }
+
+// Under MatchPathOnly the proof's htu is still a URI the request could have
+// been made to — absolute, with a host — and a request with no path matches
+// nothing.
+func TestHTUPathOnlyStillReadsTheProof(t *testing.T) {
+	cases := []struct {
+		htu, request string
+		ok           bool
+	}{
+		{"https://gw.example.com/api/v1/objects", "http://10.0.0.7:8080/v1/objects", true},
+		{"https://gw.example.com/v1/objects", "/v1/objects", true},
+		{"x/v1/objects", "/v1/objects", false},          // relative htu
+		{"urn:anything:/", "/", false},                  // no host
+		{"https://u:p@gw.example.com/v1", "/v1", false}, // userinfo
+		{"https://gw.example.com/anything/", "", false}, // no request path
+		{"https://gw.example.com/a/../v1/x", "/v1/x", true},
+	}
+	for _, tc := range cases {
+		if got := htuMatches(tc.htu, tc.request, true); got != tc.ok {
+			t.Errorf("htuMatches(%q, %q, pathOnly) = %v, want %v", tc.htu, tc.request, got, tc.ok)
+		}
+	}
+}

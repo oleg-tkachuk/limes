@@ -655,7 +655,7 @@ func (s *UsageStore[TX]) chargeLocked(
 		amount: req.Amount, released: released, maxBudget: req.MaxBudget, unit: unit,
 		capID: req.CapabilityID, tenantID: req.TenantID, ancestors: ancestors, copies: req.Copies,
 	}, crossed); err != nil {
-		return limes.ChargeReceipt{Spent: u.SpentAmount}, err
+		return limes.ChargeReceipt{Spent: u.SpentAmount, TenantID: req.TenantID, UnitCode: unit}, err
 	}
 	stagedSpent := u.SpentAmount + req.Amount
 
@@ -668,7 +668,7 @@ func (s *UsageStore[TX]) chargeLocked(
 		}
 		if err := onCharged(ctx, tx); err != nil {
 			// Nothing has been published — nothing to compensate.
-			return limes.ChargeReceipt{Spent: u.SpentAmount}, err
+			return limes.ChargeReceipt{Spent: u.SpentAmount, TenantID: req.TenantID, UnitCode: unit}, err
 		}
 	}
 

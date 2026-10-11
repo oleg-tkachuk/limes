@@ -59,7 +59,7 @@ func TestDPoPAcceptsAProofFromTheBoundKey(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			c := boundCap(t, key)
 			v := &DPoPVerifier{Replay: NewMemoryReplayCache(0), Now: func() time.Time { return now }}
-			proof, err := NewDPoPProof(key, DPoPProofRequest{Method: "post", URL: dpopURL + "?x=1", Token: "the-token", Now: now})
+			proof, err := NewDPoPProof(key, DPoPProofRequest{Method: "POST", URL: dpopURL + "?x=1", Token: "the-token", Now: now})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -197,17 +197,17 @@ func TestMemoryReplayCacheIsBoundedAndForgetsExpired(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	c := NewMemoryReplayCache(2)
 	c.now = func() time.Time { return now }
-	if c.Seen(context.Background(), "a", now.Add(time.Minute)) || c.Seen(context.Background(), "b", now.Add(time.Second)) {
+	if c.Seen(context.Background(), "k", "a", now.Add(time.Minute)) || c.Seen(context.Background(), "k", "b", now.Add(time.Second)) {
 		t.Fatal("fresh ids reported seen")
 	}
-	if !c.Seen(context.Background(), "c", now.Add(time.Minute)) {
+	if !c.Seen(context.Background(), "k", "c", now.Add(time.Minute)) {
 		t.Fatal("a full cache accepted an id it could not record")
 	}
 	now = now.Add(2 * time.Second) // b expires
-	if c.Seen(context.Background(), "c", now.Add(time.Minute)) {
+	if c.Seen(context.Background(), "k", "c", now.Add(time.Minute)) {
 		t.Fatal("an id refused while full was not accepted once room freed up")
 	}
-	if !c.Seen(context.Background(), "a", now.Add(time.Minute)) {
+	if !c.Seen(context.Background(), "k", "a", now.Add(time.Minute)) {
 		t.Fatal("a live id was forgotten")
 	}
 }
@@ -252,17 +252,17 @@ func TestMemoryReplayCacheForgetsInExpiryOrder(t *testing.T) {
 	c := NewMemoryReplayCache(0)
 	c.now = func() time.Time { return now }
 	for i, d := range []time.Duration{5, 1, 4, 2, 3} {
-		if c.Seen(ctx, fmt.Sprint(i), now.Add(d*time.Second)) {
+		if c.Seen(ctx, "k", fmt.Sprint(i), now.Add(d*time.Second)) {
 			t.Fatalf("fresh id %d reported seen", i)
 		}
 	}
 	now = now.Add(3 * time.Second) // the ids expiring at 1s, 2s and 3s lapse
-	_ = c.Seen(ctx, "probe", now.Add(time.Hour))
+	_ = c.Seen(ctx, "k", "probe", now.Add(time.Hour))
 	if got := len(c.seen); got != 3 {
 		t.Errorf("after the clock passed three expiries, %d ids are held, want 3", got)
 	}
 	for _, live := range []string{"0", "2"} {
-		if !c.Seen(ctx, live, now.Add(time.Hour)) {
+		if !c.Seen(ctx, "k", live, now.Add(time.Hour)) {
 			t.Errorf("live id %s was forgotten", live)
 		}
 	}
@@ -277,11 +277,11 @@ func BenchmarkMemoryReplayCacheFull(b *testing.B) {
 	c := NewMemoryReplayCache(entries)
 	c.now = func() time.Time { return now }
 	for i := range entries {
-		c.Seen(ctx, fmt.Sprint(i), now.Add(time.Hour))
+		c.Seen(ctx, fmt.Sprint(i), fmt.Sprint(i), now.Add(time.Hour))
 	}
 	b.ResetTimer()
 	for i := 0; b.Loop(); i++ {
-		c.Seen(ctx, fmt.Sprint("new", i), now.Add(time.Hour))
+		c.Seen(ctx, fmt.Sprint("new", i), fmt.Sprint("new", i), now.Add(time.Hour))
 	}
 }
 
@@ -310,5 +310,65 @@ func TestDPoPRefusesAPrivateJWK(t *testing.T) {
 	err = v.check(context.Background(), c, "the-token", DPoPProof{Proof: proof, Method: "POST", URL: dpopURL})
 	if !errors.Is(err, ErrDPoPInvalid) {
 		t.Fatalf("a proof carrying its private key: err = %v, want ErrDPoPInvalid", err)
+	}
+}
+
+// One key cannot fill the cache: past its share only its own proofs are
+// refused, and every other key's fresh proof is still recorded.
+func TestMemoryReplayCacheBoundsEachKey(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(1_800_000_000, 0)
+	const share = 3
+	c := NewMemoryReplayCache(100, WithEntriesPerKey(share))
+	c.now = func() time.Time { return now }
+	for i := range share {
+		if c.Seen(ctx, "noisy", fmt.Sprint(i), now.Add(time.Minute)) {
+			t.Fatalf("proof %d of the noisy key refused within its share", i)
+		}
+	}
+	if !c.Seen(ctx, "noisy", "one more", now.Add(time.Minute)) {
+		t.Error("the noisy key recorded past its share")
+	}
+	if c.Seen(ctx, "quiet", "first", now.Add(time.Minute)) {
+		t.Error("another key's fresh proof refused because one key filled its share")
+	}
+	// The same id under two keys is two proofs.
+	if c.Seen(ctx, "other", "0", now.Add(time.Minute)) {
+		t.Error("an id another key used was refused")
+	}
+	now = now.Add(2 * time.Minute) // everything lapses, and the share with it
+	if c.Seen(ctx, "noisy", "later", now.Add(time.Minute)) {
+		t.Error("the noisy key's share did not free as its ids lapsed")
+	}
+	if got := NewMemoryReplayCache(2, WithEntriesPerKey(10)).maxPerKey; got != 2 {
+		t.Errorf("a share larger than the cache = %d, want the cache's size", got)
+	}
+}
+
+// RFC 9110 §9.1: a method is case-sensitive, so a proof for POST is not one
+// for "post". RFC 7519 §2: a NumericDate may carry a fraction.
+func TestDPoPReadsMethodAndTimeAsTheRFCsDo(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := boundCap(t, priv)
+	jwk, _ := PublicJWK(priv.Public())
+	sign := func(claims string) string {
+		header := fmt.Sprintf(`{"typ":%q,"alg":%q,"jwk":{"kty":%q,"crv":%q,"x":%q}}`, DPoPTokenType, algEd25519, jwk.Kty, jwk.Crv, jwk.X)
+		input := b64([]byte(header)) + "." + b64([]byte(claims))
+		return input + "." + b64(ed25519.Sign(priv, []byte(input)))
+	}
+	claims := func(jti, iat string) string {
+		return fmt.Sprintf(`{"jti":%q,"htm":"POST","htu":%q,"iat":%s,"ath":%q}`, jti, dpopURL, iat, AccessTokenHash("tok"))
+	}
+	v := &DPoPVerifier{Replay: NewMemoryReplayCache(0), Now: func() time.Time { return now }}
+	ctx := context.Background()
+	if err := v.check(ctx, c, "tok", DPoPProof{Proof: sign(claims("j1", "1800000000")), Method: "post", URL: dpopURL}); !errors.Is(err, ErrDPoPInvalid) {
+		t.Errorf("a POST proof for a post request: err = %v, want ErrDPoPInvalid", err)
+	}
+	if err := v.check(ctx, c, "tok", DPoPProof{Proof: sign(claims("j2", "1800000000.25")), Method: "POST", URL: dpopURL}); err != nil {
+		t.Errorf("a proof with a fractional iat: %v", err)
 	}
 }

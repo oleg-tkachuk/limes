@@ -51,6 +51,10 @@ func TestErrorResponse(t *testing.T) {
 			[]string{`Bearer error="insufficient_scope"`}, false},
 		{"budget", ErrBudgetExceeded, AuthSchemeBearer, http.StatusForbidden, nil, false},
 		{"store outage", errors.New("dial tcp: refused"), AuthSchemeBearer, http.StatusInternalServerError, nil, false},
+		// An issuer's JWKS out of reach is the server's trouble, not a bad
+		// token: the client may retry, and must not discard its token.
+		{"keys unavailable", fmt.Errorf("%w: kid %q: %w", ErrInvalidSignature, "k", ErrJWKSUnavailable), AuthSchemeBearer,
+			http.StatusServiceUnavailable, nil, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

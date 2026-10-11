@@ -183,3 +183,52 @@ func TestParseJWKSSkipsMalformedEntries(t *testing.T) {
 		t.Fatalf("keys = %v, want only the valid entry", keys)
 	}
 }
+
+// twoRoundLookup blocks its first call until first is closed and answers it
+// with the caller's context error; every later call blocks until second.
+type twoRoundLookup struct {
+	calls         atomic.Int32
+	first, second chan struct{}
+}
+
+func (l *twoRoundLookup) IsRevoked(ctx context.Context, _ uuid.UUID) (bool, error) {
+	if l.calls.Add(1) == 1 {
+		<-l.first
+		return false, ctx.Err()
+	}
+	<-l.second
+	return true, nil
+}
+
+// When the leader's lookup ends with its own cancellation, the waiters retry
+// together — one of them leads, the rest share its answer — rather than each
+// going upstream on its own.
+func TestRevocationCacheRetryAfterACancelledLeaderIsShared(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const waiters = 10
+		up := &twoRoundLookup{first: make(chan struct{}), second: make(chan struct{})}
+		c := NewCachedRevocationChecker(up, time.Minute)
+		id := uuid.New()
+		leaderCtx, cancel := context.WithCancel(context.Background())
+		go func() { _, _ = c.IsRevoked(leaderCtx, id) }()
+		synctest.Wait()
+
+		var wg sync.WaitGroup
+		for range waiters {
+			wg.Go(func() {
+				if r, err := c.IsRevoked(context.Background(), id); err != nil || !r {
+					t.Errorf("waiter = %v, %v; want true", r, err)
+				}
+			})
+		}
+		synctest.Wait()
+		cancel()
+		close(up.first)
+		synctest.Wait() // the waiters have retried and are waiting again
+		close(up.second)
+		wg.Wait()
+		if n := up.calls.Load(); n != 2 {
+			t.Errorf("%d upstream calls, want 2: the cancelled one and one shared retry", n)
+		}
+	})
+}
