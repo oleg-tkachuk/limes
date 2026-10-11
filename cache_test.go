@@ -85,27 +85,6 @@ func TestRevocationCachesSweep(t *testing.T) {
 	}
 }
 
-// Invalidate drops one entry, so the next check of it asks upstream.
-func TestRevocationCacheInvalidate(t *testing.T) {
-	ctx := context.Background()
-	store := newMemStore()
-	c := NewCachedRevocationChecker(store, cacheTTL)
-	id, other := uuid.New(), uuid.New()
-	_, _ = c.IsRevoked(ctx, id)
-	_, _ = c.IsRevoked(ctx, other)
-	store.revoked[id] = true
-	if r, _ := c.IsRevoked(ctx, id); r {
-		t.Fatal("a cached answer should stand until invalidated")
-	}
-	c.Invalidate(id)
-	if r, _ := c.IsRevoked(ctx, id); !r {
-		t.Error("after Invalidate the revocation must be seen")
-	}
-	if len(c.cache.entries) != 2 {
-		t.Errorf("Invalidate of one id left %d entries, want both ids cached again", len(c.cache.entries))
-	}
-}
-
 // staleThenRevoked answers its first call with a "live" read that blocks
 // until released — a lookup that began before a revocation — and every
 // later call with "revoked".
@@ -128,40 +107,32 @@ func (s *staleThenRevoked) IsRevoked(context.Context, uuid.UUID) (bool, error) {
 	return true, nil
 }
 
-// A Clear or Invalidate that lands while a lookup is in flight is not undone
-// by that lookup's answer: the next check goes upstream and sees the
-// revocation, and a check arriving meanwhile does not join the stale lookup.
-func TestRevocationCacheDropDuringLookupIsNotUndone(t *testing.T) {
-	drops := map[string]func(*CachedRevocationChecker, uuid.UUID){
-		"Clear":      func(c *CachedRevocationChecker, _ uuid.UUID) { c.Clear() },
-		"Invalidate": func(c *CachedRevocationChecker, id uuid.UUID) { c.Invalidate(id) },
+// A Clear that lands while a lookup is in flight is not undone by that
+// lookup's answer: the next check goes upstream and sees the revocation, and
+// a check arriving meanwhile does not join the stale lookup.
+func TestRevocationCacheClearDuringLookupIsNotUndone(t *testing.T) {
+	ctx := context.Background()
+	up := newStaleThenRevoked()
+	c := NewCachedRevocationChecker(up, cacheTTL)
+	id := uuid.New()
+
+	stale := make(chan bool)
+	go func() {
+		r, _ := c.IsRevoked(ctx, id)
+		stale <- r
+	}()
+	<-up.entered
+	c.Clear()
+
+	bounded, cancel := context.WithTimeout(ctx, checkDeadline)
+	defer cancel()
+	if r, err := c.IsRevoked(bounded, id); err != nil || !r {
+		t.Errorf("check after Clear, lookup still in flight = %v, %v; want revoked", r, err)
 	}
-	for name, drop := range drops {
-		t.Run(name, func(t *testing.T) {
-			ctx := context.Background()
-			up := newStaleThenRevoked()
-			c := NewCachedRevocationChecker(up, cacheTTL)
-			id := uuid.New()
-
-			stale := make(chan bool)
-			go func() {
-				r, _ := c.IsRevoked(ctx, id)
-				stale <- r
-			}()
-			<-up.entered
-			drop(c, id)
-
-			bounded, cancel := context.WithTimeout(ctx, checkDeadline)
-			defer cancel()
-			if r, err := c.IsRevoked(bounded, id); err != nil || !r {
-				t.Errorf("check after %s, lookup still in flight = %v, %v; want revoked", name, r, err)
-			}
-			close(up.release)
-			<-stale
-			if r, err := c.IsRevoked(ctx, id); err != nil || !r {
-				t.Errorf("check after the stale lookup finished = %v, %v; want revoked", r, err)
-			}
-		})
+	close(up.release)
+	<-stale
+	if r, err := c.IsRevoked(ctx, id); err != nil || !r {
+		t.Errorf("check after the stale lookup finished = %v, %v; want revoked", r, err)
 	}
 }
 
@@ -261,19 +232,24 @@ func TestRevocationCacheEvictsTheOldestWhenFull(t *testing.T) {
 	}
 }
 
-// Invalidating answers leaves their places in the eviction order behind; the
-// order is compacted, so it stays within a small multiple of the bound
-// however many answers come and go.
+// The eviction order holds one place per entry, so it stays within the
+// bound however many answers come and go — by eviction or by expiry.
 func TestRevocationCacheOrderStaysBounded(t *testing.T) {
 	const bound, churn = 10, 10_000
 	ctx := context.Background()
-	c := NewCachedRevocationChecker(&countingLookup{}, time.Hour, WithMaxEntries(bound))
-	for range churn {
-		id := uuid.New()
-		_, _ = c.IsRevoked(ctx, id)
-		c.Invalidate(id)
+	clock := &mutableClock{now: time.Unix(0, 0)}
+	c := NewCachedRevocationChecker(&countingLookup{}, cacheTTL, WithMaxEntries(bound), WithCacheClock(func() time.Time { return clock.now }))
+	ids := make([]uuid.UUID, bound/2)
+	for i := range ids {
+		ids[i] = uuid.New()
 	}
-	if n := len(c.cache.order); n > orderSlack*bound {
-		t.Errorf("the eviction order holds %d places for a bound of %d", n, bound)
+	for i := range churn {
+		_, _ = c.IsRevoked(ctx, uuid.New())
+		// The same ids again once they have expired.
+		_, _ = c.IsRevoked(ctx, ids[i%len(ids)])
+		clock.now = clock.now.Add(cacheTTL / 3)
+	}
+	if n, e := len(c.cache.order), len(c.cache.entries); n > bound || n != e {
+		t.Errorf("the eviction order holds %d places for %d entries and a bound of %d", n, e, bound)
 	}
 }

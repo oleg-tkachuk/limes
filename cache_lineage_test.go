@@ -1,0 +1,46 @@
+package limes_test
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/oleg-tkachuk/limes"
+)
+
+// cacheLongerThanTheTest outlives the test, so only a drop can end an entry.
+const cacheLongerThanTheTest = time.Hour
+
+// A cached answer about a child is also an answer about its parent: after
+// the parent is revoked, dropping the cache must reach the child at once,
+// not when its entry expires.
+func TestRevocationCacheDropReachesADescendant(t *testing.T) {
+	ctx := context.Background()
+	s := newExampleStack()
+	parent, _ := s.issue()
+	child, _, err := s.issuer.Delegate(ctx, limes.DelegateRequest{
+		Parent:  parent,
+		Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: s.tenantID, Subject: "sub-worker"},
+		TTL:     time.Minute,
+		Caveats: limes.Caveats{
+			Ops: []limes.Op{limes.OpGet}, ResourcePrefixes: []string{"corpus/public/"},
+			MaxRequests: 1, MaxBudgetAmount: limes.MustParseAmount("1.00"), UnitCode: "USD",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cache := limes.NewCachedRevocationChecker(s.records, cacheLongerThanTheTest)
+	if revoked, err := cache.IsRevoked(ctx, child.ID); err != nil || revoked {
+		t.Fatalf("child before the revocation = %v, %v; want live", revoked, err)
+	}
+	// Not cascading: the child has no entry of its own, only its parent's.
+	if err := s.records.Revoke(ctx, limes.RevokeRequest{ID: parent.ID}); err != nil {
+		t.Fatal(err)
+	}
+	cache.Clear()
+	if revoked, err := cache.IsRevoked(ctx, child.ID); err != nil || !revoked {
+		t.Errorf("child after its parent's revocation and Clear = %v, %v; want revoked", revoked, err)
+	}
+}
