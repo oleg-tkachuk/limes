@@ -73,13 +73,20 @@ type Store interface {
 	// picked.
 	Revoke(ctx context.Context, req RevokeRequest) error
 
-	// PurgeExpired drops the revocation entries — of capabilities and of
-	// Biscuit copies — of every capability expired for at least
-	// expiredFor, and returns how many it dropped. The capability records
-	// stay: an expired token fails verification on its expiry alone, so
-	// its revocation entry no longer stops anything. Run by the
-	// housekeeping worker so the revocation lists stay bounded.
-	PurgeExpired(ctx context.Context, expiredFor time.Duration) (int64, error)
+	// Purge removes the capabilities expired for at least req.ExpiredFor —
+	// their records, their revocation entries and those of their Biscuit
+	// copies — at most req.Limit of them, and reports how many records it
+	// removed. A housekeeping worker calls it until a batch comes back short
+	// of the limit. ExpiredFor is the retention: how long an expired
+	// capability stays on record for audit.
+	//
+	// Purging by expiry never removes the ancestor of a capability that is
+	// still live: a child expires no later than its parent (Delegate cuts it
+	// to the parent's expiry, and an attenuation only narrows), so the
+	// IsRevoked walk, which stops at the first ancestor no longer on record,
+	// misses no revocation. Once records go, UsageHousekeeping.PurgeOrphans
+	// releases what the meter still holds for them.
+	Purge(ctx context.Context, req PurgeRequest) (PurgeResult, error)
 
 	// ListByPrincipal lists the capabilities issued to one principal, in
 	// ascending id order, a page at a time: at most Limit of them, and the
@@ -152,6 +159,37 @@ type RevokeRequest struct {
 	// CascadeChildren records a revocation entry for every descendant as
 	// well. Descendants stop verifying regardless; see Store.Revoke.
 	CascadeChildren bool
+}
+
+// DefaultPurgeLimit is how many records one Purge removes when the request
+// names no limit.
+const DefaultPurgeLimit = 1_000
+
+// PurgeRequest is one batch of Store.Purge.
+type PurgeRequest struct {
+	// ExpiredFor is how long a capability must have been expired to go.
+	// Zero purges every expired capability; negative is refused.
+	ExpiredFor time.Duration
+	// Limit bounds the records removed. Zero: DefaultPurgeLimit; negative
+	// is refused.
+	Limit int
+}
+
+// Validate refuses a negative retention or limit.
+func (r PurgeRequest) Validate() error {
+	switch {
+	case r.ExpiredFor < 0:
+		return invalidRequest("purge: retention %s is negative", r.ExpiredFor)
+	case r.Limit < 0:
+		return invalidRequest("purge: limit %d is negative", r.Limit)
+	}
+	return nil
+}
+
+// PurgeResult is what one Purge removed.
+type PurgeResult struct {
+	// Purged is the number of capability records removed.
+	Purged int64
 }
 
 // ListByPrincipalRequest is the input shape for Store.ListByPrincipal.

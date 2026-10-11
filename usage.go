@@ -35,7 +35,7 @@ type UsageStore[TX any] interface {
 // caller — must admit the increment. So an orchestrator holding 25.00 that
 // delegates 2.00 to each of a hundred workers can still spend 25.00 in total,
 // not 200.00. Narrowing at delegation bounds each child; this bounds the sum.
-// An ancestor whose record is gone (purged after expiry) no longer bounds
+// An ancestor whose record is gone (Store.Purge, after expiry) no longer bounds
 // anything — its children expired with it, since a child cannot outlive its
 // parent.
 //

@@ -44,7 +44,7 @@ flowchart LR
 
     subgraph contracts ["contracts the consumer implements"]
         direction TB
-        store["<b>Store</b> = IssuanceStore + admin<br/>Insert · IsRevoked · GetRecord · Revoke<br/>PurgeExpired · ListByPrincipal"]
+        store["<b>Store</b> = IssuanceStore + admin<br/>Insert · IsRevoked · GetRecord · Revoke<br/>Purge · ListByPrincipal"]
         usage["<b>UsageStore[TX]</b><br/>Meter[TX]: Bump · Charge · Reserve · Settle · Refund · Release<br/>GetUsage · GetCharge · ChargeByRef · GetReservation · ListReservations<br/>TenantBudgets · UsageHousekeeping"]
         keys["<b>KeyResolver</b><br/>PublicKey(kid)"]
         brev["<b>BiscuitRevocationStore</b><br/>IsBiscuitRevoked · RevokeBiscuit<br/>GetBiscuitRevocation"]

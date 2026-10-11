@@ -38,7 +38,7 @@ type Env struct {
 const (
 	// ttl is how long a live capability of these checks lives; expiredAgo is
 	// how long ago an expired one expired, and purgeGrace sits between, so
-	// PurgeExpired takes the expired one and leaves the live one.
+	// Purge takes the expired one and leaves the live one.
 	ttl        = time.Hour
 	expiredAgo = 2 * time.Hour
 	purgeGrace = time.Hour
@@ -133,7 +133,8 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"RevokeIsIdempotentAndReachesDescendants", checkRevoke},
 		{"CascadeRecordsEveryDescendant", checkCascade},
 		{"RevocationReachesEveryGeneration", checkDeepChain},
-		{"PurgeExpiredDropsEntriesNotRecords", checkPurge},
+		{"PurgeDropsExpiredRecordsAndTheirEntries", checkPurge},
+		{"PurgeWorksInBatches", checkPurgeBatches},
 		{"ListByPrincipalPages", checkListPages},
 		{"ListByPrincipalFilters", checkListFilters},
 		{"ListByPrincipalRefusesAMalformedRequest", checkListMalformed},
@@ -298,18 +299,50 @@ func checkDeepChain(t *testing.T, f fixture) {
 
 func checkPurge(t *testing.T, f fixture) {
 	expired := f.insert(t, f.newCapability("agent:old", uuid.Nil, f.now.Add(-expiredAgo)))
+	unrevoked := f.insert(t, f.newCapability("agent:older", uuid.Nil, f.now.Add(-expiredAgo)))
 	live := f.live(t, "agent:new", uuid.Nil)
 	f.revoke(t, expired.ID, false)
 	f.revoke(t, live.ID, false)
-	n, err := f.Store.PurgeExpired(f.Ctx, purgeGrace)
-	if err != nil || n != 1 {
-		t.Fatalf("PurgeExpired = %d, %v; want the expired capability's one entry", n, err)
+	got, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace})
+	const want = 2 // the two expired records
+	if err != nil || got.Purged != want {
+		t.Fatalf("Purge = %+v, %v; want %d records purged", got, err, want)
 	}
-	if _, err := f.get(expired.ID); err != nil {
-		t.Errorf("PurgeExpired dropped a record: Get = %v", err)
+	for _, id := range []uuid.UUID{expired.ID, unrevoked.ID} {
+		if _, err := f.get(id); !errors.Is(err, limes.ErrNotFound) {
+			t.Errorf("an expired record outlived Purge: GetRecord = %v", err)
+		}
 	}
-	if f.revoked(t, expired.ID) || !f.revoked(t, live.ID) {
-		t.Error("PurgeExpired must drop the expired capability's entry and keep the live one's")
+	if f.revoked(t, expired.ID) {
+		t.Error("a purged capability is still revoked")
+	}
+	if _, err := f.get(live.ID); err != nil || !f.revoked(t, live.ID) {
+		t.Errorf("Purge must keep a live record and its revocation: %v", err)
+	}
+}
+
+// Purge works in batches of Limit, so a housekeeping worker loops while a
+// batch comes back full; a negative bound is the request's error.
+func checkPurgeBatches(t *testing.T, f fixture) {
+	const total, batch = 3, 2
+	for range total {
+		f.insert(t, f.newCapability("agent:old", uuid.Nil, f.now.Add(-expiredAgo)))
+	}
+	first, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace, Limit: batch})
+	if err != nil || first.Purged != batch {
+		t.Fatalf("first batch = %+v, %v; want %d", first, err, batch)
+	}
+	second, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace, Limit: batch})
+	if err != nil || second.Purged != total-batch {
+		t.Fatalf("second batch = %+v, %v; want %d", second, err, total-batch)
+	}
+	for name, req := range map[string]limes.PurgeRequest{
+		"a negative limit":     {Limit: -1},
+		"a negative retention": {ExpiredFor: -time.Second},
+	} {
+		if _, err := f.Store.Purge(f.Ctx, req); !errors.Is(err, limes.ErrInvalidRequest) {
+			t.Errorf("Purge with %s: err = %v, want ErrInvalidRequest", name, err)
+		}
 	}
 }
 
@@ -459,10 +492,10 @@ func checkBiscuit(t *testing.T, f fixture) {
 	if err := revoke(expired.ID, oldCopyID); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := f.Store.PurgeExpired(f.Ctx, purgeGrace); err != nil || n != 1 {
-		t.Fatalf("PurgeExpired = %d, %v; want the expired capability's one copy", n, err)
+	if got, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace}); err != nil || got.Purged != 1 {
+		t.Fatalf("Purge = %+v, %v; want the expired capability's record", got, err)
 	}
 	if isRevoked(oldCopyID) || !isRevoked(copyID) {
-		t.Error("PurgeExpired must drop the expired capability's copy and keep the live one's")
+		t.Error("Purge must drop the expired capability's copy and keep the live one's")
 	}
 }

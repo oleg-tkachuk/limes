@@ -55,8 +55,8 @@ func (genStore) GetRecord(context.Context, uuid.UUID) (Record, error) {
 }
 func (genStore) IsRevoked(context.Context, uuid.UUID) (bool, error) { return false, nil }
 func (genStore) Revoke(context.Context, RevokeRequest) error        { return nil }
-func (genStore) PurgeExpired(context.Context, time.Duration) (int64, error) {
-	return 0, nil
+func (genStore) Purge(context.Context, PurgeRequest) (PurgeResult, error) {
+	return PurgeResult{}, nil
 }
 func (genStore) ListByPrincipal(context.Context, ListByPrincipalRequest) (Page[Capability], error) {
 	return Page[Capability]{}, nil

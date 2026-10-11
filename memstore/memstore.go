@@ -357,24 +357,35 @@ func (s *Store[TX]) GetBiscuitRevocation(_ context.Context, revocationID []byte)
 	return r, nil
 }
 
-func (s *Store[TX]) PurgeExpired(_ context.Context, expiredFor time.Duration) (int64, error) {
+// Purge implements limes.Store, oldest expiry first.
+func (s *Store[TX]) Purge(_ context.Context, req limes.PurgeRequest) (limes.PurgeResult, error) {
+	if err := req.Validate(); err != nil {
+		return limes.PurgeResult{}, err
+	}
+	limit := req.Limit
+	if limit == 0 {
+		limit = limes.DefaultPurgeLimit
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cutoff := s.nowFn().Add(-expiredFor)
-	var n int64
-	for id, c := range s.caps {
-		if c.ExpiresAt.IsZero() || !c.ExpiresAt.Before(cutoff) {
-			continue
+	cutoff := s.nowFn().Add(-req.ExpiredFor)
+	var due []limes.Capability
+	for _, c := range s.caps {
+		if !c.ExpiresAt.IsZero() && c.ExpiresAt.Before(cutoff) {
+			due = append(due, c)
 		}
-		if _, ok := s.revoked[id]; ok {
-			delete(s.revoked, id)
-			n++
-		}
-		before := len(s.revokedCopies)
-		maps.DeleteFunc(s.revokedCopies, func(_ string, r limes.BiscuitRevocation) bool { return r.CapabilityID == id })
-		n += int64(before - len(s.revokedCopies))
 	}
-	return n, nil
+	sort.Slice(due, func(i, j int) bool { return due[i].ExpiresAt.Before(due[j].ExpiresAt) })
+	if len(due) > limit {
+		due = due[:limit]
+	}
+	for _, c := range due {
+		delete(s.caps, c.ID)
+		delete(s.revoked, c.ID)
+		delete(s.issuedBy, c.ID)
+		maps.DeleteFunc(s.revokedCopies, func(_ string, r limes.BiscuitRevocation) bool { return r.CapabilityID == c.ID })
+	}
+	return limes.PurgeResult{Purged: int64(len(due))}, nil
 }
 
 func (s *Store[TX]) ListByPrincipal(_ context.Context, req limes.ListByPrincipalRequest) (limes.Page[limes.Capability], error) {

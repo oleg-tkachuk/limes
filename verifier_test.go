@@ -65,8 +65,8 @@ func (m *memStore) RevokeBiscuit(_ context.Context, args RevokeBiscuitRequest) e
 	m.copies[string(args.RevocationID)] = true
 	return nil
 }
-func (m *memStore) PurgeExpired(context.Context, time.Duration) (int64, error) {
-	return 0, nil
+func (m *memStore) Purge(context.Context, PurgeRequest) (PurgeResult, error) {
+	return PurgeResult{}, nil
 }
 func (m *memStore) ListByPrincipal(context.Context, ListByPrincipalRequest) (Page[Capability], error) {
 	return Page[Capability]{}, nil

@@ -24,7 +24,7 @@ import (
 // admin reads would find nothing behind it, and Revoke, which refuses an id
 // not on record, could not stop it. Persist-first means the token in the caller's hand is always
 // reflected in storage; a failed sign just means the row is unused
-// (cleaned up by housekeeping at the natural expiry).
+// (removed by Store.Purge once it has expired).
 type Issuer struct {
 	signer *Signer
 	store  IssuanceStore

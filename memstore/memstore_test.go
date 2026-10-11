@@ -248,7 +248,7 @@ func TestRevokeBiscuit(t *testing.T) {
 	}
 
 	s.nowFn = func() time.Time { return time.Now().Add(2 * time.Hour) }
-	if _, err := s.PurgeExpired(ctx, 0); err != nil {
+	if _, err := s.Purge(ctx, limes.PurgeRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := s.IsBiscuitRevoked(ctx, [][]byte{copyID}); got {
