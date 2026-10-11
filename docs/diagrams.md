@@ -140,7 +140,7 @@ sequenceDiagram
     S-->>W: response
 
     Op->>St: Store.Revoke(RevokeRequest{ID: parent, CascadeChildren})
-    Note over S,St: the next IsRevoked for the child answers true<br/>once the cache entry expires, or at once after Clear / Invalidate
+    Note over S,St: the next IsRevoked for the child answers true<br/>once the cache entry expires, or at once after Clear<br/>(Invalidate reaches only the id it names)
     W->>S: request + child token
     S-->>W: ErrRevoked
 ```
@@ -192,7 +192,8 @@ flowchart TB
     pre -- "no audience" --> mism
     size -- no --> bad
     hdr -- no --> bad
-    key -- "unknown kid · JWKS unavailable" --> bad
+    key -- "unknown kid" --> bad
+    key -- "JWKS unavailable (503)" --> bad
     sig -- invalid --> bad
     claims -- no --> bad
     iss -- no --> bad
@@ -217,8 +218,10 @@ flowchart TB
 ```
 
 An unknown kid, an unreachable JWKS, an untrusted issuer, a kid bound to
-another issuer and a missing tenant all surface as `ErrInvalidSignature`, so
-security-sensitive callers cannot branch on which one it was. The four DPoP
+another issuer and a missing tenant all match `ErrInvalidSignature`; the last
+three carry nothing more to branch on. An unknown kid also matches
+`ErrUnknownKID`, and an unreachable JWKS `ErrJWKSUnavailable`, which
+`ErrorResponse` answers with 503 rather than 401. The four DPoP
 refusals and `ErrAuthSchemeMismatch` match `ErrInvalidSignature` too, while
 `ErrorResponse` still tells them apart.
 
@@ -308,7 +311,7 @@ flowchart TB
     ath{"ath = hash of the token as presented"}
     iat{"|now − iat| ≤ Window<br/>(DefaultDPoPWindow, 1 minute)<br/>iat may be fractional"}
     nonce{"Nonces set → a nonce they issued"}
-    jti{"ReplayCache.Seen(key, jti, iat + Window)"}
+    jti{"ReplayCache.Seen(jkt, jti, iat + Window)"}
     ok(["proof accepted"])
 
     req["ErrDPoPRequired"]
@@ -353,13 +356,13 @@ error's own text never reaches the client.
 
 | Refusal | Status | `WWW-Authenticate` |
 |---|---|---|
-| `ErrMalformedAuthorization` | 400 | `Bearer error="invalid_request"` |
+| `ErrJWKSUnavailable` (wrapped in `ErrInvalidSignature`, so it comes first) | 503 | none |
+| `ErrMalformedAuthorization` | 400 | `error="invalid_request"` under the client's scheme (Bearer when unknown) |
 | `ErrDPoPNonceRequired` | 401 | `DPoP error="use_dpop_nonce"`, and a fresh `DPoP-Nonce` |
 | `ErrDPoPRequired` · `ErrDPoPInvalid` · `ErrDPoPReplayed` | 401 | `DPoP error="invalid_dpop_proof", algs="Ed25519 ES256"` |
 | `ErrAuthSchemeMismatch` · `ErrInvalidSignature` · `ErrExpired` · `ErrNotYetValid` · `ErrRevoked` · `ErrAudienceMismatch` | 401 | `error="invalid_token"` under the client's scheme (Bearer when unknown) |
 | `ErrCaveatViolation` | 403 | `error="insufficient_scope"` |
 | `ErrBudgetExceeded` · `ErrTenantBudgetExceeded` · `ErrRequestLimitExceeded` | 403 | none |
-| `ErrJWKSUnavailable` (matched first, though it is wrapped in `ErrInvalidSignature`) | 503 | none |
 | anything else — a store outage, `ErrEffectConflict` | 500 | none |
 
 A verifier with DPoP configured adds a bare `DPoP algs="…"` challenge beside a
@@ -392,7 +395,7 @@ flowchart LR
     res -- no --> e2
     idem -- no --> e3
     taint -- no --> e4
-    eff -- "built-in Op declared otherwise" --> e0
+    eff -- "unknown Effect, or a built-in Op declared otherwise" --> e0
 
     classDef client fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E
     classDef role fill:#DCFCE7,stroke:#16A34A,color:#14532D
@@ -509,7 +512,7 @@ flowchart TB
     cap(["capability<br/>MaxRequests 100 · budget 10.00"])
     root["<b>root Biscuit</b><br/>authority block: id A"]
     w1["<b>worker 1</b><br/>ids A · B<br/>block B: limes_max_requests 30"]
-    w2["<b>worker 2</b><br/>ids A · C<br/>block C: limes_max_budget_nanos 2.00"]
+    w2["<b>worker 2</b><br/>ids A · C<br/>block C: limes_max_budget_nanos 2000000000 (2.00)"]
     sub["<b>sub-agent of worker 1</b><br/>ids A · B · D<br/>block D: limes_max_requests 5"]
     jwt["the capability's JWT"]
 
@@ -666,8 +669,8 @@ Holds and housekeeping, in `memstore` as the contract has them:
   `PurgeOrphans` releases the holds of every capability no longer on record:
   nothing could settle or release them afterwards.
 - `SetTenantBudget` is guarded by `ExpectedVersion` (0 for a tenant with no
-  ceiling yet), refuses a new unit while anything is held or spent in the old
-  one, and with `ResetSpend` opens a new accounting period, so a refund of an
+  ceiling yet), refuses a new unit while anything is held in the old one, or
+  spent in it unless `ResetSpend` closes that spend, and with `ResetSpend` opens a new accounting period, so a refund of an
   earlier period's charge leaves the new period's spend alone.
 
 A store with transactions runs stage and commit inside one, and passes its own
@@ -699,7 +702,7 @@ flowchart LR
     store --> chain --> cache
     cache --> v1
     cache --> v2
-    notify -. "Clear() · Invalidate(id)" .-> cache
+    notify -. "Clear() · Invalidate(id), that id only" .-> cache
     bop --> blist --> bcache
     bcache --> v1
     bcache --> v2
@@ -732,6 +735,8 @@ long as the response's `Cache-Control` says — `max-age` less `Age`, zero for
 `no-cache` or `no-store` — within `MinRefreshInterval` and `RefreshInterval`
 (`RefreshInterval` when the response says nothing), revalidates with an ETag,
 refetches on an unknown kid at most once per `MinRefreshInterval`, and fails
-closed with `ErrJWKSUnavailable` once the last good set is older than
-`MaxStale`. The issuer serves the set with `JWKSHandler`: a strong ETag
+closed with `ErrJWKSUnavailable` when it has never fetched a set, or once the
+last good set is older than `MaxStale`. A document with entries but no usable
+Ed25519 key counts as a failed fetch, so the last good set stays in service;
+two entries under one kid are both dropped. The issuer serves the set with `JWKSHandler`: a strong ETag
 answering `If-None-Match` with 304, and `Cache-Control: public, max-age`.

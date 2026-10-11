@@ -405,8 +405,9 @@ func (v *StandardVerifier) verifySigned(ctx context.Context, token string) (*Cap
 	// 2) Key and signature — the cryptographic gate.
 	pub, err := v.cfg.Keys.PublicKey(ctx, header.Kid)
 	if err != nil {
-		// Surface unknown-kid as invalid signature so callers don't
-		// branch on the failure mode in security-sensitive paths.
+		// Every key failure is an invalid signature; the resolver's error
+		// stays wrapped, so ErrorResponse can tell an issuer outage
+		// (ErrJWKSUnavailable) from a token's fault.
 		return nil, fmt.Errorf("%w: kid %q: %w", ErrInvalidSignature, header.Kid, err)
 	}
 	if err := verifyParts(parts, pub); err != nil {

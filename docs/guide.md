@@ -25,6 +25,7 @@ case errors.Is(err, limes.ErrNotYetValid):      // NotBefore ahead, past Leeway 
 case errors.Is(err, limes.ErrRevoked):          // pulled mid-flight
 case errors.Is(err, limes.ErrAudienceMismatch): // token for another service
 case errors.Is(err, limes.ErrCaveatViolation):  // not allowed to do this
+case errors.Is(err, limes.ErrJWKSUnavailable):  // the issuer's keys out of reach: the server's trouble, not the token's
 case errors.Is(err, limes.ErrInvalidSignature): // forged, or no valid proof of possession
 }
 ```
@@ -50,8 +51,12 @@ Verifiers running apart from the issuer resolve keys with
 long as the response's `Cache-Control` allows within `MinRefreshInterval`
 (10s) and `RefreshInterval` (5m), revalidates by ETag, picks up a rotated-in
 kid on first sight (at most once per `MinRefreshInterval`), and fails closed
-with `ErrJWKSUnavailable` once the last good set is older than `MaxStale`
-(1h). The three intervals must nest, or construction fails:
+with `ErrJWKSUnavailable` when it has never fetched a set, or once the last
+good set is older than `MaxStale` (1h). A document whose entries are all
+unusable counts as a failed fetch, so the last good set stays in service
+rather than every key being withdrawn at once. Check `ErrJWKSUnavailable`
+before `ErrInvalidSignature`, which it also matches. The three intervals must
+nest, or construction fails:
 
 ```go
 keys, err := limes.NewRemoteJWKSResolver(limes.RemoteJWKSConfig{
@@ -64,7 +69,7 @@ verifier, err := limes.NewStandardVerifier(limes.VerifierConfig{
 
 The issuer serves that document with `JWKSHandler` — `application/jwk-set+json`,
 a strong ETag answering `If-None-Match` with 304, `Cache-Control: public,
-max-age` — over a function returning its keys, such as
+max-age` (a negative `maxAge` is served as 0) — over a function returning its keys, such as
 `StaticKeyResolver.Keys`:
 
 ```go
@@ -73,8 +78,10 @@ mux.Handle("/.well-known/jwks.json", limes.JWKSHandler(resolver.Keys, time.Minut
 
 `MarshalJWKS` writes the same document for a server of your own; `ParseJWKS`
 reads one back, for a resolver of your own. It skips an entry it cannot use — a foreign
-`kty`, no kid, a malformed key — rather than refusing the set, so one bad
-entry does not take every other key out of service mid-rotation.
+`kty` or `alg`, no kid, a malformed key — rather than refusing the set, so one bad
+entry does not take every other key out of service mid-rotation. Two entries
+naming one kid are both skipped: which one signs is not for the reader to
+guess. A document that is not JSON, or names a member twice, is refused.
 
 ### Inspect a token without trusting it
 
@@ -227,14 +234,18 @@ neither is `ErrMalformedAuthorization`.
 
 A verifier with no `DPoP` refuses every key-bound capability with
 `ErrDPoPRequired` instead of accepting it as a bearer token, so a binding
-cannot be lost to a forgotten call. Behind a proxy that rewrites the host or
-strips a mount prefix, set `DPoPVerifier.MatchPathOnly`.
+cannot be lost to a forgotten call. `DPoPProof.URL` is the absolute URL the
+client addressed, scheme and host included. Behind a proxy that rewrites the
+host or strips a mount prefix, or for a server that sees only the path, set
+`DPoPVerifier.MatchPathOnly`: only the server's side of the comparison then
+drops scheme, host and prefix — the proof's `htu` must still be an absolute
+URI.
 
 The token carries the thumbprint as `cnf.jkt` (RFC 7800), absent from an
 unbound token. A delegated
 child inherits its parent's binding or takes the sub-agent's own key, and
 `Narrows` refuses a child that drops it. `Verify` refuses a proof from another
-key, for another method, URL or token, outside `DPoPVerifier.Window` (a
+key, for another method (compared exactly: `post` is not `POST`), URL or token, outside `DPoPVerifier.Window` (a
 minute by default) of the verifier's clock, or seen before; every refusal
 matches `ErrInvalidSignature`. `MemoryReplayCache` is in-process and bounded
 — 100 000 ids, and `DefaultReplayEntriesPerKey` (1 000) per key, so one
@@ -351,8 +362,9 @@ integer arithmetic, exact however many charges they take: a tenth and two
 tenths fit under a ceiling of three tenths, and ten tenths make one. Nothing
 on your side needs rounding, summing apart or correcting.
 
-- **Writing one.** `ParseAmount("0.35")` reads a decimal exactly and refuses
-  anything finer than a nano rather than round it; `MustParseAmount` is the
+- **Writing one.** `ParseAmount("0.35")` reads a plain decimal exactly — no
+  sign, so `-0` is refused too — and refuses anything finer than a nano
+  rather than round it; `MustParseAmount` is the
   same for a literal in your code. A price that reaches you as a `float64`
   goes through `AmountFromFloat`, which rounds once, to the nearest nano.
 - **Reading one.** `String()` writes the exact decimal (`"0.35"`);
@@ -391,7 +403,9 @@ budget. `Settle` charges the actual cost in place of the hold; above the hold,
 the excess must fit, or the hold stays for you to settle lower or `Release`.
 A hold never settled lapses after its TTL (`DefaultReservationTTL`, five
 minutes, unless the request says): run `ReleaseExpired` on a timer. Settling
-the zero reservation id is `ErrReservationNotFound`.
+the zero reservation id is `ErrReservationNotFound`. The receipt names the
+charge's tenant and unit, on a refusal too, so a caller holding only the
+reservation id can attribute it.
 
 The trailing `nil` is an optional in-transaction callback. If your store has
 transactions, pass a function and the module threads **your** handle back so
@@ -517,7 +531,7 @@ Implement these and you are done:
 | `CopyUsageReader` | Reads Biscuit copies' own counters (only to show them) | No |
 | `UsageStore[TX]` = `Meter[TX]` + `TenantBudgets` + `UsageHousekeeping` | Request and spend counters, the charges ledger, tenant ceilings; `Delete` and `PurgeOrphans` release a reaped capability's holds | Only for atomic side effects |
 | `KeyResolver` | Public verification keys | No |
-| `ReplayCache` | DPoP proof ids seen (only for key-bound tokens; `MemoryReplayCache` ships for one process — behind several replicas, implement it over a shared store) | No |
+| `ReplayCache` | DPoP proof ids seen, per key: `Seen(ctx, jkt, jti, expires)` reports `true` when it cannot tell, so an unanswerable check refuses the proof (only for key-bound tokens; `MemoryReplayCache` ships for one process — behind several replicas, implement it over a shared store) | No |
 | `DPoPNonces` | Server-provided DPoP nonces (optional; `HMACNonces` ships and needs no store) | No |
 
 Two obligations are easy to miss. `Store.IsRevoked` answers for the
@@ -592,8 +606,8 @@ if err != nil {
 A malformed `Authorization` header is 400; a bad token or proof is 401, with a
 `Bearer` or `DPoP` challenge naming the error code (and `algs` for DPoP); a
 refused operation is 403 `insufficient_scope`; an exhausted budget or request
-limit is 403 with no challenge; an issuer's key set out of reach past
-`MaxStale` is 503 — the server's trouble, not the token's; anything else, a
+limit is 403 with no challenge; an issuer's key set never fetched, or out of
+reach past `MaxStale`, is 503 — the server's trouble, not the token's; anything else, a
 store outage included, is 500. A refusal for want of a nonce carries a fresh one in `DPoP-Nonce`. The
 body is `application/problem+json` with a type per kind of refusal and fixed
 text — the error's own message, which can name kids or stores, stays in your
@@ -606,11 +620,11 @@ log. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
 | `IssuerConfig.DefaultTTL` | 15 minutes |
 | `VerifierConfig.Leeway` | 30 seconds |
 | `VerifierConfig.MaxTokenBytes` | `DefaultMaxTokenBytes`, 16 KiB |
-| `DefaultRevocationCacheTTL` · `DefaultRevocationCacheEntries` | 2 seconds · 100 000 (`WithMaxEntries`; a TTL below zero disables the cache) |
+| `DefaultRevocationCacheTTL` · `DefaultRevocationCacheEntries` | 2 seconds · 100 000, the oldest dropped first past it (`WithMaxEntries`; a TTL below zero disables the cache) |
 | `RemoteJWKSConfig` | 10s fetch timeout · `RefreshInterval` 5m · `MinRefreshInterval` 10s · `MaxStale` 1h · 1 MiB document |
 | `DPoPVerifier.Window` | `DefaultDPoPWindow`, 1 minute |
 | `NewMemoryReplayCache(0)` | 100 000 ids; `DefaultReplayEntriesPerKey`, 1 000, per key (`WithEntriesPerKey`) |
-| `NewHMACNonces(0, key)` | `DefaultDPoPNonceLifetime`, 5 minutes; keys of at least `HMACNonceKeyBytes`, 32 |
+| `NewHMACNonces(0, key)` | `DefaultDPoPNonceLifetime`, 5 minutes; `HMACNonceClockSkew`, 5 seconds, for a nonce issued ahead of this replica's clock; keys of at least `HMACNonceKeyBytes`, 32 |
 | `DefaultReservationTTL` | 5 minutes |
 | `MaxExternalRefBytes` | 200 |
 | `MaxNanos` | just under a billion units |
