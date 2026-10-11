@@ -25,7 +25,7 @@ func biscuitFixture(t *testing.T) (*Issuer, *StandardVerifier, *memStore, Capabi
 		Revocations:    store,
 		TrustedIssuers: []string{"limes-test"},
 		AcceptBiscuit:  true,
-		DPoP:           &dpop.Verifier{Replay: dpop.NewMemoryReplayCache(0)},
+		DPoP:           newVerifier(t, dpop.VerifierConfig{Replay: newReplay(t, dpop.MemoryReplayCacheConfig{})}),
 
 		BiscuitRevocations: store,
 	})

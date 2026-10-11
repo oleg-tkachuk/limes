@@ -31,7 +31,7 @@ func FuzzDPoPCheck(f *testing.F) {
 		f.Fatal(err)
 	}
 	f.Fuzz(func(t *testing.T, p string) {
-		v := &Verifier{Replay: NewMemoryReplayCache(0), Now: func() time.Time { return now }}
+		v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }})
 		err := v.Verify(context.Background(), Request{Proof: Proof{JWT: p, Method: dpopMethod, URL: dpopURL}, Token: "tok", JKT: jkt})
 		if err == nil {
 			t.Fatalf("a proof without the bound key was accepted: %q", p)
@@ -43,7 +43,7 @@ func FuzzDPoPCheck(f *testing.F) {
 // every nonce it accepts carries the issued nonce's bytes.
 func FuzzHMACNonceValid(f *testing.F) {
 	issuedAt := time.Unix(1_800_000_000, 0)
-	nonces, err := NewHMACNonces(0, bytes.Repeat([]byte{1}, HMACNonceKeyBytes))
+	nonces, err := NewHMACNonces(HMACNoncesConfig{Keys: [][]byte{bytes.Repeat([]byte{1}, HMACNonceKeyBytes)}})
 	if err != nil {
 		f.Fatal(err)
 	}

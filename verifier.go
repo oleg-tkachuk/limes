@@ -91,7 +91,7 @@ type VerifierConfig struct {
 	// DPoP checks the proof of possession a key-bound capability (one with
 	// a ConfirmationJKT) must come with. Without it the verifier refuses
 	// every key-bound capability with dpop.ErrRequired, rather than accept
-	// one as a bearer token.
+	// one as a bearer token. Built by dpop.NewVerifier, with its own clock.
 	DPoP *dpop.Verifier
 }
 
@@ -166,16 +166,6 @@ func NewStandardVerifier(cfg VerifierConfig) (*StandardVerifier, error) {
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
-	}
-	if cfg.DPoP != nil {
-		if cfg.DPoP.Replay == nil {
-			return nil, dpop.ErrNoReplayCache
-		}
-		dpop := *cfg.DPoP // the caller's stays theirs
-		if dpop.Now == nil {
-			dpop.Now = cfg.Now
-		}
-		cfg.DPoP = &dpop
 	}
 	if cfg.Leeway < 0 {
 		return nil, fmt.Errorf("limes: VerifierConfig.Leeway %s is negative", cfg.Leeway)

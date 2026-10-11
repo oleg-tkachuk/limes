@@ -209,9 +209,11 @@ cap, token, _ := issuer.Issue(ctx, limes.IssueRequest{ /* … */ ConfirmationJKT
 proof, _ := dpop.Sign(agentKey, dpop.ProofRequest{Method: "POST", URL: url, Token: token, Now: time.Now()})
 
 // Server: the verifier checks the proof of every key-bound capability.
+replay, _ := dpop.NewMemoryReplayCache(dpop.MemoryReplayCacheConfig{})
+proofs, _ := dpop.NewVerifier(dpop.VerifierConfig{Replay: replay})
 verifier, _ := limes.NewStandardVerifier(limes.VerifierConfig{
     /* … */
-    DPoP: &dpop.Verifier{Replay: dpop.NewMemoryReplayCache(0)},
+    DPoP: proofs,
 })
 cap, err := verifier.Verify(ctx, limes.VerifyRequest{
     Token: token, Audience: "my-service",
@@ -223,8 +225,8 @@ Behind several replicas, give the `dpop.Verifier` server nonces, with the same
 key on every replica:
 
 ```go
-nonces, err := dpop.NewHMACNonces(0, key) // key ≥ 32 bytes; 0 = a 5-minute lifetime
-proofs := &dpop.Verifier{Replay: dpop.NewMemoryReplayCache(0), Nonces: nonces}
+nonces, err := dpop.NewHMACNonces(dpop.HMACNoncesConfig{Keys: [][]byte{key}}) // key ≥ 32 bytes
+proofs, err := dpop.NewVerifier(dpop.VerifierConfig{Replay: replay, Nonces: nonces})
 ```
 
 A proof must then carry a nonce the server issued, so it cannot be signed
@@ -253,7 +255,7 @@ The token carries the thumbprint as `cnf.jkt` (RFC 7800), absent from an
 unbound token. A delegated
 child inherits its parent's binding or takes the sub-agent's own key, and
 `Narrows` refuses a child that drops it. `Verify` refuses a proof from another
-key, for another method (compared exactly: `post` is not `POST`), URL or token, outside `dpop.Verifier.Window` (a
+key, for another method (compared exactly: `post` is not `POST`), URL or token, outside `dpop.VerifierConfig.Window` (a
 minute by default) of the verifier's clock, or seen before; every refusal
 matches `ErrProofOfPossession` as `Verify` returns it, and still matches its
 `dpop` sentinel. A replay cache or nonce store that cannot answer is an outage
@@ -644,9 +646,9 @@ log. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
 | `VerifierConfig.MaxTokenBytes` | `DefaultMaxTokenBytes`, 16 KiB |
 | `RevocationCacheConfig` · `BiscuitRevocationCacheConfig` | `DefaultRevocationCacheTTL` 2 seconds · `DefaultRevocationCacheEntries` 100 000, the oldest dropped first past it; a negative TTL or bound is refused — for no cache, give the verifier the store itself |
 | `jwks.RemoteConfig` | `jwks.DefaultFetchTimeout` 10s · `DefaultRefreshInterval` 5m · `DefaultMinRefreshInterval` 10s · `DefaultMaxStale` 1h · `DefaultMaxDocumentBytes` 1 MiB |
-| `dpop.Verifier.Window` | `dpop.DefaultWindow`, 1 minute |
-| `dpop.NewMemoryReplayCache(0)` | 100 000 ids; `dpop.DefaultReplayEntriesPerKey`, 1 000, per key (`dpop.WithEntriesPerKey`) |
-| `dpop.NewHMACNonces(0, key)` | `dpop.DefaultNonceLifetime`, 5 minutes; `dpop.HMACNonceClockSkew`, 5 seconds, for a nonce issued ahead of this replica's clock; keys of at least `dpop.HMACNonceKeyBytes`, 32 |
+| `dpop.VerifierConfig.Window` | `dpop.DefaultWindow`, 1 minute |
+| `dpop.MemoryReplayCacheConfig` | `dpop.DefaultReplayCacheEntries`, 100 000 ids; `dpop.DefaultReplayEntriesPerKey`, 1 000, per key |
+| `dpop.HMACNoncesConfig` | `dpop.DefaultNonceLifetime`, 5 minutes; `dpop.HMACNonceClockSkew`, 5 seconds, for a nonce issued ahead of this replica's clock; keys of at least `dpop.HMACNonceKeyBytes`, 32 |
 | `DefaultReservationTTL` | 5 minutes |
 | `MaxExternalRefBytes` | 200 |
 | `MaxNanos` | just under a billion units |

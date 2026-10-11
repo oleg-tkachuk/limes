@@ -87,7 +87,7 @@ and a `jti` not seen before.
   presented as `DPoP`.
 - **Replay.** `dpop.MemoryReplayCache` remembers `jti`s for one process, keyed by
   the proof key's thumbprint, each key within its own share
-  (`dpop.WithEntriesPerKey`, default `dpop.DefaultReplayEntriesPerKey`), so one key
+  (`MemoryReplayCacheConfig.EntriesPerKey`, default `dpop.DefaultReplayEntriesPerKey`), so one key
   cannot crowd another's proofs out. Across replicas, nonces or a shared
   `dpop.ReplayCache` close the window.
 

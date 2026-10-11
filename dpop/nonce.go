@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -46,8 +47,8 @@ const (
 	// HMACNonceKeyBytes is the least key length NewHMACNonces accepts: the
 	// output size of the HMAC's hash.
 	HMACNonceKeyBytes = sha256.Size
-	// DefaultNonceLifetime is how long a nonce is accepted when
-	// NewHMACNonces is given no lifetime.
+	// DefaultNonceLifetime is how long a nonce is accepted when the
+	// configuration names no lifetime.
 	DefaultNonceLifetime = 5 * time.Minute
 	// HMACNonceClockSkew is how far ahead of a replica's clock a nonce's
 	// issuance may lie: another replica's clock may run ahead, and the
@@ -67,26 +68,42 @@ type HMACNonces struct {
 	now      func() time.Time
 }
 
-// NewHMACNonces builds an HMACNonces. keys[0] signs new nonces; every key
-// checks. Each key is at least HMACNonceKeyBytes long; lifetime ≤ 0 is
-// DefaultNonceLifetime.
-func NewHMACNonces(lifetime time.Duration, keys ...[]byte) (*HMACNonces, error) {
-	if len(keys) == 0 {
+// HMACNoncesConfig configures HMACNonces.
+type HMACNoncesConfig struct {
+	// Keys check nonces; the first also signs new ones. Each is at least
+	// HMACNonceKeyBytes long. Required.
+	Keys [][]byte
+	// Lifetime is how long a nonce is accepted. Zero: DefaultNonceLifetime.
+	Lifetime time.Duration
+	// Now is the clock. Nil: time.Now.
+	Now func() time.Time
+}
+
+// NewHMACNonces builds HMACNonces, refusing no key, a short one, or a
+// negative lifetime.
+func NewHMACNonces(cfg HMACNoncesConfig) (*HMACNonces, error) {
+	if len(cfg.Keys) == 0 {
 		return nil, errors.New("dpop: HMACNonces needs a key")
 	}
-	for i, k := range keys {
+	for i, k := range cfg.Keys {
 		if len(k) < HMACNonceKeyBytes {
 			return nil, fmt.Errorf("dpop: HMACNonces key %d is %d bytes, at least %d", i, len(k), HMACNonceKeyBytes)
 		}
 	}
-	if lifetime <= 0 {
-		lifetime = DefaultNonceLifetime
+	if cfg.Lifetime < 0 {
+		return nil, fmt.Errorf("dpop: nonce lifetime %s is negative", cfg.Lifetime)
 	}
-	cloned := make([][]byte, len(keys))
-	for i, k := range keys {
-		cloned[i] = append([]byte(nil), k...)
+	if cfg.Lifetime == 0 {
+		cfg.Lifetime = DefaultNonceLifetime
 	}
-	return &HMACNonces{keys: cloned, lifetime: lifetime, now: time.Now}, nil
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
+	keys := make([][]byte, len(cfg.Keys))
+	for i, k := range cfg.Keys {
+		keys[i] = slices.Clone(k)
+	}
+	return &HMACNonces{keys: keys, lifetime: cfg.Lifetime, now: cfg.Now}, nil
 }
 
 // Nonce implements Nonces.
