@@ -69,25 +69,35 @@ func MarshalJWKS(keys map[string]ed25519.PublicKey) ([]byte, error) {
 // and so every token signed with them — out of service during a rotation.
 // A document that is not JSON at all is an error.
 func ParseJWKS(raw []byte) (map[string]ed25519.PublicKey, error) {
+	keys, _, err := parseJWKS(raw)
+	return keys, err
+}
+
+// parseJWKS is ParseJWKS, also reporting how many entries it skipped.
+func parseJWKS(raw []byte) (map[string]ed25519.PublicKey, int, error) {
 	var doc JWKSDocument
 	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("limes: parse JWKS: %w", err)
+		return nil, 0, fmt.Errorf("limes: parse JWKS: %w", err)
 	}
 	out := make(map[string]ed25519.PublicKey, len(doc.Keys))
+	skipped := 0
 	for _, k := range doc.Keys {
 		if k.Kty != jwkKtyOKP || k.Crv != jwkCrvEd25519 || k.Kid == "" {
+			skipped++
 			continue
 		}
 		if k.Alg != "" && k.Alg != algEd25519 && k.Alg != algEdDSA {
+			skipped++
 			continue
 		}
 		decoded, err := base64.RawURLEncoding.DecodeString(k.X)
 		if err != nil || len(decoded) != ed25519.PublicKeySize {
+			skipped++
 			continue
 		}
 		out[k.Kid] = ed25519.PublicKey(decoded)
 	}
-	return out, nil
+	return out, skipped, nil
 }
 
 // JWKSHandler serves keys() as a JWK Set document (RFC 7517), the way the

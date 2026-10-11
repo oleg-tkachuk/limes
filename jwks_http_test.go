@@ -153,3 +153,41 @@ func TestJWKSHandler(t *testing.T) {
 		t.Errorf("resolver over the handler = %v, %v", got, err)
 	}
 }
+
+// A response whose every entry is unusable — a key type this module does not
+// read, say — is a failed fetch, not an empty key set: the last good set
+// keeps serving within MaxStale, as for any other failure.
+func TestRemoteJWKSKeepsTheSetWhenNoKeyIsUsable(t *testing.T) {
+	kid, pub, _, err := GenerateEd25519Keypair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var foreign atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if foreign.Load() {
+			_, _ = w.Write([]byte(`{"keys":[{"kty":"OKP","crv":"Ed448","kid":"k2","x":"AA"}]}`))
+			return
+		}
+		doc, _ := MarshalJWKS(map[string]ed25519.PublicKey{kid: pub})
+		_, _ = w.Write(doc)
+	}))
+	defer srv.Close()
+	clock := &stepClock{t: time.Unix(1_800_000_000, 0)}
+	r, err := NewRemoteJWKSResolver(RemoteJWKSConfig{URL: srv.URL, Now: clock.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := r.PublicKey(ctx, kid); err != nil {
+		t.Fatal(err)
+	}
+	foreign.Store(true)
+	clock.Advance(10 * time.Minute) // past RefreshInterval, inside MaxStale
+	if got, err := r.PublicKey(ctx, kid); err != nil || !got.Equal(pub) {
+		t.Fatalf("after a response with no usable key: %v, %v; want the last good key", got, err)
+	}
+	// An empty set is an issuer withdrawing every key, and is taken as such.
+	if keys, skipped, err := parseJWKS([]byte(`{"keys":[]}`)); err != nil || len(keys) != 0 || skipped != 0 {
+		t.Errorf("an empty set = %v, %d, %v", keys, skipped, err)
+	}
+}

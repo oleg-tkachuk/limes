@@ -226,9 +226,14 @@ func (r *RemoteJWKSResolver) fetch(ctx context.Context, etag string) (keys map[s
 	if int64(len(body)) > r.cfg.MaxDocumentBytes {
 		return nil, "", nil, false, fmt.Errorf("JWKS document exceeds %d bytes", r.cfg.MaxDocumentBytes)
 	}
-	keys, err = ParseJWKS(body)
+	keys, skipped, err := parseJWKS(body)
 	if err != nil {
 		return nil, "", nil, false, err
+	}
+	// Entries, none usable: a broken document, not a withdrawal of every
+	// key — failing the fetch keeps the last good set within MaxStale.
+	if len(keys) == 0 && skipped > 0 {
+		return nil, "", nil, false, fmt.Errorf("JWKS document has %d entries and no usable Ed25519 key", skipped)
 	}
 	return keys, resp.Header.Get("ETag"), resp.Header, false, nil
 }
