@@ -1217,12 +1217,12 @@ func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTen
 	}
 	var after *budgetRow
 	if args.Cursor != "" {
-		c, err := limes.DecodeTenantBudgetCursor(args.Cursor)
+		c, err := decodeTenantBudgetCursor(args.Cursor)
 		if err != nil {
 			return limes.Page[limes.TenantBudgetSummary]{}, err
 		}
-		pct, _ := strconv.ParseFloat(c.Utilisation, 64) // DecodeTenantBudgetCursor checked it
-		after = &budgetRow{pct: pct, tenant: c.TenantID}
+		pct, _ := strconv.ParseFloat(c.utilisation, 64) // decodeTenantBudgetCursor checked it
+		after = &budgetRow{pct: pct, tenant: c.tenantID}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1253,9 +1253,10 @@ func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTen
 	if len(rows) > limit {
 		rows = rows[:limit]
 		last := rows[limit-1]
-		next = limes.TenantBudgetCursor{
-			Utilisation: strconv.FormatFloat(last.pct, 'g', -1, 64), TenantID: last.tenant,
-		}.Encode()
+		// 'f': a plain decimal, which the cursor reads back exactly.
+		next = tenantBudgetCursor{
+			utilisation: strconv.FormatFloat(last.pct, 'f', -1, 64), tenantID: last.tenant,
+		}.encode()
 	}
 	out := make([]limes.TenantBudgetSummary, 0, len(rows))
 	for _, r := range rows {

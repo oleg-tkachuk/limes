@@ -2,11 +2,8 @@ package limes
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 	"time"
 	"unicode"
 
@@ -138,7 +135,6 @@ type Meter[TX any] interface {
 	// Release ends a reservation without charging. Idempotent: releasing
 	// one that is gone is a no-op.
 	Release(ctx context.Context, req ReleaseRequest) error
-
 }
 
 // MeterReader reads back what the Meter recorded: charges, reservations and
@@ -493,45 +489,6 @@ func (r ListTenantBudgetsRequest) Validate() error {
 		return invalidRequest("list tenant budgets: threshold %v%% is outside 0..%d", r.ThresholdPct, maxThresholdPct)
 	}
 	return nil
-}
-
-// TenantBudgetCursor is a place in ListTenantBudgets' order: the last row's
-// utilisation, in the decimal text its store computed it in, and tenant id.
-type TenantBudgetCursor struct {
-	Utilisation string
-	TenantID    uuid.UUID
-}
-
-// tenantBudgetCursorSep separates the cursor's two fields; neither a decimal
-// nor a uuid contains it.
-const tenantBudgetCursorSep = "|"
-
-// Encode is the cursor as ListTenantBudgets hands it out: opaque, URL-safe.
-func (c TenantBudgetCursor) Encode() string {
-	return base64.RawURLEncoding.EncodeToString([]byte(c.Utilisation + tenantBudgetCursorSep + c.TenantID.String()))
-}
-
-// DecodeTenantBudgetCursor reads a cursor Encode wrote. Anything else is an
-// ErrInvalidRequest.
-func DecodeTenantBudgetCursor(s string) (TenantBudgetCursor, error) {
-	raw, err := base64.RawURLEncoding.DecodeString(s)
-	if err != nil {
-		return TenantBudgetCursor{}, invalidRequest("tenant budget cursor %q", s)
-	}
-	pct, id, ok := strings.Cut(string(raw), tenantBudgetCursorSep)
-	if !ok || pct == "" {
-		return TenantBudgetCursor{}, invalidRequest("tenant budget cursor %q", s)
-	}
-	// A utilisation is a finite, non-negative decimal: NaN and the
-	// infinities, or a hex float, would order differently in every store.
-	if v, err := strconv.ParseFloat(pct, 64); err != nil || !decimalAmount.MatchString(pct) || v < 0 {
-		return TenantBudgetCursor{}, invalidRequest("tenant budget cursor %q", s)
-	}
-	tenant, err := uuid.Parse(id)
-	if err != nil {
-		return TenantBudgetCursor{}, invalidRequest("tenant budget cursor %q", s)
-	}
-	return TenantBudgetCursor{Utilisation: pct, TenantID: tenant}, nil
 }
 
 // Usage is the snapshot view of a capability's runtime counters.
