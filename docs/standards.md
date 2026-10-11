@@ -95,7 +95,8 @@ and a `jti` not seen before.
 `TestNormalizeURI`, `TestRemoveDotSegments`, `TestDPoPMatchesNormalizedURIs`,
 `TestHMACNonces`, `TestVerifyRequiresTheServerNonce`,
 `TestParseAuthorization`, `TestVerifyHoldsTheSchemeToTheBinding`, and the
-fuzz targets `FuzzDPoPCheck` and `FuzzNormalizeURI`.
+fuzz targets `FuzzDPoPCheck`, `FuzzNormalizeURI`, `FuzzParseAuthorization`
+and `FuzzHMACNonceValid`.
 
 ## Refusing a request
 
@@ -138,7 +139,7 @@ keeps a set as long as the response's `max-age` less its `Age` says — never
 longer than `RefreshInterval`, never shorter than `MinRefreshInterval`;
 `no-cache` and `no-store` count as zero. *Held by* `TestResponseFreshness`,
 `TestRemoteJWKSHonoursTheResponse`, `TestRemoteJWKSClampsFreshness`,
-`TestJWKSHandler`.
+`TestJWKSHandler`, and the fuzz target `FuzzResponseFreshness`.
 
 ## Identifiers and encodings
 

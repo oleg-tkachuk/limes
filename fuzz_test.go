@@ -1,8 +1,11 @@
 package limes
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
+	"encoding/base64"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -109,6 +112,80 @@ func FuzzNormalizeURI(f *testing.F) {
 		twice, err := normalizeURI(once)
 		if err != nil || twice != once {
 			t.Fatalf("%q normalises to %q, which normalises to %q, %v", raw, once, twice, err)
+		}
+	})
+}
+
+// FuzzParseAuthorization holds the Authorization reader to what it promises:
+// a scheme this module reads and a token68 credential, which read back under
+// that scheme give the same answer.
+func FuzzParseAuthorization(f *testing.F) {
+	for _, s := range []string{"Bearer abc.def-_~+/==", "dpop  x", "Basic dXNlcg==", "Bearer a b", "Bearer ="} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, header string) {
+		scheme, credential, err := ParseAuthorization(header)
+		if err != nil {
+			return
+		}
+		if scheme != AuthSchemeBearer && scheme != AuthSchemeDPoP {
+			t.Fatalf("%q read as scheme %q", header, scheme)
+		}
+		if !isToken68(credential) {
+			t.Fatalf("%q read as credential %q, not a token68", header, credential)
+		}
+		again, cred, err := ParseAuthorization(string(scheme) + " " + credential)
+		if err != nil || again != scheme || cred != credential {
+			t.Fatalf("%q reads back as %q %q, %v", header, again, cred, err)
+		}
+	})
+}
+
+// FuzzResponseFreshness holds the Cache-Control reader to a freshness the
+// resolver can clamp: never negative, never past what delta-seconds can say,
+// and zero when the response says nothing.
+func FuzzResponseFreshness(f *testing.F) {
+	for _, s := range [][2]string{{"public, max-age=60", "10"}, {`max-age="5", max-age=9`, ""}, {"no-cache", "x"}, {"max-age=99999999999", "-1"}} {
+		f.Add(s[0], s[1])
+	}
+	f.Fuzz(func(t *testing.T, cacheControl, age string) {
+		h := http.Header{}
+		h.Set(headerCacheControl, cacheControl)
+		h.Set(headerAge, age)
+		freshness, ok := responseFreshness(h)
+		if freshness < 0 || freshness > maxDeltaSeconds*time.Second || !ok && freshness != 0 {
+			t.Fatalf("Cache-Control %q, Age %q read as %v, %v", cacheControl, age, freshness, ok)
+		}
+	})
+}
+
+// FuzzHMACNonceValid holds HMACNonces to accepting only what it issued:
+// every nonce it accepts carries the issued nonce's bytes.
+func FuzzHMACNonceValid(f *testing.F) {
+	issuedAt := time.Unix(1_800_000_000, 0)
+	nonces, err := NewHMACNonces(0, bytes.Repeat([]byte{1}, HMACNonceKeyBytes))
+	if err != nil {
+		f.Fatal(err)
+	}
+	nonces.now = func() time.Time { return issuedAt }
+	issued, err := nonces.Nonce(context.Background())
+	if err != nil {
+		f.Fatal(err)
+	}
+	want, err := base64.RawURLEncoding.DecodeString(issued)
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(issued)
+	f.Add(issued[:len(issued)-1] + "A")
+	f.Add("")
+	f.Fuzz(func(t *testing.T, nonce string) {
+		if !nonces.Valid(context.Background(), nonce) {
+			return
+		}
+		got, err := base64.RawURLEncoding.DecodeString(nonce)
+		if err != nil || !bytes.Equal(got, want) {
+			t.Fatalf("accepted %q, which is not the nonce issued", nonce)
 		}
 	})
 }
