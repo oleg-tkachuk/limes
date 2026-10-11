@@ -205,6 +205,9 @@ func (c *ttlCache[K]) finish(key K, call *lookupCall, epoch uint64) {
 		expires := c.cfg.now().Add(c.cfg.ttl)
 		c.entries[key] = cacheEntry{revoked: call.revoked, expires: expires}
 		c.order = append(c.order, queued[K]{key: key, expires: expires})
+		if len(c.order) > orderSlack*c.cfg.maxEntries {
+			c.compactLocked()
+		}
 	}
 	c.mu.Unlock()
 	close(call.done)
@@ -216,6 +219,23 @@ func (c *ttlCache[K]) makeRoomLocked() {
 	c.sweepLocked()
 	for len(c.entries) >= c.cfg.maxEntries && c.popLocked() {
 	}
+}
+
+// orderSlack is how many places per bounded entry the eviction order may
+// hold before it is compacted: places left by invalidated or re-cached
+// entries accumulate until then.
+const orderSlack = 2
+
+// compactLocked drops every place in order that is no longer its entry's
+// own, keeping the rest in order. c.mu must be held.
+func (c *ttlCache[K]) compactLocked() {
+	kept := make([]queued[K], 0, len(c.entries))
+	for _, q := range c.order {
+		if e, ok := c.entries[q.key]; ok && e.expires.Equal(q.expires) {
+			kept = append(kept, q)
+		}
+	}
+	c.order = kept
 }
 
 // popLocked drops the oldest place in order, and its entry if the place is

@@ -260,3 +260,20 @@ func TestRevocationCacheEvictsTheOldestWhenFull(t *testing.T) {
 		t.Errorf("cache holds %d entries, bound %d", n, bound)
 	}
 }
+
+// Invalidating answers leaves their places in the eviction order behind; the
+// order is compacted, so it stays within a small multiple of the bound
+// however many answers come and go.
+func TestRevocationCacheOrderStaysBounded(t *testing.T) {
+	const bound, churn = 10, 10_000
+	ctx := context.Background()
+	c := NewCachedRevocationChecker(&countingLookup{}, time.Hour, WithMaxEntries(bound))
+	for range churn {
+		id := uuid.New()
+		_, _ = c.IsRevoked(ctx, id)
+		c.Invalidate(id)
+	}
+	if n := len(c.cache.order); n > orderSlack*bound {
+		t.Errorf("the eviction order holds %d places for a bound of %d", n, bound)
+	}
+}
