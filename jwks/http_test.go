@@ -204,7 +204,6 @@ func TestRemoteJWKSKeepsTheSetWhenNoKeyIsUsable(t *testing.T) {
 	}
 }
 
-
 // A handler with no keys, or a negative max-age — an invalid Cache-Control
 // on every response — is refused; a remote resolver with a negative
 // interval or bound likewise.
