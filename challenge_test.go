@@ -134,7 +134,7 @@ func TestRefusalsAndReasonsAgree(t *testing.T) {
 		for _, sentinel := range row.sentinels {
 			// The family every caveat refusal matches: never returned alone,
 			// and each member has a Reason of its own.
-			if sentinel == ErrCaveatViolation {
+			if errors.Is(sentinel, ErrCaveatViolation) {
 				continue
 			}
 			if _, ok := ReasonOf(sentinel); !ok {

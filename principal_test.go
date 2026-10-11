@@ -150,6 +150,7 @@ func TestCloneCoversEverySharedField(t *testing.T) {
 				if !clonedFields[typ.Name()+"."+field.Name] {
 					t.Errorf("%s.%s is shared by reference and not in clonedFields; copy it in clone", typ.Name(), field.Name)
 				}
+			default: // a value: copied with the struct
 			}
 		}
 	}
