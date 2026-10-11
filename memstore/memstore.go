@@ -841,7 +841,10 @@ func (s *UsageStore[TX]) Reserve(_ context.Context, req limes.ReserveRequest) (l
 		return limes.Reservation{}, err
 	}
 	ttl := req.TTL
-	if ttl <= 0 {
+	if ttl < 0 {
+		return limes.Reservation{}, fmt.Errorf("%w: memstore: reservation TTL %s is negative", limes.ErrInvalidRequest, ttl)
+	}
+	if ttl == 0 {
 		ttl = limes.DefaultReservationTTL
 	}
 	ancestors := s.lineage(req.CapabilityID)
