@@ -12,12 +12,13 @@
 //   - Budget enforcement at the authorisation boundary: the Meter refuses a
 //     charge once a ceiling is exhausted, rather than business logic
 //     discovering it three calls deep.
-//   - Mid-flight revocation: a compromised agent's capability is revoked
-//     atomically, optionally cascading to everything it delegated.
+//   - Mid-flight revocation: a compromised agent's capability is revoked,
+//     together with everything it delegated.
 //   - Sub-capabilities without a round trip: an orchestrator narrows its own
 //     authority for each sub-agent it spawns, with no admin API in the path.
 //
-// Wire format is JWT compact serialization with Ed25519 signatures (EdDSA).
+// Wire format is JWT compact serialization with Ed25519 signatures (`alg:
+// Ed25519`, RFC 9864); docs/standards.md lists every standard followed.
 // Verification is local: the signature is checked against a resolved public
 // key, so consumers scale horizontally without contending on a shared store.
 //
@@ -50,7 +51,7 @@
 // (UnitCode, an ISO 4217 code; XXX for a budget that is not money), so spend
 // sums, compares and refunds exactly, with no rounding left to the consumer.
 //
-// Every read names what it reads — Store.Get a record, Meter.GetUsage the
+// Every read names what it reads — Store.Get a capability, Meter.GetUsage the
 // counters, TenantBudgets.GetTenantBudget a ceiling — so one type may
 // implement Store and UsageStore together, or each apart as memstore does.
 //
@@ -69,8 +70,8 @@
 //
 // # Guarantees
 //
-// Rejections are individually matchable sentinels, so a consumer can map each
-// to its own transport status; the module does not choose status codes. A
+// Rejections are matchable sentinels, so a consumer can map each to its own
+// transport status, or let StandardVerifier.ErrorResponse map it to HTTP. A
 // charge rejected by any ceiling — the capability's, an ancestor's, the
 // tenant's — leaves every counter and the ledger unmutated, so retrying after
 // a rejection is safe. Delegation can only narrow: any widening returns

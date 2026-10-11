@@ -9,8 +9,9 @@ import (
 	"golang.org/x/text/currency"
 )
 
-// Errors exposed to callers. Mapped to transport errors by the consumer —
-// not here. Verifier returns these so callers can switch.
+// Errors exposed to callers, which switch on them with errors.Is. A
+// consumer maps them to its transport, or lets StandardVerifier.ErrorResponse
+// map them to HTTP.
 var (
 	ErrInvalidSignature  = errors.New("limes: invalid signature")
 	ErrExpired           = errors.New("limes: expired")
@@ -101,17 +102,19 @@ func canonicalUnitCode(u string) string {
 // Fine-grained method gating can still layer admin-authored policy on top.
 type Op string
 
+// The built-in operations. Get, List, Search and Embed read; the rest may
+// change state (Op.ResolveEffect).
 const (
-	OpGet     Op = "get"
-	OpPut     Op = "put"
-	OpList    Op = "list"
-	OpDelete  Op = "delete"
-	OpPresign Op = "presign"
-	OpTag     Op = "tag"
-	OpSearch  Op = "search"
-	OpEmbed   Op = "embed"
-	OpShare   Op = "share"  // delegate a sub-capability to another agent
-	OpManage  Op = "manage" // admin-tier (tenant CRUD, policy authoring)
+	OpGet     Op = "get"     // read one resource
+	OpPut     Op = "put"     // write one resource
+	OpList    Op = "list"    // list resources under a prefix
+	OpDelete  Op = "delete"  // delete a resource
+	OpPresign Op = "presign" // mint a pre-signed URL for a resource
+	OpTag     Op = "tag"     // label a resource
+	OpSearch  Op = "search"  // query an index
+	OpEmbed   Op = "embed"   // compute embeddings
+	OpShare   Op = "share"   // delegate a sub-capability to another agent
+	OpManage  Op = "manage"  // administer: tenants, policy
 )
 
 // Principal identifies the subject the capability is issued to. Its json
@@ -135,10 +138,11 @@ type Principal struct {
 // PrincipalType discriminates Principal.Type.
 type PrincipalType string
 
+// The principal kinds.
 const (
-	PrincipalUser    PrincipalType = "user"
-	PrincipalAgent   PrincipalType = "agent"
-	PrincipalService PrincipalType = "service"
+	PrincipalUser    PrincipalType = "user"    // a person
+	PrincipalAgent   PrincipalType = "agent"   // an AI agent; Principal.Agent says which
+	PrincipalService PrincipalType = "service" // a service account
 )
 
 // AgentPrincipal carries the fields specific to AI-agent principals.
@@ -179,9 +183,9 @@ type Capability struct {
 	// Subject is the principal the capability authorises.
 	Subject Principal
 
-	// Audience pins which services the capability is valid for.
-	// Typical values: "data", "admin", "mcp". Verifiers reject tokens
-	// whose audience does not include the calling plane.
+	// Audience pins which services the capability is valid for: a
+	// verifier refuses a token whose audience does not include the one it
+	// verifies for (VerifyRequest.Audience).
 	Audience []string
 
 	// Caveats is the conjunction of restrictions — every caveat must
@@ -259,9 +263,9 @@ type CopyCeiling struct {
 // it did.
 //
 // A child capability may only narrow caveats — set a tighter prefix,
-// drop ops, lower the budget, shorten TTL. The verifier enforces this
-// at delegation time, not just at use time, so attempts to widen are
-// detected at issue and rejected.
+// drop ops, lower the budget, shorten TTL. Issuer.Delegate enforces this
+// through Narrows before it signs, and the verifier does for every Biscuit
+// attenuation block, so an attempt to widen is refused, never minted.
 type Caveats struct {
 	// Ops is the set of operations the capability authorises. The
 	// issuer rejects an empty set: a capability that allows nothing is

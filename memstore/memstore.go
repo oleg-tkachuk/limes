@@ -13,8 +13,8 @@
 //     no implementation in the module could show that a failed side effect
 //     leaves counters unmutated.
 //
-// It is NOT a production store: everything is a map behind one mutex, which
-// is held while onCharged runs, nothing survives a restart, and the charges
+// It is NOT a production store: each store keeps its maps behind one mutex,
+// which the usage store holds while onCharged runs, nothing survives a restart, and the charges
 // ledger is kept whole for as long as the store lives.
 package memstore
 
@@ -128,7 +128,7 @@ type LedgerEntry struct {
 	tenantPeriod uint64
 }
 
-// New returns an empty store. TX is inferred from the call site:
+// New returns an empty store. TX is given at the call site:
 //
 //	memstore.New[struct{}]()   // consumer with no transactions
 //	memstore.New[pgx.Tx]()     // consumer threading a real handle

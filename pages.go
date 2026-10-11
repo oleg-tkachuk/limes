@@ -13,12 +13,16 @@ var ErrCursorRepeated = errors.New("limes: a page returned the cursor it was fet
 // CapabilityLister lists a principal's capabilities a page at a time. Every
 // Store is one.
 type CapabilityLister interface {
+	// ListByPrincipal returns one page and the cursor of the next, empty
+	// on the last page (Store.ListByPrincipal).
 	ListByPrincipal(ctx context.Context, req ListByPrincipalRequest) ([]Capability, string, error)
 }
 
 // TenantBudgetLister lists tenant budgets a page at a time. Every
 // TenantBudgets is one.
 type TenantBudgetLister interface {
+	// ListTenantBudgets returns one page and the cursor of the next,
+	// empty on the last page (TenantBudgets.ListTenantBudgets).
 	ListTenantBudgets(ctx context.Context, req ListTenantBudgetsRequest) ([]TenantBudgetSummary, string, error)
 }
 

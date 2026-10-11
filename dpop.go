@@ -427,7 +427,9 @@ func (v *DPoPVerifier) check(ctx context.Context, c Capability, token string, p 
 }
 
 // htuMatches compares a proof's htu with the request URL after RFC 3986
-// syntax- and scheme-based normalisation, as RFC 9449 §4.3 requires.
+// syntax- and scheme-based normalisation, as RFC 9449 §4.3 requires. Under
+// pathOnly it compares the normalised paths alone, and neither URL need be
+// absolute.
 func htuMatches(htu, requestURL string, pathOnly bool) bool {
 	if pathOnly {
 		got, err1 := url.Parse(htu)

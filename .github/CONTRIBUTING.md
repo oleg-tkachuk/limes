@@ -13,8 +13,9 @@ govulncheck and actionlint are pinned in `tools/go.mod`, yq in
 task verify-all
 ```
 
-runs gofmt, golangci-lint, the unit suite, govulncheck, actionlint and the tests
-of the workflow scripts — the same task CI runs. The suite needs no database, no
+runs gofmt, `go mod tidy` and `go mod verify`, golangci-lint, the unit suite,
+govulncheck, actionlint, the tests of the workflow scripts and the release-rule
+test — the same task CI runs. The suite needs no database, no
 network and no container.
 
 ## How a change lands

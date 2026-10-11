@@ -16,9 +16,11 @@ import (
 // A verifier configured with DPoPNonces refuses a proof that carries no nonce
 // it issued, with ErrDPoPNonceRequired — "use_dpop_nonce" on the wire — and
 // the server sends a fresh one in the DPoP-Nonce header for the client to
-// retry with. A nonce bounds how long a proof may be used to how long the
-// server says, rather than to the client's clock, so a proof cannot be signed
-// ahead of time; and HMACNonces needs no state shared between replicas.
+// retry with. A proof must then carry a nonce the server issued, so it
+// cannot be signed ahead of time; its iat must still fall within the
+// DPoPVerifier's window. HMACNonces needs no state shared between replicas,
+// only the same keys; a replica whose clock runs behind the one that issued a
+// nonce refuses it until its own clock reaches the second of issuance.
 
 // DPoPNonceHeader is the HTTP response header a nonce travels in (RFC 9449
 // §8).

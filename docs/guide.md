@@ -21,6 +21,7 @@ cap, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
 // RFC 9449 / RFC 9457 way; or branch on the sentinel yourself:
 switch {
 case errors.Is(err, limes.ErrExpired):          // TTL elapsed
+case errors.Is(err, limes.ErrNotYetValid):      // NotBefore ahead, past Leeway (30s by default)
 case errors.Is(err, limes.ErrRevoked):          // pulled mid-flight
 case errors.Is(err, limes.ErrAudienceMismatch): // token for another service
 case errors.Is(err, limes.ErrCaveatViolation):  // not allowed to do this
@@ -37,7 +38,7 @@ there is no operation to check, such as before a delegation.
 Verification is **local** — the signature is checked against the resolved key,
 with no round trip to the issuer, and nothing in the claims is read until it
 has. Every rejection is a distinct sentinel; map each to whatever status your
-transport uses. This module does not decide your HTTP or RPC codes.
+transport uses, or let `ErrorResponse` answer it the HTTP way (below).
 
 The token must carry `typ: limes-cap-v3+jwt` and a tenant, its claims must
 hold no member the verifier does not know (a caveat it could not enforce),
@@ -45,8 +46,12 @@ none twice and none in another case, and may be at most
 `VerifierConfig.MaxTokenBytes` long (16 KiB unless set). When several issuers share a verifier, set
 `KeyIssuers` (kid → issuer) so one issuer's key cannot sign for another.
 Verifiers running apart from the issuer resolve keys with
-`RemoteJWKSResolver`, which caches the issuer's JWKS, picks up a rotated-in
-kid on first sight (rate-limited), and fails closed after `MaxStale`:
+`RemoteJWKSResolver`. It fetches the issuer's JWKS on first use, keeps it as
+long as the response's `Cache-Control` allows within `MinRefreshInterval`
+(10s) and `RefreshInterval` (5m), revalidates by ETag, picks up a rotated-in
+kid on first sight (at most once per `MinRefreshInterval`), and fails closed
+with `ErrJWKSUnavailable` once the last good set is older than `MaxStale`
+(1h). The three intervals must nest, or construction fails:
 
 ```go
 keys, err := limes.NewRemoteJWKSResolver(limes.RemoteJWKSConfig{
@@ -57,14 +62,24 @@ verifier, err := limes.NewStandardVerifier(limes.VerifierConfig{
 })
 ```
 
-The issuer serves that document with `MarshalJWKS`; `ParseJWKS` reads one
-back, for a resolver of your own. It skips an entry it cannot use — a foreign
+The issuer serves that document with `JWKSHandler` — `application/jwk-set+json`,
+a strong ETag answering `If-None-Match` with 304, `Cache-Control: public,
+max-age` — over a function returning its keys, such as
+`StaticKeyResolver.Keys`:
+
+```go
+mux.Handle("/.well-known/jwks.json", limes.JWKSHandler(resolver.Keys, time.Minute))
+```
+
+`MarshalJWKS` writes the same document for a server of your own; `ParseJWKS`
+reads one back, for a resolver of your own. It skips an entry it cannot use — a foreign
 `kty`, no kid, a malformed key — rather than refusing the set, so one bad
 entry does not take every other key out of service mid-rotation.
 
 ### Inspect a token without trusting it
 
-`Decode` reads a token's claims and checks nothing; `VerifySignature` checks
+`Decode` reads a JWT's claims, refusing only one that is malformed — it
+checks no signature, time, audience or revocation; `VerifySignature` checks
 only its signature against one key. Both are for tooling — showing what a
 token grants, or which key signed it. Neither applies expiry, audience or
 revocation, so never authorise a request on either: that is `Verify`.
@@ -138,14 +153,15 @@ child, childToken, err := issuer.Delegate(ctx, limes.DelegateRequest{
         Ops:              []limes.Op{limes.OpGet},  // dropped OpShare
         ResourcePrefixes: []string{"corpus/public/2026/"},     // narrowed
         MaxBudgetAmount:  limes.MustParseAmount("2.00"),  // 25.00 → 2.00
-        UnitCode:         "USD",                               // MUST match parent
+        UnitCode:         "USD",                               // the parent's ("" reads as USD)
     },
 })
 ```
 
 **The rule**: a child may only be narrower. Ask for an operation the parent
-lacks, a wider scope, a bigger budget or a longer life, and you get
-`ErrDelegationTooWide`. Ask for a different `UnitCode` and you get
+lacks, a wider scope or a bigger budget, and you get `ErrDelegationTooWide`; a
+TTL that would outlive the parent is cut to the parent's expiry, and a child
+starts no earlier than its parent (its `NotBefore`, else its issuance). Ask for a different `UnitCode` and you get
 `ErrUnitCodeMismatch` — units are never converted. Each child resource must be
 reachable by the parent (a parent pinned to exact URIs admits no child
 prefix), and each child network must lie inside a parent network.
@@ -188,27 +204,43 @@ cap, err := verifier.Verify(ctx, limes.VerifyRequest{
 })
 ```
 
-Behind several replicas, give the `DPoPVerifier` server nonces
-(`Nonces: limes.NewHMACNonces(lifetime, key)`, the same key on every replica):
-a proof must then carry a nonce the server issued, so it cannot be signed ahead
-of time, and a refusal with `ErrDPoPNonceRequired` is answered with
+Behind several replicas, give the `DPoPVerifier` server nonces, with the same
+key on every replica:
+
+```go
+nonces, err := limes.NewHMACNonces(0, key) // key ≥ 32 bytes; 0 = a 5-minute lifetime
+dpop := &limes.DPoPVerifier{Replay: limes.NewMemoryReplayCache(0), Nonces: nonces}
+```
+
+A proof must then carry a nonce the server issued, so it cannot be signed
+ahead of time; a refusal with `ErrDPoPNonceRequired` is answered with
 `verifier.DPoPNonce(ctx)` in the `DPoP-Nonce` header for the client to retry
-with (RFC 9449 §8).
+with (RFC 9449 §8). The first key signs and every key checks, so rotate by
+putting a new key first.
+
+Present a token under the scheme its binding calls for: `ParseAuthorization`
+reads `Authorization: DPoP <token>` or `Bearer <token>` (the scheme in any
+case, the token as a token68), and with `VerifyRequest.Scheme` set, `Verify`
+refuses a key-bound token presented as `Bearer` — a downgrade — or an unbound
+one presented as `DPoP`, with `ErrAuthSchemeMismatch`. A header that is
+neither is `ErrMalformedAuthorization`.
 
 A verifier with no `DPoP` refuses every key-bound capability with
 `ErrDPoPRequired` instead of accepting it as a bearer token, so a binding
 cannot be lost to a forgotten call. Behind a proxy that rewrites the host or
 strips a mount prefix, set `DPoPVerifier.MatchPathOnly`.
 
-The token carries the thumbprint as `cnf.jkt` (RFC 7800), omitted when
-unbound, so unbound tokens are byte-for-byte what they were. A delegated
+The token carries the thumbprint as `cnf.jkt` (RFC 7800), absent from an
+unbound token. A delegated
 child inherits its parent's binding or takes the sub-agent's own key, and
 `Narrows` refuses a child that drops it. `Verify` refuses a proof from another
-key, for another method, URL or token, outside a minute of the verifier's
-clock, or seen before; every refusal matches `ErrInvalidSignature`. The
-replay cache is in-process: behind several replicas, a proof replayed to a
-different one inside the window is not caught — share a `ReplayCache` to
-close that.
+key, for another method, URL or token, outside `DPoPVerifier.Window` (a
+minute by default) of the verifier's clock, or seen before; every refusal
+matches `ErrInvalidSignature`. `MemoryReplayCache` is in-process and bounded
+(100 000 ids unless told otherwise; full, it refuses rather than forgets):
+behind several replicas, a proof replayed to a different one inside the
+window is caught only by server nonces or a `ReplayCache` over a shared
+store.
 
 ## Narrow offline (Biscuit)
 
@@ -235,7 +267,7 @@ and (on an unbound token) bind a key. The verifier folds each block in
 through `Narrows`, so an attenuated token is checked exactly like a
 delegated one. A block that asks for more than the token has, or holds
 anything else (Datalog rules and checks included), makes the whole token
-invalid. An attenuated copy spends its capability's budget and request
+invalid; a later `ExpiresAt` is ignored rather than refused. An attenuated copy spends its capability's budget and request
 count, and revoking the capability revokes every copy.
 
 A copy can also get limits of its own: `MaxRequests` and `MaxBudget` on
@@ -246,7 +278,8 @@ The verifier hands them to the caller as `Capability.Copies`, and the `Meter`
 counts them when they are passed on as `Copies` in `BumpRequest`,
 `ChargeRequest` and `ReserveRequest`. A verifier admits such a copy only with
 `MeterCopies` set, which says the `Meter` behind it counts copies; without it
-the token is refused rather than accepted with its limits unkept.
+the token is refused with `ErrCopyCountersNotMetered` rather than accepted
+with its limits unkept.
 `verifier.BiscuitCopy` names the limits in force on a copy, on any verifier,
 and a `CopyUsageReader` (`memstore` implements one) reads what each has
 counted. A copy with limits of its own cannot delegate — a server-side child
@@ -254,7 +287,8 @@ would count against the capability, never the copy — so `Delegate` refuses
 it with `ErrDelegationTooWide`; its holder attenuates it instead.
 
 One copy can also be revoked on its own. `verifier.BiscuitCopy(ctx, token)`
-checks the token and names its capability and the revocation id of its last
+checks the token is genuine — but not its expiry, audience or revocation, so a
+copy can be revoked in any state — and names its capability and the revocation id of its last
 block; listing that id through `BiscuitRevocationStore.RevokeBiscuit` stops
 that copy and every copy attenuated from it, and leaves the copy it came from,
 its siblings and the capability's JWT working. A verifier that accepts
@@ -291,9 +325,21 @@ usage.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.
 usage.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID})               // the rest
 ```
 
-A refund returns spend to every counter the charge took it from, and never
-more than the charge: `Amount: 0` refunds what is left, so a retried full
-refund is a no-op.
+A refund returns spend to every counter the charge took it from — except the
+tenant aggregate when the charge fell in an accounting period since closed
+with `ResetSpend` — and never more than the charge: `Amount: 0` refunds what
+is left, so a retried full refund is a no-op, and more than is left is
+`ErrRefundExceedsCharge`. `RefundReceipt.Refunded` says what moved, and names
+the charge's tenant and unit.
+
+Every counter counts in one unit. A charge or reservation in another unit than
+the capability, an ancestor or the tenant already counts in is
+`ErrUnitCodeMismatch`, never a sum of two currencies; an empty `UnitCode`
+means USD. The tenant aggregate counts from its first charge or reservation,
+whether or not a ceiling is set: `SetTenantBudget` later measures the new
+ceiling against that spend and those holds. It is guarded by
+`ExpectedVersion` — 0 while no ceiling has been set, else the version read —
+and a conflict is `ErrTenantBudgetVersionMismatch`.
 
 ## Amounts are exact
 
@@ -341,7 +387,9 @@ A hold counts against every ceiling — the capability's, each ancestor's, the
 tenant's — exactly as spend does, so two callers cannot both hold the last
 budget. `Settle` charges the actual cost in place of the hold; above the hold,
 the excess must fit, or the hold stays for you to settle lower or `Release`.
-A hold never settled lapses after its TTL: run `ReleaseExpired` on a timer.
+A hold never settled lapses after its TTL (`DefaultReservationTTL`, five
+minutes, unless the request says): run `ReleaseExpired` on a timer. Settling
+the zero reservation id is `ErrReservationNotFound`.
 
 The trailing `nil` is an optional in-transaction callback. If your store has
 transactions, pass a function and the module threads **your** handle back so
@@ -398,10 +446,12 @@ until `ReleaseExpired` runs.
 
 ## Observe the meter
 
-`WithMetering` wraps a `UsageStore` in OpenTelemetry instruments — charges,
-refunds, reservations and request bumps, each attempt by outcome (`allowed`,
-`overrun`, `cap_exceeded`, `tenant_exceeded`, `limit_exceeded`, `error`), and
-every amount by its `unit_code`:
+`WithMetering` wraps a `UsageStore` in OpenTelemetry instruments: charge and
+settle attempts, reservations and request bumps counted by outcome
+(`allowed`, `overrun`, `cap_exceeded`, `tenant_exceeded`, `limit_exceeded`,
+`error`); amounts charged and refunded, and a capability's spend after each
+charge, by `unit_code`. Instruments are created per store, and an error
+creating them is returned:
 
 ```go
 usage, err := limes.WithMetering(store,
@@ -418,7 +468,7 @@ off by default because it multiplies every series by the number of tenants.
 Much of each contract lives in request fields and in which sentinel comes
 back, so a store that gets one wrong still compiles. Run the module's checks
 from your store's tests — `storetest` for a `Store` (and a
-`BiscuitRevocationStore`), `metertest` for a `Meter`:
+`BiscuitRevocationStore`), `metertest` for a `UsageStore`:
 
 ```go
 func TestMeterContract(t *testing.T) {
@@ -434,8 +484,7 @@ The checks include charges racing one ceiling, so run them against the
 database itself: a store that reads a counter and writes it back outside one
 statement or lock overspends, and fails them.
 
-`memstore` runs the same checks, and so do the PostgreSQL stores of
-[Paladin](https://github.com/oleg-tkachuk/paladin), the module's first consumer.
+`memstore` runs the same checks from its own tests.
 
 ## Revoke
 
@@ -446,8 +495,9 @@ records.Revoke(ctx, limes.RevokeRequest{
 })
 ```
 
-Idempotent. Verifiers that cache revocation answers learn of it within the
-cache TTL, or at once if you call `CachedRevocationChecker.Clear` when a
+Idempotent; an id not on record is `ErrNotFound` and writes nothing.
+Verifiers that cache revocation answers learn of it within the cache TTL
+(`DefaultRevocationCacheTTL`, two seconds), or at once if you call `CachedRevocationChecker.Clear` when a
 revocation is announced — on a Postgres `NOTIFY`, for example.
 Revoking a capability revokes everything delegated from it, with or
 without the flag: `IsRevoked` answers for the whole chain. `CascadeChildren`
@@ -463,9 +513,10 @@ Implement these and you are done:
 | `Store` | Capability records + revocations | No |
 | `BiscuitRevocationStore` | Revoked Biscuit copies (only if you accept Biscuits) | No |
 | `CopyUsageReader` | Reads Biscuit copies' own counters (only to show them) | No |
-| `UsageStore[TX]` = `Meter[TX]` + `TenantBudgets` + `UsageHousekeeping` | Request and spend counters, the charges ledger, tenant ceilings | Only for atomic side effects |
+| `UsageStore[TX]` = `Meter[TX]` + `TenantBudgets` + `UsageHousekeeping` | Request and spend counters, the charges ledger, tenant ceilings; `Delete` and `PurgeOrphans` release a reaped capability's holds | Only for atomic side effects |
 | `KeyResolver` | Public verification keys | No |
-| `ReplayCache` | DPoP proof ids seen (only for key-bound tokens; `MemoryReplayCache` ships, share one across replicas) | No |
+| `ReplayCache` | DPoP proof ids seen (only for key-bound tokens; `MemoryReplayCache` ships for one process — behind several replicas, implement it over a shared store) | No |
+| `DPoPNonces` | Server-provided DPoP nonces (optional; `HMACNonces` ships and needs no store) | No |
 
 Two obligations are easy to miss. `Store.IsRevoked` answers for the
 capability's whole delegation chain, and `Meter` applies every charge and
@@ -507,11 +558,58 @@ for c, err := range limes.AllByPrincipal(ctx, store, req) {
 
 1. Publish the new public key alongside the old (`SetKey`, or add it to the
    served JWKS — `MarshalJWKS` output is sorted by kid, so it is stable).
-2. Switch the issuer to sign with the new key.
+2. Switch the issuer to sign with the new key — no sooner than the
+   `max-age` the JWKS is served with, so every verifier has fetched it.
 3. Withdraw the old key (`RemoveKey`) only after the **longest outstanding
    TTL** has elapsed.
 
 Skipping the wait in step 3 invalidates tokens agents are still holding. Since
 TTLs here are minutes, the wait is short — which is part of why short TTLs are
-the default posture.
+the default posture (`IssuerConfig.DefaultTTL`, fifteen minutes).
+
+Load a signing key with `LoadPrivateKey` (PEM, PKCS#8 only) or
+`LoadOrGenerateKey(path, kid)`, which generates an ephemeral key only when the
+path is empty — an unreadable path is an error, never a fresh key — and
+reports it in `SigningKey.Generated` so you can log it loudly. A key with no
+kid named gets `DeriveKeyID`'s: its RFC 7638 thumbprint, the same wherever it
+is derived.
+
+## Answer a refusal
+
+`ErrorResponse` turns any error `Verify`, `Authorize` or the `Meter` returns
+into the response RFC 6750, RFC 9449 and RFC 9457 describe, and
+`WriteErrorResponse` writes it:
+
+```go
+if err != nil {
+    limes.WriteErrorResponse(w, verifier.ErrorResponse(ctx, err, scheme))
+    return
+}
+```
+
+A malformed `Authorization` header is 400; a bad token or proof is 401, with a
+`Bearer` or `DPoP` challenge naming the error code (and `algs` for DPoP); a
+refused operation is 403 `insufficient_scope`; an exhausted budget or request
+limit is 403 with no challenge; anything else, a store outage included, is
+500. A refusal for want of a nonce carries a fresh one in `DPoP-Nonce`. The
+body is `application/problem+json` with a type per kind of refusal and fixed
+text — the error's own message, which can name kids or stores, stays in your
+log. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
+
+## Defaults
+
+| Setting | Default |
+|---|---|
+| `IssuerConfig.DefaultTTL` | 15 minutes |
+| `VerifierConfig.Leeway` | 30 seconds |
+| `VerifierConfig.MaxTokenBytes` | `DefaultMaxTokenBytes`, 16 KiB |
+| `DefaultRevocationCacheTTL` · `DefaultRevocationCacheEntries` | 2 seconds · 100 000 (`WithMaxEntries`; a TTL below zero disables the cache) |
+| `RemoteJWKSConfig` | 10s fetch timeout · `RefreshInterval` 5m · `MinRefreshInterval` 10s · `MaxStale` 1h · 1 MiB document |
+| `DPoPVerifier.Window` | `DefaultDPoPWindow`, 1 minute |
+| `NewMemoryReplayCache(0)` | 100 000 ids |
+| `NewHMACNonces(0, key)` | `DefaultDPoPNonceLifetime`, 5 minutes; keys of at least `HMACNonceKeyBytes`, 32 |
+| `DefaultReservationTTL` | 5 minutes |
+| `MaxExternalRefBytes` | 200 |
+| `MaxNanos` | just under a billion units |
+| `MaxIJSONInteger` | 2^53 − 1, for every integer in a token |
 

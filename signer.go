@@ -223,7 +223,8 @@ func parseHeader(seg string) (jwtHeader, error) {
 		return jwtHeader{}, fmt.Errorf("limes: parse header: %w", err)
 	}
 	// Only the fully-specified identifier (RFC 9864): a capability token is
-	// this module's own, and none was ever written with another under typ v2.
+	// this module's own, and none was ever written with another under this
+	// TokenType.
 	if h.Alg != algEd25519 {
 		return jwtHeader{}, fmt.Errorf("limes: unexpected alg %q (want %s)", h.Alg, algEd25519)
 	}

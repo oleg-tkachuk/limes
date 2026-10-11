@@ -17,10 +17,9 @@ import (
 //  2. Persist the audit row, then sign and return the token.
 //
 // The persist-then-sign order is deliberate. If we signed first and the
-// DB write failed, an emitted token would have no record — verifiers
-// that consult capability_records (admin tooling) would see a forged-
-// looking token, and a missing row prevents Revoke from doing anything
-// useful. Persist-first means the token in the caller's hand is always
+// store write failed, an emitted token would have no record — audit and
+// admin reads would find nothing behind it, and Revoke, which refuses an id
+// not on record, could not stop it. Persist-first means the token in the caller's hand is always
 // reflected in storage; a failed sign just means the row is unused
 // (cleaned up by housekeeping at the natural expiry).
 type Issuer struct {
@@ -35,7 +34,7 @@ type Issuer struct {
 // defaultIssueTTL is IssuerConfig.DefaultTTL when unset.
 const defaultIssueTTL = 15 * time.Minute
 
-// IssuerConfig is the wiring for Issuer.New.
+// IssuerConfig is the wiring for NewIssuer.
 type IssuerConfig struct {
 	// Signer mints tokens. Production wraps a KMS-held private key;
 	// dev / tests use NewEd25519Signer with a local generated key.
@@ -83,9 +82,10 @@ func NewIssuer(cfg IssuerConfig) (*Issuer, error) {
 	}, nil
 }
 
-// IssueRequest is the input shape for Issuer.Issue. All fields except
-// TTL / NotBefore / Generation are required; the issuer fills in ID,
-// IssuedAt, ExpiresAt, Issuer, Generation when not supplied. Caveats are
+// IssueRequest is the input shape for Issuer.Issue. Subject (with its
+// TenantID), IssuedBy, Audience and Caveats are required; TTL, NotBefore,
+// Generation and ConfirmationJKT are optional, and the issuer fills in ID,
+// IssuedAt, ExpiresAt, Issuer and Generation. Caveats are
 // validated (Caveats.Validate) before anything is persisted.
 type IssueRequest struct {
 	Subject Principal
@@ -208,17 +208,26 @@ func validateAudience(aud []string) error {
 // holds. The issuer enforces narrowing (Narrows) before persisting so a
 // runtime widening attempt fails before any token is emitted.
 type DelegateRequest struct {
-	Parent   Capability
-	Subject  Principal
+	// Parent is the verified capability the child narrows.
+	Parent Capability
+	// Subject is who the child authorises; its TenantID defaults to the
+	// parent's.
+	Subject Principal
+	// Audience defaults to the parent's, and must be a subset of it.
 	Audience []string
-	Caveats  Caveats
+	// Caveats are the child's; see InheritCaveats.
+	Caveats Caveats
 	// InheritCaveats copies the parent's caveats verbatim and ignores
 	// Caveats. It must be asked for: an earlier version inherited silently
 	// whenever Caveats.Ops was empty, which replaced every other field the
 	// caller HAD set — a budget of 2 became the parent's 25 without a word.
 	InheritCaveats bool
-	TTL            time.Duration
-	NotBefore      time.Time
+	// TTL defaults to IssuerConfig.DefaultTTL, and is cut so the child
+	// expires no later than the parent.
+	TTL time.Duration
+	// NotBefore is raised, when earlier, to the parent's start: its
+	// NotBefore, else its IssuedAt.
+	NotBefore time.Time
 	// ConfirmationJKT binds the child to a key — typically the sub-agent's.
 	// Empty keeps the parent's binding, if it has one: a bound parent's
 	// child is always bound.

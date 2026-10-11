@@ -14,9 +14,8 @@ import (
 // Secret-mounted RO volume; dev calls GenerateEd25519Keypair instead
 // and skips this path entirely.
 //
-// We accept only PKCS#8 (not legacy PEM "PRIVATE KEY" with raw bytes)
-// because that's the OpenSSL-default output and what kubectl-managed
-// secrets typically contain. Wrong format is loud — better than
+// Only PKCS#8 under PEM type "PRIVATE KEY" is read — not a raw seed, not
+// another PEM type — because that is OpenSSL's default output. Wrong format is loud — better than
 // silently working with one form and breaking on the other.
 func LoadPrivateKey(path string) (ed25519.PrivateKey, error) {
 	if path == "" {

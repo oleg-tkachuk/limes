@@ -7,8 +7,8 @@ import (
 	"unicode"
 )
 
-// ErrInvalidCaveats is returned when a caveat bag is malformed: a negative or
-// non-finite budget, an unknown unit, an empty resource entry, an unparsable
+// ErrInvalidCaveats is returned when a caveat bag is malformed: a budget
+// outside 0..MaxNanos, a request limit outside 0..MaxIJSONInteger, an unknown unit, an empty resource entry, an unparsable
 // CIDR, an operation name that is not well formed. It is a request error, not
 // an authorisation decision — the capability was never minted — so it also
 // matches ErrInvalidRequest.
