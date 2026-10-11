@@ -172,9 +172,10 @@ func (c *ttlCache[K]) get(ctx context.Context, key K, lookup func(context.Contex
 		case <-call.done:
 			// The leader's request may have been cancelled or timed out on
 			// its own account. That is no answer about the key, so a waiter
-			// whose own context is still live asks for itself.
+			// whose own context is still live asks again — through the
+			// cache, so the waiters retrying together share one lookup.
 			if call.err != nil && isContextErr(call.err) && ctx.Err() == nil {
-				return lookup(ctx)
+				return c.get(ctx, key, lookup)
 			}
 			return call.revoked, call.err
 		case <-ctx.Done():
