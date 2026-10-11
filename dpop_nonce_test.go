@@ -42,7 +42,7 @@ func TestHMACNonces(t *testing.T) {
 
 	for name, at := range map[string]time.Time{
 		"expired":     now.Add(lifetime + time.Second),
-		"from before": now.Add(-time.Second),
+		"from before": now.Add(-HMACNonceClockSkew - time.Second),
 	} {
 		n.now = func() time.Time { return at }
 		if n.Valid(ctx, nonce) {
@@ -109,5 +109,33 @@ func TestVerifyRequiresTheServerNonce(t *testing.T) {
 	}
 	if got, err := base.DPoPNonce(ctx); err != nil || got != "" {
 		t.Errorf("a verifier without nonces handed out %q, %v", got, err)
+	}
+}
+
+// Replicas share keys, not clocks: a replica a little behind the one that
+// issued a nonce — across a second boundary, where the issuance second is
+// still ahead of it — accepts the nonce; one far behind does not.
+func TestHMACNoncesAcrossSkewedReplicas(t *testing.T) {
+	ctx := context.Background()
+	issuedAt := time.Unix(1_800_000_001, 50_000_000) // just past a second boundary
+	a, _ := NewHMACNonces(time.Minute, nonceKey(1))
+	a.now = func() time.Time { return issuedAt }
+	nonce, err := a.Nonce(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := NewHMACNonces(time.Minute, nonceKey(1))
+	for name, tc := range map[string]struct {
+		behind time.Duration
+		ok     bool
+	}{
+		"100ms behind":    {100 * time.Millisecond, true},
+		"within the skew": {HMACNonceClockSkew, true},
+		"far behind":      {HMACNonceClockSkew + 2*time.Second, false},
+	} {
+		b.now = func() time.Time { return issuedAt.Add(-tc.behind) }
+		if got := b.Valid(ctx, nonce); got != tc.ok {
+			t.Errorf("%s: Valid = %v, want %v", name, got, tc.ok)
+		}
 	}
 }
