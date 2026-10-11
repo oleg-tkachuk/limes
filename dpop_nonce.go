@@ -28,8 +28,8 @@ const DPoPNonceHeader = "DPoP-Nonce"
 // ErrDPoPNonceRequired — the verifier requires a server-provided nonce and
 // the proof carried none, or one it did not issue or that has expired. The
 // response carries a fresh one (StandardVerifier.DPoPNonce). Matches
-// ErrInvalidSignature, as every proof-of-possession refusal does.
-var ErrDPoPNonceRequired error = &popError{"limes: DPoP nonce required"}
+// ErrProofOfPossession, as every proof-of-possession refusal does.
+var ErrDPoPNonceRequired error = &familyError{"limes: DPoP nonce required", ErrProofOfPossession}
 
 // DPoPNonces issues the nonces a verifier hands out and recognises them when
 // a proof carries one back.

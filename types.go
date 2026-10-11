@@ -13,15 +13,34 @@ import (
 // Errors exposed to callers, which switch on them with errors.Is. A
 // consumer maps them to its transport, or lets StandardVerifier.ErrorResponse
 // map them to HTTP.
+//
+// Some are families that more specific sentinels match as well, so a caller
+// branches on the one it needs:
+//
+//	ErrUnauthenticated     the presented credentials were refused (401)
+//	├── ErrInvalidToken  the token is not genuine, or not this verifier's
+//	├── ErrProofOfPossession the proof of possession is missing or wrong
+//	└── ErrExpired, ErrNotYetValid, ErrRevoked, ErrAudienceMismatch
+//	ErrCaveatViolation     a caveat refuses the operation (403)
+//	ErrInvalidRequest      the request itself is malformed
+//	ErrNotFound            what the request names is not on record
 var (
-	ErrInvalidSignature  = errors.New("limes: invalid signature")
-	ErrExpired           = errors.New("limes: expired")
-	ErrNotYetValid       = errors.New("limes: not yet valid")
-	ErrRevoked           = errors.New("limes: revoked")
-	ErrCaveatViolation   = errors.New("limes: caveat violation")
-	ErrAudienceMismatch  = errors.New("limes: audience mismatch")
-	ErrBudgetExceeded    = errors.New("limes: budget exceeded")
-	ErrDelegationTooWide = errors.New("limes: child wider than parent")
+	// ErrUnauthenticated is the family of every refusal of the presented
+	// credentials, token or proof: the one errors.Is a consumer needs to
+	// answer them all as unauthenticated.
+	ErrUnauthenticated = errors.New("limes: unauthenticated")
+	// ErrInvalidToken — the token is not genuine or not this verifier's
+	// to accept: a bad signature, an unknown kid, an untrusted issuer, a
+	// malformed header or claims. One sentinel for all, so a caller cannot
+	// tell an attacker which check failed.
+	ErrInvalidToken      error = &familyError{"limes: invalid token", ErrUnauthenticated}
+	ErrExpired           error = &familyError{"limes: expired", ErrUnauthenticated}
+	ErrNotYetValid       error = &familyError{"limes: not yet valid", ErrUnauthenticated}
+	ErrRevoked           error = &familyError{"limes: revoked", ErrUnauthenticated}
+	ErrAudienceMismatch  error = &familyError{"limes: audience mismatch", ErrUnauthenticated}
+	ErrCaveatViolation         = errors.New("limes: caveat violation")
+	ErrBudgetExceeded          = errors.New("limes: budget exceeded")
+	ErrDelegationTooWide       = errors.New("limes: child wider than parent")
 	// ErrUnitCodeMismatch — two units that would have to be one: a
 	// delegated child declaring a unit_code other than its parent's, or an
 	// amount in a unit other than the one a counter (a capability's, an
@@ -44,11 +63,19 @@ var (
 	ErrTenantDeleted = errors.New("limes: tenant deleted")
 )
 
-// requestError is one of the ErrInvalidRequest family with a name of its own.
-type requestError struct{ msg string }
+// familyError is a sentinel with a name of its own that also matches the
+// family it belongs to, and that family's own: errors.Is(ErrDPoPReplayed,
+// ErrProofOfPossession) and errors.Is(ErrDPoPReplayed, ErrUnauthenticated)
+// both hold.
+type familyError struct {
+	msg    string
+	family error
+}
 
-func (e *requestError) Error() string        { return e.msg }
-func (e *requestError) Is(target error) bool { return target == ErrInvalidRequest }
+func (e *familyError) Error() string { return e.msg }
+func (e *familyError) Is(target error) bool {
+	return target == e.family || errors.Is(e.family, target)
+}
 
 // invalidRequest is an ErrInvalidRequest saying what was wrong.
 func invalidRequest(format string, args ...any) error {

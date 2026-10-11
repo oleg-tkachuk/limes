@@ -6,22 +6,13 @@ import (
 	"slices"
 )
 
-// caveatError is a caveat-violation sentinel that also matches
-// ErrCaveatViolation, so a consumer can branch on the specific reason or on
-// the family: errors.Is(err, ErrOpNotAllowed) and
-// errors.Is(err, ErrCaveatViolation) both hold for an op rejection.
-type caveatError struct{ msg string }
-
-func (e *caveatError) Error() string        { return e.msg }
-func (e *caveatError) Is(target error) bool { return target == ErrCaveatViolation }
-
 // Request-time caveat rejections. Each also matches ErrCaveatViolation.
 var (
-	ErrOpNotAllowed           error = &caveatError{"limes: operation not allowed"}
-	ErrResourceNotAllowed     error = &caveatError{"limes: resource not allowed"}
-	ErrSourceIPNotAllowed     error = &caveatError{"limes: source IP not allowed"}
-	ErrIdempotencyKeyRequired error = &caveatError{"limes: idempotency key required"}
-	ErrTaintedReadNotAllowed  error = &caveatError{"limes: tainted read not allowed"}
+	ErrOpNotAllowed           error = &familyError{"limes: operation not allowed", ErrCaveatViolation}
+	ErrResourceNotAllowed     error = &familyError{"limes: resource not allowed", ErrCaveatViolation}
+	ErrSourceIPNotAllowed     error = &familyError{"limes: source IP not allowed", ErrCaveatViolation}
+	ErrIdempotencyKeyRequired error = &familyError{"limes: idempotency key required", ErrCaveatViolation}
+	ErrTaintedReadNotAllowed  error = &familyError{"limes: tainted read not allowed", ErrCaveatViolation}
 )
 
 // CheckRequest describes one operation a bearer is attempting, in the terms

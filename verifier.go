@@ -19,16 +19,17 @@ import (
 // fetches them from an issuer's JWKS endpoint with a cache.
 type KeyResolver interface {
 	// PublicKey returns the Ed25519 public key for the given kid.
-	// Returns ErrUnknownKID if the key set does not contain the kid;
-	// the verifier maps that to ErrInvalidSignature so an unknown
-	// kid never short-circuits to "trusted".
+	// Returns ErrUnknownKID if the key set does not contain the kid,
+	// which the verifier reads as the token's fault (ErrInvalidToken).
+	// Any other error is the resolver's: the verifier refuses the token
+	// with it as it is, the server's fault rather than the token's.
 	PublicKey(ctx context.Context, kid string) (ed25519.PublicKey, error)
 }
 
 // ErrUnknownKID is the typed not-found return from KeyResolver. The
-// verifier converts it to ErrInvalidSignature for caller-facing errors;
-// keeping the typed return lets ops dashboards distinguish "we don't
-// know this kid" from "signature mismatch".
+// verifier wraps it in ErrInvalidToken for caller-facing errors, and it
+// stays matchable, so ops dashboards can tell "we don't know this kid" from
+// "signature mismatch".
 var ErrUnknownKID = errors.New("limes: unknown kid")
 
 // StaticKeyResolver is the in-memory implementation used in tests and
@@ -103,7 +104,7 @@ type VerifierConfig struct {
 
 	// TrustedIssuers is the set of issuer values the verifier accepts.
 	// Tokens whose `iss` claim is not in the set are rejected with
-	// ErrInvalidSignature.
+	// ErrInvalidToken.
 	TrustedIssuers []string
 
 	// KeyIssuers, when non-nil, binds each kid to the one issuer allowed
@@ -258,21 +259,21 @@ func NewStandardVerifier(cfg VerifierConfig) (*StandardVerifier, error) {
 func (v *StandardVerifier) Verify(ctx context.Context, req VerifyRequest) (Capability, error) {
 	token, audience := req.Token, req.Audience
 	if token == "" {
-		return Capability{}, fmt.Errorf("%w: no token", ErrInvalidSignature)
+		return Capability{}, fmt.Errorf("%w: no token", ErrInvalidToken)
 	}
 	if audience == "" {
 		return Capability{}, fmt.Errorf("%w: no audience to verify against", ErrAudienceMismatch)
 	}
 	if len(token) > v.cfg.MaxTokenBytes {
 		return Capability{}, fmt.Errorf("%w: token is %d bytes (limit %d)",
-			ErrInvalidSignature, len(token), v.cfg.MaxTokenBytes)
+			ErrInvalidToken, len(token), v.cfg.MaxTokenBytes)
 	}
 
 	var cap *Capability
 	var biscuitIDs [][]byte // set for a Biscuit, from its verified chain
 	if IsBiscuit(token) {
 		if !v.cfg.AcceptBiscuit {
-			return Capability{}, fmt.Errorf("%w: Biscuit tokens are not accepted here", ErrInvalidSignature)
+			return Capability{}, fmt.Errorf("%w: Biscuit tokens are not accepted here", ErrInvalidToken)
 		}
 		var err error
 		if cap, biscuitIDs, err = v.verifyBiscuit(ctx, token, v.cfg.MeterCopies); err != nil {
@@ -286,7 +287,7 @@ func (v *StandardVerifier) Verify(ctx context.Context, req VerifyRequest) (Capab
 		// The token sealed inside a Biscuit, lifted out to shed the
 		// Biscuit's attenuation.
 		if cap.BiscuitRoot != "" {
-			return Capability{}, fmt.Errorf("%w: token is sealed in a Biscuit; present the Biscuit", ErrInvalidSignature)
+			return Capability{}, fmt.Errorf("%w: token is sealed in a Biscuit; present the Biscuit", ErrInvalidToken)
 		}
 	}
 
@@ -383,7 +384,7 @@ func (v *StandardVerifier) verifyBiscuit(ctx context.Context, token string, mete
 		return nil, nil, err
 	}
 	if sealed.BiscuitRoot == "" {
-		return nil, nil, fmt.Errorf("%w: biscuit seals an ordinary token", ErrInvalidSignature)
+		return nil, nil, fmt.Errorf("%w: biscuit seals an ordinary token", ErrInvalidToken)
 	}
 	return attenuate(sealed, meterCopies)
 }
@@ -395,26 +396,28 @@ func (v *StandardVerifier) verifySigned(ctx context.Context, token string) (*Cap
 	// 1) Header: structure, algorithm, type, key id.
 	parts, err := splitToken(token)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidSignature, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
 	header, err := parseHeader(parts.header)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidSignature, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
 	if header.Typ != TokenType {
-		return nil, fmt.Errorf("%w: typ %q is not %q", ErrInvalidSignature, header.Typ, TokenType)
+		return nil, fmt.Errorf("%w: typ %q is not %q", ErrInvalidToken, header.Typ, TokenType)
 	}
 	if header.Kid == "" {
-		return nil, fmt.Errorf("%w: header missing kid", ErrInvalidSignature)
+		return nil, fmt.Errorf("%w: header missing kid", ErrInvalidToken)
 	}
 
 	// 2) Key and signature — the cryptographic gate.
 	pub, err := v.cfg.Keys.PublicKey(ctx, header.Kid)
 	if err != nil {
-		// Every key failure is an invalid signature; the resolver's error
-		// stays wrapped, so ErrorResponse can tell an issuer outage
-		// (ErrJWKSUnavailable) from a token's fault.
-		return nil, fmt.Errorf("%w: kid %q: %w", ErrInvalidSignature, header.Kid, err)
+		// An unknown kid is the token's fault; a resolver that cannot
+		// answer — the issuer's keys out of reach, a store down — is ours.
+		if errors.Is(err, ErrUnknownKID) {
+			return nil, fmt.Errorf("%w: kid %q: %w", ErrInvalidToken, header.Kid, err)
+		}
+		return nil, fmt.Errorf("limes: resolve kid %q: %w", header.Kid, err)
 	}
 	if err := verifyParts(parts, pub); err != nil {
 		return nil, err
@@ -423,22 +426,22 @@ func (v *StandardVerifier) verifySigned(ctx context.Context, token string) (*Cap
 	// 3) Claims, now known to be the issuer's.
 	cap, err := parseClaims(parts.claims)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidSignature, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
 	if !slices.Contains(v.cfg.TrustedIssuers, cap.Issuer) {
-		return nil, fmt.Errorf("%w: untrusted issuer %q", ErrInvalidSignature, cap.Issuer)
+		return nil, fmt.Errorf("%w: untrusted issuer %q", ErrInvalidToken, cap.Issuer)
 	}
 	if v.cfg.KeyIssuers != nil {
 		if bound, ok := v.cfg.KeyIssuers[header.Kid]; !ok || bound != cap.Issuer {
 			return nil, fmt.Errorf("%w: kid %q may not sign for issuer %q",
-				ErrInvalidSignature, header.Kid, cap.Issuer)
+				ErrInvalidToken, header.Kid, cap.Issuer)
 		}
 	}
 	if cap.Subject.TenantID == uuid.Nil {
-		return nil, fmt.Errorf("%w: capability has no tenant", ErrInvalidSignature)
+		return nil, fmt.Errorf("%w: capability has no tenant", ErrInvalidToken)
 	}
 	if err := cap.Subject.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidSignature, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
 
 	return cap, nil

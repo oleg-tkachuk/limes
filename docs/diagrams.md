@@ -176,12 +176,13 @@ flowchart TB
     brev{"Biscuit: IsBiscuitRevoked<br/>any block of this copy"}
     ok(["Capability"])
 
-    bad["ErrInvalidSignature"]
+    bad["ErrInvalidToken"]
     early["ErrNotYetValid"]
     expired["ErrExpired"]
     mism["ErrAudienceMismatch"]
     wrong["ErrAuthSchemeMismatch"]
-    dpopErr["ErrDPoPRequired · ErrDPoPInvalid<br/>ErrDPoPNonceRequired · ErrDPoPReplayed"]
+    dpopErr["ErrProofOfPossession<br/>ErrDPoPRequired · ErrDPoPInvalid<br/>ErrDPoPNonceRequired · ErrDPoPReplayed"]
+    keysDown["ErrJWKSUnavailable<br/>(503, the server's fault)"]
     revoked["ErrRevoked"]
     biscuit["the Biscuit path below"]
 
@@ -193,7 +194,7 @@ flowchart TB
     size -- no --> bad
     hdr -- no --> bad
     key -- "unknown kid" --> bad
-    key -- "JWKS unavailable (503)" --> bad
+    key -- "JWKS unavailable" --> keysDown
     sig -- invalid --> bad
     claims -- no --> bad
     iss -- no --> bad
@@ -214,16 +215,17 @@ flowchart TB
     class tok,ok client
     class pre,size,form,hdr,sig,claims,iss,tenant,sealed,nbf,exp,aud,scheme,pop role
     class key,rev,brev store
-    class bad,early,expired,mism,wrong,dpopErr,revoked,biscuit external
+    class bad,early,expired,mism,wrong,dpopErr,keysDown,revoked,biscuit external
 ```
 
-An unknown kid, an unreachable JWKS, an untrusted issuer, a kid bound to
-another issuer and a missing tenant all match `ErrInvalidSignature`; the last
-three carry nothing more to branch on. An unknown kid also matches
-`ErrUnknownKID`, and an unreachable JWKS `ErrJWKSUnavailable`, which
-`ErrorResponse` answers with 503 rather than 401. The four DPoP
-refusals and `ErrAuthSchemeMismatch` match `ErrInvalidSignature` too, while
-`ErrorResponse` still tells them apart.
+An unknown kid, an untrusted issuer, a kid bound to another issuer and a
+missing tenant all match `ErrInvalidToken`; an unknown kid also matches
+`ErrUnknownKID`, and the rest carry nothing more to branch on. An unreachable
+JWKS is the server's fault, not the token's: it is `ErrJWKSUnavailable` alone,
+which `ErrorResponse` answers with 503. The DPoP refusals and
+`ErrAuthSchemeMismatch` match `ErrProofOfPossession` — the token may be
+genuine, the proof is what failed — and every refusal of the credentials,
+token or proof, matches `ErrUnauthenticated`.
 
 A Biscuit goes through the same gates, around them. Its authority block seals
 an ordinary signed token, which passes the gates from the header to the tenant;
@@ -256,7 +258,7 @@ flowchart TB
     brev{"IsBiscuitRevoked(revocation ids)<br/>any block of this token"}
     ok(["Capability with Copies"])
 
-    bad["ErrInvalidSignature"]
+    bad["ErrInvalidToken"]
     att["ErrBiscuitAttenuation"]
     unmetered["ErrCopyCountersNotMetered"]
     revoked["ErrRevoked"]
@@ -290,14 +292,15 @@ flowchart TB
 
 The sealed token presented on its own is refused, so it cannot be lifted out
 to shed an attenuation. `ErrBiscuitAttenuation` and
-`ErrCopyCountersNotMetered` both match `ErrInvalidSignature`.
+`ErrCopyCountersNotMetered` both match `ErrInvalidToken`: the token is not
+one this verifier accepts.
 
 ## Proof of possession
 
 A key-bound capability (`ConfirmationJKT` set) needs a DPoP proof (RFC 9449)
 for every request; a verifier with no `DPoPVerifier` refuses it outright with
 `ErrDPoPRequired`. The proof is checked in this order, and every refusal
-matches `ErrInvalidSignature`:
+matches `ErrProofOfPossession`:
 
 ```mermaid
 flowchart TB
@@ -350,20 +353,20 @@ cache refuses rather than forgets.
 ## Answering a refusal
 
 `StandardVerifier.ErrorResponse` maps a refusal to how a protected resource
-answers it — the first row that matches wins — and `WriteErrorResponse`
+answers it, from the same table `ReasonOf` reads, and `WriteErrorResponse`
 writes it as `application/problem+json` with `Cache-Control: no-store`. The
 error's own text never reaches the client.
 
 | Refusal | Status | `WWW-Authenticate` |
 |---|---|---|
-| `ErrJWKSUnavailable` (wrapped in `ErrInvalidSignature`, so it comes first) | 503 | none |
+| `ErrJWKSUnavailable` | 503 | none |
 | `ErrMalformedAuthorization` | 400 | `error="invalid_request"` under the client's scheme (Bearer when unknown) |
 | `ErrDPoPNonceRequired` | 401 | `DPoP error="use_dpop_nonce"`, and a fresh `DPoP-Nonce` |
-| `ErrDPoPRequired` · `ErrDPoPInvalid` · `ErrDPoPReplayed` | 401 | `DPoP error="invalid_dpop_proof", algs="Ed25519 ES256"` |
-| `ErrAuthSchemeMismatch` · `ErrInvalidSignature` · `ErrExpired` · `ErrNotYetValid` · `ErrRevoked` · `ErrAudienceMismatch` | 401 | `error="invalid_token"` under the client's scheme (Bearer when unknown) |
-| `ErrCaveatViolation` | 403 | `error="insufficient_scope"` |
+| `ErrDPoPRequired` · `ErrDPoPInvalid` · `ErrDPoPReplayed`, and any other `ErrProofOfPossession` | 401 | `DPoP error="invalid_dpop_proof", algs="Ed25519 ES256"` |
+| `ErrAuthSchemeMismatch` · `ErrInvalidToken` · `ErrExpired` · `ErrNotYetValid` · `ErrRevoked` · `ErrAudienceMismatch`, and any other `ErrUnauthenticated` | 401 | `error="invalid_token"` under the client's scheme (Bearer when unknown) |
+| any `ErrCaveatViolation` | 403 | `error="insufficient_scope"` |
 | `ErrBudgetExceeded` · `ErrTenantBudgetExceeded` · `ErrRequestLimitExceeded` | 403 | none |
-| anything else — a store outage, `ErrEffectConflict` | 500 | none |
+| anything else — a store or key resolver outage, `ErrEffectConflict` | 500 | none |
 
 A verifier with DPoP configured adds a bare `DPoP algs="…"` challenge beside a
 `Bearer` one.

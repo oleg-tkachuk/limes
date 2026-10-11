@@ -111,8 +111,8 @@ func TestDPoPRefusals(t *testing.T) {
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("err = %v, want %v", err, tc.want)
 			}
-			if !errors.Is(err, ErrInvalidSignature) {
-				t.Fatalf("%v does not match ErrInvalidSignature", err)
+			if !errors.Is(err, ErrProofOfPossession) || errors.Is(err, ErrInvalidToken) {
+				t.Fatalf("%v: want ErrProofOfPossession and not ErrInvalidToken", err)
 			}
 		})
 	}

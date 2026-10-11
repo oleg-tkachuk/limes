@@ -96,7 +96,7 @@ func TestVerifyRequiresTheServerNonce(t *testing.T) {
 		return VerifyRequest{Token: token, Audience: audienceData, DPoP: DPoPProof{Proof: p, Method: dpopMethod, URL: dpopURL}}
 	}
 	for name, nonce := range map[string]string{"no nonce": "", "a forged nonce": b64(make([]byte, 40))} {
-		if _, err := v.Verify(ctx, proof(nonce)); !errors.Is(err, ErrDPoPNonceRequired) || !errors.Is(err, ErrInvalidSignature) {
+		if _, err := v.Verify(ctx, proof(nonce)); !errors.Is(err, ErrDPoPNonceRequired) || !errors.Is(err, ErrProofOfPossession) {
 			t.Errorf("%s: err = %v, want ErrDPoPNonceRequired", name, err)
 		}
 	}

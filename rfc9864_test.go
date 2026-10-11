@@ -63,8 +63,8 @@ func TestCapabilityTokenRefusesThePolymorphicAlgorithm(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	v := verifierFor(t, pub, VerifierConfig{})
 	tok := resign(t, priv, map[string]any{"alg": algEdDSA, "kid": "k1", "typ": TokenType}, validClaims(uuid.New()))
-	if _, err := v.Verify(context.Background(), VerifyRequest{Token: tok, Audience: audienceData}); !errors.Is(err, ErrInvalidSignature) {
-		t.Fatalf("a token naming EdDSA: err = %v, want ErrInvalidSignature", err)
+	if _, err := v.Verify(context.Background(), VerifyRequest{Token: tok, Audience: audienceData}); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("a token naming EdDSA: err = %v, want ErrInvalidToken", err)
 	}
 }
 

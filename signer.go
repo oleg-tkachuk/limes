@@ -329,14 +329,14 @@ func VerifySignature(token string, pub ed25519.PublicKey) error {
 
 func verifyParts(parts tokenParts, pub ed25519.PublicKey) error {
 	if len(pub) != ed25519.PublicKeySize {
-		return fmt.Errorf("%w: public key wrong length %d", ErrInvalidSignature, len(pub))
+		return fmt.Errorf("%w: public key wrong length %d", ErrInvalidToken, len(pub))
 	}
 	sig, err := base64.RawURLEncoding.DecodeString(parts.sig)
 	if err != nil {
-		return fmt.Errorf("%w: decode sig: %w", ErrInvalidSignature, err)
+		return fmt.Errorf("%w: decode sig: %w", ErrInvalidToken, err)
 	}
 	if !ed25519.Verify(pub, []byte(parts.signingInput()), sig) {
-		return ErrInvalidSignature
+		return ErrInvalidToken
 	}
 	return nil
 }

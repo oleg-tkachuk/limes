@@ -64,8 +64,8 @@ func TestVerifyHoldsTheSchemeToTheBinding(t *testing.T) {
 			if tc.want == nil && err != nil || tc.want != nil && !errors.Is(err, tc.want) {
 				t.Fatalf("err = %v, want %v", err, tc.want)
 			}
-			if tc.want != nil && !errors.Is(err, ErrInvalidSignature) {
-				t.Fatalf("%v does not match ErrInvalidSignature", err)
+			if tc.want != nil && (!errors.Is(err, ErrProofOfPossession) || errors.Is(err, ErrInvalidToken)) {
+				t.Fatalf("%v: want ErrProofOfPossession and not ErrInvalidToken", err)
 			}
 		})
 	}

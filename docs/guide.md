@@ -25,9 +25,12 @@ case errors.Is(err, limes.ErrNotYetValid):      // NotBefore ahead, past Leeway 
 case errors.Is(err, limes.ErrRevoked):          // pulled mid-flight
 case errors.Is(err, limes.ErrAudienceMismatch): // token for another service
 case errors.Is(err, limes.ErrCaveatViolation):  // not allowed to do this
+case errors.Is(err, limes.ErrProofOfPossession): // no valid proof that the bearer holds the key
+case errors.Is(err, limes.ErrInvalidToken): // forged, or not this verifier's to accept
 case errors.Is(err, limes.ErrJWKSUnavailable):  // the issuer's keys out of reach: the server's trouble, not the token's
-case errors.Is(err, limes.ErrInvalidSignature): // forged, or no valid proof of possession
 }
+// Every refusal of the token or its proof also matches ErrUnauthenticated —
+// the one check for "answer 401".
 ```
 
 `Authorize` is `Verify` — the token itself — followed by every caveat that
@@ -57,8 +60,9 @@ kid on first sight (at most once per `MinRefreshInterval`), and fails closed
 with `ErrJWKSUnavailable` when it has never fetched a set, or once the last
 good set is older than `MaxStale` (1h). A document whose entries are all
 unusable counts as a failed fetch, so the last good set stays in service
-rather than every key being withdrawn at once. Check `ErrJWKSUnavailable`
-before `ErrInvalidSignature`, which it also matches. The three intervals must
+rather than every key being withdrawn at once. `ErrJWKSUnavailable` is the
+server's fault, not the token's, so it matches no `ErrUnauthenticated`
+sentinel. The three intervals must
 nest, or construction fails:
 
 ```go
@@ -250,7 +254,7 @@ child inherits its parent's binding or takes the sub-agent's own key, and
 `Narrows` refuses a child that drops it. `Verify` refuses a proof from another
 key, for another method (compared exactly: `post` is not `POST`), URL or token, outside `DPoPVerifier.Window` (a
 minute by default) of the verifier's clock, or seen before; every refusal
-matches `ErrInvalidSignature`. `MemoryReplayCache` is in-process and bounded
+matches `ErrProofOfPossession`. `MemoryReplayCache` is in-process and bounded
 — 100 000 ids, and `DefaultReplayEntriesPerKey` (1 000) per key, so one
 key-bound token cannot fill it and lock the others out; full, it refuses
 rather than forgets:

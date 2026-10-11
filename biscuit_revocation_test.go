@@ -145,8 +145,8 @@ func TestBiscuitCopyRefusesWhatVerifyRefuses(t *testing.T) {
 		"garbage":            "AAAA",
 		"too long":           string(bytes.Repeat([]byte("A"), DefaultMaxTokenBytes+1)),
 	} {
-		if _, err := v.BiscuitCopy(ctx, token); !errors.Is(err, ErrInvalidSignature) {
-			t.Errorf("%s: err = %v, want ErrInvalidSignature", name, err)
+		if _, err := v.BiscuitCopy(ctx, token); !errors.Is(err, ErrInvalidToken) {
+			t.Errorf("%s: err = %v, want ErrInvalidToken", name, err)
 		}
 	}
 }

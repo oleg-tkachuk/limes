@@ -71,22 +71,21 @@ const (
 	defaultReplayCacheEntries = 100_000
 )
 
-// Proof-of-possession rejections. Each also matches ErrInvalidSignature, so a
-// consumer that maps only that sentinel still refuses them.
+// Proof-of-possession rejections. Each matches ErrProofOfPossession, and so
+// ErrUnauthenticated: the token may be genuine, the proof that its holder sent
+// it is what failed.
 var (
+	// ErrProofOfPossession is the family of every proof-of-possession
+	// refusal.
+	ErrProofOfPossession error = &familyError{"limes: proof of possession refused", ErrUnauthenticated}
 	// ErrDPoPRequired — the capability is key-bound and no proof came with it.
-	ErrDPoPRequired error = &popError{"limes: DPoP proof required"}
+	ErrDPoPRequired error = &familyError{"limes: DPoP proof required", ErrProofOfPossession}
 	// ErrDPoPInvalid — a proof came, and it does not prove possession for
 	// this token, method, URL and moment.
-	ErrDPoPInvalid error = &popError{"limes: invalid DPoP proof"}
+	ErrDPoPInvalid error = &familyError{"limes: invalid DPoP proof", ErrProofOfPossession}
 	// ErrDPoPReplayed — a proof's jti was already used inside the window.
-	ErrDPoPReplayed error = &popError{"limes: DPoP proof replayed"}
+	ErrDPoPReplayed error = &familyError{"limes: DPoP proof replayed", ErrProofOfPossession}
 )
-
-type popError struct{ msg string }
-
-func (e *popError) Error() string        { return e.msg }
-func (e *popError) Is(target error) bool { return target == ErrInvalidSignature }
 
 type dpopHeader struct {
 	Typ string   `json:"typ"`
