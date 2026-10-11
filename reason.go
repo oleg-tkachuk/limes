@@ -66,6 +66,16 @@ var reasonRules = []reasonRule{
 	{ErrTenantBudgetExceeded, ReasonTenantBudgetExceeded, false},
 }
 
+// reasonAliases are refusals that name an existing reason, checked before
+// reasonRules: each popError also matches ErrInvalidSignature, which would
+// make it a permanent refusal of the token. A nonce challenge asks for a
+// proof signed afresh with the server's nonce, and a key-bound token under
+// the wrong scheme for the same token sent under DPoP; neither stands.
+var reasonAliases = []reasonRule{
+	{ErrDPoPNonceRequired, ReasonProofInvalid, false},
+	{ErrAuthSchemeMismatch, ReasonProofRequired, false},
+}
+
 // ReasonOf returns the reason err refused a capability for, and false when
 // err is no such refusal — nil, a store failure, or a programming error such
 // as ErrInvalidRequest, which a consumer maps as it maps any other.
@@ -73,9 +83,11 @@ func ReasonOf(err error) (Reason, bool) {
 	if err == nil {
 		return "", false
 	}
-	for _, r := range reasonRules {
-		if errors.Is(err, r.sentinel) {
-			return r.reason, true
+	for _, rules := range [][]reasonRule{reasonAliases, reasonRules} {
+		for _, r := range rules {
+			if errors.Is(err, r.sentinel) {
+				return r.reason, true
+			}
 		}
 	}
 	return "", false
