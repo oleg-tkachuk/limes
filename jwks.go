@@ -120,7 +120,7 @@ func parseJWKS(raw []byte) (map[string]ed25519.PublicKey, int, error) {
 func JWKSHandler(keys func() map[string]ed25519.PublicKey, maxAge time.Duration) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			w.Header().Set("Allow", http.MethodGet+", "+http.MethodHead)
+			w.Header().Set(headerAllow, http.MethodGet+", "+http.MethodHead)
 			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 			return
 		}
@@ -132,14 +132,14 @@ func JWKSHandler(keys func() map[string]ed25519.PublicKey, maxAge time.Duration)
 		sum := sha256.Sum256(doc)
 		etag := `"` + base64.RawURLEncoding.EncodeToString(sum[:]) + `"`
 		h := w.Header()
-		h.Set("ETag", etag)
-		h.Set(headerCacheControl, fmt.Sprintf("public, %s=%d", directiveMaxAge, int64(max(maxAge, 0)/time.Second)))
-		if etagMatches(r.Header.Values("If-None-Match"), etag) {
+		h.Set(headerETag, etag)
+		h.Set(headerCacheControl, fmt.Sprintf("%s, %s=%d", directivePublic, directiveMaxAge, int64(max(maxAge, 0)/time.Second)))
+		if etagMatches(r.Header.Values(headerIfNoneMatch), etag) {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
-		h.Set("Content-Type", mediaTypeJWKSet)
-		h.Set("Content-Length", strconv.Itoa(len(doc)))
+		h.Set(headerContentType, mediaTypeJWKSet)
+		h.Set(headerContentLength, strconv.Itoa(len(doc)))
 		_, _ = w.Write(doc)
 	})
 }

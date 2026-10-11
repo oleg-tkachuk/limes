@@ -28,6 +28,13 @@ const MediaTypeProblem = "application/problem+json"
 // problemTypeBase prefixes the problem type URIs this module defines.
 const problemTypeBase = "https://github.com/oleg-tkachuk/limes/problems/"
 
+// Challenge parameters of RFC 6750 §3 and RFC 9449 §7.1.
+const (
+	authParamError            = "error"
+	authParamErrorDescription = "error_description"
+	authParamAlgs             = "algs"
+)
+
 // Error codes of RFC 6750 §3.1 and RFC 9449 §7.1, §8.
 const (
 	codeInvalidRequest    = "invalid_request"
@@ -149,10 +156,10 @@ func matchesAny(err error, sentinels []error) bool {
 func challenge(scheme AuthScheme, code, description string, withAlgs bool) string {
 	var params []string
 	if code != "" {
-		params = append(params, authParam("error", code), authParam("error_description", description))
+		params = append(params, authParam(authParamError, code), authParam(authParamErrorDescription, description))
 	}
 	if withAlgs {
-		params = append(params, authParam("algs", strings.Join(DPoPSigningAlgorithms(), " ")))
+		params = append(params, authParam(authParamAlgs, strings.Join(DPoPSigningAlgorithms(), " ")))
 	}
 	if len(params) == 0 {
 		return string(scheme)
@@ -186,8 +193,8 @@ func WriteErrorResponse(w http.ResponseWriter, resp ErrorResponse) {
 		http.Error(w, http.StatusText(resp.Status), resp.Status)
 		return
 	}
-	h.Set("Content-Type", MediaTypeProblem)
-	h.Set("Content-Length", strconv.Itoa(len(body)))
+	h.Set(headerContentType, MediaTypeProblem)
+	h.Set(headerContentLength, strconv.Itoa(len(body)))
 	// No store: a refusal is about this request's credentials.
 	h.Set(headerCacheControl, directiveNoStore)
 	w.WriteHeader(resp.Status)

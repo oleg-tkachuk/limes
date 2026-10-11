@@ -12,13 +12,25 @@ import (
 // the two directives a key-set cache acts on, and the Age header, and nothing
 // else.
 
-// HTTP caching names (RFC 9111 §5.1, §5.2.2).
+// HTTP header names the module reads or writes (RFC 9110, RFC 9111 §5),
+// spelled once.
 const (
-	headerAge          = "Age"
-	headerCacheControl = "Cache-Control"
-	directiveMaxAge    = "max-age"
-	directiveNoCache   = "no-cache"
-	directiveNoStore   = "no-store"
+	headerAccept        = "Accept"
+	headerAge           = "Age"
+	headerAllow         = "Allow"
+	headerCacheControl  = "Cache-Control"
+	headerContentLength = "Content-Length"
+	headerContentType   = "Content-Type"
+	headerETag          = "ETag"
+	headerIfNoneMatch   = "If-None-Match"
+)
+
+// Cache-Control directives (RFC 9111 §5.2).
+const (
+	directiveMaxAge  = "max-age"
+	directiveNoCache = "no-cache"
+	directiveNoStore = "no-store"
+	directivePublic  = "public"
 )
 
 // responseFreshness is how long a response stays fresh by its own headers:
