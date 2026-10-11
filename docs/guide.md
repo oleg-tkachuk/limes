@@ -307,8 +307,8 @@ the `Attenuation`. Each is counted under the revocation id of the block that
 set it, so siblings narrowed apart count apart, while the capability's own
 limits still bound them all; a limit must fit every limit already in force.
 The verifier hands them to the caller as `Capability.Copies`, and the `Meter`
-counts them when they are passed on as `Copies` in `BumpRequest`,
-`ChargeRequest` and `ReserveRequest`. A verifier admits such a copy only with
+counts them through the `MeterSubject` the verified capability gives, which
+carries them. A verifier admits such a copy only with
 `MeterCopies` set, which says the `Meter` behind it counts copies; without it
 the token is refused with `ErrCopyCountersNotMetered` rather than accepted
 with its limits unkept.
@@ -337,17 +337,19 @@ cannot be re-wrapped in a fresh Biscuit.
 
 ```go
 receipt, err := usage.Charge(ctx, limes.ChargeRequest{
-    CapabilityID: cap.ID, TenantID: tenantID,
-    Amount: limes.MustParseAmount("0.35"), MaxBudget: cap.Caveats.MaxBudgetAmount,
-    UnitCode: "USD", Op: "search", Actor: "orchestrator",
+    Subject: granted.MeterSubject(),
+    Amount:  limes.MustParseAmount("0.35"), Op: "search", Actor: "orchestrator",
 }, nil)
 if errors.Is(err, limes.ErrBudgetExceeded) {
     // rejected at the auth boundary — before your business logic ran
 }
 ```
 
-Every ceiling is checked: each Biscuit copy's own (the `Copies` you pass),
-the capability's, each ancestor's, then the tenant aggregate. If **any**
+The subject carries the capability's id, tenant, ceilings, unit and the
+Biscuit copy's limits, all as the token states them: a request has no field
+to type a ceiling into, or to leave at zero and so lift one.
+
+Every ceiling is checked: each Biscuit copy's own, the capability's, each ancestor's, then the tenant aggregate. If **any**
 rejects, no counter moves, so a retry after rejection is safe.
 
 `receipt.ChargeID` names the ledger row. Refund against it:
@@ -407,14 +409,13 @@ An LLM call is priced by the tokens it ends up using. Hold an estimate first,
 then settle the actual cost:
 
 ```go
+subject := granted.MeterSubject()
 r, err := usage.Reserve(ctx, limes.ReserveRequest{
-    CapabilityID: cap.ID, TenantID: tenantID,
-    Amount: limes.MustParseAmount("0.50"), MaxBudget: cap.Caveats.MaxBudgetAmount, UnitCode: "USD",
-    TTL: 2 * time.Minute,
+    Subject: subject, Amount: limes.MustParseAmount("0.50"), TTL: 2 * time.Minute,
 })
 // … the call runs …
 receipt, err := usage.Settle(ctx, limes.SettleRequest{
-    ReservationID: r.ID, Amount: actualCost, MaxBudget: cap.Caveats.MaxBudgetAmount,
+    Subject: subject, ReservationID: r.ID, Amount: actualCost,
 }, nil)
 ```
 
@@ -425,7 +426,8 @@ the excess must fit, or the hold stays for you to settle lower or `Release`.
 A hold never settled lapses after its TTL (`DefaultReservationTTL`, five
 minutes, unless the request says): run `ReleaseExpired` on a timer, again
 while a batch comes back full (`DefaultHousekeepingLimit` unless set). Settling
-the zero reservation id is `ErrReservationNotFound`. The receipt names the
+the zero reservation id, or a hold of another capability than the subject's,
+is `ErrReservationNotFound`. The receipt names the
 charge's tenant and unit, on a refusal too, so a caller holding only the
 reservation id can attribute it.
 
@@ -457,9 +459,10 @@ different amount, unit or tenant is `ErrExternalRefConflict`: one name is one
 cost.
 
 ```go
+rec, err := records.GetRecord(ctx, capID) // no token in hand: the stored record
 receipt, err := usage.Charge(ctx, limes.ChargeRequest{
-    CapabilityID: capID, TenantID: tenantID, Amount: cost,
-    MaxBudget:   rec.Caveats.MaxBudgetAmount, // the stored record, from Store.Get
+    Subject:     rec.MeterSubject(),
+    Amount:      cost,
     ExternalRef: event.CallID,
     Overrun:     limes.OverrunRecord,
 }, nil)
@@ -476,9 +479,9 @@ reservation made with the default `OverrunReject`, which is what stops the
 next cost before it is incurred. Keep `OverrunReject` for anything you can
 still decline.
 
-A reporter with no token in hand reads the ceiling from the capability's
-stored record (`Store.Get`), as the meter already does for every ancestor. A
-price that is not known yet is not a price of zero: hold the estimate and
+A reporter with no token in hand takes the subject from the capability's
+stored record (`Store.GetRecord`, then `Record.MeterSubject`), as the meter
+already reads every ancestor's ceiling. A price that is not known yet is not a price of zero: hold the estimate and
 settle when it is known, or let the hold lapse and count against the ceilings
 until `ReleaseExpired` runs.
 
