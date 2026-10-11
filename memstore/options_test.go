@@ -19,7 +19,8 @@ func TestWithTxFactoryThreadsTheHandle(t *testing.T) {
 	u := NewUsage[*fakeTx](nil).WithTxFactory(func() *fakeTx { return &fakeTx{id: handleID} })
 	var got *fakeTx
 	if _, err := u.Charge(context.Background(), limes.ChargeRequest{
-		CapabilityID: uuid.New(), TenantID: uuid.New(), Amount: limes.MustParseAmount("1"),
+		Subject: newSubject(subjectSpec{capID: uuid.New(), tenant: uuid.New()}),
+		Amount:  limes.MustParseAmount("1"),
 	}, func(_ context.Context, tx *fakeTx) error { got = tx; return nil }); err != nil {
 		t.Fatal(err)
 	}

@@ -34,6 +34,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/internal/link"
 )
 
 // Store implements limes.Store — capability records and revocations.
@@ -453,18 +454,18 @@ func (s *UsageStore[TX]) lineage(capID uuid.UUID) []limes.Capability {
 // increment would cross the capability's ceiling or any ancestor's. A
 // rejected call must be safe to retry.
 func (s *UsageStore[TX]) Bump(_ context.Context, req limes.BumpRequest) (limes.BumpReceipt, error) {
-	ancestors := s.lineage(req.CapabilityID)
+	ancestors := s.lineage(req.Subject.CapabilityID())
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	u := s.usage[req.CapabilityID]
+	u := s.usage[req.Subject.CapabilityID()]
 	next := u.RequestCount + 1
-	for _, c := range req.Copies {
+	for _, c := range req.Subject.Copies() {
 		if c.MaxRequests > 0 && s.copies[string(c.RevocationID)].requests+1 > c.MaxRequests {
 			return limes.BumpReceipt{Requests: u.RequestCount}, fmt.Errorf("%w: copy %x", limes.ErrRequestLimitExceeded, c.RevocationID)
 		}
 	}
-	if req.MaxRequests > 0 && next > req.MaxRequests {
+	if req.Subject.MaxRequests() > 0 && next > req.Subject.MaxRequests() {
 		return limes.BumpReceipt{Requests: u.RequestCount}, limes.ErrRequestLimitExceeded
 	}
 	for _, a := range ancestors {
@@ -479,15 +480,15 @@ func (s *UsageStore[TX]) Bump(_ context.Context, req limes.BumpRequest) (limes.B
 		au.RequestCount++
 		s.usage[a.ID] = au
 	}
-	for _, c := range req.Copies {
+	for _, c := range req.Subject.Copies() {
 		cc := s.copies[string(c.RevocationID)]
-		cc.capID = req.CapabilityID
+		cc.capID = req.Subject.CapabilityID()
 		cc.requests++
 		s.copies[string(c.RevocationID)] = cc
 	}
-	u.CapabilityID = req.CapabilityID
+	u.CapabilityID = req.Subject.CapabilityID()
 	u.RequestCount = next
-	s.usage[req.CapabilityID] = u
+	s.usage[req.Subject.CapabilityID()] = u
 	return limes.BumpReceipt{Requests: next}, nil
 }
 
@@ -525,20 +526,20 @@ func (s *UsageStore[TX]) Charge(
 	if err := limes.ValidateExternalRef(req.ExternalRef); err != nil {
 		return limes.ChargeReceipt{}, err
 	}
-	if req.TenantID == uuid.Nil {
+	if req.Subject.TenantID() == uuid.Nil {
 		return limes.ChargeReceipt{}, errors.New("memstore: charge requires TenantID")
 	}
-	unit, err := limes.NormaliseUnitCode(req.UnitCode)
+	unit, err := limes.NormaliseUnitCode(req.Subject.UnitCode())
 	if err != nil {
 		return limes.ChargeReceipt{}, err
 	}
-	ancestors := s.lineage(req.CapabilityID)
+	ancestors := s.lineage(req.Subject.CapabilityID())
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if req.ExternalRef != "" {
-		if e, ok := entryLocked(s, s.byRef, refKey{req.CapabilityID, req.ExternalRef}); ok {
-			if e.Amount != req.Amount || e.UnitCode != unit || e.TenantID != req.TenantID {
+		if e, ok := entryLocked(s, s.byRef, refKey{req.Subject.CapabilityID(), req.ExternalRef}); ok {
+			if e.Amount != req.Amount || e.UnitCode != unit || e.TenantID != req.Subject.TenantID() {
 				return limes.ChargeReceipt{}, fmt.Errorf("%w: %q was %s %s for tenant %s",
 					limes.ErrExternalRefConflict, req.ExternalRef, e.Amount, e.UnitCode, e.TenantID)
 			}
@@ -651,12 +652,12 @@ func (s *UsageStore[TX]) chargeLocked(
 		return err
 	}
 
-	u := s.usage[req.CapabilityID]
+	u := s.usage[req.Subject.CapabilityID()]
 	if err := s.checkCeilingsLocked(ceilingCheck{
-		amount: req.Amount, released: released, maxBudget: req.MaxBudget, unit: unit,
-		capID: req.CapabilityID, tenantID: req.TenantID, ancestors: ancestors, copies: req.Copies,
+		amount: req.Amount, released: released, maxBudget: req.Subject.MaxBudget(), unit: unit,
+		capID: req.Subject.CapabilityID(), tenantID: req.Subject.TenantID(), ancestors: ancestors, copies: req.Subject.Copies(),
 	}, crossed); err != nil {
-		return limes.ChargeReceipt{Spent: u.SpentAmount, TenantID: req.TenantID, UnitCode: unit}, err
+		return limes.ChargeReceipt{Spent: u.SpentAmount, TenantID: req.Subject.TenantID(), UnitCode: unit}, err
 	}
 	stagedSpent := u.SpentAmount + req.Amount
 
@@ -669,16 +670,16 @@ func (s *UsageStore[TX]) chargeLocked(
 		}
 		if err := onCharged(ctx, tx); err != nil {
 			// Nothing has been published — nothing to compensate.
-			return limes.ChargeReceipt{Spent: u.SpentAmount, TenantID: req.TenantID, UnitCode: unit}, err
+			return limes.ChargeReceipt{Spent: u.SpentAmount, TenantID: req.Subject.TenantID(), UnitCode: unit}, err
 		}
 	}
 
 	// ── commit: publish every staged mutation together ──
-	u.CapabilityID = req.CapabilityID
+	u.CapabilityID = req.Subject.CapabilityID()
 	u.SpentAmount = stagedSpent
 	u.ReservedAmount = max0(u.ReservedAmount - released)
 	u.UnitCode = unit
-	s.usage[req.CapabilityID] = u
+	s.usage[req.Subject.CapabilityID()] = u
 	for _, id := range ids {
 		au := s.usage[id]
 		au.CapabilityID = id
@@ -689,30 +690,31 @@ func (s *UsageStore[TX]) chargeLocked(
 		}
 		s.usage[id] = au
 	}
-	b := s.tenantLocked(req.TenantID, unit)
+	b := s.tenantLocked(req.Subject.TenantID(), unit)
 	b.SpentAmount += req.Amount
 	b.ReservedAmount = max0(b.ReservedAmount - released)
 	b.UpdatedAt = s.nowFn()
-	s.budgets[req.TenantID] = b
-	copyIDs := make([][]byte, 0, len(req.Copies))
-	for _, c := range req.Copies {
+	s.budgets[req.Subject.TenantID()] = b
+	copies := req.Subject.Copies()
+	copyIDs := make([][]byte, 0, len(copies))
+	for _, c := range copies {
 		cc := s.copies[string(c.RevocationID)]
-		cc.capID = req.CapabilityID
+		cc.capID = req.Subject.CapabilityID()
 		cc.spent += req.Amount
 		cc.reserved = max0(cc.reserved - released)
 		s.copies[string(c.RevocationID)] = cc
 		copyIDs = append(copyIDs, c.RevocationID)
 	}
 	entry := LedgerEntry{
-		ID: uuid.New(), CapabilityID: req.CapabilityID, Ancestors: ids,
-		TenantID: req.TenantID, Amount: req.Amount, UnitCode: unit,
+		ID: uuid.New(), CapabilityID: req.Subject.CapabilityID(), Ancestors: ids,
+		TenantID: req.Subject.TenantID(), Amount: req.Amount, UnitCode: unit,
 		Op: req.Op, Actor: req.Actor, At: s.nowFn(), Copies: copyIDs,
 		ExternalRef: req.ExternalRef, ReservationID: reservationID, Overrun: overrun,
-		tenantPeriod: s.periods[req.TenantID],
+		tenantPeriod: s.periods[req.Subject.TenantID()],
 	}
 	s.appendLocked(entry)
 	return limes.ChargeReceipt{
-		ChargeID: entry.ID, Spent: stagedSpent, Overrun: overrun, TenantID: req.TenantID, UnitCode: unit,
+		ChargeID: entry.ID, Spent: stagedSpent, Overrun: overrun, TenantID: req.Subject.TenantID(), UnitCode: unit,
 	}, nil
 }
 
@@ -833,10 +835,10 @@ func (s *UsageStore[TX]) Reserve(_ context.Context, req limes.ReserveRequest) (l
 	if err := req.Amount.Validate(); err != nil {
 		return limes.Reservation{}, err
 	}
-	if req.TenantID == uuid.Nil {
+	if req.Subject.TenantID() == uuid.Nil {
 		return limes.Reservation{}, errors.New("memstore: reserve requires TenantID")
 	}
-	unit, err := limes.NormaliseUnitCode(req.UnitCode)
+	unit, err := limes.NormaliseUnitCode(req.Subject.UnitCode())
 	if err != nil {
 		return limes.Reservation{}, err
 	}
@@ -847,24 +849,24 @@ func (s *UsageStore[TX]) Reserve(_ context.Context, req limes.ReserveRequest) (l
 	if ttl == 0 {
 		ttl = limes.DefaultReservationTTL
 	}
-	ancestors := s.lineage(req.CapabilityID)
+	ancestors := s.lineage(req.Subject.CapabilityID())
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	refuse := func(err error) error { return err }
 	if err := s.checkCeilingsLocked(ceilingCheck{
-		amount: req.Amount, maxBudget: req.MaxBudget, unit: unit,
-		capID: req.CapabilityID, tenantID: req.TenantID, ancestors: ancestors, copies: req.Copies,
+		amount: req.Amount, maxBudget: req.Subject.MaxBudget(), unit: unit,
+		capID: req.Subject.CapabilityID(), tenantID: req.Subject.TenantID(), ancestors: ancestors, copies: req.Subject.Copies(),
 	}, refuse); err != nil {
 		return limes.Reservation{}, err
 	}
 
 	h := hold{
 		id:    uuid.New(),
-		capID: req.CapabilityID, ancestors: ancestorIDs(ancestors), tenantID: req.TenantID,
+		capID: req.Subject.CapabilityID(), ancestors: ancestorIDs(ancestors), tenantID: req.Subject.TenantID(),
 		amount: req.Amount, unit: unit, op: req.Op, actor: req.Actor,
-		expires: s.nowFn().Add(ttl), copies: slices.Clone(req.Copies),
+		expires: s.nowFn().Add(ttl), copies: req.Subject.Copies(),
 	}
 	s.applyHoldLocked(h, +1)
 	s.holds[h.id] = h
@@ -913,23 +915,29 @@ func (s *UsageStore[TX]) Settle(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	subject := req.Subject.CapabilityID()
 	h, ok := s.holds[req.ReservationID]
 	if !ok {
-		if e, settled := entryLocked(s, s.byReservation, req.ReservationID); settled {
+		// A reservation of another capability is none of this one's.
+		if e, settled := entryLocked(s, s.byReservation, req.ReservationID); settled && e.CapabilityID == subject {
 			return s.replayLocked(e), nil
 		}
 	}
-	if !ok || !h.expires.After(s.nowFn()) {
+	if !ok || h.capID != subject || !h.expires.After(s.nowFn()) {
 		return limes.ChargeReceipt{}, limes.ErrReservationNotFound
 	}
 	var ancestors []limes.Capability
 	if s.records != nil {
 		ancestors = s.records.ancestors(h.capID)
 	}
+	// The charge is the reservation's: its tenant, unit and the copy limits
+	// it was made under, against the subject's own ceiling.
+	held := link.NewMeterSubject(link.MeterSubjectFields{
+		CapabilityID: h.capID, TenantID: h.tenantID, MaxRequests: req.Subject.MaxRequests(),
+		MaxBudget: int64(req.Subject.MaxBudget()), UnitCode: h.unit, Copies: h.copies,
+	}).(limes.MeterSubject)
 	receipt, err := s.chargeLocked(ctx, limes.ChargeRequest{
-		CapabilityID: h.capID, TenantID: h.tenantID, Amount: req.Amount,
-		MaxBudget: req.MaxBudget, UnitCode: h.unit, Op: h.op, Actor: h.actor,
-		Copies: h.copies, Overrun: req.Overrun,
+		Subject: held, Amount: req.Amount, Op: h.op, Actor: h.actor, Overrun: req.Overrun,
 	}, h.unit, h.ancestors, ancestors, &h, onCharged)
 	if err != nil {
 		return receipt, err

@@ -115,12 +115,12 @@ func TestBumpRequestRejectsWithoutMutating(t *testing.T) {
 	id := uuid.New()
 
 	for i := int64(1); i <= 2; i++ {
-		r, err := u.Bump(ctx, limes.BumpRequest{CapabilityID: id, MaxRequests: 2})
+		r, err := u.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: id, maxRequests: 2})})
 		if err != nil || r.Requests != i {
 			t.Fatalf("bump %d: n=%d err=%v", i, r.Requests, err)
 		}
 	}
-	n, err := u.Bump(ctx, limes.BumpRequest{CapabilityID: id, MaxRequests: 2})
+	n, err := u.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: id, maxRequests: 2})})
 	if !errors.Is(err, limes.ErrRequestLimitExceeded) {
 		t.Fatalf("want ErrRequestLimitExceeded, got %v", err)
 	}
@@ -139,7 +139,7 @@ func TestBumpRequestUnlimited(t *testing.T) {
 	u := NewUsage[struct{}](nil)
 	id := uuid.New()
 	for i := range 50 {
-		if _, err := u.Bump(ctx, limes.BumpRequest{CapabilityID: id, MaxRequests: 0}); err != nil {
+		if _, err := u.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: id, maxRequests: 0})}); err != nil {
 			t.Fatalf("unlimited bump %d: %v", i, err)
 		}
 	}
@@ -166,7 +166,7 @@ func TestRefundReturnsSpendToEveryCounterOnce(t *testing.T) {
 	u := NewUsage[struct{}](nil)
 	id, tenant := uuid.New(), uuid.New()
 	_, _ = u.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{TenantID: tenant, MaxBudgetAmount: limes.MustParseAmount("100")})
-	receipt, err := u.Charge(ctx, limes.ChargeRequest{CapabilityID: id, TenantID: tenant, Amount: limes.MustParseAmount("5"), MaxBudget: limes.MustParseAmount("100"), UnitCode: "USD"}, nil)
+	receipt, err := u.Charge(ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant, maxBudget: limes.MustParseAmount("100"), unit: "USD"}), Amount: limes.MustParseAmount("5")}, nil)
 	if err != nil {
 		t.Fatalf("Charge: %v", err)
 	}
@@ -204,7 +204,7 @@ func TestChargeRejectsInvalidAmounts(t *testing.T) {
 	ctx := context.Background()
 	u := NewUsage[struct{}](nil)
 	for _, amt := range []limes.Nanos{-1, limes.MaxNanos + 1} {
-		_, err := u.Charge(ctx, limes.ChargeRequest{CapabilityID: uuid.New(), TenantID: uuid.New(), Amount: amt}, nil)
+		_, err := u.Charge(ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: uuid.New(), tenant: uuid.New()}), Amount: amt}, nil)
 		if !errors.Is(err, limes.ErrInvalidAmount) {
 			t.Errorf("Charge(%v) err = %v, want ErrInvalidAmount", amt, err)
 		}
@@ -265,7 +265,7 @@ func TestPurgeOrphansReleasesHolds(t *testing.T) {
 	u := NewUsage(records)
 	tenant, gone := uuid.New(), uuid.New() // gone was never recorded
 	const held = 3 * limes.NanosPerUnit
-	res, err := u.Reserve(ctx, limes.ReserveRequest{CapabilityID: gone, TenantID: tenant, Amount: held})
+	res, err := u.Reserve(ctx, limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: gone, tenant: tenant}), Amount: held})
 	if err != nil {
 		t.Fatal(err)
 	}
