@@ -11,7 +11,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-// OpenTelemetry instruments of a metered UsageStore (WithMetering).
+// OpenTelemetry instruments of a metered UsageStore (Instrument).
 //
 // Cardinality:
 //
@@ -61,8 +61,8 @@ const (
 	outcomeError = "error"
 )
 
-// MeteringOption configures WithMetering.
-type MeteringOption func(*meteringConfig)
+// InstrumentOption configures Instrument.
+type InstrumentOption func(*meteringConfig)
 
 type meteringConfig struct {
 	provider metric.MeterProvider
@@ -71,13 +71,13 @@ type meteringConfig struct {
 
 // WithMeterProvider creates the instruments on p rather than on the global
 // provider (otel.GetMeterProvider).
-func WithMeterProvider(p metric.MeterProvider) MeteringOption {
+func WithMeterProvider(p metric.MeterProvider) InstrumentOption {
 	return func(c *meteringConfig) { c.provider = p }
 }
 
 // WithTenantAttribute labels every measurement with tenant_id. Off by
 // default: it multiplies each series by the number of tenants.
-func WithTenantAttribute() MeteringOption {
+func WithTenantAttribute() InstrumentOption {
 	return func(c *meteringConfig) { c.tenant = true }
 }
 
