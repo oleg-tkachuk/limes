@@ -22,6 +22,14 @@
 // Verification is local: the signature is checked against a resolved public
 // key, so consumers scale horizontally without contending on a shared store.
 //
+// # Packages
+//
+// Two standards the verifier relies on are packages of their own, usable
+// without the rest: [github.com/oleg-tkachuk/limes/jwks] for key sets (RFC
+// 7517) and [github.com/oleg-tkachuk/limes/dpop] for proof of possession
+// (RFC 9449). [github.com/oleg-tkachuk/limes/inspect] reads a token without
+// verifying it, for tooling. memstore, storetest and metertest serve stores.
+//
 // # What you implement
 //
 // Three contracts are required; a consumer that implements them needs nothing

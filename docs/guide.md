@@ -92,9 +92,10 @@ guess. A document that is not JSON, or names a member twice, is refused.
 
 ### Inspect a token without trusting it
 
-`Decode` reads a JWT's claims, refusing only one that is malformed — it
-checks no signature, time, audience or revocation; `VerifySignature` checks
-only its signature against one key. Both are for tooling — showing what a
+`inspect.Decode` reads a JWT's claims, refusing only one that is malformed —
+it checks no signature, time, audience or revocation; `inspect.VerifySignature`
+checks only its signature against one key. They live in a package of their
+own so they are never mistaken for the API that authorises. Both are for tooling — showing what a
 token grants, or which key signed it. Neither applies expiry, audience or
 revocation, so never authorise a request on either: that is `Verify`.
 

@@ -168,7 +168,10 @@ read its claims under the wrong schema.
 
 | Path | Holds |
 |------|-------|
-| [`/`](.) | the `limes` package: issuer, verifier, caveats, Biscuit, DPoP, metering, contracts |
+| [`/`](.) | the `limes` package: issuer, verifier, caveats, Biscuit, metering, contracts |
+| [jwks/](jwks) | key sets (RFC 7517): the JWKS document and handler, remote and static key resolvers |
+| [dpop/](dpop) | proof of possession (RFC 9449): signing and checking proofs, replay cache, server nonces |
+| [inspect/](inspect) | reading a token without verifying it, for tooling |
 | [memstore/](memstore) | the in-memory reference implementation of every storage contract |
 | [storetest/](storetest), [metertest/](metertest) | conformance suites to run from your own store's tests |
 | [example/](example) | the five-minute walkthrough as a runnable program |
