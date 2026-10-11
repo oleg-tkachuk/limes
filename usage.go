@@ -354,7 +354,7 @@ type ReserveRequest struct {
 	MaxBudget Nanos
 	UnitCode  string
 	// TTL is how long the hold lasts if never settled or released.
-	// 0 = DefaultReservationTTL.
+	// 0 = DefaultReservationTTL; negative is ErrInvalidRequest.
 	TTL time.Duration
 	// Op and Actor are carried onto the charge Settle records.
 	Op    string

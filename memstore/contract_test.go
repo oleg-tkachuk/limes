@@ -31,7 +31,7 @@ func TestMeterContract(t *testing.T) {
 			NewCapability: func(parent uuid.UUID, maxBudget limes.Nanos) (uuid.UUID, error) {
 				c := limes.Capability{
 					ID: uuid.New(), ParentID: parent, ExpiresAt: time.Now().Add(contractTTL),
-					Subject: limes.Principal{TenantID: tenant, Subject: "agent"},
+					Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: tenant, Subject: "agent"},
 					Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, MaxBudgetAmount: maxBudget},
 				}
 				return c.ID, records.Insert(context.Background(), c, limes.Principal{Subject: "issuer"})
@@ -75,7 +75,7 @@ func TestMeterContractUsesTheTenantHooks(t *testing.T) {
 			NewCapability: func(parent uuid.UUID, maxBudget limes.Nanos) (uuid.UUID, error) {
 				c := limes.Capability{
 					ID: uuid.New(), ParentID: parent, ExpiresAt: time.Now().Add(contractTTL),
-					Subject: limes.Principal{TenantID: tenant, Subject: "agent"},
+					Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: tenant, Subject: "agent"},
 					Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, MaxBudgetAmount: maxBudget},
 				}
 				return c.ID, records.Insert(ctx, c, limes.Principal{Subject: "issuer"})

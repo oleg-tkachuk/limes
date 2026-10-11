@@ -1,0 +1,163 @@
+package limes
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"reflect"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+func TestPrincipalValidate(t *testing.T) {
+	tenant := uuid.New()
+	agent := &AgentPrincipal{AgentType: "worker"}
+	valid := map[string]Principal{
+		"user":               {Type: PrincipalUser, TenantID: tenant, Subject: "u"},
+		"service":            {Type: PrincipalService, TenantID: tenant, Subject: "s"},
+		"agent":              {Type: PrincipalAgent, TenantID: tenant, Subject: "a"},
+		"agent with details": {Type: PrincipalAgent, TenantID: tenant, Subject: "a", Agent: agent},
+	}
+	for name, p := range valid {
+		if err := p.Validate(); err != nil {
+			t.Errorf("%s: Validate = %v, want nil", name, err)
+		}
+	}
+	invalid := map[string]Principal{
+		"no type":                {TenantID: tenant, Subject: "x"},
+		"unknown type":           {Type: "robot", TenantID: tenant, Subject: "x"},
+		"type in another case":   {Type: "Agent", TenantID: tenant, Subject: "x"},
+		"agent fields on a user": {Type: PrincipalUser, TenantID: tenant, Subject: "u", Agent: agent},
+	}
+	for name, p := range invalid {
+		if err := p.Validate(); !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("%s: Validate = %v, want ErrInvalidRequest", name, err)
+		}
+	}
+}
+
+// Issue and Delegate refuse a subject Validate refuses.
+func TestIssueAndDelegateValidateTheSubject(t *testing.T) {
+	issuer, _, _, _ := buildIssuerVerifier(t)
+	ctx := context.Background()
+	if _, _, err := issuer.Issue(ctx, IssueRequest{
+		IssuedBy: Principal{Subject: "op"},
+		Subject:  Principal{Type: "robot", TenantID: uuid.New(), Subject: "a"},
+		Audience: []string{"data"},
+		Caveats:  Caveats{Ops: []Op{OpGet}},
+		TTL:      time.Minute,
+	}); !errors.Is(err, ErrInvalidRequest) {
+		t.Errorf("Issue with an unknown principal type: err = %v, want ErrInvalidRequest", err)
+	}
+
+	parent := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet}})
+	if _, _, err := issuer.Delegate(ctx, DelegateRequest{
+		Parent:  parent,
+		Subject: Principal{Type: PrincipalService, Subject: "s", Agent: &AgentPrincipal{AgentType: "worker"}},
+		Caveats: Caveats{Ops: []Op{OpGet}},
+		TTL:     time.Minute,
+	}); !errors.Is(err, ErrInvalidRequest) {
+		t.Errorf("Delegate to a service with agent fields: err = %v, want ErrInvalidRequest", err)
+	}
+}
+
+// A token whose principal Validate refuses is not one this module issues, so
+// the verifier refuses it as it refuses any other malformed claim.
+func TestVerifyRefusesAnUnknownPrincipalType(t *testing.T) {
+	issuer, v, _, _ := buildIssuerVerifier(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	token, err := issuer.signer.Sign(ctx, Capability{
+		ID: uuid.New(), Issuer: "limes-test",
+		Subject:  Principal{Type: "robot", TenantID: uuid.New(), Subject: "a"},
+		Audience: []string{"data"}, Caveats: Caveats{Ops: []Op{OpGet}},
+		IssuedAt: now, NotBefore: now, ExpiresAt: now.Add(time.Minute), Generation: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.Verify(ctx, VerifyRequest{Token: token, Audience: "data"}); !errors.Is(err, ErrInvalidSignature) {
+		t.Errorf("Verify of an unknown principal type: err = %v, want ErrInvalidSignature", err)
+	}
+}
+
+// A capability crosses the API by value: changing the request Issue or
+// Delegate was given — or the parent a child inherited caveats from — changes
+// nothing in the capability they returned.
+func TestIssueAndDelegateKeepNoAliasOfTheCaller(t *testing.T) {
+	issuer, _, _, _ := buildIssuerVerifier(t)
+	ctx := context.Background()
+	req := IssueRequest{
+		IssuedBy: Principal{Subject: "op"},
+		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a", Agent: &AgentPrincipal{AgentType: "worker"}},
+		Audience: []string{"data"},
+		Caveats: Caveats{
+			Ops: []Op{OpGet}, ResourcePrefixes: []string{"a/"}, ResourceURIs: []string{"a/b"},
+			SourceIPCIDR: []string{"10.0.0.0/8"},
+		},
+		TTL: time.Minute,
+	}
+	parent, _, err := issuer.Issue(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, _, err := issuer.Delegate(ctx, DelegateRequest{
+		Parent: parent, Subject: Principal{Type: PrincipalAgent, Subject: "child"}, InheritCaveats: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantParent, wantChild := snapshot(parent), snapshot(child)
+
+	req.Audience[0] = "other"
+	req.Caveats.Ops[0] = OpDelete
+	req.Caveats.ResourcePrefixes[0] = "z/"
+	req.Caveats.ResourceURIs[0] = "z/y"
+	req.Caveats.SourceIPCIDR[0] = "0.0.0.0/0"
+	req.Subject.Agent.AgentType = "rogue"
+	if got := snapshot(parent); got != wantParent {
+		t.Errorf("the issued capability changed with its request:\n got %s\nwant %s", got, wantParent)
+	}
+
+	parent.Caveats.Ops[0] = OpDelete
+	parent.Caveats.ResourcePrefixes[0] = "z/"
+	if got := snapshot(child); got != wantChild {
+		t.Errorf("the delegated capability changed with its parent:\n got %s\nwant %s", got, wantChild)
+	}
+}
+
+// snapshot is a capability's slices and pointers as text.
+func snapshot(c Capability) string {
+	agent := ""
+	if c.Subject.Agent != nil {
+		agent = c.Subject.Agent.AgentType
+	}
+	return fmt.Sprint(c.Audience, c.Caveats.Ops, c.Caveats.ResourcePrefixes, c.Caveats.ResourceURIs,
+		c.Caveats.SourceIPCIDR, agent)
+}
+
+// Every slice or pointer a Caveats or Principal holds is one clone copies:
+// a field added later and left out of clone would alias the caller's again.
+func TestCloneCoversEverySharedField(t *testing.T) {
+	for _, v := range []any{Caveats{}, Principal{}} {
+		typ := reflect.TypeOf(v)
+		for i := range typ.NumField() {
+			field := typ.Field(i)
+			switch field.Type.Kind() {
+			case reflect.Slice, reflect.Pointer, reflect.Map:
+				if !clonedFields[typ.Name()+"."+field.Name] {
+					t.Errorf("%s.%s is shared by reference and not in clonedFields; copy it in clone", typ.Name(), field.Name)
+				}
+			default: // a value: copied with the struct
+			}
+		}
+	}
+}
+
+// clonedFields are the reference fields clone copies.
+var clonedFields = map[string]bool{
+	"Caveats.Ops": true, "Caveats.ResourcePrefixes": true, "Caveats.ResourceURIs": true,
+	"Caveats.SourceIPCIDR": true, "Principal.Agent": true,
+}

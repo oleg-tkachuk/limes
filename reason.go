@@ -12,6 +12,7 @@ type Reason string
 // The refusals a verifier, Caveats.Check or a Meter returns for a presented
 // capability.
 const (
+	ReasonMalformedAuthorization Reason = "malformed_authorization"
 	ReasonInvalidSignature       Reason = "invalid_signature"
 	ReasonKeysUnavailable        Reason = "keys_unavailable"
 	ReasonExpired                Reason = "expired"
@@ -46,6 +47,7 @@ type reasonRule struct {
 // invalid signature, as the verifier means it to; keys the verifier could not
 // fetch at all are an outage on its side, not a fault in the token.
 var reasonRules = []reasonRule{
+	{ErrMalformedAuthorization, ReasonMalformedAuthorization, true},
 	{ErrJWKSUnavailable, ReasonKeysUnavailable, false},
 	{ErrDPoPRequired, ReasonProofRequired, false},
 	{ErrDPoPInvalid, ReasonProofInvalid, false},

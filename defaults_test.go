@@ -71,3 +71,36 @@ func TestConfigDefaults(t *testing.T) {
 		t.Errorf("replay cache bound = %d, want 100 000", c.maxEntries)
 	}
 }
+
+// A negative duration or size is refused, not taken as given: a negative
+// default TTL mints capabilities already expired, a negative leeway narrows
+// the validity window, and a negative size refuses every token.
+func TestConfigRefusesNegatives(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := NewEd25519Signer("k1", priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewIssuer(IssuerConfig{Signer: signer, Store: newMemStore(), IssuerName: goldenIssuer, DefaultTTL: -time.Minute}); err == nil {
+		t.Error("NewIssuer accepted a negative DefaultTTL")
+	}
+
+	base := VerifierConfig{
+		Keys:           NewStaticKeyResolver(map[string]ed25519.PublicKey{"k1": pub}),
+		Revocations:    newMemStore(),
+		TrustedIssuers: []string{goldenIssuer},
+	}
+	for name, mutate := range map[string]func(*VerifierConfig){
+		"Leeway":        func(c *VerifierConfig) { c.Leeway = -time.Second },
+		"MaxTokenBytes": func(c *VerifierConfig) { c.MaxTokenBytes = -1 },
+	} {
+		cfg := base
+		mutate(&cfg)
+		if _, err := NewStandardVerifier(cfg); err == nil {
+			t.Errorf("NewStandardVerifier accepted a negative %s", name)
+		}
+	}
+}

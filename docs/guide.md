@@ -41,7 +41,10 @@ with no round trip to the issuer, and nothing in the claims is read until it
 has. Every rejection is a distinct sentinel; map each to whatever status your
 transport uses, or let `ErrorResponse` answer it the HTTP way (below).
 
-The token must carry `typ: limes-cap-v3+jwt` and a tenant, its claims must
+The token must carry `typ: limes-cap-v3+jwt`, a tenant and a principal of a
+known kind (`PrincipalUser`, `PrincipalAgent` or `PrincipalService`; agent
+details only on an agent — `Principal.Validate`, which `Issue` and `Delegate`
+run too), its claims must
 hold no member the verifier does not know (a caveat it could not enforce),
 none twice and none in another case, and may be at most
 `VerifierConfig.MaxTokenBytes` long (16 KiB unless set). When several issuers share a verifier, set
@@ -154,7 +157,7 @@ spawned, without calling back to any admin API:
 ```go
 child, childToken, err := issuer.Delegate(ctx, limes.DelegateRequest{
     Parent:  cap,                       // the verified parent
-    Subject: limes.Principal{ /* the sub-agent */ },
+    Subject: limes.Principal{Type: limes.PrincipalAgent, Subject: "sub-worker"},
     TTL:     2 * time.Minute,
     Caveats: limes.Caveats{
         Ops:              []limes.Op{limes.OpGet},  // dropped OpShare

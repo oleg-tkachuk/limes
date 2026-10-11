@@ -380,6 +380,12 @@ func checkMalformed[TX any](t *testing.T, f fixture[TX]) {
 	}, nil); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("settle with an unknown overrun: err = %v, want ErrInvalidRequest", err)
 	}
+	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
+		CapabilityID: f.child, TenantID: f.Tenant, Amount: one, MaxBudget: childBudget, UnitCode: unit,
+		TTL: -time.Minute,
+	}); !errors.Is(err, limes.ErrInvalidRequest) {
+		t.Errorf("reserve with a negative TTL: err = %v, want ErrInvalidRequest", err)
+	}
 	if f.spent(t, f.child) != 0 {
 		t.Error("a refused request moved spend")
 	}

@@ -22,7 +22,7 @@ func TestTokenIntegersStayWithinIJSON(t *testing.T) {
 	}
 	issuer, _, _, _ := buildIssuerVerifier(t)
 	_, _, err := issuer.Issue(context.Background(), IssueRequest{
-		IssuedBy: Principal{Subject: "op"}, Subject: Principal{TenantID: uuid.New(), Subject: "a"},
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, Generation: MaxIJSONInteger + 1,
 	})
 	if !errors.Is(err, ErrInvalidRequest) {
@@ -59,7 +59,7 @@ func TestTokenClaimsAreUTF8(t *testing.T) {
 func TestSignRefusesIntegersOutsideIJSON(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)
 	_, _, err := issuer.Issue(context.Background(), IssueRequest{
-		IssuedBy: Principal{Subject: "op"}, Subject: Principal{TenantID: uuid.New(), Subject: "a"},
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}},
 		NotBefore: time.Unix(-(MaxIJSONInteger + 1), 0),
 	})

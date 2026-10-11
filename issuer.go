@@ -49,7 +49,7 @@ type IssuerConfig struct {
 
 	// DefaultTTL caps the lifetime when IssueRequest.TTL is zero.
 	// Default 15 minutes when zero — short enough that revocation
-	// propagation latency rarely matters.
+	// propagation latency rarely matters. Negative is refused.
 	DefaultTTL time.Duration
 
 	// Now is the clock; tests override.
@@ -66,6 +66,9 @@ func NewIssuer(cfg IssuerConfig) (*Issuer, error) {
 	}
 	if cfg.IssuerName == "" {
 		return nil, errors.New("limes: IssuerConfig.IssuerName required")
+	}
+	if cfg.DefaultTTL < 0 {
+		return nil, fmt.Errorf("limes: IssuerConfig.DefaultTTL %s is negative", cfg.DefaultTTL)
 	}
 	if cfg.DefaultTTL == 0 {
 		cfg.DefaultTTL = defaultIssueTTL
@@ -114,6 +117,9 @@ func (i *Issuer) Issue(ctx context.Context, req IssueRequest) (Capability, strin
 	if req.Subject.TenantID == uuid.Nil {
 		return Capability{}, "", invalidRequest("Issue requires Subject.TenantID")
 	}
+	if err := req.Subject.Validate(); err != nil {
+		return Capability{}, "", err
+	}
 	if req.IssuedBy.Subject == "" {
 		return Capability{}, "", invalidRequest("IssuedBy is required")
 	}
@@ -142,9 +148,9 @@ func (i *Issuer) Issue(ctx context.Context, req IssueRequest) (Capability, strin
 	cap := Capability{
 		ID:              id,
 		Issuer:          i.issuerName,
-		Subject:         req.Subject,
-		Audience:        req.Audience,
-		Caveats:         req.Caveats,
+		Subject:         req.Subject.clone(),
+		Audience:        slices.Clone(req.Audience),
+		Caveats:         req.Caveats.clone(),
 		IssuedAt:        now,
 		ExpiresAt:       expires,
 		Generation:      req.Generation,
@@ -255,6 +261,9 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 	if req.Subject.TenantID == uuid.Nil {
 		req.Subject.TenantID = req.Parent.Subject.TenantID
 	}
+	if err := req.Subject.Validate(); err != nil {
+		return Capability{}, "", err
+	}
 	if len(req.Audience) == 0 {
 		req.Audience = append([]string(nil), req.Parent.Audience...)
 	}
@@ -298,9 +307,9 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 	child := Capability{
 		ID:              id,
 		Issuer:          i.issuerName,
-		Subject:         req.Subject,
-		Audience:        req.Audience,
-		Caveats:         req.Caveats,
+		Subject:         req.Subject.clone(),
+		Audience:        slices.Clone(req.Audience),
+		Caveats:         req.Caveats.clone(),
 		IssuedAt:        now,
 		ExpiresAt:       expires,
 		ParentID:        req.Parent.ID,

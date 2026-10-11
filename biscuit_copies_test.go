@@ -26,7 +26,7 @@ func limitedBiscuit(t *testing.T) (*StandardVerifier, Capability, string) {
 	v.cfg.MeterCopies = true
 	cap, _, err := issuer.Issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "op"},
-		Subject:  Principal{TenantID: uuid.New(), Subject: "agent"},
+		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData},
 		Caveats: Caveats{
 			Ops: []Op{OpGet}, MaxRequests: copyTestCapRequests,

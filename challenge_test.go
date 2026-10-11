@@ -124,3 +124,45 @@ func TestWriteErrorResponse(t *testing.T) {
 		t.Errorf("body = %s, %v", rec.Body, err)
 	}
 }
+
+// The refusal table and the reason table read one error the same way: every
+// error ErrorResponse answers has a Reason, every error with a Reason gets an
+// answer of its own rather than the internal-error fallback, and in each
+// table an error is matched by its own row, not by an earlier, wider one.
+func TestRefusalsAndReasonsAgree(t *testing.T) {
+	for _, row := range refusals {
+		for _, sentinel := range row.sentinels {
+			// The family every caveat refusal matches: never returned alone,
+			// and each member has a Reason of its own.
+			if errors.Is(sentinel, ErrCaveatViolation) {
+				continue
+			}
+			if _, ok := ReasonOf(sentinel); !ok {
+				t.Errorf("%v is answered %d %q but has no Reason", sentinel, row.status, row.slug)
+			}
+			if first := firstRefusal(sentinel); first.slug != row.slug {
+				t.Errorf("%v is listed under %q but matched by %q first", sentinel, row.slug, first.slug)
+			}
+		}
+	}
+	for _, rules := range [][]reasonRule{reasonAliases, reasonRules} {
+		for _, rule := range rules {
+			if first := firstRefusal(rule.sentinel); first.slug == internalError.slug {
+				t.Errorf("%v has Reason %q but ErrorResponse answers it as an internal error", rule.sentinel, rule.reason)
+			}
+			if got, _ := ReasonOf(rule.sentinel); got != rule.reason {
+				t.Errorf("%v is listed with Reason %q but ReasonOf gives %q", rule.sentinel, rule.reason, got)
+			}
+		}
+	}
+}
+
+// firstRefusal is the row ErrorResponse answers err with.
+func firstRefusal(err error) refusal {
+	for _, r := range refusals {
+		if matchesAny(err, r.sentinels) {
+			return r
+		}
+	}
+	return internalError
+}

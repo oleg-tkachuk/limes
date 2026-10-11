@@ -160,7 +160,7 @@ func TestKeyBindingSurvivesTheTokenAndDelegation(t *testing.T) {
 	jkt, _ := KeyThumbprint(key.Public())
 
 	parent, token, err := issuer.Issue(ctx, IssueRequest{
-		IssuedBy: Principal{Subject: "op"}, Subject: Principal{TenantID: uuid.New(), Subject: "a"},
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour,
 		ConfirmationJKT: jkt,
 	})
@@ -175,13 +175,13 @@ func TestKeyBindingSurvivesTheTokenAndDelegation(t *testing.T) {
 		t.Fatalf("verified binding = %q, %v; want %q", got.ConfirmationJKT, err, jkt)
 	}
 
-	child, _, err := issuer.Delegate(ctx, DelegateRequest{Parent: parent, InheritCaveats: true})
+	child, _, err := issuer.Delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: parent, InheritCaveats: true})
 	if err != nil || child.ConfirmationJKT != jkt {
 		t.Fatalf("child without its own key: binding %q, %v; want the parent's", child.ConfirmationJKT, err)
 	}
 	subKey := dpopKeys(t)["P-256"]
 	subJKT, _ := KeyThumbprint(subKey.Public())
-	child, _, err = issuer.Delegate(ctx, DelegateRequest{Parent: parent, InheritCaveats: true, ConfirmationJKT: subJKT})
+	child, _, err = issuer.Delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: parent, InheritCaveats: true, ConfirmationJKT: subJKT})
 	if err != nil || child.ConfirmationJKT != subJKT {
 		t.Fatalf("child bound to the sub-agent's key: %q, %v", child.ConfirmationJKT, err)
 	}
@@ -215,7 +215,7 @@ func TestMemoryReplayCacheIsBoundedAndForgetsExpired(t *testing.T) {
 func TestIssueRefusesAMalformedBinding(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)
 	_, _, err := issuer.Issue(context.Background(), IssueRequest{
-		IssuedBy: Principal{Subject: "op"}, Subject: Principal{TenantID: uuid.New(), Subject: "a"},
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour,
 		ConfirmationJKT: "not-a-thumbprint",
 	})
