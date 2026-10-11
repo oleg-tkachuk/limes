@@ -143,8 +143,8 @@ func TestForgedSignatureRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verifier: %v", err)
 	}
-	if _, err := verifier.Verify(context.Background(), VerifyRequest{Token: token, Audience: goldenAudience}); !errors.Is(err, ErrInvalidSignature) {
-		t.Fatalf("want ErrInvalidSignature for a forged token, got %v", err)
+	if _, err := verifier.Verify(context.Background(), VerifyRequest{Token: token, Audience: goldenAudience}); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("want ErrInvalidToken for a forged token, got %v", err)
 	}
 }
 
@@ -213,7 +213,7 @@ func TestNormaliseUnitCode(t *testing.T) {
 // them by design, and TestSentinelMatrix pins exactly which.
 func TestSentinelsAreIndividuallyMatchable(t *testing.T) {
 	all := map[string]error{
-		"ErrInvalidSignature":     ErrInvalidSignature,
+		"ErrInvalidToken":         ErrInvalidToken,
 		"ErrExpired":              ErrExpired,
 		"ErrNotYetValid":          ErrNotYetValid,
 		"ErrRevoked":              ErrRevoked,

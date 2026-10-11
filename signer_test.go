@@ -151,7 +151,7 @@ func TestSign_TamperDetection(t *testing.T) {
 	// Flip a byte in the middle of the payload segment.
 	mid := len(token) / 2
 	tampered := token[:mid] + flipByte(token[mid]) + token[mid+1:]
-	if err := VerifySignature(tampered, pub); !errors.Is(err, ErrInvalidSignature) {
+	if err := VerifySignature(tampered, pub); !errors.Is(err, ErrInvalidToken) {
 		t.Fatalf("tampered token verified: err=%v", err)
 	}
 }

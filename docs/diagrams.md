@@ -176,7 +176,7 @@ flowchart TB
     brev{"Biscuit: IsBiscuitRevoked<br/>any block of this copy"}
     ok(["Capability"])
 
-    bad["ErrInvalidSignature"]
+    bad["ErrInvalidToken"]
     early["ErrNotYetValid"]
     expired["ErrExpired"]
     mism["ErrAudienceMismatch"]
@@ -219,7 +219,7 @@ flowchart TB
 ```
 
 An unknown kid, an untrusted issuer, a kid bound to another issuer and a
-missing tenant all match `ErrInvalidSignature`; an unknown kid also matches
+missing tenant all match `ErrInvalidToken`; an unknown kid also matches
 `ErrUnknownKID`, and the rest carry nothing more to branch on. An unreachable
 JWKS is the server's fault, not the token's: it is `ErrJWKSUnavailable` alone,
 which `ErrorResponse` answers with 503. The DPoP refusals and
@@ -258,7 +258,7 @@ flowchart TB
     brev{"IsBiscuitRevoked(revocation ids)<br/>any block of this token"}
     ok(["Capability with Copies"])
 
-    bad["ErrInvalidSignature"]
+    bad["ErrInvalidToken"]
     att["ErrBiscuitAttenuation"]
     unmetered["ErrCopyCountersNotMetered"]
     revoked["ErrRevoked"]
@@ -292,7 +292,7 @@ flowchart TB
 
 The sealed token presented on its own is refused, so it cannot be lifted out
 to shed an attenuation. `ErrBiscuitAttenuation` and
-`ErrCopyCountersNotMetered` both match `ErrInvalidSignature`: the token is not
+`ErrCopyCountersNotMetered` both match `ErrInvalidToken`: the token is not
 one this verifier accepts.
 
 ## Proof of possession
@@ -363,7 +363,7 @@ error's own text never reaches the client.
 | `ErrMalformedAuthorization` | 400 | `error="invalid_request"` under the client's scheme (Bearer when unknown) |
 | `ErrDPoPNonceRequired` | 401 | `DPoP error="use_dpop_nonce"`, and a fresh `DPoP-Nonce` |
 | `ErrDPoPRequired` · `ErrDPoPInvalid` · `ErrDPoPReplayed`, and any other `ErrProofOfPossession` | 401 | `DPoP error="invalid_dpop_proof", algs="Ed25519 ES256"` |
-| `ErrAuthSchemeMismatch` · `ErrInvalidSignature` · `ErrExpired` · `ErrNotYetValid` · `ErrRevoked` · `ErrAudienceMismatch`, and any other `ErrUnauthenticated` | 401 | `error="invalid_token"` under the client's scheme (Bearer when unknown) |
+| `ErrAuthSchemeMismatch` · `ErrInvalidToken` · `ErrExpired` · `ErrNotYetValid` · `ErrRevoked` · `ErrAudienceMismatch`, and any other `ErrUnauthenticated` | 401 | `error="invalid_token"` under the client's scheme (Bearer when unknown) |
 | any `ErrCaveatViolation` | 403 | `error="insufficient_scope"` |
 | `ErrBudgetExceeded` · `ErrTenantBudgetExceeded` · `ErrRequestLimitExceeded` | 403 | none |
 | anything else — a store or key resolver outage, `ErrEffectConflict` | 500 | none |

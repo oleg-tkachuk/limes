@@ -148,7 +148,7 @@ func TestCopyLimitsNeedMeterCopies(t *testing.T) {
 	ctx := context.Background()
 	limited, _ := Attenuate(root, Attenuation{MaxRequests: 5})
 	_, err := v.Verify(ctx, VerifyRequest{Token: limited, Audience: audienceData})
-	if !errors.Is(err, ErrCopyCountersNotMetered) || !errors.Is(err, ErrInvalidSignature) {
+	if !errors.Is(err, ErrCopyCountersNotMetered) || !errors.Is(err, ErrInvalidToken) {
 		t.Fatalf("err = %v, want ErrCopyCountersNotMetered", err)
 	}
 	plain, _ := Attenuate(root, Attenuation{Ops: []Op{OpGet}})

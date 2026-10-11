@@ -41,8 +41,8 @@ func TestTokenIntegersStayWithinIJSON(t *testing.T) {
 	} {
 		claims := validClaims(uuid.New())
 		mod(claims)
-		if _, err := v.Verify(context.Background(), VerifyRequest{Token: resign(t, priv, hdr, claims), Audience: audienceData}); !errors.Is(err, ErrInvalidSignature) {
-			t.Errorf("%s past 2^53-1: err = %v, want ErrInvalidSignature", name, err)
+		if _, err := v.Verify(context.Background(), VerifyRequest{Token: resign(t, priv, hdr, claims), Audience: audienceData}); !errors.Is(err, ErrInvalidToken) {
+			t.Errorf("%s past 2^53-1: err = %v, want ErrInvalidToken", name, err)
 		}
 	}
 }

@@ -92,11 +92,11 @@ type BiscuitCopy struct {
 // a copy carrying limits is named, and can be revoked, on any verifier.
 func (v *StandardVerifier) BiscuitCopy(ctx context.Context, token string) (BiscuitCopy, error) {
 	if !IsBiscuit(token) {
-		return BiscuitCopy{}, fmt.Errorf("%w: not a Biscuit token", ErrInvalidSignature)
+		return BiscuitCopy{}, fmt.Errorf("%w: not a Biscuit token", ErrInvalidToken)
 	}
 	if len(token) > v.cfg.MaxTokenBytes {
 		return BiscuitCopy{}, fmt.Errorf("%w: token is %d bytes (limit %d)",
-			ErrInvalidSignature, len(token), v.cfg.MaxTokenBytes)
+			ErrInvalidToken, len(token), v.cfg.MaxTokenBytes)
 	}
 	c, ids, err := v.verifyBiscuit(ctx, token, true)
 	if err != nil {

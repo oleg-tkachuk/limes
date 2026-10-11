@@ -26,7 +26,7 @@ case errors.Is(err, limes.ErrRevoked):          // pulled mid-flight
 case errors.Is(err, limes.ErrAudienceMismatch): // token for another service
 case errors.Is(err, limes.ErrCaveatViolation):  // not allowed to do this
 case errors.Is(err, limes.ErrProofOfPossession): // no valid proof that the bearer holds the key
-case errors.Is(err, limes.ErrInvalidSignature): // forged, or not this verifier's to accept
+case errors.Is(err, limes.ErrInvalidToken): // forged, or not this verifier's to accept
 case errors.Is(err, limes.ErrJWKSUnavailable):  // the issuer's keys out of reach: the server's trouble, not the token's
 }
 // Every refusal of the token or its proof also matches ErrUnauthenticated —

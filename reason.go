@@ -16,7 +16,7 @@ type Reason string
 // capability.
 const (
 	ReasonMalformedAuthorization Reason = "malformed_authorization"
-	ReasonInvalidSignature       Reason = "invalid_signature"
+	ReasonInvalidToken           Reason = "invalid_token"
 	ReasonKeysUnavailable        Reason = "keys_unavailable"
 	ReasonExpired                Reason = "expired"
 	ReasonNotYetValid            Reason = "not_yet_valid"
@@ -51,7 +51,7 @@ type refusalRule struct {
 // first rule an error matches decides. Families do not overlap, so order
 // matters only within one — each member before its family's root, and
 // ErrBiscuitAttenuation, an invalid token of its own kind, before
-// ErrInvalidSignature.
+// ErrInvalidToken.
 var refusalRules = []refusalRule{
 	{ErrMalformedAuthorization, ReasonMalformedAuthorization, true, answerMalformed},
 	{ErrJWKSUnavailable, ReasonKeysUnavailable, false, answerKeysUnavailable},
@@ -67,7 +67,7 @@ var refusalRules = []refusalRule{
 	{ErrProofOfPossession, "", false, answerProof},
 
 	{ErrBiscuitAttenuation, ReasonInvalidBiscuit, true, answerToken},
-	{ErrInvalidSignature, ReasonInvalidSignature, true, answerToken},
+	{ErrInvalidToken, ReasonInvalidToken, true, answerToken},
 	{ErrExpired, ReasonExpired, true, answerToken},
 	{ErrNotYetValid, ReasonNotYetValid, false, answerToken},
 	{ErrRevoked, ReasonRevoked, true, answerToken},

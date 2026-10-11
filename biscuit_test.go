@@ -145,7 +145,7 @@ func TestBiscuitAttenuationCannotWiden(t *testing.T) {
 				}
 				return
 			}
-			if !errors.Is(err, ErrBiscuitAttenuation) || !errors.Is(err, ErrInvalidSignature) {
+			if !errors.Is(err, ErrBiscuitAttenuation) || !errors.Is(err, ErrInvalidToken) {
 				t.Fatalf("err = %v, want ErrBiscuitAttenuation", err)
 			}
 		})
@@ -194,8 +194,8 @@ func TestBiscuitCannotBeStrippedOrForged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v.Verify(context.Background(), VerifyRequest{Token: inner, Audience: audienceData}); !errors.Is(err, ErrInvalidSignature) {
-		t.Fatalf("sealed token alone: err = %v, want ErrInvalidSignature", err)
+	if _, err := v.Verify(context.Background(), VerifyRequest{Token: inner, Audience: audienceData}); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("sealed token alone: err = %v, want ErrInvalidToken", err)
 	}
 
 	// Re-wrapping that JWT in a Biscuit of one's own fails: its root is not
@@ -205,8 +205,8 @@ func TestBiscuitCannotBeStrippedOrForged(t *testing.T) {
 	_ = bb.AddAuthorityFact(biscuitFact(biscuitFactCapability, biscuit.String(inner)))
 	forged, _ := bb.Build()
 	tok, _ := serializeBiscuit(forged)
-	if _, err := v.Verify(context.Background(), VerifyRequest{Token: tok, Audience: audienceData}); !errors.Is(err, ErrInvalidSignature) {
-		t.Fatalf("re-wrapped: err = %v, want ErrInvalidSignature", err)
+	if _, err := v.Verify(context.Background(), VerifyRequest{Token: tok, Audience: audienceData}); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("re-wrapped: err = %v, want ErrInvalidToken", err)
 	}
 
 	// A Biscuit around an ordinary token (no root claim) is refused too.
@@ -218,8 +218,8 @@ func TestBiscuitCannotBeStrippedOrForged(t *testing.T) {
 	_ = bb.AddAuthorityFact(biscuitFact(biscuitFactCapability, biscuit.String(plain)))
 	wrapped, _ := bb.Build()
 	tok, _ = serializeBiscuit(wrapped)
-	if _, err := v.Verify(context.Background(), VerifyRequest{Token: tok, Audience: audienceData}); !errors.Is(err, ErrInvalidSignature) {
-		t.Fatalf("wrapped plain token: err = %v, want ErrInvalidSignature", err)
+	if _, err := v.Verify(context.Background(), VerifyRequest{Token: tok, Audience: audienceData}); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("wrapped plain token: err = %v, want ErrInvalidToken", err)
 	}
 
 	// Tampering with any byte breaks the chain.
@@ -266,8 +266,8 @@ func TestBiscuitOfflineBinding(t *testing.T) {
 func TestVerifierRefusesBiscuitUnlessEnabled(t *testing.T) {
 	_, plainVerifier, _, _ := buildIssuerVerifier(t)
 	_, _, _, _, token := biscuitFixture(t)
-	if _, err := plainVerifier.Verify(context.Background(), VerifyRequest{Token: token, Audience: audienceData}); !errors.Is(err, ErrInvalidSignature) {
-		t.Fatalf("err = %v, want ErrInvalidSignature", err)
+	if _, err := plainVerifier.Verify(context.Background(), VerifyRequest{Token: token, Audience: audienceData}); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("err = %v, want ErrInvalidToken", err)
 	}
 }
 

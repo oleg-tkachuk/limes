@@ -13,8 +13,8 @@ func TestReasonOf(t *testing.T) {
 		want      Reason
 		permanent bool
 	}{
-		{"forged", fmt.Errorf("%w: bad", ErrInvalidSignature), ReasonInvalidSignature, true},
-		{"unknown kid stays a bad signature", fmt.Errorf("%w: kid %q: %w", ErrInvalidSignature, "k1", ErrUnknownKID), ReasonInvalidSignature, true},
+		{"forged", fmt.Errorf("%w: bad", ErrInvalidToken), ReasonInvalidToken, true},
+		{"unknown kid stays a bad signature", fmt.Errorf("%w: kid %q: %w", ErrInvalidToken, "k1", ErrUnknownKID), ReasonInvalidToken, true},
 		{"keys unreachable", fmt.Errorf("limes: resolve kid %q: %w", "k1", ErrJWKSUnavailable), ReasonKeysUnavailable, false},
 		{"expired", ErrExpired, ReasonExpired, true},
 		{"not yet valid", ErrNotYetValid, ReasonNotYetValid, false},

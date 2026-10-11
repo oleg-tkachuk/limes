@@ -61,8 +61,8 @@ var ErrCopyCountersNotMetered = fmt.Errorf("%w: copy limits need a verifier with
 
 // ErrBiscuitAttenuation — an attenuation block the verifier cannot honour:
 // outside the vocabulary, malformed, or widening its parent. Matches
-// ErrInvalidSignature: the token is not one this verifier accepts.
-var ErrBiscuitAttenuation error = &familyError{"limes: invalid Biscuit attenuation", ErrInvalidSignature}
+// ErrInvalidToken: the token is not one this verifier accepts.
+var ErrBiscuitAttenuation error = &familyError{"limes: invalid Biscuit attenuation", ErrInvalidToken}
 
 // IsBiscuit reports whether token is in the Biscuit form rather than a JWT:
 // a JWT has exactly two dots, base64url has none.
@@ -183,33 +183,33 @@ func Attenuate(token string, a Attenuation) (string, error) {
 func openBiscuit(token string) (string, func(parent *Capability, meterCopies bool) (*Capability, [][]byte, error), error) {
 	raw, err := base64.RawURLEncoding.DecodeString(token)
 	if err != nil {
-		return "", nil, fmt.Errorf("%w: biscuit encoding: %w", ErrInvalidSignature, err)
+		return "", nil, fmt.Errorf("%w: biscuit encoding: %w", ErrInvalidToken, err)
 	}
 	var container pb.Biscuit
 	if err := proto.Unmarshal(raw, &container); err != nil || container.GetAuthority() == nil {
-		return "", nil, fmt.Errorf("%w: biscuit container", ErrInvalidSignature)
+		return "", nil, fmt.Errorf("%w: biscuit container", ErrInvalidToken)
 	}
 	blocks, err := decodeBiscuitBlocks(&container)
 	if err != nil {
-		return "", nil, fmt.Errorf("%w: %w", ErrInvalidSignature, err)
+		return "", nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
 	inner, err := sealedToken(blocks[0])
 	if err != nil {
-		return "", nil, fmt.Errorf("%w: %w", ErrInvalidSignature, err)
+		return "", nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
 	// The chain is checked once the sealed token has named its root; the
 	// caller verifies that token first and hands back what it vouches for.
 	attenuate := func(parent *Capability, meterCopies bool) (*Capability, [][]byte, error) {
 		root, err := base64.RawURLEncoding.DecodeString(parent.BiscuitRoot)
 		if err != nil || len(root) != ed25519.PublicKeySize {
-			return nil, nil, fmt.Errorf("%w: sealed token names no biscuit root", ErrInvalidSignature)
+			return nil, nil, fmt.Errorf("%w: sealed token names no biscuit root", ErrInvalidToken)
 		}
 		b, err := biscuit.Unmarshal(raw)
 		if err != nil {
-			return nil, nil, fmt.Errorf("%w: %w", ErrInvalidSignature, err)
+			return nil, nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 		}
 		if _, err := b.Authorizer(ed25519.PublicKey(root)); err != nil {
-			return nil, nil, fmt.Errorf("%w: biscuit chain: %w", ErrInvalidSignature, err)
+			return nil, nil, fmt.Errorf("%w: biscuit chain: %w", ErrInvalidToken, err)
 		}
 		cur := *parent
 		cur.BiscuitRoot = ""
@@ -469,15 +469,15 @@ func biscuitFact(name string, term biscuit.Term) biscuit.Fact {
 
 func parseBiscuit(token string) (*biscuit.Biscuit, error) {
 	if !IsBiscuit(token) {
-		return nil, fmt.Errorf("%w: not a Biscuit token", ErrInvalidSignature)
+		return nil, fmt.Errorf("%w: not a Biscuit token", ErrInvalidToken)
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(token)
 	if err != nil {
-		return nil, fmt.Errorf("%w: biscuit encoding: %w", ErrInvalidSignature, err)
+		return nil, fmt.Errorf("%w: biscuit encoding: %w", ErrInvalidToken, err)
 	}
 	b, err := biscuit.Unmarshal(raw)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidSignature, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
 	return b, nil
 }

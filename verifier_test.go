@@ -253,8 +253,8 @@ func TestVerify_UntrustedIssuer(t *testing.T) {
 		TrustedIssuers: []string{"limes-test"}, // rogue not in set
 	})
 	_, err := verifier.Verify(context.Background(), VerifyRequest{Token: token, Audience: audienceData})
-	if !errors.Is(err, ErrInvalidSignature) {
-		t.Fatalf("expected ErrInvalidSignature, got %v", err)
+	if !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("expected ErrInvalidToken, got %v", err)
 	}
 }
 

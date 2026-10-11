@@ -78,8 +78,8 @@ func TestVerifyRefusesAnUnknownPrincipalType(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v.Verify(ctx, VerifyRequest{Token: token, Audience: "data"}); !errors.Is(err, ErrInvalidSignature) {
-		t.Errorf("Verify of an unknown principal type: err = %v, want ErrInvalidSignature", err)
+	if _, err := v.Verify(ctx, VerifyRequest{Token: token, Audience: "data"}); !errors.Is(err, ErrInvalidToken) {
+		t.Errorf("Verify of an unknown principal type: err = %v, want ErrInvalidToken", err)
 	}
 }
 

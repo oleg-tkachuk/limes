@@ -52,7 +52,7 @@ func TestVerifyEnforcesProofOfPossession(t *testing.T) {
 		"bound, replayed proof":  {replayed, ErrDPoPReplayed},
 		"bound, another token's": {func() VerifyRequest { r := withProof(t, key, unbound, audienceData, now); r.Token = bound; return r }(), ErrDPoPInvalid},
 		"unbound, stray proof":   {withProof(t, key, unbound, audienceData, now), nil},
-		"no token":               {VerifyRequest{Audience: audienceData}, ErrInvalidSignature},
+		"no token":               {VerifyRequest{Audience: audienceData}, ErrInvalidToken},
 		"no audience":            {VerifyRequest{Token: unbound}, ErrAudienceMismatch},
 	}
 	for name, tc := range cases {

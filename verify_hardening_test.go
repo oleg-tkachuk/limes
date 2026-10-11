@@ -61,8 +61,8 @@ func TestVerifyRequiresCapabilityTyp(t *testing.T) {
 	// schema: v1 (Go field names) and v2 (authorization_details, act).
 	for _, typ := range []string{"JWT", "", "at+jwt", "limes-cap+jwt", "limes-cap-v2+jwt"} {
 		tok := resign(t, priv, map[string]any{"alg": algEd25519, "kid": "k1", "typ": typ}, validClaims(uuid.New()))
-		if _, err := v.Verify(ctx, VerifyRequest{Token: tok, Audience: "data"}); !errors.Is(err, ErrInvalidSignature) {
-			t.Errorf("typ %q: Verify = %v, want ErrInvalidSignature", typ, err)
+		if _, err := v.Verify(ctx, VerifyRequest{Token: tok, Audience: "data"}); !errors.Is(err, ErrInvalidToken) {
+			t.Errorf("typ %q: Verify = %v, want ErrInvalidToken", typ, err)
 		}
 	}
 }
@@ -73,8 +73,8 @@ func TestVerifyRejectsTenantlessAndOversizedTokens(t *testing.T) {
 	ctx := context.Background()
 	hdr := map[string]any{"alg": algEd25519, "kid": "k1", "typ": TokenType}
 
-	if _, err := v.Verify(ctx, VerifyRequest{Token: resign(t, priv, hdr, validClaims(uuid.Nil)), Audience: "data"}); !errors.Is(err, ErrInvalidSignature) {
-		t.Errorf("tenantless token: Verify = %v, want ErrInvalidSignature", err)
+	if _, err := v.Verify(ctx, VerifyRequest{Token: resign(t, priv, hdr, validClaims(uuid.Nil)), Audience: "data"}); !errors.Is(err, ErrInvalidToken) {
+		t.Errorf("tenantless token: Verify = %v, want ErrInvalidToken", err)
 	}
 
 	big := validClaims(uuid.New())
@@ -98,8 +98,8 @@ func TestVerifyEnforcesKeyIssuerBinding(t *testing.T) {
 	}
 	claims := validClaims(uuid.New())
 	claims["iss"] = "other" // trusted, but not for this key
-	if _, err := v.Verify(ctx, VerifyRequest{Token: resign(t, priv, hdr, claims), Audience: "data"}); !errors.Is(err, ErrInvalidSignature) {
-		t.Errorf("cross-issuer signature: Verify = %v, want ErrInvalidSignature", err)
+	if _, err := v.Verify(ctx, VerifyRequest{Token: resign(t, priv, hdr, claims), Audience: "data"}); !errors.Is(err, ErrInvalidToken) {
+		t.Errorf("cross-issuer signature: Verify = %v, want ErrInvalidToken", err)
 	}
 }
 
@@ -129,8 +129,8 @@ func TestVerifyReadsClaimsStrictly(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			claims := validClaims(uuid.New())
 			mod(claims)
-			if _, err := v.Verify(ctx, VerifyRequest{Token: resign(t, priv, hdr, claims), Audience: "data"}); !errors.Is(err, ErrInvalidSignature) {
-				t.Fatalf("err = %v, want ErrInvalidSignature", err)
+			if _, err := v.Verify(ctx, VerifyRequest{Token: resign(t, priv, hdr, claims), Audience: "data"}); !errors.Is(err, ErrInvalidToken) {
+				t.Fatalf("err = %v, want ErrInvalidToken", err)
 			}
 		})
 	}

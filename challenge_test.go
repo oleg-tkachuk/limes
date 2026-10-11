@@ -86,7 +86,7 @@ func TestErrorResponse(t *testing.T) {
 func TestErrorResponseLeaksNothing(t *testing.T) {
 	_, v, _, _ := buildIssuerVerifier(t)
 	secret := "kid \"internal-kid-7\" from vault\nat db-3"
-	r := v.ErrorResponse(context.Background(), fmt.Errorf("%w: %s", ErrInvalidSignature, secret), AuthSchemeBearer)
+	r := v.ErrorResponse(context.Background(), fmt.Errorf("%w: %s", ErrInvalidToken, secret), AuthSchemeBearer)
 	all := strings.Join(r.Challenges, " ") + r.Problem.Title + r.Problem.Detail
 	if strings.Contains(all, "internal-kid-7") || strings.Contains(all, "db-3") {
 		t.Errorf("the response repeats the error's text: %q", all)

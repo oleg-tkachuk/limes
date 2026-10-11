@@ -18,7 +18,7 @@ import (
 // branches on the one it needs:
 //
 //	ErrUnauthenticated     the presented credentials were refused (401)
-//	├── ErrInvalidSignature  the token is not genuine, or not this verifier's
+//	├── ErrInvalidToken  the token is not genuine, or not this verifier's
 //	├── ErrProofOfPossession the proof of possession is missing or wrong
 //	└── ErrExpired, ErrNotYetValid, ErrRevoked, ErrAudienceMismatch
 //	ErrCaveatViolation     a caveat refuses the operation (403)
@@ -29,11 +29,11 @@ var (
 	// credentials, token or proof: the one errors.Is a consumer needs to
 	// answer them all as unauthenticated.
 	ErrUnauthenticated = errors.New("limes: unauthenticated")
-	// ErrInvalidSignature — the token is not genuine or not this verifier's
+	// ErrInvalidToken — the token is not genuine or not this verifier's
 	// to accept: a bad signature, an unknown kid, an untrusted issuer, a
 	// malformed header or claims. One sentinel for all, so a caller cannot
 	// tell an attacker which check failed.
-	ErrInvalidSignature  error = &familyError{"limes: invalid signature", ErrUnauthenticated}
+	ErrInvalidToken      error = &familyError{"limes: invalid token", ErrUnauthenticated}
 	ErrExpired           error = &familyError{"limes: expired", ErrUnauthenticated}
 	ErrNotYetValid       error = &familyError{"limes: not yet valid", ErrUnauthenticated}
 	ErrRevoked           error = &familyError{"limes: revoked", ErrUnauthenticated}
