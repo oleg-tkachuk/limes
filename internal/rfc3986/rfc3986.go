@@ -1,4 +1,6 @@
-package limes
+// Package rfc3986 normalises a URI the way RFC 3986 §6.2.2 and §6.2.3 say,
+// for comparing two spellings of one request URI.
+package rfc3986
 
 import (
 	"errors"
@@ -26,11 +28,11 @@ var errNotAbsolute = errors.New("not an absolute URI")
 // errUserinfo is a URI with userinfo, which an http(s) URI must not carry.
 var errUserinfo = errors.New("userinfo in an http(s) URI")
 
-// normalizeURI is raw as RFC 9449 compares it: scheme and host in lower case,
+// Normalize is raw as RFC 9449 compares it: scheme and host in lower case,
 // the scheme's default port dropped, an empty path as "/", percent-encodings
 // of unreserved characters decoded and every other one in upper case, dot
 // segments removed — and no query or fragment.
-func normalizeURI(raw string) (string, error) {
+func Normalize(raw string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
 		return "", err
@@ -55,13 +57,13 @@ func normalizeURI(raw string) (string, error) {
 	} else if strings.Contains(host, ":") {
 		host = "[" + host + "]" // an IPv6 literal keeps its brackets
 	}
-	return scheme + "://" + host + normalizePath(u.EscapedPath()), nil
+	return scheme + "://" + host + NormalizePath(u.EscapedPath()), nil
 }
 
-// normalizePath is an escaped path with its percent-encodings normalised
+// NormalizePath is an escaped path with its percent-encodings normalised
 // (RFC 3986 §6.2.2.1, §6.2.2.2), its dot segments removed (§6.2.2.3) and, if
 // empty, as "/" (§6.2.3).
-func normalizePath(escaped string) string {
+func NormalizePath(escaped string) string {
 	p := removeDotSegments(normalizePercentEncoding(escaped))
 	if p == "" {
 		return "/"
@@ -86,7 +88,7 @@ func normalizePercentEncoding(s string) string {
 			continue
 		}
 		c := hi<<4 | lo
-		if isUnreserved(c) {
+		if IsUnreserved(c) {
 			b.WriteByte(c)
 		} else {
 			b.WriteString(strings.ToUpper(s[i : i+3]))
@@ -96,8 +98,8 @@ func normalizePercentEncoding(s string) string {
 	return b.String()
 }
 
-// isUnreserved reports whether c is an RFC 3986 §2.3 unreserved character.
-func isUnreserved(c byte) bool {
+// IsUnreserved reports whether c is an RFC 3986 §2.3 unreserved character.
+func IsUnreserved(c byte) bool {
 	switch {
 	case 'A' <= c && c <= 'Z', 'a' <= c && c <= 'z', '0' <= c && c <= '9':
 		return true

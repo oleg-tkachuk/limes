@@ -12,18 +12,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/oleg-tkachuk/limes/dpop"
 	"github.com/oleg-tkachuk/limes/internal/httpx"
 	"github.com/oleg-tkachuk/limes/jwks"
 )
 
 func TestErrorResponse(t *testing.T) {
 	_, v, _, _ := buildIssuerVerifier(t) // DPoP configured
-	nonces, err := NewHMACNonces(time.Minute, nonceKey(1))
+	nonces, err := dpop.NewHMACNonces(time.Minute, nonceKey(1))
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg := v.cfg
-	cfg.DPoP = &DPoPVerifier{Replay: NewMemoryReplayCache(0), Nonces: nonces}
+	cfg.DPoP = &dpop.Verifier{Replay: dpop.NewMemoryReplayCache(0), Nonces: nonces}
 	withNonces, err := NewStandardVerifier(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -43,13 +44,13 @@ func TestErrorResponse(t *testing.T) {
 			[]string{`Bearer error="invalid_token"`, "DPoP " + algs}, false},
 		{"revoked, under DPoP", ErrRevoked, AuthSchemeDPoP, http.StatusUnauthorized,
 			[]string{`DPoP error="invalid_token"`}, false},
-		{"no proof", ErrDPoPRequired, AuthSchemeBearer, http.StatusUnauthorized,
+		{"no proof", dpop.ErrRequired, AuthSchemeBearer, http.StatusUnauthorized,
 			[]string{`DPoP error="invalid_dpop_proof"`}, false},
-		{"replayed proof", ErrDPoPReplayed, AuthSchemeDPoP, http.StatusUnauthorized,
+		{"replayed proof", dpop.ErrReplayed, AuthSchemeDPoP, http.StatusUnauthorized,
 			[]string{`DPoP error="invalid_dpop_proof"`}, false},
 		{"downgraded scheme", ErrAuthSchemeMismatch, AuthSchemeBearer, http.StatusUnauthorized,
 			[]string{`Bearer error="invalid_token"`}, false},
-		{"nonce needed", ErrDPoPNonceRequired, AuthSchemeDPoP, http.StatusUnauthorized,
+		{"nonce needed", dpop.ErrNonceRequired, AuthSchemeDPoP, http.StatusUnauthorized,
 			[]string{`DPoP error="use_dpop_nonce"`}, true},
 		{"caveat", fmt.Errorf("%w: x", ErrResourceNotAllowed), AuthSchemeBearer, http.StatusForbidden,
 			[]string{`Bearer error="insufficient_scope"`}, false},
@@ -74,7 +75,7 @@ func TestErrorResponse(t *testing.T) {
 					t.Errorf("challenge %d = %q, want it to contain %q", i, r.Challenges[i], want)
 				}
 			}
-			if (r.DPoPNonce != "") != tc.nonce || tc.nonce && !nonces.Valid(context.Background(), r.DPoPNonce) {
+			if (r.DPoPNonce != "") != tc.nonce || tc.nonce && !validNonce(t, nonces, r.DPoPNonce) {
 				t.Errorf("nonce = %q, want one: %v", r.DPoPNonce, tc.nonce)
 			}
 			if !strings.HasPrefix(r.Problem.Type, problemTypeBase) || r.Problem.Title == "" {
@@ -154,4 +155,14 @@ func TestRefusalRulesAreOrdered(t *testing.T) {
 	if reasons := Reasons(); len(reasons) != len(slices.Compact(slices.Sorted(slices.Values(reasons)))) {
 		t.Errorf("Reasons() repeats one: %v", reasons)
 	}
+}
+
+// validNonce is n.Valid with a failure of the nonces failing the test.
+func validNonce(t *testing.T, n dpop.Nonces, nonce string) bool {
+	t.Helper()
+	ok, err := n.Valid(context.Background(), nonce)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ok
 }

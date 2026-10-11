@@ -110,7 +110,7 @@ type Attenuation struct {
 	Planes []string
 	// ExpiresAt, when earlier than the token's, becomes its expiry.
 	ExpiresAt time.Time
-	// ConfirmationJKT binds the token to a key (KeyThumbprint). Only an
+	// ConfirmationJKT binds the token to a key (dpop.Thumbprint). Only an
 	// unbound token can be bound offline: a bound one stays bound to its key,
 	// because rebinding needs no key and anyone could do it.
 	ConfirmationJKT string

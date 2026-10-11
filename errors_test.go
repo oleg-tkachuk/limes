@@ -13,7 +13,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/oleg-tkachuk/limes/dpop"
 	"github.com/oleg-tkachuk/limes/jwks"
 )
 
@@ -45,7 +47,8 @@ type sentinelCase struct {
 	status   int
 }
 
-// sentinelMatrix is every exported sentinel and how it reads. A sentinel
+// sentinelMatrix is every exported sentinel and how it reads — a dpop
+// refusal as the verifier returns it, wrapped in its family. A sentinel
 // added to the package and left out of it fails TestSentinelMatrixIsComplete.
 var sentinelMatrix = map[string]sentinelCase{
 	"ErrUnauthenticated":    {ErrUnauthenticated, []string{famUnauthenticated}, "", http.StatusUnauthorized},
@@ -60,11 +63,12 @@ var sentinelMatrix = map[string]sentinelCase{
 	},
 	"jwks.ErrUnknownKID":        {jwks.ErrUnknownKID, nil, "", http.StatusInternalServerError},
 	"ErrProofOfPossession":      {ErrProofOfPossession, []string{famUnauthenticated, famProof}, "", http.StatusUnauthorized},
-	"ErrDPoPRequired":           {ErrDPoPRequired, []string{famUnauthenticated, famProof}, ReasonProofRequired, http.StatusUnauthorized},
-	"ErrDPoPInvalid":            {ErrDPoPInvalid, []string{famUnauthenticated, famProof}, ReasonProofInvalid, http.StatusUnauthorized},
-	"ErrDPoPReplayed":           {ErrDPoPReplayed, []string{famUnauthenticated, famProof}, ReasonProofReplayed, http.StatusUnauthorized},
-	"ErrDPoPNonceRequired":      {ErrDPoPNonceRequired, []string{famUnauthenticated, famProof}, ReasonProofInvalid, http.StatusUnauthorized},
+	"dpop.ErrRequired":          {proofRefusal(dpop.ErrRequired), []string{famUnauthenticated, famProof}, ReasonProofRequired, http.StatusUnauthorized},
+	"dpop.ErrInvalid":           {proofRefusal(dpop.ErrInvalid), []string{famUnauthenticated, famProof}, ReasonProofInvalid, http.StatusUnauthorized},
+	"dpop.ErrReplayed":          {proofRefusal(dpop.ErrReplayed), []string{famUnauthenticated, famProof}, ReasonProofReplayed, http.StatusUnauthorized},
+	"dpop.ErrNonceRequired":     {proofRefusal(dpop.ErrNonceRequired), []string{famUnauthenticated, famProof}, ReasonProofInvalid, http.StatusUnauthorized},
 	"ErrAuthSchemeMismatch":     {ErrAuthSchemeMismatch, []string{famUnauthenticated, famProof}, ReasonProofRequired, http.StatusUnauthorized},
+	"dpop.ErrNoReplayCache":     {dpop.ErrNoReplayCache, nil, "", http.StatusInternalServerError},
 	"jwks.ErrUnavailable":       {jwks.ErrUnavailable, nil, ReasonKeysUnavailable, http.StatusServiceUnavailable},
 	"ErrMalformedAuthorization": {ErrMalformedAuthorization, nil, ReasonMalformedAuthorization, http.StatusBadRequest},
 
@@ -126,7 +130,7 @@ func TestSentinelMatrix(t *testing.T) {
 
 // sentinelPackages are the directories whose exported sentinels the matrix
 // must hold, and the qualifier their names take in it.
-var sentinelPackages = map[string]string{".": "", "jwks": "jwks."}
+var sentinelPackages = map[string]string{".": "", "jwks": "jwks.", "dpop": "dpop."}
 
 // Every exported sentinel of the module's packages is in the matrix, and so
 // is every sentinel the refusal table names.
@@ -134,7 +138,7 @@ func TestSentinelMatrixIsComplete(t *testing.T) {
 	for _, rule := range refusalRules {
 		found := false
 		for _, c := range sentinelMatrix {
-			found = found || c.err == rule.sentinel //nolint:errorlint // the same sentinel, not a match
+			found = found || errors.Is(c.err, rule.sentinel)
 		}
 		if !found {
 			t.Errorf("%v is in refusalRules but not in sentinelMatrix", rule.sentinel)
@@ -217,6 +221,47 @@ func TestVerifyTellsAnUnknownKidFromAResolverOutage(t *testing.T) {
 			}
 			if status := v.ErrorResponse(context.Background(), err, AuthSchemeBearer).Status; status != tc.status {
 				t.Errorf("ErrorResponse status = %d, want %d", status, tc.status)
+			}
+		})
+	}
+}
+
+// failingReplay is a replay cache whose store is down.
+type failingReplay struct{ err error }
+
+func (r failingReplay) Seen(context.Context, dpop.ReplayEntry) (bool, error) { return false, r.err }
+
+// failingNonces are nonces whose store is down.
+type failingNonces struct{ err error }
+
+func (n failingNonces) Nonce(context.Context) (string, error)       { return "", n.err }
+func (n failingNonces) Valid(context.Context, string) (bool, error) { return false, n.err }
+
+// A replay cache or nonce store that cannot answer is the server's fault:
+// the proof is refused with its error, as an outage rather than a refusal of
+// the credentials.
+func TestVerifyTellsAProofRefusalFromAProofStoreOutage(t *testing.T) {
+	issuer, configured, _, _ := buildIssuerVerifier(t)
+	key := dpopKeys(t)["Ed25519"]
+	token := issueBound(t, issuer, key)
+	outage := errors.New("store down")
+	for name, d := range map[string]*dpop.Verifier{
+		"replay cache": {Replay: failingReplay{outage}},
+		"nonces":       {Replay: dpop.NewMemoryReplayCache(0), Nonces: failingNonces{outage}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := configured.cfg
+			cfg.DPoP = d
+			v, err := NewStandardVerifier(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = v.Verify(context.Background(), withProof(t, key, token, audienceData, time.Now()))
+			if !errors.Is(err, outage) || errors.Is(err, ErrUnauthenticated) {
+				t.Errorf("err = %v, want the outage and not ErrUnauthenticated", err)
+			}
+			if status := v.ErrorResponse(context.Background(), err, AuthSchemeDPoP).Status; status != http.StatusInternalServerError {
+				t.Errorf("ErrorResponse status = %d, want 500", status)
 			}
 		})
 	}

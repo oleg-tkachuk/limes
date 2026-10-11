@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/oleg-tkachuk/limes/dpop"
 	"github.com/oleg-tkachuk/limes/jwks"
 )
 
@@ -56,7 +57,7 @@ func goldenBiscuitVerifier(t *testing.T) *StandardVerifier {
 		Now:            goldenClock,
 		AcceptBiscuit:  true,
 		MeterCopies:    true,
-		DPoP:           &DPoPVerifier{Replay: NewMemoryReplayCache(0)},
+		DPoP:           &dpop.Verifier{Replay: dpop.NewMemoryReplayCache(0)},
 
 		BiscuitRevocations: revLookup{},
 	})
@@ -103,7 +104,7 @@ func TestGenerateBiscuitFixtures(t *testing.T) {
 	}
 
 	c := readBiscuitCase(t)
-	jkt, err := KeyThumbprint(c.bindKey(t).Public())
+	jkt, err := dpop.Thumbprint(c.bindKey(t).Public())
 	if err != nil || jkt != c.Attenuate.BindJKT {
 		t.Fatalf("bind_jkt = %q, the thumbprint of bind_key_seed's key is %q (%v)", c.Attenuate.BindJKT, jkt, err)
 	}
@@ -180,7 +181,7 @@ func TestSharedAttenuationVerifies(t *testing.T) {
 	}
 	token := readBiscuitFixture(t, biscuitAttenuatedFile)
 	key := c.bindKey(t)
-	if jkt, err := KeyThumbprint(key.Public()); err != nil || jkt != c.Attenuate.BindJKT {
+	if jkt, err := dpop.Thumbprint(key.Public()); err != nil || jkt != c.Attenuate.BindJKT {
 		t.Fatalf("bind_key_seed's thumbprint = %q, %v; want bind_jkt %q", jkt, err, c.Attenuate.BindJKT)
 	}
 	got, err := v.Verify(ctx, withProof(t, key, token, audienceData, goldenClock()))

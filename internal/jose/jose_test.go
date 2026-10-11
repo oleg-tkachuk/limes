@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"testing"
 )
@@ -27,6 +28,15 @@ func TestThumbprintMatchesRFC8037(t *testing.T) {
 	}
 	if got := Ed25519Thumbprint(ed25519.PublicKey(raw)); got != rfc8037Thumbprint {
 		t.Errorf("Ed25519Thumbprint = %q, want %q", got, rfc8037Thumbprint)
+	}
+}
+
+// An EC thumbprint hashes the RFC 7638 canonical form, written out by hand.
+func TestThumbprintOfAnECKeyIsOverItsCanonicalForm(t *testing.T) {
+	ec := JWK{Kty: KtyEC, Crv: CrvP256, X: "x-coordinate", Y: "y-coordinate"}
+	sum := sha256.Sum256([]byte(`{"crv":"P-256","kty":"EC","x":"x-coordinate","y":"y-coordinate"}`))
+	if got, err := ec.Thumbprint(); err != nil || got != B64(sum[:]) {
+		t.Errorf("EC thumbprint = %q, %v; want the hash of the RFC 7638 canonical form", got, err)
 	}
 }
 

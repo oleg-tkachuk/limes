@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/oleg-tkachuk/limes/dpop"
 	"github.com/oleg-tkachuk/limes/jwks"
 )
 
@@ -105,7 +106,7 @@ type IssueRequest struct {
 	NotBefore  time.Time     // zero → now
 	Generation int64         // 0 → 1
 	// ConfirmationJKT binds the capability to the key with this RFC 7638
-	// thumbprint (KeyThumbprint); empty issues a bearer capability.
+	// thumbprint (dpop.Thumbprint); empty issues a bearer capability.
 	ConfirmationJKT string
 }
 
@@ -361,4 +362,13 @@ func GenerateEd25519Keypair() (kid string, pub ed25519.PublicKey, priv ed25519.P
 		return "", nil, nil, fmt.Errorf("limes: generate keypair: %w", err)
 	}
 	return jwks.KeyID(pub), pub, priv, nil
+}
+
+// validateThumbprint accepts "" (unbound) or a base64url SHA-256 thumbprint.
+// A malformed binding could match no key, minting a capability nobody can use.
+func validateThumbprint(jkt string) error {
+	if jkt != "" && !dpop.IsThumbprint(jkt) {
+		return invalidRequest("ConfirmationJKT %q is not a base64url SHA-256 thumbprint", jkt)
+	}
+	return nil
 }

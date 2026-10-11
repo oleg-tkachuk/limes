@@ -12,7 +12,7 @@ cap, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
     VerifyRequest: limes.VerifyRequest{
         Token: token, Scheme: scheme, Audience: "https://data.example.com",
         // Needed when the capability is key-bound; ignored when it is not.
-        DPoP: limes.DPoPProof{Proof: r.Header.Get(limes.DPoPHeader), Method: r.Method, URL: requestURL},
+        DPoP: dpop.Proof{JWT: r.Header.Get(dpop.Header), Method: r.Method, URL: requestURL},
     },
     CheckRequest: limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/report.pdf"},
     ClientAddr:   clientAddr,
@@ -201,33 +201,33 @@ to a key the agent keeps — RFC 9449 DPoP — makes a copy useless without the
 key:
 
 ```go
-jkt, _ := limes.KeyThumbprint(agentKey.Public()) // Ed25519 or P-256
+jkt, _ := dpop.Thumbprint(agentKey.Public()) // Ed25519 or P-256
 cap, token, _ := issuer.Issue(ctx, limes.IssueRequest{ /* … */ ConfirmationJKT: jkt})
 
 // Client: a fresh proof per request, signed over its method, URL and token.
-proof, _ := limes.NewDPoPProof(agentKey, limes.DPoPProofRequest{Method: "POST", URL: url, Token: token, Now: time.Now()})
+proof, _ := dpop.Sign(agentKey, dpop.ProofRequest{Method: "POST", URL: url, Token: token, Now: time.Now()})
 
 // Server: the verifier checks the proof of every key-bound capability.
 verifier, _ := limes.NewStandardVerifier(limes.VerifierConfig{
     /* … */
-    DPoP: &limes.DPoPVerifier{Replay: limes.NewMemoryReplayCache(0)},
+    DPoP: &dpop.Verifier{Replay: dpop.NewMemoryReplayCache(0)},
 })
 cap, err := verifier.Verify(ctx, limes.VerifyRequest{
     Token: token, Audience: "my-service",
-    DPoP:  limes.DPoPProof{Proof: proof, Method: "POST", URL: url},
+    DPoP:  dpop.Proof{JWT: proof, Method: "POST", URL: url},
 })
 ```
 
-Behind several replicas, give the `DPoPVerifier` server nonces, with the same
+Behind several replicas, give the `dpop.Verifier` server nonces, with the same
 key on every replica:
 
 ```go
-nonces, err := limes.NewHMACNonces(0, key) // key ≥ 32 bytes; 0 = a 5-minute lifetime
-dpop := &limes.DPoPVerifier{Replay: limes.NewMemoryReplayCache(0), Nonces: nonces}
+nonces, err := dpop.NewHMACNonces(0, key) // key ≥ 32 bytes; 0 = a 5-minute lifetime
+proofs := &dpop.Verifier{Replay: dpop.NewMemoryReplayCache(0), Nonces: nonces}
 ```
 
 A proof must then carry a nonce the server issued, so it cannot be signed
-ahead of time; a refusal with `ErrDPoPNonceRequired` is answered with
+ahead of time; a refusal with `dpop.ErrNonceRequired` is answered with
 `verifier.DPoPNonce(ctx)` in the `DPoP-Nonce` header for the client to retry
 with (RFC 9449 §8). The first key signs and every key checks, so rotate by
 putting a new key first.
@@ -240,11 +240,11 @@ one presented as `DPoP`, with `ErrAuthSchemeMismatch`. A header that is
 neither is `ErrMalformedAuthorization`.
 
 A verifier with no `DPoP` refuses every key-bound capability with
-`ErrDPoPRequired` instead of accepting it as a bearer token, so a binding
-cannot be lost to a forgotten call. `DPoPProof.URL` is the absolute URL the
+`dpop.ErrRequired` instead of accepting it as a bearer token, so a binding
+cannot be lost to a forgotten call. `dpop.Proof.URL` is the absolute URL the
 client addressed, scheme and host included. Behind a proxy that rewrites the
 host or strips a mount prefix, or for a server that sees only the path, set
-`DPoPVerifier.MatchPathOnly`: only the server's side of the comparison then
+`dpop.Verifier.MatchPathOnly`: only the server's side of the comparison then
 drops scheme, host and prefix — the proof's `htu` must still be an absolute
 URI.
 
@@ -252,14 +252,16 @@ The token carries the thumbprint as `cnf.jkt` (RFC 7800), absent from an
 unbound token. A delegated
 child inherits its parent's binding or takes the sub-agent's own key, and
 `Narrows` refuses a child that drops it. `Verify` refuses a proof from another
-key, for another method (compared exactly: `post` is not `POST`), URL or token, outside `DPoPVerifier.Window` (a
+key, for another method (compared exactly: `post` is not `POST`), URL or token, outside `dpop.Verifier.Window` (a
 minute by default) of the verifier's clock, or seen before; every refusal
-matches `ErrProofOfPossession`. `MemoryReplayCache` is in-process and bounded
-— 100 000 ids, and `DefaultReplayEntriesPerKey` (1 000) per key, so one
+matches `ErrProofOfPossession` as `Verify` returns it, and still matches its
+`dpop` sentinel. A replay cache or nonce store that cannot answer is an outage
+instead, its own error, never a refused proof. `dpop.MemoryReplayCache` is in-process and bounded
+— 100 000 ids, and `dpop.DefaultReplayEntriesPerKey` (1 000) per key, so one
 key-bound token cannot fill it and lock the others out; full, it refuses
 rather than forgets:
 behind several replicas, a proof replayed to a different one inside the
-window is caught only by server nonces or a `ReplayCache` over a shared
+window is caught only by server nonces or a `dpop.ReplayCache` over a shared
 store.
 
 ## Narrow offline (Biscuit)
@@ -550,8 +552,8 @@ Implement these and you are done:
 | `CopyUsageReader` | Reads Biscuit copies' own counters (only to show them) | No |
 | `UsageStore[TX]` = `Meter[TX]` + `TenantBudgets` + `UsageHousekeeping` | Request and spend counters, the charges ledger, tenant ceilings; `Delete` and `PurgeOrphans` release a reaped capability's holds | Only for atomic side effects |
 | `KeyResolver` | Public verification keys | No |
-| `ReplayCache` | DPoP proof ids seen, per key: `Seen(ctx, jkt, jti, expires)` reports `true` when it cannot tell, so an unanswerable check refuses the proof (only for key-bound tokens; `MemoryReplayCache` ships for one process — behind several replicas, implement it over a shared store) | No |
-| `DPoPNonces` | Server-provided DPoP nonces (optional; `HMACNonces` ships and needs no store) | No |
+| `dpop.ReplayCache` | DPoP proof ids seen, per key: `Seen(ctx, dpop.ReplayEntry)` reports a key past its share as seen, and returns an error when its store cannot answer — an outage, not a refused proof (only for key-bound tokens; `dpop.MemoryReplayCache` ships for one process — behind several replicas, implement it over a shared store) | No |
+| `dpop.Nonces` | Server-provided DPoP nonces (optional; `dpop.HMACNonces` ships and needs no store) | No |
 
 Two obligations are easy to miss. `Store.IsRevoked` answers for the
 capability's whole delegation chain, and `Meter` applies every charge and
@@ -641,9 +643,9 @@ log. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
 | `VerifierConfig.MaxTokenBytes` | `DefaultMaxTokenBytes`, 16 KiB |
 | `DefaultRevocationCacheTTL` · `DefaultRevocationCacheEntries` | 2 seconds · 100 000, the oldest dropped first past it (`WithMaxEntries`; a TTL below zero disables the cache) |
 | `jwks.RemoteConfig` | `jwks.DefaultFetchTimeout` 10s · `DefaultRefreshInterval` 5m · `DefaultMinRefreshInterval` 10s · `DefaultMaxStale` 1h · `DefaultMaxDocumentBytes` 1 MiB |
-| `DPoPVerifier.Window` | `DefaultDPoPWindow`, 1 minute |
-| `NewMemoryReplayCache(0)` | 100 000 ids; `DefaultReplayEntriesPerKey`, 1 000, per key (`WithEntriesPerKey`) |
-| `NewHMACNonces(0, key)` | `DefaultDPoPNonceLifetime`, 5 minutes; `HMACNonceClockSkew`, 5 seconds, for a nonce issued ahead of this replica's clock; keys of at least `HMACNonceKeyBytes`, 32 |
+| `dpop.Verifier.Window` | `dpop.DefaultWindow`, 1 minute |
+| `dpop.NewMemoryReplayCache(0)` | 100 000 ids; `dpop.DefaultReplayEntriesPerKey`, 1 000, per key (`dpop.WithEntriesPerKey`) |
+| `dpop.NewHMACNonces(0, key)` | `dpop.DefaultNonceLifetime`, 5 minutes; `dpop.HMACNonceClockSkew`, 5 seconds, for a nonce issued ahead of this replica's clock; keys of at least `dpop.HMACNonceKeyBytes`, 32 |
 | `DefaultReservationTTL` | 5 minutes |
 | `MaxExternalRefBytes` | 200 |
 | `MaxNanos` | just under a billion units |

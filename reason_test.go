@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/oleg-tkachuk/limes/dpop"
 	"github.com/oleg-tkachuk/limes/jwks"
 )
 
@@ -24,10 +25,10 @@ func TestReasonOf(t *testing.T) {
 		{"audience", ErrAudienceMismatch, ReasonAudienceMismatch, true},
 		{"biscuit block", fmt.Errorf("%w: rule", ErrBiscuitAttenuation), ReasonInvalidBiscuit, true},
 		{"copy limits unmetered", ErrCopyCountersNotMetered, ReasonInvalidBiscuit, true},
-		{"proof missing", ErrDPoPRequired, ReasonProofRequired, false},
-		{"proof invalid", fmt.Errorf("%w: htm", ErrDPoPInvalid), ReasonProofInvalid, false},
-		{"proof replayed", ErrDPoPReplayed, ReasonProofReplayed, false},
-		{"nonce challenge", ErrDPoPNonceRequired, ReasonProofInvalid, false},
+		{"proof missing", dpop.ErrRequired, ReasonProofRequired, false},
+		{"proof invalid", fmt.Errorf("%w: htm", dpop.ErrInvalid), ReasonProofInvalid, false},
+		{"proof replayed", dpop.ErrReplayed, ReasonProofReplayed, false},
+		{"nonce challenge", dpop.ErrNonceRequired, ReasonProofInvalid, false},
 		{"wrong scheme", fmt.Errorf("%w: Bearer", ErrAuthSchemeMismatch), ReasonProofRequired, false},
 		{"op", fmt.Errorf("%w: %q", ErrOpNotAllowed, "put"), ReasonOpNotAllowed, true},
 		{"resource", ErrResourceNotAllowed, ReasonResourceNotAllowed, true},

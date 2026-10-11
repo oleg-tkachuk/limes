@@ -1,4 +1,9 @@
-package limes
+// Package dpop implements proof of possession after RFC 9449 (DPoP): a
+// client signs a short JWT over each request with a key it holds, and a
+// server checks the proof against the key a token is bound to. It depends on
+// no token format: the server says which thumbprint the key must have and
+// which access token the proof must name.
+package dpop
 
 import (
 	"container/heap"
@@ -24,6 +29,7 @@ import (
 	"github.com/go-json-experiment/json/jsontext"
 
 	"github.com/oleg-tkachuk/limes/internal/jose"
+	"github.com/oleg-tkachuk/limes/internal/rfc3986"
 )
 
 // Proof of possession, after RFC 9449 (DPoP).
@@ -34,14 +40,14 @@ import (
 // request's method and URL, the hash of the token, a unique id and the time.
 // A token copied out of a prompt or a log is useless without the key.
 
-// DPoPHeader is the HTTP header a proof travels in.
-const DPoPHeader = "DPoP"
+// Header is the HTTP header a proof travels in.
+const Header = "DPoP"
 
-// DPoPTokenType is the JWT "typ" of a proof.
-const DPoPTokenType = "dpop+jwt"
+// tokenType is the JWT "typ" of a proof.
+const tokenType = "dpop+jwt"
 
-// DefaultDPoPWindow is how far a proof's iat may be from the verifier's clock.
-const DefaultDPoPWindow = time.Minute
+// DefaultWindow is how far a proof's iat may be from the verifier's clock.
+const DefaultWindow = time.Minute
 
 const (
 	// es256SignatureBytes is a JWS ES256 signature: r || s, not DER.
@@ -53,26 +59,24 @@ const (
 	defaultReplayCacheEntries = 100_000
 )
 
-// Proof-of-possession rejections. Each matches ErrProofOfPossession, and so
-// ErrUnauthenticated: the token may be genuine, the proof that its holder sent
-// it is what failed.
+// The refusals of a proof. A caller that judges what they mean for the
+// request — limes reads each as a refusal of the credentials — wraps them;
+// any other error Verify returns is a failure of the replay cache or the
+// nonces, not of the proof.
 var (
-	// ErrProofOfPossession is the family of every proof-of-possession
-	// refusal.
-	ErrProofOfPossession error = &familyError{"limes: proof of possession refused", ErrUnauthenticated}
-	// ErrDPoPRequired — the capability is key-bound and no proof came with it.
-	ErrDPoPRequired error = &familyError{"limes: DPoP proof required", ErrProofOfPossession}
-	// ErrDPoPInvalid — a proof came, and it does not prove possession for
-	// this token, method, URL and moment.
-	ErrDPoPInvalid error = &familyError{"limes: invalid DPoP proof", ErrProofOfPossession}
-	// ErrDPoPReplayed — a proof's jti was already used inside the window.
-	ErrDPoPReplayed error = &familyError{"limes: DPoP proof replayed", ErrProofOfPossession}
+	// ErrRequired — the token is key-bound and no proof came with it.
+	ErrRequired = errors.New("dpop: proof required")
+	// ErrInvalid — a proof came, and it does not prove possession for this
+	// token, method, URL and moment.
+	ErrInvalid = errors.New("dpop: invalid proof")
+	// ErrReplayed — a proof's jti was already used inside the window.
+	ErrReplayed = errors.New("dpop: proof replayed")
 )
 
-type dpopHeader struct {
-	Typ string   `json:"typ"`
-	Alg string   `json:"alg"`
-	JWK *DPoPJWK `json:"jwk"`
+type proofHeader struct {
+	Typ string    `json:"typ"`
+	Alg string    `json:"alg"`
+	JWK *jose.JWK `json:"jwk"`
 }
 
 // jwkPrivateMembers are the JWK members that carry private key material
@@ -81,7 +85,7 @@ type dpopHeader struct {
 var jwkPrivateMembers = []string{"d", "p", "q", "dp", "dq", "qi", "oth", "k"}
 
 // jwkHasPrivateMember reports whether the header segment's jwk carries any
-// private key member — which DPoPJWK, holding the public members alone, would
+// private key member — which jose.JWK, holding the public members alone, would
 // silently drop.
 func jwkHasPrivateMember(headerSeg string) bool {
 	var h struct {
@@ -96,7 +100,7 @@ func jwkHasPrivateMember(headerSeg string) bool {
 	})
 }
 
-type dpopClaims struct {
+type proofClaims struct {
 	JTI string  `json:"jti"`
 	HTM string  `json:"htm"`
 	HTU string  `json:"htu"`
@@ -106,38 +110,34 @@ type dpopClaims struct {
 	Nonce string `json:"nonce,omitempty"`
 }
 
-// DPoPJWK is the public key a proof carries in its header: an Ed25519 (OKP)
-// or P-256 (EC) key.
-type DPoPJWK = jose.JWK
-
-// PublicJWK describes pub, an ed25519.PublicKey or a P-256 *ecdsa.PublicKey,
+// publicJWK describes pub, an ed25519.PublicKey or a P-256 *ecdsa.PublicKey,
 // as a JWK.
-func PublicJWK(pub crypto.PublicKey) (DPoPJWK, error) {
+func publicJWK(pub crypto.PublicKey) (jose.JWK, error) {
 	j, err := jose.PublicJWK(pub)
 	if err != nil {
-		return DPoPJWK{}, fmt.Errorf("limes: DPoP key: %w", err)
+		return jose.JWK{}, fmt.Errorf("dpop: key: %w", err)
 	}
 	return j, nil
 }
 
-// KeyThumbprint is PublicJWK followed by Thumbprint: what to put in an
+// Thumbprint is publicJWK followed by Thumbprint: what to put in an
 // IssueRequest's ConfirmationJKT to bind a capability to the holder of pub.
-func KeyThumbprint(pub crypto.PublicKey) (string, error) {
-	j, err := PublicJWK(pub)
+func Thumbprint(pub crypto.PublicKey) (string, error) {
+	j, err := publicJWK(pub)
 	if err != nil {
 		return "", err
 	}
 	return j.Thumbprint()
 }
 
-// AccessTokenHash is the proof's `ath`: base64url(SHA-256(token)).
-func AccessTokenHash(token string) string {
+// accessTokenHash is the proof's `ath`: base64url(SHA-256(token)).
+func accessTokenHash(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return jose.B64(sum[:])
 }
 
-// DPoPProofRequest is the request a proof is signed for.
-type DPoPProofRequest struct {
+// ProofRequest is the request a proof is signed for.
+type ProofRequest struct {
 	// Method and URL are the request's, the method exactly as sent: it is
 	// case-sensitive (RFC 9110 §9.1).
 	Method string
@@ -151,10 +151,10 @@ type DPoPProofRequest struct {
 	Now time.Time
 }
 
-// NewDPoPProof signs a proof for one request. key is any crypto.Signer whose
+// Sign signs a proof for one request. key is any crypto.Signer whose
 // public key is Ed25519 or ECDSA P-256.
-func NewDPoPProof(key crypto.Signer, req DPoPProofRequest) (string, error) {
-	jwk, err := PublicJWK(key.Public())
+func Sign(key crypto.Signer, req ProofRequest) (string, error) {
+	jwk, err := publicJWK(key.Public())
 	if err != nil {
 		return "", err
 	}
@@ -164,54 +164,54 @@ func NewDPoPProof(key crypto.Signer, req DPoPProofRequest) (string, error) {
 	}
 	jti := make([]byte, dpopJTIBytes)
 	if _, err := rand.Read(jti); err != nil {
-		return "", fmt.Errorf("limes: DPoP jti: %w", err)
+		return "", fmt.Errorf("dpop: jti: %w", err)
 	}
 	htu, err := canonicalHTU(req.URL)
 	if err != nil {
 		return "", err
 	}
-	header, _ := json.Marshal(dpopHeader{Typ: DPoPTokenType, Alg: alg, JWK: &jwk})
-	claims, _ := json.Marshal(dpopClaims{
+	header, _ := json.Marshal(proofHeader{Typ: tokenType, Alg: alg, JWK: &jwk})
+	claims, _ := json.Marshal(proofClaims{
 		JTI: jose.B64(jti), HTM: req.Method, HTU: htu, IAT: float64(req.Now.Unix()),
-		ATH: AccessTokenHash(req.Token), Nonce: req.Nonce,
+		ATH: accessTokenHash(req.Token), Nonce: req.Nonce,
 	})
 	input := jose.B64(header) + "." + jose.B64(claims)
-	sig, err := signDPoP(key, []byte(input))
+	sig, err := signProof(key, []byte(input))
 	if err != nil {
 		return "", err
 	}
 	return input + "." + jose.B64(sig), nil
 }
 
-// signDPoP signs through the crypto.Signer interface alone, so a key held
+// signProof signs through the crypto.Signer interface alone, so a key held
 // in a KMS or an HSM works as well as one in memory.
-func signDPoP(key crypto.Signer, input []byte) ([]byte, error) {
+func signProof(key crypto.Signer, input []byte) ([]byte, error) {
 	switch key.Public().(type) {
 	case ed25519.PublicKey:
 		sig, err := key.Sign(rand.Reader, input, crypto.Hash(0))
 		if err != nil {
-			return nil, fmt.Errorf("limes: DPoP sign: %w", err)
+			return nil, fmt.Errorf("dpop: sign: %w", err)
 		}
 		return sig, nil
 	case *ecdsa.PublicKey:
 		digest := sha256.Sum256(input)
 		der, err := key.Sign(rand.Reader, digest[:], crypto.SHA256)
 		if err != nil {
-			return nil, fmt.Errorf("limes: DPoP sign: %w", err)
+			return nil, fmt.Errorf("dpop: sign: %w", err)
 		}
 		var rs struct{ R, S *big.Int }
 		if rest, err := asn1.Unmarshal(der, &rs); err != nil || len(rest) > 0 {
-			return nil, errors.New("limes: DPoP sign: malformed ECDSA signature")
+			return nil, errors.New("dpop: sign: malformed ECDSA signature")
 		}
 		sig := make([]byte, es256SignatureBytes)
 		rs.R.FillBytes(sig[:jose.P256CoordinateBytes])
 		rs.S.FillBytes(sig[jose.P256CoordinateBytes:])
 		return sig, nil
 	}
-	return nil, fmt.Errorf("limes: unsupported DPoP key type %T", key.Public())
+	return nil, fmt.Errorf("dpop: unsupported DPoP key type %T", key.Public())
 }
 
-func verifyDPoPSignature(pub crypto.PublicKey, alg string, input, sig []byte) bool {
+func verifySignature(pub crypto.PublicKey, alg string, input, sig []byte) bool {
 	switch k := pub.(type) {
 	case ed25519.PublicKey:
 		return (alg == jose.AlgEd25519 || alg == jose.AlgEdDSA) && ed25519.Verify(k, input, sig)
@@ -228,136 +228,175 @@ func verifyDPoPSignature(pub crypto.PublicKey, alg string, input, sig []byte) bo
 }
 
 // canonicalHTU is the htu a proof carries for rawURL: the URI as RFC 9449
-// compares it (normalizeURI), without query or fragment.
+// compares it (rfc3986.Normalize), without query or fragment.
 func canonicalHTU(raw string) (string, error) {
-	htu, err := normalizeURI(raw)
+	htu, err := rfc3986.Normalize(raw)
 	if err != nil {
-		return "", fmt.Errorf("limes: DPoP htu: %w", err)
+		return "", fmt.Errorf("dpop: htu: %w", err)
 	}
 	return htu, nil
 }
 
-// DPoPProof is a request's proof of possession and the request it must
-// match: what VerifyRequest.DPoP carries for a key-bound capability.
-type DPoPProof struct {
-	// Proof is the DPoP header's value; empty when the request had none.
-	Proof string
+// Proof is a request's proof of possession and the request it must match.
+type Proof struct {
+	// JWT is the DPoP header's value; empty when the request had none.
+	JWT string
 	// Method is the HTTP method, e.g. "POST".
 	Method string
 	// URL is the request URL, as the server saw it (see
-	// DPoPVerifier.MatchPathOnly).
+	// Verifier.MatchPathOnly).
 	URL string
+}
+
+// Request is what Verify checks: a proof, the access token it must name, and
+// the thumbprint of the key the token is bound to.
+type Request struct {
+	Proof Proof
+	// Token is the access token the request presents.
+	Token string
+	// JKT is the RFC 7638 thumbprint of the key the token is bound to.
+	JKT string
+}
+
+// ReplayEntry is one proof id to record: the id of a proof from the key
+// with thumbprint JKT, remembered until Expires.
+type ReplayEntry struct {
+	JKT, JTI string
+	Expires  time.Time
 }
 
 // ReplayCache remembers proof ids for as long as a proof could be accepted.
 type ReplayCache interface {
-	// Seen records the proof id jti of the key with thumbprint jkt until
-	// expires, and reports whether it was already recorded. An
-	// implementation that cannot tell — its store is unreachable, or the
-	// key has used its share of the store — reports true: an unanswerable
-	// check refuses the proof.
-	Seen(ctx context.Context, jkt, jti string, expires time.Time) bool
+	// Seen records e and reports whether its id was already recorded. A key
+	// that has used its share of the cache reports true: the proof is
+	// refused rather than accepted unrecorded. A cache that cannot answer —
+	// its store unreachable — returns an error, and Verify refuses the proof
+	// with it.
+	Seen(ctx context.Context, e ReplayEntry) (bool, error)
 }
 
-// DPoPVerifier is how a StandardVerifier checks the proofs of key-bound
-// capabilities (VerifierConfig.DPoP).
-type DPoPVerifier struct {
-	// Window bounds |now − iat|. Default DefaultDPoPWindow.
+// Verifier checks proofs against the key a token is bound to.
+type Verifier struct {
+	// Window bounds |now − iat|. Default DefaultWindow.
 	Window time.Duration
 	// Replay refuses a jti seen before. Required: without it a captured
-	// proof is good for the whole window, and NewStandardVerifier refuses
-	// the configuration.
+	// proof is good for the whole window, and Verify refuses every proof.
 	Replay ReplayCache
-	// Now is the clock; default the verifier's.
+	// Now is the clock; default time.Now.
 	Now func() time.Time
 	// Nonces, when set, requires every proof to carry a nonce it issued
 	// (RFC 9449 §8); a proof without one is refused with
-	// ErrDPoPNonceRequired, and StandardVerifier.DPoPNonce gives the nonce
-	// to send back.
-	Nonces DPoPNonces
-	// MatchPathOnly compares only the path of DPoPProof.URL, and lets the
+	// ErrNonceRequired, and Nonce gives the nonce to send back.
+	Nonces Nonces
+	// MatchPathOnly compares only the path of Proof.URL, and lets the
 	// proof's path carry extra leading segments — for a server behind a
 	// proxy, which cannot know the scheme, host or mount prefix its clients
 	// address it by.
 	MatchPathOnly bool
 }
 
-// DPoPSigningAlgorithms are the JWS algorithms a DPoP proof may be signed
+// SigningAlgorithms are the JWS algorithms a DPoP proof may be signed
 // with, as a challenge advertises them (RFC 9449 §7.1): the fully-specified
 // names (RFC 9864). The deprecated "EdDSA" is still read, never advertised.
-func DPoPSigningAlgorithms() []string { return []string{jose.AlgEd25519, jose.AlgES256} }
+func SigningAlgorithms() []string { return []string{jose.AlgEd25519, jose.AlgES256} }
 
-// errNoReplayCache is a DPoPVerifier configured without the replay cache it
-// requires.
-var errNoReplayCache = errors.New("limes: DPoPVerifier.Replay required")
+// ErrNoReplayCache is a Verifier with no ReplayCache: a captured proof
+// would be good for its whole window.
+var ErrNoReplayCache = errors.New("dpop: Verifier.Replay required")
+
+// Nonce is the nonce to send in the DPoP-Nonce header, empty when the
+// verifier issues none.
+func (v *Verifier) Nonce(ctx context.Context) (string, error) {
+	if v.Nonces == nil {
+		return "", nil
+	}
+	return v.Nonces.Nonce(ctx)
+}
 
 // check verifies p against the key-bound capability c presented as token. It
 // passes only with a proof that: is a dpop+jwt signed by the key its header
 // carries; whose key's thumbprint is the capability's; that names this method
 // and URL and this token's hash; that was issued within the window; and whose
 // jti is new.
-func (v *DPoPVerifier) check(ctx context.Context, c Capability, token string, p DPoPProof) error {
-	if p.Proof == "" {
-		return ErrDPoPRequired
+func (v *Verifier) Verify(ctx context.Context, req Request) error {
+	if v.Replay == nil {
+		return ErrNoReplayCache
+	}
+	p, token := req.Proof, req.Token
+	if p.JWT == "" {
+		return ErrRequired
 	}
 	window := v.Window
 	if window <= 0 {
-		window = DefaultDPoPWindow
+		window = DefaultWindow
 	}
 	now := v.Now
-
-	parts, err := jose.Split(p.Proof)
-	if err != nil {
-		return fmt.Errorf("%w: %w", ErrDPoPInvalid, err)
+	if now == nil {
+		now = time.Now
 	}
-	var header dpopHeader
-	if err := decodeSegment(parts.Header, &header); err != nil || header.Typ != DPoPTokenType || header.JWK == nil {
-		return fmt.Errorf("%w: header", ErrDPoPInvalid)
+
+	parts, err := jose.Split(p.JWT)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalid, err)
+	}
+	var header proofHeader
+	if err := decodeSegment(parts.Header, &header); err != nil || header.Typ != tokenType || header.JWK == nil {
+		return fmt.Errorf("%w: header", ErrInvalid)
 	}
 	// RFC 9449 §4.3: the jwk must not contain a private key.
 	if jwkHasPrivateMember(parts.Header) {
-		return fmt.Errorf("%w: jwk carries a private key", ErrDPoPInvalid)
+		return fmt.Errorf("%w: jwk carries a private key", ErrInvalid)
 	}
 	thumb, err := header.JWK.Thumbprint()
-	if err != nil || thumb != c.ConfirmationJKT {
-		return fmt.Errorf("%w: key is not the one the capability is bound to", ErrDPoPInvalid)
+	if err != nil || thumb != req.JKT {
+		return fmt.Errorf("%w: key is not the one the capability is bound to", ErrInvalid)
 	}
 	pub, err := header.JWK.PublicKey()
 	if err != nil {
-		return fmt.Errorf("%w: %w", ErrDPoPInvalid, err)
+		return fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
 	sig, err := base64.RawURLEncoding.DecodeString(parts.Signature)
-	if err != nil || !verifyDPoPSignature(pub, header.Alg, []byte(parts.SigningInput()), sig) {
-		return fmt.Errorf("%w: signature", ErrDPoPInvalid)
+	if err != nil || !verifySignature(pub, header.Alg, []byte(parts.SigningInput()), sig) {
+		return fmt.Errorf("%w: signature", ErrInvalid)
 	}
 
-	var claims dpopClaims
+	var claims proofClaims
 	if err := decodeSegment(parts.Payload, &claims); err != nil || claims.JTI == "" {
-		return fmt.Errorf("%w: claims", ErrDPoPInvalid)
+		return fmt.Errorf("%w: claims", ErrInvalid)
 	}
 	// RFC 9110 §9.1: a method is case-sensitive.
 	if claims.HTM != p.Method {
-		return fmt.Errorf("%w: method %q, proof names %q", ErrDPoPInvalid, p.Method, claims.HTM)
+		return fmt.Errorf("%w: method %q, proof names %q", ErrInvalid, p.Method, claims.HTM)
 	}
 	if !htuMatches(claims.HTU, p.URL, v.MatchPathOnly) {
-		return fmt.Errorf("%w: URL does not match the proof's htu", ErrDPoPInvalid)
+		return fmt.Errorf("%w: URL does not match the proof's htu", ErrInvalid)
 	}
-	if claims.ATH != AccessTokenHash(token) {
-		return fmt.Errorf("%w: proof is for another token", ErrDPoPInvalid)
+	if claims.ATH != accessTokenHash(token) {
+		return fmt.Errorf("%w: proof is for another token", ErrInvalid)
 	}
-	if math.IsNaN(claims.IAT) || math.IsInf(claims.IAT, 0) || math.Abs(claims.IAT) > MaxIJSONInteger {
-		return fmt.Errorf("%w: iat %v", ErrDPoPInvalid, claims.IAT)
+	if math.IsNaN(claims.IAT) || math.IsInf(claims.IAT, 0) || math.Abs(claims.IAT) > jose.MaxIJSONInteger {
+		return fmt.Errorf("%w: iat %v", ErrInvalid, claims.IAT)
 	}
 	sec, frac := math.Modf(claims.IAT)
 	iat := time.Unix(int64(sec), int64(frac*float64(time.Second)))
 	if d := now().Sub(iat); d > window || d < -window {
-		return fmt.Errorf("%w: issued at %s, outside the %s window", ErrDPoPInvalid, iat.UTC(), window)
+		return fmt.Errorf("%w: issued at %s, outside the %s window", ErrInvalid, iat.UTC(), window)
 	}
-	if v.Nonces != nil && !v.Nonces.Valid(ctx, claims.Nonce) {
-		return ErrDPoPNonceRequired
+	if v.Nonces != nil {
+		valid, err := v.Nonces.Valid(ctx, claims.Nonce)
+		if err != nil {
+			return fmt.Errorf("dpop: nonce check: %w", err)
+		}
+		if !valid {
+			return ErrNonceRequired
+		}
 	}
-	if v.Replay.Seen(ctx, thumb, claims.JTI, iat.Add(window)) {
-		return ErrDPoPReplayed
+	seen, err := v.Replay.Seen(ctx, ReplayEntry{JKT: thumb, JTI: claims.JTI, Expires: iat.Add(window)})
+	if err != nil {
+		return fmt.Errorf("dpop: replay check: %w", err)
+	}
+	if seen {
+		return ErrReplayed
 	}
 	return nil
 }
@@ -370,7 +409,7 @@ func htuMatches(htu, requestURL string, pathOnly bool) bool {
 	if pathOnly {
 		// The proof's htu is still a URI a request could have been made to:
 		// absolute, with a host, normalised.
-		normalised, err := normalizeURI(htu)
+		normalised, err := rfc3986.Normalize(htu)
 		if err != nil {
 			return false
 		}
@@ -379,15 +418,15 @@ func htuMatches(htu, requestURL string, pathOnly bool) bool {
 		if err1 != nil || err2 != nil || want.EscapedPath() == "" {
 			return false
 		}
-		g, w := got.EscapedPath(), normalizePath(want.EscapedPath())
+		g, w := got.EscapedPath(), rfc3986.NormalizePath(want.EscapedPath())
 		// A proxy may mount the service under a prefix it strips before
 		// forwarding, so the client's path may carry segments the server
 		// never sees. The server's path must still be the whole tail, from a
 		// segment boundary.
 		return g == w || strings.HasSuffix(g, w) && strings.HasPrefix(w, "/")
 	}
-	got, err1 := normalizeURI(htu)
-	want, err2 := normalizeURI(requestURL)
+	got, err1 := rfc3986.Normalize(htu)
+	want, err2 := rfc3986.Normalize(requestURL)
 	return err1 == nil && err2 == nil && got == want
 }
 
@@ -402,7 +441,7 @@ func decodeSegment(seg string, v any) error {
 // MemoryReplayCache is a bounded in-process ReplayCache. A deployment with
 // several replicas behind a balancer that does not pin a client to one
 // replica can see a proof replayed on another replica within the window;
-// keep the window short, use server nonces (DPoPVerifier.Nonces), or back
+// keep the window short, use server nonces (Verifier.Nonces), or back
 // ReplayCache with a shared store.
 //
 // Every key gets a share of the cache of its own (WithEntriesPerKey), so the
@@ -459,7 +498,8 @@ func NewMemoryReplayCache(maxEntries int, opts ...ReplayCacheOption) *MemoryRepl
 // first, so a full cache costs a lookup rather than a scan. A key past its
 // share, or a cache full of live ids, refuses the new id as a replay rather
 // than accept it unrecorded — a full cache errs towards refusing.
-func (c *MemoryReplayCache) Seen(_ context.Context, jkt, jti string, expires time.Time) bool {
+func (c *MemoryReplayCache) Seen(_ context.Context, e ReplayEntry) (bool, error) {
+	jkt, jti, expires := e.JKT, e.JTI, e.Expires
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.now()
@@ -472,15 +512,15 @@ func (c *MemoryReplayCache) Seen(_ context.Context, jkt, jti string, expires tim
 	}
 	k := replayKey{jkt: jkt, jti: jti}
 	if _, ok := c.seen[k]; ok {
-		return true
+		return true, nil
 	}
 	if c.perKey[jkt] >= c.maxPerKey || len(c.seen) >= c.maxEntries {
-		return true
+		return true, nil
 	}
 	c.seen[k] = expires
 	c.perKey[jkt]++
 	heap.Push(&c.expiries, replayEntry{key: k, expires: expires})
-	return false
+	return false, nil
 }
 
 // replayEntry is one id a MemoryReplayCache holds, and when it lapses.
@@ -503,14 +543,9 @@ func (h *expiryHeap) Pop() any {
 	return e
 }
 
-// validateThumbprint accepts "" (unbound) or a base64url SHA-256 thumbprint.
-// A malformed binding could match no key, minting a capability nobody can use.
-func validateThumbprint(jkt string) error {
-	if jkt == "" {
-		return nil
-	}
-	if raw, err := base64.RawURLEncoding.DecodeString(jkt); err != nil || len(raw) != sha256.Size {
-		return invalidRequest("ConfirmationJKT %q is not a base64url SHA-256 thumbprint", jkt)
-	}
-	return nil
+// IsThumbprint reports whether jkt is a base64url SHA-256 thumbprint, the
+// form a key binding takes.
+func IsThumbprint(jkt string) bool {
+	raw, err := base64.RawURLEncoding.DecodeString(jkt)
+	return err == nil && len(raw) == sha256.Size
 }

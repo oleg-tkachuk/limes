@@ -9,12 +9,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/oleg-tkachuk/limes/dpop"
 )
 
 // issueBound issues a capability bound to key and returns its token.
 func issueBound(t *testing.T, issuer *Issuer, key crypto.Signer) string {
 	t.Helper()
-	jkt, err := KeyThumbprint(key.Public())
+	jkt, err := dpop.Thumbprint(key.Public())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,10 +49,10 @@ func TestVerifyEnforcesProofOfPossession(t *testing.T) {
 		req  VerifyRequest
 		want error
 	}{
-		"bound, no proof":        {VerifyRequest{Token: bound, Audience: audienceData}, ErrDPoPRequired},
-		"bound, another key":     {withProof(t, keys["P-256"], bound, audienceData, now), ErrDPoPInvalid},
-		"bound, replayed proof":  {replayed, ErrDPoPReplayed},
-		"bound, another token's": {func() VerifyRequest { r := withProof(t, key, unbound, audienceData, now); r.Token = bound; return r }(), ErrDPoPInvalid},
+		"bound, no proof":        {VerifyRequest{Token: bound, Audience: audienceData}, dpop.ErrRequired},
+		"bound, another key":     {withProof(t, keys["P-256"], bound, audienceData, now), dpop.ErrInvalid},
+		"bound, replayed proof":  {replayed, dpop.ErrReplayed},
+		"bound, another token's": {func() VerifyRequest { r := withProof(t, key, unbound, audienceData, now); r.Token = bound; return r }(), dpop.ErrInvalid},
 		"unbound, stray proof":   {withProof(t, key, unbound, audienceData, now), nil},
 		"no token":               {VerifyRequest{Audience: audienceData}, ErrInvalidToken},
 		"no audience":            {VerifyRequest{Token: unbound}, ErrAudienceMismatch},
@@ -89,17 +91,17 @@ func TestVerifyWithoutDPoPRefusesBoundTokens(t *testing.T) {
 	}
 	key := dpopKeys(t)["Ed25519"]
 	req := withProof(t, key, issueBound(t, issuer, key), audienceData, time.Now())
-	if _, err := v.Verify(context.Background(), req); !errors.Is(err, ErrDPoPRequired) {
-		t.Fatalf("err = %v, want ErrDPoPRequired", err)
+	if _, err := v.Verify(context.Background(), req); !errors.Is(err, dpop.ErrRequired) {
+		t.Fatalf("err = %v, want dpop.ErrRequired", err)
 	}
 }
 
 func TestNewStandardVerifierRequiresAReplayCache(t *testing.T) {
 	_, configured, _, _ := buildIssuerVerifier(t)
 	cfg := configured.cfg
-	cfg.DPoP = &DPoPVerifier{}
-	if _, err := NewStandardVerifier(cfg); !errors.Is(err, errNoReplayCache) {
-		t.Fatalf("err = %v, want errNoReplayCache", err)
+	cfg.DPoP = &dpop.Verifier{}
+	if _, err := NewStandardVerifier(cfg); !errors.Is(err, dpop.ErrNoReplayCache) {
+		t.Fatalf("err = %v, want dpop.ErrNoReplayCache", err)
 	}
 }
 
@@ -108,7 +110,7 @@ func TestNewStandardVerifierRequiresAReplayCache(t *testing.T) {
 func TestBiscuitProofIsOverTheBiscuit(t *testing.T) {
 	_, v, _, _, token := biscuitFixture(t)
 	key := dpopKeys(t)["Ed25519"]
-	jkt, _ := KeyThumbprint(key.Public())
+	jkt, _ := dpop.Thumbprint(key.Public())
 	bound, err := Attenuate(token, Attenuation{ConfirmationJKT: jkt})
 	if err != nil {
 		t.Fatal(err)
@@ -119,8 +121,8 @@ func TestBiscuitProofIsOverTheBiscuit(t *testing.T) {
 	}
 	req := withProof(t, key, inner, audienceData, time.Now())
 	req.Token = bound
-	if _, err := v.Verify(context.Background(), req); !errors.Is(err, ErrDPoPInvalid) {
-		t.Fatalf("a proof over the sealed token: err = %v, want ErrDPoPInvalid", err)
+	if _, err := v.Verify(context.Background(), req); !errors.Is(err, dpop.ErrInvalid) {
+		t.Fatalf("a proof over the sealed token: err = %v, want dpop.ErrInvalid", err)
 	}
 }
 

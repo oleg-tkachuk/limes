@@ -4,6 +4,7 @@ import (
 	"errors"
 	"slices"
 
+	"github.com/oleg-tkachuk/limes/dpop"
 	"github.com/oleg-tkachuk/limes/jwks"
 )
 
@@ -61,10 +62,10 @@ var refusalRules = []refusalRule{
 	// A nonce challenge asks for a proof signed afresh, and a token under the
 	// wrong scheme for the same token sent under DPoP; neither stands. RFC
 	// 9449 §7.2 answers the scheme as an invalid token, not a bad proof.
-	{ErrDPoPNonceRequired, ReasonProofInvalid, false, answerNonce},
-	{ErrDPoPRequired, ReasonProofRequired, false, answerProof},
-	{ErrDPoPInvalid, ReasonProofInvalid, false, answerProof},
-	{ErrDPoPReplayed, ReasonProofReplayed, false, answerProof},
+	{dpop.ErrNonceRequired, ReasonProofInvalid, false, answerNonce},
+	{dpop.ErrRequired, ReasonProofRequired, false, answerProof},
+	{dpop.ErrInvalid, ReasonProofInvalid, false, answerProof},
+	{dpop.ErrReplayed, ReasonProofReplayed, false, answerProof},
 	{ErrAuthSchemeMismatch, ReasonProofRequired, false, answerToken},
 	{ErrProofOfPossession, "", false, answerProof},
 

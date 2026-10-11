@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/dpop"
 	"github.com/oleg-tkachuk/limes/jwks"
 	"github.com/oleg-tkachuk/limes/memstore"
 )
@@ -52,7 +53,7 @@ func newExampleStack() exampleStack {
 		TrustedIssuers:     []string{exampleIssuerName},
 		AcceptBiscuit:      true,
 		BiscuitRevocations: records,
-		DPoP:               &limes.DPoPVerifier{Replay: limes.NewMemoryReplayCache(0)},
+		DPoP:               &dpop.Verifier{Replay: dpop.NewMemoryReplayCache(0)},
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -210,14 +211,14 @@ func ExampleAttenuate() {
 	// <nil> true [get] [corpus/public/2026/]
 }
 
-func ExampleNewDPoPProof() {
+func Example_proofOfPossession() {
 	ctx := context.Background()
 	s := newExampleStack()
 	const method, url = "POST", "https://data.example.com/objects/get"
 
 	// The capability is bound to a key the agent keeps.
 	_, agentKey, _ := ed25519.GenerateKey(rand.Reader)
-	jkt, _ := limes.KeyThumbprint(agentKey.Public())
+	jkt, _ := dpop.Thumbprint(agentKey.Public())
 	_, token, err := s.issuer.Issue(ctx, limes.IssueRequest{
 		IssuedBy: limes.Principal{Subject: "operator@example.com"},
 		Subject:  limes.Principal{Type: limes.PrincipalAgent, TenantID: s.tenantID, Subject: "worker"},
@@ -231,20 +232,20 @@ func ExampleNewDPoPProof() {
 
 	// Without a proof the token is refused: a copy of it is useless.
 	_, err = s.verifier.Verify(ctx, limes.VerifyRequest{Token: token, Audience: exampleAudience})
-	fmt.Println(errors.Is(err, limes.ErrDPoPRequired))
+	fmt.Println(errors.Is(err, dpop.ErrRequired))
 
 	// The client signs a fresh proof per request.
-	proof, _ := limes.NewDPoPProof(agentKey, limes.DPoPProofRequest{Method: method, URL: url, Token: token, Now: time.Now()})
+	proof, _ := dpop.Sign(agentKey, dpop.ProofRequest{Method: method, URL: url, Token: token, Now: time.Now()})
 	req := limes.VerifyRequest{
 		Token: token, Audience: exampleAudience,
-		DPoP: limes.DPoPProof{Proof: proof, Method: method, URL: url},
+		DPoP: dpop.Proof{JWT: proof, Method: method, URL: url},
 	}
 	_, err = s.verifier.Verify(ctx, req)
 	fmt.Println(err)
 
 	// The same proof a second time is a replay.
 	_, err = s.verifier.Verify(ctx, req)
-	fmt.Println(errors.Is(err, limes.ErrDPoPReplayed))
+	fmt.Println(errors.Is(err, dpop.ErrReplayed))
 	// Output:
 	// true
 	// <nil>

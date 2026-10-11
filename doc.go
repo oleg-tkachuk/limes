@@ -41,8 +41,8 @@
 //
 // Three more are needed only with the feature they serve:
 // [BiscuitRevocationStore] to accept Biscuit tokens, [CopyUsageReader] to
-// show a Biscuit copy's own counters, and [ReplayCache] to share DPoP replay
-// state across replicas ([MemoryReplayCache] ships for one process).
+// show a Biscuit copy's own counters, and [dpop.ReplayCache] to share DPoP replay
+// state across replicas ([dpop.MemoryReplayCache] ships for one process).
 //
 // A Capability crosses the API by value, in and out: no caller can alter one
 // another holds, and one that is not there is an error, never nil.

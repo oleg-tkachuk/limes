@@ -33,7 +33,11 @@ var (
 	// to accept: a bad signature, an unknown kid, an untrusted issuer, a
 	// malformed header or claims. One sentinel for all, so a caller cannot
 	// tell an attacker which check failed.
-	ErrInvalidToken      error = &familyError{"limes: invalid token", ErrUnauthenticated}
+	ErrInvalidToken error = &familyError{"limes: invalid token", ErrUnauthenticated}
+	// ErrProofOfPossession is the family of every proof-of-possession
+	// refusal: the token may be genuine, the proof that its holder sent it
+	// is what failed. The verifier wraps each dpop refusal in it.
+	ErrProofOfPossession error = &familyError{"limes: proof of possession refused", ErrUnauthenticated}
 	ErrExpired           error = &familyError{"limes: expired", ErrUnauthenticated}
 	ErrNotYetValid       error = &familyError{"limes: not yet valid", ErrUnauthenticated}
 	ErrRevoked           error = &familyError{"limes: revoked", ErrUnauthenticated}
@@ -64,8 +68,8 @@ var (
 )
 
 // familyError is a sentinel with a name of its own that also matches the
-// family it belongs to, and that family's own: errors.Is(ErrDPoPReplayed,
-// ErrProofOfPossession) and errors.Is(ErrDPoPReplayed, ErrUnauthenticated)
+// family it belongs to, and that family's own: errors.Is(dpop.ErrReplayed,
+// ErrProofOfPossession) and errors.Is(dpop.ErrReplayed, ErrUnauthenticated)
 // both hold.
 type familyError struct {
 	msg    string
