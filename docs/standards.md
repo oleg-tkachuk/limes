@@ -13,7 +13,7 @@ the test that holds it there.
 | [RFC 3986](https://www.rfc-editor.org/rfc/rfc3986) | URI normalisation for `htu` | DPoP checks |
 | [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110), [RFC 6750](https://www.rfc-editor.org/rfc/rfc6750) | The `Authorization` header and `WWW-Authenticate` challenges | `ParseAuthorization`, `ErrorResponse` |
 | [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) | Problem details bodies | `ErrorResponse`, `WriteErrorResponse` |
-| [RFC 7517](https://www.rfc-editor.org/rfc/rfc7517), [RFC 7638](https://www.rfc-editor.org/rfc/rfc7638), [RFC 8037](https://www.rfc-editor.org/rfc/rfc8037) | JWK Sets, thumbprints, Ed25519 keys | `jwks.Marshal`, `jwks.Handler`, `jwks.KeyID` |
+| [RFC 7517](https://www.rfc-editor.org/rfc/rfc7517), [RFC 7638](https://www.rfc-editor.org/rfc/rfc7638), [RFC 8037](https://www.rfc-editor.org/rfc/rfc8037) | JWK Sets, thumbprints, Ed25519 keys | `jwks.Marshal`, `jwks.NewHandler`, `jwks.KeyID` |
 | [RFC 9111](https://www.rfc-editor.org/rfc/rfc9111) | How long a fetched JWK Set stays fresh | `jwks.Remote` |
 | [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562) | UUIDv7 capability ids | `Issuer.Issue` |
 | [RFC 4648](https://www.rfc-editor.org/rfc/rfc4648) §5 | base64url without padding, everywhere | — |
@@ -133,7 +133,7 @@ or names a member twice, is refused. `jwks.KeyID` makes a key's kid its RFC 7638
 tool computes alike.
 
 **Serving and fetching (RFC 7517 §8.5, RFC 9110 §13, RFC 9111).**
-`jwks.Handler` serves a set as `application/jwk-set+json`, with a strong ETag
+`jwks.NewHandler` serves a set as `application/jwk-set+json`, with a strong ETag
 answering `If-None-Match` with 304 and `Cache-Control: max-age`.
 `jwks.Remote` asks for that media type first, revalidates by ETag, and
 keeps a set as long as the response's `max-age` less its `Age` says — never

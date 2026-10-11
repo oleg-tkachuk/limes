@@ -50,7 +50,7 @@ func TestResponseFreshness(t *testing.T) {
 	}
 }
 
-// The resolver asks for the registered entry Set media type and keeps a set
+// The resolver asks for the registered JWK Set media type and keeps a set
 // only as long as the response's Cache-Control allows, within its bounds.
 func TestRemoteJWKSHonoursTheResponse(t *testing.T) {
 	kid, pub, _, err := generateKeypair()
@@ -119,7 +119,13 @@ func TestJWKSHandler(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := Handler(func() map[string]ed25519.PublicKey { return map[string]ed25519.PublicKey{kid: pub} }, 5*time.Minute)
+	h, err := NewHandler(HandlerConfig{
+		Keys:   func() map[string]ed25519.PublicKey { return map[string]ed25519.PublicKey{kid: pub} },
+		MaxAge: 5 * time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/jwks", nil))
@@ -198,13 +204,29 @@ func TestRemoteJWKSKeepsTheSetWhenNoKeyIsUsable(t *testing.T) {
 	}
 }
 
-// A negative max-age would write an invalid Cache-Control; it is served as
-// zero.
-func TestJWKSHandlerClampsANegativeMaxAge(t *testing.T) {
-	h := Handler(func() map[string]ed25519.PublicKey { return nil }, -time.Second)
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/jwks", nil))
-	if got := rec.Header().Get(httpx.HeaderCacheControl); got != "public, max-age=0" {
-		t.Errorf("Cache-Control = %q, want max-age=0", got)
+
+// A handler with no keys, or a negative max-age — an invalid Cache-Control
+// on every response — is refused; a remote resolver with a negative
+// interval or bound likewise.
+func TestConfigsRefuseNegatives(t *testing.T) {
+	keys := func() map[string]ed25519.PublicKey { return nil }
+	for name, cfg := range map[string]HandlerConfig{
+		"no keys":          {},
+		"negative max-age": {Keys: keys, MaxAge: -time.Second},
+	} {
+		if _, err := NewHandler(cfg); err == nil {
+			t.Errorf("NewHandler, %s: accepted", name)
+		}
+	}
+	const url = "https://issuer.example.com/jwks"
+	for name, cfg := range map[string]RemoteConfig{
+		"negative refresh":     {URL: url, RefreshInterval: -time.Second},
+		"negative min refresh": {URL: url, MinRefreshInterval: -time.Second},
+		"negative max stale":   {URL: url, MaxStale: -time.Second},
+		"negative max bytes":   {URL: url, MaxDocumentBytes: -1},
+	} {
+		if _, err := NewRemote(cfg); err == nil {
+			t.Errorf("NewRemote, %s: accepted", name)
+		}
 	}
 }

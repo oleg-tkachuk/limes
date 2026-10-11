@@ -74,13 +74,14 @@ verifier, err := limes.NewStandardVerifier(limes.VerifierConfig{
 })
 ```
 
-The issuer serves that document with `jwks.Handler` — `application/jwk-set+json`,
+The issuer serves that document with `jwks.NewHandler` — `application/jwk-set+json`,
 a strong ETag answering `If-None-Match` with 304, `Cache-Control: public,
-max-age` (a negative `maxAge` is served as 0) — over a function returning its keys, such as
+max-age` (a negative `MaxAge` is refused) — over a function returning its keys, such as
 `jwks.Static.Keys`:
 
 ```go
-mux.Handle("/.well-known/jwks.json", jwks.Handler(resolver.Keys, time.Minute))
+h, err := jwks.NewHandler(jwks.HandlerConfig{Keys: resolver.Keys, MaxAge: time.Minute})
+mux.Handle("/.well-known/jwks.json", h)
 ```
 
 `jwks.Marshal` writes the same document for a server of your own; `jwks.Parse`
