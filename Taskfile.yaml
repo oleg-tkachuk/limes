@@ -13,7 +13,7 @@ silent: true
 
 vars:
   # Shared task library — github.com/oleg-tkachuk/taskfiles, pinned.
-  TASKLIB: 'https://github.com/oleg-tkachuk/taskfiles.git//%s?ref=v11.1.2'
+  TASKLIB: 'https://github.com/oleg-tkachuk/taskfiles.git//%s?ref=v11.1.3'
   # The developer tools' own module; see its go.mod.
   TOOLS_MODFILE: tools/go.mod
 
