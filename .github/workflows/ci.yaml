@@ -213,6 +213,39 @@ jobs:
       - name: go test
         run: go test -race ./...
 
+  # The release is computed from commit types, so a break of the Go API that
+  # no commit marks breaking would ship as a patch or a feature. apidiff
+  # compares the pull request's API with its merge base; an incompatible
+  # change needs a `!` or a BREAKING CHANGE: footer in one of its commits.
+  # Pull requests only: main is reached through one.
+  api:
+    name: API compatibility
+    needs: [changes]
+    if: github.event_name == 'pull_request' && needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The merge base and every commit of the pull request.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Require a break of the API to be marked breaking
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: ./.github/scripts/api-break-check.sh "$BASE" "$HEAD"
+
   # Two jobs over the same files, and the halves do not overlap. actionlint
   # covers whether a workflow is correct at all — schema, expression syntax,
   # `needs:` naming a job that exists, and shellcheck over every `run:` block.
@@ -273,7 +306,7 @@ jobs:
   # change, which is a pass; a failure or a cancellation anywhere is not.
   checks:
     name: All checks passed
-    needs: [changes, verify, floor, syntax, audit]
+    needs: [changes, verify, floor, api, syntax, audit]
     if: always()
     runs-on: ubuntu-26.04
     timeout-minutes: 5
