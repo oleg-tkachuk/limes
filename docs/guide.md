@@ -621,6 +621,12 @@ deployment that may run without a key file chooses between the two itself. A
 key with no kid named gets `jwks.KeyID`'s: its RFC 7638 thumbprint, the same
 wherever it is derived.
 
+`NewSigner(limes.SignerConfig{KeyID: kid, Key: key})` signs through any
+`crypto.Signer` whose key is Ed25519 — an `ed25519.PrivateKey`, or a key held
+in a KMS or an HSM; the token format stays inside the module. A key that
+implements `ContextSigner` signs under the request's context, so a slow or
+cancelled call is bounded by the request that asked for the token.
+
 ## Answer a refusal
 
 `ErrorResponse` turns any error `Verify`, `Authorize` or the `Meter` returns
