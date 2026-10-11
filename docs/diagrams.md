@@ -303,10 +303,10 @@ flowchart TB
     shape{"three segments · typ dpop+jwt<br/>a jwk with no private member"}
     jkt{"the jwk's RFC 7638 thumbprint<br/>= ConfirmationJKT"}
     psig{"signature by that key<br/>Ed25519 (or EdDSA) · ES256"}
-    htm{"htm = Method (any case)"}
+    htm{"htm = Method, exactly<br/>(a method is case-sensitive)"}
     htu{"htu = URL after RFC 3986 normalisation<br/>or, under MatchPathOnly, its path a suffix"}
     ath{"ath = hash of the token as presented"}
-    iat{"|now − iat| ≤ Window<br/>(DefaultDPoPWindow, 1 minute)"}
+    iat{"|now − iat| ≤ Window<br/>(DefaultDPoPWindow, 1 minute)<br/>iat may be fractional"}
     nonce{"Nonces set → a nonce they issued"}
     jti{"ReplayCache.Seen(key, jti, iat + Window)"}
     ok(["proof accepted"])
