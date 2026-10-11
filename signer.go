@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes/internal/jose"
+	"github.com/oleg-tkachuk/limes/internal/link"
 )
 
 // Signer mints capability tokens with an Ed25519 key; verifiers pick up
@@ -282,11 +283,11 @@ func parseClaims(seg string) (*Capability, error) {
 	return cap, nil
 }
 
-// Decode parses a compact-form token without verifying the signature
-// or applying time / audience / revocation gates. Use only for tooling
-// that displays a token; production code goes through Verifier.Verify,
-// which never reads a claim before the signature has checked out.
-func Decode(token string) (Capability, error) {
+func init() { link.DecodeToken = decodeToken }
+
+// decodeToken reads a compact token's header and claims without checking
+// its signature: inspect.Decode, for tooling that displays a token.
+func decodeToken(token string) (any, error) {
 	parts, err := jose.Split(token)
 	if err != nil {
 		return Capability{}, err
@@ -301,28 +302,9 @@ func Decode(token string) (Capability, error) {
 	return *c, nil
 }
 
-// VerifySignature checks the Ed25519 signature on a compact token
-// against the supplied public key. Time / audience / revocation gates
-// are NOT applied here — Verify in the production verifier wraps this
-// call with the full check chain.
-func VerifySignature(token string, pub ed25519.PublicKey) error {
-	parts, err := jose.Split(token)
-	if err != nil {
-		return err
-	}
-	return verifyParts(parts, pub)
-}
-
 func verifyParts(parts jose.Parts, pub ed25519.PublicKey) error {
-	if len(pub) != ed25519.PublicKeySize {
-		return fmt.Errorf("%w: public key wrong length %d", ErrInvalidToken, len(pub))
-	}
-	sig, err := base64.RawURLEncoding.DecodeString(parts.Signature)
-	if err != nil {
-		return fmt.Errorf("%w: decode sig: %w", ErrInvalidToken, err)
-	}
-	if !ed25519.Verify(pub, []byte(parts.SigningInput()), sig) {
-		return ErrInvalidToken
+	if err := jose.VerifyEd25519(parts, pub); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
 	return nil
 }

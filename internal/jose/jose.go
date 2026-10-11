@@ -153,3 +153,18 @@ func Ed25519Thumbprint(pub ed25519.PublicKey) string {
 	thumb, _ := JWK{Kty: KtyOKP, Crv: CrvEd25519, X: B64(pub)}.Thumbprint()
 	return thumb
 }
+
+// VerifyEd25519 checks the Ed25519 signature over parts against pub.
+func VerifyEd25519(parts Parts, pub ed25519.PublicKey) error {
+	if len(pub) != ed25519.PublicKeySize {
+		return fmt.Errorf("public key wrong length %d", len(pub))
+	}
+	sig, err := base64.RawURLEncoding.DecodeString(parts.Signature)
+	if err != nil {
+		return fmt.Errorf("decode signature: %w", err)
+	}
+	if !ed25519.Verify(pub, []byte(parts.SigningInput()), sig) {
+		return errors.New("signature does not verify")
+	}
+	return nil
+}
