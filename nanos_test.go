@@ -29,6 +29,8 @@ func TestParseAmountRefusesWhatItCannotCountExactly(t *testing.T) {
 		"0x1p-2", "0x10", "0b1", "0o7", "1_000", "+1", ".5", "5.", " 1", "Inf",
 		// An exponent long enough to cost real work, or to round to zero.
 		"1e999999", "1e-999999", "1e1000",
+		// A sign, even on zero: an amount is never negative.
+		"-0", "-0.0e5",
 	} {
 		if _, err := ParseAmount(in); !errors.Is(err, ErrInvalidAmount) {
 			t.Errorf("ParseAmount(%q): err = %v, want ErrInvalidAmount", in, err)
@@ -184,5 +186,11 @@ func TestNanosStringNegative(t *testing.T) {
 		if got := n.String(); got != want {
 			t.Errorf("Nanos(%d).String() = %s, want %s", int64(n), got, want)
 		}
+	}
+}
+
+func TestAmountFromFloatReadsMinusZeroAsZero(t *testing.T) {
+	if n, err := AmountFromFloat(math.Copysign(0, -1)); err != nil || n != 0 {
+		t.Errorf("AmountFromFloat(-0) = %d, %v; want 0", int64(n), err)
 	}
 }

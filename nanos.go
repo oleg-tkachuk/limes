@@ -69,6 +69,9 @@ func AmountFromFloat(f float64) (Nanos, error) {
 	if math.IsNaN(f) || math.IsInf(f, 0) {
 		return 0, fmt.Errorf("%w: %v is not a number", ErrInvalidAmount, f)
 	}
+	if f == 0 { // minus zero included, which would format with a sign
+		return 0, nil
+	}
 	n, _, err := parseDecimal(strconv.FormatFloat(f, 'g', -1, 64))
 	return n, err
 }
@@ -79,15 +82,18 @@ func AmountFromFloat(f float64) (Nanos, error) {
 const maxExponentDigits = 3
 
 // decimalAmount is the one form an amount is written in: digits, an optional
-// fraction, an optional exponent. A minus sign is read so that a negative
-// amount is refused by its value; minus zero reads as zero. big.Rat reads far more — fractions, hex, binary and octal
+// fraction, an optional exponent — no sign, since an amount is never
+// negative. big.Rat reads far more — fractions, hex, binary and octal
 // floats, underscores — none of which is a decimal amount.
-var decimalAmount = regexp.MustCompile(`^-?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]{1,` +
+var decimalAmount = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]{1,` +
 	strconv.Itoa(maxExponentDigits) + `})?$`)
 
 // parseDecimal reads s as a decimal number of units and rounds it to the
 // nearest nano, halves to even, reporting whether that was exact.
 func parseDecimal(s string) (Nanos, bool, error) {
+	if strings.HasPrefix(s, "-") {
+		return 0, false, fmt.Errorf("%w: %s is negative", ErrInvalidAmount, s)
+	}
 	if !decimalAmount.MatchString(s) {
 		return 0, false, fmt.Errorf("%w: %q is not a decimal amount", ErrInvalidAmount, s)
 	}
