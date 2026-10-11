@@ -193,6 +193,7 @@ type TenantBudgets interface {
 	//     spent / max * 100 >= ThresholdPct (and max > 0).
 	//   - UnlimitedOnly: include only rows where max == 0.
 	//   - Limit: the page size, as PageLimit reads it.
+	// It refuses what ListTenantBudgetsRequest.Validate refuses.
 	//
 	// Rows come most at risk first: by spent / max × 100 descending —
 	// unclamped, so of two tenants past their ceilings the further one
@@ -458,12 +459,31 @@ type TenantBudgetSummary struct {
 // ListTenantBudgetsRequest is the input shape for
 // UsageStore.ListTenantBudgets.
 type ListTenantBudgetsRequest struct {
-	ThresholdPct    float64
-	UnlimitedOnly   bool
+	// ThresholdPct keeps only tenants at or past this utilisation, 0..100.
+	ThresholdPct float64
+	// UnlimitedOnly keeps only tenants with no ceiling.
+	UnlimitedOnly bool
+	// ExcludeInactive drops tenants the consumer marks inactive.
 	ExcludeInactive bool
-	Limit           int32
+	// Limit is the page size; see PageLimit. Negative is refused.
+	Limit int32
 	// Cursor is the one the previous page returned; empty for the first.
 	Cursor string
+}
+
+// maxThresholdPct is the highest utilisation a threshold can name.
+const maxThresholdPct = 100
+
+// Validate refuses a request no page can answer: a negative page size, or a
+// threshold outside 0..100.
+func (r ListTenantBudgetsRequest) Validate() error {
+	switch {
+	case r.Limit < 0:
+		return invalidRequest("list tenant budgets: limit %d is negative", r.Limit)
+	case r.ThresholdPct < 0 || r.ThresholdPct > maxThresholdPct:
+		return invalidRequest("list tenant budgets: threshold %v%% is outside 0..%d", r.ThresholdPct, maxThresholdPct)
+	}
+	return nil
 }
 
 // TenantBudgetCursor is a place in ListTenantBudgets' order: the last row's

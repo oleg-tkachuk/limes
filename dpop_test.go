@@ -96,3 +96,25 @@ func TestIssueRefusesAMalformedBinding(t *testing.T) {
 		t.Fatal("malformed ConfirmationJKT accepted")
 	}
 }
+
+// newReplay is dpop.NewMemoryReplayCache, failing the test on a refused
+// configuration.
+func newReplay(t testing.TB, cfg dpop.MemoryReplayCacheConfig) *dpop.MemoryReplayCache {
+	t.Helper()
+	c, err := dpop.NewMemoryReplayCache(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// newVerifier is dpop.NewVerifier, failing the test on a refused
+// configuration.
+func newVerifier(t testing.TB, cfg dpop.VerifierConfig) *dpop.Verifier {
+	t.Helper()
+	v, err := dpop.NewVerifier(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}

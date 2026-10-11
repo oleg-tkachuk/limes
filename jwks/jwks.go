@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -113,14 +114,29 @@ func parse(raw []byte) (map[string]ed25519.PublicKey, int, error) {
 	return out, skipped, nil
 }
 
-// Handler serves keys() as a entry Set document (RFC 7517), the way the
-// Remote on the other end reads it: under its registered media
-// type (§8.5), with a strong ETag of its bytes that answers If-None-Match
-// with 304 (RFC 9110 §13.1.2), and fresh for maxAge (RFC 9111 §5.2.2.1).
-// Keep maxAge below the time between publishing a new key and signing with
-// it, and between withdrawing an old key and the end of its tokens' TTL; a
-// negative maxAge is served as zero.
-func Handler(keys func() map[string]ed25519.PublicKey, maxAge time.Duration) http.Handler {
+// HandlerConfig configures the handler that serves a key set.
+type HandlerConfig struct {
+	// Keys returns the keys to serve, kid → key. Required.
+	Keys func() map[string]ed25519.PublicKey
+	// MaxAge is how long a client may keep the set (RFC 9111 §5.2.2.1).
+	// Keep it below the time between publishing a new key and signing with
+	// it, and between withdrawing an old key and the end of its tokens'
+	// TTL. Zero tells clients to revalidate every time.
+	MaxAge time.Duration
+}
+
+// NewHandler serves cfg.Keys() as a JWK Set document (RFC 7517), the way the
+// Remote on the other end reads it: under its registered media type (§8.5),
+// with a strong ETag of its bytes that answers If-None-Match with 304
+// (RFC 9110 §13.1.2), and fresh for MaxAge. A negative MaxAge is refused.
+func NewHandler(cfg HandlerConfig) (http.Handler, error) {
+	if cfg.Keys == nil {
+		return nil, errors.New("jwks: HandlerConfig.Keys required")
+	}
+	if cfg.MaxAge < 0 {
+		return nil, fmt.Errorf("jwks: HandlerConfig.MaxAge %s is negative", cfg.MaxAge)
+	}
+	keys, maxAge := cfg.Keys, cfg.MaxAge
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set(httpx.HeaderAllow, http.MethodGet+", "+http.MethodHead)
@@ -136,7 +152,7 @@ func Handler(keys func() map[string]ed25519.PublicKey, maxAge time.Duration) htt
 		etag := `"` + base64.RawURLEncoding.EncodeToString(sum[:]) + `"`
 		h := w.Header()
 		h.Set(httpx.HeaderETag, etag)
-		h.Set(httpx.HeaderCacheControl, fmt.Sprintf("%s, %s=%d", httpx.DirectivePublic, httpx.DirectiveMaxAge, int64(max(maxAge, 0)/time.Second)))
+		h.Set(httpx.HeaderCacheControl, fmt.Sprintf("%s, %s=%d", httpx.DirectivePublic, httpx.DirectiveMaxAge, int64(maxAge/time.Second)))
 		if etagMatches(r.Header.Values(httpx.HeaderIfNoneMatch), etag) {
 			w.WriteHeader(http.StatusNotModified)
 			return
@@ -144,7 +160,7 @@ func Handler(keys func() map[string]ed25519.PublicKey, maxAge time.Duration) htt
 		h.Set(httpx.HeaderContentType, mediaTypeJWKSet)
 		h.Set(httpx.HeaderContentLength, strconv.Itoa(len(doc)))
 		_, _ = w.Write(doc)
-	})
+	}), nil
 }
 
 // etagMatches is If-None-Match's weak comparison (RFC 9110 §13.1.2): any

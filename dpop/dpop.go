@@ -54,9 +54,6 @@ const (
 	es256SignatureBytes = 2 * jose.P256CoordinateBytes
 	// dpopJTIBytes is the randomness in a proof's jti.
 	dpopJTIBytes = 16
-	// defaultReplayCacheEntries bounds a MemoryReplayCache built with no
-	// explicit bound.
-	defaultReplayCacheEntries = 100_000
 )
 
 // The refusals of a proof. A caller that judges what they mean for the
@@ -275,14 +272,15 @@ type ReplayCache interface {
 	Seen(ctx context.Context, e ReplayEntry) (bool, error)
 }
 
-// Verifier checks proofs against the key a token is bound to.
-type Verifier struct {
-	// Window bounds |now − iat|. Default DefaultWindow.
+// VerifierConfig configures a Verifier. Zero fields take the defaults named
+// on them; Replay is required.
+type VerifierConfig struct {
+	// Window bounds |now − iat|. Zero: DefaultWindow.
 	Window time.Duration
 	// Replay refuses a jti seen before. Required: without it a captured
-	// proof is good for the whole window, and Verify refuses every proof.
+	// proof is good for the whole window.
 	Replay ReplayCache
-	// Now is the clock; default time.Now.
+	// Now is the clock. Nil: time.Now.
 	Now func() time.Time
 	// Nonces, when set, requires every proof to carry a nonce it issued
 	// (RFC 9449 §8); a proof without one is refused with
@@ -293,6 +291,29 @@ type Verifier struct {
 	// proxy, which cannot know the scheme, host or mount prefix its clients
 	// address it by.
 	MatchPathOnly bool
+}
+
+// Verifier checks proofs against the key a token is bound to.
+type Verifier struct {
+	cfg VerifierConfig
+}
+
+// NewVerifier builds a Verifier from cfg, refusing one with no ReplayCache
+// or a negative Window.
+func NewVerifier(cfg VerifierConfig) (*Verifier, error) {
+	if cfg.Replay == nil {
+		return nil, ErrNoReplayCache
+	}
+	if cfg.Window < 0 {
+		return nil, fmt.Errorf("dpop: Window %s is negative", cfg.Window)
+	}
+	if cfg.Window == 0 {
+		cfg.Window = DefaultWindow
+	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
+	return &Verifier{cfg: cfg}, nil
 }
 
 // SigningAlgorithms are the JWS algorithms a DPoP proof may be signed
@@ -307,10 +328,10 @@ var ErrNoReplayCache = errors.New("dpop: Verifier.Replay required")
 // Nonce is the nonce to send in the DPoP-Nonce header, empty when the
 // verifier issues none.
 func (v *Verifier) Nonce(ctx context.Context) (string, error) {
-	if v.Nonces == nil {
+	if v.cfg.Nonces == nil {
 		return "", nil
 	}
-	return v.Nonces.Nonce(ctx)
+	return v.cfg.Nonces.Nonce(ctx)
 }
 
 // check verifies p against the key-bound capability c presented as token. It
@@ -319,21 +340,14 @@ func (v *Verifier) Nonce(ctx context.Context) (string, error) {
 // and URL and this token's hash; that was issued within the window; and whose
 // jti is new.
 func (v *Verifier) Verify(ctx context.Context, req Request) error {
-	if v.Replay == nil {
-		return ErrNoReplayCache
+	if v == nil || v.cfg.Replay == nil {
+		return ErrNoReplayCache // a Verifier not made by NewVerifier
 	}
 	p, token := req.Proof, req.Token
 	if p.JWT == "" {
 		return ErrRequired
 	}
-	window := v.Window
-	if window <= 0 {
-		window = DefaultWindow
-	}
-	now := v.Now
-	if now == nil {
-		now = time.Now
-	}
+	window, now := v.cfg.Window, v.cfg.Now
 
 	parts, err := jose.Split(p.JWT)
 	if err != nil {
@@ -368,7 +382,7 @@ func (v *Verifier) Verify(ctx context.Context, req Request) error {
 	if claims.HTM != p.Method {
 		return fmt.Errorf("%w: method %q, proof names %q", ErrInvalid, p.Method, claims.HTM)
 	}
-	if !htuMatches(claims.HTU, p.URL, v.MatchPathOnly) {
+	if !htuMatches(claims.HTU, p.URL, v.cfg.MatchPathOnly) {
 		return fmt.Errorf("%w: URL does not match the proof's htu", ErrInvalid)
 	}
 	if claims.ATH != accessTokenHash(token) {
@@ -382,8 +396,8 @@ func (v *Verifier) Verify(ctx context.Context, req Request) error {
 	if d := now().Sub(iat); d > window || d < -window {
 		return fmt.Errorf("%w: issued at %s, outside the %s window", ErrInvalid, iat.UTC(), window)
 	}
-	if v.Nonces != nil {
-		valid, err := v.Nonces.Valid(ctx, claims.Nonce)
+	if v.cfg.Nonces != nil {
+		valid, err := v.cfg.Nonces.Valid(ctx, claims.Nonce)
 		if err != nil {
 			return fmt.Errorf("dpop: nonce check: %w", err)
 		}
@@ -391,7 +405,7 @@ func (v *Verifier) Verify(ctx context.Context, req Request) error {
 			return ErrNonceRequired
 		}
 	}
-	seen, err := v.Replay.Seen(ctx, ReplayEntry{JKT: thumb, JTI: claims.JTI, Expires: iat.Add(window)})
+	seen, err := v.cfg.Replay.Seen(ctx, ReplayEntry{JKT: thumb, JTI: claims.JTI, Expires: iat.Add(window)})
 	if err != nil {
 		return fmt.Errorf("dpop: replay check: %w", err)
 	}
@@ -444,7 +458,7 @@ func decodeSegment(seg string, v any) error {
 // keep the window short, use server nonces (Verifier.Nonces), or back
 // ReplayCache with a shared store.
 //
-// Every key gets a share of the cache of its own (WithEntriesPerKey), so the
+// Every key gets a share of the cache of its own (EntriesPerKey), so the
 // holder of one key-bound token cannot fill it with proofs and lock every
 // other key out: past its share, only that key's proofs are refused.
 type MemoryReplayCache struct {
@@ -460,38 +474,44 @@ type MemoryReplayCache struct {
 // replayKey is one proof id of one key.
 type replayKey struct{ jkt, jti string }
 
-// DefaultReplayEntriesPerKey is how many live proof ids one key may hold in
-// a MemoryReplayCache: a thousand requests a window from one key.
-const DefaultReplayEntriesPerKey = 1_000
+// MemoryReplayCache defaults, for a field left zero.
+const (
+	// DefaultReplayCacheEntries bounds the whole cache.
+	DefaultReplayCacheEntries = 100_000
+	// DefaultReplayEntriesPerKey is how many live proof ids one key may
+	// hold: a thousand requests a window from one key.
+	DefaultReplayEntriesPerKey = 1_000
+)
 
-// ReplayCacheOption configures a MemoryReplayCache.
-type ReplayCacheOption func(*MemoryReplayCache)
-
-// WithEntriesPerKey bounds the live proof ids of one key; ≤ 0 keeps the
-// default. It is never more than the whole cache.
-func WithEntriesPerKey(n int) ReplayCacheOption {
-	return func(c *MemoryReplayCache) {
-		if n > 0 {
-			c.maxPerKey = n
-		}
-	}
+// MemoryReplayCacheConfig configures a MemoryReplayCache.
+type MemoryReplayCacheConfig struct {
+	// MaxEntries bounds the cache. Zero: DefaultReplayCacheEntries.
+	MaxEntries int
+	// EntriesPerKey bounds the live proof ids of one key, never more than
+	// MaxEntries. Zero: DefaultReplayEntriesPerKey.
+	EntriesPerKey int
+	// Now is the clock. Nil: time.Now.
+	Now func() time.Time
 }
 
-// NewMemoryReplayCache bounds the cache at maxEntries (≤ 0: 100 000), and
-// each key at DefaultReplayEntriesPerKey unless an option says otherwise.
-func NewMemoryReplayCache(maxEntries int, opts ...ReplayCacheOption) *MemoryReplayCache {
-	if maxEntries <= 0 {
-		maxEntries = defaultReplayCacheEntries
+// NewMemoryReplayCache builds a MemoryReplayCache, refusing a negative bound.
+func NewMemoryReplayCache(cfg MemoryReplayCacheConfig) (*MemoryReplayCache, error) {
+	if cfg.MaxEntries < 0 || cfg.EntriesPerKey < 0 {
+		return nil, fmt.Errorf("dpop: replay cache bounds %d, %d are negative", cfg.MaxEntries, cfg.EntriesPerKey)
 	}
-	c := &MemoryReplayCache{
+	if cfg.MaxEntries == 0 {
+		cfg.MaxEntries = DefaultReplayCacheEntries
+	}
+	if cfg.EntriesPerKey == 0 {
+		cfg.EntriesPerKey = DefaultReplayEntriesPerKey
+	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
+	return &MemoryReplayCache{
 		seen: map[replayKey]time.Time{}, perKey: map[string]int{},
-		maxEntries: maxEntries, maxPerKey: DefaultReplayEntriesPerKey, now: time.Now,
-	}
-	for _, o := range opts {
-		o(c)
-	}
-	c.maxPerKey = min(c.maxPerKey, c.maxEntries)
-	return c
+		maxEntries: cfg.MaxEntries, maxPerKey: min(cfg.EntriesPerKey, cfg.MaxEntries), now: cfg.Now,
+	}, nil
 }
 
 // Seen implements ReplayCache. Expired ids are dropped as they lapse, soonest

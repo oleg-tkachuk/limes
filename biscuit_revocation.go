@@ -115,13 +115,27 @@ type CachedBiscuitRevocationChecker struct {
 	cache    *ttlCache[[sha256.Size]byte]
 }
 
-// NewCachedBiscuitRevocationChecker wires a cache over an upstream lookup.
-// ttl and the options apply as they do to NewCachedRevocationChecker.
-func NewCachedBiscuitRevocationChecker(upstream BiscuitRevocationLookup, ttl time.Duration, opts ...CacheOption) *CachedBiscuitRevocationChecker {
-	return &CachedBiscuitRevocationChecker{
-		upstream: upstream,
-		cache:    newTTLCache[[sha256.Size]byte](newCacheConfig(ttl, opts)),
+// BiscuitRevocationCacheConfig configures a CachedBiscuitRevocationChecker;
+// its fields read as RevocationCacheConfig's do.
+type BiscuitRevocationCacheConfig struct {
+	// Upstream answers what the cache does not hold. Required.
+	Upstream   BiscuitRevocationLookup
+	TTL        time.Duration
+	MaxEntries int
+	Now        func() time.Time
+}
+
+// NewCachedBiscuitRevocationChecker wires a cache over cfg.Upstream, as
+// NewCachedRevocationChecker does.
+func NewCachedBiscuitRevocationChecker(cfg BiscuitRevocationCacheConfig) (*CachedBiscuitRevocationChecker, error) {
+	if cfg.Upstream == nil {
+		return nil, errors.New("limes: BiscuitRevocationCacheConfig.Upstream required")
 	}
+	c, err := newCacheConfig(cfg.TTL, cfg.MaxEntries, cfg.Now)
+	if err != nil {
+		return nil, err
+	}
+	return &CachedBiscuitRevocationChecker{upstream: cfg.Upstream, cache: newTTLCache[[sha256.Size]byte](c)}, nil
 }
 
 // IsBiscuitRevoked serves a fresh cached answer, or asks upstream once on

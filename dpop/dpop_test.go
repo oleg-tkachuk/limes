@@ -48,7 +48,7 @@ func TestDPoPAcceptsAProofFromTheBoundKey(t *testing.T) {
 	for name, key := range dpopKeys(t) {
 		t.Run(name, func(t *testing.T) {
 			c := boundJKT(t, key)
-			v := &Verifier{Replay: NewMemoryReplayCache(0), Now: func() time.Time { return now }}
+			v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }})
 			proof, err := Sign(key, ProofRequest{Method: "POST", URL: dpopURL + "?x=1", Token: "the-token", Now: now})
 			if err != nil {
 				t.Fatal(err)
@@ -94,7 +94,7 @@ func TestDPoPRefusals(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			v := &Verifier{Replay: NewMemoryReplayCache(0), Now: func() time.Time { return now }}
+			v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }})
 			req := base
 			req.JWT = tc.proof
 			err := v.Verify(context.Background(), Request{Proof: req, Token: "the-token", JKT: c})
@@ -109,7 +109,7 @@ func TestDPoPPathOnlyIgnoresHostButNotPath(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	key := dpopKeys(t)["Ed25519"]
 	c := boundJKT(t, key)
-	v := &Verifier{Replay: NewMemoryReplayCache(0), Now: func() time.Time { return now }, MatchPathOnly: true}
+	v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }, MatchPathOnly: true})
 	proof, _ := Sign(key, ProofRequest{Method: "POST", URL: dpopURL, Token: "tok", Now: now})
 	req := Proof{JWT: proof, Method: "POST", URL: "http://10.0.0.7:8080/example.data.v1.ObjectService/GetObject"}
 	if err := v.Verify(context.Background(), Request{Proof: req, Token: "tok", JKT: c}); err != nil {
@@ -142,7 +142,7 @@ func TestThumbprintMatchesRFC7638(t *testing.T) {
 
 func TestMemoryReplayCacheIsBoundedAndForgetsExpired(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
-	c := NewMemoryReplayCache(2)
+	c := newReplay(t, MemoryReplayCacheConfig{MaxEntries: 2})
 	c.now = func() time.Time { return now }
 	if seen(t, c, "k", "a", now.Add(time.Minute)) || seen(t, c, "k", "b", now.Add(time.Second)) {
 		t.Fatal("fresh ids reported seen")
@@ -168,7 +168,7 @@ func TestDPoPProofFromAnOpaqueSigner(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			v := &Verifier{Replay: NewMemoryReplayCache(0), Now: func() time.Time { return now }}
+			v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }})
 			if err := v.Verify(context.Background(), Request{Proof: Proof{JWT: proof, Method: "POST", URL: dpopURL}, Token: "tok", JKT: c}); err != nil {
 				t.Fatalf("proof from an opaque signer refused: %v", err)
 			}
@@ -180,7 +180,7 @@ func TestDPoPProofFromAnOpaqueSigner(t *testing.T) {
 // came in, and only they do.
 func TestMemoryReplayCacheForgetsInExpiryOrder(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
-	c := NewMemoryReplayCache(0)
+	c := newReplay(t, MemoryReplayCacheConfig{})
 	c.now = func() time.Time { return now }
 	for i, d := range []time.Duration{5, 1, 4, 2, 3} {
 		if seen(t, c, "k", fmt.Sprint(i), now.Add(d*time.Second)) {
@@ -204,8 +204,7 @@ func TestMemoryReplayCacheForgetsInExpiryOrder(t *testing.T) {
 func BenchmarkMemoryReplayCacheFull(b *testing.B) {
 	const entries = 100_000
 	now := time.Unix(1_800_000_000, 0)
-	c := NewMemoryReplayCache(entries)
-	c.now = func() time.Time { return now }
+	c := newReplay(b, MemoryReplayCacheConfig{MaxEntries: entries, Now: func() time.Time { return now }})
 	for i := range entries {
 		seen(b, c, fmt.Sprint(i), fmt.Sprint(i), now.Add(time.Hour))
 	}
@@ -236,7 +235,7 @@ func TestDPoPRefusesAPrivateJWK(t *testing.T) {
 	input := jose.B64([]byte(header)) + "." + jose.B64([]byte(claims))
 	proof := input + "." + jose.B64(ed25519.Sign(priv, []byte(input)))
 
-	v := &Verifier{Replay: NewMemoryReplayCache(0), Now: func() time.Time { return now }}
+	v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }})
 	err = v.Verify(context.Background(), Request{Proof: Proof{JWT: proof, Method: "POST", URL: dpopURL}, Token: "the-token", JKT: c})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("a proof carrying its private key: err = %v, want ErrInvalid", err)
@@ -248,7 +247,7 @@ func TestDPoPRefusesAPrivateJWK(t *testing.T) {
 func TestMemoryReplayCacheBoundsEachKey(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	const share = 3
-	c := NewMemoryReplayCache(100, WithEntriesPerKey(share))
+	c := newReplay(t, MemoryReplayCacheConfig{MaxEntries: 100, EntriesPerKey: share})
 	c.now = func() time.Time { return now }
 	for i := range share {
 		if seen(t, c, "noisy", fmt.Sprint(i), now.Add(time.Minute)) {
@@ -269,7 +268,7 @@ func TestMemoryReplayCacheBoundsEachKey(t *testing.T) {
 	if seen(t, c, "noisy", "later", now.Add(time.Minute)) {
 		t.Error("the noisy key's share did not free as its ids lapsed")
 	}
-	if got := NewMemoryReplayCache(2, WithEntriesPerKey(10)).maxPerKey; got != 2 {
+	if got := newReplay(t, MemoryReplayCacheConfig{MaxEntries: 2, EntriesPerKey: 10}).maxPerKey; got != 2 {
 		t.Errorf("a share larger than the cache = %d, want the cache's size", got)
 	}
 }
@@ -292,7 +291,7 @@ func TestDPoPReadsMethodAndTimeAsTheRFCsDo(t *testing.T) {
 	claims := func(jti, iat string) string {
 		return fmt.Sprintf(`{"jti":%q,"htm":"POST","htu":%q,"iat":%s,"ath":%q}`, jti, dpopURL, iat, accessTokenHash("tok"))
 	}
-	v := &Verifier{Replay: NewMemoryReplayCache(0), Now: func() time.Time { return now }}
+	v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }})
 	ctx := context.Background()
 	if err := v.Verify(ctx, Request{Proof: Proof{JWT: sign(claims("j1", "1800000000")), Method: "post", URL: dpopURL}, Token: "tok", JKT: c}); !errors.Is(err, ErrInvalid) {
 		t.Errorf("a POST proof for a post request: err = %v, want ErrInvalid", err)
@@ -318,7 +317,7 @@ func TestDPoPMatchesNormalizedURIs(t *testing.T) {
 		{"https://data.example.com/v1/obj", "http://data.example.com/v1/obj", false},
 		{"https://data.example.com/v1/obj", "https://data.example.com:8443/v1/obj", false},
 	} {
-		v := &Verifier{Replay: NewMemoryReplayCache(0), Now: func() time.Time { return now }}
+		v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }})
 		proof, err := Sign(key, ProofRequest{Method: dpopMethod, URL: tc.proofURL, Token: "tok", Now: now})
 		if err != nil {
 			t.Fatal(err)
@@ -400,7 +399,53 @@ func TestSignWritesTheFullySpecifiedAlgorithm(t *testing.T) {
 
 // A zero bound takes the documented default.
 func TestMemoryReplayCacheDefaultBound(t *testing.T) {
-	if c := NewMemoryReplayCache(0); c.maxEntries != defaultReplayCacheEntries {
-		t.Errorf("replay cache bound = %d, want %d", c.maxEntries, defaultReplayCacheEntries)
+	if c := newReplay(t, MemoryReplayCacheConfig{}); c.maxEntries != DefaultReplayCacheEntries {
+		t.Errorf("replay cache bound = %d, want %d", c.maxEntries, DefaultReplayCacheEntries)
+	}
+}
+
+// newReplay is NewMemoryReplayCache, failing the test on a refused
+// configuration.
+func newReplay(t testing.TB, cfg MemoryReplayCacheConfig) *MemoryReplayCache {
+	t.Helper()
+	c, err := NewMemoryReplayCache(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// newVerifier is NewVerifier, failing the test on a refused configuration.
+func newVerifier(t testing.TB, cfg VerifierConfig) *Verifier {
+	t.Helper()
+	v, err := NewVerifier(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+// Each constructor refuses what it cannot run: no replay cache, a negative
+// window, bound or lifetime, no nonce key.
+func TestConstructorsRefuseABadConfiguration(t *testing.T) {
+	replay := newReplay(t, MemoryReplayCacheConfig{})
+	for name, cfg := range map[string]VerifierConfig{
+		"no replay cache": {},
+		"negative window": {Replay: replay, Window: -time.Second},
+	} {
+		if _, err := NewVerifier(cfg); err == nil {
+			t.Errorf("NewVerifier, %s: accepted", name)
+		}
+	}
+	for name, cfg := range map[string]MemoryReplayCacheConfig{
+		"negative bound":   {MaxEntries: -1},
+		"negative per key": {EntriesPerKey: -1},
+	} {
+		if _, err := NewMemoryReplayCache(cfg); err == nil {
+			t.Errorf("NewMemoryReplayCache, %s: accepted", name)
+		}
+	}
+	if _, err := NewHMACNonces(HMACNoncesConfig{Keys: [][]byte{nonceKey(1)}, Lifetime: -time.Second}); err == nil {
+		t.Error("NewHMACNonces accepted a negative lifetime")
 	}
 }

@@ -48,13 +48,21 @@ func newExampleStack() exampleStack {
 	if err != nil {
 		log.Fatal(err)
 	}
+	replay, err := dpop.NewMemoryReplayCache(dpop.MemoryReplayCacheConfig{})
+	if err != nil {
+		log.Fatal(err)
+	}
+	proofs, err := dpop.NewVerifier(dpop.VerifierConfig{Replay: replay})
+	if err != nil {
+		log.Fatal(err)
+	}
 	verifier, err := limes.NewStandardVerifier(limes.VerifierConfig{
 		Keys:               jwks.NewStatic(map[string]ed25519.PublicKey{kid: pub}),
 		Revocations:        records,
 		TrustedIssuers:     []string{exampleIssuerName},
 		AcceptBiscuit:      true,
 		BiscuitRevocations: records,
-		DPoP:               &dpop.Verifier{Replay: dpop.NewMemoryReplayCache(0)},
+		DPoP:               proofs,
 	})
 	if err != nil {
 		log.Fatal(err)

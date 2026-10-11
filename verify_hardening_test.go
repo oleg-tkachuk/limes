@@ -30,7 +30,7 @@ func resign(t *testing.T, priv ed25519.PrivateKey, header map[string]any, claims
 func verifierFor(t *testing.T, pub ed25519.PublicKey, cfg VerifierConfig) *StandardVerifier {
 	t.Helper()
 	cfg.Keys = jwks.NewStatic(map[string]ed25519.PublicKey{"k1": pub})
-	cfg.Revocations = NewCachedRevocationChecker(newMemStore(), -1)
+	cfg.Revocations = newMemStore()
 	if cfg.TrustedIssuers == nil {
 		cfg.TrustedIssuers = []string{"iss"}
 	}

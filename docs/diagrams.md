@@ -38,7 +38,7 @@ flowchart LR
         remote["jwks.Remote<br/>ETag · Cache-Control · MaxStale"]
         dpop["dpop.Verifier<br/>VerifierConfig.DPoP · dpop.Sign"]
         suites["storetest · metertest<br/>conformance suites"]
-        jwksh["jwks.Handler<br/>ETag · max-age"]
+        jwksh["jwks.NewHandler<br/>ETag · max-age"]
         nonce["dpop.HMACNonces<br/>stateless DPoP nonces"]
     end
 
@@ -744,5 +744,5 @@ refetches on an unknown kid at most once per `MinRefreshInterval`, and fails
 closed with `jwks.ErrUnavailable` when it has never fetched a set, or once the
 last good set is older than `MaxStale`. A document with entries but no usable
 Ed25519 key counts as a failed fetch, so the last good set stays in service;
-two entries under one kid are both dropped. The issuer serves the set with `jwks.Handler`: a strong ETag
+two entries under one kid are both dropped. The issuer serves the set with `jwks.NewHandler`: a strong ETag
 answering `If-None-Match` with 304, and `Cache-Control: public, max-age`.

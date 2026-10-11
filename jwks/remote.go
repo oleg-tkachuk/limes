@@ -88,19 +88,22 @@ func NewRemote(cfg RemoteConfig) (*Remote, error) {
 	if cfg.URL == "" {
 		return nil, errors.New("jwks: RemoteConfig.URL required")
 	}
+	if cfg.RefreshInterval < 0 || cfg.MinRefreshInterval < 0 || cfg.MaxStale < 0 || cfg.MaxDocumentBytes < 0 {
+		return nil, errors.New("jwks: RemoteConfig intervals and MaxDocumentBytes must not be negative")
+	}
 	if cfg.Client == nil {
 		cfg.Client = &http.Client{Timeout: DefaultFetchTimeout}
 	}
-	if cfg.RefreshInterval <= 0 {
+	if cfg.RefreshInterval == 0 {
 		cfg.RefreshInterval = DefaultRefreshInterval
 	}
-	if cfg.MinRefreshInterval <= 0 {
+	if cfg.MinRefreshInterval == 0 {
 		cfg.MinRefreshInterval = DefaultMinRefreshInterval
 	}
-	if cfg.MaxStale <= 0 {
+	if cfg.MaxStale == 0 {
 		cfg.MaxStale = DefaultMaxStale
 	}
-	if cfg.MaxDocumentBytes <= 0 {
+	if cfg.MaxDocumentBytes == 0 {
 		cfg.MaxDocumentBytes = DefaultMaxDocumentBytes
 	}
 	if cfg.Now == nil {

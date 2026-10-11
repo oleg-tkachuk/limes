@@ -34,8 +34,8 @@ type KeyResolver interface {
 // larger is refused before any decoding is spent on it.
 const DefaultMaxTokenBytes = 16 << 10
 
-// defaultLeeway is VerifierConfig.Leeway when unset.
-const defaultLeeway = 30 * time.Second
+// DefaultLeeway is VerifierConfig.Leeway when it is zero.
+const DefaultLeeway = 30 * time.Second
 
 // VerifierConfig wires the verifier. Keys, Revocations and TrustedIssuers
 // are required.
@@ -65,7 +65,7 @@ type VerifierConfig struct {
 	Now func() time.Time
 
 	// Leeway widens the nbf / exp window to absorb clock skew between
-	// issuer and verifier. Default 30s when zero; negative is refused.
+	// issuer and verifier. Zero: DefaultLeeway; negative is refused.
 	Leeway time.Duration
 
 	// MaxTokenBytes rejects longer tokens before decoding them. Default
@@ -91,7 +91,7 @@ type VerifierConfig struct {
 	// DPoP checks the proof of possession a key-bound capability (one with
 	// a ConfirmationJKT) must come with. Without it the verifier refuses
 	// every key-bound capability with dpop.ErrRequired, rather than accept
-	// one as a bearer token.
+	// one as a bearer token. Built by dpop.NewVerifier, with its own clock.
 	DPoP *dpop.Verifier
 }
 
@@ -167,16 +167,6 @@ func NewStandardVerifier(cfg VerifierConfig) (*StandardVerifier, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	if cfg.DPoP != nil {
-		if cfg.DPoP.Replay == nil {
-			return nil, dpop.ErrNoReplayCache
-		}
-		dpop := *cfg.DPoP // the caller's stays theirs
-		if dpop.Now == nil {
-			dpop.Now = cfg.Now
-		}
-		cfg.DPoP = &dpop
-	}
 	if cfg.Leeway < 0 {
 		return nil, fmt.Errorf("limes: VerifierConfig.Leeway %s is negative", cfg.Leeway)
 	}
@@ -184,12 +174,15 @@ func NewStandardVerifier(cfg VerifierConfig) (*StandardVerifier, error) {
 		return nil, fmt.Errorf("limes: VerifierConfig.MaxTokenBytes %d is negative", cfg.MaxTokenBytes)
 	}
 	if cfg.Leeway == 0 {
-		cfg.Leeway = defaultLeeway
+		cfg.Leeway = DefaultLeeway
 	}
 	if cfg.MaxTokenBytes == 0 {
 		cfg.MaxTokenBytes = DefaultMaxTokenBytes
 	}
 	cfg.TrustedIssuers = slices.Clone(cfg.TrustedIssuers)
+	if cfg.KeyIssuers != nil && len(cfg.KeyIssuers) == 0 {
+		return nil, errors.New("limes: VerifierConfig.KeyIssuers binds no kid; leave it nil to bind none")
+	}
 	cfg.KeyIssuers = maps.Clone(cfg.KeyIssuers)
 	return &StandardVerifier{cfg: cfg}, nil
 }

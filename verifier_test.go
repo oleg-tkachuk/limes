@@ -101,13 +101,13 @@ func buildIssuerVerifier(t *testing.T) (*Issuer, *StandardVerifier, *memStore, e
 	if err != nil {
 		t.Fatalf("issuer: %v", err)
 	}
-	cache := NewCachedRevocationChecker(store, -1) // disable cache for deterministic tests
+	cache := store // disable cache for deterministic tests
 	keys := jwks.NewStatic(map[string]ed25519.PublicKey{"k1": pub})
 	v, err := NewStandardVerifier(VerifierConfig{
 		Keys:           keys,
 		Revocations:    cache,
 		TrustedIssuers: []string{"limes-test"},
-		DPoP:           &dpop.Verifier{Replay: dpop.NewMemoryReplayCache(0)},
+		DPoP:           newVerifier(t, dpop.VerifierConfig{Replay: newReplay(t, dpop.MemoryReplayCacheConfig{})}),
 	})
 	if err != nil {
 		t.Fatalf("verifier: %v", err)
@@ -170,7 +170,7 @@ func TestVerify_Expired(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	signer, _ := NewEd25519Signer("k1", priv)
 	store := newMemStore()
-	cache := NewCachedRevocationChecker(store, -1)
+	cache := store
 	keys := jwks.NewStatic(map[string]ed25519.PublicKey{"k1": pub})
 
 	// Inject a clock that returns a fixed past time at issue, then
@@ -248,7 +248,7 @@ func TestVerify_UntrustedIssuer(t *testing.T) {
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 	})
 
-	cache := NewCachedRevocationChecker(store, -1)
+	cache := store
 	keys := jwks.NewStatic(map[string]ed25519.PublicKey{"k1": pub})
 	verifier, _ := NewStandardVerifier(VerifierConfig{
 		Keys:           keys,
@@ -381,7 +381,7 @@ func TestDelegate_RefusesACopyWithLimitsOfItsOwn(t *testing.T) {
 func TestCache_HitsAndMisses(t *testing.T) {
 	t.Parallel()
 	store := newMemStore()
-	cache := NewCachedRevocationChecker(store, time.Second)
+	cache := newRevocationCache(t, RevocationCacheConfig{Upstream: store, TTL: time.Second})
 	id := uuid.New()
 	ctx := context.Background()
 

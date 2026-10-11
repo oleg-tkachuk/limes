@@ -19,12 +19,12 @@ import (
 
 func TestErrorResponse(t *testing.T) {
 	_, v, _, _ := buildIssuerVerifier(t) // DPoP configured
-	nonces, err := dpop.NewHMACNonces(time.Minute, nonceKey(1))
+	nonces, err := dpop.NewHMACNonces(dpop.HMACNoncesConfig{Lifetime: time.Minute, Keys: [][]byte{nonceKey(1)}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg := v.cfg
-	cfg.DPoP = &dpop.Verifier{Replay: dpop.NewMemoryReplayCache(0), Nonces: nonces}
+	cfg.DPoP = newVerifier(t, dpop.VerifierConfig{Replay: newReplay(t, dpop.MemoryReplayCacheConfig{}), Nonces: nonces})
 	withNonces, err := NewStandardVerifier(cfg)
 	if err != nil {
 		t.Fatal(err)

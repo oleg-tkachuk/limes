@@ -96,15 +96,6 @@ func TestVerifyWithoutDPoPRefusesBoundTokens(t *testing.T) {
 	}
 }
 
-func TestNewStandardVerifierRequiresAReplayCache(t *testing.T) {
-	_, configured, _, _ := buildIssuerVerifier(t)
-	cfg := configured.cfg
-	cfg.DPoP = &dpop.Verifier{}
-	if _, err := NewStandardVerifier(cfg); !errors.Is(err, dpop.ErrNoReplayCache) {
-		t.Fatalf("err = %v, want dpop.ErrNoReplayCache", err)
-	}
-}
-
 // The proof of a Biscuit is over the Biscuit as presented: one over the token
 // sealed inside it is for another token.
 func TestBiscuitProofIsOverTheBiscuit(t *testing.T) {

@@ -61,29 +61,19 @@ type SigningKey struct {
 	Generated bool
 }
 
-// LoadOrGenerateKey reads the key at path (LoadPrivateKey) or, when path is
-// empty, generates an ephemeral one. kid names it; empty derives one
-// (jwks.KeyID). A path that cannot be read is an error, never a reason to
-// fall back to a fresh key. Log a generated key loudly: an operator who
-// forgot to mount the file finds out on the first restart otherwise.
-func LoadOrGenerateKey(path, kid string) (SigningKey, error) {
-	var priv ed25519.PrivateKey
-	generated := path == ""
-	if generated {
-		key, err := GenerateKey()
-		if err != nil {
-			return SigningKey{}, err
-		}
-		priv = key.Private
-	} else {
-		var err error
-		if priv, err = LoadPrivateKey(path); err != nil {
-			return SigningKey{}, err
-		}
+// LoadKey reads the signing key at path (LoadPrivateKey), under kid — or,
+// with kid empty, under the one jwks.KeyID derives. For a key that lives
+// only as long as the process, GenerateKey; a deployment that may have no
+// key file chooses between the two itself, so a missing mount is never
+// silently a fresh key.
+func LoadKey(path, kid string) (SigningKey, error) {
+	priv, err := LoadPrivateKey(path)
+	if err != nil {
+		return SigningKey{}, err
 	}
 	pub := priv.Public().(ed25519.PublicKey)
 	if kid == "" {
 		kid = jwks.KeyID(pub)
 	}
-	return SigningKey{KeyID: kid, Public: pub, Private: priv, Generated: generated}, nil
+	return SigningKey{KeyID: kid, Public: pub, Private: priv}, nil
 }

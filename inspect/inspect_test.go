@@ -60,7 +60,14 @@ func TestVerifySignature(t *testing.T) {
 		t.Fatalf("a genuine token: %v", err)
 	}
 	other, _, _ := ed25519.GenerateKey(nil)
-	tampered := token[:len(token)-2] + "AA"
+	// A changed character in the middle of the payload: the end of a
+	// base64url segment carries bits a decoder ignores.
+	mid := len(token) / 2
+	swap := byte('A')
+	if token[mid] == swap {
+		swap = 'B'
+	}
+	tampered := token[:mid] + string(swap) + token[mid+1:]
 	for name, tc := range map[string]struct {
 		token string
 		key   ed25519.PublicKey

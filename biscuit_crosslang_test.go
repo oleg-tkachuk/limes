@@ -57,7 +57,7 @@ func goldenBiscuitVerifier(t *testing.T) *StandardVerifier {
 		Now:            goldenClock,
 		AcceptBiscuit:  true,
 		MeterCopies:    true,
-		DPoP:           &dpop.Verifier{Replay: dpop.NewMemoryReplayCache(0)},
+		DPoP:           newVerifier(t, dpop.VerifierConfig{Replay: newReplay(t, dpop.MemoryReplayCacheConfig{}), Now: goldenClock}),
 
 		BiscuitRevocations: revLookup{},
 	})

@@ -245,13 +245,13 @@ func TestVerifyTellsAProofRefusalFromAProofStoreOutage(t *testing.T) {
 	key := dpopKeys(t)["Ed25519"]
 	token := issueBound(t, issuer, key)
 	outage := errors.New("store down")
-	for name, d := range map[string]*dpop.Verifier{
+	for name, d := range map[string]dpop.VerifierConfig{
 		"replay cache": {Replay: failingReplay{outage}},
-		"nonces":       {Replay: dpop.NewMemoryReplayCache(0), Nonces: failingNonces{outage}},
+		"nonces":       {Replay: newReplay(t, dpop.MemoryReplayCacheConfig{}), Nonces: failingNonces{outage}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := configured.cfg
-			cfg.DPoP = d
+			cfg.DPoP = newVerifier(t, d)
 			v, err := NewStandardVerifier(cfg)
 			if err != nil {
 				t.Fatal(err)
