@@ -13,6 +13,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"net/url"
 	"slices"
@@ -115,11 +116,11 @@ func jwkHasPrivateMember(headerSeg string) bool {
 }
 
 type dpopClaims struct {
-	JTI string `json:"jti"`
-	HTM string `json:"htm"`
-	HTU string `json:"htu"`
-	IAT int64  `json:"iat"`
-	ATH string `json:"ath,omitempty"`
+	JTI string  `json:"jti"`
+	HTM string  `json:"htm"`
+	HTU string  `json:"htu"`
+	IAT float64 `json:"iat"` // NumericDate: seconds, possibly fractional (RFC 7519 §2)
+	ATH string  `json:"ath,omitempty"`
 	// Nonce is the server-provided nonce (RFC 9449 §8), when one was asked.
 	Nonce string `json:"nonce,omitempty"`
 }
@@ -156,17 +157,31 @@ func PublicJWK(pub crypto.PublicKey) (DPoPJWK, error) {
 // Thumbprint is the key's RFC 7638 SHA-256 thumbprint, base64url — the value
 // a key-bound capability carries as its ConfirmationJKT.
 func (j DPoPJWK) Thumbprint() (string, error) {
-	// RFC 7638: the required members only, lexicographic order, no spaces.
-	var canonical string
+	// RFC 7638 §3.2: the required members only, in lexicographic order, as
+	// JSON with no whitespace. The structs' field order is that order.
+	var canonical []byte
+	var err error
 	switch j.Kty {
 	case jwkKtyOKP:
-		canonical = fmt.Sprintf(`{"crv":%q,"kty":%q,"x":%q}`, j.Crv, jwkKtyOKP, j.X)
+		canonical, err = json.Marshal(struct {
+			Crv string `json:"crv"`
+			Kty string `json:"kty"`
+			X   string `json:"x"`
+		}{j.Crv, jwkKtyOKP, j.X})
 	case jwkKtyEC:
-		canonical = fmt.Sprintf(`{"crv":%q,"kty":%q,"x":%q,"y":%q}`, j.Crv, jwkKtyEC, j.X, j.Y)
+		canonical, err = json.Marshal(struct {
+			Crv string `json:"crv"`
+			Kty string `json:"kty"`
+			X   string `json:"x"`
+			Y   string `json:"y"`
+		}{j.Crv, jwkKtyEC, j.X, j.Y})
 	default:
 		return "", fmt.Errorf("limes: unsupported JWK kty %q", j.Kty)
 	}
-	sum := sha256.Sum256([]byte(canonical))
+	if err != nil {
+		return "", fmt.Errorf("limes: JWK thumbprint: %w", err)
+	}
+	sum := sha256.Sum256(canonical)
 	return b64(sum[:]), nil
 }
 
@@ -210,7 +225,8 @@ func AccessTokenHash(token string) string {
 
 // DPoPProofRequest is the request a proof is signed for.
 type DPoPProofRequest struct {
-	// Method and URL are the request's.
+	// Method and URL are the request's, the method exactly as sent: it is
+	// case-sensitive (RFC 9110 §9.1).
 	Method string
 	URL    string
 	// Token is the capability the request presents.
@@ -243,7 +259,7 @@ func NewDPoPProof(key crypto.Signer, req DPoPProofRequest) (string, error) {
 	}
 	header, _ := json.Marshal(dpopHeader{Typ: DPoPTokenType, Alg: alg, JWK: &jwk})
 	claims, _ := json.Marshal(dpopClaims{
-		JTI: b64(jti), HTM: strings.ToUpper(req.Method), HTU: htu, IAT: req.Now.Unix(),
+		JTI: b64(jti), HTM: req.Method, HTU: htu, IAT: float64(req.Now.Unix()),
 		ATH: AccessTokenHash(req.Token), Nonce: req.Nonce,
 	})
 	input := b64(header) + "." + b64(claims)
@@ -406,7 +422,8 @@ func (v *DPoPVerifier) check(ctx context.Context, c Capability, token string, p 
 	if err := decodeSegment(parts.claims, &claims); err != nil || claims.JTI == "" {
 		return fmt.Errorf("%w: claims", ErrDPoPInvalid)
 	}
-	if !strings.EqualFold(claims.HTM, p.Method) {
+	// RFC 9110 §9.1: a method is case-sensitive.
+	if claims.HTM != p.Method {
 		return fmt.Errorf("%w: method %q, proof names %q", ErrDPoPInvalid, p.Method, claims.HTM)
 	}
 	if !htuMatches(claims.HTU, p.URL, v.MatchPathOnly) {
@@ -415,7 +432,11 @@ func (v *DPoPVerifier) check(ctx context.Context, c Capability, token string, p 
 	if claims.ATH != AccessTokenHash(token) {
 		return fmt.Errorf("%w: proof is for another token", ErrDPoPInvalid)
 	}
-	iat := time.Unix(claims.IAT, 0)
+	if math.IsNaN(claims.IAT) || math.IsInf(claims.IAT, 0) || math.Abs(claims.IAT) > MaxIJSONInteger {
+		return fmt.Errorf("%w: iat %v", ErrDPoPInvalid, claims.IAT)
+	}
+	sec, frac := math.Modf(claims.IAT)
+	iat := time.Unix(int64(sec), int64(frac*float64(time.Second)))
 	if d := now().Sub(iat); d > window || d < -window {
 		return fmt.Errorf("%w: issued at %s, outside the %s window", ErrDPoPInvalid, iat.UTC(), window)
 	}

@@ -59,7 +59,7 @@ func TestDPoPAcceptsAProofFromTheBoundKey(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			c := boundCap(t, key)
 			v := &DPoPVerifier{Replay: NewMemoryReplayCache(0), Now: func() time.Time { return now }}
-			proof, err := NewDPoPProof(key, DPoPProofRequest{Method: "post", URL: dpopURL + "?x=1", Token: "the-token", Now: now})
+			proof, err := NewDPoPProof(key, DPoPProofRequest{Method: "POST", URL: dpopURL + "?x=1", Token: "the-token", Now: now})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -342,5 +342,33 @@ func TestMemoryReplayCacheBoundsEachKey(t *testing.T) {
 	}
 	if got := NewMemoryReplayCache(2, WithEntriesPerKey(10)).maxPerKey; got != 2 {
 		t.Errorf("a share larger than the cache = %d, want the cache's size", got)
+	}
+}
+
+// RFC 9110 §9.1: a method is case-sensitive, so a proof for POST is not one
+// for "post". RFC 7519 §2: a NumericDate may carry a fraction.
+func TestDPoPReadsMethodAndTimeAsTheRFCsDo(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := boundCap(t, priv)
+	jwk, _ := PublicJWK(priv.Public())
+	sign := func(claims string) string {
+		header := fmt.Sprintf(`{"typ":%q,"alg":%q,"jwk":{"kty":%q,"crv":%q,"x":%q}}`, DPoPTokenType, algEd25519, jwk.Kty, jwk.Crv, jwk.X)
+		input := b64([]byte(header)) + "." + b64([]byte(claims))
+		return input + "." + b64(ed25519.Sign(priv, []byte(input)))
+	}
+	claims := func(jti, iat string) string {
+		return fmt.Sprintf(`{"jti":%q,"htm":"POST","htu":%q,"iat":%s,"ath":%q}`, jti, dpopURL, iat, AccessTokenHash("tok"))
+	}
+	v := &DPoPVerifier{Replay: NewMemoryReplayCache(0), Now: func() time.Time { return now }}
+	ctx := context.Background()
+	if err := v.check(ctx, c, "tok", DPoPProof{Proof: sign(claims("j1", "1800000000")), Method: "post", URL: dpopURL}); !errors.Is(err, ErrDPoPInvalid) {
+		t.Errorf("a POST proof for a post request: err = %v, want ErrDPoPInvalid", err)
+	}
+	if err := v.check(ctx, c, "tok", DPoPProof{Proof: sign(claims("j2", "1800000000.25")), Method: "POST", URL: dpopURL}); err != nil {
+		t.Errorf("a proof with a fractional iat: %v", err)
 	}
 }
