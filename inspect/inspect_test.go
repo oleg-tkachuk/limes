@@ -17,7 +17,8 @@ import (
 // issue mints a capability and returns it, its token and the issuer's key.
 func issue(t *testing.T) (limes.Capability, string, ed25519.PublicKey) {
 	t.Helper()
-	kid, pub, priv, err := limes.GenerateEd25519Keypair()
+	key, err := limes.GenerateKey()
+	kid, pub, priv := key.KeyID, key.Public, key.Private
 	if err != nil {
 		t.Fatal(err)
 	}

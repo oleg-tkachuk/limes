@@ -57,7 +57,8 @@ go get github.com/oleg-tkachuk/limes@latest
 ```go
 ctx := context.Background()
 tenantID, runID := uuid.New(), uuid.New() // github.com/google/uuid
-kid, pub, priv, _ := limes.GenerateEd25519Keypair()
+key, _ := limes.GenerateKey()
+kid, pub, priv := key.KeyID, key.Public, key.Private
 
 records := memstore.New[struct{}]()          // your Store
 usage   := memstore.NewUsage[struct{}](records)

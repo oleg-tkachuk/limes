@@ -119,7 +119,8 @@ func TestChildrenCannotExceedTheirParentsRequestCount(t *testing.T) {
 // parent is revoked, without CascadeChildren and without touching the child.
 func TestVerifierRejectsChildOfRevokedParent(t *testing.T) {
 	ctx := context.Background()
-	kid, pub, priv, err := limes.GenerateEd25519Keypair()
+	key, err := limes.GenerateKey()
+	kid, pub, priv := key.KeyID, key.Public, key.Private
 	if err != nil {
 		t.Fatal(err)
 	}

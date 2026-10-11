@@ -111,16 +111,17 @@ func TestDeriveKeyIDIsTheThumbprint(t *testing.T) {
 	if got, want := jwks.KeyID(ed25519.PublicKey(x)), "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k"; got != want {
 		t.Errorf("jwks.KeyID = %s, want %s", got, want)
 	}
-	kid, pub, _, err := GenerateEd25519Keypair()
-	if err != nil || kid != jwks.KeyID(pub) {
-		t.Errorf("GenerateEd25519Keypair kid = %q, %v; want jwks.KeyID's", kid, err)
+	key, err := GenerateKey()
+	if err != nil || key.KeyID != jwks.KeyID(key.Public) || !key.Generated {
+		t.Errorf("GenerateKey = %+v, %v; want jwks.KeyID's kid, marked generated", key, err)
 	}
 }
 
 func TestStaticKeyResolverRotation(t *testing.T) {
 	ctx := context.Background()
-	_, pubA, _, _ := GenerateEd25519Keypair()
-	_, pubB, _, _ := GenerateEd25519Keypair()
+	keyA, _ := GenerateKey()
+	keyB, _ := GenerateKey()
+	pubA, pubB := keyA.Public, keyB.Public
 	r := jwks.NewStatic(map[string]ed25519.PublicKey{"a": pubA})
 
 	r.SetKey("b", pubB)
@@ -143,7 +144,8 @@ func TestStaticKeyResolverRotation(t *testing.T) {
 }
 
 func TestNewEd25519Signer(t *testing.T) {
-	_, _, priv, err := GenerateEd25519Keypair()
+	key, err := GenerateKey()
+	priv := key.Private
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -354,14 +354,14 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 	return child, token, nil
 }
 
-// GenerateEd25519Keypair is a convenience for boot wiring: returns a new
-// Ed25519 keypair plus the kid to publish it under, jwks.KeyID's.
-func GenerateEd25519Keypair() (kid string, pub ed25519.PublicKey, priv ed25519.PrivateKey, err error) {
-	pub, priv, err = ed25519.GenerateKey(nil)
+// GenerateKey makes a fresh Ed25519 signing key under the kid jwks.KeyID
+// derives for it. It lives only as long as the process unless saved.
+func GenerateKey() (SigningKey, error) {
+	pub, priv, err := ed25519.GenerateKey(nil)
 	if err != nil {
-		return "", nil, nil, fmt.Errorf("limes: generate keypair: %w", err)
+		return SigningKey{}, fmt.Errorf("limes: generate key: %w", err)
 	}
-	return jwks.KeyID(pub), pub, priv, nil
+	return SigningKey{KeyID: jwks.KeyID(pub), Public: pub, Private: priv, Generated: true}, nil
 }
 
 // validateThumbprint accepts "" (unbound) or a base64url SHA-256 thumbprint.

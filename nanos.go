@@ -64,7 +64,7 @@ func MustParseAmount(s string) Nanos {
 // decimal that identifies it — 0.1 as "0.1", the sum 0.1+0.2 as
 // "0.30000000000000004" — so an amount written with at most nine decimals
 // and fifteen significant digits converts exactly. It refuses what
-// ValidateAmount refuses, and NaN and the infinities.
+// Nanos.Validate refuses, and NaN and the infinities.
 func AmountFromFloat(f float64) (Nanos, error) {
 	if math.IsNaN(f) || math.IsInf(f, 0) {
 		return 0, fmt.Errorf("%w: %v is not a number", ErrInvalidAmount, f)
@@ -180,5 +180,15 @@ func (n *Nanos) UnmarshalText(b []byte) error {
 		return err
 	}
 	*n = v
+	return nil
+}
+
+// Validate reports whether n is usable as a charge or refund amount: not
+// negative and at most MaxNanos. Implementations call it before touching
+// state.
+func (n Nanos) Validate() error {
+	if n < 0 || n > MaxNanos {
+		return fmt.Errorf("%w: %s is outside 0..%s", ErrInvalidAmount, n, MaxNanos)
+	}
 	return nil
 }

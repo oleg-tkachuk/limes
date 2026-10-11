@@ -194,3 +194,17 @@ func TestAmountFromFloatReadsMinusZeroAsZero(t *testing.T) {
 		t.Errorf("AmountFromFloat(-0) = %d, %v; want 0", int64(n), err)
 	}
 }
+
+// An amount is usable from zero to MaxNanos and not past either end.
+func TestNanosValidate(t *testing.T) {
+	for _, n := range []Nanos{0, 1, MaxNanos} {
+		if err := n.Validate(); err != nil {
+			t.Errorf("Validate(%d) = %v, want nil", int64(n), err)
+		}
+	}
+	for _, n := range []Nanos{-1, MaxNanos + 1} {
+		if err := n.Validate(); !errors.Is(err, ErrInvalidAmount) {
+			t.Errorf("Validate(%d) = %v, want ErrInvalidAmount", int64(n), err)
+		}
+	}
+}

@@ -580,9 +580,9 @@ the last of a budget.
 flowchart TB
     req(["ChargeRequest<br/>CapabilityID · TenantID · Amount · MaxBudget · UnitCode · Copies<br/>ExternalRef · Overrun"])
     sreq(["SettleRequest<br/>ReservationID · Amount · MaxBudget · Overrun"])
-    sval{"ValidateAmount · Overrun.Validate<br/>ReservationID not zero"}
+    sval{"Nanos.Validate · Overrun.Validate<br/>ReservationID not zero"}
     hold{"reservation open"}
-    val{"ValidateAmount · Overrun.Validate<br/>ValidateExternalRef · NormaliseUnitCode"}
+    val{"Nanos.Validate · Overrun.Validate<br/>ValidateExternalRef · NormaliseUnitCode"}
     seen{"ExternalRef already charged<br/>to this capability"}
     same{"same Amount · UnitCode · TenantID"}
 
