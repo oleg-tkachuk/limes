@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	jsonv2 "github.com/go-json-experiment/json"
 )
 
 // JWKSDocument is the on-the-wire shape served at the issuer's JWKS
@@ -67,7 +69,8 @@ func MarshalJWKS(keys map[string]ed25519.PublicKey) ([]byte, error) {
 // not decode to an Ed25519 public key are skipped rather than failing the
 // document: one malformed or foreign entry must not take every other key —
 // and so every token signed with them — out of service during a rotation.
-// A document that is not JSON at all is an error.
+// Two entries naming one kid are both skipped. A document that is not JSON
+// at all, or names a member twice, is an error.
 func ParseJWKS(raw []byte) (map[string]ed25519.PublicKey, error) {
 	keys, _, err := parseJWKS(raw)
 	return keys, err
@@ -76,13 +79,20 @@ func ParseJWKS(raw []byte) (map[string]ed25519.PublicKey, error) {
 // parseJWKS is ParseJWKS, also reporting how many entries it skipped.
 func parseJWKS(raw []byte) (map[string]ed25519.PublicKey, int, error) {
 	var doc JWKSDocument
-	if err := json.Unmarshal(raw, &doc); err != nil {
+	// JSON's own rules: names in their exact case, none twice in one object.
+	if err := jsonv2.Unmarshal(raw, &doc); err != nil {
 		return nil, 0, fmt.Errorf("limes: parse JWKS: %w", err)
 	}
 	out := make(map[string]ed25519.PublicKey, len(doc.Keys))
+	seen := make(map[string]int, len(doc.Keys)) // entries per kid
+	for _, k := range doc.Keys {
+		seen[k.Kid]++
+	}
 	skipped := 0
 	for _, k := range doc.Keys {
-		if k.Kty != jwkKtyOKP || k.Crv != jwkCrvEd25519 || k.Kid == "" {
+		// A kid named twice is used for neither key: which one signs is not
+		// for the reader to guess.
+		if k.Kty != jwkKtyOKP || k.Crv != jwkCrvEd25519 || k.Kid == "" || seen[k.Kid] > 1 {
 			skipped++
 			continue
 		}
