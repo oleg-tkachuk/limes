@@ -1,6 +1,9 @@
 package limes
 
-import "errors"
+import (
+	"errors"
+	"slices"
+)
 
 // Reason is a stable, machine-readable name for why a presented capability
 // was refused. The sentinels stay the way to branch in Go; a Reason is what a
@@ -33,66 +36,78 @@ const (
 	ReasonTenantBudgetExceeded   Reason = "tenant_budget_exceeded"
 )
 
-// reasonRule maps one sentinel to its reason. permanent is Reason.Permanent.
-type reasonRule struct {
+// refusalRule is one sentinel: the Reason ReasonOf gives it, whether that
+// refusal stands (Reason.Permanent), and how ErrorResponse answers it. A
+// family root has no Reason of its own — its members do — and answers what
+// a consumer's own error in that family gets.
+type refusalRule struct {
 	sentinel  error
 	reason    Reason
 	permanent bool
+	answer    refusal
 }
 
-// reasonRules is the one table of reasons, most specific sentinel first. The
-// verifier wraps a key it cannot resolve, a bad proof of possession and a bad
-// Biscuit block in ErrInvalidSignature as well, and every caveat sentinel
-// matches ErrCaveatViolation, so order decides. An unknown kid stays an
-// invalid signature, as the verifier means it to; keys the verifier could not
-// fetch at all are an outage on its side, not a fault in the token.
-var reasonRules = []reasonRule{
-	{ErrMalformedAuthorization, ReasonMalformedAuthorization, true},
-	{ErrJWKSUnavailable, ReasonKeysUnavailable, false},
-	{ErrDPoPRequired, ReasonProofRequired, false},
-	{ErrDPoPInvalid, ReasonProofInvalid, false},
-	{ErrDPoPReplayed, ReasonProofReplayed, false},
-	{ErrBiscuitAttenuation, ReasonInvalidBiscuit, true},
-	{ErrInvalidSignature, ReasonInvalidSignature, true},
-	{ErrExpired, ReasonExpired, true},
-	{ErrNotYetValid, ReasonNotYetValid, false},
-	{ErrRevoked, ReasonRevoked, true},
-	{ErrAudienceMismatch, ReasonAudienceMismatch, true},
-	{ErrOpNotAllowed, ReasonOpNotAllowed, true},
-	{ErrResourceNotAllowed, ReasonResourceNotAllowed, true},
-	{ErrSourceIPNotAllowed, ReasonSourceNotAllowed, true},
-	{ErrIdempotencyKeyRequired, ReasonIdempotencyKeyRequired, false},
-	{ErrTaintedReadNotAllowed, ReasonTaintedReadNotAllowed, false},
-	{ErrRequestLimitExceeded, ReasonRequestLimitExceeded, true},
-	{ErrBudgetExceeded, ReasonBudgetExceeded, false},
-	{ErrTenantBudgetExceeded, ReasonTenantBudgetExceeded, false},
+// refusalRules is the one table ReasonOf and ErrorResponse both read: the
+// first rule an error matches decides. Families do not overlap, so order
+// matters only within one — each member before its family's root, and
+// ErrBiscuitAttenuation, an invalid token of its own kind, before
+// ErrInvalidSignature.
+var refusalRules = []refusalRule{
+	{ErrMalformedAuthorization, ReasonMalformedAuthorization, true, answerMalformed},
+	{ErrJWKSUnavailable, ReasonKeysUnavailable, false, answerKeysUnavailable},
+
+	// A nonce challenge asks for a proof signed afresh, and a token under the
+	// wrong scheme for the same token sent under DPoP; neither stands. RFC
+	// 9449 §7.2 answers the scheme as an invalid token, not a bad proof.
+	{ErrDPoPNonceRequired, ReasonProofInvalid, false, answerNonce},
+	{ErrDPoPRequired, ReasonProofRequired, false, answerProof},
+	{ErrDPoPInvalid, ReasonProofInvalid, false, answerProof},
+	{ErrDPoPReplayed, ReasonProofReplayed, false, answerProof},
+	{ErrAuthSchemeMismatch, ReasonProofRequired, false, answerToken},
+	{ErrProofOfPossession, "", false, answerProof},
+
+	{ErrBiscuitAttenuation, ReasonInvalidBiscuit, true, answerToken},
+	{ErrInvalidSignature, ReasonInvalidSignature, true, answerToken},
+	{ErrExpired, ReasonExpired, true, answerToken},
+	{ErrNotYetValid, ReasonNotYetValid, false, answerToken},
+	{ErrRevoked, ReasonRevoked, true, answerToken},
+	{ErrAudienceMismatch, ReasonAudienceMismatch, true, answerToken},
+	{ErrUnauthenticated, "", false, answerToken},
+
+	{ErrOpNotAllowed, ReasonOpNotAllowed, true, answerScope},
+	{ErrResourceNotAllowed, ReasonResourceNotAllowed, true, answerScope},
+	{ErrSourceIPNotAllowed, ReasonSourceNotAllowed, true, answerScope},
+	{ErrIdempotencyKeyRequired, ReasonIdempotencyKeyRequired, false, answerScope},
+	{ErrTaintedReadNotAllowed, ReasonTaintedReadNotAllowed, false, answerScope},
+	{ErrCaveatViolation, "", false, answerScope},
+
+	{ErrRequestLimitExceeded, ReasonRequestLimitExceeded, true, answerExhausted},
+	{ErrBudgetExceeded, ReasonBudgetExceeded, false, answerExhausted},
+	{ErrTenantBudgetExceeded, ReasonTenantBudgetExceeded, false, answerExhausted},
 }
 
-// reasonAliases are refusals that name an existing reason, checked before
-// reasonRules: each popError also matches ErrInvalidSignature, which would
-// make it a permanent refusal of the token. A nonce challenge asks for a
-// proof signed afresh with the server's nonce, and a key-bound token under
-// the wrong scheme for the same token sent under DPoP; neither stands.
-var reasonAliases = []reasonRule{
-	{ErrDPoPNonceRequired, ReasonProofInvalid, false},
-	{ErrAuthSchemeMismatch, ReasonProofRequired, false},
+// ruleFor is the first rule err matches.
+func ruleFor(err error) (refusalRule, bool) {
+	if err == nil {
+		return refusalRule{}, false
+	}
+	for _, r := range refusalRules {
+		if errors.Is(err, r.sentinel) {
+			return r, true
+		}
+	}
+	return refusalRule{}, false
 }
 
 // ReasonOf returns the reason err refused a capability for, and false when
 // err is no such refusal — nil, a store failure, or a programming error such
 // as ErrInvalidRequest, which a consumer maps as it maps any other.
 func ReasonOf(err error) (Reason, bool) {
-	if err == nil {
+	rule, ok := ruleFor(err)
+	if !ok || rule.reason == "" {
 		return "", false
 	}
-	for _, rules := range [][]reasonRule{reasonAliases, reasonRules} {
-		for _, r := range rules {
-			if errors.Is(err, r.sentinel) {
-				return r.reason, true
-			}
-		}
-	}
-	return "", false
+	return rule.reason, true
 }
 
 // Permanent reports whether a refusal for r stands for as long as the
@@ -105,7 +120,7 @@ func ReasonOf(err error) (Reason, bool) {
 // valid, a proof is signed afresh, the verifier fetches its keys again, and
 // an idempotency key can be added to the request.
 func (r Reason) Permanent() bool {
-	for _, rule := range reasonRules {
+	for _, rule := range refusalRules {
 		if rule.reason == r {
 			return rule.permanent
 		}
@@ -116,9 +131,11 @@ func (r Reason) Permanent() bool {
 // Reasons returns every reason this package defines, in a fixed order, so a
 // consumer can prove its own mapping covers them all.
 func Reasons() []Reason {
-	out := make([]Reason, 0, len(reasonRules))
-	for _, r := range reasonRules {
-		out = append(out, r.reason)
+	out := make([]Reason, 0, len(refusalRules))
+	for _, r := range refusalRules {
+		if r.reason != "" && !slices.Contains(out, r.reason) {
+			out = append(out, r.reason)
+		}
 	}
 	return out
 }

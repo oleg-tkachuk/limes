@@ -78,7 +78,10 @@ func TestReasonsAreDistinctAndReachable(t *testing.T) {
 		}
 		seen[r] = true
 	}
-	for _, rule := range reasonRules {
+	for _, rule := range refusalRules {
+		if rule.reason == "" {
+			continue
+		}
 		if got, _ := ReasonOf(rule.sentinel); got != rule.reason {
 			t.Errorf("sentinel %v resolves to %q, shadowed before %q", rule.sentinel, got, rule.reason)
 		}

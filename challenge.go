@@ -3,7 +3,6 @@ package limes
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -70,40 +69,38 @@ type ErrorResponse struct {
 	Problem Problem
 }
 
-// refusal is one kind of refusal and how it is answered.
+// refusal is how a protected resource answers one kind of refusal.
 type refusal struct {
-	status    int
-	code      string // RFC 6750 / RFC 9449 error code; "" for no challenge
-	dpop      bool   // the challenge is DPoP's
-	slug      string // the problem type, after problemTypeBase
-	title     string
-	sentinels []error
+	status int
+	code   string // RFC 6750 / RFC 9449 error code; "" for no challenge
+	dpop   bool   // the challenge is DPoP's
+	slug   string // the problem type, after problemTypeBase
+	title  string
 }
 
-// refusals is checked in order: the most specific kind first, since a DPoP
-// refusal also matches ErrInvalidSignature.
-var refusals = []refusal{
-	// Before the token's own refusals: an unreachable key set is wrapped
-	// in ErrInvalidSignature, and is not the token's fault.
-	{http.StatusServiceUnavailable, "", false, "keys-unavailable", "The issuer's keys cannot be fetched",
-		[]error{ErrJWKSUnavailable}},
-	{http.StatusBadRequest, codeInvalidRequest, false, "malformed-authorization", "The Authorization header is malformed",
-		[]error{ErrMalformedAuthorization}},
-	{http.StatusUnauthorized, codeUseDPoPNonce, true, "dpop-nonce-required", "A DPoP proof with the server's nonce is required",
-		[]error{ErrDPoPNonceRequired}},
-	{http.StatusUnauthorized, codeInvalidDPoPProof, true, "invalid-dpop-proof", "The DPoP proof is missing or invalid",
-		[]error{ErrDPoPRequired, ErrDPoPInvalid, ErrDPoPReplayed}},
-	{http.StatusUnauthorized, codeInvalidToken, false, "invalid-token", "The access token is invalid",
-		[]error{ErrAuthSchemeMismatch, ErrInvalidSignature, ErrExpired, ErrNotYetValid, ErrRevoked, ErrAudienceMismatch}},
-	{http.StatusForbidden, codeInsufficientScope, false, "insufficient-scope", "The token does not allow this request",
-		[]error{ErrCaveatViolation}},
-	{http.StatusForbidden, "", false, "budget-exhausted", "The token's request or budget limit is exhausted",
-		[]error{ErrBudgetExceeded, ErrTenantBudgetExceeded, ErrRequestLimitExceeded}},
-}
+// The answers, one per kind of refusal; refusalRules says which sentinel
+// gets which.
+var (
+	answerKeysUnavailable = refusal{http.StatusServiceUnavailable, "", false, "keys-unavailable", "The issuer's keys cannot be fetched"}
+	answerMalformed       = refusal{http.StatusBadRequest, codeInvalidRequest, false, "malformed-authorization", "The Authorization header is malformed"}
+	answerNonce           = refusal{http.StatusUnauthorized, codeUseDPoPNonce, true, "dpop-nonce-required", "A DPoP proof with the server's nonce is required"}
+	answerProof           = refusal{http.StatusUnauthorized, codeInvalidDPoPProof, true, "invalid-dpop-proof", "The DPoP proof is missing or invalid"}
+	answerToken           = refusal{http.StatusUnauthorized, codeInvalidToken, false, "invalid-token", "The access token is invalid"}
+	answerScope           = refusal{http.StatusForbidden, codeInsufficientScope, false, "insufficient-scope", "The token does not allow this request"}
+	answerExhausted       = refusal{http.StatusForbidden, "", false, "budget-exhausted", "The token's request or budget limit is exhausted"}
+)
 
 // internalError answers any other error: the server's fault, said without
 // its text.
 var internalError = refusal{status: http.StatusInternalServerError, slug: "internal", title: "The request could not be authorised"}
+
+// answerFor is the answer to err: that of the first rule it matches.
+func answerFor(err error) refusal {
+	if rule, ok := ruleFor(err); ok {
+		return rule.answer
+	}
+	return internalError
+}
 
 // ErrorResponse is how to answer a request refused with err, presented
 // under scheme. A refusal about the token is challenged under the scheme the
@@ -111,13 +108,7 @@ var internalError = refusal{status: http.StatusInternalServerError, slug: "inter
 // A verifier with DPoP configured also advertises its algorithms in a DPoP
 // challenge, and hands out a fresh nonce with use_dpop_nonce.
 func (v *StandardVerifier) ErrorResponse(ctx context.Context, err error, scheme AuthScheme) ErrorResponse {
-	r := internalError
-	for _, candidate := range refusals {
-		if matchesAny(err, candidate.sentinels) {
-			r = candidate
-			break
-		}
-	}
+	r := answerFor(err)
 	resp := ErrorResponse{
 		Status:  r.status,
 		Problem: Problem{Type: problemTypeBase + r.slug, Title: r.title, Status: r.status},
@@ -139,15 +130,6 @@ func (v *StandardVerifier) ErrorResponse(ctx context.Context, err error, scheme 
 		resp.DPoPNonce, _ = v.DPoPNonce(ctx) // without one the client retries and is refused again
 	}
 	return resp
-}
-
-func matchesAny(err error, sentinels []error) bool {
-	for _, s := range sentinels {
-		if errors.Is(err, s) {
-			return true
-		}
-	}
-	return false
 }
 
 // challenge is one WWW-Authenticate challenge (RFC 9110 §11.6.1): the scheme,

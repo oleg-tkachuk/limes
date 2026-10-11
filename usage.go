@@ -545,7 +545,7 @@ var (
 	ErrInvalidAmount = errors.New("limes: invalid amount")
 
 	// ErrChargeNotFound — Refund named a charge with no ledger row.
-	ErrChargeNotFound = errors.New("limes: charge not found")
+	ErrChargeNotFound error = &familyError{"limes: charge not found", ErrNotFound}
 
 	// ErrRefundExceedsCharge — Refund would return more than the charge
 	// took, counting earlier refunds of the same charge.
@@ -554,7 +554,7 @@ var (
 	// ErrReservationNotFound — Settle named a reservation that does not
 	// exist, was released, or has expired. One already settled is not an
 	// error: Settle returns its charge again (ChargeReceipt.Replayed).
-	ErrReservationNotFound = errors.New("limes: reservation not found")
+	ErrReservationNotFound error = &familyError{"limes: reservation not found", ErrNotFound}
 
 	// ErrRequestLimitExceeded — capability used MaxRequests times,
 	// next attempt was blocked.
@@ -562,7 +562,7 @@ var (
 
 	// ErrUsageNotFound — no usage row exists for this capability.
 	// Get-only; bump/charge always inserts on first hit.
-	ErrUsageNotFound = errors.New("limes: usage row not found")
+	ErrUsageNotFound error = &familyError{"limes: usage row not found", ErrNotFound}
 
 	// ErrTenantBudgetExceeded — the tenant aggregate cap has been
 	// hit. Distinct from ErrBudgetExceeded because the remedy differs:
@@ -574,7 +574,7 @@ var (
 	// ErrTenantBudgetNotFound — Get-only; the tenant has no cap
 	// configured AND has never been charged. Distinct from "cap = 0"
 	// (which means "configured but unlimited").
-	ErrTenantBudgetNotFound = errors.New("limes: tenant budget row not found")
+	ErrTenantBudgetNotFound error = &familyError{"limes: tenant budget row not found", ErrNotFound}
 
 	// ErrTenantBudgetVersionMismatch — SetTenantBudget's OCC guard refused the
 	// write: the stored resource_version is not the one the caller read, so
@@ -587,7 +587,7 @@ var (
 // charged under, for a different amount, unit or tenant. One reference names
 // one cost; replaying the first receipt would report the second as booked.
 // Matches ErrInvalidRequest.
-var ErrExternalRefConflict error = &requestError{"limes: external ref already names a different charge"}
+var ErrExternalRefConflict error = &familyError{"limes: external ref already names a different charge", ErrInvalidRequest}
 
 // Validate reports whether p is an OverrunPolicy this package defines.
 // Implementations call it before touching state, so an unknown policy is never

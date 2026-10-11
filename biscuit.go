@@ -61,8 +61,8 @@ var ErrCopyCountersNotMetered = fmt.Errorf("%w: copy limits need a verifier with
 
 // ErrBiscuitAttenuation — an attenuation block the verifier cannot honour:
 // outside the vocabulary, malformed, or widening its parent. Matches
-// ErrInvalidSignature, so consumers that map only that sentinel refuse it.
-var ErrBiscuitAttenuation error = &popError{"limes: invalid Biscuit attenuation"}
+// ErrInvalidSignature: the token is not one this verifier accepts.
+var ErrBiscuitAttenuation error = &familyError{"limes: invalid Biscuit attenuation", ErrInvalidSignature}
 
 // IsBiscuit reports whether token is in the Biscuit form rather than a JWT:
 // a JWT has exactly two dots, base64url has none.

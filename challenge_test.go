@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -125,44 +126,29 @@ func TestWriteErrorResponse(t *testing.T) {
 	}
 }
 
-// The refusal table and the reason table read one error the same way: every
-// error ErrorResponse answers has a Reason, every error with a Reason gets an
-// answer of its own rather than the internal-error fallback, and in each
-// table an error is matched by its own row, not by an earlier, wider one.
-func TestRefusalsAndReasonsAgree(t *testing.T) {
-	for _, row := range refusals {
-		for _, sentinel := range row.sentinels {
-			// The family every caveat refusal matches: never returned alone,
-			// and each member has a Reason of its own.
-			if errors.Is(sentinel, ErrCaveatViolation) {
-				continue
-			}
-			if _, ok := ReasonOf(sentinel); !ok {
-				t.Errorf("%v is answered %d %q but has no Reason", sentinel, row.status, row.slug)
-			}
-			if first := firstRefusal(sentinel); first.slug != row.slug {
-				t.Errorf("%v is listed under %q but matched by %q first", sentinel, row.slug, first.slug)
-			}
+// The one table reads each sentinel by its own rule: no earlier, wider rule
+// swallows it; rules sharing a Reason agree on whether it stands; and a
+// family root, whose members carry the reasons, names none of its own.
+func TestRefusalRulesAreOrdered(t *testing.T) {
+	permanence := map[Reason]bool{}
+	for _, rule := range refusalRules {
+		if first, _ := ruleFor(rule.sentinel); first.sentinel != rule.sentinel { //nolint:errorlint // which row matched, not whether the error matches
+			t.Errorf("%v is matched by the rule for %v before its own", rule.sentinel, first.sentinel)
+		}
+		if rule.reason == "" {
+			continue
+		}
+		if p, seen := permanence[rule.reason]; seen && p != rule.permanent {
+			t.Errorf("Reason %q is permanent in one rule and not in another", rule.reason)
+		}
+		permanence[rule.reason] = rule.permanent
+	}
+	for _, root := range []error{ErrUnauthenticated, ErrProofOfPossession, ErrCaveatViolation} {
+		if r, ok := ReasonOf(root); ok {
+			t.Errorf("family root %v has Reason %q; its members carry the reasons", root, r)
 		}
 	}
-	for _, rules := range [][]reasonRule{reasonAliases, reasonRules} {
-		for _, rule := range rules {
-			if first := firstRefusal(rule.sentinel); first.slug == internalError.slug {
-				t.Errorf("%v has Reason %q but ErrorResponse answers it as an internal error", rule.sentinel, rule.reason)
-			}
-			if got, _ := ReasonOf(rule.sentinel); got != rule.reason {
-				t.Errorf("%v is listed with Reason %q but ReasonOf gives %q", rule.sentinel, rule.reason, got)
-			}
-		}
+	if reasons := Reasons(); len(reasons) != len(slices.Compact(slices.Sorted(slices.Values(reasons)))) {
+		t.Errorf("Reasons() repeats one: %v", reasons)
 	}
-}
-
-// firstRefusal is the row ErrorResponse answers err with.
-func firstRefusal(err error) refusal {
-	for _, r := range refusals {
-		if matchesAny(err, r.sentinels) {
-			return r
-		}
-	}
-	return internalError
 }

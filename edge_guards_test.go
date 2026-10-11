@@ -209,6 +209,8 @@ func TestNormaliseUnitCode(t *testing.T) {
 // Every rejection a consumer maps to a transport code must
 // stay individually matchable. Identity here is the contract — an errors.Is
 // that starts matching two sentinels collapses two distinct client outcomes.
+// Family roots (ErrNotFound and the others) are left out: their members match
+// them by design, and TestSentinelMatrix pins exactly which.
 func TestSentinelsAreIndividuallyMatchable(t *testing.T) {
 	all := map[string]error{
 		"ErrInvalidSignature":     ErrInvalidSignature,
@@ -220,15 +222,14 @@ func TestSentinelsAreIndividuallyMatchable(t *testing.T) {
 		"ErrBudgetExceeded":       ErrBudgetExceeded,
 		"ErrDelegationTooWide":    ErrDelegationTooWide,
 		"ErrUnitCodeMismatch":     ErrUnitCodeMismatch,
-		"ErrNotFound":             ErrNotFound,
 		"ErrUsageNotFound":        ErrUsageNotFound,
 		"ErrTenantBudgetNotFound": ErrTenantBudgetNotFound,
 		"ErrTenantBudgetExceeded": ErrTenantBudgetExceeded,
 		"ErrRequestLimitExceeded": ErrRequestLimitExceeded,
 		"ErrUnknownKID":           ErrUnknownKID,
 	}
-	if len(all) != 15 {
-		t.Fatalf("expected 15 sentinels, listed %d — update contracts §4 too", len(all))
+	if len(all) != 14 {
+		t.Fatalf("expected 14 sentinels, listed %d", len(all))
 	}
 	for nameA, a := range all {
 		for nameB, b := range all {

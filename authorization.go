@@ -33,8 +33,9 @@ var ErrMalformedAuthorization = errors.New("limes: malformed Authorization heade
 
 // ErrAuthSchemeMismatch — the scheme the token came under is not the one its
 // binding calls for: a key-bound token as Bearer, which RFC 9449 §7.2 treats
-// as a downgrade, or an unbound one as DPoP. Matches ErrInvalidSignature.
-var ErrAuthSchemeMismatch error = &popError{"limes: token presented under the wrong scheme"}
+// as a downgrade, or an unbound one as DPoP. Matches ErrProofOfPossession: the
+// binding, not the token, is what the scheme fails.
+var ErrAuthSchemeMismatch error = &familyError{"limes: token presented under the wrong scheme", ErrProofOfPossession}
 
 // ParseAuthorization reads an Authorization header value: the scheme, matched
 // without regard to case (RFC 9110 §11.1), and its token68 credential.
