@@ -222,9 +222,12 @@ func checkTenantCountsBeforeACeiling[TX any](t *testing.T, env Env[TX]) {
 
 func checkRejectionMovesNothing[TX any](t *testing.T, f fixture[TX]) {
 	ran := false
-	_, err := f.charge(limes.ChargeRequest{Amount: childBudget + one}, func(context.Context, TX) error { ran = true; return nil })
+	r, err := f.charge(limes.ChargeRequest{Amount: childBudget + one}, func(context.Context, TX) error { ran = true; return nil })
 	if !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Fatalf("charge past the ceiling: err = %v, want ErrBudgetExceeded", err)
+	}
+	if r.TenantID != f.Tenant || r.UnitCode != unit {
+		t.Errorf("a refusal's receipt names tenant %s in %q, want %s in %q", r.TenantID, r.UnitCode, f.Tenant, unit)
 	}
 	if ran || f.spent(t, f.child) != 0 || f.spent(t, f.root) != 0 || f.tenantSpent(t) != 0 {
 		t.Fatalf("a rejected charge moved something (callback ran: %v)", ran)

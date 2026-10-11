@@ -301,3 +301,21 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 		t.Error("GetUsage found a purged row")
 	}
 }
+
+// A refused settle is counted under its tenant, as a refused charge is: the
+// receipt of a refusal still names the tenant and the unit.
+func TestMeteringLabelsARefusedSettleWithItsTenant(t *testing.T) {
+	usage, reader := meteredStore(t, limes.WithTenantAttribute())
+	ctx := context.Background()
+	tenant, capID := uuid.New(), uuid.New()
+	res, err := usage.Reserve(ctx, limes.ReserveRequest{CapabilityID: capID, TenantID: tenant, Amount: limes.MustParseAmount("1"), MaxBudget: limes.MustParseAmount("2")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := usage.Settle(ctx, limes.SettleRequest{ReservationID: res.ID, Amount: limes.MustParseAmount("5"), MaxBudget: limes.MustParseAmount("2")}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
+		t.Fatalf("settle past the ceiling: %v", err)
+	}
+	if got := valueAt(points(t, reader, metricChargeDecisions), attrTenant, tenant.String()); got != 1 {
+		t.Errorf("refused settles under tenant %s = %v, want 1", tenant, got)
+	}
+}
