@@ -3,6 +3,8 @@ package limes
 import (
 	"context"
 	"errors"
+	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -79,4 +81,82 @@ func TestVerifyRefusesAnUnknownPrincipalType(t *testing.T) {
 	if _, err := v.Verify(ctx, VerifyRequest{Token: token, Audience: "data"}); !errors.Is(err, ErrInvalidSignature) {
 		t.Errorf("Verify of an unknown principal type: err = %v, want ErrInvalidSignature", err)
 	}
+}
+
+// A capability crosses the API by value: changing the request Issue or
+// Delegate was given — or the parent a child inherited caveats from — changes
+// nothing in the capability they returned.
+func TestIssueAndDelegateKeepNoAliasOfTheCaller(t *testing.T) {
+	issuer, _, _, _ := buildIssuerVerifier(t)
+	ctx := context.Background()
+	req := IssueRequest{
+		IssuedBy: Principal{Subject: "op"},
+		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a", Agent: &AgentPrincipal{AgentType: "worker"}},
+		Audience: []string{"data"},
+		Caveats: Caveats{
+			Ops: []Op{OpGet}, ResourcePrefixes: []string{"a/"}, ResourceURIs: []string{"a/b"},
+			SourceIPCIDR: []string{"10.0.0.0/8"},
+		},
+		TTL: time.Minute,
+	}
+	parent, _, err := issuer.Issue(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, _, err := issuer.Delegate(ctx, DelegateRequest{
+		Parent: parent, Subject: Principal{Type: PrincipalAgent, Subject: "child"}, InheritCaveats: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantParent, wantChild := snapshot(parent), snapshot(child)
+
+	req.Audience[0] = "other"
+	req.Caveats.Ops[0] = OpDelete
+	req.Caveats.ResourcePrefixes[0] = "z/"
+	req.Caveats.ResourceURIs[0] = "z/y"
+	req.Caveats.SourceIPCIDR[0] = "0.0.0.0/0"
+	req.Subject.Agent.AgentType = "rogue"
+	if got := snapshot(parent); got != wantParent {
+		t.Errorf("the issued capability changed with its request:\n got %s\nwant %s", got, wantParent)
+	}
+
+	parent.Caveats.Ops[0] = OpDelete
+	parent.Caveats.ResourcePrefixes[0] = "z/"
+	if got := snapshot(child); got != wantChild {
+		t.Errorf("the delegated capability changed with its parent:\n got %s\nwant %s", got, wantChild)
+	}
+}
+
+// snapshot is a capability's slices and pointers as text.
+func snapshot(c Capability) string {
+	agent := ""
+	if c.Subject.Agent != nil {
+		agent = c.Subject.Agent.AgentType
+	}
+	return fmt.Sprint(c.Audience, c.Caveats.Ops, c.Caveats.ResourcePrefixes, c.Caveats.ResourceURIs,
+		c.Caveats.SourceIPCIDR, agent)
+}
+
+// Every slice or pointer a Caveats or Principal holds is one clone copies:
+// a field added later and left out of clone would alias the caller's again.
+func TestCloneCoversEverySharedField(t *testing.T) {
+	for _, v := range []any{Caveats{}, Principal{}} {
+		typ := reflect.TypeOf(v)
+		for i := range typ.NumField() {
+			field := typ.Field(i)
+			switch field.Type.Kind() {
+			case reflect.Slice, reflect.Pointer, reflect.Map:
+				if !clonedFields[typ.Name()+"."+field.Name] {
+					t.Errorf("%s.%s is shared by reference and not in clonedFields; copy it in clone", typ.Name(), field.Name)
+				}
+			}
+		}
+	}
+}
+
+// clonedFields are the reference fields clone copies.
+var clonedFields = map[string]bool{
+	"Caveats.Ops": true, "Caveats.ResourcePrefixes": true, "Caveats.ResourceURIs": true,
+	"Caveats.SourceIPCIDR": true, "Principal.Agent": true,
 }

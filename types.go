@@ -3,6 +3,7 @@ package limes
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -316,4 +317,23 @@ type Caveats struct {
 	// Enforced by Caveats.CheckSource; delegation requires each child
 	// network to lie inside a parent network.
 	SourceIPCIDR []string `json:"source_ip_cidr,omitempty"`
+}
+
+// clone is c with slices of its own, so a capability built from it shares
+// nothing with the caller's request or with the parent it was inherited from.
+func (c Caveats) clone() Caveats {
+	c.Ops = slices.Clone(c.Ops)
+	c.ResourcePrefixes = slices.Clone(c.ResourcePrefixes)
+	c.ResourceURIs = slices.Clone(c.ResourceURIs)
+	c.SourceIPCIDR = slices.Clone(c.SourceIPCIDR)
+	return c
+}
+
+// clone is p with agent details of its own.
+func (p Principal) clone() Principal {
+	if p.Agent != nil {
+		agent := *p.Agent
+		p.Agent = &agent
+	}
+	return p
 }
