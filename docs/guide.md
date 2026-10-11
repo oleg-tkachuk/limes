@@ -350,7 +350,9 @@ the capability, an ancestor or the tenant already counts in is
 `ErrUnitCodeMismatch`, never a sum of two currencies; an empty `UnitCode`
 means USD. The tenant aggregate counts from its first charge or reservation,
 whether or not a ceiling is set: `SetTenantBudget` later measures the new
-ceiling against that spend and those holds. It is guarded by
+ceiling against that spend and those holds, and refuses a new `UnitCode`
+while anything is held in the old one, or spent in it unless `ResetSpend`
+closes that spend. It is guarded by
 `ExpectedVersion` — 0 while no ceiling has been set, else the version read —
 and a conflict is `ErrTenantBudgetVersionMismatch`.
 
@@ -507,14 +509,18 @@ statement or lock overspends, and fails them.
 ```go
 records.Revoke(ctx, limes.RevokeRequest{
     ID: cap.ID, Reason: "agent looping", Actor: "operator@example.com",
-    CascadeChildren: true,   // takes every sub-agent with it
+    CascadeChildren: true,   // also records each sub-agent's revocation, for the audit
 })
 ```
 
 Idempotent; an id not on record is `ErrNotFound` and writes nothing.
 Verifiers that cache revocation answers learn of it within the cache TTL
 (`DefaultRevocationCacheTTL`, two seconds), or at once if you call `CachedRevocationChecker.Clear` when a
-revocation is announced — on a Postgres `NOTIFY`, for example.
+revocation is announced — on a Postgres `NOTIFY`, for example. `Clear`
+drops the whole cache, and there is no per-id drop: an answer cached for a
+descendant is also an answer about the revoked ancestor. The next check of
+each id then asks the store once, so batch a burst of signals into one
+`Clear`.
 Revoking a capability revokes everything delegated from it, with or
 without the flag: `IsRevoked` answers for the whole chain. `CascadeChildren`
 also writes a revocation entry per descendant, so the audit trail names each
