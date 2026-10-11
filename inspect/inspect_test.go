@@ -22,7 +22,7 @@ func issue(t *testing.T) (limes.Capability, string, ed25519.PublicKey) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer, err := limes.NewEd25519Signer(kid, priv)
+	signer, err := limes.NewSigner(limes.SignerConfig{KeyID: kid, Key: priv})
 	if err != nil {
 		t.Fatal(err)
 	}

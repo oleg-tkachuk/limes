@@ -124,7 +124,7 @@ func TestVerifierRejectsChildOfRevokedParent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer, _ := limes.NewEd25519Signer(kid, priv)
+	signer, _ := limes.NewSigner(limes.SignerConfig{KeyID: kid, Key: priv})
 	records := New[struct{}]()
 	issuer, _ := limes.NewIssuer(limes.IssuerConfig{Signer: signer, Store: records, IssuerName: "iss"})
 	verifier, _ := limes.NewStandardVerifier(limes.VerifierConfig{
@@ -133,7 +133,7 @@ func TestVerifierRejectsChildOfRevokedParent(t *testing.T) {
 		TrustedIssuers: []string{"iss"},
 	})
 
-	parent, _, err := issuer.Issue(ctx, limes.IssueRequest{
+	parent, parentToken, err := issuer.Issue(ctx, limes.IssueRequest{
 		IssuedBy: limes.Principal{Subject: "op"},
 		Subject:  limes.Principal{Type: limes.PrincipalAgent, TenantID: uuid.New(), Subject: "orchestrator"},
 		Audience: []string{"data"},
@@ -143,7 +143,11 @@ func TestVerifierRejectsChildOfRevokedParent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, childToken, err := issuer.Delegate(ctx, limes.DelegateRequest{Parent: parent, Subject: limes.Principal{Type: limes.PrincipalAgent, Subject: "child"}, InheritCaveats: true})
+	verified, err := verifier.Verify(ctx, limes.VerifyRequest{Token: parentToken, Audience: "data"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, childToken, err := issuer.Delegate(ctx, limes.DelegateRequest{Parent: verified, Subject: limes.Principal{Type: limes.PrincipalAgent, Subject: "child"}, InheritCaveats: true})
 	if err != nil {
 		t.Fatal(err)
 	}

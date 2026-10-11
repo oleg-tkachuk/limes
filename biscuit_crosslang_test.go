@@ -74,7 +74,7 @@ func TestGenerateBiscuitFixtures(t *testing.T) {
 	if os.Getenv(biscuitWriteEnv) != biscuitWriteFlag {
 		t.Skipf("set %s=%s to (re)generate the fixtures", biscuitWriteEnv, biscuitWriteFlag)
 	}
-	signer, err := NewEd25519Signer(goldenKID, ed25519.NewKeyFromSeed(goldenSeed[:]))
+	signer, err := NewSigner(SignerConfig{KeyID: goldenKID, Key: ed25519.NewKeyFromSeed(goldenSeed[:])})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,32 +188,32 @@ func TestSharedAttenuationVerifies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the attenuated token is refused: %v", err)
 	}
-	if got.ID != seed.ID {
-		t.Errorf("ID = %s, want the seed's %s", got.ID, seed.ID)
+	if got.Capability().ID != seed.Capability().ID {
+		t.Errorf("ID = %s, want the seed's %s", got.Capability().ID, seed.Capability().ID)
 	}
 	want := c.Expect
-	if !slices.Equal(got.Caveats.Ops, want.Ops) {
-		t.Errorf("Ops = %v, want %v", got.Caveats.Ops, want.Ops)
+	if !slices.Equal(got.Capability().Caveats.Ops, want.Ops) {
+		t.Errorf("Ops = %v, want %v", got.Capability().Caveats.Ops, want.Ops)
 	}
-	if !slices.Equal(got.Caveats.ResourcePrefixes, want.ResourcePrefixes) {
-		t.Errorf("ResourcePrefixes = %v, want %v", got.Caveats.ResourcePrefixes, want.ResourcePrefixes)
+	if !slices.Equal(got.Capability().Caveats.ResourcePrefixes, want.ResourcePrefixes) {
+		t.Errorf("ResourcePrefixes = %v, want %v", got.Capability().Caveats.ResourcePrefixes, want.ResourcePrefixes)
 	}
-	if !slices.Equal(got.Caveats.ResourceURIs, want.ResourceURIs) {
-		t.Errorf("ResourceURIs = %v, want %v", got.Caveats.ResourceURIs, want.ResourceURIs)
+	if !slices.Equal(got.Capability().Caveats.ResourceURIs, want.ResourceURIs) {
+		t.Errorf("ResourceURIs = %v, want %v", got.Capability().Caveats.ResourceURIs, want.ResourceURIs)
 	}
-	if !slices.Equal(got.Audience, want.Planes) {
-		t.Errorf("Audience = %v, want %v", got.Audience, want.Planes)
+	if !slices.Equal(got.Capability().Audience, want.Planes) {
+		t.Errorf("Audience = %v, want %v", got.Capability().Audience, want.Planes)
 	}
-	if !got.ExpiresAt.Equal(want.ExpiresAt) {
-		t.Errorf("ExpiresAt = %v, want %v", got.ExpiresAt, want.ExpiresAt)
+	if !got.Capability().ExpiresAt.Equal(want.ExpiresAt) {
+		t.Errorf("ExpiresAt = %v, want %v", got.Capability().ExpiresAt, want.ExpiresAt)
 	}
-	if got.ConfirmationJKT != want.ConfirmationJKT {
-		t.Errorf("ConfirmationJKT = %q, want %q", got.ConfirmationJKT, want.ConfirmationJKT)
+	if got.Capability().ConfirmationJKT != want.ConfirmationJKT {
+		t.Errorf("ConfirmationJKT = %q, want %q", got.Capability().ConfirmationJKT, want.ConfirmationJKT)
 	}
-	if len(got.Copies) != 1 || got.Copies[0].MaxRequests != want.CopyMaxRequests ||
-		got.Copies[0].MaxBudget != Nanos(want.CopyMaxBudget) {
+	if len(got.Capability().Copies) != 1 || got.Capability().Copies[0].MaxRequests != want.CopyMaxRequests ||
+		got.Capability().Copies[0].MaxBudget != Nanos(want.CopyMaxBudget) {
 		t.Errorf("Copies = %+v, want one with %d requests and %d nanos",
-			got.Copies, want.CopyMaxRequests, want.CopyMaxBudget)
+			got.Capability().Copies, want.CopyMaxRequests, want.CopyMaxBudget)
 	}
 	if _, err := v.Verify(ctx, VerifyRequest{Token: token, Audience: audienceMCP}); err == nil {
 		t.Error("the plane the attenuation dropped is still accepted")

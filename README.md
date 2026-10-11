@@ -63,7 +63,7 @@ kid, pub, priv := key.KeyID, key.Public, key.Private
 records := memstore.New[struct{}]()          // your Store
 usage   := memstore.NewUsage[struct{}](records)
 
-signer, _ := limes.NewEd25519Signer(kid, priv)
+signer, _ := limes.NewSigner(limes.SignerConfig{KeyID: kid, Key: priv})
 issuer, _ := limes.NewIssuer(limes.IssuerConfig{
     Signer: signer, Store: records, IssuerName: "my-issuer",
 })
@@ -92,10 +92,11 @@ cap, token, _ := issuer.Issue(ctx, limes.IssueRequest{
 })
 
 // On every call: verify locally and enforce the caveats in one step, then meter.
-cap, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
+granted, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
     VerifyRequest: limes.VerifyRequest{Token: token, Audience: "my-service"},
     CheckRequest:  limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/report.pdf"},
 })
+cap := granted.Capability()
 _, err = usage.Charge(ctx, limes.ChargeRequest{
     CapabilityID: cap.ID, TenantID: tenantID, Amount: limes.MustParseAmount("0.35"),
     MaxBudget: cap.Caveats.MaxBudgetAmount, UnitCode: "USD",

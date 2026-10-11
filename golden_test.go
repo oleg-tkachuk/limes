@@ -48,33 +48,33 @@ func TestGoldenTokenStillVerifies(t *testing.T) {
 
 	// Decode, not just accept: a format change could keep the signature valid
 	// while relocating or renaming a claim, which acceptance alone would miss.
-	if cap.Issuer != goldenIssuer {
-		t.Errorf("Issuer = %q, want %q", cap.Issuer, goldenIssuer)
+	if cap.Capability().Issuer != goldenIssuer {
+		t.Errorf("Issuer = %q, want %q", cap.Capability().Issuer, goldenIssuer)
 	}
-	if cap.Subject.Subject != goldenSubject {
-		t.Errorf("Subject = %q, want %q", cap.Subject.Subject, goldenSubject)
+	if cap.Capability().Subject.Subject != goldenSubject {
+		t.Errorf("Subject = %q, want %q", cap.Capability().Subject.Subject, goldenSubject)
 	}
-	if cap.Subject.Type != PrincipalAgent {
-		t.Errorf("principal kind = %q, want agent", cap.Subject.Type)
+	if cap.Capability().Subject.Type != PrincipalAgent {
+		t.Errorf("principal kind = %q, want agent", cap.Capability().Subject.Type)
 	}
-	if cap.Subject.TenantID.String() != goldenTenant {
-		t.Errorf("TenantID = %q, want %q", cap.Subject.TenantID, goldenTenant)
+	if cap.Capability().Subject.TenantID.String() != goldenTenant {
+		t.Errorf("TenantID = %q, want %q", cap.Capability().Subject.TenantID, goldenTenant)
 	}
-	if len(cap.Caveats.Ops) != 1 || cap.Caveats.Ops[0] != OpGet {
-		t.Errorf("Ops = %v, want [%v]", cap.Caveats.Ops, OpGet)
+	if len(cap.Capability().Caveats.Ops) != 1 || cap.Capability().Caveats.Ops[0] != OpGet {
+		t.Errorf("Ops = %v, want [%v]", cap.Capability().Caveats.Ops, OpGet)
 	}
-	if cap.Caveats.MaxRequests != 10 {
-		t.Errorf("MaxRequests = %d, want 10", cap.Caveats.MaxRequests)
+	if cap.Capability().Caveats.MaxRequests != 10 {
+		t.Errorf("MaxRequests = %d, want 10", cap.Capability().Caveats.MaxRequests)
 	}
-	if cap.Caveats.MaxBudgetAmount != 3*NanosPerUnit/2 { // 1.5, as the fixture was issued
-		t.Errorf("MaxBudgetAmount = %v, want 1.5", cap.Caveats.MaxBudgetAmount)
+	if cap.Capability().Caveats.MaxBudgetAmount != 3*NanosPerUnit/2 { // 1.5, as the fixture was issued
+		t.Errorf("MaxBudgetAmount = %v, want 1.5", cap.Capability().Caveats.MaxBudgetAmount)
 	}
 	// The unit code is what cross-currency delegation rejection keys on.
-	if cap.Caveats.UnitCode != "USD" {
-		t.Errorf("UnitCode = %q, want USD", cap.Caveats.UnitCode)
+	if cap.Capability().Caveats.UnitCode != "USD" {
+		t.Errorf("UnitCode = %q, want USD", cap.Capability().Caveats.UnitCode)
 	}
-	if len(cap.Caveats.ResourcePrefixes) != 1 || cap.Caveats.ResourcePrefixes[0] != "golden/" {
-		t.Errorf("ResourcePrefixes = %v", cap.Caveats.ResourcePrefixes)
+	if len(cap.Capability().Caveats.ResourcePrefixes) != 1 || cap.Capability().Caveats.ResourcePrefixes[0] != "golden/" {
+		t.Errorf("ResourcePrefixes = %v", cap.Capability().Caveats.ResourcePrefixes)
 	}
 }
 

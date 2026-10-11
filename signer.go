@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto"
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -17,48 +19,57 @@ import (
 	"github.com/oleg-tkachuk/limes/internal/link"
 )
 
-// Signer mints capability tokens with an Ed25519 key; verifiers pick up
-// the public keys (statically or from a JWKS endpoint) and validate
-// locally — no RPC per request. Implement it over a KMS to keep the
-// private key out of process memory.
-//
-// Signer is intentionally narrow: callers populate a Capability struct
-// and ask Sign to encode + sign. The compact JWT format is the wire
-// representation; Decode reads one back without the verifier path, for
-// debugging tools, and VerifySignature checks its signature alone.
-type Signer interface {
-	// KeyID is the JWKS key ID embedded in tokens this signer mints.
-	// Verifiers index their key set by it, and rotation works by
-	// running two signers in parallel until clients have caught up.
-	KeyID() string
-
-	// Sign emits a compact JWT for the supplied capability. The cap's
-	// IssuedAt / NotBefore / ExpiresAt must already be populated; Sign
-	// does not normalise times. ctx bounds the signing, which for a key
-	// held in a KMS or an HSM is a call over the network.
-	Sign(ctx context.Context, c Capability) (string, error)
-}
-
-// ed25519Signer is the Ed25519-backed Signer.
-type ed25519Signer struct {
+// Signer mints capability tokens: it encodes a Capability as the token
+// format and signs it with an Ed25519 key, which may be in memory or held in
+// a KMS or an HSM behind crypto.Signer. Verifiers pick up the public keys
+// (statically or from a JWKS endpoint) and validate locally — no RPC per
+// request.
+type Signer struct {
 	keyID string
-	priv  ed25519.PrivateKey
+	key   crypto.Signer
 }
 
-// NewEd25519Signer constructs a signer from a key ID and Ed25519 private
-// key. Caller is responsible for key generation / KMS interaction —
-// this package is pure crypto + encoding.
-func NewEd25519Signer(keyID string, priv ed25519.PrivateKey) (Signer, error) {
-	if keyID == "" {
-		return nil, errors.New("limes: signer key ID required")
-	}
-	if len(priv) != ed25519.PrivateKeySize {
-		return nil, fmt.Errorf("limes: ed25519 private key wrong length %d", len(priv))
-	}
-	return &ed25519Signer{keyID: keyID, priv: priv}, nil
+// SignerConfig configures a Signer.
+type SignerConfig struct {
+	// KeyID is the kid tokens carry, by which verifiers find the key.
+	// Required.
+	KeyID string
+	// Key signs. Its public key must be Ed25519: an ed25519.PrivateKey, or
+	// a crypto.Signer over a key held elsewhere — one that also implements
+	// ContextSigner is given the request's context. Required.
+	Key crypto.Signer
 }
 
-func (s *ed25519Signer) KeyID() string { return s.keyID }
+// ContextSigner is a crypto.Signer that signs under a context, as a key
+// held in a KMS or an HSM does for its call over the network. Signer uses
+// SignContext when its key has it, so a slow or cancelled call is bounded
+// by the request that asked for the token.
+type ContextSigner interface {
+	crypto.Signer
+	SignContext(ctx context.Context, rand io.Reader, message []byte, opts crypto.SignerOpts) ([]byte, error)
+}
+
+// NewSigner builds a Signer, refusing an empty kid or a key that is not
+// Ed25519.
+func NewSigner(cfg SignerConfig) (*Signer, error) {
+	if cfg.KeyID == "" {
+		return nil, errors.New("limes: SignerConfig.KeyID required")
+	}
+	if cfg.Key == nil {
+		return nil, errors.New("limes: SignerConfig.Key required")
+	}
+	// An ed25519.PrivateKey of the wrong length panics in Public.
+	if k, ok := cfg.Key.(ed25519.PrivateKey); ok && len(k) != ed25519.PrivateKeySize {
+		return nil, fmt.Errorf("limes: SignerConfig.Key is %d bytes, not an Ed25519 private key's %d", len(k), ed25519.PrivateKeySize)
+	}
+	if pub, ok := cfg.Key.Public().(ed25519.PublicKey); !ok || len(pub) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("limes: SignerConfig.Key must be Ed25519, not %T", cfg.Key.Public())
+	}
+	return &Signer{keyID: cfg.KeyID, key: cfg.Key}, nil
+}
+
+// KeyID is the kid tokens this signer mints carry.
+func (s *Signer) KeyID() string { return s.keyID }
 
 // jwtHeader is the protected header. We use compact serialization:
 // `header.payload.signature` with each segment base64url-encoded.
@@ -142,7 +153,12 @@ type cnfClaim struct {
 
 // Sign implements Signer. Encodes the header + claims, signs the
 // dotted concatenation, returns the compact form.
-func (s *ed25519Signer) Sign(_ context.Context, c Capability) (string, error) {
+// Sign encodes c as a compact token and signs it. c's IssuedAt and
+// ExpiresAt must be set; Sign does not normalise times.
+func (s *Signer) Sign(ctx context.Context, c Capability) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if c.ID == uuid.Nil {
 		return "", errors.New("limes: ID required")
 	}
@@ -200,11 +216,19 @@ func (s *ed25519Signer) Sign(_ context.Context, c Capability) (string, error) {
 		base64.RawURLEncoding.EncodeToString(claimsJSON),
 	}, ".")
 
-	// Ed25519 ignores the crypto.Hash argument (PureEdDSA hashes the
-	// message itself); we pass crypto.Hash(0) per the stdlib contract.
-	sig, err := s.priv.Sign(nil, []byte(signingInput), crypto.Hash(0))
+	// Ed25519 hashes the message itself (PureEdDSA): crypto.Hash(0) is the
+	// stdlib's way to ask for it.
+	var sig []byte
+	if cs, ok := s.key.(ContextSigner); ok {
+		sig, err = cs.SignContext(ctx, rand.Reader, []byte(signingInput), crypto.Hash(0))
+	} else {
+		sig, err = s.key.Sign(rand.Reader, []byte(signingInput), crypto.Hash(0))
+	}
 	if err != nil {
 		return "", fmt.Errorf("limes: sign: %w", err)
+	}
+	if len(sig) != ed25519.SignatureSize {
+		return "", fmt.Errorf("limes: sign: an Ed25519 signature is %d bytes, not %d", ed25519.SignatureSize, len(sig))
 	}
 	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig), nil
 }

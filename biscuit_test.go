@@ -61,7 +61,7 @@ func TestBiscuitVerifiesAsItsCapability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
-	if got.ID != cap.ID || len(got.Caveats.Ops) != 3 || got.BiscuitRoot != "" {
+	if got.Capability().ID != cap.ID || len(got.Capability().Caveats.Ops) != 3 || got.Capability().BiscuitRoot != "" {
 		t.Fatalf("got %+v", got)
 	}
 }
@@ -82,20 +82,20 @@ func TestBiscuitAttenuationNarrowsOffline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify narrowed: %v", err)
 	}
-	if got.ID != cap.ID {
+	if got.Capability().ID != cap.ID {
 		t.Errorf("narrowed token is a different capability")
 	}
-	if len(got.Caveats.Ops) != 1 || got.Caveats.Ops[0] != OpGet {
-		t.Errorf("ops = %v", got.Caveats.Ops)
+	if len(got.Capability().Caveats.Ops) != 1 || got.Capability().Caveats.Ops[0] != OpGet {
+		t.Errorf("ops = %v", got.Capability().Caveats.Ops)
 	}
-	if err := got.Caveats.Check(CheckRequest{Op: OpGet, Resource: "corpus/private/x"}); err == nil {
+	if err := got.Capability().Caveats.Check(CheckRequest{Op: OpGet, Resource: "corpus/private/x"}); err == nil {
 		t.Error("narrowed token reached outside its prefix")
 	}
-	if err := got.Caveats.Check(CheckRequest{Op: OpGet, Resource: "corpus/public/x"}); err != nil {
+	if err := got.Capability().Caveats.Check(CheckRequest{Op: OpGet, Resource: "corpus/public/x"}); err != nil {
 		t.Errorf("narrowed token refused inside its prefix: %v", err)
 	}
-	if !got.ExpiresAt.Equal(soon.UTC().Truncate(time.Second)) {
-		t.Errorf("expires = %v, want %v", got.ExpiresAt, soon)
+	if !got.Capability().ExpiresAt.Equal(soon.UTC().Truncate(time.Second)) {
+		t.Errorf("expires = %v, want %v", got.Capability().ExpiresAt, soon)
 	}
 	if _, err := v.Verify(context.Background(), VerifyRequest{Token: narrowed, Audience: audienceMCP}); !errors.Is(err, ErrAudienceMismatch) {
 		t.Errorf("dropped plane: err = %v, want ErrAudienceMismatch", err)
@@ -106,10 +106,10 @@ func TestBiscuitAttenuationNarrowsOffline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := v.Verify(context.Background(), VerifyRequest{Token: again, Audience: audienceData}); err != nil || len(got.Caveats.ResourceURIs) != 1 {
+	if got, err := v.Verify(context.Background(), VerifyRequest{Token: again, Audience: audienceData}); err != nil || len(got.Capability().Caveats.ResourceURIs) != 1 {
 		t.Fatalf("two blocks: %+v, %v", got, err)
 	}
-	if got, err := v.Verify(context.Background(), VerifyRequest{Token: token, Audience: audienceMCP}); err != nil || len(got.Caveats.Ops) != 3 {
+	if got, err := v.Verify(context.Background(), VerifyRequest{Token: token, Audience: audienceMCP}); err != nil || len(got.Capability().Caveats.Ops) != 3 {
 		t.Fatalf("original after attenuation: %v", err)
 	}
 }
@@ -143,7 +143,7 @@ func TestBiscuitAttenuationCannotWiden(t *testing.T) {
 			if name == "a later expiry" {
 				// A later expiry is not a widening the token can express: the
 				// earlier one stands.
-				if err != nil || got.ExpiresAt.After(time.Now().Add(2*time.Hour)) {
+				if err != nil || got.Capability().ExpiresAt.After(time.Now().Add(2*time.Hour)) {
 					t.Fatalf("later expiry: %v, %v", got, err)
 				}
 				return
@@ -256,8 +256,8 @@ func TestBiscuitOfflineBinding(t *testing.T) {
 		t.Fatalf("bound offline, no proof: err = %v, want dpop.ErrRequired", err)
 	}
 	got, err := v.Verify(context.Background(), withProof(t, keys["Ed25519"], bound, audienceData, time.Now()))
-	if err != nil || got.ConfirmationJKT != jkt {
-		t.Fatalf("bound offline: %q, %v", got.ConfirmationJKT, err)
+	if err != nil || got.Capability().ConfirmationJKT != jkt {
+		t.Fatalf("bound offline: %q, %v", got.Capability().ConfirmationJKT, err)
 	}
 	other, _ := dpop.Thumbprint(keys["P-256"].Public())
 	rebound, _ := Attenuate(bound, Attenuation{ConfirmationJKT: other})
@@ -324,8 +324,8 @@ func TestBiscuitAttenuationChainsNeverWiden(t *testing.T) {
 				continue
 			}
 			verified++
-			if err := Narrows(cap, got); err != nil {
-				t.Fatalf("a verified chain widened its capability: %v\n%+v", err, got.Caveats)
+			if err := Narrows(cap, got.Capability()); err != nil {
+				t.Fatalf("a verified chain widened its capability: %v\n%+v", err, got.Capability().Caveats)
 			}
 		}
 	}

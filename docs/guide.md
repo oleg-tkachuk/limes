@@ -8,7 +8,7 @@ start, [diagrams.md](diagrams.md) draws each path described here, and
 
 ```go
 scheme, token, err := limes.ParseAuthorization(r.Header.Get(limes.AuthorizationHeader))
-cap, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
+granted, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
     VerifyRequest: limes.VerifyRequest{
         Token: token, Scheme: scheme, Audience: "https://data.example.com",
         // Needed when the capability is key-bound; ignored when it is not.
@@ -32,6 +32,11 @@ case errors.Is(err, jwks.ErrUnavailable):  // the issuer's keys out of reach: th
 // Every refusal of the token or its proof also matches ErrUnauthenticated —
 // the one check for "answer 401".
 ```
+
+`Verify` and `Authorize` return a `VerifiedCapability`: what the token
+grants, which only the verifier makes. `granted.Capability()` is a copy of
+the `Capability` to read — `cap` below — and `Issuer.Delegate` takes the
+`VerifiedCapability` itself, so a parent is always one the verifier checked.
 
 `Authorize` is `Verify` — the token itself — followed by every caveat that
 needs no state: the operation, the resource, the idempotency key, the tainted
@@ -163,7 +168,7 @@ spawned, without calling back to any admin API:
 
 ```go
 child, childToken, err := issuer.Delegate(ctx, limes.DelegateRequest{
-    Parent:  cap,                       // the verified parent
+    Parent:  granted,                   // as the verifier accepted it
     Subject: limes.Principal{Type: limes.PrincipalAgent, Subject: "sub-worker"},
     TTL:     2 * time.Minute,
     Caveats: limes.Caveats{
@@ -217,7 +222,7 @@ verifier, _ := limes.NewStandardVerifier(limes.VerifierConfig{
     /* … */
     DPoP: proofs,
 })
-cap, err := verifier.Verify(ctx, limes.VerifyRequest{
+granted, err := verifier.Verify(ctx, limes.VerifyRequest{
     Token: token, Audience: "my-service",
     DPoP:  dpop.Proof{JWT: proof, Method: "POST", URL: url},
 })
@@ -285,8 +290,8 @@ worker, _ := limes.Attenuate(full, limes.Attenuation{
     ExpiresAt:        time.Now().Add(10 * time.Minute),
 })
 
-// A verifier built with AcceptBiscuit: true returns the narrowed Capability.
-c, err := verifier.Verify(ctx, limes.VerifyRequest{Token: worker, Audience: "my-service"})
+// A verifier built with AcceptBiscuit: true returns the narrowed capability.
+granted, err := verifier.Verify(ctx, limes.VerifyRequest{Token: worker, Audience: "my-service"})
 ```
 
 An attenuation block may restrict operations, resources, planes, the expiry,
@@ -615,6 +620,12 @@ an ephemeral one, marked `SigningKey.Generated` so you can log it loudly — a
 deployment that may run without a key file chooses between the two itself. A
 key with no kid named gets `jwks.KeyID`'s: its RFC 7638 thumbprint, the same
 wherever it is derived.
+
+`NewSigner(limes.SignerConfig{KeyID: kid, Key: key})` signs through any
+`crypto.Signer` whose key is Ed25519 — an `ed25519.PrivateKey`, or a key held
+in a KMS or an HSM; the token format stays inside the module. A key that
+implements `ContextSigner` signs under the request's context, so a slow or
+cancelled call is bounded by the request that asked for the token.
 
 ## Answer a refusal
 

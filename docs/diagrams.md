@@ -26,7 +26,7 @@ flowchart LR
     subgraph mod ["limes (this module)"]
         direction TB
         issuer["<b>Issuer</b><br/>Issue · Delegate · Biscuit"]
-        signer["<b>Signer</b><br/>NewEd25519Signer · JWT Ed25519"]
+        signer["<b>Signer</b><br/>NewSigner · JWT Ed25519"]
         narrows["<b>Narrows</b><br/>child ⊆ parent"]
         verifier["<b>StandardVerifier</b><br/>Authorize · Verify · BiscuitCopy<br/>ErrorResponse · DPoPNonce"]
         caveats["<b>Caveats</b><br/>Check · CheckSource · MatchResource"]

@@ -54,7 +54,7 @@ func TestIssueAndDelegateValidateTheSubject(t *testing.T) {
 
 	parent := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet}})
 	if _, _, err := issuer.Delegate(ctx, DelegateRequest{
-		Parent:  parent,
+		Parent:  asVerified(parent),
 		Subject: Principal{Type: PrincipalService, Subject: "s", Agent: &AgentPrincipal{AgentType: "worker"}},
 		Caveats: Caveats{Ops: []Op{OpGet}},
 		TTL:     time.Minute,
@@ -104,7 +104,7 @@ func TestIssueAndDelegateKeepNoAliasOfTheCaller(t *testing.T) {
 		t.Fatal(err)
 	}
 	child, _, err := issuer.Delegate(ctx, DelegateRequest{
-		Parent: parent, Subject: Principal{Type: PrincipalAgent, Subject: "child"}, InheritCaveats: true,
+		Parent: asVerified(parent), Subject: Principal{Type: PrincipalAgent, Subject: "child"}, InheritCaveats: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -141,7 +141,7 @@ func snapshot(c Capability) string {
 // Every slice or pointer a Caveats or Principal holds is one clone copies:
 // a field added later and left out of clone would alias the caller's again.
 func TestCloneCoversEverySharedField(t *testing.T) {
-	for _, v := range []any{Caveats{}, Principal{}} {
+	for _, v := range []any{Caveats{}, Principal{}, Capability{}, CopyCeiling{}} {
 		typ := reflect.TypeOf(v)
 		for i := range typ.NumField() {
 			field := typ.Field(i)
@@ -160,4 +160,37 @@ func TestCloneCoversEverySharedField(t *testing.T) {
 var clonedFields = map[string]bool{
 	"Caveats.Ops": true, "Caveats.ResourcePrefixes": true, "Caveats.ResourceURIs": true,
 	"Caveats.SourceIPCIDR": true, "Principal.Agent": true,
+	"Capability.Audience": true, "Capability.Copies": true, "CopyCeiling.RevocationID": true,
+}
+
+// asVerified is c as the verifier would have accepted it, for tests of what
+// Delegate does with a parent, whatever made it.
+func asVerified(c Capability) VerifiedCapability { return VerifiedCapability{c: c} }
+
+// A parent the verifier did not make — the zero VerifiedCapability, the only
+// one code outside the package can write — delegates nothing.
+func TestDelegateRefusesAParentTheVerifierDidNotMake(t *testing.T) {
+	issuer, _, _, _ := buildIssuerVerifier(t)
+	_, _, err := issuer.Delegate(context.Background(), DelegateRequest{
+		Subject: Principal{Type: PrincipalAgent, Subject: "child"}, InheritCaveats: true,
+	})
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Errorf("Delegate from a zero VerifiedCapability: err = %v, want ErrInvalidRequest", err)
+	}
+}
+
+// What the verifier accepted cannot be widened through the copy it hands out.
+func TestVerifiedCapabilityHandsOutACopy(t *testing.T) {
+	issuer, v, _, _ := buildIssuerVerifier(t)
+	_, token := issueFor(t, issuer)
+	vc, err := v.Verify(context.Background(), VerifyRequest{Token: token, Audience: audienceData})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := vc.Capability()
+	c.Caveats.Ops[0] = OpDelete
+	c.Audience[0] = "elsewhere"
+	if got := vc.Capability(); got.Caveats.Ops[0] != OpGet || got.Audience[0] != audienceData {
+		t.Errorf("a change to the copy reached the verified capability: %+v", got)
+	}
 }

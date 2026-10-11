@@ -19,7 +19,7 @@ func TestConfigDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer, err := NewEd25519Signer("k1", priv)
+	signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: priv})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestConfigRefusesNegatives(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer, err := NewEd25519Signer("k1", priv)
+	signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: priv})
 	if err != nil {
 		t.Fatal(err)
 	}

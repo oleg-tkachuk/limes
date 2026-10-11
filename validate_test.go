@@ -94,12 +94,12 @@ func TestDelegateInheritanceIsExplicit(t *testing.T) {
 
 	if _, _, err := issuer.Delegate(ctx, DelegateRequest{
 		Subject: Principal{Type: PrincipalAgent, Subject: "child"},
-		Parent:  parent, Caveats: Caveats{MaxBudgetAmount: MustParseAmount("2")},
+		Parent:  asVerified(parent), Caveats: Caveats{MaxBudgetAmount: MustParseAmount("2")},
 	}); !errors.Is(err, ErrInvalidCaveats) {
 		t.Fatalf("delegate with ops omitted = %v, want ErrInvalidCaveats", err)
 	}
 
-	child, _, err := issuer.Delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: parent, InheritCaveats: true})
+	child, _, err := issuer.Delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true})
 	if err != nil {
 		t.Fatalf("delegate with InheritCaveats: %v", err)
 	}
@@ -115,12 +115,12 @@ func TestDelegateRefusesRevokedOrExpiredParent(t *testing.T) {
 
 	expired := parent
 	expired.ExpiresAt = time.Now().Add(-time.Minute)
-	if _, _, err := issuer.Delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: expired, InheritCaveats: true}); !errors.Is(err, ErrExpired) {
+	if _, _, err := issuer.Delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(expired), InheritCaveats: true}); !errors.Is(err, ErrExpired) {
 		t.Errorf("delegate from expired parent = %v, want ErrExpired", err)
 	}
 
 	_ = store.Revoke(ctx, RevokeRequest{ID: parent.ID})
-	if _, _, err := issuer.Delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: parent, InheritCaveats: true}); !errors.Is(err, ErrRevoked) {
+	if _, _, err := issuer.Delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true}); !errors.Is(err, ErrRevoked) {
 		t.Errorf("delegate from revoked parent = %v, want ErrRevoked", err)
 	}
 }
@@ -137,7 +137,7 @@ func TestIssuedIDsAreVersion7(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, _, err := issuer.Delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: parent, InheritCaveats: true})
+	child, _, err := issuer.Delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true})
 	if err != nil {
 		t.Fatal(err)
 	}

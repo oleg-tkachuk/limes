@@ -201,7 +201,7 @@ type AgentPrincipal struct {
 
 // Capability is the in-memory representation of a verified token. The
 // wire form is a JWT; this struct is what callers receive from
-// Verifier.Verify and what the Issuer fills before signing.
+// StandardVerifier.Verify and what the Issuer fills before signing.
 type Capability struct {
 	// ID is the unique identifier (UUIDv7 — sortable by issuance time
 	// so per-tenant indexes stay tight).
@@ -367,4 +367,20 @@ func (p Principal) clone() Principal {
 		p.Agent = &agent
 	}
 	return p
+}
+
+// clone is c with slices and pointers of its own.
+func (c Capability) clone() Capability {
+	c.Subject = c.Subject.clone()
+	c.Audience = slices.Clone(c.Audience)
+	c.Caveats = c.Caveats.clone()
+	if c.Copies != nil {
+		copies := make([]CopyCeiling, len(c.Copies))
+		for i, cc := range c.Copies {
+			cc.RevocationID = slices.Clone(cc.RevocationID)
+			copies[i] = cc
+		}
+		c.Copies = copies
+	}
+	return c
 }

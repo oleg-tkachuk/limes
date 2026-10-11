@@ -40,7 +40,7 @@ func newExampleStack() exampleStack {
 		log.Fatal(err)
 	}
 	records := memstore.New[struct{}]()
-	signer, err := limes.NewEd25519Signer(kid, priv)
+	signer, err := limes.NewSigner(limes.SignerConfig{KeyID: kid, Key: priv})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -73,6 +73,15 @@ func newExampleStack() exampleStack {
 	}
 }
 
+// verified is the capability token grants, as the verifier accepts it.
+func (s exampleStack) verified(token string) limes.VerifiedCapability {
+	vc, err := s.verifier.Verify(context.Background(), limes.VerifyRequest{Token: token, Audience: exampleAudience})
+	if err != nil {
+		log.Fatal(err)
+	}
+	return vc
+}
+
 // issue mints a capability for an agent: get and share under corpus/public/,
 // 25.00 USD and 500 requests, for 15 minutes.
 func (s exampleStack) issue() (limes.Capability, string) {
@@ -103,7 +112,7 @@ func ExampleIssuer_Issue() {
 	kid, pub, priv := key.KeyID, key.Public, key.Private
 
 	records := memstore.New[struct{}]() // your Store
-	signer, _ := limes.NewEd25519Signer(kid, priv)
+	signer, _ := limes.NewSigner(limes.SignerConfig{KeyID: kid, Key: priv})
 	issuer, _ := limes.NewIssuer(limes.IssuerConfig{
 		Signer: signer, Store: records, IssuerName: exampleIssuerName,
 	})
@@ -132,7 +141,7 @@ func ExampleIssuer_Issue() {
 	}
 
 	got, err := verifier.Verify(ctx, limes.VerifyRequest{Token: token, Audience: exampleAudience})
-	fmt.Println(err == nil, got.ID == c.ID)
+	fmt.Println(err == nil, got.Capability().ID == c.ID)
 	_, err = verifier.Verify(ctx, limes.VerifyRequest{Token: token, Audience: "another-service"})
 	fmt.Println(errors.Is(err, limes.ErrAudienceMismatch))
 	// Output:
@@ -163,7 +172,10 @@ func ExampleCaveats_Check() {
 func ExampleIssuer_Delegate() {
 	ctx := context.Background()
 	s := newExampleStack()
-	parent, _ := s.issue()
+	_, token := s.issue()
+	// The orchestrator presents its token; the parent is what the verifier
+	// accepted.
+	parent := s.verified(token)
 
 	worker := limes.Principal{Type: limes.PrincipalAgent, TenantID: s.tenantID, Subject: "sub-worker"}
 	child, _, err := s.issuer.Delegate(ctx, limes.DelegateRequest{
@@ -178,7 +190,7 @@ func ExampleIssuer_Delegate() {
 			UnitCode:         "USD",
 		},
 	})
-	fmt.Println(err, child.ParentID == parent.ID)
+	fmt.Println(err, child.ParentID == parent.Capability().ID)
 
 	// Asking for more than the parent holds is refused.
 	_, _, err = s.issuer.Delegate(ctx, limes.DelegateRequest{
@@ -216,7 +228,7 @@ func ExampleAttenuate() {
 	}
 
 	got, err := s.verifier.Verify(ctx, limes.VerifyRequest{Token: narrow, Audience: exampleAudience})
-	fmt.Println(err, got.ID == c.ID, got.Caveats.Ops, got.Caveats.ResourcePrefixes)
+	fmt.Println(err, got.Capability().ID == c.ID, got.Capability().Caveats.Ops, got.Capability().Caveats.ResourcePrefixes)
 	// Output:
 	// <nil> true [get] [corpus/public/2026/]
 }
