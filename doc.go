@@ -60,9 +60,10 @@
 // (UnitCode, an ISO 4217 code; XXX for a budget that is not money), so spend
 // sums, compares and refunds exactly, with no rounding left to the consumer.
 //
-// Every read names what it reads — Store.Get a capability, Meter.GetUsage the
-// counters, TenantBudgets.GetTenantBudget a ceiling — so one type may
-// implement Store and UsageStore together, or each apart as memstore does.
+// Every read names what it reads — Store.GetRecord a capability,
+// MeterReader.GetUsage the counters, TenantBudgets.GetTenantBudget a ceiling —
+// so one type may implement Store and UsageStore together, or each apart as
+// memstore does.
 //
 // # No-transaction mode
 //
