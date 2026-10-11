@@ -217,7 +217,7 @@ func (v *StandardVerifier) Verify(ctx context.Context, req VerifyRequest) (Capab
 
 	var cap *Capability
 	var biscuitIDs [][]byte // set for a Biscuit, from its verified chain
-	if IsBiscuit(token) {
+	if isBiscuit(token) {
 		if !v.cfg.AcceptBiscuit {
 			return Capability{}, fmt.Errorf("%w: Biscuit tokens are not accepted here", ErrInvalidToken)
 		}
@@ -352,8 +352,8 @@ func (v *StandardVerifier) verifySigned(ctx context.Context, token string) (*Cap
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
-	if header.Typ != TokenType {
-		return nil, fmt.Errorf("%w: typ %q is not %q", ErrInvalidToken, header.Typ, TokenType)
+	if header.Typ != tokenType {
+		return nil, fmt.Errorf("%w: typ %q is not %q", ErrInvalidToken, header.Typ, tokenType)
 	}
 	if header.Kid == "" {
 		return nil, fmt.Errorf("%w: header missing kid", ErrInvalidToken)

@@ -54,7 +54,7 @@ func biscuitFixture(t *testing.T) (*Issuer, *StandardVerifier, *memStore, Capabi
 
 func TestBiscuitVerifiesAsItsCapability(t *testing.T) {
 	_, v, _, cap, token := biscuitFixture(t)
-	if !IsBiscuit(token) {
+	if !isBiscuit(token) {
 		t.Fatal("Biscuit form not recognised")
 	}
 	got, err := v.Verify(context.Background(), VerifyRequest{Token: token, Audience: audienceData})

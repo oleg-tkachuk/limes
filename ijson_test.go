@@ -33,7 +33,7 @@ func TestTokenIntegersStayWithinIJSON(t *testing.T) {
 
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	v := verifierFor(t, pub, VerifierConfig{})
-	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenType}
+	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": tokenType}
 	for name, mod := range map[string]func(map[string]any){
 		"exp":       func(c map[string]any) { c["exp"] = int64(MaxIJSONInteger) + 1 },
 		"limes_gen": func(c map[string]any) { c["limes_gen"] = int64(MaxIJSONInteger) + 1 },

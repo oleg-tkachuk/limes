@@ -33,7 +33,7 @@ flowchart LR
         cache["CachedRevocationChecker<br/>TTL · bounded, oldest out · single-flight"]
         bcache["CachedBiscuitRevocationChecker<br/>per token · TTL · bounded · single-flight"]
         attenuate["<b>Attenuate</b><br/>offline · no key"]
-        metering["WithMetering<br/>OTel counters · spend histogram<br/>WithMeterProvider · WithTenantAttribute"]
+        metering["Instrument<br/>OTel counters · spend histogram<br/>WithMeterProvider · WithTenantAttribute"]
         static["jwks.Static<br/>SetKey · RemoveKey"]
         remote["jwks.Remote<br/>ETag · Cache-Control · MaxStale"]
         dpop["dpop.Verifier<br/>VerifierConfig.DPoP · dpop.Sign"]
@@ -160,7 +160,7 @@ flowchart TB
     pre{"token and audience set"}
     size{"len ≤ MaxTokenBytes"}
     form{"a Biscuit?"}
-    hdr{"header: strict parse<br/>alg = Ed25519 · typ = TokenType · kid set"}
+    hdr{"header: strict parse<br/>alg = Ed25519 · typ = limes-cap-v3+jwt · kid set"}
     key{"KeyResolver.PublicKey(kid)"}
     sig{"Ed25519 signature"}
     claims{"claims: strict parse — no unknown or duplicate member<br/>integers within ±(2^53 − 1) · sub = principal's subject"}
@@ -580,9 +580,9 @@ the last of a budget.
 flowchart TB
     req(["ChargeRequest<br/>CapabilityID · TenantID · Amount · MaxBudget · UnitCode · Copies<br/>ExternalRef · Overrun"])
     sreq(["SettleRequest<br/>ReservationID · Amount · MaxBudget · Overrun"])
-    sval{"ValidateAmount · Overrun.Validate<br/>ReservationID not zero"}
+    sval{"Nanos.Validate · Overrun.Validate<br/>ReservationID not zero"}
     hold{"reservation open"}
-    val{"ValidateAmount · Overrun.Validate<br/>ValidateExternalRef · NormaliseUnitCode"}
+    val{"Nanos.Validate · Overrun.Validate<br/>ValidateExternalRef · NormaliseUnitCode"}
     seen{"ExternalRef already charged<br/>to this capability"}
     same{"same Amount · UnitCode · TenantID"}
 

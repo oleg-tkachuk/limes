@@ -62,7 +62,7 @@ func TestBiscuitRevocationCacheCoalescesConcurrentMisses(t *testing.T) {
 func TestRevocationCachesSweep(t *testing.T) {
 	ctx := context.Background()
 	now := time.Unix(1_800_000_000, 0)
-	clock := WithCacheClock(func() time.Time { return now })
+	clock := withCacheClock(func() time.Time { return now })
 	caps := NewCachedRevocationChecker(newMemStore(), cacheTTL, clock)
 	copies := NewCachedBiscuitRevocationChecker(&countingBiscuitLookup{}, cacheTTL, clock)
 
@@ -238,7 +238,7 @@ func TestRevocationCacheOrderStaysBounded(t *testing.T) {
 	const bound, churn = 10, 10_000
 	ctx := context.Background()
 	clock := &mutableClock{now: time.Unix(0, 0)}
-	c := NewCachedRevocationChecker(&countingLookup{}, cacheTTL, WithMaxEntries(bound), WithCacheClock(func() time.Time { return clock.now }))
+	c := NewCachedRevocationChecker(&countingLookup{}, cacheTTL, WithMaxEntries(bound), withCacheClock(func() time.Time { return clock.now }))
 	ids := make([]uuid.UUID, bound/2)
 	for i := range ids {
 		ids[i] = uuid.New()

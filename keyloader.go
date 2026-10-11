@@ -16,7 +16,7 @@ const pemTypePrivateKey = "PRIVATE KEY"
 
 // LoadPrivateKey reads an Ed25519 private key from a PEM-encoded
 // PKCS#8 file at the supplied path. Production wires this against a
-// Secret-mounted RO volume; dev calls GenerateEd25519Keypair instead
+// Secret-mounted RO volume; dev calls GenerateKey instead
 // and skips this path entirely.
 //
 // Only PKCS#8 under PEM type "PRIVATE KEY" is read — not a raw seed, not
@@ -70,10 +70,11 @@ func LoadOrGenerateKey(path, kid string) (SigningKey, error) {
 	var priv ed25519.PrivateKey
 	generated := path == ""
 	if generated {
-		var err error
-		if _, _, priv, err = GenerateEd25519Keypair(); err != nil {
+		key, err := GenerateKey()
+		if err != nil {
 			return SigningKey{}, err
 		}
+		priv = key.Private
 	} else {
 		var err error
 		if priv, err = LoadPrivateKey(path); err != nil {

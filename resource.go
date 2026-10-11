@@ -20,7 +20,7 @@ import (
 // request-time enforcement both go through it, so the two can never disagree
 // about what a prefix reaches.
 func MatchResource(prefix, uri string) bool {
-	if prefix == "" || !strings.HasPrefix(uri, prefix) || HasDotSegment(uri) {
+	if prefix == "" || !strings.HasPrefix(uri, prefix) || hasDotSegment(uri) {
 		return false
 	}
 	if len(uri) == len(prefix) || strings.HasSuffix(prefix, "/") {
@@ -32,12 +32,12 @@ func MatchResource(prefix, uri string) bool {
 // dotSegmentEncoded is a "." percent-encoded, in lower case.
 const dotSegmentEncoded = "%2e"
 
-// HasDotSegment reports whether s has a "/"-separated segment that is "." or
+// hasDotSegment reports whether s has a "/"-separated segment that is "." or
 // "..", counting "%2e" (any case) as a dot — the segments RFC 3986 resolves
 // away, which make a resource's text name somewhere other than it reads.
 // Caveats.Validate refuses a resource with one, and no request naming one
 // matches a restricted capability.
-func HasDotSegment(s string) bool {
+func hasDotSegment(s string) bool {
 	for seg := range strings.SplitSeq(s, "/") {
 		switch strings.ReplaceAll(strings.ToLower(seg), dotSegmentEncoded, ".") {
 		case ".", "..":
@@ -56,14 +56,14 @@ func (c Caveats) RestrictsResources() bool {
 // AllowsResource reports whether uri is reachable under the resource caveats:
 // unrestricted caveats allow any uri; restricted ones require an
 // exact ResourceURIs entry or a covering ResourcePrefixes entry. An empty uri,
-// or one with a dot segment (HasDotSegment), is never allowed by restricted
+// or one with a dot segment (hasDotSegment), is never allowed by restricted
 // caveats — an operation that cannot name what
 // it touches cannot be shown to stay inside the scope.
 func (c Caveats) AllowsResource(uri string) bool {
 	if !c.RestrictsResources() {
 		return true
 	}
-	if uri == "" || HasDotSegment(uri) {
+	if uri == "" || hasDotSegment(uri) {
 		return false
 	}
 	if slices.Contains(c.ResourceURIs, uri) {

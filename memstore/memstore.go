@@ -516,7 +516,7 @@ func (s *UsageStore[TX]) Charge(
 	req limes.ChargeRequest,
 	onCharged func(ctx context.Context, tx TX) error,
 ) (limes.ChargeReceipt, error) {
-	if err := limes.ValidateAmount(req.Amount); err != nil {
+	if err := req.Amount.Validate(); err != nil {
 		return limes.ChargeReceipt{}, err
 	}
 	if err := req.Overrun.Validate(); err != nil {
@@ -830,7 +830,7 @@ func (s *UsageStore[TX]) checkRangeLocked(c ceilingCheck) error {
 
 // Reserve holds an amount against every ceiling Charge checks.
 func (s *UsageStore[TX]) Reserve(_ context.Context, req limes.ReserveRequest) (limes.Reservation, error) {
-	if err := limes.ValidateAmount(req.Amount); err != nil {
+	if err := req.Amount.Validate(); err != nil {
 		return limes.Reservation{}, err
 	}
 	if req.TenantID == uuid.Nil {
@@ -899,7 +899,7 @@ func (s *UsageStore[TX]) Settle(
 	req limes.SettleRequest,
 	onCharged func(ctx context.Context, tx TX) error,
 ) (limes.ChargeReceipt, error) {
-	if err := limes.ValidateAmount(req.Amount); err != nil {
+	if err := req.Amount.Validate(); err != nil {
 		return limes.ChargeReceipt{}, err
 	}
 	if err := req.Overrun.Validate(); err != nil {
@@ -1017,7 +1017,7 @@ func (s *UsageStore[TX]) ReleaseExpired(_ context.Context) (int64, error) {
 
 // Refund returns spend from one ledger entry to the counters it debited.
 func (s *UsageStore[TX]) Refund(_ context.Context, req limes.RefundRequest) (limes.RefundReceipt, error) {
-	if err := limes.ValidateAmount(req.Amount); err != nil {
+	if err := req.Amount.Validate(); err != nil {
 		return limes.RefundReceipt{}, err
 	}
 	s.mu.Lock()
@@ -1102,7 +1102,7 @@ func (s *UsageStore[TX]) GetTenantBudget(_ context.Context, tenantID uuid.UUID) 
 }
 
 func (s *UsageStore[TX]) SetTenantBudget(_ context.Context, args limes.SetTenantBudgetRequest) (limes.TenantBudget, error) {
-	if err := limes.ValidateAmount(args.MaxBudgetAmount); err != nil {
+	if err := args.MaxBudgetAmount.Validate(); err != nil {
 		return limes.TenantBudget{}, err
 	}
 	s.mu.Lock()

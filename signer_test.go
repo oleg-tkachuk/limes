@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/oleg-tkachuk/limes/internal/jose"
 )
 
 // TestSign_RoundTrip confirms Sign produces a token that Decode parses
@@ -57,11 +59,11 @@ func TestSign_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
-	if err := VerifySignature(token, pub); err != nil {
+	if err := verifySignature(token, pub); err != nil {
 		t.Fatalf("verify signature: %v", err)
 	}
 
-	got, err := Decode(token)
+	got, err := decode(token)
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
@@ -151,7 +153,7 @@ func TestSign_TamperDetection(t *testing.T) {
 	// Flip a byte in the middle of the payload segment.
 	mid := len(token) / 2
 	tampered := token[:mid] + flipByte(token[mid]) + token[mid+1:]
-	if err := VerifySignature(tampered, pub); !errors.Is(err, ErrInvalidToken) {
+	if err := verifySignature(tampered, pub); !errors.Is(err, ErrInvalidToken) {
 		t.Fatalf("tampered token verified: err=%v", err)
 	}
 }
@@ -365,4 +367,23 @@ func TestIssuerSignsUnderTheCallersContext(t *testing.T) {
 	if _, _, err := issuer.Issue(cancelled, req); !errors.Is(err, context.Canceled) {
 		t.Errorf("Issue under a cancelled context: err = %v, want context.Canceled", err)
 	}
+}
+
+// verifySignature checks token's signature alone, as the verifier's first
+// gate does.
+func verifySignature(token string, pub ed25519.PublicKey) error {
+	parts, err := jose.Split(token)
+	if err != nil {
+		return err
+	}
+	return verifyParts(parts, pub)
+}
+
+// decode reads token's claims without checking it.
+func decode(token string) (Capability, error) {
+	c, err := decodeToken(token)
+	if err != nil {
+		return Capability{}, err
+	}
+	return c.(Capability), nil
 }

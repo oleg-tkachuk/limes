@@ -21,11 +21,11 @@ import (
 // name kids, issuers or stores, which is for the server's log, not the
 // client.
 
-// WWWAuthenticateHeader is the response header a challenge travels in.
-const WWWAuthenticateHeader = "WWW-Authenticate"
+// headerWWWAuthenticate is the response header a challenge travels in.
+const headerWWWAuthenticate = "WWW-Authenticate"
 
-// MediaTypeProblem is RFC 9457 §3's media type for problem details.
-const MediaTypeProblem = "application/problem+json"
+// mediaTypeProblem is RFC 9457 §3's media type for problem details.
+const mediaTypeProblem = "application/problem+json"
 
 // problemTypeBase prefixes the problem type URIs this module defines.
 const problemTypeBase = "https://github.com/oleg-tkachuk/limes/problems/"
@@ -168,7 +168,7 @@ func authParam(name, value string) string {
 func WriteErrorResponse(w http.ResponseWriter, resp ErrorResponse) {
 	h := w.Header()
 	for _, c := range resp.Challenges {
-		h.Add(WWWAuthenticateHeader, c)
+		h.Add(headerWWWAuthenticate, c)
 	}
 	if resp.DPoPNonce != "" {
 		h.Set(dpop.NonceHeader, resp.DPoPNonce)
@@ -178,7 +178,7 @@ func WriteErrorResponse(w http.ResponseWriter, resp ErrorResponse) {
 		http.Error(w, http.StatusText(resp.Status), resp.Status)
 		return
 	}
-	h.Set(httpx.HeaderContentType, MediaTypeProblem)
+	h.Set(httpx.HeaderContentType, mediaTypeProblem)
 	h.Set(httpx.HeaderContentLength, strconv.Itoa(len(body)))
 	// No store: a refusal is about this request's credentials.
 	h.Set(httpx.HeaderCacheControl, httpx.DirectiveNoStore)

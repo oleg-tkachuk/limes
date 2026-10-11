@@ -27,11 +27,11 @@ const (
 )
 
 // meteredStore is a metered memstore whose measurements reader collects.
-func meteredStore(t *testing.T, opts ...limes.MeteringOption) (limes.UsageStore[struct{}], *sdkmetric.ManualReader) {
+func meteredStore(t *testing.T, opts ...limes.InstrumentOption) (limes.UsageStore[struct{}], *sdkmetric.ManualReader) {
 	t.Helper()
 	reader := sdkmetric.NewManualReader()
 	opts = append(opts, limes.WithMeterProvider(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))))
-	usage, err := limes.WithMetering[struct{}](memstore.NewUsage[struct{}](nil), opts...)
+	usage, err := limes.Instrument[struct{}](memstore.NewUsage[struct{}](nil), opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,14 +191,14 @@ type hiddenCopies struct {
 }
 
 // The decorator reads copy counters exactly when the store it wraps does.
-func TestWithMeteringKeepsCopyUsage(t *testing.T) {
-	if _, err := limes.WithMetering[struct{}](nil); err == nil {
-		t.Fatal("WithMetering(nil) wrapped nothing without an error")
+func TestInstrumentKeepsCopyUsage(t *testing.T) {
+	if _, err := limes.Instrument[struct{}](nil); err == nil {
+		t.Fatal("Instrument(nil) wrapped nothing without an error")
 	}
 	inner := memstore.NewUsage[struct{}](nil)
 	wrap := func(u limes.UsageStore[struct{}]) limes.UsageStore[struct{}] {
 		t.Helper()
-		m, err := limes.WithMetering(u)
+		m, err := limes.Instrument(u)
 		if err != nil {
 			t.Fatal(err)
 		}

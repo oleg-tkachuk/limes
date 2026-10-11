@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes/internal/jose"
+	"github.com/oleg-tkachuk/limes/internal/link"
 )
 
 // Signer mints capability tokens with an Ed25519 key; verifiers pick up
@@ -158,7 +159,7 @@ func (s *ed25519Signer) Sign(_ context.Context, c Capability) (string, error) {
 		return "", errors.New("limes: ExpiresAt must be after IssuedAt")
 	}
 
-	header := jwtHeader{Alg: jose.AlgEd25519, Kid: s.keyID, Typ: TokenType}
+	header := jwtHeader{Alg: jose.AlgEd25519, Kid: s.keyID, Typ: tokenType}
 	claims := jwtClaims{
 		Issuer:     c.Issuer,
 		Subject:    c.Subject.Subject,
@@ -208,12 +209,12 @@ func (s *ed25519Signer) Sign(_ context.Context, c Capability) (string, error) {
 	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig), nil
 }
 
-// TokenType is the JWT "typ" header every capability token carries. The
+// tokenType is the JWT "typ" header every capability token carries. The
 // verifier requires it, so a different kind of EdDSA JWT signed by the same
 // key — an ID token, another product's token — cannot be presented as a
 // capability. It names the format's version: a token of another version is
 // refused here, before a claim of it is read under the wrong schema.
-const TokenType = "limes-cap-v3+jwt" //nolint:gosec // G101: a JWT type label, not a credential
+const tokenType = "limes-cap-v3+jwt" //nolint:gosec // G101: a JWT type label, not a credential
 
 func parseHeader(seg string) (jwtHeader, error) {
 	raw, err := base64.RawURLEncoding.DecodeString(seg)
@@ -226,7 +227,7 @@ func parseHeader(seg string) (jwtHeader, error) {
 	}
 	// Only the fully-specified identifier (RFC 9864): a capability token is
 	// this module's own, and none was ever written with another under this
-	// TokenType.
+	// tokenType.
 	if h.Alg != jose.AlgEd25519 {
 		return jwtHeader{}, fmt.Errorf("limes: unexpected alg %q (want %s)", h.Alg, jose.AlgEd25519)
 	}
@@ -282,11 +283,11 @@ func parseClaims(seg string) (*Capability, error) {
 	return cap, nil
 }
 
-// Decode parses a compact-form token without verifying the signature
-// or applying time / audience / revocation gates. Use only for tooling
-// that displays a token; production code goes through Verifier.Verify,
-// which never reads a claim before the signature has checked out.
-func Decode(token string) (Capability, error) {
+func init() { link.DecodeToken = decodeToken }
+
+// decodeToken reads a compact token's header and claims without checking
+// its signature: inspect.Decode, for tooling that displays a token.
+func decodeToken(token string) (any, error) {
 	parts, err := jose.Split(token)
 	if err != nil {
 		return Capability{}, err
@@ -301,28 +302,9 @@ func Decode(token string) (Capability, error) {
 	return *c, nil
 }
 
-// VerifySignature checks the Ed25519 signature on a compact token
-// against the supplied public key. Time / audience / revocation gates
-// are NOT applied here — Verify in the production verifier wraps this
-// call with the full check chain.
-func VerifySignature(token string, pub ed25519.PublicKey) error {
-	parts, err := jose.Split(token)
-	if err != nil {
-		return err
-	}
-	return verifyParts(parts, pub)
-}
-
 func verifyParts(parts jose.Parts, pub ed25519.PublicKey) error {
-	if len(pub) != ed25519.PublicKeySize {
-		return fmt.Errorf("%w: public key wrong length %d", ErrInvalidToken, len(pub))
-	}
-	sig, err := base64.RawURLEncoding.DecodeString(parts.Signature)
-	if err != nil {
-		return fmt.Errorf("%w: decode sig: %w", ErrInvalidToken, err)
-	}
-	if !ed25519.Verify(pub, []byte(parts.SigningInput()), sig) {
-		return ErrInvalidToken
+	if err := jose.VerifyEd25519(parts, pub); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
 	return nil
 }

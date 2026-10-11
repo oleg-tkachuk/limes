@@ -64,9 +64,9 @@ var ErrCopyCountersNotMetered = fmt.Errorf("%w: copy limits need a verifier with
 // ErrInvalidToken: the token is not one this verifier accepts.
 var ErrBiscuitAttenuation error = &familyError{"limes: invalid Biscuit attenuation", ErrInvalidToken}
 
-// IsBiscuit reports whether token is in the Biscuit form rather than a JWT:
+// isBiscuit reports whether token is in the Biscuit form rather than a JWT:
 // a JWT has exactly two dots, base64url has none.
-func IsBiscuit(token string) bool {
+func isBiscuit(token string) bool {
 	return token != "" && !strings.Contains(token, ".")
 }
 
@@ -284,7 +284,7 @@ func sealedToken(authority decodedBlock) (string, error) {
 		return "", errors.New("biscuit authority is not a sealed capability")
 	}
 	inner, ok := authority.facts[0].term.(string)
-	if !ok || IsBiscuit(inner) {
+	if !ok || isBiscuit(inner) {
 		return "", errors.New("biscuit authority is not a sealed capability")
 	}
 	return inner, nil
@@ -468,7 +468,7 @@ func biscuitFact(name string, term biscuit.Term) biscuit.Fact {
 }
 
 func parseBiscuit(token string) (*biscuit.Biscuit, error) {
-	if !IsBiscuit(token) {
+	if !isBiscuit(token) {
 		return nil, fmt.Errorf("%w: not a Biscuit token", ErrInvalidToken)
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(token)

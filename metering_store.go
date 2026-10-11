@@ -16,15 +16,15 @@ type meteringStore[TX any] struct {
 	in    *meteringInstruments
 }
 
-// WithMetering wraps a UsageStore in the metering decorator. Its instruments
+// Instrument wraps a UsageStore in OpenTelemetry instruments. Its instruments
 // are created on the global MeterProvider unless WithMeterProvider names
 // another, and carry no tenant unless WithTenantAttribute asks for it.
 //
 // The result implements CopyUsageReader exactly when inner does, so wrapping
 // a store never hides what it can read.
-func WithMetering[TX any](inner UsageStore[TX], opts ...MeteringOption) (UsageStore[TX], error) {
+func Instrument[TX any](inner UsageStore[TX], opts ...InstrumentOption) (UsageStore[TX], error) {
 	if inner == nil {
-		return nil, errors.New("limes: WithMetering needs a UsageStore")
+		return nil, errors.New("limes: Instrument needs a UsageStore")
 	}
 	var cfg meteringConfig
 	for _, o := range opts {

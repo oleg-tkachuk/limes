@@ -91,7 +91,7 @@ type BiscuitCopy struct {
 // not checked: a copy can be revoked whatever its state. Nor is MeterCopies:
 // a copy carrying limits is named, and can be revoked, on any verifier.
 func (v *StandardVerifier) BiscuitCopy(ctx context.Context, token string) (BiscuitCopy, error) {
-	if !IsBiscuit(token) {
+	if !isBiscuit(token) {
 		return BiscuitCopy{}, fmt.Errorf("%w: not a Biscuit token", ErrInvalidToken)
 	}
 	if len(token) > v.cfg.MaxTokenBytes {

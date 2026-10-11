@@ -92,9 +92,10 @@ guess. A document that is not JSON, or names a member twice, is refused.
 
 ### Inspect a token without trusting it
 
-`Decode` reads a JWT's claims, refusing only one that is malformed — it
-checks no signature, time, audience or revocation; `VerifySignature` checks
-only its signature against one key. Both are for tooling — showing what a
+`inspect.Decode` reads a JWT's claims, refusing only one that is malformed —
+it checks no signature, time, audience or revocation; `inspect.VerifySignature`
+checks only its signature against one key. They live in a package of their
+own so they are never mistaken for the API that authorises. Both are for tooling — showing what a
 token grants, or which key signed it. Neither applies expiry, audience or
 revocation, so never authorise a request on either: that is `Verify`.
 
@@ -473,7 +474,7 @@ until `ReleaseExpired` runs.
 
 ## Observe the meter
 
-`WithMetering` wraps a `UsageStore` in OpenTelemetry instruments: charge and
+`Instrument` wraps a `UsageStore` in OpenTelemetry instruments: charge and
 settle attempts, reservations and request bumps counted by outcome
 (`allowed`, `overrun`, `cap_exceeded`, `tenant_exceeded`, `limit_exceeded`,
 `error`); amounts charged and refunded, and a capability's spend after each
@@ -481,7 +482,7 @@ charge, by `unit_code`. Instruments are created per store, and an error
 creating them is returned:
 
 ```go
-usage, err := limes.WithMetering(store,
+usage, err := limes.Instrument(store,
     limes.WithMeterProvider(provider), // default: the global provider
     limes.WithTenantAttribute(),       // opt-in: one series per tenant
 )

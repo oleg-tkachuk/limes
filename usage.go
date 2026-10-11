@@ -243,7 +243,7 @@ type ChargeRequest struct {
 	// TenantID is the capability's tenant: its aggregate ceiling applies
 	// and the ledger row is filed under it. Required.
 	TenantID uuid.UUID
-	// Amount is the cost, in UnitCode. Within 0..MaxNanos (ValidateAmount).
+	// Amount is the cost, in UnitCode. Within 0..MaxNanos (Nanos.Validate).
 	Amount Nanos
 	// MaxBudget is the capability's own ceiling, from the verified token.
 	// 0 = unlimited.
@@ -348,7 +348,7 @@ type ReserveRequest struct {
 	CapabilityID uuid.UUID
 	// TenantID is the capability's tenant. Required.
 	TenantID uuid.UUID
-	// Amount to hold, in UnitCode. Within 0..MaxNanos (ValidateAmount).
+	// Amount to hold, in UnitCode. Within 0..MaxNanos (Nanos.Validate).
 	Amount Nanos
 	// MaxBudget is the capability's own ceiling, from the verified token.
 	MaxBudget Nanos
@@ -386,7 +386,7 @@ type Reservation struct {
 // SettleRequest is the input to Meter.Settle.
 type SettleRequest struct {
 	ReservationID uuid.UUID
-	// Amount is the actual cost to charge. Within 0..MaxNanos (ValidateAmount).
+	// Amount is the actual cost to charge. Within 0..MaxNanos (Nanos.Validate).
 	Amount Nanos
 	// MaxBudget is the capability's own ceiling, from the verified token.
 	MaxBudget Nanos
@@ -610,16 +610,6 @@ func ValidateExternalRef(ref string) error {
 		if !unicode.IsPrint(r) {
 			return fmt.Errorf("%w: external ref %q contains a non-printable character", ErrInvalidRequest, ref)
 		}
-	}
-	return nil
-}
-
-// ValidateAmount reports whether a charge or refund amount is usable: not
-// negative and at most MaxNanos. Implementations call it before touching
-// state.
-func ValidateAmount(amount Nanos) error {
-	if amount < 0 || amount > MaxNanos {
-		return fmt.Errorf("%w: %s is outside 0..%s", ErrInvalidAmount, amount, MaxNanos)
 	}
 	return nil
 }

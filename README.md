@@ -57,7 +57,8 @@ go get github.com/oleg-tkachuk/limes@latest
 ```go
 ctx := context.Background()
 tenantID, runID := uuid.New(), uuid.New() // github.com/google/uuid
-kid, pub, priv, _ := limes.GenerateEd25519Keypair()
+key, _ := limes.GenerateKey()
+kid, pub, priv := key.KeyID, key.Public, key.Private
 
 records := memstore.New[struct{}]()          // your Store
 usage   := memstore.NewUsage[struct{}](records)
@@ -113,7 +114,7 @@ _, err = usage.Charge(ctx, limes.ChargeRequest{
 | **Delegate** | `Issuer.Delegate` issues a child that may only be narrower — operations, resources, limits, audience, and a validity window that starts no earlier and ends no later than the parent's; anything wider is `ErrDelegationTooWide`. |
 | **Attenuate offline** | The Biscuit v3 form of a capability can be narrowed by its holder with no key and no network; each copy can get its own limits and be revoked on its own. |
 | **Bind to a key** | RFC 9449 DPoP: `Verify` refuses a key-bound capability without a fresh proof from that key, presented under the `DPoP` scheme; server nonces (`dpop.HMACNonces`) work across replicas without shared state. |
-| **Meter** | Requests and spend count against the capability, every ancestor and the tenant, atomically with your own side effect. Reserve an estimate, settle the actual cost, refund a charge. Amounts are exact integers of billionths of an ISO 4217 unit. `WithMetering` adds OpenTelemetry instruments. |
+| **Meter** | Requests and spend count against the capability, every ancestor and the tenant, atomically with your own side effect. Reserve an estimate, settle the actual cost, refund a charge. Amounts are exact integers of billionths of an ISO 4217 unit. `Instrument` adds OpenTelemetry instruments. |
 | **Revoke** | One call stops a capability and everything delegated from it; verifiers learn of it within a cache TTL, or at once on `Clear`. |
 | **Answer refusals** | `ErrorResponse` maps a refusal to its status, an RFC 6750 / RFC 9449 `WWW-Authenticate` challenge and an RFC 9457 problem body, without the error's own text. |
 
@@ -167,7 +168,10 @@ read its claims under the wrong schema.
 
 | Path | Holds |
 |------|-------|
-| [`/`](.) | the `limes` package: issuer, verifier, caveats, Biscuit, DPoP, metering, contracts |
+| [`/`](.) | the `limes` package: issuer, verifier, caveats, Biscuit, metering, contracts |
+| [jwks/](jwks) | key sets (RFC 7517): the JWKS document and handler, remote and static key resolvers |
+| [dpop/](dpop) | proof of possession (RFC 9449): signing and checking proofs, replay cache, server nonces |
+| [inspect/](inspect) | reading a token without verifying it, for tooling |
 | [memstore/](memstore) | the in-memory reference implementation of every storage contract |
 | [storetest/](storetest), [metertest/](metertest) | conformance suites to run from your own store's tests |
 | [example/](example) | the five-minute walkthrough as a runnable program |
