@@ -76,6 +76,10 @@ type refusal struct {
 // refusals is checked in order: the most specific kind first, since a DPoP
 // refusal also matches ErrInvalidSignature.
 var refusals = []refusal{
+	// Before the token's own refusals: an unreachable key set is wrapped
+	// in ErrInvalidSignature, and is not the token's fault.
+	{http.StatusServiceUnavailable, "", false, "keys-unavailable", "The issuer's keys cannot be fetched",
+		[]error{ErrJWKSUnavailable}},
 	{http.StatusBadRequest, codeInvalidRequest, false, "malformed-authorization", "The Authorization header is malformed",
 		[]error{ErrMalformedAuthorization}},
 	{http.StatusUnauthorized, codeUseDPoPNonce, true, "dpop-nonce-required", "A DPoP proof with the server's nonce is required",

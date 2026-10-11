@@ -592,8 +592,9 @@ if err != nil {
 A malformed `Authorization` header is 400; a bad token or proof is 401, with a
 `Bearer` or `DPoP` challenge naming the error code (and `algs` for DPoP); a
 refused operation is 403 `insufficient_scope`; an exhausted budget or request
-limit is 403 with no challenge; anything else, a store outage included, is
-500. A refusal for want of a nonce carries a fresh one in `DPoP-Nonce`. The
+limit is 403 with no challenge; an issuer's key set out of reach past
+`MaxStale` is 503 — the server's trouble, not the token's; anything else, a
+store outage included, is 500. A refusal for want of a nonce carries a fresh one in `DPoP-Nonce`. The
 body is `application/problem+json` with a type per kind of refusal and fixed
 text — the error's own message, which can name kids or stores, stays in your
 log. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).

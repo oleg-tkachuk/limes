@@ -359,6 +359,7 @@ error's own text never reaches the client.
 | `ErrAuthSchemeMismatch` · `ErrInvalidSignature` · `ErrExpired` · `ErrNotYetValid` · `ErrRevoked` · `ErrAudienceMismatch` | 401 | `error="invalid_token"` under the client's scheme (Bearer when unknown) |
 | `ErrCaveatViolation` | 403 | `error="insufficient_scope"` |
 | `ErrBudgetExceeded` · `ErrTenantBudgetExceeded` · `ErrRequestLimitExceeded` | 403 | none |
+| `ErrJWKSUnavailable` (matched first, though it is wrapped in `ErrInvalidSignature`) | 503 | none |
 | anything else — a store outage, `ErrEffectConflict` | 500 | none |
 
 A verifier with DPoP configured adds a bare `DPoP algs="…"` challenge beside a
