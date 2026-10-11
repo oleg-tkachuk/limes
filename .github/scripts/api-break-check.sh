@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# api-break-check.sh — does a change break the Go API without saying so?
+#
+# Usage: api-break-check.sh <base> <head>
+#
+# Compares the exported API of the module at the merge base of <base> and
+# <head> with the one at <head>, using apidiff. An incompatible change passes
+# only when a commit in base..head marks itself breaking — `type!:` or
+# `type(scope)!:` in its subject, or a `BREAKING CHANGE:` footer — since that
+# marker is what makes semantic-release cut the version a consumer needs to
+# notice. Without it the break ships as a patch or a feature.
+#
+# A commit marked breaking with no API change passes: the wire format and
+# behaviour can break without the API doing so.
+#
+# Run from the module's root. APIDIFF overrides the apidiff command; by
+# default it is the version tools/go.mod pins.
+
+set -euo pipefail
+
+if [ "$#" -ne 2 ]; then
+    echo "usage: $0 <base> <head>" >&2
+    exit 2
+fi
+base="$1"
+head="$2"
+
+root="$(git rev-parse --show-toplevel)"
+read -r -a apidiff <<<"${APIDIFF:-go tool -modfile=$root/tools/go.mod apidiff}"
+module="$(go mod edit -json | jq -r .Module.Path)"
+
+# The subject marker and the footer Conventional Commits 1.0 define.
+SUBJECT_MARK='^[a-z]+(\([^)]*\))?!: '
+FOOTER_MARK='^BREAKING[ -]CHANGE: '
+
+work="$(mktemp -d)"
+cleanup() {
+    local tree
+    for tree in base head; do
+        git worktree remove --force "$work/$tree" >/dev/null 2>&1 || true
+    done
+    rm -rf "$work"
+}
+trap cleanup EXIT
+
+merge_base="$(git merge-base "$base" "$head")"
+git worktree add --quiet --detach "$work/base" "$merge_base"
+(cd "$work/base" && "${apidiff[@]}" -m -w "$work/base.api" "$module")
+git worktree add --quiet --detach "$work/head" "$head"
+breaks="$(cd "$work/head" && "${apidiff[@]}" -m -incompatible "$work/base.api" "$module")"
+
+if [ -z "$breaks" ]; then
+    echo "api-break-check: no incompatible API change"
+    exit 0
+fi
+
+printf 'Incompatible API changes since %s:\n%s\n' "$merge_base" "$breaks"
+
+marked=false
+while IFS= read -r -d '' message; do
+    if grep -qE "$SUBJECT_MARK" <<<"$(head -n 1 <<<"$message")" ||
+        grep -qE "$FOOTER_MARK" <<<"$message"; then
+        marked=true
+        break
+    fi
+done < <(git log --format='%B%x00' "$merge_base..$head")
+
+if [ "$marked" = true ]; then
+    echo "api-break-check: a commit marks the change breaking"
+    exit 0
+fi
+echo "api-break-check: no commit marks these changes breaking — add ! to the subject or a BREAKING CHANGE: footer" >&2
+exit 1
