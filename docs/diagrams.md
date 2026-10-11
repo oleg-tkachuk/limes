@@ -16,8 +16,8 @@ The module ships the primitive and its contracts; the consumer supplies the
 storage behind them. `memstore` is the in-memory reference implementation; a
 store over a database is the consumer's own. The two Biscuit contracts are
 needed only by a consumer that accepts the Biscuit form, and `dpop.ReplayCache` and
-`dpop.Nonces` only by one that binds capabilities to keys. `storetest` and `metertest` check a
-store against its contract from the store's own tests.
+`dpop.Nonces` only by one that binds capabilities to keys. `storetest`, `metertest`,
+`dpoptest` and `jwkstest` check an implementation against its contract from its own tests.
 
 ```mermaid
 flowchart LR
@@ -37,7 +37,7 @@ flowchart LR
         static["jwks.Static<br/>SetKey · RemoveKey"]
         remote["jwks.Remote<br/>ETag · Cache-Control · MaxStale"]
         dpop["dpop.Verifier<br/>VerifierConfig.DPoP · dpop.Sign"]
-        suites["storetest · metertest<br/>conformance suites"]
+        suites["storetest · metertest<br/>dpoptest · jwkstest<br/>conformance suites"]
         jwksh["jwks.NewHandler<br/>ETag · max-age"]
         nonce["dpop.HMACNonces<br/>stateless DPoP nonces"]
     end
@@ -80,6 +80,9 @@ flowchart LR
     jwksh -- "serves" --> jwks
     suites -. "check" .-> store
     suites -. "check" .-> usage
+    suites -. "check" .-> keys
+    suites -. "check" .-> replay
+    suites -. "check" .-> nonces
     store --> impl
     usage --> impl
     brev --> impl

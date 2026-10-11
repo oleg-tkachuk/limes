@@ -28,7 +28,9 @@
 // without the rest: [github.com/oleg-tkachuk/limes/jwks] for key sets (RFC
 // 7517) and [github.com/oleg-tkachuk/limes/dpop] for proof of possession
 // (RFC 9449). [github.com/oleg-tkachuk/limes/inspect] reads a token without
-// verifying it, for tooling. memstore, storetest and metertest serve stores.
+// verifying it, for tooling. memstore, storetest and metertest serve stores;
+// dpop/dpoptest and jwks/jwkstest check a replay cache, a nonce source and a
+// key resolver.
 //
 // # What you implement
 //

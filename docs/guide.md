@@ -509,7 +509,8 @@ off by default because it multiplies every series by the number of tenants.
 Much of each contract lives in request fields and in which sentinel comes
 back, so a store that gets one wrong still compiles. Run the module's checks
 from your store's tests — `storetest` for a `Store` (and a
-`BiscuitRevocationStore`), `metertest` for a `UsageStore`:
+`BiscuitRevocationStore`), `metertest` for a `UsageStore`, `jwkstest` for a
+`KeyResolver`, and `dpoptest` for a `dpop.ReplayCache` or `dpop.Nonces`:
 
 ```go
 func TestMeterContract(t *testing.T) {
@@ -526,12 +527,20 @@ tenants, or scopes each tenant's rows, also sets `NewTenant` (another tenant
 it can charge), `TenantCtx` (the context a write for that tenant runs under)
 and `ListCtx` (the context of `ListTenantBudgets`, a read across tenants).
 Without them the checks that need a second tenant use a random id and `Ctx`.
+`storetest.Env` takes the same `NewTenant` and `TenantCtx`, so one setup can
+serve both suites.
 
 The checks include charges racing one ceiling, so run them against the
 database itself: a store that reads a counter and writes it back outside one
 statement or lock overspends, and fails them.
 
-`memstore` runs the same checks from its own tests.
+`memstore` runs the same checks from its own tests, and `dpop` and `jwks` run
+theirs against their shipped implementations.
+
+`Instrument` wraps a `UsageStore` and keeps every interface of `limes` the
+store implements — today the optional `CopyUsageReader`. A decorator of your
+own should do the same: assert each optional interface on the store it wraps
+and forward it, or a caller checking for it finds it gone.
 
 ## Revoke
 
