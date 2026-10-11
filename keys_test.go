@@ -137,20 +137,20 @@ func TestStaticKeyResolverRotation(t *testing.T) {
 	}
 }
 
-func TestNewEd25519Signer(t *testing.T) {
+func TestNewSigner(t *testing.T) {
 	key, err := GenerateKey()
 	priv := key.Private
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := NewEd25519Signer("k1", priv)
+	s, err := NewSigner(SignerConfig{KeyID: "k1", Key: priv})
 	if err != nil || s.KeyID() != "k1" {
-		t.Fatalf("NewEd25519Signer = %v, kid %q", err, s.KeyID())
+		t.Fatalf("NewSigner = %v, kid %q", err, s.KeyID())
 	}
-	if _, err := NewEd25519Signer("", priv); err == nil {
+	if _, err := NewSigner(SignerConfig{KeyID: "", Key: priv}); err == nil {
 		t.Error("an empty key id was accepted")
 	}
-	if _, err := NewEd25519Signer("k1", priv[:10]); err == nil {
+	if _, err := NewSigner(SignerConfig{KeyID: "k1", Key: priv[:10]}); err == nil {
 		t.Error("a short key was accepted")
 	}
 }

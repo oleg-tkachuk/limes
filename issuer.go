@@ -26,7 +26,7 @@ import (
 // reflected in storage; a failed sign just means the row is unused
 // (cleaned up by housekeeping at the natural expiry).
 type Issuer struct {
-	signer Signer
+	signer *Signer
 	store  Store
 	clock  func() time.Time
 
@@ -39,9 +39,9 @@ const DefaultIssueTTL = 15 * time.Minute
 
 // IssuerConfig is the wiring for NewIssuer.
 type IssuerConfig struct {
-	// Signer mints tokens. Production wraps a KMS-held private key;
-	// dev / tests use NewEd25519Signer with a local generated key.
-	Signer Signer
+	// Signer mints tokens (NewSigner), over a key in memory or one held in
+	// a KMS or an HSM.
+	Signer *Signer
 
 	// Store persists issuance + revocation rows.
 	Store Store

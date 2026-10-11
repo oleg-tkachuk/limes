@@ -2,9 +2,13 @@ package limes
 
 import (
 	"context"
+	"crypto"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"errors"
+	"io"
 	"testing"
 	"time"
 
@@ -22,7 +26,7 @@ func TestSign_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
-	signer, err := NewEd25519Signer("test-key-1", priv)
+	signer, err := NewSigner(SignerConfig{KeyID: "test-key-1", Key: priv})
 	if err != nil {
 		t.Fatalf("new signer: %v", err)
 	}
@@ -95,7 +99,7 @@ func TestSign_RejectsInvalid(t *testing.T) {
 	t.Parallel()
 
 	_, priv, _ := ed25519.GenerateKey(rand.Reader)
-	signer, _ := NewEd25519Signer("k", priv)
+	signer, _ := NewSigner(SignerConfig{KeyID: "k", Key: priv})
 
 	now := time.Now()
 	base := func() Capability {
@@ -136,7 +140,7 @@ func TestSign_TamperDetection(t *testing.T) {
 	t.Parallel()
 
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
-	signer, _ := NewEd25519Signer("k", priv)
+	signer, _ := NewSigner(SignerConfig{KeyID: "k", Key: priv})
 
 	now := time.Now()
 	cap := Capability{
@@ -312,22 +316,19 @@ func TestNarrows_AcceptsValidNarrowing(t *testing.T) {
 	}
 }
 
-// ctxSigner records the context it was asked to sign under, as a KMS-backed
-// signer would use it for its call.
-type ctxSigner struct {
-	Signer
+// ctxKey is an ed25519 key behind ContextSigner, recording the context of
+// each signature, as a KMS-backed key would use it for its call.
+type ctxKey struct {
+	ed25519.PrivateKey
 	got []context.Context
 }
 
-func (s *ctxSigner) Sign(ctx context.Context, c Capability) (string, error) {
-	s.got = append(s.got, ctx)
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
-	return s.Signer.Sign(ctx, c)
+func (k *ctxKey) SignContext(ctx context.Context, rand io.Reader, msg []byte, opts crypto.SignerOpts) ([]byte, error) {
+	k.got = append(k.got, ctx)
+	return k.Sign(rand, msg, opts)
 }
 
-type ctxKey struct{}
+type requestValue struct{}
 
 // The issuer signs under the caller's context, so a slow or cancelled KMS
 // call is bounded by the request that asked for it.
@@ -336,16 +337,16 @@ func TestIssuerSignsUnderTheCallersContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inner, err := NewEd25519Signer("k1", priv)
+	key := &ctxKey{PrivateKey: priv}
+	signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: key})
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer := &ctxSigner{Signer: inner}
 	issuer, err := NewIssuer(IssuerConfig{Signer: signer, Store: newMemStore(), IssuerName: "limes-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := context.WithValue(context.Background(), ctxKey{}, "request")
+	ctx := context.WithValue(context.Background(), requestValue{}, "request")
 	req := IssueRequest{
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}},
@@ -357,8 +358,11 @@ func TestIssuerSignsUnderTheCallersContext(t *testing.T) {
 	if _, err := issuer.Biscuit(ctx, c); err != nil {
 		t.Fatal(err)
 	}
-	for i, got := range signer.got {
-		if got.Value(ctxKey{}) != "request" {
+	if len(key.got) == 0 {
+		t.Fatal("the key's SignContext was never called")
+	}
+	for i, got := range key.got {
+		if got.Value(requestValue{}) != "request" {
 			t.Errorf("signature %d was made under another context", i)
 		}
 	}
@@ -386,4 +390,44 @@ func decode(token string) (Capability, error) {
 		return Capability{}, err
 	}
 	return c.(Capability), nil
+}
+
+// opaqueKey hides the concrete key type, as a KMS or HSM signer does.
+type opaqueKey struct{ crypto.Signer }
+
+// A key the signer cannot see into — a KMS's — signs tokens the verifier
+// accepts; a key that is not Ed25519 is refused up front.
+func TestSignerSignsThroughAnOpaqueKey(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: opaqueKey{priv}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	token, err := signer.Sign(context.Background(), Capability{
+		ID: uuid.New(), Issuer: "i", Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New()},
+		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, IssuedAt: now, ExpiresAt: now.Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := verifySignature(token, pub); err != nil {
+		t.Fatalf("a token signed through an opaque key: %v", err)
+	}
+	ec, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, cfg := range map[string]SignerConfig{
+		"no kid":      {Key: priv},
+		"no key":      {KeyID: "k1"},
+		"a P-256 key": {KeyID: "k1", Key: ec},
+	} {
+		if _, err := NewSigner(cfg); err == nil {
+			t.Errorf("NewSigner with %s: accepted", name)
+		}
+	}
 }

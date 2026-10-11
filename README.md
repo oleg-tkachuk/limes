@@ -63,7 +63,7 @@ kid, pub, priv := key.KeyID, key.Public, key.Private
 records := memstore.New[struct{}]()          // your Store
 usage   := memstore.NewUsage[struct{}](records)
 
-signer, _ := limes.NewEd25519Signer(kid, priv)
+signer, _ := limes.NewSigner(limes.SignerConfig{KeyID: kid, Key: priv})
 issuer, _ := limes.NewIssuer(limes.IssuerConfig{
     Signer: signer, Store: records, IssuerName: "my-issuer",
 })

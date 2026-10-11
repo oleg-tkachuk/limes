@@ -124,7 +124,7 @@ func TestVerifierRejectsChildOfRevokedParent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer, _ := limes.NewEd25519Signer(kid, priv)
+	signer, _ := limes.NewSigner(limes.SignerConfig{KeyID: kid, Key: priv})
 	records := New[struct{}]()
 	issuer, _ := limes.NewIssuer(limes.IssuerConfig{Signer: signer, Store: records, IssuerName: "iss"})
 	verifier, _ := limes.NewStandardVerifier(limes.VerifierConfig{

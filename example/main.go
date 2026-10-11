@@ -39,7 +39,7 @@ func main() {
 	records := memstore.New[struct{}]()
 	usage := memstore.NewUsage[struct{}](records)
 
-	signer, err := limes.NewEd25519Signer(kid, priv)
+	signer, err := limes.NewSigner(limes.SignerConfig{KeyID: kid, Key: priv})
 	must(err, "signer")
 
 	issuer, err := limes.NewIssuer(limes.IssuerConfig{

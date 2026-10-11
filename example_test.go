@@ -40,7 +40,7 @@ func newExampleStack() exampleStack {
 		log.Fatal(err)
 	}
 	records := memstore.New[struct{}]()
-	signer, err := limes.NewEd25519Signer(kid, priv)
+	signer, err := limes.NewSigner(limes.SignerConfig{KeyID: kid, Key: priv})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func ExampleIssuer_Issue() {
 	kid, pub, priv := key.KeyID, key.Public, key.Private
 
 	records := memstore.New[struct{}]() // your Store
-	signer, _ := limes.NewEd25519Signer(kid, priv)
+	signer, _ := limes.NewSigner(limes.SignerConfig{KeyID: kid, Key: priv})
 	issuer, _ := limes.NewIssuer(limes.IssuerConfig{
 		Signer: signer, Store: records, IssuerName: exampleIssuerName,
 	})
