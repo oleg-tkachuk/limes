@@ -8,6 +8,41 @@ import (
 	"github.com/google/uuid"
 )
 
+// IssuanceStore is what an Issuer needs of storage: to record what it mints,
+// and to know whether a parent it delegates from has been revoked.
+type IssuanceStore interface {
+	// Insert records a capability at issuance. The persisted row holds
+	// the full claim set so admin tooling can show a capability without
+	// parsing the JWT, and so audit can correlate without
+	// keeping every issued token.
+	//
+	// req.IssuedBy is the principal that ASKED for the capability, which
+	// is not its Subject (the principal it authorises) and not its Issuer
+	// (the service that minted it). A delegated capability is requested by
+	// its parent's holder; a root one by an operator. It is issuance
+	// metadata, not a claim, so it travels beside the Capability rather
+	// than in it, which would change the token's frozen wire format.
+	//
+	// An id already on record returns ErrAlreadyExists and changes nothing.
+	// A store that knows tenants returns ErrUnknownTenant or
+	// ErrTenantDeleted for a tenant it cannot mint for.
+	Insert(ctx context.Context, req InsertRequest) error
+
+	// IsRevoked reports whether the capability, or any ancestor of it
+	// that is still on record, is in the revocation list. Answering for
+	// the chain is what makes revoking an orchestrator stop the workers it
+	// spawned. Verifiers gate every request on it, so implementations
+	// should make the walk a single round trip (a recursive query) and
+	// bound its depth. An id not on record is not revoked.
+	IsRevoked(ctx context.Context, id uuid.UUID) (bool, error)
+}
+
+// InsertRequest is a capability to record, and who asked for it.
+type InsertRequest struct {
+	Capability Capability
+	IssuedBy   Principal
+}
+
 // Store persists capability records and revocation entries. Consumers supply
 // the implementation; memstore ships an in-memory one, and a store over a
 // database is the consumer's own.
@@ -17,45 +52,14 @@ import (
 // request; put a CachedRevocationChecker in front to keep the per-call
 // cost flat.
 type Store interface {
-	// Insert records a capability at issuance. The persisted row holds
-	// the full claim set so admin tooling can show a capability without
-	// parsing the JWT, and so audit can correlate without
-	// keeping every issued token.
-	//
-	// issuedBy is the principal that ASKED for the capability, which is not
-	// c.Subject (the principal it authorises) and not c.Issuer (the service
-	// that minted it). A delegated capability is requested by its parent's
-	// holder; a root one by an operator. Passed as an argument rather than
-	// carried on Capability because it is issuance metadata, not a claim —
-	// putting it in the struct would change the token's frozen wire format.
-	//
-	// An id already on record returns ErrAlreadyExists and changes nothing.
-	// A store that knows tenants returns ErrUnknownTenant or
-	// ErrTenantDeleted for a tenant it cannot mint for.
-	Insert(ctx context.Context, c Capability, issuedBy Principal) error
-
-	// Get fetches a capability record by ID, for audit and admin reads and
-	// for a reporter that needs a capability's ceilings (see Meter).
-	// Returns ErrNotFound when no row exists. StandardVerifier never calls
-	// it: verification needs no record, only IsRevoked.
-	//
-	// ErrNotFound is defined in THIS package (below), not in any store
-	// implementation — a third party writing its own Store must have a
-	// sentinel to return without importing someone else's persistence.
-	Get(ctx context.Context, id uuid.UUID) (Capability, error)
+	IssuanceStore
 
 	// GetRecord reads back everything Insert and Revoke wrote about a
 	// capability: the capability, who issued it, and its own revocation
-	// entry if it has one. ErrNotFound as Get. For audit and admin reads.
+	// entry if it has one. ErrNotFound when there is no record. For audit
+	// and admin reads, and for a reporter that needs a capability's
+	// ceilings; StandardVerifier never calls it.
 	GetRecord(ctx context.Context, id uuid.UUID) (Record, error)
-
-	// IsRevoked reports whether the capability, or any ancestor of it
-	// that is still on record, is in the revocation list. Answering for
-	// the chain is what makes revoking an orchestrator stop the workers it
-	// spawned. Verifiers gate every request on it, so implementations
-	// should make the walk a single round trip (a recursive query) and
-	// bound its depth. An id not on record is not revoked.
-	IsRevoked(ctx context.Context, id uuid.UUID) (bool, error)
 
 	// Revoke adds an entry to the revocation list. Idempotent: a
 	// duplicate revoke is a no-op. An id not on record — or not visible

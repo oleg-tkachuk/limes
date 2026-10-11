@@ -86,7 +86,7 @@ func (f fixture) newCapability(subject string, parent uuid.UUID, expires time.Ti
 
 func (f fixture) insert(t *testing.T, c limes.Capability) limes.Capability {
 	t.Helper()
-	if err := f.Store.Insert(f.Ctx, c, issuedBy); err != nil {
+	if err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: c, IssuedBy: issuedBy}); err != nil {
 		t.Fatalf("insert %s: %v", c.ID, err)
 	}
 	return c
@@ -95,6 +95,12 @@ func (f fixture) insert(t *testing.T, c limes.Capability) limes.Capability {
 func (f fixture) live(t *testing.T, subject string, parent uuid.UUID) limes.Capability {
 	t.Helper()
 	return f.insert(t, f.newCapability(subject, parent, f.now.Add(ttl)))
+}
+
+// get is the capability on record under id.
+func (f fixture) get(id uuid.UUID) (limes.Capability, error) {
+	r, err := f.Store.GetRecord(f.Ctx, id)
+	return r.Capability, err
 }
 
 func (f fixture) revoked(t *testing.T, id uuid.UUID) bool {
@@ -144,9 +150,9 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 func checkRoundTrip(t *testing.T, f fixture) {
 	parent := f.live(t, "agent:parent", uuid.Nil)
 	want := f.live(t, "agent:child", parent.ID)
-	got, err := f.Store.Get(f.Ctx, want.ID)
+	got, err := f.get(want.ID)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatalf("GetRecord: %v", err)
 	}
 	if diff := diffCapabilities(got, want); diff != "" {
 		t.Fatalf("Get read back a different capability: %s", diff)
@@ -203,17 +209,17 @@ func checkDuplicate(t *testing.T, f fixture) {
 	c := f.live(t, "agent:a", uuid.Nil)
 	again := c
 	again.Subject.Subject = "agent:b"
-	if err := f.Store.Insert(f.Ctx, again, issuedBy); !errors.Is(err, limes.ErrAlreadyExists) {
+	if err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: again, IssuedBy: issuedBy}); !errors.Is(err, limes.ErrAlreadyExists) {
 		t.Fatalf("second insert of %s: err = %v, want ErrAlreadyExists", c.ID, err)
 	}
-	if got, err := f.Store.Get(f.Ctx, c.ID); err != nil || got.Subject.Subject != "agent:a" {
+	if got, err := f.get(c.ID); err != nil || got.Subject.Subject != "agent:a" {
 		t.Fatalf("after a refused insert Get = %+v, %v; want the first record", got, err)
 	}
 }
 
 func checkUnknown(t *testing.T, f fixture) {
 	for _, id := range []uuid.UUID{uuid.New(), uuid.Nil} {
-		if _, err := f.Store.Get(f.Ctx, id); !errors.Is(err, limes.ErrNotFound) {
+		if _, err := f.get(id); !errors.Is(err, limes.ErrNotFound) {
 			t.Errorf("Get %s: err = %v, want ErrNotFound", id, err)
 		}
 		if err := f.Store.Revoke(f.Ctx, limes.RevokeRequest{ID: id}); !errors.Is(err, limes.ErrNotFound) {
@@ -299,7 +305,7 @@ func checkPurge(t *testing.T, f fixture) {
 	if err != nil || n != 1 {
 		t.Fatalf("PurgeExpired = %d, %v; want the expired capability's one entry", n, err)
 	}
-	if _, err := f.Store.Get(f.Ctx, expired.ID); err != nil {
+	if _, err := f.get(expired.ID); err != nil {
 		t.Errorf("PurgeExpired dropped a record: Get = %v", err)
 	}
 	if f.revoked(t, expired.ID) || !f.revoked(t, live.ID) {

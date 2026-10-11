@@ -1,6 +1,7 @@
 package limes
 
 import (
+	"context"
 	"crypto/ed25519"
 	"errors"
 	"testing"
@@ -101,5 +102,39 @@ func TestListRequestsRefuseANegativeLimit(t *testing.T) {
 	}
 	if err := (ListTenantBudgetsRequest{ThresholdPct: maxThresholdPct + 1}).Validate(); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("a threshold past 100%%: Validate = %v, want ErrInvalidRequest", err)
+	}
+}
+
+// issuanceOnly is a store with no more than an Issuer needs.
+type issuanceOnly struct{ inserted []InsertRequest }
+
+func (s *issuanceOnly) Insert(_ context.Context, req InsertRequest) error {
+	s.inserted = append(s.inserted, req)
+	return nil
+}
+func (s *issuanceOnly) IsRevoked(context.Context, uuid.UUID) (bool, error) { return false, nil }
+
+// An Issuer runs on IssuanceStore alone: the admin half of Store is not
+// its business.
+func TestIssuerNeedsOnlyAnIssuanceStore(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: priv})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &issuanceOnly{}
+	issuer, err := NewIssuer(IssuerConfig{Signer: signer, Store: store, IssuerName: goldenIssuer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, _, err := issuer.Issue(context.Background(), IssueRequest{
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
+		Audience: []string{"data"}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Minute,
+	})
+	if err != nil || len(store.inserted) != 1 || store.inserted[0].Capability.ID != c.ID || store.inserted[0].IssuedBy.Subject != "op" {
+		t.Fatalf("Issue = %v; recorded %+v", err, store.inserted)
 	}
 }

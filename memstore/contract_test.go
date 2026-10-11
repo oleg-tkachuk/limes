@@ -34,7 +34,7 @@ func TestMeterContract(t *testing.T) {
 					Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: tenant, Subject: "agent"},
 					Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, MaxBudgetAmount: maxBudget},
 				}
-				return c.ID, records.Insert(context.Background(), c, limes.Principal{Subject: "issuer"})
+				return c.ID, records.Insert(context.Background(), limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "issuer"}})
 			},
 		}
 	})
@@ -78,7 +78,7 @@ func TestMeterContractUsesTheTenantHooks(t *testing.T) {
 					Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: tenant, Subject: "agent"},
 					Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, MaxBudgetAmount: maxBudget},
 				}
-				return c.ID, records.Insert(ctx, c, limes.Principal{Subject: "issuer"})
+				return c.ID, records.Insert(ctx, limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "issuer"}})
 			},
 		}
 	})

@@ -557,7 +557,7 @@ Implement these and you are done:
 
 | Interface | Stores | Transactions needed? |
 |---|---|---|
-| `Store` | Capability records + revocations | No |
+| `Store` = `IssuanceStore` + admin | Capability records + revocations; an `Issuer` needs only `IssuanceStore` (`Insert`, `IsRevoked`) | No |
 | `BiscuitRevocationStore` | Revoked Biscuit copies (only if you accept Biscuits) | No |
 | `CopyUsageReader` | Reads Biscuit copies' own counters (only to show them) | No |
 | `UsageStore[TX]` = `Meter[TX]` + `TenantBudgets` + `UsageHousekeeping` | Request and spend counters, the charges ledger, tenant ceilings; `Delete` and `PurgeOrphans` release a reaped capability's holds | Only for atomic side effects |

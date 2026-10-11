@@ -17,7 +17,7 @@ type failingStore struct {
 	err error
 }
 
-func (s failingStore) Insert(context.Context, Capability, Principal) error { return s.err }
+func (s failingStore) Insert(context.Context, InsertRequest) error { return s.err }
 
 func validIssue() IssueRequest {
 	return IssueRequest{

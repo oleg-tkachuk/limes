@@ -25,7 +25,7 @@ func newCopyFixture(t *testing.T) (context.Context, *UsageStore[struct{}], uuid.
 	ctx := context.Background()
 	records := New[struct{}]()
 	capID, tenant := uuid.New(), uuid.New()
-	if err := records.Insert(ctx, mkCap(capID, uuid.Nil, tenant, "agent"), limes.Principal{Subject: "op"}); err != nil {
+	if err := records.Insert(ctx, limes.InsertRequest{Capability: mkCap(capID, uuid.Nil, tenant, "agent"), IssuedBy: limes.Principal{Subject: "op"}}); err != nil {
 		t.Fatal(err)
 	}
 	return ctx, NewUsage[struct{}](records), capID, tenant

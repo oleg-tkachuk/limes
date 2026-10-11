@@ -22,7 +22,7 @@ func tree(t *testing.T, s *Store[struct{}], root limes.Caveats, n int, child lim
 	rootID := uuid.New()
 	rc := mkCap(rootID, uuid.Nil, tenant, "orchestrator")
 	rc.Caveats = root
-	if err := s.Insert(ctx, rc, limes.Principal{Subject: "op"}); err != nil {
+	if err := s.Insert(ctx, limes.InsertRequest{Capability: rc, IssuedBy: limes.Principal{Subject: "op"}}); err != nil {
 		t.Fatal(err)
 	}
 	var kids []uuid.UUID
@@ -30,7 +30,7 @@ func tree(t *testing.T, s *Store[struct{}], root limes.Caveats, n int, child lim
 		id := uuid.New()
 		c := mkCap(id, rootID, tenant, "worker")
 		c.Caveats = child
-		if err := s.Insert(ctx, c, limes.Principal{Subject: "orchestrator"}); err != nil {
+		if err := s.Insert(ctx, limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "orchestrator"}}); err != nil {
 			t.Fatal(err)
 		}
 		kids = append(kids, id)

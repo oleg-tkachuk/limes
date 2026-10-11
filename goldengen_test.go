@@ -49,10 +49,7 @@ func goldenClock() time.Time {
 // genStore is a no-op Store — issuance only needs Insert to succeed.
 type genStore struct{}
 
-func (genStore) Insert(context.Context, Capability, Principal) error { return nil }
-func (genStore) Get(context.Context, uuid.UUID) (Capability, error) {
-	return Capability{}, errors.New("not found")
-}
+func (genStore) Insert(context.Context, InsertRequest) error { return nil }
 func (genStore) GetRecord(context.Context, uuid.UUID) (Record, error) {
 	return Record{}, errors.New("not found")
 }

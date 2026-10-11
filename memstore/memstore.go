@@ -193,7 +193,8 @@ func (s *UsageStore[TX]) Ledger() []LedgerEntry {
 // issuedBy is recorded alongside the capability so the in-memory store answers
 // the same attribution questions the relational one does — a test double that
 // silently drops the initiator would let an unattributed issuance pass.
-func (s *Store[TX]) Insert(_ context.Context, c limes.Capability, issuedBy limes.Principal) error {
+func (s *Store[TX]) Insert(_ context.Context, req limes.InsertRequest) error {
+	c, issuedBy := req.Capability, req.IssuedBy
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.caps[c.ID]; ok {
@@ -232,19 +233,6 @@ func (s *Store[TX]) revokeLocked(id uuid.UUID, r limes.Revocation) {
 func (s *Store[TX]) isRevokedItselfLocked(id uuid.UUID) bool {
 	_, ok := s.revoked[id]
 	return ok
-}
-
-// Get returns limes.ErrNotFound when absent. Callers treat that as
-// forgery, not as a missing entity — a syntactically valid token with no
-// record was minted by someone else.
-func (s *Store[TX]) Get(_ context.Context, id uuid.UUID) (limes.Capability, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	c, ok := s.caps[id]
-	if !ok {
-		return limes.Capability{}, limes.ErrNotFound
-	}
-	return c, nil
 }
 
 // IsRevoked answers for the whole delegation chain: a capability is revoked
@@ -1280,6 +1268,7 @@ func max0(n limes.Nanos) limes.Nanos {
 // implement the contract either.
 var (
 	_ limes.Store                = (*Store[struct{}])(nil)
+	_ limes.IssuanceStore        = (*Store[struct{}])(nil)
 	_ limes.UsageStore[struct{}] = (*UsageStore[struct{}])(nil)
 )
 

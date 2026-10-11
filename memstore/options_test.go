@@ -38,7 +38,7 @@ func TestStoreWithClockDrivesPurgeExpired(t *testing.T) {
 		ID: uuid.New(), ExpiresAt: now.Add(time.Minute),
 		Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: tenant, Subject: "a"},
 	}
-	if err := s.Insert(ctx, c, limes.Principal{Subject: "op"}); err != nil {
+	if err := s.Insert(ctx, limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "op"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Revoke(ctx, limes.RevokeRequest{ID: c.ID}); err != nil {
