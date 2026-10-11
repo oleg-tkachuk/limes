@@ -45,7 +45,8 @@ capability's own under `limes_` (`limes_principal`, `limes_caveats`,
 `encoding/json/v2`: no member twice (§2.3), names in their exact case, UTF-8
 only (§2.1), and no member the format does not define — a caveat a verifier
 does not know is one it cannot enforce. Every integer is within ±(2^53 − 1)
-(§2.2, `MaxIJSONInteger`); amounts, which need eighteen digits, are decimal
+(§2.2, `MaxIJSONInteger`) — `Sign` refuses to write one outside it, as
+`Verify` refuses to read one; amounts, which need eighteen digits, are decimal
 strings (`"max_budget": "1.5"`). A reader in any language therefore reads the
 token the issuer signed. *Held by* `TestVerifyReadsClaimsStrictly`,
 `TestTokenIntegersStayWithinIJSON`, `TestTokenClaimsAreUTF8`.
@@ -75,15 +76,19 @@ and a `jti` not seen before.
   `ErrDPoPNonceRequired` (`use_dpop_nonce`), and
   `StandardVerifier.DPoPNonce` gives the nonce to send in `DPoP-Nonce`.
   `HMACNonces` issues them statelessly — its issuance time and an HMAC of it
-  — so replicas sharing a key share nonces without sharing state, and keys
-  rotate by putting the new one first.
+  — so replicas sharing a key, with clocks within `HMACNonceClockSkew` of each
+  other, share nonces without sharing state, and keys rotate by putting the
+  new one first.
 - **The scheme (§7.1, §7.2).** `ParseAuthorization` reads
   `Authorization: DPoP <token>` and `Authorization: Bearer <token>` (RFC 9110
   §11.6.2, token68). Given the scheme, `Verify` refuses a key-bound token
   presented as `Bearer` — the downgrade §7.2 names — and an unbound one
   presented as `DPoP`.
-- **Replay.** `MemoryReplayCache` remembers `jti`s for one process. Across
-  replicas, nonces or a shared `ReplayCache` close the window.
+- **Replay.** `MemoryReplayCache` remembers `jti`s for one process, keyed by
+  the proof key's thumbprint, each key within its own share
+  (`WithEntriesPerKey`, default `DefaultReplayEntriesPerKey`), so one key
+  cannot crowd another's proofs out. Across replicas, nonces or a shared
+  `ReplayCache` close the window.
 
 *Held by* `TestDPoPRefusals`, `TestDPoPRefusesAPrivateJWK`,
 `TestVerifyEnforcesProofOfPossession`, `TestBiscuitProofIsOverTheBiscuit`,
@@ -104,7 +109,7 @@ answers alike, and `WriteErrorResponse` writes them:
 | no nonce, or a stale one | 401 | `DPoP error="use_dpop_nonce", algs="Ed25519 ES256"`, with a fresh `DPoP-Nonce` |
 | no proof, an invalid or replayed one | 401 | `DPoP error="invalid_dpop_proof", algs="Ed25519 ES256"` |
 | invalid, expired, not-yet-valid, revoked token; wrong audience or scheme | 401 | `error="invalid_token"` under the scheme presented (`Bearer` when unknown) |
-| the issuer's JWKS unreachable past `MaxStale` | 503 | none |
+| the issuer's JWKS never fetched, or unreachable past `MaxStale` | 503 | none |
 | a caveat refuses the operation | 403 | `error="insufficient_scope"` |
 | a request or budget limit is exhausted | 403 | none |
 | anything else | 500 | none |
@@ -121,7 +126,8 @@ the values keep to the characters RFC 6750 §3 allows. *Held by*
 
 **RFC 7517, RFC 8037, RFC 7638.** `MarshalJWKS` writes a JWK Set of OKP
 Ed25519 keys; `ParseJWKS` skips an entry it cannot use rather than refuse the
-set. `DeriveKeyID` makes a key's kid its RFC 7638 thumbprint, which any JOSE
+set, and uses no key whose kid two entries name; a document that is not JSON,
+or names a member twice, is refused. `DeriveKeyID` makes a key's kid its RFC 7638 thumbprint, which any JOSE
 tool computes alike.
 
 **Serving and fetching (RFC 7517 §8.5, RFC 9110 §13, RFC 9111).**
