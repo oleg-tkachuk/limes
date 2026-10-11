@@ -105,7 +105,8 @@ func parseJWKS(raw []byte) (map[string]ed25519.PublicKey, int, error) {
 // type (§8.5), with a strong ETag of its bytes that answers If-None-Match
 // with 304 (RFC 9110 §13.1.2), and fresh for maxAge (RFC 9111 §5.2.2.1).
 // Keep maxAge below the time between publishing a new key and signing with
-// it, and between withdrawing an old key and the end of its tokens' TTL.
+// it, and between withdrawing an old key and the end of its tokens' TTL; a
+// negative maxAge is served as zero.
 func JWKSHandler(keys func() map[string]ed25519.PublicKey, maxAge time.Duration) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -122,7 +123,7 @@ func JWKSHandler(keys func() map[string]ed25519.PublicKey, maxAge time.Duration)
 		etag := `"` + base64.RawURLEncoding.EncodeToString(sum[:]) + `"`
 		h := w.Header()
 		h.Set("ETag", etag)
-		h.Set(headerCacheControl, fmt.Sprintf("public, %s=%d", directiveMaxAge, int64(maxAge/time.Second)))
+		h.Set(headerCacheControl, fmt.Sprintf("public, %s=%d", directiveMaxAge, int64(max(maxAge, 0)/time.Second)))
 		if etagMatches(r.Header.Values("If-None-Match"), etag) {
 			w.WriteHeader(http.StatusNotModified)
 			return

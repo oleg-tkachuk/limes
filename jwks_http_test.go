@@ -27,6 +27,10 @@ func TestResponseFreshness(t *testing.T) {
 		{"max-age=60, no-store", "", 0, true},
 		{"max-age=abc", "", 0, true},
 		{"public", "", 0, false},
+		// RFC 9111 §4.2.1: the first max-age stands.
+		{"max-age=10, max-age=3600", "", 10 * time.Second, true},
+		// §1.2.2: a delta-seconds too large to hold reads as 2^31.
+		{"max-age=99999999999999999999", "", maxDeltaSeconds * time.Second, true},
 		{"", "", 0, false},
 	}
 	for _, tc := range cases {
@@ -189,5 +193,16 @@ func TestRemoteJWKSKeepsTheSetWhenNoKeyIsUsable(t *testing.T) {
 	// An empty set is an issuer withdrawing every key, and is taken as such.
 	if keys, skipped, err := parseJWKS([]byte(`{"keys":[]}`)); err != nil || len(keys) != 0 || skipped != 0 {
 		t.Errorf("an empty set = %v, %d, %v", keys, skipped, err)
+	}
+}
+
+// A negative max-age would write an invalid Cache-Control; it is served as
+// zero.
+func TestJWKSHandlerClampsANegativeMaxAge(t *testing.T) {
+	h := JWKSHandler(func() map[string]ed25519.PublicKey { return nil }, -time.Second)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/jwks", nil))
+	if got := rec.Header().Get(headerCacheControl); got != "public, max-age=0" {
+		t.Errorf("Cache-Control = %q, want max-age=0", got)
 	}
 }
