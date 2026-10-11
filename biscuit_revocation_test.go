@@ -261,7 +261,7 @@ func TestCachedBiscuitRevocationChecker(t *testing.T) {
 	t.Run("serves a fresh answer, then asks again once it expires", func(t *testing.T) {
 		now := time.Unix(0, 0)
 		up := &countingBiscuitLookup{revoked: true}
-		c := NewCachedBiscuitRevocationChecker(up, ttl, withCacheClock(func() time.Time { return now }))
+		c := newBiscuitCache(t, BiscuitRevocationCacheConfig{Upstream: up, TTL: ttl, Now: func() time.Time { return now }})
 		for range 3 {
 			if got, _ := c.IsBiscuitRevoked(ctx, ids); !got {
 				t.Fatal("want revoked")
@@ -279,7 +279,7 @@ func TestCachedBiscuitRevocationChecker(t *testing.T) {
 
 	t.Run("Clear sends the next check upstream", func(t *testing.T) {
 		up := &countingBiscuitLookup{}
-		c := NewCachedBiscuitRevocationChecker(up, ttl)
+		c := newBiscuitCache(t, BiscuitRevocationCacheConfig{Upstream: up, TTL: ttl})
 		_, _ = c.IsBiscuitRevoked(ctx, ids)
 		c.Clear()
 		_, _ = c.IsBiscuitRevoked(ctx, ids)
@@ -291,7 +291,7 @@ func TestCachedBiscuitRevocationChecker(t *testing.T) {
 	t.Run("an error is returned and not cached", func(t *testing.T) {
 		boom := errors.New("down")
 		up := &countingBiscuitLookup{err: boom}
-		c := NewCachedBiscuitRevocationChecker(up, ttl)
+		c := newBiscuitCache(t, BiscuitRevocationCacheConfig{Upstream: up, TTL: ttl})
 		if _, err := c.IsBiscuitRevoked(ctx, ids); !errors.Is(err, boom) {
 			t.Fatalf("err = %v", err)
 		}
@@ -304,7 +304,7 @@ func TestCachedBiscuitRevocationChecker(t *testing.T) {
 
 	t.Run("lists that concatenate alike are different tokens", func(t *testing.T) {
 		up := &countingBiscuitLookup{}
-		c := NewCachedBiscuitRevocationChecker(up, ttl)
+		c := newBiscuitCache(t, BiscuitRevocationCacheConfig{Upstream: up, TTL: ttl})
 		_, _ = c.IsBiscuitRevoked(ctx, ids)
 		_, _ = c.IsBiscuitRevoked(ctx, [][]byte{[]byte("a"), []byte("bc")})
 		if up.calls != 2 {
@@ -315,7 +315,7 @@ func TestCachedBiscuitRevocationChecker(t *testing.T) {
 	t.Run("stays within its bound", func(t *testing.T) {
 		const bound = 2
 		up := &countingBiscuitLookup{}
-		c := NewCachedBiscuitRevocationChecker(up, ttl, WithMaxEntries(bound))
+		c := newBiscuitCache(t, BiscuitRevocationCacheConfig{Upstream: up, TTL: ttl, MaxEntries: bound})
 		for i := range bound * 3 {
 			_, _ = c.IsBiscuitRevoked(ctx, [][]byte{{byte(i)}})
 			if len(c.cache.entries) > bound {
@@ -324,13 +324,4 @@ func TestCachedBiscuitRevocationChecker(t *testing.T) {
 		}
 	})
 
-	t.Run("a negative ttl disables caching", func(t *testing.T) {
-		up := &countingBiscuitLookup{}
-		c := NewCachedBiscuitRevocationChecker(up, -1)
-		_, _ = c.IsBiscuitRevoked(ctx, ids)
-		_, _ = c.IsBiscuitRevoked(ctx, ids)
-		if up.calls != 2 {
-			t.Fatalf("upstream calls = %d, want 2", up.calls)
-		}
-	})
 }

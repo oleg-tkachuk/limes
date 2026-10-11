@@ -642,7 +642,7 @@ log. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
 | `IssuerConfig.DefaultTTL` | 15 minutes |
 | `VerifierConfig.Leeway` | 30 seconds |
 | `VerifierConfig.MaxTokenBytes` | `DefaultMaxTokenBytes`, 16 KiB |
-| `DefaultRevocationCacheTTL` · `DefaultRevocationCacheEntries` | 2 seconds · 100 000, the oldest dropped first past it (`WithMaxEntries`; a TTL below zero disables the cache) |
+| `RevocationCacheConfig` · `BiscuitRevocationCacheConfig` | `DefaultRevocationCacheTTL` 2 seconds · `DefaultRevocationCacheEntries` 100 000, the oldest dropped first past it; a negative TTL or bound is refused — for no cache, give the verifier the store itself |
 | `jwks.RemoteConfig` | `jwks.DefaultFetchTimeout` 10s · `DefaultRefreshInterval` 5m · `DefaultMinRefreshInterval` 10s · `DefaultMaxStale` 1h · `DefaultMaxDocumentBytes` 1 MiB |
 | `dpop.Verifier.Window` | `dpop.DefaultWindow`, 1 minute |
 | `dpop.NewMemoryReplayCache(0)` | 100 000 ids; `dpop.DefaultReplayEntriesPerKey`, 1 000, per key (`dpop.WithEntriesPerKey`) |

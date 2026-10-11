@@ -3,6 +3,7 @@ package limes
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -42,49 +43,58 @@ type CachedRevocationChecker struct {
 	cache    *ttlCache[uuid.UUID]
 }
 
-// cacheConfig is what the CacheOptions set, for either checker.
+// RevocationCacheConfig configures a CachedRevocationChecker.
+type RevocationCacheConfig struct {
+	// Upstream answers what the cache does not hold. Required.
+	Upstream RevocationLookup
+	// TTL is how long an answer is served. Zero: DefaultRevocationCacheTTL.
+	TTL time.Duration
+	// MaxEntries bounds the cache. Zero: DefaultRevocationCacheEntries.
+	MaxEntries int
+	// Now is the clock. Nil: time.Now.
+	Now func() time.Time
+}
+
+// NewCachedRevocationChecker wires a cache over cfg.Upstream. A negative TTL
+// or bound is refused; a deployment that wants no cache passes its store to
+// the verifier directly.
+func NewCachedRevocationChecker(cfg RevocationCacheConfig) (*CachedRevocationChecker, error) {
+	if cfg.Upstream == nil {
+		return nil, errors.New("limes: RevocationCacheConfig.Upstream required")
+	}
+	c, err := newCacheConfig(cfg.TTL, cfg.MaxEntries, cfg.Now)
+	if err != nil {
+		return nil, err
+	}
+	return &CachedRevocationChecker{upstream: cfg.Upstream, cache: newTTLCache[uuid.UUID](c)}, nil
+}
+
+// cacheConfig is what either checker's cache runs on.
 type cacheConfig struct {
 	ttl        time.Duration
 	maxEntries int
 	now        func() time.Time
 }
 
-// CacheOption configures a CachedRevocationChecker or a
-// CachedBiscuitRevocationChecker.
-type CacheOption func(*cacheConfig)
-
-// withCacheClock replaces time.Now; tests use it to step through expiry.
-func withCacheClock(now func() time.Time) CacheOption {
-	return func(c *cacheConfig) { c.now = now }
-}
-
-// WithMaxEntries bounds the number of cached entries. ≤ 0 keeps the default.
-func WithMaxEntries(n int) CacheOption {
-	return func(c *cacheConfig) {
-		if n > 0 {
-			c.maxEntries = n
-		}
+// newCacheConfig resolves a configuration's zero values to the defaults and
+// refuses the negative ones.
+func newCacheConfig(ttl time.Duration, maxEntries int, now func() time.Time) (cacheConfig, error) {
+	if ttl < 0 {
+		return cacheConfig{}, fmt.Errorf("limes: cache TTL %s is negative", ttl)
 	}
-}
-
-// newCacheConfig applies opts over the defaults. ttl of 0 falls back to
-// DefaultRevocationCacheTTL; ttl < 0 disables caching.
-func newCacheConfig(ttl time.Duration, opts []CacheOption) cacheConfig {
+	if maxEntries < 0 {
+		return cacheConfig{}, fmt.Errorf("limes: cache bound %d is negative", maxEntries)
+	}
 	if ttl == 0 {
 		ttl = DefaultRevocationCacheTTL
 	}
-	cfg := cacheConfig{ttl: ttl, maxEntries: DefaultRevocationCacheEntries, now: time.Now}
-	for _, o := range opts {
-		o(&cfg)
+	if maxEntries == 0 {
+		maxEntries = DefaultRevocationCacheEntries
 	}
-	return cfg
-}
-
-// NewCachedRevocationChecker wires a cache over an upstream lookup. ttl
-// of 0 falls back to DefaultRevocationCacheTTL; ttl < 0 disables caching
-// (every call hits upstream — useful for tests).
-func NewCachedRevocationChecker(upstream RevocationLookup, ttl time.Duration, opts ...CacheOption) *CachedRevocationChecker {
-	return &CachedRevocationChecker{upstream: upstream, cache: newTTLCache[uuid.UUID](newCacheConfig(ttl, opts))}
+	if now == nil {
+		now = time.Now
+	}
+	return cacheConfig{ttl: ttl, maxEntries: maxEntries, now: now}, nil
 }
 
 // IsRevoked serves a fresh cached answer, or asks upstream once on behalf of
@@ -153,10 +163,6 @@ func newTTLCache[K comparable](cfg cacheConfig) *ttlCache[K] {
 // get serves a fresh entry for key, or runs lookup once for every
 // concurrent caller missing it. An error is returned and never cached.
 func (c *ttlCache[K]) get(ctx context.Context, key K, lookup func(context.Context) (bool, error)) (bool, error) {
-	if c.cfg.ttl < 0 {
-		return lookup(ctx)
-	}
-
 	c.mu.Lock()
 	if e, ok := c.entries[key]; ok && e.expires.After(c.cfg.now()) {
 		c.mu.Unlock()

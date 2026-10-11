@@ -28,7 +28,7 @@ func (s *slowLookup) IsRevoked(context.Context, uuid.UUID) (bool, error) {
 func TestRevocationCacheCoalescesConcurrentMisses(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		up := &slowLookup{release: make(chan struct{})}
-		c := NewCachedRevocationChecker(up, time.Minute)
+		c := newRevocationCache(t, RevocationCacheConfig{Upstream: up, TTL: time.Minute})
 		id := uuid.New()
 
 		var wg sync.WaitGroup
@@ -69,7 +69,7 @@ func (l *ctxLookup) IsRevoked(ctx context.Context, _ uuid.UUID) (bool, error) {
 func TestRevocationCacheLeaderCancellationDoesNotFailWaiters(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		up := &ctxLookup{release: make(chan struct{})}
-		c := NewCachedRevocationChecker(up, time.Minute)
+		c := newRevocationCache(t, RevocationCacheConfig{Upstream: up, TTL: time.Minute})
 		id := uuid.New()
 
 		leaderCtx, cancel := context.WithCancel(context.Background())
@@ -106,8 +106,7 @@ func TestRevocationCacheLeaderCancellationDoesNotFailWaiters(t *testing.T) {
 func TestRevocationCacheIsBoundedAndHonoursClock(t *testing.T) {
 	store := newMemStore()
 	now := time.Unix(1_800_000_000, 0)
-	c := NewCachedRevocationChecker(store, time.Second,
-		WithMaxEntries(10), withCacheClock(func() time.Time { return now }))
+	c := newRevocationCache(t, RevocationCacheConfig{Upstream: store, TTL: time.Second, MaxEntries: 10, Now: func() time.Time { return now }})
 	ctx := context.Background()
 
 	for range 100 {
@@ -131,7 +130,7 @@ func TestRevocationCacheIsBoundedAndHonoursClock(t *testing.T) {
 
 func TestRevocationCacheClearForgetsEveryAnswer(t *testing.T) {
 	store := newMemStore()
-	c := NewCachedRevocationChecker(store, time.Hour)
+	c := newRevocationCache(t, RevocationCacheConfig{Upstream: store, TTL: time.Hour})
 	ctx := context.Background()
 	ids := []uuid.UUID{uuid.New(), uuid.New()}
 	for _, id := range ids {
@@ -171,7 +170,7 @@ func TestRevocationCacheRetryAfterACancelledLeaderIsShared(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		const waiters = 10
 		up := &twoRoundLookup{first: make(chan struct{}), second: make(chan struct{})}
-		c := NewCachedRevocationChecker(up, time.Minute)
+		c := newRevocationCache(t, RevocationCacheConfig{Upstream: up, TTL: time.Minute})
 		id := uuid.New()
 		leaderCtx, cancel := context.WithCancel(context.Background())
 		go func() { _, _ = c.IsRevoked(leaderCtx, id) }()

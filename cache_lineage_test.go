@@ -31,7 +31,7 @@ func TestRevocationCacheDropReachesADescendant(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cache := limes.NewCachedRevocationChecker(s.records, cacheLongerThanTheTest)
+	cache := newRevocationCache(t, limes.RevocationCacheConfig{Upstream: s.records, TTL: cacheLongerThanTheTest})
 	if revoked, err := cache.IsRevoked(ctx, child.ID); err != nil || revoked {
 		t.Fatalf("child before the revocation = %v, %v; want live", revoked, err)
 	}
@@ -43,4 +43,15 @@ func TestRevocationCacheDropReachesADescendant(t *testing.T) {
 	if revoked, err := cache.IsRevoked(ctx, child.ID); err != nil || !revoked {
 		t.Errorf("child after its parent's revocation and Clear = %v, %v; want revoked", revoked, err)
 	}
+}
+
+// newRevocationCache is limes.NewCachedRevocationChecker, failing the test on
+// a refused configuration.
+func newRevocationCache(t testing.TB, cfg limes.RevocationCacheConfig) *limes.CachedRevocationChecker {
+	t.Helper()
+	c, err := limes.NewCachedRevocationChecker(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
 }

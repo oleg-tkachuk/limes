@@ -22,12 +22,12 @@ func biscuitFixture(t *testing.T) (*Issuer, *StandardVerifier, *memStore, Capabi
 	issuer, _, store, pub := buildIssuerVerifier(t)
 	verifier, err := NewStandardVerifier(VerifierConfig{
 		Keys:           jwks.NewStatic(map[string]ed25519.PublicKey{"k1": pub}),
-		Revocations:    NewCachedRevocationChecker(store, -1),
+		Revocations:    store,
 		TrustedIssuers: []string{"limes-test"},
 		AcceptBiscuit:  true,
 		DPoP:           &dpop.Verifier{Replay: dpop.NewMemoryReplayCache(0)},
 
-		BiscuitRevocations: NewCachedBiscuitRevocationChecker(store, -1),
+		BiscuitRevocations: store,
 	})
 	if err != nil {
 		t.Fatal(err)
