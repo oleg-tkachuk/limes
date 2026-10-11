@@ -578,10 +578,10 @@ the last of a budget.
 
 ```mermaid
 flowchart TB
-    req(["ChargeRequest<br/>CapabilityID · TenantID · Amount · MaxBudget · UnitCode · Copies<br/>ExternalRef · Overrun"])
-    sreq(["SettleRequest<br/>ReservationID · Amount · MaxBudget · Overrun"])
+    req(["ChargeRequest<br/>Subject (id · tenant · ceilings · unit · copies) · Amount<br/>ExternalRef · Overrun"])
+    sreq(["SettleRequest<br/>Subject · ReservationID · Amount · Overrun"])
     sval{"Nanos.Validate · Overrun.Validate<br/>ReservationID not zero"}
-    hold{"reservation open"}
+    hold{"reservation open<br/>and the subject's own"}
     val{"Nanos.Validate · Overrun.Validate<br/>ValidateExternalRef · NormaliseUnitCode"}
     seen{"ExternalRef already charged<br/>to this capability"}
     same{"same Amount · UnitCode · TenantID"}
@@ -590,7 +590,7 @@ flowchart TB
         direction TB
         c00{"Amount in the unit every counter it moves counts in<br/>no counter past MaxNanos"}
         c0{"each Biscuit copy, innermost first:<br/>spend + reserved + Amount ≤ its budget"}
-        c1{"own spend + reserved + Amount ≤ MaxBudget<br/>(ceiling from the verified token)"}
+        c1{"own spend + reserved + Amount ≤ Subject.MaxBudget<br/>(ceiling from the verified token or stored record)"}
         c2{"each ancestor: spend + reserved + Amount<br/>≤ its MaxBudgetAmount<br/>(ceiling from the stored record)"}
         c3{"tenant spend + reserved + Amount<br/>≤ TenantBudget.MaxBudgetAmount<br/>(when a ceiling is set)"}
         cb{"onCharged(ctx, tx)<br/>consumer's side effect on its own TX"}

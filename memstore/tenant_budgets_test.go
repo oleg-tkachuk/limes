@@ -22,7 +22,9 @@ func seedBudget(t *testing.T, u *UsageStore[struct{}], ceiling, spent limes.Nano
 	}
 	if spent > 0 {
 		if _, err := u.Charge(ctx, limes.ChargeRequest{
-			CapabilityID: uuid.New(), TenantID: tenant, Amount: spent, Overrun: limes.OverrunRecord,
+			Subject: newSubject(subjectSpec{capID: uuid.New(), tenant: tenant}),
+			Amount:  spent,
+			Overrun: limes.OverrunRecord,
 		}, nil); err != nil {
 			t.Fatal(err)
 		}

@@ -62,10 +62,10 @@ type Meter[TX any] interface {
 	// each ancestor and of the tenant aggregate, writes one charges-ledger
 	// row, and runs onCharged — ALL atomically. Checks, in order:
 	//
-	//   1. Each Biscuit copy's own budget (req.Copies), innermost first →
+	//   1. Each Biscuit copy's own budget (req.Subject.Copies), innermost
+	//      first → ErrBudgetExceeded.
+	//   2. The capability's own ceiling (req.Subject.MaxBudget) →
 	//      ErrBudgetExceeded.
-	//   2. The capability's own ceiling (req.MaxBudget, from the verified
-	//      token) → ErrBudgetExceeded.
 	//   3. Each ancestor's ceiling → ErrBudgetExceeded.
 	//   4. The tenant aggregate ceiling → ErrTenantBudgetExceeded.
 	//
@@ -231,44 +231,31 @@ type UsageHousekeeping interface {
 
 // BumpRequest is the input to Meter.Bump.
 type BumpRequest struct {
-	CapabilityID uuid.UUID
-	// TenantID is the capability's tenant. Used for attribution (metrics);
-	// it is not an authorisation input.
-	TenantID uuid.UUID
-	// MaxRequests is the capability's own ceiling, from the verified
-	// token. 0 = unlimited. Ancestors' ceilings come from their records.
-	MaxRequests int64
-	// Copies are the presented Biscuit copy's own limits, from the verified
-	// token (Capability.Copies), innermost first.
-	Copies []CopyCeiling
+	// Subject is the capability counted, with its ceiling and copy limits:
+	// VerifiedCapability.MeterSubject. Ancestors' ceilings come from their
+	// records.
+	Subject MeterSubject
 }
 
 // ChargeRequest is the input to Meter.Charge.
 type ChargeRequest struct {
-	CapabilityID uuid.UUID
-	// TenantID is the capability's tenant: its aggregate ceiling applies
-	// and the ledger row is filed under it. Required.
-	TenantID uuid.UUID
-	// Amount is the cost, in UnitCode. Within 0..MaxNanos (Nanos.Validate).
-	Amount Nanos
-	// MaxBudget is the capability's own ceiling, from the verified token.
-	// 0 = unlimited.
-	MaxBudget Nanos
-	// UnitCode is the currency or unit; empty means DefaultUnitCode. No
-	// conversion happens: a charge in a unit other than one a counter it
-	// moves already counts in — the capability's, an ancestor's, the
-	// tenant's — returns ErrUnitCodeMismatch and moves nothing. So does a
+	// Subject is the capability charged — its tenant, its own ceiling, its
+	// unit and the presented copy's limits: VerifiedCapability.MeterSubject.
+	// No conversion happens: a counter the charge moves — the
+	// capability's, an ancestor's, the tenant's — that already counts in
+	// another unit refuses it with ErrUnitCodeMismatch, and so does a
 	// reservation.
-	UnitCode string
+	Subject MeterSubject
+	// Amount is the cost, in the subject's unit. Within 0..MaxNanos
+	// (Nanos.Validate).
+	Amount Nanos
 	// Op and Actor are stamped on the ledger row for attribution only;
 	// both may be empty and neither affects enforcement.
 	Op    string
 	Actor string
-	// Copies are the presented Biscuit copy's own limits (Capability.Copies).
-	Copies []CopyCeiling
 	// ExternalRef names the cost in the consumer's own records — the id of
 	// the call or the event that reported it — and makes the charge
-	// idempotent on (CapabilityID, ExternalRef). Empty: every call charges.
+	// idempotent on (capability, ExternalRef). Empty: every call charges.
 	// At most MaxExternalRefBytes long.
 	ExternalRef string
 	// Overrun is what happens when Amount would cross a ceiling.
@@ -351,23 +338,19 @@ const DefaultReservationTTL = 5 * time.Minute
 
 // ReserveRequest is the input to Meter.Reserve.
 type ReserveRequest struct {
-	CapabilityID uuid.UUID
-	// TenantID is the capability's tenant. Required.
-	TenantID uuid.UUID
-	// Amount to hold, in UnitCode. Within 0..MaxNanos (Nanos.Validate).
+	// Subject is the capability the hold counts against
+	// (VerifiedCapability.MeterSubject). The reservation keeps the
+	// presented copy's limits, and Settle checks and charges them.
+	Subject MeterSubject
+	// Amount to hold, in the subject's unit. Within 0..MaxNanos
+	// (Nanos.Validate).
 	Amount Nanos
-	// MaxBudget is the capability's own ceiling, from the verified token.
-	MaxBudget Nanos
-	UnitCode  string
 	// TTL is how long the hold lasts if never settled or released.
 	// 0 = DefaultReservationTTL; negative is ErrInvalidRequest.
 	TTL time.Duration
 	// Op and Actor are carried onto the charge Settle records.
 	Op    string
 	Actor string
-	// Copies are the presented Biscuit copy's own limits (Capability.Copies).
-	// The reservation keeps them, and Settle checks and charges them.
-	Copies []CopyCeiling
 }
 
 // Reservation is a committed hold, as Reserve made it and as GetReservation
@@ -391,11 +374,13 @@ type Reservation struct {
 
 // SettleRequest is the input to Meter.Settle.
 type SettleRequest struct {
+	// Subject is the capability settling, whose ceiling the charge meets
+	// (VerifiedCapability.MeterSubject). A reservation of another
+	// capability is ErrReservationNotFound.
+	Subject       MeterSubject
 	ReservationID uuid.UUID
 	// Amount is the actual cost to charge. Within 0..MaxNanos (Nanos.Validate).
 	Amount Nanos
-	// MaxBudget is the capability's own ceiling, from the verified token.
-	MaxBudget Nanos
 	// Overrun is what happens when Amount would cross a ceiling.
 	Overrun OverrunPolicy
 }

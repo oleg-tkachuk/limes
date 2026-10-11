@@ -320,12 +320,13 @@ func ExampleMatchResource() {
 func Example_charge() {
 	ctx := context.Background()
 	s := newExampleStack()
-	c, _ := s.issue()
+	_, token := s.issue()
+	// The ceilings come from what the verifier accepted, never from the caller.
+	subject := s.verified(token).MeterSubject()
 
 	charge := func(amount string) (limes.ChargeReceipt, error) {
 		return s.usage.Charge(ctx, limes.ChargeRequest{
-			CapabilityID: c.ID, TenantID: s.tenantID, Amount: limes.MustParseAmount(amount),
-			MaxBudget: c.Caveats.MaxBudgetAmount, UnitCode: "USD", Op: "search",
+			Subject: subject, Amount: limes.MustParseAmount(amount), Op: "search",
 		}, nil)
 	}
 

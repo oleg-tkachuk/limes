@@ -53,7 +53,8 @@ func TestChildrenCannotSpendPastTheirParentsBudget(t *testing.T) {
 
 	charge := func(id uuid.UUID, amount limes.Nanos) (limes.ChargeReceipt, error) {
 		return u.Charge(ctx, limes.ChargeRequest{
-			CapabilityID: id, TenantID: tenant, Amount: amount, MaxBudget: limes.MustParseAmount("20"), UnitCode: "USD",
+			Subject: newSubject(subjectSpec{capID: id, tenant: tenant, maxBudget: limes.MustParseAmount("20"), unit: "USD"}),
+			Amount:  amount,
 		}, nil)
 	}
 	first, err := charge(kids[0], 20*unit)
@@ -98,7 +99,7 @@ func TestChildrenCannotExceedTheirParentsRequestCount(t *testing.T) {
 		limes.Caveats{Ops: []limes.Op{limes.OpGet}, MaxRequests: 3},
 	)
 	bump := func(id uuid.UUID) error {
-		_, err := u.Bump(ctx, limes.BumpRequest{CapabilityID: id, TenantID: tenant, MaxRequests: 3})
+		_, err := u.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant, maxRequests: 3})})
 		return err
 	}
 	for i, id := range []uuid.UUID{kids[0], kids[0], kids[1]} {

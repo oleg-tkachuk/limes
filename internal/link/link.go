@@ -4,6 +4,24 @@
 // root.
 package link
 
+import "github.com/google/uuid"
+
 // DecodeToken reads a compact capability token's header and claims without
 // checking its signature, returning a limes.Capability.
 var DecodeToken func(token string) (any, error)
+
+// MeterSubjectFields are the parts of a limes.MeterSubject.
+type MeterSubjectFields struct {
+	CapabilityID, TenantID uuid.UUID
+	MaxRequests            int64
+	MaxBudget              int64
+	UnitCode               string
+	// Copies is a []limes.CopyCeiling.
+	Copies any
+}
+
+// NewMeterSubject builds a limes.MeterSubject from its parts, for the
+// module's own conformance suites and tests: a meter checked against
+// ceilings no issuer signed. The root sets it as it initialises; outside the
+// module only a verified capability makes one.
+var NewMeterSubject func(MeterSubjectFields) any

@@ -139,11 +139,11 @@ func main() {
 	// 6. Charge against the budget. The capability's ceiling, each ancestor's
 	//    and the tenant's all apply; a rejection by any leaves every counter
 	//    untouched, so a retry is always safe.
-	receipt, err := usage.Charge(ctx, limes.ChargeRequest{CapabilityID: parent.ID, TenantID: tenantID, Amount: limes.MustParseAmount("0.35"), MaxBudget: parent.Caveats.MaxBudgetAmount, UnitCode: "USD", Op: "search", Actor: "research-orchestrator"}, nil)
+	receipt, err := usage.Charge(ctx, limes.ChargeRequest{Subject: verified.MeterSubject(), Amount: limes.MustParseAmount("0.35"), Op: "search", Actor: "research-orchestrator"}, nil)
 	must(err, "charge")
 	fmt.Printf("charged  0.35 USD, spent now %s\n", receipt.Spent)
 
-	_, err = usage.Charge(ctx, limes.ChargeRequest{CapabilityID: parent.ID, TenantID: tenantID, Amount: limes.MustParseAmount("999"), MaxBudget: parent.Caveats.MaxBudgetAmount, UnitCode: "USD", Op: "search", Actor: "research-orchestrator"}, nil)
+	_, err = usage.Charge(ctx, limes.ChargeRequest{Subject: verified.MeterSubject(), Amount: limes.MustParseAmount("999"), Op: "search", Actor: "research-orchestrator"}, nil)
 	if !errors.Is(err, limes.ErrBudgetExceeded) {
 		log.Fatalf("over-budget charge should have been refused, got %v", err)
 	}

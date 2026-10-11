@@ -55,7 +55,7 @@ func (s *meteringCopyStore[TX]) CopyUsage(ctx context.Context, revocationIDs [][
 // Bump emits limes.request.bumps.
 func (s *meteringStore[TX]) Bump(ctx context.Context, req BumpRequest) (BumpReceipt, error) {
 	receipt, err := s.inner.Bump(ctx, req)
-	s.in.recordBump(ctx, req.TenantID, err)
+	s.in.recordBump(ctx, req.Subject.TenantID(), err)
 	return receipt, err
 }
 
@@ -66,7 +66,7 @@ func (s *meteringStore[TX]) Charge(ctx context.Context, req ChargeRequest, onCha
 	if err == nil && receipt.Replayed {
 		return receipt, nil
 	}
-	s.in.recordCharge(ctx, req.TenantID, req.Amount, receipt, err)
+	s.in.recordCharge(ctx, req.Subject.TenantID(), req.Amount, receipt, err)
 	return receipt, err
 }
 
@@ -82,7 +82,7 @@ func (s *meteringStore[TX]) Refund(ctx context.Context, req RefundRequest) (Refu
 // Reserve emits limes.reservation.decisions.
 func (s *meteringStore[TX]) Reserve(ctx context.Context, req ReserveRequest) (Reservation, error) {
 	r, err := s.inner.Reserve(ctx, req)
-	s.in.recordReservation(ctx, req.TenantID, err)
+	s.in.recordReservation(ctx, req.Subject.TenantID(), err)
 	return r, err
 }
 
