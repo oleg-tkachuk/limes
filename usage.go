@@ -613,4 +613,3 @@ func ValidateExternalRef(ref string) error {
 	}
 	return nil
 }
-
