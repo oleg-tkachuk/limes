@@ -12,9 +12,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// memStore is a goroutine-safe in-memory Store stub for tests. We avoid
-// pulling in the postgres package here; the SQL surface is tested
-// separately and the verifier doesn't need a real DB.
+// memStore is a goroutine-safe in-memory Store stub, so the verifier's
+// tests need no store package.
 type memStore struct {
 	caps     map[uuid.UUID]Capability
 	revoked  map[uuid.UUID]bool

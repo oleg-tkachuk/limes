@@ -435,7 +435,8 @@ const maxUtilisationPct = 100
 // percent turns a fraction into a percentage.
 const percent = 100
 
-// uuidLess orders ids as Postgres orders the uuid type: bytewise.
+// uuidLess is the ascending id order Store.ListByPrincipal pages in:
+// bytewise, as UUIDs compare.
 func uuidLess(a, b uuid.UUID) bool { return bytes.Compare(a[:], b[:]) < 0 }
 
 // ─── limes.UsageStore[TX] ─────────────────────────────────────────────
@@ -1106,9 +1107,10 @@ func (s *UsageStore[TX]) SetTenantBudget(_ context.Context, args limes.SetTenant
 
 	b, exists := s.budgets[args.TenantID]
 
-	// Same OCC contract as the Postgres store, or tests pass against a
-	// memstore that permits writes production refuses. A missing row expects
-	// version 0; an existing one expects its current version.
+	// SetTenantBudgetRequest.ExpectedVersion's contract, held as every store
+	// must hold it, or tests pass against a memstore that permits writes a
+	// real store refuses. A missing budget expects version 0; an existing one
+	// expects its current version.
 	want := int64(0)
 	if exists {
 		want = b.ResourceVersion

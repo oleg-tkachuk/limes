@@ -54,9 +54,8 @@ func invalidRequest(format string, args ...any) error {
 	return fmt.Errorf("%w: "+format, append([]any{ErrInvalidRequest}, args...)...)
 }
 
-// DefaultUnitCode is the fallback when a request / row omits the
-// unit. Keeps existing payloads / DB rows working without an explicit
-// migration on the domain side.
+// DefaultUnitCode is the unit of a request or stored record that names
+// none, so one written before it carried a unit keeps its meaning.
 const DefaultUnitCode = "USD"
 
 // AbstractUnitCode is the unit of a budget that is not money — requests,
