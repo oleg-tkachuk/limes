@@ -15,10 +15,9 @@ import (
 )
 
 // JWKSDocument is the on-the-wire shape served at the issuer's JWKS
-// endpoint (typically `/.well-known/jwks.json` on the admin plane).
-// Verifiers in other planes / pods fetch and cache this document with
-// a short TTL so capability verification stays local without an extra
-// RPC per request.
+// endpoint (JWKSHandler; typically `/.well-known/jwks.json`). Verifiers in
+// other services fetch and cache this document (RemoteJWKSResolver) so
+// capability verification stays local without an extra call per request.
 //
 // Format: RFC 7517 with kty=OKP and crv=Ed25519 (RFC 8037), alg=Ed25519
 // (RFC 9864).

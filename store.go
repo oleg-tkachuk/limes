@@ -9,8 +9,8 @@ import (
 )
 
 // Store persists capability records and revocation entries. Consumers supply
-// the implementation; memstore ships an in-memory one and the reference
-// deployment supplies a relational one.
+// the implementation; memstore ships an in-memory one, and a store over a
+// database is the consumer's own.
 //
 // Records are append-mostly: capabilities aren't mutated after issuance
 // except via Revoke. Revocations are checked by the verifier on every
@@ -34,9 +34,10 @@ type Store interface {
 	// ErrTenantDeleted for a tenant it cannot mint for.
 	Insert(ctx context.Context, c Capability, issuedBy Principal) error
 
-	// Get fetches a capability record by ID. Returns ErrNotFound when
-	// no row exists; callers normally treat that as ErrInvalidSignature
-	// (token forgery) rather than a missing entity.
+	// Get fetches a capability record by ID, for audit and admin reads and
+	// for a reporter that needs a capability's ceilings (see Meter).
+	// Returns ErrNotFound when no row exists. StandardVerifier never calls
+	// it: verification needs no record, only IsRevoked.
 	//
 	// ErrNotFound is defined in THIS package (below), not in any store
 	// implementation — a third party writing its own Store must have a
@@ -45,8 +46,7 @@ type Store interface {
 
 	// GetRecord reads back everything Insert and Revoke wrote about a
 	// capability: the capability, who issued it, and its own revocation
-	// entry if it has one. ErrNotFound as Get. Get stays the read on the
-	// verification path; this one is for audit and admin tooling.
+	// entry if it has one. ErrNotFound as Get. For audit and admin reads.
 	GetRecord(ctx context.Context, id uuid.UUID) (Record, error)
 
 	// IsRevoked reports whether the capability, or any ancestor of it
@@ -89,9 +89,7 @@ type Store interface {
 // in-memory, relational, or otherwise — can satisfy the Store contract using
 // only what this package publishes.
 //
-// Verifiers map it to an invalid-token response: a syntactically valid token
-// whose record is absent was forged or purged, which is an authentication
-// failure, not a missing entity.
+// The verifier never returns it: an id not on record is simply not revoked.
 var ErrNotFound = errors.New("limes: not found")
 
 // Record is a capability as the Store holds it.

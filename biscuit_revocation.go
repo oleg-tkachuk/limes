@@ -28,6 +28,8 @@ import (
 // is revoked. The ids it is asked about come from a Biscuit whose signature
 // chain has already verified.
 type BiscuitRevocationLookup interface {
+	// IsBiscuitRevoked reports whether any of revocationIDs — the blocks
+	// of one copy, authority first — has been revoked.
 	IsBiscuitRevoked(ctx context.Context, revocationIDs [][]byte) (bool, error)
 }
 

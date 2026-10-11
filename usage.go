@@ -188,11 +188,11 @@ type TenantBudgets interface {
 
 	// ListTenantBudgets returns tenant budget rows, with the consumer's
 	// display fields where it has them. Filters:
-	//   - excludeInactive: skip tenants the consumer considers inactive.
-	//   - thresholdPct > 0: include only rows where
-	//     spent / max * 100 >= thresholdPct (and max > 0).
-	//   - unlimitedOnly: include only rows where max == 0.
-	//   - limit: the page size, as PageLimit reads it.
+	//   - ExcludeInactive: skip tenants the consumer considers inactive.
+	//   - ThresholdPct > 0: include only rows where
+	//     spent / max * 100 >= ThresholdPct (and max > 0).
+	//   - UnlimitedOnly: include only rows where max == 0.
+	//   - Limit: the page size, as PageLimit reads it.
 	//
 	// Rows come most at risk first: by spent / max × 100 descending —
 	// unclamped, so of two tenants past their ceilings the further one
@@ -243,7 +243,7 @@ type ChargeRequest struct {
 	// TenantID is the capability's tenant: its aggregate ceiling applies
 	// and the ledger row is filed under it. Required.
 	TenantID uuid.UUID
-	// Amount is the cost, in UnitCode. Must be finite and ≥ 0.
+	// Amount is the cost, in UnitCode. Within 0..MaxNanos (ValidateAmount).
 	Amount Nanos
 	// MaxBudget is the capability's own ceiling, from the verified token.
 	// 0 = unlimited.
@@ -347,7 +347,7 @@ type ReserveRequest struct {
 	CapabilityID uuid.UUID
 	// TenantID is the capability's tenant. Required.
 	TenantID uuid.UUID
-	// Amount to hold, in UnitCode. Must be finite and ≥ 0.
+	// Amount to hold, in UnitCode. Within 0..MaxNanos (ValidateAmount).
 	Amount Nanos
 	// MaxBudget is the capability's own ceiling, from the verified token.
 	MaxBudget Nanos
@@ -385,7 +385,7 @@ type Reservation struct {
 // SettleRequest is the input to Meter.Settle.
 type SettleRequest struct {
 	ReservationID uuid.UUID
-	// Amount is the actual cost to charge. Must be finite and ≥ 0.
+	// Amount is the actual cost to charge. Within 0..MaxNanos (ValidateAmount).
 	Amount Nanos
 	// MaxBudget is the capability's own ceiling, from the verified token.
 	MaxBudget Nanos
@@ -536,8 +536,10 @@ type CopyUsageReader interface {
 // Usage-related sentinels. ErrBudgetExceeded already lives in types.go
 // (declared before the runtime enforcement landed); reused here.
 var (
-	// ErrInvalidAmount — a charge or refund amount that is negative, NaN
-	// or infinite. Refunds are explicit; a negative charge is not one.
+	// ErrInvalidAmount — an amount that is negative or above MaxNanos, a
+	// decimal that is not one (ParseAmount), or a charge that would take a
+	// counter past MaxNanos. Refunds are explicit; a negative charge is not
+	// one.
 	ErrInvalidAmount = errors.New("limes: invalid amount")
 
 	// ErrChargeNotFound — Refund named a charge with no ledger row.
@@ -561,11 +563,10 @@ var (
 	ErrUsageNotFound = errors.New("limes: usage row not found")
 
 	// ErrTenantBudgetExceeded — the tenant aggregate cap has been
-	// hit. Distinct from ErrBudgetExceeded so admin tooling can
-	// render "this tenant is out of budget" vs. "this capability is
-	// out of budget". Operators handle differently — tenant lift
-	// is an admin RPC; capability lift requires re-issuing the
-	// caveat.
+	// hit. Distinct from ErrBudgetExceeded because the remedy differs:
+	// an operator raises a tenant's ceiling with SetTenantBudget, while a
+	// capability's ceiling is in its token and lifting it means issuing a
+	// new one.
 	ErrTenantBudgetExceeded = errors.New("limes: tenant aggregate budget exceeded")
 
 	// ErrTenantBudgetNotFound — Get-only; the tenant has no cap

@@ -79,8 +79,8 @@ func AmountFromFloat(f float64) (Nanos, error) {
 const maxExponentDigits = 3
 
 // decimalAmount is the one form an amount is written in: digits, an optional
-// fraction, an optional exponent. A sign is read only to refuse it as
-// negative. big.Rat reads far more — fractions, hex, binary and octal
+// fraction, an optional exponent. A minus sign is read so that a negative
+// amount is refused by its value; minus zero reads as zero. big.Rat reads far more — fractions, hex, binary and octal
 // floats, underscores — none of which is a decimal amount.
 var decimalAmount = regexp.MustCompile(`^-?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]{1,` +
 	strconv.Itoa(maxExponentDigits) + `})?$`)

@@ -54,7 +54,7 @@ func (c Caveats) RestrictsResources() bool {
 }
 
 // AllowsResource reports whether uri is reachable under the resource caveats:
-// unrestricted caveats allow any non-empty uri; restricted ones require an
+// unrestricted caveats allow any uri; restricted ones require an
 // exact ResourceURIs entry or a covering ResourcePrefixes entry. An empty uri,
 // or one with a dot segment (HasDotSegment), is never allowed by restricted
 // caveats — an operation that cannot name what

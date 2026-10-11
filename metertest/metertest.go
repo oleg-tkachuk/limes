@@ -1,5 +1,6 @@
-// Package metertest checks a limes.Meter against the module's contract,
-// the way testing/fstest checks an fs.FS. A Meter is the consumer's to write,
+// Package metertest checks a limes.UsageStore against the module's contract
+// — its Meter, tenant budgets and housekeeping — the way testing/fstest
+// checks an fs.FS. A UsageStore is the consumer's to write,
 // and most of its contract lives in request fields — a store that ignores
 // ExternalRef or Overrun still compiles, and then charges a repeated cost
 // twice. Run it from the store's own tests:

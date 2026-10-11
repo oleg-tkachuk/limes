@@ -13,6 +13,8 @@ import (
 // implements it; tests substitute a stub. Like Store.IsRevoked, it answers
 // for the capability's whole delegation chain.
 type RevocationLookup interface {
+	// IsRevoked reports whether id, or any ancestor of it, is revoked. An
+	// error is no answer: the verifier refuses rather than assume not.
 	IsRevoked(ctx context.Context, id uuid.UUID) (bool, error)
 }
 
