@@ -21,7 +21,7 @@ import (
 )
 
 // document is the on-the-wire shape served at the issuer's JWKS
-// endpoint (Handler; typically `/.well-known/jwks.json`). Verifiers in
+// endpoint (NewHandler; typically `/.well-known/jwks.json`). Verifiers in
 // other services fetch and cache this document (Remote) so
 // capability verification stays local without an extra call per request.
 //

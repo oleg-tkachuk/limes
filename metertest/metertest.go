@@ -112,6 +112,9 @@ const (
 	// periodLength is how far ahead the accounting window of the
 	// PeriodEnd check closes.
 	periodLength = 30 * 24 * time.Hour
+	// tiedTenants is how many tenants of the listing check spend nothing
+	// under a ceiling, and so share one utilization.
+	tiedTenants = 2
 	// concurrentDeliveries is how many times one cost arrives at once.
 	concurrentDeliveries = 20
 )
@@ -674,8 +677,10 @@ func checkTenantBudgetReads[TX any](t *testing.T, f fixture[TX]) {
 	set, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
 		TenantID: f.Tenant, MaxBudgetAmount: tenantBudget, UnitCode: unit, ExpectedVersion: got.ResourceVersion,
 	})
-	if err != nil || set.ReservedAmount != held || set.ResourceVersion != got.ResourceVersion+1 {
-		t.Errorf("SetTenantBudget = %+v, %v; want %v held and the next version", set, err, held)
+	// The version is an opaque token: a write changes it, and it is never 0
+	// once a ceiling is set — nothing says by how much it moves.
+	if err != nil || set.ReservedAmount != held || set.ResourceVersion == got.ResourceVersion || set.ResourceVersion == 0 {
+		t.Errorf("SetTenantBudget = %+v, %v; want %v held and a new version", set, err, held)
 	}
 	for _, ceiling := range []limes.Nanos{-1, limes.MaxNanos + 1} {
 		if _, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
@@ -1076,18 +1081,27 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 			t.Errorf("ListTenantBudgets with %s: err = %v, want ErrInvalidRequest", name, err)
 		}
 	}
-	// The fixture's tenant has a ceiling of 30 and nothing spent; three more
-	// have ceilings, and one of them is unlimited.
+	// The fixture's tenant has a ceiling of 30 and spends half of it; two
+	// more have ceilings and spend nothing, so they tie and their ids order
+	// them; and one more is unlimited.
 	if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: f.root, maxBudget: rootBudget}), Amount: 15 * one}, nil); err != nil {
 		t.Fatal(err)
 	}
-	unlimited, err := f.newTenant()
-	if err != nil {
-		t.Fatal(err)
+	newTenant := func(ceiling limes.Nanos) uuid.UUID {
+		t.Helper()
+		id, err := f.newTenant()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Usage.SetTenantBudget(f.tenantCtx(id), limes.SetTenantBudgetRequest{TenantID: id, MaxBudgetAmount: ceiling, UnitCode: unit}); err != nil {
+			t.Fatal(err)
+		}
+		return id
 	}
-	if _, err := f.Usage.SetTenantBudget(f.tenantCtx(unlimited), limes.SetTenantBudgetRequest{TenantID: unlimited, UnitCode: unit}); err != nil {
-		t.Fatal(err)
+	for range tiedTenants {
+		newTenant(tenantBudget)
 	}
+	unlimited := newTenant(0)
 	all := map[uuid.UUID]bool{}
 	var order []limes.TenantBudgetSummary
 	cursor := ""
@@ -1101,6 +1115,9 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 			t.Fatalf("a page of %d rows under a limit of 1", len(page))
 		}
 		for _, row := range page {
+			if all[row.TenantID] {
+				t.Errorf("tenant %s listed twice while nothing was spent", row.TenantID)
+			}
 			all[row.TenantID] = true
 			order = append(order, row)
 		}
@@ -1112,11 +1129,17 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 	if !all[f.Tenant] || !all[unlimited] {
 		t.Fatalf("paging skipped a tenant: %v", all)
 	}
+	if want := 1 + tiedTenants + 1; len(order) != want {
+		t.Errorf("listed %d tenants, want %d", len(order), want)
+	}
 	for i := 1; i < len(order); i++ {
 		cur, _ := order[i].Budget.Utilization()
 		prev, _ := order[i-1].Budget.Utilization()
-		if cur > prev {
+		switch {
+		case cur > prev:
 			t.Errorf("row %d at %v%% follows one at %v%%; want most at risk first", i, cur, prev)
+		case cur == prev && bytes.Compare(order[i].TenantID[:], order[i-1].TenantID[:]) < 0:
+			t.Errorf("row %d (%s) follows %s at the same %v%%; want ascending tenant id", i, order[i].TenantID, order[i-1].TenantID, cur)
 		}
 	}
 	const half = 50

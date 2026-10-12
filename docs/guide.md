@@ -255,7 +255,7 @@ A verifier with no `DPoP` refuses every key-bound capability with
 cannot be lost to a forgotten call. `dpop.Proof.URL` is the absolute URL the
 client addressed, scheme and host included. Behind a proxy that rewrites the
 host or strips a mount prefix, or for a server that sees only the path, set
-`dpop.Verifier.MatchPathOnly`: only the server's side of the comparison then
+`dpop.VerifierConfig.MatchPathOnly`: only the server's side of the comparison then
 drops scheme, host and prefix — the proof's `htu` must still be an absolute
 URI.
 

@@ -69,10 +69,10 @@ and a `jti` not seen before.
   empty path as `/`, unreserved characters' percent-encodings decoded and
   every other one in upper case, dot segments removed (§5.2.4); no query or
   fragment. A URI with userinfo is refused (RFC 9110 §4.2.4). Behind a proxy,
-  `dpop.Verifier.MatchPathOnly` compares the normalised paths alone, and lets
+  `dpop.VerifierConfig.MatchPathOnly` compares the normalised paths alone, and lets
   the proof's path carry extra leading segments, as a proxy's mount prefix
   adds.
-- **Nonces (§8, §9).** With `dpop.Verifier.Nonces` set, every proof must carry
+- **Nonces (§8, §9).** With `dpop.VerifierConfig.Nonces` set, every proof must carry
   a nonce the server issued; one without is refused with
   `dpop.ErrNonceRequired` (`use_dpop_nonce`), and
   `StandardVerifier.DPoPNonce` gives the nonce to send in `DPoP-Nonce`.
