@@ -45,11 +45,13 @@ commit "feat: code"
 check "main moved past it with code" "release=false" "$("$script" "$passed" 2>/dev/null)"
 check "a sha this clone does not have" "release=false" "$("$script" 0000000000000000000000000000000000000000 2>/dev/null)"
 
-# A sha that is not behind the head is never released in its place.
-git checkout -q -b side "$passed"
-echo 'package side' >side.go
-git add side.go
-commit "feat: elsewhere"
+# A sha that is not behind the head is never released in its place, even
+# when the two differ by documentation only: the side commit forks from the
+# head and touches docs alone, so only the ancestry check can refuse it.
+git checkout -q -b side
+echo other >docs/other.md
+git add docs/other.md
+commit "docs: elsewhere"
 elsewhere=$(git rev-parse HEAD)
 git checkout -q -
 echo more >>docs/guide.md
