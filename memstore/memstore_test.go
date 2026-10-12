@@ -31,7 +31,7 @@ func mkCap(id, parent uuid.UUID, tenant uuid.UUID, subject string) limes.Capabil
 // operators racing, must not turn the second call into an error.
 func TestRevokeIsIdempotent(t *testing.T) {
 	ctx := context.Background()
-	s := New[struct{}]()
+	s := newTestStore()
 	id := uuid.New()
 	if err := s.Insert(ctx, limes.InsertRequest{Capability: mkCap(id, uuid.Nil, uuid.New(), "a"), IssuedBy: limes.Principal{Subject: "test-operator"}}); err != nil {
 		t.Fatalf("Insert: %v", err)
@@ -52,7 +52,7 @@ func TestRevokeIsIdempotent(t *testing.T) {
 // it, revoking the parent leaves its children running with live authority.
 func TestRevokeCascadesToDescendants(t *testing.T) {
 	ctx := context.Background()
-	s := New[struct{}]()
+	s := newTestStore()
 	tenant := uuid.New()
 	root, child, grandchild := uuid.New(), uuid.New(), uuid.New()
 
@@ -84,7 +84,7 @@ func TestRevokeCascadesToDescendants(t *testing.T) {
 // Revocation still flows only downwards — revoking a child leaves its parent.
 func TestRevokingAParentRevokesItsChildrenWithoutCascade(t *testing.T) {
 	ctx := context.Background()
-	s := New[struct{}]()
+	s := newTestStore()
 	tenant := uuid.New()
 	root, child, grandchild := uuid.New(), uuid.New(), uuid.New()
 	_ = s.Insert(ctx, limes.InsertRequest{Capability: mkCap(root, uuid.Nil, tenant, "parent"), IssuedBy: limes.Principal{Subject: "test-operator"}})
@@ -104,7 +104,7 @@ func TestRevokingAParentRevokesItsChildrenWithoutCascade(t *testing.T) {
 
 // An absent record is forgery, not a missing entity (contracts §1.1).
 func TestGetAbsentReturnsErrNotFound(t *testing.T) {
-	s := New[struct{}]()
+	s := newTestStore()
 	_, err := s.GetRecord(context.Background(), uuid.New())
 	if !errors.Is(err, limes.ErrNotFound) {
 		t.Fatalf("want limes.ErrNotFound, got %v", err)
@@ -115,7 +115,7 @@ func TestGetAbsentReturnsErrNotFound(t *testing.T) {
 // retry and the counter cannot drift past the limit.
 func TestBumpRequestRejectsWithoutMutating(t *testing.T) {
 	ctx := context.Background()
-	u := NewUsage[struct{}](nil)
+	u := newTestUsage(nil)
 	id := uuid.New()
 
 	for i := int64(1); i <= 2; i++ {
@@ -140,7 +140,7 @@ func TestBumpRequestRejectsWithoutMutating(t *testing.T) {
 // maxRequests <= 0 means "no ceiling"; it must not be read as "zero allowed".
 func TestBumpRequestUnlimited(t *testing.T) {
 	ctx := context.Background()
-	u := NewUsage[struct{}](nil)
+	u := newTestUsage(nil)
 	id := uuid.New()
 	for i := range 50 {
 		if _, err := u.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: id, tenant: testTenant})}); err != nil {
@@ -153,7 +153,7 @@ func TestBumpRequestUnlimited(t *testing.T) {
 // an empty unit — clients would otherwise render a bare number.
 func TestSetTenantBudgetDefaultsUnitCode(t *testing.T) {
 	ctx := context.Background()
-	u := NewUsage[struct{}](nil)
+	u := newTestUsage(nil)
 	b, err := u.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
 		TenantID: uuid.New(), Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("10")},
 	})
@@ -167,7 +167,7 @@ func TestSetTenantBudgetDefaultsUnitCode(t *testing.T) {
 
 func TestRefundReturnsSpendToEveryCounterOnce(t *testing.T) {
 	ctx := context.Background()
-	u := NewUsage[struct{}](nil)
+	u := newTestUsage(nil)
 	id, tenant := uuid.New(), uuid.New()
 	_, _ = u.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("100")}})
 	receipt, err := u.Charge(ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant, budget: budgetOf(limes.MustParseAmount("100")), unit: "USD"}), Amount: limes.MustParseAmount("5")}, nil)
@@ -206,7 +206,7 @@ func TestRefundReturnsSpendToEveryCounterOnce(t *testing.T) {
 
 func TestChargeRejectsInvalidAmounts(t *testing.T) {
 	ctx := context.Background()
-	u := NewUsage[struct{}](nil)
+	u := newTestUsage(nil)
 	for _, amt := range []limes.Nanos{-1, limes.MaxNanos + 1} {
 		_, err := u.Charge(ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: uuid.New(), tenant: uuid.New()}), Amount: amt}, nil)
 		if !errors.Is(err, limes.ErrInvalidAmount) {
@@ -219,7 +219,7 @@ func TestChargeRejectsInvalidAmounts(t *testing.T) {
 // capability on record, and goes when that capability is purged.
 func TestRevokeBiscuit(t *testing.T) {
 	ctx := context.Background()
-	s := New[struct{}]()
+	s := newTestStore()
 	id := uuid.New()
 	if err := s.Insert(ctx, limes.InsertRequest{Capability: mkCap(id, uuid.Nil, uuid.New(), "a"), IssuedBy: limes.Principal{Subject: "op"}}); err != nil {
 		t.Fatal(err)
@@ -265,8 +265,8 @@ func TestRevokeBiscuit(t *testing.T) {
 // ceiling stays short by it for good.
 func TestPurgeOrphansReleasesHolds(t *testing.T) {
 	ctx := context.Background()
-	records := New[struct{}]()
-	u := NewUsage(records)
+	records := newTestStore()
+	u := newTestUsage(records)
 	tenant, gone := uuid.New(), uuid.New() // gone was never recorded
 	const held = 3 * limes.NanosPerUnit
 	res, err := u.Reserve(ctx, limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: gone, tenant: tenant}), Amount: held})

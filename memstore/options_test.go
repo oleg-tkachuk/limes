@@ -14,9 +14,12 @@ import (
 type fakeTx struct{ id int }
 
 // The factory's handle is the one a charge's callback receives.
-func TestWithTxFactoryThreadsTheHandle(t *testing.T) {
+func TestTxFactoryThreadsTheHandle(t *testing.T) {
 	const handleID = 42
-	u := NewUsage[*fakeTx](nil).WithTxFactory(func() *fakeTx { return &fakeTx{id: handleID} })
+	u, err := NewUsageStore(UsageStoreConfig[*fakeTx]{TxFactory: func() *fakeTx { return &fakeTx{id: handleID} }})
+	if err != nil {
+		t.Fatal(err)
+	}
 	var got *fakeTx
 	if _, err := u.Charge(context.Background(), limes.ChargeRequest{
 		Subject: newSubject(subjectSpec{capID: uuid.New(), tenant: uuid.New()}),
@@ -30,10 +33,13 @@ func TestWithTxFactoryThreadsTheHandle(t *testing.T) {
 }
 
 // The record store's clock decides what Purge counts as expired.
-func TestStoreWithClockDrivesPurge(t *testing.T) {
+func TestStoreClockDrivesPurge(t *testing.T) {
 	ctx := context.Background()
 	now := time.Unix(1_800_000_000, 0)
-	s := New[struct{}]().WithClock(func() time.Time { return now })
+	s, err := NewStore(StoreConfig{Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
 	tenant := uuid.New()
 	c := limes.Capability{
 		ID: uuid.New(), ExpiresAt: now.Add(time.Minute),

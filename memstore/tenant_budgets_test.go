@@ -34,7 +34,7 @@ func seedBudget(t *testing.T, u *UsageStore[struct{}], ceiling limes.BudgetCeili
 
 func TestListTenantBudgets(t *testing.T) {
 	ctx := context.Background()
-	u := NewUsage[struct{}](nil)
+	u := newTestUsage(nil)
 	over := seedBudget(t, u, limes.BudgetCeiling{Max: 10 * unit}, 15*unit) // past its ceiling: clamped to 100%
 	half := seedBudget(t, u, limes.BudgetCeiling{Max: 10 * unit}, 5*unit)  // 50%
 	low := seedBudget(t, u, limes.BudgetCeiling{Max: 10 * unit}, 1*unit)   // 10%
@@ -82,7 +82,7 @@ func TestListTenantBudgets(t *testing.T) {
 // again; without it the ceiling changes and the spend stands.
 func TestSetTenantBudgetResetSpend(t *testing.T) {
 	ctx := context.Background()
-	u := NewUsage[struct{}](nil)
+	u := newTestUsage(nil)
 	tenant := seedBudget(t, u, limes.BudgetCeiling{Max: 10 * unit}, 4*unit)
 	b, _ := u.GetTenantBudget(ctx, tenant)
 
@@ -113,7 +113,7 @@ func TestSetTenantBudgetResetSpend(t *testing.T) {
 // ceiling of two leads although both read 100%.
 func TestListTenantBudgetsPages(t *testing.T) {
 	ctx := context.Background()
-	u := NewUsage[struct{}](nil)
+	u := newTestUsage(nil)
 	further := seedBudget(t, u, limes.BudgetCeiling{Max: 10 * unit}, 20*unit) // 200%
 	past := seedBudget(t, u, limes.BudgetCeiling{Max: 10 * unit}, 12*unit)    // 120%
 	half := seedBudget(t, u, limes.BudgetCeiling{Max: 10 * unit}, 5*unit)

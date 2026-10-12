@@ -93,6 +93,16 @@ func TestVerifyEnforcesKeyIssuerBinding(t *testing.T) {
 		TrustedIssuers: []string{"iss", "other"},
 		KeyIssuers:     map[string]string{"k1": "iss"},
 	})
+	// A trusted key the binding does not name signs for nobody.
+	unbound := verifierFor(t, pub, VerifierConfig{
+		TrustedIssuers: []string{"iss", "other"},
+		KeyIssuers:     map[string]string{"k2": "iss"},
+	})
+	if _, err := unbound.Verify(context.Background(), VerifyRequest{
+		Token: resign(t, priv, map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV4}, validClaims(uuid.New())), Audience: "data",
+	}); !errors.Is(err, ErrInvalidToken) {
+		t.Errorf("a kid the binding does not name: Verify = %v, want ErrInvalidToken", err)
+	}
 	ctx := context.Background()
 	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV4}
 

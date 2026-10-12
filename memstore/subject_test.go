@@ -1,6 +1,8 @@
 package memstore
 
 import (
+	"testing"
+
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes"
@@ -48,3 +50,31 @@ func requestsOf(n int64) *limes.RequestCeiling    { return &limes.RequestCeiling
 
 // testTenant is a tenant for a test that meters under one and cares not which.
 var testTenant = uuid.MustParse("00000000-0000-4000-8000-000000000001")
+
+// newTestStore and newTestUsage are the stores a test builds with the
+// defaults; neither constructor fails on them.
+func newTestStore() *Store {
+	s, err := NewStore(StoreConfig{})
+	if err != nil {
+		panic(err)
+	}
+	return s
+}
+
+func newTestUsage(records *Store) *UsageStore[struct{}] {
+	u, err := NewUsageStore(UsageStoreConfig[struct{}]{Records: records})
+	if err != nil {
+		panic(err)
+	}
+	return u
+}
+
+// mustUsage is NewUsageStore of cfg, failing the test on an error.
+func mustUsage(t testing.TB, cfg UsageStoreConfig[struct{}]) *UsageStore[struct{}] {
+	t.Helper()
+	u, err := NewUsageStore(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u
+}

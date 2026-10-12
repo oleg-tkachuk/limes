@@ -62,12 +62,18 @@ type VerifierConfig struct {
 	// ErrInvalidToken.
 	TrustedIssuers []string
 
-	// KeyIssuers, when non-nil, binds each kid to the one issuer allowed
-	// to sign with it: a token whose kid is absent from the map, or whose
-	// `iss` differs from the kid's binding, is rejected. Without it any
-	// trusted key may sign for any trusted issuer, which is fine for one
-	// issuer and wrong for several that do not share a trust boundary.
+	// KeyIssuers binds each kid to the one issuer allowed to sign with it:
+	// a token whose kid is absent from the map, or whose `iss` differs from
+	// the kid's binding, is rejected. With one trusted issuer it may be
+	// nil. With several it is required, unless SharedKeys says otherwise:
+	// any trusted key signing for any trusted issuer is wrong for issuers
+	// that do not share a trust boundary, so it is never the default.
 	KeyIssuers map[string]string
+
+	// SharedKeys lets every trusted key sign for every trusted issuer, for
+	// several issuers that do share one trust boundary. It and KeyIssuers
+	// exclude each other.
+	SharedKeys bool
 
 	// Now is the time function the verifier uses for nbf/exp. Tests
 	// override it; production passes time.Now.
@@ -184,8 +190,13 @@ func NewStandardVerifier(cfg VerifierConfig) (*StandardVerifier, error) {
 		cfg.MaxTokenBytes = DefaultMaxTokenBytes
 	}
 	cfg.TrustedIssuers = slices.Clone(cfg.TrustedIssuers)
-	if cfg.KeyIssuers != nil && len(cfg.KeyIssuers) == 0 {
+	switch {
+	case cfg.KeyIssuers != nil && len(cfg.KeyIssuers) == 0:
 		return nil, errors.New("limes: VerifierConfig.KeyIssuers binds no kid; leave it nil to bind none")
+	case cfg.KeyIssuers != nil && cfg.SharedKeys:
+		return nil, errors.New("limes: VerifierConfig.KeyIssuers and SharedKeys exclude each other")
+	case len(cfg.TrustedIssuers) > 1 && cfg.KeyIssuers == nil && !cfg.SharedKeys:
+		return nil, errors.New("limes: VerifierConfig trusts several issuers; bind each kid to one (KeyIssuers) or set SharedKeys")
 	}
 	cfg.KeyIssuers = maps.Clone(cfg.KeyIssuers)
 	switch {

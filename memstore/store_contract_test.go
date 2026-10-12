@@ -12,6 +12,6 @@ import (
 func TestStoreContract(t *testing.T) {
 	storetest.Run(t, func(t *testing.T) storetest.Env {
 		t.Helper()
-		return storetest.Env{Ctx: context.Background(), Store: New[struct{}](), Tenant: uuid.New()}
+		return storetest.Env{Ctx: context.Background(), Store: newTestStore(), Tenant: uuid.New()}
 	})
 }

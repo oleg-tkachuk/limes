@@ -182,3 +182,31 @@ func TestAcceptTokenTypesRefusesWhatItCannotRead(t *testing.T) {
 		}
 	}
 }
+
+// Several trusted issuers need a decision about keys: a binding, or the
+// explicit SharedKeys. Neither is never the default, and both contradict.
+func TestSeveralIssuersNeedAKeyDecision(t *testing.T) {
+	pub, _, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := VerifierConfig{Keys: jwks.NewStatic(map[string]ed25519.PublicKey{"k1": pub}), Revocations: newMemStore()}
+	for name, tc := range map[string]struct {
+		issuers []string
+		binding map[string]string
+		shared  bool
+		ok      bool
+	}{
+		"one issuer, no binding":             {[]string{"a"}, nil, false, true},
+		"several issuers, no decision":       {[]string{"a", "b"}, nil, false, false},
+		"several issuers, a binding":         {[]string{"a", "b"}, map[string]string{"k1": "a"}, false, true},
+		"several issuers, shared keys":       {[]string{"a", "b"}, nil, true, true},
+		"a binding and shared keys together": {[]string{"a", "b"}, map[string]string{"k1": "a"}, true, false},
+	} {
+		cfg := base
+		cfg.TrustedIssuers, cfg.KeyIssuers, cfg.SharedKeys = tc.issuers, tc.binding, tc.shared
+		if _, err := NewStandardVerifier(cfg); (err == nil) != tc.ok {
+			t.Errorf("%s: err = %v, want ok=%v", name, err, tc.ok)
+		}
+	}
+}

@@ -14,7 +14,7 @@ import (
 // every counter and hold where it is.
 func TestPurgeOrphansWithoutRecordsRemovesNothing(t *testing.T) {
 	ctx := context.Background()
-	u := NewUsage[struct{}](nil)
+	u := newTestUsage(nil)
 	subject := newSubject(subjectSpec{capID: uuid.New(), tenant: uuid.New()})
 	if _, err := u.Charge(ctx, limes.ChargeRequest{Subject: subject, Amount: unit}, nil); err != nil {
 		t.Fatal(err)
@@ -38,14 +38,14 @@ func TestPurgeOrphansWithoutRecordsRemovesNothing(t *testing.T) {
 // counted against it, is released.
 func TestDeleteIsNotUndoneByADescendantsHold(t *testing.T) {
 	ctx := context.Background()
-	records := New[struct{}]()
+	records := newTestStore()
 	tenant, root, child := uuid.New(), uuid.New(), uuid.New()
 	for _, c := range []limes.Capability{mkCap(root, uuid.Nil, tenant, "root"), mkCap(child, root, tenant, "child")} {
 		if err := records.Insert(ctx, limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "op"}}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	u := NewUsage[struct{}](records)
+	u := newTestUsage(records)
 	r, err := u.Reserve(ctx, limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: child, tenant: tenant}), Amount: unit})
 	if err != nil {
 		t.Fatal(err)

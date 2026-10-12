@@ -174,10 +174,16 @@ type RevokeRequest struct {
 // names no limit.
 const DefaultPurgeLimit = 1_000
 
+// PurgeClockSkew is how far the clock of the store that purges may run ahead
+// of a verifier's: the store measures expiry by its own clock, the verifier
+// by its own, and a revocation must outlive the token on both.
+const PurgeClockSkew = time.Minute
+
 // MinPurgeRetention is the shortest retention Purge takes: no verifier
-// accepts a token longer than MaxLeeway past its expiry, so a capability
-// expired for longer can lose its revocation entry unseen.
-const MinPurgeRetention = MaxLeeway
+// accepts a token longer than MaxLeeway past its expiry, by a clock no more
+// than PurgeClockSkew behind the store's, so a capability expired for longer
+// can lose its revocation entry unseen.
+const MinPurgeRetention = MaxLeeway + PurgeClockSkew
 
 // PurgeRequest is one batch of Store.Purge.
 type PurgeRequest struct {

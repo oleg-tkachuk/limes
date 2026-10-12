@@ -26,7 +26,11 @@ func issue(t *testing.T) (limes.Capability, string, ed25519.PublicKey) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	issuer, err := limes.NewIssuer(limes.IssuerConfig{Signer: signer, Store: memstore.New[struct{}](), IssuerName: "inspect-test"})
+	records, err := memstore.NewStore(memstore.StoreConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuer, err := limes.NewIssuer(limes.IssuerConfig{Signer: signer, Store: records, IssuerName: "inspect-test"})
 	if err != nil {
 		t.Fatal(err)
 	}

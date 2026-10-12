@@ -19,13 +19,13 @@ const contractTTL = time.Hour
 func TestMeterContract(t *testing.T) {
 	metertest.Run(t, func(t *testing.T) metertest.Env[struct{}] {
 		t.Helper()
-		records := New[struct{}]()
+		records := newTestStore()
 		tenant := uuid.New()
 		var offset atomic.Int64 // how far Advance has moved the clock
 		now := func() time.Time { return time.Now().Add(time.Duration(offset.Load())) }
 		return metertest.Env[struct{}]{
 			Ctx:              context.Background(),
-			Usage:            NewUsage(records).WithClock(now),
+			Usage:            mustUsage(t, UsageStoreConfig[struct{}]{Records: records, Now: now}),
 			Tenant:           tenant,
 			Advance:          func(d time.Duration) { offset.Add(int64(d)) },
 			DeleteCapability: removeRecord(records),
@@ -58,11 +58,11 @@ func TestMeterContractUsesTheTenantHooks(t *testing.T) {
 	metertest.Run(t, func(t *testing.T) metertest.Env[struct{}] {
 		t.Helper()
 		ctx := base
-		records := New[struct{}]()
+		records := newTestStore()
 		tenant := uuid.New()
 		return metertest.Env[struct{}]{
 			Ctx:    ctx,
-			Usage:  listed.wrap(NewUsage(records)),
+			Usage:  listed.wrap(newTestUsage(records)),
 			Tenant: tenant,
 			NewTenant: func() (uuid.UUID, error) {
 				id := uuid.New()
@@ -136,7 +136,7 @@ func (u *recordingUsage) SetTenantBudget(ctx context.Context, req limes.SetTenan
 
 // removeRecord removes a capability's record, as Purge does once it has
 // expired, for metertest's check of PurgeOrphans.
-func removeRecord(records *Store[struct{}]) func(uuid.UUID) error {
+func removeRecord(records *Store) func(uuid.UUID) error {
 	return func(id uuid.UUID) error {
 		records.mu.Lock()
 		defer records.mu.Unlock()

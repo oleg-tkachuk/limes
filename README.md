@@ -60,8 +60,8 @@ tenantID, runID := uuid.New(), uuid.New() // github.com/google/uuid
 key, _ := limes.GenerateKey()
 kid, pub, priv := key.KeyID, key.Public, key.Private
 
-records := memstore.New[struct{}]()          // your Store
-usage   := memstore.NewUsage[struct{}](records)
+records, _ := memstore.NewStore(memstore.StoreConfig{}) // your Store
+usage, _ := memstore.NewUsageStore(memstore.UsageStoreConfig[struct{}]{Records: records})
 
 signer, _ := limes.NewSigner(limes.SignerConfig{KeyID: kid, Key: priv})
 issuer, _ := limes.NewIssuer(limes.IssuerConfig{

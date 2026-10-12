@@ -34,7 +34,15 @@ func meteredStore(t *testing.T, opts ...limes.InstrumentOption) (limes.UsageStor
 	opts = append(opts, limes.WithMeterProvider(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))))
 	// An empty record store: no capability metered here is on record, so
 	// PurgeOrphans finds each one gone.
-	usage, err := limes.Instrument[struct{}](memstore.NewUsage(memstore.New[struct{}]()), opts...)
+	records, err := memstore.NewStore(memstore.StoreConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inner, err := memstore.NewUsageStore(memstore.UsageStoreConfig[struct{}]{Records: records})
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage, err := limes.Instrument[struct{}](inner, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +208,10 @@ func TestInstrumentKeepsCopyUsage(t *testing.T) {
 	if _, err := limes.Instrument[struct{}](nil); err == nil {
 		t.Fatal("Instrument(nil) wrapped nothing without an error")
 	}
-	inner := memstore.NewUsage[struct{}](nil)
+	inner, err := memstore.NewUsageStore(memstore.UsageStoreConfig[struct{}]{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	wrap := func(u limes.UsageStore[struct{}]) limes.UsageStore[struct{}] {
 		t.Helper()
 		m, err := limes.Instrument(u)

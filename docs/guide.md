@@ -63,8 +63,10 @@ run too), its claims must
 hold no member the verifier does not know (a caveat it could not enforce),
 none twice and none in another case, and may be at most
 `VerifierConfig.MaxTokenBytes` long (16 KiB unless set). When several issuers share a verifier, set
-`KeyIssuers` (kid → issuer) so one issuer's key cannot sign for another; an
-empty map, which would refuse every token, is refused.
+`KeyIssuers` (kid → issuer) so one issuer's key cannot sign for another —
+or, for issuers that do share one trust boundary, `SharedKeys: true`; a
+verifier trusting several issuers with neither is refused, and so is an
+empty map, which would refuse every token.
 Verifiers running apart from the issuer resolve keys with
 `jwks.Remote`. It fetches the issuer's JWKS on first use, keeps it as
 long as the response's `Cache-Control` allows within `MinRefreshInterval`
@@ -592,8 +594,9 @@ set): it removes the capabilities expired for longer than the retention, with
 their revocation entries, then `UsageHousekeeping.PurgeOrphans` releases what
 the meter still holds for them. A child never outlives its parent, so no
 ancestor of a live capability is ever purged. The retention is at least
-`MinPurgeRetention` (five minutes, the zero value's): a verifier accepts a
-token for up to its `Leeway` past expiry, never more than `MaxLeeway`, and a
+`MinPurgeRetention` (six minutes, the zero value's): a verifier accepts a
+token for up to its `Leeway` past expiry, never more than `MaxLeeway`, by a
+clock that may run up to `PurgeClockSkew` behind the store's, and a
 revocation purged inside that window would let the revoked token through.
 
 ## Bring your own storage
