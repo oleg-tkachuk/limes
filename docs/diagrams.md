@@ -442,7 +442,7 @@ signed.
 flowchart TB
     req(["DelegateRequest<br/>Parent · Subject · Audience · Caveats or InheritCaveats<br/>TTL · NotBefore · ConfirmationJKT"])
     pid{"Parent.ID set"}
-    copyp{"Parent.Copies empty<br/>(not a copy with limits of its own)"}
+    copyp{"Parent not read from a Biscuit<br/>(FromBiscuit false, no Copies)"}
     fill["unset tenant, audience, binding<br/>taken from the parent"]
     valid{"audience valid · Caveats.Validate<br/>thumbprint valid"}
     alive{"parent not expired<br/>Store.IsRevoked(parent) = false"}
@@ -462,8 +462,8 @@ flowchart TB
         n0 --> n1 --> n2 --> n3 --> n4 --> n5 --> n6 --> n7
     end
 
-    persist["Store.Insert(child, issuedBy = parent.Subject)<br/>Signer.sign(ctx, child)"]
-    ok(["child, childToken"])
+    persist["Signer.sign(ctx, child)<br/>Store.Insert(child, issuedBy = parent.Subject)"]
+    ok(["IssueResult{Capability, Token}"])
 
     wide["ErrDelegationTooWide"]
     unit["ErrUnitCodeMismatch"]
@@ -478,7 +478,7 @@ flowchart TB
     alive -- no --> dead
     n4 -- differs --> unit
     nar -- widens --> wide
-    copyp -- no --> wide
+    copyp -- no --> inval
 
     classDef client fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E
     classDef role fill:#DCFCE7,stroke:#16A34A,color:#14532D
@@ -564,11 +564,11 @@ flowchart TB
   the capability's own counters, and a charge or reservation records the ids
   it debited so a refund, settle or release returns to them.
   `CopyUsageReader` reads the counters back.
-- **Delegation from a copy** narrows from the copy as presented, not from the
-  capability's record. A copy with limits of its own cannot delegate:
-  `Issuer.Delegate` refuses a `Parent` with `Copies` (`ErrDelegationTooWide`),
-  because a server-side child counts against the capability and never the
-  copy, and would shed its limits.
+- **No delegation from a copy.** `Issuer.Delegate` refuses any `Parent` read
+  from a Biscuit (`VerifiedCapability.FromBiscuit`, with limits or without)
+  as `ErrInvalidRequest`: a server-side child would be an ordinary token of
+  the capability, which revoking the copy would not reach and the copy's
+  limits would not bound. Its holder attenuates the copy instead.
 
 ## Charge: stage, then commit
 
