@@ -24,8 +24,12 @@ type IssuanceStore interface {
 	// than in it, which would change the token's frozen wire format.
 	//
 	// An id already on record returns ErrAlreadyExists and changes nothing.
-	// A store that knows tenants returns ErrUnknownTenant or
-	// ErrTenantDeleted for a tenant it cannot mint for.
+	// It refuses what InsertRequest.Validate refuses, a parent not on
+	// record as ErrInvalidRequest, and a child expiring after its parent as
+	// ErrDelegationTooWide: Purge and the IsRevoked walk rely on a lineage
+	// that is whole and expires from the leaves up. A store that knows
+	// tenants returns ErrUnknownTenant or ErrTenantDeleted for a tenant it
+	// cannot mint for.
 	Insert(ctx context.Context, req InsertRequest) error
 
 	// IsRevoked reports whether the capability, or any ancestor of it
@@ -58,6 +62,15 @@ const MaxDelegationDepth = 64
 type InsertRequest struct {
 	Capability Capability
 	IssuedBy   Principal
+}
+
+// Validate refuses a capability with no id, as ErrInvalidRequest: nothing
+// could read it back, and the zero id is what a root's ParentID holds.
+func (r InsertRequest) Validate() error {
+	if r.Capability.ID == uuid.Nil {
+		return invalidRequest("insert: the capability has no id")
+	}
+	return nil
 }
 
 // Store persists capability records and revocation entries. Consumers supply
@@ -95,12 +108,10 @@ type Store interface {
 	// that would let a revoked token through again.
 	//
 	// Purge never removes a capability while a child of it stays on record:
-	// among records expiring together it takes the deepest first, and it
-	// keeps a parent whose child is not in the same batch. A child expires
-	// no later than its parent (Delegate cuts it to the parent's expiry, and
-	// an attenuation only narrows), so this holds back only a record inserted
-	// around that rule. The IsRevoked walk and the Meter's lineage, which
-	// stop at the first ancestor no longer on record, therefore miss no
+	// a child expires no later than its parent (Insert refuses one that
+	// would not), and among records expiring together Purge takes the
+	// deepest first. The IsRevoked walk and the Meter's lineage, which stop
+	// at the first ancestor no longer on record, therefore miss no
 	// revocation and no ceiling. Once records go, UsageHousekeeping.PurgeOrphans
 	// releases what the meter still holds for them.
 	Purge(ctx context.Context, req PurgeRequest) (PurgeResult, error)

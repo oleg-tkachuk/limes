@@ -253,3 +253,13 @@ func TestDelegationStartIsExact(t *testing.T) {
 		t.Errorf("the child starts at %s, before its parent at %s", validFrom(child), validFrom(root))
 	}
 }
+
+// An insert names the capability it records: the zero id is refused.
+func TestInsertRequestValidate(t *testing.T) {
+	if err := (InsertRequest{}).Validate(); !errors.Is(err, ErrInvalidRequest) {
+		t.Errorf("an insert with no id: err = %v, want ErrInvalidRequest", err)
+	}
+	if err := (InsertRequest{Capability: Capability{ID: uuid.New()}}).Validate(); err != nil {
+		t.Errorf("an insert with an id: %v", err)
+	}
+}
