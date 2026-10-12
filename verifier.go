@@ -20,6 +20,10 @@ import (
 // KeyResolver resolves a JWKS `kid` to the public key the verifier
 // should use. jwks.Static holds keys in memory; jwks.Remote
 // fetches them from an issuer's JWKS endpoint with a cache.
+//
+// Keys are Ed25519 for all of 1.x: the token format, not the key, names
+// the algorithm, so another algorithm would be another token type
+// (AcceptTokenTypes) rather than a key this interface returns.
 type KeyResolver interface {
 	// PublicKey returns the Ed25519 public key for the given kid.
 	// Returns jwks.ErrUnknownKID if the key set does not contain the kid,
