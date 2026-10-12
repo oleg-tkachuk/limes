@@ -20,6 +20,11 @@ vars:
 includes:
   go:
     taskfile: '{{printf .TASKLIB "go"}}'
+    # The sha256 of this Taskfile at TASKLIB's ref. A tag can be moved, and
+    # the gate runs it with --yes, so a moved tag fails rather than runs.
+    # Task does not template this field; bump it with the ref, from the
+    # checksum Task reports it got.
+    checksum: 4de07ad9c5fdd046002f1fd22bb68c40e4456d07f8d7b6c3e51253940267dada
     dir: .
     flatten: true
     # Its vuln runs a govulncheck from PATH; the one below runs the version
