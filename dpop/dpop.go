@@ -123,8 +123,9 @@ func publicJWK(pub crypto.PublicKey) (jose.JWK, error) {
 	return j, nil
 }
 
-// Thumbprint is publicJWK followed by Thumbprint: what to put in an
-// IssueRequest's ConfirmationJKT to bind a capability to the holder of pub.
+// Thumbprint is the RFC 7638 SHA-256 thumbprint of pub's JWK, base64url:
+// what to put in an IssueRequest's ConfirmationJKT to bind a capability to
+// the holder of pub.
 func Thumbprint(pub crypto.PublicKey) (string, error) {
 	j, err := publicJWK(pub)
 	if err != nil {

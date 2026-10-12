@@ -228,7 +228,8 @@ JWKS is the server's fault, not the token's: it is `jwks.ErrUnavailable` alone,
 which `ErrorResponse` answers with 503. The DPoP refusals and
 `ErrAuthSchemeMismatch` match `ErrProofOfPossession` — the token may be
 genuine, the proof is what failed — and every refusal of the credentials,
-token or proof, matches `ErrUnauthenticated`.
+token or proof, matches `ErrUnauthenticated`, as does `ErrNoCredentials`
+from `ParseAuthorization`.
 
 A Biscuit goes through the same gates, around them. Its authority block seals
 an ordinary signed token, which passes the gates from the header to the tenant;

@@ -68,10 +68,10 @@ Adding a method to any of these after 1.0 breaks every implementation.
 
 | # | Finding | Change |
 |---|---|---|
-| E1 | The hierarchy (`caveatError` → `ErrCaveatViolation`, `popError` → `ErrInvalidSignature`, `requestError` → `ErrInvalidRequest`) is spread over 12 files; two tables encode the match order. | One table — sentinel, family, `Reason`, permanent, status — from which `reasonRules` and `refusals` are derived, and a golden test of the `errors.Is` matrix. apidiff guards identifiers, not these relations. |
-| E2 | Five unrelated not-found sentinels (`ErrNotFound`, `ErrChargeNotFound`, `ErrReservationNotFound`, `ErrUsageNotFound`, `ErrTenantBudgetNotFound`). | All match `ErrNotFound`, as the request errors match `ErrInvalidRequest`. Additive. |
+| E1 | The hierarchy (`caveatError` → `ErrCaveatViolation`, `popError` → `ErrInvalidSignature`, `requestError` → `ErrInvalidRequest`) is spread over 12 files; two tables encode the match order. | One table — sentinel, family, `Reason`, permanent, status — from which `reasonRules` and `refusals` are derived, and a golden test of the `errors.Is` matrix. apidiff guards identifiers, not these relations. **Done:** `refusalRules` in reason.go, pinned by errors_test.go. |
+| E2 | Five unrelated not-found sentinels (`ErrNotFound`, `ErrChargeNotFound`, `ErrReservationNotFound`, `ErrUsageNotFound`, `ErrTenantBudgetNotFound`). | All match `ErrNotFound`, as the request errors match `ErrInvalidRequest`. Additive. **Done.** |
 | E3 | `Delegate` returns `ErrExpired`/`ErrRevoked` about the *parent*; `ReasonOf` reports them as if the presented token were refused. | Kept: in a delegation the parent *is* the presented capability, and with decision 3 a verified one, so `expired` or `revoked` is the right reason. |
-| E4 | Decided: a family of their own (decision 4). Proof-of-possession refusals match `ErrInvalidSignature`, so nonce and scheme refusals are carved back out through aliases and table order. | A separate `ErrProofOfPossession` family. Breaks consumers that map only `ErrInvalidSignature` — which the docs promise today. |
+| E4 | Decided: a family of their own (decision 4). Proof-of-possession refusals match `ErrInvalidSignature`, so nonce and scheme refusals are carved back out through aliases and table order. | A separate `ErrProofOfPossession` family. Breaks consumers that map only `ErrInvalidSignature` — which the docs promise today. **Done**, under `ErrUnauthenticated` beside `ErrInvalidToken`. |
 
 ## 5. Unexport — no consumer needs them
 
@@ -89,6 +89,10 @@ Keep — implementers need them, as memstore shows: `PageLimit`,
 `MaxExternalRefBytes`, `NormaliseUnitCode`, `DefaultReservationTTL`,
 `MaxNanos`, `NanosPerUnit`.
 
+**Done:** every name above is unexported or gone; `PublicJWK` and `JWK` live
+in `internal/jose`, `Decode` and `VerifySignature` in `inspect`, and
+`NormaliseUnitCode` is `NormalizeUnitCode` (T3).
+
 ## 6. Merge and reshape
 
 - `DeriveKeyID` re-implements `KeyThumbprint`'s RFC 7638 computation by hand;
@@ -102,6 +106,10 @@ Keep — implementers need them, as memstore shows: `PageLimit`,
   round-trips it. Decided: it moves into memstore (decision 6).
 - `NewDPoPProof` signs rather than constructs: `SignDPoPProof`.
 - `WithMetering` is a decorator, not an option: rename.
+
+**Done:** one thumbprint path in `internal/jose`, one JWK type, `GenerateKey`
+returning the key, `Nanos.Validate`, the cursor in memstore, `dpop.Sign`, and
+`Instrument`.
 
 ## 7. Policies to write down before tagging
 
@@ -135,7 +143,7 @@ accepts one `typ`, so any new caveat or Biscuit fact is refused by every
 deployed verifier.
 - (a) Freeze the claim set and the Biscuit vocabulary for all of 1.x; a new
   caveat means v2.
-- (b) `VerifierConfig.AcceptTokenTypes`, v3 accepted throughout 1.x, so a v4
+- (b) `VerifierConfig.AcceptTokenTypes`, v4 accepted throughout 1.x, so a v5
   ships in a minor: verifiers first, then issuers. Recommended. **Done:** `VerifierConfig.AcceptTokenTypes`; the format reached v4 before 1.0
   (explicit unlimited, P3), so `TokenTypeV4` is the one every 1.x verifier accepts.
 
@@ -160,7 +168,8 @@ move.
 ## Plan
 
 Each pull request is breaking and cuts a minor; the order puts code in its
-final package before it is reshaped there.
+final package before it is reshaped there. Steps 1–7 are done; step 8 waits
+for the release decision.
 
 1. **Errors** — `ErrUnauthenticated` over `ErrInvalidSignature` and the new
    `ErrProofOfPossession` family (decision 4); every not-found matching

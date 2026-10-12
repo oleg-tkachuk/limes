@@ -35,8 +35,9 @@ case errors.Is(err, limes.ErrProofOfPossession): // no valid proof that the bear
 case errors.Is(err, limes.ErrInvalidToken): // forged, or not this verifier's to accept
 case errors.Is(err, jwks.ErrUnavailable):  // the issuer's keys out of reach: the server's trouble, not the token's
 }
-// Every refusal of the token or its proof also matches ErrUnauthenticated —
-// the one check for "answer 401".
+// Every refusal of the token or its proof — and ParseAuthorization's
+// ErrNoCredentials — also matches ErrUnauthenticated: the one check for
+// "answer 401". ErrMalformedAuthorization does not: it is a bad request.
 ```
 
 `Verify` and `Authorize` return a `VerifiedCapability`: what the token
