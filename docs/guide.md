@@ -714,7 +714,7 @@ log. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
 | Setting | Default |
 |---|---|
 | `IssuerConfig.DefaultTTL` | `DefaultIssueTTL`, 15 minutes |
-| `VerifierConfig.Leeway` | `DefaultLeeway`, 30 seconds |
+| `VerifierConfig.Leeway` | `DefaultLeeway`, 30 seconds; `NoLeeway` for none |
 | `VerifierConfig.MaxTokenBytes` · `IssuerConfig.MaxTokenBytes` | `DefaultMaxTokenBytes`, 16 KiB |
 | `VerifierConfig.Leeway` bound | `MaxLeeway`, 5 minutes |
 | `VerifierConfig.AcceptTokenTypes` | `TokenTypeV4` |

@@ -81,6 +81,7 @@ func TestConfigRefusesNegatives(t *testing.T) {
 		"a negative MaxTokenBytes": func(c *VerifierConfig) { c.MaxTokenBytes = -1 },
 		"a Realm with a quote":     func(c *VerifierConfig) { c.Realm = `a"b` },
 		"a Realm with a newline":   func(c *VerifierConfig) { c.Realm = "a\nb" },
+		"a Leeway beside NoLeeway": func(c *VerifierConfig) { c.Leeway, c.NoLeeway = time.Second, true },
 	} {
 		cfg := base
 		mutate(&cfg)
@@ -92,6 +93,28 @@ func TestConfigRefusesNegatives(t *testing.T) {
 	at.Leeway = MaxLeeway
 	if _, err := NewVerifier(at); err != nil {
 		t.Errorf("NewVerifier refused a Leeway of MaxLeeway: %v", err)
+	}
+}
+
+// NoLeeway holds the window to the verifier's clock: a token a second past
+// its expiry is refused, where the default leeway would take it.
+func TestNoLeewayIsExact(t *testing.T) {
+	issuer, configured, _, _ := buildIssuerVerifier(t)
+	issued, token := issueFor(t, issuer)
+	late := func() time.Time { return issued.ExpiresAt.Add(time.Second) }
+	for _, tc := range []struct {
+		noLeeway bool
+		want     error
+	}{{false, nil}, {true, ErrExpired}} {
+		cfg := configured.cfg
+		cfg.Leeway, cfg.NoLeeway, cfg.Now = 0, tc.noLeeway, late
+		v, err := NewVerifier(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := v.Verify(t.Context(), VerifyRequest{Token: token, Audience: audienceData}); !errors.Is(err, tc.want) || (tc.want == nil && err != nil) {
+			t.Errorf("NoLeeway %v, a second past expiry: err = %v, want %v", tc.noLeeway, err, tc.want)
+		}
 	}
 }
 
