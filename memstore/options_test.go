@@ -21,8 +21,9 @@ func TestTxFactoryThreadsTheHandle(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got *fakeTx
-	if _, err := u.Charge(context.Background(), limes.ChargeRequest{
-		Subject: newSubject(subjectSpec{capID: uuid.New(), tenant: uuid.New()}),
+	ctx := t.Context()
+	if _, err := u.Charge(ctx, limes.ChargeRequest{
+		Subject: recordedSubject(ctx, t, u, subjectSpec{capID: uuid.New(), tenant: uuid.New()}),
 		Amount:  limes.MustParseAmount("1"),
 	}, func(_ context.Context, tx *fakeTx) error { got = tx; return nil }); err != nil {
 		t.Fatal(err)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
@@ -28,12 +29,10 @@ const (
 )
 
 // meteredStore is a metered memstore whose measurements reader collects.
-func meteredStore(t *testing.T, opts ...limes.InstrumentOption) (limes.UsageStore[struct{}], *sdkmetric.ManualReader) {
+func meteredStore(t *testing.T, opts ...limes.InstrumentOption) (limes.UsageStore[struct{}], *sdkmetric.ManualReader, *memstore.Store) {
 	t.Helper()
 	reader := sdkmetric.NewManualReader()
 	opts = append(opts, limes.WithMeterProvider(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))))
-	// An empty record store: no capability metered here is on record, so
-	// PurgeOrphans finds each one gone.
 	records, err := memstore.NewStore(memstore.StoreConfig{})
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +45,7 @@ func meteredStore(t *testing.T, opts ...limes.InstrumentOption) (limes.UsageStor
 	if err != nil {
 		t.Fatal(err)
 	}
-	return usage, reader
+	return usage, reader, records
 }
 
 // point is one data point of a sum: its value and attributes.
@@ -96,20 +95,20 @@ func valueAt(ps []point, key, value string) float64 {
 // A replayed charge or settle moved nothing, so the decorator counts nothing:
 // counting it again would report spend twice.
 func TestMeteringCountsNoReplay(t *testing.T) {
-	usage, reader := meteredStore(t)
+	usage, reader, records := meteredStore(t)
 	ctx := context.Background()
 	tenant, capID := uuid.New(), uuid.New()
-	charge := limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant}), Amount: limes.MustParseAmount("1"), ExternalRef: "call-1"}
+	charge := limes.ChargeRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant}), Amount: limes.MustParseAmount("1"), ExternalRef: "call-1"}
 	for range 2 {
 		if _, err := usage.Charge(ctx, charge, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
-	res, err := usage.Reserve(ctx, limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant}), Amount: limes.MustParseAmount("1")})
+	res, err := usage.Reserve(ctx, limes.ReserveRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant}), Amount: limes.MustParseAmount("1")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	settle := limes.SettleRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant}), ReservationID: res.ID, Amount: limes.MustParseAmount("1")}
+	settle := limes.SettleRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant}), ReservationID: res.ID, Amount: limes.MustParseAmount("1")}
 	for range 2 {
 		if _, err := usage.Settle(ctx, settle, nil); err != nil {
 			t.Fatal(err)
@@ -124,11 +123,11 @@ func TestMeteringCountsNoReplay(t *testing.T) {
 // names only the reservation; and every refused or failed attempt is
 // counted under its outcome.
 func TestMeteringLabelsAmountsAndOutcomes(t *testing.T) {
-	usage, reader := meteredStore(t)
+	usage, reader, records := meteredStore(t)
 	ctx := context.Background()
 	tenant, capID := uuid.New(), uuid.New()
 	eur := func(s string) limes.ChargeRequest {
-		return limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("5")), unit: "EUR"}), Amount: limes.MustParseAmount(s)}
+		return limes.ChargeRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("5")), unit: "EUR"}), Amount: limes.MustParseAmount(s)}
 	}
 	r, err := usage.Charge(ctx, eur("2"), nil)
 	if err != nil {
@@ -145,11 +144,11 @@ func TestMeteringLabelsAmountsAndOutcomes(t *testing.T) {
 	boom := errors.New("side effect failed")
 	failing := eur("0.1")
 	// A capability with room, so the callback runs.
-	failing.Subject = newSubject(subjectSpec{capID: uuid.New(), tenant: tenant, budget: budgetOf(limes.MustParseAmount("5")), unit: "EUR"})
+	failing.Subject = recordedSubject(ctx, t, records, subjectSpec{capID: uuid.New(), tenant: tenant, budget: budgetOf(limes.MustParseAmount("5")), unit: "EUR"})
 	if _, err := usage.Charge(ctx, failing, func(context.Context, struct{}) error { return boom }); !errors.Is(err, boom) {
 		t.Fatal(err)
 	}
-	held := newSubject(subjectSpec{capID: uuid.New(), tenant: tenant, unit: "EUR"})
+	held := recordedSubject(ctx, t, records, subjectSpec{capID: uuid.New(), tenant: tenant, unit: "EUR"})
 	res, err := usage.Reserve(ctx, limes.ReserveRequest{Subject: held, Amount: limes.MustParseAmount("1")})
 	if err != nil {
 		t.Fatal(err)
@@ -185,10 +184,10 @@ func TestMeteringLabelsAmountsAndOutcomes(t *testing.T) {
 
 // WithTenantAttribute labels measurements with the tenant.
 func TestMeteringTenantAttributeIsOptIn(t *testing.T) {
-	usage, reader := meteredStore(t, limes.WithTenantAttribute())
+	usage, reader, records := meteredStore(t, limes.WithTenantAttribute())
 	ctx := context.Background()
 	tenant := uuid.New()
-	if _, err := usage.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: uuid.New(), tenant: tenant, requests: requestsOf(1)})}); err != nil {
+	if _, err := usage.Bump(ctx, limes.BumpRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: uuid.New(), tenant: tenant, requests: requestsOf(1)})}); err != nil {
 		t.Fatal(err)
 	}
 	ps := points(t, reader, metricRequestBumps)
@@ -208,7 +207,8 @@ func TestInstrumentKeepsCopyUsage(t *testing.T) {
 	if _, err := limes.Instrument[struct{}](nil); err == nil {
 		t.Fatal("Instrument(nil) wrapped nothing without an error")
 	}
-	inner, err := memstore.NewUsageStore(memstore.UsageStoreConfig[struct{}]{Records: newMemstoreRecords(t)})
+	records := newMemstoreRecords(t)
+	inner, err := memstore.NewUsageStore(memstore.UsageStoreConfig[struct{}]{Records: records})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestInstrumentKeepsCopyUsage(t *testing.T) {
 	usage := wrap(inner)
 	copyID := []byte("copy-1")
 	copies := []limes.CopyCeiling{{RevocationID: copyID, Requests: limes.RequestCeiling{Max: 10}}}
-	if _, err := usage.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: uuid.New(), tenant: uuid.New(), copies: copies})}); err != nil {
+	if _, err := usage.Bump(ctx, limes.BumpRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: uuid.New(), tenant: uuid.New(), copies: copies})}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := usage.(limes.CopyUsageReader).CopyUsage(ctx, [][]byte{copyID})
@@ -243,9 +243,21 @@ func TestInstrumentKeepsCopyUsage(t *testing.T) {
 // Every method reaches the store the decorator wraps, and the ones that move
 // a counter are measured.
 func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
-	usage, reader := meteredStore(t)
+	usage, reader, records := meteredStore(t)
 	ctx := context.Background()
 	tenant, capID := uuid.New(), uuid.New()
+	// Expired long enough ago that Purge removes it, so its usage ends an
+	// orphan; until then the Meter reads its lineage like any other.
+	expired := limes.Capability{
+		ID: capID, Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: tenant, Subject: "agent"},
+		Caveats: limes.Caveats{
+			Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true},
+		},
+		ExpiresAt: time.Now().Add(-limes.MinPurgeRetention - time.Hour),
+	}
+	if err := records.Insert(ctx, limes.InsertRequest{Capability: expired, IssuedBy: limes.Principal{Subject: "issuer"}}); err != nil {
+		t.Fatal(err)
+	}
 	measured := func(name, metric string, call func() error) {
 		t.Helper()
 		before := len(points(t, reader, metric))
@@ -261,12 +273,12 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 		t.Fatal(err)
 	}
 	measured("Bump", metricRequestBumps, func() error {
-		_, err := usage.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant})})
+		_, err := usage.Bump(ctx, limes.BumpRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant})})
 		return err
 	})
 	var receipt limes.ChargeReceipt
 	measured("Charge", metricChargeAmount, func() (err error) {
-		receipt, err = usage.Charge(ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant}), Amount: limes.MustParseAmount("2"), ExternalRef: "r"}, nil)
+		receipt, err = usage.Charge(ctx, limes.ChargeRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant}), Amount: limes.MustParseAmount("2"), ExternalRef: "r"}, nil)
 		return err
 	})
 	measured("Refund", metricRefundAmount, func() error {
@@ -275,7 +287,7 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 	})
 	var res limes.Reservation
 	measured("Reserve", metricReservations, func() (err error) {
-		res, err = usage.Reserve(ctx, limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant}), Amount: limes.MustParseAmount("1")})
+		res, err = usage.Reserve(ctx, limes.ReserveRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant}), Amount: limes.MustParseAmount("1")})
 		return err
 	})
 
@@ -309,7 +321,10 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 	if err := usage.DeleteUsage(ctx, limes.DeleteUsageRequest{CapabilityID: uuid.New()}); err != nil {
 		t.Errorf("Delete of a row never written: %v", err)
 	}
-	// The capability is not on record, so its usage is an orphan.
+	if _, err := records.Purge(ctx, limes.PurgeRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	// The capability is no longer on record, so its usage is an orphan.
 	if n, err := usage.PurgeOrphans(ctx, limes.PurgeOrphansRequest{}); err != nil || n.Purged != 1 {
 		t.Errorf("PurgeOrphans = %d, %v; want the one orphan", n, err)
 	}
@@ -321,14 +336,14 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 // A refused settle is counted under its tenant, as a refused charge is: the
 // receipt of a refusal still names the tenant and the unit.
 func TestMeteringLabelsARefusedSettleWithItsTenant(t *testing.T) {
-	usage, reader := meteredStore(t, limes.WithTenantAttribute())
+	usage, reader, records := meteredStore(t, limes.WithTenantAttribute())
 	ctx := context.Background()
 	tenant, capID := uuid.New(), uuid.New()
-	res, err := usage.Reserve(ctx, limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("2"))}), Amount: limes.MustParseAmount("1")})
+	res, err := usage.Reserve(ctx, limes.ReserveRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("2"))}), Amount: limes.MustParseAmount("1")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := usage.Settle(ctx, limes.SettleRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("2"))}), ReservationID: res.ID, Amount: limes.MustParseAmount("5")}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
+	if _, err := usage.Settle(ctx, limes.SettleRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("2"))}), ReservationID: res.ID, Amount: limes.MustParseAmount("5")}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Fatalf("settle past the ceiling: %v", err)
 	}
 	if got := valueAt(points(t, reader, metricChargeDecisions), attrTenant, tenant.String()); got != 1 {
@@ -346,6 +361,25 @@ type subjectSpec struct {
 	budget   *limes.BudgetCeiling
 	unit     string
 	copies   []limes.CopyCeiling
+}
+
+// recordedSubject records spec's capability as a root in records, unless it
+// is already there, and returns its subject: the Meter meters only a
+// capability on record.
+func recordedSubject(ctx context.Context, t *testing.T, records *memstore.Store, spec subjectSpec) limes.MeterSubject {
+	t.Helper()
+	c := limes.Capability{
+		ID: spec.capID, Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: spec.tenant, Subject: "agent"},
+		Caveats: limes.Caveats{
+			Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true},
+		},
+		ExpiresAt: time.Now().Add(time.Hour),
+	}
+	err := records.Insert(ctx, limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "issuer"}})
+	if err != nil && !errors.Is(err, limes.ErrAlreadyExists) {
+		t.Fatal(err)
+	}
+	return newSubject(spec)
 }
 
 // newSubject is the MeterSubject a verified capability with spec's parts

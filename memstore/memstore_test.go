@@ -119,12 +119,12 @@ func TestBumpRequestRejectsWithoutMutating(t *testing.T) {
 	id := uuid.New()
 
 	for i := int64(1); i <= 2; i++ {
-		r, err := u.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: id, tenant: testTenant, requests: requestsOf(2)})})
+		r, err := u.Bump(ctx, limes.BumpRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: id, tenant: testTenant, requests: requestsOf(2)})})
 		if err != nil || r.RequestCount != i {
 			t.Fatalf("bump %d: n=%d err=%v", i, r.RequestCount, err)
 		}
 	}
-	n, err := u.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: id, tenant: testTenant, requests: requestsOf(2)})})
+	n, err := u.Bump(ctx, limes.BumpRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: id, tenant: testTenant, requests: requestsOf(2)})})
 	if !errors.Is(err, limes.ErrRequestLimitExceeded) {
 		t.Fatalf("want ErrRequestLimitExceeded, got %v", err)
 	}
@@ -143,7 +143,7 @@ func TestBumpRequestUnlimited(t *testing.T) {
 	u := newTestUsage(newTestStore())
 	id := uuid.New()
 	for i := range 50 {
-		if _, err := u.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: id, tenant: testTenant})}); err != nil {
+		if _, err := u.Bump(ctx, limes.BumpRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: id, tenant: testTenant})}); err != nil {
 			t.Fatalf("unlimited bump %d: %v", i, err)
 		}
 	}
@@ -170,7 +170,7 @@ func TestRefundReturnsSpendToEveryCounterOnce(t *testing.T) {
 	u := newTestUsage(newTestStore())
 	id, tenant := uuid.New(), uuid.New()
 	_, _ = u.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("100")}})
-	receipt, err := u.Charge(ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant, budget: budgetOf(limes.MustParseAmount("100")), unit: "USD"}), Amount: limes.MustParseAmount("5")}, nil)
+	receipt, err := u.Charge(ctx, limes.ChargeRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: id, tenant: tenant, budget: budgetOf(limes.MustParseAmount("100")), unit: "USD"}), Amount: limes.MustParseAmount("5")}, nil)
 	if err != nil {
 		t.Fatalf("Charge: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestChargeRejectsInvalidAmounts(t *testing.T) {
 	ctx := context.Background()
 	u := newTestUsage(newTestStore())
 	for _, amt := range []limes.Nanos{-1, limes.MaxNanos + 1} {
-		_, err := u.Charge(ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: uuid.New(), tenant: uuid.New()}), Amount: amt}, nil)
+		_, err := u.Charge(ctx, limes.ChargeRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: uuid.New(), tenant: uuid.New()}), Amount: amt}, nil)
 		if !errors.Is(err, limes.ErrInvalidAmount) {
 			t.Errorf("Charge(%v) err = %v, want ErrInvalidAmount", amt, err)
 		}
@@ -267,12 +267,13 @@ func TestPurgeOrphansReleasesHolds(t *testing.T) {
 	ctx := context.Background()
 	records := newTestStore()
 	u := newTestUsage(records)
-	tenant, gone := uuid.New(), uuid.New() // gone was never recorded
+	tenant, gone := uuid.New(), uuid.New() // held while on record, then purged
 	const held = 3 * limes.NanosPerUnit
-	res, err := u.Reserve(ctx, limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: gone, tenant: tenant}), Amount: held})
+	res, err := u.Reserve(ctx, limes.ReserveRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: gone, tenant: tenant}), Amount: held})
 	if err != nil {
 		t.Fatal(err)
 	}
+	dropRecord(records, gone)
 	if r, err := u.PurgeOrphans(ctx, limes.PurgeOrphansRequest{}); err != nil || r.Purged != 1 {
 		t.Fatalf("PurgeOrphans = %+v, %v; want the one orphan row", r, err)
 	}

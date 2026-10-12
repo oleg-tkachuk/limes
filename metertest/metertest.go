@@ -290,6 +290,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"ACopyRequestCeilingBoundsBump", checkCopyRequests[TX]},
 		{"AHoldCountsAgainstACopyBudget", checkCopyHold[TX]},
 		{"AStaleVersionIsRefused", checkStaleVersion[TX]},
+		{"ACapabilityNotOnRecordIsNotMetered", checkNotOnRecord[TX]},
 		{"AZeroCeilingAllowsNothing", checkZeroCeilings[TX]},
 	}
 	for _, c := range checks {
@@ -1430,6 +1431,31 @@ func checkPurgeOrphans[TX any](t *testing.T, f fixture[TX]) {
 	}
 	if u, err := f.Usage.GetUsage(f.Ctx, f.root); err != nil || u.ReservedAmount != 0 {
 		t.Errorf("the root still holds %v for its removed child, %v; want 0", u.ReservedAmount, err)
+	}
+}
+
+// checkNotOnRecord holds a store to refusing a capability whose record is
+// gone: its ancestors can no longer be read, and metering it alone would let
+// it spend past its live root's ceiling.
+func checkNotOnRecord[TX any](t *testing.T, f fixture[TX]) {
+	if f.DeleteCapability == nil {
+		t.Skip("Env.DeleteCapability not set")
+	}
+	if err := f.DeleteCapability(f.child); err != nil {
+		t.Fatal(err)
+	}
+	subject := f.childSubject()
+	if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: subject}); !errors.Is(err, limes.ErrNotFound) {
+		t.Errorf("a bump of a capability not on record: err = %v, want ErrNotFound", err)
+	}
+	if _, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: subject, Amount: one}, nil); !errors.Is(err, limes.ErrNotFound) {
+		t.Errorf("a charge of a capability not on record: err = %v, want ErrNotFound", err)
+	}
+	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: subject, Amount: one}); !errors.Is(err, limes.ErrNotFound) {
+		t.Errorf("a hold of a capability not on record: err = %v, want ErrNotFound", err)
+	}
+	if u, err := f.Usage.GetUsage(f.Ctx, f.root); err == nil && (u.SpentAmount != 0 || u.RequestCount != 0) {
+		t.Errorf("the root counted %+v for a child not on record", u)
 	}
 }
 

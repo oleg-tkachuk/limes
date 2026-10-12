@@ -1,7 +1,10 @@
 package memstore
 
 import (
+	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -77,4 +80,23 @@ func mustUsage(t testing.TB, cfg UsageStoreConfig[struct{}]) *UsageStore[struct{
 		t.Fatal(err)
 	}
 	return u
+}
+
+// recordedSubject records spec's capability as a root in u's record store,
+// unless it is already there, and returns its subject: the Meter meters only
+// a capability on record.
+func recordedSubject[TX any](ctx context.Context, t testing.TB, u *UsageStore[TX], spec subjectSpec) limes.MeterSubject {
+	t.Helper()
+	c := limes.Capability{
+		ID: spec.capID, Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: spec.tenant, Subject: "agent"},
+		Caveats: limes.Caveats{
+			Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true},
+		},
+		ExpiresAt: time.Now().Add(contractTTL),
+	}
+	err := u.records.Insert(ctx, limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "issuer"}})
+	if err != nil && !errors.Is(err, limes.ErrAlreadyExists) {
+		t.Fatal(err)
+	}
+	return newSubject(spec)
 }

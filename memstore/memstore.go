@@ -260,14 +260,17 @@ func (s *Store) IsRevoked(_ context.Context, id uuid.UUID) (bool, error) {
 	return false, nil
 }
 
-// ancestors returns the records of id's ancestors, nearest first, stopping
-// at the first one no longer on record. A chain with more than
-// limes.MaxDelegationDepth of them still on record — or a corrupt cycle — is
-// limes.ErrDelegationTooDeep, so a walk that stops short never answers for
-// an ancestor it did not reach.
-func (s *Store) ancestors(id uuid.UUID) ([]limes.Capability, error) {
+// lineageOf returns the records of id's ancestors, nearest first, stopping
+// at the first one no longer on record, and ErrNotFound when id itself is not
+// on record. A chain with more than limes.MaxDelegationDepth of them still on
+// record — or a corrupt cycle — is limes.ErrDelegationTooDeep, so a walk that
+// stops short never answers for an ancestor it did not reach.
+func (s *Store) lineageOf(id uuid.UUID) ([]limes.Capability, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, ok := s.caps[id]; !ok {
+		return nil, fmt.Errorf("%w: memstore: capability %s is not on record", limes.ErrNotFound, id)
+	}
 	return s.ancestorsLocked(id)
 }
 
@@ -459,9 +462,12 @@ func checkSubject(s limes.MeterSubject) error {
 	return nil
 }
 
-// lineage returns the ancestors whose counters move with capID's.
+// lineage returns the ancestors whose counters move with capID's, and
+// ErrNotFound when capID itself is not on record: with no record its
+// ancestors cannot be read, and metering it alone would let it spend past
+// every live ancestor's ceiling.
 func (s *UsageStore[TX]) lineage(capID uuid.UUID) ([]limes.Capability, error) {
-	return s.records.ancestors(capID)
+	return s.records.lineageOf(capID)
 }
 
 // Bump returns ErrRequestLimitExceeded WITHOUT mutating when the
