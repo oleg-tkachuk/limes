@@ -563,7 +563,10 @@ each id then asks the store once, so batch a burst of signals into one
 Revoking a capability revokes everything delegated from it, with or
 without the flag: `IsRevoked` answers for the whole chain. `CascadeChildren`
 also writes a revocation entry per descendant, so the audit trail names each
-capability that was stopped.
+capability that was stopped. A chain is at most `MaxDelegationDepth` (64)
+ancestors deep: `Delegate` refuses to go further with `ErrDelegationTooDeep`,
+and a store answers a deeper chain with that error — read as revoked — rather
+than walk part of it and miss a revocation at its root.
 
 Records do not stay forever. A housekeeping job calls
 `Store.Purge(ctx, limes.PurgeRequest{ExpiredFor: retention})` on a timer, and

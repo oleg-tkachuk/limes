@@ -161,6 +161,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"RevokeIsIdempotentAndReachesDescendants", checkRevoke},
 		{"CascadeRecordsEveryDescendant", checkCascade},
 		{"RevocationReachesEveryGeneration", checkDeepChain},
+		{"RevocationReachesTheDeepestChainAndRefusesADeeperOne", checkMaxDepth},
 		{"PurgeDropsExpiredRecordsAndTheirEntries", checkPurge},
 		{"PurgeWorksInBatches", checkPurgeBatches},
 		{"ListByPrincipalPages", checkListPages},
@@ -547,5 +548,24 @@ func checkBiscuit(t *testing.T, f fixture) {
 	}
 	if isRevoked(oldCopyID) || !isRevoked(copyID) {
 		t.Error("Purge must drop the expired capability's copy and keep the live one's")
+	}
+}
+
+// checkMaxDepth holds IsRevoked to the whole of a chain MaxDelegationDepth
+// deep, and to refusing — never clearing — a deeper one, whose root the walk
+// cannot reach.
+func checkMaxDepth(t *testing.T, f fixture) {
+	root := f.live(t, "agent:root", uuid.Nil)
+	leaf := root
+	for range limes.MaxDelegationDepth {
+		leaf = f.live(t, "agent:link", leaf.ID)
+	}
+	f.revoke(t, root.ID, false)
+	if !f.revoked(t, leaf.ID) {
+		t.Errorf("revoking a root did not reach a capability %d delegations below it", limes.MaxDelegationDepth)
+	}
+	deeper := f.live(t, "agent:deeper", leaf.ID)
+	if revoked, err := f.Store.IsRevoked(f.Ctx, deeper.ID); !errors.Is(err, limes.ErrDelegationTooDeep) {
+		t.Errorf("IsRevoked past MaxDelegationDepth = %v, %v; want ErrDelegationTooDeep", revoked, err)
 	}
 }

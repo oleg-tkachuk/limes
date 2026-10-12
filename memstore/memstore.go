@@ -245,7 +245,11 @@ func (s *Store[TX]) IsRevoked(_ context.Context, id uuid.UUID) (bool, error) {
 	if _, ok := s.revoked[id]; ok {
 		return true, nil
 	}
-	for _, a := range s.ancestorsLocked(id) {
+	ancestors, err := s.ancestorsLocked(id)
+	if err != nil {
+		return false, err
+	}
+	for _, a := range ancestors {
 		if _, ok := s.revoked[a.ID]; ok {
 			return true, nil
 		}
@@ -254,24 +258,32 @@ func (s *Store[TX]) IsRevoked(_ context.Context, id uuid.UUID) (bool, error) {
 }
 
 // ancestors returns the records of id's ancestors, nearest first, stopping
-// at the first one no longer on record. Bounded so a corrupt cycle cannot
-// spin forever.
-func (s *Store[TX]) ancestors(id uuid.UUID) []limes.Capability {
+// at the first one no longer on record. A chain with more than
+// limes.MaxDelegationDepth of them still on record — or a corrupt cycle — is
+// limes.ErrDelegationTooDeep, so a walk that stops short never answers for
+// an ancestor it did not reach.
+func (s *Store[TX]) ancestors(id uuid.UUID) ([]limes.Capability, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.ancestorsLocked(id)
 }
 
-func (s *Store[TX]) ancestorsLocked(id uuid.UUID) []limes.Capability {
+func (s *Store[TX]) ancestorsLocked(id uuid.UUID) ([]limes.Capability, error) {
 	var out []limes.Capability
 	c, ok := s.caps[id]
-	for depth := 0; ok && c.ParentID != uuid.Nil && depth < maxLineageDepth; depth++ {
+	for ok && c.ParentID != uuid.Nil {
+		if len(out) == limes.MaxDelegationDepth {
+			if _, more := s.caps[c.ParentID]; more {
+				return nil, fmt.Errorf("%w: %s has more than %d ancestors", limes.ErrDelegationTooDeep, id, limes.MaxDelegationDepth)
+			}
+			break
+		}
 		c, ok = s.caps[c.ParentID]
 		if ok {
 			out = append(out, c)
 		}
 	}
-	return out
+	return out, nil
 }
 
 func (s *Store[TX]) exists(id uuid.UUID) bool {
@@ -280,9 +292,6 @@ func (s *Store[TX]) exists(id uuid.UUID) bool {
 	_, ok := s.caps[id]
 	return ok
 }
-
-// maxLineageDepth matches the depth guard of the relational store.
-const maxLineageDepth = 64
 
 // Revoke is idempotent. CascadeChildren walks the delegation tree by ParentID
 // so revoking an orchestrator takes the sub-agents it spawned with it.
@@ -300,10 +309,10 @@ func (s *Store[TX]) Revoke(_ context.Context, args limes.RevokeRequest) error {
 		return nil
 	}
 	// Breadth-first down the delegation tree from args.ID alone, to the
-	// depth the relational store walks: a capability revoked earlier without
+	// depth IsRevoked walks: a capability revoked earlier without
 	// cascade elsewhere in the store is not a root of this walk.
 	level := []uuid.UUID{args.CapabilityID}
-	for depth := 0; len(level) > 0 && depth < maxLineageDepth; depth++ {
+	for depth := 0; len(level) > 0 && depth < limes.MaxDelegationDepth; depth++ {
 		var next []uuid.UUID
 		for id, c := range s.caps {
 			if slices.Contains(level, c.ParentID) {
@@ -439,9 +448,9 @@ func uuidLess(a, b uuid.UUID) bool { return bytes.Compare(a[:], b[:]) < 0 }
 // ─── limes.UsageStore[TX] ─────────────────────────────────────────────
 
 // lineage returns the ancestors whose counters move with capID's.
-func (s *UsageStore[TX]) lineage(capID uuid.UUID) []limes.Capability {
+func (s *UsageStore[TX]) lineage(capID uuid.UUID) ([]limes.Capability, error) {
 	if s.records == nil {
-		return nil
+		return nil, nil
 	}
 	return s.records.ancestors(capID)
 }
@@ -450,7 +459,10 @@ func (s *UsageStore[TX]) lineage(capID uuid.UUID) []limes.Capability {
 // increment would cross the capability's ceiling or any ancestor's. A
 // rejected call must be safe to retry.
 func (s *UsageStore[TX]) Bump(_ context.Context, req limes.BumpRequest) (limes.BumpReceipt, error) {
-	ancestors := s.lineage(req.Subject.CapabilityID())
+	ancestors, err := s.lineage(req.Subject.CapabilityID())
+	if err != nil {
+		return limes.BumpReceipt{}, err
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -530,7 +542,10 @@ func (s *UsageStore[TX]) Charge(
 	if err != nil {
 		return limes.ChargeReceipt{}, err
 	}
-	ancestors := s.lineage(req.Subject.CapabilityID())
+	ancestors, err := s.lineage(req.Subject.CapabilityID())
+	if err != nil {
+		return limes.ChargeReceipt{}, err
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -846,7 +861,10 @@ func (s *UsageStore[TX]) Reserve(_ context.Context, req limes.ReserveRequest) (l
 	if ttl == 0 {
 		ttl = limes.DefaultReservationTTL
 	}
-	ancestors := s.lineage(req.Subject.CapabilityID())
+	ancestors, err := s.lineage(req.Subject.CapabilityID())
+	if err != nil {
+		return limes.Reservation{}, err
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -923,9 +941,9 @@ func (s *UsageStore[TX]) Settle(
 	if !ok || h.capID != subject || !h.expires.After(s.nowFn()) {
 		return limes.ChargeReceipt{}, limes.ErrReservationNotFound
 	}
-	var ancestors []limes.Capability
-	if s.records != nil {
-		ancestors = s.records.ancestors(h.capID)
+	ancestors, err := s.lineage(h.capID)
+	if err != nil {
+		return limes.ChargeReceipt{}, err
 	}
 	// The charge is the reservation's: its tenant, unit and the copy limits
 	// it was made under, against the subject's own ceiling.

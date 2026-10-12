@@ -56,6 +56,7 @@ var sentinelMatrix = map[string]sentinelCase{
 	"ErrExpired":            {ErrExpired, []string{famUnauthenticated}, ReasonExpired, http.StatusUnauthorized},
 	"ErrNotYetValid":        {ErrNotYetValid, []string{famUnauthenticated}, ReasonNotYetValid, http.StatusUnauthorized},
 	"ErrRevoked":            {ErrRevoked, []string{famUnauthenticated}, ReasonRevoked, http.StatusUnauthorized},
+	"ErrDelegationTooDeep":  {ErrDelegationTooDeep, []string{famUnauthenticated}, ReasonRevoked, http.StatusUnauthorized},
 	"ErrAudienceMismatch":   {ErrAudienceMismatch, []string{famUnauthenticated}, ReasonAudienceMismatch, http.StatusUnauthorized},
 	"ErrBiscuitAttenuation": {ErrBiscuitAttenuation, []string{famUnauthenticated, famToken}, ReasonInvalidBiscuit, http.StatusUnauthorized},
 	"ErrCopyCountersNotMetered": {

@@ -251,7 +251,9 @@ type DelegateRequest struct {
 // has expired,
 // or that the store reports revoked (itself or any ancestor), delegates
 // nothing; nor does a Biscuit copy with limits of its own (Parent.Copies),
-// which returns ErrDelegationTooWide.
+// which returns ErrDelegationTooWide. A child that would have more than
+// MaxDelegationDepth ancestors is ErrDelegationTooDeep: its record is
+// written before the store can count them, but no token is signed for it.
 func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability, string, error) {
 	parent := req.Parent.c
 	if parent.ID == uuid.Nil {
@@ -349,6 +351,11 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 	// rather than accepted as an argument.
 	if err := i.store.Insert(ctx, InsertRequest{Capability: child, IssuedBy: parent.Subject}); err != nil {
 		return Capability{}, "", fmt.Errorf("limes: persist delegation: %w", err)
+	}
+	// The store counts the chain only once the child is on it: a parent
+	// at MaxDelegationDepth checks out above, its child does not.
+	if _, err := i.store.IsRevoked(ctx, child.ID); err != nil {
+		return Capability{}, "", fmt.Errorf("limes: delegate from parent %s: %w", parent.ID, err)
 	}
 	token, err := i.signer.Sign(ctx, child)
 	if err != nil {

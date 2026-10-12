@@ -41,6 +41,12 @@ var (
 	ErrExpired           error = &familyError{"limes: expired", ErrUnauthenticated}
 	ErrNotYetValid       error = &familyError{"limes: not yet valid", ErrUnauthenticated}
 	ErrRevoked           error = &familyError{"limes: revoked", ErrUnauthenticated}
+	// ErrDelegationTooDeep — a capability with more than MaxDelegationDepth
+	// ancestors on record. Its root lies past the bounded IsRevoked walk,
+	// so a revocation there would go unseen: it is refused as revoked,
+	// never accepted, and Delegate refuses to mint one. A store answers it
+	// as an error, which no revocation cache keeps.
+	ErrDelegationTooDeep error = &familyError{"limes: delegation chain too deep", ErrRevoked}
 	ErrAudienceMismatch  error = &familyError{"limes: audience mismatch", ErrUnauthenticated}
 	ErrCaveatViolation         = errors.New("limes: caveat violation")
 	ErrBudgetExceeded          = errors.New("limes: budget exceeded")

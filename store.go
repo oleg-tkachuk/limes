@@ -32,10 +32,16 @@ type IssuanceStore interface {
 	// that is still on record, is in the revocation list. Answering for
 	// the chain is what makes revoking an orchestrator stop the workers it
 	// spawned. Verifiers gate every request on it, so implementations
-	// should make the walk a single round trip (a recursive query) and
-	// bound its depth. An id not on record is not revoked.
+	// should make the walk a single round trip (a recursive query),
+	// bounded at MaxDelegationDepth ancestors: a capability with more
+	// still on record returns ErrDelegationTooDeep, never false. An id not
+	// on record is not revoked.
 	IsRevoked(ctx context.Context, id uuid.UUID) (bool, error)
 }
+
+// MaxDelegationDepth is the most ancestors a capability may have: how far
+// IsRevoked walks, and how deep Delegate mints.
+const MaxDelegationDepth = 64
 
 // InsertRequest is a capability to record, and who asked for it.
 type InsertRequest struct {
