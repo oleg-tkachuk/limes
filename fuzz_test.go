@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/biscuit-auth/biscuit-go/v2/pb"
 
@@ -84,6 +85,50 @@ func FuzzParseAuthorization(f *testing.F) {
 		again, cred, err := ParseAuthorization(string(scheme) + " " + credential)
 		if err != nil || again != scheme || cred != credential {
 			t.Fatalf("%q reads back as %q %q, %v", header, again, cred, err)
+		}
+	})
+}
+
+// FuzzAttenuationBlock folds a block of fuzzer-chosen facts into a
+// capability, past the signature chain FuzzOpenBiscuit cannot forge: what it
+// accepts must narrow the capability it was folded into, and every copy
+// ceiling it adds must fit under the ones already in force.
+func FuzzAttenuationBlock(f *testing.F) {
+	f.Add(biscuitFactOp, string(OpGet), int64(0), int64(0))
+	f.Add(biscuitFactResourcePrefix, "corpus/public/", int64(0), int64(0))
+	f.Add(biscuitFactMaxRequests, "", int64(5), int64(0))
+	f.Add(biscuitFactMaxBudget, "", int64(1_000), int64(0))
+	f.Add(biscuitFactExpires, "", int64(0), int64(1_800_000_000))
+	f.Add(biscuitFactPlane, audienceData, int64(0), int64(0))
+	start := time.Unix(1_800_000_000, 0).UTC()
+	parent := validCapability()
+	parent.IssuedAt, parent.NotBefore, parent.ExpiresAt = start, start, start.Add(time.Hour)
+	parent.Caveats.ResourcePrefixes = []string{"corpus/"}
+	parent.Caveats.Requests = RequestCeiling{Max: 10}
+	parent.Caveats.Budget = BudgetCeiling{Max: NanosPerUnit}
+	f.Fuzz(func(t *testing.T, name, s string, n, date int64) {
+		var term any
+		switch {
+		case s != "":
+			term = s
+		case date != 0:
+			term = time.Unix(date, 0).UTC()
+		default:
+			term = n
+		}
+		blk := decodedBlock{facts: []decodedFact{{name: name, term: term}}}
+		next, err := applyAttenuation(parent, blk, []byte("block"), true)
+		if err != nil {
+			return
+		}
+		if err := Narrows(parent, next); err != nil {
+			t.Fatalf("accepted %s=%v, which widens: %v", name, term, err)
+		}
+		for _, c := range next.Copies {
+			if !c.Requests.Unlimited && !c.Requests.Within(parent.Caveats.Requests) ||
+				!c.Budget.Unlimited && !c.Budget.Within(parent.Caveats.Budget) {
+				t.Fatalf("accepted a copy ceiling %+v past the capability's", c)
+			}
 		}
 	})
 }
