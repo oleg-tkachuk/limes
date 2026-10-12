@@ -715,7 +715,14 @@ log. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
 |---|---|
 | `IssuerConfig.DefaultTTL` | `DefaultIssueTTL`, 15 minutes |
 | `VerifierConfig.Leeway` | `DefaultLeeway`, 30 seconds |
-| `VerifierConfig.MaxTokenBytes` | `DefaultMaxTokenBytes`, 16 KiB |
+| `VerifierConfig.MaxTokenBytes` · `IssuerConfig.MaxTokenBytes` | `DefaultMaxTokenBytes`, 16 KiB |
+| `VerifierConfig.Leeway` bound | `MaxLeeway`, 5 minutes |
+| `VerifierConfig.AcceptTokenTypes` | `TokenTypeV4` |
+| `VerifierConfig.Realm` | `DefaultRealm`, `limes` |
+| `jwks.HandlerConfig.MaxAge` | `jwks.DefaultMaxAge`, 5 minutes; `Revalidate` for `max-age=0` |
+| `ListByPrincipalRequest.Limit` · `ListTenantBudgetsRequest.Limit` · `ListReservationsRequest.Limit` | `DefaultListLimit` 50, at most `MaxListLimit` 500 |
+| `PurgeRequest` · `ReleaseExpiredRequest` · `PurgeOrphansRequest` | `DefaultHousekeepingLimit` 1 000 a batch; `PurgeRequest.ExpiredFor` `MinPurgeRetention`, 6 minutes, and no less |
+| `MaxDelegationDepth` · `MaxBiscuitBlocks` | 64 ancestors · 32 attenuation blocks |
 | `RevocationCacheConfig` · `BiscuitRevocationCacheConfig` | `DefaultRevocationCacheTTL` 2 seconds · `DefaultRevocationCacheEntries` 100 000, the oldest dropped first past it; a negative TTL or bound is refused — for no cache, give the verifier the store itself |
 | `jwks.RemoteConfig` | `jwks.DefaultFetchTimeout` 10s · `DefaultRefreshInterval` 5m · `DefaultMinRefreshInterval` 10s · `DefaultMaxStale` 1h · `DefaultMaxDocumentBytes` 1 MiB |
 | `dpop.VerifierConfig.Window` | `dpop.DefaultWindow`, 1 minute |

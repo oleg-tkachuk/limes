@@ -12,8 +12,8 @@ import (
 // capability's id and tenant, its request and budget ceilings, its unit and
 // the limits of the Biscuit copy presented. Only
 // VerifiedCapability.MeterSubject and StoredMeterSubject make one, so a
-// ceiling is always the one the token or the store carries — never a value a
-// caller typed. A store reads it through its methods. The zero
+// ceiling is the one a verified token carries or a RecordReader reads back —
+// never a value a caller sets on the subject itself. A store reads it through its methods. The zero
 // MeterSubject names no capability and no tenant; a Meter refuses it with
 // ErrInvalidRequest rather than count it anywhere.
 type MeterSubject struct {

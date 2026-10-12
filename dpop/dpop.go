@@ -63,9 +63,10 @@ const (
 )
 
 // The refusals of a proof. A caller that judges what they mean for the
-// request — limes reads each as a refusal of the credentials — wraps them;
-// any other error Verify returns is a failure of the replay cache or the
-// nonces, not of the proof.
+// request — limes reads each as a refusal of the credentials — wraps them.
+// Verify returns one of them, ErrNonceRequired, an error naming a Request it
+// cannot check (no Holder), or a failure of the replay cache or the nonces,
+// which is not a refusal of the proof.
 var (
 	// ErrRequired — the token is key-bound and no proof came with it.
 	ErrRequired = errors.New("dpop: proof required")
@@ -371,7 +372,7 @@ func SigningAlgorithms() []string { return []string{jose.AlgEd25519, jose.AlgES2
 
 // errNoReplayCache is a Verifier with no ReplayCache: a captured proof
 // would be good for its whole window.
-var errNoReplayCache = errors.New("dpop: Verifier.Replay required")
+var errNoReplayCache = errors.New("dpop: VerifierConfig.Replay required")
 
 // Nonce is the nonce to send in the DPoP-Nonce header, empty when the
 // verifier issues none.

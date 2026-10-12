@@ -642,7 +642,8 @@ var (
 	// no room for it.
 	ErrCounterOverflow = errors.New("limes: counter would pass MaxNanos")
 
-	// ErrChargeNotFound — Refund named a charge with no ledger row.
+	// ErrChargeNotFound — Refund, GetCharge or ChargeByRef named a charge
+	// with no ledger row.
 	ErrChargeNotFound error = &familyError{"limes: charge not found", ErrNotFound}
 
 	// ErrRefundExceedsCharge — Refund would return more than the charge
@@ -790,7 +791,7 @@ type ChargeByRefRequest struct {
 	ExternalRef string
 }
 
-// DeleteUsageRequest names the capability whose usage row Delete drops.
+// DeleteUsageRequest names the capability whose usage row DeleteUsage drops.
 type DeleteUsageRequest struct {
 	CapabilityID uuid.UUID
 }

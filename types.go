@@ -27,6 +27,8 @@ import (
 //	│   └── ErrDelegationTooDeep
 //	└── ErrExpired, ErrNotYetValid, ErrAudienceMismatch
 //	ErrCaveatViolation       a caveat refuses the operation (403)
+//	ErrBudgetExceeded, ErrTenantBudgetExceeded, ErrRequestLimitExceeded
+//	                         a ceiling refuses the request (403)
 //	ErrInvalidRequest        the request itself is malformed
 //	├── ErrInvalidCaveats, ErrInvalidAmount, ErrEffectConflict
 //	ErrNotFound              what the request names is not on record

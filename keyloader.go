@@ -57,7 +57,7 @@ type SigningKey struct {
 	Private ed25519.PrivateKey
 }
 
-// LoadKey reads the signing key at path (LoadPrivateKey), under the kid
+// LoadKey reads the PKCS#8 PEM signing key at path, under the kid
 // jwks.KeyID derives from it; a deployment that names its kids sets
 // SigningKey.KeyID on the result. For a key that lives
 // only as long as the process, GenerateKey; a deployment that may have no
