@@ -181,15 +181,11 @@ func Attenuate(token string, a Attenuation) (string, error) {
 // revocation ids, authority first, read from the chain it verified.
 // meterCopies admits blocks that set a copy's own limits.
 func openBiscuit(token string) (string, func(parent *Capability, meterCopies bool) (*Capability, [][]byte, error), error) {
-	raw, err := base64.RawURLEncoding.DecodeString(token)
+	raw, container, err := decodeBiscuitContainer(token)
 	if err != nil {
-		return "", nil, fmt.Errorf("%w: biscuit encoding: %w", ErrInvalidToken, err)
+		return "", nil, err
 	}
-	var container pb.Biscuit
-	if err := proto.Unmarshal(raw, &container); err != nil || container.GetAuthority() == nil {
-		return "", nil, fmt.Errorf("%w: biscuit container", ErrInvalidToken)
-	}
-	blocks, err := decodeBiscuitBlocks(&container)
+	blocks, err := decodeBiscuitBlocks(container)
 	if err != nil {
 		return "", nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
@@ -204,17 +200,23 @@ func openBiscuit(token string) (string, func(parent *Capability, meterCopies boo
 		if err != nil || len(root) != ed25519.PublicKeySize {
 			return nil, nil, fmt.Errorf("%w: sealed token names no biscuit root", ErrInvalidToken)
 		}
-		b, err := biscuit.Unmarshal(raw)
-		if err != nil {
-			return nil, nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
-		}
-		if _, err := b.Authorizer(ed25519.PublicKey(root)); err != nil {
-			return nil, nil, fmt.Errorf("%w: biscuit chain: %w", ErrInvalidToken, err)
+		var ids [][]byte
+		if err := guardBiscuit(func() error {
+			b, err := biscuit.Unmarshal(raw)
+			if err != nil {
+				return err
+			}
+			if _, err := b.Authorizer(ed25519.PublicKey(root)); err != nil {
+				return fmt.Errorf("biscuit chain: %w", err)
+			}
+			ids = b.RevocationIds()
+			return nil
+		}); err != nil {
+			return nil, nil, err
 		}
 		cur := *parent
 		cur.BiscuitRoot = ""
 		cur.Copies = nil
-		ids := b.RevocationIds()
 		for i, blk := range blocks[1:] {
 			next, err := applyAttenuation(cur, blk, ids[i+1], meterCopies)
 			if err != nil {
@@ -256,14 +258,21 @@ func decodeBiscuitBlocks(c *pb.Biscuit) ([]decodedBlock, error) {
 		d := decodedBlock{others: len(blk.GetRulesV2()) + len(blk.GetChecksV2())}
 		for _, f := range blk.GetFactsV2() {
 			p := f.GetPredicate()
-			name := symbols.Str(datalog.String(p.GetName()))
+			name, err := biscuitSymbol(*symbols, p.GetName())
+			if err != nil {
+				return nil, fmt.Errorf("block %d: fact name: %w", i, err)
+			}
 			if len(p.GetTerms()) != 1 {
 				return nil, fmt.Errorf("block %d: fact %s takes one term", i, name)
 			}
 			var term any
 			switch t := p.GetTerms()[0].GetContent().(type) {
 			case *pb.TermV2_String_:
-				term = symbols.Str(datalog.String(t.String_))
+				s, err := biscuitSymbol(*symbols, t.String_)
+				if err != nil {
+					return nil, fmt.Errorf("block %d: fact %s: %w", i, name, err)
+				}
+				term = s
 			case *pb.TermV2_Date:
 				term = time.Unix(int64(t.Date), 0).UTC() //nolint:gosec // a Biscuit date is seconds since the epoch
 			case *pb.TermV2_Integer:
@@ -471,15 +480,81 @@ func parseBiscuit(token string) (*biscuit.Biscuit, error) {
 	if !isBiscuit(token) {
 		return nil, fmt.Errorf("%w: not a Biscuit token", ErrInvalidToken)
 	}
-	raw, err := base64.RawURLEncoding.DecodeString(token)
+	raw, _, err := decodeBiscuitContainer(token)
 	if err != nil {
-		return nil, fmt.Errorf("%w: biscuit encoding: %w", ErrInvalidToken, err)
+		return nil, err
 	}
-	b, err := biscuit.Unmarshal(raw)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
+	var b *biscuit.Biscuit
+	if err := guardBiscuit(func() error {
+		b, err = biscuit.Unmarshal(raw)
+		return err
+	}); err != nil {
+		return nil, err
 	}
 	return b, nil
+}
+
+// decodeBiscuitContainer reads token's bytes and its container, refusing a
+// container biscuit-go would trip over: no authority block, or a proof that
+// is neither a next secret of a seed's length nor a final signature of a
+// signature's. biscuit-go checks the keys and signatures of the blocks but
+// hands the proof's secret to ed25519.NewKeyFromSeed as it is, which panics
+// on any other length.
+func decodeBiscuitContainer(token string) ([]byte, *pb.Biscuit, error) {
+	raw, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: biscuit encoding: %w", ErrInvalidToken, err)
+	}
+	var c pb.Biscuit
+	if err := proto.Unmarshal(raw, &c); err != nil || c.GetAuthority() == nil {
+		return nil, nil, fmt.Errorf("%w: biscuit container", ErrInvalidToken)
+	}
+	switch p := c.GetProof().GetContent().(type) {
+	case *pb.Proof_NextSecret:
+		if len(p.NextSecret) != ed25519.SeedSize {
+			return nil, nil, fmt.Errorf("%w: biscuit proof secret is %d bytes, not %d", ErrInvalidToken, len(p.NextSecret), ed25519.SeedSize)
+		}
+	case *pb.Proof_FinalSignature:
+		if len(p.FinalSignature) != ed25519.SignatureSize {
+			return nil, nil, fmt.Errorf("%w: biscuit final signature is %d bytes, not %d", ErrInvalidToken, len(p.FinalSignature), ed25519.SignatureSize)
+		}
+	default:
+		return nil, nil, fmt.Errorf("%w: biscuit proof has no content", ErrInvalidToken)
+	}
+	return raw, &c, nil
+}
+
+// biscuitSymbol resolves a symbol id against the default symbols and the
+// table the blocks so far declared. datalog.SymbolTable.Str converts the id
+// to an int, so an id of 2^63 or more indexes the defaults at a negative
+// offset and panics; and it reads an unknown id as the text "<invalid symbol
+// N>", which a fact must not carry.
+func biscuitSymbol(table datalog.SymbolTable, id uint64) (string, error) {
+	defaults, offset := uint64(len(datalog.DEFAULT_SYMBOLS)), uint64(datalog.OFFSET) //nolint:gosec // G115: a length and biscuit-go's positive table offset
+	switch {
+	case id < defaults:
+		return datalog.DEFAULT_SYMBOLS[id], nil
+	case id >= offset && id-offset < uint64(len(table)):
+		return table[id-offset], nil
+	}
+	return "", fmt.Errorf("symbol %d is in neither the default nor the block symbols", id)
+}
+
+// guardBiscuit runs f, a call into biscuit-go over bytes the token's holder
+// chose, and returns its error as ErrInvalidToken — and a panic as one too.
+// The container is checked before biscuit-go sees it, but biscuit-go also
+// decodes every block's rules, checks and expressions, which limes then
+// refuses; a token must never take the process down on the way there.
+func guardBiscuit(f func() error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%w: biscuit: %v", ErrInvalidToken, r)
+		}
+	}()
+	if err := f(); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidToken, err)
+	}
+	return nil
 }
 
 func serializeBiscuit(b *biscuit.Biscuit) (string, error) {

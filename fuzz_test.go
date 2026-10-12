@@ -1,9 +1,13 @@
 package limes
 
 import (
+	"crypto/ed25519"
+	"encoding/base64"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/biscuit-auth/biscuit-go/v2/pb"
 
 	"github.com/oleg-tkachuk/limes/internal/jose"
 )
@@ -30,7 +34,9 @@ func FuzzParseClaims(f *testing.F) {
 }
 
 // FuzzOpenBiscuit holds the Biscuit reader to refusing, never panicking on,
-// a token it cannot read.
+// a token it cannot read: both the part read before any signature is
+// checked, and the chain check that follows once a sealed token has named a
+// root.
 func FuzzOpenBiscuit(f *testing.F) {
 	f.Add("")
 	for _, name := range []string{biscuitSeedFile, biscuitAttenuatedFile} {
@@ -40,8 +46,20 @@ func FuzzOpenBiscuit(f *testing.F) {
 		}
 		f.Add(strings.TrimSpace(string(raw)))
 	}
+	// Two that once panicked: a symbol id with its top bit set, and a proof
+	// secret one byte long.
+	topBit := uint64(1) << 63
+	f.Add(forgedBiscuitToken(f, &pb.Block{FactsV2: []*pb.FactV2{{Predicate: &pb.PredicateV2{
+		Name: &topBit, Terms: []*pb.TermV2{{Content: &pb.TermV2_Integer{Integer: 1}}},
+	}}}}, make([]byte, ed25519.SeedSize)))
+	f.Add(forgedBiscuitToken(f, &pb.Block{}, []byte{1}))
+	anyRoot := base64.RawURLEncoding.EncodeToString(make([]byte, ed25519.PublicKeySize))
 	f.Fuzz(func(t *testing.T, token string) {
-		_, _, _ = openBiscuit(token)
+		_, attenuate, err := openBiscuit(token)
+		if err != nil {
+			return
+		}
+		_, _, _ = attenuate(&Capability{BiscuitRoot: anyRoot}, true)
 	})
 }
 
