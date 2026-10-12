@@ -365,6 +365,7 @@ error's own text never reaches the client.
 | Refusal | Status | `WWW-Authenticate` |
 |---|---|---|
 | `jwks.ErrUnavailable` | 503 | none |
+| `ErrNoCredentials` | 401 | a bare challenge, no error code (RFC 6750 §3.1): no header, or another scheme's |
 | `ErrMalformedAuthorization` | 400 | `error="invalid_request"` under the client's scheme (Bearer when unknown) |
 | `dpop.ErrNonceRequired` | 401 | `DPoP error="use_dpop_nonce"`, and a fresh `DPoP-Nonce` |
 | `dpop.ErrRequired` · `dpop.ErrInvalid` · `dpop.ErrReplayed`, and any other `ErrProofOfPossession` | 401 | `DPoP error="invalid_dpop_proof", algs="Ed25519 ES256"` |

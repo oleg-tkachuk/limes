@@ -18,6 +18,7 @@ type Reason string
 // The refusals a verifier, Caveats.Check or a Meter returns for a presented
 // capability.
 const (
+	ReasonNoCredentials          Reason = "no_credentials"
 	ReasonMalformedAuthorization Reason = "malformed_authorization"
 	ReasonInvalidToken           Reason = "invalid_token"
 	ReasonKeysUnavailable        Reason = "keys_unavailable"
@@ -57,6 +58,7 @@ type refusalRule struct {
 // ErrInvalidToken.
 var refusalRules = []refusalRule{
 	{ErrMalformedAuthorization, ReasonMalformedAuthorization, true, answerMalformed},
+	{ErrNoCredentials, ReasonNoCredentials, false, answerNoCredentials},
 	{jwks.ErrUnavailable, ReasonKeysUnavailable, false, answerKeysUnavailable},
 
 	// A nonce challenge asks for a proof signed afresh, and a token under the

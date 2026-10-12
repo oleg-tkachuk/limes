@@ -227,7 +227,7 @@ func NewStandardVerifier(cfg VerifierConfig) (*StandardVerifier, error) {
 func (v *StandardVerifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapability, error) {
 	token, audience := req.Token, req.Audience
 	if token == "" {
-		return VerifiedCapability{}, fmt.Errorf("%w: no token", ErrInvalidToken)
+		return VerifiedCapability{}, ErrNoCredentials
 	}
 	if audience == "" {
 		return VerifiedCapability{}, fmt.Errorf("%w: no audience to verify against", ErrAudienceMismatch)
