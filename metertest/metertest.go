@@ -220,6 +220,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"SettleReplaysAndRecordsAnOverrun", checkSettle[TX]},
 		{"SettleOfNoReservationIsNotFound", checkSettleNil[TX]},
 		{"SettleOfAnotherCapabilitysHoldIsNotFound", checkSettleOwner[TX]},
+		{"SettleWithinTheHoldPassesACrossedCeiling", checkSettleWithinHold[TX]},
 		{"RefundOfAClosedPeriodLeavesTheTenantPeriod", checkRefundAcrossReset[TX]},
 		{"EveryCounterKeepsOneUnit", checkOneUnit[TX]},
 		{"DeleteReleasesHolds", checkDeleteReleasesHolds[TX]},
@@ -1240,5 +1241,62 @@ func checkPeriodEnd[TX any](t *testing.T, f fixture[TX]) {
 		if got, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant); err != nil || !got.PeriodEnd.Equal(want) {
 			t.Errorf("GetTenantBudget after PeriodEnd %v = %v, %v", want, got.PeriodEnd, err)
 		}
+	}
+}
+
+// checkSettleWithinHold holds a store to Settle's contract: only an amount
+// above the hold must fit the ceilings. A settle at or below it adds nothing
+// to what is already counted, so a ceiling crossed meanwhile — by an
+// OverrunRecord charge elsewhere in the chain, or a tenant ceiling lowered —
+// does not refuse it, and the whole hold is released everywhere it counted.
+func checkSettleWithinHold[TX any](t *testing.T, f fixture[TX]) {
+	const held, actual = 10 * one, 4 * one
+	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: held})
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The root spends past its ceiling, its child's hold still counted.
+	if _, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{
+		Subject: newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, maxBudget: rootBudget}),
+		Amount:  rootBudget,
+		Overrun: limes.OverrunRecord,
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: f.childSubject(), ReservationID: r.ID, Amount: actual}, nil)
+	if err != nil {
+		t.Fatalf("settle below the hold after the root crossed its ceiling: %v", err)
+	}
+	if got.Overrun {
+		t.Error("a settle below its hold reported an overrun")
+	}
+	for name, id := range map[string]uuid.UUID{"child": f.child, "root": f.root} {
+		if u, err := f.Usage.GetUsage(f.Ctx, id); err != nil || u.ReservedAmount != one {
+			t.Errorf("%s after the settle = %+v, %v; want only the other hold, %v", name, u, err, one)
+		}
+	}
+	if b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant); err != nil || b.ReservedAmount != one {
+		t.Errorf("tenant after the settle = %+v, %v; want only the other hold, %v", b, err, one)
+	}
+	if f.spent(t, f.child) != actual {
+		t.Errorf("child spent %v, want %v", f.spent(t, f.child), actual)
+	}
+
+	// A tenant ceiling lowered under a hold refuses nothing the hold covers.
+	cur, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
+		TenantID: f.Tenant, MaxBudgetAmount: cent, UnitCode: unit, ExpectedVersion: cur.ResourceVersion,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: f.childSubject(), ReservationID: again.ID, Amount: one}, nil); err != nil {
+		t.Errorf("settle at the hold after the tenant ceiling was lowered under it: %v", err)
 	}
 }
