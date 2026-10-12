@@ -212,9 +212,9 @@ func TestRemoteJWKSWaiterHonoursItsContext(t *testing.T) {
 	}
 }
 
-// A caller that gives up during its own fetch takes only itself down: its
-// cancelled context is not the endpoint failing, so the next caller fetches
-// at once instead of waiting out MinRefreshInterval on someone else's error.
+// A caller that gives up during its own fetch takes only itself down: the
+// fetch goes on without it, and the next caller is served by that fetch
+// rather than a second one or someone else's cancellation.
 func TestRemoteJWKSCallerCancellingItsFetchBlocksNoOne(t *testing.T) {
 	pub, _, err := ed25519.GenerateKey(nil)
 	if err != nil {
@@ -225,11 +225,10 @@ func TestRemoteJWKSCallerCancellingItsFetchBlocksNoOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	var fetches atomic.Int32
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if fetches.Add(1) == 1 {
-			<-r.Context().Done() // the first caller's fetch hangs until it gives up
-			return
-		}
+	release := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fetches.Add(1)
+		<-release // slow until the first caller has given up
 		_, _ = w.Write(doc)
 	}))
 	t.Cleanup(ts.Close)
@@ -243,9 +242,44 @@ func TestRemoteJWKSCallerCancellingItsFetchBlocksNoOne(t *testing.T) {
 	if _, err := r.PublicKey(ctx, "k"); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("the caller that gave up: err = %v, want its context's", err)
 	}
+	close(release)
 	got, err := r.PublicKey(context.Background(), "k")
 	if err != nil || !got.Equal(pub) {
-		t.Fatalf("the next caller = %v, %v; want the key, fetched again (fetches %d)", got, err, fetches.Load())
+		t.Fatalf("the next caller = %v, %v; want the key", got, err)
+	}
+	if n := fetches.Load(); n != 1 {
+		t.Errorf("%d fetches, want the one the first caller started", n)
+	}
+}
+
+// Callers that give up cannot turn the resolver into a request amplifier:
+// however many cancel, the issuer sees at most one fetch per
+// MinRefreshInterval.
+func TestRemoteJWKSCancellingCallersKeepTheRateLimit(t *testing.T) {
+	const callers = 5
+	var fetches atomic.Int32
+	release := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fetches.Add(1)
+		<-release
+		http.Error(w, "down", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(ts.Close)
+	t.Cleanup(func() { close(release) })
+	r, err := NewRemote(RemoteConfig{
+		URL: ts.URL, Client: ts.Client(),
+		MinRefreshInterval: time.Hour, RefreshInterval: time.Hour, MaxStale: time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range callers {
+		ctx, cancel := context.WithTimeout(context.Background(), checkDeadline/20)
+		_, _ = r.PublicKey(ctx, "unknown")
+		cancel()
+	}
+	if n := fetches.Load(); n != 1 {
+		t.Errorf("%d fetches reached the issuer from %d cancelled callers within one MinRefreshInterval, want 1", n, callers)
 	}
 }
 
