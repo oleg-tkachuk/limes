@@ -30,8 +30,9 @@ type Issuer struct {
 	store  IssuanceStore
 	clock  func() time.Time
 
-	issuerName string
-	defaultTTL time.Duration
+	issuerName    string
+	defaultTTL    time.Duration
+	maxTokenBytes int
 }
 
 // DefaultIssueTTL is IssuerConfig.DefaultTTL when it is zero.
@@ -56,6 +57,11 @@ type IssuerConfig struct {
 	// latency rarely matters. Negative is refused.
 	DefaultTTL time.Duration
 
+	// MaxTokenBytes refuses to mint a token longer than this, which a
+	// verifier with the same limit (VerifierConfig.MaxTokenBytes) would
+	// refuse unread. Zero: DefaultMaxTokenBytes; negative is refused.
+	MaxTokenBytes int
+
 	// Now is the clock; tests override.
 	Now func() time.Time
 }
@@ -77,16 +83,45 @@ func NewIssuer(cfg IssuerConfig) (*Issuer, error) {
 	if cfg.DefaultTTL == 0 {
 		cfg.DefaultTTL = DefaultIssueTTL
 	}
+	if cfg.MaxTokenBytes < 0 {
+		return nil, fmt.Errorf("limes: IssuerConfig.MaxTokenBytes %d is negative", cfg.MaxTokenBytes)
+	}
+	if cfg.MaxTokenBytes == 0 {
+		cfg.MaxTokenBytes = DefaultMaxTokenBytes
+	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
 	return &Issuer{
-		signer:     cfg.Signer,
-		store:      cfg.Store,
-		clock:      cfg.Now,
-		issuerName: cfg.IssuerName,
-		defaultTTL: cfg.DefaultTTL,
+		signer:        cfg.Signer,
+		store:         cfg.Store,
+		clock:         cfg.Now,
+		issuerName:    cfg.IssuerName,
+		defaultTTL:    cfg.DefaultTTL,
+		maxTokenBytes: cfg.MaxTokenBytes,
 	}, nil
+}
+
+// fits refuses a token longer than MaxTokenBytes: one a verifier refuses
+// unread is a capability nobody can use.
+func (i *Issuer) fits(token string) error {
+	if len(token) > i.maxTokenBytes {
+		return invalidRequest("the token would be %d bytes, past MaxTokenBytes %d; narrow its caveats", len(token), i.maxTokenBytes)
+	}
+	return nil
+}
+
+// sign signs c and holds the token to MaxTokenBytes, before anything is
+// recorded.
+func (i *Issuer) sign(ctx context.Context, c Capability) (string, error) {
+	token, err := i.signer.Sign(ctx, c)
+	if err != nil {
+		return "", fmt.Errorf("limes: sign: %w", err)
+	}
+	if err := i.fits(token); err != nil {
+		return "", err
+	}
+	return token, nil
 }
 
 // IssueRequest is the input shape for Issuer.Issue. Subject (with its
@@ -167,12 +202,14 @@ func (i *Issuer) Issue(ctx context.Context, req IssueRequest) (Capability, strin
 		return Capability{}, "", err
 	}
 
+	// Signed first: a capability whose token cannot be minted, or would be
+	// too long to use, is never recorded.
+	token, err := i.sign(ctx, cap)
+	if err != nil {
+		return Capability{}, "", err
+	}
 	if err := i.store.Insert(ctx, InsertRequest{Capability: cap, IssuedBy: req.IssuedBy}); err != nil {
 		return Capability{}, "", fmt.Errorf("limes: persist issuance: %w", err)
-	}
-	token, err := i.signer.Sign(ctx, cap)
-	if err != nil {
-		return Capability{}, "", fmt.Errorf("limes: sign: %w", err)
 	}
 	return cap, token, nil
 }
@@ -349,6 +386,10 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 	// A delegation is requested by whoever holds the parent — that is not a
 	// caller-supplied fact, it is what delegation means, so it is derived
 	// rather than accepted as an argument.
+	token, err := i.sign(ctx, child)
+	if err != nil {
+		return Capability{}, "", err
+	}
 	if err := i.store.Insert(ctx, InsertRequest{Capability: child, IssuedBy: parent.Subject}); err != nil {
 		return Capability{}, "", fmt.Errorf("limes: persist delegation: %w", err)
 	}
@@ -356,10 +397,6 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 	// at MaxDelegationDepth checks out above, its child does not.
 	if _, err := i.store.IsRevoked(ctx, child.ID); err != nil {
 		return Capability{}, "", fmt.Errorf("limes: delegate from parent %s: %w", parent.ID, err)
-	}
-	token, err := i.signer.Sign(ctx, child)
-	if err != nil {
-		return Capability{}, "", fmt.Errorf("limes: sign delegation: %w", err)
 	}
 	return child, token, nil
 }

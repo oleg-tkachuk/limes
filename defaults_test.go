@@ -29,6 +29,9 @@ func TestConfigDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if iss.maxTokenBytes != DefaultMaxTokenBytes {
+		t.Errorf("Issuer MaxTokenBytes = %d, want %d", iss.maxTokenBytes, DefaultMaxTokenBytes)
+	}
 	if iss.defaultTTL != 15*time.Minute {
 		t.Errorf("Issuer default TTL = %s, want 15m", iss.defaultTTL)
 	}
@@ -64,6 +67,9 @@ func TestConfigRefusesNegatives(t *testing.T) {
 	}
 	if _, err := NewIssuer(IssuerConfig{Signer: signer, Store: newMemStore(), IssuerName: goldenIssuer, DefaultTTL: -time.Minute}); err == nil {
 		t.Error("NewIssuer accepted a negative DefaultTTL")
+	}
+	if _, err := NewIssuer(IssuerConfig{Signer: signer, Store: newMemStore(), IssuerName: goldenIssuer, MaxTokenBytes: -1}); err == nil {
+		t.Error("NewIssuer accepted a negative MaxTokenBytes")
 	}
 
 	base := VerifierConfig{
