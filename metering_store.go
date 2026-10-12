@@ -113,8 +113,8 @@ func (s *meteringStore[TX]) GetCharge(ctx context.Context, chargeID uuid.UUID) (
 	return s.inner.GetCharge(ctx, chargeID)
 }
 
-func (s *meteringStore[TX]) ChargeByRef(ctx context.Context, capID uuid.UUID, externalRef string) (ChargeRecord, error) {
-	return s.inner.ChargeByRef(ctx, capID, externalRef)
+func (s *meteringStore[TX]) ChargeByRef(ctx context.Context, req ChargeByRefRequest) (ChargeRecord, error) {
+	return s.inner.ChargeByRef(ctx, req)
 }
 
 func (s *meteringStore[TX]) GetUsage(ctx context.Context, capID uuid.UUID) (Usage, error) {
@@ -133,8 +133,8 @@ func (s *meteringStore[TX]) ListTenantBudgets(ctx context.Context, args ListTena
 	return s.inner.ListTenantBudgets(ctx, args)
 }
 
-func (s *meteringStore[TX]) Delete(ctx context.Context, capID uuid.UUID) error {
-	return s.inner.Delete(ctx, capID)
+func (s *meteringStore[TX]) Delete(ctx context.Context, req DeleteUsageRequest) error {
+	return s.inner.Delete(ctx, req)
 }
 
 func (s *meteringStore[TX]) PurgeOrphans(ctx context.Context, req PurgeOrphansRequest) (PurgeOrphansResult, error) {

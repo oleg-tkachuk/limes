@@ -300,13 +300,13 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 	if c, err := usage.GetCharge(ctx, receipt.ChargeID); err != nil || c.RefundedAmount != limes.NanosPerUnit {
 		t.Errorf("GetCharge = %+v, %v", c, err)
 	}
-	if c, err := usage.ChargeByRef(ctx, capID, "r"); err != nil || c.ID != receipt.ChargeID {
+	if c, err := usage.ChargeByRef(ctx, limes.ChargeByRefRequest{CapabilityID: capID, ExternalRef: "r"}); err != nil || c.ID != receipt.ChargeID {
 		t.Errorf("ChargeByRef = %+v, %v", c, err)
 	}
 	if n, err := usage.ReleaseExpired(ctx, limes.ReleaseExpiredRequest{}); err != nil || n.Released != 0 {
 		t.Errorf("ReleaseExpired = %d, %v", n, err)
 	}
-	if err := usage.Delete(ctx, uuid.New()); err != nil {
+	if err := usage.Delete(ctx, limes.DeleteUsageRequest{CapabilityID: uuid.New()}); err != nil {
 		t.Errorf("Delete of a row never written: %v", err)
 	}
 	// The capability is not on record, so its usage is an orphan.
