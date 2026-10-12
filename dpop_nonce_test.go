@@ -24,7 +24,7 @@ func TestVerifyRequiresTheServerNonce(t *testing.T) {
 	}
 	cfg := base.cfg
 	cfg.DPoP = newVerifier(t, dpop.VerifierConfig{Replay: newReplay(t, dpop.MemoryReplayCacheConfig{}), Nonces: nonces})
-	v, err := NewStandardVerifier(cfg)
+	v, err := NewVerifier(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

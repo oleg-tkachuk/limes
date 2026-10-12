@@ -86,7 +86,7 @@ func TestVerifyWithoutDPoPRefusesBoundTokens(t *testing.T) {
 	issuer, configured, _, _ := buildIssuerVerifier(t)
 	cfg := configured.cfg
 	cfg.DPoP = nil
-	v, err := NewStandardVerifier(cfg)
+	v, err := NewVerifier(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

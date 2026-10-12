@@ -120,16 +120,16 @@ func TestBumpRequestRejectsWithoutMutating(t *testing.T) {
 
 	for i := int64(1); i <= 2; i++ {
 		r, err := u.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: id, tenant: testTenant, requests: requestsOf(2)})})
-		if err != nil || r.Requests != i {
-			t.Fatalf("bump %d: n=%d err=%v", i, r.Requests, err)
+		if err != nil || r.RequestCount != i {
+			t.Fatalf("bump %d: n=%d err=%v", i, r.RequestCount, err)
 		}
 	}
 	n, err := u.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: id, tenant: testTenant, requests: requestsOf(2)})})
 	if !errors.Is(err, limes.ErrRequestLimitExceeded) {
 		t.Fatalf("want ErrRequestLimitExceeded, got %v", err)
 	}
-	if n.Requests != 2 {
-		t.Errorf("returned count = %d, want the unchanged 2", n.Requests)
+	if n.RequestCount != 2 {
+		t.Errorf("returned count = %d, want the unchanged 2", n.RequestCount)
 	}
 	got, _ := u.GetUsage(ctx, id)
 	if got.RequestCount != 2 {

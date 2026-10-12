@@ -128,7 +128,7 @@ func TestVerifierRejectsChildOfRevokedParent(t *testing.T) {
 	signer, _ := limes.NewSigner(limes.SignerConfig{KeyID: kid, Key: priv})
 	records := newTestStore()
 	issuer, _ := limes.NewIssuer(limes.IssuerConfig{Signer: signer, Store: records, IssuerName: "iss"})
-	verifier, _ := limes.NewStandardVerifier(limes.VerifierConfig{
+	verifier, _ := limes.NewVerifier(limes.VerifierConfig{
 		Keys:           mustStatic(t, kid, pub),
 		Revocations:    records,
 		TrustedIssuers: []string{"iss"},

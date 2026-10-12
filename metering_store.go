@@ -133,8 +133,8 @@ func (s *meteringStore[TX]) ListTenantBudgets(ctx context.Context, args ListTena
 	return s.inner.ListTenantBudgets(ctx, args)
 }
 
-func (s *meteringStore[TX]) Delete(ctx context.Context, req DeleteUsageRequest) error {
-	return s.inner.Delete(ctx, req)
+func (s *meteringStore[TX]) DeleteUsage(ctx context.Context, req DeleteUsageRequest) error {
+	return s.inner.DeleteUsage(ctx, req)
 }
 
 func (s *meteringStore[TX]) PurgeOrphans(ctx context.Context, req PurgeOrphansRequest) (PurgeOrphansResult, error) {

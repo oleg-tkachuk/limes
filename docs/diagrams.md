@@ -28,7 +28,7 @@ flowchart LR
         issuer["<b>Issuer</b><br/>Issue · Delegate · Biscuit"]
         signer["<b>Signer</b><br/>NewSigner · JWT Ed25519"]
         narrows["<b>Narrows</b><br/>child ⊆ parent"]
-        verifier["<b>StandardVerifier</b><br/>Authorize · Verify · BiscuitCopy<br/>ErrorResponse · DPoPNonce"]
+        verifier["<b>Verifier</b><br/>Authorize · Verify · BiscuitCopy<br/>ErrorResponse · DPoPNonce"]
         caveats["<b>Caveats</b><br/>Check · CheckSource · MatchResource"]
         cache["CachedRevocationChecker<br/>TTL · bounded, oldest out · single-flight"]
         bcache["CachedBiscuitRevocationChecker<br/>per revocation id · TTL · bounded · single-flight"]
@@ -150,7 +150,7 @@ sequenceDiagram
 
 ## Verification gates
 
-`StandardVerifier.Verify` reads nothing from the claims until the signature
+`Verifier.Verify` reads nothing from the claims until the signature
 over them has verified, checks a key-bound capability's proof of possession,
 and asks the revocation store last so that cheap rejections never reach it.
 Every refusal is a sentinel the caller maps to its own transport status, or
@@ -361,7 +361,7 @@ cache refuses rather than forgets.
 
 ## Answering a refusal
 
-`StandardVerifier.ErrorResponse` maps a refusal to how a protected resource
+`Verifier.ErrorResponse` maps a refusal to how a protected resource
 answers it, from the same table `ReasonOf` reads, and `WriteErrorResponse`
 writes it as `application/problem+json` with `Cache-Control: no-store`. The
 error's own text never reaches the client.
@@ -707,8 +707,8 @@ flowchart LR
     bop(["RevokeBiscuit(RevokeBiscuitRequest{CapabilityID, RevocationID})"])
     blist[("<b>BiscuitRevocationStore</b><br/>revoked block ids")]
     bcache["<b>CachedBiscuitRevocationChecker</b><br/>answer per revocation id, cached for TTL<br/>bounded · dropped by Clear"]
-    v1["StandardVerifier"]
-    v2["StandardVerifier"]
+    v1["Verifier"]
+    v2["Verifier"]
 
     op --> store
     store -.-> cascade

@@ -42,7 +42,7 @@ func TestPurgeKeepsARevocationAcrossClockSkew(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v, err := limes.NewStandardVerifier(limes.VerifierConfig{
+	v, err := limes.NewVerifier(limes.VerifierConfig{
 		Keys: keys, Revocations: records,
 		TrustedIssuers: []string{issuerName}, Leeway: limes.MaxLeeway, Now: func() time.Time { return verifierNow },
 	})

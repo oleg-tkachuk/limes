@@ -83,7 +83,7 @@
 // # Guarantees
 //
 // Rejections are matchable sentinels, so a consumer can map each to its own
-// transport status, or let StandardVerifier.ErrorResponse map it to HTTP. A
+// transport status, or let Verifier.ErrorResponse map it to HTTP. A
 // charge rejected by any ceiling — the capability's, an ancestor's, the
 // tenant's — leaves every counter and the ledger unmutated, so retrying after
 // a rejection is safe. Delegation can only narrow: any widening returns

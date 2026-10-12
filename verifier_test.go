@@ -74,7 +74,7 @@ func (m *memStore) ListByPrincipal(context.Context, ListByPrincipalRequest) (Pag
 
 // buildIssuerVerifier wires a fresh keypair, signer, store, cache, and
 // verifier — the standard test fixture.
-func buildIssuerVerifier(t *testing.T) (*Issuer, *StandardVerifier, *memStore, ed25519.PublicKey) {
+func buildIssuerVerifier(t *testing.T) (*Issuer, *Verifier, *memStore, ed25519.PublicKey) {
 	t.Helper()
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -96,7 +96,7 @@ func buildIssuerVerifier(t *testing.T) (*Issuer, *StandardVerifier, *memStore, e
 	}
 	cache := store // disable cache for deterministic tests
 	keys := staticKeys(t, map[string]ed25519.PublicKey{"k1": pub})
-	v, err := NewStandardVerifier(VerifierConfig{
+	v, err := NewVerifier(VerifierConfig{
 		Keys:           keys,
 		Revocations:    cache,
 		TrustedIssuers: []string{"limes-test"},
@@ -178,7 +178,7 @@ func TestVerify_Expired(t *testing.T) {
 		Now:        clock.Now,
 		DefaultTTL: time.Minute,
 	})
-	verifier, _ := NewStandardVerifier(VerifierConfig{
+	verifier, _ := NewVerifier(VerifierConfig{
 		Keys:           keys,
 		Revocations:    cache,
 		TrustedIssuers: []string{"limes-test"},
@@ -243,7 +243,7 @@ func TestVerify_UntrustedIssuer(t *testing.T) {
 
 	cache := store
 	keys := staticKeys(t, map[string]ed25519.PublicKey{"k1": pub})
-	verifier, _ := NewStandardVerifier(VerifierConfig{
+	verifier, _ := NewVerifier(VerifierConfig{
 		Keys:           keys,
 		Revocations:    cache,
 		TrustedIssuers: []string{"limes-test"}, // rogue not in set

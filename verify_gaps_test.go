@@ -31,7 +31,7 @@ func TestVerifyFailsClosedWhenRevocationCannotBeChecked(t *testing.T) {
 	}
 	cfg := v.cfg
 	cfg.Revocations = downLookup{}
-	down, err := NewStandardVerifier(cfg)
+	down, err := NewVerifier(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestVerifyWindowEdges(t *testing.T) {
 	} {
 		cfg := v.cfg
 		cfg.Now = func() time.Time { return tc.now }
-		at, err := NewStandardVerifier(cfg)
+		at, err := NewVerifier(cfg)
 		if err != nil {
 			t.Fatal(err)
 		}

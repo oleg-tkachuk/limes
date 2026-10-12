@@ -704,10 +704,10 @@ func checkDeleteReleasesHolds[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatal(err)
 	}
 	// A capability with no row is no error: there is nothing to drop.
-	if err := f.Usage.Delete(f.Ctx, limes.DeleteUsageRequest{CapabilityID: uuid.New()}); err != nil {
+	if err := f.Usage.DeleteUsage(f.Ctx, limes.DeleteUsageRequest{CapabilityID: uuid.New()}); err != nil {
 		t.Errorf("Delete of a capability with no row: %v", err)
 	}
-	if err := f.Usage.Delete(f.Ctx, limes.DeleteUsageRequest{CapabilityID: f.child}); err != nil {
+	if err := f.Usage.DeleteUsage(f.Ctx, limes.DeleteUsageRequest{CapabilityID: f.child}); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 	if _, err := f.Usage.GetReservation(f.Ctx, res.ID); !errors.Is(err, limes.ErrReservationNotFound) {
@@ -1152,7 +1152,7 @@ func checkBump[TX any](t *testing.T, f fixture[TX]) {
 	const limit = 2
 	bump := func() (int64, error) {
 		r, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, requests: requestsOf(limit)})})
-		return r.Requests, err
+		return r.RequestCount, err
 	}
 	for want := int64(1); want <= limit; want++ {
 		if n, err := bump(); err != nil || n != want {

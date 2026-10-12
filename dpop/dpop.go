@@ -50,7 +50,7 @@ const tokenType = "dpop+jwt"
 const DefaultWindow = time.Minute
 
 // ReplayClockSkew is how much longer than its acceptance window a proof's id
-// is remembered (ReplayEntry.Expires): a replay cache reads its own clock,
+// is remembered (ReplayEntry.ExpiresAt): a replay cache reads its own clock,
 // a moment after the verifier — or, shared, a different machine's — and must
 // still hold the id of every proof the verifier could accept.
 const ReplayClockSkew = 5 * time.Second
@@ -263,11 +263,11 @@ type Request struct {
 }
 
 // ReplayEntry is one proof id to record: the id of a proof from the key
-// with thumbprint JKT, remembered until Expires — ReplayClockSkew past the
+// with thumbprint JKT, remembered until ExpiresAt — ReplayClockSkew past the
 // last instant the verifier accepts the proof.
 type ReplayEntry struct {
-	JKT, JTI string
-	Expires  time.Time
+	JKT, JTI  string
+	ExpiresAt time.Time
 }
 
 // ReplayCache remembers proof ids for as long as a proof could be accepted.
@@ -416,7 +416,7 @@ func (v *Verifier) Verify(ctx context.Context, req Request) error {
 	// Remembered past the last instant it is accepted, by more than the
 	// cache's clock can lag the verifier's: at iat+window it is still
 	// accepted, and a cache that dropped it then would let it through again.
-	seen, err := v.cfg.Replay.Seen(ctx, ReplayEntry{JKT: thumb, JTI: claims.JTI, Expires: iat.Add(window).Add(ReplayClockSkew)})
+	seen, err := v.cfg.Replay.Seen(ctx, ReplayEntry{JKT: thumb, JTI: claims.JTI, ExpiresAt: iat.Add(window).Add(ReplayClockSkew)})
 	if err != nil {
 		return fmt.Errorf("dpop: replay check: %w", err)
 	}
@@ -530,7 +530,7 @@ func NewMemoryReplayCache(cfg MemoryReplayCacheConfig) (*MemoryReplayCache, erro
 // share, or a cache full of live ids, refuses the new id as a replay rather
 // than accept it unrecorded — a full cache errs towards refusing.
 func (c *MemoryReplayCache) Seen(_ context.Context, e ReplayEntry) (bool, error) {
-	jkt, jti, expires := e.JKT, e.JTI, e.Expires
+	jkt, jti, expires := e.JKT, e.JTI, e.ExpiresAt
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.now()

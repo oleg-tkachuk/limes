@@ -32,7 +32,7 @@ func TestGoldenTokenStillVerifies(t *testing.T) {
 	priv := ed25519.NewKeyFromSeed(goldenSeed[:])
 	pub := priv.Public().(ed25519.PublicKey)
 
-	verifier, err := NewStandardVerifier(VerifierConfig{
+	verifier, err := NewVerifier(VerifierConfig{
 		Keys:           staticKeys(t, map[string]ed25519.PublicKey{goldenKID: pub}),
 		Revocations:    revLookup{},
 		TrustedIssuers: []string{goldenIssuer},
@@ -91,7 +91,7 @@ func TestGoldenTokenRejectsWrongAudience(t *testing.T) {
 	priv := ed25519.NewKeyFromSeed(goldenSeed[:])
 	pub := priv.Public().(ed25519.PublicKey)
 
-	verifier, err := NewStandardVerifier(VerifierConfig{
+	verifier, err := NewVerifier(VerifierConfig{
 		Keys:           staticKeys(t, map[string]ed25519.PublicKey{goldenKID: pub}),
 		Revocations:    revLookup{},
 		TrustedIssuers: []string{goldenIssuer},

@@ -11,7 +11,7 @@ import (
 )
 
 // Errors exposed to callers, which switch on them with errors.Is. A
-// consumer maps them to its transport, or lets StandardVerifier.ErrorResponse
+// consumer maps them to its transport, or lets Verifier.ErrorResponse
 // map them to HTTP.
 //
 // Some are families that more specific sentinels match as well, so a caller
@@ -208,7 +208,7 @@ type AgentPrincipal struct {
 
 // Capability is the in-memory representation of a verified token. The
 // wire form is a JWT; this struct is what callers receive from
-// StandardVerifier.Verify and what the Issuer fills before signing.
+// Verifier.Verify and what the Issuer fills before signing.
 type Capability struct {
 	// ID is the unique identifier (UUIDv7 — sortable by issuance time
 	// so per-tenant indexes stay tight).

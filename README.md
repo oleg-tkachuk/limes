@@ -68,7 +68,7 @@ issuer, _ := limes.NewIssuer(limes.IssuerConfig{
     Signer: signer, Store: records, IssuerName: "my-issuer",
 })
 keys, _ := jwks.NewStatic(jwks.StaticConfig{Keys: map[string]ed25519.PublicKey{kid: pub}})
-verifier, _ := limes.NewStandardVerifier(limes.VerifierConfig{
+verifier, _ := limes.NewVerifier(limes.VerifierConfig{
     Keys:           keys,
     Revocations:    records,
     TrustedIssuers: []string{"my-issuer"},

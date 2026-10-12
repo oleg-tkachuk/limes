@@ -6,7 +6,7 @@ the test that holds it there.
 
 | Standard | What it governs here | API |
 |---|---|---|
-| [RFC 7519](https://www.rfc-editor.org/rfc/rfc7519), [RFC 8725](https://www.rfc-editor.org/rfc/rfc8725) | The capability token: a JWT, explicitly typed | `Signer`, `StandardVerifier.Verify` |
+| [RFC 7519](https://www.rfc-editor.org/rfc/rfc7519), [RFC 8725](https://www.rfc-editor.org/rfc/rfc8725) | The capability token: a JWT, explicitly typed | `Signer`, `Verifier.Verify` |
 | [RFC 9864](https://www.rfc-editor.org/rfc/rfc9864) | `alg: Ed25519` instead of the deprecated `EdDSA` | tokens, JWKS, DPoP |
 | [RFC 7493](https://www.rfc-editor.org/rfc/rfc7493) | I-JSON: the claims every JSON reader reads alike | claim parsing |
 | [RFC 9449](https://www.rfc-editor.org/rfc/rfc9449), [RFC 7800](https://www.rfc-editor.org/rfc/rfc7800) | Proof of possession (DPoP), `cnf.jkt`, nonces, the `DPoP` scheme | `dpop.Verifier`, `dpop.Sign`, `dpop.HMACNonces` |
@@ -75,7 +75,7 @@ and a `jti` not seen before.
 - **Nonces (§8, §9).** With `dpop.VerifierConfig.Nonces` set, every proof must carry
   a nonce the server issued; one without is refused with
   `dpop.ErrNonceRequired` (`use_dpop_nonce`), and
-  `StandardVerifier.DPoPNonce` gives the nonce to send in `DPoP-Nonce`.
+  `Verifier.DPoPNonce` gives the nonce to send in `DPoP-Nonce`.
   `dpop.HMACNonces` issues them statelessly — its issuance time and an HMAC of it
   — so replicas sharing a key, with clocks within `dpop.HMACNonceClockSkew` of each
   other, share nonces without sharing state, and keys rotate by putting the
@@ -101,7 +101,7 @@ and `FuzzHMACNonceValid`.
 
 ## Refusing a request
 
-**RFC 6750, RFC 9449 §7.1, RFC 9457.** `StandardVerifier.ErrorResponse`
+**RFC 6750, RFC 9449 §7.1, RFC 9457.** `Verifier.ErrorResponse`
 turns a refusal into the status, the challenges and the body every service
 answers alike, and `WriteErrorResponse` writes them:
 

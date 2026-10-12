@@ -26,14 +26,14 @@ func resign(t *testing.T, priv ed25519.PrivateKey, header map[string]any, claims
 	return input + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, []byte(input)))
 }
 
-func verifierFor(t *testing.T, pub ed25519.PublicKey, cfg VerifierConfig) *StandardVerifier {
+func verifierFor(t *testing.T, pub ed25519.PublicKey, cfg VerifierConfig) *Verifier {
 	t.Helper()
 	cfg.Keys = staticKeys(t, map[string]ed25519.PublicKey{"k1": pub})
 	cfg.Revocations = newMemStore()
 	if cfg.TrustedIssuers == nil {
 		cfg.TrustedIssuers = []string{"iss"}
 	}
-	v, err := NewStandardVerifier(cfg)
+	v, err := NewVerifier(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

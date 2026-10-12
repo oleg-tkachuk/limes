@@ -306,7 +306,7 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 	if n, err := usage.ReleaseExpired(ctx, limes.ReleaseExpiredRequest{}); err != nil || n.Released != 0 {
 		t.Errorf("ReleaseExpired = %d, %v", n, err)
 	}
-	if err := usage.Delete(ctx, limes.DeleteUsageRequest{CapabilityID: uuid.New()}); err != nil {
+	if err := usage.DeleteUsage(ctx, limes.DeleteUsageRequest{CapabilityID: uuid.New()}); err != nil {
 		t.Errorf("Delete of a row never written: %v", err)
 	}
 	// The capability is not on record, so its usage is an orphan.

@@ -113,7 +113,7 @@ func answerFor(err error) refusal {
 // client used (Bearer when it named none); one about the proof, under DPoP.
 // A verifier with DPoP configured also advertises its algorithms in a DPoP
 // challenge, and hands out a fresh nonce with use_dpop_nonce.
-func (v *StandardVerifier) ErrorResponse(ctx context.Context, err error, scheme AuthScheme) ErrorResponse {
+func (v *Verifier) ErrorResponse(ctx context.Context, err error, scheme AuthScheme) ErrorResponse {
 	r := answerFor(err)
 	resp := ErrorResponse{
 		Status:  r.status,

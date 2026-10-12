@@ -16,10 +16,10 @@ import (
 	"github.com/oleg-tkachuk/limes/dpop"
 )
 
-func biscuitFixture(t *testing.T) (*Issuer, *StandardVerifier, *memStore, Capability, string) {
+func biscuitFixture(t *testing.T) (*Issuer, *Verifier, *memStore, Capability, string) {
 	t.Helper()
 	issuer, _, store, pub := buildIssuerVerifier(t)
-	verifier, err := NewStandardVerifier(VerifierConfig{
+	verifier, err := NewVerifier(VerifierConfig{
 		Keys:           staticKeys(t, map[string]ed25519.PublicKey{"k1": pub}),
 		Revocations:    store,
 		TrustedIssuers: []string{"limes-test"},

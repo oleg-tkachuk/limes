@@ -13,7 +13,7 @@ import (
 )
 
 // revokeCopy revokes token's copy through the store the fixture verifier reads.
-func revokeCopy(t *testing.T, v *StandardVerifier, store *memStore, token string) BiscuitCopy {
+func revokeCopy(t *testing.T, v *Verifier, store *memStore, token string) BiscuitCopy {
 	t.Helper()
 	c, err := v.BiscuitCopy(context.Background(), token)
 	if err != nil {
@@ -231,11 +231,11 @@ func TestVerifierNeedsBiscuitRevocationsToAcceptBiscuits(t *testing.T) {
 		TrustedIssuers: []string{"limes-test"},
 		AcceptBiscuit:  true,
 	}
-	if _, err := NewStandardVerifier(cfg); !errors.Is(err, errNoBiscuitRevocations) {
+	if _, err := NewVerifier(cfg); !errors.Is(err, errNoBiscuitRevocations) {
 		t.Fatalf("err = %v, want errNoBiscuitRevocations", err)
 	}
 	cfg.AcceptBiscuit = false
-	if _, err := NewStandardVerifier(cfg); err != nil {
+	if _, err := NewVerifier(cfg); err != nil {
 		t.Fatalf("without Biscuits: %v", err)
 	}
 }
