@@ -162,7 +162,10 @@ func (r *Remote) freshness(h http.Header) time.Duration {
 // refresh fetches the document unless a fetch was attempted within
 // MinRefreshInterval. Failures are recorded, not returned: the caller decides
 // from the age of the set it still holds. It returns only ctx's error, when
-// the caller gave up waiting behind another fetch.
+// the caller gave up — waiting behind another fetch, or during its own. A
+// fetch the caller abandoned is not the endpoint failing, so it is not
+// recorded: the next caller fetches at once rather than wait out
+// MinRefreshInterval on someone else's cancellation.
 func (r *Remote) refresh(ctx context.Context) error {
 	select {
 	case r.fetching <- struct{}{}:
@@ -170,6 +173,11 @@ func (r *Remote) refresh(ctx context.Context) error {
 		return ctx.Err()
 	}
 	defer func() { <-r.fetching }()
+	// select picks at random between two ready cases: a caller already
+	// done may have won the slot.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	now := r.cfg.Now()
 	r.mu.RLock()
@@ -181,6 +189,9 @@ func (r *Remote) refresh(ctx context.Context) error {
 	}
 
 	keys, newETag, header, notModified, err := r.fetch(ctx, etag)
+	if err != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
