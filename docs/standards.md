@@ -86,9 +86,10 @@ and a `jti` not seen before.
   presented as `Bearer` — the downgrade §7.2 names — and an unbound one
   presented as `DPoP`.
 - **Replay.** `dpop.MemoryReplayCache` remembers `jti`s for one process, keyed by
-  the proof key's thumbprint, each key within its own share
-  (`MemoryReplayCacheConfig.EntriesPerKey`, default `dpop.DefaultReplayEntriesPerKey`), so one key
-  cannot crowd another's proofs out. Across replicas, nonces or a shared
+  the proof key's thumbprint, each capability within its own share
+  (`MemoryReplayCacheConfig.EntriesPerHolder`, default
+  `dpop.DefaultReplayEntriesPerHolder`), so one capability — however many keys
+  its copies are bound to — cannot crowd another's proofs out. Across replicas, nonces or a shared
   `dpop.ReplayCache` close the window.
 
 *Held by* `TestDPoPRefusals`, `TestDPoPRefusesAPrivateJWK`,

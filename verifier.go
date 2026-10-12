@@ -298,7 +298,7 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapab
 			return VerifiedCapability{}, fmt.Errorf("%w: capability is key-bound and this verifier has no DPoP configured",
 				proofRefusal(dpop.ErrRequired))
 		}
-		if err := v.cfg.DPoP.Verify(ctx, dpop.Request{Proof: req.DPoP, Token: token, JKT: cap.ConfirmationJKT}); err != nil {
+		if err := v.cfg.DPoP.Verify(ctx, dpop.Request{Proof: req.DPoP, Token: token, JKT: cap.ConfirmationJKT, Holder: cap.ID.String()}); err != nil {
 			if isProofRefusal(err) {
 				return VerifiedCapability{}, proofRefusal(err)
 			}

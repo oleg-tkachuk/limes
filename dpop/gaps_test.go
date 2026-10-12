@@ -35,7 +35,7 @@ func TestVerifyFailsClosedWhenTheNonceCannotBeChecked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = v.Verify(context.Background(), Request{Proof: Proof{JWT: proof, Method: "GET", URL: dpopURL}, Token: "tok", JKT: boundJKT(t, priv)})
+	err = v.Verify(context.Background(), Request{Proof: Proof{JWT: proof, Method: "GET", URL: dpopURL}, Token: "tok", JKT: boundJKT(t, priv), Holder: testHolder})
 	if !errors.Is(err, errNoncesDown) {
 		t.Errorf("Verify with the nonce store down: err = %v, want its error", err)
 	}
@@ -54,7 +54,7 @@ func TestVerifyRefusesAProofWithoutAJTI(t *testing.T) {
 	input := jose.B64([]byte(header)) + "." + jose.B64([]byte(claims))
 	proof := input + "." + jose.B64(ed25519.Sign(priv, []byte(input)))
 	v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }})
-	err = v.Verify(context.Background(), Request{Proof: Proof{JWT: proof, Method: "GET", URL: dpopURL}, Token: "tok", JKT: boundJKT(t, priv)})
+	err = v.Verify(context.Background(), Request{Proof: Proof{JWT: proof, Method: "GET", URL: dpopURL}, Token: "tok", JKT: boundJKT(t, priv), Holder: testHolder})
 	if !errors.Is(err, ErrInvalid) {
 		t.Errorf("a proof without a jti: err = %v, want ErrInvalid", err)
 	}

@@ -286,8 +286,9 @@ minute by default) of the verifier's clock, or seen before; every refusal
 matches `ErrProofOfPossession` as `Verify` returns it, and still matches its
 `dpop` sentinel. A replay cache or nonce store that cannot answer is an outage
 instead, its own error, never a refused proof. `dpop.MemoryReplayCache` is in-process and bounded
-— 100 000 ids, and `dpop.DefaultReplayEntriesPerKey` (1 000) per key, so one
-key-bound token cannot fill it and lock the others out; full, it refuses
+— 100 000 ids, and `dpop.DefaultReplayEntriesPerHolder` (1 000) per
+capability, so one capability, whatever keys its copies are bound to, cannot
+fill it and lock the others out; full, it refuses
 rather than forgets:
 behind several replicas, a proof replayed to a different one inside the
 window is caught only by server nonces or a `dpop.ReplayCache` over a shared
@@ -615,7 +616,7 @@ Implement these and you are done:
 | `CopyUsageReader` | Reads Biscuit copies' own counters (only to show them) | No |
 | `UsageStore[TX]` = `Meter[TX]` + `MeterReader` + `TenantBudgets` + `UsageHousekeeping` | Request and spend counters, the charges ledger, tenant ceilings; `Delete` and `PurgeOrphans` release a reaped capability's holds | Only for atomic side effects |
 | `KeyResolver` | Public verification keys | No |
-| `dpop.ReplayCache` | DPoP proof ids seen, per key: `Seen(ctx, dpop.ReplayEntry)` reports a key past its share as seen, and returns an error when its store cannot answer — an outage, not a refused proof (only for key-bound tokens; `dpop.MemoryReplayCache` ships for one process — behind several replicas, implement it over a shared store) | No |
+| `dpop.ReplayCache` | DPoP proof ids seen, per key, each counted against its holder: `Seen(ctx, dpop.ReplayEntry)` reports a holder past its share as seen, and returns an error when its store cannot answer — an outage, not a refused proof (only for key-bound tokens; `dpop.MemoryReplayCache` ships for one process — behind several replicas, implement it over a shared store) | No |
 | `dpop.Nonces` | Server-provided DPoP nonces (optional; `dpop.HMACNonces` ships and needs no store) | No |
 
 Two obligations are easy to miss. `Store.IsRevoked` answers for the
@@ -713,7 +714,8 @@ log. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
 | `RevocationCacheConfig` · `BiscuitRevocationCacheConfig` | `DefaultRevocationCacheTTL` 2 seconds · `DefaultRevocationCacheEntries` 100 000, the oldest dropped first past it; a negative TTL or bound is refused — for no cache, give the verifier the store itself |
 | `jwks.RemoteConfig` | `jwks.DefaultFetchTimeout` 10s · `DefaultRefreshInterval` 5m · `DefaultMinRefreshInterval` 10s · `DefaultMaxStale` 1h · `DefaultMaxDocumentBytes` 1 MiB |
 | `dpop.VerifierConfig.Window` | `dpop.DefaultWindow`, 1 minute |
-| `dpop.MemoryReplayCacheConfig` | `dpop.DefaultReplayCacheEntries`, 100 000 ids; `dpop.DefaultReplayEntriesPerKey`, 1 000, per key |
+| `dpop.VerifierConfig.MaxProofBytes` | `dpop.DefaultMaxProofBytes`, 4 KiB; a `jti` past `dpop.MaxJTIBytes`, 128 bytes, is refused |
+| `dpop.MemoryReplayCacheConfig` | `dpop.DefaultReplayCacheEntries`, 100 000 ids; `dpop.DefaultReplayEntriesPerHolder`, 1 000, per capability |
 | `dpop.HMACNoncesConfig` | `dpop.DefaultNonceLifetime`, 5 minutes; `dpop.HMACNonceClockSkew`, 5 seconds, for a nonce issued ahead of this replica's clock; keys of at least `dpop.HMACNonceKeyBytes`, 32 |
 | `DefaultReservationTTL` | 5 minutes |
 | `MaxExternalRefBytes` | 200 |
