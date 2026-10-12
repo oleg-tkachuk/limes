@@ -66,8 +66,10 @@ func TestCaveatsOutsideTheRulesAreNeitherSignedNorAccepted(t *testing.T) {
 			t.Errorf("Sign with %s: err = %v, want ErrInvalidCaveats", name, err)
 		}
 		token := signUnchecked(t, issuer.signer, c)
-		if _, err := v.Verify(ctx, VerifyRequest{Token: token, Audience: audienceData}); !errors.Is(err, ErrInvalidToken) {
-			t.Errorf("Verify of a token with %s: err = %v, want ErrInvalidToken", name, err)
+		// A refused token, not a malformed request: it must not also match
+		// the request family a consumer answers as its own fault.
+		if _, err := v.Verify(ctx, VerifyRequest{Token: token, Audience: audienceData}); !errors.Is(err, ErrInvalidToken) || errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("Verify of a token with %s: err = %v, want ErrInvalidToken and not ErrInvalidRequest", name, err)
 		}
 	}
 	if _, err := v.Verify(ctx, VerifyRequest{Token: signUnchecked(t, issuer.signer, validCapability()), Audience: audienceData}); err != nil {

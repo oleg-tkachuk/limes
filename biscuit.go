@@ -229,11 +229,11 @@ func openBiscuit(token string) (string, func(parent *Capability) (*Capability, [
 	}
 	blocks, err := decodeBiscuitBlocks(container)
 	if err != nil {
-		return "", nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
+		return "", nil, refuseToken(ErrInvalidToken, err)
 	}
 	inner, err := sealedToken(blocks[0])
 	if err != nil {
-		return "", nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
+		return "", nil, refuseToken(ErrInvalidToken, err)
 	}
 	// The chain is checked once the sealed token has named its root; the
 	// caller verifies that token first and hands back what it vouches for.
@@ -262,14 +262,14 @@ func openBiscuit(token string) (string, func(parent *Capability) (*Capability, [
 		for i, blk := range blocks[1:] {
 			next, err := applyAttenuation(cur, blk, ids[i+1])
 			if err != nil {
-				return nil, nil, fmt.Errorf("%w: block %d: %w", ErrBiscuitAttenuation, i+1, err)
+				return nil, nil, refuseToken(ErrBiscuitAttenuation, fmt.Errorf("block %d: %w", i+1, err))
 			}
 			cur = next
 		}
 		// Each block narrows what it was handed, but the result must still
 		// be caveats the issuer could have minted.
 		if err := cur.Caveats.Validate(); err != nil {
-			return nil, nil, fmt.Errorf("%w: %w", ErrBiscuitAttenuation, err)
+			return nil, nil, refuseToken(ErrBiscuitAttenuation, err)
 		}
 		return &cur, ids, nil
 	}
@@ -602,7 +602,7 @@ func guardBiscuit(f func() error) (err error) {
 		}
 	}()
 	if err := f(); err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalidToken, err)
+		return refuseToken(ErrInvalidToken, err)
 	}
 	return nil
 }

@@ -271,8 +271,9 @@ func TestCopyLimitsAreRefusedLast(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v.Verify(ctx, VerifyRequest{Token: widened, Audience: audienceData}); !errors.Is(err, ErrBiscuitAttenuation) {
-		t.Errorf("a widening block after a copy limit: err = %v, want ErrBiscuitAttenuation", err)
+	if _, err := v.Verify(ctx, VerifyRequest{Token: widened, Audience: audienceData}); !errors.Is(err, ErrBiscuitAttenuation) ||
+		errors.Is(err, ErrDelegationTooWide) || errors.Is(err, ErrInvalidRequest) {
+		t.Errorf("a widening block after a copy limit: err = %v, want ErrBiscuitAttenuation alone", err)
 	}
 	v.cfg.Now = func() time.Time { return time.Now().Add(2 * time.Hour) }
 	if _, err := v.Verify(ctx, VerifyRequest{Token: limited, Audience: audienceData}); !errors.Is(err, ErrExpired) {
