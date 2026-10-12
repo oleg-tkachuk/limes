@@ -356,7 +356,7 @@ func TestBiscuitTakesOnlyAVerifiedCapabilityOfItsOwn(t *testing.T) {
 		t.Fatal(err)
 	}
 	foreign := cap
-	foreign.Issuer = "someone-else"
+	foreign.Issuer = foreignIssuer
 	expired := cap
 	expired.ExpiresAt = time.Now().Add(-time.Minute)
 	for name, tc := range map[string]struct {

@@ -288,9 +288,12 @@ type DelegateRequest struct {
 // has expired,
 // or that the store reports revoked (itself or any ancestor), delegates
 // nothing; nor does a Biscuit copy (VerifiedCapability.FromBiscuit), which
-// returns ErrDelegationTooWide — its holder attenuates it instead. A child that would have more than
-// MaxDelegationDepth ancestors is ErrDelegationTooDeep: its record is
-// written before the store can count them, but no token is signed for it.
+// returns ErrDelegationTooWide — its holder attenuates it instead. A parent
+// another issuer named is ErrInvalidRequest: this issuer's store holds no
+// record of it, so revoking it there would never reach the child. A child
+// that would have more than MaxDelegationDepth ancestors is
+// ErrDelegationTooDeep: its record is written before the store can count
+// them, and its token is not returned.
 func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability, string, error) {
 	parent := req.Parent.c
 	if parent.ID == uuid.Nil {
@@ -302,6 +305,9 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 	// instead.
 	if req.Parent.fromBiscuit || len(parent.Copies) > 0 {
 		return Capability{}, "", fmt.Errorf("%w: parent is a Biscuit copy; attenuate it instead", ErrDelegationTooWide)
+	}
+	if parent.Issuer != i.issuerName {
+		return Capability{}, "", invalidRequest("parent %s was issued by %q, not %q", parent.ID, parent.Issuer, i.issuerName)
 	}
 	if req.Subject.TenantID == uuid.Nil {
 		req.Subject.TenantID = parent.Subject.TenantID
