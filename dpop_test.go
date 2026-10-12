@@ -25,7 +25,7 @@ const (
 // issued at now.
 func withProof(ctx context.Context, t *testing.T, key crypto.Signer, token, audience string, now time.Time) VerifyRequest {
 	t.Helper()
-	proof, err := dpop.Sign(ctx, key, dpop.ProofRequest{Method: dpopMethod, URL: dpopURL, Token: token, Now: now})
+	proof, err := dpop.Sign(ctx, key, dpop.ProofRequest{Method: dpopMethod, URL: dpopURL, Token: token, IssuedAt: now})
 	if err != nil {
 		t.Fatal(err)
 	}

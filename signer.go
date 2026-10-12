@@ -69,9 +69,6 @@ func NewSigner(cfg SignerConfig) (*Signer, error) {
 	return &Signer{keyID: cfg.KeyID, key: cfg.Key}, nil
 }
 
-// KeyID is the kid tokens this signer mints carry.
-func (s *Signer) KeyID() string { return s.keyID }
-
 // jwtHeader is the protected header. We use compact serialization:
 // `header.payload.signature` with each segment base64url-encoded.
 type jwtHeader struct {

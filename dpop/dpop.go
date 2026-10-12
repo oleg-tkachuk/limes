@@ -151,9 +151,9 @@ type ProofRequest struct {
 	// Nonce is the last DPoP-Nonce the server sent, empty before it has
 	// sent one.
 	Nonce string
-	// Now is the proof's iat. Required: a proof with no time is refused
+	// IssuedAt is the proof's iat. Required: a proof with no time is refused
 	// rather than dated 1970.
-	Now time.Time
+	IssuedAt time.Time
 }
 
 // contextSigner is a crypto.Signer that signs under a context, as a key held
@@ -166,8 +166,8 @@ type contextSigner interface {
 // public key is Ed25519 or ECDSA P-256; one that also has SignContext is
 // given ctx, so a slow or cancelled remote signature is bounded by it.
 func Sign(ctx context.Context, key crypto.Signer, req ProofRequest) (string, error) {
-	if req.Now.IsZero() {
-		return "", errors.New("dpop: ProofRequest.Now required")
+	if req.IssuedAt.IsZero() {
+		return "", errors.New("dpop: ProofRequest.IssuedAt required")
 	}
 	jwk, err := publicJWK(key.Public())
 	if err != nil {
@@ -187,7 +187,7 @@ func Sign(ctx context.Context, key crypto.Signer, req ProofRequest) (string, err
 	}
 	header, _ := json.Marshal(proofHeader{Typ: tokenType, Alg: alg, JWK: &jwk})
 	claims, _ := json.Marshal(proofClaims{
-		JTI: jose.B64(jti), HTM: req.Method, HTU: htu, IAT: float64(req.Now.Unix()),
+		JTI: jose.B64(jti), HTM: req.Method, HTU: htu, IAT: float64(req.IssuedAt.Unix()),
 		ATH: accessTokenHash(req.Token), Nonce: req.Nonce,
 	})
 	input := jose.B64(header) + "." + jose.B64(claims)
@@ -344,7 +344,7 @@ type Verifier struct {
 // a negative Window or a negative MaxProofBytes.
 func NewVerifier(cfg VerifierConfig) (*Verifier, error) {
 	if cfg.Replay == nil {
-		return nil, ErrNoReplayCache
+		return nil, errNoReplayCache
 	}
 	if cfg.Window < 0 {
 		return nil, fmt.Errorf("dpop: Window %s is negative", cfg.Window)
@@ -369,9 +369,9 @@ func NewVerifier(cfg VerifierConfig) (*Verifier, error) {
 // names (RFC 9864). The deprecated "EdDSA" is still read, never advertised.
 func SigningAlgorithms() []string { return []string{jose.AlgEd25519, jose.AlgES256} }
 
-// ErrNoReplayCache is a Verifier with no ReplayCache: a captured proof
+// errNoReplayCache is a Verifier with no ReplayCache: a captured proof
 // would be good for its whole window.
-var ErrNoReplayCache = errors.New("dpop: Verifier.Replay required")
+var errNoReplayCache = errors.New("dpop: Verifier.Replay required")
 
 // Nonce is the nonce to send in the DPoP-Nonce header, empty when the
 // verifier issues none.
@@ -389,7 +389,7 @@ func (v *Verifier) Nonce(ctx context.Context) (string, error) {
 // within the window; and whose jti, no longer than MaxJTIBytes, is new.
 func (v *Verifier) Verify(ctx context.Context, req Request) error {
 	if v == nil || v.cfg.Replay == nil {
-		return ErrNoReplayCache // a Verifier not made by NewVerifier
+		return errNoReplayCache // a Verifier not made by NewVerifier
 	}
 	p, token := req.Proof, req.Token
 	if req.Holder == "" {

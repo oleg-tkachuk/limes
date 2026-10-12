@@ -45,7 +45,7 @@ func ed25519PKCS8(t *testing.T) (ed25519.PrivateKey, []byte) {
 
 func TestLoadPrivateKey(t *testing.T) {
 	priv, der := ed25519PKCS8(t)
-	got, err := LoadPrivateKey(writePEM(t, "PRIVATE KEY", der))
+	got, err := loadPrivateKey(writePEM(t, "PRIVATE KEY", der))
 	if err != nil || !got.Equal(priv) {
 		t.Fatalf("LoadPrivateKey = %v; want the key written", err)
 	}
@@ -70,7 +70,7 @@ func TestLoadPrivateKey(t *testing.T) {
 		"not PKCS#8":         writePEM(t, "PRIVATE KEY", []byte("garbage")),
 		"not an Ed25519 key": writePEM(t, "PRIVATE KEY", ecDER),
 	} {
-		if _, err := LoadPrivateKey(path); err == nil {
+		if _, err := loadPrivateKey(path); err == nil {
 			t.Errorf("%s: LoadPrivateKey accepted it", name)
 		}
 	}
@@ -81,7 +81,7 @@ func TestLoadKey(t *testing.T) {
 	path := writePEM(t, "PRIVATE KEY", der)
 
 	k, err := LoadKey(path)
-	if err != nil || k.Generated || !k.Private.Equal(priv) || !k.Public.Equal(priv.Public()) ||
+	if err != nil || !k.Private.Equal(priv) || !k.Public.Equal(priv.Public()) ||
 		k.KeyID != jwks.KeyID(k.Public) {
 		t.Fatalf("from a file = %+v, %v; want the file's key under its derived kid", k, err)
 	}
@@ -103,8 +103,8 @@ func TestDeriveKeyIDIsTheThumbprint(t *testing.T) {
 		t.Errorf("jwks.KeyID = %s, want %s", got, want)
 	}
 	key, err := GenerateKey()
-	if err != nil || key.KeyID != jwks.KeyID(key.Public) || !key.Generated {
-		t.Errorf("GenerateKey = %+v, %v; want jwks.KeyID's kid, marked generated", key, err)
+	if err != nil || key.KeyID != jwks.KeyID(key.Public) {
+		t.Errorf("GenerateKey = %+v, %v; want jwks.KeyID's kid", key, err)
 	}
 }
 
@@ -143,8 +143,8 @@ func TestNewSigner(t *testing.T) {
 		t.Fatal(err)
 	}
 	s, err := NewSigner(SignerConfig{KeyID: "k1", Key: priv})
-	if err != nil || s.KeyID() != "k1" {
-		t.Fatalf("NewSigner = %v, kid %q", err, s.KeyID())
+	if err != nil || s.keyID != "k1" {
+		t.Fatalf("NewSigner = %v, kid %q", err, s.keyID)
 	}
 	if _, err := NewSigner(SignerConfig{KeyID: "", Key: priv}); err == nil {
 		t.Error("an empty key id was accepted")

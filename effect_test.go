@@ -46,16 +46,16 @@ func TestOpResolveEffect(t *testing.T) {
 	}
 }
 
-// The undeclared default and Op.Mutating are one rule.
-func TestOpMutatingMatchesDefaultEffect(t *testing.T) {
+// An undeclared operation takes its default effect: a built-in its own, any
+// other a write.
+func TestUndeclaredOpsTakeTheirDefaultEffect(t *testing.T) {
 	for op := range builtinOps {
-		want := op.defaultEffect() == EffectWrite
-		if op.Mutating() != want {
-			t.Errorf("%q: Mutating = %v, default effect %s", op, op.Mutating(), op.defaultEffect())
+		if got, err := op.ResolveEffect(EffectUnspecified); err != nil || got != op.defaultEffect() {
+			t.Errorf("%q: ResolveEffect(unspecified) = %s, %v; want %s", op, got, err, op.defaultEffect())
 		}
 	}
-	if !opToolRetrieve.Mutating() {
-		t.Errorf("an undeclared custom op must be mutating")
+	if got, err := opToolRetrieve.ResolveEffect(EffectUnspecified); err != nil || got != EffectWrite {
+		t.Errorf("an undeclared custom op = %s, %v; want %s", got, err, EffectWrite)
 	}
 }
 
