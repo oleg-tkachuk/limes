@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math/big"
 	"slices"
 	"sort"
 	"strconv"
@@ -951,6 +952,9 @@ func (s *UsageStore[TX]) Settle(
 	req limes.SettleRequest,
 	onCharged func(ctx context.Context, tx TX) error,
 ) (limes.ChargeReceipt, error) {
+	if err := checkSubject(req.Subject); err != nil {
+		return limes.ChargeReceipt{}, err
+	}
 	if err := req.Amount.Validate(); err != nil {
 		return limes.ChargeReceipt{}, err
 	}
@@ -1314,7 +1318,7 @@ func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTen
 		}
 		// A ceiling of 0 is spent through, at every threshold; an
 		// unlimited one is at none.
-		if args.ThresholdPct > 0 && (row.class == classUnlimited || row.class == classBounded && row.pct < args.ThresholdPct) {
+		if args.ThresholdPct > 0 && (row.class == classUnlimited || row.class == classBounded && !atOrPast(b.SpentAmount, b.Ceiling.Max, args.ThresholdPct)) {
 			continue
 		}
 		if after != nil && !after.before(row) {
@@ -1347,6 +1351,17 @@ type budgetRow struct {
 	pct    float64 // unclamped utilization; 0 outside classBounded
 	tenant uuid.UUID
 	budget limes.TenantBudget
+}
+
+// atOrPast reports whether spent is at least pct percent of ceiling, exactly:
+// spent × 100 ≥ pct × ceiling in rationals, where a float quotient would put
+// 29 of 100 just under 29%.
+func atOrPast(spent, ceiling limes.Nanos, pct float64) bool {
+	threshold := new(big.Rat).SetFloat64(pct)
+	threshold.Mul(threshold, new(big.Rat).SetInt64(int64(ceiling)))
+	used := new(big.Rat).SetInt64(int64(spent))
+	used.Mul(used, new(big.Rat).SetInt64(percent))
+	return used.Cmp(threshold) >= 0
 }
 
 // ceilingClass is where a tenant's kind of ceiling ranks in
