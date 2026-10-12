@@ -13,11 +13,13 @@ import (
 	"github.com/oleg-tkachuk/limes/internal/link"
 )
 
-// Decode reads a compact token's claims without checking its signature.
+// Decode reads a compact token's claims without checking its signature. A
+// token it cannot read is limes.ErrInvalidToken, as VerifySignature reports
+// one.
 func Decode(token string) (limes.Capability, error) {
 	c, err := link.DecodeToken(token)
 	if err != nil {
-		return limes.Capability{}, err
+		return limes.Capability{}, fmt.Errorf("%w: %w", limes.ErrInvalidToken, err)
 	}
 	return c.(limes.Capability), nil
 }

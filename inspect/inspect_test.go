@@ -53,8 +53,8 @@ func TestDecodeReadsWhatWasIssued(t *testing.T) {
 	if err != nil || got.ID != c.ID || got.Subject.Subject != c.Subject.Subject || got.Caveats.Ops[0] != limes.OpGet {
 		t.Fatalf("Decode = %+v, %v; want the issued capability %s", got, err, c.ID)
 	}
-	if _, err := inspect.Decode("not.a.token"); err == nil {
-		t.Error("Decode read a token that is not one")
+	if _, err := inspect.Decode("not.a.token"); !errors.Is(err, limes.ErrInvalidToken) {
+		t.Errorf("Decode of a token that is not one: err = %v, want ErrInvalidToken", err)
 	}
 }
 
