@@ -290,6 +290,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"ACopyRequestCeilingBoundsBump", checkCopyRequests[TX]},
 		{"AHoldCountsAgainstACopyBudget", checkCopyHold[TX]},
 		{"AStaleVersionIsRefused", checkStaleVersion[TX]},
+		{"AZeroCeilingAllowsNothing", checkZeroCeilings[TX]},
 	}
 	for _, c := range checks {
 		t.Run(c.name, func(t *testing.T) { c.run(t, newFixture(t, setup)) })
@@ -1042,6 +1043,48 @@ func checkStaleVersion[TX any](t *testing.T, f fixture[TX]) {
 	}
 	if got, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant); err != nil || got.Ceiling != (limes.BudgetCeiling{Max: tenantBudget + one}) {
 		t.Errorf("after a stale write the ceiling = %v, %v; want %s", got.Ceiling, err, tenantBudget+one)
+	}
+}
+
+// checkZeroCeilings holds a store to a ceiling of 0 allowing nothing — on
+// the subject's requests and budget, on a hold, on an ancestor and on the
+// tenant — rather than standing for no limit, which only Unlimited does.
+func checkZeroCeilings[TX any](t *testing.T, f fixture[TX]) {
+	zero := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, requests: requestsOf(0), budget: budgetOf(0)})
+	if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: zero}); !errors.Is(err, limes.ErrRequestLimitExceeded) {
+		t.Errorf("a bump under a request ceiling of 0: err = %v, want ErrRequestLimitExceeded", err)
+	}
+	if _, err := f.charge(limes.ChargeRequest{Subject: zero, Amount: cent}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
+		t.Errorf("a charge under a budget of 0: err = %v, want ErrBudgetExceeded", err)
+	}
+	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: zero, Amount: cent}); !errors.Is(err, limes.ErrBudgetExceeded) {
+		t.Errorf("a hold under a budget of 0: err = %v, want ErrBudgetExceeded", err)
+	}
+
+	frozen, err := f.newCapability(uuid.Nil, limes.BudgetCeiling{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	under, err := f.newCapability(frozen, unlimitedBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: under}), Amount: cent}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
+		t.Errorf("a charge under an ancestor's budget of 0: err = %v, want ErrBudgetExceeded", err)
+	}
+	if f.spent(t, f.child) != 0 || f.spent(t, under) != 0 || f.tenantSpent(t) != 0 {
+		t.Error("a charge refused by a ceiling of 0 moved spend")
+	}
+
+	b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{TenantID: f.Tenant, UnitCode: unit, ExpectedVersion: b.ResourceVersion}); err != nil {
+		t.Fatalf("tenant ceiling of 0: %v", err)
+	}
+	if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: f.root}), Amount: cent}, nil); !errors.Is(err, limes.ErrTenantBudgetExceeded) {
+		t.Errorf("a charge under a tenant ceiling of 0: err = %v, want ErrTenantBudgetExceeded", err)
 	}
 }
 
