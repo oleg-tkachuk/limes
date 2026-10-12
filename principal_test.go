@@ -82,15 +82,12 @@ func TestVerifyRefusesAnUnknownPrincipalType(t *testing.T) {
 	issuer, v, _, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
-	token, err := issuer.signer.Sign(ctx, Capability{
+	token := signUnchecked(t, issuer.signer, Capability{
 		ID: uuid.New(), Issuer: "limes-test",
 		Subject:  Principal{Type: "robot", TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{"data"}, Caveats: Caveats{Ops: []Op{OpGet}},
 		IssuedAt: now, NotBefore: now, ExpiresAt: now.Add(time.Minute), Generation: 1,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := v.Verify(ctx, VerifyRequest{Token: token, Audience: "data"}); !errors.Is(err, ErrInvalidToken) {
 		t.Errorf("Verify of an unknown principal type: err = %v, want ErrInvalidToken", err)
 	}

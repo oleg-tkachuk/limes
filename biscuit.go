@@ -261,6 +261,11 @@ func openBiscuit(token string) (string, func(parent *Capability, meterCopies boo
 			}
 			cur = next
 		}
+		// Each block narrows what it was handed, but the result must still
+		// be caveats the issuer could have minted.
+		if err := cur.Caveats.Validate(); err != nil {
+			return nil, nil, fmt.Errorf("%w: %w", ErrBiscuitAttenuation, err)
+		}
 		return &cur, ids, nil
 	}
 	return inner, attenuate, nil
