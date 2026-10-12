@@ -171,6 +171,13 @@ func (s *Signer) Sign(ctx context.Context, c Capability) (string, error) {
 	if len(c.Caveats.Ops) == 0 {
 		return "", errors.New("limes: at least one Op required")
 	}
+	// Nothing is signed that the verifier would refuse to read.
+	if err := c.Caveats.Validate(); err != nil {
+		return "", err
+	}
+	if err := c.Subject.Validate(); err != nil {
+		return "", err
+	}
 	if c.ExpiresAt.Before(c.IssuedAt) || c.ExpiresAt.IsZero() {
 		return "", errors.New("limes: ExpiresAt must be after IssuedAt")
 	}

@@ -408,6 +408,12 @@ func (v *StandardVerifier) verifySigned(ctx context.Context, token string) (*Cap
 	if err := cap.Subject.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
+	// What Issue refuses to mint, no token may carry: a caveat outside the
+	// rules has no one meaning to enforce — a negative limit read as none,
+	// an operation nobody defined.
+	if err := cap.Caveats.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
+	}
 
 	return cap, nil
 }
