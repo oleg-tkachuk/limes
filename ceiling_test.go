@@ -3,6 +3,8 @@ package limes
 import (
 	"errors"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 // A ceiling's zero value allows nothing; only Unlimited lifts it.
@@ -80,5 +82,24 @@ func TestCeilingString(t *testing.T) {
 	}
 	if got := (BudgetCeiling{Max: 3 * NanosPerUnit / 2}).String(); got != "1.5" {
 		t.Errorf("String = %q, want 1.5", got)
+	}
+}
+
+// A tenant budget request is refused as malformed before any store reads it.
+func TestSetTenantBudgetRequestValidate(t *testing.T) {
+	tenant := uuid.New()
+	ok := SetTenantBudgetRequest{TenantID: tenant, Ceiling: BudgetCeiling{Max: NanosPerUnit}}
+	if err := ok.Validate(); err != nil {
+		t.Fatalf("a well-formed request: %v", err)
+	}
+	for name, req := range map[string]SetTenantBudgetRequest{
+		"no tenant":          {Ceiling: BudgetCeiling{Max: NanosPerUnit}},
+		"a negative version": {TenantID: tenant, ExpectedVersion: -1},
+		"a negative ceiling": {TenantID: tenant, Ceiling: BudgetCeiling{Max: -1}},
+		"a lower-case unit":  {TenantID: tenant, UnitCode: "usd"},
+	} {
+		if err := req.Validate(); !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("%s: err = %v, want ErrInvalidRequest", name, err)
+		}
 	}
 }
