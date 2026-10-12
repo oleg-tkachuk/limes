@@ -1369,7 +1369,7 @@ func checkUnclampedRanking[TX any](t *testing.T, f fixture[TX]) {
 			t.Fatal(err)
 		}
 	}
-	page, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{ThresholdPct: fullPct})
+	page, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetsAtOrPast, ThresholdPct: fullPct})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1399,7 +1399,7 @@ func checkThresholdBoundary[TX any](t *testing.T, f fixture[TX]) {
 	if _, err := f.Usage.Charge(f.tenantCtx(tenant), limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant}), Amount: spent}, nil); err != nil {
 		t.Fatal(err)
 	}
-	page, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{ThresholdPct: threshold})
+	page, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetsAtOrPast, ThresholdPct: threshold})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1664,9 +1664,12 @@ func checkExpiry[TX any](t *testing.T, f fixture[TX]) {
 // and paging: most at risk first, then by tenant id, a page at a time.
 func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 	for name, req := range map[string]limes.ListTenantBudgetsRequest{
-		"a negative limit":      {Limit: -1},
-		"a threshold past 100%": {ThresholdPct: 101},
-		"a negative threshold":  {ThresholdPct: -1},
+		"a negative limit":             {Limit: -1},
+		"a threshold past 100%":        {Filter: limes.TenantBudgetsAtOrPast, ThresholdPct: 101},
+		"a negative threshold":         {Filter: limes.TenantBudgetsAtOrPast, ThresholdPct: -1},
+		"a threshold with no filter":   {ThresholdPct: 1},
+		"a threshold beside unlimited": {Filter: limes.TenantBudgetsUnlimited, ThresholdPct: 1},
+		"a filter this package lacks":  {Filter: limes.TenantBudgetsUnlimited + 1},
 	} {
 		if _, err := f.Usage.ListTenantBudgets(f.listCtx(), req); !errors.Is(err, limes.ErrInvalidRequest) {
 			t.Errorf("ListTenantBudgets with %s: err = %v, want ErrInvalidRequest", name, err)
@@ -1744,12 +1747,18 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 		}
 	}
 	const half = 50
-	riskyPage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{ThresholdPct: half})
+	riskyPage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetsAtOrPast, ThresholdPct: half})
 	risky := riskyPage.Items
 	if err != nil || len(risky) != 2 || risky[0].TenantID != frozen || risky[1].TenantID != f.Tenant || riskyPct(risky[1]) != half {
 		t.Errorf("tenants at 50%% or more = %+v, %v; want %s, at a ceiling of 0, then %s at 50%%", risky, err, frozen, f.Tenant)
 	}
-	unlPage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{UnlimitedOnly: true})
+	// At a threshold of 0, every tenant with a ceiling and none without.
+	ceiled, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetsAtOrPast})
+	if err != nil || slices.ContainsFunc(ceiled.Items, func(s limes.TenantBudget) bool { return s.TenantID == unlimited }) ||
+		!slices.ContainsFunc(ceiled.Items, func(s limes.TenantBudget) bool { return s.TenantID == f.Tenant }) {
+		t.Errorf("tenants with a ceiling = %+v, %v; want %s and not %s", ceiled.Items, err, f.Tenant, unlimited)
+	}
+	unlPage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetsUnlimited})
 	unl := unlPage.Items
 	if err != nil || slices.ContainsFunc(unl, func(s limes.TenantBudget) bool { return s.TenantID == f.Tenant }) ||
 		!slices.ContainsFunc(unl, func(s limes.TenantBudget) bool { return s.TenantID == unlimited }) {

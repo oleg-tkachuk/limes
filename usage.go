@@ -199,12 +199,14 @@ type TenantBudgets interface {
 	SetTenantBudget(ctx context.Context, req SetTenantBudgetRequest) (TenantBudget, error)
 
 	// ListTenantBudgets returns tenant budget rows; a consumer joins its
-	// own tenant data to them by TenantID. Filters:
-	//   - ThresholdPct > 0: include only rows where
-	//     spent / max * 100 >= ThresholdPct, and every ceiling of 0 — spent
-	//     through at any threshold — but no unlimited one.
-	//   - UnlimitedOnly: include only rows whose ceiling is Unlimited.
-	//   - Limit: the page size, as PageLimit reads it.
+	// own tenant data to them by TenantID. Filter picks the rows:
+	//   - TenantBudgetsAll: every one.
+	//   - TenantBudgetsAtOrPast: rows with a ceiling — a bound or 0 — where
+	//     spent / max * 100 >= ThresholdPct, exactly; a ceiling of 0 is
+	//     spent through at any threshold. At a threshold of 0, every row
+	//     with a ceiling.
+	//   - TenantBudgetsUnlimited: rows whose ceiling is Unlimited.
+	// Limit is the page size, as PageLimit reads it.
 	// It refuses what ListTenantBudgetsRequest.Validate refuses.
 	//
 	// Rows come most at risk first. Ceilings of 0, which allow nothing,
@@ -523,13 +525,49 @@ func (r SetTenantBudgetRequest) Validate() error {
 	return nil
 }
 
+// TenantBudgetFilter picks the rows ListTenantBudgets lists.
+type TenantBudgetFilter uint8
+
+const (
+	// TenantBudgetsAll lists every tenant: the zero value, no filter.
+	TenantBudgetsAll TenantBudgetFilter = iota
+	// TenantBudgetsAtOrPast lists tenants with a ceiling spent to
+	// ListTenantBudgetsRequest.ThresholdPct or past it.
+	TenantBudgetsAtOrPast
+	// TenantBudgetsUnlimited lists tenants with no ceiling.
+	TenantBudgetsUnlimited
+)
+
+// String names the filter for logs and errors.
+func (f TenantBudgetFilter) String() string {
+	switch f {
+	case TenantBudgetsAll:
+		return "all"
+	case TenantBudgetsAtOrPast:
+		return "at-or-past"
+	case TenantBudgetsUnlimited:
+		return "unlimited"
+	}
+	return fmt.Sprintf("TenantBudgetFilter(%d)", uint8(f))
+}
+
+// Validate refuses a filter this package does not define, as
+// ErrInvalidRequest.
+func (f TenantBudgetFilter) Validate() error {
+	if f > TenantBudgetsUnlimited {
+		return invalidRequest("list tenant budgets: unknown filter %s", f)
+	}
+	return nil
+}
+
 // ListTenantBudgetsRequest is the input shape for
 // UsageStore.ListTenantBudgets.
 type ListTenantBudgetsRequest struct {
-	// ThresholdPct keeps only tenants at or past this utilization, 0..100.
+	// Filter picks the rows; the zero value lists every tenant.
+	Filter TenantBudgetFilter
+	// ThresholdPct is the utilization TenantBudgetsAtOrPast lists from,
+	// 0..100. Any other filter takes none.
 	ThresholdPct float64
-	// UnlimitedOnly keeps only tenants with no ceiling.
-	UnlimitedOnly bool
 	// Limit is the page size; see PageLimit. Negative is refused.
 	Limit int
 	// Cursor is the one the previous page returned; empty for the first.
@@ -539,14 +577,20 @@ type ListTenantBudgetsRequest struct {
 // maxThresholdPct is the highest utilization a threshold can name.
 const maxThresholdPct = wholePct
 
-// Validate refuses a request no page can answer: a negative page size, or a
-// threshold outside 0..100.
+// Validate refuses a request no page can answer: a negative page size, an
+// unknown filter, a threshold outside 0..100, or a threshold beside a filter
+// that takes none.
 func (r ListTenantBudgetsRequest) Validate() error {
+	if err := r.Filter.Validate(); err != nil {
+		return err
+	}
 	switch {
 	case r.Limit < 0:
 		return invalidRequest("list tenant budgets: limit %d is negative", r.Limit)
 	case r.ThresholdPct < 0 || r.ThresholdPct > maxThresholdPct:
 		return invalidRequest("list tenant budgets: threshold %v%% is outside 0..%d", r.ThresholdPct, maxThresholdPct)
+	case r.ThresholdPct != 0 && r.Filter != TenantBudgetsAtOrPast:
+		return invalidRequest("list tenant budgets: a threshold with filter %s, which takes none", r.Filter)
 	}
 	return nil
 }
