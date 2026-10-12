@@ -191,7 +191,8 @@ func TestCopyUsageReadsTheCounters(t *testing.T) {
 	if _, err := u.Reserve(ctx, limes.ReserveRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, copies: []limes.CopyCeiling{c}}), Amount: unit / 4}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := u.CopyUsage(ctx, [][]byte{[]byte("read"), []byte("never")})
+	res, err := u.CopyUsage(ctx, limes.CopyUsageRequest{RevocationIDs: [][]byte{[]byte("read"), []byte("never")}})
+	got := res.Copies
 	if err != nil {
 		t.Fatal(err)
 	}

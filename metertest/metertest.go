@@ -25,6 +25,7 @@ import (
 	"math"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -282,6 +283,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"AnExpiredHoldIsReleased", checkExpiry[TX]},
 		{"ListTenantBudgetsPagesMostAtRiskFirst", checkListTenantBudgets[TX]},
 		{"OverrunRecordCrossesACopyBudget", checkCopyOverrun[TX]},
+		{"CopyUsageRefusesAnInvalidRequest", checkCopyUsageRefusesInvalid[TX]},
 		{"TenantBudgetReadsAgree", checkTenantBudgetReads[TX]},
 		{"ReservationsReadBack", checkReservations[TX]},
 		{"SumsExactly", checkSumsExactly[TX]},
@@ -992,6 +994,28 @@ func checkReservations[TX any](t *testing.T, f fixture[TX]) {
 	}
 }
 
+// checkCopyUsageRefusesInvalid holds a CopyUsageReader to the request's
+// bounds: no copy, more than MaxCopyUsageIDs, or an empty id is refused.
+func checkCopyUsageRefusesInvalid[TX any](t *testing.T, f fixture[TX]) {
+	reader, ok := f.Usage.(limes.CopyUsageReader)
+	if !ok {
+		return // a Meter that does not read copies back is checked no further
+	}
+	tooMany := make([][]byte, limes.MaxCopyUsageIDs+1)
+	for i := range tooMany {
+		tooMany[i] = []byte(strconv.Itoa(i))
+	}
+	for name, ids := range map[string][][]byte{
+		"no id":    nil,
+		"too many": tooMany,
+		"empty id": {[]byte("copy-1"), {}},
+	} {
+		if _, err := reader.CopyUsage(f.Ctx, limes.CopyUsageRequest{RevocationIDs: ids}); !errors.Is(err, limes.ErrInvalidRequest) {
+			t.Errorf("CopyUsage with %s: err = %v, want ErrInvalidRequest", name, err)
+		}
+	}
+}
+
 func checkCopyOverrun[TX any](t *testing.T, f fixture[TX]) {
 	copyID := []byte("copy-1")
 	copies := []limes.CopyCeiling{{RevocationID: copyID, Budget: &limes.BudgetCeiling{Max: one}}}
@@ -1006,7 +1030,8 @@ func checkCopyOverrun[TX any](t *testing.T, f fixture[TX]) {
 	if !ok {
 		return // a Meter that does not read copies back is checked no further
 	}
-	got, err := reader.CopyUsage(f.Ctx, [][]byte{copyID})
+	res, err := reader.CopyUsage(f.Ctx, limes.CopyUsageRequest{RevocationIDs: [][]byte{copyID}})
+	got := res.Copies
 	if err != nil || len(got) != 1 || got[0].SpentAmount != 2*one {
 		t.Errorf("copy usage = %+v, %v; want 2 spent", got, err)
 	}
@@ -1574,7 +1599,8 @@ func checkCopySettleRefund[TX any](t *testing.T, f fixture[TX]) {
 	if _, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: settled.ChargeID, Amount: one}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := reader.CopyUsage(f.Ctx, [][]byte{copyID})
+	res, err := reader.CopyUsage(f.Ctx, limes.CopyUsageRequest{RevocationIDs: [][]byte{copyID}})
+	got := res.Copies
 	if err != nil || len(got) != 1 || got[0].SpentAmount != 2*one || got[0].ReservedAmount != 0 {
 		t.Errorf("the copy after a settle of 3 and a refund of 1 = %+v, %v; want 2 spent, nothing held", got, err)
 	}

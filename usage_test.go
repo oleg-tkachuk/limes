@@ -3,6 +3,7 @@ package limes
 import (
 	"errors"
 	"reflect"
+	"strconv"
 	"testing"
 
 	"github.com/google/uuid"
@@ -80,6 +81,28 @@ func TestOverrunPolicyNamesAndValidates(t *testing.T) {
 		}
 		if err := tc.policy.Validate(); tc.valid != (err == nil) || (err != nil && !errors.Is(err, ErrInvalidRequest)) {
 			t.Errorf("%s: Validate() = %v, want valid=%v", tc.policy, err, tc.valid)
+		}
+	}
+}
+
+func TestCopyUsageRequestValidate(t *testing.T) {
+	atLimit := make([][]byte, MaxCopyUsageIDs)
+	for i := range atLimit {
+		atLimit[i] = []byte(strconv.Itoa(i))
+	}
+	cases := map[string]struct {
+		ids  [][]byte
+		want error
+	}{
+		"one id":       {[][]byte{[]byte("copy")}, nil},
+		"at the limit": {atLimit, nil},
+		"no id":        {nil, ErrInvalidRequest},
+		"past limit":   {append(atLimit[:MaxCopyUsageIDs:MaxCopyUsageIDs], []byte("one more")), ErrInvalidRequest},
+		"empty id":     {[][]byte{[]byte("copy"), {}}, ErrInvalidRequest},
+	}
+	for name, tc := range cases {
+		if err := (CopyUsageRequest{RevocationIDs: tc.ids}).Validate(); !errors.Is(err, tc.want) {
+			t.Errorf("%s: Validate() = %v, want %v", name, err, tc.want)
 		}
 	}
 }

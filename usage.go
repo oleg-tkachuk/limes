@@ -640,8 +640,44 @@ type CopyUsage struct {
 type CopyUsageReader interface {
 	// CopyUsage returns the counters of each copy named that has been used,
 	// in no particular order; a copy never used has no counters and is
-	// absent from the result.
-	CopyUsage(ctx context.Context, revocationIDs [][]byte) ([]CopyUsage, error)
+	// absent from the result. It refuses what CopyUsageRequest.Validate
+	// refuses.
+	CopyUsage(ctx context.Context, req CopyUsageRequest) (CopyUsageResult, error)
+}
+
+// MaxCopyUsageIDs is the most revocation ids one CopyUsage reads, as a page
+// of any listing holds.
+const MaxCopyUsageIDs = MaxListLimit
+
+// CopyUsageRequest names the copies CopyUsage reads.
+type CopyUsageRequest struct {
+	// RevocationIDs are the copies' revocation ids: at least one, at most
+	// MaxCopyUsageIDs, none empty.
+	RevocationIDs [][]byte
+}
+
+// Validate refuses a request naming no copy, more than MaxCopyUsageIDs, or
+// an empty revocation id, as ErrInvalidRequest.
+func (r CopyUsageRequest) Validate() error {
+	switch n := len(r.RevocationIDs); {
+	case n == 0:
+		return invalidRequest("copy usage: no revocation id")
+	case n > MaxCopyUsageIDs:
+		return invalidRequest("copy usage: %d revocation ids, past MaxCopyUsageIDs (%d)", n, MaxCopyUsageIDs)
+	}
+	for i, id := range r.RevocationIDs {
+		if len(id) == 0 {
+			return invalidRequest("copy usage: revocation id %d is empty", i)
+		}
+	}
+	return nil
+}
+
+// CopyUsageResult is what CopyUsage read.
+type CopyUsageResult struct {
+	// Copies are the counters of the copies that have been used.
+	Copies []CopyUsage
+	_      noCompare
 }
 
 // Usage-related sentinels; ErrBudgetExceeded lives in types.go.
