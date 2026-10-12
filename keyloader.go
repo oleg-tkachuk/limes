@@ -61,19 +61,17 @@ type SigningKey struct {
 	Generated bool
 }
 
-// LoadKey reads the signing key at path (LoadPrivateKey), under kid — or,
-// with kid empty, under the one jwks.KeyID derives. For a key that lives
+// LoadKey reads the signing key at path (LoadPrivateKey), under the kid
+// jwks.KeyID derives from it; a deployment that names its kids sets
+// SigningKey.KeyID on the result. For a key that lives
 // only as long as the process, GenerateKey; a deployment that may have no
 // key file chooses between the two itself, so a missing mount is never
 // silently a fresh key.
-func LoadKey(path, kid string) (SigningKey, error) {
+func LoadKey(path string) (SigningKey, error) {
 	priv, err := LoadPrivateKey(path)
 	if err != nil {
 		return SigningKey{}, err
 	}
 	pub := priv.Public().(ed25519.PublicKey)
-	if kid == "" {
-		kid = jwks.KeyID(pub)
-	}
-	return SigningKey{KeyID: kid, Public: pub, Private: priv}, nil
+	return SigningKey{KeyID: jwks.KeyID(pub), Public: pub, Private: priv}, nil
 }

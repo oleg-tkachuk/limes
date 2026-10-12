@@ -80,16 +80,13 @@ func TestLoadKey(t *testing.T) {
 	priv, der := ed25519PKCS8(t)
 	path := writePEM(t, "PRIVATE KEY", der)
 
-	k, err := LoadKey(path, "")
+	k, err := LoadKey(path)
 	if err != nil || k.Generated || !k.Private.Equal(priv) || !k.Public.Equal(priv.Public()) ||
 		k.KeyID != jwks.KeyID(k.Public) {
 		t.Fatalf("from a file = %+v, %v; want the file's key under its derived kid", k, err)
 	}
-	if k, _ := LoadKey(path, "named"); k.KeyID != "named" {
-		t.Errorf("a named kid read back as %q", k.KeyID)
-	}
 	for name, p := range map[string]string{"an absent file": filepath.Join(t.TempDir(), "absent.pem"), "no path": ""} {
-		if _, err := LoadKey(p, ""); err == nil {
+		if _, err := LoadKey(p); err == nil {
 			t.Errorf("%s: LoadKey succeeded; it must fail, not fall back to a fresh key", name)
 		}
 	}
