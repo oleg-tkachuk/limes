@@ -9,7 +9,7 @@ start, [diagrams.md](diagrams.md) draws each path described here, and
 ```go
 scheme, token, err := limes.ParseAuthorization(r.Header.Get(limes.AuthorizationHeader))
 if err != nil {
-    // No credentials (ErrNoCredentials): 401 with a bare challenge.
+    // No credentials (ErrNoCredentials): 401, a challenge with no error code.
     // A malformed header (ErrMalformedAuthorization): 400.
     limes.WriteErrorResponse(w, verifier.ErrorResponse(ctx, err, scheme))
     return
@@ -262,7 +262,8 @@ reads `Authorization: DPoP <token>` or `Bearer <token>` (the scheme in any
 case, the token as a token68), and with `VerifyRequest.Scheme` set, `Verify`
 refuses a key-bound token presented as `Bearer` — a downgrade — or an unbound
 one presented as `DPoP`, with `ErrAuthSchemeMismatch`. No header, or one
-under another scheme, is `ErrNoCredentials` (401 with a bare challenge); a
+under another scheme, is `ErrNoCredentials` (401, a challenge with no error
+code); a
 Bearer or DPoP header whose credential is not a token68 is
 `ErrMalformedAuthorization` (400).
 
@@ -329,7 +330,8 @@ counts them through the `MeterSubject` the verified capability gives, which
 carries them. A verifier admits such a copy only with
 `MeterCopies` set, which says the `Meter` behind it counts copies; without it
 the token is refused with `ErrCopyCountersNotMetered` rather than accepted
-with its limits unkept.
+with its limits unkept — a configuration error, answered as 500, not an
+invalid token.
 `verifier.BiscuitCopy` names the limits in force on a copy, on any verifier,
 and a `CopyUsageReader` (`memstore` implements one) reads what each has
 counted. A copy cannot delegate — a server-side child would be an ordinary

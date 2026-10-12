@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net/netip"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -117,7 +118,15 @@ type VerifierConfig struct {
 	// every key-bound capability with dpop.ErrRequired, rather than accept
 	// one as a bearer token. Built by dpop.NewVerifier, with its own clock.
 	DPoP *dpop.Verifier
+
+	// Realm names the protection space in every WWW-Authenticate challenge
+	// ErrorResponse gives (RFC 9110 §11.5). Empty: DefaultRealm. Only the
+	// characters RFC 6750 §3 allows in an auth-param value.
+	Realm string
 }
+
+// DefaultRealm is the realm of a verifier whose config names none.
+const DefaultRealm = "limes"
 
 // VerifyRequest is a token as it arrived, and what it arrived for.
 type VerifyRequest struct {
@@ -188,6 +197,12 @@ func NewStandardVerifier(cfg VerifierConfig) (*StandardVerifier, error) {
 	}
 	if cfg.MaxTokenBytes == 0 {
 		cfg.MaxTokenBytes = DefaultMaxTokenBytes
+	}
+	if strings.ContainsFunc(cfg.Realm, func(r rune) bool { return !authParamChar(r) }) {
+		return nil, fmt.Errorf("limes: VerifierConfig.Realm %q holds a character RFC 6750 does not allow", cfg.Realm)
+	}
+	if cfg.Realm == "" {
+		cfg.Realm = DefaultRealm
 	}
 	cfg.TrustedIssuers = slices.Clone(cfg.TrustedIssuers)
 	switch {

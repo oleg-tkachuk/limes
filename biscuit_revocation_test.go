@@ -251,6 +251,25 @@ func (c *countingBiscuitLookup) IsBiscuitRevoked(context.Context, [][]byte) (boo
 	return c.revoked, c.err
 }
 
+// perIDLookup answers for one revocation id at a time, counting the times
+// it is asked about each.
+type perIDLookup struct {
+	revoked map[string]bool
+	asked   map[string]int
+}
+
+func (p *perIDLookup) IsBiscuitRevoked(_ context.Context, ids [][]byte) (bool, error) {
+	if p.asked == nil {
+		p.asked = map[string]int{}
+	}
+	revoked := false
+	for _, id := range ids {
+		p.asked[string(id)]++
+		revoked = revoked || p.revoked[string(id)]
+	}
+	return revoked, nil
+}
+
 func TestCachedBiscuitRevocationChecker(t *testing.T) {
 	ctx := context.Background()
 	ttl := time.Second
@@ -281,8 +300,8 @@ func TestCachedBiscuitRevocationChecker(t *testing.T) {
 		_, _ = c.IsBiscuitRevoked(ctx, ids)
 		c.Clear()
 		_, _ = c.IsBiscuitRevoked(ctx, ids)
-		if up.calls != 2 {
-			t.Fatalf("upstream calls = %d, want 2", up.calls)
+		if want := 2 * len(ids); up.calls != want {
+			t.Fatalf("upstream calls = %d, want %d: each id, twice", up.calls, want)
 		}
 	})
 
@@ -295,18 +314,43 @@ func TestCachedBiscuitRevocationChecker(t *testing.T) {
 		}
 		up.err = nil
 		_, _ = c.IsBiscuitRevoked(ctx, ids)
-		if up.calls != 2 {
-			t.Fatalf("upstream calls = %d, want 2", up.calls)
+		// The failed first id is asked again, then the second.
+		if want := 1 + len(ids); up.calls != want {
+			t.Fatalf("upstream calls = %d, want %d", up.calls, want)
 		}
 	})
 
-	t.Run("lists that concatenate alike are different tokens", func(t *testing.T) {
+	t.Run("lists that concatenate alike share no id", func(t *testing.T) {
 		up := &countingBiscuitLookup{}
 		c := newBiscuitCache(t, BiscuitRevocationCacheConfig{Upstream: up, TTL: ttl})
 		_, _ = c.IsBiscuitRevoked(ctx, ids)
 		_, _ = c.IsBiscuitRevoked(ctx, [][]byte{[]byte("a"), []byte("bc")})
-		if up.calls != 2 {
-			t.Fatalf("upstream calls = %d, want 2", up.calls)
+		if up.calls != 4 {
+			t.Fatalf("upstream calls = %d, want 4", up.calls)
+		}
+	})
+
+	// A fresh attenuation adds one block to a token: the ids it shares with
+	// the copy it came from are answered from the cache, and only its own is
+	// asked about. A revoked id stops the walk.
+	t.Run("a fresh attenuation asks only about its new block", func(t *testing.T) {
+		const copies = 50
+		up := &perIDLookup{revoked: map[string]bool{"revoked": true}}
+		c := newBiscuitCache(t, BiscuitRevocationCacheConfig{Upstream: up, TTL: ttl})
+		authority := []byte("authority")
+		for i := range copies {
+			if r, err := c.IsBiscuitRevoked(ctx, [][]byte{authority, {byte(i)}}); err != nil || r {
+				t.Fatalf("copy %d = %v, %v; want live", i, r, err)
+			}
+		}
+		if up.asked["authority"] != 1 || len(up.asked) != copies+1 {
+			t.Errorf("upstream asked %v; want the authority once and each new block once", up.asked)
+		}
+		if r, err := c.IsBiscuitRevoked(ctx, [][]byte{authority, []byte("revoked"), []byte("after")}); err != nil || !r {
+			t.Errorf("a token with a revoked block = %v, %v; want revoked", r, err)
+		}
+		if up.asked["after"] != 0 {
+			t.Error("a block after a revoked one was asked about")
 		}
 	})
 

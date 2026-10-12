@@ -32,6 +32,7 @@ const problemTypeBase = "https://github.com/oleg-tkachuk/limes/problems/"
 
 // Challenge parameters of RFC 6750 §3 and RFC 9449 §7.1.
 const (
+	authParamRealm            = "realm"
 	authParamError            = "error"
 	authParamErrorDescription = "error_description"
 	authParamAlgs             = "algs"
@@ -124,11 +125,11 @@ func (v *StandardVerifier) ErrorResponse(ctx context.Context, err error, scheme 
 	dpopConfigured := v.cfg.DPoP != nil
 	challengeDPoP := r.dpop || scheme == AuthSchemeDPoP
 	if challengeDPoP {
-		resp.Challenges = append(resp.Challenges, challenge(AuthSchemeDPoP, r.code, r.title, true))
+		resp.Challenges = append(resp.Challenges, challenge(AuthSchemeDPoP, v.cfg.Realm, r.code, r.title, true))
 	} else {
-		resp.Challenges = append(resp.Challenges, challenge(AuthSchemeBearer, r.code, r.title, false))
+		resp.Challenges = append(resp.Challenges, challenge(AuthSchemeBearer, v.cfg.Realm, r.code, r.title, false))
 		if dpopConfigured {
-			resp.Challenges = append(resp.Challenges, challenge(AuthSchemeDPoP, "", "", true))
+			resp.Challenges = append(resp.Challenges, challenge(AuthSchemeDPoP, v.cfg.Realm, "", "", true))
 		}
 	}
 	if r.code == codeUseDPoPNonce {
@@ -138,9 +139,11 @@ func (v *StandardVerifier) ErrorResponse(ctx context.Context, err error, scheme 
 }
 
 // challenge is one WWW-Authenticate challenge (RFC 9110 §11.6.1): the scheme,
-// then error and error_description (RFC 6750 §3) when there is an error, and
-// for DPoP the accepted algorithms (RFC 9449 §7.1).
-func challenge(scheme AuthScheme, code, description string, withAlgs bool) string {
+// then error and error_description (RFC 6750 §3) when there is an error, for
+// DPoP the accepted algorithms (RFC 9449 §7.1), and the realm. The realm is
+// what keeps a challenge with no error code valid: RFC 6750 §3 requires at
+// least one auth-param after the scheme.
+func challenge(scheme AuthScheme, realm, code, description string, withAlgs bool) string {
 	var params []string
 	if code != "" {
 		params = append(params, authParam(authParamError, code), authParam(authParamErrorDescription, description))
@@ -148,9 +151,7 @@ func challenge(scheme AuthScheme, code, description string, withAlgs bool) strin
 	if withAlgs {
 		params = append(params, authParam(authParamAlgs, strings.Join(dpop.SigningAlgorithms(), " ")))
 	}
-	if len(params) == 0 {
-		return string(scheme)
-	}
+	params = append(params, authParam(authParamRealm, realm))
 	return string(scheme) + " " + strings.Join(params, ", ")
 }
 
@@ -158,12 +159,18 @@ func challenge(scheme AuthScheme, code, description string, withAlgs bool) strin
 // the characters RFC 6750 §3 allows in a value.
 func authParam(name, value string) string {
 	clean := strings.Map(func(r rune) rune {
-		if r == 0x20 || r == 0x21 || r >= 0x23 && r <= 0x5B || r >= 0x5D && r <= 0x7E {
+		if authParamChar(r) {
 			return r
 		}
 		return -1
 	}, value)
 	return name + `="` + clean + `"`
+}
+
+// authParamChar reports whether RFC 6750 §3 allows r in an auth-param value:
+// %x20-21 / %x23-5B / %x5D-7E.
+func authParamChar(r rune) bool {
+	return r == 0x20 || r == 0x21 || r >= 0x23 && r <= 0x5B || r >= 0x5D && r <= 0x7E
 }
 
 // WriteErrorResponse writes resp: its status, challenges, nonce and problem.

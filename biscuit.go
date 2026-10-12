@@ -57,8 +57,11 @@ const (
 
 // ErrCopyCountersNotMetered — a Biscuit sets a copy's own request or budget
 // limit, and the verifier was not told that its Meter counts copies. The
-// limit would go unenforced, so the token is refused instead.
-var ErrCopyCountersNotMetered = fmt.Errorf("%w: copy limits need a verifier with MeterCopies", ErrBiscuitAttenuation)
+// limit would go unenforced, so the token is refused instead. The token is
+// not at fault — a verifier with MeterCopies accepts it — so this is the
+// server's configuration, outside ErrInvalidToken: ErrorResponse answers it
+// as an internal error, and it has no Reason.
+var ErrCopyCountersNotMetered = errors.New("limes: copy limits need a verifier with MeterCopies")
 
 // ErrBiscuitAttenuation — an attenuation block the verifier cannot honour:
 // outside the vocabulary, malformed, or widening its parent. Matches
