@@ -28,7 +28,7 @@ flowchart LR
     op(["Operator"])
     orch(["Orchestrator agent"])
     worker(["Sub-agent"])
-    svc["<b>Your service</b><br/>Verify · Caveats.Check · Charge"]
+    svc["<b>Your service</b><br/>Authorize · Bump · Charge"]
     store[("<b>Your storage</b><br/>Store · UsageStore · KeyResolver")]
 
     op -- "Issue" --> orch
@@ -114,7 +114,7 @@ you keep for audit.
 |---|---|
 | **Verify** | Local Ed25519 JWT verification (`alg: Ed25519`, RFC 9864) against a resolved key — static, or an issuer's JWKS fetched by `jwks.Remote`, which revalidates by ETag and honours `Cache-Control`. Claims are read strictly: no unknown or duplicate member, integers within I-JSON's range. Rejections match sentinel errors (`errors.Is`) in families — `ErrUnauthenticated` over `ErrInvalidToken` and `ErrProofOfPossession` — and kinds that must not tell an attacker which check failed share `ErrInvalidToken`. |
 | **Enforce** | `Authorize` verifies and checks every stateless caveat in one call: allowed ops, resource prefixes matched at `/` boundaries (a `.` or `..` segment never matches), idempotency keys for writes, tainted reads, source networks. Request and budget limits are the `Meter`'s. |
-| **Delegate** | `Issuer.Delegate` issues a child that may only be narrower — operations, resources, limits, audience, and a validity window that starts no earlier and ends no later than the parent's; anything wider is `ErrDelegationTooWide`. |
+| **Delegate** | `Issuer.Delegate` issues a child that may only be narrower — operations, resources, limits, audience, and a validity window that starts no earlier and ends no later than the parent's; anything wider is `ErrDelegationTooWide`. The parent must allow `OpShare`, or the delegation is `ErrOpNotAllowed`. |
 | **Attenuate offline** | The Biscuit v3 form of a capability can be narrowed by its holder with no key and no network; each copy can get its own limits and be revoked on its own. |
 | **Bind to a key** | RFC 9449 DPoP: `Verify` refuses a key-bound capability without a fresh proof from that key, presented under the `DPoP` scheme; server nonces (`dpop.HMACNonces`) work across replicas without shared state. |
 | **Meter** | Requests and spend count against the capability, every ancestor and the tenant, atomically with your own side effect. Reserve an estimate, settle the actual cost, refund a charge. Amounts are exact integers of billionths of an ISO 4217 unit. `Instrument` adds OpenTelemetry instruments. |
