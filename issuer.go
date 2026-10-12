@@ -214,7 +214,7 @@ func (i *Issuer) issue(ctx context.Context, req IssueRequest) (Capability, strin
 		Subject:         req.Subject.clone(),
 		Audience:        slices.Clone(req.Audience),
 		Caveats:         req.Caveats.clone(),
-		IssuedAt:        now,
+		IssuedAt:        now.Truncate(tokenTimeResolution),
 		ExpiresAt:       expires,
 		Generation:      req.Generation,
 		ConfirmationJKT: req.ConfirmationJKT,
@@ -247,8 +247,15 @@ func (i *Issuer) expiry(now time.Time, ttl time.Duration) (time.Time, error) {
 	if ttl == 0 {
 		ttl = i.defaultTTL
 	}
-	return now.Add(ttl), nil
+	return now.Add(ttl).Truncate(tokenTimeResolution), nil
 }
+
+// tokenTimeResolution is what a token's times carry: JWT NumericDates are
+// whole seconds. The issuer records each time as the token carries it —
+// issued and expiring rounded down, valid from rounded up — so the record
+// and the token never disagree, and no time leaves the issuer earlier than
+// the token allows or later than it ends.
+const tokenTimeResolution = time.Second
 
 // setNotBefore applies a requested not-before time, refusing one at or after
 // the expiry: such a capability could never be used.
@@ -257,6 +264,9 @@ func setNotBefore(c *Capability, nbf time.Time) error {
 		return nil
 	}
 	nbf = nbf.UTC()
+	if t := nbf.Truncate(tokenTimeResolution); !t.Equal(nbf) {
+		nbf = t.Add(tokenTimeResolution) // up: never valid before it was asked to be
+	}
 	if !nbf.Before(c.ExpiresAt) {
 		return invalidRequest("NotBefore %s is not before ExpiresAt %s", nbf, c.ExpiresAt)
 	}
@@ -391,7 +401,7 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 		Subject:         req.Subject.clone(),
 		Audience:        slices.Clone(req.Audience),
 		Caveats:         req.Caveats.clone(),
-		IssuedAt:        now,
+		IssuedAt:        now.Truncate(tokenTimeResolution),
 		ExpiresAt:       expires,
 		ParentID:        parent.ID,
 		Generation:      DefaultGeneration,

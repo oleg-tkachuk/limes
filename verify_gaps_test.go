@@ -61,8 +61,10 @@ func TestVerifyWindowEdges(t *testing.T) {
 	}{
 		"just before the window": {c.NotBefore.Add(-leeway - time.Second), ErrNotYetValid},
 		"at its start":           {c.NotBefore.Add(-leeway), nil},
-		"at its end":             {c.ExpiresAt.Add(leeway), nil},
-		"just after it":          {c.ExpiresAt.Add(leeway + time.Second), ErrExpired},
+		// RFC 7519 §4.1.4: refused on or after exp, so the last instant
+		// accepted is just before exp plus the leeway.
+		"at its end":    {c.ExpiresAt.Add(leeway - time.Nanosecond), nil},
+		"just after it": {c.ExpiresAt.Add(leeway), ErrExpired},
 	} {
 		cfg := v.cfg
 		cfg.Now = func() time.Time { return tc.now }

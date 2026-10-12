@@ -287,7 +287,8 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapab
 	if !cap.NotBefore.IsZero() && now.Add(v.cfg.Leeway).Before(cap.NotBefore) {
 		return VerifiedCapability{}, ErrNotYetValid
 	}
-	if cap.ExpiresAt.IsZero() || now.Add(-v.cfg.Leeway).After(cap.ExpiresAt) {
+	// RFC 7519 §4.1.4: refused on or after exp, less the leeway.
+	if cap.ExpiresAt.IsZero() || !now.Add(-v.cfg.Leeway).Before(cap.ExpiresAt) {
 		return VerifiedCapability{}, ErrExpired
 	}
 
