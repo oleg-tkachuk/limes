@@ -228,7 +228,7 @@ type UsageHousekeeping interface {
 	DeleteUsage(ctx context.Context, req DeleteUsageRequest) error
 
 	// PurgeOrphans deletes the usage rows of capabilities no longer on
-	// record (Store.Purge), releasing their reservations as Delete does, at
+	// record (Store.Purge), releasing their reservations as DeleteUsage does, at
 	// most req.Limit of them; the caller loops while a batch comes back
 	// full.
 	PurgeOrphans(ctx context.Context, req PurgeOrphansRequest) (PurgeOrphansResult, error)
@@ -448,9 +448,10 @@ type TenantBudget struct {
 	// open-ended one.
 	PeriodEnd time.Time
 	UpdatedAt time.Time
-	// ResourceVersion is the OCC token a caller passes back to Set. Zero
-	// means no ceiling has ever been set — the row, if there is one, holds
-	// only what Charge and Reserve counted.
+	// ResourceVersion is the OCC token a caller passes back as
+	// SetTenantBudgetRequest.ExpectedVersion. Zero means no ceiling has
+	// ever been set — the row, if there is one, holds only what Charge and
+	// Reserve counted.
 	ResourceVersion int64
 }
 

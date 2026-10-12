@@ -759,10 +759,10 @@ func checkDeleteReleasesHolds[TX any](t *testing.T, f fixture[TX]) {
 	}
 	// A capability with no row is no error: there is nothing to drop.
 	if err := f.Usage.DeleteUsage(f.Ctx, limes.DeleteUsageRequest{CapabilityID: uuid.New()}); err != nil {
-		t.Errorf("Delete of a capability with no row: %v", err)
+		t.Errorf("DeleteUsage of a capability with no row: %v", err)
 	}
 	if err := f.Usage.DeleteUsage(f.Ctx, limes.DeleteUsageRequest{CapabilityID: f.child}); err != nil {
-		t.Fatalf("Delete: %v", err)
+		t.Fatalf("DeleteUsage: %v", err)
 	}
 	if _, err := f.Usage.GetReservation(f.Ctx, res.ID); !errors.Is(err, limes.ErrReservationNotFound) {
 		t.Errorf("the deleted capability's hold: err = %v, want ErrReservationNotFound", err)

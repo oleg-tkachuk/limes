@@ -50,10 +50,12 @@
 //     [jwks.Remote] fetches an issuer's JWKS for verifiers that run
 //     apart from it.
 //
-// Three more are needed only with the feature they serve:
+// Four more are needed only with the feature they serve:
 // [BiscuitRevocationStore] to accept Biscuit tokens, [CopyUsageReader] to
-// show a Biscuit copy's own counters, and [dpop.ReplayCache] to share DPoP replay
-// state across replicas ([dpop.MemoryReplayCache] ships for one process).
+// show a Biscuit copy's own counters, [dpop.ReplayCache] to share DPoP replay
+// state across replicas ([dpop.MemoryReplayCache] ships for one process), and
+// [dpop.Nonces] to require server nonces ([dpop.HMACNonces] ships, and works
+// across replicas holding the same keys).
 //
 // A Capability crosses the API by value, in and out: no caller can alter one
 // another holds, and one that is not there is an error, never nil.

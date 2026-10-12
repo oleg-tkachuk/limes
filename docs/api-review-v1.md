@@ -89,8 +89,10 @@ Keep — implementers need them, as memstore shows: `PageLimit`,
 `MaxExternalRefBytes`, `NormaliseUnitCode`, `DefaultReservationTTL`,
 `MaxNanos`, `NanosPerUnit`.
 
-**Done:** every name above is unexported or gone; `PublicJWK` and `JWK` live
-in `internal/jose`, `Decode` and `VerifySignature` in `inspect`, and
+**Done:** every name above is unexported or gone except `TokenType`, which
+P5 (b) brought back as the type of `AcceptTokenTypes`: a verifier names the
+formats it accepts, so the value is part of the contract. `PublicJWK` and `JWK`
+live in `internal/jose`, `Decode` and `VerifySignature` in `inspect`, and
 `NormaliseUnitCode` is `NormalizeUnitCode` (T3).
 
 ## 6. Merge and reshape
@@ -119,7 +121,11 @@ already is; conformance suites skip what a store does not implement. Never a
 method added to a published interface (go.dev/blog/module-compatibility).
 
 **P2 — methods that may grow take a request and return a result struct**;
-every I/O-backed method returns an error.
+every I/O-backed method returns an error. Two kinds keep a bare error: a read
+of one record by its id (`GetRecord`, `GetUsage`, `GetTenantBudget`,
+`GetReservation`), and an idempotent command whose outcome is the state it
+leaves (`Release`, `DeleteUsage`, `Revoke`, `RevokeBiscuit`) — repeating one
+changes nothing, so there is nothing to report but failure.
 
 **P3 — zero values.** Zero means the documented default, and that default is
 an exported `Default*` constant the field doc names (today `defaultLeeway`,
