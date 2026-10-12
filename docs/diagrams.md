@@ -124,14 +124,14 @@ sequenceDiagram
     Op->>I: Issue(IssueRequest)
     I->>I: Caveats.Validate · TTL → ExpiresAt
     I->>St: Store.Insert(cap, IssuedBy)
-    I->>I: Signer.Sign(ctx, cap)
+    I->>I: Signer.sign(ctx, cap)
     I-->>O: token
 
     O->>I: Delegate(DelegateRequest{Parent, Caveats})
     I->>St: Store.IsRevoked(parent)
     I->>I: Narrows(parent, child)
     I->>St: Store.Insert(child, parent.Subject)
-    I->>I: Signer.Sign(ctx, child)
+    I->>I: Signer.sign(ctx, child)
     I-->>W: child token
 
     W->>S: request + child token
@@ -455,7 +455,7 @@ flowchart TB
         n0 --> n1 --> n2 --> n3 --> n4 --> n5 --> n6 --> n7
     end
 
-    persist["Store.Insert(child, issuedBy = parent.Subject)<br/>Signer.Sign(ctx, child)"]
+    persist["Store.Insert(child, issuedBy = parent.Subject)<br/>Signer.sign(ctx, child)"]
     ok(["child, childToken"])
 
     wide["ErrDelegationTooWide"]

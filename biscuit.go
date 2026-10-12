@@ -108,7 +108,7 @@ func (i *Issuer) Biscuit(ctx context.Context, vc VerifiedCapability) (string, er
 	}
 	sealed := c
 	sealed.BiscuitRoot = base64.RawURLEncoding.EncodeToString(rootPub)
-	inner, err := i.signer.Sign(ctx, sealed)
+	inner, err := i.signer.sign(ctx, sealed)
 	if err != nil {
 		return "", fmt.Errorf("limes: sign sealed token: %w", err)
 	}

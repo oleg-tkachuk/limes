@@ -59,7 +59,7 @@ func TestSign_RoundTrip(t *testing.T) {
 		},
 	}
 
-	token, err := signer.Sign(context.Background(), cap)
+	token, err := signer.sign(context.Background(), cap)
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestSign_RejectsInvalid(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			c := base()
 			mut(&c)
-			if _, err := signer.Sign(context.Background(), c); err == nil {
+			if _, err := signer.sign(context.Background(), c); err == nil {
 				t.Fatalf("expected error, got nil")
 			}
 		})
@@ -152,7 +152,7 @@ func TestSign_TamperDetection(t *testing.T) {
 		IssuedAt:  now,
 		ExpiresAt: now.Add(time.Minute),
 	}
-	token, _ := signer.Sign(context.Background(), cap)
+	token, _ := signer.sign(context.Background(), cap)
 
 	// Flip a byte in the middle of the payload segment.
 	mid := len(token) / 2
@@ -410,7 +410,7 @@ func TestSignerSignsThroughAnOpaqueKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	token, err := signer.Sign(context.Background(), Capability{
+	token, err := signer.sign(context.Background(), Capability{
 		ID: uuid.New(), Issuer: "i", Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New()},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, IssuedAt: now, ExpiresAt: now.Add(time.Minute),
 	})

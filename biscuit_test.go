@@ -340,7 +340,7 @@ func TestBiscuitAttenuationChainsNeverWiden(t *testing.T) {
 func TestBiscuitTakesOnlyAVerifiedCapabilityOfItsOwn(t *testing.T) {
 	issuer, v, store, cap, token := biscuitFixture(t)
 	ctx := context.Background()
-	jwt, err := issuer.signer.Sign(ctx, cap)
+	jwt, err := issuer.signer.sign(ctx, cap)
 	if err != nil {
 		t.Fatal(err)
 	}

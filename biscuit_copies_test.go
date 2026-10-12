@@ -198,7 +198,7 @@ func TestCopiesAreNeverSigned(t *testing.T) {
 	issuer, v, _, cap, _ := biscuitFixture(t)
 	withCopies := cap
 	withCopies.Copies = []CopyCeiling{{RevocationID: []byte("x"), Requests: RequestCeiling{Max: 1}}}
-	jwt, err := issuer.signer.Sign(context.Background(), withCopies)
+	jwt, err := issuer.signer.sign(context.Background(), withCopies)
 	if err != nil {
 		t.Fatal(err)
 	}
