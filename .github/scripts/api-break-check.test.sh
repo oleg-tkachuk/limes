@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # api-break-check.test.sh — api-break-check.sh refuses an unmarked break of
-# the API, and passes a marked one or a compatible change.
+# the API, and passes a marked one or a compatible change; from v1.0.0 on it
+# refuses every break.
 #
 # Runs from `task verify-all` against a scratch module — no network beyond
 # the apidiff that tools/go.mod pins.
@@ -66,6 +67,12 @@ check "a type that is not ASCII" fail drop "féat!: drop A"
 check "a footer as the subject" fail drop "BREAKING CHANGE: drop A"
 check "a compatible addition" pass add "feat: add B"
 check "a marked change with no break" pass add "feat!: change the wire format"
+
+# From v1.0.0 on, no break passes, marked or not.
+git -C "$scratch" tag v1.0.0 main
+check "on v1, an unmarked break" fail drop "fix: drop A"
+check "on v1, a marked break" fail drop "fix!: drop A"
+check "on v1, a compatible addition" pass add "feat: add B"
 
 # The check leaves no worktree behind.
 if [ "$(git -C "$scratch" worktree list | wc -l)" -ne 1 ]; then

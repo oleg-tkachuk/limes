@@ -222,6 +222,32 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: ./.github/scripts/api-break-check.sh "$BASE" "$HEAD"
 
+  # From v1.0.0 on no commit may mark itself breaking: the release would cut
+  # a major the Go proxy ignores. Git alone answers it, so it runs on every
+  # pull request — a documentation-only one too, whose marker breaks the
+  # release as surely as one beside code. See .github/scripts/marker-check.sh.
+  markers:
+    name: Breaking markers
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The merge base, every commit of the pull request, and the tags
+          # that say which release line it builds on.
+          fetch-depth: 0
+
+      - name: Refuse a breaking marker on a stable release line
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: ./.github/scripts/marker-check.sh "$BASE" "$HEAD"
+
   # Two jobs over the same files, and the halves do not overlap. actionlint
   # covers whether a workflow is correct at all — schema, expression syntax,
   # `needs:` naming a job that exists, and shellcheck over every `run:` block.
@@ -282,7 +308,7 @@ jobs:
   # change, which is a pass; a failure or a cancellation anywhere is not.
   checks:
     name: All checks passed
-    needs: [changes, verify, floor, api, syntax, audit]
+    needs: [changes, verify, floor, api, markers, syntax, audit]
     if: always()
     runs-on: ubuntu-26.04
     timeout-minutes: 5

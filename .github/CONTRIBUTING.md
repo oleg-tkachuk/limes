@@ -29,7 +29,10 @@ network and no container.
 - A change that breaks the Go API is marked breaking — `type!:` or a
   `BREAKING CHANGE:` footer — in one of its commits. CI's **API compatibility**
   job compares the pull request's API with its base using apidiff and fails an
-  unmarked break.
+  unmarked break. From 1.0.0 on it fails every break, and CI's **Breaking
+  markers** job fails any commit marked breaking — documentation-only ones
+  included — since the release would tag a v2 the Go proxy ignores; a v2 is a
+  new module path, planned on its own.
 - New behaviour comes with a test; a bug fix with a test that reproduced it.
 - A change to the token wire format regenerates the golden fixtures in the
   same commit — see `goldengen_test.go` and `biscuit_crosslang_test.go`.
