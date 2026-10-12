@@ -139,7 +139,10 @@ func (r *Remote) PublicKey(ctx context.Context, kid string) (ed25519.PublicKey, 
 		return slices.Clone(key), nil
 	}
 	if err := r.refresh(ctx); err != nil {
-		return nil, err
+		// The caller gave up waiting on the endpoint with no set it could
+		// serve: the keys are unavailable to it, the server's fault rather
+		// than the token's. The context's error stays matchable.
+		return nil, fmt.Errorf("%w: %s: %w", ErrUnavailable, r.cfg.URL, err)
 	}
 	key, ok, fetchedAt, _ = r.lookup(kid)
 

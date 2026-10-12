@@ -240,8 +240,8 @@ func TestRemoteJWKSWaiterHonoursItsContext(t *testing.T) {
 	}()
 	select {
 	case err := <-done:
-		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Errorf("waiter's error = %v, want its context's", err)
+		if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, ErrUnavailable) {
+			t.Errorf("waiter's error = %v, want its context's, as ErrUnavailable", err)
 		}
 	case <-time.After(checkDeadline):
 		t.Fatal("a waiter outlived its context behind another caller's fetch")
@@ -275,8 +275,8 @@ func TestRemoteJWKSCallerCancellingItsFetchBlocksNoOne(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), checkDeadline/10)
 	defer cancel()
-	if _, err := r.PublicKey(ctx, "k"); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("the caller that gave up: err = %v, want its context's", err)
+	if _, err := r.PublicKey(ctx, "k"); !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("the caller that gave up: err = %v, want its context's, as ErrUnavailable", err)
 	}
 	close(release)
 	got, err := r.PublicKey(context.Background(), "k")
