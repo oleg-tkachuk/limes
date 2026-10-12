@@ -62,34 +62,8 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-
-          if [ -n "${BASE:-}" ]; then
-            from="$BASE"
-            to="$HEAD"
-          else
-            from="${BEFORE:-}"
-            to="$AFTER"
-          fi
-
-          # A push that created the branch reports all zeros, a force-push can
-          # name a commit this clone does not have, and a run by hand has no
-          # diff at all. None of them is a diff, so all mean everything.
-          zero=0000000000000000000000000000000000000000
-          if [ -z "$from" ] || [ "$from" = "$zero" ] || ! git cat-file -e "${from}^{commit}" 2>/dev/null; then
-            printf '%s\n' "no usable base (${from:-none}) — running everything"
-            relevant="$(./.github/scripts/ci-relevant.sh --all)"
-          else
-            changed="$(git diff --name-only "$from" "$to")"
-            printf '%s\n' "$changed"
-            relevant="$(printf '%s\n' "$changed" | ./.github/scripts/ci-relevant.sh)"
-          fi
-
-          printf '%s\n' "relevant=$relevant" >>"$GITHUB_OUTPUT"
-          if [ "$relevant" = false ]; then
-            printf '%s\n' "documentation only — the checks below will report as skipped"
-          fi
+        # Which diff, and whether it reaches code: .github/scripts/ci-diff.sh.
+        run: ./.github/scripts/ci-diff.sh >>"$GITHUB_OUTPUT"
 
   # `task verify-all`, exactly as a developer runs it.
   verify:
