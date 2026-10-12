@@ -30,7 +30,7 @@ func TestDeleteIsNotUndoneByADescendantsHold(t *testing.T) {
 		}
 	}
 	u := newTestUsage(records)
-	r, err := u.Reserve(ctx, limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: child, tenant: tenant}), Amount: unit})
+	r, err := u.Reserve(ctx, limes.ReserveRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: child, tenant: tenant}), Amount: unit})
 	if err != nil {
 		t.Fatal(err)
 	}

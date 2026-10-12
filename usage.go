@@ -37,7 +37,11 @@ type UsageStore[TX any] interface {
 // not 200.00. Narrowing at delegation bounds each child; this bounds the sum.
 // An ancestor whose record is gone (Store.Purge, after expiry) no longer bounds
 // anything — its children expired with it, since a child cannot outlive its
-// parent.
+// parent. The capability itself must be on record: Bump, Charge, Reserve and
+// Settle refuse one that is not — never recorded, or purged — with
+// ErrNotFound, since none of its ancestors' ceilings could be read. A cost
+// reported late is charged only while the record lasts, so keep records
+// (PurgeRequest.ExpiredFor) as long as costs may still arrive.
 //
 // # Copies of a Biscuit
 //

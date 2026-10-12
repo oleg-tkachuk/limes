@@ -28,7 +28,7 @@ func TestReservationsCountAgainstTheCeiling(t *testing.T) {
 	ctx := context.Background()
 	u, capID, tenant, _ := reservationFixture(t)
 	reserve := func(amount limes.Nanos) (limes.Reservation, error) {
-		return u.Reserve(ctx, limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("10"))}), Amount: amount})
+		return u.Reserve(ctx, limes.ReserveRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("10"))}), Amount: amount})
 	}
 	if _, err := reserve(6 * unit); err != nil {
 		t.Fatalf("first hold: %v", err)
@@ -36,7 +36,7 @@ func TestReservationsCountAgainstTheCeiling(t *testing.T) {
 	if _, err := reserve(6 * unit); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Fatalf("second hold past the ceiling: err = %v, want ErrBudgetExceeded", err)
 	}
-	if _, err := u.Charge(ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("10"))}), Amount: limes.MustParseAmount("5")}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
+	if _, err := u.Charge(ctx, limes.ChargeRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("10"))}), Amount: limes.MustParseAmount("5")}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Fatalf("charge past spend+holds: err = %v, want ErrBudgetExceeded", err)
 	}
 	got, _ := u.GetUsage(ctx, capID)
@@ -48,20 +48,20 @@ func TestReservationsCountAgainstTheCeiling(t *testing.T) {
 func TestSettleChargesTheActualCostAndReleasesTheHold(t *testing.T) {
 	ctx := context.Background()
 	u, capID, tenant, _ := reservationFixture(t)
-	r, err := u.Reserve(ctx, limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("10"))}), Amount: limes.MustParseAmount("8"), Op: "llm", Actor: "agent"})
+	r, err := u.Reserve(ctx, limes.ReserveRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("10"))}), Amount: limes.MustParseAmount("8"), Op: "llm", Actor: "agent"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Above the hold, the excess must fit: 8 held, 11 actual, ceiling 10.
-	if _, err := u.Settle(ctx, limes.SettleRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("10"))}), ReservationID: r.ID, Amount: limes.MustParseAmount("11")}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
+	if _, err := u.Settle(ctx, limes.SettleRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("10"))}), ReservationID: r.ID, Amount: limes.MustParseAmount("11")}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Fatalf("settle past the ceiling: err = %v, want ErrBudgetExceeded", err)
 	}
 	if got, _ := u.GetUsage(ctx, capID); got.ReservedAmount != 8*unit {
 		t.Fatalf("a refused settle released the hold: %+v", got)
 	}
 
-	receipt, err := u.Settle(ctx, limes.SettleRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("10"))}), ReservationID: r.ID, Amount: limes.MustParseAmount("3")}, nil)
+	receipt, err := u.Settle(ctx, limes.SettleRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("10"))}), ReservationID: r.ID, Amount: limes.MustParseAmount("3")}, nil)
 	if err != nil {
 		t.Fatalf("settle: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestSettleChargesTheActualCostAndReleasesTheHold(t *testing.T) {
 	if l := u.committedLedger(); len(l) != 1 || l[0].Op != "llm" || l[0].Actor != "agent" {
 		t.Errorf("ledger = %+v, want one charge carrying the reservation's op and actor", l)
 	}
-	again, err := u.Settle(ctx, limes.SettleRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("10"))}), ReservationID: r.ID, Amount: limes.MustParseAmount("1")}, nil)
+	again, err := u.Settle(ctx, limes.SettleRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("10"))}), ReservationID: r.ID, Amount: limes.MustParseAmount("1")}, nil)
 	if err != nil || !again.Replayed || again.ChargeID != receipt.ChargeID {
 		t.Errorf("second settle = %+v, %v; want a replay of charge %s", again, err, receipt.ChargeID)
 	}
@@ -87,7 +87,7 @@ func TestSettleChargesTheActualCostAndReleasesTheHold(t *testing.T) {
 func TestReleaseAndExpiryFreeTheHold(t *testing.T) {
 	ctx := context.Background()
 	u, capID, tenant, now := reservationFixture(t)
-	r, _ := u.Reserve(ctx, limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("10"))}), Amount: limes.MustParseAmount("4")})
+	r, _ := u.Reserve(ctx, limes.ReserveRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("10"))}), Amount: limes.MustParseAmount("4")})
 	if err := u.Release(ctx, limes.ReleaseRequest{ReservationID: r.ID}); err != nil {
 		t.Fatal(err)
 	}
@@ -98,9 +98,9 @@ func TestReleaseAndExpiryFreeTheHold(t *testing.T) {
 		t.Fatalf("held after release = %v", got.ReservedAmount)
 	}
 
-	r, _ = u.Reserve(ctx, limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("10"))}), Amount: limes.MustParseAmount("4"), TTL: time.Minute})
+	r, _ = u.Reserve(ctx, limes.ReserveRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("10"))}), Amount: limes.MustParseAmount("4"), TTL: time.Minute})
 	*now = now.Add(2 * time.Minute)
-	if _, err := u.Settle(ctx, limes.SettleRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("10"))}), ReservationID: r.ID, Amount: limes.MustParseAmount("1")}, nil); !errors.Is(err, limes.ErrReservationNotFound) {
+	if _, err := u.Settle(ctx, limes.SettleRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("10"))}), ReservationID: r.ID, Amount: limes.MustParseAmount("1")}, nil); !errors.Is(err, limes.ErrReservationNotFound) {
 		t.Fatalf("settle after expiry: err = %v, want ErrReservationNotFound", err)
 	}
 	if r, _ := u.ReleaseExpired(ctx, limes.ReleaseExpiredRequest{}); r.Released != 1 {
@@ -121,10 +121,10 @@ func TestReservationsCountAgainstAncestors(t *testing.T) {
 		2,
 		limes.Caveats{Ops: []limes.Op{limes.OpGet}, Budget: limes.BudgetCeiling{Max: limes.MustParseAmount("20")}, UnitCode: "USD"},
 	)
-	if _, err := u.Reserve(ctx, limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: kids[0], tenant: tenant, budget: budgetOf(limes.MustParseAmount("20"))}), Amount: limes.MustParseAmount("20")}); err != nil {
+	if _, err := u.Reserve(ctx, limes.ReserveRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: kids[0], tenant: tenant, budget: budgetOf(limes.MustParseAmount("20"))}), Amount: limes.MustParseAmount("20")}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := u.Reserve(ctx, limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: kids[1], tenant: tenant, budget: budgetOf(limes.MustParseAmount("20"))}), Amount: limes.MustParseAmount("20")}); !errors.Is(err, limes.ErrBudgetExceeded) {
+	if _, err := u.Reserve(ctx, limes.ReserveRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: kids[1], tenant: tenant, budget: budgetOf(limes.MustParseAmount("20"))}), Amount: limes.MustParseAmount("20")}); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Fatalf("sibling hold past the parent: err = %v, want ErrBudgetExceeded", err)
 	}
 	if got, _ := u.GetUsage(ctx, rootID); got.ReservedAmount != 20*unit {
@@ -136,10 +136,10 @@ func TestReservationsCountAgainstAncestors(t *testing.T) {
 func TestReservationsCountAgainstTheTenantBudget(t *testing.T) {
 	ctx := context.Background()
 	u, capID, tenant, _ := reservationFixture(t)
-	if _, err := u.Charge(ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: uuid.New(), tenant: tenant}), Amount: limes.MustParseAmount("90")}, nil); err != nil {
+	if _, err := u.Charge(ctx, limes.ChargeRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: uuid.New(), tenant: tenant}), Amount: limes.MustParseAmount("90")}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := u.Reserve(ctx, limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant}), Amount: limes.MustParseAmount("11")}); !errors.Is(err, limes.ErrTenantBudgetExceeded) {
+	if _, err := u.Reserve(ctx, limes.ReserveRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant}), Amount: limes.MustParseAmount("11")}); !errors.Is(err, limes.ErrTenantBudgetExceeded) {
 		t.Fatalf("hold past the tenant budget: err = %v, want ErrTenantBudgetExceeded", err)
 	}
 	if b, _ := u.GetTenantBudget(ctx, tenant); b.ReservedAmount != 0 {

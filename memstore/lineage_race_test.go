@@ -43,7 +43,7 @@ func TestChargeRacingDeleteLeavesTheAncestorDeleted(t *testing.T) {
 		ctx := context.Background()
 		records, tenant, root, child := raceTree(t)
 		u := newTestUsage(records)
-		other := newSubject(subjectSpec{capID: uuid.New(), tenant: uuid.New()})
+		other := recordedSubject(ctx, t, u, subjectSpec{capID: uuid.New(), tenant: uuid.New()})
 
 		holding, release := make(chan struct{}), make(chan struct{})
 		var wg sync.WaitGroup
@@ -86,7 +86,7 @@ func TestReserveRacingDeleteLeavesTheAncestorDeleted(t *testing.T) {
 		ctx := context.Background()
 		records, tenant, root, child := raceTree(t)
 		u := newTestUsage(records)
-		other := newSubject(subjectSpec{capID: uuid.New(), tenant: uuid.New()})
+		other := recordedSubject(ctx, t, u, subjectSpec{capID: uuid.New(), tenant: uuid.New()})
 
 		holding, release := make(chan struct{}), make(chan struct{})
 		var wg sync.WaitGroup
@@ -104,7 +104,7 @@ func TestReserveRacingDeleteLeavesTheAncestorDeleted(t *testing.T) {
 		<-holding
 		go func() {
 			defer wg.Done()
-			res, _ = u.Reserve(ctx, limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: child, tenant: tenant}), Amount: unit})
+			res, _ = u.Reserve(ctx, limes.ReserveRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: child, tenant: tenant}), Amount: unit})
 		}()
 		runtime.Gosched()
 		dropRecord(records, root)

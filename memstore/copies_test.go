@@ -39,7 +39,7 @@ func TestCopyRequestLimits(t *testing.T) {
 	sibling := copyCeiling("sibling", 3, 0)
 	bump := func(copies ...limes.CopyCeiling) error {
 		_, err := u.Bump(ctx, limes.BumpRequest{
-			Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, requests: requestsOf(capLimit), copies: copies}),
+			Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, requests: requestsOf(capLimit), copies: copies}),
 		})
 		return err
 	}
@@ -83,7 +83,7 @@ func TestCopyBudgetChargeAndRefund(t *testing.T) {
 	c := copyCeiling("copy", 0, 2*unit)
 	charge := func(amount limes.Nanos) (limes.ChargeReceipt, error) {
 		return u.Charge(ctx, limes.ChargeRequest{
-			Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, copies: []limes.CopyCeiling{c}}),
+			Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, copies: []limes.CopyCeiling{c}}),
 			Amount:  amount,
 		}, nil)
 	}
@@ -114,7 +114,7 @@ func TestCopyBudgetReservations(t *testing.T) {
 	c := copyCeiling("copy", 0, 2*unit)
 	reserve := func(amount limes.Nanos) (limes.Reservation, error) {
 		return u.Reserve(ctx, limes.ReserveRequest{
-			Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, copies: []limes.CopyCeiling{c}}),
+			Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, copies: []limes.CopyCeiling{c}}),
 			Amount:  amount,
 		})
 	}
@@ -126,10 +126,10 @@ func TestCopyBudgetReservations(t *testing.T) {
 		t.Fatalf("a hold past the copy's budget: %v", err)
 	}
 	// Settling above what the copy has room for is refused, and the hold stays.
-	if _, err := u.Settle(ctx, limes.SettleRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, copies: []limes.CopyCeiling{c}}), ReservationID: r.ID, Amount: 5 * unit / 2}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
+	if _, err := u.Settle(ctx, limes.SettleRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, copies: []limes.CopyCeiling{c}}), ReservationID: r.ID, Amount: 5 * unit / 2}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Fatalf("settle past the copy's budget: %v", err)
 	}
-	if _, err := u.Settle(ctx, limes.SettleRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, copies: []limes.CopyCeiling{c}}), ReservationID: r.ID, Amount: 7 * unit / 4}, nil); err != nil {
+	if _, err := u.Settle(ctx, limes.SettleRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, copies: []limes.CopyCeiling{c}}), ReservationID: r.ID, Amount: 7 * unit / 4}, nil); err != nil {
 		t.Fatalf("settle: %v", err)
 	}
 	if got := u.copies["copy"]; got.spent != 7*unit/4 || got.reserved != 0 {
@@ -152,7 +152,7 @@ func TestCopyBudgetReservations(t *testing.T) {
 func TestCopyCountersPurgedWithTheirCapability(t *testing.T) {
 	ctx, u, capID, tenant := newCopyFixture(t)
 	if _, err := u.Bump(ctx, limes.BumpRequest{
-		Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, copies: []limes.CopyCeiling{copyCeiling("copy", 1, 0)}}),
+		Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, copies: []limes.CopyCeiling{copyCeiling("copy", 1, 0)}}),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -163,12 +163,13 @@ func TestCopyCountersPurgedWithTheirCapability(t *testing.T) {
 		t.Fatal("copy counter outlived its capability's usage")
 	}
 
-	gone := uuid.New() // never on record
+	gone := uuid.New() // counted while on record, then purged
 	if _, err := u.Bump(ctx, limes.BumpRequest{
-		Subject: newSubject(subjectSpec{capID: gone, tenant: tenant, copies: []limes.CopyCeiling{copyCeiling("orphan", 1, 0)}}),
+		Subject: recordedSubject(ctx, t, u, subjectSpec{capID: gone, tenant: tenant, copies: []limes.CopyCeiling{copyCeiling("orphan", 1, 0)}}),
 	}); err != nil {
 		t.Fatal(err)
 	}
+	dropRecord(u.records, gone)
 	if _, err := u.PurgeOrphans(ctx, limes.PurgeOrphansRequest{}); err != nil {
 		t.Fatal(err)
 	}
@@ -181,13 +182,13 @@ func TestCopyCountersPurgedWithTheirCapability(t *testing.T) {
 func TestCopyUsageReadsTheCounters(t *testing.T) {
 	ctx, u, capID, tenant := newCopyFixture(t)
 	c := copyCeiling("read", 5, 2*unit)
-	if _, err := u.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, copies: []limes.CopyCeiling{c}})}); err != nil {
+	if _, err := u.Bump(ctx, limes.BumpRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, copies: []limes.CopyCeiling{c}})}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := u.Charge(ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, copies: []limes.CopyCeiling{c}}), Amount: unit / 2}, nil); err != nil {
+	if _, err := u.Charge(ctx, limes.ChargeRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, copies: []limes.CopyCeiling{c}}), Amount: unit / 2}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := u.Reserve(ctx, limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, copies: []limes.CopyCeiling{c}}), Amount: unit / 4}); err != nil {
+	if _, err := u.Reserve(ctx, limes.ReserveRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, copies: []limes.CopyCeiling{c}}), Amount: unit / 4}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := u.CopyUsage(ctx, [][]byte{[]byte("read"), []byte("never")})
