@@ -65,8 +65,8 @@ type VerifierConfig struct {
 
 	// KeyIssuers binds each kid to the one issuer allowed to sign with it:
 	// a token whose kid is absent from the map, or whose `iss` differs from
-	// the kid's binding, is rejected. With one trusted issuer it may be
-	// nil. With several it is required, unless SharedKeys says otherwise:
+	// the kid's binding, is rejected. Empty binds no kid: enough with one
+	// trusted issuer. With several it is required, unless SharedKeys says otherwise:
 	// any trusted key signing for any trusted issuer is wrong for issuers
 	// that do not share a trust boundary, so it is never the default.
 	KeyIssuers map[string]string
@@ -106,12 +106,11 @@ type VerifierConfig struct {
 	BiscuitRevocations BiscuitRevocationLookup
 
 	// AcceptTokenTypes are the token formats (the JWT "typ") the verifier
-	// accepts. Nil: TokenTypeV4. Every 1.x verifier accepts TokenTypeV4, so
-	// a later format ships in a minor release: verifiers accept it first,
-	// issuers mint it after. A type this package has no schema for, or an
-	// empty list, is refused: a verifier cannot enforce a format it cannot
-	// read.
-	AcceptTokenTypes []string
+	// accepts. Empty: TokenTypeV4. Every 1.x verifier accepts TokenTypeV4,
+	// so a later format ships in a minor release: verifiers accept it
+	// first, issuers mint it after. A type this package has no schema for
+	// is refused: a verifier cannot enforce a format it cannot read.
+	AcceptTokenTypes []TokenType
 
 	// DPoP checks the proof of possession a key-bound capability (one with
 	// a ConfirmationJKT) must come with. Without it the verifier refuses
@@ -206,19 +205,17 @@ func NewVerifier(cfg VerifierConfig) (*Verifier, error) {
 	}
 	cfg.TrustedIssuers = slices.Clone(cfg.TrustedIssuers)
 	switch {
-	case cfg.KeyIssuers != nil && len(cfg.KeyIssuers) == 0:
-		return nil, errors.New("limes: VerifierConfig.KeyIssuers binds no kid; leave it nil to bind none")
-	case cfg.KeyIssuers != nil && cfg.SharedKeys:
+	case len(cfg.KeyIssuers) > 0 && cfg.SharedKeys:
 		return nil, errors.New("limes: VerifierConfig.KeyIssuers and SharedKeys exclude each other")
-	case len(cfg.TrustedIssuers) > 1 && cfg.KeyIssuers == nil && !cfg.SharedKeys:
+	case len(cfg.TrustedIssuers) > 1 && len(cfg.KeyIssuers) == 0 && !cfg.SharedKeys:
 		return nil, errors.New("limes: VerifierConfig trusts several issuers; bind each kid to one (KeyIssuers) or set SharedKeys")
 	}
 	cfg.KeyIssuers = maps.Clone(cfg.KeyIssuers)
-	switch {
-	case cfg.AcceptTokenTypes == nil:
-		cfg.AcceptTokenTypes = []string{TokenTypeV4}
-	case len(cfg.AcceptTokenTypes) == 0:
-		return nil, errors.New("limes: VerifierConfig.AcceptTokenTypes accepts nothing; leave it nil for TokenTypeV4")
+	if len(cfg.KeyIssuers) == 0 {
+		cfg.KeyIssuers = nil // no binding, whichever way it was spelled
+	}
+	if len(cfg.AcceptTokenTypes) == 0 {
+		cfg.AcceptTokenTypes = []TokenType{TokenTypeV4}
 	}
 	for _, typ := range cfg.AcceptTokenTypes {
 		if !slices.Contains(tokenTypes, typ) {
@@ -394,7 +391,7 @@ func (v *Verifier) verifySigned(ctx context.Context, token string) (*Capability,
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
-	if !slices.Contains(v.cfg.AcceptTokenTypes, header.Typ) {
+	if !slices.Contains(v.cfg.AcceptTokenTypes, TokenType(header.Typ)) {
 		return nil, fmt.Errorf("%w: typ %q is not one of %q", ErrInvalidToken, header.Typ, v.cfg.AcceptTokenTypes)
 	}
 	if header.Kid == "" {

@@ -45,7 +45,7 @@ func TestConfigDefaults(t *testing.T) {
 	if v.cfg.Leeway != 30*time.Second {
 		t.Errorf("verifier leeway = %s, want 30s", v.cfg.Leeway)
 	}
-	if !slices.Equal(v.cfg.AcceptTokenTypes, []string{TokenTypeV4}) {
+	if !slices.Equal(v.cfg.AcceptTokenTypes, []TokenType{TokenTypeV4}) {
 		t.Errorf("verifier accepts %q, want only %q", v.cfg.AcceptTokenTypes, TokenTypeV4)
 	}
 
@@ -95,14 +95,23 @@ func TestConfigRefusesNegatives(t *testing.T) {
 	}
 }
 
-// A key binding with no kid in it refuses every token; it is an error, not
-// a configuration to run with.
-func TestVerifierRefusesAnEmptyKeyIssuerBinding(t *testing.T) {
+// An empty KeyIssuers is no binding, as a nil one is: enough for one issuer,
+// not for several.
+func TestAnEmptyKeyIssuerBindingBindsNothing(t *testing.T) {
 	_, configured, _, _ := buildIssuerVerifier(t)
 	cfg := configured.cfg
 	cfg.KeyIssuers = map[string]string{}
+	v, err := NewVerifier(cfg)
+	if err != nil || v.cfg.KeyIssuers != nil {
+		t.Errorf("one issuer, empty KeyIssuers = %v, binding %v; want accepted, binding nothing", err, v.cfg.KeyIssuers)
+	}
+	cfg.TrustedIssuers = append(cfg.TrustedIssuers, "another")
 	if _, err := NewVerifier(cfg); err == nil {
-		t.Error("NewVerifier accepted an empty KeyIssuers")
+		t.Error("several issuers with an empty KeyIssuers were accepted, as if bound")
+	}
+	cfg.SharedKeys = true
+	if _, err := NewVerifier(cfg); err != nil {
+		t.Errorf("an empty KeyIssuers beside SharedKeys: %v", err)
 	}
 }
 
@@ -155,13 +164,14 @@ func TestIssuerNeedsOnlyAnIssuanceStore(t *testing.T) {
 	}
 }
 
-// AcceptTokenTypes names only formats this package can read, and at least one.
+// AcceptTokenTypes names only formats this package can read; an empty list,
+// as a nil one, accepts the current format.
 func TestAcceptTokenTypesRefusesWhatItCannotRead(t *testing.T) {
 	pub, _, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := func(types []string) VerifierConfig {
+	cfg := func(types []TokenType) VerifierConfig {
 		return VerifierConfig{
 			Keys:             staticKeys(t, map[string]ed25519.PublicKey{"k1": pub}),
 			Revocations:      newMemStore(),
@@ -169,11 +179,13 @@ func TestAcceptTokenTypesRefusesWhatItCannotRead(t *testing.T) {
 			AcceptTokenTypes: types,
 		}
 	}
-	if _, err := NewVerifier(cfg([]string{TokenTypeV4})); err != nil {
-		t.Errorf("accepting %q: %v", TokenTypeV4, err)
+	for _, types := range [][]TokenType{{TokenTypeV4}, nil, {}} {
+		v, err := NewVerifier(cfg(types))
+		if err != nil || !slices.Equal(v.cfg.AcceptTokenTypes, []TokenType{TokenTypeV4}) {
+			t.Errorf("accepting %q: %v", types, err)
+		}
 	}
-	for name, types := range map[string][]string{
-		"an empty list":     {},
+	for name, types := range map[string][]TokenType{
 		"an unknown format": {"limes-cap-v5+jwt"},
 		"an empty format":   {""},
 	} {
