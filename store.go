@@ -94,11 +94,14 @@ type Store interface {
 	// for up to its Leeway past expiry, and a revocation purged before
 	// that would let a revoked token through again.
 	//
-	// Purging by expiry never removes the ancestor of a capability that is
-	// still live: a child expires no later than its parent (Delegate cuts it
-	// to the parent's expiry, and an attenuation only narrows), so the
-	// IsRevoked walk, which stops at the first ancestor no longer on record,
-	// misses no revocation. Once records go, UsageHousekeeping.PurgeOrphans
+	// Purge never removes a capability while a child of it stays on record:
+	// among records expiring together it takes the deepest first, and it
+	// keeps a parent whose child is not in the same batch. A child expires
+	// no later than its parent (Delegate cuts it to the parent's expiry, and
+	// an attenuation only narrows), so this holds back only a record inserted
+	// around that rule. The IsRevoked walk and the Meter's lineage, which
+	// stop at the first ancestor no longer on record, therefore miss no
+	// revocation and no ceiling. Once records go, UsageHousekeeping.PurgeOrphans
 	// releases what the meter still holds for them.
 	Purge(ctx context.Context, req PurgeRequest) (PurgeResult, error)
 

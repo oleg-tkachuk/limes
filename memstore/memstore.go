@@ -20,6 +20,7 @@ package memstore
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -377,7 +378,10 @@ func (s *Store) GetBiscuitRevocation(_ context.Context, revocationID []byte) (li
 	return r, nil
 }
 
-// Purge implements limes.Store, oldest expiry first.
+// Purge implements limes.Store, oldest expiry first and, among records
+// expiring together, the deepest first, so a batch cut at its limit takes a
+// child before its parent; it keeps any record a child on record outside
+// the batch still descends from.
 func (s *Store) Purge(_ context.Context, req limes.PurgeRequest) (limes.PurgeResult, error) {
 	if err := req.Validate(); err != nil {
 		return limes.PurgeResult{}, err
@@ -395,10 +399,17 @@ func (s *Store) Purge(_ context.Context, req limes.PurgeRequest) (limes.PurgeRes
 			due = append(due, c)
 		}
 	}
-	sort.Slice(due, func(i, j int) bool { return due[i].ExpiresAt.Before(due[j].ExpiresAt) })
+	depth := make(map[uuid.UUID]int, len(due))
+	for _, c := range due {
+		depth[c.ID] = s.depthLocked(c)
+	}
+	slices.SortFunc(due, func(a, b limes.Capability) int {
+		return cmp.Or(a.ExpiresAt.Compare(b.ExpiresAt), cmp.Compare(depth[b.ID], depth[a.ID]), bytes.Compare(a.ID[:], b.ID[:]))
+	})
 	if len(due) > limit {
 		due = due[:limit]
 	}
+	due = s.withoutHeldParentsLocked(due)
 	for _, c := range due {
 		delete(s.caps, c.ID)
 		delete(s.revoked, c.ID)
@@ -406,6 +417,46 @@ func (s *Store) Purge(_ context.Context, req limes.PurgeRequest) (limes.PurgeRes
 		maps.DeleteFunc(s.revokedCopies, func(_ string, r limes.BiscuitRevocation) bool { return r.CapabilityID == c.ID })
 	}
 	return limes.PurgeResult{Purged: int64(len(due))}, nil
+}
+
+// depthLocked is how many of c's ancestors are on record, counted no
+// further than one past MaxDelegationDepth: enough to order a purge, and
+// bounded on a chain too deep or a corrupt cycle. s.mu must be held.
+func (s *Store) depthLocked(c limes.Capability) int {
+	n := 0
+	for ok := true; ok && c.ParentID != uuid.Nil && n <= limes.MaxDelegationDepth; n++ {
+		c, ok = s.caps[c.ParentID]
+		if !ok {
+			break
+		}
+	}
+	return n
+}
+
+// withoutHeldParentsLocked is batch less every record that a record on
+// record outside the batch is a child of, until none is: purging it would
+// leave that child's lineage, and the revocations along it, unreachable. A
+// child expires no later than its parent, so only a record inserted around
+// that rule is ever held. s.mu must be held.
+func (s *Store) withoutHeldParentsLocked(batch []limes.Capability) []limes.Capability {
+	in := make(map[uuid.UUID]bool, len(batch))
+	for _, c := range batch {
+		in[c.ID] = true
+	}
+	for {
+		held := map[uuid.UUID]bool{}
+		for _, c := range s.caps {
+			if !in[c.ID] && in[c.ParentID] {
+				held[c.ParentID] = true
+			}
+		}
+		if len(held) == 0 {
+			return slices.DeleteFunc(batch, func(c limes.Capability) bool { return !in[c.ID] })
+		}
+		for id := range held {
+			delete(in, id)
+		}
+	}
 }
 
 func (s *Store) ListByPrincipal(_ context.Context, req limes.ListByPrincipalRequest) (limes.Page[limes.Capability], error) {
