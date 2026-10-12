@@ -13,6 +13,10 @@
 # A commit marked breaking with no API change passes: the wire format and
 # behaviour can break without the API doing so.
 #
+# From v1.0.0 on — once a v1 or later tag is reachable from the merge base —
+# no break passes, marked or not: it needs a /vN module path, planned on its
+# own. marker-check.sh keeps the markers off that line.
+#
 # Run from the module's root. APIDIFF overrides the apidiff command; by
 # default it is the version tools/go.mod pins.
 
@@ -34,14 +38,8 @@ if [ -n "${APIDIFF:-}" ]; then
 fi
 module="$(go mod edit -json | jq -r .Module.Path)"
 
-# The subject marker and the footer Conventional Commits 1.0 define, as the
-# release's commit parser reads them: either case, any word as the type, and
-# the footer after leading spaces, a | or a *, followed by a colon or a space,
-# on any line but the subject. The type is ASCII, as the parser's \w is; a
-# scope runs to the last ) before the !, as its (.*) does.
-# Anything it reads as breaking, this must too.
-SUBJECT_MARK='^[A-Za-z0-9_]*(\(.*\))?!: '
-FOOTER_MARK='^[[:space:]|*]*BREAKING[ -]CHANGE[:[:space:]]'
+# shellcheck source=.github/scripts/breaking-markers.sh
+source "$(dirname "${BASH_SOURCE[0]}")/breaking-markers.sh"
 
 work="$(mktemp -d)"
 cleanup() {
@@ -66,16 +64,12 @@ fi
 
 printf 'Incompatible API changes since %s:\n%s\n' "$merge_base" "$breaks"
 
-marked=false
-while IFS= read -r -d '' message; do
-    if grep -qiE "$SUBJECT_MARK" <<<"$(head -n 1 <<<"$message")" ||
-        grep -qiE "$FOOTER_MARK" <<<"$(tail -n +2 <<<"$message")"; then
-        marked=true
-        break
-    fi
-done < <(git log -z --format=%B "$merge_base..$head")
-
-if [ "$marked" = true ]; then
+line="$(release_line "$merge_base")"
+if on_stable_line "$line"; then
+    echo "api-break-check: the API is stable on the $line line; an incompatible change needs a new module path" >&2
+    exit 1
+fi
+if marks_breaking "$merge_base" "$head"; then
     echo "api-break-check: a commit marks the change breaking"
     exit 0
 fi
