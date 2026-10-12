@@ -302,7 +302,7 @@ anything else (Datalog rules and checks included), makes the whole token
 invalid; a later `ExpiresAt` is ignored rather than refused. An attenuated copy spends its capability's budget and request
 count, and revoking the capability revokes every copy.
 
-A copy can also get limits of its own: `MaxRequests` and `MaxBudget` on
+A copy can also get limits of its own: `MaxRequests` and `MaxBudgetAmount` on
 the `Attenuation`. Each is counted under the revocation id of the block that
 set it, so siblings narrowed apart count apart, while the capability's own
 limits still bound them all; a limit must fit every limit already in force.
@@ -356,14 +356,14 @@ rejects, no counter moves, so a retry after rejection is safe.
 
 ```go
 usage.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("0.10")}) // partial
-usage.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID})               // the rest
+usage.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Remaining: true})                       // the rest
 ```
 
 A refund returns spend to every counter the charge took it from — except the
 tenant aggregate when the charge fell in an accounting period since closed
 with `ResetSpend` — and never more than the charge: `Amount: 0` refunds what
 is left, so a retried full refund is a no-op, and more than is left is
-`ErrRefundExceedsCharge`. `RefundReceipt.Refunded` says what moved, and names
+`ErrRefundExceedsCharge`. `RefundReceipt.RefundedAmount` says what moved, and names
 the charge's tenant and unit.
 
 Every counter counts in one unit. A charge or reservation in another unit than
@@ -546,7 +546,7 @@ and forward it, or a caller checking for it finds it gone.
 
 ```go
 records.Revoke(ctx, limes.RevokeRequest{
-    ID: cap.ID, Reason: "agent looping", Actor: "operator@example.com",
+    CapabilityID: cap.ID, Note: "agent looping", Actor: "operator@example.com",
     CascadeChildren: true,   // also records each sub-agent's revocation, for the audit
 })
 ```

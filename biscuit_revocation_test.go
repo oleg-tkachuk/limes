@@ -22,7 +22,7 @@ func revokeCopy(t *testing.T, v *StandardVerifier, store *memStore, token string
 		t.Fatalf("BiscuitCopy: %v", err)
 	}
 	if err := store.RevokeBiscuit(context.Background(), RevokeBiscuitRequest{
-		CapabilityID: c.CapabilityID, RevocationID: c.RevocationID, Reason: "test",
+		CapabilityID: c.CapabilityID, RevocationID: c.RevocationID, Note: "test",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestRevokingTheRootBiscuitLeavesTheJWT(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	narrowed, _ := Attenuate(root, Attenuation{Planes: []string{audienceData}})
+	narrowed, _ := Attenuate(root, Attenuation{Audience: []string{audienceData}})
 
 	revokeCopy(t, v, store, root)
 
@@ -158,7 +158,7 @@ func TestBiscuitCopyRefusesWhatVerifyRefuses(t *testing.T) {
 func TestBiscuitCopyIgnoresExpiryAndRevocation(t *testing.T) {
 	_, v, store, cap, root := biscuitFixture(t)
 	ctx := context.Background()
-	if err := store.Revoke(ctx, RevokeRequest{ID: cap.ID}); err != nil {
+	if err := store.Revoke(ctx, RevokeRequest{CapabilityID: cap.ID}); err != nil {
 		t.Fatal(err)
 	}
 	v.cfg.Now = func() time.Time { return cap.ExpiresAt.Add(24 * time.Hour) }

@@ -106,20 +106,20 @@ type Attenuation struct {
 	// replaces both.
 	ResourcePrefixes []string
 	ResourceURIs     []string
-	// Planes (audiences) the token keeps.
-	Planes []string
+	// Audience (audiences) the token keeps.
+	Audience []string
 	// ExpiresAt, when earlier than the token's, becomes its expiry.
 	ExpiresAt time.Time
 	// ConfirmationJKT binds the token to a key (dpop.Thumbprint). Only an
 	// unbound token can be bound offline: a bound one stays bound to its key,
 	// because rebinding needs no key and anyone could do it.
 	ConfirmationJKT string
-	// MaxRequests and MaxBudget give this copy limits of its own, counted
+	// MaxRequests and MaxBudgetAmount give this copy limits of its own, counted
 	// apart from its siblings' and within the capability's: requests made
 	// with it, and its spend in the capability's unit. 0 sets none. Each
 	// must be within every limit already in force.
-	MaxRequests int64
-	MaxBudget   Nanos
+	MaxRequests     int64
+	MaxBudgetAmount Nanos
 }
 
 // Attenuate appends a block that narrows token. It needs no key and no
@@ -143,7 +143,7 @@ func Attenuate(token string, a Attenuation) (string, error) {
 	for _, u := range a.ResourceURIs {
 		errs = append(errs, add(biscuitFactResourceURI, biscuit.String(u)))
 	}
-	for _, p := range a.Planes {
+	for _, p := range a.Audience {
 		errs = append(errs, add(biscuitFactPlane, biscuit.String(p)))
 	}
 	if !a.ExpiresAt.IsZero() {
@@ -155,14 +155,14 @@ func Attenuate(token string, a Attenuation) (string, error) {
 		}
 		errs = append(errs, add(biscuitFactBind, biscuit.String(a.ConfirmationJKT)))
 	}
-	if a.MaxRequests < 0 || a.MaxBudget < 0 {
+	if a.MaxRequests < 0 || a.MaxBudgetAmount < 0 {
 		return "", fmt.Errorf("%w: copy limits cannot be negative", ErrBiscuitAttenuation)
 	}
 	if a.MaxRequests > 0 {
 		errs = append(errs, add(biscuitFactMaxRequests, biscuit.Integer(a.MaxRequests)))
 	}
-	if a.MaxBudget > 0 {
-		errs = append(errs, add(biscuitFactMaxBudget, biscuit.Integer(a.MaxBudget)))
+	if a.MaxBudgetAmount > 0 {
+		errs = append(errs, add(biscuitFactMaxBudget, biscuit.Integer(a.MaxBudgetAmount)))
 	}
 	if err := errors.Join(errs...); err != nil {
 		return "", fmt.Errorf("limes: attenuation block: %w", err)
@@ -330,7 +330,7 @@ type blockFacts struct {
 }
 
 // set reports whether a block put a limit on its copy.
-func (c CopyCeiling) set() bool { return c.MaxRequests > 0 || c.MaxBudget > 0 }
+func (c CopyCeiling) set() bool { return c.MaxRequests > 0 || c.MaxBudgetAmount > 0 }
 
 // readBlockFacts reads blk's facts, refusing any outside the vocabulary or
 // with the wrong term. boundJKT is the key cur is already bound to, which a
@@ -395,7 +395,7 @@ func (f *blockFacts) read(fact decodedFact, boundJKT string) error {
 		if fact.name == biscuitFactMaxRequests {
 			f.ceiling.MaxRequests = n
 		} else {
-			f.ceiling.MaxBudget = Nanos(n)
+			f.ceiling.MaxBudgetAmount = Nanos(n)
 		}
 	default:
 		return fmt.Errorf("fact %q is not part of the attenuation vocabulary", fact.name)
@@ -437,12 +437,12 @@ func copyCeilingNarrows(cur Capability, c CopyCeiling) error {
 			return err
 		}
 	}
-	if c.MaxBudget > 0 {
-		if c.MaxBudget > MaxNanos {
-			return fmt.Errorf("copy budget %s exceeds %s", c.MaxBudget, MaxNanos)
+	if c.MaxBudgetAmount > 0 {
+		if c.MaxBudgetAmount > MaxNanos {
+			return fmt.Errorf("copy budget %s exceeds %s", c.MaxBudgetAmount, MaxNanos)
 		}
 		own := int64(cur.Caveats.MaxBudgetAmount)
-		if err := limitNarrows("budget nanos", int64(c.MaxBudget), own, cur.Copies, func(o CopyCeiling) int64 { return int64(o.MaxBudget) }); err != nil {
+		if err := limitNarrows("budget nanos", int64(c.MaxBudgetAmount), own, cur.Copies, func(o CopyCeiling) int64 { return int64(o.MaxBudgetAmount) }); err != nil {
 			return err
 		}
 	}

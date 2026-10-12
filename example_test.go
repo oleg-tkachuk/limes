@@ -331,14 +331,14 @@ func Example_charge() {
 	}
 
 	receipt, err := charge("0.35")
-	fmt.Println(err, receipt.Spent)
+	fmt.Println(err, receipt.SpentAmount)
 
 	// Over the ceiling: refused, and no counter moves.
 	_, err = charge("999")
 	fmt.Println(errors.Is(err, limes.ErrBudgetExceeded))
 
-	refund, err := s.usage.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID})
-	fmt.Println(err, refund.Refunded)
+	refund, err := s.usage.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Remaining: true})
+	fmt.Println(err, refund.RefundedAmount)
 	// Output:
 	// <nil> 0.35
 	// true
@@ -351,7 +351,7 @@ func Example_revoke() {
 	c, token := s.issue()
 
 	err := s.records.Revoke(ctx, limes.RevokeRequest{
-		ID: c.ID, Reason: "agent looping", Actor: "operator@example.com", CascadeChildren: true,
+		CapabilityID: c.ID, Note: "agent looping", Actor: "operator@example.com", CascadeChildren: true,
 	})
 	fmt.Println(err)
 

@@ -97,16 +97,16 @@ const AbstractUnitCode = "XXX"
 // IsUnitCode reports whether u is an ISO 4217 currency code, in its
 // canonical upper-case spelling: "USD", "JPY", "XXX". Empty is NOT one —
 // callers that want the empty-means-default semantics resolve through
-// NormaliseUnitCode first.
+// NormalizeUnitCode first.
 func IsUnitCode(u string) bool {
 	unit, err := currency.ParseISO(u)
 	return err == nil && unit.String() == u
 }
 
-// NormaliseUnitCode applies the empty-means-default policy and
+// NormalizeUnitCode applies the empty-means-default policy and
 // validates the result. Returns the canonical unit string and an
 // error when the supplied non-empty value is not an ISO 4217 code.
-func NormaliseUnitCode(u string) (string, error) {
+func NormalizeUnitCode(u string) (string, error) {
 	if u == "" {
 		return DefaultUnitCode, nil
 	}
@@ -116,10 +116,10 @@ func NormaliseUnitCode(u string) (string, error) {
 	return u, nil
 }
 
-// canonicalUnitCode is u as NormaliseUnitCode reads it, or u itself when it
+// canonicalUnitCode is u as NormalizeUnitCode reads it, or u itself when it
 // is unknown — for comparing two units, where an unknown one simply differs.
 func canonicalUnitCode(u string) string {
-	if n, err := NormaliseUnitCode(u); err == nil {
+	if n, err := NormalizeUnitCode(u); err == nil {
 		return n
 	}
 	return u
@@ -280,9 +280,9 @@ type CopyCeiling struct {
 	RevocationID []byte
 	// MaxRequests bounds the requests made with the copy; 0 = no limit here.
 	MaxRequests int64
-	// MaxBudget bounds the copy's spend, in the capability's unit; 0 = no
+	// MaxBudgetAmount bounds the copy's spend, in the capability's unit; 0 = no
 	// limit here.
-	MaxBudget Nanos
+	MaxBudgetAmount Nanos
 }
 
 // Caveats is a typed bag of restrictions. Empty values are interpreted

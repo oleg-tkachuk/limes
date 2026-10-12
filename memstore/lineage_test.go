@@ -77,7 +77,7 @@ func TestChildrenCannotSpendPastTheirParentsBudget(t *testing.T) {
 	}
 
 	// A refund returns spend to the parent too, re-opening room for siblings.
-	if _, err := u.Refund(ctx, limes.RefundRequest{ChargeID: first.ChargeID}); err != nil {
+	if _, err := u.Refund(ctx, limes.RefundRequest{ChargeID: first.ChargeID, Remaining: true}); err != nil {
 		t.Fatalf("Refund: %v", err)
 	}
 	root, _ = u.GetUsage(ctx, rootID)
@@ -155,7 +155,7 @@ func TestVerifierRejectsChildOfRevokedParent(t *testing.T) {
 	if _, err := verifier.Verify(ctx, limes.VerifyRequest{Token: childToken, Audience: "data"}); err != nil {
 		t.Fatalf("child before revoke: %v", err)
 	}
-	if err := records.Revoke(ctx, limes.RevokeRequest{ID: parent.ID}); err != nil {
+	if err := records.Revoke(ctx, limes.RevokeRequest{CapabilityID: parent.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := verifier.Verify(ctx, limes.VerifyRequest{Token: childToken, Audience: "data"}); !errors.Is(err, limes.ErrRevoked) {

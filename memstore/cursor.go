@@ -13,10 +13,10 @@ import (
 )
 
 // tenantBudgetCursor is memstore's cursor of ListTenantBudgets: a place in
-// its order, the last row's utilisation, in the decimal text it was
+// its order, the last row's utilization, in the decimal text it was
 // computed in, and tenant id. Another store's cursor is its own.
 type tenantBudgetCursor struct {
-	utilisation string
+	utilization string
 	tenantID    uuid.UUID
 }
 
@@ -30,7 +30,7 @@ var plainDecimal = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?$`)
 
 // encode is the cursor as ListTenantBudgets hands it out: opaque, URL-safe.
 func (c tenantBudgetCursor) encode() string {
-	return base64.RawURLEncoding.EncodeToString([]byte(c.utilisation + tenantBudgetCursorSep + c.tenantID.String()))
+	return base64.RawURLEncoding.EncodeToString([]byte(c.utilization + tenantBudgetCursorSep + c.tenantID.String()))
 }
 
 // decodeTenantBudgetCursor reads a cursor encode wrote. Anything else is
@@ -52,5 +52,5 @@ func decodeTenantBudgetCursor(s string) (tenantBudgetCursor, error) {
 	if err != nil {
 		return tenantBudgetCursor{}, bad
 	}
-	return tenantBudgetCursor{utilisation: pct, tenantID: tenant}, nil
+	return tenantBudgetCursor{utilization: pct, tenantID: tenant}, nil
 }

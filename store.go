@@ -117,7 +117,7 @@ type Record struct {
 // Revocation is one entry of the revocation list, as Revoke wrote it.
 type Revocation struct {
 	RevokedAt time.Time
-	Reason    string
+	Note      string
 	Actor     string
 	// Cascade reports that the entry was written by a cascading revoke —
 	// of this capability or of an ancestor.
@@ -149,10 +149,10 @@ func PageLimit(requested int32) int32 {
 
 // RevokeRequest is the input shape for Store.Revoke.
 type RevokeRequest struct {
-	ID uuid.UUID
-	// Reason is an operator-supplied label ("compromise", "rotation",
+	CapabilityID uuid.UUID
+	// Note is an operator-supplied label ("compromise", "rotation",
 	// "policy-change"). Stored on the revocation row for audit.
-	Reason string
+	Note string
 	// Actor identifies who triggered the revocation (a user UUID or
 	// an automation principal). Stored on the row.
 	Actor string

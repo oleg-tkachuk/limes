@@ -171,9 +171,9 @@ func TestUntrustedIssuerRejected(t *testing.T) {
 
 // ─── unit codes and sentinel distinguishability ────────────────────────────
 
-// NormaliseUnitCode / IsUnitCode are published API. They gate the
+// NormalizeUnitCode / IsUnitCode are published API. They gate the
 // empty-means-default rule and the comparison behind ErrUnitCodeMismatch.
-func TestNormaliseUnitCode(t *testing.T) {
+func TestNormalizeUnitCode(t *testing.T) {
 	cases := []struct {
 		in, want string
 		ok       bool
@@ -192,9 +192,9 @@ func TestNormaliseUnitCode(t *testing.T) {
 		{"UNIT", "", false},
 	}
 	for _, tc := range cases {
-		got, err := NormaliseUnitCode(tc.in)
+		got, err := NormalizeUnitCode(tc.in)
 		if (err == nil) != tc.ok || got != tc.want {
-			t.Errorf("NormaliseUnitCode(%q) = %q, %v; want %q, ok=%v", tc.in, got, err, tc.want, tc.ok)
+			t.Errorf("NormalizeUnitCode(%q) = %q, %v; want %q, ok=%v", tc.in, got, err, tc.want, tc.ok)
 		}
 		if tc.in != "" && IsUnitCode(tc.in) != tc.ok {
 			t.Errorf("IsUnitCode(%q) = %v, want %v", tc.in, !tc.ok, tc.ok)

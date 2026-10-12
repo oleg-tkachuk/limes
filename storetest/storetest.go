@@ -142,7 +142,7 @@ func (f fixture) revoked(t *testing.T, id uuid.UUID) bool {
 
 func (f fixture) revoke(t *testing.T, id uuid.UUID, cascade bool) {
 	t.Helper()
-	if err := f.Store.Revoke(f.Ctx, limes.RevokeRequest{ID: id, Reason: "test", Actor: "storetest", CascadeChildren: cascade}); err != nil {
+	if err := f.Store.Revoke(f.Ctx, limes.RevokeRequest{CapabilityID: id, Note: "test", Actor: "storetest", CascadeChildren: cascade}); err != nil {
 		t.Fatalf("revoke %s: %v", id, err)
 	}
 }
@@ -212,11 +212,11 @@ func checkRecord(t *testing.T, f fixture) {
 	}
 
 	f.revoke(t, parent.ID, false)
-	if err := f.Store.Revoke(f.Ctx, limes.RevokeRequest{ID: parent.ID, Reason: "again", Actor: "someone-else"}); err != nil {
+	if err := f.Store.Revoke(f.Ctx, limes.RevokeRequest{CapabilityID: parent.ID, Note: "again", Actor: "someone-else"}); err != nil {
 		t.Fatal(err)
 	}
 	rev := record(parent.ID).Revocation
-	if rev == nil || rev.Reason != "test" || rev.Actor != "storetest" || rev.Cascade || rev.RevokedAt.IsZero() {
+	if rev == nil || rev.Note != "test" || rev.Actor != "storetest" || rev.Cascade || rev.RevokedAt.IsZero() {
 		t.Errorf("revocation = %+v; want the first revoke's reason and actor, not cascading, with a time", rev)
 	}
 	if rev := record(child.ID).Revocation; rev != nil {
@@ -252,7 +252,7 @@ func checkUnknown(t *testing.T, f fixture) {
 		if _, err := f.get(id); !errors.Is(err, limes.ErrNotFound) {
 			t.Errorf("Get %s: err = %v, want ErrNotFound", id, err)
 		}
-		if err := f.Store.Revoke(f.Ctx, limes.RevokeRequest{ID: id}); !errors.Is(err, limes.ErrNotFound) {
+		if err := f.Store.Revoke(f.Ctx, limes.RevokeRequest{CapabilityID: id}); !errors.Is(err, limes.ErrNotFound) {
 			t.Errorf("Revoke %s: err = %v, want ErrNotFound", id, err)
 		}
 		if f.revoked(t, id) {
@@ -500,7 +500,7 @@ func checkBiscuit(t *testing.T, f fixture) {
 	expired := f.insert(t, f.newCapability("agent:biscuit-old", uuid.Nil, f.now.Add(-expiredAgo)))
 	copyID, oldCopyID, otherID := []byte("copy"), []byte("old-copy"), []byte("other")
 	revoke := func(capID uuid.UUID, id []byte) error {
-		return store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{CapabilityID: capID, RevocationID: id, Reason: "test", Actor: "storetest"})
+		return store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{CapabilityID: capID, RevocationID: id, Note: "test", Actor: "storetest"})
 	}
 	isRevoked := func(ids ...[]byte) bool {
 		t.Helper()
@@ -526,13 +526,13 @@ func checkBiscuit(t *testing.T, f fixture) {
 		t.Error("IsBiscuitRevoked must hold for a token carrying a revoked id, and only then")
 	}
 	if err := store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{
-		CapabilityID: live.ID, RevocationID: copyID, Reason: "again", Actor: "someone-else",
+		CapabilityID: live.ID, RevocationID: copyID, Note: "again", Actor: "someone-else",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := store.GetBiscuitRevocation(f.Ctx, copyID)
 	if err != nil || got.CapabilityID != live.ID || !bytes.Equal(got.RevocationID, copyID) ||
-		got.Reason != "test" || got.Actor != "storetest" || got.RevokedAt.IsZero() {
+		got.Note != "test" || got.Actor != "storetest" || got.RevokedAt.IsZero() {
 		t.Errorf("GetBiscuitRevocation = %+v, %v; want the first revoke of %s", got, err, live.ID)
 	}
 	if _, err := store.GetBiscuitRevocation(f.Ctx, otherID); !errors.Is(err, limes.ErrNotFound) {

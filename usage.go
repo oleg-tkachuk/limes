@@ -64,7 +64,7 @@ type Meter[TX any] interface {
 	//
 	//   1. Each Biscuit copy's own budget (req.Subject.Copies), innermost
 	//      first → ErrBudgetExceeded.
-	//   2. The capability's own ceiling (req.Subject.MaxBudget) →
+	//   2. The capability's own ceiling (req.Subject.MaxBudgetAmount) →
 	//      ErrBudgetExceeded.
 	//   3. Each ancestor's ceiling → ErrBudgetExceeded.
 	//   4. The tenant aggregate ceiling → ErrTenantBudgetExceeded.
@@ -91,12 +91,13 @@ type Meter[TX any] interface {
 
 	// Refund returns spend from one recorded charge to every counter that
 	// charge debited (capability, ancestors, tenant aggregate), and records
-	// the refund against the charge. req.Amount = 0 refunds whatever
+	// the refund against the charge. req.Remaining refunds whatever
 	// remains, which makes a full refund idempotent; a partial refund that
 	// would take the total refunded past the charge returns
 	// ErrRefundExceedsCharge and changes nothing. An unknown charge ID
-	// returns ErrChargeNotFound. The receipt carries the amount actually
-	// refunded.
+	// returns ErrChargeNotFound, and a request naming neither an Amount nor
+	// Remaining, or both, ErrInvalidRequest. The receipt carries the amount
+	// actually refunded.
 	//
 	// A charge counted in a tenant accounting period that has since been
 	// closed (SetTenantBudget with ResetSpend) is refunded to the
@@ -251,7 +252,7 @@ type ChargeRequest struct {
 	Amount Nanos
 	// Op and Actor are stamped on the ledger row for attribution only;
 	// both may be empty and neither affects enforcement.
-	Op    string
+	Op    Op
 	Actor string
 	// ExternalRef names the cost in the consumer's own records — the id of
 	// the call or the event that reported it — and makes the charge
@@ -264,13 +265,13 @@ type ChargeRequest struct {
 
 // ChargeRecord is one charge as the ledger holds it.
 type ChargeRecord struct {
-	ChargeID     uuid.UUID
+	ID           uuid.UUID
 	CapabilityID uuid.UUID
-	// Amount is what the charge took; Refunded is what has been returned
+	// Amount is what the charge took; RefundedAmount is what has been returned
 	// from it since.
-	Amount   Nanos
-	Refunded Nanos
-	UnitCode string
+	Amount         Nanos
+	RefundedAmount Nanos
+	UnitCode       string
 	// ExternalRef is the charge's ChargeRequest.ExternalRef; empty for none.
 	ExternalRef string
 	// Overrun reports that the charge crossed a ceiling (OverrunRecord).
@@ -302,9 +303,9 @@ const (
 type ChargeReceipt struct {
 	// ChargeID identifies the ledger row; pass it to Meter.Refund.
 	ChargeID uuid.UUID
-	// Spent is the capability's spend as this call returns (its subtree's,
+	// SpentAmount is the capability's spend as this call returns (its subtree's,
 	// when it has delegated children).
-	Spent Nanos
+	SpentAmount Nanos
 	// Replayed reports that the charge was already in the ledger — the same
 	// ExternalRef, or a reservation already settled — so this call moved
 	// nothing and ChargeID names the earlier charge.
@@ -324,9 +325,9 @@ type ChargeReceipt struct {
 type RefundReceipt struct {
 	// ChargeID is the charge refunded from.
 	ChargeID uuid.UUID
-	// Refunded is the amount this call returned; zero when nothing was
+	// RefundedAmount is the amount this call returned; zero when nothing was
 	// left to refund.
-	Refunded Nanos
+	RefundedAmount Nanos
 	// TenantID and UnitCode are the charge's.
 	TenantID uuid.UUID
 	UnitCode string
@@ -349,7 +350,7 @@ type ReserveRequest struct {
 	// 0 = DefaultReservationTTL; negative is ErrInvalidRequest.
 	TTL time.Duration
 	// Op and Actor are carried onto the charge Settle records.
-	Op    string
+	Op    Op
 	Actor string
 }
 
@@ -363,7 +364,7 @@ type Reservation struct {
 	Amount   Nanos
 	UnitCode string
 	// Op and Actor are what Settle will stamp on the charge.
-	Op    string
+	Op    Op
 	Actor string
 	// Copies are the Biscuit copies the hold is also on, innermost first,
 	// with the budget each is held against; a hold counts no requests, so
@@ -385,11 +386,30 @@ type SettleRequest struct {
 	Overrun OverrunPolicy
 }
 
-// RefundRequest is the input to Meter.Refund.
+// RefundRequest is the input to Meter.Refund. It names either an Amount or
+// Remaining, never both and never neither.
 type RefundRequest struct {
 	ChargeID uuid.UUID
-	// Amount to refund; 0 = everything not yet refunded from this charge.
+	// Amount to refund, above zero and within MaxNanos (Nanos.Validate).
 	Amount Nanos
+	// Remaining refunds whatever of the charge is not yet refunded, which
+	// makes a full refund idempotent: once nothing remains, it returns
+	// nothing.
+	Remaining bool
+}
+
+// Validate refuses a request that names no amount, or both an amount and
+// Remaining.
+func (r RefundRequest) Validate() error {
+	switch {
+	case r.Remaining && r.Amount != 0:
+		return invalidRequest("refund: Amount %v and Remaining both set", r.Amount)
+	case r.Remaining:
+		return nil
+	case r.Amount == 0:
+		return invalidRequest("refund: neither an Amount nor Remaining")
+	}
+	return r.Amount.Validate()
 }
 
 // TenantBudget is the snapshot view of the tenant aggregate cap. Amounts are
@@ -409,6 +429,19 @@ type TenantBudget struct {
 	// means no ceiling has ever been set — the row, if there is one, holds
 	// only what Charge and Reserve counted.
 	ResourceVersion int64
+}
+
+// wholePct is a whole, in percent.
+const wholePct = 100
+
+// Utilization is how much of the ceiling is spent, in percent, clamped to
+// 0..100: a tenant past its ceiling is at 100. limited is false for a tenant
+// with no ceiling, which has no utilization to report; pct is then 0.
+func (b TenantBudget) Utilization() (pct float64, limited bool) {
+	if b.MaxBudgetAmount <= 0 {
+		return 0, false
+	}
+	return min(max(float64(b.SpentAmount)/float64(b.MaxBudgetAmount)*wholePct, 0), wholePct), true
 }
 
 // SetTenantBudgetRequest is the input for UsageStore.SetTenantBudget.
@@ -440,16 +473,15 @@ type TenantBudgetSummary struct {
 	TenantID    uuid.UUID
 	Slug        string
 	DisplayName string
-	Budget      TenantBudget
-	// UtilisationPct = spent / max × 100, clamped to [0, 100]. 0
-	// when MaxBudgetAmount == 0 (unlimited/metering-only).
-	UtilisationPct float64
+	// Budget is the tenant's ceiling and counters; Budget.Utilization reads
+	// how much of the ceiling is spent.
+	Budget TenantBudget
 }
 
 // ListTenantBudgetsRequest is the input shape for
 // UsageStore.ListTenantBudgets.
 type ListTenantBudgetsRequest struct {
-	// ThresholdPct keeps only tenants at or past this utilisation, 0..100.
+	// ThresholdPct keeps only tenants at or past this utilization, 0..100.
 	ThresholdPct float64
 	// UnlimitedOnly keeps only tenants with no ceiling.
 	UnlimitedOnly bool
@@ -461,8 +493,8 @@ type ListTenantBudgetsRequest struct {
 	Cursor string
 }
 
-// maxThresholdPct is the highest utilisation a threshold can name.
-const maxThresholdPct = 100
+// maxThresholdPct is the highest utilization a threshold can name.
+const maxThresholdPct = wholePct
 
 // Validate refuses a request no page can answer: a negative page size, or a
 // threshold outside 0..100.

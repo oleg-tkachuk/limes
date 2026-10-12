@@ -16,14 +16,14 @@ func TestMeterSubjectCarriesTheVerifiedCeilings(t *testing.T) {
 		ID:      uuid.New(),
 		Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
 		Caveats: Caveats{MaxRequests: requests, MaxBudgetAmount: budget},
-		Copies:  []CopyCeiling{{RevocationID: []byte{1}, MaxRequests: 1, MaxBudget: budget}},
+		Copies:  []CopyCeiling{{RevocationID: []byte{1}, MaxRequests: 1, MaxBudgetAmount: budget}},
 	}
 	s := asVerified(c).MeterSubject()
 	if s.CapabilityID() != c.ID || s.TenantID() != c.Subject.TenantID {
 		t.Errorf("subject names %s of %s, want %s of %s", s.CapabilityID(), s.TenantID(), c.ID, c.Subject.TenantID)
 	}
-	if s.MaxRequests() != requests || s.MaxBudget() != budget {
-		t.Errorf("ceilings = %d requests, %v; want %d, %v", s.MaxRequests(), s.MaxBudget(), requests, budget)
+	if s.MaxRequests() != requests || s.MaxBudgetAmount() != budget {
+		t.Errorf("ceilings = %d requests, %v; want %d, %v", s.MaxRequests(), s.MaxBudgetAmount(), requests, budget)
 	}
 	if s.UnitCode() != DefaultUnitCode {
 		t.Errorf("unit of a capability naming none = %q, want %q", s.UnitCode(), DefaultUnitCode)
@@ -45,14 +45,14 @@ func TestRecordMeterSubjectCarriesTheStoredCeilings(t *testing.T) {
 			Caveats: Caveats{MaxRequests: requests, MaxBudgetAmount: budget, UnitCode: unit},
 			Copies:  []CopyCeiling{{RevocationID: []byte{1}, MaxRequests: 1}},
 		},
-		Revocation: &Revocation{Reason: "done"},
+		Revocation: &Revocation{Note: "done"},
 	}
 	s := rec.MeterSubject()
 	if s.CapabilityID() != rec.Capability.ID || s.TenantID() != rec.Capability.Subject.TenantID {
 		t.Errorf("subject names %s of %s, want the record's", s.CapabilityID(), s.TenantID())
 	}
-	if s.MaxRequests() != requests || s.MaxBudget() != budget || s.UnitCode() != unit {
-		t.Errorf("subject = %d requests, %v %s; want %d, %v %s", s.MaxRequests(), s.MaxBudget(), s.UnitCode(), requests, budget, unit)
+	if s.MaxRequests() != requests || s.MaxBudgetAmount() != budget || s.UnitCode() != unit {
+		t.Errorf("subject = %d requests, %v %s; want %d, %v %s", s.MaxRequests(), s.MaxBudgetAmount(), s.UnitCode(), requests, budget, unit)
 	}
 	if len(s.Copies()) != 0 {
 		t.Errorf("copies = %+v, want none from a stored record", s.Copies())

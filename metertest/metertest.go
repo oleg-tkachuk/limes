@@ -106,6 +106,9 @@ const (
 	// unit is the currency every amount is in; otherUnit is one it is not.
 	unit      = limes.DefaultUnitCode
 	otherUnit = "EUR"
+	// noUtilization stands for a tenant with no ceiling where a
+	// percentage is compared; no percentage equals it.
+	noUtilization = -1
 	// concurrentDeliveries is how many times one cost arrives at once.
 	concurrentDeliveries = 20
 )
@@ -153,7 +156,7 @@ func newSubject(spec subjectSpec) limes.MeterSubject {
 	}
 	return link.NewMeterSubject(link.MeterSubjectFields{
 		CapabilityID: spec.capID, TenantID: spec.tenant, MaxRequests: spec.maxRequests,
-		MaxBudget: int64(spec.maxBudget), UnitCode: spec.unit, Copies: spec.copies,
+		MaxBudgetAmount: int64(spec.maxBudget), UnitCode: spec.unit, Copies: spec.copies,
 	}).(limes.MeterSubject)
 }
 
@@ -166,7 +169,7 @@ func (f fixture[TX]) childSubject() limes.MeterSubject {
 // unit, unless the request's subject names another capability or ceiling.
 func (f fixture[TX]) charge(req limes.ChargeRequest, onCharged func(context.Context, TX) error) (limes.ChargeReceipt, error) {
 	s := req.Subject
-	spec := subjectSpec{capID: s.CapabilityID(), tenant: f.Tenant, maxRequests: s.MaxRequests(), maxBudget: s.MaxBudget(), copies: s.Copies()}
+	spec := subjectSpec{capID: s.CapabilityID(), tenant: f.Tenant, maxRequests: s.MaxRequests(), maxBudget: s.MaxBudgetAmount(), copies: s.Copies()}
 	if spec.capID == uuid.Nil {
 		spec.capID = f.child
 	}
@@ -321,7 +324,7 @@ func checkExternalRefChargesOnce[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatalf("first charge = %+v, %v", first, err)
 	}
 	again, err := f.charge(limes.ChargeRequest{Amount: 2 * one, ExternalRef: "call-1"}, onCharged)
-	if err != nil || !again.Replayed || again.ChargeID != first.ChargeID || again.Spent != 2*one {
+	if err != nil || !again.Replayed || again.ChargeID != first.ChargeID || again.SpentAmount != 2*one {
 		t.Fatalf("repeated charge = %+v, %v; want a replay of %s at spend 2", again, err, first.ChargeID)
 	}
 	// The same name for a different cost is the caller's bug; replaying the
@@ -389,8 +392,8 @@ func checkChargeByRef[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatal(err)
 	}
 	got, err := f.Usage.ChargeByRef(f.Ctx, f.child, "call-1")
-	if err != nil || got.ChargeID != r.ChargeID || got.CapabilityID != f.child || got.Amount != 3*one ||
-		got.Refunded != one || got.ExternalRef != "call-1" || got.UnitCode != unit || got.Overrun {
+	if err != nil || got.ID != r.ChargeID || got.CapabilityID != f.child || got.Amount != 3*one ||
+		got.RefundedAmount != one || got.ExternalRef != "call-1" || got.UnitCode != unit || got.Overrun {
 		t.Fatalf("ChargeByRef = %+v, %v; want charge %s of 3 with 1 refunded", got, err, r.ChargeID)
 	}
 	if byID, err := f.Usage.GetCharge(f.Ctx, r.ChargeID); err != nil || byID != got {
@@ -442,7 +445,7 @@ func checkOverrunRecord[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatal("a rejecting charge past every ceiling was accepted")
 	}
 	r, err := f.charge(limes.ChargeRequest{Amount: amount, Overrun: limes.OverrunRecord}, nil)
-	if err != nil || !r.Overrun || r.Replayed || r.Spent != amount {
+	if err != nil || !r.Overrun || r.Replayed || r.SpentAmount != amount {
 		t.Fatalf("recording charge = %+v, %v; want %v spent, overrun", r, err, amount)
 	}
 	if got := f.spent(t, f.root); got != amount {
@@ -482,14 +485,14 @@ func checkSettle[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatalf("rejecting settle past the ceiling: err = %v, want ErrBudgetExceeded", err)
 	}
 	r, err := settle(24*one, limes.OverrunRecord)
-	if err != nil || !r.Overrun || r.Spent != 24*one {
+	if err != nil || !r.Overrun || r.SpentAmount != 24*one {
 		t.Fatalf("recording settle = %+v, %v; want 24 spent, overrun", r, err)
 	}
 	if u, err := f.Usage.GetUsage(f.Ctx, f.root); err != nil || u.ReservedAmount != 0 {
 		t.Errorf("root after settling = %+v, %v; want nothing held", u, err)
 	}
 	again, err := settle(one, limes.OverrunReject)
-	if err != nil || !again.Replayed || !again.Overrun || again.ChargeID != r.ChargeID || again.Spent != 24*one {
+	if err != nil || !again.Replayed || !again.Overrun || again.ChargeID != r.ChargeID || again.SpentAmount != 24*one {
 		t.Errorf("settling again = %+v, %v; want a replay of %s", again, err, r.ChargeID)
 	}
 	if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{ReservationID: res.ID}); err != nil {
@@ -572,7 +575,7 @@ func checkRefundAcrossReset[TX any](t *testing.T, f fixture[TX]) {
 	if _, err := f.charge(limes.ChargeRequest{Amount: amount}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if r, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: before.ChargeID}); err != nil || r.Refunded != amount {
+	if r, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: before.ChargeID, Remaining: true}); err != nil || r.RefundedAmount != amount {
 		t.Fatalf("refund of the earlier period's charge = %+v, %v; want %v", r, err, amount)
 	}
 	if got := f.tenantSpent(t); got != amount {
@@ -705,7 +708,7 @@ func sameReservation(got, want limes.Reservation) string {
 		return "copies differ"
 	}
 	for i := range got.Copies {
-		if !bytes.Equal(got.Copies[i].RevocationID, want.Copies[i].RevocationID) || got.Copies[i].MaxBudget != want.Copies[i].MaxBudget || got.Copies[i].MaxRequests != 0 {
+		if !bytes.Equal(got.Copies[i].RevocationID, want.Copies[i].RevocationID) || got.Copies[i].MaxBudgetAmount != want.Copies[i].MaxBudgetAmount || got.Copies[i].MaxRequests != 0 {
 			return "copies differ"
 		}
 	}
@@ -722,7 +725,7 @@ func checkReservations[TX any](t *testing.T, f fixture[TX]) {
 		// copyLimit holds every reservation below, through the one copy.
 		copyLimit = 10
 	)
-	copies := []limes.CopyCeiling{{RevocationID: []byte("copy-1"), MaxRequests: copyLimit, MaxBudget: copyLimit * one}}
+	copies := []limes.CopyCeiling{{RevocationID: []byte("copy-1"), MaxRequests: copyLimit, MaxBudgetAmount: copyLimit * one}}
 	reserve := func(capID uuid.UUID, ceiling limes.Nanos, ttl time.Duration) limes.Reservation {
 		t.Helper()
 		r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
@@ -789,7 +792,7 @@ func checkReservations[TX any](t *testing.T, f fixture[TX]) {
 
 func checkCopyOverrun[TX any](t *testing.T, f fixture[TX]) {
 	copyID := []byte("copy-1")
-	copies := []limes.CopyCeiling{{RevocationID: copyID, MaxBudget: one}}
+	copies := []limes.CopyCeiling{{RevocationID: copyID, MaxBudgetAmount: one}}
 	if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{copies: copies}), Amount: 2 * one}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Fatalf("rejecting charge past the copy's budget: err = %v, want ErrBudgetExceeded", err)
 	}
@@ -981,22 +984,30 @@ func checkRefund[TX any](t *testing.T, f fixture[TX]) {
 	refund := func(amount limes.Nanos) (limes.RefundReceipt, error) {
 		return f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: r.ChargeID, Amount: amount})
 	}
-	if got, err := refund(one); err != nil || got.Refunded != one || got.ChargeID != r.ChargeID ||
+	if got, err := refund(one); err != nil || got.RefundedAmount != one || got.ChargeID != r.ChargeID ||
 		got.TenantID != f.Tenant || got.UnitCode != unit {
 		t.Fatalf("partial refund = %+v, %v; want 1 of charge %s, tenant %s in %q", got, err, r.ChargeID, f.Tenant, unit)
 	}
 	if _, err := refund(3 * one); !errors.Is(err, limes.ErrRefundExceedsCharge) {
 		t.Errorf("refunding past what is left: err = %v, want ErrRefundExceedsCharge", err)
 	}
+	for name, req := range map[string]limes.RefundRequest{
+		"neither an amount nor Remaining": {ChargeID: r.ChargeID},
+		"an amount and Remaining":         {ChargeID: r.ChargeID, Amount: one, Remaining: true},
+	} {
+		if _, err := f.Usage.Refund(f.Ctx, req); !errors.Is(err, limes.ErrInvalidRequest) {
+			t.Errorf("refund of %s: err = %v, want ErrInvalidRequest", name, err)
+		}
+	}
 	for range 2 { // the rest, then nothing: a full refund is idempotent
-		if _, err := refund(0); err != nil {
+		if _, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: r.ChargeID, Remaining: true}); err != nil {
 			t.Fatalf("full refund: %v", err)
 		}
 	}
 	if f.spent(t, f.child) != 0 || f.spent(t, f.root) != 0 || f.tenantSpent(t) != 0 {
 		t.Error("a full refund left spend on a counter the charge moved")
 	}
-	if _, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: uuid.New()}); !errors.Is(err, limes.ErrChargeNotFound) {
+	if _, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: uuid.New(), Remaining: true}); !errors.Is(err, limes.ErrChargeNotFound) {
 		t.Errorf("refund of an unknown charge: err = %v, want ErrChargeNotFound", err)
 	}
 }
@@ -1097,14 +1108,16 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatalf("paging skipped a tenant: %v", all)
 	}
 	for i := 1; i < len(order); i++ {
-		if order[i].UtilisationPct > order[i-1].UtilisationPct {
-			t.Errorf("row %d at %v%% follows one at %v%%; want most at risk first", i, order[i].UtilisationPct, order[i-1].UtilisationPct)
+		cur, _ := order[i].Budget.Utilization()
+		prev, _ := order[i-1].Budget.Utilization()
+		if cur > prev {
+			t.Errorf("row %d at %v%% follows one at %v%%; want most at risk first", i, cur, prev)
 		}
 	}
 	const half = 50
 	riskyPage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{ThresholdPct: half})
 	risky := riskyPage.Items
-	if err != nil || len(risky) != 1 || risky[0].TenantID != f.Tenant || risky[0].UtilisationPct != half {
+	if err != nil || len(risky) != 1 || risky[0].TenantID != f.Tenant || riskyPct(risky[0]) != half {
 		t.Errorf("tenants at 50%% or more = %+v, %v; want only %s at 50%%", risky, err, f.Tenant)
 	}
 	unlPage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{UnlimitedOnly: true})
@@ -1192,4 +1205,14 @@ func checkPurgeOrphans[TX any](t *testing.T, f fixture[TX]) {
 	if u, err := f.Usage.GetUsage(f.Ctx, f.root); err != nil || u.ReservedAmount != 0 {
 		t.Errorf("the root still holds %v for its removed child, %v; want 0", u.ReservedAmount, err)
 	}
+}
+
+// riskyPct is a row's utilization, or -1 for a tenant with no ceiling, which
+// no threshold should have listed.
+func riskyPct(s limes.TenantBudgetSummary) float64 {
+	pct, limited := s.Budget.Utilization()
+	if !limited {
+		return noUtilization
+	}
+	return pct
 }

@@ -14,7 +14,7 @@ var DecodeToken func(token string) (any, error)
 type MeterSubjectFields struct {
 	CapabilityID, TenantID uuid.UUID
 	MaxRequests            int64
-	MaxBudget              int64
+	MaxBudgetAmount        int64
 	UnitCode               string
 	// Copies is a []limes.CopyCeiling.
 	Copies any

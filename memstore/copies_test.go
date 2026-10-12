@@ -17,7 +17,7 @@ import (
 const unit limes.Nanos = limes.NanosPerUnit
 
 func copyCeiling(id string, requests int64, budget limes.Nanos) limes.CopyCeiling {
-	return limes.CopyCeiling{RevocationID: []byte(id), MaxRequests: requests, MaxBudget: budget}
+	return limes.CopyCeiling{RevocationID: []byte(id), MaxRequests: requests, MaxBudgetAmount: budget}
 }
 
 func newCopyFixture(t *testing.T) (context.Context, *UsageStore[struct{}], uuid.UUID, uuid.UUID) {
@@ -98,7 +98,7 @@ func TestCopyBudgetChargeAndRefund(t *testing.T) {
 		t.Fatalf("a refused charge moved the capability to %v", got.SpentAmount)
 	}
 	// Refund returns to the copy without being told about it.
-	if _, err := u.Refund(ctx, limes.RefundRequest{ChargeID: r.ChargeID}); err != nil {
+	if _, err := u.Refund(ctx, limes.RefundRequest{ChargeID: r.ChargeID, Remaining: true}); err != nil {
 		t.Fatal(err)
 	}
 	if got := u.copies["copy"].spent; got != 0 {

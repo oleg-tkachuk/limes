@@ -34,7 +34,7 @@ func TestRevokeIsIdempotent(t *testing.T) {
 	}
 
 	for i := range 3 {
-		if err := s.Revoke(ctx, limes.RevokeRequest{ID: id, Reason: "leak", Actor: "op"}); err != nil {
+		if err := s.Revoke(ctx, limes.RevokeRequest{CapabilityID: id, Note: "leak", Actor: "op"}); err != nil {
 			t.Fatalf("Revoke #%d: %v", i+1, err)
 		}
 	}
@@ -62,7 +62,7 @@ func TestRevokeCascadesToDescendants(t *testing.T) {
 		}
 	}
 
-	if err := s.Revoke(ctx, limes.RevokeRequest{ID: root, CascadeChildren: true}); err != nil {
+	if err := s.Revoke(ctx, limes.RevokeRequest{CapabilityID: root, CascadeChildren: true}); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
 	for name, id := range map[string]uuid.UUID{"root": root, "child": child, "grandchild": grandchild} {
@@ -87,7 +87,7 @@ func TestRevokingAParentRevokesItsChildrenWithoutCascade(t *testing.T) {
 	_ = s.Insert(ctx, limes.InsertRequest{Capability: mkCap(child, root, tenant, "child"), IssuedBy: limes.Principal{Subject: "test-operator"}})
 	_ = s.Insert(ctx, limes.InsertRequest{Capability: mkCap(grandchild, child, tenant, "grandchild"), IssuedBy: limes.Principal{Subject: "test-operator"}})
 
-	if err := s.Revoke(ctx, limes.RevokeRequest{ID: child}); err != nil {
+	if err := s.Revoke(ctx, limes.RevokeRequest{CapabilityID: child}); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
 	if r, _ := s.IsRevoked(ctx, root); r {
@@ -174,19 +174,19 @@ func TestRefundReturnsSpendToEveryCounterOnce(t *testing.T) {
 	// A partial refund, then a refund of "the rest": the second must return
 	// exactly what the first left, and a third must return nothing — a
 	// retried full refund is a no-op, not a second credit.
-	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("2")}); err != nil || got.Refunded != 2*unit {
+	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("2")}); err != nil || got.RefundedAmount != 2*unit {
 		t.Fatalf("partial refund = %v, %v; want 2, nil", got, err)
 	}
-	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID}); err != nil || got.Refunded != 3*unit {
+	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Remaining: true}); err != nil || got.RefundedAmount != 3*unit {
 		t.Fatalf("remainder refund = %v, %v; want 3, nil", got, err)
 	}
-	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID}); err != nil || got.Refunded != 0 {
+	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Remaining: true}); err != nil || got.RefundedAmount != 0 {
 		t.Fatalf("repeated full refund = %v, %v; want 0, nil", got, err)
 	}
 	if _, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("1")}); !errors.Is(err, limes.ErrRefundExceedsCharge) {
 		t.Fatalf("over-refund err = %v, want ErrRefundExceedsCharge", err)
 	}
-	if _, err := u.Refund(ctx, limes.RefundRequest{ChargeID: uuid.New()}); !errors.Is(err, limes.ErrChargeNotFound) {
+	if _, err := u.Refund(ctx, limes.RefundRequest{ChargeID: uuid.New(), Remaining: true}); !errors.Is(err, limes.ErrChargeNotFound) {
 		t.Fatalf("unknown charge err = %v, want ErrChargeNotFound", err)
 	}
 

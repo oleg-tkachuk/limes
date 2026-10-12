@@ -90,7 +90,7 @@ func (c Caveats) Validate() error {
 		return fmt.Errorf("%w: max_budget_amount %s is outside 0..%s",
 			ErrInvalidCaveats, c.MaxBudgetAmount, MaxNanos)
 	}
-	if _, err := NormaliseUnitCode(c.UnitCode); err != nil {
+	if _, err := NormalizeUnitCode(c.UnitCode); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidCaveats, err)
 	}
 	for _, cidr := range c.SourceIPCIDR {
