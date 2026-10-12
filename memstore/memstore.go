@@ -379,7 +379,7 @@ func (s *Store[TX]) Purge(_ context.Context, req limes.PurgeRequest) (limes.Purg
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cutoff := s.nowFn().Add(-req.ExpiredFor)
+	cutoff := s.nowFn().Add(-req.Retention())
 	var due []limes.Capability
 	for _, c := range s.caps {
 		if !c.ExpiresAt.IsZero() && c.ExpiresAt.Before(cutoff) {

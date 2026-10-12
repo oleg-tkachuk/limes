@@ -574,7 +574,10 @@ again while a batch comes back full (`Limit`, `DefaultPurgeLimit` unless
 set): it removes the capabilities expired for longer than the retention, with
 their revocation entries, then `UsageHousekeeping.PurgeOrphans` releases what
 the meter still holds for them. A child never outlives its parent, so no
-ancestor of a live capability is ever purged.
+ancestor of a live capability is ever purged. The retention is at least
+`MinPurgeRetention` (five minutes, the zero value's): a verifier accepts a
+token for up to its `Leeway` past expiry, never more than `MaxLeeway`, and a
+revocation purged inside that window would let the revoked token through.
 
 ## Bring your own storage
 

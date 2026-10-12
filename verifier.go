@@ -41,6 +41,11 @@ const DefaultMaxTokenBytes = 16 << 10
 // DefaultLeeway is VerifierConfig.Leeway when it is zero.
 const DefaultLeeway = 30 * time.Second
 
+// MaxLeeway is the widest VerifierConfig.Leeway a verifier takes: a token is
+// accepted for at most this long past its expiry, which is what lets a store
+// purge it safely after MinPurgeRetention.
+const MaxLeeway = 5 * time.Minute
+
 // VerifierConfig wires the verifier. Keys, Revocations and TrustedIssuers
 // are required.
 type VerifierConfig struct {
@@ -69,7 +74,8 @@ type VerifierConfig struct {
 	Now func() time.Time
 
 	// Leeway widens the nbf / exp window to absorb clock skew between
-	// issuer and verifier. Zero: DefaultLeeway; negative is refused.
+	// issuer and verifier. Zero: DefaultLeeway; negative or past MaxLeeway
+	// is refused.
 	Leeway time.Duration
 
 	// MaxTokenBytes rejects longer tokens before decoding them. Default
@@ -165,8 +171,8 @@ func NewStandardVerifier(cfg VerifierConfig) (*StandardVerifier, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	if cfg.Leeway < 0 {
-		return nil, fmt.Errorf("limes: VerifierConfig.Leeway %s is negative", cfg.Leeway)
+	if cfg.Leeway < 0 || cfg.Leeway > MaxLeeway {
+		return nil, fmt.Errorf("limes: VerifierConfig.Leeway %s is outside 0..%s", cfg.Leeway, MaxLeeway)
 	}
 	if cfg.MaxTokenBytes < 0 {
 		return nil, fmt.Errorf("limes: VerifierConfig.MaxTokenBytes %d is negative", cfg.MaxTokenBytes)

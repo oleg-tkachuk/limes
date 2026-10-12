@@ -79,12 +79,15 @@ type Store interface {
 	// picked.
 	Revoke(ctx context.Context, req RevokeRequest) error
 
-	// Purge removes the capabilities expired for at least req.ExpiredFor —
-	// their records, their revocation entries and those of their Biscuit
-	// copies — at most req.Limit of them, and reports how many records it
-	// removed. A housekeeping worker calls it until a batch comes back short
-	// of the limit. ExpiredFor is the retention: how long an expired
-	// capability stays on record for audit.
+	// Purge removes the capabilities expired for longer than the request's
+	// retention (PurgeRequest.Retention) — their records, their revocation
+	// entries and those of their Biscuit copies — at most req.Limit of
+	// them, and reports how many records it removed. A housekeeping worker
+	// calls it until a batch comes back short of the limit. The retention
+	// is how long an expired capability stays on record for audit, and
+	// never less than MinPurgeRetention: a verifier still accepts a token
+	// for up to its Leeway past expiry, and a revocation purged before
+	// that would let a revoked token through again.
 	//
 	// Purging by expiry never removes the ancestor of a capability that is
 	// still live: a child expires no later than its parent (Delegate cuts it
@@ -171,25 +174,41 @@ type RevokeRequest struct {
 // names no limit.
 const DefaultPurgeLimit = 1_000
 
+// MinPurgeRetention is the shortest retention Purge takes: no verifier
+// accepts a token longer than MaxLeeway past its expiry, so a capability
+// expired for longer can lose its revocation entry unseen.
+const MinPurgeRetention = MaxLeeway
+
 // PurgeRequest is one batch of Store.Purge.
 type PurgeRequest struct {
 	// ExpiredFor is how long a capability must have been expired to go.
-	// Zero purges every expired capability; negative is refused.
+	// Zero: MinPurgeRetention; anything shorter, negative included, is
+	// refused.
 	ExpiredFor time.Duration
 	// Limit bounds the records removed. Zero: DefaultPurgeLimit; negative
 	// is refused.
 	Limit int
 }
 
-// Validate refuses a negative retention or limit.
+// Validate refuses a retention shorter than MinPurgeRetention, other than
+// zero, and a negative limit.
 func (r PurgeRequest) Validate() error {
 	switch {
-	case r.ExpiredFor < 0:
-		return invalidRequest("purge: retention %s is negative", r.ExpiredFor)
+	case r.ExpiredFor != 0 && r.ExpiredFor < MinPurgeRetention:
+		return invalidRequest("purge: retention %s is shorter than %s", r.ExpiredFor, MinPurgeRetention)
 	case r.Limit < 0:
 		return invalidRequest("purge: limit %d is negative", r.Limit)
 	}
 	return nil
+}
+
+// Retention is how long a capability must have been expired to go: ExpiredFor,
+// or MinPurgeRetention when it is zero.
+func (r PurgeRequest) Retention() time.Duration {
+	if r.ExpiredFor == 0 {
+		return MinPurgeRetention
+	}
+	return r.ExpiredFor
 }
 
 // PurgeResult is what one Purge removed.
