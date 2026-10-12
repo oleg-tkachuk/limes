@@ -51,7 +51,7 @@ func FuzzResponseFreshness(f *testing.F) {
 		h.Set(httpx.HeaderCacheControl, cacheControl)
 		h.Set(httpx.HeaderAge, age)
 		freshness, ok := responseFreshness(h)
-		if freshness < 0 || freshness > maxDeltaSeconds*time.Second || !ok && freshness != 0 {
+		if freshness < 0 || freshness > time.Duration(maxDeltaSeconds)*time.Second || !ok && freshness != 0 {
 			t.Fatalf("Cache-Control %q, Age %q read as %v, %v", cacheControl, age, freshness, ok)
 		}
 	})

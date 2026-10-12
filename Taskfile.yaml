@@ -34,11 +34,12 @@ tasks:
       - task --list
 
   verify-all:
-    desc: "gofmt + go mod tidy/verify + golangci-lint + the unit suite + govulncheck + actionlint + the workflow scripts + the release rules and notes — what CI runs"
+    desc: "gofmt + go mod tidy/verify + golangci-lint + a 32-bit build + the unit suite + govulncheck + actionlint + the workflow scripts + the release rules and notes — what CI runs"
     cmds:
       - task: fmt:check
       - task: verify:tidy
       - task: lint
+      - task: verify:32-bit
       - task: test
       - task: vuln
       - task: verify:workflows
@@ -59,6 +60,14 @@ tasks:
         dir: tools
       - cmd: go mod tidy -diff
         dir: tools/yq
+
+  verify:32-bit:
+    desc: "go vet, tests included, for a 32-bit GOARCH — where an untyped constant past 2^31 stops the build"
+    env:
+      GOOS: linux
+      GOARCH: "386"
+    cmds:
+      - go vet ./...
 
   verify:workflows:
     desc: "actionlint over the workflows"

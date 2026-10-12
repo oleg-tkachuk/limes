@@ -19,7 +19,7 @@ import (
 // §4.2.3), zero for no-cache or no-store (§5.2.2.4, §5.2.2.5). ok is false
 // when the response says nothing, and the caller's default applies.
 func responseFreshness(h http.Header) (freshness time.Duration, ok bool) {
-	maxAge, found := -1, false
+	maxAge, found := int64(-1), false
 	for _, line := range h.Values(httpx.HeaderCacheControl) {
 		for directive := range strings.SplitSeq(line, ",") {
 			name, value, _ := strings.Cut(strings.TrimSpace(directive), "=")
@@ -50,16 +50,16 @@ func responseFreshness(h http.Header) (freshness time.Duration, ok bool) {
 }
 
 // maxDeltaSeconds is what RFC 9111 §1.2.2 reads a delta-seconds too large to
-// hold as: 2^31.
-const maxDeltaSeconds = 1 << 31
+// hold as: 2^31. Typed, so it means the same on a 32-bit int.
+const maxDeltaSeconds int64 = 1 << 31
 
 // deltaSeconds reads an RFC 9111 §1.2.2 delta-seconds: digits only, and any
 // value past maxDeltaSeconds read as it.
-func deltaSeconds(s string) (int, bool) {
+func deltaSeconds(s string) (int64, bool) {
 	if s == "" || strings.Trim(s, "0123456789") != "" {
 		return 0, false
 	}
-	n, err := strconv.Atoi(s)
+	n, err := strconv.ParseInt(s, 10, 64)
 	if err != nil || n > maxDeltaSeconds {
 		return maxDeltaSeconds, true // only digits, so too large
 	}
