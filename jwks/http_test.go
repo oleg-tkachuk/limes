@@ -32,7 +32,7 @@ func TestResponseFreshness(t *testing.T) {
 		// RFC 9111 §4.2.1: the first max-age stands.
 		{"max-age=10, max-age=3600", "", 10 * time.Second, true},
 		// §1.2.2: a delta-seconds too large to hold reads as 2^31.
-		{"max-age=99999999999999999999", "", maxDeltaSeconds * time.Second, true},
+		{"max-age=99999999999999999999", "", time.Duration(maxDeltaSeconds) * time.Second, true},
 		{"", "", 0, false},
 	}
 	for _, tc := range cases {
