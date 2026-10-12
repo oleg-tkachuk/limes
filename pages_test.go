@@ -23,8 +23,25 @@ type fakeLister struct {
 	reqs  []ListByPrincipalRequest
 }
 
+// errAskedPastPages is a fakeLister asked for more pages than a walk visiting
+// each cursor once could ask: the walk is looping.
+var errAskedPastPages = errors.New("fakeLister: asked for more pages than it serves")
+
+// ask records cursor, and refuses it once a walk visiting each cursor once —
+// every page the fake serves, and one it does not — could not have asked it,
+// so a looping walk ends with an error instead of hanging the test.
+func (f *fakeLister) ask(cursor string) error {
+	f.asked = append(f.asked, cursor)
+	if len(f.asked) > len(f.pages)+1 {
+		return errAskedPastPages
+	}
+	return nil
+}
+
 func (f *fakeLister) ListByPrincipal(_ context.Context, req ListByPrincipalRequest) (Page[Capability], error) {
-	f.asked = append(f.asked, req.Cursor)
+	if err := f.ask(req.Cursor); err != nil {
+		return Page[Capability]{}, err
+	}
 	f.reqs = append(f.reqs, req)
 	p := f.pages[req.Cursor]
 	caps := make([]Capability, 0, len(p.ids))
@@ -35,7 +52,9 @@ func (f *fakeLister) ListByPrincipal(_ context.Context, req ListByPrincipalReque
 }
 
 func (f *fakeLister) ListTenantBudgets(_ context.Context, req ListTenantBudgetsRequest) (Page[TenantBudget], error) {
-	f.asked = append(f.asked, req.Cursor)
+	if err := f.ask(req.Cursor); err != nil {
+		return Page[TenantBudget]{}, err
+	}
 	p := f.pages[req.Cursor]
 	rows := make([]TenantBudget, 0, len(p.ids))
 	for _, id := range p.ids {
