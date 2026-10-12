@@ -388,3 +388,18 @@ func TestRemoteJWKSUnknownKidDuringAnOutageIsUnavailable(t *testing.T) {
 		t.Errorf("an unknown kid once the endpoint answers: err = %v, want ErrUnknownKID", err)
 	}
 }
+
+// A caller that waited for a fetch finds the fetch slot free once it has the
+// answer, so the refresh it may start next is not mistaken for one in flight.
+func TestRemoteJWKSFreesTheFetchBeforeAnswering(t *testing.T) {
+	const attempts = 200 // the old order lost the race in a fraction of them
+	for range attempts {
+		_, r, _, kid, _ := newRemoteFixture(t)
+		if _, err := r.PublicKey(context.Background(), kid); err != nil {
+			t.Fatal(err)
+		}
+		if held := len(r.fetching); held != 0 {
+			t.Fatalf("the fetch slot is still held after its caller was answered")
+		}
+	}
+}
