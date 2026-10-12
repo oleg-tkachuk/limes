@@ -140,7 +140,7 @@ type IssueRequest struct {
 	IssuedBy   Principal
 	Audience   []string
 	Caveats    Caveats
-	TTL        time.Duration // 0 → DefaultTTL
+	TTL        time.Duration // 0 → DefaultTTL; must reach the next whole second
 	NotBefore  time.Time     // zero → valid from issuance, no nbf claim
 	Generation int64         // 0 → DefaultGeneration
 	// ConfirmationJKT binds the capability to the key with this RFC 7638
@@ -222,6 +222,9 @@ func (i *Issuer) issue(ctx context.Context, req IssueRequest) (Capability, strin
 	if cap.Generation == 0 {
 		cap.Generation = DefaultGeneration
 	}
+	if err := checkLifetime(cap); err != nil {
+		return Capability{}, "", err
+	}
 	if err := setNotBefore(&cap, req.NotBefore); err != nil {
 		return Capability{}, "", err
 	}
@@ -248,6 +251,17 @@ func (i *Issuer) expiry(now time.Time, ttl time.Duration) (time.Time, error) {
 		ttl = i.defaultTTL
 	}
 	return now.Add(ttl).Truncate(tokenTimeResolution), nil
+}
+
+// checkLifetime refuses a capability that would expire no later than it is
+// issued: a TTL ending within the second leaves a token whose whole second
+// has already ended, valid only by leeway. Delegate needs no such check: a
+// parent's expiry is a whole second, and one already reached is refused.
+func checkLifetime(c Capability) error {
+	if !c.ExpiresAt.After(c.IssuedAt) {
+		return invalidRequest("the capability would expire at %s, no later than it is issued: a token's times are whole seconds", c.ExpiresAt.Format(time.RFC3339))
+	}
+	return nil
 }
 
 // tokenTimeResolution is what a token's times carry: JWT NumericDates are
