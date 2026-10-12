@@ -3,6 +3,7 @@ package limes
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"math"
@@ -150,5 +151,40 @@ func TestBiscuitRefusesAMalformedProof(t *testing.T) {
 				}
 			}()
 		})
+	}
+}
+
+// A chain stops at MaxBiscuitBlocks: Attenuate will not append past it, and
+// a verifier refuses a token that has, before looking any of its ids up.
+func TestBiscuitBlocksAreBounded(t *testing.T) {
+	_, v, _, _, token := biscuitFixture(t)
+	for i := range MaxBiscuitBlocks {
+		next, err := Attenuate(token, Attenuation{Ops: []Op{OpGet}})
+		if err != nil {
+			t.Fatalf("block %d of %d: %v", i+1, MaxBiscuitBlocks, err)
+		}
+		token = next
+	}
+	if _, err := v.Verify(context.Background(), VerifyRequest{Token: token, Audience: audienceData}); err != nil {
+		t.Fatalf("a token of MaxBiscuitBlocks blocks: %v", err)
+	}
+	if _, err := Attenuate(token, Attenuation{Ops: []Op{OpGet}}); !errors.Is(err, ErrInvalidRequest) {
+		t.Errorf("a block past MaxBiscuitBlocks: err = %v, want ErrInvalidRequest", err)
+	}
+	// One more block, appended as any holder could without Attenuate.
+	b, err := parseBiscuit(token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := b.Append(rand.Reader, b.CreateBlock().Build())
+	if err != nil {
+		t.Fatal(err)
+	}
+	over, err := serializeBiscuit(next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.Verify(context.Background(), VerifyRequest{Token: over, Audience: audienceData}); !errors.Is(err, ErrInvalidToken) {
+		t.Errorf("a token past MaxBiscuitBlocks: err = %v, want ErrInvalidToken", err)
 	}
 }

@@ -24,9 +24,13 @@ func TestParseAuthorization(t *testing.T) {
 			t.Errorf("ParseAuthorization(%q) = %q, %q, %v; want %q, %q", tc.header, scheme, token, err, tc.scheme, tc.token)
 		}
 	}
-	for _, bad := range []string{"Bearer", "Bearer ", "Bearer a b", "Bearer =abc", "Bearer a=b", "Bearer a\tb", "DPoP é"} {
-		if _, _, err := ParseAuthorization(bad); !errors.Is(err, ErrMalformedAuthorization) {
-			t.Errorf("ParseAuthorization(%q): err = %v, want ErrMalformedAuthorization", bad, err)
+	for bad, scheme := range map[string]AuthScheme{
+		"Bearer": AuthSchemeBearer, "Bearer ": AuthSchemeBearer, "Bearer a b": AuthSchemeBearer, "Bearer =abc": AuthSchemeBearer,
+		"Bearer a=b": AuthSchemeBearer, "Bearer a\tb": AuthSchemeBearer, "DPoP é": AuthSchemeDPoP, "dpop a b": AuthSchemeDPoP,
+	} {
+		// The scheme it recognised comes back, for the challenge to use.
+		if got, _, err := ParseAuthorization(bad); !errors.Is(err, ErrMalformedAuthorization) || got != scheme {
+			t.Errorf("ParseAuthorization(%q) = %q, %v; want %q and ErrMalformedAuthorization", bad, got, err, scheme)
 		}
 	}
 	// No header, or another scheme's: no credential of ours at all.

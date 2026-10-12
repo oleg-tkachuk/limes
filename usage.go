@@ -135,7 +135,10 @@ type Meter[TX any] interface {
 	// settled moves nothing, does not run onCharged, and returns the
 	// receipt of the charge that settled it, with Replayed set. An unknown,
 	// released or expired reservation returns ErrReservationNotFound, and so
-	// does the zero id, which names none — never a direct charge.
+	// does the zero id, which names none — never a direct charge. So does a
+	// reservation made by another capability, or under other Biscuit copies
+	// than req.Subject carries: a hold is settled by the copy that made it,
+	// so a copy cannot settle a sibling's hold past its own limits.
 	Settle(ctx context.Context, req SettleRequest, onCharged func(ctx context.Context, tx TX) error) (ChargeReceipt, error)
 
 	// Release ends a reservation without charging. Idempotent: releasing

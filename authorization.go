@@ -48,7 +48,9 @@ var ErrMalformedAuthorization = errors.New("limes: malformed Authorization heade
 var ErrAuthSchemeMismatch error = &familyError{"limes: token presented under the wrong scheme", ErrProofOfPossession}
 
 // ParseAuthorization reads an Authorization header value: the scheme, matched
-// without regard to case (RFC 9110 §11.1), and its token68 credential.
+// without regard to case (RFC 9110 §11.1), and its token68 credential. With
+// ErrMalformedAuthorization it still returns the scheme it recognised, so
+// ErrorResponse challenges under the scheme the client used.
 func ParseAuthorization(header string) (AuthScheme, string, error) {
 	if header == "" {
 		return "", "", ErrNoCredentials
@@ -66,7 +68,7 @@ func ParseAuthorization(header string) (AuthScheme, string, error) {
 	}
 	credential = strings.TrimLeft(credential, " ")
 	if !isToken68(credential) {
-		return "", "", fmt.Errorf("%w: the credential is not a token68", ErrMalformedAuthorization)
+		return scheme, "", fmt.Errorf("%w: the credential is not a token68", ErrMalformedAuthorization)
 	}
 	return scheme, credential, nil
 }

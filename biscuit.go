@@ -192,6 +192,10 @@ func Attenuate(token string, a Attenuation) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// BlockCount counts the attenuation blocks, not the authority.
+	if attenuations := b.BlockCount(); attenuations >= MaxBiscuitBlocks {
+		return "", invalidRequest("the token already has %d attenuation blocks, MaxBiscuitBlocks", attenuations)
+	}
 	block := b.CreateBlock()
 	add := func(name string, term biscuit.Term) error {
 		return block.AddFact(biscuitFact(name, term))
@@ -312,7 +316,17 @@ type decodedFact struct {
 
 // decodeBiscuitBlocks reads every block's facts as data. The signatures are
 // not checked here — the caller does that before trusting anything read.
+// MaxBiscuitBlocks bounds the attenuation blocks a Biscuit may carry. Each
+// block is a revocation id the verifier looks up, and anyone holding a copy
+// can append blocks offline, so an unbounded chain is a lookup per block on
+// every request. Attenuate refuses to go past it, and the verifier refuses a
+// token that has.
+const MaxBiscuitBlocks = 32
+
 func decodeBiscuitBlocks(c *pb.Biscuit) ([]decodedBlock, error) {
+	if n := len(c.GetBlocks()); n > MaxBiscuitBlocks {
+		return nil, fmt.Errorf("%d attenuation blocks, past MaxBiscuitBlocks (%d)", n, MaxBiscuitBlocks)
+	}
 	signed := append([]*pb.SignedBlock{c.GetAuthority()}, c.GetBlocks()...)
 	symbols := &datalog.SymbolTable{}
 	out := make([]decodedBlock, 0, len(signed))
