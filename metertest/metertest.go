@@ -304,6 +304,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"EveryCounterOnTheChainKeepsItsUnit", checkChainUnits[TX]},
 		{"ListTenantBudgetsRanksUnclamped", checkUnclampedRanking[TX]},
 		{"AThresholdIsMetExactly", checkThresholdBoundary[TX]},
+		{"ListTenantBudgetsRanksExactly", checkExactRanking[TX]},
 		{"HousekeepingKeepsItsLimit", checkHousekeepingBatches[TX]},
 		{"CopiesFollowSettleAndRefund", checkCopySettleRefund[TX]},
 		{"AZeroCeilingAllowsNothing", checkZeroCeilings[TX]},
@@ -1394,27 +1395,81 @@ func checkUnclampedRanking[TX any](t *testing.T, f fixture[TX]) {
 // checkThresholdBoundary holds ThresholdPct to spent / max × 100 ≥ threshold
 // exactly: 29 of 100 is at 29%, which a float quotient reads as just under.
 func checkThresholdBoundary[TX any](t *testing.T, f fixture[TX]) {
-	const ceiling, spent, threshold = 100 * one, 29 * one, 29
-	tenant, err := f.newTenant()
+	// 29 of 100 at 29%, and 11 of 1000 at 1.1%: a threshold is the decimal
+	// written, not the float64 a hair above or below it.
+	for _, tc := range []struct {
+		ceiling, spent limes.Nanos
+		threshold      float64
+	}{
+		{100 * one, 29 * one, 29},
+		{1000 * one, 11 * one, 1.1},
+	} {
+		tenant, err := f.newTenant()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Usage.SetTenantBudget(f.tenantCtx(tenant), limes.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: tc.ceiling}, UnitCode: unit}); err != nil {
+			t.Fatal(err)
+		}
+		id, err := f.NewCapability(CapabilitySpec{Tenant: tenant, Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Usage.Charge(f.tenantCtx(tenant), limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant}), Amount: tc.spent}, nil); err != nil {
+			t.Fatal(err)
+		}
+		page, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetsAtOrPast, ThresholdPct: tc.threshold})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.ContainsFunc(page.Items, func(r limes.TenantBudget) bool { return r.TenantID == tenant }) {
+			t.Errorf("a tenant at exactly %v%% was not listed at a threshold of %v%%", tc.threshold, tc.threshold)
+		}
+	}
+}
+
+// checkExactRanking holds ListTenantBudgets to ranking by spent / max
+// exactly: a third and a nano past a third are one float64, and the second
+// must still lead, whatever the tenant ids.
+func checkExactRanking[TX any](t *testing.T, f fixture[TX]) {
+	const third = limes.MaxNanos / 3
+	type spec struct {
+		tenant         uuid.UUID
+		ceiling, spent limes.Nanos
+	}
+	tenants := make([]uuid.UUID, 2)
+	for i := range tenants {
+		id, err := f.newTenant()
+		if err != nil {
+			t.Fatal(err)
+		}
+		tenants[i] = id
+	}
+	// The further gets the higher id: ranked by a float, the two tie and the
+	// id puts it second.
+	slices.SortFunc(tenants, func(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) })
+	nearer, further := spec{tenants[0], 3, 1}, spec{tenants[1], 3 * third, third + 1}
+	for _, s := range []spec{nearer, further} {
+		if _, err := f.Usage.SetTenantBudget(f.tenantCtx(s.tenant), limes.SetTenantBudgetRequest{TenantID: s.tenant, Ceiling: limes.BudgetCeiling{Max: s.ceiling}, UnitCode: unit}); err != nil {
+			t.Fatal(err)
+		}
+		id, err := f.NewCapability(CapabilitySpec{Tenant: s.tenant, Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Usage.Charge(f.tenantCtx(s.tenant), limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: s.tenant}), Amount: s.spent}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetsAtOrPast})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Usage.SetTenantBudget(f.tenantCtx(tenant), limes.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: ceiling}, UnitCode: unit}); err != nil {
-		t.Fatal(err)
+	at := func(tenant uuid.UUID) int {
+		return slices.IndexFunc(page.Items, func(r limes.TenantBudget) bool { return r.TenantID == tenant })
 	}
-	id, err := f.NewCapability(CapabilitySpec{Tenant: tenant, Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.Usage.Charge(f.tenantCtx(tenant), limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant}), Amount: spent}, nil); err != nil {
-		t.Fatal(err)
-	}
-	page, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetsAtOrPast, ThresholdPct: threshold})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.ContainsFunc(page.Items, func(r limes.TenantBudget) bool { return r.TenantID == tenant }) {
-		t.Errorf("a tenant at exactly %d%% was not listed at a threshold of %d%%", threshold, threshold)
+	if fi, ni := at(further.tenant), at(nearer.tenant); fi < 0 || ni < 0 || fi > ni {
+		t.Errorf("listed a nano past a third at %d and a third at %d; want the further first", fi, ni)
 	}
 }
 
@@ -1674,12 +1729,13 @@ func checkExpiry[TX any](t *testing.T, f fixture[TX]) {
 // and paging: most at risk first, then by tenant id, a page at a time.
 func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 	for name, req := range map[string]limes.ListTenantBudgetsRequest{
-		"a negative limit":             {Limit: -1},
-		"a threshold past 100%":        {Filter: limes.TenantBudgetsAtOrPast, ThresholdPct: 101},
-		"a negative threshold":         {Filter: limes.TenantBudgetsAtOrPast, ThresholdPct: -1},
-		"a threshold with no filter":   {ThresholdPct: 1},
-		"a threshold beside unlimited": {Filter: limes.TenantBudgetsUnlimited, ThresholdPct: 1},
-		"a filter this package lacks":  {Filter: limes.TenantBudgetsUnlimited + 1},
+		"a negative limit":              {Limit: -1},
+		"a threshold past 100%":         {Filter: limes.TenantBudgetsAtOrPast, ThresholdPct: 101},
+		"a negative threshold":          {Filter: limes.TenantBudgetsAtOrPast, ThresholdPct: -1},
+		"a threshold with no filter":    {ThresholdPct: 1},
+		"a threshold beside unlimited":  {Filter: limes.TenantBudgetsUnlimited, ThresholdPct: 1},
+		"a filter this package lacks":   {Filter: limes.TenantBudgetsUnlimited + 1},
+		"a threshold that is no number": {Filter: limes.TenantBudgetsAtOrPast, ThresholdPct: math.NaN()},
 	} {
 		if _, err := f.Usage.ListTenantBudgets(f.listCtx(), req); !errors.Is(err, limes.ErrInvalidRequest) {
 			t.Errorf("ListTenantBudgets with %s: err = %v, want ErrInvalidRequest", name, err)

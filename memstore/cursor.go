@@ -3,7 +3,6 @@ package memstore
 import (
 	"encoding/base64"
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -13,33 +12,32 @@ import (
 )
 
 // tenantBudgetCursor is memstore's cursor of ListTenantBudgets: a place in
-// its order, the last row's ceiling class, utilization, in the decimal text
-// it was computed in, and tenant id. Another store's cursor is its own.
+// its order — the last row's ceiling class, its spend and ceiling, which
+// give its utilization exactly, and tenant id. Another store's cursor is its
+// own.
 type tenantBudgetCursor struct {
-	class       ceilingClass
-	utilization string
-	tenantID    uuid.UUID
+	class      ceilingClass
+	spent, max limes.Nanos
+	tenantID   uuid.UUID
 }
 
-// tenantBudgetCursorSep separates the cursor's fields; neither a class, a
-// decimal nor a uuid contains it.
+// tenantBudgetCursorSep separates the cursor's fields; neither a class, an
+// integer nor a uuid contains it.
 const tenantBudgetCursorSep = "|"
 
 // tenantBudgetCursorFields is how many fields a cursor has.
-const tenantBudgetCursorFields = 3
-
-// plainDecimal is a finite, non-negative decimal: NaN, the infinities or a
-// hex float would order differently than the rows they came from.
-var plainDecimal = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?$`)
+const tenantBudgetCursorFields = 4
 
 // encode is the cursor as ListTenantBudgets hands it out: opaque, URL-safe.
 func (c tenantBudgetCursor) encode() string {
-	return base64.RawURLEncoding.EncodeToString([]byte(strings.Join(
-		[]string{strconv.Itoa(int(c.class)), c.utilization, c.tenantID.String()}, tenantBudgetCursorSep)))
+	return base64.RawURLEncoding.EncodeToString([]byte(strings.Join([]string{
+		strconv.Itoa(int(c.class)), strconv.FormatInt(int64(c.spent), 10), strconv.FormatInt(int64(c.max), 10), c.tenantID.String(),
+	}, tenantBudgetCursorSep)))
 }
 
 // decodeTenantBudgetCursor reads a cursor encode wrote. Anything else is
-// ErrInvalidRequest.
+// ErrInvalidRequest: a class this store does not rank by, a spend or ceiling
+// that is negative or past MaxNanos, a bounded row with no ceiling.
 func decodeTenantBudgetCursor(s string) (tenantBudgetCursor, error) {
 	bad := fmt.Errorf("%w: memstore: tenant budget cursor %q", limes.ErrInvalidRequest, s)
 	raw, err := base64.RawURLEncoding.DecodeString(s)
@@ -54,16 +52,13 @@ func decodeTenantBudgetCursor(s string) (tenantBudgetCursor, error) {
 	if err != nil || class < int(classZero) || class > int(classUnlimited) {
 		return tenantBudgetCursor{}, bad
 	}
-	pct, id := fields[1], fields[2]
-	if !plainDecimal.MatchString(pct) {
+	spent, err1 := strconv.ParseInt(fields[1], 10, 64)
+	ceiling, err2 := strconv.ParseInt(fields[2], 10, 64)
+	tenant, err3 := uuid.Parse(fields[3])
+	if err1 != nil || err2 != nil || err3 != nil ||
+		limes.Nanos(spent).Validate() != nil || limes.Nanos(ceiling).Validate() != nil ||
+		(ceilingClass(class) == classBounded) != (ceiling > 0) {
 		return tenantBudgetCursor{}, bad
 	}
-	if _, err := strconv.ParseFloat(pct, 64); err != nil {
-		return tenantBudgetCursor{}, bad
-	}
-	tenant, err := uuid.Parse(id)
-	if err != nil {
-		return tenantBudgetCursor{}, bad
-	}
-	return tenantBudgetCursor{class: ceilingClass(class), utilization: pct, tenantID: tenant}, nil
+	return tenantBudgetCursor{class: ceilingClass(class), spent: limes.Nanos(spent), max: limes.Nanos(ceiling), tenantID: tenant}, nil
 }

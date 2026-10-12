@@ -1308,8 +1308,7 @@ func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTen
 		if err != nil {
 			return limes.Page[limes.TenantBudget]{}, err
 		}
-		pct, _ := strconv.ParseFloat(c.utilization, 64) // decodeTenantBudgetCursor checked it
-		after = &budgetRow{class: c.class, pct: pct, tenant: c.tenantID}
+		after = &budgetRow{class: c.class, spent: c.spent, max: c.max, tenant: c.tenantID}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1318,7 +1317,7 @@ func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTen
 	for _, b := range s.budgets {
 		row := budgetRow{class: classOf(b.Ceiling), tenant: b.TenantID, budget: b}
 		if row.class == classBounded {
-			row.pct = float64(b.SpentAmount) / float64(b.Ceiling.Max) * percent
+			row.spent, row.max = b.SpentAmount, b.Ceiling.Max
 		}
 		if !listed(args, row) {
 			continue
@@ -1335,10 +1334,7 @@ func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTen
 	if len(rows) > limit {
 		rows = rows[:limit]
 		last := rows[limit-1]
-		// 'f': a plain decimal, which the cursor reads back exactly.
-		next = tenantBudgetCursor{
-			class: last.class, utilization: strconv.FormatFloat(last.pct, 'f', -1, 64), tenantID: last.tenant,
-		}.encode()
+		next = tenantBudgetCursor{class: last.class, spent: last.spent, max: last.max, tenantID: last.tenant}.encode()
 	}
 	out := make([]limes.TenantBudget, 0, len(rows))
 	for _, r := range rows {
@@ -1348,11 +1344,25 @@ func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTen
 }
 
 // budgetRow is a tenant budget in ListTenantBudgets' order.
+//
+// A bounded row ranks by spent / max, compared exactly as a fraction — the
+// unclamped utilization — rather than as a float, which could tie two
+// different spends or order them backwards.
 type budgetRow struct {
-	class  ceilingClass
-	pct    float64 // unclamped utilization; 0 outside classBounded
-	tenant uuid.UUID
-	budget limes.TenantBudget
+	class ceilingClass
+	// spent and max are the utilization's numerator and denominator; zero
+	// outside classBounded.
+	spent, max limes.Nanos
+	tenant     uuid.UUID
+	budget     limes.TenantBudget
+}
+
+// compareUtilization compares a's spent / max with b's exactly, by cross
+// multiplication in big integers: -1, 0 or +1.
+func compareUtilization(a, b budgetRow) int {
+	left := new(big.Int).Mul(big.NewInt(int64(a.spent)), big.NewInt(int64(b.max)))
+	right := new(big.Int).Mul(big.NewInt(int64(b.spent)), big.NewInt(int64(a.max)))
+	return left.Cmp(right)
 }
 
 // listed reports whether args' filter keeps row. A ceiling of 0 is spent
@@ -1368,7 +1378,7 @@ func listed(args limes.ListTenantBudgetsRequest, row budgetRow) bool {
 		case classZero:
 			return true
 		case classBounded:
-			return atOrPast(row.budget.SpentAmount, row.budget.Ceiling.Max, args.ThresholdPct)
+			return atOrPast(row.spent, row.max, args.ThresholdPct)
 		case classUnlimited:
 			return false
 		}
@@ -1378,9 +1388,10 @@ func listed(args limes.ListTenantBudgetsRequest, row budgetRow) bool {
 
 // atOrPast reports whether spent is at least pct percent of ceiling, exactly:
 // spent × 100 ≥ pct × ceiling in rationals, where a float quotient would put
-// 29 of 100 just under 29%.
+// 29 of 100 just under 29%. pct is read as the decimal it is written as —
+// 1.1 is eleven tenths, not the float64 a hair above it.
 func atOrPast(spent, ceiling limes.Nanos, pct float64) bool {
-	threshold := new(big.Rat).SetFloat64(pct)
+	threshold := limes.ExactPercent(pct)
 	threshold.Mul(threshold, new(big.Rat).SetInt64(int64(ceiling)))
 	used := new(big.Rat).SetInt64(int64(spent))
 	used.Mul(used, new(big.Rat).SetInt64(percent))
@@ -1414,8 +1425,10 @@ func (r budgetRow) before(o budgetRow) bool {
 	if r.class != o.class {
 		return r.class < o.class
 	}
-	if r.pct != o.pct {
-		return r.pct > o.pct
+	if r.class == classBounded {
+		if c := compareUtilization(r, o); c != 0 {
+			return c > 0
+		}
 	}
 	return uuidLess(r.tenant, o.tenant)
 }

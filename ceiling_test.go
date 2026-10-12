@@ -2,6 +2,8 @@ package limes
 
 import (
 	"errors"
+	"math"
+	"math/big"
 	"testing"
 
 	"github.com/google/uuid"
@@ -100,6 +102,25 @@ func TestSetTenantBudgetRequestValidate(t *testing.T) {
 	} {
 		if err := req.Validate(); !errors.Is(err, ErrInvalidRequest) {
 			t.Errorf("%s: err = %v, want ErrInvalidRequest", name, err)
+		}
+	}
+}
+
+// A threshold is the decimal it is written as, and one that is no number is
+// refused before any store compares against it.
+func TestExactPercent(t *testing.T) {
+	if got, want := ExactPercent(1.1), big.NewRat(11, 10); got.Cmp(want) != 0 {
+		t.Errorf("ExactPercent(1.1) = %s, want %s", got, want)
+	}
+	if got := ExactPercent(29); got.Cmp(big.NewRat(29, 1)) != 0 {
+		t.Errorf("ExactPercent(29) = %s", got)
+	}
+	for _, pct := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		if ExactPercent(pct) != nil {
+			t.Errorf("ExactPercent(%v) is a number", pct)
+		}
+		if err := (ListTenantBudgetsRequest{Filter: TenantBudgetsAtOrPast, ThresholdPct: pct}).Validate(); !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("a threshold of %v: err = %v, want ErrInvalidRequest", pct, err)
 		}
 	}
 }
