@@ -632,10 +632,9 @@ func (s *UsageStore[TX]) Charge(
 	// its row written back.
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	ancestors, err := s.lineage(req.Subject.CapabilityID())
-	if err != nil {
-		return limes.ChargeReceipt{}, err
-	}
+	// A replay is answered before the lineage is read: it moves nothing, so
+	// it needs no record, and a capability purged since still gets its
+	// receipt, as a settled hold does.
 	if req.ExternalRef != "" {
 		if e, ok := entryLocked(s, s.byRef, refKey{req.Subject.CapabilityID(), req.ExternalRef}); ok {
 			if e.Amount != req.Amount || e.UnitCode != unit || e.TenantID != req.Subject.TenantID() {
@@ -644,6 +643,10 @@ func (s *UsageStore[TX]) Charge(
 			}
 			return s.replayLocked(e), nil
 		}
+	}
+	ancestors, err := s.lineage(req.Subject.CapabilityID())
+	if err != nil {
+		return limes.ChargeReceipt{}, err
 	}
 	return s.chargeLocked(ctx, req, unit, ancestors, nil, onCharged)
 }

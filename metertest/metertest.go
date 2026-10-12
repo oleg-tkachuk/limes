@@ -275,6 +275,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"EveryCounterKeepsOneUnit", checkOneUnit[TX]},
 		{"AnAncestorCountsInTheUnitOfItsChildren", checkAncestorUnit[TX]},
 		{"DeleteReleasesHolds", checkDeleteReleasesHolds[TX]},
+		{"AReplayIsAnsweredOnceTheCapabilityIsGone", checkReplayAfterRemoval[TX]},
 		{"AnAncestorAndATenantCeilingAreExact", checkExactCeilings[TX]},
 		{"AHoldAloneCountsOnItsTenant", checkHoldCreatesTenant[TX]},
 		{"ASettleReplayCommitsNothingAgain", checkSettleReplay[TX]},
@@ -1083,6 +1084,39 @@ func checkSettleAfterRemovedAncestor[TX any](t *testing.T, f fixture[TX]) {
 	}
 	if u, err := f.Usage.GetUsage(f.Ctx, f.root); !errors.Is(err, limes.ErrUsageNotFound) {
 		t.Errorf("the removed root after a settle: %+v, %v; want no row", u, err)
+	}
+}
+
+// checkReplayAfterRemoval holds a store to answering a replay the same way
+// for a charge and a settle once the capability is off record: each gets the
+// receipt it was given, Replayed, and moves nothing.
+func checkReplayAfterRemoval[TX any](t *testing.T, f fixture[TX]) {
+	if f.DeleteCapability == nil {
+		t.Skip("Env.DeleteCapability not set")
+	}
+	const ref = "cost-1"
+	charge := limes.ChargeRequest{Subject: f.childSubject(), Amount: one, ExternalRef: ref}
+	charged, err := f.Usage.Charge(f.Ctx, charge, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one})
+	if err != nil {
+		t.Fatal(err)
+	}
+	settle := limes.SettleRequest{Subject: f.childSubject(), ReservationID: r.ID, Amount: one}
+	settled, err := f.Usage.Settle(f.Ctx, settle, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.DeleteCapability(f.child); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := f.Usage.Charge(f.Ctx, charge, nil); err != nil || !got.Replayed || got.ChargeID != charged.ChargeID {
+		t.Errorf("a charge replayed after its capability is gone = %+v, %v; want the first receipt, replayed", got, err)
+	}
+	if got, err := f.Usage.Settle(f.Ctx, settle, nil); err != nil || !got.Replayed || got.ChargeID != settled.ChargeID {
+		t.Errorf("a settle replayed after its capability is gone = %+v, %v; want the first receipt, replayed", got, err)
 	}
 }
 
