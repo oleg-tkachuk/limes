@@ -88,14 +88,14 @@ func (s *meteringStore[TX]) Reserve(ctx context.Context, req ReserveRequest) (Re
 	return r, err
 }
 
-// Settle is a charge as far as the metrics are concerned. Its request names
-// only the reservation; the receipt carries the tenant and the unit.
+// Settle is a charge as far as the metrics are concerned, attributed to the
+// subject's tenant as a charge is: a refused settle has no receipt to name it.
 func (s *meteringStore[TX]) Settle(ctx context.Context, req SettleRequest, onCharged func(ctx context.Context, tx TX) error) (ChargeReceipt, error) {
 	receipt, err := s.inner.Settle(ctx, req, onCharged)
 	if err == nil && receipt.Replayed {
 		return receipt, nil
 	}
-	s.in.recordCharge(ctx, receipt.TenantID, req.Amount, receipt, err)
+	s.in.recordCharge(ctx, req.Subject.TenantID(), req.Amount, receipt, err)
 	return receipt, err
 }
 
