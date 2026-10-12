@@ -77,6 +77,7 @@ type refusal struct {
 	status int
 	code   string // RFC 6750 / RFC 9449 error code; "" for no challenge
 	dpop   bool   // the challenge is DPoP's
+	bare   bool   // challenge with no error code: the client sent nothing to fault
 	slug   string // the problem type, after problemTypeBase
 	title  string
 }
@@ -84,13 +85,14 @@ type refusal struct {
 // The answers, one per kind of refusal; refusalRules says which sentinel
 // gets which.
 var (
-	answerKeysUnavailable = refusal{http.StatusServiceUnavailable, "", false, "keys-unavailable", "The issuer's keys cannot be fetched"}
-	answerMalformed       = refusal{http.StatusBadRequest, codeInvalidRequest, false, "malformed-authorization", "The Authorization header is malformed"}
-	answerNonce           = refusal{http.StatusUnauthorized, codeUseDPoPNonce, true, "dpop-nonce-required", "A DPoP proof with the server's nonce is required"}
-	answerProof           = refusal{http.StatusUnauthorized, codeInvalidDPoPProof, true, "invalid-dpop-proof", "The DPoP proof is missing or invalid"}
-	answerToken           = refusal{http.StatusUnauthorized, codeInvalidToken, false, "invalid-token", "The access token is invalid"}
-	answerScope           = refusal{http.StatusForbidden, codeInsufficientScope, false, "insufficient-scope", "The token does not allow this request"}
-	answerExhausted       = refusal{http.StatusForbidden, "", false, "budget-exhausted", "The token's request or budget limit is exhausted"}
+	answerKeysUnavailable = refusal{http.StatusServiceUnavailable, "", false, false, "keys-unavailable", "The issuer's keys cannot be fetched"}
+	answerMalformed       = refusal{http.StatusBadRequest, codeInvalidRequest, false, false, "malformed-authorization", "The Authorization header is malformed"}
+	answerNoCredentials   = refusal{http.StatusUnauthorized, "", false, true, "no-credentials", "Credentials are required"}
+	answerNonce           = refusal{http.StatusUnauthorized, codeUseDPoPNonce, true, false, "dpop-nonce-required", "A DPoP proof with the server's nonce is required"}
+	answerProof           = refusal{http.StatusUnauthorized, codeInvalidDPoPProof, true, false, "invalid-dpop-proof", "The DPoP proof is missing or invalid"}
+	answerToken           = refusal{http.StatusUnauthorized, codeInvalidToken, false, false, "invalid-token", "The access token is invalid"}
+	answerScope           = refusal{http.StatusForbidden, codeInsufficientScope, false, false, "insufficient-scope", "The token does not allow this request"}
+	answerExhausted       = refusal{http.StatusForbidden, "", false, false, "budget-exhausted", "The token's request or budget limit is exhausted"}
 )
 
 // internalError answers any other error: the server's fault, said without
@@ -116,7 +118,7 @@ func (v *StandardVerifier) ErrorResponse(ctx context.Context, err error, scheme 
 		Status:  r.status,
 		Problem: Problem{Type: problemTypeBase + r.slug, Title: r.title, Status: r.status},
 	}
-	if r.code == "" {
+	if r.code == "" && !r.bare {
 		return resp
 	}
 	dpopConfigured := v.cfg.DPoP != nil

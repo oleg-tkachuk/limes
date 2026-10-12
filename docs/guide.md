@@ -8,6 +8,12 @@ start, [diagrams.md](diagrams.md) draws each path described here, and
 
 ```go
 scheme, token, err := limes.ParseAuthorization(r.Header.Get(limes.AuthorizationHeader))
+if err != nil {
+    // No credentials (ErrNoCredentials): 401 with a bare challenge.
+    // A malformed header (ErrMalformedAuthorization): 400.
+    limes.WriteErrorResponse(w, verifier.ErrorResponse(ctx, err, scheme))
+    return
+}
 granted, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
     Verify: limes.VerifyRequest{
         Token: token, Scheme: scheme, Audience: "https://data.example.com",
@@ -252,8 +258,10 @@ Present a token under the scheme its binding calls for: `ParseAuthorization`
 reads `Authorization: DPoP <token>` or `Bearer <token>` (the scheme in any
 case, the token as a token68), and with `VerifyRequest.Scheme` set, `Verify`
 refuses a key-bound token presented as `Bearer` — a downgrade — or an unbound
-one presented as `DPoP`, with `ErrAuthSchemeMismatch`. A header that is
-neither is `ErrMalformedAuthorization`.
+one presented as `DPoP`, with `ErrAuthSchemeMismatch`. No header, or one
+under another scheme, is `ErrNoCredentials` (401 with a bare challenge); a
+Bearer or DPoP header whose credential is not a token68 is
+`ErrMalformedAuthorization` (400).
 
 A verifier with no `DPoP` refuses every key-bound capability with
 `dpop.ErrRequired` instead of accepting it as a bearer token, so a binding

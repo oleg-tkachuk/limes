@@ -28,6 +28,12 @@ const (
 	AuthSchemeDPoP AuthScheme = "DPoP"
 )
 
+// ErrNoCredentials — the request carries no credential this module reads: no
+// Authorization header, or one under a scheme other than Bearer or DPoP. RFC
+// 6750 §3.1 answers it with a challenge and no error code: the client has
+// not tried, so nothing it sent was wrong.
+var ErrNoCredentials error = &familyError{"limes: no credentials", ErrUnauthenticated}
+
 // ErrMalformedAuthorization — an Authorization header that is not one
 // scheme this module reads followed by one token68 credential. It is a
 // malformed request (RFC 6750 §3.1 invalid_request), not a bad token.
@@ -42,10 +48,10 @@ var ErrAuthSchemeMismatch error = &familyError{"limes: token presented under the
 // ParseAuthorization reads an Authorization header value: the scheme, matched
 // without regard to case (RFC 9110 §11.1), and its token68 credential.
 func ParseAuthorization(header string) (AuthScheme, string, error) {
-	name, credential, ok := strings.Cut(header, " ")
-	if !ok {
-		return "", "", fmt.Errorf("%w: no credential", ErrMalformedAuthorization)
+	if header == "" {
+		return "", "", ErrNoCredentials
 	}
+	name, credential, _ := strings.Cut(header, " ")
 	var scheme AuthScheme
 	switch {
 	case strings.EqualFold(name, string(AuthSchemeBearer)):
@@ -53,7 +59,8 @@ func ParseAuthorization(header string) (AuthScheme, string, error) {
 	case strings.EqualFold(name, string(AuthSchemeDPoP)):
 		scheme = AuthSchemeDPoP
 	default:
-		return "", "", fmt.Errorf("%w: scheme %q", ErrMalformedAuthorization, name)
+		// Another scheme's credentials are none of ours to judge.
+		return "", "", fmt.Errorf("%w: scheme %q", ErrNoCredentials, name)
 	}
 	credential = strings.TrimLeft(credential, " ")
 	if !isToken68(credential) {

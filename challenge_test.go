@@ -40,6 +40,9 @@ func TestErrorResponse(t *testing.T) {
 	}{
 		{"malformed header", fmt.Errorf("x: %w", ErrMalformedAuthorization), AuthSchemeUnspecified, http.StatusBadRequest,
 			[]string{`Bearer error="invalid_request"`, "DPoP " + algs}, false},
+		// RFC 6750 §3.1: no credentials, a challenge with no error code.
+		{"no credentials", ErrNoCredentials, AuthSchemeUnspecified, http.StatusUnauthorized,
+			[]string{"Bearer", "DPoP " + algs}, false},
 		{"expired bearer", ErrExpired, AuthSchemeBearer, http.StatusUnauthorized,
 			[]string{`Bearer error="invalid_token"`, "DPoP " + algs}, false},
 		{"revoked, under DPoP", ErrRevoked, AuthSchemeDPoP, http.StatusUnauthorized,
@@ -165,4 +168,23 @@ func validNonce(t *testing.T, n dpop.Nonces, nonce string) bool {
 		t.Fatal(err)
 	}
 	return ok
+}
+
+// A request with no credentials is challenged bare: RFC 6750 §3.1 sends no
+// error code to a client that has not tried.
+func TestNoCredentialsIsChallengedWithoutAnErrorCode(t *testing.T) {
+	_, v, _, _ := buildIssuerVerifier(t)
+	_, _, err := ParseAuthorization("")
+	resp := v.ErrorResponse(context.Background(), err, AuthSchemeUnspecified)
+	if resp.Status != http.StatusUnauthorized || len(resp.Challenges) == 0 {
+		t.Fatalf("ErrorResponse = %+v; want 401 with a challenge", resp)
+	}
+	for _, c := range resp.Challenges {
+		if strings.Contains(c, "error=") {
+			t.Errorf("challenge %q names an error", c)
+		}
+	}
+	if resp.Challenges[0] != string(AuthSchemeBearer) {
+		t.Errorf("first challenge = %q, want the bare %q", resp.Challenges[0], AuthSchemeBearer)
+	}
 }

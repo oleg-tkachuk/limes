@@ -24,9 +24,15 @@ func TestParseAuthorization(t *testing.T) {
 			t.Errorf("ParseAuthorization(%q) = %q, %q, %v; want %q, %q", tc.header, scheme, token, err, tc.scheme, tc.token)
 		}
 	}
-	for _, bad := range []string{"", "Bearer", "Bearer ", "Basic dXNlcjpwdw==", "Bearer a b", "Bearer =abc", "Bearer a=b", "Bearer a\tb", "DPoP é"} {
+	for _, bad := range []string{"Bearer", "Bearer ", "Bearer a b", "Bearer =abc", "Bearer a=b", "Bearer a\tb", "DPoP é"} {
 		if _, _, err := ParseAuthorization(bad); !errors.Is(err, ErrMalformedAuthorization) {
 			t.Errorf("ParseAuthorization(%q): err = %v, want ErrMalformedAuthorization", bad, err)
+		}
+	}
+	// No header, or another scheme's: no credential of ours at all.
+	for _, none := range []string{"", "Basic dXNlcjpwdw==", "Negotiate abc"} {
+		if _, _, err := ParseAuthorization(none); !errors.Is(err, ErrNoCredentials) || errors.Is(err, ErrMalformedAuthorization) {
+			t.Errorf("ParseAuthorization(%q): err = %v, want ErrNoCredentials", none, err)
 		}
 	}
 }
