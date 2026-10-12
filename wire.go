@@ -13,6 +13,7 @@ type wirePrincipal struct {
 	TenantID uuid.UUID     `json:"tenant_id"`
 	Subject  string        `json:"subject"`
 	Agent    *wireAgent    `json:"agent,omitzero"`
+	_        noCompare
 }
 
 // wireAgent is limes_principal.agent.
@@ -23,6 +24,7 @@ type wireAgent struct {
 	ParentAgentID uuid.UUID `json:"parent_agent_id,omitzero"`
 	Model         string    `json:"model,omitempty"`
 	MCPClient     string    `json:"mcp_client,omitempty"`
+	_             noCompare
 }
 
 // wireCaveats is the limes_caveats claim.

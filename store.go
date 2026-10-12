@@ -136,6 +136,7 @@ type Revocation struct {
 	// Cascaded reports that the entry was written by a cascading revoke —
 	// of this capability or of an ancestor.
 	Cascaded bool
+	_        noCompare
 }
 
 // ErrAlreadyExists is Store.Insert given an id already on record.

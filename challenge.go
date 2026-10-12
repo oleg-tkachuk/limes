@@ -57,6 +57,7 @@ type Problem struct {
 	Status int `json:"status"`
 	// Detail explains this occurrence, in terms safe to show the client.
 	Detail string `json:"detail,omitempty"`
+	_      noCompare
 }
 
 // ErrorResponse is how to answer a refused request.

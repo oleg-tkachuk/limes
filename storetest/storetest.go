@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -234,7 +235,7 @@ func checkRecord(t *testing.T, f fixture) {
 	if diff := diffCapabilities(r.Capability, parent); diff != "" {
 		t.Errorf("GetRecord read back a different capability: %s", diff)
 	}
-	if r.IssuedBy != issuedBy || r.Revocation != nil {
+	if !reflect.DeepEqual(r.IssuedBy, issuedBy) || r.Revocation != nil {
 		t.Errorf("before any revoke: issued by %+v, revocation %+v; want %+v and none", r.IssuedBy, r.Revocation, issuedBy)
 	}
 
