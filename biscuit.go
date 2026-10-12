@@ -16,6 +16,8 @@ import (
 	"github.com/biscuit-auth/biscuit-go/v2/pb"
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/oleg-tkachuk/limes/internal/jose"
 )
 
 // Offline attenuation, on Biscuit v3 tokens.
@@ -236,7 +238,7 @@ func openBiscuit(token string) (string, func(parent *Capability) (*Capability, [
 	// The chain is checked once the sealed token has named its root; the
 	// caller verifies that token first and hands back what it vouches for.
 	attenuate := func(parent *Capability) (*Capability, [][]byte, error) {
-		root, err := base64.RawURLEncoding.DecodeString(parent.BiscuitRoot)
+		root, err := jose.UnB64(parent.BiscuitRoot)
 		if err != nil || len(root) != ed25519.PublicKeySize {
 			return nil, nil, fmt.Errorf("%w: sealed token names no biscuit root", ErrInvalidToken)
 		}
@@ -549,7 +551,7 @@ func parseBiscuit(token string) (*biscuit.Biscuit, error) {
 // hands the proof's secret to ed25519.NewKeyFromSeed as it is, which panics
 // on any other length.
 func decodeBiscuitContainer(token string) ([]byte, *pb.Biscuit, error) {
-	raw, err := base64.RawURLEncoding.DecodeString(token)
+	raw, err := jose.UnB64(token)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: biscuit encoding: %w", ErrInvalidToken, err)
 	}

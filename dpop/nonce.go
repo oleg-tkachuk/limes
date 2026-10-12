@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"slices"
 	"time"
+
+	"github.com/oleg-tkachuk/limes/internal/jose"
 )
 
 // Server-provided DPoP nonces, after RFC 9449 §8 and §9.
@@ -137,7 +139,7 @@ func (n *HMACNonces) Valid(_ context.Context, nonce string) (bool, error) {
 
 // decodeNonce is nonce's bytes, if it has a nonce's encoding and length.
 func decodeNonce(nonce string) ([]byte, bool) {
-	raw, err := base64.RawURLEncoding.DecodeString(nonce)
+	raw, err := jose.UnB64(nonce)
 	return raw, err == nil && len(raw) == nonceTimeBytes+sha256.Size
 }
 

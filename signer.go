@@ -241,7 +241,7 @@ type TokenType string
 var tokenTypes = []TokenType{TokenTypeV4}
 
 func parseHeader(seg string) (jwtHeader, error) {
-	raw, err := base64.RawURLEncoding.DecodeString(seg)
+	raw, err := jose.UnB64(seg)
 	if err != nil {
 		return jwtHeader{}, fmt.Errorf("limes: decode header: %w", err)
 	}
@@ -286,7 +286,7 @@ func claimsOf(c Capability) jwtClaims {
 }
 
 func parseClaims(seg string) (*Capability, error) {
-	raw, err := base64.RawURLEncoding.DecodeString(seg)
+	raw, err := jose.UnB64(seg)
 	if err != nil {
 		return nil, fmt.Errorf("limes: decode claims: %w", err)
 	}
