@@ -16,7 +16,7 @@ import (
 // rather than read.
 func TestTenantBudgetCursorRefusesNonFinite(t *testing.T) {
 	tenant := uuid.New()
-	ok := tenantBudgetCursor{utilization: "42.5", tenantID: tenant}
+	ok := tenantBudgetCursor{class: classBounded, utilization: "42.5", tenantID: tenant}
 	if got, err := decodeTenantBudgetCursor(ok.encode()); err != nil || got != ok {
 		t.Fatalf("round trip = %+v, %v; want %+v", got, err, ok)
 	}
@@ -26,7 +26,15 @@ func TestTenantBudgetCursorRefusesNonFinite(t *testing.T) {
 			t.Errorf("utilization %q: err = %v, want ErrInvalidRequest", pct, err)
 		}
 	}
-	for _, raw := range []string{"!!", base64.RawURLEncoding.EncodeToString([]byte("42.5")), base64.RawURLEncoding.EncodeToString([]byte("42.5|not-a-uuid"))} {
+	for _, raw := range []string{
+		"!!", base64.RawURLEncoding.EncodeToString([]byte("42.5")),
+		base64.RawURLEncoding.EncodeToString([]byte("1|42.5|not-a-uuid")),
+		// The two-field form a cursor had before it carried a class.
+		base64.RawURLEncoding.EncodeToString([]byte("42.5|" + tenant.String())),
+		base64.RawURLEncoding.EncodeToString([]byte("x|42.5|" + tenant.String())),
+		base64.RawURLEncoding.EncodeToString([]byte("-1|42.5|" + tenant.String())),
+		base64.RawURLEncoding.EncodeToString([]byte("3|42.5|" + tenant.String())),
+	} {
 		if _, err := decodeTenantBudgetCursor(raw); !errors.Is(err, limes.ErrInvalidRequest) {
 			t.Errorf("cursor %q: err = %v, want ErrInvalidRequest", raw, err)
 		}

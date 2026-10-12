@@ -1290,6 +1290,7 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 		newTenant(limes.BudgetCeiling{Max: tenantBudget})
 	}
 	unlimited := newTenant(unlimitedBudget)
+	frozen := newTenant(limes.BudgetCeiling{})
 	all := map[uuid.UUID]bool{}
 	var order []limes.TenantBudgetSummary
 	cursor := ""
@@ -1314,27 +1315,30 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 		}
 		cursor = next
 	}
-	if !all[f.Tenant] || !all[unlimited] {
+	if !all[f.Tenant] || !all[unlimited] || !all[frozen] {
 		t.Fatalf("paging skipped a tenant: %v", all)
 	}
-	if want := 1 + tiedTenants + 1; len(order) != want {
+	if want := 1 + tiedTenants + 2; len(order) != want {
 		t.Errorf("listed %d tenants, want %d", len(order), want)
 	}
+	if order[0].TenantID != frozen || order[len(order)-1].TenantID != unlimited {
+		t.Errorf("listed %s first and %s last; want the ceiling of 0 %s first and the unlimited %s last",
+			order[0].TenantID, order[len(order)-1].TenantID, frozen, unlimited)
+	}
 	for i := 1; i < len(order); i++ {
-		cur, _ := order[i].Budget.Utilization()
-		prev, _ := order[i-1].Budget.Utilization()
+		cur, prev := riskOf(order[i].Budget), riskOf(order[i-1].Budget)
 		switch {
-		case cur > prev:
-			t.Errorf("row %d at %v%% follows one at %v%%; want most at risk first", i, cur, prev)
+		case prev.after(cur):
+			t.Errorf("row %d (%+v) follows one at %+v; want most at risk first", i, cur, prev)
 		case cur == prev && bytes.Compare(order[i].TenantID[:], order[i-1].TenantID[:]) < 0:
-			t.Errorf("row %d (%s) follows %s at the same %v%%; want ascending tenant id", i, order[i].TenantID, order[i-1].TenantID, cur)
+			t.Errorf("row %d (%s) follows %s at the same risk; want ascending tenant id", i, order[i].TenantID, order[i-1].TenantID)
 		}
 	}
 	const half = 50
 	riskyPage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{ThresholdPct: half})
 	risky := riskyPage.Items
-	if err != nil || len(risky) != 1 || risky[0].TenantID != f.Tenant || riskyPct(risky[0]) != half {
-		t.Errorf("tenants at 50%% or more = %+v, %v; want only %s at 50%%", risky, err, f.Tenant)
+	if err != nil || len(risky) != 2 || risky[0].TenantID != frozen || risky[1].TenantID != f.Tenant || riskyPct(risky[1]) != half {
+		t.Errorf("tenants at 50%% or more = %+v, %v; want %s, at a ceiling of 0, then %s at 50%%", risky, err, frozen, f.Tenant)
 	}
 	unlPage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{UnlimitedOnly: true})
 	unl := unlPage.Items
@@ -1431,6 +1435,42 @@ func checkPurgeOrphans[TX any](t *testing.T, f fixture[TX]) {
 
 // riskyPct is a row's utilization, or -1 for a tenant with no ceiling, which
 // no threshold should have listed.
+// risk is where a tenant ranks in ListTenantBudgets: its ceiling's rank —
+// 0 first, bounded next, unlimited last — then, for a bounded ceiling, its
+// unclamped utilization.
+type risk struct {
+	rank int
+	pct  float64
+}
+
+// The ranks of the kinds of ceiling, most at risk first.
+const (
+	rankZero = iota
+	rankBounded
+	rankUnlimited
+)
+
+func riskOf(b limes.TenantBudget) risk {
+	switch {
+	case b.Ceiling.Unlimited:
+		return risk{rank: rankUnlimited}
+	case b.Ceiling.Max == 0:
+		return risk{rank: rankZero}
+	}
+	return risk{rank: rankBounded, pct: float64(b.SpentAmount) / float64(b.Ceiling.Max) * fullPct}
+}
+
+// after reports whether r ranks after o: less at risk.
+func (r risk) after(o risk) bool {
+	if r.rank != o.rank {
+		return r.rank > o.rank
+	}
+	return r.pct < o.pct
+}
+
+// fullPct is a whole, in percent.
+const fullPct = 100
+
 func riskyPct(s limes.TenantBudgetSummary) float64 {
 	pct, limited := s.Budget.Utilization()
 	if !limited {
