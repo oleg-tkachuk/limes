@@ -174,7 +174,7 @@ func (in *meteringInstruments) recordBump(ctx context.Context, tenantID uuid.UUI
 
 // recordRefund counts one committed refund, in the charge's unit.
 func (in *meteringInstruments) recordRefund(ctx context.Context, r RefundReceipt) {
-	in.refundAmount.Add(ctx, r.RefundedAmount.Float64(), in.attrs(r.TenantID, attribute.String(attrUnitCode, r.UnitCode)))
+	in.refundAmount.Add(ctx, r.Amount.Float64(), in.attrs(r.TenantID, attribute.String(attrUnitCode, r.UnitCode)))
 }
 
 // recordReservation counts one Reserve attempt.

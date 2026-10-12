@@ -87,7 +87,7 @@ func (r RevokeBiscuitRequest) Validate() error {
 type BiscuitCopy struct {
 	capabilityID uuid.UUID
 	revocationID []byte
-	limits       []CopyCeiling
+	copies       []CopyCeiling
 }
 
 // CapabilityID is the capability the Biscuit seals.
@@ -97,10 +97,10 @@ func (c BiscuitCopy) CapabilityID() uuid.UUID { return c.capabilityID }
 // copy and every copy attenuated from it.
 func (c BiscuitCopy) RevocationID() []byte { return slices.Clone(c.revocationID) }
 
-// Limits are the request and budget limits in force on the copy — its own
+// Copies are the request and budget limits in force on the copy — its own
 // and those of the copies it was attenuated from — innermost first;
 // CopyUsageReader reads their counters.
-func (c BiscuitCopy) Limits() []CopyCeiling { return cloneCopyCeilings(c.limits) }
+func (c BiscuitCopy) Copies() []CopyCeiling { return cloneCopyCeilings(c.copies) }
 
 // BiscuitCopy reads which copy token is, after checking it as Verify does —
 // the sealed token's signature, issuer and tenant, then the Biscuit's
@@ -120,7 +120,7 @@ func (v *Verifier) BiscuitCopy(ctx context.Context, token string) (BiscuitCopy, 
 	if err != nil {
 		return BiscuitCopy{}, err
 	}
-	return BiscuitCopy{capabilityID: c.ID, revocationID: slices.Clone(ids[len(ids)-1]), limits: cloneCopyCeilings(c.Copies)}, nil
+	return BiscuitCopy{capabilityID: c.ID, revocationID: slices.Clone(ids[len(ids)-1]), copies: cloneCopyCeilings(c.Copies)}, nil
 }
 
 func init() {

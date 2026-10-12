@@ -736,7 +736,7 @@ func checkRefundAcrossReset[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: before.ChargeID, Remaining: true}); err != nil || r.RefundedAmount != amount {
+	if r, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: before.ChargeID, Remaining: true}); err != nil || r.Amount != amount {
 		t.Fatalf("refund of the earlier period's charge = %+v, %v; want %v", r, err, amount)
 	}
 	if got := f.tenantSpent(t); got != amount {
@@ -1580,7 +1580,7 @@ func checkRefund[TX any](t *testing.T, f fixture[TX]) {
 	refund := func(amount limes.Nanos) (limes.RefundReceipt, error) {
 		return f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: r.ChargeID, Amount: amount})
 	}
-	if got, err := refund(one); err != nil || got.RefundedAmount != one || got.ChargeID != r.ChargeID ||
+	if got, err := refund(one); err != nil || got.Amount != one || got.ChargeID != r.ChargeID ||
 		got.TenantID != f.Tenant || got.UnitCode != unit {
 		t.Fatalf("partial refund = %+v, %v; want 1 of charge %s, tenant %s in %q", got, err, r.ChargeID, f.Tenant, unit)
 	}

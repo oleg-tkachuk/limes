@@ -391,7 +391,7 @@ A refund returns spend to every counter the charge took it from — except the
 tenant aggregate when the charge fell in an accounting period since closed
 with `ResetSpend` — and never more than the charge: `Amount: 0` refunds what
 is left, so a retried full refund is a no-op, and more than is left is
-`ErrRefundExceedsCharge`. `RefundReceipt.RefundedAmount` says what moved, and names
+`ErrRefundExceedsCharge`. `RefundReceipt.Amount` says what moved, and names
 the charge's tenant and unit.
 
 Every counter counts in one unit. A charge or reservation in another unit than

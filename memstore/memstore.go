@@ -1204,7 +1204,7 @@ func (s *UsageStore[TX]) Refund(_ context.Context, req limes.RefundRequest) (lim
 		}
 	}
 	e.RefundedAmount += amount
-	receipt.RefundedAmount = amount
+	receipt.Amount = amount
 	return receipt, nil
 }
 

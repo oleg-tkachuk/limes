@@ -351,9 +351,9 @@ type ChargeReceipt struct {
 type RefundReceipt struct {
 	// ChargeID is the charge refunded from.
 	ChargeID uuid.UUID
-	// RefundedAmount is the amount this call returned; zero when nothing was
+	// Amount is the amount this call returned; zero when nothing was
 	// left to refund.
-	RefundedAmount Nanos
+	Amount Nanos
 	// TenantID and UnitCode are the charge's.
 	TenantID uuid.UUID
 	UnitCode string
