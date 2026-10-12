@@ -23,6 +23,11 @@ network and no container.
 
 - Every change goes through a pull request into `main`; CI's
   **All checks passed** is the required check.
+- A pull request runs the workflows it brings, so its required check proves
+  only what its own `.github/` says. A pull request from a fork is never
+  merged automatically, and one that touches `.github/` (workflows, scripts,
+  release tooling) is merged only once those files have been read: its green
+  check is no evidence on its own.
 - Commit subjects follow [Conventional Commits](https://www.conventionalcommits.org):
   the release is computed from them (`feat` a minor; `fix`, `perf` and
   `security` a patch; pre-1.0 a breaking change a minor), so a non-conforming subject releases nothing.
