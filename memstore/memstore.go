@@ -611,8 +611,8 @@ func (s *UsageStore[TX]) GetCharge(_ context.Context, chargeID uuid.UUID) (limes
 // record is the entry as the Meter contract reads a charge back.
 func (e ledgerEntry) record() limes.ChargeRecord {
 	return limes.ChargeRecord{
-		ID: e.ID, CapabilityID: e.CapabilityID, Amount: e.Amount, RefundedAmount: e.RefundedAmount,
-		UnitCode: e.UnitCode, ExternalRef: e.ExternalRef, Overrun: e.Overrun,
+		ID: e.ID, CapabilityID: e.CapabilityID, TenantID: e.TenantID, Amount: e.Amount, RefundedAmount: e.RefundedAmount,
+		UnitCode: e.UnitCode, ExternalRef: e.ExternalRef, Overrun: e.Overrun, Op: e.Op, Actor: e.Actor, At: e.At,
 	}
 }
 

@@ -33,12 +33,6 @@ var readOnlyOps = map[Op]bool{
 // Builtin reports whether op is one of the operations this package defines.
 func (op Op) Builtin() bool { return builtinOps[op] }
 
-// Mutating reports whether op may change state when no effect is declared for
-// it (see Op.ResolveEffect). Built-in read operations are not mutating; every
-// other operation is. OpPresign is read-only by itself — what a presigned URL
-// may do is gated by the get/put assertion that accompanies it.
-func (op Op) Mutating() bool { return op.defaultEffect() == EffectWrite }
-
 // Validate reports whether op is well formed: a built-in operation, or a
 // namespaced one of the form "<namespace>:<name>" made of printable,
 // non-space ASCII.

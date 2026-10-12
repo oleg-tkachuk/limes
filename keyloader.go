@@ -14,7 +14,7 @@ import (
 // pemTypePrivateKey is the PEM type of a PKCS#8 private key (RFC 7468 §10).
 const pemTypePrivateKey = "PRIVATE KEY"
 
-// LoadPrivateKey reads an Ed25519 private key from a PEM-encoded
+// loadPrivateKey reads an Ed25519 private key from a PEM-encoded
 // PKCS#8 file at the supplied path. Production wires this against a
 // Secret-mounted RO volume; dev calls GenerateKey instead
 // and skips this path entirely.
@@ -22,7 +22,7 @@ const pemTypePrivateKey = "PRIVATE KEY"
 // Only PKCS#8 under PEM type "PRIVATE KEY" is read — not a raw seed, not
 // another PEM type — because that is OpenSSL's default output. A wrong
 // format is loud rather than read one way here and another there.
-func LoadPrivateKey(path string) (ed25519.PrivateKey, error) {
+func loadPrivateKey(path string) (ed25519.PrivateKey, error) {
 	if path == "" {
 		return nil, errors.New("limes: empty private key path")
 	}
@@ -55,10 +55,6 @@ type SigningKey struct {
 	KeyID   string
 	Public  ed25519.PublicKey
 	Private ed25519.PrivateKey
-	// Generated reports that the key was made fresh rather than read from a
-	// file: it vanishes with the process, and every token signed with it
-	// stops verifying once it does.
-	Generated bool
 }
 
 // LoadKey reads the signing key at path (LoadPrivateKey), under the kid
@@ -68,7 +64,7 @@ type SigningKey struct {
 // key file chooses between the two itself, so a missing mount is never
 // silently a fresh key.
 func LoadKey(path string) (SigningKey, error) {
-	priv, err := LoadPrivateKey(path)
+	priv, err := loadPrivateKey(path)
 	if err != nil {
 		return SigningKey{}, err
 	}

@@ -127,14 +127,16 @@ func (i *Issuer) sign(ctx context.Context, c Capability) (string, error) {
 // IssueRequest is the input shape for Issuer.Issue. Subject (with its
 // TenantID), IssuedBy, Audience and Caveats are required; TTL, NotBefore,
 // Generation and ConfirmationJKT are optional, and the issuer fills in ID,
-// IssuedAt, ExpiresAt, Issuer and Generation. Caveats are
+// IssuedAt, ExpiresAt and Issuer, and Generation when it is zero. Caveats are
 // validated (Caveats.Validate) before anything is persisted.
 type IssueRequest struct {
 	Subject Principal
 	// IssuedBy is the principal REQUESTING the capability — an operator for a
 	// root issuance, the parent's holder for a delegation. Distinct from
-	// Subject, which is who the capability authorises. Required: a capability
-	// nobody requested cannot be audited, and the store rejects an empty one.
+	// Subject, which is who the capability authorises. Its Subject is
+	// required — a capability nobody requested cannot be audited — and the
+	// rest is recorded as given: an operator need not be a tenant's
+	// principal.
 	IssuedBy   Principal
 	Audience   []string
 	Caveats    Caveats
@@ -420,7 +422,7 @@ func GenerateKey() (SigningKey, error) {
 	if err != nil {
 		return SigningKey{}, fmt.Errorf("limes: generate key: %w", err)
 	}
-	return SigningKey{KeyID: jwks.KeyID(pub), Public: pub, Private: priv, Generated: true}, nil
+	return SigningKey{KeyID: jwks.KeyID(pub), Public: pub, Private: priv}, nil
 }
 
 // validateThumbprint accepts "" (unbound) or a base64url SHA-256 thumbprint.

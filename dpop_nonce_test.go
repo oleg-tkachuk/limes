@@ -32,7 +32,7 @@ func TestVerifyRequiresTheServerNonce(t *testing.T) {
 	key := dpopKeys(t)["Ed25519"]
 	token := issueBound(t, issuer, key)
 	proof := func(nonce string) VerifyRequest {
-		p, err := dpop.Sign(ctx, key, dpop.ProofRequest{Method: dpopMethod, URL: dpopURL, Token: token, Nonce: nonce, Now: time.Now()})
+		p, err := dpop.Sign(ctx, key, dpop.ProofRequest{Method: dpopMethod, URL: dpopURL, Token: token, Nonce: nonce, IssuedAt: time.Now()})
 		if err != nil {
 			t.Fatal(err)
 		}

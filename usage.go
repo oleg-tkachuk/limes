@@ -277,6 +277,7 @@ type ChargeRequest struct {
 type ChargeRecord struct {
 	ID           uuid.UUID
 	CapabilityID uuid.UUID
+	TenantID     uuid.UUID
 	// Amount is what the charge took; RefundedAmount is what has been returned
 	// from it since.
 	Amount         Nanos
@@ -286,6 +287,11 @@ type ChargeRecord struct {
 	ExternalRef string
 	// Overrun reports that the charge crossed a ceiling (OverrunRecord).
 	Overrun bool
+	// Op and Actor are what the charge was for and who made it, as the
+	// request named them; At is when it was committed.
+	Op    Op
+	Actor string
+	At    time.Time
 }
 
 // MaxExternalRefBytes bounds ChargeRequest.ExternalRef: long enough for any

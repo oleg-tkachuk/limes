@@ -50,12 +50,13 @@ const (
 	// outcomeOverrun — committed past a ceiling under OverrunRecord.
 	outcomeOverrun = "overrun"
 	// outcomeCapExceeded — a capability's, an ancestor's or a copy's ceiling
-	// refused it.
-	outcomeCapExceeded = "cap_exceeded"
+	// refused it. The refusals carry their Reason's name, so a dashboard and
+	// a refused response say the same thing.
+	outcomeCapExceeded = string(ReasonBudgetExceeded)
 	// outcomeTenantExceeded — the tenant aggregate refused it.
-	outcomeTenantExceeded = "tenant_exceeded"
+	outcomeTenantExceeded = string(ReasonTenantBudgetExceeded)
 	// outcomeLimitExceeded — a request limit refused a Bump.
-	outcomeLimitExceeded = "limit_exceeded"
+	outcomeLimitExceeded = string(ReasonRequestLimitExceeded)
 	// outcomeError — it failed for any other reason: a malformed request, a
 	// failed onCharged, a store error.
 	outcomeError = "error"

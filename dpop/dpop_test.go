@@ -51,7 +51,7 @@ func TestDPoPAcceptsAProofFromTheBoundKey(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			c := boundJKT(t, key)
 			v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }})
-			proof, err := Sign(context.Background(), key, ProofRequest{Method: "POST", URL: dpopURL + "?x=1", Token: "the-token", Now: now})
+			proof, err := Sign(context.Background(), key, ProofRequest{Method: "POST", URL: dpopURL + "?x=1", Token: "the-token", IssuedAt: now})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -72,7 +72,7 @@ func TestDPoPRefusals(t *testing.T) {
 	key, other := keys["Ed25519"], keys["P-256"]
 	c := boundJKT(t, key)
 	fresh := func(k crypto.Signer, method, url, token string, at time.Time) string {
-		p, err := Sign(context.Background(), k, ProofRequest{Method: method, URL: url, Token: token, Now: at})
+		p, err := Sign(context.Background(), k, ProofRequest{Method: method, URL: url, Token: token, IssuedAt: at})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -112,17 +112,17 @@ func TestDPoPPathOnlyIgnoresHostButNotPath(t *testing.T) {
 	key := dpopKeys(t)["Ed25519"]
 	c := boundJKT(t, key)
 	v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }, MatchPathOnly: true})
-	proof, _ := Sign(context.Background(), key, ProofRequest{Method: "POST", URL: dpopURL, Token: "tok", Now: now})
+	proof, _ := Sign(context.Background(), key, ProofRequest{Method: "POST", URL: dpopURL, Token: "tok", IssuedAt: now})
 	req := Proof{JWT: proof, Method: "POST", URL: "http://10.0.0.7:8080/example.data.v1.ObjectService/GetObject"}
 	if err := v.Verify(context.Background(), Request{Proof: req, Token: "tok", JKT: c, Holder: testHolder}); err != nil {
 		t.Fatalf("path-only match behind a proxy: %v", err)
 	}
-	proof, _ = Sign(context.Background(), key, ProofRequest{Method: "POST", URL: "https://gw.example.com/api/example.data.v1.ObjectService/GetObject", Token: "tok", Now: now})
+	proof, _ = Sign(context.Background(), key, ProofRequest{Method: "POST", URL: "https://gw.example.com/api/example.data.v1.ObjectService/GetObject", Token: "tok", IssuedAt: now})
 	req.JWT = proof
 	if err := v.Verify(context.Background(), Request{Proof: req, Token: "tok", JKT: c, Holder: testHolder}); err != nil {
 		t.Fatalf("path-only match behind a prefix-stripping proxy: %v", err)
 	}
-	proof, _ = Sign(context.Background(), key, ProofRequest{Method: "POST", URL: dpopURL, Token: "tok", Now: now})
+	proof, _ = Sign(context.Background(), key, ProofRequest{Method: "POST", URL: dpopURL, Token: "tok", IssuedAt: now})
 	req.JWT, req.URL = proof, "http://10.0.0.7:8080/example.data.v1.ObjectService/DeleteObject"
 	if err := v.Verify(context.Background(), Request{Proof: req, Token: "tok", JKT: c, Holder: testHolder}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("path-only with another path: err = %v, want ErrInvalid", err)
@@ -166,7 +166,7 @@ func TestDPoPProofFromAnOpaqueSigner(t *testing.T) {
 	for name, key := range dpopKeys(t) {
 		t.Run(name, func(t *testing.T) {
 			c := boundJKT(t, key)
-			proof, err := Sign(context.Background(), opaqueSigner{key}, ProofRequest{Method: "POST", URL: dpopURL, Token: "tok", Now: now})
+			proof, err := Sign(context.Background(), opaqueSigner{key}, ProofRequest{Method: "POST", URL: dpopURL, Token: "tok", IssuedAt: now})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -321,7 +321,7 @@ func TestDPoPMatchesNormalizedURIs(t *testing.T) {
 		{"https://data.example.com/v1/obj", "https://data.example.com:8443/v1/obj", false},
 	} {
 		v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }})
-		proof, err := Sign(context.Background(), key, ProofRequest{Method: dpopMethod, URL: tc.proofURL, Token: "tok", Now: now})
+		proof, err := Sign(context.Background(), key, ProofRequest{Method: dpopMethod, URL: tc.proofURL, Token: "tok", IssuedAt: now})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -394,7 +394,7 @@ type opaqueSigner struct{ crypto.Signer }
 // naming EdDSA, is still read.
 func TestSignWritesTheFullySpecifiedAlgorithm(t *testing.T) {
 	key := dpopKeys(t)["Ed25519"]
-	proof, err := Sign(context.Background(), key, ProofRequest{Method: dpopMethod, URL: dpopURL, Token: "tok", Now: time.Now()})
+	proof, err := Sign(context.Background(), key, ProofRequest{Method: dpopMethod, URL: dpopURL, Token: "tok", IssuedAt: time.Now()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -473,7 +473,7 @@ func TestDPoPReplayIsCaughtAtTheWindowEdge(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := boundJKT(t, priv)
-	proof, err := Sign(context.Background(), priv, ProofRequest{Method: "POST", URL: dpopURL, Token: "tok", Now: iat})
+	proof, err := Sign(context.Background(), priv, ProofRequest{Method: "POST", URL: dpopURL, Token: "tok", IssuedAt: iat})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,7 +516,7 @@ func TestSignHandsTheContextToAContextSigner(t *testing.T) {
 	for name, key := range dpopKeys(t) {
 		ctx := context.WithValue(context.Background(), ctxKey{}, name)
 		s := &ctxSigner{Signer: key}
-		if _, err := Sign(ctx, s, ProofRequest{Method: dpopMethod, URL: dpopURL, Token: "tok", Now: time.Now()}); err != nil {
+		if _, err := Sign(ctx, s, ProofRequest{Method: dpopMethod, URL: dpopURL, Token: "tok", IssuedAt: time.Now()}); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
 		if s.got == nil || s.got.Value(ctxKey{}) != name {
@@ -526,10 +526,10 @@ func TestSignHandsTheContextToAContextSigner(t *testing.T) {
 }
 
 // A proof with no time is refused, not dated 1970.
-func TestSignRequiresNow(t *testing.T) {
+func TestSignRequiresIssuedAt(t *testing.T) {
 	key := dpopKeys(t)["Ed25519"]
 	if _, err := Sign(context.Background(), key, ProofRequest{Method: dpopMethod, URL: dpopURL, Token: "tok"}); err == nil {
-		t.Error("Sign accepted a zero Now")
+		t.Error("Sign accepted a zero IssuedAt")
 	}
 }
 
