@@ -295,6 +295,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"ReservationsTiedOnExpiryPageInIDOrder", checkReservationsTied[TX]},
 		{"HousekeepingRefusesANegativeLimit", checkHousekeepingLimits[TX]},
 		{"PurgeOrphansReleasesWhatARemovedCapabilityHeld", checkPurgeOrphans[TX]},
+		{"AChainTooDeepCountsOnceItsTopIsRemoved", checkLineageAfterRemoval[TX]},
 		{"TenantBudgetKeepsItsPeriodEnd", checkPeriodEnd[TX]},
 		{"ResetSpendAloneRollsThePeriodStart", checkPeriodStart[TX]},
 		{"TheZeroSubjectIsRefused", checkZeroSubject[TX]},
@@ -2113,6 +2114,37 @@ func checkHousekeepingLimits[TX any](t *testing.T, f fixture[TX]) {
 	}
 	if _, err := f.Usage.PurgeOrphans(f.Ctx, limes.PurgeOrphansRequest{Limit: -1}); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("PurgeOrphans with a negative limit: err = %v, want ErrInvalidRequest", err)
+	}
+}
+
+// checkLineageAfterRemoval holds a store to counting only the ancestors
+// still on record: a chain one too deep is ErrDelegationTooDeep, and once its
+// top is removed it is MaxDelegationDepth deep and counts like any other.
+func checkLineageAfterRemoval[TX any](t *testing.T, f fixture[TX]) {
+	if f.DeleteCapability == nil {
+		t.Skip("Env.DeleteCapability not set")
+	}
+	top, err := f.newCapability(uuid.Nil, unlimitedBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One more ancestor than MaxDelegationDepth: top and the links above
+	// the last.
+	leaf := top
+	for range limes.MaxDelegationDepth + 1 {
+		if leaf, err = f.newCapability(leaf, unlimitedBudget); err != nil {
+			t.Fatal(err)
+		}
+	}
+	charge := limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: leaf, tenant: f.Tenant}), Amount: one}
+	if _, err := f.Usage.Charge(f.Ctx, charge, nil); !errors.Is(err, limes.ErrDelegationTooDeep) {
+		t.Fatalf("a charge with %d ancestors on record: err = %v, want ErrDelegationTooDeep", limes.MaxDelegationDepth+1, err)
+	}
+	if err := f.DeleteCapability(top); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Usage.Charge(f.Ctx, charge, nil); err != nil {
+		t.Errorf("a charge with %d ancestors on record, the top removed: %v", limes.MaxDelegationDepth, err)
 	}
 }
 

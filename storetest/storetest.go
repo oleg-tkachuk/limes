@@ -186,6 +186,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"PurgeDropsExpiredRecordsAndTheirEntries", checkPurge},
 		{"PurgeWorksInBatches", checkPurgeBatches},
 		{"PurgeKeepsARevocationAVerifierMayStillNeed", checkPurgeRetention},
+		{"AChainTooDeepAnswersOnceItsTopIsPurged", checkMaxDepthAfterPurge},
 		{"ListByPrincipalPages", checkListPages},
 		{"ListByPrincipalFilters", checkListFilters},
 		{"ListByPrincipalExpiresAtTheInstant", checkListExpiryInstant},
@@ -710,6 +711,26 @@ func checkMaxDepthCascade(t *testing.T, f fixture) {
 		if err != nil || rec.Revocation == nil || !rec.Revocation.Cascaded {
 			t.Fatalf("the link %d delegations below a cascade: %v; want an entry of its own", depth+1, err)
 		}
+	}
+}
+
+// checkMaxDepthAfterPurge holds IsRevoked to the ancestors still on record:
+// a chain one too deep is ErrDelegationTooDeep, and once Purge takes its
+// expired top it is MaxDelegationDepth deep and answers.
+func checkMaxDepthAfterPurge(t *testing.T, f fixture) {
+	top := f.insert(t, f.newCapability("agent:top", uuid.Nil, f.now.Add(-expiredAgo)))
+	leaf := top
+	for range limes.MaxDelegationDepth + 1 {
+		leaf = f.live(t, "agent:link", leaf.ID)
+	}
+	if revoked, err := f.Store.IsRevoked(f.Ctx, leaf.ID); !errors.Is(err, limes.ErrDelegationTooDeep) {
+		t.Fatalf("IsRevoked with %d ancestors on record = %v, %v; want ErrDelegationTooDeep", limes.MaxDelegationDepth+1, revoked, err)
+	}
+	if got, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace}); err != nil || got.Purged != 1 {
+		t.Fatalf("Purge = %+v, %v; want the expired top purged", got, err)
+	}
+	if revoked, err := f.Store.IsRevoked(f.Ctx, leaf.ID); err != nil || revoked {
+		t.Errorf("IsRevoked with %d ancestors on record, the top purged = %v, %v; want false", limes.MaxDelegationDepth, revoked, err)
 	}
 }
 
