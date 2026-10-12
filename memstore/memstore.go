@@ -645,7 +645,7 @@ func (s *UsageStore[TX]) Charge(
 			return s.replayLocked(e), nil
 		}
 	}
-	return s.chargeLocked(ctx, req, unit, ancestorIDs(ancestors), ancestors, nil, onCharged)
+	return s.chargeLocked(ctx, req, unit, ancestors, nil, onCharged)
 }
 
 // ChargeByRef returns the charge a capability took under externalRef.
@@ -723,21 +723,25 @@ func ancestorIDs(ancestors []limes.Capability) []uuid.UUID {
 }
 
 // chargeLocked checks every ceiling and, if all admit the charge, publishes
-// it together with the release of settling (when non-nil). Held amounts count
-// against each ceiling, except the one being settled. s.mu must be held.
+// it together with the release of settling (when non-nil). The charge is
+// spent on ancestors, the lineage as it stands; the hold is released from the
+// ancestors that hold it, which a row dropped since may have left. Held
+// amounts count against each ceiling, except the one being settled where it
+// is held. s.mu must be held.
 func (s *UsageStore[TX]) chargeLocked(
 	ctx context.Context,
 	req limes.ChargeRequest,
 	unit string,
-	ids []uuid.UUID,
 	ancestors []limes.Capability,
 	settling *hold,
 	onCharged func(ctx context.Context, tx TX) error,
 ) (limes.ChargeReceipt, error) {
 	var released limes.Nanos
+	var holders []uuid.UUID
 	reservationID := uuid.Nil
 	if settling != nil {
 		released = settling.amount
+		holders = settling.ancestors
 		reservationID = settling.id
 	}
 	// crossed decides a ceiling the charge would cross: under OverrunRecord
@@ -754,7 +758,7 @@ func (s *UsageStore[TX]) chargeLocked(
 
 	u := s.usage[req.Subject.CapabilityID()]
 	if err := s.checkCeilingsLocked(ceilingCheck{
-		amount: req.Amount, released: released, maxBudget: req.Subject.Budget(), unit: unit,
+		amount: req.Amount, released: released, holders: holders, maxBudget: req.Subject.Budget(), unit: unit,
 		capID: req.Subject.CapabilityID(), tenantID: req.Subject.TenantID(), ancestors: ancestors, copies: req.Subject.Copies(),
 	}, crossed); err != nil {
 		return limes.ChargeReceipt{SpentAmount: u.SpentAmount, TenantID: req.Subject.TenantID(), UnitCode: unit}, err
@@ -780,15 +784,20 @@ func (s *UsageStore[TX]) chargeLocked(
 	u.ReservedAmount = max0(u.ReservedAmount - released)
 	u.UnitCode = unit
 	s.usage[req.Subject.CapabilityID()] = u
-	for _, id := range ids {
-		au := s.usage[id]
-		au.CapabilityID = id
+	for _, a := range ancestors {
+		au := s.usage[a.ID]
+		au.CapabilityID = a.ID
 		au.SpentAmount += req.Amount
-		au.ReservedAmount = max0(au.ReservedAmount - released)
 		if au.UnitCode == "" {
 			au.UnitCode = unit
 		}
-		s.usage[id] = au
+		s.usage[a.ID] = au
+	}
+	for _, id := range holders {
+		if au, ok := s.usage[id]; ok {
+			au.ReservedAmount = max0(au.ReservedAmount - released)
+			s.usage[id] = au
+		}
 	}
 	b := s.tenantLocked(req.Subject.TenantID(), unit)
 	b.SpentAmount += req.Amount
@@ -806,7 +815,7 @@ func (s *UsageStore[TX]) chargeLocked(
 		copyIDs = append(copyIDs, c.RevocationID)
 	}
 	entry := ledgerEntry{
-		ID: uuid.New(), CapabilityID: req.Subject.CapabilityID(), Ancestors: ids,
+		ID: uuid.New(), CapabilityID: req.Subject.CapabilityID(), Ancestors: ancestorIDs(ancestors),
 		TenantID: req.Subject.TenantID(), Amount: req.Amount, UnitCode: unit,
 		Op: req.Op, Actor: req.Actor, At: s.nowFn(), Copies: copyIDs,
 		ExternalRef: req.ExternalRef, ReservationID: reservationID, Overrun: overrun,
@@ -837,11 +846,14 @@ func (s *UsageStore[TX]) tenantLocked(tenantID uuid.UUID, unit string) limes.Ten
 // the amount of a hold being settled by it, which no longer counts.
 type ceilingCheck struct {
 	amount, released limes.Nanos
-	maxBudget        limes.BudgetCeiling // the capability's own, from its token
-	unit             string              // normalised
-	capID, tenantID  uuid.UUID
-	ancestors        []limes.Capability
-	copies           []limes.CopyCeiling
+	// holders are the ancestors that hold released; the capability, its
+	// copies and its tenant always do.
+	holders         []uuid.UUID
+	maxBudget       limes.BudgetCeiling // the capability's own, from its token
+	unit            string              // normalised
+	capID, tenantID uuid.UUID
+	ancestors       []limes.Capability
+	copies          []limes.CopyCeiling
 }
 
 // checkCeilingsLocked measures c against the copy's ceilings innermost
@@ -856,14 +868,16 @@ func (s *UsageStore[TX]) checkCeilingsLocked(c ceilingCheck, crossed func(error)
 	if err := s.checkRangeLocked(c); err != nil {
 		return err
 	}
-	// A settle at or below its hold adds nothing to what every counter
-	// already holds, so no ceiling can refuse it — not even one crossed
-	// since the hold was made. Only the excess must fit.
-	if c.amount <= c.released {
-		return nil
-	}
+	// A settle at or below its hold adds nothing to a counter that holds it,
+	// so no ceiling there can refuse it — not even one crossed since the
+	// hold was made. Only the excess must fit. An ancestor that does not
+	// hold it takes the whole amount.
+	withinHold := c.amount <= c.released
 	for _, cp := range c.copies {
 		cc := s.copies[string(cp.RevocationID)]
+		if withinHold {
+			continue
+		}
 		if !cp.AdmitsBudget(cc.spent + cc.reserved - c.released + c.amount) {
 			if err := crossed(fmt.Errorf("%w: copy %x", limes.ErrBudgetExceeded, cp.RevocationID)); err != nil {
 				return err
@@ -871,20 +885,27 @@ func (s *UsageStore[TX]) checkCeilingsLocked(c ceilingCheck, crossed func(error)
 		}
 	}
 	u := s.usage[c.capID]
-	if !c.maxBudget.Admits(u.SpentAmount + u.ReservedAmount - c.released + c.amount) {
+	if !withinHold && !c.maxBudget.Admits(u.SpentAmount+u.ReservedAmount-c.released+c.amount) {
 		if err := crossed(limes.ErrBudgetExceeded); err != nil {
 			return err
 		}
 	}
 	for _, a := range c.ancestors {
 		au := s.usage[a.ID]
-		if !a.Caveats.Budget.Admits(au.SpentAmount + au.ReservedAmount - c.released + c.amount) {
+		held := limes.Nanos(0)
+		if slices.Contains(c.holders, a.ID) {
+			held = c.released
+		}
+		if c.amount <= held {
+			continue
+		}
+		if !a.Caveats.Budget.Admits(au.SpentAmount + au.ReservedAmount - held + c.amount) {
 			if err := crossed(fmt.Errorf("%w: ancestor %s", limes.ErrBudgetExceeded, a.ID)); err != nil {
 				return err
 			}
 		}
 	}
-	if b, ok := s.budgets[c.tenantID]; ok &&
+	if b, ok := s.budgets[c.tenantID]; ok && !withinHold &&
 		!b.Ceiling.Admits(b.SpentAmount+c.amount+max0(b.ReservedAmount-c.released)) {
 		if err := crossed(limes.ErrTenantBudgetExceeded); err != nil {
 			return err
@@ -1058,7 +1079,7 @@ func (s *UsageStore[TX]) Settle(
 	}).(limes.MeterSubject)
 	receipt, err := s.chargeLocked(ctx, limes.ChargeRequest{
 		Subject: held, Amount: req.Amount, Op: h.op, Actor: h.actor, Overrun: req.Overrun,
-	}, h.unit, h.ancestors, ancestors, &h, onCharged)
+	}, h.unit, ancestors, &h, onCharged)
 	if err != nil {
 		return receipt, err
 	}
