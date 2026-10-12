@@ -34,17 +34,23 @@ tasks:
       - task --list
 
   verify-all:
-    desc: "gofmt + go mod tidy/verify + golangci-lint + a 32-bit build + the unit suite + govulncheck + actionlint + the workflow scripts + the release rules and notes — what CI runs"
+    desc: "gofmt + go mod tidy/verify + golangci-lint + a 32-bit build + the unit suite + the example + govulncheck + actionlint + the workflow scripts + the release rules and notes — what CI runs"
     cmds:
       - task: fmt:check
       - task: verify:tidy
       - task: lint
       - task: verify:32-bit
       - task: test
+      - task: verify:example
       - task: vuln
       - task: verify:workflows
       - task: verify:scripts
       - task: verify:release-rules
+
+  verify:example:
+    desc: "Run ./example end to end: it exits non-zero on any step that does not do what the README says"
+    cmds:
+      - go run ./example
 
   vuln:
     desc: "govulncheck — vulnerabilities this module's code actually reaches"

@@ -143,8 +143,8 @@ jobs:
       # then GitHub's list of merged pull requests, shaped by
       # .github/release.yml. A re-run publishing an earlier run's tag has no
       # generated notes and gets the list alone. Then the Go proxy is told of the tag, so
-      # `go get …@latest` and the README's badge see it now rather than
-      # whenever the proxy next refreshes; the release stands without it.
+      # `go get …@latest` sees it now rather than whenever the proxy next
+      # refreshes; the release stands without it.
       - name: Publish the release
         if: steps.catchup.outputs.release == 'true'
         env:

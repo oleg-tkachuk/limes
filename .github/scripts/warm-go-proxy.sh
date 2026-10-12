@@ -4,8 +4,7 @@
 # Usage: warm-go-proxy.sh <tag>        e.g. v0.3.0
 #
 # proxy.golang.org learns of a version when someone asks for it, and until
-# then its @latest — which `go get` and the README's badge read — keeps
-# answering the previous one. Asking for the version's .info, the endpoint of
+# then `go get …@latest` may resolve to the previous one. Asking for the version's .info, the endpoint of
 # the GOPROXY protocol `go list -m module@version` would ask, makes it fetch
 # the tag now. The module is this repository's path: it lives at the root.
 
