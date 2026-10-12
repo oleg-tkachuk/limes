@@ -950,7 +950,17 @@ func checkReservations[TX any](t *testing.T, f fixture[TX]) {
 		t.Errorf("the root's holds = %v, want only its own %v", got, onRoot.ID)
 	}
 
-	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: f.childSubject(), ReservationID: first.ID, Amount: held}, nil); err != nil {
+	// A hold is settled by the copy that made it: not by the capability
+	// without it, nor under another copy, whose own limits it would shed.
+	other := []limes.CopyCeiling{{RevocationID: []byte("copy-2"), Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true}}}
+	for name, c := range map[string][]limes.CopyCeiling{"no copy": nil, "another copy": other} {
+		subject := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: unit, copies: c})
+		if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: subject, ReservationID: first.ID, Amount: held}, nil); !errors.Is(err, limes.ErrReservationNotFound) {
+			t.Errorf("a copy's hold settled under %s: err = %v, want ErrReservationNotFound", name, err)
+		}
+	}
+	byCopy := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: unit, copies: copies})
+	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: byCopy, ReservationID: first.ID, Amount: held}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{ReservationID: second.ID}); err != nil {

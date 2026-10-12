@@ -455,6 +455,12 @@ func uuidLess(a, b uuid.UUID) bool { return bytes.Compare(a[:], b[:]) < 0 }
 
 // ─── limes.UsageStore[TX] ─────────────────────────────────────────────
 
+// sameCopies reports whether two lists of copy limits name the same copies,
+// in the same order: a hold is settled under the copies it was made under.
+func sameCopies(a, b []limes.CopyCeiling) bool {
+	return slices.EqualFunc(a, b, func(x, y limes.CopyCeiling) bool { return bytes.Equal(x.RevocationID, y.RevocationID) })
+}
+
 // checkSubject refuses a subject no verifier or record made: the zero
 // MeterSubject names no capability and no tenant to count against.
 func checkSubject(s limes.MeterSubject) error {
@@ -977,7 +983,7 @@ func (s *UsageStore[TX]) Settle(
 			return s.replayLocked(e), nil
 		}
 	}
-	if !ok || h.capID != subject || !h.expires.After(s.nowFn()) {
+	if !ok || h.capID != subject || !h.expires.After(s.nowFn()) || !sameCopies(h.copies, req.Subject.Copies()) {
 		return limes.ChargeReceipt{}, limes.ErrReservationNotFound
 	}
 	ancestors, err := s.lineage(h.capID)
