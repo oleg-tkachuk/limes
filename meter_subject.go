@@ -39,14 +39,15 @@ func (v VerifiedCapability) MeterSubject() MeterSubject {
 }
 
 // StoredMeterSubject is what the Meter counts a capability against for a
-// cost reported with no token in hand, read from the capability's record in
-// store. It takes the store rather than a Record, whose fields any caller can
-// set, so the ceilings are the ones on record. A stored record names no
+// cost reported with no token in hand, read from the capability's record —
+// records is the Store, or anything reading its records. It reads the record
+// itself rather than take a Record, whose fields any caller can set, so the
+// ceilings are the ones on record. A stored record names no
 // Biscuit copy, so the subject carries none. A revoked capability still gives
 // one: a cost already incurred belongs in the ledger. ErrNotFound when the
 // capability is not on record.
-func StoredMeterSubject(ctx context.Context, store Store, capabilityID uuid.UUID) (MeterSubject, error) {
-	rec, err := store.GetRecord(ctx, capabilityID)
+func StoredMeterSubject(ctx context.Context, records RecordReader, capabilityID uuid.UUID) (MeterSubject, error) {
+	rec, err := records.GetRecord(ctx, capabilityID)
 	if err != nil {
 		return MeterSubject{}, err
 	}

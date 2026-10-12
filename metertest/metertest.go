@@ -451,7 +451,8 @@ func checkChargeByRef[TX any](t *testing.T, f fixture[TX]) {
 	if _, err := f.Usage.ChargeByRef(f.Ctx, limes.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: "call-1"}); !errors.Is(err, limes.ErrChargeNotFound) {
 		t.Fatalf("before any charge: err = %v, want ErrChargeNotFound", err)
 	}
-	r, err := f.charge(limes.ChargeRequest{Amount: 3 * one, ExternalRef: "call-1"}, nil)
+	const actor = "reporter"
+	r, err := f.charge(limes.ChargeRequest{Amount: 3 * one, ExternalRef: "call-1", Op: limes.OpSearch, Actor: actor}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,8 +461,9 @@ func checkChargeByRef[TX any](t *testing.T, f fixture[TX]) {
 	}
 	got, err := f.Usage.ChargeByRef(f.Ctx, limes.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: "call-1"})
 	if err != nil || got.ID != r.ChargeID || got.CapabilityID != f.child || got.Amount != 3*one ||
-		got.RefundedAmount != one || got.ExternalRef != "call-1" || got.UnitCode != unit || got.Overrun {
-		t.Fatalf("ChargeByRef = %+v, %v; want charge %s of 3 with 1 refunded", got, err, r.ChargeID)
+		got.RefundedAmount != one || got.ExternalRef != "call-1" || got.UnitCode != unit || got.Overrun ||
+		got.TenantID != f.Tenant || got.Op != limes.OpSearch || got.Actor != actor || got.At.IsZero() {
+		t.Fatalf("ChargeByRef = %+v, %v; want charge %s of 3 with 1 refunded, for %s by %s in %s", got, err, r.ChargeID, limes.OpSearch, actor, f.Tenant)
 	}
 	if byID, err := f.Usage.GetCharge(f.Ctx, r.ChargeID); err != nil || byID != got {
 		t.Errorf("GetCharge = %+v, %v; want what ChargeByRef read, %+v", byID, err, got)

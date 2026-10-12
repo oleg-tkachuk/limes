@@ -39,6 +39,17 @@ type IssuanceStore interface {
 	IsRevoked(ctx context.Context, id uuid.UUID) (bool, error)
 }
 
+// RecordReader reads one capability's record. Store implements it; a caller
+// that only reads records — StoredMeterSubject — asks for no more.
+type RecordReader interface {
+	// GetRecord reads back everything Insert and Revoke wrote about a
+	// capability: the capability, who issued it, and its own revocation
+	// entry if it has one. ErrNotFound when there is no record. For audit
+	// and admin reads, and for a reporter that needs a capability's
+	// ceilings; Verifier never calls it.
+	GetRecord(ctx context.Context, id uuid.UUID) (Record, error)
+}
+
 // MaxDelegationDepth is the most ancestors a capability may have: how far
 // IsRevoked walks, and how deep Delegate mints.
 const MaxDelegationDepth = 64
@@ -59,13 +70,7 @@ type InsertRequest struct {
 // cost flat.
 type Store interface {
 	IssuanceStore
-
-	// GetRecord reads back everything Insert and Revoke wrote about a
-	// capability: the capability, who issued it, and its own revocation
-	// entry if it has one. ErrNotFound when there is no record. For audit
-	// and admin reads, and for a reporter that needs a capability's
-	// ceilings; Verifier never calls it.
-	GetRecord(ctx context.Context, id uuid.UUID) (Record, error)
+	RecordReader
 
 	// Revoke adds an entry to the revocation list. Idempotent: a
 	// duplicate revoke is a no-op. An id not on record — or not visible
