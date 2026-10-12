@@ -35,7 +35,7 @@ func FuzzDPoPCheck(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, p string) {
 		v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }})
-		err := v.Verify(context.Background(), Request{Proof: Proof{JWT: p, Method: dpopMethod, URL: dpopURL}, Token: "tok", JKT: jkt})
+		err := v.Verify(context.Background(), Request{Proof: Proof{JWT: p, Method: dpopMethod, URL: dpopURL}, Token: "tok", JKT: jkt, Holder: testHolder})
 		if err == nil {
 			t.Fatalf("a proof without the bound key was accepted: %q", p)
 		}
@@ -102,7 +102,7 @@ func FuzzDPoPClaims(f *testing.F) {
 		input := jose.B64([]byte(header)) + "." + jose.B64([]byte(claims))
 		p := input + "." + jose.B64(ed25519.Sign(key, []byte(input)))
 		v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }})
-		if err := v.Verify(context.Background(), Request{Proof: Proof{JWT: p, Method: dpopMethod, URL: dpopURL}, Token: "tok", JKT: jkt}); err != nil {
+		if err := v.Verify(context.Background(), Request{Proof: Proof{JWT: p, Method: dpopMethod, URL: dpopURL}, Token: "tok", JKT: jkt, Holder: testHolder}); err != nil {
 			return
 		}
 		var c proofClaims

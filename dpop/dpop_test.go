@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -55,10 +56,10 @@ func TestDPoPAcceptsAProofFromTheBoundKey(t *testing.T) {
 				t.Fatal(err)
 			}
 			req := Proof{JWT: proof, Method: "POST", URL: dpopURL}
-			if err := v.Verify(context.Background(), Request{Proof: req, Token: "the-token", JKT: c}); err != nil {
+			if err := v.Verify(context.Background(), Request{Proof: req, Token: "the-token", JKT: c, Holder: testHolder}); err != nil {
 				t.Fatalf("valid proof refused: %v", err)
 			}
-			if err := v.Verify(context.Background(), Request{Proof: req, Token: "the-token", JKT: c}); !errors.Is(err, ErrReplayed) {
+			if err := v.Verify(context.Background(), Request{Proof: req, Token: "the-token", JKT: c, Holder: testHolder}); !errors.Is(err, ErrReplayed) {
 				t.Fatalf("replayed proof: err = %v, want ErrReplayed", err)
 			}
 		})
@@ -98,7 +99,7 @@ func TestDPoPRefusals(t *testing.T) {
 			v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }})
 			req := base
 			req.JWT = tc.proof
-			err := v.Verify(context.Background(), Request{Proof: req, Token: "the-token", JKT: c})
+			err := v.Verify(context.Background(), Request{Proof: req, Token: "the-token", JKT: c, Holder: testHolder})
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("err = %v, want %v", err, tc.want)
 			}
@@ -113,17 +114,17 @@ func TestDPoPPathOnlyIgnoresHostButNotPath(t *testing.T) {
 	v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }, MatchPathOnly: true})
 	proof, _ := Sign(context.Background(), key, ProofRequest{Method: "POST", URL: dpopURL, Token: "tok", Now: now})
 	req := Proof{JWT: proof, Method: "POST", URL: "http://10.0.0.7:8080/example.data.v1.ObjectService/GetObject"}
-	if err := v.Verify(context.Background(), Request{Proof: req, Token: "tok", JKT: c}); err != nil {
+	if err := v.Verify(context.Background(), Request{Proof: req, Token: "tok", JKT: c, Holder: testHolder}); err != nil {
 		t.Fatalf("path-only match behind a proxy: %v", err)
 	}
 	proof, _ = Sign(context.Background(), key, ProofRequest{Method: "POST", URL: "https://gw.example.com/api/example.data.v1.ObjectService/GetObject", Token: "tok", Now: now})
 	req.JWT = proof
-	if err := v.Verify(context.Background(), Request{Proof: req, Token: "tok", JKT: c}); err != nil {
+	if err := v.Verify(context.Background(), Request{Proof: req, Token: "tok", JKT: c, Holder: testHolder}); err != nil {
 		t.Fatalf("path-only match behind a prefix-stripping proxy: %v", err)
 	}
 	proof, _ = Sign(context.Background(), key, ProofRequest{Method: "POST", URL: dpopURL, Token: "tok", Now: now})
 	req.JWT, req.URL = proof, "http://10.0.0.7:8080/example.data.v1.ObjectService/DeleteObject"
-	if err := v.Verify(context.Background(), Request{Proof: req, Token: "tok", JKT: c}); !errors.Is(err, ErrInvalid) {
+	if err := v.Verify(context.Background(), Request{Proof: req, Token: "tok", JKT: c, Holder: testHolder}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("path-only with another path: err = %v, want ErrInvalid", err)
 	}
 }
@@ -170,7 +171,7 @@ func TestDPoPProofFromAnOpaqueSigner(t *testing.T) {
 				t.Fatal(err)
 			}
 			v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }})
-			if err := v.Verify(context.Background(), Request{Proof: Proof{JWT: proof, Method: "POST", URL: dpopURL}, Token: "tok", JKT: c}); err != nil {
+			if err := v.Verify(context.Background(), Request{Proof: Proof{JWT: proof, Method: "POST", URL: dpopURL}, Token: "tok", JKT: c, Holder: testHolder}); err != nil {
 				t.Fatalf("proof from an opaque signer refused: %v", err)
 			}
 		})
@@ -237,39 +238,40 @@ func TestDPoPRefusesAPrivateJWK(t *testing.T) {
 	proof := input + "." + jose.B64(ed25519.Sign(priv, []byte(input)))
 
 	v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }})
-	err = v.Verify(context.Background(), Request{Proof: Proof{JWT: proof, Method: "POST", URL: dpopURL}, Token: "the-token", JKT: c})
+	err = v.Verify(context.Background(), Request{Proof: Proof{JWT: proof, Method: "POST", URL: dpopURL}, Token: "the-token", JKT: c, Holder: testHolder})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("a proof carrying its private key: err = %v, want ErrInvalid", err)
 	}
 }
 
-// One key cannot fill the cache: past its share only its own proofs are
-// refused, and every other key's fresh proof is still recorded.
-func TestMemoryReplayCacheBoundsEachKey(t *testing.T) {
+// One holder cannot fill the cache, however many keys it signs with: past
+// its share only its own proofs are refused, and every other holder's fresh
+// proof is still recorded.
+func TestMemoryReplayCacheBoundsEachHolder(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	const share = 3
-	c := newReplay(t, MemoryReplayCacheConfig{MaxEntries: 100, EntriesPerKey: share})
+	c := newReplay(t, MemoryReplayCacheConfig{MaxEntries: 100, EntriesPerHolder: share})
 	c.now = func() time.Time { return now }
 	for i := range share {
-		if seen(t, c, "noisy", fmt.Sprint(i), now.Add(time.Minute)) {
-			t.Fatalf("proof %d of the noisy key refused within its share", i)
+		if seenAs(t, c, "noisy", fmt.Sprint("key-", i), fmt.Sprint(i), now.Add(time.Minute)) {
+			t.Fatalf("proof %d of the noisy holder refused within its share", i)
 		}
 	}
-	if !seen(t, c, "noisy", "one more", now.Add(time.Minute)) {
-		t.Error("the noisy key recorded past its share")
+	if !seenAs(t, c, "noisy", "yet another key", "one more", now.Add(time.Minute)) {
+		t.Error("the noisy holder recorded past its share under a new key")
 	}
-	if seen(t, c, "quiet", "first", now.Add(time.Minute)) {
-		t.Error("another key's fresh proof refused because one key filled its share")
+	if seenAs(t, c, "quiet", "key-0", "first", now.Add(time.Minute)) {
+		t.Error("another holder's fresh proof refused because one holder filled its share")
 	}
 	// The same id under two keys is two proofs.
-	if seen(t, c, "other", "0", now.Add(time.Minute)) {
+	if seenAs(t, c, "other", "another key", "0", now.Add(time.Minute)) {
 		t.Error("an id another key used was refused")
 	}
 	now = now.Add(2 * time.Minute) // everything lapses, and the share with it
-	if seen(t, c, "noisy", "later", now.Add(time.Minute)) {
-		t.Error("the noisy key's share did not free as its ids lapsed")
+	if seenAs(t, c, "noisy", "key-0", "later", now.Add(time.Minute)) {
+		t.Error("the noisy holder's share did not free as its ids lapsed")
 	}
-	if got := newReplay(t, MemoryReplayCacheConfig{MaxEntries: 2}).maxPerKey; got != 2 {
+	if got := newReplay(t, MemoryReplayCacheConfig{MaxEntries: 2}).maxPerHolder; got != 2 {
 		t.Errorf("the default share in a cache smaller than it = %d, want the cache's size", got)
 	}
 }
@@ -294,10 +296,10 @@ func TestDPoPReadsMethodAndTimeAsTheRFCsDo(t *testing.T) {
 	}
 	v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }})
 	ctx := context.Background()
-	if err := v.Verify(ctx, Request{Proof: Proof{JWT: sign(claims("j1", "1800000000")), Method: "post", URL: dpopURL}, Token: "tok", JKT: c}); !errors.Is(err, ErrInvalid) {
+	if err := v.Verify(ctx, Request{Proof: Proof{JWT: sign(claims("j1", "1800000000")), Method: "post", URL: dpopURL}, Token: "tok", JKT: c, Holder: testHolder}); !errors.Is(err, ErrInvalid) {
 		t.Errorf("a POST proof for a post request: err = %v, want ErrInvalid", err)
 	}
-	if err := v.Verify(ctx, Request{Proof: Proof{JWT: sign(claims("j2", "1800000000.25")), Method: "POST", URL: dpopURL}, Token: "tok", JKT: c}); err != nil {
+	if err := v.Verify(ctx, Request{Proof: Proof{JWT: sign(claims("j2", "1800000000.25")), Method: "POST", URL: dpopURL}, Token: "tok", JKT: c, Holder: testHolder}); err != nil {
 		t.Errorf("a proof with a fractional iat: %v", err)
 	}
 }
@@ -323,7 +325,7 @@ func TestDPoPMatchesNormalizedURIs(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = v.Verify(context.Background(), Request{Proof: Proof{JWT: proof, Method: dpopMethod, URL: tc.requestURL}, Token: "tok", JKT: c})
+		err = v.Verify(context.Background(), Request{Proof: Proof{JWT: proof, Method: dpopMethod, URL: tc.requestURL}, Token: "tok", JKT: c, Holder: testHolder})
 		if tc.ok && err != nil {
 			t.Errorf("proof for %s, request %s: %v", tc.proofURL, tc.requestURL, err)
 		}
@@ -357,9 +359,18 @@ func TestHTUPathOnlyStillReadsTheProof(t *testing.T) {
 }
 
 // seen is c.Seen with a failure of the cache failing the test.
+// testHolder is the holder the proofs of these tests count against.
+const testHolder = "capability"
+
 func seen(t testing.TB, c ReplayCache, jkt, jti string, expires time.Time) bool {
 	t.Helper()
-	ok, err := c.Seen(context.Background(), ReplayEntry{JKT: jkt, JTI: jti, ExpiresAt: expires})
+	return seenAs(t, c, testHolder, jkt, jti, expires)
+}
+
+// seenAs is seen, counted against holder.
+func seenAs(t testing.TB, c ReplayCache, holder, jkt, jti string, expires time.Time) bool {
+	t.Helper()
+	ok, err := c.Seen(context.Background(), ReplayEntry{JKT: jkt, JTI: jti, Holder: holder, ExpiresAt: expires})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,8 +451,8 @@ func TestConstructorsRefuseABadConfiguration(t *testing.T) {
 	}
 	for name, cfg := range map[string]MemoryReplayCacheConfig{
 		"negative bound":         {MaxEntries: -1},
-		"negative per key":       {EntriesPerKey: -1},
-		"a share past the cache": {MaxEntries: 2, EntriesPerKey: 10},
+		"negative per holder":    {EntriesPerHolder: -1},
+		"a share past the cache": {MaxEntries: 2, EntriesPerHolder: 10},
 	} {
 		if _, err := NewMemoryReplayCache(cfg); err == nil {
 			t.Errorf("NewMemoryReplayCache, %s: accepted", name)
@@ -466,7 +477,7 @@ func TestDPoPReplayIsCaughtAtTheWindowEdge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := Request{Proof: Proof{JWT: proof, Method: "POST", URL: dpopURL}, Token: "tok", JKT: c}
+	req := Request{Proof: Proof{JWT: proof, Method: "POST", URL: dpopURL}, Token: "tok", JKT: c, Holder: testHolder}
 	for name, skew := range map[string]time.Duration{
 		"clocks agree":                        0,
 		"the cache reads later":               ReplayClockSkew / 2,
@@ -519,5 +530,47 @@ func TestSignRequiresNow(t *testing.T) {
 	key := dpopKeys(t)["Ed25519"]
 	if _, err := Sign(context.Background(), key, ProofRequest{Method: dpopMethod, URL: dpopURL, Token: "tok"}); err == nil {
 		t.Error("Sign accepted a zero Now")
+	}
+}
+
+// A proof past MaxProofBytes is refused unread, a jti past MaxJTIBytes is
+// never stored, and a request naming no holder is the caller's error.
+func TestDPoPBoundsWhatItReadsAndStores(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := boundJKT(t, priv)
+	jwk, _ := publicJWK(priv.Public())
+	sign := func(jti string) string {
+		header := fmt.Sprintf(`{"typ":%q,"alg":%q,"jwk":{"kty":%q,"crv":%q,"x":%q}}`, tokenType, jose.AlgEd25519, jwk.Kty, jwk.Crv, jwk.X)
+		claims := fmt.Sprintf(`{"jti":%q,"htm":"POST","htu":%q,"iat":%d,"ath":%q}`, jti, dpopURL, now.Unix(), accessTokenHash("tok"))
+		input := jose.B64([]byte(header)) + "." + jose.B64([]byte(claims))
+		return input + "." + jose.B64(ed25519.Sign(priv, []byte(input)))
+	}
+	replay := newReplay(t, MemoryReplayCacheConfig{})
+	v := newVerifier(t, VerifierConfig{Replay: replay, Now: func() time.Time { return now }})
+	ctx := context.Background()
+	verify := func(jwt, holder string) error {
+		return v.Verify(ctx, Request{Proof: Proof{JWT: jwt, Method: "POST", URL: dpopURL}, Token: "tok", JKT: c, Holder: holder})
+	}
+	if err := verify(sign(strings.Repeat("j", MaxJTIBytes)), testHolder); err != nil {
+		t.Errorf("a jti of MaxJTIBytes: %v", err)
+	}
+	if err := verify(sign(strings.Repeat("k", MaxJTIBytes+1)), testHolder); !errors.Is(err, ErrInvalid) {
+		t.Errorf("a jti past MaxJTIBytes: err = %v, want ErrInvalid", err)
+	}
+	if err := verify(sign(strings.Repeat("l", DefaultMaxProofBytes)), testHolder); !errors.Is(err, ErrInvalid) {
+		t.Errorf("a proof past DefaultMaxProofBytes: err = %v, want ErrInvalid", err)
+	}
+	if n := len(replay.seen); n != 1 {
+		t.Errorf("the cache holds %d ids, want only the one within bounds", n)
+	}
+	if err := verify(sign("fresh"), ""); err == nil || errors.Is(err, ErrInvalid) {
+		t.Errorf("a request naming no holder: err = %v, want the caller's error", err)
+	}
+	if _, err := NewVerifier(VerifierConfig{Replay: replay, MaxProofBytes: -1}); err == nil {
+		t.Error("NewVerifier accepted a negative MaxProofBytes")
 	}
 }

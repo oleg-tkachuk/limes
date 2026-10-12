@@ -54,3 +54,33 @@ func TestVerifyRequiresTheServerNonce(t *testing.T) {
 		t.Errorf("a verifier without nonces handed out %q, %v", got, err)
 	}
 }
+
+// holderLog records the holder of every proof id it is asked about.
+type holderLog struct{ holders []string }
+
+func (h *holderLog) Seen(_ context.Context, e dpop.ReplayEntry) (bool, error) {
+	h.holders = append(h.holders, e.Holder)
+	return false, nil
+}
+
+// A proof counts against the capability the token carries, so one capability
+// fills one share of the replay cache whatever keys its copies are bound to.
+func TestAProofCountsAgainstItsCapability(t *testing.T) {
+	issuer, base, _, _ := buildIssuerVerifier(t)
+	log := &holderLog{}
+	cfg := base.cfg
+	cfg.DPoP = newVerifier(t, dpop.VerifierConfig{Replay: log})
+	v, err := NewVerifier(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := dpopKeys(t)["Ed25519"]
+	token := issueBound(t, issuer, key)
+	got, err := v.Verify(t.Context(), withProof(t.Context(), t, key, token, audienceData, time.Now()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := got.Capability().ID.String(); len(log.holders) != 1 || log.holders[0] != want {
+		t.Errorf("proof counted against %q, want the capability %s", log.holders, want)
+	}
+}

@@ -268,28 +268,44 @@ type Proof struct {
 	URL string
 }
 
-// Request is what Verify checks: a proof, the access token it must name, and
-// the thumbprint of the key the token is bound to.
+// Request is what Verify checks: a proof, the access token it must name, the
+// thumbprint of the key the token is bound to, and who holds it.
 type Request struct {
 	Proof Proof
 	// Token is the access token the request presents.
 	Token string
 	// JKT is the RFC 7638 thumbprint of the key the token is bound to.
 	JKT string
+	// Holder names whose share of the replay cache the proof counts
+	// against: the capability the token carries, however many keys its
+	// copies are bound to. Required.
+	Holder string
 }
 
 // ReplayEntry is one proof id to record: the id of a proof from the key
-// with thumbprint JKT, remembered until ExpiresAt — ReplayClockSkew past the
-// last instant the verifier accepts the proof.
+// with thumbprint JKT, counted against Holder's share, remembered until
+// ExpiresAt — ReplayClockSkew past the last instant the verifier accepts the
+// proof.
 type ReplayEntry struct {
 	JKT, JTI  string
+	Holder    string
 	ExpiresAt time.Time
 }
 
+// MaxJTIBytes bounds a proof's jti. RFC 9449 §4.2 asks for 96 bits of
+// randomness, which a UUID or 22 base64url characters carry; a longer id
+// would only cost the replay cache memory for the whole window.
+const MaxJTIBytes = 128
+
+// DefaultMaxProofBytes bounds a proof a Verifier will look at when its
+// config names no MaxProofBytes. A proof with a P-256 key and a nonce is
+// under a kilobyte.
+const DefaultMaxProofBytes = 4 << 10
+
 // ReplayCache remembers proof ids for as long as a proof could be accepted.
 type ReplayCache interface {
-	// Seen records e and reports whether its id was already recorded. A key
-	// that has used its share of the cache reports true: the proof is
+	// Seen records e and reports whether its id was already recorded. A
+	// holder that has used its share of the cache reports true: the proof is
 	// refused rather than accepted unrecorded. A cache that cannot answer —
 	// its store unreachable — returns an error, and Verify refuses the proof
 	// with it.
@@ -310,6 +326,9 @@ type VerifierConfig struct {
 	// (RFC 9449 §8); a proof without one is refused with
 	// ErrNonceRequired, and Nonce gives the nonce to send back.
 	Nonces Nonces
+	// MaxProofBytes bounds the proof, refused unread past it. Zero:
+	// DefaultMaxProofBytes; negative is refused.
+	MaxProofBytes int
 	// MatchPathOnly compares only the path of Proof.URL, and lets the
 	// proof's path carry extra leading segments — for a server behind a
 	// proxy, which cannot know the scheme, host or mount prefix its clients
@@ -322,8 +341,8 @@ type Verifier struct {
 	cfg VerifierConfig
 }
 
-// NewVerifier builds a Verifier from cfg, refusing one with no ReplayCache
-// or a negative Window.
+// NewVerifier builds a Verifier from cfg, refusing one with no ReplayCache,
+// a negative Window or a negative MaxProofBytes.
 func NewVerifier(cfg VerifierConfig) (*Verifier, error) {
 	if cfg.Replay == nil {
 		return nil, ErrNoReplayCache
@@ -331,8 +350,14 @@ func NewVerifier(cfg VerifierConfig) (*Verifier, error) {
 	if cfg.Window < 0 {
 		return nil, fmt.Errorf("dpop: Window %s is negative", cfg.Window)
 	}
+	if cfg.MaxProofBytes < 0 {
+		return nil, fmt.Errorf("dpop: MaxProofBytes %d is negative", cfg.MaxProofBytes)
+	}
 	if cfg.Window == 0 {
 		cfg.Window = DefaultWindow
+	}
+	if cfg.MaxProofBytes == 0 {
+		cfg.MaxProofBytes = DefaultMaxProofBytes
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
@@ -358,18 +383,24 @@ func (v *Verifier) Nonce(ctx context.Context) (string, error) {
 	return v.cfg.Nonces.Nonce(ctx)
 }
 
-// check verifies p against the key-bound capability c presented as token. It
-// passes only with a proof that: is a dpop+jwt signed by the key its header
-// carries; whose key's thumbprint is the capability's; that names this method
-// and URL and this token's hash; that was issued within the window; and whose
-// jti is new.
+// Verify checks req.Proof against the key req.Token is bound to. It passes
+// only with a proof that: is no longer than MaxProofBytes; is a dpop+jwt
+// signed by the key its header carries; whose key's thumbprint is req.JKT;
+// that names this method and URL and this token's hash; that was issued
+// within the window; and whose jti, no longer than MaxJTIBytes, is new.
 func (v *Verifier) Verify(ctx context.Context, req Request) error {
 	if v == nil || v.cfg.Replay == nil {
 		return ErrNoReplayCache // a Verifier not made by NewVerifier
 	}
 	p, token := req.Proof, req.Token
+	if req.Holder == "" {
+		return errors.New("dpop: Request.Holder required")
+	}
 	if p.JWT == "" {
 		return ErrRequired
+	}
+	if len(p.JWT) > v.cfg.MaxProofBytes {
+		return fmt.Errorf("%w: proof is %d bytes (limit %d)", ErrInvalid, len(p.JWT), v.cfg.MaxProofBytes)
 	}
 	window, now := v.cfg.Window, v.cfg.Now
 
@@ -399,7 +430,7 @@ func (v *Verifier) Verify(ctx context.Context, req Request) error {
 	}
 
 	var claims proofClaims
-	if err := decodeSegment(parts.Payload, &claims); err != nil || claims.JTI == "" {
+	if err := decodeSegment(parts.Payload, &claims); err != nil || claims.JTI == "" || len(claims.JTI) > MaxJTIBytes {
 		return fmt.Errorf("%w: claims", ErrInvalid)
 	}
 	// RFC 9110 §9.1: a method is case-sensitive.
@@ -432,7 +463,9 @@ func (v *Verifier) Verify(ctx context.Context, req Request) error {
 	// Remembered past the last instant it is accepted, by more than the
 	// cache's clock can lag the verifier's: at iat+window it is still
 	// accepted, and a cache that dropped it then would let it through again.
-	seen, err := v.cfg.Replay.Seen(ctx, ReplayEntry{JKT: thumb, JTI: claims.JTI, ExpiresAt: iat.Add(window).Add(ReplayClockSkew)})
+	seen, err := v.cfg.Replay.Seen(ctx, ReplayEntry{
+		JKT: thumb, JTI: claims.JTI, Holder: req.Holder, ExpiresAt: iat.Add(window).Add(ReplayClockSkew),
+	})
 	if err != nil {
 		return fmt.Errorf("dpop: replay check: %w", err)
 	}
@@ -485,17 +518,19 @@ func decodeSegment(seg string, v any) error {
 // keep the window short, use server nonces (VerifierConfig.Nonces), or back
 // ReplayCache with a shared store.
 //
-// Every key gets a share of the cache of its own (EntriesPerKey), so the
-// holder of one key-bound token cannot fill it with proofs and lock every
-// other key out: past its share, only that key's proofs are refused.
+// Every holder gets a share of the cache of its own (EntriesPerHolder), so
+// one capability cannot fill it with proofs and lock every other one out —
+// not even a Biscuit whose copies are bound to as many keys as their holder
+// likes, since they are one capability: past its share, only its proofs are
+// refused.
 type MemoryReplayCache struct {
-	mu         sync.Mutex
-	seen       map[replayKey]time.Time
-	perKey     map[string]int // live ids per key thumbprint
-	expiries   expiryHeap     // the ids in seen, soonest to expire first
-	maxEntries int
-	maxPerKey  int
-	now        func() time.Time
+	mu           sync.Mutex
+	seen         map[replayKey]time.Time
+	perHolder    map[string]int // live ids per holder
+	expiries     expiryHeap     // the ids in seen, soonest to expire first
+	maxEntries   int
+	maxPerHolder int
+	now          func() time.Time
 }
 
 // replayKey is one proof id of one key.
@@ -505,44 +540,44 @@ type replayKey struct{ jkt, jti string }
 const (
 	// DefaultReplayCacheEntries bounds the whole cache.
 	DefaultReplayCacheEntries = 100_000
-	// DefaultReplayEntriesPerKey is how many live proof ids one key may
-	// hold: a thousand requests a window from one key.
-	DefaultReplayEntriesPerKey = 1_000
+	// DefaultReplayEntriesPerHolder is how many live proof ids one holder
+	// may have: a thousand requests a window from one capability.
+	DefaultReplayEntriesPerHolder = 1_000
 )
 
 // MemoryReplayCacheConfig configures a MemoryReplayCache.
 type MemoryReplayCacheConfig struct {
 	// MaxEntries bounds the cache. Zero: DefaultReplayCacheEntries.
 	MaxEntries int
-	// EntriesPerKey bounds the live proof ids of one key, no more than
-	// MaxEntries. Zero: DefaultReplayEntriesPerKey, or MaxEntries when that
-	// is smaller.
-	EntriesPerKey int
+	// EntriesPerHolder bounds the live proof ids of one holder, no more
+	// than MaxEntries. Zero: DefaultReplayEntriesPerHolder, or MaxEntries
+	// when that is smaller.
+	EntriesPerHolder int
 	// Now is the clock. Nil: time.Now.
 	Now func() time.Time
 }
 
 // NewMemoryReplayCache builds a MemoryReplayCache, refusing a negative bound
-// or a key's share larger than the whole cache.
+// or a holder's share larger than the whole cache.
 func NewMemoryReplayCache(cfg MemoryReplayCacheConfig) (*MemoryReplayCache, error) {
-	if cfg.MaxEntries < 0 || cfg.EntriesPerKey < 0 {
-		return nil, fmt.Errorf("dpop: replay cache bounds %d, %d are negative", cfg.MaxEntries, cfg.EntriesPerKey)
+	if cfg.MaxEntries < 0 || cfg.EntriesPerHolder < 0 {
+		return nil, fmt.Errorf("dpop: replay cache bounds %d, %d are negative", cfg.MaxEntries, cfg.EntriesPerHolder)
 	}
 	if cfg.MaxEntries == 0 {
 		cfg.MaxEntries = DefaultReplayCacheEntries
 	}
 	switch {
-	case cfg.EntriesPerKey == 0:
-		cfg.EntriesPerKey = min(DefaultReplayEntriesPerKey, cfg.MaxEntries)
-	case cfg.EntriesPerKey > cfg.MaxEntries:
-		return nil, fmt.Errorf("dpop: replay cache share of one key %d is larger than the cache, %d", cfg.EntriesPerKey, cfg.MaxEntries)
+	case cfg.EntriesPerHolder == 0:
+		cfg.EntriesPerHolder = min(DefaultReplayEntriesPerHolder, cfg.MaxEntries)
+	case cfg.EntriesPerHolder > cfg.MaxEntries:
+		return nil, fmt.Errorf("dpop: replay cache share of one holder %d is larger than the cache, %d", cfg.EntriesPerHolder, cfg.MaxEntries)
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
 	return &MemoryReplayCache{
-		seen: map[replayKey]time.Time{}, perKey: map[string]int{},
-		maxEntries: cfg.MaxEntries, maxPerKey: cfg.EntriesPerKey, now: cfg.Now,
+		seen: map[replayKey]time.Time{}, perHolder: map[string]int{},
+		maxEntries: cfg.MaxEntries, maxPerHolder: cfg.EntriesPerHolder, now: cfg.Now,
 	}, nil
 }
 
@@ -551,33 +586,35 @@ func NewMemoryReplayCache(cfg MemoryReplayCacheConfig) (*MemoryReplayCache, erro
 // share, or a cache full of live ids, refuses the new id as a replay rather
 // than accept it unrecorded — a full cache errs towards refusing.
 func (c *MemoryReplayCache) Seen(_ context.Context, e ReplayEntry) (bool, error) {
-	jkt, jti, expires := e.JKT, e.JTI, e.ExpiresAt
+	jkt, jti, holder, expires := e.JKT, e.JTI, e.Holder, e.ExpiresAt
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.now()
 	for len(c.expiries) > 0 && !c.expiries[0].expires.After(now) {
-		k := heap.Pop(&c.expiries).(replayEntry).key
-		delete(c.seen, k)
-		if c.perKey[k.jkt]--; c.perKey[k.jkt] <= 0 {
-			delete(c.perKey, k.jkt)
+		lapsed := heap.Pop(&c.expiries).(replayEntry)
+		delete(c.seen, lapsed.key)
+		if c.perHolder[lapsed.holder]--; c.perHolder[lapsed.holder] <= 0 {
+			delete(c.perHolder, lapsed.holder)
 		}
 	}
 	k := replayKey{jkt: jkt, jti: jti}
 	if _, ok := c.seen[k]; ok {
 		return true, nil
 	}
-	if c.perKey[jkt] >= c.maxPerKey || len(c.seen) >= c.maxEntries {
+	if c.perHolder[holder] >= c.maxPerHolder || len(c.seen) >= c.maxEntries {
 		return true, nil
 	}
 	c.seen[k] = expires
-	c.perKey[jkt]++
-	heap.Push(&c.expiries, replayEntry{key: k, expires: expires})
+	c.perHolder[holder]++
+	heap.Push(&c.expiries, replayEntry{key: k, holder: holder, expires: expires})
 	return false, nil
 }
 
-// replayEntry is one id a MemoryReplayCache holds, and when it lapses.
+// replayEntry is one id a MemoryReplayCache holds, whose share it counts
+// against, and when it lapses.
 type replayEntry struct {
 	key     replayKey
+	holder  string
 	expires time.Time
 }
 

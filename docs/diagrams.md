@@ -355,9 +355,12 @@ flowchart TB
 
 `dpop.HMACNonces` makes a nonce of its issuance time and an HMAC of it, so replicas
 holding the same keys accept each other's nonces with no shared state, given
-clocks within `dpop.HMACNonceClockSkew`. `dpop.MemoryReplayCache` gives each key a share
-of its own, so one key past its share has only its own proofs refused; a full
-cache refuses rather than forgets.
+clocks within `dpop.HMACNonceClockSkew`. `dpop.MemoryReplayCache` gives each holder — the
+capability the token carries — a share of its own, so one past its share has
+only its own proofs refused, however many keys its Biscuit copies are bound
+to; a full cache refuses rather than forgets. A proof past
+`dpop.DefaultMaxProofBytes` is refused unread, and a `jti` past
+`dpop.MaxJTIBytes` is never stored.
 
 ## Answering a refusal
 

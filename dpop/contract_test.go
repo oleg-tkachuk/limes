@@ -20,18 +20,18 @@ func (c *contractClock) Now() time.Time          { return c.now }
 func (c *contractClock) Advance(d time.Duration) { c.now = c.now.Add(d) }
 
 func TestMemoryReplayCacheContract(t *testing.T) {
-	// entriesPerKey is small, so the check of a key's share fills it fast.
-	const entriesPerKey = 4
+	// entriesPerHolder is small, so the check of a key's share fills it fast.
+	const entriesPerHolder = 4
 	dpoptest.RunReplayCache(t, func(t *testing.T) dpoptest.ReplayEnv {
 		t.Helper()
 		clock := &contractClock{now: contractEpoch}
-		cache, err := dpop.NewMemoryReplayCache(dpop.MemoryReplayCacheConfig{EntriesPerKey: entriesPerKey, Now: clock.Now})
+		cache, err := dpop.NewMemoryReplayCache(dpop.MemoryReplayCacheConfig{EntriesPerHolder: entriesPerHolder, Now: clock.Now})
 		if err != nil {
 			t.Fatal(err)
 		}
 		return dpoptest.ReplayEnv{
 			Ctx: context.Background(), Cache: cache,
-			Now: clock.Now, Advance: clock.Advance, EntriesPerKey: entriesPerKey,
+			Now: clock.Now, Advance: clock.Advance, EntriesPerHolder: entriesPerHolder,
 		}
 	})
 }

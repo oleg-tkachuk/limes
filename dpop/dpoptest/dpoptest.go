@@ -8,12 +8,14 @@
 //
 // The checks cover what the verifier relies on: a proof id is new once and a
 // replay ever after, while it can still be accepted; ids of different keys
-// never collide; concurrent proofs carrying one id let exactly one through;
-// a nonce issued is valid, and one never issued or expired is not.
+// never collide; a holder's share counts its proofs whatever key signed them;
+// concurrent proofs carrying one id let exactly one through; a nonce issued
+// is valid, and one never issued or expired is not.
 package dpoptest
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -35,10 +37,10 @@ type ReplayEnv struct {
 	// without both, the check that an id is remembered until it expires is
 	// skipped.
 	Advance func(d time.Duration)
-	// EntriesPerKey is how many live ids the cache holds for one key before
-	// it refuses the next as a replay. Optional: without it, the check of
-	// that share is skipped.
-	EntriesPerKey int
+	// EntriesPerHolder is how many live ids the cache holds for one holder
+	// before it refuses the next as a replay. Optional: without it, the
+	// checks of that share are skipped.
+	EntriesPerHolder int
 }
 
 // NoncesEnv is one nonce source under test, fresh for each check.
@@ -66,6 +68,10 @@ const (
 	// matter to a cache.
 	jkt      = "key-a"
 	otherJKT = "key-b"
+	// holder and otherHolder are two capabilities whose shares the ids
+	// count against.
+	holder      = "capability-a"
+	otherHolder = "capability-b"
 	// notANonce has no nonce's form at all.
 	notANonce = "not-a-nonce"
 )
@@ -81,8 +87,8 @@ func RunReplayCache(t *testing.T, setup func(t *testing.T) ReplayEnv) {
 		{"AnIDIsNewOnceThenAReplay", checkReplay},
 		{"KeysAndIDsAreApart", checkApart},
 		{"AnIDIsRememberedUntilItExpires", checkRemembered},
-		{"AKeyPastItsShareIsRefused", checkShare},
-		{"AKeysShareFreesOnceItsIDsExpire", checkShareFrees},
+		{"AHolderPastItsShareIsRefused", checkShare},
+		{"AHoldersShareFreesOnceItsIDsExpire", checkShareFrees},
 		{"ConcurrentProofsLetOneThrough", checkConcurrentReplay},
 	}
 	for _, c := range checks {
@@ -114,10 +120,19 @@ func (e ReplayEnv) now() time.Time {
 	return e.Now()
 }
 
-// entry is a fresh id of key, accepted for proofLifetime from now.
+// entry is a fresh id of key, counted against holder and accepted for
+// proofLifetime from now.
 func (e ReplayEnv) entry(key string) dpop.ReplayEntry {
-	return dpop.ReplayEntry{JKT: key, JTI: uuid.NewString(), ExpiresAt: e.now().Add(proofLifetime)}
+	return e.entryOf(holder, key)
 }
+
+// entryOf is a fresh id of key, counted against h.
+func (e ReplayEnv) entryOf(h, key string) dpop.ReplayEntry {
+	return dpop.ReplayEntry{JKT: key, JTI: uuid.NewString(), Holder: h, ExpiresAt: e.now().Add(proofLifetime)}
+}
+
+// keyOf is the i-th of a run of distinct key thumbprints.
+func keyOf(i int) string { return fmt.Sprintf("key-%d", i) }
 
 func (e ReplayEnv) seen(t *testing.T, entry dpop.ReplayEntry) bool {
 	t.Helper()
@@ -164,19 +179,20 @@ func checkRemembered(t *testing.T, e ReplayEnv) {
 }
 
 func checkShare(t *testing.T, e ReplayEnv) {
-	if e.EntriesPerKey <= 0 {
-		t.Skip("ReplayEnv.EntriesPerKey not set")
+	if e.EntriesPerHolder <= 0 {
+		t.Skip("ReplayEnv.EntriesPerHolder not set")
 	}
-	for i := range e.EntriesPerKey {
-		if e.seen(t, e.entry(jkt)) {
-			t.Fatalf("id %d of %d within the key's share was refused", i+1, e.EntriesPerKey)
+	// Each id under its own key: a share counted per key would never fill.
+	for i := range e.EntriesPerHolder {
+		if e.seen(t, e.entryOf(holder, keyOf(i))) {
+			t.Fatalf("id %d of %d within the holder's share was refused", i+1, e.EntriesPerHolder)
 		}
 	}
-	if !e.seen(t, e.entry(jkt)) {
-		t.Error("a key past its share recorded another id")
+	if !e.seen(t, e.entryOf(holder, keyOf(e.EntriesPerHolder))) {
+		t.Error("a holder past its share recorded another id under a new key")
 	}
-	if e.seen(t, e.entry(otherJKT)) {
-		t.Error("one key's full share refused another key")
+	if e.seen(t, e.entryOf(otherHolder, jkt)) {
+		t.Error("one holder's full share refused another holder")
 	}
 }
 
@@ -266,17 +282,17 @@ func checkExpiry(t *testing.T, e NoncesEnv) {
 	}
 }
 
-// checkShareFrees holds a cache to forgetting what expired: a key that filled
-// its share is not locked out for good once its ids lapse.
+// checkShareFrees holds a cache to forgetting what expired: a holder that
+// filled its share is not locked out for good once its ids lapse.
 func checkShareFrees(t *testing.T, e ReplayEnv) {
-	if e.EntriesPerKey <= 0 || e.Advance == nil || e.Now == nil {
-		t.Skip("ReplayEnv.EntriesPerKey, Now and Advance not set")
+	if e.EntriesPerHolder <= 0 || e.Advance == nil || e.Now == nil {
+		t.Skip("ReplayEnv.EntriesPerHolder, Now and Advance not set")
 	}
-	for range e.EntriesPerKey {
-		e.seen(t, e.entry(jkt))
+	for i := range e.EntriesPerHolder {
+		e.seen(t, e.entryOf(holder, keyOf(i)))
 	}
 	e.Advance(proofLifetime + tick)
 	if e.seen(t, e.entry(jkt)) {
-		t.Error("a key's share stayed full after every id in it expired")
+		t.Error("a holder's share stayed full after every id in it expired")
 	}
 }
