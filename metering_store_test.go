@@ -32,7 +32,9 @@ func meteredStore(t *testing.T, opts ...limes.InstrumentOption) (limes.UsageStor
 	t.Helper()
 	reader := sdkmetric.NewManualReader()
 	opts = append(opts, limes.WithMeterProvider(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))))
-	usage, err := limes.Instrument[struct{}](memstore.NewUsage[struct{}](nil), opts...)
+	// An empty record store: no capability metered here is on record, so
+	// PurgeOrphans finds each one gone.
+	usage, err := limes.Instrument[struct{}](memstore.NewUsage(memstore.New[struct{}]()), opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +298,7 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 	if err := usage.Delete(ctx, uuid.New()); err != nil {
 		t.Errorf("Delete of a row never written: %v", err)
 	}
-	// The store knows no records, so the capability's usage is an orphan.
+	// The capability is not on record, so its usage is an orphan.
 	if n, err := usage.PurgeOrphans(ctx, limes.PurgeOrphansRequest{}); err != nil || n.Purged != 1 {
 		t.Errorf("PurgeOrphans = %d, %v; want the one orphan", n, err)
 	}
