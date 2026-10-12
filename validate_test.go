@@ -110,6 +110,11 @@ func TestDelegateInheritanceIsExplicit(t *testing.T) {
 	}
 }
 
+// foreignIssuer names an issuer other than the one under test.
+const foreignIssuer = "someone-else"
+
+// A parent another issuer named is refused: this issuer's store has no record
+// of it, so revoking it at its own issuer would never stop the child.
 func TestDelegateRefusesRevokedOrExpiredParent(t *testing.T) {
 	issuer, _, store, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
@@ -119,6 +124,12 @@ func TestDelegateRefusesRevokedOrExpiredParent(t *testing.T) {
 	expired.ExpiresAt = time.Now().Add(-time.Minute)
 	if _, _, err := issuer.Delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(expired), InheritCaveats: true}); !errors.Is(err, ErrExpired) {
 		t.Errorf("delegate from expired parent = %v, want ErrExpired", err)
+	}
+
+	foreign := parent
+	foreign.Issuer = foreignIssuer
+	if _, _, err := issuer.Delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(foreign), InheritCaveats: true}); !errors.Is(err, ErrInvalidRequest) {
+		t.Errorf("delegate from another issuer's parent = %v, want ErrInvalidRequest", err)
 	}
 
 	_ = store.Revoke(ctx, RevokeRequest{CapabilityID: parent.ID})

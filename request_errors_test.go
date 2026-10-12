@@ -89,7 +89,7 @@ func TestIssueKeepsTheStoreErrorApartFromTheRequest(t *testing.T) {
 			if !errors.Is(err, tc.want) || errors.Is(err, ErrInvalidRequest) {
 				t.Errorf("err = %v, want %v and not ErrInvalidRequest", err, tc.want)
 			}
-			parent := Capability{ID: uuid.New(), Subject: validIssue().Subject, Audience: []string{goldenAudience},
+			parent := Capability{ID: uuid.New(), Issuer: goldenIssuer, Subject: validIssue().Subject, Audience: []string{goldenAudience},
 				Caveats: Caveats{Ops: []Op{OpGet}}, ExpiresAt: time.Now().Add(time.Hour)}
 			_, _, err = iss.Delegate(context.Background(), DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true, TTL: time.Minute})
 			if !errors.Is(err, tc.want) || errors.Is(err, ErrInvalidRequest) {
@@ -101,7 +101,7 @@ func TestIssueKeepsTheStoreErrorApartFromTheRequest(t *testing.T) {
 
 func TestDelegateRefusesAMalformedRequestAsInvalid(t *testing.T) {
 	iss := testIssuer(t, goldenKID, ed25519.NewKeyFromSeed(goldenSeed[:]), time.Now)
-	parent := Capability{ID: uuid.New(), Subject: validIssue().Subject, Audience: []string{goldenAudience},
+	parent := Capability{ID: uuid.New(), Issuer: goldenIssuer, Subject: validIssue().Subject, Audience: []string{goldenAudience},
 		Caveats: Caveats{Ops: []Op{OpGet}}, ExpiresAt: time.Now().Add(time.Hour)}
 	for name, req := range map[string]DelegateRequest{
 		"no parent":              {InheritCaveats: true},

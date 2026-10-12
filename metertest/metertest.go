@@ -45,10 +45,9 @@ type Env[TX any] struct {
 	Usage limes.UsageStore[TX]
 	// Tenant is a tenant the store can charge, with no ceiling yet.
 	Tenant uuid.UUID
-	// NewCapability records a capability of Tenant with the given parent
-	// (uuid.Nil for a root) and budget ceiling, and no request ceiling, so
-	// the Meter finds its lineage and its ceiling, and returns its id.
-	NewCapability func(parent uuid.UUID, budget limes.BudgetCeiling) (uuid.UUID, error)
+	// NewCapability records a capability of Tenant as spec describes it, so
+	// the Meter finds its lineage and its ceilings, and returns its id.
+	NewCapability func(spec CapabilitySpec) (uuid.UUID, error)
 	// Advance moves the store's clock forward by d. Optional: without it,
 	// the checks of reservation expiry are skipped.
 	Advance func(d time.Duration)
@@ -67,6 +66,22 @@ type Env[TX any] struct {
 	// ListCtx is the context ListTenantBudgets runs under: a read across
 	// tenants. Optional: without it, Ctx.
 	ListCtx context.Context
+}
+
+// CapabilitySpec is a capability Env.NewCapability records: its parent and
+// the ceilings of its caveats.
+type CapabilitySpec struct {
+	// Parent is the capability it was delegated from; uuid.Nil for a root.
+	Parent uuid.UUID
+	// Requests and Budget are its caveats' ceilings.
+	Requests limes.RequestCeiling
+	Budget   limes.BudgetCeiling
+}
+
+// newCapability records a capability under parent with the given budget and
+// no request ceiling.
+func (e Env[TX]) newCapability(parent uuid.UUID, budget limes.BudgetCeiling) (uuid.UUID, error) {
+	return e.NewCapability(CapabilitySpec{Parent: parent, Requests: limes.RequestCeiling{Unlimited: true}, Budget: budget})
 }
 
 // newTenant is another tenant, from NewTenant when the Env has one.
@@ -130,10 +145,10 @@ func newFixture[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) fixture[
 	env := setup(t)
 	f := fixture[TX]{Env: env}
 	var err error
-	if f.root, err = env.NewCapability(uuid.Nil, limes.BudgetCeiling{Max: rootBudget}); err != nil {
+	if f.root, err = env.newCapability(uuid.Nil, limes.BudgetCeiling{Max: rootBudget}); err != nil {
 		t.Fatalf("root capability: %v", err)
 	}
-	if f.child, err = env.NewCapability(f.root, limes.BudgetCeiling{Max: childBudget}); err != nil {
+	if f.child, err = env.newCapability(f.root, limes.BudgetCeiling{Max: childBudget}); err != nil {
 		t.Fatalf("child capability: %v", err)
 	}
 	if _, err := env.Usage.SetTenantBudget(env.Ctx, limes.SetTenantBudgetRequest{
@@ -270,6 +285,10 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"PurgeOrphansReleasesWhatARemovedCapabilityHeld", checkPurgeOrphans[TX]},
 		{"TenantBudgetKeepsItsPeriodEnd", checkPeriodEnd[TX]},
 		{"TheZeroSubjectIsRefused", checkZeroSubject[TX]},
+		{"AnAncestorRequestCeilingBoundsBump", checkAncestorRequests[TX]},
+		{"ACopyRequestCeilingBoundsBump", checkCopyRequests[TX]},
+		{"AHoldCountsAgainstACopyBudget", checkCopyHold[TX]},
+		{"AStaleVersionIsRefused", checkStaleVersion[TX]},
 	}
 	for _, c := range checks {
 		t.Run(c.name, func(t *testing.T) { c.run(t, newFixture(t, setup)) })
@@ -295,7 +314,7 @@ func checkTenantCountsBeforeACeiling[TX any](t *testing.T, env Env[TX]) {
 		held    = 8 * one
 		ceiling = 10 * one
 	)
-	id, err := env.NewCapability(uuid.Nil, unlimitedBudget)
+	id, err := env.newCapability(uuid.Nil, unlimitedBudget)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -648,7 +667,7 @@ func checkOneUnit[TX any](t *testing.T, f fixture[TX]) {
 		t.Errorf("a hold in %s on a %s counter: err = %v, want ErrUnitCodeMismatch", otherUnit, unit, err)
 	}
 	// A fresh capability has no unit of its own yet, but its tenant does.
-	fresh, err := f.NewCapability(uuid.Nil, unlimitedBudget)
+	fresh, err := f.newCapability(uuid.Nil, unlimitedBudget)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -867,7 +886,7 @@ func checkCopyOverrun[TX any](t *testing.T, f fixture[TX]) {
 // add up to seven tenths — the sums a float64 gets wrong.
 func checkSumsExactly[TX any](t *testing.T, f fixture[TX]) {
 	tenth, threeTenths := one/10, 3*one/10
-	id, err := f.NewCapability(uuid.Nil, limes.BudgetCeiling{Max: threeTenths})
+	id, err := f.newCapability(uuid.Nil, limes.BudgetCeiling{Max: threeTenths})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -925,7 +944,7 @@ func checkConcurrentCeiling[TX any](t *testing.T, f fixture[TX]) {
 // its record: two children each within their own budget must not sum past
 // their parent's.
 func checkAncestorCeiling[TX any](t *testing.T, f fixture[TX]) {
-	sibling, err := f.NewCapability(f.root, limes.BudgetCeiling{Max: childBudget})
+	sibling, err := f.newCapability(f.root, limes.BudgetCeiling{Max: childBudget})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -942,10 +961,93 @@ func checkAncestorCeiling[TX any](t *testing.T, f fixture[TX]) {
 	}
 }
 
+// checkAncestorRequests holds Bump to an ancestor's request ceiling: a child
+// with none of its own still stops at its root's.
+func checkAncestorRequests[TX any](t *testing.T, f fixture[TX]) {
+	const limit = 1
+	root, err := f.NewCapability(CapabilitySpec{Requests: limes.RequestCeiling{Max: limit}, Budget: unlimitedBudget})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := f.newCapability(root, unlimitedBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bump := func() error {
+		_, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: child, tenant: f.Tenant})})
+		return err
+	}
+	for range limit {
+		if err := bump(); err != nil {
+			t.Fatalf("a bump within the root's ceiling: %v", err)
+		}
+	}
+	if err := bump(); !errors.Is(err, limes.ErrRequestLimitExceeded) {
+		t.Errorf("a bump past the root's ceiling: err = %v, want ErrRequestLimitExceeded", err)
+	}
+}
+
+// checkCopyRequests holds Bump to a copy's request ceiling, which binds the
+// copy while the capability's own allows more.
+func checkCopyRequests[TX any](t *testing.T, f fixture[TX]) {
+	const limit = 1
+	copies := []limes.CopyCeiling{{RevocationID: []byte("copy-requests"), Requests: limes.RequestCeiling{Max: limit}, Budget: unlimitedBudget}}
+	bump := func() error {
+		_, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, copies: copies})})
+		return err
+	}
+	for range limit {
+		if err := bump(); err != nil {
+			t.Fatalf("a bump within the copy's ceiling: %v", err)
+		}
+	}
+	if err := bump(); !errors.Is(err, limes.ErrRequestLimitExceeded) {
+		t.Errorf("a bump past the copy's ceiling: err = %v, want ErrRequestLimitExceeded", err)
+	}
+}
+
+// checkCopyHold holds a store to counting a hold against the copy it was
+// made under, as against every other ceiling.
+func checkCopyHold[TX any](t *testing.T, f fixture[TX]) {
+	copies := []limes.CopyCeiling{{RevocationID: []byte("copy-hold"), Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Max: one}}}
+	subject := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), copies: copies})
+	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: subject, Amount: one}); err != nil {
+		t.Fatalf("a hold of the copy's whole budget: %v", err)
+	}
+	if _, err := f.charge(limes.ChargeRequest{Subject: subject, Amount: cent}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
+		t.Errorf("a charge past the copy's budget with the hold: err = %v, want ErrBudgetExceeded", err)
+	}
+}
+
+// checkStaleVersion holds SetTenantBudget to its optimistic-concurrency
+// guard: a write carrying a version another write has moved past is
+// refused, and leaves the ceiling as it was.
+func checkStaleVersion[TX any](t *testing.T, f fixture[TX]) {
+	b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := func(max limes.Nanos) error {
+		_, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
+			TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: max}, UnitCode: unit, ExpectedVersion: b.ResourceVersion,
+		})
+		return err
+	}
+	if err := set(tenantBudget + one); err != nil {
+		t.Fatalf("a write at the current version: %v", err)
+	}
+	if err := set(tenantBudget + 2*one); !errors.Is(err, limes.ErrTenantBudgetVersionMismatch) {
+		t.Errorf("a write at a stale version: err = %v, want ErrTenantBudgetVersionMismatch", err)
+	}
+	if got, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant); err != nil || got.Ceiling != (limes.BudgetCeiling{Max: tenantBudget + one}) {
+		t.Errorf("after a stale write the ceiling = %v, %v; want %s", got.Ceiling, err, tenantBudget+one)
+	}
+}
+
 // checkTenantCeiling holds a store to the tenant aggregate: capabilities each
 // within their own budgets must not sum past the tenant's.
 func checkTenantCeiling[TX any](t *testing.T, f fixture[TX]) {
-	other, err := f.NewCapability(uuid.Nil, limes.BudgetCeiling{Max: rootBudget})
+	other, err := f.newCapability(uuid.Nil, limes.BudgetCeiling{Max: rootBudget})
 	if err != nil {
 		t.Fatal(err)
 	}
