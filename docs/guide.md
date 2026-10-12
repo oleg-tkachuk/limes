@@ -315,9 +315,11 @@ the token is refused with `ErrCopyCountersNotMetered` rather than accepted
 with its limits unkept.
 `verifier.BiscuitCopy` names the limits in force on a copy, on any verifier,
 and a `CopyUsageReader` (`memstore` implements one) reads what each has
-counted. A copy with limits of its own cannot delegate — a server-side child
-would count against the capability, never the copy — so `Delegate` refuses
-it with `ErrDelegationTooWide`; its holder attenuates it instead.
+counted. A copy cannot delegate — a server-side child would be an ordinary
+token of the capability, which revoking the copy would not reach and the
+copy's limits would not bound — so `Delegate` refuses any capability read
+from a Biscuit (`VerifiedCapability.FromBiscuit`) with
+`ErrDelegationTooWide`; its holder attenuates it instead.
 
 One copy can also be revoked on its own. `verifier.BiscuitCopy(ctx, token)`
 checks the token is genuine — but not its expiry, audience or revocation, so a

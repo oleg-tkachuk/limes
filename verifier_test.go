@@ -330,7 +330,6 @@ func TestDelegate_RejectsWidening(t *testing.T) {
 
 // A Biscuit copy with limits of its own cannot delegate: the child would
 // count against the capability and never the copy, shedding its limits.
-// A copy without limits of its own delegates as the capability does.
 func TestDelegate_RefusesACopyWithLimitsOfItsOwn(t *testing.T) {
 	t.Parallel()
 	issuer, _, store, _ := buildIssuerVerifier(t)
@@ -411,3 +410,44 @@ const (
 	audienceAdmin = "admin"
 	audienceMCP   = "mcp"
 )
+
+// No Biscuit copy delegates, limits or not: the child would be an ordinary
+// token of the capability, which revoking the copy would not stop.
+func TestDelegateRefusesAnyBiscuitCopy(t *testing.T) {
+	issuer, v, store, cap, token := biscuitFixture(t)
+	ctx := context.Background()
+	jwtToken, err := issuer.signer.Sign(ctx, cap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copyToken, err := Attenuate(token, Attenuation{Ops: []Op{OpGet}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, tok := range map[string]string{"the Biscuit": token, "an attenuated copy": copyToken} {
+		vc, err := v.Verify(ctx, VerifyRequest{Token: tok, Audience: audienceData})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !vc.FromBiscuit() {
+			t.Errorf("%s: FromBiscuit = false", name)
+		}
+		before := len(store.caps)
+		_, _, err = issuer.Delegate(ctx, DelegateRequest{
+			Parent: vc, Subject: Principal{Type: PrincipalAgent, Subject: "child"}, InheritCaveats: true, TTL: time.Minute,
+		})
+		if !errors.Is(err, ErrDelegationTooWide) {
+			t.Errorf("%s: Delegate err = %v, want ErrDelegationTooWide", name, err)
+		}
+		if len(store.caps) != before {
+			t.Errorf("%s: a refused delegation recorded a child", name)
+		}
+	}
+	jwt, err := v.Verify(ctx, VerifyRequest{Token: jwtToken, Audience: audienceData})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if jwt.FromBiscuit() {
+		t.Error("a capability read from a JWT reports FromBiscuit")
+	}
+}
