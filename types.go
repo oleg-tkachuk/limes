@@ -367,6 +367,10 @@ func (c Caveats) clone() Caveats {
 	return c
 }
 
+// Clone is p with agent details of its own: a store keeps, and hands out,
+// a principal no caller can alter through a pointer it kept.
+func (p Principal) Clone() Principal { return p.clone() }
+
 // clone is p with agent details of its own.
 func (p Principal) clone() Principal {
 	if p.Agent != nil {
@@ -375,6 +379,11 @@ func (p Principal) clone() Principal {
 	}
 	return p
 }
+
+// Clone is c with slices and pointers of its own: a store keeps, and hands
+// out, a capability no caller can alter through a slice it kept — the record
+// is append-only.
+func (c Capability) Clone() Capability { return c.clone() }
 
 // clone is c with slices and pointers of its own.
 func (c Capability) clone() Capability {
