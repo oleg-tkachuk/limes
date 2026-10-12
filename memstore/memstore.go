@@ -200,11 +200,23 @@ func NewUsageStore[TX any](cfg UsageStoreConfig[TX]) (*UsageStore[TX], error) {
 // double that silently dropped the initiator would let an unattributed
 // issuance pass.
 func (s *Store) Insert(_ context.Context, req limes.InsertRequest) error {
+	if err := req.Validate(); err != nil {
+		return err
+	}
 	c, issuedBy := req.Capability, req.IssuedBy
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.caps[c.ID]; ok {
 		return fmt.Errorf("%w: %s", limes.ErrAlreadyExists, c.ID)
+	}
+	if c.ParentID != uuid.Nil {
+		parent, ok := s.caps[c.ParentID]
+		if !ok {
+			return fmt.Errorf("%w: memstore: parent %s is not on record", limes.ErrInvalidRequest, c.ParentID)
+		}
+		if c.ExpiresAt.After(parent.ExpiresAt) {
+			return fmt.Errorf("%w: expires %s, after its parent %s", limes.ErrDelegationTooWide, c.ExpiresAt, parent.ExpiresAt)
+		}
 	}
 	// Copies in and out: the caller keeps its slices, and a record never
 	// changes after it is written.
@@ -380,8 +392,8 @@ func (s *Store) GetBiscuitRevocation(_ context.Context, revocationID []byte) (li
 
 // Purge implements limes.Store, oldest expiry first and, among records
 // expiring together, the deepest first, so a batch cut at its limit takes a
-// child before its parent; it keeps any record a child on record outside
-// the batch still descends from.
+// child before its parent: Insert refuses a child that outlives its parent,
+// so a child is due no later than its parent.
 func (s *Store) Purge(_ context.Context, req limes.PurgeRequest) (limes.PurgeResult, error) {
 	if err := req.Validate(); err != nil {
 		return limes.PurgeResult{}, err
@@ -409,7 +421,6 @@ func (s *Store) Purge(_ context.Context, req limes.PurgeRequest) (limes.PurgeRes
 	if len(due) > limit {
 		due = due[:limit]
 	}
-	due = s.withoutHeldParentsLocked(due)
 	for _, c := range due {
 		delete(s.caps, c.ID)
 		delete(s.revoked, c.ID)
@@ -431,32 +442,6 @@ func (s *Store) depthLocked(c limes.Capability) int {
 		}
 	}
 	return n
-}
-
-// withoutHeldParentsLocked is batch less every record that a record on
-// record outside the batch is a child of, until none is: purging it would
-// leave that child's lineage, and the revocations along it, unreachable. A
-// child expires no later than its parent, so only a record inserted around
-// that rule is ever held. s.mu must be held.
-func (s *Store) withoutHeldParentsLocked(batch []limes.Capability) []limes.Capability {
-	in := make(map[uuid.UUID]bool, len(batch))
-	for _, c := range batch {
-		in[c.ID] = true
-	}
-	for {
-		held := map[uuid.UUID]bool{}
-		for _, c := range s.caps {
-			if !in[c.ID] && in[c.ParentID] {
-				held[c.ParentID] = true
-			}
-		}
-		if len(held) == 0 {
-			return slices.DeleteFunc(batch, func(c limes.Capability) bool { return !in[c.ID] })
-		}
-		for id := range held {
-			delete(in, id)
-		}
-	}
 }
 
 func (s *Store) ListByPrincipal(_ context.Context, req limes.ListByPrincipalRequest) (limes.Page[limes.Capability], error) {

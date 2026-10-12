@@ -194,6 +194,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"ListByPrincipalEndsOnAFullLastPage", checkListFullLastPage},
 		{"PurgeKeepsARevocationAVerifierMayStillNeed", checkPurgeRetention},
 		{"PurgeNeverLeavesAChildWithoutItsParent", checkPurgeKeepsLineage},
+		{"InsertRefusesABrokenLineage", checkInsertKeepsLineage},
 		{"ListByPrincipalPages", checkListPages},
 		{"ListByPrincipalFilters", checkListFilters},
 		{"ListByPrincipalExpiresAtTheInstant", checkListExpiryInstant},
@@ -792,10 +793,8 @@ func checkMaxDepthCascade(t *testing.T, f fixture) {
 }
 
 // checkPurgeKeepsLineage holds Purge to never removing a capability while a
-// child of it stays on record. A chain expiring at one instant, purged a
-// record a batch, goes leaf first; a parent a child outlives — inserted
-// around Delegate, which would have cut the child to the parent's expiry —
-// stays.
+// child of it stays on record: a chain expiring at one instant, purged a
+// record a batch, goes leaf first.
 func checkPurgeKeepsLineage(t *testing.T, f fixture) {
 	const chain = 4
 	expires := f.now.Add(-expiredAgo)
@@ -828,14 +827,34 @@ func checkPurgeKeepsLineage(t *testing.T, f fixture) {
 			t.Errorf("link %d of an expired chain is still on record after %d batches of one", i, chain)
 		}
 	}
+}
 
-	held := f.insert(t, f.newCapability("agent:held", uuid.Nil, expires))
-	outliving := f.live(t, "agent:outliving", held.ID)
-	if _, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace}); err != nil {
-		t.Fatal(err)
-	}
-	if !onRecord(held.ID) || !onRecord(outliving.ID) {
-		t.Errorf("Purge removed an expired parent whose child is still live")
+// checkInsertKeepsLineage holds Insert to a lineage Purge and IsRevoked can
+// rely on: no record without an id, none under a parent not on record, and
+// no child expiring after its parent. None of them is recorded.
+func checkInsertKeepsLineage(t *testing.T, f fixture) {
+	parent := f.live(t, "agent:parent", uuid.Nil)
+	noID := f.newCapability("agent:no-id", uuid.Nil, f.now.Add(ttl))
+	noID.ID = uuid.Nil
+	orphan := f.newCapability("agent:orphan", uuid.New(), f.now.Add(ttl))
+	outliving := f.newCapability("agent:outliving", parent.ID, parent.ExpiresAt.Add(time.Second))
+	for name, tc := range map[string]struct {
+		c    limes.Capability
+		want error
+	}{
+		"no id":                        {noID, limes.ErrInvalidRequest},
+		"a parent not on record":       {orphan, limes.ErrInvalidRequest},
+		"a child outliving its parent": {outliving, limes.ErrDelegationTooWide},
+	} {
+		if err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: tc.c, IssuedBy: issuedBy}); !errors.Is(err, tc.want) {
+			t.Errorf("Insert of %s: err = %v, want %v", name, err, tc.want)
+		}
+		if tc.c.ID == uuid.Nil {
+			continue
+		}
+		if _, err := f.Store.GetRecord(f.Ctx, tc.c.ID); !errors.Is(err, limes.ErrNotFound) {
+			t.Errorf("GetRecord after a refused Insert of %s: err = %v, want ErrNotFound", name, err)
+		}
 	}
 }
 

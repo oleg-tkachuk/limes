@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -92,7 +91,7 @@ func recordedSubject[TX any](ctx context.Context, t testing.TB, u *UsageStore[TX
 		Caveats: limes.Caveats{
 			Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true},
 		},
-		ExpiresAt: time.Now().Add(contractTTL),
+		ExpiresAt: contractExpiry,
 	}
 	err := u.records.Insert(ctx, limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "issuer"}})
 	if err != nil && !errors.Is(err, limes.ErrAlreadyExists) {

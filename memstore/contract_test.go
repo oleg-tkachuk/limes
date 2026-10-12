@@ -17,6 +17,10 @@ import (
 // contractTTL is how long the capabilities the contract checks record live.
 const contractTTL = time.Hour
 
+// contractExpiry is when every test capability expires: one instant, so a
+// child never outlives its parent by the time between their inserts.
+var contractExpiry = time.Now().Add(contractTTL)
+
 func TestMeterContract(t *testing.T) {
 	metertest.Run(t, func(t *testing.T) metertest.Env[struct{}] {
 		t.Helper()
@@ -35,7 +39,7 @@ func TestMeterContract(t *testing.T) {
 			DeleteCapability: removeRecord(records),
 			NewCapability: func(spec metertest.CapabilitySpec) (uuid.UUID, error) {
 				c := limes.Capability{
-					ID: uuid.New(), ParentID: spec.Parent, ExpiresAt: time.Now().Add(contractTTL),
+					ID: uuid.New(), ParentID: spec.Parent, ExpiresAt: contractExpiry,
 					Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: cmp.Or(spec.Tenant, tenant), Subject: "agent"},
 					Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: spec.Requests, Budget: spec.Budget},
 				}
@@ -79,7 +83,7 @@ func TestMeterContractUsesTheTenantHooks(t *testing.T) {
 			ListCtx: listCtx,
 			NewCapability: func(spec metertest.CapabilitySpec) (uuid.UUID, error) {
 				c := limes.Capability{
-					ID: uuid.New(), ParentID: spec.Parent, ExpiresAt: time.Now().Add(contractTTL),
+					ID: uuid.New(), ParentID: spec.Parent, ExpiresAt: contractExpiry,
 					Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: cmp.Or(spec.Tenant, tenant), Subject: "agent"},
 					Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: spec.Requests, Budget: spec.Budget},
 				}

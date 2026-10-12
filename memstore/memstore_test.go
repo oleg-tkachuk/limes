@@ -19,7 +19,7 @@ func mkCap(id, parent uuid.UUID, tenant uuid.UUID, subject string) limes.Capabil
 	return limes.Capability{
 		ID: id, ParentID: parent,
 		Subject:   limes.Principal{Type: limes.PrincipalAgent, TenantID: tenant, Subject: subject},
-		ExpiresAt: time.Now().Add(time.Hour),
+		ExpiresAt: contractExpiry,
 		// No ceiling of its own: a test that needs one sets it.
 		Caveats: limes.Caveats{
 			Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true},
