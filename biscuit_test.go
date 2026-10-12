@@ -31,7 +31,7 @@ func biscuitFixture(t *testing.T) (*Issuer, *Verifier, *memStore, Capability, st
 	if err != nil {
 		t.Fatal(err)
 	}
-	cap, _, err := issuer.Issue(context.Background(), IssueRequest{
+	cap, _, err := issuer.issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData, audienceMCP},
@@ -45,7 +45,7 @@ func biscuitFixture(t *testing.T) (*Issuer, *Verifier, *memStore, Capability, st
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := issuer.Biscuit(context.Background(), asVerified(cap))
+	token, err := issuer.biscuit(context.Background(), asVerified(cap))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestBiscuitCannotBeStrippedOrForged(t *testing.T) {
 	}
 
 	// A Biscuit around an ordinary token (no root claim) is refused too.
-	_, plain, _ := issuer.Issue(context.Background(), IssueRequest{
+	_, plain, _ := issuer.issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "op"}, Subject: cap.Subject,
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour,
 	})
@@ -348,7 +348,7 @@ func TestBiscuitTakesOnlyAVerifiedCapabilityOfItsOwn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := issuer.Biscuit(ctx, vc); err != nil {
+	if _, err := issuer.biscuit(ctx, vc); err != nil {
 		t.Fatalf("Biscuit of a verified capability: %v", err)
 	}
 	copyOf, err := v.Verify(ctx, VerifyRequest{Token: token, Audience: audienceData})
@@ -368,14 +368,14 @@ func TestBiscuitTakesOnlyAVerifiedCapabilityOfItsOwn(t *testing.T) {
 		"another issuer's":      {asVerified(foreign), ErrInvalidRequest},
 		"an expired capability": {asVerified(expired), ErrExpired},
 	} {
-		if _, err := issuer.Biscuit(ctx, tc.vc); !errors.Is(err, tc.want) {
+		if _, err := issuer.biscuit(ctx, tc.vc); !errors.Is(err, tc.want) {
 			t.Errorf("%s: err = %v, want %v", name, err, tc.want)
 		}
 	}
 	if err := store.Revoke(ctx, RevokeRequest{CapabilityID: cap.ID}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := issuer.Biscuit(ctx, vc); !errors.Is(err, ErrRevoked) {
+	if _, err := issuer.biscuit(ctx, vc); !errors.Is(err, ErrRevoked) {
 		t.Errorf("a revoked capability: err = %v, want ErrRevoked", err)
 	}
 }

@@ -23,7 +23,7 @@ func TestTokenIntegersStayWithinIJSON(t *testing.T) {
 		t.Errorf("max_requests past 2^53-1: err = %v, want ErrInvalidCaveats", err)
 	}
 	issuer, _, _, _ := buildIssuerVerifier(t)
-	_, _, err := issuer.Issue(context.Background(), IssueRequest{
+	_, _, err := issuer.issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, Generation: MaxIJSONInteger + 1,
 	})
@@ -60,7 +60,7 @@ func TestTokenClaimsAreUTF8(t *testing.T) {
 // the I-JSON range fails the signing, not the next verification.
 func TestSignRefusesIntegersOutsideIJSON(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)
-	_, _, err := issuer.Issue(context.Background(), IssueRequest{
+	_, _, err := issuer.issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}},
 		NotBefore: time.Unix(-(MaxIJSONInteger + 1), 0),

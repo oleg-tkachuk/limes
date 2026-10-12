@@ -87,7 +87,30 @@ func isBiscuit(token string) bool {
 // wrapping a copy again would shed its attenuation and its revocation id;
 // its holder attenuates it instead — and one that has expired or that the
 // store reports revoked.
-func (i *Issuer) Biscuit(ctx context.Context, vc VerifiedCapability) (string, error) {
+func (i *Issuer) Biscuit(ctx context.Context, req BiscuitRequest) (BiscuitResult, error) {
+	token, err := i.biscuit(ctx, req.Capability)
+	if err != nil {
+		return BiscuitResult{}, err
+	}
+	return BiscuitResult{Token: token}, nil
+}
+
+// BiscuitRequest is the input shape for Issuer.Biscuit.
+type BiscuitRequest struct {
+	// Capability is the capability to give a Biscuit form, as the verifier
+	// accepted it.
+	Capability VerifiedCapability
+}
+
+// BiscuitResult is what Issuer.Biscuit mints.
+type BiscuitResult struct {
+	// Token is the Biscuit, base64url.
+	Token string
+	_     noCompare
+}
+
+// biscuit is Biscuit, returning the token alone.
+func (i *Issuer) biscuit(ctx context.Context, vc VerifiedCapability) (string, error) {
 	c := vc.c
 	switch {
 	case c.ID == uuid.Nil:

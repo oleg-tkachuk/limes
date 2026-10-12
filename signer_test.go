@@ -354,11 +354,11 @@ func TestIssuerSignsUnderTheCallersContext(t *testing.T) {
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}},
 	}
-	c, _, err := issuer.Issue(ctx, req)
+	c, _, err := issuer.issue(ctx, req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := issuer.Biscuit(ctx, asVerified(c)); err != nil {
+	if _, err := issuer.biscuit(ctx, asVerified(c)); err != nil {
 		t.Fatal(err)
 	}
 	if len(key.got) == 0 {
@@ -371,7 +371,7 @@ func TestIssuerSignsUnderTheCallersContext(t *testing.T) {
 	}
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
-	if _, _, err := issuer.Issue(cancelled, req); !errors.Is(err, context.Canceled) {
+	if _, _, err := issuer.issue(cancelled, req); !errors.Is(err, context.Canceled) {
 		t.Errorf("Issue under a cancelled context: err = %v, want context.Canceled", err)
 	}
 }

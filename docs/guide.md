@@ -178,7 +178,7 @@ An orchestrator narrows its own authority and hands the result to a worker it
 spawned, without calling back to any admin API:
 
 ```go
-child, childToken, err := issuer.Delegate(ctx, limes.DelegateRequest{
+delegated, err := issuer.Delegate(ctx, limes.DelegateRequest{ // .Capability, .Token
     Parent:  granted,                   // as the verifier accepted it
     Subject: limes.Principal{Type: limes.PrincipalAgent, Subject: "sub-worker"},
     TTL:     2 * time.Minute,
@@ -226,7 +226,8 @@ key:
 
 ```go
 jkt, _ := dpop.Thumbprint(agentKey.Public()) // Ed25519 or P-256
-cap, token, _ := issuer.Issue(ctx, limes.IssueRequest{ /* … */ ConfirmationJKT: jkt})
+issued, _ := issuer.Issue(ctx, limes.IssueRequest{ /* … */ ConfirmationJKT: jkt})
+token := issued.Token
 
 // Client: a fresh proof per request, signed over its method, URL and token.
 proof, _ := dpop.Sign(ctx, agentKey, dpop.ProofRequest{Method: "POST", URL: url, Token: token, IssuedAt: time.Now()})
@@ -302,10 +303,10 @@ no key and no network, and a narrowing can never be undone:
 
 ```go
 // granted: what the verifier accepted from the capability's JWT
-full, _ := issuer.Biscuit(ctx, granted) // same ID, caveats and expiry
+full, _ := issuer.Biscuit(ctx, limes.BiscuitRequest{Capability: granted}) // same ID, caveats and expiry
 
 // An agent, offline, hands a worker a smaller token:
-worker, _ := limes.Attenuate(full, limes.Attenuation{
+worker, _ := limes.Attenuate(full.Token, limes.Attenuation{
     Ops:              []limes.Op{limes.OpGet},
     ResourcePrefixes: []string{"corpus/public/"},
     ExpiresAt:        time.Now().Add(10 * time.Minute),

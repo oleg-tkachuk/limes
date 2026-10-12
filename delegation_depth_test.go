@@ -17,12 +17,13 @@ func TestDelegationStopsAtMaxDelegationDepth(t *testing.T) {
 	s := newExampleStack()
 	root, token := s.issue()
 	delegate := func(parent limes.VerifiedCapability) (limes.Capability, string, error) {
-		return s.issuer.Delegate(ctx, limes.DelegateRequest{
+		r, err := s.issuer.Delegate(ctx, limes.DelegateRequest{
 			Parent:         parent,
 			Subject:        limes.Principal{Type: limes.PrincipalAgent, TenantID: s.tenantID, Subject: "worker"},
 			TTL:            time.Minute,
 			InheritCaveats: true,
 		})
+		return r.Capability, r.Token, err
 	}
 	for depth := 1; depth <= limes.MaxDelegationDepth; depth++ {
 		var err error

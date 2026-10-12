@@ -60,7 +60,7 @@ func main() {
 
 	// 3. Issue to an orchestrator agent. Everything the authority permits is
 	//    described by the token itself — no role, no long-lived secret.
-	parent, parentToken, err := issuer.Issue(ctx, limes.IssueRequest{
+	parentResult, err := issuer.Issue(ctx, limes.IssueRequest{
 		// Who asked for it — distinct from who it authorises, and required.
 		IssuedBy: limes.Principal{Type: limes.PrincipalUser, TenantID: tenantID, Subject: "operator@example.com"},
 		Subject: limes.Principal{
@@ -81,6 +81,7 @@ func main() {
 			UnitCode:         "USD",
 		},
 	})
+	parent, parentToken := parentResult.Capability, parentResult.Token
 	must(err, "issue")
 	fmt.Printf("issued   %s  (%d bytes)\n", parent.ID, len(parentToken))
 
@@ -99,7 +100,7 @@ func main() {
 
 	// 5. Delegate to a sub-agent — strictly narrower, without calling back to
 	//    any admin API. An orchestrator can attenuate, never escalate.
-	child, _, err := issuer.Delegate(ctx, limes.DelegateRequest{
+	childResult, err := issuer.Delegate(ctx, limes.DelegateRequest{
 		Parent: verified, // what the verifier accepted, not the issuer's copy
 		Subject: limes.Principal{
 			Type: limes.PrincipalAgent, TenantID: tenantID, Subject: "sub-worker",
@@ -118,11 +119,12 @@ func main() {
 		},
 	})
 	must(err, "delegate")
+	child := childResult.Capability
 	fmt.Printf("delegated %s (child of %s)\n", child.ID, parent.ID)
 
 	// Widening is refused — this is the property that makes the model safe to
 	// hand to an agent.
-	_, _, err = issuer.Delegate(ctx, limes.DelegateRequest{
+	_, err = issuer.Delegate(ctx, limes.DelegateRequest{
 		Parent: verified,
 		Subject: limes.Principal{
 			Type: limes.PrincipalAgent, TenantID: tenantID, Subject: "greedy-worker",

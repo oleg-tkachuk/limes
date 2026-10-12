@@ -55,7 +55,7 @@ func TestPrincipalTypeValidate(t *testing.T) {
 func TestIssueAndDelegateValidateTheSubject(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
-	if _, _, err := issuer.Issue(ctx, IssueRequest{
+	if _, _, err := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{Type: "robot", TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{"data"},
@@ -66,7 +66,7 @@ func TestIssueAndDelegateValidateTheSubject(t *testing.T) {
 	}
 
 	parent := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet}})
-	if _, _, err := issuer.Delegate(ctx, DelegateRequest{
+	if _, _, err := issuer.delegate(ctx, DelegateRequest{
 		Parent:  asVerified(parent),
 		Subject: Principal{Type: PrincipalService, Subject: "s", Agent: &AgentPrincipal{AgentType: "worker"}},
 		Caveats: Caveats{Ops: []Op{OpGet}},
@@ -109,11 +109,11 @@ func TestIssueAndDelegateKeepNoAliasOfTheCaller(t *testing.T) {
 		},
 		TTL: time.Minute,
 	}
-	parent, _, err := issuer.Issue(ctx, req)
+	parent, _, err := issuer.issue(ctx, req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, _, err := issuer.Delegate(ctx, DelegateRequest{
+	child, _, err := issuer.delegate(ctx, DelegateRequest{
 		Parent: asVerified(parent), Subject: Principal{Type: PrincipalAgent, Subject: "child"}, InheritCaveats: true,
 	})
 	if err != nil {
@@ -181,7 +181,7 @@ func asVerified(c Capability) VerifiedCapability { return VerifiedCapability{c: 
 // one code outside the package can write — delegates nothing.
 func TestDelegateRefusesAParentTheVerifierDidNotMake(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)
-	_, _, err := issuer.Delegate(context.Background(), DelegateRequest{
+	_, _, err := issuer.delegate(context.Background(), DelegateRequest{
 		Subject: Principal{Type: PrincipalAgent, Subject: "child"}, InheritCaveats: true,
 	})
 	if !errors.Is(err, ErrInvalidRequest) {

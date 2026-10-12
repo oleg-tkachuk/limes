@@ -152,14 +152,31 @@ type IssueRequest struct {
 // and of every delegated capability.
 const DefaultGeneration = 1
 
+// IssueResult is what Issue and Delegate mint: the capability as recorded,
+// to log or display, and its compact-form token, to ship to the agent.
+type IssueResult struct {
+	Capability Capability
+	Token      string
+	_          noCompare
+}
+
 // Issue mints a top-level capability. Generation defaults to
-// DefaultGeneration; see
-// Capability.Generation for what it does and does not promise.
-//
-// Returns the typed Capability and the compact-form token in one call —
-// callers usually need both: the token to ship to the agent, the struct
-// to log / display.
-func (i *Issuer) Issue(ctx context.Context, req IssueRequest) (Capability, string, error) {
+// DefaultGeneration; see Capability.Generation for what it does and does not
+// promise.
+func (i *Issuer) Issue(ctx context.Context, req IssueRequest) (IssueResult, error) {
+	return result(i.issue(ctx, req))
+}
+
+// result is a minted capability and its token as an IssueResult.
+func result(c Capability, token string, err error) (IssueResult, error) {
+	if err != nil {
+		return IssueResult{}, err
+	}
+	return IssueResult{Capability: c, Token: token}, nil
+}
+
+// issue is Issue, returning the capability and its token apart.
+func (i *Issuer) issue(ctx context.Context, req IssueRequest) (Capability, string, error) {
 	if req.Subject.TenantID == uuid.Nil {
 		return Capability{}, "", invalidRequest("Issue requires Subject.TenantID")
 	}
@@ -302,7 +319,12 @@ type DelegateRequest struct {
 // that would have more than MaxDelegationDepth ancestors is
 // ErrDelegationTooDeep: its record is written before the store can count
 // them, and its token is not returned.
-func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability, string, error) {
+func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (IssueResult, error) {
+	return result(i.delegate(ctx, req))
+}
+
+// delegate is Delegate, returning the capability and its token apart.
+func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability, string, error) {
 	parent := req.Parent.c
 	if parent.ID == uuid.Nil {
 		return Capability{}, "", invalidRequest("Delegate requires a Parent the verifier accepted")

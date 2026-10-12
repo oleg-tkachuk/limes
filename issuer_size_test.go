@@ -25,7 +25,7 @@ func oversizedCaveats() Caveats {
 // nothing for one it refused.
 func TestIssueRefusesATokenPastMaxTokenBytes(t *testing.T) {
 	issuer, _, store, _ := buildIssuerVerifier(t)
-	_, _, err := issuer.Issue(context.Background(), IssueRequest{
+	_, _, err := issuer.issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData},
@@ -45,7 +45,7 @@ func TestDelegateAndBiscuitRefuseATokenPastMaxTokenBytes(t *testing.T) {
 	issuer, v, store, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
 	wide := oversizedCaveats()
-	parent, token, err := issuer.Issue(ctx, IssueRequest{
+	parent, token, err := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData},
@@ -60,7 +60,7 @@ func TestDelegateAndBiscuitRefuseATokenPastMaxTokenBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	recorded := len(store.caps)
-	if _, _, err := issuer.Delegate(ctx, DelegateRequest{
+	if _, _, err := issuer.delegate(ctx, DelegateRequest{
 		Parent: vc, Subject: Principal{Type: PrincipalAgent, Subject: "worker"}, TTL: time.Minute, Caveats: wide,
 	}); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("Delegate: err = %v, want ErrInvalidRequest", err)
@@ -73,7 +73,7 @@ func TestDelegateAndBiscuitRefuseATokenPastMaxTokenBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := small.Biscuit(ctx, asVerified(parent)); !errors.Is(err, ErrInvalidRequest) {
+	if _, err := small.biscuit(ctx, asVerified(parent)); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("Biscuit past MaxTokenBytes: err = %v, want ErrInvalidRequest", err)
 	}
 }

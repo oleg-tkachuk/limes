@@ -115,7 +115,7 @@ func TestIssue_VerifyHappyPath(t *testing.T) {
 	issuer, verifier, _, _ := buildIssuerVerifier(t)
 
 	ctx := context.Background()
-	cap, token, err := issuer.Issue(ctx, IssueRequest{
+	cap, token, err := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject: Principal{
 			Type:     PrincipalAgent,
@@ -145,7 +145,7 @@ func TestVerify_AudienceMismatch(t *testing.T) {
 	t.Parallel()
 	issuer, verifier, _, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
-	_, token, _ := issuer.Issue(ctx, IssueRequest{
+	_, token, _ := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New()},
 		Audience: []string{audienceData},
@@ -187,7 +187,7 @@ func TestVerify_Expired(t *testing.T) {
 	})
 
 	ctx := context.Background()
-	_, token, _ := issuer.Issue(ctx, IssueRequest{
+	_, token, _ := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New()},
 		Audience: []string{audienceData},
@@ -206,7 +206,7 @@ func TestVerify_Revoked(t *testing.T) {
 	t.Parallel()
 	issuer, verifier, store, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
-	cap, token, _ := issuer.Issue(ctx, IssueRequest{
+	cap, token, _ := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New()},
 		Audience: []string{audienceData},
@@ -234,7 +234,7 @@ func TestVerify_UntrustedIssuer(t *testing.T) {
 		Store:      store,
 		IssuerName: "limes-rogue",
 	})
-	_, token, _ := rogueIssuer.Issue(context.Background(), IssueRequest{
+	_, token, _ := rogueIssuer.issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New()},
 		Audience: []string{audienceData},
@@ -262,7 +262,7 @@ func TestDelegate_NarrowsAndPersists(t *testing.T) {
 	ctx := context.Background()
 	tenantID := uuid.New()
 
-	parent, _, err := issuer.Issue(ctx, IssueRequest{
+	parent, _, err := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID},
 		Audience: []string{audienceData, audienceMCP},
@@ -277,7 +277,7 @@ func TestDelegate_NarrowsAndPersists(t *testing.T) {
 		t.Fatalf("issue parent: %v", err)
 	}
 
-	child, childToken, err := issuer.Delegate(ctx, DelegateRequest{
+	child, childToken, err := issuer.delegate(ctx, DelegateRequest{
 		Parent:   asVerified(parent),
 		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID, Subject: "child"},
 		Audience: []string{audienceData},
@@ -309,7 +309,7 @@ func TestDelegate_RejectsWidening(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
 	tenantID := uuid.New()
-	parent, _, _ := issuer.Issue(ctx, IssueRequest{
+	parent, _, _ := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID},
 		Audience: []string{audienceData},
@@ -317,7 +317,7 @@ func TestDelegate_RejectsWidening(t *testing.T) {
 		TTL:      time.Hour,
 	})
 
-	_, _, err := issuer.Delegate(ctx, DelegateRequest{
+	_, _, err := issuer.delegate(ctx, DelegateRequest{
 		Parent:   asVerified(parent),
 		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID},
 		Audience: []string{audienceData, audienceAdmin}, // wider!
@@ -335,7 +335,7 @@ func TestDelegate_RefusesACopyWithLimitsOfItsOwn(t *testing.T) {
 	issuer, _, store, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
 	tenantID := uuid.New()
-	parent, _, err := issuer.Issue(ctx, IssueRequest{
+	parent, _, err := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID},
 		Audience: []string{audienceData},
@@ -346,7 +346,7 @@ func TestDelegate_RefusesACopyWithLimitsOfItsOwn(t *testing.T) {
 		t.Fatalf("issue parent: %v", err)
 	}
 	delegate := func(from Capability) error {
-		_, _, err := issuer.Delegate(ctx, DelegateRequest{
+		_, _, err := issuer.delegate(ctx, DelegateRequest{
 			Parent:         asVerified(from),
 			Subject:        Principal{Type: PrincipalAgent, TenantID: tenantID, Subject: "child"},
 			InheritCaveats: true,
@@ -433,7 +433,7 @@ func TestDelegateRefusesAnyBiscuitCopy(t *testing.T) {
 			t.Errorf("%s: FromBiscuit = false", name)
 		}
 		before := len(store.caps)
-		_, _, err = issuer.Delegate(ctx, DelegateRequest{
+		_, _, err = issuer.delegate(ctx, DelegateRequest{
 			Parent: vc, Subject: Principal{Type: PrincipalAgent, Subject: "child"}, InheritCaveats: true, TTL: time.Minute,
 		})
 		if !errors.Is(err, ErrInvalidRequest) {
