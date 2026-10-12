@@ -423,8 +423,10 @@ type TenantBudget struct {
 	ReservedAmount Nanos
 	UnitCode       string
 	PeriodStart    time.Time
-	PeriodEnd      *time.Time
-	UpdatedAt      time.Time
+	// PeriodEnd is when the accounting window closes; zero for an
+	// open-ended one.
+	PeriodEnd time.Time
+	UpdatedAt time.Time
 	// ResourceVersion is the OCC token a caller passes back to Set. Zero
 	// means no ceiling has ever been set — the row, if there is one, holds
 	// only what Charge and Reserve counted.
@@ -451,10 +453,9 @@ type SetTenantBudgetRequest struct {
 	// UnitCode pins the currency. Empty = keep existing or default
 	// to DefaultUnitCode on first insert.
 	UnitCode string
-	// PeriodEnd, if non-nil, pins a closing time for the accounting
-	// window. Nil = open-ended (typical for "just set the cap, I'll
-	// roll later").
-	PeriodEnd *time.Time
+	// PeriodEnd pins a closing time for the accounting window; zero leaves
+	// it open-ended (typical for "just set the cap, I'll roll later").
+	PeriodEnd time.Time
 	// ResetSpend=true zeroes the spend and rolls PeriodStart to
 	// now. false leaves the counter alone — the cap changes mid-
 	// window.
@@ -488,7 +489,7 @@ type ListTenantBudgetsRequest struct {
 	// ExcludeInactive drops tenants the consumer marks inactive.
 	ExcludeInactive bool
 	// Limit is the page size; see PageLimit. Negative is refused.
-	Limit int32
+	Limit int
 	// Cursor is the one the previous page returned; empty for the first.
 	Cursor string
 }
@@ -632,7 +633,7 @@ type ReleaseRequest struct {
 type ListReservationsRequest struct {
 	CapabilityID uuid.UUID
 	// Limit is the page size; see PageLimit. Negative is refused.
-	Limit int32
+	Limit int
 	// Cursor is the one the previous page returned; empty for the first.
 	Cursor string
 }

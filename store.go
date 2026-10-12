@@ -136,7 +136,7 @@ const (
 )
 
 // PageLimit is the page size a store serves for a requested limit.
-func PageLimit(requested int32) int32 {
+func PageLimit(requested int) int {
 	switch {
 	case requested <= 0: // a negative limit was refused by Validate
 		return DefaultListLimit
@@ -206,7 +206,7 @@ type ListByPrincipalRequest struct {
 	// Cursor is the one the previous page returned; empty for the first.
 	Cursor string
 	// Limit is the page size; see PageLimit.
-	Limit int32
+	Limit int
 }
 
 // Validate reports whether the request names a principal. Every error

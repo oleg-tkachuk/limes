@@ -109,6 +109,9 @@ const (
 	// noUtilization stands for a tenant with no ceiling where a
 	// percentage is compared; no percentage equals it.
 	noUtilization = -1
+	// periodLength is how far ahead the accounting window of the
+	// PeriodEnd check closes.
+	periodLength = 30 * 24 * time.Hour
 	// concurrentDeliveries is how many times one cost arrives at once.
 	concurrentDeliveries = 20
 )
@@ -236,6 +239,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"ReservationsPage", checkReservationsPage[TX]},
 		{"HousekeepingRefusesANegativeLimit", checkHousekeepingLimits[TX]},
 		{"PurgeOrphansReleasesWhatARemovedCapabilityHeld", checkPurgeOrphans[TX]},
+		{"TenantBudgetKeepsItsPeriodEnd", checkPeriodEnd[TX]},
 	}
 	for _, c := range checks {
 		t.Run(c.name, func(t *testing.T) { c.run(t, newFixture(t, setup)) })
@@ -1215,4 +1219,26 @@ func riskyPct(s limes.TenantBudgetSummary) float64 {
 		return noUtilization
 	}
 	return pct
+}
+
+// checkPeriodEnd holds a store to keeping a tenant's PeriodEnd as set, and a
+// zero one as zero: an open-ended window.
+func checkPeriodEnd[TX any](t *testing.T, f fixture[TX]) {
+	// Microseconds: the finest a timestamp column keeps.
+	end := time.Now().UTC().Add(periodLength).Truncate(time.Microsecond)
+	for _, want := range []time.Time{end, {}} {
+		cur, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
+		if err != nil {
+			t.Fatal(err)
+		}
+		set, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
+			TenantID: f.Tenant, MaxBudgetAmount: tenantBudget, UnitCode: unit, PeriodEnd: want, ExpectedVersion: cur.ResourceVersion,
+		})
+		if err != nil || !set.PeriodEnd.Equal(want) {
+			t.Fatalf("SetTenantBudget(PeriodEnd %v) = %v, %v", want, set.PeriodEnd, err)
+		}
+		if got, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant); err != nil || !got.PeriodEnd.Equal(want) {
+			t.Errorf("GetTenantBudget after PeriodEnd %v = %v, %v", want, got.PeriodEnd, err)
+		}
+	}
 }
