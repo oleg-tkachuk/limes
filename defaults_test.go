@@ -79,6 +79,8 @@ func TestConfigRefusesNegatives(t *testing.T) {
 		"a negative Leeway":        func(c *VerifierConfig) { c.Leeway = -time.Second },
 		"a Leeway past MaxLeeway":  func(c *VerifierConfig) { c.Leeway = MaxLeeway + time.Second },
 		"a negative MaxTokenBytes": func(c *VerifierConfig) { c.MaxTokenBytes = -1 },
+		"a Realm with a quote":     func(c *VerifierConfig) { c.Realm = `a"b` },
+		"a Realm with a newline":   func(c *VerifierConfig) { c.Realm = "a\nb" },
 	} {
 		cfg := base
 		mutate(&cfg)

@@ -24,7 +24,6 @@ func TestReasonOf(t *testing.T) {
 		{"revoked", fmt.Errorf("wrapped: %w", ErrRevoked), ReasonRevoked, true},
 		{"audience", ErrAudienceMismatch, ReasonAudienceMismatch, true},
 		{"biscuit block", fmt.Errorf("%w: rule", ErrBiscuitAttenuation), ReasonBiscuitAttenuation, true},
-		{"copy limits unmetered", ErrCopyCountersNotMetered, ReasonBiscuitAttenuation, true},
 		{"proof missing", dpop.ErrRequired, ReasonProofRequired, false},
 		{"proof invalid", fmt.Errorf("%w: htm", dpop.ErrInvalid), ReasonProofInvalid, false},
 		{"proof replayed", dpop.ErrReplayed, ReasonProofReplayed, false},
@@ -61,6 +60,9 @@ func TestReasonOfNonRefusals(t *testing.T) {
 		"effect conflict": ErrEffectConflict,
 		"invalid amount":  ErrInvalidAmount,
 		"store failure":   errors.New("connection reset"),
+		// The verifier's configuration, not the token: a verifier with
+		// MeterCopies accepts the same token.
+		"copy limits unmetered": ErrCopyCountersNotMetered,
 	} {
 		if r, ok := ReasonOf(err); ok {
 			t.Errorf("%s: ReasonOf = %q, want none", name, r)

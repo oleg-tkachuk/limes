@@ -31,7 +31,7 @@ flowchart LR
         verifier["<b>StandardVerifier</b><br/>Authorize · Verify · BiscuitCopy<br/>ErrorResponse · DPoPNonce"]
         caveats["<b>Caveats</b><br/>Check · CheckSource · MatchResource"]
         cache["CachedRevocationChecker<br/>TTL · bounded, oldest out · single-flight"]
-        bcache["CachedBiscuitRevocationChecker<br/>per token · TTL · bounded · single-flight"]
+        bcache["CachedBiscuitRevocationChecker<br/>per revocation id · TTL · bounded · single-flight"]
         attenuate["<b>Attenuate</b><br/>offline · no key"]
         metering["Instrument<br/>OTel counters · spend histogram<br/>WithMeterProvider · WithTenantAttribute"]
         static["jwks.Static<br/>SetKey · RemoveKey"]
@@ -297,9 +297,10 @@ flowchart TB
 ```
 
 The sealed token presented on its own is refused, so it cannot be lifted out
-to shed an attenuation. `ErrBiscuitAttenuation` and
-`ErrCopyCountersNotMetered` both match `ErrInvalidToken`: the token is not
-one this verifier accepts.
+to shed an attenuation. `ErrBiscuitAttenuation` matches `ErrInvalidToken`:
+the token is not one this verifier accepts. `ErrCopyCountersNotMetered` does
+not: the same token passes a verifier with `MeterCopies`, so the refusal is
+the server's configuration, answered as an internal error.
 
 ## Proof of possession
 
@@ -368,17 +369,18 @@ error's own text never reaches the client.
 | Refusal | Status | `WWW-Authenticate` |
 |---|---|---|
 | `jwks.ErrUnavailable` | 503 | none |
-| `ErrNoCredentials` | 401 | a bare challenge, no error code (RFC 6750 §3.1): no header, or another scheme's |
+| `ErrNoCredentials` | 401 | a challenge with no error code, only the realm (RFC 6750 §3.1): no header, or another scheme's |
 | `ErrMalformedAuthorization` | 400 | `error="invalid_request"` under the client's scheme (Bearer when unknown) |
 | `dpop.ErrNonceRequired` | 401 | `DPoP error="use_dpop_nonce"`, and a fresh `DPoP-Nonce` |
 | `dpop.ErrRequired` · `dpop.ErrInvalid` · `dpop.ErrReplayed`, and any other `ErrProofOfPossession` | 401 | `DPoP error="invalid_dpop_proof", algs="Ed25519 ES256"` |
 | `ErrAuthSchemeMismatch` · `ErrInvalidToken` · `ErrExpired` · `ErrNotYetValid` · `ErrRevoked` · `ErrAudienceMismatch`, and any other `ErrUnauthenticated` | 401 | `error="invalid_token"` under the client's scheme (Bearer when unknown) |
 | any `ErrCaveatViolation` | 403 | `error="insufficient_scope"` |
 | `ErrBudgetExceeded` · `ErrTenantBudgetExceeded` · `ErrRequestLimitExceeded` | 403 | none |
-| anything else — a store or key resolver outage, `ErrEffectConflict` | 500 | none |
+| anything else — a store or key resolver outage, `ErrEffectConflict`, `ErrCopyCountersNotMetered` | 500 | none |
 
-A verifier with DPoP configured adds a bare `DPoP algs="…"` challenge beside a
-`Bearer` one.
+A verifier with DPoP configured adds a `DPoP algs="…"` challenge with no
+error code beside a `Bearer` one. Every challenge ends with
+`realm="…"`: `VerifierConfig.Realm`, or `DefaultRealm`.
 
 ## What the bearer may do
 
@@ -704,7 +706,7 @@ flowchart LR
     notify{{"consumer's revocation signal<br/>e.g. a Postgres channel"}}
     bop(["RevokeBiscuit(RevokeBiscuitRequest{CapabilityID, RevocationID})"])
     blist[("<b>BiscuitRevocationStore</b><br/>revoked block ids")]
-    bcache["<b>CachedBiscuitRevocationChecker</b><br/>answer per token, cached for TTL<br/>bounded · dropped by Clear"]
+    bcache["<b>CachedBiscuitRevocationChecker</b><br/>answer per revocation id, cached for TTL<br/>bounded · dropped by Clear"]
     v1["StandardVerifier"]
     v2["StandardVerifier"]
 

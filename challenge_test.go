@@ -184,7 +184,32 @@ func TestNoCredentialsIsChallengedWithoutAnErrorCode(t *testing.T) {
 			t.Errorf("challenge %q names an error", c)
 		}
 	}
-	if resp.Challenges[0] != string(AuthSchemeBearer) {
-		t.Errorf("first challenge = %q, want the bare %q", resp.Challenges[0], AuthSchemeBearer)
+	// RFC 6750 §3: the scheme is followed by at least one auth-param.
+	if want := string(AuthSchemeBearer) + ` realm="` + DefaultRealm + `"`; resp.Challenges[0] != want {
+		t.Errorf("first challenge = %q, want %q", resp.Challenges[0], want)
+	}
+}
+
+// A configured realm names the protection space in every challenge, Bearer
+// and DPoP alike.
+func TestEveryChallengeNamesTheRealm(t *testing.T) {
+	const realm = "api.example"
+	_, configured, _, _ := buildIssuerVerifier(t)
+	cfg := configured.cfg
+	cfg.Realm = realm
+	v, err := NewStandardVerifier(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, err := range []error{ErrNoCredentials, ErrExpired, ErrResourceNotAllowed, dpop.ErrRequired} {
+		resp := v.ErrorResponse(context.Background(), err, AuthSchemeBearer)
+		if len(resp.Challenges) == 0 {
+			t.Fatalf("%v: no challenge", err)
+		}
+		for _, c := range resp.Challenges {
+			if !strings.HasSuffix(c, `realm="`+realm+`"`) {
+				t.Errorf("%v: challenge %q does not name realm %q", err, c, realm)
+			}
+		}
 	}
 }
