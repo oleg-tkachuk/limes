@@ -5,7 +5,6 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
-	"maps"
 	"slices"
 	"sync"
 )
@@ -64,7 +63,7 @@ func (r *Static) PublicKey(_ context.Context, kid string) (ed25519.PublicKey, er
 	if !ok {
 		return nil, ErrUnknownKID
 	}
-	return k, nil
+	return slices.Clone(k), nil
 }
 
 // SetKey adds or replaces a kid → key mapping. Rotation step 1: publish
@@ -90,9 +89,14 @@ func (r *Static) RemoveKey(kid string) {
 	r.mu.Unlock()
 }
 
-// Keys returns a snapshot of the current key set, e.g. for Marshal.
+// Keys returns a snapshot of the current key set, e.g. for Marshal: keys of
+// its own, which a caller may change without changing the resolver's.
 func (r *Static) Keys() map[string]ed25519.PublicKey {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return maps.Clone(r.keys)
+	out := make(map[string]ed25519.PublicKey, len(r.keys))
+	for kid, k := range r.keys {
+		out[kid] = slices.Clone(k)
+	}
+	return out
 }
