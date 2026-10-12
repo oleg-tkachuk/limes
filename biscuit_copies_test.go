@@ -235,6 +235,30 @@ func TestBiscuitCopyNamesItsLimits(t *testing.T) {
 	}
 }
 
+// A copy may set the axis an enclosing copy left alone, either way round: the
+// enclosing copy then has no ceiling there to be within.
+func TestBiscuitCopySetsTheAxisItsEncloserLeft(t *testing.T) {
+	v, _, root := limitedBiscuit(t)
+	v.cfg.MeterCopies = false
+	const requests = 5
+	for name, tc := range map[string]struct{ outer, inner Attenuation }{
+		"requests under a budget": {Attenuation{Budget: &BudgetCeiling{Max: NanosPerUnit}}, Attenuation{Requests: &RequestCeiling{Max: requests}}},
+		"a budget under requests": {Attenuation{Requests: &RequestCeiling{Max: requests}}, Attenuation{Budget: &BudgetCeiling{Max: NanosPerUnit}}},
+	} {
+		outer, err := Attenuate(root, tc.outer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		inner, err := Attenuate(outer, tc.inner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err := v.BiscuitCopy(context.Background(), inner); err != nil || len(got.Copies()) != 2 {
+			t.Errorf("%s: BiscuitCopy = %+v, %v; want both copies' limits", name, got, err)
+		}
+	}
+}
+
 // ceilingIs reports whether an optional ceiling is set and equal to want.
 func ceilingIs[T comparable](got *T, want T) bool { return got != nil && *got == want }
 

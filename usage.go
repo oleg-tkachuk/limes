@@ -49,8 +49,9 @@ type UsageStore[TX any] interface {
 // # Copies of a Biscuit
 //
 // A Biscuit's holder can give a copy limits of its own (CopyCeiling), which
-// arrive as Copies on BumpRequest, ChargeRequest and ReserveRequest. Each is
-// counted under its revocation id, apart from its siblings, and checked
+// arrive through the Subject of BumpRequest, ChargeRequest and ReserveRequest
+// (MeterSubject.Copies). Each is counted under its revocation id, apart from
+// its siblings, and checked
 // before the capability's ceilings; the capability's counters still take
 // every copy's requests and spend. A charge or reservation records the copies
 // it debited, so Refund, Settle, Release and ReleaseExpired return to them
