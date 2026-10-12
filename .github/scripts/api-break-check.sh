@@ -26,7 +26,12 @@ base="$1"
 head="$2"
 
 root="$(git rev-parse --show-toplevel)"
-read -r -a apidiff <<<"${APIDIFF:-go tool -modfile=$root/tools/go.mod apidiff}"
+# The default as an array, so a checkout path with a space stays one word;
+# APIDIFF, a command line of its own, is split on whitespace.
+apidiff=(go tool "-modfile=$root/tools/go.mod" apidiff)
+if [ -n "${APIDIFF:-}" ]; then
+    read -r -a apidiff <<<"$APIDIFF"
+fi
 module="$(go mod edit -json | jq -r .Module.Path)"
 
 # The subject marker and the footer Conventional Commits 1.0 define.
@@ -63,7 +68,7 @@ while IFS= read -r -d '' message; do
         marked=true
         break
     fi
-done < <(git log --format='%B%x00' "$merge_base..$head")
+done < <(git log -z --format=%B "$merge_base..$head")
 
 if [ "$marked" = true ]; then
     echo "api-break-check: a commit marks the change breaking"
