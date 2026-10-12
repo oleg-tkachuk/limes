@@ -142,11 +142,17 @@ func (r *Remote) PublicKey(ctx context.Context, kid string) (ed25519.PublicKey, 
 	}
 	key, ok, fetchedAt, _ = r.lookup(kid)
 
+	r.mu.RLock()
+	lastErr := r.lastErr
+	r.mu.RUnlock()
 	if fetchedAt.IsZero() || r.cfg.Now().Sub(fetchedAt) > r.cfg.MaxStale {
-		r.mu.RLock()
-		lastErr := r.lastErr
-		r.mu.RUnlock()
 		return nil, fmt.Errorf("%w: %s: %w", ErrUnavailable, r.cfg.URL, lastErr)
+	}
+	// A kid the held set lacks while the endpoint is failing may be one the
+	// issuer has rotated in since: the fault is the endpoint's, not the
+	// token's, so it is not refused as unknown.
+	if !ok && lastErr != nil {
+		return nil, fmt.Errorf("%w: %s: kid %q is not in the set held: %w", ErrUnavailable, r.cfg.URL, kid, lastErr)
 	}
 	if !ok {
 		return nil, ErrUnknownKID
