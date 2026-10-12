@@ -41,3 +41,24 @@ func TestRefundRequestNamesOneAmount(t *testing.T) {
 		}
 	}
 }
+
+func TestTenantBudgetUtilization(t *testing.T) {
+	const ceiling = 10 * NanosPerUnit
+	cases := map[string]struct {
+		budget  TenantBudget
+		pct     float64
+		limited bool
+	}{
+		"no ceiling":         {TenantBudget{SpentAmount: ceiling}, 0, false},
+		"nothing spent":      {TenantBudget{MaxBudgetAmount: ceiling}, 0, true},
+		"a quarter spent":    {TenantBudget{MaxBudgetAmount: ceiling, SpentAmount: ceiling / 4}, wholePct / 4, true},
+		"all spent":          {TenantBudget{MaxBudgetAmount: ceiling, SpentAmount: ceiling}, wholePct, true},
+		"past the ceiling":   {TenantBudget{MaxBudgetAmount: ceiling, SpentAmount: 2 * ceiling}, wholePct, true},
+		"a negative ceiling": {TenantBudget{MaxBudgetAmount: -ceiling, SpentAmount: ceiling}, 0, false},
+	}
+	for name, tc := range cases {
+		if pct, limited := tc.budget.Utilization(); pct != tc.pct || limited != tc.limited {
+			t.Errorf("%s: Utilization() = %v, %v; want %v, %v", name, pct, limited, tc.pct, tc.limited)
+		}
+	}
+}

@@ -429,10 +429,6 @@ func (s *Store[TX]) ListByPrincipal(_ context.Context, req limes.ListByPrincipal
 	return limes.Page[limes.Capability]{Items: out, Next: out[len(out)-1].ID.String()}, nil
 }
 
-// maxUtilizationPct is where TenantBudgetSummary.UtilizationPct is clamped:
-// a tenant past its ceiling is at 100%, not beyond.
-const maxUtilizationPct = 100
-
 // percent turns a fraction into a percentage.
 const percent = 100
 
@@ -1230,7 +1226,7 @@ func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTen
 		if err != nil {
 			return limes.Page[limes.TenantBudgetSummary]{}, err
 		}
-		pct, _ := strconv.ParseFloat(c.utilisation, 64) // decodeTenantBudgetCursor checked it
+		pct, _ := strconv.ParseFloat(c.utilization, 64) // decodeTenantBudgetCursor checked it
 		after = &budgetRow{pct: pct, tenant: c.tenantID}
 	}
 	s.mu.Lock()
@@ -1264,13 +1260,13 @@ func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTen
 		last := rows[limit-1]
 		// 'f': a plain decimal, which the cursor reads back exactly.
 		next = tenantBudgetCursor{
-			utilisation: strconv.FormatFloat(last.pct, 'f', -1, 64), tenantID: last.tenant,
+			utilization: strconv.FormatFloat(last.pct, 'f', -1, 64), tenantID: last.tenant,
 		}.encode()
 	}
 	out := make([]limes.TenantBudgetSummary, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, limes.TenantBudgetSummary{
-			TenantID: r.tenant, Budget: r.budget, UtilizationPct: min(r.pct, maxUtilizationPct),
+			TenantID: r.tenant, Budget: r.budget,
 		})
 	}
 	return limes.Page[limes.TenantBudgetSummary]{Items: out, Next: next}, nil
@@ -1278,12 +1274,12 @@ func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTen
 
 // budgetRow is a tenant budget in ListTenantBudgets' order.
 type budgetRow struct {
-	pct    float64 // unclamped utilisation
+	pct    float64 // unclamped utilization
 	tenant uuid.UUID
 	budget limes.TenantBudget
 }
 
-// before reports whether r comes before o: higher utilisation first, then the
+// before reports whether r comes before o: higher utilization first, then the
 // lower tenant id.
 func (r budgetRow) before(o budgetRow) bool {
 	if r.pct != o.pct {

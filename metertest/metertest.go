@@ -106,6 +106,9 @@ const (
 	// unit is the currency every amount is in; otherUnit is one it is not.
 	unit      = limes.DefaultUnitCode
 	otherUnit = "EUR"
+	// noUtilization stands for a tenant with no ceiling where a
+	// percentage is compared; no percentage equals it.
+	noUtilization = -1
 	// concurrentDeliveries is how many times one cost arrives at once.
 	concurrentDeliveries = 20
 )
@@ -1105,14 +1108,16 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatalf("paging skipped a tenant: %v", all)
 	}
 	for i := 1; i < len(order); i++ {
-		if order[i].UtilizationPct > order[i-1].UtilizationPct {
-			t.Errorf("row %d at %v%% follows one at %v%%; want most at risk first", i, order[i].UtilizationPct, order[i-1].UtilizationPct)
+		cur, _ := order[i].Budget.Utilization()
+		prev, _ := order[i-1].Budget.Utilization()
+		if cur > prev {
+			t.Errorf("row %d at %v%% follows one at %v%%; want most at risk first", i, cur, prev)
 		}
 	}
 	const half = 50
 	riskyPage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{ThresholdPct: half})
 	risky := riskyPage.Items
-	if err != nil || len(risky) != 1 || risky[0].TenantID != f.Tenant || risky[0].UtilizationPct != half {
+	if err != nil || len(risky) != 1 || risky[0].TenantID != f.Tenant || riskyPct(risky[0]) != half {
 		t.Errorf("tenants at 50%% or more = %+v, %v; want only %s at 50%%", risky, err, f.Tenant)
 	}
 	unlPage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{UnlimitedOnly: true})
@@ -1200,4 +1205,14 @@ func checkPurgeOrphans[TX any](t *testing.T, f fixture[TX]) {
 	if u, err := f.Usage.GetUsage(f.Ctx, f.root); err != nil || u.ReservedAmount != 0 {
 		t.Errorf("the root still holds %v for its removed child, %v; want 0", u.ReservedAmount, err)
 	}
+}
+
+// riskyPct is a row's utilization, or -1 for a tenant with no ceiling, which
+// no threshold should have listed.
+func riskyPct(s limes.TenantBudgetSummary) float64 {
+	pct, limited := s.Budget.Utilization()
+	if !limited {
+		return noUtilization
+	}
+	return pct
 }

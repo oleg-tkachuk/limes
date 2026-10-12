@@ -73,8 +73,8 @@ func TestListTenantBudgets(t *testing.T) {
 	}
 	page, _ := u.ListTenantBudgets(ctx, limes.ListTenantBudgetsRequest{Limit: 1})
 	got := page.Items
-	if got[0].UtilizationPct != maxUtilizationPct {
-		t.Errorf("a tenant past its ceiling reads %v%%, want %d%%", got[0].UtilizationPct, maxUtilizationPct)
+	if pct, limited := got[0].Budget.Utilization(); !limited || pct != percent {
+		t.Errorf("a tenant past its ceiling reads %v%% (limited %v), want %d%%", pct, limited, percent)
 	}
 }
 
@@ -156,7 +156,7 @@ func TestListTenantBudgetsPages(t *testing.T) {
 		t.Fatalf("AllTenantBudgets walked %v, want %v", walked, want)
 	}
 
-	for _, bad := range []string{"garbage", tenantBudgetCursor{utilisation: "x", tenantID: half}.encode()} {
+	for _, bad := range []string{"garbage", tenantBudgetCursor{utilization: "x", tenantID: half}.encode()} {
 		if _, err := u.ListTenantBudgets(ctx, limes.ListTenantBudgetsRequest{Cursor: bad}); !errors.Is(err, limes.ErrInvalidRequest) {
 			t.Errorf("cursor %q: err = %v, want ErrInvalidRequest", bad, err)
 		}

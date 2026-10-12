@@ -431,6 +431,19 @@ type TenantBudget struct {
 	ResourceVersion int64
 }
 
+// wholePct is a whole, in percent.
+const wholePct = 100
+
+// Utilization is how much of the ceiling is spent, in percent, clamped to
+// 0..100: a tenant past its ceiling is at 100. limited is false for a tenant
+// with no ceiling, which has no utilization to report; pct is then 0.
+func (b TenantBudget) Utilization() (pct float64, limited bool) {
+	if b.MaxBudgetAmount <= 0 {
+		return 0, false
+	}
+	return min(max(float64(b.SpentAmount)/float64(b.MaxBudgetAmount)*wholePct, 0), wholePct), true
+}
+
 // SetTenantBudgetRequest is the input for UsageStore.SetTenantBudget.
 type SetTenantBudgetRequest struct {
 	TenantID        uuid.UUID
@@ -460,16 +473,15 @@ type TenantBudgetSummary struct {
 	TenantID    uuid.UUID
 	Slug        string
 	DisplayName string
-	Budget      TenantBudget
-	// UtilizationPct = spent / max × 100, clamped to [0, 100]. 0
-	// when MaxBudgetAmount == 0 (unlimited/metering-only).
-	UtilizationPct float64
+	// Budget is the tenant's ceiling and counters; Budget.Utilization reads
+	// how much of the ceiling is spent.
+	Budget TenantBudget
 }
 
 // ListTenantBudgetsRequest is the input shape for
 // UsageStore.ListTenantBudgets.
 type ListTenantBudgetsRequest struct {
-	// ThresholdPct keeps only tenants at or past this utilisation, 0..100.
+	// ThresholdPct keeps only tenants at or past this utilization, 0..100.
 	ThresholdPct float64
 	// UnlimitedOnly keeps only tenants with no ceiling.
 	UnlimitedOnly bool
@@ -481,8 +493,8 @@ type ListTenantBudgetsRequest struct {
 	Cursor string
 }
 
-// maxThresholdPct is the highest utilisation a threshold can name.
-const maxThresholdPct = 100
+// maxThresholdPct is the highest utilization a threshold can name.
+const maxThresholdPct = wholePct
 
 // Validate refuses a request no page can answer: a negative page size, or a
 // threshold outside 0..100.
