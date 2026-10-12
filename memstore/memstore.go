@@ -148,7 +148,8 @@ func New[TX any]() *Store[TX] {
 // NewUsage returns an empty usage store over a record store. The records are
 // how it finds each capability's ancestors and their ceilings, and which
 // capabilities still exist for PurgeOrphans. nil records means no lineage is
-// known: every capability is metered on its own.
+// known: every capability is metered on its own, and none is known to be
+// gone, so PurgeOrphans removes nothing.
 func NewUsage[TX any](records *Store[TX]) *UsageStore[TX] {
 	return &UsageStore[TX]{
 		usage:   map[uuid.UUID]limes.Usage{},
@@ -202,8 +203,10 @@ func (s *Store[TX]) Insert(_ context.Context, req limes.InsertRequest) error {
 	if _, ok := s.caps[c.ID]; ok {
 		return fmt.Errorf("%w: %s", limes.ErrAlreadyExists, c.ID)
 	}
-	s.caps[c.ID] = c
-	s.issuedBy[c.ID] = issuedBy
+	// Copies in and out: the caller keeps its slices, and a record never
+	// changes after it is written.
+	s.caps[c.ID] = c.Clone()
+	s.issuedBy[c.ID] = issuedBy.Clone()
 	return nil
 }
 
@@ -215,7 +218,7 @@ func (s *Store[TX]) GetRecord(_ context.Context, id uuid.UUID) (limes.Record, er
 	if !ok {
 		return limes.Record{}, limes.ErrNotFound
 	}
-	rec := limes.Record{Capability: c, IssuedBy: s.issuedBy[id]}
+	rec := limes.Record{Capability: c.Clone(), IssuedBy: s.issuedBy[id].Clone()}
 	if r, ok := s.revoked[id]; ok {
 		rec.Revocation = &r
 	}
@@ -426,7 +429,7 @@ func (s *Store[TX]) ListByPrincipal(_ context.Context, req limes.ListByPrincipal
 		case req.Cursor != "" && !uuidLess(after, id):
 			continue
 		}
-		out = append(out, c)
+		out = append(out, c.Clone())
 	}
 	// Ascending id, the order the cursor seeks in.
 	sort.Slice(out, func(i, j int) bool { return uuidLess(out[i].ID, out[j].ID) })
@@ -1332,6 +1335,14 @@ func (s *UsageStore[TX]) Delete(_ context.Context, capID uuid.UUID) error {
 	s.releaseHoldsLocked(func(id uuid.UUID) bool { return id == capID })
 	delete(s.usage, capID)
 	maps.DeleteFunc(s.copies, func(_ string, c copyCounter) bool { return c.capID == capID })
+	// A descendant's hold still names capID among its ancestors; releasing
+	// or settling it later must not write the dropped row back.
+	for id, h := range s.holds {
+		if i := slices.Index(h.ancestors, capID); i >= 0 {
+			h.ancestors = slices.Delete(slices.Clone(h.ancestors), i, i+1)
+			s.holds[id] = h
+		}
+	}
 	return nil
 }
 
@@ -1340,9 +1351,14 @@ func (s *UsageStore[TX]) PurgeOrphans(_ context.Context, req limes.PurgeOrphansR
 	if err != nil {
 		return limes.PurgeOrphansResult{}, err
 	}
+	// With no records nothing is known to be gone: every row is a live
+	// capability's as far as this store can tell.
+	if s.records == nil {
+		return limes.PurgeOrphansResult{}, nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	gone := func(id uuid.UUID) bool { return s.records == nil || !s.records.exists(id) }
+	gone := func(id uuid.UUID) bool { return !s.records.exists(id) }
 	// Every capability with a row or a hold that is no longer on record, in
 	// a fixed order so batches are repeatable.
 	orphans := map[uuid.UUID]bool{}

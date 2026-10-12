@@ -156,6 +156,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 	}{
 		{"InsertReadsBack", checkRoundTrip},
 		{"InsertRefusesADuplicate", checkDuplicate},
+		{"ARecordIsNoCallersToChange", checkRecordIsItsOwn},
 		{"GetRecordReadsBackIssuanceAndRevocation", checkRecord},
 		{"UnknownIDs", checkUnknown},
 		{"RevokeIsIdempotentAndReachesDescendants", checkRevoke},
@@ -589,4 +590,45 @@ func checkPurgeRetention(t *testing.T, f fixture) {
 	if _, err := f.get(old.ID); !errors.Is(err, limes.ErrNotFound) {
 		t.Errorf("GetRecord of the capability expired past the retention: err = %v, want ErrNotFound", err)
 	}
+}
+
+// checkRecordIsItsOwn holds a store to an append-only record: neither the
+// capability handed to Insert nor one read back shares anything with what is
+// stored, so changing it changes no record.
+func checkRecordIsItsOwn(t *testing.T, f fixture) {
+	const subject = "agent:own"
+	c := f.newCapability(subject, uuid.Nil, f.now.Add(ttl))
+	want := c.Clone()
+	f.insert(t, c)
+	scribble := func(c *limes.Capability) {
+		c.Audience[0] = "scribbled"
+		c.Caveats.Ops[0] = "scribbled"
+		c.Caveats.ResourcePrefixes[0] = "scribbled/"
+		c.Caveats.SourceIPCIDR[0] = "0.0.0.0/0"
+		c.Subject.Agent.Model = "scribbled"
+	}
+	check := func(after string) {
+		t.Helper()
+		got, err := f.get(c.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if diff := diffCapabilities(got, want); diff != "" {
+			t.Errorf("the record changed after %s: %s", after, diff)
+		}
+	}
+	scribble(&c)
+	check("the inserted capability was changed")
+	got, err := f.get(c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scribble(&got)
+	check("a capability read back was changed")
+	page, err := f.Store.ListByPrincipal(f.Ctx, limes.ListByPrincipalRequest{TenantID: f.Tenant, PrincipalType: limes.PrincipalAgent, Subject: subject})
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("ListByPrincipal = %+v, %v; want the one capability", page.Items, err)
+	}
+	scribble(&page.Items[0])
+	check("a capability listed was changed")
 }
