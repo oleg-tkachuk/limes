@@ -26,13 +26,15 @@ const (
 	ReasonNotYetValid            Reason = "not_yet_valid"
 	ReasonRevoked                Reason = "revoked"
 	ReasonAudienceMismatch       Reason = "audience_mismatch"
-	ReasonInvalidBiscuit         Reason = "invalid_biscuit"
+	ReasonBiscuitAttenuation     Reason = "biscuit_attenuation"
 	ReasonProofRequired          Reason = "proof_required"
+	ReasonNonceRequired          Reason = "nonce_required"
+	ReasonAuthSchemeMismatch     Reason = "auth_scheme_mismatch"
 	ReasonProofInvalid           Reason = "proof_invalid"
 	ReasonProofReplayed          Reason = "proof_replayed"
 	ReasonOpNotAllowed           Reason = "op_not_allowed"
 	ReasonResourceNotAllowed     Reason = "resource_not_allowed"
-	ReasonSourceNotAllowed       Reason = "source_not_allowed"
+	ReasonSourceIPNotAllowed     Reason = "source_ip_not_allowed"
 	ReasonIdempotencyKeyRequired Reason = "idempotency_key_required"
 	ReasonTaintedReadNotAllowed  Reason = "tainted_read_not_allowed"
 	ReasonRequestLimitExceeded   Reason = "request_limit_exceeded"
@@ -64,14 +66,14 @@ var refusalRules = []refusalRule{
 	// A nonce challenge asks for a proof signed afresh, and a token under the
 	// wrong scheme for the same token sent under DPoP; neither stands. RFC
 	// 9449 §7.2 answers the scheme as an invalid token, not a bad proof.
-	{dpop.ErrNonceRequired, ReasonProofInvalid, false, answerNonce},
+	{dpop.ErrNonceRequired, ReasonNonceRequired, false, answerNonce},
 	{dpop.ErrRequired, ReasonProofRequired, false, answerProof},
 	{dpop.ErrInvalid, ReasonProofInvalid, false, answerProof},
 	{dpop.ErrReplayed, ReasonProofReplayed, false, answerProof},
-	{ErrAuthSchemeMismatch, ReasonProofRequired, false, answerToken},
+	{ErrAuthSchemeMismatch, ReasonAuthSchemeMismatch, false, answerToken},
 	{ErrProofOfPossession, "", false, answerProof},
 
-	{ErrBiscuitAttenuation, ReasonInvalidBiscuit, true, answerToken},
+	{ErrBiscuitAttenuation, ReasonBiscuitAttenuation, true, answerToken},
 	{ErrInvalidToken, ReasonInvalidToken, true, answerToken},
 	{ErrExpired, ReasonExpired, true, answerToken},
 	{ErrNotYetValid, ReasonNotYetValid, false, answerToken},
@@ -81,7 +83,7 @@ var refusalRules = []refusalRule{
 
 	{ErrOpNotAllowed, ReasonOpNotAllowed, true, answerScope},
 	{ErrResourceNotAllowed, ReasonResourceNotAllowed, true, answerScope},
-	{ErrSourceIPNotAllowed, ReasonSourceNotAllowed, true, answerScope},
+	{ErrSourceIPNotAllowed, ReasonSourceIPNotAllowed, true, answerScope},
 	{ErrIdempotencyKeyRequired, ReasonIdempotencyKeyRequired, false, answerScope},
 	{ErrTaintedReadNotAllowed, ReasonTaintedReadNotAllowed, false, answerScope},
 	{ErrCaveatViolation, "", false, answerScope},
