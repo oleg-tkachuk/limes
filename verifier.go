@@ -287,7 +287,8 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapab
 	if !cap.NotBefore.IsZero() && now.Add(v.cfg.Leeway).Before(cap.NotBefore) {
 		return VerifiedCapability{}, ErrNotYetValid
 	}
-	if cap.ExpiresAt.IsZero() || now.Add(-v.cfg.Leeway).After(cap.ExpiresAt) {
+	// RFC 7519 §4.1.4: refused on or after exp, less the leeway.
+	if cap.ExpiresAt.IsZero() || !now.Add(-v.cfg.Leeway).Before(cap.ExpiresAt) {
 		return VerifiedCapability{}, ErrExpired
 	}
 
@@ -471,9 +472,6 @@ func isProofRefusal(err error) bool {
 	return false
 }
 
-// proofRefusal is a dpop refusal as this module reads it: a refusal of the
-// credentials (ErrProofOfPossession, and so ErrUnauthenticated), with the
-// dpop sentinel still matchable.
 // refuseToken is err as a refusal of the presented token in family: the
 // family and the cause's text, but not the cause's own sentinels. A token
 // whose caveats do not validate is a refused token, not a malformed request
@@ -481,6 +479,9 @@ func isProofRefusal(err error) bool {
 // server's fault.
 func refuseToken(family, err error) error { return fmt.Errorf("%w: %s", family, err.Error()) }
 
+// proofRefusal is a dpop refusal as this module reads it: a refusal of the
+// credentials (ErrProofOfPossession, and so ErrUnauthenticated), with the
+// dpop sentinel still matchable.
 func proofRefusal(err error) error { return fmt.Errorf("%w: %w", ErrProofOfPossession, err) }
 
 // VerifiedCapability is a capability a Verifier accepted. Only Verify

@@ -63,7 +63,7 @@ func TestPurgeKeepsARevocationAcrossClockSkew(t *testing.T) {
 	}
 	// The verifier is at the last instant it accepts the token; the store's
 	// clock runs ahead by just under the allowance.
-	verifierNow = c.ExpiresAt.Add(limes.MaxLeeway)
+	verifierNow = c.ExpiresAt.Add(limes.MaxLeeway - time.Nanosecond)
 	storeNow = verifierNow.Add(limes.PurgeClockSkew - time.Second)
 	if _, err := records.Purge(ctx, limes.PurgeRequest{}); err != nil {
 		t.Fatal(err)

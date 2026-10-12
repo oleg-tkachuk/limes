@@ -257,3 +257,61 @@ func TestTenantBudgetFilter(t *testing.T) {
 		t.Errorf("an unknown filter: err = %v, want ErrInvalidRequest", err)
 	}
 }
+
+// What Issue records is what the token carries: whole seconds, the expiry
+// rounded down and the start rounded up, so no record says a token is valid
+// at an instant the token itself is not.
+func TestIssuedTimesAreTheTokens(t *testing.T) {
+	issuer, configured, _, _ := buildIssuerVerifier(t)
+	at := time.Date(2026, time.October, 12, 9, 30, 0, 700_000_000, time.UTC) // x.7s
+	issuer.clock = func() time.Time { return at }
+	nbf := at.Add(10 * time.Second) // also x.7s: rounds up
+	issued, err := issuer.Issue(t.Context(), IssueRequest{
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
+		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour, NotBefore: nbf,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := decodeToken(issued.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inToken := decoded.(Capability)
+	got := issued.Capability
+	for name, pair := range map[string][2]time.Time{
+		"IssuedAt": {got.IssuedAt, inToken.IssuedAt}, "NotBefore": {got.NotBefore, inToken.NotBefore}, "ExpiresAt": {got.ExpiresAt, inToken.ExpiresAt},
+	} {
+		if !pair[0].Equal(pair[1]) || pair[0].Nanosecond() != 0 {
+			t.Errorf("%s recorded %s, token carries %s; want the same whole second", name, pair[0], pair[1])
+		}
+	}
+	if got.NotBefore.Before(nbf) {
+		t.Errorf("NotBefore %s is before the %s asked for", got.NotBefore, nbf)
+	}
+	if got.ExpiresAt.After(at.Add(time.Hour)) {
+		t.Errorf("ExpiresAt %s is past the TTL's end %s", got.ExpiresAt, at.Add(time.Hour))
+	}
+	// With no leeway the window is exact: valid at NotBefore, refused at
+	// ExpiresAt (RFC 7519 §4.1.4).
+	cfg := configured.cfg
+	cfg.Leeway, cfg.NoLeeway = 0, true
+	for name, tc := range map[string]struct {
+		now  time.Time
+		want error
+	}{
+		"just before NotBefore": {got.NotBefore.Add(-time.Nanosecond), ErrNotYetValid},
+		"at NotBefore":          {got.NotBefore, nil},
+		"just before ExpiresAt": {got.ExpiresAt.Add(-time.Nanosecond), nil},
+		"at ExpiresAt":          {got.ExpiresAt, ErrExpired},
+	} {
+		cfg.Now = func() time.Time { return tc.now }
+		v, err := NewVerifier(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := v.Verify(t.Context(), VerifyRequest{Token: issued.Token, Audience: audienceData}); tc.want == nil && err != nil || tc.want != nil && !errors.Is(err, tc.want) {
+			t.Errorf("%s: err = %v, want %v", name, err, tc.want)
+		}
+	}
+}

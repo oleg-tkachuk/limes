@@ -300,6 +300,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"AResetKeepsTheHolds", checkResetKeepsHolds[TX]},
 		{"AnAncestorCountsItsDescendantsHolds", checkDescendantHolds[TX]},
 		{"SettleAboveTheHoldCountsTheHoldOnce", checkSettleAboveHold[TX]},
+		{"ANestedCopySettlesOnlyItsOwnHold", checkNestedCopySettle[TX]},
 		{"TheUnitStaysWhileHoldsAreOpen", checkUnitWithHolds[TX]},
 		{"EveryCounterOnTheChainKeepsItsUnit", checkChainUnits[TX]},
 		{"ListTenantBudgetsRanksUnclamped", checkUnclampedRanking[TX]},
@@ -964,6 +965,14 @@ func checkReservations[TX any](t *testing.T, f fixture[TX]) {
 	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: byCopy, ReservationID: first.ID, Amount: held}, nil); err != nil {
 		t.Fatal(err)
 	}
+	// Settled, the hold's receipt reads back to its copy alone.
+	if r, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: byCopy, ReservationID: first.ID, Amount: held}, nil); err != nil || !r.Replayed {
+		t.Errorf("the copy settling its hold again = %+v, %v; want the replay", r, err)
+	}
+	another := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: unit, copies: other})
+	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: another, ReservationID: first.ID, Amount: held}, nil); !errors.Is(err, limes.ErrReservationNotFound) {
+		t.Errorf("another copy settling a settled hold: err = %v, want ErrReservationNotFound, not the receipt", err)
+	}
 	if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{ReservationID: second.ID}); err != nil {
 		t.Fatal(err)
 	}
@@ -1291,6 +1300,30 @@ func checkSettleAboveHold[TX any](t *testing.T, f fixture[TX]) {
 	for _, id := range []uuid.UUID{f.child, f.root} {
 		if u, err := f.Usage.GetUsage(f.Ctx, id); err != nil || u.ReservedAmount != 0 {
 			t.Errorf("%s holds %v after the settle, %v; want nothing", id, u.ReservedAmount, err)
+		}
+	}
+}
+
+// checkNestedCopySettle holds Settle to every copy of a hold, not only the
+// outermost: copies run innermost first, so a child copy C of P presents
+// [C, P], and settling P's hold under [C, P] — or C's under [P] — would move
+// spend past a copy's own limits.
+func checkNestedCopySettle[TX any](t *testing.T, f fixture[TX]) {
+	p := limes.CopyCeiling{RevocationID: []byte("copy-p"), Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Max: childBudget}}
+	c := limes.CopyCeiling{RevocationID: []byte("copy-c"), Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Max: one}}
+	under := func(copies ...limes.CopyCeiling) limes.MeterSubject {
+		return newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), copies: copies})
+	}
+	for name, tc := range map[string]struct{ held, settling limes.MeterSubject }{
+		"the parent's hold by the child": {under(p), under(c, p)},
+		"the child's hold by the parent": {under(c, p), under(p)},
+	} {
+		r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: tc.held, Amount: one})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: tc.settling, ReservationID: r.ID, Amount: one}, nil); !errors.Is(err, limes.ErrReservationNotFound) {
+			t.Errorf("%s: err = %v, want ErrReservationNotFound", name, err)
 		}
 	}
 }
