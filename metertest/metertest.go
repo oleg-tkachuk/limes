@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -478,7 +479,7 @@ func checkChargeByRef[TX any](t *testing.T, f fixture[TX]) {
 		got.TenantID != f.Tenant || got.Op != limes.OpSearch || got.Actor != actor || got.At.IsZero() {
 		t.Fatalf("ChargeByRef = %+v, %v; want charge %s of 3 with 1 refunded, for %s by %s in %s", got, err, r.ChargeID, limes.OpSearch, actor, f.Tenant)
 	}
-	if byID, err := f.Usage.GetCharge(f.Ctx, r.ChargeID); err != nil || byID != got {
+	if byID, err := f.Usage.GetCharge(f.Ctx, r.ChargeID); err != nil || !reflect.DeepEqual(byID, got) {
 		t.Errorf("GetCharge = %+v, %v; want what ChargeByRef read, %+v", byID, err, got)
 	}
 	if _, err := f.Usage.GetCharge(f.Ctx, uuid.New()); !errors.Is(err, limes.ErrChargeNotFound) {

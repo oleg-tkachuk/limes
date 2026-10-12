@@ -292,6 +292,7 @@ type ChargeRecord struct {
 	Op    Op
 	Actor string
 	At    time.Time
+	_     noCompare
 }
 
 // MaxExternalRefBytes bounds ChargeRequest.ExternalRef: long enough for any
@@ -338,6 +339,7 @@ type ChargeReceipt struct {
 	// still sets them.
 	TenantID uuid.UUID
 	UnitCode string
+	_        noCompare
 }
 
 // RefundReceipt is the result of Meter.Refund.
@@ -350,6 +352,7 @@ type RefundReceipt struct {
 	// TenantID and UnitCode are the charge's.
 	TenantID uuid.UUID
 	UnitCode string
+	_        noCompare
 }
 
 // DefaultReservationTTL is how long a reservation lasts when the request
@@ -453,6 +456,7 @@ type TenantBudget struct {
 	// ever been set — the row, if there is one, holds only what Charge and
 	// Reserve counted.
 	ResourceVersion int64
+	_               noCompare
 }
 
 // wholePct is a whole, in percent.
@@ -556,6 +560,7 @@ type Usage struct {
 	// capability with delegated children).
 	ReservedAmount Nanos
 	UnitCode       string
+	_              noCompare
 }
 
 // CopyUsage is the counters of one Biscuit copy with limits of its own (see
@@ -678,6 +683,7 @@ func ValidateExternalRef(ref string) error {
 type BumpReceipt struct {
 	// RequestCount is the capability's request count after this one.
 	RequestCount int64
+	_            noCompare
 }
 
 // ReleaseRequest names the reservation to release.

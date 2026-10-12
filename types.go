@@ -163,6 +163,13 @@ const (
 	OpManage  Op = "manage"  // administer: tenants, policy
 )
 
+// noCompare makes a struct that holds it not comparable with ==. The structs
+// that may gain a field in 1.x carry one, so a field of a type == cannot
+// compare — a slice, a map — is an addition rather than a break: no caller
+// can have written a comparison it would stop compiling. Compare them field
+// by field, or with reflect.DeepEqual.
+type noCompare [0]func()
+
 // Principal identifies the subject the capability is issued to. It is
 // written into a token as the limes_principal claim (wire.go). Agent
 // principals have a richer shape than service principals: they carry
@@ -178,6 +185,7 @@ type Principal struct {
 	Subject string
 	// Agent fields are populated only for Type == PrincipalAgent.
 	Agent *AgentPrincipal
+	_     noCompare
 }
 
 // PrincipalType discriminates Principal.Type.
@@ -213,6 +221,7 @@ type AgentPrincipal struct {
 	// MCPClient is the agent host's user-agent ("example-host@1.4.0",
 	// "cursor@0.44"). Useful for compatibility tracking.
 	MCPClient string
+	_         noCompare
 }
 
 // Capability is the in-memory representation of a verified token. The
