@@ -62,3 +62,24 @@ func TestTenantBudgetUtilization(t *testing.T) {
 		}
 	}
 }
+
+func TestOverrunPolicyNamesAndValidates(t *testing.T) {
+	cases := []struct {
+		policy OverrunPolicy
+		name   string
+		valid  bool
+	}{
+		{OverrunUnspecified, "unspecified", true},
+		{OverrunReject, "reject", true},
+		{OverrunRecord, "record", true},
+		{OverrunRecord + 1, "OverrunPolicy(3)", false},
+	}
+	for _, tc := range cases {
+		if got := tc.policy.String(); got != tc.name {
+			t.Errorf("String() = %q, want %q", got, tc.name)
+		}
+		if err := tc.policy.Validate(); tc.valid != (err == nil) || (err != nil && !errors.Is(err, ErrInvalidRequest)) {
+			t.Errorf("%s: Validate() = %v, want valid=%v", tc.policy, err, tc.valid)
+		}
+	}
+}
