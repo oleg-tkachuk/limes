@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"sync"
 	"time"
@@ -258,12 +259,9 @@ func (r *Remote) fetch(ctx context.Context, etag string) (keys map[string]ed2551
 	case resp.StatusCode != http.StatusOK:
 		return nil, "", nil, false, fmt.Errorf("JWKS fetch: HTTP %d", resp.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(r.cfg.MaxDocumentBytes)+1))
+	body, err := readCapped(resp.Body, r.cfg.MaxDocumentBytes)
 	if err != nil {
-		return nil, "", nil, false, fmt.Errorf("JWKS read: %w", err)
-	}
-	if len(body) > r.cfg.MaxDocumentBytes {
-		return nil, "", nil, false, fmt.Errorf("JWKS document exceeds %d bytes", r.cfg.MaxDocumentBytes)
+		return nil, "", nil, false, err
 	}
 	keys, skipped, err := parse(body)
 	if err != nil {
@@ -275,4 +273,22 @@ func (r *Remote) fetch(ctx context.Context, etag string) (keys map[string]ed2551
 		return nil, "", nil, false, fmt.Errorf("JWKS document has %d entries and no usable Ed25519 key", skipped)
 	}
 	return keys, resp.Header.Get(httpx.HeaderETag), resp.Header, false, nil
+}
+
+// readCapped reads all of body, refusing more than maxBytes. It reads one
+// byte past maxBytes to tell a document of exactly that size from a longer
+// one; at math.MaxInt64 none is longer, and one past it would overflow.
+func readCapped(body io.Reader, maxBytes int) ([]byte, error) {
+	limit := int64(maxBytes)
+	if limit < math.MaxInt64 {
+		limit++
+	}
+	b, err := io.ReadAll(io.LimitReader(body, limit))
+	if err != nil {
+		return nil, fmt.Errorf("JWKS read: %w", err)
+	}
+	if len(b) > maxBytes {
+		return nil, fmt.Errorf("JWKS document exceeds %d bytes", maxBytes)
+	}
+	return b, nil
 }
