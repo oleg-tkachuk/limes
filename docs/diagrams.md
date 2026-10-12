@@ -423,8 +423,7 @@ are stateful and belong to the `UsageStore`.
 
 ## Delegation: attenuate, never escalate
 
-`Issuer.Delegate` refuses a parent that is a Biscuit copy with limits of its
-own, fills what the request leaves out from the parent — tenant, audience,
+`Issuer.Delegate` refuses a parent read from a Biscuit copy, fills what the request leaves out from the parent — tenant, audience,
 key binding, and the caveats under `InheritCaveats` — refuses a parent that is
 expired or revoked, clamps the child's window inside the parent's, and then
 requires `Narrows(parent, child)` to pass before anything is persisted or

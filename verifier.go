@@ -303,7 +303,7 @@ func (v *StandardVerifier) Verify(ctx context.Context, req VerifyRequest) (Verif
 		}
 	}
 
-	return VerifiedCapability{c: *cap}, nil
+	return VerifiedCapability{c: *cap, fromBiscuit: biscuitIDs != nil}, nil
 }
 
 // DPoPNonce is the nonce to send in the DPoP-Nonce header — with a
@@ -436,7 +436,16 @@ func proofRefusal(err error) error { return fmt.Errorf("%w: %w", ErrProofOfPosse
 // have checked it.
 type VerifiedCapability struct {
 	c Capability
+	// fromBiscuit marks one read from a Biscuit copy: what it grants is
+	// the copy's, revoked with the copy, which a token minted from it would
+	// not be.
+	fromBiscuit bool
 }
+
+// FromBiscuit reports whether the capability was read from a copy of a
+// Biscuit rather than from a JWT. Issuer.Delegate and Issuer.Biscuit take
+// only the latter.
+func (v VerifiedCapability) FromBiscuit() bool { return v.fromBiscuit }
 
 // Capability is what the token grants: a copy, the caller's to change.
 func (v VerifiedCapability) Capability() Capability { return v.c.clone() }

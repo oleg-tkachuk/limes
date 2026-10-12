@@ -14,6 +14,7 @@ import (
 	biscuit "github.com/biscuit-auth/biscuit-go/v2"
 	"github.com/biscuit-auth/biscuit-go/v2/datalog"
 	"github.com/biscuit-auth/biscuit-go/v2/pb"
+	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -74,7 +75,33 @@ func isBiscuit(token string) bool {
 // same capability — same ID, caveats, expiry and binding, revoked together
 // with it — in a token its holder can attenuate offline. One copy can also be
 // revoked on its own; see BiscuitRevocationStore.
-func (i *Issuer) Biscuit(ctx context.Context, c Capability) (string, error) {
+//
+// Like Delegate it takes a VerifiedCapability, so what it signs is what this
+// issuer signed and recorded before, never a value a caller assembled or
+// widened. It refuses one another issuer named, one read from a Biscuit —
+// wrapping a copy again would shed its attenuation and its revocation id;
+// its holder attenuates it instead — and one that has expired or that the
+// store reports revoked.
+func (i *Issuer) Biscuit(ctx context.Context, vc VerifiedCapability) (string, error) {
+	c := vc.c
+	switch {
+	case c.ID == uuid.Nil:
+		return "", invalidRequest("Biscuit requires a capability the verifier accepted")
+	case vc.fromBiscuit:
+		return "", invalidRequest("capability %s was read from a Biscuit; attenuate that instead", c.ID)
+	case c.Issuer != i.issuerName:
+		return "", invalidRequest("capability %s was issued by %q, not %q", c.ID, c.Issuer, i.issuerName)
+	}
+	if !i.clock().Before(c.ExpiresAt) {
+		return "", fmt.Errorf("limes: biscuit of %s: %w", c.ID, ErrExpired)
+	}
+	revoked, err := i.store.IsRevoked(ctx, c.ID)
+	if err != nil {
+		return "", fmt.Errorf("limes: biscuit revocation lookup: %w", err)
+	}
+	if revoked {
+		return "", fmt.Errorf("limes: biscuit of %s: %w", c.ID, ErrRevoked)
+	}
 	rootPub, rootPriv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return "", fmt.Errorf("limes: biscuit root key: %w", err)

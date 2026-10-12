@@ -287,8 +287,8 @@ type DelegateRequest struct {
 // token carries. It does not trust it to be current, though: a parent that
 // has expired,
 // or that the store reports revoked (itself or any ancestor), delegates
-// nothing; nor does a Biscuit copy with limits of its own (Parent.Copies),
-// which returns ErrDelegationTooWide. A child that would have more than
+// nothing; nor does a Biscuit copy (VerifiedCapability.FromBiscuit), which
+// returns ErrDelegationTooWide — its holder attenuates it instead. A child that would have more than
 // MaxDelegationDepth ancestors is ErrDelegationTooDeep: its record is
 // written before the store can count them, but no token is signed for it.
 func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability, string, error) {
@@ -296,12 +296,12 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 	if parent.ID == uuid.Nil {
 		return Capability{}, "", invalidRequest("Delegate requires a Parent the verifier accepted")
 	}
-	// A child counts against the capability and its ancestors, never against
-	// a Biscuit copy's own counters, so a copy with limits of its own would
-	// shed them by delegating. Its holder attenuates it instead.
-	if len(parent.Copies) > 0 {
-		return Capability{}, "", fmt.Errorf("%w: parent is a Biscuit copy with limits of its own; attenuate it instead",
-			ErrDelegationTooWide)
+	// A Biscuit copy delegates nothing: the child would be an ordinary
+	// token of the capability, which neither RevokeBiscuit of the copy
+	// reaches nor the copy's own counters bound. Its holder attenuates it
+	// instead.
+	if req.Parent.fromBiscuit || len(parent.Copies) > 0 {
+		return Capability{}, "", fmt.Errorf("%w: parent is a Biscuit copy; attenuate it instead", ErrDelegationTooWide)
 	}
 	if req.Subject.TenantID == uuid.Nil {
 		req.Subject.TenantID = parent.Subject.TenantID
