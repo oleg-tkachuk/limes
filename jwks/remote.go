@@ -58,7 +58,7 @@ type RemoteConfig struct {
 	MaxStale time.Duration
 	// MaxDocumentBytes caps the response body. Default
 	// DefaultMaxDocumentBytes.
-	MaxDocumentBytes int64
+	MaxDocumentBytes int
 	// Now is the clock; tests override.
 	Now func() time.Time
 }
@@ -258,11 +258,11 @@ func (r *Remote) fetch(ctx context.Context, etag string) (keys map[string]ed2551
 	case resp.StatusCode != http.StatusOK:
 		return nil, "", nil, false, fmt.Errorf("JWKS fetch: HTTP %d", resp.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, r.cfg.MaxDocumentBytes+1))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(r.cfg.MaxDocumentBytes)+1))
 	if err != nil {
 		return nil, "", nil, false, fmt.Errorf("JWKS read: %w", err)
 	}
-	if int64(len(body)) > r.cfg.MaxDocumentBytes {
+	if len(body) > r.cfg.MaxDocumentBytes {
 		return nil, "", nil, false, fmt.Errorf("JWKS document exceeds %d bytes", r.cfg.MaxDocumentBytes)
 	}
 	keys, skipped, err := parse(body)

@@ -322,16 +322,25 @@ jobs:
     permissions:
       contents: write # POST /repos/{owner}/{repo}/dispatches needs write
     steps:
+      # gh-retry.sh, beside its test: one 5xx must not lose the release.
+      - name: Check out the retry helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
       - name: Dispatch the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          source .github/scripts/gh-retry.sh
           # --input rather than -f: client_payload is nested and the form
           # syntax cannot express that. Both values come from Actions itself
           # and arrive through env, so nothing here is substituted into the
-          # script before the shell runs.
-          gh api "repos/${GITHUB_REPOSITORY}/dispatches" --input - <<JSON
+          # script before the shell runs. A file rather than stdin, so a
+          # retry sends it again.
+          payload="$RUNNER_TEMP/dispatch.json"
+          cat >"$payload" <<JSON
           {
             "event_type": "release",
             "client_payload": {
@@ -340,4 +349,5 @@ jobs:
             }
           }
           JSON
+          gh_retry api "repos/${GITHUB_REPOSITORY}/dispatches" --input "$payload"
           printf '%s\n' "dispatched release for ${GITHUB_SHA}"

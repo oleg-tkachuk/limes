@@ -194,9 +194,10 @@ func NewUsageStore[TX any](cfg UsageStoreConfig[TX]) (*UsageStore[TX], error) {
 
 // ─── limes.Store ──────────────────────────────────────────────────────
 
-// issuedBy is recorded alongside the capability so the in-memory store answers
-// the same attribution questions the relational one does — a test double that
-// silently drops the initiator would let an unattributed issuance pass.
+// Insert records req.Capability with req.IssuedBy beside it, so the in-memory
+// store answers the same attribution questions a relational one does — a test
+// double that silently dropped the initiator would let an unattributed
+// issuance pass.
 func (s *Store) Insert(_ context.Context, req limes.InsertRequest) error {
 	c, issuedBy := req.Capability, req.IssuedBy
 	s.mu.Lock()

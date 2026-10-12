@@ -16,6 +16,9 @@
 
 set -euo pipefail
 
+# shellcheck source=.github/scripts/gh-retry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/gh-retry.sh"
+
 readonly RELEASE_TAG='^v[0-9]'
 
 before="${1:?usage: new-release-tag.sh <tags-before-file>}"
@@ -24,10 +27,12 @@ new() { git tag --points-at HEAD | grep -E "$RELEASE_TAG" | grep -vxF -f "$befor
 
 # unpublished prints the release tags on HEAD that have no GitHub release.
 # grep finding none exits 1, which pipefail would make this function's status.
+# A release gh cannot read for a transient reason is retried: read as
+# missing, it would be published a second time.
 unpublished() {
     local tag
     { git tag --points-at HEAD | grep -E "$RELEASE_TAG" || true; } | while read -r tag; do
-        gh release view "$tag" >/dev/null 2>&1 || echo "$tag"
+        gh_retry release view "$tag" >/dev/null 2>&1 || echo "$tag"
     done
 }
 
