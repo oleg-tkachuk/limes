@@ -10,8 +10,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
-	"github.com/oleg-tkachuk/limes/jwks"
 )
 
 // revokeCopy revokes token's copy through the store the fixture verifier reads.
@@ -228,7 +226,7 @@ func TestBiscuitRevocationLookupFailsClosed(t *testing.T) {
 func TestVerifierNeedsBiscuitRevocationsToAcceptBiscuits(t *testing.T) {
 	pub, _, _ := ed25519.GenerateKey(nil)
 	cfg := VerifierConfig{
-		Keys:           jwks.NewStatic(map[string]ed25519.PublicKey{"k1": pub}),
+		Keys:           staticKeys(t, map[string]ed25519.PublicKey{"k1": pub}),
 		Revocations:    revLookup{},
 		TrustedIssuers: []string{"limes-test"},
 		AcceptBiscuit:  true,

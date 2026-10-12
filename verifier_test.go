@@ -95,7 +95,7 @@ func buildIssuerVerifier(t *testing.T) (*Issuer, *StandardVerifier, *memStore, e
 		t.Fatalf("issuer: %v", err)
 	}
 	cache := store // disable cache for deterministic tests
-	keys := jwks.NewStatic(map[string]ed25519.PublicKey{"k1": pub})
+	keys := staticKeys(t, map[string]ed25519.PublicKey{"k1": pub})
 	v, err := NewStandardVerifier(VerifierConfig{
 		Keys:           keys,
 		Revocations:    cache,
@@ -164,7 +164,7 @@ func TestVerify_Expired(t *testing.T) {
 	signer, _ := NewSigner(SignerConfig{KeyID: "k1", Key: priv})
 	store := newMemStore()
 	cache := store
-	keys := jwks.NewStatic(map[string]ed25519.PublicKey{"k1": pub})
+	keys := staticKeys(t, map[string]ed25519.PublicKey{"k1": pub})
 
 	// Inject a clock that returns a fixed past time at issue, then
 	// jumps an hour ahead at verify.
@@ -242,7 +242,7 @@ func TestVerify_UntrustedIssuer(t *testing.T) {
 	})
 
 	cache := store
-	keys := jwks.NewStatic(map[string]ed25519.PublicKey{"k1": pub})
+	keys := staticKeys(t, map[string]ed25519.PublicKey{"k1": pub})
 	verifier, _ := NewStandardVerifier(VerifierConfig{
 		Keys:           keys,
 		Revocations:    cache,
@@ -450,4 +450,14 @@ func TestDelegateRefusesAnyBiscuitCopy(t *testing.T) {
 	if jwt.FromBiscuit() {
 		t.Error("a capability read from a JWT reports FromBiscuit")
 	}
+}
+
+// staticKeys is a jwks.Static over keys, failing the test on a refused key.
+func staticKeys(t testing.TB, keys map[string]ed25519.PublicKey) *jwks.Static {
+	t.Helper()
+	s, err := jwks.NewStatic(jwks.StaticConfig{Keys: keys})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
 }

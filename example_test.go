@@ -64,7 +64,7 @@ func newExampleStack() exampleStack {
 		log.Fatal(err)
 	}
 	verifier, err := limes.NewStandardVerifier(limes.VerifierConfig{
-		Keys:               jwks.NewStatic(map[string]ed25519.PublicKey{kid: pub}),
+		Keys:               exampleKeys(kid, pub),
 		Revocations:        records,
 		TrustedIssuers:     []string{exampleIssuerName},
 		AcceptBiscuit:      true,
@@ -124,7 +124,7 @@ func ExampleIssuer_Issue() {
 		Signer: signer, Store: records, IssuerName: exampleIssuerName,
 	})
 	verifier, _ := limes.NewStandardVerifier(limes.VerifierConfig{
-		Keys:           jwks.NewStatic(map[string]ed25519.PublicKey{kid: pub}),
+		Keys:           exampleKeys(kid, pub),
 		Revocations:    records,
 		TrustedIssuers: []string{exampleIssuerName},
 	})
@@ -391,4 +391,13 @@ func ExampleAllByPrincipal() {
 	fmt.Println(n)
 	// Output:
 	// 3
+}
+
+// exampleKeys is a jwks.Static holding pub under kid.
+func exampleKeys(kid string, pub ed25519.PublicKey) *jwks.Static {
+	keys, err := jwks.NewStatic(jwks.StaticConfig{Keys: map[string]ed25519.PublicKey{kid: pub}})
+	if err != nil {
+		log.Fatal(err)
+	}
+	return keys
 }

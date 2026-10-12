@@ -125,42 +125,52 @@ type HandlerConfig struct {
 	MaxAge time.Duration
 }
 
-// NewHandler serves cfg.Keys() as a JWK Set document (RFC 7517), the way the
+// Handler serves a key set as a JWK Set document (RFC 7517), the way the
 // Remote on the other end reads it: under its registered media type (§8.5),
 // with a strong ETag of its bytes that answers If-None-Match with 304
-// (RFC 9110 §13.1.2), and fresh for MaxAge. A negative MaxAge is refused.
-func NewHandler(cfg HandlerConfig) (http.Handler, error) {
+// (RFC 9110 §13.1.2), and fresh for MaxAge.
+type Handler struct {
+	keys   func() map[string]ed25519.PublicKey
+	maxAge time.Duration
+}
+
+// NewHandler builds a Handler serving cfg.Keys(), refusing no Keys or a
+// negative MaxAge.
+func NewHandler(cfg HandlerConfig) (*Handler, error) {
 	if cfg.Keys == nil {
 		return nil, errors.New("jwks: HandlerConfig.Keys required")
 	}
 	if cfg.MaxAge < 0 {
 		return nil, fmt.Errorf("jwks: HandlerConfig.MaxAge %s is negative", cfg.MaxAge)
 	}
-	keys, maxAge := cfg.Keys, cfg.MaxAge
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			w.Header().Set(httpx.HeaderAllow, http.MethodGet+", "+http.MethodHead)
-			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
-			return
-		}
-		doc, err := Marshal(keys())
-		if err != nil {
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
-		}
-		sum := sha256.Sum256(doc)
-		etag := `"` + base64.RawURLEncoding.EncodeToString(sum[:]) + `"`
-		h := w.Header()
-		h.Set(httpx.HeaderETag, etag)
-		h.Set(httpx.HeaderCacheControl, fmt.Sprintf("%s, %s=%d", httpx.DirectivePublic, httpx.DirectiveMaxAge, int64(maxAge/time.Second)))
-		if etagMatches(r.Header.Values(httpx.HeaderIfNoneMatch), etag) {
-			w.WriteHeader(http.StatusNotModified)
-			return
-		}
-		h.Set(httpx.HeaderContentType, mediaTypeJWKSet)
-		h.Set(httpx.HeaderContentLength, strconv.Itoa(len(doc)))
-		_, _ = w.Write(doc)
-	}), nil
+	return &Handler{keys: cfg.Keys, maxAge: cfg.MaxAge}, nil
+}
+
+// ServeHTTP answers GET and HEAD with the document, and anything else with
+// 405.
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set(httpx.HeaderAllow, http.MethodGet+", "+http.MethodHead)
+		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+		return
+	}
+	doc, err := Marshal(h.keys())
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	sum := sha256.Sum256(doc)
+	etag := `"` + base64.RawURLEncoding.EncodeToString(sum[:]) + `"`
+	header := w.Header()
+	header.Set(httpx.HeaderETag, etag)
+	header.Set(httpx.HeaderCacheControl, fmt.Sprintf("%s, %s=%d", httpx.DirectivePublic, httpx.DirectiveMaxAge, int64(h.maxAge/time.Second)))
+	if etagMatches(r.Header.Values(httpx.HeaderIfNoneMatch), etag) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	header.Set(httpx.HeaderContentType, mediaTypeJWKSet)
+	header.Set(httpx.HeaderContentLength, strconv.Itoa(len(doc)))
+	_, _ = w.Write(doc)
 }
 
 // etagMatches is If-None-Match's weak comparison (RFC 9110 §13.1.2): any

@@ -129,7 +129,7 @@ func TestVerifierRejectsChildOfRevokedParent(t *testing.T) {
 	records := newTestStore()
 	issuer, _ := limes.NewIssuer(limes.IssuerConfig{Signer: signer, Store: records, IssuerName: "iss"})
 	verifier, _ := limes.NewStandardVerifier(limes.VerifierConfig{
-		Keys:           jwks.NewStatic(map[string]ed25519.PublicKey{kid: pub}),
+		Keys:           mustStatic(t, kid, pub),
 		Revocations:    records,
 		TrustedIssuers: []string{"iss"},
 	})
@@ -161,4 +161,14 @@ func TestVerifierRejectsChildOfRevokedParent(t *testing.T) {
 	if _, err := verifier.Verify(ctx, limes.VerifyRequest{Token: childToken, Audience: "data"}); !errors.Is(err, limes.ErrRevoked) {
 		t.Fatalf("child after parent revoke: err = %v, want ErrRevoked", err)
 	}
+}
+
+// mustStatic is a jwks.Static holding pub under kid.
+func mustStatic(t testing.TB, kid string, pub ed25519.PublicKey) *jwks.Static {
+	t.Helper()
+	s, err := jwks.NewStatic(jwks.StaticConfig{Keys: map[string]ed25519.PublicKey{kid: pub}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
 }

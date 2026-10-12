@@ -26,10 +26,11 @@ func TestStaticContract(t *testing.T) {
 	jwkstest.Run(t, func(t *testing.T) jwkstest.Env {
 		t.Helper()
 		key := contractKey(t)
-		return jwkstest.Env{
-			Ctx: context.Background(), KID: contractKID, Key: key,
-			Resolver: jwks.NewStatic(map[string]ed25519.PublicKey{contractKID: key}),
+		static, err := jwks.NewStatic(jwks.StaticConfig{Keys: map[string]ed25519.PublicKey{contractKID: key}})
+		if err != nil {
+			t.Fatal(err)
 		}
+		return jwkstest.Env{Ctx: context.Background(), KID: contractKID, Key: key, Resolver: static}
 	})
 }
 

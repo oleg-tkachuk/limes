@@ -9,8 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
-	"github.com/oleg-tkachuk/limes/jwks"
 )
 
 // RFC 8037 appendix A: the Ed25519 public key and its RFC 7638 thumbprint.
@@ -37,7 +35,7 @@ func TestConfigDefaults(t *testing.T) {
 	}
 
 	v, err := NewStandardVerifier(VerifierConfig{
-		Keys:           jwks.NewStatic(map[string]ed25519.PublicKey{"k1": pub}),
+		Keys:           staticKeys(t, map[string]ed25519.PublicKey{"k1": pub}),
 		Revocations:    newMemStore(),
 		TrustedIssuers: []string{goldenIssuer},
 	})
@@ -73,7 +71,7 @@ func TestConfigRefusesNegatives(t *testing.T) {
 	}
 
 	base := VerifierConfig{
-		Keys:           jwks.NewStatic(map[string]ed25519.PublicKey{"k1": pub}),
+		Keys:           staticKeys(t, map[string]ed25519.PublicKey{"k1": pub}),
 		Revocations:    newMemStore(),
 		TrustedIssuers: []string{goldenIssuer},
 	}
@@ -163,7 +161,7 @@ func TestAcceptTokenTypesRefusesWhatItCannotRead(t *testing.T) {
 	}
 	cfg := func(types []string) VerifierConfig {
 		return VerifierConfig{
-			Keys:             jwks.NewStatic(map[string]ed25519.PublicKey{"k1": pub}),
+			Keys:             staticKeys(t, map[string]ed25519.PublicKey{"k1": pub}),
 			Revocations:      newMemStore(),
 			TrustedIssuers:   []string{goldenIssuer},
 			AcceptTokenTypes: types,
@@ -190,7 +188,7 @@ func TestSeveralIssuersNeedAKeyDecision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := VerifierConfig{Keys: jwks.NewStatic(map[string]ed25519.PublicKey{"k1": pub}), Revocations: newMemStore()}
+	base := VerifierConfig{Keys: staticKeys(t, map[string]ed25519.PublicKey{"k1": pub}), Revocations: newMemStore()}
 	for name, tc := range map[string]struct {
 		issuers []string
 		binding map[string]string
