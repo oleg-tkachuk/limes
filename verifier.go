@@ -113,8 +113,10 @@ type VerifyRequest struct {
 
 // AuthorizeRequest is a VerifyRequest and the operation it is presented for.
 type AuthorizeRequest struct {
-	VerifyRequest
-	CheckRequest
+	// Verify is the token and how it was presented.
+	Verify VerifyRequest
+	// Check is what the token is asked to allow.
+	Check CheckRequest
 	// ClientAddr is the client address the consumer observed. A capability
 	// constrained to source networks refuses the zero address.
 	ClientAddr netip.Addr
@@ -290,14 +292,14 @@ func (v *StandardVerifier) DPoPNonce(ctx context.Context) (string, error) {
 // request and budget limits are stateful: the Meter enforces them, through
 // Bump and Charge, inside the consumer's own transaction.
 func (v *StandardVerifier) Authorize(ctx context.Context, req AuthorizeRequest) (VerifiedCapability, error) {
-	vc, err := v.Verify(ctx, req.VerifyRequest)
+	vc, err := v.Verify(ctx, req.Verify)
 	if err != nil {
 		return VerifiedCapability{}, err
 	}
 	if err := vc.c.Caveats.CheckSource(req.ClientAddr); err != nil {
 		return VerifiedCapability{}, err
 	}
-	if err := vc.c.Caveats.Check(req.CheckRequest); err != nil {
+	if err := vc.c.Caveats.Check(req.Check); err != nil {
 		return VerifiedCapability{}, err
 	}
 	return vc, nil

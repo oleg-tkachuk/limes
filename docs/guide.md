@@ -9,12 +9,12 @@ start, [diagrams.md](diagrams.md) draws each path described here, and
 ```go
 scheme, token, err := limes.ParseAuthorization(r.Header.Get(limes.AuthorizationHeader))
 granted, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
-    VerifyRequest: limes.VerifyRequest{
+    Verify: limes.VerifyRequest{
         Token: token, Scheme: scheme, Audience: "https://data.example.com",
         // Needed when the capability is key-bound; ignored when it is not.
         DPoP: dpop.Proof{JWT: r.Header.Get(dpop.Header), Method: r.Method, URL: requestURL},
     },
-    CheckRequest: limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/report.pdf"},
+    Check: limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/report.pdf"},
     ClientAddr:   clientAddr,
 })
 // verifier.ErrorResponse(ctx, err, scheme) answers a refusal the RFC 6750 /

@@ -282,8 +282,8 @@ func ExampleStandardVerifier_Authorize() {
 	// One call: the token, then every caveat that needs no state.
 	authorize := func(op limes.Op, resource string) error {
 		_, err := s.verifier.Authorize(ctx, limes.AuthorizeRequest{
-			VerifyRequest: limes.VerifyRequest{Token: token, Audience: exampleAudience},
-			CheckRequest:  limes.CheckRequest{Op: op, Resource: resource},
+			Verify: limes.VerifyRequest{Token: token, Audience: exampleAudience},
+			Check:  limes.CheckRequest{Op: op, Resource: resource},
 		})
 		return err
 	}

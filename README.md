@@ -93,8 +93,8 @@ cap, token, _ := issuer.Issue(ctx, limes.IssueRequest{
 
 // On every call: verify locally and enforce the caveats in one step, then meter.
 granted, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
-    VerifyRequest: limes.VerifyRequest{Token: token, Audience: "my-service"},
-    CheckRequest:  limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/report.pdf"},
+    Verify: limes.VerifyRequest{Token: token, Audience: "my-service"},
+    Check:  limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/report.pdf"},
 })
 _, err = usage.Charge(ctx, limes.ChargeRequest{
     Subject: granted.MeterSubject(), Amount: limes.MustParseAmount("0.35"),
