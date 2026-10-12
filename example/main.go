@@ -85,12 +85,23 @@ func main() {
 	must(err, "issue")
 	fmt.Printf("issued   %s  (%d bytes)\n", parent.ID, len(parentToken))
 
-	// 4. Verify on every call. Local — no round trip to the issuer.
-	verified, err := verifier.Verify(ctx, limes.VerifyRequest{Token: parentToken, Audience: "my-service"})
+	// 4. On every call, verify and enforce the caveats in one step. Local — no
+	//    round trip to the issuer.
+	verified, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
+		Verify: limes.VerifyRequest{Token: parentToken, Audience: "my-service"},
+		Check:  limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/report.pdf"},
+	})
 	if err != nil {
-		log.Fatalf("verify: %v", err)
+		log.Fatalf("authorize: %v", err)
 	}
-	fmt.Println("verified ok")
+	fmt.Println("verified ok, and the caveats admit the call")
+	if _, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
+		Verify: limes.VerifyRequest{Token: parentToken, Audience: "my-service"},
+		Check:  limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/private/report.pdf"},
+	}); !errors.Is(err, limes.ErrResourceNotAllowed) {
+		log.Fatalf("a resource outside the caveats should have been refused, got %v", err)
+	}
+	fmt.Println("authorize refused a resource outside the caveats")
 
 	// A token minted for one audience must not verify for another.
 	if _, err := verifier.Verify(ctx, limes.VerifyRequest{Token: parentToken, Audience: "another-service"}); err == nil {
@@ -142,9 +153,12 @@ func main() {
 	}
 	fmt.Println("widening refused with ErrDelegationTooWide")
 
-	// 6. Charge against the budget. The capability's ceiling, each ancestor's
+	// 6. Count the request and charge against the budget. The capability's ceiling, each ancestor's
 	//    and the tenant's all apply; a rejection by any leaves every counter
 	//    untouched, so a retry is always safe.
+	bumped, err := usage.Bump(ctx, limes.BumpRequest{Subject: verified.MeterSubject()})
+	must(err, "bump")
+	fmt.Printf("counted  request %d of %s\n", bumped.RequestCount, verified.Capability().Caveats.Requests)
 	receipt, err := usage.Charge(ctx, limes.ChargeRequest{Subject: verified.MeterSubject(), Amount: limes.MustParseAmount("0.35"), Op: "search", Actor: "research-orchestrator"}, nil)
 	must(err, "charge")
 	fmt.Printf("charged  0.35 USD, spent now %s\n", receipt.SpentAmount)
