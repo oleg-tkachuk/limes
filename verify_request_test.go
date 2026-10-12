@@ -56,7 +56,7 @@ func TestVerifyEnforcesProofOfPossession(t *testing.T) {
 		"bound, another token's": {func() VerifyRequest { r := withProof(t, key, unbound, audienceData, now); r.Token = bound; return r }(), dpop.ErrInvalid},
 		"unbound, stray proof":   {withProof(t, key, unbound, audienceData, now), nil},
 		"no token":               {VerifyRequest{Audience: audienceData}, ErrNoCredentials},
-		"no audience":            {VerifyRequest{Token: unbound}, ErrAudienceMismatch},
+		"no audience":            {VerifyRequest{Token: unbound}, ErrInvalidRequest},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

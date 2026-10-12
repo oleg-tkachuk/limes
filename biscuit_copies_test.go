@@ -166,7 +166,8 @@ func TestCopyLimitsMalformed(t *testing.T) {
 		// A copy only narrows: a ceiling it lifts means nothing.
 		{Requests: &RequestCeiling{Unlimited: true}}, {Budget: &BudgetCeiling{Unlimited: true}},
 	} {
-		if _, err := Attenuate(root, a); !errors.Is(err, ErrBiscuitAttenuation) {
+		// The holder's own call: a request error, not a token the verifier refused.
+		if _, err := Attenuate(root, a); !errors.Is(err, ErrInvalidRequest) || errors.Is(err, ErrBiscuitAttenuation) {
 			t.Errorf("Attenuate(%+v): err = %v", a, err)
 		}
 	}
