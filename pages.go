@@ -43,9 +43,10 @@ type TenantBudgetLister interface {
 // client — and this is for a caller that wants the whole list in one go.
 func AllByPrincipal(ctx context.Context, l CapabilityLister, req ListByPrincipalRequest) iter.Seq2[Capability, error] {
 	return func(yield func(Capability, error) bool) {
+		page := req // each range walks from req.Cursor with a request of its own
 		walkPages(ctx, req.Cursor, func(ctx context.Context, cursor string) (Page[Capability], error) {
-			req.Cursor = cursor
-			return l.ListByPrincipal(ctx, req)
+			page.Cursor = cursor
+			return l.ListByPrincipal(ctx, page)
 		}, yield)
 	}
 }
@@ -56,9 +57,10 @@ func AllByPrincipal(ctx context.Context, l CapabilityLister, req ListByPrincipal
 // TenantBudgets.ListTenantBudgets.
 func AllTenantBudgets(ctx context.Context, l TenantBudgetLister, req ListTenantBudgetsRequest) iter.Seq2[TenantBudget, error] {
 	return func(yield func(TenantBudget, error) bool) {
+		page := req // each range walks from req.Cursor with a request of its own
 		walkPages(ctx, req.Cursor, func(ctx context.Context, cursor string) (Page[TenantBudget], error) {
-			req.Cursor = cursor
-			return l.ListTenantBudgets(ctx, req)
+			page.Cursor = cursor
+			return l.ListTenantBudgets(ctx, page)
 		}, yield)
 	}
 }
