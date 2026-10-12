@@ -122,6 +122,16 @@ func TestAllByPrincipal(t *testing.T) {
 			wantErr:   ErrCursorRepeated,
 			wantAsked: []string{"", cursorSecond},
 		},
+		"a cycle of cursors": {
+			pages: map[string]fakePage{
+				"":           {ids: []uuid.UUID{idA}, next: cursorSecond},
+				cursorSecond: {ids: []uuid.UUID{idB}, next: cursorThird},
+				cursorThird:  {ids: []uuid.UUID{idC}, next: cursorSecond},
+			},
+			wantIDs:   []uuid.UUID{idA, idB, idC},
+			wantErr:   ErrCursorRepeated,
+			wantAsked: []string{"", cursorSecond, cursorThird},
+		},
 		"a cancelled context fetches nothing": {
 			ctx:     cancelled,
 			pages:   threePages(),

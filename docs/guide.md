@@ -650,7 +650,7 @@ The two listings, `ListByPrincipal` and `ListTenantBudgets`, are pages with an
 opaque cursor, so an API can hand a page token to its client. To read a whole
 listing in one go, range over `AllByPrincipal` or `AllTenantBudgets`: they
 walk the pages for you, stop fetching when the loop breaks, and refuse a page
-that returns the cursor it was fetched with (`ErrCursorRepeated`).
+that returns a cursor already fetched (`ErrCursorRepeated`).
 
 ```go
 for c, err := range limes.AllByPrincipal(ctx, store, req) {
