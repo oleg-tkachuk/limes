@@ -51,17 +51,15 @@ type sentinelCase struct {
 // refusal as the verifier returns it, wrapped in its family. A sentinel
 // added to the package and left out of it fails TestSentinelMatrixIsComplete.
 var sentinelMatrix = map[string]sentinelCase{
-	"ErrUnauthenticated":    {ErrUnauthenticated, []string{famUnauthenticated}, "", http.StatusUnauthorized},
-	"ErrInvalidToken":       {ErrInvalidToken, []string{famUnauthenticated, famToken}, ReasonInvalidToken, http.StatusUnauthorized},
-	"ErrExpired":            {ErrExpired, []string{famUnauthenticated}, ReasonExpired, http.StatusUnauthorized},
-	"ErrNotYetValid":        {ErrNotYetValid, []string{famUnauthenticated}, ReasonNotYetValid, http.StatusUnauthorized},
-	"ErrRevoked":            {ErrRevoked, []string{famUnauthenticated}, ReasonRevoked, http.StatusUnauthorized},
-	"ErrDelegationTooDeep":  {ErrDelegationTooDeep, []string{famUnauthenticated}, ReasonRevoked, http.StatusUnauthorized},
-	"ErrAudienceMismatch":   {ErrAudienceMismatch, []string{famUnauthenticated}, ReasonAudienceMismatch, http.StatusUnauthorized},
-	"ErrBiscuitAttenuation": {ErrBiscuitAttenuation, []string{famUnauthenticated, famToken}, ReasonBiscuitAttenuation, http.StatusUnauthorized},
-	"ErrCopyCountersNotMetered": {
-		ErrCopyCountersNotMetered, []string{famUnauthenticated, famToken}, ReasonBiscuitAttenuation, http.StatusUnauthorized,
-	},
+	"ErrUnauthenticated":        {ErrUnauthenticated, []string{famUnauthenticated}, "", http.StatusUnauthorized},
+	"ErrInvalidToken":           {ErrInvalidToken, []string{famUnauthenticated, famToken}, ReasonInvalidToken, http.StatusUnauthorized},
+	"ErrExpired":                {ErrExpired, []string{famUnauthenticated}, ReasonExpired, http.StatusUnauthorized},
+	"ErrNotYetValid":            {ErrNotYetValid, []string{famUnauthenticated}, ReasonNotYetValid, http.StatusUnauthorized},
+	"ErrRevoked":                {ErrRevoked, []string{famUnauthenticated}, ReasonRevoked, http.StatusUnauthorized},
+	"ErrDelegationTooDeep":      {ErrDelegationTooDeep, []string{famUnauthenticated}, ReasonRevoked, http.StatusUnauthorized},
+	"ErrAudienceMismatch":       {ErrAudienceMismatch, []string{famUnauthenticated}, ReasonAudienceMismatch, http.StatusUnauthorized},
+	"ErrBiscuitAttenuation":     {ErrBiscuitAttenuation, []string{famUnauthenticated, famToken}, ReasonBiscuitAttenuation, http.StatusUnauthorized},
+	"ErrCopyCountersNotMetered": {ErrCopyCountersNotMetered, nil, "", http.StatusInternalServerError},
 	"jwks.ErrUnknownKID":        {jwks.ErrUnknownKID, nil, "", http.StatusInternalServerError},
 	"ErrProofOfPossession":      {ErrProofOfPossession, []string{famUnauthenticated, famProof}, "", http.StatusUnauthorized},
 	"dpop.ErrRequired":          {proofRefusal(dpop.ErrRequired), []string{famUnauthenticated, famProof}, ReasonProofRequired, http.StatusUnauthorized},
