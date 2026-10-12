@@ -34,9 +34,10 @@ func Narrows(parent, child Capability) error {
 
 	// Start: child cannot begin before parent. A capability with no
 	// NotBefore starts when it was issued; one with neither, at any time.
-	// Compared to the second, the precision a token carries times in, so a
-	// parent read back from its token compares equal to itself.
-	if ps := validFrom(parent).Truncate(time.Second); !ps.IsZero() && validFrom(child).Before(ps) {
+	// Compared exactly: a token's times are whole seconds, so a parent read
+	// back from its token compares equal to itself, and rounding a parent's
+	// start down would let a child begin up to a second before it.
+	if ps := validFrom(parent); !ps.IsZero() && validFrom(child).Before(ps) {
 		return fmt.Errorf("%w: child starts %s, before parent %s",
 			ErrDelegationTooWide, validFrom(child), ps)
 	}
