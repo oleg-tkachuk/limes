@@ -333,7 +333,8 @@ jobs:
     needs: [changes, verify, floor, syntax, audit]
     # Not for a documentation-only push: its code is byte-identical to the
     # commit before it. Its commits are not lost — semantic-release counts them
-    # in the next release a code change dispatches.
+    # in the next release, and a release dispatched by the code commit before
+    # it releases past it (release-head-check.sh).
     if: >-
       always() &&
       needs.changes.outputs.relevant == 'true' &&

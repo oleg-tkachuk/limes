@@ -71,8 +71,9 @@ jobs:
         run: ./.github/scripts/ci-run-check.sh "$CI_RUN" "$SHA"
 
       # The checkout above is main's head, which can be newer than the commit
-      # whose CI dispatched this run. Only that commit is released; a newer
-      # head is released by its own CI run. See .github/scripts/release-head-check.sh.
+      # whose CI dispatched this run. Only that commit's code is released: a
+      # head past it with documentation alone is released in its place, any
+      # other by its own CI run. See .github/scripts/release-head-check.sh.
       - name: Release only the commit CI passed
         id: head
         env:

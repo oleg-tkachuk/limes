@@ -13,6 +13,11 @@
 # run once it passes, and semantic-release counts this commit's changes in
 # that release.
 #
+# Unless everything past the dispatched commit is documentation
+# (ci-relevant.sh): CI dispatches no release for such a commit, so waiting
+# for it would leave this one unreleased until the next code change. Its
+# code is the dispatched commit's, byte for byte, so the head is released.
+#
 # An empty sha is an error, not a pass. The workflow cannot tell which commit
 # CI vouched for, so it does not release.
 
@@ -26,8 +31,14 @@ if [ -z "$sha" ]; then
     exit 1
 fi
 
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 head=$(git rev-parse HEAD)
-if [ "$(git rev-parse --verify --quiet "${sha}^{commit}" || true)" = "$head" ]; then
+dispatched="$(git rev-parse --verify --quiet "${sha}^{commit}" || true)"
+if [ "$dispatched" = "$head" ]; then
+    echo "${OUTPUT_KEY}=true"
+elif [ -n "$dispatched" ] && git merge-base --is-ancestor "$dispatched" "$head" &&
+    [ "$(git diff --name-only "$dispatched" "$head" | "$here/ci-relevant.sh")" = false ]; then
+    echo "main moved past $sha to $head with documentation only; releasing the head, whose code is $sha's" >&2
     echo "${OUTPUT_KEY}=true"
 else
     echo "main moved past $sha to $head; that commit's own CI releases it" >&2
