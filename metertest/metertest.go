@@ -275,6 +275,14 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"EveryCounterKeepsOneUnit", checkOneUnit[TX]},
 		{"AnAncestorCountsInTheUnitOfItsChildren", checkAncestorUnit[TX]},
 		{"DeleteReleasesHolds", checkDeleteReleasesHolds[TX]},
+		{"AnAncestorAndATenantCeilingAreExact", checkExactCeilings[TX]},
+		{"AHoldAloneCountsOnItsTenant", checkHoldCreatesTenant[TX]},
+		{"ASettleReplayCommitsNothingAgain", checkSettleReplay[TX]},
+		{"ReleasingAHoldReturnsItToTheCopy", checkReleaseReturnsCopy[TX]},
+		{"ARefusedBumpCountsNothing", checkRefusedBump[TX]},
+		{"HoldsCountTowardsTheCounterRange", checkRangeCountsHolds[TX]},
+		{"ARefundOfExactlyWhatIsLeftRefundsIt", checkRefundExactRemainder[TX]},
+		{"ASettleWritesNoRowForARemovedAncestor", checkSettleAfterRemovedAncestor[TX]},
 		{"ASettleCountsOnAnAncestorWhoseRowWasDropped", checkSettleAfterAncestorDropped[TX]},
 		{"ConcurrentChargesKeepTheCeiling", checkConcurrentCeiling[TX]},
 		{"AnAncestorCeilingBoundsItsChildren", checkAncestorCeiling[TX]},
@@ -871,6 +879,210 @@ func checkSettleAfterAncestorDropped[TX any](t *testing.T, f fixture[TX]) {
 	}
 	if got := f.spent(t, f.root); got != rootSpend+admitted {
 		t.Errorf("root spent %v after the settle, want %v counted on it", got, rootSpend+admitted)
+	}
+}
+
+// checkExactCeilings holds a store to an ancestor's and a tenant's ceiling
+// to the nano: a charge reaching one exactly is admitted, a nano more is not.
+func checkExactCeilings[TX any](t *testing.T, f fixture[TX]) {
+	const nano limes.Nanos = 1
+	under, err := f.newCapability(f.root, unlimitedBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	charge := func(capID uuid.UUID, amount limes.Nanos) error {
+		_, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: f.Tenant}), Amount: amount}, nil)
+		return err
+	}
+	if err := charge(under, rootBudget); err != nil {
+		t.Errorf("a charge taking the root to its ceiling exactly: %v", err)
+	}
+	if err := charge(under, nano); !errors.Is(err, limes.ErrBudgetExceeded) {
+		t.Errorf("a nano past the root's ceiling: err = %v, want ErrBudgetExceeded", err)
+	}
+	other, err := f.newCapability(uuid.Nil, unlimitedBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := charge(other, tenantBudget-rootBudget); err != nil {
+		t.Errorf("a charge taking the tenant to its ceiling exactly: %v", err)
+	}
+	if err := charge(other, nano); !errors.Is(err, limes.ErrTenantBudgetExceeded) {
+		t.Errorf("a nano past the tenant's ceiling: err = %v, want ErrTenantBudgetExceeded", err)
+	}
+}
+
+// checkHoldCreatesTenant holds a store to counting a hold on a tenant whose
+// first act it is: a ceiling set afterwards must see it.
+func checkHoldCreatesTenant[TX any](t *testing.T, f fixture[TX]) {
+	tenant, err := f.newTenant()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := f.NewCapability(CapabilitySpec{Tenant: tenant, Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Usage.Reserve(f.tenantCtx(tenant), limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant}), Amount: one}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := f.Usage.GetTenantBudget(f.tenantCtx(tenant), tenant)
+	if err != nil || b.ReservedAmount != one {
+		t.Errorf("a tenant whose first act is a hold: %+v, %v; want %v held", b, err, one)
+	}
+}
+
+// checkSettleReplay holds a store to a settle replayed: the same receipt,
+// and onCharged not run again, so a side effect committed with the first is
+// not committed twice.
+func checkSettleReplay[TX any](t *testing.T, f fixture[TX]) {
+	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: 2 * one, Op: "llm", Actor: "agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := limes.SettleRequest{Subject: f.childSubject(), ReservationID: r.ID, Amount: one}
+	first, err := f.Usage.Settle(f.Ctx, req, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ran := false
+	again, err := f.Usage.Settle(f.Ctx, req, func(context.Context, TX) error { ran = true; return nil })
+	if err != nil || !again.Replayed || again.ChargeID != first.ChargeID || again.SpentAmount != first.SpentAmount {
+		t.Errorf("a replayed settle = %+v, %v; want the first's receipt %+v, replayed", again, err, first)
+	}
+	if ran {
+		t.Error("a replayed settle ran onCharged again")
+	}
+	charge, err := f.Usage.GetCharge(f.Ctx, first.ChargeID)
+	if err != nil || charge.Op != "llm" || charge.Actor != "agent" {
+		t.Errorf("the settled charge = %+v, %v; want the hold's op and actor", charge, err)
+	}
+}
+
+// checkReleaseReturnsCopy holds a store to returning a hold to the copy it
+// was made under, by Release and by ReleaseExpired: a hold left on the copy
+// blocks it for good.
+func checkReleaseReturnsCopy[TX any](t *testing.T, f fixture[TX]) {
+	reader, ok := f.Usage.(limes.CopyUsageReader)
+	if !ok {
+		return // a Meter that does not read copies back is checked no further
+	}
+	const ttl = time.Minute
+	for name, release := range map[string]func(id uuid.UUID) error{
+		"Release": func(id uuid.UUID) error {
+			return f.Usage.Release(f.Ctx, limes.ReleaseRequest{ReservationID: id})
+		},
+		"ReleaseExpired": func(uuid.UUID) error {
+			f.Advance(2 * ttl)
+			_, err := f.Usage.ReleaseExpired(f.Ctx, limes.ReleaseExpiredRequest{})
+			return err
+		},
+	} {
+		if name == "ReleaseExpired" && f.Advance == nil {
+			continue
+		}
+		copyID := []byte("copy-" + name)
+		copies := []limes.CopyCeiling{{RevocationID: copyID, Budget: &limes.BudgetCeiling{Max: childBudget}}}
+		r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, copies: copies}), Amount: one, TTL: ttl})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := release(r.ID); err != nil {
+			t.Fatal(err)
+		}
+		if got := f.copyUsage(t, reader, copyID); len(got) != 1 || got[0].ReservedAmount != 0 {
+			t.Errorf("the copy after %s = %+v; want nothing held", name, got)
+		}
+	}
+}
+
+// checkRefusedBump holds a store to a Bump refused by a copy's request
+// ceiling moving no counter.
+func checkRefusedBump[TX any](t *testing.T, f fixture[TX]) {
+	frozen := []limes.CopyCeiling{{RevocationID: []byte("frozen"), Requests: &limes.RequestCeiling{}}}
+	if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, copies: frozen})}); !errors.Is(err, limes.ErrRequestLimitExceeded) {
+		t.Fatalf("a bump past a frozen copy: err = %v, want ErrRequestLimitExceeded", err)
+	}
+	for name, id := range map[string]uuid.UUID{"capability": f.child, "root": f.root} {
+		u, err := f.Usage.GetUsage(f.Ctx, id)
+		if err != nil && !errors.Is(err, limes.ErrUsageNotFound) {
+			t.Fatal(err)
+		}
+		if u.RequestCount != 0 {
+			t.Errorf("the %s counted %d requests after a refused bump, want 0", name, u.RequestCount)
+		}
+	}
+}
+
+// checkRangeCountsHolds holds a store to the counter range with what is held
+// counted: holds summing past MaxNanos would leave a counter it cannot
+// keep, so the one that would is ErrCounterOverflow.
+func checkRangeCountsHolds[TX any](t *testing.T, f fixture[TX]) {
+	tenant, err := f.newTenant()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := f.NewCapability(CapabilitySpec{Tenant: tenant, Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reserve := func(amount limes.Nanos) error {
+		_, err := f.Usage.Reserve(f.tenantCtx(tenant), limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant}), Amount: amount})
+		return err
+	}
+	if err := reserve(limes.MaxNanos); err != nil {
+		t.Fatal(err)
+	}
+	if err := reserve(1); !errors.Is(err, limes.ErrCounterOverflow) {
+		t.Errorf("a hold past MaxNanos held: err = %v, want ErrCounterOverflow", err)
+	}
+}
+
+// checkRefundExactRemainder holds a store to a refund of an Amount exactly
+// what is left of the charge: it is refunded whole, not refused.
+func checkRefundExactRemainder[TX any](t *testing.T, f fixture[TX]) {
+	const charged, first = 3 * one, one
+	receipt, err := f.charge(limes.ChargeRequest{Amount: charged}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refund := func(amount limes.Nanos) (limes.RefundReceipt, error) {
+		return f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Amount: amount})
+	}
+	if _, err := refund(first); err != nil {
+		t.Fatal(err)
+	}
+	got, err := refund(charged - first)
+	if err != nil || got.Amount != charged-first {
+		t.Errorf("a refund of exactly what is left = %+v, %v; want %v refunded", got, err, charged-first)
+	}
+	if spent := f.spent(t, f.child); spent != 0 {
+		t.Errorf("spent %v after refunding the whole charge, want 0", spent)
+	}
+}
+
+// checkSettleAfterRemovedAncestor holds a store to writing no row for an
+// ancestor that PurgeOrphans has dropped: a hold settled afterwards counts
+// on the lineage still on record, and the removed one stays gone.
+func checkSettleAfterRemovedAncestor[TX any](t *testing.T, f fixture[TX]) {
+	if f.DeleteCapability == nil {
+		t.Skip("Env.DeleteCapability not set")
+	}
+	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.DeleteCapability(f.root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Usage.PurgeOrphans(f.Ctx, limes.PurgeOrphansRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: f.childSubject(), ReservationID: r.ID, Amount: one}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if u, err := f.Usage.GetUsage(f.Ctx, f.root); !errors.Is(err, limes.ErrUsageNotFound) {
+		t.Errorf("the removed root after a settle: %+v, %v; want no row", u, err)
 	}
 }
 
