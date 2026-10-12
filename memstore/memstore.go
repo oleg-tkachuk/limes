@@ -473,13 +473,15 @@ func (s *UsageStore[TX]) Bump(_ context.Context, req limes.BumpRequest) (limes.B
 	if err := checkSubject(req.Subject); err != nil {
 		return limes.BumpReceipt{}, err
 	}
+	// The lineage is read under the usage lock, as Delete and PurgeOrphans
+	// take it: read before, an ancestor they dropped meanwhile would have
+	// its row written back.
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	ancestors, err := s.lineage(req.Subject.CapabilityID())
 	if err != nil {
 		return limes.BumpReceipt{}, err
 	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	u := s.usage[req.Subject.CapabilityID()]
 	next := u.RequestCount + 1
 	for _, c := range req.Subject.Copies() {
@@ -555,13 +557,15 @@ func (s *UsageStore[TX]) Charge(
 	if err != nil {
 		return limes.ChargeReceipt{}, err
 	}
+	// The lineage is read under the usage lock, as Delete and PurgeOrphans
+	// take it: read before, an ancestor they dropped meanwhile would have
+	// its row written back.
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	ancestors, err := s.lineage(req.Subject.CapabilityID())
 	if err != nil {
 		return limes.ChargeReceipt{}, err
 	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if req.ExternalRef != "" {
 		if e, ok := entryLocked(s, s.byRef, refKey{req.Subject.CapabilityID(), req.ExternalRef}); ok {
 			if e.Amount != req.Amount || e.UnitCode != unit || e.TenantID != req.Subject.TenantID() {
@@ -884,13 +888,15 @@ func (s *UsageStore[TX]) Reserve(_ context.Context, req limes.ReserveRequest) (l
 	if ttl == 0 {
 		ttl = limes.DefaultReservationTTL
 	}
+	// The lineage is read under the usage lock, as Delete and PurgeOrphans
+	// take it: read before, an ancestor they dropped meanwhile would have
+	// its row written back.
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	ancestors, err := s.lineage(req.Subject.CapabilityID())
 	if err != nil {
 		return limes.Reservation{}, err
 	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	refuse := func(err error) error { return err }
 	if err := s.checkCeilingsLocked(ceilingCheck{
@@ -1356,15 +1362,21 @@ func (s *UsageStore[TX]) Delete(_ context.Context, capID uuid.UUID) error {
 	s.releaseHoldsLocked(func(id uuid.UUID) bool { return id == capID })
 	delete(s.usage, capID)
 	maps.DeleteFunc(s.copies, func(_ string, c copyCounter) bool { return c.capID == capID })
-	// A descendant's hold still names capID among its ancestors; releasing
-	// or settling it later must not write the dropped row back.
+	s.forgetAncestorLocked(func(id uuid.UUID) bool { return id == capID })
+	return nil
+}
+
+// forgetAncestorLocked drops every id gone reports from the ancestors of the
+// holds that remain: a descendant's hold still names a dropped row's
+// capability, and releasing or settling it later must not write that row
+// back. s.mu must be held.
+func (s *UsageStore[TX]) forgetAncestorLocked(gone func(uuid.UUID) bool) {
 	for id, h := range s.holds {
-		if i := slices.Index(h.ancestors, capID); i >= 0 {
-			h.ancestors = slices.Delete(slices.Clone(h.ancestors), i, i+1)
+		if slices.ContainsFunc(h.ancestors, gone) {
+			h.ancestors = slices.DeleteFunc(slices.Clone(h.ancestors), gone)
 			s.holds[id] = h
 		}
 	}
-	return nil
 }
 
 func (s *UsageStore[TX]) PurgeOrphans(_ context.Context, req limes.PurgeOrphansRequest) (limes.PurgeOrphansResult, error) {
@@ -1407,6 +1419,7 @@ func (s *UsageStore[TX]) PurgeOrphans(_ context.Context, req limes.PurgeOrphansR
 	for id := range batch {
 		delete(s.usage, id)
 	}
+	s.forgetAncestorLocked(func(id uuid.UUID) bool { return batch[id] })
 	maps.DeleteFunc(s.copies, func(_ string, c copyCounter) bool { return batch[c.capID] })
 	return limes.PurgeOrphansResult{Purged: int64(len(ids))}, nil
 }
