@@ -31,7 +31,7 @@ flowchart LR
         verifier["<b>StandardVerifier</b><br/>Authorize · Verify · BiscuitCopy<br/>ErrorResponse · DPoPNonce"]
         caveats["<b>Caveats</b><br/>Check · CheckSource · MatchResource"]
         cache["CachedRevocationChecker<br/>TTL · bounded, oldest out · single-flight"]
-        bcache["CachedBiscuitRevocationChecker<br/>per token · TTL · bounded · single-flight"]
+        bcache["CachedBiscuitRevocationChecker<br/>per revocation id · TTL · bounded · single-flight"]
         attenuate["<b>Attenuate</b><br/>offline · no key"]
         metering["Instrument<br/>OTel counters · spend histogram<br/>WithMeterProvider · WithTenantAttribute"]
         static["jwks.Static<br/>SetKey · RemoveKey"]
@@ -706,7 +706,7 @@ flowchart LR
     notify{{"consumer's revocation signal<br/>e.g. a Postgres channel"}}
     bop(["RevokeBiscuit(RevokeBiscuitRequest{CapabilityID, RevocationID})"])
     blist[("<b>BiscuitRevocationStore</b><br/>revoked block ids")]
-    bcache["<b>CachedBiscuitRevocationChecker</b><br/>answer per token, cached for TTL<br/>bounded · dropped by Clear"]
+    bcache["<b>CachedBiscuitRevocationChecker</b><br/>answer per revocation id, cached for TTL<br/>bounded · dropped by Clear"]
     v1["StandardVerifier"]
     v2["StandardVerifier"]
 

@@ -2,8 +2,6 @@ package limes
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"time"
@@ -105,18 +103,25 @@ func (v *StandardVerifier) BiscuitCopy(ctx context.Context, token string) (Biscu
 	return BiscuitCopy{CapabilityID: c.ID, RevocationID: ids[len(ids)-1], Limits: c.Copies}, nil
 }
 
-// CachedBiscuitRevocationChecker caches IsBiscuitRevoked answers per token —
-// keyed by its whole list of revocation ids — under the same TTL, bound and
-// sharing of concurrent misses as CachedRevocationChecker, and is cleared the
-// same way: a revoked id is part of the key of every token carrying it, so
-// only Clear reaches them all.
+// CachedBiscuitRevocationChecker caches IsBiscuitRevoked answers per
+// revocation id, under the same TTL, bound and sharing of concurrent misses
+// as CachedRevocationChecker. A token is revoked when any of its ids is, so
+// each id is asked about on its own: the ids a token shares with the copies
+// it was attenuated from stay cached, and a fresh attenuation — which anyone
+// holding a copy can make offline — costs one upstream lookup, for its new
+// block, rather than one for the whole token. A token none of whose ids is
+// cached costs one lookup per block.
+//
+// A revoked id's cached "live" answer lasts until the TTL, as in
+// CachedRevocationChecker; Clear drops every entry at once.
 type CachedBiscuitRevocationChecker struct {
 	upstream BiscuitRevocationLookup
-	cache    *ttlCache[[sha256.Size]byte]
+	cache    *ttlCache[string]
 }
 
 // BiscuitRevocationCacheConfig configures a CachedBiscuitRevocationChecker;
-// its fields read as RevocationCacheConfig's do.
+// its fields read as RevocationCacheConfig's do, MaxEntries counting
+// revocation ids.
 type BiscuitRevocationCacheConfig struct {
 	// Upstream answers what the cache does not hold. Required.
 	Upstream   BiscuitRevocationLookup
@@ -135,16 +140,23 @@ func NewCachedBiscuitRevocationChecker(cfg BiscuitRevocationCacheConfig) (*Cache
 	if err != nil {
 		return nil, err
 	}
-	return &CachedBiscuitRevocationChecker{upstream: cfg.Upstream, cache: newTTLCache[[sha256.Size]byte](c)}, nil
+	return &CachedBiscuitRevocationChecker{upstream: cfg.Upstream, cache: newTTLCache[string](c)}, nil
 }
 
-// IsBiscuitRevoked serves a fresh cached answer, or asks upstream once on
-// behalf of every concurrent caller asking about the same token. An upstream
-// error is returned and never cached.
+// IsBiscuitRevoked answers for each id in turn — a fresh cached answer, or
+// one upstream lookup shared by every concurrent caller asking about that
+// id — and stops at the first revoked. An upstream error is returned and
+// never cached.
 func (c *CachedBiscuitRevocationChecker) IsBiscuitRevoked(ctx context.Context, revocationIDs [][]byte) (bool, error) {
-	return c.cache.get(ctx, biscuitCacheKey(revocationIDs), func(ctx context.Context) (bool, error) {
-		return c.upstream.IsBiscuitRevoked(ctx, revocationIDs)
-	})
+	for _, id := range revocationIDs {
+		revoked, err := c.cache.get(ctx, string(id), func(ctx context.Context) (bool, error) {
+			return c.upstream.IsBiscuitRevoked(ctx, [][]byte{id})
+		})
+		if err != nil || revoked {
+			return revoked, err
+		}
+	}
+	return false, nil
 }
 
 // Clear drops every entry; wire it to the same revocation notification as
@@ -153,18 +165,6 @@ func (c *CachedBiscuitRevocationChecker) Clear() { c.cache.clear() }
 
 // Sweep drops every expired entry and returns how many it dropped.
 func (c *CachedBiscuitRevocationChecker) Sweep() int { return c.cache.sweep() }
-
-// biscuitCacheKey hashes the ids length-prefixed, so no two lists share a key.
-func biscuitCacheKey(ids [][]byte) [sha256.Size]byte {
-	h := sha256.New()
-	for _, id := range ids {
-		h.Write(binary.BigEndian.AppendUint64(nil, uint64(len(id))))
-		h.Write(id)
-	}
-	var out [sha256.Size]byte
-	copy(out[:], h.Sum(nil))
-	return out
-}
 
 // errNoBiscuitRevocations is returned by NewStandardVerifier when Biscuits
 // are accepted with nothing to check their copies against.
