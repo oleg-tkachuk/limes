@@ -10,11 +10,14 @@
 //	}
 //
 // The checks cover what a charge does at its ceilings and when it arrives
-// again: rejection that moves nothing — by the capability's, an ancestor's or
-// the tenant's ceiling, by a failed onCharged, under concurrent charges —
-// idempotency on ExternalRef and on a settled reservation, ChargeByRef,
-// OverrunRecord past every ceiling, refunds, holds and their expiry, request
-// counts, units, the tenant aggregate and its listing, and the validation of
+// again: rejection that moves nothing — by a Biscuit copy's, the capability's,
+// an ancestor's or the tenant's ceiling, by a failed onCharged, under
+// concurrent charges — idempotency on ExternalRef and on a settled
+// reservation, also once the capability is gone, ChargeByRef, OverrunRecord
+// past every ceiling, refunds, holds, their listing and their expiry, request
+// counts, copy counters and CopyUsage, units, counters that never pass
+// MaxNanos, a capability not on record, DeleteUsage and PurgeOrphans, the
+// tenant aggregate, its version guard and its listing, and the validation of
 // the request. They need a real ledger, not a fake.
 package metertest
 

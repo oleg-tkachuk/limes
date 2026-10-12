@@ -5,7 +5,7 @@
 Go (the `toolchain` in `go.mod`; the `go` directive is the oldest Go the
 module supports, and CI runs the suite on it too), [Task](https://taskfile.dev) and
 [golangci-lint](https://golangci-lint.run); Node and
-`npm ci --ignore-scripts --prefix .github/release` for the release-rule and release-notes tests.
+`npm ci --ignore-scripts --prefix .github/release` for the release-rule, release-notes and major-guard tests.
 govulncheck and actionlint are pinned in `tools/go.mod`, yq in
 `tools/yq/go.mod`, and all run through `go tool`, so they need no install.
 
@@ -15,7 +15,7 @@ task verify-all
 
 runs gofmt, `go mod tidy` and `go mod verify`, golangci-lint, `go vet` of a
 32-bit build, the unit suite, `./example` end to end, govulncheck, actionlint,
-the tests of the workflow scripts, and the release-rule and release-notes tests
+the tests of the workflow scripts, and the release-rule, release-notes and major-guard tests
 — the same task CI runs. The suite needs no database, no
 network and no container.
 

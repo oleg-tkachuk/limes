@@ -119,7 +119,7 @@ type VerifierConfig struct {
 
 	// DPoP checks the proof of possession a key-bound capability (one with
 	// a ConfirmationJKT) must come with. Without it the verifier refuses
-	// every key-bound capability with dpop.ErrRequired, rather than accept
+	// every key-bound capability with ErrProofUnsupported, rather than accept
 	// one as a bearer token. Built by dpop.NewVerifier, with its own clock.
 	DPoP *dpop.Verifier
 
