@@ -65,8 +65,8 @@ fi
 printf 'Incompatible API changes since %s:\n%s\n' "$merge_base" "$breaks"
 
 line="$(release_line "$merge_base")"
-if on_stable_line "$line"; then
-    echo "api-break-check: the API is stable on the $line line; an incompatible change needs a new module path" >&2
+if stable_at "$merge_base"; then
+    echo "api-break-check: the API is stable on this line (${line:-untagged yet}); an incompatible change needs a new module path" >&2
     exit 1
 fi
 if marks_breaking "$merge_base" "$head"; then

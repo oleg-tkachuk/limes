@@ -23,6 +23,8 @@ readonly REQUIRED_JOBS=(
     "Changed paths"
     "Verify"
     "Test on the oldest supported Go"
+    "API compatibility"
+    "Breaking markers"
     "Workflow syntax"
     "Workflow audit"
 )
