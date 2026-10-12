@@ -62,7 +62,7 @@ type UsageStore[TX any] struct {
 
 	usage   map[uuid.UUID]limes.Usage
 	budgets map[uuid.UUID]limes.TenantBudget
-	ledger  []LedgerEntry
+	ledger  []ledgerEntry
 	// The ledger's indexes, each to a position in ledger: by charge id, by
 	// (capability, external ref) and by the reservation a charge settled.
 	byCharge      map[uuid.UUID]int
@@ -97,9 +97,8 @@ type copyCounter struct {
 	reserved limes.Nanos
 }
 
-// LedgerEntry records one committed charge. Exposed so tests (and readers)
-// can assert that a rolled-back charge left no trace.
-type LedgerEntry struct {
+// ledgerEntry records one committed charge.
+type ledgerEntry struct {
 	ID           uuid.UUID
 	CapabilityID uuid.UUID
 	// Ancestors are the capabilities the charge also debited, nearest
@@ -186,13 +185,6 @@ func NewUsageStore[TX any](cfg UsageStoreConfig[TX]) (*UsageStore[TX], error) {
 		nowFn:         cfg.Now,
 		txFactory:     cfg.TxFactory,
 	}, nil
-}
-
-// Ledger returns a copy of the committed charge ledger.
-func (s *UsageStore[TX]) Ledger() []LedgerEntry {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]LedgerEntry(nil), s.ledger...)
 }
 
 // ─── limes.Store ──────────────────────────────────────────────────────
@@ -610,7 +602,7 @@ func (s *UsageStore[TX]) GetCharge(_ context.Context, chargeID uuid.UUID) (limes
 }
 
 // record is the entry as the Meter contract reads a charge back.
-func (e LedgerEntry) record() limes.ChargeRecord {
+func (e ledgerEntry) record() limes.ChargeRecord {
 	return limes.ChargeRecord{
 		ID: e.ID, CapabilityID: e.CapabilityID, Amount: e.Amount, RefundedAmount: e.RefundedAmount,
 		UnitCode: e.UnitCode, ExternalRef: e.ExternalRef, Overrun: e.Overrun,
@@ -619,16 +611,16 @@ func (e LedgerEntry) record() limes.ChargeRecord {
 
 // entryLocked returns the ledger entry index files under key. s.mu must be
 // held.
-func entryLocked[TX any, K comparable](s *UsageStore[TX], index map[K]int, key K) (LedgerEntry, bool) {
+func entryLocked[TX any, K comparable](s *UsageStore[TX], index map[K]int, key K) (ledgerEntry, bool) {
 	i, ok := index[key]
 	if !ok {
-		return LedgerEntry{}, false
+		return ledgerEntry{}, false
 	}
 	return s.ledger[i], true
 }
 
 // appendLocked adds entry to the ledger and its indexes. s.mu must be held.
-func (s *UsageStore[TX]) appendLocked(entry LedgerEntry) {
+func (s *UsageStore[TX]) appendLocked(entry ledgerEntry) {
 	i := len(s.ledger)
 	s.ledger = append(s.ledger, entry)
 	s.byCharge[entry.ID] = i
@@ -642,7 +634,7 @@ func (s *UsageStore[TX]) appendLocked(entry LedgerEntry) {
 
 // replayLocked is the receipt for a charge already in the ledger, returned
 // when the same charge arrives again. s.mu must be held.
-func (s *UsageStore[TX]) replayLocked(e LedgerEntry) limes.ChargeReceipt {
+func (s *UsageStore[TX]) replayLocked(e ledgerEntry) limes.ChargeReceipt {
 	return limes.ChargeReceipt{
 		ChargeID: e.ID, SpentAmount: s.usage[e.CapabilityID].SpentAmount,
 		Replayed: true, Overrun: e.Overrun, TenantID: e.TenantID, UnitCode: e.UnitCode,
@@ -740,7 +732,7 @@ func (s *UsageStore[TX]) chargeLocked(
 		s.copies[string(c.RevocationID)] = cc
 		copyIDs = append(copyIDs, c.RevocationID)
 	}
-	entry := LedgerEntry{
+	entry := ledgerEntry{
 		ID: uuid.New(), CapabilityID: req.Subject.CapabilityID(), Ancestors: ids,
 		TenantID: req.Subject.TenantID(), Amount: req.Amount, UnitCode: unit,
 		Op: req.Op, Actor: req.Actor, At: s.nowFn(), Copies: copyIDs,
@@ -1287,15 +1279,15 @@ func (s *UsageStore[TX]) SetTenantBudget(_ context.Context, args limes.SetTenant
 	return b, nil
 }
 
-func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTenantBudgetsRequest) (limes.Page[limes.TenantBudgetSummary], error) {
+func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTenantBudgetsRequest) (limes.Page[limes.TenantBudget], error) {
 	if err := args.Validate(); err != nil {
-		return limes.Page[limes.TenantBudgetSummary]{}, err
+		return limes.Page[limes.TenantBudget]{}, err
 	}
 	var after *budgetRow
 	if args.Cursor != "" {
 		c, err := decodeTenantBudgetCursor(args.Cursor)
 		if err != nil {
-			return limes.Page[limes.TenantBudgetSummary]{}, err
+			return limes.Page[limes.TenantBudget]{}, err
 		}
 		pct, _ := strconv.ParseFloat(c.utilization, 64) // decodeTenantBudgetCursor checked it
 		after = &budgetRow{class: c.class, pct: pct, tenant: c.tenantID}
@@ -1334,13 +1326,11 @@ func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTen
 			class: last.class, utilization: strconv.FormatFloat(last.pct, 'f', -1, 64), tenantID: last.tenant,
 		}.encode()
 	}
-	out := make([]limes.TenantBudgetSummary, 0, len(rows))
+	out := make([]limes.TenantBudget, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, limes.TenantBudgetSummary{
-			TenantID: r.tenant, Budget: r.budget,
-		})
+		out = append(out, r.budget)
 	}
-	return limes.Page[limes.TenantBudgetSummary]{Items: out, Next: next}, nil
+	return limes.Page[limes.TenantBudget]{Items: out, Next: next}, nil
 }
 
 // budgetRow is a tenant budget in ListTenantBudgets' order.

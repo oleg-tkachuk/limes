@@ -193,9 +193,8 @@ type TenantBudgets interface {
 	// held in the old unit, or spent in it and not reset.
 	SetTenantBudget(ctx context.Context, req SetTenantBudgetRequest) (TenantBudget, error)
 
-	// ListTenantBudgets returns tenant budget rows, with the consumer's
-	// display fields where it has them. Filters:
-	//   - ExcludeInactive: skip tenants the consumer considers inactive.
+	// ListTenantBudgets returns tenant budget rows; a consumer joins its
+	// own tenant data to them by TenantID. Filters:
 	//   - ThresholdPct > 0: include only rows where
 	//     spent / max * 100 >= ThresholdPct, and every ceiling of 0 — spent
 	//     through at any threshold — but no unlimited one.
@@ -211,7 +210,7 @@ type TenantBudgets interface {
 	// the next one, empty on the last page. Spend moves between pages, so
 	// a tenant may show on two of them, or on none; a cursor is a place in
 	// the order, not a snapshot.
-	ListTenantBudgets(ctx context.Context, req ListTenantBudgetsRequest) (Page[TenantBudgetSummary], error)
+	ListTenantBudgets(ctx context.Context, req ListTenantBudgetsRequest) (Page[TenantBudget], error)
 }
 
 // UsageHousekeeping reclaims usage rows of capabilities that are gone.
@@ -485,17 +484,6 @@ type SetTenantBudgetRequest struct {
 	ExpectedVersion int64
 }
 
-// TenantBudgetSummary is a TenantBudget with the consumer's display fields
-// (empty when the consumer keeps none). Returned by ListTenantBudgets.
-type TenantBudgetSummary struct {
-	TenantID    uuid.UUID
-	Slug        string
-	DisplayName string
-	// Budget is the tenant's ceiling and counters; Budget.Utilization reads
-	// how much of the ceiling is spent.
-	Budget TenantBudget
-}
-
 // ListTenantBudgetsRequest is the input shape for
 // UsageStore.ListTenantBudgets.
 type ListTenantBudgetsRequest struct {
@@ -503,8 +491,6 @@ type ListTenantBudgetsRequest struct {
 	ThresholdPct float64
 	// UnlimitedOnly keeps only tenants with no ceiling.
 	UnlimitedOnly bool
-	// ExcludeInactive drops tenants the consumer marks inactive.
-	ExcludeInactive bool
 	// Limit is the page size; see PageLimit. Negative is refused.
 	Limit int
 	// Cursor is the one the previous page returned; empty for the first.

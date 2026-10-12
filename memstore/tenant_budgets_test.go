@@ -73,7 +73,7 @@ func TestListTenantBudgets(t *testing.T) {
 	}
 	page, _ := u.ListTenantBudgets(ctx, limes.ListTenantBudgetsRequest{Limit: 1})
 	got := page.Items
-	if pct, limited := got[0].Budget.Utilization(); !limited || pct != percent {
+	if pct, limited := got[0].Utilization(); !limited || pct != percent {
 		t.Errorf("a tenant past its ceiling reads %v%% (limited %v), want %d%%", pct, limited, percent)
 	}
 }
