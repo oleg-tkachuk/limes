@@ -94,10 +94,10 @@ type jwtClaims struct {
 	ID        string   `json:"jti"`
 
 	// Capability claims.
-	Principal  Principal `json:"limes_principal"`
-	Caveats    Caveats   `json:"limes_caveats"`
-	ParentID   string    `json:"limes_parent_id,omitempty"`
-	Generation int64     `json:"limes_gen,omitzero"`
+	Principal  wirePrincipal `json:"limes_principal"`
+	Caveats    wireCaveats   `json:"limes_caveats"`
+	ParentID   string        `json:"limes_parent_id,omitempty"`
+	Generation int64         `json:"limes_gen,omitzero"`
 
 	// Confirmation is RFC 7800's `cnf`, omitted for an unbound capability.
 	Confirmation *cnfClaim `json:"cnf,omitzero"`
@@ -175,28 +175,8 @@ func (s *Signer) Sign(ctx context.Context, c Capability) (string, error) {
 		return "", errors.New("limes: ExpiresAt must be after IssuedAt")
 	}
 
-	header := jwtHeader{Alg: jose.AlgEd25519, Kid: s.keyID, Typ: tokenType}
-	claims := jwtClaims{
-		Issuer:     c.Issuer,
-		Subject:    c.Subject.Subject,
-		Audience:   c.Audience,
-		IssuedAt:   c.IssuedAt.Unix(),
-		ExpiresAt:  c.ExpiresAt.Unix(),
-		ID:         c.ID.String(),
-		Principal:  c.Subject,
-		Caveats:    c.Caveats,
-		Generation: c.Generation,
-	}
-	if !c.NotBefore.IsZero() {
-		claims.NotBefore = c.NotBefore.Unix()
-	}
-	if c.ParentID != uuid.Nil {
-		claims.ParentID = c.ParentID.String()
-	}
-	claims.BiscuitRoot = c.BiscuitRoot
-	if c.ConfirmationJKT != "" {
-		claims.Confirmation = &cnfClaim{JKT: c.ConfirmationJKT}
-	}
+	header := jwtHeader{Alg: jose.AlgEd25519, Kid: s.keyID, Typ: TokenTypeV3}
+	claims := claimsOf(c)
 	// Nothing is signed that the verifier would refuse to read.
 	if err := checkIJSONIntegers(claims); err != nil {
 		return "", err
@@ -233,12 +213,17 @@ func (s *Signer) Sign(ctx context.Context, c Capability) (string, error) {
 	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig), nil
 }
 
-// tokenType is the JWT "typ" header every capability token carries. The
-// verifier requires it, so a different kind of EdDSA JWT signed by the same
-// key — an ID token, another product's token — cannot be presented as a
-// capability. It names the format's version: a token of another version is
-// refused here, before a claim of it is read under the wrong schema.
-const tokenType = "limes-cap-v3+jwt" //nolint:gosec // G101: a JWT type label, not a credential
+// TokenTypeV3 is the JWT "typ" header of the current token format, which
+// every Signer of this module mints. The verifier requires a type it
+// accepts (VerifierConfig.AcceptTokenTypes), so a different kind of EdDSA
+// JWT signed by the same key — an ID token, another product's token —
+// cannot be presented as a capability. It names the format's version: a
+// token of another version is refused before a claim of it is read under
+// the wrong schema.
+const TokenTypeV3 = "limes-cap-v3+jwt" //nolint:gosec // G101: a JWT type label, not a credential
+
+// tokenTypes are the token types this package has a schema for.
+var tokenTypes = []string{TokenTypeV3}
 
 func parseHeader(seg string) (jwtHeader, error) {
 	raw, err := base64.RawURLEncoding.DecodeString(seg)
@@ -250,12 +235,39 @@ func parseHeader(seg string) (jwtHeader, error) {
 		return jwtHeader{}, fmt.Errorf("limes: parse header: %w", err)
 	}
 	// Only the fully-specified identifier (RFC 9864): a capability token is
-	// this module's own, and none was ever written with another under this
-	// tokenType.
+	// this module's own, and none was ever written with another under any
+	// of its token types.
 	if h.Alg != jose.AlgEd25519 {
 		return jwtHeader{}, fmt.Errorf("limes: unexpected alg %q (want %s)", h.Alg, jose.AlgEd25519)
 	}
 	return h, nil
+}
+
+// claimsOf is the payload Sign writes for c: the one place a Capability
+// becomes claims.
+func claimsOf(c Capability) jwtClaims {
+	claims := jwtClaims{
+		Issuer:     c.Issuer,
+		Subject:    c.Subject.Subject,
+		Audience:   c.Audience,
+		IssuedAt:   c.IssuedAt.Unix(),
+		ExpiresAt:  c.ExpiresAt.Unix(),
+		ID:         c.ID.String(),
+		Principal:  toWirePrincipal(c.Subject),
+		Caveats:    toWireCaveats(c.Caveats),
+		Generation: c.Generation,
+	}
+	if !c.NotBefore.IsZero() {
+		claims.NotBefore = c.NotBefore.Unix()
+	}
+	if c.ParentID != uuid.Nil {
+		claims.ParentID = c.ParentID.String()
+	}
+	claims.BiscuitRoot = c.BiscuitRoot
+	if c.ConfirmationJKT != "" {
+		claims.Confirmation = &cnfClaim{JKT: c.ConfirmationJKT}
+	}
+	return claims
 }
 
 func parseClaims(seg string) (*Capability, error) {
@@ -284,7 +296,7 @@ func parseClaims(seg string) (*Capability, error) {
 		ID:         id,
 		Issuer:     claims.Issuer,
 		Audience:   claims.Audience,
-		Caveats:    claims.Caveats,
+		Caveats:    claims.Caveats.caveats(),
 		IssuedAt:   time.Unix(claims.IssuedAt, 0).UTC(),
 		ExpiresAt:  time.Unix(claims.ExpiresAt, 0).UTC(),
 		Generation: claims.Generation,
@@ -292,7 +304,7 @@ func parseClaims(seg string) (*Capability, error) {
 	if claims.NotBefore != 0 {
 		cap.NotBefore = time.Unix(claims.NotBefore, 0).UTC()
 	}
-	cap.Subject = claims.Principal
+	cap.Subject = claims.Principal.principal()
 	if claims.Confirmation != nil {
 		cap.ConfirmationJKT = claims.Confirmation.JKT
 	}

@@ -163,7 +163,7 @@ flowchart TB
     pre{"token and audience set"}
     size{"len ≤ MaxTokenBytes"}
     form{"a Biscuit?"}
-    hdr{"header: strict parse<br/>alg = Ed25519 · typ = limes-cap-v3+jwt · kid set"}
+    hdr{"header: strict parse<br/>alg = Ed25519 · typ ∈ AcceptTokenTypes · kid set"}
     key{"KeyResolver.PublicKey(kid)"}
     sig{"Ed25519 signature"}
     claims{"claims: strict parse — no unknown or duplicate member<br/>integers within ±(2^53 − 1) · sub = principal's subject"}
