@@ -82,6 +82,7 @@ func RunReplayCache(t *testing.T, setup func(t *testing.T) ReplayEnv) {
 		{"KeysAndIDsAreApart", checkApart},
 		{"AnIDIsRememberedUntilItExpires", checkRemembered},
 		{"AKeyPastItsShareIsRefused", checkShare},
+		{"AKeysShareFreesOnceItsIDsExpire", checkShareFrees},
 		{"ConcurrentProofsLetOneThrough", checkConcurrentReplay},
 	}
 	for _, c := range checks {
@@ -262,5 +263,20 @@ func checkExpiry(t *testing.T, e NoncesEnv) {
 	e.Advance(e.Lifetime)
 	if e.valid(t, n) {
 		t.Error("a nonce is valid past its lifetime")
+	}
+}
+
+// checkShareFrees holds a cache to forgetting what expired: a key that filled
+// its share is not locked out for good once its ids lapse.
+func checkShareFrees(t *testing.T, e ReplayEnv) {
+	if e.EntriesPerKey <= 0 || e.Advance == nil || e.Now == nil {
+		t.Skip("ReplayEnv.EntriesPerKey, Now and Advance not set")
+	}
+	for range e.EntriesPerKey {
+		e.seen(t, e.entry(jkt))
+	}
+	e.Advance(proofLifetime + tick)
+	if e.seen(t, e.entry(jkt)) {
+		t.Error("a key's share stayed full after every id in it expired")
 	}
 }
