@@ -100,8 +100,3 @@ tasks:
       - node .github/release/release-rules.test.mjs
       - node .github/release/release-notes.test.mjs
       - node .github/release/major-guard.test.mjs
-
-  example:
-    desc: "Run the quickstart walkthrough end to end"
-    cmds:
-      - go run ./example
