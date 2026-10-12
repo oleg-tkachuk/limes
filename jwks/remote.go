@@ -36,7 +36,9 @@ type RemoteConfig struct {
 	// https://issuer.example/.well-known/jwks.json.
 	URL string
 	// Client performs the fetch. Default: a client with a
-	// DefaultFetchTimeout timeout.
+	// DefaultFetchTimeout timeout. A fetch runs apart from the caller that
+	// started it, and is bounded by DefaultFetchTimeout whatever the
+	// client allows.
 	Client *http.Client
 	// RefreshInterval is how long a fetched key set is used before it is
 	// re-fetched, unless the response's Cache-Control says a shorter time
@@ -162,20 +164,24 @@ func (r *Remote) freshness(h http.Header) time.Duration {
 // refresh fetches the document unless a fetch was attempted within
 // MinRefreshInterval. Failures are recorded, not returned: the caller decides
 // from the age of the set it still holds. It returns only ctx's error, when
-// the caller gave up — waiting behind another fetch, or during its own. A
-// fetch the caller abandoned is not the endpoint failing, so it is not
-// recorded: the next caller fetches at once rather than wait out
-// MinRefreshInterval on someone else's cancellation.
+// the caller gave up — waiting behind another fetch, or during its own.
+//
+// The fetch runs apart from the caller, bounded by DefaultFetchTimeout
+// rather than by the caller's context, and is recorded when it ends. A
+// caller that gives up therefore neither makes the endpoint look failed to
+// everyone else nor escapes MinRefreshInterval: it leaves a fetch in
+// flight, which the next caller waits for instead of starting another.
 func (r *Remote) refresh(ctx context.Context) error {
 	select {
 	case r.fetching <- struct{}{}:
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	defer func() { <-r.fetching }()
+	release := func() { <-r.fetching }
 	// select picks at random between two ready cases: a caller already
 	// done may have won the slot.
 	if err := ctx.Err(); err != nil {
+		release()
 		return err
 	}
 
@@ -185,28 +191,42 @@ func (r *Remote) refresh(ctx context.Context) error {
 	etag := r.etag
 	r.mu.RUnlock()
 	if recent {
+		release()
 		return nil
 	}
 
-	keys, newETag, header, notModified, err := r.fetch(ctx, etag)
-	if err != nil && ctx.Err() != nil {
+	done := make(chan struct{})
+	go func() {
+		defer release()
+		defer close(done)
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), DefaultFetchTimeout)
+		defer cancel()
+		keys, newETag, header, notModified, err := r.fetch(fetchCtx, etag)
+		r.record(now, keys, newETag, header, notModified, err)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
 
+// record keeps what a fetch attempted at now found.
+func (r *Remote) record(now time.Time, keys map[string]ed25519.PublicKey, etag string, header http.Header, notModified bool, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.lastAttempt = now
 	r.lastErr = err
 	if err != nil {
-		return nil
+		return
 	}
 	r.fetchedAt = now
 	r.freshFor = r.freshness(header)
 	if !notModified {
 		r.keys = keys
-		r.etag = newETag
+		r.etag = etag
 	}
-	return nil
 }
 
 // JWKS media types (RFC 7517 §8.5), the registered one first: some servers
