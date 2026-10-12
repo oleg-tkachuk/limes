@@ -754,7 +754,7 @@ type ceilingCheck struct {
 
 // checkCeilingsLocked measures c against the copy's ceilings innermost
 // first, then the capability's, each ancestor's and the tenant aggregate's,
-// with whatever is already spent and held. Each ceiling c would cross goes
+// with whatever is already spent and held, when c adds to it. Each ceiling c would cross goes
 // to crossed, which returns the error to stop on or nil to carry on.
 // s.mu must be held.
 func (s *UsageStore[TX]) checkCeilingsLocked(c ceilingCheck, crossed func(error) error) error {
@@ -763,6 +763,12 @@ func (s *UsageStore[TX]) checkCeilingsLocked(c ceilingCheck, crossed func(error)
 	}
 	if err := s.checkRangeLocked(c); err != nil {
 		return err
+	}
+	// A settle at or below its hold adds nothing to what every counter
+	// already holds, so no ceiling can refuse it — not even one crossed
+	// since the hold was made. Only the excess must fit.
+	if c.amount <= c.released {
+		return nil
 	}
 	for _, cp := range c.copies {
 		cc := s.copies[string(cp.RevocationID)]
