@@ -156,3 +156,29 @@ func TestVerifyRefusesDuplicateClaims(t *testing.T) {
 		t.Fatal("claims with iss twice were read")
 	}
 }
+
+// A verifier keeps the trust it was built with: changing the slices and maps
+// of its config afterwards changes nothing it accepts.
+func TestVerifierConfigIsItsOwn(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	cfg := VerifierConfig{
+		TrustedIssuers:   []string{"iss", "other"},
+		KeyIssuers:       map[string]string{"k1": "iss"},
+		AcceptTokenTypes: []TokenType{TokenTypeV4},
+	}
+	v := verifierFor(t, pub, cfg)
+	cfg.TrustedIssuers[0] = "scribbled"
+	cfg.KeyIssuers["k1"] = "other"
+	cfg.AcceptTokenTypes[0] = "scribbled"
+
+	ctx := context.Background()
+	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV4}
+	if _, err := v.Verify(ctx, VerifyRequest{Token: resign(t, priv, hdr, validClaims(uuid.New())), Audience: "data"}); err != nil {
+		t.Errorf("a token the verifier was built to accept: %v", err)
+	}
+	claims := validClaims(uuid.New())
+	claims["iss"] = "other"
+	if _, err := v.Verify(ctx, VerifyRequest{Token: resign(t, priv, hdr, claims), Audience: "data"}); !errors.Is(err, ErrInvalidToken) {
+		t.Errorf("a token the config now binds k1 to: err = %v, want ErrInvalidToken", err)
+	}
+}
