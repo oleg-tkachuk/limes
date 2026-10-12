@@ -41,3 +41,32 @@ on_stable_line() {
     local major="${1#v}"
     [ -n "$1" ] && [ "${major%%.*}" -ge "$STABLE_MAJOR" ]
 }
+
+# The release config, and the rule in it that makes a break a minor before
+# v1.0.0. The change that cuts v1.0.0 removes the rule; the tag follows only
+# once the release has run, so a change built on the commit without the rule
+# is on the stable line already, tag or no tag.
+readonly RELEASE_CONFIG=.github/release/release.config.cjs
+readonly PRE_STABLE_RULE=BREAKING_IS_A_MINOR_BEFORE_1_0
+
+# releases_majors reports whether the release config at <rev> releases a
+# break as a major. A revision with no config says nothing either way.
+releases_majors() {
+    local config
+    config="$(git show "$1:$RELEASE_CONFIG" 2>/dev/null)" || return 1
+    ! grep -qF "$PRE_STABLE_RULE" <<<"$config"
+}
+
+# stable_at reports whether a change built on <rev> must keep the API: a
+# stable release line is tagged at or below it, or its release config
+# already releases breaks as majors.
+stable_at() {
+    on_stable_line "$(release_line "$1")" || releases_majors "$1"
+}
+
+# title_marks_breaking reports whether a pull request title would mark its
+# merge commit breaking: the title becomes the commit's body, where the
+# release's parser reads a BREAKING CHANGE footer.
+title_marks_breaking() {
+    grep -qiE "$FOOTER_MARK" <<<"$1"
+}

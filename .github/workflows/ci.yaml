@@ -7,6 +7,9 @@ on:
   push:
     branches: [main]
   pull_request:
+    # edited: the title becomes the merge commit's body, which the release
+    # reads, so a title changed after green is checked again.
+    types: [opened, synchronize, reopened, edited]
   # A run by hand has no diff to classify, so it runs every check. It never
   # dispatches a release: that job requires a push event.
   workflow_dispatch:
@@ -193,11 +196,13 @@ jobs:
   # no commit marks breaking would ship as a patch or a feature. apidiff
   # compares the pull request's API with its merge base; an incompatible
   # change needs a `!` or a BREAKING CHANGE: footer in one of its commits.
-  # Pull requests only: main is reached through one.
+  # A push to main is checked again from the last release, and the release
+  # waits for it: a push past the pull request rule was checked by nothing
+  # else. See .github/scripts/check-range.sh.
   api:
     name: API compatibility
     needs: [changes]
-    if: github.event_name == 'pull_request' && needs.changes.outputs.relevant == 'true'
+    if: github.event_name != 'workflow_dispatch' && needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
@@ -216,19 +221,30 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      - name: Require a break of the API to be marked breaking
+      - name: Name the commits to check
+        id: range
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: ./.github/scripts/check-range.sh "$EVENT" "$PR_BASE" "$PR_HEAD" "$GITHUB_SHA" >>"$GITHUB_OUTPUT"
+
+      - name: Require a break of the API to be marked breaking
+        if: steps.range.outputs.base != ''
+        env:
+          BASE: ${{ steps.range.outputs.base }}
+          HEAD: ${{ steps.range.outputs.head }}
         run: ./.github/scripts/api-break-check.sh "$BASE" "$HEAD"
 
   # From v1.0.0 on no commit may mark itself breaking: the release would cut
   # a major the Go proxy ignores. Git alone answers it, so it runs on every
   # pull request — a documentation-only one too, whose marker breaks the
-  # release as surely as one beside code. See .github/scripts/marker-check.sh.
+  # release as surely as one beside code — and on every push to main, from
+  # the last release, as the API check does. See
+  # .github/scripts/marker-check.sh.
   markers:
     name: Breaking markers
-    if: github.event_name == 'pull_request'
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
@@ -242,10 +258,20 @@ jobs:
           # that say which release line it builds on.
           fetch-depth: 0
 
-      - name: Refuse a breaking marker on a stable release line
+      - name: Name the commits to check
+        id: range
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: ./.github/scripts/check-range.sh "$EVENT" "$PR_BASE" "$PR_HEAD" "$GITHUB_SHA" >>"$GITHUB_OUTPUT"
+
+      - name: Refuse a breaking marker on a stable release line
+        if: steps.range.outputs.base != ''
+        env:
+          BASE: ${{ steps.range.outputs.base }}
+          HEAD: ${{ steps.range.outputs.head }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: ./.github/scripts/marker-check.sh "$BASE" "$HEAD"
 
   # Two jobs over the same files, and the halves do not overlap. actionlint
@@ -332,7 +358,7 @@ jobs:
 
   dispatch-release:
     name: Dispatch release
-    needs: [changes, verify, floor, syntax, audit]
+    needs: [changes, verify, floor, api, markers, syntax, audit]
     # Not for a documentation-only push: its code is byte-identical to the
     # commit before it. Its commits are not lost — semantic-release counts them
     # in the next release, and a release dispatched by the code commit before
