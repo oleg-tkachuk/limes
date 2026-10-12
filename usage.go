@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"math/big"
+	"strconv"
 	"time"
 	"unicode"
 
@@ -213,9 +216,9 @@ type TenantBudgets interface {
 	// It refuses what ListTenantBudgetsRequest.Validate refuses.
 	//
 	// Rows come most at risk first. Ceilings of 0, which allow nothing,
-	// lead; bounded ceilings follow by spent / max × 100 descending —
-	// unclamped, so of two tenants past their ceilings the further one
-	// leads; unlimited ceilings, with no utilization, trail. Within each,
+	// lead; bounded ceilings follow by spent / max descending, compared
+	// exactly as fractions — unclamped, so of two tenants past their
+	// ceilings the further one leads; unlimited ceilings, with no utilization, trail. Within each,
 	// ties go by tenant id. A page ends with a cursor that fetches
 	// the next one, empty on the last page. Spend moves between pages, so
 	// a tenant may show on two of them, or on none; a cursor is a place in
@@ -577,6 +580,19 @@ type ListTenantBudgetsRequest struct {
 	Cursor string
 }
 
+// ExactPercent is pct as the decimal it is written as — the shortest decimal
+// that reads back as the same float64 — so a threshold of 1.1 means eleven
+// tenths exactly, not the binary fraction a hair above it. A store compares
+// spent / max × 100 against it without rounding. It is nil for NaN or an
+// infinity, which ListTenantBudgetsRequest.Validate refuses.
+func ExactPercent(pct float64) *big.Rat {
+	if math.IsNaN(pct) || math.IsInf(pct, 0) {
+		return nil
+	}
+	r, _ := new(big.Rat).SetString(strconv.FormatFloat(pct, 'g', -1, 64))
+	return r
+}
+
 // maxThresholdPct is the highest utilization a threshold can name.
 const maxThresholdPct = wholePct
 
@@ -590,7 +606,7 @@ func (r ListTenantBudgetsRequest) Validate() error {
 	switch {
 	case r.Limit < 0:
 		return invalidRequest("list tenant budgets: limit %d is negative", r.Limit)
-	case r.ThresholdPct < 0 || r.ThresholdPct > maxThresholdPct:
+	case math.IsNaN(r.ThresholdPct) || r.ThresholdPct < 0 || r.ThresholdPct > maxThresholdPct:
 		return invalidRequest("list tenant budgets: threshold %v%% is outside 0..%d", r.ThresholdPct, maxThresholdPct)
 	case r.ThresholdPct != 0 && r.Filter != TenantBudgetsAtOrPast:
 		return invalidRequest("list tenant budgets: a threshold with filter %s, which takes none", r.Filter)

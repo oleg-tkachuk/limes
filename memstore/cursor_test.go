@@ -11,29 +11,32 @@ import (
 	"github.com/oleg-tkachuk/limes"
 )
 
-// A cursor holds a utilization the store computed: a finite, non-negative
-// decimal. NaN and the infinities order differently, so they are refused
-// rather than read.
-func TestTenantBudgetCursorRefusesNonFinite(t *testing.T) {
+// A tenant budget cursor holds the last row's spend and ceiling exactly, and
+// refuses anything a store could not have written: a class it does not rank
+// by, an amount outside 0..MaxNanos, a bounded row with no ceiling.
+func TestTenantBudgetCursorRoundTripsAndRefusesGarbage(t *testing.T) {
 	tenant := uuid.New()
-	ok := tenantBudgetCursor{class: classBounded, utilization: "42.5", tenantID: tenant}
-	if got, err := decodeTenantBudgetCursor(ok.encode()); err != nil || got != ok {
-		t.Fatalf("round trip = %+v, %v; want %+v", got, err, ok)
-	}
-	for _, pct := range []string{"NaN", "Inf", "-Inf", "+Inf", "infinity", "-1", "1e999", "0x1p3"} {
-		c := tenantBudgetCursor{utilization: pct, tenantID: tenant}.encode()
-		if _, err := decodeTenantBudgetCursor(c); !errors.Is(err, limes.ErrInvalidRequest) {
-			t.Errorf("utilization %q: err = %v, want ErrInvalidRequest", pct, err)
+	for _, ok := range []tenantBudgetCursor{
+		{class: classBounded, spent: 29, max: 100, tenantID: tenant},
+		{class: classBounded, spent: limes.MaxNanos, max: 1, tenantID: tenant},
+		{class: classZero, tenantID: tenant},
+		{class: classUnlimited, tenantID: tenant},
+	} {
+		if got, err := decodeTenantBudgetCursor(ok.encode()); err != nil || got != ok {
+			t.Errorf("round trip of %+v = %+v, %v", ok, got, err)
 		}
 	}
+	enc := func(s string) string { return base64.RawURLEncoding.EncodeToString([]byte(s)) }
+	id := tenant.String()
 	for _, raw := range []string{
-		"!!", base64.RawURLEncoding.EncodeToString([]byte("42.5")),
-		base64.RawURLEncoding.EncodeToString([]byte("1|42.5|not-a-uuid")),
-		// The two-field form a cursor had before it carried a class.
-		base64.RawURLEncoding.EncodeToString([]byte("42.5|" + tenant.String())),
-		base64.RawURLEncoding.EncodeToString([]byte("x|42.5|" + tenant.String())),
-		base64.RawURLEncoding.EncodeToString([]byte("-1|42.5|" + tenant.String())),
-		base64.RawURLEncoding.EncodeToString([]byte("3|42.5|" + tenant.String())),
+		"!!", enc("1|29|100"), enc("1|29|100|not-a-uuid"),
+		// The three-field form a cursor had before it carried the fraction.
+		enc("1|29.0|" + id),
+		enc("x|29|100|" + id), enc("-1|29|100|" + id), enc("3|29|100|" + id),
+		enc("1|-1|100|" + id), enc("1|29|-100|" + id), enc("1|NaN|100|" + id), enc("1|29|1.5|" + id),
+		enc("1|29|0|" + id),  // a bounded row has a ceiling
+		enc("0|0|100|" + id), // a row of another class has none
+		enc("1|1000000000000000001|100|" + id),
 	} {
 		if _, err := decodeTenantBudgetCursor(raw); !errors.Is(err, limes.ErrInvalidRequest) {
 			t.Errorf("cursor %q: err = %v, want ErrInvalidRequest", raw, err)
@@ -84,5 +87,22 @@ func TestAtOrPastIsExact(t *testing.T) {
 		if got := atOrPast(tc.spent, tc.ceiling, tc.pct); got != tc.want {
 			t.Errorf("atOrPast(%s, %s, %v) = %v, want %v", tc.spent, tc.ceiling, tc.pct, got, tc.want)
 		}
+	}
+}
+
+// Utilizations compare exactly: two that a float64 reads as equal still
+// order by their true size, and a non-dyadic threshold is met at its value.
+func TestUtilizationIsExact(t *testing.T) {
+	const third = 333_333_333_333_333_333
+	a := budgetRow{class: classBounded, spent: third + 1, max: 3 * third}
+	b := budgetRow{class: classBounded, spent: 1, max: 3}
+	if float64(a.spent)/float64(a.max) != float64(b.spent)/float64(b.max) {
+		t.Skip("the float64 quotients differ; the case shows nothing")
+	}
+	if compareUtilization(a, b) <= 0 || compareUtilization(b, a) >= 0 {
+		t.Error("a utilization just past a third did not rank above a third")
+	}
+	if !atOrPast(11, 1000, 1.1) || atOrPast(10, 1000, 1.1) {
+		t.Error("11 of 1000 must be at 1.1%, and 10 of 1000 under it")
 	}
 }
