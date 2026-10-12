@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -1300,16 +1301,22 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 	}
 }
 
+// longestTTL is the longest hold a ReserveRequest can ask for: it expires
+// centuries out, past what a count of nanoseconds since 1970 can hold.
+const longestTTL = time.Duration(math.MaxInt64)
+
 // checkReservationsPage holds a store to paging a capability's reservations
-// in their order, and to refusing a negative page size.
+// in their order — the last two expiring past year 2262, where a cursor
+// counting Unix nanoseconds overflows — and to refusing a negative page size.
 func checkReservationsPage[TX any](t *testing.T, f fixture[TX]) {
-	const holds = 3
+	ttls := []time.Duration{time.Minute, longestTTL - time.Minute, longestTTL}
+	holds := len(ttls)
 	var want []uuid.UUID
-	for i := range holds {
+	for _, ttl := range ttls {
 		r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
 			Subject: f.childSubject(),
 			Amount:  one,
-			TTL:     time.Duration(i+1) * time.Minute,
+			TTL:     ttl,
 		})
 		if err != nil {
 			t.Fatal(err)
