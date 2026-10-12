@@ -25,6 +25,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/internal/link"
 )
 
 // Env is one store under test, fresh for each check. Its fields mirror
@@ -497,6 +498,13 @@ func checkListMalformed(t *testing.T, f fixture) {
 	}
 }
 
+// biscuitCopy is the BiscuitCopy a verifier would read for a copy of capID
+// with revocation id id: the suite checks a store against copies no
+// verifier read.
+func biscuitCopy(capID uuid.UUID, id []byte) limes.BiscuitCopy {
+	return link.NewBiscuitCopy(capID, id).(limes.BiscuitCopy)
+}
+
 func checkBiscuit(t *testing.T, f fixture) {
 	store, ok := f.Store.(limes.BiscuitRevocationStore)
 	if !ok {
@@ -506,7 +514,7 @@ func checkBiscuit(t *testing.T, f fixture) {
 	expired := f.insert(t, f.newCapability("agent:biscuit-old", uuid.Nil, f.now.Add(-expiredAgo)))
 	copyID, oldCopyID, otherID := []byte("copy"), []byte("old-copy"), []byte("other")
 	revoke := func(capID uuid.UUID, id []byte) error {
-		return store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{CapabilityID: capID, RevocationID: id, Note: "test", Actor: "storetest"})
+		return store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(capID, id), Note: "test", Actor: "storetest"})
 	}
 	isRevoked := func(ids ...[]byte) bool {
 		t.Helper()
@@ -523,6 +531,9 @@ func checkBiscuit(t *testing.T, f fixture) {
 	if err := revoke(live.ID, nil); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("an empty revocation id: err = %v, want ErrInvalidRequest", err)
 	}
+	if err := store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{}); !errors.Is(err, limes.ErrInvalidRequest) {
+		t.Errorf("a request naming no copy: err = %v, want ErrInvalidRequest", err)
+	}
 	for range 2 { // idempotent
 		if err := revoke(live.ID, copyID); err != nil {
 			t.Fatalf("RevokeBiscuit: %v", err)
@@ -532,7 +543,7 @@ func checkBiscuit(t *testing.T, f fixture) {
 		t.Error("IsBiscuitRevoked must hold for a token carrying a revoked id, and only then")
 	}
 	if err := store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{
-		CapabilityID: live.ID, RevocationID: copyID, Note: "again", Actor: "someone-else",
+		Copy: biscuitCopy(live.ID, copyID), Note: "again", Actor: "someone-else",
 	}); err != nil {
 		t.Fatal(err)
 	}

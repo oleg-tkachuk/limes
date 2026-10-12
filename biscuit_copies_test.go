@@ -225,12 +225,12 @@ func TestBiscuitCopyNamesItsLimits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BiscuitCopy: %v", err)
 	}
-	if len(got.Limits) != 2 ||
-		!bytes.Equal(got.Limits[0].RevocationID, lastRevocationID(t, inner)) || got.Limits[0].Budget != (BudgetCeiling{Max: NanosPerUnit}) ||
-		!bytes.Equal(got.Limits[1].RevocationID, lastRevocationID(t, outer)) || got.Limits[1].Requests != (RequestCeiling{Max: 50}) {
-		t.Fatalf("limits = %+v", got.Limits)
+	if len(got.Limits()) != 2 ||
+		!bytes.Equal(got.Limits()[0].RevocationID, lastRevocationID(t, inner)) || got.Limits()[0].Budget != (BudgetCeiling{Max: NanosPerUnit}) ||
+		!bytes.Equal(got.Limits()[1].RevocationID, lastRevocationID(t, outer)) || got.Limits()[1].Requests != (RequestCeiling{Max: 50}) {
+		t.Fatalf("limits = %+v", got.Limits())
 	}
-	if plain, err := v.BiscuitCopy(context.Background(), root); err != nil || plain.Limits != nil {
+	if plain, err := v.BiscuitCopy(context.Background(), root); err != nil || plain.Limits() != nil {
 		t.Fatalf("root copy: %+v, %v; want no limits", plain, err)
 	}
 }

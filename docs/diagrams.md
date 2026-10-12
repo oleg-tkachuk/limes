@@ -707,7 +707,7 @@ flowchart LR
     chain["IsRevoked(id):<br/>id or any ancestor revoked"]
     cache["<b>CachedRevocationChecker</b><br/>answer cached for TTL (default 2s)<br/>one upstream call per id at a time<br/>bounded: the oldest answer makes room<br/>errors never cached · a Clear mid-lookup<br/>discards that lookup's answer"]
     notify{{"consumer's revocation signal<br/>e.g. a Postgres channel"}}
-    bop(["RevokeBiscuit(RevokeBiscuitRequest{CapabilityID, RevocationID})"])
+    bop(["RevokeBiscuit(RevokeBiscuitRequest{Copy: Verifier.BiscuitCopy(token)})"])
     blist[("<b>BiscuitRevocationStore</b><br/>revoked block ids")]
     bcache["<b>CachedBiscuitRevocationChecker</b><br/>answer per revocation id, cached for TTL<br/>bounded · dropped by Clear"]
     v1["Verifier"]

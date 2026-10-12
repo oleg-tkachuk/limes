@@ -62,7 +62,7 @@ func (m *memStore) IsBiscuitRevoked(_ context.Context, ids [][]byte) (bool, erro
 	return false, nil
 }
 func (m *memStore) RevokeBiscuit(_ context.Context, args RevokeBiscuitRequest) error {
-	m.copies[string(args.RevocationID)] = true
+	m.copies[string(args.Copy.RevocationID())] = true
 	return nil
 }
 func (m *memStore) Purge(context.Context, PurgeRequest) (PurgeResult, error) {

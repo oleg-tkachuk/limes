@@ -100,3 +100,9 @@ func recordedSubject[TX any](ctx context.Context, t testing.TB, u *UsageStore[TX
 	}
 	return newSubject(spec)
 }
+
+// biscuitCopy is the BiscuitCopy a verifier would read for a copy of capID
+// with revocation id id.
+func biscuitCopy(capID uuid.UUID, id []byte) limes.BiscuitCopy {
+	return link.NewBiscuitCopy(capID, id).(limes.BiscuitCopy)
+}

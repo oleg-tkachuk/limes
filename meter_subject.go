@@ -2,7 +2,6 @@ package limes
 
 import (
 	"context"
-	"slices"
 
 	"github.com/google/uuid"
 
@@ -79,13 +78,7 @@ func (s MeterSubject) Budget() BudgetCeiling { return s.maxBudget }
 func (s MeterSubject) UnitCode() string { return s.unitCode }
 
 // Copies are the limits of the Biscuit copy presented, a copy of them.
-func (s MeterSubject) Copies() []CopyCeiling {
-	out := slices.Clone(s.copies)
-	for i := range out {
-		out[i].RevocationID = slices.Clone(out[i].RevocationID)
-	}
-	return out
-}
+func (s MeterSubject) Copies() []CopyCeiling { return cloneCopyCeilings(s.copies) }
 
 func init() {
 	link.NewMeterSubject = func(f link.MeterSubjectFields) any {

@@ -341,12 +341,14 @@ counted. A copy cannot delegate — a server-side child would be an ordinary
 token of the capability, which revoking the copy would not reach and the
 copy's limits would not bound — so `Delegate` refuses any capability read
 from a Biscuit (`VerifiedCapability.FromBiscuit`) with
-`ErrDelegationTooWide`; its holder attenuates it instead.
+`ErrInvalidRequest`; its holder attenuates it instead.
 
 One copy can also be revoked on its own. `verifier.BiscuitCopy(ctx, token)`
 checks the token is genuine — but not its expiry, audience or revocation, so a
-copy can be revoked in any state — and names its capability and the revocation id of its last
-block; listing that id through `BiscuitRevocationStore.RevokeBiscuit` stops
+copy can be revoked in any state — and returns the copy: its capability and
+the revocation id of its last block, which only it pairs, so a caller cannot
+name another tenant's copy under its own capability. Passing it to
+`BiscuitRevocationStore.RevokeBiscuit` (`RevokeBiscuitRequest{Copy: …}`) stops
 that copy and every copy attenuated from it, and leaves the copy it came from,
 its siblings and the capability's JWT working. A verifier that accepts
 Biscuits needs `BiscuitRevocations` — wrap the store in a
