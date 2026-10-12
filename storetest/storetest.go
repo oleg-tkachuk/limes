@@ -477,11 +477,12 @@ func checkListTenants(t *testing.T, f fixture) {
 func checkListMalformed(t *testing.T, f fixture) {
 	base := limes.ListByPrincipalRequest{TenantID: f.Tenant, PrincipalType: limes.PrincipalAgent, Subject: "agent:x"}
 	for name, mutate := range map[string]func(*limes.ListByPrincipalRequest){
-		"no tenant":         func(r *limes.ListByPrincipalRequest) { r.TenantID = uuid.Nil },
-		"no principal type": func(r *limes.ListByPrincipalRequest) { r.PrincipalType = "" },
-		"no subject":        func(r *limes.ListByPrincipalRequest) { r.Subject = "" },
-		"bad cursor":        func(r *limes.ListByPrincipalRequest) { r.Cursor = "not-a-cursor" },
-		"negative limit":    func(r *limes.ListByPrincipalRequest) { r.Limit = -1 },
+		"no tenant":              func(r *limes.ListByPrincipalRequest) { r.TenantID = uuid.Nil },
+		"no principal type":      func(r *limes.ListByPrincipalRequest) { r.PrincipalType = limes.PrincipalUnspecified },
+		"unknown principal type": func(r *limes.ListByPrincipalRequest) { r.PrincipalType = "robot" },
+		"no subject":             func(r *limes.ListByPrincipalRequest) { r.Subject = "" },
+		"bad cursor":             func(r *limes.ListByPrincipalRequest) { r.Cursor = "not-a-cursor" },
+		"negative limit":         func(r *limes.ListByPrincipalRequest) { r.Limit = -1 },
 	} {
 		req := base
 		mutate(&req)

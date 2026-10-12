@@ -287,10 +287,13 @@ const MaxExternalRefBytes = 200
 type OverrunPolicy uint8
 
 const (
+	// OverrunUnspecified takes the default, OverrunReject: a caller that
+	// says nothing never commits past a ceiling.
+	OverrunUnspecified OverrunPolicy = iota
 	// OverrunReject refuses the charge with the ceiling's sentinel and
 	// changes nothing. Use it for a cost not yet incurred: the refusal is
 	// what stops it.
-	OverrunReject OverrunPolicy = iota
+	OverrunReject
 	// OverrunRecord commits the charge past the ceiling and reports it in
 	// ChargeReceipt.Overrun. Use it for a cost already incurred — reported
 	// after the fact, out of the request path — where refusing would only
@@ -598,9 +601,23 @@ var ErrExternalRefConflict error = &familyError{"limes: external ref already nam
 // read as either one.
 func (p OverrunPolicy) Validate() error {
 	if p > OverrunRecord {
-		return fmt.Errorf("%w: unknown overrun policy %d", ErrInvalidRequest, p)
+		return fmt.Errorf("%w: unknown overrun policy %s", ErrInvalidRequest, p)
 	}
 	return nil
+}
+
+// String names the policy for logs and errors.
+func (p OverrunPolicy) String() string {
+	switch p {
+	case OverrunUnspecified:
+		return "unspecified"
+	case OverrunReject:
+		return "reject"
+	case OverrunRecord:
+		return "record"
+	default:
+		return fmt.Sprintf("OverrunPolicy(%d)", uint8(p))
+	}
 }
 
 // ValidateExternalRef reports whether ref is usable as

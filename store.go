@@ -215,8 +215,8 @@ func (r ListByPrincipalRequest) Validate() error {
 	switch {
 	case r.TenantID == uuid.Nil:
 		return invalidRequest("list: tenant id required")
-	case r.PrincipalType == "":
-		return invalidRequest("list: principal type required")
+	case r.PrincipalType.Validate() != nil:
+		return invalidRequest("list: principal type %q is not a principal kind", r.PrincipalType)
 	case r.Subject == "":
 		return invalidRequest("list: subject required")
 	case r.Limit < 0:

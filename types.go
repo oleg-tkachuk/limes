@@ -169,11 +169,13 @@ type Principal struct {
 // PrincipalType discriminates Principal.Type.
 type PrincipalType string
 
-// The principal kinds.
+// The principal kinds. The zero value, PrincipalUnspecified, names none and
+// is refused wherever a kind is required.
 const (
-	PrincipalUser    PrincipalType = "user"    // a person
-	PrincipalAgent   PrincipalType = "agent"   // an AI agent; Principal.Agent says which
-	PrincipalService PrincipalType = "service" // a service account
+	PrincipalUnspecified PrincipalType = ""
+	PrincipalUser        PrincipalType = "user"    // a person
+	PrincipalAgent       PrincipalType = "agent"   // an AI agent; Principal.Agent says which
+	PrincipalService     PrincipalType = "service" // a service account
 )
 
 // AgentPrincipal carries the fields specific to AI-agent principals.
