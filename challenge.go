@@ -126,7 +126,7 @@ func (v *Verifier) ErrorResponse(ctx context.Context, err error, scheme AuthSche
 	dpopConfigured := v.cfg.DPoP != nil
 	challengeDPoP := r.dpop || scheme == AuthSchemeDPoP
 	if challengeDPoP {
-		resp.Challenges = append(resp.Challenges, challenge(AuthSchemeDPoP, v.cfg.Realm, r.code, r.title, true))
+		resp.Challenges = append(resp.Challenges, challenge(AuthSchemeDPoP, v.cfg.Realm, r.code, r.title, dpopConfigured))
 	} else {
 		resp.Challenges = append(resp.Challenges, challenge(AuthSchemeBearer, v.cfg.Realm, r.code, r.title, false))
 		if dpopConfigured {

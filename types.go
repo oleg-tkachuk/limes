@@ -82,6 +82,11 @@ var (
 	// so its rows may be restored, but nothing new is minted for it. The
 	// Store returns it.
 	ErrTenantDeleted = errors.New("limes: tenant deleted")
+	// ErrProofUnsupported is a key-bound capability presented to a verifier
+	// with no DPoP configured: no proof the client sends could be checked.
+	// It is the deployment's fault, not the request's, so it matches no
+	// ErrUnauthenticated sentinel and ErrorResponse invites no retry.
+	ErrProofUnsupported = errors.New("limes: key-bound capability, and this verifier checks no proof")
 )
 
 // familyError is a sentinel with a name of its own that also matches the
