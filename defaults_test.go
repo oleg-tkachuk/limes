@@ -315,3 +315,29 @@ func TestIssuedTimesAreTheTokens(t *testing.T) {
 		}
 	}
 }
+
+// A capability that would expire within the second it is issued is refused,
+// never minted to live on leeway alone.
+func TestIssueRefusesALifetimeUnderASecond(t *testing.T) {
+	issuer, _, store, _ := buildIssuerVerifier(t)
+	at := time.Date(2026, time.October, 12, 9, 30, 0, 400_000_000, time.UTC) // x.4s
+	issuer.clock = func() time.Time { return at }
+	issue := func(ttl time.Duration) error {
+		_, err := issuer.Issue(t.Context(), IssueRequest{
+			IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
+			Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: ttl,
+		})
+		return err
+	}
+	const withinTheSecond, toTheNext = 500 * time.Millisecond, 600 * time.Millisecond
+	before := len(store.caps)
+	if err := issue(withinTheSecond); !errors.Is(err, ErrInvalidRequest) {
+		t.Errorf("a TTL ending within the second: err = %v, want ErrInvalidRequest", err)
+	}
+	if len(store.caps) != before {
+		t.Error("a refused capability was recorded")
+	}
+	if err := issue(toTheNext); err != nil {
+		t.Errorf("a TTL reaching the next second: %v", err)
+	}
+}
