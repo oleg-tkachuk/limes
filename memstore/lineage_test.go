@@ -46,14 +46,14 @@ func TestChildrenCannotSpendPastTheirParentsBudget(t *testing.T) {
 	s := New[struct{}]()
 	u := NewUsage(s)
 	rootID, kids, tenant := tree(t, s,
-		limes.Caveats{Ops: []limes.Op{limes.OpGet}, MaxBudgetAmount: limes.MustParseAmount("25"), UnitCode: "USD"},
+		limes.Caveats{Ops: []limes.Op{limes.OpGet}, Budget: limes.BudgetCeiling{Max: limes.MustParseAmount("25")}, UnitCode: "USD"},
 		2,
-		limes.Caveats{Ops: []limes.Op{limes.OpGet}, MaxBudgetAmount: limes.MustParseAmount("20"), UnitCode: "USD"},
+		limes.Caveats{Ops: []limes.Op{limes.OpGet}, Budget: limes.BudgetCeiling{Max: limes.MustParseAmount("20")}, UnitCode: "USD"},
 	)
 
 	charge := func(id uuid.UUID, amount limes.Nanos) (limes.ChargeReceipt, error) {
 		return u.Charge(ctx, limes.ChargeRequest{
-			Subject: newSubject(subjectSpec{capID: id, tenant: tenant, maxBudget: limes.MustParseAmount("20"), unit: "USD"}),
+			Subject: newSubject(subjectSpec{capID: id, tenant: tenant, budget: budgetOf(limes.MustParseAmount("20")), unit: "USD"}),
 			Amount:  amount,
 		}, nil)
 	}
@@ -94,12 +94,12 @@ func TestChildrenCannotExceedTheirParentsRequestCount(t *testing.T) {
 	s := New[struct{}]()
 	u := NewUsage(s)
 	rootID, kids, tenant := tree(t, s,
-		limes.Caveats{Ops: []limes.Op{limes.OpGet}, MaxRequests: 3},
+		limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Max: 3}},
 		2,
-		limes.Caveats{Ops: []limes.Op{limes.OpGet}, MaxRequests: 3},
+		limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Max: 3}},
 	)
 	bump := func(id uuid.UUID) error {
-		_, err := u.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant, maxRequests: 3})})
+		_, err := u.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant, requests: requestsOf(3)})})
 		return err
 	}
 	for i, id := range []uuid.UUID{kids[0], kids[0], kids[1]} {

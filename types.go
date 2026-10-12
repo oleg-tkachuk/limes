@@ -285,11 +285,12 @@ type Capability struct {
 type CopyCeiling struct {
 	// RevocationID is the block's revocation id.
 	RevocationID []byte
-	// MaxRequests bounds the requests made with the copy; 0 = no limit here.
-	MaxRequests int64
-	// MaxBudgetAmount bounds the copy's spend, in the capability's unit; 0 = no
-	// limit here.
-	MaxBudgetAmount Nanos
+	// Requests bounds the requests made with the copy; Unlimited when the
+	// block set no request limit of its own.
+	Requests RequestCeiling
+	// Budget bounds the copy's spend, in the capability's unit; Unlimited
+	// when the block set no budget of its own.
+	Budget BudgetCeiling
 }
 
 // Caveats is a typed bag of restrictions. Empty values are interpreted
@@ -321,15 +322,17 @@ type Caveats struct {
 	// child needs.
 	ResourceURIs []string
 
-	// MaxRequests caps the total number of times the capability may
-	// be used. 0 = unlimited within the TTL.
-	MaxRequests int64
+	// Requests caps the total number of times the capability may be
+	// used within its TTL; the zero value allows none, and
+	// RequestCeiling{Unlimited: true} lifts the cap.
+	Requests RequestCeiling
 
-	// MaxBudgetAmount is the cost budget the capability authorises, in
-	// the currency identified by UnitCode, exact to the nano. The Meter
-	// counts spend against it; once exhausted, a charge returns
+	// Budget is the cost budget the capability authorises, in the
+	// currency identified by UnitCode, exact to the nano; the zero value
+	// allows no spend, and BudgetCeiling{Unlimited: true} lifts it. The
+	// Meter counts spend against it; once exhausted, a charge returns
 	// ErrBudgetExceeded.
-	MaxBudgetAmount Nanos
+	Budget BudgetCeiling
 
 	// UnitCode pins the currency or unit: an ISO 4217 code (IsUnitCode),
 	// XXX ("no currency") for a budget that is not money. Empty value is

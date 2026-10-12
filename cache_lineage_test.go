@@ -25,7 +25,7 @@ func TestRevocationCacheDropReachesADescendant(t *testing.T) {
 		TTL:     time.Minute,
 		Caveats: limes.Caveats{
 			Ops: []limes.Op{limes.OpGet}, ResourcePrefixes: []string{"corpus/public/"},
-			MaxRequests: 1, MaxBudgetAmount: limes.MustParseAmount("1.00"), UnitCode: "USD",
+			Requests: limes.RequestCeiling{Max: 1}, Budget: limes.BudgetCeiling{Max: limes.MustParseAmount("1.00")}, UnitCode: "USD",
 		},
 	})
 	if err != nil {

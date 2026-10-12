@@ -31,16 +31,20 @@ type wireCaveats struct {
 	ResourcePrefixes       []string `json:"resource_prefixes,omitempty"`
 	ResourceURIs           []string `json:"resource_uris,omitempty"`
 	MaxRequests            int64    `json:"max_requests,omitzero"`
-	MaxBudgetAmount        Nanos    `json:"max_budget,omitzero"`
+	UnlimitedRequests      bool     `json:"unlimited_requests,omitzero"`
+	MaxBudget              Nanos    `json:"max_budget,omitzero"`
+	UnlimitedBudget        bool     `json:"unlimited_budget,omitzero"`
 	UnitCode               string   `json:"unit_code,omitempty"`
 	AllowTaintedRead       bool     `json:"allow_tainted_read,omitzero"`
 	IdempotencyKeyRequired bool     `json:"idempotency_key_required,omitzero"`
 	SourceIPCIDR           []string `json:"source_ip_cidr,omitempty"`
 }
 
-// wireAgent and wireCaveats have exactly the fields of AgentPrincipal and
-// Caveats, so each converts to the other: a field added to one and not the
-// other stops the build.
+// wireAgent has exactly the fields of AgentPrincipal, so each converts to the
+// other: a field added to one and not the other stops the build. wireCaveats
+// spells each ceiling as two members — an absent max_requests is a ceiling
+// of 0, and only unlimited_requests lifts it — so it is converted field by
+// field, and a test holds the two to the same fields.
 
 func toWirePrincipal(p Principal) wirePrincipal {
 	w := wirePrincipal{Type: p.Type, TenantID: p.TenantID, Subject: p.Subject}
@@ -60,6 +64,22 @@ func (w wirePrincipal) principal() Principal {
 	return p
 }
 
-func toWireCaveats(c Caveats) wireCaveats { return wireCaveats(c) }
+func toWireCaveats(c Caveats) wireCaveats {
+	return wireCaveats{
+		Ops: c.Ops, ResourcePrefixes: c.ResourcePrefixes, ResourceURIs: c.ResourceURIs,
+		MaxRequests: c.Requests.Max, UnlimitedRequests: c.Requests.Unlimited,
+		MaxBudget: c.Budget.Max, UnlimitedBudget: c.Budget.Unlimited,
+		UnitCode: c.UnitCode, AllowTaintedRead: c.AllowTaintedRead,
+		IdempotencyKeyRequired: c.IdempotencyKeyRequired, SourceIPCIDR: c.SourceIPCIDR,
+	}
+}
 
-func (w wireCaveats) caveats() Caveats { return Caveats(w) }
+func (w wireCaveats) caveats() Caveats {
+	return Caveats{
+		Ops: w.Ops, ResourcePrefixes: w.ResourcePrefixes, ResourceURIs: w.ResourceURIs,
+		Requests: RequestCeiling{Max: w.MaxRequests, Unlimited: w.UnlimitedRequests},
+		Budget:   BudgetCeiling{Max: w.MaxBudget, Unlimited: w.UnlimitedBudget},
+		UnitCode: w.UnitCode, AllowTaintedRead: w.AllowTaintedRead,
+		IdempotencyKeyRequired: w.IdempotencyKeyRequired, SourceIPCIDR: w.SourceIPCIDR,
+	}
+}

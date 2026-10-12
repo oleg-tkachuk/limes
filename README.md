@@ -146,13 +146,13 @@ pre-1.0, so a breaking change is a minor too — **the Go API may change between
 minor versions**; read the release notes, which list breaking changes first,
 before bumping.
 
-The token wire format — claims, `typ: limes-cap-v3+jwt`, the Biscuit facts —
+The token wire format — claims, `typ: limes-cap-v4+jwt`, the Biscuit facts —
 is a separate promise: a token is a credential that outlives the process that
 issued it, so the format changes only as a deliberate breaking change that
 moves the version in `typ`, with the golden fixtures regenerated in the same
 commit. A verifier refuses a token of a version it does not accept
 (`VerifierConfig.AcceptTokenTypes`) outright, rather than read its claims
-under the wrong schema. Every 1.x verifier accepts `limes-cap-v3+jwt`, so a
+under the wrong schema. Every 1.x verifier accepts `limes-cap-v4+jwt`, so a
 later version ships in a minor release: verifiers accept it first, issuers
 mint it after. Tokens are signed with Ed25519 throughout 1.x; another
 algorithm would be another token version, never a runtime choice.

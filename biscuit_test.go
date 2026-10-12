@@ -39,6 +39,7 @@ func biscuitFixture(t *testing.T) (*Issuer, *StandardVerifier, *memStore, Capabi
 		Caveats: Caveats{
 			Ops:              []Op{OpGet, OpList, OpPut},
 			ResourcePrefixes: []string{"corpus/"},
+			Requests:         RequestCeiling{Unlimited: true}, Budget: BudgetCeiling{Unlimited: true},
 		},
 		TTL: time.Hour,
 	})

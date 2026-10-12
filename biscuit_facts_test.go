@@ -21,7 +21,7 @@ func TestReadBlockFacts(t *testing.T) {
 		"plane not a string":    {facts: []decodedFact{fact(biscuitFactPlane, int64(1))}},
 		"expiry not a date":     {facts: []decodedFact{fact(biscuitFactExpires, "tomorrow")}},
 		"bind not a thumbprint": {facts: []decodedFact{fact(biscuitFactBind, "key")}},
-		"limit not positive":    {facts: []decodedFact{fact(biscuitFactMaxRequests, int64(0))}},
+		"limit negative":        {facts: []decodedFact{fact(biscuitFactMaxRequests, int64(-1))}},
 		"budget not an integer": {facts: []decodedFact{fact(biscuitFactMaxBudget, "1")}},
 		"unknown fact":          {facts: []decodedFact{fact("limes_admin", "yes")}},
 	}
@@ -44,7 +44,7 @@ func TestReadBlockFacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !f.expires.Equal(early) || len(f.ops) != 2 || f.ceiling.MaxRequests != 3 || f.bind != jkt {
+	if !f.expires.Equal(early) || len(f.ops) != 2 || f.requests == nil || *f.requests != (RequestCeiling{Max: 3}) || f.bind != jkt {
 		t.Errorf("facts = %+v; want the earliest expiry, both ops, the last limit and the restated binding", f)
 	}
 }
@@ -53,8 +53,8 @@ func TestReadBlockFacts(t *testing.T) {
 // longer part of the vocabulary.
 func TestReadBlockFactsBudgetIsNanos(t *testing.T) {
 	f, err := readBlockFacts(decodedBlock{facts: []decodedFact{{name: biscuitFactMaxBudget, term: int64(1_500)}}}, "")
-	if err != nil || f.ceiling.MaxBudgetAmount != 1_500 {
-		t.Errorf("budget = %s, %v; want 1500 nanos", f.ceiling.MaxBudgetAmount, err)
+	if err != nil || f.budget == nil || *f.budget != (BudgetCeiling{Max: 1_500}) {
+		t.Errorf("budget = %v, %v; want 1500 nanos", f.budget, err)
 	}
 	if _, err := readBlockFacts(decodedBlock{facts: []decodedFact{{name: "limes_max_budget_micros", term: int64(1_500)}}}, ""); err == nil {
 		t.Error("the micros budget fact was read")

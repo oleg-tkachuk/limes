@@ -72,8 +72,8 @@ func main() {
 		Caveats: limes.Caveats{
 			Ops:              []limes.Op{limes.OpGet, limes.OpShare},
 			ResourcePrefixes: []string{"corpus/public/"},
-			MaxRequests:      500,
-			MaxBudgetAmount:  limes.MustParseAmount("25.00"),
+			Requests:         limes.RequestCeiling{Max: 500},
+			Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("25.00")},
 			UnitCode:         "USD",
 		},
 	})
@@ -108,8 +108,8 @@ func main() {
 		Caveats: limes.Caveats{
 			Ops:              []limes.Op{limes.OpGet},         // dropped OpShare
 			ResourcePrefixes: []string{"corpus/public/2026/"}, // narrowed
-			MaxRequests:      50,
-			MaxBudgetAmount:  limes.MustParseAmount("2.00"), // 25.00 → 2.00
+			Requests:         limes.RequestCeiling{Max: 50},
+			Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("2.00")}, // 25.00 → 2.00
 			UnitCode:         "USD",
 		},
 	})
@@ -126,9 +126,9 @@ func main() {
 		Audience: []string{"my-service"},
 		TTL:      time.Minute,
 		Caveats: limes.Caveats{
-			Ops:             []limes.Op{limes.OpGet},
-			MaxBudgetAmount: limes.MustParseAmount("999"), // wider than the parent's 25.00
-			UnitCode:        "USD",
+			Ops:      []limes.Op{limes.OpGet},
+			Budget:   limes.BudgetCeiling{Max: limes.MustParseAmount("999")}, // wider than the parent's 25.00
+			UnitCode: "USD",
 		},
 	})
 	if !errors.Is(err, limes.ErrDelegationTooWide) {

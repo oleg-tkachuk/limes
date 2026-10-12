@@ -13,9 +13,9 @@ var DecodeToken func(token string) (any, error)
 // MeterSubjectFields are the parts of a limes.MeterSubject.
 type MeterSubjectFields struct {
 	CapabilityID, TenantID uuid.UUID
-	MaxRequests            int64
-	MaxBudgetAmount        int64
-	UnitCode               string
+	// Requests is a limes.RequestCeiling, Budget a limes.BudgetCeiling.
+	Requests, Budget any
+	UnitCode         string
 	// Copies is a []limes.CopyCeiling.
 	Copies any
 }

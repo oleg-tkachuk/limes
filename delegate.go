@@ -81,13 +81,10 @@ func narrowsCaveats(parent, child Caveats) error {
 		return err
 	}
 
-	// MaxRequests: 0 = unlimited. Child 0 with parent>0 is invalid
-	// (child would have unlimited where parent is bounded).
-	if parent.MaxRequests > 0 {
-		if child.MaxRequests == 0 || child.MaxRequests > parent.MaxRequests {
-			return fmt.Errorf("%w: child requests %d would exceed parent %d",
-				ErrDelegationTooWide, child.MaxRequests, parent.MaxRequests)
-		}
+	// Requests: a child's ceiling may not lift or raise its parent's.
+	if !child.Requests.Within(parent.Requests) {
+		return fmt.Errorf("%w: child requests %s would exceed parent %s",
+			ErrDelegationTooWide, child.Requests, parent.Requests)
 	}
 
 	// Unit code: child must declare the same unit as the parent.
@@ -104,11 +101,9 @@ func narrowsCaveats(parent, child Caveats) error {
 
 	// Budget: same rule. Compared in the shared unit_code (validated
 	// just above) so we don't need an FX rate.
-	if parent.MaxBudgetAmount > 0 {
-		if child.MaxBudgetAmount <= 0 || child.MaxBudgetAmount > parent.MaxBudgetAmount {
-			return fmt.Errorf("%w: child budget %s exceeds parent %s",
-				ErrDelegationTooWide, child.MaxBudgetAmount, parent.MaxBudgetAmount)
-		}
+	if !child.Budget.Within(parent.Budget) {
+		return fmt.Errorf("%w: child budget %s exceeds parent %s",
+			ErrDelegationTooWide, child.Budget, parent.Budget)
 	}
 
 	// AllowTaintedRead: child cannot grant a privilege the parent lacks.

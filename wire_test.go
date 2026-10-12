@@ -12,7 +12,6 @@ func TestWireStructsMirrorTheExportedTypes(t *testing.T) {
 	pairs := []struct{ exported, wire reflect.Type }{
 		{reflect.TypeFor[Principal](), reflect.TypeFor[wirePrincipal]()},
 		{reflect.TypeFor[AgentPrincipal](), reflect.TypeFor[wireAgent]()},
-		{reflect.TypeFor[Caveats](), reflect.TypeFor[wireCaveats]()},
 	}
 	for _, p := range pairs {
 		if p.exported.NumField() != p.wire.NumField() {
@@ -20,18 +19,40 @@ func TestWireStructsMirrorTheExportedTypes(t *testing.T) {
 		}
 		for i := range p.exported.NumField() {
 			f := p.exported.Field(i)
-			if tag, ok := f.Tag.Lookup("json"); ok {
-				t.Errorf("%s.%s carries json tag %q; the wire format lives in %s", p.exported.Name(), f.Name, tag, p.wire.Name())
-			}
 			if _, ok := p.wire.FieldByName(f.Name); !ok {
 				t.Errorf("%s.%s has no counterpart in %s", p.exported.Name(), f.Name, p.wire.Name())
 			}
 		}
 	}
-	capability := reflect.TypeFor[Capability]()
-	for i := range capability.NumField() {
-		if tag, ok := capability.Field(i).Tag.Lookup("json"); ok {
-			t.Errorf("Capability.%s carries json tag %q", capability.Field(i).Name, tag)
+	// A ceiling is two members on the wire: its bound and whether it is
+	// lifted. Every other field of Caveats has one of the same name.
+	ceilings := map[string][]string{
+		"Requests": {"MaxRequests", "UnlimitedRequests"},
+		"Budget":   {"MaxBudget", "UnlimitedBudget"},
+	}
+	caveats, wire := reflect.TypeFor[Caveats](), reflect.TypeFor[wireCaveats]()
+	want := 0
+	for i := range caveats.NumField() {
+		f := caveats.Field(i)
+		names, isCeiling := ceilings[f.Name]
+		if !isCeiling {
+			names = []string{f.Name}
+		}
+		for _, n := range names {
+			want++
+			if _, ok := wire.FieldByName(n); !ok {
+				t.Errorf("Caveats.%s has no %s in wireCaveats", f.Name, n)
+			}
+		}
+	}
+	if wire.NumField() != want {
+		t.Errorf("wireCaveats has %d fields, want %d", wire.NumField(), want)
+	}
+	for _, typ := range []reflect.Type{reflect.TypeFor[Principal](), reflect.TypeFor[AgentPrincipal](), caveats, reflect.TypeFor[Capability]()} {
+		for i := range typ.NumField() {
+			if tag, ok := typ.Field(i).Tag.Lookup("json"); ok {
+				t.Errorf("%s.%s carries json tag %q; the wire format lives in wire.go", typ.Name(), typ.Field(i).Name, tag)
+			}
 		}
 	}
 }
@@ -46,7 +67,7 @@ func TestWireStructsRoundTrip(t *testing.T) {
 	}
 	c := Caveats{
 		Ops: []Op{OpGet}, ResourcePrefixes: []string{"a/"}, ResourceURIs: []string{"a/b"},
-		MaxRequests: 1, MaxBudgetAmount: NanosPerUnit, UnitCode: DefaultUnitCode,
+		Requests: RequestCeiling{Max: 1}, Budget: BudgetCeiling{Max: NanosPerUnit}, UnitCode: DefaultUnitCode,
 		AllowTaintedRead: true, IdempotencyKeyRequired: true, SourceIPCIDR: []string{"10.0.0.0/8"},
 	}
 	if got := toWireCaveats(c).caveats(); !reflect.DeepEqual(got, c) {

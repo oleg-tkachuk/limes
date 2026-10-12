@@ -67,11 +67,11 @@ func TestGoldenTokenStillVerifies(t *testing.T) {
 	if len(cap.Capability().Caveats.Ops) != 1 || cap.Capability().Caveats.Ops[0] != OpGet {
 		t.Errorf("Ops = %v, want [%v]", cap.Capability().Caveats.Ops, OpGet)
 	}
-	if cap.Capability().Caveats.MaxRequests != 10 {
-		t.Errorf("MaxRequests = %d, want 10", cap.Capability().Caveats.MaxRequests)
+	if cap.Capability().Caveats.Requests != (RequestCeiling{Max: 10}) {
+		t.Errorf("Requests = %v, want 10", cap.Capability().Caveats.Requests)
 	}
-	if cap.Capability().Caveats.MaxBudgetAmount != 3*NanosPerUnit/2 { // 1.5, as the fixture was issued
-		t.Errorf("MaxBudgetAmount = %v, want 1.5", cap.Capability().Caveats.MaxBudgetAmount)
+	if cap.Capability().Caveats.Budget != (BudgetCeiling{Max: 3 * NanosPerUnit / 2}) { // 1.5, as the fixture was issued
+		t.Errorf("MaxBudgetAmount = %v, want 1.5", cap.Capability().Caveats.Budget)
 	}
 	// The unit code is what cross-currency delegation rejection keys on.
 	if cap.Capability().Caveats.UnitCode != "USD" {

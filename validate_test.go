@@ -22,9 +22,9 @@ func TestCaveatsValidate(t *testing.T) {
 		"op with space":        {Ops: []Op{"tool:do it"}},
 		"empty prefix":         {Ops: []Op{OpGet}, ResourcePrefixes: []string{""}},
 		"empty uri":            {Ops: []Op{OpGet}, ResourceURIs: []string{""}},
-		"neg requests":         {Ops: []Op{OpGet}, MaxRequests: -1},
-		"neg budget":           {Ops: []Op{OpGet}, MaxBudgetAmount: -5},
-		"budget past MaxNanos": {Ops: []Op{OpGet}, MaxBudgetAmount: MaxNanos + 1},
+		"neg requests":         {Ops: []Op{OpGet}, Requests: RequestCeiling{Max: -1}},
+		"neg budget":           {Ops: []Op{OpGet}, Budget: BudgetCeiling{Max: -5}},
+		"budget past MaxNanos": {Ops: []Op{OpGet}, Budget: BudgetCeiling{Max: MaxNanos + 1}},
 		"bad unit":             {Ops: []Op{OpGet}, UnitCode: "XYZ"},
 		"bad cidr":             {Ops: []Op{OpGet}, SourceIPCIDR: []string{"10.0.0.0/33"}},
 		"IPv4-mapped cidr":     {Ops: []Op{OpGet}, SourceIPCIDR: []string{"::ffff:10.0.0.0/104"}},
@@ -58,7 +58,7 @@ func TestIssueRejectsMalformedRequests(t *testing.T) {
 		"negative ttl":       func(r *IssueRequest) { r.TTL = -time.Second },
 		"nbf after expiry":   func(r *IssueRequest) { r.NotBefore = time.Now().Add(time.Hour) },
 		"empty audience":     func(r *IssueRequest) { r.Audience = []string{""} },
-		"negative budget":    func(r *IssueRequest) { r.Caveats.MaxBudgetAmount = -1 },
+		"negative budget":    func(r *IssueRequest) { r.Caveats.Budget = BudgetCeiling{Max: -1} },
 		"negative gen":       func(r *IssueRequest) { r.Generation = -1 },
 		"missing issued-by":  func(r *IssueRequest) { r.IssuedBy = Principal{} },
 		"empty prefix entry": func(r *IssueRequest) { r.Caveats.ResourcePrefixes = []string{""} },
@@ -92,11 +92,11 @@ func issueRoot(t *testing.T, issuer *Issuer, caveats Caveats) Capability {
 func TestDelegateInheritanceIsExplicit(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
-	parent := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet}, MaxBudgetAmount: MustParseAmount("25"), UnitCode: "USD"})
+	parent := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet}, Budget: BudgetCeiling{Max: MustParseAmount("25")}, UnitCode: "USD"})
 
 	if _, _, err := issuer.Delegate(ctx, DelegateRequest{
 		Subject: Principal{Type: PrincipalAgent, Subject: "child"},
-		Parent:  asVerified(parent), Caveats: Caveats{MaxBudgetAmount: MustParseAmount("2")},
+		Parent:  asVerified(parent), Caveats: Caveats{Budget: BudgetCeiling{Max: MustParseAmount("2")}},
 	}); !errors.Is(err, ErrInvalidCaveats) {
 		t.Fatalf("delegate with ops omitted = %v, want ErrInvalidCaveats", err)
 	}
@@ -105,8 +105,8 @@ func TestDelegateInheritanceIsExplicit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("delegate with InheritCaveats: %v", err)
 	}
-	if child.Caveats.MaxBudgetAmount != 25*NanosPerUnit {
-		t.Errorf("inherited budget = %v, want 25", child.Caveats.MaxBudgetAmount)
+	if child.Caveats.Budget != (BudgetCeiling{Max: 25 * NanosPerUnit}) {
+		t.Errorf("inherited budget = %v, want 25", child.Caveats.Budget)
 	}
 }
 

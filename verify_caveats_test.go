@@ -19,7 +19,7 @@ import (
 // key holder could mint by hand, which the verifier must judge for itself.
 func signUnchecked(t *testing.T, s *Signer, c Capability) string {
 	t.Helper()
-	header, err := json.Marshal(jwtHeader{Alg: jose.AlgEd25519, Kid: s.keyID, Typ: TokenTypeV3})
+	header, err := json.Marshal(jwtHeader{Alg: jose.AlgEd25519, Kid: s.keyID, Typ: TokenTypeV4})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,8 +53,8 @@ func TestCaveatsOutsideTheRulesAreNeitherSignedNorAccepted(t *testing.T) {
 	issuer, v, _, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
 	spoil := map[string]func(*Caveats){
-		"a negative request limit":    func(c *Caveats) { c.MaxRequests = -7 },
-		"a negative budget":           func(c *Caveats) { c.MaxBudgetAmount = -NanosPerUnit },
+		"a negative request limit":    func(c *Caveats) { c.Requests = RequestCeiling{Max: -7} },
+		"a negative budget":           func(c *Caveats) { c.Budget = BudgetCeiling{Max: -NanosPerUnit} },
 		"an operation nobody defined": func(c *Caveats) { c.Ops = []Op{"not an op"} },
 		"an empty resource prefix":    func(c *Caveats) { c.ResourcePrefixes = []string{""} },
 		"a malformed network":         func(c *Caveats) { c.SourceIPCIDR = []string{"10.0.0.0/33"} },

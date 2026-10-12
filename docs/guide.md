@@ -50,7 +50,7 @@ has. Every rejection is a distinct sentinel; map each to whatever status your
 transport uses, or let `ErrorResponse` answer it the HTTP way (below).
 
 The token must carry a `typ` the verifier accepts (`AcceptTokenTypes`, by
-default `limes-cap-v3+jwt`), a tenant and a principal of a
+default `limes-cap-v4+jwt`), a tenant and a principal of a
 known kind (`PrincipalUser`, `PrincipalAgent` or `PrincipalService`; agent
 details only on an agent — `Principal.Validate`, which `Issue` and `Delegate`
 run too), its claims must

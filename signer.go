@@ -182,7 +182,7 @@ func (s *Signer) Sign(ctx context.Context, c Capability) (string, error) {
 		return "", errors.New("limes: ExpiresAt must be after IssuedAt")
 	}
 
-	header := jwtHeader{Alg: jose.AlgEd25519, Kid: s.keyID, Typ: TokenTypeV3}
+	header := jwtHeader{Alg: jose.AlgEd25519, Kid: s.keyID, Typ: TokenTypeV4}
 	claims := claimsOf(c)
 	// Nothing is signed that the verifier would refuse to read.
 	if err := checkIJSONIntegers(claims); err != nil {
@@ -220,17 +220,21 @@ func (s *Signer) Sign(ctx context.Context, c Capability) (string, error) {
 	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig), nil
 }
 
-// TokenTypeV3 is the JWT "typ" header of the current token format, which
+// TokenTypeV4 is the JWT "typ" header of the current token format, which
 // every Signer of this module mints. The verifier requires a type it
 // accepts (VerifierConfig.AcceptTokenTypes), so a different kind of EdDSA
 // JWT signed by the same key — an ID token, another product's token —
 // cannot be presented as a capability. It names the format's version: a
 // token of another version is refused before a claim of it is read under
 // the wrong schema.
-const TokenTypeV3 = "limes-cap-v3+jwt" //nolint:gosec // G101: a JWT type label, not a credential
+//
+// v4 spells every ceiling out: an absent max_requests or max_budget is a
+// ceiling of 0, and only unlimited_requests or unlimited_budget lifts it.
+// v3, which read an absent bound as none, is not accepted.
+const TokenTypeV4 = "limes-cap-v4+jwt" //nolint:gosec // G101: a JWT type label, not a credential
 
 // tokenTypes are the token types this package has a schema for.
-var tokenTypes = []string{TokenTypeV3}
+var tokenTypes = []string{TokenTypeV4}
 
 func parseHeader(seg string) (jwtHeader, error) {
 	raw, err := base64.RawURLEncoding.DecodeString(seg)

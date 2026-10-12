@@ -54,8 +54,8 @@ func TestSign_RoundTrip(t *testing.T) {
 		Caveats: Caveats{
 			Ops:              []Op{OpGet, OpList, OpSearch},
 			ResourcePrefixes: []string{"object://acme/run-42/"},
-			MaxBudgetAmount:  NanosPerUnit / 2,
-			MaxRequests:      100,
+			Budget:           BudgetCeiling{Max: NanosPerUnit / 2},
+			Requests:         RequestCeiling{Max: 100},
 		},
 	}
 
@@ -83,8 +83,8 @@ func TestSign_RoundTrip(t *testing.T) {
 	if got.Subject.Agent == nil || got.Subject.Agent.AgentType != "research-orchestrator" {
 		t.Errorf("AgentPrincipal round-trip lost")
 	}
-	if got.Caveats.MaxBudgetAmount != NanosPerUnit/2 {
-		t.Errorf("MaxBudgetAmount: got %v, want 0.50", got.Caveats.MaxBudgetAmount)
+	if got.Caveats.Budget != (BudgetCeiling{Max: NanosPerUnit / 2}) {
+		t.Errorf("MaxBudgetAmount: got %v, want 0.50", got.Caveats.Budget)
 	}
 	if got.Generation != 1 {
 		t.Errorf("Generation: got %d, want 1", got.Generation)
@@ -186,8 +186,8 @@ func TestNarrows_RejectsWidening(t *testing.T) {
 		Caveats: Caveats{
 			Ops:              []Op{OpGet, OpList},
 			ResourcePrefixes: []string{"object://acme/"},
-			MaxBudgetAmount:  MustParseAmount("1.00"),
-			MaxRequests:      50,
+			Budget:           BudgetCeiling{Max: MustParseAmount("1.00")},
+			Requests:         RequestCeiling{Max: 50},
 		},
 		IssuedAt:  now,
 		ExpiresAt: now.Add(15 * time.Minute),
@@ -204,7 +204,7 @@ func TestNarrows_RejectsWidening(t *testing.T) {
 			c.ExpiresAt = now.Add(time.Hour)
 		},
 		"wider budget": func(c *Capability) {
-			c.Caveats.MaxBudgetAmount = 10 * NanosPerUnit
+			c.Caveats.Budget = BudgetCeiling{Max: 10 * NanosPerUnit}
 		},
 		"unrestricted prefix": func(c *Capability) {
 			c.Caveats.ResourcePrefixes = nil
@@ -216,7 +216,10 @@ func TestNarrows_RejectsWidening(t *testing.T) {
 			c.Caveats.AllowTaintedRead = true
 		},
 		"unlimited requests": func(c *Capability) {
-			c.Caveats.MaxRequests = 0
+			c.Caveats.Requests = RequestCeiling{Unlimited: true}
+		},
+		"unlimited budget": func(c *Capability) {
+			c.Caveats.Budget = BudgetCeiling{Unlimited: true}
 		},
 		"cross tenant": func(c *Capability) {
 			c.Subject.TenantID = uuid.New()
@@ -254,9 +257,9 @@ func TestNarrows_RejectsCrossCurrency(t *testing.T) {
 		Subject:  Principal{TenantID: tenantID, Type: PrincipalAgent},
 		Audience: []string{audienceData},
 		Caveats: Caveats{
-			Ops:             []Op{OpGet},
-			MaxBudgetAmount: MustParseAmount("10.0"),
-			UnitCode:        "USD",
+			Ops:      []Op{OpGet},
+			Budget:   BudgetCeiling{Max: MustParseAmount("10.0")},
+			UnitCode: "USD",
 		},
 		IssuedAt:  now,
 		ExpiresAt: now.Add(15 * time.Minute),
@@ -265,9 +268,9 @@ func TestNarrows_RejectsCrossCurrency(t *testing.T) {
 	child.ID = uuid.New()
 	child.ParentID = parent.ID
 	child.Caveats = Caveats{
-		Ops:             []Op{OpGet},
-		MaxBudgetAmount: MustParseAmount("5.0"),
-		UnitCode:        "EUR", // ← mismatch
+		Ops:      []Op{OpGet},
+		Budget:   BudgetCeiling{Max: MustParseAmount("5.0")},
+		UnitCode: "EUR", // ← mismatch
 	}
 	err := Narrows(parent, child)
 	if !errors.Is(err, ErrUnitCodeMismatch) {
@@ -290,8 +293,8 @@ func TestNarrows_AcceptsValidNarrowing(t *testing.T) {
 		Caveats: Caveats{
 			Ops:              []Op{OpGet, OpList, OpSearch},
 			ResourcePrefixes: []string{"object://acme/"},
-			MaxBudgetAmount:  MustParseAmount("1.00"),
-			MaxRequests:      100,
+			Budget:           BudgetCeiling{Max: MustParseAmount("1.00")},
+			Requests:         RequestCeiling{Max: 100},
 		},
 		IssuedAt:  now,
 		ExpiresAt: now.Add(time.Hour),
@@ -304,8 +307,8 @@ func TestNarrows_AcceptsValidNarrowing(t *testing.T) {
 		Caveats: Caveats{
 			Ops:              []Op{OpGet},
 			ResourcePrefixes: []string{"object://acme/run-42/"},
-			MaxBudgetAmount:  NanosPerUnit / 10,
-			MaxRequests:      10,
+			Budget:           BudgetCeiling{Max: NanosPerUnit / 10},
+			Requests:         RequestCeiling{Max: 10},
 		},
 		IssuedAt:  now,
 		ExpiresAt: now.Add(15 * time.Minute),

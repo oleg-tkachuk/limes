@@ -99,8 +99,8 @@ func (f fixture) newCapability(subject string, parent uuid.UUID, expires time.Ti
 		Caveats: limes.Caveats{
 			Ops:              []limes.Op{limes.OpGet, "tool:search"},
 			ResourcePrefixes: []string{"corpus/"},
-			MaxRequests:      7,
-			MaxBudgetAmount:  3 * limes.NanosPerUnit / 2, // 1.5
+			Requests:         limes.RequestCeiling{Max: 7},
+			Budget:           limes.BudgetCeiling{Max: 3 * limes.NanosPerUnit / 2}, // 1.5
 			UnitCode:         "EUR",
 			SourceIPCIDR:     []string{"10.0.0.0/8"},
 		},

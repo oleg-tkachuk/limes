@@ -15,15 +15,15 @@ func TestMeterSubjectCarriesTheVerifiedCeilings(t *testing.T) {
 	c := Capability{
 		ID:      uuid.New(),
 		Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
-		Caveats: Caveats{MaxRequests: requests, MaxBudgetAmount: budget},
-		Copies:  []CopyCeiling{{RevocationID: []byte{1}, MaxRequests: 1, MaxBudgetAmount: budget}},
+		Caveats: Caveats{Requests: RequestCeiling{Max: requests}, Budget: BudgetCeiling{Max: budget}},
+		Copies:  []CopyCeiling{{RevocationID: []byte{1}, Requests: RequestCeiling{Max: 1}, Budget: BudgetCeiling{Max: budget}}},
 	}
 	s := asVerified(c).MeterSubject()
 	if s.CapabilityID() != c.ID || s.TenantID() != c.Subject.TenantID {
 		t.Errorf("subject names %s of %s, want %s of %s", s.CapabilityID(), s.TenantID(), c.ID, c.Subject.TenantID)
 	}
-	if s.MaxRequests() != requests || s.MaxBudgetAmount() != budget {
-		t.Errorf("ceilings = %d requests, %v; want %d, %v", s.MaxRequests(), s.MaxBudgetAmount(), requests, budget)
+	if s.Requests() != (RequestCeiling{Max: requests}) || s.Budget() != (BudgetCeiling{Max: budget}) {
+		t.Errorf("ceilings = %v requests, %v; want %d, %v", s.Requests(), s.Budget(), requests, budget)
 	}
 	if s.UnitCode() != DefaultUnitCode {
 		t.Errorf("unit of a capability naming none = %q, want %q", s.UnitCode(), DefaultUnitCode)
@@ -42,8 +42,8 @@ func TestRecordMeterSubjectCarriesTheStoredCeilings(t *testing.T) {
 		Capability: Capability{
 			ID:      uuid.New(),
 			Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
-			Caveats: Caveats{MaxRequests: requests, MaxBudgetAmount: budget, UnitCode: unit},
-			Copies:  []CopyCeiling{{RevocationID: []byte{1}, MaxRequests: 1}},
+			Caveats: Caveats{Requests: RequestCeiling{Max: requests}, Budget: BudgetCeiling{Max: budget}, UnitCode: unit},
+			Copies:  []CopyCeiling{{RevocationID: []byte{1}, Requests: RequestCeiling{Max: 1}}},
 		},
 		Revocation: &Revocation{Note: "done"},
 	}
@@ -51,8 +51,8 @@ func TestRecordMeterSubjectCarriesTheStoredCeilings(t *testing.T) {
 	if s.CapabilityID() != rec.Capability.ID || s.TenantID() != rec.Capability.Subject.TenantID {
 		t.Errorf("subject names %s of %s, want the record's", s.CapabilityID(), s.TenantID())
 	}
-	if s.MaxRequests() != requests || s.MaxBudgetAmount() != budget || s.UnitCode() != unit {
-		t.Errorf("subject = %d requests, %v %s; want %d, %v %s", s.MaxRequests(), s.MaxBudgetAmount(), s.UnitCode(), requests, budget, unit)
+	if s.Requests() != (RequestCeiling{Max: requests}) || s.Budget() != (BudgetCeiling{Max: budget}) || s.UnitCode() != unit {
+		t.Errorf("subject = %v requests, %v %s; want %d, %v %s", s.Requests(), s.Budget(), s.UnitCode(), requests, budget, unit)
 	}
 	if len(s.Copies()) != 0 {
 		t.Errorf("copies = %+v, want none from a stored record", s.Copies())
@@ -62,12 +62,12 @@ func TestRecordMeterSubjectCarriesTheStoredCeilings(t *testing.T) {
 // Neither the capability it came from nor a caller holding its copies can
 // change a subject's ceilings afterwards.
 func TestMeterSubjectCopiesAreItsOwn(t *testing.T) {
-	c := Capability{ID: uuid.New(), Copies: []CopyCeiling{{RevocationID: []byte{1}, MaxRequests: 1}}}
+	c := Capability{ID: uuid.New(), Copies: []CopyCeiling{{RevocationID: []byte{1}, Requests: RequestCeiling{Max: 1}}}}
 	s := asVerified(c).MeterSubject()
-	c.Copies[0].MaxRequests, c.Copies[0].RevocationID[0] = 0, 0
+	c.Copies[0].Requests, c.Copies[0].RevocationID[0] = RequestCeiling{}, 0
 	got := s.Copies()
-	got[0].MaxRequests, got[0].RevocationID[0] = 0, 0
-	if again := s.Copies(); again[0].MaxRequests != 1 || again[0].RevocationID[0] != 1 {
+	got[0].Requests, got[0].RevocationID[0] = RequestCeiling{}, 0
+	if again := s.Copies(); again[0].Requests != (RequestCeiling{Max: 1}) || again[0].RevocationID[0] != 1 {
 		t.Errorf("copies after mutating the sources = %+v, want the verified ones", again)
 	}
 }

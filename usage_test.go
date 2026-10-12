@@ -49,12 +49,12 @@ func TestTenantBudgetUtilization(t *testing.T) {
 		pct     float64
 		limited bool
 	}{
-		"no ceiling":         {TenantBudget{SpentAmount: ceiling}, 0, false},
-		"nothing spent":      {TenantBudget{MaxBudgetAmount: ceiling}, 0, true},
-		"a quarter spent":    {TenantBudget{MaxBudgetAmount: ceiling, SpentAmount: ceiling / 4}, wholePct / 4, true},
-		"all spent":          {TenantBudget{MaxBudgetAmount: ceiling, SpentAmount: ceiling}, wholePct, true},
-		"past the ceiling":   {TenantBudget{MaxBudgetAmount: ceiling, SpentAmount: 2 * ceiling}, wholePct, true},
-		"a negative ceiling": {TenantBudget{MaxBudgetAmount: -ceiling, SpentAmount: ceiling}, 0, false},
+		"no ceiling":       {TenantBudget{Ceiling: BudgetCeiling{Unlimited: true}, SpentAmount: ceiling}, 0, false},
+		"a ceiling of 0":   {TenantBudget{SpentAmount: 0}, wholePct, true},
+		"nothing spent":    {TenantBudget{Ceiling: BudgetCeiling{Max: ceiling}}, 0, true},
+		"a quarter spent":  {TenantBudget{Ceiling: BudgetCeiling{Max: ceiling}, SpentAmount: ceiling / 4}, wholePct / 4, true},
+		"all spent":        {TenantBudget{Ceiling: BudgetCeiling{Max: ceiling}, SpentAmount: ceiling}, wholePct, true},
+		"past the ceiling": {TenantBudget{Ceiling: BudgetCeiling{Max: ceiling}, SpentAmount: 2 * ceiling}, wholePct, true},
 	}
 	for name, tc := range cases {
 		if pct, limited := tc.budget.Utilization(); pct != tc.pct || limited != tc.limited {
