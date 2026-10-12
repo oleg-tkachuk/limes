@@ -245,8 +245,13 @@ func (r *Remote) fetchHeld(ctx context.Context) <-chan struct{} {
 	}
 	done := make(chan struct{})
 	go func() {
-		defer r.releaseFetch()
-		defer close(done)
+		// The token goes back before done closes: a caller woken by done may
+		// start the next refresh at once, and must find the slot free rather
+		// than take its own finished fetch for one still in flight.
+		defer func() {
+			r.releaseFetch()
+			close(done)
+		}()
 		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), DefaultFetchTimeout)
 		defer cancel()
 		keys, newETag, header, notModified, err := r.fetch(fetchCtx, etag)
