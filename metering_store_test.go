@@ -161,7 +161,7 @@ func TestMeteringLabelsAmountsAndOutcomes(t *testing.T) {
 	}
 
 	decisions := points(t, reader, metricChargeDecisions)
-	for outcome, want := range map[string]float64{"allowed": 2, "cap_exceeded": 1, "overrun": 1, "error": 1} {
+	for outcome, want := range map[string]float64{"allowed": 2, "budget_exceeded": 1, "overrun": 1, "error": 1} {
 		if got := valueAt(decisions, attrOutcome, outcome); got != want {
 			t.Errorf("%s charges = %v, want %v", outcome, got, want)
 		}

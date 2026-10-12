@@ -516,7 +516,8 @@ until `ReleaseExpired` runs.
 
 `Instrument` wraps a `UsageStore` in OpenTelemetry instruments: charge and
 settle attempts, reservations and request bumps counted by outcome
-(`allowed`, `overrun`, `cap_exceeded`, `tenant_exceeded`, `limit_exceeded`,
+(`allowed`, `overrun`, `budget_exceeded`, `tenant_budget_exceeded`,
+`request_limit_exceeded` — the refusals named as their `Reason` — and
 `error`); amounts charged and refunded, and a capability's spend after each
 charge, by `unit_code`. Instruments are created per store, and an error
 creating them is returned:
