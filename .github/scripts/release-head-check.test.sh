@@ -4,7 +4,7 @@
 #
 # The case that matters is a head that moved: a pull request merged while the
 # dispatching CI run finished. Reporting it as current tags a commit whose own
-# checks have not run.
+# checks have not run — unless all it adds is documentation.
 #
 # Runs from `task verify-all` — no Docker, no network.
 
@@ -31,9 +31,31 @@ passed=$(git rev-parse HEAD)
 check "the head CI passed" "release=true" "$("$script" "$passed")"
 check "the head by its short sha" "release=true" "$("$script" "${passed:0:8}")"
 
-commit two
-check "main moved past it" "release=false" "$("$script" "$passed" 2>/dev/null)"
+# Past it with documentation only: the head's code is the passed commit's,
+# and no CI run would dispatch a release for it.
+mkdir -p docs
+echo note >docs/guide.md
+git add docs/guide.md
+commit "docs: a note"
+check "main moved past it with documentation only" "release=true" "$("$script" "$passed" 2>/dev/null)"
+
+echo 'package m' >m.go
+git add m.go
+commit "feat: code"
+check "main moved past it with code" "release=false" "$("$script" "$passed" 2>/dev/null)"
 check "a sha this clone does not have" "release=false" "$("$script" 0000000000000000000000000000000000000000 2>/dev/null)"
+
+# A sha that is not behind the head is never released in its place.
+git checkout -q -b side "$passed"
+echo 'package side' >side.go
+git add side.go
+commit "feat: elsewhere"
+elsewhere=$(git rev-parse HEAD)
+git checkout -q -
+echo more >>docs/guide.md
+git add docs/guide.md
+commit "docs: more"
+check "a sha off the head's history" "release=false" "$("$script" "$elsewhere" 2>/dev/null)"
 
 if "$script" "" >/dev/null 2>&1; then
     printf 'FAIL %s\n' "an empty sha is accepted"
