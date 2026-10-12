@@ -1077,21 +1077,36 @@ func (p reservationPlace) before(q reservationPlace) bool {
 	return uuidLess(p.id, q.id)
 }
 
-// reservationCursorSep separates a cursor's expiry from its id.
+// reservationCursorSep separates a cursor's fields: the expiry's Unix
+// seconds, its nanoseconds within the second, and the id. Seconds and
+// nanoseconds apart, because a single count of Unix nanoseconds overflows
+// past year 2262, and a hold's TTL reaches further.
 const reservationCursorSep = "_"
 
+// reservationCursorFields is how many fields a cursor has.
+const reservationCursorFields = 3
+
 func (p reservationPlace) String() string {
-	return strconv.FormatInt(p.expires.UnixNano(), 10) + reservationCursorSep + p.id.String()
+	return strings.Join([]string{
+		strconv.FormatInt(p.expires.Unix(), 10),
+		strconv.Itoa(p.expires.Nanosecond()),
+		p.id.String(),
+	}, reservationCursorSep)
 }
 
 func parseReservationPlace(cursor string) (reservationPlace, error) {
-	ns, id, ok := strings.Cut(cursor, reservationCursorSep)
-	n, err1 := strconv.ParseInt(ns, 10, 64)
-	u, err2 := uuid.Parse(id)
-	if !ok || err1 != nil || err2 != nil {
-		return reservationPlace{}, fmt.Errorf("%w: memstore: cursor %q", limes.ErrInvalidRequest, cursor)
+	invalid := fmt.Errorf("%w: memstore: cursor %q", limes.ErrInvalidRequest, cursor)
+	fields := strings.Split(cursor, reservationCursorSep)
+	if len(fields) != reservationCursorFields {
+		return reservationPlace{}, invalid
 	}
-	return reservationPlace{time.Unix(0, n), u}, nil
+	sec, err1 := strconv.ParseInt(fields[0], 10, 64)
+	nsec, err2 := strconv.ParseInt(fields[1], 10, 64)
+	id, err3 := uuid.Parse(fields[2])
+	if err1 != nil || err2 != nil || err3 != nil || nsec < 0 || nsec >= int64(time.Second) {
+		return reservationPlace{}, invalid
+	}
+	return reservationPlace{time.Unix(sec, nsec), id}, nil
 }
 
 // Release ends a reservation without charging. Idempotent.

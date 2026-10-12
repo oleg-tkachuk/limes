@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -289,6 +290,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"ACopyRequestCeilingBoundsBump", checkCopyRequests[TX]},
 		{"AHoldCountsAgainstACopyBudget", checkCopyHold[TX]},
 		{"AStaleVersionIsRefused", checkStaleVersion[TX]},
+		{"AZeroCeilingAllowsNothing", checkZeroCeilings[TX]},
 	}
 	for _, c := range checks {
 		t.Run(c.name, func(t *testing.T) { c.run(t, newFixture(t, setup)) })
@@ -1044,6 +1046,48 @@ func checkStaleVersion[TX any](t *testing.T, f fixture[TX]) {
 	}
 }
 
+// checkZeroCeilings holds a store to a ceiling of 0 allowing nothing — on
+// the subject's requests and budget, on a hold, on an ancestor and on the
+// tenant — rather than standing for no limit, which only Unlimited does.
+func checkZeroCeilings[TX any](t *testing.T, f fixture[TX]) {
+	zero := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, requests: requestsOf(0), budget: budgetOf(0)})
+	if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: zero}); !errors.Is(err, limes.ErrRequestLimitExceeded) {
+		t.Errorf("a bump under a request ceiling of 0: err = %v, want ErrRequestLimitExceeded", err)
+	}
+	if _, err := f.charge(limes.ChargeRequest{Subject: zero, Amount: cent}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
+		t.Errorf("a charge under a budget of 0: err = %v, want ErrBudgetExceeded", err)
+	}
+	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: zero, Amount: cent}); !errors.Is(err, limes.ErrBudgetExceeded) {
+		t.Errorf("a hold under a budget of 0: err = %v, want ErrBudgetExceeded", err)
+	}
+
+	frozen, err := f.newCapability(uuid.Nil, limes.BudgetCeiling{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	under, err := f.newCapability(frozen, unlimitedBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: under}), Amount: cent}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
+		t.Errorf("a charge under an ancestor's budget of 0: err = %v, want ErrBudgetExceeded", err)
+	}
+	if f.spent(t, f.child) != 0 || f.spent(t, under) != 0 || f.tenantSpent(t) != 0 {
+		t.Error("a charge refused by a ceiling of 0 moved spend")
+	}
+
+	b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{TenantID: f.Tenant, UnitCode: unit, ExpectedVersion: b.ResourceVersion}); err != nil {
+		t.Fatalf("tenant ceiling of 0: %v", err)
+	}
+	if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: f.root}), Amount: cent}, nil); !errors.Is(err, limes.ErrTenantBudgetExceeded) {
+		t.Errorf("a charge under a tenant ceiling of 0: err = %v, want ErrTenantBudgetExceeded", err)
+	}
+}
+
 // checkTenantCeiling holds a store to the tenant aggregate: capabilities each
 // within their own budgets must not sum past the tenant's.
 func checkTenantCeiling[TX any](t *testing.T, f fixture[TX]) {
@@ -1300,16 +1344,22 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 	}
 }
 
+// longestTTL is the longest hold a ReserveRequest can ask for: it expires
+// centuries out, past what a count of nanoseconds since 1970 can hold.
+const longestTTL = time.Duration(math.MaxInt64)
+
 // checkReservationsPage holds a store to paging a capability's reservations
-// in their order, and to refusing a negative page size.
+// in their order — the last two expiring past year 2262, where a cursor
+// counting Unix nanoseconds overflows — and to refusing a negative page size.
 func checkReservationsPage[TX any](t *testing.T, f fixture[TX]) {
-	const holds = 3
+	ttls := []time.Duration{time.Minute, longestTTL - time.Minute, longestTTL}
+	holds := len(ttls)
 	var want []uuid.UUID
-	for i := range holds {
+	for _, ttl := range ttls {
 		r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
 			Subject: f.childSubject(),
 			Amount:  one,
-			TTL:     time.Duration(i+1) * time.Minute,
+			TTL:     ttl,
 		})
 		if err != nil {
 			t.Fatal(err)
