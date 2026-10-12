@@ -133,8 +133,19 @@ type ledgerEntry struct {
 
 // StoreConfig configures a Store.
 type StoreConfig struct {
-	// Now is the clock. Nil: time.Now.
+	// Now is the clock, read as a wall clock (wallClock). Nil: time.Now.
 	Now func() time.Time
+}
+
+// wallClock is now with its monotonic reading dropped. time.Time compares two
+// times by their monotonic readings when both carry one, and by the wall
+// clock otherwise; a time parsed from a cursor carries none. A store keeping
+// one would order its rows by one clock and seek its cursors by the other,
+// and after a step of the wall clock the two disagree: a page skips or
+// repeats a row. A store over a database keeps wall times alone; so does
+// this one.
+func wallClock(now func() time.Time) func() time.Time {
+	return func() time.Time { return now().Round(0) }
 }
 
 // NewStore returns an empty record store.
@@ -146,7 +157,7 @@ func NewStore(cfg StoreConfig) (*Store, error) {
 		caps:     map[uuid.UUID]limes.Capability{},
 		issuedBy: map[uuid.UUID]limes.Principal{},
 		revoked:  map[uuid.UUID]limes.Revocation{},
-		nowFn:    cfg.Now,
+		nowFn:    wallClock(cfg.Now),
 
 		revokedCopies: map[string]limes.BiscuitRevocation{},
 	}, nil
@@ -160,7 +171,7 @@ type UsageStoreConfig[TX any] struct {
 	// Required: without it no ancestor's ceiling would bind, which a store
 	// over a database never does.
 	Records *Store
-	// Now is the clock. Nil: time.Now.
+	// Now is the clock, read as a wall clock (wallClock). Nil: time.Now.
 	Now func() time.Time
 	// TxFactory makes the handle passed to onCharged. Nil: the zero TX.
 	TxFactory func() TX
@@ -188,7 +199,7 @@ func NewUsageStore[TX any](cfg UsageStoreConfig[TX]) (*UsageStore[TX], error) {
 		byRef:         map[refKey]int{},
 		byReservation: map[uuid.UUID]int{},
 		records:       cfg.Records,
-		nowFn:         cfg.Now,
+		nowFn:         wallClock(cfg.Now),
 		txFactory:     cfg.TxFactory,
 	}, nil
 }

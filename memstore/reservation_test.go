@@ -146,3 +146,26 @@ func TestReservationsCountAgainstTheTenantBudget(t *testing.T) {
 		t.Errorf("tenant held after a refused hold = %v, want 0", b.ReservedAmount)
 	}
 }
+
+// A hold's expiry is a wall time, as the cursor it is paged by: sorted by a
+// monotonic reading and sought by a wall one, a page would skip or repeat a
+// hold after the wall clock steps. Round(0) drops a monotonic reading, so a
+// time equal to its own Round(0), compared with ==, carries none.
+func TestHoldExpiryIsAWallTime(t *testing.T) {
+	ctx := context.Background()
+	u := mustUsage(t, UsageStoreConfig[struct{}]{Records: newTestStore()}) // time.Now, which carries one
+	capID, tenant := uuid.New(), uuid.New()
+	r, err := u.Reserve(ctx, limes.ReserveRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant}), Amount: unit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := u.ListReservations(ctx, limes.ListReservationsRequest{CapabilityID: capID})
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("ListReservations = %+v, %v; want the one hold", page.Items, err)
+	}
+	for name, at := range map[string]time.Time{"Reserve": r.ExpiresAt, "ListReservations": page.Items[0].ExpiresAt} {
+		if at != at.Round(0) {
+			t.Errorf("%s: ExpiresAt %v carries a monotonic reading", name, at)
+		}
+	}
+}
