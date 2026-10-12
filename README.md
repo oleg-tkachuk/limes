@@ -97,8 +97,10 @@ granted, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
     Verify: limes.VerifyRequest{Token: token, Audience: "my-service"},
     Check:  limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/report.pdf"},
 })
+subject := granted.MeterSubject()
+_, err = usage.Bump(ctx, limes.BumpRequest{Subject: subject}) // one request of the 500
 _, err = usage.Charge(ctx, limes.ChargeRequest{
-    Subject: granted.MeterSubject(), Amount: limes.MustParseAmount("0.35"),
+    Subject: subject, Amount: limes.MustParseAmount("0.35"),
 }, nil)
 ```
 

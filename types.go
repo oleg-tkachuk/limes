@@ -293,8 +293,10 @@ type CopyCeiling struct {
 	Budget BudgetCeiling
 }
 
-// Caveats is a typed bag of restrictions. Empty values are interpreted
-// as "no restriction on that axis"; explicit bounds are AND-combined.
+// Caveats is a typed bag of restrictions, AND-combined. Ops is required; an
+// empty resource or source-network list places no restriction on its axis.
+// The ceilings are explicit: a zero RequestCeiling or BudgetCeiling allows
+// nothing, and only Unlimited lifts one.
 //
 // It is written into a token as the limes_caveats claim (wire.go), so
 // renaming a field changes nothing a token carries. A verifier refuses a

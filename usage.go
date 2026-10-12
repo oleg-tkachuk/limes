@@ -22,7 +22,8 @@ type UsageStore[TX any] interface {
 	UsageHousekeeping
 }
 
-// Meter enforces the MaxRequests and MaxBudgetAmount caveats and keeps the
+// Meter enforces the request and budget ceilings (Caveats.Requests,
+// Caveats.Budget) and keeps the
 // charges ledger. Separated from Store so the issuance / revocation surface
 // stays focused on identity, not runtime state.
 //
@@ -64,7 +65,7 @@ type Meter[TX any] interface {
 	//
 	//   1. Each Biscuit copy's own budget (req.Subject.Copies), innermost
 	//      first → ErrBudgetExceeded.
-	//   2. The capability's own ceiling (req.Subject.MaxBudgetAmount) →
+	//   2. The capability's own ceiling (req.Subject.Budget()) →
 	//      ErrBudgetExceeded.
 	//   3. Each ancestor's ceiling → ErrBudgetExceeded.
 	//   4. The tenant aggregate ceiling → ErrTenantBudgetExceeded.
@@ -573,8 +574,8 @@ var (
 	// error: Settle returns its charge again (ChargeReceipt.Replayed).
 	ErrReservationNotFound error = &familyError{"limes: reservation not found", ErrNotFound}
 
-	// ErrRequestLimitExceeded — capability used MaxRequests times,
-	// next attempt was blocked.
+	// ErrRequestLimitExceeded — the capability, a Biscuit copy or an
+	// ancestor used every request its ceiling allows; the next was blocked.
 	ErrRequestLimitExceeded = errors.New("limes: request limit exceeded")
 
 	// ErrUsageNotFound — no usage row exists for this capability.

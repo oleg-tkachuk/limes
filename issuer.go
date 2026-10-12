@@ -14,17 +14,17 @@ import (
 	"github.com/oleg-tkachuk/limes/jwks"
 )
 
-// Issuer mints capabilities. Two responsibilities, in this order:
+// Issuer mints capabilities, in this order:
 //
 //  1. Validate the request (caveats sane, parent narrowing if delegated).
-//  2. Persist the audit row, then sign and return the token.
+//  2. Sign the token, then persist the record, and only then return the
+//     token.
 //
-// The persist-then-sign order is deliberate. If we signed first and the
-// store write failed, an emitted token would have no record — audit and
-// admin reads would find nothing behind it, and Revoke, which refuses an id
-// not on record, could not stop it. Persist-first means the token in the caller's hand is always
-// reflected in storage; a failed sign just means the row is unused
-// (removed by Store.Purge once it has expired).
+// Signing first means a capability whose token cannot be minted — a signer
+// that fails, or a token past MaxTokenBytes — is never recorded. The token
+// is returned only once its record is written: if the store write fails, the
+// signed token is dropped, so no token leaves the issuer that audit could
+// not find or Revoke, which refuses an id not on record, could not stop.
 type Issuer struct {
 	signer *Signer
 	store  IssuanceStore
@@ -139,7 +139,7 @@ type IssueRequest struct {
 	Audience   []string
 	Caveats    Caveats
 	TTL        time.Duration // 0 → DefaultTTL
-	NotBefore  time.Time     // zero → now
+	NotBefore  time.Time     // zero → valid from issuance, no nbf claim
 	Generation int64         // 0 → 1
 	// ConfirmationJKT binds the capability to the key with this RFC 7638
 	// thumbprint (dpop.Thumbprint); empty issues a bearer capability.
