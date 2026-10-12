@@ -1298,7 +1298,7 @@ func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTen
 			return limes.Page[limes.TenantBudgetSummary]{}, err
 		}
 		pct, _ := strconv.ParseFloat(c.utilization, 64) // decodeTenantBudgetCursor checked it
-		after = &budgetRow{pct: pct, tenant: c.tenantID}
+		after = &budgetRow{class: c.class, pct: pct, tenant: c.tenantID}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1308,19 +1308,15 @@ func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTen
 		if args.UnlimitedOnly && !b.Ceiling.Unlimited {
 			continue
 		}
-		var pct float64
-		switch {
-		case b.Ceiling.Unlimited:
-		case b.Ceiling.Max == 0:
-			// A ceiling of nothing is spent through.
-			pct = percent
-		default:
-			pct = float64(b.SpentAmount) / float64(b.Ceiling.Max) * percent
+		row := budgetRow{class: classOf(b.Ceiling), tenant: b.TenantID, budget: b}
+		if row.class == classBounded {
+			row.pct = float64(b.SpentAmount) / float64(b.Ceiling.Max) * percent
 		}
-		if args.ThresholdPct > 0 && pct < args.ThresholdPct {
+		// A ceiling of 0 is spent through, at every threshold; an
+		// unlimited one is at none.
+		if args.ThresholdPct > 0 && (row.class == classUnlimited || row.class == classBounded && row.pct < args.ThresholdPct) {
 			continue
 		}
-		row := budgetRow{pct: pct, tenant: b.TenantID, budget: b}
 		if after != nil && !after.before(row) {
 			continue
 		}
@@ -1335,7 +1331,7 @@ func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTen
 		last := rows[limit-1]
 		// 'f': a plain decimal, which the cursor reads back exactly.
 		next = tenantBudgetCursor{
-			utilization: strconv.FormatFloat(last.pct, 'f', -1, 64), tenantID: last.tenant,
+			class: last.class, utilization: strconv.FormatFloat(last.pct, 'f', -1, 64), tenantID: last.tenant,
 		}.encode()
 	}
 	out := make([]limes.TenantBudgetSummary, 0, len(rows))
@@ -1349,14 +1345,39 @@ func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTen
 
 // budgetRow is a tenant budget in ListTenantBudgets' order.
 type budgetRow struct {
-	pct    float64 // unclamped utilization
+	class  ceilingClass
+	pct    float64 // unclamped utilization; 0 outside classBounded
 	tenant uuid.UUID
 	budget limes.TenantBudget
 }
 
-// before reports whether r comes before o: higher utilization first, then the
-// lower tenant id.
+// ceilingClass is where a tenant's kind of ceiling ranks in
+// ListTenantBudgets: a ceiling of 0 allows nothing and leads, a bounded one
+// ranks by its utilization, and an unlimited one has none and trails.
+type ceilingClass int
+
+const (
+	classZero ceilingClass = iota
+	classBounded
+	classUnlimited
+)
+
+func classOf(c limes.BudgetCeiling) ceilingClass {
+	switch {
+	case c.Unlimited:
+		return classUnlimited
+	case c.Max == 0:
+		return classZero
+	}
+	return classBounded
+}
+
+// before reports whether r comes before o: by class, then higher utilization
+// first, then the lower tenant id.
 func (r budgetRow) before(o budgetRow) bool {
+	if r.class != o.class {
+		return r.class < o.class
+	}
 	if r.pct != o.pct {
 		return r.pct > o.pct
 	}

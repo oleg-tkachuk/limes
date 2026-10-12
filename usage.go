@@ -197,14 +197,17 @@ type TenantBudgets interface {
 	// display fields where it has them. Filters:
 	//   - ExcludeInactive: skip tenants the consumer considers inactive.
 	//   - ThresholdPct > 0: include only rows where
-	//     spent / max * 100 >= ThresholdPct (a bounded ceiling only).
+	//     spent / max * 100 >= ThresholdPct, and every ceiling of 0 — spent
+	//     through at any threshold — but no unlimited one.
 	//   - UnlimitedOnly: include only rows whose ceiling is Unlimited.
 	//   - Limit: the page size, as PageLimit reads it.
 	// It refuses what ListTenantBudgetsRequest.Validate refuses.
 	//
-	// Rows come most at risk first: by spent / max × 100 descending —
+	// Rows come most at risk first. Ceilings of 0, which allow nothing,
+	// lead; bounded ceilings follow by spent / max × 100 descending —
 	// unclamped, so of two tenants past their ceilings the further one
-	// leads — then by tenant id. A page ends with a cursor that fetches
+	// leads; unlimited ceilings, with no utilization, trail. Within each,
+	// ties go by tenant id. A page ends with a cursor that fetches
 	// the next one, empty on the last page. Spend moves between pages, so
 	// a tenant may show on two of them, or on none; a cursor is a place in
 	// the order, not a snapshot.
