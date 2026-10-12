@@ -125,7 +125,7 @@ func TestListRequestsRefuseANegativeLimit(t *testing.T) {
 	if err := budgets.Validate(); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("ListTenantBudgetsRequest with Limit -1: Validate = %v, want ErrInvalidRequest", err)
 	}
-	if err := (ListTenantBudgetsRequest{ThresholdPct: maxThresholdPct + 1}).Validate(); !errors.Is(err, ErrInvalidRequest) {
+	if err := (ListTenantBudgetsRequest{Filter: TenantBudgetsAtOrPast, ThresholdPct: maxThresholdPct + 1}).Validate(); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("a threshold past 100%%: Validate = %v, want ErrInvalidRequest", err)
 	}
 }
@@ -220,5 +220,17 @@ func TestSeveralIssuersNeedAKeyDecision(t *testing.T) {
 		if _, err := NewVerifier(cfg); (err == nil) != tc.ok {
 			t.Errorf("%s: err = %v, want ok=%v", name, err, tc.ok)
 		}
+	}
+}
+
+// A tenant budget filter names itself, and one this package lacks is refused.
+func TestTenantBudgetFilter(t *testing.T) {
+	for f, want := range map[TenantBudgetFilter]string{TenantBudgetsAll: "all", TenantBudgetsAtOrPast: "at-or-past", TenantBudgetsUnlimited: "unlimited"} {
+		if f.String() != want || f.Validate() != nil {
+			t.Errorf("%d: String = %q, Validate = %v; want %q, nil", f, f.String(), f.Validate(), want)
+		}
+	}
+	if err := (TenantBudgetsUnlimited + 1).Validate(); !errors.Is(err, ErrInvalidRequest) {
+		t.Errorf("an unknown filter: err = %v, want ErrInvalidRequest", err)
 	}
 }

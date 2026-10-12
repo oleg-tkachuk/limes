@@ -1309,16 +1309,11 @@ func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTen
 
 	rows := make([]budgetRow, 0, len(s.budgets))
 	for _, b := range s.budgets {
-		if args.UnlimitedOnly && !b.Ceiling.Unlimited {
-			continue
-		}
 		row := budgetRow{class: classOf(b.Ceiling), tenant: b.TenantID, budget: b}
 		if row.class == classBounded {
 			row.pct = float64(b.SpentAmount) / float64(b.Ceiling.Max) * percent
 		}
-		// A ceiling of 0 is spent through, at every threshold; an
-		// unlimited one is at none.
-		if args.ThresholdPct > 0 && (row.class == classUnlimited || row.class == classBounded && !atOrPast(b.SpentAmount, b.Ceiling.Max, args.ThresholdPct)) {
+		if !listed(args, row) {
 			continue
 		}
 		if after != nil && !after.before(row) {
@@ -1351,6 +1346,27 @@ type budgetRow struct {
 	pct    float64 // unclamped utilization; 0 outside classBounded
 	tenant uuid.UUID
 	budget limes.TenantBudget
+}
+
+// listed reports whether args' filter keeps row. A ceiling of 0 is spent
+// through, at every threshold; an unlimited one is at none.
+func listed(args limes.ListTenantBudgetsRequest, row budgetRow) bool {
+	switch args.Filter {
+	case limes.TenantBudgetsAll:
+		return true
+	case limes.TenantBudgetsUnlimited:
+		return row.class == classUnlimited
+	case limes.TenantBudgetsAtOrPast:
+		switch row.class {
+		case classZero:
+			return true
+		case classBounded:
+			return atOrPast(row.budget.SpentAmount, row.budget.Ceiling.Max, args.ThresholdPct)
+		case classUnlimited:
+			return false
+		}
+	}
+	return false // Validate refused any other filter
 }
 
 // atOrPast reports whether spent is at least pct percent of ceiling, exactly:
