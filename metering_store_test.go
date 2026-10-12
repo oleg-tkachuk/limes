@@ -120,7 +120,7 @@ func TestMeteringLabelsAmountsAndOutcomes(t *testing.T) {
 	ctx := context.Background()
 	tenant, capID := uuid.New(), uuid.New()
 	eur := func(s string) limes.ChargeRequest {
-		return limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, maxBudget: limes.MustParseAmount("5"), unit: "EUR"}), Amount: limes.MustParseAmount(s)}
+		return limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("5")), unit: "EUR"}), Amount: limes.MustParseAmount(s)}
 	}
 	r, err := usage.Charge(ctx, eur("2"), nil)
 	if err != nil {
@@ -137,7 +137,7 @@ func TestMeteringLabelsAmountsAndOutcomes(t *testing.T) {
 	boom := errors.New("side effect failed")
 	failing := eur("0.1")
 	// A capability with room, so the callback runs.
-	failing.Subject = newSubject(subjectSpec{capID: uuid.New(), tenant: tenant, maxBudget: limes.MustParseAmount("5"), unit: "EUR"})
+	failing.Subject = newSubject(subjectSpec{capID: uuid.New(), tenant: tenant, budget: budgetOf(limes.MustParseAmount("5")), unit: "EUR"})
 	if _, err := usage.Charge(ctx, failing, func(context.Context, struct{}) error { return boom }); !errors.Is(err, boom) {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestMeteringTenantAttributeIsOptIn(t *testing.T) {
 	usage, reader := meteredStore(t, limes.WithTenantAttribute())
 	ctx := context.Background()
 	tenant := uuid.New()
-	if _, err := usage.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: uuid.New(), tenant: tenant, maxRequests: 1})}); err != nil {
+	if _, err := usage.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: uuid.New(), tenant: tenant, requests: requestsOf(1)})}); err != nil {
 		t.Fatal(err)
 	}
 	ps := points(t, reader, metricRequestBumps)
@@ -219,7 +219,7 @@ func TestInstrumentKeepsCopyUsage(t *testing.T) {
 	ctx := context.Background()
 	usage := wrap(inner)
 	copyID := []byte("copy-1")
-	copies := []limes.CopyCeiling{{RevocationID: copyID, MaxRequests: 10}}
+	copies := []limes.CopyCeiling{{RevocationID: copyID, Requests: limes.RequestCeiling{Max: 10}}}
 	if _, err := usage.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: uuid.New(), tenant: uuid.New(), copies: copies})}); err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +246,7 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 		}
 	}
 
-	if _, err := usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{TenantID: tenant, MaxBudgetAmount: limes.MustParseAmount("10")}); err != nil {
+	if _, err := usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("10")}}); err != nil {
 		t.Fatal(err)
 	}
 	measured("Bump", metricRequestBumps, func() error {
@@ -313,11 +313,11 @@ func TestMeteringLabelsARefusedSettleWithItsTenant(t *testing.T) {
 	usage, reader := meteredStore(t, limes.WithTenantAttribute())
 	ctx := context.Background()
 	tenant, capID := uuid.New(), uuid.New()
-	res, err := usage.Reserve(ctx, limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, maxBudget: limes.MustParseAmount("2")}), Amount: limes.MustParseAmount("1")})
+	res, err := usage.Reserve(ctx, limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("2"))}), Amount: limes.MustParseAmount("1")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := usage.Settle(ctx, limes.SettleRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, maxBudget: limes.MustParseAmount("2")}), ReservationID: res.ID, Amount: limes.MustParseAmount("5")}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
+	if _, err := usage.Settle(ctx, limes.SettleRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("2"))}), ReservationID: res.ID, Amount: limes.MustParseAmount("5")}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Fatalf("settle past the ceiling: %v", err)
 	}
 	if got := valueAt(points(t, reader, metricChargeDecisions), attrTenant, tenant.String()); got != 1 {
@@ -327,19 +327,39 @@ func TestMeteringLabelsARefusedSettleWithItsTenant(t *testing.T) {
 
 // subjectSpec is a meter subject's parts.
 type subjectSpec struct {
-	capID       uuid.UUID
-	tenant      uuid.UUID
-	maxRequests int64
-	maxBudget   limes.Nanos
-	unit        string
-	copies      []limes.CopyCeiling
+	capID  uuid.UUID
+	tenant uuid.UUID
+	// requests and budget are the subject's ceilings; nil, a check that
+	// sets none, is Unlimited.
+	requests *limes.RequestCeiling
+	budget   *limes.BudgetCeiling
+	unit     string
+	copies   []limes.CopyCeiling
 }
 
 // newSubject is the MeterSubject a verified capability with spec's parts
 // would give, so a test can meter against ceilings no issuer signed.
 func newSubject(spec subjectSpec) limes.MeterSubject {
 	return link.NewMeterSubject(link.MeterSubjectFields{
-		CapabilityID: spec.capID, TenantID: spec.tenant, MaxRequests: spec.maxRequests,
-		MaxBudgetAmount: int64(spec.maxBudget), UnitCode: spec.unit, Copies: spec.copies,
+		CapabilityID: spec.capID, TenantID: spec.tenant,
+		Requests: spec.requestCeiling(), Budget: spec.budgetCeiling(), UnitCode: spec.unit, Copies: spec.copies,
 	}).(limes.MeterSubject)
 }
+
+func (spec subjectSpec) requestCeiling() limes.RequestCeiling {
+	if spec.requests == nil {
+		return limes.RequestCeiling{Unlimited: true}
+	}
+	return *spec.requests
+}
+
+func (spec subjectSpec) budgetCeiling() limes.BudgetCeiling {
+	if spec.budget == nil {
+		return limes.BudgetCeiling{Unlimited: true}
+	}
+	return *spec.budget
+}
+
+// budgetOf and requestsOf are ceilings of n, for a spec to set.
+func budgetOf(n limes.Nanos) *limes.BudgetCeiling { return &limes.BudgetCeiling{Max: n} }
+func requestsOf(n int64) *limes.RequestCeiling    { return &limes.RequestCeiling{Max: n} }

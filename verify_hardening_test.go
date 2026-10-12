@@ -56,13 +56,13 @@ func TestVerifyRequiresCapabilityTyp(t *testing.T) {
 	v := verifierFor(t, pub, VerifierConfig{})
 	ctx := context.Background()
 
-	good := resign(t, priv, map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV3}, validClaims(uuid.New()))
+	good := resign(t, priv, map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV4}, validClaims(uuid.New()))
 	if _, err := v.Verify(ctx, VerifyRequest{Token: good, Audience: "data"}); err != nil {
 		t.Fatalf("well-formed token rejected: %v", err)
 	}
 	// Earlier formats, whose claims a v3 reader would read under another
 	// schema: v1 (Go field names) and v2 (authorization_details, act).
-	for _, typ := range []string{"JWT", "", "at+jwt", "limes-cap+jwt", "limes-cap-v2+jwt"} {
+	for _, typ := range []string{"JWT", "", "at+jwt", "limes-cap+jwt", "limes-cap-v2+jwt", "limes-cap-v3+jwt"} {
 		tok := resign(t, priv, map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": typ}, validClaims(uuid.New()))
 		if _, err := v.Verify(ctx, VerifyRequest{Token: tok, Audience: "data"}); !errors.Is(err, ErrInvalidToken) {
 			t.Errorf("typ %q: Verify = %v, want ErrInvalidToken", typ, err)
@@ -74,7 +74,7 @@ func TestVerifyRejectsTenantlessAndOversizedTokens(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	v := verifierFor(t, pub, VerifierConfig{MaxTokenBytes: 2048})
 	ctx := context.Background()
-	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV3}
+	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV4}
 
 	if _, err := v.Verify(ctx, VerifyRequest{Token: resign(t, priv, hdr, validClaims(uuid.Nil)), Audience: "data"}); !errors.Is(err, ErrInvalidToken) {
 		t.Errorf("tenantless token: Verify = %v, want ErrInvalidToken", err)
@@ -94,7 +94,7 @@ func TestVerifyEnforcesKeyIssuerBinding(t *testing.T) {
 		KeyIssuers:     map[string]string{"k1": "iss"},
 	})
 	ctx := context.Background()
-	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV3}
+	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV4}
 
 	if _, err := v.Verify(ctx, VerifyRequest{Token: resign(t, priv, hdr, validClaims(uuid.New())), Audience: "data"}); err != nil {
 		t.Fatalf("bound issuer rejected: %v", err)
@@ -111,7 +111,7 @@ func TestVerifyEnforcesKeyIssuerBinding(t *testing.T) {
 func TestVerifyReadsClaimsStrictly(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	v := verifierFor(t, pub, VerifierConfig{})
-	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV3}
+	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV4}
 	ctx := context.Background()
 	cases := map[string]func(map[string]any){
 		// A caveat this verifier does not know is one it cannot enforce.

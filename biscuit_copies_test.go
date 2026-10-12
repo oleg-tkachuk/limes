@@ -29,8 +29,8 @@ func limitedBiscuit(t *testing.T) (*StandardVerifier, Capability, string) {
 		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData},
 		Caveats: Caveats{
-			Ops: []Op{OpGet}, MaxRequests: copyTestCapRequests,
-			MaxBudgetAmount: copyTestCapBudget, UnitCode: DefaultUnitCode,
+			Ops: []Op{OpGet}, Requests: RequestCeiling{Max: copyTestCapRequests},
+			Budget: BudgetCeiling{Max: copyTestCapBudget}, UnitCode: DefaultUnitCode,
 		},
 		TTL: time.Hour,
 	})
@@ -60,12 +60,12 @@ func lastRevocationID(t *testing.T, token string) []byte {
 func TestCopyLimitsArriveAsCopies(t *testing.T) {
 	v, cap, root := limitedBiscuit(t)
 	ctx := context.Background()
-	outer, err := Attenuate(root, Attenuation{MaxRequests: 50, MaxBudgetAmount: 4 * NanosPerUnit})
+	outer, err := Attenuate(root, Attenuation{Requests: &RequestCeiling{Max: 50}, Budget: &BudgetCeiling{Max: 4 * NanosPerUnit}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	plain, _ := Attenuate(outer, Attenuation{Ops: []Op{OpGet}}) // sets no limit
-	inner, _ := Attenuate(plain, Attenuation{MaxRequests: 10})
+	inner, _ := Attenuate(plain, Attenuation{Requests: &RequestCeiling{Max: 10}})
 
 	got, err := v.Verify(ctx, VerifyRequest{Token: inner, Audience: audienceData})
 	if err != nil {
@@ -75,13 +75,13 @@ func TestCopyLimitsArriveAsCopies(t *testing.T) {
 		t.Fatalf("copies = %+v, want two: the blocks that set limits", got.Capability().Copies)
 	}
 	in, out := got.Capability().Copies[0], got.Capability().Copies[1]
-	if !bytes.Equal(in.RevocationID, lastRevocationID(t, inner)) || in.MaxRequests != 10 || in.MaxBudgetAmount != 0 {
+	if !bytes.Equal(in.RevocationID, lastRevocationID(t, inner)) || in.Requests != (RequestCeiling{Max: 10}) || !in.Budget.Unlimited {
 		t.Errorf("innermost = %+v", in)
 	}
-	if !bytes.Equal(out.RevocationID, lastRevocationID(t, outer)) || out.MaxRequests != 50 || out.MaxBudgetAmount != 4*NanosPerUnit {
+	if !bytes.Equal(out.RevocationID, lastRevocationID(t, outer)) || out.Requests != (RequestCeiling{Max: 50}) || out.Budget != (BudgetCeiling{Max: 4 * NanosPerUnit}) {
 		t.Errorf("outermost = %+v", out)
 	}
-	if got.Capability().Caveats.MaxRequests != cap.Caveats.MaxRequests || got.Capability().Caveats.MaxBudgetAmount != cap.Caveats.MaxBudgetAmount {
+	if got.Capability().Caveats.Requests != cap.Caveats.Requests || got.Capability().Caveats.Budget != cap.Caveats.Budget {
 		t.Errorf("capability caveats changed: %+v", got.Capability().Caveats)
 	}
 
@@ -100,21 +100,20 @@ func TestCopyLimitsArriveAsCopies(t *testing.T) {
 func TestCopyLimitsNarrow(t *testing.T) {
 	v, _, root := limitedBiscuit(t)
 	ctx := context.Background()
-	outer, _ := Attenuate(root, Attenuation{MaxRequests: 50, MaxBudgetAmount: 4 * NanosPerUnit})
+	outer, _ := Attenuate(root, Attenuation{Requests: &RequestCeiling{Max: 50}, Budget: &BudgetCeiling{Max: 4 * NanosPerUnit}})
 
 	for name, tc := range map[string]struct {
 		from string
 		a    Attenuation
 		ok   bool
 	}{
-		"requests within the capability's":       {root, Attenuation{MaxRequests: copyTestCapRequests}, true},
-		"requests beyond the capability's":       {root, Attenuation{MaxRequests: copyTestCapRequests + 1}, false},
-		"budget within the capability's":         {root, Attenuation{MaxBudgetAmount: copyTestCapBudget}, true},
-		"budget beyond the capability's":         {root, Attenuation{MaxBudgetAmount: copyTestCapBudget + 1}, false},
-		"requests within the enclosing copy's":   {outer, Attenuation{MaxRequests: 50}, true},
-		"requests beyond the enclosing copy's":   {outer, Attenuation{MaxRequests: 51}, false},
-		"budget beyond the enclosing copy's":     {outer, Attenuation{MaxBudgetAmount: 4*NanosPerUnit + 1}, false},
-		"a budget past what an amount can carry": {root, Attenuation{MaxBudgetAmount: MaxNanos + 1}, false},
+		"requests within the capability's":     {root, Attenuation{Requests: &RequestCeiling{Max: copyTestCapRequests}}, true},
+		"requests beyond the capability's":     {root, Attenuation{Requests: &RequestCeiling{Max: copyTestCapRequests + 1}}, false},
+		"budget within the capability's":       {root, Attenuation{Budget: &BudgetCeiling{Max: copyTestCapBudget}}, true},
+		"budget beyond the capability's":       {root, Attenuation{Budget: &BudgetCeiling{Max: copyTestCapBudget + 1}}, false},
+		"requests within the enclosing copy's": {outer, Attenuation{Requests: &RequestCeiling{Max: 50}}, true},
+		"requests beyond the enclosing copy's": {outer, Attenuation{Requests: &RequestCeiling{Max: 51}}, false},
+		"budget beyond the enclosing copy's":   {outer, Attenuation{Budget: &BudgetCeiling{Max: 4*NanosPerUnit + 1}}, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			tok, err := Attenuate(tc.from, tc.a)
@@ -134,7 +133,7 @@ func TestCopyLimitsNarrow(t *testing.T) {
 	// The fixture capability has no limits: any positive copy limit fits.
 	_, unlimited, _, _, token := biscuitFixture(t)
 	unlimited.cfg.MeterCopies = true
-	tok, _ := Attenuate(token, Attenuation{MaxRequests: 1 << 40, MaxBudgetAmount: MaxNanos})
+	tok, _ := Attenuate(token, Attenuation{Requests: &RequestCeiling{Max: 1 << 40}, Budget: &BudgetCeiling{Max: MaxNanos}})
 	if _, err := unlimited.Verify(ctx, VerifyRequest{Token: tok, Audience: audienceData}); err != nil {
 		t.Fatalf("under no limit: %v", err)
 	}
@@ -146,7 +145,7 @@ func TestCopyLimitsNeedMeterCopies(t *testing.T) {
 	v, _, root := limitedBiscuit(t)
 	v.cfg.MeterCopies = false
 	ctx := context.Background()
-	limited, _ := Attenuate(root, Attenuation{MaxRequests: 5})
+	limited, _ := Attenuate(root, Attenuation{Requests: &RequestCeiling{Max: 5}})
 	_, err := v.Verify(ctx, VerifyRequest{Token: limited, Audience: audienceData})
 	if !errors.Is(err, ErrCopyCountersNotMetered) || !errors.Is(err, ErrInvalidToken) {
 		t.Fatalf("err = %v, want ErrCopyCountersNotMetered", err)
@@ -161,13 +160,17 @@ func TestCopyLimitsNeedMeterCopies(t *testing.T) {
 // a negative or a non-integer limit is refused by the verifier.
 func TestCopyLimitsMalformed(t *testing.T) {
 	v, _, root := limitedBiscuit(t)
-	for _, a := range []Attenuation{{MaxRequests: -1}, {MaxBudgetAmount: -1}} {
+	for _, a := range []Attenuation{
+		{Requests: &RequestCeiling{Max: -1}}, {Budget: &BudgetCeiling{Max: -1}},
+		{Budget: &BudgetCeiling{Max: MaxNanos + 1}},
+		// A copy only narrows: a ceiling it lifts means nothing.
+		{Requests: &RequestCeiling{Unlimited: true}}, {Budget: &BudgetCeiling{Unlimited: true}},
+	} {
 		if _, err := Attenuate(root, a); !errors.Is(err, ErrBiscuitAttenuation) {
 			t.Errorf("Attenuate(%+v): err = %v", a, err)
 		}
 	}
 	for name, term := range map[string]biscuit.Term{
-		"zero":     biscuit.Integer(0),
 		"negative": biscuit.Integer(-3),
 		"a string": biscuit.String("10"),
 	} {
@@ -194,7 +197,7 @@ func TestCopyLimitsMalformed(t *testing.T) {
 func TestCopiesAreNeverSigned(t *testing.T) {
 	issuer, v, _, cap, _ := biscuitFixture(t)
 	withCopies := cap
-	withCopies.Copies = []CopyCeiling{{RevocationID: []byte("x"), MaxRequests: 1}}
+	withCopies.Copies = []CopyCeiling{{RevocationID: []byte("x"), Requests: RequestCeiling{Max: 1}}}
 	jwt, err := issuer.signer.Sign(context.Background(), withCopies)
 	if err != nil {
 		t.Fatal(err)
@@ -214,19 +217,40 @@ func TestCopiesAreNeverSigned(t *testing.T) {
 func TestBiscuitCopyNamesItsLimits(t *testing.T) {
 	v, _, root := limitedBiscuit(t)
 	v.cfg.MeterCopies = false
-	outer, _ := Attenuate(root, Attenuation{MaxRequests: 50})
-	inner, _ := Attenuate(outer, Attenuation{MaxBudgetAmount: NanosPerUnit})
+	outer, _ := Attenuate(root, Attenuation{Requests: &RequestCeiling{Max: 50}})
+	inner, _ := Attenuate(outer, Attenuation{Budget: &BudgetCeiling{Max: NanosPerUnit}})
 
 	got, err := v.BiscuitCopy(context.Background(), inner)
 	if err != nil {
 		t.Fatalf("BiscuitCopy: %v", err)
 	}
 	if len(got.Limits) != 2 ||
-		!bytes.Equal(got.Limits[0].RevocationID, lastRevocationID(t, inner)) || got.Limits[0].MaxBudgetAmount != NanosPerUnit ||
-		!bytes.Equal(got.Limits[1].RevocationID, lastRevocationID(t, outer)) || got.Limits[1].MaxRequests != 50 {
+		!bytes.Equal(got.Limits[0].RevocationID, lastRevocationID(t, inner)) || got.Limits[0].Budget != (BudgetCeiling{Max: NanosPerUnit}) ||
+		!bytes.Equal(got.Limits[1].RevocationID, lastRevocationID(t, outer)) || got.Limits[1].Requests != (RequestCeiling{Max: 50}) {
 		t.Fatalf("limits = %+v", got.Limits)
 	}
 	if plain, err := v.BiscuitCopy(context.Background(), root); err != nil || plain.Limits != nil {
 		t.Fatalf("root copy: %+v, %v; want no limits", plain, err)
+	}
+}
+
+// A copy ceiling of 0 freezes the copy: it is a ceiling, not "none".
+func TestACopyCanBeFrozen(t *testing.T) {
+	_, v, _, _, token := biscuitFixture(t)
+	v.cfg.MeterCopies = true
+	frozen, err := Attenuate(token, Attenuation{Requests: &RequestCeiling{}, Budget: &BudgetCeiling{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	vc, err := v.Verify(context.Background(), VerifyRequest{Token: frozen, Audience: audienceData})
+	if err != nil {
+		t.Fatal(err)
+	}
+	copies := vc.Capability().Copies
+	if len(copies) != 1 || copies[0].Requests != (RequestCeiling{}) || copies[0].Budget != (BudgetCeiling{}) {
+		t.Errorf("copies = %+v; want one ceiling of 0 requests and 0 spend", copies)
+	}
+	if copies[0].Requests.Admits(1) || copies[0].Budget.Admits(1) {
+		t.Error("a frozen copy admits a request or a spend")
 	}
 }

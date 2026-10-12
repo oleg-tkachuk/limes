@@ -15,7 +15,7 @@ compatibility is not a constraint before 1.0.
 
 | # | Question | Decision | Why |
 |---|---|---|---|
-| 1 | Wire format through 1.x | `VerifierConfig.AcceptTokenTypes`; v3 accepted throughout 1.x, so a v4 ships in a minor: verifiers first, then issuers. | Versioned format with a controlled migration. Reading unknown claims leniently is refused: a caveat a verifier does not know is one it does not enforce. |
+| 1 | Wire format through 1.x | `VerifierConfig.AcceptTokenTypes`; v4 (v3 before the explicit-unlimited change) accepted throughout 1.x, so a v4 ships in a minor: verifiers first, then issuers. | Versioned format with a controlled migration. Reading unknown claims leniently is refused: a caveat a verifier does not know is one it does not enforce. |
 | 2 | Token algorithm | Ed25519 only for 1.x; another algorithm is another `typ`. | No runtime algorithm choice (RFC 8725); versioning the protocol replaces algorithm agility, and decision 1 carries the version. |
 | 3 | What `Delegate` trusts | `Verify` returns a `VerifiedCapability` with unexported fields, and `Delegate` accepts only that type. | "Parse, don't validate": the compiler, not a doc comment, guarantees the parent was verified; a token's caveats are immutable, so no store read is needed beyond the revocation check `Delegate` already makes. |
 | 4 | Proof-of-possession errors | A family of their own, `ErrProofOfPossession`, beside `ErrInvalidSignature` — renamed `ErrInvalidToken`, which it always meant, RFC 6750's `invalid_token` — and both under an umbrella `ErrUnauthenticated`. | `errors.Is` asserts identity: a missing or replayed proof is not an invalid signature. The overlap needed `reasonAliases`, made table order load-bearing and once made a nonce challenge read as permanent. |
@@ -121,7 +121,9 @@ coerced. "Disabled", "unlimited" and "generate" are explicit — a field, a
 constructor or a constant — never a reserved number or an empty string. Today:
 cache `ttl < 0` disables, `WithMaxEntries(0)` silently does nothing,
 `LoadOrGenerateKey("")` generates, `UtilisationPct` 0 means both "unused" and
-"unlimited".
+"unlimited". **Done**, including the ceilings: `RequestCeiling` and
+`BudgetCeiling` carry `Unlimited` explicitly and their zero value allows
+nothing, on caveats, Biscuit copies, the meter subject and tenant budgets.
 
 **P4 — configuration.** One shape: `NewX(XConfig) (*X, error)` for anything
 with a default or a check, concrete return types, a `Now` field for the clock;
@@ -134,7 +136,8 @@ deployed verifier.
 - (a) Freeze the claim set and the Biscuit vocabulary for all of 1.x; a new
   caveat means v2.
 - (b) `VerifierConfig.AcceptTokenTypes`, v3 accepted throughout 1.x, so a v4
-  ships in a minor: verifiers first, then issuers. Recommended. **Done:** `VerifierConfig.AcceptTokenTypes`, `TokenTypeV3`.
+  ships in a minor: verifiers first, then issuers. Recommended. **Done:** `VerifierConfig.AcceptTokenTypes`; the format reached v4 before 1.0
+  (explicit unlimited, P3), so `TokenTypeV4` is the one every 1.x verifier accepts.
 
 **P6 — cutting 1.0.** Remove `BREAKING_IS_A_MINOR_BEFORE_1_0` from
 `.github/release/release.config.cjs` and flip its case in

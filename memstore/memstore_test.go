@@ -20,6 +20,10 @@ func mkCap(id, parent uuid.UUID, tenant uuid.UUID, subject string) limes.Capabil
 		ID: id, ParentID: parent,
 		Subject:   limes.Principal{Type: limes.PrincipalAgent, TenantID: tenant, Subject: subject},
 		ExpiresAt: time.Now().Add(time.Hour),
+		// No ceiling of its own: a test that needs one sets it.
+		Caveats: limes.Caveats{
+			Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true},
+		},
 	}
 }
 
@@ -115,12 +119,12 @@ func TestBumpRequestRejectsWithoutMutating(t *testing.T) {
 	id := uuid.New()
 
 	for i := int64(1); i <= 2; i++ {
-		r, err := u.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: id, maxRequests: 2})})
+		r, err := u.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: id, tenant: testTenant, requests: requestsOf(2)})})
 		if err != nil || r.Requests != i {
 			t.Fatalf("bump %d: n=%d err=%v", i, r.Requests, err)
 		}
 	}
-	n, err := u.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: id, maxRequests: 2})})
+	n, err := u.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: id, tenant: testTenant, requests: requestsOf(2)})})
 	if !errors.Is(err, limes.ErrRequestLimitExceeded) {
 		t.Fatalf("want ErrRequestLimitExceeded, got %v", err)
 	}
@@ -139,7 +143,7 @@ func TestBumpRequestUnlimited(t *testing.T) {
 	u := NewUsage[struct{}](nil)
 	id := uuid.New()
 	for i := range 50 {
-		if _, err := u.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: id, maxRequests: 0})}); err != nil {
+		if _, err := u.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: id, tenant: testTenant})}); err != nil {
 			t.Fatalf("unlimited bump %d: %v", i, err)
 		}
 	}
@@ -151,7 +155,7 @@ func TestSetTenantBudgetDefaultsUnitCode(t *testing.T) {
 	ctx := context.Background()
 	u := NewUsage[struct{}](nil)
 	b, err := u.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
-		TenantID: uuid.New(), MaxBudgetAmount: limes.MustParseAmount("10"),
+		TenantID: uuid.New(), Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("10")},
 	})
 	if err != nil {
 		t.Fatalf("SetTenantBudget: %v", err)
@@ -165,8 +169,8 @@ func TestRefundReturnsSpendToEveryCounterOnce(t *testing.T) {
 	ctx := context.Background()
 	u := NewUsage[struct{}](nil)
 	id, tenant := uuid.New(), uuid.New()
-	_, _ = u.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{TenantID: tenant, MaxBudgetAmount: limes.MustParseAmount("100")})
-	receipt, err := u.Charge(ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant, maxBudget: limes.MustParseAmount("100"), unit: "USD"}), Amount: limes.MustParseAmount("5")}, nil)
+	_, _ = u.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("100")}})
+	receipt, err := u.Charge(ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant, budget: budgetOf(limes.MustParseAmount("100")), unit: "USD"}), Amount: limes.MustParseAmount("5")}, nil)
 	if err != nil {
 		t.Fatalf("Charge: %v", err)
 	}

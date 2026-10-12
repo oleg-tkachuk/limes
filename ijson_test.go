@@ -16,10 +16,10 @@ import (
 // RFC 7493 §2.2: a number in a token is an integer a double holds exactly,
 // so a reader in any language reads the value that was signed.
 func TestTokenIntegersStayWithinIJSON(t *testing.T) {
-	if err := (Caveats{Ops: []Op{OpGet}, MaxRequests: MaxIJSONInteger}).Validate(); err != nil {
+	if err := (Caveats{Ops: []Op{OpGet}, Requests: RequestCeiling{Max: MaxIJSONInteger}}).Validate(); err != nil {
 		t.Errorf("the largest I-JSON integer refused: %v", err)
 	}
-	if err := (Caveats{Ops: []Op{OpGet}, MaxRequests: MaxIJSONInteger + 1}).Validate(); !errors.Is(err, ErrInvalidCaveats) {
+	if err := (Caveats{Ops: []Op{OpGet}, Requests: RequestCeiling{Max: MaxIJSONInteger + 1}}).Validate(); !errors.Is(err, ErrInvalidCaveats) {
 		t.Errorf("max_requests past 2^53-1: err = %v, want ErrInvalidCaveats", err)
 	}
 	issuer, _, _, _ := buildIssuerVerifier(t)
@@ -33,7 +33,7 @@ func TestTokenIntegersStayWithinIJSON(t *testing.T) {
 
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	v := verifierFor(t, pub, VerifierConfig{})
-	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV3}
+	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV4}
 	for name, mod := range map[string]func(map[string]any){
 		"exp":       func(c map[string]any) { c["exp"] = int64(MaxIJSONInteger) + 1 },
 		"limes_gen": func(c map[string]any) { c["limes_gen"] = int64(MaxIJSONInteger) + 1 },

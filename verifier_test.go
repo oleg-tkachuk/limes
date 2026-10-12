@@ -269,7 +269,7 @@ func TestDelegate_NarrowsAndPersists(t *testing.T) {
 		Caveats: Caveats{
 			Ops:              []Op{OpGet, OpList, OpSearch},
 			ResourcePrefixes: []string{"object://acme/"},
-			MaxBudgetAmount:  MustParseAmount("1.00"),
+			Budget:           BudgetCeiling{Max: MustParseAmount("1.00")},
 		},
 		TTL: time.Hour,
 	})
@@ -284,7 +284,7 @@ func TestDelegate_NarrowsAndPersists(t *testing.T) {
 		Caveats: Caveats{
 			Ops:              []Op{OpGet},
 			ResourcePrefixes: []string{"object://acme/run-42/"},
-			MaxBudgetAmount:  NanosPerUnit / 10,
+			Budget:           BudgetCeiling{Max: NanosPerUnit / 10},
 		},
 		TTL: 15 * time.Minute,
 	})
@@ -339,7 +339,7 @@ func TestDelegate_RefusesACopyWithLimitsOfItsOwn(t *testing.T) {
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID},
 		Audience: []string{audienceData},
-		Caveats:  Caveats{Ops: []Op{OpGet}, MaxRequests: 100},
+		Caveats:  Caveats{Ops: []Op{OpGet}, Requests: RequestCeiling{Max: 100}},
 		TTL:      time.Hour,
 	})
 	if err != nil {
@@ -355,7 +355,7 @@ func TestDelegate_RefusesACopyWithLimitsOfItsOwn(t *testing.T) {
 	}
 
 	copyOf := parent
-	copyOf.Copies = []CopyCeiling{{RevocationID: []byte("block"), MaxRequests: 5}}
+	copyOf.Copies = []CopyCeiling{{RevocationID: []byte("block"), Requests: RequestCeiling{Max: 5}}}
 	before := len(store.caps)
 	if err := delegate(copyOf); !errors.Is(err, ErrDelegationTooWide) {
 		t.Fatalf("delegate from a copy with limits: err = %v, want ErrDelegationTooWide", err)

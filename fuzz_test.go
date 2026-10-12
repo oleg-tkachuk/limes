@@ -27,8 +27,8 @@ func FuzzParseClaims(f *testing.F) {
 		if err != nil {
 			return
 		}
-		if c.Caveats.MaxBudgetAmount < 0 || c.Caveats.MaxBudgetAmount > MaxNanos {
-			t.Fatalf("accepted a budget of %d", int64(c.Caveats.MaxBudgetAmount))
+		if c.Caveats.Budget.Max < 0 || c.Caveats.Budget.Max > MaxNanos {
+			t.Fatalf("accepted a budget of %d", int64(c.Caveats.Budget.Max))
 		}
 	})
 }

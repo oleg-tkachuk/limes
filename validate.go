@@ -83,12 +83,11 @@ func (c Caveats) Validate() error {
 			return err
 		}
 	}
-	if c.MaxRequests < 0 || c.MaxRequests > MaxIJSONInteger {
-		return fmt.Errorf("%w: max_requests %d is outside 0..%d", ErrInvalidCaveats, c.MaxRequests, int64(MaxIJSONInteger))
+	if err := c.Requests.Validate(); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidCaveats, err)
 	}
-	if c.MaxBudgetAmount < 0 || c.MaxBudgetAmount > MaxNanos {
-		return fmt.Errorf("%w: max_budget_amount %s is outside 0..%s",
-			ErrInvalidCaveats, c.MaxBudgetAmount, MaxNanos)
+	if err := c.Budget.Validate(); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidCaveats, err)
 	}
 	if _, err := NormalizeUnitCode(c.UnitCode); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidCaveats, err)

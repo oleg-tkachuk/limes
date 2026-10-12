@@ -21,7 +21,6 @@ package memstore
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -450,6 +449,15 @@ func uuidLess(a, b uuid.UUID) bool { return bytes.Compare(a[:], b[:]) < 0 }
 
 // ─── limes.UsageStore[TX] ─────────────────────────────────────────────
 
+// checkSubject refuses a subject no verifier or record made: the zero
+// MeterSubject names no capability and no tenant to count against.
+func checkSubject(s limes.MeterSubject) error {
+	if s.CapabilityID() == uuid.Nil || s.TenantID() == uuid.Nil {
+		return fmt.Errorf("%w: memstore: the subject names no capability or no tenant", limes.ErrInvalidRequest)
+	}
+	return nil
+}
+
 // lineage returns the ancestors whose counters move with capID's.
 func (s *UsageStore[TX]) lineage(capID uuid.UUID) ([]limes.Capability, error) {
 	if s.records == nil {
@@ -462,6 +470,9 @@ func (s *UsageStore[TX]) lineage(capID uuid.UUID) ([]limes.Capability, error) {
 // increment would cross the capability's ceiling or any ancestor's. A
 // rejected call must be safe to retry.
 func (s *UsageStore[TX]) Bump(_ context.Context, req limes.BumpRequest) (limes.BumpReceipt, error) {
+	if err := checkSubject(req.Subject); err != nil {
+		return limes.BumpReceipt{}, err
+	}
 	ancestors, err := s.lineage(req.Subject.CapabilityID())
 	if err != nil {
 		return limes.BumpReceipt{}, err
@@ -472,16 +483,15 @@ func (s *UsageStore[TX]) Bump(_ context.Context, req limes.BumpRequest) (limes.B
 	u := s.usage[req.Subject.CapabilityID()]
 	next := u.RequestCount + 1
 	for _, c := range req.Subject.Copies() {
-		if c.MaxRequests > 0 && s.copies[string(c.RevocationID)].requests+1 > c.MaxRequests {
+		if !c.Requests.Admits(s.copies[string(c.RevocationID)].requests + 1) {
 			return limes.BumpReceipt{Requests: u.RequestCount}, fmt.Errorf("%w: copy %x", limes.ErrRequestLimitExceeded, c.RevocationID)
 		}
 	}
-	if req.Subject.MaxRequests() > 0 && next > req.Subject.MaxRequests() {
+	if !req.Subject.Requests().Admits(next) {
 		return limes.BumpReceipt{Requests: u.RequestCount}, limes.ErrRequestLimitExceeded
 	}
 	for _, a := range ancestors {
-		limit := int64(a.Caveats.MaxRequests)
-		if limit > 0 && s.usage[a.ID].RequestCount+1 > limit {
+		if !a.Caveats.Requests.Admits(s.usage[a.ID].RequestCount + 1) {
 			return limes.BumpReceipt{Requests: u.RequestCount}, fmt.Errorf("%w: ancestor %s", limes.ErrRequestLimitExceeded, a.ID)
 		}
 	}
@@ -538,8 +548,8 @@ func (s *UsageStore[TX]) Charge(
 	if err := limes.ValidateExternalRef(req.ExternalRef); err != nil {
 		return limes.ChargeReceipt{}, err
 	}
-	if req.Subject.TenantID() == uuid.Nil {
-		return limes.ChargeReceipt{}, errors.New("memstore: charge requires TenantID")
+	if err := checkSubject(req.Subject); err != nil {
+		return limes.ChargeReceipt{}, err
 	}
 	unit, err := limes.NormalizeUnitCode(req.Subject.UnitCode())
 	if err != nil {
@@ -669,7 +679,7 @@ func (s *UsageStore[TX]) chargeLocked(
 
 	u := s.usage[req.Subject.CapabilityID()]
 	if err := s.checkCeilingsLocked(ceilingCheck{
-		amount: req.Amount, released: released, maxBudget: req.Subject.MaxBudgetAmount(), unit: unit,
+		amount: req.Amount, released: released, maxBudget: req.Subject.Budget(), unit: unit,
 		capID: req.Subject.CapabilityID(), tenantID: req.Subject.TenantID(), ancestors: ancestors, copies: req.Subject.Copies(),
 	}, crossed); err != nil {
 		return limes.ChargeReceipt{SpentAmount: u.SpentAmount, TenantID: req.Subject.TenantID(), UnitCode: unit}, err
@@ -741,15 +751,19 @@ func (s *UsageStore[TX]) tenantLocked(tenantID uuid.UUID, unit string) limes.Ten
 	if b, ok := s.budgets[tenantID]; ok {
 		return b
 	}
-	return limes.TenantBudget{TenantID: tenantID, UnitCode: unit, PeriodStart: s.nowFn()}
+	// A ceiling never set lifts nothing and limits nothing: the row only
+	// counts, until SetTenantBudget gives it a ceiling.
+	return limes.TenantBudget{
+		TenantID: tenantID, Ceiling: limes.BudgetCeiling{Unlimited: true}, UnitCode: unit, PeriodStart: s.nowFn(),
+	}
 }
 
 // ceilingCheck is an amount measured against every ceiling. released is
 // the amount of a hold being settled by it, which no longer counts.
 type ceilingCheck struct {
 	amount, released limes.Nanos
-	maxBudget        limes.Nanos // the capability's own, from its token
-	unit             string      // normalised
+	maxBudget        limes.BudgetCeiling // the capability's own, from its token
+	unit             string              // normalised
 	capID, tenantID  uuid.UUID
 	ancestors        []limes.Capability
 	copies           []limes.CopyCeiling
@@ -775,28 +789,28 @@ func (s *UsageStore[TX]) checkCeilingsLocked(c ceilingCheck, crossed func(error)
 	}
 	for _, cp := range c.copies {
 		cc := s.copies[string(cp.RevocationID)]
-		if cp.MaxBudgetAmount > 0 && cc.spent+cc.reserved-c.released+c.amount > cp.MaxBudgetAmount {
+		if !cp.Budget.Admits(cc.spent + cc.reserved - c.released + c.amount) {
 			if err := crossed(fmt.Errorf("%w: copy %x", limes.ErrBudgetExceeded, cp.RevocationID)); err != nil {
 				return err
 			}
 		}
 	}
 	u := s.usage[c.capID]
-	if c.maxBudget > 0 && u.SpentAmount+u.ReservedAmount-c.released+c.amount > c.maxBudget {
+	if !c.maxBudget.Admits(u.SpentAmount + u.ReservedAmount - c.released + c.amount) {
 		if err := crossed(limes.ErrBudgetExceeded); err != nil {
 			return err
 		}
 	}
 	for _, a := range c.ancestors {
 		au := s.usage[a.ID]
-		if limit := a.Caveats.MaxBudgetAmount; limit > 0 && au.SpentAmount+au.ReservedAmount-c.released+c.amount > limit {
+		if !a.Caveats.Budget.Admits(au.SpentAmount + au.ReservedAmount - c.released + c.amount) {
 			if err := crossed(fmt.Errorf("%w: ancestor %s", limes.ErrBudgetExceeded, a.ID)); err != nil {
 				return err
 			}
 		}
 	}
-	if b, ok := s.budgets[c.tenantID]; ok && b.MaxBudgetAmount > 0 &&
-		b.SpentAmount+c.amount+max0(b.ReservedAmount-c.released) > b.MaxBudgetAmount {
+	if b, ok := s.budgets[c.tenantID]; ok &&
+		!b.Ceiling.Admits(b.SpentAmount+c.amount+max0(b.ReservedAmount-c.released)) {
 		if err := crossed(limes.ErrTenantBudgetExceeded); err != nil {
 			return err
 		}
@@ -856,8 +870,8 @@ func (s *UsageStore[TX]) Reserve(_ context.Context, req limes.ReserveRequest) (l
 	if err := req.Amount.Validate(); err != nil {
 		return limes.Reservation{}, err
 	}
-	if req.Subject.TenantID() == uuid.Nil {
-		return limes.Reservation{}, errors.New("memstore: reserve requires TenantID")
+	if err := checkSubject(req.Subject); err != nil {
+		return limes.Reservation{}, err
 	}
 	unit, err := limes.NormalizeUnitCode(req.Subject.UnitCode())
 	if err != nil {
@@ -880,7 +894,7 @@ func (s *UsageStore[TX]) Reserve(_ context.Context, req limes.ReserveRequest) (l
 
 	refuse := func(err error) error { return err }
 	if err := s.checkCeilingsLocked(ceilingCheck{
-		amount: req.Amount, maxBudget: req.Subject.MaxBudgetAmount(), unit: unit,
+		amount: req.Amount, maxBudget: req.Subject.Budget(), unit: unit,
 		capID: req.Subject.CapabilityID(), tenantID: req.Subject.TenantID(), ancestors: ancestors, copies: req.Subject.Copies(),
 	}, refuse); err != nil {
 		return limes.Reservation{}, err
@@ -957,8 +971,8 @@ func (s *UsageStore[TX]) Settle(
 	// The charge is the reservation's: its tenant, unit and the copy limits
 	// it was made under, against the subject's own ceiling.
 	held := link.NewMeterSubject(link.MeterSubjectFields{
-		CapabilityID: h.capID, TenantID: h.tenantID, MaxRequests: req.Subject.MaxRequests(),
-		MaxBudgetAmount: int64(req.Subject.MaxBudgetAmount()), UnitCode: h.unit, Copies: h.copies,
+		CapabilityID: h.capID, TenantID: h.tenantID, Requests: req.Subject.Requests(),
+		Budget: req.Subject.Budget(), UnitCode: h.unit, Copies: h.copies,
 	}).(limes.MeterSubject)
 	receipt, err := s.chargeLocked(ctx, limes.ChargeRequest{
 		Subject: held, Amount: req.Amount, Op: h.op, Actor: h.actor, Overrun: req.Overrun,
@@ -985,7 +999,10 @@ func budgetsOnly(copies []limes.CopyCeiling) []limes.CopyCeiling {
 	}
 	out := make([]limes.CopyCeiling, len(copies))
 	for i, c := range copies {
-		out[i] = limes.CopyCeiling{RevocationID: slices.Clone(c.RevocationID), MaxBudgetAmount: c.MaxBudgetAmount}
+		out[i] = limes.CopyCeiling{
+			RevocationID: slices.Clone(c.RevocationID), Budget: c.Budget,
+			Requests: limes.RequestCeiling{Unlimited: true}, // a hold counts no requests
+		}
 	}
 	return out
 }
@@ -1190,7 +1207,7 @@ func (s *UsageStore[TX]) GetTenantBudget(_ context.Context, tenantID uuid.UUID) 
 }
 
 func (s *UsageStore[TX]) SetTenantBudget(_ context.Context, args limes.SetTenantBudgetRequest) (limes.TenantBudget, error) {
-	if err := args.MaxBudgetAmount.Validate(); err != nil {
+	if err := args.Ceiling.Validate(); err != nil {
 		return limes.TenantBudget{}, err
 	}
 	s.mu.Lock()
@@ -1226,7 +1243,7 @@ func (s *UsageStore[TX]) SetTenantBudget(_ context.Context, args limes.SetTenant
 	}
 
 	b.TenantID = args.TenantID
-	b.MaxBudgetAmount = args.MaxBudgetAmount
+	b.Ceiling = args.Ceiling
 	b.UnitCode = normalised
 	b.PeriodEnd = args.PeriodEnd
 	if args.ResetSpend {
@@ -1261,13 +1278,17 @@ func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTen
 
 	rows := make([]budgetRow, 0, len(s.budgets))
 	for _, b := range s.budgets {
-		unlimited := b.MaxBudgetAmount <= 0
-		if args.UnlimitedOnly && !unlimited {
+		if args.UnlimitedOnly && !b.Ceiling.Unlimited {
 			continue
 		}
 		var pct float64
-		if !unlimited {
-			pct = float64(b.SpentAmount) / float64(b.MaxBudgetAmount) * percent
+		switch {
+		case b.Ceiling.Unlimited:
+		case b.Ceiling.Max == 0:
+			// A ceiling of nothing is spent through.
+			pct = percent
+		default:
+			pct = float64(b.SpentAmount) / float64(b.Ceiling.Max) * percent
 		}
 		if args.ThresholdPct > 0 && pct < args.ThresholdPct {
 			continue

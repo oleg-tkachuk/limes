@@ -47,8 +47,8 @@ func TestConfigDefaults(t *testing.T) {
 	if v.cfg.Leeway != 30*time.Second {
 		t.Errorf("verifier leeway = %s, want 30s", v.cfg.Leeway)
 	}
-	if !slices.Equal(v.cfg.AcceptTokenTypes, []string{TokenTypeV3}) {
-		t.Errorf("verifier accepts %q, want only %q", v.cfg.AcceptTokenTypes, TokenTypeV3)
+	if !slices.Equal(v.cfg.AcceptTokenTypes, []string{TokenTypeV4}) {
+		t.Errorf("verifier accepts %q, want only %q", v.cfg.AcceptTokenTypes, TokenTypeV4)
 	}
 
 }
@@ -169,12 +169,12 @@ func TestAcceptTokenTypesRefusesWhatItCannotRead(t *testing.T) {
 			AcceptTokenTypes: types,
 		}
 	}
-	if _, err := NewStandardVerifier(cfg([]string{TokenTypeV3})); err != nil {
-		t.Errorf("accepting %q: %v", TokenTypeV3, err)
+	if _, err := NewStandardVerifier(cfg([]string{TokenTypeV4})); err != nil {
+		t.Errorf("accepting %q: %v", TokenTypeV4, err)
 	}
 	for name, types := range map[string][]string{
 		"an empty list":     {},
-		"an unknown format": {"limes-cap-v4+jwt"},
+		"an unknown format": {"limes-cap-v5+jwt"},
 		"an empty format":   {""},
 	} {
 		if _, err := NewStandardVerifier(cfg(types)); err == nil {

@@ -89,8 +89,11 @@ func TestGenerateBiscuitFixtures(t *testing.T) {
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.MustParse(goldenTenant), Subject: goldenSubject},
 		Audience: []string{audienceData, audienceMCP},
-		Caveats:  Caveats{Ops: []Op{OpGet, OpList, OpPut}, ResourcePrefixes: []string{"corpus/"}},
-		TTL:      biscuitSeedTTL,
+		Caveats: Caveats{
+			Ops: []Op{OpGet, OpList, OpPut}, ResourcePrefixes: []string{"corpus/"},
+			Requests: RequestCeiling{Unlimited: true}, Budget: BudgetCeiling{Unlimited: true},
+		},
+		TTL: biscuitSeedTTL,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -114,8 +117,8 @@ func TestGenerateBiscuitFixtures(t *testing.T) {
 		Audience:         c.Attenuate.Planes,
 		ExpiresAt:        c.Attenuate.ExpiresAt,
 		ConfirmationJKT:  c.Attenuate.BindJKT,
-		MaxRequests:      c.Attenuate.MaxRequests,
-		MaxBudgetAmount:  Nanos(c.Attenuate.MaxBudget),
+		Requests:         &RequestCeiling{Max: c.Attenuate.MaxRequests},
+		Budget:           &BudgetCeiling{Max: Nanos(c.Attenuate.MaxBudget)},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -210,8 +213,8 @@ func TestSharedAttenuationVerifies(t *testing.T) {
 	if got.Capability().ConfirmationJKT != want.ConfirmationJKT {
 		t.Errorf("ConfirmationJKT = %q, want %q", got.Capability().ConfirmationJKT, want.ConfirmationJKT)
 	}
-	if len(got.Capability().Copies) != 1 || got.Capability().Copies[0].MaxRequests != want.CopyMaxRequests ||
-		got.Capability().Copies[0].MaxBudgetAmount != Nanos(want.CopyMaxBudget) {
+	if len(got.Capability().Copies) != 1 || got.Capability().Copies[0].Requests != (RequestCeiling{Max: want.CopyMaxRequests}) ||
+		got.Capability().Copies[0].Budget != (BudgetCeiling{Max: Nanos(want.CopyMaxBudget)}) {
 		t.Errorf("Copies = %+v, want one with %d requests and %d nanos",
 			got.Capability().Copies, want.CopyMaxRequests, want.CopyMaxBudget)
 	}

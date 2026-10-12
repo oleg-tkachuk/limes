@@ -195,8 +195,8 @@ type TenantBudgets interface {
 	// display fields where it has them. Filters:
 	//   - ExcludeInactive: skip tenants the consumer considers inactive.
 	//   - ThresholdPct > 0: include only rows where
-	//     spent / max * 100 >= ThresholdPct (and max > 0).
-	//   - UnlimitedOnly: include only rows where max == 0.
+	//     spent / max * 100 >= ThresholdPct (a bounded ceiling only).
+	//   - UnlimitedOnly: include only rows whose ceiling is Unlimited.
 	//   - Limit: the page size, as PageLimit reads it.
 	// It refuses what ListTenantBudgetsRequest.Validate refuses.
 	//
@@ -371,7 +371,7 @@ type Reservation struct {
 	Actor string
 	// Copies are the Biscuit copies the hold is also on, innermost first,
 	// with the budget each is held against; a hold counts no requests, so
-	// their MaxRequests is zero.
+	// their Requests is Unlimited.
 	Copies    []CopyCeiling
 	ExpiresAt time.Time
 }
@@ -419,9 +419,11 @@ func (r RefundRequest) Validate() error {
 // Nanos, exact; a store keeps them exactly too (an integer or decimal column),
 // so that sums do not drift.
 type TenantBudget struct {
-	TenantID        uuid.UUID
-	MaxBudgetAmount Nanos
-	SpentAmount     Nanos
+	TenantID uuid.UUID
+	// Ceiling bounds the tenant's spend in the current period. A tenant
+	// whose ceiling was never set counts Unlimited.
+	Ceiling     BudgetCeiling
+	SpentAmount Nanos
 	// ReservedAmount is held by the tenant's open reservations.
 	ReservedAmount Nanos
 	UnitCode       string
@@ -440,19 +442,25 @@ type TenantBudget struct {
 const wholePct = 100
 
 // Utilization is how much of the ceiling is spent, in percent, clamped to
-// 0..100: a tenant past its ceiling is at 100. limited is false for a tenant
-// with no ceiling, which has no utilization to report; pct is then 0.
+// 0..100: a tenant past its ceiling, or with a ceiling of 0, is at 100.
+// limited is false for an unlimited tenant, which has no utilization to
+// report; pct is then 0.
 func (b TenantBudget) Utilization() (pct float64, limited bool) {
-	if b.MaxBudgetAmount <= 0 {
+	switch {
+	case b.Ceiling.Unlimited:
 		return 0, false
+	case b.Ceiling.Max == 0:
+		return wholePct, true
 	}
-	return min(max(float64(b.SpentAmount)/float64(b.MaxBudgetAmount)*wholePct, 0), wholePct), true
+	return min(max(float64(b.SpentAmount)/float64(b.Ceiling.Max)*wholePct, 0), wholePct), true
 }
 
 // SetTenantBudgetRequest is the input for UsageStore.SetTenantBudget.
 type SetTenantBudgetRequest struct {
-	TenantID        uuid.UUID
-	MaxBudgetAmount Nanos
+	TenantID uuid.UUID
+	// Ceiling is the tenant's new ceiling; the zero value freezes its
+	// spend, BudgetCeiling{Unlimited: true} lifts it.
+	Ceiling BudgetCeiling
 	// UnitCode pins the currency. Empty = keep existing or default
 	// to DefaultUnitCode on first insert.
 	UnitCode string
@@ -578,9 +586,9 @@ var (
 	// new one.
 	ErrTenantBudgetExceeded = errors.New("limes: tenant aggregate budget exceeded")
 
-	// ErrTenantBudgetNotFound — Get-only; the tenant has no cap
-	// configured AND has never been charged. Distinct from "cap = 0"
-	// (which means "configured but unlimited").
+	// ErrTenantBudgetNotFound — Get-only; the tenant has no ceiling set
+	// and has never been charged. A tenant charged before any ceiling was
+	// set has a row, Unlimited, with ResourceVersion 0.
 	ErrTenantBudgetNotFound error = &familyError{"limes: tenant budget row not found", ErrNotFound}
 
 	// ErrTenantBudgetVersionMismatch — SetTenantBudget's OCC guard refused the

@@ -17,7 +17,7 @@ import (
 const unit limes.Nanos = limes.NanosPerUnit
 
 func copyCeiling(id string, requests int64, budget limes.Nanos) limes.CopyCeiling {
-	return limes.CopyCeiling{RevocationID: []byte(id), MaxRequests: requests, MaxBudgetAmount: budget}
+	return limes.CopyCeiling{RevocationID: []byte(id), Requests: limes.RequestCeiling{Max: requests}, Budget: limes.BudgetCeiling{Max: budget}}
 }
 
 func newCopyFixture(t *testing.T) (context.Context, *UsageStore[struct{}], uuid.UUID, uuid.UUID) {
@@ -39,7 +39,7 @@ func TestCopyRequestLimits(t *testing.T) {
 	sibling := copyCeiling("sibling", 3, 0)
 	bump := func(copies ...limes.CopyCeiling) error {
 		_, err := u.Bump(ctx, limes.BumpRequest{
-			Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, maxRequests: capLimit, copies: copies}),
+			Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, requests: requestsOf(capLimit), copies: copies}),
 		})
 		return err
 	}

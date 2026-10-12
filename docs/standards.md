@@ -23,7 +23,7 @@ the test that holds it there.
 
 **RFC 7519, RFC 8725.** A capability token is a JWS-signed JWT. Following
 the JWT best current practice, it is explicitly typed — `typ:
-limes-cap-v3+jwt` (§3.11), so no other JWT signed by the same key passes as a
+limes-cap-v4+jwt` (§3.11), so no other JWT signed by the same key passes as a
 capability — the algorithm is fixed by the verifier rather than read from the
 token (§3.1), and `iss` and `aud` are always checked (§3.8, §3.9). The
 version is part of `typ`: a token of another format version is refused

@@ -99,7 +99,7 @@ type VerifierConfig struct {
 	BiscuitRevocations BiscuitRevocationLookup
 
 	// AcceptTokenTypes are the token formats (the JWT "typ") the verifier
-	// accepts. Nil: TokenTypeV3. Every 1.x verifier accepts TokenTypeV3, so
+	// accepts. Nil: TokenTypeV4. Every 1.x verifier accepts TokenTypeV4, so
 	// a later format ships in a minor release: verifiers accept it first,
 	// issuers mint it after. A type this package has no schema for, or an
 	// empty list, is refused: a verifier cannot enforce a format it cannot
@@ -190,9 +190,9 @@ func NewStandardVerifier(cfg VerifierConfig) (*StandardVerifier, error) {
 	cfg.KeyIssuers = maps.Clone(cfg.KeyIssuers)
 	switch {
 	case cfg.AcceptTokenTypes == nil:
-		cfg.AcceptTokenTypes = []string{TokenTypeV3}
+		cfg.AcceptTokenTypes = []string{TokenTypeV4}
 	case len(cfg.AcceptTokenTypes) == 0:
-		return nil, errors.New("limes: VerifierConfig.AcceptTokenTypes accepts nothing; leave it nil for TokenTypeV3")
+		return nil, errors.New("limes: VerifierConfig.AcceptTokenTypes accepts nothing; leave it nil for TokenTypeV4")
 	}
 	for _, typ := range cfg.AcceptTokenTypes {
 		if !slices.Contains(tokenTypes, typ) {

@@ -13,13 +13,14 @@ import (
 // the limits of the Biscuit copy presented. Only
 // VerifiedCapability.MeterSubject and Record.MeterSubject make one, so a
 // ceiling is always the one the token or the stored record carries — never a
-// value a caller typed, or left at zero and so lifted. A store reads it
-// through its methods.
+// value a caller typed. A store reads it through its methods. The zero
+// MeterSubject names no capability and no tenant; a Meter refuses it with
+// ErrInvalidRequest rather than count it anywhere.
 type MeterSubject struct {
 	capabilityID uuid.UUID
 	tenantID     uuid.UUID
-	maxRequests  int64
-	maxBudget    Nanos
+	maxRequests  RequestCeiling
+	maxBudget    BudgetCeiling
 	unitCode     string
 	copies       []CopyCeiling
 }
@@ -29,8 +30,8 @@ func (v VerifiedCapability) MeterSubject() MeterSubject {
 	return MeterSubject{
 		capabilityID: v.c.ID,
 		tenantID:     v.c.Subject.TenantID,
-		maxRequests:  v.c.Caveats.MaxRequests,
-		maxBudget:    v.c.Caveats.MaxBudgetAmount,
+		maxRequests:  v.c.Caveats.Requests,
+		maxBudget:    v.c.Caveats.Budget,
 		unitCode:     canonicalUnitCode(v.c.Caveats.UnitCode),
 		copies:       v.c.clone().Copies,
 	}
@@ -45,8 +46,8 @@ func (r Record) MeterSubject() MeterSubject {
 	return MeterSubject{
 		capabilityID: c.ID,
 		tenantID:     c.Subject.TenantID,
-		maxRequests:  c.Caveats.MaxRequests,
-		maxBudget:    c.Caveats.MaxBudgetAmount,
+		maxRequests:  c.Caveats.Requests,
+		maxBudget:    c.Caveats.Budget,
 		unitCode:     canonicalUnitCode(c.Caveats.UnitCode),
 	}
 }
@@ -58,11 +59,11 @@ func (s MeterSubject) CapabilityID() uuid.UUID { return s.capabilityID }
 // the ledger files the charge under it.
 func (s MeterSubject) TenantID() uuid.UUID { return s.tenantID }
 
-// MaxRequests is the capability's own request ceiling; 0 is unlimited.
-func (s MeterSubject) MaxRequests() int64 { return s.maxRequests }
+// Requests is the capability's own request ceiling.
+func (s MeterSubject) Requests() RequestCeiling { return s.maxRequests }
 
-// MaxBudgetAmount is the capability's own budget ceiling; 0 is unlimited.
-func (s MeterSubject) MaxBudgetAmount() Nanos { return s.maxBudget }
+// Budget is the capability's own budget ceiling.
+func (s MeterSubject) Budget() BudgetCeiling { return s.maxBudget }
 
 // UnitCode is the unit the capability counts in, normalised: empty reads
 // as DefaultUnitCode.
@@ -80,9 +81,11 @@ func (s MeterSubject) Copies() []CopyCeiling {
 func init() {
 	link.NewMeterSubject = func(f link.MeterSubjectFields) any {
 		copies, _ := f.Copies.([]CopyCeiling)
+		requests, _ := f.Requests.(RequestCeiling)
+		budget, _ := f.Budget.(BudgetCeiling)
 		return MeterSubject{
 			capabilityID: f.CapabilityID, tenantID: f.TenantID,
-			maxRequests: f.MaxRequests, maxBudget: Nanos(f.MaxBudgetAmount),
+			maxRequests: requests, maxBudget: budget,
 			unitCode: canonicalUnitCode(f.UnitCode), copies: copies,
 		}
 	}

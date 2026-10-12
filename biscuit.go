@@ -148,12 +148,13 @@ type Attenuation struct {
 	// unbound token can be bound offline: a bound one stays bound to its key,
 	// because rebinding needs no key and anyone could do it.
 	ConfirmationJKT string
-	// MaxRequests and MaxBudgetAmount give this copy limits of its own, counted
-	// apart from its siblings' and within the capability's: requests made
-	// with it, and its spend in the capability's unit. 0 sets none. Each
-	// must be within every limit already in force.
-	MaxRequests     int64
-	MaxBudgetAmount Nanos
+	// Requests and Budget give this copy limits of its own, counted apart
+	// from its siblings' and within the capability's: requests made with
+	// it, and its spend in the capability's unit. nil sets none; a ceiling
+	// of 0 freezes the copy. Each must be within every limit already in
+	// force, and an Unlimited one is refused: a copy only narrows.
+	Requests *RequestCeiling
+	Budget   *BudgetCeiling
 }
 
 // Attenuate appends a block that narrows token. It needs no key and no
@@ -189,14 +190,17 @@ func Attenuate(token string, a Attenuation) (string, error) {
 		}
 		errs = append(errs, add(biscuitFactBind, biscuit.String(a.ConfirmationJKT)))
 	}
-	if a.MaxRequests < 0 || a.MaxBudgetAmount < 0 {
-		return "", fmt.Errorf("%w: copy limits cannot be negative", ErrBiscuitAttenuation)
+	if r := a.Requests; r != nil {
+		if r.Unlimited || r.Validate() != nil {
+			return "", fmt.Errorf("%w: a copy's request ceiling is a bound within 0..%d", ErrBiscuitAttenuation, int64(MaxIJSONInteger))
+		}
+		errs = append(errs, add(biscuitFactMaxRequests, biscuit.Integer(r.Max)))
 	}
-	if a.MaxRequests > 0 {
-		errs = append(errs, add(biscuitFactMaxRequests, biscuit.Integer(a.MaxRequests)))
-	}
-	if a.MaxBudgetAmount > 0 {
-		errs = append(errs, add(biscuitFactMaxBudget, biscuit.Integer(a.MaxBudgetAmount)))
+	if b := a.Budget; b != nil {
+		if b.Unlimited || b.Validate() != nil {
+			return "", fmt.Errorf("%w: a copy's budget ceiling is a bound within 0..%s", ErrBiscuitAttenuation, MaxNanos)
+		}
+		errs = append(errs, add(biscuitFactMaxBudget, biscuit.Integer(b.Max)))
 	}
 	if err := errors.Join(errs...); err != nil {
 		return "", fmt.Errorf("limes: attenuation block: %w", err)
@@ -350,17 +354,28 @@ func applyAttenuation(cur Capability, blk decodedBlock, id []byte, meterCopies b
 	if err := Narrows(cur, next); err != nil {
 		return cur, err
 	}
-	if !f.ceiling.set() {
+	if f.requests == nil && f.budget == nil {
 		return next, nil
 	}
 	if !meterCopies {
 		return cur, ErrCopyCountersNotMetered
 	}
-	f.ceiling.RevocationID = id
-	if err := copyCeilingNarrows(cur, f.ceiling); err != nil {
+	// An axis the block left alone has no ceiling of this copy's own.
+	ceiling := CopyCeiling{
+		RevocationID: id,
+		Requests:     RequestCeiling{Unlimited: true},
+		Budget:       BudgetCeiling{Unlimited: true},
+	}
+	if f.requests != nil {
+		ceiling.Requests = *f.requests
+	}
+	if f.budget != nil {
+		ceiling.Budget = *f.budget
+	}
+	if err := copyCeilingNarrows(cur, ceiling); err != nil {
 		return cur, err
 	}
-	next.Copies = append([]CopyCeiling{f.ceiling}, cur.Copies...)
+	next.Copies = append([]CopyCeiling{ceiling}, cur.Copies...)
 	return next, nil
 }
 
@@ -374,11 +389,11 @@ type blockFacts struct {
 	planes         []string
 	expires        time.Time
 	bind           string
-	ceiling        CopyCeiling
+	// requests and budget are the copy ceilings the block set, nil for an
+	// axis it left alone.
+	requests *RequestCeiling
+	budget   *BudgetCeiling
 }
-
-// set reports whether a block put a limit on its copy.
-func (c CopyCeiling) set() bool { return c.MaxRequests > 0 || c.MaxBudgetAmount > 0 }
 
 // readBlockFacts reads blk's facts, refusing any outside the vocabulary or
 // with the wrong term. boundJKT is the key cur is already bound to, which a
@@ -437,13 +452,13 @@ func (f *blockFacts) read(fact decodedFact, boundJKT string) error {
 		f.bind = s
 	case biscuitFactMaxRequests, biscuitFactMaxBudget:
 		n, ok := fact.term.(int64)
-		if !ok || n <= 0 {
-			return fmt.Errorf("%s takes a positive integer", fact.name)
+		if !ok || n < 0 {
+			return fmt.Errorf("%s takes an integer of 0 or more", fact.name)
 		}
 		if fact.name == biscuitFactMaxRequests {
-			f.ceiling.MaxRequests = n
+			f.requests = &RequestCeiling{Max: n}
 		} else {
-			f.ceiling.MaxBudgetAmount = Nanos(n)
+			f.budget = &BudgetCeiling{Max: Nanos(n)}
 		}
 	default:
 		return fmt.Errorf("fact %q is not part of the attenuation vocabulary", fact.name)
@@ -475,37 +490,35 @@ func (f blockFacts) narrow(cur Capability) Capability {
 	return next
 }
 
-// copyCeilingNarrows checks a copy's limits against every limit already in
-// force on cur: the capability's own and each enclosing copy's. A limit not
-// set by the new block stays as it was, so only the ones it sets are checked.
+// copyCeilingNarrows checks a copy's ceilings against every one already in
+// force on cur: the capability's own and each enclosing copy's.
 func copyCeilingNarrows(cur Capability, c CopyCeiling) error {
-	if c.MaxRequests > 0 {
-		own := int64(cur.Caveats.MaxRequests)
-		if err := limitNarrows("requests", c.MaxRequests, own, cur.Copies, func(o CopyCeiling) int64 { return o.MaxRequests }); err != nil {
-			return err
+	if err := c.Requests.Validate(); err != nil {
+		return fmt.Errorf("copy %w", err)
+	}
+	if err := c.Budget.Validate(); err != nil {
+		return fmt.Errorf("copy %w", err)
+	}
+	// An Unlimited axis is one this block left alone: the copy keeps no
+	// ceiling of its own there, and the ones above it still bound it.
+	if !c.Requests.Unlimited {
+		if !c.Requests.Within(cur.Caveats.Requests) {
+			return fmt.Errorf("copy requests %s exceed the capability's %s", c.Requests, cur.Caveats.Requests)
+		}
+		for _, o := range cur.Copies {
+			if !c.Requests.Within(o.Requests) {
+				return fmt.Errorf("copy requests %s exceed an enclosing copy's %s", c.Requests, o.Requests)
+			}
 		}
 	}
-	if c.MaxBudgetAmount > 0 {
-		if c.MaxBudgetAmount > MaxNanos {
-			return fmt.Errorf("copy budget %s exceeds %s", c.MaxBudgetAmount, MaxNanos)
+	if !c.Budget.Unlimited {
+		if !c.Budget.Within(cur.Caveats.Budget) {
+			return fmt.Errorf("copy budget %s exceeds the capability's %s", c.Budget, cur.Caveats.Budget)
 		}
-		own := int64(cur.Caveats.MaxBudgetAmount)
-		if err := limitNarrows("budget nanos", int64(c.MaxBudgetAmount), own, cur.Copies, func(o CopyCeiling) int64 { return int64(o.MaxBudgetAmount) }); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// limitNarrows checks a copy's limit n against the capability's own (≤ 0:
-// none) and each enclosing copy's, read by of (≤ 0: none).
-func limitNarrows(what string, n, own int64, outer []CopyCeiling, of func(CopyCeiling) int64) error {
-	if own > 0 && n > own {
-		return fmt.Errorf("copy %s %d exceed the capability's %d", what, n, own)
-	}
-	for _, o := range outer {
-		if limit := of(o); limit > 0 && n > limit {
-			return fmt.Errorf("copy %s %d exceed an enclosing copy's %d", what, n, limit)
+		for _, o := range cur.Copies {
+			if !c.Budget.Within(o.Budget) {
+				return fmt.Errorf("copy budget %s exceeds an enclosing copy's %s", c.Budget, o.Budget)
+			}
 		}
 	}
 	return nil
