@@ -284,10 +284,10 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 	if lPage, err := usage.ListTenantBudgets(ctx, limes.ListTenantBudgetsRequest{}); err != nil || len(lPage.Items) != 1 {
 		t.Errorf("ListTenantBudgets = %+v, %v", lPage, err)
 	}
-	if c, err := usage.GetCharge(ctx, receipt.ChargeID); err != nil || c.Refunded != limes.NanosPerUnit {
+	if c, err := usage.GetCharge(ctx, receipt.ChargeID); err != nil || c.RefundedAmount != limes.NanosPerUnit {
 		t.Errorf("GetCharge = %+v, %v", c, err)
 	}
-	if c, err := usage.ChargeByRef(ctx, capID, "r"); err != nil || c.ChargeID != receipt.ChargeID {
+	if c, err := usage.ChargeByRef(ctx, capID, "r"); err != nil || c.ID != receipt.ChargeID {
 		t.Errorf("ChargeByRef = %+v, %v", c, err)
 	}
 	if n, err := usage.ReleaseExpired(ctx, limes.ReleaseExpiredRequest{}); err != nil || n.Released != 0 {
@@ -338,6 +338,6 @@ type subjectSpec struct {
 func newSubject(spec subjectSpec) limes.MeterSubject {
 	return link.NewMeterSubject(link.MeterSubjectFields{
 		CapabilityID: spec.capID, TenantID: spec.tenant, MaxRequests: spec.maxRequests,
-		MaxBudget: int64(spec.maxBudget), UnitCode: spec.unit, Copies: spec.copies,
+		MaxBudgetAmount: int64(spec.maxBudget), UnitCode: spec.unit, Copies: spec.copies,
 	}).(limes.MeterSubject)
 }

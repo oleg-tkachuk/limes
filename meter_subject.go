@@ -61,8 +61,8 @@ func (s MeterSubject) TenantID() uuid.UUID { return s.tenantID }
 // MaxRequests is the capability's own request ceiling; 0 is unlimited.
 func (s MeterSubject) MaxRequests() int64 { return s.maxRequests }
 
-// MaxBudget is the capability's own budget ceiling; 0 is unlimited.
-func (s MeterSubject) MaxBudget() Nanos { return s.maxBudget }
+// MaxBudgetAmount is the capability's own budget ceiling; 0 is unlimited.
+func (s MeterSubject) MaxBudgetAmount() Nanos { return s.maxBudget }
 
 // UnitCode is the unit the capability counts in, normalised: empty reads
 // as DefaultUnitCode.
@@ -82,7 +82,7 @@ func init() {
 		copies, _ := f.Copies.([]CopyCeiling)
 		return MeterSubject{
 			capabilityID: f.CapabilityID, tenantID: f.TenantID,
-			maxRequests: f.MaxRequests, maxBudget: Nanos(f.MaxBudget),
+			maxRequests: f.MaxRequests, maxBudget: Nanos(f.MaxBudgetAmount),
 			unitCode: canonicalUnitCode(f.UnitCode), copies: copies,
 		}
 	}

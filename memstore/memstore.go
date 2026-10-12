@@ -109,11 +109,11 @@ type LedgerEntry struct {
 	TenantID  uuid.UUID
 	Amount    limes.Nanos
 	UnitCode  string
-	Op        string
+	Op        limes.Op
 	Actor     string
 	At        time.Time
-	// Refunded is the total refunded from this charge so far.
-	Refunded limes.Nanos
+	// RefundedAmount is the total refunded from this charge so far.
+	RefundedAmount limes.Nanos
 	// Copies are the revocation ids of the Biscuit copies the charge also
 	// debited, innermost first.
 	Copies [][]byte
@@ -289,20 +289,20 @@ const maxLineageDepth = 64
 func (s *Store[TX]) Revoke(_ context.Context, args limes.RevokeRequest) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.caps[args.ID]; !ok {
+	if _, ok := s.caps[args.CapabilityID]; !ok {
 		return limes.ErrNotFound
 	}
 	entry := limes.Revocation{
-		RevokedAt: s.nowFn(), Reason: args.Reason, Actor: args.Actor, Cascade: args.CascadeChildren,
+		RevokedAt: s.nowFn(), Note: args.Note, Actor: args.Actor, Cascade: args.CascadeChildren,
 	}
-	s.revokeLocked(args.ID, entry)
+	s.revokeLocked(args.CapabilityID, entry)
 	if !args.CascadeChildren {
 		return nil
 	}
 	// Breadth-first down the delegation tree from args.ID alone, to the
 	// depth the relational store walks: a capability revoked earlier without
 	// cascade elsewhere in the store is not a root of this walk.
-	level := []uuid.UUID{args.ID}
+	level := []uuid.UUID{args.CapabilityID}
 	for depth := 0; len(level) > 0 && depth < maxLineageDepth; depth++ {
 		var next []uuid.UUID
 		for id, c := range s.caps {
@@ -341,7 +341,7 @@ func (s *Store[TX]) RevokeBiscuit(_ context.Context, args limes.RevokeBiscuitReq
 	if _, ok := s.revokedCopies[string(args.RevocationID)]; !ok { // the first entry stands
 		s.revokedCopies[string(args.RevocationID)] = limes.BiscuitRevocation{
 			CapabilityID: args.CapabilityID, RevocationID: slices.Clone(args.RevocationID),
-			RevokedAt: s.nowFn(), Reason: args.Reason, Actor: args.Actor,
+			RevokedAt: s.nowFn(), Note: args.Note, Actor: args.Actor,
 		}
 	}
 	return nil
@@ -429,9 +429,9 @@ func (s *Store[TX]) ListByPrincipal(_ context.Context, req limes.ListByPrincipal
 	return limes.Page[limes.Capability]{Items: out, Next: out[len(out)-1].ID.String()}, nil
 }
 
-// maxUtilisationPct is where TenantBudgetSummary.UtilisationPct is clamped:
+// maxUtilizationPct is where TenantBudgetSummary.UtilizationPct is clamped:
 // a tenant past its ceiling is at 100%, not beyond.
-const maxUtilisationPct = 100
+const maxUtilizationPct = 100
 
 // percent turns a fraction into a percentage.
 const percent = 100
@@ -500,7 +500,8 @@ type hold struct {
 	tenantID  uuid.UUID
 	amount    limes.Nanos
 	unit      string
-	op, actor string
+	op        limes.Op
+	actor     string
 	expires   time.Time
 	copies    []limes.CopyCeiling
 }
@@ -529,7 +530,7 @@ func (s *UsageStore[TX]) Charge(
 	if req.Subject.TenantID() == uuid.Nil {
 		return limes.ChargeReceipt{}, errors.New("memstore: charge requires TenantID")
 	}
-	unit, err := limes.NormaliseUnitCode(req.Subject.UnitCode())
+	unit, err := limes.NormalizeUnitCode(req.Subject.UnitCode())
 	if err != nil {
 		return limes.ChargeReceipt{}, err
 	}
@@ -577,7 +578,7 @@ func (s *UsageStore[TX]) GetCharge(_ context.Context, chargeID uuid.UUID) (limes
 // record is the entry as the Meter contract reads a charge back.
 func (e LedgerEntry) record() limes.ChargeRecord {
 	return limes.ChargeRecord{
-		ChargeID: e.ID, CapabilityID: e.CapabilityID, Amount: e.Amount, Refunded: e.Refunded,
+		ID: e.ID, CapabilityID: e.CapabilityID, Amount: e.Amount, RefundedAmount: e.RefundedAmount,
 		UnitCode: e.UnitCode, ExternalRef: e.ExternalRef, Overrun: e.Overrun,
 	}
 }
@@ -609,7 +610,7 @@ func (s *UsageStore[TX]) appendLocked(entry LedgerEntry) {
 // when the same charge arrives again. s.mu must be held.
 func (s *UsageStore[TX]) replayLocked(e LedgerEntry) limes.ChargeReceipt {
 	return limes.ChargeReceipt{
-		ChargeID: e.ID, Spent: s.usage[e.CapabilityID].SpentAmount,
+		ChargeID: e.ID, SpentAmount: s.usage[e.CapabilityID].SpentAmount,
 		Replayed: true, Overrun: e.Overrun, TenantID: e.TenantID, UnitCode: e.UnitCode,
 	}
 }
@@ -654,10 +655,10 @@ func (s *UsageStore[TX]) chargeLocked(
 
 	u := s.usage[req.Subject.CapabilityID()]
 	if err := s.checkCeilingsLocked(ceilingCheck{
-		amount: req.Amount, released: released, maxBudget: req.Subject.MaxBudget(), unit: unit,
+		amount: req.Amount, released: released, maxBudget: req.Subject.MaxBudgetAmount(), unit: unit,
 		capID: req.Subject.CapabilityID(), tenantID: req.Subject.TenantID(), ancestors: ancestors, copies: req.Subject.Copies(),
 	}, crossed); err != nil {
-		return limes.ChargeReceipt{Spent: u.SpentAmount, TenantID: req.Subject.TenantID(), UnitCode: unit}, err
+		return limes.ChargeReceipt{SpentAmount: u.SpentAmount, TenantID: req.Subject.TenantID(), UnitCode: unit}, err
 	}
 	stagedSpent := u.SpentAmount + req.Amount
 
@@ -670,7 +671,7 @@ func (s *UsageStore[TX]) chargeLocked(
 		}
 		if err := onCharged(ctx, tx); err != nil {
 			// Nothing has been published — nothing to compensate.
-			return limes.ChargeReceipt{Spent: u.SpentAmount, TenantID: req.Subject.TenantID(), UnitCode: unit}, err
+			return limes.ChargeReceipt{SpentAmount: u.SpentAmount, TenantID: req.Subject.TenantID(), UnitCode: unit}, err
 		}
 	}
 
@@ -714,7 +715,7 @@ func (s *UsageStore[TX]) chargeLocked(
 	}
 	s.appendLocked(entry)
 	return limes.ChargeReceipt{
-		ChargeID: entry.ID, Spent: stagedSpent, Overrun: overrun, TenantID: req.Subject.TenantID(), UnitCode: unit,
+		ChargeID: entry.ID, SpentAmount: stagedSpent, Overrun: overrun, TenantID: req.Subject.TenantID(), UnitCode: unit,
 	}, nil
 }
 
@@ -754,7 +755,7 @@ func (s *UsageStore[TX]) checkCeilingsLocked(c ceilingCheck, crossed func(error)
 	}
 	for _, cp := range c.copies {
 		cc := s.copies[string(cp.RevocationID)]
-		if cp.MaxBudget > 0 && cc.spent+cc.reserved-c.released+c.amount > cp.MaxBudget {
+		if cp.MaxBudgetAmount > 0 && cc.spent+cc.reserved-c.released+c.amount > cp.MaxBudgetAmount {
 			if err := crossed(fmt.Errorf("%w: copy %x", limes.ErrBudgetExceeded, cp.RevocationID)); err != nil {
 				return err
 			}
@@ -838,7 +839,7 @@ func (s *UsageStore[TX]) Reserve(_ context.Context, req limes.ReserveRequest) (l
 	if req.Subject.TenantID() == uuid.Nil {
 		return limes.Reservation{}, errors.New("memstore: reserve requires TenantID")
 	}
-	unit, err := limes.NormaliseUnitCode(req.Subject.UnitCode())
+	unit, err := limes.NormalizeUnitCode(req.Subject.UnitCode())
 	if err != nil {
 		return limes.Reservation{}, err
 	}
@@ -856,7 +857,7 @@ func (s *UsageStore[TX]) Reserve(_ context.Context, req limes.ReserveRequest) (l
 
 	refuse := func(err error) error { return err }
 	if err := s.checkCeilingsLocked(ceilingCheck{
-		amount: req.Amount, maxBudget: req.Subject.MaxBudget(), unit: unit,
+		amount: req.Amount, maxBudget: req.Subject.MaxBudgetAmount(), unit: unit,
 		capID: req.Subject.CapabilityID(), tenantID: req.Subject.TenantID(), ancestors: ancestors, copies: req.Subject.Copies(),
 	}, refuse); err != nil {
 		return limes.Reservation{}, err
@@ -934,7 +935,7 @@ func (s *UsageStore[TX]) Settle(
 	// it was made under, against the subject's own ceiling.
 	held := link.NewMeterSubject(link.MeterSubjectFields{
 		CapabilityID: h.capID, TenantID: h.tenantID, MaxRequests: req.Subject.MaxRequests(),
-		MaxBudget: int64(req.Subject.MaxBudget()), UnitCode: h.unit, Copies: h.copies,
+		MaxBudgetAmount: int64(req.Subject.MaxBudgetAmount()), UnitCode: h.unit, Copies: h.copies,
 	}).(limes.MeterSubject)
 	receipt, err := s.chargeLocked(ctx, limes.ChargeRequest{
 		Subject: held, Amount: req.Amount, Op: h.op, Actor: h.actor, Overrun: req.Overrun,
@@ -961,7 +962,7 @@ func budgetsOnly(copies []limes.CopyCeiling) []limes.CopyCeiling {
 	}
 	out := make([]limes.CopyCeiling, len(copies))
 	for i, c := range copies {
-		out[i] = limes.CopyCeiling{RevocationID: slices.Clone(c.RevocationID), MaxBudget: c.MaxBudget}
+		out[i] = limes.CopyCeiling{RevocationID: slices.Clone(c.RevocationID), MaxBudgetAmount: c.MaxBudgetAmount}
 	}
 	return out
 }
@@ -1093,7 +1094,7 @@ func (s *UsageStore[TX]) Refund(_ context.Context, req limes.RefundRequest) (lim
 	}
 	e := &s.ledger[i]
 	receipt := limes.RefundReceipt{ChargeID: e.ID, TenantID: e.TenantID, UnitCode: e.UnitCode}
-	remaining := e.Amount - e.Refunded
+	remaining := e.Amount - e.RefundedAmount
 	amount := req.Amount
 	if amount == 0 {
 		amount = remaining
@@ -1124,8 +1125,8 @@ func (s *UsageStore[TX]) Refund(_ context.Context, req limes.RefundRequest) (lim
 			s.copies[string(id)] = cc
 		}
 	}
-	e.Refunded += amount
-	receipt.Refunded = amount
+	e.RefundedAmount += amount
+	receipt.RefundedAmount = amount
 	return receipt, nil
 }
 
@@ -1190,7 +1191,7 @@ func (s *UsageStore[TX]) SetTenantBudget(_ context.Context, args limes.SetTenant
 	if unit == "" {
 		unit = b.UnitCode
 	}
-	normalised, err := limes.NormaliseUnitCode(unit)
+	normalised, err := limes.NormalizeUnitCode(unit)
 	if err != nil {
 		return limes.TenantBudget{}, err
 	}
@@ -1269,7 +1270,7 @@ func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTen
 	out := make([]limes.TenantBudgetSummary, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, limes.TenantBudgetSummary{
-			TenantID: r.tenant, Budget: r.budget, UtilisationPct: min(r.pct, maxUtilisationPct),
+			TenantID: r.tenant, Budget: r.budget, UtilizationPct: min(r.pct, maxUtilizationPct),
 		})
 	}
 	return limes.Page[limes.TenantBudgetSummary]{Items: out, Next: next}, nil

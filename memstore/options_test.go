@@ -42,7 +42,7 @@ func TestStoreWithClockDrivesPurge(t *testing.T) {
 	if err := s.Insert(ctx, limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "op"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Revoke(ctx, limes.RevokeRequest{ID: c.ID}); err != nil {
+	if err := s.Revoke(ctx, limes.RevokeRequest{CapabilityID: c.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := s.Purge(ctx, limes.PurgeRequest{}); got.Purged != 0 {

@@ -141,7 +141,7 @@ func main() {
 	//    untouched, so a retry is always safe.
 	receipt, err := usage.Charge(ctx, limes.ChargeRequest{Subject: verified.MeterSubject(), Amount: limes.MustParseAmount("0.35"), Op: "search", Actor: "research-orchestrator"}, nil)
 	must(err, "charge")
-	fmt.Printf("charged  0.35 USD, spent now %s\n", receipt.Spent)
+	fmt.Printf("charged  0.35 USD, spent now %s\n", receipt.SpentAmount)
 
 	_, err = usage.Charge(ctx, limes.ChargeRequest{Subject: verified.MeterSubject(), Amount: limes.MustParseAmount("999"), Op: "search", Actor: "research-orchestrator"}, nil)
 	if !errors.Is(err, limes.ErrBudgetExceeded) {
@@ -151,7 +151,7 @@ func main() {
 
 	// 7. Revoke, cascading to everything the orchestrator delegated.
 	must(records.Revoke(ctx, limes.RevokeRequest{
-		ID: parent.ID, Reason: "example finished", Actor: "operator", CascadeChildren: true,
+		CapabilityID: parent.ID, Note: "example finished", Actor: "operator", CascadeChildren: true,
 	}), "revoke")
 
 	// The child stops either way — IsRevoked walks the chain — but only the

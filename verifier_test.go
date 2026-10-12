@@ -50,7 +50,7 @@ func (m *memStore) IsRevoked(_ context.Context, id uuid.UUID) (bool, error) {
 	return m.revoked[id], nil
 }
 func (m *memStore) Revoke(_ context.Context, args RevokeRequest) error {
-	m.revoked[args.ID] = true
+	m.revoked[args.CapabilityID] = true
 	return nil
 }
 func (m *memStore) IsBiscuitRevoked(_ context.Context, ids [][]byte) (bool, error) {
@@ -212,7 +212,7 @@ func TestVerify_Revoked(t *testing.T) {
 		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 	})
-	if err := store.Revoke(ctx, RevokeRequest{ID: cap.ID, Reason: "test"}); err != nil {
+	if err := store.Revoke(ctx, RevokeRequest{CapabilityID: cap.ID, Note: "test"}); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
 	_, err := verifier.Verify(ctx, VerifyRequest{Token: token, Audience: audienceData})

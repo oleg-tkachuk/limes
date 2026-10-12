@@ -8,7 +8,7 @@ import (
 // A meter request names its ceilings only through the subject: a field of
 // its own would be one a caller could type, or leave at zero and so lift.
 func TestMeterRequestsCarryNoCeilingOfTheirOwn(t *testing.T) {
-	ceilings := []string{"CapabilityID", "TenantID", "MaxRequests", "MaxBudget", "UnitCode", "Copies"}
+	ceilings := []string{"CapabilityID", "TenantID", "MaxRequests", "MaxBudgetAmount", "UnitCode", "Copies"}
 	for _, req := range []any{BumpRequest{}, ChargeRequest{}, ReserveRequest{}, SettleRequest{}} {
 		typ := reflect.TypeOf(req)
 		for _, name := range ceilings {

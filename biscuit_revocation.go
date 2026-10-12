@@ -56,7 +56,7 @@ type BiscuitRevocation struct {
 	CapabilityID uuid.UUID
 	RevocationID []byte
 	RevokedAt    time.Time
-	Reason       string
+	Note         string
 	Actor        string
 }
 
@@ -66,9 +66,9 @@ type RevokeBiscuitRequest struct {
 	CapabilityID uuid.UUID
 	// RevocationID is the id to list: BiscuitCopy.RevocationID.
 	RevocationID []byte
-	// Reason and Actor are stored for audit, as on RevokeRequest.
-	Reason string
-	Actor  string
+	// Note and Actor are stored for audit, as on RevokeRequest.
+	Note  string
+	Actor string
 }
 
 // BiscuitCopy identifies one copy of a capability's Biscuit.

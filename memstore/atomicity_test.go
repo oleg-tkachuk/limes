@@ -61,8 +61,8 @@ func TestChargeRollsBackWhenSideEffectFails(t *testing.T) {
 	if after.SpentAmount != before.SpentAmount {
 		t.Errorf("capability spend moved: %v → %v", before.SpentAmount, after.SpentAmount)
 	}
-	if spent.Spent != before.SpentAmount {
-		t.Errorf("returned spend = %v, want the unchanged %v", spent.Spent, before.SpentAmount)
+	if spent.SpentAmount != before.SpentAmount {
+		t.Errorf("returned spend = %v, want the unchanged %v", spent.SpentAmount, before.SpentAmount)
 	}
 
 	budgetAfter, err := usage.GetTenantBudget(ctx, tenantID)
@@ -97,8 +97,8 @@ func TestChargeRetryAfterRollbackIsClean(t *testing.T) {
 	if err != nil {
 		t.Fatalf("retry: %v", err)
 	}
-	if spent.Spent != 7*unit {
-		t.Errorf("spend after one failed + one successful charge = %v, want 7", spent.Spent)
+	if spent.SpentAmount != 7*unit {
+		t.Errorf("spend after one failed + one successful charge = %v, want 7", spent.SpentAmount)
 	}
 	if got := len(usage.Ledger()); got != 1 {
 		t.Errorf("ledger has %d entries, want exactly 1", got)
@@ -180,8 +180,8 @@ func TestNoTransactionModeWorksEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Charge: %v", err)
 	}
-	if spent.Spent != 3*unit {
-		t.Errorf("spent = %v, want 3", spent.Spent)
+	if spent.SpentAmount != 3*unit {
+		t.Errorf("spent = %v, want 3", spent.SpentAmount)
 	}
 	u, err := usage.GetUsage(ctx, capID)
 	if err != nil {

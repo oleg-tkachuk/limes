@@ -22,6 +22,6 @@ type subjectSpec struct {
 func newSubject(spec subjectSpec) limes.MeterSubject {
 	return link.NewMeterSubject(link.MeterSubjectFields{
 		CapabilityID: spec.capID, TenantID: spec.tenant, MaxRequests: spec.maxRequests,
-		MaxBudget: int64(spec.maxBudget), UnitCode: spec.unit, Copies: spec.copies,
+		MaxBudgetAmount: int64(spec.maxBudget), UnitCode: spec.unit, Copies: spec.copies,
 	}).(limes.MeterSubject)
 }

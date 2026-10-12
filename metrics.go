@@ -156,7 +156,7 @@ func (in *meteringInstruments) recordCharge(ctx context.Context, tenantID uuid.U
 	}
 	unit := in.attrs(receipt.TenantID, attribute.String(attrUnitCode, receipt.UnitCode))
 	in.chargeAmount.Add(ctx, amount.Float64(), unit)
-	in.currentSpend.Record(ctx, receipt.Spent.Float64(), unit)
+	in.currentSpend.Record(ctx, receipt.SpentAmount.Float64(), unit)
 }
 
 // recordBump counts one Bump attempt.
@@ -173,7 +173,7 @@ func (in *meteringInstruments) recordBump(ctx context.Context, tenantID uuid.UUI
 
 // recordRefund counts one committed refund, in the charge's unit.
 func (in *meteringInstruments) recordRefund(ctx context.Context, r RefundReceipt) {
-	in.refundAmount.Add(ctx, r.Refunded.Float64(), in.attrs(r.TenantID, attribute.String(attrUnitCode, r.UnitCode)))
+	in.refundAmount.Add(ctx, r.RefundedAmount.Float64(), in.attrs(r.TenantID, attribute.String(attrUnitCode, r.UnitCode)))
 }
 
 // recordReservation counts one Reserve attempt.

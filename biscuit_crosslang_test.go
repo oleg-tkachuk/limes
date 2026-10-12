@@ -111,11 +111,11 @@ func TestGenerateBiscuitFixtures(t *testing.T) {
 	attenuated, err := Attenuate(token, Attenuation{
 		Ops:              c.Attenuate.Ops,
 		ResourcePrefixes: c.Attenuate.ResourcePrefixes,
-		Planes:           c.Attenuate.Planes,
+		Audience:         c.Attenuate.Planes,
 		ExpiresAt:        c.Attenuate.ExpiresAt,
 		ConfirmationJKT:  c.Attenuate.BindJKT,
 		MaxRequests:      c.Attenuate.MaxRequests,
-		MaxBudget:        Nanos(c.Attenuate.MaxBudget),
+		MaxBudgetAmount:  Nanos(c.Attenuate.MaxBudget),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -211,7 +211,7 @@ func TestSharedAttenuationVerifies(t *testing.T) {
 		t.Errorf("ConfirmationJKT = %q, want %q", got.Capability().ConfirmationJKT, want.ConfirmationJKT)
 	}
 	if len(got.Capability().Copies) != 1 || got.Capability().Copies[0].MaxRequests != want.CopyMaxRequests ||
-		got.Capability().Copies[0].MaxBudget != Nanos(want.CopyMaxBudget) {
+		got.Capability().Copies[0].MaxBudgetAmount != Nanos(want.CopyMaxBudget) {
 		t.Errorf("Copies = %+v, want one with %d requests and %d nanos",
 			got.Capability().Copies, want.CopyMaxRequests, want.CopyMaxBudget)
 	}

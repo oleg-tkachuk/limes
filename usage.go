@@ -64,7 +64,7 @@ type Meter[TX any] interface {
 	//
 	//   1. Each Biscuit copy's own budget (req.Subject.Copies), innermost
 	//      first → ErrBudgetExceeded.
-	//   2. The capability's own ceiling (req.Subject.MaxBudget) →
+	//   2. The capability's own ceiling (req.Subject.MaxBudgetAmount) →
 	//      ErrBudgetExceeded.
 	//   3. Each ancestor's ceiling → ErrBudgetExceeded.
 	//   4. The tenant aggregate ceiling → ErrTenantBudgetExceeded.
@@ -251,7 +251,7 @@ type ChargeRequest struct {
 	Amount Nanos
 	// Op and Actor are stamped on the ledger row for attribution only;
 	// both may be empty and neither affects enforcement.
-	Op    string
+	Op    Op
 	Actor string
 	// ExternalRef names the cost in the consumer's own records — the id of
 	// the call or the event that reported it — and makes the charge
@@ -264,13 +264,13 @@ type ChargeRequest struct {
 
 // ChargeRecord is one charge as the ledger holds it.
 type ChargeRecord struct {
-	ChargeID     uuid.UUID
+	ID           uuid.UUID
 	CapabilityID uuid.UUID
-	// Amount is what the charge took; Refunded is what has been returned
+	// Amount is what the charge took; RefundedAmount is what has been returned
 	// from it since.
-	Amount   Nanos
-	Refunded Nanos
-	UnitCode string
+	Amount         Nanos
+	RefundedAmount Nanos
+	UnitCode       string
 	// ExternalRef is the charge's ChargeRequest.ExternalRef; empty for none.
 	ExternalRef string
 	// Overrun reports that the charge crossed a ceiling (OverrunRecord).
@@ -302,9 +302,9 @@ const (
 type ChargeReceipt struct {
 	// ChargeID identifies the ledger row; pass it to Meter.Refund.
 	ChargeID uuid.UUID
-	// Spent is the capability's spend as this call returns (its subtree's,
+	// SpentAmount is the capability's spend as this call returns (its subtree's,
 	// when it has delegated children).
-	Spent Nanos
+	SpentAmount Nanos
 	// Replayed reports that the charge was already in the ledger — the same
 	// ExternalRef, or a reservation already settled — so this call moved
 	// nothing and ChargeID names the earlier charge.
@@ -324,9 +324,9 @@ type ChargeReceipt struct {
 type RefundReceipt struct {
 	// ChargeID is the charge refunded from.
 	ChargeID uuid.UUID
-	// Refunded is the amount this call returned; zero when nothing was
+	// RefundedAmount is the amount this call returned; zero when nothing was
 	// left to refund.
-	Refunded Nanos
+	RefundedAmount Nanos
 	// TenantID and UnitCode are the charge's.
 	TenantID uuid.UUID
 	UnitCode string
@@ -349,7 +349,7 @@ type ReserveRequest struct {
 	// 0 = DefaultReservationTTL; negative is ErrInvalidRequest.
 	TTL time.Duration
 	// Op and Actor are carried onto the charge Settle records.
-	Op    string
+	Op    Op
 	Actor string
 }
 
@@ -363,7 +363,7 @@ type Reservation struct {
 	Amount   Nanos
 	UnitCode string
 	// Op and Actor are what Settle will stamp on the charge.
-	Op    string
+	Op    Op
 	Actor string
 	// Copies are the Biscuit copies the hold is also on, innermost first,
 	// with the budget each is held against; a hold counts no requests, so
@@ -441,9 +441,9 @@ type TenantBudgetSummary struct {
 	Slug        string
 	DisplayName string
 	Budget      TenantBudget
-	// UtilisationPct = spent / max × 100, clamped to [0, 100]. 0
+	// UtilizationPct = spent / max × 100, clamped to [0, 100]. 0
 	// when MaxBudgetAmount == 0 (unlimited/metering-only).
-	UtilisationPct float64
+	UtilizationPct float64
 }
 
 // ListTenantBudgetsRequest is the input shape for

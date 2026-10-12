@@ -72,7 +72,7 @@ func TestBiscuitAttenuationNarrowsOffline(t *testing.T) {
 	narrowed, err := Attenuate(token, Attenuation{
 		Ops:              []Op{OpGet},
 		ResourcePrefixes: []string{"corpus/public/"},
-		Planes:           []string{audienceData},
+		Audience:         []string{audienceData},
 		ExpiresAt:        soon,
 	})
 	if err != nil {
@@ -130,7 +130,7 @@ func TestBiscuitAttenuationCannotWiden(t *testing.T) {
 	cases := map[string]Attenuation{
 		"an op the token lacks":   {Ops: []Op{OpDelete}},
 		"a resource outside":      {ResourcePrefixes: []string{"other/"}},
-		"a plane the token lacks": {Planes: []string{audienceAdmin}},
+		"a plane the token lacks": {Audience: []string{audienceAdmin}},
 		"a later expiry":          {ExpiresAt: time.Now().Add(48 * time.Hour)},
 	}
 	for name, a := range cases {
@@ -236,7 +236,7 @@ func TestBiscuitCannotBeStrippedOrForged(t *testing.T) {
 func TestBiscuitRevokedWithItsCapability(t *testing.T) {
 	_, v, store, cap, token := biscuitFixture(t)
 	narrowed, _ := Attenuate(token, Attenuation{Ops: []Op{OpGet}})
-	if err := store.Revoke(context.Background(), RevokeRequest{ID: cap.ID, Reason: "test"}); err != nil {
+	if err := store.Revoke(context.Background(), RevokeRequest{CapabilityID: cap.ID, Note: "test"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := v.Verify(context.Background(), VerifyRequest{Token: narrowed, Audience: audienceData}); !errors.Is(err, ErrRevoked) {
@@ -307,7 +307,7 @@ func TestBiscuitAttenuationChainsNeverWiden(t *testing.T) {
 				a.ResourcePrefixes = pick(prefixes)
 			}
 			if r.IntN(3) == 0 {
-				a.Planes = pick(planes)
+				a.Audience = pick(planes)
 			}
 			if r.IntN(3) == 0 {
 				a.ExpiresAt = time.Now().Add(time.Duration(r.IntN(240)-60) * time.Minute)

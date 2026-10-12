@@ -53,8 +53,8 @@ func TestReadBlockFacts(t *testing.T) {
 // longer part of the vocabulary.
 func TestReadBlockFactsBudgetIsNanos(t *testing.T) {
 	f, err := readBlockFacts(decodedBlock{facts: []decodedFact{{name: biscuitFactMaxBudget, term: int64(1_500)}}}, "")
-	if err != nil || f.ceiling.MaxBudget != 1_500 {
-		t.Errorf("budget = %s, %v; want 1500 nanos", f.ceiling.MaxBudget, err)
+	if err != nil || f.ceiling.MaxBudgetAmount != 1_500 {
+		t.Errorf("budget = %s, %v; want 1500 nanos", f.ceiling.MaxBudgetAmount, err)
 	}
 	if _, err := readBlockFacts(decodedBlock{facts: []decodedFact{{name: "limes_max_budget_micros", term: int64(1_500)}}}, ""); err == nil {
 		t.Error("the micros budget fact was read")
