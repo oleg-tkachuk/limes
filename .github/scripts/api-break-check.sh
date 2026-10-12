@@ -36,9 +36,11 @@ module="$(go mod edit -json | jq -r .Module.Path)"
 
 # The subject marker and the footer Conventional Commits 1.0 define, as the
 # release's commit parser reads them: either case, any word as the type, and
-# the footer after leading spaces, a | or a *, followed by a colon or a space.
+# the footer after leading spaces, a | or a *, followed by a colon or a space,
+# on any line but the subject. The type is ASCII, as the parser's \w is; a
+# scope runs to the last ) before the !, as its (.*) does.
 # Anything it reads as breaking, this must too.
-SUBJECT_MARK='^[[:alnum:]_]*(\([^)]*\))?!: '
+SUBJECT_MARK='^[A-Za-z0-9_]*(\(.*\))?!: '
 FOOTER_MARK='^[[:space:]|*]*BREAKING[ -]CHANGE[:[:space:]]'
 
 work="$(mktemp -d)"
@@ -67,7 +69,7 @@ printf 'Incompatible API changes since %s:\n%s\n' "$merge_base" "$breaks"
 marked=false
 while IFS= read -r -d '' message; do
     if grep -qiE "$SUBJECT_MARK" <<<"$(head -n 1 <<<"$message")" ||
-        grep -qiE "$FOOTER_MARK" <<<"$message"; then
+        grep -qiE "$FOOTER_MARK" <<<"$(tail -n +2 <<<"$message")"; then
         marked=true
         break
     fi
