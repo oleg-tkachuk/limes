@@ -19,9 +19,7 @@ func revokeCopy(t *testing.T, v *Verifier, store *memStore, token string) Biscui
 	if err != nil {
 		t.Fatalf("BiscuitCopy: %v", err)
 	}
-	if err := store.RevokeBiscuit(context.Background(), RevokeBiscuitRequest{
-		CapabilityID: c.CapabilityID, RevocationID: c.RevocationID, Note: "test",
-	}); err != nil {
+	if err := store.RevokeBiscuit(context.Background(), RevokeBiscuitRequest{Copy: c, Note: "test"}); err != nil {
 		t.Fatal(err)
 	}
 	return c
@@ -37,8 +35,8 @@ func TestRevokingABiscuitCopy(t *testing.T) {
 	sibling, _ := Attenuate(root, Attenuation{Ops: []Op{OpPut}})
 
 	got := revokeCopy(t, v, store, mid)
-	if got.CapabilityID != cap.ID {
-		t.Fatalf("copy names capability %s, want %s", got.CapabilityID, cap.ID)
+	if got.CapabilityID() != cap.ID {
+		t.Fatalf("copy names capability %s, want %s", got.CapabilityID(), cap.ID)
 	}
 
 	for name, tc := range map[string]struct {
@@ -108,8 +106,8 @@ func TestBiscuitCopyNamesTheLastBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 	ids := b.RevocationIds()
-	if len(ids) != 2 || !bytes.Equal(ids[0], rootCopy.RevocationID) || !bytes.Equal(ids[1], midCopy.RevocationID) {
-		t.Fatalf("ids %x; root copy %x, mid copy %x", ids, rootCopy.RevocationID, midCopy.RevocationID)
+	if len(ids) != 2 || !bytes.Equal(ids[0], rootCopy.RevocationID()) || !bytes.Equal(ids[1], midCopy.RevocationID()) {
+		t.Fatalf("ids %x; root copy %x, mid copy %x", ids, rootCopy.RevocationID(), midCopy.RevocationID())
 	}
 }
 
@@ -189,10 +187,10 @@ func TestSharedAttenuationRevokedThroughItsSeed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if attCopy.CapabilityID != seedCopy.CapabilityID || bytes.Equal(attCopy.RevocationID, seedCopy.RevocationID) {
+	if attCopy.CapabilityID() != seedCopy.CapabilityID() || bytes.Equal(attCopy.RevocationID(), seedCopy.RevocationID()) {
 		t.Fatalf("attenuated copy %+v, seed copy %+v", attCopy, seedCopy)
 	}
-	copies[string(seedCopy.RevocationID)] = true
+	copies[string(seedCopy.RevocationID())] = true
 	req := withProof(t.Context(), t, readBiscuitCase(t).bindKey(t), attenuated, audienceData, goldenClock())
 	if _, err := v.Verify(ctx, req); !errors.Is(err, ErrRevoked) {
 		t.Fatalf("err = %v, want ErrRevoked", err)
@@ -366,4 +364,29 @@ func TestCachedBiscuitRevocationChecker(t *testing.T) {
 		}
 	})
 
+}
+
+// A request names a copy only as Verifier.BiscuitCopy read it, and the copy
+// hands out ids of its own: a caller can neither pair a revocation id with
+// another capability nor alter the one a copy holds.
+func TestBiscuitCopyIsReadOnly(t *testing.T) {
+	_, v, _, cap, root := biscuitFixture(t)
+	c, err := v.BiscuitCopy(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.CapabilityID() != cap.ID {
+		t.Fatalf("copy of capability %s, want %s", c.CapabilityID(), cap.ID)
+	}
+	id := c.RevocationID()
+	id[0] ^= 0xff
+	if bytes.Equal(c.RevocationID(), id) {
+		t.Error("a caller altered the copy's revocation id through what it handed out")
+	}
+	if err := (RevokeBiscuitRequest{}).Validate(); !errors.Is(err, ErrInvalidRequest) {
+		t.Errorf("a request naming no copy: err = %v, want ErrInvalidRequest", err)
+	}
+	if err := (RevokeBiscuitRequest{Copy: c}).Validate(); err != nil {
+		t.Errorf("a request naming a verified copy: %v", err)
+	}
 }

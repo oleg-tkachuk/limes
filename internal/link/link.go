@@ -25,3 +25,9 @@ type MeterSubjectFields struct {
 // ceilings no issuer signed. The root sets it as it initialises; outside the
 // module only a verified capability makes one.
 var NewMeterSubject func(MeterSubjectFields) any
+
+// NewBiscuitCopy builds a limes.BiscuitCopy of a capability id and a
+// revocation id, for the module's own conformance suites: a store checked
+// against copies no verifier read. The root sets it as it initialises;
+// outside the module only Verifier.BiscuitCopy makes one.
+var NewBiscuitCopy func(capabilityID uuid.UUID, revocationID []byte) any

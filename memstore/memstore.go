@@ -345,17 +345,18 @@ func (s *Store) IsBiscuitRevoked(_ context.Context, revocationIDs [][]byte) (boo
 
 // RevokeBiscuit implements limes.BiscuitRevocationStore.
 func (s *Store) RevokeBiscuit(_ context.Context, args limes.RevokeBiscuitRequest) error {
-	if len(args.RevocationID) == 0 {
-		return fmt.Errorf("%w: memstore: revocation id required", limes.ErrInvalidRequest)
+	if err := args.Validate(); err != nil {
+		return err
 	}
+	capID, revocationID := args.Copy.CapabilityID(), args.Copy.RevocationID()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.caps[args.CapabilityID]; !ok {
+	if _, ok := s.caps[capID]; !ok {
 		return limes.ErrNotFound
 	}
-	if _, ok := s.revokedCopies[string(args.RevocationID)]; !ok { // the first entry stands
-		s.revokedCopies[string(args.RevocationID)] = limes.BiscuitRevocation{
-			CapabilityID: args.CapabilityID, RevocationID: slices.Clone(args.RevocationID),
+	if _, ok := s.revokedCopies[string(revocationID)]; !ok { // the first entry stands
+		s.revokedCopies[string(revocationID)] = limes.BiscuitRevocation{
+			CapabilityID: capID, RevocationID: revocationID,
 			RevokedAt: s.nowFn(), Note: args.Note, Actor: args.Actor,
 		}
 	}

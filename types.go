@@ -399,18 +399,24 @@ func (p Principal) clone() Principal {
 // is append-only.
 func (c Capability) Clone() Capability { return c.clone() }
 
+// cloneCopyCeilings is cs with revocation ids of its own; nil stays nil.
+func cloneCopyCeilings(cs []CopyCeiling) []CopyCeiling {
+	if cs == nil {
+		return nil
+	}
+	out := make([]CopyCeiling, len(cs))
+	for i, c := range cs {
+		c.RevocationID = slices.Clone(c.RevocationID)
+		out[i] = c
+	}
+	return out
+}
+
 // clone is c with slices and pointers of its own.
 func (c Capability) clone() Capability {
 	c.Subject = c.Subject.clone()
 	c.Audience = slices.Clone(c.Audience)
 	c.Caveats = c.Caveats.clone()
-	if c.Copies != nil {
-		copies := make([]CopyCeiling, len(c.Copies))
-		for i, cc := range c.Copies {
-			cc.RevocationID = slices.Clone(cc.RevocationID)
-			copies[i] = cc
-		}
-		c.Copies = copies
-	}
+	c.Copies = cloneCopyCeilings(c.Copies)
 	return c
 }

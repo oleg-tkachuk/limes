@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/oleg-tkachuk/limes/internal/link"
 )
 
 // Revoking one copy of a Biscuit.
@@ -36,11 +39,12 @@ type BiscuitRevocationLookup interface {
 type BiscuitRevocationStore interface {
 	BiscuitRevocationLookup
 
-	// RevokeBiscuit lists one revocation id of a capability's Biscuit.
-	// Idempotent. Returns ErrNotFound when the capability is not on record
-	// — or not visible to the caller — so a caller cannot revoke a copy of a
-	// capability it cannot see, and an ErrInvalidRequest for an empty
-	// revocation id.
+	// RevokeBiscuit lists the revocation id of one Biscuit copy, under the
+	// capability the copy belongs to — the pair Verifier.BiscuitCopy read
+	// from the token, which no caller can assemble. Idempotent. Returns
+	// ErrNotFound when the capability is not on record — or not visible to
+	// the caller — so a caller cannot revoke a copy of a capability it cannot
+	// see, and ErrInvalidRequest for a request naming no copy.
 	RevokeBiscuit(ctx context.Context, req RevokeBiscuitRequest) error
 
 	// GetBiscuitRevocation reads back what RevokeBiscuit wrote for one
@@ -60,27 +64,43 @@ type BiscuitRevocation struct {
 
 // RevokeBiscuitRequest is the input shape for BiscuitRevocationStore.RevokeBiscuit.
 type RevokeBiscuitRequest struct {
-	// CapabilityID is the capability the Biscuit seals.
-	CapabilityID uuid.UUID
-	// RevocationID is the id to list: BiscuitCopy.RevocationID.
-	RevocationID []byte
+	// Copy is the copy to revoke, as Verifier.BiscuitCopy read it.
+	Copy BiscuitCopy
 	// Note and Actor are stored for audit, as on RevokeRequest.
 	Note  string
 	Actor string
 }
 
-// BiscuitCopy identifies one copy of a capability's Biscuit.
-type BiscuitCopy struct {
-	// CapabilityID is the capability the Biscuit seals.
-	CapabilityID uuid.UUID
-	// RevocationID is the id of the copy's last block: listing it revokes
-	// this copy and every copy attenuated from it.
-	RevocationID []byte
-	// Limits are the request and budget limits in force on the copy — its
-	// own and those of the copies it was attenuated from — innermost first;
-	// CopyUsageReader reads their counters.
-	Limits []CopyCeiling
+// Validate refuses a request naming no copy as ErrInvalidRequest.
+func (r RevokeBiscuitRequest) Validate() error {
+	if r.Copy.capabilityID == uuid.Nil || len(r.Copy.revocationID) == 0 {
+		return invalidRequest("revoke biscuit: no copy; read one with Verifier.BiscuitCopy")
+	}
+	return nil
 }
+
+// BiscuitCopy identifies one copy of a capability's Biscuit. Only
+// Verifier.BiscuitCopy makes one, from a token whose signature chain it
+// checked, so the revocation id and the capability it is revoked under always
+// belong together: a caller cannot name another tenant's copy under its own
+// capability. The zero BiscuitCopy names nothing.
+type BiscuitCopy struct {
+	capabilityID uuid.UUID
+	revocationID []byte
+	limits       []CopyCeiling
+}
+
+// CapabilityID is the capability the Biscuit seals.
+func (c BiscuitCopy) CapabilityID() uuid.UUID { return c.capabilityID }
+
+// RevocationID is the id of the copy's last block: listing it revokes this
+// copy and every copy attenuated from it.
+func (c BiscuitCopy) RevocationID() []byte { return slices.Clone(c.revocationID) }
+
+// Limits are the request and budget limits in force on the copy — its own
+// and those of the copies it was attenuated from — innermost first;
+// CopyUsageReader reads their counters.
+func (c BiscuitCopy) Limits() []CopyCeiling { return cloneCopyCeilings(c.limits) }
 
 // BiscuitCopy reads which copy token is, after checking it as Verify does —
 // the sealed token's signature, issuer and tenant, then the Biscuit's
@@ -100,7 +120,13 @@ func (v *Verifier) BiscuitCopy(ctx context.Context, token string) (BiscuitCopy, 
 	if err != nil {
 		return BiscuitCopy{}, err
 	}
-	return BiscuitCopy{CapabilityID: c.ID, RevocationID: ids[len(ids)-1], Limits: c.Copies}, nil
+	return BiscuitCopy{capabilityID: c.ID, revocationID: slices.Clone(ids[len(ids)-1]), limits: cloneCopyCeilings(c.Copies)}, nil
+}
+
+func init() {
+	link.NewBiscuitCopy = func(capabilityID uuid.UUID, revocationID []byte) any {
+		return BiscuitCopy{capabilityID: capabilityID, revocationID: slices.Clone(revocationID)}
+	}
 }
 
 // CachedBiscuitRevocationChecker caches IsBiscuitRevoked answers per
