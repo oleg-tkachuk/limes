@@ -94,10 +94,10 @@ type jwtClaims struct {
 	ID        string   `json:"jti"`
 
 	// Capability claims.
-	Principal  Principal `json:"limes_principal"`
-	Caveats    Caveats   `json:"limes_caveats"`
-	ParentID   string    `json:"limes_parent_id,omitempty"`
-	Generation int64     `json:"limes_gen,omitzero"`
+	Principal  wirePrincipal `json:"limes_principal"`
+	Caveats    wireCaveats   `json:"limes_caveats"`
+	ParentID   string        `json:"limes_parent_id,omitempty"`
+	Generation int64         `json:"limes_gen,omitzero"`
 
 	// Confirmation is RFC 7800's `cnf`, omitted for an unbound capability.
 	Confirmation *cnfClaim `json:"cnf,omitzero"`
@@ -253,8 +253,8 @@ func claimsOf(c Capability) jwtClaims {
 		IssuedAt:   c.IssuedAt.Unix(),
 		ExpiresAt:  c.ExpiresAt.Unix(),
 		ID:         c.ID.String(),
-		Principal:  c.Subject,
-		Caveats:    c.Caveats,
+		Principal:  toWirePrincipal(c.Subject),
+		Caveats:    toWireCaveats(c.Caveats),
 		Generation: c.Generation,
 	}
 	if !c.NotBefore.IsZero() {
@@ -296,7 +296,7 @@ func parseClaims(seg string) (*Capability, error) {
 		ID:         id,
 		Issuer:     claims.Issuer,
 		Audience:   claims.Audience,
-		Caveats:    claims.Caveats,
+		Caveats:    claims.Caveats.caveats(),
 		IssuedAt:   time.Unix(claims.IssuedAt, 0).UTC(),
 		ExpiresAt:  time.Unix(claims.ExpiresAt, 0).UTC(),
 		Generation: claims.Generation,
@@ -304,7 +304,7 @@ func parseClaims(seg string) (*Capability, error) {
 	if claims.NotBefore != 0 {
 		cap.NotBefore = time.Unix(claims.NotBefore, 0).UTC()
 	}
-	cap.Subject = claims.Principal
+	cap.Subject = claims.Principal.principal()
 	if claims.Confirmation != nil {
 		cap.ConfirmationJKT = claims.Confirmation.JKT
 	}
