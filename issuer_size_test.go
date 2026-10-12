@@ -49,7 +49,7 @@ func TestDelegateAndBiscuitRefuseATokenPastMaxTokenBytes(t *testing.T) {
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData},
-		Caveats:  Caveats{Ops: []Op{OpGet}, ResourcePrefixes: []string{"corpus/"}},
+		Caveats:  Caveats{Ops: []Op{OpGet, OpShare}, ResourcePrefixes: []string{"corpus/"}},
 		TTL:      time.Minute,
 	})
 	if err != nil {

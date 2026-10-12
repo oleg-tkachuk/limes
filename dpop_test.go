@@ -53,7 +53,7 @@ func TestKeyBindingSurvivesTheTokenAndDelegation(t *testing.T) {
 
 	parent, token, err := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
-		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour,
+		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet, OpShare}}, TTL: time.Hour,
 		ConfirmationJKT: jkt,
 	})
 	if err != nil {

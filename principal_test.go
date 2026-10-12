@@ -59,17 +59,17 @@ func TestIssueAndDelegateValidateTheSubject(t *testing.T) {
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{Type: "robot", TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{"data"},
-		Caveats:  Caveats{Ops: []Op{OpGet}},
+		Caveats:  Caveats{Ops: []Op{OpGet, OpShare}},
 		TTL:      time.Minute,
 	}); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("Issue with an unknown principal type: err = %v, want ErrInvalidRequest", err)
 	}
 
-	parent := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet}})
+	parent := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet, OpShare}})
 	if _, _, err := issuer.delegate(ctx, DelegateRequest{
 		Parent:  asVerified(parent),
 		Subject: Principal{Type: PrincipalService, Subject: "s", Agent: &AgentPrincipal{AgentType: "worker"}},
-		Caveats: Caveats{Ops: []Op{OpGet}},
+		Caveats: Caveats{Ops: []Op{OpGet, OpShare}},
 		TTL:     time.Minute,
 	}); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("Delegate to a service with agent fields: err = %v, want ErrInvalidRequest", err)
@@ -104,7 +104,7 @@ func TestIssueAndDelegateKeepNoAliasOfTheCaller(t *testing.T) {
 		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a", Agent: &AgentPrincipal{AgentType: "worker"}},
 		Audience: []string{"data"},
 		Caveats: Caveats{
-			Ops: []Op{OpGet}, ResourcePrefixes: []string{"a/"}, ResourceURIs: []string{"a/b"},
+			Ops: []Op{OpGet, OpShare}, ResourcePrefixes: []string{"a/"}, ResourceURIs: []string{"a/b"},
 			SourceIPCIDR: []string{"10.0.0.0/8"},
 		},
 		TTL: time.Minute,
