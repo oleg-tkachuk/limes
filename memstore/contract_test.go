@@ -22,8 +22,11 @@ func TestMeterContract(t *testing.T) {
 		t.Helper()
 		records := newTestStore()
 		tenant := uuid.New()
+		// The clock stands still but for Advance, so holds made together
+		// expire together.
+		start := time.Now()
 		var offset atomic.Int64 // how far Advance has moved the clock
-		now := func() time.Time { return time.Now().Add(time.Duration(offset.Load())) }
+		now := func() time.Time { return start.Add(time.Duration(offset.Load())) }
 		return metertest.Env[struct{}]{
 			Ctx:              context.Background(),
 			Usage:            mustUsage(t, UsageStoreConfig[struct{}]{Records: records, Now: now}),

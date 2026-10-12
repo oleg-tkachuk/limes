@@ -171,8 +171,9 @@ type MeterReader interface {
 
 	// ListReservations returns, a page at a time, every reservation
 	// GetReservation would return that was made against the capability
-	// itself — not its delegated children — soonest to expire first. It
-	// refuses what ListReservationsRequest.Validate refuses.
+	// itself — not its delegated children — soonest to expire first, and
+	// holds expiring at the same instant in ascending ID, compared bytewise.
+	// It refuses what ListReservationsRequest.Validate refuses.
 	ListReservations(ctx context.Context, req ListReservationsRequest) (Page[Reservation], error)
 
 	// GetUsage returns the current snapshot. Returns ErrUsageNotFound when no
