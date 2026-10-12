@@ -15,14 +15,19 @@ import (
 func TestStoreContract(t *testing.T) {
 	storetest.Run(t, func(t *testing.T) storetest.Env {
 		t.Helper()
-		// The store's clock stands still, as storetest.Env.Now asks.
-		now := time.Now().UTC()
-		clock := func() time.Time { return now }
+		// The store's clock stands still but for Advance, as storetest.Env.Now
+		// asks.
+		start := time.Now().UTC()
+		var offset time.Duration
+		clock := func() time.Time { return start.Add(offset) }
 		store, err := NewStore(StoreConfig{Now: clock})
 		if err != nil {
 			t.Fatal(err)
 		}
-		return storetest.Env{Ctx: context.Background(), Store: store, Tenant: uuid.New(), Now: clock}
+		return storetest.Env{
+			Ctx: context.Background(), Store: store, Tenant: uuid.New(),
+			Now: clock, Advance: func(d time.Duration) { offset += d },
+		}
 	})
 }
 
