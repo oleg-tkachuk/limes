@@ -178,13 +178,13 @@ func TestRefundReturnsSpendToEveryCounterOnce(t *testing.T) {
 	// A partial refund, then a refund of "the rest": the second must return
 	// exactly what the first left, and a third must return nothing — a
 	// retried full refund is a no-op, not a second credit.
-	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("2")}); err != nil || got.RefundedAmount != 2*unit {
+	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("2")}); err != nil || got.Amount != 2*unit {
 		t.Fatalf("partial refund = %v, %v; want 2, nil", got, err)
 	}
-	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Remaining: true}); err != nil || got.RefundedAmount != 3*unit {
+	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Remaining: true}); err != nil || got.Amount != 3*unit {
 		t.Fatalf("remainder refund = %v, %v; want 3, nil", got, err)
 	}
-	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Remaining: true}); err != nil || got.RefundedAmount != 0 {
+	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Remaining: true}); err != nil || got.Amount != 0 {
 		t.Fatalf("repeated full refund = %v, %v; want 0, nil", got, err)
 	}
 	if _, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("1")}); !errors.Is(err, limes.ErrRefundExceedsCharge) {

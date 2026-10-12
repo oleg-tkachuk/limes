@@ -84,6 +84,9 @@ type VerifierConfig struct {
 	// issuer and verifier. Zero: DefaultLeeway; negative or past MaxLeeway
 	// is refused.
 	Leeway time.Duration
+	// NoLeeway holds nbf and exp to the verifier's clock exactly, for an
+	// issuer that shares it. It excludes a Leeway.
+	NoLeeway bool
 
 	// MaxTokenBytes rejects longer tokens before decoding them. Default
 	// DefaultMaxTokenBytes when zero; negative is refused.
@@ -193,7 +196,12 @@ func NewVerifier(cfg VerifierConfig) (*Verifier, error) {
 	if cfg.MaxTokenBytes < 0 {
 		return nil, fmt.Errorf("limes: VerifierConfig.MaxTokenBytes %d is negative", cfg.MaxTokenBytes)
 	}
-	if cfg.Leeway == 0 {
+	switch {
+	case cfg.NoLeeway && cfg.Leeway != 0:
+		return nil, fmt.Errorf("limes: VerifierConfig.Leeway %s beside NoLeeway", cfg.Leeway)
+	case cfg.NoLeeway:
+		// Leeway stays 0: the window is exact.
+	case cfg.Leeway == 0:
 		cfg.Leeway = DefaultLeeway
 	}
 	if cfg.MaxTokenBytes == 0 {
