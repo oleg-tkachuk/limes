@@ -19,7 +19,10 @@ name: Auto-merge
 #
 # Same-repository pull requests only. A fork's branch belongs to its author:
 # rewriting it is not ours to do, and merging it stays a person's decision.
-# A draft is left alone until it is marked ready.
+# A draft is left alone until it is marked ready. Renovate's are left to
+# Renovate, which merges them itself only once a release is old enough
+# (renovate.json, minimumReleaseAge) and rebases its own branches: queueing
+# them here merged them while that check was still pending.
 #
 # Repository settings this relies on (Settings → General → Pull Requests):
 # "Allow auto-merge" and "Allow merge commits" on, and branch protection or a
@@ -45,7 +48,8 @@ jobs:
     if: >-
       github.event_name == 'pull_request' &&
       !github.event.pull_request.draft &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'renovate[bot]'
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions: {}
