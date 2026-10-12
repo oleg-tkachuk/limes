@@ -52,6 +52,11 @@ type Env struct {
 	// Optional: without it, the checks at an expiry's exact instant are
 	// skipped, and the checks read the wall clock.
 	Now func() time.Time
+	// DeleteTenant moves a tenant NewTenant created to the trash, for a
+	// store that knows its tenants: it then refuses an id it never created
+	// as ErrUnknownTenant and one in the trash as ErrTenantDeleted.
+	// Optional: without it, those checks are skipped.
+	DeleteTenant func(tenant uuid.UUID) error
 }
 
 // newTenant is another tenant, from NewTenant when the Env has one.
@@ -186,6 +191,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"ListByPrincipalExpiresAtTheInstant", checkListExpiryInstant},
 		{"ListByPrincipalRefusesAMalformedRequest", checkListMalformed},
 		{"ListByPrincipalKeepsTenantsApart", checkListTenants},
+		{"InsertRefusesATenantItCannotMintFor", checkInsertTenants},
 		{"BiscuitRevocation", checkBiscuit},
 	}
 	for _, c := range checks {
@@ -525,6 +531,40 @@ func checkListExpiryInstant(t *testing.T, f fixture) {
 	slices.SortFunc(want, compareUUID)
 	if !slices.Equal(got, want) {
 		t.Errorf("listed with expired %v, want both %v", got, want)
+	}
+}
+
+// checkInsertTenants holds a store that knows its tenants to minting only
+// for a live one: an id it never created is ErrUnknownTenant, one in the
+// trash ErrTenantDeleted, and neither is recorded. It needs
+// Env.DeleteTenant.
+func checkInsertTenants(t *testing.T, f fixture) {
+	if f.DeleteTenant == nil {
+		t.Skip("Env.DeleteTenant is not set")
+	}
+	deleted, err := f.newTenant()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.DeleteTenant(deleted); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name   string
+		tenant uuid.UUID
+		want   error
+	}{
+		{"an unknown tenant", uuid.New(), limes.ErrUnknownTenant},
+		{"a deleted tenant", deleted, limes.ErrTenantDeleted},
+	} {
+		c := f.newCapability("agent:orphan", uuid.Nil, f.now.Add(ttl))
+		c.Subject.TenantID = tc.tenant
+		if err := f.Store.Insert(f.tenantCtx(tc.tenant), limes.InsertRequest{Capability: c, IssuedBy: issuedBy}); !errors.Is(err, tc.want) {
+			t.Errorf("Insert for %s: err = %v, want %v", tc.name, err, tc.want)
+		}
+		if _, err := f.Store.GetRecord(f.tenantCtx(tc.tenant), c.ID); !errors.Is(err, limes.ErrNotFound) {
+			t.Errorf("GetRecord after an Insert for %s: err = %v, want ErrNotFound", tc.name, err)
+		}
 	}
 }
 
