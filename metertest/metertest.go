@@ -20,6 +20,7 @@ package metertest
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"math"
@@ -288,6 +289,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"ReservationsReadBack", checkReservations[TX]},
 		{"SumsExactly", checkSumsExactly[TX]},
 		{"ReservationsPage", checkReservationsPage[TX]},
+		{"ReservationsTiedOnExpiryPageInIDOrder", checkReservationsTied[TX]},
 		{"HousekeepingRefusesANegativeLimit", checkHousekeepingLimits[TX]},
 		{"PurgeOrphansReleasesWhatARemovedCapabilityHeld", checkPurgeOrphans[TX]},
 		{"TenantBudgetKeepsItsPeriodEnd", checkPeriodEnd[TX]},
@@ -1900,6 +1902,50 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 // longestTTL is the longest hold a ReserveRequest can ask for: it expires
 // centuries out, past what a count of nanoseconds since 1970 can hold.
 const longestTTL = time.Duration(math.MaxInt64)
+
+// checkReservationsTied holds a store to its order among holds that expire
+// at the same instant: ascending ID, bytewise, page after page. Ties form
+// only when the store's clock stands still between the holds; without one
+// there is nothing to order and the check is skipped.
+func checkReservationsTied[TX any](t *testing.T, f fixture[TX]) {
+	const holds = 4
+	var want []limes.Reservation
+	for range holds {
+		r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one, TTL: time.Minute})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want = append(want, r)
+	}
+	slices.SortFunc(want, func(a, b limes.Reservation) int {
+		return cmp.Or(a.ExpiresAt.Compare(b.ExpiresAt), bytes.Compare(a.ID[:], b.ID[:]))
+	})
+	if !slices.ContainsFunc(want[1:], func(r limes.Reservation) bool { return r.ExpiresAt.Equal(want[0].ExpiresAt) }) {
+		t.Skip("the store's clock moved between the holds; none expire together")
+	}
+	var got []uuid.UUID
+	cursor := ""
+	for range holds + 1 {
+		page, err := f.Usage.ListReservations(f.Ctx, limes.ListReservationsRequest{CapabilityID: f.child, Limit: 1, Cursor: cursor})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range page.Items {
+			got = append(got, r.ID)
+		}
+		if page.Next == "" {
+			break
+		}
+		cursor = page.Next
+	}
+	wantIDs := make([]uuid.UUID, len(want))
+	for i, r := range want {
+		wantIDs[i] = r.ID
+	}
+	if !slices.Equal(got, wantIDs) {
+		t.Errorf("holds expiring together, paged one at a time = %v, want %v in ascending ID", got, wantIDs)
+	}
+}
 
 // checkReservationsPage holds a store to paging a capability's reservations
 // in their order — the last two expiring past year 2262, where a cursor
