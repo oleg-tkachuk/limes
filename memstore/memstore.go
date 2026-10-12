@@ -462,6 +462,12 @@ func sameCopies(a, b []limes.CopyCeiling) bool {
 	return slices.EqualFunc(a, b, func(x, y limes.CopyCeiling) bool { return bytes.Equal(x.RevocationID, y.RevocationID) })
 }
 
+// sameCopyIDs reports whether a ledger entry's copy ids are those of the
+// copy limits a subject carries, in order.
+func sameCopyIDs(ids [][]byte, copies []limes.CopyCeiling) bool {
+	return slices.EqualFunc(ids, copies, func(id []byte, c limes.CopyCeiling) bool { return bytes.Equal(id, c.RevocationID) })
+}
+
 // checkSubject refuses a subject no verifier or record made: the zero
 // MeterSubject names no capability and no tenant to count against.
 func checkSubject(s limes.MeterSubject) error {
@@ -979,8 +985,10 @@ func (s *UsageStore[TX]) Settle(
 	subject := req.Subject.CapabilityID()
 	h, ok := s.holds[req.ReservationID]
 	if !ok {
-		// A reservation of another capability is none of this one's.
-		if e, settled := entryLocked(s, s.byReservation, req.ReservationID); settled && e.CapabilityID == subject {
+		// A reservation of another capability, or settled under other
+		// copies, is none of this one's: its receipt is not this subject's
+		// to read back either.
+		if e, settled := entryLocked(s, s.byReservation, req.ReservationID); settled && e.CapabilityID == subject && sameCopyIDs(e.Copies, req.Subject.Copies()) {
 			return s.replayLocked(e), nil
 		}
 	}
