@@ -188,7 +188,7 @@ func TestSeveralIssuersNeedAKeyDecision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := VerifierConfig{Keys: jwks.NewStatic(map[string]ed25519.PublicKey{"k1": pub}), Revocations: newMemStore()}
+	base := VerifierConfig{Keys: staticKeys(t, map[string]ed25519.PublicKey{"k1": pub}), Revocations: newMemStore()}
 	for name, tc := range map[string]struct {
 		issuers []string
 		binding map[string]string

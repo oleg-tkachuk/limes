@@ -38,8 +38,12 @@ func TestPurgeKeepsARevocationAcrossClockSkew(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	keys, err := jwks.NewStatic(jwks.StaticConfig{Keys: map[string]ed25519.PublicKey{key.KeyID: key.Public}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	v, err := limes.NewStandardVerifier(limes.VerifierConfig{
-		Keys: jwks.NewStatic(map[string]ed25519.PublicKey{key.KeyID: key.Public}), Revocations: records,
+		Keys: keys, Revocations: records,
 		TrustedIssuers: []string{issuerName}, Leeway: limes.MaxLeeway, Now: func() time.Time { return verifierNow },
 	})
 	if err != nil {
