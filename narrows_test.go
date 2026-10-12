@@ -30,6 +30,13 @@ func TestMatchResourceRespectsSegmentBoundaries(t *testing.T) {
 		{"corpus/public", "corpus/public/%2e%2E/private", false},
 		{"corpus/public", "corpus/public/..", false},
 		{"corpus/public", "corpus/public/..x", true},
+		// Nor between slashes a consumer that decodes first would split on.
+		{"corpus/public", "corpus/public/..%2Fsecret", false},
+		{"corpus/public", "corpus/public/..%2fsecret", false},
+		{"corpus/public", `corpus/public/..\secret`, false},
+		{"corpus/public", "corpus/public/..%5Csecret", false},
+		{"corpus/public", "corpus/public/%2e%2e%2Fsecret", false},
+		{"corpus/public", "corpus/public/a%2Fb", true},
 	}
 	for _, tc := range cases {
 		if got := MatchResource(tc.prefix, tc.uri); got != tc.want {

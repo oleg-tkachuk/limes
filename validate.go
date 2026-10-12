@@ -94,8 +94,14 @@ func (c Caveats) Validate() error {
 		return fmt.Errorf("%w: %w", ErrInvalidCaveats, err)
 	}
 	for _, cidr := range c.SourceIPCIDR {
-		if _, err := netip.ParsePrefix(cidr); err != nil {
+		p, err := netip.ParsePrefix(cidr)
+		if err != nil {
 			return fmt.Errorf("%w: source_ip_cidr %q: %w", ErrInvalidCaveats, cidr, err)
+		}
+		// CheckSource unmaps the client's address, so an IPv4-mapped IPv6
+		// prefix would admit no client at all: write it as IPv4.
+		if p.Addr().Is4In6() {
+			return fmt.Errorf("%w: source_ip_cidr %q is IPv4-mapped IPv6; write it as IPv4", ErrInvalidCaveats, cidr)
 		}
 	}
 	return nil

@@ -12,8 +12,8 @@ import (
 // a caveat that means "everything" is written by leaving the list empty, not
 // by an empty entry, so a stray "" can never silently widen a capability.
 //
-// A uri with a dot segment — "." or "..", percent-encoded or not — matches
-// nothing: what it names depends on how the consumer resolves it, so the
+// A uri with a dot segment — "." or "..", percent-encoded or not, between
+// slashes that may be encoded or backslashes — matches nothing: what it names depends on how the consumer resolves it, so the
 // match it seems to make by its text proves nothing about where it leads.
 //
 // This is the single definition of a resource match. Delegation narrowing and
@@ -32,14 +32,21 @@ func MatchResource(prefix, uri string) bool {
 // dotSegmentEncoded is a "." percent-encoded, in lower case.
 const dotSegmentEncoded = "%2e"
 
-// hasDotSegment reports whether s has a "/"-separated segment that is "." or
-// "..", counting "%2e" (any case) as a dot — the segments RFC 3986 resolves
-// away, which make a resource's text name somewhere other than it reads.
-// Caveats.Validate refuses a resource with one, and no request naming one
-// matches a restricted capability.
+// segmentSeparators read as a "/" when looking for a dot segment: the
+// percent-encoded slash, and the backslash and its encoding, which a consumer
+// that decodes before it splits, or a backend that takes either slash, treats
+// as one.
+var segmentSeparators = strings.NewReplacer("%2f", "/", `\`, "/", "%5c", "/")
+
+// hasDotSegment reports whether s has a segment that is "." or "..",
+// counting "%2e" (any case) as a dot and every segmentSeparators entry as a
+// "/" — the segments RFC 3986 resolves away, which make a resource's text
+// name somewhere other than it reads, also for a consumer that decodes before
+// it resolves. Caveats.Validate refuses a resource with one, and no request
+// naming one matches a restricted capability.
 func hasDotSegment(s string) bool {
-	for seg := range strings.SplitSeq(s, "/") {
-		switch strings.ReplaceAll(strings.ToLower(seg), dotSegmentEncoded, ".") {
+	for seg := range strings.SplitSeq(segmentSeparators.Replace(strings.ToLower(s)), "/") {
+		switch strings.ReplaceAll(seg, dotSegmentEncoded, ".") {
 		case ".", "..":
 			return true
 		}

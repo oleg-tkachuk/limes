@@ -27,10 +27,12 @@ func TestCaveatsValidate(t *testing.T) {
 		"budget past MaxNanos": {Ops: []Op{OpGet}, MaxBudgetAmount: MaxNanos + 1},
 		"bad unit":             {Ops: []Op{OpGet}, UnitCode: "XYZ"},
 		"bad cidr":             {Ops: []Op{OpGet}, SourceIPCIDR: []string{"10.0.0.0/33"}},
+		"IPv4-mapped cidr":     {Ops: []Op{OpGet}, SourceIPCIDR: []string{"::ffff:10.0.0.0/104"}},
 		"control in uri":       {Ops: []Op{OpGet}, ResourceURIs: []string{"a\x00b"}},
 		"dot-dot in prefix":    {Ops: []Op{OpGet}, ResourcePrefixes: []string{"a/../b"}},
 		"dot in uri":           {Ops: []Op{OpGet}, ResourceURIs: []string{"a/./b"}},
 		"encoded dot-dot":      {Ops: []Op{OpGet}, ResourcePrefixes: []string{"a/%2E%2e/b"}},
+		"dot-dot before %2F":   {Ops: []Op{OpGet}, ResourcePrefixes: []string{"corpus/..%2F"}},
 		"leading dot-dot":      {Ops: []Op{OpGet}, ResourceURIs: []string{"../b"}},
 	}
 	for name, c := range bad {
