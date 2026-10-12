@@ -94,16 +94,21 @@ func (f fixture) newCapability(subject string, parent uuid.UUID, expires time.Ti
 		Issuer: "storetest",
 		Subject: limes.Principal{
 			Type: limes.PrincipalAgent, TenantID: f.Tenant, Subject: subject,
-			Agent: &limes.AgentPrincipal{AgentType: "worker", AgentVersion: "1", RunID: uuid.New(), Model: "m"},
+			Agent: &limes.AgentPrincipal{
+				AgentType: "worker", AgentVersion: "1", RunID: uuid.New(), ParentAgentID: uuid.New(), Model: "m", MCPClient: "client",
+			},
 		},
 		Audience: []string{"data", "mcp"},
 		Caveats: limes.Caveats{
-			Ops:              []limes.Op{limes.OpGet, "tool:search"},
-			ResourcePrefixes: []string{"corpus/"},
-			Requests:         limes.RequestCeiling{Max: 7},
-			Budget:           limes.BudgetCeiling{Max: 3 * limes.NanosPerUnit / 2}, // 1.5
-			UnitCode:         "EUR",
-			SourceIPCIDR:     []string{"10.0.0.0/8"},
+			Ops:                    []limes.Op{limes.OpGet, "tool:search"},
+			ResourcePrefixes:       []string{"corpus/"},
+			ResourceURIs:           []string{"corpus/index.json"},
+			Requests:               limes.RequestCeiling{Max: 7},
+			Budget:                 limes.BudgetCeiling{Max: 3 * limes.NanosPerUnit / 2}, // 1.5
+			UnitCode:               "EUR",
+			AllowTaintedRead:       true,
+			IdempotencyKeyRequired: true,
+			SourceIPCIDR:           []string{"10.0.0.0/8"},
 		},
 		IssuedAt:        f.now,
 		NotBefore:       f.now,
@@ -191,6 +196,23 @@ func checkRoundTrip(t *testing.T, f fixture) {
 	}
 	if diff := diffCapabilities(got, want); diff != "" {
 		t.Fatalf("Get read back a different capability: %s", diff)
+	}
+	// Each ceiling lifted in turn: a store that drops either Unlimited reads
+	// a ceiling of 0 back, and a capability that allows nothing.
+	for name, lift := range map[string]func(*limes.Caveats){
+		"requests unlimited": func(c *limes.Caveats) { c.Requests = limes.RequestCeiling{Unlimited: true} },
+		"budget unlimited":   func(c *limes.Caveats) { c.Budget = limes.BudgetCeiling{Unlimited: true} },
+	} {
+		c := f.newCapability("agent:unlimited", uuid.Nil, f.now.Add(ttl))
+		lift(&c.Caveats)
+		f.insert(t, c)
+		got, err := f.get(c.ID)
+		if err != nil {
+			t.Fatalf("%s: GetRecord: %v", name, err)
+		}
+		if diff := diffCapabilities(got, c); diff != "" {
+			t.Errorf("%s: Get read back a different capability: %s", name, diff)
+		}
 	}
 }
 
@@ -335,6 +357,8 @@ func checkPurge(t *testing.T, f fixture) {
 	expired := f.insert(t, f.newCapability("agent:old", uuid.Nil, f.now.Add(-expiredAgo)))
 	unrevoked := f.insert(t, f.newCapability("agent:older", uuid.Nil, f.now.Add(-expiredAgo)))
 	live := f.live(t, "agent:new", uuid.Nil)
+	// Expired past MinPurgeRetention but within the retention asked for: kept.
+	recent := f.insert(t, f.newCapability("agent:recent", uuid.Nil, f.now.Add(-purgeGrace/2)))
 	f.revoke(t, expired.ID, false)
 	f.revoke(t, live.ID, false)
 	got, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace})
@@ -352,6 +376,9 @@ func checkPurge(t *testing.T, f fixture) {
 	}
 	if _, err := f.get(live.ID); err != nil || !f.revoked(t, live.ID) {
 		t.Errorf("Purge must keep a live record and its revocation: %v", err)
+	}
+	if _, err := f.get(recent.ID); err != nil {
+		t.Errorf("Purge removed a record expired for less than ExpiredFor: %v", err)
 	}
 }
 
@@ -437,6 +464,10 @@ func checkListFilters(t *testing.T, f fixture) {
 	expired := f.insert(t, f.newCapability(subject, uuid.Nil, f.now.Add(-expiredAgo)))
 	revoked := f.live(t, subject, uuid.Nil)
 	f.revoke(t, revoked.ID, false)
+	// The same subject under another principal type is another principal.
+	user := f.newCapability(subject, uuid.Nil, f.now.Add(ttl))
+	user.Subject.Type, user.Subject.Agent = limes.PrincipalUser, nil
+	f.insert(t, user)
 	base := limes.ListByPrincipalRequest{TenantID: f.Tenant, PrincipalType: limes.PrincipalAgent, Subject: subject}
 	cases := []struct {
 		name             string

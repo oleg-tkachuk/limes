@@ -65,3 +65,24 @@ func TestReservationCursorRoundTripsAndRefusesGarbage(t *testing.T) {
 		}
 	}
 }
+
+// A threshold compares exactly: 29 of 100 is at 29%, where a float quotient
+// reads 28.999…; and a spend near MaxNanos does not overflow the product.
+func TestAtOrPastIsExact(t *testing.T) {
+	const unit = limes.NanosPerUnit
+	for _, tc := range []struct {
+		spent, ceiling limes.Nanos
+		pct            float64
+		want           bool
+	}{
+		{29 * unit, 100 * unit, 29, true},
+		{29*unit - 1, 100 * unit, 29, false},
+		{1, 3, 33.3, true},
+		{limes.MaxNanos, limes.MaxNanos, 100, true},
+		{limes.MaxNanos - 1, limes.MaxNanos, 100, false},
+	} {
+		if got := atOrPast(tc.spent, tc.ceiling, tc.pct); got != tc.want {
+			t.Errorf("atOrPast(%s, %s, %v) = %v, want %v", tc.spent, tc.ceiling, tc.pct, got, tc.want)
+		}
+	}
+}
