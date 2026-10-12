@@ -229,15 +229,17 @@ type TenantBudgets interface {
 
 // UsageHousekeeping reclaims usage rows of capabilities that are gone.
 type UsageHousekeeping interface {
-	// DeleteUsage drops the capability's row. Called when the capability is
-	// reaped. It releases the capability's open reservations first,
+	// DeleteUsage drops the capability's row and the counters of its Biscuit
+	// copies. Called when the capability is reaped. It releases the
+	// capability's open reservations first,
 	// returning their holds to its ancestors and its tenant: nothing could
 	// settle or release them afterwards. A capability with no row is no
 	// error: there is nothing to drop.
 	DeleteUsage(ctx context.Context, req DeleteUsageRequest) error
 
 	// PurgeOrphans deletes the usage rows of capabilities no longer on
-	// record (Store.Purge), releasing their reservations as DeleteUsage does, at
+	// record (Store.Purge), with their copies' counters, releasing their
+	// reservations as DeleteUsage does, at
 	// most req.Limit of them; the caller loops while a batch comes back
 	// full.
 	PurgeOrphans(ctx context.Context, req PurgeOrphansRequest) (PurgeOrphansResult, error)
