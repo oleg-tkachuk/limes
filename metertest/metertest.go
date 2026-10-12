@@ -366,6 +366,16 @@ func checkExternalRefChargesOnce[TX any](t *testing.T, f fixture[TX]) {
 	if r, err := f.charge(limes.ChargeRequest{Amount: 5 * one, ExternalRef: "call-1"}, onCharged); !errors.Is(err, limes.ErrExternalRefConflict) {
 		t.Fatalf("the ref again for another amount = %+v, %v; want ErrExternalRefConflict", r, err)
 	}
+	// So is the same name for the same amount in another unit or for
+	// another tenant: it names another cost all the same.
+	for name, subject := range map[string]limes.MeterSubject{
+		"in another unit":    newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: otherUnit}),
+		"for another tenant": newSubject(subjectSpec{capID: f.child, tenant: uuid.New(), budget: budgetOf(childBudget)}),
+	} {
+		if r, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: subject, Amount: 2 * one, ExternalRef: "call-1"}, onCharged); !errors.Is(err, limes.ErrExternalRefConflict) {
+			t.Errorf("the ref again %s = %+v, %v; want ErrExternalRefConflict", name, r, err)
+		}
+	}
 	if fanOuts != 1 {
 		t.Errorf("onCharged ran %d times, want once", fanOuts)
 	}
