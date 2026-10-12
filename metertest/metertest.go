@@ -285,6 +285,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"AnExpiredHoldIsReleased", checkExpiry[TX]},
 		{"ListTenantBudgetsPagesMostAtRiskFirst", checkListTenantBudgets[TX]},
 		{"OverrunRecordCrossesACopyBudget", checkCopyOverrun[TX]},
+		{"ACopyCountsForItsCapabilityAndGoesWithIt", checkCopyCountersGo[TX]},
 		{"CopyUsageRefusesAnInvalidRequest", checkCopyUsageRefusesInvalid[TX]},
 		{"TenantBudgetReadsAgree", checkTenantBudgetReads[TX]},
 		{"ReservationsReadBack", checkReservations[TX]},
@@ -1051,6 +1052,66 @@ func checkCopyUsageRefusesInvalid[TX any](t *testing.T, f fixture[TX]) {
 			t.Errorf("CopyUsage with %s: err = %v, want ErrInvalidRequest", name, err)
 		}
 	}
+}
+
+// checkCopyCountersGo holds a CopyUsageReader to naming the capability a
+// copy counts for, and to dropping the copy's counters with the
+// capability's usage: by DeleteUsage, and by PurgeOrphans once the
+// capability is off record.
+func checkCopyCountersGo[TX any](t *testing.T, f fixture[TX]) {
+	reader, ok := f.Usage.(limes.CopyUsageReader)
+	if !ok {
+		return // a Meter that does not read copies back is checked no further
+	}
+	// requests is each copy's ceiling: the one request it is counted with.
+	const requests = 1
+	counted := func(capID uuid.UUID, copyID []byte) []limes.CopyUsage {
+		t.Helper()
+		copies := []limes.CopyCeiling{{RevocationID: copyID, Requests: &limes.RequestCeiling{Max: requests}}}
+		if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: f.Tenant, copies: copies})}); err != nil {
+			t.Fatal(err)
+		}
+		return f.copyUsage(t, reader, copyID)
+	}
+	deleted := []byte("copy-deleted")
+	if got := counted(f.child, deleted); len(got) != 1 || got[0].CapabilityID != f.child {
+		t.Fatalf("copy usage = %+v; want one copy counting for %s", got, f.child)
+	}
+	if err := f.Usage.DeleteUsage(f.Ctx, limes.DeleteUsageRequest{CapabilityID: f.child}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.copyUsage(t, reader, deleted); len(got) != 0 {
+		t.Errorf("copy usage after DeleteUsage of its capability = %+v; want none", got)
+	}
+
+	if f.DeleteCapability == nil {
+		return // PurgeOrphans needs a capability off record
+	}
+	orphan, err := f.newCapability(uuid.Nil, unlimitedBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	purged := []byte("copy-purged")
+	counted(orphan, purged)
+	if err := f.DeleteCapability(orphan); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Usage.PurgeOrphans(f.Ctx, limes.PurgeOrphansRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.copyUsage(t, reader, purged); len(got) != 0 {
+		t.Errorf("copy usage after PurgeOrphans of its capability = %+v; want none", got)
+	}
+}
+
+// copyUsage is what reader holds for the copy copyID.
+func (f fixture[TX]) copyUsage(t *testing.T, reader limes.CopyUsageReader, copyID []byte) []limes.CopyUsage {
+	t.Helper()
+	res, err := reader.CopyUsage(f.Ctx, limes.CopyUsageRequest{RevocationIDs: [][]byte{copyID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res.Copies
 }
 
 func checkCopyOverrun[TX any](t *testing.T, f fixture[TX]) {
