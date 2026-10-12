@@ -171,6 +171,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"CascadeRecordsEveryDescendant", checkCascade},
 		{"RevocationReachesEveryGeneration", checkDeepChain},
 		{"RevocationReachesTheDeepestChainAndRefusesADeeperOne", checkMaxDepth},
+		{"CascadeRecordsTheDeepestChain", checkMaxDepthCascade},
 		{"PurgeDropsExpiredRecordsAndTheirEntries", checkPurge},
 		{"PurgeWorksInBatches", checkPurgeBatches},
 		{"PurgeKeepsARevocationAVerifierMayStillNeed", checkPurgeRetention},
@@ -614,6 +615,26 @@ func checkMaxDepth(t *testing.T, f fixture) {
 	deeper := f.live(t, "agent:deeper", leaf.ID)
 	if revoked, err := f.Store.IsRevoked(f.Ctx, deeper.ID); !errors.Is(err, limes.ErrDelegationTooDeep) {
 		t.Errorf("IsRevoked past MaxDelegationDepth = %v, %v; want ErrDelegationTooDeep", revoked, err)
+	}
+}
+
+// checkMaxDepthCascade holds a cascade to every generation of a chain
+// MaxDelegationDepth deep: each link gets an entry of its own, the deepest
+// included, not only the first few a shallow walk reaches.
+func checkMaxDepthCascade(t *testing.T, f fixture) {
+	root := f.live(t, "agent:root", uuid.Nil)
+	links := make([]uuid.UUID, 0, limes.MaxDelegationDepth)
+	parent := root.ID
+	for range limes.MaxDelegationDepth {
+		parent = f.live(t, "agent:link", parent).ID
+		links = append(links, parent)
+	}
+	f.revoke(t, root.ID, true)
+	for depth, id := range links {
+		rec, err := f.Store.GetRecord(f.Ctx, id)
+		if err != nil || rec.Revocation == nil || !rec.Revocation.Cascaded {
+			t.Fatalf("the link %d delegations below a cascade: %v; want an entry of its own", depth+1, err)
+		}
 	}
 }
 
