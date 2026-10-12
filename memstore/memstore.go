@@ -1082,7 +1082,7 @@ func (s *UsageStore[TX]) ReleaseExpired(_ context.Context, req limes.ReleaseExpi
 
 // Refund returns spend from one ledger entry to the counters it debited.
 func (s *UsageStore[TX]) Refund(_ context.Context, req limes.RefundRequest) (limes.RefundReceipt, error) {
-	if err := req.Amount.Validate(); err != nil {
+	if err := req.Validate(); err != nil {
 		return limes.RefundReceipt{}, err
 	}
 	s.mu.Lock()
@@ -1096,7 +1096,7 @@ func (s *UsageStore[TX]) Refund(_ context.Context, req limes.RefundRequest) (lim
 	receipt := limes.RefundReceipt{ChargeID: e.ID, TenantID: e.TenantID, UnitCode: e.UnitCode}
 	remaining := e.Amount - e.RefundedAmount
 	amount := req.Amount
-	if amount == 0 {
+	if req.Remaining {
 		amount = remaining
 	}
 	if amount > remaining {

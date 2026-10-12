@@ -177,16 +177,16 @@ func TestRefundReturnsSpendToEveryCounterOnce(t *testing.T) {
 	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("2")}); err != nil || got.RefundedAmount != 2*unit {
 		t.Fatalf("partial refund = %v, %v; want 2, nil", got, err)
 	}
-	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID}); err != nil || got.RefundedAmount != 3*unit {
+	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Remaining: true}); err != nil || got.RefundedAmount != 3*unit {
 		t.Fatalf("remainder refund = %v, %v; want 3, nil", got, err)
 	}
-	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID}); err != nil || got.RefundedAmount != 0 {
+	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Remaining: true}); err != nil || got.RefundedAmount != 0 {
 		t.Fatalf("repeated full refund = %v, %v; want 0, nil", got, err)
 	}
 	if _, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("1")}); !errors.Is(err, limes.ErrRefundExceedsCharge) {
 		t.Fatalf("over-refund err = %v, want ErrRefundExceedsCharge", err)
 	}
-	if _, err := u.Refund(ctx, limes.RefundRequest{ChargeID: uuid.New()}); !errors.Is(err, limes.ErrChargeNotFound) {
+	if _, err := u.Refund(ctx, limes.RefundRequest{ChargeID: uuid.New(), Remaining: true}); !errors.Is(err, limes.ErrChargeNotFound) {
 		t.Fatalf("unknown charge err = %v, want ErrChargeNotFound", err)
 	}
 

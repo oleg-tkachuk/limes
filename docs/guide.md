@@ -356,7 +356,7 @@ rejects, no counter moves, so a retry after rejection is safe.
 
 ```go
 usage.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("0.10")}) // partial
-usage.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID})               // the rest
+usage.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Remaining: true})                       // the rest
 ```
 
 A refund returns spend to every counter the charge took it from — except the

@@ -572,7 +572,7 @@ func checkRefundAcrossReset[TX any](t *testing.T, f fixture[TX]) {
 	if _, err := f.charge(limes.ChargeRequest{Amount: amount}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if r, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: before.ChargeID}); err != nil || r.RefundedAmount != amount {
+	if r, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: before.ChargeID, Remaining: true}); err != nil || r.RefundedAmount != amount {
 		t.Fatalf("refund of the earlier period's charge = %+v, %v; want %v", r, err, amount)
 	}
 	if got := f.tenantSpent(t); got != amount {
@@ -988,15 +988,23 @@ func checkRefund[TX any](t *testing.T, f fixture[TX]) {
 	if _, err := refund(3 * one); !errors.Is(err, limes.ErrRefundExceedsCharge) {
 		t.Errorf("refunding past what is left: err = %v, want ErrRefundExceedsCharge", err)
 	}
+	for name, req := range map[string]limes.RefundRequest{
+		"neither an amount nor Remaining": {ChargeID: r.ChargeID},
+		"an amount and Remaining":         {ChargeID: r.ChargeID, Amount: one, Remaining: true},
+	} {
+		if _, err := f.Usage.Refund(f.Ctx, req); !errors.Is(err, limes.ErrInvalidRequest) {
+			t.Errorf("refund of %s: err = %v, want ErrInvalidRequest", name, err)
+		}
+	}
 	for range 2 { // the rest, then nothing: a full refund is idempotent
-		if _, err := refund(0); err != nil {
+		if _, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: r.ChargeID, Remaining: true}); err != nil {
 			t.Fatalf("full refund: %v", err)
 		}
 	}
 	if f.spent(t, f.child) != 0 || f.spent(t, f.root) != 0 || f.tenantSpent(t) != 0 {
 		t.Error("a full refund left spend on a counter the charge moved")
 	}
-	if _, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: uuid.New()}); !errors.Is(err, limes.ErrChargeNotFound) {
+	if _, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: uuid.New(), Remaining: true}); !errors.Is(err, limes.ErrChargeNotFound) {
 		t.Errorf("refund of an unknown charge: err = %v, want ErrChargeNotFound", err)
 	}
 }

@@ -98,7 +98,7 @@ func TestCopyBudgetChargeAndRefund(t *testing.T) {
 		t.Fatalf("a refused charge moved the capability to %v", got.SpentAmount)
 	}
 	// Refund returns to the copy without being told about it.
-	if _, err := u.Refund(ctx, limes.RefundRequest{ChargeID: r.ChargeID}); err != nil {
+	if _, err := u.Refund(ctx, limes.RefundRequest{ChargeID: r.ChargeID, Remaining: true}); err != nil {
 		t.Fatal(err)
 	}
 	if got := u.copies["copy"].spent; got != 0 {

@@ -612,7 +612,7 @@ flowchart TB
 
     ok(["ChargeReceipt{ChargeID, SpentAmount, Overrun, TenantID, UnitCode}"])
     replay(["ChargeReceipt{Replayed}<br/>the earlier charge; nothing moves"])
-    refund["Refund(RefundRequest{ChargeID, Amount}) → RefundReceipt<br/>returns spend to every counter the charge took it from;<br/>the tenant's only within the same accounting period"]
+    refund["Refund(RefundRequest{ChargeID, Amount or Remaining}) → RefundReceipt<br/>returns spend to every counter the charge took it from;<br/>the tenant's only within the same accounting period"]
 
     e0["ErrInvalidAmount · ErrInvalidRequest<br/>ErrUnitCodeMismatch"]
     e1["ErrBudgetExceeded"]

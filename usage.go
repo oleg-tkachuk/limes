@@ -91,12 +91,13 @@ type Meter[TX any] interface {
 
 	// Refund returns spend from one recorded charge to every counter that
 	// charge debited (capability, ancestors, tenant aggregate), and records
-	// the refund against the charge. req.Amount = 0 refunds whatever
+	// the refund against the charge. req.Remaining refunds whatever
 	// remains, which makes a full refund idempotent; a partial refund that
 	// would take the total refunded past the charge returns
 	// ErrRefundExceedsCharge and changes nothing. An unknown charge ID
-	// returns ErrChargeNotFound. The receipt carries the amount actually
-	// refunded.
+	// returns ErrChargeNotFound, and a request naming neither an Amount nor
+	// Remaining, or both, ErrInvalidRequest. The receipt carries the amount
+	// actually refunded.
 	//
 	// A charge counted in a tenant accounting period that has since been
 	// closed (SetTenantBudget with ResetSpend) is refunded to the
@@ -385,11 +386,30 @@ type SettleRequest struct {
 	Overrun OverrunPolicy
 }
 
-// RefundRequest is the input to Meter.Refund.
+// RefundRequest is the input to Meter.Refund. It names either an Amount or
+// Remaining, never both and never neither.
 type RefundRequest struct {
 	ChargeID uuid.UUID
-	// Amount to refund; 0 = everything not yet refunded from this charge.
+	// Amount to refund, above zero and within MaxNanos (Nanos.Validate).
 	Amount Nanos
+	// Remaining refunds whatever of the charge is not yet refunded, which
+	// makes a full refund idempotent: once nothing remains, it returns
+	// nothing.
+	Remaining bool
+}
+
+// Validate refuses a request that names no amount, or both an amount and
+// Remaining.
+func (r RefundRequest) Validate() error {
+	switch {
+	case r.Remaining && r.Amount != 0:
+		return invalidRequest("refund: Amount %v and Remaining both set", r.Amount)
+	case r.Remaining:
+		return nil
+	case r.Amount == 0:
+		return invalidRequest("refund: neither an Amount nor Remaining")
+	}
+	return r.Amount.Validate()
 }
 
 // TenantBudget is the snapshot view of the tenant aggregate cap. Amounts are
