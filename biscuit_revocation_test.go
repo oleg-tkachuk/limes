@@ -193,7 +193,7 @@ func TestSharedAttenuationRevokedThroughItsSeed(t *testing.T) {
 		t.Fatalf("attenuated copy %+v, seed copy %+v", attCopy, seedCopy)
 	}
 	copies[string(seedCopy.RevocationID)] = true
-	req := withProof(t, readBiscuitCase(t).bindKey(t), attenuated, audienceData, goldenClock())
+	req := withProof(t.Context(), t, readBiscuitCase(t).bindKey(t), attenuated, audienceData, goldenClock())
 	if _, err := v.Verify(ctx, req); !errors.Is(err, ErrRevoked) {
 		t.Fatalf("err = %v, want ErrRevoked", err)
 	}

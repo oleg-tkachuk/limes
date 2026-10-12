@@ -256,7 +256,7 @@ func TestVerifyTellsAProofRefusalFromAProofStoreOutage(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = v.Verify(context.Background(), withProof(t, key, token, audienceData, time.Now()))
+			_, err = v.Verify(context.Background(), withProof(t.Context(), t, key, token, audienceData, time.Now()))
 			if !errors.Is(err, outage) || errors.Is(err, ErrUnauthenticated) {
 				t.Errorf("err = %v, want the outage and not ErrUnauthenticated", err)
 			}

@@ -14,7 +14,7 @@ import (
 func reservationFixture(t *testing.T) (*UsageStore[struct{}], uuid.UUID, uuid.UUID, *time.Time) {
 	t.Helper()
 	now := time.Unix(1_800_000_000, 0)
-	u := mustUsage(t, UsageStoreConfig[struct{}]{Now: func() time.Time { return now }})
+	u := mustUsage(t, UsageStoreConfig[struct{}]{Records: newTestStore(), Now: func() time.Time { return now }})
 	tenant := uuid.New()
 	if _, err := u.SetTenantBudget(context.Background(), limes.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("100")}}); err != nil {
 		t.Fatal(err)

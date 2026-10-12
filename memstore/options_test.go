@@ -16,7 +16,7 @@ type fakeTx struct{ id int }
 // The factory's handle is the one a charge's callback receives.
 func TestTxFactoryThreadsTheHandle(t *testing.T) {
 	const handleID = 42
-	u, err := NewUsageStore(UsageStoreConfig[*fakeTx]{TxFactory: func() *fakeTx { return &fakeTx{id: handleID} }})
+	u, err := NewUsageStore(UsageStoreConfig[*fakeTx]{Records: newTestStore(), TxFactory: func() *fakeTx { return &fakeTx{id: handleID} }})
 	if err != nil {
 		t.Fatal(err)
 	}

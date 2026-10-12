@@ -255,7 +255,7 @@ func TestBiscuitOfflineBinding(t *testing.T) {
 	if _, err := v.Verify(context.Background(), VerifyRequest{Token: bound, Audience: audienceData}); !errors.Is(err, dpop.ErrRequired) {
 		t.Fatalf("bound offline, no proof: err = %v, want dpop.ErrRequired", err)
 	}
-	got, err := v.Verify(context.Background(), withProof(t, keys["Ed25519"], bound, audienceData, time.Now()))
+	got, err := v.Verify(context.Background(), withProof(t.Context(), t, keys["Ed25519"], bound, audienceData, time.Now()))
 	if err != nil || got.Capability().ConfirmationJKT != jkt {
 		t.Fatalf("bound offline: %q, %v", got.Capability().ConfirmationJKT, err)
 	}

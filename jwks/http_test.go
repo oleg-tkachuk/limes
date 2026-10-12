@@ -3,6 +3,7 @@ package jwks
 import (
 	"context"
 	"crypto/ed25519"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -204,14 +205,39 @@ func TestRemoteJWKSKeepsTheSetWhenNoKeyIsUsable(t *testing.T) {
 	}
 }
 
+// The Cache-Control a handler sends: DefaultMaxAge when it names none, and
+// max-age=0 only when told to revalidate.
+func TestHandlerMaxAge(t *testing.T) {
+	keys := func() map[string]ed25519.PublicKey { return nil }
+	for name, tc := range map[string]struct {
+		cfg  HandlerConfig
+		want string
+	}{
+		"none named": {HandlerConfig{Keys: keys}, fmt.Sprintf("public, max-age=%d", int64(DefaultMaxAge/time.Second))},
+		"revalidate": {HandlerConfig{Keys: keys, Revalidate: true}, "public, max-age=0"},
+		"a minute":   {HandlerConfig{Keys: keys, MaxAge: time.Minute}, "public, max-age=60"},
+	} {
+		h, err := NewHandler(tc.cfg)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/jwks", nil))
+		if got := rec.Header().Get(httpx.HeaderCacheControl); got != tc.want {
+			t.Errorf("%s: Cache-Control = %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
 // A handler with no keys, or a negative max-age — an invalid Cache-Control
 // on every response — is refused; a remote resolver with a negative
 // interval or bound likewise.
 func TestConfigsRefuseNegatives(t *testing.T) {
 	keys := func() map[string]ed25519.PublicKey { return nil }
 	for name, cfg := range map[string]HandlerConfig{
-		"no keys":          {},
-		"negative max-age": {Keys: keys, MaxAge: -time.Second},
+		"no keys":                   {},
+		"negative max-age":          {Keys: keys, MaxAge: -time.Second},
+		"max-age beside revalidate": {Keys: keys, MaxAge: time.Second, Revalidate: true},
 	} {
 		if _, err := NewHandler(cfg); err == nil {
 			t.Errorf("NewHandler, %s: accepted", name)

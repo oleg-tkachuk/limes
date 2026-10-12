@@ -186,7 +186,7 @@ func TestSharedAttenuationVerifies(t *testing.T) {
 	if jkt, err := dpop.Thumbprint(key.Public()); err != nil || jkt != c.Attenuate.BindJKT {
 		t.Fatalf("bind_key_seed's thumbprint = %q, %v; want bind_jkt %q", jkt, err, c.Attenuate.BindJKT)
 	}
-	got, err := v.Verify(ctx, withProof(t, key, token, audienceData, goldenClock()))
+	got, err := v.Verify(ctx, withProof(t.Context(), t, key, token, audienceData, goldenClock()))
 	if err != nil {
 		t.Fatalf("the attenuated token is refused: %v", err)
 	}

@@ -92,7 +92,8 @@ verifier, err := limes.NewVerifier(limes.VerifierConfig{
 
 The issuer serves that document with `jwks.NewHandler` — `application/jwk-set+json`,
 a strong ETag answering `If-None-Match` with 304, `Cache-Control: public,
-max-age` (a negative `MaxAge` is refused) — over a function returning its keys, such as
+max-age` (`DefaultMaxAge` unless `MaxAge` says otherwise, `max-age=0` only with
+`Revalidate`; a negative `MaxAge` is refused) — over a function returning its keys, such as
 `jwks.Static.Keys`:
 
 ```go
@@ -228,7 +229,7 @@ jkt, _ := dpop.Thumbprint(agentKey.Public()) // Ed25519 or P-256
 cap, token, _ := issuer.Issue(ctx, limes.IssueRequest{ /* … */ ConfirmationJKT: jkt})
 
 // Client: a fresh proof per request, signed over its method, URL and token.
-proof, _ := dpop.Sign(agentKey, dpop.ProofRequest{Method: "POST", URL: url, Token: token, Now: time.Now()})
+proof, _ := dpop.Sign(ctx, agentKey, dpop.ProofRequest{Method: "POST", URL: url, Token: token, Now: time.Now()})
 
 // Server: the verifier checks the proof of every key-bound capability.
 replay, _ := dpop.NewMemoryReplayCache(dpop.MemoryReplayCacheConfig{})

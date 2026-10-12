@@ -31,7 +31,7 @@ func TestVerifyFailsClosedWhenTheNonceCannotBeChecked(t *testing.T) {
 	v := newVerifier(t, VerifierConfig{
 		Replay: newReplay(t, MemoryReplayCacheConfig{}), Nonces: downNonces{}, Now: func() time.Time { return now },
 	})
-	proof, err := Sign(priv, ProofRequest{Method: "GET", URL: dpopURL, Token: "tok", Nonce: "n", Now: now})
+	proof, err := Sign(context.Background(), priv, ProofRequest{Method: "GET", URL: dpopURL, Token: "tok", Nonce: "n", Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}

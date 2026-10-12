@@ -21,6 +21,7 @@ package memstore
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -154,8 +155,8 @@ func NewStore(cfg StoreConfig) (*Store, error) {
 type UsageStoreConfig[TX any] struct {
 	// Records is how the usage store finds each capability's ancestors and
 	// their ceilings, and which capabilities still exist for PurgeOrphans.
-	// Nil: no lineage is known — every capability is metered on its own, and
-	// none is known to be gone, so PurgeOrphans removes nothing.
+	// Required: without it no ancestor's ceiling would bind, which a store
+	// over a database never does.
 	Records *Store
 	// Now is the clock. Nil: time.Now.
 	Now func() time.Time
@@ -166,8 +167,11 @@ type UsageStoreConfig[TX any] struct {
 // NewUsageStore returns an empty usage store.
 //
 //	memstore.NewUsageStore(memstore.UsageStoreConfig[struct{}]{Records: records}) // no transactions
-//	memstore.NewUsageStore(memstore.UsageStoreConfig[pgx.Tx]{TxFactory: begin})    // a real handle
+//	memstore.NewUsageStore(memstore.UsageStoreConfig[pgx.Tx]{Records: records, TxFactory: begin}) // a real handle
 func NewUsageStore[TX any](cfg UsageStoreConfig[TX]) (*UsageStore[TX], error) {
+	if cfg.Records == nil {
+		return nil, errors.New("memstore: UsageStoreConfig.Records required")
+	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
@@ -457,9 +461,6 @@ func checkSubject(s limes.MeterSubject) error {
 
 // lineage returns the ancestors whose counters move with capID's.
 func (s *UsageStore[TX]) lineage(capID uuid.UUID) ([]limes.Capability, error) {
-	if s.records == nil {
-		return nil, nil
-	}
 	return s.records.ancestors(capID)
 }
 
@@ -1416,11 +1417,6 @@ func (s *UsageStore[TX]) PurgeOrphans(_ context.Context, req limes.PurgeOrphansR
 	limit, err := housekeepingLimit(req.Limit)
 	if err != nil {
 		return limes.PurgeOrphansResult{}, err
-	}
-	// With no records nothing is known to be gone: every row is a live
-	// capability's as far as this store can tell.
-	if s.records == nil {
-		return limes.PurgeOrphansResult{}, nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

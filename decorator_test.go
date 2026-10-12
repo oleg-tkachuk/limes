@@ -89,7 +89,7 @@ func hasMethods(t reflect.Type, names []string) bool {
 // memstore, but not to the decorator, fails here rather than vanishing behind
 // a wrapped store.
 func TestInstrumentForwardsEveryInterfaceTheStoreImplements(t *testing.T) {
-	inner, err := memstore.NewUsageStore(memstore.UsageStoreConfig[struct{}]{})
+	inner, err := memstore.NewUsageStore(memstore.UsageStoreConfig[struct{}]{Records: newMemstoreRecords(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,4 +113,15 @@ func TestInstrumentForwardsEveryInterfaceTheStoreImplements(t *testing.T) {
 	if !slices.Contains(checked, optional) {
 		t.Fatalf("checked %v, want %s among them", checked, optional)
 	}
+}
+
+// newMemstoreRecords is an empty memstore record store, for a usage store
+// to find lineage in.
+func newMemstoreRecords(t *testing.T) *memstore.Store {
+	t.Helper()
+	records, err := memstore.NewStore(memstore.StoreConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return records
 }
