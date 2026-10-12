@@ -290,6 +290,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"ReservationsReadBack", checkReservations[TX]},
 		{"SumsExactly", checkSumsExactly[TX]},
 		{"ReservationsPage", checkReservationsPage[TX]},
+		{"AHoldWithNoTTLLastsTheDefault", checkDefaultReservationTTL[TX]},
 		{"ReservationsTiedOnExpiryPageInIDOrder", checkReservationsTied[TX]},
 		{"HousekeepingRefusesANegativeLimit", checkHousekeepingLimits[TX]},
 		{"PurgeOrphansReleasesWhatARemovedCapabilityHeld", checkPurgeOrphans[TX]},
@@ -1978,6 +1979,28 @@ func checkReservationsTied[TX any](t *testing.T, f fixture[TX]) {
 	}
 	if !slices.Equal(got, wantIDs) {
 		t.Errorf("holds expiring together, paged one at a time = %v, want %v in ascending ID", got, wantIDs)
+	}
+}
+
+// clockSlack is how far apart a store's clock may read for two calls made
+// one after the other: far below any TTL the suite tells apart.
+const clockSlack = time.Second
+
+// checkDefaultReservationTTL holds a store to giving a hold with no TTL
+// DefaultReservationTTL: it expires when one asking for that TTL outright
+// does.
+func checkDefaultReservationTTL[TX any](t *testing.T, f fixture[TX]) {
+	reserve := func(ttl time.Duration) time.Time {
+		t.Helper()
+		r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one, TTL: ttl})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r.ExpiresAt
+	}
+	defaulted, explicit := reserve(0), reserve(limes.DefaultReservationTTL)
+	if gap := explicit.Sub(defaulted); gap < 0 || gap > clockSlack {
+		t.Errorf("a hold with no TTL expires at %v, %v before one of DefaultReservationTTL; want within %v", defaulted, gap, clockSlack)
 	}
 }
 
