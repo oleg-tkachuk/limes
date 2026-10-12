@@ -50,8 +50,8 @@ type meteringCopyStore[TX any] struct {
 	copies CopyUsageReader
 }
 
-func (s *meteringCopyStore[TX]) CopyUsage(ctx context.Context, revocationIDs [][]byte) ([]CopyUsage, error) {
-	return s.copies.CopyUsage(ctx, revocationIDs)
+func (s *meteringCopyStore[TX]) CopyUsage(ctx context.Context, req CopyUsageRequest) (CopyUsageResult, error) {
+	return s.copies.CopyUsage(ctx, req)
 }
 
 // Bump emits limes.request.bumps.

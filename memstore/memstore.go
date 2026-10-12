@@ -1229,11 +1229,14 @@ func (s *UsageStore[TX]) GetUsage(_ context.Context, capID uuid.UUID) (limes.Usa
 }
 
 // CopyUsage implements limes.CopyUsageReader.
-func (s *UsageStore[TX]) CopyUsage(_ context.Context, revocationIDs [][]byte) ([]limes.CopyUsage, error) {
+func (s *UsageStore[TX]) CopyUsage(_ context.Context, req limes.CopyUsageRequest) (limes.CopyUsageResult, error) {
+	if err := req.Validate(); err != nil {
+		return limes.CopyUsageResult{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []limes.CopyUsage
-	for _, id := range revocationIDs {
+	for _, id := range req.RevocationIDs {
 		if c, ok := s.copies[string(id)]; ok {
 			out = append(out, limes.CopyUsage{
 				RevocationID: slices.Clone(id), CapabilityID: c.capID,
@@ -1241,7 +1244,7 @@ func (s *UsageStore[TX]) CopyUsage(_ context.Context, revocationIDs [][]byte) ([
 			})
 		}
 	}
-	return out, nil
+	return limes.CopyUsageResult{Copies: out}, nil
 }
 
 func (s *UsageStore[TX]) GetTenantBudget(_ context.Context, tenantID uuid.UUID) (limes.TenantBudget, error) {

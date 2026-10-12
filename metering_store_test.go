@@ -234,7 +234,8 @@ func TestInstrumentKeepsCopyUsage(t *testing.T) {
 	if _, err := usage.Bump(ctx, limes.BumpRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: uuid.New(), tenant: uuid.New(), copies: copies})}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := usage.(limes.CopyUsageReader).CopyUsage(ctx, [][]byte{copyID})
+	res, err := usage.(limes.CopyUsageReader).CopyUsage(ctx, limes.CopyUsageRequest{RevocationIDs: [][]byte{copyID}})
+	got := res.Copies
 	if err != nil || len(got) != 1 || got[0].RequestCount != 1 {
 		t.Errorf("CopyUsage through the decorator = %+v, %v; want one request counted", got, err)
 	}
