@@ -91,7 +91,8 @@ type Meter[TX any] interface {
 	// With req.ExternalRef set, Charge is idempotent on (CapabilityID,
 	// ExternalRef): a charge whose pair is already in the ledger moves
 	// nothing, does not run onCharged, and returns that charge's receipt
-	// with Replayed set. The pair names one cost: arriving again with a
+	// with Replayed set — also once the capability is no longer on record,
+	// as Settle replays a settled hold. The pair names one cost: arriving again with a
 	// different Amount, UnitCode or TenantID it returns
 	// ErrExternalRefConflict and moves nothing. With req.Overrun = OverrunRecord, a charge that
 	// would cross a ceiling is committed anyway and the receipt reports it
