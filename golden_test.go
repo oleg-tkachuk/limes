@@ -1,12 +1,16 @@
 package limes
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/oleg-tkachuk/limes/internal/jose"
 	"github.com/oleg-tkachuk/limes/jwks"
 )
 
@@ -100,5 +104,35 @@ func TestGoldenTokenRejectsWrongAudience(t *testing.T) {
 
 	if _, err := verifier.Verify(context.Background(), VerifyRequest{Token: string(raw), Audience: "limes-admin"}); err == nil {
 		t.Fatal("a token minted for limes-data must not verify for limes-admin")
+	}
+}
+
+// The claims round-trip byte for byte: decoding the golden payload and
+// writing it back as Sign would gives the signed bytes. A renamed member, a
+// changed omission rule or a moved claim fails here even where the decoded
+// fields still compare equal.
+func TestGoldenClaimsRoundTripExactly(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "golden_token.jwt"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	parts, err := jose.Split(string(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := parseClaims(parts.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	written, err := json.Marshal(claimsOf(*c))
+	if err != nil {
+		t.Fatal(err)
+	}
+	signed, err := base64.RawURLEncoding.DecodeString(parts.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(written, signed) {
+		t.Errorf("claims written back differ from the signed ones:\n got %s\nwant %s", written, signed)
 	}
 }

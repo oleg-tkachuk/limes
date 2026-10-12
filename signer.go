@@ -176,27 +176,7 @@ func (s *Signer) Sign(ctx context.Context, c Capability) (string, error) {
 	}
 
 	header := jwtHeader{Alg: jose.AlgEd25519, Kid: s.keyID, Typ: tokenType}
-	claims := jwtClaims{
-		Issuer:     c.Issuer,
-		Subject:    c.Subject.Subject,
-		Audience:   c.Audience,
-		IssuedAt:   c.IssuedAt.Unix(),
-		ExpiresAt:  c.ExpiresAt.Unix(),
-		ID:         c.ID.String(),
-		Principal:  c.Subject,
-		Caveats:    c.Caveats,
-		Generation: c.Generation,
-	}
-	if !c.NotBefore.IsZero() {
-		claims.NotBefore = c.NotBefore.Unix()
-	}
-	if c.ParentID != uuid.Nil {
-		claims.ParentID = c.ParentID.String()
-	}
-	claims.BiscuitRoot = c.BiscuitRoot
-	if c.ConfirmationJKT != "" {
-		claims.Confirmation = &cnfClaim{JKT: c.ConfirmationJKT}
-	}
+	claims := claimsOf(c)
 	// Nothing is signed that the verifier would refuse to read.
 	if err := checkIJSONIntegers(claims); err != nil {
 		return "", err
@@ -256,6 +236,33 @@ func parseHeader(seg string) (jwtHeader, error) {
 		return jwtHeader{}, fmt.Errorf("limes: unexpected alg %q (want %s)", h.Alg, jose.AlgEd25519)
 	}
 	return h, nil
+}
+
+// claimsOf is the payload Sign writes for c: the one place a Capability
+// becomes claims.
+func claimsOf(c Capability) jwtClaims {
+	claims := jwtClaims{
+		Issuer:     c.Issuer,
+		Subject:    c.Subject.Subject,
+		Audience:   c.Audience,
+		IssuedAt:   c.IssuedAt.Unix(),
+		ExpiresAt:  c.ExpiresAt.Unix(),
+		ID:         c.ID.String(),
+		Principal:  c.Subject,
+		Caveats:    c.Caveats,
+		Generation: c.Generation,
+	}
+	if !c.NotBefore.IsZero() {
+		claims.NotBefore = c.NotBefore.Unix()
+	}
+	if c.ParentID != uuid.Nil {
+		claims.ParentID = c.ParentID.String()
+	}
+	claims.BiscuitRoot = c.BiscuitRoot
+	if c.ConfirmationJKT != "" {
+		claims.Confirmation = &cnfClaim{JKT: c.ConfirmationJKT}
+	}
+	return claims
 }
 
 func parseClaims(seg string) (*Capability, error) {
