@@ -161,8 +161,10 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"RevokeIsIdempotentAndReachesDescendants", checkRevoke},
 		{"CascadeRecordsEveryDescendant", checkCascade},
 		{"RevocationReachesEveryGeneration", checkDeepChain},
+		{"RevocationReachesTheDeepestChainAndRefusesADeeperOne", checkMaxDepth},
 		{"PurgeDropsExpiredRecordsAndTheirEntries", checkPurge},
 		{"PurgeWorksInBatches", checkPurgeBatches},
+		{"PurgeKeepsARevocationAVerifierMayStillNeed", checkPurgeRetention},
 		{"ListByPrincipalPages", checkListPages},
 		{"ListByPrincipalFilters", checkListFilters},
 		{"ListByPrincipalRefusesAMalformedRequest", checkListMalformed},
@@ -366,8 +368,9 @@ func checkPurgeBatches(t *testing.T, f fixture) {
 		t.Fatalf("second batch = %+v, %v; want %d", second, err, total-batch)
 	}
 	for name, req := range map[string]limes.PurgeRequest{
-		"a negative limit":     {Limit: -1},
-		"a negative retention": {ExpiredFor: -time.Second},
+		"a negative limit":              {Limit: -1},
+		"a negative retention":          {ExpiredFor: -time.Second},
+		"a retention below the minimum": {ExpiredFor: limes.MinPurgeRetention - time.Second},
 	} {
 		if _, err := f.Store.Purge(f.Ctx, req); !errors.Is(err, limes.ErrInvalidRequest) {
 			t.Errorf("Purge with %s: err = %v, want ErrInvalidRequest", name, err)
@@ -547,5 +550,43 @@ func checkBiscuit(t *testing.T, f fixture) {
 	}
 	if isRevoked(oldCopyID) || !isRevoked(copyID) {
 		t.Error("Purge must drop the expired capability's copy and keep the live one's")
+	}
+}
+
+// checkMaxDepth holds IsRevoked to the whole of a chain MaxDelegationDepth
+// deep, and to refusing — never clearing — a deeper one, whose root the walk
+// cannot reach.
+func checkMaxDepth(t *testing.T, f fixture) {
+	root := f.live(t, "agent:root", uuid.Nil)
+	leaf := root
+	for range limes.MaxDelegationDepth {
+		leaf = f.live(t, "agent:link", leaf.ID)
+	}
+	f.revoke(t, root.ID, false)
+	if !f.revoked(t, leaf.ID) {
+		t.Errorf("revoking a root did not reach a capability %d delegations below it", limes.MaxDelegationDepth)
+	}
+	deeper := f.live(t, "agent:deeper", leaf.ID)
+	if revoked, err := f.Store.IsRevoked(f.Ctx, deeper.ID); !errors.Is(err, limes.ErrDelegationTooDeep) {
+		t.Errorf("IsRevoked past MaxDelegationDepth = %v, %v; want ErrDelegationTooDeep", revoked, err)
+	}
+}
+
+// checkPurgeRetention holds Purge to MinPurgeRetention whatever it is asked:
+// a capability expired for less is still inside a verifier's leeway, and its
+// revocation must stay where IsRevoked finds it.
+func checkPurgeRetention(t *testing.T, f fixture) {
+	recent := f.insert(t, f.newCapability("agent:recent", uuid.Nil, f.now.Add(-limes.MinPurgeRetention/2)))
+	old := f.insert(t, f.newCapability("agent:old", uuid.Nil, f.now.Add(-2*limes.MinPurgeRetention)))
+	f.revoke(t, recent.ID, false)
+	got, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{})
+	if err != nil || got.Purged != 1 {
+		t.Fatalf("Purge with the default retention = %+v, %v; want only the capability expired past it", got, err)
+	}
+	if !f.revoked(t, recent.ID) {
+		t.Error("Purge dropped the revocation of a capability expired for less than MinPurgeRetention")
+	}
+	if _, err := f.get(old.ID); !errors.Is(err, limes.ErrNotFound) {
+		t.Errorf("GetRecord of the capability expired past the retention: err = %v, want ErrNotFound", err)
 	}
 }

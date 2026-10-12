@@ -48,8 +48,14 @@ func TestStoreWithClockDrivesPurge(t *testing.T) {
 	if got, _ := s.Purge(ctx, limes.PurgeRequest{}); got.Purged != 0 {
 		t.Fatalf("purged %d before the capability expired", got.Purged)
 	}
-	now = now.Add(2 * time.Minute)
+	// Expired, but within MinPurgeRetention: a verifier may still accept
+	// the token, so its revocation stays.
+	now = c.ExpiresAt.Add(limes.MinPurgeRetention)
+	if got, _ := s.Purge(ctx, limes.PurgeRequest{}); got.Purged != 0 {
+		t.Fatalf("purged %d within the minimum retention", got.Purged)
+	}
+	now = now.Add(time.Second)
 	if got, _ := s.Purge(ctx, limes.PurgeRequest{}); got.Purged != 1 {
-		t.Fatalf("purged %d once the clock passed its expiry, want 1", got.Purged)
+		t.Fatalf("purged %d once the retention passed, want 1", got.Purged)
 	}
 }

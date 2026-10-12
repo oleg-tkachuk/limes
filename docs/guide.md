@@ -563,7 +563,10 @@ each id then asks the store once, so batch a burst of signals into one
 Revoking a capability revokes everything delegated from it, with or
 without the flag: `IsRevoked` answers for the whole chain. `CascadeChildren`
 also writes a revocation entry per descendant, so the audit trail names each
-capability that was stopped.
+capability that was stopped. A chain is at most `MaxDelegationDepth` (64)
+ancestors deep: `Delegate` refuses to go further with `ErrDelegationTooDeep`,
+and a store answers a deeper chain with that error — read as revoked — rather
+than walk part of it and miss a revocation at its root.
 
 Records do not stay forever. A housekeeping job calls
 `Store.Purge(ctx, limes.PurgeRequest{ExpiredFor: retention})` on a timer, and
@@ -571,7 +574,10 @@ again while a batch comes back full (`Limit`, `DefaultPurgeLimit` unless
 set): it removes the capabilities expired for longer than the retention, with
 their revocation entries, then `UsageHousekeeping.PurgeOrphans` releases what
 the meter still holds for them. A child never outlives its parent, so no
-ancestor of a live capability is ever purged.
+ancestor of a live capability is ever purged. The retention is at least
+`MinPurgeRetention` (five minutes, the zero value's): a verifier accepts a
+token for up to its `Leeway` past expiry, never more than `MaxLeeway`, and a
+revocation purged inside that window would let the revoked token through.
 
 ## Bring your own storage
 

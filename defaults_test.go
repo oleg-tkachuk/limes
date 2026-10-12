@@ -72,14 +72,20 @@ func TestConfigRefusesNegatives(t *testing.T) {
 		TrustedIssuers: []string{goldenIssuer},
 	}
 	for name, mutate := range map[string]func(*VerifierConfig){
-		"Leeway":        func(c *VerifierConfig) { c.Leeway = -time.Second },
-		"MaxTokenBytes": func(c *VerifierConfig) { c.MaxTokenBytes = -1 },
+		"a negative Leeway":        func(c *VerifierConfig) { c.Leeway = -time.Second },
+		"a Leeway past MaxLeeway":  func(c *VerifierConfig) { c.Leeway = MaxLeeway + time.Second },
+		"a negative MaxTokenBytes": func(c *VerifierConfig) { c.MaxTokenBytes = -1 },
 	} {
 		cfg := base
 		mutate(&cfg)
 		if _, err := NewStandardVerifier(cfg); err == nil {
-			t.Errorf("NewStandardVerifier accepted a negative %s", name)
+			t.Errorf("NewStandardVerifier accepted %s", name)
 		}
+	}
+	at := base
+	at.Leeway = MaxLeeway
+	if _, err := NewStandardVerifier(at); err != nil {
+		t.Errorf("NewStandardVerifier refused a Leeway of MaxLeeway: %v", err)
 	}
 }
 
