@@ -5,8 +5,8 @@ root package exports 173 top-level identifiers; `memstore`, `metertest` and
 `storetest` add 9. After v1.0 every one of them, and every method of every
 interface a consumer implements, is frozen until a `/v2` module path.
 
-Each item gives the evidence, the change, and what it breaks. Items marked
-**decision** have more than one defensible answer.
+Each item gives the evidence, the change, and what it breaks. Items with more
+than one defensible answer cite the decision taken in the table below.
 
 ## Decisions
 
@@ -15,7 +15,7 @@ compatibility is not a constraint before 1.0.
 
 | # | Question | Decision | Why |
 |---|---|---|---|
-| 1 | Wire format through 1.x | `VerifierConfig.AcceptTokenTypes`; v4 (v3 before the explicit-unlimited change) accepted throughout 1.x, so a v4 ships in a minor: verifiers first, then issuers. | Versioned format with a controlled migration. Reading unknown claims leniently is refused: a caveat a verifier does not know is one it does not enforce. |
+| 1 | Wire format through 1.x | `VerifierConfig.AcceptTokenTypes`; v4 accepted throughout 1.x (the format reached v4 before 1.0), so a v5 ships in a minor: verifiers first, then issuers. | Versioned format with a controlled migration. Reading unknown claims leniently is refused: a caveat a verifier does not know is one it does not enforce. |
 | 2 | Token algorithm | Ed25519 only for 1.x; another algorithm is another `typ`. | No runtime algorithm choice (RFC 8725); versioning the protocol replaces algorithm agility, and decision 1 carries the version. |
 | 3 | What `Delegate` trusts | `Verify` returns a `VerifiedCapability` with unexported fields, and `Delegate` accepts only that type. | "Parse, don't validate": the compiler, not a doc comment, guarantees the parent was verified; a token's caveats are immutable, so no store read is needed beyond the revocation check `Delegate` already makes. |
 | 4 | Proof-of-possession errors | A family of their own, `ErrProofOfPossession`, beside `ErrInvalidSignature` — renamed `ErrInvalidToken`, which it always meant, RFC 6750's `invalid_token` — and both under an umbrella `ErrUnauthenticated`. | `errors.Is` asserts identity: a missing or replayed proof is not an invalid signature. The overlap needed `reasonAliases`, made table order load-bearing and once made a nonce challenge read as permanent. |
@@ -42,22 +42,22 @@ Adding a method to any of these after 1.0 breaks every implementation.
 
 | # | Interface | Finding | Change | Breaks |
 |---|---|---|---|---|
-| I1 | `Signer` | signer.go:19 invites a KMS implementation, but `Sign(ctx, Capability)` must emit the whole JWT, and the claim encoding, I-JSON checks and validation are unexported: an outside implementation must re-create the wire format by hand. `KeyID()` is never called by the library. `NewEd25519Signer` returns the interface. | A concrete signer over `crypto.Signer` — `NewSigner(kid, crypto.Signer) (*Signer, error)` — with encoding kept in the library, as `NewDPoPProof` already does (dpop.go:243). | `Signer` implementers (none can be correct today), `NewEd25519Signer` callers. |
-| I2 | `ReplayCache`, `DPoPNonces` | `Seen` and `Valid` return a bare `bool`: a Redis- or SQL-backed implementation can only fail closed by answering "seen", and the cause never reaches logs, metrics or `ErrorResponse`. `Seen` has three positional parameters and cannot grow. | `Seen(ctx, ReplayEntry) (bool, error)`; `Valid(ctx, nonce) (bool, error)`. | `MemoryReplayCache`, `HMACNonces`, consumer implementations. |
+| I1 | `Signer` | signer.go:19 invites a KMS implementation, but `Sign(ctx, Capability)` must emit the whole JWT, and the claim encoding, I-JSON checks and validation are unexported: an outside implementation must re-create the wire format by hand. `KeyID()` is never called by the library. `NewEd25519Signer` returns the interface. | A concrete signer over `crypto.Signer` — `NewSigner(kid, crypto.Signer) (*Signer, error)` — with encoding kept in the library, as `NewDPoPProof` already does (dpop.go:243). **Done**, as `NewSigner(SignerConfig)` (P4) rather than positional; `ContextSigner` passes the context to a KMS key. | `Signer` implementers (none can be correct today), `NewEd25519Signer` callers. |
+| I2 | `ReplayCache`, `DPoPNonces` | `Seen` and `Valid` return a bare `bool`: a Redis- or SQL-backed implementation can only fail closed by answering "seen", and the cause never reaches logs, metrics or `ErrorResponse`. `Seen` has three positional parameters and cannot grow. | `Seen(ctx, ReplayEntry) (bool, error)`; `Valid(ctx, nonce) (bool, error)`. **Done** in `dpop` (`ReplayCache`, `Nonces`, `MemoryReplayCache`, `HMACNonces`). | `MemoryReplayCache`, `HMACNonces`, consumer implementations. |
 | I3 | `Verifier` | Only `StandardVerifier` implements it, no library code accepts it, and the real surface (`ErrorResponse`, `DPoPNonce`, `BiscuitCopy`) already lives outside it. A commitment nobody pays for. | Remove; consumers declare the narrow interface they mock. **Done**; the concrete `StandardVerifier` then took the name `Verifier` (T3). | External references to `limes.Verifier`. |
-| I4 | `Store` | `Issuer` calls only `Insert` and `IsRevoked`; five of seven methods are admin API the library never calls. `Get` is a subset of `GetRecord`. `Insert` and `PurgeExpired` are positional. **No method reaps capability records**, yet issuer.go:24, usage.go:37 and `PurgeOrphans` assume records disappear — a SQL store grows without bound. | `Issuer` takes a narrow `IssuanceStore{Insert; IsRevoked}`; drop `Get`; request structs for `Insert` and `PurgeExpired` (with a `Limit`); a record-reaping method or a documented consumer duty ordered against `UsageHousekeeping`. | Every `Store` implementation. |
-| I5 | `Meter` | 11 methods, five of them reads an interceptor never needs; `Bump` returns a bare `int64`; `Release` and `ChargeByRef` are positional; `ListReservations` is unbounded where both other lists page. | Split `MeterReader` from `Meter`; `Bump` returns a receipt; request structs for `Release` and `ListReservations` (paged). | Every `UsageStore`, `WithMetering`. |
-| I6 | `UsageHousekeeping` | `Delete`, `PurgeOrphans`, `ReleaseExpired` take no limit; `PurgeOrphans` is untested by `metertest`; `Delete` of an unknown id is undocumented. | Request structs with `Limit`; a `metertest` check for `PurgeOrphans`. | Every `UsageStore`. |
+| I4 | `Store` | `Issuer` calls only `Insert` and `IsRevoked`; five of seven methods are admin API the library never calls. `Get` is a subset of `GetRecord`. `Insert` and `PurgeExpired` are positional. **No method reaps capability records**, yet issuer.go:24, usage.go:37 and `PurgeOrphans` assume records disappear — a SQL store grows without bound. | `Issuer` takes a narrow `IssuanceStore{Insert; IsRevoked}`; drop `Get`; request structs for `Insert` and `PurgeExpired` (with a `Limit`); a record-reaping method or a documented consumer duty ordered against `UsageHousekeeping`. **Done:** `PurgeExpired` became `Purge`, which reaps records in batches of `Limit`. | Every `Store` implementation. |
+| I5 | `Meter` | 11 methods, five of them reads an interceptor never needs; `Bump` returns a bare `int64`; `Release` and `ChargeByRef` are positional; `ListReservations` is unbounded where both other lists page. | Split `MeterReader` from `Meter`; `Bump` returns a receipt; request structs for `Release` and `ListReservations` (paged). **Done.** | Every `UsageStore`, `WithMetering`. |
+| I6 | `UsageHousekeeping` | `Delete`, `PurgeOrphans`, `ReleaseExpired` take no limit; `PurgeOrphans` is untested by `metertest`; `Delete` of an unknown id is undocumented. | Request structs with `Limit`; a `metertest` check for `PurgeOrphans`. **Done**; `Delete` is `DeleteUsage(DeleteUsageRequest)`. | Every `UsageStore`. |
 | I7 | `KeyResolver` | Decided: Ed25519 for 1.x (decision 2). `PublicKey` returns `ed25519.PublicKey`, so a second token algorithm needs a new interface. | Either declare Ed25519 permanent for 1.x (the token `typ` already versions the format), or return `crypto.PublicKey` now. **Done:** Ed25519 is permanent for 1.x, stated on `KeyResolver` and in the README. | — / every resolver. |
-| I8 | decorators | `WithMetering` needs a second wrapper type to forward one optional interface (metering_store.go:38-51); a second optional interface doubles them again. | Pick a rule: a fixed forwarding list pinned by a test, or an `Unwrap()` convention. **Chosen: the fixed list** — `Instrument` is the one decorator and `CopyUsageReader` the one optional interface; a test reads the package's interfaces from source and fails when the decorator hides one its store implements. | Nothing yet. |
+| I8 | decorators | `WithMetering` needs a second wrapper type to forward one optional interface (metering_store.go:38-51); a second optional interface doubles them again. | Pick a rule: a fixed forwarding list pinned by a test, or an `Unwrap()` convention. **Chosen: the fixed list** — `Instrument` is the one decorator and `CopyUsageReader` the one optional interface; a test reads the package's interfaces from source and fails when the decorator hides one its store implements. **Done**, pinned by decorator_test.go. | Nothing. |
 | I9 | conformance | `storetest.Env` has one `Ctx`; `metertest.Env` has `TenantCtx`/`ListCtx`. `ReplayCache`, `DPoPNonces`, `KeyResolver` have no suite. | Align the two `Env`s; a suite for each interface a consumer implements. **Done:** `storetest.Env` gains `NewTenant` and `TenantCtx`; `dpop/dpoptest` checks `ReplayCache` and `Nonces`, `jwks/jwkstest` checks `KeyResolver`. | Code comparing `storetest.Env` values. |
 
 ## 3. Data types
 
 | # | Finding | Change | Breaks |
 |---|---|---|---|
-| T1 | Every `Meter` request carries the ceilings (`MaxBudget`, `MaxRequests`, `Copies`) as caller-supplied copies of the verified capability; passing 0 drops the capability's own ceiling. | Requests carry a `MeterSubject` built only by `VerifiedCapability.MeterSubject` or `StoredMeterSubject`, so id, tenant, ceilings, unit and copies have one source. | Every `Meter` call site and implementation. |
-| T2 | `Delegate` narrows against the `Capability` the caller hands in (issuer.go:236); a stale or unverified one is not compared with the stored record. Lower risk than it reads: whoever holds `*Issuer` can already `Issue` anything. | Decided: `VerifiedCapability` (decision 3). | `DelegateRequest.Parent`. |
+| T1 | Every `Meter` request carries the ceilings (`MaxBudget`, `MaxRequests`, `Copies`) as caller-supplied copies of the verified capability; passing 0 drops the capability's own ceiling. | Requests carry a `MeterSubject` built only by `VerifiedCapability.MeterSubject` or `StoredMeterSubject`, so id, tenant, ceilings, unit and copies have one source. **Done.** | Every `Meter` call site and implementation. |
+| T2 | `Delegate` narrows against the `Capability` the caller hands in (issuer.go:236); a stale or unverified one is not compared with the stored record. Lower risk than it reads: whoever holds `*Issuer` can already `Issue` anything. | Decided: `VerifiedCapability` (decision 3). **Done.** | `DelegateRequest.Parent`. |
 | T3 | Names disagree: `MaxBudget` / `MaxBudgetAmount`; `Spent` / `SpentAmount`; `ID` / `ChargeID`; `Planes` (Attenuation, Biscuit fact) / `Audience`; `Reason` the free-text field / `Reason` the refusal code; `Op` typed in `CheckRequest`, `string` in `ChargeRequest`; British `NormaliseUnitCode`, `UtilisationPct` beside American `Authorize`. | One spelling per concept; American identifiers; `ID` on the entity, `XID` on a reference; the free-text field becomes `Note`. **Done**, with two sentinels gone: a full refund names `RefundRequest.Remaining`, and `TenantBudget.Utilization` reports whether there is a ceiling. | Field and function names across all packages. |
 | T4 | `AuthorizeRequest` embeds `VerifyRequest` and `CheckRequest`: a field or method later added to both is an ambiguous selector — a compile break caused by an additive change. | Named fields `Verify`, `Check`. **Done.** | Every `AuthorizeRequest` literal. |
 | T5 | `Limit int32` leaks a column type; optional times are `*time.Time` in one place (`PeriodEnd`) and the zero `time.Time` everywhere else; `ListTenantBudgetsRequest` fields are undocumented. | `int`; zero-is-absent; document. **Done.** | The two list requests. |
@@ -91,7 +91,9 @@ Keep — implementers need them, as memstore shows: `PageLimit`,
 
 **Done:** every name above is unexported or gone except `TokenType`, which
 P5 (b) brought back as the type of `AcceptTokenTypes`: a verifier names the
-formats it accepts, so the value is part of the contract. `PublicJWK` and `JWK`
+formats it accepts, so the value is part of the contract; and
+`DPoPSigningAlgorithms`, now `dpop.SigningAlgorithms`, exported because the
+root's challenges advertise it. `PublicJWK` and `JWK`
 live in `internal/jose`, `Decode` and `VerifySignature` in `inspect`, and
 `NormaliseUnitCode` is `NormalizeUnitCode` (T3).
 
@@ -123,7 +125,7 @@ method added to a published interface (go.dev/blog/module-compatibility).
 **P2 — methods that may grow take a request and return a result struct**;
 every I/O-backed method returns an error. Two kinds keep a bare error: a read
 of one record by its id (`GetRecord`, `GetUsage`, `GetTenantBudget`,
-`GetReservation`), and an idempotent command whose outcome is the state it
+`GetReservation`, `GetCharge`, `GetBiscuitRevocation`), and an idempotent command whose outcome is the state it
 leaves (`Release`, `DeleteUsage`, `Revoke`, `RevokeBiscuit`) — repeating one
 changes nothing, so there is nothing to report but failure.
 
@@ -141,8 +143,8 @@ nothing, on caveats, Biscuit copies, the meter subject and tenant budgets.
 
 **P4 — configuration.** One shape: `NewX(XConfig) (*X, error)` for anything
 with a default or a check, concrete return types, a `Now` field for the clock;
-functional options only for decorators. Today there are four shapes and three
-option types.
+functional options only for decorators. **Done:** one option type,
+`InstrumentOption`, for the one decorator.
 
 **P5 — wire format.** Decided: (b), decision 1. The verifier reads claims strictly and
 accepts one `typ`, so any new caveat or Biscuit fact is refused by every
@@ -162,7 +164,9 @@ deployed verifier.
 **P7 — after 1.0.** semantic-release would tag a break `v2.0.0`, which the Go
 proxy ignores without a `/v2` module path. So `api-break-check.sh` fails any
 incompatible change on the v1 line, marked or not; a v2 is a deliberate module
-move.
+move. **Done:** `api-break-check.sh` and `marker-check.sh`, both reading the
+line through `breaking-markers.sh`, and `major-guard.cjs`, which refuses a
+major the module path does not carry.
 
 ## 8. Deferred
 
@@ -203,4 +207,4 @@ for the release decision.
    times, enums (T3–T5, T7).
 7. **Wire format** — `AcceptTokenTypes` (decision 1), unexported wire structs
    (T6), Ed25519-only stated (decision 2).
-8. **1.0** — P6, with P7 in the same change.
+8. **1.0** — P6; P7 is already in place.

@@ -42,11 +42,11 @@ predate the RFC. DPoP challenges advertise `algs="Ed25519 ES256"`
 
 **RFC 7493 (I-JSON).** The claims — the standard ones, and the
 capability's own under `limes_` (`limes_principal`, `limes_caveats`,
-`limes_parent_id`) — are read with the semantics of
+`limes_parent_id`, `limes_gen`, `limes_bsk`) — are read with the semantics of
 `encoding/json/v2`: no member twice (§2.3), names in their exact case, UTF-8
 only (§2.1), and no member the format does not define — a caveat a verifier
 does not know is one it cannot enforce. Every integer is within ±(2^53 − 1)
-(§2.2, `MaxIJSONInteger`) — `Sign` refuses to write one outside it, as
+(§2.2, `MaxIJSONInteger`) — `Issue` refuses to sign one outside it, as
 `Verify` refuses to read one; amounts, which need eighteen digits, are decimal
 strings (`"max_budget": "1.5"`). A reader in any language therefore reads the
 token the issuer signed. *Held by* `TestVerifyReadsClaimsStrictly`,
@@ -87,7 +87,7 @@ and a `jti` not seen before.
   presented as `DPoP`.
 - **Replay.** `dpop.MemoryReplayCache` remembers `jti`s for one process, keyed by
   the proof key's thumbprint, each capability within its own share
-  (`MemoryReplayCacheConfig.EntriesPerHolder`, default
+  (`dpop.MemoryReplayCacheConfig.EntriesPerHolder`, default
   `dpop.DefaultReplayEntriesPerHolder`), so one capability — however many keys
   its copies are bound to — cannot crowd another's proofs out. Across replicas, nonces or a shared
   `dpop.ReplayCache` close the window.
@@ -108,14 +108,15 @@ answers alike, and `WriteErrorResponse` writes them:
 
 | Refusal | Status | Challenge |
 |---|---|---|
+| no credentials | 401 | `Bearer realm="…"` with no error code (RFC 6750 §3.1), and `DPoP algs="…"` when configured |
 | malformed `Authorization` | 400 | `Bearer error="invalid_request"` |
 | no nonce, or a stale one | 401 | `DPoP error="use_dpop_nonce", algs="Ed25519 ES256"`, with a fresh `DPoP-Nonce` |
 | no proof, an invalid or replayed one | 401 | `DPoP error="invalid_dpop_proof", algs="Ed25519 ES256"` |
 | invalid, expired, not-yet-valid, revoked token; wrong audience or scheme | 401 | `error="invalid_token"` under the scheme presented (`Bearer` when unknown) |
-| the issuer's JWKS never fetched, or unreachable past `MaxStale` | 503 | none |
+| the issuer's JWKS never fetched, unreachable past `MaxStale`, or lacking the token's kid while the endpoint fails | 503 | none |
 | a caveat refuses the operation | 403 | `error="insufficient_scope"` |
 | a request or budget limit is exhausted | 403 | none |
-| anything else | 500 | none |
+| anything else — an outage, or a key-bound token at a verifier with no DPoP (`ErrProofUnsupported`) | 500 | none |
 
 A verifier with DPoP configured also adds a `DPoP algs="…"` challenge to a
 `Bearer` one, as §7.1 allows. The body is `application/problem+json` with a
