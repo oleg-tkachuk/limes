@@ -20,8 +20,25 @@ type jwksServer struct {
 	fetches atomic.Int32
 }
 
-// checkDeadline bounds a check that must not hang.
-const checkDeadline = time.Second
+// checkDeadline bounds a check that must not hang; checkPoll is how often a
+// check waiting on a fetch behind a caller looks again.
+const (
+	checkDeadline = time.Second
+	checkPoll     = time.Millisecond
+)
+
+// awaitFetches waits, up to checkDeadline, for fetches to reach want: a
+// refresh started behind a caller ends after the caller has its key.
+func awaitFetches(t *testing.T, fetches func() int32, want int32) {
+	t.Helper()
+	deadline := time.Now().Add(checkDeadline)
+	for fetches() < want && time.Now().Before(deadline) {
+		time.Sleep(checkPoll)
+	}
+	if got := fetches(); got != want {
+		t.Fatalf("fetches = %d, want %d", got, want)
+	}
+}
 
 func (s *jwksServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.fetches.Add(1)
@@ -106,9 +123,28 @@ func TestRemoteJWKSCachesUntilRefreshInterval(t *testing.T) {
 	if _, err := r.PublicKey(ctx, kid); err != nil {
 		t.Fatal(err)
 	}
-	if n := srv.fetches.Load(); n != 2 {
-		t.Fatalf("fetches after refresh interval = %d, want 2", n)
+	awaitFetches(t, srv.fetches.Load, 2)
+}
+
+// A known key from a set past its freshness but within MaxStale is served at
+// once while the endpoint hangs: the refresh runs behind the caller, whose
+// deadline the endpoint cannot spend.
+func TestRemoteJWKSServesAHeldKeyWhileTheEndpointHangs(t *testing.T) {
+	srv, r, clock, kid, pub := newRemoteFixture(t)
+	if _, err := r.PublicKey(context.Background(), kid); err != nil {
+		t.Fatal(err)
 	}
+	srv.mu.Lock() // the endpoint hangs until the check ends
+	t.Cleanup(srv.mu.Unlock)
+
+	clock.Advance(2 * time.Minute) // past RefreshInterval, within MaxStale
+	ctx, cancel := context.WithTimeout(context.Background(), checkDeadline/10)
+	defer cancel()
+	got, err := r.PublicKey(ctx, kid)
+	if err != nil || !got.Equal(pub) {
+		t.Fatalf("PublicKey while the endpoint hangs = %v, %v; want the held key", got, err)
+	}
+	awaitFetches(t, srv.fetches.Load, 2)
 }
 
 // A new kid is picked up on first sight — that is how rotation reaches a

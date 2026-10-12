@@ -122,15 +122,25 @@ func NewRemote(cfg RemoteConfig) (*Remote, error) {
 	return &Remote{cfg: cfg, fetching: make(chan struct{}, 1)}, nil
 }
 
-// PublicKey implements KeyResolver.
+// PublicKey implements KeyResolver. A known key from a set past its
+// freshness but within MaxStale is served at once, its refresh started behind
+// it: a slow endpoint delays no request while the set it holds is still good.
+// A caller waits on the endpoint only for a kid the set does not hold, or a
+// set it cannot serve.
 func (r *Remote) PublicKey(ctx context.Context, kid string) (ed25519.PublicKey, error) {
 	key, ok, fetchedAt, freshFor := r.lookup(kid)
-	if !ok || r.cfg.Now().Sub(fetchedAt) >= freshFor {
-		if err := r.refresh(ctx); err != nil {
-			return nil, err
-		}
-		key, ok, fetchedAt, _ = r.lookup(kid)
+	age := r.cfg.Now().Sub(fetchedAt)
+	if ok && age < freshFor {
+		return key, nil
 	}
+	if ok && age <= r.cfg.MaxStale {
+		r.refreshBehind(ctx)
+		return key, nil
+	}
+	if err := r.refresh(ctx); err != nil {
+		return nil, err
+	}
+	key, ok, fetchedAt, _ = r.lookup(kid)
 
 	if fetchedAt.IsZero() || r.cfg.Now().Sub(fetchedAt) > r.cfg.MaxStale {
 		r.mu.RLock()
@@ -178,39 +188,61 @@ func (r *Remote) refresh(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	release := func() { <-r.fetching }
 	// select picks at random between two ready cases: a caller already
 	// done may have won the slot.
 	if err := ctx.Err(); err != nil {
-		release()
+		r.releaseFetch()
 		return err
 	}
-
-	now := r.cfg.Now()
-	r.mu.RLock()
-	recent := !r.lastAttempt.IsZero() && now.Sub(r.lastAttempt) < r.cfg.MinRefreshInterval
-	etag := r.etag
-	r.mu.RUnlock()
-	if recent {
-		release()
+	done := r.fetchHeld(ctx)
+	if done == nil {
 		return nil
 	}
-
-	done := make(chan struct{})
-	go func() {
-		defer release()
-		defer close(done)
-		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), DefaultFetchTimeout)
-		defer cancel()
-		keys, newETag, header, notModified, err := r.fetch(fetchCtx, etag)
-		r.record(now, keys, newETag, header, notModified, err)
-	}()
 	select {
 	case <-done:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// refreshBehind starts a refresh without waiting for it, unless a fetch is
+// already in flight or was attempted within MinRefreshInterval.
+func (r *Remote) refreshBehind(ctx context.Context) {
+	select {
+	case r.fetching <- struct{}{}:
+		r.fetchHeld(ctx)
+	default: // a fetch is in flight; it refreshes the set
+	}
+}
+
+// releaseFetch gives back the token fetching holds.
+func (r *Remote) releaseFetch() { <-r.fetching }
+
+// fetchHeld starts a fetch for a caller holding the fetching token, which
+// the fetch gives back when it ends, and returns a channel closed then. When
+// a fetch was attempted within MinRefreshInterval it gives the token back at
+// once and returns nil.
+func (r *Remote) fetchHeld(ctx context.Context) <-chan struct{} {
+	now := r.cfg.Now()
+	r.mu.RLock()
+	recent := !r.lastAttempt.IsZero() && now.Sub(r.lastAttempt) < r.cfg.MinRefreshInterval
+	etag := r.etag
+	r.mu.RUnlock()
+	if recent {
+		r.releaseFetch()
+		return nil
+	}
+	done := make(chan struct{})
+	go func() {
+		defer r.releaseFetch()
+		defer close(done)
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), DefaultFetchTimeout)
+		defer cancel()
+		keys, newETag, header, notModified, err := r.fetch(fetchCtx, etag)
+		r.record(now, keys, newETag, header, notModified, err)
+	}()
+	return done
 }
 
 // record keeps what a fetch attempted at now found.

@@ -91,9 +91,7 @@ func TestRemoteJWKSHonoursTheResponse(t *testing.T) {
 	}
 	clock.Advance(31 * time.Second) // past max-age, well before RefreshInterval
 	_, _ = r.PublicKey(ctx, kid)
-	if n := fetches.Load(); n != 2 {
-		t.Errorf("%d fetches past max-age, want 2", n)
-	}
+	awaitFetches(t, fetches.Load, 2)
 }
 
 // A max-age outside the resolver's bounds is clamped to them.
