@@ -333,7 +333,8 @@ carries them. A verifier admits such a copy only with
 `MeterCopies` set, which says the `Meter` behind it counts copies; without it
 the token is refused with `ErrCopyCountersNotMetered` rather than accepted
 with its limits unkept — a configuration error, answered as 500, not an
-invalid token.
+invalid token, and returned only once the token has passed every other
+check.
 `verifier.BiscuitCopy` names the limits in force on a copy, on any verifier,
 and a `CopyUsageReader` (`memstore` implements one) reads what each has
 counted. A copy cannot delegate — a server-side child would be an ordinary

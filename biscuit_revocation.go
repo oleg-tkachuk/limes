@@ -96,7 +96,7 @@ func (v *Verifier) BiscuitCopy(ctx context.Context, token string) (BiscuitCopy, 
 		return BiscuitCopy{}, fmt.Errorf("%w: token is %d bytes (limit %d)",
 			ErrInvalidToken, len(token), v.cfg.MaxTokenBytes)
 	}
-	c, ids, err := v.verifyBiscuit(ctx, token, true)
+	c, ids, err := v.verifyBiscuit(ctx, token)
 	if err != nil {
 		return BiscuitCopy{}, err
 	}

@@ -60,7 +60,7 @@ func FuzzOpenBiscuit(f *testing.F) {
 		if err != nil {
 			return
 		}
-		_, _, _ = attenuate(&Capability{BiscuitRoot: anyRoot}, true)
+		_, _, _ = attenuate(&Capability{BiscuitRoot: anyRoot})
 	})
 }
 
@@ -117,7 +117,7 @@ func FuzzAttenuationBlock(f *testing.F) {
 			term = n
 		}
 		blk := decodedBlock{facts: []decodedFact{{name: name, term: term}}}
-		next, err := applyAttenuation(parent, blk, []byte("block"), true)
+		next, err := applyAttenuation(parent, blk, []byte("block"))
 		if err != nil {
 			return
 		}

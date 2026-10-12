@@ -220,8 +220,7 @@ func Attenuate(token string, a Attenuation) (string, error) {
 // signature chain against the root the JWT vouches for, then each
 // attenuation block folded in. That function also returns the token's
 // revocation ids, authority first, read from the chain it verified.
-// meterCopies admits blocks that set a copy's own limits.
-func openBiscuit(token string) (string, func(parent *Capability, meterCopies bool) (*Capability, [][]byte, error), error) {
+func openBiscuit(token string) (string, func(parent *Capability) (*Capability, [][]byte, error), error) {
 	raw, container, err := decodeBiscuitContainer(token)
 	if err != nil {
 		return "", nil, err
@@ -236,7 +235,7 @@ func openBiscuit(token string) (string, func(parent *Capability, meterCopies boo
 	}
 	// The chain is checked once the sealed token has named its root; the
 	// caller verifies that token first and hands back what it vouches for.
-	attenuate := func(parent *Capability, meterCopies bool) (*Capability, [][]byte, error) {
+	attenuate := func(parent *Capability) (*Capability, [][]byte, error) {
 		root, err := base64.RawURLEncoding.DecodeString(parent.BiscuitRoot)
 		if err != nil || len(root) != ed25519.PublicKeySize {
 			return nil, nil, fmt.Errorf("%w: sealed token names no biscuit root", ErrInvalidToken)
@@ -259,11 +258,8 @@ func openBiscuit(token string) (string, func(parent *Capability, meterCopies boo
 		cur.BiscuitRoot = ""
 		cur.Copies = nil
 		for i, blk := range blocks[1:] {
-			next, err := applyAttenuation(cur, blk, ids[i+1], meterCopies)
+			next, err := applyAttenuation(cur, blk, ids[i+1])
 			if err != nil {
-				if errors.Is(err, ErrCopyCountersNotMetered) {
-					return nil, nil, fmt.Errorf("block %d: %w", i+1, err)
-				}
 				return nil, nil, fmt.Errorf("%w: block %d: %w", ErrBiscuitAttenuation, i+1, err)
 			}
 			cur = next
@@ -348,7 +344,7 @@ func sealedToken(authority decodedBlock) (string, error) {
 // applyAttenuation folds one block into cur, refusing anything it cannot
 // enforce and anything that would widen cur. id is the block's revocation id,
 // which keys the counters of the limits it sets.
-func applyAttenuation(cur Capability, blk decodedBlock, id []byte, meterCopies bool) (Capability, error) {
+func applyAttenuation(cur Capability, blk decodedBlock, id []byte) (Capability, error) {
 	f, err := readBlockFacts(blk, cur.ConfirmationJKT)
 	if err != nil {
 		return cur, err
@@ -359,9 +355,6 @@ func applyAttenuation(cur Capability, blk decodedBlock, id []byte, meterCopies b
 	}
 	if f.requests == nil && f.budget == nil {
 		return next, nil
-	}
-	if !meterCopies {
-		return cur, ErrCopyCountersNotMetered
 	}
 	// An axis the block left alone has no ceiling of this copy's own.
 	ceiling := CopyCeiling{

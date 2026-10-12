@@ -253,15 +253,15 @@ flowchart TB
         vocab{"only limes_* facts<br/>no rules · no checks"}
         narrow{"Narrows(cur, next)<br/>ops · resources · planes · expiry · binding"}
         lim{"sets limes_max_requests /<br/>limes_max_budget_nanos?"}
-        meter{"MeterCopies"}
         fit{"within the capability's limit<br/>and every enclosing copy's"}
         copies["Capability.Copies gains<br/>{revocation id, limits}, innermost first"]
         vocab -- yes --> narrow -- yes --> lim
-        lim -- yes --> meter -- yes --> fit -- yes --> copies
+        lim -- yes --> fit -- yes --> copies
     end
     post["time window · audience · scheme<br/>DPoP over the Biscuit as presented"]
     rev{"IsRevoked(capability)"}
     brev{"IsBiscuitRevoked(revocation ids)<br/>any block of this token"}
+    meter{"Copies set, and<br/>no MeterCopies?"}
     ok(["Capability with Copies"])
 
     bad["ErrInvalidToken"]
@@ -276,13 +276,13 @@ flowchart TB
     lim -. "next block" .-> vocab
     post --> rev
     auth -- no --> bad
-    rev -- no --> brev -- no --> ok
+    rev -- no --> brev -- no --> meter -- no --> ok
     on -- no --> bad
     chain -- no --> bad
     vocab -- no --> att
     narrow -- widens --> att
     fit -- no --> att
-    meter -- no --> unmetered
+    meter -- yes --> unmetered
     rev -- yes --> revoked
     brev -- yes --> revoked
 
