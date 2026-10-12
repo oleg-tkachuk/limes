@@ -521,7 +521,12 @@ func decodeSegment(seg string, v any) error {
 // one capability cannot fill it with proofs and lock every other one out —
 // not even a Biscuit whose copies are bound to as many keys as their holder
 // likes, since they are one capability: past its share, only its proofs are
-// refused.
+// refused. It does not stop one tenant holding many capabilities — Delegate
+// mints them freely — from filling the cache with its proofs; past
+// MaxEntries the cache refuses every new id rather than forget one, since a
+// forgotten id could be replayed. Size MaxEntries for the busiest window, or
+// require server nonces (VerifierConfig.Nonces), which bound how fast any
+// client mints proofs.
 type MemoryReplayCache struct {
 	mu           sync.Mutex
 	seen         map[replayKey]time.Time
