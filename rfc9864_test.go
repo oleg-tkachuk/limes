@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -59,5 +60,24 @@ func TestReadsTheDeprecatedAlgorithmFromOthers(t *testing.T) {
 	keys, err := jwks.Parse([]byte(doc))
 	if err != nil || !keys["old"].Equal(pub) {
 		t.Errorf("a JWKS entry naming EdDSA = %v, %v; want it read", keys, err)
+	}
+}
+
+// A token has one spelling: changing the spare bits of its signature's last
+// character makes a different string that must not verify as the same token.
+func TestATokenHasOneSpelling(t *testing.T) {
+	issuer, v, _, _ := buildIssuerVerifier(t)
+	_, token := issueFor(t, issuer)
+	if _, err := v.Verify(t.Context(), VerifyRequest{Token: token, Audience: audienceData}); err != nil {
+		t.Fatal(err)
+	}
+	// An Ed25519 signature is 64 bytes, 86 characters with 4 spare bits:
+	// flipping the lowest bit of the last character keeps the bytes the
+	// same for a lenient decoder.
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	last := strings.IndexByte(alphabet, token[len(token)-1])
+	altered := token[:len(token)-1] + string(alphabet[last^1])
+	if _, err := v.Verify(t.Context(), VerifyRequest{Token: altered, Audience: audienceData}); !errors.Is(err, ErrInvalidToken) {
+		t.Errorf("a token with a spare bit of its signature set: err = %v, want ErrInvalidToken", err)
 	}
 }

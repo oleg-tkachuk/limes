@@ -255,3 +255,27 @@ func TestACopyCanBeFrozen(t *testing.T) {
 		t.Error("a frozen copy admits a request or a spend")
 	}
 }
+
+// Without MeterCopies, a copy's limits are refused only once the token has
+// passed everything else: a token refused for what it is — a widening block,
+// an expiry — gets that refusal, not the verifier's.
+func TestCopyLimitsAreRefusedLast(t *testing.T) {
+	v, _, root := limitedBiscuit(t)
+	v.cfg.MeterCopies = false
+	ctx := context.Background()
+	limited, err := Attenuate(root, Attenuation{Requests: &RequestCeiling{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	widened, err := Attenuate(limited, Attenuation{Ops: []Op{OpDelete}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.Verify(ctx, VerifyRequest{Token: widened, Audience: audienceData}); !errors.Is(err, ErrBiscuitAttenuation) {
+		t.Errorf("a widening block after a copy limit: err = %v, want ErrBiscuitAttenuation", err)
+	}
+	v.cfg.Now = func() time.Time { return time.Now().Add(2 * time.Hour) }
+	if _, err := v.Verify(ctx, VerifyRequest{Token: limited, Audience: audienceData}); !errors.Is(err, ErrExpired) {
+		t.Errorf("an expired token with a copy limit: err = %v, want ErrExpired", err)
+	}
+}

@@ -14,7 +14,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/asn1"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -424,7 +423,7 @@ func (v *Verifier) Verify(ctx context.Context, req Request) error {
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
-	sig, err := base64.RawURLEncoding.DecodeString(parts.Signature)
+	sig, err := jose.UnB64(parts.Signature)
 	if err != nil || !verifySignature(pub, header.Alg, []byte(parts.SigningInput()), sig) {
 		return fmt.Errorf("%w: signature", ErrInvalid)
 	}
@@ -505,7 +504,7 @@ func htuMatches(htu, requestURL string, pathOnly bool) bool {
 }
 
 func decodeSegment(seg string, v any) error {
-	raw, err := base64.RawURLEncoding.DecodeString(seg)
+	raw, err := jose.UnB64(seg)
 	if err != nil {
 		return err
 	}
@@ -635,6 +634,6 @@ func (h *expiryHeap) Pop() any {
 // IsThumbprint reports whether jkt is a base64url SHA-256 thumbprint, the
 // form a key binding takes.
 func IsThumbprint(jkt string) bool {
-	raw, err := base64.RawURLEncoding.DecodeString(jkt)
+	raw, err := jose.UnB64(jkt)
 	return err == nil && len(raw) == sha256.Size
 }

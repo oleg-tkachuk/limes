@@ -82,3 +82,17 @@ func TestSplit(t *testing.T) {
 		}
 	}
 }
+
+// UnB64 reads each byte string under one spelling only: a last character
+// whose spare bits are set is refused, where a lenient decoder reads it as
+// the same bytes.
+func TestUnB64IsStrict(t *testing.T) {
+	// Two bytes take three characters, with two spare bits: "AAA" is the
+	// canonical spelling, "AAB" sets a spare bit.
+	if b, err := UnB64("AAA"); err != nil || len(b) != 2 {
+		t.Fatalf(`UnB64("AAA") = %v, %v`, b, err)
+	}
+	if _, err := UnB64("AAB"); err == nil {
+		t.Error(`UnB64("AAB") accepted a spare bit`)
+	}
+}

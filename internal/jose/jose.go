@@ -47,6 +47,11 @@ const MaxIJSONInteger = 1<<53 - 1
 // B64 is b in base64url without padding, as JOSE writes every binary value.
 func B64(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 
+// UnB64 decodes unpadded base64url strictly: the spare bits of the last
+// character must be zero, so each byte string has one spelling and a
+// signature or token cannot be altered and still decode to the same bytes.
+func UnB64(s string) ([]byte, error) { return base64.RawURLEncoding.Strict().DecodeString(s) }
+
 // Parts is a compact JWS split into its three segments.
 type Parts struct {
 	Header, Payload, Signature string
@@ -126,7 +131,7 @@ func (j JWK) Thumbprint() (string, error) {
 
 // PublicKey is the key j describes.
 func (j JWK) PublicKey() (crypto.PublicKey, error) {
-	x, err := base64.RawURLEncoding.DecodeString(j.X)
+	x, err := UnB64(j.X)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +142,7 @@ func (j JWK) PublicKey() (crypto.PublicKey, error) {
 		}
 		return ed25519.PublicKey(x), nil
 	case j.Kty == KtyEC && j.Crv == CrvP256:
-		y, err := base64.RawURLEncoding.DecodeString(j.Y)
+		y, err := UnB64(j.Y)
 		if err != nil || len(x) != P256CoordinateBytes || len(y) != P256CoordinateBytes {
 			return nil, errors.New("P-256 key malformed")
 		}
@@ -159,7 +164,7 @@ func VerifyEd25519(parts Parts, pub ed25519.PublicKey) error {
 	if len(pub) != ed25519.PublicKeySize {
 		return fmt.Errorf("public key wrong length %d", len(pub))
 	}
-	sig, err := base64.RawURLEncoding.DecodeString(parts.Signature)
+	sig, err := UnB64(parts.Signature)
 	if err != nil {
 		return fmt.Errorf("decode signature: %w", err)
 	}
