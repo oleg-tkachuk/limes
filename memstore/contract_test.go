@@ -29,11 +29,11 @@ func TestMeterContract(t *testing.T) {
 			Tenant:           tenant,
 			Advance:          func(d time.Duration) { offset.Add(int64(d)) },
 			DeleteCapability: removeRecord(records),
-			NewCapability: func(parent uuid.UUID, budget limes.BudgetCeiling) (uuid.UUID, error) {
+			NewCapability: func(spec metertest.CapabilitySpec) (uuid.UUID, error) {
 				c := limes.Capability{
-					ID: uuid.New(), ParentID: parent, ExpiresAt: time.Now().Add(contractTTL),
+					ID: uuid.New(), ParentID: spec.Parent, ExpiresAt: time.Now().Add(contractTTL),
 					Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: tenant, Subject: "agent"},
-					Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: budget},
+					Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: spec.Requests, Budget: spec.Budget},
 				}
 				return c.ID, records.Insert(context.Background(), limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "issuer"}})
 			},
@@ -73,11 +73,11 @@ func TestMeterContractUsesTheTenantHooks(t *testing.T) {
 				return context.WithValue(ctx, tenantScope{}, tenant)
 			},
 			ListCtx: listCtx,
-			NewCapability: func(parent uuid.UUID, budget limes.BudgetCeiling) (uuid.UUID, error) {
+			NewCapability: func(spec metertest.CapabilitySpec) (uuid.UUID, error) {
 				c := limes.Capability{
-					ID: uuid.New(), ParentID: parent, ExpiresAt: time.Now().Add(contractTTL),
+					ID: uuid.New(), ParentID: spec.Parent, ExpiresAt: time.Now().Add(contractTTL),
 					Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: tenant, Subject: "agent"},
-					Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: budget},
+					Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: spec.Requests, Budget: spec.Budget},
 				}
 				return c.ID, records.Insert(ctx, limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "issuer"}})
 			},
