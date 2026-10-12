@@ -74,6 +74,9 @@ type Env[TX any] struct {
 type CapabilitySpec struct {
 	// Parent is the capability it was delegated from; uuid.Nil for a root.
 	Parent uuid.UUID
+	// Tenant is the tenant it is issued in, one NewTenant created; uuid.Nil
+	// for Env.Tenant.
+	Tenant uuid.UUID
 	// Requests and Budget are its caveats' ceilings.
 	Requests limes.RequestCeiling
 	Budget   limes.BudgetCeiling
@@ -292,6 +295,15 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"AStaleVersionIsRefused", checkStaleVersion[TX]},
 		{"ACapabilityNotOnRecordIsNotMetered", checkNotOnRecord[TX]},
 		{"ACounterNeverPassesMaxNanos", checkCounterOverflow[TX]},
+		{"ReleaseReturnsTheHoldToEveryCounter", checkRelease[TX]},
+		{"AResetKeepsTheHolds", checkResetKeepsHolds[TX]},
+		{"AnAncestorCountsItsDescendantsHolds", checkDescendantHolds[TX]},
+		{"SettleAboveTheHoldCountsTheHoldOnce", checkSettleAboveHold[TX]},
+		{"TheUnitStaysWhileHoldsAreOpen", checkUnitWithHolds[TX]},
+		{"EveryCounterOnTheChainKeepsItsUnit", checkChainUnits[TX]},
+		{"ListTenantBudgetsRanksUnclamped", checkUnclampedRanking[TX]},
+		{"HousekeepingKeepsItsLimit", checkHousekeepingBatches[TX]},
+		{"CopiesFollowSettleAndRefund", checkCopySettleRefund[TX]},
 		{"AZeroCeilingAllowsNothing", checkZeroCeilings[TX]},
 	}
 	for _, c := range checks {
@@ -1128,6 +1140,264 @@ func checkZeroCeilings[TX any](t *testing.T, f fixture[TX]) {
 	}
 }
 
+// checkRelease holds Release to returning a hold to every counter it
+// counted against: the capability's, each ancestor's and the tenant's.
+func checkRelease[TX any](t *testing.T, f fixture[TX]) {
+	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: 15 * one})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{ReservationID: r.ID}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []uuid.UUID{f.child, f.root} {
+		if u, err := f.Usage.GetUsage(f.Ctx, id); err == nil && u.ReservedAmount != 0 {
+			t.Errorf("%s still holds %s after Release", id, u.ReservedAmount)
+		}
+	}
+	if b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant); err != nil || b.ReservedAmount != 0 {
+		t.Errorf("the tenant still holds %s after Release, %v", b.ReservedAmount, err)
+	}
+	if _, err := f.charge(limes.ChargeRequest{Amount: 10 * one}, nil); err != nil {
+		t.Errorf("a charge the released hold made room for: %v", err)
+	}
+}
+
+// checkResetKeepsHolds holds a store to ResetSpend resetting the spend only:
+// a hold still open counts against the tenant's new period.
+func checkResetKeepsHolds[TX any](t *testing.T, f fixture[TX]) {
+	const held = 10 * one
+	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: held}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
+		TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: tenantBudget}, UnitCode: unit, ResetSpend: true, ExpectedVersion: b.ResourceVersion,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant); err != nil || b.ReservedAmount != held {
+		t.Errorf("after a reset the tenant holds %s, %v; want %s", b.ReservedAmount, err, held)
+	}
+	other, err := f.newCapability(uuid.Nil, unlimitedBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 10 held + 25 is past the tenant's 30.
+	if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: other}), Amount: 25 * one}, nil); !errors.Is(err, limes.ErrTenantBudgetExceeded) {
+		t.Errorf("a charge past the tenant's ceiling with the hold: err = %v, want ErrTenantBudgetExceeded", err)
+	}
+}
+
+// checkDescendantHolds holds an ancestor's ceiling to counting what its
+// descendants hold, not only what they spent.
+func checkDescendantHolds[TX any](t *testing.T, f fixture[TX]) {
+	sibling, err := f.newCapability(f.root, limes.BudgetCeiling{Max: childBudget})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: 15 * one}); err != nil {
+		t.Fatal(err)
+	}
+	// 15 held by the child + 15 is past the root's 25.
+	_, err = f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: sibling, budget: budgetOf(childBudget)}), Amount: 15 * one}, nil)
+	if !errors.Is(err, limes.ErrBudgetExceeded) {
+		t.Errorf("a sibling's charge past the root's ceiling with the child's hold: err = %v, want ErrBudgetExceeded", err)
+	}
+}
+
+// checkSettleAboveHold holds Settle to counting the hold once: settling 20
+// of a 19 hold adds 1 to every counter, so it fits a ceiling of 20 — the
+// capability's, a copy's — with nothing to spare.
+func checkSettleAboveHold[TX any](t *testing.T, f fixture[TX]) {
+	copies := []limes.CopyCeiling{{RevocationID: []byte("settle-copy"), Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Max: childBudget}}}
+	subject := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), copies: copies})
+	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: subject, Amount: childBudget - one})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: subject, ReservationID: r.ID, Amount: childBudget}, nil)
+	if err != nil || got.Overrun {
+		t.Fatalf("settling the whole ceiling over a hold just under it = %+v, %v; want accepted, no overrun", got, err)
+	}
+	if spent := f.spent(t, f.child); spent != childBudget {
+		t.Errorf("the child spent %s, want %s", spent, childBudget)
+	}
+	for _, id := range []uuid.UUID{f.child, f.root} {
+		if u, err := f.Usage.GetUsage(f.Ctx, id); err != nil || u.ReservedAmount != 0 {
+			t.Errorf("%s holds %v after the settle, %v; want nothing", id, u.ReservedAmount, err)
+		}
+	}
+}
+
+// checkUnitWithHolds holds a store to keeping a tenant's unit while a hold in
+// it is open: the hold could never settle in another.
+func checkUnitWithHolds[TX any](t *testing.T, f fixture[TX]) {
+	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
+		TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: tenantBudget}, UnitCode: otherUnit, ResetSpend: true, ExpectedVersion: b.ResourceVersion,
+	})
+	if !errors.Is(err, limes.ErrUnitCodeMismatch) {
+		t.Errorf("a unit change with a hold open: err = %v, want ErrUnitCodeMismatch", err)
+	}
+}
+
+// checkChainUnits holds a store to every counter on the chain keeping its
+// unit, not only the tenant's: once the tenant moves to another unit, a
+// capability that counted in the first — or whose ancestor did — refuses an
+// amount in the second.
+func checkChainUnits[TX any](t *testing.T, f fixture[TX]) {
+	parent, err := f.newCapability(uuid.Nil, unlimitedBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := f.newCapability(parent, unlimitedBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: parent}), Amount: one}, nil); err != nil {
+		t.Fatal(err)
+	}
+	b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
+		TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: tenantBudget}, UnitCode: otherUnit, ResetSpend: true, ExpectedVersion: b.ResourceVersion,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for name, id := range map[string]uuid.UUID{"its own counter": parent, "its ancestor's counter": child} {
+		_, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: f.Tenant, unit: otherUnit}), Amount: one}, nil)
+		if !errors.Is(err, limes.ErrUnitCodeMismatch) {
+			t.Errorf("an amount in %s against %s in %s: err = %v, want ErrUnitCodeMismatch", otherUnit, name, unit, err)
+		}
+	}
+}
+
+// checkUnclampedRanking holds ListTenantBudgets to ranking by spend over the
+// ceiling unclamped: of two tenants past their ceilings, the further leads,
+// whatever their ids.
+func checkUnclampedRanking[TX any](t *testing.T, f fixture[TX]) {
+	const ceiling = 10 * one
+	type overspender struct{ tenant, capability uuid.UUID }
+	newOverspender := func() overspender {
+		t.Helper()
+		tenant, err := f.newTenant()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Usage.SetTenantBudget(f.tenantCtx(tenant), limes.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: ceiling}, UnitCode: unit}); err != nil {
+			t.Fatal(err)
+		}
+		id, err := f.NewCapability(CapabilitySpec{Tenant: tenant, Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return overspender{tenant, id}
+	}
+	nearer, further := newOverspender(), newOverspender()
+	// The further gets the higher id: clamped, the two would tie and the
+	// id would put it second.
+	if bytes.Compare(further.tenant[:], nearer.tenant[:]) < 0 {
+		nearer, further = further, nearer
+	}
+	for o, spent := range map[overspender]limes.Nanos{nearer: 2 * ceiling, further: 3 * ceiling} {
+		if _, err := f.Usage.Charge(f.tenantCtx(o.tenant), limes.ChargeRequest{
+			Subject: newSubject(subjectSpec{capID: o.capability, tenant: o.tenant}), Amount: spent, Overrun: limes.OverrunRecord,
+		}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{ThresholdPct: fullPct})
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := func(tenant uuid.UUID) int {
+		return slices.IndexFunc(page.Items, func(r limes.TenantBudget) bool { return r.TenantID == tenant })
+	}
+	if fi, ni := at(further.tenant), at(nearer.tenant); fi < 0 || ni < 0 || fi > ni {
+		t.Errorf("listed the tenant at 300%% at %d and the one at 200%% at %d; want the further first", fi, ni)
+	}
+}
+
+// checkHousekeepingBatches holds ReleaseExpired and PurgeOrphans to their
+// Limit: a batch of one does one.
+func checkHousekeepingBatches[TX any](t *testing.T, f fixture[TX]) {
+	if f.Advance == nil {
+		t.Skip("Env.Advance is not set")
+	}
+	const rows, batch = 2, 1
+	for range rows {
+		if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one, TTL: time.Minute}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.Advance(time.Hour)
+	if r, err := f.Usage.ReleaseExpired(f.Ctx, limes.ReleaseExpiredRequest{Limit: batch}); err != nil || r.Released != batch {
+		t.Errorf("ReleaseExpired with a limit of %d = %+v, %v", batch, r, err)
+	}
+	if f.DeleteCapability == nil {
+		return
+	}
+	var gone []uuid.UUID
+	for range rows {
+		id, err := f.newCapability(uuid.Nil, unlimitedBudget)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: id}), Amount: one}, nil); err != nil {
+			t.Fatal(err)
+		}
+		gone = append(gone, id)
+	}
+	for _, id := range gone {
+		if err := f.DeleteCapability(id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if r, err := f.Usage.PurgeOrphans(f.Ctx, limes.PurgeOrphansRequest{Limit: batch}); err != nil || r.Purged != batch {
+		t.Errorf("PurgeOrphans with a limit of %d = %+v, %v", batch, r, err)
+	}
+}
+
+// checkCopySettleRefund holds a store's copy counters to following Settle and
+// Refund as every other counter does: a settle moves the hold to spend, a
+// refund returns it.
+func checkCopySettleRefund[TX any](t *testing.T, f fixture[TX]) {
+	reader, ok := f.Usage.(limes.CopyUsageReader)
+	if !ok {
+		t.Skip("the store reads no copy counters back")
+	}
+	copyID := []byte("copy-settle-refund")
+	copies := []limes.CopyCeiling{{RevocationID: copyID, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Max: childBudget}}}
+	subject := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), copies: copies})
+	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: subject, Amount: 2 * one})
+	if err != nil {
+		t.Fatal(err)
+	}
+	settled, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: subject, ReservationID: r.ID, Amount: 3 * one}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: settled.ChargeID, Amount: one}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := reader.CopyUsage(f.Ctx, [][]byte{copyID})
+	if err != nil || len(got) != 1 || got[0].SpentAmount != 2*one || got[0].ReservedAmount != 0 {
+		t.Errorf("the copy after a settle of 3 and a refund of 1 = %+v, %v; want 2 spent, nothing held", got, err)
+	}
+}
+
 // checkTenantCeiling holds a store to the tenant aggregate: capabilities each
 // within their own budgets must not sum past the tenant's.
 func checkTenantCeiling[TX any](t *testing.T, f fixture[TX]) {
@@ -1282,15 +1552,30 @@ func checkExpiry[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A hold that outlives the clock's step: ReleaseExpired leaves it.
+	long, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
+		Subject: newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, budget: budgetOf(rootBudget)}),
+		Amount:  one,
+		TTL:     time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	f.Advance(2 * ttl)
 	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: f.childSubject(), ReservationID: res.ID, Amount: one}, nil); !errors.Is(err, limes.ErrReservationNotFound) {
 		t.Errorf("settling an expired reservation: err = %v, want ErrReservationNotFound", err)
+	}
+	if _, err := f.Usage.GetReservation(f.Ctx, res.ID); err != nil {
+		t.Errorf("an expired hold not yet released still reads back: %v", err)
 	}
 	if _, err := f.charge(limes.ChargeRequest{Amount: 10 * one}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Errorf("before ReleaseExpired the hold still counts: err = %v, want ErrBudgetExceeded", err)
 	}
 	if r, err := f.Usage.ReleaseExpired(f.Ctx, limes.ReleaseExpiredRequest{}); err != nil || r.Released != 1 {
 		t.Fatalf("ReleaseExpired = %+v, %v; want 1 released", r, err)
+	}
+	if _, err := f.Usage.GetReservation(f.Ctx, long.ID); err != nil {
+		t.Errorf("ReleaseExpired released a hold that has not expired: %v", err)
 	}
 	if _, err := f.charge(limes.ChargeRequest{Amount: 10 * one}, nil); err != nil {
 		t.Errorf("after ReleaseExpired: %v", err)
@@ -1334,7 +1619,13 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 	all := map[uuid.UUID]bool{}
 	var order []limes.TenantBudget
 	cursor := ""
-	for {
+	// One page per tenant listed, and one more to see the end: a cursor that
+	// does not advance fails here rather than looping forever.
+	const listed = 1 + tiedTenants + 2
+	for page := 0; ; page++ {
+		if page > listed {
+			t.Fatalf("paging did not end after %d pages of one tenant each", listed)
+		}
 		pagePage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Limit: 1, Cursor: cursor})
 		page, next := pagePage.Items, pagePage.Next
 		if err != nil {
@@ -1358,7 +1649,7 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 	if !all[f.Tenant] || !all[unlimited] || !all[frozen] {
 		t.Fatalf("paging skipped a tenant: %v", all)
 	}
-	if want := 1 + tiedTenants + 2; len(order) != want {
+	if want := listed; len(order) != want {
 		t.Errorf("listed %d tenants, want %d", len(order), want)
 	}
 	if order[0].TenantID != frozen || order[len(order)-1].TenantID != unlimited {
