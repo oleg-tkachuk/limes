@@ -20,7 +20,9 @@ type AuthScheme string
 
 const (
 	// AuthSchemeUnspecified is a token that did not come from an
-	// Authorization header; VerifyRequest checks no scheme for it.
+	// Authorization header — a gRPC metadata entry, a message field.
+	// VerifyRequest checks no scheme for it; a key-bound token still needs
+	// its DPoP proof.
 	AuthSchemeUnspecified AuthScheme = ""
 	// AuthSchemeBearer presents a bearer token (RFC 6750).
 	AuthSchemeBearer AuthScheme = "Bearer"
@@ -85,15 +87,26 @@ func isToken68(s string) bool {
 	return true
 }
 
+// Validate refuses a scheme other than the ones ParseAuthorization returns,
+// or AuthSchemeUnspecified, as ErrInvalidRequest.
+func (s AuthScheme) Validate() error {
+	switch s {
+	case AuthSchemeUnspecified, AuthSchemeBearer, AuthSchemeDPoP:
+		return nil
+	}
+	return invalidRequest("unknown authorization scheme %q", s)
+}
+
 // checkScheme holds a token's scheme to its binding (RFC 9449 §7.1, §7.2).
 // A scheme other than the ones ParseAuthorization returns is the caller's
 // error, ErrInvalidRequest.
 func checkScheme(scheme AuthScheme, bound bool) error {
+	if err := scheme.Validate(); err != nil {
+		return err
+	}
 	switch {
 	case scheme == AuthSchemeUnspecified:
 		return nil
-	case scheme != AuthSchemeBearer && scheme != AuthSchemeDPoP:
-		return invalidRequest("unknown authorization scheme %q", scheme)
 	case bound && scheme != AuthSchemeDPoP:
 		return fmt.Errorf("%w: a key-bound token came as %s, not %s", ErrAuthSchemeMismatch, scheme, AuthSchemeDPoP)
 	case !bound && scheme == AuthSchemeDPoP:

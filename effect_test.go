@@ -111,3 +111,15 @@ func TestEffectString(t *testing.T) {
 		}
 	}
 }
+
+// Validate admits the effects this package defines and refuses any other.
+func TestEffectValidate(t *testing.T) {
+	for _, e := range []Effect{EffectUnspecified, EffectRead, EffectWrite} {
+		if err := e.Validate(); err != nil {
+			t.Errorf("%s: %v", e, err)
+		}
+	}
+	if err := (EffectWrite + 1).Validate(); !errors.Is(err, ErrEffectConflict) {
+		t.Errorf("an unknown effect: err = %v, want ErrEffectConflict", err)
+	}
+}

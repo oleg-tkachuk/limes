@@ -88,3 +88,18 @@ func TestVerifyRefusesAnUnknownScheme(t *testing.T) {
 		t.Fatalf("err = %v, want ErrInvalidRequest", err)
 	}
 }
+
+// Validate admits the schemes ParseAuthorization returns, and none, and
+// refuses any other.
+func TestAuthSchemeValidate(t *testing.T) {
+	for _, s := range []AuthScheme{AuthSchemeUnspecified, AuthSchemeBearer, AuthSchemeDPoP} {
+		if err := s.Validate(); err != nil {
+			t.Errorf("%q: %v", s, err)
+		}
+	}
+	for _, s := range []AuthScheme{"Basic", "bearer", "dpop"} {
+		if err := s.Validate(); !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("%q: err = %v, want ErrInvalidRequest", s, err)
+		}
+	}
+}

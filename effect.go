@@ -44,6 +44,15 @@ func (e Effect) String() string {
 	}
 }
 
+// Validate refuses an effect this package does not define as
+// ErrEffectConflict.
+func (e Effect) Validate() error {
+	if e > EffectWrite {
+		return fmt.Errorf("%w: unknown effect %s", ErrEffectConflict, e)
+	}
+	return nil
+}
+
 // defaultEffect is op's effect with nothing declared: the fixed effect of a
 // built-in operation, EffectWrite for any other.
 func (op Op) defaultEffect() Effect {
@@ -58,8 +67,8 @@ func (op Op) defaultEffect() Effect {
 // declaration may only repeat it; a consumer-defined operation takes the
 // declaration, or EffectWrite when there is none.
 func (op Op) ResolveEffect(declared Effect) (Effect, error) {
-	if declared > EffectWrite {
-		return 0, fmt.Errorf("%w: unknown effect %s for %q", ErrEffectConflict, declared, op)
+	if err := declared.Validate(); err != nil {
+		return 0, fmt.Errorf("%w for %q", err, op)
 	}
 	if op.Builtin() {
 		own := op.defaultEffect()
