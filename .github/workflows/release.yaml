@@ -168,3 +168,21 @@ jobs:
             gh_retry release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null
           ./.github/scripts/warm-go-proxy.sh "$tag" ||
             echo "::warning::the Go proxy did not take $tag yet; it will on its own"
+
+      # A run that pushed its tag and failed before publishing it is re-run
+      # above only while that tag is still on HEAD. Once main has moved on,
+      # this publishes it: every recent tag below HEAD with no release, as
+      # not the latest, with GitHub's list of merged pull requests for notes.
+      # See .github/scripts/unpublished-tags.sh.
+      - name: Publish releases an earlier run left behind
+        if: steps.catchup.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          source .github/scripts/gh-retry.sh
+          ./.github/scripts/unpublished-tags.sh | while read -r tag; do
+            gh_retry release create "$tag" --repo "$GITHUB_REPOSITORY" --generate-notes --verify-tag --latest=false ||
+              gh_retry release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null
+            printf '%s\n' "published $tag, which an earlier run left without a release"
+          done
