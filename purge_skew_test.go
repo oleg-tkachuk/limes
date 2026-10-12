@@ -21,7 +21,10 @@ func TestPurgeKeepsARevocationAcrossClockSkew(t *testing.T) {
 	ctx := context.Background()
 	start := time.Unix(1_800_000_000, 0)
 	verifierNow, storeNow := start, start
-	records := memstore.New[struct{}]().WithClock(func() time.Time { return storeNow })
+	records, err := memstore.NewStore(memstore.StoreConfig{Now: func() time.Time { return storeNow }})
+	if err != nil {
+		t.Fatal(err)
+	}
 	key, err := limes.GenerateKey()
 	if err != nil {
 		t.Fatal(err)
