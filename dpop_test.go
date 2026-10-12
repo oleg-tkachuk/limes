@@ -23,9 +23,9 @@ const (
 
 // withProof is a VerifyRequest for token carrying a fresh proof from key,
 // issued at now.
-func withProof(t *testing.T, key crypto.Signer, token, audience string, now time.Time) VerifyRequest {
+func withProof(ctx context.Context, t *testing.T, key crypto.Signer, token, audience string, now time.Time) VerifyRequest {
 	t.Helper()
-	proof, err := dpop.Sign(key, dpop.ProofRequest{Method: dpopMethod, URL: dpopURL, Token: token, Now: now})
+	proof, err := dpop.Sign(ctx, key, dpop.ProofRequest{Method: dpopMethod, URL: dpopURL, Token: token, Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestKeyBindingSurvivesTheTokenAndDelegation(t *testing.T) {
 	if _, err := verifier.Verify(ctx, VerifyRequest{Token: token, Audience: audienceData}); !errors.Is(err, dpop.ErrRequired) {
 		t.Fatalf("bound token without a proof: err = %v, want dpop.ErrRequired", err)
 	}
-	got, err := verifier.Verify(ctx, withProof(t, key, token, audienceData, time.Now()))
+	got, err := verifier.Verify(ctx, withProof(t.Context(), t, key, token, audienceData, time.Now()))
 	if err != nil || got.Capability().ConfirmationJKT != jkt {
 		t.Fatalf("verified binding = %q, %v; want %q", got.Capability().ConfirmationJKT, err, jkt)
 	}

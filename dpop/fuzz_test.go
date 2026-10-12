@@ -22,7 +22,7 @@ import (
 func FuzzDPoPCheck(f *testing.F) {
 	now := time.Unix(1_800_000_000, 0)
 	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{1}, ed25519.SeedSize))
-	proof, err := Sign(key, ProofRequest{Method: dpopMethod, URL: dpopURL, Token: "tok", Now: now})
+	proof, err := Sign(context.Background(), key, ProofRequest{Method: dpopMethod, URL: dpopURL, Token: "tok", Now: now})
 	if err != nil {
 		f.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func FuzzDPoPClaims(f *testing.F) {
 	if err != nil {
 		f.Fatal(err)
 	}
-	proof, err := Sign(key, ProofRequest{Method: dpopMethod, URL: dpopURL, Token: "tok", Now: now})
+	proof, err := Sign(context.Background(), key, ProofRequest{Method: dpopMethod, URL: dpopURL, Token: "tok", Now: now})
 	if err != nil {
 		f.Fatal(err)
 	}

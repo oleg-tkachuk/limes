@@ -41,20 +41,23 @@ func TestVerifyEnforcesProofOfPossession(t *testing.T) {
 	bound := issueBound(t, issuer, key)
 	unbound := mintFor(t, issuer)
 	now := time.Now()
-	replayed := withProof(t, key, bound, audienceData, now)
+	replayed := withProof(t.Context(), t, key, bound, audienceData, now)
 	if _, err := v.Verify(ctx, replayed); err != nil {
 		t.Fatalf("a fresh proof from the bound key: %v", err)
 	}
 
+	// A proof made for the unbound token, presented with the bound one.
+	anotherTokens := withProof(t.Context(), t, key, unbound, audienceData, now)
+	anotherTokens.Token = bound
 	cases := map[string]struct {
 		req  VerifyRequest
 		want error
 	}{
 		"bound, no proof":        {VerifyRequest{Token: bound, Audience: audienceData}, dpop.ErrRequired},
-		"bound, another key":     {withProof(t, keys["P-256"], bound, audienceData, now), dpop.ErrInvalid},
+		"bound, another key":     {withProof(t.Context(), t, keys["P-256"], bound, audienceData, now), dpop.ErrInvalid},
 		"bound, replayed proof":  {replayed, dpop.ErrReplayed},
-		"bound, another token's": {func() VerifyRequest { r := withProof(t, key, unbound, audienceData, now); r.Token = bound; return r }(), dpop.ErrInvalid},
-		"unbound, stray proof":   {withProof(t, key, unbound, audienceData, now), nil},
+		"bound, another token's": {anotherTokens, dpop.ErrInvalid},
+		"unbound, stray proof":   {withProof(t.Context(), t, key, unbound, audienceData, now), nil},
 		"no token":               {VerifyRequest{Audience: audienceData}, ErrNoCredentials},
 		"no audience":            {VerifyRequest{Token: unbound}, ErrInvalidRequest},
 	}
@@ -91,7 +94,7 @@ func TestVerifyWithoutDPoPRefusesBoundTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := dpopKeys(t)["Ed25519"]
-	req := withProof(t, key, issueBound(t, issuer, key), audienceData, time.Now())
+	req := withProof(t.Context(), t, key, issueBound(t, issuer, key), audienceData, time.Now())
 	if _, err := v.Verify(context.Background(), req); !errors.Is(err, dpop.ErrRequired) {
 		t.Fatalf("err = %v, want dpop.ErrRequired", err)
 	}
@@ -111,7 +114,7 @@ func TestBiscuitProofIsOverTheBiscuit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := withProof(t, key, inner, audienceData, time.Now())
+	req := withProof(t.Context(), t, key, inner, audienceData, time.Now())
 	req.Token = bound
 	if _, err := v.Verify(context.Background(), req); !errors.Is(err, dpop.ErrInvalid) {
 		t.Fatalf("a proof over the sealed token: err = %v, want dpop.ErrInvalid", err)

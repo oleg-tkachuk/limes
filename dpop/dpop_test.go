@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"io"
 	"testing"
 	"time"
 
@@ -49,7 +50,7 @@ func TestDPoPAcceptsAProofFromTheBoundKey(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			c := boundJKT(t, key)
 			v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }})
-			proof, err := Sign(key, ProofRequest{Method: "POST", URL: dpopURL + "?x=1", Token: "the-token", Now: now})
+			proof, err := Sign(context.Background(), key, ProofRequest{Method: "POST", URL: dpopURL + "?x=1", Token: "the-token", Now: now})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -70,7 +71,7 @@ func TestDPoPRefusals(t *testing.T) {
 	key, other := keys["Ed25519"], keys["P-256"]
 	c := boundJKT(t, key)
 	fresh := func(k crypto.Signer, method, url, token string, at time.Time) string {
-		p, err := Sign(k, ProofRequest{Method: method, URL: url, Token: token, Now: at})
+		p, err := Sign(context.Background(), k, ProofRequest{Method: method, URL: url, Token: token, Now: at})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -110,17 +111,17 @@ func TestDPoPPathOnlyIgnoresHostButNotPath(t *testing.T) {
 	key := dpopKeys(t)["Ed25519"]
 	c := boundJKT(t, key)
 	v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }, MatchPathOnly: true})
-	proof, _ := Sign(key, ProofRequest{Method: "POST", URL: dpopURL, Token: "tok", Now: now})
+	proof, _ := Sign(context.Background(), key, ProofRequest{Method: "POST", URL: dpopURL, Token: "tok", Now: now})
 	req := Proof{JWT: proof, Method: "POST", URL: "http://10.0.0.7:8080/example.data.v1.ObjectService/GetObject"}
 	if err := v.Verify(context.Background(), Request{Proof: req, Token: "tok", JKT: c}); err != nil {
 		t.Fatalf("path-only match behind a proxy: %v", err)
 	}
-	proof, _ = Sign(key, ProofRequest{Method: "POST", URL: "https://gw.example.com/api/example.data.v1.ObjectService/GetObject", Token: "tok", Now: now})
+	proof, _ = Sign(context.Background(), key, ProofRequest{Method: "POST", URL: "https://gw.example.com/api/example.data.v1.ObjectService/GetObject", Token: "tok", Now: now})
 	req.JWT = proof
 	if err := v.Verify(context.Background(), Request{Proof: req, Token: "tok", JKT: c}); err != nil {
 		t.Fatalf("path-only match behind a prefix-stripping proxy: %v", err)
 	}
-	proof, _ = Sign(key, ProofRequest{Method: "POST", URL: dpopURL, Token: "tok", Now: now})
+	proof, _ = Sign(context.Background(), key, ProofRequest{Method: "POST", URL: dpopURL, Token: "tok", Now: now})
 	req.JWT, req.URL = proof, "http://10.0.0.7:8080/example.data.v1.ObjectService/DeleteObject"
 	if err := v.Verify(context.Background(), Request{Proof: req, Token: "tok", JKT: c}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("path-only with another path: err = %v, want ErrInvalid", err)
@@ -164,7 +165,7 @@ func TestDPoPProofFromAnOpaqueSigner(t *testing.T) {
 	for name, key := range dpopKeys(t) {
 		t.Run(name, func(t *testing.T) {
 			c := boundJKT(t, key)
-			proof, err := Sign(opaqueSigner{key}, ProofRequest{Method: "POST", URL: dpopURL, Token: "tok", Now: now})
+			proof, err := Sign(context.Background(), opaqueSigner{key}, ProofRequest{Method: "POST", URL: dpopURL, Token: "tok", Now: now})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -268,8 +269,8 @@ func TestMemoryReplayCacheBoundsEachKey(t *testing.T) {
 	if seen(t, c, "noisy", "later", now.Add(time.Minute)) {
 		t.Error("the noisy key's share did not free as its ids lapsed")
 	}
-	if got := newReplay(t, MemoryReplayCacheConfig{MaxEntries: 2, EntriesPerKey: 10}).maxPerKey; got != 2 {
-		t.Errorf("a share larger than the cache = %d, want the cache's size", got)
+	if got := newReplay(t, MemoryReplayCacheConfig{MaxEntries: 2}).maxPerKey; got != 2 {
+		t.Errorf("the default share in a cache smaller than it = %d, want the cache's size", got)
 	}
 }
 
@@ -318,7 +319,7 @@ func TestDPoPMatchesNormalizedURIs(t *testing.T) {
 		{"https://data.example.com/v1/obj", "https://data.example.com:8443/v1/obj", false},
 	} {
 		v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }})
-		proof, err := Sign(key, ProofRequest{Method: dpopMethod, URL: tc.proofURL, Token: "tok", Now: now})
+		proof, err := Sign(context.Background(), key, ProofRequest{Method: dpopMethod, URL: tc.proofURL, Token: "tok", Now: now})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -382,7 +383,7 @@ type opaqueSigner struct{ crypto.Signer }
 // naming EdDSA, is still read.
 func TestSignWritesTheFullySpecifiedAlgorithm(t *testing.T) {
 	key := dpopKeys(t)["Ed25519"]
-	proof, err := Sign(key, ProofRequest{Method: dpopMethod, URL: dpopURL, Token: "tok", Now: time.Now()})
+	proof, err := Sign(context.Background(), key, ProofRequest{Method: dpopMethod, URL: dpopURL, Token: "tok", Now: time.Now()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -438,8 +439,9 @@ func TestConstructorsRefuseABadConfiguration(t *testing.T) {
 		}
 	}
 	for name, cfg := range map[string]MemoryReplayCacheConfig{
-		"negative bound":   {MaxEntries: -1},
-		"negative per key": {EntriesPerKey: -1},
+		"negative bound":         {MaxEntries: -1},
+		"negative per key":       {EntriesPerKey: -1},
+		"a share past the cache": {MaxEntries: 2, EntriesPerKey: 10},
 	} {
 		if _, err := NewMemoryReplayCache(cfg); err == nil {
 			t.Errorf("NewMemoryReplayCache, %s: accepted", name)
@@ -460,7 +462,7 @@ func TestDPoPReplayIsCaughtAtTheWindowEdge(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := boundJKT(t, priv)
-	proof, err := Sign(priv, ProofRequest{Method: "POST", URL: dpopURL, Token: "tok", Now: iat})
+	proof, err := Sign(context.Background(), priv, ProofRequest{Method: "POST", URL: dpopURL, Token: "tok", Now: iat})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,5 +483,41 @@ func TestDPoPReplayIsCaughtAtTheWindowEdge(t *testing.T) {
 				t.Fatalf("the same proof again: err = %v, want ErrReplayed", err)
 			}
 		})
+	}
+}
+
+// ctxKey marks the context a ctxSigner must be handed.
+type ctxKey struct{}
+
+// ctxSigner records the context SignContext was given.
+type ctxSigner struct {
+	crypto.Signer
+	got context.Context
+}
+
+func (s *ctxSigner) SignContext(ctx context.Context, r io.Reader, m []byte, o crypto.SignerOpts) ([]byte, error) {
+	s.got = ctx
+	return s.Sign(r, m, o)
+}
+
+// A key that signs under a context is handed Sign's, for each algorithm.
+func TestSignHandsTheContextToAContextSigner(t *testing.T) {
+	for name, key := range dpopKeys(t) {
+		ctx := context.WithValue(context.Background(), ctxKey{}, name)
+		s := &ctxSigner{Signer: key}
+		if _, err := Sign(ctx, s, ProofRequest{Method: dpopMethod, URL: dpopURL, Token: "tok", Now: time.Now()}); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if s.got == nil || s.got.Value(ctxKey{}) != name {
+			t.Errorf("%s: SignContext was not given Sign's context", name)
+		}
+	}
+}
+
+// A proof with no time is refused, not dated 1970.
+func TestSignRequiresNow(t *testing.T) {
+	key := dpopKeys(t)["Ed25519"]
+	if _, err := Sign(context.Background(), key, ProofRequest{Method: dpopMethod, URL: dpopURL, Token: "tok"}); err == nil {
+		t.Error("Sign accepted a zero Now")
 	}
 }

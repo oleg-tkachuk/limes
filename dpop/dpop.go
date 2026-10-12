@@ -17,6 +17,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"math/big"
 	"net/url"
@@ -151,13 +152,24 @@ type ProofRequest struct {
 	// Nonce is the last DPoP-Nonce the server sent, empty before it has
 	// sent one.
 	Nonce string
-	// Now is the proof's iat.
+	// Now is the proof's iat. Required: a proof with no time is refused
+	// rather than dated 1970.
 	Now time.Time
 }
 
+// contextSigner is a crypto.Signer that signs under a context, as a key held
+// in a KMS or an HSM does; limes.ContextSigner is one.
+type contextSigner interface {
+	SignContext(ctx context.Context, rand io.Reader, message []byte, opts crypto.SignerOpts) ([]byte, error)
+}
+
 // Sign signs a proof for one request. key is any crypto.Signer whose
-// public key is Ed25519 or ECDSA P-256.
-func Sign(key crypto.Signer, req ProofRequest) (string, error) {
+// public key is Ed25519 or ECDSA P-256; one that also has SignContext is
+// given ctx, so a slow or cancelled remote signature is bounded by it.
+func Sign(ctx context.Context, key crypto.Signer, req ProofRequest) (string, error) {
+	if req.Now.IsZero() {
+		return "", errors.New("dpop: ProofRequest.Now required")
+	}
 	jwk, err := publicJWK(key.Public())
 	if err != nil {
 		return "", err
@@ -180,7 +192,7 @@ func Sign(key crypto.Signer, req ProofRequest) (string, error) {
 		ATH: accessTokenHash(req.Token), Nonce: req.Nonce,
 	})
 	input := jose.B64(header) + "." + jose.B64(claims)
-	sig, err := signProof(key, []byte(input))
+	sig, err := signProof(ctx, key, []byte(input))
 	if err != nil {
 		return "", err
 	}
@@ -189,17 +201,21 @@ func Sign(key crypto.Signer, req ProofRequest) (string, error) {
 
 // signProof signs through the crypto.Signer interface alone, so a key held
 // in a KMS or an HSM works as well as one in memory.
-func signProof(key crypto.Signer, input []byte) ([]byte, error) {
+func signProof(ctx context.Context, key crypto.Signer, input []byte) ([]byte, error) {
+	sign := key.Sign
+	if cs, ok := key.(contextSigner); ok {
+		sign = func(r io.Reader, m []byte, o crypto.SignerOpts) ([]byte, error) { return cs.SignContext(ctx, r, m, o) }
+	}
 	switch key.Public().(type) {
 	case ed25519.PublicKey:
-		sig, err := key.Sign(rand.Reader, input, crypto.Hash(0))
+		sig, err := sign(rand.Reader, input, crypto.Hash(0))
 		if err != nil {
 			return nil, fmt.Errorf("dpop: sign: %w", err)
 		}
 		return sig, nil
 	case *ecdsa.PublicKey:
 		digest := sha256.Sum256(input)
-		der, err := key.Sign(rand.Reader, digest[:], crypto.SHA256)
+		der, err := sign(rand.Reader, digest[:], crypto.SHA256)
 		if err != nil {
 			return nil, fmt.Errorf("dpop: sign: %w", err)
 		}
@@ -498,14 +514,16 @@ const (
 type MemoryReplayCacheConfig struct {
 	// MaxEntries bounds the cache. Zero: DefaultReplayCacheEntries.
 	MaxEntries int
-	// EntriesPerKey bounds the live proof ids of one key, never more than
-	// MaxEntries. Zero: DefaultReplayEntriesPerKey.
+	// EntriesPerKey bounds the live proof ids of one key, no more than
+	// MaxEntries. Zero: DefaultReplayEntriesPerKey, or MaxEntries when that
+	// is smaller.
 	EntriesPerKey int
 	// Now is the clock. Nil: time.Now.
 	Now func() time.Time
 }
 
-// NewMemoryReplayCache builds a MemoryReplayCache, refusing a negative bound.
+// NewMemoryReplayCache builds a MemoryReplayCache, refusing a negative bound
+// or a key's share larger than the whole cache.
 func NewMemoryReplayCache(cfg MemoryReplayCacheConfig) (*MemoryReplayCache, error) {
 	if cfg.MaxEntries < 0 || cfg.EntriesPerKey < 0 {
 		return nil, fmt.Errorf("dpop: replay cache bounds %d, %d are negative", cfg.MaxEntries, cfg.EntriesPerKey)
@@ -513,15 +531,18 @@ func NewMemoryReplayCache(cfg MemoryReplayCacheConfig) (*MemoryReplayCache, erro
 	if cfg.MaxEntries == 0 {
 		cfg.MaxEntries = DefaultReplayCacheEntries
 	}
-	if cfg.EntriesPerKey == 0 {
-		cfg.EntriesPerKey = DefaultReplayEntriesPerKey
+	switch {
+	case cfg.EntriesPerKey == 0:
+		cfg.EntriesPerKey = min(DefaultReplayEntriesPerKey, cfg.MaxEntries)
+	case cfg.EntriesPerKey > cfg.MaxEntries:
+		return nil, fmt.Errorf("dpop: replay cache share of one key %d is larger than the cache, %d", cfg.EntriesPerKey, cfg.MaxEntries)
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
 	return &MemoryReplayCache{
 		seen: map[replayKey]time.Time{}, perKey: map[string]int{},
-		maxEntries: cfg.MaxEntries, maxPerKey: min(cfg.EntriesPerKey, cfg.MaxEntries), now: cfg.Now,
+		maxEntries: cfg.MaxEntries, maxPerKey: cfg.EntriesPerKey, now: cfg.Now,
 	}, nil
 }
 

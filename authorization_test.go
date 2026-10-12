@@ -63,7 +63,7 @@ func TestVerifyHoldsTheSchemeToTheBinding(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req := VerifyRequest{Token: tc.token, Audience: audienceData}
 			if tc.proof {
-				req = withProof(t, key, tc.token, audienceData, time.Now())
+				req = withProof(ctx, t, key, tc.token, audienceData, time.Now())
 			}
 			req.Scheme = tc.scheme
 			_, err := v.Verify(ctx, req)
