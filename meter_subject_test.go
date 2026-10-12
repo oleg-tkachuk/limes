@@ -18,7 +18,7 @@ func TestMeterSubjectCarriesTheVerifiedCeilings(t *testing.T) {
 		ID:      uuid.New(),
 		Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
 		Caveats: Caveats{Requests: RequestCeiling{Max: requests}, Budget: BudgetCeiling{Max: budget}},
-		Copies:  []CopyCeiling{{RevocationID: []byte{1}, Requests: RequestCeiling{Max: 1}, Budget: BudgetCeiling{Max: budget}}},
+		Copies:  []CopyCeiling{{RevocationID: []byte{1}, Requests: &RequestCeiling{Max: 1}, Budget: &BudgetCeiling{Max: budget}}},
 	}
 	s := asVerified(c).MeterSubject()
 	if s.CapabilityID() != c.ID || s.TenantID() != c.Subject.TenantID {
@@ -76,12 +76,12 @@ func TestStoredMeterSubjectCarriesTheStoredCeilings(t *testing.T) {
 // Neither the capability it came from nor a caller holding its copies can
 // change a subject's ceilings afterwards.
 func TestMeterSubjectCopiesAreItsOwn(t *testing.T) {
-	c := Capability{ID: uuid.New(), Copies: []CopyCeiling{{RevocationID: []byte{1}, Requests: RequestCeiling{Max: 1}}}}
+	c := Capability{ID: uuid.New(), Copies: []CopyCeiling{{RevocationID: []byte{1}, Requests: &RequestCeiling{Max: 1}}}}
 	s := asVerified(c).MeterSubject()
-	c.Copies[0].Requests, c.Copies[0].RevocationID[0] = RequestCeiling{}, 0
+	*c.Copies[0].Requests, c.Copies[0].RevocationID[0] = RequestCeiling{}, 0
 	got := s.Copies()
-	got[0].Requests, got[0].RevocationID[0] = RequestCeiling{}, 0
-	if again := s.Copies(); again[0].Requests != (RequestCeiling{Max: 1}) || again[0].RevocationID[0] != 1 {
+	*got[0].Requests, got[0].RevocationID[0] = RequestCeiling{}, 0
+	if again := s.Copies(); !ceilingIs(again[0].Requests, RequestCeiling{Max: 1}) || again[0].RevocationID[0] != 1 {
 		t.Errorf("copies after mutating the sources = %+v, want the verified ones", again)
 	}
 }

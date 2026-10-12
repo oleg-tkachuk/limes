@@ -355,7 +355,7 @@ func TestDelegate_RefusesACopyWithLimitsOfItsOwn(t *testing.T) {
 	}
 
 	copyOf := parent
-	copyOf.Copies = []CopyCeiling{{RevocationID: []byte("block"), Requests: RequestCeiling{Max: 5}}}
+	copyOf.Copies = []CopyCeiling{{RevocationID: []byte("block"), Requests: &RequestCeiling{Max: 5}}}
 	before := len(store.caps)
 	if err := delegate(copyOf); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("delegate from a copy with limits: err = %v, want ErrInvalidRequest", err)

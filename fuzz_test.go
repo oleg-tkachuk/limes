@@ -125,8 +125,8 @@ func FuzzAttenuationBlock(f *testing.F) {
 			t.Fatalf("accepted %s=%v, which widens: %v", name, term, err)
 		}
 		for _, c := range next.Copies {
-			if !c.Requests.Unlimited && !c.Requests.Within(parent.Caveats.Requests) ||
-				!c.Budget.Unlimited && !c.Budget.Within(parent.Caveats.Budget) {
+			if c.Requests != nil && !c.Requests.Within(parent.Caveats.Requests) ||
+				c.Budget != nil && !c.Budget.Within(parent.Caveats.Budget) {
 				t.Fatalf("accepted a copy ceiling %+v past the capability's", c)
 			}
 		}

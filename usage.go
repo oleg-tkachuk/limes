@@ -397,9 +397,8 @@ type Reservation struct {
 	Op    Op
 	Actor string
 	// Copies are the Biscuit copies the hold is also on, innermost first,
-	// with the budget each is held against; a hold counts no requests, so
-	// their Requests is Unlimited.
-	Copies    []CopyCeiling
+	// with the budget each is held against.
+	Copies    []HeldCopy
 	ExpiresAt time.Time
 }
 

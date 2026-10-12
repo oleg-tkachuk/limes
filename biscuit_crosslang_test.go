@@ -212,8 +212,8 @@ func TestSharedAttenuationVerifies(t *testing.T) {
 	if got.Capability().ConfirmationJKT != want.ConfirmationJKT {
 		t.Errorf("ConfirmationJKT = %q, want %q", got.Capability().ConfirmationJKT, want.ConfirmationJKT)
 	}
-	if len(got.Capability().Copies) != 1 || got.Capability().Copies[0].Requests != (RequestCeiling{Max: want.CopyMaxRequests}) ||
-		got.Capability().Copies[0].Budget != (BudgetCeiling{Max: Nanos(want.CopyMaxBudget)}) {
+	if len(got.Capability().Copies) != 1 || !ceilingIs(got.Capability().Copies[0].Requests, RequestCeiling{Max: want.CopyMaxRequests}) ||
+		!ceilingIs(got.Capability().Copies[0].Budget, BudgetCeiling{Max: Nanos(want.CopyMaxBudget)}) {
 		t.Errorf("Copies = %+v, want one with %d requests and %d nanos",
 			got.Capability().Copies, want.CopyMaxRequests, want.CopyMaxBudget)
 	}

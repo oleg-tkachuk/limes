@@ -75,10 +75,10 @@ func TestCopyLimitsArriveAsCopies(t *testing.T) {
 		t.Fatalf("copies = %+v, want two: the blocks that set limits", got.Capability().Copies)
 	}
 	in, out := got.Capability().Copies[0], got.Capability().Copies[1]
-	if !bytes.Equal(in.RevocationID, lastRevocationID(t, inner)) || in.Requests != (RequestCeiling{Max: 10}) || !in.Budget.Unlimited {
+	if !bytes.Equal(in.RevocationID, lastRevocationID(t, inner)) || !ceilingIs(in.Requests, RequestCeiling{Max: 10}) || in.Budget != nil {
 		t.Errorf("innermost = %+v", in)
 	}
-	if !bytes.Equal(out.RevocationID, lastRevocationID(t, outer)) || out.Requests != (RequestCeiling{Max: 50}) || out.Budget != (BudgetCeiling{Max: 4 * NanosPerUnit}) {
+	if !bytes.Equal(out.RevocationID, lastRevocationID(t, outer)) || !ceilingIs(out.Requests, RequestCeiling{Max: 50}) || !ceilingIs(out.Budget, BudgetCeiling{Max: 4 * NanosPerUnit}) {
 		t.Errorf("outermost = %+v", out)
 	}
 	if got.Capability().Caveats.Requests != cap.Caveats.Requests || got.Capability().Caveats.Budget != cap.Caveats.Budget {
@@ -198,7 +198,7 @@ func TestCopyLimitsMalformed(t *testing.T) {
 func TestCopiesAreNeverSigned(t *testing.T) {
 	issuer, v, _, cap, _ := biscuitFixture(t)
 	withCopies := cap
-	withCopies.Copies = []CopyCeiling{{RevocationID: []byte("x"), Requests: RequestCeiling{Max: 1}}}
+	withCopies.Copies = []CopyCeiling{{RevocationID: []byte("x"), Requests: &RequestCeiling{Max: 1}}}
 	jwt, err := issuer.signer.sign(context.Background(), withCopies)
 	if err != nil {
 		t.Fatal(err)
@@ -226,14 +226,17 @@ func TestBiscuitCopyNamesItsLimits(t *testing.T) {
 		t.Fatalf("BiscuitCopy: %v", err)
 	}
 	if len(got.Copies()) != 2 ||
-		!bytes.Equal(got.Copies()[0].RevocationID, lastRevocationID(t, inner)) || got.Copies()[0].Budget != (BudgetCeiling{Max: NanosPerUnit}) ||
-		!bytes.Equal(got.Copies()[1].RevocationID, lastRevocationID(t, outer)) || got.Copies()[1].Requests != (RequestCeiling{Max: 50}) {
+		!bytes.Equal(got.Copies()[0].RevocationID, lastRevocationID(t, inner)) || !ceilingIs(got.Copies()[0].Budget, BudgetCeiling{Max: NanosPerUnit}) ||
+		!bytes.Equal(got.Copies()[1].RevocationID, lastRevocationID(t, outer)) || !ceilingIs(got.Copies()[1].Requests, RequestCeiling{Max: 50}) {
 		t.Fatalf("limits = %+v", got.Copies())
 	}
 	if plain, err := v.BiscuitCopy(context.Background(), root); err != nil || plain.Copies() != nil {
 		t.Fatalf("root copy: %+v, %v; want no limits", plain, err)
 	}
 }
+
+// ceilingIs reports whether an optional ceiling is set and equal to want.
+func ceilingIs[T comparable](got *T, want T) bool { return got != nil && *got == want }
 
 // A copy ceiling of 0 freezes the copy: it is a ceiling, not "none".
 func TestACopyCanBeFrozen(t *testing.T) {
@@ -248,7 +251,7 @@ func TestACopyCanBeFrozen(t *testing.T) {
 		t.Fatal(err)
 	}
 	copies := vc.Capability().Copies
-	if len(copies) != 1 || copies[0].Requests != (RequestCeiling{}) || copies[0].Budget != (BudgetCeiling{}) {
+	if len(copies) != 1 || !ceilingIs(copies[0].Requests, RequestCeiling{}) || !ceilingIs(copies[0].Budget, BudgetCeiling{}) {
 		t.Errorf("copies = %+v; want one ceiling of 0 requests and 0 spend", copies)
 	}
 	if copies[0].Requests.Admits(1) || copies[0].Budget.Admits(1) {

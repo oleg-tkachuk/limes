@@ -230,7 +230,7 @@ func TestInstrumentKeepsCopyUsage(t *testing.T) {
 	ctx := context.Background()
 	usage := wrap(inner)
 	copyID := []byte("copy-1")
-	copies := []limes.CopyCeiling{{RevocationID: copyID, Requests: limes.RequestCeiling{Max: 10}}}
+	copies := []limes.CopyCeiling{{RevocationID: copyID, Requests: &limes.RequestCeiling{Max: 10}}}
 	if _, err := usage.Bump(ctx, limes.BumpRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: uuid.New(), tenant: uuid.New(), copies: copies})}); err != nil {
 		t.Fatal(err)
 	}
