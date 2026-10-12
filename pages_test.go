@@ -228,3 +228,37 @@ func TestAllTenantBudgets(t *testing.T) {
 		t.Errorf("tenants = %v, want %v", ids, want)
 	}
 }
+
+// A walk can be ranged again, and from where it was asked to start: each
+// range pages with a request of its own, never the cursor a previous range
+// reached.
+func TestAllWalksRangeAgain(t *testing.T) {
+	want := []uuid.UUID{idC, idD}
+	l := &fakeLister{pages: threePages()}
+	capabilities := AllByPrincipal(context.Background(), l, ListByPrincipalRequest{Cursor: cursorSecond})
+	budgets := AllTenantBudgets(context.Background(), l, ListTenantBudgetsRequest{Cursor: cursorSecond})
+	for pass := range 2 {
+		l.asked = nil // each range is a walk of its own
+		var got []uuid.UUID
+		for c, err := range capabilities {
+			if err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, c.ID)
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("AllByPrincipal, range %d = %v, want %v", pass+1, got, want)
+		}
+		l.asked = nil
+		got = nil
+		for row, err := range budgets {
+			if err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, row.TenantID)
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("AllTenantBudgets, range %d = %v, want %v", pass+1, got, want)
+		}
+	}
+}
