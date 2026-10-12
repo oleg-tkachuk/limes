@@ -48,10 +48,13 @@ type Env struct {
 	// runs under, when the store scopes each tenant's rows; Tenant's own
 	// calls run under Ctx. Optional: without it, Ctx.
 	TenantCtx func(tenant uuid.UUID) context.Context
-	// Now reads the store's clock, which stands still while a check runs.
-	// Optional: without it, the checks at an expiry's exact instant are
-	// skipped, and the checks read the wall clock.
+	// Now reads the store's clock, which stands still while a check runs
+	// but for Advance. Optional: without it, the checks at an expiry's exact
+	// instant are skipped, and the checks read the wall clock.
 	Now func() time.Time
+	// Advance moves the store's clock forward by d. Optional: without it,
+	// the checks of what time passing must leave alone are skipped.
+	Advance func(d time.Duration)
 	// DeleteTenant moves a tenant NewTenant created to the trash, for a
 	// store that knows its tenants: it then refuses an id it never created
 	// as ErrUnknownTenant and one in the trash as ErrTenantDeleted.
@@ -185,6 +188,10 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"CascadeRecordsTheDeepestChain", checkMaxDepthCascade},
 		{"PurgeDropsExpiredRecordsAndTheirEntries", checkPurge},
 		{"PurgeWorksInBatches", checkPurgeBatches},
+		{"PurgeTakesTheDefaultBatchWhenAskedForNone", checkPurgeDefaultLimit},
+		{"ARevocationOutlastsTimePassing", checkRevocationOutlastsTime},
+		{"ListByPrincipalClampsItsLimit", checkListLimits},
+		{"ListByPrincipalEndsOnAFullLastPage", checkListFullLastPage},
 		{"PurgeKeepsARevocationAVerifierMayStillNeed", checkPurgeRetention},
 		{"PurgeNeverLeavesAChildWithoutItsParent", checkPurgeKeepsLineage},
 		{"ListByPrincipalPages", checkListPages},
@@ -428,6 +435,74 @@ func checkPurgeBatches(t *testing.T, f fixture) {
 	}
 }
 
+// checkPurgeDefaultLimit holds Purge to DefaultHousekeepingLimit when no
+// limit is asked for, rather than everything due in one go.
+func checkPurgeDefaultLimit(t *testing.T, f fixture) {
+	for range limes.DefaultHousekeepingLimit + 1 {
+		f.insert(t, f.newCapability("agent:old", uuid.Nil, f.now.Add(-expiredAgo)))
+	}
+	got, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace})
+	if err != nil || got.Purged != limes.DefaultHousekeepingLimit {
+		t.Errorf("Purge with no limit = %+v, %v; want DefaultHousekeepingLimit (%d)", got, err, limes.DefaultHousekeepingLimit)
+	}
+}
+
+// checkRevocationOutlastsTime holds a store to keeping the revocation of a
+// capability still live however long ago it was revoked: Purge, or
+// anything else that ages rows out, must not take it. It needs Env.Advance.
+func checkRevocationOutlastsTime(t *testing.T, f fixture) {
+	if f.Advance == nil {
+		t.Skip("Env.Advance is not set")
+	}
+	// Live well past the time that passes: several retentions.
+	const lives, passes = 4 * limes.MinPurgeRetention, 2 * limes.MinPurgeRetention
+	c := f.insert(t, f.newCapability("agent:long-lived", uuid.Nil, f.now.Add(lives)))
+	f.revoke(t, c.ID, false)
+	f.Advance(passes)
+	if _, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if !f.revoked(t, c.ID) {
+		t.Errorf("a live capability revoked %s ago is no longer revoked", passes)
+	}
+}
+
+// checkListLimits holds ListByPrincipal to its page sizes: DefaultListLimit
+// when none is asked for, and never more than MaxListLimit.
+func checkListLimits(t *testing.T, f fixture) {
+	const subject = "agent:many"
+	for range limes.MaxListLimit + 1 {
+		f.live(t, subject, uuid.Nil)
+	}
+	for name, tc := range map[string]struct{ limit, want int }{
+		"no limit":      {0, limes.DefaultListLimit},
+		"past the most": {2 * limes.MaxListLimit, limes.MaxListLimit},
+	} {
+		page, err := f.Store.ListByPrincipal(f.Ctx, limes.ListByPrincipalRequest{
+			TenantID: f.Tenant, PrincipalType: limes.PrincipalAgent, Subject: subject, Limit: tc.limit,
+		})
+		if err != nil || len(page.Items) != tc.want || page.Next == "" {
+			t.Errorf("%s: %d items, next %q, %v; want %d and a next page", name, len(page.Items), page.Next, err, tc.want)
+		}
+	}
+}
+
+// checkListFullLastPage holds ListByPrincipal to an empty cursor on the last
+// page, a page filled exactly included: a cursor there costs the caller a
+// request that can only come back empty.
+func checkListFullLastPage(t *testing.T, f fixture) {
+	const subject = "agent:exact"
+	for range pageSize {
+		f.live(t, subject, uuid.Nil)
+	}
+	page, err := f.Store.ListByPrincipal(f.Ctx, limes.ListByPrincipalRequest{
+		TenantID: f.Tenant, PrincipalType: limes.PrincipalAgent, Subject: subject, Limit: pageSize,
+	})
+	if err != nil || len(page.Items) != pageSize || page.Next != "" {
+		t.Errorf("an exactly full last page: %d items, next %q, %v; want %d and no next page", len(page.Items), page.Next, err, pageSize)
+	}
+}
+
 // listAll pages through ListByPrincipal and returns the ids in the order read.
 // A store whose page hands back its own cursor fails here rather than hanging.
 func (f fixture) listAll(t *testing.T, req limes.ListByPrincipalRequest) []uuid.UUID {
@@ -648,8 +723,10 @@ func checkBiscuit(t *testing.T, f fixture) {
 			t.Fatalf("RevokeBiscuit: %v", err)
 		}
 	}
-	if !isRevoked(otherID, copyID) || isRevoked(otherID) {
-		t.Error("IsBiscuitRevoked must hold for a token carrying a revoked id, and only then")
+	// A copy attenuated from a revoked one carries the revoked id before its
+	// own: every id is looked up, not only the last.
+	if !isRevoked(otherID, copyID) || !isRevoked(copyID, otherID) || isRevoked(otherID) {
+		t.Error("IsBiscuitRevoked must hold for a token carrying a revoked id, wherever it is, and only then")
 	}
 	if err := store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{
 		Copy: biscuitCopy(live.ID, copyID), Note: "again", Actor: "someone-else",
@@ -793,6 +870,7 @@ func checkRecordIsItsOwn(t *testing.T, f fixture) {
 		c.Audience[0] = "scribbled"
 		c.Caveats.Ops[0] = "scribbled"
 		c.Caveats.ResourcePrefixes[0] = "scribbled/"
+		c.Caveats.ResourceURIs[0] = "scribbled/uri"
 		c.Caveats.SourceIPCIDR[0] = "0.0.0.0/0"
 		c.Subject.Agent.Model = "scribbled"
 	}
@@ -820,4 +898,36 @@ func checkRecordIsItsOwn(t *testing.T, f fixture) {
 	}
 	scribble(&page.Items[0])
 	check("a capability listed was changed")
+
+	// Who issued it, and a Biscuit copy's revocation, are the store's too.
+	byAgent := limes.Principal{Type: limes.PrincipalAgent, TenantID: f.Tenant, Subject: "agent:issuer", Agent: &limes.AgentPrincipal{Model: "m"}}
+	issued := f.newCapability(subject, uuid.Nil, f.now.Add(ttl))
+	if err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: issued, IssuedBy: byAgent}); err != nil {
+		t.Fatal(err)
+	}
+	byAgent.Agent.Model = "scribbled"
+	r, err := f.Store.GetRecord(f.Ctx, issued.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.IssuedBy.Agent.Model = "scribbled"
+	if again, err := f.Store.GetRecord(f.Ctx, issued.ID); err != nil || again.IssuedBy.Agent == nil || again.IssuedBy.Agent.Model != "m" {
+		t.Errorf("IssuedBy after changing what was inserted and read = %+v, %v; want the agent model kept", again.IssuedBy.Agent, err)
+	}
+	store, ok := f.Store.(limes.BiscuitRevocationStore)
+	if !ok {
+		return
+	}
+	copyID := []byte("own-copy")
+	if err := store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(issued.ID, copyID)}); err != nil {
+		t.Fatal(err)
+	}
+	rev, err := store.GetBiscuitRevocation(f.Ctx, copyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rev.RevocationID[0] = 'X'
+	if again, err := store.GetBiscuitRevocation(f.Ctx, copyID); err != nil || !bytes.Equal(again.RevocationID, copyID) {
+		t.Errorf("a Biscuit revocation after changing one read = %q, %v; want %q", again.RevocationID, err, copyID)
+	}
 }
