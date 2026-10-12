@@ -212,9 +212,9 @@ func ExampleIssuer_Delegate() {
 func ExampleAttenuate() {
 	ctx := context.Background()
 	s := newExampleStack()
-	c, _ := s.issue()
+	c, token := s.issue()
 
-	full, err := s.issuer.Biscuit(context.Background(), c)
+	full, err := s.issuer.Biscuit(context.Background(), s.verified(token))
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -45,7 +45,7 @@ func biscuitFixture(t *testing.T) (*Issuer, *StandardVerifier, *memStore, Capabi
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := issuer.Biscuit(context.Background(), cap)
+	token, err := issuer.Biscuit(context.Background(), asVerified(cap))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,5 +331,51 @@ func TestBiscuitAttenuationChainsNeverWiden(t *testing.T) {
 	}
 	if verified == 0 {
 		t.Fatal("no chain verified; the property was never exercised")
+	}
+}
+
+// Biscuit signs only what this issuer issued, as the verifier read it back:
+// never a value a caller assembled, a Biscuit copy wrapped again, another
+// issuer's capability, or one that has expired or been revoked.
+func TestBiscuitTakesOnlyAVerifiedCapabilityOfItsOwn(t *testing.T) {
+	issuer, v, store, cap, token := biscuitFixture(t)
+	ctx := context.Background()
+	jwt, err := issuer.signer.Sign(ctx, cap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vc, err := v.Verify(ctx, VerifyRequest{Token: jwt, Audience: audienceData})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := issuer.Biscuit(ctx, vc); err != nil {
+		t.Fatalf("Biscuit of a verified capability: %v", err)
+	}
+	copyOf, err := v.Verify(ctx, VerifyRequest{Token: token, Audience: audienceData})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := cap
+	foreign.Issuer = "someone-else"
+	expired := cap
+	expired.ExpiresAt = time.Now().Add(-time.Minute)
+	for name, tc := range map[string]struct {
+		vc   VerifiedCapability
+		want error
+	}{
+		"the zero value":        {VerifiedCapability{}, ErrInvalidRequest},
+		"a Biscuit copy":        {copyOf, ErrInvalidRequest},
+		"another issuer's":      {asVerified(foreign), ErrInvalidRequest},
+		"an expired capability": {asVerified(expired), ErrExpired},
+	} {
+		if _, err := issuer.Biscuit(ctx, tc.vc); !errors.Is(err, tc.want) {
+			t.Errorf("%s: err = %v, want %v", name, err, tc.want)
+		}
+	}
+	if err := store.Revoke(ctx, RevokeRequest{CapabilityID: cap.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := issuer.Biscuit(ctx, vc); !errors.Is(err, ErrRevoked) {
+		t.Errorf("a revoked capability: err = %v, want ErrRevoked", err)
 	}
 }

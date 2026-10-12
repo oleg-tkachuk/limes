@@ -73,7 +73,7 @@ func TestDelegateAndBiscuitRefuseATokenPastMaxTokenBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := small.Biscuit(ctx, parent); !errors.Is(err, ErrInvalidRequest) {
+	if _, err := small.Biscuit(ctx, asVerified(parent)); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("Biscuit past MaxTokenBytes: err = %v, want ErrInvalidRequest", err)
 	}
 }

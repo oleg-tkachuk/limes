@@ -282,7 +282,8 @@ of the same capability (Biscuit v3) can be narrowed by whoever holds it, with
 no key and no network, and a narrowing can never be undone:
 
 ```go
-full, _ := issuer.Biscuit(ctx, cap) // same ID, caveats and expiry as cap
+// granted: what the verifier accepted from the capability's JWT
+full, _ := issuer.Biscuit(ctx, granted) // same ID, caveats and expiry
 
 // An agent, offline, hands a worker a smaller token:
 worker, _ := limes.Attenuate(full, limes.Attenuation{

@@ -355,7 +355,7 @@ func TestIssuerSignsUnderTheCallersContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := issuer.Biscuit(ctx, c); err != nil {
+	if _, err := issuer.Biscuit(ctx, asVerified(c)); err != nil {
 		t.Fatal(err)
 	}
 	if len(key.got) == 0 {
