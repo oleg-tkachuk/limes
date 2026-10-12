@@ -13,7 +13,8 @@
 // and docs/style/refactor/test/build/ci/chore release nothing. `security` is a
 // patch: the preset knows no such type. The module is pre-1.0, where a
 // breaking change is a minor; that rule goes when it reaches 1.0.
-// release-rules.test.mjs pins all of it.
+// release-rules.test.mjs pins all of it. major-guard.cjs refuses a major the
+// module path does not carry, whatever marker cut it.
 
 const PRESET = "conventionalcommits";
 const SECURITY_IS_A_PATCH = { type: "security", release: "patch" };
@@ -34,6 +35,7 @@ module.exports = {
     ["@semantic-release/commit-analyzer", analyzer],
     ["@semantic-release/release-notes-generator", notes],
     "./release-notes-file.cjs",
+    "./major-guard.cjs",
   ],
   // Read by release-rules.test.mjs and release-notes.test.mjs;
   // semantic-release ignores them.
