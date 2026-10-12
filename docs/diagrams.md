@@ -445,9 +445,9 @@ flowchart TB
         n0["Audience ⊆ parent's · ExpiresAt ≤ parent's<br/>starts no earlier than the parent<br/>same tenant · a bound parent's child stays bound"]
         n1["Ops ⊆ parent.Ops"]
         n2["every resource reachable by the parent<br/>exact-URI parent admits no child prefix"]
-        n3["MaxRequests ≤ parent's, never unlimited under a bounded parent"]
+        n3["Requests within the parent's: any under Unlimited,<br/>a bound no higher under a bound"]
         n4["UnitCode = parent's"]
-        n5["MaxBudgetAmount ≤ parent's, never unlimited under a bounded parent"]
+        n5["Budget within the parent's, the same way"]
         n6["AllowTaintedRead only if the parent has it<br/>IdempotencyKeyRequired never relaxed"]
         n7["SourceIPCIDR inside a parent network"]
         n0 --> n1 --> n2 --> n3 --> n4 --> n5 --> n6 --> n7
@@ -488,9 +488,9 @@ workers can still spend 25.00 in total, not 40.00:
 
 ```mermaid
 flowchart TB
-    p["<b>orchestrator</b><br/>MaxBudgetAmount 25.00<br/>spent 25.00 = 15.00 + 10.00"]
-    a["<b>worker A</b><br/>MaxBudgetAmount 20.00<br/>spent 15.00"]
-    b["<b>worker B</b><br/>MaxBudgetAmount 20.00<br/>spent 10.00"]
+    p["<b>orchestrator</b><br/>Budget 25.00<br/>spent 25.00 = 15.00 + 10.00"]
+    a["<b>worker A</b><br/>Budget 20.00<br/>spent 15.00"]
+    b["<b>worker B</b><br/>Budget 20.00<br/>spent 10.00"]
     next(["worker B charges 1.00 more"])
     deny["ErrBudgetExceeded: ancestor<br/>B's own ceiling allows it, the parent's does not"]
 
@@ -516,7 +516,7 @@ a holder's copy can have on its own: a revocation, and limits.
 
 ```mermaid
 flowchart TB
-    cap(["capability<br/>MaxRequests 100 · budget 10.00"])
+    cap(["capability<br/>Requests 100 · budget 10.00"])
     root["<b>root Biscuit</b><br/>authority block: id A"]
     w1["<b>worker 1</b><br/>ids A · B<br/>block B: limes_max_requests 30"]
     w2["<b>worker 2</b><br/>ids A · C<br/>block C: limes_max_budget_nanos 2000000000 (2.00)"]
@@ -592,9 +592,9 @@ flowchart TB
         direction TB
         c00{"Amount in the unit every counter it moves counts in<br/>no counter past MaxNanos"}
         c0{"each Biscuit copy, innermost first:<br/>spend + reserved + Amount ≤ its budget"}
-        c1{"own spend + reserved + Amount ≤ Subject.MaxBudgetAmount<br/>(ceiling from the verified token or stored record)"}
-        c2{"each ancestor: spend + reserved + Amount<br/>≤ its MaxBudgetAmount<br/>(ceiling from the stored record)"}
-        c3{"tenant spend + reserved + Amount<br/>≤ TenantBudget.MaxBudgetAmount<br/>(when a ceiling is set)"}
+        c1{"own spend + reserved + Amount ≤ Subject.Budget<br/>(ceiling from the verified token or stored record)"}
+        c2{"each ancestor: spend + reserved + Amount<br/>≤ its Budget<br/>(ceiling from the stored record)"}
+        c3{"tenant spend + reserved + Amount<br/>≤ TenantBudget.Ceiling<br/>(Unlimited until one is set)"}
         cb{"onCharged(ctx, tx)<br/>consumer's side effect on its own TX"}
         c00 -- yes --> c0 -- yes --> c1 -- yes --> c2 -- yes --> c3 -- yes --> cb
     end

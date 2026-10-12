@@ -85,8 +85,8 @@ cap, token, _ := issuer.Issue(ctx, limes.IssueRequest{
     Caveats: limes.Caveats{
         Ops:              []limes.Op{limes.OpGet, limes.OpShare},
         ResourcePrefixes: []string{"corpus/public/"},
-        MaxRequests:      500,
-        MaxBudgetAmount:  limes.MustParseAmount("25.00"),
+        Requests:         limes.RequestCeiling{Max: 500},
+        Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("25.00")},
         UnitCode:         "USD",
     },
 })

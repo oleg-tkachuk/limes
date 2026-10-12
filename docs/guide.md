@@ -175,11 +175,16 @@ child, childToken, err := issuer.Delegate(ctx, limes.DelegateRequest{
     Caveats: limes.Caveats{
         Ops:              []limes.Op{limes.OpGet},  // dropped OpShare
         ResourcePrefixes: []string{"corpus/public/2026/"},     // narrowed
-        MaxBudgetAmount:  limes.MustParseAmount("2.00"),  // 25.00 → 2.00
+        Requests:         limes.RequestCeiling{Max: 50},                         // 500 → 50
+        Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("2.00")}, // 25.00 → 2.00
         UnitCode:         "USD",                               // the parent's ("" reads as USD)
     },
 })
 ```
+
+A ceiling's zero value allows nothing: a capability that should make requests
+or spend names a `Max`, or `Unlimited: true` to lift the ceiling — so a ceiling
+left out fails closed instead of opening up.
 
 **The rule**: a child may only be narrower. Ask for an operation the parent
 lacks, a wider scope or a bigger budget, and you get `ErrDelegationTooWide`; a
@@ -304,8 +309,8 @@ anything else (Datalog rules and checks included), makes the whole token
 invalid; a later `ExpiresAt` is ignored rather than refused. An attenuated copy spends its capability's budget and request
 count, and revoking the capability revokes every copy.
 
-A copy can also get limits of its own: `MaxRequests` and `MaxBudgetAmount` on
-the `Attenuation`. Each is counted under the revocation id of the block that
+A copy can also get limits of its own: `Requests` and `Budget` on the
+`Attenuation` (nil sets none; a ceiling of 0 freezes the copy). Each is counted under the revocation id of the block that
 set it, so siblings narrowed apart count apart, while the capability's own
 limits still bound them all; a limit must fit every limit already in force.
 The verifier hands them to the caller as `Capability.Copies`, and the `Meter`
@@ -379,7 +384,8 @@ ceiling against that spend and those holds, and refuses a new `UnitCode`
 while anything is held in the old one, or spent in it unless `ResetSpend`
 closes that spend. It is guarded by
 `ExpectedVersion` — 0 while no ceiling has been set, else the version read —
-and a conflict is `ErrTenantBudgetVersionMismatch`.
+and a conflict is `ErrTenantBudgetVersionMismatch`. Until one is set the
+tenant's ceiling reads `Unlimited`; a ceiling of 0 freezes its spend.
 
 ## Amounts are exact
 
