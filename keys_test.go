@@ -116,9 +116,11 @@ func TestStaticKeyResolverRotation(t *testing.T) {
 	keyA, _ := GenerateKey()
 	keyB, _ := GenerateKey()
 	pubA, pubB := keyA.Public, keyB.Public
-	r := jwks.NewStatic(map[string]ed25519.PublicKey{"a": pubA})
+	r := staticKeys(t, map[string]ed25519.PublicKey{"a": pubA})
 
-	r.SetKey("b", pubB)
+	if err := r.SetKey("b", pubB); err != nil {
+		t.Fatal(err)
+	}
 	if keys := r.Keys(); len(keys) != 2 || !keys["b"].Equal(pubB) {
 		t.Fatalf("Keys after SetKey = %v", keys)
 	}

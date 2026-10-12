@@ -15,7 +15,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes/dpop"
-	"github.com/oleg-tkachuk/limes/jwks"
 )
 
 // The cross-language attenuation (testdata/biscuit/attenuation.json): this
@@ -51,7 +50,7 @@ func goldenBiscuitVerifier(t *testing.T) *StandardVerifier {
 	t.Helper()
 	priv := ed25519.NewKeyFromSeed(goldenSeed[:])
 	v, err := NewStandardVerifier(VerifierConfig{
-		Keys:           jwks.NewStatic(map[string]ed25519.PublicKey{goldenKID: priv.Public().(ed25519.PublicKey)}),
+		Keys:           staticKeys(t, map[string]ed25519.PublicKey{goldenKID: priv.Public().(ed25519.PublicKey)}),
 		Revocations:    revLookup{},
 		TrustedIssuers: []string{goldenIssuer},
 		Now:            goldenClock,

@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"fmt"
 	"maps"
+	"slices"
 	"sync"
 )
 
@@ -22,10 +24,36 @@ type Static struct {
 	keys map[string]ed25519.PublicKey
 }
 
-// NewStatic builds a resolver from a kid → public key map.
-// The map is copied to defend against caller mutation.
-func NewStatic(keys map[string]ed25519.PublicKey) *Static {
-	return &Static{keys: maps.Clone(keys)}
+// StaticConfig configures a Static resolver.
+type StaticConfig struct {
+	// Keys maps each kid to its Ed25519 public key. Copied: changing the
+	// map afterwards changes nothing the resolver serves.
+	Keys map[string]ed25519.PublicKey
+}
+
+// NewStatic builds a resolver over cfg.Keys, refusing an empty kid or a key
+// that is not an Ed25519 public key's length — which the verifier would
+// otherwise read, token by token, as the tokens' fault.
+func NewStatic(cfg StaticConfig) (*Static, error) {
+	keys := make(map[string]ed25519.PublicKey, len(cfg.Keys))
+	for kid, key := range cfg.Keys {
+		if err := validateKey(kid, key); err != nil {
+			return nil, err
+		}
+		keys[kid] = slices.Clone(key)
+	}
+	return &Static{keys: keys}, nil
+}
+
+// validateKey refuses an empty kid, or a key of the wrong length.
+func validateKey(kid string, key ed25519.PublicKey) error {
+	switch {
+	case kid == "":
+		return errors.New("jwks: a key needs a kid")
+	case len(key) != ed25519.PublicKeySize:
+		return fmt.Errorf("jwks: key %q is %d bytes, not an Ed25519 public key's %d", kid, len(key), ed25519.PublicKeySize)
+	}
+	return nil
 }
 
 // PublicKey implements KeyResolver.
@@ -40,14 +68,18 @@ func (r *Static) PublicKey(_ context.Context, kid string) (ed25519.PublicKey, er
 }
 
 // SetKey adds or replaces a kid → key mapping. Rotation step 1: publish
-// the new key alongside the old.
-func (r *Static) SetKey(kid string, key ed25519.PublicKey) {
+// the new key alongside the old. It refuses what NewStatic refuses.
+func (r *Static) SetKey(kid string, key ed25519.PublicKey) error {
+	if err := validateKey(kid, key); err != nil {
+		return err
+	}
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.keys == nil {
 		r.keys = make(map[string]ed25519.PublicKey)
 	}
-	r.keys[kid] = key
-	r.mu.Unlock()
+	r.keys[kid] = slices.Clone(key)
+	return nil
 }
 
 // RemoveKey withdraws a kid. Rotation step 3: call it only once the longest
