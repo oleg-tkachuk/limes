@@ -48,6 +48,10 @@ type Env struct {
 	// runs under, when the store scopes each tenant's rows; Tenant's own
 	// calls run under Ctx. Optional: without it, Ctx.
 	TenantCtx func(tenant uuid.UUID) context.Context
+	// Now reads the store's clock, which stands still while a check runs.
+	// Optional: without it, the checks at an expiry's exact instant are
+	// skipped, and the checks read the wall clock.
+	Now func() time.Time
 }
 
 // newTenant is another tenant, from NewTenant when the Env has one.
@@ -77,6 +81,8 @@ const (
 	// listing check: three pages, the last one short.
 	pageSize = 2
 	listed   = 5
+	// timestampResolution is the finest a timestamp column keeps.
+	timestampResolution = time.Microsecond
 )
 
 // issuedBy is the principal every capability of these checks is issued by.
@@ -177,14 +183,19 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"PurgeKeepsARevocationAVerifierMayStillNeed", checkPurgeRetention},
 		{"ListByPrincipalPages", checkListPages},
 		{"ListByPrincipalFilters", checkListFilters},
+		{"ListByPrincipalExpiresAtTheInstant", checkListExpiryInstant},
 		{"ListByPrincipalRefusesAMalformedRequest", checkListMalformed},
 		{"ListByPrincipalKeepsTenantsApart", checkListTenants},
 		{"BiscuitRevocation", checkBiscuit},
 	}
 	for _, c := range checks {
 		t.Run(c.name, func(t *testing.T) {
-			// Microseconds: the finest a timestamp column keeps.
-			c.run(t, fixture{Env: setup(t), now: time.Now().UTC().Truncate(time.Microsecond)})
+			env := setup(t)
+			now := time.Now().UTC().Truncate(timestampResolution)
+			if env.Now != nil {
+				now = env.Now()
+			}
+			c.run(t, fixture{Env: env, now: now})
 		})
 	}
 }
@@ -490,6 +501,30 @@ func checkListFilters(t *testing.T, f fixture) {
 		if !slices.Equal(got, tc.want) {
 			t.Errorf("%s: listed %v, want %v", tc.name, got, tc.want)
 		}
+	}
+}
+
+// checkListExpiryInstant holds a listing to a capability's expiry at its own
+// instant: one expiring at the store's now is expired, one a tick later is
+// not. It needs the store's clock (Env.Now).
+func checkListExpiryInstant(t *testing.T, f fixture) {
+	if f.Now == nil {
+		t.Skip("Env.Now is not set")
+	}
+	const subject = "agent:boundary"
+	atNow := f.insert(t, f.newCapability(subject, uuid.Nil, f.now))
+	justAfter := f.insert(t, f.newCapability(subject, uuid.Nil, f.now.Add(timestampResolution)))
+	base := limes.ListByPrincipalRequest{TenantID: f.Tenant, PrincipalType: limes.PrincipalAgent, Subject: subject}
+	if got := f.listAll(t, base); !slices.Equal(got, []uuid.UUID{justAfter.ID}) {
+		t.Errorf("listed %v, want only %s: %s expires at the store's now", got, justAfter.ID, atNow.ID)
+	}
+	base.IncludeExpired = true
+	got := f.listAll(t, base)
+	slices.SortFunc(got, compareUUID)
+	want := []uuid.UUID{atNow.ID, justAfter.ID}
+	slices.SortFunc(want, compareUUID)
+	if !slices.Equal(got, want) {
+		t.Errorf("listed with expired %v, want both %v", got, want)
 	}
 }
 

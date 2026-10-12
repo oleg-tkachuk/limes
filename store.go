@@ -238,7 +238,8 @@ type ListByPrincipalRequest struct {
 	PrincipalType PrincipalType
 	Subject       string
 	// IncludeExpired and IncludeRevoked also list capabilities that have
-	// expired, or that are revoked themselves (not through an ancestor).
+	// expired — at their ExpiresAt, by the store's clock — or that are
+	// revoked themselves (not through an ancestor).
 	IncludeExpired bool
 	IncludeRevoked bool
 	// Cursor is the one the previous page returned; empty for the first.
