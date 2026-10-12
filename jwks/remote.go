@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -131,11 +132,11 @@ func (r *Remote) PublicKey(ctx context.Context, kid string) (ed25519.PublicKey, 
 	key, ok, fetchedAt, freshFor := r.lookup(kid)
 	age := r.cfg.Now().Sub(fetchedAt)
 	if ok && age < freshFor {
-		return key, nil
+		return slices.Clone(key), nil
 	}
 	if ok && age <= r.cfg.MaxStale {
 		r.refreshBehind(ctx)
-		return key, nil
+		return slices.Clone(key), nil
 	}
 	if err := r.refresh(ctx); err != nil {
 		return nil, err
@@ -157,7 +158,7 @@ func (r *Remote) PublicKey(ctx context.Context, kid string) (ed25519.PublicKey, 
 	if !ok {
 		return nil, ErrUnknownKID
 	}
-	return key, nil
+	return slices.Clone(key), nil
 }
 
 func (r *Remote) lookup(kid string) (ed25519.PublicKey, bool, time.Time, time.Duration) {
