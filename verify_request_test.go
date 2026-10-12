@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"errors"
 	"net/netip"
+	"reflect"
 	"testing"
 	"time"
 
@@ -134,20 +135,20 @@ func TestAuthorize(t *testing.T) {
 	}
 	inside := netip.MustParseAddr("10.1.2.3")
 	ok := AuthorizeRequest{
-		VerifyRequest: VerifyRequest{Token: token, Audience: audienceData},
-		CheckRequest:  CheckRequest{Op: OpGet, Resource: "corpus/public/a"},
-		ClientAddr:    inside,
+		Verify:     VerifyRequest{Token: token, Audience: audienceData},
+		Check:      CheckRequest{Op: OpGet, Resource: "corpus/public/a"},
+		ClientAddr: inside,
 	}
 	cases := map[string]struct {
 		mod  func(*AuthorizeRequest)
 		want error
 	}{
 		"allowed":                {func(*AuthorizeRequest) {}, nil},
-		"another audience":       {func(r *AuthorizeRequest) { r.Audience = audienceMCP }, ErrAudienceMismatch},
-		"op not allowed":         {func(r *AuthorizeRequest) { r.Op = OpDelete }, ErrOpNotAllowed},
-		"resource outside":       {func(r *AuthorizeRequest) { r.Resource = "corpus/private/a" }, ErrResourceNotAllowed},
-		"write without key":      {func(r *AuthorizeRequest) { r.Op = OpPut }, ErrIdempotencyKeyRequired},
-		"write with key":         {func(r *AuthorizeRequest) { r.Op, r.HasIdempotencyKey = OpPut, true }, nil},
+		"another audience":       {func(r *AuthorizeRequest) { r.Verify.Audience = audienceMCP }, ErrAudienceMismatch},
+		"op not allowed":         {func(r *AuthorizeRequest) { r.Check.Op = OpDelete }, ErrOpNotAllowed},
+		"resource outside":       {func(r *AuthorizeRequest) { r.Check.Resource = "corpus/private/a" }, ErrResourceNotAllowed},
+		"write without key":      {func(r *AuthorizeRequest) { r.Check.Op = OpPut }, ErrIdempotencyKeyRequired},
+		"write with key":         {func(r *AuthorizeRequest) { r.Check.Op, r.Check.HasIdempotencyKey = OpPut, true }, nil},
 		"client outside":         {func(r *AuthorizeRequest) { r.ClientAddr = netip.MustParseAddr("192.0.2.1") }, ErrSourceIPNotAllowed},
 		"client address unknown": {func(r *AuthorizeRequest) { r.ClientAddr = netip.Addr{} }, ErrSourceIPNotAllowed},
 	}
@@ -169,5 +170,17 @@ func TestAuthorize(t *testing.T) {
 				t.Fatalf("err = %v, want %v", err, tc.want)
 			}
 		})
+	}
+}
+
+// AuthorizeRequest names its parts: an embedded request would promote its
+// fields, and one later added to both parts would be an ambiguous selector —
+// a compile break from an additive change.
+func TestAuthorizeRequestEmbedsNothing(t *testing.T) {
+	typ := reflect.TypeFor[AuthorizeRequest]()
+	for i := range typ.NumField() {
+		if f := typ.Field(i); f.Anonymous {
+			t.Errorf("AuthorizeRequest embeds %s", f.Name)
+		}
 	}
 }
