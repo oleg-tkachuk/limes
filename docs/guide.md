@@ -196,7 +196,8 @@ A ceiling's zero value allows nothing: a capability that should make requests
 or spend names a `Max`, or `Unlimited: true` to lift the ceiling — so a ceiling
 left out fails closed instead of opening up.
 
-**The rule**: a child may only be narrower. Ask for an operation the parent
+**The rule**: only a parent granted `OpShare` may delegate — without it,
+`ErrOpNotAllowed` — and a child may only be narrower. Ask for an operation the parent
 lacks, a wider scope or a bigger budget, and you get `ErrDelegationTooWide`; a
 TTL that would outlive the parent is cut to the parent's expiry, and a child
 starts no earlier than its parent (its `NotBefore`, else its issuance). Ask for a different `UnitCode` and you get

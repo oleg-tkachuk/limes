@@ -92,7 +92,7 @@ func issueRoot(t *testing.T, issuer *Issuer, caveats Caveats) Capability {
 func TestDelegateInheritanceIsExplicit(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
-	parent := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet}, Budget: BudgetCeiling{Max: MustParseAmount("25")}, UnitCode: "USD"})
+	parent := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet, OpShare}, Budget: BudgetCeiling{Max: MustParseAmount("25")}, UnitCode: "USD"})
 
 	if _, _, err := issuer.delegate(ctx, DelegateRequest{
 		Subject: Principal{Type: PrincipalAgent, Subject: "child"},
@@ -118,7 +118,7 @@ const foreignIssuer = "someone-else"
 func TestDelegateRefusesRevokedOrExpiredParent(t *testing.T) {
 	issuer, _, store, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
-	parent := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet}})
+	parent := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet, OpShare}})
 
 	expired := parent
 	expired.ExpiresAt = time.Now().Add(-time.Minute)
@@ -145,7 +145,7 @@ func TestIssuedIDsAreVersion7(t *testing.T) {
 	ctx := context.Background()
 	parent, _, err := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
-		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour,
+		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet, OpShare}}, TTL: time.Hour,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -190,5 +190,29 @@ func TestMintingResults(t *testing.T) {
 	}
 	if b, err := issuer.Biscuit(ctx, BiscuitRequest{}); err == nil || b.Token != "" {
 		t.Errorf("a refused Biscuit = %+v, %v; want the zero result and an error", b, err)
+	}
+}
+
+// Delegating is the share operation: a parent granted without OpShare hands
+// on nothing, and nothing is recorded for the refused child.
+func TestDelegateRequiresOpShare(t *testing.T) {
+	issuer, _, store, _ := buildIssuerVerifier(t)
+	ctx := context.Background()
+	for name, tc := range map[string]struct {
+		ops  []Op
+		want error
+	}{
+		"a parent without share": {[]Op{OpGet}, ErrOpNotAllowed},
+		"a parent with share":    {[]Op{OpGet, OpShare}, nil},
+	} {
+		parent := issueRoot(t, issuer, Caveats{Ops: tc.ops})
+		before := len(store.caps)
+		_, err := issuer.Delegate(ctx, DelegateRequest{Parent: asVerified(parent), Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Caveats: Caveats{Ops: []Op{OpGet}}})
+		if tc.want == nil && err != nil || tc.want != nil && !errors.Is(err, tc.want) {
+			t.Errorf("%s: err = %v, want %v", name, err, tc.want)
+		}
+		if tc.want != nil && len(store.caps) != before {
+			t.Errorf("%s: a refused delegation was recorded", name)
+		}
 	}
 }

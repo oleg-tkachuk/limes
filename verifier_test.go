@@ -267,7 +267,7 @@ func TestDelegate_NarrowsAndPersists(t *testing.T) {
 		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID},
 		Audience: []string{audienceData, audienceMCP},
 		Caveats: Caveats{
-			Ops:              []Op{OpGet, OpList, OpSearch},
+			Ops:              []Op{OpGet, OpList, OpSearch, OpShare},
 			ResourcePrefixes: []string{"object://acme/"},
 			Budget:           BudgetCeiling{Max: MustParseAmount("1.00")},
 		},
@@ -282,7 +282,7 @@ func TestDelegate_NarrowsAndPersists(t *testing.T) {
 		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID, Subject: "child"},
 		Audience: []string{audienceData},
 		Caveats: Caveats{
-			Ops:              []Op{OpGet},
+			Ops:              []Op{OpGet, OpShare},
 			ResourcePrefixes: []string{"object://acme/run-42/"},
 			Budget:           BudgetCeiling{Max: NanosPerUnit / 10},
 		},
@@ -313,7 +313,7 @@ func TestDelegate_RejectsWidening(t *testing.T) {
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID},
 		Audience: []string{audienceData},
-		Caveats:  Caveats{Ops: []Op{OpGet}},
+		Caveats:  Caveats{Ops: []Op{OpGet, OpShare}},
 		TTL:      time.Hour,
 	})
 
@@ -321,7 +321,7 @@ func TestDelegate_RejectsWidening(t *testing.T) {
 		Parent:   asVerified(parent),
 		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID},
 		Audience: []string{audienceData, audienceAdmin}, // wider!
-		Caveats:  Caveats{Ops: []Op{OpGet}},
+		Caveats:  Caveats{Ops: []Op{OpGet, OpShare}},
 	})
 	if !errors.Is(err, ErrDelegationTooWide) {
 		t.Fatalf("expected ErrDelegationTooWide, got %v", err)
@@ -339,7 +339,7 @@ func TestDelegate_RefusesACopyWithLimitsOfItsOwn(t *testing.T) {
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID},
 		Audience: []string{audienceData},
-		Caveats:  Caveats{Ops: []Op{OpGet}, Requests: RequestCeiling{Max: 100}},
+		Caveats:  Caveats{Ops: []Op{OpGet, OpShare}, Requests: RequestCeiling{Max: 100}},
 		TTL:      time.Hour,
 	})
 	if err != nil {

@@ -138,7 +138,7 @@ func TestVerifierRejectsChildOfRevokedParent(t *testing.T) {
 		IssuedBy: limes.Principal{Subject: "op"},
 		Subject:  limes.Principal{Type: limes.PrincipalAgent, TenantID: uuid.New(), Subject: "orchestrator"},
 		Audience: []string{"data"},
-		Caveats:  limes.Caveats{Ops: []limes.Op{limes.OpGet}},
+		Caveats:  limes.Caveats{Ops: []limes.Op{limes.OpGet, limes.OpShare}},
 		TTL:      time.Hour,
 	})
 	parent, parentToken := parentResult.Capability, parentResult.Token

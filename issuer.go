@@ -328,7 +328,10 @@ type DelegateRequest struct {
 // record of it, so revoking it there would never reach the child. A child
 // that would have more than MaxDelegationDepth ancestors is
 // ErrDelegationTooDeep: its record is written before the store can count
-// them, and its token is not returned.
+// them, and its token is not returned. A parent whose caveats do not allow
+// OpShare — the right to delegate — is ErrOpNotAllowed: delegating is the
+// share operation, and a capability granted without it may not hand on any
+// part of itself.
 func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (IssueResult, error) {
 	return result(i.delegate(ctx, req))
 }
@@ -348,6 +351,9 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 	}
 	if parent.Issuer != i.issuerName {
 		return Capability{}, "", invalidRequest("parent %s was issued by %q, not %q", parent.ID, parent.Issuer, i.issuerName)
+	}
+	if !slices.Contains(parent.Caveats.Ops, OpShare) {
+		return Capability{}, "", fmt.Errorf("%w: parent %s does not allow %q", ErrOpNotAllowed, parent.ID, OpShare)
 	}
 	if req.Subject.TenantID == uuid.Nil {
 		req.Subject.TenantID = parent.Subject.TenantID
