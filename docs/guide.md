@@ -389,9 +389,10 @@ usage.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Remaining: tru
 
 A refund returns spend to every counter the charge took it from — except the
 tenant aggregate when the charge fell in an accounting period since closed
-with `ResetSpend` — and never more than the charge: `Amount: 0` refunds what
-is left, so a retried full refund is a no-op, and more than is left is
-`ErrRefundExceedsCharge`. `RefundReceipt.Amount` says what moved, and names
+with `ResetSpend` — and never more than the charge: `Remaining: true` refunds
+what is left, so a retried full refund is a no-op; a request with neither an
+`Amount` nor `Remaining`, or both, is `ErrInvalidRequest`, and more than is
+left is `ErrRefundExceedsCharge`. `RefundReceipt.Amount` says what moved, and names
 the charge's tenant and unit.
 
 Every counter counts in one unit. A charge or reservation in another unit than
@@ -714,12 +715,12 @@ log. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
 | Setting | Default |
 |---|---|
 | `IssuerConfig.DefaultTTL` | `DefaultIssueTTL`, 15 minutes |
-| `VerifierConfig.Leeway` | `DefaultLeeway`, 30 seconds; `NoLeeway` for none |
+| `VerifierConfig.Leeway` | `DefaultLeeway`, 30 seconds; `VerifierConfig.NoLeeway: true` for none |
 | `VerifierConfig.MaxTokenBytes` · `IssuerConfig.MaxTokenBytes` | `DefaultMaxTokenBytes`, 16 KiB |
 | `VerifierConfig.Leeway` bound | `MaxLeeway`, 5 minutes |
 | `VerifierConfig.AcceptTokenTypes` | `TokenTypeV4` |
 | `VerifierConfig.Realm` | `DefaultRealm`, `limes` |
-| `jwks.HandlerConfig.MaxAge` | `jwks.DefaultMaxAge`, 5 minutes; `Revalidate` for `max-age=0` |
+| `jwks.HandlerConfig.MaxAge` | `jwks.DefaultMaxAge`, 5 minutes; `HandlerConfig.Revalidate: true` for `max-age=0` |
 | `ListByPrincipalRequest.Limit` · `ListTenantBudgetsRequest.Limit` · `ListReservationsRequest.Limit` | `DefaultListLimit` 50, at most `MaxListLimit` 500 |
 | `PurgeRequest` · `ReleaseExpiredRequest` · `PurgeOrphansRequest` | `DefaultHousekeepingLimit` 1 000 a batch; `PurgeRequest.ExpiredFor` `MinPurgeRetention`, 6 minutes, and no less |
 | `MaxDelegationDepth` · `MaxBiscuitBlocks` | 64 ancestors · 32 attenuation blocks |

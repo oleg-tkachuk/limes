@@ -162,6 +162,9 @@ jobs:
             notes=(--notes-file "$RELEASE_NOTES_FILE")
           fi
           source .github/scripts/gh-retry.sh
-          gh_retry release create "$tag" --repo "$GITHUB_REPOSITORY" --generate-notes --verify-tag "${notes[@]}"
+          # A 5xx can arrive after the release was made: the retry then
+          # meets "already exists", and the release standing is success.
+          gh_retry release create "$tag" --repo "$GITHUB_REPOSITORY" --generate-notes --verify-tag "${notes[@]}" ||
+            gh_retry release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null
           ./.github/scripts/warm-go-proxy.sh "$tag" ||
             echo "::warning::the Go proxy did not take $tag yet; it will on its own"
