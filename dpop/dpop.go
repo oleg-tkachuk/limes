@@ -49,6 +49,12 @@ const tokenType = "dpop+jwt"
 // DefaultWindow is how far a proof's iat may be from the verifier's clock.
 const DefaultWindow = time.Minute
 
+// ReplayClockSkew is how much longer than its acceptance window a proof's id
+// is remembered (ReplayEntry.Expires): a replay cache reads its own clock,
+// a moment after the verifier — or, shared, a different machine's — and must
+// still hold the id of every proof the verifier could accept.
+const ReplayClockSkew = 5 * time.Second
+
 const (
 	// es256SignatureBytes is a JWS ES256 signature: r || s, not DER.
 	es256SignatureBytes = 2 * jose.P256CoordinateBytes
@@ -256,7 +262,8 @@ type Request struct {
 }
 
 // ReplayEntry is one proof id to record: the id of a proof from the key
-// with thumbprint JKT, remembered until Expires.
+// with thumbprint JKT, remembered until Expires — ReplayClockSkew past the
+// last instant the verifier accepts the proof.
 type ReplayEntry struct {
 	JKT, JTI string
 	Expires  time.Time
@@ -405,7 +412,10 @@ func (v *Verifier) Verify(ctx context.Context, req Request) error {
 			return ErrNonceRequired
 		}
 	}
-	seen, err := v.cfg.Replay.Seen(ctx, ReplayEntry{JKT: thumb, JTI: claims.JTI, Expires: iat.Add(window)})
+	// Remembered past the last instant it is accepted, by more than the
+	// cache's clock can lag the verifier's: at iat+window it is still
+	// accepted, and a cache that dropped it then would let it through again.
+	seen, err := v.cfg.Replay.Seen(ctx, ReplayEntry{JKT: thumb, JTI: claims.JTI, Expires: iat.Add(window).Add(ReplayClockSkew)})
 	if err != nil {
 		return fmt.Errorf("dpop: replay check: %w", err)
 	}

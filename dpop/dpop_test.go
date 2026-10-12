@@ -449,3 +449,37 @@ func TestConstructorsRefuseABadConfiguration(t *testing.T) {
 		t.Error("NewHMACNonces accepted a negative lifetime")
 	}
 }
+
+// A proof is remembered for longer than it is accepted, so it is never
+// accepted twice: not at the very edge of the window, and not when the
+// cache's clock reads a little later than the verifier's.
+func TestDPoPReplayIsCaughtAtTheWindowEdge(t *testing.T) {
+	iat := time.Unix(1_800_000_000, 0)
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := boundJKT(t, priv)
+	proof, err := Sign(priv, ProofRequest{Method: "POST", URL: dpopURL, Token: "tok", Now: iat})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := Request{Proof: Proof{JWT: proof, Method: "POST", URL: dpopURL}, Token: "tok", JKT: c}
+	for name, skew := range map[string]time.Duration{
+		"clocks agree":                        0,
+		"the cache reads later":               ReplayClockSkew / 2,
+		"the cache reads just under the skew": ReplayClockSkew - time.Nanosecond,
+	} {
+		t.Run(name, func(t *testing.T) {
+			at := iat.Add(DefaultWindow)
+			replay := newReplay(t, MemoryReplayCacheConfig{Now: func() time.Time { return at.Add(skew) }})
+			v := newVerifier(t, VerifierConfig{Replay: replay, Now: func() time.Time { return at }})
+			if err := v.Verify(context.Background(), req); err != nil {
+				t.Fatalf("the proof at the window's edge: %v", err)
+			}
+			if err := v.Verify(context.Background(), req); !errors.Is(err, ErrReplayed) {
+				t.Fatalf("the same proof again: err = %v, want ErrReplayed", err)
+			}
+		})
+	}
+}
