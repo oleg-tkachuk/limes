@@ -357,8 +357,8 @@ func TestDelegate_RefusesACopyWithLimitsOfItsOwn(t *testing.T) {
 	copyOf := parent
 	copyOf.Copies = []CopyCeiling{{RevocationID: []byte("block"), Requests: RequestCeiling{Max: 5}}}
 	before := len(store.caps)
-	if err := delegate(copyOf); !errors.Is(err, ErrDelegationTooWide) {
-		t.Fatalf("delegate from a copy with limits: err = %v, want ErrDelegationTooWide", err)
+	if err := delegate(copyOf); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("delegate from a copy with limits: err = %v, want ErrInvalidRequest", err)
 	}
 	if len(store.caps) != before {
 		t.Error("a refused delegation persisted a child")
@@ -436,8 +436,8 @@ func TestDelegateRefusesAnyBiscuitCopy(t *testing.T) {
 		_, _, err = issuer.Delegate(ctx, DelegateRequest{
 			Parent: vc, Subject: Principal{Type: PrincipalAgent, Subject: "child"}, InheritCaveats: true, TTL: time.Minute,
 		})
-		if !errors.Is(err, ErrDelegationTooWide) {
-			t.Errorf("%s: Delegate err = %v, want ErrDelegationTooWide", name, err)
+		if !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("%s: Delegate err = %v, want ErrInvalidRequest", name, err)
 		}
 		if len(store.caps) != before {
 			t.Errorf("%s: a refused delegation recorded a child", name)

@@ -192,13 +192,13 @@ func Attenuate(token string, a Attenuation) (string, error) {
 	}
 	if r := a.Requests; r != nil {
 		if r.Unlimited || r.Validate() != nil {
-			return "", fmt.Errorf("%w: a copy's request ceiling is a bound within 0..%d", ErrBiscuitAttenuation, int64(MaxIJSONInteger))
+			return "", invalidRequest("a copy's request ceiling is a bound within 0..%d", int64(MaxIJSONInteger))
 		}
 		errs = append(errs, add(biscuitFactMaxRequests, biscuit.Integer(r.Max)))
 	}
 	if b := a.Budget; b != nil {
 		if b.Unlimited || b.Validate() != nil {
-			return "", fmt.Errorf("%w: a copy's budget ceiling is a bound within 0..%s", ErrBiscuitAttenuation, MaxNanos)
+			return "", invalidRequest("a copy's budget ceiling is a bound within 0..%s", MaxNanos)
 		}
 		errs = append(errs, add(biscuitFactMaxBudget, biscuit.Integer(b.Max)))
 	}

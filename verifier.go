@@ -230,7 +230,8 @@ func (v *StandardVerifier) Verify(ctx context.Context, req VerifyRequest) (Verif
 		return VerifiedCapability{}, ErrNoCredentials
 	}
 	if audience == "" {
-		return VerifiedCapability{}, fmt.Errorf("%w: no audience to verify against", ErrAudienceMismatch)
+		// The server's own call names no audience: its error, not the token's.
+		return VerifiedCapability{}, invalidRequest("VerifyRequest.Audience is required")
 	}
 	if len(token) > v.cfg.MaxTokenBytes {
 		return VerifiedCapability{}, fmt.Errorf("%w: token is %d bytes (limit %d)",

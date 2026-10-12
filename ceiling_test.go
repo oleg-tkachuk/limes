@@ -36,6 +36,8 @@ func TestCeilingValidate(t *testing.T) {
 		"budget negative":               {BudgetCeiling{Max: -1}.Validate(), ErrInvalidAmount},
 		"budget past MaxNanos":          {BudgetCeiling{Max: MaxNanos + 1}.Validate(), ErrInvalidAmount},
 		"budget unlimited with a Max":   {BudgetCeiling{Max: 1, Unlimited: true}.Validate(), ErrInvalidRequest},
+		// An out-of-range budget is a bad request too, not only a bad amount.
+		"budget negative, a request": {BudgetCeiling{Max: -1}.Validate(), ErrInvalidRequest},
 	} {
 		if tc.want == nil && tc.err != nil || tc.want != nil && !errors.Is(tc.err, tc.want) {
 			t.Errorf("%s: Validate() = %v, want %v", name, tc.err, tc.want)

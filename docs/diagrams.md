@@ -188,12 +188,14 @@ flowchart TB
     keysDown["jwks.ErrUnavailable<br/>(503, the server's fault)"]
     revoked["ErrRevoked"]
     biscuit["the Biscuit path below"]
+    noCreds["ErrNoCredentials"]
+    invalid["ErrInvalidRequest<br/>(the server's own call)"]
 
     tok --> pre -- yes --> size -- yes --> form -- no --> hdr -- yes --> key -- found --> sig -- valid --> claims -- yes --> iss -- yes --> tenant -- yes --> sealed -- yes --> nbf
     form -- yes --> biscuit
     nbf -- yes --> exp -- yes --> aud -- yes --> scheme -- yes --> pop -- "unbound, or valid proof" --> rev -- no --> brev -- "no, or not a Biscuit" --> ok
-    pre -- "no token" --> bad
-    pre -- "no audience" --> mism
+    pre -- "no token" --> noCreds
+    pre -- "no audience" --> invalid
     size -- no --> bad
     hdr -- no --> bad
     key -- "unknown kid" --> bad
@@ -218,7 +220,7 @@ flowchart TB
     class tok,ok client
     class pre,size,form,hdr,sig,claims,iss,tenant,sealed,nbf,exp,aud,scheme,pop role
     class key,rev,brev store
-    class bad,early,expired,mism,wrong,dpopErr,keysDown,revoked,biscuit external
+    class bad,early,expired,mism,wrong,dpopErr,keysDown,revoked,biscuit,noCreds,invalid external
 ```
 
 An unknown kid, an untrusted issuer, a kid bound to another issuer and a
