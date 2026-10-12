@@ -31,9 +31,9 @@ readonly OTHER=fedcba9876543210fedcba9876543210fedcba98
 readonly RUN_ID=42
 export GITHUB_REPOSITORY="$REPO"
 
-run_json() { # path, event, branch, sha
+run_json() { # path, event, branch, sha, [repository]
     printf '{"path":"%s","event":"%s","head_branch":"%s","head_sha":"%s","repository":{"full_name":"%s"}}' \
-        "$1" "$2" "$3" "$4" "$REPO"
+        "$1" "$2" "$3" "$4" "${5-$REPO}"
 }
 jobs_tsv() { # conclusion for Verify
     local name
@@ -67,6 +67,7 @@ check "another sha" fail "$(run_json .github/workflows/ci.yaml push main "$OTHER
 check "another workflow" fail "$(run_json .github/workflows/codeql.yaml push main "$SHA")" "$(jobs_tsv success)"
 check "a pull request" fail "$(run_json .github/workflows/ci.yaml pull_request main "$SHA")" "$(jobs_tsv success)"
 check "another branch" fail "$(run_json .github/workflows/ci.yaml push feature "$SHA")" "$(jobs_tsv success)"
+check "another repository" fail "$(run_json .github/workflows/ci.yaml push main "$SHA" someone/fork)" "$(jobs_tsv success)"
 check "no run id" fail "$good" "$(jobs_tsv success)" "" "$SHA"
 check "no sha" fail "$good" "$(jobs_tsv success)" "$RUN_ID" ""
 
