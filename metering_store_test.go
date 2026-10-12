@@ -409,3 +409,22 @@ func (spec subjectSpec) budgetCeiling() limes.BudgetCeiling {
 // budgetOf and requestsOf are ceilings of n, for a spec to set.
 func budgetOf(n limes.Nanos) *limes.BudgetCeiling { return &limes.BudgetCeiling{Max: n} }
 func requestsOf(n int64) *limes.RequestCeiling    { return &limes.RequestCeiling{Max: n} }
+
+// A refused settle is attributed to the subject's tenant, as a refused charge
+// is, not to the zero tenant of the empty receipt.
+func TestMeteringAttributesARefusedSettle(t *testing.T) {
+	usage, reader, records := meteredStore(t, limes.WithTenantAttribute())
+	ctx := context.Background()
+	tenant := uuid.New()
+	subject := recordedSubject(ctx, t, records, subjectSpec{capID: uuid.New(), tenant: tenant})
+	if _, err := usage.Settle(ctx, limes.SettleRequest{Subject: subject, ReservationID: uuid.New(), Amount: limes.MustParseAmount("1")}, nil); !errors.Is(err, limes.ErrReservationNotFound) {
+		t.Fatalf("settling no reservation: err = %v, want ErrReservationNotFound", err)
+	}
+	decisions := points(t, reader, metricChargeDecisions)
+	if got := valueAt(decisions, attrTenant, tenant.String()); got != 1 {
+		t.Errorf("refused settles for tenant %s = %v, want 1", tenant, got)
+	}
+	if got := valueAt(decisions, attrTenant, uuid.Nil.String()); got != 0 {
+		t.Errorf("refused settles for the zero tenant = %v, want 0", got)
+	}
+}
