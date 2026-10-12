@@ -88,7 +88,7 @@ type BiscuitCopy struct {
 // capability the token genuinely carries. Expiry, audience and revocation are
 // not checked: a copy can be revoked whatever its state. Nor is MeterCopies:
 // a copy carrying limits is named, and can be revoked, on any verifier.
-func (v *StandardVerifier) BiscuitCopy(ctx context.Context, token string) (BiscuitCopy, error) {
+func (v *Verifier) BiscuitCopy(ctx context.Context, token string) (BiscuitCopy, error) {
 	if !isBiscuit(token) {
 		return BiscuitCopy{}, fmt.Errorf("%w: not a Biscuit token", ErrInvalidToken)
 	}
@@ -166,6 +166,6 @@ func (c *CachedBiscuitRevocationChecker) Clear() { c.cache.clear() }
 // Sweep drops every expired entry and returns how many it dropped.
 func (c *CachedBiscuitRevocationChecker) Sweep() int { return c.cache.sweep() }
 
-// errNoBiscuitRevocations is returned by NewStandardVerifier when Biscuits
+// errNoBiscuitRevocations is returned by NewVerifier when Biscuits
 // are accepted with nothing to check their copies against.
 var errNoBiscuitRevocations = errors.New("limes: VerifierConfig.BiscuitRevocations required when AcceptBiscuit is set")

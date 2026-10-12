@@ -58,7 +58,7 @@ func stringTerm(id uint64) *pb.TermV2 { return &pb.TermV2{Content: &pb.TermV2_St
 func integerTerm() *pb.TermV2 { return &pb.TermV2{Content: &pb.TermV2_Integer{Integer: 1}} }
 
 // verifyNoPanic is v.Verify of token, failing the test if it panics.
-func verifyNoPanic(t *testing.T, v *StandardVerifier, token string) (err error) {
+func verifyNoPanic(t *testing.T, v *Verifier, token string) (err error) {
 	t.Helper()
 	defer func() {
 		if r := recover(); r != nil {

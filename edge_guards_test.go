@@ -72,7 +72,7 @@ func TestRetiredButPublishedKeyStillVerifies(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	verifier, err := NewStandardVerifier(VerifierConfig{
+	verifier, err := NewVerifier(VerifierConfig{
 		Keys: resolver, Revocations: revLookup{},
 		TrustedIssuers: []string{goldenIssuer}, Now: goldenClock,
 	})
@@ -103,7 +103,7 @@ func TestWithdrawnKeyStopsVerifying(t *testing.T) {
 	newPub := ed25519.NewKeyFromSeed(newSeed[:]).Public().(ed25519.PublicKey)
 
 	// The old kid is simply absent from the published set.
-	verifier, err := NewStandardVerifier(VerifierConfig{
+	verifier, err := NewVerifier(VerifierConfig{
 		Keys:        staticKeys(t, map[string]ed25519.PublicKey{"new-kid": newPub}),
 		Revocations: revLookup{}, TrustedIssuers: []string{goldenIssuer}, Now: goldenClock,
 	})
@@ -140,7 +140,7 @@ func TestForgedSignatureRejected(t *testing.T) {
 	otherSeed[31] ^= 0xff
 	otherPub := ed25519.NewKeyFromSeed(otherSeed[:]).Public().(ed25519.PublicKey)
 
-	verifier, err := NewStandardVerifier(VerifierConfig{
+	verifier, err := NewVerifier(VerifierConfig{
 		Keys:        staticKeys(t, map[string]ed25519.PublicKey{goldenKID: otherPub}),
 		Revocations: revLookup{}, TrustedIssuers: []string{goldenIssuer}, Now: goldenClock,
 	})
@@ -159,7 +159,7 @@ func TestUntrustedIssuerRejected(t *testing.T) {
 	pub := priv.Public().(ed25519.PublicKey)
 	token := mintToken(t, testIssuer(t, goldenKID, priv, goldenClock))
 
-	verifier, err := NewStandardVerifier(VerifierConfig{
+	verifier, err := NewVerifier(VerifierConfig{
 		Keys:        staticKeys(t, map[string]ed25519.PublicKey{goldenKID: pub}),
 		Revocations: revLookup{}, TrustedIssuers: []string{"some-other-issuer"}, Now: goldenClock,
 	})

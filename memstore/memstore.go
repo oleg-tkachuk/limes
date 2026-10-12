@@ -301,7 +301,7 @@ func (s *Store) Revoke(_ context.Context, args limes.RevokeRequest) error {
 		return limes.ErrNotFound
 	}
 	entry := limes.Revocation{
-		RevokedAt: s.nowFn(), Note: args.Note, Actor: args.Actor, Cascade: args.CascadeChildren,
+		RevokedAt: s.nowFn(), Note: args.Note, Actor: args.Actor, Cascaded: args.CascadeChildren,
 	}
 	s.revokeLocked(args.CapabilityID, entry)
 	if !args.CascadeChildren {
@@ -374,7 +374,7 @@ func (s *Store) Purge(_ context.Context, req limes.PurgeRequest) (limes.PurgeRes
 	}
 	limit := req.Limit
 	if limit == 0 {
-		limit = limes.DefaultPurgeLimit
+		limit = limes.DefaultHousekeepingLimit
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -483,15 +483,15 @@ func (s *UsageStore[TX]) Bump(_ context.Context, req limes.BumpRequest) (limes.B
 	next := u.RequestCount + 1
 	for _, c := range req.Subject.Copies() {
 		if !c.Requests.Admits(s.copies[string(c.RevocationID)].requests + 1) {
-			return limes.BumpReceipt{Requests: u.RequestCount}, fmt.Errorf("%w: copy %x", limes.ErrRequestLimitExceeded, c.RevocationID)
+			return limes.BumpReceipt{RequestCount: u.RequestCount}, fmt.Errorf("%w: copy %x", limes.ErrRequestLimitExceeded, c.RevocationID)
 		}
 	}
 	if !req.Subject.Requests().Admits(next) {
-		return limes.BumpReceipt{Requests: u.RequestCount}, limes.ErrRequestLimitExceeded
+		return limes.BumpReceipt{RequestCount: u.RequestCount}, limes.ErrRequestLimitExceeded
 	}
 	for _, a := range ancestors {
 		if !a.Caveats.Requests.Admits(s.usage[a.ID].RequestCount + 1) {
-			return limes.BumpReceipt{Requests: u.RequestCount}, fmt.Errorf("%w: ancestor %s", limes.ErrRequestLimitExceeded, a.ID)
+			return limes.BumpReceipt{RequestCount: u.RequestCount}, fmt.Errorf("%w: ancestor %s", limes.ErrRequestLimitExceeded, a.ID)
 		}
 	}
 	for _, a := range ancestors {
@@ -509,7 +509,7 @@ func (s *UsageStore[TX]) Bump(_ context.Context, req limes.BumpRequest) (limes.B
 	u.CapabilityID = req.Subject.CapabilityID()
 	u.RequestCount = next
 	s.usage[req.Subject.CapabilityID()] = u
-	return limes.BumpReceipt{Requests: next}, nil
+	return limes.BumpReceipt{RequestCount: next}, nil
 }
 
 // hold is one open reservation and every counter it holds against.
@@ -1385,10 +1385,10 @@ func (s *UsageStore[TX]) releaseHoldsLocked(gone func(capID uuid.UUID) bool) {
 	}
 }
 
-// Delete drops the capability's counters and releases its holds first:
+// DeleteUsage drops the capability's counters and releases its holds first:
 // nothing could settle or release them once it is gone, and they would keep
 // counting against its ancestors and its tenant.
-func (s *UsageStore[TX]) Delete(_ context.Context, req limes.DeleteUsageRequest) error {
+func (s *UsageStore[TX]) DeleteUsage(_ context.Context, req limes.DeleteUsageRequest) error {
 	capID := req.CapabilityID
 	s.mu.Lock()
 	defer s.mu.Unlock()

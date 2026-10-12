@@ -215,12 +215,12 @@ type TenantBudgets interface {
 
 // UsageHousekeeping reclaims usage rows of capabilities that are gone.
 type UsageHousekeeping interface {
-	// Delete drops the capability's row. Called when the capability is
+	// DeleteUsage drops the capability's row. Called when the capability is
 	// reaped. It releases the capability's open reservations first,
 	// returning their holds to its ancestors and its tenant: nothing could
 	// settle or release them afterwards. A capability with no row is no
 	// error: there is nothing to drop.
-	Delete(ctx context.Context, req DeleteUsageRequest) error
+	DeleteUsage(ctx context.Context, req DeleteUsageRequest) error
 
 	// PurgeOrphans deletes the usage rows of capabilities no longer on
 	// record (Store.Purge), releasing their reservations as Delete does, at
@@ -637,8 +637,8 @@ func ValidateExternalRef(ref string) error {
 
 // BumpReceipt is what a Bump counted.
 type BumpReceipt struct {
-	// Requests is the capability's request count after this one.
-	Requests int64
+	// RequestCount is the capability's request count after this one.
+	RequestCount int64
 }
 
 // ReleaseRequest names the reservation to release.
@@ -665,10 +665,6 @@ func (r ListReservationsRequest) Validate() error {
 	}
 	return nil
 }
-
-// DefaultHousekeepingLimit is how many rows one housekeeping batch handles
-// when the request names no limit.
-const DefaultHousekeepingLimit = 1_000
 
 // PurgeOrphansRequest is one batch of UsageHousekeeping.PurgeOrphans.
 type PurgeOrphansRequest struct {

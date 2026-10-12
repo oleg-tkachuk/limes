@@ -107,7 +107,7 @@ var sentinelMatrix = map[string]sentinelCase{
 // Each sentinel matches exactly the families the matrix names, has the
 // Reason it names and is answered with the status it names.
 func TestSentinelMatrix(t *testing.T) {
-	v := &StandardVerifier{}
+	v := &Verifier{}
 	for name, c := range sentinelMatrix {
 		for family, target := range families {
 			want := slices.Contains(c.families, family)
@@ -208,7 +208,7 @@ func TestVerifyTellsAnUnknownKidFromAResolverOutage(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			cfg := configured.cfg
 			cfg.Keys = failingResolver{tc.resolverErr}
-			v, err := NewStandardVerifier(cfg)
+			v, err := NewVerifier(cfg)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -252,7 +252,7 @@ func TestVerifyTellsAProofRefusalFromAProofStoreOutage(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			cfg := configured.cfg
 			cfg.DPoP = newVerifier(t, d)
-			v, err := NewStandardVerifier(cfg)
+			v, err := NewVerifier(cfg)
 			if err != nil {
 				t.Fatal(err)
 			}

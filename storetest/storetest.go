@@ -220,7 +220,7 @@ func checkRecord(t *testing.T, f fixture) {
 		t.Fatal(err)
 	}
 	rev := record(parent.ID).Revocation
-	if rev == nil || rev.Note != "test" || rev.Actor != "storetest" || rev.Cascade || rev.RevokedAt.IsZero() {
+	if rev == nil || rev.Note != "test" || rev.Actor != "storetest" || rev.Cascaded || rev.RevokedAt.IsZero() {
 		t.Errorf("revocation = %+v; want the first revoke's reason and actor, not cascading, with a time", rev)
 	}
 	if rev := record(child.ID).Revocation; rev != nil {
@@ -228,7 +228,7 @@ func checkRecord(t *testing.T, f fixture) {
 	}
 	f.revoke(t, cascadeRoot.ID, true)
 	for _, id := range []uuid.UUID{cascadeRoot.ID, cascadeChild.ID} {
-		if rev := record(id).Revocation; rev == nil || !rev.Cascade {
+		if rev := record(id).Revocation; rev == nil || !rev.Cascaded {
 			t.Errorf("%s after a cascading revoke: revocation %+v, want a cascading entry", id, rev)
 		}
 	}

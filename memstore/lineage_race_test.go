@@ -55,7 +55,7 @@ func TestChargeRacingDeleteLeavesTheAncestorDeleted(t *testing.T) {
 				<-release
 				return nil
 			})
-			_ = u.Delete(ctx, limes.DeleteUsageRequest{CapabilityID: root})
+			_ = u.DeleteUsage(ctx, limes.DeleteUsageRequest{CapabilityID: root})
 		}()
 		<-holding
 		go func() { // R: reads lineage now, parks on the usage lock
@@ -99,7 +99,7 @@ func TestReserveRacingDeleteLeavesTheAncestorDeleted(t *testing.T) {
 				<-release
 				return nil
 			})
-			_ = u.Delete(ctx, limes.DeleteUsageRequest{CapabilityID: root})
+			_ = u.DeleteUsage(ctx, limes.DeleteUsageRequest{CapabilityID: root})
 		}()
 		<-holding
 		go func() {

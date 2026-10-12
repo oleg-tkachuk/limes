@@ -25,7 +25,7 @@ func TestErrorResponse(t *testing.T) {
 	}
 	cfg := v.cfg
 	cfg.DPoP = newVerifier(t, dpop.VerifierConfig{Replay: newReplay(t, dpop.MemoryReplayCacheConfig{}), Nonces: nonces})
-	withNonces, err := NewStandardVerifier(cfg)
+	withNonces, err := NewVerifier(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestEveryChallengeNamesTheRealm(t *testing.T) {
 	_, configured, _, _ := buildIssuerVerifier(t)
 	cfg := configured.cfg
 	cfg.Realm = realm
-	v, err := NewStandardVerifier(cfg)
+	v, err := NewVerifier(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

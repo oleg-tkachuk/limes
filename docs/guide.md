@@ -85,7 +85,7 @@ nest, or construction fails:
 keys, err := jwks.NewRemote(jwks.RemoteConfig{
     URL: "https://issuer.example.com/.well-known/jwks.json",
 })
-verifier, err := limes.NewStandardVerifier(limes.VerifierConfig{
+verifier, err := limes.NewVerifier(limes.VerifierConfig{
     Keys: keys, Revocations: revocations, TrustedIssuers: []string{"my-issuer"},
 })
 ```
@@ -233,7 +233,7 @@ proof, _ := dpop.Sign(agentKey, dpop.ProofRequest{Method: "POST", URL: url, Toke
 // Server: the verifier checks the proof of every key-bound capability.
 replay, _ := dpop.NewMemoryReplayCache(dpop.MemoryReplayCacheConfig{})
 proofs, _ := dpop.NewVerifier(dpop.VerifierConfig{Replay: replay})
-verifier, _ := limes.NewStandardVerifier(limes.VerifierConfig{
+verifier, _ := limes.NewVerifier(limes.VerifierConfig{
     /* … */
     DPoP: proofs,
 })
@@ -592,7 +592,7 @@ than walk part of it and miss a revocation at its root.
 
 Records do not stay forever. A housekeeping job calls
 `Store.Purge(ctx, limes.PurgeRequest{ExpiredFor: retention})` on a timer, and
-again while a batch comes back full (`Limit`, `DefaultPurgeLimit` unless
+again while a batch comes back full (`Limit`, `DefaultHousekeepingLimit` unless
 set): it removes the capabilities expired for longer than the retention, with
 their revocation entries, then `UsageHousekeeping.PurgeOrphans` releases what
 the meter still holds for them. A child never outlives its parent, so no

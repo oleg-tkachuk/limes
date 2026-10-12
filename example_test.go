@@ -27,7 +27,7 @@ const (
 // setup ExampleIssuer_Issue shows in full.
 type exampleStack struct {
 	issuer   *limes.Issuer
-	verifier *limes.StandardVerifier
+	verifier *limes.Verifier
 	records  *memstore.Store
 	usage    *memstore.UsageStore[struct{}]
 	tenantID uuid.UUID
@@ -63,7 +63,7 @@ func newExampleStack() exampleStack {
 	if err != nil {
 		log.Fatal(err)
 	}
-	verifier, err := limes.NewStandardVerifier(limes.VerifierConfig{
+	verifier, err := limes.NewVerifier(limes.VerifierConfig{
 		Keys:               exampleKeys(kid, pub),
 		Revocations:        records,
 		TrustedIssuers:     []string{exampleIssuerName},
@@ -123,7 +123,7 @@ func ExampleIssuer_Issue() {
 	issuer, _ := limes.NewIssuer(limes.IssuerConfig{
 		Signer: signer, Store: records, IssuerName: exampleIssuerName,
 	})
-	verifier, _ := limes.NewStandardVerifier(limes.VerifierConfig{
+	verifier, _ := limes.NewVerifier(limes.VerifierConfig{
 		Keys:           exampleKeys(kid, pub),
 		Revocations:    records,
 		TrustedIssuers: []string{exampleIssuerName},
@@ -281,7 +281,7 @@ func Example_proofOfPossession() {
 	// true
 }
 
-func ExampleStandardVerifier_Authorize() {
+func ExampleVerifier_Authorize() {
 	ctx := context.Background()
 	s := newExampleStack()
 	_, token := s.issue()

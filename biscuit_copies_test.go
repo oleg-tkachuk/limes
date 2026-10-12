@@ -20,7 +20,7 @@ const (
 
 // limitedBiscuit is a Biscuit of a capability with request and budget
 // limits, and a verifier that admits copy limits.
-func limitedBiscuit(t *testing.T) (*StandardVerifier, Capability, string) {
+func limitedBiscuit(t *testing.T) (*Verifier, Capability, string) {
 	t.Helper()
 	issuer, v, _, _, _ := biscuitFixture(t)
 	v.cfg.MeterCopies = true

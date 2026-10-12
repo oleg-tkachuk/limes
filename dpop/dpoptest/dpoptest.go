@@ -116,7 +116,7 @@ func (e ReplayEnv) now() time.Time {
 
 // entry is a fresh id of key, accepted for proofLifetime from now.
 func (e ReplayEnv) entry(key string) dpop.ReplayEntry {
-	return dpop.ReplayEntry{JKT: key, JTI: uuid.NewString(), Expires: e.now().Add(proofLifetime)}
+	return dpop.ReplayEntry{JKT: key, JTI: uuid.NewString(), ExpiresAt: e.now().Add(proofLifetime)}
 }
 
 func (e ReplayEnv) seen(t *testing.T, entry dpop.ReplayEntry) bool {

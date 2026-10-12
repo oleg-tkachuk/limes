@@ -34,7 +34,7 @@ func TestConfigDefaults(t *testing.T) {
 		t.Errorf("Issuer default TTL = %s, want 15m", iss.defaultTTL)
 	}
 
-	v, err := NewStandardVerifier(VerifierConfig{
+	v, err := NewVerifier(VerifierConfig{
 		Keys:           staticKeys(t, map[string]ed25519.PublicKey{"k1": pub}),
 		Revocations:    newMemStore(),
 		TrustedIssuers: []string{goldenIssuer},
@@ -84,14 +84,14 @@ func TestConfigRefusesNegatives(t *testing.T) {
 	} {
 		cfg := base
 		mutate(&cfg)
-		if _, err := NewStandardVerifier(cfg); err == nil {
-			t.Errorf("NewStandardVerifier accepted %s", name)
+		if _, err := NewVerifier(cfg); err == nil {
+			t.Errorf("NewVerifier accepted %s", name)
 		}
 	}
 	at := base
 	at.Leeway = MaxLeeway
-	if _, err := NewStandardVerifier(at); err != nil {
-		t.Errorf("NewStandardVerifier refused a Leeway of MaxLeeway: %v", err)
+	if _, err := NewVerifier(at); err != nil {
+		t.Errorf("NewVerifier refused a Leeway of MaxLeeway: %v", err)
 	}
 }
 
@@ -101,8 +101,8 @@ func TestVerifierRefusesAnEmptyKeyIssuerBinding(t *testing.T) {
 	_, configured, _, _ := buildIssuerVerifier(t)
 	cfg := configured.cfg
 	cfg.KeyIssuers = map[string]string{}
-	if _, err := NewStandardVerifier(cfg); err == nil {
-		t.Error("NewStandardVerifier accepted an empty KeyIssuers")
+	if _, err := NewVerifier(cfg); err == nil {
+		t.Error("NewVerifier accepted an empty KeyIssuers")
 	}
 }
 
@@ -169,7 +169,7 @@ func TestAcceptTokenTypesRefusesWhatItCannotRead(t *testing.T) {
 			AcceptTokenTypes: types,
 		}
 	}
-	if _, err := NewStandardVerifier(cfg([]string{TokenTypeV4})); err != nil {
+	if _, err := NewVerifier(cfg([]string{TokenTypeV4})); err != nil {
 		t.Errorf("accepting %q: %v", TokenTypeV4, err)
 	}
 	for name, types := range map[string][]string{
@@ -177,7 +177,7 @@ func TestAcceptTokenTypesRefusesWhatItCannotRead(t *testing.T) {
 		"an unknown format": {"limes-cap-v5+jwt"},
 		"an empty format":   {""},
 	} {
-		if _, err := NewStandardVerifier(cfg(types)); err == nil {
+		if _, err := NewVerifier(cfg(types)); err == nil {
 			t.Errorf("%s: a verifier was built", name)
 		}
 	}
@@ -205,7 +205,7 @@ func TestSeveralIssuersNeedAKeyDecision(t *testing.T) {
 	} {
 		cfg := base
 		cfg.TrustedIssuers, cfg.KeyIssuers, cfg.SharedKeys = tc.issuers, tc.binding, tc.shared
-		if _, err := NewStandardVerifier(cfg); (err == nil) != tc.ok {
+		if _, err := NewVerifier(cfg); (err == nil) != tc.ok {
 			t.Errorf("%s: err = %v, want ok=%v", name, err, tc.ok)
 		}
 	}

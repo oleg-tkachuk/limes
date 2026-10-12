@@ -256,7 +256,7 @@ func validateAudience(aud []string) error {
 // runtime widening attempt fails before any token is emitted.
 type DelegateRequest struct {
 	// Parent is the capability the child narrows, as the verifier accepted
-	// it: only StandardVerifier.Verify and Authorize make one.
+	// it: only Verifier.Verify and Authorize make one.
 	Parent VerifiedCapability
 	// Subject is who the child authorises; its TenantID defaults to the
 	// parent's.

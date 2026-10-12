@@ -64,7 +64,7 @@ type Store interface {
 	// capability: the capability, who issued it, and its own revocation
 	// entry if it has one. ErrNotFound when there is no record. For audit
 	// and admin reads, and for a reporter that needs a capability's
-	// ceilings; StandardVerifier never calls it.
+	// ceilings; Verifier never calls it.
 	GetRecord(ctx context.Context, id uuid.UUID) (Record, error)
 
 	// Revoke adds an entry to the revocation list. Idempotent: a
@@ -128,9 +128,9 @@ type Revocation struct {
 	RevokedAt time.Time
 	Note      string
 	Actor     string
-	// Cascade reports that the entry was written by a cascading revoke —
+	// Cascaded reports that the entry was written by a cascading revoke —
 	// of this capability or of an ancestor.
-	Cascade bool
+	Cascaded bool
 }
 
 // ErrAlreadyExists is Store.Insert given an id already on record.
@@ -170,9 +170,10 @@ type RevokeRequest struct {
 	CascadeChildren bool
 }
 
-// DefaultPurgeLimit is how many records one Purge removes when the request
-// names no limit.
-const DefaultPurgeLimit = 1_000
+// DefaultHousekeepingLimit is how many rows one housekeeping batch —
+// Store.Purge, UsageHousekeeping.ReleaseExpired or PurgeOrphans — handles
+// when the request names no limit.
+const DefaultHousekeepingLimit = 1_000
 
 // PurgeClockSkew is how far the clock of the store that purges may run ahead
 // of a verifier's: the store measures expiry by its own clock, the verifier
@@ -191,7 +192,7 @@ type PurgeRequest struct {
 	// Zero: MinPurgeRetention; anything shorter, negative included, is
 	// refused.
 	ExpiredFor time.Duration
-	// Limit bounds the records removed. Zero: DefaultPurgeLimit; negative
+	// Limit bounds the records removed. Zero: DefaultHousekeepingLimit; negative
 	// is refused.
 	Limit int
 }

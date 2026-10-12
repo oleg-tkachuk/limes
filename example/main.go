@@ -51,7 +51,7 @@ func main() {
 
 	keys, err := jwks.NewStatic(jwks.StaticConfig{Keys: map[string]ed25519.PublicKey{kid: pub}})
 	must(err, "key set")
-	verifier, err := limes.NewStandardVerifier(limes.VerifierConfig{
+	verifier, err := limes.NewVerifier(limes.VerifierConfig{
 		Keys:           keys,
 		Revocations:    records,
 		TrustedIssuers: []string{"example-issuer"},

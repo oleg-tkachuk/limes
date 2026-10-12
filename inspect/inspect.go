@@ -1,7 +1,7 @@
 // Package inspect reads a capability token for tooling — a CLI that shows a
 // token, a debugger, a log viewer — without verifying it. Nothing here
 // checks time, audience, revocation or proof of possession, so never
-// authorise a request on what it returns: that is limes.StandardVerifier.Verify.
+// authorise a request on what it returns: that is limes.Verifier.Verify.
 package inspect
 
 import (

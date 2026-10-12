@@ -155,7 +155,7 @@ type AuthorizeRequest struct {
 	ClientAddr netip.Addr
 }
 
-// StandardVerifier is the production verifier — signature first, then
+// Verifier is the production verifier — signature first, then
 // claims, then issuer / tenant / time / audience / revocation gates. A
 // deployment typically resolves keys through a cached JWKS (jwks.Remote) and
 // checks revocation through a short-TTL cache (CachedRevocationChecker), so
@@ -165,12 +165,12 @@ type AuthorizeRequest struct {
 // Verification is independent of the persistence layer apart from the
 // revocation lookup, so the verifier scales horizontally without contention
 // on the capability records.
-type StandardVerifier struct {
+type Verifier struct {
 	cfg VerifierConfig
 }
 
-// NewStandardVerifier validates wiring and builds the verifier.
-func NewStandardVerifier(cfg VerifierConfig) (*StandardVerifier, error) {
+// NewVerifier validates wiring and builds the verifier.
+func NewVerifier(cfg VerifierConfig) (*Verifier, error) {
 	if cfg.Keys == nil {
 		return nil, errors.New("limes: VerifierConfig.Keys required")
 	}
@@ -226,7 +226,7 @@ func NewStandardVerifier(cfg VerifierConfig) (*StandardVerifier, error) {
 		}
 	}
 	cfg.AcceptTokenTypes = slices.Clone(cfg.AcceptTokenTypes)
-	return &StandardVerifier{cfg: cfg}, nil
+	return &Verifier{cfg: cfg}, nil
 }
 
 // Verify checks the token itself: its signature, issuer and tenant, its
@@ -239,7 +239,7 @@ func NewStandardVerifier(cfg VerifierConfig) (*StandardVerifier, error) {
 // them has verified, so a forged token costs a header decode and one
 // signature check, and no claim-parsing path is reachable by an attacker.
 // The checks that need no I/O come before the revocation lookup.
-func (v *StandardVerifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapability, error) {
+func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapability, error) {
 	token, audience := req.Token, req.Audience
 	if token == "" {
 		return VerifiedCapability{}, ErrNoCredentials
@@ -336,7 +336,7 @@ func (v *StandardVerifier) Verify(ctx context.Context, req VerifyRequest) (Verif
 // DPoPNonce is the nonce to send in the DPoP-Nonce header — with a
 // response refused by dpop.ErrNonceRequired, and with any other for the
 // client's next proof. Empty when the verifier issues none.
-func (v *StandardVerifier) DPoPNonce(ctx context.Context) (string, error) {
+func (v *Verifier) DPoPNonce(ctx context.Context) (string, error) {
 	if v.cfg.DPoP == nil {
 		return "", nil
 	}
@@ -348,7 +348,7 @@ func (v *StandardVerifier) DPoPNonce(ctx context.Context) (string, error) {
 // (Caveats.Check), and the client's address (Caveats.CheckSource). The
 // request and budget limits are stateful: the Meter enforces them, through
 // Bump and Charge, inside the consumer's own transaction.
-func (v *StandardVerifier) Authorize(ctx context.Context, req AuthorizeRequest) (VerifiedCapability, error) {
+func (v *Verifier) Authorize(ctx context.Context, req AuthorizeRequest) (VerifiedCapability, error) {
 	vc, err := v.Verify(ctx, req.Verify)
 	if err != nil {
 		return VerifiedCapability{}, err
@@ -366,7 +366,7 @@ func (v *StandardVerifier) Authorize(ctx context.Context, req AuthorizeRequest) 
 // signature chain and attenuation blocks. It returns the capability the
 // Biscuit grants and its revocation ids, authority first. meterCopies admits
 // blocks that set a copy's own limits.
-func (v *StandardVerifier) verifyBiscuit(ctx context.Context, token string, meterCopies bool) (*Capability, [][]byte, error) {
+func (v *Verifier) verifyBiscuit(ctx context.Context, token string, meterCopies bool) (*Capability, [][]byte, error) {
 	inner, attenuate, err := openBiscuit(token)
 	if err != nil {
 		return nil, nil, err
@@ -384,7 +384,7 @@ func (v *StandardVerifier) verifyBiscuit(ctx context.Context, token string, mete
 // verifySigned checks a compact JWT's header, signature, issuer and tenant —
 // everything about the token itself; the time, audience and revocation gates
 // run in Verify on the capability the token finally grants.
-func (v *StandardVerifier) verifySigned(ctx context.Context, token string) (*Capability, error) {
+func (v *Verifier) verifySigned(ctx context.Context, token string) (*Capability, error) {
 	// 1) Header: structure, algorithm, type, key id.
 	parts, err := jose.Split(token)
 	if err != nil {
@@ -463,7 +463,7 @@ func isProofRefusal(err error) bool {
 // dpop sentinel still matchable.
 func proofRefusal(err error) error { return fmt.Errorf("%w: %w", ErrProofOfPossession, err) }
 
-// VerifiedCapability is a capability a StandardVerifier accepted. Only Verify
+// VerifiedCapability is a capability a Verifier accepted. Only Verify
 // and Authorize make one, so a function that takes it — Issuer.Delegate —
 // knows the token it came from was checked, rather than trusting a caller to
 // have checked it.

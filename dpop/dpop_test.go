@@ -358,7 +358,7 @@ func TestHTUPathOnlyStillReadsTheProof(t *testing.T) {
 // seen is c.Seen with a failure of the cache failing the test.
 func seen(t testing.TB, c ReplayCache, jkt, jti string, expires time.Time) bool {
 	t.Helper()
-	ok, err := c.Seen(context.Background(), ReplayEntry{JKT: jkt, JTI: jti, Expires: expires})
+	ok, err := c.Seen(context.Background(), ReplayEntry{JKT: jkt, JTI: jti, ExpiresAt: expires})
 	if err != nil {
 		t.Fatal(err)
 	}

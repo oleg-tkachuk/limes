@@ -46,10 +46,10 @@ func readBiscuitFixture(t *testing.T, name string) string {
 	return strings.TrimSpace(string(raw))
 }
 
-func goldenBiscuitVerifier(t *testing.T) *StandardVerifier {
+func goldenBiscuitVerifier(t *testing.T) *Verifier {
 	t.Helper()
 	priv := ed25519.NewKeyFromSeed(goldenSeed[:])
-	v, err := NewStandardVerifier(VerifierConfig{
+	v, err := NewVerifier(VerifierConfig{
 		Keys:           staticKeys(t, map[string]ed25519.PublicKey{goldenKID: priv.Public().(ed25519.PublicKey)}),
 		Revocations:    revLookup{},
 		TrustedIssuers: []string{goldenIssuer},
