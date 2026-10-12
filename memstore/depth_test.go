@@ -15,7 +15,7 @@ import (
 // the ancestors past the bound and their ceilings with them.
 func TestMeteringRefusesAChainPastMaxDelegationDepth(t *testing.T) {
 	ctx := context.Background()
-	records := New[struct{}]()
+	records := newTestStore()
 	tenant := uuid.New()
 	parent := uuid.Nil
 	for range limes.MaxDelegationDepth + 2 {
@@ -25,7 +25,7 @@ func TestMeteringRefusesAChainPastMaxDelegationDepth(t *testing.T) {
 		}
 		parent = id
 	}
-	u := NewUsage[struct{}](records)
+	u := newTestUsage(records)
 	subject := newSubject(subjectSpec{capID: parent, tenant: tenant})
 	if _, err := u.Bump(ctx, limes.BumpRequest{Subject: subject}); !errors.Is(err, limes.ErrDelegationTooDeep) {
 		t.Errorf("Bump: err = %v, want ErrDelegationTooDeep", err)

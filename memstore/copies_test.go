@@ -23,12 +23,12 @@ func copyCeiling(id string, requests int64, budget limes.Nanos) limes.CopyCeilin
 func newCopyFixture(t *testing.T) (context.Context, *UsageStore[struct{}], uuid.UUID, uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
-	records := New[struct{}]()
+	records := newTestStore()
 	capID, tenant := uuid.New(), uuid.New()
 	if err := records.Insert(ctx, limes.InsertRequest{Capability: mkCap(capID, uuid.Nil, tenant, "agent"), IssuedBy: limes.Principal{Subject: "op"}}); err != nil {
 		t.Fatal(err)
 	}
-	return ctx, NewUsage[struct{}](records), capID, tenant
+	return ctx, newTestUsage(records), capID, tenant
 }
 
 func TestCopyRequestLimits(t *testing.T) {

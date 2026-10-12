@@ -14,7 +14,7 @@ import (
 func reservationFixture(t *testing.T) (*UsageStore[struct{}], uuid.UUID, uuid.UUID, *time.Time) {
 	t.Helper()
 	now := time.Unix(1_800_000_000, 0)
-	u := NewUsage[struct{}](nil).WithClock(func() time.Time { return now })
+	u := mustUsage(t, UsageStoreConfig[struct{}]{Now: func() time.Time { return now }})
 	tenant := uuid.New()
 	if _, err := u.SetTenantBudget(context.Background(), limes.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("100")}}); err != nil {
 		t.Fatal(err)
@@ -114,8 +114,8 @@ func TestReleaseAndExpiryFreeTheHold(t *testing.T) {
 // A child's hold counts against its parent, like its spend does.
 func TestReservationsCountAgainstAncestors(t *testing.T) {
 	ctx := context.Background()
-	s := New[struct{}]()
-	u := NewUsage(s)
+	s := newTestStore()
+	u := newTestUsage(s)
 	rootID, kids, tenant := tree(t, s,
 		limes.Caveats{Ops: []limes.Op{limes.OpGet}, Budget: limes.BudgetCeiling{Max: limes.MustParseAmount("25")}, UnitCode: "USD"},
 		2,

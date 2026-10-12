@@ -36,8 +36,10 @@ func main() {
 	// 2. Wire an issuer and a verifier. Storage is yours — here, in memory.
 	//    UsageStore is generic in the transaction handle; with no transactions
 	//    of our own we instantiate it over struct{} and pass nil callbacks.
-	records := memstore.New[struct{}]()
-	usage := memstore.NewUsage[struct{}](records)
+	records, err := memstore.NewStore(memstore.StoreConfig{})
+	must(err, "record store")
+	usage, err := memstore.NewUsageStore(memstore.UsageStoreConfig[struct{}]{Records: records})
+	must(err, "usage store")
 
 	signer, err := limes.NewSigner(limes.SignerConfig{KeyID: kid, Key: priv})
 	must(err, "signer")

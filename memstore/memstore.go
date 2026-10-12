@@ -40,7 +40,7 @@ import (
 //
 // It is a separate type from UsageStore so that each reads as the contract it
 // implements: records and revocations here, counters and the ledger there.
-type Store[TX any] struct {
+type Store struct {
 	mu sync.Mutex
 
 	caps     map[uuid.UUID]limes.Capability
@@ -68,7 +68,7 @@ type UsageStore[TX any] struct {
 	byCharge      map[uuid.UUID]int
 	byRef         map[refKey]int
 	byReservation map[uuid.UUID]int
-	records       *Store[TX] // lineage and ceilings of ancestors; nil = none known
+	records       *Store // lineage and ceilings of ancestors; nil = none known
 	holds         map[uuid.UUID]hold
 	nowFn         func() time.Time
 	txFactory     func() TX
@@ -129,27 +129,49 @@ type LedgerEntry struct {
 	tenantPeriod uint64
 }
 
-// New returns an empty store. TX is given at the call site:
-//
-//	memstore.New[struct{}]()   // consumer with no transactions
-//	memstore.New[pgx.Tx]()     // consumer threading a real handle
-func New[TX any]() *Store[TX] {
-	return &Store[TX]{
+// StoreConfig configures a Store.
+type StoreConfig struct {
+	// Now is the clock. Nil: time.Now.
+	Now func() time.Time
+}
+
+// NewStore returns an empty record store.
+func NewStore(cfg StoreConfig) (*Store, error) {
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
+	return &Store{
 		caps:     map[uuid.UUID]limes.Capability{},
 		issuedBy: map[uuid.UUID]limes.Principal{},
 		revoked:  map[uuid.UUID]limes.Revocation{},
-		nowFn:    time.Now,
+		nowFn:    cfg.Now,
 
 		revokedCopies: map[string]limes.BiscuitRevocation{},
-	}
+	}, nil
 }
 
-// NewUsage returns an empty usage store over a record store. The records are
-// how it finds each capability's ancestors and their ceilings, and which
-// capabilities still exist for PurgeOrphans. nil records means no lineage is
-// known: every capability is metered on its own, and none is known to be
-// gone, so PurgeOrphans removes nothing.
-func NewUsage[TX any](records *Store[TX]) *UsageStore[TX] {
+// UsageStoreConfig configures a UsageStore. TX is the consumer's
+// transaction handle, threaded back to onCharged.
+type UsageStoreConfig[TX any] struct {
+	// Records is how the usage store finds each capability's ancestors and
+	// their ceilings, and which capabilities still exist for PurgeOrphans.
+	// Nil: no lineage is known — every capability is metered on its own, and
+	// none is known to be gone, so PurgeOrphans removes nothing.
+	Records *Store
+	// Now is the clock. Nil: time.Now.
+	Now func() time.Time
+	// TxFactory makes the handle passed to onCharged. Nil: the zero TX.
+	TxFactory func() TX
+}
+
+// NewUsageStore returns an empty usage store.
+//
+//	memstore.NewUsageStore(memstore.UsageStoreConfig[struct{}]{Records: records}) // no transactions
+//	memstore.NewUsageStore(memstore.UsageStoreConfig[pgx.Tx]{TxFactory: begin})    // a real handle
+func NewUsageStore[TX any](cfg UsageStoreConfig[TX]) (*UsageStore[TX], error) {
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
 	return &UsageStore[TX]{
 		usage:   map[uuid.UUID]limes.Usage{},
 		budgets: map[uuid.UUID]limes.TenantBudget{},
@@ -160,27 +182,10 @@ func NewUsage[TX any](records *Store[TX]) *UsageStore[TX] {
 		byCharge:      map[uuid.UUID]int{},
 		byRef:         map[refKey]int{},
 		byReservation: map[uuid.UUID]int{},
-		records:       records,
-		nowFn:         time.Now,
-	}
-}
-
-// WithClock pins the clock on the usage store.
-func (s *UsageStore[TX]) WithClock(now func() time.Time) *UsageStore[TX] {
-	s.nowFn = now
-	return s
-}
-
-// WithTxFactory supplies the handle passed to onCharged.
-func (s *UsageStore[TX]) WithTxFactory(f func() TX) *UsageStore[TX] {
-	s.txFactory = f
-	return s
-}
-
-// WithClock pins the clock. Tests use it so timestamps are deterministic.
-func (s *Store[TX]) WithClock(now func() time.Time) *Store[TX] {
-	s.nowFn = now
-	return s
+		records:       cfg.Records,
+		nowFn:         cfg.Now,
+		txFactory:     cfg.TxFactory,
+	}, nil
 }
 
 // Ledger returns a copy of the committed charge ledger.
@@ -195,7 +200,7 @@ func (s *UsageStore[TX]) Ledger() []LedgerEntry {
 // issuedBy is recorded alongside the capability so the in-memory store answers
 // the same attribution questions the relational one does — a test double that
 // silently drops the initiator would let an unattributed issuance pass.
-func (s *Store[TX]) Insert(_ context.Context, req limes.InsertRequest) error {
+func (s *Store) Insert(_ context.Context, req limes.InsertRequest) error {
 	c, issuedBy := req.Capability, req.IssuedBy
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -210,7 +215,7 @@ func (s *Store[TX]) Insert(_ context.Context, req limes.InsertRequest) error {
 }
 
 // GetRecord returns the capability, who issued it and its own revocation.
-func (s *Store[TX]) GetRecord(_ context.Context, id uuid.UUID) (limes.Record, error) {
+func (s *Store) GetRecord(_ context.Context, id uuid.UUID) (limes.Record, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c, ok := s.caps[id]
@@ -226,7 +231,7 @@ func (s *Store[TX]) GetRecord(_ context.Context, id uuid.UUID) (limes.Record, er
 
 // revokeLocked writes id's revocation entry unless it has one: the first
 // entry stands, as a repeated revoke is a no-op. s.mu must be held.
-func (s *Store[TX]) revokeLocked(id uuid.UUID, r limes.Revocation) {
+func (s *Store) revokeLocked(id uuid.UUID, r limes.Revocation) {
 	if _, ok := s.revoked[id]; !ok {
 		s.revoked[id] = r
 	}
@@ -234,14 +239,14 @@ func (s *Store[TX]) revokeLocked(id uuid.UUID, r limes.Revocation) {
 
 // isRevokedItselfLocked reports whether id has a revocation entry of its own.
 // s.mu must be held.
-func (s *Store[TX]) isRevokedItselfLocked(id uuid.UUID) bool {
+func (s *Store) isRevokedItselfLocked(id uuid.UUID) bool {
 	_, ok := s.revoked[id]
 	return ok
 }
 
 // IsRevoked answers for the whole delegation chain: a capability is revoked
 // when it, or any ancestor still on record, is.
-func (s *Store[TX]) IsRevoked(_ context.Context, id uuid.UUID) (bool, error) {
+func (s *Store) IsRevoked(_ context.Context, id uuid.UUID) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.revoked[id]; ok {
@@ -264,13 +269,13 @@ func (s *Store[TX]) IsRevoked(_ context.Context, id uuid.UUID) (bool, error) {
 // limes.MaxDelegationDepth of them still on record — or a corrupt cycle — is
 // limes.ErrDelegationTooDeep, so a walk that stops short never answers for
 // an ancestor it did not reach.
-func (s *Store[TX]) ancestors(id uuid.UUID) ([]limes.Capability, error) {
+func (s *Store) ancestors(id uuid.UUID) ([]limes.Capability, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.ancestorsLocked(id)
 }
 
-func (s *Store[TX]) ancestorsLocked(id uuid.UUID) ([]limes.Capability, error) {
+func (s *Store) ancestorsLocked(id uuid.UUID) ([]limes.Capability, error) {
 	var out []limes.Capability
 	c, ok := s.caps[id]
 	for ok && c.ParentID != uuid.Nil {
@@ -288,7 +293,7 @@ func (s *Store[TX]) ancestorsLocked(id uuid.UUID) ([]limes.Capability, error) {
 	return out, nil
 }
 
-func (s *Store[TX]) exists(id uuid.UUID) bool {
+func (s *Store) exists(id uuid.UUID) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, ok := s.caps[id]
@@ -297,7 +302,7 @@ func (s *Store[TX]) exists(id uuid.UUID) bool {
 
 // Revoke is idempotent. CascadeChildren walks the delegation tree by ParentID
 // so revoking an orchestrator takes the sub-agents it spawned with it.
-func (s *Store[TX]) Revoke(_ context.Context, args limes.RevokeRequest) error {
+func (s *Store) Revoke(_ context.Context, args limes.RevokeRequest) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.caps[args.CapabilityID]; !ok {
@@ -328,7 +333,7 @@ func (s *Store[TX]) Revoke(_ context.Context, args limes.RevokeRequest) error {
 }
 
 // IsBiscuitRevoked implements limes.BiscuitRevocationLookup.
-func (s *Store[TX]) IsBiscuitRevoked(_ context.Context, revocationIDs [][]byte) (bool, error) {
+func (s *Store) IsBiscuitRevoked(_ context.Context, revocationIDs [][]byte) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, id := range revocationIDs {
@@ -340,7 +345,7 @@ func (s *Store[TX]) IsBiscuitRevoked(_ context.Context, revocationIDs [][]byte) 
 }
 
 // RevokeBiscuit implements limes.BiscuitRevocationStore.
-func (s *Store[TX]) RevokeBiscuit(_ context.Context, args limes.RevokeBiscuitRequest) error {
+func (s *Store) RevokeBiscuit(_ context.Context, args limes.RevokeBiscuitRequest) error {
 	if len(args.RevocationID) == 0 {
 		return fmt.Errorf("%w: memstore: revocation id required", limes.ErrInvalidRequest)
 	}
@@ -359,7 +364,7 @@ func (s *Store[TX]) RevokeBiscuit(_ context.Context, args limes.RevokeBiscuitReq
 }
 
 // GetBiscuitRevocation returns what RevokeBiscuit wrote for revocationID.
-func (s *Store[TX]) GetBiscuitRevocation(_ context.Context, revocationID []byte) (limes.BiscuitRevocation, error) {
+func (s *Store) GetBiscuitRevocation(_ context.Context, revocationID []byte) (limes.BiscuitRevocation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r, ok := s.revokedCopies[string(revocationID)]
@@ -371,7 +376,7 @@ func (s *Store[TX]) GetBiscuitRevocation(_ context.Context, revocationID []byte)
 }
 
 // Purge implements limes.Store, oldest expiry first.
-func (s *Store[TX]) Purge(_ context.Context, req limes.PurgeRequest) (limes.PurgeResult, error) {
+func (s *Store) Purge(_ context.Context, req limes.PurgeRequest) (limes.PurgeResult, error) {
 	if err := req.Validate(); err != nil {
 		return limes.PurgeResult{}, err
 	}
@@ -401,7 +406,7 @@ func (s *Store[TX]) Purge(_ context.Context, req limes.PurgeRequest) (limes.Purg
 	return limes.PurgeResult{Purged: int64(len(due))}, nil
 }
 
-func (s *Store[TX]) ListByPrincipal(_ context.Context, req limes.ListByPrincipalRequest) (limes.Page[limes.Capability], error) {
+func (s *Store) ListByPrincipal(_ context.Context, req limes.ListByPrincipalRequest) (limes.Page[limes.Capability], error) {
 	if err := req.Validate(); err != nil {
 		return limes.Page[limes.Capability]{}, err
 	}
@@ -1446,8 +1451,8 @@ func max0(n limes.Nanos) limes.Nanos {
 // nothing but this module. If either assertion breaks, a third party cannot
 // implement the contract either.
 var (
-	_ limes.Store                = (*Store[struct{}])(nil)
-	_ limes.IssuanceStore        = (*Store[struct{}])(nil)
+	_ limes.Store                = (*Store)(nil)
+	_ limes.IssuanceStore        = (*Store)(nil)
 	_ limes.UsageStore[struct{}] = (*UsageStore[struct{}])(nil)
 )
 
