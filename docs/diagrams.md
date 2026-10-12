@@ -681,7 +681,7 @@ Holds and housekeeping, in `memstore` as the contract has them:
   `Release` and `ReleaseExpired` take it off again. A hold never settled lapses
   at its `ExpiresAt` (default `DefaultReservationTTL`, five minutes) but keeps
   counting until `ReleaseExpired` runs, which errs towards refusing spend.
-- `Delete` releases the capability's holds before it drops its counters, and
+- `DeleteUsage` releases the capability's holds before it drops its counters, and
   `PurgeOrphans` releases the holds of every capability no longer on record:
   nothing could settle or release them afterwards.
 - `SetTenantBudget` is guarded by `ExpectedVersion` (0 for a tenant with no

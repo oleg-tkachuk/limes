@@ -69,7 +69,7 @@ type UsageStore[TX any] struct {
 	byCharge      map[uuid.UUID]int
 	byRef         map[refKey]int
 	byReservation map[uuid.UUID]int
-	records       *Store // lineage and ceilings of ancestors; nil = none known
+	records       *Store // lineage and ceilings of ancestors
 	holds         map[uuid.UUID]hold
 	nowFn         func() time.Time
 	txFactory     func() TX
@@ -477,7 +477,7 @@ func (s *UsageStore[TX]) Bump(_ context.Context, req limes.BumpRequest) (limes.B
 	if err := checkSubject(req.Subject); err != nil {
 		return limes.BumpReceipt{}, err
 	}
-	// The lineage is read under the usage lock, as Delete and PurgeOrphans
+	// The lineage is read under the usage lock, as DeleteUsage and PurgeOrphans
 	// take it: read before, an ancestor they dropped meanwhile would have
 	// its row written back.
 	s.mu.Lock()
@@ -561,7 +561,7 @@ func (s *UsageStore[TX]) Charge(
 	if err != nil {
 		return limes.ChargeReceipt{}, err
 	}
-	// The lineage is read under the usage lock, as Delete and PurgeOrphans
+	// The lineage is read under the usage lock, as DeleteUsage and PurgeOrphans
 	// take it: read before, an ancestor they dropped meanwhile would have
 	// its row written back.
 	s.mu.Lock()
@@ -893,7 +893,7 @@ func (s *UsageStore[TX]) Reserve(_ context.Context, req limes.ReserveRequest) (l
 	if ttl == 0 {
 		ttl = limes.DefaultReservationTTL
 	}
-	// The lineage is read under the usage lock, as Delete and PurgeOrphans
+	// The lineage is read under the usage lock, as DeleteUsage and PurgeOrphans
 	// take it: read before, an ancestor they dropped meanwhile would have
 	// its row written back.
 	s.mu.Lock()
