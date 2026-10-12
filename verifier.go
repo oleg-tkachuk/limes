@@ -393,11 +393,11 @@ func (v *Verifier) verifySigned(ctx context.Context, token string) (*Capability,
 	// 1) Header: structure, algorithm, type, key id.
 	parts, err := jose.Split(token)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
+		return nil, refuseToken(ErrInvalidToken, err)
 	}
 	header, err := parseHeader(parts.Header)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
+		return nil, refuseToken(ErrInvalidToken, err)
 	}
 	if !slices.Contains(v.cfg.AcceptTokenTypes, TokenType(header.Typ)) {
 		return nil, fmt.Errorf("%w: typ %q is not one of %q", ErrInvalidToken, header.Typ, v.cfg.AcceptTokenTypes)
@@ -423,7 +423,7 @@ func (v *Verifier) verifySigned(ctx context.Context, token string) (*Capability,
 	// 3) Claims, now known to be the issuer's.
 	cap, err := parseClaims(parts.Payload)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
+		return nil, refuseToken(ErrInvalidToken, err)
 	}
 	if !slices.Contains(v.cfg.TrustedIssuers, cap.Issuer) {
 		return nil, fmt.Errorf("%w: untrusted issuer %q", ErrInvalidToken, cap.Issuer)
@@ -438,13 +438,13 @@ func (v *Verifier) verifySigned(ctx context.Context, token string) (*Capability,
 		return nil, fmt.Errorf("%w: capability has no tenant", ErrInvalidToken)
 	}
 	if err := cap.Subject.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
+		return nil, refuseToken(ErrInvalidToken, err)
 	}
 	// What Issue refuses to mint, no token may carry: a caveat outside the
 	// rules has no one meaning to enforce — a negative limit read as none,
 	// an operation nobody defined.
 	if err := cap.Caveats.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
+		return nil, refuseToken(ErrInvalidToken, err)
 	}
 
 	return cap, nil
@@ -466,6 +466,13 @@ func isProofRefusal(err error) bool {
 // proofRefusal is a dpop refusal as this module reads it: a refusal of the
 // credentials (ErrProofOfPossession, and so ErrUnauthenticated), with the
 // dpop sentinel still matchable.
+// refuseToken is err as a refusal of the presented token in family: the
+// family and the cause's text, but not the cause's own sentinels. A token
+// whose caveats do not validate is a refused token, not a malformed request
+// — matching ErrInvalidRequest as well would let a consumer answer it as the
+// server's fault.
+func refuseToken(family, err error) error { return fmt.Errorf("%w: %s", family, err.Error()) }
+
 func proofRefusal(err error) error { return fmt.Errorf("%w: %w", ErrProofOfPossession, err) }
 
 // VerifiedCapability is a capability a Verifier accepted. Only Verify

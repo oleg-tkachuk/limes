@@ -14,9 +14,10 @@ type Page[T any] struct {
 	Next  string
 }
 
-// ErrCursorRepeated is a page that hands back the cursor it was fetched with.
-// Following it would fetch the same page forever, so the walk stops there.
-var ErrCursorRepeated = errors.New("limes: a page returned the cursor it was fetched with")
+// ErrCursorRepeated is a page that hands back a cursor the walk has already
+// fetched — its own, or one further back. Following it would fetch the same
+// pages forever, so the walk stops there.
+var ErrCursorRepeated = errors.New("limes: a page returned a cursor already fetched")
 
 // CapabilityLister lists a principal's capabilities a page at a time. Every
 // Store is one.
@@ -71,11 +72,13 @@ func walkPages[T any](
 	yield func(T, error) bool,
 ) {
 	var zero T
+	fetched := map[string]bool{}
 	for {
 		if err := ctx.Err(); err != nil {
 			yield(zero, err)
 			return
 		}
+		fetched[cursor] = true
 		p, err := page(ctx, cursor)
 		if err != nil {
 			yield(zero, err)
@@ -87,10 +90,10 @@ func walkPages[T any](
 				return
 			}
 		}
-		switch next {
-		case "":
+		if next == "" {
 			return
-		case cursor:
+		}
+		if fetched[next] {
 			yield(zero, ErrCursorRepeated)
 			return
 		}
