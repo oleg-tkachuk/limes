@@ -186,7 +186,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"PurgeDropsExpiredRecordsAndTheirEntries", checkPurge},
 		{"PurgeWorksInBatches", checkPurgeBatches},
 		{"PurgeKeepsARevocationAVerifierMayStillNeed", checkPurgeRetention},
-		{"AChainTooDeepAnswersOnceItsTopIsPurged", checkMaxDepthAfterPurge},
+		{"PurgeNeverLeavesAChildWithoutItsParent", checkPurgeKeepsLineage},
 		{"ListByPrincipalPages", checkListPages},
 		{"ListByPrincipalFilters", checkListFilters},
 		{"ListByPrincipalExpiresAtTheInstant", checkListExpiryInstant},
@@ -714,23 +714,51 @@ func checkMaxDepthCascade(t *testing.T, f fixture) {
 	}
 }
 
-// checkMaxDepthAfterPurge holds IsRevoked to the ancestors still on record:
-// a chain one too deep is ErrDelegationTooDeep, and once Purge takes its
-// expired top it is MaxDelegationDepth deep and answers.
-func checkMaxDepthAfterPurge(t *testing.T, f fixture) {
-	top := f.insert(t, f.newCapability("agent:top", uuid.Nil, f.now.Add(-expiredAgo)))
-	leaf := top
-	for range limes.MaxDelegationDepth + 1 {
-		leaf = f.live(t, "agent:link", leaf.ID)
+// checkPurgeKeepsLineage holds Purge to never removing a capability while a
+// child of it stays on record. A chain expiring at one instant, purged a
+// record a batch, goes leaf first; a parent a child outlives — inserted
+// around Delegate, which would have cut the child to the parent's expiry —
+// stays.
+func checkPurgeKeepsLineage(t *testing.T, f fixture) {
+	const chain = 4
+	expires := f.now.Add(-expiredAgo)
+	ids := make([]uuid.UUID, 0, chain)
+	parent := uuid.Nil
+	for range chain {
+		parent = f.insert(t, f.newCapability("agent:link", parent, expires)).ID
+		ids = append(ids, parent)
 	}
-	if revoked, err := f.Store.IsRevoked(f.Ctx, leaf.ID); !errors.Is(err, limes.ErrDelegationTooDeep) {
-		t.Fatalf("IsRevoked with %d ancestors on record = %v, %v; want ErrDelegationTooDeep", limes.MaxDelegationDepth+1, revoked, err)
+	onRecord := func(id uuid.UUID) bool {
+		t.Helper()
+		_, err := f.Store.GetRecord(f.Ctx, id)
+		if err != nil && !errors.Is(err, limes.ErrNotFound) {
+			t.Fatal(err)
+		}
+		return err == nil
 	}
-	if got, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace}); err != nil || got.Purged != 1 {
-		t.Fatalf("Purge = %+v, %v; want the expired top purged", got, err)
+	for range chain {
+		if _, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace, Limit: 1}); err != nil {
+			t.Fatal(err)
+		}
+		for i := 1; i < chain; i++ {
+			if onRecord(ids[i]) && !onRecord(ids[i-1]) {
+				t.Fatalf("Purge left link %d on record without its parent", i)
+			}
+		}
 	}
-	if revoked, err := f.Store.IsRevoked(f.Ctx, leaf.ID); err != nil || revoked {
-		t.Errorf("IsRevoked with %d ancestors on record, the top purged = %v, %v; want false", limes.MaxDelegationDepth, revoked, err)
+	for i, id := range ids {
+		if onRecord(id) {
+			t.Errorf("link %d of an expired chain is still on record after %d batches of one", i, chain)
+		}
+	}
+
+	held := f.insert(t, f.newCapability("agent:held", uuid.Nil, expires))
+	outliving := f.live(t, "agent:outliving", held.ID)
+	if _, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace}); err != nil {
+		t.Fatal(err)
+	}
+	if !onRecord(held.ID) || !onRecord(outliving.ID) {
+		t.Errorf("Purge removed an expired parent whose child is still live")
 	}
 }
 
