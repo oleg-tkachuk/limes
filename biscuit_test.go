@@ -14,14 +14,13 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes/dpop"
-	"github.com/oleg-tkachuk/limes/jwks"
 )
 
 func biscuitFixture(t *testing.T) (*Issuer, *StandardVerifier, *memStore, Capability, string) {
 	t.Helper()
 	issuer, _, store, pub := buildIssuerVerifier(t)
 	verifier, err := NewStandardVerifier(VerifierConfig{
-		Keys:           jwks.NewStatic(map[string]ed25519.PublicKey{"k1": pub}),
+		Keys:           staticKeys(t, map[string]ed25519.PublicKey{"k1": pub}),
 		Revocations:    store,
 		TrustedIssuers: []string{"limes-test"},
 		AcceptBiscuit:  true,

@@ -1,10 +1,12 @@
 package jwks
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -141,4 +143,39 @@ func TestMarshalWritesTheFullySpecifiedAlgorithm(t *testing.T) {
 		t.Errorf("JWKS alg = %+v, %v; want %q", set, err, jose.AlgEd25519)
 	}
 
+}
+
+// A key set refuses, at once, a key the verifier could never use: an empty
+// kid or a key of the wrong length would otherwise surface token by token as
+// the tokens' fault.
+func TestStaticRefusesAKeyItCannotServe(t *testing.T) {
+	pub, _, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, keys := range map[string]map[string]ed25519.PublicKey{
+		"an empty kid":  {"": pub},
+		"a short key":   {"k": pub[:ed25519.PublicKeySize-1]},
+		"no key at all": {"k": nil},
+	} {
+		if _, err := NewStatic(StaticConfig{Keys: keys}); err == nil {
+			t.Errorf("NewStatic with %s: built", name)
+		}
+	}
+	s, err := NewStatic(StaticConfig{Keys: map[string]ed25519.PublicKey{"k": pub}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetKey("short", pub[:1]); err == nil {
+		t.Error("SetKey accepted a short key")
+	}
+	if _, err := s.PublicKey(context.Background(), "short"); !errors.Is(err, ErrUnknownKID) {
+		t.Errorf("a refused key is served: %v", err)
+	}
+	// The resolver keeps its own copy of each key.
+	pub[0] ^= 1
+	got, err := s.PublicKey(context.Background(), "k")
+	if err != nil || got[0] == pub[0] {
+		t.Error("changing the caller's key changed the one the resolver serves")
+	}
 }

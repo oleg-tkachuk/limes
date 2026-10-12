@@ -67,8 +67,10 @@ func TestRetiredButPublishedKeyStillVerifies(t *testing.T) {
 	oldToken := mintToken(t, testIssuer(t, goldenKID, oldPriv, goldenClock))
 
 	// Step 1 of rotation: publish the new key alongside the old.
-	resolver := jwks.NewStatic(map[string]ed25519.PublicKey{goldenKID: oldPub})
-	resolver.SetKey("new-kid", newPub)
+	resolver := staticKeys(t, map[string]ed25519.PublicKey{goldenKID: oldPub})
+	if err := resolver.SetKey("new-kid", newPub); err != nil {
+		t.Fatal(err)
+	}
 
 	verifier, err := NewStandardVerifier(VerifierConfig{
 		Keys: resolver, Revocations: revLookup{},
@@ -102,7 +104,7 @@ func TestWithdrawnKeyStopsVerifying(t *testing.T) {
 
 	// The old kid is simply absent from the published set.
 	verifier, err := NewStandardVerifier(VerifierConfig{
-		Keys:        jwks.NewStatic(map[string]ed25519.PublicKey{"new-kid": newPub}),
+		Keys:        staticKeys(t, map[string]ed25519.PublicKey{"new-kid": newPub}),
 		Revocations: revLookup{}, TrustedIssuers: []string{goldenIssuer}, Now: goldenClock,
 	})
 	if err != nil {
@@ -118,7 +120,7 @@ func TestWithdrawnKeyStopsVerifying(t *testing.T) {
 // jwks.Static reports an unknown kid distinctly, so a forged token
 // signed by an unpublished key is separable from a malformed one.
 func TestUnknownKIDIsDistinct(t *testing.T) {
-	r := jwks.NewStatic(map[string]ed25519.PublicKey{})
+	r := staticKeys(t, map[string]ed25519.PublicKey{})
 	_, err := r.PublicKey(context.Background(), "never-published")
 	if !errors.Is(err, jwks.ErrUnknownKID) {
 		t.Fatalf("want jwks.ErrUnknownKID, got %v", err)
@@ -139,7 +141,7 @@ func TestForgedSignatureRejected(t *testing.T) {
 	otherPub := ed25519.NewKeyFromSeed(otherSeed[:]).Public().(ed25519.PublicKey)
 
 	verifier, err := NewStandardVerifier(VerifierConfig{
-		Keys:        jwks.NewStatic(map[string]ed25519.PublicKey{goldenKID: otherPub}),
+		Keys:        staticKeys(t, map[string]ed25519.PublicKey{goldenKID: otherPub}),
 		Revocations: revLookup{}, TrustedIssuers: []string{goldenIssuer}, Now: goldenClock,
 	})
 	if err != nil {
@@ -158,7 +160,7 @@ func TestUntrustedIssuerRejected(t *testing.T) {
 	token := mintToken(t, testIssuer(t, goldenKID, priv, goldenClock))
 
 	verifier, err := NewStandardVerifier(VerifierConfig{
-		Keys:        jwks.NewStatic(map[string]ed25519.PublicKey{goldenKID: pub}),
+		Keys:        staticKeys(t, map[string]ed25519.PublicKey{goldenKID: pub}),
 		Revocations: revLookup{}, TrustedIssuers: []string{"some-other-issuer"}, Now: goldenClock,
 	})
 	if err != nil {
