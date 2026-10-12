@@ -52,6 +52,8 @@ check "a break marked in a footer" pass drop "$(printf 'fix: drop A\n\nBREAKING 
 check "a break marked by a later commit" pass drop "refactor: drop A" "docs!: say A is gone"
 check "a break marked by an earlier commit" pass drop "fix!: drop A" "docs: say A is gone"
 check "a ! that is not in the type" fail drop "fix: drop A!: really"
+check "a break marked in a hyphenated footer" pass drop "$(printf 'fix: drop A\n\nBREAKING-CHANGE: A is gone')"
+check "a marker in the body, not the subject" fail drop "$(printf 'fix: drop A\n\nfix!: is not a subject')"
 check "a compatible addition" pass add "feat: add B"
 check "a marked change with no break" pass add "feat!: change the wire format"
 

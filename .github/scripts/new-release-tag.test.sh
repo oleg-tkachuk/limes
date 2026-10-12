@@ -52,6 +52,7 @@ check "no tag on HEAD" "" "$("$script" "$before")"
 succeeds "no tag on HEAD"
 
 git tag baseline
+git tag vnext
 check "a tag that is no version" "" "$("$script" "$before")"
 succeeds "a tag that is no version"
 

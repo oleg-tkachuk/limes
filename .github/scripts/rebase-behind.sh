@@ -19,6 +19,9 @@
 
 set -euo pipefail
 
+# shellcheck source=.github/scripts/gh-retry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/gh-retry.sh"
+
 readonly BASE_BRANCH=main
 # The most pull requests one run looks at.
 readonly PR_LIMIT=200
@@ -33,7 +36,7 @@ if [ -z "${GH_TOKEN:-}" ]; then
 fi
 : "${REPO:?REPO names the repository, owner/name}"
 
-candidates="$(gh pr list --repo "$REPO" --base "$BASE_BRANCH" --state open --limit "$PR_LIMIT" \
+candidates="$(gh_retry pr list --repo "$REPO" --base "$BASE_BRANCH" --state open --limit "$PR_LIMIT" \
     --json number,headRefOid,isDraft,isCrossRepository,mergeStateStatus,author |
     jq -r --arg dirty "$DIRTY" --arg renovate "$RENOVATE" \
         '.[] | select(.isDraft | not) | select(.isCrossRepository | not)
@@ -43,7 +46,7 @@ candidates="$(gh pr list --repo "$REPO" --base "$BASE_BRANCH" --state open --lim
 behind=""
 while read -r pr head; do
     [ -n "$pr" ] || continue
-    if ! by="$(gh api "repos/${REPO}/compare/${BASE_BRANCH}...${head}" | jq -r '.behind_by')"; then
+    if ! by="$(gh_retry api "repos/${REPO}/compare/${BASE_BRANCH}...${head}" | jq -r '.behind_by')"; then
         echo "::warning::could not compare #${pr} with ${BASE_BRANCH}; it is not rebased"
         continue
     fi
@@ -54,7 +57,7 @@ done <<<"$candidates"
 
 failed=0
 for pr in $behind; do
-    if gh api --method PUT "repos/${REPO}/pulls/${pr}/update-branch" -f update_method=rebase >/dev/null; then
+    if gh_retry api --method PUT "repos/${REPO}/pulls/${pr}/update-branch" -f update_method=rebase >/dev/null; then
         echo "rebased #${pr}"
     else
         echo "::warning::could not rebase #${pr}; it needs a manual update"
