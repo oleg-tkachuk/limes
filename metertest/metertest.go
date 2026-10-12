@@ -273,6 +273,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"SettleWithinTheHoldPassesACrossedCeiling", checkSettleWithinHold[TX]},
 		{"RefundOfAClosedPeriodLeavesTheTenantPeriod", checkRefundAcrossReset[TX]},
 		{"EveryCounterKeepsOneUnit", checkOneUnit[TX]},
+		{"AnAncestorCountsInTheUnitOfItsChildren", checkAncestorUnit[TX]},
 		{"DeleteReleasesHolds", checkDeleteReleasesHolds[TX]},
 		{"ConcurrentChargesKeepTheCeiling", checkConcurrentCeiling[TX]},
 		{"AnAncestorCeilingBoundsItsChildren", checkAncestorCeiling[TX]},
@@ -757,6 +758,38 @@ func checkRefundAcrossReset[TX any](t *testing.T, f fixture[TX]) {
 	}
 	if got := f.tenantSpent(t); got != 0 {
 		t.Errorf("tenant spent %v after refunding the new period's charge, want 0", got)
+	}
+}
+
+// checkAncestorUnit holds a store to giving an ancestor counted only through
+// a child — by a charge or by a hold — the unit the child counts in, as
+// GetUsage reads it back.
+func checkAncestorUnit[TX any](t *testing.T, f fixture[TX]) {
+	tree := func() (parent, child uuid.UUID) {
+		t.Helper()
+		parent, err := f.newCapability(uuid.Nil, unlimitedBudget)
+		if err != nil {
+			t.Fatal(err)
+		}
+		child, err = f.newCapability(parent, unlimitedBudget)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return parent, child
+	}
+	charged, chargedChild := tree()
+	if _, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: chargedChild, tenant: f.Tenant, unit: unit}), Amount: one}, nil); err != nil {
+		t.Fatal(err)
+	}
+	held, heldChild := tree()
+	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: heldChild, tenant: f.Tenant, unit: unit}), Amount: one}); err != nil {
+		t.Fatal(err)
+	}
+	for name, id := range map[string]uuid.UUID{"charged": charged, "held": held} {
+		u, err := f.Usage.GetUsage(f.Ctx, id)
+		if err != nil || u.UnitCode != unit {
+			t.Errorf("the parent of a %s child: usage %+v, %v; want counted in %q", name, u, err, unit)
+		}
 	}
 }
 
