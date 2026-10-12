@@ -17,7 +17,7 @@ import (
 const unit limes.Nanos = limes.NanosPerUnit
 
 func copyCeiling(id string, requests int64, budget limes.Nanos) limes.CopyCeiling {
-	return limes.CopyCeiling{RevocationID: []byte(id), Requests: limes.RequestCeiling{Max: requests}, Budget: limes.BudgetCeiling{Max: budget}}
+	return limes.CopyCeiling{RevocationID: []byte(id), Requests: &limes.RequestCeiling{Max: requests}, Budget: &limes.BudgetCeiling{Max: budget}}
 }
 
 func newCopyFixture(t *testing.T) (context.Context, *UsageStore[struct{}], uuid.UUID, uuid.UUID) {

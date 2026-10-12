@@ -171,6 +171,7 @@ var clonedFields = map[string]bool{
 	"Caveats.Ops": true, "Caveats.ResourcePrefixes": true, "Caveats.ResourceURIs": true,
 	"Caveats.SourceIPCIDR": true, "Principal.Agent": true,
 	"Capability.Audience": true, "Capability.Copies": true, "CopyCeiling.RevocationID": true,
+	"CopyCeiling.Requests": true, "CopyCeiling.Budget": true,
 }
 
 // asVerified is c as the verifier would have accepted it, for tests of what

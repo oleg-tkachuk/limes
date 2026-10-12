@@ -884,11 +884,17 @@ func sameReservation(got, want limes.Reservation) string {
 		return "copies differ"
 	}
 	for i := range got.Copies {
-		if !bytes.Equal(got.Copies[i].RevocationID, want.Copies[i].RevocationID) || got.Copies[i].Budget != want.Copies[i].Budget || !got.Copies[i].Requests.Unlimited {
+		if !bytes.Equal(got.Copies[i].RevocationID, want.Copies[i].RevocationID) || !sameCeiling(got.Copies[i].Budget, want.Copies[i].Budget) {
 			return "copies differ"
 		}
 	}
 	return ""
+}
+
+// sameCeiling reports whether two optional ceilings are both absent or
+// both present and equal.
+func sameCeiling[T comparable](a, b *T) bool {
+	return (a == nil) == (b == nil) && (a == nil || *a == *b)
 }
 
 // Reserve, GetReservation and ListReservations read one hold the same way,
@@ -902,7 +908,7 @@ func checkReservations[TX any](t *testing.T, f fixture[TX]) {
 		copyLimit = 10
 	)
 	copies := []limes.CopyCeiling{{
-		RevocationID: []byte("copy-1"), Requests: limes.RequestCeiling{Max: copyLimit}, Budget: limes.BudgetCeiling{Max: copyLimit * one},
+		RevocationID: []byte("copy-1"), Requests: &limes.RequestCeiling{Max: copyLimit}, Budget: &limes.BudgetCeiling{Max: copyLimit * one},
 	}}
 	reserve := func(capID uuid.UUID, ceiling limes.Nanos, ttl time.Duration) limes.Reservation {
 		t.Helper()
@@ -922,7 +928,7 @@ func checkReservations[TX any](t *testing.T, f fixture[TX]) {
 	second := reserve(f.child, childBudget, later)
 	onRoot := reserve(f.root, rootBudget, sooner)
 	if first.CapabilityID != f.child || first.TenantID != f.Tenant || first.Amount != held ||
-		first.Op != "llm" || first.Actor != "agent" || len(first.Copies) != 1 || !first.Copies[0].Requests.Unlimited {
+		first.Op != "llm" || first.Actor != "agent" || len(first.Copies) != 1 || !sameCeiling(first.Copies[0].Budget, copies[0].Budget) {
 		t.Errorf("Reserve returned %+v; want the whole hold, copies with their budgets alone", first)
 	}
 
@@ -954,7 +960,7 @@ func checkReservations[TX any](t *testing.T, f fixture[TX]) {
 
 	// A hold is settled by the copy that made it: not by the capability
 	// without it, nor under another copy, whose own limits it would shed.
-	other := []limes.CopyCeiling{{RevocationID: []byte("copy-2"), Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true}}}
+	other := []limes.CopyCeiling{{RevocationID: []byte("copy-2")}}
 	for name, c := range map[string][]limes.CopyCeiling{"no copy": nil, "another copy": other} {
 		subject := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: unit, copies: c})
 		if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: subject, ReservationID: first.ID, Amount: held}, nil); !errors.Is(err, limes.ErrReservationNotFound) {
@@ -988,7 +994,7 @@ func checkReservations[TX any](t *testing.T, f fixture[TX]) {
 
 func checkCopyOverrun[TX any](t *testing.T, f fixture[TX]) {
 	copyID := []byte("copy-1")
-	copies := []limes.CopyCeiling{{RevocationID: copyID, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Max: one}}}
+	copies := []limes.CopyCeiling{{RevocationID: copyID, Budget: &limes.BudgetCeiling{Max: one}}}
 	if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{copies: copies}), Amount: 2 * one}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Fatalf("rejecting charge past the copy's budget: err = %v, want ErrBudgetExceeded", err)
 	}
@@ -1116,7 +1122,7 @@ func checkAncestorRequests[TX any](t *testing.T, f fixture[TX]) {
 // copy while the capability's own allows more.
 func checkCopyRequests[TX any](t *testing.T, f fixture[TX]) {
 	const limit = 1
-	copies := []limes.CopyCeiling{{RevocationID: []byte("copy-requests"), Requests: limes.RequestCeiling{Max: limit}, Budget: unlimitedBudget}}
+	copies := []limes.CopyCeiling{{RevocationID: []byte("copy-requests"), Requests: &limes.RequestCeiling{Max: limit}}}
 	bump := func() error {
 		_, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, copies: copies})})
 		return err
@@ -1134,7 +1140,7 @@ func checkCopyRequests[TX any](t *testing.T, f fixture[TX]) {
 // checkCopyHold holds a store to counting a hold against the copy it was
 // made under, as against every other ceiling.
 func checkCopyHold[TX any](t *testing.T, f fixture[TX]) {
-	copies := []limes.CopyCeiling{{RevocationID: []byte("copy-hold"), Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Max: one}}}
+	copies := []limes.CopyCeiling{{RevocationID: []byte("copy-hold"), Budget: &limes.BudgetCeiling{Max: one}}}
 	subject := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), copies: copies})
 	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: subject, Amount: one}); err != nil {
 		t.Fatalf("a hold of the copy's whole budget: %v", err)
@@ -1284,7 +1290,7 @@ func checkDescendantHolds[TX any](t *testing.T, f fixture[TX]) {
 // of a 19 hold adds 1 to every counter, so it fits a ceiling of 20 — the
 // capability's, a copy's — with nothing to spare.
 func checkSettleAboveHold[TX any](t *testing.T, f fixture[TX]) {
-	copies := []limes.CopyCeiling{{RevocationID: []byte("settle-copy"), Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Max: childBudget}}}
+	copies := []limes.CopyCeiling{{RevocationID: []byte("settle-copy"), Budget: &limes.BudgetCeiling{Max: childBudget}}}
 	subject := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), copies: copies})
 	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: subject, Amount: childBudget - one})
 	if err != nil {
@@ -1309,8 +1315,8 @@ func checkSettleAboveHold[TX any](t *testing.T, f fixture[TX]) {
 // [C, P], and settling P's hold under [C, P] — or C's under [P] — would move
 // spend past a copy's own limits.
 func checkNestedCopySettle[TX any](t *testing.T, f fixture[TX]) {
-	p := limes.CopyCeiling{RevocationID: []byte("copy-p"), Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Max: childBudget}}
-	c := limes.CopyCeiling{RevocationID: []byte("copy-c"), Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Max: one}}
+	p := limes.CopyCeiling{RevocationID: []byte("copy-p"), Budget: &limes.BudgetCeiling{Max: childBudget}}
+	c := limes.CopyCeiling{RevocationID: []byte("copy-c"), Budget: &limes.BudgetCeiling{Max: one}}
 	under := func(copies ...limes.CopyCeiling) limes.MeterSubject {
 		return newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), copies: copies})
 	}
@@ -1555,7 +1561,7 @@ func checkCopySettleRefund[TX any](t *testing.T, f fixture[TX]) {
 		t.Skip("the store reads no copy counters back")
 	}
 	copyID := []byte("copy-settle-refund")
-	copies := []limes.CopyCeiling{{RevocationID: copyID, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Max: childBudget}}}
+	copies := []limes.CopyCeiling{{RevocationID: copyID, Budget: &limes.BudgetCeiling{Max: childBudget}}}
 	subject := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), copies: copies})
 	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: subject, Amount: 2 * one})
 	if err != nil {

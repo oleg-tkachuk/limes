@@ -124,3 +124,31 @@ func TestExactPercent(t *testing.T) {
 		}
 	}
 }
+
+// A copy with no ceiling of its own on an axis admits any count there; one
+// with a ceiling admits up to it, 0 admitting nothing.
+func TestCopyCeilingAdmits(t *testing.T) {
+	const bound = 3
+	cases := map[string]struct {
+		c            CopyCeiling
+		n            int64
+		amount       Nanos
+		wantRequests bool
+		wantBudget   bool
+	}{
+		"none of its own": {CopyCeiling{}, MaxIJSONInteger, MaxNanos, true, true},
+		"at the bound":    {CopyCeiling{Requests: &RequestCeiling{Max: bound}, Budget: &BudgetCeiling{Max: bound}}, bound, bound, true, true},
+		"past the bound":  {CopyCeiling{Requests: &RequestCeiling{Max: bound}, Budget: &BudgetCeiling{Max: bound}}, bound + 1, bound + 1, false, false},
+		"frozen":          {CopyCeiling{Requests: &RequestCeiling{}, Budget: &BudgetCeiling{}}, 1, 1, false, false},
+		"requests only":   {CopyCeiling{Requests: &RequestCeiling{Max: bound}}, bound + 1, MaxNanos, false, true},
+		"budget only":     {CopyCeiling{Budget: &BudgetCeiling{Max: bound}}, MaxIJSONInteger, bound + 1, true, false},
+	}
+	for name, tc := range cases {
+		if got := tc.c.AdmitsRequests(tc.n); got != tc.wantRequests {
+			t.Errorf("%s: AdmitsRequests(%d) = %v, want %v", name, tc.n, got, tc.wantRequests)
+		}
+		if got := tc.c.AdmitsBudget(tc.amount); got != tc.wantBudget {
+			t.Errorf("%s: AdmitsBudget(%d) = %v, want %v", name, tc.amount, got, tc.wantBudget)
+		}
+	}
+}

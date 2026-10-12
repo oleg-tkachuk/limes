@@ -396,17 +396,7 @@ func applyAttenuation(cur Capability, blk decodedBlock, id []byte) (Capability, 
 		return next, nil
 	}
 	// An axis the block left alone has no ceiling of this copy's own.
-	ceiling := CopyCeiling{
-		RevocationID: id,
-		Requests:     RequestCeiling{Unlimited: true},
-		Budget:       BudgetCeiling{Unlimited: true},
-	}
-	if f.requests != nil {
-		ceiling.Requests = *f.requests
-	}
-	if f.budget != nil {
-		ceiling.Budget = *f.budget
-	}
+	ceiling := CopyCeiling{RevocationID: id, Requests: f.requests, Budget: f.budget}
 	if err := copyCeilingNarrows(cur, ceiling); err != nil {
 		return cur, err
 	}
@@ -528,31 +518,32 @@ func (f blockFacts) narrow(cur Capability) Capability {
 // copyCeilingNarrows checks a copy's ceilings against every one already in
 // force on cur: the capability's own and each enclosing copy's.
 func copyCeilingNarrows(cur Capability, c CopyCeiling) error {
-	if err := c.Requests.Validate(); err != nil {
-		return fmt.Errorf("copy %w", err)
-	}
-	if err := c.Budget.Validate(); err != nil {
-		return fmt.Errorf("copy %w", err)
-	}
-	// An Unlimited axis is one this block left alone: the copy keeps no
-	// ceiling of its own there, and the ones above it still bound it.
-	if !c.Requests.Unlimited {
-		if !c.Requests.Within(cur.Caveats.Requests) {
-			return fmt.Errorf("copy requests %s exceed the capability's %s", c.Requests, cur.Caveats.Requests)
+	// A nil axis is one this block left alone: the copy keeps no ceiling of
+	// its own there, and the ones above it still bound it. A block sets only
+	// a bound (readBlockFacts), never an Unlimited ceiling.
+	if r := c.Requests; r != nil {
+		if err := r.Validate(); err != nil {
+			return fmt.Errorf("copy %w", err)
+		}
+		if !r.Within(cur.Caveats.Requests) {
+			return fmt.Errorf("copy requests %s exceed the capability's %s", r, cur.Caveats.Requests)
 		}
 		for _, o := range cur.Copies {
-			if !c.Requests.Within(o.Requests) {
-				return fmt.Errorf("copy requests %s exceed an enclosing copy's %s", c.Requests, o.Requests)
+			if o.Requests != nil && !r.Within(*o.Requests) {
+				return fmt.Errorf("copy requests %s exceed an enclosing copy's %s", r, o.Requests)
 			}
 		}
 	}
-	if !c.Budget.Unlimited {
-		if !c.Budget.Within(cur.Caveats.Budget) {
-			return fmt.Errorf("copy budget %s exceeds the capability's %s", c.Budget, cur.Caveats.Budget)
+	if b := c.Budget; b != nil {
+		if err := b.Validate(); err != nil {
+			return fmt.Errorf("copy %w", err)
+		}
+		if !b.Within(cur.Caveats.Budget) {
+			return fmt.Errorf("copy budget %s exceeds the capability's %s", b, cur.Caveats.Budget)
 		}
 		for _, o := range cur.Copies {
-			if !c.Budget.Within(o.Budget) {
-				return fmt.Errorf("copy budget %s exceeds an enclosing copy's %s", c.Budget, o.Budget)
+			if o.Budget != nil && !b.Within(*o.Budget) {
+				return fmt.Errorf("copy budget %s exceeds an enclosing copy's %s", b, o.Budget)
 			}
 		}
 	}

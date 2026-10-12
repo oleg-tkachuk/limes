@@ -305,12 +305,32 @@ type Capability struct {
 type CopyCeiling struct {
 	// RevocationID is the block's revocation id.
 	RevocationID []byte
-	// Requests bounds the requests made with the copy; Unlimited when the
-	// block set no request limit of its own.
-	Requests RequestCeiling
-	// Budget bounds the copy's spend, in the capability's unit; Unlimited
-	// when the block set no budget of its own.
-	Budget BudgetCeiling
+	// Requests bounds the requests made with the copy; nil when the block
+	// set no request limit of its own. Never Unlimited: a copy only narrows.
+	Requests *RequestCeiling
+	// Budget bounds the copy's spend, in the capability's unit; nil when the
+	// block set no budget of its own. Never Unlimited.
+	Budget *BudgetCeiling
+}
+
+// AdmitsRequests reports whether n requests made with the copy in all stay
+// under its own request limit; with none of its own, any number does.
+func (c CopyCeiling) AdmitsRequests(n int64) bool { return c.Requests == nil || c.Requests.Admits(n) }
+
+// AdmitsBudget reports whether amount spent with the copy in all stays under
+// its own budget; with none of its own, any amount does.
+func (c CopyCeiling) AdmitsBudget(amount Nanos) bool {
+	return c.Budget == nil || c.Budget.Admits(amount)
+}
+
+// HeldCopy is a Biscuit copy a hold is on: a hold counts no requests, so it
+// carries the copy's budget alone.
+type HeldCopy struct {
+	// RevocationID is the copy's revocation id.
+	RevocationID []byte
+	// Budget is the copy's own budget the hold counts against; nil when the
+	// copy has none of its own.
+	Budget *BudgetCeiling
 }
 
 // Caveats is a typed bag of restrictions, AND-combined. Ops is required; an
@@ -417,10 +437,22 @@ func cloneCopyCeilings(cs []CopyCeiling) []CopyCeiling {
 	}
 	out := make([]CopyCeiling, len(cs))
 	for i, c := range cs {
-		c.RevocationID = slices.Clone(c.RevocationID)
-		out[i] = c
+		out[i] = CopyCeiling{
+			RevocationID: slices.Clone(c.RevocationID),
+			Requests:     clonePtr(c.Requests),
+			Budget:       clonePtr(c.Budget),
+		}
 	}
 	return out
+}
+
+// clonePtr is a pointer to a copy of *p; nil stays nil.
+func clonePtr[T any](p *T) *T {
+	if p == nil {
+		return nil
+	}
+	v := *p
+	return &v
 }
 
 // clone is c with slices and pointers of its own.

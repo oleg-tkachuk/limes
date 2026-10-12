@@ -504,7 +504,7 @@ func (s *UsageStore[TX]) Bump(_ context.Context, req limes.BumpRequest) (limes.B
 	u := s.usage[req.Subject.CapabilityID()]
 	next := u.RequestCount + 1
 	for _, c := range req.Subject.Copies() {
-		if !c.Requests.Admits(s.copies[string(c.RevocationID)].requests + 1) {
+		if !c.AdmitsRequests(s.copies[string(c.RevocationID)].requests + 1) {
 			return limes.BumpReceipt{RequestCount: u.RequestCount}, fmt.Errorf("%w: copy %x", limes.ErrRequestLimitExceeded, c.RevocationID)
 		}
 	}
@@ -813,7 +813,7 @@ func (s *UsageStore[TX]) checkCeilingsLocked(c ceilingCheck, crossed func(error)
 	}
 	for _, cp := range c.copies {
 		cc := s.copies[string(cp.RevocationID)]
-		if !cp.Budget.Admits(cc.spent + cc.reserved - c.released + c.amount) {
+		if !cp.AdmitsBudget(cc.spent + cc.reserved - c.released + c.amount) {
 			if err := crossed(fmt.Errorf("%w: copy %x", limes.ErrBudgetExceeded, cp.RevocationID)); err != nil {
 				return err
 			}
@@ -1019,21 +1019,23 @@ func (s *UsageStore[TX]) Settle(
 func (h hold) reservation() limes.Reservation {
 	return limes.Reservation{
 		ID: h.id, CapabilityID: h.capID, TenantID: h.tenantID, Amount: h.amount, UnitCode: h.unit,
-		Op: h.op, Actor: h.actor, Copies: budgetsOnly(h.copies), ExpiresAt: h.expires,
+		Op: h.op, Actor: h.actor, Copies: heldCopies(h.copies), ExpiresAt: h.expires,
 	}
 }
 
-// budgetsOnly is copies with their budgets alone, as a hold keeps them.
-func budgetsOnly(copies []limes.CopyCeiling) []limes.CopyCeiling {
+// heldCopies is the copies a hold is on, with their budgets alone.
+func heldCopies(copies []limes.CopyCeiling) []limes.HeldCopy {
 	if len(copies) == 0 {
 		return nil
 	}
-	out := make([]limes.CopyCeiling, len(copies))
+	out := make([]limes.HeldCopy, len(copies))
 	for i, c := range copies {
-		out[i] = limes.CopyCeiling{
-			RevocationID: slices.Clone(c.RevocationID), Budget: c.Budget,
-			Requests: limes.RequestCeiling{Unlimited: true}, // a hold counts no requests
+		h := limes.HeldCopy{RevocationID: slices.Clone(c.RevocationID)}
+		if c.Budget != nil {
+			b := *c.Budget
+			h.Budget = &b
 		}
+		out[i] = h
 	}
 	return out
 }
