@@ -57,8 +57,10 @@ run too), its claims must
 hold no member the verifier does not know (a caveat it could not enforce),
 none twice and none in another case, and may be at most
 `VerifierConfig.MaxTokenBytes` long (16 KiB unless set). When several issuers share a verifier, set
-`KeyIssuers` (kid → issuer) so one issuer's key cannot sign for another; an
-empty map, which would refuse every token, is refused.
+`KeyIssuers` (kid → issuer) so one issuer's key cannot sign for another —
+or, for issuers that do share one trust boundary, `SharedKeys: true`; a
+verifier trusting several issuers with neither is refused, and so is an
+empty map, which would refuse every token.
 Verifiers running apart from the issuer resolve keys with
 `jwks.Remote`. It fetches the issuer's JWKS on first use, keeps it as
 long as the response's `Cache-Control` allows within `MinRefreshInterval`
