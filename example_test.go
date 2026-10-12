@@ -28,7 +28,7 @@ const (
 type exampleStack struct {
 	issuer   *limes.Issuer
 	verifier *limes.StandardVerifier
-	records  *memstore.Store[struct{}]
+	records  *memstore.Store
 	usage    *memstore.UsageStore[struct{}]
 	tenantID uuid.UUID
 }
@@ -39,7 +39,14 @@ func newExampleStack() exampleStack {
 	if err != nil {
 		log.Fatal(err)
 	}
-	records := memstore.New[struct{}]()
+	records, err := memstore.NewStore(memstore.StoreConfig{})
+	if err != nil {
+		log.Fatal(err)
+	}
+	usage, err := memstore.NewUsageStore(memstore.UsageStoreConfig[struct{}]{Records: records})
+	if err != nil {
+		log.Fatal(err)
+	}
 	signer, err := limes.NewSigner(limes.SignerConfig{KeyID: kid, Key: priv})
 	if err != nil {
 		log.Fatal(err)
@@ -69,7 +76,7 @@ func newExampleStack() exampleStack {
 	}
 	return exampleStack{
 		issuer: issuer, verifier: verifier, records: records,
-		usage: memstore.NewUsage[struct{}](records), tenantID: uuid.New(),
+		usage: usage, tenantID: uuid.New(),
 	}
 }
 
@@ -111,7 +118,7 @@ func ExampleIssuer_Issue() {
 	key, _ := limes.GenerateKey()
 	kid, pub, priv := key.KeyID, key.Public, key.Private
 
-	records := memstore.New[struct{}]() // your Store
+	records, _ := memstore.NewStore(memstore.StoreConfig{}) // your Store
 	signer, _ := limes.NewSigner(limes.SignerConfig{KeyID: kid, Key: priv})
 	issuer, _ := limes.NewIssuer(limes.IssuerConfig{
 		Signer: signer, Store: records, IssuerName: exampleIssuerName,

@@ -89,7 +89,10 @@ func hasMethods(t reflect.Type, names []string) bool {
 // memstore, but not to the decorator, fails here rather than vanishing behind
 // a wrapped store.
 func TestInstrumentForwardsEveryInterfaceTheStoreImplements(t *testing.T) {
-	inner := memstore.NewUsage[struct{}](nil)
+	inner, err := memstore.NewUsageStore(memstore.UsageStoreConfig[struct{}]{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	wrapped, err := limes.Instrument[struct{}](inner)
 	if err != nil {
 		t.Fatal(err)

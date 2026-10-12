@@ -23,7 +23,7 @@ func TestChargeRollsBackWhenSideEffectFails(t *testing.T) {
 	ctx := context.Background()
 	capID, tenantID := uuid.New(), uuid.New()
 
-	usage := NewUsage[struct{}](nil)
+	usage := newTestUsage(nil)
 	if _, err := usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
 		TenantID: tenantID, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("100")}, UnitCode: "USD",
 	}); err != nil {
@@ -86,7 +86,7 @@ func TestChargeRollsBackWhenSideEffectFails(t *testing.T) {
 func TestChargeRetryAfterRollbackIsClean(t *testing.T) {
 	ctx := context.Background()
 	capID, tenantID := uuid.New(), uuid.New()
-	usage := NewUsage[struct{}](nil)
+	usage := newTestUsage(nil)
 
 	boom := errors.New("transient")
 	if _, err := usage.Charge(ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenantID, budget: budgetOf(limes.MustParseAmount("100")), unit: "USD"}), Amount: limes.MustParseAmount("7"), Op: "op", Actor: "actor"}, func(context.Context, struct{}) error { return boom }); !errors.Is(err, boom) {
@@ -110,7 +110,7 @@ func TestChargeRetryAfterRollbackIsClean(t *testing.T) {
 func TestChargeCapabilityCeilingLeavesBothCountersUnmutated(t *testing.T) {
 	ctx := context.Background()
 	capID, tenantID := uuid.New(), uuid.New()
-	usage := NewUsage[struct{}](nil)
+	usage := newTestUsage(nil)
 	if _, err := usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
 		TenantID: tenantID, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("1000")}, UnitCode: "USD",
 	}); err != nil {
@@ -140,7 +140,7 @@ func TestChargeCapabilityCeilingLeavesBothCountersUnmutated(t *testing.T) {
 func TestChargeTenantCeilingLeavesBothCountersUnmutated(t *testing.T) {
 	ctx := context.Background()
 	capID, tenantID := uuid.New(), uuid.New()
-	usage := NewUsage[struct{}](nil)
+	usage := newTestUsage(nil)
 	if _, err := usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
 		TenantID: tenantID, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("20")}, UnitCode: "USD",
 	}); err != nil {
@@ -171,7 +171,7 @@ func TestChargeTenantCeilingLeavesBothCountersUnmutated(t *testing.T) {
 func TestNoTransactionModeWorksEndToEnd(t *testing.T) {
 	ctx := context.Background()
 	capID := uuid.New()
-	usage := NewUsage[struct{}](nil)
+	usage := newTestUsage(nil)
 
 	if _, err := usage.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: testTenant, requests: requestsOf(5)})}); err != nil {
 		t.Fatalf("Bump: %v", err)

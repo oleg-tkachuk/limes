@@ -15,7 +15,7 @@ import (
 
 // tree inserts a root with the given caveats and n children each holding
 // childCaveats, returning the root and children IDs.
-func tree(t *testing.T, s *Store[struct{}], root limes.Caveats, n int, child limes.Caveats) (uuid.UUID, []uuid.UUID, uuid.UUID) {
+func tree(t *testing.T, s *Store, root limes.Caveats, n int, child limes.Caveats) (uuid.UUID, []uuid.UUID, uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
 	tenant := uuid.New()
@@ -43,8 +43,8 @@ func tree(t *testing.T, s *Store[struct{}], root limes.Caveats, n int, child lim
 // spend 200.00.
 func TestChildrenCannotSpendPastTheirParentsBudget(t *testing.T) {
 	ctx := context.Background()
-	s := New[struct{}]()
-	u := NewUsage(s)
+	s := newTestStore()
+	u := newTestUsage(s)
 	rootID, kids, tenant := tree(t, s,
 		limes.Caveats{Ops: []limes.Op{limes.OpGet}, Budget: limes.BudgetCeiling{Max: limes.MustParseAmount("25")}, UnitCode: "USD"},
 		2,
@@ -91,8 +91,8 @@ func TestChildrenCannotSpendPastTheirParentsBudget(t *testing.T) {
 
 func TestChildrenCannotExceedTheirParentsRequestCount(t *testing.T) {
 	ctx := context.Background()
-	s := New[struct{}]()
-	u := NewUsage(s)
+	s := newTestStore()
+	u := newTestUsage(s)
 	rootID, kids, tenant := tree(t, s,
 		limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Max: 3}},
 		2,
@@ -126,7 +126,7 @@ func TestVerifierRejectsChildOfRevokedParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	signer, _ := limes.NewSigner(limes.SignerConfig{KeyID: kid, Key: priv})
-	records := New[struct{}]()
+	records := newTestStore()
 	issuer, _ := limes.NewIssuer(limes.IssuerConfig{Signer: signer, Store: records, IssuerName: "iss"})
 	verifier, _ := limes.NewStandardVerifier(limes.VerifierConfig{
 		Keys:           jwks.NewStatic(map[string]ed25519.PublicKey{kid: pub}),
