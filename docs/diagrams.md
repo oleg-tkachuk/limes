@@ -35,7 +35,7 @@ flowchart LR
         attenuate["<b>Attenuate</b><br/>offline · no key"]
         metering["Instrument<br/>OTel counters · spend histogram<br/>WithMeterProvider · WithTenantAttribute"]
         static["jwks.Static<br/>SetKey · RemoveKey"]
-        remote["jwks.Remote<br/>ETag · Cache-Control · MaxStale"]
+        remote["jwks.Remote<br/>ETag · Cache-Control · MaxStale<br/>held keys served, refreshed behind"]
         dpop["dpop.Verifier<br/>VerifierConfig.DPoP · dpop.Sign"]
         suites["storetest · metertest<br/>dpoptest · jwkstest<br/>conformance suites"]
         jwksh["jwks.NewHandler<br/>ETag · max-age"]
@@ -48,7 +48,7 @@ flowchart LR
         usage["<b>UsageStore[TX]</b><br/>Meter[TX]: Bump · Charge · Reserve · Settle · Refund · Release<br/>MeterReader: GetUsage · GetCharge · ChargeByRef · GetReservation · ListReservations<br/>TenantBudgets · UsageHousekeeping"]
         keys["<b>KeyResolver</b><br/>PublicKey(kid)"]
         brev["<b>BiscuitRevocationStore</b><br/>IsBiscuitRevoked · RevokeBiscuit<br/>GetBiscuitRevocation"]
-        cusage["<b>CopyUsageReader</b><br/>CopyUsage(CopyUsageRequest{RevocationIDs})"]
+        cusage["<b>CopyUsageReader</b><br/>CopyUsage(CopyUsageRequest{RevocationIDs})<br/>→ CopyUsageResult{Copies}"]
         replay["<b>dpop.ReplayCache</b><br/>Seen(ctx, ReplayEntry) · MemoryReplayCache ships"]
         nonces["<b>dpop.Nonces</b><br/>Nonce · Valid"]
     end
@@ -122,16 +122,18 @@ sequenceDiagram
     participant St as Store / UsageStore
 
     Op->>I: Issue(IssueRequest)
-    I->>I: Caveats.Validate · TTL → ExpiresAt
-    I->>St: Store.Insert(cap, IssuedBy)
-    I->>I: Signer.sign(ctx, cap)
+    I->>I: Caveats.Validate · TTL → ExpiresAt, after IssuedAt
+    I->>I: Signer.sign(ctx, cap), within MaxTokenBytes
+    I->>St: Store.Insert(InsertRequest{cap, IssuedBy})
     I-->>O: token
 
-    O->>I: Delegate(DelegateRequest{Parent, Caveats})
+    O->>I: Delegate(DelegateRequest{Parent: Verify(token), Caveats})
+    I->>I: parent allows OpShare
     I->>St: Store.IsRevoked(parent)
     I->>I: Narrows(parent, child)
-    I->>St: Store.Insert(child, parent.Subject)
     I->>I: Signer.sign(ctx, child)
+    I->>St: Store.Insert(InsertRequest{child, IssuedBy: parent.Subject})
+    I->>St: Store.IsRevoked(child) — depth within MaxDelegationDepth
     I-->>W: child token
 
     W->>S: request + child token
@@ -154,8 +156,11 @@ sequenceDiagram
 over them has verified, checks a key-bound capability's proof of possession,
 and asks the revocation store last so that cheap rejections never reach it.
 Every refusal is a sentinel the caller maps to its own transport status, or
-hands to `ErrorResponse`; the one exception is a revocation lookup that fails,
-which returns the store's error wrapped.
+hands to `ErrorResponse`. An outage is not a refusal: a key resolver other
+than for an unknown kid, a revocation lookup, a replay cache or a nonce
+source that cannot answer returns its error wrapped, and a key-bound
+capability at a verifier with no `dpop.Verifier` is `ErrProofUnsupported` —
+the deployment's fault, answered 500.
 
 ```mermaid
 flowchart TB
@@ -168,16 +173,17 @@ flowchart TB
     sig{"Ed25519 signature"}
     claims{"claims: strict parse — no unknown or duplicate member<br/>integers within ±(2^53 − 1) · sub = principal's subject"}
     iss{"iss ∈ TrustedIssuers<br/>KeyIssuers[kid] = iss"}
-    tenant{"Subject.TenantID set"}
+    tenant{"Subject.TenantID set<br/>Subject.Validate · Caveats.Validate"}
     sealed{"no BiscuitRoot<br/>(not lifted out of a Biscuit)"}
     nbf{"now + Leeway ≥ NotBefore"}
-    exp{"now − Leeway ≤ ExpiresAt"}
+    exp{"now − Leeway < ExpiresAt"}
     aud{"Audience ∈ token's audience"}
     scheme{"Scheme, if set, matches the binding<br/>DPoP for a key-bound token, Bearer otherwise"}
-    pop{"key-bound: a dpop.Verifier is configured<br/>and the proof checks out"}
+    bound{"key-bound: a dpop.Verifier<br/>is configured"}
+    pop{"dpop.Verifier.Verify<br/>the proof checks out"}
     rev{"RevocationLookup.IsRevoked<br/>this capability or an ancestor"}
     brev{"Biscuit: IsBiscuitRevoked<br/>any block of this copy"}
-    ok(["Capability"])
+    ok(["VerifiedCapability"])
 
     bad["ErrInvalidToken"]
     early["ErrNotYetValid"]
@@ -185,7 +191,9 @@ flowchart TB
     mism["ErrAudienceMismatch"]
     wrong["ErrAuthSchemeMismatch"]
     dpopErr["ErrProofOfPossession<br/>dpop.ErrRequired · dpop.ErrInvalid<br/>dpop.ErrNonceRequired · dpop.ErrReplayed"]
+    unsup["ErrProofUnsupported<br/>(500, the deployment's fault)"]
     keysDown["jwks.ErrUnavailable<br/>(503, the server's fault)"]
+    outage["the store's, resolver's, replay cache's<br/>or nonce source's error, wrapped (500)"]
     revoked["ErrRevoked"]
     biscuit["the Biscuit path below"]
     noCreds["ErrNoCredentials"]
@@ -193,13 +201,14 @@ flowchart TB
 
     tok --> pre -- yes --> size -- yes --> form -- no --> hdr -- yes --> key -- found --> sig -- valid --> claims -- yes --> iss -- yes --> tenant -- yes --> sealed -- yes --> nbf
     form -- yes --> biscuit
-    nbf -- yes --> exp -- yes --> aud -- yes --> scheme -- yes --> pop -- "unbound, or valid proof" --> rev -- no --> brev -- "no, or not a Biscuit" --> ok
+    nbf -- yes --> exp -- yes --> aud -- yes --> scheme -- yes --> bound -- "unbound, or configured" --> pop -- "unbound, or valid proof" --> rev -- no --> brev -- "no, or not a Biscuit" --> ok
     pre -- "no token" --> noCreds
     pre -- "no audience" --> invalid
     size -- no --> bad
     hdr -- no --> bad
     key -- "unknown kid" --> bad
     key -- "JWKS unavailable" --> keysDown
+    key -- "other resolver error" --> outage
     sig -- invalid --> bad
     claims -- no --> bad
     iss -- no --> bad
@@ -209,25 +218,31 @@ flowchart TB
     exp -- no --> expired
     aud -- no --> mism
     scheme -- no --> wrong
+    bound -- "no dpop.Verifier" --> unsup
     pop -- no --> dpopErr
+    pop -- "cannot answer" --> outage
     rev -- yes --> revoked
+    rev -- "lookup fails" --> outage
     brev -- yes --> revoked
+    brev -- "lookup fails" --> outage
 
     classDef client fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E
     classDef role fill:#DCFCE7,stroke:#16A34A,color:#14532D
     classDef store fill:#FEF3C7,stroke:#D97706,color:#78350F
     classDef external fill:#FCE7F3,stroke:#DB2777,color:#831843
     class tok,ok client
-    class pre,size,form,hdr,sig,claims,iss,tenant,sealed,nbf,exp,aud,scheme,pop role
+    class pre,size,form,hdr,sig,claims,iss,tenant,sealed,nbf,exp,aud,scheme,bound,pop role
     class key,rev,brev store
-    class bad,early,expired,mism,wrong,dpopErr,keysDown,revoked,biscuit,noCreds,invalid external
+    class bad,early,expired,mism,wrong,dpopErr,unsup,keysDown,outage,revoked,biscuit,noCreds,invalid external
 ```
 
 An unknown kid, an untrusted issuer, a kid bound to another issuer and a
 missing tenant all match `ErrInvalidToken`; an unknown kid also matches
 `jwks.ErrUnknownKID`, and the rest carry nothing more to branch on. An unreachable
 JWKS is the server's fault, not the token's: it is `jwks.ErrUnavailable` alone,
-which `ErrorResponse` answers with 503. The DPoP refusals and
+which `ErrorResponse` answers with 503 — with `jwks.Remote`, so is a kid the
+held set lacks while the endpoint is failing, and a caller that gave up
+waiting with no set to serve. The DPoP refusals and
 `ErrAuthSchemeMismatch` match `ErrProofOfPossession` — the token may be
 genuine, the proof is what failed — and every refusal of the credentials,
 token or proof, matches `ErrUnauthenticated`, as does `ErrNoCredentials`
@@ -245,43 +260,47 @@ asked last.
 flowchart TB
     tok(["Biscuit, audience"])
     on{"AcceptBiscuit"}
-    auth{"authority block: exactly one<br/>limes_capability fact, no rules"}
-    sealed["the sealed token: header · key · signature<br/>claims · issuer · tenant — and it carries BiscuitRoot"]
+    auth{"container decodes · ≤ MaxBiscuitBlocks blocks<br/>authority block: exactly one<br/>limes_capability fact, no rules"}
+    sealed{"the sealed token: header · key · signature<br/>claims · issuer · tenant — and it carries BiscuitRoot"}
     chain{"signature chain verifies<br/>against BiscuitRoot"}
     subgraph fold ["each attenuation block, in order"]
         direction TB
-        vocab{"only limes_* facts<br/>no rules · no checks"}
+        vocab{"only limes_* facts<br/>no rules · no checks · no rebinding"}
         narrow{"Narrows(cur, next)<br/>ops · resources · planes · expiry · binding"}
         lim{"sets limes_max_requests /<br/>limes_max_budget_nanos?"}
         fit{"within the capability's limit<br/>and every enclosing copy's"}
-        copies["Capability.Copies gains<br/>{revocation id, limits}, innermost first"]
+        copies["Capability.Copies gains a CopyCeiling<br/>{RevocationID, Requests, Budget}, innermost first<br/>an axis the block left alone stays nil"]
         vocab -- yes --> narrow -- yes --> lim
         lim -- yes --> fit -- yes --> copies
     end
+    cval{"folded caveats<br/>Caveats.Validate"}
     post["time window · audience · scheme<br/>DPoP over the Biscuit as presented"]
     rev{"IsRevoked(capability)"}
     brev{"IsBiscuitRevoked(revocation ids)<br/>any block of this token"}
     meter{"Copies set, and<br/>no MeterCopies?"}
-    ok(["Capability with Copies"])
+    ok(["VerifiedCapability with Copies"])
 
     bad["ErrInvalidToken"]
     att["ErrBiscuitAttenuation"]
     unmetered["ErrCopyCountersNotMetered"]
     revoked["ErrRevoked"]
 
-    tok --> on -- yes --> auth -- yes --> sealed --> chain -- yes --> vocab
-    lim -- no --> post
-    copies --> post
+    tok --> on -- yes --> auth -- yes --> sealed -- yes --> chain -- yes --> vocab
+    lim -- no --> cval
+    copies --> cval
     copies -. "next block" .-> vocab
     lim -. "next block" .-> vocab
+    cval -- yes --> post
     post --> rev
     auth -- no --> bad
+    sealed -- no --> bad
     rev -- no --> brev -- no --> meter -- no --> ok
     on -- no --> bad
     chain -- no --> bad
     vocab -- no --> att
     narrow -- widens --> att
     fit -- no --> att
+    cval -- no --> att
     meter -- yes --> unmetered
     rev -- yes --> revoked
     brev -- yes --> revoked
@@ -291,7 +310,7 @@ flowchart TB
     classDef store fill:#FEF3C7,stroke:#D97706,color:#78350F
     classDef external fill:#FCE7F3,stroke:#DB2777,color:#831843
     class tok,ok client
-    class on,auth,sealed,chain,vocab,narrow,lim,meter,fit,copies,post role
+    class on,auth,sealed,chain,vocab,narrow,lim,meter,fit,copies,cval,post role
     class rev,brev store
     class bad,att,unmetered,revoked external
 ```
@@ -305,52 +324,57 @@ the server's configuration, answered as an internal error.
 ## Proof of possession
 
 A key-bound capability (`ConfirmationJKT` set) needs a DPoP proof (RFC 9449)
-for every request; a verifier with no `dpop.Verifier` refuses it outright with
-`dpop.ErrRequired`. The `dpop` package checks the proof in this order and
+for every request; a verifier with no `dpop.Verifier` cannot check one and
+answers `ErrProofUnsupported`. The `dpop` package checks the proof in this order and
 returns its own sentinel; the verifier wraps each refusal in
 `ErrProofOfPossession`, and passes a replay cache or nonce store that cannot
 answer through as an outage:
 
 ```mermaid
 flowchart TB
-    p(["dpop.Proof<br/>Proof · Method · URL"])
+    p(["dpop.Request<br/>Proof{JWT · Method · URL} · Token · JKT · Holder"])
     has{"proof present"}
-    shape{"three segments · typ dpop+jwt<br/>a jwk with no private member"}
+    shape{"≤ MaxProofBytes · three segments · typ dpop+jwt<br/>a jwk with no private member"}
     jkt{"the jwk's RFC 7638 thumbprint<br/>= ConfirmationJKT"}
     psig{"signature by that key<br/>Ed25519 (or EdDSA) · ES256"}
+    cl{"claims decode · jti set,<br/>≤ MaxJTIBytes"}
     htm{"htm = Method, exactly<br/>(a method is case-sensitive)"}
     htu{"htu = URL after RFC 3986 normalisation<br/>or, under MatchPathOnly, its path a suffix"}
     ath{"ath = hash of the token as presented"}
     iat{"|now − iat| ≤ Window<br/>(dpop.DefaultWindow, 1 minute)<br/>iat may be fractional"}
-    nonce{"Nonces set → a nonce they issued"}
-    jti{"ReplayCache.Seen(jkt, jti, iat + Window)"}
+    nonce{"Nonces set → Nonces.Valid(nonce)"}
+    jti{"ReplayCache.Seen(ReplayEntry{JKT, JTI, Holder,<br/>ExpiresAt: iat + Window + ReplayClockSkew})"}
     ok(["proof accepted"])
 
     req["dpop.ErrRequired"]
     inv["dpop.ErrInvalid"]
     nn["dpop.ErrNonceRequired<br/>answer with a fresh DPoP-Nonce"]
     rp["dpop.ErrReplayed"]
+    down["the store's error, wrapped<br/>(an outage, not a refusal)"]
 
-    p --> has -- yes --> shape -- yes --> jkt -- yes --> psig -- yes --> htm -- yes --> htu -- yes --> ath -- yes --> iat -- yes --> nonce -- yes --> jti -- "new" --> ok
+    p --> has -- yes --> shape -- yes --> jkt -- yes --> psig -- yes --> cl -- yes --> htm -- yes --> htu -- yes --> ath -- yes --> iat -- yes --> nonce -- "yes, or no Nonces" --> jti -- "new" --> ok
     has -- no --> req
     shape -- no --> inv
     jkt -- no --> inv
     psig -- no --> inv
+    cl -- no --> inv
     htm -- no --> inv
     htu -- no --> inv
     ath -- no --> inv
     iat -- no --> inv
     nonce -- no --> nn
-    jti -- "seen, or cannot tell" --> rp
+    nonce -- "cannot answer" --> down
+    jti -- "seen, or the holder's share is full" --> rp
+    jti -- "cannot answer" --> down
 
     classDef client fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E
     classDef role fill:#DCFCE7,stroke:#16A34A,color:#14532D
     classDef store fill:#FEF3C7,stroke:#D97706,color:#78350F
     classDef external fill:#FCE7F3,stroke:#DB2777,color:#831843
     class p,ok client
-    class has,shape,jkt,psig,htm,htu,ath,iat role
+    class has,shape,jkt,psig,cl,htm,htu,ath,iat role
     class nonce,jti store
-    class req,inv,nn,rp external
+    class req,inv,nn,rp,down external
 ```
 
 `dpop.HMACNonces` makes a nonce of its issuance time and an HMAC of it, so replicas
@@ -359,8 +383,8 @@ clocks within `dpop.HMACNonceClockSkew`. `dpop.MemoryReplayCache` gives each hol
 capability the token carries — a share of its own, so one past its share has
 only its own proofs refused, however many keys its Biscuit copies are bound
 to; a full cache refuses rather than forgets. A proof past
-`dpop.DefaultMaxProofBytes` is refused unread, and a `jti` past
-`dpop.MaxJTIBytes` is never stored.
+`MaxProofBytes` is refused unread, and a `jti` past `dpop.MaxJTIBytes` is
+refused as `dpop.ErrInvalid`, never stored.
 
 ## Answering a refusal
 
@@ -379,7 +403,7 @@ error's own text never reaches the client.
 | `ErrAuthSchemeMismatch` · `ErrInvalidToken` · `ErrExpired` · `ErrNotYetValid` · `ErrRevoked` · `ErrAudienceMismatch`, and any other `ErrUnauthenticated` | 401 | `error="invalid_token"` under the client's scheme (Bearer when unknown) |
 | any `ErrCaveatViolation` | 403 | `error="insufficient_scope"` |
 | `ErrBudgetExceeded` · `ErrTenantBudgetExceeded` · `ErrRequestLimitExceeded` | 403 | none |
-| anything else — a store or key resolver outage, `ErrEffectConflict`, `ErrCopyCountersNotMetered` | 500 | none |
+| anything else — a store or key resolver outage, `ErrProofUnsupported`, `ErrEffectConflict`, `ErrCopyCountersNotMetered` | 500 | none |
 
 A verifier with DPoP configured adds a `DPoP algs="…"` challenge with no
 error code beside a `Bearer` one. Every challenge ends with
@@ -432,21 +456,27 @@ are stateful and belong to the `UsageStore`.
 
 ## Delegation: attenuate, never escalate
 
-`Issuer.Delegate` refuses a parent read from a Biscuit copy, fills what the request leaves out from the parent — tenant, audience,
-key binding, and the caveats under `InheritCaveats` — refuses a parent that is
-expired or revoked, clamps the child's window inside the parent's, and then
-requires `Narrows(parent, child)` to pass before anything is persisted or
-signed.
+`Issuer.Delegate` refuses a parent read from a Biscuit copy, one another
+issuer minted, and one whose ops lack `OpShare` (`ErrOpNotAllowed`). It fills
+what the request leaves out from the parent — tenant, audience, key binding,
+and the caveats under `InheritCaveats` — refuses a parent that is expired or
+revoked, clamps the child's window inside the parent's, and requires
+`Narrows(parent, child)` to pass before anything is signed or persisted. A
+Biscuit's holder attenuates the copy instead: a server-side child would be an
+ordinary token of the capability, which revoking the copy would not reach and
+the copy's limits would not bound.
 
 ```mermaid
 flowchart TB
     req(["DelegateRequest<br/>Parent · Subject · Audience · Caveats or InheritCaveats<br/>TTL · NotBefore · ConfirmationJKT"])
     pid{"Parent.ID set"}
     copyp{"Parent not read from a Biscuit<br/>(FromBiscuit false, no Copies)"}
-    fill["unset tenant, audience, binding<br/>taken from the parent"]
-    valid{"audience valid · Caveats.Validate<br/>thumbprint valid"}
+    own{"Parent.Issuer = this issuer"}
+    share{"OpShare ∈ parent's Ops"}
+    fill["unset tenant and audience taken from the parent<br/>InheritCaveats: the parent's caveats"]
+    valid{"Subject.Validate · audience valid<br/>Caveats.Validate · thumbprint valid"}
     alive{"parent not expired<br/>Store.IsRevoked(parent) = false"}
-    clamp["ExpiresAt = min(now + TTL, parent.ExpiresAt)"]
+    clamp["ExpiresAt = min(now + TTL, parent.ExpiresAt)<br/>unset binding taken from the parent"]
     start["starts no earlier than the parent:<br/>NotBefore raised to the parent's start<br/>(its NotBefore, else IssuedAt)"]
 
     subgraph nar ["Narrows(parent, child)"]
@@ -462,32 +492,42 @@ flowchart TB
         n0 --> n1 --> n2 --> n3 --> n4 --> n5 --> n6 --> n7
     end
 
-    persist["Signer.sign(ctx, child)<br/>Store.Insert(child, issuedBy = parent.Subject)"]
+    sign["Issuer.sign: Signer.sign(ctx, child)<br/>token within MaxTokenBytes"]
+    persist{"Store.Insert(InsertRequest{child,<br/>IssuedBy: parent.Subject})"}
+    depth{"Store.IsRevoked(child) answers<br/>(no more than MaxDelegationDepth ancestors)"}
     ok(["IssueResult{Capability, Token}"])
 
     wide["ErrDelegationTooWide"]
     unit["ErrUnitCodeMismatch"]
+    noshare["ErrOpNotAllowed"]
     dead["ErrExpired · ErrRevoked<br/>or the store's error"]
     inval["ErrInvalidRequest · ErrInvalidCaveats"]
+    stored["the store's error<br/>ErrDelegationTooDeep, …"]
 
-    req --> pid -- yes --> copyp -- yes --> fill --> valid -- yes --> alive -- yes --> clamp --> start --> n0
-    n7 --> persist --> ok
+    req --> pid -- yes --> copyp -- yes --> own -- yes --> share -- yes --> fill --> valid -- yes --> alive -- yes --> clamp --> start --> n0
+    n7 --> sign --> persist -- ok --> depth -- yes --> ok
     pid -- no --> inval
+    copyp -- no --> inval
+    own -- no --> inval
+    share -- no --> noshare
     valid -- no --> inval
+    clamp -- "negative TTL" --> inval
     start -- "window empty" --> inval
     alive -- no --> dead
     n4 -- differs --> unit
     nar -- widens --> wide
-    copyp -- no --> inval
+    sign -- "too long" --> inval
+    persist -- refused --> stored
+    depth -- no --> stored
 
     classDef client fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E
     classDef role fill:#DCFCE7,stroke:#16A34A,color:#14532D
     classDef store fill:#FEF3C7,stroke:#D97706,color:#78350F
     classDef external fill:#FCE7F3,stroke:#DB2777,color:#831843
     class req,ok client
-    class pid,fill,valid,copyp,clamp,start,n0,n1,n2,n3,n4,n5,n6,n7 role
-    class alive,persist store
-    class wide,unit,dead,inval external
+    class pid,fill,valid,copyp,own,share,clamp,start,sign,n0,n1,n2,n3,n4,n5,n6,n7 role
+    class alive,persist,depth store
+    class wide,unit,noshare,dead,inval,stored external
 ```
 
 Narrowing bounds each child on its own. The tree as a whole is bounded at use:
@@ -566,9 +606,7 @@ flowchart TB
   `CopyUsageReader` reads the counters back.
 - **No delegation from a copy.** `Issuer.Delegate` refuses any `Parent` read
   from a Biscuit (`VerifiedCapability.FromBiscuit`, with limits or without)
-  as `ErrInvalidRequest`: a server-side child would be an ordinary token of
-  the capability, which revoking the copy would not reach and the copy's
-  limits would not bound. Its holder attenuates the copy instead.
+  as `ErrInvalidRequest`; see the delegation section above.
 
 ## Charge: stage, then commit
 
@@ -591,11 +629,12 @@ the last of a budget.
 flowchart TB
     req(["ChargeRequest<br/>Subject (id · tenant · ceilings · unit · copies) · Amount<br/>ExternalRef · Overrun"])
     sreq(["SettleRequest<br/>Subject · ReservationID · Amount · Overrun"])
-    sval{"Nanos.Validate · Overrun.Validate<br/>ReservationID not zero"}
-    hold{"reservation open<br/>and the subject's own"}
-    val{"Nanos.Validate · Overrun.Validate<br/>ValidateExternalRef · NormalizeUnitCode"}
+    sval{"subject set · Nanos.Validate · Overrun.Validate<br/>ReservationID not zero"}
+    hold{"reservation open, unexpired,<br/>the subject's own, under the same copies"}
+    val{"Nanos.Validate · Overrun.Validate · ValidateExternalRef<br/>subject set · NormalizeUnitCode"}
     seen{"ExternalRef already charged<br/>to this capability"}
     same{"same Amount · UnitCode · TenantID"}
+    lin{"capability on record<br/>lineage read: its ancestors still on record"}
 
     subgraph stage ["stage — compute, publish nothing"]
         direction TB
@@ -612,9 +651,9 @@ flowchart TB
         direction TB
         w5["each copy's spend += Amount"]
         w1["capability spend += Amount"]
-        w2["each ancestor spend += Amount"]
+        w2["each ancestor on the lineage as read now:<br/>spend += Amount"]
         w3["tenant spend += Amount<br/>(the row created, with no ceiling, if missing)"]
-        w0["settling: the hold leaves reserved everywhere"]
+        w0["settling: the hold leaves reserved on the capability,<br/>its copies, the tenant and each ancestor<br/>that held it and still has a row"]
         w4["ledger row: ChargeID · TenantID · Amount · UnitCode · At<br/>Ancestors · copy ids · Op · Actor · ExternalRef<br/>ReservationID · Overrun · tenant period"]
     end
 
@@ -629,15 +668,18 @@ flowchart TB
     e4["the callback's error"]
     e5["ErrReservationNotFound"]
     e6["ErrExternalRefConflict"]
+    e7["ErrNotFound · ErrDelegationTooDeep"]
 
-    req --> val -- ok --> seen -- no --> c00
+    req --> val -- ok --> seen -- no --> lin
     seen -- yes --> same -- yes --> replay
     same -- no --> e6
-    sreq --> sval -- ok --> hold -- "yes: its own hold<br/>is not counted" --> c00
+    sreq --> sval -- ok --> hold -- yes --> lin
+    lin -- yes --> c00
+    lin -- no --> e7
     sval -- "invalid" --> e0
     sval -- "zero id" --> e5
-    hold -- "settled" --> replay
-    hold -- "released · expired" --> e5
+    hold -- "settled by this subject,<br/>under the same copies" --> replay
+    hold -- "released · expired · another capability's<br/>· other copies" --> e5
     cb -- nil --> w5 --> w1 --> w2 --> w3 --> w0 --> w4 --> ok
     ok -. "later" .-> refund
     val -- invalid --> e0
@@ -654,15 +696,16 @@ flowchart TB
     classDef optional fill:#F1F5F9,stroke:#64748B,color:#334155,stroke-dasharray:5 4
     classDef external fill:#FCE7F3,stroke:#DB2777,color:#831843
     class req,sreq,ok,replay client
-    class val,sval,seen,same,hold,c00,c0,c1,c2,c3 role
+    class val,sval,seen,same,hold,lin,c00,c0,c1,c2,c3 role
     class cb optional
     class w5,w1,w2,w3,w0,w4,refund store
-    class e0,e1,e2,e3,e4,e5,e6 external
+    class e0,e1,e2,e3,e4,e5,e6,e7 external
 ```
 
 `Bump` takes the same order for requests: each copy's limit, then the
 capability's, then each ancestor's. A reservation keeps its copies' budgets,
-so `Settle` checks them without being handed the token again.
+so `Settle` checks them without being handed them again; the subject settling
+must still carry the same copies.
 
 A settle rejected by a ceiling leaves the reservation in place, to be settled
 lower or released with `Release`. Under `OverrunRecord` no ceiling rejects: a
@@ -704,7 +747,7 @@ flowchart LR
     op(["Revoke(RevokeRequest{CapabilityID, Note, Actor, CascadeChildren})"])
     store[("<b>Store</b><br/>revoked set<br/>ParentID links")]
     cascade["CascadeChildren:<br/>a revocation entry per descendant,<br/>for the audit trail"]
-    chain["IsRevoked(id):<br/>id or any ancestor revoked"]
+    chain["IsRevoked(id):<br/>id or any ancestor still on record revoked<br/>past MaxDelegationDepth: ErrDelegationTooDeep"]
     cache["<b>CachedRevocationChecker</b><br/>answer cached for TTL (default 2s)<br/>one upstream call per id at a time<br/>bounded: the oldest answer makes room<br/>errors never cached · a Clear mid-lookup<br/>discards that lookup's answer"]
     notify{{"consumer's revocation signal<br/>e.g. a Postgres channel"}}
     bop(["RevokeBiscuit(RevokeBiscuitRequest{Copy: Verifier.BiscuitCopy(token)})"])
@@ -753,7 +796,11 @@ long as the response's `Cache-Control` says — `max-age` less `Age`, zero for
 (`RefreshInterval` when the response says nothing), revalidates with an ETag,
 refetches on an unknown kid at most once per `MinRefreshInterval`, and fails
 closed with `jwks.ErrUnavailable` when it has never fetched a set, or once the
-last good set is older than `MaxStale`. A document with entries but no usable
+last good set is older than `MaxStale`. A known kid from a set past its
+freshness but within `MaxStale` is served at once, its refresh started behind
+the caller; an unknown kid while the endpoint is failing, or a caller that
+gives up waiting with no set to serve, is `jwks.ErrUnavailable` too. Keys are
+handed out as copies. A document with entries but no usable
 Ed25519 key counts as a failed fetch, so the last good set stays in service;
 two entries under one kid are both dropped. The issuer serves the set with `jwks.NewHandler`: a strong ETag
 answering `If-None-Match` with 304, and `Cache-Control: public, max-age`.
