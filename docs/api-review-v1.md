@@ -62,7 +62,7 @@ Adding a method to any of these after 1.0 breaks every implementation.
 | T4 | `AuthorizeRequest` embeds `VerifyRequest` and `CheckRequest`: a field or method later added to both is an ambiguous selector — a compile break caused by an additive change. | Named fields `Verify`, `Check`. **Done.** | Every `AuthorizeRequest` literal. |
 | T5 | `Limit int32` leaks a column type; optional times are `*time.Time` in one place (`PeriodEnd`) and the zero `time.Time` everywhere else; `ListTenantBudgetsRequest` fields are undocumented. | `int`; zero-is-absent; document. **Done.** | The two list requests. |
 | T6 | `Caveats`, `Principal`, `AgentPrincipal` are both the Go API and the wire format (their JSON tags are the claims): a Go rename is a wire change. `Capability` carries a lone `json:"-"`. | Unexported wire structs, as `jwtClaims` already is. | Nothing exported. |
-| T7 | Enums follow three zero-value rules: `Effect` has `Unspecified`; `OverrunPolicy`'s zero is a real value (`Reject`) and it has no `String()`; `PrincipalType` and `AuthScheme` accept anything non-empty (`checkScheme`). | One rule — an explicit `Unspecified` zero — `String()` on every enum, unknown values refused. | Numeric values of `OverrunPolicy`. |
+| T7 | Enums follow three zero-value rules: `Effect` has `Unspecified`; `OverrunPolicy`'s zero is a real value (`Reject`) and it has no `String()`; `PrincipalType` and `AuthScheme` accept anything non-empty (`checkScheme`). | One rule — an explicit `Unspecified` zero — `String()` on every enum, unknown values refused. **Done**; the string-backed `PrincipalType` and `AuthScheme` print as themselves. | Numeric values of `OverrunPolicy`. |
 
 ## 4. Errors
 
