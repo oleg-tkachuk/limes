@@ -139,10 +139,10 @@ sequenceDiagram
     S->>St: IsRevoked(child), inside Verify — via CachedRevocationChecker
     S->>S: Authorize: CheckSource(addr) · Check(op, resource)
     S->>St: Bump · Charge, or Reserve then Settle
-    St-->>S: ChargeReceipt{ChargeID, Spent}
+    St-->>S: ChargeReceipt{ChargeID, SpentAmount}
     S-->>W: response
 
-    Op->>St: Store.Revoke(RevokeRequest{ID: parent, CascadeChildren})
+    Op->>St: Store.Revoke(RevokeRequest{CapabilityID: parent, CascadeChildren})
     Note over S,St: the next IsRevoked for the child answers true<br/>once the cache entry expires, or at once after Clear
     W->>S: request + child token
     S-->>W: ErrRevoked
@@ -585,7 +585,7 @@ flowchart TB
     sreq(["SettleRequest<br/>Subject · ReservationID · Amount · Overrun"])
     sval{"Nanos.Validate · Overrun.Validate<br/>ReservationID not zero"}
     hold{"reservation open<br/>and the subject's own"}
-    val{"Nanos.Validate · Overrun.Validate<br/>ValidateExternalRef · NormaliseUnitCode"}
+    val{"Nanos.Validate · Overrun.Validate<br/>ValidateExternalRef · NormalizeUnitCode"}
     seen{"ExternalRef already charged<br/>to this capability"}
     same{"same Amount · UnitCode · TenantID"}
 
@@ -593,7 +593,7 @@ flowchart TB
         direction TB
         c00{"Amount in the unit every counter it moves counts in<br/>no counter past MaxNanos"}
         c0{"each Biscuit copy, innermost first:<br/>spend + reserved + Amount ≤ its budget"}
-        c1{"own spend + reserved + Amount ≤ Subject.MaxBudget<br/>(ceiling from the verified token or stored record)"}
+        c1{"own spend + reserved + Amount ≤ Subject.MaxBudgetAmount<br/>(ceiling from the verified token or stored record)"}
         c2{"each ancestor: spend + reserved + Amount<br/>≤ its MaxBudgetAmount<br/>(ceiling from the stored record)"}
         c3{"tenant spend + reserved + Amount<br/>≤ TenantBudget.MaxBudgetAmount<br/>(when a ceiling is set)"}
         cb{"onCharged(ctx, tx)<br/>consumer's side effect on its own TX"}
@@ -610,7 +610,7 @@ flowchart TB
         w4["ledger row: ChargeID · TenantID · Amount · UnitCode · At<br/>Ancestors · copy ids · Op · Actor · ExternalRef<br/>ReservationID · Overrun · tenant period"]
     end
 
-    ok(["ChargeReceipt{ChargeID, Spent, Overrun, TenantID, UnitCode}"])
+    ok(["ChargeReceipt{ChargeID, SpentAmount, Overrun, TenantID, UnitCode}"])
     replay(["ChargeReceipt{Replayed}<br/>the earlier charge; nothing moves"])
     refund["Refund(RefundRequest{ChargeID, Amount}) → RefundReceipt<br/>returns spend to every counter the charge took it from;<br/>the tenant's only within the same accounting period"]
 
@@ -693,7 +693,7 @@ Revocation is a write to the `Store`; verifiers see it through
 
 ```mermaid
 flowchart LR
-    op(["Revoke(RevokeRequest{ID, Reason, Actor, CascadeChildren})"])
+    op(["Revoke(RevokeRequest{CapabilityID, Note, Actor, CascadeChildren})"])
     store[("<b>Store</b><br/>revoked set<br/>ParentID links")]
     cascade["CascadeChildren:<br/>a revocation entry per descendant,<br/>for the audit trail"]
     chain["IsRevoked(id):<br/>id or any ancestor revoked"]
