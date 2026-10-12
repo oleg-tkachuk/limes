@@ -314,8 +314,6 @@ type decodedFact struct {
 	term any // string, time.Time or int64
 }
 
-// decodeBiscuitBlocks reads every block's facts as data. The signatures are
-// not checked here — the caller does that before trusting anything read.
 // MaxBiscuitBlocks bounds the attenuation blocks a Biscuit may carry. Each
 // block is a revocation id the verifier looks up, and anyone holding a copy
 // can append blocks offline, so an unbounded chain is a lookup per block on
@@ -323,6 +321,8 @@ type decodedFact struct {
 // token that has.
 const MaxBiscuitBlocks = 32
 
+// decodeBiscuitBlocks reads every block's facts as data. The signatures are
+// not checked here — the caller does that before trusting anything read.
 func decodeBiscuitBlocks(c *pb.Biscuit) ([]decodedBlock, error) {
 	if n := len(c.GetBlocks()); n > MaxBiscuitBlocks {
 		return nil, fmt.Errorf("%d attenuation blocks, past MaxBiscuitBlocks (%d)", n, MaxBiscuitBlocks)
