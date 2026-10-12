@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -42,6 +43,9 @@ func TestConfigDefaults(t *testing.T) {
 	}
 	if v.cfg.Leeway != 30*time.Second {
 		t.Errorf("verifier leeway = %s, want 30s", v.cfg.Leeway)
+	}
+	if !slices.Equal(v.cfg.AcceptTokenTypes, []string{TokenTypeV3}) {
+		t.Errorf("verifier accepts %q, want only %q", v.cfg.AcceptTokenTypes, TokenTypeV3)
 	}
 
 }
@@ -136,5 +140,33 @@ func TestIssuerNeedsOnlyAnIssuanceStore(t *testing.T) {
 	})
 	if err != nil || len(store.inserted) != 1 || store.inserted[0].Capability.ID != c.ID || store.inserted[0].IssuedBy.Subject != "op" {
 		t.Fatalf("Issue = %v; recorded %+v", err, store.inserted)
+	}
+}
+
+// AcceptTokenTypes names only formats this package can read, and at least one.
+func TestAcceptTokenTypesRefusesWhatItCannotRead(t *testing.T) {
+	pub, _, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := func(types []string) VerifierConfig {
+		return VerifierConfig{
+			Keys:             jwks.NewStatic(map[string]ed25519.PublicKey{"k1": pub}),
+			Revocations:      newMemStore(),
+			TrustedIssuers:   []string{goldenIssuer},
+			AcceptTokenTypes: types,
+		}
+	}
+	if _, err := NewStandardVerifier(cfg([]string{TokenTypeV3})); err != nil {
+		t.Errorf("accepting %q: %v", TokenTypeV3, err)
+	}
+	for name, types := range map[string][]string{
+		"an empty list":     {},
+		"an unknown format": {"limes-cap-v4+jwt"},
+		"an empty format":   {""},
+	} {
+		if _, err := NewStandardVerifier(cfg(types)); err == nil {
+			t.Errorf("%s: a verifier was built", name)
+		}
 	}
 }

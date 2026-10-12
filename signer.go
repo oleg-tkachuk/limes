@@ -175,7 +175,7 @@ func (s *Signer) Sign(ctx context.Context, c Capability) (string, error) {
 		return "", errors.New("limes: ExpiresAt must be after IssuedAt")
 	}
 
-	header := jwtHeader{Alg: jose.AlgEd25519, Kid: s.keyID, Typ: tokenType}
+	header := jwtHeader{Alg: jose.AlgEd25519, Kid: s.keyID, Typ: TokenTypeV3}
 	claims := claimsOf(c)
 	// Nothing is signed that the verifier would refuse to read.
 	if err := checkIJSONIntegers(claims); err != nil {
@@ -213,12 +213,17 @@ func (s *Signer) Sign(ctx context.Context, c Capability) (string, error) {
 	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig), nil
 }
 
-// tokenType is the JWT "typ" header every capability token carries. The
-// verifier requires it, so a different kind of EdDSA JWT signed by the same
-// key — an ID token, another product's token — cannot be presented as a
-// capability. It names the format's version: a token of another version is
-// refused here, before a claim of it is read under the wrong schema.
-const tokenType = "limes-cap-v3+jwt" //nolint:gosec // G101: a JWT type label, not a credential
+// TokenTypeV3 is the JWT "typ" header of the current token format, which
+// every Signer of this module mints. The verifier requires a type it
+// accepts (VerifierConfig.AcceptTokenTypes), so a different kind of EdDSA
+// JWT signed by the same key — an ID token, another product's token —
+// cannot be presented as a capability. It names the format's version: a
+// token of another version is refused before a claim of it is read under
+// the wrong schema.
+const TokenTypeV3 = "limes-cap-v3+jwt" //nolint:gosec // G101: a JWT type label, not a credential
+
+// tokenTypes are the token types this package has a schema for.
+var tokenTypes = []string{TokenTypeV3}
 
 func parseHeader(seg string) (jwtHeader, error) {
 	raw, err := base64.RawURLEncoding.DecodeString(seg)
@@ -230,8 +235,8 @@ func parseHeader(seg string) (jwtHeader, error) {
 		return jwtHeader{}, fmt.Errorf("limes: parse header: %w", err)
 	}
 	// Only the fully-specified identifier (RFC 9864): a capability token is
-	// this module's own, and none was ever written with another under this
-	// tokenType.
+	// this module's own, and none was ever written with another under any
+	// of its token types.
 	if h.Alg != jose.AlgEd25519 {
 		return jwtHeader{}, fmt.Errorf("limes: unexpected alg %q (want %s)", h.Alg, jose.AlgEd25519)
 	}

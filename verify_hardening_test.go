@@ -56,7 +56,7 @@ func TestVerifyRequiresCapabilityTyp(t *testing.T) {
 	v := verifierFor(t, pub, VerifierConfig{})
 	ctx := context.Background()
 
-	good := resign(t, priv, map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": tokenType}, validClaims(uuid.New()))
+	good := resign(t, priv, map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV3}, validClaims(uuid.New()))
 	if _, err := v.Verify(ctx, VerifyRequest{Token: good, Audience: "data"}); err != nil {
 		t.Fatalf("well-formed token rejected: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestVerifyRejectsTenantlessAndOversizedTokens(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	v := verifierFor(t, pub, VerifierConfig{MaxTokenBytes: 2048})
 	ctx := context.Background()
-	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": tokenType}
+	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV3}
 
 	if _, err := v.Verify(ctx, VerifyRequest{Token: resign(t, priv, hdr, validClaims(uuid.Nil)), Audience: "data"}); !errors.Is(err, ErrInvalidToken) {
 		t.Errorf("tenantless token: Verify = %v, want ErrInvalidToken", err)
@@ -94,7 +94,7 @@ func TestVerifyEnforcesKeyIssuerBinding(t *testing.T) {
 		KeyIssuers:     map[string]string{"k1": "iss"},
 	})
 	ctx := context.Background()
-	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": tokenType}
+	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV3}
 
 	if _, err := v.Verify(ctx, VerifyRequest{Token: resign(t, priv, hdr, validClaims(uuid.New())), Audience: "data"}); err != nil {
 		t.Fatalf("bound issuer rejected: %v", err)
@@ -111,7 +111,7 @@ func TestVerifyEnforcesKeyIssuerBinding(t *testing.T) {
 func TestVerifyReadsClaimsStrictly(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	v := verifierFor(t, pub, VerifierConfig{})
-	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": tokenType}
+	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV3}
 	ctx := context.Background()
 	cases := map[string]func(map[string]any){
 		// A caveat this verifier does not know is one it cannot enforce.

@@ -88,6 +88,14 @@ type VerifierConfig struct {
 	// CachedBiscuitRevocationChecker.
 	BiscuitRevocations BiscuitRevocationLookup
 
+	// AcceptTokenTypes are the token formats (the JWT "typ") the verifier
+	// accepts. Nil: TokenTypeV3. Every 1.x verifier accepts TokenTypeV3, so
+	// a later format ships in a minor release: verifiers accept it first,
+	// issuers mint it after. A type this package has no schema for, or an
+	// empty list, is refused: a verifier cannot enforce a format it cannot
+	// read.
+	AcceptTokenTypes []string
+
 	// DPoP checks the proof of possession a key-bound capability (one with
 	// a ConfirmationJKT) must come with. Without it the verifier refuses
 	// every key-bound capability with dpop.ErrRequired, rather than accept
@@ -170,6 +178,18 @@ func NewStandardVerifier(cfg VerifierConfig) (*StandardVerifier, error) {
 		return nil, errors.New("limes: VerifierConfig.KeyIssuers binds no kid; leave it nil to bind none")
 	}
 	cfg.KeyIssuers = maps.Clone(cfg.KeyIssuers)
+	switch {
+	case cfg.AcceptTokenTypes == nil:
+		cfg.AcceptTokenTypes = []string{TokenTypeV3}
+	case len(cfg.AcceptTokenTypes) == 0:
+		return nil, errors.New("limes: VerifierConfig.AcceptTokenTypes accepts nothing; leave it nil for TokenTypeV3")
+	}
+	for _, typ := range cfg.AcceptTokenTypes {
+		if !slices.Contains(tokenTypes, typ) {
+			return nil, fmt.Errorf("limes: VerifierConfig.AcceptTokenTypes names %q, which is not one of %q", typ, tokenTypes)
+		}
+	}
+	cfg.AcceptTokenTypes = slices.Clone(cfg.AcceptTokenTypes)
 	return &StandardVerifier{cfg: cfg}, nil
 }
 
@@ -337,8 +357,8 @@ func (v *StandardVerifier) verifySigned(ctx context.Context, token string) (*Cap
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 	}
-	if header.Typ != tokenType {
-		return nil, fmt.Errorf("%w: typ %q is not %q", ErrInvalidToken, header.Typ, tokenType)
+	if !slices.Contains(v.cfg.AcceptTokenTypes, header.Typ) {
+		return nil, fmt.Errorf("%w: typ %q is not one of %q", ErrInvalidToken, header.Typ, v.cfg.AcceptTokenTypes)
 	}
 	if header.Kid == "" {
 		return nil, fmt.Errorf("%w: header missing kid", ErrInvalidToken)
