@@ -19,9 +19,10 @@ import (
 	"github.com/oleg-tkachuk/limes/internal/link"
 )
 
-// Signer mints capability tokens: it encodes a Capability as the token
-// format and signs it with an Ed25519 key, which may be in memory or held in
-// a KMS or an HSM behind crypto.Signer. Verifiers pick up the public keys
+// Signer holds the key an Issuer mints capability tokens with: it encodes a
+// Capability as the token format and signs it with an Ed25519 key, which may
+// be in memory or held in a KMS or an HSM behind crypto.Signer. It signs only
+// for an Issuer (IssuerConfig.Signer). Verifiers pick up the public keys
 // (statically or from a JWKS endpoint) and validate locally — no RPC per
 // request.
 type Signer struct {
@@ -151,11 +152,11 @@ type cnfClaim struct {
 	JKT string `json:"jkt"`
 }
 
-// Sign implements Signer. Encodes the header + claims, signs the
-// dotted concatenation, returns the compact form.
-// Sign encodes c as a compact token and signs it. c's IssuedAt and
-// ExpiresAt must be set; Sign does not normalise times.
-func (s *Signer) Sign(ctx context.Context, c Capability) (string, error) {
+// sign encodes c as a compact token and signs it. c's IssuedAt and
+// ExpiresAt must be set; sign does not normalise times. Unexported: a
+// token is minted only through an Issuer, which records the capability
+// first, so every token can be revoked and its usage traced.
+func (s *Signer) sign(ctx context.Context, c Capability) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}

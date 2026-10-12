@@ -416,7 +416,7 @@ const (
 func TestDelegateRefusesAnyBiscuitCopy(t *testing.T) {
 	issuer, v, store, cap, token := biscuitFixture(t)
 	ctx := context.Background()
-	jwtToken, err := issuer.signer.Sign(ctx, cap)
+	jwtToken, err := issuer.signer.sign(ctx, cap)
 	if err != nil {
 		t.Fatal(err)
 	}

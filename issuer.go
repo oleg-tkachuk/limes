@@ -114,7 +114,7 @@ func (i *Issuer) fits(token string) error {
 // sign signs c and holds the token to MaxTokenBytes, before anything is
 // recorded.
 func (i *Issuer) sign(ctx context.Context, c Capability) (string, error) {
-	token, err := i.signer.Sign(ctx, c)
+	token, err := i.signer.sign(ctx, c)
 	if err != nil {
 		return "", fmt.Errorf("limes: sign: %w", err)
 	}

@@ -62,7 +62,7 @@ func TestCaveatsOutsideTheRulesAreNeitherSignedNorAccepted(t *testing.T) {
 	for name, mutate := range spoil {
 		c := validCapability()
 		mutate(&c.Caveats)
-		if _, err := issuer.signer.Sign(ctx, c); !errors.Is(err, ErrInvalidCaveats) {
+		if _, err := issuer.signer.sign(ctx, c); !errors.Is(err, ErrInvalidCaveats) {
 			t.Errorf("Sign with %s: err = %v, want ErrInvalidCaveats", name, err)
 		}
 		token := signUnchecked(t, issuer.signer, c)

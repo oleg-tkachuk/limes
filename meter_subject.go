@@ -1,6 +1,7 @@
 package limes
 
 import (
+	"context"
 	"slices"
 
 	"github.com/google/uuid"
@@ -11,9 +12,9 @@ import (
 // MeterSubject is what a Meter counts a request against: a verified
 // capability's id and tenant, its request and budget ceilings, its unit and
 // the limits of the Biscuit copy presented. Only
-// VerifiedCapability.MeterSubject and Record.MeterSubject make one, so a
-// ceiling is always the one the token or the stored record carries — never a
-// value a caller typed. A store reads it through its methods. The zero
+// VerifiedCapability.MeterSubject and StoredMeterSubject make one, so a
+// ceiling is always the one the token or the store carries — never a value a
+// caller typed. A store reads it through its methods. The zero
 // MeterSubject names no capability and no tenant; a Meter refuses it with
 // ErrInvalidRequest rather than count it anywhere.
 type MeterSubject struct {
@@ -37,19 +38,26 @@ func (v VerifiedCapability) MeterSubject() MeterSubject {
 	}
 }
 
-// MeterSubject is what the Meter counts this record's capability against,
-// for a cost reported with no token in hand. A stored record names no Biscuit
-// copy, so the subject carries none. A revoked capability still gives one: a
-// cost already incurred belongs in the ledger.
-func (r Record) MeterSubject() MeterSubject {
-	c := r.Capability
+// StoredMeterSubject is what the Meter counts a capability against for a
+// cost reported with no token in hand, read from the capability's record in
+// store. It takes the store rather than a Record, whose fields any caller can
+// set, so the ceilings are the ones on record. A stored record names no
+// Biscuit copy, so the subject carries none. A revoked capability still gives
+// one: a cost already incurred belongs in the ledger. ErrNotFound when the
+// capability is not on record.
+func StoredMeterSubject(ctx context.Context, store Store, capabilityID uuid.UUID) (MeterSubject, error) {
+	rec, err := store.GetRecord(ctx, capabilityID)
+	if err != nil {
+		return MeterSubject{}, err
+	}
+	c := rec.Capability
 	return MeterSubject{
 		capabilityID: c.ID,
 		tenantID:     c.Subject.TenantID,
 		maxRequests:  c.Caveats.Requests,
 		maxBudget:    c.Caveats.Budget,
 		unitCode:     canonicalUnitCode(c.Caveats.UnitCode),
-	}
+	}, nil
 }
 
 // CapabilityID is the capability the request counts against.

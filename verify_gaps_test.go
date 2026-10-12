@@ -50,7 +50,7 @@ func TestVerifyWindowEdges(t *testing.T) {
 	c := validCapability()
 	c.Issuer = issuer.issuerName
 	c.IssuedAt, c.NotBefore, c.ExpiresAt = start, start.Add(time.Hour), start.Add(2*time.Hour)
-	token, err := issuer.signer.Sign(context.Background(), c)
+	token, err := issuer.signer.sign(context.Background(), c)
 	if err != nil {
 		t.Fatal(err)
 	}
