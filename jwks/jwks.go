@@ -8,7 +8,6 @@ package jwks
 import (
 	"crypto/ed25519"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -67,7 +66,7 @@ func Marshal(keys map[string]ed25519.PublicKey) ([]byte, error) {
 			Crv: jose.CrvEd25519,
 			Alg: jose.AlgEd25519,
 			Kid: kid,
-			X:   base64.RawURLEncoding.EncodeToString(pub),
+			X:   jose.B64(pub),
 		})
 	}
 	return json.Marshal(doc)
@@ -109,7 +108,7 @@ func parse(raw []byte) (map[string]ed25519.PublicKey, int, error) {
 			skipped++
 			continue
 		}
-		decoded, err := base64.RawURLEncoding.DecodeString(k.X)
+		decoded, err := jose.UnB64(k.X) // strict: one encoding per key, as every JOSE member
 		if err != nil || len(decoded) != ed25519.PublicKeySize {
 			skipped++
 			continue
@@ -179,7 +178,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sum := sha256.Sum256(doc)
-	etag := `"` + base64.RawURLEncoding.EncodeToString(sum[:]) + `"`
+	etag := `"` + jose.B64(sum[:]) + `"`
 	header := w.Header()
 	header.Set(httpx.HeaderETag, etag)
 	header.Set(httpx.HeaderCacheControl, fmt.Sprintf("%s, %s=%d", httpx.DirectivePublic, httpx.DirectiveMaxAge, int64(h.maxAge/time.Second)))
