@@ -208,7 +208,7 @@ func TestInstrumentKeepsCopyUsage(t *testing.T) {
 	if _, err := limes.Instrument[struct{}](nil); err == nil {
 		t.Fatal("Instrument(nil) wrapped nothing without an error")
 	}
-	inner, err := memstore.NewUsageStore(memstore.UsageStoreConfig[struct{}]{})
+	inner, err := memstore.NewUsageStore(memstore.UsageStoreConfig[struct{}]{Records: newMemstoreRecords(t)})
 	if err != nil {
 		t.Fatal(err)
 	}

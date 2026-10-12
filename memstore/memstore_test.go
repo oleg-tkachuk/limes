@@ -115,7 +115,7 @@ func TestGetAbsentReturnsErrNotFound(t *testing.T) {
 // retry and the counter cannot drift past the limit.
 func TestBumpRequestRejectsWithoutMutating(t *testing.T) {
 	ctx := context.Background()
-	u := newTestUsage(nil)
+	u := newTestUsage(newTestStore())
 	id := uuid.New()
 
 	for i := int64(1); i <= 2; i++ {
@@ -140,7 +140,7 @@ func TestBumpRequestRejectsWithoutMutating(t *testing.T) {
 // maxRequests <= 0 means "no ceiling"; it must not be read as "zero allowed".
 func TestBumpRequestUnlimited(t *testing.T) {
 	ctx := context.Background()
-	u := newTestUsage(nil)
+	u := newTestUsage(newTestStore())
 	id := uuid.New()
 	for i := range 50 {
 		if _, err := u.Bump(ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: id, tenant: testTenant})}); err != nil {
@@ -153,7 +153,7 @@ func TestBumpRequestUnlimited(t *testing.T) {
 // an empty unit — clients would otherwise render a bare number.
 func TestSetTenantBudgetDefaultsUnitCode(t *testing.T) {
 	ctx := context.Background()
-	u := newTestUsage(nil)
+	u := newTestUsage(newTestStore())
 	b, err := u.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
 		TenantID: uuid.New(), Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("10")},
 	})
@@ -167,7 +167,7 @@ func TestSetTenantBudgetDefaultsUnitCode(t *testing.T) {
 
 func TestRefundReturnsSpendToEveryCounterOnce(t *testing.T) {
 	ctx := context.Background()
-	u := newTestUsage(nil)
+	u := newTestUsage(newTestStore())
 	id, tenant := uuid.New(), uuid.New()
 	_, _ = u.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("100")}})
 	receipt, err := u.Charge(ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant, budget: budgetOf(limes.MustParseAmount("100")), unit: "USD"}), Amount: limes.MustParseAmount("5")}, nil)
@@ -206,7 +206,7 @@ func TestRefundReturnsSpendToEveryCounterOnce(t *testing.T) {
 
 func TestChargeRejectsInvalidAmounts(t *testing.T) {
 	ctx := context.Background()
-	u := newTestUsage(nil)
+	u := newTestUsage(newTestStore())
 	for _, amt := range []limes.Nanos{-1, limes.MaxNanos + 1} {
 		_, err := u.Charge(ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: uuid.New(), tenant: uuid.New()}), Amount: amt}, nil)
 		if !errors.Is(err, limes.ErrInvalidAmount) {
