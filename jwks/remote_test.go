@@ -212,6 +212,65 @@ func TestRemoteJWKSWaiterHonoursItsContext(t *testing.T) {
 	}
 }
 
+// A caller that gives up during its own fetch takes only itself down: its
+// cancelled context is not the endpoint failing, so the next caller fetches
+// at once instead of waiting out MinRefreshInterval on someone else's error.
+func TestRemoteJWKSCallerCancellingItsFetchBlocksNoOne(t *testing.T) {
+	pub, _, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := Marshal(map[string]ed25519.PublicKey{"k": pub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fetches atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if fetches.Add(1) == 1 {
+			<-r.Context().Done() // the first caller's fetch hangs until it gives up
+			return
+		}
+		_, _ = w.Write(doc)
+	}))
+	t.Cleanup(ts.Close)
+	r, err := NewRemote(RemoteConfig{URL: ts.URL, Client: ts.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), checkDeadline/10)
+	defer cancel()
+	if _, err := r.PublicKey(ctx, "k"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("the caller that gave up: err = %v, want its context's", err)
+	}
+	got, err := r.PublicKey(context.Background(), "k")
+	if err != nil || !got.Equal(pub) {
+		t.Fatalf("the next caller = %v, %v; want the key, fetched again (fetches %d)", got, err, fetches.Load())
+	}
+}
+
+// A caller whose context is already done fetches nothing.
+func TestRemoteJWKSDoneCallerFetchesNothing(t *testing.T) {
+	var fetches atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fetches.Add(1)
+		http.Error(w, "unused", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(ts.Close)
+	r, err := NewRemote(RemoteConfig{URL: ts.URL, Client: ts.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := r.PublicKey(ctx, "k"); !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+	if n := fetches.Load(); n != 0 {
+		t.Errorf("a cancelled caller fetched %d times", n)
+	}
+}
+
 // The intervals must nest: a key set older than MaxStale before it is due a
 // refresh would fail closed with no fetch having failed.
 func TestRemoteJWKSRefusesIntervalsThatDoNotNest(t *testing.T) {
