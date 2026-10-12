@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/oleg-tkachuk/limes/internal/jose"
@@ -63,5 +64,32 @@ func TestParseSkipsAKeyForAnotherAlgorithm(t *testing.T) {
 	keys, skipped, err := parse(doc)
 	if err != nil || len(keys) != 0 || skipped != 1 {
 		t.Errorf("parse of a key labelled RS256 = %d keys, %d skipped, %v; want it skipped", len(keys), skipped, err)
+	}
+}
+
+// A key's x is read strictly: base64url with its unused trailing bits set is
+// another spelling of the same key, and is skipped rather than accepted.
+func TestParseReadsXStrictly(t *testing.T) {
+	_, pub, _, err := generateKeypair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := jose.B64(pub)
+	// 32 bytes take 43 characters, whose last two bits are unused.
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	last := strings.IndexByte(alphabet, x[len(x)-1])
+	loose := x[:len(x)-1] + string(alphabet[last|1])
+	for name, tc := range map[string]struct {
+		x    string
+		want int
+	}{
+		"canonical":         {x, 1},
+		"trailing bits set": {loose, 0},
+	} {
+		entry := map[string]string{"kty": jose.KtyOKP, "crv": jose.CrvEd25519, "kid": "k", "x": tc.x}
+		doc, _ := json.Marshal(map[string]any{"keys": []any{entry}})
+		if keys, _, err := parse(doc); err != nil || len(keys) != tc.want {
+			t.Errorf("%s: parse = %d keys, %v; want %d", name, len(keys), err, tc.want)
+		}
 	}
 }
