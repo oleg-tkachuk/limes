@@ -49,11 +49,12 @@ func TestPurgeKeepsARevocationAcrossClockSkew(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, token, err := issuer.Issue(ctx, limes.IssueRequest{
+	cResult, err := issuer.Issue(ctx, limes.IssueRequest{
 		IssuedBy: limes.Principal{Subject: "op"},
 		Subject:  limes.Principal{Type: limes.PrincipalAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{exampleAudience}, Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}}, TTL: time.Minute,
 	})
+	c, token := cResult.Capability, cResult.Token
 	if err != nil {
 		t.Fatal(err)
 	}

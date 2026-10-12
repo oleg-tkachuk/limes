@@ -134,13 +134,14 @@ func TestVerifierRejectsChildOfRevokedParent(t *testing.T) {
 		TrustedIssuers: []string{"iss"},
 	})
 
-	parent, parentToken, err := issuer.Issue(ctx, limes.IssueRequest{
+	parentResult, err := issuer.Issue(ctx, limes.IssueRequest{
 		IssuedBy: limes.Principal{Subject: "op"},
 		Subject:  limes.Principal{Type: limes.PrincipalAgent, TenantID: uuid.New(), Subject: "orchestrator"},
 		Audience: []string{"data"},
 		Caveats:  limes.Caveats{Ops: []limes.Op{limes.OpGet}},
 		TTL:      time.Hour,
 	})
+	parent, parentToken := parentResult.Capability, parentResult.Token
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +149,8 @@ func TestVerifierRejectsChildOfRevokedParent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, childToken, err := issuer.Delegate(ctx, limes.DelegateRequest{Parent: verified, Subject: limes.Principal{Type: limes.PrincipalAgent, Subject: "child"}, InheritCaveats: true})
+	childTokenResult, err := issuer.Delegate(ctx, limes.DelegateRequest{Parent: verified, Subject: limes.Principal{Type: limes.PrincipalAgent, Subject: "child"}, InheritCaveats: true})
+	childToken := childTokenResult.Token
 	if err != nil {
 		t.Fatal(err)
 	}

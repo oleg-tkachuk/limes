@@ -84,7 +84,7 @@ func TestGenerateBiscuitFixtures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cap, _, err := issuer.Issue(context.Background(), IssueRequest{
+	cap, _, err := issuer.issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.MustParse(goldenTenant), Subject: goldenSubject},
 		Audience: []string{audienceData, audienceMCP},
@@ -97,7 +97,7 @@ func TestGenerateBiscuitFixtures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := issuer.Biscuit(context.Background(), asVerified(cap))
+	token, err := issuer.biscuit(context.Background(), asVerified(cap))
 	if err != nil {
 		t.Fatal(err)
 	}

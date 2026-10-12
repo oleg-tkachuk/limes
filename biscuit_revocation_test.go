@@ -60,7 +60,7 @@ func TestRevokingABiscuitCopy(t *testing.T) {
 func TestRevokingTheRootBiscuitLeavesTheJWT(t *testing.T) {
 	issuer, v, store, _, _ := biscuitFixture(t)
 	ctx := context.Background()
-	cap, jwt, err := issuer.Issue(ctx, IssueRequest{
+	cap, jwt, err := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData},
@@ -70,7 +70,7 @@ func TestRevokingTheRootBiscuitLeavesTheJWT(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root, err := issuer.Biscuit(context.Background(), asVerified(cap))
+	root, err := issuer.biscuit(context.Background(), asVerified(cap))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestBiscuitCopyNamesTheLastBlock(t *testing.T) {
 func TestBiscuitCopyRefusesWhatVerifyRefuses(t *testing.T) {
 	issuer, v, _, cap, root := biscuitFixture(t)
 	ctx := context.Background()
-	_, jwt, err := issuer.Issue(ctx, IssueRequest{
+	_, jwt, err := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData},
@@ -131,7 +131,7 @@ func TestBiscuitCopyRefusesWhatVerifyRefuses(t *testing.T) {
 	tampered := base64.RawURLEncoding.EncodeToString(raw)
 
 	stranger, _, _, _ := buildIssuerVerifier(t) // another key, same issuer name
-	foreign, err := stranger.Biscuit(context.Background(), asVerified(cap))
+	foreign, err := stranger.biscuit(context.Background(), asVerified(cap))
 	if err != nil {
 		t.Fatal(err)
 	}

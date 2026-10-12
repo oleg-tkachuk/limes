@@ -32,7 +32,7 @@ func testIssuer(t *testing.T, kid string, priv ed25519.PrivateKey, now func() ti
 
 func mintToken(t *testing.T, iss *Issuer) string {
 	t.Helper()
-	_, token, err := iss.Issue(context.Background(), IssueRequest{
+	_, token, err := iss.issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject: Principal{
 			Type: PrincipalService, TenantID: uuid.MustParse(goldenTenant), Subject: "svc",

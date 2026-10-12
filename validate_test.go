@@ -66,7 +66,7 @@ func TestIssueRejectsMalformedRequests(t *testing.T) {
 	for name, mutate := range mutations {
 		req := base()
 		mutate(&req)
-		if _, _, err := issuer.Issue(ctx, req); err == nil {
+		if _, _, err := issuer.issue(ctx, req); err == nil {
 			t.Errorf("%s: Issue succeeded, want an error", name)
 		}
 	}
@@ -74,7 +74,7 @@ func TestIssueRejectsMalformedRequests(t *testing.T) {
 
 func issueRoot(t *testing.T, issuer *Issuer, caveats Caveats) Capability {
 	t.Helper()
-	c, _, err := issuer.Issue(context.Background(), IssueRequest{
+	c, _, err := issuer.issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "root"},
 		Audience: []string{"data"},
@@ -94,14 +94,14 @@ func TestDelegateInheritanceIsExplicit(t *testing.T) {
 	ctx := context.Background()
 	parent := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet}, Budget: BudgetCeiling{Max: MustParseAmount("25")}, UnitCode: "USD"})
 
-	if _, _, err := issuer.Delegate(ctx, DelegateRequest{
+	if _, _, err := issuer.delegate(ctx, DelegateRequest{
 		Subject: Principal{Type: PrincipalAgent, Subject: "child"},
 		Parent:  asVerified(parent), Caveats: Caveats{Budget: BudgetCeiling{Max: MustParseAmount("2")}},
 	}); !errors.Is(err, ErrInvalidCaveats) {
 		t.Fatalf("delegate with ops omitted = %v, want ErrInvalidCaveats", err)
 	}
 
-	child, _, err := issuer.Delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true})
+	child, _, err := issuer.delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true})
 	if err != nil {
 		t.Fatalf("delegate with InheritCaveats: %v", err)
 	}
@@ -122,18 +122,18 @@ func TestDelegateRefusesRevokedOrExpiredParent(t *testing.T) {
 
 	expired := parent
 	expired.ExpiresAt = time.Now().Add(-time.Minute)
-	if _, _, err := issuer.Delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(expired), InheritCaveats: true}); !errors.Is(err, ErrExpired) {
+	if _, _, err := issuer.delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(expired), InheritCaveats: true}); !errors.Is(err, ErrExpired) {
 		t.Errorf("delegate from expired parent = %v, want ErrExpired", err)
 	}
 
 	foreign := parent
 	foreign.Issuer = foreignIssuer
-	if _, _, err := issuer.Delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(foreign), InheritCaveats: true}); !errors.Is(err, ErrInvalidRequest) {
+	if _, _, err := issuer.delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(foreign), InheritCaveats: true}); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("delegate from another issuer's parent = %v, want ErrInvalidRequest", err)
 	}
 
 	_ = store.Revoke(ctx, RevokeRequest{CapabilityID: parent.ID})
-	if _, _, err := issuer.Delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true}); !errors.Is(err, ErrRevoked) {
+	if _, _, err := issuer.delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true}); !errors.Is(err, ErrRevoked) {
 		t.Errorf("delegate from revoked parent = %v, want ErrRevoked", err)
 	}
 }
@@ -143,14 +143,14 @@ func TestDelegateRefusesRevokedOrExpiredParent(t *testing.T) {
 func TestIssuedIDsAreVersion7(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
-	parent, _, err := issuer.Issue(ctx, IssueRequest{
+	parent, _, err := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, _, err := issuer.Delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true})
+	child, _, err := issuer.delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,5 +159,36 @@ func TestIssuedIDsAreVersion7(t *testing.T) {
 		if v := id.Version(); v != v7 {
 			t.Errorf("%s id %s is version %d, want %d", name, id, v, v7)
 		}
+	}
+}
+
+// Issue, Delegate and Biscuit hand back what their unexported forms mint, in
+// result structs that may grow: the capability as recorded and its token.
+func TestMintingResults(t *testing.T) {
+	issuer, v, _, _ := buildIssuerVerifier(t)
+	ctx := context.Background()
+	issued, err := issuer.Issue(ctx, IssueRequest{
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
+		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet, OpShare}}, TTL: time.Hour,
+	})
+	if err != nil || issued.Token == "" || issued.Capability.ID == uuid.Nil {
+		t.Fatalf("Issue = %+v, %v; want a capability and its token", issued, err)
+	}
+	vc, err := v.Verify(ctx, VerifyRequest{Token: issued.Token, Audience: audienceData})
+	if err != nil || vc.Capability().ID != issued.Capability.ID {
+		t.Fatalf("the issued token verifies as %s, %v; want %s", vc.Capability().ID, err, issued.Capability.ID)
+	}
+	delegated, err := issuer.Delegate(ctx, DelegateRequest{Parent: vc, Subject: Principal{Type: PrincipalAgent, Subject: "child"}, InheritCaveats: true})
+	if err != nil || delegated.Token == "" || delegated.Capability.ParentID != issued.Capability.ID {
+		t.Fatalf("Delegate = %+v, %v; want a child of %s", delegated, err, issued.Capability.ID)
+	}
+	if b, err := issuer.Biscuit(ctx, BiscuitRequest{Capability: vc}); err != nil || b.Token == "" {
+		t.Fatalf("Biscuit = %+v, %v; want a token", b, err)
+	}
+	if r, err := issuer.Issue(ctx, IssueRequest{}); err == nil || r.Token != "" {
+		t.Errorf("a refused Issue = %+v, %v; want the zero result and an error", r, err)
+	}
+	if b, err := issuer.Biscuit(ctx, BiscuitRequest{}); err == nil || b.Token != "" {
+		t.Errorf("a refused Biscuit = %+v, %v; want the zero result and an error", b, err)
 	}
 }

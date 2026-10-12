@@ -48,7 +48,7 @@ func TestIssueRefusesAMalformedRequestAsInvalid(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			req := validIssue()
 			mutate(&req)
-			if _, _, err := iss.Issue(context.Background(), req); !errors.Is(err, ErrInvalidRequest) {
+			if _, _, err := iss.issue(context.Background(), req); !errors.Is(err, ErrInvalidRequest) {
 				t.Errorf("err = %v, want ErrInvalidRequest", err)
 			}
 		})
@@ -85,13 +85,13 @@ func TestIssueKeepsTheStoreErrorApartFromTheRequest(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, _, err = iss.Issue(context.Background(), validIssue())
+			_, _, err = iss.issue(context.Background(), validIssue())
 			if !errors.Is(err, tc.want) || errors.Is(err, ErrInvalidRequest) {
 				t.Errorf("err = %v, want %v and not ErrInvalidRequest", err, tc.want)
 			}
 			parent := Capability{ID: uuid.New(), Issuer: goldenIssuer, Subject: validIssue().Subject, Audience: []string{goldenAudience},
 				Caveats: Caveats{Ops: []Op{OpGet}}, ExpiresAt: time.Now().Add(time.Hour)}
-			_, _, err = iss.Delegate(context.Background(), DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true, TTL: time.Minute})
+			_, _, err = iss.delegate(context.Background(), DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true, TTL: time.Minute})
 			if !errors.Is(err, tc.want) || errors.Is(err, ErrInvalidRequest) {
 				t.Errorf("delegate err = %v, want %v and not ErrInvalidRequest", err, tc.want)
 			}
@@ -113,7 +113,7 @@ func TestDelegateRefusesAMalformedRequestAsInvalid(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			// A valid subject, so each case is refused for its own fault.
 			req.Subject = Principal{Type: PrincipalAgent, Subject: "child"}
-			if _, _, err := iss.Delegate(context.Background(), req); !errors.Is(err, ErrInvalidRequest) {
+			if _, _, err := iss.delegate(context.Background(), req); !errors.Is(err, ErrInvalidRequest) {
 				t.Errorf("err = %v, want ErrInvalidRequest", err)
 			}
 		})

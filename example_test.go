@@ -92,7 +92,7 @@ func (s exampleStack) verified(token string) limes.VerifiedCapability {
 // issue mints a capability for an agent: get and share under corpus/public/,
 // 25.00 USD and 500 requests, for 15 minutes.
 func (s exampleStack) issue() (limes.Capability, string) {
-	c, token, err := s.issuer.Issue(context.Background(), limes.IssueRequest{
+	cResult, err := s.issuer.Issue(context.Background(), limes.IssueRequest{
 		IssuedBy: limes.Principal{Subject: "operator@example.com"},
 		Subject: limes.Principal{
 			Type: limes.PrincipalAgent, TenantID: s.tenantID, Subject: "research-orchestrator",
@@ -107,6 +107,7 @@ func (s exampleStack) issue() (limes.Capability, string) {
 			UnitCode:         "USD",
 		},
 	})
+	c, token := cResult.Capability, cResult.Token
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -129,7 +130,7 @@ func ExampleIssuer_Issue() {
 		TrustedIssuers: []string{exampleIssuerName},
 	})
 
-	c, token, err := issuer.Issue(ctx, limes.IssueRequest{
+	cResult, err := issuer.Issue(ctx, limes.IssueRequest{
 		IssuedBy: limes.Principal{Subject: "operator@example.com"},
 		Subject: limes.Principal{
 			Type: limes.PrincipalAgent, TenantID: uuid.New(), Subject: "research-orchestrator",
@@ -143,6 +144,7 @@ func ExampleIssuer_Issue() {
 			UnitCode:         "USD",
 		},
 	})
+	c, token := cResult.Capability, cResult.Token
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -185,7 +187,7 @@ func ExampleIssuer_Delegate() {
 	parent := s.verified(token)
 
 	worker := limes.Principal{Type: limes.PrincipalAgent, TenantID: s.tenantID, Subject: "sub-worker"}
-	child, _, err := s.issuer.Delegate(ctx, limes.DelegateRequest{
+	childResult, err := s.issuer.Delegate(ctx, limes.DelegateRequest{
 		Parent:  parent,
 		Subject: worker,
 		TTL:     2 * time.Minute,
@@ -197,10 +199,11 @@ func ExampleIssuer_Delegate() {
 			UnitCode:         "USD",
 		},
 	})
+	child := childResult.Capability
 	fmt.Println(err, child.ParentID == parent.Capability().ID)
 
 	// Asking for more than the parent holds is refused.
-	_, _, err = s.issuer.Delegate(ctx, limes.DelegateRequest{
+	_, err = s.issuer.Delegate(ctx, limes.DelegateRequest{
 		Parent:  parent,
 		Subject: worker,
 		TTL:     time.Minute,
@@ -221,7 +224,8 @@ func ExampleAttenuate() {
 	s := newExampleStack()
 	c, token := s.issue()
 
-	full, err := s.issuer.Biscuit(context.Background(), s.verified(token))
+	fullResult, err := s.issuer.Biscuit(context.Background(), limes.BiscuitRequest{Capability: s.verified(token)})
+	full := fullResult.Token
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -248,13 +252,14 @@ func Example_proofOfPossession() {
 	// The capability is bound to a key the agent keeps.
 	_, agentKey, _ := ed25519.GenerateKey(rand.Reader)
 	jkt, _ := dpop.Thumbprint(agentKey.Public())
-	_, token, err := s.issuer.Issue(ctx, limes.IssueRequest{
+	tokenResult, err := s.issuer.Issue(ctx, limes.IssueRequest{
 		IssuedBy: limes.Principal{Subject: "operator@example.com"},
 		Subject:  limes.Principal{Type: limes.PrincipalAgent, TenantID: s.tenantID, Subject: "worker"},
 		Audience: []string{exampleAudience}, TTL: 15 * time.Minute,
 		Caveats:         limes.Caveats{Ops: []limes.Op{limes.OpGet}},
 		ConfirmationJKT: jkt,
 	})
+	token := tokenResult.Token
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -155,7 +155,7 @@ func TestIssuerNeedsOnlyAnIssuanceStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, _, err := issuer.Issue(context.Background(), IssueRequest{
+	c, _, err := issuer.issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{"data"}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Minute,
 	})

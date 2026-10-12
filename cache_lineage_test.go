@@ -19,7 +19,7 @@ func TestRevocationCacheDropReachesADescendant(t *testing.T) {
 	s := newExampleStack()
 	_, token := s.issue()
 	parent := s.verified(token)
-	child, _, err := s.issuer.Delegate(ctx, limes.DelegateRequest{
+	childResult, err := s.issuer.Delegate(ctx, limes.DelegateRequest{
 		Parent:  parent,
 		Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: s.tenantID, Subject: "sub-worker"},
 		TTL:     time.Minute,
@@ -28,6 +28,7 @@ func TestRevocationCacheDropReachesADescendant(t *testing.T) {
 			Requests: limes.RequestCeiling{Max: 1}, Budget: limes.BudgetCeiling{Max: limes.MustParseAmount("1.00")}, UnitCode: "USD",
 		},
 	})
+	child := childResult.Capability
 	if err != nil {
 		t.Fatal(err)
 	}

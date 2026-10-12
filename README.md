@@ -74,7 +74,7 @@ verifier, _ := limes.NewVerifier(limes.VerifierConfig{
     TrustedIssuers: []string{"my-issuer"},
 })
 
-cap, token, _ := issuer.Issue(ctx, limes.IssueRequest{
+issued, _ := issuer.Issue(ctx, limes.IssueRequest{
     IssuedBy: limes.Principal{Subject: "operator@example.com"}, // who asked
     Subject: limes.Principal{
         Type: limes.PrincipalAgent, TenantID: tenantID,
@@ -94,7 +94,7 @@ cap, token, _ := issuer.Issue(ctx, limes.IssueRequest{
 
 // On every call: verify locally and enforce the caveats in one step, then meter.
 granted, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
-    Verify: limes.VerifyRequest{Token: token, Audience: "my-service"},
+    Verify: limes.VerifyRequest{Token: issued.Token, Audience: "my-service"},
     Check:  limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/report.pdf"},
 })
 subject := granted.MeterSubject()
@@ -104,7 +104,8 @@ _, err = usage.Charge(ctx, limes.ChargeRequest{
 }, nil)
 ```
 
-`token` is what the agent carries; `cap` is the record you keep for audit.
+`issued.Token` is what the agent carries; `issued.Capability` is the record
+you keep for audit.
 `go run ./example` runs issue, verify, delegate, charge and revoke end to end.
 
 ## What it does

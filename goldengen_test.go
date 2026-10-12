@@ -84,7 +84,7 @@ func TestGenerateGoldenToken(t *testing.T) {
 		t.Fatalf("issuer: %v", err)
 	}
 
-	_, token, err := issuer.Issue(context.Background(), IssueRequest{
+	_, token, err := issuer.issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject: Principal{
 			Type:     PrincipalAgent,
