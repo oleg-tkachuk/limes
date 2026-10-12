@@ -9,7 +9,8 @@
 // The checks cover what every caller relies on: a record reads back as it was
 // written, a duplicate or unknown id is refused with the module's sentinel,
 // revocation reaches a capability's descendants, purging drops revocation
-// entries and never records, and listing pages in a fixed order.
+// entries and never records, and listing pages in a fixed order and keeps
+// tenants apart.
 package storetest
 
 import (
@@ -25,14 +26,41 @@ import (
 	"github.com/oleg-tkachuk/limes"
 )
 
-// Env is one store under test, fresh for each check.
+// Env is one store under test, fresh for each check. Its fields mirror
+// metertest.Env, so one setup can serve both suites.
 type Env struct {
-	// Ctx is the context every call runs under.
+	// Ctx is the context every call for Tenant runs under — scoped to it, if
+	// the store needs that. A write for a tenant from NewTenant runs under
+	// TenantCtx, when the Env sets it.
 	Ctx context.Context
 	// Store is the store under test, with nothing on record.
 	Store limes.Store
 	// Tenant is a tenant the store can record capabilities for.
 	Tenant uuid.UUID
+	// NewTenant creates another tenant the store can record capabilities
+	// for, for the checks that need more than one. Optional: without it, a
+	// random id, which a store that refers to its tenants refuses.
+	NewTenant func() (uuid.UUID, error)
+	// TenantCtx is the context a write for tenant — one NewTenant created —
+	// runs under, when the store scopes each tenant's rows; Tenant's own
+	// calls run under Ctx. Optional: without it, Ctx.
+	TenantCtx func(tenant uuid.UUID) context.Context
+}
+
+// newTenant is another tenant, from NewTenant when the Env has one.
+func (e Env) newTenant() (uuid.UUID, error) {
+	if e.NewTenant == nil {
+		return uuid.New(), nil
+	}
+	return e.NewTenant()
+}
+
+// tenantCtx is the context a write for tenant runs under.
+func (e Env) tenantCtx(tenant uuid.UUID) context.Context {
+	if e.TenantCtx == nil {
+		return e.Ctx
+	}
+	return e.TenantCtx(tenant)
 }
 
 const (
@@ -138,6 +166,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"ListByPrincipalPages", checkListPages},
 		{"ListByPrincipalFilters", checkListFilters},
 		{"ListByPrincipalRefusesAMalformedRequest", checkListMalformed},
+		{"ListByPrincipalKeepsTenantsApart", checkListTenants},
 		{"BiscuitRevocation", checkBiscuit},
 	}
 	for _, c := range checks {
@@ -422,6 +451,26 @@ func checkListFilters(t *testing.T, f fixture) {
 		if !slices.Equal(got, tc.want) {
 			t.Errorf("%s: listed %v, want %v", tc.name, got, tc.want)
 		}
+	}
+}
+
+// A listing holds the named tenant's capabilities, never another's of the
+// same principal.
+func checkListTenants(t *testing.T, f fixture) {
+	const subject = "agent:shared"
+	other, err := f.newTenant()
+	if err != nil {
+		t.Fatalf("NewTenant: %v", err)
+	}
+	mine := f.live(t, subject, uuid.Nil)
+	theirs := f.newCapability(subject, uuid.Nil, f.now.Add(ttl))
+	theirs.Subject.TenantID = other
+	if err := f.Store.Insert(f.tenantCtx(other), limes.InsertRequest{Capability: theirs, IssuedBy: issuedBy}); err != nil {
+		t.Fatalf("insert for another tenant: %v", err)
+	}
+	got := f.listAll(t, limes.ListByPrincipalRequest{TenantID: f.Tenant, PrincipalType: limes.PrincipalAgent, Subject: subject})
+	if !slices.Equal(got, []uuid.UUID{mine.ID}) {
+		t.Errorf("listed %v, want only this tenant's %v", got, mine.ID)
 	}
 }
 

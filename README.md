@@ -118,8 +118,8 @@ _, err = usage.Charge(ctx, limes.ChargeRequest{
 | **Answer refusals** | `ErrorResponse` maps a refusal to its status, an RFC 6750 / RFC 9449 `WWW-Authenticate` challenge and an RFC 9457 problem body, without the error's own text. |
 
 You implement `Store`, `UsageStore[TX]` and `KeyResolver` — or use `memstore`
-— and check your implementation from its own tests with `storetest` and
-`metertest`. `UsageStore` is generic in your transaction type, so a charge can
+— and check your implementation from its own tests with `storetest`,
+`metertest` and `jwkstest` (`dpoptest` for a DPoP replay cache or nonce source). `UsageStore` is generic in your transaction type, so a charge can
 commit together with, say, an outbox write; with no transactions, use
 `UsageStore[struct{}]`.
 
@@ -172,7 +172,7 @@ read its claims under the wrong schema.
 | [dpop/](dpop) | proof of possession (RFC 9449): signing and checking proofs, replay cache, server nonces |
 | [inspect/](inspect) | reading a token without verifying it, for tooling |
 | [memstore/](memstore) | the in-memory reference implementation of every storage contract |
-| [storetest/](storetest), [metertest/](metertest) | conformance suites to run from your own store's tests |
+| [storetest/](storetest), [metertest/](metertest), [dpop/dpoptest](dpop/dpoptest), [jwks/jwkstest](jwks/jwkstest) | conformance suites to run from your own implementation's tests |
 | [example/](example) | the five-minute walkthrough as a runnable program |
 | [testdata/](testdata) | golden tokens, and the Biscuit vocabulary and cases shared with SDKs in other languages |
 | [tools/](tools) | the developer tools, pinned in modules of their own and run with `go tool -modfile=tools/go.mod` (yq: `tools/yq/go.mod`) |
