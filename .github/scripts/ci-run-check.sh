@@ -14,6 +14,9 @@
 
 set -euo pipefail
 
+# shellcheck source=.github/scripts/gh-retry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/gh-retry.sh"
+
 # The ci.yaml jobs dispatch-release needs, by name. ci-run-check.test.sh
 # fails when this list and ci.yaml disagree.
 readonly REQUIRED_JOBS=(
@@ -40,7 +43,7 @@ if [[ ! "$run_id" =~ ^[0-9]+$ ]] || [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
     exit 1
 fi
 
-run="$(gh api "repos/${repo}/actions/runs/${run_id}")"
+run="$(gh_retry api "repos/${repo}/actions/runs/${run_id}")"
 field() { jq -r "$1" <<<"$run"; }
 problems=()
 [ "$(field .path)" = "$CI_WORKFLOW" ] || problems+=("run is $(field .path), not $CI_WORKFLOW")
@@ -49,7 +52,7 @@ problems=()
 [ "$(field .head_sha)" = "$sha" ] || problems+=("run tested $(field .head_sha), not $sha")
 [ "$(field .repository.full_name)" = "$repo" ] || problems+=("run belongs to $(field .repository.full_name)")
 
-jobs="$(gh api --paginate "repos/${repo}/actions/runs/${run_id}/jobs" --jq '.jobs[] | [.name, .status, (.conclusion // "")] | @tsv')"
+jobs="$(gh_retry api --paginate "repos/${repo}/actions/runs/${run_id}/jobs" --jq '.jobs[] | [.name, .status, (.conclusion // "")] | @tsv')"
 for name in "${REQUIRED_JOBS[@]}"; do
     line="$(awk -F'\t' -v n="$name" '$1 == n' <<<"$jobs" | tail -n 1)"
     status="$(cut -f2 <<<"$line")"
