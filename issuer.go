@@ -140,13 +140,18 @@ type IssueRequest struct {
 	Caveats    Caveats
 	TTL        time.Duration // 0 → DefaultTTL
 	NotBefore  time.Time     // zero → valid from issuance, no nbf claim
-	Generation int64         // 0 → 1
+	Generation int64         // 0 → DefaultGeneration
 	// ConfirmationJKT binds the capability to the key with this RFC 7638
 	// thumbprint (dpop.Thumbprint); empty issues a bearer capability.
 	ConfirmationJKT string
 }
 
-// Issue mints a top-level capability. Generation defaults to 1; see
+// DefaultGeneration is the Generation of a capability issued without one,
+// and of every delegated capability.
+const DefaultGeneration = 1
+
+// Issue mints a top-level capability. Generation defaults to
+// DefaultGeneration; see
 // Capability.Generation for what it does and does not promise.
 //
 // Returns the typed Capability and the compact-form token in one call —
@@ -196,7 +201,7 @@ func (i *Issuer) Issue(ctx context.Context, req IssueRequest) (Capability, strin
 		ConfirmationJKT: req.ConfirmationJKT,
 	}
 	if cap.Generation == 0 {
-		cap.Generation = 1
+		cap.Generation = DefaultGeneration
 	}
 	if err := setNotBefore(&cap, req.NotBefore); err != nil {
 		return Capability{}, "", err
@@ -365,7 +370,7 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (Capability,
 		IssuedAt:        now,
 		ExpiresAt:       expires,
 		ParentID:        parent.ID,
-		Generation:      1,
+		Generation:      DefaultGeneration,
 		ConfirmationJKT: req.ConfirmationJKT,
 	}
 	if child.ConfirmationJKT == "" {

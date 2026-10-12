@@ -665,12 +665,12 @@ Skipping the wait in step 3 invalidates tokens agents are still holding. Since
 TTLs here are minutes, the wait is short — which is part of why short TTLs are
 the default posture (`IssuerConfig.DefaultTTL`, fifteen minutes).
 
-Load a signing key with `LoadKey(path, kid)` (PEM, PKCS#8 only); an
+Load a signing key with `LoadKey(path)` (PEM, PKCS#8 only); an
 unreadable path, or none, is an error, never a fresh key. `GenerateKey` makes
 an ephemeral one, marked `SigningKey.Generated` so you can log it loudly — a
-deployment that may run without a key file chooses between the two itself. A
-key with no kid named gets `jwks.KeyID`'s: its RFC 7638 thumbprint, the same
-wherever it is derived.
+deployment that may run without a key file chooses between the two itself.
+Either key's kid is `jwks.KeyID`'s: its RFC 7638 thumbprint, the same wherever
+it is derived; set `SigningKey.KeyID` to name it otherwise.
 
 `NewSigner(limes.SignerConfig{KeyID: kid, Key: key})` signs through any
 `crypto.Signer` whose key is Ed25519 — an `ed25519.PrivateKey`, or a key held

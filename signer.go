@@ -183,7 +183,7 @@ func (s *Signer) sign(ctx context.Context, c Capability) (string, error) {
 		return "", errors.New("limes: ExpiresAt must be after IssuedAt")
 	}
 
-	header := jwtHeader{Alg: jose.AlgEd25519, Kid: s.keyID, Typ: TokenTypeV4}
+	header := jwtHeader{Alg: jose.AlgEd25519, Kid: s.keyID, Typ: string(TokenTypeV4)}
 	claims := claimsOf(c)
 	// Nothing is signed that the verifier would refuse to read.
 	if err := checkIJSONIntegers(claims); err != nil {
@@ -232,10 +232,13 @@ func (s *Signer) sign(ctx context.Context, c Capability) (string, error) {
 // v4 spells every ceiling out: an absent max_requests or max_budget is a
 // ceiling of 0, and only unlimited_requests or unlimited_budget lifts it.
 // v3, which read an absent bound as none, is not accepted.
-const TokenTypeV4 = "limes-cap-v4+jwt" //nolint:gosec // G101: a JWT type label, not a credential
+const TokenTypeV4 TokenType = "limes-cap-v4+jwt" //nolint:gosec // G101: a JWT type label, not a credential
+
+// TokenType is a token format, as the JWT "typ" header names it.
+type TokenType string
 
 // tokenTypes are the token types this package has a schema for.
-var tokenTypes = []string{TokenTypeV4}
+var tokenTypes = []TokenType{TokenTypeV4}
 
 func parseHeader(seg string) (jwtHeader, error) {
 	raw, err := base64.RawURLEncoding.DecodeString(seg)
