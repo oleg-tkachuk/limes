@@ -126,9 +126,16 @@ type HandlerConfig struct {
 	// MaxAge is how long a client may keep the set (RFC 9111 §5.2.2.1).
 	// Keep it below the time between publishing a new key and signing with
 	// it, and between withdrawing an old key and the end of its tokens'
-	// TTL. Zero tells clients to revalidate every time.
+	// TTL. Zero: DefaultMaxAge.
 	MaxAge time.Duration
+	// Revalidate tells clients to revalidate the set on every use
+	// (max-age=0) instead of keeping it for MaxAge, which it excludes.
+	Revalidate bool
 }
+
+// DefaultMaxAge is how long a client may keep the set when the handler names
+// no MaxAge: Remote's own DefaultRefreshInterval.
+const DefaultMaxAge = DefaultRefreshInterval
 
 // Handler serves a key set as a JWK Set document (RFC 7517), the way the
 // Remote on the other end reads it: under its registered media type (§8.5),
@@ -139,14 +146,21 @@ type Handler struct {
 	maxAge time.Duration
 }
 
-// NewHandler builds a Handler serving cfg.Keys(), refusing no Keys or a
-// negative MaxAge.
+// NewHandler builds a Handler serving cfg.Keys(), refusing no Keys, a
+// negative MaxAge, or a MaxAge beside Revalidate.
 func NewHandler(cfg HandlerConfig) (*Handler, error) {
 	if cfg.Keys == nil {
 		return nil, errors.New("jwks: HandlerConfig.Keys required")
 	}
-	if cfg.MaxAge < 0 {
+	switch {
+	case cfg.MaxAge < 0:
 		return nil, fmt.Errorf("jwks: HandlerConfig.MaxAge %s is negative", cfg.MaxAge)
+	case cfg.Revalidate && cfg.MaxAge != 0:
+		return nil, fmt.Errorf("jwks: HandlerConfig.MaxAge %s beside Revalidate", cfg.MaxAge)
+	case cfg.Revalidate:
+		// maxAge stays 0: max-age=0.
+	case cfg.MaxAge == 0:
+		cfg.MaxAge = DefaultMaxAge
 	}
 	return &Handler{keys: cfg.Keys, maxAge: cfg.MaxAge}, nil
 }
