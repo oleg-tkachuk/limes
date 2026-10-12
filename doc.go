@@ -39,7 +39,8 @@
 //
 //   - [Store] — capability records and revocations; an [Issuer] needs only its
 //     [IssuanceStore] half. IsRevoked answers for the
-//     capability's whole delegation chain. No transactions required; an
+//     capability's whole delegation chain, at most [MaxDelegationDepth]
+//     ancestors deep. No transactions required; an
 //     in-memory map is a valid implementation.
 //   - [UsageStore] — request and spend counters and the charges ledger; the
 //     union of [Meter], [MeterReader], [TenantBudgets] and [UsageHousekeeping]. Every charge
@@ -88,7 +89,8 @@
 // transport status, or let Verifier.ErrorResponse map it to HTTP. A
 // charge rejected by any ceiling — the capability's, an ancestor's, the
 // tenant's — leaves every counter and the ledger unmutated, so retrying after
-// a rejection is safe. Delegation can only narrow: any widening returns
+// a rejection is safe. Delegation needs [OpShare] on the parent and can only
+// narrow: any widening returns
 // [ErrDelegationTooWide], and a differing unit code returns
 // [ErrUnitCodeMismatch] rather than converting.
 //

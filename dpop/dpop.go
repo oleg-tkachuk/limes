@@ -587,7 +587,7 @@ func NewMemoryReplayCache(cfg MemoryReplayCacheConfig) (*MemoryReplayCache, erro
 }
 
 // Seen implements ReplayCache. Expired ids are dropped as they lapse, soonest
-// first, so a full cache costs a lookup rather than a scan. A key past its
+// first, so a full cache costs a lookup rather than a scan. A holder past its
 // share, or a cache full of live ids, refuses the new id as a replay rather
 // than accept it unrecorded — a full cache errs towards refusing.
 func (c *MemoryReplayCache) Seen(_ context.Context, e ReplayEntry) (bool, error) {

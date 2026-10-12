@@ -133,9 +133,8 @@ func narrowsCaveats(parent, child Caveats) error {
 //     exact URIs admits no child prefix at all — a prefix names an open-ended
 //     set, which no finite list of URIs covers.
 //
-// The second rule is the one an earlier version missed: it checked child
-// prefixes only when the parent itself had prefixes, so a parent pinned to a
-// single URI could delegate a child with any prefix it liked.
+// The second rule holds whether or not the parent has prefixes: a parent
+// pinned to a single URI admits no child prefix.
 func narrowsResources(parent, child Caveats) error {
 	if !parent.RestrictsResources() {
 		return nil

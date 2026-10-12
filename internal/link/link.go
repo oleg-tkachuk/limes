@@ -1,7 +1,8 @@
-// Package link lets limes/inspect reach the root package's token reader
-// without the root exporting it. The root sets DecodeToken as it
-// initialises, which is before any code of inspect runs: inspect imports the
-// root.
+// Package link lets the module's own packages reach what the root does not
+// export: limes/inspect the token reader, and metertest, storetest and
+// memstore's tests the constructors of a MeterSubject and a BiscuitCopy. The
+// root sets each as it initialises, which is before any code of theirs runs:
+// each imports the root.
 package link
 
 import "github.com/google/uuid"

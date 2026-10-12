@@ -314,9 +314,9 @@ type DelegateRequest struct {
 	// Caveats are the child's; see InheritCaveats.
 	Caveats Caveats
 	// InheritCaveats copies the parent's caveats verbatim and ignores
-	// Caveats. It must be asked for: an earlier version inherited silently
-	// whenever Caveats.Ops was empty, which replaced every other field the
-	// caller HAD set — a budget of 2 became the parent's 25 without a word.
+	// Caveats. It must be asked for: Caveats with no Ops is refused, never
+	// read as "inherit", which would replace every other field the caller
+	// set — a budget of 2 would become the parent's 25 without a word.
 	InheritCaveats bool
 	// TTL defaults to IssuerConfig.DefaultTTL, and is cut so the child
 	// expires no later than the parent.

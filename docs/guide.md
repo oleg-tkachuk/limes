@@ -66,13 +66,19 @@ none twice and none in another case, and may be at most
 `VerifierConfig.MaxTokenBytes` long (16 KiB unless set). When several issuers share a verifier, set
 `KeyIssuers` (kid → issuer) so one issuer's key cannot sign for another —
 or, for issuers that do share one trust boundary, `SharedKeys: true`; a
-verifier trusting several issuers with neither is refused, and so is an
-empty map, which would refuse every token.
+verifier trusting several issuers with neither is refused — an empty map
+binds nothing, the same as none — and so is one setting both.
 Verifiers running apart from the issuer resolve keys with
 `jwks.Remote`. It fetches the issuer's JWKS on first use, keeps it as
 long as the response's `Cache-Control` allows within `MinRefreshInterval`
 (10s) and `RefreshInterval` (5m), revalidates by ETag, picks up a rotated-in
-kid on first sight (at most once per `MinRefreshInterval`), and fails closed
+kid on first sight (at most once per `MinRefreshInterval`). A known key from
+a set past its freshness but within `MaxStale` is served at once and the set
+refreshed behind it, so a slow endpoint delays no request. A fetch runs apart
+from the caller, bounded by `jwks.DefaultFetchTimeout`; a caller that gives up
+waiting with no usable set gets `jwks.ErrUnavailable`, and so does a kid the
+held set lacks while the endpoint is failing — it may be one rotated in since,
+so it is not refused as unknown. It fails closed
 with `jwks.ErrUnavailable` when it has never fetched a set, or once the last
 good set is older than `MaxStale` (1h). A document whose entries are all
 unusable counts as a failed fetch, so the last good set stays in service
@@ -93,7 +99,7 @@ verifier, err := limes.NewVerifier(limes.VerifierConfig{
 The issuer serves that document with `jwks.NewHandler` — `application/jwk-set+json`,
 a strong ETag answering `If-None-Match` with 304, `Cache-Control: public,
 max-age` (`DefaultMaxAge` unless `MaxAge` says otherwise, `max-age=0` only with
-`Revalidate`; a negative `MaxAge` is refused) — over a function returning its keys, such as
+`Revalidate`, which excludes a `MaxAge`; a negative `MaxAge` is refused) — over a function returning its keys, such as
 `jwks.Static.Keys`:
 
 ```go
@@ -207,8 +213,10 @@ prefix), and each child network must lie inside a parent network.
 
 To hand a child exactly the parent's caveats, say so with
 `InheritCaveats: true`; caveats without any `Ops` are rejected rather than
-silently replaced by the parent's. A parent that has expired, or that is
-revoked (itself or any ancestor), cannot delegate.
+silently replaced by the parent's. A parent that has expired (`ErrExpired`),
+that is revoked, itself or any ancestor (`ErrRevoked`), or that another issuer
+minted (`ErrInvalidRequest`: this issuer's store holds no record of it) cannot
+delegate.
 
 Narrowing bounds each child. The tree as a whole is bounded at use: every
 charge and request also counts against each ancestor, so a parent holding
@@ -255,9 +263,9 @@ proofs, err := dpop.NewVerifier(dpop.VerifierConfig{Replay: replay, Nonces: nonc
 ```
 
 A proof must then carry a nonce the server issued, so it cannot be signed
-ahead of time; a refusal with `dpop.ErrNonceRequired` is answered with
-`verifier.DPoPNonce(ctx)` in the `DPoP-Nonce` header for the client to retry
-with (RFC 9449 §8). The first key signs and every key checks, so rotate by
+ahead of time; a refusal with `dpop.ErrNonceRequired` carries a fresh nonce in
+the `DPoP-Nonce` header for the client to retry with (RFC 9449 §8) —
+`ErrorResponse` sets it, or call `verifier.DPoPNonce(ctx)` yourself. The first key signs and every key checks, so rotate by
 putting a new key first.
 
 Present a token under the scheme its binding calls for: `ParseAuthorization`
@@ -271,8 +279,9 @@ Bearer or DPoP header whose credential is not a token68 is
 `ErrMalformedAuthorization` (400).
 
 A verifier with no `DPoP` refuses every key-bound capability with
-`dpop.ErrRequired` instead of accepting it as a bearer token, so a binding
-cannot be lost to a forgotten call. `dpop.Proof.URL` is the absolute URL the
+`ErrProofUnsupported` instead of accepting it as a bearer token, so a binding
+cannot be lost to a forgotten call. It is the deployment's fault, not the
+request's: it matches no `ErrUnauthenticated` sentinel and is answered 500. `dpop.Proof.URL` is the absolute URL the
 client addressed, scheme and host included. Behind a proxy that rewrites the
 host or strips a mount prefix, or for a server that sees only the path, set
 `dpop.VerifierConfig.MatchPathOnly`: only the server's side of the comparison then
@@ -317,7 +326,7 @@ worker, _ := limes.Attenuate(full.Token, limes.Attenuation{
 granted, err := verifier.Verify(ctx, limes.VerifyRequest{Token: worker, Audience: "my-service"})
 ```
 
-An attenuation block may restrict operations, resources, planes, the expiry,
+An attenuation block may restrict operations, resources, the audience, the expiry,
 and (on an unbound token) bind a key. The verifier folds each block in
 through `Narrows`, so an attenuated token is checked exactly like a
 delegated one. A block that asks for more than the token has, or holds
@@ -328,7 +337,8 @@ count, and revoking the capability revokes every copy.
 A copy can also get limits of its own: `Requests` and `Budget` on the
 `Attenuation` (nil sets none; a ceiling of 0 freezes the copy). Each is counted under the revocation id of the block that
 set it, so siblings narrowed apart count apart, while the capability's own
-limits still bound them all; a limit must fit every limit already in force.
+limits still bound them all; a limit must fit every limit already in force,
+and an `Unlimited` one is refused: a copy only narrows.
 The verifier hands them to the caller as `Capability.Copies`, and the `Meter`
 counts them through the `MeterSubject` the verified capability gives, which
 carries them. A verifier admits such a copy only with
@@ -339,7 +349,9 @@ invalid token, and returned only once the token has passed every other
 check.
 `verifier.BiscuitCopy` names the limits in force on a copy, on any verifier,
 and a `CopyUsageReader` (`memstore` implements one) reads what each has
-counted. A copy cannot delegate — a server-side child would be an ordinary
+counted: `CopyUsage` takes a `CopyUsageRequest` of up to `MaxCopyUsageIDs`
+revocation ids and returns, in a `CopyUsageResult`, the counters of those
+used; a copy never used is absent. A copy cannot delegate — a server-side child would be an ordinary
 token of the capability, which revoking the copy would not reach and the
 copy's limits would not bound — so `Delegate` refuses any capability read
 from a Biscuit (`VerifiedCapability.FromBiscuit`) with
@@ -458,8 +470,9 @@ the excess must fit, or the hold stays for you to settle lower or `Release`.
 A hold never settled lapses after its TTL (`DefaultReservationTTL`, five
 minutes, unless the request says): run `ReleaseExpired` on a timer, again
 while a batch comes back full (`DefaultHousekeepingLimit` unless set). Settling
-the zero reservation id, or a hold of another capability than the subject's,
-is `ErrReservationNotFound`. The receipt names the
+the zero reservation id, a hold of another capability than the subject's, or
+one made under other Biscuit copies than the subject carries, is
+`ErrReservationNotFound`: a hold is settled by the copy that made it. The receipt names the
 charge's tenant and unit, on a refusal too, so a caller holding only the
 reservation id can attribute it.
 
@@ -501,7 +514,10 @@ receipt, err := usage.Charge(ctx, limes.ChargeRequest{
 ```
 
 A settle is idempotent on its reservation in the same way: settling one twice
-returns the first charge. `ChargeByRef` reads a named charge back, so a
+returns the first charge. A repeat is answered even once the capability's
+record is purged. A new charge is not: the `Meter` refuses a capability not on
+record with `ErrNotFound`, since no ancestor's ceiling could be read — so keep
+records (`PurgeRequest.ExpiredFor`) as long as costs may still arrive. `ChargeByRef` reads a named charge back, so a
 reporter can reconcile its own records with the ledger.
 
 **It has already been spent.** Refusing it would only leave the ledger short.
@@ -535,7 +551,9 @@ usage, err := limes.Instrument(store,
 ```
 
 A replayed charge or settle moved nothing and is not counted. `tenant_id` is
-off by default because it multiplies every series by the number of tenants.
+off by default because it multiplies every series by the number of tenants;
+with `WithTenantAttribute`, every measurement — a refused charge or settle
+included — carries the subject's tenant.
 
 ## Check your own store
 
@@ -560,8 +578,12 @@ tenants, or scopes each tenant's rows, also sets `NewTenant` (another tenant
 it can charge), `TenantCtx` (the context a write for that tenant runs under)
 and `ListCtx` (the context of `ListTenantBudgets`, a read across tenants).
 Without them the checks that need a second tenant use a random id and `Ctx`.
-`storetest.Env` takes the same `NewTenant` and `TenantCtx`, so one setup can
-serve both suites.
+`DeleteCapability` removes a record as `Store.Purge` would, for the
+`PurgeOrphans` checks. `storetest.Env` takes the same `NewTenant`,
+`TenantCtx` and `Advance`, so one setup can serve both suites, plus `Now` (the
+store's clock, for the checks at an expiry's exact instant) and
+`DeleteTenant` (moves a tenant to the trash, for the `ErrUnknownTenant` and
+`ErrTenantDeleted` checks).
 
 The checks include charges racing one ceiling, so run them against the
 database itself: a store that reads a counter and writes it back outside one
@@ -596,7 +618,8 @@ Revoking a capability revokes everything delegated from it, with or
 without the flag: `IsRevoked` answers for the whole chain. `CascadeChildren`
 also writes a revocation entry per descendant, so the audit trail names each
 capability that was stopped. A chain is at most `MaxDelegationDepth` (64)
-ancestors deep: `Delegate` refuses to go further with `ErrDelegationTooDeep`,
+ancestors deep: `Delegate` returns `ErrDelegationTooDeep` and no token for a
+child past it (its record is already written, and reads as revoked),
 and a store answers a deeper chain with that error — read as revoked — rather
 than walk part of it and miss a revocation at its root.
 
@@ -604,9 +627,11 @@ Records do not stay forever. A housekeeping job calls
 `Store.Purge(ctx, limes.PurgeRequest{ExpiredFor: retention})` on a timer, and
 again while a batch comes back full (`Limit`, `DefaultHousekeepingLimit` unless
 set): it removes the capabilities expired for longer than the retention, with
-their revocation entries, then `UsageHousekeeping.PurgeOrphans` releases what
-the meter still holds for them. A child never outlives its parent, so no
-ancestor of a live capability is ever purged. The retention is at least
+their revocation entries and those of their Biscuit copies, then
+`UsageHousekeeping.PurgeOrphans` releases what the meter still holds for them.
+It never removes a capability while a child of it stays on record: `Insert`
+refuses a child that would outlive its parent, and among records expiring
+together `Purge` takes the deepest first. The retention is at least
 `MinPurgeRetention` (six minutes, the zero value's): a verifier accepts a
 token for up to its `Leeway` past expiry, never more than `MaxLeeway`, by a
 clock that may run up to `PurgeClockSkew` behind the store's, and a
@@ -632,12 +657,17 @@ request to each ancestor as well, reading the ancestor's ceilings from its
 record. Code that only meters can depend on `Meter` alone; code that only
 administers tenant ceilings on `TenantBudgets` alone.
 
-`Store.Insert` should tell a missing tenant from a failure: return
+`Store.Insert` returns `ErrAlreadyExists` for an id already on record, refuses
+a record with no id or under a parent not on record as `ErrInvalidRequest`,
+and a child expiring after its parent as `ErrDelegationTooWide`: `Purge` and
+the `IsRevoked` walk rely on a whole lineage. It should tell a missing tenant
+from a failure: return
 `ErrUnknownTenant` for a tenant it does not hold and `ErrTenantDeleted` for one
 in the trash. `Issue` and `Delegate` pass them through, wrapped, beside
 `ErrInvalidRequest`, which every check on the request itself matches — a
-missing tenant id, an empty audience entry, a negative TTL, a malformed
-thumbprint, invalid caveats. Anything else they return is the store's or the
+missing tenant id, an empty audience entry, a negative TTL or one ending within
+the second it is issued (a token's times are whole seconds), a `NotBefore` at
+or after the expiry, a malformed thumbprint, invalid caveats. Anything else they return is the store's or the
 signer's failure, not the caller's.
 
 Every input is a `…Request`, every list a `Page`, and every read names what
@@ -649,11 +679,14 @@ Instantiate `UsageStore[struct{}]` and always pass `nil` for the callback.
 Everything works identically; you forgo the atomic-side-effect
 guarantee.
 
-The two listings, `ListByPrincipal` and `ListTenantBudgets`, are pages with an
-opaque cursor, so an API can hand a page token to its client. To read a whole
-listing in one go, range over `AllByPrincipal` or `AllTenantBudgets`: they
-walk the pages for you, stop fetching when the loop breaks, and refuse a page
-that returns a cursor already fetched (`ErrCursorRepeated`).
+The three listings, `ListByPrincipal`, `ListTenantBudgets` and
+`ListReservations` (soonest to expire first, ties by id), are pages with an
+opaque cursor, so an API can hand a page token to its client. To read the
+first two whole, range over `AllByPrincipal` or `AllTenantBudgets`: they walk
+the pages from `req.Cursor` afresh on every range, stop fetching when the loop
+breaks, and refuse a page that returns a cursor already fetched
+(`ErrCursorRepeated`). Spend moves between pages, so `AllTenantBudgets` may
+yield a tenant twice or not at all.
 
 ```go
 for c, err := range limes.AllByPrincipal(ctx, store, req) {
@@ -704,9 +737,11 @@ if err != nil {
 A malformed `Authorization` header is 400; a bad token or proof is 401, with a
 `Bearer` or `DPoP` challenge naming the error code (and `algs` for DPoP); a
 refused operation is 403 `insufficient_scope`; an exhausted budget or request
-limit is 403 with no challenge; an issuer's key set never fetched, or out of
-reach past `MaxStale`, is 503 — the server's trouble, not the token's; anything else, a
-store outage included, is 500. A refusal for want of a nonce carries a fresh one in `DPoP-Nonce`. The
+limit is 403 with no challenge; an issuer's key set never fetched, out of
+reach past `MaxStale`, or lacking the token's kid while the endpoint fails, is
+503 — the server's trouble, not the token's; anything else, a store outage or
+a verifier with no `DPoP` given a key-bound token (`ErrProofUnsupported`)
+included, is 500. A refusal for want of a nonce carries a fresh one in `DPoP-Nonce`. The
 body is `application/problem+json` with a type per kind of refusal and fixed
 text — the error's own message, which can name kids or stores, stays in your
 log. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
@@ -725,6 +760,7 @@ log. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
 | `ListByPrincipalRequest.Limit` · `ListTenantBudgetsRequest.Limit` · `ListReservationsRequest.Limit` | `DefaultListLimit` 50, at most `MaxListLimit` 500 |
 | `PurgeRequest` · `ReleaseExpiredRequest` · `PurgeOrphansRequest` | `DefaultHousekeepingLimit` 1 000 a batch; `PurgeRequest.ExpiredFor` `MinPurgeRetention`, 6 minutes, and no less |
 | `MaxDelegationDepth` · `MaxBiscuitBlocks` | 64 ancestors · 32 attenuation blocks |
+| `CopyUsageRequest.RevocationIDs` | at most `MaxCopyUsageIDs`, 500 |
 | `RevocationCacheConfig` · `BiscuitRevocationCacheConfig` | `DefaultRevocationCacheTTL` 2 seconds · `DefaultRevocationCacheEntries` 100 000, the oldest dropped first past it; a negative TTL or bound is refused — for no cache, give the verifier the store itself |
 | `jwks.RemoteConfig` | `jwks.DefaultFetchTimeout` 10s · `DefaultRefreshInterval` 5m · `DefaultMinRefreshInterval` 10s · `DefaultMaxStale` 1h · `DefaultMaxDocumentBytes` 1 MiB |
 | `dpop.VerifierConfig.Window` | `dpop.DefaultWindow`, 1 minute |
