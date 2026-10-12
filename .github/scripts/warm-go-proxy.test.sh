@@ -31,7 +31,12 @@ for tag in "" "0.3.0" "v0.3" "sdk/go/v0.3.0" "v0.3.0-rc.1"; do
     fi
 done
 
-if GITHUB_REPOSITORY=Oleg/limes "$script" "$VERSION" >/dev/null 2>&1; then
+# The proxy has the .info under the upper-case path too, so only the
+# script's own guard can refuse it — and it must, before asking.
+readonly UPPER=Oleg/limes
+mkdir -p "$work/proxy/github.com/$UPPER/@v"
+cp "$work/proxy/github.com/$REPO/@v/$VERSION.info" "$work/proxy/github.com/$UPPER/@v/"
+if GITHUB_REPOSITORY="$UPPER" "$script" "$VERSION" >/dev/null 2>&1; then
     fail "accepted an upper-case module path"
 fi
 
