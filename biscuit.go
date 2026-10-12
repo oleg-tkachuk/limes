@@ -93,7 +93,14 @@ func (i *Issuer) Biscuit(ctx context.Context, c Capability) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("limes: build biscuit: %w", err)
 	}
-	return serializeBiscuit(token)
+	out, err := serializeBiscuit(token)
+	if err != nil {
+		return "", err
+	}
+	if err := i.fits(out); err != nil {
+		return "", err
+	}
+	return out, nil
 }
 
 // Attenuation is one offline narrowing. Empty fields leave that dimension as
@@ -106,7 +113,7 @@ type Attenuation struct {
 	// replaces both.
 	ResourcePrefixes []string
 	ResourceURIs     []string
-	// Audience (audiences) the token keeps.
+	// Audience the token keeps.
 	Audience []string
 	// ExpiresAt, when earlier than the token's, becomes its expiry.
 	ExpiresAt time.Time
