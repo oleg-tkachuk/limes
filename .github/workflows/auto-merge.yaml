@@ -68,31 +68,19 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-26.04
     timeout-minutes: 10
-    permissions: {}
+    permissions:
+      contents: read # the checkout below; the rebase itself acts through AUTOMERGE_TOKEN
     steps:
+      # The script lives in the repository, beside its test.
+      - name: Check out the rebase script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
       - name: Rebase every pull request that is behind main
         env:
           GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
           REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          if [ -z "${GH_TOKEN}" ]; then
-            echo "::warning::AUTOMERGE_TOKEN is not set; pull requests not rebased (see auto-merge.yaml)"
-            exit 0
-          fi
-          # mergeStateStatus is computed lazily; BEHIND is the only state a
-          # rebase can fix. A conflict (DIRTY) needs a person.
-          gh pr list --repo "$REPO" --base main --state open --limit 200 \
-              --json number,isDraft,isCrossRepository,mergeStateStatus \
-              --jq '.[] | select(.isDraft | not) | select(.isCrossRepository | not)
-                        | select(.mergeStateStatus == "BEHIND") | .number' |
-          while read -r pr; do
-            # One pull request that cannot be rebased (a conflict GitHub only
-            # finds while rebasing) must not stop the rest.
-            if gh api --method PUT "repos/${REPO}/pulls/${pr}/update-branch" \
-                -f update_method=rebase >/dev/null; then
-              echo "rebased #${pr}"
-            else
-              echo "::warning::could not rebase #${pr}; it needs a manual update"
-            fi
-          done
+        # .github/scripts/rebase-behind.sh
+        run: ./.github/scripts/rebase-behind.sh
