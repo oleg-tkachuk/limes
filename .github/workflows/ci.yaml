@@ -14,13 +14,21 @@ on:
 # Nothing at the top level — each job asks for what it needs.
 permissions: {}
 
+# A pull request's runs share a group and the newest cancels the rest. Each
+# push to main gets a group of its own: GitHub keeps one pending run per
+# group and cancels it when another joins, so a shared group would drop the
+# CI — and the release dispatch — of a commit merged between two others.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'push' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Pinned tools, one place each. A floating tool changes what the gate checks
 # with no commit of ours in between.
 env:
+  # The release tooling's runtime, exact so a patch arrives as a reviewed
+  # change rather than whatever the runner image caches.
+  # renovate: datasource=node-version depName=node
+  NODE_VERSION: "24.21.0"
   # renovate: datasource=github-releases depName=go-task/task
   TASK_VERSION: "3.54.0"
   # Must be BUILT with a Go no older than the `go` directive in go.mod, or it
@@ -118,7 +126,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          node-version: ${{ env.NODE_VERSION }}
           package-manager-cache: false
 
       - name: Install the release tooling
@@ -173,13 +181,7 @@ jobs:
           cache: false
 
       - name: Require GO_FLOOR_VERSION to match the go directive
-        run: |
-          set -euo pipefail
-          directive="$(go mod edit -json | jq -r .Go)"
-          if [ "${GO_FLOOR_VERSION%.*}" != "${directive%.*}" ]; then
-            printf 'GO_FLOOR_VERSION %s is not a patch of the go.mod directive %s\n' "$GO_FLOOR_VERSION" "$directive"
-            exit 1
-          fi
+        run: ./.github/scripts/go-floor-check.sh "$GO_FLOOR_VERSION" "$(go mod edit -json | jq -r .Go)"
 
       - name: go vet
         run: go vet ./...

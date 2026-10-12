@@ -28,6 +28,12 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+
+env:
+  # The release tooling's runtime, as ci.yaml pins it.
+  # renovate: datasource=node-version depName=node
+  NODE_VERSION: "24.21.0"
+
 jobs:
   release:
     name: Tag and publish the release
@@ -84,7 +90,7 @@ jobs:
         if: steps.head.outputs.release == 'true'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
+          node-version: ${{ env.NODE_VERSION }}
           # No dependency cache: this job holds a write token, and a cache
           # another run wrote is not something to restore into it.
           package-manager-cache: false
@@ -99,16 +105,27 @@ jobs:
         # in the checkout.
         run: npm ci --ignore-scripts
 
+      # semantic-release publishes nothing from a branch behind its remote,
+      # and says so with exit 0: whatever landed on main since the checkout
+      # is caught up with now, and the decision made again against it. See
+      # .github/scripts/release-catch-up.sh.
+      - name: Catch up with main
+        id: catchup
+        if: steps.head.outputs.release == 'true'
+        env:
+          SHA: ${{ github.event.client_payload.sha }}
+        run: ./.github/scripts/release-catch-up.sh "$SHA" >>"$GITHUB_OUTPUT"
+
       # What HEAD carried before this run, so the step after it can tell a tag
       # it pushed from one an earlier dispatch to the same commit pushed.
       - name: Note the tags already on HEAD
-        if: steps.head.outputs.release == 'true'
+        if: steps.catchup.outputs.release == 'true'
         run: git tag --points-at HEAD >"$RUNNER_TEMP/tags-before"
 
       # Run where its config and lockfile live; git finds the repository from
       # there.
       - name: Compute and push the tag
-        if: steps.head.outputs.release == 'true'
+        if: steps.catchup.outputs.release == 'true'
         working-directory: .github/release
         run: npx semantic-release --no-ci
         env:
@@ -129,7 +146,7 @@ jobs:
       # `go get …@latest` and the README's badge see it now rather than
       # whenever the proxy next refreshes; the release stands without it.
       - name: Publish the release
-        if: steps.head.outputs.release == 'true'
+        if: steps.catchup.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes.md
