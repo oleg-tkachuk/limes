@@ -416,8 +416,9 @@ on your side needs rounding, summing apart or correcting.
   goes through `AmountFromFloat`, which rounds once, to the nearest nano.
 - **Reading one.** `String()` writes the exact decimal (`"0.35"`);
   `Float64()` is for display and metrics only.
-- **Range.** Up to `MaxNanos`, just under a billion units. A charge that
-  would take a counter past it is refused with `ErrInvalidAmount`.
+- **Range.** Up to `MaxNanos`, just under a billion units. An amount outside
+  it is `ErrInvalidAmount`, which matches `ErrInvalidRequest`; a charge of a
+  valid amount that would take a counter past it is `ErrCounterOverflow`.
 - **Units.** `UnitCode` is any ISO 4217 code in upper case (`IsUnitCode`);
   XXX, ISO 4217's code for "no currency", is the one for a budget that is not
   money.

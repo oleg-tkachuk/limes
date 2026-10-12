@@ -17,13 +17,20 @@ import (
 // Some are families that more specific sentinels match as well, so a caller
 // branches on the one it needs:
 //
-//	ErrUnauthenticated     the presented credentials were refused (401)
-//	├── ErrInvalidToken  the token is not genuine, or not this verifier's
+//	ErrUnauthenticated       the presented credentials were refused (401)
+//	├── ErrNoCredentials     none were presented
+//	├── ErrInvalidToken      the token is not genuine, or not this verifier's
+//	│   └── ErrBiscuitAttenuation
 //	├── ErrProofOfPossession the proof of possession is missing or wrong
-//	└── ErrExpired, ErrNotYetValid, ErrRevoked, ErrAudienceMismatch
-//	ErrCaveatViolation     a caveat refuses the operation (403)
-//	ErrInvalidRequest      the request itself is malformed
-//	ErrNotFound            what the request names is not on record
+//	│   └── ErrAuthSchemeMismatch
+//	├── ErrRevoked
+//	│   └── ErrDelegationTooDeep
+//	└── ErrExpired, ErrNotYetValid, ErrAudienceMismatch
+//	ErrCaveatViolation       a caveat refuses the operation (403)
+//	ErrInvalidRequest        the request itself is malformed
+//	├── ErrInvalidCaveats, ErrInvalidAmount, ErrEffectConflict
+//	ErrNotFound              what the request names is not on record
+//	└── ErrChargeNotFound, ErrReservationNotFound, ErrUsageNotFound, …
 var (
 	// ErrUnauthenticated is the family of every refusal of the presented
 	// credentials, token or proof: the one errors.Is a consumer needs to
@@ -58,11 +65,13 @@ var (
 	// currencies, so cross-currency delegation is refused at issuance and a
 	// cross-currency charge at the Meter.
 	ErrUnitCodeMismatch = errors.New("limes: unit_code mismatch")
-	// ErrInvalidRequest is an Issue or Delegate request that is malformed in
-	// itself: a missing tenant, an empty audience entry, a negative TTL, a
-	// thumbprint that is not one, a not-before past the expiry, caveats that
-	// do not validate. Nothing was minted. Every such error matches it, so a
-	// caller maps the whole family to its "bad request" without listing it.
+	// ErrInvalidRequest is a request malformed in itself: a missing tenant,
+	// an empty audience entry, a negative TTL, a thumbprint that is not one,
+	// a not-before past the expiry, caveats or an amount that do not
+	// validate. Nothing was done. Every such error matches it, so a caller
+	// maps the whole family to its "bad request" without listing it. A
+	// request that is well formed but asks for more than is allowed has its
+	// own sentinel instead: ErrDelegationTooWide, ErrUnitCodeMismatch.
 	ErrInvalidRequest = errors.New("limes: invalid request")
 	// ErrUnknownTenant is an issuance for a tenant that does not exist —
 	// typically one whose provisioning has not finished. The Store returns it.
@@ -117,7 +126,7 @@ func NormalizeUnitCode(u string) (string, error) {
 		return DefaultUnitCode, nil
 	}
 	if !IsUnitCode(u) {
-		return "", fmt.Errorf("limes: unit_code %q is not an ISO 4217 code in upper case", u)
+		return "", invalidRequest("unit_code %q is not an ISO 4217 code in upper case", u)
 	}
 	return u, nil
 }

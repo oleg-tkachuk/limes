@@ -191,8 +191,9 @@ type TenantBudgets interface {
 	// SetTenantBudget upserts the tenant cap. ResetSpend=true rolls
 	// the accounting period and zeroes the spend — operators call
 	// this on each billing close. ResetSpend=false adjusts the cap
-	// mid-cycle without affecting accumulated spend. A ceiling outside
-	// 0..MaxNanos returns ErrInvalidAmount and changes nothing. A UnitCode
+	// mid-cycle without affecting accumulated spend. It refuses what
+	// SetTenantBudgetRequest.Validate refuses — a ceiling outside
+	// 0..MaxNanos is ErrInvalidAmount — and changes nothing. A UnitCode
 	// other than the row's returns ErrUnitCodeMismatch while anything is
 	// held in the old unit, or spent in it and not reset.
 	SetTenantBudget(ctx context.Context, req SetTenantBudgetRequest) (TenantBudget, error)
@@ -488,6 +489,29 @@ type SetTenantBudgetRequest struct {
 	ExpectedVersion int64
 }
 
+// Validate refuses a request with no tenant, a ceiling that does not
+// validate, a unit that is not an ISO 4217 code, or a negative
+// ExpectedVersion, as ErrInvalidRequest. A store calls it before reading the
+// tenant's row, so a malformed request is refused as one, never as a
+// version conflict.
+func (r SetTenantBudgetRequest) Validate() error {
+	switch {
+	case r.TenantID == uuid.Nil:
+		return invalidRequest("set tenant budget: no tenant")
+	case r.ExpectedVersion < 0:
+		return invalidRequest("set tenant budget: ExpectedVersion %d is negative", r.ExpectedVersion)
+	}
+	if err := r.Ceiling.Validate(); err != nil {
+		return err
+	}
+	if r.UnitCode != "" {
+		if _, err := NormalizeUnitCode(r.UnitCode); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ListTenantBudgetsRequest is the input shape for
 // UsageStore.ListTenantBudgets.
 type ListTenantBudgetsRequest struct {
@@ -546,14 +570,18 @@ type CopyUsageReader interface {
 	CopyUsage(ctx context.Context, revocationIDs [][]byte) ([]CopyUsage, error)
 }
 
-// Usage-related sentinels. ErrBudgetExceeded already lives in types.go
-// (declared before the runtime enforcement landed); reused here.
+// Usage-related sentinels; ErrBudgetExceeded lives in types.go.
 var (
-	// ErrInvalidAmount — an amount that is negative or above MaxNanos, a
-	// decimal that is not one (ParseAmount), or a charge that would take a
-	// counter past MaxNanos. Refunds are explicit; a negative charge is not
-	// one.
-	ErrInvalidAmount = errors.New("limes: invalid amount")
+	// ErrInvalidAmount — an amount that is negative or above MaxNanos, or a
+	// decimal that is not one (ParseAmount). Refunds are explicit; a
+	// negative charge is not one. A malformed request, so it matches
+	// ErrInvalidRequest.
+	ErrInvalidAmount error = &familyError{"limes: invalid amount", ErrInvalidRequest}
+
+	// ErrCounterOverflow — an amount, each valid on its own, that would take
+	// a counter past MaxNanos. The request is well formed; the counter has
+	// no room for it.
+	ErrCounterOverflow = errors.New("limes: counter would pass MaxNanos")
 
 	// ErrChargeNotFound — Refund named a charge with no ledger row.
 	ErrChargeNotFound error = &familyError{"limes: charge not found", ErrNotFound}

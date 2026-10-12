@@ -44,14 +44,14 @@ func (c RequestCeiling) Validate() error {
 }
 
 // Validate refuses a Max beside Unlimited as ErrInvalidRequest, and a Max
-// outside 0..MaxNanos as ErrInvalidRequest that also matches
-// ErrInvalidAmount (Nanos.Validate): a ceiling is part of a request.
+// outside 0..MaxNanos as ErrInvalidAmount (Nanos.Validate), which matches
+// ErrInvalidRequest too.
 func (c BudgetCeiling) Validate() error {
 	if c.Unlimited && c.Max != 0 {
 		return invalidRequest("budget: %s (Max %s)", unlimitedWithMax, c.Max)
 	}
 	if err := c.Max.Validate(); err != nil {
-		return fmt.Errorf("%w: budget: %w", ErrInvalidRequest, err)
+		return fmt.Errorf("budget: %w", err)
 	}
 	return nil
 }

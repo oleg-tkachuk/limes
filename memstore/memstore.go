@@ -869,7 +869,7 @@ func (s *UsageStore[TX]) checkRangeLocked(c ceilingCheck) error {
 		ok = ok && fits(b.SpentAmount, b.ReservedAmount)
 	}
 	if !ok {
-		return fmt.Errorf("%w: %s would take a counter past %s", limes.ErrInvalidAmount, c.amount, limes.MaxNanos)
+		return fmt.Errorf("%w: %s more", limes.ErrCounterOverflow, c.amount)
 	}
 	return nil
 }
@@ -1233,7 +1233,7 @@ func (s *UsageStore[TX]) GetTenantBudget(_ context.Context, tenantID uuid.UUID) 
 }
 
 func (s *UsageStore[TX]) SetTenantBudget(_ context.Context, args limes.SetTenantBudgetRequest) (limes.TenantBudget, error) {
-	if err := args.Ceiling.Validate(); err != nil {
+	if err := args.Validate(); err != nil {
 		return limes.TenantBudget{}, err
 	}
 	s.mu.Lock()

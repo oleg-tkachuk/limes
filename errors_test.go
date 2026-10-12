@@ -94,7 +94,8 @@ var sentinelMatrix = map[string]sentinelCase{
 	"ErrTenantBudgetNotFound": {ErrTenantBudgetNotFound, []string{famNotFound}, "", http.StatusInternalServerError},
 
 	"ErrAlreadyExists":               {ErrAlreadyExists, nil, "", http.StatusInternalServerError},
-	"ErrInvalidAmount":               {ErrInvalidAmount, nil, "", http.StatusInternalServerError},
+	"ErrInvalidAmount":               {ErrInvalidAmount, []string{famRequest}, "", http.StatusInternalServerError},
+	"ErrCounterOverflow":             {ErrCounterOverflow, nil, "", http.StatusInternalServerError},
 	"ErrDelegationTooWide":           {ErrDelegationTooWide, nil, "", http.StatusInternalServerError},
 	"ErrUnitCodeMismatch":            {ErrUnitCodeMismatch, nil, "", http.StatusInternalServerError},
 	"ErrUnknownTenant":               {ErrUnknownTenant, nil, "", http.StatusInternalServerError},

@@ -291,6 +291,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"AHoldCountsAgainstACopyBudget", checkCopyHold[TX]},
 		{"AStaleVersionIsRefused", checkStaleVersion[TX]},
 		{"ACapabilityNotOnRecordIsNotMetered", checkNotOnRecord[TX]},
+		{"ACounterNeverPassesMaxNanos", checkCounterOverflow[TX]},
 		{"AZeroCeilingAllowsNothing", checkZeroCeilings[TX]},
 	}
 	for _, c := range checks {
@@ -499,8 +500,46 @@ func checkMalformed[TX any](t *testing.T, f fixture[TX]) {
 	}); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("reserve with a negative TTL: err = %v, want ErrInvalidRequest", err)
 	}
+	// A malformed amount or unit is a malformed request, whatever else it
+	// matches.
+	for name, amount := range map[string]limes.Nanos{"negative": -one, "past MaxNanos": limes.MaxNanos + 1} {
+		if _, err := f.charge(limes.ChargeRequest{Amount: amount}, nil); !errors.Is(err, limes.ErrInvalidAmount) || !errors.Is(err, limes.ErrInvalidRequest) {
+			t.Errorf("a charge of a %s amount: err = %v, want ErrInvalidAmount and ErrInvalidRequest", name, err)
+		}
+		if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: amount}); !errors.Is(err, limes.ErrInvalidRequest) {
+			t.Errorf("a hold of a %s amount: err = %v, want ErrInvalidRequest", name, err)
+		}
+	}
+	for name, req := range map[string]limes.SetTenantBudgetRequest{
+		"in a unit that is not one": {TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: one}, UnitCode: "usd"},
+		"for no tenant":             {Ceiling: limes.BudgetCeiling{Max: one}},
+	} {
+		if _, err := f.Usage.SetTenantBudget(f.Ctx, req); !errors.Is(err, limes.ErrInvalidRequest) {
+			t.Errorf("a tenant budget %s: err = %v, want ErrInvalidRequest", name, err)
+		}
+	}
 	if f.spent(t, f.child) != 0 {
 		t.Error("a refused request moved spend")
+	}
+}
+
+// checkCounterOverflow holds a store to refusing, even past every ceiling,
+// a charge that would take a counter past MaxNanos: each amount is valid,
+// their sum has no room.
+func checkCounterOverflow[TX any](t *testing.T, f fixture[TX]) {
+	id, err := f.newCapability(uuid.Nil, unlimitedBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject := newSubject(subjectSpec{capID: id, tenant: f.Tenant})
+	if _, err := f.charge(limes.ChargeRequest{Subject: subject, Amount: limes.MaxNanos, Overrun: limes.OverrunRecord}, nil); err != nil {
+		t.Fatalf("a charge of MaxNanos: %v", err)
+	}
+	if _, err := f.charge(limes.ChargeRequest{Subject: subject, Amount: 1, Overrun: limes.OverrunRecord}, nil); !errors.Is(err, limes.ErrCounterOverflow) || errors.Is(err, limes.ErrInvalidRequest) {
+		t.Errorf("a nano past MaxNanos on the counter: err = %v, want ErrCounterOverflow and not ErrInvalidRequest", err)
+	}
+	if got := f.spent(t, id); got != limes.MaxNanos {
+		t.Errorf("spent %s after the overflow was refused, want %s", got, limes.MaxNanos)
 	}
 }
 
