@@ -8,9 +8,10 @@
 //
 // The checks cover what every caller relies on: a record reads back as it was
 // written, a duplicate or unknown id is refused with the module's sentinel,
-// revocation reaches a capability's descendants, purging drops revocation
-// entries and never records, and listing pages in a fixed order and keeps
-// tenants apart.
+// revocation reaches a capability's descendants, purging drops a record
+// with its revocation entries once it has been expired long enough and keeps
+// a revocation a verifier may still need, a stored record is no caller's to
+// change, and listing pages in a fixed order and keeps tenants apart.
 package storetest
 
 import (

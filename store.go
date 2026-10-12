@@ -104,7 +104,7 @@ type Store interface {
 	ListByPrincipal(ctx context.Context, req ListByPrincipalRequest) (Page[Capability], error)
 }
 
-// ErrNotFound is the typed not-found return from Store.Get. It lives in the
+// ErrNotFound is the typed not-found return from Store.GetRecord. It lives in the
 // core package rather than in a store implementation so that any consumer —
 // in-memory, relational, or otherwise — can satisfy the Store contract using
 // only what this package publishes.

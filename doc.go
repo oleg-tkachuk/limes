@@ -42,7 +42,7 @@
 //     capability's whole delegation chain. No transactions required; an
 //     in-memory map is a valid implementation.
 //   - [UsageStore] — request and spend counters and the charges ledger; the
-//     union of [Meter], [TenantBudgets] and [UsageHousekeeping]. Every charge
+//     union of [Meter], [MeterReader], [TenantBudgets] and [UsageHousekeeping]. Every charge
 //     and request also counts against each ancestor. Generic in TX, the
 //     consumer's transaction handle; see "No-transaction mode" below.
 //   - [KeyResolver] — public verification keys. [jwks.Static] ships as a
