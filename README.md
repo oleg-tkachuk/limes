@@ -106,7 +106,7 @@ _, err = usage.Charge(ctx, limes.ChargeRequest{
 
 `issued.Token` is what the agent carries; `issued.Capability` is the record
 you keep for audit.
-`go run ./example` runs issue, verify, delegate, charge and revoke end to end.
+`go run ./example` runs issue, authorize, delegate, meter and revoke end to end.
 
 ## What it does
 
