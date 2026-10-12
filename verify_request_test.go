@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto"
 	"errors"
+	"net/http"
 	"net/netip"
 	"reflect"
 	"testing"
@@ -84,7 +85,8 @@ func mintFor(t *testing.T, issuer *Issuer) string {
 }
 
 // A verifier with no DPoP configured refuses a key-bound capability, saying
-// why, rather than accept it as a bearer token.
+// why, rather than accept it as a bearer token — as its own fault: the
+// answer invites no proof, which it could not check.
 func TestVerifyWithoutDPoPRefusesBoundTokens(t *testing.T) {
 	issuer, configured, _, _ := buildIssuerVerifier(t)
 	cfg := configured.cfg
@@ -95,8 +97,12 @@ func TestVerifyWithoutDPoPRefusesBoundTokens(t *testing.T) {
 	}
 	key := dpopKeys(t)["Ed25519"]
 	req := withProof(t.Context(), t, key, issueBound(t, issuer, key), audienceData, time.Now())
-	if _, err := v.Verify(context.Background(), req); !errors.Is(err, dpop.ErrRequired) {
-		t.Fatalf("err = %v, want dpop.ErrRequired", err)
+	_, err = v.Verify(context.Background(), req)
+	if !errors.Is(err, ErrProofUnsupported) || errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("err = %v, want ErrProofUnsupported alone", err)
+	}
+	if resp := v.ErrorResponse(t.Context(), err, AuthSchemeDPoP); resp.Status != http.StatusInternalServerError || len(resp.Challenges) != 0 {
+		t.Errorf("ErrorResponse = %d with %q; want 500 and no challenge", resp.Status, resp.Challenges)
 	}
 }
 

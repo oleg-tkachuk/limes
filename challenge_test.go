@@ -213,3 +213,31 @@ func TestEveryChallengeNamesTheRealm(t *testing.T) {
 		}
 	}
 }
+
+// A verifier with no DPoP configured advertises no algorithms: a client
+// that presented under DPoP is challenged under it, but told nothing it
+// could sign a proof with.
+func TestDPoPChallengeAdvertisesAlgsOnlyWhenConfigured(t *testing.T) {
+	_, configured, _, _ := buildIssuerVerifier(t)
+	cfg := configured.cfg
+	cfg.DPoP = nil
+	bare, err := NewVerifier(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		v        *Verifier
+		wantAlgs bool
+	}{
+		"configured": {configured, true},
+		"bare":       {bare, false},
+	} {
+		resp := tc.v.ErrorResponse(t.Context(), ErrExpired, AuthSchemeDPoP)
+		if len(resp.Challenges) == 0 {
+			t.Fatalf("%s: no challenge", name)
+		}
+		if got := strings.Contains(resp.Challenges[0], authParamAlgs+"="); got != tc.wantAlgs {
+			t.Errorf("%s: challenge %q advertises algs = %v, want %v", name, resp.Challenges[0], got, tc.wantAlgs)
+		}
+	}
+}
