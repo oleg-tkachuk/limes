@@ -436,7 +436,7 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 	nbf := req.NotBefore
 	childStart := nbf
 	if childStart.IsZero() {
-		childStart = now
+		childStart = now.Truncate(tokenTimeResolution) // as IssuedAt records it
 	}
 	if ps := validFrom(parent); childStart.Before(ps) {
 		nbf = ps

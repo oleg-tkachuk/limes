@@ -216,3 +216,40 @@ func TestDelegateRequiresOpShare(t *testing.T) {
 		}
 	}
 }
+
+// A child starts no earlier than its parent, to the instant: a parent
+// starting within a second — one built by hand, as a dry run may — is not
+// rounded down to let a child in before it, and Delegate still mints a child
+// of such a parent, starting at the next whole second.
+func TestDelegationStartIsExact(t *testing.T) {
+	const fraction, earlier = 700 * time.Millisecond, 500 * time.Millisecond
+	second := time.Now().Truncate(time.Second)
+	parent := Capability{NotBefore: second.Add(fraction), ExpiresAt: second.Add(time.Hour), Caveats: Caveats{Ops: []Op{OpGet}}}
+	for name, tc := range map[string]struct {
+		start time.Time
+		want  error
+	}{
+		"within the second, before the parent": {second.Add(fraction - earlier), ErrDelegationTooWide},
+		"at the parent's start":                {second.Add(fraction), nil},
+		"at the next second":                   {second.Add(time.Second), nil},
+	} {
+		child := parent
+		child.NotBefore = tc.start
+		if err := Narrows(parent, child); tc.want == nil && err != nil || tc.want != nil && !errors.Is(err, tc.want) {
+			t.Errorf("%s: Narrows = %v, want %v", name, err, tc.want)
+		}
+	}
+
+	issuer, _, _, _ := buildIssuerVerifier(t)
+	root := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet, OpShare}})
+	at := root.IssuedAt.Add(time.Second + fraction)
+	root.NotBefore = at.Add(-earlier) // within the second at is in
+	issuer.clock = func() time.Time { return at }
+	child, _, err := issuer.delegate(t.Context(), DelegateRequest{Parent: asVerified(root), Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Caveats: Caveats{Ops: []Op{OpGet}}})
+	if err != nil {
+		t.Fatalf("Delegate from a parent starting within the second: %v", err)
+	}
+	if validFrom(child).Before(validFrom(root)) {
+		t.Errorf("the child starts at %s, before its parent at %s", validFrom(child), validFrom(root))
+	}
+}
