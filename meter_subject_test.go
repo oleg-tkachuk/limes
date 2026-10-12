@@ -1,8 +1,10 @@
 package limes
 
 import (
+	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -34,21 +36,30 @@ func TestMeterSubjectCarriesTheVerifiedCeilings(t *testing.T) {
 }
 
 // A stored record gives the subject a reporter with no token counts
-// against: the record's ceilings and unit, and no Biscuit copy.
-func TestRecordMeterSubjectCarriesTheStoredCeilings(t *testing.T) {
+// against: the record's ceilings and unit, and no Biscuit copy, read from
+// the store — a revoked capability included.
+func TestStoredMeterSubjectCarriesTheStoredCeilings(t *testing.T) {
 	const requests, unit = 3, "EUR"
+	ctx := context.Background()
 	budget := MustParseAmount("4")
-	rec := Record{
-		Capability: Capability{
-			ID:      uuid.New(),
-			Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
-			Caveats: Caveats{Requests: RequestCeiling{Max: requests}, Budget: BudgetCeiling{Max: budget}, UnitCode: unit},
-			Copies:  []CopyCeiling{{RevocationID: []byte{1}, Requests: RequestCeiling{Max: 1}}},
-		},
-		Revocation: &Revocation{Note: "done"},
+	c := Capability{
+		ID:        uuid.New(),
+		Subject:   Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
+		Caveats:   Caveats{Ops: []Op{OpGet}, Requests: RequestCeiling{Max: requests}, Budget: BudgetCeiling{Max: budget}, UnitCode: unit},
+		ExpiresAt: time.Now().Add(time.Hour),
 	}
-	s := rec.MeterSubject()
-	if s.CapabilityID() != rec.Capability.ID || s.TenantID() != rec.Capability.Subject.TenantID {
+	store := newMemStore()
+	if err := store.Insert(ctx, InsertRequest{Capability: c, IssuedBy: Principal{Subject: "op"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Revoke(ctx, RevokeRequest{CapabilityID: c.ID}); err != nil {
+		t.Fatal(err)
+	}
+	s, err := StoredMeterSubject(ctx, store, c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.CapabilityID() != c.ID || s.TenantID() != c.Subject.TenantID {
 		t.Errorf("subject names %s of %s, want the record's", s.CapabilityID(), s.TenantID())
 	}
 	if s.Requests() != (RequestCeiling{Max: requests}) || s.Budget() != (BudgetCeiling{Max: budget}) || s.UnitCode() != unit {
@@ -56,6 +67,9 @@ func TestRecordMeterSubjectCarriesTheStoredCeilings(t *testing.T) {
 	}
 	if len(s.Copies()) != 0 {
 		t.Errorf("copies = %+v, want none from a stored record", s.Copies())
+	}
+	if got, err := StoredMeterSubject(ctx, store, uuid.New()); err == nil || got.CapabilityID() != uuid.Nil {
+		t.Errorf("a capability not on record = %+v, %v; want the store's error and no subject", got, err)
 	}
 }
 

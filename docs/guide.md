@@ -480,9 +480,9 @@ different amount, unit or tenant is `ErrExternalRefConflict`: one name is one
 cost.
 
 ```go
-rec, err := records.GetRecord(ctx, capID) // no token in hand: the stored record
+subject, err := limes.StoredMeterSubject(ctx, records, capID) // no token in hand
 receipt, err := usage.Charge(ctx, limes.ChargeRequest{
-    Subject:     rec.MeterSubject(),
+    Subject:     subject,
     Amount:      cost,
     ExternalRef: event.CallID,
     Overrun:     limes.OverrunRecord,
@@ -501,7 +501,7 @@ next cost before it is incurred. Keep `OverrunReject` for anything you can
 still decline.
 
 A reporter with no token in hand takes the subject from the capability's
-stored record (`Store.GetRecord`, then `Record.MeterSubject`), as the meter
+stored record (`StoredMeterSubject`, which reads it from the `Store`), as the meter
 already reads every ancestor's ceiling. A price that is not known yet is not a price of zero: hold the estimate and
 settle when it is known, or let the hold lapse and count against the ceilings
 until `ReleaseExpired` runs.
