@@ -294,6 +294,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"HousekeepingRefusesANegativeLimit", checkHousekeepingLimits[TX]},
 		{"PurgeOrphansReleasesWhatARemovedCapabilityHeld", checkPurgeOrphans[TX]},
 		{"TenantBudgetKeepsItsPeriodEnd", checkPeriodEnd[TX]},
+		{"ResetSpendAloneRollsThePeriodStart", checkPeriodStart[TX]},
 		{"TheZeroSubjectIsRefused", checkZeroSubject[TX]},
 		{"AnAncestorRequestCeilingBoundsBump", checkAncestorRequests[TX]},
 		{"ACopyRequestCeilingBoundsBump", checkCopyRequests[TX]},
@@ -2158,6 +2159,45 @@ func checkPeriodEnd[TX any](t *testing.T, f fixture[TX]) {
 		if got, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant); err != nil || !got.PeriodEnd.Equal(want) {
 			t.Errorf("GetTenantBudget after PeriodEnd %v = %v, %v", want, got.PeriodEnd, err)
 		}
+	}
+}
+
+// checkPeriodStart holds a store to rolling a tenant's PeriodStart to its
+// clock's now on ResetSpend, and only then: a new ceiling mid-window keeps
+// the window it is in.
+func checkPeriodStart[TX any](t *testing.T, f fixture[TX]) {
+	if f.Advance == nil {
+		t.Skip("Env.Advance is not set")
+	}
+	const step = time.Hour
+	set := func(reset bool) limes.TenantBudget {
+		t.Helper()
+		f.Advance(step)
+		cur, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
+			TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: tenantBudget}, UnitCode: unit, ResetSpend: reset, ExpectedVersion: cur.ResourceVersion,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	before, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kept := set(false); !kept.PeriodStart.Equal(before.PeriodStart) {
+		t.Errorf("PeriodStart after a new ceiling without ResetSpend = %v, want %v kept", kept.PeriodStart, before.PeriodStart)
+	}
+	// Two steps on: the one before the kept ceiling and the one before this.
+	if rolled := set(true); rolled.PeriodStart.Before(before.PeriodStart.Add(2 * step)) {
+		t.Errorf("PeriodStart after ResetSpend = %v, want at least %v, the store's now", rolled.PeriodStart, before.PeriodStart.Add(2*step))
 	}
 }
 
