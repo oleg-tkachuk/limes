@@ -13,10 +13,10 @@ import (
 )
 
 // raceTree inserts root and child (child under root) in one tenant.
-func raceTree(t *testing.T) (*Store[struct{}], uuid.UUID, uuid.UUID, uuid.UUID) {
+func raceTree(t *testing.T) (*Store, uuid.UUID, uuid.UUID, uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
-	records := New[struct{}]()
+	records := newTestStore()
 	tenant, root, child := uuid.New(), uuid.New(), uuid.New()
 	for _, c := range []limes.Capability{mkCap(root, uuid.Nil, tenant, "root"), mkCap(child, root, tenant, "child")} {
 		if err := records.Insert(ctx, limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "op"}}); err != nil {
@@ -27,7 +27,7 @@ func raceTree(t *testing.T) (*Store[struct{}], uuid.UUID, uuid.UUID, uuid.UUID) 
 }
 
 // dropRecord simulates Store.Purge having removed id.
-func dropRecord(s *Store[struct{}], id uuid.UUID) {
+func dropRecord(s *Store, id uuid.UUID) {
 	s.mu.Lock()
 	delete(s.caps, id)
 	s.mu.Unlock()
@@ -42,7 +42,7 @@ func TestChargeRacingDeleteLeavesTheAncestorDeleted(t *testing.T) {
 	for range rounds {
 		ctx := context.Background()
 		records, tenant, root, child := raceTree(t)
-		u := NewUsage[struct{}](records)
+		u := newTestUsage(records)
 		other := newSubject(subjectSpec{capID: uuid.New(), tenant: uuid.New()})
 
 		holding, release := make(chan struct{}), make(chan struct{})
@@ -85,7 +85,7 @@ func TestReserveRacingDeleteLeavesTheAncestorDeleted(t *testing.T) {
 	for range rounds {
 		ctx := context.Background()
 		records, tenant, root, child := raceTree(t)
-		u := NewUsage[struct{}](records)
+		u := newTestUsage(records)
 		other := newSubject(subjectSpec{capID: uuid.New(), tenant: uuid.New()})
 
 		holding, release := make(chan struct{}), make(chan struct{})
@@ -128,7 +128,7 @@ func TestReserveRacingDeleteLeavesTheAncestorDeleted(t *testing.T) {
 func TestPurgeOrphansForgetsTheAncestorInHolds(t *testing.T) {
 	ctx := context.Background()
 	records, tenant, root, child := raceTree(t)
-	u := NewUsage[struct{}](records)
+	u := newTestUsage(records)
 	subject := newSubject(subjectSpec{capID: child, tenant: tenant})
 	r, err := u.Reserve(ctx, limes.ReserveRequest{Subject: subject, Amount: 2 * unit})
 	if err != nil {
