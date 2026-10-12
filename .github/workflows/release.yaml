@@ -161,6 +161,7 @@ jobs:
           if [ -s "$RELEASE_NOTES_FILE" ]; then
             notes=(--notes-file "$RELEASE_NOTES_FILE")
           fi
-          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --generate-notes --verify-tag "${notes[@]}"
+          source .github/scripts/gh-retry.sh
+          gh_retry release create "$tag" --repo "$GITHUB_REPOSITORY" --generate-notes --verify-tag "${notes[@]}"
           ./.github/scripts/warm-go-proxy.sh "$tag" ||
             echo "::warning::the Go proxy did not take $tag yet; it will on its own"
