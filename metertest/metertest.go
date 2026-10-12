@@ -366,6 +366,16 @@ func checkExternalRefChargesOnce[TX any](t *testing.T, f fixture[TX]) {
 	if r, err := f.charge(limes.ChargeRequest{Amount: 5 * one, ExternalRef: "call-1"}, onCharged); !errors.Is(err, limes.ErrExternalRefConflict) {
 		t.Fatalf("the ref again for another amount = %+v, %v; want ErrExternalRefConflict", r, err)
 	}
+	// So is the same name for the same amount in another unit or for
+	// another tenant: it names another cost all the same.
+	for name, subject := range map[string]limes.MeterSubject{
+		"in another unit":    newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: otherUnit}),
+		"for another tenant": newSubject(subjectSpec{capID: f.child, tenant: uuid.New(), budget: budgetOf(childBudget)}),
+	} {
+		if r, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: subject, Amount: 2 * one, ExternalRef: "call-1"}, onCharged); !errors.Is(err, limes.ErrExternalRefConflict) {
+			t.Errorf("the ref again %s = %+v, %v; want ErrExternalRefConflict", name, r, err)
+		}
+	}
 	if fanOuts != 1 {
 		t.Errorf("onCharged ran %d times, want once", fanOuts)
 	}
@@ -415,7 +425,7 @@ func checkExternalRefConcurrent[TX any](t *testing.T, f fixture[TX]) {
 }
 
 func checkChargeByRef[TX any](t *testing.T, f fixture[TX]) {
-	if _, err := f.Usage.ChargeByRef(f.Ctx, f.child, "call-1"); !errors.Is(err, limes.ErrChargeNotFound) {
+	if _, err := f.Usage.ChargeByRef(f.Ctx, limes.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: "call-1"}); !errors.Is(err, limes.ErrChargeNotFound) {
 		t.Fatalf("before any charge: err = %v, want ErrChargeNotFound", err)
 	}
 	r, err := f.charge(limes.ChargeRequest{Amount: 3 * one, ExternalRef: "call-1"}, nil)
@@ -425,7 +435,7 @@ func checkChargeByRef[TX any](t *testing.T, f fixture[TX]) {
 	if _, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: r.ChargeID, Amount: one}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := f.Usage.ChargeByRef(f.Ctx, f.child, "call-1")
+	got, err := f.Usage.ChargeByRef(f.Ctx, limes.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: "call-1"})
 	if err != nil || got.ID != r.ChargeID || got.CapabilityID != f.child || got.Amount != 3*one ||
 		got.RefundedAmount != one || got.ExternalRef != "call-1" || got.UnitCode != unit || got.Overrun {
 		t.Fatalf("ChargeByRef = %+v, %v; want charge %s of 3 with 1 refunded", got, err, r.ChargeID)
@@ -436,10 +446,10 @@ func checkChargeByRef[TX any](t *testing.T, f fixture[TX]) {
 	if _, err := f.Usage.GetCharge(f.Ctx, uuid.New()); !errors.Is(err, limes.ErrChargeNotFound) {
 		t.Errorf("GetCharge of an unknown id: err = %v, want ErrChargeNotFound", err)
 	}
-	if _, err := f.Usage.ChargeByRef(f.Ctx, f.root, "call-1"); !errors.Is(err, limes.ErrChargeNotFound) {
+	if _, err := f.Usage.ChargeByRef(f.Ctx, limes.ChargeByRefRequest{CapabilityID: f.root, ExternalRef: "call-1"}); !errors.Is(err, limes.ErrChargeNotFound) {
 		t.Errorf("the ref on another capability: err = %v, want ErrChargeNotFound", err)
 	}
-	if _, err := f.Usage.ChargeByRef(f.Ctx, f.child, ""); !errors.Is(err, limes.ErrChargeNotFound) {
+	if _, err := f.Usage.ChargeByRef(f.Ctx, limes.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: ""}); !errors.Is(err, limes.ErrChargeNotFound) {
 		t.Errorf("an empty ref: err = %v, want ErrChargeNotFound", err)
 	}
 }
@@ -672,7 +682,11 @@ func checkDeleteReleasesHolds[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.Usage.Delete(f.Ctx, f.child); err != nil {
+	// A capability with no row is no error: there is nothing to drop.
+	if err := f.Usage.Delete(f.Ctx, limes.DeleteUsageRequest{CapabilityID: uuid.New()}); err != nil {
+		t.Errorf("Delete of a capability with no row: %v", err)
+	}
+	if err := f.Usage.Delete(f.Ctx, limes.DeleteUsageRequest{CapabilityID: f.child}); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 	if _, err := f.Usage.GetReservation(f.Ctx, res.ID); !errors.Is(err, limes.ErrReservationNotFound) {
@@ -959,7 +973,7 @@ func checkCallbackRollback[TX any](t *testing.T, f fixture[TX]) {
 	if f.spent(t, f.child) != 0 || f.spent(t, f.root) != 0 || f.tenantSpent(t) != 0 {
 		t.Error("a charge whose callback failed moved spend")
 	}
-	if _, err := f.Usage.ChargeByRef(f.Ctx, f.child, "call-1"); !errors.Is(err, limes.ErrChargeNotFound) {
+	if _, err := f.Usage.ChargeByRef(f.Ctx, limes.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: "call-1"}); !errors.Is(err, limes.ErrChargeNotFound) {
 		t.Errorf("the failed charge's ref: err = %v, want ErrChargeNotFound", err)
 	}
 	// The ref is free again: a retry charges.

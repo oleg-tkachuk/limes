@@ -50,7 +50,7 @@ func TestDeleteIsNotUndoneByADescendantsHold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := u.Delete(ctx, root); err != nil {
+	if err := u.Delete(ctx, limes.DeleteUsageRequest{CapabilityID: root}); err != nil {
 		t.Fatal(err)
 	}
 	if err := u.Release(ctx, limes.ReleaseRequest{ReservationID: r.ID}); err != nil {

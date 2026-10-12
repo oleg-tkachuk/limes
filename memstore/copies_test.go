@@ -156,7 +156,7 @@ func TestCopyCountersPurgedWithTheirCapability(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := u.Delete(ctx, capID); err != nil {
+	if err := u.Delete(ctx, limes.DeleteUsageRequest{CapabilityID: capID}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := u.copies["copy"]; ok {

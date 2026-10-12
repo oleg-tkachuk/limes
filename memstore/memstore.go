@@ -584,7 +584,8 @@ func (s *UsageStore[TX]) Charge(
 }
 
 // ChargeByRef returns the charge a capability took under externalRef.
-func (s *UsageStore[TX]) ChargeByRef(_ context.Context, capID uuid.UUID, externalRef string) (limes.ChargeRecord, error) {
+func (s *UsageStore[TX]) ChargeByRef(_ context.Context, req limes.ChargeByRefRequest) (limes.ChargeRecord, error) {
+	capID, externalRef := req.CapabilityID, req.ExternalRef
 	if externalRef == "" {
 		return limes.ChargeRecord{}, limes.ErrChargeNotFound
 	}
@@ -1361,7 +1362,8 @@ func (s *UsageStore[TX]) releaseHoldsLocked(gone func(capID uuid.UUID) bool) {
 // Delete drops the capability's counters and releases its holds first:
 // nothing could settle or release them once it is gone, and they would keep
 // counting against its ancestors and its tenant.
-func (s *UsageStore[TX]) Delete(_ context.Context, capID uuid.UUID) error {
+func (s *UsageStore[TX]) Delete(_ context.Context, req limes.DeleteUsageRequest) error {
+	capID := req.CapabilityID
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.releaseHoldsLocked(func(id uuid.UUID) bool { return id == capID })
