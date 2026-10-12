@@ -275,6 +275,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"EveryCounterKeepsOneUnit", checkOneUnit[TX]},
 		{"AnAncestorCountsInTheUnitOfItsChildren", checkAncestorUnit[TX]},
 		{"DeleteReleasesHolds", checkDeleteReleasesHolds[TX]},
+		{"ASettleCountsOnAnAncestorWhoseRowWasDropped", checkSettleAfterAncestorDropped[TX]},
 		{"ConcurrentChargesKeepTheCeiling", checkConcurrentCeiling[TX]},
 		{"AnAncestorCeilingBoundsItsChildren", checkAncestorCeiling[TX]},
 		{"TheTenantCeilingBoundsEveryCapability", checkTenantCeiling[TX]},
@@ -834,6 +835,42 @@ func checkOneUnit[TX any](t *testing.T, f fixture[TX]) {
 		TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: tenantBudget}, UnitCode: otherUnit, ExpectedVersion: b.ResourceVersion,
 	}); !errors.Is(err, limes.ErrUnitCodeMismatch) {
 		t.Errorf("re-denominating a tenant with %s spent: err = %v, want ErrUnitCodeMismatch", unit, err)
+	}
+}
+
+// checkSettleAfterAncestorDropped holds Settle to the lineage as it stands:
+// an ancestor whose row DeleteUsage dropped after the hold was made no
+// longer holds it, so the settled amount must fit its ceiling whole, and is
+// counted on it once it does.
+func checkSettleAfterAncestorDropped[TX any](t *testing.T, f fixture[TX]) {
+	// The root holds 8, spends 18 once its row is dropped, and then holds
+	// nothing of the hold: settling all 8 would take it to 26, past its 25;
+	// settling 7 takes it to exactly 25.
+	const held, rootSpend, admitted = 8 * one, 18 * one, 7 * one
+	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: held})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Usage.DeleteUsage(f.Ctx, limes.DeleteUsageRequest{CapabilityID: f.root}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{
+		Subject: newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, budget: budgetOf(rootBudget)}), Amount: rootSpend,
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	settle := func(amount limes.Nanos) error {
+		_, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: f.childSubject(), ReservationID: r.ID, Amount: amount}, nil)
+		return err
+	}
+	if err := settle(held); !errors.Is(err, limes.ErrBudgetExceeded) {
+		t.Errorf("a settle within its hold but past the root's ceiling, the root's row dropped: err = %v, want ErrBudgetExceeded", err)
+	}
+	if err := settle(admitted); err != nil {
+		t.Fatalf("a settle within the root's ceiling: %v", err)
+	}
+	if got := f.spent(t, f.root); got != rootSpend+admitted {
+		t.Errorf("root spent %v after the settle, want %v counted on it", got, rootSpend+admitted)
 	}
 }
 
