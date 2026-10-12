@@ -146,10 +146,11 @@ type MeterReader interface {
 	// is none.
 	GetCharge(ctx context.Context, chargeID uuid.UUID) (ChargeRecord, error)
 
-	// ChargeByRef returns the charge a capability took under externalRef
-	// (ChargeRequest.ExternalRef), so a reporter can reconcile its own
-	// records with the ledger. ErrChargeNotFound when there is none.
-	ChargeByRef(ctx context.Context, capID uuid.UUID, externalRef string) (ChargeRecord, error)
+	// ChargeByRef returns the charge a capability took under an external
+	// reference (ChargeRequest.ExternalRef), so a reporter can reconcile
+	// its own records with the ledger. ErrChargeNotFound when there is none,
+	// an empty reference included: no charge is taken under no name.
+	ChargeByRef(ctx context.Context, req ChargeByRefRequest) (ChargeRecord, error)
 
 	// GetReservation returns a reservation still holding budget — open,
 	// or expired and not yet released, since until ReleaseExpired runs it
@@ -211,11 +212,12 @@ type TenantBudgets interface {
 
 // UsageHousekeeping reclaims usage rows of capabilities that are gone.
 type UsageHousekeeping interface {
-	// Delete drops the row. Called when the capability is reaped. It
-	// releases the capability's open reservations first, returning their
-	// holds to its ancestors and its tenant: nothing could settle or release
-	// them afterwards.
-	Delete(ctx context.Context, capID uuid.UUID) error
+	// Delete drops the capability's row. Called when the capability is
+	// reaped. It releases the capability's open reservations first,
+	// returning their holds to its ancestors and its tenant: nothing could
+	// settle or release them afterwards. A capability with no row is no
+	// error: there is nothing to drop.
+	Delete(ctx context.Context, req DeleteUsageRequest) error
 
 	// PurgeOrphans deletes the usage rows of capabilities no longer on
 	// record (Store.Purge), releasing their reservations as Delete does, at
@@ -700,4 +702,17 @@ type ReleaseExpiredRequest struct {
 // ReleaseExpiredResult is what one ReleaseExpired released.
 type ReleaseExpiredResult struct {
 	Released int64
+}
+
+// ChargeByRefRequest names one charge by the reference it was taken under.
+type ChargeByRefRequest struct {
+	// CapabilityID is the capability the charge was taken against.
+	CapabilityID uuid.UUID
+	// ExternalRef is the ChargeRequest.ExternalRef it was taken under.
+	ExternalRef string
+}
+
+// DeleteUsageRequest names the capability whose usage row Delete drops.
+type DeleteUsageRequest struct {
+	CapabilityID uuid.UUID
 }
