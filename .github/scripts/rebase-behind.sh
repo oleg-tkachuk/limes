@@ -5,7 +5,8 @@
 # Usage: GH_TOKEN=… REPO=owner/name rebase-behind.sh
 #
 # Same-repository, non-draft pull requests only: a fork's branch belongs to its
-# author and a draft is not ready. Whether one is behind is read from the
+# author and a draft is not ready. Renovate's are skipped: Renovate rebases its
+# own branches, and stops updating one it finds changed by anyone else. Whether one is behind is read from the
 # comparison of its head with main, not from its merge state: GitHub computes
 # that in the background, and seconds after a push to main it still reads
 # CLEAN or UNKNOWN for a branch the push left behind. A known conflict (DIRTY)
@@ -21,6 +22,8 @@ set -euo pipefail
 readonly BASE_BRANCH=main
 # The most pull requests one run looks at.
 readonly PR_LIMIT=200
+# How gh names Renovate as the author of a pull request.
+readonly RENOVATE=app/renovate
 # The merge state of a pull request whose branch conflicts with main.
 readonly DIRTY=DIRTY
 
@@ -31,9 +34,10 @@ fi
 : "${REPO:?REPO names the repository, owner/name}"
 
 candidates="$(gh pr list --repo "$REPO" --base "$BASE_BRANCH" --state open --limit "$PR_LIMIT" \
-    --json number,headRefOid,isDraft,isCrossRepository,mergeStateStatus |
-    jq -r --arg dirty "$DIRTY" \
+    --json number,headRefOid,isDraft,isCrossRepository,mergeStateStatus,author |
+    jq -r --arg dirty "$DIRTY" --arg renovate "$RENOVATE" \
         '.[] | select(.isDraft | not) | select(.isCrossRepository | not)
+             | select(.author.login != $renovate)
              | select(.mergeStateStatus != $dirty) | "\(.number) \(.headRefOid)"')"
 
 behind=""

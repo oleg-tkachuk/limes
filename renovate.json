@@ -5,7 +5,7 @@
   "description": [
     "Go and npm: minor/patch only, grouped into one PR per manager per month. Majors are crossed by hand, per the upstream CHANGELOG.",
     "Vulnerability remediation is ungrouped and unscheduled — it should not wait for the monthly window.",
-    "A release is proposed only once it is three days old: a compromised or broken one is usually pulled within that window, and an approved pull request merges and releases on green.",
+    "A release is proposed only once it is three days old: a compromised or broken one is usually pulled within that window. No pull request is opened before then (internalChecksFilter), and Renovate merges its own once green; auto-merge.yaml leaves Renovate's pull requests to it.",
     "The tools the workflows pin carry a `# renovate:` comment naming their datasource; the shared task library's tag is read from Taskfile.yaml."
   ],
   "enabledManagers": ["github-actions", "gomod", "npm", "custom.regex"],
@@ -26,6 +26,10 @@
   ],
   "postUpdateOptions": ["gomodTidy"],
   "minimumReleaseAge": "3 days",
+  "internalChecksFilter": "strict",
+  "automerge": true,
+  "automergeType": "pr",
+  "automergeStrategy": "merge-commit",
   "schedule": ["before 6am on monday"],
   "prHourlyLimit": 2,
   "packageRules": [

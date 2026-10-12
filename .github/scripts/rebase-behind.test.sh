@@ -51,19 +51,21 @@ updates() { grep -- '--method PUT' "$CALLS" || true; }
 
 # #1 fails to rebase; #5, after it, is still rebased. #7 reads CLEAN, as a
 # branch a push has just left behind does, and is rebased all the same; #8
-# reads BEHIND but its head is current. #9's comparison fails.
+# reads BEHIND but its head is current. #9's comparison fails. #10 is
+# Renovate's, which Renovate rebases itself.
 export FAKE_PRS='[
-  {"number": 1, "headRefOid": "a1", "isDraft": false, "isCrossRepository": false, "mergeStateStatus": "BEHIND"},
-  {"number": 2, "headRefOid": "a2", "isDraft": true,  "isCrossRepository": false, "mergeStateStatus": "BEHIND"},
-  {"number": 3, "headRefOid": "a3", "isDraft": false, "isCrossRepository": true,  "mergeStateStatus": "BEHIND"},
-  {"number": 4, "headRefOid": "a4", "isDraft": false, "isCrossRepository": false, "mergeStateStatus": "DIRTY"},
-  {"number": 5, "headRefOid": "a5", "isDraft": false, "isCrossRepository": false, "mergeStateStatus": "BEHIND"},
-  {"number": 6, "headRefOid": "a6", "isDraft": false, "isCrossRepository": false, "mergeStateStatus": "CLEAN"},
-  {"number": 7, "headRefOid": "a7", "isDraft": false, "isCrossRepository": false, "mergeStateStatus": "CLEAN"},
-  {"number": 8, "headRefOid": "a8", "isDraft": false, "isCrossRepository": false, "mergeStateStatus": "BEHIND"},
-  {"number": 9, "headRefOid": "a9", "isDraft": false, "isCrossRepository": false, "mergeStateStatus": "UNKNOWN"}
+  {"number": 1, "headRefOid": "a1", "isDraft": false, "isCrossRepository": false, "mergeStateStatus": "BEHIND", "author": {"login": "someone"}},
+  {"number": 2, "headRefOid": "a2", "isDraft": true,  "isCrossRepository": false, "mergeStateStatus": "BEHIND", "author": {"login": "someone"}},
+  {"number": 3, "headRefOid": "a3", "isDraft": false, "isCrossRepository": true,  "mergeStateStatus": "BEHIND", "author": {"login": "someone"}},
+  {"number": 4, "headRefOid": "a4", "isDraft": false, "isCrossRepository": false, "mergeStateStatus": "DIRTY", "author": {"login": "someone"}},
+  {"number": 5, "headRefOid": "a5", "isDraft": false, "isCrossRepository": false, "mergeStateStatus": "BEHIND", "author": {"login": "someone"}},
+  {"number": 6, "headRefOid": "a6", "isDraft": false, "isCrossRepository": false, "mergeStateStatus": "CLEAN", "author": {"login": "someone"}},
+  {"number": 7, "headRefOid": "a7", "isDraft": false, "isCrossRepository": false, "mergeStateStatus": "CLEAN", "author": {"login": "someone"}},
+  {"number": 8, "headRefOid": "a8", "isDraft": false, "isCrossRepository": false, "mergeStateStatus": "BEHIND", "author": {"login": "someone"}},
+  {"number": 9, "headRefOid": "a9", "isDraft": false, "isCrossRepository": false, "mergeStateStatus": "UNKNOWN", "author": {"login": "someone"}},
+  {"number": 10, "headRefOid": "b0", "isDraft": false, "isCrossRepository": false, "mergeStateStatus": "BEHIND", "author": {"login": "app/renovate"}}
 ]'
-export FAKE_BEHIND='{"a1": 1, "a2": 1, "a3": 1, "a4": 1, "a5": 2, "a6": 0, "a7": 1, "a8": 0}'
+export FAKE_BEHIND='{"a1": 1, "a2": 1, "a3": 1, "a4": 1, "a5": 2, "a6": 0, "a7": 1, "a8": 0, "b0": 1}'
 
 : >"$CALLS"
 out="$(GH_TOKEN=t FAIL_PR=1 "$script")" || fail "a run with one failed rebase exited non-zero"
@@ -75,7 +77,7 @@ list="$(grep '^pr list' "$CALLS")"
 [[ " $list " == *" --base main "* && " $list " == *" --state open "* ]] ||
     fail "pr list asked for the wrong pull requests: $list"
 grep -q '^api repos/oleg-tkachuk/limes/compare/main\.\.\.a5$' "$CALLS" || fail "#5 was not compared with main"
-! grep -Eq 'compare/main\.\.\.a[234]$' "$CALLS" || fail "a draft, a fork's or a conflicting pull request was compared"
+! grep -Eq 'compare/main\.\.\.(a[234]|b0)$' "$CALLS" || fail "a draft, a fork's, a conflicting or Renovate's pull request was compared"
 [[ "$out" == *"could not rebase #1"* && "$out" == *"rebased #5"* ]] || fail "the log does not say what happened: $out"
 [[ "$out" == *"could not compare #9"* ]] || fail "a failed comparison was not reported: $out"
 
