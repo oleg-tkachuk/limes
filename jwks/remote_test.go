@@ -360,3 +360,31 @@ func TestRemoteJWKSRefusesIntervalsThatDoNotNest(t *testing.T) {
 		}
 	}
 }
+
+// A kid the held set lacks, while the endpoint fails, is the endpoint's
+// fault — the issuer may have rotated it in — so it is ErrUnavailable, not
+// an unknown kid the token is refused for; once the endpoint answers
+// without it, it is unknown again.
+func TestRemoteJWKSUnknownKidDuringAnOutageIsUnavailable(t *testing.T) {
+	srv, r, clock, kid, _ := newRemoteFixture(t)
+	ctx := context.Background()
+	if _, err := r.PublicKey(ctx, kid); err != nil {
+		t.Fatal(err)
+	}
+	const rateLimitPassed = 11 * time.Second // past MinRefreshInterval
+	srv.set(func() { srv.fail = true })
+	clock.Advance(rateLimitPassed)
+	_, err := r.PublicKey(ctx, "rotated-in")
+	if !errors.Is(err, ErrUnavailable) || errors.Is(err, ErrUnknownKID) {
+		t.Errorf("an unknown kid while the endpoint fails: err = %v, want ErrUnavailable", err)
+	}
+	if _, err := r.PublicKey(ctx, kid); err != nil {
+		t.Errorf("a held kid while the endpoint fails: %v", err)
+	}
+
+	srv.set(func() { srv.fail = false })
+	clock.Advance(rateLimitPassed)
+	if _, err := r.PublicKey(ctx, "rotated-in"); !errors.Is(err, ErrUnknownKID) {
+		t.Errorf("an unknown kid once the endpoint answers: err = %v, want ErrUnknownKID", err)
+	}
+}
