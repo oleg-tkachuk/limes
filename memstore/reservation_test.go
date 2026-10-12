@@ -72,15 +72,15 @@ func TestSettleChargesTheActualCostAndReleasesTheHold(t *testing.T) {
 	if b, _ := u.GetTenantBudget(ctx, tenant); b.SpentAmount != 3*unit || b.ReservedAmount != 0 {
 		t.Errorf("tenant after settle = %+v", b)
 	}
-	if l := u.Ledger(); len(l) != 1 || l[0].Op != "llm" || l[0].Actor != "agent" {
+	if l := u.committedLedger(); len(l) != 1 || l[0].Op != "llm" || l[0].Actor != "agent" {
 		t.Errorf("ledger = %+v, want one charge carrying the reservation's op and actor", l)
 	}
 	again, err := u.Settle(ctx, limes.SettleRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("10"))}), ReservationID: r.ID, Amount: limes.MustParseAmount("1")}, nil)
 	if err != nil || !again.Replayed || again.ChargeID != receipt.ChargeID {
 		t.Errorf("second settle = %+v, %v; want a replay of charge %s", again, err, receipt.ChargeID)
 	}
-	if got, _ := u.GetUsage(ctx, capID); got.SpentAmount != 3*unit || len(u.Ledger()) != 1 {
-		t.Errorf("a replayed settle moved spend: %+v, ledger %d rows", got, len(u.Ledger()))
+	if got, _ := u.GetUsage(ctx, capID); got.SpentAmount != 3*unit || len(u.committedLedger()) != 1 {
+		t.Errorf("a replayed settle moved spend: %+v, ledger %d rows", got, len(u.committedLedger()))
 	}
 }
 

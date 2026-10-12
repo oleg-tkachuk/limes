@@ -755,11 +755,11 @@ func checkTenantBudgetReads[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	i := slices.IndexFunc(listed, func(s limes.TenantBudgetSummary) bool { return s.TenantID == f.Tenant })
+	i := slices.IndexFunc(listed, func(s limes.TenantBudget) bool { return s.TenantID == f.Tenant })
 	if i < 0 {
 		t.Fatalf("ListTenantBudgets left out the tenant: %+v", listed)
 	}
-	if b := listed[i].Budget; b.ReservedAmount != held || b.ResourceVersion != set.ResourceVersion {
+	if b := listed[i]; b.ReservedAmount != held || b.ResourceVersion != set.ResourceVersion {
 		t.Errorf("listed budget = %+v; want %v held at version %d", b, held, set.ResourceVersion)
 	}
 }
@@ -1292,7 +1292,7 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 	unlimited := newTenant(unlimitedBudget)
 	frozen := newTenant(limes.BudgetCeiling{})
 	all := map[uuid.UUID]bool{}
-	var order []limes.TenantBudgetSummary
+	var order []limes.TenantBudget
 	cursor := ""
 	for {
 		pagePage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Limit: 1, Cursor: cursor})
@@ -1326,7 +1326,7 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 			order[0].TenantID, order[len(order)-1].TenantID, frozen, unlimited)
 	}
 	for i := 1; i < len(order); i++ {
-		cur, prev := riskOf(order[i].Budget), riskOf(order[i-1].Budget)
+		cur, prev := riskOf(order[i]), riskOf(order[i-1])
 		switch {
 		case prev.after(cur):
 			t.Errorf("row %d (%+v) follows one at %+v; want most at risk first", i, cur, prev)
@@ -1342,8 +1342,8 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 	}
 	unlPage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{UnlimitedOnly: true})
 	unl := unlPage.Items
-	if err != nil || slices.ContainsFunc(unl, func(s limes.TenantBudgetSummary) bool { return s.TenantID == f.Tenant }) ||
-		!slices.ContainsFunc(unl, func(s limes.TenantBudgetSummary) bool { return s.TenantID == unlimited }) {
+	if err != nil || slices.ContainsFunc(unl, func(s limes.TenantBudget) bool { return s.TenantID == f.Tenant }) ||
+		!slices.ContainsFunc(unl, func(s limes.TenantBudget) bool { return s.TenantID == unlimited }) {
 		t.Errorf("unlimited tenants = %+v, %v; want %s and not %s", unl, err, unlimited, f.Tenant)
 	}
 }
@@ -1471,8 +1471,8 @@ func (r risk) after(o risk) bool {
 // fullPct is a whole, in percent.
 const fullPct = 100
 
-func riskyPct(s limes.TenantBudgetSummary) float64 {
-	pct, limited := s.Budget.Utilization()
+func riskyPct(s limes.TenantBudget) float64 {
+	pct, limited := s.Utilization()
 	if !limited {
 		return noUtilization
 	}

@@ -43,7 +43,7 @@ func TestChargeRollsBackWhenSideEffectFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTenantBudget: %v", err)
 	}
-	ledgerBefore := len(usage.Ledger())
+	ledgerBefore := len(usage.committedLedger())
 
 	// Now a charge whose side effect fails.
 	boom := errors.New("outbox insert failed")
@@ -76,7 +76,7 @@ func TestChargeRollsBackWhenSideEffectFails(t *testing.T) {
 	// The ledger is the third thing that must not have grown — a committed
 	// ledger row for a rolled-back charge is exactly the dual-write divergence
 	// this design exists to prevent.
-	if got := len(usage.Ledger()); got != ledgerBefore {
+	if got := len(usage.committedLedger()); got != ledgerBefore {
 		t.Errorf("ledger grew from %d to %d despite the rollback", ledgerBefore, got)
 	}
 }
@@ -100,7 +100,7 @@ func TestChargeRetryAfterRollbackIsClean(t *testing.T) {
 	if spent.SpentAmount != 7*unit {
 		t.Errorf("spend after one failed + one successful charge = %v, want 7", spent.SpentAmount)
 	}
-	if got := len(usage.Ledger()); got != 1 {
+	if got := len(usage.committedLedger()); got != 1 {
 		t.Errorf("ledger has %d entries, want exactly 1", got)
 	}
 }
@@ -160,7 +160,7 @@ func TestChargeTenantCeilingLeavesBothCountersUnmutated(t *testing.T) {
 	if b.SpentAmount != 0 {
 		t.Errorf("tenant spend = %v, want 0", b.SpentAmount)
 	}
-	if got := len(usage.Ledger()); got != 0 {
+	if got := len(usage.committedLedger()); got != 0 {
 		t.Errorf("ledger has %d entries after a rejection, want 0", got)
 	}
 }

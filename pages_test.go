@@ -34,14 +34,14 @@ func (f *fakeLister) ListByPrincipal(_ context.Context, req ListByPrincipalReque
 	return Page[Capability]{Items: caps, Next: p.next}, p.err
 }
 
-func (f *fakeLister) ListTenantBudgets(_ context.Context, req ListTenantBudgetsRequest) (Page[TenantBudgetSummary], error) {
+func (f *fakeLister) ListTenantBudgets(_ context.Context, req ListTenantBudgetsRequest) (Page[TenantBudget], error) {
 	f.asked = append(f.asked, req.Cursor)
 	p := f.pages[req.Cursor]
-	rows := make([]TenantBudgetSummary, 0, len(p.ids))
+	rows := make([]TenantBudget, 0, len(p.ids))
 	for _, id := range p.ids {
-		rows = append(rows, TenantBudgetSummary{TenantID: id})
+		rows = append(rows, TenantBudget{TenantID: id})
 	}
-	return Page[TenantBudgetSummary]{Items: rows, Next: p.next}, p.err
+	return Page[TenantBudget]{Items: rows, Next: p.next}, p.err
 }
 
 // The cursors of a three-page listing.

@@ -29,7 +29,7 @@ type CapabilityLister interface {
 // TenantBudgets is one.
 type TenantBudgetLister interface {
 	// ListTenantBudgets returns one page (TenantBudgets.ListTenantBudgets).
-	ListTenantBudgets(ctx context.Context, req ListTenantBudgetsRequest) (Page[TenantBudgetSummary], error)
+	ListTenantBudgets(ctx context.Context, req ListTenantBudgetsRequest) (Page[TenantBudget], error)
 }
 
 // AllByPrincipal walks ListByPrincipal page by page, from req.Cursor, and
@@ -53,9 +53,9 @@ func AllByPrincipal(ctx context.Context, l CapabilityLister, req ListByPrincipal
 // yields every row in its order, as AllByPrincipal does. Spend moves between
 // pages, so a tenant may be yielded twice or not at all; see
 // TenantBudgets.ListTenantBudgets.
-func AllTenantBudgets(ctx context.Context, l TenantBudgetLister, req ListTenantBudgetsRequest) iter.Seq2[TenantBudgetSummary, error] {
-	return func(yield func(TenantBudgetSummary, error) bool) {
-		walkPages(ctx, req.Cursor, func(ctx context.Context, cursor string) (Page[TenantBudgetSummary], error) {
+func AllTenantBudgets(ctx context.Context, l TenantBudgetLister, req ListTenantBudgetsRequest) iter.Seq2[TenantBudget, error] {
+	return func(yield func(TenantBudget, error) bool) {
+		walkPages(ctx, req.Cursor, func(ctx context.Context, cursor string) (Page[TenantBudget], error) {
 			req.Cursor = cursor
 			return l.ListTenantBudgets(ctx, req)
 		}, yield)
