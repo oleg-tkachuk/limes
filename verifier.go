@@ -243,9 +243,12 @@ func NewVerifier(cfg VerifierConfig) (*Verifier, error) {
 // branch on the failure mode.
 //
 // Order matters: nothing in the claims is read until the signature over
-// them has verified, so a forged token costs a header decode and one
-// signature check, and no claim-parsing path is reachable by an attacker.
-// The checks that need no I/O come before the revocation lookup.
+// them has verified, so a forged JWT costs a header decode and one signature
+// check, and no claim-parsing path is reachable by an attacker. A Biscuit is
+// read further before its signatures are checked: its container and every
+// block are decoded and their facts read as data, which MaxTokenBytes and
+// MaxBiscuitBlocks bound; none of it is trusted until the signatures have
+// verified. The checks that need no I/O come before the revocation lookup.
 func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapability, error) {
 	token, audience := req.Token, req.Audience
 	if token == "" {
