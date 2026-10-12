@@ -38,6 +38,19 @@ func TestPrincipalValidate(t *testing.T) {
 	}
 }
 
+func TestPrincipalTypeValidate(t *testing.T) {
+	for _, typ := range []PrincipalType{PrincipalUser, PrincipalAgent, PrincipalService} {
+		if err := typ.Validate(); err != nil {
+			t.Errorf("%q: Validate = %v, want nil", typ, err)
+		}
+	}
+	for _, typ := range []PrincipalType{PrincipalUnspecified, "robot", "Agent"} {
+		if err := typ.Validate(); !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("%q: Validate = %v, want ErrInvalidRequest", typ, err)
+		}
+	}
+}
+
 // Issue and Delegate refuse a subject Validate refuses.
 func TestIssueAndDelegateValidateTheSubject(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)

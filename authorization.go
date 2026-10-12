@@ -79,10 +79,14 @@ func isToken68(s string) bool {
 }
 
 // checkScheme holds a token's scheme to its binding (RFC 9449 §7.1, §7.2).
+// A scheme other than the ones ParseAuthorization returns is the caller's
+// error, ErrInvalidRequest.
 func checkScheme(scheme AuthScheme, bound bool) error {
 	switch {
 	case scheme == AuthSchemeUnspecified:
 		return nil
+	case scheme != AuthSchemeBearer && scheme != AuthSchemeDPoP:
+		return invalidRequest("unknown authorization scheme %q", scheme)
 	case bound && scheme != AuthSchemeDPoP:
 		return fmt.Errorf("%w: a key-bound token came as %s, not %s", ErrAuthSchemeMismatch, scheme, AuthSchemeDPoP)
 	case !bound && scheme == AuthSchemeDPoP:

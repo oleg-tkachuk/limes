@@ -123,14 +123,23 @@ func validResource(kind, s string) error {
 // outside the set would be signed and then read by every verifier as it
 // pleased.
 func (p Principal) Validate() error {
-	switch p.Type {
-	case PrincipalUser, PrincipalAgent, PrincipalService:
-	default:
-		return invalidRequest("principal type %q is not one of %q, %q, %q",
-			p.Type, PrincipalUser, PrincipalAgent, PrincipalService)
+	if err := p.Type.Validate(); err != nil {
+		return err
 	}
 	if p.Agent != nil && p.Type != PrincipalAgent {
 		return invalidRequest("principal of type %q carries agent details", p.Type)
 	}
 	return nil
+}
+
+// Validate reports whether t is one of the principal kinds, spelled as the
+// constants spell it. Every error matches ErrInvalidRequest.
+func (t PrincipalType) Validate() error {
+	switch t {
+	case PrincipalUser, PrincipalAgent, PrincipalService:
+		return nil
+	case PrincipalUnspecified:
+	}
+	return invalidRequest("principal type %q is not one of %q, %q, %q",
+		t, PrincipalUser, PrincipalAgent, PrincipalService)
 }

@@ -70,3 +70,15 @@ func TestVerifyHoldsTheSchemeToTheBinding(t *testing.T) {
 		})
 	}
 }
+
+// A scheme ParseAuthorization never returns is the caller's mistake, refused
+// before it is read as either binding.
+func TestVerifyRefusesAnUnknownScheme(t *testing.T) {
+	issuer, v, _, _ := buildIssuerVerifier(t)
+	_, token := issueFor(t, issuer)
+	const basic AuthScheme = "Basic"
+	_, err := v.Verify(context.Background(), VerifyRequest{Token: token, Audience: audienceData, Scheme: basic})
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("err = %v, want ErrInvalidRequest", err)
+	}
+}
