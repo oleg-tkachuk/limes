@@ -5,8 +5,8 @@
 Go (the `toolchain` in `go.mod`; the `go` directive is the oldest Go the
 module supports, and CI runs the suite on it too), [Task](https://taskfile.dev) and
 [golangci-lint](https://golangci-lint.run); Node and
-`npm ci --ignore-scripts --prefix .github/release` for the release-rule, release-notes and major-guard tests.
-govulncheck and actionlint are pinned in `tools/go.mod`, yq in
+`npm ci --ignore-scripts --prefix .github/release` for the release-rule, release-notes, major-guard and
+module-commits tests. govulncheck, actionlint and apidiff are pinned in `tools/go.mod`, yq in
 `tools/yq/go.mod`, and all run through `go tool`, so they need no install.
 
 ```bash
@@ -15,9 +15,11 @@ task verify-all
 
 runs gofmt, `go mod tidy` and `go mod verify`, golangci-lint, `go vet` of a
 32-bit build, the unit suite, `./example` end to end, govulncheck, actionlint,
-the tests of the workflow scripts, the release-rule, release-notes and major-guard tests,
-and the static checks of `pgstore` — the same task CI runs. It needs no
-database, no network and no container.
+the tests of the workflow scripts, the release-rule, release-notes, major-guard and
+module-commits tests, the gate of `redisreplay` (its tests on miniredis
+included) and the static checks of `pgstore` — the same task CI runs. It
+needs no database and no container; it does need the network, for the shared
+Taskfile include, `go mod verify` and govulncheck's database.
 
 `pgstore`, the reference PostgreSQL store, is a module of its own. Its tests run
 the contract suites against PostgreSQL in a container, so they need a running
@@ -26,6 +28,16 @@ Docker, and run apart:
 ```bash
 task test:pgstore
 ```
+
+`redisreplay`'s contract against a real Redis runs apart too, at the address
+`LIMES_REDIS_ADDR` names (`host:port`); miniredis runs another Lua, so this is
+the check of the script itself:
+
+```bash
+task test:redisreplay
+```
+
+Both are jobs CI requires before a release.
 
 ## How a change lands
 

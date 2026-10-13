@@ -11,7 +11,8 @@
 //	records, err := pgstore.NewStore(pgstore.Config{DB: pool})
 //	usage, err := pgstore.NewUsageStore(pgstore.Config{DB: pool})
 //
-// Every call runs in one transaction on one connection, and every time it
+// Every call runs in one transaction on one connection — but for the two
+// revocation checks, each a single statement (see Tenants) — and every time it
 // writes or compares against comes from Config.Now, never from the database's
 // own clock: the store's clock is the one limes measures expiry and purging
 // by, and a database clock beside it would be a second one.

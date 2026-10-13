@@ -20,4 +20,5 @@ A fork's pull request is never merged automatically, and one that touches
 
 ## Supported versions
 
-Pre-1.0: only the latest release. There are no maintenance branches.
+Pre-1.0: only the latest release of each module — `limes`, `pgstore` and
+`redisreplay`. There are no maintenance branches.

@@ -131,7 +131,7 @@ operation under a capability it already verified asks them directly, through
 the same one definition:
 
 ```go
-if err := cap.Caveats.CheckSource(clientAddr); err != nil { /* per connection */ }
+if err := cap.Caveats.CheckSource(clientAddr); err != nil { /* per connection: limes.ErrSourceIPNotAllowed */ }
 
 err := cap.Caveats.Check(limes.CheckRequest{
     Op:                limes.OpGet,
@@ -204,7 +204,9 @@ left out fails closed instead of opening up.
 
 **The rule**: only a parent granted `OpShare` may delegate — without it,
 `ErrOpNotAllowed` — and a child may only be narrower. Ask for an operation the parent
-lacks, a wider scope or a bigger budget, and you get `ErrDelegationTooWide`; a
+lacks, a wider scope, a bigger budget, a wider audience or another tenant —
+or drop the parent's key binding or `IdempotencyKeyRequired`, or grant an
+`AllowTaintedRead` it lacks — and you get `ErrDelegationTooWide`; a
 TTL that would outlive the parent is cut to the parent's expiry, and a child
 starts no earlier than its parent (its `NotBefore`, else its issuance). Ask for a different `UnitCode` and you get
 `ErrUnitCodeMismatch` — units are never converted. Each child resource must be
@@ -315,7 +317,10 @@ It keeps one sorted set per capability, so one call is one atomic script on
 one key, Redis Cluster included, and it decides what is live by the
 verifier's clock, never the server's. Run it with `maxmemory-policy
 noeviction`: full, Redis refuses the write and the proof is refused, where an
-eviction policy would forget a live id.
+eviction policy would forget a live id. Redis replicates asynchronously, so
+a failover can lose ids the old primary acknowledged and a proof can then be
+replayed once inside its window; where that matters, keep `Window` short or
+require server nonces.
 
 ## Narrow offline (Biscuit)
 
@@ -343,7 +348,8 @@ and (on an unbound token) bind a key. The verifier folds each block in
 through `Narrows`, so an attenuated token is checked exactly like a
 delegated one. A block that asks for more than the token has, or holds
 anything else (Datalog rules and checks included), makes the whole token
-invalid; a later `ExpiresAt` is ignored rather than refused. An attenuated copy spends its capability's budget and request
+invalid — `ErrBiscuitAttenuation`, which matches `ErrInvalidToken`; a later
+`ExpiresAt` is ignored rather than refused. An attenuated copy spends its capability's budget and request
 count, and revoking the capability revokes every copy.
 
 A copy can also get limits of its own: `Requests` and `Budget` on the
@@ -360,7 +366,7 @@ with its limits unkept — a configuration error, answered as 500, not an
 invalid token, and returned only once the token has passed every other
 check.
 `verifier.BiscuitCopy` names the limits in force on a copy, on any verifier,
-and a `CopyUsageReader` (`memstore` implements one) reads what each has
+and a `CopyUsageReader` (`memstore` and `pgstore` implement one) reads what each has
 counted: `CopyUsage` takes a `CopyUsageRequest` of up to `MaxCopyUsageIDs`
 revocation ids and returns, in a `CopyUsageResult`, the counters of those
 used; a copy never used is absent. A copy cannot delegate — a server-side child would be an ordinary
@@ -403,7 +409,11 @@ Biscuit copy's limits, all as the token states them: a request has no field
 to type a ceiling into, or to leave at zero and so lift one.
 
 Every ceiling is checked: each Biscuit copy's own, the capability's, each ancestor's, then the tenant aggregate. If **any**
-rejects, no counter moves, so a retry after rejection is safe.
+rejects, no counter moves, so a retry after rejection is safe. A copy's,
+the capability's or an ancestor's ceiling refuses as `ErrBudgetExceeded`, the tenant's as
+`ErrTenantBudgetExceeded`. Requests are counted apart, by `Meter.Bump` with
+the same subject, against the request ceilings of the same copies, capability and ancestors; past one
+it is `ErrRequestLimitExceeded`.
 
 `receipt.ChargeID` names the ledger row. Refund against it:
 
@@ -687,6 +697,13 @@ see every tenant, as the verifier asks them before it knows the token's.
 `onCharged` runs on the store's own `pgx.Tx`. Every time it writes comes from
 `Config.Now`, never from the database's clock.
 
+Run `Migrate` as the role that owns the schema and serve as another one: the
+owner is not bound by the policies. `Config.CheckTenant` runs in `Insert`'s
+transaction, so a consumer that keeps its own tenants answers
+`ErrUnknownTenant` and `ErrTenantDeleted` from the same snapshot the record is
+written in; `Config.Scope` replaces `ScopeFromContext` for a consumer whose
+policies read settings of their own.
+
 Elsewhere, implement these and you are done:
 
 | Interface | Stores | Transactions needed? |
@@ -812,7 +829,7 @@ log. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
 | `CopyUsageRequest.RevocationIDs` | at most `MaxCopyUsageIDs`, 500 |
 | `RevocationCacheConfig` · `BiscuitRevocationCacheConfig` | `DefaultRevocationCacheTTL` 2 seconds · `DefaultRevocationCacheEntries` 100 000, the oldest dropped first past it; a negative TTL or bound is refused — for no cache, give the verifier the store itself |
 | `jwks.RemoteConfig` | `jwks.DefaultFetchTimeout` 10s · `DefaultRefreshInterval` 5m · `DefaultMinRefreshInterval` 10s · `DefaultMaxStale` 1h · `DefaultMaxDocumentBytes` 1 MiB |
-| `dpop.VerifierConfig.Window` | `dpop.DefaultWindow`, 1 minute |
+| `dpop.VerifierConfig.Window` | `dpop.DefaultWindow`, 1 minute; a proof's id is remembered for `Window` plus `dpop.ReplayClockSkew`, 5 seconds |
 | `dpop.VerifierConfig.MaxProofBytes` | `dpop.DefaultMaxProofBytes`, 4 KiB; a `jti` past `dpop.MaxJTIBytes`, 128 bytes, is refused |
 | `dpop.MemoryReplayCacheConfig` | `dpop.DefaultReplayCacheEntries`, 100 000 ids; `dpop.DefaultReplayEntriesPerHolder`, 1 000, per capability |
 | `redisreplay.Config` | `redisreplay.DefaultKeyPrefix`, `limes:dpop:replay:`; `dpop.DefaultReplayEntriesPerHolder`, 1 000, per capability |
@@ -821,4 +838,5 @@ log. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
 | `MaxExternalRefBytes` | 200 |
 | `MaxNanos` | just under a billion units |
 | `MaxIJSONInteger` | 2^53 − 1, for every integer in a token |
+| `Env.CheckTimeout` of every conformance suite | `DefaultCheckTimeout`, 1 minute a check |
 

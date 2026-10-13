@@ -125,7 +125,7 @@ API, and this file stops growing.
   `TokenTypeV4` is a `TokenType`. An empty `AcceptTokenTypes` accepts
   `TokenTypeV4`, and an empty `KeyIssuers` binds no kid, where both were
   refused.
-- `dpop.Sign(req)` → `dpop.Sign(ctx, req)`, and `ProofRequest.Now` is
+- `dpop.Sign(key, req)` → `dpop.Sign(ctx, key, req)`, and `ProofRequest.Now` is
   required. `NewMemoryReplayCache` refuses `EntriesPerKey` above `MaxEntries`.
 - `LoadKey(path, kid)` → `LoadKey(path)`, deriving the kid; set
   `SigningKey.KeyID` to name it otherwise.
@@ -330,7 +330,7 @@ API, and this file stops growing.
 
 - `dpop.Verifier{…}` → `dpop.NewVerifier(VerifierConfig)`, fields unexported;
   it takes its clock from its own `VerifierConfig.Now`.
-- `NewMemoryReplayCache(opts…)` → takes `MemoryReplayCacheConfig`;
+- `NewMemoryReplayCache(maxEntries, opts…)` → takes `MemoryReplayCacheConfig`;
   `NewHMACNonces` → takes `HMACNoncesConfig`; both return an error.
   `ReplayCacheOption`, `WithEntriesPerKey` → removed.
 - `jwks.Handler(keys, maxAge)` → `jwks.NewHandler(HandlerConfig)` returning
@@ -342,7 +342,7 @@ API, and this file stops growing.
 - `ListByPrincipalRequest.Validate`, the new
   `ListTenantBudgetsRequest.Validate` → refuse a negative `Limit`, the latter
   also a `ThresholdPct` outside 0..100; the suites check a store refuses them.
-- `NewCachedRevocationChecker(opts…)`, `NewCachedBiscuitRevocationChecker(opts…)`
+- `NewCachedRevocationChecker(upstream, ttl, opts…)`, `NewCachedBiscuitRevocationChecker(upstream, ttl, opts…)`
   → take `RevocationCacheConfig`, `BiscuitRevocationCacheConfig` and return an
   error. `CacheOption`, `WithMaxEntries` → removed; a negative TTL no longer
   disables the cache.
@@ -402,8 +402,8 @@ The key-set API moved to `github.com/oleg-tkachuk/limes/jwks`:
   `ErrUnauthenticated`.
 - `ErrChargeNotFound`, `ErrReservationNotFound`, `ErrUsageNotFound`,
   `ErrTenantBudgetNotFound` → also match `ErrNotFound`.
-- `ErrInvalidSignature` → `ErrInvalidToken`; reason `invalid_signature` →
-  `invalid_token`.
+- `ErrInvalidSignature` → `ErrInvalidToken`; `ReasonInvalidSignature` →
+  `ReasonInvalidToken`, reason `invalid_signature` → `invalid_token`.
 - `ErrJWKSUnavailable`, and any `KeyResolver` error but `ErrUnknownKID`,
   matched `ErrInvalidSignature` → match it no longer; `ErrorResponse` answers
   a custom resolver's failure with 500.
