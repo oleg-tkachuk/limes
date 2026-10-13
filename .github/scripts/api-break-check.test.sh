@@ -80,6 +80,65 @@ if [ "$(git -C "$scratch" worktree list | wc -l)" -ne 1 ]; then
     failures=$((failures + 1))
 fi
 
+# A repository of two modules, as the release scopes them: each module's API
+# is checked in its own directory, against the markers of the commits that
+# touch it.
+nested="$scratch/nested"
+readonly NESTED=redisreplay
+git -C "$scratch" init --quiet --initial-branch=main "$nested"
+git -C "$nested" config user.name test
+git -C "$nested" config user.email test@example.com
+mkdir -p "$nested/.github/release"
+cp "$root/.github/release/modules.cjs" "$nested/.github/release/"
+(cd "$nested" && go mod init example.com/m >/dev/null 2>&1)
+printf 'package m\n\nfunc A() {}\n' >"$nested/m.go"
+git -C "$nested" add -A
+git -C "$nested" commit --quiet -m "feat: add A"
+git -C "$nested" checkout --quiet -b without-nested
+mkdir "$nested/$NESTED"
+(cd "$nested/$NESTED" && go mod init "example.com/m/$NESTED" >/dev/null 2>&1)
+printf 'package %s\n\nfunc R() {}\n' "$NESTED" >"$nested/$NESTED/r.go"
+git -C "$nested" add -A
+git -C "$nested" commit --quiet -m "feat($NESTED): add R"
+git -C "$nested" checkout --quiet main
+git -C "$nested" merge --quiet --ff-only without-nested
+
+# check_module name, want, module, messages: the first commit drops R, each
+# message after it is a commit touching the root module only.
+check_module() {
+    local name="$1" want="$2" module="$3" first="$4"
+    shift 4
+    git -C "$nested" checkout --quiet -B case main
+    printf 'package %s\n' "$NESTED" >"$nested/$NESTED/r.go"
+    git -C "$nested" commit --quiet -a -m "$first"
+    local message
+    for message in "$@"; do
+        printf '// %s\n' "$message" >>"$nested/m.go"
+        git -C "$nested" commit --quiet -a -m "$message"
+    done
+    local got=pass
+    (cd "$nested" && "$script" main case "$module" >/dev/null 2>&1) || got=fail
+    if [ "$want" != "$got" ]; then
+        printf 'FAIL %s: want %s, got %s\n' "$name" "$want" "$got"
+        failures=$((failures + 1))
+    fi
+}
+
+check_module "a nested break, unmarked" fail "$NESTED" "fix($NESTED): drop R"
+check_module "a nested break, marked on its commit" pass "$NESTED" "fix($NESTED)!: drop R"
+check_module "a nested break, marked on a root commit only" fail "$NESTED" "fix($NESTED): drop R" "docs!: say R is gone"
+check_module "a nested break, checked for the root" pass limes "fix($NESTED): drop R"
+
+# A module the merge base does not hold yet has no API to break.
+git -C "$nested" checkout --quiet -B case without-nested
+git -C "$nested" checkout --quiet -B base main~1
+got=pass
+(cd "$nested" && "$script" base case "$NESTED" >/dev/null 2>&1) || got=fail
+if [ "$got" != pass ]; then
+    printf 'FAIL a module new since the merge base: want pass, got %s\n' "$got"
+    failures=$((failures + 1))
+fi
+
 if [ "$failures" -gt 0 ]; then
     exit 1
 fi

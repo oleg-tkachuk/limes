@@ -38,6 +38,17 @@ later="$(commit "fix: later")"
 expect "a push after a release" "$(printf 'base=v0.2.0\nhead=%s' "$later")" push "" "" "$later"
 expect "a pull request" "$(printf 'base=%s\nhead=%s' "$first" "$later")" pull_request "$first" "$later" "$later"
 
+# With the module table, a push is checked from the module's own newest tag.
+mkdir -p "$scratch/.github/release"
+cp "$root/.github/release/modules.cjs" "$scratch/.github/release/"
+git -C "$scratch" add .github
+git -C "$scratch" commit --quiet -m "build: add the module table"
+git -C "$scratch" tag redisreplay/v0.1.0
+nested_later="$(commit "fix(redisreplay): later")"
+expect "a push, the root module" "$(printf 'base=v0.2.0\nhead=%s' "$nested_later")" push "" "" "$nested_later"
+expect "a push, the nested module" "$(printf 'base=redisreplay/v0.1.0\nhead=%s' "$nested_later")" push "" "" "$nested_later" redisreplay
+expect "a pull request, the nested module" "$(printf 'base=%s\nhead=%s' "$first" "$nested_later")" pull_request "$first" "$nested_later" "$nested_later" redisreplay
+
 if [ "$failures" -gt 0 ]; then
     exit 1
 fi

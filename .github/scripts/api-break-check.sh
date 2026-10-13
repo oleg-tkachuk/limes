@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # api-break-check.sh — does a change break the Go API without saying so?
 #
-# Usage: api-break-check.sh <base> <head>
+# Usage: api-break-check.sh <base> <head> [module]
 #
 # Compares the exported API of the module at the merge base of <base> and
 # <head> with the one at <head>, using apidiff. An incompatible change passes
@@ -17,13 +17,16 @@
 # no break passes, marked or not: it needs a /vN module path, planned on its
 # own. marker-check.sh keeps the markers off that line.
 #
-# Run from the module's root. APIDIFF overrides the apidiff command; by
-# default it is the version tools/go.mod pins.
+# The module is the one named, as .github/release/modules.cjs scopes it — the
+# root module when none is — and only the commits that touch it count as its
+# markers (breaking-markers.sh). A module not yet at the merge base has no
+# API to break. Run from anywhere in the repository. APIDIFF overrides the
+# apidiff command; by default it is the version tools/go.mod pins.
 
 set -euo pipefail
 
-if [ "$#" -ne 2 ]; then
-    echo "usage: $0 <base> <head>" >&2
+if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
+    echo "usage: $0 <base> <head> [module]" >&2
     exit 2
 fi
 base="$1"
@@ -36,10 +39,12 @@ apidiff=(go tool "-modfile=$root/tools/go.mod" apidiff)
 if [ -n "${APIDIFF:-}" ]; then
     read -r -a apidiff <<<"$APIDIFF"
 fi
-module="$(go mod edit -json | jq -r .Module.Path)"
 
 # shellcheck source=.github/scripts/breaking-markers.sh
 source "$(dirname "${BASH_SOURCE[0]}")/breaking-markers.sh"
+select_module "${3:-$ROOT_MODULE}"
+# The module's directory, from the repository root: `.` for the root module.
+dir="${MODULE_DIR:-.}"
 
 work="$(mktemp -d)"
 cleanup() {
@@ -53,12 +58,20 @@ trap cleanup EXIT
 
 merge_base="$(git merge-base "$base" "$head")"
 git worktree add --quiet --detach "$work/base" "$merge_base"
-(cd "$work/base" && "${apidiff[@]}" -m -w "$work/base.api" "$module")
 git worktree add --quiet --detach "$work/head" "$head"
-breaks="$(cd "$work/head" && "${apidiff[@]}" -m -incompatible "$work/base.api" "$module")"
+for tree in base head; do
+    if [ ! -f "$work/$tree/$dir/go.mod" ]; then
+        echo "api-break-check: $MODULE_NAME: no module at the $tree, so no API to compare"
+        exit 0
+    fi
+done
+# The path the change leaves the module at, which its API is read under.
+module="$(cd "$work/head/$dir" && go mod edit -json | jq -r .Module.Path)"
+(cd "$work/base/$dir" && "${apidiff[@]}" -m -w "$work/base.api" "$module")
+breaks="$(cd "$work/head/$dir" && "${apidiff[@]}" -m -incompatible "$work/base.api" "$module")"
 
 if [ -z "$breaks" ]; then
-    echo "api-break-check: no incompatible API change"
+    echo "api-break-check: $MODULE_NAME: no incompatible API change"
     exit 0
 fi
 
@@ -66,12 +79,12 @@ printf 'Incompatible API changes since %s:\n%s\n' "$merge_base" "$breaks"
 
 line="$(release_line "$merge_base")"
 if stable_at "$merge_base"; then
-    echo "api-break-check: the API is stable on this line (${line:-untagged yet}); an incompatible change needs a new module path" >&2
+    echo "api-break-check: $MODULE_NAME: the API is stable on this line (${line:-untagged yet}); an incompatible change needs a new module path" >&2
     exit 1
 fi
 if marks_breaking "$merge_base" "$head"; then
-    echo "api-break-check: a commit marks the change breaking"
+    echo "api-break-check: $MODULE_NAME: a commit marks the change breaking"
     exit 0
 fi
-echo "api-break-check: no commit marks these changes breaking — add ! to the subject or a BREAKING CHANGE: footer" >&2
+echo "api-break-check: $MODULE_NAME: no commit marks these changes breaking — add ! to the subject or a BREAKING CHANGE: footer" >&2
 exit 1

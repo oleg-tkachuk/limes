@@ -234,7 +234,8 @@ jobs:
         run: go test -race ./...
 
   # The release is computed from commit types, so a break of the Go API that
-  # no commit marks breaking would ship as a patch or a feature. apidiff
+  # no commit marks breaking would ship as a patch or a feature. Each module
+  # the repository releases is checked against the commits that touch it. apidiff
   # compares the pull request's API with its merge base; an incompatible
   # change needs a `!` or a BREAKING CHANGE: footer in one of its commits.
   # A push to main is checked again from the last release, and the release
@@ -262,20 +263,21 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      - name: Name the commits to check
-        id: range
+      # The module table the checks read is JavaScript: .github/release/modules.cjs.
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+
+      # Every module, each from its own last release on a push: see
+      # .github/scripts/check-modules.sh.
+      - name: Require a break of the API to be marked breaking
         env:
           EVENT: ${{ github.event_name }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
-        run: ./.github/scripts/check-range.sh "$EVENT" "$PR_BASE" "$PR_HEAD" "$GITHUB_SHA" >>"$GITHUB_OUTPUT"
-
-      - name: Require a break of the API to be marked breaking
-        if: steps.range.outputs.base != ''
-        env:
-          BASE: ${{ steps.range.outputs.base }}
-          HEAD: ${{ steps.range.outputs.head }}
-        run: ./.github/scripts/api-break-check.sh "$BASE" "$HEAD"
+        run: ./.github/scripts/check-modules.sh api "$EVENT" "$PR_BASE" "$PR_HEAD" "$GITHUB_SHA"
 
   # From v1.0.0 on no commit may mark itself breaking: the release would cut
   # a major the Go proxy ignores. Git alone answers it, so it runs on every
@@ -299,21 +301,20 @@ jobs:
           # that say which release line it builds on.
           fetch-depth: 0
 
-      - name: Name the commits to check
-        id: range
+      # The module table the checks read is JavaScript: .github/release/modules.cjs.
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+
+      - name: Refuse a breaking marker on a stable release line
         env:
           EVENT: ${{ github.event_name }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
-        run: ./.github/scripts/check-range.sh "$EVENT" "$PR_BASE" "$PR_HEAD" "$GITHUB_SHA" >>"$GITHUB_OUTPUT"
-
-      - name: Refuse a breaking marker on a stable release line
-        if: steps.range.outputs.base != ''
-        env:
-          BASE: ${{ steps.range.outputs.base }}
-          HEAD: ${{ steps.range.outputs.head }}
           PR_TITLE: ${{ github.event.pull_request.title }}
-        run: ./.github/scripts/marker-check.sh "$BASE" "$HEAD"
+        run: ./.github/scripts/check-modules.sh markers "$EVENT" "$PR_BASE" "$PR_HEAD" "$GITHUB_SHA"
 
   # Two jobs over the same files, and the halves do not overlap. actionlint
   # covers whether a workflow is correct at all — schema, expression syntax,

@@ -62,6 +62,7 @@ select_module() {
         console.log(cfg.scope.dir);
         console.log(m.tagPrefix(cfg.scope.dir));
     ' "$config" "$1")" || return 1
+    # shellcheck disable=SC2034 # read by the scripts that source this one
     MODULE_DIR="$(sed -n 1p <<<"$scope")"
     MODULE_PREFIX="$(sed -n 2p <<<"$scope")"
 }
