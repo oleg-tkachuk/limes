@@ -231,6 +231,14 @@ func (s *Store) Insert(_ context.Context, req limes.InsertRequest) error {
 		if c.Subject.TenantID != parent.Subject.TenantID {
 			return fmt.Errorf("%w: tenant %s, not its parent's %s", limes.ErrDelegationTooWide, c.Subject.TenantID, parent.Subject.TenantID)
 		}
+		// The child's ancestors are its parent and the parent's own.
+		ancestors, err := s.ancestorsLocked(c.ParentID)
+		if err != nil {
+			return err
+		}
+		if len(ancestors) >= limes.MaxDelegationDepth {
+			return fmt.Errorf("%w: %s would have more than %d ancestors", limes.ErrDelegationTooDeep, c.ID, limes.MaxDelegationDepth)
+		}
 	}
 	// Copies in and out: the caller keeps its slices, and a record never
 	// changes after it is written.

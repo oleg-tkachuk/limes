@@ -13,6 +13,14 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.57.0
+
+- `Store.Insert` accepted a child with more than `MaxDelegationDepth`
+  ancestors on record, and `Delegate` refused it only once it was written →
+  `Insert` refuses one as `ErrDelegationTooDeep` and writes nothing.
+  `storetest` checks it; `metertest.Env.NewCapability` returns the store's
+  error, which a check now matches.
+
 ## v0.55.0
 
 - `Store.Insert` accepted a child in another tenant than its parent → it
