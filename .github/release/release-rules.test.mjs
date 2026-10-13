@@ -28,6 +28,9 @@ const cases = [
   ["test: cover a thing", null],
   ["build: pin the toolchain", null],
   ["ci: cache the module", null],
+  // pgstore, untagged, releases nothing of the limes module.
+  ["feat(pgstore): add the meter", null],
+  ["fix(pgstore): lock in order", null],
 ];
 
 const logger = { log() {}, error() {}, warn() {}, success() {} };
