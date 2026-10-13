@@ -173,7 +173,10 @@ major the module path does not carry.
 - Moving the meter out of the root: it leans on the capability types, so it
   stays until a v2 (decision 7 splits only `jwks` and `dpop`).
 - A Postgres reference store in its own module, to prove `Store` and
-  `UsageStore` against row-level security before they freeze.
+  `UsageStore` against row-level security before they freeze. **Done:**
+  `pgstore`, held to storetest and metertest under row-level security; it
+  moved one rule into the contract — `Store.Insert` refuses a child in
+  another tenant than its parent.
 
 ## Plan
 

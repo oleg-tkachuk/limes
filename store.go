@@ -75,8 +75,8 @@ func (r InsertRequest) Validate() error {
 }
 
 // Store persists capability records and revocation entries. Consumers supply
-// the implementation; memstore ships an in-memory one, and a store over a
-// database is the consumer's own.
+// the implementation: memstore ships an in-memory one, and the module
+// github.com/oleg-tkachuk/limes/pgstore one over PostgreSQL.
 //
 // Records are append-mostly: capabilities aren't mutated after issuance
 // except via Revoke. Revocations are checked by the verifier on every
