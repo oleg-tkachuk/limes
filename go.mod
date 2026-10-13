@@ -7,7 +7,9 @@
 //
 // Persistence is the consumer's concern — the module publishes the storage
 // contracts (Store, UsageStore[TX], KeyResolver and the optional ones) and no
-// implementation beyond memstore.
+// implementation beyond memstore. The PostgreSQL one, pgstore, is a module of
+// its own (github.com/oleg-tkachuk/limes/pgstore), so its driver stays out of
+// this graph.
 module github.com/oleg-tkachuk/limes
 
 go 1.26.0

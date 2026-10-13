@@ -606,8 +606,10 @@ run as the pool has connections. Every suite bounds each check by
 `CheckTimeout` (a minute unless the Env sets it); a check that outlives it
 stops the test binary with every goroutine's stack, naming the check.
 
-`memstore` runs the same checks from its own tests, and `dpop` and `jwks` run
-theirs against their shipped implementations.
+`memstore` and `pgstore` run the same checks from their own tests — `pgstore`
+against PostgreSQL in a container, as a role that owns no table, on a pool of
+two connections — and `dpop` and `jwks` run theirs against their shipped
+implementations.
 
 `Instrument` wraps a `UsageStore` and keeps every interface of `limes` the
 store implements — today the optional `CopyUsageReader`. A decorator of your
@@ -665,7 +667,27 @@ any `Leeway` up to `MaxLeeway`, and `Purge` any `ExpiredFor` from
 
 ## Bring your own storage
 
-Implement these and you are done:
+On PostgreSQL, take `pgstore` (`github.com/oleg-tkachuk/limes/pgstore`, a
+module of its own): it implements every contract below but `KeyResolver` and
+the DPoP stores, passes `storetest` and `metertest`, and keeps tenants apart
+with row-level security.
+
+```go
+if err := pgstore.Migrate(ctx, pool); err != nil { /* … */ }
+records, _ := pgstore.NewStore(pgstore.Config{DB: pool})
+usage, _ := pgstore.NewUsageStore(pgstore.Config{DB: pool})
+// A call for one tenant; housekeeping and ListTenantBudgets take
+// pgstore.WithAllTenants(ctx).
+err := records.Revoke(pgstore.WithTenant(ctx, tenant), limes.RevokeRequest{CapabilityID: id})
+```
+
+A role that does not own the tables sees only the rows of the tenant a call
+is scoped to, and none when it is scoped to no tenant; the revocation checks
+see every tenant, as the verifier asks them before it knows the token's.
+`onCharged` runs on the store's own `pgx.Tx`. Every time it writes comes from
+`Config.Now`, never from the database's clock.
+
+Elsewhere, implement these and you are done:
 
 | Interface | Stores | Transactions needed? |
 |---|---|---|
