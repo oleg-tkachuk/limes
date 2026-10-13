@@ -13,11 +13,18 @@ process.
 ## Contract boundary
 
 The module ships the primitive and its contracts; the consumer supplies the
-storage behind them. `memstore` is the in-memory reference implementation; a
-store over a database is the consumer's own. The two Biscuit contracts are
-needed only by a consumer that accepts the Biscuit form, and `dpop.ReplayCache` and
-`dpop.Nonces` only by one that binds capabilities to keys. `storetest`, `metertest`,
-`dpoptest` and `jwkstest` check an implementation against its contract from its own tests.
+storage behind them, or takes one of the stores this repository ships:
+`memstore` in memory, and the nested modules `pgstore`, every store contract
+over PostgreSQL with row-level security, and `redisreplay`, a
+`dpop.ReplayCache` over Redis. Each nested module has its own `go.mod` and its
+own tag line, so the root module's dependency graph stays free of a driver.
+The two Biscuit contracts are needed only by a consumer that accepts the
+Biscuit form, and `dpop.ReplayCache` and `dpop.Nonces` only by one that binds
+capabilities to keys. `storetest`, `metertest`, `dpop/dpoptest` and
+`jwks/jwkstest` check an implementation against its contract from its own
+tests — the Biscuit and copy contracts too, when the store under test
+implements them — and bound every check by `Env.CheckTimeout`, so a store that
+deadlocks fails the check instead of hanging the run.
 
 ```mermaid
 flowchart LR
@@ -29,7 +36,7 @@ flowchart LR
         signer["<b>Signer</b><br/>NewSigner · JWT Ed25519"]
         narrows["<b>Narrows</b><br/>child ⊆ parent"]
         verifier["<b>Verifier</b><br/>Authorize · Verify · BiscuitCopy<br/>ErrorResponse · DPoPNonce"]
-        caveats["<b>Caveats</b><br/>Check · CheckSource · MatchResource"]
+        caveats["<b>Caveats</b><br/>Check · CheckSource · AllowsResource"]
         cache["CachedRevocationChecker<br/>TTL · bounded, oldest out · single-flight"]
         bcache["CachedBiscuitRevocationChecker<br/>per revocation id · TTL · bounded · single-flight"]
         attenuate["<b>Attenuate</b><br/>offline · no key"]
@@ -37,7 +44,7 @@ flowchart LR
         static["jwks.Static<br/>SetKey · RemoveKey"]
         remote["jwks.Remote<br/>ETag · Cache-Control · MaxStale<br/>held keys served, refreshed behind"]
         dpop["dpop.Verifier<br/>VerifierConfig.DPoP · dpop.Sign"]
-        suites["storetest · metertest<br/>dpoptest · jwkstest<br/>conformance suites"]
+        suites["storetest · metertest<br/>dpoptest · jwkstest<br/>conformance suites · CheckTimeout"]
         jwksh["jwks.NewHandler<br/>ETag · max-age"]
         nonce["dpop.HMACNonces<br/>stateless DPoP nonces"]
     end
@@ -53,7 +60,11 @@ flowchart LR
         nonces["<b>dpop.Nonces</b><br/>Nonce · Valid"]
     end
 
-    impl[("memstore · PostgreSQL · …")]
+    impl[("memstore · your own store")]
+    pg["<b>pgstore</b> (nested module)<br/>Store · BiscuitRevocationStore<br/>UsageStore[pgx.Tx] · CopyUsageReader<br/>Migrate · WithTenant · row-level security"]
+    rr["<b>redisreplay</b> (nested module)<br/>Cache: dpop.ReplayCache over Redis"]
+    pgdb{{"PostgreSQL"}}
+    redis{{"Redis"}}
     jwks{{"Issuer JWKS endpoint"}}
     otel{{"OTel MeterProvider"}}
 
@@ -83,10 +94,19 @@ flowchart LR
     suites -. "check" .-> keys
     suites -. "check" .-> replay
     suites -. "check" .-> nonces
+    suites -. "check" .-> brev
+    suites -. "check" .-> cusage
     store --> impl
     usage --> impl
     brev --> impl
     cusage --> impl
+    pg -. "implements" .-> store
+    pg -. "implements" .-> usage
+    pg -. "implements" .-> brev
+    pg -. "implements" .-> cusage
+    pg --> pgdb
+    rr -. "implements" .-> replay
+    rr --> redis
 
     classDef client fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E
     classDef role fill:#DCFCE7,stroke:#16A34A,color:#14532D
@@ -95,10 +115,18 @@ flowchart LR
     classDef external fill:#FCE7F3,stroke:#DB2777,color:#831843
     class caller client
     class issuer,signer,narrows,verifier,caveats role
-    class cache,metering,static,remote,bcache,attenuate,dpop,suites,jwksh,nonce optional
+    class cache,metering,static,remote,bcache,attenuate,dpop,suites,jwksh,nonce,pg,rr optional
     class store,usage,keys,impl,brev,cusage,replay,nonces store
-    class jwks,otel external
+    class jwks,otel,pgdb,redis external
 ```
+
+The roles take narrower contracts than the stores implement: `IssuerConfig.Store`
+is an `IssuanceStore` (Insert · IsRevoked), `VerifierConfig.Revocations` a
+`RevocationLookup` and `VerifierConfig.BiscuitRevocations` a
+`BiscuitRevocationLookup`. A `Meter` counts against a `MeterSubject`, which
+only `VerifiedCapability.MeterSubject` or `StoredMeterSubject` over a
+`RecordReader` builds, so a charge always names a capability the verifier or
+the store vouched for.
 
 Every read names what it reads — `Store.GetRecord`, `MeterReader.GetUsage`,
 `TenantBudgets.GetTenantBudget` — so one type may implement `Store` and
@@ -123,15 +151,16 @@ sequenceDiagram
 
     Op->>I: Issue(IssueRequest)
     I->>I: Caveats.Validate · TTL → ExpiresAt, after IssuedAt
-    I->>I: Signer.sign(ctx, cap), within MaxTokenBytes
+    I->>I: sign with the Signer, within MaxTokenBytes
     I->>St: Store.Insert(InsertRequest{cap, IssuedBy})
     I-->>O: token
 
     O->>I: Delegate(DelegateRequest{Parent: Verify(token), Caveats})
-    I->>I: parent allows OpShare
+    I->>I: parent not a Biscuit copy · same issuer · allows OpShare
+    I->>I: Subject · Audience · Caveats.Validate · parent not expired
     I->>St: Store.IsRevoked(parent)
     I->>I: Narrows(parent, child)
-    I->>I: Signer.sign(ctx, child)
+    I->>I: sign the child with the Signer
     I->>St: Store.Insert(InsertRequest{child, IssuedBy: parent.Subject})
     I->>St: Store.IsRevoked(child) — depth within MaxDelegationDepth
     I-->>W: child token
@@ -140,8 +169,8 @@ sequenceDiagram
     S->>S: Authorize: Verify — signature · time · audience · DPoP
     S->>St: IsRevoked(child), inside Verify — via CachedRevocationChecker
     S->>S: Authorize: CheckSource(addr) · Check(op, resource)
-    S->>St: Bump · Charge, or Reserve then Settle
-    St-->>S: ChargeReceipt{ChargeID, SpentAmount}
+    S->>St: Bump · Charge, or Reserve then Settle — against VerifiedCapability.MeterSubject()
+    St-->>S: BumpReceipt · ChargeReceipt{ChargeID, SpentAmount} · Reservation
     S-->>W: response
 
     Op->>St: Store.Revoke(RevokeRequest{CapabilityID: parent, CascadeChildren})
@@ -172,7 +201,7 @@ flowchart TB
     key{"KeyResolver.PublicKey(kid)"}
     sig{"Ed25519 signature"}
     claims{"claims: strict parse — no unknown or duplicate member<br/>integers within ±(2^53 − 1) · sub = principal's subject"}
-    iss{"iss ∈ TrustedIssuers<br/>KeyIssuers[kid] = iss"}
+    iss{"iss ∈ TrustedIssuers<br/>KeyIssuers[kid] = iss, when KeyIssuers is set"}
     tenant{"Subject.TenantID set<br/>Subject.Validate · Caveats.Validate"}
     sealed{"no BiscuitRoot<br/>(not lifted out of a Biscuit)"}
     nbf{"now + Leeway ≥ NotBefore"}
@@ -217,7 +246,8 @@ flowchart TB
     nbf -- no --> early
     exp -- no --> expired
     aud -- no --> mism
-    scheme -- no --> wrong
+    scheme -- "mismatch" --> wrong
+    scheme -- "not Bearer, DPoP or unset" --> invalid
     bound -- "no dpop.Verifier" --> unsup
     pop -- no --> dpopErr
     pop -- "cannot answer" --> outage
@@ -253,14 +283,15 @@ an ordinary signed token, which passes the gates from the header to the tenant;
 that token names the key rooting the Biscuit's chain, which is checked next,
 and then each attenuation block is folded in. The time window, the audience,
 the scheme and the proof of possession — over the Biscuit as presented — apply
-once, to the narrowed capability that comes out, and both revocation lists are
-asked last.
+once, to the narrowed capability that comes out; both revocation lists are
+asked after them, and only then is a copy with counters refused at a verifier
+that does not meter them.
 
 ```mermaid
 flowchart TB
     tok(["Biscuit, audience"])
     on{"AcceptBiscuit"}
-    auth{"container decodes · ≤ MaxBiscuitBlocks blocks<br/>authority block: exactly one<br/>limes_capability fact, no rules"}
+    auth{"container decodes · ≤ MaxBiscuitBlocks blocks<br/>authority block: exactly one<br/>limes_capability fact, no rules, no checks"}
     sealed{"the sealed token: header · key · signature<br/>claims · issuer · tenant — and it carries BiscuitRoot"}
     chain{"signature chain verifies<br/>against BiscuitRoot"}
     subgraph fold ["each attenuation block, in order"]
@@ -333,7 +364,7 @@ answer through as an outage:
 ```mermaid
 flowchart TB
     p(["dpop.Request<br/>Proof{JWT · Method · URL} · Token · JKT · Holder"])
-    has{"proof present"}
+    has{"proof present<br/>(after Holder set, else an error)"}
     shape{"≤ MaxProofBytes · three segments · typ dpop+jwt<br/>a jwk with no private member"}
     jkt{"the jwk's RFC 7638 thumbprint<br/>= ConfirmationJKT"}
     psig{"signature by that key<br/>Ed25519 (or EdDSA) · ES256"}
@@ -364,7 +395,7 @@ flowchart TB
     iat -- no --> inv
     nonce -- no --> nn
     nonce -- "cannot answer" --> down
-    jti -- "seen, or the holder's share is full" --> rp
+    jti -- "seen, or no room for it" --> rp
     jti -- "cannot answer" --> down
 
     classDef client fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E
@@ -382,7 +413,9 @@ holding the same keys accept each other's nonces with no shared state, given
 clocks within `dpop.HMACNonceClockSkew`. `dpop.MemoryReplayCache` gives each holder — the
 capability the token carries — a share of its own, so one past its share has
 only its own proofs refused, however many keys its Biscuit copies are bound
-to; a full cache refuses rather than forgets. A proof past
+to; a full cache refuses rather than forgets. `redisreplay.Cache` keeps the
+same per-holder share in Redis, so replicas share one cache; it has no bound
+on the whole. A proof past
 `MaxProofBytes` is refused unread, and a `jti` past `dpop.MaxJTIBytes` is
 refused as `dpop.ErrInvalid`, never stored.
 
@@ -406,8 +439,10 @@ error's own text never reaches the client.
 | anything else — a store or key resolver outage, `ErrProofUnsupported`, `ErrEffectConflict`, `ErrCopyCountersNotMetered` | 500 | none |
 
 A verifier with DPoP configured adds a `DPoP algs="…"` challenge with no
-error code beside a `Bearer` one. Every challenge ends with
-`realm="…"`: `VerifierConfig.Realm`, or `DefaultRealm`.
+error code beside a `Bearer` one, and every `DPoP` challenge it answers
+carries `algs`. A challenge with an error code also carries
+`error_description`, the refusal's fixed title — never the error's own. Every
+challenge ends with `realm="…"`: `VerifierConfig.Realm`, or `DefaultRealm`.
 
 ## What the bearer may do
 
@@ -518,7 +553,7 @@ flowchart TB
     nar -- widens --> wide
     sign -- "too long" --> inval
     persist -- refused --> stored
-    depth -- no --> stored
+    depth -- "too deep" --> stored
 
     classDef client fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E
     classDef role fill:#DCFCE7,stroke:#16A34A,color:#14532D
@@ -621,9 +656,12 @@ ledger exactly as they were, so a retry after a rejection is safe.
 
 A cost known only afterwards goes through a reservation instead. `Reserve`
 holds an estimate against the same ceilings, and `Settle` charges the
-actual cost along the same path, releasing the hold in the same commit. Every
-ceiling counts open holds as well as spend, so two callers cannot both hold
-the last of a budget.
+actual cost along the same path, releasing the hold and deleting the
+reservation in the same commit. Every ceiling counts open holds as well as
+spend, so two callers cannot both hold the last of a budget. A settle takes
+its hold off before it measures, so one at or below the hold fits every
+ceiling that holds it — even one lowered or crossed since — and only an
+amount past the hold, or an ancestor that does not hold it, is checked.
 
 ```mermaid
 flowchart TB
@@ -653,7 +691,7 @@ flowchart TB
         w1["capability spend += Amount"]
         w2["each ancestor on the lineage as read now:<br/>spend += Amount"]
         w3["tenant spend += Amount<br/>(the row created, with no ceiling, if missing)"]
-        w0["settling: the hold leaves reserved on the capability,<br/>its copies, the tenant and each ancestor<br/>that held it and still has a row"]
+        w0["settling: the hold leaves reserved on the capability,<br/>its copies, the tenant and each ancestor<br/>that held it and still has a row; the reservation is deleted"]
         w4["ledger row: ChargeID · TenantID · Amount · UnitCode · At<br/>Ancestors · copy ids · Op · Actor · ExternalRef<br/>ReservationID · Overrun · tenant period"]
     end
 
@@ -717,24 +755,37 @@ named by `ExternalRef`, or a settle of a reservation already settled, returns
 the earlier charge and moves nothing; the same `ExternalRef` with another
 amount, unit or tenant is `ErrExternalRefConflict`.
 
-Holds and housekeeping, in `memstore` as the contract has them:
+Holds and housekeeping, in `memstore` and `pgstore` as the contract has them:
 
 - `Reserve` checks the same ceilings — never overrun — and holds the amount on
   the capability, each ancestor, the tenant (creating its row) and each copy;
   `Release` and `ReleaseExpired` take it off again. A hold never settled lapses
   at its `ExpiresAt` (default `DefaultReservationTTL`, five minutes) but keeps
   counting until `ReleaseExpired` runs, which errs towards refusing spend.
-- `DeleteUsage` releases the capability's holds before it drops its counters, and
-  `PurgeOrphans` releases the holds of every capability no longer on record:
-  nothing could settle or release them afterwards.
+- `DeleteUsage` releases the capability's holds before it drops its counters
+  and its copies', and `PurgeOrphans` releases the holds of every capability
+  no longer on record, a batch of `Limit` at a time: nothing could settle or
+  release them afterwards. Either takes the dropped ids off the ancestor
+  lists of the holds that remain.
 - `SetTenantBudget` is guarded by `ExpectedVersion` (0 for a tenant with no
   ceiling yet), refuses a new unit while anything is held in the old one, or
   spent in it unless `ResetSpend` closes that spend, and with `ResetSpend` opens a new accounting period, so a refund of an
   earlier period's charge leaves the new period's spend alone.
 
 A store with transactions runs stage and commit inside one, and passes its own
-handle as `tx`; a store without them is instantiated as
-`UsageStore[struct{}]` and the caller passes `nil` for `onCharged`.
+handle as `tx`; `onCharged` may be `nil`. A store without them, or a consumer
+with none, uses `UsageStore[struct{}]`; `memstore` still runs `onCharged`
+before it publishes, with the zero `TX` or the handle `TxFactory` makes.
+
+`pgstore` runs each call in one transaction, `onCharged` on that same
+`pgx.Tx`, so a rejection or a failing side effect rolls everything back. It
+locks in one order, so two calls never wait on each other in a cycle: the
+reservation being settled or released, then the lineage's records `FOR SHARE`
+in id order — a purge locks its batch in the same order — then the tenant's
+row, the usage rows by capability id and the copies' rows by revocation id. An
+`ExternalRef` is looked up again once the locks are held, since a concurrent
+delivery may have committed in between. A call holds one connection, so a
+small pool serves as many calls at once as it has connections.
 
 ## Revocation reaches the verifiers
 
@@ -746,10 +797,10 @@ Revocation is a write to the `Store`; verifiers see it through
 flowchart LR
     op(["Revoke(RevokeRequest{CapabilityID, Note, Actor, CascadeChildren})"])
     store[("<b>Store</b><br/>revoked set<br/>ParentID links")]
-    cascade["CascadeChildren:<br/>a revocation entry per descendant,<br/>for the audit trail"]
-    chain["IsRevoked(id):<br/>id or any ancestor still on record revoked<br/>past MaxDelegationDepth: ErrDelegationTooDeep"]
+    cascade["CascadeChildren:<br/>a revocation entry per descendant,<br/>MaxDelegationDepth generations down,<br/>for the audit trail; an earlier entry stands"]
+    chain["IsRevoked(id):<br/>id revoked, or any ancestor still on record revoked<br/>past MaxDelegationDepth: ErrDelegationTooDeep<br/>pgstore: one statement, every tenant"]
     cache["<b>CachedRevocationChecker</b><br/>answer cached for TTL (default 2s)<br/>one upstream call per id at a time<br/>bounded: the oldest answer makes room<br/>errors never cached · a Clear mid-lookup<br/>discards that lookup's answer"]
-    notify{{"consumer's revocation signal<br/>e.g. a Postgres channel"}}
+    notify{{"consumer's revocation signal<br/>e.g. a Postgres channel —<br/>neither shipped store emits one"}}
     bop(["RevokeBiscuit(RevokeBiscuitRequest{Copy: Verifier.BiscuitCopy(token)})"])
     blist[("<b>BiscuitRevocationStore</b><br/>revoked block ids")]
     bcache["<b>CachedBiscuitRevocationChecker</b><br/>answer per revocation id, cached for TTL<br/>bounded · dropped by Clear"]
@@ -789,8 +840,16 @@ predate the revocation, so it is neither cached nor shared with later checks.
 Revoked Biscuit copies travel the same way, on their own list and cache; one
 signal clears both.
 
+In `pgstore`, `Revoke` and `RevokeBiscuit` run under the caller's tenant —
+a capability it cannot see is `ErrNotFound` — while `IsRevoked` and
+`IsBiscuitRevoked` are each one statement calling a `SECURITY DEFINER`
+function of the schema, which sees every tenant: the verifier asks before it
+knows the token's. A revocation entry is deleted with its record, so once
+`Purge` reaps an ancestor the walk no longer reaches it — by then it has
+expired, and so has every descendant.
+
 A verifier that runs apart from the issuer resolves keys with
-`jwks.Remote`. It asks for `application/jwk-set+json`, keeps a set as
+`jwks.Remote`. It asks for `application/jwk-set+json` (then `application/json`), keeps a set as
 long as the response's `Cache-Control` says — `max-age` less `Age`, zero for
 `no-cache` or `no-store` — within `MinRefreshInterval` and `RefreshInterval`
 (`RefreshInterval` when the response says nothing), revalidates with an ETag,
