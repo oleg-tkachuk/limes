@@ -88,6 +88,18 @@ tasks:
     cmds:
       - go test -race -count=1 ./...
 
+  test:redisreplay:
+    desc: "redisreplay's contract against a real Redis at LIMES_REDIS_ADDR (host:port) — miniredis runs another Lua, so this is the check of the script itself"
+    dir: '{{.REDISREPLAY_DIR}}'
+    preconditions:
+      - sh: test -n "$LIMES_REDIS_ADDR"
+        msg: "LIMES_REDIS_ADDR is not set — start a Redis and name it as host:port"
+    env:
+      # An unset address fails the run rather than skipping it.
+      LIMES_REDIS_REQUIRED: "1"
+    cmds:
+      - go test -race -count=1 -run '^TestContractOnRedis$' ./...
+
   verify:example:
     desc: "Run ./example end to end: it exits non-zero on any step that does not do what the README says"
     cmds:

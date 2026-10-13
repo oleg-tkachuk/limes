@@ -189,6 +189,50 @@ jobs:
       - name: task test:pgstore
         run: task --yes test:pgstore
 
+  # redisreplay's contract against a real Redis: verify-all runs it on
+  # miniredis, whose scripts run on another Lua. The image is pinned by digest;
+  # Renovate moves both together.
+  redis:
+    name: Redis replay cache
+    needs: [changes]
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    services:
+      redis:
+        image: redis:8.10.2-alpine@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: redisreplay/go.mod
+          cache: false
+
+      - name: Set up Task
+        uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+        with:
+          version: ${{ env.TASK_VERSION }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: task test:redisreplay
+        env:
+          LIMES_REDIS_ADDR: localhost:6379
+        run: task --yes test:redisreplay
+
   # verify-all runs on the toolchain go.mod pins. A consumer builds this module
   # with their own Go, as old as the `go` directive allows, so the suite runs
   # on that floor as well — with GOTOOLCHAIN=local, so it cannot quietly
@@ -376,7 +420,7 @@ jobs:
   # change, which is a pass; a failure or a cancellation anywhere is not.
   checks:
     name: All checks passed
-    needs: [changes, verify, pgstore, floor, api, markers, syntax, audit]
+    needs: [changes, verify, pgstore, redis, floor, api, markers, syntax, audit]
     if: always()
     runs-on: ubuntu-26.04
     timeout-minutes: 5
@@ -400,7 +444,7 @@ jobs:
 
   dispatch-release:
     name: Dispatch release
-    needs: [changes, verify, pgstore, floor, api, markers, syntax, audit]
+    needs: [changes, verify, pgstore, redis, floor, api, markers, syntax, audit]
     # Not for a documentation-only push: its code is byte-identical to the
     # commit before it. Its commits are not lost — semantic-release counts them
     # in the next release, and a release dispatched by the code commit before
