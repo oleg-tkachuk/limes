@@ -40,7 +40,7 @@ GRANT USAGE ON SCHEMA ` + schema + ` TO ` + appUser + `;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA ` + schema + ` TO ` + appUser + `;`
 
 // emptyTables empties every table of the store, as the owner.
-const emptyTables = `TRUNCATE ` + schema + `.capabilities CASCADE`
+const emptyTables = `TRUNCATE ` + schema + `.capabilities, ` + schema + `.usage, ` + schema + `.copy_usage, ` + schema + `.tenant_budgets, ` + schema + `.charges, ` + schema + `.reservations CASCADE`
 
 var (
 	// owner is a pool as the owner role; app as appUser.

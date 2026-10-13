@@ -246,16 +246,21 @@ func (s *Store) Revoke(ctx context.Context, req limes.RevokeRequest) error {
 // sqlPurge removes the oldest-expired records past the cutoff, deepest first
 // among those expiring together, so a batch cut at its limit takes a child
 // before its parent. Their revocation entries go with them (ON DELETE
-// CASCADE).
+// CASCADE). The batch is locked in id order, the order the meter holds a
+// lineage's records in, so the two never wait on each other in a cycle.
 const sqlPurge = `
 WITH due AS (
     SELECT id FROM limes.capabilities
     WHERE expires_at < $1
     ORDER BY expires_at, depth DESC, id
     LIMIT $2
+), locked AS (
+    SELECT id FROM limes.capabilities
+    WHERE id IN (SELECT id FROM due)
+    ORDER BY id
     FOR UPDATE
 )
-DELETE FROM limes.capabilities c USING due WHERE c.id = due.id`
+DELETE FROM limes.capabilities c USING locked WHERE c.id = locked.id`
 
 // Purge removes the capabilities expired for longer than the retention.
 func (s *Store) Purge(ctx context.Context, req limes.PurgeRequest) (limes.PurgeResult, error) {
