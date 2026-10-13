@@ -17,10 +17,15 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/internal/watchdog"
 	"github.com/oleg-tkachuk/limes/jwks"
 )
+
+// DefaultCheckTimeout bounds a check whose Env sets no CheckTimeout.
+const DefaultCheckTimeout = watchdog.DefaultLimit
 
 // Env is one resolver under test, fresh for each check, that knows Key under
 // KID and no other kid the checks ask for.
@@ -33,6 +38,11 @@ type Env struct {
 	KID string
 	// Key is the public key the resolver holds under KID.
 	Key ed25519.PublicKey
+	// CheckTimeout bounds one check, setup aside: past it the suite panics
+	// with every goroutine's stack, naming the check, rather than leave a
+	// deadlocked resolver to go test's -timeout. Optional: without it,
+	// DefaultCheckTimeout.
+	CheckTimeout time.Duration
 }
 
 const (
@@ -54,7 +64,10 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"ConcurrentLookupsAgree", checkConcurrent},
 	}
 	for _, c := range checks {
-		t.Run(c.name, func(t *testing.T) { c.run(t, setup(t)) })
+		t.Run(c.name, func(t *testing.T) {
+			env := setup(t)
+			watchdog.Run(c.name, env.CheckTimeout, func() { c.run(t, env) })
+		})
 	}
 }
 

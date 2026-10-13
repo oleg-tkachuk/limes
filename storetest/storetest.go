@@ -14,7 +14,8 @@
 // its revocation entries once it has been expired long enough — in batches,
 // never before its children and never inside a verifier's leeway — listing
 // pages in a fixed order and keeps tenants apart, and a Biscuit copy revokes
-// on its own.
+// on its own. A check that does not finish within Env.CheckTimeout stops the
+// test binary with every goroutine's stack, naming the check.
 package storetest
 
 import (
@@ -31,7 +32,11 @@ import (
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/internal/fields"
 	"github.com/oleg-tkachuk/limes/internal/link"
+	"github.com/oleg-tkachuk/limes/internal/watchdog"
 )
+
+// DefaultCheckTimeout bounds a check whose Env sets no CheckTimeout.
+const DefaultCheckTimeout = watchdog.DefaultLimit
 
 // Env is one store under test, fresh for each check. Its fields mirror
 // metertest.Env, so one setup can serve both suites.
@@ -64,6 +69,11 @@ type Env struct {
 	// as ErrUnknownTenant and one in the trash as ErrTenantDeleted.
 	// Optional: without it, those checks are skipped.
 	DeleteTenant func(tenant uuid.UUID) error
+	// CheckTimeout bounds one check, setup aside: past it the suite panics
+	// with every goroutine's stack, naming the check, rather than leave a
+	// deadlocked store to go test's -timeout. Optional: without it,
+	// DefaultCheckTimeout.
+	CheckTimeout time.Duration
 }
 
 // newTenant is another tenant, from NewTenant when the Env has one.
@@ -225,7 +235,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 			if env.Now != nil {
 				now = env.Now()
 			}
-			c.run(t, fixture{Env: env, now: now})
+			watchdog.Run(c.name, env.CheckTimeout, func() { c.run(t, fixture{Env: env, now: now}) })
 		})
 	}
 }

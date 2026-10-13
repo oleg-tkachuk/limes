@@ -19,6 +19,12 @@
 // MaxNanos, a capability not on record, DeleteUsage and PurgeOrphans, the
 // tenant aggregate, its version guard and its listing, and the validation of
 // the request. They need a real ledger, not a fake.
+//
+// Several checks call the store from many goroutines at once. Give the Env a
+// connection pool of one or two connections: a call that takes a second
+// connection while it holds its transaction then deadlocks here, not under a
+// production load. A check that does not finish within Env.CheckTimeout stops
+// the test binary with every goroutine's stack, naming the check.
 package metertest
 
 import (
@@ -41,7 +47,11 @@ import (
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/internal/fields"
 	"github.com/oleg-tkachuk/limes/internal/link"
+	"github.com/oleg-tkachuk/limes/internal/watchdog"
 )
+
+// DefaultCheckTimeout bounds a check whose Env sets no CheckTimeout.
+const DefaultCheckTimeout = watchdog.DefaultLimit
 
 // Env is one store under test, fresh for each check.
 type Env[TX any] struct {
@@ -56,6 +66,11 @@ type Env[TX any] struct {
 	// NewCapability records a capability of Tenant as spec describes it, so
 	// the Meter finds its lineage and its ceilings, and returns its id.
 	NewCapability func(spec CapabilitySpec) (uuid.UUID, error)
+	// CheckTimeout bounds one check, setup aside: past it the suite panics
+	// with every goroutine's stack, naming the check, rather than leave a
+	// deadlocked store to go test's -timeout. Optional: without it,
+	// DefaultCheckTimeout.
+	CheckTimeout time.Duration
 	// Advance moves the store's clock forward by d. Optional: without it,
 	// the checks of reservation expiry are skipped.
 	Advance func(d time.Duration)
@@ -334,7 +349,10 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"AZeroCeilingAllowsNothing", checkZeroCeilings[TX]},
 	}
 	for _, c := range checks {
-		t.Run(c.name, func(t *testing.T) { c.run(t, newFixture(t, setup)) })
+		t.Run(c.name, func(t *testing.T) {
+			f := newFixture(t, setup)
+			watchdog.Run(c.name, f.CheckTimeout, func() { c.run(t, f) })
+		})
 	}
 	// Checks that need the tenant as setup leaves it, with no ceiling yet.
 	bare := []struct {
@@ -344,7 +362,10 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"TenantAggregateCountsBeforeACeiling", checkTenantCountsBeforeACeiling[TX]},
 	}
 	for _, c := range bare {
-		t.Run(c.name, func(t *testing.T) { c.run(t, setup(t)) })
+		t.Run(c.name, func(t *testing.T) {
+			env := setup(t)
+			watchdog.Run(c.name, env.CheckTimeout, func() { c.run(t, env) })
+		})
 	}
 }
 

@@ -60,6 +60,14 @@ type UsageStore[TX any] interface {
 //
 // All methods are concurrency-safe. A rejected call mutates nothing, so a
 // retry after rejection is safe.
+//
+// A store over a database holds at most one connection per call: the reads of
+// the lineage, the ceilings and the ledger, the writes, and onCharged all run
+// on the one transaction the call opens. A call that takes a second
+// connection while it holds its transaction deadlocks once as many
+// calls run as the pool has connections — each holds one and waits for
+// another — which a large pool under a light load never shows. Run metertest
+// against a pool of one or two connections to catch it.
 type Meter[TX any] interface {
 	// Bump increments the request counter of the capability and of
 	// each ancestor, and returns the capability's new count. When any
