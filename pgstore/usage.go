@@ -387,19 +387,19 @@ const (
 	keepAtOrPast  = "at-or-past"
 )
 
-// keepOf is the rows f keeps, as sqlListTenants names them. Every filter but
-// the two that narrow lists every tenant: TenantBudgetsAll and the
-// unspecified zero that defaults to it, and nothing else, since the request
-// was validated against the limes this package is built with.
-func keepOf(f limes.TenantBudgetFilter) string {
+// keepOf is the rows f keeps, as sqlListTenants names them. A filter this
+// package does not name — one a later limes adds — is refused rather than
+// read as another: a filter that narrows must never list every tenant.
+func keepOf(f limes.TenantBudgetFilter) (string, error) {
 	switch f {
+	case limes.TenantBudgetsUnspecified, limes.TenantBudgetsAll:
+		return keepEvery, nil
 	case limes.TenantBudgetsUnlimited:
-		return keepUnlimited
+		return keepUnlimited, nil
 	case limes.TenantBudgetsAtOrPast:
-		return keepAtOrPast
-	default:
-		return keepEvery
+		return keepAtOrPast, nil
 	}
+	return "", fmt.Errorf("%w: pgstore: list tenant budgets: filter %s is not one this store knows", limes.ErrInvalidRequest, f)
 }
 
 // sqlListTenants pages the aggregates most at risk first, ties by tenant id,
@@ -446,6 +446,10 @@ func (s *UsageStore) ListTenantBudgets(ctx context.Context, req limes.ListTenant
 		}
 		after = &p
 	}
+	keep, err := keepOf(req.Filter)
+	if err != nil {
+		return limes.Page[limes.TenantBudget]{}, err
+	}
 	threshold := limes.ExactPercent(req.ThresholdPct)
 	limit := limes.PageLimit(req.Limit)
 	var class *int
@@ -455,9 +459,9 @@ func (s *UsageStore) ListTenantBudgets(ctx context.Context, req limes.ListTenant
 		class, spent, ceiling, tenant = &after.class, int64(after.spent), int64(after.max), after.tenantID
 	}
 	var rows []budgetRow
-	err := s.inTx(ctx, func(tx pgx.Tx) error {
+	err = s.inTx(ctx, func(tx pgx.Tx) error {
 		r, err := tx.Query(ctx, sqlListTenants,
-			keepOf(req.Filter), threshold.Num().String(), threshold.Denom().String(),
+			keep, threshold.Num().String(), threshold.Denom().String(),
 			class, spent, ceiling, tenant, limit+1, utilizationScale)
 		if err != nil {
 			return err
