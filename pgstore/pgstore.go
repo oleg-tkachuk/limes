@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -53,6 +54,12 @@ type Config struct {
 	// its settings here (set_config(…, true), local to the transaction). An
 	// error from it ends the call.
 	Scope func(ctx context.Context, tx pgx.Tx) error
+	// CheckTenant, when set, runs in Insert's transaction before the record
+	// is written, for a consumer that keeps its own tenants: it returns
+	// limes.ErrUnknownTenant for a tenant it does not hold and
+	// limes.ErrTenantDeleted for one in the trash, which Insert returns
+	// as they are. Nil: every tenant is one the store can mint for.
+	CheckTenant func(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error
 }
 
 // errNoDB is NewStore given a Config without a DB.
@@ -61,9 +68,10 @@ var errNoDB = errors.New("pgstore: Config.DB required")
 // conn is what every store of the package shares: the database, the clock
 // and the scope.
 type conn struct {
-	db    DB
-	now   func() time.Time
-	scope func(ctx context.Context, tx pgx.Tx) error
+	db          DB
+	now         func() time.Time
+	scope       func(ctx context.Context, tx pgx.Tx) error
+	checkTenant func(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error
 }
 
 func newConn(cfg Config) (conn, error) {
@@ -76,7 +84,7 @@ func newConn(cfg Config) (conn, error) {
 	if cfg.Scope == nil {
 		cfg.Scope = ScopeFromContext
 	}
-	return conn{db: cfg.DB, now: cfg.Now, scope: cfg.Scope}, nil
+	return conn{db: cfg.DB, now: cfg.Now, scope: cfg.Scope, checkTenant: cfg.CheckTenant}, nil
 }
 
 // clock is the store's time now, to the column's resolution and in UTC.

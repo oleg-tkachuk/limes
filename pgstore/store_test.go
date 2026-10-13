@@ -19,16 +19,20 @@ func TestStoreContract(t *testing.T) {
 		t.Helper()
 		fresh(t)
 		clock := newFakeClock()
-		store, err := NewStore(Config{DB: app, Now: clock.Now})
+		store, err := NewStore(Config{DB: app, Now: clock.Now, CheckTenant: checkTenant})
 		if err != nil {
 			t.Fatal(err)
 		}
-		tenant := uuid.New()
+		tenant := newTenant(t)
 		return storetest.Env{
 			Ctx:       WithTenant(t.Context(), tenant),
 			Store:     store,
 			Tenant:    tenant,
-			NewTenant: func() (uuid.UUID, error) { return uuid.New(), nil },
+			NewTenant: func() (uuid.UUID, error) { return newTenant(t), nil },
+			DeleteTenant: func(tenant uuid.UUID) error {
+				_, err := owner.Exec(t.Context(), sqlDeleteTenant, tenant)
+				return err
+			},
 			TenantCtx: func(tenant uuid.UUID) context.Context { return WithTenant(t.Context(), tenant) },
 			Now:       clock.Now,
 			Advance:   clock.Advance,

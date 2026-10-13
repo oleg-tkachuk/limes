@@ -67,6 +67,11 @@ func (s *Store) Insert(ctx context.Context, req limes.InsertRequest) error {
 		if exists {
 			return fmt.Errorf("%w: %s", limes.ErrAlreadyExists, c.ID)
 		}
+		if s.checkTenant != nil {
+			if err := s.checkTenant(ctx, tx, c.Subject.TenantID); err != nil {
+				return err
+			}
+		}
 		depth := 0
 		var parentID *uuid.UUID
 		if c.ParentID != uuid.Nil {
