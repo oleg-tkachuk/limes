@@ -111,9 +111,9 @@ jobs:
             ~/.cache/go-build
             ~/go/pkg/mod
             ~/.cache/golangci-lint
-          key: go-${{ runner.os }}-verify-${{ hashFiles('go.sum', 'tools/go.sum', 'tools/yq/go.sum', 'redisreplay/go.sum') }}-${{ github.sha }}
+          key: go-${{ runner.os }}-verify-${{ hashFiles('go.sum', 'tools/go.sum', 'tools/yq/go.sum', 'redisreplay/go.sum', 'pgstore/go.sum') }}-${{ github.sha }}
           restore-keys: |
-            go-${{ runner.os }}-verify-${{ hashFiles('go.sum', 'tools/go.sum', 'tools/yq/go.sum', 'redisreplay/go.sum') }}-
+            go-${{ runner.os }}-verify-${{ hashFiles('go.sum', 'tools/go.sum', 'tools/yq/go.sum', 'redisreplay/go.sum', 'pgstore/go.sum') }}-
             go-${{ runner.os }}-verify-
 
       - name: Set up golangci-lint
@@ -156,6 +156,38 @@ jobs:
             ~/go/pkg/mod
             ~/.cache/golangci-lint
           key: ${{ steps.go-cache.outputs.cache-primary-key }}
+
+  # pgstore's tests — storetest and metertest among them — against PostgreSQL
+  # in a container, which verify-all leaves out so that it needs no Docker.
+  # The runner's Docker serves testcontainers.
+  pgstore:
+    name: PostgreSQL store
+    needs: [changes]
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: pgstore/go.mod
+          cache: false
+
+      - name: Set up Task
+        uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+        with:
+          version: ${{ env.TASK_VERSION }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: task test:pgstore
+        run: task --yes test:pgstore
 
   # verify-all runs on the toolchain go.mod pins. A consumer builds this module
   # with their own Go, as old as the `go` directive allows, so the suite runs
@@ -343,7 +375,7 @@ jobs:
   # change, which is a pass; a failure or a cancellation anywhere is not.
   checks:
     name: All checks passed
-    needs: [changes, verify, floor, api, markers, syntax, audit]
+    needs: [changes, verify, pgstore, floor, api, markers, syntax, audit]
     if: always()
     runs-on: ubuntu-26.04
     timeout-minutes: 5
@@ -367,7 +399,7 @@ jobs:
 
   dispatch-release:
     name: Dispatch release
-    needs: [changes, verify, floor, api, markers, syntax, audit]
+    needs: [changes, verify, pgstore, floor, api, markers, syntax, audit]
     # Not for a documentation-only push: its code is byte-identical to the
     # commit before it. Its commits are not lost — semantic-release counts them
     # in the next release, and a release dispatched by the code commit before

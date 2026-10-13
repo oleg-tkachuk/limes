@@ -22,6 +22,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/gh-retry.sh"
 readonly REQUIRED_JOBS=(
     "Changed paths"
     "Verify"
+    "PostgreSQL store"
     "Test on the oldest supported Go"
     "API compatibility"
     "Breaking markers"
