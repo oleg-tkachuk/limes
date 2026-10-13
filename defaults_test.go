@@ -248,7 +248,7 @@ func TestSeveralIssuersNeedAKeyDecision(t *testing.T) {
 
 // A tenant budget filter names itself, and one this package lacks is refused.
 func TestTenantBudgetFilter(t *testing.T) {
-	for f, want := range map[TenantBudgetFilter]string{TenantBudgetsAll: "all", TenantBudgetsAtOrPast: "at-or-past", TenantBudgetsUnlimited: "unlimited"} {
+	for f, want := range map[TenantBudgetFilter]string{TenantBudgetsUnspecified: "unspecified", TenantBudgetsAll: "all", TenantBudgetsAtOrPast: "at-or-past", TenantBudgetsUnlimited: "unlimited"} {
 		if f.String() != want || f.Validate() != nil {
 			t.Errorf("%d: String = %q, Validate = %v; want %q, nil", f, f.String(), f.Validate(), want)
 		}

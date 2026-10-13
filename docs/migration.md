@@ -20,6 +20,11 @@ API, and this file stops growing.
   `Insert` refuses one as `ErrDelegationTooDeep` and writes nothing.
   `storetest` checks it; `metertest.Env.NewCapability` returns the store's
   error, which a check now matches.
+- `TenantBudgetFilter`'s zero was `TenantBudgetsAll` → it is
+  `TenantBudgetsUnspecified`, which lists every tenant as before, and
+  `TenantBudgetsAll`, `TenantBudgetsAtOrPast` and `TenantBudgetsUnlimited`
+  each moved up by one. Code that names the filters needs no change; a store
+  that passes the filter on as a number maps it by name instead.
 
 ## v0.55.0
 

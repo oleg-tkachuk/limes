@@ -2334,6 +2334,16 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 		!slices.ContainsFunc(unl, func(s limes.TenantBudget) bool { return s.TenantID == unlimited }) {
 		t.Errorf("unlimited tenants = %+v, %v; want %s and not %s", unl, err, unlimited, f.Tenant)
 	}
+	// TenantBudgetsAll names the filter a request that names none takes.
+	named, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetsAll, Limit: listed})
+	if err != nil || len(named.Items) != len(order) {
+		t.Fatalf("every tenant, by name = %d rows, %v; want %d", len(named.Items), err, len(order))
+	}
+	for i, row := range named.Items {
+		if row.TenantID != order[i].TenantID {
+			t.Errorf("every tenant, by name: row %d is %s, want %s as with no filter", i, row.TenantID, order[i].TenantID)
+		}
+	}
 }
 
 // longestTTL is the longest hold a ReserveRequest can ask for: it expires

@@ -1464,7 +1464,7 @@ func compareUtilization(a, b budgetRow) int {
 // through, at every threshold; an unlimited one is at none.
 func listed(args limes.ListTenantBudgetsRequest, row budgetRow) bool {
 	switch args.Filter {
-	case limes.TenantBudgetsAll:
+	case limes.TenantBudgetsUnspecified, limes.TenantBudgetsAll:
 		return true
 	case limes.TenantBudgetsUnlimited:
 		return row.class == classUnlimited
