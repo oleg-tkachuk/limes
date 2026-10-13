@@ -23,7 +23,11 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes/dpop"
+	"github.com/oleg-tkachuk/limes/internal/watchdog"
 )
+
+// DefaultCheckTimeout bounds a check whose ReplayEnv or NoncesEnv sets no CheckTimeout.
+const DefaultCheckTimeout = watchdog.DefaultLimit
 
 // ReplayEnv is one replay cache under test, fresh and empty for each check.
 type ReplayEnv struct {
@@ -41,6 +45,11 @@ type ReplayEnv struct {
 	// before it refuses the next as a replay. Optional: without it, the
 	// checks of that share are skipped.
 	EntriesPerHolder int
+	// CheckTimeout bounds one check, setup aside: past it the suite panics
+	// with every goroutine's stack, naming the check, rather than leave a
+	// deadlocked cache to go test's -timeout. Optional: without it,
+	// DefaultCheckTimeout.
+	CheckTimeout time.Duration
 }
 
 // NoncesEnv is one nonce source under test, fresh for each check.
@@ -54,6 +63,11 @@ type NoncesEnv struct {
 	Lifetime time.Duration
 	// Advance moves the source's clock forward by d.
 	Advance func(d time.Duration)
+	// CheckTimeout bounds one check, setup aside: past it the suite panics
+	// with every goroutine's stack, naming the check, rather than leave a
+	// deadlocked source to go test's -timeout. Optional: without it,
+	// DefaultCheckTimeout.
+	CheckTimeout time.Duration
 }
 
 const (
@@ -92,7 +106,10 @@ func RunReplayCache(t *testing.T, setup func(t *testing.T) ReplayEnv) {
 		{"ConcurrentProofsLetOneThrough", checkConcurrentReplay},
 	}
 	for _, c := range checks {
-		t.Run(c.name, func(t *testing.T) { c.run(t, setup(t)) })
+		t.Run(c.name, func(t *testing.T) {
+			env := setup(t)
+			watchdog.Run(c.name, env.CheckTimeout, func() { c.run(t, env) })
+		})
 	}
 }
 
@@ -109,7 +126,10 @@ func RunNonces(t *testing.T, setup func(t *testing.T) NoncesEnv) {
 		{"ANonceExpires", checkExpiry},
 	}
 	for _, c := range checks {
-		t.Run(c.name, func(t *testing.T) { c.run(t, setup(t)) })
+		t.Run(c.name, func(t *testing.T) {
+			env := setup(t)
+			watchdog.Run(c.name, env.CheckTimeout, func() { c.run(t, env) })
+		})
 	}
 }
 

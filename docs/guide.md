@@ -587,7 +587,12 @@ store's clock, for the checks at an expiry's exact instant) and
 
 The checks include charges racing one ceiling, so run them against the
 database itself: a store that reads a counter and writes it back outside one
-statement or lock overspends, and fails them.
+statement or lock overspends, and fails them. Give the store a pool of one or
+two connections there: a call holds one connection for its transaction, and
+one that takes a second while it holds the first deadlocks once as many calls
+run as the pool has connections. Every suite bounds each check by
+`CheckTimeout` (a minute unless the Env sets it); a check that outlives it
+stops the test binary with every goroutine's stack, naming the check.
 
 `memstore` runs the same checks from its own tests, and `dpop` and `jwks` run
 theirs against their shipped implementations.
