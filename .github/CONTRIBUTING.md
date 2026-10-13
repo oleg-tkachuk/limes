@@ -45,9 +45,11 @@ Both are jobs CI requires before a release.
   **All checks passed** is the required check.
 - A pull request runs the workflows it brings, so its required check proves
   only what its own `.github/` says. A pull request from a fork is never
-  merged automatically, and one that touches `.github/` (workflows, scripts,
-  release tooling) is merged only once those files have been read: its green
-  check is no evidence on its own.
+  merged automatically, and neither is one that changes what CI runs —
+  `.github/` (workflows, scripts, release tooling), `Taskfile.yaml`,
+  `.golangci.yml` or `tools/`: its green check is no evidence on its own, so
+  a person reads those files and merges it. Auto-merge decides this from
+  `main`'s own workflow, so a pull request cannot change the rule.
 - Commit subjects follow [Conventional Commits](https://www.conventionalcommits.org):
   the release is computed from them (`feat` a minor; `fix`, `perf` and
   `security` a patch; pre-1.0 a breaking change a minor), so a non-conforming subject releases nothing.

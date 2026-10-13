@@ -19,6 +19,12 @@ name: Auto-merge
 #
 # Same-repository pull requests only. A fork's branch belongs to its author:
 # rewriting it is not ours to do, and merging it stays a person's decision.
+# So does one that changes what CI runs — .github/, the tasks, the linter's
+# configuration, the pinned tools (.github/scripts/queue-auto-merge.sh): it
+# runs its own checks, so its green check is no evidence. The decision runs
+# under pull_request_target, from main's own copy of this workflow and of the
+# script, so a pull request cannot rewrite the rule that holds it; nothing of
+# the pull request is checked out or run, only its list of changed files read.
 # A draft is left alone until it is marked ready. Auto-merge is queued once,
 # when a pull request opens or becomes ready, not on every push: a push —
 # the rebase below among them — would otherwise queue again a pull request a
@@ -33,7 +39,7 @@ name: Auto-merge
 # required check, auto-merge would merge immediately.
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, reopened, ready_for_review]
   push:
     branches: [main]
@@ -49,26 +55,30 @@ jobs:
   enable:
     name: Enable auto-merge
     if: >-
-      github.event_name == 'pull_request' &&
+      github.event_name == 'pull_request_target' &&
       !github.event.pull_request.draft &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.user.login != 'renovate[bot]'
     runs-on: ubuntu-26.04
     timeout-minutes: 5
-    permissions: {}
+    permissions:
+      contents: read # the checkout below; the merge itself acts through AUTOMERGE_TOKEN
     steps:
+      # main's script, not the pull request's: pull_request_target checks out
+      # the base branch.
+      - name: Check out the queueing script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
       - name: Queue the pull request to merge when it is green
         env:
           GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          if [ -z "${GH_TOKEN}" ]; then
-            echo "::warning::AUTOMERGE_TOKEN is not set; auto-merge left off (see auto-merge.yaml)"
-            exit 0
-          fi
-          gh pr merge "$PR" --repo "$REPO" --auto --merge
+        # .github/scripts/queue-auto-merge.sh
+        run: ./.github/scripts/queue-auto-merge.sh
 
   rebase:
     name: Rebase open pull requests onto main
