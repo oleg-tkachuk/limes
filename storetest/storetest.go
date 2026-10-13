@@ -29,6 +29,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/internal/fields"
 	"github.com/oleg-tkachuk/limes/internal/link"
 )
 
@@ -134,6 +135,17 @@ func (f fixture) newCapability(subject string, parent uuid.UUID, expires time.Ti
 		ParentID:        parent,
 		Generation:      1,
 		ConfirmationJKT: "jkt",
+	}
+}
+
+// issuer is a principal with every field set, so a store that drops one
+// from Record.IssuedBy fails the round trip.
+func (f fixture) issuer() limes.Principal {
+	return limes.Principal{
+		Type: limes.PrincipalAgent, TenantID: f.Tenant, Subject: "agent:issuer",
+		Agent: &limes.AgentPrincipal{
+			AgentType: "planner", AgentVersion: "2", RunID: uuid.New(), ParentAgentID: uuid.New(), Model: "issuer-model", MCPClient: "issuer-client",
+		},
 	}
 }
 
@@ -261,12 +273,17 @@ func checkRecord(t *testing.T, f fixture) {
 		return r
 	}
 
-	r := record(parent.ID)
-	if diff := diffCapabilities(r.Capability, parent); diff != "" {
+	issuer := f.issuer()
+	issued := f.newCapability("agent:issued", uuid.Nil, f.now.Add(ttl))
+	if err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: issued, IssuedBy: issuer}); err != nil {
+		t.Fatalf("insert %s: %v", issued.ID, err)
+	}
+	r := record(issued.ID)
+	if diff := diffCapabilities(r.Capability, issued); diff != "" {
 		t.Errorf("GetRecord read back a different capability: %s", diff)
 	}
-	if !reflect.DeepEqual(r.IssuedBy, issuedBy) || r.Revocation != nil {
-		t.Errorf("before any revoke: issued by %+v, revocation %+v; want %+v and none", r.IssuedBy, r.Revocation, issuedBy)
+	if !reflect.DeepEqual(r.IssuedBy, issuer) || r.Revocation != nil {
+		t.Errorf("before any revoke: issued by %+v, revocation %+v; want %+v and none", r.IssuedBy, r.Revocation, issuer)
 	}
 
 	f.revoke(t, parent.ID, false)
@@ -282,8 +299,15 @@ func checkRecord(t *testing.T, f fixture) {
 	}
 	f.revoke(t, cascadeRoot.ID, true)
 	for _, id := range []uuid.UUID{cascadeRoot.ID, cascadeChild.ID} {
-		if rev := record(id).Revocation; rev == nil || !rev.Cascaded {
+		rev := record(id).Revocation
+		if rev == nil || !rev.Cascaded {
 			t.Errorf("%s after a cascading revoke: revocation %+v, want a cascading entry", id, rev)
+			continue
+		}
+		// Every field of a cascading entry is set, so one the store does not
+		// keep reads back as unset.
+		if unset := fields.Unset(*rev); len(unset) > 0 {
+			t.Errorf("%s: revocation %+v reads back with %v unset", id, rev, unset)
 		}
 	}
 	for _, id := range []uuid.UUID{uuid.New(), uuid.Nil} {

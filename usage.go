@@ -462,6 +462,7 @@ type TenantBudget struct {
 	// PeriodEnd is when the accounting window closes; zero for an
 	// open-ended one.
 	PeriodEnd time.Time
+	// UpdatedAt is when the store last wrote the aggregate, by its clock.
 	UpdatedAt time.Time
 	// ResourceVersion is the OCC token a caller passes back as
 	// SetTenantBudgetRequest.ExpectedVersion. Zero means no ceiling has
