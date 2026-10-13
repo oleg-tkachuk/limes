@@ -64,7 +64,7 @@ func TestScopeRunsInEveryCall(t *testing.T) {
 	if err := store.Insert(ctx, limes.InsertRequest{Capability: c}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.IsRevoked(ctx, c.ID); err != nil {
+	if _, err := store.GetRecord(ctx, c.ID); err != nil {
 		t.Fatal(err)
 	}
 	if got := calls.Load(); got != 2 {
@@ -75,5 +75,45 @@ func TestScopeRunsInEveryCall(t *testing.T) {
 	store.scope = func(context.Context, pgx.Tx) error { return refused }
 	if _, err := store.GetRecord(ctx, c.ID); !errors.Is(err, refused) {
 		t.Errorf("GetRecord with a failing Scope: err = %v, want its error", err)
+	}
+}
+
+// countingDB counts what a store asks of its database.
+type countingDB struct {
+	DB
+	begins, statements atomic.Int64
+}
+
+func (d *countingDB) Begin(ctx context.Context) (pgx.Tx, error) {
+	d.begins.Add(1)
+	return d.DB.Begin(ctx)
+}
+
+func (d *countingDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	d.statements.Add(1)
+	return d.DB.QueryRow(ctx, sql, args...)
+}
+
+// A revocation check is on the path of every request: one statement, one
+// round trip, no transaction around it.
+func TestRevocationChecksAreOneStatement(t *testing.T) {
+	f := newTenantFixture(t)
+	db := &countingDB{DB: app}
+	store, err := NewStore(Config{DB: db})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, check := range map[string]func() (bool, error){
+		"IsRevoked":        func() (bool, error) { return store.IsRevoked(t.Context(), f.child.ID) },
+		"IsBiscuitRevoked": func() (bool, error) { return store.IsBiscuitRevoked(t.Context(), [][]byte{[]byte("copy")}) },
+	} {
+		db.begins.Store(0)
+		db.statements.Store(0)
+		if _, err := check(); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if b, s := db.begins.Load(), db.statements.Load(); b != 0 || s != 1 {
+			t.Errorf("%s: %d transactions and %d statements, want none and one", name, b, s)
+		}
 	}
 }
