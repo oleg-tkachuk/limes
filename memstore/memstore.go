@@ -228,6 +228,9 @@ func (s *Store) Insert(_ context.Context, req limes.InsertRequest) error {
 		if c.ExpiresAt.After(parent.ExpiresAt) {
 			return fmt.Errorf("%w: expires %s, after its parent %s", limes.ErrDelegationTooWide, c.ExpiresAt, parent.ExpiresAt)
 		}
+		if c.Subject.TenantID != parent.Subject.TenantID {
+			return fmt.Errorf("%w: tenant %s, not its parent's %s", limes.ErrDelegationTooWide, c.Subject.TenantID, parent.Subject.TenantID)
+		}
 	}
 	// Copies in and out: the caller keeps its slices, and a record never
 	// changes after it is written.

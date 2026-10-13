@@ -25,11 +25,12 @@ type IssuanceStore interface {
 	//
 	// An id already on record returns ErrAlreadyExists and changes nothing.
 	// It refuses what InsertRequest.Validate refuses, a parent not on
-	// record as ErrInvalidRequest, and a child expiring after its parent as
-	// ErrDelegationTooWide: Purge and the IsRevoked walk rely on a lineage
-	// that is whole and expires from the leaves up. A store that knows
-	// tenants returns ErrUnknownTenant or ErrTenantDeleted for a tenant it
-	// cannot mint for.
+	// record as ErrInvalidRequest, and a child expiring after its parent or
+	// in another tenant as ErrDelegationTooWide: Purge and the IsRevoked walk
+	// rely on a lineage that is whole, expires from the leaves up and stays
+	// in one tenant, so a store that scopes rows by tenant sees all of it. A
+	// store that knows tenants returns ErrUnknownTenant or ErrTenantDeleted
+	// for a tenant it cannot mint for.
 	Insert(ctx context.Context, req InsertRequest) error
 
 	// IsRevoked reports whether the capability, or any ancestor of it

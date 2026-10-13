@@ -13,6 +13,12 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.55.0
+
+- `Store.Insert` accepted a child in another tenant than its parent → it
+  refuses one as `ErrDelegationTooWide`, as `Delegate` always has.
+  `storetest` checks it.
+
 ## v0.53.0
 
 - `Store.Insert` accepted any record → it refuses a capability with no id or
