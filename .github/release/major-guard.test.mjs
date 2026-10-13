@@ -7,7 +7,7 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const guard = require("./major-guard.cjs");
-const config = require("./release.config.cjs");
+const modules = require("./modules.cjs");
 
 const bare = "github.com/oleg-tkachuk/limes";
 // [version, module path, refused]
@@ -38,17 +38,45 @@ if (guard.modulePath("module example.com/m/v3\n\ngo 1.26\n") !== "example.com/m/
   console.log("FAIL modulePath does not read the module directive");
   failures++;
 }
-// The guard is useless unless the release runs it.
-if (!config.plugins.includes("./major-guard.cjs")) {
-  console.log("FAIL release.config.cjs does not run major-guard.cjs");
-  failures++;
+// A module whose release line nobody seeded is refused, not released as 1.0.0.
+for (const [lastRelease, refused] of [[{}, true], [undefined, true], [{ version: "0.1.0" }, false]]) {
+  let got = false;
+  try {
+    guard.checkFirst(lastRelease, "sub/");
+  } catch {
+    got = true;
+  }
+  if (got !== refused) {
+    console.log(`FAIL checkFirst(${JSON.stringify(lastRelease)}): refused=${got}, want ${refused}`);
+    failures++;
+  }
 }
-// The repository's own go.mod parses, and allows the release line it is on.
+
+// Every module's config runs the guard against its own go.mod, which parses
+// and allows the release line it is on.
 const { readFileSync } = await import("node:fs");
-const own = guard.modulePath(readFileSync(new URL("../../go.mod", import.meta.url), "utf8"));
-if (guard.moduleMajor(own) < 1) {
-  console.log(`FAIL the module path ${own} allows no release`);
-  failures++;
+for (const name of Object.keys(modules.MODULES)) {
+  const cfg = modules.configFor(name);
+  const entry = cfg.plugins.find((p) => Array.isArray(p) && p[0] === "./major-guard.cjs");
+  if (!entry) {
+    console.log(`FAIL the ${name} release does not run major-guard.cjs`);
+    failures++;
+    continue;
+  }
+  const own = guard.modulePath(readFileSync(guard.goModOf(entry[1].dir), "utf8"));
+  const want = `${bare}${modules.MODULES[name].dir ? `/${modules.MODULES[name].dir}` : ""}`;
+  if (own !== want) {
+    console.log(`FAIL the ${name} release guards ${own}, want ${want}`);
+    failures++;
+  }
+  if (guard.moduleMajor(own) < 1) {
+    console.log(`FAIL the module path ${own} allows no release`);
+    failures++;
+  }
+  if (entry[1].tagPrefix !== modules.tagPrefix(modules.MODULES[name].dir)) {
+    console.log(`FAIL the ${name} release names the seed tag with prefix ${entry[1].tagPrefix}`);
+    failures++;
+  }
 }
 
 if (failures > 0) {

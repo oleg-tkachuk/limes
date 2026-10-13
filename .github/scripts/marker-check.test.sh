@@ -60,6 +60,24 @@ TITLE="Breaking change: drop X" check "on v0, a footer as the title" fail "docs:
 TITLE="* BREAKING CHANGE: drop X" check "on v0, a listed footer as the title" fail "docs: explain"
 TITLE="docs: explain the breaking change" check "on v0, the words in a title" pass "docs: explain"
 
+# The same, with the module table release.config.cjs reads its rules from:
+# the root module's own rules decide, not the text of release.config.cjs.
+git -C "$scratch" checkout --quiet main
+mkdir -p "$scratch/.github/release"
+cp "$root/.github/release/modules.cjs" "$root/.github/release/release.config.cjs" "$scratch/.github/release/"
+git -C "$scratch" add .github
+git -C "$scratch" commit --quiet -m "build: release from the module table"
+MIGRATION=1 check "on v0, the pre-1.0 rule in the module table" pass "feat!: change"
+git -C "$scratch" checkout --quiet main
+# The root's rules are the one list that holds the rule on a line of its own.
+sed -i.bak '/^      BREAKING_IS_A_MINOR_BEFORE_1_0,$/d' "$scratch/.github/release/modules.cjs"
+rm -f "$scratch/.github/release/modules.cjs.bak"
+git -C "$scratch" commit --quiet -am "build!: release root breaks as majors"
+check "the root's pre-1.0 rule gone from the module table" fail "feat!: change"
+git -C "$scratch" checkout --quiet main
+git -C "$scratch" rm --quiet -r .github
+git -C "$scratch" commit --quiet -m "build: drop the module table"
+
 # The release config decides before the tag does: with the pre-1.0 rule a
 # marker cuts a minor; once the change cutting v1.0.0 removed it, a change
 # built on that commit is on the stable line, though v1.0.0 is not tagged yet.

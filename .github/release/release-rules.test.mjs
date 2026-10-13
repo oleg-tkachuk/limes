@@ -11,6 +11,7 @@ import { analyzeCommits } from "@semantic-release/commit-analyzer";
 
 const require = createRequire(import.meta.url);
 const config = require("./release.config.cjs");
+const modules = require("./modules.cjs");
 
 // [commit message, release wanted]
 const cases = [
@@ -28,31 +29,72 @@ const cases = [
   ["test: cover a thing", null],
   ["build: pin the toolchain", null],
   ["ci: cache the module", null],
-  // pgstore, untagged, releases nothing of the limes module.
-  ["feat(pgstore): add the meter", null],
-  ["fix(pgstore): lock in order", null],
-  // So does redisreplay.
-  ["feat(redisreplay): add a script", null],
-  ["fix(redisreplay): expire the key", null],
 ];
+
+// Cases of one module's own rules, beside the shared ones above.
+const moduleCases = {
+  // pgstore, untagged, releases nothing of the limes module.
+  [modules.ROOT_MODULE]: [
+    ["feat(pgstore): add the meter", null],
+    ["fix(pgstore): lock in order", null],
+    // So does redisreplay, on a line of its own.
+    ["feat(redisreplay): add a script", null],
+    ["fix(redisreplay): expire the key", null],
+  ],
+};
 
 const logger = { log() {}, error() {}, warn() {}, success() {} };
 let failed = 0;
-for (const [message, want] of cases) {
-  const got = await analyzeCommits(config.analyzer, {
-    commits: [{ hash: "0", message }],
-    logger,
-    cwd: process.cwd(),
-    options: {},
-  });
-  if ((got ?? null) !== want) {
-    console.log(`FAIL ${JSON.stringify(message)}: got ${got ?? null}, want ${want}`);
+
+// Every module releases by the same rules today, each from its own config,
+// and tags as the Go proxy reads it: vX.Y.Z at the root, dir/vX.Y.Z for a
+// module in dir.
+for (const [name, module] of Object.entries(modules.MODULES)) {
+  const cfg = modules.configFor(name);
+  for (const [message, want] of [...cases, ...(moduleCases[name] ?? [])]) {
+    const got = await analyzeCommits(cfg.analyzer, {
+      commits: [{ hash: "0", message }],
+      logger,
+      cwd: process.cwd(),
+      options: {},
+    });
+    if ((got ?? null) !== want) {
+      console.log(`FAIL ${name} ${JSON.stringify(message)}: got ${got ?? null}, want ${want}`);
+      failed = 1;
+    }
+  }
+  const prefix = module.dir === "" ? "" : `${module.dir}/`;
+  if (cfg.tagFormat !== `${prefix}v\${version}`) {
+    console.log(`FAIL ${name} tagFormat ${cfg.tagFormat}: the Go proxy reads ${prefix}vX.Y.Z`);
     failed = 1;
   }
 }
 
-if (!config.tagFormat.startsWith("v") || !config.tagFormat.includes("${version}")) {
-  console.log(`FAIL tagFormat ${config.tagFormat}: the Go proxy reads vX.Y.Z at the module root`);
+// The config semantic-release loads is the root module's unless
+// RELEASE_MODULE names another.
+if (config.tagFormat !== modules.configFor(modules.ROOT_MODULE).tagFormat) {
+  console.log(`FAIL release.config.cjs releases ${config.tagFormat} with ${modules.MODULE_ENV} unset`);
+  failed = 1;
+}
+// A module here that release.yaml never releases would never be tagged, and
+// nothing would say so: every nested one must be named there.
+const { readFileSync } = await import("node:fs");
+const workflow = readFileSync(new URL("../workflows/release.yaml", import.meta.url), "utf8");
+for (const [name, module] of Object.entries(modules.MODULES)) {
+  if (module.dir !== "" && !new RegExp(`^\\s+[A-Z_]+_MODULE: ${name}$`, "m").test(workflow)) {
+    console.log(`FAIL release.yaml does not release the ${name} module`);
+    failed = 1;
+  }
+}
+
+let unknownRefused = false;
+try {
+  modules.configFor("no-such-module");
+} catch {
+  unknownRefused = true;
+}
+if (!unknownRefused) {
+  console.log("FAIL a module name no config holds was accepted");
   failed = 1;
 }
 

@@ -36,6 +36,15 @@ check() { # name, want
     fi
 }
 
+check_prefixed() { # prefix, name, want
+    local got
+    got="$("$script" "$1" | tr '\n' ' ')"
+    if [ "$3" != "$got" ]; then
+        printf 'FAIL %s: want %q, got %q\n' "$2" "$3" "$got"
+        failures=$((failures + 1))
+    fi
+}
+
 commit one
 check "no tag" ""
 git tag v0.1.0
@@ -59,6 +68,13 @@ commit side
 git tag v9.0.0
 git checkout -q -
 check "a tag not below HEAD" ""
+
+# Each module's run looks at its own tags only.
+git tag sub/v0.1.0
+check "the root run beside a nested module's unpublished tag" ""
+check_prefixed "sub/" "the nested module's unpublished tag" "sub/v0.1.0 "
+echo sub/v0.1.0 >>"$RELEASED"
+check_prefixed "sub/" "the nested module's tag published" ""
 
 if [ "$failures" -gt 0 ]; then
     exit 1

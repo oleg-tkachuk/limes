@@ -3,8 +3,8 @@ name: Release
 # Dispatched by ci.yaml once the checks on a push to main have passed.
 #
 # A release is a vX.Y.Z tag — the Go proxy reads the tag, so nothing else is
-# published — and the GitHub release that announces it. Nothing is tagged when
-# no release was due.
+# published — and the GitHub release that announces it. A nested module's tag
+# is <dir>/vX.Y.Z. Nothing is tagged when no release was due.
 #
 # workflow_run is the obvious trigger and is refused by zizmor's
 # dangerous-triggers audit. A plain `push` trigger would not help: GitHub
@@ -33,6 +33,10 @@ env:
   # The release tooling's runtime, as ci.yaml pins it.
   # renovate: datasource=node-version depName=node
   NODE_VERSION: "24.21.0"
+  # The nested module's name in .github/release/modules.cjs, which is also
+  # its directory and the prefix of its tags. release-rules.test.mjs fails
+  # when a module there is not released here.
+  REDISREPLAY_MODULE: redisreplay
 
 jobs:
   release:
@@ -116,15 +120,20 @@ jobs:
           SHA: ${{ github.event.client_payload.sha }}
         run: ./.github/scripts/release-catch-up.sh "$SHA" >>"$GITHUB_OUTPUT"
 
-      # What HEAD carried before this run, so the step after it can tell a tag
+      # What HEAD carried before this run, so the steps after it can tell a tag
       # it pushed from one an earlier dispatch to the same commit pushed.
       - name: Note the tags already on HEAD
         if: steps.catchup.outputs.release == 'true'
         run: git tag --points-at HEAD >"$RUNNER_TEMP/tags-before"
 
+      # Each module is released on its own line, from the commits that touch
+      # it: the root module first, then each nested one, whose tags carry its
+      # directory (.github/release/modules.cjs). A failure of a nested
+      # module's release leaves the root's published.
+      #
       # Run where its config and lockfile live; git finds the repository from
       # there.
-      - name: Compute and push the tag
+      - name: Compute and push the tag of the root module
         if: steps.catchup.outputs.release == 'true'
         working-directory: .github/release
         run: npx semantic-release --no-ci
@@ -140,34 +149,34 @@ jobs:
       #
       # Notes for people: the ones semantic-release generated from the
       # commits — breaking changes first, whatever the pull requests' labels —
-      # then GitHub's list of merged pull requests, shaped by
-      # .github/release.yml. A re-run publishing an earlier run's tag has no
-      # generated notes and gets the list alone. Then the Go proxy is told of the tag, so
-      # `go get …@latest` sees it now rather than whenever the proxy next
-      # refreshes; the release stands without it.
-      - name: Publish the release
+      # then GitHub's list of merged pull requests since the module's previous
+      # tag, shaped by .github/release.yml. A re-run publishing an earlier
+      # run's tag has no generated notes and gets the list alone. Then the Go
+      # proxy is told of the tag, so `go get …@latest` sees it now rather than
+      # whenever the proxy next refreshes; the release stands without it. See
+      # .github/scripts/publish-release.sh.
+      - name: Publish the release of the root module
         if: steps.catchup.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes.md
-        run: |
-          set -euo pipefail
-          tag="$(./.github/scripts/new-release-tag.sh "$RUNNER_TEMP/tags-before")"
-          if [ -z "$tag" ]; then
-            printf '%s\n' "no new tag from this run — no release was due"
-            exit 0
-          fi
-          notes=()
-          if [ -s "$RELEASE_NOTES_FILE" ]; then
-            notes=(--notes-file "$RELEASE_NOTES_FILE")
-          fi
-          source .github/scripts/gh-retry.sh
-          # A 5xx can arrive after the release was made: the retry then
-          # meets "already exists", and the release standing is success.
-          gh_retry release create "$tag" --repo "$GITHUB_REPOSITORY" --generate-notes --verify-tag "${notes[@]}" ||
-            gh_retry release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null
-          ./.github/scripts/warm-go-proxy.sh "$tag" ||
-            echo "::warning::the Go proxy did not take $tag yet; it will on its own"
+        run: ./.github/scripts/publish-release.sh new "$RUNNER_TEMP/tags-before"
+
+      - name: Compute and push the tag of redisreplay
+        if: steps.catchup.outputs.release == 'true'
+        working-directory: .github/release
+        run: npx semantic-release --no-ci
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_MODULE: ${{ env.REDISREPLAY_MODULE }}
+          RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes-redisreplay.md
+
+      - name: Publish the release of redisreplay
+        if: steps.catchup.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes-redisreplay.md
+        run: ./.github/scripts/publish-release.sh new "$RUNNER_TEMP/tags-before" "$REDISREPLAY_MODULE/"
 
       # A run that pushed its tag and failed before publishing it is re-run
       # above only while that tag is still on HEAD. Once main has moved on,
@@ -180,9 +189,5 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          source .github/scripts/gh-retry.sh
-          ./.github/scripts/unpublished-tags.sh | while read -r tag; do
-            gh_retry release create "$tag" --repo "$GITHUB_REPOSITORY" --generate-notes --verify-tag --latest=false ||
-              gh_retry release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null
-            printf '%s\n' "published $tag, which an earlier run left without a release"
-          done
+          ./.github/scripts/publish-release.sh left-behind
+          ./.github/scripts/publish-release.sh left-behind "$REDISREPLAY_MODULE/"
