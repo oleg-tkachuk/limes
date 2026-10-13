@@ -20,9 +20,6 @@ const cases = [
   ["fix: repair a check", "patch"],
   ["perf: verify faster", "patch"],
   ["security: refuse a forged proof", "patch"],
-  // Pre-1.0, a breaking change is a minor.
-  ["feat!: rename a request field", "minor"],
-  ["fix: drop a field\n\nBREAKING CHANGE: the field is gone", "minor"],
   ["docs: explain a thing", null],
   ["chore: tidy", null],
   ["refactor: move a thing", null],
@@ -31,10 +28,20 @@ const cases = [
   ["ci: cache the module", null],
 ];
 
-// Cases of one module's own rules, beside the shared ones above.
+// A breaking change, in both spellings, cutting release.
+const breaking = (release) => [
+  ["feat!: rename a request field", release],
+  ["fix: drop a field\n\nBREAKING CHANGE: the field is gone", release],
+];
+
+// Cases of one module's own rules, beside the shared ones above. Before 1.0 a
+// breaking change is a minor; on the v1 line a major, which the marker check
+// (.github/ci/release-checks.ts) keeps off the line and major-guard.cjs
+// refuses should one get through.
 const moduleCases = {
-  // pgstore releases nothing of the limes module, on a line of its own.
   [modules.ROOT_MODULE]: [
+    ...breaking("major"),
+    // pgstore releases nothing of the limes module, on a line of its own.
     ["feat(pgstore): add the meter", null],
     ["fix(pgstore): lock in order", null],
     // So does redisreplay, on a line of its own.
@@ -59,6 +66,7 @@ const moduleCases = {
   // resolve has changed. The first is the subject .github/ci/require-limes.ts
   // commits, which once merged and released nothing.
   [modules.REDISREPLAY_MODULE]: [
+    ...breaking("minor"),
     ["build(redisreplay): require limes v0.64.0", "patch"],
     ["build(redisreplay): bump go-redis", "patch"],
     ["build(pgstore): require limes v0.64.0", null],
@@ -69,6 +77,7 @@ const moduleCases = {
     ["build(limes): require limes v0.64.0", "patch"],
   ],
   [modules.PGSTORE_MODULE]: [
+    ...breaking("minor"),
     ["build(pgstore): require limes v0.64.0", "patch"],
     ["build(redisreplay): require limes v0.64.0", null],
     ["build(nested): require limes v0.64.0 in pgstore and otelmetric", "patch"],
