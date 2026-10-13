@@ -379,9 +379,33 @@ const (
 // more than 1/MaxNanos², which this scale keeps apart, and equal ones meet.
 const utilizationScale = "1e40"
 
+// The rows sqlListTenants keeps, as its $1 names them: never the filter's
+// number, which is limes's to renumber.
+const (
+	keepEvery     = "every"
+	keepUnlimited = "unlimited"
+	keepAtOrPast  = "at-or-past"
+)
+
+// keepOf is the rows f keeps, as sqlListTenants names them. Every filter but
+// the two that narrow lists every tenant: TenantBudgetsAll and the
+// unspecified zero that defaults to it, and nothing else, since the request
+// was validated against the limes this package is built with.
+func keepOf(f limes.TenantBudgetFilter) string {
+	switch f {
+	case limes.TenantBudgetsUnlimited:
+		return keepUnlimited
+	case limes.TenantBudgetsAtOrPast:
+		return keepAtOrPast
+	default:
+		return keepEvery
+	}
+}
+
 // sqlListTenants pages the aggregates most at risk first, ties by tenant id,
 // after the place ($4 class, $5 spent, $6 max, $7 tenant) when $4 is set.
-// $1 is the filter, and $2 / $3 the threshold as an exact fraction.
+// $1 is the rows to keep, as keepOf names them, and $2 / $3 the threshold as
+// an exact fraction.
 const sqlListTenants = `
 WITH ranked AS (
     SELECT b.*,
@@ -397,10 +421,10 @@ WITH ranked AS (
 SELECT r.tenant_id, r.ceiling_max, r.ceiling_unlimited, r.spent, r.reserved, r.unit_code,
        r.period_start, r.period_end, r.updated_at, r.resource_version, r.period
 FROM ranked r, place p
-WHERE CASE $1::int
-        WHEN 0 THEN true
-        WHEN 2 THEN r.class = 2
-        ELSE r.class = 0 OR (r.class = 1 AND r.spent::numeric * 100 * $3::numeric >= $2::numeric * r.ceiling_max)
+WHERE CASE $1::text
+        WHEN '` + keepEvery + `' THEN true
+        WHEN '` + keepUnlimited + `' THEN r.class = 2
+        WHEN '` + keepAtOrPast + `' THEN r.class = 0 OR (r.class = 1 AND r.spent::numeric * 100 * $3::numeric >= $2::numeric * r.ceiling_max)
       END
   AND (p.class IS NULL
        OR r.class > p.class
@@ -433,7 +457,7 @@ func (s *UsageStore) ListTenantBudgets(ctx context.Context, req limes.ListTenant
 	var rows []budgetRow
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		r, err := tx.Query(ctx, sqlListTenants,
-			int(req.Filter), threshold.Num().String(), threshold.Denom().String(),
+			keepOf(req.Filter), threshold.Num().String(), threshold.Denom().String(),
 			class, spent, ceiling, tenant, limit+1, utilizationScale)
 		if err != nil {
 			return err
