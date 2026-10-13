@@ -45,8 +45,9 @@ let failed = 0;
 try {
   git("init", "-q", "-b", "main");
   const first = commit("chore: start", "go.mod", `${NESTED}/go.mod`);
-  // A module with no release line: neither the root nor NESTED counts it.
-  const unreleased = commit("feat: add a store", `${modules.UNRELEASED_DIRS[0]}/store.go`);
+  // A third module of the table: neither the root nor NESTED counts it.
+  const third = Object.values(modules.MODULES).find((m) => m.dir !== "" && m.dir !== NESTED).dir;
+  const thirdFeat = commit(`feat(${third}): add a store`, `${third}/store.go`);
   const rootFeat = commit("feat: add a caveat", "caveat.go");
   const nestedFeat = commit(`feat(${NESTED}): add a cache`, `${NESTED}/cache.go`);
   const both = commit("fix: rename across both", "rename.go", `${NESTED}/rename.go`);
@@ -55,7 +56,7 @@ try {
   git("checkout", "-q", "main");
   git(...IDENTITY, "merge", "-q", "--no-ff", "-m", `fix(${NESTED}): merge a fix`, "side");
   const merge = { hash: git("rev-parse", "HEAD"), message: `fix(${NESTED}): merge a fix` };
-  const all = [first, unreleased, rootFeat, nestedFeat, both, sideFix, merge];
+  const all = [first, thirdFeat, rootFeat, nestedFeat, both, sideFix, merge];
 
   // [module, scope, the commits it must count]
   const cases = [

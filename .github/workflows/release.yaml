@@ -33,10 +33,11 @@ env:
   # The release tooling's runtime, as ci.yaml pins it.
   # renovate: datasource=node-version depName=node
   NODE_VERSION: "24.21.0"
-  # The nested module's name in .github/release/modules.cjs, which is also
+  # Each nested module's name in .github/release/modules.cjs, which is also
   # its directory and the prefix of its tags. release-rules.test.mjs fails
   # when a module there is not released here.
   REDISREPLAY_MODULE: redisreplay
+  PGSTORE_MODULE: pgstore
 
 jobs:
   release:
@@ -178,6 +179,22 @@ jobs:
           RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes-redisreplay.md
         run: ./.github/scripts/publish-release.sh new "$RUNNER_TEMP/tags-before" "$REDISREPLAY_MODULE/"
 
+      - name: Compute and push the tag of pgstore
+        if: steps.catchup.outputs.release == 'true'
+        working-directory: .github/release
+        run: npx semantic-release --no-ci
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_MODULE: ${{ env.PGSTORE_MODULE }}
+          RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes-pgstore.md
+
+      - name: Publish the release of pgstore
+        if: steps.catchup.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes-pgstore.md
+        run: ./.github/scripts/publish-release.sh new "$RUNNER_TEMP/tags-before" "$PGSTORE_MODULE/"
+
       # A run that pushed its tag and failed before publishing it is re-run
       # above only while that tag is still on HEAD. Once main has moved on,
       # this publishes it: every recent tag below HEAD with no release, as
@@ -191,3 +208,4 @@ jobs:
           set -euo pipefail
           ./.github/scripts/publish-release.sh left-behind
           ./.github/scripts/publish-release.sh left-behind "$REDISREPLAY_MODULE/"
+          ./.github/scripts/publish-release.sh left-behind "$PGSTORE_MODULE/"

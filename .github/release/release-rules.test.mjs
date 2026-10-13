@@ -33,7 +33,7 @@ const cases = [
 
 // Cases of one module's own rules, beside the shared ones above.
 const moduleCases = {
-  // pgstore, untagged, releases nothing of the limes module.
+  // pgstore releases nothing of the limes module, on a line of its own.
   [modules.ROOT_MODULE]: [
     ["feat(pgstore): add the meter", null],
     ["fix(pgstore): lock in order", null],
