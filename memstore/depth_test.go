@@ -12,7 +12,8 @@ import (
 
 // A capability deeper than MaxDelegationDepth is metered against no partial
 // lineage: every call that walks its ancestors refuses it, rather than skip
-// the ancestors past the bound and their ceilings with them.
+// the ancestors past the bound and their ceilings with them. Insert refuses
+// such a chain, so it is written here as records kept from before it did.
 func TestMeteringRefusesAChainPastMaxDelegationDepth(t *testing.T) {
 	ctx := context.Background()
 	records := newTestStore()
@@ -20,9 +21,8 @@ func TestMeteringRefusesAChainPastMaxDelegationDepth(t *testing.T) {
 	parent := uuid.Nil
 	for range limes.MaxDelegationDepth + 2 {
 		id := uuid.New()
-		if err := records.Insert(ctx, limes.InsertRequest{Capability: mkCap(id, parent, tenant, "agent"), IssuedBy: limes.Principal{Subject: "op"}}); err != nil {
-			t.Fatal(err)
-		}
+		records.caps[id] = mkCap(id, parent, tenant, "agent")
+		records.issuedBy[id] = limes.Principal{Subject: "op"}
 		parent = id
 	}
 	u := newTestUsage(records)

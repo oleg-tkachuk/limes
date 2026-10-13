@@ -45,7 +45,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
 )
 
 // Insert records req.Capability and who asked for it. The parent must be on
-// record, in the same tenant, and expire no earlier than the child.
+// record, in the same tenant, and expire no earlier than the child, and the
+// child may have no more than limes.MaxDelegationDepth ancestors on record.
 func (s *Store) Insert(ctx context.Context, req limes.InsertRequest) error {
 	if err := req.Validate(); err != nil {
 		return err
@@ -95,8 +96,9 @@ func (s *Store) Insert(ctx context.Context, req limes.InsertRequest) error {
 }
 
 // checkParent holds c's parent on record for the rest of tx and refuses a
-// child it cannot keep: under a parent not on record, outliving it, or in
-// another tenant. It returns the parent's depth.
+// child it cannot keep: under a parent not on record, outliving it, in
+// another tenant, or past limes.MaxDelegationDepth. It returns the parent's
+// depth.
 func checkParent(ctx context.Context, tx pgx.Tx, c limes.Capability) (int, error) {
 	var depth int
 	var raw []byte
@@ -116,6 +118,20 @@ func checkParent(ctx context.Context, tx pgx.Tx, c limes.Capability) (int, error
 	}
 	if c.Subject.TenantID != parent.Subject.TenantID {
 		return 0, fmt.Errorf("%w: tenant %s, not its parent's %s", limes.ErrDelegationTooWide, c.Subject.TenantID, parent.Subject.TenantID)
+	}
+	// The child's ancestors are its parent and the parent's own, counted as
+	// IsRevoked counts them: those still on record. The depth column keeps
+	// the depth at insertion, which a purged ancestor does not lower.
+	rows, err := tx.Query(ctx, sqlLineage, c.ParentID, limes.MaxDelegationDepth)
+	if err != nil {
+		return 0, err
+	}
+	chain, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+	if err != nil {
+		return 0, err
+	}
+	if len(chain) > limes.MaxDelegationDepth {
+		return 0, fmt.Errorf("%w: %s would have more than %d ancestors", limes.ErrDelegationTooDeep, c.ID, limes.MaxDelegationDepth)
 	}
 	return depth, nil
 }

@@ -64,7 +64,9 @@ type Env[TX any] struct {
 	// Tenant is a tenant the store can charge, with no ceiling yet.
 	Tenant uuid.UUID
 	// NewCapability records a capability of Tenant as spec describes it, so
-	// the Meter finds its lineage and its ceilings, and returns its id.
+	// the Meter finds its lineage and its ceilings, and returns its id — or
+	// the error the store's Insert returned, which the checks match by its
+	// sentinel.
 	NewCapability func(spec CapabilitySpec) (uuid.UUID, error)
 	// CheckTimeout bounds one check, setup aside: past it the suite panics
 	// with every goroutine's stack, naming the check, rather than leave a
@@ -324,7 +326,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"ReservationsTiedOnExpiryPageInIDOrder", checkReservationsTied[TX]},
 		{"HousekeepingRefusesANegativeLimit", checkHousekeepingLimits[TX]},
 		{"PurgeOrphansReleasesWhatARemovedCapabilityHeld", checkPurgeOrphans[TX]},
-		{"AChainTooDeepCountsOnceItsTopIsRemoved", checkLineageAfterRemoval[TX]},
+		{"AChainAtMaxDepthTakesAChildOnceItsTopIsRemoved", checkLineageAfterRemoval[TX]},
 		{"TenantBudgetKeepsItsPeriodEnd", checkPeriodEnd[TX]},
 		{"ResetSpendAloneRollsThePeriodStart", checkPeriodStart[TX]},
 		{"TheZeroSubjectIsRefused", checkZeroSubject[TX]},
@@ -2332,6 +2334,16 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 		!slices.ContainsFunc(unl, func(s limes.TenantBudget) bool { return s.TenantID == unlimited }) {
 		t.Errorf("unlimited tenants = %+v, %v; want %s and not %s", unl, err, unlimited, f.Tenant)
 	}
+	// TenantBudgetsAll names the filter a request that names none takes.
+	named, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetsAll, Limit: listed})
+	if err != nil || len(named.Items) != len(order) {
+		t.Fatalf("every tenant, by name = %d rows, %v; want %d", len(named.Items), err, len(order))
+	}
+	for i, row := range named.Items {
+		if row.TenantID != order[i].TenantID {
+			t.Errorf("every tenant, by name: row %d is %s, want %s as with no filter", i, row.TenantID, order[i].TenantID)
+		}
+	}
 }
 
 // longestTTL is the longest hold a ReserveRequest can ask for: it expires
@@ -2456,8 +2468,8 @@ func checkHousekeepingLimits[TX any](t *testing.T, f fixture[TX]) {
 }
 
 // checkLineageAfterRemoval holds a store to counting only the ancestors
-// still on record: a chain one too deep is ErrDelegationTooDeep, and once its
-// top is removed it is MaxDelegationDepth deep and counts like any other.
+// still on record: a chain MaxDelegationDepth deep charges, takes no child,
+// and once its top is removed takes one, which charges like any other.
 func checkLineageAfterRemoval[TX any](t *testing.T, f fixture[TX]) {
 	if f.DeleteCapability == nil {
 		t.Skip("Env.DeleteCapability not set")
@@ -2466,22 +2478,30 @@ func checkLineageAfterRemoval[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// One more ancestor than MaxDelegationDepth: top and the links above
-	// the last.
 	leaf := top
-	for range limes.MaxDelegationDepth + 1 {
+	for range limes.MaxDelegationDepth {
 		if leaf, err = f.newCapability(leaf, unlimitedBudget); err != nil {
 			t.Fatal(err)
 		}
 	}
-	charge := limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: leaf, tenant: f.Tenant}), Amount: one}
-	if _, err := f.Usage.Charge(f.Ctx, charge, nil); !errors.Is(err, limes.ErrDelegationTooDeep) {
-		t.Fatalf("a charge with %d ancestors on record: err = %v, want ErrDelegationTooDeep", limes.MaxDelegationDepth+1, err)
+	charge := func(capID uuid.UUID) error {
+		_, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: f.Tenant}), Amount: one}, nil)
+		return err
+	}
+	if err := charge(leaf); err != nil {
+		t.Fatalf("a charge with %d ancestors on record: %v", limes.MaxDelegationDepth, err)
+	}
+	if _, err := f.newCapability(leaf, unlimitedBudget); !errors.Is(err, limes.ErrDelegationTooDeep) {
+		t.Fatalf("a capability with %d ancestors on record: err = %v, want ErrDelegationTooDeep", limes.MaxDelegationDepth+1, err)
 	}
 	if err := f.DeleteCapability(top); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Usage.Charge(f.Ctx, charge, nil); err != nil {
+	deeper, err := f.newCapability(leaf, unlimitedBudget)
+	if err != nil {
+		t.Fatalf("a capability with %d ancestors on record, the top removed: %v", limes.MaxDelegationDepth, err)
+	}
+	if err := charge(deeper); err != nil {
 		t.Errorf("a charge with %d ancestors on record, the top removed: %v", limes.MaxDelegationDepth, err)
 	}
 }

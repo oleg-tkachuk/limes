@@ -647,9 +647,9 @@ Revoking a capability revokes everything delegated from it, with or
 without the flag: `IsRevoked` answers for the whole chain. `CascadeChildren`
 also writes a revocation entry per descendant, so the audit trail names each
 capability that was stopped. A chain is at most `MaxDelegationDepth` (64)
-ancestors deep: `Delegate` returns `ErrDelegationTooDeep` and no token for a
-child past it (its record is already written, and reads as revoked),
-and a store answers a deeper chain with that error — read as revoked — rather
+ancestors deep: `Store.Insert` refuses a child past it as `ErrDelegationTooDeep`,
+writing nothing, so `Delegate` returns that error and no token; a store
+answers a deeper chain, written before `Insert` refused one, with that error — read as revoked — rather
 than walk part of it and miss a revocation at its root.
 
 Records do not stay forever. A housekeeping job calls
@@ -724,9 +724,11 @@ administers tenant ceilings on `TenantBudgets` alone.
 
 `Store.Insert` returns `ErrAlreadyExists` for an id already on record, refuses
 a record with no id or under a parent not on record as `ErrInvalidRequest`,
-and a child expiring after its parent or in another tenant as
-`ErrDelegationTooWide`: `Purge` and the `IsRevoked` walk rely on a whole
-lineage in one tenant. It should tell a missing tenant
+a child expiring after its parent or in another tenant as
+`ErrDelegationTooWide`, and a child with more than `MaxDelegationDepth`
+ancestors still on record as `ErrDelegationTooDeep`, writing nothing:
+`Purge` and the `IsRevoked` walk rely on a whole lineage in one tenant, no
+deeper than the walk reaches. It should tell a missing tenant
 from a failure: return
 `ErrUnknownTenant` for a tenant it does not hold and `ErrTenantDeleted` for one
 in the trash. `Issue` and `Delegate` pass them through, wrapped, beside

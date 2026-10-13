@@ -161,8 +161,8 @@ sequenceDiagram
     I->>St: Store.IsRevoked(parent)
     I->>I: Narrows(parent, child)
     I->>I: sign the child with the Signer
-    I->>St: Store.Insert(InsertRequest{child, IssuedBy: parent.Subject})
-    I->>St: Store.IsRevoked(child) — depth within MaxDelegationDepth
+    I->>St: Store.Insert(InsertRequest{child, IssuedBy: parent.Subject}) — depth within MaxDelegationDepth
+    I->>St: Store.IsRevoked(child)
     I-->>W: child token
 
     W->>S: request + child token
@@ -528,8 +528,8 @@ flowchart TB
     end
 
     sign["Issuer.sign: Signer.sign(ctx, child)<br/>token within MaxTokenBytes"]
-    persist{"Store.Insert(InsertRequest{child,<br/>IssuedBy: parent.Subject})"}
-    depth{"Store.IsRevoked(child) answers<br/>(no more than MaxDelegationDepth ancestors)"}
+    persist{"Store.Insert(InsertRequest{child,<br/>IssuedBy: parent.Subject})<br/>no more than MaxDelegationDepth ancestors"}
+    depth{"Store.IsRevoked(child) answers<br/>(a backstop for a store that does not refuse)"}
     ok(["IssueResult{Capability, Token}"])
 
     wide["ErrDelegationTooWide"]

@@ -341,8 +341,7 @@ type DelegateRequest struct {
 // another issuer named is ErrInvalidRequest: this issuer's store holds no
 // record of it, so revoking it there would never reach the child. A child
 // that would have more than MaxDelegationDepth ancestors is
-// ErrDelegationTooDeep: its record is written before the store can count
-// them, and its token is not returned. A parent whose caveats do not allow
+// ErrDelegationTooDeep, refused by Store.Insert before it is on record. A parent whose caveats do not allow
 // OpShare — the right to delegate — is ErrOpNotAllowed: delegating is the
 // share operation, and a capability granted without it may not hand on any
 // part of itself.
@@ -459,8 +458,9 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 	if err := i.store.Insert(ctx, InsertRequest{Capability: child, IssuedBy: parent.Subject}); err != nil {
 		return Capability{}, "", fmt.Errorf("limes: persist delegation: %w", err)
 	}
-	// The store counts the chain only once the child is on it: a parent
-	// at MaxDelegationDepth checks out above, its child does not.
+	// Insert refuses a child past MaxDelegationDepth. A store that does not
+	// is still caught here, before a token no verifier would accept leaves:
+	// the walk reaches past the bound only from a chain too deep.
 	if _, err := i.store.IsRevoked(ctx, child.ID); err != nil {
 		return Capability{}, "", fmt.Errorf("limes: delegate from parent %s: %w", parent.ID, err)
 	}

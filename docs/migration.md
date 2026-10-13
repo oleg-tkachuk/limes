@@ -13,6 +13,19 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.57.0
+
+- `Store.Insert` accepted a child with more than `MaxDelegationDepth`
+  ancestors on record, and `Delegate` refused it only once it was written →
+  `Insert` refuses one as `ErrDelegationTooDeep` and writes nothing.
+  `storetest` checks it; `metertest.Env.NewCapability` returns the store's
+  error, which a check now matches.
+- `TenantBudgetFilter`'s zero was `TenantBudgetsAll` → it is
+  `TenantBudgetsUnspecified`, which lists every tenant as before, and
+  `TenantBudgetsAll`, `TenantBudgetsAtOrPast` and `TenantBudgetsUnlimited`
+  each moved up by one. Code that names the filters needs no change; a store
+  that passes the filter on as a number maps it by name instead.
+
 ## v0.55.0
 
 - `Store.Insert` accepted a child in another tenant than its parent → it

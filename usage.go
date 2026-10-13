@@ -217,7 +217,7 @@ type TenantBudgets interface {
 
 	// ListTenantBudgets returns tenant budget rows; a consumer joins its
 	// own tenant data to them by TenantID. Filter picks the rows:
-	//   - TenantBudgetsAll: every one.
+	//   - TenantBudgetsUnspecified, TenantBudgetsAll: every one.
 	//   - TenantBudgetsAtOrPast: rows with a ceiling — a bound or 0 — where
 	//     spent / max * 100 >= ThresholdPct, exactly; a ceiling of 0 is
 	//     spent through at any threshold. At a threshold of 0, every row
@@ -548,8 +548,11 @@ func (r SetTenantBudgetRequest) Validate() error {
 type TenantBudgetFilter uint8
 
 const (
-	// TenantBudgetsAll lists every tenant: the zero value, no filter.
-	TenantBudgetsAll TenantBudgetFilter = iota
+	// TenantBudgetsUnspecified takes the default, TenantBudgetsAll: a
+	// request that names no filter lists every tenant.
+	TenantBudgetsUnspecified TenantBudgetFilter = iota
+	// TenantBudgetsAll lists every tenant: no filter.
+	TenantBudgetsAll
 	// TenantBudgetsAtOrPast lists tenants with a ceiling spent to
 	// ListTenantBudgetsRequest.ThresholdPct or past it.
 	TenantBudgetsAtOrPast
@@ -560,6 +563,8 @@ const (
 // String names the filter for logs and errors.
 func (f TenantBudgetFilter) String() string {
 	switch f {
+	case TenantBudgetsUnspecified:
+		return "unspecified"
 	case TenantBudgetsAll:
 		return "all"
 	case TenantBudgetsAtOrPast:

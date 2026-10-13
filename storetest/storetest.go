@@ -9,8 +9,8 @@
 // The checks cover what every caller relies on: a record reads back as it was
 // written and is no caller's to change, a duplicate or unknown id is refused
 // with the module's sentinel, Insert refuses a lineage it could not keep whole
-// and a tenant it cannot mint for, revocation reaches every descendant down
-// to MaxDelegationDepth and outlasts time passing, purging drops a record with
+// — a child past MaxDelegationDepth among it — and a tenant it cannot mint
+// for, revocation reaches every descendant down to MaxDelegationDepth and outlasts time passing, purging drops a record with
 // its revocation entries once it has been expired long enough — in batches,
 // never before its children and never inside a verifier's leeway — listing
 // pages in a fixed order and keeps tenants apart, and a Biscuit copy revokes
@@ -209,7 +209,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"RevokeIsIdempotentAndReachesDescendants", checkRevoke},
 		{"CascadeRecordsEveryDescendant", checkCascade},
 		{"RevocationReachesEveryGeneration", checkDeepChain},
-		{"RevocationReachesTheDeepestChainAndRefusesADeeperOne", checkMaxDepth},
+		{"RevocationReachesTheDeepestChainAndInsertRefusesADeeperOne", checkMaxDepth},
 		{"CascadeRecordsTheDeepestChain", checkMaxDepthCascade},
 		{"PurgeDropsExpiredRecordsAndTheirEntries", checkPurge},
 		{"PurgeWorksInBatches", checkPurgeBatches},
@@ -791,8 +791,8 @@ func checkBiscuit(t *testing.T, f fixture) {
 }
 
 // checkMaxDepth holds IsRevoked to the whole of a chain MaxDelegationDepth
-// deep, and to refusing — never clearing — a deeper one, whose root the walk
-// cannot reach.
+// deep, and Insert to refusing a deeper one, whose root the walk could not
+// reach, without writing it.
 func checkMaxDepth(t *testing.T, f fixture) {
 	root := f.live(t, "agent:root", uuid.Nil)
 	leaf := root
@@ -803,9 +803,12 @@ func checkMaxDepth(t *testing.T, f fixture) {
 	if !f.revoked(t, leaf.ID) {
 		t.Errorf("revoking a root did not reach a capability %d delegations below it", limes.MaxDelegationDepth)
 	}
-	deeper := f.live(t, "agent:deeper", leaf.ID)
-	if revoked, err := f.Store.IsRevoked(f.Ctx, deeper.ID); !errors.Is(err, limes.ErrDelegationTooDeep) {
-		t.Errorf("IsRevoked past MaxDelegationDepth = %v, %v; want ErrDelegationTooDeep", revoked, err)
+	deeper := f.newCapability("agent:deeper", leaf.ID, f.now.Add(ttl))
+	if err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: deeper, IssuedBy: issuedBy}); !errors.Is(err, limes.ErrDelegationTooDeep) {
+		t.Errorf("Insert past MaxDelegationDepth: err = %v, want ErrDelegationTooDeep", err)
+	}
+	if _, err := f.get(deeper.ID); !errors.Is(err, limes.ErrNotFound) {
+		t.Errorf("a record Insert refused as too deep reads back: err = %v, want ErrNotFound", err)
 	}
 }
 
