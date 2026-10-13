@@ -39,6 +39,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/internal/fields"
 	"github.com/oleg-tkachuk/limes/internal/link"
 )
 
@@ -1175,6 +1176,17 @@ func checkTenantBudgetReads[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil || set.ReservedAmount != held || set.ResourceVersion == got.ResourceVersion || set.ResourceVersion == 0 {
 		t.Errorf("SetTenantBudget = %+v, %v; want %v held and a new version", set, err, held)
 	}
+	// Nothing is spent and the period is open-ended; every other field holds
+	// a value, so one the store does not keep reads back unset.
+	open := []string{"Ceiling.Unlimited", "SpentAmount", "PeriodEnd"}
+	if unset := fields.Unset(set); !slices.Equal(unset, open) {
+		t.Errorf("SetTenantBudget = %+v: %v unset, want only %v", set, unset, open)
+	}
+	if read, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant); err != nil {
+		t.Errorf("GetTenantBudget after a set: %v", err)
+	} else if diff := sameTenantBudget(read, set); diff != "" {
+		t.Errorf("GetTenantBudget = %+v, SetTenantBudget returned %+v: %s", read, set, diff)
+	}
 	for _, ceiling := range []limes.Nanos{-1, limes.MaxNanos + 1} {
 		if _, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
 			TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: ceiling}, UnitCode: unit, ExpectedVersion: set.ResourceVersion,
@@ -1191,29 +1203,43 @@ func checkTenantBudgetReads[TX any](t *testing.T, f fixture[TX]) {
 	if i < 0 {
 		t.Fatalf("ListTenantBudgets left out the tenant: %+v", listed)
 	}
-	if b := listed[i]; b.ReservedAmount != held || b.ResourceVersion != set.ResourceVersion {
-		t.Errorf("listed budget = %+v; want %v held at version %d", b, held, set.ResourceVersion)
+	if diff := sameTenantBudget(listed[i], set); diff != "" {
+		t.Errorf("listed budget = %+v, SetTenantBudget returned %+v: %s", listed[i], set, diff)
 	}
 }
 
-// sameReservation names how got differs from want, or returns "".
+// sameReservation names how got differs from want, or returns "". Every
+// field counts, so one the store does not keep is a difference; the expiry
+// compares as an instant, whatever its zone.
 func sameReservation(got, want limes.Reservation) string {
-	switch {
-	case got.ID != want.ID, got.CapabilityID != want.CapabilityID, got.TenantID != want.TenantID:
-		return "ids differ"
-	case got.Amount != want.Amount, got.UnitCode != want.UnitCode:
-		return "amount differs"
-	case got.Op != want.Op, got.Actor != want.Actor:
-		return "op or actor differs"
-	case !got.ExpiresAt.Equal(want.ExpiresAt):
+	if !got.ExpiresAt.Equal(want.ExpiresAt) {
 		return "expiry differs"
-	case len(got.Copies) != len(want.Copies):
-		return "copies differ"
 	}
-	for i := range got.Copies {
-		if !bytes.Equal(got.Copies[i].RevocationID, want.Copies[i].RevocationID) || !sameCeiling(got.Copies[i].Budget, want.Copies[i].Budget) {
-			return "copies differ"
+	got.ExpiresAt = want.ExpiresAt
+	if !reflect.DeepEqual(got, want) {
+		return "fields differ"
+	}
+	return ""
+}
+
+// sameTenantBudget names how got differs from want, or returns "". Every
+// field counts; the times compare as instants.
+func sameTenantBudget(got, want limes.TenantBudget) string {
+	for _, f := range []struct {
+		name      string
+		got, want time.Time
+	}{
+		{"PeriodStart", got.PeriodStart, want.PeriodStart},
+		{"PeriodEnd", got.PeriodEnd, want.PeriodEnd},
+		{"UpdatedAt", got.UpdatedAt, want.UpdatedAt},
+	} {
+		if !f.got.Equal(f.want) {
+			return f.name + " differs"
 		}
+	}
+	got.PeriodStart, got.PeriodEnd, got.UpdatedAt = want.PeriodStart, want.PeriodEnd, want.UpdatedAt
+	if !reflect.DeepEqual(got, want) {
+		return "fields differ"
 	}
 	return ""
 }
@@ -1257,6 +1283,11 @@ func checkReservations[TX any](t *testing.T, f fixture[TX]) {
 	if first.CapabilityID != f.child || first.TenantID != f.Tenant || first.Amount != held ||
 		first.Op != "llm" || first.Actor != "agent" || len(first.Copies) != 1 || !sameCeiling(first.Copies[0].Budget, copies[0].Budget) {
 		t.Errorf("Reserve returned %+v; want the whole hold, copies with their budgets alone", first)
+	}
+	// The copy's budget has a Max; every other field of this hold holds a
+	// value, so one the store does not keep reads back unset.
+	if unset, want := fields.Unset(first), []string{"Copies[0].Budget.Unlimited"}; !slices.Equal(unset, want) {
+		t.Errorf("Reserve returned %+v with %v unset, want only %v", first, unset, want)
 	}
 
 	got, err := f.Usage.GetReservation(f.Ctx, first.ID)
