@@ -16,7 +16,7 @@ the test that holds it there.
 | [RFC 7517](https://www.rfc-editor.org/rfc/rfc7517), [RFC 7638](https://www.rfc-editor.org/rfc/rfc7638), [RFC 8037](https://www.rfc-editor.org/rfc/rfc8037) | JWK Sets, thumbprints, Ed25519 keys | `jwks.Marshal`, `jwks.NewHandler`, `jwks.KeyID` |
 | [RFC 9111](https://www.rfc-editor.org/rfc/rfc9111) | How long a fetched JWK Set stays fresh | `jwks.Remote` |
 | [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562) | UUIDv7 capability ids | `Issuer.Issue` |
-| [RFC 4648](https://www.rfc-editor.org/rfc/rfc4648) §5 | base64url without padding, everywhere | — |
+| [RFC 4648](https://www.rfc-editor.org/rfc/rfc4648) §5 | base64url without padding, everywhere | token segments, JWKS, DPoP, nonces |
 | ISO 4217 | Budget units | `IsUnitCode` |
 
 ## The token
@@ -27,7 +27,9 @@ limes-cap-v4+jwt` (§3.11), so no other JWT signed by the same key passes as a
 capability — the algorithm is fixed by the verifier rather than read from the
 token (§3.1), and `iss` and `aud` are always checked (§3.8, §3.9). The
 version is part of `typ`: a token of another format version is refused
-before any claim is read under the wrong schema.
+before any claim is read under the wrong schema. *Held by*
+`TestVerifyRequiresCapabilityTyp`, `TestVerifyFixesTheAlgorithm`,
+`TestVerify_UntrustedIssuer`, `TestVerify_AudienceMismatch`.
 
 **RFC 9864.** Tokens, JWKS entries and DPoP proofs carry the fully-specified
 `alg: Ed25519`. The polymorphic `EdDSA` is deprecated by RFC 9864; a
@@ -151,7 +153,15 @@ store's index on them stays tight. *Held by* `TestIssuedIDsAreVersion7`.
 
 **ISO 4217.** A budget's unit is any ISO 4217 code in its upper-case
 spelling, validated against `golang.org/x/text/currency`; `XXX` is the unit
-of a budget that is not money.
+of a budget that is not money. *Held by* `TestNormalizeUnitCode`,
+`TestAbstractUnitIsXXX`.
+
+**RFC 4648 §5.** Every base64 value the module reads or writes — a token's
+segments, a JWK's `x`, a DPoP proof, a nonce, a thumbprint — is base64url
+without padding, and is read strictly: padding, the standard alphabet and
+spare bits set in the last character are refused, so a value has one
+spelling. *Held by* `TestVerifyReadsTokenSegmentsAsUnpaddedBase64URL`,
+`TestWritesUnpaddedBase64URL`, `TestUnB64IsStrict`, `TestParseReadsXStrictly`.
 
 ## Not adopted
 
