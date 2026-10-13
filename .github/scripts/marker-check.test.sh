@@ -105,6 +105,53 @@ check "on v1, a footer in another case" fail "$(printf 'docs: explain\n\nbreakin
 check "on v1, a marker in an earlier commit" fail "docs!: explain" "docs: more"
 check "on v1, a ! outside the type" pass "fix: a!: b"
 
+# A repository of two modules, as the release scopes them: a marker counts
+# for the module whose files its commit touches, and each module is on its
+# own release line.
+nested="$scratch/nested"
+readonly NESTED=redisreplay
+git -C "$scratch" init --quiet --initial-branch=main "$nested"
+git -C "$nested" config user.name test
+git -C "$nested" config user.email test@example.com
+mkdir -p "$nested/.github/release" "$nested/$NESTED"
+cp "$root/.github/release/modules.cjs" "$root/.github/release/release.config.cjs" "$nested/.github/release/"
+: >"$nested/README.md"
+: >"$nested/$NESTED/README.md"
+git -C "$nested" add -A
+git -C "$nested" commit --quiet -m "feat: start"
+git -C "$nested" tag v0.1.0
+git -C "$nested" tag "$NESTED/v0.1.0"
+
+# check_module name, want, module, path the commit touches, message
+check_module() {
+    local name="$1" want="$2" module="$3" path="$4" message="$5"
+    git -C "$nested" checkout --quiet -B case main
+    printf '%s\n' "$message" >>"$nested/$path"
+    [ -z "${MIGRATION:-}" ] || mkdir -p "$nested/docs"
+    [ -z "${MIGRATION:-}" ] || printf '%s\n' "$message" >>"$nested/docs/migration.md"
+    git -C "$nested" add -A
+    git -C "$nested" commit --quiet -m "$message"
+    local got=pass
+    (cd "$nested" && "$script" main case "$module" >/dev/null 2>&1) || got=fail
+    if [ "$want" != "$got" ]; then
+        printf 'FAIL %s: want %s, got %s\n' "$name" "$want" "$got"
+        failures=$((failures + 1))
+    fi
+}
+
+check_module "a nested marker with no migration entry" fail "$NESTED" "$NESTED/README.md" "feat($NESTED)!: change"
+check_module "a nested marker, checked for the root" pass limes "$NESTED/README.md" "feat($NESTED)!: change"
+check_module "a root marker, checked for the nested module" pass "$NESTED" README.md "feat!: change"
+MIGRATION=1 check_module "a nested marker with its migration entry" pass "$NESTED" "$NESTED/README.md" "feat($NESTED)!: change"
+git -C "$nested" checkout --quiet main
+git -C "$nested" tag "$NESTED/v1.0.0"
+check_module "a nested marker on its stable line" fail "$NESTED" "$NESTED/README.md" "feat($NESTED)!: change"
+MIGRATION=1 check_module "a root marker beside the nested stable line" pass limes README.md "feat!: change"
+if (cd "$nested" && "$script" main main no-such-module >/dev/null 2>&1); then
+    printf 'FAIL a module the table does not hold was checked\n'
+    failures=$((failures + 1))
+fi
+
 if [ "$failures" -gt 0 ]; then
     exit 1
 fi

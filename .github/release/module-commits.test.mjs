@@ -88,6 +88,20 @@ try {
     }
   }
 
+  // As a command, for the checks of breaking markers: the same commits.
+  for (const [name, scope] of [[modules.ROOT_MODULE, scopeOf(root)], [NESTED, scopeOf(nested)]]) {
+    const out = execFileSync("node", [require.resolve("./module-commits.cjs"), require.resolve("./modules.cjs"), name], {
+      cwd: repo,
+      encoding: "utf8",
+      input: all.map((c) => c.hash).join("\n"),
+    });
+    const want = all.filter((c) => plugin.touches(plugin.changedPaths(repo, c.hash), scope)).map((c) => c.hash);
+    if (out.split("\n").filter((h) => h !== "").join(" ") !== want.join(" ")) {
+      console.log(`FAIL the command prints for ${name}:\n${out}`);
+      failed = 1;
+    }
+  }
+
   // The notes of a module list its own changes and not another's.
   const lastRelease = { gitTag: `${NESTED}/v0.1.0`, version: "0.1.0" };
   const nextRelease = { gitTag: `${NESTED}/v0.2.0`, version: "0.2.0", type: "minor" };
