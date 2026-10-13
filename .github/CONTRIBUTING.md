@@ -15,9 +15,17 @@ task verify-all
 
 runs gofmt, `go mod tidy` and `go mod verify`, golangci-lint, `go vet` of a
 32-bit build, the unit suite, `./example` end to end, govulncheck, actionlint,
-the tests of the workflow scripts, and the release-rule, release-notes and major-guard tests
-— the same task CI runs. The suite needs no database, no
-network and no container.
+the tests of the workflow scripts, the release-rule, release-notes and major-guard tests,
+and the static checks of `pgstore` — the same task CI runs. It needs no
+database, no network and no container.
+
+`pgstore`, the reference PostgreSQL store, is a module of its own. Its tests run
+the contract suites against PostgreSQL in a container, so they need a running
+Docker, and run apart:
+
+```bash
+task test:pgstore
+```
 
 ## How a change lands
 
