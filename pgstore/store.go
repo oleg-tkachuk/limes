@@ -177,11 +177,12 @@ SELECT
     EXISTS (SELECT 1 FROM chain JOIN limes.revocations r ON r.capability_id = chain.id)
 FROM chain`
 
-// IsRevoked answers for the capability and every ancestor still on record.
+// IsRevoked answers for the capability and every ancestor still on record,
+// across every tenant whatever the call's scope.
 func (s *Store) IsRevoked(ctx context.Context, id uuid.UUID) (bool, error) {
 	var self, inChain bool
 	var deepest int
-	err := s.inTx(ctx, func(tx pgx.Tx) error {
+	err := s.inTxAllTenants(ctx, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, sqlIsRevoked, id, limes.MaxDelegationDepth).Scan(&self, &deepest, &inChain)
 	})
 	switch {
@@ -349,13 +350,14 @@ ON CONFLICT (revocation_id) DO NOTHING`
 SELECT capability_id, revoked_at, note, actor FROM limes.biscuit_revocations WHERE revocation_id = $1`
 )
 
-// IsBiscuitRevoked reports whether any of revocationIDs is revoked.
+// IsBiscuitRevoked reports whether any of revocationIDs is revoked, across
+// every tenant whatever the call's scope.
 func (s *Store) IsBiscuitRevoked(ctx context.Context, revocationIDs [][]byte) (bool, error) {
 	if len(revocationIDs) == 0 {
 		return false, nil
 	}
 	var revoked bool
-	err := s.inTx(ctx, func(tx pgx.Tx) error {
+	err := s.inTxAllTenants(ctx, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, sqlIsBiscuitRevoked, revocationIDs).Scan(&revoked)
 	})
 	return revoked, err

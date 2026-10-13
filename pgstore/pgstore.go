@@ -46,10 +46,12 @@ type Config struct {
 	DB DB
 	// Now is the store's clock. Nil: time.Now.
 	Now func() time.Time
-	// Scope, when set, runs first in every transaction the store opens, with
-	// the call's context: where a consumer sets what its row-level security
-	// policies read (SET LOCAL, set_config(…, true)) from the caller's
-	// tenant. An error from it ends the call.
+	// Scope runs first in every transaction the store opens, with the call's
+	// context, and sets what row-level security policies read: nil is
+	// ScopeFromContext, which serves the schema's own policies from
+	// WithTenant and WithAllTenants. A consumer with policies of its own sets
+	// its settings here (set_config(…, true), local to the transaction). An
+	// error from it ends the call.
 	Scope func(ctx context.Context, tx pgx.Tx) error
 }
 
@@ -71,6 +73,9 @@ func newConn(cfg Config) (conn, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
+	if cfg.Scope == nil {
+		cfg.Scope = ScopeFromContext
+	}
 	return conn{db: cfg.DB, now: cfg.Now, scope: cfg.Scope}, nil
 }
 
@@ -83,10 +88,21 @@ func (c conn) clock() time.Time {
 // returns nil.
 func (c conn) inTx(ctx context.Context, fn func(pgx.Tx) error) error {
 	return pgx.BeginFunc(ctx, c.db, func(tx pgx.Tx) error {
-		if c.scope != nil {
-			if err := c.scope(ctx, tx); err != nil {
-				return fmt.Errorf("pgstore: scope: %w", err)
-			}
+		if err := c.scope(ctx, tx); err != nil {
+			return fmt.Errorf("pgstore: scope: %w", err)
+		}
+		return fn(tx)
+	})
+}
+
+// inTxAllTenants is inTx scoped to every tenant as well, for a revocation
+// check: the verifier asks before it knows the token's tenant, and a check
+// that missed an entry because of the caller's scope would let a revoked
+// token through.
+func (c conn) inTxAllTenants(ctx context.Context, fn func(pgx.Tx) error) error {
+	return c.inTx(ctx, func(tx pgx.Tx) error {
+		if err := allTenants(ctx, tx); err != nil {
+			return err
 		}
 		return fn(tx)
 	})

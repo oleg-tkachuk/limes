@@ -44,10 +44,13 @@ func TestMeterContract(t *testing.T) {
 		// parent by the time between their inserts.
 		expiry := clock.Now().Add(contractTTL)
 		return metertest.Env[pgx.Tx]{
-			Ctx:     t.Context(),
-			Usage:   usage,
-			Tenant:  tenant,
-			Advance: clock.Advance,
+			Ctx:       WithTenant(t.Context(), tenant),
+			Usage:     usage,
+			Tenant:    tenant,
+			NewTenant: func() (uuid.UUID, error) { return uuid.New(), nil },
+			TenantCtx: func(tenant uuid.UUID) context.Context { return WithTenant(t.Context(), tenant) },
+			ListCtx:   WithAllTenants(t.Context()),
+			Advance:   clock.Advance,
 			DeleteCapability: func(id uuid.UUID) error {
 				_, err := owner.Exec(context.Background(), deleteRecord, id)
 				return err
@@ -58,7 +61,7 @@ func TestMeterContract(t *testing.T) {
 					Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: cmp.Or(spec.Tenant, tenant), Subject: "agent"},
 					Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: spec.Requests, Budget: spec.Budget},
 				}
-				return c.ID, records.Insert(t.Context(), limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "issuer"}})
+				return c.ID, records.Insert(WithTenant(t.Context(), c.Subject.TenantID), limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "issuer"}})
 			},
 		}
 	})

@@ -1,0 +1,161 @@
+package pgstore
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/internal/link"
+)
+
+// rlsTTL is how long the capabilities of these tests live.
+const rlsTTL = time.Hour
+
+// tenantFixture is two stores over the app role and a capability of tenant
+// mine, revoked, with a child, a charge and a hold.
+type tenantFixture struct {
+	records       *Store
+	usage         *UsageStore
+	clock         *fakeClock
+	mine, theirs  uuid.UUID
+	parent, child limes.Capability
+}
+
+func newTenantFixture(t *testing.T) tenantFixture {
+	t.Helper()
+	fresh(t)
+	f := tenantFixture{clock: newFakeClock(), mine: uuid.New(), theirs: uuid.New()}
+	var err error
+	if f.records, err = NewStore(Config{DB: app, Now: f.clock.Now}); err != nil {
+		t.Fatal(err)
+	}
+	if f.usage, err = NewUsageStore(Config{DB: app, Now: f.clock.Now}); err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithTenant(t.Context(), f.mine)
+	expiry := f.clock.Now().Add(rlsTTL)
+	f.parent = limes.Capability{
+		ID: uuid.New(), ExpiresAt: expiry,
+		Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: f.mine, Subject: "agent:parent"},
+		Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true}},
+	}
+	f.child = f.parent
+	f.child.ID, f.child.ParentID, f.child.Subject.Subject = uuid.New(), f.parent.ID, "agent:child"
+	for _, c := range []limes.Capability{f.parent, f.child} {
+		if err := f.records.Insert(ctx, limes.InsertRequest{Capability: c}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: f.parent.ID}); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+// A role that does not own the tables sees and writes its own tenant's rows
+// only: another tenant's records are not there for it, and neither is a
+// write in their name.
+func TestRowSecurityKeepsTenantsApart(t *testing.T) {
+	f := newTenantFixture(t)
+	for name, ctx := range map[string]context.Context{
+		"another tenant": WithTenant(t.Context(), f.theirs),
+		"no scope":       t.Context(),
+	} {
+		if _, err := f.records.GetRecord(ctx, f.parent.ID); !errors.Is(err, limes.ErrNotFound) {
+			t.Errorf("%s: GetRecord: err = %v, want ErrNotFound", name, err)
+		}
+		if err := f.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: f.child.ID}); !errors.Is(err, limes.ErrNotFound) {
+			t.Errorf("%s: Revoke: err = %v, want ErrNotFound", name, err)
+		}
+		page, err := f.records.ListByPrincipal(ctx, limes.ListByPrincipalRequest{
+			TenantID: f.mine, PrincipalType: limes.PrincipalAgent, Subject: "agent:child",
+		})
+		if err != nil || len(page.Items) != 0 {
+			t.Errorf("%s: ListByPrincipal = %d items, %v; want none", name, len(page.Items), err)
+		}
+		c := f.parent
+		c.ID, c.ParentID = uuid.New(), uuid.Nil
+		if err := f.records.Insert(ctx, limes.InsertRequest{Capability: c}); err == nil {
+			t.Errorf("%s: Insert of a capability of another tenant succeeded", name)
+		}
+	}
+}
+
+// The revocation checks see every tenant whatever the call's scope: the
+// verifier asks before it knows the token's tenant, and a check that missed
+// an entry would let a revoked token through.
+func TestRevocationChecksSeeEveryTenant(t *testing.T) {
+	f := newTenantFixture(t)
+	for name, ctx := range map[string]context.Context{
+		"own tenant":     WithTenant(t.Context(), f.mine),
+		"another tenant": WithTenant(t.Context(), f.theirs),
+		"no scope":       t.Context(),
+	} {
+		for _, id := range []uuid.UUID{f.parent.ID, f.child.ID} {
+			if revoked, err := f.records.IsRevoked(ctx, id); err != nil || !revoked {
+				t.Errorf("%s: IsRevoked(%s) = %v, %v; want revoked", name, id, revoked, err)
+			}
+		}
+	}
+	copyID := []byte("rls-copy")
+	if err := f.records.RevokeBiscuit(WithTenant(t.Context(), f.mine), limes.RevokeBiscuitRequest{
+		Copy: biscuitCopy(t, f.child.ID, copyID),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if revoked, err := f.records.IsBiscuitRevoked(t.Context(), [][]byte{copyID}); err != nil || !revoked {
+		t.Errorf("IsBiscuitRevoked with no scope = %v, %v; want revoked", revoked, err)
+	}
+}
+
+// The meter of another tenant cannot count against a capability, nor read
+// its counters; a call with no scope reads nothing either.
+func TestRowSecurityKeepsTheMeterApart(t *testing.T) {
+	f := newTenantFixture(t)
+	ctx := WithTenant(t.Context(), f.mine)
+	if _, err := f.usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
+		TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true}, UnitCode: limes.DefaultUnitCode,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for name, other := range map[string]context.Context{
+		"another tenant": WithTenant(t.Context(), f.theirs),
+		"no scope":       t.Context(),
+	} {
+		if _, err := f.usage.GetTenantBudget(other, f.mine); !errors.Is(err, limes.ErrTenantBudgetNotFound) {
+			t.Errorf("%s: GetTenantBudget: err = %v, want ErrTenantBudgetNotFound", name, err)
+		}
+		page, err := f.usage.ListTenantBudgets(other, limes.ListTenantBudgetsRequest{})
+		if err != nil || len(page.Items) != 0 {
+			t.Errorf("%s: ListTenantBudgets = %d rows, %v; want none", name, len(page.Items), err)
+		}
+	}
+	page, err := f.usage.ListTenantBudgets(WithAllTenants(t.Context()), limes.ListTenantBudgetsRequest{})
+	if err != nil || len(page.Items) != 1 {
+		t.Errorf("ListTenantBudgets across every tenant = %d rows, %v; want this tenant's", len(page.Items), err)
+	}
+}
+
+// Housekeeping with no scope removes nothing; scoped to every tenant it
+// removes what is due in each.
+func TestHousekeepingNeedsEveryTenant(t *testing.T) {
+	f := newTenantFixture(t)
+	f.clock.Advance(rlsTTL + 2*limes.MinPurgeRetention)
+	if got, err := f.records.Purge(t.Context(), limes.PurgeRequest{}); err != nil || got.Purged != 0 {
+		t.Errorf("Purge with no scope = %+v, %v; want nothing purged", got, err)
+	}
+	if got, err := f.records.Purge(WithAllTenants(t.Context()), limes.PurgeRequest{}); err != nil || got.Purged != 2 {
+		t.Errorf("Purge across every tenant = %+v, %v; want both records", got, err)
+	}
+}
+
+// biscuitCopy is the copy of capID under revocation id id, as only a
+// verifier makes one.
+func biscuitCopy(t *testing.T, capID uuid.UUID, id []byte) limes.BiscuitCopy {
+	t.Helper()
+	return link.NewBiscuitCopy(capID, id).(limes.BiscuitCopy)
+}

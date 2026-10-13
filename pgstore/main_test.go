@@ -117,12 +117,11 @@ func (c *fakeClock) Now() time.Time { return c.start.Add(time.Duration(c.offset.
 
 func (c *fakeClock) Advance(d time.Duration) { c.offset.Add(int64(d)) }
 
-// scopeNothing is a Scope that runs a statement, so a test can tell the
-// store called it in the transaction it opened.
-func scopeNothing(calls *atomic.Int64) func(context.Context, pgx.Tx) error {
+// countedScope is ScopeFromContext, counting its calls, so a test can tell
+// the store called its Scope in the transaction it opened.
+func countedScope(calls *atomic.Int64) func(context.Context, pgx.Tx) error {
 	return func(ctx context.Context, tx pgx.Tx) error {
 		calls.Add(1)
-		_, err := tx.Exec(ctx, "SELECT 1")
-		return err
+		return ScopeFromContext(ctx, tx)
 	}
 }
