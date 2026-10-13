@@ -303,7 +303,19 @@ fill it and lock the others out; full, it refuses
 rather than forgets:
 behind several replicas, a proof replayed to a different one inside the
 window is caught only by server nonces or a `dpop.ReplayCache` over a shared
-store.
+store. The `redisreplay` module is one, over Redis, a module of its own so
+limes never resolves a Redis client:
+
+```go
+// go get github.com/oleg-tkachuk/limes/redisreplay
+replay, err := redisreplay.New(redisreplay.Config{Client: rdb}) // any redis.UniversalClient
+```
+
+It keeps one sorted set per capability, so one call is one atomic script on
+one key, Redis Cluster included, and it decides what is live by the
+verifier's clock, never the server's. Run it with `maxmemory-policy
+noeviction`: full, Redis refuses the write and the proof is refused, where an
+eviction policy would forget a live id.
 
 ## Narrow offline (Biscuit)
 
@@ -662,7 +674,7 @@ Implement these and you are done:
 | `CopyUsageReader` | Reads Biscuit copies' own counters (only to show them) | No |
 | `UsageStore[TX]` = `Meter[TX]` + `MeterReader` + `TenantBudgets` + `UsageHousekeeping` | Request and spend counters, the charges ledger, tenant ceilings; `DeleteUsage` and `PurgeOrphans` release a reaped capability's holds | Only for atomic side effects |
 | `KeyResolver` | Public verification keys | No |
-| `dpop.ReplayCache` | DPoP proof ids seen, per key, each counted against its holder: `Seen(ctx, dpop.ReplayEntry)` reports a holder past its share as seen, and returns an error when its store cannot answer — an outage, not a refused proof (only for key-bound tokens; `dpop.MemoryReplayCache` ships for one process — behind several replicas, implement it over a shared store) | No |
+| `dpop.ReplayCache` | DPoP proof ids seen, per key, each counted against its holder: `Seen(ctx, dpop.ReplayEntry)` reports a holder past its share as seen, and returns an error when its store cannot answer — an outage, not a refused proof (only for key-bound tokens; `dpop.MemoryReplayCache` ships for one process — behind several replicas, the `redisreplay` module ships one over Redis, or implement it over another shared store) | No |
 | `dpop.Nonces` | Server-provided DPoP nonces (optional; `dpop.HMACNonces` ships and needs no store) | No |
 
 Two obligations are easy to miss. `Store.IsRevoked` answers for the
@@ -781,6 +793,7 @@ log. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
 | `dpop.VerifierConfig.Window` | `dpop.DefaultWindow`, 1 minute |
 | `dpop.VerifierConfig.MaxProofBytes` | `dpop.DefaultMaxProofBytes`, 4 KiB; a `jti` past `dpop.MaxJTIBytes`, 128 bytes, is refused |
 | `dpop.MemoryReplayCacheConfig` | `dpop.DefaultReplayCacheEntries`, 100 000 ids; `dpop.DefaultReplayEntriesPerHolder`, 1 000, per capability |
+| `redisreplay.Config` | `redisreplay.DefaultKeyPrefix`, `limes:dpop:replay:`; `dpop.DefaultReplayEntriesPerHolder`, 1 000, per capability |
 | `dpop.HMACNoncesConfig` | `dpop.DefaultNonceLifetime`, 5 minutes; `dpop.HMACNonceClockSkew`, 5 seconds, for a nonce issued ahead of this replica's clock; keys of at least `dpop.HMACNonceKeyBytes`, 32 |
 | `DefaultReservationTTL` | 5 minutes |
 | `MaxExternalRefBytes` | 200 |

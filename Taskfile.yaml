@@ -6,8 +6,9 @@ version: "3"
 #   task --list
 #   task verify-all      # before pushing; CI runs the same task
 #
-# One Go module at the root, so the shared library's Go verbs are flattened in:
-# `task test`, not `task go:test`.
+# The library is the module at the root, so the shared library's Go verbs are
+# flattened in: `task test`, not `task go:test`. The redisreplay module has a
+# gate of its own, verify:redisreplay.
 
 silent: true
 
@@ -16,6 +17,9 @@ vars:
   TASKLIB: 'https://github.com/oleg-tkachuk/taskfiles.git//%s?ref=v11.2.2'
   # The developer tools' own module; see its go.mod.
   TOOLS_MODFILE: tools/go.mod
+  # The Redis replay cache, a module of its own so the root never resolves a
+  # Redis client.
+  REDISREPLAY_DIR: redisreplay
 
 includes:
   go:
@@ -39,7 +43,7 @@ tasks:
       - task --list
 
   verify-all:
-    desc: "gofmt + go mod tidy/verify + golangci-lint + a 32-bit build + the unit suite + the example + govulncheck + actionlint + the workflow scripts + the release rules and notes — what CI runs"
+    desc: "gofmt + go mod tidy/verify + golangci-lint + a 32-bit build + the unit suite + the example + govulncheck + actionlint + the workflow scripts + the release rules and notes + the redisreplay module — what CI runs"
     cmds:
       - task: fmt:check
       - task: verify:tidy
@@ -51,6 +55,18 @@ tasks:
       - task: verify:workflows
       - task: verify:scripts
       - task: verify:release-rules
+      - task: verify:redisreplay
+
+  verify:redisreplay:
+    desc: "The redisreplay module's own gate: go mod tidy/verify, go vet, golangci-lint, the unit suite and govulncheck — ./... at the root does not reach a nested module"
+    dir: '{{.REDISREPLAY_DIR}}'
+    cmds:
+      - go mod tidy -diff
+      - go mod verify
+      - go vet ./...
+      - golangci-lint run --config ../.golangci.yml ./...
+      - go test -race -short ./...
+      - go tool -modfile=../{{.TOOLS_MODFILE}} govulncheck ./...
 
   verify:example:
     desc: "Run ./example end to end: it exits non-zero on any step that does not do what the README says"

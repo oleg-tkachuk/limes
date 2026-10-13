@@ -516,7 +516,8 @@ func decodeSegment(seg string, v any) error {
 // several replicas behind a balancer that does not pin a client to one
 // replica can see a proof replayed on another replica within the window;
 // keep the window short, use server nonces (VerifierConfig.Nonces), or back
-// ReplayCache with a shared store.
+// ReplayCache with a shared store — the redisreplay module ships one over
+// Redis.
 //
 // Every holder gets a share of the cache of its own (EntriesPerHolder), so
 // one capability cannot fill it with proofs and lock every other one out —
