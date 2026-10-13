@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # marker-check.test.sh — marker-check.sh lets breaking markers through before
-# v1.0.0 and refuses every one from then on, a documentation-only change's
-# included, in every spelling the release's commit parser reads.
+# v1.0.0, when the change writes its migration entry, and refuses every one
+# from then on, a documentation-only change's included, in every spelling the
+# release's commit parser reads.
 #
 # Runs from `task verify-all` against a scratch repository — no network.
 
@@ -28,6 +29,11 @@ check() {
     for message in "$@"; do
         printf '%s\n' "$message" >>"$scratch/README.md"
         git -C "$scratch" add README.md
+        if [ -n "${MIGRATION:-}" ]; then
+            mkdir -p "$scratch/docs"
+            printf '%s\n' "$message" >>"$scratch/docs/migration.md"
+            git -C "$scratch" add docs/migration.md
+        fi
         git -C "$scratch" commit --quiet -m "$message"
     done
     local got=pass
@@ -38,10 +44,15 @@ check() {
     fi
 }
 
-# Before any release, and on 0.x, a marker cuts a minor: it passes.
-check "no release, a marker" pass "feat!: change"
+# Before any release, and on 0.x, a marker cuts a minor: it passes when the
+# change writes its migration entry.
+MIGRATION=1 check "no release, a marker" pass "feat!: change"
 git -C "$scratch" tag v0.9.0 main
-check "on v0, a marker" pass "feat!: change"
+MIGRATION=1 check "on v0, a marker" pass "feat!: change"
+MIGRATION=1 check "on v0, a footer" pass "$(printf 'fix: x\n\nBREAKING CHANGE: gone')"
+check "on v0, a marker without a migration entry" fail "feat!: change"
+check "on v0, a footer without a migration entry" fail "$(printf 'fix: x\n\nBREAKING CHANGE: gone')"
+MIGRATION=1 check "on v0, a marker in an earlier commit" pass "feat!: change" "docs: more"
 check "on v0, no marker" pass "docs: explain"
 
 # A title that reads as a footer in the merge commit is refused on any line.
@@ -58,7 +69,7 @@ mkdir -p "$(dirname "$config")"
 printf 'const BREAKING_IS_A_MINOR_BEFORE_1_0 = {};\n' >"$config"
 git -C "$scratch" add .github
 git -C "$scratch" commit --quiet -m "build: release breaks as minors"
-check "on v0, the pre-1.0 rule in force" pass "feat!: change"
+MIGRATION=1 check "on v0, the pre-1.0 rule in force" pass "feat!: change"
 git -C "$scratch" checkout --quiet main
 printf 'module.exports = {};\n' >"$config"
 git -C "$scratch" commit --quiet -am "build!: release breaks as majors"

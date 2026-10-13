@@ -34,7 +34,10 @@ network and no container.
 - A change that breaks the Go API is marked breaking — `type!:` or a
   `BREAKING CHANGE:` footer — in one of its commits. CI's **API compatibility**
   job compares the pull request's API with its base using apidiff and fails an
-  unmarked break. From 1.0.0 on it fails every break, and CI's **Breaking
+  unmarked break. Before 1.0.0 the change also adds its entry to
+  [docs/migration.md](../docs/migration.md) — what each name was and what it
+  is — and the **Breaking markers** job fails a marked change that leaves
+  that file alone. From 1.0.0 on it fails every break, and CI's **Breaking
   markers** job fails any commit marked breaking — documentation-only ones
   included — since the release would tag a v2 the Go proxy ignores; a v2 is a
   new module path, planned on its own.
