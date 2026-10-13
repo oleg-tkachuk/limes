@@ -19,15 +19,22 @@
 const PRESET = "conventionalcommits";
 const SECURITY_IS_A_PATCH = { type: "security", release: "patch" };
 const BREAKING_IS_A_MINOR_BEFORE_1_0 = { breaking: true, release: "minor" };
-// pgstore is a module of its own, not yet tagged: its changes leave the limes
-// module's code as it was, so they cut no release of it. A breaking change
-// there still would — the rule above matches it too — so a pgstore commit
-// carries no breaking marker until pgstore has a release line of its own.
+// pgstore and redisreplay are modules of their own, not yet tagged: their
+// changes leave the limes module's code as it was, so they cut no release of
+// it. A breaking change there still would — the rule above matches it too —
+// so their commits carry no breaking marker until each has a release line of
+// its own.
 const PGSTORE_RELEASES_NOTHING = { scope: "pgstore", release: false };
+const REDISREPLAY_RELEASES_NOTHING = { scope: "redisreplay", release: false };
 
 const analyzer = {
   preset: PRESET,
-  releaseRules: [SECURITY_IS_A_PATCH, BREAKING_IS_A_MINOR_BEFORE_1_0, PGSTORE_RELEASES_NOTHING],
+  releaseRules: [
+    SECURITY_IS_A_PATCH,
+    BREAKING_IS_A_MINOR_BEFORE_1_0,
+    PGSTORE_RELEASES_NOTHING,
+    REDISREPLAY_RELEASES_NOTHING,
+  ],
 };
 
 const notes = { preset: PRESET };

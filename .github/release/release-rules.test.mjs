@@ -31,6 +31,9 @@ const cases = [
   // pgstore, untagged, releases nothing of the limes module.
   ["feat(pgstore): add the meter", null],
   ["fix(pgstore): lock in order", null],
+  // So does redisreplay.
+  ["feat(redisreplay): add a script", null],
+  ["fix(redisreplay): expire the key", null],
 ];
 
 const logger = { log() {}, error() {}, warn() {}, success() {} };
