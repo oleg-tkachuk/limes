@@ -11,9 +11,13 @@
 # and every release after it would be refused (major-guard.cjs). A v2 is a
 # module path move, planned on its own.
 #
+# Before v1.0.0 a marker cuts a minor, and passes when the change also edits
+# the migration guide: a break no entry describes leaves every consumer to
+# rebuild it from the diff.
+#
 # Separate from api-break-check.sh, which needs Go, so it runs on every pull
 # request — one that touches only documentation included: a marker there
-# breaks the release as surely as one beside code. Before v1.0.0 it passes.
+# breaks the release as surely as one beside code.
 
 set -euo pipefail
 
@@ -33,9 +37,16 @@ if [ -n "${PR_TITLE:-}" ] && title_marks_breaking "$PR_TITLE"; then
     exit 1
 fi
 
+# Where each break before v1.0.0 is described as what it was and what it is.
+readonly MIGRATION_GUIDE=docs/migration.md
+
 merge_base="$(git merge-base "$1" "$2")"
 line="$(release_line "$merge_base")"
 if ! stable_at "$merge_base"; then
+    if marks_breaking "$merge_base" "$2" && git diff --quiet "$merge_base" "$2" -- "$MIGRATION_GUIDE"; then
+        echo "marker-check: a commit marks a break, and $MIGRATION_GUIDE has no entry for it" >&2
+        exit 1
+    fi
     echo "marker-check: no stable release line yet (${line:-no release}); breaking markers cut a minor"
     exit 0
 fi

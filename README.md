@@ -168,6 +168,7 @@ algorithm would be another token version, never a runtime choice.
 | [docs/guide.md](docs/guide.md) | each concern in turn: verification, caveats, delegation, DPoP, Biscuit, metering, revocation, storage contracts, key rotation |
 | [docs/standards.md](docs/standards.md) | the RFCs implemented — JWT, DPoP, JWKS, HTTP challenges and problem details — the choices made within them, and the OAuth standards deliberately left out |
 | [docs/diagrams.md](docs/diagrams.md) | the contract boundary, a capability's lifecycle, the verification gates, delegation, Biscuit copies, the charge path, revocation |
+| [docs/migration.md](docs/migration.md) | every breaking change since v0.3.0, release by release, as what it was and what it is now |
 | [CONTRIBUTING.md](.github/CONTRIBUTING.md) | building, testing and how a change lands |
 | [SECURITY.md](.github/SECURITY.md) | reporting a vulnerability |
 
