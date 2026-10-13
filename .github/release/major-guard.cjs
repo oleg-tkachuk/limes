@@ -1,5 +1,5 @@
 // A semantic-release plugin of one step: refuse a release whose major version
-// the module path does not carry.
+// the module path does not carry, or a module's first release.
 //
 // A Go module's import path names its major from v2 on (…/v2), so a tag
 // v2.0.0 on a module whose path has no /v2 is one the Go proxy ignores, and
@@ -7,12 +7,18 @@
 // breaking marker it reads — in a subject, a footer in any case, a merge
 // commit's body — so the check sits here, on the one path every release
 // takes, rather than only on the pull request.
+//
+// A module with no release tag yet would be released as 1.0.0, semantic-
+// release's first version, which promises a stable API by accident. Its
+// release line starts from a tag pushed by hand instead, and this refuses to
+// start it for one.
 
 const fs = require("node:fs");
 const path = require("node:path");
 
-// The module's go.mod, two levels above this directory.
-const GO_MOD = path.join(__dirname, "..", "..", "go.mod");
+// The repository root, two levels above this directory.
+const REPO_ROOT = path.join(__dirname, "..", "..");
+const GO_MOD = "go.mod";
 // The major a module path without a /vN suffix may release: v0 and v1 share
 // the bare path.
 const BARE_PATH_MAJOR = 1;
@@ -44,8 +50,25 @@ function check(version, modPath) {
   }
 }
 
-async function verifyRelease(_pluginConfig, { nextRelease }) {
-  check(nextRelease.version, modulePath(fs.readFileSync(GO_MOD, "utf8")));
+// checkFirst throws when there is no last release to count from: the release
+// line of the module whose tags start with prefix has not been seeded.
+function checkFirst(lastRelease, prefix) {
+  if (!lastRelease?.version) {
+    throw new Error(
+      `refusing a first release, which semantic-release cuts as 1.0.0: ` +
+        `seed the release line with a ${prefix}v0.x.y tag on a commit that holds the module`,
+    );
+  }
 }
 
-module.exports = { verifyRelease, check, moduleMajor, modulePath };
+// goModOf is the path of the go.mod of the module in dir, empty for the root.
+function goModOf(dir) {
+  return path.join(REPO_ROOT, dir ?? "", GO_MOD);
+}
+
+async function verifyRelease(pluginConfig, { lastRelease, nextRelease }) {
+  checkFirst(lastRelease, pluginConfig.tagPrefix ?? "");
+  check(nextRelease.version, modulePath(fs.readFileSync(goModOf(pluginConfig.dir), "utf8")));
+}
+
+module.exports = { verifyRelease, check, checkFirst, goModOf, moduleMajor, modulePath };

@@ -25,11 +25,22 @@ fail() { printf 'FAIL %s\n' "$1"; failures=$((failures + 1)); }
 got="$("$script" "$VERSION")" || fail "a published version"
 [[ "$got" == *'"Version":"v0.3.0"'* ]] || fail "the .info read back: $got"
 
-for tag in "" "0.3.0" "v0.3" "sdk/go/v0.3.0" "v0.3.0-rc.1"; do
+for tag in "" "0.3.0" "v0.3" "v0.3.0-rc.1" "/v0.3.0" "Sub/v0.3.0" "sub/v0.3" "sub//v0.3.0"; do
     if "$script" "$tag" >/dev/null 2>&1; then
         fail "accepted ${tag:-an empty tag}"
     fi
 done
+
+# A nested module's tag asks under the module's own path, for the version
+# alone.
+readonly NESTED=redisreplay
+mkdir -p "$work/proxy/github.com/$REPO/$NESTED/@v"
+echo '{"Version":"v0.4.0"}' >"$work/proxy/github.com/$REPO/$NESTED/@v/v0.4.0.info"
+got="$("$script" "$NESTED/v0.4.0")" || fail "a nested module's version"
+[[ "$got" == *'"Version":"v0.4.0"'* ]] || fail "the nested .info read back: $got"
+if "$script" "$NESTED/v0.3.0" >/dev/null 2>&1; then
+    fail "asked for a root version under the nested module's path"
+fi
 
 # The proxy has the .info under the upper-case path too, so only the
 # script's own guard can refuse it — and it must, before asking.

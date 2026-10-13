@@ -150,6 +150,10 @@ pre-1.0, so a breaking change is a minor too — **the Go API may change between
 minor versions**; read the release notes, which list breaking changes first,
 before bumping.
 
+`redisreplay` is a module of its own with a release line of its own,
+`redisreplay/vX.Y.Z`, cut by the same rules from the commits that touch it; a
+change to one module releases nothing of the other.
+
 The token wire format — claims, `typ: limes-cap-v4+jwt`, the Biscuit facts —
 is a separate promise: a token is a credential that outlives the process that
 issued it, so the format changes only as a deliberate breaking change that

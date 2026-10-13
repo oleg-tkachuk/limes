@@ -69,6 +69,17 @@ succeeds "a tag an earlier run pushed and published"
 git tag v0.2.1
 check "a new tag beside an old one" "v0.2.1" "$("$script" "$before")"
 
+# A nested module's run sees its own tags and the root's run does not.
+echo v0.2.1 >>"$RELEASED"
+git tag --points-at HEAD >"$before"
+git tag sub/v0.1.0
+check "the root run beside a nested module's new tag" "" "$("$script" "$before")"
+check "the nested module's new tag" "sub/v0.1.0" "$("$script" "$before" sub/)"
+check "another module's prefix" "" "$("$script" "$before" other/)"
+git tag --points-at HEAD >"$before"
+echo sub/v0.1.0 >>"$RELEASED"
+check "the nested module's tag published" "" "$("$script" "$before" sub/)"
+
 if [ "$failures" -gt 0 ]; then
     exit 1
 fi

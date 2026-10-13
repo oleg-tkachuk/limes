@@ -57,11 +57,13 @@ for (const [text, why] of wanted) {
   }
 }
 
+// The generator runs through module-commits.cjs, which narrows the commits
+// to the module's and hands them on.
 const names = config.plugins.map((p) => (Array.isArray(p) ? p[0] : p));
-const generatorAt = names.indexOf("@semantic-release/release-notes-generator");
+const generatorAt = names.indexOf("./module-commits.cjs");
 const fileAt = names.indexOf("./release-notes-file.cjs");
-if (generatorAt < 0 || fileAt < 0) {
-  console.log("FAIL the config must load the notes generator and the plugin that writes its notes");
+if (generatorAt < 0 || fileAt < 0 || generatorAt > fileAt) {
+  console.log("FAIL the config must generate the notes, through module-commits.cjs, before the plugin that writes them");
   failed = 1;
 }
 
