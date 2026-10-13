@@ -1,13 +1,15 @@
 // Package pgstore is the reference implementation of the limes storage
 // contracts over PostgreSQL: limes.Store and limes.BiscuitRevocationStore for
-// capability records and revocations. It passes the module's own contract
-// suite (storetest), which is how a consumer knows it keeps every rule a
-// store must keep.
+// capability records and revocations, limes.UsageStore[pgx.Tx] and
+// limes.CopyUsageReader for the meter. It passes the module's own contract
+// suites, storetest and metertest, which is how a consumer knows it keeps
+// every rule a store must keep.
 //
-// Create the schema once, then build the store over a pool:
+// Create the schema once, then build both stores over one pool:
 //
 //	if err := pgstore.Migrate(ctx, pool); err != nil { … }
-//	store, err := pgstore.NewStore(pgstore.Config{DB: pool})
+//	records, err := pgstore.NewStore(pgstore.Config{DB: pool})
+//	usage, err := pgstore.NewUsageStore(pgstore.Config{DB: pool})
 //
 // Every call runs in one transaction on one connection, and every time it
 // writes or compares against comes from Config.Now, never from the database's
