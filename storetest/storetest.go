@@ -875,6 +875,15 @@ func checkInsertKeepsLineage(t *testing.T, f fixture) {
 	noID.ID = uuid.Nil
 	orphan := f.newCapability("agent:orphan", uuid.New(), f.now.Add(ttl))
 	outliving := f.newCapability("agent:outliving", parent.ID, parent.ExpiresAt.Add(time.Second))
+	other, err := f.newTenant()
+	if err != nil {
+		t.Fatalf("NewTenant: %v", err)
+	}
+	// A lineage stays in one tenant, as Delegate keeps it: a store that scopes
+	// rows by tenant could not see the rest of a mixed one, and its IsRevoked
+	// walk would miss a revoked ancestor.
+	elsewhere := f.newCapability("agent:elsewhere", parent.ID, parent.ExpiresAt)
+	elsewhere.Subject.TenantID = other
 	for name, tc := range map[string]struct {
 		c    limes.Capability
 		want error
@@ -882,6 +891,7 @@ func checkInsertKeepsLineage(t *testing.T, f fixture) {
 		"no id":                        {noID, limes.ErrInvalidRequest},
 		"a parent not on record":       {orphan, limes.ErrInvalidRequest},
 		"a child outliving its parent": {outliving, limes.ErrDelegationTooWide},
+		"a child in another tenant":    {elsewhere, limes.ErrDelegationTooWide},
 	} {
 		if err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: tc.c, IssuedBy: issuedBy}); !errors.Is(err, tc.want) {
 			t.Errorf("Insert of %s: err = %v, want %v", name, err, tc.want)

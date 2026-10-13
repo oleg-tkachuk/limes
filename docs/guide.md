@@ -673,8 +673,9 @@ administers tenant ceilings on `TenantBudgets` alone.
 
 `Store.Insert` returns `ErrAlreadyExists` for an id already on record, refuses
 a record with no id or under a parent not on record as `ErrInvalidRequest`,
-and a child expiring after its parent as `ErrDelegationTooWide`: `Purge` and
-the `IsRevoked` walk rely on a whole lineage. It should tell a missing tenant
+and a child expiring after its parent or in another tenant as
+`ErrDelegationTooWide`: `Purge` and the `IsRevoked` walk rely on a whole
+lineage in one tenant. It should tell a missing tenant
 from a failure: return
 `ErrUnknownTenant` for a tenant it does not hold and `ErrTenantDeleted` for one
 in the trash. `Issue` and `Delegate` pass them through, wrapped, beside
