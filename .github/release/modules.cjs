@@ -1,6 +1,10 @@
 // The modules this repository releases, and the semantic-release config of
 // each; release.config.cjs picks one.
 //
+// It requires nothing: the CI checks evaluate a copy of it from an earlier
+// commit, on its own, to learn which rules a module released by there
+// (.github/scripts/breaking-markers.sh).
+//
 // A release computes the next SemVer from Conventional Commits, writes the
 // release notes and creates the git tag — nothing else. Run by
 // .github/workflows/release.yaml, which ci.yaml dispatches once every check
@@ -103,4 +107,11 @@ function configFor(name) {
   };
 }
 
-module.exports = { MODULES, MODULE_ENV, ROOT_MODULE, UNRELEASED_DIRS, configFor, tagPrefix };
+// breaksAreMinor reports whether the module name still releases a breaking
+// change as a minor, as every module does before 1.0. The checks of breaking
+// markers and of the API ask it rather than read the rules themselves.
+function breaksAreMinor(name) {
+  return configFor(name).analyzer.releaseRules.includes(BREAKING_IS_A_MINOR_BEFORE_1_0);
+}
+
+module.exports = { MODULES, MODULE_ENV, ROOT_MODULE, UNRELEASED_DIRS, breaksAreMinor, configFor, tagPrefix };

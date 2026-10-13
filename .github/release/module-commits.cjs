@@ -59,3 +59,20 @@ async function generateNotes(pluginConfig, context) {
 }
 
 module.exports = { analyzeCommits, generateNotes, changedPaths, touches };
+
+// Run as a command, it reads commit hashes from stdin, one a line, and prints
+// those that touch the module named, as modules.cjs at the path given scopes
+// it — so the checks of breaking markers count the commits the release does.
+//
+//   node module-commits.cjs <modules.cjs> <module> <hashes
+if (require.main === module) {
+  const [modulesPath, name] = process.argv.slice(2);
+  const { configFor } = require(require("node:path").resolve(modulesPath));
+  const scope = configFor(name).plugins.find((p) => Array.isArray(p) && p[0] === "./module-commits.cjs")[1];
+  const hashes = require("node:fs").readFileSync(0, "utf8").split("\n").filter((h) => h !== "");
+  for (const hash of hashes) {
+    if (touches(changedPaths(process.cwd(), hash), scope)) {
+      console.log(hash);
+    }
+  }
+}
