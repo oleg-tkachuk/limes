@@ -15,6 +15,19 @@
 // writes or compares against comes from Config.Now, never from the database's
 // own clock: the store's clock is the one limes measures expiry and purging
 // by, and a database clock beside it would be a second one.
+//
+// # Tenants
+//
+// Every table keeps its rows' tenant, and the schema's row-level security
+// binds a role that does not own the tables to the tenant a call is scoped
+// to: pass WithTenant(ctx, tenant) to a call for one tenant, and
+// WithAllTenants(ctx) to housekeeping (Purge, ReleaseExpired, PurgeOrphans)
+// and to ListTenantBudgets. A call scoped to neither sees no row and writes
+// none. IsRevoked and IsBiscuitRevoked see every tenant whatever the scope:
+// the verifier asks them before it knows the token's tenant. The owner of
+// the tables, which runs Migrate, is not bound; connect as another role for
+// the policies to hold. Config.CheckTenant lets a consumer that keeps its own
+// tenants refuse one it does not hold.
 package pgstore
 
 import (
