@@ -23,6 +23,7 @@ readonly REQUIRED_JOBS=(
     "Changed paths"
     "Verify"
     "PostgreSQL store"
+    "Redis replay cache"
     "Test on the oldest supported Go"
     "API compatibility"
     "Breaking markers"
