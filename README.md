@@ -11,7 +11,8 @@ as a Go library.
 A capability is a short-lived signed token that carries its own authority:
 which operations, on which resources, for how much money and how many
 requests, until when, and on whose behalf. An agent can hand a sub-agent a
-strictly narrower copy without calling back to anyone, every charge counts
+strictly narrower copy — through the issuer, or offline as a Biscuit block
+with no call at all — every charge counts
 against the whole delegation chain, and any capability can be revoked
 mid-flight along with everything delegated from it.
 
@@ -121,8 +122,9 @@ you keep for audit.
 | **Revoke** | One call stops a capability and everything delegated from it; verifiers learn of it within a cache TTL, or at once on `Clear`. |
 | **Answer refusals** | `ErrorResponse` maps a refusal to its status, an RFC 6750 / RFC 9449 `WWW-Authenticate` challenge and an RFC 9457 problem body, without the error's own text. |
 
-You implement `Store`, `UsageStore[TX]` and `KeyResolver` — or use `memstore`
-— and check your implementation from its own tests with `storetest`,
+You implement `Store` and `UsageStore[TX]` — or use `memstore`, or `pgstore`
+over PostgreSQL — and a `KeyResolver`, which `jwks.Static` and `jwks.Remote`
+already are, and check your implementation from its own tests with `storetest`,
 `metertest` and `jwkstest` (`dpoptest` for a DPoP replay cache or nonce source). `UsageStore` is generic in your transaction type, so a charge can
 commit together with, say, an outbox write; with no transactions, use
 `UsageStore[struct{}]`.
@@ -140,7 +142,9 @@ commit together with, say, an outbox write; with no transactions, use
   wire-format drift, because tokens outlive deployments.
 - **No hidden dependencies.** `isolation_test.go` fails if a database driver or
   an object-storage SDK enters the resolved dependency graph.
-- **Tests need nothing**: no database, no network, no container.
+- **The root module's tests need nothing**: no database, no network, no
+  container. `pgstore`'s run against PostgreSQL in a container, and
+  `redisreplay`'s against miniredis and, in CI, a real Redis.
 
 ## Versioning
 
@@ -153,7 +157,8 @@ before bumping.
 `redisreplay` and `pgstore` are modules of their own, each with a release
 line of its own — `redisreplay/vX.Y.Z`, `pgstore/vX.Y.Z` — cut by the same
 rules from the commits that touch it; a change to one module releases nothing
-of another.
+of another, unless a commit scoped to one also touches another and is marked
+breaking.
 
 The token wire format — claims, `typ: limes-cap-v4+jwt`, the Biscuit facts —
 is a separate promise: a token is a credential that outlives the process that
@@ -174,6 +179,7 @@ algorithm would be another token version, never a runtime choice.
 | [docs/standards.md](docs/standards.md) | the RFCs implemented — JWT, DPoP, JWKS, HTTP challenges and problem details — the choices made within them, and the OAuth standards deliberately left out |
 | [docs/diagrams.md](docs/diagrams.md) | the contract boundary, a capability's lifecycle, the verification gates, delegation, Biscuit copies, the charge path, revocation |
 | [docs/migration.md](docs/migration.md) | every breaking change since v0.3.0, release by release, as what it was and what it is now |
+| [docs/api-review-v1.md](docs/api-review-v1.md) | the review of the API before 1.0: each finding, the decision taken and whether it is done |
 | [CONTRIBUTING.md](.github/CONTRIBUTING.md) | building, testing and how a change lands |
 | [SECURITY.md](.github/SECURITY.md) | reporting a vulnerability |
 
@@ -187,6 +193,7 @@ algorithm would be another token version, never a runtime choice.
 | [inspect/](inspect) | reading a token without verifying it, for tooling |
 | [memstore/](memstore) | the in-memory reference implementation of every storage contract |
 | [pgstore/](pgstore) | the reference PostgreSQL store, a module of its own: `Store`, `BiscuitRevocationStore`, `UsageStore[pgx.Tx]` and `CopyUsageReader`, held to storetest and metertest; released as `pgstore/vX.Y.Z` |
+| [redisreplay/](redisreplay) | a `dpop.ReplayCache` over Redis, a module of its own, for verifiers behind several replicas; released as `redisreplay/vX.Y.Z` |
 | [storetest/](storetest), [metertest/](metertest), [dpop/dpoptest](dpop/dpoptest), [jwks/jwkstest](jwks/jwkstest) | conformance suites to run from your own implementation's tests |
 | [example/](example) | the five-minute walkthrough as a runnable program |
 | [testdata/](testdata) | golden tokens, and the Biscuit vocabulary and cases shared with SDKs in other languages |

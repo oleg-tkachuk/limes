@@ -13,9 +13,9 @@
 // atomic and the cache works unchanged on Redis Cluster.
 //
 // Ids are remembered per holder, not across holders. That loses nothing: a
-// proof names the access token it was made for (its `ath`), and dpop.Verify
-// refuses it with any other token before the cache is asked, so a captured
-// proof cannot reach the cache under another holder.
+// proof names the access token it was made for (its `ath`), and
+// dpop.Verifier.Verify refuses it with any other token before the cache is
+// asked, so a captured proof cannot reach the cache under another holder.
 //
 // # Clocks
 //

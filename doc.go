@@ -14,13 +14,17 @@
 //     discovering it three calls deep.
 //   - Mid-flight revocation: a compromised agent's capability is revoked,
 //     together with everything it delegated.
-//   - Sub-capabilities without a round trip: an orchestrator narrows its own
-//     authority for each sub-agent it spawns, with no admin API in the path.
+//   - Sub-capabilities without an operator: an orchestrator narrows its own
+//     authority for each sub-agent it spawns, through the Issuer with no admin
+//     API in the path, or offline as a Biscuit block with no call at all.
 //
 // Wire format is JWT compact serialization with Ed25519 signatures (`alg:
-// Ed25519`, RFC 9864); docs/standards.md lists every standard followed.
-// Verification is local: the signature is checked against a resolved public
-// key, so consumers scale horizontally without contending on a shared store.
+// Ed25519`, RFC 9864), or a Biscuit v3 sealing such a token;
+// docs/standards.md lists every standard followed. Verification is local:
+// the signature is checked against a resolved public key, and the one store
+// read, whether the capability is revoked, goes through a short-lived cache
+// ([CachedRevocationChecker]), so consumers scale horizontally without
+// contending on a shared store.
 //
 // # Packages
 //
@@ -30,7 +34,10 @@
 // (RFC 9449). [github.com/oleg-tkachuk/limes/inspect] reads a token without
 // verifying it, for tooling. memstore, storetest and metertest serve stores;
 // dpop/dpoptest and jwks/jwkstest check a replay cache, a nonce source and a
-// key resolver.
+// key resolver. Two modules of their own ship stores with a driver the root
+// module does not resolve: github.com/oleg-tkachuk/limes/pgstore, every store
+// contract over PostgreSQL, and github.com/oleg-tkachuk/limes/redisreplay, a
+// replay cache over Redis.
 //
 // # What you implement
 //
