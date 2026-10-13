@@ -12,6 +12,11 @@ toolchain go1.27.2
 // replace, gets the version required here.
 replace github.com/oleg-tkachuk/limes => ../
 
+// v0.1.0 passes a tenant budget filter to SQL as its number, so with limes
+// v0.57.0 or later, which renumbered the filters, ListTenantBudgets lists the
+// wrong tenants without an error.
+retract v0.1.0
+
 require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
