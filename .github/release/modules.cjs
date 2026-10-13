@@ -34,9 +34,9 @@ const PRESET = "conventionalcommits";
 const SECURITY_IS_A_PATCH = { type: "security", release: "patch" };
 const BREAKING_IS_A_MINOR_BEFORE_1_0 = { breaking: true, release: "minor" };
 // A pgstore or redisreplay commit cuts no release of the limes module. Their
-// directories are left out of its commits already (UNRELEASED_DIRS, and
-// redisreplay's own line); these cover a commit scoped to one that also
-// touches a path outside it. A breaking change there would still cut one —
+// directories are left out of its commits already, each module being on a
+// line of its own; these cover a commit scoped to one that also touches a
+// path outside it. A breaking change there would still cut one —
 // the rule above matches it too — so such a commit carries no breaking
 // marker.
 const PGSTORE_RELEASES_NOTHING = { scope: "pgstore", release: false };
@@ -64,11 +64,11 @@ const MODULES = {
     dir: "redisreplay",
     releaseRules: [SECURITY_IS_A_PATCH, BREAKING_IS_A_MINOR_BEFORE_1_0],
   },
+  pgstore: {
+    dir: "pgstore",
+    releaseRules: [SECURITY_IS_A_PATCH, BREAKING_IS_A_MINOR_BEFORE_1_0],
+  },
 };
-
-// The directories of modules with no release line yet. Their commits release
-// nothing of the root module, and nothing at all until they join MODULES.
-const UNRELEASED_DIRS = ["pgstore"];
 
 // tagPrefix is what starts every release tag of the module in dir.
 function tagPrefix(dir) {
@@ -82,12 +82,9 @@ function configFor(name) {
     throw new Error(`${MODULE_ENV}=${name} names no module; known: ${Object.keys(MODULES).join(", ")}`);
   }
   // Every other module's directory, which the root module's commits exclude.
-  const others = [
-    ...Object.values(MODULES)
-      .map((m) => m.dir)
-      .filter((dir) => dir !== "" && dir !== module.dir),
-    ...UNRELEASED_DIRS,
-  ];
+  const others = Object.values(MODULES)
+    .map((m) => m.dir)
+    .filter((dir) => dir !== "" && dir !== module.dir);
   const analyzer = { preset: PRESET, releaseRules: module.releaseRules };
   const notes = { preset: PRESET };
   const scope = { dir: module.dir, exclude: module.dir === "" ? others : [] };
@@ -114,4 +111,4 @@ function breaksAreMinor(name) {
   return configFor(name).analyzer.releaseRules.includes(BREAKING_IS_A_MINOR_BEFORE_1_0);
 }
 
-module.exports = { MODULES, MODULE_ENV, ROOT_MODULE, UNRELEASED_DIRS, breaksAreMinor, configFor, tagPrefix };
+module.exports = { MODULES, MODULE_ENV, ROOT_MODULE, breaksAreMinor, configFor, tagPrefix };

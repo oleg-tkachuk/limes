@@ -55,15 +55,17 @@ expect() {
     fi
 }
 
-expect "a push, the nested module never released" 0 "api-break-check v0.1.0 $later limes" \
+expect "a push, the nested modules never released" 0 "api-break-check v0.1.0 $later limes" \
     api push "" "" "$later"
 git -C "$scratch" tag redisreplay/v0.1.0 "$first"
-expect "a push, each module from its own tag" 0 "$(printf 'marker-check v0.1.0 %s limes\nmarker-check redisreplay/v0.1.0 %s redisreplay' "$later" "$later")" \
+expect "a push, each module from its own tag, one never released" 0 \
+    "$(printf 'marker-check v0.1.0 %s limes\nmarker-check redisreplay/v0.1.0 %s redisreplay' "$later" "$later")" \
     markers push "" "" "$later"
-expect "a pull request" 0 "$(printf 'api-break-check %s %s limes\napi-break-check %s %s redisreplay' "$first" "$later" "$first" "$later")" \
-    api pull_request "$first" "$later" "$later"
-FAIL_MODULE=limes expect "one module failing, the others still checked" 1 \
-    "$(printf 'api-break-check %s %s limes\napi-break-check %s %s redisreplay' "$first" "$later" "$first" "$later")" \
+# Every module of the table, in its order, for a pull request.
+pr_calls="$(printf 'api-break-check %s %s limes\napi-break-check %s %s redisreplay\napi-break-check %s %s pgstore' \
+    "$first" "$later" "$first" "$later" "$first" "$later")"
+expect "a pull request" 0 "$pr_calls" api pull_request "$first" "$later" "$later"
+FAIL_MODULE=limes expect "one module failing, the others still checked" 1 "$pr_calls" \
     api pull_request "$first" "$later" "$later"
 expect "an unknown check" 2 "" bogus push "" "" "$later"
 

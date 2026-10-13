@@ -150,9 +150,10 @@ pre-1.0, so a breaking change is a minor too — **the Go API may change between
 minor versions**; read the release notes, which list breaking changes first,
 before bumping.
 
-`redisreplay` is a module of its own with a release line of its own,
-`redisreplay/vX.Y.Z`, cut by the same rules from the commits that touch it; a
-change to one module releases nothing of the other.
+`redisreplay` and `pgstore` are modules of their own, each with a release
+line of its own — `redisreplay/vX.Y.Z`, `pgstore/vX.Y.Z` — cut by the same
+rules from the commits that touch it; a change to one module releases nothing
+of another.
 
 The token wire format — claims, `typ: limes-cap-v4+jwt`, the Biscuit facts —
 is a separate promise: a token is a credential that outlives the process that
@@ -185,7 +186,7 @@ algorithm would be another token version, never a runtime choice.
 | [dpop/](dpop) | proof of possession (RFC 9449): signing and checking proofs, replay cache, server nonces |
 | [inspect/](inspect) | reading a token without verifying it, for tooling |
 | [memstore/](memstore) | the in-memory reference implementation of every storage contract |
-| [pgstore/](pgstore) | the reference PostgreSQL store, a module of its own: `Store`, `BiscuitRevocationStore`, `UsageStore[pgx.Tx]` and `CopyUsageReader`, held to storetest and metertest; not tagged yet |
+| [pgstore/](pgstore) | the reference PostgreSQL store, a module of its own: `Store`, `BiscuitRevocationStore`, `UsageStore[pgx.Tx]` and `CopyUsageReader`, held to storetest and metertest; released as `pgstore/vX.Y.Z` |
 | [storetest/](storetest), [metertest/](metertest), [dpop/dpoptest](dpop/dpoptest), [jwks/jwkstest](jwks/jwkstest) | conformance suites to run from your own implementation's tests |
 | [example/](example) | the five-minute walkthrough as a runnable program |
 | [testdata/](testdata) | golden tokens, and the Biscuit vocabulary and cases shared with SDKs in other languages |
