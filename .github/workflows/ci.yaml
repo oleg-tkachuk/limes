@@ -111,9 +111,9 @@ jobs:
             ~/.cache/go-build
             ~/go/pkg/mod
             ~/.cache/golangci-lint
-          key: go-${{ runner.os }}-verify-${{ hashFiles('go.sum', 'tools/go.sum', 'tools/yq/go.sum') }}-${{ github.sha }}
+          key: go-${{ runner.os }}-verify-${{ hashFiles('go.sum', 'tools/go.sum', 'tools/yq/go.sum', 'redisreplay/go.sum') }}-${{ github.sha }}
           restore-keys: |
-            go-${{ runner.os }}-verify-${{ hashFiles('go.sum', 'tools/go.sum', 'tools/yq/go.sum') }}-
+            go-${{ runner.os }}-verify-${{ hashFiles('go.sum', 'tools/go.sum', 'tools/yq/go.sum', 'redisreplay/go.sum') }}-
             go-${{ runner.os }}-verify-
 
       - name: Set up golangci-lint
@@ -190,6 +190,15 @@ jobs:
         run: go vet ./...
 
       - name: go test
+        run: go test -race ./...
+
+      # A module of its own: ./... at the root does not reach it.
+      - name: go vet redisreplay
+        working-directory: redisreplay
+        run: go vet ./...
+
+      - name: go test redisreplay
+        working-directory: redisreplay
         run: go test -race ./...
 
   # The release is computed from commit types, so a break of the Go API that
