@@ -637,6 +637,15 @@ token for up to its `Leeway` past expiry, never more than `MaxLeeway`, by a
 clock that may run up to `PurgeClockSkew` behind the store's, and a
 revocation purged inside that window would let the revoked token through.
 
+These bounds are constants, not settings, because the two sides that rely on
+them are configured apart: the verifiers, in every service that accepts a
+token, and the job that purges, beside the store. A store cannot see the
+leeway of each verifier, so the only bound it can trust is one every verifier
+is held to. Both bounds are floors and ceilings, not values: a verifier takes
+any `Leeway` up to `MaxLeeway`, and `Purge` any `ExpiredFor` from
+`MinPurgeRetention` up. Where clocks may drift further apart than
+`PurgeClockSkew`, keep revocations longer by passing a longer `ExpiredFor`.
+
 ## Bring your own storage
 
 Implement these and you are done:
