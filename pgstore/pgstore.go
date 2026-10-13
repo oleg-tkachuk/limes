@@ -24,7 +24,9 @@
 // WithAllTenants(ctx) to housekeeping (Purge, ReleaseExpired, PurgeOrphans)
 // and to ListTenantBudgets. A call scoped to neither sees no row and writes
 // none. IsRevoked and IsBiscuitRevoked see every tenant whatever the scope:
-// the verifier asks them before it knows the token's tenant. The owner of
+// the verifier asks them before it knows the token's tenant, on every
+// request, so each is one statement calling a function of the schema that
+// runs as the tables' owner — one round trip, no transaction. The owner of
 // the tables, which runs Migrate, is not bound; connect as another role for
 // the policies to hold. Config.CheckTenant lets a consumer that keeps its own
 // tenants refuse one it does not hold.
@@ -48,10 +50,12 @@ const schema = "limes"
 // its clock to it, so a time it writes reads back equal.
 const timeResolution = time.Microsecond
 
-// DB is what the store needs of a connection pool: a transaction per call.
-// *pgxpool.Pool and *pgx.Conn implement it.
+// DB is what the store needs of a connection pool: a transaction per call,
+// and a single statement for a revocation check. *pgxpool.Pool and *pgx.Conn
+// implement it.
 type DB interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
 // Config configures a store.
@@ -111,19 +115,6 @@ func (c conn) inTx(ctx context.Context, fn func(pgx.Tx) error) error {
 	return pgx.BeginFunc(ctx, c.db, func(tx pgx.Tx) error {
 		if err := c.scope(ctx, tx); err != nil {
 			return fmt.Errorf("pgstore: scope: %w", err)
-		}
-		return fn(tx)
-	})
-}
-
-// inTxAllTenants is inTx scoped to every tenant as well, for a revocation
-// check: the verifier asks before it knows the token's tenant, and a check
-// that missed an entry because of the caller's scope would let a revoked
-// token through.
-func (c conn) inTxAllTenants(ctx context.Context, fn func(pgx.Tx) error) error {
-	return c.inTx(ctx, func(tx pgx.Tx) error {
-		if err := allTenants(ctx, tx); err != nil {
-			return err
 		}
 		return fn(tx)
 	})

@@ -165,31 +165,18 @@ func (s *Store) GetRecord(ctx context.Context, id uuid.UUID) (limes.Record, erro
 	return rec, err
 }
 
-// sqlIsRevoked walks the chain from $1 up in one round trip, to one ancestor
-// past $2 (limes.MaxDelegationDepth), which is how a chain too deep shows.
-const sqlIsRevoked = `
-WITH RECURSIVE chain (id, parent_id, depth) AS (
-    SELECT id, parent_id, 0 FROM limes.capabilities WHERE id = $1
-  UNION ALL
-    SELECT c.id, c.parent_id, chain.depth + 1
-    FROM limes.capabilities c
-    JOIN chain ON c.id = chain.parent_id
-    WHERE chain.depth <= $2
-)
-SELECT
-    EXISTS (SELECT 1 FROM limes.revocations WHERE capability_id = $1),
-    coalesce(max(depth), 0),
-    EXISTS (SELECT 1 FROM chain JOIN limes.revocations r ON r.capability_id = chain.id)
-FROM chain`
+// sqlIsRevoked asks limes.is_revoked (migrations/004_revocation_checks.sql)
+// in one statement, outside any transaction: one round trip on the path
+// every request takes.
+const sqlIsRevoked = `SELECT self, deepest, in_chain FROM limes.is_revoked($1, $2)`
 
 // IsRevoked answers for the capability and every ancestor still on record,
-// across every tenant whatever the call's scope.
+// across every tenant whatever the call's scope, in one round trip: the
+// verifier asks it before it knows the token's tenant, on every request.
 func (s *Store) IsRevoked(ctx context.Context, id uuid.UUID) (bool, error) {
 	var self, inChain bool
 	var deepest int
-	err := s.inTxAllTenants(ctx, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, sqlIsRevoked, id, limes.MaxDelegationDepth).Scan(&self, &deepest, &inChain)
-	})
+	err := s.db.QueryRow(ctx, sqlIsRevoked, id, limes.MaxDelegationDepth).Scan(&self, &deepest, &inChain)
 	switch {
 	case err != nil:
 		return false, err
@@ -344,7 +331,9 @@ func (s *Store) ListByPrincipal(ctx context.Context, req limes.ListByPrincipalRe
 }
 
 const (
-	sqlIsBiscuitRevoked = `SELECT EXISTS (SELECT 1 FROM limes.biscuit_revocations WHERE revocation_id = ANY ($1))`
+	// sqlIsBiscuitRevoked asks limes.is_biscuit_revoked in one statement,
+	// as sqlIsRevoked does.
+	sqlIsBiscuitRevoked = `SELECT limes.is_biscuit_revoked($1)`
 
 	sqlRevokeBiscuit = `
 INSERT INTO limes.biscuit_revocations (revocation_id, capability_id, tenant_id, revoked_at, note, actor)
@@ -356,15 +345,13 @@ SELECT capability_id, revoked_at, note, actor FROM limes.biscuit_revocations WHE
 )
 
 // IsBiscuitRevoked reports whether any of revocationIDs is revoked, across
-// every tenant whatever the call's scope.
+// every tenant whatever the call's scope, in one round trip.
 func (s *Store) IsBiscuitRevoked(ctx context.Context, revocationIDs [][]byte) (bool, error) {
 	if len(revocationIDs) == 0 {
 		return false, nil
 	}
 	var revoked bool
-	err := s.inTxAllTenants(ctx, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, sqlIsBiscuitRevoked, revocationIDs).Scan(&revoked)
-	})
+	err := s.db.QueryRow(ctx, sqlIsBiscuitRevoked, revocationIDs).Scan(&revoked)
 	return revoked, err
 }
 
