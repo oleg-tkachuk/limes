@@ -68,6 +68,16 @@
     },
     {
       "matchManagers": ["gomod"],
+      "matchPackageNames": ["github.com/oleg-tkachuk/limes"],
+      "groupName": "limes",
+      "schedule": ["at any time"],
+      "minimumReleaseAge": null,
+      "enabled": true,
+      "allowedVersions": "<2",
+      "description": "redisreplay and pgstore require the limes module of this repository. Each release of it is proposed at once and unaged: it is the repository's own, so the three-day wait guards nothing, and CI tests the nested modules against it. v1 is the same module path, so it is let through the rule that keeps majors by hand; a v2 is a new path, crossed by hand."
+    },
+    {
+      "matchManagers": ["gomod"],
       "matchDepTypes": ["golang", "toolchain"],
       "groupName": "go toolchain",
       "schedule": ["at any time"],
