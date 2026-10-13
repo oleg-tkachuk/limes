@@ -2,16 +2,20 @@ package pgstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
+
+	"github.com/oleg-tkachuk/limes"
 )
 
 // The database every test of the package runs against: one PostgreSQL
@@ -39,8 +43,44 @@ CREATE ROLE ` + appUser + ` LOGIN PASSWORD '` + appPassword + `';
 GRANT USAGE ON SCHEMA ` + schema + ` TO ` + appUser + `;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA ` + schema + ` TO ` + appUser + `;`
 
+// The tenants a consumer keeps, as the tests stand one in: a table of their
+// own, read by Config.CheckTenant.
+const (
+	createTenants = `
+CREATE TABLE public.tenants (id uuid PRIMARY KEY, deleted boolean NOT NULL DEFAULT false);
+GRANT SELECT ON public.tenants TO ` + appUser
+	sqlNewTenant    = `INSERT INTO public.tenants (id) VALUES ($1)`
+	sqlDeleteTenant = `UPDATE public.tenants SET deleted = true WHERE id = $1`
+	sqlTenantStatus = `SELECT deleted FROM public.tenants WHERE id = $1`
+)
+
+// newTenant records a tenant the tests' CheckTenant knows.
+func newTenant(t *testing.T) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	if _, err := owner.Exec(t.Context(), sqlNewTenant, id); err != nil {
+		t.Fatalf("new tenant: %v", err)
+	}
+	return id
+}
+
+// checkTenant is the tests' Config.CheckTenant over public.tenants.
+func checkTenant(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error {
+	var deleted bool
+	err := tx.QueryRow(ctx, sqlTenantStatus, tenant).Scan(&deleted)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return limes.ErrUnknownTenant
+	case err != nil:
+		return err
+	case deleted:
+		return limes.ErrTenantDeleted
+	}
+	return nil
+}
+
 // emptyTables empties every table of the store, as the owner.
-const emptyTables = `TRUNCATE ` + schema + `.capabilities, ` + schema + `.usage, ` + schema + `.copy_usage, ` + schema + `.tenant_budgets, ` + schema + `.charges, ` + schema + `.reservations CASCADE`
+const emptyTables = `TRUNCATE public.tenants, ` + schema + `.capabilities, ` + schema + `.usage, ` + schema + `.copy_usage, ` + schema + `.tenant_budgets, ` + schema + `.charges, ` + schema + `.reservations CASCADE`
 
 var (
 	// owner is a pool as the owner role; app as appUser.
@@ -79,7 +119,7 @@ func run(m *testing.M) (int, error) {
 	if err := Migrate(ctx, owner); err != nil {
 		return 0, err
 	}
-	if _, err := owner.Exec(ctx, grantApp); err != nil {
+	if _, err := owner.Exec(ctx, grantApp+createTenants); err != nil {
 		return 0, err
 	}
 	cfg, err := pgxpool.ParseConfig(dsn)
@@ -117,12 +157,11 @@ func (c *fakeClock) Now() time.Time { return c.start.Add(time.Duration(c.offset.
 
 func (c *fakeClock) Advance(d time.Duration) { c.offset.Add(int64(d)) }
 
-// scopeNothing is a Scope that runs a statement, so a test can tell the
-// store called it in the transaction it opened.
-func scopeNothing(calls *atomic.Int64) func(context.Context, pgx.Tx) error {
+// countedScope is ScopeFromContext, counting its calls, so a test can tell
+// the store called its Scope in the transaction it opened.
+func countedScope(calls *atomic.Int64) func(context.Context, pgx.Tx) error {
 	return func(ctx context.Context, tx pgx.Tx) error {
 		calls.Add(1)
-		_, err := tx.Exec(ctx, "SELECT 1")
-		return err
+		return ScopeFromContext(ctx, tx)
 	}
 }

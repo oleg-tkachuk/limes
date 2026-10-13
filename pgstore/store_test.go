@@ -19,16 +19,23 @@ func TestStoreContract(t *testing.T) {
 		t.Helper()
 		fresh(t)
 		clock := newFakeClock()
-		store, err := NewStore(Config{DB: app, Now: clock.Now})
+		store, err := NewStore(Config{DB: app, Now: clock.Now, CheckTenant: checkTenant})
 		if err != nil {
 			t.Fatal(err)
 		}
+		tenant := newTenant(t)
 		return storetest.Env{
-			Ctx:     t.Context(),
-			Store:   store,
-			Tenant:  uuid.New(),
-			Now:     clock.Now,
-			Advance: clock.Advance,
+			Ctx:       WithTenant(t.Context(), tenant),
+			Store:     store,
+			Tenant:    tenant,
+			NewTenant: func() (uuid.UUID, error) { return newTenant(t), nil },
+			DeleteTenant: func(tenant uuid.UUID) error {
+				_, err := owner.Exec(t.Context(), sqlDeleteTenant, tenant)
+				return err
+			},
+			TenantCtx: func(tenant uuid.UUID) context.Context { return WithTenant(t.Context(), tenant) },
+			Now:       clock.Now,
+			Advance:   clock.Advance,
 		}
 	})
 }
@@ -44,14 +51,15 @@ func TestNewStoreRequiresADB(t *testing.T) {
 func TestScopeRunsInEveryCall(t *testing.T) {
 	fresh(t)
 	var calls atomic.Int64
-	store, err := NewStore(Config{DB: app, Scope: scopeNothing(&calls)})
+	store, err := NewStore(Config{DB: app, Scope: countedScope(&calls)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := t.Context()
+	tenant := uuid.New()
+	ctx := WithTenant(t.Context(), tenant)
 	c := limes.Capability{
 		ID: uuid.New(), ExpiresAt: time.Now().Add(time.Hour),
-		Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: uuid.New(), Subject: "agent:scoped"},
+		Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: tenant, Subject: "agent:scoped"},
 	}
 	if err := store.Insert(ctx, limes.InsertRequest{Capability: c}); err != nil {
 		t.Fatal(err)
