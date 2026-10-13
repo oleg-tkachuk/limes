@@ -20,6 +20,11 @@ import (
 // another Lua, which a real server is the only check of.
 const redisAddrEnv = "LIMES_REDIS_ADDR"
 
+// redisRequiredEnv, set to any value, makes an unset redisAddrEnv a failure
+// rather than a skip: the CI job that brings a Redis up sets it, so a job
+// that lost the address cannot pass by checking nothing.
+const redisRequiredEnv = "LIMES_REDIS_REQUIRED"
+
 // testEpoch is where the clock of these tests starts.
 var testEpoch = time.Unix(1_800_000_000, 0)
 
@@ -92,6 +97,9 @@ func TestContractOnMiniredis(t *testing.T) {
 func TestContractOnRedis(t *testing.T) {
 	addr := os.Getenv(redisAddrEnv)
 	if addr == "" {
+		if os.Getenv(redisRequiredEnv) != "" {
+			t.Fatalf("%s is set but %s is not", redisRequiredEnv, redisAddrEnv)
+		}
 		t.Skipf("%s not set", redisAddrEnv)
 	}
 	client := redis.NewClient(&redis.Options{Addr: addr})
