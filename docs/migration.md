@@ -1,0 +1,456 @@
+# Migrating between releases
+
+Every release that broke the API, newest first, each change as what it was
+and what it is now. Before v1.0.0 a breaking change cuts a minor release, so
+only `v0.N.0` releases appear here; patch releases never break.
+
+Names are those of the release that changed them. A name changed again later
+appears again under that later release: to cross several releases, read
+upwards from the one you are on.
+
+A pull request that marks a break adds its entry at the top, under the
+release it cuts: the minor after the newest tag. CI refuses a breaking marker
+whose change leaves this file alone. From v1.0.0 on no change may break the
+API, and this file stops growing.
+
+## v0.53.0
+
+- `Store.Insert` accepted any record → it refuses a capability with no id or
+  with a parent not on record (`ErrInvalidRequest`), and a child expiring
+  after its parent (`ErrDelegationTooWide`). `storetest` checks it.
+
+## v0.52.0
+
+- `CopyCeiling.Requests`, `CopyCeiling.Budget` (values) → pointers, nil when
+  the block set none.
+- `Reservation.Copies` (`[]CopyCeiling`) → `[]HeldCopy`.
+- `CopyUsageReader.CopyUsage(ctx, revocationIDs)` returning `[]CopyUsage` →
+  `CopyUsage(ctx, CopyUsageRequest)` returning `CopyUsageResult`.
+
+## v0.51.0
+
+- `Delegate` from a parent without `OpShare` → `ErrOpNotAllowed`.
+
+## v0.50.0
+
+- `RefundReceipt.RefundedAmount` → `RefundReceipt.Amount`.
+- `BiscuitCopy.Limits` → `BiscuitCopy.Copies`.
+
+## v0.49.0
+
+- `jwks.RemoteConfig.MaxDocumentBytes` (`int64`) → `int`.
+
+## v0.48.0
+
+- `Settle` under other Biscuit copies than the reservation was made under →
+  `ErrReservationNotFound`.
+
+## v0.47.0
+
+- `ListTenantBudgetsRequest.UnlimitedOnly` → `Filter`: `TenantBudgetsAll`,
+  `TenantBudgetsAtOrPast` or `TenantBudgetsUnlimited`. `ThresholdPct` applies
+  only to `TenantBudgetsAtOrPast`.
+
+## v0.46.0
+
+- `Issue`, `Delegate` returning the token → `IssueResult{Capability, Token}`.
+- `Issuer.Biscuit(ctx, capability)` → `Biscuit(ctx, BiscuitRequest{Capability})`
+  returning `BiscuitResult{Token}`.
+
+## v0.45.0
+
+- `ChargeRecord`, `ChargeReceipt`, `RefundReceipt`, `BumpReceipt`,
+  `TenantBudget`, `Usage`, `Revocation`, `Problem`, `Principal` and
+  `AgentPrincipal` compared with `==` → no longer comparable; compare fields,
+  or use `reflect.DeepEqual` in tests.
+
+## v0.44.0
+
+- `Verify`'s refusals matched the request sentinel of their cause → they match
+  only `ErrInvalidToken` or `ErrBiscuitAttenuation`.
+
+## v0.43.0
+
+- `BiscuitCopy` fields → methods; only `Verifier.BiscuitCopy` makes one.
+- `RevokeBiscuitRequest` takes the copy as `Copy`.
+
+## v0.42.0
+
+- `LoadPrivateKey`, `Signer.KeyID`, `Op.Mutating`, `SigningKey.Generated`,
+  `dpop.ErrNoReplayCache` → removed.
+- `dpop.ProofRequest.Now` → `IssuedAt`.
+- `StoredMeterSubject(ctx, Store, id)` → takes a `RecordReader`, which `Store`
+  embeds.
+- `ChargeRecord` gains `TenantID`, `Op`, `Actor` and `At`; a store must keep
+  them, and `metertest` checks it.
+- Metric outcomes `cap_exceeded`, `tenant_exceeded`, `limit_exceeded` →
+  `budget_exceeded`, `tenant_budget_exceeded`, `request_limit_exceeded`.
+
+## v0.41.0
+
+- `metertest.CapabilitySpec` gains `Tenant`, which `Env.NewCapability` must
+  honour for a tenant from `NewTenant`.
+
+## v0.40.0
+
+- `dpop.Request`, `dpop.ReplayEntry` gain `Holder`, which `Verify` requires.
+- `MemoryReplayCacheConfig.EntriesPerKey` → `EntriesPerHolder`;
+  `DefaultReplayEntriesPerKey` → `DefaultReplayEntriesPerHolder`.
+- Proofs past `MaxProofBytes` and jtis past `MaxJTIBytes` → refused.
+
+## v0.39.0
+
+- `ErrInvalidAmount` and `NormalizeUnitCode`'s error → also match
+  `ErrInvalidRequest`.
+- A charge taking a counter past `MaxNanos` → `ErrCounterOverflow`.
+- `SetTenantBudget` → refuses what `SetTenantBudgetRequest.Validate` refuses,
+  a nil `TenantID` included.
+
+## v0.38.0
+
+- `Bump`, `Charge`, `Reserve`, `Settle` for a capability not on record →
+  `ErrNotFound`. `metertest` checks it.
+
+## v0.37.0
+
+- `jwks.HandlerConfig.MaxAge` of zero meant `max-age=0` → it means
+  `DefaultMaxAge`; set `Revalidate` for `max-age=0`.
+- `VerifierConfig.AcceptTokenTypes` (`[]string`) → `[]TokenType`;
+  `TokenTypeV4` is a `TokenType`. An empty `AcceptTokenTypes` accepts
+  `TokenTypeV4`, and an empty `KeyIssuers` binds no kid, where both were
+  refused.
+- `dpop.Sign(req)` → `dpop.Sign(ctx, req)`, and `ProofRequest.Now` is
+  required. `NewMemoryReplayCache` refuses `EntriesPerKey` above `MaxEntries`.
+- `LoadKey(path, kid)` → `LoadKey(path)`, deriving the kid; set
+  `SigningKey.KeyID` to name it otherwise.
+- `memstore.NewUsageStore` without `Records` → refused.
+
+## v0.36.0
+
+- `StandardVerifier`, `NewStandardVerifier` → `Verifier`, `NewVerifier`.
+- `UsageHousekeeping.Delete` → `DeleteUsage`.
+- `BumpReceipt.Requests` → `RequestCount`.
+- `Revocation.Cascade` → `Cascaded`.
+- `dpop.ReplayEntry.Expires` → `ExpiresAt`.
+- `DefaultPurgeLimit` → `DefaultHousekeepingLimit`.
+
+## v0.35.0
+
+- `ListTenantBudgets` returning `Page[TenantBudgetSummary]` →
+  `Page[TenantBudget]`.
+- `TenantBudgetSummary`, `ListTenantBudgetsRequest.ExcludeInactive`,
+  `memstore.LedgerEntry`, `UsageStore.Ledger` → removed.
+
+## v0.34.0
+
+- `ErrCopyCountersNotMetered` matched `ErrBiscuitAttenuation` and
+  `ErrInvalidToken` → it matches neither; `ErrorResponse` answers it with 500
+  and `ReasonOf` gives it no reason.
+
+## v0.33.0
+
+- Reasons `invalid_biscuit`, `source_not_allowed` → `biscuit_attenuation`,
+  `source_ip_not_allowed`. `ErrAuthSchemeMismatch` gives
+  `auth_scheme_mismatch`, `dpop.ErrNonceRequired` gives `nonce_required`.
+- `Record.MeterSubject()` → `StoredMeterSubject(ctx, store, capabilityID)`.
+- `Signer.Sign` → unexported; mint tokens with `Issuer`.
+- An empty `VerifyRequest.Audience`, a malformed `Attenuation`, an
+  out-of-range budget ceiling and `Delegate` from a Biscuit parent matched
+  `ErrAudienceMismatch`, `ErrBiscuitAttenuation` or `ErrDelegationTooWide` →
+  they match `ErrInvalidRequest`.
+
+## v0.32.0
+
+- `metertest.Env.NewCapability(parent, budget)` →
+  `NewCapability(CapabilitySpec)`, carrying the parent and both ceilings.
+
+## v0.31.0
+
+- `ParseAuthorization` with an empty header or a foreign scheme:
+  `ErrMalformedAuthorization` → `ErrNoCredentials`. `Verify` with an empty
+  token: `ErrInvalidToken` → `ErrNoCredentials`.
+- `UsageHousekeeping.Delete(ctx, capabilityID)` → takes a `DeleteUsageRequest`.
+- `MeterReader.ChargeByRef(ctx, capabilityID, externalRef)` → takes a
+  `ChargeByRefRequest`.
+
+## v0.30.0
+
+- `jwks.NewStatic(map)` → `jwks.NewStatic(StaticConfig)` returning
+  `(*Static, error)`.
+- `jwks.Static.SetKey` → returns an error.
+- `jwks.NewHandler` → returns `*Handler`.
+
+## v0.29.0
+
+- `MinPurgeRetention` (5m) → `MaxLeeway + PurgeClockSkew` (6m); a
+  `PurgeRequest.ExpiredFor` between 5m and 6m is refused.
+- `NewStandardVerifier` → refuses several `TrustedIssuers` with neither
+  `KeyIssuers` nor `SharedKeys`, and with both.
+
+## v0.28.0
+
+- `memstore.New[TX]()` → `memstore.NewStore(StoreConfig)`, returning an
+  error; `Store` is no longer generic.
+- `memstore.NewUsage[TX](records)` →
+  `memstore.NewUsageStore[TX](UsageStoreConfig[TX])`, returning an error.
+- `WithClock`, `WithTxFactory` → the `Now` and `TxFactory` config fields.
+
+## v0.27.0
+
+- `Caveats.MaxRequests`, `Caveats.MaxBudgetAmount` (zero meant unlimited) →
+  `Caveats.Requests` (`RequestCeiling`) and `Caveats.Budget`
+  (`BudgetCeiling`), each with `Max` and `Unlimited`. **A zero ceiling now
+  allows nothing**: set `Unlimited` where zero meant no limit.
+- `CopyCeiling` likewise; `Attenuation` takes `*RequestCeiling` and
+  `*BudgetCeiling`, nil for none.
+- `MeterSubject.Requests()`, `Budget()` → return ceilings.
+- `TenantBudget`, `SetTenantBudgetRequest` take `Ceiling` (`BudgetCeiling`);
+  a tenant charged before any ceiling counts `Unlimited`.
+- `metertest.Env.NewCapability` → takes a `BudgetCeiling`.
+- `TokenTypeV3` → `TokenTypeV4`; v3 tokens are refused.
+
+## v0.26.0
+
+- `Signer.Sign` → returns `ErrInvalidCaveats` or `ErrInvalidRequest` for what
+  `Issue` would refuse; a token whose caveats do not validate is
+  `ErrInvalidToken`.
+
+## v0.25.0
+
+- `Delegate` from a parent read from a Biscuit → always
+  `ErrDelegationTooWide`, not only when it carries limits of its own.
+- `Issuer.Biscuit(ctx, Capability)` → takes a `VerifiedCapability`.
+
+## v0.23.0
+
+- `Store.IsRevoked` → must answer for `MaxDelegationDepth` ancestors and
+  return `ErrDelegationTooDeep` for a deeper chain; `Delegate` returns
+  `ErrDelegationTooDeep` past that depth.
+- `VerifierConfig.Leeway` above `MaxLeeway` (5m) → refused.
+- `PurgeRequest.ExpiredFor` of zero → means `MinPurgeRetention`; a shorter
+  non-zero retention is `ErrInvalidRequest`.
+
+## v0.22.0
+
+- `Principal`, `AgentPrincipal`, `Caveats`, `Capability` with json tags → no
+  json tags; `json.Marshal` of them no longer writes the claim format. A store
+  that serialises them keeps a representation of its own; `storetest` checks
+  every field survives it.
+
+## v0.21.0
+
+- `ListByPrincipal` with a principal type outside user, agent and service, and
+  `Verify` with a scheme other than Bearer or DPoP → `ErrInvalidRequest`.
+- `OverrunReject` = 0, `OverrunRecord` = 1 → `OverrunReject` = 1,
+  `OverrunRecord` = 2; remap a stored or serialised numeric policy. The zero
+  value still rejects.
+
+## v0.20.0
+
+- `AuthorizeRequest{VerifyRequest: …, CheckRequest: …}` →
+  `AuthorizeRequest{Verify: …, Check: …}`; `req.Token` → `req.Verify.Token`.
+- `Limit` on `ListByPrincipalRequest`, `ListTenantBudgetsRequest`,
+  `ListReservationsRequest`, and `PageLimit` → `int`.
+- `PeriodEnd` on `TenantBudget` and `SetTenantBudgetRequest` → `time.Time`,
+  zero for none.
+
+## v0.19.0
+
+- `CopyCeiling.MaxBudget`, `Attenuation.MaxBudget`, `MeterSubject.MaxBudget` →
+  `MaxBudgetAmount`.
+- `ChargeReceipt.Spent` → `SpentAmount`.
+- `ChargeRecord.Refunded`, `RefundReceipt.Refunded` → `RefundedAmount`.
+- `ChargeRecord.ChargeID` → `ID`.
+- `RevokeRequest.ID` → `CapabilityID`.
+- `Attenuation.Planes` → `Audience`.
+- `Reason` on `RevokeRequest`, `Revocation`, `RevokeBiscuitRequest`,
+  `BiscuitRevocation` → `Note`.
+- `Op` on `ChargeRequest`, `ReserveRequest`, `Reservation` (`string`) → `Op`.
+- `NormaliseUnitCode` → `NormalizeUnitCode`.
+- `TenantBudgetSummary.UtilisationPct` → removed; call `Budget.Utilization()`.
+- `RefundRequest{ChargeID}` with no `Amount` (a full refund) →
+  `ErrInvalidRequest`; pass `Remaining: true`.
+
+## v0.18.0
+
+- `storetest.Env` → holds func fields and is no longer comparable.
+
+## v0.17.0
+
+- `CapabilityID`, `TenantID`, `MaxRequests`, `MaxBudget`, `UnitCode`, `Copies`
+  on `BumpRequest`, `ChargeRequest`, `ReserveRequest`, `SettleRequest` →
+  `Subject`, from `VerifiedCapability.MeterSubject()` or
+  `Record.MeterSubject()`.
+
+## v0.16.0
+
+- `Meter.GetCharge`, `ChargeByRef`, `GetReservation`, `ListReservations`,
+  `GetUsage` → `MeterReader`'s.
+- `Bump` → returns `BumpReceipt`.
+- `Release(ctx, reservationID)` → takes a `ReleaseRequest`.
+- `ListReservations` → takes `ListReservationsRequest`, returns
+  `Page[Reservation]`.
+- `PurgeOrphans`, `ReleaseExpired` → take `PurgeOrphansRequest`,
+  `ReleaseExpiredRequest` and return results.
+- `metertest.Env` gains an optional `DeleteCapability`.
+- `TenantBudgetCursor`, `DecodeTenantBudgetCursor` → removed; a store writes
+  its `ListTenantBudgets` cursor in a format of its own.
+
+## v0.15.0
+
+- `Store.Insert(ctx, capability, issuedBy)` →
+  `Insert(ctx, InsertRequest{Capability, IssuedBy})`.
+- `Store.Get` → removed; `GetRecord` returns the capability with its record.
+- `IssuerConfig.Store` → an `IssuanceStore`, which every `Store` satisfies.
+- `Store.ListByPrincipal`, `TenantBudgets.ListTenantBudgets`, and
+  `CapabilityLister`, `TenantBudgetLister` → return `(Page[…], error)`.
+- `Store.PurgeExpired(ctx, expiredFor)` →
+  `Store.Purge(ctx, PurgeRequest{ExpiredFor, Limit})` returning
+  `PurgeResult`; it removes the expired records as well, and refuses a
+  negative retention or limit.
+
+## v0.14.0
+
+- `NewEd25519Signer` → `NewSigner(SignerConfig{KeyID, Key})`;
+  `IssuerConfig.Signer` is `*Signer`. A key that needs the context implements
+  `ContextSigner`.
+- `StandardVerifier.Verify`, `Authorize` returning a `Capability` → return
+  `VerifiedCapability`; read it with its `Capability` method, a copy.
+- `DelegateRequest.Parent` → a `VerifiedCapability`.
+- The `Verifier` interface → removed; use `*StandardVerifier`, or declare the
+  interface the calling code needs.
+
+## v0.13.0
+
+- `dpop.Verifier{…}` → `dpop.NewVerifier(VerifierConfig)`, fields unexported;
+  it takes its clock from its own `VerifierConfig.Now`.
+- `NewMemoryReplayCache(opts…)` → takes `MemoryReplayCacheConfig`;
+  `NewHMACNonces` → takes `HMACNoncesConfig`; both return an error.
+  `ReplayCacheOption`, `WithEntriesPerKey` → removed.
+- `jwks.Handler(keys, maxAge)` → `jwks.NewHandler(HandlerConfig)` returning
+  `(http.Handler, error)`. `NewHandler` and `NewRemote` refuse a negative
+  max-age, interval or document bound instead of using the default.
+- `LoadOrGenerateKey` → `LoadKey(path, kid)`, which never generates; call
+  `GenerateKey` for an ephemeral key.
+- `NewStandardVerifier` → refuses a non-nil empty `KeyIssuers`.
+- `ListByPrincipalRequest.Validate`, the new
+  `ListTenantBudgetsRequest.Validate` → refuse a negative `Limit`, the latter
+  also a `ThresholdPct` outside 0..100; the suites check a store refuses them.
+- `NewCachedRevocationChecker(opts…)`, `NewCachedBiscuitRevocationChecker(opts…)`
+  → take `RevocationCacheConfig`, `BiscuitRevocationCacheConfig` and return an
+  error. `CacheOption`, `WithMaxEntries` → removed; a negative TTL no longer
+  disables the cache.
+
+## v0.12.0
+
+- `Decode`, `VerifySignature` → `inspect.Decode`, `inspect.VerifySignature`
+  in `github.com/oleg-tkachuk/limes/inspect`.
+- `GenerateEd25519Keypair` → `GenerateKey`, returning `(SigningKey, error)`.
+- `ValidateAmount(n)` → `n.Validate()`.
+- `WithCacheClock`, `HasDotSegment`, `IsBiscuit`, `MediaTypeProblem`,
+  `WWWAuthenticateHeader`, `TokenType` → unexported.
+- `WithMetering`, `MeteringOption` → `Instrument`, `InstrumentOption`.
+
+## v0.11.0
+
+Proof of possession moved to `github.com/oleg-tkachuk/limes/dpop`, and lost
+its `DPoP` prefix:
+
+- `DPoPVerifier` → `dpop.Verifier`, checking a `dpop.Request`.
+- `DPoPProof` → `dpop.Proof`, its `Proof` field `JWT`.
+- `NewDPoPProof`, `DPoPProofRequest` → `dpop.Sign`, `dpop.ProofRequest`.
+- `KeyThumbprint` → `dpop.Thumbprint`.
+- `DPoPNonces`, `HMACNonces`, `NewHMACNonces`, `MemoryReplayCache`,
+  `NewMemoryReplayCache`, `ReplayCache`, their options and constants →
+  `dpop.Nonces`, `dpop.HMACNonces`, …; `DPoPHeader` → `dpop.Header`,
+  `DPoPNonceHeader` → `dpop.NonceHeader`, `DefaultDPoPWindow` →
+  `dpop.DefaultWindow`, `DPoPSigningAlgorithms` → `dpop.SigningAlgorithms`.
+- `ErrDPoPRequired`, `ErrDPoPInvalid`, `ErrDPoPReplayed`,
+  `ErrDPoPNonceRequired` → `dpop.ErrRequired`, `ErrInvalid`, `ErrReplayed`,
+  `ErrNonceRequired`, matching `ErrProofOfPossession` only as the verifier
+  returns them.
+- `ReplayCache.Seen` → takes a `ReplayEntry`, returns `(bool, error)`;
+  `Nonces.Valid` → returns `(bool, error)`.
+- `PublicJWK`, `DPoPJWK`, `AccessTokenHash`, `DPoPTokenType` → unexported.
+
+## v0.10.0
+
+The key-set API moved to `github.com/oleg-tkachuk/limes/jwks`:
+
+- `MarshalJWKS`, `ParseJWKS`, `JWKSHandler` → `jwks.Marshal`, `jwks.Parse`,
+  `jwks.Handler`.
+- `RemoteJWKSResolver`, `NewRemoteJWKSResolver`, `RemoteJWKSConfig` →
+  `jwks.Remote`, `jwks.NewRemote`, `jwks.RemoteConfig`.
+- `StaticKeyResolver`, `NewStaticKeyResolver` → `jwks.Static`,
+  `jwks.NewStatic`.
+- `DeriveKeyID` → `jwks.KeyID`.
+- `ErrUnknownKID`, `ErrJWKSUnavailable` → `jwks.ErrUnknownKID`,
+  `jwks.ErrUnavailable`.
+- `JWKSDocument`, `JWK` → unexported.
+
+## v0.9.0
+
+- `ErrDPoPRequired`, `ErrDPoPInvalid`, `ErrDPoPReplayed`,
+  `ErrDPoPNonceRequired`, `ErrAuthSchemeMismatch` matched
+  `ErrInvalidSignature` → match `ErrProofOfPossession` or
+  `ErrUnauthenticated`.
+- `ErrChargeNotFound`, `ErrReservationNotFound`, `ErrUsageNotFound`,
+  `ErrTenantBudgetNotFound` → also match `ErrNotFound`.
+- `ErrInvalidSignature` → `ErrInvalidToken`; reason `invalid_signature` →
+  `invalid_token`.
+- `ErrJWKSUnavailable`, and any `KeyResolver` error but `ErrUnknownKID`,
+  matched `ErrInvalidSignature` → match it no longer; `ErrorResponse` answers
+  a custom resolver's failure with 500.
+
+## v0.8.0
+
+- `Issue`, `Delegate`, `Verify` → refuse a principal whose `Type` is not
+  `PrincipalUser`, `PrincipalAgent` or `PrincipalService`, or that carries
+  `Agent` without being an agent. `Delegate` needs a `Subject` with a `Type`.
+
+## v0.6.0
+
+- `CachedRevocationChecker.Invalidate` → removed; call `Clear` on a revocation
+  signal.
+
+## v0.5.0
+
+- `NewDPoPProof` upper-cased the method → writes it as given, and the verifier
+  compares it exactly.
+- `ReplayCache.Seen` → takes the proof key's thumbprint.
+
+## v0.4.0
+
+- `AuthorizationDetail`, `AuthorizationDetailsType` and their marshal and
+  parse functions → removed; caveats travel in `limes_caveats`, with `Ops` as
+  `"ops"`.
+- `Capability.OnBehalfOf`, `Capability.Actor`, `Actor`, `MaxDelegationDepth`
+  → removed; a delegated token's `sub` is its own principal's subject.
+- `IssuerMetadata`, `DiscoverIssuer`, `MetadataHandler`, `RevocationHandler`,
+  `IntrospectionHandler`, `StandardVerifier.Introspect` → removed.
+- Token `typ` `limes-cap-v2+jwt` → `limes-cap-v3+jwt`; v2 tokens are refused.
+- `ValidateResourceIndicator` → removed; `Issue` and `Delegate` accept any
+  non-empty audience entry.
+
+## v0.3.0
+
+- `AllowedUnitCodes`, `IsAllowedUnitCode` → `IsUnitCode`.
+- Token `alg` `EdDSA` → `Ed25519`; `EdDSA` is refused.
+- `Issue`, `Delegate` → refuse an audience that is not an absolute URI.
+- `Issue` → requires `Subject.Subject`; a delegated token's `sub` is the root
+  capability's subject (`Capability.OnBehalfOf`), and `Delegate` with no
+  subject delegates to the parent's own.
+- `MustLoadOrGenerate` → `LoadOrGenerateKey`, returning a `SigningKey`;
+  derived kids are thumbprints (`DeriveKeyID`).
+- `NewDPoPProof` → takes a `DPoPProofRequest`.
+- `Signer.Sign`, `Issuer.Biscuit` → take a `context.Context`.
+- Claim `limes_caveats` → `authorization_details`, `Caveats.Ops` encoded as
+  `"actions"`.
+- Token `typ` → `limes-cap-v2+jwt`, earlier ones refused;
+  `Caveats.MaxRequests` → `int64`; `Nanos` encodes as a JSON string.
+- `Verify` → takes a `VerifyRequest`; `DPoPVerifier.Check`, `DPoPRequest` and
+  the `AudiencePlane*` constants → removed; `MatchPathOnly` → on
+  `DPoPVerifier`.
+- `WithMetering` → takes options and returns an error; `MeteringStore` →
+  unexported; `Refund` → returns a `RefundReceipt`; `ChargeReceipt` gains
+  `TenantID` and `UnitCode`; `tenant_id` is opt-in via `WithTenantAttribute`.
