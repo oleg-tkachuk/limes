@@ -155,12 +155,12 @@ deployed verifier.
   ships in a minor: verifiers first, then issuers. Recommended. **Done:** `VerifierConfig.AcceptTokenTypes`; the format reached v4 before 1.0
   (explicit unlimited, P3), so `TokenTypeV4` is the one every 1.x verifier accepts.
 
-**P6 — cutting 1.0.** Remove `BREAKING_IS_A_MINOR_BEFORE_1_0` from the root module's rules in
-`.github/release/modules.cjs` — `pgstore` and `redisreplay` keep it, each on
-its own line — and flip its case in
+**P6 — cutting 1.0.** Remove `BREAKING_IS_A_MINOR_BEFORE_1_0` from the limes
+module's rules in `.github/release/modules.cjs` — `pgstore` and `redisreplay`
+keep it, each on its own line — and flip its case in
 `release-rules.test.mjs`, in the same pull request as a commit carrying a
 `BREAKING CHANGE:` footer — that commit cuts 1.0.0. Update README
-"Versioning".
+"Versioning". **Done.**
 
 **P7 — after 1.0.** semantic-release would tag a break `v2.0.0`, which the Go
 proxy ignores without a `/v2` module path. So `api-break-check.sh` fails any

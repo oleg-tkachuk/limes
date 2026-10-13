@@ -28,10 +28,12 @@
 // patch: the preset knows no such type. A nested module's own build change is
 // a patch of it: such a commit changes the go.mod its users resolve — above
 // all the release workflow's `build(<module>): require limes vX.Y.Z`, which
-// would otherwise leave the requirement unreleased. Every module is pre-1.0, where a
-// breaking change is a minor; that rule goes from a module's own rules when
-// it reaches 1.0. release-rules.test.mjs pins all of it. major-guard.cjs
-// refuses a major the module path does not carry, whatever marker cut it.
+// would otherwise leave the requirement unreleased. A module before 1.0
+// releases a breaking change as a minor (BREAKING_IS_A_MINOR_BEFORE_1_0, in
+// its own rules); the limes module is on its v1 line, where a breaking change
+// is a major, which marker-check.sh and api-break-check.sh keep off the line
+// and major-guard.cjs refuses: a v2 is a module path move.
+// release-rules.test.mjs pins all of it.
 
 const PRESET = "conventionalcommits";
 const SECURITY_IS_A_PATCH = { type: "security", release: "patch" };
@@ -42,8 +44,8 @@ const REDISREPLAY_MODULE = "redisreplay";
 // A pgstore or redisreplay commit cuts no release of the limes module. Their
 // directories are left out of its commits already, each module being on a
 // line of its own; these cover a commit scoped to one that also touches a
-// path outside it. A rule releasing nothing outranks the breaking rule
-// above, so a breaking change scoped to one cuts no limes release either.
+// path outside it. A rule releasing nothing outranks a breaking marker, so a
+// breaking change scoped to one cuts no limes release either.
 const PGSTORE_RELEASES_NOTHING = { scope: PGSTORE_MODULE, release: false };
 const REDISREPLAY_RELEASES_NOTHING = { scope: REDISREPLAY_MODULE, release: false };
 
@@ -66,7 +68,6 @@ const MODULES = {
     dir: "",
     releaseRules: [
       SECURITY_IS_A_PATCH,
-      BREAKING_IS_A_MINOR_BEFORE_1_0,
       PGSTORE_RELEASES_NOTHING,
       REDISREPLAY_RELEASES_NOTHING,
     ],
