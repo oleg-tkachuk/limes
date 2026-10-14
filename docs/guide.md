@@ -690,8 +690,9 @@ with row-level security.
 if err := pgstore.Migrate(ctx, pool); err != nil { /* … */ }
 records, _ := pgstore.NewStore(pgstore.Config{DB: pool})
 usage, _ := pgstore.NewUsageStore(pgstore.Config{DB: pool})
-// A call for one tenant; housekeeping and ListTenantBudgets take
-// pgstore.WithAllTenants(ctx).
+// A call for one tenant; housekeeping takes pgstore.WithAllTenants(ctx),
+// and a read across tenants, ListTenantBudgets among them,
+// pgstore.WithAllTenantsReadOnly(ctx), which admits no write.
 err := records.Revoke(pgstore.WithTenant(ctx, tenant), limes.RevokeRequest{CapabilityID: id})
 ```
 
