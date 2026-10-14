@@ -55,6 +55,8 @@ go get github.com/oleg-tkachuk/limes@latest
 
 ## Five minutes
 
+Setup errors are dropped below for brevity; each constructor returns one.
+
 ```go
 ctx := context.Background()
 tenantID, runID := uuid.New(), uuid.New() // github.com/google/uuid
@@ -98,15 +100,26 @@ granted, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
     Verify: limes.VerifyRequest{Token: issued.Token, Audience: "my-service"},
     Check:  limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/report.pdf"},
 })
+if err != nil {
+    return err // a refusal, e.g. limes.ErrResourceNotAllowed outside corpus/public/
+}
 subject := granted.MeterSubject()
-_, err = usage.Bump(ctx, limes.BumpRequest{Subject: subject}) // one request of the 500
-_, err = usage.Charge(ctx, limes.ChargeRequest{
+if _, err := usage.Bump(ctx, limes.BumpRequest{Subject: subject}); err != nil {
+    return err // limes.ErrRequestLimitExceeded past the 500th request
+}
+if _, err := usage.Charge(ctx, limes.ChargeRequest{
     Subject: subject, Amount: limes.MustParseAmount("0.35"),
-}, nil)
+}, nil); err != nil {
+    return err // limes.ErrBudgetExceeded past 25.00, with nothing counted
+}
 ```
 
-`issued.Token` is what the agent carries; `issued.Capability` is the record
-you keep for audit.
+`IssueRequest` requires `Subject` with its `TenantID`, `IssuedBy` (a
+`Subject` at least), `Audience` and `Caveats`; `TTL` defaults to fifteen
+minutes. `issued.Token` is what the agent carries; `issued.Capability` is the
+record you keep for audit. `verifier.ErrorResponse(ctx, err, limes.AuthSchemeBearer)`
+turns a refusal into the HTTP status, `WWW-Authenticate` challenge and problem
+body to answer with.
 `go run ./example` runs issue, authorize, delegate, meter and revoke end to end.
 
 ## What it does
@@ -161,9 +174,9 @@ before bumping.
 
 `redisreplay` and `pgstore` are modules of their own, each with a release
 line of its own — `redisreplay/vX.Y.Z`, `pgstore/vX.Y.Z` — cut by the same
-rules from the commits that touch it; a change to one module releases nothing
-of another, unless a commit scoped to one also touches another and is marked
-breaking.
+rules from the commits that touch it. A commit releases, by its type, each
+module whose files it changes; one scoped `pgstore` or `redisreplay` never releases limes,
+breaking or not.
 
 The token wire format — claims, `typ: limes-cap-v4+jwt`, the Biscuit facts —
 is a separate promise: a token is a credential that outlives the process that
@@ -197,8 +210,9 @@ algorithm would be another token version, never a runtime choice.
 | [dpop/](dpop) | proof of possession (RFC 9449): signing and checking proofs, replay cache, server nonces |
 | [inspect/](inspect) | reading a token without verifying it, for tooling |
 | [memstore/](memstore) | the in-memory reference implementation of every storage contract |
-| [pgstore/](pgstore) | the reference PostgreSQL store, a module of its own: `Store`, `BiscuitRevocationStore`, `UsageStore[pgx.Tx]`, `CopyUsageReader`, a `Ledger` and both tenant erasers under row-level security per tenant, with `EraseTenant` and a `RevocationWatcher`; held to storetest and metertest; released as `pgstore/vX.Y.Z` |
+| [pgstore/](pgstore) | the reference PostgreSQL store, a module of its own: `Store`, `BiscuitRevocationStore`, `UsageStore[pgx.Tx]`, `CopyUsageReader`, a `Ledger`, a `Census` and both tenant erasers under row-level security per tenant, with `EraseTenant` and a `RevocationWatcher`; held to storetest and metertest; released as `pgstore/vX.Y.Z` |
 | [redisreplay/](redisreplay) | a `dpop.ReplayCache` over Redis, a module of its own, for verifiers behind several replicas; released as `redisreplay/vX.Y.Z` |
+| [internal/](internal) | the module's own shared packages, not importable from outside it: JOSE pieces (`jose`), HTTP header names (`httpx`), RFC 3986 URI normalisation (`rfc3986`), access to unexported root internals for sibling packages (`link`), and field coverage and per-check deadlines for the conformance suites (`fields`, `watchdog`) |
 | [storetest/](storetest), [metertest/](metertest), [dpop/dpoptest](dpop/dpoptest), [jwks/jwkstest](jwks/jwkstest) | conformance suites to run from your own implementation's tests |
 | [example/](example) | the five-minute walkthrough as a runnable program |
 | [testdata/](testdata) | golden tokens, and the Biscuit vocabulary and cases shared with SDKs in other languages |

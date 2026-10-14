@@ -98,8 +98,9 @@ verifier, err := limes.NewVerifier(limes.VerifierConfig{
 
 The issuer serves that document with `jwks.NewHandler` — `application/jwk-set+json`,
 a strong ETag answering `If-None-Match` with 304, `Cache-Control: public,
-max-age` (`DefaultMaxAge` unless `MaxAge` says otherwise, `max-age=0` only with
-`Revalidate`, which excludes a `MaxAge`; a negative `MaxAge` is refused) — over a function returning its keys, such as
+max-age` in whole seconds (`DefaultMaxAge` unless `MaxAge` says otherwise;
+`Revalidate` serves `max-age=0` and excludes a `MaxAge`, a `MaxAge` under a
+second is served as 0 too, and a negative `MaxAge` is refused) — over a function returning its keys, such as
 `jwks.Static.Keys`:
 
 ```go
@@ -486,8 +487,8 @@ receipt, err := usage.Settle(ctx, limes.SettleRequest{
 }, nil)
 ```
 
-A hold counts against every ceiling — the capability's, each ancestor's, the
-tenant's — exactly as spend does, so two callers cannot both hold the last
+A hold counts against every ceiling — each presented Biscuit copy's own
+budget, the capability's, each ancestor's, the tenant's — exactly as spend does, so two callers cannot both hold the last
 budget. `Settle` charges the actual cost in place of the hold; above the hold,
 the excess must fit, or the hold stays for you to settle lower or `Release`.
 A hold never settled lapses after its TTL (`DefaultReservationTTL`, five
@@ -591,7 +592,7 @@ func TestMeterContract(t *testing.T) {
     metertest.Run(t, func(t *testing.T) metertest.Env[MyTx] {
         return metertest.Env[MyTx]{Ctx: ctx, Usage: newStore(t), Tenant: tenant,
             NewCapability: recordCapability,
-            Advance: clock.Advance} // optional: runs the reservation-expiry checks
+            Advance: clock.Advance} // optional: reservation-expiry checks, and with Ledger and Now the ledger's bucket checks
     })
 }
 ```
@@ -606,14 +607,18 @@ suites check that a call for `Tenant` under another tenant's context returns
 Without them the checks that need a second tenant use a random id and `Ctx`.
 `DeleteCapability` removes a record as `Store.Purge` would, for the
 `PurgeOrphans` checks; some remove an ancestor whose children stay, so a store
-whose records refer to their parent unhooks the children first. `Ledger` and
-`Now` (the store's clock) turn on the checks of a `LedgerReader`. `storetest.Env` takes the same `NewTenant`,
+whose records refer to their parent unhooks the children first. `Ledger` turns
+on the checks of a `LedgerReader`; with `Now` (the store's clock) and
+`Advance` as well, the checks of its UTC buckets. `storetest.Env` takes the same `NewTenant`,
 `TenantCtx` and `Advance`, so one setup can serve both suites, plus `Now` (the
 store's clock, for the checks at an expiry's exact instant) and
 `DeleteTenant` (moves a tenant to the trash, for the `ErrUnknownTenant` and
 `ErrTenantDeleted` checks). Both suites take `ScopesTenants` for a store that
 keeps tenants apart by the call's context: a call naming one tenant under
-another's scope must then be `ErrScopeMismatch`.
+another's scope must then be `ErrScopeMismatch`. Both take `ReadOnlyCtx` too,
+a context that reads every tenant's rows and writes none: the suites then
+check that every write under it is `ErrScopeMismatch`, changes nothing and,
+in `metertest`, runs no `onCharged`.
 
 The checks include charges racing one ceiling, so run them against the
 database itself: a store that reads a counter and writes it back outside one
@@ -626,8 +631,8 @@ stops the test binary with every goroutine's stack, naming the check.
 
 `memstore` and `pgstore` run the same checks from their own tests — `pgstore`
 against PostgreSQL in a container, as a role that owns no table, on a pool of
-two connections — and `dpop` and `jwks` run theirs against their shipped
-implementations.
+two connections — `dpop` and `jwks` run theirs against their shipped
+implementations, and `redisreplay` runs `dpoptest` against Redis.
 
 `Instrument` wraps a `UsageStore` and keeps every interface of `limes` the
 store implements — the optional `CopyUsageReader` and `TenantUsageEraser`. A decorator of your
@@ -732,7 +737,8 @@ is scoped to, and none when it is scoped to no tenant; the revocation checks
 see every tenant, as the verifier asks them before it knows the token's. A
 call whose request names its tenant — `Insert`, `ListByPrincipal`, `Bump`,
 `Charge`, `Reserve`, `Settle`, `GetTenantBudget`, `SetTenantBudget`, the
-tenant erasers and `Ledger.SumCharges` — under a
+tenant erasers, `Ledger.SumCharges` and `Census.CountRecords` for one tenant —
+under a
 scope that does not admit that tenant returns `ErrScopeMismatch`, never
 `ErrNotFound` or `ErrInvalidRequest`. A call that names only an id
 (`GetRecord`, `Revoke`, `Refund`, `Release`, `GetUsage`, `GetCharge`, …) cannot
@@ -770,7 +776,7 @@ Elsewhere, implement these and you are done:
 | `RecordCensus` | Counts capability records by disposition, for one tenant or every tenant (optional; a type of its own beside `Store`) | No |
 | `TenantRecordEraser`, `TenantUsageEraser` | Erase a tenant's records and usage (optional) | No |
 | `UsageStore[TX]` = `Meter[TX]` + `MeterReader` + `TenantBudgets` + `UsageHousekeeping` | Request and spend counters, the charges ledger, tenant ceilings; `DeleteUsage` and `PurgeOrphans` release a reaped capability's holds | Only for atomic side effects |
-| `KeyResolver` | Public verification keys | No |
+| `KeyResolver` | Public verification keys; an unknown kid is `jwks.ErrUnknownKID`, the token's fault (`ErrInvalidToken`), and any other error the resolver's own (`jwks.Static` and `jwks.Remote` ship; `jwkstest` checks yours) | No |
 | `dpop.ReplayCache` | DPoP proof ids seen, per key, each counted against its holder: `Seen(ctx, dpop.ReplayEntry)` reports a holder past its share as seen, and returns an error when its store cannot answer — an outage, not a refused proof (only for key-bound tokens; `dpop.MemoryReplayCache` ships for one process — behind several replicas, the `redisreplay` module ships one over Redis, or implement it over another shared store) | No |
 | `dpop.Nonces` | Server-provided DPoP nonces (optional; `dpop.HMACNonces` ships and needs no store) | No |
 
@@ -799,9 +805,10 @@ ancestor on record — wins over expired, and expired — a zero `ExpiresAt`
 included — over active. `Delegated` counts
 the records with a parent, and `ExpiringSoon` the active ones expiring within
 `ExpiringWithin`. `memstore.NewCensus` and `pgstore.NewCensus` ship one; with
-pgstore, a census of every tenant runs under `WithAllTenantsReadOnly`, and one
-under a narrower scope is `ErrScopeMismatch`. `storetest` checks a census its
-`Env.Census` names.
+pgstore, a census of every tenant runs under `WithAllTenantsReadOnly` or
+`WithAllTenants`, and one under a narrower scope is `ErrScopeMismatch`.
+`storetest` checks a census its `Env.Census` names, when the `Env` also sets
+`Now`.
 
 To test a report, backdate its charges through the store's clock, never by
 writing a store's tables, whose columns are the store's own and change
@@ -883,10 +890,10 @@ Instantiate `UsageStore[struct{}]` and always pass `nil` for the callback.
 Everything works identically; you forgo the atomic-side-effect
 guarantee.
 
-The three listings, `ListByPrincipal`, `ListTenantBudgets` and
-`ListReservations` (soonest to expire first, ties by id), are pages with an
-opaque cursor, so an API can hand a page token to its client. To read the
-first two whole, range over `AllByPrincipal` or `AllTenantBudgets`: they walk
+Every listing — `ListByPrincipal`, `ListTenantBudgets`, `ListReservations`
+(soonest to expire first, ties by id), `SumCharges` and `CountRecords` — is a
+page with an opaque cursor, so an API can hand a page token to its client. To
+read `ListByPrincipal` or `ListTenantBudgets` whole, range over `AllByPrincipal` or `AllTenantBudgets`: they walk
 the pages from `req.Cursor` afresh on every range, stop fetching when the loop
 breaks, and refuse a page that returns a cursor already fetched
 (`ErrCursorRepeated`). Spend moves between pages, so `AllTenantBudgets` may
@@ -901,18 +908,18 @@ for c, err := range limes.AllByPrincipal(ctx, store, req) {
 
 ## Key rotation
 
-1. Publish the new public key alongside the old (`SetKey`, or add it to the
+1. Publish the new public key alongside the old (`jwks.Static.SetKey`, or add it to the
    served JWKS — `jwks.Marshal` output is sorted by kid, so it is stable).
 2. Switch the issuer to sign with the new key — no sooner than the
    `max-age` the JWKS is served with, so every verifier has fetched it.
-3. Withdraw the old key (`RemoveKey`) only after the **longest outstanding
+3. Withdraw the old key (`jwks.Static.RemoveKey`) only after the **longest outstanding
    TTL** has elapsed.
 
 Skipping the wait in step 3 invalidates tokens agents are still holding. Since
 TTLs here are minutes, the wait is short — which is part of why short TTLs are
 the default posture (`IssuerConfig.DefaultTTL`, fifteen minutes).
 
-Load a signing key with `LoadKey(path)` (PEM, PKCS#8 only); an
+Load a signing key with `LoadKey(path)` (an Ed25519 key, PKCS#8 PEM only); an
 unreadable path, or none, is an error, never a fresh key. `GenerateKey` makes
 an ephemeral one, which vanishes with the process — a deployment that may run
 without a key file chooses between the two itself, and knows which it chose.
@@ -939,7 +946,7 @@ if err != nil {
 ```
 
 A malformed `Authorization` header is 400; a bad token or proof is 401, with a
-`Bearer` or `DPoP` challenge naming the error code (and `algs` for DPoP); a
+`Bearer` or `DPoP` challenge naming the error code (and `algs` for DPoP, when the verifier checks proofs); a
 refused operation is 403 `insufficient_scope`; an exhausted budget or request
 limit is 403 with no challenge; an issuer's key set never fetched, out of
 reach past `MaxStale`, or lacking the token's kid while the endpoint fails, is
@@ -964,7 +971,7 @@ stop rather than retry. The full table is in [diagrams.md](diagrams.md#answering
 | `VerifierConfig.AcceptTokenTypes` | `TokenTypeV4` |
 | `VerifierConfig.Realm` | `DefaultRealm`, `limes` |
 | `jwks.HandlerConfig.MaxAge` | `jwks.DefaultMaxAge`, 5 minutes; `HandlerConfig.Revalidate: true` for `max-age=0` |
-| `ListByPrincipalRequest.Limit` · `ListTenantBudgetsRequest.Limit` · `ListReservationsRequest.Limit` · `SumChargesRequest.Limit` | `DefaultListLimit` 50, at most `MaxListLimit` 500 |
+| `ListByPrincipalRequest.Limit` · `ListTenantBudgetsRequest.Limit` · `ListReservationsRequest.Limit` · `SumChargesRequest.Limit` · `CountRecordsRequest.Limit` | `DefaultListLimit` 50, at most `MaxListLimit` 500 |
 | `PurgeRequest` · `ReleaseExpiredRequest` · `PurgeOrphansRequest` | `DefaultHousekeepingLimit` 1 000 a batch; `PurgeRequest.ExpiredFor` `MinPurgeRetention`, 6 minutes, and no less |
 | `MaxDelegationDepth` · `MaxBiscuitBlocks` | 64 ancestors · 32 attenuation blocks |
 | `CopyUsageRequest.RevocationIDs` | at most `MaxCopyUsageIDs`, 500 |

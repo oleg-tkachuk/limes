@@ -104,18 +104,21 @@ flowchart LR
     suites -. "check" .-> brev
     suites -. "check" .-> cusage
     suites -. "check" .-> ledger
+    suites -. "check" .-> census
     suites -. "check" .-> erasers
     store --> impl
     usage --> impl
     brev --> impl
     cusage --> impl
     ledger --> impl
+    census --> impl
     erasers --> impl
     pg -. "implements" .-> store
     pg -. "implements" .-> usage
     pg -. "implements" .-> brev
     pg -. "implements" .-> cusage
     pg -. "implements" .-> ledger
+    pg -. "implements" .-> census
     pg -. "implements" .-> erasers
     pg --> pgdb
     rr -. "implements" .-> replay
@@ -129,7 +132,7 @@ flowchart LR
     class caller client
     class issuer,signer,narrows,verifier,caveats role
     class cache,metering,static,remote,bcache,attenuate,dpop,suites,jwksh,nonce,pg,rr optional
-    class store,usage,keys,impl,brev,cusage,replay,nonces,ledger,erasers store
+    class store,usage,keys,impl,brev,cusage,replay,nonces,ledger,census,erasers store
     class jwks,otel,pgdb,redis external
 ```
 
@@ -689,7 +692,7 @@ flowchart TB
 
     subgraph stage ["stage — compute, publish nothing"]
         direction TB
-        c00{"Amount in the unit every counter it moves counts in<br/>no counter past MaxNanos"}
+        c00{"Amount in the unit the capability, each ancestor and the tenant count in<br/>no counter, copies included, past MaxNanos"}
         c0{"each Biscuit copy, innermost first:<br/>spend + reserved + Amount ≤ its budget"}
         c1{"own spend + reserved + Amount ≤ Subject.Budget<br/>(ceiling from the verified token or stored record)"}
         c2{"each ancestor: spend + reserved + Amount<br/>≤ its Budget<br/>(ceiling from the stored record)"}
@@ -828,8 +831,8 @@ flowchart LR
     store --> chain --> cache
     cache --> v1
     cache --> v2
-    store -. "pgstore: statement trigger on a write<br/>to limes.revocations → pg_notify" .-> notify
-    blist -. "pgstore: statement trigger on a write<br/>to limes.biscuit_revocations → pg_notify" .-> notify
+    store -. "pgstore: statement trigger on an INSERT<br/>that adds a row to limes.revocations → pg_notify" .-> notify
+    blist -. "pgstore: statement trigger on an INSERT<br/>that adds a row to limes.biscuit_revocations → pg_notify" .-> notify
     notify -. "Clear() once listening<br/>and on each notification" .-> cache
     bop --> blist --> bcache
     bcache --> v1
@@ -902,17 +905,21 @@ flowchart TB
     ro{"the call writes,<br/>under WithAllTenantsReadOnly"}
     begin["BEGIN · Config.Scope(ctx, tx)<br/>default ScopeFromContext: set_config, local to the transaction<br/>limes.tenant_id = id · limes.all_tenants = on · = read"]
     roset{"the call writes, under a Config.Scope of the consumer's<br/>that set limes.all_tenants = read (one SELECT)"}
-    named{"the request names a tenant<br/>Insert · ListByPrincipal · Bump · Charge · Reserve · Settle<br/>Get/SetTenantBudget · erasers · SumCharges"}
+    named{"the request names a tenant<br/>Insert · ListByPrincipal · Bump · Charge · Reserve · Settle<br/>Get/SetTenantBudget · erasers · SumCharges · CountRecords"}
     check{"Config.CheckScope admits it<br/>default: the context's scope is every tenant or that one;<br/>none: CheckSchemaScope asks the database"}
     rls["statements under row-level security<br/>read: tenant_visible — all_tenants on or read, or tenant_id matches<br/>write: tenant_writable — all_tenants on, or tenant_id matches"]
     commit(["COMMIT"])
     idonly["a call naming only an id<br/>(GetRecord · Revoke · Refund · Release · GetUsage · …):<br/>a row out of scope is not found"]
     definer["IsRevoked · IsBiscuitRevoked<br/>one statement, no transaction:<br/>a SECURITY DEFINER function sees every tenant"]
+    every{"the request reads every tenant<br/>CountRecords AllTenants"}
+    evcheck{"the scope admits every tenant<br/>default: WithAllTenants or WithAllTenantsReadOnly;<br/>otherwise the database is asked"}
     mismatch["ErrScopeMismatch"]
 
     ctx --> ro -- no --> begin --> roset -- no --> named -- yes --> check -- yes --> rls --> commit
     roset -- yes --> mismatch
-    named -- no --> rls
+    named -- no --> every -- yes --> evcheck -- yes --> rls
+    every -- no --> rls
+    evcheck -- no --> mismatch
     rls -.-> idonly
     ro -- yes --> mismatch
     ctx -. "a verifier's lookups" .-> definer
@@ -924,7 +931,7 @@ flowchart TB
     classDef store fill:#FEF3C7,stroke:#D97706,color:#78350F
     classDef external fill:#FCE7F3,stroke:#DB2777,color:#831843
     class ctx,commit client
-    class ro,begin,roset,named,check role
+    class ro,begin,roset,named,check,every,evcheck role
     class idonly,definer optional
     class rls store
     class mismatch external
@@ -948,7 +955,7 @@ flowchart TB
     tx["inTenantTx: scoped, CheckScope admits the tenant"]
     holds["lock the tenant's holds, in id order"]
     recs["lock its records, in id order"]
-    revoke["revoke every record not revoked yet<br/>(the notify trigger fires: watchers Clear)"]
+    revoke["revoke every record not revoked yet<br/>(when any is newly revoked, the notify trigger fires: watchers Clear)"]
     remove["remove the records Purge would:<br/>expired before now − MinPurgeRetention"]
     kept["count the records kept: revoked, until Purge takes them"]
     usage["lock aggregate · counters · copies' counters<br/>delete holds · tenant budget · usage · copy usage · charges"]
