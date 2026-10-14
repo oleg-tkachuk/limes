@@ -39,9 +39,11 @@ fail releases limes and redisreplay, and holds pgstore back.
 So a limes change that pgstore must follow — a value pgstore names
 exhaustively, such as a `ChargeBucket`, or an API pgstore calls — lands with
 pgstore in one pull request. Its released-limes job fails, as nothing released
-has the change yet; the merge releases limes, and Renovate raises pgstore's
-requirement to that release at once. That pull request passes the job, and its
-merge releases pgstore with every change it held. A pgstore change that needs
+has the change yet; the merge releases limes, and the release workflow opens
+a pull request raising each nested module's requirement to that release
+(`build(pgstore): require limes vX.Y.Z`, queued to merge once green). That
+pull request passes the job, and its merge releases pgstore with every change
+it held. A pgstore change that needs
 a limes already released raises the requirement in its own `go.mod`.
 
 `redisreplay`'s contract against a real Redis runs apart too, at the address
