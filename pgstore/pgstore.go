@@ -1,7 +1,8 @@
 // Package pgstore is the reference implementation of the limes storage
 // contracts over PostgreSQL: limes.Store and limes.BiscuitRevocationStore for
 // capability records and revocations, limes.UsageStore[pgx.Tx] and
-// limes.CopyUsageReader for the meter, limes.LedgerReader for reports, and
+// limes.CopyUsageReader for the meter, limes.LedgerReader and
+// limes.RecordCensus for reports, and
 // limes.TenantRecordEraser and limes.TenantUsageEraser for removing a
 // tenant. It passes the module's own contract
 // suites, storetest and metertest, which is how a consumer knows it keeps
@@ -59,7 +60,11 @@
 //
 // A Ledger sums a tenant's charges for billing and reports
 // (limes.LedgerReader), so a consumer reads the ledger through it rather
-// than through the charges table, whose columns are this package's own.
+// than through the charges table, whose columns are this package's own. A
+// Census counts the capability records (limes.RecordCensus) for the same
+// reason: of one tenant, scoped to it as every call naming a tenant, or of
+// every tenant under WithAllTenantsReadOnly or WithAllTenants — a scope that
+// admits fewer is refused with limes.ErrScopeMismatch, not counted as all.
 //
 // To remove a tenant, Store.EraseTenant revokes its capabilities, removes
 // the records Purge would and every meter row of the tenant — the charges
@@ -169,6 +174,9 @@ type conn struct {
 	// admits reads only: nil under the default Scope, whose context
 	// decides before the transaction begins.
 	checkReadOnly func(ctx context.Context, tx pgx.Tx) error
+	// checkEvery refuses, in a call across every tenant, a scope that
+	// admits fewer.
+	checkEvery func(ctx context.Context, tx pgx.Tx) error
 }
 
 func newConn(cfg Config) (conn, error) {
@@ -178,17 +186,18 @@ func newConn(cfg Config) (conn, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	checkReadOnly := checkSchemaReadOnly
+	checkReadOnly, checkEvery := checkSchemaReadOnly, checkSchemaAdmitsEvery
 	if cfg.CheckScope == nil && cfg.Scope == nil {
 		cfg.CheckScope = checkContextScope
 	}
 	if cfg.Scope == nil {
 		cfg.Scope = ScopeFromContext
-		checkReadOnly = nil
+		checkReadOnly, checkEvery = nil, checkContextAdmitsEvery
 	}
 	return conn{
 		db: cfg.DB, now: cfg.Now, scope: cfg.Scope,
-		checkTenant: cfg.CheckTenant, checkScope: cfg.CheckScope, checkReadOnly: checkReadOnly,
+		checkTenant: cfg.CheckTenant, checkScope: cfg.CheckScope,
+		checkReadOnly: checkReadOnly, checkEvery: checkEvery,
 	}, nil
 }
 
@@ -239,6 +248,18 @@ func (c conn) inTenantTx(ctx context.Context, tenant uuid.UUID, fn func(pgx.Tx) 
 // as inTenantTx checks.
 func (c conn) inTenantReadTx(ctx context.Context, tenant uuid.UUID, fn func(pgx.Tx) error) error {
 	return c.inReadTx(ctx, c.admitting(ctx, tenant, fn))
+}
+
+// inEveryTenantReadTx is inReadTx for a read across every tenant: it
+// refuses a scope that admits fewer before fn reads a row, so one tenant's
+// rows are never read as every tenant's.
+func (c conn) inEveryTenantReadTx(ctx context.Context, fn func(pgx.Tx) error) error {
+	return c.inReadTx(ctx, func(tx pgx.Tx) error {
+		if err := c.checkEvery(ctx, tx); err != nil {
+			return err
+		}
+		return fn(tx)
+	})
 }
 
 // admitting is fn, run once the call's scope admits tenant.

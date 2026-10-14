@@ -156,3 +156,43 @@ func checkContextScope(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error {
 func scopeMismatch(tenant uuid.UUID) error {
 	return fmt.Errorf("%w: pgstore: tenant %s", limes.ErrScopeMismatch, tenant)
 }
+
+// sqlScopeAdmitsEvery is whether the transaction may see every tenant's
+// rows: the role is not bound by row-level security on the schema's tables,
+// or the schema's settings scope it to every tenant, to read and write or to
+// read.
+const sqlScopeAdmitsEvery = `SELECT NOT row_security_active('` + schema + `.capabilities') OR coalesce(current_setting('` + settingAllTenants + `', true) IN ('` + settingOn + `', '` + settingRead + `'), false)`
+
+// errScopeNotEvery is a call across every tenant made under a scope that
+// admits fewer.
+var errScopeNotEvery = fmt.Errorf("%w: pgstore: the scope does not admit every tenant", limes.ErrScopeMismatch)
+
+// checkSchemaAdmitsEvery refuses with limes.ErrScopeMismatch a transaction
+// whose scope, as the schema's settings hold it, does not admit every
+// tenant, when row-level security binds its role: a call across every
+// tenant would otherwise count one tenant's rows as everyone's.
+func checkSchemaAdmitsEvery(ctx context.Context, tx pgx.Tx) error {
+	var admits bool
+	if err := tx.QueryRow(ctx, sqlScopeAdmitsEvery).Scan(&admits); err != nil {
+		return err
+	}
+	if !admits {
+		return errScopeNotEvery
+	}
+	return nil
+}
+
+// checkContextAdmitsEvery is checkSchemaAdmitsEvery for the default Scope: a
+// call's WithAllTenants or WithAllTenantsReadOnly admits it without a round
+// trip, WithTenant refuses it, and one with neither is checked against the
+// database, where an owner is not bound.
+func checkContextAdmitsEvery(ctx context.Context, tx pgx.Tx) error {
+	s, ok := ctx.Value(scopeKey{}).(scope)
+	switch {
+	case !ok:
+		return checkSchemaAdmitsEvery(ctx, tx)
+	case s.all:
+		return nil
+	}
+	return errScopeNotEvery
+}
