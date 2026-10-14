@@ -35,6 +35,8 @@ const (
 	truncHour  = "hour"
 	truncDay   = "day"
 	truncMonth = "month"
+	// truncWeek is date_trunc's ISO week, which starts on a Monday.
+	truncWeek = "week"
 )
 
 // truncOf is the date_trunc field of b, and false for ChargeBucketNone,
@@ -50,6 +52,8 @@ func truncOf(b limes.ChargeBucket) (string, bool, error) {
 		return truncDay, true, nil
 	case limes.ChargeBucketMonth:
 		return truncMonth, true, nil
+	case limes.ChargeBucketWeek:
+		return truncWeek, true, nil
 	default:
 		return "", false, fmt.Errorf("%w: pgstore: sum charges: bucket %s is not one this store knows", limes.ErrInvalidRequest, b)
 	}
