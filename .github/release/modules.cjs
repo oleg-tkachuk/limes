@@ -42,9 +42,8 @@ const REDISREPLAY_MODULE = "redisreplay";
 // A pgstore or redisreplay commit cuts no release of the limes module. Their
 // directories are left out of its commits already, each module being on a
 // line of its own; these cover a commit scoped to one that also touches a
-// path outside it. A breaking change there would still cut one —
-// the rule above matches it too — so such a commit carries no breaking
-// marker.
+// path outside it. A rule releasing nothing outranks the breaking rule
+// above, so a breaking change scoped to one cuts no limes release either.
 const PGSTORE_RELEASES_NOTHING = { scope: PGSTORE_MODULE, release: false };
 const REDISREPLAY_RELEASES_NOTHING = { scope: REDISREPLAY_MODULE, release: false };
 

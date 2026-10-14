@@ -40,6 +40,9 @@ const moduleCases = {
     // So does redisreplay, on a line of its own.
     ["feat(redisreplay): add a script", null],
     ["fix(redisreplay): expire the key", null],
+    // A scope that releases nothing outranks a breaking marker.
+    ["feat(pgstore)!: rename a column", null],
+    ["fix(redisreplay): drop a key\n\nBREAKING CHANGE: the key is gone", null],
     // A nested module's build change releases that module, not limes.
     ["build(pgstore): require limes v0.64.0", null],
     ["build(redisreplay): require limes v0.64.0", null],
