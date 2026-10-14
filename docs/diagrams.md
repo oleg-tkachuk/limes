@@ -802,7 +802,7 @@ flowchart LR
     cascade["CascadeChildren:<br/>a revocation entry per descendant,<br/>MaxDelegationDepth generations down,<br/>for the audit trail; an earlier entry stands"]
     chain["IsRevoked(id):<br/>id revoked, or any ancestor still on record revoked<br/>past MaxDelegationDepth: ErrDelegationTooDeep<br/>pgstore: one statement, every tenant"]
     cache["<b>CachedRevocationChecker</b><br/>answer cached for TTL (default 2s)<br/>one upstream call per id at a time<br/>bounded: the oldest answer makes room<br/>errors never cached · a Clear mid-lookup<br/>discards that lookup's answer"]
-    notify{{"consumer's revocation signal<br/>e.g. a Postgres channel —<br/>neither shipped store emits one"}}
+    notify{{"revocation signal<br/>pgstore: RevocationWatcher on<br/>RevocationChannel; memstore: none"}}
     bop(["RevokeBiscuit(RevokeBiscuitRequest{Copy: Verifier.BiscuitCopy(token)})"])
     blist[("<b>BiscuitRevocationStore</b><br/>revoked block ids")]
     bcache["<b>CachedBiscuitRevocationChecker</b><br/>answer per revocation id, cached for TTL<br/>bounded · dropped by Clear"]
@@ -835,7 +835,10 @@ flowchart LR
 Revoking a capability stops everything delegated from it whether or not
 `CascadeChildren` is set, because `IsRevoked` walks the ancestors; the flag
 only adds the per-descendant entries that name each stopped capability. Without
-a revocation signal, a verifier learns of a revocation within the cache TTL.
+a revocation signal, a verifier learns of a revocation within the cache TTL;
+`pgstore`'s schema notifies a channel on every revocation, and its
+`RevocationWatcher` clears the caches on each notification and after each
+reconnect.
 Each cache is dropped whole: an answer cached for a descendant is also an
 answer about the revoked ancestor. A `Clear` also detaches any lookup in flight, whose answer may
 predate the revocation, so it is neither cached nor shared with later checks.
