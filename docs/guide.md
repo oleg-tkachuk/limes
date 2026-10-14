@@ -60,7 +60,9 @@ The token must carry a `typ` the verifier accepts (`AcceptTokenTypes`, by
 default `limes-cap-v4+jwt`), a tenant and a principal of a
 known kind (`PrincipalUser`, `PrincipalAgent` or `PrincipalService`; agent
 details only on an agent — `Principal.Validate`, which `Issue` and `Delegate`
-run too), its claims must
+run too; an agent's `AgentPrincipal` — `AgentType`, `AgentVersion`, `RunID`,
+`ParentAgentID`, `Model`, `MCPClient` — is signed into the token for audit and
+lineage, and none of it is a caveat), its claims must
 hold no member the verifier does not know (a caveat it could not enforce),
 none twice and none in another case, and may be at most
 `VerifierConfig.MaxTokenBytes` long (16 KiB unless set). When several issuers share a verifier, set
@@ -280,7 +282,10 @@ one presented as `DPoP`, with `ErrAuthSchemeMismatch`. No header, or one
 under another scheme, is `ErrNoCredentials` (401, a challenge with no error
 code); a
 Bearer or DPoP header whose credential is not a token68 is
-`ErrMalformedAuthorization` (400).
+`ErrMalformedAuthorization` (400). A token that came from no `Authorization`
+header — gRPC metadata, a message field — goes in with `AuthSchemeUnspecified`,
+the zero `Scheme`: no scheme is checked, but a key-bound token still needs its
+proof.
 
 A verifier with no `DPoP` refuses every key-bound capability with
 `ErrProofUnsupported` instead of accepting it as a bearer token, so a binding
@@ -444,6 +449,16 @@ closes that spend. It is guarded by
 and a conflict is `ErrTenantBudgetVersionMismatch`. Until one is set the
 tenant's ceiling reads `Unlimited`; a ceiling of 0 freezes its spend.
 
+To find the tenants near their ceiling, `ListTenantBudgets` takes a `Filter`:
+`TenantBudgetsAll` (the default), `TenantBudgetsUnlimited`, or
+`TenantBudgetsAtOrPast` with a `ThresholdPct` of 0..100, compared exactly as
+the decimal it is written as (`ExactPercent`), so 1.1 means eleven tenths.
+Rows come most at risk first: ceilings of 0, then bounded ceilings by spent /
+max descending, unclamped, then unlimited ones; ties by tenant id.
+`TenantBudget.Utilization()` reports the same percentage clamped to 0..100,
+and `limited` false for an unlimited tenant. A tenant never charged and never
+given a ceiling has no row: `GetTenantBudget` is `ErrTenantBudgetNotFound`.
+
 ## Amounts are exact
 
 Every amount is `limes.Nanos`: an `int64` count of billionths of the
@@ -459,6 +474,9 @@ on your side needs rounding, summing apart or correcting.
   goes through `AmountFromFloat`, which rounds once, to the nearest nano.
 - **Reading one.** `String()` writes the exact decimal (`"0.35"`);
   `Float64()` is for display and metrics only.
+- **In configuration.** `Nanos` is a `TextMarshaler` and `TextUnmarshaler`
+  that write and read the same exact decimal, so a YAML scalar or an
+  environment variable carries an amount with no `float64` in between.
 - **Range.** Up to `MaxNanos`, just under a billion units. An amount outside
   it is `ErrInvalidAmount`, which matches `ErrInvalidRequest`; a charge of a
   valid amount that would take a counter past it is `ErrCounterOverflow`.
@@ -498,7 +516,10 @@ the zero reservation id, a hold of another capability than the subject's, or
 one made under other Biscuit copies than the subject carries, is
 `ErrReservationNotFound`: a hold is settled by the copy that made it. The receipt names the
 charge's tenant and unit, on a refusal too, so a caller holding only the
-reservation id can attribute it.
+reservation id can attribute it. `GetReservation` reads a hold back while it
+still counts — open, or expired and not yet released — and is
+`ErrReservationNotFound` once settled or released; `ListReservations` pages a
+capability's own holds.
 
 The trailing `nil` is an optional in-transaction callback. If your store has
 transactions, pass a function and the module threads **your** handle back so
@@ -649,13 +670,21 @@ records.Revoke(ctx, limes.RevokeRequest{
 ```
 
 Idempotent; an id not on record is `ErrNotFound` and writes nothing.
+`GetRecord` reads the record back with `IssuedBy` and its own `Revocation`,
+whose `Cascaded` says a cascading revoke wrote it; a capability stopped only
+through an ancestor has none, so ask `IsRevoked` whether it verifies.
+`ListByPrincipal` leaves expired and revoked records out unless
+`IncludeExpired` or `IncludeRevoked` asks for them.
 Verifiers that cache revocation answers learn of it within the cache TTL
 (`DefaultRevocationCacheTTL`, two seconds), or at once if you call `CachedRevocationChecker.Clear` when a
 revocation is announced — on a Postgres `NOTIFY`, for example. `Clear`
 drops the whole cache, and there is no per-id drop: an answer cached for a
 descendant is also an answer about the revoked ancestor. The next check of
 each id then asks the store once, so batch a burst of signals into one
-`Clear`. Over `pgstore`, run a `pgstore.RevocationWatcher` beside each
+`Clear`. Build the caches with `NewCachedRevocationChecker` and
+`NewCachedBiscuitRevocationChecker` over your store; `Sweep` drops their
+expired entries on a timer of yours, optional since lookups skip and replace
+them anyway. Over `pgstore`, run a `pgstore.RevocationWatcher` beside each
 verifier: the schema notifies `pgstore.RevocationChannel` on every
 revocation, and the watcher clears the caches it is given on each
 notification and after each connection it opens:
@@ -754,7 +783,10 @@ only reads of the version table. Run it before any migration of yours that
 refers to its tables. It holds the advisory lock every `tern` migration
 takes, which is reentrant per session: a consumer migrating with `tern` calls
 `Migrate` on the connection its own run holds. `CheckSchema` tells a readiness
-check whether the schema is at the version the package queries. `Config.CheckTenant` runs in `Insert`'s
+check whether the schema is at the version the package queries, returning
+`ErrSchemaMismatch` when it is not — behind, `Migrate` has not run; ahead, a
+later pgstore migrated; `ReadSchemaVersion` reports both numbers (`Applied`,
+`Expected`), with no more than SELECT on the version table. `Config.CheckTenant` runs in `Insert`'s
 transaction, so a consumer that keeps its own tenants answers
 `ErrUnknownTenant` and `ErrTenantDeleted` from the same snapshot the record is
 written in; `Config.Scope` replaces `ScopeFromContext` for a consumer whose
@@ -877,8 +909,14 @@ the one its request names, rather than answer as if the rows were not there. `Is
 `ErrInvalidRequest`, which every check on the request itself matches — a
 missing tenant id, an empty audience entry, a negative TTL or one ending within
 the second it is issued (a token's times are whole seconds), a `NotBefore` at
-or after the expiry, a malformed thumbprint, invalid caveats. Anything else they return is the store's or the
-signer's failure, not the caller's.
+or after the expiry, a malformed thumbprint, invalid caveats (`ErrInvalidCaveats`).
+Anything else they return is the store's or the signer's failure, not the
+caller's.
+
+A read by id that finds nothing matches `ErrNotFound`, through a sentinel of
+its own where the contract names one: `ErrChargeNotFound` (`Refund`,
+`GetCharge`, `ChargeByRef`), `ErrReservationNotFound`, `ErrUsageNotFound` (a
+capability never bumped or charged) and `ErrTenantBudgetNotFound`.
 
 Every write and every listing takes a `…Request`, a read by id takes the id,
 every list is a `Page`, and every read names what
