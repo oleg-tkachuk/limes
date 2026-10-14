@@ -13,6 +13,13 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## pgstore/v0.7.0
+
+- `Migrate(ctx, pool)` → `Migrate(ctx, conn, MigrateOptions{})`: it takes one
+  `*pgx.Conn` (from a pool, `pool.AcquireFunc` and `c.Conn()`), and
+  `MigrateOptions.RuntimeRoles` grants the roles the stores serve as, which
+  replaces your own `GRANT` statements.
+
 ## pgstore/v0.2.0
 
 - A call whose request names its tenant (`Insert`, `ListByPrincipal`, `Bump`,

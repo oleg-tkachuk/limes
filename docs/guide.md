@@ -691,7 +691,10 @@ the DPoP stores, passes `storetest` and `metertest`, and keeps tenants apart
 with row-level security.
 
 ```go
-if err := pgstore.Migrate(ctx, pool); err != nil { /* … */ }
+// As the owner of the schema, granting the role the stores serve as.
+err := ownerPool.AcquireFunc(ctx, func(c *pgxpool.Conn) error {
+    return pgstore.Migrate(ctx, c.Conn(), pgstore.MigrateOptions{RuntimeRoles: []string{"app"}})
+})
 records, _ := pgstore.NewStore(pgstore.Config{DB: pool})
 usage, _ := pgstore.NewUsageStore(pgstore.Config{DB: pool})
 // A call for one tenant; housekeeping takes pgstore.WithAllTenants(ctx),
@@ -713,7 +716,13 @@ be checked so, and answers a row out of scope as not found.
 `Config.Now`, never from the database's clock.
 
 Run `Migrate` as the role that owns the schema and serve as another one: the
-owner is not bound by the policies. `Config.CheckTenant` runs in `Insert`'s
+owner is not bound by the policies. `MigrateOptions.RuntimeRoles` grants the
+serving roles the schema, its tables and the tables of later versions, and
+only reads of the version table. Run it before any migration of yours that
+refers to its tables. It holds the advisory lock every `tern` migration
+takes, which is reentrant per session: a consumer migrating with `tern` calls
+`Migrate` on the connection its own run holds. `CheckSchema` tells a readiness
+check whether the schema is at the version the package queries. `Config.CheckTenant` runs in `Insert`'s
 transaction, so a consumer that keeps its own tenants answers
 `ErrUnknownTenant` and `ErrTenantDeleted` from the same snapshot the record is
 written in; `Config.Scope` replaces `ScopeFromContext` for a consumer whose

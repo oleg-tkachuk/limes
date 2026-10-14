@@ -5,9 +5,12 @@
 // suites, storetest and metertest, which is how a consumer knows it keeps
 // every rule a store must keep.
 //
-// Create the schema once, then build both stores over one pool:
+// Create the schema once, as the role that owns it, granting the role the
+// stores serve as; then build both stores over a pool of that role:
 //
-//	if err := pgstore.Migrate(ctx, pool); err != nil { … }
+//	err := ownerPool.AcquireFunc(ctx, func(c *pgxpool.Conn) error {
+//		return pgstore.Migrate(ctx, c.Conn(), pgstore.MigrateOptions{RuntimeRoles: []string{"app"}})
+//	})
 //	records, err := pgstore.NewStore(pgstore.Config{DB: pool})
 //	usage, err := pgstore.NewUsageStore(pgstore.Config{DB: pool})
 //
