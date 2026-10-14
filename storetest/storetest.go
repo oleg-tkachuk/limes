@@ -57,6 +57,12 @@ type Env struct {
 	// runs under, when the store scopes each tenant's rows; Tenant's own
 	// calls run under Ctx. Optional: without it, Ctx.
 	TenantCtx func(tenant uuid.UUID) context.Context
+	// ScopesTenants reports that the store keeps each tenant's rows apart
+	// by the call's context, TenantCtx giving each tenant's: a call whose
+	// request names one tenant, made under another tenant's context, is
+	// refused with limes.ErrScopeMismatch and changes nothing. Optional:
+	// without it, the checks of that are skipped.
+	ScopesTenants bool
 	// Now reads the store's clock, which stands still while a check runs
 	// but for Advance. Optional: without it, the checks at an expiry's exact
 	// instant are skipped, and the checks read the wall clock.
@@ -227,6 +233,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"ListByPrincipalKeepsTenantsApart", checkListTenants},
 		{"InsertRefusesATenantItCannotMintFor", checkInsertTenants},
 		{"BiscuitRevocation", checkBiscuit},
+		{"ACallScopedToAnotherTenantIsRefused", checkScopeMismatch},
 	}
 	for _, c := range checks {
 		t.Run(c.name, func(t *testing.T) {
@@ -887,6 +894,12 @@ func checkInsertKeepsLineage(t *testing.T, f fixture) {
 	// walk would miss a revoked ancestor.
 	elsewhere := f.newCapability("agent:elsewhere", parent.ID, parent.ExpiresAt)
 	elsewhere.Subject.TenantID = other
+	// A store that scopes tenants refuses the child in another tenant
+	// before it reads the parent: Ctx is not that tenant's.
+	elsewhereRefusal := limes.ErrDelegationTooWide
+	if f.ScopesTenants {
+		elsewhereRefusal = limes.ErrScopeMismatch
+	}
 	for name, tc := range map[string]struct {
 		c    limes.Capability
 		want error
@@ -894,7 +907,7 @@ func checkInsertKeepsLineage(t *testing.T, f fixture) {
 		"no id":                        {noID, limes.ErrInvalidRequest},
 		"a parent not on record":       {orphan, limes.ErrInvalidRequest},
 		"a child outliving its parent": {outliving, limes.ErrDelegationTooWide},
-		"a child in another tenant":    {elsewhere, limes.ErrDelegationTooWide},
+		"a child in another tenant":    {elsewhere, elsewhereRefusal},
 	} {
 		if err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: tc.c, IssuedBy: issuedBy}); !errors.Is(err, tc.want) {
 			t.Errorf("Insert of %s: err = %v, want %v", name, err, tc.want)
@@ -998,5 +1011,36 @@ func checkRecordIsItsOwn(t *testing.T, f fixture) {
 	rev.RevocationID[0] = 'X'
 	if again, err := store.GetBiscuitRevocation(f.Ctx, copyID); err != nil || !bytes.Equal(again.RevocationID, copyID) {
 		t.Errorf("a Biscuit revocation after changing one read = %q, %v; want %q", again.RevocationID, err, copyID)
+	}
+}
+
+// A call naming Tenant, made under another tenant's context, is refused as
+// one — an Insert writing nothing, a delegated child's included — rather
+// than answered as if Tenant's rows were not there.
+func checkScopeMismatch(t *testing.T, f fixture) {
+	if !f.ScopesTenants {
+		t.Skip("Env.ScopesTenants not set")
+	}
+	other, err := f.newTenant()
+	if err != nil {
+		t.Fatalf("NewTenant: %v", err)
+	}
+	wrong := f.tenantCtx(other)
+	parent := f.live(t, "agent:parent", uuid.Nil)
+	for name, c := range map[string]limes.Capability{
+		"a root":            f.newCapability("agent:root", uuid.Nil, f.now.Add(ttl)),
+		"a delegated child": f.newCapability("agent:child", parent.ID, parent.ExpiresAt),
+	} {
+		if err := f.Store.Insert(wrong, limes.InsertRequest{Capability: c, IssuedBy: issuedBy}); !errors.Is(err, limes.ErrScopeMismatch) {
+			t.Errorf("Insert of %s of Tenant under another tenant's context: err = %v, want ErrScopeMismatch", name, err)
+		}
+		if _, err := f.get(c.ID); !errors.Is(err, limes.ErrNotFound) {
+			t.Errorf("GetRecord of %s after a refused Insert: err = %v, want ErrNotFound", name, err)
+		}
+	}
+	if _, err := f.Store.ListByPrincipal(wrong, limes.ListByPrincipalRequest{
+		TenantID: f.Tenant, PrincipalType: parent.Subject.Type, Subject: parent.Subject.Subject,
+	}); !errors.Is(err, limes.ErrScopeMismatch) {
+		t.Errorf("ListByPrincipal of Tenant under another tenant's context: err = %v, want ErrScopeMismatch", err)
 	}
 }
