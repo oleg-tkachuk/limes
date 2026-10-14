@@ -167,17 +167,18 @@ commit together with, say, an outbox write; with no transactions, use
 ## Versioning
 
 Releases are `vX.Y.Z` tags, cut from Conventional Commits on `main` when CI
-passes: `feat` is a minor; `fix`, `perf` and `security` a patch. The module is
-pre-1.0, so a breaking change is a minor too — **the Go API may change between
-minor versions**; read the release notes, which list breaking changes first,
-before bumping.
+passes: `feat` is a minor; `fix`, `perf` and `security` a patch. From 1.0.0
+the Go API is stable: no change on the v1 line breaks a caller, and CI refuses
+one that would. A breaking change would be a v2 under its own module path.
 
 `redisreplay` and `pgstore` are modules of their own, each with a release
 line of its own — `redisreplay/vX.Y.Z`, `pgstore/vX.Y.Z` — cut by the same
 rules from the commits that touch it, plus one: a module's own `build`
 commit, such as `build(pgstore): require limes vX.Y.Z`, is a patch of it. A
 commit releases, by its type, each module whose files it changes; one scoped
-`pgstore` or `redisreplay` never releases limes, breaking or not.
+`pgstore` or `redisreplay` never releases limes, breaking or not. Both are
+pre-1.0: a breaking change there is a minor, listed first in the release notes
+and in [docs/migration.md](docs/migration.md).
 
 The token wire format — claims, `typ: limes-cap-v4+jwt`, the Biscuit facts —
 is a separate promise: a token is a credential that outlives the process that

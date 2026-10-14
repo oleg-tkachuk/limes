@@ -1,9 +1,9 @@
 # Migrating between releases
 
 Every release that broke the API, newest first, each change as what it was
-and what it is now. Before v1.0.0 a breaking change cuts a minor release, so
-only minor releases (`v0.N.0`, `pgstore/v0.N.0`) appear here; patch releases
-never break.
+and what it is now. Before a module's v1.0.0 a breaking change cuts a minor
+release, so only minor releases (`v0.N.0`, `pgstore/v0.N.0`) appear here;
+patch releases never break. A nested module's release is named by its tag.
 
 Names are those of the release that changed them. A name changed again later
 appears again under that later release: to cross several releases, read
@@ -12,7 +12,12 @@ upwards from the one you are on.
 A pull request that marks a break adds its entry at the top, under the
 release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
-API, and this file stops growing.
+limes API, so only `redisreplay` and `pgstore`, both before 1.0, add entries.
+
+## v1.0.0
+
+- No change to the API: v0.N.0's API is v1.0.0's, and the v1 line keeps it.
+  Bump to v1.0.0 from the newest v0.N.0 as from any minor.
 
 ## pgstore/v0.9.0
 

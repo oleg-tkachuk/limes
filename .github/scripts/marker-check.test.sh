@@ -20,6 +20,23 @@ git -C "$scratch" config user.email test@example.com
 git -C "$scratch" commit --quiet --allow-empty -m "feat: start"
 
 failures=0
+
+# pre_stable_root rewrites the module table at <path> so that the limes
+# module releases breaks as minors, whatever the table it was copied from
+# says: the cases that copy the real table are about a module before 1.0.
+# The root's rules are the one list written a rule a line.
+readonly PRE_STABLE_LINE='      BREAKING_IS_A_MINOR_BEFORE_1_0,'
+readonly ROOT_FIRST_RULE='      SECURITY_IS_A_PATCH,'
+pre_stable_root() {
+    awk -v rule="$PRE_STABLE_LINE" -v first="$ROOT_FIRST_RULE" \
+        '$0 != rule { print } $0 == first { print rule }' "$1" >"$1.new"
+    mv "$1.new" "$1"
+    node -e 'process.exit(require(process.argv[1]).breaksAreMinor("limes") ? 0 : 1)' "$1" || {
+        echo "FAIL pre_stable_root left the limes module releasing majors" >&2
+        exit 1
+    }
+}
+
 # check name, want (pass|fail), commit messages...
 check() {
     local name="$1" want="$2"
@@ -65,13 +82,13 @@ TITLE="docs: explain the breaking change" check "on v0, the words in a title" pa
 git -C "$scratch" checkout --quiet main
 mkdir -p "$scratch/.github/release"
 cp "$root/.github/release/modules.cjs" "$root/.github/release/release.config.cjs" "$scratch/.github/release/"
+pre_stable_root "$scratch/.github/release/modules.cjs"
 git -C "$scratch" add .github
 git -C "$scratch" commit --quiet -m "build: release from the module table"
 MIGRATION=1 check "on v0, the pre-1.0 rule in the module table" pass "feat!: change"
 git -C "$scratch" checkout --quiet main
-# The root's rules are the one list that holds the rule on a line of its own.
-sed -i.bak '/^      BREAKING_IS_A_MINOR_BEFORE_1_0,$/d' "$scratch/.github/release/modules.cjs"
-rm -f "$scratch/.github/release/modules.cjs.bak"
+grep -vxF "$PRE_STABLE_LINE" "$scratch/.github/release/modules.cjs" >"$scratch/modules.cjs.new"
+mv "$scratch/modules.cjs.new" "$scratch/.github/release/modules.cjs"
 git -C "$scratch" commit --quiet -am "build!: release root breaks as majors"
 check "the root's pre-1.0 rule gone from the module table" fail "feat!: change"
 git -C "$scratch" checkout --quiet main
@@ -115,6 +132,7 @@ git -C "$nested" config user.name test
 git -C "$nested" config user.email test@example.com
 mkdir -p "$nested/.github/release" "$nested/$NESTED"
 cp "$root/.github/release/modules.cjs" "$root/.github/release/release.config.cjs" "$nested/.github/release/"
+pre_stable_root "$nested/.github/release/modules.cjs"
 : >"$nested/README.md"
 : >"$nested/$NESTED/README.md"
 git -C "$nested" add -A
