@@ -729,12 +729,15 @@ Elsewhere, implement these and you are done:
 
 To remove a tenant, a store may implement `TenantRecordEraser` and
 `TenantUsageEraser` (optional; `storetest` and `metertest` check them when
-present, and `memstore` implements both). `EraseTenantRecords`
+present, and `memstore` and `pgstore` implement both). `EraseTenantRecords`
 revokes every capability of the tenant and removes only the records `Purge`
 would remove: an id not on record is not revoked, so erasing a record whose
 token may still verify would let it through again. `Purge` takes the rest as
 it expires. `EraseTenantUsage` drops the tenant's counters, holds, charges
-and aggregate — its billing history, which does not come back.
+and aggregate — its billing history, which does not come back. In
+`pgstore`, `Store.EraseTenant` does both in one transaction and runs a
+callback of yours in it, so your own rows of the tenant go with them or not
+at all.
 
 Two obligations are easy to miss. `Store.IsRevoked` answers for the
 capability's whole delegation chain, and `Meter` applies every charge and
