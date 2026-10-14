@@ -118,8 +118,9 @@ you keep for audit.
 | **Delegate** | `Issuer.Delegate` issues a child that may only be narrower — operations, resources, limits, audience, and a validity window that starts no earlier and ends no later than the parent's; anything wider is `ErrDelegationTooWide`. The parent must allow `OpShare`, or the delegation is `ErrOpNotAllowed`. |
 | **Attenuate offline** | The Biscuit v3 form of a capability can be narrowed by its holder with no key and no network; each copy can get its own limits and be revoked on its own. |
 | **Bind to a key** | RFC 9449 DPoP: `Verify` refuses a key-bound capability without a fresh proof from that key, presented under the `DPoP` scheme; server nonces (`dpop.HMACNonces`) work across replicas without shared state. |
-| **Meter** | Requests and spend count against the capability, every ancestor and the tenant, atomically with your own side effect. Reserve an estimate, settle the actual cost, refund a charge. Amounts are exact integers of billionths of an ISO 4217 unit. `Instrument` adds OpenTelemetry instruments. |
-| **Revoke** | One call stops a capability and everything delegated from it; verifiers learn of it within a cache TTL, or at once on `Clear`. |
+| **Meter** | Requests count against the capability and every ancestor; spend against those and the tenant, atomically with your own side effect. Reserve an estimate, settle the actual cost, refund a charge. Amounts are exact integers of billionths of an ISO 4217 unit. `Instrument` adds OpenTelemetry instruments. |
+| **Revoke** | One call stops a capability and everything delegated from it; verifiers learn of it within a cache TTL, or at once on `Clear`, which `pgstore.RevocationWatcher` calls on every revocation. |
+| **Report** | `LedgerReader.SumCharges` sums a tenant's charges over a period by unit, whole or by UTC hour, day, ISO week or month, and by operation, actor or capability, the largest first. |
 | **Answer refusals** | `ErrorResponse` maps a refusal to its status, an RFC 6750 / RFC 9449 `WWW-Authenticate` challenge and an RFC 9457 problem body, without the error's own text. |
 
 You implement `Store` and `UsageStore[TX]` — or use `memstore`, or `pgstore`
@@ -127,7 +128,10 @@ over PostgreSQL — and a `KeyResolver`, which `jwks.Static` and `jwks.Remote`
 already are, and check your implementation from its own tests with `storetest`,
 `metertest` and `jwkstest` (`dpoptest` for a DPoP replay cache or nonce source). `UsageStore` is generic in your transaction type, so a charge can
 commit together with, say, an outbox write; with no transactions, use
-`UsageStore[struct{}]`.
+`UsageStore[struct{}]`. Optional contracts serve one feature each:
+`BiscuitRevocationStore` and `CopyUsageReader` for Biscuit copies,
+`LedgerReader` for billing reads, and `TenantRecordEraser` and
+`TenantUsageEraser` to remove a tenant.
 
 ## Guarantees
 
@@ -178,7 +182,7 @@ algorithm would be another token version, never a runtime choice.
 | [docs/guide.md](docs/guide.md) | each concern in turn: verification, caveats, delegation, DPoP, Biscuit, metering, revocation, storage contracts, key rotation |
 | [docs/standards.md](docs/standards.md) | the RFCs implemented — JWT, DPoP, JWKS, HTTP challenges and problem details — the choices made within them, and the OAuth standards deliberately left out |
 | [docs/diagrams.md](docs/diagrams.md) | the contract boundary, a capability's lifecycle, the verification gates, delegation, Biscuit copies, the charge path, revocation |
-| [docs/migration.md](docs/migration.md) | every breaking change since v0.3.0, release by release, as what it was and what it is now |
+| [docs/migration.md](docs/migration.md) | every breaking change from v0.3.0 on, of limes and of pgstore, release by release, as what it was and what it is now |
 | [docs/api-review-v1.md](docs/api-review-v1.md) | the review of the API before 1.0: each finding, the decision taken and whether it is done |
 | [CONTRIBUTING.md](.github/CONTRIBUTING.md) | building, testing and how a change lands |
 | [SECURITY.md](.github/SECURITY.md) | reporting a vulnerability |
@@ -192,7 +196,7 @@ algorithm would be another token version, never a runtime choice.
 | [dpop/](dpop) | proof of possession (RFC 9449): signing and checking proofs, replay cache, server nonces |
 | [inspect/](inspect) | reading a token without verifying it, for tooling |
 | [memstore/](memstore) | the in-memory reference implementation of every storage contract |
-| [pgstore/](pgstore) | the reference PostgreSQL store, a module of its own: `Store`, `BiscuitRevocationStore`, `UsageStore[pgx.Tx]` and `CopyUsageReader`, held to storetest and metertest; released as `pgstore/vX.Y.Z` |
+| [pgstore/](pgstore) | the reference PostgreSQL store, a module of its own: `Store`, `BiscuitRevocationStore`, `UsageStore[pgx.Tx]`, `CopyUsageReader`, a `Ledger` and both tenant erasers under row-level security per tenant, with `EraseTenant` and a `RevocationWatcher`; held to storetest and metertest; released as `pgstore/vX.Y.Z` |
 | [redisreplay/](redisreplay) | a `dpop.ReplayCache` over Redis, a module of its own, for verifiers behind several replicas; released as `redisreplay/vX.Y.Z` |
 | [storetest/](storetest), [metertest/](metertest), [dpop/dpoptest](dpop/dpoptest), [jwks/jwkstest](jwks/jwkstest) | conformance suites to run from your own implementation's tests |
 | [example/](example) | the five-minute walkthrough as a runnable program |

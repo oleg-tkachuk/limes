@@ -21,9 +21,10 @@
 // Wire format is JWT compact serialization with Ed25519 signatures (`alg:
 // Ed25519`, RFC 9864), or a Biscuit v3 sealing such a token;
 // docs/standards.md lists every standard followed. Verification is local:
-// the signature is checked against a resolved public key, and the one store
-// read, whether the capability is revoked, goes through a short-lived cache
-// ([CachedRevocationChecker]), so consumers scale horizontally without
+// the signature is checked against a resolved public key, and the store
+// reads, whether the capability is revoked and, for a Biscuit, whether its
+// copy is, go through short-lived caches ([CachedRevocationChecker],
+// [CachedBiscuitRevocationChecker]), so consumers scale horizontally without
 // contending on a shared store.
 //
 // # Packages
@@ -48,7 +49,9 @@
 //     [IssuanceStore] half. IsRevoked answers for the
 //     capability's whole delegation chain, at most [MaxDelegationDepth]
 //     ancestors deep. No transactions required; an
-//     in-memory map is a valid implementation.
+//     in-memory map is a valid implementation. A store that scopes calls to
+//     a tenant refuses one whose request names another with
+//     [ErrScopeMismatch].
 //   - [UsageStore] — request and spend counters and the charges ledger; the
 //     union of [Meter], [MeterReader], [TenantBudgets] and [UsageHousekeeping]. Every charge
 //     and request also counts against each ancestor. Generic in TX, the
@@ -58,9 +61,11 @@
 //     [jwks.Remote] fetches an issuer's JWKS for verifiers that run
 //     apart from it.
 //
-// Four more are needed only with the feature they serve:
+// Seven more are needed only with the feature they serve:
 // [BiscuitRevocationStore] to accept Biscuit tokens, [CopyUsageReader] to
-// show a Biscuit copy's own counters, [dpop.ReplayCache] to share DPoP replay
+// show a Biscuit copy's own counters, [LedgerReader] to sum a tenant's
+// charges for billing and reports, [TenantRecordEraser] and
+// [TenantUsageEraser] to remove a tenant, [dpop.ReplayCache] to share DPoP replay
 // state across replicas ([dpop.MemoryReplayCache] ships for one process), and
 // [dpop.Nonces] to require server nonces ([dpop.HMACNonces] ships, and works
 // across replicas holding the same keys).

@@ -71,7 +71,8 @@ func readOnly(ctx context.Context) bool {
 }
 
 // ScopeFromContext is the Scope a store uses when Config sets none: it sets
-// the settings the schema's policies read from WithTenant or WithAllTenants.
+// the settings the schema's policies read from WithTenant, WithAllTenants or
+// WithAllTenantsReadOnly.
 func ScopeFromContext(ctx context.Context, tx pgx.Tx) error {
 	s, ok := ctx.Value(scopeKey{}).(scope)
 	switch {

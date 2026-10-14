@@ -1,6 +1,7 @@
 // Package link lets the module's own packages reach what the root does not
-// export: limes/inspect the token reader, and metertest, storetest and
-// memstore's tests the constructors of a MeterSubject and a BiscuitCopy. The
+// export: limes/inspect the token reader, and metertest, storetest, memstore
+// and the tests of memstore and pgstore the constructors of a MeterSubject and
+// a BiscuitCopy. The
 // root sets each as it initialises, which is before any code of theirs runs:
 // each imports the root.
 package link
