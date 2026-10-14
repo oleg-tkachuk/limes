@@ -79,6 +79,12 @@ type Env[TX any] struct {
 	// DeleteCapability removes a capability's record, as Store.Purge does
 	// once it has expired. Optional: without it, the check of PurgeOrphans
 	// is skipped.
+	//
+	// Some checks remove an ancestor whose children stay on record, which
+	// Purge never does: a store whose records refer to their parent (a
+	// foreign key) unhooks the children first, leaving each a root, as its
+	// lineage reads once the ancestor is gone. pgstore's own test does it
+	// in one statement: UPDATE the children's parent to none, then DELETE.
 	DeleteCapability func(id uuid.UUID) error
 	// NewTenant creates another tenant the store can charge, for the checks
 	// that need more than one. Optional: without it, a random id, which a
