@@ -16,7 +16,8 @@
 // pages in a fixed order and keeps tenants apart, and a Biscuit copy revokes
 // on its own. When the store implements limes.TenantRecordEraser, erasing a
 // tenant keeps what a verifier still needs; when Env.ScopesTenants is set, a
-// call under another tenant's scope is refused with limes.ErrScopeMismatch. A check that does not finish within Env.CheckTimeout stops the
+// call under another tenant's scope is refused with limes.ErrScopeMismatch,
+// and when Env.ReadOnlyCtx is set, every write under a read-only scope is. A check that does not finish within Env.CheckTimeout stops the
 // test binary with every goroutine's stack, naming the check.
 package storetest
 
@@ -65,6 +66,13 @@ type Env struct {
 	// refused with limes.ErrScopeMismatch and changes nothing. Optional:
 	// without it, the checks of that are skipped.
 	ScopesTenants bool
+	// ReadOnlyCtx is a context scoped to reading every tenant's rows and
+	// writing none, as the store's consumer scopes it — by the store's own
+	// context or by a scope of the consumer's: Tenant's records read under
+	// it, and every call that writes is refused with
+	// limes.ErrScopeMismatch and changes nothing. Optional: without it, the
+	// checks of that are skipped.
+	ReadOnlyCtx context.Context
 	// Now reads the store's clock, which stands still while a check runs
 	// but for Advance. Optional: without it, the checks at an expiry's exact
 	// instant are skipped, and the checks read the wall clock.
@@ -236,6 +244,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"InsertRefusesATenantItCannotMintFor", checkInsertTenants},
 		{"BiscuitRevocation", checkBiscuit},
 		{"ACallScopedToAnotherTenantIsRefused", checkScopeMismatch},
+		{"AReadOnlyScopeWritesNothing", checkReadOnlyScope},
 		{"EraseTenantRecordsKeepsWhatAVerifierStillNeeds", checkEraseTenant},
 	}
 	for _, c := range checks {
@@ -1045,6 +1054,62 @@ func checkScopeMismatch(t *testing.T, f fixture) {
 		TenantID: f.Tenant, PrincipalType: parent.Subject.Type, Subject: parent.Subject.Subject,
 	}); !errors.Is(err, limes.ErrScopeMismatch) {
 		t.Errorf("ListByPrincipal of Tenant under another tenant's context: err = %v, want ErrScopeMismatch", err)
+	}
+}
+
+// A read-only scope reads Tenant's records and writes none: every call that
+// writes is refused as out of scope rather than let through as no rows, and
+// the record it would have written, revoked or removed stays as it was.
+func checkReadOnlyScope(t *testing.T, f fixture) {
+	ro := f.ReadOnlyCtx
+	if ro == nil {
+		t.Skip("Env.ReadOnlyCtx not set")
+	}
+	live := f.live(t, "agent:live", uuid.Nil)
+	expired := f.insert(t, f.newCapability("agent:expired", uuid.Nil, f.now.Add(-expiredAgo)))
+	if _, err := f.Store.GetRecord(ro, live.ID); err != nil {
+		t.Errorf("GetRecord under the read-only scope: %v", err)
+	}
+	fresh := f.newCapability("agent:fresh", uuid.Nil, f.now.Add(ttl))
+	copyID := []byte("read-only-copy")
+	writes := map[string]func() error{
+		"Insert": func() error { return f.Store.Insert(ro, limes.InsertRequest{Capability: fresh, IssuedBy: issuedBy}) },
+		"Revoke": func() error { return f.Store.Revoke(ro, limes.RevokeRequest{CapabilityID: live.ID}) },
+		"Purge": func() error {
+			_, err := f.Store.Purge(ro, limes.PurgeRequest{ExpiredFor: purgeGrace})
+			return err
+		},
+	}
+	biscuits, withBiscuits := f.Store.(limes.BiscuitRevocationStore)
+	if withBiscuits {
+		writes["RevokeBiscuit"] = func() error {
+			return biscuits.RevokeBiscuit(ro, limes.RevokeBiscuitRequest{Copy: biscuitCopy(live.ID, copyID)})
+		}
+	}
+	if eraser, ok := f.Store.(limes.TenantRecordEraser); ok {
+		writes["EraseTenantRecords"] = func() error {
+			_, err := eraser.EraseTenantRecords(ro, limes.EraseTenantRequest{TenantID: f.Tenant})
+			return err
+		}
+	}
+	for name, write := range writes {
+		if err := write(); !errors.Is(err, limes.ErrScopeMismatch) {
+			t.Errorf("%s under the read-only scope: err = %v, want ErrScopeMismatch", name, err)
+		}
+	}
+	if _, err := f.get(fresh.ID); !errors.Is(err, limes.ErrNotFound) {
+		t.Errorf("GetRecord after a refused Insert: err = %v, want ErrNotFound", err)
+	}
+	if f.revoked(t, live.ID) {
+		t.Error("a capability is revoked after a refused Revoke or erase")
+	}
+	if _, err := f.get(expired.ID); err != nil {
+		t.Errorf("an expired record after a refused Purge: %v", err)
+	}
+	if withBiscuits {
+		if _, err := biscuits.GetBiscuitRevocation(f.Ctx, copyID); !errors.Is(err, limes.ErrNotFound) {
+			t.Errorf("GetBiscuitRevocation after a refused RevokeBiscuit: err = %v, want ErrNotFound", err)
+		}
 	}
 }
 
