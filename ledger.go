@@ -10,7 +10,7 @@ import (
 
 // LedgerReader sums a tenant's charges ledger over a period, for billing and
 // reporting: totals, the largest spenders by operation, actor or capability,
-// and series by hour, day or month. It reads the ledger the Meter writes, so
+// and series by hour, day, week or month. It reads the ledger the Meter writes, so
 // a consumer reports from it rather than from a store's tables. It is a type
 // of its own, beside UsageStore rather than one of its interfaces: a reporter
 // holds it, a meter does not. memstore and pgstore each ship one; metertest
@@ -85,12 +85,15 @@ type ChargeSum struct {
 // ChargeBucket is how SumCharges splits a period in time.
 type ChargeBucket uint8
 
-// The buckets, each cut at UTC boundaries.
+// The buckets, each cut at UTC boundaries. A new one is appended, so that no
+// bucket's number changes.
 const (
 	ChargeBucketNone ChargeBucket = iota
 	ChargeBucketHour
 	ChargeBucketDay
 	ChargeBucketMonth
+	// ChargeBucketWeek is an ISO week, from Monday 00:00 UTC.
+	ChargeBucketWeek
 	chargeBucketEnd // one past the last
 )
 
@@ -105,6 +108,8 @@ func (b ChargeBucket) String() string {
 		return "day"
 	case ChargeBucketMonth:
 		return "month"
+	case ChargeBucketWeek:
+		return "week"
 	default:
 		return fmt.Sprintf("ChargeBucket(%d)", uint8(b))
 	}
@@ -129,7 +134,18 @@ func (b ChargeBucket) Start(t time.Time) time.Time {
 		return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 	case ChargeBucketMonth:
 		return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
+	case ChargeBucketWeek:
+		return time.Date(t.Year(), t.Month(), t.Day()-daysSinceMonday(t.Weekday()), 0, 0, 0, 0, time.UTC)
 	default:
 		return time.Time{}
 	}
 }
+
+// daysSinceMonday is how many days into its ISO week, which starts on a
+// Monday, a day of weekday d falls.
+func daysSinceMonday(d time.Weekday) int {
+	return (int(d) - int(time.Monday) + daysPerWeek) % daysPerWeek
+}
+
+// daysPerWeek is the length of a week, in days.
+const daysPerWeek = 7

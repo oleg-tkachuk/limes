@@ -22,6 +22,7 @@ func TestChargeBucketStart(t *testing.T) {
 		ChargeBucketHour:  {"hour", time.Date(2026, time.February, 28, 22, 0, 0, 0, time.UTC)},
 		ChargeBucketDay:   {"day", time.Date(2026, time.February, 28, 0, 0, 0, 0, time.UTC)},
 		ChargeBucketMonth: {"month", time.Date(2026, time.February, 1, 0, 0, 0, 0, time.UTC)},
+		ChargeBucketWeek:  {"week", time.Date(2026, time.February, 23, 0, 0, 0, 0, time.UTC)},
 	}
 	b := ChargeBucket(0)
 	for ; b.Validate() == nil; b++ {
@@ -42,6 +43,26 @@ func TestChargeBucketStart(t *testing.T) {
 	}
 	if !errors.Is(b.Validate(), ErrInvalidRequest) {
 		t.Errorf("%s.Validate() = %v, want ErrInvalidRequest", b, b.Validate())
+	}
+}
+
+// A week starts on the Monday at or before the day, at 00:00 UTC, across a
+// month's and a year's end alike.
+func TestChargeBucketWeekStart(t *testing.T) {
+	monday := time.Date(2026, time.December, 28, 0, 0, 0, 0, time.UTC)
+	for name, tc := range map[string]struct {
+		at, want time.Time
+	}{
+		"Monday at midnight":           {monday, monday},
+		"a nanosecond before it":       {monday.Add(-time.Nanosecond), monday.AddDate(0, 0, -7)},
+		"Sunday, the week's last day":  {time.Date(2027, time.January, 3, 23, 59, 59, 0, time.UTC), monday},
+		"the next year's first day":    {time.Date(2027, time.January, 1, 12, 0, 0, 0, time.UTC), monday},
+		"the next Monday":              {time.Date(2027, time.January, 4, 0, 0, 0, 0, time.UTC), time.Date(2027, time.January, 4, 0, 0, 0, 0, time.UTC)},
+		"a Monday east of UTC, Sunday": {time.Date(2027, time.January, 4, 1, 0, 0, 0, time.FixedZone("UTC+2", 2*int(time.Hour/time.Second))), monday},
+	} {
+		if got := ChargeBucketWeek.Start(tc.at); !got.Equal(tc.want) || got.Location() != time.UTC {
+			t.Errorf("%s: Start(%s) = %s, want %s", name, tc.at, got, tc.want)
+		}
 	}
 }
 
