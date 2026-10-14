@@ -28,10 +28,12 @@
 // patch: the preset knows no such type. A nested module's own build change is
 // a patch of it: such a commit changes the go.mod its users resolve — above
 // all the release workflow's `build(<module>): require limes vX.Y.Z`, which
-// would otherwise leave the requirement unreleased. Every module is pre-1.0, where a
-// breaking change is a minor; that rule goes from a module's own rules when
-// it reaches 1.0. release-rules.test.mjs pins all of it. major-guard.cjs
-// refuses a major the module path does not carry, whatever marker cut it.
+// would otherwise leave the requirement unreleased — and is listed in its
+// notes, which the preset would leave empty, build being a hidden type.
+// Every module is pre-1.0, where a breaking change is a minor; that rule goes
+// from a module's own rules when it reaches 1.0. release-rules.test.mjs and
+// release-notes.test.mjs pin all of it. major-guard.cjs refuses a major the
+// module path does not carry, whatever marker cut it.
 
 const PRESET = "conventionalcommits";
 const SECURITY_IS_A_PATCH = { type: "security", release: "patch" };
@@ -53,6 +55,37 @@ function buildIsAPatch(name) {
   return { type: "build", scope: name, release: "patch" };
 }
 
+// The section types of the conventionalcommits preset, as 10.4.1 defines them
+// (DEFAULT_COMMIT_TYPES in its src/constants.js): presetConfig.types replaces
+// the list, so a module that changes one type spells out all the others.
+// release-notes.test.mjs checks they render as the preset's own defaults.
+const PRESET_TYPES = [
+  { type: "feat", section: "Features", effect: "bump" },
+  { type: "feature", section: "Features", effect: "bump" },
+  { type: "fix", section: "Bug Fixes", effect: "bump" },
+  { type: "perf", section: "Performance Improvements", effect: "bump" },
+  { type: "revert", section: "Reverts", effect: "bump" },
+  { type: "docs", section: "Documentation", effect: "hidden" },
+  { type: "style", section: "Styles", effect: "hidden" },
+  { type: "chore", section: "Miscellaneous Chores", effect: "hidden" },
+  { type: "refactor", section: "Code Refactoring", effect: "hidden" },
+  { type: "test", section: "Tests", effect: "hidden" },
+  { type: "build", section: "Build System", effect: "hidden" },
+  { type: "ci", section: "Continuous Integration", effect: "hidden" },
+];
+const DEPENDENCIES_SECTION = "Dependencies";
+
+// buildIsListed is the nested module name's notes types: the preset's, with
+// the build changes scoped to it — the ones buildIsAPatch releases — listed
+// under DEPENDENCIES_SECTION rather than hidden, so such a release has notes.
+// The preset takes the first entry that matches a commit, so the scoped one
+// goes ahead of the hidden build type.
+function buildIsListed(name) {
+  const at = PRESET_TYPES.findIndex((t) => t.type === "build");
+  const listed = { type: "build", scope: name, section: DEPENDENCIES_SECTION, effect: "bump" };
+  return [...PRESET_TYPES.slice(0, at), listed, ...PRESET_TYPES.slice(at)];
+}
+
 // The variable that picks the module to release, and the one picked without it.
 const MODULE_ENV = "RELEASE_MODULE";
 const ROOT_MODULE = "limes";
@@ -60,7 +93,8 @@ const ROOT_MODULE = "limes";
 // Each Go module this repository releases. dir is the module's directory from
 // the repository root, empty for the root module; a nested module's tags carry
 // it as a prefix, as the Go proxy requires. releaseRules are the module's own,
-// so one module reaching 1.0 does not change how another releases.
+// so one module reaching 1.0 does not change how another releases. notesTypes,
+// where set, replaces the preset's section types in the module's notes.
 const MODULES = {
   [ROOT_MODULE]: {
     dir: "",
@@ -74,10 +108,12 @@ const MODULES = {
   [REDISREPLAY_MODULE]: {
     dir: REDISREPLAY_MODULE,
     releaseRules: [SECURITY_IS_A_PATCH, BREAKING_IS_A_MINOR_BEFORE_1_0, buildIsAPatch(REDISREPLAY_MODULE)],
+    notesTypes: buildIsListed(REDISREPLAY_MODULE),
   },
   [PGSTORE_MODULE]: {
     dir: PGSTORE_MODULE,
     releaseRules: [SECURITY_IS_A_PATCH, BREAKING_IS_A_MINOR_BEFORE_1_0, buildIsAPatch(PGSTORE_MODULE)],
+    notesTypes: buildIsListed(PGSTORE_MODULE),
   },
 };
 
@@ -97,7 +133,7 @@ function configFor(name) {
     .map((m) => m.dir)
     .filter((dir) => dir !== "" && dir !== module.dir);
   const analyzer = { preset: PRESET, releaseRules: module.releaseRules };
-  const notes = { preset: PRESET };
+  const notes = module.notesTypes ? { preset: PRESET, presetConfig: { types: module.notesTypes } } : { preset: PRESET };
   const scope = { dir: module.dir, exclude: module.dir === "" ? others : [] };
   return {
     branches: ["main"],
@@ -123,6 +159,7 @@ function breaksAreMinor(name) {
 }
 
 module.exports = {
+  DEPENDENCIES_SECTION,
   MODULES,
   MODULE_ENV,
   ROOT_MODULE,
