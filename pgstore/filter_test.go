@@ -41,6 +41,7 @@ func TestTruncOfNamesEveryBucket(t *testing.T) {
 		limes.ChargeBucketHour:  truncHour,
 		limes.ChargeBucketDay:   truncDay,
 		limes.ChargeBucketMonth: truncMonth,
+		limes.ChargeBucketWeek:  truncWeek,
 	}
 	b := limes.ChargeBucket(0)
 	for ; b.Validate() == nil; b++ {
