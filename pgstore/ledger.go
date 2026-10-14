@@ -15,6 +15,21 @@ import (
 )
 
 // Ledger implements limes.LedgerReader over the store's charges ledger.
+//
+// A charge carries the store's time, so a test of a report backdates its
+// charges through Config.Now rather than by writing the charges table, whose
+// columns are this package's own: build the stores on a clock the test sets,
+// record a capability that outlives the period, and move the clock forward
+// before each charge.
+//
+//	at := start
+//	cfg := pgstore.Config{DB: pool, Now: func() time.Time { return at }}
+//	records, _ := pgstore.NewStore(cfg)
+//	usage, _ := pgstore.NewUsageStore(cfg)
+//	_ = records.Insert(ctx, limes.InsertRequest{Capability: c}) // c.ExpiresAt past the period
+//	subject, _ := limes.StoredMeterSubject(ctx, records, c.ID)
+//	at = start.AddDate(0, 0, 1)
+//	_, _ = usage.Charge(ctx, limes.ChargeRequest{Subject: subject, Amount: amount}, nil)
 type Ledger struct {
 	conn
 }
