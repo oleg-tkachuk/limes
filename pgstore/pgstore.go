@@ -38,6 +38,13 @@
 // answer as if the tenant's rows were not there (Config.CheckScope). A call
 // that names only an id cannot be checked so, and answers a row out of scope
 // as not found.
+//
+// To remove a tenant, Store.EraseTenant revokes its capabilities, removes
+// the records Purge would and every meter row of the tenant — the charges
+// ledger included — in one transaction, and runs the consumer's own removal
+// in it. The records it keeps stay revoked until Purge takes them: an id not
+// on record is not revoked, so a token whose record went early would verify
+// again.
 package pgstore
 
 import (
