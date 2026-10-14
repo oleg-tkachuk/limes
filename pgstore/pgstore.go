@@ -16,6 +16,10 @@
 //	records, err := pgstore.NewStore(pgstore.Config{DB: pool})
 //	usage, err := pgstore.NewUsageStore(pgstore.Config{DB: pool})
 //
+// CheckSchema returns ErrSchemaMismatch while the schema is not the version
+// this package queries, for a readiness check; ReadSchemaVersion reports both
+// versions and needs only the SELECT that Migrate grants a runtime role.
+//
 // Every call runs in one transaction on one connection — but for the two
 // revocation checks, each a single statement (see Tenants) — and every time it
 // writes or compares against comes from Config.Now, never from the database's
@@ -101,7 +105,7 @@ type Config struct {
 	// Scope runs first in every transaction the store opens, with the call's
 	// context, and sets what row-level security policies read: nil is
 	// ScopeFromContext, which serves the schema's own policies from
-	// WithTenant and WithAllTenants. A consumer with policies of its own sets
+	// WithTenant, WithAllTenants and WithAllTenantsReadOnly. A consumer with policies of its own sets
 	// its settings here (set_config(…, true), local to the transaction). An
 	// error from it ends the call.
 	Scope func(ctx context.Context, tx pgx.Tx) error
