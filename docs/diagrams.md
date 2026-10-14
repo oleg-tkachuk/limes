@@ -889,7 +889,9 @@ Every call of `pgstore` runs in a transaction that `Config.Scope` scopes first;
 the default reads the scope a context carries. A call whose request names a
 tenant is refused with `ErrScopeMismatch` when that scope does not admit the
 tenant, before it reads a row, rather than answer as rows that are not there.
-Row-level security then binds every statement: `tenant_visible` for reads,
+A call that writes is refused so under a read-only scope: before the
+transaction under `WithAllTenantsReadOnly`, and once a `Config.Scope` of the
+consumer's has run when it set `limes.all_tenants` to `read`. Row-level security then binds every statement: `tenant_visible` for reads,
 `tenant_writable` for writes. The table owner, as `Migrate` runs, is not bound.
 
 ```mermaid
@@ -897,6 +899,7 @@ flowchart TB
     ctx(["ctx: WithTenant(id) · WithAllTenants · WithAllTenantsReadOnly · none"])
     ro{"the call writes,<br/>under WithAllTenantsReadOnly"}
     begin["BEGIN · Config.Scope(ctx, tx)<br/>default ScopeFromContext: set_config, local to the transaction<br/>limes.tenant_id = id · limes.all_tenants = on · = read"]
+    roset{"the call writes, under a Config.Scope of the consumer's<br/>that set limes.all_tenants = read (one SELECT)"}
     named{"the request names a tenant<br/>Insert · ListByPrincipal · Bump · Charge · Reserve · Settle<br/>Get/SetTenantBudget · erasers · SumCharges"}
     check{"Config.CheckScope admits it<br/>default: the context's scope is every tenant or that one;<br/>none: CheckSchemaScope asks the database"}
     rls["statements under row-level security<br/>read: tenant_visible — all_tenants on or read, or tenant_id matches<br/>write: tenant_writable — all_tenants on, or tenant_id matches"]
@@ -905,7 +908,8 @@ flowchart TB
     definer["IsRevoked · IsBiscuitRevoked<br/>one statement, no transaction:<br/>a SECURITY DEFINER function sees every tenant"]
     mismatch["ErrScopeMismatch"]
 
-    ctx --> ro -- no --> begin --> named -- yes --> check -- yes --> rls --> commit
+    ctx --> ro -- no --> begin --> roset -- no --> named -- yes --> check -- yes --> rls --> commit
+    roset -- yes --> mismatch
     named -- no --> rls
     rls -.-> idonly
     ro -- yes --> mismatch
@@ -918,7 +922,7 @@ flowchart TB
     classDef store fill:#FEF3C7,stroke:#D97706,color:#78350F
     classDef external fill:#FCE7F3,stroke:#DB2777,color:#831843
     class ctx,commit client
-    class ro,begin,named,check role
+    class ro,begin,roset,named,check role
     class idonly,definer optional
     class rls store
     class mismatch external
