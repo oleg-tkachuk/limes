@@ -37,6 +37,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/google/uuid"
@@ -61,7 +62,8 @@ type DB interface {
 
 // Config configures a store.
 type Config struct {
-	// DB is the database, its schema created by Migrate. Required.
+	// DB is the database, its schema created by Migrate. Required: nil, or a
+	// nil pool or connection, is refused at construction.
 	DB DB
 	// Now is the store's clock. Nil: time.Now.
 	Now func() time.Time
@@ -80,8 +82,24 @@ type Config struct {
 	CheckTenant func(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error
 }
 
-// errNoDB is NewStore given a Config without a DB.
+// errNoDB is NewStore given a Config without a DB: none at all, or a nil
+// pool or connection, which is a DB that fails on its first call.
 var errNoDB = errors.New("pgstore: Config.DB required")
+
+// isNil reports whether db is nil or holds a nil pointer, such as a
+// *pgxpool.Pool left unset: a non-nil DB that cannot serve a call.
+func isNil(db DB) bool {
+	if db == nil {
+		return true
+	}
+	v := reflect.ValueOf(db)
+	switch v.Kind() {
+	case reflect.Pointer, reflect.Interface, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan:
+		return v.IsNil()
+	default:
+		return false
+	}
+}
 
 // conn is what every store of the package shares: the database, the clock
 // and the scope.
@@ -93,7 +111,7 @@ type conn struct {
 }
 
 func newConn(cfg Config) (conn, error) {
-	if cfg.DB == nil {
+	if isNil(cfg.DB) {
 		return conn{}, errNoDB
 	}
 	if cfg.Now == nil {
