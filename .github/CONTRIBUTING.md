@@ -35,6 +35,22 @@ what a consumer's build resolves (`task test:pgstore:pinned`). A pgstore change
 that needs something new in limes therefore lands after the limes release that
 has it, with `go.mod` requiring that release.
 
+A limes change that pgstore must follow at once cannot take that order: one
+that adds a value pgstore names exhaustively, such as a `ChargeBucket`, fails
+pgstore's tests in the same commit, and CI dispatches no release while any job
+fails. It lands in three steps:
+
+1. The limes pull request, merged by an owner with pgstore's job failing:
+   that failure is the check saying pgstore must follow.
+2. The pgstore pull request, with `go.mod` requiring the pseudo-version of the
+   merge commit of step 1 on `main` (`go list -m github.com/oleg-tkachuk/limes@<sha>`
+   prints it). Both jobs pass, and its merge releases limes and pgstore.
+3. `build(pgstore): require limes vX.Y.Z`, once that limes tag exists.
+
+Require only a commit on `main`: a pull request's own commits are rewritten
+when it is rebased, and a pseudo-version of one would name a commit `main`
+never holds.
+
 `redisreplay`'s contract against a real Redis runs apart too, at the address
 `LIMES_REDIS_ADDR` names (`host:port`); miniredis runs another Lua, so this is
 the check of the script itself:
