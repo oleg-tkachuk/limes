@@ -19,9 +19,13 @@ func (s *UsageStore) Bump(ctx context.Context, req limes.BumpRequest) (limes.Bum
 	if err := checkSubject(req.Subject); err != nil {
 		return limes.BumpReceipt{}, err
 	}
+	unit, err := limes.NormalizeUnitCode(req.Subject.UnitCode())
+	if err != nil {
+		return limes.BumpReceipt{}, err
+	}
 	subject := req.Subject
 	var receipt limes.BumpReceipt
-	err := s.inTenantTx(ctx, subject.TenantID(), func(tx pgx.Tx) error {
+	err = s.inTenantTx(ctx, subject.TenantID(), func(tx pgx.Tx) error {
 		ancestors, err := lineage(ctx, tx, subject.CapabilityID())
 		if err != nil {
 			return err
@@ -52,6 +56,9 @@ func (s *UsageStore) Bump(ctx context.Context, req limes.BumpRequest) (limes.Bum
 		}
 		for _, row := range c.usage {
 			row.requests++
+			if row.unit == "" {
+				row.unit = unit
+			}
 		}
 		for _, row := range c.copies {
 			row.capID = subject.CapabilityID()

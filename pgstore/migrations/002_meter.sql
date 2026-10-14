@@ -10,7 +10,7 @@ CREATE TABLE limes.usage (
     request_count bigint NOT NULL DEFAULT 0 CHECK (request_count >= 0),
     spent         bigint NOT NULL DEFAULT 0 CHECK (spent >= 0),
     reserved      bigint NOT NULL DEFAULT 0 CHECK (reserved >= 0),
-    -- Empty until an amount is counted.
+    -- Empty until the first count records the subject's unit.
     unit_code     text   NOT NULL DEFAULT ''
 );
 
