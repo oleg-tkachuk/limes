@@ -352,6 +352,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"SumChargesGroupsAndPagesTheLedger", checkSumCharges[TX]},
 		{"SumChargesCutsBucketsAtUTCBoundaries", checkSumChargeBuckets[TX]},
 		{"SumChargesOrdersByAmountNotDigits", checkSumChargesOrderByAmount[TX]},
+		{"SumChargesCutsWeeksAtMonday", checkSumChargeWeeks[TX]},
 		{"ResetSpendAloneRollsThePeriodStart", checkPeriodStart[TX]},
 		{"TheZeroSubjectIsRefused", checkZeroSubject[TX]},
 		{"AnAncestorRequestCeilingBoundsBump", checkAncestorRequests[TX]},
@@ -3196,6 +3197,37 @@ func checkSumChargeBuckets[TX any](t *testing.T, f fixture[TX]) {
 	}
 	if err != nil || !reflect.DeepEqual(months, want) {
 		t.Errorf("SumCharges by month = %+v, %v; want the months %v", page.Items, err, want)
+	}
+}
+
+// A week bucket is an ISO week: a charge a microsecond before Monday 00:00
+// UTC falls in the week before, one at it in the week it starts.
+func checkSumChargeWeeks[TX any](t *testing.T, f fixture[TX]) {
+	if f.Ledger == nil || f.Now == nil || f.Advance == nil {
+		t.Skip("Env.Ledger, Now or Advance not set")
+	}
+	const tick = time.Microsecond
+	from := f.Now()
+	y, m, d := from.UTC().Date()
+	monday := time.Date(y, m, d+1, 0, 0, 0, 0, time.UTC)
+	for monday.Weekday() != time.Monday {
+		monday = monday.AddDate(0, 0, 1)
+	}
+	f.Advance(monday.Sub(from) - tick)
+	if _, err := f.charge(limes.ChargeRequest{Amount: 2 * one}, nil); err != nil {
+		t.Fatalf("charge before Monday: %v", err)
+	}
+	f.Advance(tick)
+	if _, err := f.charge(limes.ChargeRequest{Amount: 3 * one}, nil); err != nil {
+		t.Fatalf("charge at Monday: %v", err)
+	}
+	page, err := f.Ledger.SumCharges(f.Ctx, limes.SumChargesRequest{TenantID: f.Tenant, From: from, To: monday.Add(time.Second), Bucket: limes.ChargeBucketWeek})
+	want := []limes.ChargeSum{
+		{BucketStart: monday.AddDate(0, 0, -7), UnitCode: unit, Charged: 2 * one, Charges: 1},
+		{BucketStart: monday, UnitCode: unit, Charged: 3 * one, Charges: 1},
+	}
+	if err != nil || !sameSums(page.Items, want) {
+		t.Errorf("SumCharges by week = %+v, %v; want %+v", page.Items, err, want)
 	}
 }
 
