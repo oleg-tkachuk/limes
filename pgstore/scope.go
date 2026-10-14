@@ -15,9 +15,12 @@ import (
 const (
 	// settingTenant holds the tenant a transaction is scoped to.
 	settingTenant = "limes.tenant_id"
-	// settingAllTenants is settingOn in a transaction scoped to every tenant.
+	// settingAllTenants is settingOn in a transaction scoped to every
+	// tenant, and settingRead in one that may read every tenant's rows and
+	// write none.
 	settingAllTenants = "limes.all_tenants"
 	settingOn         = "on"
+	settingRead       = "read"
 )
 
 // sqlSetLocal sets a setting for the rest of the transaction only, so a
@@ -31,6 +34,8 @@ type scopeKey struct{}
 type scope struct {
 	tenant uuid.UUID
 	all    bool
+	// readOnly narrows all to reading.
+	readOnly bool
 }
 
 // WithTenant scopes the calls made with ctx to one tenant: under the row-level
@@ -40,12 +45,29 @@ func WithTenant(ctx context.Context, tenant uuid.UUID) context.Context {
 	return context.WithValue(ctx, scopeKey{}, scope{tenant: tenant})
 }
 
-// WithAllTenants scopes the calls made with ctx to every tenant: for
-// housekeeping (Store.Purge, UsageStore.ReleaseExpired and PurgeOrphans) and
-// for reads across tenants (ListTenantBudgets). A call scoped to neither sees
-// no row at all.
+// WithAllTenants scopes the calls made with ctx to every tenant, to read
+// and write: for housekeeping (Store.Purge, UsageStore.ReleaseExpired and
+// PurgeOrphans). A read across tenants takes WithAllTenantsReadOnly. A call
+// scoped to none sees no row at all.
 func WithAllTenants(ctx context.Context) context.Context {
 	return context.WithValue(ctx, scopeKey{}, scope{all: true})
+}
+
+// WithAllTenantsReadOnly scopes the calls made with ctx to reading every
+// tenant's rows — ListTenantBudgets, a dashboard, an admin lookup — and
+// writing none: the schema's policies admit no write under it, and a call
+// that writes is refused with limes.ErrScopeMismatch before it begins.
+func WithAllTenantsReadOnly(ctx context.Context) context.Context {
+	return context.WithValue(ctx, scopeKey{}, scope{all: true, readOnly: true})
+}
+
+// errReadOnlyScope is a call that writes, made under WithAllTenantsReadOnly.
+var errReadOnlyScope = fmt.Errorf("%w: pgstore: a read-only scope admits no write", limes.ErrScopeMismatch)
+
+// readOnly reports whether ctx is scoped by WithAllTenantsReadOnly.
+func readOnly(ctx context.Context) bool {
+	s, ok := ctx.Value(scopeKey{}).(scope)
+	return ok && s.readOnly
 }
 
 // ScopeFromContext is the Scope a store uses when Config sets none: it sets
@@ -55,6 +77,9 @@ func ScopeFromContext(ctx context.Context, tx pgx.Tx) error {
 	switch {
 	case !ok:
 		return nil
+	case s.readOnly:
+		_, err := tx.Exec(ctx, sqlSetLocal, settingAllTenants, settingRead)
+		return err
 	case s.all:
 		return allTenants(ctx, tx)
 	}

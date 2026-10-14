@@ -21,10 +21,12 @@
 //
 // Every table keeps its rows' tenant, and the schema's row-level security
 // binds a role that does not own the tables to the tenant a call is scoped
-// to: pass WithTenant(ctx, tenant) to a call for one tenant, and
-// WithAllTenants(ctx) to housekeeping (Purge, ReleaseExpired, PurgeOrphans)
-// and to ListTenantBudgets. A call scoped to neither sees no row and writes
-// none. IsRevoked and IsBiscuitRevoked see every tenant whatever the scope:
+// to: pass WithTenant(ctx, tenant) to a call for one tenant,
+// WithAllTenants(ctx) to housekeeping (Purge, ReleaseExpired, PurgeOrphans),
+// and WithAllTenantsReadOnly(ctx) to a read across tenants, such as
+// ListTenantBudgets: its policies admit reads only, and a call that writes
+// under it is refused with limes.ErrScopeMismatch. A call scoped to none sees
+// no row and writes none. IsRevoked and IsBiscuitRevoked see every tenant whatever the scope:
 // the verifier asks them before it knows the token's tenant, on every
 // request, so each is one statement calling a function of the schema that
 // runs as the tables' owner — one round trip, no transaction. The owner of
@@ -156,9 +158,19 @@ func (c conn) clock() time.Time {
 	return c.now().UTC().Truncate(timeResolution)
 }
 
-// inTx runs fn in one transaction, scoped first, and commits it when fn
-// returns nil.
+// inTx runs fn, a call that writes, in one transaction, scoped first, and
+// commits it when fn returns nil. A read-only scope is refused before the
+// transaction begins: its policies would let the writes through as no rows.
 func (c conn) inTx(ctx context.Context, fn func(pgx.Tx) error) error {
+	if readOnly(ctx) {
+		return errReadOnlyScope
+	}
+	return c.inReadTx(ctx, fn)
+}
+
+// inReadTx runs fn, a call that only reads, in one transaction, scoped
+// first.
+func (c conn) inReadTx(ctx context.Context, fn func(pgx.Tx) error) error {
 	return pgx.BeginFunc(ctx, c.db, func(tx pgx.Tx) error {
 		if err := c.scope(ctx, tx); err != nil {
 			return fmt.Errorf("pgstore: scope: %w", err)
@@ -171,12 +183,23 @@ func (c conn) inTx(ctx context.Context, fn func(pgx.Tx) error) error {
 // scope that does not admit tenant before fn reads a row, so a call under
 // the wrong scope fails as one rather than as rows that are not there.
 func (c conn) inTenantTx(ctx context.Context, tenant uuid.UUID, fn func(pgx.Tx) error) error {
-	return c.inTx(ctx, func(tx pgx.Tx) error {
+	return c.inTx(ctx, c.admitting(ctx, tenant, fn))
+}
+
+// inTenantReadTx is inReadTx for a read whose request names tenant, checked
+// as inTenantTx checks.
+func (c conn) inTenantReadTx(ctx context.Context, tenant uuid.UUID, fn func(pgx.Tx) error) error {
+	return c.inReadTx(ctx, c.admitting(ctx, tenant, fn))
+}
+
+// admitting is fn, run once the call's scope admits tenant.
+func (c conn) admitting(ctx context.Context, tenant uuid.UUID, fn func(pgx.Tx) error) func(pgx.Tx) error {
+	return func(tx pgx.Tx) error {
 		if c.checkScope != nil {
 			if err := c.checkScope(ctx, tx, tenant); err != nil {
 				return err
 			}
 		}
 		return fn(tx)
-	})
+	}
 }

@@ -50,7 +50,7 @@ func TestMeterContract(t *testing.T) {
 			Tenant:        tenant,
 			NewTenant:     func() (uuid.UUID, error) { return uuid.New(), nil },
 			TenantCtx:     func(tenant uuid.UUID) context.Context { return WithTenant(t.Context(), tenant) },
-			ListCtx:       WithAllTenants(t.Context()),
+			ListCtx:       WithAllTenantsReadOnly(t.Context()),
 			Advance:       clock.Advance,
 			DeleteCapability: func(id uuid.UUID) error {
 				_, err := owner.Exec(context.Background(), deleteRecord, id)

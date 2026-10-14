@@ -96,7 +96,7 @@ func (s *UsageStore) ChargeByRef(ctx context.Context, req limes.ChargeByRefReque
 
 func (s *UsageStore) readCharge(ctx context.Context, query string, args ...any) (limes.ChargeRecord, error) {
 	var out limes.ChargeRecord
-	err := s.inTx(ctx, func(tx pgx.Tx) error {
+	err := s.inReadTx(ctx, func(tx pgx.Tx) error {
 		e, ok, err := readEntry(ctx, tx, query, args...)
 		if err != nil {
 			return err
@@ -113,7 +113,7 @@ func (s *UsageStore) readCharge(ctx context.Context, query string, args ...any) 
 // GetReservation returns a hold that still counts, expired or not.
 func (s *UsageStore) GetReservation(ctx context.Context, reservationID uuid.UUID) (limes.Reservation, error) {
 	var out limes.Reservation
-	err := s.inTx(ctx, func(tx pgx.Tx) error {
+	err := s.inReadTx(ctx, func(tx pgx.Tx) error {
 		h, err := scanHold(tx.QueryRow(ctx, sqlGetHold, reservationID))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return limes.ErrReservationNotFound
@@ -148,7 +148,7 @@ func (s *UsageStore) ListReservations(ctx context.Context, req limes.ListReserva
 	}
 	limit := limes.PageLimit(req.Limit)
 	var holds []hold
-	err := s.inTx(ctx, func(tx pgx.Tx) error {
+	err := s.inReadTx(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, sqlListHolds, req.CapabilityID, after.expiresOrNil(), after.id, limit+1)
 		if err != nil {
 			return err
@@ -223,7 +223,7 @@ const sqlGetUsage = `SELECT request_count, spent, reserved, unit_code FROM limes
 // GetUsage returns a capability's counters, its children's included.
 func (s *UsageStore) GetUsage(ctx context.Context, capID uuid.UUID) (limes.Usage, error) {
 	u := limes.Usage{CapabilityID: capID}
-	err := s.inTx(ctx, func(tx pgx.Tx) error {
+	err := s.inReadTx(ctx, func(tx pgx.Tx) error {
 		var spent, reserved int64
 		err := tx.QueryRow(ctx, sqlGetUsage, capID).Scan(&u.RequestCount, &spent, &reserved, &u.UnitCode)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -248,7 +248,7 @@ func (s *UsageStore) CopyUsage(ctx context.Context, req limes.CopyUsageRequest) 
 		return limes.CopyUsageResult{}, err
 	}
 	var out []limes.CopyUsage
-	err := s.inTx(ctx, func(tx pgx.Tx) error {
+	err := s.inReadTx(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, sqlCopyUsage, req.RevocationIDs)
 		if err != nil {
 			return err
@@ -274,7 +274,7 @@ func (s *UsageStore) CopyUsage(ctx context.Context, req limes.CopyUsageRequest) 
 // GetTenantBudget returns a tenant's aggregate.
 func (s *UsageStore) GetTenantBudget(ctx context.Context, tenantID uuid.UUID) (limes.TenantBudget, error) {
 	var out limes.TenantBudget
-	err := s.inTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
+	err := s.inTenantReadTx(ctx, tenantID, func(tx pgx.Tx) error {
 		b, err := readTenant(ctx, tx, sqlGetTenant, tenantID)
 		if err != nil {
 			return err
@@ -459,7 +459,7 @@ func (s *UsageStore) ListTenantBudgets(ctx context.Context, req limes.ListTenant
 		class, spent, ceiling, tenant = &after.class, int64(after.spent), int64(after.max), after.tenantID
 	}
 	var rows []budgetRow
-	err = s.inTx(ctx, func(tx pgx.Tx) error {
+	err = s.inReadTx(ctx, func(tx pgx.Tx) error {
 		r, err := tx.Query(ctx, sqlListTenants,
 			keep, threshold.Num().String(), threshold.Denom().String(),
 			class, spent, ceiling, tenant, limit+1, utilizationScale)

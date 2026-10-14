@@ -219,3 +219,130 @@ func TestCheckScopeBesideAScopeOfTheConsumers(t *testing.T) {
 		}
 	}
 }
+
+// A read-only scope reads every tenant's rows and writes none: a call that
+// writes is refused before it begins, and the schema's policies refuse the
+// writes of a Scope that sets the read-only setting itself.
+func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
+	f := newTenantFixture(t)
+	mine := WithTenant(t.Context(), f.mine)
+	if _, err := f.usage.SetTenantBudget(mine, limes.SetTenantBudgetRequest{
+		TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true}, UnitCode: limes.DefaultUnitCode,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ro := WithAllTenantsReadOnly(t.Context())
+	if _, err := f.records.GetRecord(ro, f.child.ID); err != nil {
+		t.Errorf("GetRecord under a read-only scope: %v", err)
+	}
+	if _, err := f.usage.GetTenantBudget(ro, f.mine); err != nil {
+		t.Errorf("GetTenantBudget under a read-only scope: %v", err)
+	}
+	if page, err := f.usage.ListTenantBudgets(ro, limes.ListTenantBudgetsRequest{}); err != nil || len(page.Items) != 1 {
+		t.Errorf("ListTenantBudgets under a read-only scope = %d rows, %v; want this tenant's", len(page.Items), err)
+	}
+	c := f.parent
+	c.ID, c.ParentID = uuid.New(), uuid.Nil
+	f.clock.Advance(rlsTTL + 2*limes.MinPurgeRetention)
+	for name, write := range map[string]func() error{
+		"Insert": func() error { return f.records.Insert(ro, limes.InsertRequest{Capability: c}) },
+		"Revoke": func() error { return f.records.Revoke(ro, limes.RevokeRequest{CapabilityID: f.child.ID}) },
+		"Purge": func() error {
+			_, err := f.records.Purge(ro, limes.PurgeRequest{})
+			return err
+		},
+		"SetTenantBudget": func() error {
+			_, err := f.usage.SetTenantBudget(ro, limes.SetTenantBudgetRequest{
+				TenantID: f.mine, Ceiling: limes.BudgetCeiling{Max: 1}, UnitCode: limes.DefaultUnitCode,
+			})
+			return err
+		},
+		"Charge": func() error {
+			_, err := f.usage.Charge(ro, limes.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}, nil)
+			return err
+		},
+		"ReleaseExpired": func() error {
+			_, err := f.usage.ReleaseExpired(ro, limes.ReleaseExpiredRequest{})
+			return err
+		},
+		"PurgeOrphans": func() error {
+			_, err := f.usage.PurgeOrphans(ro, limes.PurgeOrphansRequest{})
+			return err
+		},
+		"EraseTenant": func() error {
+			_, err := f.records.EraseTenant(ro, limes.EraseTenantRequest{TenantID: f.mine}, nil)
+			return err
+		},
+	} {
+		if err := write(); !errors.Is(err, limes.ErrScopeMismatch) {
+			t.Errorf("%s under a read-only scope: err = %v, want ErrScopeMismatch", name, err)
+		}
+	}
+	// The policies alone, with no check before them.
+	readEvery := func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, sqlSetLocal, settingAllTenants, settingRead)
+		return err
+	}
+	records, err := NewStore(Config{DB: app, Now: f.clock.Now, Scope: readEvery})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := records.GetRecord(t.Context(), f.child.ID); err != nil {
+		t.Errorf("GetRecord under the read-only setting: %v", err)
+	}
+	if got, err := records.Purge(t.Context(), limes.PurgeRequest{}); err != nil || got.Purged != 0 {
+		t.Errorf("Purge under the read-only setting = %+v, %v; want nothing purged", got, err)
+	}
+	if err := records.Insert(t.Context(), limes.InsertRequest{Capability: c}); err == nil {
+		t.Error("Insert under the read-only setting succeeded")
+	}
+	if _, err := f.records.GetRecord(mine, f.child.ID); err != nil {
+		t.Errorf("the record after the refused writes: %v", err)
+	}
+}
+
+// scopedTables is every table the schema's policies bind.
+var scopedTables = []string{
+	"capabilities", "revocations", "biscuit_revocations", "usage",
+	"copy_usage", "tenant_budgets", "charges", "reservations",
+}
+
+// Under the read-only setting each table's policies let its rows be read
+// and none be changed or removed, statement by statement.
+func TestReadOnlyPoliciesOfEveryTable(t *testing.T) {
+	f := newTenantFixture(t)
+	if _, err := f.usage.Charge(WithTenant(t.Context(), f.mine), limes.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.usage.Reserve(WithTenant(t.Context(), f.mine), limes.ReserveRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}); err != nil {
+		t.Fatal(err)
+	}
+	err := pgx.BeginFunc(t.Context(), app, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), sqlSetLocal, settingAllTenants, settingRead); err != nil {
+			return err
+		}
+		for _, table := range scopedTables {
+			name := pgx.Identifier{schema, table}.Sanitize()
+			var rows int64
+			if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM `+name).Scan(&rows); err != nil {
+				return err
+			}
+			if rows == 0 && table != "biscuit_revocations" && table != "copy_usage" {
+				t.Errorf("%s: no row read under the read-only setting", table)
+			}
+			for _, write := range []string{`UPDATE ` + name + ` SET tenant_id = tenant_id`, `DELETE FROM ` + name} {
+				tag, err := tx.Exec(t.Context(), write)
+				if err != nil {
+					return err
+				}
+				if tag.RowsAffected() != 0 {
+					t.Errorf("%s under the read-only setting changed %d rows", write, tag.RowsAffected())
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
