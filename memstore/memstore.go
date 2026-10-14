@@ -589,6 +589,10 @@ func (s *UsageStore[TX]) Bump(_ context.Context, req limes.BumpRequest) (limes.B
 	if err := checkSubject(req.Subject); err != nil {
 		return limes.BumpReceipt{}, err
 	}
+	unit, err := limes.NormalizeUnitCode(req.Subject.UnitCode())
+	if err != nil {
+		return limes.BumpReceipt{}, err
+	}
 	// The lineage is read under the usage lock, as DeleteUsage and PurgeOrphans
 	// take it: read before, an ancestor they dropped meanwhile would have
 	// its row written back.
@@ -617,6 +621,9 @@ func (s *UsageStore[TX]) Bump(_ context.Context, req limes.BumpRequest) (limes.B
 		au := s.usage[a.ID]
 		au.CapabilityID = a.ID
 		au.RequestCount++
+		if au.UnitCode == "" {
+			au.UnitCode = unit
+		}
 		s.putUsageLocked(a.ID, req.Subject.TenantID(), au)
 	}
 	for _, c := range req.Subject.Copies() {
@@ -627,6 +634,9 @@ func (s *UsageStore[TX]) Bump(_ context.Context, req limes.BumpRequest) (limes.B
 	}
 	u.CapabilityID = req.Subject.CapabilityID()
 	u.RequestCount = next
+	if u.UnitCode == "" {
+		u.UnitCode = unit
+	}
 	s.putUsageLocked(req.Subject.CapabilityID(), req.Subject.TenantID(), u)
 	return limes.BumpReceipt{RequestCount: next}, nil
 }

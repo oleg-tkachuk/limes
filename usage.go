@@ -640,8 +640,11 @@ type Usage struct {
 	// ReservedAmount is held by open reservations (its subtree's, for a
 	// capability with delegated children).
 	ReservedAmount Nanos
-	UnitCode       string
-	_              noCompare
+	// UnitCode is the unit the counters count in: the subject's, recorded
+	// by the first Bump, Charge or Reserve, so a capability that has only
+	// been bumped reads its unit too.
+	UnitCode string
+	_        noCompare
 }
 
 // CopyUsage is the counters of one Biscuit copy with limits of its own (see

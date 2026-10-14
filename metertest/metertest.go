@@ -2139,9 +2139,11 @@ func checkBump[TX any](t *testing.T, f fixture[TX]) {
 	if _, err := bump(); !errors.Is(err, limes.ErrRequestLimitExceeded) {
 		t.Fatalf("a bump past the limit: err = %v, want ErrRequestLimitExceeded", err)
 	}
+	// Counting requests alone records the subject's unit, so a reader
+	// shows the counters in it rather than in none.
 	for _, id := range []uuid.UUID{f.child, f.root} {
-		if u, err := f.Usage.GetUsage(f.Ctx, id); err != nil || u.RequestCount != limit {
-			t.Errorf("requests of %s = %+v, %v; want %d", id, u, err, limit)
+		if u, err := f.Usage.GetUsage(f.Ctx, id); err != nil || u.RequestCount != limit || u.UnitCode != unit {
+			t.Errorf("usage of %s = %+v, %v; want %d requests in %s", id, u, err, limit, unit)
 		}
 	}
 }
