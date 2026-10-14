@@ -2,7 +2,8 @@
 
 Every release that broke the API, newest first, each change as what it was
 and what it is now. Before v1.0.0 a breaking change cuts a minor release, so
-only `v0.N.0` releases appear here; patch releases never break.
+only minor releases (`v0.N.0`, `pgstore/v0.N.0`) appear here; patch releases
+never break.
 
 Names are those of the release that changed them. A name changed again later
 appears again under that later release: to cross several releases, read
@@ -132,7 +133,8 @@ API, and this file stops growing.
 
 - `dpop.Request`, `dpop.ReplayEntry` gain `Holder`, which `Verify` requires.
 - `MemoryReplayCacheConfig.EntriesPerKey` → `EntriesPerHolder`;
-  `DefaultReplayEntriesPerKey` → `DefaultReplayEntriesPerHolder`.
+  `DefaultReplayEntriesPerKey` → `DefaultReplayEntriesPerHolder`;
+  `dpoptest.ReplayEnv.EntriesPerKey` → `EntriesPerHolder`.
 - Proofs past `MaxProofBytes` and jtis past `MaxJTIBytes` → refused.
 
 ## v0.39.0
@@ -186,8 +188,9 @@ API, and this file stops growing.
 
 ## v0.33.0
 
-- Reasons `invalid_biscuit`, `source_not_allowed` → `biscuit_attenuation`,
-  `source_ip_not_allowed`. `ErrAuthSchemeMismatch` gives
+- Reasons `invalid_biscuit`, `source_not_allowed` (`ReasonInvalidBiscuit`,
+  `ReasonSourceNotAllowed`) → `biscuit_attenuation`, `source_ip_not_allowed`
+  (`ReasonBiscuitAttenuation`, `ReasonSourceIPNotAllowed`). `ErrAuthSchemeMismatch` gives
   `auth_scheme_mismatch`, `dpop.ErrNonceRequired` gives `nonce_required`.
 - `Record.MeterSubject()` → `StoredMeterSubject(ctx, store, capabilityID)`.
 - `Signer.Sign` → unexported; mint tokens with `Issuer`.
@@ -304,7 +307,7 @@ API, and this file stops growing.
   `BiscuitRevocation` → `Note`.
 - `Op` on `ChargeRequest`, `ReserveRequest`, `Reservation` (`string`) → `Op`.
 - `NormaliseUnitCode` → `NormalizeUnitCode`.
-- `TenantBudgetSummary.UtilisationPct` → removed; call `Budget.Utilization()`.
+- `TenantBudgetSummary.UtilisationPct` → removed; call `TenantBudget.Utilization()` (the summary's `Budget` field).
 - `RefundRequest{ChargeID}` with no `Amount` (a full refund) →
   `ErrInvalidRequest`; pass `Remaining: true`.
 
@@ -461,10 +464,14 @@ The key-set API moved to `github.com/oleg-tkachuk/limes/jwks`:
 - `AuthorizationDetail`, `AuthorizationDetailsType` and their marshal and
   parse functions → removed; caveats travel in `limes_caveats`, with `Ops` as
   `"ops"`.
-- `Capability.OnBehalfOf`, `Capability.Actor`, `Actor`, `MaxDelegationDepth`
-  → removed; a delegated token's `sub` is its own principal's subject.
-- `IssuerMetadata`, `DiscoverIssuer`, `MetadataHandler`, `RevocationHandler`,
-  `IntrospectionHandler`, `StandardVerifier.Introspect` → removed.
+- `Capability.OnBehalfOf`, `Capability.Actor`, `Capability.Authority`,
+  `Actor`, `MaxDelegationDepth` → removed; a delegated token's `sub` is its own principal's subject.
+- `IssuerMetadata`, `NewIssuerMetadata`, `MetadataURL`, `DiscoverIssuer`,
+  `MetadataHandler`, `RevocationHandler`, `RevocationConfig`,
+  `IntrospectionHandler`, `Introspection`, `IntrospectionConfig`,
+  `NewIntrospection`, `ClientAuthenticator`, `ClientAuthorizer`,
+  `ErrClientUnauthorized`, `ErrInvalidMetadata`, `StandardVerifier.Introspect`
+  → removed.
 - Token `typ` `limes-cap-v2+jwt` → `limes-cap-v3+jwt`; v2 tokens are refused.
 - `ValidateResourceIndicator` → removed; `Issue` and `Delegate` accept any
   non-empty audience entry.
@@ -485,6 +492,9 @@ The key-set API moved to `github.com/oleg-tkachuk/limes/jwks`:
   `"actions"`.
 - Token `typ` → `limes-cap-v2+jwt`, earlier ones refused;
   `Caveats.MaxRequests` → `int64`; `Nanos` encodes as a JSON string.
+- `Verify` → checks the DPoP proof of a key-bound token itself, and refuses
+  one at a verifier with no DPoP configured; the `Verifier` interface gains
+  `Authorize`.
 - `Verify` → takes a `VerifyRequest`; `DPoPVerifier.Check`, `DPoPRequest` and
   the `AudiencePlane*` constants → removed; `MatchPathOnly` → on
   `DPoPVerifier`.

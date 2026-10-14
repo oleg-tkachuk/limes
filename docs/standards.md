@@ -111,7 +111,7 @@ answers alike, and `WriteErrorResponse` writes them:
 | Refusal | Status | Challenge |
 |---|---|---|
 | no credentials | 401 | `Bearer realm="…"` with no error code (RFC 6750 §3.1), and `DPoP algs="…"` when configured |
-| malformed `Authorization` | 400 | `Bearer error="invalid_request"` |
+| malformed `Authorization` | 400 | `error="invalid_request"` under the scheme presented: `DPoP`, or else `Bearer`, with `DPoP algs="…"` beside it when configured |
 | no nonce, or a stale one | 401 | `DPoP error="use_dpop_nonce", algs="Ed25519 ES256"`, with a fresh `DPoP-Nonce` |
 | no proof, an invalid or replayed one | 401 | `DPoP error="invalid_dpop_proof", algs="Ed25519 ES256"` |
 | invalid, expired, not-yet-valid, revoked token; wrong audience or scheme | 401 | `error="invalid_token"` under the scheme presented (`Bearer` when unknown) |
