@@ -646,7 +646,10 @@ revocation is announced — on a Postgres `NOTIFY`, for example. `Clear`
 drops the whole cache, and there is no per-id drop: an answer cached for a
 descendant is also an answer about the revoked ancestor. The next check of
 each id then asks the store once, so batch a burst of signals into one
-`Clear`.
+`Clear`. Over `pgstore`, run a `pgstore.RevocationWatcher` beside each
+verifier: the schema notifies `pgstore.RevocationChannel` on every
+revocation, and the watcher clears the caches it is given on each
+notification and after each connection it opens.
 Revoking a capability revokes everything delegated from it, with or
 without the flag: `IsRevoked` answers for the whole chain. `CascadeChildren`
 also writes a revocation entry per descendant, so the audit trail names each
