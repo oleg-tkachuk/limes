@@ -56,18 +56,40 @@ func WithAllTenants(ctx context.Context) context.Context {
 // WithAllTenantsReadOnly scopes the calls made with ctx to reading every
 // tenant's rows — ListTenantBudgets, a dashboard, an admin lookup — and
 // writing none: the schema's policies admit no write under it, and a call
-// that writes is refused with limes.ErrScopeMismatch before it begins.
+// that writes is refused with limes.ErrScopeMismatch before it begins. A
+// Scope of the consumer's gets the same refusal by setting limes.all_tenants
+// to 'read' (Config.Scope).
 func WithAllTenantsReadOnly(ctx context.Context) context.Context {
 	return context.WithValue(ctx, scopeKey{}, scope{all: true, readOnly: true})
 }
 
-// errReadOnlyScope is a call that writes, made under WithAllTenantsReadOnly.
+// errReadOnlyScope is a call that writes, made under a read-only scope.
 var errReadOnlyScope = fmt.Errorf("%w: pgstore: a read-only scope admits no write", limes.ErrScopeMismatch)
 
 // readOnly reports whether ctx is scoped by WithAllTenantsReadOnly.
 func readOnly(ctx context.Context) bool {
 	s, ok := ctx.Value(scopeKey{}).(scope)
 	return ok && s.readOnly
+}
+
+// sqlScopeReadOnly is whether the transaction is scoped to reading only, as
+// the schema's settings hold it: unset reads as not.
+const sqlScopeReadOnly = `SELECT coalesce(current_setting('` + settingAllTenants + `', true) = '` + settingRead + `', false)`
+
+// checkSchemaReadOnly refuses with limes.ErrScopeMismatch a transaction that
+// a Scope of the consumer's scoped to reading only, before the call writes:
+// the schema's policies would let the writes through as no rows, or fail
+// them with the database's own error. It is the read-only check of every
+// call that writes under a Scope the store did not set itself.
+func checkSchemaReadOnly(ctx context.Context, tx pgx.Tx) error {
+	var ro bool
+	if err := tx.QueryRow(ctx, sqlScopeReadOnly).Scan(&ro); err != nil {
+		return err
+	}
+	if ro {
+		return errReadOnlyScope
+	}
+	return nil
 }
 
 // ScopeFromContext is the Scope a store uses when Config sets none: it sets

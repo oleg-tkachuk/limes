@@ -14,6 +14,19 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## pgstore/v0.9.0
+
+- A call that writes under a `Config.Scope` of your own that sets
+  `limes.all_tenants` to `read` was left to the schema's policies: `Insert`,
+  `Revoke` and `RevokeBiscuit` failed with PostgreSQL's row-level security
+  error, the rest answered as rows not found or — `Purge`, `ReleaseExpired`,
+  `PurgeOrphans`, `DeleteUsage` and the erasers among them — succeeded and
+  changed nothing, and a write to a
+  tenant that `limes.tenant_id` named beside it went through → each returns
+  `limes.ErrScopeMismatch` before it writes, as under
+  `WithAllTenantsReadOnly`. Scope a call that writes to a tenant, or to every
+  tenant with `on`.
+
 ## pgstore/v0.7.0
 
 - `Migrate(ctx, pool)` → `Migrate(ctx, conn, MigrateOptions{})`: it takes one

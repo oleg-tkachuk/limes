@@ -754,7 +754,10 @@ transaction, so a consumer that keeps its own tenants answers
 written in; `Config.Scope` replaces `ScopeFromContext` for a consumer whose
 policies read settings of their own; such a Scope gets no scope check unless
 `Config.CheckScope` names one — `pgstore.CheckSchemaScope` for a Scope that
-sets the schema's own settings.
+sets the schema's own settings. A Scope that maps a read across every tenant
+to `limes.all_tenants = 'read'` gets the read-only refusal of
+`WithAllTenantsReadOnly`: a call that writes under it returns
+`ErrScopeMismatch` and changes nothing.
 
 Elsewhere, implement these and you are done:
 

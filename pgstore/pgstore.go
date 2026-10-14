@@ -34,7 +34,8 @@
 // WithAllTenants(ctx) to housekeeping (Purge, ReleaseExpired, PurgeOrphans),
 // and WithAllTenantsReadOnly(ctx) to a read across tenants, such as
 // ListTenantBudgets: its policies admit reads only, and a call that writes
-// under it is refused with limes.ErrScopeMismatch. A call scoped to none sees
+// under it is refused with limes.ErrScopeMismatch, as one is under a Scope of
+// the consumer's that sets the same read-only setting. A call scoped to none sees
 // no row and writes none. IsRevoked and IsBiscuitRevoked see every tenant whatever the scope:
 // the verifier asks them before it knows the token's tenant, on every
 // request, so each is one statement calling a function of the schema that
@@ -108,6 +109,14 @@ type Config struct {
 	// WithTenant, WithAllTenants and WithAllTenantsReadOnly. A consumer with policies of its own sets
 	// its settings here (set_config(…, true), local to the transaction). An
 	// error from it ends the call.
+	//
+	// A Scope of the consumer's that scopes a call to reading every tenant
+	// sets limes.all_tenants to 'read', as WithAllTenantsReadOnly does: a
+	// call that writes then reads the setting back once Scope has run, and
+	// refuses with limes.ErrScopeMismatch before it writes anything —
+	// whatever limes.tenant_id says beside it, and one round trip more per
+	// call that writes. A Scope that never sets limes.all_tenants to 'read'
+	// gets no such check; its policies alone decide what a write reaches.
 	Scope func(ctx context.Context, tx pgx.Tx) error
 	// CheckTenant, when set, runs in Insert's transaction before the record
 	// is written, for a consumer that keeps its own tenants: it returns
@@ -156,6 +165,10 @@ type conn struct {
 	scope       func(ctx context.Context, tx pgx.Tx) error
 	checkTenant func(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error
 	checkScope  func(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error
+	// checkReadOnly refuses, in a transaction that writes, a scope that
+	// admits reads only: nil under the default Scope, whose context
+	// decides before the transaction begins.
+	checkReadOnly func(ctx context.Context, tx pgx.Tx) error
 }
 
 func newConn(cfg Config) (conn, error) {
@@ -165,13 +178,18 @@ func newConn(cfg Config) (conn, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
+	checkReadOnly := checkSchemaReadOnly
 	if cfg.CheckScope == nil && cfg.Scope == nil {
 		cfg.CheckScope = checkContextScope
 	}
 	if cfg.Scope == nil {
 		cfg.Scope = ScopeFromContext
+		checkReadOnly = nil
 	}
-	return conn{db: cfg.DB, now: cfg.Now, scope: cfg.Scope, checkTenant: cfg.CheckTenant, checkScope: cfg.CheckScope}, nil
+	return conn{
+		db: cfg.DB, now: cfg.Now, scope: cfg.Scope,
+		checkTenant: cfg.CheckTenant, checkScope: cfg.CheckScope, checkReadOnly: checkReadOnly,
+	}, nil
 }
 
 // clock is the store's time now, to the column's resolution and in UTC.
@@ -180,13 +198,23 @@ func (c conn) clock() time.Time {
 }
 
 // inTx runs fn, a call that writes, in one transaction, scoped first, and
-// commits it when fn returns nil. A read-only scope is refused before the
-// transaction begins: its policies would let the writes through as no rows.
+// commits it when fn returns nil. A read-only scope is refused before fn
+// writes — WithAllTenantsReadOnly before the transaction begins, the
+// read-only setting of a Scope of the consumer's once it has run — since its
+// policies would let the writes through as no rows.
 func (c conn) inTx(ctx context.Context, fn func(pgx.Tx) error) error {
 	if readOnly(ctx) {
 		return errReadOnlyScope
 	}
-	return c.inReadTx(ctx, fn)
+	if c.checkReadOnly == nil {
+		return c.inReadTx(ctx, fn)
+	}
+	return c.inReadTx(ctx, func(tx pgx.Tx) error {
+		if err := c.checkReadOnly(ctx, tx); err != nil {
+			return err
+		}
+		return fn(tx)
+	})
 }
 
 // inReadTx runs fn, a call that only reads, in one transaction, scoped

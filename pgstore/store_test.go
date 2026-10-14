@@ -18,28 +18,46 @@ import (
 func TestStoreContract(t *testing.T) {
 	storetest.Run(t, func(t *testing.T) storetest.Env {
 		t.Helper()
-		fresh(t)
-		clock := newFakeClock()
-		store, err := NewStore(Config{DB: app, Now: clock.Now, CheckTenant: checkTenant})
-		if err != nil {
-			t.Fatal(err)
-		}
-		tenant := newTenant(t)
-		return storetest.Env{
-			Ctx:           WithTenant(t.Context(), tenant),
-			ScopesTenants: true,
-			Store:         store,
-			Tenant:        tenant,
-			NewTenant:     func() (uuid.UUID, error) { return newTenant(t), nil },
-			DeleteTenant: func(tenant uuid.UUID) error {
-				_, err := owner.Exec(t.Context(), sqlDeleteTenant, tenant)
-				return err
-			},
-			TenantCtx: func(tenant uuid.UUID) context.Context { return WithTenant(t.Context(), tenant) },
-			Now:       clock.Now,
-			Advance:   clock.Advance,
-		}
+		return storeEnv(t, Config{}, WithAllTenantsReadOnly)
 	})
+}
+
+// The contract holds under a consumer's Scope that sets the schema's own
+// settings — its read-only marker among them — and CheckSchemaScope.
+func TestStoreContractUnderAConsumersScope(t *testing.T) {
+	storetest.Run(t, func(t *testing.T) storetest.Env {
+		t.Helper()
+		return storeEnv(t, Config{Scope: consumerScope, CheckScope: CheckSchemaScope}, consumerReadOnly)
+	})
+}
+
+// storeEnv is the contract's Env over a store of cfg's scope, readOnly giving the
+// context that scope reads as reading every tenant.
+func storeEnv(t *testing.T, cfg Config, readOnly func(context.Context) context.Context) storetest.Env {
+	t.Helper()
+	fresh(t)
+	clock := newFakeClock()
+	cfg.DB, cfg.Now, cfg.CheckTenant = app, clock.Now, checkTenant
+	store, err := NewStore(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenant := newTenant(t)
+	return storetest.Env{
+		Ctx:           WithTenant(t.Context(), tenant),
+		ScopesTenants: true,
+		ReadOnlyCtx:   readOnly(t.Context()),
+		Store:         store,
+		Tenant:        tenant,
+		NewTenant:     func() (uuid.UUID, error) { return newTenant(t), nil },
+		DeleteTenant: func(tenant uuid.UUID) error {
+			_, err := owner.Exec(t.Context(), sqlDeleteTenant, tenant)
+			return err
+		},
+		TenantCtx: func(tenant uuid.UUID) context.Context { return WithTenant(t.Context(), tenant) },
+		Now:       clock.Now,
+		Advance:   clock.Advance,
+	}
 }
 
 // A Config without a DB, or with a nil pool or connection, builds no store:
