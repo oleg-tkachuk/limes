@@ -19,7 +19,8 @@
 // MaxNanos, a capability not on record, DeleteUsage and PurgeOrphans, the
 // tenant aggregate, its version guard and its listing, and the validation of
 // the request; and, where the Env enables them, EraseTenantUsage,
-// limes.ErrScopeMismatch under another tenant's scope, and a LedgerReader's
+// limes.ErrScopeMismatch under another tenant's scope and for every write
+// under a read-only one, and a LedgerReader's
 // sums, their order, paging and UTC buckets. They need a real ledger, not a
 // fake.
 //
@@ -113,6 +114,13 @@ type Env[TX any] struct {
 	// refused with limes.ErrScopeMismatch and changes nothing. Optional:
 	// without it, the checks of that are skipped.
 	ScopesTenants bool
+	// ReadOnlyCtx is a context scoped to reading every tenant's rows and
+	// writing none, as the store's consumer scopes it — by the store's own
+	// context or by a scope of the consumer's: Tenant's usage reads under
+	// it, and every call that writes is refused with
+	// limes.ErrScopeMismatch, runs no onCharged and changes nothing.
+	// Optional: without it, the checks of that are skipped.
+	ReadOnlyCtx context.Context
 }
 
 // CapabilitySpec is a capability Env.NewCapability records: its parent and
@@ -351,6 +359,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"AChainAtMaxDepthTakesAChildOnceItsTopIsRemoved", checkLineageAfterRemoval[TX]},
 		{"TenantBudgetKeepsItsPeriodEnd", checkPeriodEnd[TX]},
 		{"ACallScopedToAnotherTenantIsRefused", checkScopeMismatch[TX]},
+		{"AReadOnlyScopeWritesNothing", checkReadOnlyScope[TX]},
 		{"EraseTenantUsageDropsEveryRowOfTheTenant", checkEraseTenantUsage[TX]},
 		{"SumChargesGroupsAndPagesTheLedger", checkSumCharges[TX]},
 		{"SumChargesCutsBucketsAtUTCBoundaries", checkSumChargeBuckets[TX]},
@@ -2851,6 +2860,102 @@ func checkScopeMismatch[TX any](t *testing.T, f fixture[TX]) {
 	}
 	if _, err := f.Usage.GetReservation(f.Ctx, held.ID); err != nil {
 		t.Errorf("the hold after a refused Settle: %v; want it open", err)
+	}
+	b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
+	if err != nil {
+		t.Fatalf("tenant budget: %v", err)
+	}
+	if b.Ceiling != (limes.BudgetCeiling{Max: tenantBudget}) {
+		t.Errorf("tenant ceiling after a refused SetTenantBudget = %+v, want %v", b.Ceiling, tenantBudget)
+	}
+}
+
+// A read-only scope reads Tenant's usage and writes none: every call that
+// writes, housekeeping included, is refused as out of scope rather than let
+// through as no rows, runs no onCharged, and moves no counter, hold or
+// ceiling.
+func checkReadOnlyScope[TX any](t *testing.T, f fixture[TX]) {
+	ro := f.ReadOnlyCtx
+	if ro == nil {
+		t.Skip("Env.ReadOnlyCtx not set")
+	}
+	charged, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: f.childSubject(), Amount: one}, nil)
+	if err != nil {
+		t.Fatalf("charge: %v", err)
+	}
+	held, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one})
+	if err != nil {
+		t.Fatalf("reserve: %v", err)
+	}
+	before, err := f.Usage.GetUsage(ro, f.child)
+	if err != nil {
+		t.Fatalf("GetUsage under the read-only scope: %v", err)
+	}
+	ran := false
+	onCharged := func(context.Context, TX) error {
+		ran = true
+		return nil
+	}
+	writes := map[string]func() error{
+		"Bump": func() error {
+			_, err := f.Usage.Bump(ro, limes.BumpRequest{Subject: f.childSubject()})
+			return err
+		},
+		"Charge": func() error {
+			_, err := f.Usage.Charge(ro, limes.ChargeRequest{Subject: f.childSubject(), Amount: one}, onCharged)
+			return err
+		},
+		"Reserve": func() error {
+			_, err := f.Usage.Reserve(ro, limes.ReserveRequest{Subject: f.childSubject(), Amount: one})
+			return err
+		},
+		"Settle": func() error {
+			_, err := f.Usage.Settle(ro, limes.SettleRequest{Subject: f.childSubject(), ReservationID: held.ID, Amount: one}, onCharged)
+			return err
+		},
+		"Release": func() error { return f.Usage.Release(ro, limes.ReleaseRequest{ReservationID: held.ID}) },
+		"Refund": func() error {
+			_, err := f.Usage.Refund(ro, limes.RefundRequest{ChargeID: charged.ChargeID, Remaining: true})
+			return err
+		},
+		"SetTenantBudget": func() error {
+			_, err := f.Usage.SetTenantBudget(ro, limes.SetTenantBudgetRequest{
+				TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Unlimited: true}, UnitCode: unit,
+			})
+			return err
+		},
+		"ReleaseExpired": func() error {
+			_, err := f.Usage.ReleaseExpired(ro, limes.ReleaseExpiredRequest{})
+			return err
+		},
+		"PurgeOrphans": func() error {
+			_, err := f.Usage.PurgeOrphans(ro, limes.PurgeOrphansRequest{})
+			return err
+		},
+		"DeleteUsage": func() error { return f.Usage.DeleteUsage(ro, limes.DeleteUsageRequest{CapabilityID: f.child}) },
+	}
+	if eraser, ok := f.Usage.(limes.TenantUsageEraser); ok {
+		writes["EraseTenantUsage"] = func() error {
+			return eraser.EraseTenantUsage(ro, limes.EraseTenantUsageRequest{TenantID: f.Tenant})
+		}
+	}
+	for name, write := range writes {
+		if err := write(); !errors.Is(err, limes.ErrScopeMismatch) {
+			t.Errorf("%s under the read-only scope: err = %v, want ErrScopeMismatch", name, err)
+		}
+	}
+	if ran {
+		t.Error("a write under the read-only scope ran onCharged")
+	}
+	after, err := f.Usage.GetUsage(f.Ctx, f.child)
+	if err != nil {
+		t.Fatalf("usage: %v", err)
+	}
+	if !reflect.DeepEqual(after, before) {
+		t.Errorf("usage after the refused calls = %+v, want %+v", after, before)
+	}
+	if _, err := f.Usage.GetReservation(f.Ctx, held.ID); err != nil {
+		t.Errorf("the hold after a refused Settle or Release: %v; want it open", err)
 	}
 	b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
 	if err != nil {
