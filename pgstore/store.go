@@ -153,7 +153,7 @@ WHERE c.id = $1`
 // GetRecord reads back the capability, who issued it and its own revocation.
 func (s *Store) GetRecord(ctx context.Context, id uuid.UUID) (limes.Record, error) {
 	var rec limes.Record
-	err := s.inTx(ctx, func(tx pgx.Tx) error {
+	err := s.inReadTx(ctx, func(tx pgx.Tx) error {
 		var capability, issuedBy []byte
 		var revokedAt *time.Time
 		var note, actor *string
@@ -320,7 +320,7 @@ func (s *Store) ListByPrincipal(ctx context.Context, req limes.ListByPrincipalRe
 	}
 	limit := limes.PageLimit(req.Limit)
 	out := []limes.Capability{}
-	err := s.inTenantTx(ctx, req.TenantID, func(tx pgx.Tx) error {
+	err := s.inTenantReadTx(ctx, req.TenantID, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, sqlListByPrincipal,
 			req.TenantID, string(req.PrincipalType), req.Subject,
 			req.IncludeExpired, s.clock(), req.IncludeRevoked, after, limit+1)
@@ -395,7 +395,7 @@ func (s *Store) RevokeBiscuit(ctx context.Context, req limes.RevokeBiscuitReques
 // GetBiscuitRevocation reads back what RevokeBiscuit wrote for revocationID.
 func (s *Store) GetBiscuitRevocation(ctx context.Context, revocationID []byte) (limes.BiscuitRevocation, error) {
 	r := limes.BiscuitRevocation{RevocationID: revocationID}
-	err := s.inTx(ctx, func(tx pgx.Tx) error {
+	err := s.inReadTx(ctx, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, sqlGetBiscuitRevocation, revocationID).Scan(&r.CapabilityID, &r.RevokedAt, &r.Note, &r.Actor)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
