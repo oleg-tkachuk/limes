@@ -94,15 +94,19 @@ jobs:
       # The toolchain directive in go.mod decides the Go, so govulncheck checks
       # the standard library this module is built with.
       - name: Set up Go
+        id: go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           # The cache below replaces setup-go's, which only main should write.
           cache: false
 
-      # Refreshed by every push to main (the key carries the commit), and
-      # restored by a pull request from the newest main entry. Only main
-      # writes, so a pull request cannot seed what main builds from.
+      # Keyed by what decides the cache's contents — the Go, the linter and
+      # every module's go.sum — not by the commit: the dependencies and the
+      # standard library are most of the build, and they change with those.
+      # main writes a new entry only when the key changes, and a pull request
+      # restores main's, so a pull request cannot seed what main builds from.
+      # A key with the commit wrote ~2 GiB on every merge and kept four.
       - name: Restore the Go caches
         id: go-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -111,10 +115,18 @@ jobs:
             ~/.cache/go-build
             ~/go/pkg/mod
             ~/.cache/golangci-lint
-          key: go-${{ runner.os }}-verify-${{ hashFiles('go.sum', 'tools/go.sum', 'tools/yq/go.sum', 'redisreplay/go.sum', 'pgstore/go.sum') }}-${{ github.sha }}
+          key: go-${{ runner.os }}-verify-${{ steps.go.outputs.go-version }}-${{ env.GOLANGCI_LINT_VERSION }}-${{ hashFiles('go.sum', 'tools/go.sum', 'tools/yq/go.sum', 'redisreplay/go.sum', 'pgstore/go.sum') }}
           restore-keys: |
-            go-${{ runner.os }}-verify-${{ hashFiles('go.sum', 'tools/go.sum', 'tools/yq/go.sum', 'redisreplay/go.sum', 'pgstore/go.sum') }}-
-            go-${{ runner.os }}-verify-
+            go-${{ runner.os }}-verify-${{ steps.go.outputs.go-version }}-${{ env.GOLANGCI_LINT_VERSION }}-
+            go-${{ runner.os }}-verify-${{ steps.go.outputs.go-version }}-
+
+      # A build cache entry this run uses is touched by go once it is an hour
+      # old, so anything not newer than two hours before the run is one the
+      # run did not use; the trim before the save drops those. Were go to
+      # touch less often, the trim would drop entries it used, a slower next
+      # run, never a wrong one.
+      - name: Mark the run's start for the cache trim
+        run: touch -d '2 hours ago' "$RUNNER_TEMP/go-cache-mark"
 
       - name: Set up golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
@@ -147,8 +159,12 @@ jobs:
       - name: task verify-all
         run: task --yes verify-all
 
+      - name: Trim the build cache to what this run used
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true'
+        run: find ~/.cache/go-build -type f ! -newer "$RUNNER_TEMP/go-cache-mark" -delete
+
       - name: Save the Go caches
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
