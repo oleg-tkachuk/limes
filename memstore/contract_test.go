@@ -31,9 +31,12 @@ func TestMeterContract(t *testing.T) {
 		start := time.Now()
 		var offset atomic.Int64 // how far Advance has moved the clock
 		now := func() time.Time { return start.Add(time.Duration(offset.Load())) }
+		usage := mustUsage(t, UsageStoreConfig[struct{}]{Records: records, Now: now})
 		return metertest.Env[struct{}]{
 			Ctx:              context.Background(),
-			Usage:            mustUsage(t, UsageStoreConfig[struct{}]{Records: records, Now: now}),
+			Usage:            usage,
+			Ledger:           NewLedger(usage),
+			Now:              now,
 			Tenant:           tenant,
 			Advance:          func(d time.Duration) { offset.Add(int64(d)) },
 			DeleteCapability: removeRecord(records),

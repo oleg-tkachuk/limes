@@ -605,7 +605,8 @@ suites check that a call for `Tenant` under another tenant's context returns
 Without them the checks that need a second tenant use a random id and `Ctx`.
 `DeleteCapability` removes a record as `Store.Purge` would, for the
 `PurgeOrphans` checks; some remove an ancestor whose children stay, so a store
-whose records refer to their parent unhooks the children first. `storetest.Env` takes the same `NewTenant`,
+whose records refer to their parent unhooks the children first. `Ledger` and
+`Now` (the store's clock) turn on the checks of a `LedgerReader`. `storetest.Env` takes the same `NewTenant`,
 `TenantCtx` and `Advance`, so one setup can serve both suites, plus `Now` (the
 store's clock, for the checks at an expiry's exact instant) and
 `DeleteTenant` (moves a tenant to the trash, for the `ErrUnknownTenant` and
@@ -731,6 +732,15 @@ Elsewhere, implement these and you are done:
 | `KeyResolver` | Public verification keys | No |
 | `dpop.ReplayCache` | DPoP proof ids seen, per key, each counted against its holder: `Seen(ctx, dpop.ReplayEntry)` reports a holder past its share as seen, and returns an error when its store cannot answer — an outage, not a refused proof (only for key-bound tokens; `dpop.MemoryReplayCache` ships for one process — behind several replicas, the `redisreplay` module ships one over Redis, or implement it over another shared store) | No |
 | `dpop.Nonces` | Server-provided DPoP nonces (optional; `dpop.HMACNonces` ships and needs no store) | No |
+
+To bill or report from the charges ledger, read it through a
+`LedgerReader` rather than a store's tables: `SumCharges` sums a tenant's
+charges over a period — whole, or by UTC hour, day or month — grouped by unit
+and, as asked, by operation, actor or capability, the largest first within
+each bucket, so the first page of `Limit` rows is the top `Limit`. A refund
+counts with the charge it returns, so a closed period's sums still move.
+`memstore.NewLedger` reads a `memstore` ledger; `metertest` checks a reader
+its `Env.Ledger` names.
 
 To remove a tenant, a store may implement `TenantRecordEraser` and
 `TenantUsageEraser` (optional; `storetest` and `metertest` check them when
