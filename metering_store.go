@@ -21,7 +21,7 @@ type meteringStore[TX any] struct {
 // another, and carry no tenant unless WithTenantAttribute asks for it.
 //
 // The result implements every interface of this package that inner does —
-// today the one optional interface, CopyUsageReader — so wrapping a store
+// the optional CopyUsageReader and TenantUsageEraser — so wrapping a store
 // never hides what it can do. A decorator forwards a fixed list of optional
 // interfaces, and a test fails when the list misses one the store has.
 func Instrument[TX any](inner UsageStore[TX], opts ...InstrumentOption) (UsageStore[TX], error) {
@@ -37,10 +37,44 @@ func Instrument[TX any](inner UsageStore[TX], opts ...InstrumentOption) (UsageSt
 		return nil, err
 	}
 	m := &meteringStore[TX]{inner: inner, in: in}
-	if reader, ok := inner.(CopyUsageReader); ok {
+	reader, reads := inner.(CopyUsageReader)
+	eraser, erases := inner.(TenantUsageEraser)
+	switch {
+	case reads && erases:
+		return &meteringCopyErasingStore[TX]{
+			meteringCopyStore: &meteringCopyStore[TX]{meteringStore: m, copies: reader},
+			tenantUsageEraser: tenantUsageEraser{eraser},
+		}, nil
+	case reads:
 		return &meteringCopyStore[TX]{meteringStore: m, copies: reader}, nil
+	case erases:
+		return &meteringErasingStore[TX]{meteringStore: m, tenantUsageEraser: tenantUsageEraser{eraser}}, nil
 	}
 	return m, nil
+}
+
+// tenantUsageEraser forwards EraseTenantUsage. Erasing moves no counter a
+// metric follows, so it emits none.
+type tenantUsageEraser struct {
+	eraser TenantUsageEraser
+}
+
+func (e tenantUsageEraser) EraseTenantUsage(ctx context.Context, req EraseTenantUsageRequest) error {
+	return e.eraser.EraseTenantUsage(ctx, req)
+}
+
+// meteringErasingStore is meteringStore over a store that also erases a
+// tenant's usage.
+type meteringErasingStore[TX any] struct {
+	*meteringStore[TX]
+	tenantUsageEraser
+}
+
+// meteringCopyErasingStore is meteringCopyStore over a store that also
+// erases a tenant's usage.
+type meteringCopyErasingStore[TX any] struct {
+	*meteringCopyStore[TX]
+	tenantUsageEraser
 }
 
 // meteringCopyStore is meteringStore over a store that also reads Biscuit

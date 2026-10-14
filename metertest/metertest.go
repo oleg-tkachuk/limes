@@ -335,6 +335,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"AChainAtMaxDepthTakesAChildOnceItsTopIsRemoved", checkLineageAfterRemoval[TX]},
 		{"TenantBudgetKeepsItsPeriodEnd", checkPeriodEnd[TX]},
 		{"ACallScopedToAnotherTenantIsRefused", checkScopeMismatch[TX]},
+		{"EraseTenantUsageDropsEveryRowOfTheTenant", checkEraseTenantUsage[TX]},
 		{"ResetSpendAloneRollsThePeriodStart", checkPeriodStart[TX]},
 		{"TheZeroSubjectIsRefused", checkZeroSubject[TX]},
 		{"AnAncestorRequestCeilingBoundsBump", checkAncestorRequests[TX]},
@@ -2835,5 +2836,88 @@ func checkScopeMismatch[TX any](t *testing.T, f fixture[TX]) {
 	}
 	if b.Ceiling != (limes.BudgetCeiling{Max: tenantBudget}) {
 		t.Errorf("tenant ceiling after a refused SetTenantBudget = %+v, want %v", b.Ceiling, tenantBudget)
+	}
+}
+
+// Erasing a tenant's usage drops its counters, holds, copies' counters,
+// charges and aggregate, and no other tenant's.
+func checkEraseTenantUsage[TX any](t *testing.T, f fixture[TX]) {
+	eraser, ok := f.Usage.(limes.TenantUsageEraser)
+	if !ok {
+		t.Skip("the UsageStore does not implement limes.TenantUsageEraser")
+	}
+	other, err := f.newTenant()
+	if err != nil {
+		t.Fatalf("NewTenant: %v", err)
+	}
+	theirCap, err := f.NewCapability(CapabilitySpec{Tenant: other, Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget})
+	if err != nil {
+		t.Fatalf("capability of another tenant: %v", err)
+	}
+	theirCtx := f.tenantCtx(other)
+	if _, err := f.Usage.SetTenantBudget(theirCtx, limes.SetTenantBudgetRequest{
+		TenantID: other, Ceiling: limes.BudgetCeiling{Unlimited: true}, UnitCode: unit,
+	}); err != nil {
+		t.Fatalf("budget of another tenant: %v", err)
+	}
+	theirSubject := newSubject(subjectSpec{capID: theirCap, tenant: other})
+	theirCharge, err := f.Usage.Charge(theirCtx, limes.ChargeRequest{Subject: theirSubject, Amount: one}, nil)
+	if err != nil {
+		t.Fatalf("charge of another tenant: %v", err)
+	}
+	copyID := []byte("erased-tenant-copy")
+	mine := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget),
+		copies: []limes.CopyCeiling{{RevocationID: copyID, Budget: &limes.BudgetCeiling{Max: childBudget}}}})
+	charged, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: mine, Amount: one, ExternalRef: "erased"}, nil)
+	if err != nil {
+		t.Fatalf("charge: %v", err)
+	}
+	held, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one})
+	if err != nil {
+		t.Fatalf("reserve: %v", err)
+	}
+	req := limes.EraseTenantUsageRequest{TenantID: f.Tenant}
+	if f.ScopesTenants {
+		if err := eraser.EraseTenantUsage(theirCtx, req); !errors.Is(err, limes.ErrScopeMismatch) {
+			t.Errorf("EraseTenantUsage under another tenant's context: err = %v, want ErrScopeMismatch", err)
+		}
+	}
+	if err := eraser.EraseTenantUsage(f.Ctx, limes.EraseTenantUsageRequest{}); !errors.Is(err, limes.ErrInvalidRequest) {
+		t.Errorf("EraseTenantUsage naming no tenant: err = %v, want ErrInvalidRequest", err)
+	}
+	if err := eraser.EraseTenantUsage(f.Ctx, req); err != nil {
+		t.Fatalf("EraseTenantUsage: %v", err)
+	}
+	for _, id := range []uuid.UUID{f.root, f.child} {
+		if u, err := f.Usage.GetUsage(f.Ctx, id); !errors.Is(err, limes.ErrUsageNotFound) {
+			t.Errorf("usage of %s after the erase = %+v, %v; want ErrUsageNotFound", id, u, err)
+		}
+	}
+	if _, err := f.Usage.GetCharge(f.Ctx, charged.ChargeID); !errors.Is(err, limes.ErrChargeNotFound) {
+		t.Errorf("GetCharge after the erase: err = %v, want ErrChargeNotFound", err)
+	}
+	if _, err := f.Usage.ChargeByRef(f.Ctx, limes.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: "erased"}); !errors.Is(err, limes.ErrChargeNotFound) {
+		t.Errorf("ChargeByRef after the erase: err = %v, want ErrChargeNotFound", err)
+	}
+	if _, err := f.Usage.GetReservation(f.Ctx, held.ID); !errors.Is(err, limes.ErrReservationNotFound) {
+		t.Errorf("GetReservation after the erase: err = %v, want ErrReservationNotFound", err)
+	}
+	if _, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant); !errors.Is(err, limes.ErrTenantBudgetNotFound) {
+		t.Errorf("GetTenantBudget after the erase: err = %v, want ErrTenantBudgetNotFound", err)
+	}
+	if copies, ok := f.Usage.(limes.CopyUsageReader); ok {
+		got, err := copies.CopyUsage(f.Ctx, limes.CopyUsageRequest{RevocationIDs: [][]byte{copyID}})
+		if err != nil || len(got.Copies) != 0 {
+			t.Errorf("CopyUsage after the erase = %+v, %v; want no copy", got, err)
+		}
+	}
+	if u, err := f.Usage.GetUsage(theirCtx, theirCap); err != nil || u.SpentAmount != one {
+		t.Errorf("another tenant's usage after the erase = %+v, %v; want %v spent", u, err, one)
+	}
+	if _, err := f.Usage.GetCharge(theirCtx, theirCharge.ChargeID); err != nil {
+		t.Errorf("another tenant's charge after the erase: %v", err)
+	}
+	if b, err := f.Usage.GetTenantBudget(theirCtx, other); err != nil || b.SpentAmount != one {
+		t.Errorf("another tenant's budget after the erase = %+v, %v; want %v spent", b, err, one)
 	}
 }
