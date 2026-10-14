@@ -97,6 +97,13 @@ type Env[TX any] struct {
 	// ListCtx is the context ListTenantBudgets runs under: a read across
 	// tenants. Optional: without it, Ctx.
 	ListCtx context.Context
+	// Ledger reads the store's charges ledger. Optional: without it, the
+	// checks of limes.LedgerReader are skipped.
+	Ledger limes.LedgerReader
+	// Now reads the store's clock, which stands still while a check runs
+	// but for Advance. Optional: without it, the checks of the ledger's
+	// time buckets are skipped.
+	Now func() time.Time
 	// ScopesTenants reports that the store keeps each tenant's rows apart
 	// by the call's context, TenantCtx giving each tenant's: a call whose
 	// request names one tenant, made under another tenant's context, is
@@ -342,6 +349,8 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"TenantBudgetKeepsItsPeriodEnd", checkPeriodEnd[TX]},
 		{"ACallScopedToAnotherTenantIsRefused", checkScopeMismatch[TX]},
 		{"EraseTenantUsageDropsEveryRowOfTheTenant", checkEraseTenantUsage[TX]},
+		{"SumChargesGroupsAndPagesTheLedger", checkSumCharges[TX]},
+		{"SumChargesCutsBucketsAtUTCBoundaries", checkSumChargeBuckets[TX]},
 		{"ResetSpendAloneRollsThePeriodStart", checkPeriodStart[TX]},
 		{"TheZeroSubjectIsRefused", checkZeroSubject[TX]},
 		{"AnAncestorRequestCeilingBoundsBump", checkAncestorRequests[TX]},
@@ -2928,4 +2937,173 @@ func checkEraseTenantUsage[TX any](t *testing.T, f fixture[TX]) {
 	if b, err := f.Usage.GetTenantBudget(theirCtx, other); err != nil || b.SpentAmount != one {
 		t.Errorf("another tenant's budget after the erase = %+v, %v; want %v spent", b, err, one)
 	}
+}
+
+// sumWindow is how far either side of a check's clock SumCharges looks when
+// the Env reads no clock: past any store's offset from the wall clock.
+const sumWindow = 24 * time.Hour
+
+// sumPeriod is a period holding every charge a check takes.
+func (f fixture[TX]) sumPeriod() (from, to time.Time) {
+	now := time.Now()
+	if f.Now != nil {
+		now = f.Now()
+	}
+	return now.Add(-sumWindow), now.Add(sumWindow)
+}
+
+// SumCharges sums Tenant's charges alone, grouped as asked, the largest
+// first, a refund in its charge's group, and pages them.
+func checkSumCharges[TX any](t *testing.T, f fixture[TX]) {
+	if f.Ledger == nil {
+		t.Skip("Env.Ledger not set")
+	}
+	other, err := f.newTenant()
+	if err != nil {
+		t.Fatalf("NewTenant: %v", err)
+	}
+	theirCap, err := f.NewCapability(CapabilitySpec{Tenant: other, Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget})
+	if err != nil {
+		t.Fatalf("capability of another tenant: %v", err)
+	}
+	if _, err := f.Usage.Charge(f.tenantCtx(other), limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: theirCap, tenant: other}), Amount: 7 * one}, nil); err != nil {
+		t.Fatalf("charge of another tenant: %v", err)
+	}
+	root := newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, budget: budgetOf(rootBudget)})
+	for _, c := range []limes.ChargeRequest{
+		{Amount: 2 * one, Op: limes.OpGet, Actor: "a"},
+		{Amount: 3 * one, Op: limes.OpPut, Actor: "b"},
+		{Subject: root, Amount: 6 * one, Op: limes.OpGet, Actor: "a"},
+	} {
+		r, err := f.charge(c, nil)
+		if err != nil {
+			t.Fatalf("charge: %v", err)
+		}
+		if c.Op == limes.OpPut {
+			if _, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: r.ChargeID, Amount: one}); err != nil {
+				t.Fatalf("refund: %v", err)
+			}
+		}
+	}
+	from, to := f.sumPeriod()
+	sums := func(req limes.SumChargesRequest) []limes.ChargeSum {
+		t.Helper()
+		req.TenantID, req.From, req.To = f.Tenant, from, to
+		page, err := f.Ledger.SumCharges(f.Ctx, req)
+		if err != nil {
+			t.Fatalf("SumCharges(%+v): %v", req, err)
+		}
+		return page.Items
+	}
+	for name, tc := range map[string]struct {
+		req  limes.SumChargesRequest
+		want []limes.ChargeSum
+	}{
+		"the whole period": {limes.SumChargesRequest{}, []limes.ChargeSum{
+			{UnitCode: unit, Charged: 11 * one, Refunded: one, Charges: 3},
+		}},
+		"by operation": {limes.SumChargesRequest{ByOp: true}, []limes.ChargeSum{
+			{UnitCode: unit, Op: limes.OpGet, Charged: 8 * one, Charges: 2},
+			{UnitCode: unit, Op: limes.OpPut, Charged: 3 * one, Refunded: one, Charges: 1},
+		}},
+		"by actor": {limes.SumChargesRequest{ByActor: true}, []limes.ChargeSum{
+			{UnitCode: unit, Actor: "a", Charged: 8 * one, Charges: 2},
+			{UnitCode: unit, Actor: "b", Charged: 3 * one, Refunded: one, Charges: 1},
+		}},
+		"by capability": {limes.SumChargesRequest{ByCapability: true}, []limes.ChargeSum{
+			{UnitCode: unit, CapabilityID: f.root, Charged: 6 * one, Charges: 1},
+			{UnitCode: unit, CapabilityID: f.child, Charged: 5 * one, Refunded: one, Charges: 2},
+		}},
+	} {
+		if got := sums(tc.req); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: SumCharges = %+v, want %+v", name, got, tc.want)
+		}
+	}
+	// The top one, then the rest after its cursor.
+	req := limes.SumChargesRequest{TenantID: f.Tenant, From: from, To: to, ByCapability: true, Limit: 1}
+	first, err := f.Ledger.SumCharges(f.Ctx, req)
+	if err != nil || len(first.Items) != 1 || first.Items[0].CapabilityID != f.root || first.Next == "" {
+		t.Fatalf("the first page of one = %+v, %v; want the root and a cursor", first, err)
+	}
+	req.Cursor = first.Next
+	second, err := f.Ledger.SumCharges(f.Ctx, req)
+	if err != nil || len(second.Items) != 1 || second.Items[0].CapabilityID != f.child || second.Next != "" {
+		t.Errorf("the page after it = %+v, %v; want the child, and the last page", second, err)
+	}
+	// A period that ends before the charges holds none of them.
+	if page, err := f.Ledger.SumCharges(f.Ctx, limes.SumChargesRequest{TenantID: f.Tenant, From: from, To: from.Add(time.Second)}); err != nil || len(page.Items) != 0 {
+		t.Errorf("SumCharges of a period before the charges = %+v, %v; want none", page, err)
+	}
+	for name, bad := range map[string]limes.SumChargesRequest{
+		"no tenant":         {From: from, To: to},
+		"an empty period":   {TenantID: f.Tenant, From: to, To: from},
+		"no period":         {TenantID: f.Tenant},
+		"an unknown bucket": {TenantID: f.Tenant, From: from, To: to, Bucket: limes.ChargeBucket(math.MaxUint8)},
+		"a negative limit":  {TenantID: f.Tenant, From: from, To: to, Limit: -1},
+		"a foreign cursor":  {TenantID: f.Tenant, From: from, To: to, Cursor: "not a cursor"},
+	} {
+		if _, err := f.Ledger.SumCharges(f.Ctx, bad); !errors.Is(err, limes.ErrInvalidRequest) {
+			t.Errorf("SumCharges with %s: err = %v, want ErrInvalidRequest", name, err)
+		}
+	}
+	if f.ScopesTenants {
+		if _, err := f.Ledger.SumCharges(f.tenantCtx(other), limes.SumChargesRequest{TenantID: f.Tenant, From: from, To: to}); !errors.Is(err, limes.ErrScopeMismatch) {
+			t.Errorf("SumCharges under another tenant's context: err = %v, want ErrScopeMismatch", err)
+		}
+	}
+}
+
+// Buckets are cut at UTC boundaries: a charge a microsecond — the finest a
+// timestamp column keeps — before midnight falls in that day and hour, and
+// one at midnight in the next.
+func checkSumChargeBuckets[TX any](t *testing.T, f fixture[TX]) {
+	if f.Ledger == nil || f.Now == nil || f.Advance == nil {
+		t.Skip("Env.Ledger, Now or Advance not set")
+	}
+	const tick = time.Microsecond
+	from := f.Now()
+	y, m, d := from.UTC().Date()
+	midnight := time.Date(y, m, d+1, 0, 0, 0, 0, time.UTC)
+	f.Advance(midnight.Sub(from) - tick)
+	if _, err := f.charge(limes.ChargeRequest{Amount: 2 * one}, nil); err != nil {
+		t.Fatalf("charge before midnight: %v", err)
+	}
+	f.Advance(tick)
+	if _, err := f.charge(limes.ChargeRequest{Amount: 3 * one}, nil); err != nil {
+		t.Fatalf("charge at midnight: %v", err)
+	}
+	to := midnight.Add(time.Second)
+	for b, before := range map[limes.ChargeBucket]time.Time{
+		limes.ChargeBucketHour: midnight.Add(-time.Hour),
+		limes.ChargeBucketDay:  midnight.AddDate(0, 0, -1),
+	} {
+		page, err := f.Ledger.SumCharges(f.Ctx, limes.SumChargesRequest{TenantID: f.Tenant, From: from, To: to, Bucket: b})
+		want := []limes.ChargeSum{
+			{BucketStart: before, UnitCode: unit, Charged: 2 * one, Charges: 1},
+			{BucketStart: midnight, UnitCode: unit, Charged: 3 * one, Charges: 1},
+		}
+		if err != nil || !sameSums(page.Items, want) {
+			t.Errorf("SumCharges by %s = %+v, %v; want %+v", b, page.Items, err, want)
+		}
+	}
+	page, err := f.Ledger.SumCharges(f.Ctx, limes.SumChargesRequest{TenantID: f.Tenant, From: from, To: to, Bucket: limes.ChargeBucketMonth})
+	months := map[time.Time]bool{}
+	for _, s := range page.Items {
+		months[s.BucketStart] = true
+	}
+	want := map[time.Time]bool{
+		time.Date(y, m, 1, 0, 0, 0, 0, time.UTC):                              true,
+		time.Date(midnight.Year(), midnight.Month(), 1, 0, 0, 0, 0, time.UTC): true,
+	}
+	if err != nil || !reflect.DeepEqual(months, want) {
+		t.Errorf("SumCharges by month = %+v, %v; want the months %v", page.Items, err, want)
+	}
+}
+
+// sameSums compares sums, their bucket starts as instants.
+func sameSums(got, want []limes.ChargeSum) bool {
+	return slices.EqualFunc(got, want, func(a, b limes.ChargeSum) bool {
+		a.BucketStart, b.BucketStart = a.BucketStart.UTC(), b.BucketStart.UTC()
+		return reflect.DeepEqual(a, b)
+	})
 }
