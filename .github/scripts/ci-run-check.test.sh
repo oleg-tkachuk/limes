@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # ci-run-check.test.sh — ci-run-check.sh releases only for a passed CI run of
 # ci.yaml on a push to main for the dispatched sha, and its list of required
-# jobs is the one ci.yaml's dispatch-release waits for.
+# jobs is the one ci.yaml's required check stands for, which dispatch-release
+# waits for.
 #
 # A fake gh stands in for the API: it answers the run from FAKE_RUN and the
 # jobs, as the real gh's --jq would print them, from FAKE_JOBS.
@@ -71,11 +72,17 @@ check "another repository" fail "$(run_json .github/workflows/ci.yaml push main 
 check "no run id" fail "$good" "$(jobs_tsv success)" "" "$SHA"
 check "no sha" fail "$good" "$(jobs_tsv success)" "$RUN_ID" ""
 
-# The required jobs are the names of the jobs dispatch-release needs.
+# The required jobs are the names of the jobs the required check needs, and
+# dispatch-release waits for that check.
+yq() { go tool -modfile="$root/tools/yq/go.mod" yq "$@" "$root/.github/workflows/ci.yaml"; }
 want="$("$script" --print-required | sort)"
-got="$(go tool -modfile="$root/tools/yq/go.mod" yq '.jobs.dispatch-release.needs[] as $id | .jobs[$id].name' "$root/.github/workflows/ci.yaml" | sort)"
+got="$(yq '.jobs.checks.needs[] as $id | .jobs[$id].name' | sort)"
 if [ "$want" != "$got" ]; then
-    printf 'FAIL REQUIRED_JOBS differs from dispatch-release.needs:\n%s\n' "$(diff <(echo "$want") <(echo "$got") || true)"
+    printf 'FAIL REQUIRED_JOBS differs from checks.needs:\n%s\n' "$(diff <(echo "$want") <(echo "$got") || true)"
+    failures=$((failures + 1))
+fi
+if ! yq '.jobs.dispatch-release.needs[]' | grep -qx checks; then
+    echo "FAIL dispatch-release does not wait for the required check"
     failures=$((failures + 1))
 fi
 

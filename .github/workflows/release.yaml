@@ -179,8 +179,21 @@ jobs:
           RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes-redisreplay.md
         run: ./.github/scripts/publish-release.sh new "$RUNNER_TEMP/tags-before" "$REDISREPLAY_MODULE/"
 
-      - name: Compute and push the tag of pgstore
+      # pgstore is released only once its tests against the limes its go.mod
+      # requires passed in the dispatching run: a change to limes that pgstore
+      # must follow lands with pgstore, and pgstore waits here, released with
+      # everything since, until Renovate raises its requirement to the limes
+      # this run released. See .github/scripts/ci-job-passed.sh.
+      - name: Require pgstore's tests against the released limes
+        id: pgstore-gate
         if: steps.catchup.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_RUN: ${{ github.event.client_payload.ci_run_id }}
+        run: ./.github/scripts/ci-job-passed.sh "$CI_RUN" "PostgreSQL store, released limes" >>"$GITHUB_OUTPUT"
+
+      - name: Compute and push the tag of pgstore
+        if: steps.catchup.outputs.release == 'true' && steps.pgstore-gate.outputs.passed == 'true'
         working-directory: .github/release
         run: npx semantic-release --no-ci
         env:
@@ -189,7 +202,7 @@ jobs:
           RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes-pgstore.md
 
       - name: Publish the release of pgstore
-        if: steps.catchup.outputs.release == 'true'
+        if: steps.catchup.outputs.release == 'true' && steps.pgstore-gate.outputs.passed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes-pgstore.md

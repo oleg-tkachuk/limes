@@ -29,27 +29,20 @@ Docker, and run apart:
 task test:pgstore
 ```
 
-CI runs them twice: against the limes of the same commit, through the replace
-in `pgstore/go.mod`, and against the limes that `go.mod` requires, which is
-what a consumer's build resolves (`task test:pgstore:pinned`). A pgstore change
-that needs something new in limes therefore lands after the limes release that
-has it, with `go.mod` requiring that release.
+CI runs them twice. Against the limes of the same commit, through the replace
+in `pgstore/go.mod`, they are part of the required check: limes may not break
+pgstore. Against the limes that `go.mod` requires, which is what a consumer's
+build resolves (`task test:pgstore:pinned`, the job **PostgreSQL store,
+released limes**), they gate pgstore's release instead: a run in which they
+fail releases limes and redisreplay, and holds pgstore back.
 
-A limes change that pgstore must follow at once cannot take that order: one
-that adds a value pgstore names exhaustively, such as a `ChargeBucket`, fails
-pgstore's tests in the same commit, and CI dispatches no release while any job
-fails. It lands in three steps:
-
-1. The limes pull request, merged by an owner with pgstore's job failing:
-   that failure is the check saying pgstore must follow.
-2. The pgstore pull request, with `go.mod` requiring the pseudo-version of the
-   merge commit of step 1 on `main` (`go list -m github.com/oleg-tkachuk/limes@<sha>`
-   prints it). Both jobs pass, and its merge releases limes and pgstore.
-3. `build(pgstore): require limes vX.Y.Z`, once that limes tag exists.
-
-Require only a commit on `main`: a pull request's own commits are rewritten
-when it is rebased, and a pseudo-version of one would name a commit `main`
-never holds.
+So a limes change that pgstore must follow — a value pgstore names
+exhaustively, such as a `ChargeBucket`, or an API pgstore calls — lands with
+pgstore in one pull request. Its released-limes job fails, as nothing released
+has the change yet; the merge releases limes, and Renovate raises pgstore's
+requirement to that release at once. That pull request passes the job, and its
+merge releases pgstore with every change it held. A pgstore change that needs
+a limes already released raises the requirement in its own `go.mod`.
 
 `redisreplay`'s contract against a real Redis runs apart too, at the address
 `LIMES_REDIS_ADDR` names (`host:port`); miniredis runs another Lua, so this is
