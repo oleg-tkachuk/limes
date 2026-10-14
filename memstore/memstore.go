@@ -13,6 +13,10 @@
 //     no implementation in the module could show that a failed side effect
 //     leaves counters unmutated.
 //
+// NewLedger reads a usage store's ledger as a limes.LedgerReader, and the
+// stores erase a tenant as limes.TenantRecordEraser and
+// limes.TenantUsageEraser.
+//
 // It is NOT a production store: each store keeps its maps behind one mutex,
 // which the usage store holds while onCharged runs, nothing survives a restart, and the charges
 // ledger is kept whole for as long as the store lives.

@@ -14,7 +14,9 @@
 // its revocation entries once it has been expired long enough — in batches,
 // never before its children and never inside a verifier's leeway — listing
 // pages in a fixed order and keeps tenants apart, and a Biscuit copy revokes
-// on its own. A check that does not finish within Env.CheckTimeout stops the
+// on its own. When the store implements limes.TenantRecordEraser, erasing a
+// tenant keeps what a verifier still needs; when Env.ScopesTenants is set, a
+// call under another tenant's scope is refused with limes.ErrScopeMismatch. A check that does not finish within Env.CheckTimeout stops the
 // test binary with every goroutine's stack, naming the check.
 package storetest
 

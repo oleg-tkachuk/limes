@@ -18,7 +18,10 @@
 // counts, copy counters and CopyUsage, units, counters that never pass
 // MaxNanos, a capability not on record, DeleteUsage and PurgeOrphans, the
 // tenant aggregate, its version guard and its listing, and the validation of
-// the request. They need a real ledger, not a fake.
+// the request; and, where the Env enables them, EraseTenantUsage,
+// limes.ErrScopeMismatch under another tenant's scope, and a LedgerReader's
+// sums, their order, paging and UTC buckets. They need a real ledger, not a
+// fake.
 //
 // Several checks call the store from many goroutines at once. Give the Env a
 // connection pool of one or two connections: a call that takes a second

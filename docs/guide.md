@@ -216,9 +216,10 @@ prefix), and each child network must lie inside a parent network.
 To hand a child exactly the parent's caveats, say so with
 `InheritCaveats: true`; caveats without any `Ops` are rejected rather than
 silently replaced by the parent's. A parent that has expired (`ErrExpired`),
-that is revoked, itself or any ancestor (`ErrRevoked`), or that another issuer
-minted (`ErrInvalidRequest`: this issuer's store holds no record of it) cannot
-delegate.
+that is revoked, itself or any ancestor (`ErrRevoked`), or whose issuer is not
+this one (`ErrInvalidRequest`: its `iss` is not `IssuerConfig.IssuerName`)
+cannot delegate; neither can one read from a Biscuit copy, whose holder
+attenuates it instead.
 
 Narrowing bounds each child. The tree as a whole is bounded at use: every
 charge and request also counts against each ancestor, so a parent holding
@@ -397,7 +398,7 @@ cannot be re-wrapped in a fresh Biscuit.
 ```go
 receipt, err := usage.Charge(ctx, limes.ChargeRequest{
     Subject: granted.MeterSubject(),
-    Amount:  limes.MustParseAmount("0.35"), Op: "search", Actor: "orchestrator",
+    Amount:  limes.MustParseAmount("0.35"), Op: limes.OpSearch, Actor: "orchestrator",
 }, nil)
 if errors.Is(err, limes.ErrBudgetExceeded) {
     // rejected at the auth boundary — before your business logic ran
@@ -433,7 +434,7 @@ the charge's tenant and unit.
 Every counter counts in one unit. A charge or reservation in another unit than
 the capability, an ancestor or the tenant already counts in is
 `ErrUnitCodeMismatch`, never a sum of two currencies; an empty `UnitCode`
-means USD. The tenant aggregate counts from its first charge or reservation,
+means `DefaultUnitCode`, USD. The tenant aggregate counts from its first charge or reservation,
 whether or not a ceiling is set: `SetTenantBudget` later measures the new
 ceiling against that spend and those holds, and refuses a new `UnitCode`
 while anything is held in the old one, or spent in it unless `ResetSpend`
@@ -450,8 +451,8 @@ integer arithmetic, exact however many charges they take: a tenth and two
 tenths fit under a ceiling of three tenths, and ten tenths make one. Nothing
 on your side needs rounding, summing apart or correcting.
 
-- **Writing one.** `ParseAmount("0.35")` reads a plain decimal exactly — no
-  sign, so `-0` is refused too — and refuses anything finer than a nano
+- **Writing one.** `ParseAmount("0.35")` reads a decimal exactly — digits, an
+  optional fraction and an optional exponent (`1e-7`), no sign, so `-0` is refused too — and refuses anything finer than a nano
   rather than round it; `MustParseAmount` is the
   same for a literal in your code. A price that reaches you as a `float64`
   goes through `AmountFromFloat`, which rounds once, to the nearest nano.
@@ -461,8 +462,8 @@ on your side needs rounding, summing apart or correcting.
   it is `ErrInvalidAmount`, which matches `ErrInvalidRequest`; a charge of a
   valid amount that would take a counter past it is `ErrCounterOverflow`.
 - **Units.** `UnitCode` is any ISO 4217 code in upper case (`IsUnitCode`);
-  XXX, ISO 4217's code for "no currency", is the one for a budget that is not
-  money.
+  XXX (`AbstractUnitCode`), ISO 4217's code for "no currency", is the one for
+  a budget that is not money.
 
 In a token the budget is a decimal in a JSON string (`"max_budget": "1.5"`),
 so a reader whose numbers are float64 — JavaScript's `JSON.parse` among them —
@@ -550,7 +551,7 @@ next cost before it is incurred. Keep `OverrunReject` for anything you can
 still decline.
 
 A reporter with no token in hand takes the subject from the capability's
-stored record (`StoredMeterSubject`, which reads it from the `Store`), as the meter
+stored record (`StoredMeterSubject`, which reads it through a `RecordReader`, as any `Store` is one), as the meter
 already reads every ancestor's ceiling. A price that is not known yet is not a price of zero: hold the estimate and
 settle when it is known, or let the hold lapse and count against the ceilings
 until `ReleaseExpired` runs.
@@ -610,7 +611,9 @@ whose records refer to their parent unhooks the children first. `Ledger` and
 `TenantCtx` and `Advance`, so one setup can serve both suites, plus `Now` (the
 store's clock, for the checks at an expiry's exact instant) and
 `DeleteTenant` (moves a tenant to the trash, for the `ErrUnknownTenant` and
-`ErrTenantDeleted` checks).
+`ErrTenantDeleted` checks). Both suites take `ScopesTenants` for a store that
+keeps tenants apart by the call's context: a call naming one tenant under
+another's scope must then be `ErrScopeMismatch`.
 
 The checks include charges racing one ceiling, so run them against the
 database itself: a store that reads a counter and writes it back outside one
@@ -627,7 +630,7 @@ two connections — and `dpop` and `jwks` run theirs against their shipped
 implementations.
 
 `Instrument` wraps a `UsageStore` and keeps every interface of `limes` the
-store implements — today the optional `CopyUsageReader`. A decorator of your
+store implements — the optional `CopyUsageReader` and `TenantUsageEraser`. A decorator of your
 own should do the same: assert each optional interface on the store it wraps
 and forward it, or a caller checking for it finds it gone.
 
@@ -650,13 +653,33 @@ each id then asks the store once, so batch a burst of signals into one
 `Clear`. Over `pgstore`, run a `pgstore.RevocationWatcher` beside each
 verifier: the schema notifies `pgstore.RevocationChannel` on every
 revocation, and the watcher clears the caches it is given on each
-notification and after each connection it opens.
+notification and after each connection it opens:
+
+```go
+w := pgstore.RevocationWatcher{
+    // A connection of the watcher's own: LISTEN holds it for as long as it runs.
+    Connect: func(ctx context.Context) (*pgx.Conn, error) {
+        c, err := pool.Acquire(ctx)
+        if err != nil {
+            return nil, err
+        }
+        return c.Hijack(), nil
+    },
+    Caches:  []pgstore.Clearer{revocations, biscuitRevocations},
+    OnError: func(err error) { log.Printf("revocation watcher: %v", err) },
+}
+go w.Run(ctx) // reconnects with backoff until ctx ends
+```
+
+A statement that writes no new revocation entry notifies nothing; a Biscuit
+copy's revocation notifies as a capability's does.
 Revoking a capability revokes everything delegated from it, with or
 without the flag: `IsRevoked` answers for the whole chain. `CascadeChildren`
 also writes a revocation entry per descendant, so the audit trail names each
 capability that was stopped. A chain is at most `MaxDelegationDepth` (64)
 ancestors deep: `Store.Insert` refuses a child past it as `ErrDelegationTooDeep`,
-writing nothing, so `Delegate` returns that error and no token; a store
+writing nothing, so `Delegate` returns that error and no token
+(`ErrDelegationTooDeep` matches `ErrRevoked`, and so answers as 401); a store
 answers a deeper chain, written before `Insert` refused one, with that error — read as revoked — rather
 than walk part of it and miss a revocation at its root.
 
@@ -699,8 +722,9 @@ records, _ := pgstore.NewStore(pgstore.Config{DB: pool})
 usage, _ := pgstore.NewUsageStore(pgstore.Config{DB: pool})
 // A call for one tenant; housekeeping takes pgstore.WithAllTenants(ctx),
 // and a read across tenants, ListTenantBudgets among them,
-// pgstore.WithAllTenantsReadOnly(ctx), which admits no write.
-err := records.Revoke(pgstore.WithTenant(ctx, tenant), limes.RevokeRequest{CapabilityID: id})
+// pgstore.WithAllTenantsReadOnly(ctx), which admits no write: one is
+// refused with ErrScopeMismatch before it begins.
+err = records.Revoke(pgstore.WithTenant(ctx, tenant), limes.RevokeRequest{CapabilityID: id})
 ```
 
 A role that does not own the tables sees only the rows of the tenant a call
@@ -712,7 +736,8 @@ tenant erasers and `Ledger.SumCharges` — under a
 scope that does not admit that tenant returns `ErrScopeMismatch`, never
 `ErrNotFound` or `ErrInvalidRequest`. A call that names only an id
 (`GetRecord`, `Revoke`, `Refund`, `Release`, `GetUsage`, `GetCharge`, …) cannot
-be checked so, and answers a row out of scope as not found.
+be checked so, and answers a row out of scope as not found — `Release`, being
+idempotent, as a no-op.
 `onCharged` runs on the store's own `pgx.Tx`. Every time it writes comes from
 `Config.Now`, never from the database's clock.
 
@@ -747,10 +772,16 @@ Elsewhere, implement these and you are done:
 
 To bill or report from the charges ledger, read it through a
 `LedgerReader` rather than a store's tables: `SumCharges` sums a tenant's
-charges over a period — whole, or by UTC hour, day, ISO week or month — grouped by unit
-and, as asked, by operation, actor or capability, the largest first within
-each bucket, so the first page of `Limit` rows is the top `Limit`. A refund
-counts with the charge it returns, so a closed period's sums still move.
+charges taken in [`From`, `To`), by the store's clock, grouped by unit and, as
+`SumChargesRequest` asks, by bucket — `ChargeBucketNone` for the period whole,
+or the UTC `ChargeBucketHour`, `Day`, `Week` (ISO, from Monday 00:00) or
+`Month` — and by operation, actor or capability. Buckets come in time order
+and, within each, the largest `Charged` first, ties by unit, operation, actor
+and capability, bytewise; so with `ChargeBucketNone` the first page of `Limit`
+rows is the top `Limit`. Each `ChargeSum` carries `Charged`, `Refunded` and
+`Charges`; the net is `Charged − Refunded`. A refund counts with the charge it
+returns, so a closed period's sums still move, and a sum past `MaxNanos` is
+`ErrCounterOverflow`.
 `memstore.NewLedger` and `pgstore.NewLedger` read their stores' ledgers, the
 latter scoped to the tenant as every other read; `metertest` checks a reader
 its `Env.Ledger` names.
@@ -765,7 +796,10 @@ it expires. `EraseTenantUsage` drops the tenant's counters, holds, charges
 and aggregate — its billing history, which does not come back. In
 `pgstore`, `Store.EraseTenant` does both in one transaction and runs a
 callback of yours in it, so your own rows of the tenant go with them or not
-at all.
+at all. `EraseTenantRequest.Note` and `Actor` go on each revocation entry it
+writes, and `EraseTenantResult` counts the capabilities `Revoked`, the records
+`Removed` and the records `Kept`, revoked, for `Purge`; a second erase revokes
+nothing the first did.
 
 Two obligations are easy to miss. `Store.IsRevoked` answers for the
 capability's whole delegation chain, and `Meter` applies every charge and
@@ -791,7 +825,8 @@ the second it is issued (a token's times are whole seconds), a `NotBefore` at
 or after the expiry, a malformed thumbprint, invalid caveats. Anything else they return is the store's or the
 signer's failure, not the caller's.
 
-Every input is a `…Request`, every list a `Page`, and every read names what
+Every write and every listing takes a `…Request`, a read by id takes the id,
+every list is a `Page`, and every read names what
 it reads (`GetRecord`, `GetUsage`, `GetTenantBudget`), so one type may implement `Store` and
 `UsageStore` together, or each apart as `memstore` does.
 
@@ -865,7 +900,10 @@ a verifier with no `DPoP` given a key-bound token (`ErrProofUnsupported`)
 included, is 500. A refusal for want of a nonce carries a fresh one in `DPoP-Nonce`. The
 body is `application/problem+json` with a type per kind of refusal and fixed
 text — the error's own message, which can name kids or stores, stays in your
-log. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
+log. `ReasonOf(err)` gives the refusal's stable `Reason` (`budget_exceeded`,
+`revoked`, …) for your own wire format, and `Reason.Permanent()` whether the
+same request with the same capability can ever succeed, so a caller knows to
+stop rather than retry. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
 
 ## Defaults
 
@@ -878,7 +916,7 @@ log. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
 | `VerifierConfig.AcceptTokenTypes` | `TokenTypeV4` |
 | `VerifierConfig.Realm` | `DefaultRealm`, `limes` |
 | `jwks.HandlerConfig.MaxAge` | `jwks.DefaultMaxAge`, 5 minutes; `HandlerConfig.Revalidate: true` for `max-age=0` |
-| `ListByPrincipalRequest.Limit` · `ListTenantBudgetsRequest.Limit` · `ListReservationsRequest.Limit` | `DefaultListLimit` 50, at most `MaxListLimit` 500 |
+| `ListByPrincipalRequest.Limit` · `ListTenantBudgetsRequest.Limit` · `ListReservationsRequest.Limit` · `SumChargesRequest.Limit` | `DefaultListLimit` 50, at most `MaxListLimit` 500 |
 | `PurgeRequest` · `ReleaseExpiredRequest` · `PurgeOrphansRequest` | `DefaultHousekeepingLimit` 1 000 a batch; `PurgeRequest.ExpiredFor` `MinPurgeRetention`, 6 minutes, and no less |
 | `MaxDelegationDepth` · `MaxBiscuitBlocks` | 64 ancestors · 32 attenuation blocks |
 | `CopyUsageRequest.RevocationIDs` | at most `MaxCopyUsageIDs`, 500 |
@@ -890,6 +928,8 @@ log. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
 | `redisreplay.Config` | `redisreplay.DefaultKeyPrefix`, `limes:dpop:replay:`; `dpop.DefaultReplayEntriesPerHolder`, 1 000, per capability |
 | `dpop.HMACNoncesConfig` | `dpop.DefaultNonceLifetime`, 5 minutes; `dpop.HMACNonceClockSkew`, 5 seconds, for a nonce issued ahead of this replica's clock; keys of at least `dpop.HMACNonceKeyBytes`, 32 |
 | `DefaultReservationTTL` | 5 minutes |
+| `UnitCode` left empty | `DefaultUnitCode`, USD |
+| `PurgeClockSkew` | 1 minute |
 | `MaxExternalRefBytes` | 200 |
 | `MaxNanos` | just under a billion units |
 | `MaxIJSONInteger` | 2^53 − 1, for every integer in a token |
