@@ -31,6 +31,13 @@
 // the tables, which runs Migrate, is not bound; connect as another role for
 // the policies to hold. Config.CheckTenant lets a consumer that keeps its own
 // tenants refuse one it does not hold.
+//
+// A call whose request names its tenant — Insert, ListByPrincipal, Bump,
+// Charge, Reserve, Settle, GetTenantBudget, SetTenantBudget — under a scope
+// that does not admit that tenant returns limes.ErrScopeMismatch rather than
+// answer as if the tenant's rows were not there (Config.CheckScope). A call
+// that names only an id cannot be checked so, and answers a row out of scope
+// as not found.
 package pgstore
 
 import (
@@ -80,6 +87,16 @@ type Config struct {
 	// limes.ErrTenantDeleted for one in the trash, which Insert returns
 	// as they are. Nil: every tenant is one the store can mint for.
 	CheckTenant func(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error
+	// CheckScope runs after Scope in the transaction of every call whose
+	// request names its tenant — Insert, ListByPrincipal, Bump, Charge,
+	// Reserve, Settle, GetTenantBudget, SetTenantBudget — and refuses one
+	// whose scope does not admit that tenant with limes.ErrScopeMismatch,
+	// which the call returns as it is. Nil, under the default Scope: the
+	// call's WithTenant or WithAllTenants decides, and with neither
+	// CheckSchemaScope does. Nil beside a Scope of the consumer's: no check,
+	// since the store cannot tell what its policies admit; a Scope that sets
+	// the schema's own settings passes CheckSchemaScope here.
+	CheckScope func(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error
 }
 
 // errNoDB is NewStore given a Config without a DB: none at all, or a nil
@@ -108,6 +125,7 @@ type conn struct {
 	now         func() time.Time
 	scope       func(ctx context.Context, tx pgx.Tx) error
 	checkTenant func(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error
+	checkScope  func(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error
 }
 
 func newConn(cfg Config) (conn, error) {
@@ -117,10 +135,13 @@ func newConn(cfg Config) (conn, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
+	if cfg.CheckScope == nil && cfg.Scope == nil {
+		cfg.CheckScope = checkContextScope
+	}
 	if cfg.Scope == nil {
 		cfg.Scope = ScopeFromContext
 	}
-	return conn{db: cfg.DB, now: cfg.Now, scope: cfg.Scope, checkTenant: cfg.CheckTenant}, nil
+	return conn{db: cfg.DB, now: cfg.Now, scope: cfg.Scope, checkTenant: cfg.CheckTenant, checkScope: cfg.CheckScope}, nil
 }
 
 // clock is the store's time now, to the column's resolution and in UTC.
@@ -134,6 +155,20 @@ func (c conn) inTx(ctx context.Context, fn func(pgx.Tx) error) error {
 	return pgx.BeginFunc(ctx, c.db, func(tx pgx.Tx) error {
 		if err := c.scope(ctx, tx); err != nil {
 			return fmt.Errorf("pgstore: scope: %w", err)
+		}
+		return fn(tx)
+	})
+}
+
+// inTenantTx is inTx for a call whose request names tenant: it refuses a
+// scope that does not admit tenant before fn reads a row, so a call under
+// the wrong scope fails as one rather than as rows that are not there.
+func (c conn) inTenantTx(ctx context.Context, tenant uuid.UUID, fn func(pgx.Tx) error) error {
+	return c.inTx(ctx, func(tx pgx.Tx) error {
+		if c.checkScope != nil {
+			if err := c.checkScope(ctx, tx, tenant); err != nil {
+				return err
+			}
 		}
 		return fn(tx)
 	})

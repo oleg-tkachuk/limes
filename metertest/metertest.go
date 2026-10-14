@@ -91,6 +91,12 @@ type Env[TX any] struct {
 	// ListCtx is the context ListTenantBudgets runs under: a read across
 	// tenants. Optional: without it, Ctx.
 	ListCtx context.Context
+	// ScopesTenants reports that the store keeps each tenant's rows apart
+	// by the call's context, TenantCtx giving each tenant's: a call whose
+	// request names one tenant, made under another tenant's context, is
+	// refused with limes.ErrScopeMismatch and changes nothing. Optional:
+	// without it, the checks of that are skipped.
+	ScopesTenants bool
 }
 
 // CapabilitySpec is a capability Env.NewCapability records: its parent and
@@ -328,6 +334,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"PurgeOrphansReleasesWhatARemovedCapabilityHeld", checkPurgeOrphans[TX]},
 		{"AChainAtMaxDepthTakesAChildOnceItsTopIsRemoved", checkLineageAfterRemoval[TX]},
 		{"TenantBudgetKeepsItsPeriodEnd", checkPeriodEnd[TX]},
+		{"ACallScopedToAnotherTenantIsRefused", checkScopeMismatch[TX]},
 		{"ResetSpendAloneRollsThePeriodStart", checkPeriodStart[TX]},
 		{"TheZeroSubjectIsRefused", checkZeroSubject[TX]},
 		{"AnAncestorRequestCeilingBoundsBump", checkAncestorRequests[TX]},
@@ -457,8 +464,14 @@ func checkExternalRefChargesOnce[TX any](t *testing.T, f fixture[TX]) {
 		"in another unit":    newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: otherUnit}),
 		"for another tenant": newSubject(subjectSpec{capID: f.child, tenant: uuid.New(), budget: budgetOf(childBudget)}),
 	} {
-		if r, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: subject, Amount: 2 * one, ExternalRef: "call-1"}, onCharged); !errors.Is(err, limes.ErrExternalRefConflict) {
-			t.Errorf("the ref again %s = %+v, %v; want ErrExternalRefConflict", name, r, err)
+		want := limes.ErrExternalRefConflict
+		// A store that scopes tenants refuses the call before it reads
+		// the ledger: Ctx is not that tenant's.
+		if f.ScopesTenants && subject.TenantID() != f.Tenant {
+			want = limes.ErrScopeMismatch
+		}
+		if r, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: subject, Amount: 2 * one, ExternalRef: "call-1"}, onCharged); !errors.Is(err, want) {
+			t.Errorf("the ref again %s = %+v, %v; want %v", name, r, err, want)
 		}
 	}
 	if fanOuts != 1 {
@@ -2751,5 +2764,76 @@ func checkZeroSubject[TX any](t *testing.T, f fixture[TX]) {
 	}
 	if _, err := f.Usage.GetUsage(f.Ctx, uuid.Nil); !errors.Is(err, limes.ErrUsageNotFound) {
 		t.Errorf("GetUsage(nil id) = %v; want ErrUsageNotFound, nothing counted", err)
+	}
+}
+
+// A call naming Tenant, made under another tenant's context, is refused as
+// one: the rows are there, so answering as if they were not would read as a
+// bad request or a miss. Nothing it would have moved moves.
+func checkScopeMismatch[TX any](t *testing.T, f fixture[TX]) {
+	if !f.ScopesTenants {
+		t.Skip("Env.ScopesTenants not set")
+	}
+	other, err := f.newTenant()
+	if err != nil {
+		t.Fatalf("NewTenant: %v", err)
+	}
+	held, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one})
+	if err != nil {
+		t.Fatalf("reserve: %v", err)
+	}
+	before, err := f.Usage.GetUsage(f.Ctx, f.child)
+	if err != nil {
+		t.Fatalf("usage: %v", err)
+	}
+	wrong := f.tenantCtx(other)
+	for name, call := range map[string]func() error{
+		"Bump": func() error {
+			_, err := f.Usage.Bump(wrong, limes.BumpRequest{Subject: f.childSubject()})
+			return err
+		},
+		"Charge": func() error {
+			_, err := f.Usage.Charge(wrong, limes.ChargeRequest{Subject: f.childSubject(), Amount: one}, nil)
+			return err
+		},
+		"Reserve": func() error {
+			_, err := f.Usage.Reserve(wrong, limes.ReserveRequest{Subject: f.childSubject(), Amount: one})
+			return err
+		},
+		"Settle": func() error {
+			_, err := f.Usage.Settle(wrong, limes.SettleRequest{Subject: f.childSubject(), ReservationID: held.ID, Amount: one}, nil)
+			return err
+		},
+		"GetTenantBudget": func() error {
+			_, err := f.Usage.GetTenantBudget(wrong, f.Tenant)
+			return err
+		},
+		"SetTenantBudget": func() error {
+			_, err := f.Usage.SetTenantBudget(wrong, limes.SetTenantBudgetRequest{
+				TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Unlimited: true}, UnitCode: unit,
+			})
+			return err
+		},
+	} {
+		if err := call(); !errors.Is(err, limes.ErrScopeMismatch) {
+			t.Errorf("%s for Tenant under another tenant's context: err = %v, want ErrScopeMismatch", name, err)
+		}
+	}
+	after, err := f.Usage.GetUsage(f.Ctx, f.child)
+	if err != nil {
+		t.Fatalf("usage: %v", err)
+	}
+	if !reflect.DeepEqual(after, before) {
+		t.Errorf("usage after the refused calls = %+v, want %+v", after, before)
+	}
+	if _, err := f.Usage.GetReservation(f.Ctx, held.ID); err != nil {
+		t.Errorf("the hold after a refused Settle: %v; want it open", err)
+	}
+	b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
+	if err != nil {
+		t.Fatalf("tenant budget: %v", err)
+	}
+	if b.Ceiling != (limes.BudgetCeiling{Max: tenantBudget}) {
+		t.Errorf("tenant ceiling after a refused SetTenantBudget = %+v, want %v", b.Ceiling, tenantBudget)
 	}
 }
