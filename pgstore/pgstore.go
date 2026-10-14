@@ -1,7 +1,9 @@
 // Package pgstore is the reference implementation of the limes storage
 // contracts over PostgreSQL: limes.Store and limes.BiscuitRevocationStore for
 // capability records and revocations, limes.UsageStore[pgx.Tx] and
-// limes.CopyUsageReader for the meter. It passes the module's own contract
+// limes.CopyUsageReader for the meter, limes.LedgerReader for reports, and
+// limes.TenantRecordEraser and limes.TenantUsageEraser for removing a
+// tenant. It passes the module's own contract
 // suites, storetest and metertest, which is how a consumer knows it keeps
 // every rule a store must keep.
 //
@@ -38,7 +40,8 @@
 // tenants refuse one it does not hold.
 //
 // A call whose request names its tenant — Insert, ListByPrincipal, Bump,
-// Charge, Reserve, Settle, GetTenantBudget, SetTenantBudget — under a scope
+// Charge, Reserve, Settle, GetTenantBudget, SetTenantBudget, the erasers and
+// Ledger.SumCharges — under a scope
 // that does not admit that tenant returns limes.ErrScopeMismatch rather than
 // answer as if the tenant's rows were not there (Config.CheckScope). A call
 // that names only an id cannot be checked so, and answers a row out of scope
@@ -110,7 +113,9 @@ type Config struct {
 	CheckTenant func(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error
 	// CheckScope runs after Scope in the transaction of every call whose
 	// request names its tenant — Insert, ListByPrincipal, Bump, Charge,
-	// Reserve, Settle, GetTenantBudget, SetTenantBudget — and refuses one
+	// Reserve, Settle, GetTenantBudget, SetTenantBudget, EraseTenant,
+	// EraseTenantRecords, EraseTenantUsage and Ledger.SumCharges — and
+	// refuses one
 	// whose scope does not admit that tenant with limes.ErrScopeMismatch,
 	// which the call returns as it is. Nil, under the default Scope: the
 	// call's WithTenant or WithAllTenants decides, and with neither
