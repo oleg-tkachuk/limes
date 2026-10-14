@@ -132,7 +132,8 @@ type Config struct {
 	// CheckScope runs after Scope in the transaction of every call whose
 	// request names its tenant — Insert, ListByPrincipal, Bump, Charge,
 	// Reserve, Settle, GetTenantBudget, SetTenantBudget, EraseTenant,
-	// EraseTenantRecords, EraseTenantUsage and Ledger.SumCharges — and
+	// EraseTenantRecords, EraseTenantUsage, Ledger.SumCharges and
+	// Census.CountRecords for one tenant — and
 	// refuses one
 	// whose scope does not admit that tenant with limes.ErrScopeMismatch,
 	// which the call returns as it is. Nil, under the default Scope: the
