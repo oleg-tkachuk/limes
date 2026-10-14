@@ -31,3 +31,28 @@ func TestKeepOfNamesEveryFilter(t *testing.T) {
 		t.Errorf("keepOf(%s), a filter limes lacks: err = %v, want ErrInvalidRequest", f, err)
 	}
 }
+
+// Every bucket limes defines is one this store names, each as its
+// date_trunc field; one limes adds later fails here until the store names
+// it, rather than sum by another.
+func TestTruncOfNamesEveryBucket(t *testing.T) {
+	want := map[limes.ChargeBucket]string{
+		limes.ChargeBucketNone:  "",
+		limes.ChargeBucketHour:  truncHour,
+		limes.ChargeBucketDay:   truncDay,
+		limes.ChargeBucketMonth: truncMonth,
+	}
+	b := limes.ChargeBucket(0)
+	for ; b.Validate() == nil; b++ {
+		got, bucketed, err := truncOf(b)
+		if w, ok := want[b]; !ok || err != nil || got != w || bucketed != (w != "") {
+			t.Errorf("truncOf(%s) = %q, %v, %v; want %q", b, got, bucketed, err, w)
+		}
+	}
+	if len(want) != int(b) {
+		t.Errorf("limes defines %d buckets, the test names %d", b, len(want))
+	}
+	if _, _, err := truncOf(b); !errors.Is(err, limes.ErrInvalidRequest) {
+		t.Errorf("truncOf(%s), a bucket limes lacks: err = %v, want ErrInvalidRequest", b, err)
+	}
+}

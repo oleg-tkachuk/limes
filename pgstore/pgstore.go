@@ -46,6 +46,10 @@
 // caches then, so a revocation reaches every replica at once rather than
 // within the caches' TTL.
 //
+// A Ledger sums a tenant's charges for billing and reports
+// (limes.LedgerReader), so a consumer reads the ledger through it rather
+// than through the charges table, whose columns are this package's own.
+//
 // To remove a tenant, Store.EraseTenant revokes its capabilities, removes
 // the records Purge would and every meter row of the tenant — the charges
 // ledger included — in one transaction, and runs the consumer's own removal

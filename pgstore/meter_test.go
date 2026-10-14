@@ -43,10 +43,16 @@ func TestMeterContract(t *testing.T) {
 		// One expiry for every capability, so a child never outlives its
 		// parent by the time between their inserts.
 		expiry := clock.Now().Add(contractTTL)
+		ledger, err := NewLedger(Config{DB: app, Now: clock.Now})
+		if err != nil {
+			t.Fatal(err)
+		}
 		return metertest.Env[pgx.Tx]{
 			Ctx:           WithTenant(t.Context(), tenant),
 			ScopesTenants: true,
 			Usage:         usage,
+			Ledger:        ledger,
+			Now:           clock.Now,
 			Tenant:        tenant,
 			NewTenant:     func() (uuid.UUID, error) { return uuid.New(), nil },
 			TenantCtx:     func(tenant uuid.UUID) context.Context { return WithTenant(t.Context(), tenant) },
