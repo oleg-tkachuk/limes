@@ -61,7 +61,7 @@ flowchart LR
     end
 
     impl[("memstore · your own store")]
-    pg["<b>pgstore</b> (nested module)<br/>Store · BiscuitRevocationStore<br/>UsageStore[pgx.Tx] · CopyUsageReader<br/>Migrate · WithTenant · row-level security"]
+    pg["<b>pgstore</b> (nested module)<br/>Store · BiscuitRevocationStore · erasers<br/>UsageStore[pgx.Tx] · CopyUsageReader · Ledger<br/>Migrate · WithTenant · WithAllTenantsReadOnly<br/>RevocationWatcher · row-level security"]
     rr["<b>redisreplay</b> (nested module)<br/>Cache: dpop.ReplayCache over Redis"]
     pgdb{{"PostgreSQL"}}
     redis{{"Redis"}}

@@ -707,7 +707,8 @@ A role that does not own the tables sees only the rows of the tenant a call
 is scoped to, and none when it is scoped to no tenant; the revocation checks
 see every tenant, as the verifier asks them before it knows the token's. A
 call whose request names its tenant — `Insert`, `ListByPrincipal`, `Bump`,
-`Charge`, `Reserve`, `Settle`, `GetTenantBudget`, `SetTenantBudget` — under a
+`Charge`, `Reserve`, `Settle`, `GetTenantBudget`, `SetTenantBudget`, the
+tenant erasers and `Ledger.SumCharges` — under a
 scope that does not admit that tenant returns `ErrScopeMismatch`, never
 `ErrNotFound` or `ErrInvalidRequest`. A call that names only an id
 (`GetRecord`, `Revoke`, `Refund`, `Release`, `GetUsage`, `GetCharge`, …) cannot
@@ -737,6 +738,8 @@ Elsewhere, implement these and you are done:
 | `Store` = `IssuanceStore` + admin | Capability records + revocations; an `Issuer` needs only `IssuanceStore` (`Insert`, `IsRevoked`) | No |
 | `BiscuitRevocationStore` | Revoked Biscuit copies (only if you accept Biscuits) | No |
 | `CopyUsageReader` | Reads Biscuit copies' own counters (only to show them) | No |
+| `LedgerReader` | Sums a tenant's charges for billing and reports (optional; a type of its own beside `UsageStore`) | No |
+| `TenantRecordEraser`, `TenantUsageEraser` | Erase a tenant's records and usage (optional) | No |
 | `UsageStore[TX]` = `Meter[TX]` + `MeterReader` + `TenantBudgets` + `UsageHousekeeping` | Request and spend counters, the charges ledger, tenant ceilings; `DeleteUsage` and `PurgeOrphans` release a reaped capability's holds | Only for atomic side effects |
 | `KeyResolver` | Public verification keys | No |
 | `dpop.ReplayCache` | DPoP proof ids seen, per key, each counted against its holder: `Seen(ctx, dpop.ReplayEntry)` reports a holder past its share as seen, and returns an error when its store cannot answer — an outage, not a refused proof (only for key-bound tokens; `dpop.MemoryReplayCache` ships for one process — behind several replicas, the `redisreplay` module ships one over Redis, or implement it over another shared store) | No |
