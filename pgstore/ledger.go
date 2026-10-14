@@ -62,7 +62,9 @@ func truncOf(b limes.ChargeBucket) (string, bool, error) {
 // order: buckets in time order, the largest charged first, then the group's
 // fields ascending, bytewise. A group not named is one value — ” or the
 // nil uuid — and a period summed whole is one bucket at the epoch, so every
-// column orders and compares. The sums are numeric, exact past bigint.
+// column orders and compares. The sums are numeric, exact past bigint, and
+// they order and compare as numbers: their text, which the scan reads, is
+// named apart so that no output column shadows them in ORDER BY.
 const sqlSumCharges = `
 WITH sums AS (
     SELECT
@@ -78,12 +80,12 @@ WITH sums AS (
     WHERE tenant_id = $1 AND at >= $2 AND at < $3
     GROUP BY 1, 2, 3, 4, 5
 )
-SELECT bucket, unit_code, op, actor, capability_id, charged::text, refunded::text, charges
+SELECT bucket, unit_code, op, actor, capability_id, charged::text AS charged_text, refunded::text AS refunded_text, charges
 FROM sums
 WHERE NOT $8::boolean
    OR (bucket, -charged, unit_code COLLATE "C", op COLLATE "C", actor COLLATE "C", capability_id)
     > ($9::timestamptz, -($10::numeric), $11::text COLLATE "C", $12::text COLLATE "C", $13::text COLLATE "C", $14::uuid)
-ORDER BY bucket, charged DESC, unit_code COLLATE "C", op COLLATE "C", actor COLLATE "C", capability_id
+ORDER BY sums.bucket, sums.charged DESC, sums.unit_code COLLATE "C", sums.op COLLATE "C", sums.actor COLLATE "C", sums.capability_id
 LIMIT $15`
 
 // sumCursor is pgstore's cursor of SumCharges: the last row's place, as

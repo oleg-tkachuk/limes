@@ -351,6 +351,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"EraseTenantUsageDropsEveryRowOfTheTenant", checkEraseTenantUsage[TX]},
 		{"SumChargesGroupsAndPagesTheLedger", checkSumCharges[TX]},
 		{"SumChargesCutsBucketsAtUTCBoundaries", checkSumChargeBuckets[TX]},
+		{"SumChargesOrdersByAmountNotDigits", checkSumChargesOrderByAmount[TX]},
 		{"ResetSpendAloneRollsThePeriodStart", checkPeriodStart[TX]},
 		{"TheZeroSubjectIsRefused", checkZeroSubject[TX]},
 		{"AnAncestorRequestCeilingBoundsBump", checkAncestorRequests[TX]},
@@ -3051,6 +3052,104 @@ func checkSumCharges[TX any](t *testing.T, f fixture[TX]) {
 			t.Errorf("SumCharges under another tenant's context: err = %v, want ErrScopeMismatch", err)
 		}
 	}
+}
+
+// SumCharges orders sums by amount, not by their digits: sums of different
+// lengths come largest first, whole and within each bucket, and a walk one
+// row at a time yields what one page does. A refund stays in its charge's
+// group throughout.
+func checkSumChargesOrderByAmount[TX any](t *testing.T, f fixture[TX]) {
+	if f.Ledger == nil {
+		t.Skip("Env.Ledger not set")
+	}
+	// The charges outgrow the fixture's ceilings: an unlimited capability
+	// under an unlimited tenant.
+	b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
+	if err != nil {
+		t.Fatalf("tenant budget: %v", err)
+	}
+	if _, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
+		TenantID: f.Tenant, Ceiling: unlimitedBudget, UnitCode: unit, ExpectedVersion: b.ResourceVersion,
+	}); err != nil {
+		t.Fatalf("tenant budget: %v", err)
+	}
+	capID, err := f.NewCapability(CapabilitySpec{Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget})
+	if err != nil {
+		t.Fatalf("capability: %v", err)
+	}
+	subject := newSubject(subjectSpec{capID: capID, tenant: f.Tenant})
+	charge := func(actor string, amount, refund limes.Nanos) {
+		t.Helper()
+		r, err := f.charge(limes.ChargeRequest{Subject: subject, Amount: amount, Actor: actor}, nil)
+		if err != nil {
+			t.Fatalf("charge of %s by %s: %v", amount, actor, err)
+		}
+		if refund == 0 {
+			return
+		}
+		if _, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: r.ChargeID, Amount: refund}); err != nil {
+			t.Fatalf("refund: %v", err)
+		}
+	}
+	from, to := f.sumPeriod()
+	walk := func(req limes.SumChargesRequest, want []limes.ChargeSum) {
+		t.Helper()
+		req.TenantID, req.From, req.To, req.ByActor = f.Tenant, from, to, true
+		page, err := f.Ledger.SumCharges(f.Ctx, req)
+		if err != nil || page.Next != "" || !sameSums(page.Items, want) {
+			t.Errorf("SumCharges by %s = %+v, %q, %v; want %+v on one page", req.Bucket, page.Items, page.Next, err, want)
+		}
+		req.Limit = 1
+		var walked []limes.ChargeSum
+		for range len(want) + 1 {
+			page, err := f.Ledger.SumCharges(f.Ctx, req)
+			if err != nil {
+				t.Fatalf("SumCharges by %s, a page of one: %v", req.Bucket, err)
+			}
+			walked = append(walked, page.Items...)
+			if req.Cursor = page.Next; req.Cursor == "" {
+				break
+			}
+		}
+		if !sameSums(walked, want) {
+			t.Errorf("SumCharges by %s a row at a time = %+v, want %+v", req.Bucket, walked, want)
+		}
+	}
+	// Sums of nine, ten and eleven digits in nanos, whose text order is the
+	// reverse of their order by amount.
+	charge("x", 12*one, one)
+	charge("y", 2*one, 0)
+	charge("z", one/2, 0)
+	walk(limes.SumChargesRequest{}, []limes.ChargeSum{
+		{UnitCode: unit, Actor: "x", Charged: 12 * one, Refunded: one, Charges: 1},
+		{UnitCode: unit, Actor: "y", Charged: 2 * one, Charges: 1},
+		{UnitCode: unit, Actor: "z", Charged: one / 2, Charges: 1},
+	})
+	if f.Now == nil || f.Advance == nil {
+		return
+	}
+	// The next day, an order of its own, again the reverse of the text's.
+	first := f.Now().UTC()
+	firstDay := time.Date(first.Year(), first.Month(), first.Day(), 0, 0, 0, 0, time.UTC)
+	nextDay := firstDay.AddDate(0, 0, 1)
+	f.Advance(nextDay.Sub(first))
+	charge("z", 100*one, 0)
+	charge("x", 7*one, 0)
+	charge("y", 9*cent, 0)
+	_, to = f.sumPeriod()
+	walk(limes.SumChargesRequest{}, []limes.ChargeSum{
+		{UnitCode: unit, Actor: "z", Charged: 100*one + one/2, Charges: 2},
+		{UnitCode: unit, Actor: "x", Charged: 19 * one, Refunded: one, Charges: 2},
+		{UnitCode: unit, Actor: "y", Charged: 2*one + 9*cent, Charges: 2},
+	})
+	walk(limes.SumChargesRequest{Bucket: limes.ChargeBucketDay}, []limes.ChargeSum{
+		{BucketStart: firstDay, UnitCode: unit, Actor: "x", Charged: 12 * one, Refunded: one, Charges: 1},
+		{BucketStart: firstDay, UnitCode: unit, Actor: "y", Charged: 2 * one, Charges: 1},
+		{BucketStart: firstDay, UnitCode: unit, Actor: "z", Charged: one / 2, Charges: 1},
+		{BucketStart: nextDay, UnitCode: unit, Actor: "z", Charged: 100 * one, Charges: 1},
+		{BucketStart: nextDay, UnitCode: unit, Actor: "x", Charged: 7 * one, Charges: 1},
+		{BucketStart: nextDay, UnitCode: unit, Actor: "y", Charged: 9 * cent, Charges: 1},
+	})
 }
 
 // Buckets are cut at UTC boundaries: a charge a microsecond — the finest a
