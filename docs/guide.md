@@ -739,7 +739,8 @@ charges over a period — whole, or by UTC hour, day or month — grouped by uni
 and, as asked, by operation, actor or capability, the largest first within
 each bucket, so the first page of `Limit` rows is the top `Limit`. A refund
 counts with the charge it returns, so a closed period's sums still move.
-`memstore.NewLedger` reads a `memstore` ledger; `metertest` checks a reader
+`memstore.NewLedger` and `pgstore.NewLedger` read their stores' ledgers, the
+latter scoped to the tenant as every other read; `metertest` checks a reader
 its `Env.Ledger` names.
 
 To remove a tenant, a store may implement `TenantRecordEraser` and
