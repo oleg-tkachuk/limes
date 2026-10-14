@@ -82,6 +82,13 @@ var (
 	// so its rows may be restored, but nothing new is minted for it. The
 	// Store returns it.
 	ErrTenantDeleted = errors.New("limes: tenant deleted")
+	// ErrScopeMismatch is a store call whose context is scoped to a tenant
+	// other than the one its request names — or to none — under a store
+	// that keeps each tenant's rows apart. The rows are there; the call may
+	// not see them. It is the caller's wiring that is wrong, not the
+	// request, so it matches neither ErrInvalidRequest nor ErrNotFound, and
+	// ErrorResponse answers it 500.
+	ErrScopeMismatch = errors.New("limes: call scoped to another tenant than its request names")
 	// ErrProofUnsupported is a key-bound capability presented to a verifier
 	// with no DPoP configured: no proof the client sends could be checked.
 	// It is the deployment's fault, not the request's, so it matches no
