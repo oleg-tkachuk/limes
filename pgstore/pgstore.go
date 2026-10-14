@@ -41,6 +41,11 @@
 // that names only an id cannot be checked so, and answers a row out of scope
 // as not found.
 //
+// The schema notifies RevocationChannel on every statement that writes a
+// revocation; a RevocationWatcher beside each verifier clears its revocation
+// caches then, so a revocation reaches every replica at once rather than
+// within the caches' TTL.
+//
 // To remove a tenant, Store.EraseTenant revokes its capabilities, removes
 // the records Purge would and every meter row of the tenant — the charges
 // ledger included — in one transaction, and runs the consumer's own removal
