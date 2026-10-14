@@ -13,7 +13,8 @@
 //     no implementation in the module could show that a failed side effect
 //     leaves counters unmutated.
 //
-// NewLedger reads a usage store's ledger as a limes.LedgerReader, and the
+// NewLedger reads a usage store's ledger as a limes.LedgerReader, NewCensus
+// counts a record store's records as a limes.RecordCensus, and the
 // stores erase a tenant as limes.TenantRecordEraser and
 // limes.TenantUsageEraser.
 //
@@ -290,19 +291,7 @@ func (s *Store) isRevokedItselfLocked(id uuid.UUID) bool {
 func (s *Store) IsRevoked(_ context.Context, id uuid.UUID) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.revoked[id]; ok {
-		return true, nil
-	}
-	ancestors, err := s.ancestorsLocked(id)
-	if err != nil {
-		return false, err
-	}
-	for _, a := range ancestors {
-		if _, ok := s.revoked[a.ID]; ok {
-			return true, nil
-		}
-	}
-	return false, nil
+	return s.revokedLocked(id)
 }
 
 // lineageOf returns the records of id's ancestors, nearest first, stopping

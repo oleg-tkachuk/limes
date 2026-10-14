@@ -17,7 +17,10 @@
 // on its own. When the store implements limes.TenantRecordEraser, erasing a
 // tenant keeps what a verifier still needs; when Env.ScopesTenants is set, a
 // call under another tenant's scope is refused with limes.ErrScopeMismatch,
-// and when Env.ReadOnlyCtx is set, every write under a read-only scope is. A check that does not finish within Env.CheckTimeout stops the
+// and when Env.ReadOnlyCtx is set, every write under a read-only scope is.
+// When Env.Census is set, a census counts each record under one disposition —
+// revoked, through an ancestor too, over expired over active — by tenant and
+// by principal type, a page at a time. A check that does not finish within Env.CheckTimeout stops the
 // test binary with every goroutine's stack, naming the check.
 package storetest
 
@@ -90,6 +93,10 @@ type Env struct {
 	// deadlocked store to go test's -timeout. Optional: without it,
 	// DefaultCheckTimeout.
 	CheckTimeout time.Duration
+	// Census counts the store's records. Optional: without it, or without
+	// Now, the checks of limes.RecordCensus are skipped. A count across
+	// every tenant runs under ReadOnlyCtx when the Env sets it, else Ctx.
+	Census limes.RecordCensus
 }
 
 // newTenant is another tenant, from NewTenant when the Env has one.
@@ -245,6 +252,8 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"BiscuitRevocation", checkBiscuit},
 		{"ACallScopedToAnotherTenantIsRefused", checkScopeMismatch},
 		{"AReadOnlyScopeWritesNothing", checkReadOnlyScope},
+		{"CensusCountsEachRecordOnce", checkCensus},
+		{"CensusPagesAndRefusesAMalformedRequest", checkCensusPages},
 		{"EraseTenantRecordsKeepsWhatAVerifierStillNeeds", checkEraseTenant},
 	}
 	for _, c := range checks {
@@ -1181,5 +1190,169 @@ func checkEraseTenant(t *testing.T, f fixture) {
 	}
 	if again, err := eraser.EraseTenantRecords(f.Ctx, req); err != nil || again != (limes.EraseTenantResult{Kept: 4}) {
 		t.Errorf("EraseTenantRecords again = %+v, %v; want nothing revoked or removed", again, err)
+	}
+}
+
+// censusWindow is the ExpiringWithin of the census checks: past the soonest
+// active record's expiry, short of ttl.
+const censusWindow = ttl / 2
+
+// censusFixture records, for Tenant, a capability of every disposition and
+// shape a census tells apart, and one active capability for another tenant;
+// it returns that tenant. Counted at f.now within censusWindow, Tenant's
+// records are:
+//
+//	agent:   a live root, its child expiring soon, one expiring at the
+//	         window's end, one expired and revoked — 4, 3 active, 1 revoked,
+//	         1 delegated, 2 expiring soon
+//	service: one long expired, one expiring at now — 2, both expired
+//	user:    a revoked root and its child, not revoked itself — 2, both
+//	         revoked, 1 delegated
+func censusFixture(t *testing.T, f fixture) uuid.UUID {
+	t.Helper()
+	of := func(kind limes.PrincipalType, c limes.Capability) limes.Capability {
+		c.Subject.Type = kind
+		if kind != limes.PrincipalAgent {
+			c.Subject.Agent = nil
+		}
+		return c
+	}
+	root := f.live(t, "agent:root", uuid.Nil)
+	f.insert(t, f.newCapability("agent:soon", root.ID, f.now.Add(censusWindow/2)))
+	f.insert(t, f.newCapability("agent:edge", uuid.Nil, f.now.Add(censusWindow)))
+	revokedExpired := f.insert(t, f.newCapability("agent:revoked-expired", uuid.Nil, f.now.Add(-expiredAgo)))
+	f.revoke(t, revokedExpired.ID, false)
+	f.insert(t, of(limes.PrincipalService, f.newCapability("svc:old", uuid.Nil, f.now.Add(-expiredAgo))))
+	f.insert(t, of(limes.PrincipalService, f.newCapability("svc:now", uuid.Nil, f.now)))
+	userRoot := f.insert(t, of(limes.PrincipalUser, f.newCapability("user:root", uuid.Nil, f.now.Add(ttl))))
+	userChild := f.insert(t, of(limes.PrincipalUser, f.newCapability("user:child", userRoot.ID, f.now.Add(ttl))))
+	f.revoke(t, userRoot.ID, false)
+	if !f.revoked(t, userChild.ID) {
+		t.Fatal("a child of a revoked capability is not revoked")
+	}
+	other, err := f.newTenant()
+	if err != nil {
+		t.Fatalf("NewTenant: %v", err)
+	}
+	theirs := f.newCapability("agent:theirs", uuid.Nil, f.now.Add(ttl))
+	theirs.Subject.TenantID = other
+	if err := f.Store.Insert(f.tenantCtx(other), limes.InsertRequest{Capability: theirs, IssuedBy: issuedBy}); err != nil {
+		t.Fatalf("Insert for another tenant: %v", err)
+	}
+	return other
+}
+
+// allTenantsCtx is the context a census across every tenant runs under.
+func (f fixture) allTenantsCtx() context.Context {
+	if f.ReadOnlyCtx != nil {
+		return f.ReadOnlyCtx
+	}
+	return f.Ctx
+}
+
+// countAll is every row of the census req asks for, a page at a time.
+func (f fixture) countAll(t *testing.T, ctx context.Context, req limes.CountRecordsRequest) []limes.RecordCount {
+	t.Helper()
+	var out []limes.RecordCount
+	fetched := map[string]bool{}
+	for {
+		fetched[req.Cursor] = true
+		page, err := f.Census.CountRecords(ctx, req)
+		if err != nil {
+			t.Fatalf("CountRecords(%+v): %v", req, err)
+		}
+		out = append(out, page.Items...)
+		if page.Next == "" {
+			return out
+		}
+		if fetched[page.Next] {
+			t.Fatalf("CountRecords handed back cursor %q again", page.Next)
+		}
+		req.Cursor = page.Next
+	}
+}
+
+// Each record counts under one disposition — revoked, through an ancestor
+// on record too, over expired, over active — and a census of one tenant
+// counts that tenant's only, whole or by principal type; one across every
+// tenant counts each, by tenant.
+func checkCensus(t *testing.T, f fixture) {
+	if f.Census == nil || f.Now == nil {
+		t.Skip("Env.Census or Env.Now not set")
+	}
+	other := censusFixture(t, f)
+	mine := limes.CountRecordsRequest{TenantID: f.Tenant, ExpiringWithin: censusWindow}
+	whole := limes.RecordCount{Total: 8, Active: 3, Expired: 2, Revoked: 3, Delegated: 2, ExpiringSoon: 2}
+	if got := f.countAll(t, f.Ctx, mine); !slices.Equal(got, []limes.RecordCount{whole}) {
+		t.Errorf("census of Tenant = %+v, want %+v", got, whole)
+	}
+	byType := mine
+	byType.ByPrincipalType = true
+	want := []limes.RecordCount{
+		{PrincipalType: limes.PrincipalAgent, Total: 4, Active: 3, Revoked: 1, Delegated: 1, ExpiringSoon: 2},
+		{PrincipalType: limes.PrincipalService, Total: 2, Expired: 2},
+		{PrincipalType: limes.PrincipalUser, Total: 2, Revoked: 2, Delegated: 1},
+	}
+	if got := f.countAll(t, f.Ctx, byType); !slices.Equal(got, want) {
+		t.Errorf("census of Tenant by principal type = %+v, want %+v", got, want)
+	}
+	noWindow := mine
+	noWindow.ExpiringWithin = 0
+	if got := f.countAll(t, f.Ctx, noWindow); len(got) != 1 || got[0].ExpiringSoon != 0 {
+		t.Errorf("census with no window = %+v, want nothing expiring soon", got)
+	}
+
+	all := limes.CountRecordsRequest{AllTenants: true, ExpiringWithin: censusWindow, ByTenant: true}
+	mineByTenant, theirs := whole, limes.RecordCount{TenantID: other, Total: 1, Active: 1}
+	mineByTenant.TenantID = f.Tenant
+	want = []limes.RecordCount{mineByTenant, theirs}
+	slices.SortFunc(want, func(a, b limes.RecordCount) int { return bytes.Compare(a.TenantID[:], b.TenantID[:]) })
+	if got := f.countAll(t, f.allTenantsCtx(), all); !slices.Equal(got, want) {
+		t.Errorf("census of every tenant by tenant = %+v, want %+v", got, want)
+	}
+	all.ByTenant = false
+	sum := limes.RecordCount{Total: 9, Active: 4, Expired: 2, Revoked: 3, Delegated: 2, ExpiringSoon: 2}
+	if got := f.countAll(t, f.allTenantsCtx(), all); !slices.Equal(got, []limes.RecordCount{sum}) {
+		t.Errorf("census of every tenant = %+v, want %+v", got, sum)
+	}
+}
+
+// A census pages in its order and hands the same rows a page at a time as
+// in one; a malformed request, or a census under a scope that does not
+// admit what it counts, is refused.
+func checkCensusPages(t *testing.T, f fixture) {
+	if f.Census == nil || f.Now == nil {
+		t.Skip("Env.Census or Env.Now not set")
+	}
+	other := censusFixture(t, f)
+	req := limes.CountRecordsRequest{AllTenants: true, ExpiringWithin: censusWindow, ByTenant: true, ByPrincipalType: true}
+	whole := f.countAll(t, f.allTenantsCtx(), req)
+	const groups = 4 // Tenant's three principal types and the other tenant's agents
+	if len(whole) != groups {
+		t.Fatalf("census by tenant and principal type = %+v, want %d rows", whole, groups)
+	}
+	req.Limit = 1
+	if paged := f.countAll(t, f.allTenantsCtx(), req); !slices.Equal(paged, whole) {
+		t.Errorf("census a row at a time = %+v, want %+v", paged, whole)
+	}
+	for name, bad := range map[string]limes.CountRecordsRequest{
+		"no tenant":         {},
+		"a tenant and all":  {TenantID: f.Tenant, AllTenants: true},
+		"a negative window": {TenantID: f.Tenant, ExpiringWithin: -time.Second},
+		"a negative limit":  {TenantID: f.Tenant, Limit: -1},
+		"a foreign cursor":  {TenantID: f.Tenant, Cursor: "not-a-cursor"},
+	} {
+		if _, err := f.Census.CountRecords(f.Ctx, bad); !errors.Is(err, limes.ErrInvalidRequest) {
+			t.Errorf("CountRecords with %s: err = %v, want ErrInvalidRequest", name, err)
+		}
+	}
+	if !f.ScopesTenants {
+		return
+	}
+	if _, err := f.Census.CountRecords(f.tenantCtx(other), limes.CountRecordsRequest{TenantID: f.Tenant}); !errors.Is(err, limes.ErrScopeMismatch) {
+		t.Errorf("CountRecords of Tenant under another tenant's context: err = %v, want ErrScopeMismatch", err)
+	}
+	if _, err := f.Census.CountRecords(f.Ctx, limes.CountRecordsRequest{AllTenants: true}); !errors.Is(err, limes.ErrScopeMismatch) {
+		t.Errorf("CountRecords of every tenant under one tenant's context: err = %v, want ErrScopeMismatch", err)
 	}
 }

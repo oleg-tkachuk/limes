@@ -42,8 +42,13 @@ func storeEnv(t *testing.T, cfg Config, readOnly func(context.Context) context.C
 	if err != nil {
 		t.Fatal(err)
 	}
+	census, err := NewCensus(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
 	tenant := newTenant(t)
 	return storetest.Env{
+		Census:        census,
 		Ctx:           WithTenant(t.Context(), tenant),
 		ScopesTenants: true,
 		ReadOnlyCtx:   readOnly(t.Context()),

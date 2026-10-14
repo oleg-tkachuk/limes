@@ -25,7 +25,7 @@ func TestStoreContract(t *testing.T) {
 			t.Fatal(err)
 		}
 		return storetest.Env{
-			Ctx: context.Background(), Store: store, Tenant: uuid.New(),
+			Ctx: context.Background(), Store: store, Tenant: uuid.New(), Census: NewCensus(store),
 			Now: clock, Advance: func(d time.Duration) { offset += d },
 		}
 	})

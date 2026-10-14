@@ -120,7 +120,7 @@ you keep for audit.
 | **Bind to a key** | RFC 9449 DPoP: `Verify` refuses a key-bound capability without a fresh proof from that key, presented under the `DPoP` scheme; server nonces (`dpop.HMACNonces`) work across replicas without shared state. |
 | **Meter** | Requests count against the capability and every ancestor; spend against those and the tenant, atomically with your own side effect. Reserve an estimate, settle the actual cost, refund a charge. Amounts are exact integers of billionths of an ISO 4217 unit. `Instrument` adds OpenTelemetry instruments. |
 | **Revoke** | One call stops a capability and everything delegated from it; verifiers learn of it within a cache TTL, or at once on `Clear`, which `pgstore.RevocationWatcher` calls on every revocation. |
-| **Report** | `LedgerReader.SumCharges` sums a tenant's charges over a period by unit, whole or by UTC hour, day, ISO week or month, and by operation, actor or capability, the largest first. |
+| **Report** | `LedgerReader.SumCharges` sums a tenant's charges over a period by unit, whole or by UTC hour, day, ISO week or month, and by operation, actor or capability, the largest first. `RecordCensus.CountRecords` counts capability records — active, expired, revoked, delegated, expiring soon — for one tenant or all, by tenant and principal type. |
 | **Answer refusals** | `ErrorResponse` maps a refusal to its status, an RFC 6750 / RFC 9449 `WWW-Authenticate` challenge and an RFC 9457 problem body, without the error's own text. |
 
 You implement `Store` and `UsageStore[TX]` — or use `memstore`, or `pgstore`
@@ -130,7 +130,8 @@ already are, and check your implementation from its own tests with `storetest`,
 commit together with, say, an outbox write; with no transactions, use
 `UsageStore[struct{}]`. Optional contracts serve one feature each:
 `BiscuitRevocationStore` and `CopyUsageReader` for Biscuit copies,
-`LedgerReader` for billing reads, and `TenantRecordEraser` and
+`LedgerReader` for billing reads, `RecordCensus` for a census of records, and
+`TenantRecordEraser` and
 `TenantUsageEraser` to remove a tenant.
 
 ## Guarantees
