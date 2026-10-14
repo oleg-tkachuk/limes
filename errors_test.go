@@ -99,6 +99,7 @@ var sentinelMatrix = map[string]sentinelCase{
 	"ErrUnitCodeMismatch":            {ErrUnitCodeMismatch, nil, "", http.StatusInternalServerError},
 	"ErrUnknownTenant":               {ErrUnknownTenant, nil, "", http.StatusInternalServerError},
 	"ErrTenantDeleted":               {ErrTenantDeleted, nil, "", http.StatusInternalServerError},
+	"ErrScopeMismatch":               {ErrScopeMismatch, nil, "", http.StatusInternalServerError},
 	"ErrProofUnsupported":            {ErrProofUnsupported, nil, "", http.StatusInternalServerError},
 	"ErrCursorRepeated":              {ErrCursorRepeated, nil, "", http.StatusInternalServerError},
 	"ErrRefundExceedsCharge":         {ErrRefundExceedsCharge, nil, "", http.StatusInternalServerError},

@@ -731,7 +731,9 @@ ancestors still on record as `ErrDelegationTooDeep`, writing nothing:
 deeper than the walk reaches. It should tell a missing tenant
 from a failure: return
 `ErrUnknownTenant` for a tenant it does not hold and `ErrTenantDeleted` for one
-in the trash. `Issue` and `Delegate` pass them through, wrapped, beside
+in the trash. A store that keeps each tenant's rows apart by the call's
+context returns `ErrScopeMismatch` for a call scoped to another tenant than
+the one its request names, rather than answer as if the rows were not there. `Issue` and `Delegate` pass them through, wrapped, beside
 `ErrInvalidRequest`, which every check on the request itself matches — a
 missing tenant id, an empty audience entry, a negative TTL or one ending within
 the second it is issued (a token's times are whole seconds), a `NotBefore` at
