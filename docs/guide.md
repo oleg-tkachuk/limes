@@ -767,6 +767,7 @@ Elsewhere, implement these and you are done:
 | `BiscuitRevocationStore` | Revoked Biscuit copies (only if you accept Biscuits) | No |
 | `CopyUsageReader` | Reads Biscuit copies' own counters (only to show them) | No |
 | `LedgerReader` | Sums a tenant's charges for billing and reports (optional; a type of its own beside `UsageStore`) | No |
+| `RecordCensus` | Counts capability records by disposition, for one tenant or every tenant (optional; a type of its own beside `Store`) | No |
 | `TenantRecordEraser`, `TenantUsageEraser` | Erase a tenant's records and usage (optional) | No |
 | `UsageStore[TX]` = `Meter[TX]` + `MeterReader` + `TenantBudgets` + `UsageHousekeeping` | Request and spend counters, the charges ledger, tenant ceilings; `DeleteUsage` and `PurgeOrphans` release a reaped capability's holds | Only for atomic side effects |
 | `KeyResolver` | Public verification keys | No |
@@ -788,6 +789,19 @@ returns, so a closed period's sums still move, and a sum past `MaxNanos` is
 `memstore.NewLedger` and `pgstore.NewLedger` read their stores' ledgers, the
 latter scoped to the tenant as every other read; `metertest` checks a reader
 its `Env.Ledger` names.
+
+To report on capability records, count them through a `RecordCensus`:
+`CountRecords` counts the records of `TenantID`, or of every tenant with
+`AllTenants`, whole or by tenant and principal type, a page at a time in that
+order. Each `RecordCount` has `Total` = `Active` + `Expired` + `Revoked`, each
+record in one of them by the store's clock: revoked — itself or through an
+ancestor on record — wins over expired, and expired — a zero `ExpiresAt`
+included — over active. `Delegated` counts
+the records with a parent, and `ExpiringSoon` the active ones expiring within
+`ExpiringWithin`. `memstore.NewCensus` and `pgstore.NewCensus` ship one; with
+pgstore, a census of every tenant runs under `WithAllTenantsReadOnly`, and one
+under a narrower scope is `ErrScopeMismatch`. `storetest` checks a census its
+`Env.Census` names.
 
 To remove a tenant, a store may implement `TenantRecordEraser` and
 `TenantUsageEraser` (optional; `storetest` and `metertest` check them when

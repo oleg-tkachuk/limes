@@ -21,7 +21,7 @@ own tag line, so the root module's dependency graph stays free of a driver.
 The two Biscuit contracts are needed only by a consumer that accepts the
 Biscuit form, `dpop.ReplayCache` and `dpop.Nonces` only by one that binds
 capabilities to keys, `LedgerReader` only by one that bills or reports from the
-charges ledger, and the two tenant erasers only by one that removes a tenant. `storetest`, `metertest`, `dpop/dpoptest` and
+charges ledger, `RecordCensus` only by one that reports on records, and the two tenant erasers only by one that removes a tenant. `storetest`, `metertest`, `dpop/dpoptest` and
 `jwks/jwkstest` check an implementation against its contract from its own
 tests — the Biscuit and copy contracts too, when the store under test
 implements them — and bound every check by `Env.CheckTimeout`, so a store that
@@ -60,11 +60,12 @@ flowchart LR
         replay["<b>dpop.ReplayCache</b><br/>Seen(ctx, ReplayEntry) · MemoryReplayCache ships"]
         nonces["<b>dpop.Nonces</b><br/>Nonce · Valid"]
         ledger["<b>LedgerReader</b><br/>SumCharges(SumChargesRequest) → Page[ChargeSum]<br/>by unit · bucket none/hour/day/week/month · op · actor · capability"]
+        census["<b>RecordCensus</b><br/>CountRecords(CountRecordsRequest) → Page[RecordCount]<br/>one tenant or all · by tenant · principal type<br/>active · expired · revoked · delegated · expiring soon"]
         erasers["<b>TenantRecordEraser · TenantUsageEraser</b><br/>EraseTenantRecords · EraseTenantUsage"]
     end
 
     impl[("memstore · your own store")]
-    pg["<b>pgstore</b> (nested module)<br/>Store · BiscuitRevocationStore · erasers<br/>UsageStore[pgx.Tx] · CopyUsageReader · Ledger<br/>Migrate · CheckSchema · EraseTenant<br/>WithTenant · WithAllTenants · WithAllTenantsReadOnly<br/>RevocationWatcher · row-level security"]
+    pg["<b>pgstore</b> (nested module)<br/>Store · BiscuitRevocationStore · erasers<br/>UsageStore[pgx.Tx] · CopyUsageReader · Ledger · Census<br/>Migrate · CheckSchema · EraseTenant<br/>WithTenant · WithAllTenants · WithAllTenantsReadOnly<br/>RevocationWatcher · row-level security"]
     rr["<b>redisreplay</b> (nested module)<br/>Cache: dpop.ReplayCache over Redis"]
     pgdb{{"PostgreSQL"}}
     redis{{"Redis"}}
@@ -84,6 +85,7 @@ flowchart LR
     verifier -. "AcceptBiscuit" .-> bcache --> brev
     caller -. "admin read" .-> cusage
     caller -. "billing read" .-> ledger
+    caller -. "records report" .-> census
     caller -. "remove a tenant" .-> erasers
     metering --> usage
     metering -. "metrics" .-> otel
