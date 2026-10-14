@@ -71,7 +71,10 @@ Both are jobs CI requires before a release.
   `.github/` (workflows, scripts, release tooling), `Taskfile.yaml`,
   `.golangci.yml` or `tools/`: its green check is no evidence on its own, so
   a person reads those files and merges it. Auto-merge decides this from
-  `main`'s own workflow, so a pull request cannot change the rule.
+  `main`'s own workflow, so a pull request cannot change the rule. Renovate's
+  own pull requests are the exception: Renovate merges them itself once green
+  (`renovate.json`), those bumping workflow actions, pinned tools or the task
+  library included.
 - Commit subjects follow [Conventional Commits](https://www.conventionalcommits.org):
   the release is computed from them (`feat` a minor; `fix`, `perf` and
   `security` a patch; pre-1.0 a breaking change a minor), so a non-conforming subject releases nothing.
