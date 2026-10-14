@@ -26,10 +26,11 @@ func TestStoreContract(t *testing.T) {
 		}
 		tenant := newTenant(t)
 		return storetest.Env{
-			Ctx:       WithTenant(t.Context(), tenant),
-			Store:     store,
-			Tenant:    tenant,
-			NewTenant: func() (uuid.UUID, error) { return newTenant(t), nil },
+			Ctx:           WithTenant(t.Context(), tenant),
+			ScopesTenants: true,
+			Store:         store,
+			Tenant:        tenant,
+			NewTenant:     func() (uuid.UUID, error) { return newTenant(t), nil },
 			DeleteTenant: func(tenant uuid.UUID) error {
 				_, err := owner.Exec(t.Context(), sqlDeleteTenant, tenant)
 				return err

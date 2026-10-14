@@ -274,7 +274,7 @@ func (s *UsageStore) CopyUsage(ctx context.Context, req limes.CopyUsageRequest) 
 // GetTenantBudget returns a tenant's aggregate.
 func (s *UsageStore) GetTenantBudget(ctx context.Context, tenantID uuid.UUID) (limes.TenantBudget, error) {
 	var out limes.TenantBudget
-	err := s.inTx(ctx, func(tx pgx.Tx) error {
+	err := s.inTenantTx(ctx, tenantID, func(tx pgx.Tx) error {
 		b, err := readTenant(ctx, tx, sqlGetTenant, tenantID)
 		if err != nil {
 			return err
@@ -316,7 +316,7 @@ func (s *UsageStore) SetTenantBudget(ctx context.Context, req limes.SetTenantBud
 		return limes.TenantBudget{}, err
 	}
 	var out limes.TenantBudget
-	err := s.inTx(ctx, func(tx pgx.Tx) error {
+	err := s.inTenantTx(ctx, req.TenantID, func(tx pgx.Tx) error {
 		b, err := lockTenant(ctx, tx, req.TenantID)
 		if err != nil {
 			return err

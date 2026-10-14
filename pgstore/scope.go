@@ -2,9 +2,12 @@ package pgstore
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/oleg-tkachuk/limes"
 )
 
 // The settings the row-level security policies read (migrations/
@@ -63,4 +66,45 @@ func ScopeFromContext(ctx context.Context, tx pgx.Tx) error {
 func allTenants(ctx context.Context, tx pgx.Tx) error {
 	_, err := tx.Exec(ctx, sqlSetLocal, settingAllTenants, settingOn)
 	return err
+}
+
+// sqlScopeAdmits is whether the transaction may see tenant's rows: the role
+// is not bound by row-level security on the schema's tables — the owner, or
+// one that bypasses it — or the schema's settings admit tenant, as its
+// policies read them. tenant_visible is NULL in a transaction scoped to no
+// tenant, which a policy reads as false and so does this.
+const sqlScopeAdmits = `SELECT NOT row_security_active('` + schema + `.capabilities') OR coalesce(` + schema + `.tenant_visible($1), false)`
+
+// CheckSchemaScope refuses with limes.ErrScopeMismatch a transaction whose
+// scope, as the schema's settings hold it, does not admit tenant — scoped to
+// another tenant, or to none — when row-level security binds its role. It is
+// a Config.CheckScope for a Scope of the consumer's that sets those settings.
+func CheckSchemaScope(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error {
+	var admits bool
+	if err := tx.QueryRow(ctx, sqlScopeAdmits, tenant).Scan(&admits); err != nil {
+		return err
+	}
+	if !admits {
+		return scopeMismatch(tenant)
+	}
+	return nil
+}
+
+// checkContextScope is the CheckScope of the default Scope: a call's
+// WithTenant or WithAllTenants decides without a round trip, and one with
+// neither is checked against the database, where an owner is not bound.
+func checkContextScope(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error {
+	s, ok := ctx.Value(scopeKey{}).(scope)
+	switch {
+	case !ok:
+		return CheckSchemaScope(ctx, tx, tenant)
+	case s.all, s.tenant == tenant:
+		return nil
+	}
+	return scopeMismatch(tenant)
+}
+
+// scopeMismatch is limes.ErrScopeMismatch for a call naming tenant.
+func scopeMismatch(tenant uuid.UUID) error {
+	return fmt.Errorf("%w: pgstore: tenant %s", limes.ErrScopeMismatch, tenant)
 }

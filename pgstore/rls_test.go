@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/internal/link"
@@ -58,7 +59,8 @@ func newTenantFixture(t *testing.T) tenantFixture {
 
 // A role that does not own the tables sees and writes its own tenant's rows
 // only: another tenant's records are not there for it, and neither is a
-// write in their name.
+// write in their name. A call whose request names the tenant is refused as
+// scoped to another one.
 func TestRowSecurityKeepsTenantsApart(t *testing.T) {
 	f := newTenantFixture(t)
 	for name, ctx := range map[string]context.Context{
@@ -74,13 +76,13 @@ func TestRowSecurityKeepsTenantsApart(t *testing.T) {
 		page, err := f.records.ListByPrincipal(ctx, limes.ListByPrincipalRequest{
 			TenantID: f.mine, PrincipalType: limes.PrincipalAgent, Subject: "agent:child",
 		})
-		if err != nil || len(page.Items) != 0 {
-			t.Errorf("%s: ListByPrincipal = %d items, %v; want none", name, len(page.Items), err)
+		if !errors.Is(err, limes.ErrScopeMismatch) || len(page.Items) != 0 {
+			t.Errorf("%s: ListByPrincipal = %d items, %v; want ErrScopeMismatch", name, len(page.Items), err)
 		}
 		c := f.parent
 		c.ID, c.ParentID = uuid.New(), uuid.Nil
-		if err := f.records.Insert(ctx, limes.InsertRequest{Capability: c}); err == nil {
-			t.Errorf("%s: Insert of a capability of another tenant succeeded", name)
+		if err := f.records.Insert(ctx, limes.InsertRequest{Capability: c}); !errors.Is(err, limes.ErrScopeMismatch) {
+			t.Errorf("%s: Insert of a capability of another tenant: err = %v, want ErrScopeMismatch", name, err)
 		}
 	}
 }
@@ -126,8 +128,8 @@ func TestRowSecurityKeepsTheMeterApart(t *testing.T) {
 		"another tenant": WithTenant(t.Context(), f.theirs),
 		"no scope":       t.Context(),
 	} {
-		if _, err := f.usage.GetTenantBudget(other, f.mine); !errors.Is(err, limes.ErrTenantBudgetNotFound) {
-			t.Errorf("%s: GetTenantBudget: err = %v, want ErrTenantBudgetNotFound", name, err)
+		if _, err := f.usage.GetTenantBudget(other, f.mine); !errors.Is(err, limes.ErrScopeMismatch) {
+			t.Errorf("%s: GetTenantBudget: err = %v, want ErrScopeMismatch", name, err)
 		}
 		page, err := f.usage.ListTenantBudgets(other, limes.ListTenantBudgetsRequest{})
 		if err != nil || len(page.Items) != 0 {
@@ -158,4 +160,62 @@ func TestHousekeepingNeedsEveryTenant(t *testing.T) {
 func biscuitCopy(t *testing.T, capID uuid.UUID, id []byte) limes.BiscuitCopy {
 	t.Helper()
 	return link.NewBiscuitCopy(capID, id).(limes.BiscuitCopy)
+}
+
+// A delegated child in another tenant than its parent is refused as too
+// wide under a scope that sees both tenants, where the parent is in view.
+func TestInsertRefusesAChildInAnotherTenantAcrossTenants(t *testing.T) {
+	f := newTenantFixture(t)
+	c := f.child
+	c.ID, c.ParentID, c.Subject.TenantID = uuid.New(), f.parent.ID, f.theirs
+	if err := f.records.Insert(WithAllTenants(t.Context()), limes.InsertRequest{Capability: c}); !errors.Is(err, limes.ErrDelegationTooWide) {
+		t.Errorf("Insert of a child in another tenant across tenants: err = %v, want ErrDelegationTooWide", err)
+	}
+}
+
+// The owner is not bound by the policies, so a call of its with no scope is
+// admitted: the check refuses only a scope row-level security would apply.
+func TestTheOwnerNeedsNoScope(t *testing.T) {
+	fresh(t)
+	store, err := NewStore(Config{DB: owner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := limes.Capability{
+		ID: uuid.New(), ExpiresAt: time.Now().Add(rlsTTL),
+		Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: uuid.New(), Subject: "agent:owner"},
+		Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true}},
+	}
+	if err := store.Insert(t.Context(), limes.InsertRequest{Capability: c}); err != nil {
+		t.Errorf("Insert as the owner with no scope: %v", err)
+	}
+}
+
+// A Scope of the consumer's gets no check of its own, since the store cannot
+// tell what the consumer's policies admit; CheckSchemaScope checks one that
+// sets the schema's settings.
+func TestCheckScopeBesideAScopeOfTheConsumers(t *testing.T) {
+	f := newTenantFixture(t)
+	setTenant := func(tenant uuid.UUID) func(context.Context, pgx.Tx) error {
+		return func(ctx context.Context, tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, sqlSetLocal, settingTenant, tenant.String())
+			return err
+		}
+	}
+	for name, tc := range map[string]struct {
+		cfg  Config
+		want error
+	}{
+		"no check":                 {Config{DB: app, Scope: setTenant(f.theirs)}, limes.ErrTenantBudgetNotFound},
+		"CheckSchemaScope":         {Config{DB: app, Scope: setTenant(f.theirs), CheckScope: CheckSchemaScope}, limes.ErrScopeMismatch},
+		"CheckSchemaScope, admits": {Config{DB: app, Scope: setTenant(f.mine), CheckScope: CheckSchemaScope}, limes.ErrTenantBudgetNotFound},
+	} {
+		usage, err := NewUsageStore(tc.cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := usage.GetTenantBudget(t.Context(), f.mine); !errors.Is(err, tc.want) {
+			t.Errorf("%s: GetTenantBudget: err = %v, want %v", name, err, tc.want)
+		}
+	}
 }

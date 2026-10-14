@@ -60,7 +60,7 @@ func (s *Store) Insert(ctx context.Context, req limes.InsertRequest) error {
 	if err != nil {
 		return err
 	}
-	err = s.inTx(ctx, func(tx pgx.Tx) error {
+	err = s.inTenantTx(ctx, c.Subject.TenantID, func(tx pgx.Tx) error {
 		var exists bool
 		if err := tx.QueryRow(ctx, sqlCapabilityExists, c.ID).Scan(&exists); err != nil {
 			return err
@@ -320,7 +320,7 @@ func (s *Store) ListByPrincipal(ctx context.Context, req limes.ListByPrincipalRe
 	}
 	limit := limes.PageLimit(req.Limit)
 	out := []limes.Capability{}
-	err := s.inTx(ctx, func(tx pgx.Tx) error {
+	err := s.inTenantTx(ctx, req.TenantID, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, sqlListByPrincipal,
 			req.TenantID, string(req.PrincipalType), req.Subject,
 			req.IncludeExpired, s.clock(), req.IncludeRevoked, after, limit+1)
