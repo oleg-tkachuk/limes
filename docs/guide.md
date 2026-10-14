@@ -747,7 +747,7 @@ Elsewhere, implement these and you are done:
 
 To bill or report from the charges ledger, read it through a
 `LedgerReader` rather than a store's tables: `SumCharges` sums a tenant's
-charges over a period — whole, or by UTC hour, day or month — grouped by unit
+charges over a period — whole, or by UTC hour, day, ISO week or month — grouped by unit
 and, as asked, by operation, actor or capability, the largest first within
 each bucket, so the first page of `Limit` rows is the top `Limit`. A refund
 counts with the charge it returns, so a closed period's sums still move.
