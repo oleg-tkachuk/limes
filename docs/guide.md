@@ -598,7 +598,10 @@ func TestMeterContract(t *testing.T) {
 `Ctx` is the context of every call for `Tenant`. A store that refers to its
 tenants, or scopes each tenant's rows, also sets `NewTenant` (another tenant
 it can charge), `TenantCtx` (the context a write for that tenant runs under)
-and `ListCtx` (the context of `ListTenantBudgets`, a read across tenants).
+and `ListCtx` (the context of `ListTenantBudgets`, a read across tenants). One
+that scopes rows by the call's context sets `ScopesTenants` too, and the
+suites check that a call for `Tenant` under another tenant's context returns
+`ErrScopeMismatch` and moves nothing.
 Without them the checks that need a second tenant use a random id and `Ctx`.
 `DeleteCapability` removes a record as `Store.Purge` would, for the
 `PurgeOrphans` checks. `storetest.Env` takes the same `NewTenant`,
@@ -693,7 +696,13 @@ err := records.Revoke(pgstore.WithTenant(ctx, tenant), limes.RevokeRequest{Capab
 
 A role that does not own the tables sees only the rows of the tenant a call
 is scoped to, and none when it is scoped to no tenant; the revocation checks
-see every tenant, as the verifier asks them before it knows the token's.
+see every tenant, as the verifier asks them before it knows the token's. A
+call whose request names its tenant — `Insert`, `ListByPrincipal`, `Bump`,
+`Charge`, `Reserve`, `Settle`, `GetTenantBudget`, `SetTenantBudget` — under a
+scope that does not admit that tenant returns `ErrScopeMismatch`, never
+`ErrNotFound` or `ErrInvalidRequest`. A call that names only an id
+(`GetRecord`, `Revoke`, `Refund`, `Release`, `GetUsage`, `GetCharge`, …) cannot
+be checked so, and answers a row out of scope as not found.
 `onCharged` runs on the store's own `pgx.Tx`. Every time it writes comes from
 `Config.Now`, never from the database's clock.
 
@@ -702,7 +711,9 @@ owner is not bound by the policies. `Config.CheckTenant` runs in `Insert`'s
 transaction, so a consumer that keeps its own tenants answers
 `ErrUnknownTenant` and `ErrTenantDeleted` from the same snapshot the record is
 written in; `Config.Scope` replaces `ScopeFromContext` for a consumer whose
-policies read settings of their own.
+policies read settings of their own; such a Scope gets no scope check unless
+`Config.CheckScope` names one — `pgstore.CheckSchemaScope` for a Scope that
+sets the schema's own settings.
 
 Elsewhere, implement these and you are done:
 

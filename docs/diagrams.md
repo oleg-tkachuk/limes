@@ -778,7 +778,9 @@ with none, uses `UsageStore[struct{}]`; `memstore` still runs `onCharged`
 before it publishes, with the zero `TX` or the handle `TxFactory` makes.
 
 `pgstore` runs each call in one transaction, `onCharged` on that same
-`pgx.Tx`, so a rejection or a failing side effect rolls everything back. It
+`pgx.Tx`, so a rejection or a failing side effect rolls everything back.
+`Bump`, `Charge`, `Reserve` and `Settle` first refuse a scope that does not
+admit the subject's tenant, as `ErrScopeMismatch`, before any row is read. It
 locks in one order, so two calls never wait on each other in a cycle: the
 reservation being settled or released, then the lineage's records `FOR SHARE`
 in id order — a purge locks its batch in the same order — then the tenant's

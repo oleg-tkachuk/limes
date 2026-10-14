@@ -13,6 +13,17 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## pgstore/v0.2.0
+
+- A call whose request names its tenant (`Insert`, `ListByPrincipal`, `Bump`,
+  `Charge`, `Reserve`, `Settle`, `GetTenantBudget`, `SetTenantBudget`) under
+  a scope that did not admit that tenant answered as if its rows were not
+  there — `ErrInvalidRequest` for a child whose parent it could not see,
+  `ErrTenantBudgetNotFound`, an empty page, or PostgreSQL's row-level
+  security error → it returns `limes.ErrScopeMismatch` and changes nothing.
+  Scope each call to the tenant its request names. A `Config.Scope` of your
+  own gets no check unless `Config.CheckScope` names one.
+
 ## v0.57.0
 
 - `Store.Insert` accepted a child with more than `MaxDelegationDepth`
