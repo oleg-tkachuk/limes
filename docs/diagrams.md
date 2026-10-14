@@ -19,8 +19,9 @@ over PostgreSQL with row-level security, and `redisreplay`, a
 `dpop.ReplayCache` over Redis. Each nested module has its own `go.mod` and its
 own tag line, so the root module's dependency graph stays free of a driver.
 The two Biscuit contracts are needed only by a consumer that accepts the
-Biscuit form, and `dpop.ReplayCache` and `dpop.Nonces` only by one that binds
-capabilities to keys. `storetest`, `metertest`, `dpop/dpoptest` and
+Biscuit form, `dpop.ReplayCache` and `dpop.Nonces` only by one that binds
+capabilities to keys, `LedgerReader` only by one that bills or reports from the
+charges ledger, and the two tenant erasers only by one that removes a tenant. `storetest`, `metertest`, `dpop/dpoptest` and
 `jwks/jwkstest` check an implementation against its contract from its own
 tests — the Biscuit and copy contracts too, when the store under test
 implements them — and bound every check by `Env.CheckTimeout`, so a store that
@@ -58,10 +59,12 @@ flowchart LR
         cusage["<b>CopyUsageReader</b><br/>CopyUsage(CopyUsageRequest{RevocationIDs})<br/>→ CopyUsageResult{Copies}"]
         replay["<b>dpop.ReplayCache</b><br/>Seen(ctx, ReplayEntry) · MemoryReplayCache ships"]
         nonces["<b>dpop.Nonces</b><br/>Nonce · Valid"]
+        ledger["<b>LedgerReader</b><br/>SumCharges(SumChargesRequest) → Page[ChargeSum]<br/>by unit · bucket none/hour/day/week/month · op · actor · capability"]
+        erasers["<b>TenantRecordEraser · TenantUsageEraser</b><br/>EraseTenantRecords · EraseTenantUsage"]
     end
 
     impl[("memstore · your own store")]
-    pg["<b>pgstore</b> (nested module)<br/>Store · BiscuitRevocationStore · erasers<br/>UsageStore[pgx.Tx] · CopyUsageReader · Ledger<br/>Migrate · WithTenant · WithAllTenantsReadOnly<br/>RevocationWatcher · row-level security"]
+    pg["<b>pgstore</b> (nested module)<br/>Store · BiscuitRevocationStore · erasers<br/>UsageStore[pgx.Tx] · CopyUsageReader · Ledger<br/>Migrate · CheckSchema · EraseTenant<br/>WithTenant · WithAllTenants · WithAllTenantsReadOnly<br/>RevocationWatcher · row-level security"]
     rr["<b>redisreplay</b> (nested module)<br/>Cache: dpop.ReplayCache over Redis"]
     pgdb{{"PostgreSQL"}}
     redis{{"Redis"}}
@@ -80,6 +83,8 @@ flowchart LR
     verifier --> cache --> store
     verifier -. "AcceptBiscuit" .-> bcache --> brev
     caller -. "admin read" .-> cusage
+    caller -. "billing read" .-> ledger
+    caller -. "remove a tenant" .-> erasers
     metering --> usage
     metering -. "metrics" .-> otel
     static -. "implements" .-> keys
@@ -96,14 +101,20 @@ flowchart LR
     suites -. "check" .-> nonces
     suites -. "check" .-> brev
     suites -. "check" .-> cusage
+    suites -. "check" .-> ledger
+    suites -. "check" .-> erasers
     store --> impl
     usage --> impl
     brev --> impl
     cusage --> impl
+    ledger --> impl
+    erasers --> impl
     pg -. "implements" .-> store
     pg -. "implements" .-> usage
     pg -. "implements" .-> brev
     pg -. "implements" .-> cusage
+    pg -. "implements" .-> ledger
+    pg -. "implements" .-> erasers
     pg --> pgdb
     rr -. "implements" .-> replay
     rr --> redis
@@ -116,7 +127,7 @@ flowchart LR
     class caller client
     class issuer,signer,narrows,verifier,caveats role
     class cache,metering,static,remote,bcache,attenuate,dpop,suites,jwksh,nonce,pg,rr optional
-    class store,usage,keys,impl,brev,cusage,replay,nonces store
+    class store,usage,keys,impl,brev,cusage,replay,nonces,ledger,erasers store
     class jwks,otel,pgdb,redis external
 ```
 
@@ -529,7 +540,7 @@ flowchart TB
 
     sign["Issuer.sign: Signer.sign(ctx, child)<br/>token within MaxTokenBytes"]
     persist{"Store.Insert(InsertRequest{child,<br/>IssuedBy: parent.Subject})<br/>no more than MaxDelegationDepth ancestors"}
-    depth{"Store.IsRevoked(child) answers<br/>(a backstop for a store that does not refuse)"}
+    depth{"Store.IsRevoked(child) returns no error<br/>(a backstop for a store that does not refuse;<br/>the child is already on record)"}
     ok(["IssueResult{Capability, Token}"])
 
     wide["ErrDelegationTooWide"]
@@ -540,7 +551,7 @@ flowchart TB
     stored["the store's error<br/>ErrDelegationTooDeep, …"]
 
     req --> pid -- yes --> copyp -- yes --> own -- yes --> share -- yes --> fill --> valid -- yes --> alive -- yes --> clamp --> start --> n0
-    n7 --> sign --> persist -- ok --> depth -- yes --> ok
+    n7 --> sign --> persist -- ok --> depth -- "no error" --> ok
     pid -- no --> inval
     copyp -- no --> inval
     own -- no --> inval
@@ -553,7 +564,7 @@ flowchart TB
     nar -- widens --> wide
     sign -- "too long" --> inval
     persist -- refused --> stored
-    depth -- "too deep" --> stored
+    depth -- "error, e.g. too deep" --> stored
 
     classDef client fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E
     classDef role fill:#DCFCE7,stroke:#16A34A,color:#14532D
@@ -687,12 +698,13 @@ flowchart TB
 
     subgraph commit ["commit — all together"]
         direction TB
-        w5["each copy's spend += Amount"]
-        w1["capability spend += Amount"]
+        w1["capability spend += Amount<br/>settling: its hold leaves reserved"]
         w2["each ancestor on the lineage as read now:<br/>spend += Amount"]
-        w3["tenant spend += Amount<br/>(the row created, with no ceiling, if missing)"]
-        w0["settling: the hold leaves reserved on the capability,<br/>its copies, the tenant and each ancestor<br/>that held it and still has a row; the reservation is deleted"]
+        w0["settling: each ancestor that held it<br/>and still has a row: its hold leaves reserved"]
+        w3["tenant spend += Amount · settling: its hold leaves reserved<br/>(the row created, with no ceiling, if missing)"]
+        w5["each copy's spend += Amount<br/>settling: its hold leaves reserved"]
         w4["ledger row: ChargeID · TenantID · Amount · UnitCode · At<br/>Ancestors · copy ids · Op · Actor · ExternalRef<br/>ReservationID · Overrun · tenant period"]
+        w6["settling: the reservation is deleted"]
     end
 
     ok(["ChargeReceipt{ChargeID, SpentAmount, Overrun, TenantID, UnitCode}"])
@@ -718,7 +730,7 @@ flowchart TB
     sval -- "zero id" --> e5
     hold -- "settled by this subject,<br/>under the same copies" --> replay
     hold -- "released · expired · another capability's<br/>· other copies" --> e5
-    cb -- nil --> w5 --> w1 --> w2 --> w3 --> w0 --> w4 --> ok
+    cb -- nil --> w1 --> w2 --> w0 --> w3 --> w5 --> w4 --> w6 --> ok
     ok -. "later" .-> refund
     val -- invalid --> e0
     c0 -- "no, OverrunReject" --> e1
@@ -736,7 +748,7 @@ flowchart TB
     class req,sreq,ok,replay client
     class val,sval,seen,same,hold,lin,c00,c0,c1,c2,c3 role
     class cb optional
-    class w5,w1,w2,w3,w0,w4,refund store
+    class w1,w2,w0,w3,w5,w4,w6,refund store
     class e0,e1,e2,e3,e4,e5,e6,e7 external
 ```
 
@@ -802,10 +814,10 @@ flowchart LR
     cascade["CascadeChildren:<br/>a revocation entry per descendant,<br/>MaxDelegationDepth generations down,<br/>for the audit trail; an earlier entry stands"]
     chain["IsRevoked(id):<br/>id revoked, or any ancestor still on record revoked<br/>past MaxDelegationDepth: ErrDelegationTooDeep<br/>pgstore: one statement, every tenant"]
     cache["<b>CachedRevocationChecker</b><br/>answer cached for TTL (default 2s)<br/>one upstream call per id at a time<br/>bounded: the oldest answer makes room<br/>errors never cached · a Clear mid-lookup<br/>discards that lookup's answer"]
-    notify{{"revocation signal<br/>pgstore: RevocationWatcher on<br/>RevocationChannel; memstore: none"}}
+    notify{{"revocation signal<br/>pgstore: RevocationWatcher LISTENs on<br/>RevocationChannel; memstore: none"}}
     bop(["RevokeBiscuit(RevokeBiscuitRequest{Copy: Verifier.BiscuitCopy(token)})"])
     blist[("<b>BiscuitRevocationStore</b><br/>revoked block ids")]
-    bcache["<b>CachedBiscuitRevocationChecker</b><br/>answer per revocation id, cached for TTL<br/>bounded · dropped by Clear"]
+    bcache["<b>CachedBiscuitRevocationChecker</b><br/>per revocation id, in turn; stops at the first revoked<br/>cached for TTL · one upstream call per id at a time<br/>bounded · dropped by Clear"]
     v1["Verifier"]
     v2["Verifier"]
 
@@ -814,11 +826,13 @@ flowchart LR
     store --> chain --> cache
     cache --> v1
     cache --> v2
-    notify -. "Clear()" .-> cache
+    store -. "pgstore: statement trigger on a write<br/>to limes.revocations → pg_notify" .-> notify
+    blist -. "pgstore: statement trigger on a write<br/>to limes.biscuit_revocations → pg_notify" .-> notify
+    notify -. "Clear() once listening<br/>and on each notification" .-> cache
     bop --> blist --> bcache
     bcache --> v1
     bcache --> v2
-    notify -. "Clear()" .-> bcache
+    notify -. "Clear() once listening<br/>and on each notification" .-> bcache
 
     classDef client fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E
     classDef role fill:#DCFCE7,stroke:#16A34A,color:#14532D
@@ -868,3 +882,92 @@ handed out as copies. A document with entries but no usable
 Ed25519 key counts as a failed fetch, so the last good set stays in service;
 two entries under one kid are both dropped. The issuer serves the set with `jwks.NewHandler`: a strong ETag
 answering `If-None-Match` with 304, and `Cache-Control: public, max-age`.
+
+## pgstore: a call under its tenant's scope
+
+Every call of `pgstore` runs in a transaction that `Config.Scope` scopes first;
+the default reads the scope a context carries. A call whose request names a
+tenant is refused with `ErrScopeMismatch` when that scope does not admit the
+tenant, before it reads a row, rather than answer as rows that are not there.
+Row-level security then binds every statement: `tenant_visible` for reads,
+`tenant_writable` for writes. The table owner, as `Migrate` runs, is not bound.
+
+```mermaid
+flowchart TB
+    ctx(["ctx: WithTenant(id) · WithAllTenants · WithAllTenantsReadOnly · none"])
+    ro{"the call writes,<br/>under WithAllTenantsReadOnly"}
+    begin["BEGIN · Config.Scope(ctx, tx)<br/>default ScopeFromContext: set_config, local to the transaction<br/>limes.tenant_id = id · limes.all_tenants = on · = read"]
+    named{"the request names a tenant<br/>Insert · ListByPrincipal · Bump · Charge · Reserve · Settle<br/>Get/SetTenantBudget · erasers · SumCharges"}
+    check{"Config.CheckScope admits it<br/>default: the context's scope is every tenant or that one;<br/>none: CheckSchemaScope asks the database"}
+    rls["statements under row-level security<br/>read: tenant_visible — all_tenants on or read, or tenant_id matches<br/>write: tenant_writable — all_tenants on, or tenant_id matches"]
+    commit(["COMMIT"])
+    idonly["a call naming only an id<br/>(GetRecord · Revoke · Refund · Release · GetUsage · …):<br/>a row out of scope is not found"]
+    definer["IsRevoked · IsBiscuitRevoked<br/>one statement, no transaction:<br/>a SECURITY DEFINER function sees every tenant"]
+    mismatch["ErrScopeMismatch"]
+
+    ctx --> ro -- no --> begin --> named -- yes --> check -- yes --> rls --> commit
+    named -- no --> rls
+    rls -.-> idonly
+    ro -- yes --> mismatch
+    ctx -. "a verifier's lookups" .-> definer
+    check -- no --> mismatch
+
+    classDef client fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E
+    classDef role fill:#DCFCE7,stroke:#16A34A,color:#14532D
+    classDef optional fill:#F1F5F9,stroke:#64748B,color:#334155,stroke-dasharray:5 4
+    classDef store fill:#FEF3C7,stroke:#D97706,color:#78350F
+    classDef external fill:#FCE7F3,stroke:#DB2777,color:#831843
+    class ctx,commit client
+    class ro,begin,named,check role
+    class idonly,definer optional
+    class rls store
+    class mismatch external
+```
+
+A consumer's own `Config.Scope` gets no check unless it also sets
+`Config.CheckScope`; `CheckSchemaScope` serves one that sets the schema's own
+settings.
+
+## Erasing a tenant
+
+`Store.EraseTenant` removes a tenant from `pgstore` in one transaction scoped
+to it, and runs the consumer's `onErased` last in the same transaction, so the
+consumer's rows of the tenant go with the store's or not at all. It locks in
+the order the meter does, so it never waits on a meter call in a cycle.
+
+```mermaid
+flowchart TB
+    req(["EraseTenantRequest{TenantID, Note, Actor} · onErased"])
+    val{"Validate"}
+    tx["inTenantTx: scoped, CheckScope admits the tenant"]
+    holds["lock the tenant's holds, in id order"]
+    recs["lock its records, in id order"]
+    revoke["revoke every record not revoked yet<br/>(the notify trigger fires: watchers Clear)"]
+    remove["remove the records Purge would:<br/>expired before now − MinPurgeRetention"]
+    kept["count the records kept: revoked, until Purge takes them"]
+    usage["lock aggregate · counters · copies' counters<br/>delete holds · tenant budget · usage · copy usage · charges"]
+    cb{"onErased(ctx, tx)"}
+    ok(["EraseTenantResult{Revoked, Removed, Kept}"])
+    back["rolled back: nothing erased"]
+
+    req --> val -- ok --> tx --> holds --> recs --> revoke --> remove --> kept --> usage --> cb -- nil --> ok
+    val -- invalid --> inval["ErrInvalidRequest"]
+    tx -- "scope does not admit it" --> mismatch["ErrScopeMismatch"]
+    cb -- error --> back
+
+    classDef client fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E
+    classDef role fill:#DCFCE7,stroke:#16A34A,color:#14532D
+    classDef optional fill:#F1F5F9,stroke:#64748B,color:#334155,stroke-dasharray:5 4
+    classDef store fill:#FEF3C7,stroke:#D97706,color:#78350F
+    classDef external fill:#FCE7F3,stroke:#DB2777,color:#831843
+    class req,ok client
+    class val,tx role
+    class cb optional
+    class holds,recs,revoke,remove,kept,usage store
+    class inval,mismatch,back external
+```
+
+A record kept stays revoked: an id not on record is not revoked, so removing
+a live record early would let its token through. The separate
+`EraseTenantRecords` and `UsageStore.EraseTenantUsage` do each half alone, and
+`memstore` implements both.
