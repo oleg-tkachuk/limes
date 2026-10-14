@@ -214,6 +214,8 @@ func TestHandlerMaxAge(t *testing.T) {
 		"none named": {HandlerConfig{Keys: keys}, fmt.Sprintf("public, max-age=%d", int64(DefaultMaxAge/time.Second))},
 		"revalidate": {HandlerConfig{Keys: keys, Revalidate: true}, "public, max-age=0"},
 		"a minute":   {HandlerConfig{Keys: keys, MaxAge: time.Minute}, "public, max-age=60"},
+		// Whole seconds, the fraction dropped.
+		"a second and a half": {HandlerConfig{Keys: keys, MaxAge: 1500 * time.Millisecond}, "public, max-age=1"},
 	} {
 		h, err := NewHandler(tc.cfg)
 		if err != nil {
@@ -227,8 +229,8 @@ func TestHandlerMaxAge(t *testing.T) {
 	}
 }
 
-// A handler with no keys, or a negative max-age — an invalid Cache-Control
-// on every response — is refused; a remote resolver with a negative
+// A handler with no keys, a negative max-age — an invalid Cache-Control on
+// every response — or one under a second is refused; a remote resolver with a negative
 // interval or bound likewise.
 func TestConfigsRefuseNegatives(t *testing.T) {
 	keys := func() map[string]ed25519.PublicKey { return nil }
@@ -236,6 +238,8 @@ func TestConfigsRefuseNegatives(t *testing.T) {
 		"no keys":                   {},
 		"negative max-age":          {Keys: keys, MaxAge: -time.Second},
 		"max-age beside revalidate": {Keys: keys, MaxAge: time.Second, Revalidate: true},
+		// Served in whole seconds, it would read max-age=0: Revalidate's.
+		"max-age under a second": {Keys: keys, MaxAge: 500 * time.Millisecond},
 	} {
 		if _, err := NewHandler(cfg); err == nil {
 			t.Errorf("NewHandler, %s: accepted", name)

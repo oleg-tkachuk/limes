@@ -99,8 +99,8 @@ verifier, err := limes.NewVerifier(limes.VerifierConfig{
 The issuer serves that document with `jwks.NewHandler` — `application/jwk-set+json`,
 a strong ETag answering `If-None-Match` with 304, `Cache-Control: public,
 max-age` in whole seconds (`DefaultMaxAge` unless `MaxAge` says otherwise;
-`Revalidate` serves `max-age=0` and excludes a `MaxAge`, a `MaxAge` under a
-second is served as 0 too, and a negative `MaxAge` is refused) — over a function returning its keys, such as
+`Revalidate` serves `max-age=0` and excludes a `MaxAge`; a negative `MaxAge`,
+or one under a second, is refused) — over a function returning its keys, such as
 `jwks.Static.Keys`:
 
 ```go
