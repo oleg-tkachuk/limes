@@ -3,6 +3,8 @@ package pgstore
 import (
 	"context"
 	"errors"
+	"fmt"
+	"maps"
 	"testing"
 	"time"
 
@@ -220,15 +222,24 @@ func TestCheckScopeBesideAScopeOfTheConsumers(t *testing.T) {
 	}
 }
 
-// A read-only scope reads every tenant's rows and writes none: a call that
-// writes is refused before it begins, and the schema's policies refuse the
-// writes of a Scope that sets the read-only setting itself.
+// A read-only scope reads every tenant's rows and writes none: whether the
+// call's context says so or a Scope of the consumer's sets the read-only
+// setting, every call that writes is refused as out of scope, runs none of
+// the consumer's code, and changes no row.
 func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 	f := newTenantFixture(t)
 	mine := WithTenant(t.Context(), f.mine)
 	if _, err := f.usage.SetTenantBudget(mine, limes.SetTenantBudgetRequest{
 		TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true}, UnitCode: limes.DefaultUnitCode,
 	}); err != nil {
+		t.Fatal(err)
+	}
+	charged, err := f.usage.Charge(mine, limes.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, err := f.usage.Reserve(mine, limes.ReserveRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1})
+	if err != nil {
 		t.Fatal(err)
 	}
 	ro := WithAllTenantsReadOnly(t.Context())
@@ -241,44 +252,12 @@ func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 	if page, err := f.usage.ListTenantBudgets(ro, limes.ListTenantBudgetsRequest{}); err != nil || len(page.Items) != 1 {
 		t.Errorf("ListTenantBudgets under a read-only scope = %d rows, %v; want this tenant's", len(page.Items), err)
 	}
-	c := f.parent
-	c.ID, c.ParentID = uuid.New(), uuid.Nil
+	// Past the hold's expiry and the records' retention, so housekeeping
+	// let through would have rows to take.
 	f.clock.Advance(rlsTTL + 2*limes.MinPurgeRetention)
-	for name, write := range map[string]func() error{
-		"Insert": func() error { return f.records.Insert(ro, limes.InsertRequest{Capability: c}) },
-		"Revoke": func() error { return f.records.Revoke(ro, limes.RevokeRequest{CapabilityID: f.child.ID}) },
-		"Purge": func() error {
-			_, err := f.records.Purge(ro, limes.PurgeRequest{})
-			return err
-		},
-		"SetTenantBudget": func() error {
-			_, err := f.usage.SetTenantBudget(ro, limes.SetTenantBudgetRequest{
-				TenantID: f.mine, Ceiling: limes.BudgetCeiling{Max: 1}, UnitCode: limes.DefaultUnitCode,
-			})
-			return err
-		},
-		"Charge": func() error {
-			_, err := f.usage.Charge(ro, limes.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}, nil)
-			return err
-		},
-		"ReleaseExpired": func() error {
-			_, err := f.usage.ReleaseExpired(ro, limes.ReleaseExpiredRequest{})
-			return err
-		},
-		"PurgeOrphans": func() error {
-			_, err := f.usage.PurgeOrphans(ro, limes.PurgeOrphansRequest{})
-			return err
-		},
-		"EraseTenant": func() error {
-			_, err := f.records.EraseTenant(ro, limes.EraseTenantRequest{TenantID: f.mine}, nil)
-			return err
-		},
-	} {
-		if err := write(); !errors.Is(err, limes.ErrScopeMismatch) {
-			t.Errorf("%s under a read-only scope: err = %v, want ErrScopeMismatch", name, err)
-		}
-	}
-	// The policies alone, with no check before them.
+
+	// A consumer's Scope that maps a marker of its own to the read-only
+	// setting: the store never sees WithAllTenantsReadOnly.
 	readEvery := func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, sqlSetLocal, settingAllTenants, settingRead)
 		return err
@@ -287,18 +266,119 @@ func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	usage, err := NewUsageStore(Config{DB: app, Now: f.clock.Now, Scope: readEvery})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := records.GetRecord(t.Context(), f.child.ID); err != nil {
-		t.Errorf("GetRecord under the read-only setting: %v", err)
+		t.Errorf("GetRecord under the consumer's read-only Scope: %v", err)
 	}
-	if got, err := records.Purge(t.Context(), limes.PurgeRequest{}); err != nil || got.Purged != 0 {
-		t.Errorf("Purge under the read-only setting = %+v, %v; want nothing purged", got, err)
+
+	before := tableDigests(t)
+	for scope, s := range map[string]struct {
+		ctx     context.Context
+		records *Store
+		usage   *UsageStore
+	}{
+		"WithAllTenantsReadOnly":         {ro, f.records, f.usage},
+		"the consumer's read-only Scope": {t.Context(), records, usage},
+	} {
+		ran := false
+		consumer := func(context.Context, pgx.Tx) error {
+			ran = true
+			return nil
+		}
+		c := f.parent
+		c.ID, c.ParentID = uuid.New(), uuid.Nil
+		subject := meterSubject(f.child.ID, f.mine)
+		for name, write := range map[string]func() error{
+			"Insert": func() error { return s.records.Insert(s.ctx, limes.InsertRequest{Capability: c}) },
+			"Revoke": func() error { return s.records.Revoke(s.ctx, limes.RevokeRequest{CapabilityID: f.child.ID}) },
+			"RevokeBiscuit": func() error {
+				return s.records.RevokeBiscuit(s.ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(t, f.child.ID, []byte("read-only"))})
+			},
+			"Purge": func() error {
+				_, err := s.records.Purge(s.ctx, limes.PurgeRequest{})
+				return err
+			},
+			"EraseTenantRecords": func() error {
+				_, err := s.records.EraseTenantRecords(s.ctx, limes.EraseTenantRequest{TenantID: f.mine})
+				return err
+			},
+			"EraseTenant": func() error {
+				_, err := s.records.EraseTenant(s.ctx, limes.EraseTenantRequest{TenantID: f.mine}, consumer)
+				return err
+			},
+			"Bump": func() error {
+				_, err := s.usage.Bump(s.ctx, limes.BumpRequest{Subject: subject})
+				return err
+			},
+			"Charge": func() error {
+				_, err := s.usage.Charge(s.ctx, limes.ChargeRequest{Subject: subject, Amount: 1}, consumer)
+				return err
+			},
+			"Reserve": func() error {
+				_, err := s.usage.Reserve(s.ctx, limes.ReserveRequest{Subject: subject, Amount: 1})
+				return err
+			},
+			"Settle": func() error {
+				_, err := s.usage.Settle(s.ctx, limes.SettleRequest{Subject: subject, ReservationID: held.ID, Amount: 1}, consumer)
+				return err
+			},
+			"Release": func() error { return s.usage.Release(s.ctx, limes.ReleaseRequest{ReservationID: held.ID}) },
+			"Refund": func() error {
+				_, err := s.usage.Refund(s.ctx, limes.RefundRequest{ChargeID: charged.ChargeID, Remaining: true})
+				return err
+			},
+			"SetTenantBudget": func() error {
+				_, err := s.usage.SetTenantBudget(s.ctx, limes.SetTenantBudgetRequest{
+					TenantID: f.mine, Ceiling: limes.BudgetCeiling{Max: 1}, UnitCode: limes.DefaultUnitCode,
+				})
+				return err
+			},
+			"ReleaseExpired": func() error {
+				_, err := s.usage.ReleaseExpired(s.ctx, limes.ReleaseExpiredRequest{})
+				return err
+			},
+			"PurgeOrphans": func() error {
+				_, err := s.usage.PurgeOrphans(s.ctx, limes.PurgeOrphansRequest{})
+				return err
+			},
+			"DeleteUsage": func() error { return s.usage.DeleteUsage(s.ctx, limes.DeleteUsageRequest{CapabilityID: f.child.ID}) },
+			"EraseTenantUsage": func() error {
+				return s.usage.EraseTenantUsage(s.ctx, limes.EraseTenantUsageRequest{TenantID: f.mine})
+			},
+		} {
+			if err := write(); !errors.Is(err, limes.ErrScopeMismatch) {
+				t.Errorf("%s under %s: err = %v, want ErrScopeMismatch", name, scope, err)
+			}
+		}
+		if ran {
+			t.Errorf("a write under %s ran the consumer's code", scope)
+		}
 	}
-	if err := records.Insert(t.Context(), limes.InsertRequest{Capability: c}); err == nil {
-		t.Error("Insert under the read-only setting succeeded")
+	if after := tableDigests(t); !maps.Equal(after, before) {
+		t.Errorf("the tables changed under a read-only scope: %v, want %v", after, before)
 	}
-	if _, err := f.records.GetRecord(mine, f.child.ID); err != nil {
-		t.Errorf("the record after the refused writes: %v", err)
+}
+
+// sqlTableDigest is a digest of every row of a table, as the owner reads it.
+const sqlTableDigest = `SELECT coalesce(md5(string_agg(t::text, ',' ORDER BY t::text)), '') FROM %s t`
+
+// tableDigests is a digest of each table the schema's policies bind, so a
+// test can tell that a call changed no row of any.
+func tableDigests(t *testing.T) map[string]string {
+	t.Helper()
+	digests := make(map[string]string, len(scopedTables))
+	for _, table := range scopedTables {
+		var digest string
+		query := fmt.Sprintf(sqlTableDigest, pgx.Identifier{schema, table}.Sanitize())
+		if err := owner.QueryRow(t.Context(), query).Scan(&digest); err != nil {
+			t.Fatalf("digest of %s: %v", table, err)
+		}
+		digests[table] = digest
 	}
+	return digests
 }
 
 // scopedTables is every table the schema's policies bind.

@@ -171,3 +171,24 @@ func countedScope(calls *atomic.Int64) func(context.Context, pgx.Tx) error {
 		return ScopeFromContext(ctx, tx)
 	}
 }
+
+// consumerReadOnlyKey is a consumer's own marker of a call that reads every
+// tenant, which the store never sees: consumerScope maps it to the schema's
+// read-only setting.
+type consumerReadOnlyKey struct{}
+
+// consumerReadOnly marks ctx as the consumer's read across every tenant.
+func consumerReadOnly(ctx context.Context) context.Context {
+	return context.WithValue(ctx, consumerReadOnlyKey{}, true)
+}
+
+// consumerScope is a consumer's Config.Scope: its own read-only marker sets
+// the schema's read-only setting, and WithTenant and WithAllTenants set
+// theirs as ScopeFromContext does.
+func consumerScope(ctx context.Context, tx pgx.Tx) error {
+	if ctx.Value(consumerReadOnlyKey{}) != nil {
+		_, err := tx.Exec(ctx, sqlSetLocal, settingAllTenants, settingRead)
+		return err
+	}
+	return ScopeFromContext(ctx, tx)
+}
