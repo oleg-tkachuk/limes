@@ -63,9 +63,12 @@ type Store struct {
 type UsageStore[TX any] struct {
 	mu sync.Mutex
 
-	usage   map[uuid.UUID]limes.Usage
-	budgets map[uuid.UUID]limes.TenantBudget
-	ledger  []ledgerEntry
+	usage map[uuid.UUID]limes.Usage
+	// tenantOf is the tenant of each capability with a usage row, so a
+	// row outliving its record still names its tenant (EraseTenantUsage).
+	tenantOf map[uuid.UUID]uuid.UUID
+	budgets  map[uuid.UUID]limes.TenantBudget
+	ledger   []ledgerEntry
 	// The ledger's indexes, each to a position in ledger: by charge id, by
 	// (capability, external ref) and by the reservation a charge settled.
 	byCharge      map[uuid.UUID]int
@@ -189,11 +192,12 @@ func NewUsageStore[TX any](cfg UsageStoreConfig[TX]) (*UsageStore[TX], error) {
 		cfg.Now = time.Now
 	}
 	return &UsageStore[TX]{
-		usage:   map[uuid.UUID]limes.Usage{},
-		budgets: map[uuid.UUID]limes.TenantBudget{},
-		holds:   map[uuid.UUID]hold{},
-		copies:  map[string]copyCounter{},
-		periods: map[uuid.UUID]uint64{},
+		usage:    map[uuid.UUID]limes.Usage{},
+		tenantOf: map[uuid.UUID]uuid.UUID{},
+		budgets:  map[uuid.UUID]limes.TenantBudget{},
+		holds:    map[uuid.UUID]hold{},
+		copies:   map[string]copyCounter{},
+		periods:  map[uuid.UUID]uint64{},
 
 		byCharge:      map[uuid.UUID]int{},
 		byRef:         map[refKey]int{},
@@ -452,6 +456,41 @@ func (s *Store) Purge(_ context.Context, req limes.PurgeRequest) (limes.PurgeRes
 	return limes.PurgeResult{Purged: int64(len(due))}, nil
 }
 
+// EraseTenantRecords implements limes.TenantRecordEraser: it revokes each
+// of the tenant's capabilities not revoked yet and removes those Purge would
+// remove at limes.MinPurgeRetention, leaving the rest to Purge.
+func (s *Store) EraseTenantRecords(_ context.Context, req limes.EraseTenantRequest) (limes.EraseTenantResult, error) {
+	if err := req.Validate(); err != nil {
+		return limes.EraseTenantResult{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.nowFn()
+	cutoff := now.Add(-limes.MinPurgeRetention)
+	var out limes.EraseTenantResult
+	for id, c := range s.caps {
+		if c.Subject.TenantID != req.TenantID {
+			continue
+		}
+		if _, ok := s.revoked[id]; !ok {
+			s.revokeLocked(id, limes.Revocation{RevokedAt: now, Note: req.Note, Actor: req.Actor})
+			out.Revoked++
+		}
+		// A child expires no later than its parent, so the records due
+		// hold each one's descendants: none is left without its parent.
+		if c.ExpiresAt.IsZero() || !c.ExpiresAt.Before(cutoff) {
+			out.Kept++
+			continue
+		}
+		delete(s.caps, id)
+		delete(s.revoked, id)
+		delete(s.issuedBy, id)
+		maps.DeleteFunc(s.revokedCopies, func(_ string, r limes.BiscuitRevocation) bool { return r.CapabilityID == id })
+		out.Removed++
+	}
+	return out, nil
+}
+
 // depthLocked is how many of c's ancestors are on record, counted no
 // further than one past MaxDelegationDepth: enough to order a purge, and
 // bounded on a chain too deep or a corrupt cycle. s.mu must be held.
@@ -578,7 +617,7 @@ func (s *UsageStore[TX]) Bump(_ context.Context, req limes.BumpRequest) (limes.B
 		au := s.usage[a.ID]
 		au.CapabilityID = a.ID
 		au.RequestCount++
-		s.usage[a.ID] = au
+		s.putUsageLocked(a.ID, req.Subject.TenantID(), au)
 	}
 	for _, c := range req.Subject.Copies() {
 		cc := s.copies[string(c.RevocationID)]
@@ -588,7 +627,7 @@ func (s *UsageStore[TX]) Bump(_ context.Context, req limes.BumpRequest) (limes.B
 	}
 	u.CapabilityID = req.Subject.CapabilityID()
 	u.RequestCount = next
-	s.usage[req.Subject.CapabilityID()] = u
+	s.putUsageLocked(req.Subject.CapabilityID(), req.Subject.TenantID(), u)
 	return limes.BumpReceipt{RequestCount: next}, nil
 }
 
@@ -702,6 +741,18 @@ func entryLocked[TX any, K comparable](s *UsageStore[TX], index map[K]int, key K
 	return s.ledger[i], true
 }
 
+// putUsageLocked writes capID's usage row, of tenant. s.mu must be held.
+func (s *UsageStore[TX]) putUsageLocked(capID, tenant uuid.UUID, u limes.Usage) {
+	s.usage[capID] = u
+	s.tenantOf[capID] = tenant
+}
+
+// dropUsageLocked removes capID's usage row. s.mu must be held.
+func (s *UsageStore[TX]) dropUsageLocked(capID uuid.UUID) {
+	delete(s.usage, capID)
+	delete(s.tenantOf, capID)
+}
+
 // appendLocked adds entry to the ledger and its indexes. s.mu must be held.
 func (s *UsageStore[TX]) appendLocked(entry ledgerEntry) {
 	i := len(s.ledger)
@@ -793,7 +844,7 @@ func (s *UsageStore[TX]) chargeLocked(
 	u.SpentAmount = stagedSpent
 	u.ReservedAmount = max0(u.ReservedAmount - released)
 	u.UnitCode = unit
-	s.usage[req.Subject.CapabilityID()] = u
+	s.putUsageLocked(req.Subject.CapabilityID(), req.Subject.TenantID(), u)
 	for _, a := range ancestors {
 		au := s.usage[a.ID]
 		au.CapabilityID = a.ID
@@ -801,12 +852,12 @@ func (s *UsageStore[TX]) chargeLocked(
 		if au.UnitCode == "" {
 			au.UnitCode = unit
 		}
-		s.usage[a.ID] = au
+		s.putUsageLocked(a.ID, req.Subject.TenantID(), au)
 	}
 	for _, id := range holders {
 		if au, ok := s.usage[id]; ok {
 			au.ReservedAmount = max0(au.ReservedAmount - released)
-			s.usage[id] = au
+			s.putUsageLocked(id, req.Subject.TenantID(), au)
 		}
 	}
 	b := s.tenantLocked(req.Subject.TenantID(), unit)
@@ -1028,7 +1079,7 @@ func (s *UsageStore[TX]) applyHoldLocked(h hold, sign limes.Nanos) {
 		if u.UnitCode == "" {
 			u.UnitCode = h.unit
 		}
-		s.usage[id] = u
+		s.putUsageLocked(id, h.tenantID, u)
 	}
 	b := s.tenantLocked(h.tenantID, h.unit)
 	b.ReservedAmount = max0(b.ReservedAmount + sign*h.amount)
@@ -1279,7 +1330,7 @@ func (s *UsageStore[TX]) Refund(_ context.Context, req limes.RefundRequest) (lim
 	for _, id := range append([]uuid.UUID{e.CapabilityID}, e.Ancestors...) {
 		if u, ok := s.usage[id]; ok {
 			u.SpentAmount = max0(u.SpentAmount - amount)
-			s.usage[id] = u
+			s.putUsageLocked(id, e.TenantID, u)
 		}
 	}
 	// A charge of a period since closed is history: the current period's
@@ -1547,7 +1598,7 @@ func (s *UsageStore[TX]) DeleteUsage(_ context.Context, req limes.DeleteUsageReq
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.releaseHoldsLocked(func(id uuid.UUID) bool { return id == capID })
-	delete(s.usage, capID)
+	s.dropUsageLocked(capID)
 	maps.DeleteFunc(s.copies, func(_ string, c copyCounter) bool { return c.capID == capID })
 	s.forgetAncestorLocked(func(id uuid.UUID) bool { return id == capID })
 	return nil
@@ -1564,6 +1615,36 @@ func (s *UsageStore[TX]) forgetAncestorLocked(gone func(uuid.UUID) bool) {
 			s.holds[id] = h
 		}
 	}
+}
+
+// EraseTenantUsage implements limes.TenantUsageEraser: it drops the
+// tenant's holds, counters, copies' counters, ledger entries and aggregate.
+func (s *UsageStore[TX]) EraseTenantUsage(_ context.Context, req limes.EraseTenantUsageRequest) error {
+	if err := req.Validate(); err != nil {
+		return err
+	}
+	tenant := req.TenantID
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	mine := func(capID uuid.UUID) bool { return s.tenantOf[capID] == tenant }
+	maps.DeleteFunc(s.holds, func(_ uuid.UUID, h hold) bool { return h.tenantID == tenant })
+	maps.DeleteFunc(s.copies, func(_ string, c copyCounter) bool { return mine(c.capID) })
+	for id := range s.usage {
+		if mine(id) {
+			s.dropUsageLocked(id)
+		}
+	}
+	ledger := slices.DeleteFunc(s.ledger, func(e ledgerEntry) bool { return e.TenantID == tenant })
+	s.ledger = nil
+	clear(s.byCharge)
+	clear(s.byRef)
+	clear(s.byReservation)
+	for _, e := range ledger {
+		s.appendLocked(e)
+	}
+	delete(s.budgets, tenant)
+	delete(s.periods, tenant)
+	return nil
 }
 
 func (s *UsageStore[TX]) PurgeOrphans(_ context.Context, req limes.PurgeOrphansRequest) (limes.PurgeOrphansResult, error) {
@@ -1599,7 +1680,7 @@ func (s *UsageStore[TX]) PurgeOrphans(_ context.Context, req limes.PurgeOrphansR
 	// batch purges if they are orphans too.
 	s.releaseHoldsLocked(func(id uuid.UUID) bool { return batch[id] })
 	for id := range batch {
-		delete(s.usage, id)
+		s.dropUsageLocked(id)
 	}
 	s.forgetAncestorLocked(func(id uuid.UUID) bool { return batch[id] })
 	maps.DeleteFunc(s.copies, func(_ string, c copyCounter) bool { return batch[c.capID] })
@@ -1628,9 +1709,11 @@ func max0(n limes.Nanos) limes.Nanos {
 // nothing but this module. If either assertion breaks, a third party cannot
 // implement the contract either.
 var (
+	_ limes.TenantRecordEraser   = (*Store)(nil)
 	_ limes.Store                = (*Store)(nil)
 	_ limes.IssuanceStore        = (*Store)(nil)
 	_ limes.UsageStore[struct{}] = (*UsageStore[struct{}])(nil)
+	_ limes.TenantUsageEraser    = (*UsageStore[struct{}])(nil)
 )
 
 var _ limes.CopyUsageReader = (*UsageStore[struct{}])(nil)

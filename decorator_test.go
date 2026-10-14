@@ -6,7 +6,6 @@ import (
 	"go/token"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"testing"
 
@@ -93,25 +92,43 @@ func TestInstrumentForwardsEveryInterfaceTheStoreImplements(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wrapped, err := limes.Instrument[struct{}](inner)
-	if err != nil {
-		t.Fatal(err)
+	// Every mix of the optional interfaces: the decorator claims each the
+	// store has, and none it lacks.
+	stores := map[string]limes.UsageStore[struct{}]{
+		"every one": inner,
+		"CopyUsageReader alone": struct {
+			limes.UsageStore[struct{}]
+			limes.CopyUsageReader
+		}{inner, inner},
+		"TenantUsageEraser alone": struct {
+			limes.UsageStore[struct{}]
+			limes.TenantUsageEraser
+		}{inner, inner},
+		"none": struct{ limes.UsageStore[struct{}] }{inner},
 	}
-	innerType, wrappedType := reflect.TypeOf(inner), reflect.TypeOf(wrapped)
-	var checked []string
-	for name, methods := range interfaceMethods(t) {
-		if !hasMethods(innerType, methods) {
-			continue
+	checked := map[string]bool{}
+	for mix, store := range stores {
+		wrapped, err := limes.Instrument[struct{}](store)
+		if err != nil {
+			t.Fatal(err)
 		}
-		checked = append(checked, name)
-		if !hasMethods(wrappedType, methods) {
-			t.Errorf("Instrument hides %s, which the wrapped store implements", name)
+		storeType, wrappedType := reflect.TypeOf(store), reflect.TypeOf(wrapped)
+		for name, methods := range interfaceMethods(t) {
+			has, shows := hasMethods(storeType, methods), hasMethods(wrappedType, methods)
+			switch {
+			case has && !shows:
+				t.Errorf("%s: Instrument hides %s, which the wrapped store implements", mix, name)
+			case shows && !has:
+				t.Errorf("%s: Instrument claims %s, which the wrapped store lacks", mix, name)
+			}
+			checked[name] = checked[name] || has
 		}
 	}
-	// The rule is only pinned if it reaches the optional interface.
-	const optional = "CopyUsageReader"
-	if !slices.Contains(checked, optional) {
-		t.Fatalf("checked %v, want %s among them", checked, optional)
+	// The rule is only pinned if it reaches the optional interfaces.
+	for _, optional := range []string{"CopyUsageReader", "TenantUsageEraser"} {
+		if !checked[optional] {
+			t.Errorf("no store checked implements %s", optional)
+		}
 	}
 }
 

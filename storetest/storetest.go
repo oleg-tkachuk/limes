@@ -234,6 +234,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"InsertRefusesATenantItCannotMintFor", checkInsertTenants},
 		{"BiscuitRevocation", checkBiscuit},
 		{"ACallScopedToAnotherTenantIsRefused", checkScopeMismatch},
+		{"EraseTenantRecordsKeepsWhatAVerifierStillNeeds", checkEraseTenant},
 	}
 	for _, c := range checks {
 		t.Run(c.name, func(t *testing.T) {
@@ -1042,5 +1043,76 @@ func checkScopeMismatch(t *testing.T, f fixture) {
 		TenantID: f.Tenant, PrincipalType: parent.Subject.Type, Subject: parent.Subject.Subject,
 	}); !errors.Is(err, limes.ErrScopeMismatch) {
 		t.Errorf("ListByPrincipal of Tenant under another tenant's context: err = %v, want ErrScopeMismatch", err)
+	}
+}
+
+// Erasing a tenant's records stops every token of the tenant and removes no
+// record a verifier may still need: an id not on record is not revoked, so a
+// record gone while its token may verify would let that token through
+// again. What Purge would take goes now; the rest stays, revoked, for Purge.
+func checkEraseTenant(t *testing.T, f fixture) {
+	eraser, ok := f.Store.(limes.TenantRecordEraser)
+	if !ok {
+		t.Skip("the Store does not implement limes.TenantRecordEraser")
+	}
+	other, err := f.newTenant()
+	if err != nil {
+		t.Fatalf("NewTenant: %v", err)
+	}
+	root := f.live(t, "agent:root", uuid.Nil)
+	child := f.live(t, "agent:child", root.ID)
+	revoked := f.live(t, "agent:revoked", uuid.Nil)
+	f.revoke(t, revoked.ID, false)
+	copyID := []byte("erased-tenant-copy")
+	biscuits, withBiscuits := f.Store.(limes.BiscuitRevocationStore)
+	if withBiscuits {
+		if err := biscuits.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(child.ID, copyID)}); err != nil {
+			t.Fatalf("RevokeBiscuit: %v", err)
+		}
+	}
+	expired := f.insert(t, f.newCapability("agent:expired", uuid.Nil, f.now.Add(-expiredAgo)))
+	// Expired, but not for MinPurgeRetention: a verifier may still take it.
+	recent := f.insert(t, f.newCapability("agent:recent", uuid.Nil, f.now.Add(-limes.MinPurgeRetention/2)))
+	theirs := f.newCapability("agent:theirs", uuid.Nil, f.now.Add(ttl))
+	theirs.Subject.TenantID = other
+	if err := f.Store.Insert(f.tenantCtx(other), limes.InsertRequest{Capability: theirs, IssuedBy: issuedBy}); err != nil {
+		t.Fatalf("Insert for another tenant: %v", err)
+	}
+	req := limes.EraseTenantRequest{TenantID: f.Tenant, Note: "tenant removed", Actor: "storetest"}
+	if f.ScopesTenants {
+		if _, err := eraser.EraseTenantRecords(f.tenantCtx(other), req); !errors.Is(err, limes.ErrScopeMismatch) {
+			t.Errorf("EraseTenantRecords under another tenant's context: err = %v, want ErrScopeMismatch", err)
+		}
+	}
+	if _, err := eraser.EraseTenantRecords(f.Ctx, limes.EraseTenantRequest{}); !errors.Is(err, limes.ErrInvalidRequest) {
+		t.Errorf("EraseTenantRecords naming no tenant: err = %v, want ErrInvalidRequest", err)
+	}
+	got, err := eraser.EraseTenantRecords(f.Ctx, req)
+	want := limes.EraseTenantResult{Revoked: 4, Removed: 1, Kept: 4}
+	if err != nil || got != want {
+		t.Fatalf("EraseTenantRecords = %+v, %v; want %+v", got, err, want)
+	}
+	for _, c := range []limes.Capability{root, child, revoked, recent} {
+		if !f.revoked(t, c.ID) {
+			t.Errorf("%s verifies after its tenant was erased", c.Subject.Subject)
+		}
+	}
+	r, err := f.Store.GetRecord(f.Ctx, root.ID)
+	if err != nil || r.Revocation == nil || r.Revocation.Note != req.Note || r.Revocation.Actor != req.Actor {
+		t.Errorf("the erased root's record = %+v, %v; want its revocation, noted as the request asks", r, err)
+	}
+	if withBiscuits {
+		if copyRevoked, err := biscuits.IsBiscuitRevoked(f.Ctx, [][]byte{copyID}); err != nil || !copyRevoked {
+			t.Errorf("IsBiscuitRevoked of a live child's copy after the erase = %v, %v; want revoked", copyRevoked, err)
+		}
+	}
+	if _, err := f.get(expired.ID); !errors.Is(err, limes.ErrNotFound) {
+		t.Errorf("GetRecord of a record Purge would take, after the erase: err = %v, want ErrNotFound", err)
+	}
+	if r, err := f.Store.GetRecord(f.tenantCtx(other), theirs.ID); err != nil || r.Revocation != nil {
+		t.Errorf("another tenant's record after the erase = %+v, %v; want it on record and not revoked", r, err)
+	}
+	if again, err := eraser.EraseTenantRecords(f.Ctx, req); err != nil || again != (limes.EraseTenantResult{Kept: 4}) {
+		t.Errorf("EraseTenantRecords again = %+v, %v; want nothing revoked or removed", again, err)
 	}
 }

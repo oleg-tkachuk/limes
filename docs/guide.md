@@ -727,6 +727,15 @@ Elsewhere, implement these and you are done:
 | `dpop.ReplayCache` | DPoP proof ids seen, per key, each counted against its holder: `Seen(ctx, dpop.ReplayEntry)` reports a holder past its share as seen, and returns an error when its store cannot answer — an outage, not a refused proof (only for key-bound tokens; `dpop.MemoryReplayCache` ships for one process — behind several replicas, the `redisreplay` module ships one over Redis, or implement it over another shared store) | No |
 | `dpop.Nonces` | Server-provided DPoP nonces (optional; `dpop.HMACNonces` ships and needs no store) | No |
 
+To remove a tenant, a store may implement `TenantRecordEraser` and
+`TenantUsageEraser` (optional; `storetest` and `metertest` check them when
+present, and `memstore` implements both). `EraseTenantRecords`
+revokes every capability of the tenant and removes only the records `Purge`
+would remove: an id not on record is not revoked, so erasing a record whose
+token may still verify would let it through again. `Purge` takes the rest as
+it expires. `EraseTenantUsage` drops the tenant's counters, holds, charges
+and aggregate — its billing history, which does not come back.
+
 Two obligations are easy to miss. `Store.IsRevoked` answers for the
 capability's whole delegation chain, and `Meter` applies every charge and
 request to each ancestor as well, reading the ancestor's ceilings from its
