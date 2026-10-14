@@ -51,6 +51,10 @@ jobs:
     permissions:
       contents: write # semantic-release pushes the tag; gh creates the release
       actions: read # the dispatching CI run and its jobs
+    outputs:
+      # The root module's release tag this run pushed or published; empty
+      # when none.
+      limes-tag: ${{ steps.limes-tag.outputs.tag }}
     steps:
       # No persist-credentials: false — semantic-release pushes the tag it
       # creates, so this is the one checkout here that needs its credentials.
@@ -163,6 +167,15 @@ jobs:
           RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes.md
         run: ./.github/scripts/publish-release.sh new "$RUNNER_TEMP/tags-before"
 
+      # For the job below, which proposes the nested modules' requirement of
+      # it. See .github/scripts/new-release-tag.sh.
+      - name: Note the root module's release
+        id: limes-tag
+        if: steps.catchup.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf 'tag=%s\n' "$(./.github/scripts/new-release-tag.sh "$RUNNER_TEMP/tags-before")" >>"$GITHUB_OUTPUT"
+
       - name: Compute and push the tag of redisreplay
         if: steps.catchup.outputs.release == 'true'
         working-directory: .github/release
@@ -182,8 +195,8 @@ jobs:
       # pgstore is released only once its tests against the limes its go.mod
       # requires passed in the dispatching run: a change to limes that pgstore
       # must follow lands with pgstore, and pgstore waits here, released with
-      # everything since, until Renovate raises its requirement to the limes
-      # this run released. See .github/scripts/ci-job-passed.sh.
+      # everything since, until the job below raises its requirement to the
+      # limes this run released. See .github/scripts/ci-job-passed.sh.
       - name: Require pgstore's tests against the released limes
         id: pgstore-gate
         if: steps.catchup.outputs.release == 'true'
@@ -222,3 +235,51 @@ jobs:
           ./.github/scripts/publish-release.sh left-behind
           ./.github/scripts/publish-release.sh left-behind "$REDISREPLAY_MODULE/"
           ./.github/scripts/publish-release.sh left-behind "$PGSTORE_MODULE/"
+
+  # Each limes release is followed by a pull request per nested module that
+  # raises the module's requirement to it: pgstore is released only once its
+  # tests pass against the limes it requires, so its release waits for that
+  # merge. It acts through AUTOMERGE_TOKEN, never GITHUB_TOKEN: a branch
+  # pushed with GITHUB_TOKEN would get no CI, and its pull request would wait
+  # forever on its required check (auto-merge.yaml, which then queues it).
+  # Without the secret it warns and does nothing. See
+  # .github/scripts/require-released-limes.sh.
+  require-released-limes:
+    name: Propose the nested modules' requirement of the released limes
+    needs: release
+    if: needs.release.outputs.limes-tag != ''
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read # the checkout; the push and the pull request act through AUTOMERGE_TOKEN
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          # No module cache: this job holds a write token, and a cache another
+          # run wrote is not something to restore into it.
+          cache: false
+
+      - name: Propose each nested module's requirement
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
+          REPO: ${{ github.repository }}
+          LIMES_TAG: ${{ needs.release.outputs.limes-tag }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        # One module's failure leaves the others proposed, and fails the step.
+        run: |
+          set -uo pipefail
+          failed=0
+          for module in "$REDISREPLAY_MODULE" "$PGSTORE_MODULE"; do
+            ./.github/scripts/require-released-limes.sh "$module" "$LIMES_TAG" || failed=1
+          done
+          exit "$failed"
