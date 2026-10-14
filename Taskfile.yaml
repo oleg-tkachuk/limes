@@ -23,6 +23,9 @@ vars:
   # The reference PostgreSQL store, a module of its own: `./...` from the
   # root does not reach it.
   PGSTORE_DIR: pgstore
+  # LIMES_MODULE is the root module's path, which pgstore replaces with this
+  # checkout.
+  LIMES_MODULE: github.com/oleg-tkachuk/limes
 
 includes:
   go:
@@ -87,6 +90,20 @@ tasks:
     dir: '{{.PGSTORE_DIR}}'
     cmds:
       - go test -race -count=1 ./...
+
+  test:pgstore:pinned:
+    desc: "pgstore's tests against the limes its go.mod requires, as a consumer's build resolves it, not the limes of this commit — needs a running Docker and the module proxy"
+    dir: '{{.PGSTORE_DIR}}'
+    vars:
+      # A copy of go.mod without the replace, in a scratch directory: the
+      # tracked go.mod and go.sum stay as they are.
+      PINNED_DIR:
+        sh: mktemp -d
+    cmds:
+      - defer: rm -rf '{{.PINNED_DIR}}'
+      - cp go.mod go.sum '{{.PINNED_DIR}}/'
+      - go mod edit -dropreplace={{.LIMES_MODULE}} '{{.PINNED_DIR}}/go.mod'
+      - go test -modfile='{{.PINNED_DIR}}/go.mod' -mod=mod -race -count=1 ./...
 
   test:redisreplay:
     desc: "redisreplay's contract against a real Redis at LIMES_REDIS_ADDR (host:port) — miniredis runs another Lua, so this is the check of the script itself"

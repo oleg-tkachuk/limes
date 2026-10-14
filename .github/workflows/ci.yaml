@@ -158,7 +158,8 @@ jobs:
           key: ${{ steps.go-cache.outputs.cache-primary-key }}
 
   # pgstore's tests — storetest and metertest among them — against PostgreSQL
-  # in a container, which verify-all leaves out so that it needs no Docker.
+  # in a container, which verify-all leaves out so that it needs no Docker:
+  # with the limes of this commit, then with the one its go.mod requires.
   # The runner's Docker serves testcontainers.
   pgstore:
     name: PostgreSQL store
@@ -188,6 +189,12 @@ jobs:
 
       - name: task test:pgstore
         run: task --yes test:pgstore
+
+      # The same tests against the limes pgstore's go.mod requires, which is
+      # what a consumer's build resolves: a pgstore that needs a limes not yet
+      # released, or that a released limes breaks, fails here, not there.
+      - name: task test:pgstore:pinned
+        run: task --yes test:pgstore:pinned
 
   # redisreplay's contract against a real Redis: verify-all runs it on
   # miniredis, whose scripts run on another Lua. The image is pinned by digest;
