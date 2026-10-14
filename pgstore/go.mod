@@ -21,7 +21,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/jackc/tern/v2 v2.4.3
-	github.com/oleg-tkachuk/limes v0.61.0
+	github.com/oleg-tkachuk/limes v0.61.2-0.20261014121812-177afae7de68
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0
 )
