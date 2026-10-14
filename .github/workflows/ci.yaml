@@ -174,9 +174,9 @@ jobs:
           key: ${{ steps.go-cache.outputs.cache-primary-key }}
 
   # pgstore's tests — storetest and metertest among them — against PostgreSQL
-  # in a container, which verify-all leaves out so that it needs no Docker:
-  # with the limes of this commit, then with the one its go.mod requires.
-  # The runner's Docker serves testcontainers.
+  # in a container, which verify-all leaves out so that it needs no Docker,
+  # with the limes of this commit: limes may not break pgstore. The runner's
+  # Docker serves testcontainers.
   pgstore:
     name: PostgreSQL store
     needs: [changes]
@@ -206,9 +206,38 @@ jobs:
       - name: task test:pgstore
         run: task --yes test:pgstore
 
-      # The same tests against the limes pgstore's go.mod requires, which is
-      # what a consumer's build resolves: a pgstore that needs a limes not yet
-      # released, or that a released limes breaks, fails here, not there.
+  # The same tests against the limes pgstore's go.mod requires, which is what
+  # a consumer's build resolves. This gates pgstore's release, not a merge: a
+  # change to limes that pgstore must follow lands with pgstore in one pull
+  # request, which fails here until limes is released and Renovate raises
+  # pgstore's requirement. Until then release.yaml releases limes and holds
+  # pgstore back, so no pgstore is published that a consumer cannot build.
+  pgstore-released-limes:
+    name: PostgreSQL store, released limes
+    needs: [changes]
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: pgstore/go.mod
+          cache: false
+
+      - name: Set up Task
+        uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+        with:
+          version: ${{ env.TASK_VERSION }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: task test:pgstore:pinned
         run: task --yes test:pgstore:pinned
 
@@ -465,9 +494,13 @@ jobs:
             esac
           done
 
+  # It waits for the one required check, which stands for every job a merge
+  # needs, and for pgstore-released-limes, whose result release.yaml reads to
+  # decide pgstore alone (ci-job-passed.sh), so a release never starts before
+  # it is known.
   dispatch-release:
     name: Dispatch release
-    needs: [changes, verify, pgstore, redis, floor, api, markers, syntax, audit]
+    needs: [changes, checks, pgstore-released-limes]
     # Not for a documentation-only push: its code is byte-identical to the
     # commit before it. Its commits are not lost — semantic-release counts them
     # in the next release, and a release dispatched by the code commit before
@@ -476,8 +509,8 @@ jobs:
       always() &&
       needs.changes.outputs.relevant == 'true' &&
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
-      !contains(needs.*.result, 'failure') &&
-      !contains(needs.*.result, 'cancelled')
+      needs.checks.result == 'success' &&
+      needs.pgstore-released-limes.result != 'cancelled'
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:

@@ -6,9 +6,10 @@
 # release.yaml runs on any repository_dispatch of type `release`, and anyone
 # holding a write token can send one, naming any sha. This asks the API rather
 # than the payload: the run must be ci.yaml on a push to main, for exactly
-# that sha, and every job a release needs must have passed or been skipped.
-# The dispatching job is part of that run, so the run itself has not finished;
-# the jobs it waits for have.
+# that sha, and every job the required check stands for must have passed or
+# been skipped. The dispatching job is part of that run, so the run itself has
+# not finished; the jobs it waits for have. pgstore's tests against the
+# released limes decide pgstore's release alone: see ci-job-passed.sh.
 #
 # Exits non-zero, saying why, on anything else. Needs gh and jq.
 
@@ -17,8 +18,8 @@ set -euo pipefail
 # shellcheck source=.github/scripts/gh-retry.sh
 source "$(dirname "${BASH_SOURCE[0]}")/gh-retry.sh"
 
-# The ci.yaml jobs dispatch-release needs, by name. ci-run-check.test.sh
-# fails when this list and ci.yaml disagree.
+# The ci.yaml jobs the required check (All checks passed) needs, by name.
+# ci-run-check.test.sh fails when this list and ci.yaml disagree.
 readonly REQUIRED_JOBS=(
     "Changed paths"
     "Verify"
