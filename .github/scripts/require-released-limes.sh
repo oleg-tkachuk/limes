@@ -9,7 +9,8 @@
 # limes release is followed by raising that requirement: this commits it on
 # a branch of the module's own and opens its pull request, or updates the
 # one still open to the newer release. auto-merge.yaml queues it, and its
-# merge releases what the module was waiting for.
+# merge releases the module: a build commit scoped to a nested module is a
+# patch of it (.github/release/modules.cjs).
 #
 # The module's go.mod is read and written by `go mod edit`, then tidied. A
 # module that does not require limes, or already requires this release or a

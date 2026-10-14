@@ -43,7 +43,8 @@ has the change yet; the merge releases limes, and the release workflow opens
 a pull request raising each nested module's requirement to that release
 (`build(pgstore): require limes vX.Y.Z`, queued to merge once green). That
 pull request passes the job, and its merge releases pgstore with every change
-it held. A pgstore change that needs
+it held: a nested module's own `build` commit is a patch of it, so the raised
+requirement is released even when nothing else waits. A pgstore change that needs
 a limes already released raises the requirement in its own `go.mod`.
 
 `redisreplay`'s contract against a real Redis runs apart too, at the address
