@@ -61,10 +61,11 @@
 //     [jwks.Remote] fetches an issuer's JWKS for verifiers that run
 //     apart from it.
 //
-// Seven more are needed only with the feature they serve:
+// Eight more are needed only with the feature they serve:
 // [BiscuitRevocationStore] to accept Biscuit tokens, [CopyUsageReader] to
 // show a Biscuit copy's own counters, [LedgerReader] to sum a tenant's
-// charges for billing and reports, [TenantRecordEraser] and
+// charges for billing and reports, [RecordCensus] to count capability
+// records by disposition across tenants, [TenantRecordEraser] and
 // [TenantUsageEraser] to remove a tenant, [dpop.ReplayCache] to share DPoP replay
 // state across replicas ([dpop.MemoryReplayCache] ships for one process), and
 // [dpop.Nonces] to require server nonces ([dpop.HMACNonces] ships, and works
