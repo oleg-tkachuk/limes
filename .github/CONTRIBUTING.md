@@ -29,6 +29,12 @@ Docker, and run apart:
 task test:pgstore
 ```
 
+CI runs them twice: against the limes of the same commit, through the replace
+in `pgstore/go.mod`, and against the limes that `go.mod` requires, which is
+what a consumer's build resolves (`task test:pgstore:pinned`). A pgstore change
+that needs something new in limes therefore lands after the limes release that
+has it, with `go.mod` requiring that release.
+
 `redisreplay`'s contract against a real Redis runs apart too, at the address
 `LIMES_REDIS_ADDR` names (`host:port`); miniredis runs another Lua, so this is
 the check of the script itself:
