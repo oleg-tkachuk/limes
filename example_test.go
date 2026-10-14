@@ -357,6 +357,62 @@ func Example_charge() {
 	// <nil> 0.35
 }
 
+// A test of a report needs charges at chosen times. Build the stores on a
+// clock the test sets, record a capability that outlives the period, and
+// move the clock forward before each charge: a charge carries the store's
+// time, so it lands where the clock says, and no test writes a store's
+// tables.
+func Example_backdatedCharges() {
+	ctx := context.Background()
+	start := time.Date(2026, time.March, 2, 9, 0, 0, 0, time.UTC) // a Monday
+	at := start
+	clock := func() time.Time { return at }
+	records, err := memstore.NewStore(memstore.StoreConfig{Now: clock})
+	if err != nil {
+		log.Fatal(err)
+	}
+	usage, err := memstore.NewUsageStore(memstore.UsageStoreConfig[struct{}]{Records: records, Now: clock})
+	if err != nil {
+		log.Fatal(err)
+	}
+	ledger := memstore.NewLedger(usage)
+
+	// The meter does not read expiry, but a capability that expired before
+	// a charge's time would make a report the test cannot reproduce live.
+	const period = 14 * 24 * time.Hour
+	c := limes.Capability{
+		ID: uuid.New(), IssuedAt: start, ExpiresAt: start.Add(period),
+		Subject: limes.Principal{Type: limes.PrincipalService, TenantID: uuid.New(), Subject: "svc:reporting"},
+		Caveats: limes.Caveats{Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true}},
+	}
+	if err := records.Insert(ctx, limes.InsertRequest{Capability: c}); err != nil {
+		log.Fatal(err)
+	}
+	subject, err := limes.StoredMeterSubject(ctx, records, c.ID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, day := range []int{0, 1, 8} { // Monday, Tuesday, and Tuesday a week on
+		at = start.AddDate(0, 0, day)
+		if _, err := usage.Charge(ctx, limes.ChargeRequest{Subject: subject, Amount: limes.MustParseAmount("1.5")}, nil); err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	page, err := ledger.SumCharges(ctx, limes.SumChargesRequest{
+		TenantID: c.Subject.TenantID, From: start, To: start.Add(period), Bucket: limes.ChargeBucketWeek,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, sum := range page.Items {
+		fmt.Println(sum.BucketStart.Format(time.DateOnly), sum.Charged, sum.Charges)
+	}
+	// Output:
+	// 2026-03-02 3 2
+	// 2026-03-09 1.5 1
+}
+
 func Example_revoke() {
 	ctx := context.Background()
 	s := newExampleStack()

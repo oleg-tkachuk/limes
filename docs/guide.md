@@ -803,6 +803,37 @@ pgstore, a census of every tenant runs under `WithAllTenantsReadOnly`, and one
 under a narrower scope is `ErrScopeMismatch`. `storetest` checks a census its
 `Env.Census` names.
 
+To test a report, backdate its charges through the store's clock, never by
+writing a store's tables, whose columns are the store's own and change
+without notice. A charge carries the store's time (`ChargeRecord.At`), so
+build the stores on a clock the test sets (`Config.Now` in `pgstore`,
+`StoreConfig.Now` and `UsageStoreConfig.Now` in `memstore`), start it at the
+period's start and move it forward before each charge:
+
+```go
+at := start
+cfg := pgstore.Config{DB: pool, Now: func() time.Time { return at }}
+records, _ := pgstore.NewStore(cfg)
+usage, _ := pgstore.NewUsageStore(cfg)
+
+// A record that lives through the period, as a token in use would.
+c := limes.Capability{ID: uuid.New(), ExpiresAt: start.Add(period), Subject: subject, Caveats: caveats}
+_ = records.Insert(ctx, limes.InsertRequest{Capability: c})
+meterSubject, _ := limes.StoredMeterSubject(ctx, records, c.ID)
+for _, day := range []int{0, 1, 8} {
+	at = start.AddDate(0, 0, day)
+	_, _ = usage.Charge(ctx, limes.ChargeRequest{Subject: meterSubject, Amount: amount}, nil)
+}
+```
+
+The capability must not have expired at a charge's time. Insert its record
+with an `ExpiresAt` past the period, as above. Or issue it through an
+`Issuer` whose `IssuerConfig.Now` is the same clock, set to the period's
+start, with an `IssueRequest.TTL` as long as the period. A test that charges
+through verified tokens gives `VerifierConfig.Now` that clock as well. Move
+the clock forward only: holds, revocations and expiry are all measured by it.
+`Example_backdatedCharges` runs the whole route on `memstore`.
+
 To remove a tenant, a store may implement `TenantRecordEraser` and
 `TenantUsageEraser` (optional; `storetest` and `metertest` check them when
 present, and `memstore` and `pgstore` implement both). `EraseTenantRecords`
