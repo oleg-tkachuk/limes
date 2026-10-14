@@ -604,7 +604,8 @@ suites check that a call for `Tenant` under another tenant's context returns
 `ErrScopeMismatch` and moves nothing.
 Without them the checks that need a second tenant use a random id and `Ctx`.
 `DeleteCapability` removes a record as `Store.Purge` would, for the
-`PurgeOrphans` checks. `storetest.Env` takes the same `NewTenant`,
+`PurgeOrphans` checks; some remove an ancestor whose children stay, so a store
+whose records refer to their parent unhooks the children first. `storetest.Env` takes the same `NewTenant`,
 `TenantCtx` and `Advance`, so one setup can serve both suites, plus `Now` (the
 store's clock, for the checks at an expiry's exact instant) and
 `DeleteTenant` (moves a tenant to the trash, for the `ErrUnknownTenant` and
