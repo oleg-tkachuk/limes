@@ -40,6 +40,21 @@ const moduleCases = {
     // So does redisreplay, on a line of its own.
     ["feat(redisreplay): add a script", null],
     ["fix(redisreplay): expire the key", null],
+    // A nested module's build change releases that module, not limes.
+    ["build(pgstore): require limes v0.64.0", null],
+    ["build(redisreplay): require limes v0.64.0", null],
+  ],
+  // A nested module's own build change is a patch of it: the go.mod its users
+  // resolve has changed. The first is the subject require-released-limes.sh
+  // commits, which once merged and released nothing.
+  [modules.REDISREPLAY_MODULE]: [
+    ["build(redisreplay): require limes v0.64.0", "patch"],
+    ["build(redisreplay): bump go-redis", "patch"],
+    ["build(pgstore): require limes v0.64.0", null],
+  ],
+  [modules.PGSTORE_MODULE]: [
+    ["build(pgstore): require limes v0.64.0", "patch"],
+    ["build(redisreplay): require limes v0.64.0", null],
   ],
 };
 

@@ -25,7 +25,10 @@
 //
 // `conventionalcommits` preset: feat is a minor, fix and perf are a patch,
 // and docs/style/refactor/test/build/ci/chore release nothing. `security` is a
-// patch: the preset knows no such type. Every module is pre-1.0, where a
+// patch: the preset knows no such type. A nested module's own build change is
+// a patch of it: such a commit changes the go.mod its users resolve — above
+// all the release workflow's `build(<module>): require limes vX.Y.Z`, which
+// would otherwise leave the requirement unreleased. Every module is pre-1.0, where a
 // breaking change is a minor; that rule goes from a module's own rules when
 // it reaches 1.0. release-rules.test.mjs pins all of it. major-guard.cjs
 // refuses a major the module path does not carry, whatever marker cut it.
@@ -33,14 +36,23 @@
 const PRESET = "conventionalcommits";
 const SECURITY_IS_A_PATCH = { type: "security", release: "patch" };
 const BREAKING_IS_A_MINOR_BEFORE_1_0 = { breaking: true, release: "minor" };
+// The nested modules: each one's name, directory and commit scope.
+const PGSTORE_MODULE = "pgstore";
+const REDISREPLAY_MODULE = "redisreplay";
 // A pgstore or redisreplay commit cuts no release of the limes module. Their
 // directories are left out of its commits already, each module being on a
 // line of its own; these cover a commit scoped to one that also touches a
 // path outside it. A breaking change there would still cut one —
 // the rule above matches it too — so such a commit carries no breaking
 // marker.
-const PGSTORE_RELEASES_NOTHING = { scope: "pgstore", release: false };
-const REDISREPLAY_RELEASES_NOTHING = { scope: "redisreplay", release: false };
+const PGSTORE_RELEASES_NOTHING = { scope: PGSTORE_MODULE, release: false };
+const REDISREPLAY_RELEASES_NOTHING = { scope: REDISREPLAY_MODULE, release: false };
+
+// buildIsAPatch is the rule that releases a build change scoped to the nested
+// module name as a patch of it.
+function buildIsAPatch(name) {
+  return { type: "build", scope: name, release: "patch" };
+}
 
 // The variable that picks the module to release, and the one picked without it.
 const MODULE_ENV = "RELEASE_MODULE";
@@ -60,13 +72,13 @@ const MODULES = {
       REDISREPLAY_RELEASES_NOTHING,
     ],
   },
-  redisreplay: {
-    dir: "redisreplay",
-    releaseRules: [SECURITY_IS_A_PATCH, BREAKING_IS_A_MINOR_BEFORE_1_0],
+  [REDISREPLAY_MODULE]: {
+    dir: REDISREPLAY_MODULE,
+    releaseRules: [SECURITY_IS_A_PATCH, BREAKING_IS_A_MINOR_BEFORE_1_0, buildIsAPatch(REDISREPLAY_MODULE)],
   },
-  pgstore: {
-    dir: "pgstore",
-    releaseRules: [SECURITY_IS_A_PATCH, BREAKING_IS_A_MINOR_BEFORE_1_0],
+  [PGSTORE_MODULE]: {
+    dir: PGSTORE_MODULE,
+    releaseRules: [SECURITY_IS_A_PATCH, BREAKING_IS_A_MINOR_BEFORE_1_0, buildIsAPatch(PGSTORE_MODULE)],
   },
 };
 
@@ -111,4 +123,13 @@ function breaksAreMinor(name) {
   return configFor(name).analyzer.releaseRules.includes(BREAKING_IS_A_MINOR_BEFORE_1_0);
 }
 
-module.exports = { MODULES, MODULE_ENV, ROOT_MODULE, breaksAreMinor, configFor, tagPrefix };
+module.exports = {
+  MODULES,
+  MODULE_ENV,
+  ROOT_MODULE,
+  PGSTORE_MODULE,
+  REDISREPLAY_MODULE,
+  breaksAreMinor,
+  configFor,
+  tagPrefix,
+};
