@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/storetest"
@@ -40,9 +41,30 @@ func TestStoreContract(t *testing.T) {
 	})
 }
 
+// A Config without a DB, or with a nil pool or connection, builds no store:
+// the error comes at construction, not on the first call.
 func TestNewStoreRequiresADB(t *testing.T) {
-	if _, err := NewStore(Config{}); !errors.Is(err, errNoDB) {
-		t.Fatalf("NewStore without a DB: err = %v, want errNoDB", err)
+	var pool *pgxpool.Pool
+	var conn *pgx.Conn
+	for _, tc := range []struct {
+		name string
+		db   DB
+	}{
+		{"none", nil},
+		{"nil pool", pool},
+		{"nil conn", conn},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := NewStore(Config{DB: tc.db}); !errors.Is(err, errNoDB) {
+				t.Errorf("NewStore: err = %v, want errNoDB", err)
+			}
+			if _, err := NewUsageStore(Config{DB: tc.db}); !errors.Is(err, errNoDB) {
+				t.Errorf("NewUsageStore: err = %v, want errNoDB", err)
+			}
+		})
+	}
+	if _, err := NewStore(Config{DB: app}); err != nil {
+		t.Errorf("NewStore over a pool: %v", err)
 	}
 }
 
