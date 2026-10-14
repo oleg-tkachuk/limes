@@ -174,9 +174,10 @@ before bumping.
 
 `redisreplay` and `pgstore` are modules of their own, each with a release
 line of its own — `redisreplay/vX.Y.Z`, `pgstore/vX.Y.Z` — cut by the same
-rules from the commits that touch it. A commit releases, by its type, each
-module whose files it changes; one scoped `pgstore` or `redisreplay` never releases limes,
-breaking or not.
+rules from the commits that touch it, plus one: a module's own `build`
+commit, such as `build(pgstore): require limes vX.Y.Z`, is a patch of it. A
+commit releases, by its type, each module whose files it changes; one scoped
+`pgstore` or `redisreplay` never releases limes, breaking or not.
 
 The token wire format — claims, `typ: limes-cap-v4+jwt`, the Biscuit facts —
 is a separate promise: a token is a credential that outlives the process that
