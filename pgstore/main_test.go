@@ -37,11 +37,8 @@ const (
 	appPoolConns = 2
 )
 
-// grantApp lets appUser use the tables Migrate created, and no more.
-const grantApp = `
-CREATE ROLE ` + appUser + ` LOGIN PASSWORD '` + appPassword + `';
-GRANT USAGE ON SCHEMA ` + schema + ` TO ` + appUser + `;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA ` + schema + ` TO ` + appUser + `;`
+// createApp creates appUser, which Migrate grants as a runtime role.
+const createApp = `CREATE ROLE ` + appUser + ` LOGIN PASSWORD '` + appPassword + `'`
 
 // The tenants a consumer keeps, as the tests stand one in: a table of their
 // own, read by Config.CheckTenant.
@@ -85,6 +82,8 @@ const emptyTables = `TRUNCATE public.tenants, ` + schema + `.capabilities, ` + s
 var (
 	// owner is a pool as the owner role; app as appUser.
 	owner, app *pgxpool.Pool
+	// ownerDSN reaches the container's database as the owner.
+	ownerDSN string
 )
 
 func TestMain(m *testing.M) {
@@ -112,14 +111,21 @@ func run(m *testing.M) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	ownerDSN = dsn
 	if owner, err = pgxpool.New(ctx, dsn); err != nil {
 		return 0, err
 	}
 	defer owner.Close()
-	if err := Migrate(ctx, owner); err != nil {
+	if _, err := owner.Exec(ctx, createApp); err != nil {
 		return 0, err
 	}
-	if _, err := owner.Exec(ctx, grantApp+createTenants); err != nil {
+	err = owner.AcquireFunc(ctx, func(c *pgxpool.Conn) error {
+		return Migrate(ctx, c.Conn(), MigrateOptions{RuntimeRoles: []string{appUser}})
+	})
+	if err != nil {
+		return 0, err
+	}
+	if _, err := owner.Exec(ctx, createTenants); err != nil {
 		return 0, err
 	}
 	cfg, err := pgxpool.ParseConfig(dsn)
