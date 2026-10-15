@@ -13,18 +13,20 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/examples/internal/demo"
 	"github.com/oleg-tkachuk/limes/jwks"
 	"github.com/oleg-tkachuk/limes/memstore"
 )
 
 func main() {
 	ctx := context.Background()
+	log := demo.New("quickstart")
+	must := func(err error, step string) { demo.Must(log, err, step) }
 	tenantID := uuid.New()
 
 	// 1. Mint a signing key. `kid` identifies it so tokens stay verifiable
@@ -83,7 +85,8 @@ func main() {
 	})
 	parent, parentToken := parentResult.Capability, parentResult.Token
 	must(err, "issue")
-	fmt.Printf("issued   %s  (%d bytes)\n", parent.ID, len(parentToken))
+	log.Info("issued a capability to the orchestrator agent",
+		"capability", parent.ID, "token size", fmt.Sprintf("%d bytes", len(parentToken)))
 
 	// 4. On every call, verify and enforce the caveats in one step. Local — no
 	//    round trip to the issuer.
@@ -91,23 +94,17 @@ func main() {
 		Verify: limes.VerifyRequest{Token: parentToken, Audience: "my-service"},
 		Check:  limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/report.pdf"},
 	})
-	if err != nil {
-		log.Fatalf("authorize: %v", err)
-	}
-	fmt.Println("verified ok, and the caveats admit the call")
-	if _, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
+	must(err, "authorize")
+	log.Info("verified the token and admitted a call the caveats allow", "resource", "corpus/public/report.pdf")
+	_, err = verifier.Authorize(ctx, limes.AuthorizeRequest{
 		Verify: limes.VerifyRequest{Token: parentToken, Audience: "my-service"},
 		Check:  limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/private/report.pdf"},
-	}); !errors.Is(err, limes.ErrResourceNotAllowed) {
-		log.Fatalf("a resource outside the caveats should have been refused, got %v", err)
-	}
-	fmt.Println("authorize refused a resource outside the caveats")
+	})
+	demo.Refused(log, err, limes.ErrResourceNotAllowed, "a resource outside the caveats")
 
 	// A token minted for one audience must not verify for another.
-	if _, err := verifier.Verify(ctx, limes.VerifyRequest{Token: parentToken, Audience: "another-service"}); err == nil {
-		log.Fatal("audience gate did not hold")
-	}
-	fmt.Println("verified rejected for the wrong audience")
+	_, err = verifier.Verify(ctx, limes.VerifyRequest{Token: parentToken, Audience: "another-service"})
+	demo.Refused(log, err, limes.ErrAudienceMismatch, "the token presented to another service")
 
 	// 5. Delegate to a sub-agent — strictly narrower, without calling back to
 	//    any admin API. An orchestrator can attenuate, never escalate.
@@ -131,7 +128,7 @@ func main() {
 	})
 	must(err, "delegate")
 	child := childResult.Capability
-	fmt.Printf("delegated %s (child of %s)\n", child.ID, parent.ID)
+	log.Info("delegated a narrower capability to a sub-agent", "capability", child.ID, "parent", parent.ID)
 
 	// Widening is refused — this is the property that makes the model safe to
 	// hand to an agent.
@@ -143,31 +140,27 @@ func main() {
 		Audience: []string{"my-service"},
 		TTL:      time.Minute,
 		Caveats: limes.Caveats{
-			Ops:      []limes.Op{limes.OpGet},
-			Budget:   limes.BudgetCeiling{Max: limes.MustParseAmount("999")}, // wider than the parent's 25.00
-			UnitCode: "USD",
+			Ops:              []limes.Op{limes.OpGet},
+			ResourcePrefixes: []string{"corpus/public/"},
+			Requests:         limes.RequestCeiling{Max: 50},
+			Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("999")}, // wider than the parent's 25.00
+			UnitCode:         "USD",
 		},
 	})
-	if !errors.Is(err, limes.ErrDelegationTooWide) {
-		log.Fatalf("widening delegation should have been refused, got %v", err)
-	}
-	fmt.Println("widening refused with ErrDelegationTooWide")
+	demo.Refused(log, err, limes.ErrDelegationTooWide, "a delegation wider than its parent")
 
 	// 6. Count the request and charge against the budget. The capability's ceiling, each ancestor's
 	//    and the tenant's all apply; a rejection by any leaves every counter
 	//    untouched, so a retry is always safe.
 	bumped, err := usage.Bump(ctx, limes.BumpRequest{Subject: verified.MeterSubject()})
 	must(err, "bump")
-	fmt.Printf("counted  request %d of %s\n", bumped.RequestCount, verified.Capability().Caveats.Requests)
+	log.Info("counted a request", "request", fmt.Sprintf("%d of %s", bumped.RequestCount, verified.Capability().Caveats.Requests))
 	receipt, err := usage.Charge(ctx, limes.ChargeRequest{Subject: verified.MeterSubject(), Amount: limes.MustParseAmount("0.35"), Op: "search", Actor: "research-orchestrator"}, nil)
 	must(err, "charge")
-	fmt.Printf("charged  0.35 USD, spent now %s\n", receipt.SpentAmount)
+	log.Info("charged against the budget", "amount", "0.35 USD", "spent so far", receipt.SpentAmount.String()+" USD")
 
 	_, err = usage.Charge(ctx, limes.ChargeRequest{Subject: verified.MeterSubject(), Amount: limes.MustParseAmount("999"), Op: "search", Actor: "research-orchestrator"}, nil)
-	if !errors.Is(err, limes.ErrBudgetExceeded) {
-		log.Fatalf("over-budget charge should have been refused, got %v", err)
-	}
-	fmt.Println("over-budget charge refused with ErrBudgetExceeded")
+	demo.Refused(log, err, limes.ErrBudgetExceeded, "a charge over the budget")
 
 	// 7. Revoke, cascading to everything the orchestrator delegated.
 	must(records.Revoke(ctx, limes.RevokeRequest{
@@ -179,18 +172,14 @@ func main() {
 	rec, err := records.GetRecord(ctx, child.ID)
 	must(err, "get-record")
 	if rec.Revocation == nil {
-		log.Fatal("cascade did not reach the delegated child")
+		must(errCascadeMissed, "cascade the revocation")
 	}
-	fmt.Println("revoked  parent + cascaded to the child")
+	log.Info("revoked the orchestrator's capability, cascading to the sub-agent's", "parent", parent.ID, "child", child.ID)
 
-	if _, err := verifier.Verify(ctx, limes.VerifyRequest{Token: parentToken, Audience: "my-service"}); !errors.Is(err, limes.ErrRevoked) {
-		log.Fatalf("revoked token should fail with ErrRevoked, got %v", err)
-	}
-	fmt.Println("verified now rejects the revoked token")
+	_, err = verifier.Verify(ctx, limes.VerifyRequest{Token: parentToken, Audience: "my-service"})
+	demo.Refused(log, err, limes.ErrRevoked, "the revoked token")
+	log.Info("done: every step behaved as described")
 }
 
-func must(err error, what string) {
-	if err != nil {
-		log.Fatalf("%s: %v", what, err)
-	}
-}
+// errCascadeMissed is a revocation that did not reach the delegated child.
+var errCascadeMissed = errors.New("the delegated child carries no revocation of its own")

@@ -9,12 +9,14 @@ package main
 import (
 	"context"
 	"crypto/ed25519"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/testcontainers/testcontainers-go"
+	tclog "github.com/testcontainers/testcontainers-go/log"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
 	"github.com/oleg-tkachuk/limes"
@@ -39,6 +41,9 @@ const (
 	unit       = "USD"
 )
 
+// money is an amount or a budget in the examples' currency.
+func money(v fmt.Stringer) string { return v.String() + " " + unit }
+
 // The example's own table, written in the same transaction as a charge: the
 // call is recorded if and only if it is charged.
 const (
@@ -56,6 +61,7 @@ func main() {
 	log := demo.New("pgstore")
 
 	log.Info("starting PostgreSQL in a container", "image", postgresImage)
+	tclog.SetDefault(quiet{})
 	container, err := postgres.Run(ctx, postgresImage,
 		postgres.WithDatabase(databaseName),
 		postgres.WithUsername(ownerUser),
@@ -78,7 +84,8 @@ func main() {
 	demo.Must(log, err, "migrate")
 	_, err = owner.Exec(ctx, createCalls)
 	demo.Must(log, err, "create the example's table")
-	log.Info("schema created", "owner", ownerUser, "runtime_role", appUser)
+	log.Info("created the limes schema as its owner, and granted it to the role the service connects as",
+		"owner", ownerUser, "service role", appUser)
 
 	cfg, err := pgxpool.ParseConfig(dsn)
 	demo.Must(log, err, "parse the connection string")
@@ -91,7 +98,8 @@ func main() {
 	demo.Must(log, err, "records store")
 	usage, err := pgstore.NewUsageStore(pgstore.Config{DB: app})
 	demo.Must(log, err, "usage store")
-	log.Info("stores ready", "connected_as", appUser)
+	log.Info("built the records and usage stores; the service role owns no table, so row-level security binds it",
+		"connected as", appUser)
 
 	key, err := limes.GenerateKey()
 	demo.Must(log, err, "generate a signing key")
@@ -128,13 +136,15 @@ func main() {
 	})
 	demo.Must(log, err, "issue")
 	c := issued.Capability
-	log.Info("capability issued and stored", "id", c.ID, "tenant", tenant, "budget", c.Caveats.Budget)
+	log.Info("issued a capability; its record is now a row in limes.capabilities",
+		"capability", c.ID, "tenant", tenant, "budget", money(c.Caveats.Budget))
 
 	// The verifier reads revocations without a tenant scope: it does so
 	// before it knows the token's tenant.
 	verified, err := verifier.Verify(ctx, limes.VerifyRequest{Token: issued.Token, Audience: audience})
 	demo.Must(log, err, "verify")
-	log.Info("token verified against PostgreSQL", "capability", verified.Capability().ID)
+	log.Info("verified the token: the signature locally, the revocation status in PostgreSQL",
+		"capability", verified.Capability().ID)
 
 	const query = "limes capability tokens"
 	receipt, err := usage.Charge(inTenant, limes.ChargeRequest{
@@ -142,15 +152,16 @@ func main() {
 	}, func(ctx context.Context, tx pgx.Tx) error {
 		// Inside the charge's transaction: this row commits with the charge,
 		// or neither does.
-		log.Info("recording the call in the charge's transaction", "query", query)
+		log.Info("inside the charge's transaction: recording the call in the service's own table", "query", query)
 		return insertChargedCall(ctx, tx, query)
 	})
 	demo.Must(log, err, "charge")
-	log.Info("charged", "charge", receipt.ChargeID, "spent", receipt.SpentAmount)
+	log.Info("charged the search; the charge and the call's row committed together",
+		"charge", receipt.ChargeID, "spent so far", money(receipt.SpentAmount))
 
 	u, err := usage.GetUsage(inTenant, c.ID)
 	demo.Must(log, err, "read usage")
-	log.Info("usage read back", "spent", u.SpentAmount, "requests", u.RequestCount)
+	log.Info("read the capability's usage back, scoped to its tenant", "spent", money(u.SpentAmount))
 
 	elsewhere := pgstore.WithTenant(ctx, uuid.New())
 	_, err = records.GetRecord(elsewhere, c.ID)
@@ -159,19 +170,29 @@ func main() {
 	demo.Refused(log, err, limes.ErrUsageNotFound, "read its usage scoped to another tenant")
 
 	demo.Must(log, records.Revoke(inTenant, limes.RevokeRequest{CapabilityID: c.ID, Note: "agent finished", Actor: "operator"}), "revoke")
-	log.Info("capability revoked", "id", c.ID)
+	log.Info("revoked the capability", "capability", c.ID)
 	_, err = verifier.Verify(ctx, limes.VerifyRequest{Token: issued.Token, Audience: audience})
 	demo.Refused(log, err, limes.ErrRevoked, "verify the revoked token")
 
 	// As the owner, which row-level security does not bind: what the
 	// example left in the database.
-	for table, sql := range map[string]string{"limes.capabilities": countCaps, "limes.charges": countCharge, "public.calls": countCalls} {
+	var rows []any
+	for _, t := range []struct{ table, sql string }{
+		{"limes.capabilities", countCaps}, {"limes.charges", countCharge}, {"public.calls", countCalls},
+	} {
 		var n int
-		demo.Must(log, owner.QueryRow(ctx, sql).Scan(&n), "count "+table)
-		log.Info("rows in the database", "table", table, "rows", n)
+		demo.Must(log, owner.QueryRow(ctx, t.sql).Scan(&n), "count "+t.table)
+		rows = append(rows, t.table, fmt.Sprintf("%d row(s)", n))
 	}
-	log.Info("done")
+	log.Info("what the example left in the database, read as the owner", rows...)
+	log.Info("done: every step behaved as described")
 }
+
+// quiet drops the container library's own log lines, which would break up
+// the example's steps.
+type quiet struct{}
+
+func (quiet) Printf(string, ...any) {}
 
 // insertChargedCall records the charged call in the example's own table.
 func insertChargedCall(ctx context.Context, tx pgx.Tx, query string) error {

@@ -1,24 +1,65 @@
 package demo
 
 import (
+	"bytes"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
-	"strings"
 	"testing"
 )
 
-// captureStdout runs f and returns what it wrote to stdout.
-func captureStdout(t *testing.T, f func()) string {
-	t.Helper()
+// A step reads as its mark and message, then its details, one per line,
+// indented, their names aligned: no level, no time, no key=value noise.
+func TestAStepReadsAsLines(t *testing.T) {
+	var out bytes.Buffer
+	log := newLogger(&out, "quickstart")
+	log.Info("capability issued", "id", 7, "token size", "746 bytes")
+	log.With("tenant", "t1").WithGroup("budget").Info("budget set", "max", 25)
+	log.Error("step failed: issue", errorKey, errors.New("boom"))
+
+	want := "quickstart\n" +
+		"──────────\n" +
+		"• capability issued\n" +
+		"    id          7\n" +
+		"    token size  746 bytes\n" +
+		"• budget set\n" +
+		"    tenant      t1\n" +
+		"    budget.max  25\n" +
+		"✗ step failed: issue\n" +
+		"    error  boom\n"
+	if got := out.String(); got != want {
+		t.Errorf("output:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// Below Info nothing is written.
+func TestDebugIsNotShown(t *testing.T) {
+	var out bytes.Buffer
+	log := newLogger(&out, "x")
+	out.Reset()
+	log.Debug("internal detail")
+	if out.Len() != 0 {
+		t.Errorf("debug wrote %q", out.String())
+	}
+}
+
+// A refusal the example expects is marked as a success, with its step and
+// error, and the example goes on. The other paths of Must and Refused exit
+// the process, which a test in the same process cannot observe; running the
+// examples checks them.
+func TestRefusedMarksAnExpectedRefusal(t *testing.T) {
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
 	stdout := os.Stdout
 	os.Stdout = w
-	defer func() { os.Stdout = stdout }()
-	f()
+	want := errors.New("limes: revoked")
+	log := New("quickstart")
+	Must(log, nil, "issue")
+	Refused(log, want, want, "verify the revoked token")
+	os.Stdout = stdout
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -26,36 +67,13 @@ func captureStdout(t *testing.T, f func()) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(out)
-}
-
-// A step logs to stdout as one line, naming its example, without the time.
-func TestNewLogsEachStepToStdout(t *testing.T) {
-	out := captureStdout(t, func() { New("quickstart").Info("capability issued", "id", 7) })
-	for _, want := range []string{`msg="capability issued"`, "example=quickstart", "id=7"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("line %q lacks %s", out, want)
-		}
-	}
-	if strings.Contains(out, "time=") || strings.Count(out, "\n") != 1 {
-		t.Errorf("line %q: want one line without the time", out)
+	wantOut := "quickstart\n──────────\n" +
+		"✓ refused, as expected: verify the revoked token\n" +
+		"    error  limes: revoked\n"
+	if string(out) != wantOut {
+		t.Errorf("output:\n%s\nwant:\n%s", out, wantOut)
 	}
 }
 
-// A refusal the example expects is logged with its step and error, and
-// the example goes on. The other paths of Must and Refused exit the
-// process, which a test in the same process cannot observe; running the
-// examples checks them.
-func TestRefusedLogsAnExpectedRefusal(t *testing.T) {
-	want := errors.New("limes: revoked")
-	out := captureStdout(t, func() {
-		log := New("quickstart")
-		Must(log, nil, "issue")
-		Refused(log, want, want, "verify the revoked token")
-	})
-	for _, s := range []string{`msg="refused, as expected"`, `step="verify the revoked token"`, `err="limes: revoked"`} {
-		if !strings.Contains(out, s) {
-			t.Errorf("output %q lacks %s", out, s)
-		}
-	}
-}
+// The handler is an slog.Handler that keeps to slog's own rules.
+var _ slog.Handler = (*handler)(nil)

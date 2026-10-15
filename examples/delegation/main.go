@@ -8,6 +8,7 @@ package main
 import (
 	"context"
 	"crypto/ed25519"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,6 +24,9 @@ const (
 	audience   = "search-service"
 	unit       = "USD"
 )
+
+// money is an amount or a budget in the examples' currency.
+func money(v fmt.Stringer) string { return v.String() + " " + unit }
 
 func main() {
 	ctx := context.Background()
@@ -56,9 +60,10 @@ func main() {
 		},
 	})
 	demo.Must(log, err, "issue to the orchestrator")
-	log.Info("orchestrator holds a capability", "id", root.Capability.ID,
-		"ops", root.Capability.Caveats.Ops, "resources", root.Capability.Caveats.ResourcePrefixes,
-		"budget", root.Capability.Caveats.Budget)
+	log.Info("issued the orchestrator its capability",
+		"capability", root.Capability.ID, "operations", root.Capability.Caveats.Ops,
+		"resources under", root.Capability.Caveats.ResourcePrefixes,
+		"requests", root.Capability.Caveats.Requests, "budget", money(root.Capability.Caveats.Budget))
 
 	// A delegation starts from what the verifier accepted: the orchestrator
 	// presents its own token, as it would to any service.
@@ -79,16 +84,18 @@ func main() {
 		},
 	})
 	demo.Must(log, err, "delegate to the sub-agent")
-	log.Info("sub-agent holds a narrower capability", "id", child.Capability.ID, "parent", child.Capability.ParentID,
-		"ops", child.Capability.Caveats.Ops, "resources", child.Capability.Caveats.ResourcePrefixes,
-		"budget", child.Capability.Caveats.Budget, "expires", child.Capability.ExpiresAt.Format(time.RFC3339))
+	log.Info("the orchestrator delegated a narrower capability to a sub-agent, with no call to an admin",
+		"capability", child.Capability.ID, "parent", child.Capability.ParentID,
+		"operations", child.Capability.Caveats.Ops, "resources under", child.Capability.Caveats.ResourcePrefixes,
+		"requests", child.Capability.Caveats.Requests, "budget", money(child.Capability.Caveats.Budget),
+		"expires", child.Capability.ExpiresAt.Format(time.RFC3339))
 
 	_, err = verifier.Authorize(ctx, limes.AuthorizeRequest{
 		Verify: limes.VerifyRequest{Token: child.Token, Audience: audience},
 		Check:  limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/2026/q3.pdf"},
 	})
 	demo.Must(log, err, "the sub-agent reads inside its prefix")
-	log.Info("sub-agent request admitted", "resource", "corpus/public/2026/q3.pdf")
+	log.Info("verifier admitted the sub-agent's request inside its own prefix", "resource", "corpus/public/2026/q3.pdf")
 
 	_, err = verifier.Authorize(ctx, limes.AuthorizeRequest{
 		Verify: limes.VerifyRequest{Token: child.Token, Audience: audience},
@@ -114,9 +121,9 @@ func main() {
 	demo.Must(log, records.Revoke(ctx, limes.RevokeRequest{
 		CapabilityID: root.Capability.ID, Note: "run finished", Actor: "operator", CascadeChildren: true,
 	}), "revoke the orchestrator")
-	log.Info("orchestrator revoked, cascading to what it delegated", "id", root.Capability.ID)
+	log.Info("revoked the orchestrator's capability, and with it everything it delegated", "capability", root.Capability.ID)
 
 	_, err = verifier.Verify(ctx, limes.VerifyRequest{Token: child.Token, Audience: audience})
 	demo.Refused(log, err, limes.ErrRevoked, "the sub-agent's token after its parent's revocation")
-	log.Info("done")
+	log.Info("done: every step behaved as described")
 }
