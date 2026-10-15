@@ -28,6 +28,14 @@ API, and this file stops growing.
 - `Store.Insert` accepted a child with no expiry under a parent that has one
   → it refuses one as `ErrDelegationTooWide`. `storetest` checks it.
 
+## pgstore/v0.10.0
+
+- `UsageStore.Release` released any reservation, in any tenant → it needs
+  `ReleaseRequest.Subject`, runs in that subject's tenant and leaves a
+  reservation of another capability or copy held, as `Settle` does.
+- `Store.Insert` accepted a child with no expiry under a parent that has one,
+  which `Purge` then failed on → it refuses one as `ErrDelegationTooWide`.
+
 ## pgstore/v0.9.0
 
 - A call that writes under a `Config.Scope` of your own that sets
