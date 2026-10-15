@@ -28,7 +28,9 @@ name: Auto-merge
 # A draft is left alone until it is marked ready. Auto-merge is queued once,
 # when a pull request opens or becomes ready, not on every push: a push —
 # the rebase below among them — would otherwise queue again a pull request a
-# maintainer took off the queue to hold it. Renovate's are left to
+# maintainer took off the queue to hold it. A push is still read, though: one
+# that makes the pull request change what CI runs takes it off the queue, as
+# the gate would have refused it had that been its first commit. Renovate's are left to
 # Renovate, which merges them itself only once a release is old enough
 # (renovate.json, minimumReleaseAge) and rebases its own branches: queueing
 # them here merged them while that check was still pending.
@@ -40,7 +42,7 @@ name: Auto-merge
 
 on:
   pull_request_target:
-    types: [opened, reopened, ready_for_review]
+    types: [opened, reopened, ready_for_review, synchronize]
   push:
     branches: [main]
 
@@ -77,6 +79,7 @@ jobs:
           GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
+          ACTION: ${{ github.event.action }}
         # .github/scripts/queue-auto-merge.sh
         run: ./.github/scripts/queue-auto-merge.sh
 
