@@ -10,7 +10,14 @@
 # comparison of its head with main, not from its merge state: GitHub computes
 # that in the background, and seconds after a push to main it still reads
 # CLEAN or UNKNOWN for a branch the push left behind. A known conflict (DIRTY)
-# needs a person and is skipped. One pull request that cannot be rebased — a
+# needs a person and is skipped.
+#
+# A same-repository head is not always its author's: anyone may open a pull
+# request from a branch already here, release/v1 or another person's. Only
+# one whose author can push to this repository is rebased, so the token never
+# rewrites a branch on behalf of someone who could not have pushed it. Each
+# rebase names the head it compared (expected_head_sha): a branch pushed to
+# since is left as its owner left it, not rewritten. One pull request that cannot be rebased — a
 # conflict GitHub finds only while rebasing — is reported and does not stop the
 # rest.
 #
@@ -29,6 +36,9 @@ readonly PR_LIMIT=200
 readonly RENOVATE=app/renovate
 # The merge state of a pull request whose branch conflicts with main.
 readonly DIRTY=DIRTY
+# The repository permissions that can push a branch, as the collaborator
+# permission API names them (maintain reads as write there).
+readonly PUSH_PERMISSIONS='^(admin|write)$'
 
 if [ -z "${GH_TOKEN:-}" ]; then
     echo "::warning::AUTOMERGE_TOKEN is not set; pull requests not rebased (see auto-merge.yaml)"
@@ -41,23 +51,37 @@ candidates="$(gh_retry pr list --repo "$REPO" --base "$BASE_BRANCH" --state open
     jq -r --arg dirty "$DIRTY" --arg renovate "$RENOVATE" \
         '.[] | select(.isDraft | not) | select(.isCrossRepository | not)
              | select(.author.login != $renovate)
-             | select(.mergeStateStatus != $dirty) | "\(.number) \(.headRefOid)"')"
+             | select(.mergeStateStatus != $dirty) | "\(.number) \(.headRefOid) \(.author.login)"')"
+
+# can_push reports whether login can push to REPO. An author the API does not
+# know as a collaborator — an app, a user with no access — cannot.
+can_push() {
+    local permission
+    permission="$(gh_retry api "repos/${REPO}/collaborators/$1/permission" --jq .permission 2>/dev/null)" || return 1
+    [[ $permission =~ $PUSH_PERMISSIONS ]]
+}
 
 behind=""
-while read -r pr head; do
+while read -r pr head author; do
     [ -n "$pr" ] || continue
+    if ! can_push "$author"; then
+        echo "::notice::#${pr} is by ${author}, who cannot push here; it is not rebased"
+        continue
+    fi
     if ! by="$(gh_retry api "repos/${REPO}/compare/${BASE_BRANCH}...${head}" | jq -r '.behind_by')"; then
         echo "::warning::could not compare #${pr} with ${BASE_BRANCH}; it is not rebased"
         continue
     fi
     if [ "$by" -gt 0 ]; then
-        behind="${behind} ${pr}"
+        behind="${behind} ${pr}:${head}"
     fi
 done <<<"$candidates"
 
 failed=0
-for pr in $behind; do
-    if gh_retry api --method PUT "repos/${REPO}/pulls/${pr}/update-branch" -f update_method=rebase >/dev/null; then
+for entry in $behind; do
+    pr="${entry%%:*}"
+    if gh_retry api --method PUT "repos/${REPO}/pulls/${pr}/update-branch" \
+        -f update_method=rebase -f expected_head_sha="${entry#*:}" >/dev/null; then
         echo "rebased #${pr}"
     else
         echo "::warning::could not rebase #${pr}; it needs a manual update"
