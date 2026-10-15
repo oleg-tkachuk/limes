@@ -42,9 +42,11 @@ env:
 jobs:
   release:
     name: Tag and publish the release
-    # Only CI's own dispatch, sent with its GITHUB_TOKEN. Any write token can
-    # send a repository_dispatch; the step below also asks the API whether the
-    # run it names passed, rather than trust the payload.
+    # Only CI's own dispatch, sent with its GITHUB_TOKEN. This is a filter,
+    # not the control: any write token can send a repository_dispatch, and the
+    # payload is the sender's to write. The control is the step below, which
+    # asks the API whether the run the payload names passed on main, for the
+    # commit it names (.github/scripts/ci-run-check.sh).
     if: github.event.sender.login == 'github-actions[bot]'
     runs-on: ubuntu-26.04
     timeout-minutes: 10
