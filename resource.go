@@ -32,6 +32,10 @@ func MatchResource(prefix, uri string) bool {
 // dotSegmentEncoded is a "." percent-encoded, in lower case.
 const dotSegmentEncoded = "%2e"
 
+// percentEncoded is a "%" percent-encoded: "%252e" decodes once to "%2e"
+// and twice to ".".
+const percentEncoded = "%25"
+
 // segmentSeparators read as a "/" when looking for a dot segment: the
 // percent-encoded slash, and the backslash and its encoding, which a consumer
 // that decodes before it splits, or a backend that takes either slash, treats
@@ -40,12 +44,13 @@ var segmentSeparators = strings.NewReplacer("%2f", "/", `\`, "/", "%5c", "/")
 
 // hasDotSegment reports whether s has a segment that is "." or "..",
 // counting "%2e" (any case) as a dot and every segmentSeparators entry as a
-// "/" — the segments RFC 3986 resolves away, which make a resource's text
-// name somewhere other than it reads, also for a consumer that decodes before
-// it resolves. Caveats.Validate refuses a resource with one, and no request
+// "/", each also encoded once more ("%252e", "%252f") — the segments RFC 3986
+// resolves away, which make a resource's text name somewhere other than it
+// reads, also for a consumer that decodes before it resolves, once or twice. Caveats.Validate refuses a resource with one, and no request
 // naming one matches a restricted capability.
 func hasDotSegment(s string) bool {
-	for seg := range strings.SplitSeq(segmentSeparators.Replace(strings.ToLower(s)), "/") {
+	decoded := strings.ReplaceAll(strings.ToLower(s), percentEncoded, "%")
+	for seg := range strings.SplitSeq(segmentSeparators.Replace(decoded), "/") {
 		switch strings.ReplaceAll(seg, dotSegmentEncoded, ".") {
 		case ".", "..":
 			return true

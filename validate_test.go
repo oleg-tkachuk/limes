@@ -33,6 +33,7 @@ func TestCaveatsValidate(t *testing.T) {
 		"dot in uri":           {Ops: []Op{OpGet}, ResourceURIs: []string{"a/./b"}},
 		"encoded dot-dot":      {Ops: []Op{OpGet}, ResourcePrefixes: []string{"a/%2E%2e/b"}},
 		"dot-dot before %2F":   {Ops: []Op{OpGet}, ResourcePrefixes: []string{"corpus/..%2F"}},
+		"double-encoded dots":  {Ops: []Op{OpGet}, ResourcePrefixes: []string{"a/%252e%252e/b"}},
 		"leading dot-dot":      {Ops: []Op{OpGet}, ResourceURIs: []string{"../b"}},
 	}
 	for name, c := range bad {

@@ -20,6 +20,10 @@ API, and this file stops growing.
   match any proof whose `htu` path ends in a slash → the root matches only a
   proof for the root. A server mounted under a prefix takes no proofs at its
   root under `MatchPathOnly`.
+- A resource with a dot segment encoded twice (`%252e%252e`, or `..%252f`)
+  was allowed → it is refused as one encoded once is: `Caveats.Validate`
+  refuses a prefix or URI with one, and no request naming one matches a
+  restricted capability.
 
 ## v0.65.0
 
