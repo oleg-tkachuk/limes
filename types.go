@@ -173,7 +173,7 @@ const (
 	OpTag     Op = "tag"     // label a resource
 	OpSearch  Op = "search"  // query an index
 	OpEmbed   Op = "embed"   // compute embeddings
-	OpShare   Op = "share"   // delegate a sub-capability to another agent
+	OpShare   Op = "share"   // delegate a sub-capability to another agent through the issuer; not needed to attenuate a Biscuit copy
 	OpManage  Op = "manage"  // administer: tenants, policy
 )
 
