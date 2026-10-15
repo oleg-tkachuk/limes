@@ -113,6 +113,6 @@
 // the caveats mean at use time; delegation narrowing ([Narrows]) uses the same
 // resource matcher ([MatchResource]), so the two cannot disagree.
 //
-// See README.md for a five-minute walkthrough and example/ for it as a
-// runnable program.
+// See README.md for a five-minute walkthrough and examples/quickstart for it
+// as a runnable program.
 package limes

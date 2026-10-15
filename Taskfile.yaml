@@ -52,14 +52,13 @@ tasks:
       - task --list
 
   verify-all:
-    desc: "gofmt + go mod tidy/verify + golangci-lint + a 32-bit build + the unit suite + the example + govulncheck + actionlint + the workflow scripts + the release rules and notes + the redisreplay module + pgstore's static checks + the examples that need no database — what CI runs, but test:pgstore and test:examples:pgstore"
+    desc: "gofmt + go mod tidy/verify + golangci-lint + a 32-bit build + the unit suite + govulncheck + actionlint + the workflow scripts + the release rules and notes + the redisreplay module + pgstore's static checks + the examples that need no database — what CI runs, but test:pgstore and test:examples:pgstore"
     cmds:
       - task: fmt:check
       - task: verify:tidy
       - task: lint
       - task: verify:32-bit
       - task: test
-      - task: verify:example
       - task: vuln
       - task: verify:workflows
       - task: verify:scripts
@@ -98,6 +97,7 @@ tasks:
       - go vet ./...
       - golangci-lint run --config ../.golangci.yml ./...
       - go test -race -short ./...
+      - go run ./quickstart
       - go run ./issue-verify
       - go run ./delegation
       - go run ./metering
@@ -139,11 +139,6 @@ tasks:
       LIMES_REDIS_REQUIRED: "1"
     cmds:
       - go test -race -count=1 -run '^TestContractOnRedis$' ./...
-
-  verify:example:
-    desc: "Run ./example end to end: it exits non-zero on any step that does not do what the README says"
-    cmds:
-      - go run ./example
 
   vuln:
     desc: "govulncheck — vulnerabilities this module's code actually reaches"

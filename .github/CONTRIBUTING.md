@@ -14,10 +14,11 @@ task verify-all
 ```
 
 runs gofmt, `go mod tidy` and `go mod verify`, golangci-lint, `go vet` of a
-32-bit build, the unit suite, `./example` end to end, govulncheck, actionlint,
+32-bit build, the unit suite, govulncheck, actionlint,
 the tests of the workflow scripts, the release-rule, release-notes, major-guard and
 module-commits tests, the gate of `redisreplay` (its tests on miniredis
-included) and the static checks of `pgstore` — the same task CI runs. It
+included), the static checks of `pgstore` and the examples that need no
+database, run end to end — the same task CI runs. It
 needs no database and no container; it does need the network, for the shared
 Taskfile include, `go mod verify` and govulncheck's database.
 
