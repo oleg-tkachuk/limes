@@ -237,6 +237,11 @@ func (s *Store) Insert(_ context.Context, req limes.InsertRequest) error {
 		if c.ExpiresAt.After(parent.ExpiresAt) {
 			return fmt.Errorf("%w: expires %s, after its parent %s", limes.ErrDelegationTooWide, c.ExpiresAt, parent.ExpiresAt)
 		}
+		// No expiry outlives every expiry: Purge would drop the parent and
+		// keep the child, whose lineage IsRevoked then cannot walk.
+		if c.ExpiresAt.IsZero() && !parent.ExpiresAt.IsZero() {
+			return fmt.Errorf("%w: never expires, under a parent expiring %s", limes.ErrDelegationTooWide, parent.ExpiresAt)
+		}
 		if c.Subject.TenantID != parent.Subject.TenantID {
 			return fmt.Errorf("%w: tenant %s, not its parent's %s", limes.ErrDelegationTooWide, c.Subject.TenantID, parent.Subject.TenantID)
 		}

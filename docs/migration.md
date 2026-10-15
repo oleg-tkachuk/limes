@@ -25,6 +25,8 @@ API, and this file stops growing.
   `SettleRequest` does: a request without one is `ErrInvalidRequest`, and a
   reservation of another capability, tenant or Biscuit copy is left held.
   memstore and `metertest` check it.
+- `Store.Insert` accepted a child with no expiry under a parent that has one
+  → it refuses one as `ErrDelegationTooWide`. `storetest` checks it.
 
 ## pgstore/v0.9.0
 

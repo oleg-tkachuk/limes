@@ -899,13 +899,16 @@ func checkPurgeKeepsLineage(t *testing.T, f fixture) {
 
 // checkInsertKeepsLineage holds Insert to a lineage Purge and IsRevoked can
 // rely on: no record without an id, none under a parent not on record, and
-// no child expiring after its parent. None of them is recorded.
+// no child expiring after its parent — one with no expiry under a parent
+// that has one among them, as Purge would leave it with no parent. None of
+// them is recorded.
 func checkInsertKeepsLineage(t *testing.T, f fixture) {
 	parent := f.live(t, "agent:parent", uuid.Nil)
 	noID := f.newCapability("agent:no-id", uuid.Nil, f.now.Add(ttl))
 	noID.ID = uuid.Nil
 	orphan := f.newCapability("agent:orphan", uuid.New(), f.now.Add(ttl))
 	outliving := f.newCapability("agent:outliving", parent.ID, parent.ExpiresAt.Add(time.Second))
+	unexpiring := f.newCapability("agent:unexpiring", parent.ID, time.Time{})
 	other, err := f.newTenant()
 	if err != nil {
 		t.Fatalf("NewTenant: %v", err)
@@ -928,6 +931,7 @@ func checkInsertKeepsLineage(t *testing.T, f fixture) {
 		"no id":                        {noID, limes.ErrInvalidRequest},
 		"a parent not on record":       {orphan, limes.ErrInvalidRequest},
 		"a child outliving its parent": {outliving, limes.ErrDelegationTooWide},
+		"a child with no expiry":       {unexpiring, limes.ErrDelegationTooWide},
 		"a child in another tenant":    {elsewhere, elsewhereRefusal},
 	} {
 		if err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: tc.c, IssuedBy: issuedBy}); !errors.Is(err, tc.want) {

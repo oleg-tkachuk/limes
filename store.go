@@ -25,8 +25,9 @@ type IssuanceStore interface {
 	//
 	// An id already on record returns ErrAlreadyExists and changes nothing.
 	// It refuses what InsertRequest.Validate refuses, a parent not on
-	// record as ErrInvalidRequest, a child expiring after its parent or in
-	// another tenant as ErrDelegationTooWide, and a child that would have
+	// record as ErrInvalidRequest, a child expiring after its parent — or
+	// with no expiry under a parent that has one — or in another tenant as
+	// ErrDelegationTooWide, and a child that would have
 	// more than MaxDelegationDepth ancestors still on record — counted as
 	// IsRevoked counts them — as ErrDelegationTooDeep: Purge and the
 	// IsRevoked walk rely on a lineage that is whole, no deeper than the
