@@ -1,6 +1,8 @@
 package limes
 
 import (
+	"crypto"
+	"crypto/ed25519"
 	"fmt"
 	"strings"
 	"testing"
@@ -10,17 +12,11 @@ import (
 // key's bytes, in one notation or another, from a value that holds it.
 var verbsThatShowBytes = []string{"%v", "%+v", "%#v", "%s", "%x", "%X", "%q", "%d"}
 
-// seedPrefixBytes is how many leading bytes of the seed identify it in
-// formatted text: enough that no kid or public key repeats them by chance.
-const seedPrefixBytes = 8
-
-// spelling is how fmt writes b under verb, without the brackets, braces or
-// quotes around a slice, so it is found inside a longer slice's spelling.
-func spelling(verb string, b []byte) string {
-	s := fmt.Sprintf(verb, b)
-	s = strings.TrimPrefix(s, "[]byte{")
-	return strings.Trim(s, `[]{}"`)
-}
+// keySpelling is how fmt writes key under verb. A value that holds the key
+// in a field writes the field the same way, so finding this in the value's
+// text finds the key; a prefix of the key would not do, as %q joins bytes
+// into runes across the prefix's end.
+func keySpelling(verb string, key ed25519.PrivateKey) string { return fmt.Sprintf(verb, key) }
 
 // A value that holds a private key formats without it, under every verb,
 // itself or through a pointer, and still shows its kid.
@@ -33,7 +29,6 @@ func TestFormattingRedactsPrivateKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seed := key.Private.Seed()[:seedPrefixBytes]
 	for name, v := range map[string]any{
 		"SigningKey":    key,
 		"*SigningKey":   &key,
@@ -43,7 +38,7 @@ func TestFormattingRedactsPrivateKeys(t *testing.T) {
 	} {
 		for _, verb := range verbsThatShowBytes {
 			got := fmt.Sprintf(verb, v)
-			if strings.Contains(got, spelling(verb, seed)) {
+			if strings.Contains(got, keySpelling(verb, key.Private)) {
 				t.Errorf("%s under %s = %q: carries the private key", name, verb, got)
 			}
 		}
@@ -54,17 +49,23 @@ func TestFormattingRedactsPrivateKeys(t *testing.T) {
 	}
 }
 
-// The check above would see a key that is printed: without the redaction,
-// the same values carry it.
-func TestSpellingFindsAnUnredactedKey(t *testing.T) {
+// The check above would see a key that is printed: a value holding the key
+// with no redaction, in a field of its own type or of an interface, carries
+// its spelling under every verb.
+func TestKeySpellingFindsAnUnredactedKey(t *testing.T) {
 	key, err := GenerateKey()
 	if err != nil {
 		t.Fatal(err)
 	}
-	seed := key.Private.Seed()[:seedPrefixBytes]
-	for _, verb := range verbsThatShowBytes {
-		if got := fmt.Sprintf(verb, []byte(key.Private)); !strings.Contains(got, spelling(verb, seed)) {
-			t.Errorf("the bare key under %s = %q: its seed's spelling %q is not found", verb, got, spelling(verb, seed))
+	for name, v := range map[string]any{
+		"a key field":      struct{ Key ed25519.PrivateKey }{key.Private},
+		"a crypto.Signer":  struct{ Key crypto.Signer }{key.Private},
+		"behind a pointer": &struct{ Key ed25519.PrivateKey }{key.Private},
+	} {
+		for _, verb := range verbsThatShowBytes {
+			if got := fmt.Sprintf(verb, v); !strings.Contains(got, keySpelling(verb, key.Private)) {
+				t.Errorf("%s under %s = %q: the key's spelling is not found", name, verb, got)
+			}
 		}
 	}
 }
