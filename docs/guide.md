@@ -521,8 +521,8 @@ while a batch comes back full (`DefaultHousekeepingLimit` unless set). Settling
 the zero reservation id, a hold of another capability than the subject's, or
 one made under other Biscuit copies than the subject carries, is
 `ErrReservationNotFound`: a hold is settled by the copy that made it. The receipt names the
-charge's tenant and unit, on a refusal too, so a caller holding only the
-reservation id can attribute it. `GetReservation` reads a hold back while it
+charge's tenant and unit, on a refusal too, so a caller can attribute it from
+the receipt alone. `GetReservation` reads a hold back while it
 still counts — open, or expired and not yet released — and is
 `ErrReservationNotFound` once settled or released; `ListReservations` pages a
 capability's own holds.

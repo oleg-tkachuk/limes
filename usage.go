@@ -358,9 +358,8 @@ type ChargeReceipt struct {
 	// only OverrunRecord allows.
 	Overrun bool
 	// TenantID and UnitCode are the charge's tenant and unit, so a caller
-	// holding only a receipt — of a Settle, say, whose request names only the
-	// reservation — can attribute it. A refusal by a ceiling or by onCharged
-	// still sets them.
+	// holding only the receipt — logged, or passed on — can attribute it. A
+	// refusal by a ceiling or by onCharged still sets them.
 	TenantID uuid.UUID
 	UnitCode string
 	_        noCompare
