@@ -47,10 +47,20 @@ const MaxIJSONInteger = 1<<53 - 1
 // B64 is b in base64url without padding, as JOSE writes every binary value.
 func B64(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 
+// lineBreaks are the characters encoding/base64 skips while decoding, even
+// in strict mode.
+const lineBreaks = "\r\n"
+
 // UnB64 decodes unpadded base64url strictly: the spare bits of the last
-// character must be zero, so each byte string has one spelling and a
-// signature or token cannot be altered and still decode to the same bytes.
-func UnB64(s string) ([]byte, error) { return base64.RawURLEncoding.Strict().DecodeString(s) }
+// character must be zero and no line break may appear, so each byte string
+// has one spelling and a signature or token cannot be altered and still
+// decode to the same bytes.
+func UnB64(s string) ([]byte, error) {
+	if strings.ContainsAny(s, lineBreaks) {
+		return nil, errors.New("base64url: line break in encoded data")
+	}
+	return base64.RawURLEncoding.Strict().DecodeString(s)
+}
 
 // Parts is a compact JWS split into its three segments.
 type Parts struct {
