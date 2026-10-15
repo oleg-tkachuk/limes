@@ -297,7 +297,7 @@ client addressed, scheme and host included. Behind a proxy that rewrites the
 host or strips a mount prefix, or for a server that sees only the path, set
 `dpop.VerifierConfig.MatchPathOnly`: only the server's side of the comparison then
 drops scheme, host and prefix — the proof's `htu` must still be an absolute
-URI.
+URI, and a request to the root path `/` must match it exactly.
 
 The token carries the thumbprint as `cnf.jkt` (RFC 7800), absent from an
 unbound token. A delegated

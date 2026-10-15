@@ -73,7 +73,7 @@ and a `jti` not seen before.
   fragment. A URI with userinfo is refused (RFC 9110 §4.2.4). Behind a proxy,
   `dpop.VerifierConfig.MatchPathOnly` compares the normalised paths alone, and lets
   the proof's path carry extra leading segments, as a proxy's mount prefix
-  adds.
+  adds — but for the root path `/`, which must match exactly.
 - **Nonces (§8, §9).** With `dpop.VerifierConfig.Nonces` set, every proof must carry
   a nonce the server issued; one without is refused with
   `dpop.ErrNonceRequired` (`use_dpop_nonce`), and

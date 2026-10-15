@@ -350,6 +350,13 @@ func TestHTUPathOnlyStillReadsTheProof(t *testing.T) {
 		{"https://u:p@gw.example.com/v1", "/v1", false}, // userinfo
 		{"https://gw.example.com/anything/", "", false}, // no request path
 		{"https://gw.example.com/a/../v1/x", "/v1/x", true},
+		// The root matches only the root: as a tail it would match every
+		// path ending in a slash.
+		{"https://gw.example.com/", "/", true},
+		{"https://gw.example.com", "/", true},
+		{"https://gw.example.com/admin/", "/", false},
+		{"https://gw.example.com/api/", "/", false},
+		{"https://gw.example.com/api/items/", "/items/", true},
 	}
 	for _, tc := range cases {
 		if got := htuMatches(tc.htu, tc.request, true); got != tc.ok {

@@ -332,7 +332,10 @@ type VerifierConfig struct {
 	// MatchPathOnly compares only the path of Proof.URL, and lets the
 	// proof's path carry extra leading segments — for a server behind a
 	// proxy, which cannot know the scheme, host or mount prefix its clients
-	// address it by.
+	// address it by. The root path "/" is the exception: it must match
+	// exactly, since as a tail it would match every path that ends in a
+	// slash, so a server mounted under a prefix cannot take proofs at its
+	// root.
 	MatchPathOnly bool
 }
 
@@ -479,6 +482,10 @@ func (v *Verifier) Verify(ctx context.Context, req Request) error {
 // syntax- and scheme-based normalisation, as RFC 9449 §4.3 requires. Under
 // pathOnly it compares the normalised paths alone: the htu must still be an
 // absolute URI, and the request URL must have a path.
+// rootPath is the path of a server's root, and the separator a path starts
+// with.
+const rootPath = "/"
+
 func htuMatches(htu, requestURL string, pathOnly bool) bool {
 	if pathOnly {
 		// The proof's htu is still a URI a request could have been made to:
@@ -496,8 +503,9 @@ func htuMatches(htu, requestURL string, pathOnly bool) bool {
 		// A proxy may mount the service under a prefix it strips before
 		// forwarding, so the client's path may carry segments the server
 		// never sees. The server's path must still be the whole tail, from a
-		// segment boundary.
-		return g == w || strings.HasSuffix(g, w) && strings.HasPrefix(w, "/")
+		// segment boundary — and name a segment: the root's tail is every
+		// path that ends in a slash.
+		return g == w || w != rootPath && strings.HasSuffix(g, w) && strings.HasPrefix(w, rootPath)
 	}
 	got, err1 := rfc3986.Normalize(htu)
 	want, err2 := rfc3986.Normalize(requestURL)
