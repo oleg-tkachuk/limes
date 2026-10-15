@@ -50,11 +50,16 @@ if [ -z "${GH_TOKEN:-}" ]; then
     exit 0
 fi
 
+# go_without_token runs go without GH_TOKEN: go fetches modules and may run
+# their version-control tools, and the token that pushes and opens the pull
+# request has no business in their environment.
+go_without_token() { env -u GH_TOKEN go "$@"; }
+
 # Every module starts from main as origin has it, whatever an earlier call
 # left checked out or half-written: this runs in a checkout of its own.
 branch="$BRANCH_PREFIX$module"
 git switch --quiet --discard-changes -C "$branch" "origin/$BASE_BRANCH"
-current="$(cd "$module" && go mod edit -json | jq -r --arg m "$LIMES_MODULE" '.Require[]? | select(.Path == $m) | .Version')"
+current="$(cd "$module" && go_without_token mod edit -json | jq -r --arg m "$LIMES_MODULE" '.Require[]? | select(.Path == $m) | .Version')"
 if [ -z "$current" ]; then
     echo "$module does not require $LIMES_MODULE"
     exit 0
@@ -65,7 +70,7 @@ if [ "$(printf '%s\n%s\n' "$current" "$tag" | sort -V | tail -n 1)" = "$current"
 fi
 
 title="build($module): require limes $tag"
-(cd "$module" && go mod edit -require="$LIMES_MODULE@$tag" && go mod tidy)
+(cd "$module" && go_without_token mod edit -require="$LIMES_MODULE@$tag" && go_without_token mod tidy)
 git add "$module/go.mod" "$module/go.sum"
 git commit --quiet -m "$title"
 gh auth setup-git
