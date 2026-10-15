@@ -120,7 +120,9 @@ minutes. `issued.Token` is what the agent carries; `issued.Capability` is the
 record you keep for audit. `verifier.ErrorResponse(ctx, err, limes.AuthSchemeBearer)`
 turns a refusal into the HTTP status, `WWW-Authenticate` challenge and problem
 body to answer with.
-`go run ./example` runs issue, authorize, delegate, meter and revoke end to end.
+`go run ./example` runs issue, authorize, delegate, meter and revoke end to end;
+[examples/](examples) takes each step on its own, pgstore included, logging
+what happens.
 
 ## What it does
 
@@ -216,6 +218,7 @@ algorithm would be another token version, never a runtime choice.
 | [internal/](internal) | the module's own shared packages, not importable from outside it: JOSE pieces (`jose`), HTTP header names (`httpx`), RFC 3986 URI normalisation (`rfc3986`), access to unexported root internals for sibling packages (`link`), and field coverage and per-check deadlines for the conformance suites (`fields`, `watchdog`) |
 | [storetest/](storetest), [metertest/](metertest), [dpop/dpoptest](dpop/dpoptest), [jwks/jwkstest](jwks/jwkstest) | conformance suites to run from your own implementation's tests |
 | [example/](example) | the five-minute walkthrough as a runnable program |
+| [examples/](examples) | smaller programs, one topic each, that log every step to stdout: issuing and verifying, delegation, metering, and pgstore over PostgreSQL; a module of its own, never released |
 | [testdata/](testdata) | golden tokens, and the Biscuit vocabulary and cases shared with SDKs in other languages |
 | [tools/](tools) | the developer tools, pinned in modules of their own and run with `go tool -modfile=tools/go.mod` (yq: `tools/yq/go.mod`) |
 

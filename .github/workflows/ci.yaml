@@ -177,6 +177,7 @@ jobs:
   # in a container, which verify-all leaves out so that it needs no Docker,
   # with the limes of this commit: limes may not break pgstore. The runner's
   # Docker serves testcontainers.
+  # The pgstore example runs here too, for the same Docker.
   pgstore:
     name: PostgreSQL store
     needs: [changes]
@@ -205,6 +206,9 @@ jobs:
 
       - name: task test:pgstore
         run: task --yes test:pgstore
+
+      - name: task test:examples:pgstore
+        run: task --yes test:examples:pgstore
 
   # The same tests against the limes pgstore's go.mod requires, which is what
   # a consumer's build resolves. This gates pgstore's release, not a merge: a
