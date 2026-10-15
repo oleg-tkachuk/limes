@@ -27,15 +27,19 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/gh-retry.sh"
 
 # The paths that decide what CI runs: the workflows and their scripts, the
-# tasks CI calls, the linter's configuration and the pinned tools. Task and
-# golangci-lint each read whichever of several file names exists, and Task
-# prefers Taskfile.yml to Taskfile.yaml, so a new file under another of those
-# names replaces the reviewed one: every spelling counts.
+# tasks CI calls, the linter's configuration, the pinned tools, and the root
+# go.mod, whose go and toolchain lines pick the Go every job sets up. Task
+# and golangci-lint each read whichever of several file names exists, and
+# Task prefers Taskfile.yml to Taskfile.yaml, so a new file under another of
+# those names replaces the reviewed one: every spelling counts. A nested
+# module's go.mod is left out on purpose: the release raises its requirement
+# of limes in a pull request this queues (require-released-limes.sh).
 CI_DEFINITION=(
     '.github/*'
     '[Tt]askfile.*'
     '.golangci.*'
     'tools/*'
+    'go.mod'
 )
 
 # The pull_request_target action of a push to the pull request's branch.

@@ -343,8 +343,12 @@ type DelegateRequest struct {
 // that would have more than MaxDelegationDepth ancestors is
 // ErrDelegationTooDeep, refused by Store.Insert before it is on record. A parent whose caveats do not allow
 // OpShare — the right to delegate — is ErrOpNotAllowed: delegating is the
-// share operation, and a capability granted without it may not hand on any
-// part of itself.
+// share operation, and a capability granted without it may not have the
+// issuer mint a new principal any part of it. OpShare gates Delegate only:
+// a Biscuit form of the capability (Issuer.Biscuit) is attenuated by
+// whoever holds it, with no key and no OpShare, and a copy handed on is the
+// same capability, not a new principal. Give a capability that must not be
+// passed on no Biscuit form.
 func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (IssueResult, error) {
 	return result(i.delegate(ctx, req))
 }

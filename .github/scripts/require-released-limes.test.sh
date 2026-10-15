@@ -11,7 +11,8 @@
 # module requiring it through a local replace, as pgstore does, so go tidies
 # it offline. Its origin is a bare repository beside it. A fake gh logs every
 # call to CALLS and answers `pr list` by running its --jq over FAKE_OPEN_PRS,
-# the open pull requests from that branch.
+# the open pull requests from that branch. A go in front of the real one
+# logs whether GH_TOKEN reached it to GO_CALLS.
 #
 # Runs from `task verify-all` — no Docker, no network.
 
@@ -40,7 +41,14 @@ case "$1 $2" in
 esac
 GH
 chmod +x "$work/bin/gh"
-export PATH="$work/bin:$PATH" CALLS="$work/calls" REPO=oleg-tkachuk/limes GH_RETRY_DELAY_SECONDS=0
+real_go="$(command -v go)"
+cat >"$work/bin/go" <<GO
+#!/usr/bin/env bash
+printf '%s GH_TOKEN=%s\n' "\$*" "\${GH_TOKEN:-unset}" >>"\$GO_CALLS"
+exec "$real_go" "\$@"
+GO
+chmod +x "$work/bin/go"
+export PATH="$work/bin:$PATH" CALLS="$work/calls" GO_CALLS="$work/go-calls" REPO=oleg-tkachuk/limes GH_RETRY_DELAY_SECONDS=0
 export GOFLAGS=-mod=mod GOPROXY=off GOWORK=off GOTOOLCHAIN=local
 export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com
 
@@ -90,6 +98,8 @@ git -C "$work/repo" fetch --quiet origin
 [ "$(required main)" = "$REQUIRED" ] || fail "main was changed"
 [ "$(git -C "$work/repo" log -1 --format=%s "origin/require-limes/$MODULE")" = "build($MODULE): require limes v0.2.0" ] || fail "the commit's subject"
 grep -q "^pr create .*--head require-limes/$MODULE --title build($MODULE): require limes v0.2.0" "$CALLS" || fail "no pull request opened: $(cat "$CALLS")"
+grep -q '^mod tidy GH_TOKEN=unset$' "$GO_CALLS" || fail "go mod tidy did not run without the token: $(cat "$GO_CALLS")"
+! grep -v 'GH_TOKEN=unset$' "$GO_CALLS" || fail "go saw the token"
 
 # A newer release while that pull request is open: the branch moves to it
 # and the pull request is retitled, not opened again.

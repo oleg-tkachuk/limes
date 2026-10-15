@@ -42,9 +42,11 @@ env:
 jobs:
   release:
     name: Tag and publish the release
-    # Only CI's own dispatch, sent with its GITHUB_TOKEN. Any write token can
-    # send a repository_dispatch; the step below also asks the API whether the
-    # run it names passed, rather than trust the payload.
+    # Only CI's own dispatch, sent with its GITHUB_TOKEN. This is a filter,
+    # not the control: any write token can send a repository_dispatch, and the
+    # payload is the sender's to write. The control is the step below, which
+    # asks the API whether the run the payload names passed on main, for the
+    # commit it names (.github/scripts/ci-run-check.sh).
     if: github.event.sender.login == 'github-actions[bot]'
     runs-on: ubuntu-26.04
     timeout-minutes: 10
@@ -137,11 +139,13 @@ jobs:
       # module's release leaves the root's published.
       #
       # Run where its config and lockfile live; git finds the repository from
-      # there.
+      # there. semantic-release logs every commit message it reads, and this
+      # step holds a write token: no line of that log may act as a workflow
+      # command. See .github/scripts/without-workflow-commands.sh.
       - name: Compute and push the tag of the root module
         if: steps.catchup.outputs.release == 'true'
         working-directory: .github/release
-        run: npx semantic-release --no-ci
+        run: ../scripts/without-workflow-commands.sh npx semantic-release --no-ci
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # release-notes-file.cjs writes the notes generated from the
@@ -179,7 +183,7 @@ jobs:
       - name: Compute and push the tag of redisreplay
         if: steps.catchup.outputs.release == 'true'
         working-directory: .github/release
-        run: npx semantic-release --no-ci
+        run: ../scripts/without-workflow-commands.sh npx semantic-release --no-ci
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_MODULE: ${{ env.REDISREPLAY_MODULE }}
@@ -208,7 +212,7 @@ jobs:
       - name: Compute and push the tag of pgstore
         if: steps.catchup.outputs.release == 'true' && steps.pgstore-gate.outputs.passed == 'true'
         working-directory: .github/release
-        run: npx semantic-release --no-ci
+        run: ../scripts/without-workflow-commands.sh npx semantic-release --no-ci
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_MODULE: ${{ env.PGSTORE_MODULE }}

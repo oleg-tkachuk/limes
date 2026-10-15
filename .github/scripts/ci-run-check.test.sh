@@ -81,7 +81,10 @@ if [ "$want" != "$got" ]; then
     printf 'FAIL REQUIRED_JOBS differs from checks.needs:\n%s\n' "$(diff <(echo "$want") <(echo "$got") || true)"
     failures=$((failures + 1))
 fi
-if ! yq '.jobs.dispatch-release.needs[]' | grep -qx checks; then
+# Read whole before matching: grep -q stops at the first match, and yq,
+# still writing, would fail on the closed pipe under pipefail.
+needs="$(yq '.jobs.dispatch-release.needs[]')"
+if ! grep -qx checks <<<"$needs"; then
     echo "FAIL dispatch-release does not wait for the required check"
     failures=$((failures + 1))
 fi

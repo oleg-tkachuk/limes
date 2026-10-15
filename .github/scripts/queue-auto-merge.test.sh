@@ -65,6 +65,11 @@ check "another spelling of it" false ".golangci.yaml"
 check "a pinned tool" false "tools/go.mod"
 check "code beside a workflow" false "$(printf 'verifier.go\n.github/workflows/ci.yaml')"
 check "a name that only starts like one" true "github/notes.md"
+check "the module definition" false "go.mod"
+# A nested module's requirement of limes is raised by a pull request this
+# queues on purpose.
+check "a nested module's definition" true "$(printf 'pgstore/go.mod\npgstore/go.sum')"
+check "the module's checksums" true "go.sum"
 
 push() { # name, FAKE_QUEUED, want dequeued (true/false), changed paths
     : >"$CALLS"
