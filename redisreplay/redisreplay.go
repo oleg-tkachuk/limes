@@ -24,6 +24,13 @@
 // duration that collects a holder gone quiet; a server clock running ahead
 // cannot drop a live id.
 //
+// The verifiers' clocks must agree to within dpop.ReplayClockSkew. An id is
+// kept until ReplayClockSkew past the last instant a verifier accepts its
+// proof, and each call drops the ids that have lapsed by its own clock: a
+// replica running further ahead than that drops an id while a replica behind
+// it still accepts the proof, which can then be replayed there. Keep the
+// replicas on NTP.
+//
 // # Memory
 //
 // EntriesPerHolder bounds each holder; nothing bounds the holders. Bound the
