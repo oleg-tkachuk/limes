@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # require-released-limes.test.sh — require-released-limes.sh raises a nested
 # module's requirement of limes on its own branch and opens its pull request,
-# updates the one still open to a newer release, leaves alone a module that
+# updates the one still open to a newer release, never a fork's pull request
+# from a branch of the same name, leaves alone a module that
 # already requires that release or a later one or none at all, refuses a tag
 # that is not a release's, and does nothing without a token; and release.yaml
 # proposes it for every nested module it releases.
@@ -9,7 +10,8 @@
 # A scratch repository stands in for this one: a stub limes at its root and a
 # module requiring it through a local replace, as pgstore does, so go tidies
 # it offline. Its origin is a bare repository beside it. A fake gh logs every
-# call to CALLS and answers `pr list` with FAKE_OPEN_PR.
+# call to CALLS and answers `pr list` by running its --jq over FAKE_OPEN_PRS,
+# the open pull requests from that branch.
 #
 # Runs from `task verify-all` — no Docker, no network.
 
@@ -26,7 +28,14 @@ cat >"$work/bin/gh" <<'GH'
 printf '%s\n' "$*" >>"$CALLS"
 case "$1 $2" in
     "auth setup-git" | "pr create" | "pr edit") ;;
-    "pr list") printf '%s\n' "${FAKE_OPEN_PR:-}" ;;
+    "pr list")
+        filter=""
+        while [ $# -gt 0 ]; do
+            if [ "$1" = "--jq" ]; then filter="$2"; fi
+            shift
+        done
+        jq -r "$filter" <<<"${FAKE_OPEN_PRS:-[]}"
+        ;;
     *) echo "unexpected gh $*" >&2; exit 2 ;;
 esac
 GH
@@ -86,11 +95,19 @@ grep -q "^pr create .*--head require-limes/$MODULE --title build($MODULE): requi
 # and the pull request is retitled, not opened again.
 : >"$CALLS"
 (cd "$work/repo" && git switch --quiet main)
-FAKE_OPEN_PR=7 run "$MODULE" v0.3.0 >/dev/null || fail "updating the open pull request failed"
+FAKE_OPEN_PRS='[{"number": 7, "isCrossRepository": false}]' run "$MODULE" v0.3.0 >/dev/null || fail "updating the open pull request failed"
 git -C "$work/repo" fetch --quiet origin
 [ "$(required "require-limes/$MODULE")" = v0.3.0 ] || fail "the branch requires $(required "require-limes/$MODULE"), want v0.3.0"
 grep -q '^pr edit 7 .*--title build('"$MODULE"'): require limes v0.3.0' "$CALLS" || fail "the open pull request not updated: $(cat "$CALLS")"
 ! grep -q '^pr create' "$CALLS" || fail "a second pull request opened"
+
+# A fork's pull request from a branch of the same name is not ours: a pull
+# request of our own is opened beside it, and the fork's is not touched.
+scratch "$REQUIRED"
+FAKE_OPEN_PRS='[{"number": 9, "isCrossRepository": true}]' run "$MODULE" v0.2.0 >/dev/null || fail "beside a fork's pull request: failed"
+! grep -q '^pr edit' "$CALLS" || fail "a fork's pull request was edited: $(cat "$CALLS")"
+grep -q "^pr create .*--head require-limes/$MODULE " "$CALLS" || fail "beside a fork's pull request: none opened: $(cat "$CALLS")"
+grep -q '^pr list .*--json number,isCrossRepository ' "$CALLS" || fail "pr list did not ask which pull requests are a fork's: $(cat "$CALLS")"
 
 # Nothing to raise: the same release, an older one, or no requirement.
 for tc in "$REQUIRED:$REQUIRED" "v0.10.0:v0.9.0" ":v0.2.0"; do

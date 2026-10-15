@@ -2,7 +2,7 @@
 # queue-auto-merge.sh — queue a pull request to merge once it is green, unless
 # it changes what CI checks.
 #
-# Usage: GH_TOKEN=… REPO=owner/name PR=<number> queue-auto-merge.sh
+# Usage: GH_TOKEN=… REPO=owner/name PR=<number> ACTION=<event action> queue-auto-merge.sh
 #
 # A pull request runs the workflows and tasks in its own head, so one that
 # changes them can make "All checks passed" pass without the checks behind it:
@@ -11,6 +11,12 @@
 # leaves the pull request alone. auto-merge.yaml runs this from main, never
 # from the pull request, so a pull request cannot rewrite the rule that holds
 # it.
+#
+# A pull request is queued only when it opens or becomes ready (ACTION other
+# than synchronize). A push to it (ACTION=synchronize) never queues it again —
+# a maintainer may have taken it off the queue to hold it — but one that now
+# changes CI_DEFINITION takes it off the queue: the gate read its files once,
+# and a later push would otherwise merge unread under the earlier verdict.
 #
 # Without GH_TOKEN it warns and does nothing: a merge made with the workflow's
 # own GITHUB_TOKEN would start no CI on main (auto-merge.yaml).
@@ -32,6 +38,9 @@ CI_DEFINITION=(
     'tools/*'
 )
 
+# The pull_request_target action of a push to the pull request's branch.
+readonly SYNCHRONIZE=synchronize
+
 # defines_ci reports whether path is one CI_DEFINITION names.
 defines_ci() {
     local pattern
@@ -48,6 +57,7 @@ if [ -z "${GH_TOKEN:-}" ]; then
 fi
 : "${REPO:?REPO names the repository, owner/name}"
 : "${PR:?PR names the pull request, by number}"
+: "${ACTION:?ACTION names the pull_request_target action}"
 
 # A diff that cannot be read fails the step, so the pull request is left
 # alone rather than queued unread.
@@ -56,8 +66,16 @@ while IFS= read -r path; do
     [ -n "$path" ] || continue
     if defines_ci "$path"; then
         echo "::notice::#$PR changes $path, which decides what CI runs; left for a person to merge"
+        queued="$(gh_retry pr view "$PR" --repo "$REPO" --json autoMergeRequest --jq '.autoMergeRequest != null')"
+        if [ "$queued" = true ]; then
+            gh_retry pr merge "$PR" --repo "$REPO" --disable-auto
+            echo "::notice::#$PR taken off the merge queue"
+        fi
         exit 0
     fi
 done <<<"$changed"
 
+if [ "$ACTION" = "$SYNCHRONIZE" ]; then
+    exit 0
+fi
 gh_retry pr merge "$PR" --repo "$REPO" --auto --merge
