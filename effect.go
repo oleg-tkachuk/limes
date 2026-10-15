@@ -15,7 +15,10 @@ const (
 	// EffectUnspecified takes the operation's default: the fixed effect of a
 	// built-in operation, and EffectWrite for a consumer-defined one, whose
 	// effect this package cannot know — so an undeclared operation errs
-	// towards the caveats that tighten mutations.
+	// towards the caveats that tighten mutations. It errs away from the one
+	// that tightens reads: a tainted resource is refused only to a read, so
+	// a consumer-defined operation that reads and is left undeclared is
+	// never held to AllowTaintedRead. Declare EffectRead for one.
 	EffectUnspecified Effect = iota
 	// EffectRead leaves state unchanged.
 	EffectRead
