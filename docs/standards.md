@@ -81,7 +81,9 @@ and a `jti` not seen before.
   `dpop.HMACNonces` issues them statelessly — its issuance time and an HMAC of it
   — so replicas sharing a key, with clocks within `dpop.HMACNonceClockSkew` of each
   other, share nonces without sharing state, and keys rotate by putting the
-  new one first.
+  new one first. Such a nonce is bound to no client or key and may be reused
+  until it expires: it bounds how long before use a proof can be signed, and
+  no more.
 - **The scheme (§7.1, §7.2).** `ParseAuthorization` reads
   `Authorization: DPoP <token>` and `Authorization: Bearer <token>` (RFC 9110
   §11.6.2, token68). Given the scheme, `Verify` refuses a key-bound token
