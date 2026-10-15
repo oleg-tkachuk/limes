@@ -96,7 +96,8 @@ func (s *Store) Insert(ctx context.Context, req limes.InsertRequest) error {
 }
 
 // checkParent holds c's parent on record for the rest of tx and refuses a
-// child it cannot keep: under a parent not on record, outliving it, in
+// child it cannot keep: under a parent not on record, outliving it (with no
+// expiry under a parent that has one included), in
 // another tenant, or past limes.MaxDelegationDepth. It returns the parent's
 // depth.
 func checkParent(ctx context.Context, tx pgx.Tx, c limes.Capability) (int, error) {
@@ -115,6 +116,11 @@ func checkParent(ctx context.Context, tx pgx.Tx, c limes.Capability) (int, error
 	}
 	if c.ExpiresAt.After(parent.ExpiresAt) {
 		return 0, fmt.Errorf("%w: expires %s, after its parent %s", limes.ErrDelegationTooWide, c.ExpiresAt, parent.ExpiresAt)
+	}
+	// No expiry outlives every expiry: Purge could not drop the parent
+	// while the child, which it never purges, still refers to it.
+	if c.ExpiresAt.IsZero() && !parent.ExpiresAt.IsZero() {
+		return 0, fmt.Errorf("%w: never expires, under a parent expiring %s", limes.ErrDelegationTooWide, parent.ExpiresAt)
 	}
 	if c.Subject.TenantID != parent.Subject.TenantID {
 		return 0, fmt.Errorf("%w: tenant %s, not its parent's %s", limes.ErrDelegationTooWide, c.Subject.TenantID, parent.Subject.TenantID)
