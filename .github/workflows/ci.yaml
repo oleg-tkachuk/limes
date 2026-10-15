@@ -34,6 +34,11 @@ env:
   NODE_VERSION: "24.21.0"
   # renovate: datasource=github-releases depName=go-task/task
   TASK_VERSION: "3.54.0"
+  # The SHA256 of that release's task_linux_amd64.tar.gz, from its
+  # task_checksums.txt: setup-task refuses an archive that does not match,
+  # so a release replaced under the same tag fails the run. Renovate moves
+  # TASK_VERSION alone; a bump fails here until this follows it.
+  TASK_SHA256: "680859dbb4d881a9c72d4d9a8f510825450849af8567deacd7302c01124416fb"
   # Must be BUILT with a Go no older than the `go` directive in go.mod, or it
   # refuses to load the module. Bumping go.mod means checking this.
   # renovate: datasource=github-releases depName=golangci/golangci-lint
@@ -152,6 +157,7 @@ jobs:
         uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
         with:
           version: ${{ env.TASK_VERSION }}
+          checksum: ${{ env.TASK_SHA256 }}
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       # --yes accepts the first-fetch trust prompt for the shared task library
@@ -202,6 +208,7 @@ jobs:
         uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
         with:
           version: ${{ env.TASK_VERSION }}
+          checksum: ${{ env.TASK_SHA256 }}
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: task test:pgstore
@@ -240,6 +247,7 @@ jobs:
         uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
         with:
           version: ${{ env.TASK_VERSION }}
+          checksum: ${{ env.TASK_SHA256 }}
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: task test:pgstore:pinned
@@ -282,6 +290,7 @@ jobs:
         uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
         with:
           version: ${{ env.TASK_VERSION }}
+          checksum: ${{ env.TASK_SHA256 }}
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: task test:redisreplay
