@@ -771,14 +771,13 @@ A role that does not own the tables sees only the rows of the tenant a call
 is scoped to, and none when it is scoped to no tenant; the revocation checks
 see every tenant, as the verifier asks them before it knows the token's. A
 call whose request names its tenant — `Insert`, `ListByPrincipal`, `Bump`,
-`Charge`, `Reserve`, `Settle`, `GetTenantBudget`, `SetTenantBudget`, the
+`Charge`, `Reserve`, `Settle`, `Release`, `GetTenantBudget`, `SetTenantBudget`, the
 tenant erasers, `Ledger.SumCharges` and `Census.CountRecords` for one tenant —
 under a
 scope that does not admit that tenant returns `ErrScopeMismatch`, never
 `ErrNotFound` or `ErrInvalidRequest`. A call that names only an id
-(`GetRecord`, `Revoke`, `Refund`, `Release`, `GetUsage`, `GetCharge`, …) cannot
-be checked so, and answers a row out of scope as not found — `Release`, being
-idempotent, as a no-op.
+(`GetRecord`, `Revoke`, `Refund`, `GetUsage`, `GetCharge`, …) cannot
+be checked so, and answers a row out of scope as not found.
 `onCharged` runs on the store's own `pgx.Tx`. Every time it writes comes from
 `Config.Now`, never from the database's clock.
 
