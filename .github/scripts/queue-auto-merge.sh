@@ -21,11 +21,14 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/gh-retry.sh"
 
 # The paths that decide what CI runs: the workflows and their scripts, the
-# tasks CI calls, the linter's configuration and the pinned tools.
+# tasks CI calls, the linter's configuration and the pinned tools. Task and
+# golangci-lint each read whichever of several file names exists, and Task
+# prefers Taskfile.yml to Taskfile.yaml, so a new file under another of those
+# names replaces the reviewed one: every spelling counts.
 CI_DEFINITION=(
     '.github/*'
-    'Taskfile.yaml'
-    '.golangci.yml'
+    '[Tt]askfile.*'
+    '.golangci.*'
     'tools/*'
 )
 
