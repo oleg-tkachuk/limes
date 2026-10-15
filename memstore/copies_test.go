@@ -140,7 +140,7 @@ func TestCopyBudgetReservations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := u.Release(ctx, limes.ReleaseRequest{ReservationID: r2.ID}); err != nil {
+	if err := u.Release(ctx, limes.ReleaseRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, copies: []limes.CopyCeiling{c}}), ReservationID: r2.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if got := u.copies["copy"].reserved; got != 0 {

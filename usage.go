@@ -155,7 +155,10 @@ type Meter[TX any] interface {
 	Settle(ctx context.Context, req SettleRequest, onCharged func(ctx context.Context, tx TX) error) (ChargeReceipt, error)
 
 	// Release ends a reservation without charging. Idempotent: releasing
-	// one that is gone is a no-op.
+	// one that is gone is a no-op. So is releasing a reservation made by
+	// another capability, or under other Biscuit copies than req.Subject
+	// carries: it is none of this subject's, and stays held, so a copy
+	// cannot free a sibling's hold to spend past its own limits.
 	Release(ctx context.Context, req ReleaseRequest) error
 }
 
@@ -807,8 +810,12 @@ type BumpReceipt struct {
 	_            noCompare
 }
 
-// ReleaseRequest names the reservation to release.
+// ReleaseRequest names the reservation to release, and who releases it.
 type ReleaseRequest struct {
+	// Subject is the capability releasing, as it reserved
+	// (VerifiedCapability.MeterSubject). A reservation of another
+	// capability, or of other copies, is left held.
+	Subject       MeterSubject
 	ReservationID uuid.UUID
 }
 

@@ -87,11 +87,12 @@ func TestSettleChargesTheActualCostAndReleasesTheHold(t *testing.T) {
 func TestReleaseAndExpiryFreeTheHold(t *testing.T) {
 	ctx := context.Background()
 	u, capID, tenant, now := reservationFixture(t)
-	r, _ := u.Reserve(ctx, limes.ReserveRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("10"))}), Amount: limes.MustParseAmount("4")})
-	if err := u.Release(ctx, limes.ReleaseRequest{ReservationID: r.ID}); err != nil {
+	subject := recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("10"))})
+	r, _ := u.Reserve(ctx, limes.ReserveRequest{Subject: subject, Amount: limes.MustParseAmount("4")})
+	if err := u.Release(ctx, limes.ReleaseRequest{Subject: subject, ReservationID: r.ID}); err != nil {
 		t.Fatal(err)
 	}
-	if err := u.Release(ctx, limes.ReleaseRequest{ReservationID: r.ID}); err != nil {
+	if err := u.Release(ctx, limes.ReleaseRequest{Subject: subject, ReservationID: r.ID}); err != nil {
 		t.Fatalf("repeated release: %v", err)
 	}
 	if got, _ := u.GetUsage(ctx, capID); got.ReservedAmount != 0 {

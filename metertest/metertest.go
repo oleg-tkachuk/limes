@@ -374,6 +374,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"ACapabilityNotOnRecordIsNotMetered", checkNotOnRecord[TX]},
 		{"ACounterNeverPassesMaxNanos", checkCounterOverflow[TX]},
 		{"ReleaseReturnsTheHoldToEveryCounter", checkRelease[TX]},
+		{"ReleaseIsTheReservingCopys", checkReleaseIsTheOwners[TX]},
 		{"AResetKeepsTheHolds", checkResetKeepsHolds[TX]},
 		{"AnAncestorCountsItsDescendantsHolds", checkDescendantHolds[TX]},
 		{"SettleAboveTheHoldCountsTheHoldOnce", checkSettleAboveHold[TX]},
@@ -746,17 +747,15 @@ func checkSettle[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil || !again.Replayed || !again.Overrun || again.ChargeID != r.ChargeID || again.SpentAmount != 24*one {
 		t.Errorf("settling again = %+v, %v; want a replay of %s", again, err, r.ChargeID)
 	}
-	if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{ReservationID: res.ID}); err != nil {
+	if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{Subject: f.childSubject(), ReservationID: res.ID}); err != nil {
 		t.Errorf("releasing a settled reservation: %v", err)
 	}
-	other, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
-		Subject: newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, budget: budgetOf(rootBudget), unit: unit}),
-		Amount:  0,
-	})
+	onRoot := newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, budget: budgetOf(rootBudget), unit: unit})
+	other, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: onRoot, Amount: 0})
 	if err != nil {
 		t.Fatalf("reserve nothing: %v", err)
 	}
-	if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{ReservationID: other.ID}); err != nil {
+	if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{Subject: onRoot, ReservationID: other.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, budget: budgetOf(rootBudget)}), ReservationID: other.ID, Amount: 0}, nil); !errors.Is(err, limes.ErrReservationNotFound) {
@@ -1039,11 +1038,11 @@ func checkReleaseReturnsCopy[TX any](t *testing.T, f fixture[TX]) {
 		return // a Meter that does not read copies back is checked no further
 	}
 	const ttl = time.Minute
-	for name, release := range map[string]func(id uuid.UUID) error{
-		"Release": func(id uuid.UUID) error {
-			return f.Usage.Release(f.Ctx, limes.ReleaseRequest{ReservationID: id})
+	for name, release := range map[string]func(subject limes.MeterSubject, id uuid.UUID) error{
+		"Release": func(subject limes.MeterSubject, id uuid.UUID) error {
+			return f.Usage.Release(f.Ctx, limes.ReleaseRequest{Subject: subject, ReservationID: id})
 		},
-		"ReleaseExpired": func(uuid.UUID) error {
+		"ReleaseExpired": func(limes.MeterSubject, uuid.UUID) error {
 			f.Advance(2 * ttl)
 			_, err := f.Usage.ReleaseExpired(f.Ctx, limes.ReleaseExpiredRequest{})
 			return err
@@ -1054,11 +1053,12 @@ func checkReleaseReturnsCopy[TX any](t *testing.T, f fixture[TX]) {
 		}
 		copyID := []byte("copy-" + name)
 		copies := []limes.CopyCeiling{{RevocationID: copyID, Budget: &limes.BudgetCeiling{Max: childBudget}}}
-		r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, copies: copies}), Amount: one, TTL: ttl})
+		subject := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, copies: copies})
+		r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: subject, Amount: one, TTL: ttl})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := release(r.ID); err != nil {
+		if err := release(subject, r.ID); err != nil {
 			t.Fatal(err)
 		}
 		if got := f.copyUsage(t, reader, copyID); len(got) != 1 || got[0].ReservedAmount != 0 {
@@ -1403,7 +1403,7 @@ func checkReservations[TX any](t *testing.T, f fixture[TX]) {
 	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: another, ReservationID: first.ID, Amount: held}, nil); !errors.Is(err, limes.ErrReservationNotFound) {
 		t.Errorf("another copy settling a settled hold: err = %v, want ErrReservationNotFound, not the receipt", err)
 	}
-	if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{ReservationID: second.ID}); err != nil {
+	if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{Subject: byCopy, ReservationID: second.ID}); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []uuid.UUID{first.ID, second.ID, uuid.New()} {
@@ -1731,7 +1731,7 @@ func checkRelease[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{ReservationID: r.ID}); err != nil {
+	if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{Subject: f.childSubject(), ReservationID: r.ID}); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []uuid.UUID{f.child, f.root} {
@@ -1744,6 +1744,54 @@ func checkRelease[TX any](t *testing.T, f fixture[TX]) {
 	}
 	if _, err := f.charge(limes.ChargeRequest{Amount: 10 * one}, nil); err != nil {
 		t.Errorf("a charge the released hold made room for: %v", err)
+	}
+}
+
+// checkReleaseIsTheOwners holds Release to the copy that reserved: under
+// another capability, another tenant, another copy or none, the hold stays
+// in place, as Settle refuses it, so a copy cannot free a sibling's hold to
+// spend past its own limits. A request naming no subject is refused.
+func checkReleaseIsTheOwners[TX any](t *testing.T, f fixture[TX]) {
+	const held = 3 * one
+	copies := []limes.CopyCeiling{{RevocationID: []byte("holder"), Budget: &limes.BudgetCeiling{Max: childBudget}}}
+	owner := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: unit, copies: copies})
+	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: owner, Amount: held})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stillHeld := func(by string) {
+		t.Helper()
+		if _, err := f.Usage.GetReservation(f.Ctx, r.ID); err != nil {
+			t.Errorf("after a release by %s: GetReservation = %v, want the hold", by, err)
+		}
+		if u, err := f.Usage.GetUsage(f.Ctx, f.child); err != nil || u.ReservedAmount != held {
+			t.Errorf("after a release by %s: the child holds %+v, %v; want %s", by, u, err, held)
+		}
+	}
+	sibling := []limes.CopyCeiling{{RevocationID: []byte("sibling"), Budget: &limes.BudgetCeiling{Max: childBudget}}}
+	for name, subject := range map[string]limes.MeterSubject{
+		"another capability": newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, budget: budgetOf(rootBudget), unit: unit}),
+		"another tenant":     newSubject(subjectSpec{capID: f.child, tenant: uuid.New(), budget: budgetOf(childBudget), unit: unit, copies: copies}),
+		"another copy":       newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: unit, copies: sibling}),
+		"no copy":            f.childSubject(),
+	} {
+		if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{Subject: subject, ReservationID: r.ID}); err != nil && !errors.Is(err, limes.ErrScopeMismatch) {
+			t.Errorf("a release by %s: %v", name, err)
+		}
+		stillHeld(name)
+	}
+	if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{ReservationID: r.ID}); !errors.Is(err, limes.ErrInvalidRequest) {
+		t.Errorf("a release naming no subject: err = %v, want ErrInvalidRequest", err)
+	}
+	stillHeld("no subject")
+	if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{Subject: owner, ReservationID: r.ID}); err != nil {
+		t.Fatalf("the owner's release: %v", err)
+	}
+	if _, err := f.Usage.GetReservation(f.Ctx, r.ID); !errors.Is(err, limes.ErrReservationNotFound) {
+		t.Errorf("after the owner's release: GetReservation = %v, want ErrReservationNotFound", err)
+	}
+	if u, err := f.Usage.GetUsage(f.Ctx, f.child); err != nil || u.ReservedAmount != 0 {
+		t.Errorf("after the owner's release: the child holds %+v, %v; want nothing", u, err)
 	}
 }
 
@@ -2913,7 +2961,9 @@ func checkReadOnlyScope[TX any](t *testing.T, f fixture[TX]) {
 			_, err := f.Usage.Settle(ro, limes.SettleRequest{Subject: f.childSubject(), ReservationID: held.ID, Amount: one}, onCharged)
 			return err
 		},
-		"Release": func() error { return f.Usage.Release(ro, limes.ReleaseRequest{ReservationID: held.ID}) },
+		"Release": func() error {
+			return f.Usage.Release(ro, limes.ReleaseRequest{Subject: f.childSubject(), ReservationID: held.ID})
+		},
 		"Refund": func() error {
 			_, err := f.Usage.Refund(ro, limes.RefundRequest{ChargeID: charged.ChargeID, Remaining: true})
 			return err

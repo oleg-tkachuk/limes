@@ -298,7 +298,7 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 	if got, err := usage.ListReservations(ctx, limes.ListReservationsRequest{CapabilityID: capID}); err != nil || len(got.Items) != 1 || got.Items[0].ID != res.ID {
 		t.Errorf("ListReservations = %+v, %v", got, err)
 	}
-	if err := usage.Release(ctx, limes.ReleaseRequest{ReservationID: res.ID}); err != nil {
+	if err := usage.Release(ctx, limes.ReleaseRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant}), ReservationID: res.ID}); err != nil {
 		t.Errorf("Release: %v", err)
 	}
 	if u, err := usage.GetUsage(ctx, capID); err != nil || u.RequestCount != 1 || u.SpentAmount != limes.NanosPerUnit {

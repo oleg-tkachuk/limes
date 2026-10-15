@@ -110,7 +110,7 @@ func TestReserveRacingDeleteLeavesTheAncestorDeleted(t *testing.T) {
 		dropRecord(records, root)
 		close(release)
 		wg.Wait()
-		_ = u.Release(ctx, limes.ReleaseRequest{ReservationID: res.ID})
+		_ = u.Release(ctx, limes.ReleaseRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: child, tenant: tenant}), ReservationID: res.ID})
 		if _, err := u.GetUsage(ctx, root); !errors.Is(err, limes.ErrUsageNotFound) {
 			resurrected++
 		}

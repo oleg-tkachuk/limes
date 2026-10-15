@@ -30,14 +30,15 @@ func TestDeleteIsNotUndoneByADescendantsHold(t *testing.T) {
 		}
 	}
 	u := newTestUsage(records)
-	r, err := u.Reserve(ctx, limes.ReserveRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: child, tenant: tenant}), Amount: unit})
+	subject := recordedSubject(ctx, t, u, subjectSpec{capID: child, tenant: tenant})
+	r, err := u.Reserve(ctx, limes.ReserveRequest{Subject: subject, Amount: unit})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := u.DeleteUsage(ctx, limes.DeleteUsageRequest{CapabilityID: root}); err != nil {
 		t.Fatal(err)
 	}
-	if err := u.Release(ctx, limes.ReleaseRequest{ReservationID: r.ID}); err != nil {
+	if err := u.Release(ctx, limes.ReleaseRequest{Subject: subject, ReservationID: r.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := u.GetUsage(ctx, root); !errors.Is(err, limes.ErrUsageNotFound) {

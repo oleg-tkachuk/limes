@@ -20,6 +20,11 @@ API, and this file stops growing.
   it refuses a `RemoteConfig.URL` that is not `https`, and a fetch refuses a
   redirect to another scheme or host. A `RemoteConfig.Client` of your own is
   copied, not changed, and its `CheckRedirect` still runs within that.
+- `ReleaseRequest` named the reservation alone, and `Meter.Release` released
+  any → it takes `Subject`, the `MeterSubject` that reserved, as
+  `SettleRequest` does: a request without one is `ErrInvalidRequest`, and a
+  reservation of another capability, tenant or Biscuit copy is left held.
+  memstore and `metertest` check it.
 
 ## pgstore/v0.9.0
 
