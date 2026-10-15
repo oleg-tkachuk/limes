@@ -14,6 +14,13 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.65.0
+
+- `jwks.NewRemote` accepted any URL and its client followed any redirect →
+  it refuses a `RemoteConfig.URL` that is not `https`, and a fetch refuses a
+  redirect to another scheme or host. A `RemoteConfig.Client` of your own is
+  copied, not changed, and its `CheckRedirect` still runs within that.
+
 ## pgstore/v0.9.0
 
 - A call that writes under a `Config.Scope` of your own that sets

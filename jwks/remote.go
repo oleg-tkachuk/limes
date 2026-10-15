@@ -8,7 +8,9 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,16 +33,25 @@ const (
 	DefaultMaxDocumentBytes   = 1 << 20
 )
 
+// schemeHTTPS is the only scheme a key set is fetched over: over anything
+// else whoever sits on the path chooses the keys the verifier trusts.
+const schemeHTTPS = "https"
+
+// maxRedirects is how many redirects a fetch follows, net/http's own default
+// limit, for a Client that sets no CheckRedirect of its own.
+const maxRedirects = 10
+
 // RemoteConfig configures a Remote. Only URL is required.
 // The intervals must nest: MinRefreshInterval ≤ RefreshInterval ≤ MaxStale.
 type RemoteConfig struct {
 	// URL of the issuer's JWKS document, e.g.
-	// https://issuer.example/.well-known/jwks.json.
+	// https://issuer.example/.well-known/jwks.json. It must be https.
 	URL string
 	// Client performs the fetch. Default: a client with a
 	// DefaultFetchTimeout timeout. A fetch runs apart from the caller that
 	// started it, and is bounded by DefaultFetchTimeout whatever the
-	// client allows.
+	// client allows. Whatever the client's own redirect policy, a redirect
+	// to another scheme or host is refused.
 	Client *http.Client
 	// RefreshInterval is how long a fetched key set is used before it is
 	// re-fetched, unless the response's Cache-Control says a shorter time
@@ -92,12 +103,20 @@ func NewRemote(cfg RemoteConfig) (*Remote, error) {
 	if cfg.URL == "" {
 		return nil, errors.New("jwks: RemoteConfig.URL required")
 	}
+	u, err := url.Parse(cfg.URL)
+	if err != nil {
+		return nil, fmt.Errorf("jwks: RemoteConfig.URL: %w", err)
+	}
+	if u.Scheme != schemeHTTPS || u.Host == "" {
+		return nil, fmt.Errorf("jwks: RemoteConfig.URL must be an %s URL, got %q", schemeHTTPS, cfg.URL)
+	}
 	if cfg.RefreshInterval < 0 || cfg.MinRefreshInterval < 0 || cfg.MaxStale < 0 || cfg.MaxDocumentBytes < 0 {
 		return nil, errors.New("jwks: RemoteConfig intervals and MaxDocumentBytes must not be negative")
 	}
 	if cfg.Client == nil {
 		cfg.Client = &http.Client{Timeout: DefaultFetchTimeout}
 	}
+	cfg.Client = sameOrigin(cfg.Client)
 	if cfg.RefreshInterval == 0 {
 		cfg.RefreshInterval = DefaultRefreshInterval
 	}
@@ -121,6 +140,30 @@ func NewRemote(cfg RemoteConfig) (*Remote, error) {
 			cfg.MinRefreshInterval, cfg.RefreshInterval, cfg.MaxStale)
 	}
 	return &Remote{cfg: cfg, fetching: make(chan struct{}, 1)}, nil
+}
+
+// sameOrigin is a shallow copy of c, so the caller's client is left as it
+// is, whose redirects keep to the scheme and host of the first request: a
+// redirect is the server's choice, and one to http or to another host would
+// let it, or whoever can steer it, pick the keys. Within that, c's own policy
+// decides, or net/http's default when it has none.
+func sameOrigin(c *http.Client) *http.Client {
+	own := c.CheckRedirect
+	out := *c
+	out.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		first := via[0].URL
+		if req.URL.Scheme != schemeHTTPS || !strings.EqualFold(req.URL.Host, first.Host) {
+			return fmt.Errorf("jwks: redirect from %s to %s leaves the origin", first.Redacted(), req.URL.Redacted())
+		}
+		if own != nil {
+			return own(req, via)
+		}
+		if len(via) >= maxRedirects {
+			return fmt.Errorf("jwks: stopped after %d redirects", maxRedirects)
+		}
+		return nil
+	}
+	return &out
 }
 
 // PublicKey implements KeyResolver. A known key from a set past its

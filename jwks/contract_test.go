@@ -44,7 +44,7 @@ func TestRemoteContract(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		srv := httptest.NewServer(h)
+		srv := httptest.NewTLSServer(h)
 		t.Cleanup(srv.Close)
 		remote, err := jwks.NewRemote(jwks.RemoteConfig{URL: srv.URL, Client: srv.Client()})
 		if err != nil {
