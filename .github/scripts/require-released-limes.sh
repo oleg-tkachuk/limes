@@ -16,6 +16,11 @@
 # module that does not require limes, or already requires this release or a
 # later one, is left alone.
 #
+# The open pull request is found by its head branch, and GitHub matches that
+# by name alone: a fork's branch of the same name matches too. A fork's pull
+# request is never the one updated — AUTOMERGE_TOKEN would retitle another
+# author's work — so only one from this repository counts.
+#
 # Without GH_TOKEN it warns and does nothing: a push made with the workflow's
 # own GITHUB_TOKEN would start no CI on the branch (auto-merge.yaml).
 #
@@ -67,7 +72,8 @@ gh auth setup-git
 git push --quiet --force origin "$branch"
 
 body="limes $tag is released. $module required $current; this raises it, so $module is tested against, and released with, the limes it now requires."
-pr="$(gh_retry pr list --repo "$repo" --head "$branch" --base "$BASE_BRANCH" --state open --json number --jq '.[0].number // empty')"
+pr="$(gh_retry pr list --repo "$repo" --head "$branch" --base "$BASE_BRANCH" --state open \
+    --json number,isCrossRepository --jq '[.[] | select(.isCrossRepository | not)][0].number // empty')"
 if [ -n "$pr" ]; then
     gh_retry pr edit "$pr" --repo "$repo" --title "$title" --body "$body" >/dev/null
     echo "updated #$pr: $title"
