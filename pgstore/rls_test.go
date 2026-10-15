@@ -133,6 +133,11 @@ func TestRowSecurityKeepsTheMeterApart(t *testing.T) {
 		if _, err := f.usage.GetTenantBudget(other, f.mine); !errors.Is(err, limes.ErrScopeMismatch) {
 			t.Errorf("%s: GetTenantBudget: err = %v, want ErrScopeMismatch", name, err)
 		}
+		// Release names its subject's tenant, so it is refused as scoped
+		// to another one, not answered as a no-op.
+		if err := f.usage.Release(other, limes.ReleaseRequest{Subject: meterSubject(f.child.ID, f.mine), ReservationID: uuid.New()}); !errors.Is(err, limes.ErrScopeMismatch) {
+			t.Errorf("%s: Release: err = %v, want ErrScopeMismatch", name, err)
+		}
 		page, err := f.usage.ListTenantBudgets(other, limes.ListTenantBudgetsRequest{})
 		if err != nil || len(page.Items) != 0 {
 			t.Errorf("%s: ListTenantBudgets = %d rows, %v; want none", name, len(page.Items), err)
