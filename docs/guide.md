@@ -121,7 +121,8 @@ guess. A document that is not JSON, or names a member twice, is refused.
 
 ### Inspect a token without trusting it
 
-`inspect.Decode` reads a JWT's claims, refusing only one that is malformed —
+`inspect.Decode` reads a JWT's claims, refusing only one that is malformed or
+longer than `inspect.MaxTokenBytes` —
 it checks no signature, time, audience or revocation; `inspect.VerifySignature`
 checks only its signature against one key. They live in a package of their
 own so they are never mistaken for the API that authorises. Both are for tooling — showing what a
@@ -157,7 +158,7 @@ Resource prefixes match at a `/` segment boundary: `corpus/public` covers
 `corpus/public/x` but not `corpus/public-secret`. An operation that cannot name
 its resource (`Resource: ""`) is refused by a resource-restricted capability —
 for an operation over a set, pass the prefix that bounds the set. A resource
-with a `.` or `..` segment, plain or percent-encoded, is refused by a
+with a `.` or `..` segment, plain or percent-encoded once or twice, is refused by a
 resource-restricted capability and by `Validate`: what it names depends on how
 you resolve it, not on its text. Pass the resource as your storage will
 address it.
@@ -297,7 +298,7 @@ client addressed, scheme and host included. Behind a proxy that rewrites the
 host or strips a mount prefix, or for a server that sees only the path, set
 `dpop.VerifierConfig.MatchPathOnly`: only the server's side of the comparison then
 drops scheme, host and prefix — the proof's `htu` must still be an absolute
-URI.
+URI, and a request to the root path `/` must match it exactly.
 
 The token carries the thumbprint as `cnf.jkt` (RFC 7800), absent from an
 unbound token. A delegated

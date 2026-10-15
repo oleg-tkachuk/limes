@@ -144,6 +144,44 @@ func TestRowSecurityKeepsTheMeterApart(t *testing.T) {
 	}
 }
 
+// A refund names only the charge, so it is checked by scope alone: under
+// another tenant's scope, or none, the charge is not there to refund, and
+// what it charged stays charged.
+func TestRowSecurityKeepsRefundsApart(t *testing.T) {
+	f := newTenantFixture(t)
+	mine := WithTenant(t.Context(), f.mine)
+	if _, err := f.usage.SetTenantBudget(mine, limes.SetTenantBudgetRequest{
+		TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true}, UnitCode: limes.DefaultUnitCode,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	const amount = 5
+	charged, err := f.usage.Charge(mine, limes.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: amount}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, other := range map[string]context.Context{
+		"another tenant": WithTenant(t.Context(), f.theirs),
+		"no scope":       t.Context(),
+	} {
+		for kind, req := range map[string]limes.RefundRequest{
+			"in part":      {ChargeID: charged.ChargeID, Amount: 1},
+			"what remains": {ChargeID: charged.ChargeID, Remaining: true},
+		} {
+			if _, err := f.usage.Refund(other, req); !errors.Is(err, limes.ErrChargeNotFound) {
+				t.Errorf("%s: Refund %s: err = %v, want ErrChargeNotFound", name, kind, err)
+			}
+		}
+	}
+	got, err := f.usage.GetCharge(mine, charged.ChargeID)
+	if err != nil || got.RefundedAmount != 0 {
+		t.Errorf("the charge after refunds out of scope = %+v, %v; want nothing refunded", got, err)
+	}
+	if u, err := f.usage.GetUsage(mine, f.child.ID); err != nil || u.SpentAmount != amount {
+		t.Errorf("the capability after refunds out of scope = %+v, %v; want %d spent", u, err, amount)
+	}
+}
+
 // Housekeeping with no scope removes nothing; scoped to every tenant it
 // removes what is due in each.
 func TestHousekeepingNeedsEveryTenant(t *testing.T) {

@@ -20,8 +20,15 @@ import (
 // it issued, with ErrNonceRequired — "use_dpop_nonce" on the wire — and
 // the server sends a fresh one in the DPoP-Nonce header for the client to
 // retry with. A proof must then carry a nonce the server issued, so it
-// cannot be signed ahead of time; its iat must still fall within the
-// Verifier's window. HMACNonces needs no state shared between replicas,
+// cannot be signed earlier than the nonce's lifetime before it is used; its
+// iat must still fall within the Verifier's window.
+//
+// What a nonce bounds is that lifetime, and no more. An HMACNonces nonce is
+// its issuance time and an HMAC of it: it names no client and no key, every
+// client asking within the same second gets the same one, and any of them
+// may carry it in any number of proofs until it expires — DefaultNonceLifetime
+// unless configured shorter. Replay of one proof is the ReplayCache's to
+// stop, not the nonce's. HMACNonces needs no state shared between replicas,
 // only the same keys, and clocks within HMACNonceClockSkew of each other.
 
 // NonceHeader is the HTTP response header a nonce travels in (RFC 9449
@@ -62,7 +69,10 @@ const (
 
 // HMACNonces is a Nonces that keeps no state: a nonce is its issuance
 // time and an HMAC of it, so every replica holding the same keys issues and
-// accepts the same nonces. Rotate by putting the new key first: it issues,
+// accepts the same nonces. A nonce is not bound to the client it was sent
+// to, nor used up by a proof: it limits how long before use a proof can be
+// signed to its lifetime, so keep Lifetime as short as the clients' round
+// trip allows. Rotate by putting the new key first: it issues,
 // and the old ones are still accepted until their nonces expire.
 type HMACNonces struct {
 	keys     [][]byte

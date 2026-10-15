@@ -28,6 +28,10 @@ import (
 type Signer struct {
 	keyID string
 	key   crypto.Signer
+	// pub is the key's public half, read once: each signature is checked
+	// against it before a token carries it. An array, so Signer stays
+	// comparable.
+	pub [ed25519.PublicKeySize]byte
 }
 
 // SignerConfig configures a Signer.
@@ -63,10 +67,11 @@ func NewSigner(cfg SignerConfig) (*Signer, error) {
 	if k, ok := cfg.Key.(ed25519.PrivateKey); ok && len(k) != ed25519.PrivateKeySize {
 		return nil, fmt.Errorf("limes: SignerConfig.Key is %d bytes, not an Ed25519 private key's %d", len(k), ed25519.PrivateKeySize)
 	}
-	if pub, ok := cfg.Key.Public().(ed25519.PublicKey); !ok || len(pub) != ed25519.PublicKeySize {
+	pub, ok := cfg.Key.Public().(ed25519.PublicKey)
+	if !ok || len(pub) != ed25519.PublicKeySize {
 		return nil, fmt.Errorf("limes: SignerConfig.Key must be Ed25519, not %T", cfg.Key.Public())
 	}
-	return &Signer{keyID: cfg.KeyID, key: cfg.Key}, nil
+	return &Signer{keyID: cfg.KeyID, key: cfg.Key, pub: [ed25519.PublicKeySize]byte(pub)}, nil
 }
 
 // jwtHeader is the protected header. We use compact serialization:
@@ -214,6 +219,13 @@ func (s *Signer) sign(ctx context.Context, c Capability) (string, error) {
 	}
 	if len(sig) != ed25519.SignatureSize {
 		return "", fmt.Errorf("limes: sign: an Ed25519 signature is %d bytes, not %d", ed25519.SignatureSize, len(sig))
+	}
+	// A key held elsewhere — a KMS, an HSM — may sign with another key than
+	// the one it reports, or return bytes that are no signature at all:
+	// a token carrying either would be refused by every verifier, and
+	// recorded as issued.
+	if !ed25519.Verify(s.pub[:], []byte(signingInput), sig) {
+		return "", errors.New("limes: sign: the signature does not verify under the key's public key")
 	}
 	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig), nil
 }

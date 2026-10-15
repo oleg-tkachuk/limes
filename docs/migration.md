@@ -14,6 +14,20 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.66.0
+
+- `dpop.VerifierConfig.MatchPathOnly` let a request to the root path `/`
+  match any proof whose `htu` path ends in a slash → the root matches only a
+  proof for the root. A server mounted under a prefix takes no proofs at its
+  root under `MatchPathOnly`.
+- A resource with a dot segment encoded twice (`%252e%252e`, or `..%252f`)
+  was allowed → it is refused as one encoded once is: `Caveats.Validate`
+  refuses a prefix or URI with one, and no request naming one matches a
+  restricted capability.
+- `inspect.Decode` and `inspect.VerifySignature` read a token of any length →
+  one longer than `inspect.MaxTokenBytes` (`limes.DefaultMaxTokenBytes`) is
+  `ErrInvalidToken`, unread.
+
 ## v0.65.0
 
 - `jwks.NewRemote` accepted any URL and its client followed any redirect →

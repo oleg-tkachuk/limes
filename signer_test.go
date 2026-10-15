@@ -434,3 +434,56 @@ func TestSignerSignsThroughAnOpaqueKey(t *testing.T) {
 		}
 	}
 }
+
+// misreportingKey reports one public key and signs with another, as a KMS
+// signer wired to the wrong key version does.
+type misreportingKey struct {
+	reported ed25519.PublicKey
+	signs    ed25519.PrivateKey
+}
+
+func (k misreportingKey) Public() crypto.PublicKey { return k.reported }
+
+func (k misreportingKey) Sign(r io.Reader, msg []byte, opts crypto.SignerOpts) ([]byte, error) {
+	return k.signs.Sign(r, msg, opts)
+}
+
+// garbageKey reports a real public key and returns a signature's length of
+// zero bytes, as a broken signer might.
+type garbageKey struct{ reported ed25519.PublicKey }
+
+func (k garbageKey) Public() crypto.PublicKey { return k.reported }
+
+func (garbageKey) Sign(io.Reader, []byte, crypto.SignerOpts) ([]byte, error) {
+	return make([]byte, ed25519.SignatureSize), nil
+}
+
+// A signature that does not verify under the key's own public key is never
+// put in a token, whatever signed it: every verifier would refuse that token.
+func TestSignerRefusesASignatureItsKeyDoesNotVerify(t *testing.T) {
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, other, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	c := Capability{
+		ID: uuid.New(), Issuer: "i", Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New()},
+		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, IssuedAt: now, ExpiresAt: now.Add(time.Minute),
+	}
+	for name, key := range map[string]crypto.Signer{
+		"another key's signature": misreportingKey{reported: pub, signs: other},
+		"no signature at all":     garbageKey{reported: pub},
+	} {
+		signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: key})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if token, err := signer.sign(context.Background(), c); err == nil {
+			t.Errorf("%s: signed %q", name, token)
+		}
+	}
+}

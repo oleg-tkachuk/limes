@@ -73,7 +73,7 @@ and a `jti` not seen before.
   fragment. A URI with userinfo is refused (RFC 9110 §4.2.4). Behind a proxy,
   `dpop.VerifierConfig.MatchPathOnly` compares the normalised paths alone, and lets
   the proof's path carry extra leading segments, as a proxy's mount prefix
-  adds.
+  adds — but for the root path `/`, which must match exactly.
 - **Nonces (§8, §9).** With `dpop.VerifierConfig.Nonces` set, every proof must carry
   a nonce the server issued; one without is refused with
   `dpop.ErrNonceRequired` (`use_dpop_nonce`), and
@@ -81,7 +81,9 @@ and a `jti` not seen before.
   `dpop.HMACNonces` issues them statelessly — its issuance time and an HMAC of it
   — so replicas sharing a key, with clocks within `dpop.HMACNonceClockSkew` of each
   other, share nonces without sharing state, and keys rotate by putting the
-  new one first.
+  new one first. Such a nonce is bound to no client or key and may be reused
+  until it expires: it bounds how long before use a proof can be signed, and
+  no more.
 - **The scheme (§7.1, §7.2).** `ParseAuthorization` reads
   `Authorization: DPoP <token>` and `Authorization: Bearer <token>` (RFC 9110
   §11.6.2, token68). Given the scheme, `Verify` refuses a key-bound token
