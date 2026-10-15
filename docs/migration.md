@@ -24,6 +24,9 @@ API, and this file stops growing.
   was allowed → it is refused as one encoded once is: `Caveats.Validate`
   refuses a prefix or URI with one, and no request naming one matches a
   restricted capability.
+- `inspect.Decode` and `inspect.VerifySignature` read a token of any length →
+  one longer than `inspect.MaxTokenBytes` (`limes.DefaultMaxTokenBytes`) is
+  `ErrInvalidToken`, unread.
 
 ## v0.65.0
 

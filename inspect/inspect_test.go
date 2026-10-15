@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -85,5 +86,23 @@ func TestVerifySignature(t *testing.T) {
 		if err := inspect.VerifySignature(tc.token, tc.key); !errors.Is(err, limes.ErrInvalidToken) {
 			t.Errorf("%s: err = %v, want ErrInvalidToken", name, err)
 		}
+	}
+}
+
+// A token over MaxTokenBytes is refused unread, by both; one of exactly
+// that length is read. The padding sits in the signature, which Decode does
+// not read, so only the size can refuse it.
+func TestTokensOverTheSizeLimitAreRefused(t *testing.T) {
+	_, token, pub := issue(t)
+	pad := func(n int) string { return token + strings.Repeat("A", n-len(token)) }
+	if _, err := inspect.Decode(pad(inspect.MaxTokenBytes)); err != nil {
+		t.Errorf("Decode of a token of exactly MaxTokenBytes: %v", err)
+	}
+	over := pad(inspect.MaxTokenBytes + 1)
+	if _, err := inspect.Decode(over); !errors.Is(err, limes.ErrInvalidToken) {
+		t.Errorf("Decode of a token over MaxTokenBytes: err = %v, want ErrInvalidToken", err)
+	}
+	if err := inspect.VerifySignature(over, pub); !errors.Is(err, limes.ErrInvalidToken) || !strings.Contains(err.Error(), "bytes") {
+		t.Errorf("VerifySignature of a token over MaxTokenBytes: err = %v, want ErrInvalidToken for its size", err)
 	}
 }

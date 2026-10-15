@@ -121,7 +121,8 @@ guess. A document that is not JSON, or names a member twice, is refused.
 
 ### Inspect a token without trusting it
 
-`inspect.Decode` reads a JWT's claims, refusing only one that is malformed —
+`inspect.Decode` reads a JWT's claims, refusing only one that is malformed or
+longer than `inspect.MaxTokenBytes` —
 it checks no signature, time, audience or revocation; `inspect.VerifySignature`
 checks only its signature against one key. They live in a package of their
 own so they are never mistaken for the API that authorises. Both are for tooling — showing what a
