@@ -636,15 +636,23 @@ func (s *UsageStore) Settle(ctx context.Context, req limes.SettleRequest, onChar
 }
 
 // Release ends a reservation without charging. Releasing one that is gone
-// is a no-op.
+// is a no-op, and so is releasing one of another capability or other
+// copies: it is left held.
 func (s *UsageStore) Release(ctx context.Context, req limes.ReleaseRequest) error {
-	return s.inTx(ctx, func(tx pgx.Tx) error {
+	if err := checkSubject(req.Subject); err != nil {
+		return err
+	}
+	subject := req.Subject
+	return s.inTenantTx(ctx, subject.TenantID(), func(tx pgx.Tx) error {
 		h, err := scanHold(tx.QueryRow(ctx, sqlLockHold, req.ReservationID))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
 			return err
+		}
+		if h.capID != subject.CapabilityID() || !sameCopyIDs(copyIDs(h.copies), subject.Copies()) {
+			return nil
 		}
 		return s.releaseHold(ctx, tx, h)
 	})

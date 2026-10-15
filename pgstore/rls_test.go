@@ -325,7 +325,9 @@ func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 				_, err := s.usage.Settle(s.ctx, limes.SettleRequest{Subject: subject, ReservationID: held.ID, Amount: 1}, consumer)
 				return err
 			},
-			"Release": func() error { return s.usage.Release(s.ctx, limes.ReleaseRequest{ReservationID: held.ID}) },
+			"Release": func() error {
+				return s.usage.Release(s.ctx, limes.ReleaseRequest{Subject: subject, ReservationID: held.ID})
+			},
 			"Refund": func() error {
 				_, err := s.usage.Refund(s.ctx, limes.RefundRequest{ChargeID: charged.ChargeID, Remaining: true})
 				return err
