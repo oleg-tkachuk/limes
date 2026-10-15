@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # require-released-limes.test.sh — require-released-limes.sh raises a nested
 # module's requirement of limes on its own branch and opens its pull request,
-# updates the one still open to a newer release, never a fork's pull request
+# updates the one still open to a newer release, tidies a module that builds
+# against it through a replace in the same commit, never a fork's pull request
 # from a branch of the same name, leaves alone a module that
 # already requires that release or a later one or none at all, refuses a tag
 # that is not a release's, and does nothing without a token; and release.yaml
@@ -55,9 +56,13 @@ export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com GIT_COMMITTER_NAME
 readonly MODULE=nested
 readonly LIMES=github.com/oleg-tkachuk/limes
 readonly REQUIRED=v0.1.0
+# A module never released that builds against MODULE through a replace, as
+# examples does; its name is the one the script tidies.
+readonly FOLLOWER=examples
 
 # A scratch checkout of main, its origin a bare repository; MODULE requires
-# limes at the version given, or not at all when none is.
+# limes at the version given, or not at all when none is. With a second
+# argument, FOLLOWER builds against MODULE and limes, requiring both at it.
 scratch() {
     rm -rf "$work/origin.git" "$work/repo"
     git init --quiet --bare --initial-branch=main "$work/origin.git"
@@ -74,6 +79,12 @@ scratch() {
         printf 'module example.com/%s\n\ngo 1.21\n' "$MODULE" >"$MODULE/go.mod"
     fi
     touch "$MODULE/go.sum"
+    if [ -n "${2:-}" ]; then
+        mkdir "$FOLLOWER"
+        printf 'module example.com/%s\n\ngo 1.21\n\nrequire (\n\t%s %s\n\texample.com/%s %s\n)\n\nreplace (\n\t%s => ../\n\texample.com/%s => ../%s\n)\n' \
+            "$FOLLOWER" "$LIMES" "$2" "$MODULE" "$2" "$LIMES" "$MODULE" "$MODULE" >"$FOLLOWER/go.mod"
+        printf 'package main\n\nimport _ "example.com/%s"\n\nfunc main() {}\n' "$MODULE" >"$FOLLOWER/main.go"
+    fi
     git add -A
     git commit --quiet -m init
     git push --quiet origin main
@@ -83,6 +94,11 @@ scratch() {
 # required is the limes version MODULE requires on branch, as origin has it.
 required() {
     git -C "$work/repo" show "origin/$1:$MODULE/go.mod" | awk -v m="$LIMES" '$1 == "require" && $2 == m { print $3 }'
+}
+
+# follower_requires prints the version of limes FOLLOWER requires on branch $1.
+follower_requires() {
+    git -C "$work/repo" show "origin/$1:$FOLLOWER/go.mod" | awk -v m="$LIMES" '{ for (i = 1; i < NF; i++) if ($i == m && $(i + 1) ~ /^v/) print $(i + 1) }'
 }
 
 failures=0
@@ -100,6 +116,16 @@ git -C "$work/repo" fetch --quiet origin
 grep -q "^pr create .*--head require-limes/$MODULE --title build($MODULE): require limes v0.2.0" "$CALLS" || fail "no pull request opened: $(cat "$CALLS")"
 grep -q '^mod tidy GH_TOKEN=unset$' "$GO_CALLS" || fail "go mod tidy did not run without the token: $(cat "$GO_CALLS")"
 ! grep -v 'GH_TOKEN=unset$' "$GO_CALLS" || fail "go saw the token"
+
+# A module that builds against MODULE through a replace follows it in the
+# same commit: its requirement of limes is raised too, so it stays tidy.
+scratch "$REQUIRED" "$REQUIRED"
+run "$MODULE" v0.2.0 >/dev/null || fail "beside a follower: failed"
+git -C "$work/repo" fetch --quiet origin
+[ "$(follower_requires "require-limes/$MODULE")" = v0.2.0 ] || fail "the follower requires $(follower_requires "require-limes/$MODULE"), want v0.2.0"
+[ "$(follower_requires main)" = "$REQUIRED" ] || fail "the follower was changed on main"
+[ "$(git -C "$work/repo" rev-list --count "origin/main..origin/require-limes/$MODULE")" = 1 ] || fail "the follower was not raised in the module's one commit"
+(cd "$work/repo" && git switch --quiet "require-limes/$MODULE" && cd "$FOLLOWER" && go mod tidy -diff >/dev/null) || fail "the follower is not tidy on the branch"
 
 # A newer release while that pull request is open: the branch moves to it
 # and the pull request is retitled, not opened again.

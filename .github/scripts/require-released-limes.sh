@@ -14,7 +14,7 @@
 #
 # The module's go.mod is read and written by `go mod edit`, then tidied. A
 # module that does not require limes, or already requires this release or a
-# later one, is left alone.
+# later one, is left alone. Each of FOLLOWERS is tidied in the same commit.
 #
 # The open pull request is found by its head branch, and GitHub matches that
 # by name alone: a fork's branch of the same name matches too. A fork's pull
@@ -33,6 +33,11 @@ source "$(dirname "${BASH_SOURCE[0]}")/gh-retry.sh"
 
 # The module every nested module requires.
 readonly LIMES_MODULE=github.com/oleg-tkachuk/limes
+# The modules never released that build against the nested ones through a
+# replace. Raising a nested module's requirement of limes raises theirs, so
+# their go.mod, tidied, follows in the same commit: left behind, their own
+# check that go.mod is tidy fails the pull request.
+readonly FOLLOWERS=(examples)
 # The branch a module's requirement is proposed on: <prefix><module dir>.
 readonly BRANCH_PREFIX=require-limes/
 # The branch the pull request merges into.
@@ -72,6 +77,14 @@ fi
 title="build($module): require limes $tag"
 (cd "$module" && go_without_token mod edit -require="$LIMES_MODULE@$tag" && go_without_token mod tidy)
 git add "$module/go.mod" "$module/go.sum"
+for follower in "${FOLLOWERS[@]}"; do
+    [ -f "$follower/go.mod" ] || continue
+    (cd "$follower" && go_without_token mod tidy)
+    git add "$follower/go.mod"
+    if [ -f "$follower/go.sum" ]; then
+        git add "$follower/go.sum"
+    fi
+done
 git commit --quiet -m "$title"
 gh auth setup-git
 git push --quiet --force origin "$branch"
