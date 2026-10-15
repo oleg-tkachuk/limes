@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"crypto/ed25519"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,7 +29,7 @@ func main() {
 
 	key, err := limes.GenerateKey()
 	demo.Must(log, err, "generate a signing key")
-	log.Info("signing key generated", "kid", key.KeyID)
+	log.Info("generated an Ed25519 signing key", "key id", key.KeyID)
 
 	// The records store keeps every capability and its revocation; in
 	// memory here, PostgreSQL in the pgstore example.
@@ -45,7 +46,8 @@ func main() {
 	demo.Must(log, err, "key set")
 	verifier, err := limes.NewVerifier(limes.VerifierConfig{Keys: keys, Revocations: records, TrustedIssuers: []string{issuerName}})
 	demo.Must(log, err, "verifier")
-	log.Info("issuer and verifier ready", "issuer", issuerName, "audience", audience)
+	log.Info("issuer signs tokens; verifier checks them with the public key alone, no call back to the issuer",
+		"issuer", issuerName, "audience", audience)
 
 	tenant := uuid.New()
 	issued, err := issuer.Issue(ctx, limes.IssueRequest{
@@ -62,17 +64,18 @@ func main() {
 	})
 	demo.Must(log, err, "issue")
 	c := issued.Capability
-	log.Info("capability issued",
-		"id", c.ID, "subject", c.Subject.Subject, "ops", c.Caveats.Ops,
-		"resources", c.Caveats.ResourcePrefixes, "expires", c.ExpiresAt.Format(time.RFC3339),
-		"token_bytes", len(issued.Token))
+	log.Info("issued a capability token to the agent: what it may do travels in the token",
+		"capability", c.ID, "agent", c.Subject.Subject, "operations", c.Caveats.Ops,
+		"resources under", c.Caveats.ResourcePrefixes, "expires", c.ExpiresAt.Format(time.RFC3339),
+		"token size", fmt.Sprintf("%d bytes", len(issued.Token)))
 
 	verified, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
 		Verify: limes.VerifyRequest{Token: issued.Token, Audience: audience},
 		Check:  limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/report.pdf"},
 	})
 	demo.Must(log, err, "authorize a read inside the caveats")
-	log.Info("request admitted", "op", limes.OpGet, "resource", "corpus/public/report.pdf", "capability", verified.Capability().ID)
+	log.Info("verifier admitted a request the caveats allow",
+		"operation", limes.OpGet, "resource", "corpus/public/report.pdf", "capability", verified.Capability().ID)
 
 	_, err = verifier.Authorize(ctx, limes.AuthorizeRequest{
 		Verify: limes.VerifyRequest{Token: issued.Token, Audience: audience},
@@ -90,9 +93,9 @@ func main() {
 	demo.Refused(log, err, limes.ErrAudienceMismatch, "present the token to another service")
 
 	demo.Must(log, records.Revoke(ctx, limes.RevokeRequest{CapabilityID: c.ID, Note: "agent finished", Actor: "operator"}), "revoke")
-	log.Info("capability revoked", "id", c.ID)
+	log.Info("revoked the capability in the store", "capability", c.ID)
 
 	_, err = verifier.Verify(ctx, limes.VerifyRequest{Token: issued.Token, Audience: audience})
 	demo.Refused(log, err, limes.ErrRevoked, "verify the revoked token")
-	log.Info("done")
+	log.Info("done: every step behaved as described")
 }

@@ -1,9 +1,10 @@
 # Examples
 
-Small programs that show limes at work, one topic each. Every step is logged
-to stdout as one line, and a step that does not do what the example says
-stops it with a non-zero exit, so each example is also a check
-(`task verify:examples`, `task test:examples:pgstore`).
+Small programs that show limes at work, one topic each. Each one tells what
+it does step by step on stdout, in plain words, with the values that matter
+below each step. A step that does not do what the example says stops it with
+a non-zero exit, so each example is also a check (`task verify:examples`,
+`task test:examples:pgstore`).
 
 Run them from this directory:
 
@@ -19,8 +20,17 @@ All but `pgstore` keep everything in memory (`memstore`). This directory is a
 module of its own, so that the limes module never resolves a database driver;
 its `replace` lines build it against the limes and pgstore beside it.
 
-A line of output reads like this:
+Each step is marked `•` when it is done, `✓` for a refusal the example sets
+out to show, and `✗` when something did not go as described:
 
 ```
-level=INFO msg="refused, as expected" example=issue-verify step="verify the revoked token" err="limes: revoked"
+• issued a capability token to the agent: what it may do travels in the token
+    capability       01a13fe2-f383-77d7-b40d-852485955220
+    agent            research-agent
+    operations       [get]
+    resources under  [corpus/public/]
+    expires          2026-10-15T14:21:40Z
+    token size       746 bytes
+✓ refused, as expected: verify the revoked token
+    error  limes: revoked
 ```
