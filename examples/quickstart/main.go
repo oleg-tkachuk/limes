@@ -1,11 +1,11 @@
-// Command example is the quickstart walkthrough as a runnable program:
+// Command quickstart is the README's walkthrough as a runnable program:
 // issue → verify → delegate → charge → revoke, against the in-memory
 // reference store.
 //
 // It deliberately mentions no object storage and no database. If this program
 // needs either to run, the module has broken its central promise.
 //
-//	go run ./example
+//	go run ./quickstart
 package main
 
 import (
