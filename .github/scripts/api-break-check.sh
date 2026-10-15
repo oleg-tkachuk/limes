@@ -13,6 +13,9 @@
 # A commit marked breaking with no API change passes: the wire format and
 # behaviour can break without the API doing so.
 #
+# A command — a main package — exports nothing a consumer can import, so
+# removing one, or changing what it declares, breaks no API and is left out.
+#
 # From v1.0.0 on — once a v1 or later tag is reachable from the merge base —
 # no break passes, marked or not: it needs a /vN module path, planned on its
 # own. marker-check.sh keeps the markers off that line.
@@ -69,6 +72,22 @@ done
 module="$(cd "$work/head/$dir" && go mod edit -json | jq -r .Module.Path)"
 (cd "$work/base/$dir" && "${apidiff[@]}" -m -w "$work/base.api" "$module")
 breaks="$(cd "$work/head/$dir" && "${apidiff[@]}" -m -incompatible "$work/base.api" "$module")"
+
+# commands prints the import path of each main package of the module in the
+# tree at $1.
+commands() {
+    (cd "$1/$dir" && go list -f '{{if eq .Name "main"}}{{.ImportPath}}{{end}}' ./...)
+}
+
+# apidiff names a removed package by its import path, and a member of a
+# package below the module's root by the package's path from that root:
+# one line of each per command, matched up to the separator after the name.
+: >"$work/commands"
+while IFS= read -r command; do
+    [ -n "$command" ] || continue
+    printf -- '- package %s: \n- ./%s.\n' "$command" "${command#"$module"/}" >>"$work/commands"
+done < <({ commands "$work/base"; commands "$work/head"; } | sort -u)
+breaks="$(grep -v -F -f "$work/commands" <<<"$breaks" || true)"
 
 if [ -z "$breaks" ]; then
     echo "api-break-check: $MODULE_NAME: no incompatible API change"
