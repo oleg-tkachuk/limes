@@ -46,7 +46,7 @@
 // tenants refuse one it does not hold.
 //
 // A call whose request names its tenant — Insert, ListByPrincipal, Bump,
-// Charge, Reserve, Settle, GetTenantBudget, SetTenantBudget, the erasers and
+// Charge, Reserve, Settle, Release, GetTenantBudget, SetTenantBudget, the erasers and
 // Ledger.SumCharges — under a scope
 // that does not admit that tenant returns limes.ErrScopeMismatch rather than
 // answer as if the tenant's rows were not there (Config.CheckScope). A call
@@ -131,7 +131,7 @@ type Config struct {
 	CheckTenant func(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error
 	// CheckScope runs after Scope in the transaction of every call whose
 	// request names its tenant — Insert, ListByPrincipal, Bump, Charge,
-	// Reserve, Settle, GetTenantBudget, SetTenantBudget, EraseTenant,
+	// Reserve, Settle, Release, GetTenantBudget, SetTenantBudget, EraseTenant,
 	// EraseTenantRecords, EraseTenantUsage, Ledger.SumCharges and
 	// Census.CountRecords for one tenant — and
 	// refuses one

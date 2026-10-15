@@ -796,7 +796,7 @@ before it publishes, with the zero `TX` or the handle `TxFactory` makes.
 
 `pgstore` runs each call in one transaction, `onCharged` on that same
 `pgx.Tx`, so a rejection or a failing side effect rolls everything back.
-`Bump`, `Charge`, `Reserve` and `Settle` first refuse a scope that does not
+`Bump`, `Charge`, `Reserve`, `Settle` and `Release` first refuse a scope that does not
 admit the subject's tenant, as `ErrScopeMismatch`, before any row is read. It
 locks in one order, so two calls never wait on each other in a cycle: the
 reservation being settled or released, then the lineage's records `FOR SHARE`
@@ -905,11 +905,11 @@ flowchart TB
     ro{"the call writes,<br/>under WithAllTenantsReadOnly"}
     begin["BEGIN · Config.Scope(ctx, tx)<br/>default ScopeFromContext: set_config, local to the transaction<br/>limes.tenant_id = id · limes.all_tenants = on · = read"]
     roset{"the call writes, under a Config.Scope of the consumer's<br/>that set limes.all_tenants = read (one SELECT)"}
-    named{"the request names a tenant<br/>Insert · ListByPrincipal · Bump · Charge · Reserve · Settle<br/>Get/SetTenantBudget · erasers · SumCharges · CountRecords"}
+    named{"the request names a tenant<br/>Insert · ListByPrincipal · Bump · Charge · Reserve · Settle · Release<br/>Get/SetTenantBudget · erasers · SumCharges · CountRecords"}
     check{"Config.CheckScope admits it<br/>default: the context's scope is every tenant or that one;<br/>none: CheckSchemaScope asks the database"}
     rls["statements under row-level security<br/>read: tenant_visible — all_tenants on or read, or tenant_id matches<br/>write: tenant_writable — all_tenants on, or tenant_id matches"]
     commit(["COMMIT"])
-    idonly["a call naming only an id<br/>(GetRecord · Revoke · Refund · Release · GetUsage · …):<br/>a row out of scope is not found"]
+    idonly["a call naming only an id<br/>(GetRecord · Revoke · Refund · GetUsage · …):<br/>a row out of scope is not found"]
     definer["IsRevoked · IsBiscuitRevoked<br/>one statement, no transaction:<br/>a SECURITY DEFINER function sees every tenant"]
     every{"the request reads every tenant<br/>CountRecords AllTenants"}
     evcheck{"the scope admits every tenant<br/>default: WithAllTenants or WithAllTenantsReadOnly;<br/>otherwise the database is asked"}

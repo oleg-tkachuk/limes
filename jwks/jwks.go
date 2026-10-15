@@ -1,7 +1,7 @@
 // Package jwks publishes and resolves the Ed25519 keys capability tokens are
 // signed with, as an RFC 7517 JSON Web Key Set. NewHandler serves an issuer's
 // keys; a verifier resolves a token's kid through a limes.KeyResolver — Static for
-// keys it holds, Remote for an issuer's set fetched over HTTP and cached.
+// keys it holds, Remote for an issuer's set fetched over HTTPS and cached.
 // jwkstest checks a resolver of one's own against the same contract.
 package jwks
 
