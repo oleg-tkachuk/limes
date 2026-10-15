@@ -69,6 +69,30 @@ func TestVerifyRequiresCapabilityTyp(t *testing.T) {
 	}
 }
 
+// A line break inside any segment refuses the token: the decoder would skip
+// it, so a signature with one spliced in reads as the same signature and the
+// altered string would verify as the original capability.
+func TestVerifyRejectsLineBreaksInSegments(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	v := verifierFor(t, pub, VerifierConfig{})
+	ctx := context.Background()
+	good := resign(t, priv, map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV4}, validClaims(uuid.New()))
+	if _, err := v.Verify(ctx, VerifyRequest{Token: good, Audience: "data"}); err != nil {
+		t.Fatalf("well-formed token rejected: %v", err)
+	}
+	parts, err := jose.Split(good)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, brk := range []string{"\r", "\n", "\r\n"} {
+		sig := parts.Signature[:4] + brk + parts.Signature[4:]
+		tok := parts.SigningInput() + "." + sig
+		if _, err := v.Verify(ctx, VerifyRequest{Token: tok, Audience: "data"}); !errors.Is(err, ErrInvalidToken) {
+			t.Errorf("signature with %q: Verify = %v, want ErrInvalidToken", brk, err)
+		}
+	}
+}
+
 func TestVerifyRejectsTenantlessAndOversizedTokens(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	v := verifierFor(t, pub, VerifierConfig{MaxTokenBytes: 2048})

@@ -61,7 +61,7 @@ func TestRemoteJWKSHonoursTheResponse(t *testing.T) {
 	var fetches atomic.Int32
 	var accept atomic.Value
 	const maxAge = "60"
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fetches.Add(1)
 		accept.Store(r.Header.Get("Accept"))
 		doc, _ := Marshal(map[string]ed25519.PublicKey{kid: pub})
@@ -71,7 +71,7 @@ func TestRemoteJWKSHonoursTheResponse(t *testing.T) {
 	defer srv.Close()
 	clock := &stepClock{t: time.Unix(1_800_000_000, 0)}
 	r, err := NewRemote(RemoteConfig{
-		URL: srv.URL, Now: clock.Now,
+		URL: srv.URL, Client: srv.Client(), Now: clock.Now,
 		MinRefreshInterval: 10 * time.Second, RefreshInterval: 5 * time.Minute, MaxStale: time.Hour,
 	})
 	if err != nil {
@@ -154,9 +154,9 @@ func TestJWKSHandler(t *testing.T) {
 	}
 
 	// The resolver reads what the handler serves, and revalidates by ETag.
-	srv := httptest.NewServer(h)
+	srv := httptest.NewTLSServer(h)
 	defer srv.Close()
-	r, err := NewRemote(RemoteConfig{URL: srv.URL})
+	r, err := NewRemote(RemoteConfig{URL: srv.URL, Client: srv.Client()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestRemoteJWKSKeepsTheSetWhenNoKeyIsUsable(t *testing.T) {
 		t.Fatal(err)
 	}
 	var foreign atomic.Bool
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if foreign.Load() {
 			_, _ = w.Write([]byte(`{"keys":[{"kty":"OKP","crv":"Ed448","kid":"k2","x":"AA"}]}`))
 			return
@@ -184,7 +184,7 @@ func TestRemoteJWKSKeepsTheSetWhenNoKeyIsUsable(t *testing.T) {
 	}))
 	defer srv.Close()
 	clock := &stepClock{t: time.Unix(1_800_000_000, 0)}
-	r, err := NewRemote(RemoteConfig{URL: srv.URL, Now: clock.Now})
+	r, err := NewRemote(RemoteConfig{URL: srv.URL, Client: srv.Client(), Now: clock.Now})
 	if err != nil {
 		t.Fatal(err)
 	}

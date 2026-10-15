@@ -14,6 +14,28 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.65.0
+
+- `jwks.NewRemote` accepted any URL and its client followed any redirect →
+  it refuses a `RemoteConfig.URL` that is not `https`, and a fetch refuses a
+  redirect to another scheme or host. A `RemoteConfig.Client` of your own is
+  copied, not changed, and its `CheckRedirect` still runs within that.
+- `ReleaseRequest` named the reservation alone, and `Meter.Release` released
+  any → it takes `Subject`, the `MeterSubject` that reserved, as
+  `SettleRequest` does: a request without one is `ErrInvalidRequest`, and a
+  reservation of another capability, tenant or Biscuit copy is left held.
+  memstore and `metertest` check it.
+- `Store.Insert` accepted a child with no expiry under a parent that has one
+  → it refuses one as `ErrDelegationTooWide`. `storetest` checks it.
+
+## pgstore/v0.10.0
+
+- `UsageStore.Release` released any reservation, in any tenant → it needs
+  `ReleaseRequest.Subject`, runs in that subject's tenant and leaves a
+  reservation of another capability or copy held, as `Settle` does.
+- `Store.Insert` accepted a child with no expiry under a parent that has one,
+  which `Purge` then failed on → it refuses one as `ErrDelegationTooWide`.
+
 ## pgstore/v0.9.0
 
 - A call that writes under a `Config.Scope` of your own that sets

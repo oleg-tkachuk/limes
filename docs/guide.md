@@ -86,7 +86,9 @@ good set is older than `MaxStale` (1h). A document whose entries are all
 unusable counts as a failed fetch, so the last good set stays in service
 rather than every key being withdrawn at once. `jwks.ErrUnavailable` is the
 server's fault, not the token's, so it matches no `ErrUnauthenticated`
-sentinel. The three intervals must
+sentinel. The URL must be `https`, and a redirect to another scheme or host
+is not followed: whoever answers the fetch chooses the keys every token is
+checked against. The three intervals must
 nest, or construction fails:
 
 ```go

@@ -20,7 +20,7 @@ const keysWait = 50 * time.Millisecond
 // as an internal error.
 func TestKeysTimeoutIsUnavailable(t *testing.T) {
 	release := make(chan struct{})
-	hang := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
+	hang := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
 	t.Cleanup(hang.Close)
 	t.Cleanup(func() { close(release) })
 	keys, err := jwks.NewRemote(jwks.RemoteConfig{URL: hang.URL, Client: hang.Client()})

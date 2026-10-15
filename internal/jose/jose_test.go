@@ -96,3 +96,13 @@ func TestUnB64IsStrict(t *testing.T) {
 		t.Error(`UnB64("AAB") accepted a spare bit`)
 	}
 }
+
+// A line break anywhere is refused, where encoding/base64 skips it and reads
+// the same bytes.
+func TestUnB64RefusesLineBreaks(t *testing.T) {
+	for _, s := range []string{"AA\rA", "AA\nA", "\r\nAAA", "AAA\n"} {
+		if _, err := UnB64(s); err == nil {
+			t.Errorf("UnB64(%q) accepted a line break", s)
+		}
+	}
+}

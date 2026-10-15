@@ -237,6 +237,11 @@ func (s *Store) Insert(_ context.Context, req limes.InsertRequest) error {
 		if c.ExpiresAt.After(parent.ExpiresAt) {
 			return fmt.Errorf("%w: expires %s, after its parent %s", limes.ErrDelegationTooWide, c.ExpiresAt, parent.ExpiresAt)
 		}
+		// No expiry outlives every expiry: Purge would drop the parent and
+		// keep the child, whose lineage IsRevoked then cannot walk.
+		if c.ExpiresAt.IsZero() && !parent.ExpiresAt.IsZero() {
+			return fmt.Errorf("%w: never expires, under a parent expiring %s", limes.ErrDelegationTooWide, parent.ExpiresAt)
+		}
 		if c.Subject.TenantID != parent.Subject.TenantID {
 			return fmt.Errorf("%w: tenant %s, not its parent's %s", limes.ErrDelegationTooWide, c.Subject.TenantID, parent.Subject.TenantID)
 		}
@@ -1266,15 +1271,20 @@ func parseReservationPlace(cursor string) (reservationPlace, error) {
 	return reservationPlace{time.Unix(sec, nsec), id}, nil
 }
 
-// Release ends a reservation without charging. Idempotent.
+// Release ends a reservation without charging. Idempotent; a hold of
+// another capability or other copies is left held.
 func (s *UsageStore[TX]) Release(_ context.Context, req limes.ReleaseRequest) error {
-	reservationID := req.ReservationID
+	if err := checkSubject(req.Subject); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if h, ok := s.holds[reservationID]; ok {
-		s.applyHoldLocked(h, -1)
-		delete(s.holds, reservationID)
+	h, ok := s.holds[req.ReservationID]
+	if !ok || h.capID != req.Subject.CapabilityID() || h.tenantID != req.Subject.TenantID() || !sameCopies(h.copies, req.Subject.Copies()) {
+		return nil
 	}
+	s.applyHoldLocked(h, -1)
+	delete(s.holds, req.ReservationID)
 	return nil
 }
 

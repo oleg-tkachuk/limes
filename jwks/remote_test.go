@@ -92,7 +92,7 @@ func newRemoteFixture(t *testing.T) (*jwksServer, *Remote, *stepClock, string, e
 		t.Fatal(err)
 	}
 	srv := &jwksServer{keys: map[string]ed25519.PublicKey{kid: pub}}
-	ts := httptest.NewServer(srv)
+	ts := httptest.NewTLSServer(srv)
 	t.Cleanup(ts.Close)
 	clock := &stepClock{t: time.Unix(1_800_000_000, 0)}
 	r, err := NewRemote(RemoteConfig{
@@ -202,7 +202,7 @@ func TestRemoteJWKSServesStaleThenFailsClosed(t *testing.T) {
 }
 
 func TestRemoteJWKSNeverReachedFailsClosed(t *testing.T) {
-	r, err := NewRemote(RemoteConfig{URL: "http://127.0.0.1:1/jwks.json"})
+	r, err := NewRemote(RemoteConfig{URL: "https://127.0.0.1:1/jwks.json"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestRemoteJWKSNeverReachedFailsClosed(t *testing.T) {
 func TestRemoteJWKSWaiterHonoursItsContext(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		once.Do(func() { close(entered) })
 		<-release
 		http.Error(w, "slow", http.StatusServiceUnavailable)
@@ -262,7 +262,7 @@ func TestRemoteJWKSCallerCancellingItsFetchBlocksNoOne(t *testing.T) {
 	}
 	var fetches atomic.Int32
 	release := make(chan struct{})
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		fetches.Add(1)
 		<-release // slow until the first caller has given up
 		_, _ = w.Write(doc)
@@ -295,7 +295,7 @@ func TestRemoteJWKSCancellingCallersKeepTheRateLimit(t *testing.T) {
 	const callers = 5
 	var fetches atomic.Int32
 	release := make(chan struct{})
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		fetches.Add(1)
 		<-release
 		http.Error(w, "down", http.StatusServiceUnavailable)
@@ -322,7 +322,7 @@ func TestRemoteJWKSCancellingCallersKeepTheRateLimit(t *testing.T) {
 // A caller whose context is already done fetches nothing.
 func TestRemoteJWKSDoneCallerFetchesNothing(t *testing.T) {
 	var fetches atomic.Int32
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		fetches.Add(1)
 		http.Error(w, "unused", http.StatusServiceUnavailable)
 	}))
