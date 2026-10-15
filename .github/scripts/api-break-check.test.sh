@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # api-break-check.test.sh — api-break-check.sh refuses an unmarked break of
 # the API, and passes a marked one or a compatible change; from v1.0.0 on it
-# refuses every break.
+# refuses every break. A command's changes are no break.
 #
 # Runs from `task verify-all` against a scratch module — no network beyond
 # the apidiff that tools/go.mod pins.
@@ -15,17 +15,22 @@ export APIDIFF="go tool -modfile=$root/tools/go.mod apidiff"
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 
-# A module whose API is one exported function, on its own main.
+# A module whose API is one exported function, on its own main, beside a
+# command that declares an exported function of its own.
 git -C "$scratch" init --quiet --initial-branch=main
 git -C "$scratch" config user.name test
 git -C "$scratch" config user.email test@example.com
 (cd "$scratch" && go mod init example.com/m >/dev/null 2>&1)
 printf 'package m\n\nfunc A() {}\n' >"$scratch/m.go"
+mkdir "$scratch/cmd"
+printf 'package main\n\nfunc Exported() {}\n\nfunc main() {}\n' >"$scratch/cmd/main.go"
 git -C "$scratch" add -A
 git -C "$scratch" commit --quiet -m "feat: add A"
 
 failures=0
-# check name, want (pass|fail), change (drop|add), commit messages...
+# check name, want (pass|fail), change, commit messages... The change is
+# drop (A), add (B), dropcmd (the command), cmdexport (the command's
+# Exported) or dropboth (A and the command).
 check() {
     local name="$1" want="$2" change="$3"
     shift 3
@@ -33,6 +38,12 @@ check() {
     case "$change" in
         drop) printf 'package m\n' >"$scratch/m.go" ;;
         add) printf 'package m\n\nfunc A() {}\n\nfunc B() {}\n' >"$scratch/m.go" ;;
+        dropcmd) git -C "$scratch" rm --quiet -r cmd ;;
+        cmdexport) printf 'package main\n\nfunc main() {}\n' >"$scratch/cmd/main.go" ;;
+        dropboth)
+            printf 'package m\n' >"$scratch/m.go"
+            git -C "$scratch" rm --quiet -r cmd
+            ;;
     esac
     local message
     for message in "$@"; do
@@ -67,6 +78,9 @@ check "a type that is not ASCII" fail drop "féat!: drop A"
 check "a footer as the subject" fail drop "BREAKING CHANGE: drop A"
 check "a compatible addition" pass add "feat: add B"
 check "a marked change with no break" pass add "feat!: change the wire format"
+check "a command removed" pass dropcmd "docs: move the command"
+check "a command's exported function removed" pass cmdexport "docs: trim the command"
+check "a command removed beside an unmarked break" fail dropboth "docs: drop A and the command"
 
 # From v1.0.0 on, no break passes, marked or not.
 git -C "$scratch" tag v1.0.0 main
