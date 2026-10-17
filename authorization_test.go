@@ -3,6 +3,7 @@ package limes
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 )
@@ -31,6 +32,15 @@ func TestParseAuthorization(t *testing.T) {
 		// The scheme it recognised comes back, for the challenge to use.
 		if got, _, err := ParseAuthorization(bad); !errors.Is(err, ErrMalformedAuthorization) || got != scheme {
 			t.Errorf("ParseAuthorization(%q) = %q, %v; want %q and ErrMalformedAuthorization", bad, got, err, scheme)
+		}
+		// A malformed request, as ErrInvalidRequest's family is, and still
+		// the client's to fix: 400, not the 500 of the server's own call.
+		_, _, err := ParseAuthorization(bad)
+		if !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("ParseAuthorization(%q): err = %v, want it to match ErrInvalidRequest", bad, err)
+		}
+		if got := (&Verifier{}).ErrorResponse(context.Background(), err, scheme).Status; got != http.StatusBadRequest {
+			t.Errorf("ParseAuthorization(%q): ErrorResponse status = %d, want %d", bad, got, http.StatusBadRequest)
 		}
 	}
 	// No header, or another scheme's: no credential of ours at all.

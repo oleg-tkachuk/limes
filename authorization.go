@@ -1,7 +1,6 @@
 package limes
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -38,8 +37,10 @@ var ErrNoCredentials error = &familyError{"limes: no credentials", ErrUnauthenti
 
 // ErrMalformedAuthorization — an Authorization header that is not one
 // scheme this module reads followed by one token68 credential. It is a
-// malformed request (RFC 6750 §3.1 invalid_request), not a bad token.
-var ErrMalformedAuthorization = errors.New("limes: malformed Authorization header")
+// malformed request (RFC 6750 §3.1 invalid_request), not a bad token, so it
+// matches ErrInvalidRequest; ErrorResponse still answers it 400, as the
+// client's fault, where the rest of that family is the server's own call.
+var ErrMalformedAuthorization error = &familyError{"limes: malformed Authorization header", ErrInvalidRequest}
 
 // ErrAuthSchemeMismatch — the scheme the token came under is not the one its
 // binding calls for: a key-bound token as Bearer, which RFC 9449 §7.2 treats

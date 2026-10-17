@@ -14,6 +14,13 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.70.0
+
+- `ErrMalformedAuthorization` matched no family → it matches
+  `ErrInvalidRequest`, as the type tree documents. `ErrorResponse` still
+  answers it 400; a mapping of your own that sends `ErrInvalidRequest` to 500
+  must test `ErrMalformedAuthorization` first.
+
 ## v0.68.0
 
 - `PurgeResult`, `PurgeOrphansResult`, `ReleaseExpiredResult`,
