@@ -122,7 +122,7 @@ func TestRowSecurityKeepsTheMeterApart(t *testing.T) {
 	f := newTenantFixture(t)
 	ctx := WithTenant(t.Context(), f.mine)
 	if _, err := f.usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
-		TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true}, UnitCode: limes.DefaultUnitCode,
+		TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true}, UnitCode: testUnit,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestHoldIsItsTenantsAcrossTenants(t *testing.T) {
 	f := newTenantFixture(t)
 	mine := WithTenant(t.Context(), f.mine)
 	if _, err := f.usage.SetTenantBudget(mine, limes.SetTenantBudgetRequest{
-		TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true}, UnitCode: limes.DefaultUnitCode,
+		TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true}, UnitCode: testUnit,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestRowSecurityKeepsRefundsApart(t *testing.T) {
 	f := newTenantFixture(t)
 	mine := WithTenant(t.Context(), f.mine)
 	if _, err := f.usage.SetTenantBudget(mine, limes.SetTenantBudgetRequest{
-		TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true}, UnitCode: limes.DefaultUnitCode,
+		TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true}, UnitCode: testUnit,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +302,7 @@ func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 	f := newTenantFixture(t)
 	mine := WithTenant(t.Context(), f.mine)
 	if _, err := f.usage.SetTenantBudget(mine, limes.SetTenantBudgetRequest{
-		TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true}, UnitCode: limes.DefaultUnitCode,
+		TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true}, UnitCode: testUnit,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -408,7 +408,7 @@ func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 			},
 			"SetTenantBudget": func() error {
 				_, err := s.usage.SetTenantBudget(s.ctx, limes.SetTenantBudgetRequest{
-					TenantID: f.mine, Ceiling: limes.BudgetCeiling{Max: 1}, UnitCode: limes.DefaultUnitCode,
+					TenantID: f.mine, Ceiling: limes.BudgetCeiling{Max: 1}, UnitCode: testUnit,
 				})
 				return err
 			},

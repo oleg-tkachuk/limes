@@ -177,7 +177,7 @@ const (
 	childBudget  = 20 * one
 	tenantBudget = 30 * one
 	// unit is the currency every amount is in; otherUnit is one it is not.
-	unit      = limes.DefaultUnitCode
+	unit      = "USD"
 	otherUnit = "EUR"
 	// noUtilization stands for a tenant with no ceiling where a
 	// percentage is compared; no percentage equals it.
@@ -228,14 +228,20 @@ type subjectSpec struct {
 	// sets none, is Unlimited.
 	requests *limes.RequestCeiling
 	budget   *limes.BudgetCeiling
+	// unit is the subject's unit, the suite's own when empty; unitless
+	// gives a subject that names none.
 	unit     string
+	unitless bool
 	copies   []limes.CopyCeiling
 }
 
 // newSubject is the MeterSubject a verified capability with spec's parts
 // would give: the suite checks a store against ceilings no issuer signed.
 func newSubject(spec subjectSpec) limes.MeterSubject {
-	if spec.unit == "" {
+	switch {
+	case spec.unitless:
+		spec.unit = ""
+	case spec.unit == "":
 		spec.unit = unit
 	}
 	return link.NewMeterSubject(link.MeterSubjectFields{
@@ -325,6 +331,8 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"RefundOfAClosedPeriodLeavesTheTenantPeriod", checkRefundAcrossReset[TX]},
 		{"EveryCounterKeepsOneUnit", checkOneUnit[TX]},
 		{"AnAncestorCountsInTheUnitOfItsChildren", checkAncestorUnit[TX]},
+		{"ASubjectWithNoUnitCountsRequestsAlone", checkNoUnit[TX]},
+		{"ATenantBudgetWithNoUnitTakesTheFirstCharges", checkTenantUnitFromCharge[TX]},
 		{"DeleteReleasesHolds", checkDeleteReleasesHolds[TX]},
 		{"AReplayIsAnsweredOnceTheCapabilityIsGone", checkReplayAfterRemoval[TX]},
 		{"AnAncestorAndATenantCeilingAreExact", checkExactCeilings[TX]},
@@ -880,6 +888,88 @@ func checkAncestorUnit[TX any](t *testing.T, f fixture[TX]) {
 		if err != nil || u.UnitCode != unit {
 			t.Errorf("the parent of a %s child: usage %+v, %v; want counted in %q", name, u, err, unit)
 		}
+	}
+}
+
+// checkNoUnit holds a store to a subject that names no unit: it is bumped,
+// with its counters left in none, and no amount is charged, held or settled
+// on it; the first charge that names a unit pins it.
+func checkNoUnit[TX any](t *testing.T, f fixture[TX]) {
+	none := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unitless: true})
+	if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: none}); err != nil {
+		t.Fatalf("Bump of a subject with no unit: %v", err)
+	}
+	if u, err := f.Usage.GetUsage(f.Ctx, f.child); err != nil || u.UnitCode != "" || u.RequestCount != 1 {
+		t.Errorf("usage after a bump with no unit = %+v, %v; want one request in no unit", u, err)
+	}
+	for name, call := range map[string]func() error{
+		"Charge": func() error {
+			_, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: none, Amount: one}, nil)
+			return err
+		},
+		"Reserve": func() error {
+			_, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: none, Amount: one})
+			return err
+		},
+		"Settle": func() error {
+			_, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: none, ReservationID: uuid.New(), Amount: one}, nil)
+			return err
+		},
+	} {
+		if err := call(); !errors.Is(err, limes.ErrInvalidRequest) {
+			t.Errorf("%s of a subject with no unit: err = %v, want ErrInvalidRequest", name, err)
+		}
+	}
+	if _, err := f.charge(limes.ChargeRequest{Amount: one}, nil); err != nil {
+		t.Fatalf("charge in %s: %v", unit, err)
+	}
+	if u, err := f.Usage.GetUsage(f.Ctx, f.child); err != nil || u.UnitCode != unit {
+		t.Errorf("usage after a charge in %s = %+v, %v; want it counted in %s", unit, u, err, unit)
+	}
+}
+
+// checkTenantUnitFromCharge holds a store to a tenant budget set with no
+// unit: it names none until the first charge or hold, whose unit it then
+// keeps.
+func checkTenantUnitFromCharge[TX any](t *testing.T, f fixture[TX]) {
+	// unitless is a tenant whose budget names no unit, and a capability of it.
+	unitless := func() (tenant, id uuid.UUID, ctx context.Context) {
+		t.Helper()
+		tenant, err := f.newTenant()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx = f.tenantCtx(tenant)
+		b, err := f.Usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{TenantID: tenant, Ceiling: unlimitedBudget})
+		if err != nil || b.UnitCode != "" {
+			t.Fatalf("SetTenantBudget with no unit = %+v, %v; want a budget in none", b, err)
+		}
+		id, err = f.NewCapability(CapabilitySpec{Tenant: tenant, Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tenant, id, ctx
+	}
+	heldTenant, heldID, heldCtx := unitless()
+	if _, err := f.Usage.Reserve(heldCtx, limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: heldID, tenant: heldTenant, unit: otherUnit}), Amount: one}); err != nil {
+		t.Fatalf("hold in %s: %v", otherUnit, err)
+	}
+	if b, err := f.Usage.GetTenantBudget(heldCtx, heldTenant); err != nil || b.UnitCode != otherUnit {
+		t.Errorf("tenant budget after a hold in %s = %+v, %v; want it counted in %s", otherUnit, b, err, otherUnit)
+	}
+	tenant, id, ctx := unitless()
+	if _, err := f.Usage.Charge(ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant, unit: otherUnit}), Amount: one}, nil); err != nil {
+		t.Fatalf("charge in %s: %v", otherUnit, err)
+	}
+	if b, err := f.Usage.GetTenantBudget(ctx, tenant); err != nil || b.UnitCode != otherUnit {
+		t.Errorf("tenant budget after a charge in %s = %+v, %v; want it counted in %s", otherUnit, b, err, otherUnit)
+	}
+	other, err := f.NewCapability(CapabilitySpec{Tenant: tenant, Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Usage.Charge(ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: other, tenant: tenant, unit: unit}), Amount: one}, nil); !errors.Is(err, limes.ErrUnitCodeMismatch) {
+		t.Errorf("a charge in %s on a tenant counting %s: err = %v, want ErrUnitCodeMismatch", unit, otherUnit, err)
 	}
 }
 

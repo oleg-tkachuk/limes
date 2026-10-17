@@ -19,13 +19,25 @@ type subjectSpec struct {
 	// sets none, is Unlimited.
 	requests *limes.RequestCeiling
 	budget   *limes.BudgetCeiling
+	// unit is the subject's unit, defaultTestUnit when empty; unitless
+	// gives a subject that names none.
 	unit     string
+	unitless bool
 	copies   []limes.CopyCeiling
 }
+
+// defaultTestUnit is the unit of a subject whose spec names none.
+const defaultTestUnit = "USD"
 
 // newSubject is the MeterSubject a verified capability with spec's parts
 // would give, so a test can meter against ceilings no issuer signed.
 func newSubject(spec subjectSpec) limes.MeterSubject {
+	switch {
+	case spec.unitless:
+		spec.unit = ""
+	case spec.unit == "":
+		spec.unit = defaultTestUnit
+	}
 	return link.NewMeterSubject(link.MeterSubjectFields{
 		CapabilityID: spec.capID, TenantID: spec.tenant,
 		Requests: spec.requestCeiling(), Budget: spec.budgetCeiling(), UnitCode: spec.unit, Copies: spec.copies,

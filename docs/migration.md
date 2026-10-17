@@ -14,6 +14,19 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.75.0
+
+- `DefaultUnitCode`, `NormalizeUnitCode` and the rule that an empty unit is
+  USD → removed: an empty `UnitCode` names no unit, and none is assumed.
+  `Charge`, `Reserve` and `Settle` of a capability with no `UnitCode` are
+  `ErrInvalidRequest`; `Bump` still counts its requests. A delegated child
+  that names no unit takes its parent's, and `Narrows` matches an empty unit
+  only with another. `SetTenantBudget` with no `UnitCode` leaves a new
+  tenant's unit to its first charge or hold. Issue every capability that is
+  charged with its `UnitCode` — `"USD"` where an empty one meant it — and
+  read a unit with `IsUnitCode` in place of `NormalizeUnitCode`. Rows a
+  store already holds keep the unit they were counted in.
+
 ## v0.74.0
 
 - Constants were prefixed by their type's name or a stem of it → every

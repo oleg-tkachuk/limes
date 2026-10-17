@@ -83,7 +83,7 @@ func (c Caveats) Validate() error {
 	if err := c.Budget.Validate(); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidCaveats, err)
 	}
-	if _, err := NormalizeUnitCode(c.UnitCode); err != nil {
+	if err := validUnitCode(c.UnitCode); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidCaveats, err)
 	}
 	for _, cidr := range c.SourceIPCIDR {
