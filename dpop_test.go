@@ -222,3 +222,40 @@ func TestRevokedCapabilitiesSpendNoReplayRoom(t *testing.T) {
 		t.Fatalf("another tenant's live capability after the revoked flood: %v", err)
 	}
 }
+
+// A key-bound token's proof is checked before its revocation is looked up:
+// a holder of the token without its key is refused for the proof, learns
+// nothing of whether the token is revoked, and causes no lookup.
+func TestAProofIsCheckedBeforeRevocation(t *testing.T) {
+	ctx := context.Background()
+	issuer, _, store, pub := buildIssuerVerifier(t)
+	v := replayVerifier(t, store, pub, 10*replayShare)
+	keys := dpopKeys(t)
+	boundKey, otherKey := keys["Ed25519"], keys["P-256"]
+	jkt, _ := dpop.Thumbprint(boundKey.Public())
+	c, tok, err := issuer.issue(ctx, IssueRequest{
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
+		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour, ConfirmationJKT: jkt,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Revoke(ctx, RevokeRequest{CapabilityID: c.ID, Note: "test"}); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, req := range map[string]VerifyRequest{
+		"no proof":            {Token: tok, Audience: audienceData},
+		"another key's proof": withProof(ctx, t, otherKey, tok, audienceData, time.Now()),
+	} {
+		if _, err := v.Verify(ctx, req); !errors.Is(err, ErrProofOfPossession) || errors.Is(err, ErrRevoked) {
+			t.Errorf("revoked token, %s: err = %v, want ErrProofOfPossession", name, err)
+		}
+	}
+	if n := store.revCalls.Load(); n != 0 {
+		t.Fatalf("revocation lookups before a proof passed = %d, want 0", n)
+	}
+	if _, err := v.Verify(ctx, withProof(ctx, t, boundKey, tok, audienceData, time.Now())); !errors.Is(err, ErrRevoked) {
+		t.Fatalf("revoked token, the bound key's proof: err = %v, want ErrRevoked", err)
+	}
+}
