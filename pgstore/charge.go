@@ -16,7 +16,7 @@ import (
 // Bump counts one request against the capability, each ancestor and each
 // copy, or none when a ceiling would be crossed.
 func (s *UsageStore) Bump(ctx context.Context, req limes.BumpRequest) (limes.BumpReceipt, error) {
-	if err := checkSubject(req.Subject); err != nil {
+	if err := req.Validate(); err != nil {
 		return limes.BumpReceipt{}, err
 	}
 	unit, err := limes.NormalizeUnitCode(req.Subject.UnitCode())
@@ -161,16 +161,7 @@ func replayByRef(ctx context.Context, tx pgx.Tx, req limes.ChargeRequest, unit s
 // Charge applies the ceiling chain and commits the charge, onCharged
 // included, in one transaction.
 func (s *UsageStore) Charge(ctx context.Context, req limes.ChargeRequest, onCharged func(ctx context.Context, c limes.Charged[pgx.Tx]) error) (limes.ChargeReceipt, error) {
-	if err := req.Amount.Validate(); err != nil {
-		return limes.ChargeReceipt{}, err
-	}
-	if err := req.Overrun.Validate(); err != nil {
-		return limes.ChargeReceipt{}, err
-	}
-	if err := limes.ValidateExternalRef(req.ExternalRef); err != nil {
-		return limes.ChargeReceipt{}, err
-	}
-	if err := checkSubject(req.Subject); err != nil {
+	if err := req.Validate(); err != nil {
 		return limes.ChargeReceipt{}, err
 	}
 	unit, err := limes.NormalizeUnitCode(req.Subject.UnitCode())
@@ -492,10 +483,7 @@ func scanHold(row pgx.Row) (hold, error) {
 
 // Reserve holds an amount against every ceiling Charge checks.
 func (s *UsageStore) Reserve(ctx context.Context, req limes.ReserveRequest) (limes.Reservation, error) {
-	if err := req.Amount.Validate(); err != nil {
-		return limes.Reservation{}, err
-	}
-	if err := checkSubject(req.Subject); err != nil {
+	if err := req.Validate(); err != nil {
 		return limes.Reservation{}, err
 	}
 	unit, err := limes.NormalizeUnitCode(req.Subject.UnitCode())
@@ -503,9 +491,6 @@ func (s *UsageStore) Reserve(ctx context.Context, req limes.ReserveRequest) (lim
 		return limes.Reservation{}, err
 	}
 	ttl := req.TTL
-	if ttl < 0 {
-		return limes.Reservation{}, fmt.Errorf("%w: pgstore: reservation TTL %s is negative", limes.ErrInvalidRequest, ttl)
-	}
 	if ttl == 0 {
 		ttl = limes.DefaultReservationTTL
 	}
@@ -575,13 +560,7 @@ func applyHold(c *counters, h hold, sign limes.Nanos) {
 
 // Settle charges the actual cost in place of a reservation.
 func (s *UsageStore) Settle(ctx context.Context, req limes.SettleRequest, onCharged func(ctx context.Context, c limes.Charged[pgx.Tx]) error) (limes.ChargeReceipt, error) {
-	if err := checkSubject(req.Subject); err != nil {
-		return limes.ChargeReceipt{}, err
-	}
-	if err := req.Amount.Validate(); err != nil {
-		return limes.ChargeReceipt{}, err
-	}
-	if err := req.Overrun.Validate(); err != nil {
+	if err := req.Validate(); err != nil {
 		return limes.ChargeReceipt{}, err
 	}
 	// A direct charge has no reservation id, so the zero id names none.
@@ -640,7 +619,7 @@ func (s *UsageStore) Settle(ctx context.Context, req limes.SettleRequest, onChar
 // is a no-op, and so is releasing one of another capability or tenant, or
 // of other copies: it is left held.
 func (s *UsageStore) Release(ctx context.Context, req limes.ReleaseRequest) error {
-	if err := checkSubject(req.Subject); err != nil {
+	if err := req.Validate(); err != nil {
 		return err
 	}
 	subject := req.Subject
