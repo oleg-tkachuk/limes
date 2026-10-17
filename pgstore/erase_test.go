@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/internal/link"
@@ -39,7 +38,7 @@ func TestEraseTenantTakesRecordsAndUsageTogether(t *testing.T) {
 	}
 	req := limes.EraseTenantRequest{TenantID: f.mine, Note: "tenant removed", Actor: "test"}
 	errConsumer := errors.New("the consumer's own rows")
-	if _, err := f.records.EraseTenant(ctx, req, func(context.Context, pgx.Tx) error { return errConsumer }); !errors.Is(err, errConsumer) {
+	if _, err := f.records.EraseTenant(ctx, req, func(context.Context, Erased) error { return errConsumer }); !errors.Is(err, errConsumer) {
 		t.Fatalf("EraseTenant with a failing onErased: err = %v, want its error", err)
 	}
 	if r, err := f.records.GetRecord(ctx, f.child.ID); err != nil || r.Revocation != nil {
@@ -49,11 +48,17 @@ func TestEraseTenantTakesRecordsAndUsageTogether(t *testing.T) {
 		t.Errorf("usage after a rolled-back erase: %v", err)
 	}
 	var seen int64
-	got, err := f.records.EraseTenant(ctx, req, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx, countRevocations, f.mine).Scan(&seen)
+	var handed limes.EraseTenantResult
+	got, err := f.records.EraseTenant(ctx, req, func(ctx context.Context, e Erased) error {
+		handed = e.Result
+		return e.Tx.QueryRow(ctx, countRevocations, f.mine).Scan(&seen)
 	})
-	if want := (limes.EraseTenantResult{Revoked: 1, Kept: 2}); err != nil || !reflect.DeepEqual(got, want) {
+	want := limes.EraseTenantResult{Revoked: 1, Kept: 2}
+	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("EraseTenant = %+v, %v; want %+v", got, err, want)
+	}
+	if !reflect.DeepEqual(handed, want) {
+		t.Errorf("onErased was handed %+v, want the result the call returns, %+v", handed, want)
 	}
 	if seen != 2 {
 		t.Errorf("onErased saw %d revocation entries of the tenant, want both", seen)

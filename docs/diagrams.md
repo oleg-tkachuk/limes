@@ -960,7 +960,7 @@ flowchart TB
     remove["remove the records Purge would:<br/>expired before now − MinPurgeRetention"]
     kept["count the records kept: revoked, until Purge takes them"]
     usage["lock aggregate · counters · copies' counters<br/>delete holds · tenant budget · usage · copy usage · charges"]
-    cb{"onErased(ctx, tx)"}
+    cb{"onErased(ctx, Erased{Tx, Result})"}
     ok(["EraseTenantResult{Revoked, Removed, Kept}"])
     back["rolled back: nothing erased"]
 

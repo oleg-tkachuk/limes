@@ -896,7 +896,8 @@ it expires. `EraseTenantUsage` drops the tenant's counters, holds, charges
 and aggregate — its billing history, which does not come back. In
 `pgstore`, `Store.EraseTenant` does both in one transaction and runs a
 callback of yours in it, so your own rows of the tenant go with them or not
-at all. `EraseTenantRequest.Note` and `Actor` go on each revocation entry it
+at all; it is handed a `pgstore.Erased`, the transaction as `Tx` and the
+result the call will return as `Result`. `EraseTenantRequest.Note` and `Actor` go on each revocation entry it
 writes, and `EraseTenantResult` counts the capabilities `Revoked`, the records
 `Removed` and the records `Kept`, revoked, for `Purge`; a second erase revokes
 nothing the first did.
