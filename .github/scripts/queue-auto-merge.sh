@@ -63,18 +63,31 @@ fi
 : "${PR:?PR names the pull request, by number}"
 : "${ACTION:?ACTION names the pull_request_target action}"
 
+# dequeue takes the pull request off the merge queue when it is on it.
+dequeue() {
+    local queued
+    queued="$(gh_retry pr view "$PR" --repo "$REPO" --json autoMergeRequest --jq '.autoMergeRequest != null')"
+    if [ "$queued" = true ]; then
+        gh_retry pr merge "$PR" --repo "$REPO" --disable-auto
+        echo "::notice::#$PR taken off the merge queue"
+    fi
+}
+
 # A diff that cannot be read fails the step, so the pull request is left
-# alone rather than queued unread.
-changed="$(gh_retry pr diff "$PR" --repo "$REPO" --name-only)"
+# alone rather than queued unread. On a push it may be one that changes CI,
+# and the queue holds an earlier verdict, so it comes off the queue first.
+if ! changed="$(gh_retry pr diff "$PR" --repo "$REPO" --name-only)"; then
+    echo "::error::#$PR: its diff could not be read; not queued"
+    if [ "$ACTION" = "$SYNCHRONIZE" ]; then
+        dequeue
+    fi
+    exit 1
+fi
 while IFS= read -r path; do
     [ -n "$path" ] || continue
     if defines_ci "$path"; then
         echo "::notice::#$PR changes $path, which decides what CI runs; left for a person to merge"
-        queued="$(gh_retry pr view "$PR" --repo "$REPO" --json autoMergeRequest --jq '.autoMergeRequest != null')"
-        if [ "$queued" = true ]; then
-            gh_retry pr merge "$PR" --repo "$REPO" --disable-auto
-            echo "::notice::#$PR taken off the merge queue"
-        fi
+        dequeue
         exit 0
     fi
 done <<<"$changed"
