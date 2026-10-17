@@ -2,6 +2,7 @@ package limes
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/uuid"
 
@@ -82,13 +83,29 @@ func (s MeterSubject) Copies() []CopyCeiling { return cloneCopyCeilings(s.copies
 
 func init() {
 	link.NewMeterSubject = func(f link.MeterSubjectFields) any {
-		copies, _ := f.Copies.([]CopyCeiling)
-		requests, _ := f.Requests.(RequestCeiling)
-		budget, _ := f.Budget.(BudgetCeiling)
+		copies := linkedPart[[]CopyCeiling]("Copies", f.Copies)
+		requests := linkedPart[RequestCeiling]("Requests", f.Requests)
+		budget := linkedPart[BudgetCeiling]("Budget", f.Budget)
 		return MeterSubject{
 			capabilityID: f.CapabilityID, tenantID: f.TenantID,
 			maxRequests: requests, maxBudget: budget,
 			unitCode: canonicalUnitCode(f.UnitCode), copies: copies,
 		}
 	}
+}
+
+// linkedPart is the part v of link.MeterSubjectFields named name, as a T. A
+// part left out, nil, is T's zero value. One of another type is the module's
+// own wiring gone wrong, and panics: read as none, a missing copy ceiling
+// would let a copy spend past its limits.
+func linkedPart[T any](name string, v any) T {
+	if v == nil {
+		var zero T
+		return zero
+	}
+	t, ok := v.(T)
+	if !ok {
+		panic(fmt.Sprintf("limes: link.MeterSubjectFields.%s is a %T, not a %T", name, v, t))
+	}
+	return t
 }
