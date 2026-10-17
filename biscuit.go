@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	biscuit "github.com/biscuit-auth/biscuit-go/v2"
-	"github.com/biscuit-auth/biscuit-go/v2/datalog"
-	"github.com/biscuit-auth/biscuit-go/v2/pb"
+	biscuit "github.com/eclipse-biscuit/biscuit-go/v2"
+	"github.com/eclipse-biscuit/biscuit-go/v2/datalog"
+	"github.com/eclipse-biscuit/biscuit-go/v2/pb"
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 
