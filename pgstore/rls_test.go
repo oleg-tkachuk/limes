@@ -149,6 +149,35 @@ func TestRowSecurityKeepsTheMeterApart(t *testing.T) {
 	}
 }
 
+// A hold is its tenant's even under a scope that admits every tenant, where
+// row security lets every row through: its capability named under another
+// tenant neither settles nor releases it.
+func TestHoldIsItsTenantsAcrossTenants(t *testing.T) {
+	f := newTenantFixture(t)
+	mine := WithTenant(t.Context(), f.mine)
+	if _, err := f.usage.SetTenantBudget(mine, limes.SetTenantBudgetRequest{
+		TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true}, UnitCode: limes.DefaultUnitCode,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	const held, settled = 3, 1
+	hold, err := f.usage.Reserve(mine, limes.ReserveRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: held})
+	if err != nil {
+		t.Fatal(err)
+	}
+	every := WithAllTenants(t.Context())
+	elsewhere := meterSubject(f.child.ID, f.theirs)
+	if _, err := f.usage.Settle(every, limes.SettleRequest{Subject: elsewhere, ReservationID: hold.ID, Amount: settled}, nil); !errors.Is(err, limes.ErrReservationNotFound) {
+		t.Errorf("Settle under another tenant: err = %v, want ErrReservationNotFound", err)
+	}
+	if err := f.usage.Release(every, limes.ReleaseRequest{Subject: elsewhere, ReservationID: hold.ID}); err != nil {
+		t.Errorf("Release under another tenant: %v", err)
+	}
+	if _, err := f.usage.GetReservation(every, hold.ID); err != nil {
+		t.Errorf("after both: GetReservation = %v, want the hold", err)
+	}
+}
+
 // A refund names only the charge, so it is checked by scope alone: under
 // another tenant's scope, or none, the charge is not there to refund, and
 // what it charged stays charged.
