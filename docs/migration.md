@@ -23,6 +23,12 @@ API, and this file stops growing.
   among it. Change `func(ctx context.Context, tx MyTx) error` to
   `func(ctx context.Context, c limes.Charged[MyTx]) error` and read `c.Tx`.
 
+## pgstore/v0.11.0
+
+- `UsageStore.Charge` and `UsageStore.Settle` take
+  `onCharged func(ctx, c limes.Charged[pgx.Tx]) error`, as `limes.Meter` now
+  does: the transaction is `c.Tx`.
+
 ## v0.66.0
 
 - `dpop.VerifierConfig.MatchPathOnly` let a request to the root path `/`

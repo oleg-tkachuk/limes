@@ -149,11 +149,12 @@ func main() {
 	const query = "limes capability tokens"
 	receipt, err := usage.Charge(inTenant, limes.ChargeRequest{
 		Subject: verified.MeterSubject(), Amount: limes.MustParseAmount("0.35"), Op: "search", Actor: "research-agent",
-	}, func(ctx context.Context, tx pgx.Tx) error {
+	}, func(ctx context.Context, charged limes.Charged[pgx.Tx]) error {
 		// Inside the charge's transaction: this row commits with the charge,
-		// or neither does.
-		log.Info("inside the charge's transaction: recording the call in the service's own table", "query", query)
-		return insertChargedCall(ctx, tx, query)
+		// or neither does, and names the charge it records.
+		log.Info("inside the charge's transaction: recording the call in the service's own table",
+			"query", query, "charge", charged.Receipt.ChargeID)
+		return insertChargedCall(ctx, charged.Tx, charged.Receipt.ChargeID, query)
 	})
 	demo.Must(log, err, "charge")
 	log.Info("charged the search; the charge and the call's row committed together",
@@ -194,8 +195,9 @@ type quiet struct{}
 
 func (quiet) Printf(string, ...any) {}
 
-// insertChargedCall records the charged call in the example's own table.
-func insertChargedCall(ctx context.Context, tx pgx.Tx, query string) error {
-	_, err := tx.Exec(ctx, insertCall, uuid.New(), query)
+// insertChargedCall records the charged call in the example's own table,
+// under the charge's id.
+func insertChargedCall(ctx context.Context, tx pgx.Tx, chargeID uuid.UUID, query string) error {
+	_, err := tx.Exec(ctx, insertCall, chargeID, query)
 	return err
 }

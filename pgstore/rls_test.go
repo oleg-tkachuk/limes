@@ -360,6 +360,7 @@ func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 			ran = true
 			return nil
 		}
+		onCharged := func(ctx context.Context, c limes.Charged[pgx.Tx]) error { return consumer(ctx, c.Tx) }
 		c := f.parent
 		c.ID, c.ParentID = uuid.New(), uuid.Nil
 		subject := meterSubject(f.child.ID, f.mine)
@@ -386,7 +387,7 @@ func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 				return err
 			},
 			"Charge": func() error {
-				_, err := s.usage.Charge(s.ctx, limes.ChargeRequest{Subject: subject, Amount: 1}, consumer)
+				_, err := s.usage.Charge(s.ctx, limes.ChargeRequest{Subject: subject, Amount: 1}, onCharged)
 				return err
 			},
 			"Reserve": func() error {
@@ -394,7 +395,7 @@ func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 				return err
 			},
 			"Settle": func() error {
-				_, err := s.usage.Settle(s.ctx, limes.SettleRequest{Subject: subject, ReservationID: held.ID, Amount: 1}, consumer)
+				_, err := s.usage.Settle(s.ctx, limes.SettleRequest{Subject: subject, ReservationID: held.ID, Amount: 1}, onCharged)
 				return err
 			},
 			"Release": func() error {
