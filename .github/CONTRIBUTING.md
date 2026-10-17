@@ -3,11 +3,10 @@
 ## Building and testing
 
 Go (the `toolchain` in `go.mod`; the `go` directive is the oldest Go the
-module supports, and CI runs the suite on it too), [Task](https://taskfile.dev) and
-[golangci-lint](https://golangci-lint.run); Node and
+module supports, and CI runs the suite on it too) and [Task](https://taskfile.dev); Node and
 `npm ci --ignore-scripts --prefix .github/release` for the release-rule, release-notes, major-guard and
 module-commits tests. govulncheck, actionlint and apidiff are pinned in `tools/go.mod`, yq in
-`tools/yq/go.mod`, and all run through `go tool`, so they need no install.
+`tools/yq/go.mod`, golangci-lint in `tools/golangci-lint/go.mod`, and all run through `go tool`, so they need no install.
 
 ```bash
 task verify-all

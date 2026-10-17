@@ -219,7 +219,7 @@ algorithm would be another token version, never a runtime choice.
 | [storetest/](storetest), [metertest/](metertest), [dpop/dpoptest](dpop/dpoptest), [jwks/jwkstest](jwks/jwkstest) | conformance suites to run from your own implementation's tests |
 | [examples/](examples) | runnable programs: the five-minute walkthrough (`quickstart`), and one topic each, logging every step to stdout — issuing and verifying, delegation, metering, and pgstore over PostgreSQL; a module of its own, never released |
 | [testdata/](testdata) | golden tokens, and the Biscuit vocabulary and cases shared with SDKs in other languages |
-| [tools/](tools) | the developer tools, pinned in modules of their own and run with `go tool -modfile=tools/go.mod` (yq: `tools/yq/go.mod`) |
+| [tools/](tools) | the developer tools, pinned in modules of their own and run with `go tool -modfile=tools/go.mod` (yq: `tools/yq/go.mod`, golangci-lint: `tools/golangci-lint/go.mod`) |
 
 ## License
 
