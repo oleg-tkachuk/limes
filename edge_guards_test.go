@@ -173,40 +173,39 @@ func TestUntrustedIssuerRejected(t *testing.T) {
 
 // ─── unit codes and sentinel distinguishability ────────────────────────────
 
-// NormalizeUnitCode / IsUnitCode are published API. They gate the
-// empty-means-default rule and the comparison behind ErrUnitCodeMismatch.
-func TestNormalizeUnitCode(t *testing.T) {
+// IsUnitCode is published API: the one spelling of each ISO 4217 code,
+// which caveats accept beside an empty unit — none named, never one assumed.
+func TestUnitCodes(t *testing.T) {
 	cases := []struct {
-		in, want string
-		ok       bool
+		in string
+		ok bool
 	}{
-		{"", DefaultUnitCode, true},
-		{"USD", "USD", true},
-		{"EUR", "EUR", true},
-		{"UAH", "UAH", true},
-		{"JPY", "JPY", true}, // any ISO 4217 code, not a list of four
-		{"CHF", "CHF", true},
-		{AbstractUnitCode, AbstractUnitCode, true},
-		{"usd", "", false}, // one spelling per unit, so counters compare
-		{"XYZ", "", false},
-		{"BTC", "", false},
-		{"US", "", false},
-		{"UNIT", "", false},
+		{"USD", true},
+		{"EUR", true},
+		{"UAH", true},
+		{"JPY", true}, // any ISO 4217 code, not a list of four
+		{"CHF", true},
+		{AbstractUnitCode, true},
+		{"usd", false}, // one spelling per unit, so counters compare
+		{"XYZ", false},
+		{"BTC", false},
+		{"US", false},
+		{"UNIT", false},
 	}
 	for _, tc := range cases {
-		got, err := NormalizeUnitCode(tc.in)
-		if (err == nil) != tc.ok || got != tc.want {
-			t.Errorf("NormalizeUnitCode(%q) = %q, %v; want %q, ok=%v", tc.in, got, err, tc.want, tc.ok)
-		}
-		if tc.in != "" && IsUnitCode(tc.in) != tc.ok {
+		if IsUnitCode(tc.in) != tc.ok {
 			t.Errorf("IsUnitCode(%q) = %v, want %v", tc.in, !tc.ok, tc.ok)
 		}
+		if err := (Caveats{Ops: []Op{OpGet}, UnitCode: tc.in}).Validate(); (err == nil) != tc.ok {
+			t.Errorf("caveats in %q: err = %v, want ok=%v", tc.in, err, tc.ok)
+		}
 	}
-	// The asymmetry is deliberate: "" normalises to the default but is not a
-	// unit code itself, so empty-means-default is a choice made by
-	// normalising first.
+	// Empty is no unit code, and caveats that name none are valid.
 	if IsUnitCode("") {
 		t.Error(`IsUnitCode("") must be false`)
+	}
+	if err := (Caveats{Ops: []Op{OpGet}}).Validate(); err != nil {
+		t.Errorf("caveats naming no unit: %v", err)
 	}
 }
 

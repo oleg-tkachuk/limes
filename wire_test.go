@@ -67,7 +67,7 @@ func TestWireStructsRoundTrip(t *testing.T) {
 	}
 	c := Caveats{
 		Ops: []Op{OpGet}, ResourcePrefixes: []string{"a/"}, ResourceURIs: []string{"a/b"},
-		Requests: RequestCeiling{Max: 1}, Budget: BudgetCeiling{Max: NanosPerUnit}, UnitCode: DefaultUnitCode,
+		Requests: RequestCeiling{Max: 1}, Budget: BudgetCeiling{Max: NanosPerUnit}, UnitCode: "USD",
 		AllowTaintedRead: true, IdempotencyKeyRequired: true, SourceIPCIDR: []string{"10.0.0.0/8"},
 	}
 	if got := toWireCaveats(c).caveats(); !reflect.DeepEqual(got, c) {

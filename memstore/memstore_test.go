@@ -149,9 +149,9 @@ func TestBumpRequestUnlimited(t *testing.T) {
 	}
 }
 
-// A pre-unit-tracking row must resolve to the default rather than persisting
-// an empty unit — clients would otherwise render a bare number.
-func TestSetTenantBudgetDefaultsUnitCode(t *testing.T) {
+// A tenant budget set with no unit names none: no unit is assumed, and the
+// first charge or hold pins one (metertest checks that).
+func TestSetTenantBudgetAssumesNoUnit(t *testing.T) {
 	ctx := context.Background()
 	u := newTestUsage(newTestStore())
 	b, err := u.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
@@ -160,8 +160,8 @@ func TestSetTenantBudgetDefaultsUnitCode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SetTenantBudget: %v", err)
 	}
-	if b.UnitCode != limes.DefaultUnitCode {
-		t.Errorf("UnitCode = %q, want %q", b.UnitCode, limes.DefaultUnitCode)
+	if b.UnitCode != "" {
+		t.Errorf("UnitCode = %q, want none", b.UnitCode)
 	}
 }
 

@@ -219,7 +219,8 @@ or drop the parent's key binding or `IdempotencyKeyRequired`, or grant an
 `AllowTaintedRead` it lacks — and you get `ErrDelegationTooWide`; a
 TTL that would outlive the parent is cut to the parent's expiry, and a child
 starts no earlier than its parent (its `NotBefore`, else its issuance). Ask for a different `UnitCode` and you get
-`ErrUnitCodeMismatch` — units are never converted. Each child resource must be
+`ErrUnitCodeMismatch` — units are never converted; name none and the child
+takes its parent's. Each child resource must be
 reachable by the parent (a parent pinned to exact URIs admits no child
 prefix), and each child network must lie inside a parent network.
 
@@ -448,8 +449,11 @@ the charge's tenant and unit.
 
 Every counter counts in one unit. A charge or reservation in another unit than
 the capability, an ancestor or the tenant already counts in is
-`ErrUnitCodeMismatch`, never a sum of two currencies; an empty `UnitCode`
-means `DefaultUnitCode`, USD. The tenant aggregate counts from its first charge or reservation,
+`ErrUnitCodeMismatch`, never a sum of two currencies. No unit is assumed: a
+capability whose `UnitCode` is empty counts requests (`Bump`) but no amount —
+its `Charge`, `Reserve` and `Settle` are `ErrInvalidRequest` — and a
+`SetTenantBudget` that names none leaves the tenant's unit to its first
+charge or reservation. The tenant aggregate counts from its first charge or reservation,
 whether or not a ceiling is set: `SetTenantBudget` later measures the new
 ceiling against that spend and those holds, and refuses a new `UnitCode`
 while anything is held in the old one, or spent in it unless `ResetSpend`
@@ -1035,7 +1039,7 @@ stop rather than retry. The full table is in [diagrams.md](diagrams.md#answering
 | `redisreplay.Config` | `redisreplay.DefaultKeyPrefix`, `limes:dpop:replay:`; `dpop.DefaultReplayEntriesPerHolder`, 1 000, per capability |
 | `dpop.HMACNoncesConfig` | `dpop.DefaultNonceLifetime`, 5 minutes; `dpop.HMACNonceClockSkew`, 5 seconds, for a nonce issued ahead of this replica's clock; keys of at least `dpop.HMACNonceKeyBytes`, 32 |
 | `DefaultReservationTTL` | 5 minutes |
-| `UnitCode` left empty | `DefaultUnitCode`, USD |
+| `UnitCode` left empty | none: no amount is counted until a unit is named |
 | `PurgeClockSkew` | 1 minute |
 | `MaxExternalRefBytes` | 200 |
 | `MaxNanos` | just under a billion units |

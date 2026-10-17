@@ -433,6 +433,10 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 	if child.ConfirmationJKT == "" {
 		child.ConfirmationJKT = parent.ConfirmationJKT
 	}
+	// A child counts in its parent's unit; one that names none takes it.
+	if child.Caveats.UnitCode == "" {
+		child.Caveats.UnitCode = parent.Caveats.UnitCode
+	}
 	// A child starts no earlier than its parent, as it ends no later. The
 	// parent may start after now — a not-before ahead, or an issuer replica
 	// whose clock runs ahead of this one — and the child then waits for it.

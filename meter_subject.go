@@ -33,7 +33,7 @@ func (v VerifiedCapability) MeterSubject() MeterSubject {
 		tenantID:     v.c.Subject.TenantID,
 		maxRequests:  v.c.Caveats.Requests,
 		maxBudget:    v.c.Caveats.Budget,
-		unitCode:     canonicalUnitCode(v.c.Caveats.UnitCode),
+		unitCode:     v.c.Caveats.UnitCode,
 		copies:       v.c.clone().Copies,
 	}
 }
@@ -57,7 +57,7 @@ func StoredMeterSubject(ctx context.Context, records RecordReader, capabilityID 
 		tenantID:     c.Subject.TenantID,
 		maxRequests:  c.Caveats.Requests,
 		maxBudget:    c.Caveats.Budget,
-		unitCode:     canonicalUnitCode(c.Caveats.UnitCode),
+		unitCode:     c.Caveats.UnitCode,
 	}, nil
 }
 
@@ -74,8 +74,8 @@ func (s MeterSubject) Requests() RequestCeiling { return s.maxRequests }
 // Budget is the capability's own budget ceiling.
 func (s MeterSubject) Budget() BudgetCeiling { return s.maxBudget }
 
-// UnitCode is the unit the capability counts in, normalised: empty reads
-// as DefaultUnitCode.
+// UnitCode is the unit the capability counts in; empty when it names none,
+// and then it counts requests alone.
 func (s MeterSubject) UnitCode() string { return s.unitCode }
 
 // Copies are the limits of the Biscuit copy presented, a copy of them.
@@ -87,8 +87,19 @@ func (s MeterSubject) validate() error {
 	if s.capabilityID == uuid.Nil || s.tenantID == uuid.Nil {
 		return invalidRequest("the meter subject names no capability or no tenant")
 	}
-	_, err := NormalizeUnitCode(s.unitCode)
-	return err
+	return validUnitCode(s.unitCode)
+}
+
+// validateAmounts is validate for a request that moves an amount, which
+// needs a unit to count it in: no unit is ever assumed.
+func (s MeterSubject) validateAmounts() error {
+	if err := s.validate(); err != nil {
+		return err
+	}
+	if s.unitCode == "" {
+		return invalidRequest("capability %s names no unit_code, so it counts no amount", s.capabilityID)
+	}
+	return nil
 }
 
 func init() {
@@ -99,7 +110,7 @@ func init() {
 		return MeterSubject{
 			capabilityID: f.CapabilityID, tenantID: f.TenantID,
 			maxRequests: requests, maxBudget: budget,
-			unitCode: canonicalUnitCode(f.UnitCode), copies: copies,
+			unitCode: f.UnitCode, copies: copies,
 		}
 	}
 }

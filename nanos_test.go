@@ -134,10 +134,10 @@ func mustParse(t *testing.T, s string) Nanos {
 
 // The abstract unit is ISO 4217's XXX; UNIT, its name before, is refused.
 func TestAbstractUnitIsXXX(t *testing.T) {
-	if got, err := NormalizeUnitCode(AbstractUnitCode); err != nil || got != "XXX" {
-		t.Errorf("NormalizeUnitCode(XXX) = %q, %v", got, err)
+	if AbstractUnitCode != "XXX" || !IsUnitCode(AbstractUnitCode) {
+		t.Errorf("AbstractUnitCode = %q, want the ISO 4217 code XXX", AbstractUnitCode)
 	}
-	if _, err := NormalizeUnitCode("UNIT"); err == nil {
+	if IsUnitCode("UNIT") {
 		t.Error("UNIT is still accepted")
 	}
 	if err := (Caveats{Ops: []Op{OpGet}, UnitCode: "UNIT"}).Validate(); !errors.Is(err, ErrInvalidCaveats) {

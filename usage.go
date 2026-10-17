@@ -307,7 +307,7 @@ type ChargeRequest struct {
 
 // Validate refuses an amount out of range, an unknown overrun policy, an
 // external ref past MaxExternalRefBytes, and a subject that names no
-// capability, no tenant or an unknown unit.
+// capability, no tenant or no unit, or an unknown unit.
 func (r ChargeRequest) Validate() error {
 	if err := r.Amount.Validate(); err != nil {
 		return err
@@ -318,7 +318,7 @@ func (r ChargeRequest) Validate() error {
 	if err := ValidateExternalRef(r.ExternalRef); err != nil {
 		return err
 	}
-	return r.Subject.validate()
+	return r.Subject.validateAmounts()
 }
 
 // ChargeRecord is one charge as the ledger holds it.
@@ -436,12 +436,12 @@ type ReserveRequest struct {
 }
 
 // Validate refuses an amount out of range, a subject that names no
-// capability, no tenant or an unknown unit, and a negative TTL.
+// capability, no tenant or no unit, or an unknown unit, and a negative TTL.
 func (r ReserveRequest) Validate() error {
 	if err := r.Amount.Validate(); err != nil {
 		return err
 	}
-	if err := r.Subject.validate(); err != nil {
+	if err := r.Subject.validateAmounts(); err != nil {
 		return err
 	}
 	if r.TTL < 0 {
@@ -481,12 +481,12 @@ type SettleRequest struct {
 	Overrun OverrunPolicy
 }
 
-// Validate refuses a subject that names no capability, no tenant or an
-// unknown unit, an amount out of range, and an unknown overrun policy. The
-// zero ReservationID is not refused here: it names no reservation, which
-// Settle reports as ErrReservationNotFound.
+// Validate refuses a subject that names no capability, no tenant or no
+// unit, or an unknown unit, an amount out of range, and an unknown overrun
+// policy. The zero ReservationID is not refused here: it names no
+// reservation, which Settle reports as ErrReservationNotFound.
 func (r SettleRequest) Validate() error {
-	if err := r.Subject.validate(); err != nil {
+	if err := r.Subject.validateAmounts(); err != nil {
 		return err
 	}
 	if err := r.Amount.Validate(); err != nil {
@@ -570,8 +570,9 @@ type SetTenantBudgetRequest struct {
 	// Ceiling is the tenant's new ceiling; the zero value freezes its
 	// spend, BudgetCeiling{Unlimited: true} lifts it.
 	Ceiling BudgetCeiling
-	// UnitCode pins the currency. Empty = keep existing or default
-	// to DefaultUnitCode on first insert.
+	// UnitCode pins the currency. Empty keeps the tenant's, or, for a
+	// tenant that has none yet, leaves it to the first charge or hold to
+	// pin.
 	UnitCode string
 	// PeriodEnd pins a closing time for the accounting window; zero leaves
 	// it open-ended (typical for "just set the cap, I'll roll later").
@@ -603,12 +604,7 @@ func (r SetTenantBudgetRequest) Validate() error {
 	if err := r.Ceiling.Validate(); err != nil {
 		return err
 	}
-	if r.UnitCode != "" {
-		if _, err := NormalizeUnitCode(r.UnitCode); err != nil {
-			return err
-		}
-	}
-	return nil
+	return validUnitCode(r.UnitCode)
 }
 
 // TenantBudgetFilter picks the rows ListTenantBudgets lists.
@@ -708,8 +704,9 @@ type Usage struct {
 	// capability with delegated children).
 	ReservedAmount Nanos
 	// UnitCode is the unit the counters count in: the subject's, recorded
-	// by the first Bump, Charge or Reserve, so a capability that has only
-	// been bumped reads its unit too.
+	// by the first Bump, Charge or Reserve of a subject that names one, so
+	// a capability that has only been bumped reads its unit too. Empty
+	// while none has.
 	UnitCode string
 	_        noCompare
 }
