@@ -80,6 +80,7 @@ type ChargeSum struct {
 	Refunded Nanos
 	// Charges counts the group's charges.
 	Charges int64
+	_       noCompare
 }
 
 // ChargeBucket is how SumCharges splits a period in time.

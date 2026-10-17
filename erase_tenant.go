@@ -59,6 +59,7 @@ type EraseTenantResult struct {
 	// for Purge.
 	Removed int64
 	Kept    int64
+	_       noCompare
 }
 
 // EraseTenantUsageRequest names the tenant EraseTenantUsage erases.
