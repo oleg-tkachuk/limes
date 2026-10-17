@@ -2,9 +2,9 @@
 # queue-auto-merge.test.sh — queue-auto-merge.sh queues a pull request whose
 # changes leave CI as it is, leaves one that changes what CI runs, takes one
 # off the queue when a later push makes it change what CI runs, never queues
-# again on a push, fails
-# rather than queue one whose diff it cannot read, and does nothing without a
-# token.
+# again on a push, fails rather than queue one whose diff it cannot read —
+# taking it off the queue first when that diff is a push's — and does nothing
+# without a token.
 #
 # A fake gh stands in for the API. It logs every call's arguments to CALLS,
 # answers `pr diff` with FAKE_FILES, and fails it when FAKE_DIFF_FAILS is set;
@@ -90,6 +90,21 @@ if FAKE_DIFF_FAILS=1 FAKE_FILES="" "$script" >/dev/null 2>&1; then
     fail "an unreadable diff: the script succeeded"
 fi
 queued && fail "an unreadable diff: queued"
+
+# A push whose diff cannot be read may have changed CI: a queued pull
+# request comes off the queue before the step fails.
+: >"$CALLS"
+if ACTION=synchronize FAKE_QUEUED=true FAKE_DIFF_FAILS=1 FAKE_FILES="" "$script" >/dev/null 2>&1; then
+    fail "an unreadable diff on a push: the script succeeded"
+fi
+dequeued || fail "an unreadable diff on a push: left on the queue"
+queued && fail "an unreadable diff on a push: queued again"
+
+: >"$CALLS"
+if ACTION=synchronize FAKE_QUEUED=false FAKE_DIFF_FAILS=1 FAKE_FILES="" "$script" >/dev/null 2>&1; then
+    fail "an unreadable diff on a push to a held one: the script succeeded"
+fi
+dequeued && fail "an unreadable diff on a push to a held one: taken off the queue"
 
 : >"$CALLS"
 GH_TOKEN="" FAKE_FILES="verifier.go" "$script" >/dev/null
