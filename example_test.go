@@ -95,7 +95,7 @@ func (s exampleStack) issue() (limes.Capability, string) {
 	cResult, err := s.issuer.Issue(context.Background(), limes.IssueRequest{
 		IssuedBy: limes.Principal{Subject: "operator@example.com"},
 		Subject: limes.Principal{
-			Type: limes.PrincipalAgent, TenantID: s.tenantID, Subject: "research-orchestrator",
+			Type: limes.PrincipalTypeAgent, TenantID: s.tenantID, Subject: "research-orchestrator",
 		},
 		Audience: []string{exampleAudience},
 		TTL:      15 * time.Minute,
@@ -133,7 +133,7 @@ func ExampleIssuer_Issue() {
 	cResult, err := issuer.Issue(ctx, limes.IssueRequest{
 		IssuedBy: limes.Principal{Subject: "operator@example.com"},
 		Subject: limes.Principal{
-			Type: limes.PrincipalAgent, TenantID: uuid.New(), Subject: "research-orchestrator",
+			Type: limes.PrincipalTypeAgent, TenantID: uuid.New(), Subject: "research-orchestrator",
 		},
 		Audience: []string{exampleAudience},
 		TTL:      15 * time.Minute,
@@ -186,7 +186,7 @@ func ExampleIssuer_Delegate() {
 	// accepted.
 	parent := s.verified(token)
 
-	worker := limes.Principal{Type: limes.PrincipalAgent, TenantID: s.tenantID, Subject: "sub-worker"}
+	worker := limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: s.tenantID, Subject: "sub-worker"}
 	childResult, err := s.issuer.Delegate(ctx, limes.DelegateRequest{
 		Parent:  parent,
 		Subject: worker,
@@ -254,7 +254,7 @@ func Example_proofOfPossession() {
 	jkt, _ := dpop.Thumbprint(agentKey.Public())
 	tokenResult, err := s.issuer.Issue(ctx, limes.IssueRequest{
 		IssuedBy: limes.Principal{Subject: "operator@example.com"},
-		Subject:  limes.Principal{Type: limes.PrincipalAgent, TenantID: s.tenantID, Subject: "worker"},
+		Subject:  limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: s.tenantID, Subject: "worker"},
 		Audience: []string{exampleAudience}, TTL: 15 * time.Minute,
 		Caveats:         limes.Caveats{Ops: []limes.Op{limes.OpGet}},
 		ConfirmationJKT: jkt,
@@ -382,7 +382,7 @@ func Example_backdatedCharges() {
 	const period = 14 * 24 * time.Hour
 	c := limes.Capability{
 		ID: uuid.New(), IssuedAt: start, ExpiresAt: start.Add(period),
-		Subject: limes.Principal{Type: limes.PrincipalService, TenantID: uuid.New(), Subject: "svc:reporting"},
+		Subject: limes.Principal{Type: limes.PrincipalTypeService, TenantID: uuid.New(), Subject: "svc:reporting"},
 		Caveats: limes.Caveats{Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true}},
 	}
 	if err := records.Insert(ctx, limes.InsertRequest{Capability: c}); err != nil {
@@ -441,7 +441,7 @@ func ExampleAllByPrincipal() {
 	const pageSize = 1
 	n := 0
 	for _, err := range limes.AllByPrincipal(ctx, s.records, limes.ListByPrincipalRequest{
-		TenantID: s.tenantID, PrincipalType: limes.PrincipalAgent, Subject: "research-orchestrator",
+		TenantID: s.tenantID, PrincipalType: limes.PrincipalTypeAgent, Subject: "research-orchestrator",
 		Limit: pageSize,
 	}) {
 		if err != nil {

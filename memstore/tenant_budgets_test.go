@@ -24,7 +24,7 @@ func seedBudget(t *testing.T, u *UsageStore[struct{}], ceiling limes.BudgetCeili
 		if _, err := u.Charge(ctx, limes.ChargeRequest{
 			Subject: recordedSubject(ctx, t, u, subjectSpec{capID: uuid.New(), tenant: tenant}),
 			Amount:  spent,
-			Overrun: limes.OverrunRecord,
+			Overrun: limes.OverrunPolicyRecord,
 		}, nil); err != nil {
 			t.Fatal(err)
 		}
@@ -46,9 +46,9 @@ func TestListTenantBudgets(t *testing.T) {
 		want []uuid.UUID
 	}{
 		{"most at risk first", limes.ListTenantBudgetsRequest{}, []uuid.UUID{over, half, low, unlimited}},
-		{"threshold", limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetsAtOrPast, ThresholdPct: 50}, []uuid.UUID{over, half}},
-		{"unlimited only", limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetsUnlimited}, []uuid.UUID{unlimited}},
-		{"every ceiling", limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetsAtOrPast}, []uuid.UUID{over, half, low}},
+		{"threshold", limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterAtOrPast, ThresholdPct: 50}, []uuid.UUID{over, half}},
+		{"unlimited only", limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterUnlimited}, []uuid.UUID{unlimited}},
+		{"every ceiling", limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterAtOrPast}, []uuid.UUID{over, half, low}},
 		{"limit", limes.ListTenantBudgetsRequest{Limit: 2}, []uuid.UUID{over, half}},
 	}
 	for _, tc := range cases {

@@ -64,9 +64,9 @@ func main() {
 	//    described by the token itself — no role, no long-lived secret.
 	parentResult, err := issuer.Issue(ctx, limes.IssueRequest{
 		// Who asked for it — distinct from who it authorises, and required.
-		IssuedBy: limes.Principal{Type: limes.PrincipalUser, TenantID: tenantID, Subject: "operator@example.com"},
+		IssuedBy: limes.Principal{Type: limes.PrincipalTypeUser, TenantID: tenantID, Subject: "operator@example.com"},
 		Subject: limes.Principal{
-			Type:     limes.PrincipalAgent,
+			Type:     limes.PrincipalTypeAgent,
 			TenantID: tenantID,
 			Subject:  "research-orchestrator",
 			Agent: &limes.AgentPrincipal{
@@ -111,7 +111,7 @@ func main() {
 	childResult, err := issuer.Delegate(ctx, limes.DelegateRequest{
 		Parent: verified, // what the verifier accepted, not the issuer's copy
 		Subject: limes.Principal{
-			Type: limes.PrincipalAgent, TenantID: tenantID, Subject: "sub-worker",
+			Type: limes.PrincipalTypeAgent, TenantID: tenantID, Subject: "sub-worker",
 			Agent: &limes.AgentPrincipal{
 				AgentType: "example-agent", ParentAgentID: parent.ID,
 			},
@@ -135,7 +135,7 @@ func main() {
 	_, err = issuer.Delegate(ctx, limes.DelegateRequest{
 		Parent: verified,
 		Subject: limes.Principal{
-			Type: limes.PrincipalAgent, TenantID: tenantID, Subject: "greedy-worker",
+			Type: limes.PrincipalTypeAgent, TenantID: tenantID, Subject: "greedy-worker",
 		},
 		Audience: []string{"my-service"},
 		TTL:      time.Minute,

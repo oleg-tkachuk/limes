@@ -43,7 +43,7 @@ func TestMeterContract(t *testing.T) {
 			NewCapability: func(spec metertest.CapabilitySpec) (uuid.UUID, error) {
 				c := limes.Capability{
 					ID: uuid.New(), ParentID: spec.Parent, ExpiresAt: contractExpiry,
-					Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: cmp.Or(spec.Tenant, tenant), Subject: "agent"},
+					Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: cmp.Or(spec.Tenant, tenant), Subject: "agent"},
 					Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: spec.Requests, Budget: spec.Budget},
 				}
 				return c.ID, records.Insert(context.Background(), limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "issuer"}})
@@ -87,7 +87,7 @@ func TestMeterContractUsesTheTenantHooks(t *testing.T) {
 			NewCapability: func(spec metertest.CapabilitySpec) (uuid.UUID, error) {
 				c := limes.Capability{
 					ID: uuid.New(), ParentID: spec.Parent, ExpiresAt: contractExpiry,
-					Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: cmp.Or(spec.Tenant, tenant), Subject: "agent"},
+					Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: cmp.Or(spec.Tenant, tenant), Subject: "agent"},
 					Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: spec.Requests, Budget: spec.Budget},
 				}
 				return c.ID, records.Insert(ctx, limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "issuer"}})

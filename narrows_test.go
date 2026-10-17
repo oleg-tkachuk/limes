@@ -54,8 +54,8 @@ func TestMatchResourceRespectsSegmentBoundaries(t *testing.T) {
 func narrowFixture(parent, child Caveats) (Capability, Capability) {
 	tenant := uuid.New()
 	exp := time.Now().Add(time.Hour)
-	p := Capability{Audience: []string{"data"}, ExpiresAt: exp, Subject: Principal{Type: PrincipalAgent, TenantID: tenant}, Caveats: parent}
-	c := Capability{Audience: []string{"data"}, ExpiresAt: exp, Subject: Principal{Type: PrincipalAgent, TenantID: tenant}, Caveats: child}
+	p := Capability{Audience: []string{"data"}, ExpiresAt: exp, Subject: Principal{Type: PrincipalTypeAgent, TenantID: tenant}, Caveats: parent}
+	c := Capability{Audience: []string{"data"}, ExpiresAt: exp, Subject: Principal{Type: PrincipalTypeAgent, TenantID: tenant}, Caveats: child}
 	return p, c
 }
 
@@ -201,14 +201,14 @@ func TestDelegateStartsNoEarlierThanItsParent(t *testing.T) {
 	iss := testIssuer(t, goldenKID, ed25519.NewKeyFromSeed(goldenSeed[:]), func() time.Time { return now })
 	parent, _, err := iss.issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalService, TenantID: uuid.MustParse(goldenTenant), Subject: "svc"},
+		Subject:  Principal{Type: PrincipalTypeService, TenantID: uuid.MustParse(goldenTenant), Subject: "svc"},
 		Audience: []string{goldenAudience}, Caveats: Caveats{Ops: []Op{OpGet, OpShare}},
 		NotBefore: now.Add(time.Minute), TTL: time.Hour,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, _, err := iss.delegate(context.Background(), DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true})
+	child, _, err := iss.delegate(context.Background(), DelegateRequest{Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true})
 	if err != nil {
 		t.Fatalf("Delegate: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestDelegateStartsNoEarlierThanItsParent(t *testing.T) {
 	const skew = 5 * time.Second
 	ahead := parent
 	ahead.NotBefore, ahead.IssuedAt = time.Time{}, now.Add(skew)
-	child, _, err = iss.delegate(context.Background(), DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(ahead), InheritCaveats: true})
+	child, _, err = iss.delegate(context.Background(), DelegateRequest{Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"}, Parent: asVerified(ahead), InheritCaveats: true})
 	if err != nil {
 		t.Fatalf("Delegate from a parent issued %s ahead: %v", skew, err)
 	}

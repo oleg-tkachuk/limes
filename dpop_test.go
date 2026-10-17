@@ -52,7 +52,7 @@ func TestKeyBindingSurvivesTheTokenAndDelegation(t *testing.T) {
 	jkt, _ := dpop.Thumbprint(key.Public())
 
 	parent, token, err := issuer.issue(ctx, IssueRequest{
-		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet, OpShare}}, TTL: time.Hour,
 		ConfirmationJKT: jkt,
 	})
@@ -67,13 +67,13 @@ func TestKeyBindingSurvivesTheTokenAndDelegation(t *testing.T) {
 		t.Fatalf("verified binding = %q, %v; want %q", got.Capability().ConfirmationJKT, err, jkt)
 	}
 
-	child, _, err := issuer.delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true})
+	child, _, err := issuer.delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true})
 	if err != nil || child.ConfirmationJKT != jkt {
 		t.Fatalf("child without its own key: binding %q, %v; want the parent's", child.ConfirmationJKT, err)
 	}
 	subKey := dpopKeys(t)["P-256"]
 	subJKT, _ := dpop.Thumbprint(subKey.Public())
-	child, _, err = issuer.delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true, ConfirmationJKT: subJKT})
+	child, _, err = issuer.delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true, ConfirmationJKT: subJKT})
 	if err != nil || child.ConfirmationJKT != subJKT {
 		t.Fatalf("child bound to the sub-agent's key: %q, %v", child.ConfirmationJKT, err)
 	}
@@ -88,7 +88,7 @@ func TestKeyBindingSurvivesTheTokenAndDelegation(t *testing.T) {
 func TestIssueRefusesAMalformedBinding(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)
 	_, _, err := issuer.issue(context.Background(), IssueRequest{
-		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour,
 		ConfirmationJKT: "not-a-thumbprint",
 	})
@@ -147,7 +147,7 @@ func TestARevokedCopySpendsNoReplayRoom(t *testing.T) {
 	ctx := context.Background()
 	issuer, _, store, pub := buildIssuerVerifier(t)
 	cap, _, err := issuer.issue(ctx, IssueRequest{
-		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, TTL: time.Hour,
 		Caveats: Caveats{Ops: []Op{OpGet}, Requests: RequestCeiling{Unlimited: true}, Budget: BudgetCeiling{Unlimited: true}},
 	})
@@ -196,7 +196,7 @@ func TestRevokedCapabilitiesSpendNoReplayRoom(t *testing.T) {
 		t.Helper()
 		jkt, _ := dpop.Thumbprint(key.Public())
 		c, tok, err := issuer.issue(ctx, IssueRequest{
-			IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: tenant, Subject: "a"},
+			IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: tenant, Subject: "a"},
 			Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour, ConfirmationJKT: jkt,
 		})
 		if err != nil {
@@ -234,7 +234,7 @@ func TestAProofIsCheckedBeforeRevocation(t *testing.T) {
 	boundKey, otherKey := keys["Ed25519"], keys["P-256"]
 	jkt, _ := dpop.Thumbprint(boundKey.Public())
 	c, tok, err := issuer.issue(ctx, IssueRequest{
-		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour, ConfirmationJKT: jkt,
 	})
 	if err != nil {

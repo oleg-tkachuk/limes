@@ -47,8 +47,8 @@ func main() {
 
 	tenant := uuid.New()
 	root, err := issuer.Issue(ctx, limes.IssueRequest{
-		IssuedBy: limes.Principal{Type: limes.PrincipalUser, TenantID: tenant, Subject: "operator@example.com"},
-		Subject:  limes.Principal{Type: limes.PrincipalAgent, TenantID: tenant, Subject: "orchestrator"},
+		IssuedBy: limes.Principal{Type: limes.PrincipalTypeUser, TenantID: tenant, Subject: "operator@example.com"},
+		Subject:  limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: tenant, Subject: "orchestrator"},
 		Audience: []string{audience},
 		TTL:      15 * time.Minute,
 		Caveats: limes.Caveats{
@@ -72,7 +72,7 @@ func main() {
 
 	child, err := issuer.Delegate(ctx, limes.DelegateRequest{
 		Parent:   parent,
-		Subject:  limes.Principal{Type: limes.PrincipalAgent, TenantID: tenant, Subject: "sub-agent"},
+		Subject:  limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: tenant, Subject: "sub-agent"},
 		Audience: []string{audience},
 		TTL:      2 * time.Minute,
 		Caveats: limes.Caveats{
@@ -105,7 +105,7 @@ func main() {
 
 	_, err = issuer.Delegate(ctx, limes.DelegateRequest{
 		Parent:   parent,
-		Subject:  limes.Principal{Type: limes.PrincipalAgent, TenantID: tenant, Subject: "greedy-agent"},
+		Subject:  limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: tenant, Subject: "greedy-agent"},
 		Audience: []string{audience},
 		TTL:      time.Minute,
 		Caveats: limes.Caveats{

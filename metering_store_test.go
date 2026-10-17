@@ -137,7 +137,7 @@ func TestMeteringLabelsAmountsAndOutcomes(t *testing.T) {
 		t.Fatalf("charge past the ceiling: %v", err)
 	}
 	over := eur("9")
-	over.Overrun = limes.OverrunRecord
+	over.Overrun = limes.OverrunPolicyRecord
 	if _, err := usage.Charge(ctx, over, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +250,7 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 	// Expired long enough ago that Purge removes it, so its usage ends an
 	// orphan; until then the Meter reads its lineage like any other.
 	expired := limes.Capability{
-		ID: capID, Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: tenant, Subject: "agent"},
+		ID: capID, Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: tenant, Subject: "agent"},
 		Caveats: limes.Caveats{
 			Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true},
 		},
@@ -370,7 +370,7 @@ type subjectSpec struct {
 func recordedSubject(ctx context.Context, t *testing.T, records *memstore.Store, spec subjectSpec) limes.MeterSubject {
 	t.Helper()
 	c := limes.Capability{
-		ID: spec.capID, Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: spec.tenant, Subject: "agent"},
+		ID: spec.capID, Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: spec.tenant, Subject: "agent"},
 		Caveats: limes.Caveats{
 			Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true},
 		},

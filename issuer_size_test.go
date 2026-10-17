@@ -27,7 +27,7 @@ func TestIssueRefusesATokenPastMaxTokenBytes(t *testing.T) {
 	issuer, _, store, _ := buildIssuerVerifier(t)
 	_, _, err := issuer.issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "op"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "agent"},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData},
 		Caveats:  oversizedCaveats(),
 		TTL:      time.Minute,
@@ -47,7 +47,7 @@ func TestDelegateAndBiscuitRefuseATokenPastMaxTokenBytes(t *testing.T) {
 	wide := oversizedCaveats()
 	parent, token, err := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "op"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "agent"},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet, OpShare}, ResourcePrefixes: []string{"corpus/"}},
 		TTL:      time.Minute,
@@ -61,7 +61,7 @@ func TestDelegateAndBiscuitRefuseATokenPastMaxTokenBytes(t *testing.T) {
 	}
 	recorded := len(store.caps)
 	if _, _, err := issuer.delegate(ctx, DelegateRequest{
-		Parent: vc, Subject: Principal{Type: PrincipalAgent, Subject: "worker"}, TTL: time.Minute, Caveats: wide,
+		Parent: vc, Subject: Principal{Type: PrincipalTypeAgent, Subject: "worker"}, TTL: time.Minute, Caveats: wide,
 	}); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("Delegate: err = %v, want ErrInvalidRequest", err)
 	}

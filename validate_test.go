@@ -52,7 +52,7 @@ func TestIssueRejectsMalformedRequests(t *testing.T) {
 	base := func() IssueRequest {
 		return IssueRequest{
 			IssuedBy: Principal{Subject: "op"},
-			Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
+			Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 			Audience: []string{"data"},
 			Caveats:  Caveats{Ops: []Op{OpGet}},
 			TTL:      time.Minute,
@@ -80,7 +80,7 @@ func issueRoot(t *testing.T, issuer *Issuer, caveats Caveats) Capability {
 	t.Helper()
 	c, _, err := issuer.issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "op"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "root"},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "root"},
 		Audience: []string{"data"},
 		Caveats:  caveats,
 		TTL:      time.Hour,
@@ -99,13 +99,13 @@ func TestDelegateInheritanceIsExplicit(t *testing.T) {
 	parent := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet, OpShare}, Budget: BudgetCeiling{Max: MustParseAmount("25")}, UnitCode: "USD"})
 
 	if _, _, err := issuer.delegate(ctx, DelegateRequest{
-		Subject: Principal{Type: PrincipalAgent, Subject: "child"},
+		Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"},
 		Parent:  asVerified(parent), Caveats: Caveats{Budget: BudgetCeiling{Max: MustParseAmount("2")}},
 	}); !errors.Is(err, ErrInvalidCaveats) {
 		t.Fatalf("delegate with ops omitted = %v, want ErrInvalidCaveats", err)
 	}
 
-	child, _, err := issuer.delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true})
+	child, _, err := issuer.delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true})
 	if err != nil {
 		t.Fatalf("delegate with InheritCaveats: %v", err)
 	}
@@ -126,18 +126,18 @@ func TestDelegateRefusesRevokedOrExpiredParent(t *testing.T) {
 
 	expired := parent
 	expired.ExpiresAt = time.Now().Add(-time.Minute)
-	if _, _, err := issuer.delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(expired), InheritCaveats: true}); !errors.Is(err, ErrExpired) {
+	if _, _, err := issuer.delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"}, Parent: asVerified(expired), InheritCaveats: true}); !errors.Is(err, ErrExpired) {
 		t.Errorf("delegate from expired parent = %v, want ErrExpired", err)
 	}
 
 	foreign := parent
 	foreign.Issuer = foreignIssuer
-	if _, _, err := issuer.delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(foreign), InheritCaveats: true}); !errors.Is(err, ErrInvalidRequest) {
+	if _, _, err := issuer.delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"}, Parent: asVerified(foreign), InheritCaveats: true}); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("delegate from another issuer's parent = %v, want ErrInvalidRequest", err)
 	}
 
 	_ = store.Revoke(ctx, RevokeRequest{CapabilityID: parent.ID})
-	if _, _, err := issuer.delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true}); !errors.Is(err, ErrRevoked) {
+	if _, _, err := issuer.delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true}); !errors.Is(err, ErrRevoked) {
 		t.Errorf("delegate from revoked parent = %v, want ErrRevoked", err)
 	}
 }
@@ -148,13 +148,13 @@ func TestIssuedIDsAreVersion7(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
 	parent, _, err := issuer.issue(ctx, IssueRequest{
-		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet, OpShare}}, TTL: time.Hour,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, _, err := issuer.delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true})
+	child, _, err := issuer.delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestMintingResults(t *testing.T) {
 	issuer, v, _, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
 	issued, err := issuer.Issue(ctx, IssueRequest{
-		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet, OpShare}}, TTL: time.Hour,
 	})
 	if err != nil || issued.Token == "" || issued.Capability.ID == uuid.Nil {
@@ -182,7 +182,7 @@ func TestMintingResults(t *testing.T) {
 	if err != nil || vc.Capability().ID != issued.Capability.ID {
 		t.Fatalf("the issued token verifies as %s, %v; want %s", vc.Capability().ID, err, issued.Capability.ID)
 	}
-	delegated, err := issuer.Delegate(ctx, DelegateRequest{Parent: vc, Subject: Principal{Type: PrincipalAgent, Subject: "child"}, InheritCaveats: true})
+	delegated, err := issuer.Delegate(ctx, DelegateRequest{Parent: vc, Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"}, InheritCaveats: true})
 	if err != nil || delegated.Token == "" || delegated.Capability.ParentID != issued.Capability.ID {
 		t.Fatalf("Delegate = %+v, %v; want a child of %s", delegated, err, issued.Capability.ID)
 	}
@@ -211,7 +211,7 @@ func TestDelegateRequiresOpShare(t *testing.T) {
 	} {
 		parent := issueRoot(t, issuer, Caveats{Ops: tc.ops})
 		before := len(store.caps)
-		_, err := issuer.Delegate(ctx, DelegateRequest{Parent: asVerified(parent), Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Caveats: Caveats{Ops: []Op{OpGet}}})
+		_, err := issuer.Delegate(ctx, DelegateRequest{Parent: asVerified(parent), Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"}, Caveats: Caveats{Ops: []Op{OpGet}}})
 		if tc.want == nil && err != nil || tc.want != nil && !errors.Is(err, tc.want) {
 			t.Errorf("%s: err = %v, want %v", name, err, tc.want)
 		}
@@ -249,7 +249,7 @@ func TestDelegationStartIsExact(t *testing.T) {
 	at := root.IssuedAt.Add(time.Second + fraction)
 	root.NotBefore = at.Add(-earlier) // within the second at is in
 	issuer.clock = func() time.Time { return at }
-	child, _, err := issuer.delegate(t.Context(), DelegateRequest{Parent: asVerified(root), Subject: Principal{Type: PrincipalAgent, Subject: "child"}, Caveats: Caveats{Ops: []Op{OpGet}}})
+	child, _, err := issuer.delegate(t.Context(), DelegateRequest{Parent: asVerified(root), Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"}, Caveats: Caveats{Ops: []Op{OpGet}}})
 	if err != nil {
 		t.Fatalf("Delegate from a parent starting within the second: %v", err)
 	}
@@ -289,11 +289,11 @@ func TestMeterRequestsValidate(t *testing.T) {
 		"bump, no subject":        {BumpRequest{}, false},
 		"bump, no tenant":         {BumpRequest{Subject: noTenant}, false},
 		"bump, unknown unit":      {BumpRequest{Subject: badUnit}, false},
-		"charge":                  {ChargeRequest{Subject: subject, Amount: one, ExternalRef: "call-1", Overrun: OverrunRecord}, true},
+		"charge":                  {ChargeRequest{Subject: subject, Amount: one, ExternalRef: "call-1", Overrun: OverrunPolicyRecord}, true},
 		"charge of nothing":       {ChargeRequest{Subject: subject}, true},
 		"charge, negative":        {ChargeRequest{Subject: subject, Amount: -one}, false},
 		"charge, past MaxNanos":   {ChargeRequest{Subject: subject, Amount: MaxNanos + 1}, false},
-		"charge, unknown overrun": {ChargeRequest{Subject: subject, Amount: one, Overrun: OverrunRecord + 1}, false},
+		"charge, unknown overrun": {ChargeRequest{Subject: subject, Amount: one, Overrun: OverrunPolicyRecord + 1}, false},
 		"charge, ref too long":    {ChargeRequest{Subject: subject, Amount: one, ExternalRef: longRef}, false},
 		"charge, no subject":      {ChargeRequest{Amount: one}, false},
 		"reserve":                 {ReserveRequest{Subject: subject, Amount: one, TTL: time.Minute}, true},
@@ -304,7 +304,7 @@ func TestMeterRequestsValidate(t *testing.T) {
 		"settle":                  {SettleRequest{Subject: subject, ReservationID: uuid.New(), Amount: one}, true},
 		"settle, no reservation":  {SettleRequest{Subject: subject, Amount: one}, true},
 		"settle, negative":        {SettleRequest{Subject: subject, ReservationID: uuid.New(), Amount: -one}, false},
-		"settle, unknown overrun": {SettleRequest{Subject: subject, ReservationID: uuid.New(), Overrun: OverrunRecord + 1}, false},
+		"settle, unknown overrun": {SettleRequest{Subject: subject, ReservationID: uuid.New(), Overrun: OverrunPolicyRecord + 1}, false},
 		"settle, no subject":      {SettleRequest{ReservationID: uuid.New(), Amount: one}, false},
 		"release":                 {ReleaseRequest{Subject: subject, ReservationID: uuid.New()}, true},
 		"release, no subject":     {ReleaseRequest{ReservationID: uuid.New()}, false},

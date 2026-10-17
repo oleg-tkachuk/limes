@@ -119,7 +119,7 @@ func TestExactPercent(t *testing.T) {
 		if ExactPercent(pct) != nil {
 			t.Errorf("ExactPercent(%v) is a number", pct)
 		}
-		if err := (ListTenantBudgetsRequest{Filter: TenantBudgetsAtOrPast, ThresholdPct: pct}).Validate(); !errors.Is(err, ErrInvalidRequest) {
+		if err := (ListTenantBudgetsRequest{Filter: TenantBudgetFilterAtOrPast, ThresholdPct: pct}).Validate(); !errors.Is(err, ErrInvalidRequest) {
 			t.Errorf("a threshold of %v: err = %v, want ErrInvalidRequest", pct, err)
 		}
 	}

@@ -35,7 +35,7 @@ func mintToken(t *testing.T, iss *Issuer) string {
 	_, token, err := iss.issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject: Principal{
-			Type: PrincipalService, TenantID: uuid.MustParse(goldenTenant), Subject: "svc",
+			Type: PrincipalTypeService, TenantID: uuid.MustParse(goldenTenant), Subject: "svc",
 		},
 		Audience: []string{goldenAudience},
 		Caveats:  Caveats{Ops: []Op{OpGet}},

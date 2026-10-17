@@ -106,7 +106,7 @@ type Meter[TX any] interface {
 	// with Replayed set — also once the capability is no longer on record,
 	// as Settle replays a settled hold. The pair names one cost: arriving again with a
 	// different Amount, UnitCode or TenantID it returns
-	// ErrExternalRefConflict and moves nothing. With req.Overrun = OverrunRecord, a charge that
+	// ErrExternalRefConflict and moves nothing. With req.Overrun = OverrunPolicyRecord, a charge that
 	// would cross a ceiling is committed anyway and the receipt reports it
 	// (ChargeReceipt.Overrun); see OverrunPolicy.
 	Charge(ctx context.Context, req ChargeRequest, onCharged func(ctx context.Context, c Charged[TX]) error) (ChargeReceipt, error)
@@ -145,7 +145,7 @@ type Meter[TX any] interface {
 	// below, equal to or above the hold; above it, the excess must fit
 	// every ceiling, or Settle returns the Charge sentinel and the
 	// reservation stays in place for the caller to settle lower or
-	// release — unless req.Overrun is OverrunRecord, when the cost is
+	// release — unless req.Overrun is OverrunPolicyRecord, when the cost is
 	// charged anyway and the receipt reports it.
 	//
 	// Settle is idempotent on the reservation: settling one already
@@ -224,12 +224,12 @@ type TenantBudgets interface {
 
 	// ListTenantBudgets returns tenant budget rows; a consumer joins its
 	// own tenant data to them by TenantID. Filter picks the rows:
-	//   - TenantBudgetsUnspecified, TenantBudgetsAll: every one.
-	//   - TenantBudgetsAtOrPast: rows with a ceiling — a bound or 0 — where
+	//   - TenantBudgetFilterUnspecified, TenantBudgetFilterAll: every one.
+	//   - TenantBudgetFilterAtOrPast: rows with a ceiling — a bound or 0 — where
 	//     spent / max * 100 >= ThresholdPct, exactly; a ceiling of 0 is
 	//     spent through at any threshold. At a threshold of 0, every row
 	//     with a ceiling.
-	//   - TenantBudgetsUnlimited: rows whose ceiling is Unlimited.
+	//   - TenantBudgetFilterUnlimited: rows whose ceiling is Unlimited.
 	// Limit is the page size, as PageLimit reads it.
 	// It refuses what ListTenantBudgetsRequest.Validate refuses.
 	//
@@ -333,7 +333,7 @@ type ChargeRecord struct {
 	UnitCode       string
 	// ExternalRef is the charge's ChargeRequest.ExternalRef; empty for none.
 	ExternalRef string
-	// Overrun reports that the charge crossed a ceiling (OverrunRecord).
+	// Overrun reports that the charge crossed a ceiling (OverrunPolicyRecord).
 	Overrun bool
 	// Op and Actor are what the charge was for and who made it, as the
 	// request named them; At is when it was committed.
@@ -352,19 +352,19 @@ const MaxExternalRefBytes = 200
 type OverrunPolicy uint8
 
 const (
-	// OverrunUnspecified takes the default, OverrunReject: a caller that
-	// says nothing never commits past a ceiling.
-	OverrunUnspecified OverrunPolicy = iota
-	// OverrunReject refuses the charge with the ceiling's sentinel and
+	// OverrunPolicyUnspecified takes the default, OverrunPolicyReject: a
+	// caller that says nothing never commits past a ceiling.
+	OverrunPolicyUnspecified OverrunPolicy = iota
+	// OverrunPolicyReject refuses the charge with the ceiling's sentinel and
 	// changes nothing. Use it for a cost not yet incurred: the refusal is
 	// what stops it.
-	OverrunReject
-	// OverrunRecord commits the charge past the ceiling and reports it in
+	OverrunPolicyReject
+	// OverrunPolicyRecord commits the charge past the ceiling and reports it in
 	// ChargeReceipt.Overrun. Use it for a cost already incurred — reported
 	// after the fact, out of the request path — where refusing would only
 	// leave the ledger short of what was spent. The crossed ceiling then
-	// refuses every later charge and reservation under OverrunReject.
-	OverrunRecord
+	// refuses every later charge and reservation under OverrunPolicyReject.
+	OverrunPolicyRecord
 )
 
 // ChargeReceipt is the result of a committed charge.
@@ -379,7 +379,7 @@ type ChargeReceipt struct {
 	// nothing and ChargeID names the earlier charge.
 	Replayed bool
 	// Overrun reports that the charge crossed at least one ceiling, which
-	// only OverrunRecord allows.
+	// only OverrunPolicyRecord allows.
 	Overrun bool
 	// TenantID and UnitCode are the charge's tenant and unit, so a caller
 	// holding only the receipt — logged, or passed on — can attribute it. A
@@ -615,28 +615,28 @@ func (r SetTenantBudgetRequest) Validate() error {
 type TenantBudgetFilter uint8
 
 const (
-	// TenantBudgetsUnspecified takes the default, TenantBudgetsAll: a
+	// TenantBudgetFilterUnspecified takes the default, TenantBudgetFilterAll: a
 	// request that names no filter lists every tenant.
-	TenantBudgetsUnspecified TenantBudgetFilter = iota
-	// TenantBudgetsAll lists every tenant: no filter.
-	TenantBudgetsAll
-	// TenantBudgetsAtOrPast lists tenants with a ceiling spent to
+	TenantBudgetFilterUnspecified TenantBudgetFilter = iota
+	// TenantBudgetFilterAll lists every tenant: no filter.
+	TenantBudgetFilterAll
+	// TenantBudgetFilterAtOrPast lists tenants with a ceiling spent to
 	// ListTenantBudgetsRequest.ThresholdPct or past it.
-	TenantBudgetsAtOrPast
-	// TenantBudgetsUnlimited lists tenants with no ceiling.
-	TenantBudgetsUnlimited
+	TenantBudgetFilterAtOrPast
+	// TenantBudgetFilterUnlimited lists tenants with no ceiling.
+	TenantBudgetFilterUnlimited
 )
 
 // String names the filter for logs and errors.
 func (f TenantBudgetFilter) String() string {
 	switch f {
-	case TenantBudgetsUnspecified:
+	case TenantBudgetFilterUnspecified:
 		return "unspecified"
-	case TenantBudgetsAll:
+	case TenantBudgetFilterAll:
 		return "all"
-	case TenantBudgetsAtOrPast:
+	case TenantBudgetFilterAtOrPast:
 		return "at-or-past"
-	case TenantBudgetsUnlimited:
+	case TenantBudgetFilterUnlimited:
 		return "unlimited"
 	}
 	return fmt.Sprintf("TenantBudgetFilter(%d)", uint8(f))
@@ -645,7 +645,7 @@ func (f TenantBudgetFilter) String() string {
 // Validate refuses a filter this package does not define, as
 // ErrInvalidRequest.
 func (f TenantBudgetFilter) Validate() error {
-	if f > TenantBudgetsUnlimited {
+	if f > TenantBudgetFilterUnlimited {
 		return invalidRequest("list tenant budgets: unknown filter %s", f)
 	}
 	return nil
@@ -656,7 +656,7 @@ func (f TenantBudgetFilter) Validate() error {
 type ListTenantBudgetsRequest struct {
 	// Filter picks the rows; the zero value lists every tenant.
 	Filter TenantBudgetFilter
-	// ThresholdPct is the utilization TenantBudgetsAtOrPast lists from,
+	// ThresholdPct is the utilization TenantBudgetFilterAtOrPast lists from,
 	// 0..100. Any other filter takes none.
 	ThresholdPct float64
 	// Limit is the page size; see PageLimit. Negative is refused.
@@ -693,7 +693,7 @@ func (r ListTenantBudgetsRequest) Validate() error {
 		return invalidRequest("list tenant budgets: limit %d is negative", r.Limit)
 	case math.IsNaN(r.ThresholdPct) || r.ThresholdPct < 0 || r.ThresholdPct > maxThresholdPct:
 		return invalidRequest("list tenant budgets: threshold %v%% is outside 0..%d", r.ThresholdPct, maxThresholdPct)
-	case r.ThresholdPct != 0 && r.Filter != TenantBudgetsAtOrPast:
+	case r.ThresholdPct != 0 && r.Filter != TenantBudgetFilterAtOrPast:
 		return invalidRequest("list tenant budgets: a threshold with filter %s, which takes none", r.Filter)
 	}
 	return nil
@@ -832,7 +832,7 @@ var ErrExternalRefConflict error = &familyError{"limes: external ref already nam
 // Implementations call it before touching state, so an unknown policy is never
 // read as either one.
 func (p OverrunPolicy) Validate() error {
-	if p > OverrunRecord {
+	if p > OverrunPolicyRecord {
 		return fmt.Errorf("%w: unknown overrun policy %s", ErrInvalidRequest, p)
 	}
 	return nil
@@ -841,11 +841,11 @@ func (p OverrunPolicy) Validate() error {
 // String names the policy for logs and errors.
 func (p OverrunPolicy) String() string {
 	switch p {
-	case OverrunUnspecified:
+	case OverrunPolicyUnspecified:
 		return "unspecified"
-	case OverrunReject:
+	case OverrunPolicyReject:
 		return "reject"
-	case OverrunRecord:
+	case OverrunPolicyRecord:
 		return "record"
 	default:
 		return fmt.Sprintf("OverrunPolicy(%d)", uint8(p))

@@ -15,10 +15,10 @@ func TestPrincipalValidate(t *testing.T) {
 	tenant := uuid.New()
 	agent := &AgentPrincipal{AgentType: "worker"}
 	valid := map[string]Principal{
-		"user":               {Type: PrincipalUser, TenantID: tenant, Subject: "u"},
-		"service":            {Type: PrincipalService, TenantID: tenant, Subject: "s"},
-		"agent":              {Type: PrincipalAgent, TenantID: tenant, Subject: "a"},
-		"agent with details": {Type: PrincipalAgent, TenantID: tenant, Subject: "a", Agent: agent},
+		"user":               {Type: PrincipalTypeUser, TenantID: tenant, Subject: "u"},
+		"service":            {Type: PrincipalTypeService, TenantID: tenant, Subject: "s"},
+		"agent":              {Type: PrincipalTypeAgent, TenantID: tenant, Subject: "a"},
+		"agent with details": {Type: PrincipalTypeAgent, TenantID: tenant, Subject: "a", Agent: agent},
 	}
 	for name, p := range valid {
 		if err := p.Validate(); err != nil {
@@ -29,7 +29,7 @@ func TestPrincipalValidate(t *testing.T) {
 		"no type":                {TenantID: tenant, Subject: "x"},
 		"unknown type":           {Type: "robot", TenantID: tenant, Subject: "x"},
 		"type in another case":   {Type: "Agent", TenantID: tenant, Subject: "x"},
-		"agent fields on a user": {Type: PrincipalUser, TenantID: tenant, Subject: "u", Agent: agent},
+		"agent fields on a user": {Type: PrincipalTypeUser, TenantID: tenant, Subject: "u", Agent: agent},
 	}
 	for name, p := range invalid {
 		if err := p.Validate(); !errors.Is(err, ErrInvalidRequest) {
@@ -39,12 +39,12 @@ func TestPrincipalValidate(t *testing.T) {
 }
 
 func TestPrincipalTypeValidate(t *testing.T) {
-	for _, typ := range []PrincipalType{PrincipalUser, PrincipalAgent, PrincipalService} {
+	for _, typ := range []PrincipalType{PrincipalTypeUser, PrincipalTypeAgent, PrincipalTypeService} {
 		if err := typ.Validate(); err != nil {
 			t.Errorf("%q: Validate = %v, want nil", typ, err)
 		}
 	}
-	for _, typ := range []PrincipalType{PrincipalUnspecified, "robot", "Agent"} {
+	for _, typ := range []PrincipalType{PrincipalTypeUnspecified, "robot", "Agent"} {
 		if err := typ.Validate(); !errors.Is(err, ErrInvalidRequest) {
 			t.Errorf("%q: Validate = %v, want ErrInvalidRequest", typ, err)
 		}
@@ -68,7 +68,7 @@ func TestIssueAndDelegateValidateTheSubject(t *testing.T) {
 	parent := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet, OpShare}})
 	if _, _, err := issuer.delegate(ctx, DelegateRequest{
 		Parent:  asVerified(parent),
-		Subject: Principal{Type: PrincipalService, Subject: "s", Agent: &AgentPrincipal{AgentType: "worker"}},
+		Subject: Principal{Type: PrincipalTypeService, Subject: "s", Agent: &AgentPrincipal{AgentType: "worker"}},
 		Caveats: Caveats{Ops: []Op{OpGet, OpShare}},
 		TTL:     time.Minute,
 	}); !errors.Is(err, ErrInvalidRequest) {
@@ -101,7 +101,7 @@ func TestIssueAndDelegateKeepNoAliasOfTheCaller(t *testing.T) {
 	ctx := context.Background()
 	req := IssueRequest{
 		IssuedBy: Principal{Subject: "op"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a", Agent: &AgentPrincipal{AgentType: "worker"}},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a", Agent: &AgentPrincipal{AgentType: "worker"}},
 		Audience: []string{"data"},
 		Caveats: Caveats{
 			Ops: []Op{OpGet, OpShare}, ResourcePrefixes: []string{"a/"}, ResourceURIs: []string{"a/b"},
@@ -114,7 +114,7 @@ func TestIssueAndDelegateKeepNoAliasOfTheCaller(t *testing.T) {
 		t.Fatal(err)
 	}
 	child, _, err := issuer.delegate(ctx, DelegateRequest{
-		Parent: asVerified(parent), Subject: Principal{Type: PrincipalAgent, Subject: "child"}, InheritCaveats: true,
+		Parent: asVerified(parent), Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"}, InheritCaveats: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -183,7 +183,7 @@ func asVerified(c Capability) VerifiedCapability { return VerifiedCapability{c: 
 func TestDelegateRefusesAParentTheVerifierDidNotMake(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)
 	_, _, err := issuer.delegate(context.Background(), DelegateRequest{
-		Subject: Principal{Type: PrincipalAgent, Subject: "child"}, InheritCaveats: true,
+		Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"}, InheritCaveats: true,
 	})
 	if !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("Delegate from a zero VerifiedCapability: err = %v, want ErrInvalidRequest", err)

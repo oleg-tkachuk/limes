@@ -738,10 +738,10 @@ flowchart TB
     cb -- nil --> w1 --> w2 --> w0 --> w3 --> w5 --> w4 --> w6 --> ok
     ok -. "later" .-> refund
     val -- invalid --> e0
-    c0 -- "no, OverrunReject" --> e1
-    c1 -- "no, OverrunReject" --> e1
-    c2 -- "no, OverrunReject" --> e2
-    c3 -- "no, OverrunReject" --> e3
+    c0 -- "no, OverrunPolicyReject" --> e1
+    c1 -- "no, OverrunPolicyReject" --> e1
+    c2 -- "no, OverrunPolicyReject" --> e2
+    c3 -- "no, OverrunPolicyReject" --> e3
     cb -- error --> e4
     c00 -- no --> e0
 
@@ -763,10 +763,10 @@ so `Settle` checks them without being handed them again; the subject settling
 must still carry the same copies.
 
 A settle rejected by a ceiling leaves the reservation in place, to be settled
-lower or released with `Release`. Under `OverrunRecord` no ceiling rejects: a
+lower or released with `Release`. Under `OverrunPolicyRecord` no ceiling rejects: a
 check that fails marks the charge as an overrun and the stage goes on, since
 the cost has already been incurred; the crossed ceiling then refuses whatever
-follows under `OverrunReject`. A mismatched unit or a counter past `MaxNanos`
+follows under `OverrunPolicyReject`. A mismatched unit or a counter past `MaxNanos`
 is refused even then: neither is a ceiling an overrun may cross. A charge
 named by `ExternalRef`, or a settle of a reservation already settled, returns
 the earlier charge and moves nothing; the same `ExternalRef` with another

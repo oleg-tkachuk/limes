@@ -140,7 +140,7 @@ func TestAnEmptyKeyIssuerBindingBindsNothing(t *testing.T) {
 
 // A negative page size is the request's error, not the default page.
 func TestListRequestsRefuseANegativeLimit(t *testing.T) {
-	list := ListByPrincipalRequest{TenantID: uuid.New(), PrincipalType: PrincipalAgent, Subject: "a", Limit: -1}
+	list := ListByPrincipalRequest{TenantID: uuid.New(), PrincipalType: PrincipalTypeAgent, Subject: "a", Limit: -1}
 	if err := list.Validate(); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("ListByPrincipalRequest with Limit -1: Validate = %v, want ErrInvalidRequest", err)
 	}
@@ -148,7 +148,7 @@ func TestListRequestsRefuseANegativeLimit(t *testing.T) {
 	if err := budgets.Validate(); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("ListTenantBudgetsRequest with Limit -1: Validate = %v, want ErrInvalidRequest", err)
 	}
-	if err := (ListTenantBudgetsRequest{Filter: TenantBudgetsAtOrPast, ThresholdPct: maxThresholdPct + 1}).Validate(); !errors.Is(err, ErrInvalidRequest) {
+	if err := (ListTenantBudgetsRequest{Filter: TenantBudgetFilterAtOrPast, ThresholdPct: maxThresholdPct + 1}).Validate(); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("a threshold past 100%%: Validate = %v, want ErrInvalidRequest", err)
 	}
 }
@@ -179,7 +179,7 @@ func TestIssuerNeedsOnlyAnIssuanceStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	c, _, err := issuer.issue(context.Background(), IssueRequest{
-		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{"data"}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Minute,
 	})
 	if err != nil || len(store.inserted) != 1 || store.inserted[0].Capability.ID != c.ID || store.inserted[0].IssuedBy.Subject != "op" {
@@ -248,12 +248,12 @@ func TestSeveralIssuersNeedAKeyDecision(t *testing.T) {
 
 // A tenant budget filter names itself, and one this package lacks is refused.
 func TestTenantBudgetFilter(t *testing.T) {
-	for f, want := range map[TenantBudgetFilter]string{TenantBudgetsUnspecified: "unspecified", TenantBudgetsAll: "all", TenantBudgetsAtOrPast: "at-or-past", TenantBudgetsUnlimited: "unlimited"} {
+	for f, want := range map[TenantBudgetFilter]string{TenantBudgetFilterUnspecified: "unspecified", TenantBudgetFilterAll: "all", TenantBudgetFilterAtOrPast: "at-or-past", TenantBudgetFilterUnlimited: "unlimited"} {
 		if f.String() != want || f.Validate() != nil {
 			t.Errorf("%d: String = %q, Validate = %v; want %q, nil", f, f.String(), f.Validate(), want)
 		}
 	}
-	if err := (TenantBudgetsUnlimited + 1).Validate(); !errors.Is(err, ErrInvalidRequest) {
+	if err := (TenantBudgetFilterUnlimited + 1).Validate(); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("an unknown filter: err = %v, want ErrInvalidRequest", err)
 	}
 }
@@ -267,7 +267,7 @@ func TestIssuedTimesAreTheTokens(t *testing.T) {
 	issuer.clock = func() time.Time { return at }
 	nbf := at.Add(10 * time.Second) // also x.7s: rounds up
 	issued, err := issuer.Issue(t.Context(), IssueRequest{
-		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour, NotBefore: nbf,
 	})
 	if err != nil {
@@ -324,7 +324,7 @@ func TestIssueRefusesALifetimeUnderASecond(t *testing.T) {
 	issuer.clock = func() time.Time { return at }
 	issue := func(ttl time.Duration) error {
 		_, err := issuer.Issue(t.Context(), IssueRequest{
-			IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
+			IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 			Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: ttl,
 		})
 		return err

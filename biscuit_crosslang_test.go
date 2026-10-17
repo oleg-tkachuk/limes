@@ -86,7 +86,7 @@ func TestGenerateBiscuitFixtures(t *testing.T) {
 	}
 	cap, _, err := issuer.issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.MustParse(goldenTenant), Subject: goldenSubject},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.MustParse(goldenTenant), Subject: goldenSubject},
 		Audience: []string{audienceData, audienceMCP},
 		Caveats: Caveats{
 			Ops: []Op{OpGet, OpList, OpPut}, ResourcePrefixes: []string{"corpus/"},

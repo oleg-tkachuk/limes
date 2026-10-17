@@ -37,7 +37,7 @@ func TestSign_RoundTrip(t *testing.T) {
 		ID:     uuid.New(),
 		Issuer: "limes-test",
 		Subject: Principal{
-			Type:     PrincipalAgent,
+			Type:     PrincipalTypeAgent,
 			TenantID: tenantID,
 			Subject:  "agent-42",
 			Agent: &AgentPrincipal{
@@ -107,7 +107,7 @@ func TestSign_RejectsInvalid(t *testing.T) {
 			ID:     uuid.New(),
 			Issuer: "i",
 			Subject: Principal{
-				Type:     PrincipalAgent,
+				Type:     PrincipalTypeAgent,
 				TenantID: uuid.New(),
 			},
 			Caveats:   Caveats{Ops: []Op{OpGet}},
@@ -146,7 +146,7 @@ func TestSign_TamperDetection(t *testing.T) {
 	cap := Capability{
 		ID:        uuid.New(),
 		Issuer:    "i",
-		Subject:   Principal{TenantID: uuid.New(), Type: PrincipalAgent},
+		Subject:   Principal{TenantID: uuid.New(), Type: PrincipalTypeAgent},
 		Audience:  []string{audienceData},
 		Caveats:   Caveats{Ops: []Op{OpGet}},
 		IssuedAt:  now,
@@ -181,7 +181,7 @@ func TestNarrows_RejectsWidening(t *testing.T) {
 	parent := Capability{
 		ID:       uuid.New(),
 		Issuer:   "i",
-		Subject:  Principal{TenantID: tenantID, Type: PrincipalAgent},
+		Subject:  Principal{TenantID: tenantID, Type: PrincipalTypeAgent},
 		Audience: []string{audienceData},
 		Caveats: Caveats{
 			Ops:              []Op{OpGet, OpList},
@@ -254,7 +254,7 @@ func TestNarrows_RejectsCrossCurrency(t *testing.T) {
 	parent := Capability{
 		ID:       uuid.New(),
 		Issuer:   "i",
-		Subject:  Principal{TenantID: tenantID, Type: PrincipalAgent},
+		Subject:  Principal{TenantID: tenantID, Type: PrincipalTypeAgent},
 		Audience: []string{audienceData},
 		Caveats: Caveats{
 			Ops:      []Op{OpGet},
@@ -288,7 +288,7 @@ func TestNarrows_AcceptsValidNarrowing(t *testing.T) {
 	parent := Capability{
 		ID:       uuid.New(),
 		Issuer:   "i",
-		Subject:  Principal{TenantID: tenantID, Type: PrincipalAgent},
+		Subject:  Principal{TenantID: tenantID, Type: PrincipalTypeAgent},
 		Audience: []string{audienceData, audienceMCP},
 		Caveats: Caveats{
 			Ops:              []Op{OpGet, OpList, OpSearch},
@@ -302,7 +302,7 @@ func TestNarrows_AcceptsValidNarrowing(t *testing.T) {
 	child := Capability{
 		ID:       uuid.New(),
 		Issuer:   "i",
-		Subject:  Principal{TenantID: tenantID, Type: PrincipalAgent},
+		Subject:  Principal{TenantID: tenantID, Type: PrincipalTypeAgent},
 		Audience: []string{audienceData},
 		Caveats: Caveats{
 			Ops:              []Op{OpGet},
@@ -351,7 +351,7 @@ func TestIssuerSignsUnderTheCallersContext(t *testing.T) {
 	}
 	ctx := context.WithValue(context.Background(), requestValue{}, "request")
 	req := IssueRequest{
-		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}},
 	}
 	c, _, err := issuer.issue(ctx, req)
@@ -411,7 +411,7 @@ func TestSignerSignsThroughAnOpaqueKey(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	token, err := signer.sign(context.Background(), Capability{
-		ID: uuid.New(), Issuer: "i", Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New()},
+		ID: uuid.New(), Issuer: "i", Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New()},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, IssuedAt: now, ExpiresAt: now.Add(time.Minute),
 	})
 	if err != nil {
@@ -471,7 +471,7 @@ func TestSignerRefusesASignatureItsKeyDoesNotVerify(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	c := Capability{
-		ID: uuid.New(), Issuer: "i", Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New()},
+		ID: uuid.New(), Issuer: "i", Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New()},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, IssuedAt: now, ExpiresAt: now.Add(time.Minute),
 	}
 	for name, key := range map[string]crypto.Signer{

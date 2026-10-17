@@ -47,7 +47,7 @@ const (
 const (
 	// outcomeAllowed — every ceiling admitted it.
 	outcomeAllowed = "allowed"
-	// outcomeOverrun — committed past a ceiling under OverrunRecord.
+	// outcomeOverrun — committed past a ceiling under OverrunPolicyRecord.
 	outcomeOverrun = "overrun"
 	// outcomeCapExceeded — a capability's, an ancestor's or a copy's ceiling
 	// refused it. The refusals carry their Reason's name, so a dashboard and

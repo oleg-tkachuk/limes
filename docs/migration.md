@@ -14,7 +14,21 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
-## v0.72.0
+## v0.74.0
+
+- Constants were prefixed by their type's name or a stem of it → every
+  enum's constants carry their type's name in full. `OverrunReject`,
+  `OverrunRecord`, `OverrunUnspecified` → `OverrunPolicyReject`,
+  `OverrunPolicyRecord`, `OverrunPolicyUnspecified`; `PrincipalUser`,
+  `PrincipalAgent`, `PrincipalService`, `PrincipalUnspecified` →
+  `PrincipalTypeUser`, `PrincipalTypeAgent`, `PrincipalTypeService`,
+  `PrincipalTypeUnspecified`; `TenantBudgetsAll`, `TenantBudgetsAtOrPast`,
+  `TenantBudgetsUnlimited`, `TenantBudgetsUnspecified` →
+  `TenantBudgetFilterAll`, `TenantBudgetFilterAtOrPast`,
+  `TenantBudgetFilterUnlimited`, `TenantBudgetFilterUnspecified`. Values
+  and wire spellings are unchanged.
+
+## v0.73.0
 
 - `ChargeBucketNone` was the zero `ChargeBucket` → the zero is
   `ChargeBucketUnspecified`, which sums the period whole as `ChargeBucketNone`

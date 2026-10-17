@@ -57,7 +57,7 @@ func TestGoldenTokenStillVerifies(t *testing.T) {
 	if cap.Capability().Subject.Subject != goldenSubject {
 		t.Errorf("Subject = %q, want %q", cap.Capability().Subject.Subject, goldenSubject)
 	}
-	if cap.Capability().Subject.Type != PrincipalAgent {
+	if cap.Capability().Subject.Type != PrincipalTypeAgent {
 		t.Errorf("principal kind = %q, want agent", cap.Capability().Subject.Type)
 	}
 	if cap.Capability().Subject.TenantID.String() != goldenTenant {

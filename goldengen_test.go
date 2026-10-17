@@ -87,7 +87,7 @@ func TestGenerateGoldenToken(t *testing.T) {
 	_, token, err := issuer.issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject: Principal{
-			Type:     PrincipalAgent,
+			Type:     PrincipalTypeAgent,
 			TenantID: uuid.MustParse(goldenTenant),
 			Subject:  goldenSubject,
 			Agent:    &AgentPrincipal{AgentType: "golden", Model: "fixture"},

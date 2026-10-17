@@ -70,10 +70,10 @@ func TestOverrunPolicyNamesAndValidates(t *testing.T) {
 		name   string
 		valid  bool
 	}{
-		{OverrunUnspecified, "unspecified", true},
-		{OverrunReject, "reject", true},
-		{OverrunRecord, "record", true},
-		{OverrunRecord + 1, "OverrunPolicy(3)", false},
+		{OverrunPolicyUnspecified, "unspecified", true},
+		{OverrunPolicyReject, "reject", true},
+		{OverrunPolicyRecord, "record", true},
+		{OverrunPolicyRecord + 1, "OverrunPolicy(3)", false},
 	}
 	for _, tc := range cases {
 		if got := tc.policy.String(); got != tc.name {

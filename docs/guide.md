@@ -59,7 +59,7 @@ transport uses, or let `ErrorResponse` answer it the HTTP way (below).
 
 The token must carry a `typ` the verifier accepts (`AcceptTokenTypes`, by
 default `limes-cap-v4+jwt`), a tenant and a principal of a
-known kind (`PrincipalUser`, `PrincipalAgent` or `PrincipalService`; agent
+known kind (`PrincipalTypeUser`, `PrincipalTypeAgent` or `PrincipalTypeService`; agent
 details only on an agent — `Principal.Validate`, which `Issue` and `Delegate`
 run too; an agent's `AgentPrincipal` — `AgentType`, `AgentVersion`, `RunID`,
 `ParentAgentID`, `Model`, `MCPClient` — is signed into the token for audit and
@@ -193,7 +193,7 @@ spawned, without calling back to any admin API:
 ```go
 delegated, err := issuer.Delegate(ctx, limes.DelegateRequest{ // .Capability, .Token
     Parent:  granted,                   // as the verifier accepted it
-    Subject: limes.Principal{Type: limes.PrincipalAgent, Subject: "sub-worker"},
+    Subject: limes.Principal{Type: limes.PrincipalTypeAgent, Subject: "sub-worker"},
     TTL:     2 * time.Minute,
     Caveats: limes.Caveats{
         Ops:              []limes.Op{limes.OpGet},  // dropped OpShare
@@ -459,8 +459,8 @@ and a conflict is `ErrTenantBudgetVersionMismatch`. Until one is set the
 tenant's ceiling reads `Unlimited`; a ceiling of 0 freezes its spend.
 
 To find the tenants near their ceiling, `ListTenantBudgets` takes a `Filter`:
-`TenantBudgetsAll` (the default), `TenantBudgetsUnlimited`, or
-`TenantBudgetsAtOrPast` with a `ThresholdPct` of 0..100, compared exactly as
+`TenantBudgetFilterAll` (the default), `TenantBudgetFilterUnlimited`, or
+`TenantBudgetFilterAtOrPast` with a `ThresholdPct` of 0..100, compared exactly as
 the decimal it is written as (`ExactPercent`), so 1.1 means eleven tenths.
 Rows come most at risk first: ceilings of 0, then bounded ceilings by spent /
 max descending, unclamped, then unlimited ones; ties by tenant id.
@@ -568,7 +568,7 @@ receipt, err := usage.Charge(ctx, limes.ChargeRequest{
     Subject:     subject,
     Amount:      cost,
     ExternalRef: event.CallID,
-    Overrun:     limes.OverrunRecord,
+    Overrun:     limes.OverrunPolicyRecord,
 }, nil)
 ```
 
@@ -580,10 +580,10 @@ records (`PurgeRequest.ExpiredFor`) as long as costs may still arrive. `ChargeBy
 reporter can reconcile its own records with the ledger.
 
 **It has already been spent.** Refusing it would only leave the ledger short.
-`OverrunRecord` charges it past every ceiling it crosses and sets
+`OverrunPolicyRecord` charges it past every ceiling it crosses and sets
 `receipt.Overrun`; the crossed ceiling then refuses every later charge and
-reservation made with the default `OverrunReject`, which is what stops the
-next cost before it is incurred. Keep `OverrunReject` for anything you can
+reservation made with the default `OverrunPolicyReject`, which is what stops the
+next cost before it is incurred. Keep `OverrunPolicyReject` for anything you can
 still decline.
 
 A reporter with no token in hand takes the subject from the capability's

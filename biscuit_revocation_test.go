@@ -62,7 +62,7 @@ func TestRevokingTheRootBiscuitLeavesTheJWT(t *testing.T) {
 	ctx := context.Background()
 	cap, jwt, err := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "op"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "agent"},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 		TTL:      time.Hour,
@@ -118,7 +118,7 @@ func TestBiscuitCopyRefusesWhatVerifyRefuses(t *testing.T) {
 	ctx := context.Background()
 	_, jwt, err := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "op"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "agent"},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 		TTL:      time.Hour,
