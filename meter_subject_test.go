@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/oleg-tkachuk/limes/internal/link"
 )
 
 // The subject carries what the verified capability carries, with the unit
@@ -83,5 +85,37 @@ func TestMeterSubjectCopiesAreItsOwn(t *testing.T) {
 	*got[0].Requests, got[0].RevocationID[0] = RequestCeiling{}, 0
 	if again := s.Copies(); !ceilingIs(again[0].Requests, RequestCeiling{Max: 1}) || again[0].RevocationID[0] != 1 {
 		t.Errorf("copies after mutating the sources = %+v, want the verified ones", again)
+	}
+}
+
+// link.NewMeterSubject takes its parts as any: a part of another type is the
+// module's own wiring gone wrong, and is refused loudly rather than read as
+// none — no copy ceilings would let a copy spend past its limits. A part
+// left out is its zero value.
+func TestLinkedMeterSubjectRefusesAMistypedPart(t *testing.T) {
+	copies := []CopyCeiling{{RevocationID: []byte("copy"), Budget: &BudgetCeiling{Max: 1}}}
+	for name, f := range map[string]link.MeterSubjectFields{
+		"copies by pointer":   {Copies: &copies},
+		"copies by element":   {Copies: copies[0]},
+		"requests by pointer": {Requests: &RequestCeiling{Max: 1}},
+		"budget as requests":  {Budget: RequestCeiling{Max: 1}},
+	} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("%s: built a subject", name)
+				}
+			}()
+			link.NewMeterSubject(f)
+		}()
+	}
+
+	s := link.NewMeterSubject(link.MeterSubjectFields{CapabilityID: uuid.New()}).(MeterSubject)
+	if s.Copies() != nil || s.Requests() != (RequestCeiling{}) || s.Budget() != (BudgetCeiling{}) {
+		t.Errorf("parts left out = %v, %+v, %+v; want none, and ceilings of zero", s.Copies(), s.Requests(), s.Budget())
+	}
+	s = link.NewMeterSubject(link.MeterSubjectFields{Copies: copies}).(MeterSubject)
+	if !reflect.DeepEqual(s.Copies(), copies) {
+		t.Errorf("copies = %+v, want %+v", s.Copies(), copies)
 	}
 }
