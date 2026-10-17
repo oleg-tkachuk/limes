@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -51,7 +52,7 @@ func TestEraseTenantTakesRecordsAndUsageTogether(t *testing.T) {
 	got, err := f.records.EraseTenant(ctx, req, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, countRevocations, f.mine).Scan(&seen)
 	})
-	if want := (limes.EraseTenantResult{Revoked: 1, Kept: 2}); err != nil || got != want {
+	if want := (limes.EraseTenantResult{Revoked: 1, Kept: 2}); err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("EraseTenant = %+v, %v; want %+v", got, err, want)
 	}
 	if seen != 2 {
