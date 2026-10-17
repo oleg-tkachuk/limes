@@ -581,3 +581,44 @@ func TestDPoPBoundsWhatItReadsAndStores(t *testing.T) {
 		t.Error("NewVerifier accepted a negative MaxProofBytes")
 	}
 }
+
+// Check records nothing: a proof it accepts is new to the replay cache until
+// Record records it, once.
+func TestCheckRecordsOnlyOnRecord(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(1_800_000_000, 0)
+	key := dpopKeys(t)["Ed25519"]
+	v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }})
+	proof, err := Sign(ctx, key, ProofRequest{Method: dpopMethod, URL: dpopURL, Token: "the-token", IssuedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := Request{Proof: Proof{JWT: proof, Method: dpopMethod, URL: dpopURL}, Token: "the-token", JKT: boundJKT(t, key), Holder: testHolder}
+
+	first, err := v.Check(ctx, req)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	second, err := v.Check(ctx, req)
+	if err != nil {
+		t.Fatalf("Check again before Record: %v, want the proof still new", err)
+	}
+	if err := v.Record(ctx, first); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	if err := v.Record(ctx, second); !errors.Is(err, ErrReplayed) {
+		t.Fatalf("Record of the same proof again: err = %v, want ErrReplayed", err)
+	}
+	if err := v.Verify(ctx, req); !errors.Is(err, ErrReplayed) {
+		t.Fatalf("Verify after Record: err = %v, want ErrReplayed", err)
+	}
+}
+
+// Record refuses a CheckedProof Check did not make, rather than record an
+// empty id.
+func TestRecordRefusesAnUncheckedProof(t *testing.T) {
+	v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{})})
+	if err := v.Record(context.Background(), CheckedProof{}); err == nil || errors.Is(err, ErrReplayed) {
+		t.Fatalf("Record of a zero CheckedProof: err = %v, want a refusal that is not ErrReplayed", err)
+	}
+}

@@ -391,84 +391,119 @@ func (v *Verifier) Nonce(ctx context.Context) (string, error) {
 // signed by the key its header carries; whose key's thumbprint is req.JKT;
 // that names this method and URL and this token's hash; that was issued
 // within the window; and whose jti, no longer than MaxJTIBytes, is new.
+// It is Check followed by Record.
 func (v *Verifier) Verify(ctx context.Context, req Request) error {
+	checked, err := v.Check(ctx, req)
+	if err != nil {
+		return err
+	}
+	return v.Record(ctx, checked)
+}
+
+// CheckedProof is a proof Check accepted and Record has still to record.
+// Only Check makes one.
+type CheckedProof struct {
+	entry ReplayEntry
+}
+
+// errNotChecked is a CheckedProof Check did not make.
+var errNotChecked = errors.New("dpop: CheckedProof not made by Check")
+
+// Check is everything Verify checks but whether the proof's jti is new: it
+// records nothing in the replay cache. A caller with checks of its own to
+// make between the two — a revocation lookup — runs them after Check and
+// calls Record only once they pass, so a proof is recorded only for a
+// request that is otherwise accepted, and the cheap refusals come first.
+func (v *Verifier) Check(ctx context.Context, req Request) (CheckedProof, error) {
 	if v == nil || v.cfg.Replay == nil {
-		return errNoReplayCache // a Verifier not made by NewVerifier
+		return CheckedProof{}, errNoReplayCache // a Verifier not made by NewVerifier
 	}
 	p, token := req.Proof, req.Token
 	if req.Holder == "" {
-		return errors.New("dpop: Request.Holder required")
+		return CheckedProof{}, errors.New("dpop: Request.Holder required")
 	}
 	if p.JWT == "" {
-		return ErrRequired
+		return CheckedProof{}, ErrRequired
 	}
 	if len(p.JWT) > v.cfg.MaxProofBytes {
-		return fmt.Errorf("%w: proof is %d bytes (limit %d)", ErrInvalid, len(p.JWT), v.cfg.MaxProofBytes)
+		return CheckedProof{}, fmt.Errorf("%w: proof is %d bytes (limit %d)", ErrInvalid, len(p.JWT), v.cfg.MaxProofBytes)
 	}
 	window, now := v.cfg.Window, v.cfg.Now
 
 	parts, err := jose.Split(p.JWT)
 	if err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalid, err)
+		return CheckedProof{}, fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
 	var header proofHeader
 	if err := decodeSegment(parts.Header, &header); err != nil || header.Typ != tokenType || header.JWK == nil {
-		return fmt.Errorf("%w: header", ErrInvalid)
+		return CheckedProof{}, fmt.Errorf("%w: header", ErrInvalid)
 	}
 	// RFC 9449 §4.3: the jwk must not contain a private key.
 	if jwkHasPrivateMember(parts.Header) {
-		return fmt.Errorf("%w: jwk carries a private key", ErrInvalid)
+		return CheckedProof{}, fmt.Errorf("%w: jwk carries a private key", ErrInvalid)
 	}
 	thumb, err := header.JWK.Thumbprint()
 	if err != nil || thumb != req.JKT {
-		return fmt.Errorf("%w: key is not the one the capability is bound to", ErrInvalid)
+		return CheckedProof{}, fmt.Errorf("%w: key is not the one the capability is bound to", ErrInvalid)
 	}
 	pub, err := header.JWK.PublicKey()
 	if err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalid, err)
+		return CheckedProof{}, fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
 	sig, err := jose.UnB64(parts.Signature)
 	if err != nil || !verifySignature(pub, header.Alg, []byte(parts.SigningInput()), sig) {
-		return fmt.Errorf("%w: signature", ErrInvalid)
+		return CheckedProof{}, fmt.Errorf("%w: signature", ErrInvalid)
 	}
 
 	var claims proofClaims
 	if err := decodeSegment(parts.Payload, &claims); err != nil || claims.JTI == "" || len(claims.JTI) > MaxJTIBytes {
-		return fmt.Errorf("%w: claims", ErrInvalid)
+		return CheckedProof{}, fmt.Errorf("%w: claims", ErrInvalid)
 	}
 	// RFC 9110 §9.1: a method is case-sensitive.
 	if claims.HTM != p.Method {
-		return fmt.Errorf("%w: method %q, proof names %q", ErrInvalid, p.Method, claims.HTM)
+		return CheckedProof{}, fmt.Errorf("%w: method %q, proof names %q", ErrInvalid, p.Method, claims.HTM)
 	}
 	if !htuMatches(claims.HTU, p.URL, v.cfg.MatchPathOnly) {
-		return fmt.Errorf("%w: URL does not match the proof's htu", ErrInvalid)
+		return CheckedProof{}, fmt.Errorf("%w: URL does not match the proof's htu", ErrInvalid)
 	}
 	if claims.ATH != accessTokenHash(token) {
-		return fmt.Errorf("%w: proof is for another token", ErrInvalid)
+		return CheckedProof{}, fmt.Errorf("%w: proof is for another token", ErrInvalid)
 	}
 	if math.IsNaN(claims.IAT) || math.IsInf(claims.IAT, 0) || math.Abs(claims.IAT) > jose.MaxIJSONInteger {
-		return fmt.Errorf("%w: iat %v", ErrInvalid, claims.IAT)
+		return CheckedProof{}, fmt.Errorf("%w: iat %v", ErrInvalid, claims.IAT)
 	}
 	sec, frac := math.Modf(claims.IAT)
 	iat := time.Unix(int64(sec), int64(frac*float64(time.Second)))
 	if d := now().Sub(iat); d > window || d < -window {
-		return fmt.Errorf("%w: issued at %s, outside the %s window", ErrInvalid, iat.UTC(), window)
+		return CheckedProof{}, fmt.Errorf("%w: issued at %s, outside the %s window", ErrInvalid, iat.UTC(), window)
 	}
 	if v.cfg.Nonces != nil {
 		valid, err := v.cfg.Nonces.Valid(ctx, claims.Nonce)
 		if err != nil {
-			return fmt.Errorf("dpop: nonce check: %w", err)
+			return CheckedProof{}, fmt.Errorf("dpop: nonce check: %w", err)
 		}
 		if !valid {
-			return ErrNonceRequired
+			return CheckedProof{}, ErrNonceRequired
 		}
 	}
 	// Remembered past the last instant it is accepted, by more than the
 	// cache's clock can lag the verifier's: at iat+window it is still
 	// accepted, and a cache that dropped it then would let it through again.
-	seen, err := v.cfg.Replay.Seen(ctx, ReplayEntry{
+	return CheckedProof{entry: ReplayEntry{
 		JKT: thumb, JTI: claims.JTI, Holder: req.Holder, ExpiresAt: iat.Add(window).Add(ReplayClockSkew),
-	})
+	}}, nil
+}
+
+// Record records a proof Check accepted in the replay cache, refusing it
+// with ErrReplayed when its jti was seen before.
+func (v *Verifier) Record(ctx context.Context, p CheckedProof) error {
+	if v == nil || v.cfg.Replay == nil {
+		return errNoReplayCache // a Verifier not made by NewVerifier
+	}
+	if p.entry.JTI == "" {
+		return errNotChecked
+	}
+	seen, err := v.cfg.Replay.Seen(ctx, p.entry)
 	if err != nil {
 		return fmt.Errorf("dpop: replay check: %w", err)
 	}
