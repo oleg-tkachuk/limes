@@ -270,6 +270,7 @@ func TestDelegate_NarrowsAndPersists(t *testing.T) {
 			Ops:              []Op{OpGet, OpList, OpSearch, OpShare},
 			ResourcePrefixes: []string{"object://acme/"},
 			Budget:           BudgetCeiling{Max: MustParseAmount("1.00")},
+			UnitCode:         "USD",
 		},
 		TTL: time.Hour,
 	})

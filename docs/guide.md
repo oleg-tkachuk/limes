@@ -451,8 +451,9 @@ Every counter counts in one unit. A charge or reservation in another unit than
 the capability, an ancestor or the tenant already counts in is
 `ErrUnitCodeMismatch`, never a sum of two currencies. No unit is assumed: a
 capability whose `UnitCode` is empty counts requests (`Bump`) but no amount —
-its `Charge`, `Reserve` and `Settle` are `ErrInvalidRequest` — and a
-`SetTenantBudget` that names none leaves the tenant's unit to its first
+its `Charge`, `Reserve` and `Settle` are `ErrInvalidRequest`, and caveats
+that bound its spend (`Budget.Max` above zero) without one are
+`ErrInvalidCaveats` — and a `SetTenantBudget` that names none leaves the tenant's unit to its first
 charge or reservation. The tenant aggregate counts from its first charge or reservation,
 whether or not a ceiling is set: `SetTenantBudget` later measures the new
 ceiling against that spend and those holds, and refuses a new `UnitCode`

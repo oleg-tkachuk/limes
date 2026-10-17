@@ -14,6 +14,15 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.76.0
+
+- Caveats with a `Budget.Max` above zero and no `UnitCode` validated, though
+  nothing could be charged against them → `Caveats.Validate` refuses them as
+  `ErrInvalidCaveats`: `Issue` mints no such capability and `Verify` refuses
+  a token carrying one as `ErrInvalidToken`. Name the unit the budget is in;
+  an unlimited budget, or none, still needs no unit. A delegated child that
+  names no unit still takes its parent's.
+
 ## v0.75.0
 
 - `DefaultUnitCode`, `NormalizeUnitCode` and the rule that an empty unit is

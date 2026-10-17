@@ -342,3 +342,26 @@ func TestMeterRequestsValidate(t *testing.T) {
 		}
 	}
 }
+
+// A bound on spend needs a unit to count it in; a budget that bounds nothing
+// — none allowed, or unlimited — does not.
+func TestABudgetNeedsAUnit(t *testing.T) {
+	bound := BudgetCeiling{Max: MustParseAmount("5")}
+	for name, tc := range map[string]struct {
+		c  Caveats
+		ok bool
+	}{
+		"a bound and a unit":    {Caveats{Ops: []Op{OpGet}, Budget: bound, UnitCode: "EUR"}, true},
+		"a bound and no unit":   {Caveats{Ops: []Op{OpGet}, Budget: bound}, false},
+		"no spend and no unit":  {Caveats{Ops: []Op{OpGet}}, true},
+		"unlimited and no unit": {Caveats{Ops: []Op{OpGet}, Budget: BudgetCeiling{Unlimited: true}}, true},
+	} {
+		err := tc.c.Validate()
+		if tc.ok && err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+		if !tc.ok && !errors.Is(err, ErrInvalidCaveats) {
+			t.Errorf("%s: err = %v, want ErrInvalidCaveats", name, err)
+		}
+	}
+}
