@@ -59,7 +59,9 @@ type UsageStore[TX any] interface {
 // not be paired with a verifier that sets VerifierConfig.MeterCopies.
 //
 // All methods are concurrency-safe. A rejected call mutates nothing, so a
-// retry after rejection is safe.
+// retry after rejection is safe. Each method first refuses a request whose
+// Validate does, before it reads anything: a store that calls Validate
+// enforces a rule added to it without a change of its own.
 //
 // A store over a database holds at most one connection per call: the reads of
 // the lineage, the ceilings and the ledger, the writes, and onCharged all run
@@ -274,6 +276,10 @@ type BumpRequest struct {
 	Subject MeterSubject
 }
 
+// Validate refuses a request whose subject names no capability, no tenant or
+// an unknown unit.
+func (r BumpRequest) Validate() error { return r.Subject.validate() }
+
 // ChargeRequest is the input to Meter.Charge.
 type ChargeRequest struct {
 	// Subject is the capability charged — its tenant, its own ceiling, its
@@ -297,6 +303,22 @@ type ChargeRequest struct {
 	ExternalRef string
 	// Overrun is what happens when Amount would cross a ceiling.
 	Overrun OverrunPolicy
+}
+
+// Validate refuses an amount out of range, an unknown overrun policy, an
+// external ref past MaxExternalRefBytes, and a subject that names no
+// capability, no tenant or an unknown unit.
+func (r ChargeRequest) Validate() error {
+	if err := r.Amount.Validate(); err != nil {
+		return err
+	}
+	if err := r.Overrun.Validate(); err != nil {
+		return err
+	}
+	if err := ValidateExternalRef(r.ExternalRef); err != nil {
+		return err
+	}
+	return r.Subject.validate()
 }
 
 // ChargeRecord is one charge as the ledger holds it.
@@ -413,6 +435,21 @@ type ReserveRequest struct {
 	Actor string
 }
 
+// Validate refuses an amount out of range, a subject that names no
+// capability, no tenant or an unknown unit, and a negative TTL.
+func (r ReserveRequest) Validate() error {
+	if err := r.Amount.Validate(); err != nil {
+		return err
+	}
+	if err := r.Subject.validate(); err != nil {
+		return err
+	}
+	if r.TTL < 0 {
+		return invalidRequest("reservation TTL %s is negative", r.TTL)
+	}
+	return nil
+}
+
 // Reservation is a committed hold, as Reserve made it and as GetReservation
 // and ListReservations read it back.
 type Reservation struct {
@@ -442,6 +479,20 @@ type SettleRequest struct {
 	Amount Nanos
 	// Overrun is what happens when Amount would cross a ceiling.
 	Overrun OverrunPolicy
+}
+
+// Validate refuses a subject that names no capability, no tenant or an
+// unknown unit, an amount out of range, and an unknown overrun policy. The
+// zero ReservationID is not refused here: it names no reservation, which
+// Settle reports as ErrReservationNotFound.
+func (r SettleRequest) Validate() error {
+	if err := r.Subject.validate(); err != nil {
+		return err
+	}
+	if err := r.Amount.Validate(); err != nil {
+		return err
+	}
+	return r.Overrun.Validate()
 }
 
 // RefundRequest is the input to Meter.Refund. It names either an Amount or
@@ -831,6 +882,10 @@ type ReleaseRequest struct {
 	Subject       MeterSubject
 	ReservationID uuid.UUID
 }
+
+// Validate refuses a request whose subject names no capability, no tenant or
+// an unknown unit.
+func (r ReleaseRequest) Validate() error { return r.Subject.validate() }
 
 // ListReservationsRequest asks for one page of a capability's reservations.
 type ListReservationsRequest struct {

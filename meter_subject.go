@@ -81,6 +81,16 @@ func (s MeterSubject) UnitCode() string { return s.unitCode }
 // Copies are the limits of the Biscuit copy presented, a copy of them.
 func (s MeterSubject) Copies() []CopyCeiling { return cloneCopyCeilings(s.copies) }
 
+// validate refuses a subject that names no capability or no tenant — the
+// zero MeterSubject, a request that set none — or an unknown unit.
+func (s MeterSubject) validate() error {
+	if s.capabilityID == uuid.Nil || s.tenantID == uuid.Nil {
+		return invalidRequest("the meter subject names no capability or no tenant")
+	}
+	_, err := NormalizeUnitCode(s.unitCode)
+	return err
+}
+
 func init() {
 	link.NewMeterSubject = func(f link.MeterSubjectFields) any {
 		copies := linkedPart[[]CopyCeiling]("Copies", f.Copies)

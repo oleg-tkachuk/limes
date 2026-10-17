@@ -563,15 +563,6 @@ func sameCopyIDs(ids [][]byte, copies []limes.CopyCeiling) bool {
 	return slices.EqualFunc(ids, copies, func(id []byte, c limes.CopyCeiling) bool { return bytes.Equal(id, c.RevocationID) })
 }
 
-// checkSubject refuses a subject no verifier or record made: the zero
-// MeterSubject names no capability and no tenant to count against.
-func checkSubject(s limes.MeterSubject) error {
-	if s.CapabilityID() == uuid.Nil || s.TenantID() == uuid.Nil {
-		return fmt.Errorf("%w: memstore: the subject names no capability or no tenant", limes.ErrInvalidRequest)
-	}
-	return nil
-}
-
 // lineage returns the ancestors whose counters move with capID's, and
 // ErrNotFound when capID itself is not on record: with no record its
 // ancestors cannot be read, and metering it alone would let it spend past
@@ -584,7 +575,7 @@ func (s *UsageStore[TX]) lineage(capID uuid.UUID) ([]limes.Capability, error) {
 // increment would cross the capability's ceiling or any ancestor's. A
 // rejected call must be safe to retry.
 func (s *UsageStore[TX]) Bump(_ context.Context, req limes.BumpRequest) (limes.BumpReceipt, error) {
-	if err := checkSubject(req.Subject); err != nil {
+	if err := req.Validate(); err != nil {
 		return limes.BumpReceipt{}, err
 	}
 	unit, err := limes.NormalizeUnitCode(req.Subject.UnitCode())
@@ -665,16 +656,7 @@ func (s *UsageStore[TX]) Charge(
 	req limes.ChargeRequest,
 	onCharged func(ctx context.Context, c limes.Charged[TX]) error,
 ) (limes.ChargeReceipt, error) {
-	if err := req.Amount.Validate(); err != nil {
-		return limes.ChargeReceipt{}, err
-	}
-	if err := req.Overrun.Validate(); err != nil {
-		return limes.ChargeReceipt{}, err
-	}
-	if err := limes.ValidateExternalRef(req.ExternalRef); err != nil {
-		return limes.ChargeReceipt{}, err
-	}
-	if err := checkSubject(req.Subject); err != nil {
+	if err := req.Validate(); err != nil {
 		return limes.ChargeReceipt{}, err
 	}
 	unit, err := limes.NormalizeUnitCode(req.Subject.UnitCode())
@@ -1033,10 +1015,7 @@ func (s *UsageStore[TX]) checkRangeLocked(c ceilingCheck) error {
 
 // Reserve holds an amount against every ceiling Charge checks.
 func (s *UsageStore[TX]) Reserve(_ context.Context, req limes.ReserveRequest) (limes.Reservation, error) {
-	if err := req.Amount.Validate(); err != nil {
-		return limes.Reservation{}, err
-	}
-	if err := checkSubject(req.Subject); err != nil {
+	if err := req.Validate(); err != nil {
 		return limes.Reservation{}, err
 	}
 	unit, err := limes.NormalizeUnitCode(req.Subject.UnitCode())
@@ -1044,9 +1023,6 @@ func (s *UsageStore[TX]) Reserve(_ context.Context, req limes.ReserveRequest) (l
 		return limes.Reservation{}, err
 	}
 	ttl := req.TTL
-	if ttl < 0 {
-		return limes.Reservation{}, fmt.Errorf("%w: memstore: reservation TTL %s is negative", limes.ErrInvalidRequest, ttl)
-	}
 	if ttl == 0 {
 		ttl = limes.DefaultReservationTTL
 	}
@@ -1107,13 +1083,7 @@ func (s *UsageStore[TX]) Settle(
 	req limes.SettleRequest,
 	onCharged func(ctx context.Context, c limes.Charged[TX]) error,
 ) (limes.ChargeReceipt, error) {
-	if err := checkSubject(req.Subject); err != nil {
-		return limes.ChargeReceipt{}, err
-	}
-	if err := req.Amount.Validate(); err != nil {
-		return limes.ChargeReceipt{}, err
-	}
-	if err := req.Overrun.Validate(); err != nil {
+	if err := req.Validate(); err != nil {
 		return limes.ChargeReceipt{}, err
 	}
 	// A direct charge is filed under the zero reservation id, so the zero id
@@ -1275,7 +1245,7 @@ func parseReservationPlace(cursor string) (reservationPlace, error) {
 // Release ends a reservation without charging. Idempotent; a hold of
 // another capability or tenant, or of other copies, is left held.
 func (s *UsageStore[TX]) Release(_ context.Context, req limes.ReleaseRequest) error {
-	if err := checkSubject(req.Subject); err != nil {
+	if err := req.Validate(); err != nil {
 		return err
 	}
 	s.mu.Lock()
