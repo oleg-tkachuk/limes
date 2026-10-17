@@ -248,9 +248,11 @@ func NewVerifier(cfg VerifierConfig) (*Verifier, error) {
 // read further before its signatures are checked: its container and every
 // block are decoded and their facts read as data, which MaxTokenBytes and
 // MaxBiscuitBlocks bound; none of it is trusted until the signatures have
-// verified. The checks that need no I/O come before the revocation lookup,
-// and the proof of possession comes after it, so a revoked token never
-// records a proof in the replay cache.
+// verified. The checks that need no I/O come before the revocation lookup —
+// the proof of possession among them, so a holder of a key-bound token
+// without its key learns nothing of the token's revocation and causes no
+// lookup — and the proof's id is recorded in the replay cache after it, so a
+// revoked token never records one.
 func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapability, error) {
 	token, audience := req.Token, req.Audience
 	if token == "" {
@@ -311,8 +313,19 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapab
 	if cap.ConfirmationJKT != "" && v.cfg.DPoP == nil {
 		return VerifiedCapability{}, ErrProofUnsupported
 	}
+	// 7) Proof of possession, for a key-bound capability — over the token
+	// as presented, the Biscuit when it is one. Everything but the replay
+	// check, which needs the cache and comes last.
+	var proof dpop.CheckedProof
+	if cap.ConfirmationJKT != "" {
+		var err error
+		proof, err = v.cfg.DPoP.Check(ctx, dpop.Request{Proof: req.DPoP, Token: token, JKT: cap.ConfirmationJKT, Holder: cap.ID.String()})
+		if err != nil {
+			return VerifiedCapability{}, proofError(err)
+		}
+	}
 
-	// 7) Revocation of this capability or any ancestor, after the checks
+	// 8) Revocation of this capability or any ancestor, after the checks
 	// that need no I/O.
 	revoked, err := v.cfg.Revocations.IsRevoked(ctx, cap.ID)
 	if err != nil {
@@ -321,7 +334,7 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapab
 	if revoked {
 		return VerifiedCapability{}, ErrRevoked
 	}
-	// 8) Revocation of this copy of a Biscuit, or a copy it was attenuated
+	// 9) Revocation of this copy of a Biscuit, or a copy it was attenuated
 	// from.
 	if biscuitIDs != nil {
 		revoked, err := v.cfg.BiscuitRevocations.IsBiscuitRevoked(ctx, biscuitIDs)
@@ -333,19 +346,15 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapab
 		}
 	}
 
-	// 9) Proof of possession, for a key-bound capability — over the token
-	// as presented, the Biscuit when it is one. After revocation: checking
-	// the proof records its id in the replay cache, whose room every copy of
-	// the capability shares, and a revoked token must not spend it.
+	// 10) The proof's id, recorded in the replay cache. After revocation:
+	// the cache's room is shared by every copy of the capability, and a
+	// revoked token must not spend it.
 	if cap.ConfirmationJKT != "" {
-		if err := v.cfg.DPoP.Verify(ctx, dpop.Request{Proof: req.DPoP, Token: token, JKT: cap.ConfirmationJKT, Holder: cap.ID.String()}); err != nil {
-			if isProofRefusal(err) {
-				return VerifiedCapability{}, proofRefusal(err)
-			}
-			return VerifiedCapability{}, fmt.Errorf("limes: proof of possession: %w", err)
+		if err := v.cfg.DPoP.Record(ctx, proof); err != nil {
+			return VerifiedCapability{}, proofError(err)
 		}
 	}
-	// 10) A copy's own limits need a Meter that counts copies. Last, so a
+	// 11) A copy's own limits need a Meter that counts copies. Last, so a
 	// token refused for what it is gets that refusal, not this one, which
 	// is about the verifier.
 	if len(cap.Copies) > 0 && !v.cfg.MeterCopies {
@@ -470,6 +479,16 @@ func (v *Verifier) verifySigned(ctx context.Context, token string) (*Capability,
 // proofRefusals are the dpop errors that refuse a proof; any other error
 // from dpop.Verifier is a failure of its replay cache or nonces.
 var proofRefusals = []error{dpop.ErrRequired, dpop.ErrInvalid, dpop.ErrReplayed, dpop.ErrNonceRequired}
+
+// proofError is an error from dpop.Verifier as Verify returns it: a refused
+// proof in the ErrProofOfPossession family, a failure of the replay cache or
+// nonces wrapped as one.
+func proofError(err error) error {
+	if isProofRefusal(err) {
+		return proofRefusal(err)
+	}
+	return fmt.Errorf("limes: proof of possession: %w", err)
+}
 
 func isProofRefusal(err error) bool {
 	for _, r := range proofRefusals {
