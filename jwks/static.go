@@ -55,7 +55,7 @@ func validateKey(kid string, key ed25519.PublicKey) error {
 	return nil
 }
 
-// PublicKey implements KeyResolver.
+// PublicKey implements limes.KeyResolver.
 func (r *Static) PublicKey(_ context.Context, kid string) (ed25519.PublicKey, error) {
 	r.mu.RLock()
 	k, ok := r.keys[kid]
