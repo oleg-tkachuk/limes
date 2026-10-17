@@ -9,32 +9,48 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
 // jwksServer serves a mutable key set with an ETag and counts fetches.
 type jwksServer struct {
-	mu      sync.Mutex
-	keys    map[string]ed25519.PublicKey
-	fail    bool
+	mu   sync.Mutex
+	keys map[string]ed25519.PublicKey
+	fail bool
+	// hang, when set, holds every request until it is closed.
+	hang    chan struct{}
 	fetches atomic.Int32
 }
 
-// checkDeadline bounds a check that must not hang; checkPoll is how often a
-// check waiting on a fetch behind a caller looks again.
-const (
-	checkDeadline = time.Second
-	checkPoll     = time.Millisecond
-)
+// checkDeadline bounds a check that must not hang.
+const checkDeadline = time.Second
 
-// awaitFetches waits, up to checkDeadline, for fetches to reach want: a
-// refresh started behind a caller ends after the caller has its key.
+// fixtureURL is the endpoint a handlerClient serves; nothing resolves it.
+const fixtureURL = "https://jwks.test/jwks.json"
+
+// handlerTransport serves every request from h in memory. A test in a
+// synctest bubble needs it: synctest.Wait cannot tell a goroutine waiting
+// on the network from one still running.
+type handlerTransport struct{ h http.Handler }
+
+func (tr handlerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	rec := httptest.NewRecorder()
+	tr.h.ServeHTTP(rec, req)
+	return rec.Result(), nil
+}
+
+// handlerClient is a client whose every request h serves in memory.
+func handlerClient(h http.Handler) *http.Client {
+	return &http.Client{Transport: handlerTransport{h}}
+}
+
+// awaitFetches waits, in a synctest bubble, for every goroutine there to
+// block, then checks fetches: a refresh started behind a caller ends, or
+// blocks, after the caller has its key.
 func awaitFetches(t *testing.T, fetches func() int32, want int32) {
 	t.Helper()
-	deadline := time.Now().Add(checkDeadline)
-	for fetches() < want && time.Now().Before(deadline) {
-		time.Sleep(checkPoll)
-	}
+	synctest.Wait()
 	if got := fetches(); got != want {
 		t.Fatalf("fetches = %d, want %d", got, want)
 	}
@@ -42,6 +58,12 @@ func awaitFetches(t *testing.T, fetches func() int32, want int32) {
 
 func (s *jwksServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.fetches.Add(1)
+	s.mu.Lock()
+	hang := s.hang
+	s.mu.Unlock()
+	if hang != nil {
+		<-hang
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.fail {
@@ -92,11 +114,9 @@ func newRemoteFixture(t *testing.T) (*jwksServer, *Remote, *stepClock, string, e
 		t.Fatal(err)
 	}
 	srv := &jwksServer{keys: map[string]ed25519.PublicKey{kid: pub}}
-	ts := httptest.NewTLSServer(srv)
-	t.Cleanup(ts.Close)
 	clock := &stepClock{t: time.Unix(1_800_000_000, 0)}
 	r, err := NewRemote(RemoteConfig{
-		URL: ts.URL, Client: ts.Client(), Now: clock.Now,
+		URL: fixtureURL, Client: handlerClient(srv), Now: clock.Now,
 		RefreshInterval: time.Minute, MinRefreshInterval: 10 * time.Second, MaxStale: time.Hour,
 	})
 	if err != nil {
@@ -106,45 +126,50 @@ func newRemoteFixture(t *testing.T) (*jwksServer, *Remote, *stepClock, string, e
 }
 
 func TestRemoteJWKSCachesUntilRefreshInterval(t *testing.T) {
-	srv, r, clock, kid, pub := newRemoteFixture(t)
-	ctx := context.Background()
+	synctest.Test(t, func(t *testing.T) {
+		srv, r, clock, kid, pub := newRemoteFixture(t)
+		ctx := context.Background()
 
-	for range 3 {
-		got, err := r.PublicKey(ctx, kid)
-		if err != nil || !got.Equal(pub) {
-			t.Fatalf("PublicKey = %v, %v", got, err)
+		for range 3 {
+			got, err := r.PublicKey(ctx, kid)
+			if err != nil || !got.Equal(pub) {
+				t.Fatalf("PublicKey = %v, %v", got, err)
+			}
 		}
-	}
-	if n := srv.fetches.Load(); n != 1 {
-		t.Fatalf("fetches = %d, want 1 (cached)", n)
-	}
+		if n := srv.fetches.Load(); n != 1 {
+			t.Fatalf("fetches = %d, want 1 (cached)", n)
+		}
 
-	clock.Advance(2 * time.Minute)
-	if _, err := r.PublicKey(ctx, kid); err != nil {
-		t.Fatal(err)
-	}
-	awaitFetches(t, srv.fetches.Load, 2)
+		clock.Advance(2 * time.Minute)
+		if _, err := r.PublicKey(ctx, kid); err != nil {
+			t.Fatal(err)
+		}
+		awaitFetches(t, srv.fetches.Load, 2)
+	})
 }
 
 // A known key from a set past its freshness but within MaxStale is served at
 // once while the endpoint hangs: the refresh runs behind the caller, whose
 // deadline the endpoint cannot spend.
 func TestRemoteJWKSServesAHeldKeyWhileTheEndpointHangs(t *testing.T) {
-	srv, r, clock, kid, pub := newRemoteFixture(t)
-	if _, err := r.PublicKey(context.Background(), kid); err != nil {
-		t.Fatal(err)
-	}
-	srv.mu.Lock() // the endpoint hangs until the check ends
-	t.Cleanup(srv.mu.Unlock)
+	synctest.Test(t, func(t *testing.T) {
+		srv, r, clock, kid, pub := newRemoteFixture(t)
+		if _, err := r.PublicKey(context.Background(), kid); err != nil {
+			t.Fatal(err)
+		}
+		hang := make(chan struct{}) // the endpoint hangs until the check ends
+		srv.set(func() { srv.hang = hang })
+		t.Cleanup(func() { close(hang) })
 
-	clock.Advance(2 * time.Minute) // past RefreshInterval, within MaxStale
-	ctx, cancel := context.WithTimeout(context.Background(), checkDeadline/10)
-	defer cancel()
-	got, err := r.PublicKey(ctx, kid)
-	if err != nil || !got.Equal(pub) {
-		t.Fatalf("PublicKey while the endpoint hangs = %v, %v; want the held key", got, err)
-	}
-	awaitFetches(t, srv.fetches.Load, 2)
+		clock.Advance(2 * time.Minute) // past RefreshInterval, within MaxStale
+		ctx, cancel := context.WithTimeout(context.Background(), checkDeadline/10)
+		defer cancel()
+		got, err := r.PublicKey(ctx, kid)
+		if err != nil || !got.Equal(pub) {
+			t.Fatalf("PublicKey while the endpoint hangs = %v, %v; want the held key", got, err)
+		}
+		awaitFetches(t, srv.fetches.Load, 2)
+	})
 }
 
 // A new kid is picked up on first sight — that is how rotation reaches a
