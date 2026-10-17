@@ -84,7 +84,7 @@ func meterEnv(t *testing.T, cfg Config, readOnly func(context.Context) context.C
 		NewCapability: func(spec metertest.CapabilitySpec) (uuid.UUID, error) {
 			c := limes.Capability{
 				ID: uuid.New(), ParentID: spec.Parent, ExpiresAt: expiry,
-				Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: cmp.Or(spec.Tenant, tenant), Subject: "agent"},
+				Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: cmp.Or(spec.Tenant, tenant), Subject: "agent"},
 				Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: spec.Requests, Budget: spec.Budget},
 			}
 			return c.ID, records.Insert(WithTenant(t.Context(), c.Subject.TenantID), limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "issuer"}})

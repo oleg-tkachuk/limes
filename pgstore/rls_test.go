@@ -43,7 +43,7 @@ func newTenantFixture(t *testing.T) tenantFixture {
 	expiry := f.clock.Now().Add(rlsTTL)
 	f.parent = limes.Capability{
 		ID: uuid.New(), ExpiresAt: expiry,
-		Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: f.mine, Subject: "agent:parent"},
+		Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: f.mine, Subject: "agent:parent"},
 		Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true}},
 	}
 	f.child = f.parent
@@ -76,7 +76,7 @@ func TestRowSecurityKeepsTenantsApart(t *testing.T) {
 			t.Errorf("%s: Revoke: err = %v, want ErrNotFound", name, err)
 		}
 		page, err := f.records.ListByPrincipal(ctx, limes.ListByPrincipalRequest{
-			TenantID: f.mine, PrincipalType: limes.PrincipalAgent, Subject: "agent:child",
+			TenantID: f.mine, PrincipalType: limes.PrincipalTypeAgent, Subject: "agent:child",
 		})
 		if !errors.Is(err, limes.ErrScopeMismatch) || len(page.Items) != 0 {
 			t.Errorf("%s: ListByPrincipal = %d items, %v; want ErrScopeMismatch", name, len(page.Items), err)
@@ -257,7 +257,7 @@ func TestTheOwnerNeedsNoScope(t *testing.T) {
 	}
 	c := limes.Capability{
 		ID: uuid.New(), ExpiresAt: time.Now().Add(rlsTTL),
-		Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: uuid.New(), Subject: "agent:owner"},
+		Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent:owner"},
 		Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true}},
 	}
 	if err := store.Insert(t.Context(), limes.InsertRequest{Capability: c}); err != nil {

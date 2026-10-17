@@ -12,10 +12,10 @@ import (
 // than list every tenant for a filter that narrows.
 func TestKeepOfNamesEveryFilter(t *testing.T) {
 	want := map[limes.TenantBudgetFilter]string{
-		limes.TenantBudgetsUnspecified: keepEvery,
-		limes.TenantBudgetsAll:         keepEvery,
-		limes.TenantBudgetsAtOrPast:    keepAtOrPast,
-		limes.TenantBudgetsUnlimited:   keepUnlimited,
+		limes.TenantBudgetFilterUnspecified: keepEvery,
+		limes.TenantBudgetFilterAll:         keepEvery,
+		limes.TenantBudgetFilterAtOrPast:    keepAtOrPast,
+		limes.TenantBudgetFilterUnlimited:   keepUnlimited,
 	}
 	f := limes.TenantBudgetFilter(0)
 	for ; f.Validate() == nil; f++ {

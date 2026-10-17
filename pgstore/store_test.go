@@ -105,7 +105,7 @@ func TestScopeRunsInEveryCall(t *testing.T) {
 	ctx := WithTenant(t.Context(), tenant)
 	c := limes.Capability{
 		ID: uuid.New(), ExpiresAt: time.Now().Add(time.Hour),
-		Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: tenant, Subject: "agent:scoped"},
+		Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: tenant, Subject: "agent:scoped"},
 	}
 	if err := store.Insert(ctx, limes.InsertRequest{Capability: c}); err != nil {
 		t.Fatal(err)

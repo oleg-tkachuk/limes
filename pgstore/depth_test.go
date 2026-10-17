@@ -32,7 +32,7 @@ func TestAChainPastMaxDelegationDepthIsRefused(t *testing.T) {
 	for depth := range limes.MaxDelegationDepth + 2 {
 		c := limes.Capability{
 			ID: uuid.New(), ExpiresAt: clock.Now().Add(depthTTL),
-			Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: tenant, Subject: "agent"},
+			Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: tenant, Subject: "agent"},
 			Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true}},
 		}
 		if parent != nil {
