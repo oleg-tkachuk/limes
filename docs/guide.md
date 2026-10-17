@@ -37,7 +37,8 @@ case errors.Is(err, jwks.ErrUnavailable):  // the issuer's keys out of reach: th
 }
 // Every refusal of the token or its proof — and ParseAuthorization's
 // ErrNoCredentials — also matches ErrUnauthenticated: the one check for
-// "answer 401". ErrMalformedAuthorization does not: it is a bad request.
+// "answer 401". ErrMalformedAuthorization does not: it is a bad request,
+// and matches ErrInvalidRequest.
 ```
 
 `Verify` and `Authorize` return a `VerifiedCapability`: what the token
@@ -288,7 +289,9 @@ one presented as `DPoP`, with `ErrAuthSchemeMismatch`. No header, or one
 under another scheme, is `ErrNoCredentials` (401, a challenge with no error
 code); a
 Bearer or DPoP header whose credential is not a token68 is
-`ErrMalformedAuthorization` (400). A token that came from no `Authorization`
+`ErrMalformedAuthorization` (400), which matches `ErrInvalidRequest` as
+every malformed request does — though `ErrorResponse` answers the rest of
+that family 500, as the server's own call. A token that came from no `Authorization`
 header — gRPC metadata, a message field — goes in with `AuthSchemeUnspecified`,
 the zero `Scheme`: no scheme is checked, but a key-bound token still needs its
 proof.

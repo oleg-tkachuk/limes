@@ -31,6 +31,7 @@ import (
 //	                         a ceiling refuses the request (403)
 //	ErrInvalidRequest        the request itself is malformed
 //	├── ErrInvalidCaveats, ErrInvalidAmount, ErrEffectConflict
+//	└── ErrMalformedAuthorization  the client's Authorization header (400)
 //	ErrNotFound              what the request names is not on record
 //	└── ErrChargeNotFound, ErrReservationNotFound, ErrUsageNotFound, …
 var (

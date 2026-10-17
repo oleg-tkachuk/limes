@@ -68,7 +68,7 @@ var sentinelMatrix = map[string]sentinelCase{
 	"dpop.ErrNonceRequired":     {proofRefusal(dpop.ErrNonceRequired), []string{famUnauthenticated, famProof}, ReasonNonceRequired, http.StatusUnauthorized},
 	"ErrAuthSchemeMismatch":     {ErrAuthSchemeMismatch, []string{famUnauthenticated, famProof}, ReasonAuthSchemeMismatch, http.StatusUnauthorized},
 	"jwks.ErrUnavailable":       {jwks.ErrUnavailable, nil, ReasonKeysUnavailable, http.StatusServiceUnavailable},
-	"ErrMalformedAuthorization": {ErrMalformedAuthorization, nil, ReasonMalformedAuthorization, http.StatusBadRequest},
+	"ErrMalformedAuthorization": {ErrMalformedAuthorization, []string{famRequest}, ReasonMalformedAuthorization, http.StatusBadRequest},
 	"ErrNoCredentials":          {ErrNoCredentials, []string{famUnauthenticated}, ReasonNoCredentials, http.StatusUnauthorized},
 
 	"ErrCaveatViolation":        {ErrCaveatViolation, []string{famCaveat}, "", http.StatusForbidden},

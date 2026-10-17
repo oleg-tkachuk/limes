@@ -108,7 +108,9 @@ func ruleFor(err error) (refusalRule, bool) {
 
 // ReasonOf returns the reason err refused a capability for, and false when
 // err is no such refusal — nil, a store failure, or a programming error such
-// as ErrInvalidRequest, which a consumer maps as it maps any other.
+// as ErrInvalidRequest, which a consumer maps as it maps any other. The one
+// member of that family that is a refusal, ErrMalformedAuthorization, has
+// its reason.
 func ReasonOf(err error) (Reason, bool) {
 	rule, ok := ruleFor(err)
 	if !ok || rule.reason == "" {
