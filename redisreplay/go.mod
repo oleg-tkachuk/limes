@@ -9,7 +9,7 @@ toolchain go1.27.2
 require (
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/google/uuid v1.6.0
-	github.com/oleg-tkachuk/limes v0.66.1
+	github.com/oleg-tkachuk/limes v0.67.0
 	github.com/redis/go-redis/v9 v9.23.0
 )
 
@@ -18,5 +18,5 @@ require (
 	github.com/go-json-experiment/json v0.0.0-20260820222146-c27c302e5fc3 // indirect
 	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.uber.org/atomic v1.12.0 // indirect
-	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
 )
