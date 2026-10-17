@@ -14,6 +14,14 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.68.0
+
+- `PurgeResult`, `PurgeOrphansResult`, `ReleaseExpiredResult`,
+  `EraseTenantResult`, `RecordCount` and `ChargeSum` compared with `==` →
+  they no longer compare, as the other results already did not, so a field
+  added to one in 1.x breaks no caller. Compare their fields, or use
+  `reflect.DeepEqual`; build them with field names, not positionally.
+
 ## v0.67.0
 
 - `Meter.Charge` and `Meter.Settle` took `onCharged func(ctx, tx TX) error`,

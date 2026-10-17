@@ -1169,7 +1169,7 @@ func checkEraseTenant(t *testing.T, f fixture) {
 	}
 	got, err := eraser.EraseTenantRecords(f.Ctx, req)
 	want := limes.EraseTenantResult{Revoked: 4, Removed: 1, Kept: 4}
-	if err != nil || got != want {
+	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("EraseTenantRecords = %+v, %v; want %+v", got, err, want)
 	}
 	for _, c := range []limes.Capability{root, child, revoked, recent} {
@@ -1192,7 +1192,7 @@ func checkEraseTenant(t *testing.T, f fixture) {
 	if r, err := f.Store.GetRecord(f.tenantCtx(other), theirs.ID); err != nil || r.Revocation != nil {
 		t.Errorf("another tenant's record after the erase = %+v, %v; want it on record and not revoked", r, err)
 	}
-	if again, err := eraser.EraseTenantRecords(f.Ctx, req); err != nil || again != (limes.EraseTenantResult{Kept: 4}) {
+	if again, err := eraser.EraseTenantRecords(f.Ctx, req); err != nil || !reflect.DeepEqual(again, limes.EraseTenantResult{Kept: 4}) {
 		t.Errorf("EraseTenantRecords again = %+v, %v; want nothing revoked or removed", again, err)
 	}
 }
@@ -1287,7 +1287,7 @@ func checkCensus(t *testing.T, f fixture) {
 	other := censusFixture(t, f)
 	mine := limes.CountRecordsRequest{TenantID: f.Tenant, ExpiringWithin: censusWindow}
 	whole := limes.RecordCount{Total: 8, Active: 3, Expired: 2, Revoked: 3, Delegated: 2, ExpiringSoon: 2}
-	if got := f.countAll(t, f.Ctx, mine); !slices.Equal(got, []limes.RecordCount{whole}) {
+	if got := f.countAll(t, f.Ctx, mine); !reflect.DeepEqual(got, []limes.RecordCount{whole}) {
 		t.Errorf("census of Tenant = %+v, want %+v", got, whole)
 	}
 	byType := mine
@@ -1297,7 +1297,7 @@ func checkCensus(t *testing.T, f fixture) {
 		{PrincipalType: limes.PrincipalService, Total: 2, Expired: 2},
 		{PrincipalType: limes.PrincipalUser, Total: 2, Revoked: 2, Delegated: 1},
 	}
-	if got := f.countAll(t, f.Ctx, byType); !slices.Equal(got, want) {
+	if got := f.countAll(t, f.Ctx, byType); !reflect.DeepEqual(got, want) {
 		t.Errorf("census of Tenant by principal type = %+v, want %+v", got, want)
 	}
 	noWindow := mine
@@ -1311,12 +1311,12 @@ func checkCensus(t *testing.T, f fixture) {
 	mineByTenant.TenantID = f.Tenant
 	want = []limes.RecordCount{mineByTenant, theirs}
 	slices.SortFunc(want, func(a, b limes.RecordCount) int { return bytes.Compare(a.TenantID[:], b.TenantID[:]) })
-	if got := f.countAll(t, f.allTenantsCtx(), all); !slices.Equal(got, want) {
+	if got := f.countAll(t, f.allTenantsCtx(), all); !reflect.DeepEqual(got, want) {
 		t.Errorf("census of every tenant by tenant = %+v, want %+v", got, want)
 	}
 	all.ByTenant = false
 	sum := limes.RecordCount{Total: 9, Active: 4, Expired: 2, Revoked: 3, Delegated: 2, ExpiringSoon: 2}
-	if got := f.countAll(t, f.allTenantsCtx(), all); !slices.Equal(got, []limes.RecordCount{sum}) {
+	if got := f.countAll(t, f.allTenantsCtx(), all); !reflect.DeepEqual(got, []limes.RecordCount{sum}) {
 		t.Errorf("census of every tenant = %+v, want %+v", got, sum)
 	}
 }
@@ -1336,7 +1336,7 @@ func checkCensusPages(t *testing.T, f fixture) {
 		t.Fatalf("census by tenant and principal type = %+v, want %d rows", whole, groups)
 	}
 	req.Limit = 1
-	if paged := f.countAll(t, f.allTenantsCtx(), req); !slices.Equal(paged, whole) {
+	if paged := f.countAll(t, f.allTenantsCtx(), req); !reflect.DeepEqual(paged, whole) {
 		t.Errorf("census a row at a time = %+v, want %+v", paged, whole)
 	}
 	for name, bad := range map[string]limes.CountRecordsRequest{

@@ -88,4 +88,5 @@ type RecordCount struct {
 	// ExpiringSoon counts the active records expiring within the
 	// request's ExpiringWithin of now: a part of Active.
 	ExpiringSoon int64
+	_            noCompare
 }

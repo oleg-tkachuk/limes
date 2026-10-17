@@ -248,6 +248,7 @@ func (r PurgeRequest) Retention() time.Duration {
 type PurgeResult struct {
 	// Purged is the number of capability records removed.
 	Purged int64
+	_      noCompare
 }
 
 // ListByPrincipalRequest is the input shape for Store.ListByPrincipal.

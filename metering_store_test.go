@@ -317,7 +317,7 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 		t.Errorf("ChargeByRef = %+v, %v", c, err)
 	}
 	if n, err := usage.ReleaseExpired(ctx, limes.ReleaseExpiredRequest{}); err != nil || n.Released != 0 {
-		t.Errorf("ReleaseExpired = %d, %v", n, err)
+		t.Errorf("ReleaseExpired = %+v, %v", n, err)
 	}
 	if err := usage.DeleteUsage(ctx, limes.DeleteUsageRequest{CapabilityID: uuid.New()}); err != nil {
 		t.Errorf("Delete of a row never written: %v", err)
@@ -327,7 +327,7 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 	}
 	// The capability is no longer on record, so its usage is an orphan.
 	if n, err := usage.PurgeOrphans(ctx, limes.PurgeOrphansRequest{}); err != nil || n.Purged != 1 {
-		t.Errorf("PurgeOrphans = %d, %v; want the one orphan", n, err)
+		t.Errorf("PurgeOrphans = %+v, %v; want the one orphan", n, err)
 	}
 	if _, err := usage.GetUsage(ctx, capID); err == nil {
 		t.Error("GetUsage found a purged row")

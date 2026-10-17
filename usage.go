@@ -917,6 +917,7 @@ type PurgeOrphansRequest struct {
 // PurgeOrphansResult is what one PurgeOrphans deleted.
 type PurgeOrphansResult struct {
 	Purged int64
+	_      noCompare
 }
 
 // ReleaseExpiredRequest is one batch of UsageHousekeeping.ReleaseExpired.
@@ -929,6 +930,7 @@ type ReleaseExpiredRequest struct {
 // ReleaseExpiredResult is what one ReleaseExpired released.
 type ReleaseExpiredResult struct {
 	Released int64
+	_        noCompare
 }
 
 // ChargeByRefRequest names one charge by the reference it was taken under.
