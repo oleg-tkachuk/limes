@@ -51,6 +51,12 @@ tasks:
     cmds:
       - task --list
 
+  deps:update:all:
+    desc: "deps:update for the root, then go mod tidy in each nested module that builds it through a replace — pgstore and examples — whose go.mod a root bump changes too"
+    cmds:
+      - task: deps:update
+      - bash .github/scripts/tidy-replacing-modules.sh
+
   verify-all:
     desc: "gofmt + go mod tidy/verify + golangci-lint + a 32-bit build + the unit suite + govulncheck + actionlint + the workflow scripts + the release rules and notes + the redisreplay module + pgstore's static checks + the examples that need no database — what CI runs, but test:pgstore and test:examples:pgstore"
     cmds:
@@ -169,9 +175,9 @@ tasks:
       - go tool -modfile={{.TOOLS_MODFILE}} actionlint
 
   verify:scripts:
-    desc: "Test the shell scripts the workflows run"
+    desc: "Test the shell scripts the workflows and tasks run"
     cmds:
-      - for: [api-break-check, check-modules, check-range, ci-diff, ci-job-passed, ci-relevant, ci-run-check, gh-retry, go-floor-check, marker-check, new-release-tag, publish-release, queue-auto-merge, rebase-behind, release-catch-up, release-head-check, require-released-limes, unpublished-tags, warm-go-proxy, without-workflow-commands]
+      - for: [api-break-check, check-modules, check-range, ci-diff, ci-job-passed, ci-relevant, ci-run-check, gh-retry, go-floor-check, marker-check, new-release-tag, publish-release, queue-auto-merge, rebase-behind, release-catch-up, release-head-check, require-released-limes, tidy-replacing-modules, unpublished-tags, warm-go-proxy, without-workflow-commands]
         cmd: bash .github/scripts/{{.ITEM}}.test.sh
 
   verify:release-rules:
