@@ -18,7 +18,7 @@ import (
 func mkCap(id, parent uuid.UUID, tenant uuid.UUID, subject string) limes.Capability {
 	return limes.Capability{
 		ID: id, ParentID: parent,
-		Subject:   limes.Principal{Type: limes.PrincipalAgent, TenantID: tenant, Subject: subject},
+		Subject:   limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: tenant, Subject: subject},
 		ExpiresAt: contractExpiry,
 		// No ceiling of its own: a test that needs one sets it.
 		Caveats: limes.Caveats{

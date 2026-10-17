@@ -392,11 +392,11 @@ const (
 // read as another: a filter that narrows must never list every tenant.
 func keepOf(f limes.TenantBudgetFilter) (string, error) {
 	switch f {
-	case limes.TenantBudgetsUnspecified, limes.TenantBudgetsAll:
+	case limes.TenantBudgetFilterUnspecified, limes.TenantBudgetFilterAll:
 		return keepEvery, nil
-	case limes.TenantBudgetsUnlimited:
+	case limes.TenantBudgetFilterUnlimited:
 		return keepUnlimited, nil
-	case limes.TenantBudgetsAtOrPast:
+	case limes.TenantBudgetFilterAtOrPast:
 		return keepAtOrPast, nil
 	}
 	return "", fmt.Errorf("%w: pgstore: list tenant budgets: filter %s is not one this store knows", limes.ErrInvalidRequest, f)

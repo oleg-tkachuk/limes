@@ -255,7 +255,7 @@ func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, s
 	refused := limes.ChargeReceipt{SpentAmount: c.usageOf(spec.capID).spent, TenantID: spec.tenantID, UnitCode: spec.unit}
 	overrun := false
 	crossed := func(err error) error {
-		if spec.overrun == limes.OverrunRecord {
+		if spec.overrun == limes.OverrunPolicyRecord {
 			overrun = true
 			return nil
 		}

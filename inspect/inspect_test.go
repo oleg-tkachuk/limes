@@ -37,7 +37,7 @@ func issue(t *testing.T) (limes.Capability, string, ed25519.PublicKey) {
 	}
 	cResult, err := issuer.Issue(context.Background(), limes.IssueRequest{
 		IssuedBy: limes.Principal{Subject: "op"},
-		Subject:  limes.Principal{Type: limes.PrincipalAgent, TenantID: uuid.New(), Subject: "agent"},
+		Subject:  limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{"data"},
 		Caveats:  limes.Caveats{Ops: []limes.Op{limes.OpGet}},
 		TTL:      time.Minute,

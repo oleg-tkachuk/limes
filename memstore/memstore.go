@@ -131,7 +131,7 @@ type ledgerEntry struct {
 	// ReservationID is the reservation the charge settled; uuid.Nil for a
 	// charge made directly.
 	ReservationID uuid.UUID
-	// Overrun reports that the charge crossed a ceiling (OverrunRecord).
+	// Overrun reports that the charge crossed a ceiling (OverrunPolicyRecord).
 	Overrun bool
 
 	// tenantPeriod is the tenant's accounting period the charge was counted
@@ -798,12 +798,12 @@ func (s *UsageStore[TX]) chargeLocked(
 		holders = settling.ancestors
 		reservationID = settling.id
 	}
-	// crossed decides a ceiling the charge would cross: under OverrunRecord
+	// crossed decides a ceiling the charge would cross: under OverrunPolicyRecord
 	// the charge goes on and the receipt says so; otherwise it is refused
 	// with err, and nothing has been published.
 	overrun := false
 	crossed := func(err error) error {
-		if req.Overrun == limes.OverrunRecord {
+		if req.Overrun == limes.OverrunPolicyRecord {
 			overrun = true
 			return nil
 		}
@@ -1502,11 +1502,11 @@ func compareUtilization(a, b budgetRow) int {
 // through, at every threshold; an unlimited one is at none.
 func listed(args limes.ListTenantBudgetsRequest, row budgetRow) bool {
 	switch args.Filter {
-	case limes.TenantBudgetsUnspecified, limes.TenantBudgetsAll:
+	case limes.TenantBudgetFilterUnspecified, limes.TenantBudgetFilterAll:
 		return true
-	case limes.TenantBudgetsUnlimited:
+	case limes.TenantBudgetFilterUnlimited:
 		return row.class == classUnlimited
-	case limes.TenantBudgetsAtOrPast:
+	case limes.TenantBudgetFilterAtOrPast:
 		switch row.class {
 		case classZero:
 			return true

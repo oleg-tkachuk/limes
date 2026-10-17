@@ -125,7 +125,7 @@ func (p Principal) Validate() error {
 	if err := p.Type.Validate(); err != nil {
 		return err
 	}
-	if p.Agent != nil && p.Type != PrincipalAgent {
+	if p.Agent != nil && p.Type != PrincipalTypeAgent {
 		return invalidRequest("principal of type %q carries agent details", p.Type)
 	}
 	return nil
@@ -135,10 +135,10 @@ func (p Principal) Validate() error {
 // constants spell it. Every error matches ErrInvalidRequest.
 func (t PrincipalType) Validate() error {
 	switch t {
-	case PrincipalUser, PrincipalAgent, PrincipalService:
+	case PrincipalTypeUser, PrincipalTypeAgent, PrincipalTypeService:
 		return nil
-	case PrincipalUnspecified:
+	case PrincipalTypeUnspecified:
 	}
 	return invalidRequest("principal type %q is not one of %q, %q, %q",
-		t, PrincipalUser, PrincipalAgent, PrincipalService)
+		t, PrincipalTypeUser, PrincipalTypeAgent, PrincipalTypeService)
 }

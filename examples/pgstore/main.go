@@ -123,8 +123,8 @@ func main() {
 	demo.Must(log, err, "set the tenant's budget")
 
 	issued, err := issuer.Issue(inTenant, limes.IssueRequest{
-		IssuedBy: limes.Principal{Type: limes.PrincipalUser, TenantID: tenant, Subject: "operator@example.com"},
-		Subject:  limes.Principal{Type: limes.PrincipalAgent, TenantID: tenant, Subject: "research-agent"},
+		IssuedBy: limes.Principal{Type: limes.PrincipalTypeUser, TenantID: tenant, Subject: "operator@example.com"},
+		Subject:  limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: tenant, Subject: "research-agent"},
 		Audience: []string{audience},
 		TTL:      15 * time.Minute,
 		Caveats: limes.Caveats{

@@ -23,7 +23,7 @@ func issueBound(t *testing.T, issuer *Issuer, key crypto.Signer) string {
 		t.Fatal(err)
 	}
 	_, token, err := issuer.issue(context.Background(), IssueRequest{
-		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour, ConfirmationJKT: jkt,
 	})
 	if err != nil {
@@ -75,7 +75,7 @@ func TestVerifyEnforcesProofOfPossession(t *testing.T) {
 func mintFor(t *testing.T, issuer *Issuer) string {
 	t.Helper()
 	_, token, err := issuer.issue(context.Background(), IssueRequest{
-		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour,
 	})
 	if err != nil {
@@ -132,7 +132,7 @@ func TestAuthorize(t *testing.T) {
 	issuer, v, _, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
 	_, token, err := issuer.issue(ctx, IssueRequest{
-		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, TTL: time.Hour,
 		Caveats: Caveats{
 			Ops: []Op{OpGet, OpPut}, ResourcePrefixes: []string{"corpus/public"},

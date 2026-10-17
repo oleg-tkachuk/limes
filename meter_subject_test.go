@@ -18,7 +18,7 @@ func TestMeterSubjectCarriesTheVerifiedCeilings(t *testing.T) {
 	budget := MustParseAmount("2.50")
 	c := Capability{
 		ID:      uuid.New(),
-		Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
+		Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Caveats: Caveats{Requests: RequestCeiling{Max: requests}, Budget: BudgetCeiling{Max: budget}},
 		Copies:  []CopyCeiling{{RevocationID: []byte{1}, Requests: &RequestCeiling{Max: 1}, Budget: &BudgetCeiling{Max: budget}}},
 	}
@@ -46,7 +46,7 @@ func TestStoredMeterSubjectCarriesTheStoredCeilings(t *testing.T) {
 	budget := MustParseAmount("4")
 	c := Capability{
 		ID:        uuid.New(),
-		Subject:   Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
+		Subject:   Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Caveats:   Caveats{Ops: []Op{OpGet}, Requests: RequestCeiling{Max: requests}, Budget: BudgetCeiling{Max: budget}, UnitCode: unit},
 		ExpiresAt: time.Now().Add(time.Hour),
 	}

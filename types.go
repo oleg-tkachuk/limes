@@ -198,7 +198,7 @@ type Principal struct {
 	// Subject is the stable identity (user UUID, agent run ID, service
 	// account name). Format depends on Type.
 	Subject string
-	// Agent fields are populated only for Type == PrincipalAgent.
+	// Agent fields are populated only for Type == PrincipalTypeAgent.
 	Agent *AgentPrincipal
 	_     noCompare
 }
@@ -206,13 +206,13 @@ type Principal struct {
 // PrincipalType discriminates Principal.Type.
 type PrincipalType string
 
-// The principal kinds. The zero value, PrincipalUnspecified, names none and
-// is refused wherever a kind is required.
+// The principal kinds. The zero value, PrincipalTypeUnspecified, names none
+// and is refused wherever a kind is required.
 const (
-	PrincipalUnspecified PrincipalType = ""
-	PrincipalUser        PrincipalType = "user"    // a person
-	PrincipalAgent       PrincipalType = "agent"   // an AI agent; Principal.Agent says which
-	PrincipalService     PrincipalType = "service" // a service account
+	PrincipalTypeUnspecified PrincipalType = ""
+	PrincipalTypeUser        PrincipalType = "user"    // a person
+	PrincipalTypeAgent       PrincipalType = "agent"   // an AI agent; Principal.Agent says which
+	PrincipalTypeService     PrincipalType = "service" // a service account
 )
 
 // AgentPrincipal carries the fields specific to AI-agent principals.

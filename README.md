@@ -80,7 +80,7 @@ verifier, _ := limes.NewVerifier(limes.VerifierConfig{
 issued, _ := issuer.Issue(ctx, limes.IssueRequest{
     IssuedBy: limes.Principal{Subject: "operator@example.com"}, // who asked
     Subject: limes.Principal{
-        Type: limes.PrincipalAgent, TenantID: tenantID,
+        Type: limes.PrincipalTypeAgent, TenantID: tenantID,
         Subject: "research-orchestrator",
         Agent:   &limes.AgentPrincipal{AgentType: "my-agent", RunID: runID},
     },

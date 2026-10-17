@@ -19,7 +19,7 @@ func TestDelegationStopsAtMaxDelegationDepth(t *testing.T) {
 	delegate := func(parent limes.VerifiedCapability, subject string) (limes.Capability, string, error) {
 		r, err := s.issuer.Delegate(ctx, limes.DelegateRequest{
 			Parent:         parent,
-			Subject:        limes.Principal{Type: limes.PrincipalAgent, TenantID: s.tenantID, Subject: subject},
+			Subject:        limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: s.tenantID, Subject: subject},
 			TTL:            time.Minute,
 			InheritCaveats: true,
 		})
@@ -36,7 +36,7 @@ func TestDelegationStopsAtMaxDelegationDepth(t *testing.T) {
 		t.Fatalf("a delegation past MaxDelegationDepth: err = %v, want ErrDelegationTooDeep", err)
 	}
 	left, err := s.records.ListByPrincipal(ctx, limes.ListByPrincipalRequest{
-		TenantID: s.tenantID, PrincipalType: limes.PrincipalAgent, Subject: "too-deep",
+		TenantID: s.tenantID, PrincipalType: limes.PrincipalTypeAgent, Subject: "too-deep",
 	})
 	if err != nil || len(left.Items) != 0 {
 		t.Errorf("records of the refused delegation = %d, %v; want none", len(left.Items), err)

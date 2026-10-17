@@ -44,7 +44,7 @@ func TestStoreClockDrivesPurge(t *testing.T) {
 	tenant := uuid.New()
 	c := limes.Capability{
 		ID: uuid.New(), ExpiresAt: now.Add(time.Minute),
-		Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: tenant, Subject: "a"},
+		Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: tenant, Subject: "a"},
 	}
 	if err := s.Insert(ctx, limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "op"}}); err != nil {
 		t.Fatal(err)

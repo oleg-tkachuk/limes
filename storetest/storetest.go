@@ -131,7 +131,7 @@ const (
 )
 
 // issuedBy is the principal every capability of these checks is issued by.
-var issuedBy = limes.Principal{Type: limes.PrincipalService, Subject: "svc:storetest"}
+var issuedBy = limes.Principal{Type: limes.PrincipalTypeService, Subject: "svc:storetest"}
 
 type fixture struct {
 	Env
@@ -145,7 +145,7 @@ func (f fixture) newCapability(subject string, parent uuid.UUID, expires time.Ti
 		ID:     uuid.New(),
 		Issuer: "storetest",
 		Subject: limes.Principal{
-			Type: limes.PrincipalAgent, TenantID: f.Tenant, Subject: subject,
+			Type: limes.PrincipalTypeAgent, TenantID: f.Tenant, Subject: subject,
 			Agent: &limes.AgentPrincipal{
 				AgentType: "worker", AgentVersion: "1", RunID: uuid.New(), ParentAgentID: uuid.New(), Model: "m", MCPClient: "client",
 			},
@@ -175,7 +175,7 @@ func (f fixture) newCapability(subject string, parent uuid.UUID, expires time.Ti
 // from Record.IssuedBy fails the round trip.
 func (f fixture) issuer() limes.Principal {
 	return limes.Principal{
-		Type: limes.PrincipalAgent, TenantID: f.Tenant, Subject: "agent:issuer",
+		Type: limes.PrincipalTypeAgent, TenantID: f.Tenant, Subject: "agent:issuer",
 		Agent: &limes.AgentPrincipal{
 			AgentType: "planner", AgentVersion: "2", RunID: uuid.New(), ParentAgentID: uuid.New(), Model: "issuer-model", MCPClient: "issuer-client",
 		},
@@ -408,7 +408,7 @@ func checkCascade(t *testing.T, f fixture) {
 	f.revoke(t, cascadeRoot.ID, true)
 
 	got := f.listAll(t, limes.ListByPrincipalRequest{
-		TenantID: f.Tenant, PrincipalType: limes.PrincipalAgent, Subject: subject,
+		TenantID: f.Tenant, PrincipalType: limes.PrincipalTypeAgent, Subject: subject,
 	})
 	if !slices.Contains(got, plainChild.ID) || slices.Contains(got, cascadeChild.ID) {
 		t.Fatalf("listing hides %v; want only the child revoked by cascade (%s) hidden", got, cascadeChild.ID)
@@ -546,7 +546,7 @@ func checkListLimits(t *testing.T, f fixture) {
 		"past the most": {2 * limes.MaxListLimit, limes.MaxListLimit},
 	} {
 		page, err := f.Store.ListByPrincipal(f.Ctx, limes.ListByPrincipalRequest{
-			TenantID: f.Tenant, PrincipalType: limes.PrincipalAgent, Subject: subject, Limit: tc.limit,
+			TenantID: f.Tenant, PrincipalType: limes.PrincipalTypeAgent, Subject: subject, Limit: tc.limit,
 		})
 		if err != nil || len(page.Items) != tc.want || page.Next == "" {
 			t.Errorf("%s: %d items, next %q, %v; want %d and a next page", name, len(page.Items), page.Next, err, tc.want)
@@ -563,7 +563,7 @@ func checkListFullLastPage(t *testing.T, f fixture) {
 		f.live(t, subject, uuid.Nil)
 	}
 	page, err := f.Store.ListByPrincipal(f.Ctx, limes.ListByPrincipalRequest{
-		TenantID: f.Tenant, PrincipalType: limes.PrincipalAgent, Subject: subject, Limit: pageSize,
+		TenantID: f.Tenant, PrincipalType: limes.PrincipalTypeAgent, Subject: subject, Limit: pageSize,
 	})
 	if err != nil || len(page.Items) != pageSize || page.Next != "" {
 		t.Errorf("an exactly full last page: %d items, next %q, %v; want %d and no next page", len(page.Items), page.Next, err, pageSize)
@@ -592,7 +592,7 @@ func checkListPages(t *testing.T, f fixture) {
 	}
 	f.live(t, "agent:someone-else", uuid.Nil)
 	req := limes.ListByPrincipalRequest{
-		TenantID: f.Tenant, PrincipalType: limes.PrincipalAgent, Subject: subject, Limit: pageSize,
+		TenantID: f.Tenant, PrincipalType: limes.PrincipalTypeAgent, Subject: subject, Limit: pageSize,
 	}
 	var sizes []int
 	var got []uuid.UUID
@@ -628,9 +628,9 @@ func checkListFilters(t *testing.T, f fixture) {
 	f.revoke(t, revoked.ID, false)
 	// The same subject under another principal type is another principal.
 	user := f.newCapability(subject, uuid.Nil, f.now.Add(ttl))
-	user.Subject.Type, user.Subject.Agent = limes.PrincipalUser, nil
+	user.Subject.Type, user.Subject.Agent = limes.PrincipalTypeUser, nil
 	f.insert(t, user)
-	base := limes.ListByPrincipalRequest{TenantID: f.Tenant, PrincipalType: limes.PrincipalAgent, Subject: subject}
+	base := limes.ListByPrincipalRequest{TenantID: f.Tenant, PrincipalType: limes.PrincipalTypeAgent, Subject: subject}
 	cases := []struct {
 		name             string
 		expired, revoked bool
@@ -663,7 +663,7 @@ func checkListExpiryInstant(t *testing.T, f fixture) {
 	const subject = "agent:boundary"
 	atNow := f.insert(t, f.newCapability(subject, uuid.Nil, f.now))
 	justAfter := f.insert(t, f.newCapability(subject, uuid.Nil, f.now.Add(timestampResolution)))
-	base := limes.ListByPrincipalRequest{TenantID: f.Tenant, PrincipalType: limes.PrincipalAgent, Subject: subject}
+	base := limes.ListByPrincipalRequest{TenantID: f.Tenant, PrincipalType: limes.PrincipalTypeAgent, Subject: subject}
 	if got := f.listAll(t, base); !slices.Equal(got, []uuid.UUID{justAfter.ID}) {
 		t.Errorf("listed %v, want only %s: %s expires at the store's now", got, justAfter.ID, atNow.ID)
 	}
@@ -725,17 +725,17 @@ func checkListTenants(t *testing.T, f fixture) {
 	if err := f.Store.Insert(f.tenantCtx(other), limes.InsertRequest{Capability: theirs, IssuedBy: issuedBy}); err != nil {
 		t.Fatalf("insert for another tenant: %v", err)
 	}
-	got := f.listAll(t, limes.ListByPrincipalRequest{TenantID: f.Tenant, PrincipalType: limes.PrincipalAgent, Subject: subject})
+	got := f.listAll(t, limes.ListByPrincipalRequest{TenantID: f.Tenant, PrincipalType: limes.PrincipalTypeAgent, Subject: subject})
 	if !slices.Equal(got, []uuid.UUID{mine.ID}) {
 		t.Errorf("listed %v, want only this tenant's %v", got, mine.ID)
 	}
 }
 
 func checkListMalformed(t *testing.T, f fixture) {
-	base := limes.ListByPrincipalRequest{TenantID: f.Tenant, PrincipalType: limes.PrincipalAgent, Subject: "agent:x"}
+	base := limes.ListByPrincipalRequest{TenantID: f.Tenant, PrincipalType: limes.PrincipalTypeAgent, Subject: "agent:x"}
 	for name, mutate := range map[string]func(*limes.ListByPrincipalRequest){
 		"no tenant":              func(r *limes.ListByPrincipalRequest) { r.TenantID = uuid.Nil },
-		"no principal type":      func(r *limes.ListByPrincipalRequest) { r.PrincipalType = limes.PrincipalUnspecified },
+		"no principal type":      func(r *limes.ListByPrincipalRequest) { r.PrincipalType = limes.PrincipalTypeUnspecified },
 		"unknown principal type": func(r *limes.ListByPrincipalRequest) { r.PrincipalType = "robot" },
 		"no subject":             func(r *limes.ListByPrincipalRequest) { r.Subject = "" },
 		"bad cursor":             func(r *limes.ListByPrincipalRequest) { r.Cursor = "not-a-cursor" },
@@ -1020,7 +1020,7 @@ func checkRecordIsItsOwn(t *testing.T, f fixture) {
 	}
 	scribble(&got)
 	check("a capability read back was changed")
-	page, err := f.Store.ListByPrincipal(f.Ctx, limes.ListByPrincipalRequest{TenantID: f.Tenant, PrincipalType: limes.PrincipalAgent, Subject: subject})
+	page, err := f.Store.ListByPrincipal(f.Ctx, limes.ListByPrincipalRequest{TenantID: f.Tenant, PrincipalType: limes.PrincipalTypeAgent, Subject: subject})
 	if err != nil || len(page.Items) != 1 {
 		t.Fatalf("ListByPrincipal = %+v, %v; want the one capability", page.Items, err)
 	}
@@ -1028,7 +1028,7 @@ func checkRecordIsItsOwn(t *testing.T, f fixture) {
 	check("a capability listed was changed")
 
 	// Who issued it, and a Biscuit copy's revocation, are the store's too.
-	byAgent := limes.Principal{Type: limes.PrincipalAgent, TenantID: f.Tenant, Subject: "agent:issuer", Agent: &limes.AgentPrincipal{Model: "m"}}
+	byAgent := limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: f.Tenant, Subject: "agent:issuer", Agent: &limes.AgentPrincipal{Model: "m"}}
 	issued := f.newCapability(subject, uuid.Nil, f.now.Add(ttl))
 	if err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: issued, IssuedBy: byAgent}); err != nil {
 		t.Fatal(err)
@@ -1237,7 +1237,7 @@ func censusFixture(t *testing.T, f fixture) uuid.UUID {
 	t.Helper()
 	of := func(kind limes.PrincipalType, c limes.Capability) limes.Capability {
 		c.Subject.Type = kind
-		if kind != limes.PrincipalAgent {
+		if kind != limes.PrincipalTypeAgent {
 			c.Subject.Agent = nil
 		}
 		return c
@@ -1247,10 +1247,10 @@ func censusFixture(t *testing.T, f fixture) uuid.UUID {
 	f.insert(t, f.newCapability("agent:edge", uuid.Nil, f.now.Add(censusWindow)))
 	revokedExpired := f.insert(t, f.newCapability("agent:revoked-expired", uuid.Nil, f.now.Add(-expiredAgo)))
 	f.revoke(t, revokedExpired.ID, false)
-	f.insert(t, of(limes.PrincipalService, f.newCapability("svc:old", uuid.Nil, f.now.Add(-expiredAgo))))
-	f.insert(t, of(limes.PrincipalService, f.newCapability("svc:now", uuid.Nil, f.now)))
-	userRoot := f.insert(t, of(limes.PrincipalUser, f.newCapability("user:root", uuid.Nil, f.now.Add(ttl))))
-	userChild := f.insert(t, of(limes.PrincipalUser, f.newCapability("user:child", userRoot.ID, f.now.Add(ttl))))
+	f.insert(t, of(limes.PrincipalTypeService, f.newCapability("svc:old", uuid.Nil, f.now.Add(-expiredAgo))))
+	f.insert(t, of(limes.PrincipalTypeService, f.newCapability("svc:now", uuid.Nil, f.now)))
+	userRoot := f.insert(t, of(limes.PrincipalTypeUser, f.newCapability("user:root", uuid.Nil, f.now.Add(ttl))))
+	userChild := f.insert(t, of(limes.PrincipalTypeUser, f.newCapability("user:child", userRoot.ID, f.now.Add(ttl))))
 	f.revoke(t, userRoot.ID, false)
 	if !f.revoked(t, userChild.ID) {
 		t.Fatal("a child of a revoked capability is not revoked")
@@ -1314,9 +1314,9 @@ func checkCensus(t *testing.T, f fixture) {
 	byType := mine
 	byType.ByPrincipalType = true
 	want := []limes.RecordCount{
-		{PrincipalType: limes.PrincipalAgent, Total: 4, Active: 3, Revoked: 1, Delegated: 1, ExpiringSoon: 2},
-		{PrincipalType: limes.PrincipalService, Total: 2, Expired: 2},
-		{PrincipalType: limes.PrincipalUser, Total: 2, Revoked: 2, Delegated: 1},
+		{PrincipalType: limes.PrincipalTypeAgent, Total: 4, Active: 3, Revoked: 1, Delegated: 1, ExpiringSoon: 2},
+		{PrincipalType: limes.PrincipalTypeService, Total: 2, Expired: 2},
+		{PrincipalType: limes.PrincipalTypeUser, Total: 2, Revoked: 2, Delegated: 1},
 	}
 	if got := f.countAll(t, f.Ctx, byType); !reflect.DeepEqual(got, want) {
 		t.Errorf("census of Tenant by principal type = %+v, want %+v", got, want)

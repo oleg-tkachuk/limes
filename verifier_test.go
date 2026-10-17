@@ -118,7 +118,7 @@ func TestIssue_VerifyHappyPath(t *testing.T) {
 	cap, token, err := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject: Principal{
-			Type:     PrincipalAgent,
+			Type:     PrincipalTypeAgent,
 			TenantID: uuid.New(),
 			Subject:  "agent-1",
 		},
@@ -147,7 +147,7 @@ func TestVerify_AudienceMismatch(t *testing.T) {
 	ctx := context.Background()
 	_, token, _ := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New()},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New()},
 		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 	})
@@ -189,7 +189,7 @@ func TestVerify_Expired(t *testing.T) {
 	ctx := context.Background()
 	_, token, _ := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New()},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New()},
 		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 	})
@@ -208,7 +208,7 @@ func TestVerify_Revoked(t *testing.T) {
 	ctx := context.Background()
 	cap, token, _ := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New()},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New()},
 		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 	})
@@ -236,7 +236,7 @@ func TestVerify_UntrustedIssuer(t *testing.T) {
 	})
 	_, token, _ := rogueIssuer.issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New()},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New()},
 		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 	})
@@ -264,7 +264,7 @@ func TestDelegate_NarrowsAndPersists(t *testing.T) {
 
 	parent, _, err := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: tenantID},
 		Audience: []string{audienceData, audienceMCP},
 		Caveats: Caveats{
 			Ops:              []Op{OpGet, OpList, OpSearch, OpShare},
@@ -279,7 +279,7 @@ func TestDelegate_NarrowsAndPersists(t *testing.T) {
 
 	child, childToken, err := issuer.delegate(ctx, DelegateRequest{
 		Parent:   asVerified(parent),
-		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID, Subject: "child"},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: tenantID, Subject: "child"},
 		Audience: []string{audienceData},
 		Caveats: Caveats{
 			Ops:              []Op{OpGet, OpShare},
@@ -311,7 +311,7 @@ func TestDelegate_RejectsWidening(t *testing.T) {
 	tenantID := uuid.New()
 	parent, _, _ := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: tenantID},
 		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet, OpShare}},
 		TTL:      time.Hour,
@@ -319,7 +319,7 @@ func TestDelegate_RejectsWidening(t *testing.T) {
 
 	_, _, err := issuer.delegate(ctx, DelegateRequest{
 		Parent:   asVerified(parent),
-		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: tenantID},
 		Audience: []string{audienceData, audienceAdmin}, // wider!
 		Caveats:  Caveats{Ops: []Op{OpGet, OpShare}},
 	})
@@ -337,7 +337,7 @@ func TestDelegate_RefusesACopyWithLimitsOfItsOwn(t *testing.T) {
 	tenantID := uuid.New()
 	parent, _, err := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: tenantID},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: tenantID},
 		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet, OpShare}, Requests: RequestCeiling{Max: 100}},
 		TTL:      time.Hour,
@@ -348,7 +348,7 @@ func TestDelegate_RefusesACopyWithLimitsOfItsOwn(t *testing.T) {
 	delegate := func(from Capability) error {
 		_, _, err := issuer.delegate(ctx, DelegateRequest{
 			Parent:         asVerified(from),
-			Subject:        Principal{Type: PrincipalAgent, TenantID: tenantID, Subject: "child"},
+			Subject:        Principal{Type: PrincipalTypeAgent, TenantID: tenantID, Subject: "child"},
 			InheritCaveats: true,
 		})
 		return err
@@ -434,7 +434,7 @@ func TestDelegateRefusesAnyBiscuitCopy(t *testing.T) {
 		}
 		before := len(store.caps)
 		_, _, err = issuer.delegate(ctx, DelegateRequest{
-			Parent: vc, Subject: Principal{Type: PrincipalAgent, Subject: "child"}, InheritCaveats: true, TTL: time.Minute,
+			Parent: vc, Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"}, InheritCaveats: true, TTL: time.Minute,
 		})
 		if !errors.Is(err, ErrInvalidRequest) {
 			t.Errorf("%s: Delegate err = %v, want ErrInvalidRequest", name, err)

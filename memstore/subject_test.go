@@ -87,7 +87,7 @@ func mustUsage(t testing.TB, cfg UsageStoreConfig[struct{}]) *UsageStore[struct{
 func recordedSubject[TX any](ctx context.Context, t testing.TB, u *UsageStore[TX], spec subjectSpec) limes.MeterSubject {
 	t.Helper()
 	c := limes.Capability{
-		ID: spec.capID, Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: spec.tenant, Subject: "agent"},
+		ID: spec.capID, Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: spec.tenant, Subject: "agent"},
 		Caveats: limes.Caveats{
 			Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true},
 		},

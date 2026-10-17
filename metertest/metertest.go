@@ -13,8 +13,8 @@
 // again: rejection that moves nothing — by a Biscuit copy's, the capability's,
 // an ancestor's or the tenant's ceiling, by a failed onCharged, under
 // concurrent charges — idempotency on ExternalRef and on a settled
-// reservation, also once the capability is gone, ChargeByRef, OverrunRecord
-// past every ceiling, refunds, holds, their listing and their expiry, request
+// reservation, also once the capability is gone, ChargeByRef,
+// OverrunPolicyRecord past every ceiling, refunds, holds, their listing and their expiry, request
 // counts, copy counters and CopyUsage, units, counters that never pass
 // MaxNanos, a capability not on record, DeleteUsage and PurgeOrphans, the
 // tenant aggregate, its version guard and its listing, and the validation of
@@ -590,7 +590,7 @@ func checkMalformed[TX any](t *testing.T, f fixture[TX]) {
 	for name, req := range map[string]limes.ChargeRequest{
 		"ref too long":      {ExternalRef: strings.Repeat("x", limes.MaxExternalRefBytes+1)},
 		"ref not printable": {ExternalRef: "call\n1"},
-		"unknown overrun":   {Overrun: limes.OverrunRecord + 1},
+		"unknown overrun":   {Overrun: limes.OverrunPolicyRecord + 1},
 	} {
 		req.Amount = 1
 		if _, err := f.charge(req, nil); !errors.Is(err, limes.ErrInvalidRequest) {
@@ -598,7 +598,7 @@ func checkMalformed[TX any](t *testing.T, f fixture[TX]) {
 		}
 	}
 	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{
-		Subject: f.childSubject(), ReservationID: uuid.New(), Amount: one, Overrun: limes.OverrunRecord + 1,
+		Subject: f.childSubject(), ReservationID: uuid.New(), Amount: one, Overrun: limes.OverrunPolicyRecord + 1,
 	}, nil); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("settle with an unknown overrun: err = %v, want ErrInvalidRequest", err)
 	}
@@ -654,10 +654,10 @@ func checkCounterOverflow[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatal(err)
 	}
 	subject := newSubject(subjectSpec{capID: id, tenant: f.Tenant})
-	if _, err := f.charge(limes.ChargeRequest{Subject: subject, Amount: limes.MaxNanos, Overrun: limes.OverrunRecord}, nil); err != nil {
+	if _, err := f.charge(limes.ChargeRequest{Subject: subject, Amount: limes.MaxNanos, Overrun: limes.OverrunPolicyRecord}, nil); err != nil {
 		t.Fatalf("a charge of MaxNanos: %v", err)
 	}
-	if _, err := f.charge(limes.ChargeRequest{Subject: subject, Amount: 1, Overrun: limes.OverrunRecord}, nil); !errors.Is(err, limes.ErrCounterOverflow) || errors.Is(err, limes.ErrInvalidRequest) {
+	if _, err := f.charge(limes.ChargeRequest{Subject: subject, Amount: 1, Overrun: limes.OverrunPolicyRecord}, nil); !errors.Is(err, limes.ErrCounterOverflow) || errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("a nano past MaxNanos on the counter: err = %v, want ErrCounterOverflow and not ErrInvalidRequest", err)
 	}
 	if got := f.spent(t, id); got != limes.MaxNanos {
@@ -670,7 +670,7 @@ func checkCounterOverflow[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: fresh}), Amount: 1, Overrun: limes.OverrunRecord}, nil); !errors.Is(err, limes.ErrCounterOverflow) {
+	if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: fresh}), Amount: 1, Overrun: limes.OverrunPolicyRecord}, nil); !errors.Is(err, limes.ErrCounterOverflow) {
 		t.Errorf("a nano past MaxNanos on the tenant alone: err = %v, want ErrCounterOverflow", err)
 	}
 	b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
@@ -686,7 +686,7 @@ func checkCounterOverflow[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: child}), Amount: 1, Overrun: limes.OverrunRecord}, nil); !errors.Is(err, limes.ErrCounterOverflow) {
+	if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: child}), Amount: 1, Overrun: limes.OverrunPolicyRecord}, nil); !errors.Is(err, limes.ErrCounterOverflow) {
 		t.Errorf("a nano past MaxNanos on the parent alone: err = %v, want ErrCounterOverflow", err)
 	}
 }
@@ -697,7 +697,7 @@ func checkOverrunRecord[TX any](t *testing.T, f fixture[TX]) {
 	if _, err := f.charge(limes.ChargeRequest{Amount: amount}, nil); err == nil {
 		t.Fatal("a rejecting charge past every ceiling was accepted")
 	}
-	r, err := f.charge(limes.ChargeRequest{Amount: amount, Overrun: limes.OverrunRecord}, nil)
+	r, err := f.charge(limes.ChargeRequest{Amount: amount, Overrun: limes.OverrunPolicyRecord}, nil)
 	if err != nil || !r.Overrun || r.Replayed || r.SpentAmount != amount {
 		t.Fatalf("recording charge = %+v, %v; want %v spent, overrun", r, err, amount)
 	}
@@ -734,17 +734,17 @@ func checkSettle[TX any](t *testing.T, f fixture[TX]) {
 			Overrun:       p,
 		}, nil)
 	}
-	if _, err := settle(24*one, limes.OverrunReject); !errors.Is(err, limes.ErrBudgetExceeded) {
+	if _, err := settle(24*one, limes.OverrunPolicyReject); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Fatalf("rejecting settle past the ceiling: err = %v, want ErrBudgetExceeded", err)
 	}
-	r, err := settle(24*one, limes.OverrunRecord)
+	r, err := settle(24*one, limes.OverrunPolicyRecord)
 	if err != nil || !r.Overrun || r.SpentAmount != 24*one {
 		t.Fatalf("recording settle = %+v, %v; want 24 spent, overrun", r, err)
 	}
 	if u, err := f.Usage.GetUsage(f.Ctx, f.root); err != nil || u.ReservedAmount != 0 {
 		t.Errorf("root after settling = %+v, %v; want nothing held", u, err)
 	}
-	again, err := settle(one, limes.OverrunReject)
+	again, err := settle(one, limes.OverrunPolicyReject)
 	if err != nil || !again.Replayed || !again.Overrun || again.ChargeID != r.ChargeID || again.SpentAmount != 24*one {
 		t.Errorf("settling again = %+v, %v; want a replay of %s", again, err, r.ChargeID)
 	}
@@ -1511,7 +1511,7 @@ func checkCopyOverrun[TX any](t *testing.T, f fixture[TX]) {
 	if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{copies: copies}), Amount: 2 * one}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Fatalf("rejecting charge past the copy's budget: err = %v, want ErrBudgetExceeded", err)
 	}
-	r, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{copies: copies}), Amount: 2 * one, Overrun: limes.OverrunRecord}, nil)
+	r, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{copies: copies}), Amount: 2 * one, Overrun: limes.OverrunPolicyRecord}, nil)
 	if err != nil || !r.Overrun {
 		t.Fatalf("recording charge = %+v, %v; want an overrun", r, err)
 	}
@@ -1976,12 +1976,12 @@ func checkUnclampedRanking[TX any](t *testing.T, f fixture[TX]) {
 	}
 	for o, spent := range map[overspender]limes.Nanos{nearer: 2 * ceiling, further: 3 * ceiling} {
 		if _, err := f.Usage.Charge(f.tenantCtx(o.tenant), limes.ChargeRequest{
-			Subject: newSubject(subjectSpec{capID: o.capability, tenant: o.tenant}), Amount: spent, Overrun: limes.OverrunRecord,
+			Subject: newSubject(subjectSpec{capID: o.capability, tenant: o.tenant}), Amount: spent, Overrun: limes.OverrunPolicyRecord,
 		}, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
-	page, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetsAtOrPast, ThresholdPct: fullPct})
+	page, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterAtOrPast, ThresholdPct: fullPct})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2019,7 +2019,7 @@ func checkThresholdBoundary[TX any](t *testing.T, f fixture[TX]) {
 		if _, err := f.Usage.Charge(f.tenantCtx(tenant), limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant}), Amount: tc.spent}, nil); err != nil {
 			t.Fatal(err)
 		}
-		page, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetsAtOrPast, ThresholdPct: tc.threshold})
+		page, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterAtOrPast, ThresholdPct: tc.threshold})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2062,7 +2062,7 @@ func checkExactRanking[TX any](t *testing.T, f fixture[TX]) {
 			t.Fatal(err)
 		}
 	}
-	page, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetsAtOrPast})
+	page, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterAtOrPast})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2240,7 +2240,7 @@ func checkCallbackSeesTheReceipt[TX any](t *testing.T, f fixture[TX]) {
 	}
 	same("a settle", got)
 
-	got, err = f.charge(limes.ChargeRequest{Amount: childBudget, Overrun: limes.OverrunRecord}, onCharged)
+	got, err = f.charge(limes.ChargeRequest{Amount: childBudget, Overrun: limes.OverrunPolicyRecord}, onCharged)
 	if err != nil || !got.Overrun {
 		t.Fatalf("a charge past the ceiling = %+v, %v; want it recorded as an overrun", got, err)
 	}
@@ -2380,12 +2380,12 @@ func checkExpiry[TX any](t *testing.T, f fixture[TX]) {
 func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 	for name, req := range map[string]limes.ListTenantBudgetsRequest{
 		"a negative limit":              {Limit: -1},
-		"a threshold past 100%":         {Filter: limes.TenantBudgetsAtOrPast, ThresholdPct: 101},
-		"a negative threshold":          {Filter: limes.TenantBudgetsAtOrPast, ThresholdPct: -1},
+		"a threshold past 100%":         {Filter: limes.TenantBudgetFilterAtOrPast, ThresholdPct: 101},
+		"a negative threshold":          {Filter: limes.TenantBudgetFilterAtOrPast, ThresholdPct: -1},
 		"a threshold with no filter":    {ThresholdPct: 1},
-		"a threshold beside unlimited":  {Filter: limes.TenantBudgetsUnlimited, ThresholdPct: 1},
-		"a filter this package lacks":   {Filter: limes.TenantBudgetsUnlimited + 1},
-		"a threshold that is no number": {Filter: limes.TenantBudgetsAtOrPast, ThresholdPct: math.NaN()},
+		"a threshold beside unlimited":  {Filter: limes.TenantBudgetFilterUnlimited, ThresholdPct: 1},
+		"a filter this package lacks":   {Filter: limes.TenantBudgetFilterUnlimited + 1},
+		"a threshold that is no number": {Filter: limes.TenantBudgetFilterAtOrPast, ThresholdPct: math.NaN()},
 	} {
 		if _, err := f.Usage.ListTenantBudgets(f.listCtx(), req); !errors.Is(err, limes.ErrInvalidRequest) {
 			t.Errorf("ListTenantBudgets with %s: err = %v, want ErrInvalidRequest", name, err)
@@ -2463,25 +2463,25 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 		}
 	}
 	const half = 50
-	riskyPage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetsAtOrPast, ThresholdPct: half})
+	riskyPage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterAtOrPast, ThresholdPct: half})
 	risky := riskyPage.Items
 	if err != nil || len(risky) != 2 || risky[0].TenantID != frozen || risky[1].TenantID != f.Tenant || riskyPct(risky[1]) != half {
 		t.Errorf("tenants at 50%% or more = %+v, %v; want %s, at a ceiling of 0, then %s at 50%%", risky, err, frozen, f.Tenant)
 	}
 	// At a threshold of 0, every tenant with a ceiling and none without.
-	ceiled, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetsAtOrPast})
+	ceiled, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterAtOrPast})
 	if err != nil || slices.ContainsFunc(ceiled.Items, func(s limes.TenantBudget) bool { return s.TenantID == unlimited }) ||
 		!slices.ContainsFunc(ceiled.Items, func(s limes.TenantBudget) bool { return s.TenantID == f.Tenant }) {
 		t.Errorf("tenants with a ceiling = %+v, %v; want %s and not %s", ceiled.Items, err, f.Tenant, unlimited)
 	}
-	unlPage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetsUnlimited})
+	unlPage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterUnlimited})
 	unl := unlPage.Items
 	if err != nil || slices.ContainsFunc(unl, func(s limes.TenantBudget) bool { return s.TenantID == f.Tenant }) ||
 		!slices.ContainsFunc(unl, func(s limes.TenantBudget) bool { return s.TenantID == unlimited }) {
 		t.Errorf("unlimited tenants = %+v, %v; want %s and not %s", unl, err, unlimited, f.Tenant)
 	}
-	// TenantBudgetsAll names the filter a request that names none takes.
-	named, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetsAll, Limit: listed})
+	// TenantBudgetFilterAll names the filter a request that names none takes.
+	named, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterAll, Limit: listed})
 	if err != nil || len(named.Items) != len(order) {
 		t.Fatalf("every tenant, by name = %d rows, %v; want %d", len(named.Items), err, len(order))
 	}
@@ -2824,8 +2824,8 @@ func checkPeriodStart[TX any](t *testing.T, f fixture[TX]) {
 // checkSettleWithinHold holds a store to Settle's contract: only an amount
 // above the hold must fit the ceilings. A settle at or below it adds nothing
 // to what is already counted, so a ceiling crossed meanwhile — by an
-// OverrunRecord charge elsewhere in the chain, or a tenant ceiling lowered —
-// does not refuse it, and the whole hold is released everywhere it counted.
+// OverrunPolicyRecord charge elsewhere in the chain, or a tenant ceiling
+// lowered — does not refuse it, and the whole hold is released everywhere it counted.
 func checkSettleWithinHold[TX any](t *testing.T, f fixture[TX]) {
 	const held, actual = 10 * one, 4 * one
 	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: held})
@@ -2840,7 +2840,7 @@ func checkSettleWithinHold[TX any](t *testing.T, f fixture[TX]) {
 	if _, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{
 		Subject: newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, budget: budgetOf(rootBudget)}),
 		Amount:  rootBudget,
-		Overrun: limes.OverrunRecord,
+		Overrun: limes.OverrunPolicyRecord,
 	}, nil); err != nil {
 		t.Fatal(err)
 	}

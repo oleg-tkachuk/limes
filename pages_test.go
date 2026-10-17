@@ -186,7 +186,7 @@ func TestAllByPrincipal(t *testing.T) {
 func TestAllByPrincipalKeepsTheRequest(t *testing.T) {
 	const pageSize = 2
 	req := ListByPrincipalRequest{
-		TenantID: uuid.New(), PrincipalType: PrincipalAgent, Subject: "agent",
+		TenantID: uuid.New(), PrincipalType: PrincipalTypeAgent, Subject: "agent",
 		IncludeExpired: true, Limit: pageSize,
 	}
 	l := &fakeLister{pages: threePages()}

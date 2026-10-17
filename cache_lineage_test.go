@@ -21,7 +21,7 @@ func TestRevocationCacheDropReachesADescendant(t *testing.T) {
 	parent := s.verified(token)
 	childResult, err := s.issuer.Delegate(ctx, limes.DelegateRequest{
 		Parent:  parent,
-		Subject: limes.Principal{Type: limes.PrincipalAgent, TenantID: s.tenantID, Subject: "sub-worker"},
+		Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: s.tenantID, Subject: "sub-worker"},
 		TTL:     time.Minute,
 		Caveats: limes.Caveats{
 			Ops: []limes.Op{limes.OpGet}, ResourcePrefixes: []string{"corpus/public/"},

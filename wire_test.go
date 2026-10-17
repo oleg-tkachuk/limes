@@ -59,7 +59,7 @@ func TestWireStructsMirrorTheExportedTypes(t *testing.T) {
 
 // Every field crosses the wire and back.
 func TestWireStructsRoundTrip(t *testing.T) {
-	p := Principal{Type: PrincipalAgent, Subject: "agent:a", Agent: &AgentPrincipal{
+	p := Principal{Type: PrincipalTypeAgent, Subject: "agent:a", Agent: &AgentPrincipal{
 		AgentType: "worker", AgentVersion: "1", Model: "m", MCPClient: "host@1",
 	}}
 	if got := toWirePrincipal(p).principal(); !reflect.DeepEqual(got, p) {

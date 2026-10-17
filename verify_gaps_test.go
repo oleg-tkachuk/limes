@@ -23,7 +23,7 @@ func TestVerifyFailsClosedWhenRevocationCannotBeChecked(t *testing.T) {
 	issuer, v, _, _ := buildIssuerVerifier(t)
 	_, token, err := issuer.issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "op"},
-		Subject:  Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Minute,
 	})
 	if err != nil {

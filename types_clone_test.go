@@ -8,7 +8,7 @@ import (
 // Clone shares nothing with the capability it copies.
 func TestCapabilityCloneSharesNothing(t *testing.T) {
 	c := Capability{
-		Subject:  Principal{Type: PrincipalAgent, Agent: &AgentPrincipal{Model: "m"}},
+		Subject:  Principal{Type: PrincipalTypeAgent, Agent: &AgentPrincipal{Model: "m"}},
 		Audience: []string{"a"},
 		Caveats:  Caveats{Ops: []Op{OpGet}, ResourcePrefixes: []string{"p/"}, ResourceURIs: []string{"p/u"}, SourceIPCIDR: []string{netip.MustParsePrefix("10.0.0.0/8").String()}},
 		Copies:   []CopyCeiling{{RevocationID: []byte{1}, Requests: &RequestCeiling{Max: 1}, Budget: &BudgetCeiling{Max: 1}}},

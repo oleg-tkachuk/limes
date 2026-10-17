@@ -34,7 +34,7 @@ func TestWritesTheFullySpecifiedAlgorithm(t *testing.T) {
 func issueFor(t *testing.T, issuer *Issuer) (Capability, string) {
 	t.Helper()
 	c, token, err := issuer.issue(context.Background(), IssueRequest{
-		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalAgent, TenantID: uuid.New(), Subject: "a"},
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour,
 	})
 	if err != nil {
