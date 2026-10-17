@@ -55,8 +55,7 @@ func main() {
 			Ops:              []limes.Op{limes.OpGet, limes.OpShare},
 			ResourcePrefixes: []string{"corpus/public/"},
 			Requests:         limes.RequestCeiling{Max: 500},
-			Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("25.00")},
-			UnitCode:         unit,
+			Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("25.00"), UnitCode: unit},
 		},
 	})
 	demo.Must(log, err, "issue to the orchestrator")
@@ -79,8 +78,7 @@ func main() {
 			Ops:              []limes.Op{limes.OpGet},
 			ResourcePrefixes: []string{"corpus/public/2026/"},
 			Requests:         limes.RequestCeiling{Max: 50},
-			Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("2.00")},
-			UnitCode:         unit,
+			Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("2.00"), UnitCode: unit},
 		},
 	})
 	demo.Must(log, err, "delegate to the sub-agent")
@@ -112,8 +110,7 @@ func main() {
 			Ops:              []limes.Op{limes.OpGet},
 			ResourcePrefixes: []string{"corpus/public/"},
 			Requests:         limes.RequestCeiling{Max: 50},
-			Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("999.00")},
-			UnitCode:         unit,
+			Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("999.00"), UnitCode: unit},
 		},
 	})
 	demo.Refused(log, err, limes.ErrDelegationTooWide, "delegate a budget wider than the parent's")

@@ -90,8 +90,7 @@ issued, _ := issuer.Issue(ctx, limes.IssueRequest{
         Ops:              []limes.Op{limes.OpGet, limes.OpShare},
         ResourcePrefixes: []string{"corpus/public/"},
         Requests:         limes.RequestCeiling{Max: 500},
-        Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("25.00")},
-        UnitCode:         "USD",
+        Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("25.00"), UnitCode: "USD"},
     },
 })
 

@@ -199,8 +199,7 @@ delegated, err := issuer.Delegate(ctx, limes.DelegateRequest{ // .Capability, .T
         Ops:              []limes.Op{limes.OpGet},  // dropped OpShare
         ResourcePrefixes: []string{"corpus/public/2026/"},     // narrowed
         Requests:         limes.RequestCeiling{Max: 50},                         // 500 → 50
-        Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("2.00")}, // 25.00 → 2.00
-        UnitCode:         "USD",                               // the parent's ("" reads as USD)
+        Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("2.00")}, // 25.00 → 2.00, in the parent's USD
     },
 })
 ```
@@ -218,9 +217,9 @@ lacks, a wider scope, a bigger budget, a wider audience or another tenant —
 or drop the parent's key binding or `IdempotencyKeyRequired`, or grant an
 `AllowTaintedRead` it lacks — and you get `ErrDelegationTooWide`; a
 TTL that would outlive the parent is cut to the parent's expiry, and a child
-starts no earlier than its parent (its `NotBefore`, else its issuance). Ask for a different `UnitCode` and you get
-`ErrUnitCodeMismatch` — units are never converted; name none and the child
-takes its parent's. Each child resource must be
+starts no earlier than its parent (its `NotBefore`, else its issuance). Ask for a budget in a different `UnitCode` and
+you get `ErrUnitCodeMismatch` — units are never converted; name none and the
+child takes its parent's. Each child resource must be
 reachable by the parent (a parent pinned to exact URIs admits no child
 prefix), and each child network must lie inside a parent network.
 
@@ -370,7 +369,9 @@ invalid — `ErrBiscuitAttenuation`, which matches `ErrInvalidToken`; a later
 count, and revoking the capability revokes every copy.
 
 A copy can also get limits of its own: `Requests` and `Budget` on the
-`Attenuation` (nil sets none; a ceiling of 0 freezes the copy). Each is counted under the revocation id of the block that
+`Attenuation` (nil sets none; a ceiling of 0 freezes the copy). A copy's
+`Budget` names no `UnitCode`: it is in its capability's unit, which the block
+does not carry, and the verifier gives it. Each is counted under the revocation id of the block that
 set it, so siblings narrowed apart count apart, while the capability's own
 limits still bound them all; a limit must fit every limit already in force,
 and an `Unlimited` one is refused: a copy only narrows.
@@ -449,15 +450,18 @@ the charge's tenant and unit.
 
 Every counter counts in one unit. A charge or reservation in another unit than
 the capability, an ancestor or the tenant already counts in is
-`ErrUnitCodeMismatch`, never a sum of two currencies. No unit is assumed: a
-capability whose `UnitCode` is empty counts requests (`Bump`) but no amount —
-its `Charge`, `Reserve` and `Settle` are `ErrInvalidRequest`, and caveats
-that bound its spend (`Budget.Max` above zero) without one are
-`ErrInvalidCaveats` — and a `SetTenantBudget` that names none leaves the tenant's unit to its first
-charge or reservation. The tenant aggregate counts from its first charge or reservation,
+`ErrUnitCodeMismatch`, never a sum of two currencies. The unit is part of
+the ceiling, as a currency is part of an amount: a `BudgetCeiling` that lets
+anything be spent — a `Max` above zero, or `Unlimited` — names its
+`UnitCode`, and one that does not is `ErrInvalidRequest` (`ErrInvalidCaveats`
+in caveats). Only the zero ceiling, which spends nothing, may name none: such
+a capability counts requests (`Bump`) but no amount — its `Charge`, `Reserve`
+and `Settle` are `ErrInvalidRequest`. A tenant ceiling names its unit the same
+way; the zero one, a freeze, keeps the unit the tenant counts in. The tenant
+aggregate counts from its first charge or reservation, in that charge's unit,
 whether or not a ceiling is set: `SetTenantBudget` later measures the new
-ceiling against that spend and those holds, and refuses a new `UnitCode`
-while anything is held in the old one, or spent in it unless `ResetSpend`
+ceiling against that spend and those holds, and refuses a ceiling in another
+unit while anything is held in the old one, or spent in it unless `ResetSpend`
 closes that spend. It is guarded by
 `ExpectedVersion` — 0 while no ceiling has been set, else the version read —
 and a conflict is `ErrTenantBudgetVersionMismatch`. Until one is set the
@@ -494,7 +498,7 @@ on your side needs rounding, summing apart or correcting.
 - **Range.** Up to `MaxNanos`, just under a billion units. An amount outside
   it is `ErrInvalidAmount`, which matches `ErrInvalidRequest`; a charge of a
   valid amount that would take a counter past it is `ErrCounterOverflow`.
-- **Units.** `UnitCode` is any ISO 4217 code in upper case (`IsUnitCode`);
+- **Units.** `BudgetCeiling.UnitCode` is any ISO 4217 code in upper case (`IsUnitCode`);
   XXX (`AbstractUnitCode`), ISO 4217's code for "no currency", is the one for
   a budget that is not money.
 
@@ -1040,7 +1044,7 @@ stop rather than retry. The full table is in [diagrams.md](diagrams.md#answering
 | `redisreplay.Config` | `redisreplay.DefaultKeyPrefix`, `limes:dpop:replay:`; `dpop.DefaultReplayEntriesPerHolder`, 1 000, per capability |
 | `dpop.HMACNoncesConfig` | `dpop.DefaultNonceLifetime`, 5 minutes; `dpop.HMACNonceClockSkew`, 5 seconds, for a nonce issued ahead of this replica's clock; keys of at least `dpop.HMACNonceKeyBytes`, 32 |
 | `DefaultReservationTTL` | 5 minutes |
-| `UnitCode` left empty | none: no amount is counted until a unit is named |
+| `BudgetCeiling.UnitCode` left empty | allowed only on the zero ceiling, which spends nothing |
 | `PurgeClockSkew` | 1 minute |
 | `MaxExternalRefBytes` | 200 |
 | `MaxNanos` | just under a billion units |

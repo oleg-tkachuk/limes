@@ -83,15 +83,6 @@ func (c Caveats) Validate() error {
 	if err := c.Budget.Validate(); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidCaveats, err)
 	}
-	if err := validUnitCode(c.UnitCode); err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalidCaveats, err)
-	}
-	// A bound on spend counts in a unit; without one nothing could ever be
-	// charged against it. An unlimited budget bounds nothing, so a
-	// capability that counts requests alone may carry one.
-	if c.Budget.Max > 0 && c.UnitCode == "" {
-		return fmt.Errorf("%w: budget %s names no unit_code", ErrInvalidCaveats, c.Budget)
-	}
 	for _, cidr := range c.SourceIPCIDR {
 		p, err := netip.ParsePrefix(cidr)
 		if err != nil {

@@ -103,8 +103,7 @@ func (s exampleStack) issue() (limes.Capability, string) {
 			Ops:              []limes.Op{limes.OpGet, limes.OpShare},
 			ResourcePrefixes: []string{"corpus/public/"},
 			Requests:         limes.RequestCeiling{Max: 500},
-			Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("25.00")},
-			UnitCode:         "USD",
+			Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("25.00"), UnitCode: "USD"},
 		},
 	})
 	c, token := cResult.Capability, cResult.Token
@@ -140,8 +139,7 @@ func ExampleIssuer_Issue() {
 		Caveats: limes.Caveats{
 			Ops:              []limes.Op{limes.OpGet},
 			ResourcePrefixes: []string{"corpus/public/"},
-			Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("25.00")},
-			UnitCode:         "USD",
+			Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("25.00"), UnitCode: "USD"},
 		},
 	})
 	c, token := cResult.Capability, cResult.Token
@@ -195,8 +193,7 @@ func ExampleIssuer_Delegate() {
 			Ops:              []limes.Op{limes.OpGet},
 			ResourcePrefixes: []string{"corpus/public/2026/"},
 			Requests:         limes.RequestCeiling{Max: 50},
-			Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("2.00")},
-			UnitCode:         "USD",
+			Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("2.00"), UnitCode: "USD"},
 		},
 	})
 	child := childResult.Capability
@@ -208,9 +205,8 @@ func ExampleIssuer_Delegate() {
 		Subject: worker,
 		TTL:     time.Minute,
 		Caveats: limes.Caveats{
-			Ops:      []limes.Op{limes.OpGet},
-			Budget:   limes.BudgetCeiling{Max: limes.MustParseAmount("999")},
-			UnitCode: "USD",
+			Ops:    []limes.Op{limes.OpGet},
+			Budget: limes.BudgetCeiling{Max: limes.MustParseAmount("999"), UnitCode: "USD"},
 		},
 	})
 	fmt.Println(errors.Is(err, limes.ErrDelegationTooWide))
@@ -383,7 +379,7 @@ func Example_backdatedCharges() {
 	c := limes.Capability{
 		ID: uuid.New(), IssuedAt: start, ExpiresAt: start.Add(period),
 		Subject: limes.Principal{Type: limes.PrincipalTypeService, TenantID: uuid.New(), Subject: "svc:reporting"},
-		Caveats: limes.Caveats{Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true}, UnitCode: "USD"},
+		Caveats: limes.Caveats{Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true, UnitCode: "USD"}},
 	}
 	if err := records.Insert(ctx, limes.InsertRequest{Capability: c}); err != nil {
 		log.Fatal(err)

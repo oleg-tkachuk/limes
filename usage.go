@@ -217,9 +217,9 @@ type TenantBudgets interface {
 	// this on each billing close. ResetSpend=false adjusts the cap
 	// mid-cycle without affecting accumulated spend. It refuses what
 	// SetTenantBudgetRequest.Validate refuses — a ceiling outside
-	// 0..MaxNanos is ErrInvalidAmount — and changes nothing. A UnitCode
-	// other than the row's returns ErrUnitCodeMismatch while anything is
-	// held in the old unit, or spent in it and not reset.
+	// 0..MaxNanos is ErrInvalidAmount — and changes nothing. A ceiling in a
+	// unit other than the row's returns ErrUnitCodeMismatch while anything
+	// is held in the old unit, or spent in it and not reset.
 	SetTenantBudget(ctx context.Context, req SetTenantBudgetRequest) (TenantBudget, error)
 
 	// ListTenantBudgets returns tenant budget rows; a consumer joins its
@@ -526,13 +526,14 @@ func (r RefundRequest) Validate() error {
 // so that sums do not drift.
 type TenantBudget struct {
 	TenantID uuid.UUID
-	// Ceiling bounds the tenant's spend in the current period. A tenant
-	// whose ceiling was never set counts Unlimited.
+	// Ceiling bounds the tenant's spend in the current period, in the unit
+	// the tenant counts in: Ceiling.UnitCode, which the first charge or
+	// hold records when no ceiling named it. A tenant whose ceiling was
+	// never set counts Unlimited.
 	Ceiling     BudgetCeiling
 	SpentAmount Nanos
 	// ReservedAmount is held by the tenant's open reservations.
 	ReservedAmount Nanos
-	UnitCode       string
 	PeriodStart    time.Time
 	// PeriodEnd is when the accounting window closes; zero for an
 	// open-ended one.
@@ -567,13 +568,10 @@ func (b TenantBudget) Utilization() (pct float64, limited bool) {
 // SetTenantBudgetRequest is the input for UsageStore.SetTenantBudget.
 type SetTenantBudgetRequest struct {
 	TenantID uuid.UUID
-	// Ceiling is the tenant's new ceiling; the zero value freezes its
-	// spend, BudgetCeiling{Unlimited: true} lifts it.
+	// Ceiling is the tenant's new ceiling, in the unit it names: the zero
+	// value freezes the tenant's spend, in whatever unit it counts, and
+	// BudgetCeiling{Unlimited: true, UnitCode: u} lifts it.
 	Ceiling BudgetCeiling
-	// UnitCode pins the currency. Empty keeps the tenant's, or, for a
-	// tenant that has none yet, leaves it to the first charge or hold to
-	// pin.
-	UnitCode string
 	// PeriodEnd pins a closing time for the accounting window; zero leaves
 	// it open-ended (typical for "just set the cap, I'll roll later").
 	PeriodEnd time.Time
@@ -590,8 +588,8 @@ type SetTenantBudgetRequest struct {
 }
 
 // Validate refuses a request with no tenant, a ceiling that does not
-// validate, a unit that is not an ISO 4217 code, or a negative
-// ExpectedVersion, as ErrInvalidRequest. A store calls it before reading the
+// validate — among them one that lets something be spent and names no unit
+// — or a negative ExpectedVersion, as ErrInvalidRequest. A store calls it before reading the
 // tenant's row, so a malformed request is refused as one, never as a
 // version conflict.
 func (r SetTenantBudgetRequest) Validate() error {
@@ -601,10 +599,7 @@ func (r SetTenantBudgetRequest) Validate() error {
 	case r.ExpectedVersion < 0:
 		return invalidRequest("set tenant budget: ExpectedVersion %d is negative", r.ExpectedVersion)
 	}
-	if err := r.Ceiling.Validate(); err != nil {
-		return err
-	}
-	return validUnitCode(r.UnitCode)
+	return r.Ceiling.Validate()
 }
 
 // TenantBudgetFilter picks the rows ListTenantBudgets lists.

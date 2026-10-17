@@ -386,8 +386,8 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 	}
 	// A child counts in its parent's unit; one that names none takes it,
 	// before its caveats are validated against it.
-	if req.Caveats.UnitCode == "" {
-		req.Caveats.UnitCode = parent.Caveats.UnitCode
+	if req.Caveats.Budget.UnitCode == "" {
+		req.Caveats.Budget.UnitCode = parent.Caveats.Budget.UnitCode
 	}
 	if err := validateAudience(req.Audience); err != nil {
 		return Capability{}, "", err

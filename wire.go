@@ -71,7 +71,7 @@ func toWireCaveats(c Caveats) wireCaveats {
 		Ops: c.Ops, ResourcePrefixes: c.ResourcePrefixes, ResourceURIs: c.ResourceURIs,
 		MaxRequests: c.Requests.Max, UnlimitedRequests: c.Requests.Unlimited,
 		MaxBudget: c.Budget.Max, UnlimitedBudget: c.Budget.Unlimited,
-		UnitCode: c.UnitCode, AllowTaintedRead: c.AllowTaintedRead,
+		UnitCode: c.Budget.UnitCode, AllowTaintedRead: c.AllowTaintedRead,
 		IdempotencyKeyRequired: c.IdempotencyKeyRequired, SourceIPCIDR: c.SourceIPCIDR,
 	}
 }
@@ -79,9 +79,9 @@ func toWireCaveats(c Caveats) wireCaveats {
 func (w wireCaveats) caveats() Caveats {
 	return Caveats{
 		Ops: w.Ops, ResourcePrefixes: w.ResourcePrefixes, ResourceURIs: w.ResourceURIs,
-		Requests: RequestCeiling{Max: w.MaxRequests, Unlimited: w.UnlimitedRequests},
-		Budget:   BudgetCeiling{Max: w.MaxBudget, Unlimited: w.UnlimitedBudget},
-		UnitCode: w.UnitCode, AllowTaintedRead: w.AllowTaintedRead,
+		Requests:               RequestCeiling{Max: w.MaxRequests, Unlimited: w.UnlimitedRequests},
+		Budget:                 BudgetCeiling{Max: w.MaxBudget, Unlimited: w.UnlimitedBudget, UnitCode: w.UnitCode},
+		AllowTaintedRead:       w.AllowTaintedRead,
 		IdempotencyKeyRequired: w.IdempotencyKeyRequired, SourceIPCIDR: w.SourceIPCIDR,
 	}
 }

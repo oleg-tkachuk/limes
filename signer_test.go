@@ -54,8 +54,7 @@ func TestSign_RoundTrip(t *testing.T) {
 		Caveats: Caveats{
 			Ops:              []Op{OpGet, OpList, OpSearch},
 			ResourcePrefixes: []string{"object://acme/run-42/"},
-			Budget:           BudgetCeiling{Max: NanosPerUnit / 2},
-			UnitCode:         "USD",
+			Budget:           BudgetCeiling{Max: NanosPerUnit / 2, UnitCode: "USD"},
 			Requests:         RequestCeiling{Max: 100},
 		},
 	}
@@ -84,8 +83,8 @@ func TestSign_RoundTrip(t *testing.T) {
 	if got.Subject.Agent == nil || got.Subject.Agent.AgentType != "research-orchestrator" {
 		t.Errorf("AgentPrincipal round-trip lost")
 	}
-	if got.Caveats.Budget != (BudgetCeiling{Max: NanosPerUnit / 2}) {
-		t.Errorf("MaxBudgetAmount: got %v, want 0.50", got.Caveats.Budget)
+	if got.Caveats.Budget != (BudgetCeiling{Max: NanosPerUnit / 2, UnitCode: "USD"}) {
+		t.Errorf("MaxBudgetAmount: got %v, want 0.50 USD", got.Caveats.Budget)
 	}
 	if got.Generation != 1 {
 		t.Errorf("Generation: got %d, want 1", got.Generation)
@@ -220,7 +219,7 @@ func TestNarrows_RejectsWidening(t *testing.T) {
 			c.Caveats.Requests = RequestCeiling{Unlimited: true}
 		},
 		"unlimited budget": func(c *Capability) {
-			c.Caveats.Budget = BudgetCeiling{Unlimited: true}
+			c.Caveats.Budget = BudgetCeiling{Unlimited: true, UnitCode: "USD"}
 		},
 		"cross tenant": func(c *Capability) {
 			c.Subject.TenantID = uuid.New()
@@ -258,9 +257,8 @@ func TestNarrows_RejectsCrossCurrency(t *testing.T) {
 		Subject:  Principal{TenantID: tenantID, Type: PrincipalTypeAgent},
 		Audience: []string{audienceData},
 		Caveats: Caveats{
-			Ops:      []Op{OpGet},
-			Budget:   BudgetCeiling{Max: MustParseAmount("10.0")},
-			UnitCode: "USD",
+			Ops:    []Op{OpGet},
+			Budget: BudgetCeiling{Max: MustParseAmount("10.0"), UnitCode: "USD"},
 		},
 		IssuedAt:  now,
 		ExpiresAt: now.Add(15 * time.Minute),
@@ -283,7 +281,7 @@ func TestNarrows_RejectsCrossCurrency(t *testing.T) {
 		{"", "", true},
 		{"USD", "USD", true},
 	} {
-		parent.Caveats.UnitCode, child.Caveats.UnitCode = tc.parent, tc.child
+		parent.Caveats.Budget.UnitCode, child.Caveats.Budget.UnitCode = tc.parent, tc.child
 		err := Narrows(parent, child)
 		if got := !errors.Is(err, ErrUnitCodeMismatch); got != tc.ok {
 			t.Errorf("Narrows, parent in %q, child in %q: err = %v; want ok=%v", tc.parent, tc.child, err, tc.ok)

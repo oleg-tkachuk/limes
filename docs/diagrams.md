@@ -536,7 +536,7 @@ flowchart TB
         n1["Ops ⊆ parent.Ops"]
         n2["every resource reachable by the parent<br/>exact-URI parent admits no child prefix"]
         n3["Requests within the parent's: any under Unlimited,<br/>a bound no higher under a bound"]
-        n4["UnitCode = parent's"]
+        n4["Budget.UnitCode = parent's<br/>(none taken as the parent's)"]
         n5["Budget within the parent's, the same way"]
         n6["AllowTaintedRead only if the parent has it<br/>IdempotencyKeyRequired never relaxed"]
         n7["SourceIPCIDR inside a parent network"]

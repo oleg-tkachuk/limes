@@ -75,8 +75,9 @@
 // another holds, and one that is not there is an error, never nil.
 //
 // Every amount is [Nanos], an int64 count of billionths of the unit
-// (UnitCode, an ISO 4217 code; XXX for a budget that is not money), so spend
-// sums, compares and refunds exactly, with no rounding left to the consumer.
+// (BudgetCeiling.UnitCode, an ISO 4217 code; XXX for a budget that is not
+// money), so spend sums, compares and refunds exactly, with no rounding left
+// to the consumer.
 //
 // Every read names what it reads — Store.GetRecord a capability,
 // MeterReader.GetUsage the counters, TenantBudgets.GetTenantBudget a ceiling —

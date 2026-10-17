@@ -196,7 +196,7 @@ func TestUnitCodes(t *testing.T) {
 		if IsUnitCode(tc.in) != tc.ok {
 			t.Errorf("IsUnitCode(%q) = %v, want %v", tc.in, !tc.ok, tc.ok)
 		}
-		if err := (Caveats{Ops: []Op{OpGet}, UnitCode: tc.in}).Validate(); (err == nil) != tc.ok {
+		if err := (Caveats{Ops: []Op{OpGet}, Budget: BudgetCeiling{UnitCode: tc.in}}).Validate(); (err == nil) != tc.ok {
 			t.Errorf("caveats in %q: err = %v, want ok=%v", tc.in, err, tc.ok)
 		}
 	}

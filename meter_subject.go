@@ -22,7 +22,6 @@ type MeterSubject struct {
 	tenantID     uuid.UUID
 	maxRequests  RequestCeiling
 	maxBudget    BudgetCeiling
-	unitCode     string
 	copies       []CopyCeiling
 }
 
@@ -33,7 +32,6 @@ func (v VerifiedCapability) MeterSubject() MeterSubject {
 		tenantID:     v.c.Subject.TenantID,
 		maxRequests:  v.c.Caveats.Requests,
 		maxBudget:    v.c.Caveats.Budget,
-		unitCode:     v.c.Caveats.UnitCode,
 		copies:       v.c.clone().Copies,
 	}
 }
@@ -57,7 +55,6 @@ func StoredMeterSubject(ctx context.Context, records RecordReader, capabilityID 
 		tenantID:     c.Subject.TenantID,
 		maxRequests:  c.Caveats.Requests,
 		maxBudget:    c.Caveats.Budget,
-		unitCode:     c.Caveats.UnitCode,
 	}, nil
 }
 
@@ -74,9 +71,9 @@ func (s MeterSubject) Requests() RequestCeiling { return s.maxRequests }
 // Budget is the capability's own budget ceiling.
 func (s MeterSubject) Budget() BudgetCeiling { return s.maxBudget }
 
-// UnitCode is the unit the capability counts in; empty when it names none,
-// and then it counts requests alone.
-func (s MeterSubject) UnitCode() string { return s.unitCode }
+// UnitCode is the unit the capability counts in, its budget's; empty when
+// that names none, and then it counts requests alone.
+func (s MeterSubject) UnitCode() string { return s.maxBudget.UnitCode }
 
 // Copies are the limits of the Biscuit copy presented, a copy of them.
 func (s MeterSubject) Copies() []CopyCeiling { return cloneCopyCeilings(s.copies) }
@@ -87,7 +84,7 @@ func (s MeterSubject) validate() error {
 	if s.capabilityID == uuid.Nil || s.tenantID == uuid.Nil {
 		return invalidRequest("the meter subject names no capability or no tenant")
 	}
-	return validUnitCode(s.unitCode)
+	return validUnitCode(s.maxBudget.UnitCode)
 }
 
 // validateAmounts is validate for a request that moves an amount, which
@@ -96,7 +93,7 @@ func (s MeterSubject) validateAmounts() error {
 	if err := s.validate(); err != nil {
 		return err
 	}
-	if s.unitCode == "" {
+	if s.maxBudget.UnitCode == "" {
 		return invalidRequest("capability %s names no unit_code, so it counts no amount", s.capabilityID)
 	}
 	return nil
@@ -109,8 +106,7 @@ func init() {
 		budget := linkedPart[BudgetCeiling]("Budget", f.Budget)
 		return MeterSubject{
 			capabilityID: f.CapabilityID, tenantID: f.TenantID,
-			maxRequests: requests, maxBudget: budget,
-			unitCode: f.UnitCode, copies: copies,
+			maxRequests: requests, maxBudget: budget, copies: copies,
 		}
 	}
 }

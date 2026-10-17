@@ -24,11 +24,12 @@ func TestWireStructsMirrorTheExportedTypes(t *testing.T) {
 			}
 		}
 	}
-	// A ceiling is two members on the wire: its bound and whether it is
-	// lifted. Every other field of Caveats has one of the same name.
+	// A ceiling is its members on the wire: its bound, whether it is
+	// lifted and, for a budget, its unit. Every other field of Caveats has
+	// one of the same name.
 	ceilings := map[string][]string{
 		"Requests": {"MaxRequests", "UnlimitedRequests"},
-		"Budget":   {"MaxBudget", "UnlimitedBudget"},
+		"Budget":   {"MaxBudget", "UnlimitedBudget", "UnitCode"},
 	}
 	caveats, wire := reflect.TypeFor[Caveats](), reflect.TypeFor[wireCaveats]()
 	want := 0
@@ -67,7 +68,7 @@ func TestWireStructsRoundTrip(t *testing.T) {
 	}
 	c := Caveats{
 		Ops: []Op{OpGet}, ResourcePrefixes: []string{"a/"}, ResourceURIs: []string{"a/b"},
-		Requests: RequestCeiling{Max: 1}, Budget: BudgetCeiling{Max: NanosPerUnit}, UnitCode: "USD",
+		Requests: RequestCeiling{Max: 1}, Budget: BudgetCeiling{Max: NanosPerUnit, UnitCode: "USD"},
 		AllowTaintedRead: true, IdempotencyKeyRequired: true, SourceIPCIDR: []string{"10.0.0.0/8"},
 	}
 	if got := toWireCaveats(c).caveats(); !reflect.DeepEqual(got, c) {

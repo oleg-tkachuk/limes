@@ -178,9 +178,11 @@ type Attenuation struct {
 	ConfirmationJKT string
 	// Requests and Budget give this copy limits of its own, counted apart
 	// from its siblings' and within the capability's: requests made with
-	// it, and its spend in the capability's unit. nil sets none; a ceiling
-	// of 0 freezes the copy. Each must be within every limit already in
-	// force, and an Unlimited one is refused: a copy only narrows.
+	// it, and its spend in the capability's unit, which a block does not
+	// carry — so Budget names no UnitCode, and the verifier gives it the
+	// capability's. nil sets none; a ceiling of 0 freezes the copy. Each
+	// must be within every limit already in force, and an Unlimited one is
+	// refused: a copy only narrows.
 	Requests *RequestCeiling
 	Budget   *BudgetCeiling
 }
@@ -229,8 +231,8 @@ func Attenuate(token string, a Attenuation) (string, error) {
 		errs = append(errs, add(biscuitFactMaxRequests, biscuit.Integer(r.Max)))
 	}
 	if b := a.Budget; b != nil {
-		if b.Unlimited || b.Validate() != nil {
-			return "", invalidRequest("a copy's budget ceiling is a bound within 0..%s", MaxNanos)
+		if b.Unlimited || b.Max.Validate() != nil || b.UnitCode != "" {
+			return "", invalidRequest("a copy's budget ceiling is a bound within 0..%s, in its capability's unit, which it does not name", MaxNanos)
 		}
 		errs = append(errs, add(biscuitFactMaxBudget, biscuit.Integer(b.Max)))
 	}
@@ -394,6 +396,10 @@ func applyAttenuation(cur Capability, blk decodedBlock, id []byte) (Capability, 
 	}
 	if f.requests == nil && f.budget == nil {
 		return next, nil
+	}
+	// A copy spends in its capability's unit, which the block leaves out.
+	if f.budget != nil {
+		f.budget.UnitCode = cur.Caveats.Budget.UnitCode
 	}
 	// An axis the block left alone has no ceiling of this copy's own.
 	ceiling := CopyCeiling{RevocationID: id, Requests: f.requests, Budget: f.budget}

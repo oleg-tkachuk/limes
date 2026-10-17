@@ -252,7 +252,7 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 	expired := limes.Capability{
 		ID: capID, Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: tenant, Subject: "agent"},
 		Caveats: limes.Caveats{
-			Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true},
+			Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true, UnitCode: "USD"},
 		},
 		ExpiresAt: time.Now().Add(-limes.MinPurgeRetention - time.Hour),
 	}
@@ -270,7 +270,7 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 		}
 	}
 
-	if _, err := usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("10")}}); err != nil {
+	if _, err := usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("10"), UnitCode: defaultTestUnit}}); err != nil {
 		t.Fatal(err)
 	}
 	measured("Bump", metricRequestBumps, func() error {
@@ -360,8 +360,9 @@ type subjectSpec struct {
 	// sets none, is Unlimited.
 	requests *limes.RequestCeiling
 	budget   *limes.BudgetCeiling
-	// unit is the subject's unit, defaultTestUnit when empty; unitless
-	// gives a subject that names none.
+	// unit is the unit of the subject's budget, defaultTestUnit when
+	// empty; unitless gives a subject whose budget is the zero one, in no
+	// unit.
 	unit     string
 	unitless bool
 	copies   []limes.CopyCeiling
@@ -378,7 +379,7 @@ func recordedSubject(ctx context.Context, t *testing.T, records *memstore.Store,
 	c := limes.Capability{
 		ID: spec.capID, Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: spec.tenant, Subject: "agent"},
 		Caveats: limes.Caveats{
-			Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true},
+			Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true, UnitCode: "USD"},
 		},
 		ExpiresAt: time.Now().Add(time.Hour),
 	}
@@ -392,15 +393,9 @@ func recordedSubject(ctx context.Context, t *testing.T, records *memstore.Store,
 // newSubject is the MeterSubject a verified capability with spec's parts
 // would give, so a test can meter against ceilings no issuer signed.
 func newSubject(spec subjectSpec) limes.MeterSubject {
-	switch {
-	case spec.unitless:
-		spec.unit = ""
-	case spec.unit == "":
-		spec.unit = defaultTestUnit
-	}
 	return link.NewMeterSubject(link.MeterSubjectFields{
 		CapabilityID: spec.capID, TenantID: spec.tenant,
-		Requests: spec.requestCeiling(), Budget: spec.budgetCeiling(), UnitCode: spec.unit, Copies: spec.copies,
+		Requests: spec.requestCeiling(), Budget: spec.budgetCeiling(), Copies: spec.copies,
 	}).(limes.MeterSubject)
 }
 
@@ -412,10 +407,20 @@ func (spec subjectSpec) requestCeiling() limes.RequestCeiling {
 }
 
 func (spec subjectSpec) budgetCeiling() limes.BudgetCeiling {
-	if spec.budget == nil {
-		return limes.BudgetCeiling{Unlimited: true}
+	if spec.unitless {
+		return limes.BudgetCeiling{}
 	}
-	return *spec.budget
+	c := limes.BudgetCeiling{Unlimited: true}
+	if spec.budget != nil {
+		c = *spec.budget
+	}
+	switch {
+	case spec.unit != "":
+		c.UnitCode = spec.unit
+	case c.UnitCode == "":
+		c.UnitCode = defaultTestUnit
+	}
+	return c
 }
 
 // budgetOf and requestsOf are ceilings of n, for a spec to set.

@@ -69,12 +69,12 @@ func TestGoldenTokenStillVerifies(t *testing.T) {
 	if cap.Capability().Caveats.Requests != (RequestCeiling{Max: 10}) {
 		t.Errorf("Requests = %v, want 10", cap.Capability().Caveats.Requests)
 	}
-	if cap.Capability().Caveats.Budget != (BudgetCeiling{Max: 3 * NanosPerUnit / 2}) { // 1.5, as the fixture was issued
-		t.Errorf("MaxBudgetAmount = %v, want 1.5", cap.Capability().Caveats.Budget)
+	if cap.Capability().Caveats.Budget != (BudgetCeiling{Max: 3 * NanosPerUnit / 2, UnitCode: "USD"}) { // 1.5, as the fixture was issued
+		t.Errorf("MaxBudgetAmount = %v, want 1.5 USD", cap.Capability().Caveats.Budget)
 	}
 	// The unit code is what cross-currency delegation rejection keys on.
-	if cap.Capability().Caveats.UnitCode != "USD" {
-		t.Errorf("UnitCode = %q, want USD", cap.Capability().Caveats.UnitCode)
+	if cap.Capability().Caveats.Budget.UnitCode != "USD" {
+		t.Errorf("UnitCode = %q, want USD", cap.Capability().Caveats.Budget.UnitCode)
 	}
 	if len(cap.Capability().Caveats.ResourcePrefixes) != 1 || cap.Capability().Caveats.ResourcePrefixes[0] != "golden/" {
 		t.Errorf("ResourcePrefixes = %v", cap.Capability().Caveats.ResourcePrefixes)

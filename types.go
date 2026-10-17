@@ -303,8 +303,9 @@ type CopyCeiling struct {
 	// Requests bounds the requests made with the copy; nil when the block
 	// set no request limit of its own. Never Unlimited: a copy only narrows.
 	Requests *RequestCeiling
-	// Budget bounds the copy's spend, in the capability's unit; nil when the
-	// block set no budget of its own. Never Unlimited.
+	// Budget bounds the copy's spend, in the capability's unit, which its
+	// UnitCode carries; nil when the block set no budget of its own. Never
+	// Unlimited.
 	Budget *BudgetCeiling
 }
 
@@ -364,20 +365,15 @@ type Caveats struct {
 	// RequestCeiling{Unlimited: true} lifts the cap.
 	Requests RequestCeiling
 
-	// Budget is the cost budget the capability authorises, in the
-	// currency identified by UnitCode, exact to the nano; the zero value
-	// allows no spend, and BudgetCeiling{Unlimited: true} lifts it. The
-	// Meter counts spend against it; once exhausted, a charge returns
-	// ErrBudgetExceeded.
+	// Budget is the cost budget the capability authorises, exact to the
+	// nano, in Budget.UnitCode — the unit every amount metered against the
+	// capability counts in. The zero value allows no spend and needs no
+	// unit: the capability counts requests (Meter.Bump) but no amount, and
+	// a Charge, Reserve or Settle on it with no unit is ErrInvalidRequest.
+	// BudgetCeiling{Unlimited: true, UnitCode: u} lifts the bound. Once it
+	// is exhausted, a charge returns ErrBudgetExceeded. A delegated child
+	// whose budget names no unit takes its parent's.
 	Budget BudgetCeiling
-
-	// UnitCode pins the currency or unit: an ISO 4217 code (IsUnitCode),
-	// XXX ("no currency") for a budget that is not money. Empty names none:
-	// the capability counts requests (Meter.Bump) but no amount, and a
-	// Charge, Reserve or Settle on it is ErrInvalidRequest, and a
-	// Budget.Max above zero without one is ErrInvalidCaveats. A delegated
-	// child that names none takes its parent's.
-	UnitCode string
 
 	// AllowTaintedRead permits non-mutating operations on resources the
 	// consumer has flagged with prompt-injection / PII / secrets signals.

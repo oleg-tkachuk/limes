@@ -25,7 +25,7 @@ func TestChargeRollsBackWhenSideEffectFails(t *testing.T) {
 
 	usage := newTestUsage(newTestStore())
 	if _, err := usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
-		TenantID: tenantID, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("100")}, UnitCode: "USD",
+		TenantID: tenantID, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("100"), UnitCode: "USD"},
 	}); err != nil {
 		t.Fatalf("SetTenantBudget: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestChargeCapabilityCeilingLeavesBothCountersUnmutated(t *testing.T) {
 	capID, tenantID := uuid.New(), uuid.New()
 	usage := newTestUsage(newTestStore())
 	if _, err := usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
-		TenantID: tenantID, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("1000")}, UnitCode: "USD",
+		TenantID: tenantID, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("1000"), UnitCode: "USD"},
 	}); err != nil {
 		t.Fatalf("SetTenantBudget: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestChargeTenantCeilingLeavesBothCountersUnmutated(t *testing.T) {
 	capID, tenantID := uuid.New(), uuid.New()
 	usage := newTestUsage(newTestStore())
 	if _, err := usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
-		TenantID: tenantID, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("20")}, UnitCode: "USD",
+		TenantID: tenantID, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("20"), UnitCode: "USD"},
 	}); err != nil {
 		t.Fatalf("SetTenantBudget: %v", err)
 	}

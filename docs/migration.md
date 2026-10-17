@@ -14,6 +14,31 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.77.0
+
+- `Caveats.UnitCode`, `SetTenantBudgetRequest.UnitCode` and
+  `TenantBudget.UnitCode` → `BudgetCeiling.UnitCode`: the unit is part of the
+  ceiling it bounds. Write `Budget: BudgetCeiling{Max: m, UnitCode: "USD"}` for
+  `Budget: BudgetCeiling{Max: m}, UnitCode: "USD"`, `Ceiling:
+  BudgetCeiling{Max: m, UnitCode: u}` in `SetTenantBudgetRequest`, and read
+  `b.Ceiling.UnitCode` for `b.UnitCode`. The token's `unit_code` claim is
+  unchanged.
+- A `BudgetCeiling` that lets anything be spent — a `Max` above zero, or
+  `Unlimited` — and names no unit is `ErrInvalidRequest`, in caveats
+  `ErrInvalidCaveats`: an unlimited budget in no unit was accepted before,
+  though nothing could be charged against it. A capability that is never
+  charged takes the zero budget; one with an unlimited budget names its unit.
+  `Verify` refuses a token carrying such a budget as `ErrInvalidToken`.
+- A tenant ceiling no longer takes its unit from the first charge: a
+  `SetTenantBudget` ceiling that lets anything be spent names it, and the zero
+  ceiling keeps the tenant's. A tenant with no ceiling still counts in the
+  unit of its first charge or hold, which `GetTenantBudget` reports as an
+  unlimited ceiling in it. A tenant ceiling set without a unit under
+  v0.75.0–v0.76.0 reads back with none; set it again with one.
+- `BudgetCeiling.String` names the unit (`25 USD`, `unlimited USD`). A copy's
+  budget (`CopyCeiling.Budget`, `HeldCopy.Budget`) carries its capability's
+  unit; `Attenuation.Budget` names none, and one that does is refused.
+
 ## v0.76.0
 
 - Caveats with a `Budget.Max` above zero and no `UnitCode` validated, though

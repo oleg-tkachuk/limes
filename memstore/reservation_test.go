@@ -16,7 +16,7 @@ func reservationFixture(t *testing.T) (*UsageStore[struct{}], uuid.UUID, uuid.UU
 	now := time.Unix(1_800_000_000, 0)
 	u := mustUsage(t, UsageStoreConfig[struct{}]{Records: newTestStore(), Now: func() time.Time { return now }})
 	tenant := uuid.New()
-	if _, err := u.SetTenantBudget(context.Background(), limes.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("100")}}); err != nil {
+	if _, err := u.SetTenantBudget(context.Background(), limes.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("100"), UnitCode: defaultTestUnit}}); err != nil {
 		t.Fatal(err)
 	}
 	return u, uuid.New(), tenant, &now
@@ -118,9 +118,9 @@ func TestReservationsCountAgainstAncestors(t *testing.T) {
 	s := newTestStore()
 	u := newTestUsage(s)
 	rootID, kids, tenant := tree(t, s,
-		limes.Caveats{Ops: []limes.Op{limes.OpGet}, Budget: limes.BudgetCeiling{Max: limes.MustParseAmount("25")}, UnitCode: "USD"},
+		limes.Caveats{Ops: []limes.Op{limes.OpGet}, Budget: limes.BudgetCeiling{Max: limes.MustParseAmount("25"), UnitCode: "USD"}},
 		2,
-		limes.Caveats{Ops: []limes.Op{limes.OpGet}, Budget: limes.BudgetCeiling{Max: limes.MustParseAmount("20")}, UnitCode: "USD"},
+		limes.Caveats{Ops: []limes.Op{limes.OpGet}, Budget: limes.BudgetCeiling{Max: limes.MustParseAmount("20"), UnitCode: "USD"}},
 	)
 	if _, err := u.Reserve(ctx, limes.ReserveRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: kids[0], tenant: tenant, budget: budgetOf(limes.MustParseAmount("20"))}), Amount: limes.MustParseAmount("20")}); err != nil {
 		t.Fatal(err)
