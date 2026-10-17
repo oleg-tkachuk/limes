@@ -14,6 +14,15 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.72.0
+
+- `ChargeBucketNone` was the zero `ChargeBucket` → the zero is
+  `ChargeBucketUnspecified`, which sums the period whole as `ChargeBucketNone`
+  does, and `ChargeBucketNone` is a value of its own after `ChargeBucketWeek`.
+  A request that names no bucket reads the same; a `switch` over buckets
+  handles `ChargeBucketUnspecified` beside `ChargeBucketNone`, and a bucket
+  stored by number is renumbered (`0` → `5`).
+
 ## v0.71.0
 
 - `SigningKey.Public`, a field that could disagree with `Private` → a method

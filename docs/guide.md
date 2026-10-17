@@ -828,8 +828,8 @@ Elsewhere, implement these and you are done:
 To bill or report from the charges ledger, read it through a
 `LedgerReader` rather than a store's tables: `SumCharges` sums a tenant's
 charges taken in [`From`, `To`), by the store's clock, grouped by unit and, as
-`SumChargesRequest` asks, by bucket — `ChargeBucketNone` for the period whole,
-or the UTC `ChargeBucketHour`, `Day`, `Week` (ISO, from Monday 00:00) or
+`SumChargesRequest` asks, by bucket — `ChargeBucketNone`, or the zero `ChargeBucketUnspecified`, for
+the period whole, or the UTC `ChargeBucketHour`, `Day`, `Week` (ISO, from Monday 00:00) or
 `Month` — and by operation, actor or capability. Buckets come in time order
 and, within each, the largest `Charged` first, ties by unit, operation, actor
 and capability, bytewise; so with `ChargeBucketNone` the first page of `Limit`
