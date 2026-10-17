@@ -255,8 +255,11 @@ func (s *Store) Insert(_ context.Context, req limes.InsertRequest) error {
 		}
 	}
 	// Copies in and out: the caller keeps its slices, and a record never
-	// changes after it is written.
-	s.caps[c.ID] = c.Clone()
+	// changes after it is written. Capability.Copies is the verifier's,
+	// never a stored record's.
+	stored := c.Clone()
+	stored.Copies = nil
+	s.caps[c.ID] = stored
 	s.issuedBy[c.ID] = issuedBy.Clone()
 	return nil
 }
