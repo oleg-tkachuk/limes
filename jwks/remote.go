@@ -174,7 +174,7 @@ func sameOrigin(c *http.Client) *http.Client {
 	return &out
 }
 
-// PublicKey implements KeyResolver. A known key from a set past its
+// PublicKey implements limes.KeyResolver. A known key from a set past its
 // freshness but within MaxStale is served at once, its refresh started behind
 // it: a slow endpoint delays no request while the set it holds is still good.
 // A caller waits on the endpoint only for a kid the set does not hold, or a

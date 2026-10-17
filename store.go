@@ -129,10 +129,12 @@ type Store interface {
 	ListByPrincipal(ctx context.Context, req ListByPrincipalRequest) (Page[Capability], error)
 }
 
-// ErrNotFound is the typed not-found return from Store.GetRecord. It lives in the
-// core package rather than in a store implementation so that any consumer —
-// in-memory, relational, or otherwise — can satisfy the Store contract using
-// only what this package publishes.
+// ErrNotFound is the family of every not-found error: Store.GetRecord returns
+// it, and the meter's not-found sentinels (ErrUsageNotFound and the others)
+// match it under errors.Is. It lives in the core package rather than in a
+// store implementation so that any consumer — in-memory, relational, or
+// otherwise — can satisfy the Store contract using only what this package
+// publishes.
 //
 // The verifier never returns it: an id not on record is simply not revoked.
 var ErrNotFound = errors.New("limes: not found")

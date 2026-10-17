@@ -238,9 +238,9 @@ type AgentPrincipal struct {
 	_         noCompare
 }
 
-// Capability is the in-memory representation of a verified token. The
-// wire form is a JWT; this struct is what callers receive from
-// Verifier.Verify and what the Issuer fills before signing.
+// Capability is the in-memory representation of a token. The wire form is
+// a JWT; this struct is what the Issuer fills before signing, and what
+// Verifier.Verify returns inside a VerifiedCapability.
 type Capability struct {
 	// ID is the unique identifier (UUIDv7 — sortable by issuance time
 	// so per-tenant indexes stay tight).
@@ -289,7 +289,7 @@ type Capability struct {
 
 	// ConfirmationJKT, when set, binds the capability to a key: the RFC 7638
 	// thumbprint of the public key whose holder alone may present it. Every
-	// request must then carry a DPoP proof signed by that key (dpop.go). A
+	// request must then carry a DPoP proof signed by that key (package dpop). A
 	// delegated child of a bound capability is bound too. Carried in the
 	// token as `cnf.jkt`, and absent from tokens that are not bound.
 	ConfirmationJKT string

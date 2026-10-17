@@ -1,9 +1,12 @@
 # API review before v1.0
 
-Review of the exported API of `github.com/oleg-tkachuk/limes` at v0.7.0. The
-root package exports 173 top-level identifiers; `memstore`, `metertest` and
-`storetest` add 9. After v1.0 every one of them, and every method of every
-interface a consumer implements, is frozen until a `/v2` module path.
+Review of the exported API of `github.com/oleg-tkachuk/limes`, taken at
+v0.7.0, when the root package exported 173 top-level identifiers and
+`memstore`, `metertest` and `storetest` 9. Steps 1–7 of the [plan](#plan) have
+shipped since: at v0.69.0 the root exports 257, and `jwks`, `dpop` and
+`inspect` are public packages beside those three. After v1.0 every exported
+identifier, and every method of every interface a consumer implements, is
+frozen until a `/v2` module path.
 
 Each item gives the evidence, the change, and what it breaks. Items with more
 than one defensible answer cite the decision taken in the table below.
