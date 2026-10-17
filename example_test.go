@@ -383,7 +383,7 @@ func Example_backdatedCharges() {
 	c := limes.Capability{
 		ID: uuid.New(), IssuedAt: start, ExpiresAt: start.Add(period),
 		Subject: limes.Principal{Type: limes.PrincipalTypeService, TenantID: uuid.New(), Subject: "svc:reporting"},
-		Caveats: limes.Caveats{Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true}},
+		Caveats: limes.Caveats{Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true}, UnitCode: "USD"},
 	}
 	if err := records.Insert(ctx, limes.InsertRequest{Capability: c}); err != nil {
 		log.Fatal(err)

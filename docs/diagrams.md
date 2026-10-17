@@ -683,9 +683,9 @@ amount past the hold, or an ancestor that does not hold it, is checked.
 flowchart TB
     req(["ChargeRequest<br/>Subject (id · tenant · ceilings · unit · copies) · Amount<br/>ExternalRef · Overrun"])
     sreq(["SettleRequest<br/>Subject · ReservationID · Amount · Overrun"])
-    sval{"subject set · Nanos.Validate · Overrun.Validate<br/>ReservationID not zero"}
+    sval{"subject set, a unit named · Nanos.Validate · Overrun.Validate<br/>ReservationID not zero"}
     hold{"reservation open, unexpired,<br/>the subject's own, under the same copies"}
-    val{"Nanos.Validate · Overrun.Validate · ValidateExternalRef<br/>subject set · NormalizeUnitCode"}
+    val{"Nanos.Validate · Overrun.Validate · ValidateExternalRef<br/>subject set · a unit named"}
     seen{"ExternalRef already charged<br/>to this capability"}
     same{"same Amount · UnitCode · TenantID"}
     lin{"capability on record<br/>lineage read: its ancestors still on record"}

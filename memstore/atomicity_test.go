@@ -176,7 +176,7 @@ func TestNoTransactionModeWorksEndToEnd(t *testing.T) {
 	if _, err := usage.Bump(ctx, limes.BumpRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: testTenant, requests: requestsOf(5)})}); err != nil {
 		t.Fatalf("Bump: %v", err)
 	}
-	spent, err := usage.Charge(ctx, limes.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: uuid.New(), budget: budgetOf(limes.MustParseAmount("10")), unit: ""}), Amount: limes.MustParseAmount("3"), Op: "op", Actor: "actor"}, nil)
+	spent, err := usage.Charge(ctx, limes.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: uuid.New(), budget: budgetOf(limes.MustParseAmount("10")), unit: defaultTestUnit}), Amount: limes.MustParseAmount("3"), Op: "op", Actor: "actor"}, nil)
 	if err != nil {
 		t.Fatalf("Charge: %v", err)
 	}
@@ -190,9 +190,8 @@ func TestNoTransactionModeWorksEndToEnd(t *testing.T) {
 	if u.RequestCount != 1 {
 		t.Errorf("RequestCount = %d, want 1", u.RequestCount)
 	}
-	// An empty unit code must resolve to the default rather than persisting
-	// blank — a bare number with no unit is unrenderable.
-	if u.UnitCode != limes.DefaultUnitCode {
-		t.Errorf("UnitCode = %q, want the %q default", u.UnitCode, limes.DefaultUnitCode)
+	// The bump named no amount; the charge's unit is the one counted.
+	if u.UnitCode != defaultTestUnit {
+		t.Errorf("UnitCode = %q, want the charge's %q", u.UnitCode, defaultTestUnit)
 	}
 }

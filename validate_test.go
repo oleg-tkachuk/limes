@@ -114,6 +114,29 @@ func TestDelegateInheritanceIsExplicit(t *testing.T) {
 	}
 }
 
+// A child that names no unit counts in its parent's, so it is not refused
+// as narrower in another; one that names a unit keeps it.
+func TestDelegateGivesAChildItsParentsUnit(t *testing.T) {
+	issuer, _, _, _ := buildIssuerVerifier(t)
+	ctx := context.Background()
+	const parentUnit = "EUR"
+	parent := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet, OpShare}, Budget: BudgetCeiling{Max: MustParseAmount("25")}, UnitCode: parentUnit})
+	for name, named := range map[string]string{"names none": "", "names the parent's": parentUnit} {
+		child, _, err := issuer.delegate(ctx, DelegateRequest{
+			Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"},
+			Parent:  asVerified(parent), Caveats: Caveats{Ops: []Op{OpGet}, Budget: BudgetCeiling{Max: MustParseAmount("2")}, UnitCode: named},
+		})
+		if err != nil || child.Caveats.UnitCode != parentUnit {
+			t.Errorf("a child that %s: unit %q, %v; want %q", name, child.Caveats.UnitCode, err, parentUnit)
+		}
+	}
+	unitless := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet, OpShare}})
+	child, _, err := issuer.delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"}, Parent: asVerified(unitless), InheritCaveats: true})
+	if err != nil || child.Caveats.UnitCode != "" {
+		t.Errorf("a child of a parent with no unit: unit %q, %v; want none", child.Caveats.UnitCode, err)
+	}
+}
+
 // foreignIssuer names an issuer other than the one under test.
 const foreignIssuer = "someone-else"
 

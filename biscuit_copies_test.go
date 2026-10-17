@@ -30,7 +30,7 @@ func limitedBiscuit(t *testing.T) (*Verifier, Capability, string) {
 		Audience: []string{audienceData},
 		Caveats: Caveats{
 			Ops: []Op{OpGet}, Requests: RequestCeiling{Max: copyTestCapRequests},
-			Budget: BudgetCeiling{Max: copyTestCapBudget}, UnitCode: DefaultUnitCode,
+			Budget: BudgetCeiling{Max: copyTestCapBudget}, UnitCode: "USD",
 		},
 		TTL: time.Hour,
 	})

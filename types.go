@@ -116,43 +116,25 @@ func invalidRequest(format string, args ...any) error {
 	return fmt.Errorf("%w: "+format, append([]any{ErrInvalidRequest}, args...)...)
 }
 
-// DefaultUnitCode is the unit of a request or stored record that names
-// none, so one written before it carried a unit keeps its meaning.
-const DefaultUnitCode = "USD"
-
 // AbstractUnitCode is the unit of a budget that is not money — requests,
 // credits, anything metered: ISO 4217's XXX, "no currency involved".
 const AbstractUnitCode = "XXX"
 
 // IsUnitCode reports whether u is an ISO 4217 currency code, in its
-// canonical upper-case spelling: "USD", "JPY", "XXX". Empty is NOT one —
-// callers that want the empty-means-default semantics resolve through
-// NormalizeUnitCode first.
+// canonical upper-case spelling: "USD", "JPY", "XXX". Empty is not one: it
+// names no unit, and no unit is ever assumed for it.
 func IsUnitCode(u string) bool {
 	unit, err := currency.ParseISO(u)
 	return err == nil && unit.String() == u
 }
 
-// NormalizeUnitCode applies the empty-means-default policy and
-// validates the result. Returns the canonical unit string and an
-// error when the supplied non-empty value is not an ISO 4217 code.
-func NormalizeUnitCode(u string) (string, error) {
-	if u == "" {
-		return DefaultUnitCode, nil
+// validUnitCode refuses a unit that is neither empty — none named — nor an
+// ISO 4217 code.
+func validUnitCode(u string) error {
+	if u != "" && !IsUnitCode(u) {
+		return invalidRequest("unit_code %q is not an ISO 4217 code in upper case", u)
 	}
-	if !IsUnitCode(u) {
-		return "", invalidRequest("unit_code %q is not an ISO 4217 code in upper case", u)
-	}
-	return u, nil
-}
-
-// canonicalUnitCode is u as NormalizeUnitCode reads it, or u itself when it
-// is unknown — for comparing two units, where an unknown one simply differs.
-func canonicalUnitCode(u string) string {
-	if n, err := NormalizeUnitCode(u); err == nil {
-		return n
-	}
-	return u
+	return nil
 }
 
 // Op is an operation an agent may perform. The package defines a small
@@ -390,9 +372,10 @@ type Caveats struct {
 	Budget BudgetCeiling
 
 	// UnitCode pins the currency or unit: an ISO 4217 code (IsUnitCode),
-	// XXX ("no currency") for a budget that is not money. Empty value is
-	// interpreted as the default ("USD") at the application boundary; the
-	// in-memory shape is happy to carry either form.
+	// XXX ("no currency") for a budget that is not money. Empty names none:
+	// the capability counts requests (Meter.Bump) but no amount, and a
+	// Charge, Reserve or Settle on it is ErrInvalidRequest. A delegated
+	// child that names none takes its parent's.
 	UnitCode string
 
 	// AllowTaintedRead permits non-mutating operations on resources the

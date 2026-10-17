@@ -268,13 +268,25 @@ func TestNarrows_RejectsCrossCurrency(t *testing.T) {
 	child.ID = uuid.New()
 	child.ParentID = parent.ID
 	child.Caveats = Caveats{
-		Ops:      []Op{OpGet},
-		Budget:   BudgetCeiling{Max: MustParseAmount("5.0")},
-		UnitCode: "EUR", // ← mismatch
+		Ops:    []Op{OpGet},
+		Budget: BudgetCeiling{Max: MustParseAmount("5.0")},
 	}
-	err := Narrows(parent, child)
-	if !errors.Is(err, ErrUnitCodeMismatch) {
-		t.Fatalf("expected ErrUnitCodeMismatch, got %v", err)
+	// No unit is assumed for an empty one: it matches only another empty.
+	for _, tc := range []struct {
+		parent, child string
+		ok            bool
+	}{
+		{"USD", "EUR", false},
+		{"", "USD", false},
+		{"USD", "", false},
+		{"", "", true},
+		{"USD", "USD", true},
+	} {
+		parent.Caveats.UnitCode, child.Caveats.UnitCode = tc.parent, tc.child
+		err := Narrows(parent, child)
+		if got := !errors.Is(err, ErrUnitCodeMismatch); got != tc.ok {
+			t.Errorf("Narrows, parent in %q, child in %q: err = %v; want ok=%v", tc.parent, tc.child, err, tc.ok)
+		}
 	}
 }
 

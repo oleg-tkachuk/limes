@@ -581,10 +581,7 @@ func (s *UsageStore[TX]) Bump(_ context.Context, req limes.BumpRequest) (limes.B
 	if err := req.Validate(); err != nil {
 		return limes.BumpReceipt{}, err
 	}
-	unit, err := limes.NormalizeUnitCode(req.Subject.UnitCode())
-	if err != nil {
-		return limes.BumpReceipt{}, err
-	}
+	unit := req.Subject.UnitCode()
 	// The lineage is read under the usage lock, as DeleteUsage and PurgeOrphans
 	// take it: read before, an ancestor they dropped meanwhile would have
 	// its row written back.
@@ -662,10 +659,7 @@ func (s *UsageStore[TX]) Charge(
 	if err := req.Validate(); err != nil {
 		return limes.ChargeReceipt{}, err
 	}
-	unit, err := limes.NormalizeUnitCode(req.Subject.UnitCode())
-	if err != nil {
-		return limes.ChargeReceipt{}, err
-	}
+	unit := req.Subject.UnitCode()
 	// The lineage is read under the usage lock, as DeleteUsage and PurgeOrphans
 	// take it: read before, an ancestor they dropped meanwhile would have
 	// its row written back.
@@ -883,11 +877,15 @@ func (s *UsageStore[TX]) chargeLocked(
 }
 
 // tenantLocked returns the tenant's aggregate row, or a new one without a
-// ceiling. The aggregate counts from the first charge or hold, not from the
-// first SetTenantBudget, so a ceiling set later is measured against what the
-// tenant has already spent and holds. s.mu must be held.
+// ceiling, in unit when the row names none yet. The aggregate counts from
+// the first charge or hold, not from the first SetTenantBudget, so a ceiling
+// set later is measured against what the tenant has already spent and
+// holds. s.mu must be held.
 func (s *UsageStore[TX]) tenantLocked(tenantID uuid.UUID, unit string) limes.TenantBudget {
 	if b, ok := s.budgets[tenantID]; ok {
+		if b.UnitCode == "" {
+			b.UnitCode = unit
+		}
 		return b
 	}
 	// A ceiling never set lifts nothing and limits nothing: the row only
@@ -1021,10 +1019,7 @@ func (s *UsageStore[TX]) Reserve(_ context.Context, req limes.ReserveRequest) (l
 	if err := req.Validate(); err != nil {
 		return limes.Reservation{}, err
 	}
-	unit, err := limes.NormalizeUnitCode(req.Subject.UnitCode())
-	if err != nil {
-		return limes.Reservation{}, err
-	}
+	unit := req.Subject.UnitCode()
 	ttl := req.TTL
 	if ttl == 0 {
 		ttl = limes.DefaultReservationTTL
@@ -1402,12 +1397,8 @@ func (s *UsageStore[TX]) SetTenantBudget(_ context.Context, args limes.SetTenant
 	if unit == "" {
 		unit = b.UnitCode
 	}
-	normalised, err := limes.NormalizeUnitCode(unit)
-	if err != nil {
-		return limes.TenantBudget{}, err
-	}
 	// A reset closes the spend, never the holds still open in the old unit.
-	if exists && b.UnitCode != "" && normalised != b.UnitCode &&
+	if exists && b.UnitCode != "" && unit != b.UnitCode &&
 		(b.ReservedAmount > 0 || (b.SpentAmount > 0 && !args.ResetSpend)) {
 		return limes.TenantBudget{}, fmt.Errorf("%w: tenant %s has %s counted in %s",
 			limes.ErrUnitCodeMismatch, args.TenantID, b.SpentAmount+b.ReservedAmount, b.UnitCode)
@@ -1415,7 +1406,7 @@ func (s *UsageStore[TX]) SetTenantBudget(_ context.Context, args limes.SetTenant
 
 	b.TenantID = args.TenantID
 	b.Ceiling = args.Ceiling
-	b.UnitCode = normalised
+	b.UnitCode = unit
 	b.PeriodEnd = args.PeriodEnd
 	if args.ResetSpend {
 		b.SpentAmount = 0

@@ -155,7 +155,8 @@ store's index on them stays tight. *Held by* `TestIssuedIDsAreVersion7`.
 
 **ISO 4217.** A budget's unit is any ISO 4217 code in its upper-case
 spelling, validated against `golang.org/x/text/currency`; `XXX` is the unit
-of a budget that is not money. *Held by* `TestNormalizeUnitCode`,
+of a budget that is not money. An empty unit names none; no unit is ever assumed for it. *Held by*
+`TestUnitCodes`, `TestAnAmountNeedsAUnit`,
 `TestAbstractUnitIsXXX`.
 
 **RFC 4648 §5.** Every base64 value the module reads or writes — a token's
