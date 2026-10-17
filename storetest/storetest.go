@@ -227,6 +227,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"InsertReadsBack", checkRoundTrip},
 		{"InsertRefusesADuplicate", checkDuplicate},
 		{"ARecordIsNoCallersToChange", checkRecordIsItsOwn},
+		{"InsertDropsTheCopiesAVerifierSets", checkInsertDropsCopies},
 		{"GetRecordReadsBackIssuanceAndRevocation", checkRecord},
 		{"UnknownIDs", checkUnknown},
 		{"RevokeIsIdempotentAndReachesDescendants", checkRevoke},
@@ -968,6 +969,26 @@ func checkPurgeRetention(t *testing.T, f fixture) {
 // checkRecordIsItsOwn holds a store to an append-only record: neither the
 // capability handed to Insert nor one read back shares anything with what is
 // stored, so changing it changes no record.
+// checkInsertDropsCopies inserts a capability carrying Copies, which only a
+// verifier sets on a Biscuit it accepted: the record keeps the capability
+// without them, so no read of it passes for a Biscuit copy.
+func checkInsertDropsCopies(t *testing.T, f fixture) {
+	c := f.newCapability("agent:copies", uuid.Nil, f.now.Add(ttl))
+	want := c.Clone()
+	c.Copies = []limes.CopyCeiling{{RevocationID: []byte{1}, Requests: &limes.RequestCeiling{Max: 1}}}
+	f.insert(t, c)
+	got, err := f.get(c.ID)
+	if err != nil {
+		t.Fatalf("GetRecord: %v", err)
+	}
+	if got.Copies != nil {
+		t.Errorf("GetRecord read back Copies %+v, want none", got.Copies)
+	}
+	if diff := diffCapabilities(got, want); diff != "" {
+		t.Errorf("Get read back a different capability: %s", diff)
+	}
+}
+
 func checkRecordIsItsOwn(t *testing.T, f fixture) {
 	const subject = "agent:own"
 	c := f.newCapability(subject, uuid.Nil, f.now.Add(ttl))
