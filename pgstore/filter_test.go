@@ -37,11 +37,12 @@ func TestKeepOfNamesEveryFilter(t *testing.T) {
 // it, rather than sum by another.
 func TestTruncOfNamesEveryBucket(t *testing.T) {
 	want := map[limes.ChargeBucket]string{
-		limes.ChargeBucketNone:  "",
-		limes.ChargeBucketHour:  truncHour,
-		limes.ChargeBucketDay:   truncDay,
-		limes.ChargeBucketMonth: truncMonth,
-		limes.ChargeBucketWeek:  truncWeek,
+		limes.ChargeBucketUnspecified: "",
+		limes.ChargeBucketNone:        "",
+		limes.ChargeBucketHour:        truncHour,
+		limes.ChargeBucketDay:         truncDay,
+		limes.ChargeBucketMonth:       truncMonth,
+		limes.ChargeBucketWeek:        truncWeek,
 	}
 	b := limes.ChargeBucket(0)
 	for ; b.Validate() == nil; b++ {

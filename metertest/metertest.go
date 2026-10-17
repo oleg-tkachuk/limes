@@ -3366,7 +3366,7 @@ func checkSumChargesOrderByAmount[TX any](t *testing.T, f fixture[TX]) {
 
 // Buckets are cut at UTC boundaries: a charge a microsecond — the finest a
 // timestamp column keeps — before midnight falls in that day and hour, and
-// one at midnight in the next.
+// one at midnight in the next. No bucket sums them together.
 func checkSumChargeBuckets[TX any](t *testing.T, f fixture[TX]) {
 	if f.Ledger == nil || f.Now == nil || f.Advance == nil {
 		t.Skip("Env.Ledger, Now or Advance not set")
@@ -3393,6 +3393,14 @@ func checkSumChargeBuckets[TX any](t *testing.T, f fixture[TX]) {
 			{BucketStart: before, UnitCode: unit, Charged: 2 * one, Charges: 1},
 			{BucketStart: midnight, UnitCode: unit, Charged: 3 * one, Charges: 1},
 		}
+		if err != nil || !sameSums(page.Items, want) {
+			t.Errorf("SumCharges by %s = %+v, %v; want %+v", b, page.Items, err, want)
+		}
+	}
+	// No bucket, named or left unspecified, sums the period whole.
+	for _, b := range []limes.ChargeBucket{limes.ChargeBucketNone, limes.ChargeBucketUnspecified} {
+		page, err := f.Ledger.SumCharges(f.Ctx, limes.SumChargesRequest{TenantID: f.Tenant, From: from, To: to, Bucket: b})
+		want := []limes.ChargeSum{{UnitCode: unit, Charged: 5 * one, Charges: 2}}
 		if err != nil || !sameSums(page.Items, want) {
 			t.Errorf("SumCharges by %s = %+v, %v; want %+v", b, page.Items, err, want)
 		}

@@ -18,11 +18,15 @@ func TestChargeBucketStart(t *testing.T) {
 		name  string
 		start time.Time
 	}{
-		ChargeBucketNone:  {"none", time.Time{}},
-		ChargeBucketHour:  {"hour", time.Date(2026, time.February, 28, 22, 0, 0, 0, time.UTC)},
-		ChargeBucketDay:   {"day", time.Date(2026, time.February, 28, 0, 0, 0, 0, time.UTC)},
-		ChargeBucketMonth: {"month", time.Date(2026, time.February, 1, 0, 0, 0, 0, time.UTC)},
-		ChargeBucketWeek:  {"week", time.Date(2026, time.February, 23, 0, 0, 0, 0, time.UTC)},
+		ChargeBucketUnspecified: {"unspecified", time.Time{}},
+		ChargeBucketNone:        {"none", time.Time{}},
+		ChargeBucketHour:        {"hour", time.Date(2026, time.February, 28, 22, 0, 0, 0, time.UTC)},
+		ChargeBucketDay:         {"day", time.Date(2026, time.February, 28, 0, 0, 0, 0, time.UTC)},
+		ChargeBucketMonth:       {"month", time.Date(2026, time.February, 1, 0, 0, 0, 0, time.UTC)},
+		ChargeBucketWeek:        {"week", time.Date(2026, time.February, 23, 0, 0, 0, 0, time.UTC)},
+	}
+	if ChargeBucket(0) != ChargeBucketUnspecified {
+		t.Errorf("the zero bucket is %s, want %s", ChargeBucket(0), ChargeBucketUnspecified)
 	}
 	b := ChargeBucket(0)
 	for ; b.Validate() == nil; b++ {
