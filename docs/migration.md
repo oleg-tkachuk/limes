@@ -14,6 +14,13 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## pgstore/v0.12.0
+
+- `Store.EraseTenant` took `onErased func(ctx, tx pgx.Tx) error`, which saw
+  nothing of the erase → it takes `onErased func(ctx, e pgstore.Erased) error`:
+  `e.Tx` is the transaction the callback had, and `e.Result` the
+  `EraseTenantResult` the call returns. Read `e.Tx` where you read `tx`.
+
 ## v0.70.0
 
 - `ErrMalformedAuthorization` matched no family → it matches

@@ -67,11 +67,21 @@ func (s *Store) EraseTenantRecords(ctx context.Context, req limes.EraseTenantReq
 	return out, err
 }
 
+// Erased is what EraseTenant hands its callback once the store's rows of the
+// tenant are gone, in the transaction that removes them. Like the result it
+// carries, it does not compare, so a field added in 1.x breaks no caller.
+type Erased struct {
+	// Tx is the erase's transaction, scoped to the tenant.
+	Tx pgx.Tx
+	// Result is what the call returns once the transaction commits.
+	Result limes.EraseTenantResult
+}
+
 // EraseTenant erases the tenant's records, as EraseTenantRecords does, and
 // its usage, as UsageStore.EraseTenantUsage does, in one transaction, and
 // runs onErased in it last, so a consumer removes its own rows of the tenant
 // with them or not at all. An error from onErased rolls everything back.
-func (s *Store) EraseTenant(ctx context.Context, req limes.EraseTenantRequest, onErased func(ctx context.Context, tx pgx.Tx) error) (limes.EraseTenantResult, error) {
+func (s *Store) EraseTenant(ctx context.Context, req limes.EraseTenantRequest, onErased func(ctx context.Context, e Erased) error) (limes.EraseTenantResult, error) {
 	if err := req.Validate(); err != nil {
 		return limes.EraseTenantResult{}, err
 	}
@@ -90,7 +100,7 @@ func (s *Store) EraseTenant(ctx context.Context, req limes.EraseTenantRequest, o
 			return err
 		}
 		if onErased != nil {
-			return onErased(ctx, tx)
+			return onErased(ctx, Erased{Tx: tx, Result: out})
 		}
 		return nil
 	})

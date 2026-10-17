@@ -361,6 +361,7 @@ func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 			return nil
 		}
 		onCharged := func(ctx context.Context, c limes.Charged[pgx.Tx]) error { return consumer(ctx, c.Tx) }
+		onErased := func(ctx context.Context, e Erased) error { return consumer(ctx, e.Tx) }
 		c := f.parent
 		c.ID, c.ParentID = uuid.New(), uuid.Nil
 		subject := meterSubject(f.child.ID, f.mine)
@@ -379,7 +380,7 @@ func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 				return err
 			},
 			"EraseTenant": func() error {
-				_, err := s.records.EraseTenant(s.ctx, limes.EraseTenantRequest{TenantID: f.mine}, consumer)
+				_, err := s.records.EraseTenant(s.ctx, limes.EraseTenantRequest{TenantID: f.mine}, onErased)
 				return err
 			},
 			"Bump": func() error {
