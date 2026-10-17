@@ -697,7 +697,7 @@ flowchart TB
         c1{"own spend + reserved + Amount ≤ Subject.Budget<br/>(ceiling from the verified token or stored record)"}
         c2{"each ancestor: spend + reserved + Amount<br/>≤ its Budget<br/>(ceiling from the stored record)"}
         c3{"tenant spend + reserved + Amount<br/>≤ TenantBudget.Ceiling<br/>(Unlimited until one is set)"}
-        cb{"onCharged(ctx, tx)<br/>consumer's side effect on its own TX"}
+        cb{"onCharged(ctx, Charged{Tx, Receipt})<br/>consumer's side effect on its own TX"}
         c00 -- yes --> c0 -- yes --> c1 -- yes --> c2 -- yes --> c3 -- yes --> cb
     end
 
@@ -790,7 +790,8 @@ Holds and housekeeping, in `memstore` and `pgstore` as the contract has them:
   earlier period's charge leaves the new period's spend alone.
 
 A store with transactions runs stage and commit inside one, and passes its own
-handle as `tx`; `onCharged` may be `nil`. A store without them, or a consumer
+handle as `Charged.Tx`, beside the receipt the call will return; `onCharged`
+may be `nil`. A store without them, or a consumer
 with none, uses `UsageStore[struct{}]`; `memstore` still runs `onCharged`
 before it publishes, with the zero `TX` or the handle `TxFactory` makes.
 

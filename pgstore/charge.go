@@ -160,7 +160,7 @@ func replayByRef(ctx context.Context, tx pgx.Tx, req limes.ChargeRequest, unit s
 
 // Charge applies the ceiling chain and commits the charge, onCharged
 // included, in one transaction.
-func (s *UsageStore) Charge(ctx context.Context, req limes.ChargeRequest, onCharged func(ctx context.Context, tx pgx.Tx) error) (limes.ChargeReceipt, error) {
+func (s *UsageStore) Charge(ctx context.Context, req limes.ChargeRequest, onCharged func(ctx context.Context, c limes.Charged[pgx.Tx]) error) (limes.ChargeReceipt, error) {
 	if err := req.Amount.Validate(); err != nil {
 		return limes.ChargeReceipt{}, err
 	}
@@ -254,7 +254,7 @@ type chargeSpec struct {
 // settles. The charge is spent on the lineage as it stands; the hold is
 // released from the ancestors that hold it, which a row dropped since may
 // have left.
-func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, spec chargeSpec, onCharged func(context.Context, pgx.Tx) error) (limes.ChargeReceipt, error) {
+func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, spec chargeSpec, onCharged func(context.Context, limes.Charged[pgx.Tx]) error) (limes.ChargeReceipt, error) {
 	var released limes.Nanos
 	var holders []uuid.UUID
 	var reservationID *uuid.UUID
@@ -276,8 +276,12 @@ func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, s
 	}, crossed); err != nil {
 		return refused, err
 	}
+	receipt := limes.ChargeReceipt{
+		ChargeID: uuid.New(), SpentAmount: c.usageOf(spec.capID).spent + spec.amount, Overrun: overrun,
+		TenantID: spec.tenantID, UnitCode: spec.unit,
+	}
 	if onCharged != nil {
-		if err := onCharged(ctx, tx); err != nil {
+		if err := onCharged(ctx, limes.Charged[pgx.Tx]{Tx: tx, Receipt: receipt}); err != nil {
 			return refused, err
 		}
 	}
@@ -310,15 +314,12 @@ func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, s
 	if err := c.write(ctx, tx, now, true); err != nil {
 		return refused, err
 	}
-	id := uuid.New()
 	if _, err := tx.Exec(ctx, sqlInsertCharge,
-		id, spec.capID, spec.tenantID, int64(spec.amount), spec.unit, string(spec.op), spec.actor, now,
+		receipt.ChargeID, spec.capID, spec.tenantID, int64(spec.amount), spec.unit, string(spec.op), spec.actor, now,
 		ancestorIDs(spec.ancestors), copyIDs(spec.copies), spec.externalRef, reservationID, overrun, c.tenant.period); err != nil {
 		return refused, err
 	}
-	return limes.ChargeReceipt{
-		ChargeID: id, SpentAmount: u.spent, Overrun: overrun, TenantID: spec.tenantID, UnitCode: spec.unit,
-	}, nil
+	return receipt, nil
 }
 
 // ceilingCheck is an amount measured against every ceiling. released is the
@@ -573,7 +574,7 @@ func applyHold(c *counters, h hold, sign limes.Nanos) {
 }
 
 // Settle charges the actual cost in place of a reservation.
-func (s *UsageStore) Settle(ctx context.Context, req limes.SettleRequest, onCharged func(ctx context.Context, tx pgx.Tx) error) (limes.ChargeReceipt, error) {
+func (s *UsageStore) Settle(ctx context.Context, req limes.SettleRequest, onCharged func(ctx context.Context, c limes.Charged[pgx.Tx]) error) (limes.ChargeReceipt, error) {
 	if err := checkSubject(req.Subject); err != nil {
 		return limes.ChargeReceipt{}, err
 	}

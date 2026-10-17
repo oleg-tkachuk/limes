@@ -86,8 +86,9 @@
 // # No-transaction mode
 //
 // Meter.Charge and Meter.Settle take an onCharged callback that runs inside
-// the charge, receiving the consumer's transaction handle, so a side effect
-// such as an outbox write commits atomically with the spend. The module never
+// the charge, receiving the consumer's transaction handle and the charge's
+// receipt (Charged), so a side effect such as an outbox write commits
+// atomically with the spend and names the charge. The module never
 // constructs, inspects or constrains that handle — it only threads it back.
 // That is what keeps this package free of any database dependency.
 //

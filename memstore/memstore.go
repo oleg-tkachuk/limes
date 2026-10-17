@@ -663,7 +663,7 @@ type hold struct {
 func (s *UsageStore[TX]) Charge(
 	ctx context.Context,
 	req limes.ChargeRequest,
-	onCharged func(ctx context.Context, tx TX) error,
+	onCharged func(ctx context.Context, c limes.Charged[TX]) error,
 ) (limes.ChargeReceipt, error) {
 	if err := req.Amount.Validate(); err != nil {
 		return limes.ChargeReceipt{}, err
@@ -803,7 +803,7 @@ func (s *UsageStore[TX]) chargeLocked(
 	unit string,
 	ancestors []limes.Capability,
 	settling *hold,
-	onCharged func(ctx context.Context, tx TX) error,
+	onCharged func(ctx context.Context, c limes.Charged[TX]) error,
 ) (limes.ChargeReceipt, error) {
 	var released limes.Nanos
 	var holders []uuid.UUID
@@ -833,6 +833,9 @@ func (s *UsageStore[TX]) chargeLocked(
 		return limes.ChargeReceipt{SpentAmount: u.SpentAmount, TenantID: req.Subject.TenantID(), UnitCode: unit}, err
 	}
 	stagedSpent := u.SpentAmount + req.Amount
+	receipt := limes.ChargeReceipt{
+		ChargeID: uuid.New(), SpentAmount: stagedSpent, Overrun: overrun, TenantID: req.Subject.TenantID(), UnitCode: unit,
+	}
 
 	// the caller's side effect, on the caller's handle, before anything is
 	// published
@@ -841,7 +844,7 @@ func (s *UsageStore[TX]) chargeLocked(
 		if s.txFactory != nil {
 			tx = s.txFactory()
 		}
-		if err := onCharged(ctx, tx); err != nil {
+		if err := onCharged(ctx, limes.Charged[TX]{Tx: tx, Receipt: receipt}); err != nil {
 			// Nothing has been published — nothing to compensate.
 			return limes.ChargeReceipt{SpentAmount: u.SpentAmount, TenantID: req.Subject.TenantID(), UnitCode: unit}, err
 		}
@@ -884,16 +887,14 @@ func (s *UsageStore[TX]) chargeLocked(
 		copyIDs = append(copyIDs, c.RevocationID)
 	}
 	entry := ledgerEntry{
-		ID: uuid.New(), CapabilityID: req.Subject.CapabilityID(), Ancestors: ancestorIDs(ancestors),
+		ID: receipt.ChargeID, CapabilityID: req.Subject.CapabilityID(), Ancestors: ancestorIDs(ancestors),
 		TenantID: req.Subject.TenantID(), Amount: req.Amount, UnitCode: unit,
 		Op: req.Op, Actor: req.Actor, At: s.nowFn(), Copies: copyIDs,
 		ExternalRef: req.ExternalRef, ReservationID: reservationID, Overrun: overrun,
 		tenantPeriod: s.periods[req.Subject.TenantID()],
 	}
 	s.appendLocked(entry)
-	return limes.ChargeReceipt{
-		ChargeID: entry.ID, SpentAmount: stagedSpent, Overrun: overrun, TenantID: req.Subject.TenantID(), UnitCode: unit,
-	}, nil
+	return receipt, nil
 }
 
 // tenantLocked returns the tenant's aggregate row, or a new one without a
@@ -1104,7 +1105,7 @@ func (s *UsageStore[TX]) applyHoldLocked(h hold, sign limes.Nanos) {
 func (s *UsageStore[TX]) Settle(
 	ctx context.Context,
 	req limes.SettleRequest,
-	onCharged func(ctx context.Context, tx TX) error,
+	onCharged func(ctx context.Context, c limes.Charged[TX]) error,
 ) (limes.ChargeReceipt, error) {
 	if err := checkSubject(req.Subject); err != nil {
 		return limes.ChargeReceipt{}, err

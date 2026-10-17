@@ -97,7 +97,7 @@ func (s *meteringStore[TX]) Bump(ctx context.Context, req BumpRequest) (BumpRece
 
 // Charge emits limes.charge.{decisions,amount,current_spend}. A replay moved
 // nothing, so it counts nothing: counting it would report spend twice.
-func (s *meteringStore[TX]) Charge(ctx context.Context, req ChargeRequest, onCharged func(ctx context.Context, tx TX) error) (ChargeReceipt, error) {
+func (s *meteringStore[TX]) Charge(ctx context.Context, req ChargeRequest, onCharged func(ctx context.Context, c Charged[TX]) error) (ChargeReceipt, error) {
 	receipt, err := s.inner.Charge(ctx, req, onCharged)
 	if err == nil && receipt.Replayed {
 		return receipt, nil
@@ -124,7 +124,7 @@ func (s *meteringStore[TX]) Reserve(ctx context.Context, req ReserveRequest) (Re
 
 // Settle is a charge as far as the metrics are concerned, attributed to the
 // subject's tenant as a charge is: a refused settle has no receipt to name it.
-func (s *meteringStore[TX]) Settle(ctx context.Context, req SettleRequest, onCharged func(ctx context.Context, tx TX) error) (ChargeReceipt, error) {
+func (s *meteringStore[TX]) Settle(ctx context.Context, req SettleRequest, onCharged func(ctx context.Context, c Charged[TX]) error) (ChargeReceipt, error) {
 	receipt, err := s.inner.Settle(ctx, req, onCharged)
 	if err == nil && receipt.Replayed {
 		return receipt, nil

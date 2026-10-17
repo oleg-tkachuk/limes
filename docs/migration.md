@@ -14,6 +14,21 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.67.0
+
+- `Meter.Charge` and `Meter.Settle` took `onCharged func(ctx, tx TX) error`,
+  which saw nothing of the charge → they take
+  `onCharged func(ctx, c limes.Charged[TX]) error`: `c.Tx` is the handle the
+  callback had, and `c.Receipt` the receipt the call returns, its `ChargeID`
+  among it. Change `func(ctx context.Context, tx MyTx) error` to
+  `func(ctx context.Context, c limes.Charged[MyTx]) error` and read `c.Tx`.
+
+## pgstore/v0.11.0
+
+- `UsageStore.Charge` and `UsageStore.Settle` take
+  `onCharged func(ctx, c limes.Charged[pgx.Tx]) error`, as `limes.Meter` now
+  does: the transaction is `c.Tx`.
+
 ## v0.66.0
 
 - `dpop.VerifierConfig.MatchPathOnly` let a request to the root path `/`

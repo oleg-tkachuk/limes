@@ -529,13 +529,18 @@ capability's own holds.
 
 The trailing `nil` is an optional in-transaction callback. If your store has
 transactions, pass a function and the module threads **your** handle back so
-your side effects commit atomically with the spend:
+your side effects commit atomically with the spend. It also hands over the
+receipt the call will return, so the side effect can name the charge:
 
 ```go
-usage.Charge(ctx, req, func(ctx context.Context, tx MyTx) error {
-    return myOutbox.Enqueue(ctx, tx, chargeEvent)   // commits with the charge
+usage.Charge(ctx, req, func(ctx context.Context, c limes.Charged[MyTx]) error {
+    // commits with the charge
+    return myOutbox.Enqueue(ctx, c.Tx, c.Receipt.ChargeID, c.Receipt.SpentAmount)
 })
 ```
+
+The ledger row is written after the callback returns, so the callback cannot
+read it back yet; the receipt is what it has.
 
 `Settle` takes the same callback. It must not call back into the `Meter`: a
 store may hold its counters while the callback runs. The module never

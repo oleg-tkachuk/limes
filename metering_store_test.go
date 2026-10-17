@@ -145,7 +145,7 @@ func TestMeteringLabelsAmountsAndOutcomes(t *testing.T) {
 	failing := eur("0.1")
 	// A capability with room, so the callback runs.
 	failing.Subject = recordedSubject(ctx, t, records, subjectSpec{capID: uuid.New(), tenant: tenant, budget: budgetOf(limes.MustParseAmount("5")), unit: "EUR"})
-	if _, err := usage.Charge(ctx, failing, func(context.Context, struct{}) error { return boom }); !errors.Is(err, boom) {
+	if _, err := usage.Charge(ctx, failing, func(context.Context, limes.Charged[struct{}]) error { return boom }); !errors.Is(err, boom) {
 		t.Fatal(err)
 	}
 	held := recordedSubject(ctx, t, records, subjectSpec{capID: uuid.New(), tenant: tenant, unit: "EUR"})
