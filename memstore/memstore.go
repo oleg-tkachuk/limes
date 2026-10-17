@@ -1126,14 +1126,14 @@ func (s *UsageStore[TX]) Settle(
 	subject := req.Subject.CapabilityID()
 	h, ok := s.holds[req.ReservationID]
 	if !ok {
-		// A reservation of another capability, or settled under other
-		// copies, is none of this one's: its receipt is not this subject's
-		// to read back either.
-		if e, settled := entryLocked(s, s.byReservation, req.ReservationID); settled && e.CapabilityID == subject && sameCopyIDs(e.Copies, req.Subject.Copies()) {
+		// A reservation of another capability or tenant, or settled under
+		// other copies, is none of this one's: its receipt is not this
+		// subject's to read back either.
+		if e, settled := entryLocked(s, s.byReservation, req.ReservationID); settled && e.CapabilityID == subject && e.TenantID == req.Subject.TenantID() && sameCopyIDs(e.Copies, req.Subject.Copies()) {
 			return s.replayLocked(e), nil
 		}
 	}
-	if !ok || h.capID != subject || !h.expires.After(s.nowFn()) || !sameCopies(h.copies, req.Subject.Copies()) {
+	if !ok || h.capID != subject || h.tenantID != req.Subject.TenantID() || !h.expires.After(s.nowFn()) || !sameCopies(h.copies, req.Subject.Copies()) {
 		return limes.ChargeReceipt{}, limes.ErrReservationNotFound
 	}
 	ancestors, err := s.lineage(h.capID)
@@ -1272,7 +1272,7 @@ func parseReservationPlace(cursor string) (reservationPlace, error) {
 }
 
 // Release ends a reservation without charging. Idempotent; a hold of
-// another capability or other copies is left held.
+// another capability or tenant, or of other copies, is left held.
 func (s *UsageStore[TX]) Release(_ context.Context, req limes.ReleaseRequest) error {
 	if err := checkSubject(req.Subject); err != nil {
 		return err

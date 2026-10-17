@@ -592,14 +592,14 @@ func (s *UsageStore) Settle(ctx context.Context, req limes.SettleRequest, onChar
 	err := s.inTenantTx(ctx, subject.TenantID(), func(tx pgx.Tx) error {
 		h, err := scanHold(tx.QueryRow(ctx, sqlLockHold, req.ReservationID))
 		if errors.Is(err, pgx.ErrNoRows) {
-			// A reservation of another capability, or settled under other
-			// copies, is none of this one's: its receipt is not this
-			// subject's to read back either.
+			// A reservation of another capability or tenant, or settled
+			// under other copies, is none of this one's: its receipt is not
+			// this subject's to read back either.
 			e, settled, err := readEntry(ctx, tx, sqlChargeByReservation, req.ReservationID)
 			if err != nil {
 				return err
 			}
-			if settled && e.CapabilityID == subject.CapabilityID() && sameCopyIDs(e.copies, subject.Copies()) {
+			if settled && e.CapabilityID == subject.CapabilityID() && e.TenantID == subject.TenantID() && sameCopyIDs(e.copies, subject.Copies()) {
 				receipt, err = replay(ctx, tx, e)
 				return err
 			}
@@ -608,7 +608,7 @@ func (s *UsageStore) Settle(ctx context.Context, req limes.SettleRequest, onChar
 		if err != nil {
 			return err
 		}
-		if h.capID != subject.CapabilityID() || !h.expires.After(s.clock()) || !sameCopyIDs(copyIDs(h.copies), subject.Copies()) {
+		if h.capID != subject.CapabilityID() || h.tenantID != subject.TenantID() || !h.expires.After(s.clock()) || !sameCopyIDs(copyIDs(h.copies), subject.Copies()) {
 			return limes.ErrReservationNotFound
 		}
 		ancestors, err := lineage(ctx, tx, h.capID)
@@ -636,8 +636,8 @@ func (s *UsageStore) Settle(ctx context.Context, req limes.SettleRequest, onChar
 }
 
 // Release ends a reservation without charging. Releasing one that is gone
-// is a no-op, and so is releasing one of another capability or other
-// copies: it is left held.
+// is a no-op, and so is releasing one of another capability or tenant, or
+// of other copies: it is left held.
 func (s *UsageStore) Release(ctx context.Context, req limes.ReleaseRequest) error {
 	if err := checkSubject(req.Subject); err != nil {
 		return err
@@ -651,7 +651,7 @@ func (s *UsageStore) Release(ctx context.Context, req limes.ReleaseRequest) erro
 		if err != nil {
 			return err
 		}
-		if h.capID != subject.CapabilityID() || !sameCopyIDs(copyIDs(h.copies), subject.Copies()) {
+		if h.capID != subject.CapabilityID() || h.tenantID != subject.TenantID() || !sameCopyIDs(copyIDs(h.copies), subject.Copies()) {
 			return nil
 		}
 		return s.releaseHold(ctx, tx, h)

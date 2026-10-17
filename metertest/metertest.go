@@ -792,6 +792,12 @@ func checkSettleOwner[TX any](t *testing.T, f fixture[TX]) {
 	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: stranger, ReservationID: res.ID, Amount: one}, nil); !errors.Is(err, limes.ErrReservationNotFound) {
 		t.Errorf("settling the child's hold as the root: err = %v, want ErrReservationNotFound", err)
 	}
+	// The hold's capability under another tenant is not its owner either; a
+	// store that scopes tenants may refuse the call as out of scope instead.
+	elsewhere := newSubject(subjectSpec{capID: f.child, tenant: uuid.New(), budget: budgetOf(childBudget)})
+	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: elsewhere, ReservationID: res.ID, Amount: one}, nil); !errors.Is(err, limes.ErrReservationNotFound) && !errors.Is(err, limes.ErrScopeMismatch) {
+		t.Errorf("settling the child's hold under another tenant: err = %v, want ErrReservationNotFound or ErrScopeMismatch", err)
+	}
 	if u, err := f.Usage.GetUsage(f.Ctx, f.child); err != nil || u.ReservedAmount != 2*one || u.SpentAmount != 0 {
 		t.Errorf("child after a refused settle = %+v, %v; want 2 held, nothing spent", u, err)
 	}
