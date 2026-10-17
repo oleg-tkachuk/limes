@@ -17,6 +17,8 @@ vars:
   TASKLIB: 'https://github.com/oleg-tkachuk/taskfiles.git//%s?ref=v11.2.2'
   # The developer tools' own module; see its go.mod.
   TOOLS_MODFILE: tools/go.mod
+  # golangci-lint's module, apart from TOOLS_MODFILE; see its go.mod.
+  GOLANGCI_LINT_MODFILE: tools/golangci-lint/go.mod
   # The Redis replay cache, a module of its own so the root never resolves a
   # Redis client.
   REDISREPLAY_DIR: redisreplay
@@ -40,9 +42,9 @@ includes:
     checksum: 4de07ad9c5fdd046002f1fd22bb68c40e4456d07f8d7b6c3e51253940267dada
     dir: .
     flatten: true
-    # Its vuln runs a govulncheck from PATH; the one below runs the version
-    # tools/go.mod pins.
-    excludes: [vuln]
+    # Its vuln and lint run a govulncheck and a golangci-lint from PATH; the
+    # ones below run the versions tools/ pins.
+    excludes: [vuln, lint]
     # GO_TEST_FLAGS spelled out, so a bump of the library cannot drop -race.
     vars: { PROJECT_NAME: limes, GO_TEST_FLAGS: -race -short }
 
@@ -80,7 +82,7 @@ tasks:
       - go mod tidy -diff
       - go mod verify
       - go vet ./...
-      - golangci-lint run --config ../.golangci.yml ./...
+      - go tool -modfile=../{{.GOLANGCI_LINT_MODFILE}} golangci-lint run --config ../.golangci.yml ./...
       - go test -race -short ./...
       - go tool -modfile=../{{.TOOLS_MODFILE}} govulncheck ./...
 
@@ -91,7 +93,7 @@ tasks:
       - go mod tidy -diff
       - go mod verify
       - go vet ./...
-      - golangci-lint run --config ../.golangci.yml ./...
+      - go tool -modfile=../{{.GOLANGCI_LINT_MODFILE}} golangci-lint run --config ../.golangci.yml ./...
       - go tool -modfile=../{{.TOOLS_MODFILE}} govulncheck ./...
 
   verify:examples:
@@ -101,7 +103,7 @@ tasks:
       - go mod tidy -diff
       - go mod verify
       - go vet ./...
-      - golangci-lint run --config ../.golangci.yml ./...
+      - go tool -modfile=../{{.GOLANGCI_LINT_MODFILE}} golangci-lint run --config ../.golangci.yml ./...
       - go test -race -short ./...
       - go run ./quickstart
       - go run ./issue-verify
@@ -146,13 +148,18 @@ tasks:
     cmds:
       - go test -race -count=1 -run '^TestContractOnRedis$' ./...
 
+  lint:
+    desc: "golangci-lint over the module, the version tools/golangci-lint pins — the one CI runs; flags go after --, as in task lint -- --concurrency 1"
+    cmds:
+      - go tool -modfile={{.GOLANGCI_LINT_MODFILE}} golangci-lint run {{.CLI_ARGS}} ./...
+
   vuln:
     desc: "govulncheck — vulnerabilities this module's code actually reaches"
     cmds:
       - go tool -modfile={{.TOOLS_MODFILE}} govulncheck ./...
 
   verify:tidy:
-    desc: "Fail when any module's go.mod or go.sum (root, tools, tools/yq) is not what go mod tidy writes, or a download differs from go.sum"
+    desc: "Fail when any module's go.mod or go.sum (root, tools, tools/yq, tools/golangci-lint) is not what go mod tidy writes, or a download differs from go.sum"
     cmds:
       - go mod tidy -diff
       - go mod verify
@@ -160,6 +167,8 @@ tasks:
         dir: tools
       - cmd: go mod tidy -diff
         dir: tools/yq
+      - cmd: go mod tidy -diff
+        dir: tools/golangci-lint
 
   verify:32-bit:
     desc: "go vet, tests included, for a 32-bit GOARCH — where an untyped constant past 2^31 stops the build"

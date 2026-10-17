@@ -39,10 +39,6 @@ env:
   # so a release replaced under the same tag fails the run. Renovate moves
   # TASK_VERSION alone; a bump fails here until this follows it.
   TASK_SHA256: "680859dbb4d881a9c72d4d9a8f510825450849af8567deacd7302c01124416fb"
-  # Must be BUILT with a Go no older than the `go` directive in go.mod, or it
-  # refuses to load the module. Bumping go.mod means checking this.
-  # renovate: datasource=github-releases depName=golangci/golangci-lint
-  GOLANGCI_LINT_VERSION: "v2.14.0"
   # renovate: datasource=pypi depName=zizmor
   ZIZMOR_VERSION: "1.30.1"
   # The newest patch of the oldest Go the module supports: the `go` directive
@@ -106,8 +102,8 @@ jobs:
           # The cache below replaces setup-go's, which only main should write.
           cache: false
 
-      # Keyed by what decides the cache's contents — the Go, the linter and
-      # every module's go.sum — not by the commit: the dependencies and the
+      # Keyed by what decides the cache's contents — the Go and every
+      # module's go.sum, the linter's among them — not by the commit: the dependencies and the
       # standard library are most of the build, and they change with those.
       # main writes a new entry only when the key changes, and a pull request
       # restores main's, so a pull request cannot seed what main builds from.
@@ -120,9 +116,8 @@ jobs:
             ~/.cache/go-build
             ~/go/pkg/mod
             ~/.cache/golangci-lint
-          key: go-${{ runner.os }}-verify-${{ steps.go.outputs.go-version }}-${{ env.GOLANGCI_LINT_VERSION }}-${{ hashFiles('go.sum', 'tools/go.sum', 'tools/yq/go.sum', 'redisreplay/go.sum', 'pgstore/go.sum') }}
+          key: go-${{ runner.os }}-verify-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum', 'tools/go.sum', 'tools/yq/go.sum', 'tools/golangci-lint/go.sum', 'redisreplay/go.sum', 'pgstore/go.sum') }}
           restore-keys: |
-            go-${{ runner.os }}-verify-${{ steps.go.outputs.go-version }}-${{ env.GOLANGCI_LINT_VERSION }}-
             go-${{ runner.os }}-verify-${{ steps.go.outputs.go-version }}-
 
       # A build cache entry this run uses is touched by go once it is an hour
@@ -132,14 +127,6 @@ jobs:
       # run, never a wrong one.
       - name: Mark the run's start for the cache trim
         run: touch -d '2 hours ago' "$RUNNER_TEMP/go-cache-mark"
-
-      - name: Set up golangci-lint
-        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
-        with:
-          version: ${{ env.GOLANGCI_LINT_VERSION }}
-          install-only: true
-          # Its cache lives in the Go caches above.
-          skip-cache: true
 
       # verify:release-rules runs the pinned commit analyzer and notes generator against
       # release.config.cjs. Node 24, as release.yaml runs it.
