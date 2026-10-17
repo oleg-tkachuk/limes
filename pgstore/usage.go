@@ -330,19 +330,15 @@ func (s *UsageStore) SetTenantBudget(ctx context.Context, req limes.SetTenantBud
 		if unit == "" {
 			unit = b.unit
 		}
-		normalised, err := limes.NormalizeUnitCode(unit)
-		if err != nil {
-			return err
-		}
 		// A reset closes the spend, never the holds still open in the old
 		// unit.
-		if b.persisted && b.unit != "" && normalised != b.unit &&
+		if b.persisted && b.unit != "" && unit != b.unit &&
 			(b.reserved > 0 || (b.spent > 0 && !req.ResetSpend)) {
 			return fmt.Errorf("%w: tenant %s has %s counted in %s",
 				limes.ErrUnitCodeMismatch, req.TenantID, b.spent+b.reserved, b.unit)
 		}
 		now := s.clock()
-		b.ceiling, b.unit, b.end = req.Ceiling, normalised, nil
+		b.ceiling, b.unit, b.end = req.Ceiling, unit, nil
 		if !req.PeriodEnd.IsZero() {
 			end := req.PeriodEnd.UTC().Truncate(timeResolution)
 			b.end = &end

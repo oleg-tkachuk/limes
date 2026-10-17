@@ -16,11 +16,14 @@ import (
 // eraseHolds is how many holds the concurrent erase check settles beside it.
 const eraseHolds = 4
 
+// testUnit is the unit the package's own tests count in.
+const testUnit = "USD"
+
 // meterSubject is capID of tenant as a verified capability gives it, with no
 // ceiling of its own.
 func meterSubject(capID, tenant uuid.UUID) limes.MeterSubject {
 	return link.NewMeterSubject(link.MeterSubjectFields{
-		CapabilityID: capID, TenantID: tenant, UnitCode: limes.DefaultUnitCode,
+		CapabilityID: capID, TenantID: tenant, UnitCode: testUnit,
 		Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true},
 	}).(limes.MeterSubject)
 }

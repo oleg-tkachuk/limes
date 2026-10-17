@@ -19,13 +19,10 @@ func (s *UsageStore) Bump(ctx context.Context, req limes.BumpRequest) (limes.Bum
 	if err := req.Validate(); err != nil {
 		return limes.BumpReceipt{}, err
 	}
-	unit, err := limes.NormalizeUnitCode(req.Subject.UnitCode())
-	if err != nil {
-		return limes.BumpReceipt{}, err
-	}
+	unit := req.Subject.UnitCode()
 	subject := req.Subject
 	var receipt limes.BumpReceipt
-	err = s.inTenantTx(ctx, subject.TenantID(), func(tx pgx.Tx) error {
+	err := s.inTenantTx(ctx, subject.TenantID(), func(tx pgx.Tx) error {
 		ancestors, err := lineage(ctx, tx, subject.CapabilityID())
 		if err != nil {
 			return err
@@ -164,12 +161,9 @@ func (s *UsageStore) Charge(ctx context.Context, req limes.ChargeRequest, onChar
 	if err := req.Validate(); err != nil {
 		return limes.ChargeReceipt{}, err
 	}
-	unit, err := limes.NormalizeUnitCode(req.Subject.UnitCode())
-	if err != nil {
-		return limes.ChargeReceipt{}, err
-	}
+	unit := req.Subject.UnitCode()
 	var receipt limes.ChargeReceipt
-	err = s.inTenantTx(ctx, req.Subject.TenantID(), func(tx pgx.Tx) error {
+	err := s.inTenantTx(ctx, req.Subject.TenantID(), func(tx pgx.Tx) error {
 		// A replay is answered before the lineage is read: it moves nothing,
 		// so it needs no record, and a capability purged since still gets its
 		// receipt, as a settled hold does.
@@ -295,6 +289,9 @@ func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, s
 	}
 	c.tenant.spent += spec.amount
 	c.tenant.reserved = max0(c.tenant.reserved - released)
+	if c.tenant.unit == "" {
+		c.tenant.unit = spec.unit
+	}
 	for _, cp := range spec.copies {
 		r := c.copies[string(cp.RevocationID)]
 		r.capID = spec.capID
@@ -486,10 +483,7 @@ func (s *UsageStore) Reserve(ctx context.Context, req limes.ReserveRequest) (lim
 	if err := req.Validate(); err != nil {
 		return limes.Reservation{}, err
 	}
-	unit, err := limes.NormalizeUnitCode(req.Subject.UnitCode())
-	if err != nil {
-		return limes.Reservation{}, err
-	}
+	unit := req.Subject.UnitCode()
 	ttl := req.TTL
 	if ttl == 0 {
 		ttl = limes.DefaultReservationTTL
@@ -550,6 +544,9 @@ func applyHold(c *counters, h hold, sign limes.Nanos) {
 		}
 	}
 	c.tenant.reserved = max0(c.tenant.reserved + sign*h.amount)
+	if c.tenant.unit == "" {
+		c.tenant.unit = h.unit
+	}
 	for _, cp := range h.copies {
 		if r, ok := c.copies[string(cp.RevocationID)]; ok {
 			r.capID = h.capID

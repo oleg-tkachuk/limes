@@ -24,7 +24,7 @@ func TestSumChargesRefusesASumPastMaxNanos(t *testing.T) {
 	tenant, capID := uuid.New(), uuid.New()
 	at := time.Now().UTC().Truncate(timeResolution)
 	for range 2 {
-		if _, err := owner.Exec(t.Context(), sqlLedgerCharge, uuid.New(), capID, tenant, int64(limes.MaxNanos), limes.DefaultUnitCode, at); err != nil {
+		if _, err := owner.Exec(t.Context(), sqlLedgerCharge, uuid.New(), capID, tenant, int64(limes.MaxNanos), testUnit, at); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -76,7 +76,7 @@ func TestChargesLandWhereTheStoresClockSays(t *testing.T) {
 	c := limes.Capability{
 		ID: uuid.New(), ExpiresAt: start.Add(period),
 		Subject: limes.Principal{Type: limes.PrincipalTypeService, TenantID: tenant, Subject: "svc:reporting"},
-		Caveats: limes.Caveats{Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true}},
+		Caveats: limes.Caveats{Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true}, UnitCode: testUnit},
 	}
 	if err := records.Insert(ctx, limes.InsertRequest{Capability: c}); err != nil {
 		t.Fatal(err)
