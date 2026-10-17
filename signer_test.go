@@ -55,6 +55,7 @@ func TestSign_RoundTrip(t *testing.T) {
 			Ops:              []Op{OpGet, OpList, OpSearch},
 			ResourcePrefixes: []string{"object://acme/run-42/"},
 			Budget:           BudgetCeiling{Max: NanosPerUnit / 2},
+			UnitCode:         "USD",
 			Requests:         RequestCeiling{Max: 100},
 		},
 	}

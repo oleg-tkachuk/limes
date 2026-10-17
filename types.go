@@ -374,7 +374,8 @@ type Caveats struct {
 	// UnitCode pins the currency or unit: an ISO 4217 code (IsUnitCode),
 	// XXX ("no currency") for a budget that is not money. Empty names none:
 	// the capability counts requests (Meter.Bump) but no amount, and a
-	// Charge, Reserve or Settle on it is ErrInvalidRequest. A delegated
+	// Charge, Reserve or Settle on it is ErrInvalidRequest, and a
+	// Budget.Max above zero without one is ErrInvalidCaveats. A delegated
 	// child that names none takes its parent's.
 	UnitCode string
 

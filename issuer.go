@@ -384,6 +384,11 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 	if req.InheritCaveats {
 		req.Caveats = parent.Caveats
 	}
+	// A child counts in its parent's unit; one that names none takes it,
+	// before its caveats are validated against it.
+	if req.Caveats.UnitCode == "" {
+		req.Caveats.UnitCode = parent.Caveats.UnitCode
+	}
 	if err := validateAudience(req.Audience); err != nil {
 		return Capability{}, "", err
 	}
@@ -432,10 +437,6 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 	}
 	if child.ConfirmationJKT == "" {
 		child.ConfirmationJKT = parent.ConfirmationJKT
-	}
-	// A child counts in its parent's unit; one that names none takes it.
-	if child.Caveats.UnitCode == "" {
-		child.Caveats.UnitCode = parent.Caveats.UnitCode
 	}
 	// A child starts no earlier than its parent, as it ends no later. The
 	// parent may start after now — a not-before ahead, or an issuer replica
