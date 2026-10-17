@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/oleg-tkachuk/limes/internal/httpx"
@@ -54,44 +55,45 @@ func TestResponseFreshness(t *testing.T) {
 // The resolver asks for the registered JWK Set media type and keeps a set
 // only as long as the response's Cache-Control allows, within its bounds.
 func TestRemoteJWKSHonoursTheResponse(t *testing.T) {
-	kid, pub, _, err := generateKeypair()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var fetches atomic.Int32
-	var accept atomic.Value
-	const maxAge = "60"
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fetches.Add(1)
-		accept.Store(r.Header.Get("Accept"))
-		doc, _ := Marshal(map[string]ed25519.PublicKey{kid: pub})
-		w.Header().Set(httpx.HeaderCacheControl, "max-age="+maxAge)
-		_, _ = w.Write(doc)
-	}))
-	defer srv.Close()
-	clock := &stepClock{t: time.Unix(1_800_000_000, 0)}
-	r, err := NewRemote(RemoteConfig{
-		URL: srv.URL, Client: srv.Client(), Now: clock.Now,
-		MinRefreshInterval: 10 * time.Second, RefreshInterval: 5 * time.Minute, MaxStale: time.Hour,
+	synctest.Test(t, func(t *testing.T) {
+		kid, pub, _, err := generateKeypair()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fetches atomic.Int32
+		var accept atomic.Value
+		const maxAge = "60"
+		srv := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fetches.Add(1)
+			accept.Store(r.Header.Get("Accept"))
+			doc, _ := Marshal(map[string]ed25519.PublicKey{kid: pub})
+			w.Header().Set(httpx.HeaderCacheControl, "max-age="+maxAge)
+			_, _ = w.Write(doc)
+		})
+		clock := &stepClock{t: time.Unix(1_800_000_000, 0)}
+		r, err := NewRemote(RemoteConfig{
+			URL: fixtureURL, Client: handlerClient(srv), Now: clock.Now,
+			MinRefreshInterval: 10 * time.Second, RefreshInterval: 5 * time.Minute, MaxStale: time.Hour,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx := context.Background()
+		if _, err := r.PublicKey(ctx, kid); err != nil {
+			t.Fatal(err)
+		}
+		if got := accept.Load(); !strings.HasPrefix(got.(string), mediaTypeJWKSet) {
+			t.Errorf("Accept = %q, want %s first", got, mediaTypeJWKSet)
+		}
+		clock.Advance(30 * time.Second)
+		_, _ = r.PublicKey(ctx, kid)
+		if n := fetches.Load(); n != 1 {
+			t.Errorf("%d fetches within max-age, want 1", n)
+		}
+		clock.Advance(31 * time.Second) // past max-age, well before RefreshInterval
+		_, _ = r.PublicKey(ctx, kid)
+		awaitFetches(t, fetches.Load, 2)
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	if _, err := r.PublicKey(ctx, kid); err != nil {
-		t.Fatal(err)
-	}
-	if got := accept.Load(); !strings.HasPrefix(got.(string), mediaTypeJWKSet) {
-		t.Errorf("Accept = %q, want %s first", got, mediaTypeJWKSet)
-	}
-	clock.Advance(30 * time.Second)
-	_, _ = r.PublicKey(ctx, kid)
-	if n := fetches.Load(); n != 1 {
-		t.Errorf("%d fetches within max-age, want 1", n)
-	}
-	clock.Advance(31 * time.Second) // past max-age, well before RefreshInterval
-	_, _ = r.PublicKey(ctx, kid)
-	awaitFetches(t, fetches.Load, 2)
 }
 
 // A max-age outside the resolver's bounds is clamped to them.
