@@ -47,7 +47,7 @@ func TestChargeRollsBackWhenSideEffectFails(t *testing.T) {
 
 	// Now a charge whose side effect fails.
 	boom := errors.New("outbox insert failed")
-	spent, err := usage.Charge(ctx, limes.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: tenantID, budget: budgetOf(limes.MustParseAmount("100")), unit: "USD"}), Amount: limes.MustParseAmount("25"), Op: "write", Actor: "alice"}, func(context.Context, struct{}) error { return boom })
+	spent, err := usage.Charge(ctx, limes.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: tenantID, budget: budgetOf(limes.MustParseAmount("100")), unit: "USD"}), Amount: limes.MustParseAmount("25"), Op: "write", Actor: "alice"}, func(context.Context, limes.Charged[struct{}]) error { return boom })
 
 	if !errors.Is(err, boom) {
 		t.Fatalf("want the side-effect error, got %v", err)
@@ -89,7 +89,7 @@ func TestChargeRetryAfterRollbackIsClean(t *testing.T) {
 	usage := newTestUsage(newTestStore())
 
 	boom := errors.New("transient")
-	if _, err := usage.Charge(ctx, limes.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: tenantID, budget: budgetOf(limes.MustParseAmount("100")), unit: "USD"}), Amount: limes.MustParseAmount("7"), Op: "op", Actor: "actor"}, func(context.Context, struct{}) error { return boom }); !errors.Is(err, boom) {
+	if _, err := usage.Charge(ctx, limes.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: tenantID, budget: budgetOf(limes.MustParseAmount("100")), unit: "USD"}), Amount: limes.MustParseAmount("7"), Op: "op", Actor: "actor"}, func(context.Context, limes.Charged[struct{}]) error { return boom }); !errors.Is(err, boom) {
 		t.Fatalf("want the failure, got %v", err)
 	}
 

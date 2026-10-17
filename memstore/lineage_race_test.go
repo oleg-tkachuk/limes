@@ -50,7 +50,7 @@ func TestChargeRacingDeleteLeavesTheAncestorDeleted(t *testing.T) {
 		wg.Add(2)
 		go func() { // B: holds the usage lock in onCharged, then barges with Delete
 			defer wg.Done()
-			_, _ = u.Charge(ctx, limes.ChargeRequest{Subject: other, Amount: unit}, func(context.Context, struct{}) error {
+			_, _ = u.Charge(ctx, limes.ChargeRequest{Subject: other, Amount: unit}, func(context.Context, limes.Charged[struct{}]) error {
 				close(holding)
 				<-release
 				return nil
@@ -94,7 +94,7 @@ func TestReserveRacingDeleteLeavesTheAncestorDeleted(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			_, _ = u.Charge(ctx, limes.ChargeRequest{Subject: other, Amount: unit}, func(context.Context, struct{}) error {
+			_, _ = u.Charge(ctx, limes.ChargeRequest{Subject: other, Amount: unit}, func(context.Context, limes.Charged[struct{}]) error {
 				close(holding)
 				<-release
 				return nil

@@ -269,7 +269,7 @@ func (f fixture[TX]) childSubject() limes.MeterSubject {
 
 // charge charges req against the fixture's child, its ceiling, tenant and
 // unit, unless the request's subject names another capability or ceiling.
-func (f fixture[TX]) charge(req limes.ChargeRequest, onCharged func(context.Context, TX) error) (limes.ChargeReceipt, error) {
+func (f fixture[TX]) charge(req limes.ChargeRequest, onCharged func(context.Context, limes.Charged[TX]) error) (limes.ChargeReceipt, error) {
 	s := req.Subject
 	requests, budget := s.Requests(), s.Budget()
 	spec := subjectSpec{capID: s.CapabilityID(), tenant: f.Tenant, requests: &requests, budget: &budget, copies: s.Copies()}
@@ -340,6 +340,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"AnAncestorCeilingBoundsItsChildren", checkAncestorCeiling[TX]},
 		{"TheTenantCeilingBoundsEveryCapability", checkTenantCeiling[TX]},
 		{"AFailedCallbackMovesNothing", checkCallbackRollback[TX]},
+		{"TheCallbackSeesTheReceipt", checkCallbackSeesTheReceipt[TX]},
 		{"BumpCountsTheChain", checkBump[TX]},
 		{"RefundReturnsToEveryCounter", checkRefund[TX]},
 		{"AHoldCountsAgainstCharges", checkHoldBlocksCharge[TX]},
@@ -461,7 +462,7 @@ func checkTenantCountsBeforeACeiling[TX any](t *testing.T, env Env[TX]) {
 
 func checkRejectionMovesNothing[TX any](t *testing.T, f fixture[TX]) {
 	ran := false
-	r, err := f.charge(limes.ChargeRequest{Amount: childBudget + one}, func(context.Context, TX) error { ran = true; return nil })
+	r, err := f.charge(limes.ChargeRequest{Amount: childBudget + one}, func(context.Context, limes.Charged[TX]) error { ran = true; return nil })
 	if !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Fatalf("charge past the ceiling: err = %v, want ErrBudgetExceeded", err)
 	}
@@ -475,7 +476,7 @@ func checkRejectionMovesNothing[TX any](t *testing.T, f fixture[TX]) {
 
 func checkExternalRefChargesOnce[TX any](t *testing.T, f fixture[TX]) {
 	fanOuts := 0
-	onCharged := func(context.Context, TX) error { fanOuts++; return nil }
+	onCharged := func(context.Context, limes.Charged[TX]) error { fanOuts++; return nil }
 	first, err := f.charge(limes.ChargeRequest{Amount: 2 * one, ExternalRef: "call-1"}, onCharged)
 	if err != nil || first.Replayed {
 		t.Fatalf("first charge = %+v, %v", first, err)
@@ -1022,7 +1023,7 @@ func checkSettleReplay[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatal(err)
 	}
 	ran := false
-	again, err := f.Usage.Settle(f.Ctx, req, func(context.Context, TX) error { ran = true; return nil })
+	again, err := f.Usage.Settle(f.Ctx, req, func(context.Context, limes.Charged[TX]) error { ran = true; return nil })
 	if err != nil || !again.Replayed || again.ChargeID != first.ChargeID || again.SpentAmount != first.SpentAmount {
 		t.Errorf("a replayed settle = %+v, %v; want the first's receipt %+v, replayed", again, err, first)
 	}
@@ -2167,7 +2168,7 @@ func checkTenantCeiling[TX any](t *testing.T, f fixture[TX]) {
 // survives it.
 func checkCallbackRollback[TX any](t *testing.T, f fixture[TX]) {
 	boom := errors.New("side effect failed")
-	if _, err := f.charge(limes.ChargeRequest{Amount: one, ExternalRef: "call-1"}, func(context.Context, TX) error { return boom }); !errors.Is(err, boom) {
+	if _, err := f.charge(limes.ChargeRequest{Amount: one, ExternalRef: "call-1"}, func(context.Context, limes.Charged[TX]) error { return boom }); !errors.Is(err, boom) {
 		t.Fatalf("charge with a failing callback: err = %v, want the callback's", err)
 	}
 	if f.spent(t, f.child) != 0 || f.spent(t, f.root) != 0 || f.tenantSpent(t) != 0 {
@@ -2189,7 +2190,7 @@ func checkCallbackRollback[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatal(err)
 	}
 	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: f.childSubject(), ReservationID: res.ID, Amount: 2 * one},
-		func(context.Context, TX) error { return boom }); !errors.Is(err, boom) {
+		func(context.Context, limes.Charged[TX]) error { return boom }); !errors.Is(err, boom) {
 		t.Fatalf("settle with a failing callback: err = %v, want the callback's", err)
 	}
 	if _, err := f.Usage.GetReservation(f.Ctx, res.ID); err != nil {
@@ -2198,6 +2199,52 @@ func checkCallbackRollback[TX any](t *testing.T, f fixture[TX]) {
 	if got := f.spent(t, f.child); got != one {
 		t.Errorf("child spent %v after a failed settle, want 1", got)
 	}
+}
+
+// checkCallbackSeesTheReceipt holds a store to handing onCharged the charge
+// it runs inside: the receipt the call then returns, so a side effect such as
+// an outbox row can name the ChargeID, the spend and an overrun.
+func checkCallbackSeesTheReceipt[TX any](t *testing.T, f fixture[TX]) {
+	var seen limes.ChargeReceipt
+	runs := 0
+	onCharged := func(_ context.Context, c limes.Charged[TX]) error {
+		seen = c.Receipt
+		runs++
+		return nil
+	}
+	same := func(how string, got limes.ChargeReceipt) {
+		t.Helper()
+		if runs != 1 {
+			t.Fatalf("%s: onCharged ran %d times, want once", how, runs)
+		}
+		if seen.ChargeID == uuid.Nil || seen.ChargeID != got.ChargeID || seen.SpentAmount != got.SpentAmount ||
+			seen.Overrun != got.Overrun || seen.Replayed || seen.TenantID != got.TenantID || seen.UnitCode != got.UnitCode {
+			t.Errorf("%s: onCharged saw %+v, the call returned %+v", how, seen, got)
+		}
+		runs = 0
+	}
+
+	got, err := f.charge(limes.ChargeRequest{Amount: one}, onCharged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	same("a charge", got)
+
+	res, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err = f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: f.childSubject(), ReservationID: res.ID, Amount: one}, onCharged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	same("a settle", got)
+
+	got, err = f.charge(limes.ChargeRequest{Amount: childBudget, Overrun: limes.OverrunRecord}, onCharged)
+	if err != nil || !got.Overrun {
+		t.Fatalf("a charge past the ceiling = %+v, %v; want it recorded as an overrun", got, err)
+	}
+	same("an overrun", got)
 }
 
 // checkBump holds a store to counting requests on the capability and every
@@ -2946,7 +2993,7 @@ func checkReadOnlyScope[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatalf("GetUsage under the read-only scope: %v", err)
 	}
 	ran := false
-	onCharged := func(context.Context, TX) error {
+	onCharged := func(context.Context, limes.Charged[TX]) error {
 		ran = true
 		return nil
 	}
