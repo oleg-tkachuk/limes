@@ -412,15 +412,6 @@ func ancestorIDs(ancestors []ancestor) []uuid.UUID {
 	return out
 }
 
-// checkSubject refuses a subject no verifier or record made: the zero
-// MeterSubject names no capability and no tenant to count against.
-func checkSubject(s limes.MeterSubject) error {
-	if s.CapabilityID() == uuid.Nil || s.TenantID() == uuid.Nil {
-		return fmt.Errorf("%w: pgstore: the subject names no capability or no tenant", limes.ErrInvalidRequest)
-	}
-	return nil
-}
-
 func max0(n limes.Nanos) limes.Nanos {
 	if n < 0 {
 		return 0
