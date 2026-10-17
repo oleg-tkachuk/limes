@@ -79,8 +79,7 @@ func main() {
 			Ops:              []limes.Op{limes.OpGet, limes.OpShare},
 			ResourcePrefixes: []string{"corpus/public/"},
 			Requests:         limes.RequestCeiling{Max: 500},
-			Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("25.00")},
-			UnitCode:         "USD",
+			Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("25.00"), UnitCode: "USD"},
 		},
 	})
 	parent, parentToken := parentResult.Capability, parentResult.Token
@@ -122,8 +121,7 @@ func main() {
 			Ops:              []limes.Op{limes.OpGet},         // dropped OpShare
 			ResourcePrefixes: []string{"corpus/public/2026/"}, // narrowed
 			Requests:         limes.RequestCeiling{Max: 50},
-			Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("2.00")}, // 25.00 → 2.00
-			UnitCode:         "USD",
+			Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("2.00")}, // 25.00 → 2.00, in the parent's USD
 		},
 	})
 	must(err, "delegate")
@@ -144,7 +142,6 @@ func main() {
 			ResourcePrefixes: []string{"corpus/public/"},
 			Requests:         limes.RequestCeiling{Max: 50},
 			Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("999")}, // wider than the parent's 25.00
-			UnitCode:         "USD",
 		},
 	})
 	demo.Refused(log, err, limes.ErrDelegationTooWide, "a delegation wider than its parent")

@@ -22,7 +22,7 @@ func mkCap(id, parent uuid.UUID, tenant uuid.UUID, subject string) limes.Capabil
 		ExpiresAt: contractExpiry,
 		// No ceiling of its own: a test that needs one sets it.
 		Caveats: limes.Caveats{
-			Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true},
+			Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true, UnitCode: "USD"},
 		},
 	}
 }
@@ -149,19 +149,24 @@ func TestBumpRequestUnlimited(t *testing.T) {
 	}
 }
 
-// A tenant budget set with no unit names none: no unit is assumed, and the
-// first charge or hold pins one (metertest checks that).
+// A tenant frozen before it counts anything names no unit, and a ceiling
+// that lets something be spent names its own: none is assumed.
 func TestSetTenantBudgetAssumesNoUnit(t *testing.T) {
 	ctx := context.Background()
 	u := newTestUsage(newTestStore())
 	b, err := u.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
-		TenantID: uuid.New(), Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("10")},
+		TenantID: uuid.New(), Ceiling: limes.BudgetCeiling{},
 	})
 	if err != nil {
 		t.Fatalf("SetTenantBudget: %v", err)
 	}
-	if b.UnitCode != "" {
-		t.Errorf("UnitCode = %q, want none", b.UnitCode)
+	if b.Ceiling.UnitCode != "" {
+		t.Errorf("UnitCode = %q, want none", b.Ceiling.UnitCode)
+	}
+	if _, err := u.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
+		TenantID: uuid.New(), Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("10")},
+	}); !errors.Is(err, limes.ErrInvalidRequest) {
+		t.Errorf("a ceiling of 10 in no unit: err = %v, want ErrInvalidRequest", err)
 	}
 }
 

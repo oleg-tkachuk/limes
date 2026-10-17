@@ -17,14 +17,20 @@ type RequestCeiling struct {
 	Unlimited bool
 }
 
-// BudgetCeiling bounds an amount spent: at most Max, in the capability's
-// unit, or none at all when Unlimited.
+// BudgetCeiling bounds an amount spent: at most Max of UnitCode, or any
+// amount of it when Unlimited. The unit is part of the bound, as a currency
+// is part of an amount: a ceiling that lets anything be spent names what,
+// and the zero ceiling, which lets nothing be, needs none.
 type BudgetCeiling struct {
 	// Max is the most that may be spent; 0 allows nothing. Within
 	// 0..MaxNanos, and 0 when Unlimited.
 	Max Nanos
 	// Unlimited lifts the ceiling.
 	Unlimited bool
+	// UnitCode is the unit Max counts in: an ISO 4217 code (IsUnitCode),
+	// AbstractUnitCode for a budget that is not money. Required when the
+	// ceiling lets anything be spent; may be empty on the zero ceiling.
+	UnitCode string
 }
 
 // unlimitedWithMax says what is wrong with a ceiling that both names a bound
@@ -43,9 +49,10 @@ func (c RequestCeiling) Validate() error {
 	return nil
 }
 
-// Validate refuses a Max beside Unlimited as ErrInvalidRequest, and a Max
-// outside 0..MaxNanos as ErrInvalidAmount (Nanos.Validate), which matches
-// ErrInvalidRequest too.
+// Validate refuses a Max beside Unlimited, a unit that is not an ISO 4217
+// code, and a ceiling that lets something be spent without naming its unit,
+// as ErrInvalidRequest; a Max outside 0..MaxNanos is ErrInvalidAmount
+// (Nanos.Validate), which matches ErrInvalidRequest too.
 func (c BudgetCeiling) Validate() error {
 	if c.Unlimited && c.Max != 0 {
 		return invalidRequest("budget: %s (Max %s)", unlimitedWithMax, c.Max)
@@ -53,8 +60,18 @@ func (c BudgetCeiling) Validate() error {
 	if err := c.Max.Validate(); err != nil {
 		return fmt.Errorf("budget: %w", err)
 	}
+	if err := validUnitCode(c.UnitCode); err != nil {
+		return fmt.Errorf("budget: %w", err)
+	}
+	if c.permitsSpend() && c.UnitCode == "" {
+		return invalidRequest("budget %s names no unit_code", c)
+	}
 	return nil
 }
+
+// permitsSpend reports whether the ceiling lets anything be spent, which
+// only a ceiling in a unit can.
+func (c BudgetCeiling) permitsSpend() bool { return c.Unlimited || c.Max > 0 }
 
 // Admits reports whether n requests in all stay under the ceiling.
 func (c RequestCeiling) Admits(n int64) bool { return c.Unlimited || n <= c.Max }
@@ -69,7 +86,9 @@ func (c RequestCeiling) Within(outer RequestCeiling) bool {
 	return outer.Unlimited || (!c.Unlimited && c.Max <= outer.Max)
 }
 
-// Within reports whether c allows no more than outer.
+// Within reports whether c allows no more than outer, by amount alone:
+// whether the two count in one unit is the caller's to check, and to refuse
+// as ErrUnitCodeMismatch rather than as a wider ceiling.
 func (c BudgetCeiling) Within(outer BudgetCeiling) bool {
 	return outer.Unlimited || (!c.Unlimited && c.Max <= outer.Max)
 }
@@ -82,12 +101,17 @@ func (c RequestCeiling) String() string {
 	return fmt.Sprint(c.Max)
 }
 
-// String is the ceiling for logs and errors: its Max, or "unlimited".
+// String is the ceiling for logs and errors: its Max, or "unlimited", and
+// its unit when it names one.
 func (c BudgetCeiling) String() string {
+	amount := c.Max.String()
 	if c.Unlimited {
-		return unlimitedText
+		amount = unlimitedText
 	}
-	return c.Max.String()
+	if c.UnitCode == "" {
+		return amount
+	}
+	return amount + " " + c.UnitCode
 }
 
 // unlimitedText is how a lifted ceiling prints.

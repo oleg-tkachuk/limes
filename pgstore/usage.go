@@ -326,7 +326,8 @@ func (s *UsageStore) SetTenantBudget(ctx context.Context, req limes.SetTenantBud
 		if req.ExpectedVersion != b.version {
 			return limes.ErrTenantBudgetVersionMismatch
 		}
-		unit := req.UnitCode
+		// A ceiling that names no unit — the zero one — keeps the tenant's.
+		unit := req.Ceiling.UnitCode
 		if unit == "" {
 			unit = b.unit
 		}

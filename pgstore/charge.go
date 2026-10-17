@@ -474,7 +474,7 @@ func scanHold(row pgx.Row) (hold, error) {
 	}
 	h.amount, h.op = limes.Nanos(amount), limes.Op(op)
 	var err error
-	h.copies, err = decodeHeldCopies(copies)
+	h.copies, err = decodeHeldCopies(copies, h.unit)
 	return h, err
 }
 

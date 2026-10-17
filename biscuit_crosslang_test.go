@@ -90,7 +90,7 @@ func TestGenerateBiscuitFixtures(t *testing.T) {
 		Audience: []string{audienceData, audienceMCP},
 		Caveats: Caveats{
 			Ops: []Op{OpGet, OpList, OpPut}, ResourcePrefixes: []string{"corpus/"},
-			Requests: RequestCeiling{Unlimited: true}, Budget: BudgetCeiling{Unlimited: true},
+			Requests: RequestCeiling{Unlimited: true}, Budget: BudgetCeiling{Unlimited: true, UnitCode: "USD"},
 		},
 		TTL: biscuitSeedTTL,
 	})
@@ -167,6 +167,7 @@ type biscuitCase struct {
 		ConfirmationJKT  string    `json:"confirmation_jkt"`
 		CopyMaxRequests  int64     `json:"copy_max_requests"`
 		CopyMaxBudget    int64     `json:"copy_max_budget_nanos"`
+		CopyUnitCode     string    `json:"copy_unit_code"`
 	} `json:"expect"`
 }
 
@@ -213,9 +214,9 @@ func TestSharedAttenuationVerifies(t *testing.T) {
 		t.Errorf("ConfirmationJKT = %q, want %q", got.Capability().ConfirmationJKT, want.ConfirmationJKT)
 	}
 	if len(got.Capability().Copies) != 1 || !ceilingIs(got.Capability().Copies[0].Requests, RequestCeiling{Max: want.CopyMaxRequests}) ||
-		!ceilingIs(got.Capability().Copies[0].Budget, BudgetCeiling{Max: Nanos(want.CopyMaxBudget)}) {
-		t.Errorf("Copies = %+v, want one with %d requests and %d nanos",
-			got.Capability().Copies, want.CopyMaxRequests, want.CopyMaxBudget)
+		!ceilingIs(got.Capability().Copies[0].Budget, BudgetCeiling{Max: Nanos(want.CopyMaxBudget), UnitCode: want.CopyUnitCode}) {
+		t.Errorf("Copies = %+v, want one with %d requests and %d nanos of %s",
+			got.Capability().Copies, want.CopyMaxRequests, want.CopyMaxBudget, want.CopyUnitCode)
 	}
 	if _, err := v.Verify(ctx, VerifyRequest{Token: token, Audience: audienceMCP}); err == nil {
 		t.Error("the plane the attenuation dropped is still accepted")

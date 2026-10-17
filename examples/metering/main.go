@@ -64,7 +64,7 @@ func main() {
 
 	tenant := uuid.New()
 	tenantBudget, err := usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
-		TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("100.00")}, UnitCode: unit,
+		TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("100.00"), UnitCode: unit},
 	})
 	demo.Must(log, err, "set the tenant's budget")
 	log.Info("set the tenant's budget: every capability in the tenant spends from it too",
@@ -78,8 +78,7 @@ func main() {
 		Caveats: limes.Caveats{
 			Ops:      []limes.Op{limes.OpGet},
 			Requests: limes.RequestCeiling{Max: requestLimit},
-			Budget:   limes.BudgetCeiling{Max: limes.MustParseAmount("1.00")},
-			UnitCode: unit,
+			Budget:   limes.BudgetCeiling{Max: limes.MustParseAmount("1.00"), UnitCode: unit},
 		},
 	})
 	demo.Must(log, err, "issue")

@@ -59,7 +59,8 @@ func main() {
 			Ops:              []limes.Op{limes.OpGet},
 			ResourcePrefixes: []string{"corpus/public/"},
 			Requests:         limes.RequestCeiling{Unlimited: true},
-			Budget:           limes.BudgetCeiling{Unlimited: true},
+			// No Budget: the zero ceiling, which spends nothing and needs no
+			// unit — this capability is read, never charged.
 		},
 	})
 	demo.Must(log, err, "issue")

@@ -44,7 +44,7 @@ func newTenantFixture(t *testing.T) tenantFixture {
 	f.parent = limes.Capability{
 		ID: uuid.New(), ExpiresAt: expiry,
 		Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: f.mine, Subject: "agent:parent"},
-		Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true}},
+		Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true, UnitCode: testUnit}},
 	}
 	f.child = f.parent
 	f.child.ID, f.child.ParentID, f.child.Subject.Subject = uuid.New(), f.parent.ID, "agent:child"
@@ -122,7 +122,7 @@ func TestRowSecurityKeepsTheMeterApart(t *testing.T) {
 	f := newTenantFixture(t)
 	ctx := WithTenant(t.Context(), f.mine)
 	if _, err := f.usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
-		TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true}, UnitCode: testUnit,
+		TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: testUnit},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestHoldIsItsTenantsAcrossTenants(t *testing.T) {
 	f := newTenantFixture(t)
 	mine := WithTenant(t.Context(), f.mine)
 	if _, err := f.usage.SetTenantBudget(mine, limes.SetTenantBudgetRequest{
-		TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true}, UnitCode: testUnit,
+		TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: testUnit},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestRowSecurityKeepsRefundsApart(t *testing.T) {
 	f := newTenantFixture(t)
 	mine := WithTenant(t.Context(), f.mine)
 	if _, err := f.usage.SetTenantBudget(mine, limes.SetTenantBudgetRequest{
-		TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true}, UnitCode: testUnit,
+		TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: testUnit},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ func TestTheOwnerNeedsNoScope(t *testing.T) {
 	c := limes.Capability{
 		ID: uuid.New(), ExpiresAt: time.Now().Add(rlsTTL),
 		Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent:owner"},
-		Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true}},
+		Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true, UnitCode: testUnit}},
 	}
 	if err := store.Insert(t.Context(), limes.InsertRequest{Capability: c}); err != nil {
 		t.Errorf("Insert as the owner with no scope: %v", err)
@@ -302,7 +302,7 @@ func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 	f := newTenantFixture(t)
 	mine := WithTenant(t.Context(), f.mine)
 	if _, err := f.usage.SetTenantBudget(mine, limes.SetTenantBudgetRequest{
-		TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true}, UnitCode: testUnit,
+		TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: testUnit},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -408,7 +408,7 @@ func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 			},
 			"SetTenantBudget": func() error {
 				_, err := s.usage.SetTenantBudget(s.ctx, limes.SetTenantBudgetRequest{
-					TenantID: f.mine, Ceiling: limes.BudgetCeiling{Max: 1}, UnitCode: testUnit,
+					TenantID: f.mine, Ceiling: limes.BudgetCeiling{Max: 1, UnitCode: testUnit},
 				})
 				return err
 			},

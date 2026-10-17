@@ -48,7 +48,7 @@ func TestStoredMeterSubjectCarriesTheStoredCeilings(t *testing.T) {
 	c := Capability{
 		ID:        uuid.New(),
 		Subject:   Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
-		Caveats:   Caveats{Ops: []Op{OpGet}, Requests: RequestCeiling{Max: requests}, Budget: BudgetCeiling{Max: budget}, UnitCode: unit},
+		Caveats:   Caveats{Ops: []Op{OpGet}, Requests: RequestCeiling{Max: requests}, Budget: BudgetCeiling{Max: budget, UnitCode: unit}},
 		ExpiresAt: time.Now().Add(time.Hour),
 	}
 	store := newMemStore()
@@ -65,8 +65,8 @@ func TestStoredMeterSubjectCarriesTheStoredCeilings(t *testing.T) {
 	if s.CapabilityID() != c.ID || s.TenantID() != c.Subject.TenantID {
 		t.Errorf("subject names %s of %s, want the record's", s.CapabilityID(), s.TenantID())
 	}
-	if s.Requests() != (RequestCeiling{Max: requests}) || s.Budget() != (BudgetCeiling{Max: budget}) || s.UnitCode() != unit {
-		t.Errorf("subject = %v requests, %v %s; want %d, %v %s", s.Requests(), s.Budget(), s.UnitCode(), requests, budget, unit)
+	if s.Requests() != (RequestCeiling{Max: requests}) || s.Budget() != (BudgetCeiling{Max: budget, UnitCode: unit}) || s.UnitCode() != unit {
+		t.Errorf("subject = %v requests, %v in %s; want %d, %v %s", s.Requests(), s.Budget(), s.UnitCode(), requests, budget, unit)
 	}
 	if len(s.Copies()) != 0 {
 		t.Errorf("copies = %+v, want none from a stored record", s.Copies())

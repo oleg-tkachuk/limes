@@ -156,8 +156,7 @@ func (f fixture) newCapability(subject string, parent uuid.UUID, expires time.Ti
 			ResourcePrefixes:       []string{"corpus/"},
 			ResourceURIs:           []string{"corpus/index.json"},
 			Requests:               limes.RequestCeiling{Max: 7},
-			Budget:                 limes.BudgetCeiling{Max: 3 * limes.NanosPerUnit / 2}, // 1.5
-			UnitCode:               "EUR",
+			Budget:                 limes.BudgetCeiling{Max: 3 * limes.NanosPerUnit / 2, UnitCode: "EUR"}, // 1.5 EUR
 			AllowTaintedRead:       true,
 			IdempotencyKeyRequired: true,
 			SourceIPCIDR:           []string{"10.0.0.0/8"},
@@ -283,7 +282,7 @@ func checkRoundTrip(t *testing.T, f fixture) {
 	// a ceiling of 0 back, and a capability that allows nothing.
 	for name, lift := range map[string]func(*limes.Caveats){
 		"requests unlimited": func(c *limes.Caveats) { c.Requests = limes.RequestCeiling{Unlimited: true} },
-		"budget unlimited":   func(c *limes.Caveats) { c.Budget = limes.BudgetCeiling{Unlimited: true} },
+		"budget unlimited":   func(c *limes.Caveats) { c.Budget = limes.BudgetCeiling{Unlimited: true, UnitCode: c.Budget.UnitCode} },
 	} {
 		c := f.newCapability("agent:unlimited", uuid.Nil, f.now.Add(ttl))
 		lift(&c.Caveats)

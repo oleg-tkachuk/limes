@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// Nanos is an amount of a currency or metering unit (see UnitCode) in
+// Nanos is an amount of a currency or metering unit (see BudgetCeiling.UnitCode) in
 // billionths of the unit: 1.5 USD is 1_500_000_000. Every amount the module
 // counts — a charge, a ceiling, a hold, a refund — is Nanos, so spend sums,
 // compares and refunds exactly, however many charges it takes. Float64

@@ -140,7 +140,7 @@ func TestAbstractUnitIsXXX(t *testing.T) {
 	if IsUnitCode("UNIT") {
 		t.Error("UNIT is still accepted")
 	}
-	if err := (Caveats{Ops: []Op{OpGet}, UnitCode: "UNIT"}).Validate(); !errors.Is(err, ErrInvalidCaveats) {
+	if err := (Caveats{Ops: []Op{OpGet}, Budget: BudgetCeiling{UnitCode: "UNIT"}}).Validate(); !errors.Is(err, ErrInvalidCaveats) {
 		t.Errorf("caveats in UNIT: err = %v, want ErrInvalidCaveats", err)
 	}
 }

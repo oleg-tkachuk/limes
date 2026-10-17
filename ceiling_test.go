@@ -35,8 +35,10 @@ func TestCeilingValidate(t *testing.T) {
 		"requests negative":             {RequestCeiling{Max: -1}.Validate(), ErrInvalidRequest},
 		"requests past I-JSON":          {RequestCeiling{Max: MaxIJSONInteger + 1}.Validate(), ErrInvalidRequest},
 		"requests unlimited with a Max": {RequestCeiling{Max: 1, Unlimited: true}.Validate(), ErrInvalidRequest},
-		"budget within range":           {BudgetCeiling{Max: MaxNanos}.Validate(), nil},
-		"budget unlimited":              {BudgetCeiling{Unlimited: true}.Validate(), nil},
+		"budget within range":           {BudgetCeiling{Max: MaxNanos, UnitCode: "USD"}.Validate(), nil},
+		"budget in no unit":             {BudgetCeiling{Max: MaxNanos}.Validate(), ErrInvalidRequest},
+		"no budget in no unit":          {BudgetCeiling{}.Validate(), nil},
+		"budget unlimited":              {BudgetCeiling{Unlimited: true, UnitCode: "USD"}.Validate(), nil},
 		"budget negative":               {BudgetCeiling{Max: -1}.Validate(), ErrInvalidAmount},
 		"budget past MaxNanos":          {BudgetCeiling{Max: MaxNanos + 1}.Validate(), ErrInvalidAmount},
 		"budget unlimited with a Max":   {BudgetCeiling{Max: 1, Unlimited: true}.Validate(), ErrInvalidRequest},
@@ -82,6 +84,12 @@ func TestCeilingString(t *testing.T) {
 	if got := (BudgetCeiling{Unlimited: true}).String(); got != unlimitedText {
 		t.Errorf("String = %q, want %q", got, unlimitedText)
 	}
+	if got := (BudgetCeiling{Max: 3 * NanosPerUnit / 2, UnitCode: "EUR"}).String(); got != "1.5 EUR" {
+		t.Errorf("String = %q, want 1.5 EUR", got)
+	}
+	if got := (BudgetCeiling{Unlimited: true, UnitCode: "EUR"}).String(); got != unlimitedText+" EUR" {
+		t.Errorf("String = %q, want %s EUR", got, unlimitedText)
+	}
 	if got := (BudgetCeiling{Max: 3 * NanosPerUnit / 2}).String(); got != "1.5" {
 		t.Errorf("String = %q, want 1.5", got)
 	}
@@ -90,7 +98,7 @@ func TestCeilingString(t *testing.T) {
 // A tenant budget request is refused as malformed before any store reads it.
 func TestSetTenantBudgetRequestValidate(t *testing.T) {
 	tenant := uuid.New()
-	ok := SetTenantBudgetRequest{TenantID: tenant, Ceiling: BudgetCeiling{Max: NanosPerUnit}}
+	ok := SetTenantBudgetRequest{TenantID: tenant, Ceiling: BudgetCeiling{Max: NanosPerUnit, UnitCode: "USD"}}
 	if err := ok.Validate(); err != nil {
 		t.Fatalf("a well-formed request: %v", err)
 	}
@@ -98,7 +106,8 @@ func TestSetTenantBudgetRequestValidate(t *testing.T) {
 		"no tenant":          {Ceiling: BudgetCeiling{Max: NanosPerUnit}},
 		"a negative version": {TenantID: tenant, ExpectedVersion: -1},
 		"a negative ceiling": {TenantID: tenant, Ceiling: BudgetCeiling{Max: -1}},
-		"a lower-case unit":  {TenantID: tenant, UnitCode: "usd"},
+		"a lower-case unit":  {TenantID: tenant, Ceiling: BudgetCeiling{Max: 1, UnitCode: "usd"}},
+		"spend in no unit":   {TenantID: tenant, Ceiling: BudgetCeiling{Unlimited: true}},
 	} {
 		if err := req.Validate(); !errors.Is(err, ErrInvalidRequest) {
 			t.Errorf("%s: err = %v, want ErrInvalidRequest", name, err)

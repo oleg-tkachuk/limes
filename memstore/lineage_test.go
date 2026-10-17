@@ -46,9 +46,9 @@ func TestChildrenCannotSpendPastTheirParentsBudget(t *testing.T) {
 	s := newTestStore()
 	u := newTestUsage(s)
 	rootID, kids, tenant := tree(t, s,
-		limes.Caveats{Ops: []limes.Op{limes.OpGet}, Budget: limes.BudgetCeiling{Max: limes.MustParseAmount("25")}, UnitCode: "USD"},
+		limes.Caveats{Ops: []limes.Op{limes.OpGet}, Budget: limes.BudgetCeiling{Max: limes.MustParseAmount("25"), UnitCode: "USD"}},
 		2,
-		limes.Caveats{Ops: []limes.Op{limes.OpGet}, Budget: limes.BudgetCeiling{Max: limes.MustParseAmount("20")}, UnitCode: "USD"},
+		limes.Caveats{Ops: []limes.Op{limes.OpGet}, Budget: limes.BudgetCeiling{Max: limes.MustParseAmount("20"), UnitCode: "USD"}},
 	)
 
 	charge := func(id uuid.UUID, amount limes.Nanos) (limes.ChargeReceipt, error) {

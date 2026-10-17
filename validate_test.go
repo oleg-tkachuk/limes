@@ -15,7 +15,7 @@ import (
 // ─── validation ────────────────────────────────────────────────────────────
 
 func TestCaveatsValidate(t *testing.T) {
-	ok := Caveats{Ops: []Op{OpGet, "tool:search"}, ResourcePrefixes: []string{"a/"}, UnitCode: "EUR", SourceIPCIDR: []string{"10.0.0.0/8"}}
+	ok := Caveats{Ops: []Op{OpGet, "tool:search"}, ResourcePrefixes: []string{"a/"}, Budget: BudgetCeiling{UnitCode: "EUR"}, SourceIPCIDR: []string{"10.0.0.0/8"}}
 	if err := ok.Validate(); err != nil {
 		t.Fatalf("valid caveats rejected: %v", err)
 	}
@@ -28,7 +28,7 @@ func TestCaveatsValidate(t *testing.T) {
 		"neg requests":         {Ops: []Op{OpGet}, Requests: RequestCeiling{Max: -1}},
 		"neg budget":           {Ops: []Op{OpGet}, Budget: BudgetCeiling{Max: -5}},
 		"budget past MaxNanos": {Ops: []Op{OpGet}, Budget: BudgetCeiling{Max: MaxNanos + 1}},
-		"bad unit":             {Ops: []Op{OpGet}, UnitCode: "XYZ"},
+		"bad unit":             {Ops: []Op{OpGet}, Budget: BudgetCeiling{UnitCode: "XYZ"}},
 		"bad cidr":             {Ops: []Op{OpGet}, SourceIPCIDR: []string{"10.0.0.0/33"}},
 		"IPv4-mapped cidr":     {Ops: []Op{OpGet}, SourceIPCIDR: []string{"::ffff:10.0.0.0/104"}},
 		"control in uri":       {Ops: []Op{OpGet}, ResourceURIs: []string{"a\x00b"}},
@@ -96,7 +96,7 @@ func issueRoot(t *testing.T, issuer *Issuer, caveats Caveats) Capability {
 func TestDelegateInheritanceIsExplicit(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
-	parent := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet, OpShare}, Budget: BudgetCeiling{Max: MustParseAmount("25")}, UnitCode: "USD"})
+	parent := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet, OpShare}, Budget: BudgetCeiling{Max: MustParseAmount("25"), UnitCode: "USD"}})
 
 	if _, _, err := issuer.delegate(ctx, DelegateRequest{
 		Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"},
@@ -109,8 +109,8 @@ func TestDelegateInheritanceIsExplicit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("delegate with InheritCaveats: %v", err)
 	}
-	if child.Caveats.Budget != (BudgetCeiling{Max: 25 * NanosPerUnit}) {
-		t.Errorf("inherited budget = %v, want 25", child.Caveats.Budget)
+	if child.Caveats.Budget != (BudgetCeiling{Max: 25 * NanosPerUnit, UnitCode: "USD"}) {
+		t.Errorf("inherited budget = %v, want 25 USD", child.Caveats.Budget)
 	}
 }
 
@@ -120,20 +120,20 @@ func TestDelegateGivesAChildItsParentsUnit(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
 	const parentUnit = "EUR"
-	parent := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet, OpShare}, Budget: BudgetCeiling{Max: MustParseAmount("25")}, UnitCode: parentUnit})
+	parent := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet, OpShare}, Budget: BudgetCeiling{Max: MustParseAmount("25"), UnitCode: parentUnit}})
 	for name, named := range map[string]string{"names none": "", "names the parent's": parentUnit} {
 		child, _, err := issuer.delegate(ctx, DelegateRequest{
 			Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"},
-			Parent:  asVerified(parent), Caveats: Caveats{Ops: []Op{OpGet}, Budget: BudgetCeiling{Max: MustParseAmount("2")}, UnitCode: named},
+			Parent:  asVerified(parent), Caveats: Caveats{Ops: []Op{OpGet}, Budget: BudgetCeiling{Max: MustParseAmount("2"), UnitCode: named}},
 		})
-		if err != nil || child.Caveats.UnitCode != parentUnit {
-			t.Errorf("a child that %s: unit %q, %v; want %q", name, child.Caveats.UnitCode, err, parentUnit)
+		if err != nil || child.Caveats.Budget.UnitCode != parentUnit {
+			t.Errorf("a child that %s: unit %q, %v; want %q", name, child.Caveats.Budget.UnitCode, err, parentUnit)
 		}
 	}
 	unitless := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet, OpShare}})
 	child, _, err := issuer.delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"}, Parent: asVerified(unitless), InheritCaveats: true})
-	if err != nil || child.Caveats.UnitCode != "" {
-		t.Errorf("a child of a parent with no unit: unit %q, %v; want none", child.Caveats.UnitCode, err)
+	if err != nil || child.Caveats.Budget.UnitCode != "" {
+		t.Errorf("a child of a parent with no unit: unit %q, %v; want none", child.Caveats.Budget.UnitCode, err)
 	}
 }
 
@@ -295,11 +295,11 @@ func TestInsertRequestValidate(t *testing.T) {
 // calling Validate enforces a rule added later without a change of its own.
 func TestMeterRequestsValidate(t *testing.T) {
 	subject := link.NewMeterSubject(link.MeterSubjectFields{
-		CapabilityID: uuid.New(), TenantID: uuid.New(), UnitCode: "EUR",
+		CapabilityID: uuid.New(), TenantID: uuid.New(), Budget: BudgetCeiling{UnitCode: "EUR"},
 	}).(MeterSubject)
 	noTenant := link.NewMeterSubject(link.MeterSubjectFields{CapabilityID: uuid.New()}).(MeterSubject)
 	badUnit := link.NewMeterSubject(link.MeterSubjectFields{
-		CapabilityID: uuid.New(), TenantID: uuid.New(), UnitCode: "euro",
+		CapabilityID: uuid.New(), TenantID: uuid.New(), Budget: BudgetCeiling{UnitCode: "euro"},
 	}).(MeterSubject)
 	const one = Nanos(1)
 	longRef := strings.Repeat("r", MaxExternalRefBytes+1)
@@ -343,20 +343,22 @@ func TestMeterRequestsValidate(t *testing.T) {
 	}
 }
 
-// A bound on spend needs a unit to count it in; a budget that bounds nothing
-// — none allowed, or unlimited — does not.
+// A ceiling that lets anything be spent names the unit it counts in; the
+// zero one, which lets nothing be, needs none.
 func TestABudgetNeedsAUnit(t *testing.T) {
-	bound := BudgetCeiling{Max: MustParseAmount("5")}
 	for name, tc := range map[string]struct {
-		c  Caveats
+		b  BudgetCeiling
 		ok bool
 	}{
-		"a bound and a unit":    {Caveats{Ops: []Op{OpGet}, Budget: bound, UnitCode: "EUR"}, true},
-		"a bound and no unit":   {Caveats{Ops: []Op{OpGet}, Budget: bound}, false},
-		"no spend and no unit":  {Caveats{Ops: []Op{OpGet}}, true},
-		"unlimited and no unit": {Caveats{Ops: []Op{OpGet}, Budget: BudgetCeiling{Unlimited: true}}, true},
+		"a bound in a unit":      {BudgetCeiling{Max: MustParseAmount("5"), UnitCode: "EUR"}, true},
+		"a bound in no unit":     {BudgetCeiling{Max: MustParseAmount("5")}, false},
+		"unlimited in a unit":    {BudgetCeiling{Unlimited: true, UnitCode: "EUR"}, true},
+		"unlimited in no unit":   {BudgetCeiling{Unlimited: true}, false},
+		"no spend in no unit":    {BudgetCeiling{}, true},
+		"no spend in a unit":     {BudgetCeiling{UnitCode: "EUR"}, true},
+		"a unit that is not one": {BudgetCeiling{UnitCode: "euro"}, false},
 	} {
-		err := tc.c.Validate()
+		err := (Caveats{Ops: []Op{OpGet}, Budget: tc.b}).Validate()
 		if tc.ok && err != nil {
 			t.Errorf("%s: %v", name, err)
 		}

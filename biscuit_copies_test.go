@@ -30,7 +30,7 @@ func limitedBiscuit(t *testing.T) (*Verifier, Capability, string) {
 		Audience: []string{audienceData},
 		Caveats: Caveats{
 			Ops: []Op{OpGet}, Requests: RequestCeiling{Max: copyTestCapRequests},
-			Budget: BudgetCeiling{Max: copyTestCapBudget}, UnitCode: "USD",
+			Budget: BudgetCeiling{Max: copyTestCapBudget, UnitCode: "USD"},
 		},
 		TTL: time.Hour,
 	})
@@ -78,7 +78,7 @@ func TestCopyLimitsArriveAsCopies(t *testing.T) {
 	if !bytes.Equal(in.RevocationID, lastRevocationID(t, inner)) || !ceilingIs(in.Requests, RequestCeiling{Max: 10}) || in.Budget != nil {
 		t.Errorf("innermost = %+v", in)
 	}
-	if !bytes.Equal(out.RevocationID, lastRevocationID(t, outer)) || !ceilingIs(out.Requests, RequestCeiling{Max: 50}) || !ceilingIs(out.Budget, BudgetCeiling{Max: 4 * NanosPerUnit}) {
+	if !bytes.Equal(out.RevocationID, lastRevocationID(t, outer)) || !ceilingIs(out.Requests, RequestCeiling{Max: 50}) || !ceilingIs(out.Budget, BudgetCeiling{Max: 4 * NanosPerUnit, UnitCode: "USD"}) {
 		t.Errorf("outermost = %+v", out)
 	}
 	if got.Capability().Caveats.Requests != cap.Caveats.Requests || got.Capability().Caveats.Budget != cap.Caveats.Budget {
@@ -165,6 +165,9 @@ func TestCopyLimitsMalformed(t *testing.T) {
 		{Budget: &BudgetCeiling{Max: MaxNanos + 1}},
 		// A copy only narrows: a ceiling it lifts means nothing.
 		{Requests: &RequestCeiling{Unlimited: true}}, {Budget: &BudgetCeiling{Unlimited: true}},
+		// A copy spends in its capability's unit, which a block does not
+		// carry: one it names would not be the one enforced.
+		{Budget: &BudgetCeiling{Max: 1, UnitCode: "USD"}},
 	} {
 		// The holder's own call: a request error, not a token the verifier refused.
 		if _, err := Attenuate(root, a); !errors.Is(err, ErrInvalidRequest) || errors.Is(err, ErrBiscuitAttenuation) {
@@ -226,7 +229,7 @@ func TestBiscuitCopyNamesItsLimits(t *testing.T) {
 		t.Fatalf("BiscuitCopy: %v", err)
 	}
 	if len(got.Copies()) != 2 ||
-		!bytes.Equal(got.Copies()[0].RevocationID, lastRevocationID(t, inner)) || !ceilingIs(got.Copies()[0].Budget, BudgetCeiling{Max: NanosPerUnit}) ||
+		!bytes.Equal(got.Copies()[0].RevocationID, lastRevocationID(t, inner)) || !ceilingIs(got.Copies()[0].Budget, BudgetCeiling{Max: NanosPerUnit, UnitCode: "USD"}) ||
 		!bytes.Equal(got.Copies()[1].RevocationID, lastRevocationID(t, outer)) || !ceilingIs(got.Copies()[1].Requests, RequestCeiling{Max: 50}) {
 		t.Fatalf("limits = %+v", got.Copies())
 	}
@@ -275,7 +278,7 @@ func TestACopyCanBeFrozen(t *testing.T) {
 		t.Fatal(err)
 	}
 	copies := vc.Capability().Copies
-	if len(copies) != 1 || !ceilingIs(copies[0].Requests, RequestCeiling{}) || !ceilingIs(copies[0].Budget, BudgetCeiling{}) {
+	if len(copies) != 1 || !ceilingIs(copies[0].Requests, RequestCeiling{}) || !ceilingIs(copies[0].Budget, BudgetCeiling{UnitCode: "USD"}) {
 		t.Errorf("copies = %+v; want one ceiling of 0 requests and 0 spend", copies)
 	}
 	if copies[0].Requests.Admits(1) || copies[0].Budget.Admits(1) {

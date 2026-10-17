@@ -877,21 +877,22 @@ func (s *UsageStore[TX]) chargeLocked(
 }
 
 // tenantLocked returns the tenant's aggregate row, or a new one without a
-// ceiling, in unit when the row names none yet. The aggregate counts from
+// ceiling, in unit when the row counts in none yet: the unit of what it
+// counts, not one a ceiling set. The aggregate counts from
 // the first charge or hold, not from the first SetTenantBudget, so a ceiling
 // set later is measured against what the tenant has already spent and
 // holds. s.mu must be held.
 func (s *UsageStore[TX]) tenantLocked(tenantID uuid.UUID, unit string) limes.TenantBudget {
 	if b, ok := s.budgets[tenantID]; ok {
-		if b.UnitCode == "" {
-			b.UnitCode = unit
+		if b.Ceiling.UnitCode == "" {
+			b.Ceiling.UnitCode = unit
 		}
 		return b
 	}
 	// A ceiling never set lifts nothing and limits nothing: the row only
 	// counts, until SetTenantBudget gives it a ceiling.
 	return limes.TenantBudget{
-		TenantID: tenantID, Ceiling: limes.BudgetCeiling{Unlimited: true}, UnitCode: unit, PeriodStart: s.nowFn(),
+		TenantID: tenantID, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: unit}, PeriodStart: s.nowFn(),
 	}
 }
 
@@ -981,8 +982,8 @@ func (s *UsageStore[TX]) checkUnitsLocked(c ceilingCheck) error {
 			return fmt.Errorf("%w: ancestor %s counts in %s, not %s", limes.ErrUnitCodeMismatch, a.ID, have, c.unit)
 		}
 	}
-	if b, ok := s.budgets[c.tenantID]; ok && differs(b.UnitCode) {
-		return fmt.Errorf("%w: tenant %s counts in %s, not %s", limes.ErrUnitCodeMismatch, c.tenantID, b.UnitCode, c.unit)
+	if b, ok := s.budgets[c.tenantID]; ok && differs(b.Ceiling.UnitCode) {
+		return fmt.Errorf("%w: tenant %s counts in %s, not %s", limes.ErrUnitCodeMismatch, c.tenantID, b.Ceiling.UnitCode, c.unit)
 	}
 	return nil
 }
@@ -1111,9 +1112,11 @@ func (s *UsageStore[TX]) Settle(
 	}
 	// The charge is the reservation's: its tenant, unit and the copy limits
 	// it was made under, against the subject's own ceiling.
+	budget := req.Subject.Budget()
+	budget.UnitCode = h.unit
 	held := link.NewMeterSubject(link.MeterSubjectFields{
 		CapabilityID: h.capID, TenantID: h.tenantID, Requests: req.Subject.Requests(),
-		Budget: req.Subject.Budget(), UnitCode: h.unit, Copies: h.copies,
+		Budget: budget, Copies: h.copies,
 	}).(limes.MeterSubject)
 	receipt, err := s.chargeLocked(ctx, limes.ChargeRequest{
 		Subject: held, Amount: req.Amount, Op: h.op, Actor: h.actor, Overrun: req.Overrun,
@@ -1393,20 +1396,21 @@ func (s *UsageStore[TX]) SetTenantBudget(_ context.Context, args limes.SetTenant
 		return limes.TenantBudget{}, limes.ErrTenantBudgetVersionMismatch
 	}
 
-	unit := args.UnitCode
+	// A ceiling that names no unit — the zero one — keeps the tenant's.
+	unit := args.Ceiling.UnitCode
 	if unit == "" {
-		unit = b.UnitCode
+		unit = b.Ceiling.UnitCode
 	}
 	// A reset closes the spend, never the holds still open in the old unit.
-	if exists && b.UnitCode != "" && unit != b.UnitCode &&
+	if have := b.Ceiling.UnitCode; exists && have != "" && unit != have &&
 		(b.ReservedAmount > 0 || (b.SpentAmount > 0 && !args.ResetSpend)) {
 		return limes.TenantBudget{}, fmt.Errorf("%w: tenant %s has %s counted in %s",
-			limes.ErrUnitCodeMismatch, args.TenantID, b.SpentAmount+b.ReservedAmount, b.UnitCode)
+			limes.ErrUnitCodeMismatch, args.TenantID, b.SpentAmount+b.ReservedAmount, have)
 	}
 
 	b.TenantID = args.TenantID
 	b.Ceiling = args.Ceiling
-	b.UnitCode = unit
+	b.Ceiling.UnitCode = unit
 	b.PeriodEnd = args.PeriodEnd
 	if args.ResetSpend {
 		b.SpentAmount = 0

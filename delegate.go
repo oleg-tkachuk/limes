@@ -88,15 +88,15 @@ func narrowsCaveats(parent, child Caveats) error {
 			ErrDelegationTooWide, child.Requests, parent.Requests)
 	}
 
-	// Unit code: child must declare the same unit as the parent, none
-	// under none. We don't auto-convert between currencies — a delegated
-	// child in EUR off a USD parent is a configuration mistake (which
-	// budget does the eventual charge land on?) and is rejected at
-	// issuance. Issuer.Delegate gives a child that names none its
-	// parent's.
-	if parent.UnitCode != child.UnitCode {
+	// Unit code: a child budget counts in the parent's unit. We don't
+	// auto-convert between currencies — a delegated child in EUR off a
+	// USD parent is a configuration mistake (which budget does the
+	// eventual charge land on?) and is rejected at issuance. Only a child
+	// budget that spends nothing may name no unit; Issuer.Delegate gives
+	// it its parent's.
+	if child.Budget.UnitCode != parent.Budget.UnitCode && (child.Budget.UnitCode != "" || child.Budget.permitsSpend()) {
 		return fmt.Errorf("%w: parent unit_code %q vs child %q",
-			ErrUnitCodeMismatch, parent.UnitCode, child.UnitCode)
+			ErrUnitCodeMismatch, parent.Budget.UnitCode, child.Budget.UnitCode)
 	}
 
 	// Budget: same rule. Compared in the shared unit_code (validated

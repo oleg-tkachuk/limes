@@ -118,7 +118,7 @@ func main() {
 	inTenant := pgstore.WithTenant(ctx, tenant)
 
 	_, err = usage.SetTenantBudget(inTenant, limes.SetTenantBudgetRequest{
-		TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("100.00")}, UnitCode: unit,
+		TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("100.00"), UnitCode: unit},
 	})
 	demo.Must(log, err, "set the tenant's budget")
 
@@ -130,8 +130,7 @@ func main() {
 		Caveats: limes.Caveats{
 			Ops:      []limes.Op{limes.OpGet},
 			Requests: limes.RequestCeiling{Max: 100},
-			Budget:   limes.BudgetCeiling{Max: limes.MustParseAmount("5.00")},
-			UnitCode: unit,
+			Budget:   limes.BudgetCeiling{Max: limes.MustParseAmount("5.00"), UnitCode: unit},
 		},
 	})
 	demo.Must(log, err, "issue")

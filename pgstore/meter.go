@@ -158,9 +158,12 @@ type budgetRow struct {
 }
 
 func (b budgetRow) budget() limes.TenantBudget {
+	// The row keeps one unit, the tenant's; the ceiling is in it.
+	ceiling := b.ceiling
+	ceiling.UnitCode = b.unit
 	out := limes.TenantBudget{
-		TenantID: b.tenantID, Ceiling: b.ceiling, SpentAmount: b.spent, ReservedAmount: b.reserved,
-		UnitCode: b.unit, PeriodStart: b.start, UpdatedAt: b.updated, ResourceVersion: b.version,
+		TenantID: b.tenantID, Ceiling: ceiling, SpentAmount: b.spent, ReservedAmount: b.reserved,
+		PeriodStart: b.start, UpdatedAt: b.updated, ResourceVersion: b.version,
 	}
 	if b.end != nil {
 		out.PeriodEnd = *b.end
@@ -442,7 +445,9 @@ func encodeHeldCopies(copies []limes.CopyCeiling) ([]byte, error) {
 	return json.Marshal(out)
 }
 
-func decodeHeldCopies(b []byte) ([]limes.CopyCeiling, error) {
+// decodeHeldCopies reads the copies of a hold in unit: a copy's budget is
+// in its hold's unit, which the row keeps once, beside them.
+func decodeHeldCopies(b []byte, unit string) ([]limes.CopyCeiling, error) {
 	var records []heldCopyRecord
 	if err := json.Unmarshal(b, &records); err != nil {
 		return nil, fmt.Errorf("pgstore: decode held copies: %w", err)
@@ -457,7 +462,7 @@ func decodeHeldCopies(b []byte) ([]limes.CopyCeiling, error) {
 			c.Requests = &limes.RequestCeiling{Max: r.Requests.Max, Unlimited: r.Requests.Unlimited}
 		}
 		if r.Budget != nil {
-			c.Budget = &limes.BudgetCeiling{Max: limes.Nanos(r.Budget.Max), Unlimited: r.Budget.Unlimited}
+			c.Budget = &limes.BudgetCeiling{Max: limes.Nanos(r.Budget.Max), Unlimited: r.Budget.Unlimited, UnitCode: unit}
 		}
 		out = append(out, c)
 	}
