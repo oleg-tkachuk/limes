@@ -23,8 +23,8 @@ const testUnit = "USD"
 // ceiling of its own.
 func meterSubject(capID, tenant uuid.UUID) limes.MeterSubject {
 	return link.NewMeterSubject(link.MeterSubjectFields{
-		CapabilityID: capID, TenantID: tenant, UnitCode: testUnit,
-		Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true},
+		CapabilityID: capID, TenantID: tenant,
+		Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true, UnitCode: testUnit},
 	}).(limes.MeterSubject)
 }
 

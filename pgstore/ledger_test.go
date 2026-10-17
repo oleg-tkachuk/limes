@@ -76,7 +76,7 @@ func TestChargesLandWhereTheStoresClockSays(t *testing.T) {
 	c := limes.Capability{
 		ID: uuid.New(), ExpiresAt: start.Add(period),
 		Subject: limes.Principal{Type: limes.PrincipalTypeService, TenantID: tenant, Subject: "svc:reporting"},
-		Caveats: limes.Caveats{Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true}, UnitCode: testUnit},
+		Caveats: limes.Caveats{Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true, UnitCode: testUnit}},
 	}
 	if err := records.Insert(ctx, limes.InsertRequest{Capability: c}); err != nil {
 		t.Fatal(err)
