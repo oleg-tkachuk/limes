@@ -77,7 +77,7 @@ func TestFormattingKeepsThePublicKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := fmt.Sprintf("%x", key), fmt.Sprintf("%x", []byte(key.Public)); !strings.Contains(got, want) {
+	if got, want := fmt.Sprintf("%x", key), fmt.Sprintf("%x", []byte(key.Public())); !strings.Contains(got, want) {
 		t.Errorf("SigningKey under %%x = %q, want the public key %s in it", got, want)
 	}
 }

@@ -19,7 +19,7 @@ import (
 func issue(t *testing.T) (limes.Capability, string, ed25519.PublicKey) {
 	t.Helper()
 	key, err := limes.GenerateKey()
-	kid, pub, priv := key.KeyID, key.Public, key.Private
+	kid, pub, priv := key.KeyID, key.Public(), key.Private
 	if err != nil {
 		t.Fatal(err)
 	}

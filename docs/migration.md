@@ -14,6 +14,13 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.71.0
+
+- `SigningKey.Public`, a field that could disagree with `Private` → a method
+  that derives the public key from `Private`. Read `key.Public()` where you
+  read `key.Public`, and build a `SigningKey` from its `KeyID` and `Private`
+  alone.
+
 ## pgstore/v0.12.0
 
 - `Store.EraseTenant` took `onErased func(ctx, tx pgx.Tx) error`, which saw
