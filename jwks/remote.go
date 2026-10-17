@@ -82,6 +82,9 @@ type RemoteConfig struct {
 // and keeps serving the last good set through a bounded outage.
 type Remote struct {
 	cfg RemoteConfig
+	// endpoint is cfg.URL with any password masked, the form an error
+	// names: an error is what reaches a log.
+	endpoint string
 
 	// fetching holds one token while a fetch is in flight. It is a channel
 	// rather than a mutex so that a caller waiting behind another's fetch
@@ -105,10 +108,15 @@ func NewRemote(cfg RemoteConfig) (*Remote, error) {
 	}
 	u, err := url.Parse(cfg.URL)
 	if err != nil {
+		// A *url.Error quotes the whole URL, password and all: only the
+		// reason is kept.
+		if ue, ok := errors.AsType[*url.Error](err); ok {
+			err = ue.Err
+		}
 		return nil, fmt.Errorf("jwks: RemoteConfig.URL: %w", err)
 	}
 	if u.Scheme != schemeHTTPS || u.Host == "" {
-		return nil, fmt.Errorf("jwks: RemoteConfig.URL must be an %s URL, got %q", schemeHTTPS, cfg.URL)
+		return nil, fmt.Errorf("jwks: RemoteConfig.URL must be an %s URL, got %q", schemeHTTPS, u.Redacted())
 	}
 	if cfg.RefreshInterval < 0 || cfg.MinRefreshInterval < 0 || cfg.MaxStale < 0 || cfg.MaxDocumentBytes < 0 {
 		return nil, errors.New("jwks: RemoteConfig intervals and MaxDocumentBytes must not be negative")
@@ -139,7 +147,7 @@ func NewRemote(cfg RemoteConfig) (*Remote, error) {
 		return nil, fmt.Errorf("jwks: RemoteConfig needs MinRefreshInterval (%s) ≤ RefreshInterval (%s) ≤ MaxStale (%s)",
 			cfg.MinRefreshInterval, cfg.RefreshInterval, cfg.MaxStale)
 	}
-	return &Remote{cfg: cfg, fetching: make(chan struct{}, 1)}, nil
+	return &Remote{cfg: cfg, endpoint: u.Redacted(), fetching: make(chan struct{}, 1)}, nil
 }
 
 // sameOrigin is a shallow copy of c, so the caller's client is left as it
@@ -185,7 +193,7 @@ func (r *Remote) PublicKey(ctx context.Context, kid string) (ed25519.PublicKey, 
 		// The caller gave up waiting on the endpoint with no set it could
 		// serve: the keys are unavailable to it, the server's fault rather
 		// than the token's. The context's error stays matchable.
-		return nil, fmt.Errorf("%w: %s: %w", ErrUnavailable, r.cfg.URL, err)
+		return nil, fmt.Errorf("%w: %s: %w", ErrUnavailable, r.endpoint, err)
 	}
 	key, ok, fetchedAt, _ = r.lookup(kid)
 
@@ -193,13 +201,13 @@ func (r *Remote) PublicKey(ctx context.Context, kid string) (ed25519.PublicKey, 
 	lastErr := r.lastErr
 	r.mu.RUnlock()
 	if fetchedAt.IsZero() || r.cfg.Now().Sub(fetchedAt) > r.cfg.MaxStale {
-		return nil, fmt.Errorf("%w: %s: %w", ErrUnavailable, r.cfg.URL, lastErr)
+		return nil, fmt.Errorf("%w: %s: %w", ErrUnavailable, r.endpoint, lastErr)
 	}
 	// A kid the held set lacks while the endpoint is failing may be one the
 	// issuer has rotated in since: the fault is the endpoint's, not the
 	// token's, so it is not refused as unknown.
 	if !ok && lastErr != nil {
-		return nil, fmt.Errorf("%w: %s: kid %q is not in the set held: %w", ErrUnavailable, r.cfg.URL, kid, lastErr)
+		return nil, fmt.Errorf("%w: %s: kid %q is not in the set held: %w", ErrUnavailable, r.endpoint, kid, lastErr)
 	}
 	if !ok {
 		return nil, ErrUnknownKID
