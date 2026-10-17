@@ -26,7 +26,7 @@ type signingKeyView struct {
 
 // Format prints k with its private key redacted.
 func (k SigningKey) Format(f fmt.State, verb rune) {
-	_, _ = fmt.Fprintf(f, fmt.FormatString(f, verb), signingKeyView{KeyID: k.KeyID, Public: k.Public})
+	_, _ = fmt.Fprintf(f, fmt.FormatString(f, verb), signingKeyView{KeyID: k.KeyID, Public: k.Public()})
 }
 
 // signerConfigView is a SignerConfig as it is formatted.

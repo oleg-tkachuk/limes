@@ -50,11 +50,22 @@ func loadPrivateKey(path string) (ed25519.PrivateKey, error) {
 	return priv, nil
 }
 
-// SigningKey is an Ed25519 key and the kid it is published under.
+// SigningKey is an Ed25519 key and the kid it is published under. It holds
+// the private key alone, and Public derives the public half from it, so the
+// two cannot disagree.
 type SigningKey struct {
 	KeyID   string
-	Public  ed25519.PublicKey
 	Private ed25519.PrivateKey
+}
+
+// Public is the public half of Private; nil when Private is not an Ed25519
+// private key.
+func (k SigningKey) Public() ed25519.PublicKey {
+	if len(k.Private) != ed25519.PrivateKeySize {
+		return nil
+	}
+	pub, _ := k.Private.Public().(ed25519.PublicKey)
+	return pub
 }
 
 // LoadKey reads the PKCS#8 PEM signing key at path, under the kid
@@ -68,6 +79,7 @@ func LoadKey(path string) (SigningKey, error) {
 	if err != nil {
 		return SigningKey{}, err
 	}
-	pub := priv.Public().(ed25519.PublicKey)
-	return SigningKey{KeyID: jwks.KeyID(pub), Public: pub, Private: priv}, nil
+	key := SigningKey{Private: priv}
+	key.KeyID = jwks.KeyID(key.Public())
+	return key, nil
 }

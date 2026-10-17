@@ -35,7 +35,7 @@ type exampleStack struct {
 
 func newExampleStack() exampleStack {
 	key, err := limes.GenerateKey()
-	kid, pub, priv := key.KeyID, key.Public, key.Private
+	kid, pub, priv := key.KeyID, key.Public(), key.Private
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func (s exampleStack) issue() (limes.Capability, string) {
 func ExampleIssuer_Issue() {
 	ctx := context.Background()
 	key, _ := limes.GenerateKey()
-	kid, pub, priv := key.KeyID, key.Public, key.Private
+	kid, pub, priv := key.KeyID, key.Public(), key.Private
 
 	records, _ := memstore.NewStore(memstore.StoreConfig{}) // your Store
 	signer, _ := limes.NewSigner(limes.SignerConfig{KeyID: kid, Key: priv})

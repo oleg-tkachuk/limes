@@ -81,8 +81,8 @@ func TestLoadKey(t *testing.T) {
 	path := writePEM(t, "PRIVATE KEY", der)
 
 	k, err := LoadKey(path)
-	if err != nil || !k.Private.Equal(priv) || !k.Public.Equal(priv.Public()) ||
-		k.KeyID != jwks.KeyID(k.Public) {
+	if err != nil || !k.Private.Equal(priv) || !k.Public().Equal(priv.Public()) ||
+		k.KeyID != jwks.KeyID(k.Public()) {
 		t.Fatalf("from a file = %+v, %v; want the file's key under its derived kid", k, err)
 	}
 	for name, p := range map[string]string{"an absent file": filepath.Join(t.TempDir(), "absent.pem"), "no path": ""} {
@@ -103,7 +103,7 @@ func TestDeriveKeyIDIsTheThumbprint(t *testing.T) {
 		t.Errorf("jwks.KeyID = %s, want %s", got, want)
 	}
 	key, err := GenerateKey()
-	if err != nil || key.KeyID != jwks.KeyID(key.Public) {
+	if err != nil || key.KeyID != jwks.KeyID(key.Public()) {
 		t.Errorf("GenerateKey = %+v, %v; want jwks.KeyID's kid", key, err)
 	}
 }
@@ -112,7 +112,7 @@ func TestStaticKeyResolverRotation(t *testing.T) {
 	ctx := context.Background()
 	keyA, _ := GenerateKey()
 	keyB, _ := GenerateKey()
-	pubA, pubB := keyA.Public, keyB.Public
+	pubA, pubB := keyA.Public(), keyB.Public()
 	r := staticKeys(t, map[string]ed25519.PublicKey{"a": pubA})
 
 	if err := r.SetKey("b", pubB); err != nil {
@@ -151,5 +151,25 @@ func TestNewSigner(t *testing.T) {
 	}
 	if _, err := NewSigner(SignerConfig{KeyID: "k1", Key: priv[:10]}); err == nil {
 		t.Error("a short key was accepted")
+	}
+}
+
+// Public is derived from Private, so a SigningKey cannot carry a public key
+// that is not its private key's; with no private key there is none.
+func TestSigningKeyPublic(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := (SigningKey{Private: priv}).Public(); !got.Equal(pub) {
+		t.Errorf("Public = %x, want the private key's %x", got, pub)
+	}
+	for name, k := range map[string]SigningKey{
+		"no private key": {},
+		"a short one":    {Private: priv[:ed25519.SeedSize]},
+	} {
+		if got := k.Public(); got != nil {
+			t.Errorf("%s: Public = %x, want nil", name, got)
+		}
 	}
 }

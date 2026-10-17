@@ -61,7 +61,7 @@ Setup errors are dropped below for brevity; each constructor returns one.
 ctx := context.Background()
 tenantID, runID := uuid.New(), uuid.New() // github.com/google/uuid
 key, _ := limes.GenerateKey()
-kid, pub, priv := key.KeyID, key.Public, key.Private
+kid, pub, priv := key.KeyID, key.Public(), key.Private
 
 records, _ := memstore.NewStore(memstore.StoreConfig{}) // your Store
 usage, _ := memstore.NewUsageStore(memstore.UsageStoreConfig[struct{}]{Records: records})

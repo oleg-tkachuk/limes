@@ -32,7 +32,7 @@ func main() {
 	// 1. Mint a signing key. `kid` identifies it so tokens stay verifiable
 	//    across rotation.
 	key, err := limes.GenerateKey()
-	kid, pub, priv := key.KeyID, key.Public, key.Private
+	kid, pub, priv := key.KeyID, key.Public(), key.Private
 	must(err, "generate keypair")
 
 	// 2. Wire an issuer and a verifier. Storage is yours — here, in memory.

@@ -42,7 +42,7 @@ func main() {
 
 	// The verifier needs only the public key and the revocations: it checks
 	// a token locally, with no call to the issuer.
-	keys, err := jwks.NewStatic(jwks.StaticConfig{Keys: map[string]ed25519.PublicKey{key.KeyID: key.Public}})
+	keys, err := jwks.NewStatic(jwks.StaticConfig{Keys: map[string]ed25519.PublicKey{key.KeyID: key.Public()}})
 	demo.Must(log, err, "key set")
 	verifier, err := limes.NewVerifier(limes.VerifierConfig{Keys: keys, Revocations: records, TrustedIssuers: []string{issuerName}})
 	demo.Must(log, err, "verifier")
