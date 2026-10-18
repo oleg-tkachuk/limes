@@ -528,7 +528,9 @@ budget, the capability's, each ancestor's, the tenant's — exactly as spend doe
 budget. `Settle` charges the actual cost in place of the hold; above the hold,
 the excess must fit, or the hold stays for you to settle lower or `Release`.
 A hold never settled lapses after its TTL (`DefaultReservationTTL`, five
-minutes, unless the request says): run `ReleaseExpired` on a timer, again
+minutes, unless the request says), or when its capability expires, if that
+comes sooner. Revoking the capability does not end it: the cost may already be
+incurred, and it can still be settled until then. Run `ReleaseExpired` on a timer, again
 while a batch comes back full (`DefaultHousekeepingLimit` unless set). Settling
 the zero reservation id, a hold of another capability than the subject's, or
 one made under other Biscuit copies than the subject carries, is
