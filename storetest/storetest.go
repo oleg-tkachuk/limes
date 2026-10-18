@@ -147,7 +147,7 @@ func (f fixture) newCapability(subject string, parent uuid.UUID, expires time.Ti
 		Subject: limes.Principal{
 			Type: limes.PrincipalTypeAgent, TenantID: f.Tenant, Subject: subject,
 			Agent: &limes.AgentPrincipal{
-				AgentType: "worker", AgentVersion: "1", RunID: uuid.New(), ParentAgentID: uuid.New(), Model: "m", MCPClient: "client",
+				AgentType: "worker", AgentVersion: "1", RunID: uuid.New(), ParentRunID: uuid.New(), Model: "m", MCPClient: "client",
 			},
 		},
 		Audience: []string{"data", "mcp"},
@@ -175,7 +175,7 @@ func (f fixture) issuer() limes.Principal {
 	return limes.Principal{
 		Type: limes.PrincipalTypeAgent, TenantID: f.Tenant, Subject: "agent:issuer",
 		Agent: &limes.AgentPrincipal{
-			AgentType: "planner", AgentVersion: "2", RunID: uuid.New(), ParentAgentID: uuid.New(), Model: "issuer-model", MCPClient: "issuer-client",
+			AgentType: "planner", AgentVersion: "2", RunID: uuid.New(), ParentRunID: uuid.New(), Model: "issuer-model", MCPClient: "issuer-client",
 		},
 	}
 }

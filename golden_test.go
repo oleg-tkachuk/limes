@@ -136,7 +136,7 @@ func TestGoldenClaimsRoundTripExactly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	written, err := json.Marshal(claimsOf(*c))
+	written, err := json.Marshal(claimsOf(*c, TokenTypeV5))
 	if err != nil {
 		t.Fatal(err)
 	}

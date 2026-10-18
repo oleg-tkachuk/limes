@@ -147,6 +147,15 @@ type IssueRequest struct {
 	ConfirmationJKT string
 }
 
+// parentRunOf is the run a capability of p delegates from: an agent's RunID,
+// zero for any other principal.
+func parentRunOf(p Principal) uuid.UUID {
+	if p.Agent == nil {
+		return uuid.Nil
+	}
+	return p.Agent.RunID
+}
+
 // IssueResult is what Issue and Delegate mint: the capability as recorded,
 // to log or display, and its compact-form token, to ship to the agent.
 type IssueResult struct {
@@ -364,6 +373,10 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 	if err := req.Subject.Validate(); err != nil {
 		return Capability{}, "", err
 	}
+	parentRun := parentRunOf(parent.Subject)
+	if a := req.Subject.Agent; a != nil && a.ParentRunID != uuid.Nil && a.ParentRunID != parentRun {
+		return Capability{}, "", invalidRequest("Subject.Agent.ParentRunID %s is not the parent's RunID %s", a.ParentRunID, parentRun)
+	}
 	if len(req.Audience) == 0 {
 		req.Audience = append([]string(nil), parent.Audience...)
 	}
@@ -422,6 +435,14 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 	}
 	if child.ConfirmationJKT == "" {
 		child.ConfirmationJKT = parent.ConfirmationJKT
+	}
+	// The run a child agent was delegated from is the parent's, taken from
+	// the token the verifier accepted rather than on the caller's word.
+	if child.Subject.Type == PrincipalTypeAgent && parentRun != uuid.Nil {
+		if child.Subject.Agent == nil {
+			child.Subject.Agent = &AgentPrincipal{}
+		}
+		child.Subject.Agent.ParentRunID = parentRun
 	}
 	// A child starts no earlier than its parent, as it ends no later. The
 	// parent may start after now — a not-before ahead, or an issuer replica

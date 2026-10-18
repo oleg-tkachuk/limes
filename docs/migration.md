@@ -26,6 +26,10 @@ API, and this file stops growing.
   still verifies and is checked against that name, now with a consumer
   operation's effect — a write unless declared — and a child delegated from
   it cannot name it: issue such roots again under the new names.
+- `AgentPrincipal.ParentAgentID` → `ParentRunID`, and `Delegate` sets it to
+  the parent agent's `RunID`: a request naming another run is
+  `ErrInvalidRequest`, where any value was signed as given. Leave it unset. A
+  v5 token spells it `parent_run_id`; a v4 one keeps `parent_agent_id`.
 - New token type `TokenTypeV5`: v4 without `limes_gen` and without those
   four operations. A verifier accepts v4 and v5 by default; a `Signer` mints
   v4 until `SignerConfig.TokenType` is `TokenTypeV5`. Upgrade every verifier

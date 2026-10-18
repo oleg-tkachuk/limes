@@ -19,6 +19,13 @@ func headerOf(typ TokenType) map[string]any {
 	return map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": typ}
 }
 
+// withParentRun names a parent run in the token's agent details, under member.
+func withParentRun(member string) func(map[string]any) {
+	return func(c map[string]any) {
+		c["limes_principal"].(map[string]any)["agent"] = map[string]any{member: uuid.NewString()}
+	}
+}
+
 // Each token type is read under its own schema: limes_gen and the operations
 // v4 defined unnamespaced are a v4 token's, refused in a v5 one.
 func TestEachTokenTypeIsReadUnderItsSchema(t *testing.T) {
@@ -31,12 +38,16 @@ func TestEachTokenTypeIsReadUnderItsSchema(t *testing.T) {
 		mutate func(map[string]any)
 		ok     bool
 	}{
-		"v4 with limes_gen":              {TokenTypeV4, withGen, true},
-		"v4 with a v4 operation":         {TokenTypeV4, withV4Op, true},
-		"v5 with neither":                {TokenTypeV5, func(map[string]any) {}, true},
-		"v5 with limes_gen":              {TokenTypeV5, withGen, false},
-		"v5 with a v4 operation":         {TokenTypeV5, withV4Op, false},
-		"v4 with an unnamespaced op too": {TokenTypeV4, func(c map[string]any) { c["limes_caveats"].(map[string]any)["ops"] = []string{"browse"} }, false},
+		"v4 with limes_gen":                   {TokenTypeV4, withGen, true},
+		"v4 with a v4 operation":              {TokenTypeV4, withV4Op, true},
+		"v5 with neither":                     {TokenTypeV5, func(map[string]any) {}, true},
+		"v5 with limes_gen":                   {TokenTypeV5, withGen, false},
+		"v5 with a v4 operation":              {TokenTypeV5, withV4Op, false},
+		"v4 with an unnamespaced op too":      {TokenTypeV4, func(c map[string]any) { c["limes_caveats"].(map[string]any)["ops"] = []string{"browse"} }, false},
+		"v4 naming the parent run as v4 does": {TokenTypeV4, withParentRun(claimParentAgentID), true},
+		"v4 naming it as v5 does":             {TokenTypeV4, withParentRun("parent_run_id"), false},
+		"v5 naming it as v5 does":             {TokenTypeV5, withParentRun("parent_run_id"), true},
+		"v5 naming it as v4 does":             {TokenTypeV5, withParentRun(claimParentAgentID), false},
 	} {
 		claims := validClaims(uuid.New())
 		tc.mutate(claims)

@@ -62,7 +62,7 @@ default `limes-cap-v4+jwt` and `limes-cap-v5+jwt`), a tenant and a principal of 
 known kind (`PrincipalTypeUser`, `PrincipalTypeAgent` or `PrincipalTypeService`; agent
 details only on an agent — `Principal.Validate`, which `Issue` and `Delegate`
 run too; an agent's `AgentPrincipal` — `AgentType`, `AgentVersion`, `RunID`,
-`ParentAgentID`, `Model`, `MCPClient` — is signed into the token for audit and
+`ParentRunID`, `Model`, `MCPClient` — is signed into the token for audit and
 lineage, and none of it is a caveat), its claims must
 hold no member the verifier does not know (a caveat it could not enforce),
 none twice and none in another case, and may be at most

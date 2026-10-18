@@ -207,9 +207,11 @@ type AgentPrincipal struct {
 	AgentVersion string
 	// RunID is a UUID minted by the agent host at session start.
 	RunID uuid.UUID
-	// ParentAgentID is set when this agent was spawned by another via
-	// `OpShare`. Empty for top-level agents.
-	ParentAgentID uuid.UUID
+	// ParentRunID is the RunID of the agent whose capability this one was
+	// delegated from. Issuer.Delegate sets it from the parent, and refuses
+	// a request naming another; zero for a root capability, or one
+	// delegated from a principal that is no agent or names no run.
+	ParentRunID uuid.UUID
 	// Model identifies the LLM behind the agent ("example-model-1",
 	// "gpt-5-pro"). Used for cost attribution.
 	Model string

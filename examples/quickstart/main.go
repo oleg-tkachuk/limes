@@ -112,7 +112,8 @@ func main() {
 		Subject: limes.Principal{
 			Type: limes.PrincipalTypeAgent, TenantID: tenantID, Subject: "sub-worker",
 			Agent: &limes.AgentPrincipal{
-				AgentType: "example-agent", ParentAgentID: parent.ID,
+				// Delegate sets ParentRunID to the orchestrator's RunID.
+				AgentType: "example-agent", RunID: uuid.New(),
 			},
 		},
 		Audience: []string{"my-service"},

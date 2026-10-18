@@ -23,7 +23,7 @@ func signUnchecked(t *testing.T, s *Signer, c Capability) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims, err := json.Marshal(claimsOf(c))
+	claims, err := json.Marshal(claimsOf(c, TokenTypeV4))
 	if err != nil {
 		t.Fatal(err)
 	}

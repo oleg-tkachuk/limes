@@ -1,6 +1,10 @@
 package limes
 
-import "github.com/google/uuid"
+import (
+	"fmt"
+
+	"github.com/google/uuid"
+)
 
 // The token's claims are these unexported structs, never the exported types
 // a caller holds: renaming a field of Principal, AgentPrincipal or Caveats is
@@ -16,16 +20,22 @@ type wirePrincipal struct {
 	_        noCompare
 }
 
-// wireAgent is limes_principal.agent.
+// wireAgent is limes_principal.agent. The parent's run is parent_run_id in
+// v5 and parent_agent_id in v4; each type refuses the other's member.
 type wireAgent struct {
-	AgentType     string    `json:"agent_type,omitempty"`
-	AgentVersion  string    `json:"agent_version,omitempty"`
-	RunID         uuid.UUID `json:"run_id,omitzero"`
+	AgentType    string    `json:"agent_type,omitempty"`
+	AgentVersion string    `json:"agent_version,omitempty"`
+	RunID        uuid.UUID `json:"run_id,omitzero"`
+	ParentRunID  uuid.UUID `json:"parent_run_id,omitzero"`
+	Model        string    `json:"model,omitempty"`
+	MCPClient    string    `json:"mcp_client,omitempty"`
+	// ParentAgentID is ParentRunID as TokenTypeV4 spells it.
 	ParentAgentID uuid.UUID `json:"parent_agent_id,omitzero"`
-	Model         string    `json:"model,omitempty"`
-	MCPClient     string    `json:"mcp_client,omitempty"`
 	_             noCompare
 }
+
+// The member a v4 token names the parent's run by.
+const claimParentAgentID = "parent_agent_id"
 
 // wireCaveats is the limes_caveats claim.
 type wireCaveats struct {
@@ -42,28 +52,49 @@ type wireCaveats struct {
 	SourceIPCIDR           []string `json:"source_ip_cidr,omitempty"`
 }
 
-// wireAgent has exactly the fields of AgentPrincipal, so each converts to the
-// other: a field added to one and not the other stops the build. wireCaveats
+// wireAgent has the fields of AgentPrincipal and v4's spelling of one of
+// them, and a test holds the two to the same fields. wireCaveats
 // spells each ceiling as two members — an absent max_requests is a ceiling
 // of 0, and only unlimited_requests lifts it — so it is converted field by
 // field, and a test holds the two to the same fields.
 
-func toWirePrincipal(p Principal) wirePrincipal {
+// toWirePrincipal is p as a token of type typ carries it.
+func toWirePrincipal(p Principal, typ TokenType) wirePrincipal {
 	w := wirePrincipal{Type: p.Type, TenantID: p.TenantID, Subject: p.Subject}
-	if p.Agent != nil {
-		a := wireAgent(*p.Agent)
-		w.Agent = &a
+	if a := p.Agent; a != nil {
+		w.Agent = &wireAgent{
+			AgentType: a.AgentType, AgentVersion: a.AgentVersion, RunID: a.RunID,
+			ParentRunID: a.ParentRunID, Model: a.Model, MCPClient: a.MCPClient,
+		}
+		if typ == TokenTypeV4 {
+			w.Agent.ParentAgentID, w.Agent.ParentRunID = a.ParentRunID, uuid.Nil
+		}
 	}
 	return w
 }
 
-func (w wirePrincipal) principal() Principal {
+// principal is the principal a token of type typ carries, refusing the
+// member of the parent's run the type does not spell it with.
+func (w wirePrincipal) principal(typ TokenType) (Principal, error) {
 	p := Principal{Type: w.Type, TenantID: w.TenantID, Subject: w.Subject}
-	if w.Agent != nil {
-		a := AgentPrincipal(*w.Agent)
-		p.Agent = &a
+	a := w.Agent
+	if a == nil {
+		return p, nil
 	}
-	return p
+	parent := a.ParentRunID
+	switch {
+	case typ == TokenTypeV4 && a.ParentRunID != uuid.Nil:
+		return Principal{}, fmt.Errorf("limes: %s carries parent_run_id; v4 spells it %s", typ, claimParentAgentID)
+	case typ == TokenTypeV4:
+		parent = a.ParentAgentID
+	case a.ParentAgentID != uuid.Nil:
+		return Principal{}, fmt.Errorf("limes: %s carries %s; it spells it parent_run_id", typ, claimParentAgentID)
+	}
+	p.Agent = &AgentPrincipal{
+		AgentType: a.AgentType, AgentVersion: a.AgentVersion, RunID: a.RunID,
+		ParentRunID: parent, Model: a.Model, MCPClient: a.MCPClient,
+	}
+	return p, nil
 }
 
 func toWireCaveats(c Caveats) wireCaveats {

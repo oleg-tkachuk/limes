@@ -205,7 +205,7 @@ func (s *Signer) sign(ctx context.Context, c Capability) (string, error) {
 	}
 
 	header := jwtHeader{Alg: jose.AlgEd25519, Kid: s.keyID, Typ: string(s.typ)}
-	claims := claimsOf(c)
+	claims := claimsOf(c, s.typ)
 	// Nothing is signed that the verifier would refuse to read.
 	if err := checkIJSONIntegers(claims); err != nil {
 		return "", err
@@ -294,7 +294,7 @@ func parseHeader(seg string) (jwtHeader, error) {
 
 // claimsOf is the payload Sign writes for c: the one place a Capability
 // becomes claims.
-func claimsOf(c Capability) jwtClaims {
+func claimsOf(c Capability, typ TokenType) jwtClaims {
 	claims := jwtClaims{
 		Issuer:    c.Issuer,
 		Subject:   c.Subject.Subject,
@@ -302,7 +302,7 @@ func claimsOf(c Capability) jwtClaims {
 		IssuedAt:  c.IssuedAt.Unix(),
 		ExpiresAt: c.ExpiresAt.Unix(),
 		ID:        c.ID.String(),
-		Principal: toWirePrincipal(c.Subject),
+		Principal: toWirePrincipal(c.Subject, typ),
 		Caveats:   toWireCaveats(c.Caveats),
 	}
 	if !c.NotBefore.IsZero() {
@@ -367,7 +367,9 @@ func parseClaims(seg string, typ TokenType) (*Capability, error) {
 	if claims.NotBefore != 0 {
 		cap.NotBefore = time.Unix(claims.NotBefore, 0).UTC()
 	}
-	cap.Subject = claims.Principal.principal()
+	if cap.Subject, err = claims.Principal.principal(typ); err != nil {
+		return nil, err
+	}
 	if claims.Confirmation != nil {
 		cap.ConfirmationJKT = claims.Confirmation.JKT
 	}
