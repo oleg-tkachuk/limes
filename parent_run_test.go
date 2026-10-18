@@ -13,8 +13,8 @@ import (
 
 // Delegate takes a child agent's ParentRunID from the parent the verifier
 // accepted: it fills one the request leaves out, keeps one that agrees, and
-// refuses one that names another run. A parent that is no agent, or names no
-// run, gives none.
+// refuses one that names another run, and a child run that is the parent's
+// own. A parent that is no agent, or names no run, gives none.
 func TestDelegateDerivesTheParentRun(t *testing.T) {
 	ctx := context.Background()
 	s := newExampleStack()
@@ -57,6 +57,7 @@ func TestDelegateDerivesTheParentRun(t *testing.T) {
 		"no agent details":             {agentParent, child(nil), parentRun, false},
 		"the parent's run":             {agentParent, child(&limes.AgentPrincipal{ParentRunID: parentRun}), parentRun, false},
 		"another run":                  {agentParent, child(&limes.AgentPrincipal{ParentRunID: uuid.New()}), uuid.Nil, true},
+		"the parent's run as its own":  {agentParent, child(&limes.AgentPrincipal{RunID: parentRun}), uuid.Nil, true},
 		"a service parent":             {serviceParent, child(&limes.AgentPrincipal{}), uuid.Nil, false},
 		"a run under a service parent": {serviceParent, child(&limes.AgentPrincipal{ParentRunID: uuid.New()}), uuid.Nil, true},
 		"a parent agent naming no run": {runlessParent, child(nil), uuid.Nil, false},
