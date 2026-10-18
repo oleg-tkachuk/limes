@@ -30,6 +30,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/merge-policy.sh"
 
 # The state of a pull request still open.
 readonly OPEN=OPEN
+# The most files GitHub's pull request files API lists: past it the rest are
+# never seen, so a pull request that reaches it is left for a person.
+readonly FILES_API_CAP=3000
 
 if [ -z "${GH_TOKEN:-}" ]; then
     echo "::warning::AUTOMERGE_TOKEN is not set; nothing merged (see auto-merge.yaml)"
@@ -46,11 +49,11 @@ fi
 # merge_if_green merges pull request $1 at HEAD_SHA if nothing leaves it for
 # a person; it reports why not otherwise.
 merge_if_green() {
-    local pr=$1 view state draft cross author base head path
+    local pr=$1 view state draft cross author base head changed path
     view="$(gh_retry pr view "$pr" --repo "$REPO" \
-        --json state,isDraft,isCrossRepository,author,baseRefName,headRefOid \
-        --jq '[.state, .isDraft, .isCrossRepository, .author.login, .baseRefName, .headRefOid] | @tsv')"
-    IFS=$'\t' read -r state draft cross author base head <<<"$view"
+        --json state,isDraft,isCrossRepository,author,baseRefName,headRefOid,changedFiles \
+        --jq '[.state, .isDraft, .isCrossRepository, .author.login, .baseRefName, .headRefOid, .changedFiles] | @tsv')"
+    IFS=$'\t' read -r state draft cross author base head changed <<<"$view"
     if [ "$state" != "$OPEN" ] || [ "$draft" = true ] || [ "$cross" = true ]; then
         echo "::notice::#$pr is not an open same-repository pull request ready to merge; left alone"
         return 0
@@ -74,8 +77,17 @@ merge_if_green() {
     # A renamed file names its old path only in previous_filename: moving a
     # CI definition out of its place changes what CI runs as surely as
     # deleting it does.
-    local files
-    files="$(gh_retry api "repos/${REPO}/pulls/${pr}/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)')"
+    local entries files
+    entries="$(gh_retry api "repos/${REPO}/pulls/${pr}/files" --paginate --jq '.[] | [.filename, (.previous_filename // "")] | @tsv')"
+    # Every file the pull request changes must have been listed: one the
+    # API left out could be a CI definition.
+    local listed
+    listed="$(grep -c . <<<"$entries" || true)"
+    if [ "$listed" -lt "$changed" ] || [ "$listed" -ge "$FILES_API_CAP" ]; then
+        echo "::notice::#$pr changes $changed files and $listed were listed; left for a person to merge"
+        return 0
+    fi
+    files="$(tr '\t' '\n' <<<"$entries")"
     while IFS= read -r path; do
         [ -n "$path" ] || continue
         if defines_ci "$path"; then

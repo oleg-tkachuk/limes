@@ -26,7 +26,8 @@ cat >"$work/gh" <<'GH'
 printf '%s\n' "$*" >>"$CALLS"
 case "$1 $2" in
     "pr view")
-        printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$FAKE_STATE" "$FAKE_DRAFT" "$FAKE_CROSS" "$FAKE_AUTHOR" "$FAKE_BASE" "$FAKE_HEAD"
+        changed="${FAKE_CHANGED:-$(printf '%s\n' "$FAKE_FILES" | grep -c .)}"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$FAKE_STATE" "$FAKE_DRAFT" "$FAKE_CROSS" "$FAKE_AUTHOR" "$FAKE_BASE" "$FAKE_HEAD" "$changed"
         ;;
     "pr merge")
         [ -z "${FAKE_MERGE_FAILS:-}" ] || { echo "GraphQL: Head branch was modified" >&2; exit 1; }
@@ -103,6 +104,11 @@ check "a workflow renamed out of .github" false FAKE_FILES="$(printf '.github/wo
 check "CODEOWNERS renamed away" false FAKE_FILES="$(printf '.github/CODEOWNERS>docs/CODEOWNERS')"
 check "Renovate's settings renamed away" false FAKE_FILES="$(printf 'renovate.json>docs/renovate.json')"
 check "a Go file renamed" true FAKE_FILES="$(printf 'old.go>new.go')"
+check "a workspace in a nested module" false FAKE_FILES="pgstore/go.work"
+check "a vendor directory" false FAKE_FILES="vendor/modules.txt"
+check "a nested vendor directory" false FAKE_FILES="pgstore/vendor/modules.txt"
+# A file the files API did not list could be a CI definition.
+check "more files changed than listed" false FAKE_FILES="verifier.go" FAKE_CHANGED=2
 # A refused merge — the head moved between the read and the merge — is
 # reported and leaves the pull request as it is.
 check "a merge GitHub refuses" true FAKE_MERGE_FAILS=1
