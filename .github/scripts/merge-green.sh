@@ -30,9 +30,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/merge-policy.sh"
 
 # The state of a pull request still open.
 readonly OPEN=OPEN
-# The most files GitHub's pull request files API lists: past it the rest are
-# never seen, so a pull request that reaches it is left for a person.
-readonly FILES_API_CAP=3000
 
 if [ -z "${GH_TOKEN:-}" ]; then
     echo "::warning::AUTOMERGE_TOKEN is not set; nothing merged (see auto-merge.yaml)"

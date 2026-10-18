@@ -46,13 +46,16 @@ source "$(dirname "${BASH_SOURCE[0]}")/merge-policy.sh"
 readonly PR_LIMIT=200
 # The merge state of a pull request whose branch conflicts with main.
 readonly DIRTY=DIRTY
-# The check main requires, and the conclusion that takes a pull request out
-# of line until it is pushed to or its run is retried. Only the latest run of
-# the check counts: a run superseded on the same head — the pull request's
-# title edited, say — is cancelled, and reports the check failed beside the
-# run that replaced it.
+# The check main requires, and the conclusions of it that keep a pull
+# request in line: any other a finished run of it ends with — failed,
+# cancelled, timed out — takes the pull request out until it is pushed to or
+# its run is retried, as no merge would follow it. Only the latest run of the
+# check counts: a run superseded on the same head — the pull request's title
+# edited, say — is cancelled beside the run that replaced it. A run still
+# going has no conclusion yet (a status still PENDING), and stays in line.
 readonly REQUIRED_CHECK="All checks passed"
-readonly FAILED=FAILURE
+readonly PASSING='["SUCCESS", "NEUTRAL", "SKIPPED"]'
+readonly PENDING=PENDING
 
 if [ -z "${GH_TOKEN:-}" ]; then
     echo "::warning::AUTOMERGE_TOKEN is not set; the merge queue does not move (see auto-merge.yaml)"
@@ -62,19 +65,28 @@ fi
 
 # Lowest number first: the order pull requests joined the queue in.
 candidates="$(gh_retry pr list --repo "$REPO" --base "$BASE_BRANCH" --state open --limit "$PR_LIMIT" \
-    --json number,headRefOid,isDraft,isCrossRepository,mergeStateStatus,author,autoMergeRequest,statusCheckRollup |
-    jq -r --arg dirty "$DIRTY" --arg renovate "$RENOVATE" --arg check "$REQUIRED_CHECK" --arg failed "$FAILED" \
+    --json number,headRefOid,isDraft,isCrossRepository,mergeStateStatus,author,autoMergeRequest,statusCheckRollup,changedFiles |
+    jq -r --arg dirty "$DIRTY" --arg renovate "$RENOVATE" --arg check "$REQUIRED_CHECK" \
+        --argjson passing "$PASSING" --arg pending "$PENDING" \
         'sort_by(.number) | .[] | select(.isDraft | not) | select(.isCrossRepository | not)
              | select(.author.login != $renovate)
              | select(.mergeStateStatus != $dirty)
-             | select(([.statusCheckRollup[]? | select((.name // .context) == $check)] | sort_by(.startedAt // "") | last | .conclusion) != $failed)
-             | "\(.number) \(.headRefOid) \(.author.login) \(.autoMergeRequest != null)"')"
+             | select(([.statusCheckRollup[]? | select((.name // .context) == $check)] | sort_by(.startedAt // "") | last
+                       | (.conclusion // .state // "")) as $c
+                       | $c == "" or $c == $pending or ($passing | index($c)))
+             | "\(.number) \(.headRefOid) \(.author.login) \(.autoMergeRequest != null) \(.changedFiles)"')"
 
-# merges_itself reports whether pull request <n>, without GitHub's
-# auto-merge, is one merge-green merges: it changes no CI definition.
+# merges_itself reports whether pull request <n>, changing <changed> files,
+# is one merge-green merges without GitHub's auto-merge: every file it
+# changes is listed, and none is a CI definition.
 merges_itself() {
-    local files path
-    files="$(gh_retry api "repos/${REPO}/pulls/$1/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)')" || return 1
+    local entries listed files path
+    entries="$(gh_retry api "repos/${REPO}/pulls/$1/files" --paginate --jq '.[] | [.filename, (.previous_filename // "")] | @tsv')" || return 1
+    listed="$(grep -c . <<<"$entries" || true)"
+    if [ "$listed" -lt "$2" ] || [ "$listed" -ge "$FILES_API_CAP" ]; then
+        return 1
+    fi
+    files="$(tr '\t' '\n' <<<"$entries")"
     while IFS= read -r path; do
         [ -n "$path" ] || continue
         if defines_ci "$path"; then
@@ -83,14 +95,14 @@ merges_itself() {
     done <<<"$files"
 }
 
-while read -r pr head author auto; do
+while read -r pr head author auto changed; do
     [ -n "$pr" ] || continue
     if ! can_push "$author"; then
         echo "::notice::#${pr} is by ${author}, who cannot push here; it is not in line"
         continue
     fi
-    if [ "$auto" != true ] && ! merges_itself "$pr"; then
-        echo "::notice::#${pr} changes what CI runs and has no auto-merge; it waits for a person, not in line"
+    if [ "$auto" != true ] && ! merges_itself "$pr" "$changed"; then
+        echo "::notice::#${pr} changes what CI runs, or more files than were listed, and has no auto-merge; it waits for a person, not in line"
         continue
     fi
     if ! by="$(gh_retry api "repos/${REPO}/compare/${BASE_BRANCH}...${head}" | jq -r '.behind_by')"; then

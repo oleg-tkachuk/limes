@@ -80,7 +80,7 @@ pr() {
     local obj
     obj="$(jq -n --argjson n "$n" --arg sha "$sha" '{number: $n, headRefOid: $sha, isDraft: false, isCrossRepository: false,
         mergeStateStatus: "BEHIND", author: {login: "someone"}, autoMergeRequest: null,
-        statusCheckRollup: [{name: "All checks passed", conclusion: "SUCCESS"}]}')"
+        statusCheckRollup: [{name: "All checks passed", conclusion: "SUCCESS"}], changedFiles: 0}')"
     local kv
     for kv in "$@"; do
         obj="$(jq --arg k "${kv%%=*}" --argjson v "${kv#*=}" '.[$k] = $v' <<<"$obj")"
@@ -99,7 +99,7 @@ red='[{"name": "All checks passed", "conclusion": "FAILURE"}]'
 # number goes first.
 export FAKE_FILES='{"7": [{"filename": ".github/workflows/ci.yaml"}], "9": [{"filename": "verifier.go"}]}'
 export FAKE_PRS
-FAKE_PRS="$(prs "$(pr 11 b1)" "$(pr 9 a9)" "$(pr 1 a1 isDraft=true)" "$(pr 2 a2 isCrossRepository=true)" \
+FAKE_PRS="$(prs "$(pr 11 b1)" "$(pr 9 a9 changedFiles=1)" "$(pr 1 a1 isDraft=true)" "$(pr 2 a2 isCrossRepository=true)" \
     "$(pr 3 a3 'mergeStateStatus="DIRTY"')" "$(pr 4 a4 'author={"login":"app/renovate"}')" \
     "$(pr 5 a5 'author={"login":"reader"}')" "$(pr 6 a6 "statusCheckRollup=$red")" "$(pr 7 a7)")"
 run "the first in line"
@@ -119,6 +119,20 @@ regressed='[{"name": "All checks passed", "conclusion": "SUCCESS", "startedAt": 
 FAKE_PRS="$(prs "$(pr 1 a1 "statusCheckRollup=$regressed")" "$(pr 2 a2 "statusCheckRollup=$superseded")")"
 run "a superseded failed run"
 rebased_only 2 a2 || fail "updated: $(updates | tr '\n' ';'), want #2, whose latest run passed, and not #1, whose latest failed"
+
+# Any conclusion a finished latest run ends with but a pass takes the pull
+# request out: no merge would follow it. A run still going keeps it in line.
+cancelled='[{"name": "All checks passed", "status": "COMPLETED", "conclusion": "CANCELLED"}]'
+running='[{"name": "All checks passed", "status": "IN_PROGRESS", "conclusion": ""}]'
+FAKE_PRS="$(prs "$(pr 1 a1 "statusCheckRollup=$cancelled")" "$(pr 2 a2 "statusCheckRollup=$running")")"
+run "a cancelled latest run"
+rebased_only 2 a2 || fail "updated: $(updates | tr '\n' ';'), want #2, whose run is still going, and not #1, whose latest was cancelled"
+
+# A pull request with more files than the files API listed may hide a CI
+# definition: merge-green would leave it for a person, so it is not in line.
+FAKE_PRS="$(prs "$(pr 1 a1 changedFiles=2)" "$(pr 2 a2)")"
+FAKE_FILES='{"1": [{"filename": "verifier.go"}]}' run "files left unlisted"
+rebased_only 2 a2 || fail "updated: $(updates | tr '\n' ';'), want #2, not #1 with a file unlisted"
 
 # A CI change with auto-merge on merges itself, so it is in line.
 FAKE_PRS="$(prs "$(pr 7 a7 'autoMergeRequest={"mergeMethod":"MERGE"}')" "$(pr 9 a9)")"

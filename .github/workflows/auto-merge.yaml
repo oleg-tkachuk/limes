@@ -96,7 +96,8 @@ jobs:
     name: Rebase the first pull request in line onto main
     if: >-
       github.event_name == 'push' ||
-      (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request')
+      (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     # One queue: two runs at once could each rebase a different first in line.
     concurrency:
       group: merge-queue
