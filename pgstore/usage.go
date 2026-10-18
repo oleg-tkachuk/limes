@@ -737,6 +737,6 @@ func (s *UsageStore) dropUsage(ctx context.Context, tx pgx.Tx, ids []uuid.UUID) 
 }
 
 var (
-	_ meter.UsageStore[pgx.Tx] = (*UsageStore)(nil)
-	_ meter.CopyUsageReader    = (*UsageStore)(nil)
+	_ meter.UsageStore      = (*UsageStore)(nil)
+	_ meter.CopyUsageReader = (*UsageStore)(nil)
 )

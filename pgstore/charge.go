@@ -162,7 +162,7 @@ func replayByRef(ctx context.Context, tx pgx.Tx, req meter.ChargeRequest, unit s
 
 // Charge applies the ceiling chain and commits the charge, onCharged
 // included, in one transaction.
-func (s *UsageStore) Charge(ctx context.Context, req meter.ChargeRequest, onCharged func(ctx context.Context, c meter.Charged[pgx.Tx]) error) (meter.ChargeReceipt, error) {
+func (s *UsageStore) Charge(ctx context.Context, req meter.ChargeRequest, onCharged func(ctx context.Context, c meter.Charged) error) (meter.ChargeReceipt, error) {
 	if err := req.Validate(); err != nil {
 		return meter.ChargeReceipt{}, err
 	}
@@ -247,7 +247,7 @@ type chargeSpec struct {
 // settles. The charge is spent on the lineage as it stands; the hold is
 // released from the ancestors that hold it, which a row dropped since may
 // have left.
-func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, spec chargeSpec, onCharged func(context.Context, meter.Charged[pgx.Tx]) error) (meter.ChargeReceipt, error) {
+func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, spec chargeSpec, onCharged func(context.Context, meter.Charged) error) (meter.ChargeReceipt, error) {
 	var released limes.Nanos
 	var holders []uuid.UUID
 	var reservationID *uuid.UUID
@@ -274,7 +274,7 @@ func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, s
 		TenantID: spec.tenantID, UnitCode: spec.unit,
 	}
 	if onCharged != nil {
-		if err := onCharged(ctx, meter.Charged[pgx.Tx]{Tx: tx, Receipt: receipt}); err != nil {
+		if err := onCharged(withTx(ctx, tx), meter.Charged{Receipt: receipt}); err != nil {
 			return refused, err
 		}
 	}
@@ -579,7 +579,7 @@ func applyHold(c *counters, h hold, sign limes.Nanos) {
 }
 
 // Settle charges the actual cost in place of a reservation.
-func (s *UsageStore) Settle(ctx context.Context, req meter.SettleRequest, onCharged func(ctx context.Context, c meter.Charged[pgx.Tx]) error) (meter.ChargeReceipt, error) {
+func (s *UsageStore) Settle(ctx context.Context, req meter.SettleRequest, onCharged func(ctx context.Context, c meter.Charged) error) (meter.ChargeReceipt, error) {
 	if err := req.Validate(); err != nil {
 		return meter.ChargeReceipt{}, err
 	}
