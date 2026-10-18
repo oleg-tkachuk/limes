@@ -374,6 +374,12 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           package-manager-cache: false
 
+      # A marker counts for a module only when its own release analyzer
+      # releases the commit: .github/release/module-commits.cjs.
+      - name: Install the release tooling
+        working-directory: .github/release
+        run: npm ci --ignore-scripts
+
       # Every module, each from its own last release on a push: see
       # .github/scripts/check-modules.sh.
       - name: Require a break of the API to be marked breaking
@@ -411,6 +417,12 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           package-manager-cache: false
+
+      # A marker counts for a module only when its own release analyzer
+      # releases the commit: .github/release/module-commits.cjs.
+      - name: Install the release tooling
+        working-directory: .github/release
+        run: npm ci --ignore-scripts
 
       - name: Refuse a breaking marker on a stable release line
         env:

@@ -103,6 +103,22 @@ try {
     }
   }
 
+  // With --released, the commits the module's own analyzer cuts a release
+  // for: a breaking marker scoped to another module, on a commit that
+  // touches the root, releases nothing of the root.
+  const scopedBreak = commit(`refactor(${NESTED})!: move a type`, "move.go", `${NESTED}/move.go`);
+  const rootBreak = commit("refactor!: drop a type", "drop.go");
+  const out = execFileSync(
+    "node",
+    [require.resolve("./module-commits.cjs"), require.resolve("./modules.cjs"), modules.ROOT_MODULE, "--released"],
+    { cwd: repo, encoding: "utf8", input: [first, rootFeat, scopedBreak, rootBreak].map((c) => c.hash).join("\n") },
+  );
+  const released = out.split("\n").filter((h) => h !== "");
+  if (JSON.stringify(released) !== JSON.stringify([rootFeat.hash, rootBreak.hash])) {
+    console.log(`FAIL --released prints for the root ${JSON.stringify(released)}, want the root feat and the root break`);
+    failed = 1;
+  }
+
   // The notes of a module list its own changes and not another's.
   const lastRelease = { gitTag: `${NESTED}/v0.1.0`, version: "0.1.0" };
   const nextRelease = { gitTag: `${NESTED}/v0.2.0`, version: "0.2.0", type: "minor" };
