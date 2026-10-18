@@ -1012,6 +1012,19 @@ Skipping the wait in step 3 invalidates tokens agents are still holding. Since
 TTLs here are minutes, the wait is short — which is part of why short TTLs are
 the default posture (`IssuerConfig.DefaultTTL`, fifteen minutes).
 
+A compromised key is withdrawn at once, and the bound is the verifiers'
+cache, not a TTL. A verifier on `jwks.Remote` stops accepting the key once it
+fetches the document without it: within the `max-age` the document is served
+with (`jwks.HandlerConfig.MaxAge`, at most `RemoteConfig.RefreshInterval`,
+5 minutes by default), or within `RemoteConfig.MinRefreshInterval`, 10
+seconds, with `HandlerConfig.Revalidate`. While it
+cannot reach the endpoint it keeps the last set it fetched for up to
+`RemoteConfig.MaxStale`, an hour by default, then refuses every token. So on
+compromise also revoke the capabilities the key signed (`Store.Revoke`): a
+revoked capability is refused whatever key verifies it. A document with no
+`"keys"` array is a failed fetch, not a withdrawal; `{"keys":[]}` withdraws
+every key.
+
 Load a signing key with `LoadKey(path)` (an Ed25519 key, PKCS#8 PEM only); an
 unreadable path, or none, is an error, never a fresh key. `GenerateKey` makes
 an ephemeral one, which vanishes with the process — a deployment that may run
