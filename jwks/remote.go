@@ -17,11 +17,15 @@ import (
 	"github.com/oleg-tkachuk/limes/internal/httpx"
 )
 
-// ErrUnavailable is returned by Remote when it holds no key
-// set recent enough to trust: the endpoint has been failing for longer than
-// MaxStale, or never answered. The verifier refuses the token with it — an
-// issuer we cannot reach verifies nothing — and, being the server's fault
-// rather than the token's, it matches no ErrUnauthenticated sentinel.
+// ErrUnavailable is returned by Remote when it holds no key set recent
+// enough to trust — the endpoint has been failing for longer than MaxStale,
+// or never answered —, when the kid asked for is not in the set it holds
+// while the endpoint is failing, since the issuer may have rotated it in
+// since, and when the caller's context ends while it waits on the endpoint
+// with no set to serve; the context's error stays matchable. The verifier
+// refuses the token with it — an issuer we cannot reach verifies nothing —
+// and, being the server's fault rather than the token's, it matches no
+// ErrUnauthenticated sentinel.
 var ErrUnavailable = errors.New("jwks: key set unavailable")
 
 // RemoteConfig defaults, for a field left zero.

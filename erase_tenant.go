@@ -53,7 +53,10 @@ func (r EraseTenantRequest) Validate() error {
 
 // EraseTenantResult is what EraseTenantRecords did.
 type EraseTenantResult struct {
-	// Revoked counts the capabilities it revoked: those not revoked before.
+	// Revoked counts the revocation entries it wrote: one for each of the
+	// tenant's capabilities that had none of its own — one revoked only
+	// through an ancestor included — whether or not its record was then
+	// removed.
 	Revoked int64
 	// Removed counts the records it removed; Kept, those it left on record
 	// for Purge.
