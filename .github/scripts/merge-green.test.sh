@@ -86,6 +86,11 @@ check "a Taskfile Task prefers" false FAKE_FILES="Taskfile.yml"
 check "the linter's configuration" false FAKE_FILES=".golangci.yaml"
 check "a pinned tool" false FAKE_FILES="tools/golangci-lint/go.mod"
 check "the module definition" false FAKE_FILES="go.mod"
+check "a workspace" false FAKE_FILES="go.work"
+check "a workspace's checksums" false FAKE_FILES="go.work.sum"
+check "Task's own settings" false FAKE_FILES=".taskrc.yml"
+check "Renovate's settings" false FAKE_FILES="renovate.json"
+check "Renovate's settings, another spelling" false FAKE_FILES=".renovaterc.json5"
 # A refused merge — the head moved between the read and the merge — is
 # reported and leaves the pull request as it is.
 check "a merge GitHub refuses" true FAKE_MERGE_FAILS=1
