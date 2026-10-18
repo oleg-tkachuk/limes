@@ -305,6 +305,9 @@ func (s *Store) Insert(_ context.Context, req limes.InsertRequest) error {
 		if c.Subject.TenantID != parent.Subject.TenantID {
 			return fmt.Errorf("%w: tenant %s, not its parent's %s", limes.ErrDelegationTooWide, c.Subject.TenantID, parent.Subject.TenantID)
 		}
+		if c.Caveats.Budget.UnitCode != parent.Caveats.Budget.UnitCode {
+			return fmt.Errorf("%w: budget in %q, under a parent in %q", limes.ErrUnitCodeMismatch, c.Caveats.Budget.UnitCode, parent.Caveats.Budget.UnitCode)
+		}
 		// The child's ancestors are its parent and the parent's own.
 		ancestors, err := s.ancestorsLocked(c.ParentID)
 		if err != nil {

@@ -955,7 +955,8 @@ administers tenant ceilings on `TenantBudgets` alone.
 `Store.Insert` returns `ErrAlreadyExists` for an id already on record, refuses
 a record with no id or under a parent not on record as `ErrInvalidRequest`,
 a child expiring after its parent or in another tenant as
-`ErrDelegationTooWide`, and a child with more than `MaxDelegationDepth`
+`ErrDelegationTooWide`, a child whose budget names another unit than its
+parent's as `ErrUnitCodeMismatch`, and a child with more than `MaxDelegationDepth`
 ancestors still on record as `ErrDelegationTooDeep`, writing nothing:
 `Purge` and the `IsRevoked` walk rely on a whole lineage in one tenant, no
 deeper than the walk reaches. It should tell a missing tenant

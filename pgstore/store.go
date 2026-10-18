@@ -125,6 +125,11 @@ func checkParent(ctx context.Context, tx pgx.Tx, c limes.Capability) (int, error
 	if c.Subject.TenantID != parent.Subject.TenantID {
 		return 0, fmt.Errorf("%w: tenant %s, not its parent's %s", limes.ErrDelegationTooWide, c.Subject.TenantID, parent.Subject.TenantID)
 	}
+	// Metering a child spends from every ancestor, so the lineage counts in
+	// one unit.
+	if c.Caveats.Budget.UnitCode != parent.Caveats.Budget.UnitCode {
+		return 0, fmt.Errorf("%w: budget in %q, under a parent in %q", limes.ErrUnitCodeMismatch, c.Caveats.Budget.UnitCode, parent.Caveats.Budget.UnitCode)
+	}
 	// The child's ancestors are its parent and the parent's own, counted as
 	// IsRevoked counts them: those still on record. The depth column keeps
 	// the depth at insertion, which a purged ancestor does not lower.
