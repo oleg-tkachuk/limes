@@ -124,6 +124,14 @@ func TestCheckSchema(t *testing.T) {
 		t.Errorf("CheckSchema as the runtime role: %v", err)
 	}
 	conn := freshConn(t)
+	// A database Migrate never ran in has no version table, nor even the
+	// schema: it is at version 0, which is a mismatch, not an outage.
+	if got, err := ReadSchemaVersion(ctx, conn); err != nil || got.Applied != 0 {
+		t.Errorf("ReadSchemaVersion before any Migrate = %+v, %v; want version 0", got, err)
+	}
+	if err := CheckSchema(ctx, conn); !errors.Is(err, ErrSchemaMismatch) {
+		t.Errorf("CheckSchema before any Migrate: err = %v, want ErrSchemaMismatch", err)
+	}
 	if err := Migrate(ctx, conn, MigrateOptions{}); err != nil {
 		t.Fatal(err)
 	}
