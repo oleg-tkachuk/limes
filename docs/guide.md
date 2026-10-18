@@ -357,7 +357,7 @@ worker, _ := limes.Attenuate(full.Token, limes.Attenuation{
     ExpiresAt:        time.Now().Add(10 * time.Minute),
 })
 
-// A verifier built with AcceptBiscuit: true returns the narrowed capability.
+// A verifier built with a VerifierConfig.Biscuit returns the narrowed capability.
 granted, err := verifier.Verify(ctx, limes.VerifyRequest{Token: worker, Audience: "my-service"})
 ```
 
@@ -380,7 +380,7 @@ and an `Unlimited` one is refused: a copy only narrows.
 The verifier hands them to the caller as `VerifiedCapability.Copies`, and the `Meter`
 counts them through the `MeterSubject` the verified capability gives, which
 carries them. A verifier admits such a copy only with
-`MeterCopies` set, which says the `Meter` behind it counts copies; without it
+`BiscuitConfig.MeterCopies` set, which says the `Meter` behind it counts copies; without it
 the token is refused with `ErrCopyCountersNotMetered` rather than accepted
 with its limits unkept — a configuration error, answered as 500, not an
 invalid token, and returned only once the token has passed every other
@@ -403,7 +403,7 @@ name another tenant's copy under its own capability. Passing it to
 `BiscuitRevocationStore.RevokeBiscuit` (`RevokeBiscuitRequest{Copy: …}`) stops
 that copy and every copy attenuated from it, and leaves the copy it came from,
 its siblings and the capability's JWT working. A verifier that accepts
-Biscuits needs `BiscuitRevocations` — wrap the store in a
+Biscuits needs `BiscuitConfig.Revocations` — wrap the store in a
 `BiscuitRevocationCache` and clear it with the other cache.
 
 The Biscuit seals an ordinary signed token, so a KMS-held signing key works.

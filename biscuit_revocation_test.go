@@ -169,7 +169,7 @@ func TestSharedAttenuationRevokedThroughItsSeed(t *testing.T) {
 	ctx := context.Background()
 	copies := map[string]bool{}
 	v := goldenBiscuitVerifier(t)
-	v.cfg.BiscuitRevocations = biscuitLookupFunc(func(ids [][]byte) bool {
+	v.cfg.Biscuit.Revocations = biscuitLookupFunc(func(ids [][]byte) bool {
 		for _, id := range ids {
 			if copies[string(id)] {
 				return true
@@ -213,7 +213,7 @@ func (f failingBiscuitLookup) IsBiscuitRevoked(context.Context, [][]byte) (bool,
 func TestBiscuitRevocationLookupFailsClosed(t *testing.T) {
 	_, v, _, _, root := biscuitFixture(t)
 	boom := errors.New("database down")
-	v.cfg.BiscuitRevocations = failingBiscuitLookup{boom}
+	v.cfg.Biscuit.Revocations = failingBiscuitLookup{boom}
 	if _, err := v.Verify(context.Background(), VerifyRequest{Token: root, Audience: audienceData}); !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want the lookup's error", err)
 	}
@@ -227,14 +227,34 @@ func TestVerifierNeedsBiscuitRevocationsToAcceptBiscuits(t *testing.T) {
 		Keys:           staticKeys(t, map[string]ed25519.PublicKey{"k1": pub}),
 		Revocations:    revLookup{},
 		TrustedIssuers: []string{"limes-test"},
-		AcceptBiscuit:  true,
+		Biscuit:        &BiscuitConfig{},
 	}
 	if _, err := NewVerifier(cfg); !errors.Is(err, errNoBiscuitRevocations) {
 		t.Fatalf("err = %v, want errNoBiscuitRevocations", err)
 	}
-	cfg.AcceptBiscuit = false
+	cfg.Biscuit = nil
 	if _, err := NewVerifier(cfg); err != nil {
 		t.Fatalf("without Biscuits: %v", err)
+	}
+}
+
+// The verifier keeps its own BiscuitConfig: the caller changing the one it
+// passed changes nothing the verifier does.
+func TestVerifierKeepsItsOwnBiscuitConfig(t *testing.T) {
+	pub, _, _ := ed25519.GenerateKey(nil)
+	biscuit := &BiscuitConfig{Revocations: revLookup{}}
+	v, err := NewVerifier(VerifierConfig{
+		Keys:           staticKeys(t, map[string]ed25519.PublicKey{"k1": pub}),
+		Revocations:    revLookup{},
+		TrustedIssuers: []string{"limes-test"},
+		Biscuit:        biscuit,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	biscuit.MeterCopies, biscuit.Revocations = true, nil
+	if v.cfg.Biscuit == biscuit || v.cfg.Biscuit.MeterCopies || v.cfg.Biscuit.Revocations == nil {
+		t.Errorf("the verifier's BiscuitConfig followed the caller's: %+v", v.cfg.Biscuit)
 	}
 }
 

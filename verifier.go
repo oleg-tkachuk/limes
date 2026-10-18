@@ -92,23 +92,10 @@ type VerifierConfig struct {
 	// DefaultMaxTokenBytes when zero; negative is refused.
 	MaxTokenBytes int
 
-	// AcceptBiscuit accepts the Biscuit form (Issuer.Biscuit, Attenuate)
-	// beside the JWT. Off, a Biscuit is refused like any malformed token.
-	AcceptBiscuit bool
-
-	// MeterCopies admits Biscuits whose attenuation blocks set a copy's own
-	// request or budget limits (Attenuation.Requests, Attenuation.Budget).
-	// Set it only when the Meter that enforces caveats counts
-	// the copies a MeterSubject carries; off, such a token is refused with
-	// ErrCopyCountersNotMetered rather than accepted with its limits unkept
-	// — once it has passed every other check, so a token refused for what
-	// it is gets that refusal instead.
-	MeterCopies bool
-
-	// BiscuitRevocations answers whether a copy of a Biscuit is revoked on
-	// its own. Required when AcceptBiscuit is set; wrap the store in a
-	// BiscuitRevocationCache.
-	BiscuitRevocations BiscuitRevocationLookup
+	// Biscuit accepts the Biscuit form (Issuer.Biscuit, Attenuate) beside
+	// the JWT, as it says. Nil: a Biscuit is refused like any malformed
+	// token.
+	Biscuit *BiscuitConfig
 
 	// AcceptTokenTypes are the token formats (the JWT "typ") the verifier
 	// accepts. Empty: every type this package reads, TokenTypeV4 and
@@ -128,6 +115,23 @@ type VerifierConfig struct {
 	// ErrorResponse gives (RFC 9110 §11.5). Empty: DefaultRealm. Only the
 	// characters RFC 6750 §3 allows in an auth-param value.
 	Realm string
+}
+
+// BiscuitConfig is how a verifier reads the Biscuit form
+// (VerifierConfig.Biscuit).
+type BiscuitConfig struct {
+	// Revocations answers whether a copy of a Biscuit is revoked on its
+	// own. Required; wrap the store in a BiscuitRevocationCache.
+	Revocations BiscuitRevocationLookup
+
+	// MeterCopies admits Biscuits whose attenuation blocks set a copy's own
+	// request or budget limits (Attenuation.Requests, Attenuation.Budget).
+	// Set it only when the Meter that enforces caveats counts
+	// the copies a MeterSubject carries; off, such a token is refused with
+	// ErrCopyCountersNotMetered rather than accepted with its limits unkept
+	// — once it has passed every other check, so a token refused for what
+	// it is gets that refusal instead.
+	MeterCopies bool
 }
 
 // DefaultRealm is the realm of a verifier whose config names none.
@@ -185,7 +189,11 @@ func NewVerifier(cfg VerifierConfig) (*Verifier, error) {
 	if len(cfg.TrustedIssuers) == 0 {
 		return nil, errors.New("limes: VerifierConfig.TrustedIssuers required")
 	}
-	if cfg.AcceptBiscuit && cfg.BiscuitRevocations == nil {
+	if cfg.Biscuit != nil {
+		b := *cfg.Biscuit // the caller's struct stays the caller's
+		cfg.Biscuit = &b
+	}
+	if cfg.Biscuit != nil && cfg.Biscuit.Revocations == nil {
 		return nil, errNoBiscuitRevocations
 	}
 	if cfg.Now == nil {
@@ -271,7 +279,7 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapab
 	var cap *grant
 	var biscuitIDs [][]byte // set for a Biscuit, from its verified chain
 	if isBiscuit(token) {
-		if !v.cfg.AcceptBiscuit {
+		if v.cfg.Biscuit == nil {
 			return VerifiedCapability{}, fmt.Errorf("%w: Biscuit tokens are not accepted here", ErrInvalidToken)
 		}
 		var err error
@@ -338,7 +346,7 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapab
 	// 9) Revocation of this copy of a Biscuit, or a copy it was attenuated
 	// from.
 	if biscuitIDs != nil {
-		revoked, err := v.cfg.BiscuitRevocations.IsBiscuitRevoked(ctx, biscuitIDs)
+		revoked, err := v.cfg.Biscuit.Revocations.IsBiscuitRevoked(ctx, biscuitIDs)
 		if err != nil {
 			return VerifiedCapability{}, fmt.Errorf("limes: biscuit revocation lookup: %w", err)
 		}
@@ -350,7 +358,7 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapab
 	// 10) A copy's own limits need a Meter that counts copies. After every
 	// check of the token, so a token refused for what it is gets that
 	// refusal, not this one, which is about the verifier.
-	if len(cap.copies) > 0 && !v.cfg.MeterCopies {
+	if len(cap.copies) > 0 && !v.cfg.Biscuit.MeterCopies {
 		return VerifiedCapability{}, ErrCopyCountersNotMetered
 	}
 	// 11) The proof's id, recorded in the replay cache, last: the cache's

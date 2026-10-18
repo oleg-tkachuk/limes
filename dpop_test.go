@@ -129,7 +129,7 @@ func replayVerifier(t *testing.T, store *memStore, pub ed25519.PublicKey, maxEnt
 	t.Helper()
 	v, err := NewVerifier(VerifierConfig{
 		Keys: staticKeys(t, map[string]ed25519.PublicKey{"k1": pub}), Revocations: store,
-		TrustedIssuers: []string{"limes-test"}, AcceptBiscuit: true, BiscuitRevocations: store,
+		TrustedIssuers: []string{"limes-test"}, Biscuit: &BiscuitConfig{Revocations: store},
 		DPoP: newVerifier(t, dpop.VerifierConfig{Replay: newReplay(t, dpop.MemoryReplayCacheConfig{
 			EntriesPerHolder: replayShare, MaxEntries: maxEntries,
 		})}),

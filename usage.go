@@ -56,7 +56,7 @@ type UsageStore[TX any] interface {
 // every copy's requests and spend. A charge or reservation records the copies
 // it debited, so Refund, Settle, Release and ReleaseExpired return to them
 // without being handed them again. A Meter that does not count copies must
-// not be paired with a verifier that sets VerifierConfig.MeterCopies.
+// not be paired with a verifier that sets BiscuitConfig.MeterCopies.
 //
 // All methods are concurrency-safe. A rejected call mutates nothing, so a
 // retry after rejection is safe. Each method first refuses a request whose

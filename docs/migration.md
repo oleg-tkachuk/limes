@@ -14,6 +14,15 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.88.0
+
+- `VerifierConfig.AcceptBiscuit`, `MeterCopies` and `BiscuitRevocations` →
+  `VerifierConfig.Biscuit *BiscuitConfig`, with `Revocations` and
+  `MeterCopies`: write `Biscuit: &limes.BiscuitConfig{Revocations: r}` for
+  `AcceptBiscuit: true, BiscuitRevocations: r`. Nil refuses Biscuits, as
+  `AcceptBiscuit: false` did; a copy setting with no Biscuit to apply to can
+  no longer be written.
+
 ## v0.87.0
 
 - `dpop.ProofRequest` → `dpop.SignRequest`: the request `dpop.Sign` takes,

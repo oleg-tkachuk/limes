@@ -64,12 +64,11 @@ func newExampleStack() exampleStack {
 		log.Fatal(err)
 	}
 	verifier, err := limes.NewVerifier(limes.VerifierConfig{
-		Keys:               exampleKeys(kid, pub),
-		Revocations:        records,
-		TrustedIssuers:     []string{exampleIssuerName},
-		AcceptBiscuit:      true,
-		BiscuitRevocations: records,
-		DPoP:               proofs,
+		Keys:           exampleKeys(kid, pub),
+		Revocations:    records,
+		TrustedIssuers: []string{exampleIssuerName},
+		Biscuit:        &limes.BiscuitConfig{Revocations: records},
+		DPoP:           proofs,
 	})
 	if err != nil {
 		log.Fatal(err)

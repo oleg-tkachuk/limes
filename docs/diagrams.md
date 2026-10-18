@@ -84,7 +84,7 @@ flowchart LR
     issuer --> store
     verifier --> keys
     verifier --> cache --> store
-    verifier -. "AcceptBiscuit" .-> bcache --> brev
+    verifier -. "VerifierConfig.Biscuit" .-> bcache --> brev
     caller -. "admin read" .-> cusage
     caller -. "billing read" .-> ledger
     caller -. "records report" .-> census
@@ -140,7 +140,7 @@ flowchart LR
 
 The roles take narrower contracts than the stores implement: `IssuerConfig.Store`
 is an `IssuanceStore` (Insert · IsRevoked), `VerifierConfig.Revocations` a
-`RevocationLookup` and `VerifierConfig.BiscuitRevocations` a
+`RevocationLookup` and `BiscuitConfig.Revocations` a
 `BiscuitRevocationLookup`. A `Meter` counts against a `MeterSubject`, which
 only `VerifiedCapability.MeterSubject` or `StoredMeterSubject` over a
 `RecordReader` builds, so a charge always names a capability the verifier or
@@ -319,7 +319,7 @@ that does not meter them; the proof's id is recorded last, as for any token.
 ```mermaid
 flowchart TB
     tok(["Biscuit, audience"])
-    on{"AcceptBiscuit"}
+    on{"VerifierConfig.Biscuit set"}
     auth{"container decodes · ≤ MaxBiscuitBlocks blocks<br/>authority block: exactly one<br/>limes_capability fact, no rules, no checks"}
     sealed{"the sealed token: header · key · signature<br/>claims · issuer · tenant — and it names a root, limes_bsk"}
     chain{"signature chain verifies<br/>against that root"}

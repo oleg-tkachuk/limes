@@ -23,7 +23,7 @@ const (
 func limitedBiscuit(t *testing.T) (*Verifier, Capability, string) {
 	t.Helper()
 	issuer, v, _, _, _ := biscuitFixture(t)
-	v.cfg.MeterCopies = true
+	v.cfg.Biscuit.MeterCopies = true
 	cap, _, err := issuer.issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
@@ -132,7 +132,7 @@ func TestCopyLimitsNarrow(t *testing.T) {
 
 	// The fixture capability has no limits: any positive copy limit fits.
 	_, unlimited, _, _, token := biscuitFixture(t)
-	unlimited.cfg.MeterCopies = true
+	unlimited.cfg.Biscuit.MeterCopies = true
 	tok, _ := Attenuate(token, Attenuation{Requests: &RequestCeiling{Max: 1 << 40}, Budget: &BudgetCeiling{Max: MaxNanos}})
 	if _, err := unlimited.Verify(ctx, VerifyRequest{Token: tok, Audience: audienceData}); err != nil {
 		t.Fatalf("under no limit: %v", err)
@@ -143,7 +143,7 @@ func TestCopyLimitsNarrow(t *testing.T) {
 // token carrying one is refused; a token without one is not affected.
 func TestCopyLimitsNeedMeterCopies(t *testing.T) {
 	v, _, root := limitedBiscuit(t)
-	v.cfg.MeterCopies = false
+	v.cfg.Biscuit.MeterCopies = false
 	ctx := context.Background()
 	limited, _ := Attenuate(root, Attenuation{Requests: &RequestCeiling{Max: 5}})
 	_, err := v.Verify(ctx, VerifyRequest{Token: limited, Audience: audienceData})
@@ -219,7 +219,7 @@ func TestCopiesAreNeverSigned(t *testing.T) {
 // read and revoked there.
 func TestBiscuitCopyNamesItsLimits(t *testing.T) {
 	v, _, root := limitedBiscuit(t)
-	v.cfg.MeterCopies = false
+	v.cfg.Biscuit.MeterCopies = false
 	outer, _ := Attenuate(root, Attenuation{Requests: &RequestCeiling{Max: 50}})
 	inner, _ := Attenuate(outer, Attenuation{Budget: &BudgetCeiling{Max: NanosPerUnit}})
 
@@ -241,7 +241,7 @@ func TestBiscuitCopyNamesItsLimits(t *testing.T) {
 // enclosing copy then has no ceiling there to be within.
 func TestBiscuitCopySetsTheAxisItsEncloserLeft(t *testing.T) {
 	v, _, root := limitedBiscuit(t)
-	v.cfg.MeterCopies = false
+	v.cfg.Biscuit.MeterCopies = false
 	const requests = 5
 	for name, tc := range map[string]struct{ outer, inner Attenuation }{
 		"requests under a budget": {Attenuation{Budget: &BudgetCeiling{Max: NanosPerUnit}}, Attenuation{Requests: &RequestCeiling{Max: requests}}},
@@ -267,7 +267,7 @@ func ceilingIs[T comparable](got *T, want T) bool { return got != nil && *got ==
 // A copy ceiling of 0 freezes the copy: it is a ceiling, not "none".
 func TestACopyCanBeFrozen(t *testing.T) {
 	_, v, _, _, token := biscuitFixture(t)
-	v.cfg.MeterCopies = true
+	v.cfg.Biscuit.MeterCopies = true
 	frozen, err := Attenuate(token, Attenuation{Requests: &RequestCeiling{}, Budget: &BudgetCeiling{}})
 	if err != nil {
 		t.Fatal(err)
@@ -290,7 +290,7 @@ func TestACopyCanBeFrozen(t *testing.T) {
 // an expiry — gets that refusal, not the verifier's.
 func TestCopyLimitsAreRefusedLast(t *testing.T) {
 	v, _, root := limitedBiscuit(t)
-	v.cfg.MeterCopies = false
+	v.cfg.Biscuit.MeterCopies = false
 	ctx := context.Background()
 	limited, err := Attenuate(root, Attenuation{Requests: &RequestCeiling{}})
 	if err != nil {
