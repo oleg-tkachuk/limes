@@ -8,7 +8,6 @@ package main
 import (
 	"context"
 	"crypto/ed25519"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,9 +23,6 @@ const (
 	audience   = "search-service"
 	unit       = "USD"
 )
-
-// money is an amount or a budget in the examples' currency.
-func money(v fmt.Stringer) string { return v.String() + " " + unit }
 
 func main() {
 	ctx := context.Background()
@@ -62,7 +58,7 @@ func main() {
 	log.Info("issued the orchestrator its capability",
 		"capability", root.Capability.ID, "operations", root.Capability.Caveats.Ops,
 		"resources under", root.Capability.Caveats.ResourcePrefixes,
-		"requests", root.Capability.Caveats.Requests, "budget", money(root.Capability.Caveats.Budget))
+		"requests", root.Capability.Caveats.Requests, "budget", root.Capability.Caveats.Budget)
 
 	// A delegation starts from what the verifier accepted: the orchestrator
 	// presents its own token, as it would to any service.
@@ -85,7 +81,7 @@ func main() {
 	log.Info("the orchestrator delegated a narrower capability to a sub-agent, with no call to an admin",
 		"capability", child.Capability.ID, "parent", child.Capability.ParentID,
 		"operations", child.Capability.Caveats.Ops, "resources under", child.Capability.Caveats.ResourcePrefixes,
-		"requests", child.Capability.Caveats.Requests, "budget", money(child.Capability.Caveats.Budget),
+		"requests", child.Capability.Caveats.Requests, "budget", child.Capability.Caveats.Budget,
 		"expires", child.Capability.ExpiresAt.Format(time.RFC3339))
 
 	_, err = verifier.Authorize(ctx, limes.AuthorizeRequest{
