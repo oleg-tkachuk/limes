@@ -60,9 +60,13 @@ fi
 # request has no business in their environment.
 go_without_token() { env -u GH_TOKEN go "$@"; }
 
-# Every module starts from main as origin has it, whatever an earlier call
-# left checked out or half-written: this runs in a checkout of its own.
+# Every module starts from main as origin has it now, whatever an earlier
+# call left checked out or half-written: this runs in a checkout of its own.
+# Fetched afresh, not as the release's checkout had it: a pull request
+# raising the same module's requirement may have merged since, and a branch
+# cut from before it would conflict with it.
 branch="$BRANCH_PREFIX$module"
+git fetch --quiet origin "$BASE_BRANCH"
 git switch --quiet --discard-changes -C "$branch" "origin/$BASE_BRANCH"
 current="$(cd "$module" && go_without_token mod edit -json | jq -r --arg m "$LIMES_MODULE" '.Require[]? | select(.Path == $m) | .Version')"
 if [ -z "$current" ]; then
