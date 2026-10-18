@@ -91,6 +91,11 @@ var refusalRules = []refusalRule{
 	{ErrRequestLimitExceeded, ReasonRequestLimitExceeded, true, answerExhausted},
 	{ErrBudgetExceeded, ReasonBudgetExceeded, false, answerExhausted},
 	{ErrTenantBudgetExceeded, ReasonTenantBudgetExceeded, false, answerExhausted},
+
+	// A request that disagrees with what is on record — an external
+	// reference already naming another cost, say — is the client's to
+	// resolve, not the server's fault.
+	{ErrConflict, "", false, answerConflict},
 }
 
 // ruleFor is the first rule err matches.

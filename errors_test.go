@@ -94,9 +94,9 @@ var sentinelMatrix = map[string]sentinelCase{
 	"ErrUsageNotFound":        {ErrUsageNotFound, []string{famNotFound}, "", http.StatusInternalServerError},
 	"ErrTenantBudgetNotFound": {ErrTenantBudgetNotFound, []string{famNotFound}, "", http.StatusInternalServerError},
 
-	"ErrConflict":                    {ErrConflict, []string{famConflict}, "", http.StatusInternalServerError},
-	"ErrAlreadyExists":               {ErrAlreadyExists, []string{famConflict}, "", http.StatusInternalServerError},
-	"ErrExternalRefConflict":         {ErrExternalRefConflict, []string{famConflict}, "", http.StatusInternalServerError},
+	"ErrConflict":                    {ErrConflict, []string{famConflict}, "", http.StatusConflict},
+	"ErrAlreadyExists":               {ErrAlreadyExists, []string{famConflict}, "", http.StatusConflict},
+	"ErrExternalRefConflict":         {ErrExternalRefConflict, []string{famConflict}, "", http.StatusConflict},
 	"ErrInvalidAmount":               {ErrInvalidAmount, []string{famRequest}, "", http.StatusInternalServerError},
 	"ErrCounterOverflow":             {ErrCounterOverflow, nil, "", http.StatusInternalServerError},
 	"ErrDelegationTooWide":           {ErrDelegationTooWide, nil, "", http.StatusInternalServerError},
@@ -107,7 +107,7 @@ var sentinelMatrix = map[string]sentinelCase{
 	"ErrProofUnsupported":            {ErrProofUnsupported, nil, "", http.StatusInternalServerError},
 	"ErrCursorRepeated":              {ErrCursorRepeated, nil, "", http.StatusInternalServerError},
 	"ErrRefundExceedsCharge":         {ErrRefundExceedsCharge, nil, "", http.StatusInternalServerError},
-	"ErrTenantBudgetVersionMismatch": {ErrTenantBudgetVersionMismatch, []string{famConflict}, "", http.StatusInternalServerError},
+	"ErrTenantBudgetVersionMismatch": {ErrTenantBudgetVersionMismatch, []string{famConflict}, "", http.StatusConflict},
 }
 
 // Each sentinel matches exactly the families the matrix names, has the
