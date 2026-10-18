@@ -419,8 +419,8 @@ func keepOf(f limes.TenantBudgetFilter) (string, error) {
 
 // sqlListTenants pages the aggregates most at risk first, ties by tenant id,
 // after the place ($4 class, $5 spent, $6 max, $7 tenant) when $4 is set.
-// $1 is the rows to keep, as keepOf names them, and $2 / $3 the threshold as
-// an exact fraction.
+// $1 is the rows to keep, as keepOf names them, $2 the threshold in basis
+// points and $3 the basis points in a whole.
 const sqlListTenants = `
 WITH ranked AS (
     SELECT b.*,
@@ -439,7 +439,7 @@ FROM ranked r, place p
 WHERE CASE $1::text
         WHEN '` + keepEvery + `' THEN true
         WHEN '` + keepUnlimited + `' THEN r.class = 2
-        WHEN '` + keepAtOrPast + `' THEN r.class = 0 OR (r.class = 1 AND r.spent::numeric * 100 * $3::numeric >= $2::numeric * r.ceiling_max)
+        WHEN '` + keepAtOrPast + `' THEN r.class = 0 OR (r.class = 1 AND r.spent::numeric * $3::numeric >= $2::numeric * r.ceiling_max)
       END
   AND (p.class IS NULL
        OR r.class > p.class
@@ -465,7 +465,6 @@ func (s *UsageStore) ListTenantBudgets(ctx context.Context, req limes.ListTenant
 	if err != nil {
 		return limes.Page[limes.TenantBudget]{}, err
 	}
-	threshold := limes.ExactPercent(req.ThresholdPct)
 	limit := limes.PageLimit(req.Limit)
 	var class *int
 	var spent, ceiling int64
@@ -478,7 +477,7 @@ func (s *UsageStore) ListTenantBudgets(ctx context.Context, req limes.ListTenant
 	// census does: under it the page would read as every tenant's.
 	err = s.inEveryTenantReadTx(ctx, func(tx pgx.Tx) error {
 		r, err := tx.Query(ctx, sqlListTenants,
-			keep, threshold.Num().String(), threshold.Denom().String(),
+			keep, req.ThresholdBasisPoints, limes.BasisPointsPerWhole,
 			class, spent, ceiling, tenant, limit+1, utilizationScale)
 		if err != nil {
 			return err
