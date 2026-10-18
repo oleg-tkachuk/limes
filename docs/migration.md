@@ -14,6 +14,14 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.91.0
+
+- `TokenTypeV4` is gone: a verifier accepts `limes-cap-v5+jwt` alone, and a
+  `Signer` mints it by default. A v4 token still in flight is refused as
+  `ErrInvalidToken`; issue it again. A `VerifierConfig.AcceptTokenTypes` or
+  `SignerConfig.TokenType` naming v4 is refused when the verifier or signer
+  is built.
+
 ## pgstore/v0.16.0
 
 - `pgstore.SchemaVersion.Applied` and `Expected` are `int`, not `int32`, the

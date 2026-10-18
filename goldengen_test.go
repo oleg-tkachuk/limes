@@ -40,13 +40,15 @@ const (
 	goldenWriteFlag = "1"
 )
 
-// goldenFiles are the fixtures, one per token type. The v4 one is frozen: it
-// carries limes_gen, which nothing mints any more, and is kept to show a v4
-// token still verifies. The v5 one is what TestGenerateGoldenToken writes.
+// goldenFiles are the fixtures of the token types this package reads, one
+// each: what TestGenerateGoldenToken writes.
 var goldenFiles = map[TokenType]string{
-	TokenTypeV4: "golden_token.jwt",
 	TokenTypeV5: "golden_token_v5.jwt",
 }
+
+// retiredV4Fixture is a v4 token from before v4 was retired, kept to show
+// it is refused rather than read under another schema.
+const retiredV4Fixture = "golden_token_v4.jwt"
 
 // goldenPath is the fixture of token type typ.
 func goldenPath(typ TokenType) string { return filepath.Join("testdata", goldenFiles[typ]) }

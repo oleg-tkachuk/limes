@@ -98,8 +98,7 @@ type VerifierConfig struct {
 	Biscuit *BiscuitConfig
 
 	// AcceptTokenTypes are the token formats (the JWT "typ") the verifier
-	// accepts. Empty: every type this package reads, TokenTypeV4 and
-	// TokenTypeV5. A new format ships so: verifiers accept it first,
+	// accepts. Empty: every type this package reads, TokenTypeV5 alone. A new format ships so: verifiers accept it first,
 	// issuers mint it after (SignerConfig.TokenType). A type this package
 	// has no schema for is refused: a verifier cannot enforce a format it
 	// cannot read.
@@ -481,7 +480,7 @@ func (v *Verifier) verifySigned(ctx context.Context, token string) (*grant, Toke
 	// What Issue refuses to mint, no token may carry: a caveat outside the
 	// rules has no one meaning to enforce — a negative limit read as none,
 	// an operation nobody defined.
-	if err := cap.Caveats.validateAs(typ); err != nil {
+	if err := cap.Caveats.Validate(); err != nil {
 		return nil, "", refuseToken(ErrInvalidToken, err)
 	}
 

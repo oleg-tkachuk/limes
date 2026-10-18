@@ -55,7 +55,7 @@ func TestVerifyRequiresCapabilityTyp(t *testing.T) {
 	v := verifierFor(t, pub, VerifierConfig{})
 	ctx := context.Background()
 
-	good := resign(t, priv, map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV4}, validClaims(uuid.New()))
+	good := resign(t, priv, map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV5}, validClaims(uuid.New()))
 	if _, err := v.Verify(ctx, VerifyRequest{Token: good, Audience: "data"}); err != nil {
 		t.Fatalf("well-formed token rejected: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestVerifyRejectsLineBreaksInSegments(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	v := verifierFor(t, pub, VerifierConfig{})
 	ctx := context.Background()
-	good := resign(t, priv, map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV4}, validClaims(uuid.New()))
+	good := resign(t, priv, map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV5}, validClaims(uuid.New()))
 	if _, err := v.Verify(ctx, VerifyRequest{Token: good, Audience: "data"}); err != nil {
 		t.Fatalf("well-formed token rejected: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestVerifyRejectsTenantlessAndOversizedTokens(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	v := verifierFor(t, pub, VerifierConfig{MaxTokenBytes: 2048})
 	ctx := context.Background()
-	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV4}
+	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV5}
 
 	if _, err := v.Verify(ctx, VerifyRequest{Token: resign(t, priv, hdr, validClaims(uuid.Nil)), Audience: "data"}); !errors.Is(err, ErrInvalidToken) {
 		t.Errorf("tenantless token: Verify = %v, want ErrInvalidToken", err)
@@ -122,12 +122,12 @@ func TestVerifyEnforcesKeyIssuerBinding(t *testing.T) {
 		KeyIssuers:     map[string]string{"k2": "iss"},
 	})
 	if _, err := unbound.Verify(context.Background(), VerifyRequest{
-		Token: resign(t, priv, map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV4}, validClaims(uuid.New())), Audience: "data",
+		Token: resign(t, priv, map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV5}, validClaims(uuid.New())), Audience: "data",
 	}); !errors.Is(err, ErrInvalidToken) {
 		t.Errorf("a kid the binding does not name: Verify = %v, want ErrInvalidToken", err)
 	}
 	ctx := context.Background()
-	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV4}
+	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV5}
 
 	if _, err := v.Verify(ctx, VerifyRequest{Token: resign(t, priv, hdr, validClaims(uuid.New())), Audience: "data"}); err != nil {
 		t.Fatalf("bound issuer rejected: %v", err)
@@ -144,7 +144,7 @@ func TestVerifyEnforcesKeyIssuerBinding(t *testing.T) {
 func TestVerifyReadsClaimsStrictly(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	v := verifierFor(t, pub, VerifierConfig{})
-	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV4}
+	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV5}
 	ctx := context.Background()
 	cases := map[string]func(map[string]any){
 		// A caveat this verifier does not know is one it cannot enforce.
@@ -188,7 +188,7 @@ func TestVerifierConfigIsItsOwn(t *testing.T) {
 	cfg := VerifierConfig{
 		TrustedIssuers:   []string{"iss", "other"},
 		KeyIssuers:       map[string]string{"k1": "iss"},
-		AcceptTokenTypes: []TokenType{TokenTypeV4},
+		AcceptTokenTypes: []TokenType{TokenTypeV5},
 	}
 	v := verifierFor(t, pub, cfg)
 	cfg.TrustedIssuers[0] = "scribbled"
@@ -196,7 +196,7 @@ func TestVerifierConfigIsItsOwn(t *testing.T) {
 	cfg.AcceptTokenTypes[0] = "scribbled"
 
 	ctx := context.Background()
-	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV4}
+	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV5}
 	if _, err := v.Verify(ctx, VerifyRequest{Token: resign(t, priv, hdr, validClaims(uuid.New())), Audience: "data"}); err != nil {
 		t.Errorf("a token the verifier was built to accept: %v", err)
 	}

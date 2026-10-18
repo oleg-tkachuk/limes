@@ -19,11 +19,11 @@ import (
 // key holder could mint by hand, which the verifier must judge for itself.
 func signUnchecked(t *testing.T, s *Signer, c Capability) string {
 	t.Helper()
-	header, err := json.Marshal(jwtHeader{Alg: jose.AlgEd25519, Kid: s.keyID, Typ: string(TokenTypeV4)})
+	header, err := json.Marshal(jwtHeader{Alg: jose.AlgEd25519, Kid: s.keyID, Typ: string(TokenTypeV5)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims, err := json.Marshal(claimsOf(grant{Capability: c}, TokenTypeV4))
+	claims, err := json.Marshal(claimsOf(grant{Capability: c}))
 	if err != nil {
 		t.Fatal(err)
 	}

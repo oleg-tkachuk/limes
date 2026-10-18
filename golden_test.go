@@ -6,7 +6,9 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/oleg-tkachuk/limes/internal/jose"
@@ -21,6 +23,28 @@ import (
 //
 // Regenerating the fixture is a deliberate act, not a fix: it declares the old
 // format dead. Do it only with the format change reviewed on its own merits.
+
+// A v4 token, valid when it was minted, is refused: its typ is no longer one
+// a verifier accepts.
+func TestRetiredV4TokenIsRefused(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", retiredV4Fixture))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	priv := ed25519.NewKeyFromSeed(goldenSeed[:])
+	verifier, err := NewVerifier(VerifierConfig{
+		Keys:           staticKeys(t, map[string]ed25519.PublicKey{goldenKID: priv.Public().(ed25519.PublicKey)}),
+		Revocations:    revLookup{},
+		TrustedIssuers: []string{goldenIssuer},
+		Now:            goldenClock,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := verifier.Verify(context.Background(), VerifyRequest{Token: string(raw), Audience: goldenAudience}); !errors.Is(err, ErrInvalidToken) {
+		t.Errorf("a v4 token: err = %v, want ErrInvalidToken", err)
+	}
+}
 
 func TestGoldenTokenStillVerifies(t *testing.T) {
 	for typ := range goldenFiles {
@@ -121,8 +145,7 @@ func checkGoldenRejectsWrongAudience(t *testing.T, typ TokenType) {
 // The claims round-trip byte for byte: decoding the golden payload and
 // writing it back as Sign would gives the signed bytes. A renamed member, a
 // changed omission rule or a moved claim fails here even where the decoded
-// fields still compare equal. Only the format Sign writes round-trips: the
-// v4 fixture's limes_gen is read and dropped.
+// fields still compare equal.
 func TestGoldenClaimsRoundTripExactly(t *testing.T) {
 	raw, err := os.ReadFile(goldenPath(TokenTypeV5))
 	if err != nil {
@@ -136,7 +159,7 @@ func TestGoldenClaimsRoundTripExactly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	written, err := json.Marshal(claimsOf(*c, TokenTypeV5))
+	written, err := json.Marshal(claimsOf(*c))
 	if err != nil {
 		t.Fatal(err)
 	}
