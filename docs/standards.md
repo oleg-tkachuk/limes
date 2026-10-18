@@ -197,6 +197,9 @@ either side reads them. Each can return when something does.
   `IdempotencyKeyRequired` takes whether a request carried a key from the
   consumer, whatever header it travelled in.
 - **Biscuit** has a specification of its own (biscuitsec.org), not an RFC; the
-  Biscuit form follows its v3 format through `biscuit-go`.
+  Biscuit form follows its v3 format through `biscuit-go`, as a container
+  with a vocabulary of limes's own rather than a policy language; any Biscuit
+  implementation can append a block of that vocabulary
+  ([biscuit-profile.md](biscuit-profile.md)).
 - **OAuth scopes** (RFC 6749 §3.3) are not used: what a token allows is its
   caveats, which say more than a list of scope strings.

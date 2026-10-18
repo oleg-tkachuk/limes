@@ -343,7 +343,9 @@ require server nonces.
 
 `Delegate` narrows a capability, but it needs the issuer. The Biscuit form
 of the same capability (Biscuit v3) can be narrowed by whoever holds it, with
-no key and no network, and a narrowing can never be undone:
+no key and no network, and a narrowing can never be undone. An agent in
+another language narrows it with any Biscuit library, writing the facts
+[biscuit-profile.md](biscuit-profile.md) lists:
 
 ```go
 // granted: what the verifier accepted from the capability's JWT
