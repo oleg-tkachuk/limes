@@ -493,6 +493,9 @@ func checkRejectionMovesNothing[TX any](t *testing.T, f fixture[TX]) {
 }
 
 func checkExternalRefChargesOnce[TX any](t *testing.T, f fixture[TX]) {
+	// copyRequests is the request ceiling of the copy below: any, as a
+	// charge counts no requests.
+	const copyRequests = 10
 	fanOuts := 0
 	onCharged := func(context.Context, limes.Charged[TX]) error { fanOuts++; return nil }
 	first, err := f.charge(limes.ChargeRequest{Amount: 2 * one, ExternalRef: "call-1"}, onCharged)
@@ -513,6 +516,10 @@ func checkExternalRefChargesOnce[TX any](t *testing.T, f fixture[TX]) {
 	for name, subject := range map[string]limes.MeterSubject{
 		"in another unit":    newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: otherUnit}),
 		"for another tenant": newSubject(subjectSpec{capID: f.child, tenant: uuid.New(), budget: budgetOf(childBudget)}),
+		// Another copy of the capability charges its own counters: the
+		// first copy's receipt is not its to read back.
+		"under a Biscuit copy": newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget),
+			copies: []limes.CopyCeiling{{RevocationID: []byte("another-copy"), Requests: &limes.RequestCeiling{Max: copyRequests}}}}),
 	} {
 		want := limes.ErrExternalRefConflict
 		// A store that scopes tenants refuses the call before it reads
@@ -520,8 +527,13 @@ func checkExternalRefChargesOnce[TX any](t *testing.T, f fixture[TX]) {
 		if f.ScopesTenants && subject.TenantID() != f.Tenant {
 			want = limes.ErrScopeMismatch
 		}
-		if r, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: subject, Amount: 2 * one, ExternalRef: "call-1"}, onCharged); !errors.Is(err, want) {
+		r, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: subject, Amount: 2 * one, ExternalRef: "call-1"}, onCharged)
+		if !errors.Is(err, want) {
 			t.Errorf("the ref again %s = %+v, %v; want %v", name, r, err, want)
+		}
+		// The conflict says which ref, not what the other charge was.
+		if err != nil && strings.Contains(err.Error(), f.Tenant.String()) {
+			t.Errorf("the ref again %s: the error names the first charge's tenant: %v", name, err)
 		}
 	}
 	if fanOuts != 1 {

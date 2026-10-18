@@ -105,8 +105,9 @@ type Meter[TX any] interface {
 	// nothing, does not run onCharged, and returns that charge's receipt
 	// with Replayed set — also once the capability is no longer on record,
 	// as Settle replays a settled hold. The pair names one cost: arriving again with a
-	// different Amount, UnitCode or TenantID it returns
-	// ErrExternalRefConflict and moves nothing. With req.Overrun = OverrunPolicyRecord, a charge that
+	// different Amount, UnitCode or TenantID, or under other Biscuit copies
+	// than req.Subject carries, it returns ErrExternalRefConflict and moves
+	// nothing. With req.Overrun = OverrunPolicyRecord, a charge that
 	// would cross a ceiling is committed anyway and the receipt reports it
 	// (ChargeReceipt.Overrun); see OverrunPolicy.
 	Charge(ctx context.Context, req ChargeRequest, onCharged func(ctx context.Context, c Charged[TX]) error) (ChargeReceipt, error)
@@ -815,8 +816,10 @@ var (
 )
 
 // ErrExternalRefConflict — Charge named an ExternalRef its capability already
-// charged under, for a different amount, unit or tenant. One reference names
-// one cost; replaying the first receipt would report the second as booked.
+// charged under, for a different amount, unit or tenant, or under other
+// Biscuit copies. One reference names one cost; replaying the first receipt
+// would report the second as booked. The error names the reference, never
+// the charge it names.
 // Matches ErrInvalidRequest.
 var ErrExternalRefConflict error = &familyError{"limes: external ref already names a different charge", ErrInvalidRequest}
 
