@@ -175,7 +175,7 @@ func TestVerifyReadsClaimsStrictly(t *testing.T) {
 // A duplicate member is refused: encoding/json would keep the last, another
 // parser the first.
 func TestVerifyRefusesDuplicateClaims(t *testing.T) {
-	_, err := parseClaims(jose.B64([]byte(`{"iss":"a","iss":"b"}`)))
+	_, err := parseClaims(jose.B64([]byte(`{"iss":"a","iss":"b"}`)), TokenTypeV5)
 	if err == nil {
 		t.Fatal("claims with iss twice were read")
 	}

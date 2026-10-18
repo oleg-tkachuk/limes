@@ -37,7 +37,6 @@ func TestIssueRefusesAMalformedRequestAsInvalid(t *testing.T) {
 	for name, mutate := range map[string]func(*IssueRequest){
 		"no tenant":              func(r *IssueRequest) { r.Subject.TenantID = uuid.Nil },
 		"no issuer principal":    func(r *IssueRequest) { r.IssuedBy = Principal{} },
-		"a negative generation":  func(r *IssueRequest) { r.Generation = -1 },
 		"no audience":            func(r *IssueRequest) { r.Audience = nil },
 		"an empty audience":      func(r *IssueRequest) { r.Audience = []string{""} },
 		"invalid caveats":        func(r *IssueRequest) { r.Caveats = Caveats{} },

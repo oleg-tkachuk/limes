@@ -180,15 +180,16 @@ commit, such as `build(pgstore): require limes vX.Y.Z`, is a patch of it. A
 commit releases, by its type, each module whose files it changes; one scoped
 `pgstore` or `redisreplay` never releases limes, breaking or not.
 
-The token wire format — claims, `typ: limes-cap-v4+jwt`, the Biscuit facts —
+The token wire format — claims, `typ: limes-cap-v5+jwt`, the Biscuit facts —
 is a separate promise: a token is a credential that outlives the process that
 issued it, so the format changes only as a deliberate breaking change that
 moves the version in `typ`, with the golden fixtures regenerated in the same
 commit. A verifier refuses a token of a version it does not accept
 (`VerifierConfig.AcceptTokenTypes`) outright, rather than read its claims
-under the wrong schema. Every 1.x verifier accepts `limes-cap-v4+jwt`, so a
-later version ships in a minor release: verifiers accept it first, issuers
-mint it after. Tokens are signed with Ed25519 throughout 1.x; another
+under the wrong schema. A new version ships as v5 did: verifiers accept it
+first (`AcceptTokenTypes` takes every version the package reads), and
+issuers mint it after (`SignerConfig.TokenType`), so no token in flight is
+refused during the change. Tokens are signed with Ed25519 throughout 1.x; another
 algorithm would be another token version, never a runtime choice.
 
 ## Documentation

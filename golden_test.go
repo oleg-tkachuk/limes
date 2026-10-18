@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/oleg-tkachuk/limes/internal/jose"
@@ -15,15 +14,22 @@ import (
 
 // The wire-format guard.
 //
-// testdata/golden_token.jwt is minted by goldengen_test.go from the fixed seed
-// and clock below. If this test fails, the token format changed — which
-// invalidates capabilities already held by running agents, not merely a build.
+// The fixtures (goldenFiles) are minted from the fixed seed and clock of
+// goldengen_test.go, one per token type. If these tests fail, a token format
+// changed — which invalidates capabilities already held by running agents,
+// not merely a build.
 //
 // Regenerating the fixture is a deliberate act, not a fix: it declares the old
 // format dead. Do it only with the format change reviewed on its own merits.
 
 func TestGoldenTokenStillVerifies(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("testdata", "golden_token.jwt"))
+	for typ := range goldenFiles {
+		t.Run(string(typ), func(t *testing.T) { checkGoldenVerifies(t, typ) })
+	}
+}
+
+func checkGoldenVerifies(t *testing.T, typ TokenType) {
+	raw, err := os.ReadFile(goldenPath(typ))
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
@@ -84,7 +90,13 @@ func TestGoldenTokenStillVerifies(t *testing.T) {
 // A token for one audience must not verify for another — the audience gate is
 // part of the format contract, not only of the runtime policy.
 func TestGoldenTokenRejectsWrongAudience(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("testdata", "golden_token.jwt"))
+	for typ := range goldenFiles {
+		t.Run(string(typ), func(t *testing.T) { checkGoldenRejectsWrongAudience(t, typ) })
+	}
+}
+
+func checkGoldenRejectsWrongAudience(t *testing.T, typ TokenType) {
+	raw, err := os.ReadFile(goldenPath(typ))
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
@@ -109,9 +121,10 @@ func TestGoldenTokenRejectsWrongAudience(t *testing.T) {
 // The claims round-trip byte for byte: decoding the golden payload and
 // writing it back as Sign would gives the signed bytes. A renamed member, a
 // changed omission rule or a moved claim fails here even where the decoded
-// fields still compare equal.
+// fields still compare equal. Only the format Sign writes round-trips: the
+// v4 fixture's limes_gen is read and dropped.
 func TestGoldenClaimsRoundTripExactly(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("testdata", "golden_token.jwt"))
+	raw, err := os.ReadFile(goldenPath(TokenTypeV5))
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
@@ -119,7 +132,7 @@ func TestGoldenClaimsRoundTripExactly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := parseClaims(parts.Payload)
+	c, err := parseClaims(parts.Payload, TokenTypeV5)
 	if err != nil {
 		t.Fatal(err)
 	}

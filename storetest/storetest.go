@@ -165,7 +165,6 @@ func (f fixture) newCapability(subject string, parent uuid.UUID, expires time.Ti
 		NotBefore:       f.now,
 		ExpiresAt:       expires,
 		ParentID:        parent,
-		Generation:      1,
 		ConfirmationJKT: "jkt",
 	}
 }

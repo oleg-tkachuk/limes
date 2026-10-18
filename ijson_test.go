@@ -22,15 +22,6 @@ func TestTokenIntegersStayWithinIJSON(t *testing.T) {
 	if err := (Caveats{Ops: []Op{OpGet}, Requests: RequestCeiling{Max: MaxIJSONInteger + 1}}).Validate(); !errors.Is(err, ErrInvalidCaveats) {
 		t.Errorf("max_requests past 2^53-1: err = %v, want ErrInvalidCaveats", err)
 	}
-	issuer, _, _, _ := buildIssuerVerifier(t)
-	_, _, err := issuer.issue(context.Background(), IssueRequest{
-		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
-		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, Generation: MaxIJSONInteger + 1,
-	})
-	if !errors.Is(err, ErrInvalidRequest) {
-		t.Errorf("a generation past 2^53-1: err = %v, want ErrInvalidRequest", err)
-	}
-
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	v := verifierFor(t, pub, VerifierConfig{})
 	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV4}
@@ -51,7 +42,7 @@ func TestTokenIntegersStayWithinIJSON(t *testing.T) {
 
 // RFC 7493 §2.1: a token's JSON is UTF-8; one that is not is refused.
 func TestTokenClaimsAreUTF8(t *testing.T) {
-	if _, err := parseClaims(jose.B64([]byte("{\"iss\":\"\xff\"}"))); err == nil {
+	if _, err := parseClaims(jose.B64([]byte("{\"iss\":\"\xff\"}")), TokenTypeV5); err == nil {
 		t.Error("claims with invalid UTF-8 were read")
 	}
 }

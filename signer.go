@@ -1,6 +1,7 @@
 package limes
 
 import (
+	"cmp"
 	"context"
 	"crypto"
 	"crypto/ed25519"
@@ -9,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -32,6 +34,8 @@ type Signer struct {
 	// against it before a token carries it. An array, so Signer stays
 	// comparable.
 	pub [ed25519.PublicKeySize]byte
+	// typ is the token type it mints.
+	typ TokenType
 }
 
 // SignerConfig configures a Signer.
@@ -43,6 +47,10 @@ type SignerConfig struct {
 	// a crypto.Signer over a key held elsewhere — one that also implements
 	// ContextSigner is given the request's context. Required.
 	Key crypto.Signer
+	// TokenType is the format the signer mints. Empty: TokenTypeV4, which
+	// every verifier of this module accepts. Set TokenTypeV5 once every
+	// verifier of the tokens accepts it (VerifierConfig.AcceptTokenTypes).
+	TokenType TokenType
 }
 
 // ContextSigner is a crypto.Signer that signs under a context, as a key
@@ -71,7 +79,11 @@ func NewSigner(cfg SignerConfig) (*Signer, error) {
 	if !ok || len(pub) != ed25519.PublicKeySize {
 		return nil, fmt.Errorf("limes: SignerConfig.Key must be Ed25519, not %T", cfg.Key.Public())
 	}
-	return &Signer{keyID: cfg.KeyID, key: cfg.Key, pub: [ed25519.PublicKeySize]byte(pub)}, nil
+	typ := cmp.Or(cfg.TokenType, TokenTypeV4)
+	if !slices.Contains(tokenTypes, typ) {
+		return nil, fmt.Errorf("limes: SignerConfig.TokenType %q is not one of %q", typ, tokenTypes)
+	}
+	return &Signer{keyID: cfg.KeyID, key: cfg.Key, pub: [ed25519.PublicKeySize]byte(pub), typ: typ}, nil
 }
 
 // jwtHeader is the protected header. We use compact serialization:
@@ -97,10 +109,9 @@ type jwtClaims struct {
 	ID        string   `json:"jti"`
 
 	// Capability claims.
-	Principal  wirePrincipal `json:"limes_principal"`
-	Caveats    wireCaveats   `json:"limes_caveats"`
-	ParentID   string        `json:"limes_parent_id,omitempty"`
-	Generation int64         `json:"limes_gen,omitzero"`
+	Principal wirePrincipal `json:"limes_principal"`
+	Caveats   wireCaveats   `json:"limes_caveats"`
+	ParentID  string        `json:"limes_parent_id,omitempty"`
 
 	// Confirmation is RFC 7800's `cnf`, omitted for an unbound capability.
 	Confirmation *cnfClaim `json:"cnf,omitzero"`
@@ -108,6 +119,14 @@ type jwtClaims struct {
 	// BiscuitRoot roots the signature chain of the Biscuit this token is
 	// sealed in; omitted on every ordinary token.
 	BiscuitRoot string `json:"limes_bsk,omitempty"`
+}
+
+// jwtClaimsV4 is a TokenTypeV4 payload: v5's claims and limes_gen, a counter
+// v4 carried for audit and nothing read. It is read, range-checked and
+// dropped; nothing writes it.
+type jwtClaimsV4 struct {
+	jwtClaims  `json:",inline"`
+	Generation int64 `json:"limes_gen,omitzero"`
 }
 
 // MaxIJSONInteger is the largest integer a token carries: 2^53 − 1, the
@@ -133,7 +152,7 @@ func checkIJSONIntegers(c jwtClaims) error {
 		n    int64
 	}{
 		{claimIssuedAt, c.IssuedAt}, {claimNotBefore, c.NotBefore}, {claimExpiresAt, c.ExpiresAt},
-		{claimGeneration, c.Generation}, {claimMaxRequests, c.Caveats.MaxRequests},
+		{claimMaxRequests, c.Caveats.MaxRequests},
 	} {
 		if claim.n < -MaxIJSONInteger || claim.n > MaxIJSONInteger {
 			return fmt.Errorf("limes: %s %d is outside the I-JSON integer range (RFC 7493)", claim.name, claim.n)
@@ -185,7 +204,7 @@ func (s *Signer) sign(ctx context.Context, c Capability) (string, error) {
 		return "", errors.New("limes: ExpiresAt must be after IssuedAt")
 	}
 
-	header := jwtHeader{Alg: jose.AlgEd25519, Kid: s.keyID, Typ: string(TokenTypeV4)}
+	header := jwtHeader{Alg: jose.AlgEd25519, Kid: s.keyID, Typ: string(s.typ)}
 	claims := claimsOf(c)
 	// Nothing is signed that the verifier would refuse to read.
 	if err := checkIJSONIntegers(claims); err != nil {
@@ -230,24 +249,30 @@ func (s *Signer) sign(ctx context.Context, c Capability) (string, error) {
 	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig), nil
 }
 
-// TokenTypeV4 is the JWT "typ" header of the current token format, which
-// every Signer of this module mints. The verifier requires a type it
-// accepts (VerifierConfig.AcceptTokenTypes), so a different kind of EdDSA
+// A token's JWT "typ" header names its format. The verifier requires a type
+// it accepts (VerifierConfig.AcceptTokenTypes), so a different kind of EdDSA
 // JWT signed by the same key — an ID token, another product's token —
-// cannot be presented as a capability. It names the format's version: a
-// token of another version is refused before a claim of it is read under
-// the wrong schema.
+// cannot be presented as a capability, and it reads each type's claims
+// under that type's schema.
 //
 // v4 spells every ceiling out: an absent max_requests or max_budget is a
 // ceiling of 0, and only unlimited_requests or unlimited_budget lifts it.
 // v3, which read an absent bound as none, is not accepted.
-const TokenTypeV4 TokenType = "limes-cap-v4+jwt" //nolint:gosec // G101: a JWT type label, not a credential
+//
+// v5 is v4 without limes_gen, and without the operations presign, tag,
+// search and embed, which a v4 token may name unnamespaced: a domain's
+// operations are its consumer's, namespaced. A Signer mints v4 unless
+// SignerConfig.TokenType says v5; a verifier accepts both.
+const (
+	TokenTypeV4 TokenType = "limes-cap-v4+jwt" //nolint:gosec // G101: a JWT type label, not a credential
+	TokenTypeV5 TokenType = "limes-cap-v5+jwt" //nolint:gosec // G101: a JWT type label, not a credential
+)
 
 // TokenType is a token format, as the JWT "typ" header names it.
 type TokenType string
 
 // tokenTypes are the token types this package has a schema for.
-var tokenTypes = []TokenType{TokenTypeV4}
+var tokenTypes = []TokenType{TokenTypeV4, TokenTypeV5}
 
 func parseHeader(seg string) (jwtHeader, error) {
 	raw, err := jose.UnB64(seg)
@@ -271,15 +296,14 @@ func parseHeader(seg string) (jwtHeader, error) {
 // becomes claims.
 func claimsOf(c Capability) jwtClaims {
 	claims := jwtClaims{
-		Issuer:     c.Issuer,
-		Subject:    c.Subject.Subject,
-		Audience:   c.Audience,
-		IssuedAt:   c.IssuedAt.Unix(),
-		ExpiresAt:  c.ExpiresAt.Unix(),
-		ID:         c.ID.String(),
-		Principal:  toWirePrincipal(c.Subject),
-		Caveats:    toWireCaveats(c.Caveats),
-		Generation: c.Generation,
+		Issuer:    c.Issuer,
+		Subject:   c.Subject.Subject,
+		Audience:  c.Audience,
+		IssuedAt:  c.IssuedAt.Unix(),
+		ExpiresAt: c.ExpiresAt.Unix(),
+		ID:        c.ID.String(),
+		Principal: toWirePrincipal(c.Subject),
+		Caveats:   toWireCaveats(c.Caveats),
 	}
 	if !c.NotBefore.IsZero() {
 		claims.NotBefore = c.NotBefore.Unix()
@@ -294,14 +318,30 @@ func claimsOf(c Capability) jwtClaims {
 	return claims
 }
 
-func parseClaims(seg string) (*Capability, error) {
+// parseClaims reads a payload under the schema of its token type typ, one
+// of tokenTypes.
+func parseClaims(seg string, typ TokenType) (*Capability, error) {
 	raw, err := jose.UnB64(seg)
 	if err != nil {
 		return nil, fmt.Errorf("limes: decode claims: %w", err)
 	}
 	var claims jwtClaims
-	if err := json.Unmarshal(raw, &claims, strictClaims); err != nil {
-		return nil, fmt.Errorf("limes: parse claims: %w", err)
+	switch typ {
+	case TokenTypeV4:
+		var v4 jwtClaimsV4
+		if err := json.Unmarshal(raw, &v4, strictClaims); err != nil {
+			return nil, fmt.Errorf("limes: parse claims: %w", err)
+		}
+		if v4.Generation < -MaxIJSONInteger || v4.Generation > MaxIJSONInteger {
+			return nil, fmt.Errorf("limes: %s %d is outside the I-JSON integer range (RFC 7493)", claimGeneration, v4.Generation)
+		}
+		claims = v4.jwtClaims
+	case TokenTypeV5:
+		if err := json.Unmarshal(raw, &claims, strictClaims); err != nil {
+			return nil, fmt.Errorf("limes: parse claims: %w", err)
+		}
+	default:
+		return nil, fmt.Errorf("limes: no claims schema for typ %q", typ)
 	}
 	if err := checkIJSONIntegers(claims); err != nil {
 		return nil, err
@@ -317,13 +357,12 @@ func parseClaims(seg string) (*Capability, error) {
 		return nil, fmt.Errorf("limes: parse jti: %w", err)
 	}
 	cap := &Capability{
-		ID:         id,
-		Issuer:     claims.Issuer,
-		Audience:   claims.Audience,
-		Caveats:    claims.Caveats.caveats(),
-		IssuedAt:   time.Unix(claims.IssuedAt, 0).UTC(),
-		ExpiresAt:  time.Unix(claims.ExpiresAt, 0).UTC(),
-		Generation: claims.Generation,
+		ID:        id,
+		Issuer:    claims.Issuer,
+		Audience:  claims.Audience,
+		Caveats:   claims.Caveats.caveats(),
+		IssuedAt:  time.Unix(claims.IssuedAt, 0).UTC(),
+		ExpiresAt: time.Unix(claims.ExpiresAt, 0).UTC(),
 	}
 	if claims.NotBefore != 0 {
 		cap.NotBefore = time.Unix(claims.NotBefore, 0).UTC()
@@ -352,10 +391,11 @@ func decodeToken(token string) (any, error) {
 	if err != nil {
 		return Capability{}, err
 	}
-	if _, err := parseHeader(parts.Header); err != nil {
+	h, err := parseHeader(parts.Header)
+	if err != nil {
 		return Capability{}, err
 	}
-	c, err := parseClaims(parts.Payload)
+	c, err := parseClaims(parts.Payload, TokenType(h.Typ))
 	if err != nil {
 		return Capability{}, err
 	}

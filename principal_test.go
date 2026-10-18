@@ -86,7 +86,7 @@ func TestVerifyRefusesAnUnknownPrincipalType(t *testing.T) {
 		ID: uuid.New(), Issuer: "limes-test",
 		Subject:  Principal{Type: "robot", TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{"data"}, Caveats: Caveats{Ops: []Op{OpGet}},
-		IssuedAt: now, NotBefore: now, ExpiresAt: now.Add(time.Minute), Generation: 1,
+		IssuedAt: now, NotBefore: now, ExpiresAt: now.Add(time.Minute),
 	})
 	if _, err := v.Verify(ctx, VerifyRequest{Token: token, Audience: "data"}); !errors.Is(err, ErrInvalidToken) {
 		t.Errorf("Verify of an unknown principal type: err = %v, want ErrInvalidToken", err)

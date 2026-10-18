@@ -14,6 +14,24 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.81.0
+
+- `Capability.Generation`, `IssueRequest.Generation` and `DefaultGeneration`
+  are gone: nothing read them. Drop the field from your requests; record a
+  rotation in your own records if you kept one.
+- `OpPresign`, `OpTag`, `OpSearch` and `OpEmbed` are gone, and
+  `Caveats.Validate` refuses their bare names: a domain's operations are the
+  consumer's. Name yours namespaced (`"index:search"`, `"model:embed"`) and
+  declare `EffectRead` for those that read. A v4 token naming a bare one
+  still verifies and is checked against that name, now with a consumer
+  operation's effect — a write unless declared — and a child delegated from
+  it cannot name it: issue such roots again under the new names.
+- New token type `TokenTypeV5`: v4 without `limes_gen` and without those
+  four operations. A verifier accepts v4 and v5 by default; a `Signer` mints
+  v4 until `SignerConfig.TokenType` is `TokenTypeV5`. Upgrade every verifier
+  first — one with `AcceptTokenTypes` set adds `TokenTypeV5` — then switch the
+  issuers.
+
 ## pgstore/v0.15.0
 
 - `UsageStore.ListTenantBudgets` under `WithTenant`, or with no scope,
