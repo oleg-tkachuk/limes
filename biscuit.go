@@ -39,7 +39,7 @@ import (
 // resources, planes and expiry they allow, a key to bind to, and request and
 // budget limits of the copy's own — which the verifier folds into a narrower
 // Capability through Narrows, exactly as a server-side delegation is checked,
-// and into Capability.Copies. Everything downstream (Caveats.Check,
+// and into the copy limits VerifiedCapability.Copies reports. Everything downstream (Caveats.Check,
 // budgets, DPoP) then sees an ordinary Capability. A block holding anything
 // outside the vocabulary — a rule, a check, another predicate — is refused:
 // a restriction the verifier cannot enforce must not pass as one it did.
@@ -134,9 +134,7 @@ func (i *Issuer) biscuit(ctx context.Context, vc VerifiedCapability) (string, er
 	if err != nil {
 		return "", fmt.Errorf("limes: biscuit root key: %w", err)
 	}
-	sealed := c
-	sealed.BiscuitRoot = base64.RawURLEncoding.EncodeToString(rootPub)
-	inner, err := i.signer.sign(ctx, sealed)
+	inner, err := i.signer.signGrant(ctx, grant{Capability: c, biscuitRoot: base64.RawURLEncoding.EncodeToString(rootPub)})
 	if err != nil {
 		return "", fmt.Errorf("limes: sign sealed token: %w", err)
 	}
@@ -251,7 +249,7 @@ func Attenuate(token string, a Attenuation) (string, error) {
 // signature chain against the root the JWT vouches for, then each
 // attenuation block folded in. That function also returns the token's
 // revocation ids, authority first, read from the chain it verified.
-func openBiscuit(token string) (string, func(parent *Capability, typ TokenType) (*Capability, [][]byte, error), error) {
+func openBiscuit(token string) (string, func(parent *grant, typ TokenType) (*grant, [][]byte, error), error) {
 	raw, container, err := decodeBiscuitContainer(token)
 	if err != nil {
 		return "", nil, err
@@ -266,8 +264,8 @@ func openBiscuit(token string) (string, func(parent *Capability, typ TokenType) 
 	}
 	// The chain is checked once the sealed token has named its root; the
 	// caller verifies that token first and hands back what it vouches for.
-	attenuate := func(parent *Capability, typ TokenType) (*Capability, [][]byte, error) {
-		root, err := jose.UnB64(parent.BiscuitRoot)
+	attenuate := func(parent *grant, typ TokenType) (*grant, [][]byte, error) {
+		root, err := jose.UnB64(parent.biscuitRoot)
 		if err != nil || len(root) != ed25519.PublicKeySize {
 			return nil, nil, fmt.Errorf("%w: sealed token names no biscuit root", ErrInvalidToken)
 		}
@@ -285,9 +283,7 @@ func openBiscuit(token string) (string, func(parent *Capability, typ TokenType) 
 		}); err != nil {
 			return nil, nil, err
 		}
-		cur := *parent
-		cur.BiscuitRoot = ""
-		cur.Copies = nil
+		cur := grant{Capability: parent.Capability}
 		for i, blk := range blocks[1:] {
 			next, err := applyAttenuation(cur, blk, ids[i+1])
 			if err != nil {
@@ -386,13 +382,13 @@ func sealedToken(authority decodedBlock) (string, error) {
 // applyAttenuation folds one block into cur, refusing anything it cannot
 // enforce and anything that would widen cur. id is the block's revocation id,
 // which keys the counters of the limits it sets.
-func applyAttenuation(cur Capability, blk decodedBlock, id []byte) (Capability, error) {
+func applyAttenuation(cur grant, blk decodedBlock, id []byte) (grant, error) {
 	f, err := readBlockFacts(blk, cur.ConfirmationJKT)
 	if err != nil {
 		return cur, err
 	}
-	next := f.narrow(cur)
-	if err := Narrows(cur, next); err != nil {
+	next := grant{Capability: f.narrow(cur.Capability), copies: cur.copies}
+	if err := Narrows(cur.Capability, next.Capability); err != nil {
 		return cur, err
 	}
 	if f.requests == nil && f.budget == nil {
@@ -407,7 +403,7 @@ func applyAttenuation(cur Capability, blk decodedBlock, id []byte) (Capability, 
 	if err := copyCeilingNarrows(cur, ceiling); err != nil {
 		return cur, err
 	}
-	next.Copies = append([]CopyCeiling{ceiling}, cur.Copies...)
+	next.copies = append([]CopyCeiling{ceiling}, cur.copies...)
 	return next, nil
 }
 
@@ -524,7 +520,7 @@ func (f blockFacts) narrow(cur Capability) Capability {
 
 // copyCeilingNarrows checks a copy's ceilings against every one already in
 // force on cur: the capability's own and each enclosing copy's.
-func copyCeilingNarrows(cur Capability, c CopyCeiling) error {
+func copyCeilingNarrows(cur grant, c CopyCeiling) error {
 	// A nil axis is one this block left alone: the copy keeps no ceiling of
 	// its own there, and the ones above it still bound it. A block sets only
 	// a bound (readBlockFacts), never an Unlimited ceiling.
@@ -535,7 +531,7 @@ func copyCeilingNarrows(cur Capability, c CopyCeiling) error {
 		if !r.Within(cur.Caveats.Requests) {
 			return fmt.Errorf("copy requests %s exceed the capability's %s", r, cur.Caveats.Requests)
 		}
-		for _, o := range cur.Copies {
+		for _, o := range cur.copies {
 			if o.Requests != nil && !r.Within(*o.Requests) {
 				return fmt.Errorf("copy requests %s exceed an enclosing copy's %s", r, o.Requests)
 			}
@@ -548,7 +544,7 @@ func copyCeilingNarrows(cur Capability, c CopyCeiling) error {
 		if !b.Within(cur.Caveats.Budget) {
 			return fmt.Errorf("copy budget %s exceeds the capability's %s", b, cur.Caveats.Budget)
 		}
-		for _, o := range cur.Copies {
+		for _, o := range cur.copies {
 			if o.Budget != nil && !b.Within(*o.Budget) {
 				return fmt.Errorf("copy budget %s exceeds an enclosing copy's %s", b, o.Budget)
 			}

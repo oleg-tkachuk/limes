@@ -122,7 +122,7 @@ func (v *Verifier) BiscuitCopy(ctx context.Context, token string) (BiscuitCopy, 
 	if err != nil {
 		return BiscuitCopy{}, err
 	}
-	return BiscuitCopy{capabilityID: c.ID, revocationID: slices.Clone(ids[len(ids)-1]), copies: cloneCopyCeilings(c.Copies)}, nil
+	return BiscuitCopy{capabilityID: c.ID, revocationID: slices.Clone(ids[len(ids)-1]), copies: cloneCopyCeilings(c.copies)}, nil
 }
 
 func init() {

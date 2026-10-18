@@ -178,6 +178,13 @@ type cnfClaim struct {
 // token is minted only through an Issuer, which records the capability
 // first, so every token can be revoked and its usage traced.
 func (s *Signer) sign(ctx context.Context, c Capability) (string, error) {
+	return s.signGrant(ctx, grant{Capability: c})
+}
+
+// signGrant is sign for a grant: a token sealed in a Biscuit names its
+// root. A grant's copies are the verifier's and never signed.
+func (s *Signer) signGrant(ctx context.Context, g grant) (string, error) {
+	c := g.Capability
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -205,7 +212,7 @@ func (s *Signer) sign(ctx context.Context, c Capability) (string, error) {
 	}
 
 	header := jwtHeader{Alg: jose.AlgEd25519, Kid: s.keyID, Typ: string(s.typ)}
-	claims := claimsOf(c, s.typ)
+	claims := claimsOf(g, s.typ)
 	// Nothing is signed that the verifier would refuse to read.
 	if err := checkIJSONIntegers(claims); err != nil {
 		return "", err
@@ -294,7 +301,8 @@ func parseHeader(seg string) (jwtHeader, error) {
 
 // claimsOf is the payload Sign writes for c: the one place a Capability
 // becomes claims.
-func claimsOf(c Capability, typ TokenType) jwtClaims {
+func claimsOf(g grant, typ TokenType) jwtClaims {
+	c := g.Capability
 	claims := jwtClaims{
 		Issuer:    c.Issuer,
 		Subject:   c.Subject.Subject,
@@ -311,7 +319,7 @@ func claimsOf(c Capability, typ TokenType) jwtClaims {
 	if c.ParentID != uuid.Nil {
 		claims.ParentID = c.ParentID.String()
 	}
-	claims.BiscuitRoot = c.BiscuitRoot
+	claims.BiscuitRoot = g.biscuitRoot
 	if c.ConfirmationJKT != "" {
 		claims.Confirmation = &cnfClaim{JKT: c.ConfirmationJKT}
 	}
@@ -320,7 +328,7 @@ func claimsOf(c Capability, typ TokenType) jwtClaims {
 
 // parseClaims reads a payload under the schema of its token type typ, one
 // of tokenTypes.
-func parseClaims(seg string, typ TokenType) (*Capability, error) {
+func parseClaims(seg string, typ TokenType) (*grant, error) {
 	raw, err := jose.UnB64(seg)
 	if err != nil {
 		return nil, fmt.Errorf("limes: decode claims: %w", err)
@@ -373,7 +381,6 @@ func parseClaims(seg string, typ TokenType) (*Capability, error) {
 	if claims.Confirmation != nil {
 		cap.ConfirmationJKT = claims.Confirmation.JKT
 	}
-	cap.BiscuitRoot = claims.BiscuitRoot
 	if claims.ParentID != "" {
 		pid, err := uuid.Parse(claims.ParentID)
 		if err != nil {
@@ -381,7 +388,7 @@ func parseClaims(seg string, typ TokenType) (*Capability, error) {
 		}
 		cap.ParentID = pid
 	}
-	return cap, nil
+	return &grant{Capability: *cap, biscuitRoot: claims.BiscuitRoot}, nil
 }
 
 func init() { link.DecodeToken = decodeToken }
@@ -401,7 +408,7 @@ func decodeToken(token string) (any, error) {
 	if err != nil {
 		return Capability{}, err
 	}
-	return *c, nil
+	return c.Capability, nil
 }
 
 func verifyParts(parts jose.Parts, pub ed25519.PublicKey) error {

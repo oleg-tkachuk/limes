@@ -224,7 +224,7 @@ flowchart TB
     claims{"claims: strict parse — no unknown or duplicate member<br/>integers within ±(2^53 − 1) · sub = principal's subject"}
     iss{"iss ∈ TrustedIssuers<br/>KeyIssuers[kid] = iss, when KeyIssuers is set"}
     tenant{"Subject.TenantID set<br/>Subject.Validate · Caveats.Validate"}
-    sealed{"no BiscuitRoot<br/>(not lifted out of a Biscuit)"}
+    sealed{"names no Biscuit root, limes_bsk<br/>(not lifted out of a Biscuit)"}
     nbf{"now + Leeway ≥ NotBefore"}
     exp{"now − Leeway < ExpiresAt"}
     aud{"Audience ∈ token's audience"}
@@ -319,15 +319,15 @@ flowchart TB
     tok(["Biscuit, audience"])
     on{"AcceptBiscuit"}
     auth{"container decodes · ≤ MaxBiscuitBlocks blocks<br/>authority block: exactly one<br/>limes_capability fact, no rules, no checks"}
-    sealed{"the sealed token: header · key · signature<br/>claims · issuer · tenant — and it carries BiscuitRoot"}
-    chain{"signature chain verifies<br/>against BiscuitRoot"}
+    sealed{"the sealed token: header · key · signature<br/>claims · issuer · tenant — and it names a root, limes_bsk"}
+    chain{"signature chain verifies<br/>against that root"}
     subgraph fold ["each attenuation block, in order"]
         direction TB
         vocab{"only limes_* facts<br/>no rules · no checks · no rebinding"}
         narrow{"Narrows(cur, next)<br/>ops · resources · planes · expiry · binding"}
         lim{"sets limes_max_requests /<br/>limes_max_budget_nanos?"}
         fit{"within the capability's limit<br/>and every enclosing copy's"}
-        copies["Capability.Copies gains a CopyCeiling<br/>{RevocationID, Requests, Budget}, innermost first<br/>an axis the block left alone stays nil"]
+        copies["VerifiedCapability.Copies gains a CopyCeiling<br/>{RevocationID, Requests, Budget}, innermost first<br/>an axis the block left alone stays nil"]
         vocab -- yes --> narrow -- yes --> lim
         lim -- yes --> fit -- yes --> copies
     end

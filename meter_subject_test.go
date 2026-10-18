@@ -21,9 +21,9 @@ func TestMeterSubjectCarriesTheVerifiedCeilings(t *testing.T) {
 		ID:      uuid.New(),
 		Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Caveats: Caveats{Requests: RequestCeiling{Max: requests}, Budget: BudgetCeiling{Max: budget}},
-		Copies:  []CopyCeiling{{RevocationID: []byte{1}, Requests: &RequestCeiling{Max: 1}, Budget: &BudgetCeiling{Max: budget}}},
 	}
-	s := asVerified(c).MeterSubject()
+	copies := []CopyCeiling{{RevocationID: []byte{1}, Requests: &RequestCeiling{Max: 1}, Budget: &BudgetCeiling{Max: budget}}}
+	s := VerifiedCapability{c: c, copies: copies}.MeterSubject()
 	if s.CapabilityID() != c.ID || s.TenantID() != c.Subject.TenantID {
 		t.Errorf("subject names %s of %s, want %s of %s", s.CapabilityID(), s.TenantID(), c.ID, c.Subject.TenantID)
 	}
@@ -33,8 +33,8 @@ func TestMeterSubjectCarriesTheVerifiedCeilings(t *testing.T) {
 	if s.UnitCode() != "" {
 		t.Errorf("unit of a capability naming none = %q, want none", s.UnitCode())
 	}
-	if !reflect.DeepEqual(s.Copies(), c.Copies) {
-		t.Errorf("copies = %+v, want %+v", s.Copies(), c.Copies)
+	if !reflect.DeepEqual(s.Copies(), copies) {
+		t.Errorf("copies = %+v, want %+v", s.Copies(), copies)
 	}
 }
 
@@ -79,9 +79,15 @@ func TestStoredMeterSubjectCarriesTheStoredCeilings(t *testing.T) {
 // Neither the capability it came from nor a caller holding its copies can
 // change a subject's ceilings afterwards.
 func TestMeterSubjectCopiesAreItsOwn(t *testing.T) {
-	c := Capability{ID: uuid.New(), Copies: []CopyCeiling{{RevocationID: []byte{1}, Requests: &RequestCeiling{Max: 1}}}}
-	s := asVerified(c).MeterSubject()
-	*c.Copies[0].Requests, c.Copies[0].RevocationID[0] = RequestCeiling{}, 0
+	copies := []CopyCeiling{{RevocationID: []byte{1}, Requests: &RequestCeiling{Max: 1}}}
+	vc := VerifiedCapability{c: Capability{ID: uuid.New()}, copies: copies}
+	s := vc.MeterSubject()
+	read := vc.Copies()
+	*read[0].Requests, read[0].RevocationID[0] = RequestCeiling{}, 0
+	if again := vc.Copies(); !ceilingIs(again[0].Requests, RequestCeiling{Max: 1}) || again[0].RevocationID[0] != 1 {
+		t.Errorf("VerifiedCapability.Copies after mutating what it returned = %+v, want its own", again)
+	}
+	*copies[0].Requests, copies[0].RevocationID[0] = RequestCeiling{}, 0
 	got := s.Copies()
 	*got[0].Requests, got[0].RevocationID[0] = RequestCeiling{}, 0
 	if again := s.Copies(); !ceilingIs(again[0].Requests, RequestCeiling{Max: 1}) || again[0].RevocationID[0] != 1 {

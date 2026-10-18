@@ -14,6 +14,14 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.83.0
+
+- `Capability.Copies` → `VerifiedCapability.Copies()`, and
+  `Capability.BiscuitRoot` is gone: both were what the verifier read from a
+  token, never part of a capability a store records or an issuer mints.
+  Read a Biscuit copy's limits from what `Verify` returned; its
+  `MeterSubject` carries them as before.
+
 ## v0.82.0
 
 - `ErrExternalRefConflict` matched `ErrInvalidRequest`, though the request

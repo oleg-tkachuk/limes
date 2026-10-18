@@ -63,7 +63,7 @@ func FuzzOpenBiscuit(f *testing.F) {
 			return
 		}
 		for _, typ := range tokenTypes {
-			_, _, _ = attenuate(&Capability{BiscuitRoot: anyRoot}, typ)
+			_, _, _ = attenuate(&grant{biscuitRoot: anyRoot}, typ)
 		}
 	})
 }
@@ -121,14 +121,14 @@ func FuzzAttenuationBlock(f *testing.F) {
 			term = n
 		}
 		blk := decodedBlock{facts: []decodedFact{{name: name, term: term}}}
-		next, err := applyAttenuation(parent, blk, []byte("block"))
+		next, err := applyAttenuation(grant{Capability: parent}, blk, []byte("block"))
 		if err != nil {
 			return
 		}
-		if err := Narrows(parent, next); err != nil {
+		if err := Narrows(parent, next.Capability); err != nil {
 			t.Fatalf("accepted %s=%v, which widens: %v", name, term, err)
 		}
-		for _, c := range next.Copies {
+		for _, c := range next.copies {
 			if c.Requests != nil && !c.Requests.Within(parent.Caveats.Requests) ||
 				c.Budget != nil && !c.Budget.Within(parent.Caveats.Budget) {
 				t.Fatalf("accepted a copy ceiling %+v past the capability's", c)

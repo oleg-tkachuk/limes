@@ -358,7 +358,7 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 	// token of the capability, which neither RevokeBiscuit of the copy
 	// reaches nor the copy's own counters bound. Its holder attenuates it
 	// instead.
-	if req.Parent.fromBiscuit || len(parent.Copies) > 0 {
+	if req.Parent.fromBiscuit || len(req.Parent.copies) > 0 {
 		return Capability{}, "", invalidRequest("parent is a Biscuit copy; attenuate it instead")
 	}
 	if parent.Issuer != i.issuerName {
