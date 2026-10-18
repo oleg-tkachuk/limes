@@ -18,6 +18,7 @@ import (
 	"github.com/oleg-tkachuk/limes/examples/internal/demo"
 	"github.com/oleg-tkachuk/limes/jwks"
 	"github.com/oleg-tkachuk/limes/memstore"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 const (
@@ -60,7 +61,7 @@ func main() {
 	demo.Must(log, err, "verifier")
 
 	tenant := uuid.New()
-	tenantBudget, err := usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
+	tenantBudget, err := usage.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{
 		TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("100.00"), UnitCode: unit},
 	})
 	demo.Must(log, err, "set the tenant's budget")
@@ -90,14 +91,14 @@ func main() {
 	subject := verified.MeterSubject()
 
 	for range requestLimit {
-		r, err := usage.Bump(ctx, limes.BumpRequest{Subject: subject})
+		r, err := usage.Bump(ctx, meter.BumpRequest{Subject: subject})
 		demo.Must(log, err, "count a request")
 		log.Info("counted a request against the capability's limit", "request", fmt.Sprintf("%d of %d", r.RequestCount, requestLimit))
 	}
-	_, err = usage.Bump(ctx, limes.BumpRequest{Subject: subject})
+	_, err = usage.Bump(ctx, meter.BumpRequest{Subject: subject})
 	demo.Refused(log, err, limes.ErrRequestLimitExceeded, "a request past the limit")
 
-	receipt, err := usage.Charge(ctx, limes.ChargeRequest{
+	receipt, err := usage.Charge(ctx, meter.ChargeRequest{
 		Subject: subject, Amount: searchCost, Op: "search", Actor: "research-agent",
 	}, nil)
 	demo.Must(log, err, "charge a search")
@@ -106,7 +107,7 @@ func main() {
 
 	// A call whose cost is known only afterwards holds an estimate first,
 	// then settles at what it cost.
-	hold, err := usage.Reserve(ctx, limes.ReserveRequest{
+	hold, err := usage.Reserve(ctx, meter.ReserveRequest{
 		Subject: subject, Amount: completionEstimate, TTL: holdTTL, Op: "completion", Actor: "research-agent",
 	})
 	demo.Must(log, err, "reserve an estimate")
@@ -114,7 +115,7 @@ func main() {
 		"reservation", hold.ID, "held", demo.Money(hold.Amount, unit), "released unless settled by", hold.ExpiresAt.UTC().Format(time.RFC3339))
 	logUsage(ctx, log, usage, c.ID)
 
-	settled, err := usage.Settle(ctx, limes.SettleRequest{
+	settled, err := usage.Settle(ctx, meter.SettleRequest{
 		Subject: subject, ReservationID: hold.ID, Amount: completionCost,
 	}, nil)
 	demo.Must(log, err, "settle at the actual cost")
@@ -122,7 +123,7 @@ func main() {
 		"actual cost", demo.Money(completionCost, unit), "spent so far", demo.Money(settled.SpentAmount, unit))
 	logUsage(ctx, log, usage, c.ID)
 
-	_, err = usage.Charge(ctx, limes.ChargeRequest{
+	_, err = usage.Charge(ctx, meter.ChargeRequest{
 		Subject: subject, Amount: limes.MustParseAmount("0.50"), Op: "search", Actor: "research-agent",
 	}, nil)
 	demo.Refused(log, err, limes.ErrBudgetExceeded, "a charge past the capability's budget")
@@ -136,7 +137,7 @@ func main() {
 }
 
 // logUsage logs what the meter holds for capability id.
-func logUsage(ctx context.Context, log *slog.Logger, usage limes.MeterReader, id uuid.UUID) {
+func logUsage(ctx context.Context, log *slog.Logger, usage meter.MeterReader, id uuid.UUID) {
 	u, err := usage.GetUsage(ctx, id)
 	if err != nil {
 		log.Info("the meter holds nothing for the capability yet", "capability", id, "error", err)
