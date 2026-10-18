@@ -944,6 +944,10 @@ A read by id that finds nothing matches `ErrNotFound`, through a sentinel of
 its own where the contract names one: `ErrChargeNotFound` (`Refund`,
 `GetCharge`, `ChargeByRef`), `ErrReservationNotFound`, `ErrUsageNotFound` (a
 capability never bumped or charged) and `ErrTenantBudgetNotFound`.
+A well-formed write that disagrees with what is on record matches
+`ErrConflict` — map the family to 409 and read again: `ErrAlreadyExists`
+(`Insert`), `ErrExternalRefConflict` (`Charge`) and
+`ErrTenantBudgetVersionMismatch` (`SetTenantBudget`).
 
 Every write and every listing takes a `…Request`, a read by id takes the id,
 every list is a `Page`, and every read names what

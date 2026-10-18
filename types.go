@@ -34,6 +34,8 @@ import (
 //	└── ErrMalformedAuthorization  the client's Authorization header (400)
 //	ErrNotFound              what the request names is not on record
 //	└── ErrChargeNotFound, ErrReservationNotFound, ErrUsageNotFound, …
+//	ErrConflict              a well-formed request disagrees with what is on record
+//	└── ErrAlreadyExists, ErrExternalRefConflict, ErrTenantBudgetVersionMismatch
 var (
 	// ErrUnauthenticated is the family of every refusal of the presented
 	// credentials, token or proof: the one errors.Is a consumer needs to

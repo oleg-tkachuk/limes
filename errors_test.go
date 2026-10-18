@@ -27,6 +27,7 @@ const (
 	famCaveat          = "CaveatViolation"
 	famRequest         = "InvalidRequest"
 	famNotFound        = "NotFound"
+	famConflict        = "Conflict"
 )
 
 var families = map[string]error{
@@ -36,6 +37,7 @@ var families = map[string]error{
 	famCaveat:          ErrCaveatViolation,
 	famRequest:         ErrInvalidRequest,
 	famNotFound:        ErrNotFound,
+	famConflict:        ErrConflict,
 }
 
 // sentinelCase is one exported sentinel: the families it matches, the Reason
@@ -81,10 +83,9 @@ var sentinelMatrix = map[string]sentinelCase{
 	"ErrTenantBudgetExceeded":   {ErrTenantBudgetExceeded, nil, ReasonTenantBudgetExceeded, http.StatusForbidden},
 	"ErrRequestLimitExceeded":   {ErrRequestLimitExceeded, nil, ReasonRequestLimitExceeded, http.StatusForbidden},
 
-	"ErrInvalidRequest":      {ErrInvalidRequest, []string{famRequest}, "", http.StatusInternalServerError},
-	"ErrInvalidCaveats":      {ErrInvalidCaveats, []string{famRequest}, "", http.StatusInternalServerError},
-	"ErrEffectConflict":      {ErrEffectConflict, []string{famRequest}, "", http.StatusInternalServerError},
-	"ErrExternalRefConflict": {ErrExternalRefConflict, []string{famRequest}, "", http.StatusInternalServerError},
+	"ErrInvalidRequest": {ErrInvalidRequest, []string{famRequest}, "", http.StatusInternalServerError},
+	"ErrInvalidCaveats": {ErrInvalidCaveats, []string{famRequest}, "", http.StatusInternalServerError},
+	"ErrEffectConflict": {ErrEffectConflict, []string{famRequest}, "", http.StatusInternalServerError},
 
 	"ErrNotFound":             {ErrNotFound, []string{famNotFound}, "", http.StatusInternalServerError},
 	"ErrChargeNotFound":       {ErrChargeNotFound, []string{famNotFound}, "", http.StatusInternalServerError},
@@ -92,7 +93,9 @@ var sentinelMatrix = map[string]sentinelCase{
 	"ErrUsageNotFound":        {ErrUsageNotFound, []string{famNotFound}, "", http.StatusInternalServerError},
 	"ErrTenantBudgetNotFound": {ErrTenantBudgetNotFound, []string{famNotFound}, "", http.StatusInternalServerError},
 
-	"ErrAlreadyExists":               {ErrAlreadyExists, nil, "", http.StatusInternalServerError},
+	"ErrConflict":                    {ErrConflict, []string{famConflict}, "", http.StatusInternalServerError},
+	"ErrAlreadyExists":               {ErrAlreadyExists, []string{famConflict}, "", http.StatusInternalServerError},
+	"ErrExternalRefConflict":         {ErrExternalRefConflict, []string{famConflict}, "", http.StatusInternalServerError},
 	"ErrInvalidAmount":               {ErrInvalidAmount, []string{famRequest}, "", http.StatusInternalServerError},
 	"ErrCounterOverflow":             {ErrCounterOverflow, nil, "", http.StatusInternalServerError},
 	"ErrDelegationTooWide":           {ErrDelegationTooWide, nil, "", http.StatusInternalServerError},
@@ -103,7 +106,7 @@ var sentinelMatrix = map[string]sentinelCase{
 	"ErrProofUnsupported":            {ErrProofUnsupported, nil, "", http.StatusInternalServerError},
 	"ErrCursorRepeated":              {ErrCursorRepeated, nil, "", http.StatusInternalServerError},
 	"ErrRefundExceedsCharge":         {ErrRefundExceedsCharge, nil, "", http.StatusInternalServerError},
-	"ErrTenantBudgetVersionMismatch": {ErrTenantBudgetVersionMismatch, nil, "", http.StatusInternalServerError},
+	"ErrTenantBudgetVersionMismatch": {ErrTenantBudgetVersionMismatch, []string{famConflict}, "", http.StatusInternalServerError},
 }
 
 // Each sentinel matches exactly the families the matrix names, has the
