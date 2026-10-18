@@ -971,7 +971,8 @@ capability never bumped or charged) and `ErrTenantBudgetNotFound`.
 A well-formed write that disagrees with what is on record matches
 `ErrConflict` — map the family to 409 and read again: `ErrAlreadyExists`
 (`Insert`), `ErrExternalRefConflict` (`Charge`) and
-`ErrTenantBudgetVersionMismatch` (`SetTenantBudget`).
+`ErrTenantBudgetVersionMismatch` (`SetTenantBudget`). `ErrorResponse`
+answers the family 409 too.
 
 Every write and every listing takes a `…Request`, a read by id takes the id,
 every list is a `Page`, and every read names what
