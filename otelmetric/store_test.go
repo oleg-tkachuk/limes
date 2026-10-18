@@ -15,6 +15,7 @@ import (
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/internal/link"
 	"github.com/oleg-tkachuk/limes/memstore"
+	"github.com/oleg-tkachuk/limes/meter"
 	"github.com/oleg-tkachuk/limes/otelmetric"
 )
 
@@ -31,13 +32,13 @@ const (
 )
 
 // meteredStore is a metered memstore whose measurements reader collects.
-func meteredStore(t *testing.T, opts ...otelmetric.Option) (limes.UsageStore[struct{}], *sdkmetric.ManualReader, *memstore.Store) {
+func meteredStore(t *testing.T, opts ...otelmetric.Option) (meter.UsageStore[struct{}], *sdkmetric.ManualReader, *memstore.Store) {
 	t.Helper()
 	return meteredStoreAt(t, time.Now, opts...)
 }
 
 // meteredStoreAt is meteredStore with its records read against now.
-func meteredStoreAt(t *testing.T, now func() time.Time, opts ...otelmetric.Option) (limes.UsageStore[struct{}], *sdkmetric.ManualReader, *memstore.Store) {
+func meteredStoreAt(t *testing.T, now func() time.Time, opts ...otelmetric.Option) (meter.UsageStore[struct{}], *sdkmetric.ManualReader, *memstore.Store) {
 	t.Helper()
 	reader := sdkmetric.NewManualReader()
 	opts = append(opts, otelmetric.WithMeterProvider(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))))
@@ -106,17 +107,17 @@ func TestMeteringCountsNoReplay(t *testing.T) {
 	usage, reader, records := meteredStore(t)
 	ctx := context.Background()
 	tenant, capID := uuid.New(), uuid.New()
-	charge := limes.ChargeRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant}), Amount: limes.MustParseAmount("1"), ExternalRef: "call-1"}
+	charge := meter.ChargeRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant}), Amount: limes.MustParseAmount("1"), ExternalRef: "call-1"}
 	for range 2 {
 		if _, err := usage.Charge(ctx, charge, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
-	res, err := usage.Reserve(ctx, limes.ReserveRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant}), Amount: limes.MustParseAmount("1")})
+	res, err := usage.Reserve(ctx, meter.ReserveRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant}), Amount: limes.MustParseAmount("1")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	settle := limes.SettleRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant}), ReservationID: res.ID, Amount: limes.MustParseAmount("1")}
+	settle := meter.SettleRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant}), ReservationID: res.ID, Amount: limes.MustParseAmount("1")}
 	for range 2 {
 		if _, err := usage.Settle(ctx, settle, nil); err != nil {
 			t.Fatal(err)
@@ -134,8 +135,8 @@ func TestMeteringLabelsAmountsAndOutcomes(t *testing.T) {
 	usage, reader, records := meteredStore(t)
 	ctx := context.Background()
 	tenant, capID := uuid.New(), uuid.New()
-	eur := func(s string) limes.ChargeRequest {
-		return limes.ChargeRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("5")), unit: "EUR"}), Amount: limes.MustParseAmount(s)}
+	eur := func(s string) meter.ChargeRequest {
+		return meter.ChargeRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("5")), unit: "EUR"}), Amount: limes.MustParseAmount(s)}
 	}
 	r, err := usage.Charge(ctx, eur("2"), nil)
 	if err != nil {
@@ -145,7 +146,7 @@ func TestMeteringLabelsAmountsAndOutcomes(t *testing.T) {
 		t.Fatalf("charge past the ceiling: %v", err)
 	}
 	over := eur("9")
-	over.Overrun = limes.OverrunPolicyRecord
+	over.Overrun = meter.OverrunPolicyRecord
 	if _, err := usage.Charge(ctx, over, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -153,18 +154,18 @@ func TestMeteringLabelsAmountsAndOutcomes(t *testing.T) {
 	failing := eur("0.1")
 	// A capability with room, so the callback runs.
 	failing.Subject = recordedSubject(ctx, t, records, subjectSpec{capID: uuid.New(), tenant: tenant, budget: budgetOf(limes.MustParseAmount("5")), unit: "EUR"})
-	if _, err := usage.Charge(ctx, failing, func(context.Context, limes.Charged[struct{}]) error { return boom }); !errors.Is(err, boom) {
+	if _, err := usage.Charge(ctx, failing, func(context.Context, meter.Charged[struct{}]) error { return boom }); !errors.Is(err, boom) {
 		t.Fatal(err)
 	}
 	held := recordedSubject(ctx, t, records, subjectSpec{capID: uuid.New(), tenant: tenant, unit: "EUR"})
-	res, err := usage.Reserve(ctx, limes.ReserveRequest{Subject: held, Amount: limes.MustParseAmount("1")})
+	res, err := usage.Reserve(ctx, meter.ReserveRequest{Subject: held, Amount: limes.MustParseAmount("1")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := usage.Settle(ctx, limes.SettleRequest{Subject: held, ReservationID: res.ID, Amount: limes.MustParseAmount("1")}, nil); err != nil {
+	if _, err := usage.Settle(ctx, meter.SettleRequest{Subject: held, ReservationID: res.ID, Amount: limes.MustParseAmount("1")}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := usage.Refund(ctx, limes.RefundRequest{ChargeID: r.ChargeID, Remaining: true}); err != nil {
+	if _, err := usage.Refund(ctx, meter.RefundRequest{ChargeID: r.ChargeID, Remaining: true}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -195,7 +196,7 @@ func TestMeteringTenantAttributeIsOptIn(t *testing.T) {
 	usage, reader, records := meteredStore(t, otelmetric.WithTenantAttribute())
 	ctx := context.Background()
 	tenant := uuid.New()
-	if _, err := usage.Bump(ctx, limes.BumpRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: uuid.New(), tenant: tenant, requests: requestsOf(1)})}); err != nil {
+	if _, err := usage.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: uuid.New(), tenant: tenant, requests: requestsOf(1)})}); err != nil {
 		t.Fatal(err)
 	}
 	ps := points(t, reader, metricRequestBumps)
@@ -207,7 +208,7 @@ func TestMeteringTenantAttributeIsOptIn(t *testing.T) {
 // hiddenCopies is a UsageStore that reads no copy counters: memstore's
 // usage store with CopyUsage out of reach.
 type hiddenCopies struct {
-	limes.UsageStore[struct{}]
+	meter.UsageStore[struct{}]
 }
 
 // The decorator reads copy counters exactly when the store it wraps does.
@@ -220,7 +221,7 @@ func TestInstrumentKeepsCopyUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wrap := func(u limes.UsageStore[struct{}]) limes.UsageStore[struct{}] {
+	wrap := func(u meter.UsageStore[struct{}]) meter.UsageStore[struct{}] {
 		t.Helper()
 		m, err := otelmetric.Instrument(u)
 		if err != nil {
@@ -228,10 +229,10 @@ func TestInstrumentKeepsCopyUsage(t *testing.T) {
 		}
 		return m
 	}
-	if _, ok := wrap(inner).(limes.CopyUsageReader); !ok {
+	if _, ok := wrap(inner).(meter.CopyUsageReader); !ok {
 		t.Error("wrapping a store that reads copy counters hid them")
 	}
-	if _, ok := wrap(hiddenCopies{inner}).(limes.CopyUsageReader); ok {
+	if _, ok := wrap(hiddenCopies{inner}).(meter.CopyUsageReader); ok {
 		t.Error("wrapping a store that reads no copy counters claimed to read them")
 	}
 
@@ -240,10 +241,10 @@ func TestInstrumentKeepsCopyUsage(t *testing.T) {
 	copyID := []byte("copy-1")
 	copies := []limes.CopyCeiling{{RevocationID: copyID, Requests: &limes.RequestCeiling{Max: 10}}}
 	capID := uuid.New()
-	if _, err := usage.Bump(ctx, limes.BumpRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: uuid.New(), copies: copies})}); err != nil {
+	if _, err := usage.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: uuid.New(), copies: copies})}); err != nil {
 		t.Fatal(err)
 	}
-	res, err := usage.(limes.CopyUsageReader).CopyUsage(ctx, limes.CopyUsageRequest{CapabilityID: capID, RevocationIDs: [][]byte{copyID}})
+	res, err := usage.(meter.CopyUsageReader).CopyUsage(ctx, meter.CopyUsageRequest{CapabilityID: capID, RevocationIDs: [][]byte{copyID}})
 	got := res.Copies
 	if err != nil || len(got) != 1 || got[0].RequestCount != 1 {
 		t.Errorf("CopyUsage through the decorator = %+v, %v; want one request counted", got, err)
@@ -286,35 +287,35 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 		}
 	}
 
-	if _, err := usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("10"), UnitCode: defaultTestUnit}}); err != nil {
+	if _, err := usage.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("10"), UnitCode: defaultTestUnit}}); err != nil {
 		t.Fatal(err)
 	}
 	measured("Bump", metricRequestBumps, func() error {
-		_, err := usage.Bump(ctx, limes.BumpRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant})})
+		_, err := usage.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant})})
 		return err
 	})
-	var receipt limes.ChargeReceipt
+	var receipt meter.ChargeReceipt
 	measured("Charge", metricChargeAmount, func() (err error) {
-		receipt, err = usage.Charge(ctx, limes.ChargeRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant}), Amount: limes.MustParseAmount("2"), ExternalRef: "r"}, nil)
+		receipt, err = usage.Charge(ctx, meter.ChargeRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant}), Amount: limes.MustParseAmount("2"), ExternalRef: "r"}, nil)
 		return err
 	})
 	measured("Refund", metricRefundAmount, func() error {
-		_, err := usage.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("1")})
+		_, err := usage.Refund(ctx, meter.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("1")})
 		return err
 	})
-	var res limes.Reservation
+	var res meter.Reservation
 	measured("Reserve", metricReservations, func() (err error) {
-		res, err = usage.Reserve(ctx, limes.ReserveRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant}), Amount: limes.MustParseAmount("1")})
+		res, err = usage.Reserve(ctx, meter.ReserveRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant}), Amount: limes.MustParseAmount("1")})
 		return err
 	})
 
 	if got, err := usage.GetReservation(ctx, res.ID); err != nil || got.ID != res.ID {
 		t.Errorf("GetReservation = %+v, %v", got, err)
 	}
-	if got, err := usage.ListReservations(ctx, limes.ListReservationsRequest{CapabilityID: capID}); err != nil || len(got.Items) != 1 || got.Items[0].ID != res.ID {
+	if got, err := usage.ListReservations(ctx, meter.ListReservationsRequest{CapabilityID: capID}); err != nil || len(got.Items) != 1 || got.Items[0].ID != res.ID {
 		t.Errorf("ListReservations = %+v, %v", got, err)
 	}
-	if err := usage.Release(ctx, limes.ReleaseRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant}), ReservationID: res.ID}); err != nil {
+	if err := usage.Release(ctx, meter.ReleaseRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant}), ReservationID: res.ID}); err != nil {
 		t.Errorf("Release: %v", err)
 	}
 	if u, err := usage.GetUsage(ctx, capID); err != nil || u.RequestCount != 1 || u.SpentAmount != limes.NanosPerUnit {
@@ -323,19 +324,19 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 	if b, err := usage.GetTenantBudget(ctx, tenant); err != nil || b.SpentAmount != limes.NanosPerUnit {
 		t.Errorf("GetTenantBudget = %+v, %v", b, err)
 	}
-	if lPage, err := usage.ListTenantBudgets(ctx, limes.ListTenantBudgetsRequest{}); err != nil || len(lPage.Items) != 1 {
+	if lPage, err := usage.ListTenantBudgets(ctx, meter.ListTenantBudgetsRequest{}); err != nil || len(lPage.Items) != 1 {
 		t.Errorf("ListTenantBudgets = %+v, %v", lPage, err)
 	}
 	if c, err := usage.GetCharge(ctx, receipt.ChargeID); err != nil || c.RefundedAmount != limes.NanosPerUnit {
 		t.Errorf("GetCharge = %+v, %v", c, err)
 	}
-	if c, err := usage.ChargeByRef(ctx, limes.ChargeByRefRequest{CapabilityID: capID, ExternalRef: "r"}); err != nil || c.ID != receipt.ChargeID {
+	if c, err := usage.ChargeByRef(ctx, meter.ChargeByRefRequest{CapabilityID: capID, ExternalRef: "r"}); err != nil || c.ID != receipt.ChargeID {
 		t.Errorf("ChargeByRef = %+v, %v", c, err)
 	}
-	if n, err := usage.ReleaseExpired(ctx, limes.ReleaseExpiredRequest{}); err != nil || n.Released != 0 {
+	if n, err := usage.ReleaseExpired(ctx, meter.ReleaseExpiredRequest{}); err != nil || n.Released != 0 {
 		t.Errorf("ReleaseExpired = %+v, %v", n, err)
 	}
-	if err := usage.DeleteUsage(ctx, limes.DeleteUsageRequest{CapabilityID: uuid.New()}); err != nil {
+	if err := usage.DeleteUsage(ctx, meter.DeleteUsageRequest{CapabilityID: uuid.New()}); err != nil {
 		t.Errorf("Delete of a row never written: %v", err)
 	}
 	later.Store(true)
@@ -343,7 +344,7 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The capability is no longer on record, so its usage is an orphan.
-	if n, err := usage.PurgeOrphans(ctx, limes.PurgeOrphansRequest{}); err != nil || n.Purged != 1 {
+	if n, err := usage.PurgeOrphans(ctx, meter.PurgeOrphansRequest{}); err != nil || n.Purged != 1 {
 		t.Errorf("PurgeOrphans = %+v, %v; want the one orphan", n, err)
 	}
 	if _, err := usage.GetUsage(ctx, capID); err == nil {
@@ -357,11 +358,11 @@ func TestMeteringLabelsARefusedSettleWithItsTenant(t *testing.T) {
 	usage, reader, records := meteredStore(t, otelmetric.WithTenantAttribute())
 	ctx := context.Background()
 	tenant, capID := uuid.New(), uuid.New()
-	res, err := usage.Reserve(ctx, limes.ReserveRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("2"))}), Amount: limes.MustParseAmount("1")})
+	res, err := usage.Reserve(ctx, meter.ReserveRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("2"))}), Amount: limes.MustParseAmount("1")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := usage.Settle(ctx, limes.SettleRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("2"))}), ReservationID: res.ID, Amount: limes.MustParseAmount("5")}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
+	if _, err := usage.Settle(ctx, meter.SettleRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("2"))}), ReservationID: res.ID, Amount: limes.MustParseAmount("5")}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Fatalf("settle past the ceiling: %v", err)
 	}
 	if got := valueAt(points(t, reader, metricChargeDecisions), attrTenant, tenant.String()); got != 1 {
@@ -451,7 +452,7 @@ func TestMeteringAttributesARefusedSettle(t *testing.T) {
 	ctx := context.Background()
 	tenant := uuid.New()
 	subject := recordedSubject(ctx, t, records, subjectSpec{capID: uuid.New(), tenant: tenant})
-	if _, err := usage.Settle(ctx, limes.SettleRequest{Subject: subject, ReservationID: uuid.New(), Amount: limes.MustParseAmount("1")}, nil); !errors.Is(err, limes.ErrReservationNotFound) {
+	if _, err := usage.Settle(ctx, meter.SettleRequest{Subject: subject, ReservationID: uuid.New(), Amount: limes.MustParseAmount("1")}, nil); !errors.Is(err, meter.ErrReservationNotFound) {
 		t.Fatalf("settling no reservation: err = %v, want ErrReservationNotFound", err)
 	}
 	decisions := points(t, reader, metricChargeDecisions)

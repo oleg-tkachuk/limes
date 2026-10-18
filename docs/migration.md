@@ -14,6 +14,12 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## otelmetric/v0.2.0
+
+- `Instrument` takes and returns a `meter.UsageStore`, which moved out of
+  `limes` in v0.100.0, and forwards the optional interfaces of the package
+  `meter`.
+
 ## v0.100.0
 
 - Metering moved out of `limes` into the package

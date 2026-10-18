@@ -11,9 +11,10 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
-// OpenTelemetry instruments of a metered limes.UsageStore (Instrument).
+// OpenTelemetry instruments of a metered meter.UsageStore (Instrument).
 //
 // Cardinality:
 //
@@ -49,7 +50,7 @@ const (
 const (
 	// outcomeAllowed — every ceiling admitted it.
 	outcomeAllowed = "allowed"
-	// outcomeOverrun — committed past a ceiling under limes.OverrunPolicyRecord.
+	// outcomeOverrun — committed past a ceiling under meter.OverrunPolicyRecord.
 	outcomeOverrun = "overrun"
 	// outcomeCapExceeded — a capability's, an ancestor's or a copy's ceiling
 	// refused it. The refusals carry their Reason's name, so a dashboard and
@@ -113,7 +114,7 @@ func newMeteringInstruments(cfg meteringConfig) (*meteringInstruments, error) {
 	in.refundAmount, errs[3] = meter.Float64Counter(metricRefundAmount,
 		metric.WithDescription("Amount refunded from recorded charges, by unit_code."))
 	in.reservations, errs[4] = meter.Int64Counter(metricReservations,
-		metric.WithDescription("limes.Reservation attempts, by outcome."))
+		metric.WithDescription("meter.Reservation attempts, by outcome."))
 	in.currentSpend, errs[5] = meter.Float64Histogram(metricCurrentSpend,
 		metric.WithDescription("A capability's spend after each charge, by unit_code."))
 	if err := errors.Join(errs[:]...); err != nil {
@@ -132,7 +133,7 @@ func (in *meteringInstruments) attrs(tenantID uuid.UUID, kv ...attribute.KeyValu
 }
 
 // chargeOutcome classifies a charge or settle that was not replayed.
-func chargeOutcome(receipt limes.ChargeReceipt, err error) string {
+func chargeOutcome(receipt meter.ChargeReceipt, err error) string {
 	switch {
 	case err == nil && receipt.Overrun:
 		return outcomeOverrun
@@ -151,7 +152,7 @@ func chargeOutcome(receipt limes.ChargeReceipt, err error) string {
 // its amount and the capability's spend after it, in the receipt's unit. The
 // instruments count float64, the metrics contract; amounts are exact up to
 // that boundary.
-func (in *meteringInstruments) recordCharge(ctx context.Context, tenantID uuid.UUID, amount limes.Nanos, receipt limes.ChargeReceipt, err error) {
+func (in *meteringInstruments) recordCharge(ctx context.Context, tenantID uuid.UUID, amount limes.Nanos, receipt meter.ChargeReceipt, err error) {
 	outcome := chargeOutcome(receipt, err)
 	in.chargeDecisions.Add(ctx, 1, in.attrs(tenantID, attribute.String(attrOutcome, outcome)))
 	if err != nil {
@@ -175,12 +176,12 @@ func (in *meteringInstruments) recordBump(ctx context.Context, tenantID uuid.UUI
 }
 
 // recordRefund counts one committed refund, in the charge's unit.
-func (in *meteringInstruments) recordRefund(ctx context.Context, r limes.RefundReceipt) {
+func (in *meteringInstruments) recordRefund(ctx context.Context, r meter.RefundReceipt) {
 	in.refundAmount.Add(ctx, r.Amount.Float64(), in.attrs(r.TenantID, attribute.String(attrUnitCode, r.UnitCode)))
 }
 
 // recordReservation counts one Reserve attempt.
 func (in *meteringInstruments) recordReservation(ctx context.Context, tenantID uuid.UUID, err error) {
-	outcome := chargeOutcome(limes.ChargeReceipt{}, err)
+	outcome := chargeOutcome(meter.ChargeReceipt{}, err)
 	in.reservations.Add(ctx, 1, in.attrs(tenantID, attribute.String(attrOutcome, outcome)))
 }
