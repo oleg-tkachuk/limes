@@ -38,7 +38,7 @@ func (s *UsageStore) Refund(ctx context.Context, req limes.RefundRequest) (limes
 			now:      s.clock(),
 			tenantID: e.TenantID,
 			existing: append([]uuid.UUID{e.CapabilityID}, e.ancestors...),
-			copies:   e.copies,
+			copies:   e.copies, copiesCapID: e.CapabilityID,
 		})
 		if err != nil {
 			return err
@@ -251,7 +251,7 @@ func (s *UsageStore) GetUsage(ctx context.Context, capID uuid.UUID) (limes.Usage
 
 const sqlCopyUsage = `
 SELECT revocation_id, capability_id, request_count, spent, reserved
-FROM limes.copy_usage WHERE revocation_id = ANY ($1)`
+FROM limes.copy_usage WHERE capability_id = $1 AND revocation_id = ANY ($2)`
 
 // CopyUsage returns the counters of each copy named that has been used.
 func (s *UsageStore) CopyUsage(ctx context.Context, req limes.CopyUsageRequest) (limes.CopyUsageResult, error) {
@@ -260,7 +260,7 @@ func (s *UsageStore) CopyUsage(ctx context.Context, req limes.CopyUsageRequest) 
 	}
 	var out []limes.CopyUsage
 	err := s.inReadTx(ctx, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, sqlCopyUsage, req.RevocationIDs)
+		rows, err := tx.Query(ctx, sqlCopyUsage, req.CapabilityID, req.RevocationIDs)
 		if err != nil {
 			return err
 		}

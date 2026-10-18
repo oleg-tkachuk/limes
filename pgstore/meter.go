@@ -198,20 +198,20 @@ WHERE u.capability_id = v.capability_id`
 	sqlCreateCopies = `
 INSERT INTO limes.copy_usage (revocation_id, capability_id, tenant_id)
 SELECT id, $2, $3 FROM unnest($1::bytea[]) AS id ORDER BY id
-ON CONFLICT (revocation_id) DO NOTHING`
+ON CONFLICT (capability_id, revocation_id) DO NOTHING`
 
 	sqlLockCopies = `
 SELECT revocation_id, capability_id, request_count, spent, reserved
-FROM limes.copy_usage WHERE revocation_id = ANY ($1)
+FROM limes.copy_usage WHERE capability_id = $1 AND revocation_id = ANY ($2)
 ORDER BY revocation_id
 FOR UPDATE`
 
 	sqlWriteCopies = `
 UPDATE limes.copy_usage c
-SET capability_id = v.capability_id, request_count = v.request_count, spent = v.spent, reserved = v.reserved
+SET request_count = v.request_count, spent = v.spent, reserved = v.reserved
 FROM unnest($1::bytea[], $2::uuid[], $3::bigint[], $4::bigint[], $5::bigint[])
     AS v (revocation_id, capability_id, request_count, spent, reserved)
-WHERE c.revocation_id = v.revocation_id`
+WHERE c.capability_id = v.capability_id AND c.revocation_id = v.revocation_id`
 
 	// sqlCreateTenant starts a tenant's aggregate with no ceiling: it counts
 	// from the first charge or hold, so a ceiling set later is measured
@@ -319,7 +319,7 @@ func lock(ctx context.Context, tx pgx.Tx, l lockRequest) (*counters, error) {
 				return nil, err
 			}
 		}
-		rows, err := tx.Query(ctx, sqlLockCopies, l.copies)
+		rows, err := tx.Query(ctx, sqlLockCopies, l.copiesCapID, l.copies)
 		if err != nil {
 			return nil, err
 		}
@@ -351,8 +351,9 @@ type lockRequest struct {
 	// usageTenant; existing are locked only if they have counters.
 	created, existing []uuid.UUID
 	usageTenant       uuid.UUID
-	// copies are revocation ids, created under copiesCapID when
-	// createCopies.
+	// copies are revocation ids of copies of copiesCapID, created first when
+	// createCopies. A copy is counted under its capability: a block's
+	// revocation id alone can turn up on another capability's chain.
 	copies       [][]byte
 	createCopies bool
 	copiesCapID  uuid.UUID

@@ -25,6 +25,13 @@ API, and this file stops growing.
   `IsBiscuitRevoked` matching an id under any capability, and drops only the
   purged or erased capability's own: metertest and storetest check it.
 
+## pgstore/v0.17.0
+
+- Migration `008_copy_key_by_capability.sql` keys `limes.copy_usage` on
+  `(capability_id, revocation_id)` and `limes.biscuit_revocations` on
+  `(revocation_id, capability_id)`; run `Migrate` before deploying.
+  `Store.GetBiscuitRevocation` takes a `limes.BiscuitCopy`.
+
 ## v0.92.0
 
 - `InsertRequest.Validate` refuses a capability with no `ExpiresAt` as
