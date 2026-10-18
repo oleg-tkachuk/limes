@@ -265,7 +265,7 @@ func Example_proofOfPossession() {
 	fmt.Println(errors.Is(err, dpop.ErrRequired))
 
 	// The client signs a fresh proof per request.
-	proof, _ := dpop.Sign(ctx, agentKey, dpop.ProofRequest{Method: method, URL: url, Token: token, IssuedAt: time.Now()})
+	proof, _ := dpop.Sign(ctx, agentKey, dpop.SignRequest{Method: method, URL: url, Token: token, IssuedAt: time.Now()})
 	req := limes.VerifyRequest{
 		Token: token, Audience: exampleAudience,
 		DPoP: dpop.Proof{JWT: proof, Method: method, URL: url},
