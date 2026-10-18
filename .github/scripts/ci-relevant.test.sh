@@ -22,6 +22,9 @@ check() { # name, want, changed paths
 check "no change" false ""
 check "the README" false "README.md"
 check "a document" false "docs/diagrams.md"
+# Only documentation's own file types are inert under docs/: a Go file there
+# builds like any other.
+check "Go source under docs" true "docs/example.go"
 check "the licence" false "LICENSE"
 check "documentation and code" true "$(printf 'README.md\nverifier.go')"
 check "Go source" true "verifier.go"

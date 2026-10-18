@@ -24,8 +24,10 @@ readonly RENOVATE=app/renovate
 # The paths that decide what CI runs: the workflows and their scripts, the
 # tasks CI calls, the linter's configuration, the pinned tools, and the root
 # go.mod, whose go and toolchain lines pick the Go every job sets up, a
-# workspace, which overrides every module's requirements in each job that
-# runs go, Task's own settings, and Renovate's, which decide what Renovate
+# workspace at any depth, which overrides every module's requirements in each
+# job that runs go from there down, a vendor directory at any depth, which
+# replaces the source a module builds, Task's own settings, and Renovate's,
+# which decide what Renovate
 # merges into main with no person reading it. A pull
 # request runs the workflows and tasks of its own head, so one that changes
 # them can make "All checks passed" pass without the checks behind it: its
@@ -43,6 +45,9 @@ readonly CI_DEFINITION=(
     'tools/*'
     'go.mod'
     'go.work*'
+    '*/go.work*'
+    'vendor/*'
+    '*/vendor/*'
     'renovate.json*'
     '.renovaterc*'
 )

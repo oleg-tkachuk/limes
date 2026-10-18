@@ -14,7 +14,6 @@ set -euo pipefail
 
 INERT=(
     '*.md'
-    'docs/*'
     'LICENSE'
     'NOTICE'
     '.gitignore'
