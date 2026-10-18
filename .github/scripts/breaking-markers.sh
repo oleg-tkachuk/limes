@@ -94,15 +94,25 @@ module_commits() {
 
 # marks_breaking reports whether a commit in the range <from>..<to> that
 # touches the module marks itself breaking, and is one its release counts.
+#
+# The commits are read in full before any is looked at: a failure reading
+# them — the release analyzer not loading, say — ends the check, which fails,
+# rather than reading as a range with no marker in it. Callers test this in
+# an `if`, where `set -e` does not apply, so the failure exits the script.
 marks_breaking() {
-    local hash message
+    local commits hash message
+    if ! commits="$(module_commits "$1" "$2")"; then
+        echo "!!! could not read the commits of $MODULE_NAME in $1..$2" >&2
+        exit 1
+    fi
     while IFS= read -r hash; do
+        [ -n "$hash" ] || continue
         message="$(git log -1 --format=%B "$hash")"
         if grep -qiE "$SUBJECT_MARK" <<<"$(head -n 1 <<<"$message")" ||
             grep -qiE "$FOOTER_MARK" <<<"$(tail -n +2 <<<"$message")"; then
             return 0
         fi
-    done < <(module_commits "$1" "$2")
+    done <<<"$commits"
     return 1
 }
 

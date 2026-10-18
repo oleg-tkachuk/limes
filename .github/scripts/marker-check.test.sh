@@ -147,6 +147,29 @@ git -C "$nested" checkout --quiet main
 git -C "$nested" tag "$NESTED/v1.0.0"
 check_module "a nested marker on its stable line" fail "$NESTED" "$NESTED/README.md" "feat($NESTED)!: change"
 MIGRATION=1 check_module "a root marker beside the nested stable line" pass limes README.md "feat!: change"
+# The release analyzer failing to run is no range without a marker: the
+# check fails rather than passing a marker it never read. A node in front of
+# the real one fails module-commits.cjs alone.
+broken="$scratch/broken-node"
+mkdir -p "$broken"
+real_node="$(command -v node)"
+cat >"$broken/node" <<NODE
+#!/usr/bin/env bash
+for arg in "\$@"; do
+    case "\$arg" in *module-commits.cjs) exit 3 ;; esac
+done
+exec "$real_node" "\$@"
+NODE
+chmod +x "$broken/node"
+git -C "$nested" checkout --quiet -B case main
+printf 'x\n' >>"$nested/README.md"
+git -C "$nested" commit --quiet -am "feat!: change"
+if (cd "$nested" && PATH="$broken:$PATH" "$script" main case limes >/dev/null 2>&1); then
+    printf 'FAIL a marker check whose analyzer could not run passed\n'
+    failures=$((failures + 1))
+fi
+git -C "$nested" checkout --quiet main
+
 if (cd "$nested" && "$script" main main no-such-module >/dev/null 2>&1); then
     printf 'FAIL a module the table does not hold was checked\n'
     failures=$((failures + 1))
