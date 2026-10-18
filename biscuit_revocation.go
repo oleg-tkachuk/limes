@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -131,12 +133,12 @@ func init() {
 
 // CachedBiscuitRevocationChecker caches IsBiscuitRevoked answers per
 // revocation id, under the same TTL, bound and sharing of concurrent misses
-// as CachedRevocationChecker. A token is revoked when any of its ids is, so
-// each id is asked about on its own: the ids a token shares with the copies
-// it was attenuated from stay cached, and a fresh attenuation — which anyone
-// holding a copy can make offline — costs one upstream lookup, for its new
-// block, rather than one for the whole token. A token none of whose ids is
-// cached costs one lookup per block.
+// as CachedRevocationChecker. A token is revoked when any of its ids is: the
+// ids a token shares with the copies it was attenuated from stay cached, and
+// the ones the cache does not hold are asked about together, in one upstream
+// lookup. A fresh attenuation — which anyone holding a copy can make offline
+// — so costs one lookup for its new block, and a token of blocks the cache
+// has never seen one lookup in all, not one per block.
 //
 // A revoked id's cached "live" answer lasts until the TTL, as in
 // CachedRevocationChecker; Clear drops every entry at once.
@@ -169,20 +171,57 @@ func NewCachedBiscuitRevocationChecker(cfg BiscuitRevocationCacheConfig) (*Cache
 	return &CachedBiscuitRevocationChecker{upstream: cfg.Upstream, cache: newTTLCache[string](c)}, nil
 }
 
-// IsBiscuitRevoked answers for each id in turn — a fresh cached answer, or
-// one upstream lookup shared by every concurrent caller asking about that
-// id — and stops at the first revoked. An upstream error is returned and
-// never cached.
+// IsBiscuitRevoked answers from the cache for each id that has a fresh
+// answer, and asks upstream about all the others in one lookup, shared by
+// every concurrent caller asking about the same ones. A "live" answer is then
+// cached for each of them; a "revoked" one for that set alone, as upstream
+// does not say which id it is. An upstream error is returned and never
+// cached.
 func (c *CachedBiscuitRevocationChecker) IsBiscuitRevoked(ctx context.Context, revocationIDs [][]byte) (bool, error) {
-	for _, id := range revocationIDs {
-		revoked, err := c.cache.get(ctx, string(id), func(ctx context.Context) (bool, error) {
-			return c.upstream.IsBiscuitRevoked(ctx, [][]byte{id})
-		})
-		if err != nil || revoked {
-			return revoked, err
-		}
+	keys := make([]string, len(revocationIDs))
+	for i, id := range revocationIDs {
+		keys[i] = idKey(id)
 	}
-	return false, nil
+	revoked, missing, epoch := c.cache.cached(keys)
+	if revoked || len(missing) == 0 {
+		return revoked, nil
+	}
+	ids := make([][]byte, len(missing))
+	for i, k := range missing {
+		ids[i] = []byte(k[len(idKeyPrefix):])
+	}
+	key := missing[0]
+	if len(missing) > 1 {
+		key = setKey(ids)
+	}
+	revoked, err := c.cache.get(ctx, key, func(ctx context.Context) (bool, error) {
+		return c.upstream.IsBiscuitRevoked(ctx, ids)
+	})
+	if err == nil && !revoked && len(missing) > 1 {
+		c.cache.seedLive(missing, epoch)
+	}
+	return revoked, err
+}
+
+// The cache holds one revocation id under idKeyPrefix and a set of them,
+// asked about together, under setKeyPrefix, each id of a set preceded by its
+// length: no id's key spells a set's, and no two sets spell one key.
+const (
+	idKeyPrefix  = "i"
+	setKeyPrefix = "s"
+)
+
+func idKey(id []byte) string { return idKeyPrefix + string(id) }
+
+func setKey(ids [][]byte) string {
+	var b strings.Builder
+	b.WriteString(setKeyPrefix)
+	for _, id := range ids {
+		b.WriteString(strconv.Itoa(len(id)))
+		b.WriteByte(':')
+		b.Write(id)
+	}
+	return b.String()
 }
 
 // Clear drops every entry; wire it to the same revocation notification as
