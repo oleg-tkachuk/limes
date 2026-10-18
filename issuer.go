@@ -377,6 +377,11 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 	if a := req.Subject.Agent; a != nil && a.ParentRunID != uuid.Nil && a.ParentRunID != parentRun {
 		return Capability{}, "", invalidRequest("Subject.Agent.ParentRunID %s is not the parent's RunID %s", a.ParentRunID, parentRun)
 	}
+	// A child run is another run than the one it was delegated from: the
+	// same id would make the run its own parent in an audit's run graph.
+	if a := req.Subject.Agent; a != nil && parentRun != uuid.Nil && a.RunID == parentRun {
+		return Capability{}, "", invalidRequest("Subject.Agent.RunID %s is the parent's own run", a.RunID)
+	}
 	if len(req.Audience) == 0 {
 		req.Audience = append([]string(nil), parent.Audience...)
 	}
