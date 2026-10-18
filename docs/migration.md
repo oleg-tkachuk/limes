@@ -14,6 +14,13 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.82.0
+
+- `ErrExternalRefConflict` matched `ErrInvalidRequest`, though the request
+  was well formed → it matches the new `ErrConflict`, as `ErrAlreadyExists`
+  and `ErrTenantBudgetVersionMismatch` now do. A caller mapping
+  `ErrInvalidRequest` to 400 maps `ErrConflict` to 409.
+
 ## v0.81.0
 
 - `Capability.Generation`, `IssueRequest.Generation` and `DefaultGeneration`

@@ -820,17 +820,18 @@ var (
 	// ErrTenantBudgetVersionMismatch — SetTenantBudget's OCC guard refused the
 	// write: the stored resource_version is not the one the caller read, so
 	// someone else changed the cap in between. The caller re-reads and decides,
-	// rather than silently overwriting a change it never saw.
-	ErrTenantBudgetVersionMismatch = errors.New("limes: tenant budget resource_version mismatch")
+	// rather than silently overwriting a change it never saw. Matches
+	// ErrConflict.
+	ErrTenantBudgetVersionMismatch error = &familyError{"limes: tenant budget resource_version mismatch", ErrConflict}
 )
 
 // ErrExternalRefConflict — Charge named an ExternalRef its capability already
 // charged under, for a different amount, unit or tenant, or under other
 // Biscuit copies. One reference names one cost; replaying the first receipt
 // would report the second as booked. The error names the reference, never
-// the charge it names.
-// Matches ErrInvalidRequest.
-var ErrExternalRefConflict error = &familyError{"limes: external ref already names a different charge", ErrInvalidRequest}
+// the charge it names. Matches ErrConflict: the request is well formed, and
+// would have charged had the reference been free.
+var ErrExternalRefConflict error = &familyError{"limes: external ref already names a different charge", ErrConflict}
 
 // Validate reports whether p is an OverrunPolicy this package defines.
 // Implementations call it before touching state, so an unknown policy is never

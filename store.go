@@ -161,8 +161,17 @@ type Revocation struct {
 	_        noCompare
 }
 
-// ErrAlreadyExists is Store.Insert given an id already on record.
-var ErrAlreadyExists = errors.New("limes: already exists")
+// ErrConflict is the family of a request that is well formed but disagrees
+// with what is already on record: an id taken, a name already given to
+// another cost, a version someone else moved. Nothing was done; the caller
+// reads again and decides. It matches no ErrInvalidRequest — the request
+// would have succeeded against other state — and a caller maps the whole
+// family to its "conflict" (HTTP 409) without listing it.
+var ErrConflict = errors.New("limes: conflict")
+
+// ErrAlreadyExists is Store.Insert given an id already on record. It
+// matches ErrConflict.
+var ErrAlreadyExists error = &familyError{"limes: already exists", ErrConflict}
 
 // Page sizes of a list: Limit 0 means DefaultListLimit, anything above
 // MaxListLimit is clamped to it, and a negative Limit is the request's
