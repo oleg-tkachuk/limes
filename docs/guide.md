@@ -594,7 +594,8 @@ receipt, err := usage.Charge(ctx, limes.ChargeRequest{
 ```
 
 A settle is idempotent on its reservation in the same way: settling one twice
-returns the first charge. A repeat is answered even once the capability's
+for the same amount returns the first charge, and for another amount is
+`ErrSettleConflict`. A repeat is answered even once the capability's
 record is purged. A new charge is not: the `Meter` refuses a capability not on
 record with `ErrNotFound`, since no ancestor's ceiling could be read — so keep
 records (`PurgeRequest.ExpiredFor`) as long as costs may still arrive. `ChargeByRef` reads a named charge back, so a

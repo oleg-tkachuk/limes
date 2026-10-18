@@ -150,8 +150,11 @@ type Meter[TX any] interface {
 	// charged anyway and the receipt reports it.
 	//
 	// Settle is idempotent on the reservation: settling one already
-	// settled moves nothing, does not run onCharged, and returns the
-	// receipt of the charge that settled it, with Replayed set. An unknown,
+	// settled for the same Amount moves nothing, does not run onCharged, and
+	// returns the receipt of the charge that settled it, with Replayed set.
+	// Settling it again for another Amount returns ErrSettleConflict and
+	// moves nothing: the reservation names one cost, and replaying its
+	// receipt would report the second as booked. An unknown,
 	// released or expired reservation returns ErrReservationNotFound, and so
 	// does the zero id, which names none — never a direct charge. So does a
 	// reservation made by another capability or tenant, or under other Biscuit copies
@@ -835,6 +838,12 @@ var (
 // the charge it names. Matches ErrConflict: the request is well formed, and
 // would have charged had the reference been free.
 var ErrExternalRefConflict error = &familyError{"limes: external ref already names a different charge", ErrConflict}
+
+// ErrSettleConflict — Settle named a reservation already settled, for a
+// different amount. One reservation names one cost; replaying the first
+// receipt would report the second as booked. Matches ErrConflict, as
+// ErrExternalRefConflict does.
+var ErrSettleConflict error = &familyError{"limes: reservation already settled for a different amount", ErrConflict}
 
 // Validate reports whether p is an OverrunPolicy this package defines.
 // Implementations call it before touching state, so an unknown policy is never

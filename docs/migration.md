@@ -20,6 +20,13 @@ API, and this file stops growing.
   `OpShare`, as `ErrOpNotAllowed`, as `Delegate` does: a Biscuit form is
   handed on offline. Grant `OpShare` to a capability you mint a Biscuit for.
 
+## v0.98.0
+
+- `Settle` of a reservation already settled for another amount returns
+  `ErrSettleConflict` (an `ErrConflict`, answered 409) instead of the first
+  receipt; the same amount is still a replay. A `UsageStore` of your own
+  does the same: metertest checks it.
+
 ## v0.95.0
 
 - `Reserve` refuses a capability whose record has already expired as
