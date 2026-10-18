@@ -29,11 +29,18 @@ case "$1 $2" in
         ;;
     "pr view") printf '%s\n' "${FAKE_QUEUED:-false}" ;;
     "pr merge") ;;
+    "api repos/"*/permission)
+        login="${2%/permission}"
+        login="${login##*/}"
+        jq -e --arg l "$login" 'has($l)' <<<"$FAKE_PERMISSIONS" >/dev/null || { echo "HTTP 404: Not Found" >&2; exit 1; }
+        jq -r --arg l "$login" '.[$l]' <<<"$FAKE_PERMISSIONS"
+        ;;
     *) echo "unexpected gh $*" >&2; exit 2 ;;
 esac
 GH
 chmod +x "$work/gh"
 export PATH="$work:$PATH" CALLS="$work/calls" REPO=oleg-tkachuk/limes PR=7 GH_TOKEN=token ACTION=opened
+export AUTHOR=someone BASE=main FAKE_PERMISSIONS='{"someone": "write", "keeper": "admin", "reader": "read"}'
 export GH_RETRY_DELAY_SECONDS=0
 
 failures=0
@@ -70,6 +77,22 @@ check "the module definition" false "go.mod"
 # queues on purpose.
 check "a nested module's definition" true "$(printf 'pgstore/go.mod\npgstore/go.sum')"
 check "the module's checksums" true "go.sum"
+
+# Queued only for an author who can push here, into main: anyone may open a
+# pull request from a branch already here, and into any branch.
+whom() { # name, author, base, want queued (true/false)
+    : >"$CALLS"
+    AUTHOR="$2" BASE="$3" FAKE_FILES="verifier.go" "$script" >/dev/null || { fail "$1: the script failed"; return; }
+    if [ "$4" = true ] && ! queued; then fail "$1: not queued"; fi
+    if [ "$4" = false ] && queued; then fail "$1: queued"; fi
+}
+
+whom "an author with write" someone main true
+whom "an author with admin" keeper main true
+whom "an author who can only read" reader main false
+whom "an author the API does not know" stranger main false
+whom "an app as author" app/somebot main false
+whom "a pull request into another branch" someone release/v1 false
 
 push() { # name, FAKE_QUEUED, want dequeued (true/false), changed paths
     : >"$CALLS"

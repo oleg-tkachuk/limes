@@ -2,7 +2,7 @@
 # queue-auto-merge.sh — queue a pull request to merge once it is green, unless
 # it changes what CI checks.
 #
-# Usage: GH_TOKEN=… REPO=owner/name PR=<number> ACTION=<event action> queue-auto-merge.sh
+# Usage: GH_TOKEN=… REPO=owner/name PR=<number> ACTION=<event action> AUTHOR=<login> BASE=<branch> queue-auto-merge.sh
 #
 # A pull request runs the workflows and tasks in its own head, so one that
 # changes them can make "All checks passed" pass without the checks behind it:
@@ -18,6 +18,11 @@
 # changes CI_DEFINITION takes it off the queue: the gate read its files once,
 # and a later push would otherwise merge unread under the earlier verdict.
 #
+# A same-repository head is not always its author's: anyone may open a pull
+# request from a branch already here, into any branch. Only a pull request
+# into BASE_BRANCH whose author can push here (AUTHOR, BASE; merge-policy.sh)
+# is queued, so the token never merges for someone who could not have.
+#
 # Without GH_TOKEN it warns and does nothing: a merge made with the workflow's
 # own GITHUB_TOKEN would start no CI on main (auto-merge.yaml).
 
@@ -25,6 +30,8 @@ set -euo pipefail
 
 # shellcheck source=.github/scripts/gh-retry.sh
 source "$(dirname "${BASH_SOURCE[0]}")/gh-retry.sh"
+# shellcheck source=.github/scripts/merge-policy.sh
+source "$(dirname "${BASH_SOURCE[0]}")/merge-policy.sh"
 
 # The paths that decide what CI runs: the workflows and their scripts, the
 # tasks CI calls, the linter's configuration, the pinned tools, and the root
@@ -62,6 +69,8 @@ fi
 : "${REPO:?REPO names the repository, owner/name}"
 : "${PR:?PR names the pull request, by number}"
 : "${ACTION:?ACTION names the pull_request_target action}"
+: "${AUTHOR:?AUTHOR names the author of the pull request, by login}"
+: "${BASE:?BASE names the branch the pull request merges into}"
 
 # dequeue takes the pull request off the merge queue when it is on it.
 dequeue() {
@@ -93,6 +102,14 @@ while IFS= read -r path; do
 done <<<"$changed"
 
 if [ "$ACTION" = "$SYNCHRONIZE" ]; then
+    exit 0
+fi
+if [ "$BASE" != "$BASE_BRANCH" ]; then
+    echo "::notice::#$PR merges into $BASE, not $BASE_BRANCH; left for a person to merge"
+    exit 0
+fi
+if ! can_push "$AUTHOR"; then
+    echo "::notice::#$PR is by $AUTHOR, who cannot push here; left for a person to merge"
     exit 0
 fi
 gh_retry pr merge "$PR" --repo "$REPO" --auto --merge

@@ -28,17 +28,15 @@ set -euo pipefail
 
 # shellcheck source=.github/scripts/gh-retry.sh
 source "$(dirname "${BASH_SOURCE[0]}")/gh-retry.sh"
+# shellcheck source=.github/scripts/merge-policy.sh
+source "$(dirname "${BASH_SOURCE[0]}")/merge-policy.sh"
 
-readonly BASE_BRANCH=main
 # The most pull requests one run looks at.
 readonly PR_LIMIT=200
 # How gh names Renovate as the author of a pull request.
 readonly RENOVATE=app/renovate
 # The merge state of a pull request whose branch conflicts with main.
 readonly DIRTY=DIRTY
-# The repository permissions that can push a branch, as the collaborator
-# permission API names them (maintain reads as write there).
-readonly PUSH_PERMISSIONS='^(admin|write)$'
 
 if [ -z "${GH_TOKEN:-}" ]; then
     echo "::warning::AUTOMERGE_TOKEN is not set; pull requests not rebased (see auto-merge.yaml)"
@@ -52,14 +50,6 @@ candidates="$(gh_retry pr list --repo "$REPO" --base "$BASE_BRANCH" --state open
         '.[] | select(.isDraft | not) | select(.isCrossRepository | not)
              | select(.author.login != $renovate)
              | select(.mergeStateStatus != $dirty) | "\(.number) \(.headRefOid) \(.author.login)"')"
-
-# can_push reports whether login can push to REPO. An author the API does not
-# know as a collaborator — an app, a user with no access — cannot.
-can_push() {
-    local permission
-    permission="$(gh_retry api "repos/${REPO}/collaborators/$1/permission" --jq .permission 2>/dev/null)" || return 1
-    [[ $permission =~ $PUSH_PERMISSIONS ]]
-}
 
 behind=""
 while read -r pr head author; do
