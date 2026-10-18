@@ -40,7 +40,14 @@ git mv .github/workflows/ci.yaml docs/ci.yaml
 commit moved
 moved=$(git rev-parse HEAD)
 
+git mv m.go m.md
+commit renamed
+renamed=$(git rev-parse HEAD)
+
 check "a pull request with documentation only" "relevant=false" "$(classify BASE="$base" HEAD="$docs")"
+# Renamed into an inert name, the code it was is still a change to what CI
+# checks: the old path counts.
+check "code renamed to documentation" "relevant=true" "$(classify BASE="$moved" HEAD="$renamed")"
 check "a workflow moved into docs" "relevant=true" "$(classify BASE="$workflow" HEAD="$moved")"
 check "a pull request with code" "relevant=true" "$(classify BASE="$base" HEAD="$code")"
 check "a push of documentation only" "relevant=false" "$(classify BEFORE="$base" AFTER="$docs")"
