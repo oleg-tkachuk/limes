@@ -26,7 +26,8 @@ readonly RENOVATE=app/renovate
 # go.mod, whose go and toolchain lines pick the Go every job sets up, a
 # workspace at any depth, which overrides every module's requirements in each
 # job that runs go from there down, a vendor directory at any depth, which
-# replaces the source a module builds, Task's own settings, and Renovate's,
+# replaces the source a module builds, Task's own settings and its cache of
+# remote includes and checksums (.task), and Renovate's,
 # which decide what Renovate
 # merges into main with no person reading it. A pull
 # request runs the workflows and tasks of its own head, so one that changes
@@ -41,6 +42,7 @@ readonly CI_DEFINITION=(
     '.github/*'
     '[Tt]askfile.*'
     '.taskrc*'
+    '.task/*'
     '.golangci.*'
     'tools/*'
     'go.mod'
@@ -51,6 +53,11 @@ readonly CI_DEFINITION=(
     'renovate.json*'
     '.renovaterc*'
 )
+
+# The most files GitHub's pull request files API lists: past it the rest are
+# never seen, so a pull request that reaches it is left for a person.
+# shellcheck disable=SC2034 # read by the scripts that source this one
+readonly FILES_API_CAP=3000
 
 # defines_ci reports whether path is one CI_DEFINITION names.
 defines_ci() {

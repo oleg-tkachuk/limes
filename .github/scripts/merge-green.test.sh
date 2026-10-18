@@ -106,6 +106,7 @@ check "Renovate's settings renamed away" false FAKE_FILES="$(printf 'renovate.js
 check "a Go file renamed" true FAKE_FILES="$(printf 'old.go>new.go')"
 check "a workspace in a nested module" false FAKE_FILES="pgstore/go.work"
 check "a vendor directory" false FAKE_FILES="vendor/modules.txt"
+check "Task's cache of a remote include" false FAKE_FILES=".task/remote/taskfile.yaml"
 check "a nested vendor directory" false FAKE_FILES="pgstore/vendor/modules.txt"
 # A file the files API did not list could be a CI definition.
 check "more files changed than listed" false FAKE_FILES="verifier.go" FAKE_CHANGED=2
