@@ -33,6 +33,15 @@ func MatchResource(prefix, uri string) bool {
 // dotSegmentEncoded is a "." percent-encoded, in lower case.
 const dotSegmentEncoded = "%2e"
 
+// pathParameters starts a segment's path parameters (RFC 3986 §3.3), and
+// pathParametersEncoded is it percent-encoded, in lower case. A servlet-style
+// backend drops a segment's parameters before it resolves the segment, so
+// "..;x" is a ".." to it.
+const (
+	pathParameters        = ";"
+	pathParametersEncoded = "%3b"
+)
+
 // consumerDecodes is how many times a consumer may percent-decode a resource
 // before it resolves the path: the check below looks for a dot segment in
 // the resource as given and after each of these decodings.
@@ -46,8 +55,9 @@ var segmentSeparators = strings.NewReplacer("%2f", "/", `\`, "/", "%5c", "/")
 
 // hasDotSegment reports whether s has a segment that is "." or "..",
 // counting "%2e" (any case) as a dot and every segmentSeparators entry as a
-// "/" — the segments RFC 3986 resolves away, which make a resource's text
-// name somewhere other than it reads — in s as given and after each of up to
+// "/", and reading a segment up to its path parameters ("..;x" is "..") —
+// the segments RFC 3986 resolves away, which make a resource's text name
+// somewhere other than it reads — in s as given and after each of up to
 // consumerDecodes percent-decodings, so also for a consumer that decodes
 // before it resolves, once or twice, however the second escape is spelled
 // ("%252e", "%25%32%65"). Caveats.Validate refuses a resource with one, and
@@ -55,6 +65,8 @@ var segmentSeparators = strings.NewReplacer("%2f", "/", `\`, "/", "%5c", "/")
 func hasDotSegment(s string) bool {
 	for pass := 0; ; pass++ {
 		for seg := range strings.SplitSeq(segmentSeparators.Replace(strings.ToLower(s)), "/") {
+			seg = strings.ReplaceAll(seg, pathParametersEncoded, pathParameters)
+			seg, _, _ = strings.Cut(seg, pathParameters)
 			switch strings.ReplaceAll(seg, dotSegmentEncoded, ".") {
 			case ".", "..":
 				return true
