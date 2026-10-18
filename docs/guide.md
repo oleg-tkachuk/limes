@@ -388,7 +388,14 @@ check.
 and a `CopyUsageReader` (`memstore` and `pgstore` implement one) reads what each has
 counted: `CopyUsage` takes a `CopyUsageRequest` naming a capability and up to
 `MaxCopyUsageIDs` revocation ids of its copies and returns, in a
-`CopyUsageResult`, the counters of those used; a copy never used is absent.
+`CopyUsageResult`, the counters of those used; a copy never used is absent. A holder mints copies offline, as many
+as it likes, so a store counts at most a quota of them per capability —
+`memstore.UsageStoreConfig.MaxCopiesPerCapability` or
+`pgstore.Config.MaxCopiesPerCapability`, `DefaultMaxCopiesPerCapability`
+(1 024) when unset — and refuses a request that would count one more with
+`ErrCopyLimitExceeded`, a kind of `ErrRequestLimitExceeded`. A copy already
+counted goes on being metered, and dropping the capability's usage frees its
+quota.
 A revocation id alone does not name a copy: biscuit-go signs a block without
 the signature before it, so a holder of two Biscuits can graft a block of one
 onto the other, and the same id then turns up under two capabilities. Each

@@ -47,13 +47,20 @@ type UsageStore[TX any] interface {
 //
 // A Biscuit's holder can give a copy limits of its own (CopyCeiling), which
 // arrive through the Subject of BumpRequest, ChargeRequest and ReserveRequest
-// (MeterSubject.Copies). Each is counted under its revocation id, apart from
-// its siblings, and checked
+// (MeterSubject.Copies). Each is counted under its capability and revocation
+// id, apart from its siblings, and checked
 // before the capability's ceilings; the capability's counters still take
 // every copy's requests and spend. A charge or reservation records the copies
 // it debited, so Refund, Settle, Release and ReleaseExpired return to them
 // without being handed them again. A Meter that does not count copies must
 // not be paired with a verifier that sets BiscuitConfig.MeterCopies.
+//
+// A holder mints copies offline, as many as it likes, and each one metered
+// is a counter the store keeps until the capability's usage goes. So a store
+// counts at most a quota of copies per capability — its configuration's, or
+// DefaultMaxCopiesPerCapability — and Bump, Charge and Reserve refuse a call
+// that would count one more as ErrCopyLimitExceeded, counting nothing. A copy
+// already counted goes on being metered.
 //
 // All methods are concurrency-safe. A rejected call mutates nothing, so a
 // retry after rejection is safe. Each method first refuses a request whose
@@ -735,6 +742,13 @@ type CopyUsageReader interface {
 	CopyUsage(ctx context.Context, req CopyUsageRequest) (CopyUsageResult, error)
 }
 
+// DefaultMaxCopiesPerCapability is the quota of Biscuit copies a store
+// counts per capability (Meter, "Copies of a Biscuit") when its configuration
+// names none: room for every copy of a deep delegation tree of attenuated
+// Biscuits, far short of what an unlimited request ceiling would let a holder
+// pile up.
+const DefaultMaxCopiesPerCapability = 1024
+
 // MaxCopyUsageIDs is the most revocation ids one CopyUsage reads, as a page
 // of any listing holds.
 const MaxCopyUsageIDs = MaxListLimit
@@ -806,6 +820,13 @@ var (
 	// ErrRequestLimitExceeded — the capability, a Biscuit copy or an
 	// ancestor used every request its ceiling allows; the next was blocked.
 	ErrRequestLimitExceeded = errors.New("limes: request limit exceeded")
+
+	// ErrCopyLimitExceeded — counting one more Biscuit copy of the
+	// capability would pass the store's quota of copies per capability
+	// (Meter, "Copies of a Biscuit"). The request is refused and nothing is
+	// counted. Matches ErrRequestLimitExceeded: the capability has used what
+	// it may.
+	ErrCopyLimitExceeded error = &familyError{"limes: copy limit exceeded", ErrRequestLimitExceeded}
 
 	// ErrUsageNotFound — no usage row exists for this capability.
 	// Get-only; bump/charge always inserts on first hit.

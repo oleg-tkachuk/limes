@@ -66,3 +66,10 @@ func TestStoreClockDrivesPurge(t *testing.T) {
 		t.Fatalf("purged %d once the retention passed, want 1", got.Purged)
 	}
 }
+
+// A negative quota of copies is refused rather than read as none.
+func TestNewUsageStoreRefusesANegativeCopyQuota(t *testing.T) {
+	if _, err := NewUsageStore(UsageStoreConfig[struct{}]{Records: newTestStore(), MaxCopiesPerCapability: -1}); err == nil {
+		t.Fatal("a negative MaxCopiesPerCapability was accepted")
+	}
+}
