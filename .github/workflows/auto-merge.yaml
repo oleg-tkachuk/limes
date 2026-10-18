@@ -43,6 +43,8 @@ name: Auto-merge
 on:
   pull_request_target:
     types: [opened, reopened, ready_for_review, synchronize]
+    # BASE_BRANCH in .github/scripts/merge-policy.sh.
+    branches: [main]
   push:
     branches: [main]
 
@@ -80,6 +82,8 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
           ACTION: ${{ github.event.action }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          BASE: ${{ github.event.pull_request.base.ref }}
         # .github/scripts/queue-auto-merge.sh
         run: ./.github/scripts/queue-auto-merge.sh
 
