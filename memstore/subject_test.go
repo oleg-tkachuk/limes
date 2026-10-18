@@ -108,7 +108,8 @@ func recordedSubject[TX any](ctx context.Context, t testing.TB, u *UsageStore[TX
 		Caveats: limes.Caveats{
 			Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true, UnitCode: "USD"},
 		},
-		ExpiresAt: contractExpiry,
+		// By the store's own clock, which a test may have set anywhere.
+		ExpiresAt: u.nowFn().Add(contractTTL),
 	}
 	err := u.records.Insert(ctx, limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "issuer"}})
 	if err != nil && !errors.Is(err, limes.ErrAlreadyExists) {

@@ -14,6 +14,15 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.78.0
+
+- A reservation lasted `ReserveRequest.TTL` whatever its capability did → it
+  expires when its capability's record does, if that comes sooner, and
+  `UsageHousekeeping.ReleaseExpired` also releases the holds of a revoked
+  capability or of one under a revoked ancestor. A `UsageStore` of your own
+  does both to pass `metertest`; a caller that relied on a hold outliving its
+  capability reserves again under a live one.
+
 ## v0.77.0
 
 - `Caveats.UnitCode`, `SetTenantBudgetRequest.UnitCode` and
