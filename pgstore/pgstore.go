@@ -83,6 +83,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/oleg-tkachuk/limes"
 )
 
 // schema is the PostgreSQL schema every table of the store lives in. The
@@ -142,6 +144,11 @@ type Config struct {
 	// since the store cannot tell what its policies admit; a Scope that sets
 	// the schema's own settings passes CheckSchemaScope here.
 	CheckScope func(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error
+	// MaxCopiesPerCapability is how many Biscuit copies the usage store
+	// counts for one capability (limes.Meter, "Copies of a Biscuit"). Zero:
+	// limes.DefaultMaxCopiesPerCapability; negative is refused. The record
+	// store ignores it.
+	MaxCopiesPerCapability int
 }
 
 // errNoDB is NewStore given a Config without a DB: none at all, or a nil
@@ -178,6 +185,8 @@ type conn struct {
 	// checkEvery refuses, in a call across every tenant, a scope that
 	// admits fewer.
 	checkEvery func(ctx context.Context, tx pgx.Tx) error
+	// maxCopies is Config.MaxCopiesPerCapability, its default applied.
+	maxCopies int
 }
 
 func newConn(cfg Config) (conn, error) {
@@ -186,6 +195,12 @@ func newConn(cfg Config) (conn, error) {
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
+	}
+	switch {
+	case cfg.MaxCopiesPerCapability < 0:
+		return conn{}, fmt.Errorf("pgstore: Config.MaxCopiesPerCapability %d is negative", cfg.MaxCopiesPerCapability)
+	case cfg.MaxCopiesPerCapability == 0:
+		cfg.MaxCopiesPerCapability = limes.DefaultMaxCopiesPerCapability
 	}
 	checkReadOnly, checkEvery := checkSchemaReadOnly, checkSchemaAdmitsEvery
 	if cfg.CheckScope == nil && cfg.Scope == nil {
@@ -199,6 +214,7 @@ func newConn(cfg Config) (conn, error) {
 		db: cfg.DB, now: cfg.Now, scope: cfg.Scope,
 		checkTenant: cfg.CheckTenant, checkScope: cfg.CheckScope,
 		checkReadOnly: checkReadOnly, checkEvery: checkEvery,
+		maxCopies: cfg.MaxCopiesPerCapability,
 	}, nil
 }
 

@@ -43,13 +43,17 @@ func TestMeterContractUnderAConsumersScope(t *testing.T) {
 	})
 }
 
+// contractCopyQuota is the quota of copies per capability the contract's
+// usage store is built with: above every check's own copies.
+const contractCopyQuota = 16
+
 // meterEnv is the contract's Env over stores of cfg's scope, readOnly giving the
 // context that scope reads as reading every tenant.
 func meterEnv(t *testing.T, cfg Config, readOnly func(context.Context) context.Context) metertest.Env[pgx.Tx] {
 	t.Helper()
 	fresh(t)
 	clock := newFakeClock()
-	cfg.DB, cfg.Now = app, clock.Now
+	cfg.DB, cfg.Now, cfg.MaxCopiesPerCapability = app, clock.Now, contractCopyQuota
 	records, err := NewStore(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -67,17 +71,18 @@ func meterEnv(t *testing.T, cfg Config, readOnly func(context.Context) context.C
 		t.Fatal(err)
 	}
 	return metertest.Env[pgx.Tx]{
-		Ctx:           WithTenant(t.Context(), tenant),
-		ScopesTenants: true,
-		Usage:         usage,
-		Ledger:        ledger,
-		Now:           clock.Now,
-		Tenant:        tenant,
-		NewTenant:     func() (uuid.UUID, error) { return uuid.New(), nil },
-		TenantCtx:     func(tenant uuid.UUID) context.Context { return WithTenant(t.Context(), tenant) },
-		ListCtx:       WithAllTenantsReadOnly(t.Context()),
-		ReadOnlyCtx:   readOnly(t.Context()),
-		Advance:       clock.Advance,
+		MaxCopiesPerCapability: contractCopyQuota,
+		Ctx:                    WithTenant(t.Context(), tenant),
+		ScopesTenants:          true,
+		Usage:                  usage,
+		Ledger:                 ledger,
+		Now:                    clock.Now,
+		Tenant:                 tenant,
+		NewTenant:              func() (uuid.UUID, error) { return uuid.New(), nil },
+		TenantCtx:              func(tenant uuid.UUID) context.Context { return WithTenant(t.Context(), tenant) },
+		ListCtx:                WithAllTenantsReadOnly(t.Context()),
+		ReadOnlyCtx:            readOnly(t.Context()),
+		Advance:                clock.Advance,
 		DeleteCapability: func(id uuid.UUID) error {
 			_, err := owner.Exec(context.Background(), deleteRecord, id)
 			return err
@@ -120,5 +125,12 @@ func TestMeterRefusesACounterRowOfAnotherTenant(t *testing.T) {
 	}
 	if called {
 		t.Error("onCharged ran for a charge refused over another tenant's row")
+	}
+}
+
+// A negative quota of copies is refused rather than read as none.
+func TestNewUsageStoreRefusesANegativeCopyQuota(t *testing.T) {
+	if _, err := NewUsageStore(Config{DB: app, MaxCopiesPerCapability: -1}); err == nil {
+		t.Fatal("a negative MaxCopiesPerCapability was accepted")
 	}
 }
