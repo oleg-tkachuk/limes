@@ -125,8 +125,8 @@ func ScopeFromContext(ctx context.Context, tx pgx.Tx) error {
 }
 
 // sqlScopeAdmits is whether the transaction may see tenant's rows: the role
-// is not bound by row-level security on the schema's tables — the owner, or
-// one that bypasses it — or the schema's settings admit tenant, as its
+// is not bound by row-level security on the schema's tables — a superuser,
+// or one with BYPASSRLS — or the schema's settings admit tenant, as its
 // policies read them. tenant_visible is NULL in a transaction scoped to no
 // tenant, which a policy reads as false and so does this.
 const sqlScopeAdmits = `SELECT NOT row_security_active('` + schema + `.capabilities') OR coalesce(` + schema + `.tenant_visible($1), false)`
@@ -148,7 +148,8 @@ func CheckSchemaScope(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error {
 
 // checkContextScope is the CheckScope of the default Scope: a call's
 // WithTenant or WithAllTenants decides without a round trip, and one with
-// neither is checked against the database, where an owner is not bound.
+// neither is checked against the database, where a role the policies do not
+// bind is admitted.
 func checkContextScope(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error {
 	s, ok := ctx.Value(scopeKey{}).(scope)
 	switch {
@@ -193,7 +194,7 @@ func checkSchemaAdmitsEvery(ctx context.Context, tx pgx.Tx) error {
 // checkContextAdmitsEvery is checkSchemaAdmitsEvery for the default Scope: a
 // call's WithAllTenants or WithAllTenantsReadOnly admits it without a round
 // trip, WithTenant refuses it, and one with neither is checked against the
-// database, where an owner is not bound.
+// database, where a role the policies do not bind is admitted.
 func checkContextAdmitsEvery(ctx context.Context, tx pgx.Tx) error {
 	s, ok := ctx.Value(scopeKey{}).(scope)
 	switch {

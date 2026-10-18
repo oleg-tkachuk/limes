@@ -18,8 +18,10 @@
 //	usage, err := pgstore.NewUsageStore(pgstore.Config{DB: pool})
 //
 // CheckSchema returns ErrSchemaMismatch while the schema is not the version
-// this package queries, for a readiness check; ReadSchemaVersion reports both
-// versions and needs only the SELECT that Migrate grants a runtime role.
+// this package queries, and ErrRuntimeRole when the pool is a role the
+// policies do not hold — a superuser, one with BYPASSRLS, or the schema's
+// owner — for a readiness check; ReadSchemaVersion reports both versions and
+// needs only the SELECT that Migrate grants a runtime role.
 //
 // Every call runs in one transaction on one connection — but for the two
 // revocation checks, each a single statement (see Tenants) — and every time it
@@ -30,8 +32,8 @@
 // # Tenants
 //
 // Every table keeps its rows' tenant, and the schema's row-level security
-// binds a role that does not own the tables to the tenant a call is scoped
-// to: pass WithTenant(ctx, tenant) to a call for one tenant,
+// binds every role — the tables' owner too — to the tenant a call is scoped
+// to, short of a superuser or a role with BYPASSRLS: pass WithTenant(ctx, tenant) to a call for one tenant,
 // WithAllTenants(ctx) to housekeeping (Purge, ReleaseExpired, PurgeOrphans),
 // and WithAllTenantsReadOnly(ctx) to a read across tenants, such as
 // ListTenantBudgets: its policies admit reads only, and a call that writes
@@ -40,9 +42,11 @@
 // no row and writes none. IsRevoked and IsBiscuitRevoked see every tenant whatever the scope:
 // the verifier asks them before it knows the token's tenant, on every
 // request, so each is one statement calling a function of the schema that
-// runs as the tables' owner — one round trip, no transaction. The owner of
-// the tables, which runs Migrate, is not bound; connect as another role for
-// the policies to hold. Config.CheckTenant lets a consumer that keeps its own
+// runs as the tables' owner and scopes itself to every tenant, read only,
+// for its own query — one round trip, no transaction. Migrate runs as the
+// owner, scoped to every tenant for its run; serve as a role that owns
+// nothing, which CheckSchema checks, so that no call can turn the policies
+// off. Config.CheckTenant lets a consumer that keeps its own
 // tenants refuse one it does not hold.
 //
 // A call whose request names its tenant — Insert, ListByPrincipal, Bump,
