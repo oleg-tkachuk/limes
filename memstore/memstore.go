@@ -238,11 +238,6 @@ func (s *Store) Insert(_ context.Context, req limes.InsertRequest) error {
 		if c.ExpiresAt.After(parent.ExpiresAt) {
 			return fmt.Errorf("%w: expires %s, after its parent %s", limes.ErrDelegationTooWide, c.ExpiresAt, parent.ExpiresAt)
 		}
-		// No expiry outlives every expiry: Purge would drop the parent and
-		// keep the child, whose lineage IsRevoked then cannot walk.
-		if c.ExpiresAt.IsZero() && !parent.ExpiresAt.IsZero() {
-			return fmt.Errorf("%w: never expires, under a parent expiring %s", limes.ErrDelegationTooWide, parent.ExpiresAt)
-		}
 		if c.Subject.TenantID != parent.Subject.TenantID {
 			return fmt.Errorf("%w: tenant %s, not its parent's %s", limes.ErrDelegationTooWide, c.Subject.TenantID, parent.Subject.TenantID)
 		}
@@ -443,7 +438,7 @@ func (s *Store) Purge(_ context.Context, req limes.PurgeRequest) (limes.PurgeRes
 	cutoff := s.nowFn().Add(-req.Retention())
 	var due []limes.Capability
 	for _, c := range s.caps {
-		if !c.ExpiresAt.IsZero() && c.ExpiresAt.Before(cutoff) {
+		if c.ExpiresAt.Before(cutoff) {
 			due = append(due, c)
 		}
 	}
@@ -488,7 +483,7 @@ func (s *Store) EraseTenantRecords(_ context.Context, req limes.EraseTenantReque
 		}
 		// A child expires no later than its parent, so the records due
 		// hold each one's descendants: none is left without its parent.
-		if c.ExpiresAt.IsZero() || !c.ExpiresAt.Before(cutoff) {
+		if !c.ExpiresAt.Before(cutoff) {
 			out.Kept++
 			continue
 		}

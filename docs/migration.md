@@ -14,6 +14,14 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.92.0
+
+- `InsertRequest.Validate` refuses a capability with no `ExpiresAt` as
+  `ErrInvalidRequest`, a child under any parent included: no verifier
+  accepts one and `Purge` never removes it. A `Store` of your own calls
+  `Validate` to pass storetest, which no longer expects such a record kept
+  by `EraseTenantRecords` or counted by a census.
+
 ## v0.91.0
 
 - `TokenTypeV4` is gone: a verifier accepts `limes-cap-v5+jwt` alone, and a

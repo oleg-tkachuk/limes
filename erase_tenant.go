@@ -16,7 +16,7 @@ type TenantRecordEraser interface {
 	// revocation entry and its Biscuit copies' — and no other: an id not on
 	// record is not revoked, so a record removed while its token may still
 	// verify would let that token through again. Purge takes the rest as
-	// it expires; a capability with no expiry stays on record, revoked. It
+	// it expires. It
 	// changes no other tenant's records, and a second call revokes and
 	// removes nothing the first left.
 	EraseTenantRecords(ctx context.Context, req EraseTenantRequest) (EraseTenantResult, error)
