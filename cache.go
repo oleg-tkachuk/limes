@@ -101,7 +101,8 @@ func newCacheConfig(ttl time.Duration, maxEntries int, now func() time.Time) (ca
 // every concurrent caller asking about the same id. An upstream error is
 // returned to all of them and is never cached.
 func (c *RevocationCache) IsRevoked(ctx context.Context, id uuid.UUID) (bool, error) {
-	return c.cache.get(ctx, id, func(ctx context.Context) (bool, error) { return c.upstream.IsRevoked(ctx, id) })
+	revoked, _, err := c.cache.get(ctx, id, func(ctx context.Context) (bool, error) { return c.upstream.IsRevoked(ctx, id) })
+	return revoked, err
 }
 
 // Clear drops every entry. A consumer that learns of a revocation from
@@ -126,9 +127,12 @@ type ttlCache[K comparable] struct {
 	entries  map[K]cacheEntry
 	inflight map[K]*lookupCall
 	// order holds the entries in the order they were cached, which every
-	// entry sharing one TTL makes the order they expire in: one place per
-	// entry, since a key is cached again only once its place has expired
-	// and been dropped.
+	// entry sharing one TTL makes the order they expire in, but for an id
+	// seeded from a set's answer, which expires with that answer: sweeping
+	// stops at the first place not yet expired, so such an id is dropped a
+	// little late, and never served past its expiry. One place per entry,
+	// since a key is cached again only once its place has expired and been
+	// dropped.
 	order []queued[K]
 	// epoch counts clears. A lookup that started before one may
 	// have read the state it invalidated, so its answer is not cached.
@@ -150,6 +154,9 @@ type lookupCall struct {
 	done    chan struct{}
 	revoked bool
 	err     error
+	// expires is when the answer stops being fresh: a TTL from when the
+	// lookup started, no later than the entry finish caches.
+	expires time.Time
 }
 
 // errLookupAbandoned is what callers sharing a lookup receive when it ended
@@ -161,12 +168,13 @@ func newTTLCache[K comparable](cfg cacheConfig) *ttlCache[K] {
 }
 
 // get serves a fresh entry for key, or runs lookup once for every
-// concurrent caller missing it. An error is returned and never cached.
-func (c *ttlCache[K]) get(ctx context.Context, key K, lookup func(context.Context) (bool, error)) (bool, error) {
+// concurrent caller missing it, with when the answer stops being fresh. An
+// error is returned and never cached.
+func (c *ttlCache[K]) get(ctx context.Context, key K, lookup func(context.Context) (bool, error)) (bool, time.Time, error) {
 	c.mu.Lock()
 	if e, ok := c.entries[key]; ok && e.expires.After(c.cfg.now()) {
 		c.mu.Unlock()
-		return e.revoked, nil
+		return e.revoked, e.expires, nil
 	}
 	if call, ok := c.inflight[key]; ok {
 		c.mu.Unlock()
@@ -179,12 +187,12 @@ func (c *ttlCache[K]) get(ctx context.Context, key K, lookup func(context.Contex
 			if call.err != nil && isContextErr(call.err) && ctx.Err() == nil {
 				return c.get(ctx, key, lookup)
 			}
-			return call.revoked, call.err
+			return call.revoked, call.expires, call.err
 		case <-ctx.Done():
-			return false, ctx.Err()
+			return false, time.Time{}, ctx.Err()
 		}
 	}
-	call := &lookupCall{done: make(chan struct{}), err: errLookupAbandoned}
+	call := &lookupCall{done: make(chan struct{}), err: errLookupAbandoned, expires: c.cfg.now().Add(c.cfg.ttl)}
 	c.inflight[key] = call
 	epoch := c.epoch
 	c.mu.Unlock()
@@ -193,7 +201,7 @@ func (c *ttlCache[K]) get(ctx context.Context, key K, lookup func(context.Contex
 	// the key.
 	defer c.finish(key, call, epoch)
 	call.revoked, call.err = lookup(ctx)
-	return call.revoked, call.err
+	return call.revoked, call.expires, call.err
 }
 
 // cached reads the fresh answers keys have: whether any of them is revoked,
@@ -214,16 +222,19 @@ func (c *ttlCache[K]) cached(keys []K) (revoked bool, missing []K, epoch uint64)
 	return false, missing, c.epoch
 }
 
-// seedLive caches keys as not revoked, as a lookup of them all that started
-// in epoch answered, unless a clear has happened since; a key that has a
-// fresh answer or a lookup of its own in flight keeps that.
-func (c *ttlCache[K]) seedLive(keys []K, epoch uint64) {
+// seedLive caches keys as not revoked until expires, as an answer about them
+// all, read in epoch and fresh until then, said; nothing when a clear has
+// happened since or the answer is no longer fresh. Seeded with a TTL of
+// their own, keys would outlive an answer served from the cache near its
+// end. A key that has a fresh answer or a lookup of its own in flight keeps
+// that.
+func (c *ttlCache[K]) seedLive(keys []K, epoch uint64, expires time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.epoch != epoch {
+	now := c.cfg.now()
+	if c.epoch != epoch || !expires.After(now) {
 		return
 	}
-	now := c.cfg.now()
 	for _, k := range keys {
 		if e, ok := c.entries[k]; ok && e.expires.After(now) {
 			continue
@@ -232,7 +243,6 @@ func (c *ttlCache[K]) seedLive(keys []K, epoch uint64) {
 			continue
 		}
 		c.makeRoomLocked()
-		expires := now.Add(c.cfg.ttl)
 		c.entries[k] = cacheEntry{expires: expires}
 		c.order = append(c.order, queued[K]{key: k, expires: expires})
 	}
@@ -279,7 +289,9 @@ func (c *ttlCache[K]) popLocked() bool {
 }
 
 // clear drops every entry and detaches every lookup in flight, so the next
-// check asks upstream rather than taking an answer read before now.
+// check asks upstream rather than taking an answer read before now. A caller
+// already waiting on a detached lookup still gets its answer: it asked before
+// the clear, and the answer is not cached.
 func (c *ttlCache[K]) clear() {
 	c.mu.Lock()
 	c.epoch++

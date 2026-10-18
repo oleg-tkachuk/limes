@@ -321,6 +321,31 @@ func TestBiscuitRevocationCache(t *testing.T) {
 		}
 	})
 
+	// A set's answer served from the cache near its end seeds the set's ids
+	// until that end, not for a TTL of their own: an id goes upstream again
+	// no later than the answer it came from expires.
+	t.Run("ids seeded from a cached set's answer expire with it", func(t *testing.T) {
+		now := time.Unix(0, 0)
+		up := &countingBiscuitLookup{}
+		c := newBiscuitCache(t, BiscuitRevocationCacheConfig{Upstream: up, TTL: ttl, Now: func() time.Time { return now }})
+		// The set's answer alone, cached at 0 and fresh until ttl.
+		if _, _, err := c.cache.get(ctx, setKey(ids), func(ctx context.Context) (bool, error) { return up.IsBiscuitRevoked(ctx, ids) }); err != nil {
+			t.Fatal(err)
+		}
+		now = now.Add(ttl - time.Millisecond)
+		if got, err := c.IsBiscuitRevoked(ctx, ids); err != nil || got {
+			t.Fatalf("near the set's end = %v, %v; want live, from the cache", got, err)
+		}
+		if up.calls != 1 {
+			t.Fatalf("upstream calls = %d, want 1: the set was cached", up.calls)
+		}
+		up.revoked = true
+		now = now.Add(time.Millisecond)
+		if got, _ := c.IsBiscuitRevoked(ctx, ids[:1]); !got {
+			t.Fatal("an id seeded from the set's answer outlived it: want revoked, asked upstream")
+		}
+	})
+
 	t.Run("Clear sends the next check upstream", func(t *testing.T) {
 		up := &countingBiscuitLookup{}
 		c := newBiscuitCache(t, BiscuitRevocationCacheConfig{Upstream: up, TTL: ttl})

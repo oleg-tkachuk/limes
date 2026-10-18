@@ -204,11 +204,11 @@ func (c *BiscuitRevocationCache) IsBiscuitRevoked(ctx context.Context, revocatio
 	if len(missing) > 1 {
 		key = setKey(ids)
 	}
-	revoked, err := c.cache.get(ctx, key, func(ctx context.Context) (bool, error) {
+	revoked, expires, err := c.cache.get(ctx, key, func(ctx context.Context) (bool, error) {
 		return c.upstream.IsBiscuitRevoked(ctx, ids)
 	})
 	if err == nil && !revoked && len(missing) > 1 {
-		c.cache.seedLive(missing, epoch)
+		c.cache.seedLive(missing, epoch, expires)
 	}
 	return revoked, err
 }
