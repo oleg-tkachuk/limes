@@ -254,22 +254,22 @@ func TestRevocationCacheOrderStaysBounded(t *testing.T) {
 	}
 }
 
-// newRevocationCache is NewCachedRevocationChecker, failing the test on a
+// newRevocationCache is NewRevocationCache, failing the test on a
 // refused configuration.
-func newRevocationCache(t testing.TB, cfg RevocationCacheConfig) *CachedRevocationChecker {
+func newRevocationCache(t testing.TB, cfg RevocationCacheConfig) *RevocationCache {
 	t.Helper()
-	c, err := NewCachedRevocationChecker(cfg)
+	c, err := NewRevocationCache(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return c
 }
 
-// newBiscuitCache is NewCachedBiscuitRevocationChecker, failing the test on a
+// newBiscuitCache is NewBiscuitRevocationCache, failing the test on a
 // refused configuration.
-func newBiscuitCache(t testing.TB, cfg BiscuitRevocationCacheConfig) *CachedBiscuitRevocationChecker {
+func newBiscuitCache(t testing.TB, cfg BiscuitRevocationCacheConfig) *BiscuitRevocationCache {
 	t.Helper()
-	c, err := NewCachedBiscuitRevocationChecker(cfg)
+	c, err := NewBiscuitRevocationCache(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,14 +284,14 @@ func TestRevocationCachesRefuseABadConfiguration(t *testing.T) {
 		"negative TTL":   {Upstream: newMemStore(), TTL: -time.Second},
 		"negative bound": {Upstream: newMemStore(), MaxEntries: -1},
 	} {
-		if _, err := NewCachedRevocationChecker(cfg); err == nil {
+		if _, err := NewRevocationCache(cfg); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 		bcfg := BiscuitRevocationCacheConfig{TTL: cfg.TTL, MaxEntries: cfg.MaxEntries}
 		if cfg.Upstream != nil {
 			bcfg.Upstream = &countingBiscuitLookup{}
 		}
-		if _, err := NewCachedBiscuitRevocationChecker(bcfg); err == nil {
+		if _, err := NewBiscuitRevocationCache(bcfg); err == nil {
 			t.Errorf("%s: the Biscuit cache accepted it", name)
 		}
 	}

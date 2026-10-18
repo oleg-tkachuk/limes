@@ -14,6 +14,14 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.86.0
+
+- `CachedRevocationChecker`, `NewCachedRevocationChecker` →
+  `RevocationCache`, `NewRevocationCache`; `CachedBiscuitRevocationChecker`,
+  `NewCachedBiscuitRevocationChecker` → `BiscuitRevocationCache`,
+  `NewBiscuitRevocationCache`, named as their configs
+  (`RevocationCacheConfig`, `BiscuitRevocationCacheConfig`) already were.
+
 ## v0.85.0
 
 - `Instrument`, `InstrumentOption`, `WithMeterProvider` and

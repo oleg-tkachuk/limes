@@ -277,7 +277,7 @@ func (p *perIDLookup) IsBiscuitRevoked(_ context.Context, ids [][]byte) (bool, e
 	return revoked, nil
 }
 
-func TestCachedBiscuitRevocationChecker(t *testing.T) {
+func TestBiscuitRevocationCache(t *testing.T) {
 	ctx := context.Background()
 	ttl := time.Second
 	ids := [][]byte{[]byte("ab"), []byte("c")}

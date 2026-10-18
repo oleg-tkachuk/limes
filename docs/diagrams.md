@@ -40,8 +40,8 @@ flowchart LR
         narrows["<b>Narrows</b><br/>child ⊆ parent"]
         verifier["<b>Verifier</b><br/>Authorize · Verify · BiscuitCopy<br/>ErrorResponse · DPoPNonce"]
         caveats["<b>Caveats</b><br/>Check · CheckSource · AllowsResource"]
-        cache["CachedRevocationChecker<br/>TTL · bounded, oldest out · single-flight"]
-        bcache["CachedBiscuitRevocationChecker<br/>per revocation id · TTL · bounded · single-flight"]
+        cache["RevocationCache<br/>TTL · bounded, oldest out · single-flight"]
+        bcache["BiscuitRevocationCache<br/>per revocation id · TTL · bounded · single-flight"]
         attenuate["<b>Attenuate</b><br/>offline · no key"]
         static["jwks.Static<br/>SetKey · RemoveKey"]
         remote["jwks.Remote<br/>ETag · Cache-Control · MaxStale<br/>held keys served, refreshed behind"]
@@ -185,7 +185,7 @@ sequenceDiagram
 
     W->>S: request + child token
     S->>S: Authorize: Verify — signature · time · audience · DPoP
-    S->>St: IsRevoked(child), inside Verify — via CachedRevocationChecker
+    S->>St: IsRevoked(child), inside Verify — via RevocationCache
     S->>S: Authorize: CheckSource(addr) · Check(op, resource)
     S->>St: Bump · Charge, or Reserve then Settle — against VerifiedCapability.MeterSubject()
     St-->>S: BumpReceipt · ChargeReceipt{ChargeID, SpentAmount} · Reservation
@@ -828,7 +828,7 @@ small pool serves as many calls at once as it has connections.
 
 Revocation is a write to the `Store`; verifiers see it through
 `IsRevoked`, which answers for the whole delegation chain, usually behind a
-`CachedRevocationChecker`.
+`RevocationCache`.
 
 ```mermaid
 flowchart LR
@@ -836,11 +836,11 @@ flowchart LR
     store[("<b>Store</b><br/>revoked set<br/>ParentID links")]
     cascade["CascadeChildren:<br/>a revocation entry per descendant,<br/>MaxDelegationDepth generations down,<br/>for the audit trail; an earlier entry stands"]
     chain["IsRevoked(id):<br/>id revoked, or any ancestor still on record revoked<br/>past MaxDelegationDepth: ErrDelegationTooDeep<br/>pgstore: one statement, every tenant"]
-    cache["<b>CachedRevocationChecker</b><br/>answer cached for TTL (default 2s)<br/>one upstream call per id at a time<br/>bounded: the oldest answer makes room<br/>errors never cached · a Clear mid-lookup<br/>discards that lookup's answer"]
+    cache["<b>RevocationCache</b><br/>answer cached for TTL (default 2s)<br/>one upstream call per id at a time<br/>bounded: the oldest answer makes room<br/>errors never cached · a Clear mid-lookup<br/>discards that lookup's answer"]
     notify{{"revocation signal<br/>pgstore: RevocationWatcher LISTENs on<br/>RevocationChannel; memstore: none"}}
     bop(["RevokeBiscuit(RevokeBiscuitRequest{Copy: Verifier.BiscuitCopy(token)})"])
     blist[("<b>BiscuitRevocationStore</b><br/>revoked block ids")]
-    bcache["<b>CachedBiscuitRevocationChecker</b><br/>per revocation id, in turn; stops at the first revoked<br/>cached for TTL · one upstream call per id at a time<br/>bounded · dropped by Clear"]
+    bcache["<b>BiscuitRevocationCache</b><br/>per revocation id, in turn; stops at the first revoked<br/>cached for TTL · one upstream call per id at a time<br/>bounded · dropped by Clear"]
     v1["Verifier"]
     v2["Verifier"]
 

@@ -47,11 +47,11 @@ func TestRevocationCacheDropReachesADescendant(t *testing.T) {
 	}
 }
 
-// newRevocationCache is limes.NewCachedRevocationChecker, failing the test on
+// newRevocationCache is limes.NewRevocationCache, failing the test on
 // a refused configuration.
-func newRevocationCache(t testing.TB, cfg limes.RevocationCacheConfig) *limes.CachedRevocationChecker {
+func newRevocationCache(t testing.TB, cfg limes.RevocationCacheConfig) *limes.RevocationCache {
 	t.Helper()
-	c, err := limes.NewCachedRevocationChecker(cfg)
+	c, err := limes.NewRevocationCache(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
