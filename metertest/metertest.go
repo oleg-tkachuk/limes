@@ -2162,7 +2162,7 @@ func checkUnclampedRanking[TX any](t *testing.T, f fixture[TX]) {
 			t.Fatal(err)
 		}
 	}
-	page, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterAtOrPast, ThresholdPct: fullPct})
+	page, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterAtOrPast, ThresholdBasisPoints: limes.BasisPointsPerWhole})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2174,17 +2174,20 @@ func checkUnclampedRanking[TX any](t *testing.T, f fixture[TX]) {
 	}
 }
 
-// checkThresholdBoundary holds ThresholdPct to spent / max × 100 ≥ threshold
-// exactly: 29 of 100 is at 29%, which a float quotient reads as just under.
+// checkThresholdBoundary holds ThresholdBasisPoints to spent / max ≥
+// threshold exactly: 29 of 100 is at 29%, which a float quotient reads as
+// just under, and one nano under it is not.
 func checkThresholdBoundary[TX any](t *testing.T, f fixture[TX]) {
-	// 29 of 100 at 29%, and 11 of 1000 at 1.1%: a threshold is the decimal
-	// written, not the float64 a hair above or below it.
+	// 29 of 100 at 29%, 11 of 1000 at 1.1%, and a nano short of 29% under
+	// it.
 	for _, tc := range []struct {
 		ceiling, spent limes.Nanos
-		threshold      float64
+		threshold      int
+		listed         bool
 	}{
-		{100 * one, 29 * one, 29},
-		{1000 * one, 11 * one, 1.1},
+		{100 * one, 29 * one, 2900, true},
+		{1000 * one, 11 * one, 110, true},
+		{100 * one, 29*one - 1, 2900, false},
 	} {
 		tenant, err := f.newTenant()
 		if err != nil {
@@ -2200,12 +2203,12 @@ func checkThresholdBoundary[TX any](t *testing.T, f fixture[TX]) {
 		if _, err := f.Usage.Charge(f.tenantCtx(tenant), limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant}), Amount: tc.spent}, nil); err != nil {
 			t.Fatal(err)
 		}
-		page, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterAtOrPast, ThresholdPct: tc.threshold})
+		page, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterAtOrPast, ThresholdBasisPoints: tc.threshold})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !slices.ContainsFunc(page.Items, func(r limes.TenantBudget) bool { return r.TenantID == tenant }) {
-			t.Errorf("a tenant at exactly %v%% was not listed at a threshold of %v%%", tc.threshold, tc.threshold)
+		if got := slices.ContainsFunc(page.Items, func(r limes.TenantBudget) bool { return r.TenantID == tenant }); got != tc.listed {
+			t.Errorf("%s spent of %s at a threshold of %d basis points: listed %v, want %v", tc.spent, tc.ceiling, tc.threshold, got, tc.listed)
 		}
 	}
 }
@@ -2560,13 +2563,12 @@ func checkExpiry[TX any](t *testing.T, f fixture[TX]) {
 // and paging: most at risk first, then by tenant id, a page at a time.
 func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 	for name, req := range map[string]limes.ListTenantBudgetsRequest{
-		"a negative limit":              {Limit: -1},
-		"a threshold past 100%":         {Filter: limes.TenantBudgetFilterAtOrPast, ThresholdPct: 101},
-		"a negative threshold":          {Filter: limes.TenantBudgetFilterAtOrPast, ThresholdPct: -1},
-		"a threshold with no filter":    {ThresholdPct: 1},
-		"a threshold beside unlimited":  {Filter: limes.TenantBudgetFilterUnlimited, ThresholdPct: 1},
-		"a filter this package lacks":   {Filter: limes.TenantBudgetFilterUnlimited + 1},
-		"a threshold that is no number": {Filter: limes.TenantBudgetFilterAtOrPast, ThresholdPct: math.NaN()},
+		"a negative limit":             {Limit: -1},
+		"a threshold past 100%":        {Filter: limes.TenantBudgetFilterAtOrPast, ThresholdBasisPoints: limes.BasisPointsPerWhole + 1},
+		"a negative threshold":         {Filter: limes.TenantBudgetFilterAtOrPast, ThresholdBasisPoints: -1},
+		"a threshold with no filter":   {ThresholdBasisPoints: 1},
+		"a threshold beside unlimited": {Filter: limes.TenantBudgetFilterUnlimited, ThresholdBasisPoints: 1},
+		"a filter this package lacks":  {Filter: limes.TenantBudgetFilterUnlimited + 1},
 	} {
 		if _, err := f.Usage.ListTenantBudgets(f.listCtx(), req); !errors.Is(err, limes.ErrInvalidRequest) {
 			t.Errorf("ListTenantBudgets with %s: err = %v, want ErrInvalidRequest", name, err)
@@ -2644,7 +2646,7 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 		}
 	}
 	const half = 50
-	riskyPage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterAtOrPast, ThresholdPct: half})
+	riskyPage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterAtOrPast, ThresholdBasisPoints: half * basisPointsPerPercent})
 	risky := riskyPage.Items
 	if err != nil || len(risky) != 2 || risky[0].TenantID != frozen || risky[1].TenantID != f.Tenant || riskyPct(risky[1]) != half {
 		t.Errorf("tenants at 50%% or more = %+v, %v; want %s, at a ceiling of 0, then %s at 50%%", risky, err, frozen, f.Tenant)
@@ -2932,8 +2934,12 @@ func (r risk) after(o risk) bool {
 	return r.pct < o.pct
 }
 
-// fullPct is a whole, in percent.
-const fullPct = 100
+// fullPct is a whole, in percent; basisPointsPerPercent turns a percentage
+// into basis points.
+const (
+	fullPct               = 100
+	basisPointsPerPercent = limes.BasisPointsPerWhole / fullPct
+)
 
 func riskyPct(s limes.TenantBudget) float64 {
 	pct, limited := s.Utilization()

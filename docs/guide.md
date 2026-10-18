@@ -471,8 +471,9 @@ tenant's ceiling reads `Unlimited`; a ceiling of 0 freezes its spend.
 
 To find the tenants near their ceiling, `ListTenantBudgets` takes a `Filter`:
 `TenantBudgetFilterAll` (the default), `TenantBudgetFilterUnlimited`, or
-`TenantBudgetFilterAtOrPast` with a `ThresholdPct` of 0..100, compared exactly as
-the decimal it is written as (`ExactPercent`), so 1.1 means eleven tenths.
+`TenantBudgetFilterAtOrPast` with a `ThresholdBasisPoints` of
+0..`BasisPointsPerWhole` — hundredths of a percent, so 110 is 1.1% — compared
+in integers, without rounding.
 Rows come most at risk first: ceilings of 0, then bounded ceilings by spent /
 max descending, unclamped, then unlimited ones; ties by tenant id.
 `TenantBudget.Utilization()` reports the same percentage clamped to 0..100,

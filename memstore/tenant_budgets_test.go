@@ -46,7 +46,7 @@ func TestListTenantBudgets(t *testing.T) {
 		want []uuid.UUID
 	}{
 		{"most at risk first", limes.ListTenantBudgetsRequest{}, []uuid.UUID{over, half, low, unlimited}},
-		{"threshold", limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterAtOrPast, ThresholdPct: 50}, []uuid.UUID{over, half}},
+		{"threshold", limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterAtOrPast, ThresholdBasisPoints: 5000}, []uuid.UUID{over, half}},
 		{"unlimited only", limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterUnlimited}, []uuid.UUID{unlimited}},
 		{"every ceiling", limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterAtOrPast}, []uuid.UUID{over, half, low}},
 		{"limit", limes.ListTenantBudgetsRequest{Limit: 2}, []uuid.UUID{over, half}},
