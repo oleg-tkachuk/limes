@@ -262,6 +262,13 @@ func NewVerifier(cfg VerifierConfig) (*Verifier, error) {
 // lookup — and the proof's id is recorded in the replay cache last, so
 // neither a revoked token nor a copy this verifier cannot meter records one.
 func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapability, error) {
+	return v.verify(ctx, req, nil)
+}
+
+// verify is Verify with accept, when set, run on the capability after every
+// check of the token and before the proof's id is recorded: a request accept
+// refuses spends none of the replay cache's room either.
+func (v *Verifier) verify(ctx context.Context, req VerifyRequest, accept func(Capability) error) (VerifiedCapability, error) {
 	token, audience := req.Token, req.Audience
 	if token == "" {
 		return VerifiedCapability{}, ErrNoCredentials
@@ -360,10 +367,16 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapab
 	if len(cap.copies) > 0 && !v.cfg.Biscuit.MeterCopies {
 		return VerifiedCapability{}, ErrCopyCountersNotMetered
 	}
-	// 11) The proof's id, recorded in the replay cache, last: the cache's
+	// 11) The caller's own refusals: Authorize's caveats.
+	if accept != nil {
+		if err := accept(cap.Capability); err != nil {
+			return VerifiedCapability{}, err
+		}
+	}
+	// 12) The proof's id, recorded in the replay cache, last: the cache's
 	// room is shared by every copy of the capability, so only a request this
-	// verifier accepts spends it — not a revoked token, nor a copy it cannot
-	// meter.
+	// verifier accepts spends it — not a revoked token, a copy it cannot
+	// meter, nor a request a caveat refuses.
 	if cap.ConfirmationJKT != "" {
 		if err := v.cfg.DPoP.Record(ctx, proof); err != nil {
 			return VerifiedCapability{}, proofError(err)
@@ -387,19 +400,17 @@ func (v *Verifier) DPoPNonce(ctx context.Context) (string, error) {
 // state: the operation, the resource, the idempotency key, the tainted read
 // (Caveats.Check), and the client's address (Caveats.CheckSource). The
 // request and budget limits are stateful: the Meter enforces them, through
-// Bump and Charge, inside the consumer's own transaction.
+// Bump and Charge, inside the consumer's own transaction. The caveats are
+// checked before the proof's id is recorded, so a presenter they refuse —
+// one outside the allowed networks, say — spends none of the replay cache's
+// room, which every holder of the capability shares.
 func (v *Verifier) Authorize(ctx context.Context, req AuthorizeRequest) (VerifiedCapability, error) {
-	vc, err := v.Verify(ctx, req.Verify)
-	if err != nil {
-		return VerifiedCapability{}, err
-	}
-	if err := vc.c.Caveats.CheckSource(req.ClientAddr); err != nil {
-		return VerifiedCapability{}, err
-	}
-	if err := vc.c.Caveats.Check(req.Check); err != nil {
-		return VerifiedCapability{}, err
-	}
-	return vc, nil
+	return v.verify(ctx, req.Verify, func(c Capability) error {
+		if err := c.Caveats.CheckSource(req.ClientAddr); err != nil {
+			return err
+		}
+		return c.Caveats.Check(req.Check)
+	})
 }
 
 // verifyBiscuit checks a Biscuit's sealed token as verifySigned does, then its
