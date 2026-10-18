@@ -159,7 +159,10 @@ type BiscuitRevocationCache struct {
 
 // BiscuitRevocationCacheConfig configures a BiscuitRevocationCache;
 // its fields read as RevocationCacheConfig's do, MaxEntries counting
-// revocation ids.
+// entries: one per revocation id, and one per set of ids asked about
+// together, whose key holds every id of the set — up to MaxBiscuitBlocks+1
+// block signatures. Size memory for MaxEntries times the largest such key,
+// not one id.
 type BiscuitRevocationCacheConfig struct {
 	// Upstream answers what the cache does not hold. Required.
 	Upstream   BiscuitRevocationLookup

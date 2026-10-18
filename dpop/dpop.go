@@ -569,9 +569,15 @@ func decodeSegment(seg string, v any) error {
 // refused. It does not stop one tenant holding many capabilities — Delegate
 // mints them freely — from filling the cache with its proofs; past
 // MaxEntries the cache refuses every new id rather than forget one, since a
-// forgotten id could be replayed. Size MaxEntries for the busiest window, or
-// require server nonces (VerifierConfig.Nonces), which bound how fast any
-// client mints proofs.
+// forgotten id could be replayed. Size MaxEntries for the busiest window.
+// Server nonces (VerifierConfig.Nonces) do not bound it: an HMACNonces nonce
+// may back any number of proofs until it expires, so they bound how early a
+// proof is signed, not how many are.
+//
+// It keys a proof id by the key that signed it (jkt, jti) across holders,
+// where redisreplay keys it within its holder: the same id under one key for
+// two capabilities is refused here and accepted there. Neither is a replay —
+// ath binds a proof to one token, and so to one holder.
 type MemoryReplayCache struct {
 	mu           sync.Mutex
 	seen         map[replayKey]time.Time
