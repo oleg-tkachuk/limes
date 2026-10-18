@@ -169,9 +169,9 @@ var ErrSchemaMismatch = errors.New("pgstore: schema version mismatch")
 // version of the package needs it.
 type SchemaVersion struct {
 	// Applied is the last migration run; zero when none has.
-	Applied int32
+	Applied int
 	// Expected is the last migration this package carries.
-	Expected int32
+	Expected int
 }
 
 // The SQLSTATE codes of a version table that is not there: the table, or
@@ -192,7 +192,9 @@ func ReadSchemaVersion(ctx context.Context, db DB) (SchemaVersion, error) {
 		return SchemaVersion{}, err
 	}
 	v := SchemaVersion{Expected: expected}
-	err = db.QueryRow(ctx, sqlSchemaVersion).Scan(&v.Applied)
+	// tern keeps the version as an int4.
+	var applied int32
+	err = db.QueryRow(ctx, sqlSchemaVersion).Scan(&applied)
 	// With no version table — Migrate never ran here — no migration has
 	// been applied: version 0, not an outage.
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && (pgErr.Code == undefinedTable || pgErr.Code == invalidSchemaName) {
@@ -201,6 +203,7 @@ func ReadSchemaVersion(ctx context.Context, db DB) (SchemaVersion, error) {
 	if err != nil {
 		return SchemaVersion{}, fmt.Errorf("pgstore: schema version: %w", err)
 	}
+	v.Applied = int(applied)
 	return v, nil
 }
 
@@ -220,10 +223,10 @@ func CheckSchema(ctx context.Context, db DB) error {
 
 // expectedVersion is the number of migrations the package carries: tern
 // numbers them from one without a gap, so the count is the last one's.
-func expectedVersion() (int32, error) {
+func expectedVersion() (int, error) {
 	files, err := fs.Glob(migrationFiles, path.Join(migrationsDir, "*.sql"))
 	if err != nil {
 		return 0, err
 	}
-	return int32(len(files)), nil //nolint:gosec // a handful of embedded files
+	return len(files), nil
 }

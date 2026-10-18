@@ -14,6 +14,11 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## pgstore/v0.16.0
+
+- `pgstore.SchemaVersion.Applied` and `Expected` are `int`, not `int32`, the
+  width of tern's column: compare them as Go's integers.
+
 ## v0.91.0
 
 - `RevokeRequest`, `DeleteUsageRequest`, `ChargeByRefRequest`,

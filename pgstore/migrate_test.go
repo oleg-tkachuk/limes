@@ -135,7 +135,7 @@ func TestCheckSchema(t *testing.T) {
 	if err := Migrate(ctx, conn, MigrateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	for name, shift := range map[string]int32{"behind": -1, "ahead": 1} {
+	for name, shift := range map[string]int{"behind": -1, "ahead": 1} {
 		if _, err := conn.Exec(ctx, `UPDATE `+versionTable+` SET version = $1`, v.Expected+shift); err != nil {
 			t.Fatal(err)
 		}
