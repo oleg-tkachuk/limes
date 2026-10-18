@@ -55,12 +55,12 @@ const (
 )
 
 // truncOf is the date_trunc field of b, and false for ChargeBucketNone,
-// which sums the period whole, and ChargeBucketUnspecified, which takes it.
+// which sums the period whole.
 // A bucket this store does not name is refused rather than summed as
 // another.
 func truncOf(b limes.ChargeBucket) (string, bool, error) {
 	switch b {
-	case limes.ChargeBucketUnspecified, limes.ChargeBucketNone:
+	case limes.ChargeBucketNone:
 		return "", false, nil
 	case limes.ChargeBucketHour:
 		return truncHour, true, nil

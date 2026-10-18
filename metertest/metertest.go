@@ -3586,8 +3586,8 @@ func checkSumChargeBuckets[TX any](t *testing.T, f fixture[TX]) {
 			t.Errorf("SumCharges by %s = %+v, %v; want %+v", b, page.Items, err, want)
 		}
 	}
-	// No bucket, named or left unspecified, sums the period whole.
-	for _, b := range []limes.ChargeBucket{limes.ChargeBucketNone, limes.ChargeBucketUnspecified} {
+	// No bucket, named or left zero, sums the period whole.
+	for _, b := range []limes.ChargeBucket{limes.ChargeBucketNone, 0} {
 		page, err := f.Ledger.SumCharges(f.Ctx, limes.SumChargesRequest{TenantID: f.Tenant, From: from, To: to, Bucket: b})
 		want := []limes.ChargeSum{{UnitCode: unit, Charged: 5 * one, Charges: 2}}
 		if err != nil || !sameSums(page.Items, want) {
