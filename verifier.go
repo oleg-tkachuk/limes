@@ -268,7 +268,7 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapab
 			ErrInvalidToken, len(token), v.cfg.MaxTokenBytes)
 	}
 
-	var cap *Capability
+	var cap *grant
 	var biscuitIDs [][]byte // set for a Biscuit, from its verified chain
 	if isBiscuit(token) {
 		if !v.cfg.AcceptBiscuit {
@@ -285,7 +285,7 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapab
 		}
 		// The token sealed inside a Biscuit, lifted out to shed the
 		// Biscuit's attenuation.
-		if cap.BiscuitRoot != "" {
+		if cap.biscuitRoot != "" {
 			return VerifiedCapability{}, fmt.Errorf("%w: token is sealed in a Biscuit; present the Biscuit", ErrInvalidToken)
 		}
 	}
@@ -350,7 +350,7 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapab
 	// 10) A copy's own limits need a Meter that counts copies. After every
 	// check of the token, so a token refused for what it is gets that
 	// refusal, not this one, which is about the verifier.
-	if len(cap.Copies) > 0 && !v.cfg.MeterCopies {
+	if len(cap.copies) > 0 && !v.cfg.MeterCopies {
 		return VerifiedCapability{}, ErrCopyCountersNotMetered
 	}
 	// 11) The proof's id, recorded in the replay cache, last: the cache's
@@ -363,7 +363,7 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapab
 		}
 	}
 
-	return VerifiedCapability{c: *cap, fromBiscuit: biscuitIDs != nil}, nil
+	return VerifiedCapability{c: cap.Capability, copies: cap.copies, fromBiscuit: biscuitIDs != nil}, nil
 }
 
 // DPoPNonce is the nonce to send in the DPoP-Nonce header — with a
@@ -399,7 +399,7 @@ func (v *Verifier) Authorize(ctx context.Context, req AuthorizeRequest) (Verifie
 // signature chain and attenuation blocks. It returns the capability the
 // Biscuit grants, copy limits included, and its revocation ids, authority
 // first.
-func (v *Verifier) verifyBiscuit(ctx context.Context, token string) (*Capability, [][]byte, error) {
+func (v *Verifier) verifyBiscuit(ctx context.Context, token string) (*grant, [][]byte, error) {
 	inner, attenuate, err := openBiscuit(token)
 	if err != nil {
 		return nil, nil, err
@@ -408,7 +408,7 @@ func (v *Verifier) verifyBiscuit(ctx context.Context, token string) (*Capability
 	if err != nil {
 		return nil, nil, err
 	}
-	if sealed.BiscuitRoot == "" {
+	if sealed.biscuitRoot == "" {
 		return nil, nil, fmt.Errorf("%w: biscuit seals an ordinary token", ErrInvalidToken)
 	}
 	return attenuate(sealed, typ)
@@ -418,7 +418,7 @@ func (v *Verifier) verifyBiscuit(ctx context.Context, token string) (*Capability
 // everything about the token itself; the time, audience and revocation gates
 // run in Verify on the capability the token finally grants. It returns the
 // token's type too, under whose rules a Biscuit sealing it is read.
-func (v *Verifier) verifySigned(ctx context.Context, token string) (*Capability, TokenType, error) {
+func (v *Verifier) verifySigned(ctx context.Context, token string) (*grant, TokenType, error) {
 	// 1) Header: structure, algorithm, type, key id.
 	parts, err := jose.Split(token)
 	if err != nil {
@@ -521,6 +521,8 @@ func proofRefusal(err error) error { return fmt.Errorf("%w: %w", ErrProofOfPosse
 // have checked it.
 type VerifiedCapability struct {
 	c Capability
+	// copies are the limits a Biscuit copy's blocks set (Copies).
+	copies []CopyCeiling
 	// fromBiscuit marks one read from a Biscuit copy: what it grants is
 	// the copy's, revoked with the copy, which a token minted from it would
 	// not be.
@@ -534,3 +536,9 @@ func (v VerifiedCapability) FromBiscuit() bool { return v.fromBiscuit }
 
 // Capability is what the token grants: a copy, the caller's to change.
 func (v VerifiedCapability) Capability() Capability { return v.c.clone() }
+
+// Copies are the request and budget limits the attenuation blocks of a
+// verified Biscuit set, innermost block first; none for a JWT, or a Biscuit
+// whose blocks set none. Each is counted on its own, beside the capability's
+// counters, by every Meter call its MeterSubject is handed.
+func (v VerifiedCapability) Copies() []CopyCeiling { return cloneCopyCeilings(v.copies) }

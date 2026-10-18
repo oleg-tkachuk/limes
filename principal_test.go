@@ -170,7 +170,7 @@ func TestCloneCoversEverySharedField(t *testing.T) {
 var clonedFields = map[string]bool{
 	"Caveats.Ops": true, "Caveats.ResourcePrefixes": true, "Caveats.ResourceURIs": true,
 	"Caveats.SourceIPCIDR": true, "Principal.Agent": true,
-	"Capability.Audience": true, "Capability.Copies": true, "CopyCeiling.RevocationID": true,
+	"Capability.Audience": true, "CopyCeiling.RevocationID": true,
 	"CopyCeiling.Requests": true, "CopyCeiling.Budget": true,
 }
 

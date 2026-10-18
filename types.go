@@ -267,20 +267,21 @@ type Capability struct {
 	// delegated child of a bound capability is bound too. Carried in the
 	// token as `cnf.jkt`, and absent from tokens that are not bound.
 	ConfirmationJKT string
+}
 
-	// BiscuitRoot is set only on the token sealed inside a Biscuit (see
+// grant is what a token says beyond its capability: the parts no record
+// holds, which only this package reads and writes.
+type grant struct {
+	Capability
+	// biscuitRoot is set only on the token sealed inside a Biscuit (see
 	// Issuer.Biscuit): the base64url Ed25519 public key that roots the
 	// Biscuit's signature chain. A token carrying it is refused when
 	// presented on its own, so it cannot be lifted out of an attenuated
 	// Biscuit to shed the attenuation.
-	BiscuitRoot string
-
-	// Copies are the request and budget limits the attenuation blocks of a
-	// verified Biscuit set, innermost block first. Each is counted on its
-	// own, beside the capability's counters, by every Meter call that is
-	// handed them. Set by the verifier only; never part of a token or a
-	// stored record.
-	Copies []CopyCeiling
+	biscuitRoot string
+	// copies are the request and budget limits the attenuation blocks of a
+	// verified Biscuit set, innermost block first (VerifiedCapability.Copies).
+	copies []CopyCeiling
 }
 
 // CopyCeiling is a limit one attenuation block of a Biscuit set on the copy
@@ -444,6 +445,5 @@ func (c Capability) clone() Capability {
 	c.Subject = c.Subject.clone()
 	c.Audience = slices.Clone(c.Audience)
 	c.Caveats = c.Caveats.clone()
-	c.Copies = cloneCopyCeilings(c.Copies)
 	return c
 }

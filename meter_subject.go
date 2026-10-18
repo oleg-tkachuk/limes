@@ -32,7 +32,7 @@ func (v VerifiedCapability) MeterSubject() MeterSubject {
 		tenantID:     v.c.Subject.TenantID,
 		maxRequests:  v.c.Caveats.Requests,
 		maxBudget:    v.c.Caveats.Budget,
-		copies:       v.c.clone().Copies,
+		copies:       cloneCopyCeilings(v.copies),
 	}
 }
 

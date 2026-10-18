@@ -61,7 +61,7 @@ func TestBiscuitVerifiesAsItsCapability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
-	if got.Capability().ID != cap.ID || len(got.Capability().Caveats.Ops) != 3 || got.Capability().BiscuitRoot != "" {
+	if got.Capability().ID != cap.ID || len(got.Capability().Caveats.Ops) != 3 {
 		t.Fatalf("got %+v", got)
 	}
 }

@@ -354,10 +354,11 @@ func TestDelegate_RefusesACopyWithLimitsOfItsOwn(t *testing.T) {
 		return err
 	}
 
-	copyOf := parent
-	copyOf.Copies = []CopyCeiling{{RevocationID: []byte("block"), Requests: &RequestCeiling{Max: 5}}}
+	copyOf := VerifiedCapability{c: parent, copies: []CopyCeiling{{RevocationID: []byte("block"), Requests: &RequestCeiling{Max: 5}}}}
 	before := len(store.caps)
-	if err := delegate(copyOf); !errors.Is(err, ErrInvalidRequest) {
+	if _, _, err := issuer.delegate(ctx, DelegateRequest{
+		Parent: copyOf, Subject: Principal{Type: PrincipalTypeAgent, TenantID: tenantID, Subject: "child"}, InheritCaveats: true,
+	}); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("delegate from a copy with limits: err = %v, want ErrInvalidRequest", err)
 	}
 	if len(store.caps) != before {

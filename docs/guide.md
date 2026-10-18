@@ -377,7 +377,7 @@ does not carry, and the verifier gives it. Each is counted under the revocation 
 set it, so siblings narrowed apart count apart, while the capability's own
 limits still bound them all; a limit must fit every limit already in force,
 and an `Unlimited` one is refused: a copy only narrows.
-The verifier hands them to the caller as `Capability.Copies`, and the `Meter`
+The verifier hands them to the caller as `VerifiedCapability.Copies`, and the `Meter`
 counts them through the `MeterSubject` the verified capability gives, which
 carries them. A verifier admits such a copy only with
 `MeterCopies` set, which says the `Meter` behind it counts copies; without it

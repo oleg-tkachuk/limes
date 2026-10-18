@@ -71,10 +71,10 @@ func TestCopyLimitsArriveAsCopies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
-	if len(got.Capability().Copies) != 2 {
-		t.Fatalf("copies = %+v, want two: the blocks that set limits", got.Capability().Copies)
+	if len(got.Copies()) != 2 {
+		t.Fatalf("copies = %+v, want two: the blocks that set limits", got.Copies())
 	}
-	in, out := got.Capability().Copies[0], got.Capability().Copies[1]
+	in, out := got.Copies()[0], got.Copies()[1]
 	if !bytes.Equal(in.RevocationID, lastRevocationID(t, inner)) || !ceilingIs(in.Requests, RequestCeiling{Max: 10}) || in.Budget != nil {
 		t.Errorf("innermost = %+v", in)
 	}
@@ -89,7 +89,7 @@ func TestCopyLimitsArriveAsCopies(t *testing.T) {
 	// the ones above it.
 	for tok, want := range map[string]int{root: 0, plain: 1} {
 		got, err := v.Verify(ctx, VerifyRequest{Token: tok, Audience: audienceData})
-		if err != nil || len(got.Capability().Copies) != want {
+		if err != nil || len(got.Copies()) != want {
 			t.Errorf("copies = %+v, err = %v; want %d", got, err, want)
 		}
 	}
@@ -200,9 +200,8 @@ func TestCopyLimitsMalformed(t *testing.T) {
 // carries them does not, and a JWT verifies with none.
 func TestCopiesAreNeverSigned(t *testing.T) {
 	issuer, v, _, cap, _ := biscuitFixture(t)
-	withCopies := cap
-	withCopies.Copies = []CopyCeiling{{RevocationID: []byte("x"), Requests: &RequestCeiling{Max: 1}}}
-	jwt, err := issuer.signer.sign(context.Background(), withCopies)
+	withCopies := grant{Capability: cap, copies: []CopyCeiling{{RevocationID: []byte("x"), Requests: &RequestCeiling{Max: 1}}}}
+	jwt, err := issuer.signer.signGrant(context.Background(), withCopies)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,8 +209,8 @@ func TestCopiesAreNeverSigned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Capability().Copies != nil {
-		t.Fatalf("copies = %+v, want none", got.Capability().Copies)
+	if got.Copies() != nil {
+		t.Fatalf("copies = %+v, want none", got.Copies())
 	}
 }
 
@@ -277,7 +276,7 @@ func TestACopyCanBeFrozen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	copies := vc.Capability().Copies
+	copies := vc.Copies()
 	if len(copies) != 1 || !ceilingIs(copies[0].Requests, RequestCeiling{}) || !ceilingIs(copies[0].Budget, BudgetCeiling{UnitCode: "USD"}) {
 		t.Errorf("copies = %+v; want one ceiling of 0 requests and 0 spend", copies)
 	}
