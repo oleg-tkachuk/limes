@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/tern/v2/migrate"
 )
 
@@ -173,6 +174,13 @@ type SchemaVersion struct {
 	Expected int32
 }
 
+// The SQLSTATE codes of a version table that is not there: the table, or
+// the whole schema.
+const (
+	undefinedTable    = "42P01"
+	invalidSchemaName = "3F000"
+)
+
 // sqlSchemaVersion reads the version tern records.
 const sqlSchemaVersion = `SELECT version FROM ` + versionTable
 
@@ -184,7 +192,13 @@ func ReadSchemaVersion(ctx context.Context, db DB) (SchemaVersion, error) {
 		return SchemaVersion{}, err
 	}
 	v := SchemaVersion{Expected: expected}
-	if err := db.QueryRow(ctx, sqlSchemaVersion).Scan(&v.Applied); err != nil {
+	err = db.QueryRow(ctx, sqlSchemaVersion).Scan(&v.Applied)
+	// With no version table — Migrate never ran here — no migration has
+	// been applied: version 0, not an outage.
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && (pgErr.Code == undefinedTable || pgErr.Code == invalidSchemaName) {
+		return v, nil
+	}
+	if err != nil {
 		return SchemaVersion{}, fmt.Errorf("pgstore: schema version: %w", err)
 	}
 	return v, nil
