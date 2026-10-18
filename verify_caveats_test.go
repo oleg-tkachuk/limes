@@ -23,7 +23,7 @@ func signUnchecked(t *testing.T, s *Signer, c Capability) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims, err := json.Marshal(claimsOf(c))
+	claims, err := json.Marshal(claimsOf(c, TokenTypeV4))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func validCapability() Capability {
 		ID: uuid.New(), Issuer: "limes-test",
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}},
-		IssuedAt: now, NotBefore: now, ExpiresAt: now.Add(time.Minute), Generation: 1,
+		IssuedAt: now, NotBefore: now, ExpiresAt: now.Add(time.Minute),
 	}
 }
 

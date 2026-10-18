@@ -45,8 +45,8 @@ func TestConfigDefaults(t *testing.T) {
 	if v.cfg.Leeway != 30*time.Second {
 		t.Errorf("verifier leeway = %s, want 30s", v.cfg.Leeway)
 	}
-	if !slices.Equal(v.cfg.AcceptTokenTypes, []TokenType{TokenTypeV4}) {
-		t.Errorf("verifier accepts %q, want only %q", v.cfg.AcceptTokenTypes, TokenTypeV4)
+	if !slices.Equal(v.cfg.AcceptTokenTypes, []TokenType{TokenTypeV4, TokenTypeV5}) {
+		t.Errorf("verifier accepts %q, want %q and %q", v.cfg.AcceptTokenTypes, TokenTypeV4, TokenTypeV5)
 	}
 
 }
@@ -188,7 +188,7 @@ func TestIssuerNeedsOnlyAnIssuanceStore(t *testing.T) {
 }
 
 // AcceptTokenTypes names only formats this package can read; an empty list,
-// as a nil one, accepts the current format.
+// as a nil one, accepts every format it reads.
 func TestAcceptTokenTypesRefusesWhatItCannotRead(t *testing.T) {
 	pub, _, err := ed25519.GenerateKey(nil)
 	if err != nil {
@@ -202,14 +202,20 @@ func TestAcceptTokenTypesRefusesWhatItCannotRead(t *testing.T) {
 			AcceptTokenTypes: types,
 		}
 	}
-	for _, types := range [][]TokenType{{TokenTypeV4}, nil, {}} {
-		v, err := NewVerifier(cfg(types))
-		if err != nil || !slices.Equal(v.cfg.AcceptTokenTypes, []TokenType{TokenTypeV4}) {
-			t.Errorf("accepting %q: %v", types, err)
+	every := []TokenType{TokenTypeV4, TokenTypeV5}
+	for _, tc := range []struct{ types, want []TokenType }{
+		{[]TokenType{TokenTypeV4}, []TokenType{TokenTypeV4}},
+		{[]TokenType{TokenTypeV5}, []TokenType{TokenTypeV5}},
+		{nil, every},
+		{[]TokenType{}, every},
+	} {
+		v, err := NewVerifier(cfg(tc.types))
+		if err != nil || !slices.Equal(v.cfg.AcceptTokenTypes, tc.want) {
+			t.Errorf("accepting %q: %v", tc.types, err)
 		}
 	}
 	for name, types := range map[string][]TokenType{
-		"an unknown format": {"limes-cap-v5+jwt"},
+		"an unknown format": {"limes-cap-v6+jwt"},
 		"an empty format":   {""},
 	} {
 		if _, err := NewVerifier(cfg(types)); err == nil {

@@ -145,19 +145,17 @@ func validUnitCode(u string) error {
 // Fine-grained method gating can still layer admin-authored policy on top.
 type Op string
 
-// The built-in operations. Get, List, Search and Embed read; the rest may
-// change state (Op.ResolveEffect).
+// The built-in operations: the ones every resource server shares. Get and
+// List read; the rest may change state (Op.ResolveEffect). A domain's own
+// operations — searching an index, computing embeddings — are the
+// consumer's, namespaced: "index:search", "model:embed".
 const (
-	OpGet     Op = "get"     // read one resource
-	OpPut     Op = "put"     // write one resource
-	OpList    Op = "list"    // list resources under a prefix
-	OpDelete  Op = "delete"  // delete a resource
-	OpPresign Op = "presign" // mint a pre-signed URL for a resource
-	OpTag     Op = "tag"     // label a resource
-	OpSearch  Op = "search"  // query an index
-	OpEmbed   Op = "embed"   // compute embeddings
-	OpShare   Op = "share"   // delegate a sub-capability to another agent through the issuer; not needed to attenuate a Biscuit copy
-	OpManage  Op = "manage"  // administer: tenants, policy
+	OpGet    Op = "get"    // read one resource
+	OpPut    Op = "put"    // write one resource
+	OpList   Op = "list"   // list resources under a prefix
+	OpDelete Op = "delete" // delete a resource
+	OpShare  Op = "share"  // delegate a sub-capability to another agent through the issuer; not needed to attenuate a Biscuit copy
+	OpManage Op = "manage" // administer: tenants, policy
 )
 
 // noCompare makes a struct that holds it not comparable with ==. The structs
@@ -209,9 +207,11 @@ type AgentPrincipal struct {
 	AgentVersion string
 	// RunID is a UUID minted by the agent host at session start.
 	RunID uuid.UUID
-	// ParentAgentID is set when this agent was spawned by another via
-	// `OpShare`. Empty for top-level agents.
-	ParentAgentID uuid.UUID
+	// ParentRunID is the RunID of the agent whose capability this one was
+	// delegated from. Issuer.Delegate sets it from the parent, and refuses
+	// a request naming another; zero for a root capability, or one
+	// delegated from a principal that is no agent or names no run.
+	ParentRunID uuid.UUID
 	// Model identifies the LLM behind the agent ("example-model-1",
 	// "gpt-5-pro"). Used for cost attribution.
 	Model string
@@ -258,17 +258,6 @@ type Capability struct {
 	// whole chain), and every charge also debits each ancestor, so a
 	// parent's budget bounds the spend of everything delegated from it.
 	ParentID uuid.UUID
-
-	// Generation is an issuer-assigned counter (1 for a fresh root, 1 for
-	// every delegated child) carried in the token for audit. A consumer
-	// that rotates a capability may reissue with Generation+1 and revoke
-	// the previous one, and compare generations in its own records.
-	//
-	// It is NOT a fence token: nothing in this package compares it
-	// against a stored current value, so an older generation stays usable
-	// until it expires or is revoked. Revocation is the mechanism that
-	// stops a superseded capability.
-	Generation int64
 
 	// ConfirmationJKT, when set, binds the capability to a key: the RFC 7638
 	// thumbprint of the public key whose holder alone may present it. Every

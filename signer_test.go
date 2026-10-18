@@ -47,12 +47,11 @@ func TestSign_RoundTrip(t *testing.T) {
 				Model:        "example-model-1",
 			},
 		},
-		Audience:   []string{audienceData, audienceMCP},
-		IssuedAt:   now,
-		ExpiresAt:  now.Add(15 * time.Minute),
-		Generation: 1,
+		Audience:  []string{audienceData, audienceMCP},
+		IssuedAt:  now,
+		ExpiresAt: now.Add(15 * time.Minute),
 		Caveats: Caveats{
-			Ops:              []Op{OpGet, OpList, OpSearch},
+			Ops:              []Op{OpGet, OpList, "index:search"},
 			ResourcePrefixes: []string{"object://acme/run-42/"},
 			Budget:           BudgetCeiling{Max: NanosPerUnit / 2, UnitCode: "USD"},
 			Requests:         RequestCeiling{Max: 100},
@@ -85,9 +84,6 @@ func TestSign_RoundTrip(t *testing.T) {
 	}
 	if got.Caveats.Budget != (BudgetCeiling{Max: NanosPerUnit / 2, UnitCode: "USD"}) {
 		t.Errorf("MaxBudgetAmount: got %v, want 0.50 USD", got.Caveats.Budget)
-	}
-	if got.Generation != 1 {
-		t.Errorf("Generation: got %d, want 1", got.Generation)
 	}
 	if !got.IssuedAt.Equal(cap.IssuedAt) {
 		t.Errorf("IssuedAt round-trip drift: %s vs %s", got.IssuedAt, cap.IssuedAt)
@@ -302,7 +298,7 @@ func TestNarrows_AcceptsValidNarrowing(t *testing.T) {
 		Subject:  Principal{TenantID: tenantID, Type: PrincipalTypeAgent},
 		Audience: []string{audienceData, audienceMCP},
 		Caveats: Caveats{
-			Ops:              []Op{OpGet, OpList, OpSearch},
+			Ops:              []Op{OpGet, OpList, "index:search"},
 			ResourcePrefixes: []string{"object://acme/"},
 			Budget:           BudgetCeiling{Max: MustParseAmount("1.00")},
 			Requests:         RequestCeiling{Max: 100},

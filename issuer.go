@@ -125,9 +125,9 @@ func (i *Issuer) sign(ctx context.Context, c Capability) (string, error) {
 }
 
 // IssueRequest is the input shape for Issuer.Issue. Subject (with its
-// TenantID), IssuedBy, Audience and Caveats are required; TTL, NotBefore,
-// Generation and ConfirmationJKT are optional, and the issuer fills in ID,
-// IssuedAt, ExpiresAt and Issuer, and Generation when it is zero. Caveats are
+// TenantID), IssuedBy, Audience and Caveats are required; TTL, NotBefore
+// and ConfirmationJKT are optional, and the issuer fills in ID, IssuedAt,
+// ExpiresAt and Issuer. Caveats are
 // validated (Caveats.Validate) before anything is persisted.
 type IssueRequest struct {
 	Subject Principal
@@ -137,20 +137,24 @@ type IssueRequest struct {
 	// required — a capability nobody requested cannot be audited — and the
 	// rest is recorded as given: an operator need not be a tenant's
 	// principal.
-	IssuedBy   Principal
-	Audience   []string
-	Caveats    Caveats
-	TTL        time.Duration // 0 → DefaultTTL; must reach the next whole second
-	NotBefore  time.Time     // zero → valid from issuance, no nbf claim
-	Generation int64         // 0 → DefaultGeneration
+	IssuedBy  Principal
+	Audience  []string
+	Caveats   Caveats
+	TTL       time.Duration // 0 → DefaultTTL; must reach the next whole second
+	NotBefore time.Time     // zero → valid from issuance, no nbf claim
 	// ConfirmationJKT binds the capability to the key with this RFC 7638
 	// thumbprint (dpop.Thumbprint); empty issues a bearer capability.
 	ConfirmationJKT string
 }
 
-// DefaultGeneration is the Generation of a capability issued without one,
-// and of every delegated capability.
-const DefaultGeneration = 1
+// parentRunOf is the run a capability of p delegates from: an agent's RunID,
+// zero for any other principal.
+func parentRunOf(p Principal) uuid.UUID {
+	if p.Agent == nil {
+		return uuid.Nil
+	}
+	return p.Agent.RunID
+}
 
 // IssueResult is what Issue and Delegate mint: the capability as recorded,
 // to log or display, and its compact-form token, to ship to the agent.
@@ -160,9 +164,7 @@ type IssueResult struct {
 	_          noCompare
 }
 
-// Issue mints a top-level capability. Generation defaults to
-// DefaultGeneration; see Capability.Generation for what it does and does not
-// promise.
+// Issue mints a top-level capability.
 func (i *Issuer) Issue(ctx context.Context, req IssueRequest) (IssueResult, error) {
 	return result(i.issue(ctx, req))
 }
@@ -185,9 +187,6 @@ func (i *Issuer) issue(ctx context.Context, req IssueRequest) (Capability, strin
 	}
 	if req.IssuedBy.Subject == "" {
 		return Capability{}, "", invalidRequest("IssuedBy is required")
-	}
-	if req.Generation < 0 || req.Generation > MaxIJSONInteger {
-		return Capability{}, "", invalidRequest("Generation %d is outside 0..%d", req.Generation, int64(MaxIJSONInteger))
 	}
 	if err := validateAudience(req.Audience); err != nil {
 		return Capability{}, "", err
@@ -216,11 +215,7 @@ func (i *Issuer) issue(ctx context.Context, req IssueRequest) (Capability, strin
 		Caveats:         req.Caveats.clone(),
 		IssuedAt:        now.Truncate(tokenTimeResolution),
 		ExpiresAt:       expires,
-		Generation:      req.Generation,
 		ConfirmationJKT: req.ConfirmationJKT,
-	}
-	if cap.Generation == 0 {
-		cap.Generation = DefaultGeneration
 	}
 	if err := checkLifetime(cap); err != nil {
 		return Capability{}, "", err
@@ -378,6 +373,10 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 	if err := req.Subject.Validate(); err != nil {
 		return Capability{}, "", err
 	}
+	parentRun := parentRunOf(parent.Subject)
+	if a := req.Subject.Agent; a != nil && a.ParentRunID != uuid.Nil && a.ParentRunID != parentRun {
+		return Capability{}, "", invalidRequest("Subject.Agent.ParentRunID %s is not the parent's RunID %s", a.ParentRunID, parentRun)
+	}
 	if len(req.Audience) == 0 {
 		req.Audience = append([]string(nil), parent.Audience...)
 	}
@@ -432,11 +431,18 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 		IssuedAt:        now.Truncate(tokenTimeResolution),
 		ExpiresAt:       expires,
 		ParentID:        parent.ID,
-		Generation:      DefaultGeneration,
 		ConfirmationJKT: req.ConfirmationJKT,
 	}
 	if child.ConfirmationJKT == "" {
 		child.ConfirmationJKT = parent.ConfirmationJKT
+	}
+	// The run a child agent was delegated from is the parent's, taken from
+	// the token the verifier accepted rather than on the caller's word.
+	if child.Subject.Type == PrincipalTypeAgent && parentRun != uuid.Nil {
+		if child.Subject.Agent == nil {
+			child.Subject.Agent = &AgentPrincipal{}
+		}
+		child.Subject.Agent.ParentRunID = parentRun
 	}
 	// A child starts no earlier than its parent, as it ends no later. The
 	// parent may start after now — a not-before ahead, or an issuer replica

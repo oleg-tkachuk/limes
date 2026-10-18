@@ -58,11 +58,11 @@ has. Every rejection is a distinct sentinel; map each to whatever status your
 transport uses, or let `ErrorResponse` answer it the HTTP way (below).
 
 The token must carry a `typ` the verifier accepts (`AcceptTokenTypes`, by
-default `limes-cap-v4+jwt`), a tenant and a principal of a
+default `limes-cap-v4+jwt` and `limes-cap-v5+jwt`), a tenant and a principal of a
 known kind (`PrincipalTypeUser`, `PrincipalTypeAgent` or `PrincipalTypeService`; agent
 details only on an agent — `Principal.Validate`, which `Issue` and `Delegate`
 run too; an agent's `AgentPrincipal` — `AgentType`, `AgentVersion`, `RunID`,
-`ParentAgentID`, `Model`, `MCPClient` — is signed into the token for audit and
+`ParentRunID`, `Model`, `MCPClient` — is signed into the token for audit and
 lineage, and none of it is a caveat), its claims must
 hold no member the verifier does not know (a caveat it could not enforce),
 none twice and none in another case, and may be at most
@@ -166,7 +166,9 @@ address it.
 `AllowTaintedRead` can only act on a taint signal you supply; if you track
 none, it protects nothing, and you should say so.
 
-Your own operations are namespaced (`tool:retrieve`, `mcp:github/create_issue`)
+The built-in operations are the ones every resource server shares: `get`,
+`put`, `list`, `delete`, `share` and `manage`. Your own operations — searching
+an index, computing embeddings — are namespaced (`tool:retrieve`, `mcp:github/create_issue`)
 and are treated as writes unless you declare otherwise, so an undeclared one
 needs an idempotency key under `IdempotencyKeyRequired` and is never refused as
 a tainted read. Declare the effect where you define the operation — a method
@@ -415,7 +417,7 @@ cannot be re-wrapped in a fresh Biscuit.
 ```go
 receipt, err := usage.Charge(ctx, limes.ChargeRequest{
     Subject: granted.MeterSubject(),
-    Amount:  limes.MustParseAmount("0.35"), Op: limes.OpSearch, Actor: "orchestrator",
+    Amount:  limes.MustParseAmount("0.35"), Op: "index:search", Actor: "orchestrator",
 }, nil)
 if errors.Is(err, limes.ErrBudgetExceeded) {
     // rejected at the auth boundary — before your business logic ran
@@ -1031,7 +1033,8 @@ stop rather than retry. The full table is in [diagrams.md](diagrams.md#answering
 | `VerifierConfig.Leeway` | `DefaultLeeway`, 30 seconds; `VerifierConfig.NoLeeway: true` for none |
 | `VerifierConfig.MaxTokenBytes` · `IssuerConfig.MaxTokenBytes` | `DefaultMaxTokenBytes`, 16 KiB |
 | `VerifierConfig.Leeway` bound | `MaxLeeway`, 5 minutes |
-| `VerifierConfig.AcceptTokenTypes` | `TokenTypeV4` |
+| `VerifierConfig.AcceptTokenTypes` | `TokenTypeV4` and `TokenTypeV5` |
+| `SignerConfig.TokenType` | `TokenTypeV4` |
 | `VerifierConfig.Realm` | `DefaultRealm`, `limes` |
 | `jwks.HandlerConfig.MaxAge` | `jwks.DefaultMaxAge`, 5 minutes; `HandlerConfig.Revalidate: true` for `max-age=0` |
 | `ListByPrincipalRequest.Limit` · `ListTenantBudgetsRequest.Limit` · `ListReservationsRequest.Limit` · `SumChargesRequest.Limit` · `CountRecordsRequest.Limit` | `DefaultListLimit` 50, at most `MaxListLimit` 500 |

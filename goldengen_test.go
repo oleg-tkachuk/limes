@@ -12,8 +12,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// Mints the golden-token fixture golden_test.go verifies. Run explicitly, and
-// only for a deliberate wire-format change:
+// Mints the TokenTypeV5 golden-token fixture golden_test.go verifies. Run
+// explicitly, and only for a deliberate wire-format change:
 //
 //	LIMES_WRITE_GOLDEN=1 go test . -run TestGenerateGoldenToken
 //
@@ -39,6 +39,17 @@ const (
 	goldenWriteEnv  = "LIMES_WRITE_GOLDEN"
 	goldenWriteFlag = "1"
 )
+
+// goldenFiles are the fixtures, one per token type. The v4 one is frozen: it
+// carries limes_gen, which nothing mints any more, and is kept to show a v4
+// token still verifies. The v5 one is what TestGenerateGoldenToken writes.
+var goldenFiles = map[TokenType]string{
+	TokenTypeV4: "golden_token.jwt",
+	TokenTypeV5: "golden_token_v5.jwt",
+}
+
+// goldenPath is the fixture of token type typ.
+func goldenPath(typ TokenType) string { return filepath.Join("testdata", goldenFiles[typ]) }
 
 // goldenClock is the fixed issuance instant. The module-side verifier pins
 // the same value so nbf/exp stay inside the window forever.
@@ -68,7 +79,7 @@ func TestGenerateGoldenToken(t *testing.T) {
 	}
 
 	priv := ed25519.NewKeyFromSeed(goldenSeed[:])
-	signer, err := NewSigner(SignerConfig{KeyID: goldenKID, Key: priv})
+	signer, err := NewSigner(SignerConfig{KeyID: goldenKID, Key: priv, TokenType: TokenTypeV5})
 	if err != nil {
 		t.Fatalf("signer: %v", err)
 	}
@@ -105,7 +116,7 @@ func TestGenerateGoldenToken(t *testing.T) {
 		t.Fatalf("issue: %v", err)
 	}
 
-	out := filepath.Join("testdata", "golden_token.jwt")
+	out := goldenPath(TokenTypeV5)
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}

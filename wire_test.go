@@ -3,6 +3,8 @@ package limes
 import (
 	"reflect"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 // The exported types carry no wire format, and the wire structs carry every
@@ -13,8 +15,11 @@ func TestWireStructsMirrorTheExportedTypes(t *testing.T) {
 		{reflect.TypeFor[Principal](), reflect.TypeFor[wirePrincipal]()},
 		{reflect.TypeFor[AgentPrincipal](), reflect.TypeFor[wireAgent]()},
 	}
+	// v4's spelling of AgentPrincipal.ParentRunID is the one field a wire
+	// struct has beyond its type's.
+	extra := map[reflect.Type]int{reflect.TypeFor[wireAgent](): 1}
 	for _, p := range pairs {
-		if p.exported.NumField() != p.wire.NumField() {
+		if p.exported.NumField()+extra[p.wire] != p.wire.NumField() {
 			t.Errorf("%s has %d fields, %s %d", p.exported.Name(), p.exported.NumField(), p.wire.Name(), p.wire.NumField())
 		}
 		for i := range p.exported.NumField() {
@@ -58,13 +63,16 @@ func TestWireStructsMirrorTheExportedTypes(t *testing.T) {
 	}
 }
 
-// Every field crosses the wire and back.
+// Every field crosses the wire and back, under either token type.
 func TestWireStructsRoundTrip(t *testing.T) {
 	p := Principal{Type: PrincipalTypeAgent, Subject: "agent:a", Agent: &AgentPrincipal{
-		AgentType: "worker", AgentVersion: "1", Model: "m", MCPClient: "host@1",
+		AgentType: "worker", AgentVersion: "1", RunID: uuid.New(), ParentRunID: uuid.New(), Model: "m", MCPClient: "host@1",
 	}}
-	if got := toWirePrincipal(p).principal(); !reflect.DeepEqual(got, p) {
-		t.Errorf("principal round trip = %+v, want %+v", got, p)
+	for _, typ := range tokenTypes {
+		got, err := toWirePrincipal(p, typ).principal(typ)
+		if err != nil || !reflect.DeepEqual(got, p) {
+			t.Errorf("%s: principal round trip = %+v, %v; want %+v", typ, got, err, p)
+		}
 	}
 	c := Caveats{
 		Ops: []Op{OpGet}, ResourcePrefixes: []string{"a/"}, ResourceURIs: []string{"a/b"},

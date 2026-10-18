@@ -66,7 +66,6 @@ func TestIssueRejectsMalformedRequests(t *testing.T) {
 		"nbf after expiry":   func(r *IssueRequest) { r.NotBefore = time.Now().Add(time.Hour) },
 		"empty audience":     func(r *IssueRequest) { r.Audience = []string{""} },
 		"negative budget":    func(r *IssueRequest) { r.Caveats.Budget = BudgetCeiling{Max: -1} },
-		"negative gen":       func(r *IssueRequest) { r.Generation = -1 },
 		"missing issued-by":  func(r *IssueRequest) { r.IssuedBy = Principal{} },
 		"empty prefix entry": func(r *IssueRequest) { r.Caveats.ResourcePrefixes = []string{""} },
 	}

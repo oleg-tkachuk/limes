@@ -28,7 +28,6 @@ type capabilityRecord struct {
 	NotBefore       time.Time       `json:"not_before"`
 	ExpiresAt       time.Time       `json:"expires_at"`
 	ParentID        uuid.UUID       `json:"parent_id"`
-	Generation      int64           `json:"generation"`
 	ConfirmationJKT string          `json:"confirmation_jkt"`
 }
 
@@ -40,12 +39,13 @@ type principalRecord struct {
 }
 
 type agentRecord struct {
-	AgentType     string    `json:"agent_type"`
-	AgentVersion  string    `json:"agent_version"`
-	RunID         uuid.UUID `json:"run_id"`
-	ParentAgentID uuid.UUID `json:"parent_agent_id"`
-	Model         string    `json:"model"`
-	MCPClient     string    `json:"mcp_client"`
+	AgentType    string    `json:"agent_type"`
+	AgentVersion string    `json:"agent_version"`
+	RunID        uuid.UUID `json:"run_id"`
+	// ParentRunID keeps the key it was first stored under.
+	ParentRunID uuid.UUID `json:"parent_agent_id"`
+	Model       string    `json:"model"`
+	MCPClient   string    `json:"mcp_client"`
 }
 
 type caveatsRecord struct {
@@ -71,7 +71,7 @@ func toPrincipalRecord(p limes.Principal) principalRecord {
 	if a := p.Agent; a != nil {
 		r.Agent = &agentRecord{
 			AgentType: a.AgentType, AgentVersion: a.AgentVersion, RunID: a.RunID,
-			ParentAgentID: a.ParentAgentID, Model: a.Model, MCPClient: a.MCPClient,
+			ParentRunID: a.ParentRunID, Model: a.Model, MCPClient: a.MCPClient,
 		}
 	}
 	return r
@@ -82,7 +82,7 @@ func (r principalRecord) principal() limes.Principal {
 	if a := r.Agent; a != nil {
 		p.Agent = &limes.AgentPrincipal{
 			AgentType: a.AgentType, AgentVersion: a.AgentVersion, RunID: a.RunID,
-			ParentAgentID: a.ParentAgentID, Model: a.Model, MCPClient: a.MCPClient,
+			ParentRunID: a.ParentRunID, Model: a.Model, MCPClient: a.MCPClient,
 		}
 	}
 	return p
@@ -100,7 +100,7 @@ func toCapabilityRecord(c limes.Capability) capabilityRecord {
 			IdempotencyKeyRequired: cv.IdempotencyKeyRequired, SourceIPCIDR: cv.SourceIPCIDR,
 		},
 		IssuedAt: c.IssuedAt, NotBefore: c.NotBefore, ExpiresAt: c.ExpiresAt, ParentID: c.ParentID,
-		Generation: c.Generation, ConfirmationJKT: c.ConfirmationJKT,
+		ConfirmationJKT: c.ConfirmationJKT,
 	}
 }
 
@@ -116,7 +116,7 @@ func (r capabilityRecord) capability() limes.Capability {
 			IdempotencyKeyRequired: cv.IdempotencyKeyRequired, SourceIPCIDR: cv.SourceIPCIDR,
 		},
 		IssuedAt: r.IssuedAt, NotBefore: r.NotBefore, ExpiresAt: r.ExpiresAt, ParentID: r.ParentID,
-		Generation: r.Generation, ConfirmationJKT: r.ConfirmationJKT,
+		ConfirmationJKT: r.ConfirmationJKT,
 	}
 }
 

@@ -24,12 +24,14 @@ func FuzzParseClaims(f *testing.F) {
 	f.Add([]byte(`{"iss":"a","iss":"b"}`))
 	f.Add([]byte(`{"limes_caveats":{"Ops":["get"]}}`))
 	f.Fuzz(func(t *testing.T, raw []byte) {
-		c, err := parseClaims(jose.B64(raw))
-		if err != nil {
-			return
-		}
-		if c.Caveats.Budget.Max < 0 || c.Caveats.Budget.Max > MaxNanos {
-			t.Fatalf("accepted a budget of %d", int64(c.Caveats.Budget.Max))
+		for _, typ := range tokenTypes {
+			c, err := parseClaims(jose.B64(raw), typ)
+			if err != nil {
+				continue
+			}
+			if c.Caveats.Budget.Max < 0 || c.Caveats.Budget.Max > MaxNanos {
+				t.Fatalf("%s accepted a budget of %d", typ, int64(c.Caveats.Budget.Max))
+			}
 		}
 	})
 }
@@ -60,7 +62,9 @@ func FuzzOpenBiscuit(f *testing.F) {
 		if err != nil {
 			return
 		}
-		_, _, _ = attenuate(&Capability{BiscuitRoot: anyRoot})
+		for _, typ := range tokenTypes {
+			_, _, _ = attenuate(&Capability{BiscuitRoot: anyRoot}, typ)
+		}
 	})
 }
 

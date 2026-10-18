@@ -251,7 +251,7 @@ func Attenuate(token string, a Attenuation) (string, error) {
 // signature chain against the root the JWT vouches for, then each
 // attenuation block folded in. That function also returns the token's
 // revocation ids, authority first, read from the chain it verified.
-func openBiscuit(token string) (string, func(parent *Capability) (*Capability, [][]byte, error), error) {
+func openBiscuit(token string) (string, func(parent *Capability, typ TokenType) (*Capability, [][]byte, error), error) {
 	raw, container, err := decodeBiscuitContainer(token)
 	if err != nil {
 		return "", nil, err
@@ -266,7 +266,7 @@ func openBiscuit(token string) (string, func(parent *Capability) (*Capability, [
 	}
 	// The chain is checked once the sealed token has named its root; the
 	// caller verifies that token first and hands back what it vouches for.
-	attenuate := func(parent *Capability) (*Capability, [][]byte, error) {
+	attenuate := func(parent *Capability, typ TokenType) (*Capability, [][]byte, error) {
 		root, err := jose.UnB64(parent.BiscuitRoot)
 		if err != nil || len(root) != ed25519.PublicKeySize {
 			return nil, nil, fmt.Errorf("%w: sealed token names no biscuit root", ErrInvalidToken)
@@ -296,8 +296,9 @@ func openBiscuit(token string) (string, func(parent *Capability) (*Capability, [
 			cur = next
 		}
 		// Each block narrows what it was handed, but the result must still
-		// be caveats the issuer could have minted.
-		if err := cur.Caveats.Validate(); err != nil {
+		// be caveats the issuer could have minted, under the sealed token's
+		// type.
+		if err := cur.Caveats.validateAs(typ); err != nil {
 			return nil, nil, refuseToken(ErrBiscuitAttenuation, err)
 		}
 		return &cur, ids, nil
