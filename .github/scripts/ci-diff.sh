@@ -33,7 +33,9 @@ if [ -z "$from" ] || [ -z "$to" ] || [ "$from" = "$ZERO_SHA" ] ||
     echo "no usable base (${from:-none}) — running everything" >&2
     relevant="$("$here/ci-relevant.sh" --all)"
 else
-    changed="$(git diff --name-only "$from" "$to")"
+    # --no-renames lists a rename's old path too: a CI definition moved
+    # away from its place is a change to what CI runs.
+    changed="$(git diff --name-only --no-renames "$from" "$to")"
     printf '%s\n' "$changed" >&2
     relevant="$(printf '%s\n' "$changed" | "$here/ci-relevant.sh")"
 fi

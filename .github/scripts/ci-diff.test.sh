@@ -33,7 +33,15 @@ echo 'package m // more' >m.go
 commit code
 code=$(git rev-parse HEAD)
 
+mkdir -p .github/workflows && echo 'name: ci' >.github/workflows/ci.yaml
+commit workflow
+workflow=$(git rev-parse HEAD)
+git mv .github/workflows/ci.yaml docs/ci.yaml
+commit moved
+moved=$(git rev-parse HEAD)
+
 check "a pull request with documentation only" "relevant=false" "$(classify BASE="$base" HEAD="$docs")"
+check "a workflow moved into docs" "relevant=true" "$(classify BASE="$workflow" HEAD="$moved")"
 check "a pull request with code" "relevant=true" "$(classify BASE="$base" HEAD="$code")"
 check "a push of documentation only" "relevant=false" "$(classify BEFORE="$base" AFTER="$docs")"
 check "a push of code" "relevant=true" "$(classify BEFORE="$docs" AFTER="$code")"
