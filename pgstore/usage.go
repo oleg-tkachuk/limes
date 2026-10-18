@@ -317,12 +317,19 @@ func (s *UsageStore) SetTenantBudget(ctx context.Context, req limes.SetTenantBud
 	}
 	var out limes.TenantBudget
 	err := s.inTenantTx(ctx, req.TenantID, func(tx pgx.Tx) error {
+		// The aggregate is created, with no unit yet, before it is locked:
+		// locking a row that is not there locks nothing, and a first charge
+		// that created it meanwhile would be overwritten by the write below.
+		// Created here, the call waits for that charge and reads its counts.
+		if _, err := tx.Exec(ctx, sqlCreateTenant, req.TenantID, "", s.clock()); err != nil {
+			return err
+		}
 		b, err := lockTenant(ctx, tx, req.TenantID)
 		if err != nil {
 			return err
 		}
-		// A missing budget expects version 0; an existing one its current
-		// version.
+		// A budget with no ceiling set yet expects version 0; an existing one
+		// its current version.
 		if req.ExpectedVersion != b.version {
 			return limes.ErrTenantBudgetVersionMismatch
 		}
