@@ -607,7 +607,10 @@ until `ReleaseExpired` runs.
 
 ## Observe the meter
 
-`Instrument` wraps a `UsageStore` in OpenTelemetry instruments: charge and
+`otelmetric.Instrument`, from the nested module
+`github.com/oleg-tkachuk/limes/otelmetric`, wraps a `UsageStore` in
+OpenTelemetry instruments — a module of its own, so limes itself resolves no
+OpenTelemetry dependency: charge and
 settle attempts, reservations and request bumps counted by outcome
 (`allowed`, `overrun`, `budget_exceeded`, `tenant_budget_exceeded`,
 `request_limit_exceeded` — the refusals named as their `Reason` — and
@@ -616,9 +619,9 @@ charge, by `unit_code`. Instruments are created per store, and an error
 creating them is returned:
 
 ```go
-usage, err := limes.Instrument(store,
-    limes.WithMeterProvider(provider), // default: the global provider
-    limes.WithTenantAttribute(),       // opt-in: one series per tenant
+usage, err := otelmetric.Instrument(store,
+    otelmetric.WithMeterProvider(provider), // default: the global provider
+    otelmetric.WithTenantAttribute(),       // opt-in: one series per tenant
 )
 ```
 
@@ -682,7 +685,7 @@ against PostgreSQL in a container, as a role that owns no table, on a pool of
 two connections — `dpop` and `jwks` run theirs against their shipped
 implementations, and `redisreplay` runs `dpoptest` against Redis.
 
-`Instrument` wraps a `UsageStore` and keeps every interface of `limes` the
+`otelmetric.Instrument` wraps a `UsageStore` and keeps every interface of `limes` the
 store implements — the optional `CopyUsageReader` and `TenantUsageEraser`. A decorator of your
 own should do the same: assert each optional interface on the store it wraps
 and forward it, or a caller checking for it finds it gone.

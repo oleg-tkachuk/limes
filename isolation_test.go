@@ -14,7 +14,8 @@ import (
 // This module must be usable by a third party that runs neither object
 // storage nor a particular database, so its RESOLVED dependency graph — not
 // its go.mod, a transitive pull disqualifies it just as much — may contain no
-// database driver and no object-storage SDK. The check lives in the module's
+// database driver, no object-storage SDK and no OpenTelemetry, which the
+// otelmetric module brings for a consumer that wants it. The check lives in the module's
 // own suite so that `task verify-all`, and through it CI, cannot run without
 // it.
 
@@ -22,6 +23,7 @@ import (
 const (
 	labelDatabaseDriver = "a database driver"
 	labelStorageSDK     = "an object-storage SDK"
+	labelTelemetry      = "OpenTelemetry"
 )
 
 // modulePath is this module's own import path. The live check
@@ -59,6 +61,7 @@ var forbiddenImports = []forbiddenImport{
 	{prefix: "github.com/minio/minio-go", label: labelStorageSDK},
 	{prefix: "cloud.google.com/go/storage", label: labelStorageSDK},
 	{prefix: "github.com/Azure/azure-sdk-for-go", label: labelStorageSDK},
+	{prefix: "go.opentelemetry.io", label: labelTelemetry},
 }
 
 // dependencyViolation is one forbidden package found in the graph.
@@ -121,7 +124,12 @@ func TestFindForbidden(t *testing.T) {
 	}{
 		{
 			name:  "clean graph",
-			paths: []string{"fmt", "github.com/google/uuid", "go.opentelemetry.io/otel", modulePath},
+			paths: []string{"fmt", "github.com/google/uuid", modulePath},
+		},
+		{
+			name:  "opentelemetry stays in its own module",
+			paths: []string{"go.opentelemetry.io/otel/metric"},
+			want:  []dependencyViolation{{importPath: "go.opentelemetry.io/otel/metric", label: labelTelemetry}},
 		},
 		{
 			name:  "one database driver",

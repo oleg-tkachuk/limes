@@ -14,6 +14,17 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.85.0
+
+- `Instrument`, `InstrumentOption`, `WithMeterProvider` and
+  `WithTenantAttribute` → the nested module
+  `github.com/oleg-tkachuk/limes/otelmetric`: `otelmetric.Instrument`,
+  `otelmetric.Option`, `otelmetric.WithMeterProvider`,
+  `otelmetric.WithTenantAttribute`, so limes no longer resolves
+  OpenTelemetry. Require the module and change the qualifier; the metric
+  names and attributes are unchanged, and the instrumentation scope is now
+  `github.com/oleg-tkachuk/limes/otelmetric`.
+
 ## v0.84.0
 
 - A problem body's `type` named the kind of refusal — `invalid-token` for an
