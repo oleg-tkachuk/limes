@@ -6,7 +6,9 @@
 # token.
 #
 # A fake gh stands in for the API. It logs every call's arguments to CALLS;
-# `pr view` answers from the FAKE_* variables, the files API with FAKE_FILES,
+# `pr view` answers from the FAKE_* variables, the files API with FAKE_FILES —
+# one path a line, or old>new for a rename — shaped as GitHub answers and
+# put through the script's own --jq,
 # a collaborator's permission from FAKE_PERMISSIONS keyed by login (a login
 # missing there fails), and `pr merge` fails when FAKE_MERGE_FAILS is set.
 #
@@ -30,7 +32,11 @@ case "$1 $2" in
         [ -z "${FAKE_MERGE_FAILS:-}" ] || { echo "GraphQL: Head branch was modified" >&2; exit 1; }
         ;;
     "api repos/"*/files)
-        printf '%s' "$FAKE_FILES"
+        while [ "$1" != --jq ]; do shift; done
+        printf '%s\n' "$FAKE_FILES" | jq -R -s '
+            split("\n") | map(select(. != "") | split(">")
+                | if length == 2 then {filename: .[1], previous_filename: .[0], status: "renamed"}
+                  else {filename: .[0], status: "modified"} end)' | jq -r "$2"
         ;;
     "api repos/"*/permission)
         login="${2%/permission}"
@@ -91,6 +97,12 @@ check "a workspace's checksums" false FAKE_FILES="go.work.sum"
 check "Task's own settings" false FAKE_FILES=".taskrc.yml"
 check "Renovate's settings" false FAKE_FILES="renovate.json"
 check "Renovate's settings, another spelling" false FAKE_FILES=".renovaterc.json5"
+# A rename names the path it leaves too: moving a CI definition out of its
+# place changes what CI runs.
+check "a workflow renamed out of .github" false FAKE_FILES="$(printf '.github/workflows/codeql.yaml>docs/codeql.yaml')"
+check "CODEOWNERS renamed away" false FAKE_FILES="$(printf '.github/CODEOWNERS>docs/CODEOWNERS')"
+check "Renovate's settings renamed away" false FAKE_FILES="$(printf 'renovate.json>docs/renovate.json')"
+check "a Go file renamed" true FAKE_FILES="$(printf 'old.go>new.go')"
 # A refused merge — the head moved between the read and the merge — is
 # reported and leaves the pull request as it is.
 check "a merge GitHub refuses" true FAKE_MERGE_FAILS=1

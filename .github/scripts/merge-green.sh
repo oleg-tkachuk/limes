@@ -71,8 +71,11 @@ merge_if_green() {
         echo "::notice::#$pr is by $author, who cannot push here; left for a person to merge"
         return 0
     fi
+    # A renamed file names its old path only in previous_filename: moving a
+    # CI definition out of its place changes what CI runs as surely as
+    # deleting it does.
     local files
-    files="$(gh_retry api "repos/${REPO}/pulls/${pr}/files" --paginate --jq '.[].filename')"
+    files="$(gh_retry api "repos/${REPO}/pulls/${pr}/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)')"
     while IFS= read -r path; do
         [ -n "$path" ] || continue
         if defines_ci "$path"; then
