@@ -370,6 +370,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"TenantBudgetReadsAgree", checkTenantBudgetReads[TX]},
 		{"ReservationsReadBack", checkReservations[TX]},
 		{"AHoldNeverOutlivesItsCapability", checkHoldWithinCapability[TX]},
+		{"AHoldDatesTheTenantBudget", checkHoldDatesTenantBudget[TX]},
 		{"SumsExactly", checkSumsExactly[TX]},
 		{"ReservationsPage", checkReservationsPage[TX]},
 		{"AHoldWithNoTTLLastsTheDefault", checkDefaultReservationTTL[TX]},
@@ -1435,6 +1436,35 @@ func sameCeiling[T comparable](a, b *T) bool {
 
 // Reserve, GetReservation and ListReservations read one hold the same way,
 // and a settled or released hold is gone from both.
+// checkHoldDatesTenantBudget holds a store to dating the tenant's aggregate
+// whenever it writes it: a tenant that has only ever reserved reads back
+// when that happened, and a release dates it again.
+func checkHoldDatesTenantBudget[TX any](t *testing.T, f fixture[TX]) {
+	if f.Now == nil || f.Advance == nil {
+		t.Skip("Env.Now or Env.Advance not set")
+	}
+	// later is how far the clock moves before the release.
+	const later = time.Minute
+	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !b.UpdatedAt.Equal(f.Now()) {
+		t.Errorf("after the first hold the aggregate is dated %s, want %s", b.UpdatedAt, f.Now())
+	}
+	f.Advance(later)
+	if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{Subject: f.childSubject(), ReservationID: r.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if b, err = f.Usage.GetTenantBudget(f.Ctx, f.Tenant); err != nil || !b.UpdatedAt.Equal(f.Now()) {
+		t.Errorf("after the release the aggregate is dated %s, %v; want %s", b.UpdatedAt, err, f.Now())
+	}
+}
+
 // checkHoldWithinCapability holds a store to ending a hold no later than its
 // capability: a TTL past the capability's expiry is cut to it, so a hold no
 // one can settle any more does not keep the ancestors' and the tenant's
