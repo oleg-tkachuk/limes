@@ -512,6 +512,8 @@ func (s *Store) depthLocked(c limes.Capability) int {
 	return n
 }
 
+// ListByPrincipal pages one principal's capabilities, as the Store contract
+// orders them.
 func (s *Store) ListByPrincipal(_ context.Context, req limes.ListByPrincipalRequest) (limes.Page[limes.Capability], error) {
 	if err := req.Validate(); err != nil {
 		return limes.Page[limes.Capability]{}, err
@@ -1351,6 +1353,7 @@ func (s *UsageStore[TX]) Refund(_ context.Context, req limes.RefundRequest) (lim
 	return receipt, nil
 }
 
+// GetUsage reads one capability's counters.
 func (s *UsageStore[TX]) GetUsage(_ context.Context, capID uuid.UUID) (limes.Usage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1380,6 +1383,7 @@ func (s *UsageStore[TX]) CopyUsage(_ context.Context, req limes.CopyUsageRequest
 	return limes.CopyUsageResult{Copies: out}, nil
 }
 
+// GetTenantBudget reads one tenant's aggregate and ceiling.
 func (s *UsageStore[TX]) GetTenantBudget(_ context.Context, tenantID uuid.UUID) (limes.TenantBudget, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1390,6 +1394,7 @@ func (s *UsageStore[TX]) GetTenantBudget(_ context.Context, tenantID uuid.UUID) 
 	return b, nil
 }
 
+// SetTenantBudget sets a tenant's ceiling under the request's version guard.
 func (s *UsageStore[TX]) SetTenantBudget(_ context.Context, args limes.SetTenantBudgetRequest) (limes.TenantBudget, error) {
 	if err := args.Validate(); err != nil {
 		return limes.TenantBudget{}, err
@@ -1441,6 +1446,7 @@ func (s *UsageStore[TX]) SetTenantBudget(_ context.Context, args limes.SetTenant
 	return b, nil
 }
 
+// ListTenantBudgets pages the tenants' aggregates, most at risk first.
 func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args limes.ListTenantBudgetsRequest) (limes.Page[limes.TenantBudget], error) {
 	if err := args.Validate(); err != nil {
 		return limes.Page[limes.TenantBudget]{}, err
@@ -1644,6 +1650,8 @@ func (s *UsageStore[TX]) EraseTenantUsage(_ context.Context, req limes.EraseTena
 	return nil
 }
 
+// PurgeOrphans drops the counters of capabilities no longer on record, a
+// batch at a time, releasing their holds first.
 func (s *UsageStore[TX]) PurgeOrphans(_ context.Context, req limes.PurgeOrphansRequest) (limes.PurgeOrphansResult, error) {
 	limit, err := housekeepingLimit(req.Limit)
 	if err != nil {
