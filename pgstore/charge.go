@@ -529,6 +529,10 @@ func (s *UsageStore) Reserve(ctx context.Context, req limes.ReserveRequest) (lim
 		if err := tx.QueryRow(ctx, sqlCapabilityExpiry, subject.CapabilityID()).Scan(&capExpires); err != nil {
 			return err
 		}
+		// A capability already expired could hold nothing anyone may settle.
+		if capExpires != nil && !capExpires.After(now) {
+			return limes.ErrExpired
+		}
 		if capExpires != nil && capExpires.Before(expires) {
 			expires = *capExpires
 		}
