@@ -294,7 +294,7 @@ func (v *Verifier) verify(ctx context.Context, req VerifyRequest, accept func(Ca
 		}
 	} else {
 		var err error
-		if cap, _, err = v.verifySigned(ctx, token); err != nil {
+		if cap, err = v.verifySigned(ctx, token); err != nil {
 			return VerifiedCapability{}, err
 		}
 		// The token sealed inside a Biscuit, lifted out to shed the
@@ -422,35 +422,34 @@ func (v *Verifier) verifyBiscuit(ctx context.Context, token string) (*grant, [][
 	if err != nil {
 		return nil, nil, err
 	}
-	sealed, typ, err := v.verifySigned(ctx, inner)
+	sealed, err := v.verifySigned(ctx, inner)
 	if err != nil {
 		return nil, nil, err
 	}
 	if sealed.biscuitRoot == "" {
 		return nil, nil, fmt.Errorf("%w: biscuit seals an ordinary token", ErrInvalidToken)
 	}
-	return attenuate(sealed, typ)
+	return attenuate(sealed)
 }
 
 // verifySigned checks a compact JWT's header, signature, issuer and tenant —
 // everything about the token itself; the time, audience and revocation gates
-// run in Verify on the capability the token finally grants. It returns the
-// token's type too, under whose rules a Biscuit sealing it is read.
-func (v *Verifier) verifySigned(ctx context.Context, token string) (*grant, TokenType, error) {
+// run in Verify on the capability the token finally grants.
+func (v *Verifier) verifySigned(ctx context.Context, token string) (*grant, error) {
 	// 1) Header: structure, algorithm, type, key id.
 	parts, err := jose.Split(token)
 	if err != nil {
-		return nil, "", refuseToken(ErrInvalidToken, err)
+		return nil, refuseToken(ErrInvalidToken, err)
 	}
 	header, err := parseHeader(parts.Header)
 	if err != nil {
-		return nil, "", refuseToken(ErrInvalidToken, err)
+		return nil, refuseToken(ErrInvalidToken, err)
 	}
 	if !slices.Contains(v.cfg.AcceptTokenTypes, TokenType(header.Typ)) {
-		return nil, "", fmt.Errorf("%w: typ %q is not one of %q", ErrInvalidToken, header.Typ, v.cfg.AcceptTokenTypes)
+		return nil, fmt.Errorf("%w: typ %q is not one of %q", ErrInvalidToken, header.Typ, v.cfg.AcceptTokenTypes)
 	}
 	if header.Kid == "" {
-		return nil, "", fmt.Errorf("%w: header missing kid", ErrInvalidToken)
+		return nil, fmt.Errorf("%w: header missing kid", ErrInvalidToken)
 	}
 
 	// 2) Key and signature — the cryptographic gate.
@@ -459,43 +458,43 @@ func (v *Verifier) verifySigned(ctx context.Context, token string) (*grant, Toke
 		// An unknown kid is the token's fault; a resolver that cannot
 		// answer — the issuer's keys out of reach, a store down — is ours.
 		if errors.Is(err, jwks.ErrUnknownKID) {
-			return nil, "", fmt.Errorf("%w: kid %q: %w", ErrInvalidToken, header.Kid, err)
+			return nil, fmt.Errorf("%w: kid %q: %w", ErrInvalidToken, header.Kid, err)
 		}
-		return nil, "", fmt.Errorf("limes: resolve kid %q: %w", header.Kid, err)
+		return nil, fmt.Errorf("limes: resolve kid %q: %w", header.Kid, err)
 	}
 	if err := verifyParts(parts, pub); err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	// 3) Claims, now known to be the issuer's.
 	typ := TokenType(header.Typ)
 	cap, err := parseClaims(parts.Payload, typ)
 	if err != nil {
-		return nil, "", refuseToken(ErrInvalidToken, err)
+		return nil, refuseToken(ErrInvalidToken, err)
 	}
 	if !slices.Contains(v.cfg.TrustedIssuers, cap.Issuer) {
-		return nil, "", fmt.Errorf("%w: untrusted issuer %q", ErrInvalidToken, cap.Issuer)
+		return nil, fmt.Errorf("%w: untrusted issuer %q", ErrInvalidToken, cap.Issuer)
 	}
 	if v.cfg.KeyIssuers != nil {
 		if bound, ok := v.cfg.KeyIssuers[header.Kid]; !ok || bound != cap.Issuer {
-			return nil, "", fmt.Errorf("%w: kid %q may not sign for issuer %q",
+			return nil, fmt.Errorf("%w: kid %q may not sign for issuer %q",
 				ErrInvalidToken, header.Kid, cap.Issuer)
 		}
 	}
 	if cap.Subject.TenantID == uuid.Nil {
-		return nil, "", fmt.Errorf("%w: capability has no tenant", ErrInvalidToken)
+		return nil, fmt.Errorf("%w: capability has no tenant", ErrInvalidToken)
 	}
 	if err := cap.Subject.Validate(); err != nil {
-		return nil, "", refuseToken(ErrInvalidToken, err)
+		return nil, refuseToken(ErrInvalidToken, err)
 	}
 	// What Issue refuses to mint, no token may carry: a caveat outside the
 	// rules has no one meaning to enforce — a negative limit read as none,
 	// an operation nobody defined.
 	if err := cap.Caveats.Validate(); err != nil {
-		return nil, "", refuseToken(ErrInvalidToken, err)
+		return nil, refuseToken(ErrInvalidToken, err)
 	}
 
-	return cap, typ, nil
+	return cap, nil
 }
 
 // proofRefusals are the dpop errors that refuse a proof; any other error

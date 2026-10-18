@@ -249,7 +249,7 @@ func Attenuate(token string, a Attenuation) (string, error) {
 // signature chain against the root the JWT vouches for, then each
 // attenuation block folded in. That function also returns the token's
 // revocation ids, authority first, read from the chain it verified.
-func openBiscuit(token string) (string, func(parent *grant, typ TokenType) (*grant, [][]byte, error), error) {
+func openBiscuit(token string) (string, func(parent *grant) (*grant, [][]byte, error), error) {
 	raw, container, err := decodeBiscuitContainer(token)
 	if err != nil {
 		return "", nil, err
@@ -264,7 +264,7 @@ func openBiscuit(token string) (string, func(parent *grant, typ TokenType) (*gra
 	}
 	// The chain is checked once the sealed token has named its root; the
 	// caller verifies that token first and hands back what it vouches for.
-	attenuate := func(parent *grant, typ TokenType) (*grant, [][]byte, error) {
+	attenuate := func(parent *grant) (*grant, [][]byte, error) {
 		root, err := jose.UnB64(parent.biscuitRoot)
 		if err != nil || len(root) != ed25519.PublicKeySize {
 			return nil, nil, fmt.Errorf("%w: sealed token names no biscuit root", ErrInvalidToken)
