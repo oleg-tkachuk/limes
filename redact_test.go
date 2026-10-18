@@ -1,9 +1,13 @@
 package limes
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 )
@@ -79,5 +83,39 @@ func TestFormattingKeepsThePublicKey(t *testing.T) {
 	}
 	if got, want := fmt.Sprintf("%x", key), fmt.Sprintf("%x", []byte(key.Public())); !strings.Contains(got, want) {
 		t.Errorf("SigningKey under %%x = %q, want the public key %s in it", got, want)
+	}
+}
+
+// A value that holds a private key also leaves it out of encoding/json and
+// of either slog handler, the two other ways a key reaches a log.
+func TestEncodingRedactsPrivateKeys(t *testing.T) {
+	key, err := GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	spellings := []string{base64.StdEncoding.EncodeToString(key.Private), fmt.Sprintf("%x", []byte(key.Private))}
+	for name, v := range map[string]any{
+		"SigningKey":    key,
+		"*SigningKey":   &key,
+		"SignerConfig":  SignerConfig{KeyID: key.KeyID, Key: key.Private},
+		"*SignerConfig": &SignerConfig{KeyID: key.KeyID, Key: key.Private},
+	} {
+		encoded, err := json.Marshal(v)
+		if err != nil {
+			t.Fatalf("%s: json.Marshal: %v", name, err)
+		}
+		var text, structured bytes.Buffer
+		slog.New(slog.NewTextHandler(&text, nil)).Info("key", "value", v)
+		slog.New(slog.NewJSONHandler(&structured, nil)).Info("key", "value", v)
+		for how, got := range map[string]string{"json.Marshal": string(encoded), "slog text": text.String(), "slog JSON": structured.String()} {
+			for _, spelling := range spellings {
+				if strings.Contains(got, spelling) {
+					t.Errorf("%s under %s = %s: carries the private key", name, how, got)
+				}
+			}
+			if !strings.Contains(got, key.KeyID) || !strings.Contains(got, redactedKeyText) {
+				t.Errorf("%s under %s = %s: want its kid and %s", name, how, got, redactedKeyText)
+			}
+		}
 	}
 }
