@@ -56,7 +56,7 @@ func ParseAuthorization(header string) (AuthScheme, string, error) {
 	if header == "" {
 		return "", "", ErrNoCredentials
 	}
-	name, credential, _ := strings.Cut(header, " ")
+	name, credential, separated := strings.Cut(header, " ")
 	var scheme AuthScheme
 	switch {
 	case strings.EqualFold(name, string(AuthSchemeBearer)):
@@ -65,9 +65,10 @@ func ParseAuthorization(header string) (AuthScheme, string, error) {
 		scheme = AuthSchemeDPoP
 	default:
 		// Another scheme's credentials are none of ours to judge. Its name
-		// goes in the error only when it can be no credential: with no
-		// single space after the scheme, the whole header is the "name".
-		if !isSchemeName(name) {
+		// goes in the error only when it can be no credential: a space must
+		// follow it, for a header with none is a bare credential — an API
+		// key of letters and digits reads as a scheme name too.
+		if !separated || !isSchemeName(name) {
 			return "", "", ErrNoCredentials
 		}
 		return "", "", fmt.Errorf("%w: scheme %q", ErrNoCredentials, name)
