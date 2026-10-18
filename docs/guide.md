@@ -58,7 +58,7 @@ has. Every rejection is a distinct sentinel; map each to whatever status your
 transport uses, or let `ErrorResponse` answer it the HTTP way (below).
 
 The token must carry a `typ` the verifier accepts (`AcceptTokenTypes`, by
-default `limes-cap-v4+jwt` and `limes-cap-v5+jwt`), a tenant and a principal of a
+default `limes-cap-v5+jwt`, the one format the package reads), a tenant and a principal of a
 known kind (`PrincipalTypeUser`, `PrincipalTypeAgent` or `PrincipalTypeService`; agent
 details only on an agent — `Principal.Validate`, which `Issue` and `Delegate`
 run too; an agent's `AgentPrincipal` — `AgentType`, `AgentVersion`, `RunID`,
@@ -1049,8 +1049,8 @@ stop rather than retry. The full table is in [diagrams.md](diagrams.md#answering
 | `VerifierConfig.Leeway` | `DefaultLeeway`, 30 seconds; `VerifierConfig.NoLeeway: true` for none |
 | `VerifierConfig.MaxTokenBytes` · `IssuerConfig.MaxTokenBytes` | `DefaultMaxTokenBytes`, 16 KiB |
 | `VerifierConfig.Leeway` bound | `MaxLeeway`, 5 minutes |
-| `VerifierConfig.AcceptTokenTypes` | `TokenTypeV4` and `TokenTypeV5` |
-| `SignerConfig.TokenType` | `TokenTypeV4` |
+| `VerifierConfig.AcceptTokenTypes` | `TokenTypeV5` |
+| `SignerConfig.TokenType` | `TokenTypeV5` |
 | `VerifierConfig.Realm` | `DefaultRealm`, `limes` |
 | `jwks.HandlerConfig.MaxAge` | `jwks.DefaultMaxAge`, 5 minutes; `HandlerConfig.Revalidate: true` for `max-age=0` |
 | `ListByPrincipalRequest.Limit` · `ListTenantBudgetsRequest.Limit` · `ListReservationsRequest.Limit` · `SumChargesRequest.Limit` · `CountRecordsRequest.Limit` | `DefaultListLimit` 50, at most `MaxListLimit` 500 |

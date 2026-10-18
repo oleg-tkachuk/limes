@@ -21,13 +21,6 @@ var builtinOps = map[Op]bool{
 	OpGet: true, OpPut: true, OpList: true, OpDelete: true, OpShare: true, OpManage: true,
 }
 
-// v4Ops are the operations TokenTypeV4 also defined, named without a
-// namespace: a v4 token carrying one still verifies, and is checked against
-// that name, but nothing mints one. Their effect is a consumer operation's —
-// mutating unless the server declares otherwise — since this package no
-// longer defines what they do.
-var v4Ops = map[Op]bool{"presign": true, "tag": true, "search": true, "embed": true}
-
 // readOnlyOps are the built-in operations that do not change state. Anything
 // else — including every consumer-defined operation, whose effect this package
 // cannot know — is treated as mutating, so a caveat that tightens mutations
@@ -62,18 +55,11 @@ func (op Op) Validate() error {
 // Validate reports whether the caveat bag is well formed. The issuer runs it
 // before minting anything, root or delegated, so every signed capability
 // carries caveats with one meaning.
-func (c Caveats) Validate() error { return c.validateAs(TokenTypeV5) }
-
-// validateAs is Validate under the rules of token type typ: a TokenTypeV4
-// token's caveats may also name the operations v4 defined (v4Ops).
-func (c Caveats) validateAs(typ TokenType) error {
+func (c Caveats) Validate() error {
 	if len(c.Ops) == 0 {
 		return fmt.Errorf("%w: at least one op required", ErrInvalidCaveats)
 	}
 	for _, op := range c.Ops {
-		if typ == TokenTypeV4 && v4Ops[op] {
-			continue
-		}
 		if err := op.Validate(); err != nil {
 			return err
 		}

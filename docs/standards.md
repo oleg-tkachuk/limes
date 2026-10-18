@@ -23,7 +23,7 @@ the test that holds it there.
 
 **RFC 7519, RFC 8725.** A capability token is a JWS-signed JWT. Following
 the JWT best current practice, it is explicitly typed — `typ:
-limes-cap-v5+jwt`, or the `limes-cap-v4+jwt` it replaces (§3.11), so no other JWT signed by the same key passes as a
+limes-cap-v5+jwt` (§3.11), so no other JWT signed by the same key passes as a
 capability — the algorithm is fixed by the verifier rather than read from the
 token (§3.1), and `iss` and `aud` are always checked (§3.8, §3.9). The
 version is part of `typ`: a token of another format version is refused
@@ -44,7 +44,7 @@ predate the RFC. DPoP challenges advertise `algs="Ed25519 ES256"`
 
 **RFC 7493 (I-JSON).** The claims — the standard ones, and the
 capability's own under `limes_` (`limes_principal`, `limes_caveats`,
-`limes_parent_id`, `limes_bsk`, and in v4 `limes_gen`) — are read with the semantics of
+`limes_parent_id`, `limes_bsk`) — are read with the semantics of
 `encoding/json/v2`: no member twice (§2.3), names in their exact case, UTF-8
 only (§2.1), and no member the format does not define — a caveat a verifier
 does not know is one it cannot enforce. Every integer is within ±(2^53 − 1)

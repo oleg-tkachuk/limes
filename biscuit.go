@@ -294,7 +294,7 @@ func openBiscuit(token string) (string, func(parent *grant, typ TokenType) (*gra
 		// Each block narrows what it was handed, but the result must still
 		// be caveats the issuer could have minted, under the sealed token's
 		// type.
-		if err := cur.Caveats.validateAs(typ); err != nil {
+		if err := cur.Caveats.Validate(); err != nil {
 			return nil, nil, refuseToken(ErrBiscuitAttenuation, err)
 		}
 		return &cur, ids, nil
