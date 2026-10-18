@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -312,6 +313,14 @@ func lock(ctx context.Context, tx pgx.Tx, l lockRequest) (*counters, error) {
 		if err := rows.Err(); err != nil {
 			return nil, err
 		}
+		// A row created above that the transaction cannot see is another
+		// tenant's under the same id, which ON CONFLICT DO NOTHING left in
+		// place: refused, never counted as zero or written through nil.
+		for _, id := range l.created {
+			if _, ok := c.usage[id]; !ok {
+				return nil, fmt.Errorf("%w: %s", errCounterHidden, id)
+			}
+		}
 	}
 	if len(l.copies) > 0 {
 		if l.createCopies {
@@ -336,9 +345,21 @@ func lock(ctx context.Context, tx pgx.Tx, l lockRequest) (*counters, error) {
 		if err := rows.Err(); err != nil {
 			return nil, err
 		}
+		if l.createCopies {
+			for _, id := range l.copies {
+				if _, ok := c.copies[string(id)]; !ok {
+					return nil, fmt.Errorf("%w: copy %x of %s", errCounterHidden, id, l.copiesCapID)
+				}
+			}
+		}
 	}
 	return c, nil
 }
+
+// errCounterHidden is a counter row lock created that the transaction cannot
+// see: one of another tenant holds the same id. Ids are random or signed, so
+// it means a store written outside pgstore, and the call is refused.
+var errCounterHidden = errors.New("pgstore: a counter row of the same id belongs to another tenant")
 
 // lockRequest names what lock reads.
 type lockRequest struct {

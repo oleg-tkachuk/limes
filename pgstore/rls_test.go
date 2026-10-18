@@ -461,7 +461,7 @@ func tableDigests(t *testing.T) map[string]string {
 // scopedTables is every table the schema's policies bind.
 var scopedTables = []string{
 	"capabilities", "revocations", "biscuit_revocations", "usage",
-	"copy_usage", "tenant_budgets", "charges", "reservations",
+	"copy_usage", "tenant_budgets", "charges", "reservations", "erased_tenants",
 }
 
 // Under the read-only setting each table's policies let its rows be read
@@ -472,6 +472,10 @@ func TestReadOnlyPoliciesOfEveryTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := f.usage.Reserve(WithTenant(t.Context(), f.mine), limes.ReserveRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}); err != nil {
+		t.Fatal(err)
+	}
+	// The other tenant's erase leaves its mark, a row of erased_tenants.
+	if err := f.usage.EraseTenantUsage(WithTenant(t.Context(), f.theirs), limes.EraseTenantUsageRequest{TenantID: f.theirs}); err != nil {
 		t.Fatal(err)
 	}
 	err := pgx.BeginFunc(t.Context(), app, func(tx pgx.Tx) error {
