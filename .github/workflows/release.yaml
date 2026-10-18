@@ -254,6 +254,9 @@ jobs:
     if: needs.release.outputs.limes-tag != ''
     runs-on: ubuntu-26.04
     timeout-minutes: 10
+    # AUTOMERGE_TOKEN lives in this environment, which only main may deploy to
+    # (auto-merge.yaml).
+    environment: automerge
     permissions:
       contents: read # the checkout; the push and the pull request act through AUTOMERGE_TOKEN
     steps:
