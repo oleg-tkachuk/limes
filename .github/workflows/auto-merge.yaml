@@ -5,9 +5,14 @@ name: Auto-merge
 #   - merge: when ci.yaml passes for a pull request, it is merged (a merge
 #     commit, as every merge into main has been) at the very commit that run
 #     tested;
-#   - auto-rebase: on each push to main, every open pull request that has
-#     fallen behind is rebased onto the new head, so it is tested against
-#     what it would actually merge into.
+#   - merge queue: main requires a pull request to be up to date before it
+#     merges, so one that falls behind is rebased onto main and tested again
+#     against what it would actually merge into. Only the first in line is:
+#     rebasing every one after each merge reran CI on all of them for one to
+#     merge. On each push to main, and each completed CI run of a pull
+#     request (the first in line may have failed), the first in line is
+#     rebased if it is behind; the rest wait their turn
+#     (.github/scripts/rebase-behind.sh).
 #
 # Both act through AUTOMERGE_TOKEN — a fine-grained token or GitHub App token
 # with Contents and Pull requests write on this repository — and never through
@@ -88,8 +93,14 @@ jobs:
         run: ./.github/scripts/merge-green.sh
 
   rebase:
-    name: Rebase open pull requests onto main
-    if: github.event_name == 'push'
+    name: Rebase the first pull request in line onto main
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request')
+    # One queue: two runs at once could each rebase a different first in line.
+    concurrency:
+      group: merge-queue
+      cancel-in-progress: false
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     # AUTOMERGE_TOKEN lives in this environment, which only main may deploy to.
@@ -104,7 +115,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: .github/scripts
 
-      - name: Rebase every pull request that is behind main
+      - name: Rebase the first pull request in line if it is behind main
         env:
           GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
           REPO: ${{ github.repository }}
