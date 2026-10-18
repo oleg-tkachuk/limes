@@ -136,3 +136,51 @@ func TestCheckSchema(t *testing.T) {
 		}
 	}
 }
+
+// A runtime role is one role: "public" in any case names every role there
+// is, and a NUL would be dropped from the name, so Migrate refuses both
+// before it changes anything.
+func TestMigrateRefusesARuntimeRoleThatIsNotOne(t *testing.T) {
+	conn := freshConn(t)
+	ctx := t.Context()
+	for _, role := range []string{"", "public", "PUBLIC", "Public", "app\x00role"} {
+		if err := Migrate(ctx, conn, MigrateOptions{RuntimeRoles: []string{role}}); err == nil {
+			t.Errorf("Migrate with runtime role %q: no error", role)
+		}
+	}
+	var created bool
+	if err := conn.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = $1)`, schema).Scan(&created); err != nil {
+		t.Fatal(err)
+	}
+	if created {
+		t.Error("a refused Migrate created the schema")
+	}
+}
+
+// intruderRole owns a schema of the store's name made before Migrate ran.
+const intruderRole = "limes_intruder"
+
+// A schema of the store's name that another role owns is not the store's:
+// that role could drop or replace what Migrate creates in it, policies
+// included, so Migrate refuses it.
+func TestMigrateRefusesASchemaAnotherRoleOwns(t *testing.T) {
+	conn := freshConn(t)
+	ctx := t.Context()
+	role := pgx.Identifier{intruderRole}.Sanitize()
+	if _, err := conn.Exec(ctx, "DROP ROLE IF EXISTS "+role); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, "CREATE ROLE "+role); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = conn.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
+		_, _ = owner.Exec(context.Background(), "DROP ROLE IF EXISTS "+role)
+	})
+	if _, err := conn.Exec(ctx, "CREATE SCHEMA "+pgx.Identifier{schema}.Sanitize()+" AUTHORIZATION "+role); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(ctx, conn, MigrateOptions{}); !errors.Is(err, ErrSchemaOwner) {
+		t.Fatalf("Migrate into a schema %s owns: err = %v, want ErrSchemaOwner", intruderRole, err)
+	}
+}

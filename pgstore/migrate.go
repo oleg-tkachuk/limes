@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/tern/v2/migrate"
@@ -59,9 +60,22 @@ func Migrate(ctx context.Context, conn *pgx.Conn, opts MigrateOptions) error {
 	if conn == nil {
 		return errors.New("pgstore: migrate: a connection is required")
 	}
+	if err := checkRuntimeRoles(opts.RuntimeRoles); err != nil {
+		return fmt.Errorf("pgstore: migrate: %w", err)
+	}
 	// The version table lives in the schema, so the schema comes first.
 	if _, err := conn.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+pgx.Identifier{schema}.Sanitize()); err != nil {
 		return fmt.Errorf("pgstore: migrate: create schema: %w", err)
+	}
+	// A schema of the store's name made earlier by another role is that
+	// role's to change: it could drop or replace the tables and policies
+	// Migrate puts in it.
+	var owned bool
+	if err := conn.QueryRow(ctx, sqlSchemaOwned, schema).Scan(&owned); err != nil {
+		return fmt.Errorf("pgstore: migrate: schema owner: %w", err)
+	}
+	if !owned {
+		return fmt.Errorf("%w: %s is owned by another role than the one migrating", ErrSchemaOwner, schema)
 	}
 	m, err := migrate.NewMigrator(ctx, conn, versionTable)
 	if err != nil {
@@ -80,6 +94,35 @@ func Migrate(ctx context.Context, conn *pgx.Conn, opts MigrateOptions) error {
 	return grant(ctx, conn, opts.RuntimeRoles)
 }
 
+// ErrSchemaOwner is Migrate finding the store's schema owned by another role
+// than the one it runs as.
+var ErrSchemaOwner = errors.New("pgstore: the schema belongs to another role")
+
+// sqlSchemaOwned is whether the role migrating owns the schema named $1.
+const sqlSchemaOwned = `SELECT pg_get_userbyid(nspowner) = current_user FROM pg_namespace WHERE nspname = $1`
+
+// publicRole is the name PostgreSQL reads as every role there is, quoted or
+// not, in a GRANT.
+const publicRole = "public"
+
+// checkRuntimeRoles refuses a runtime role that is not one role: an empty
+// name, "public" in any case, which would grant every role, and a name with
+// a NUL, which the identifier quoting drops, granting another role than the
+// one named.
+func checkRuntimeRoles(roles []string) error {
+	for _, r := range roles {
+		switch {
+		case r == "":
+			return errors.New("an empty runtime role name")
+		case strings.EqualFold(r, publicRole):
+			return fmt.Errorf("runtime role %q names every role", r)
+		case strings.ContainsRune(r, 0):
+			return fmt.Errorf("runtime role %q holds a NUL", r)
+		}
+	}
+	return nil
+}
+
 // grant gives each runtime role what the stores need of the schema, in one
 // transaction, so a role is granted everything or nothing.
 func grant(ctx context.Context, conn *pgx.Conn, roles []string) error {
@@ -90,9 +133,6 @@ func grant(ctx context.Context, conn *pgx.Conn, roles []string) error {
 	versions := pgx.Identifier{schema, versionTableName}.Sanitize()
 	err := pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
 		for _, r := range roles {
-			if r == "" {
-				return errors.New("an empty role name")
-			}
 			role := pgx.Identifier{r}.Sanitize()
 			for _, stmt := range []string{
 				"GRANT USAGE ON SCHEMA " + schemaName + " TO " + role,
