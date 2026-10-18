@@ -64,7 +64,7 @@ func TestRevokingTheRootBiscuitLeavesTheJWT(t *testing.T) {
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData},
-		Caveats:  Caveats{Ops: []Op{OpGet}},
+		Caveats:  Caveats{Ops: []Op{OpGet, OpShare}},
 		TTL:      time.Hour,
 	})
 	if err != nil {
@@ -120,7 +120,7 @@ func TestBiscuitCopyRefusesWhatVerifyRefuses(t *testing.T) {
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData},
-		Caveats:  Caveats{Ops: []Op{OpGet}},
+		Caveats:  Caveats{Ops: []Op{OpGet, OpShare}},
 		TTL:      time.Hour,
 	})
 	if err != nil {

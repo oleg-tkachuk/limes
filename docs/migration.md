@@ -14,6 +14,12 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.96.0
+
+- `Issuer.Biscuit` refuses a capability whose caveats do not allow
+  `OpShare`, as `ErrOpNotAllowed`, as `Delegate` does: a Biscuit form is
+  handed on offline. Grant `OpShare` to a capability you mint a Biscuit for.
+
 ## v0.95.0
 
 - `Reserve` refuses a capability whose record has already expired as

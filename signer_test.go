@@ -359,7 +359,7 @@ func TestIssuerSignsUnderTheCallersContext(t *testing.T) {
 	ctx := context.WithValue(context.Background(), requestValue{}, "request")
 	req := IssueRequest{
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
-		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}},
+		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet, OpShare}},
 	}
 	c, _, err := issuer.issue(ctx, req)
 	if err != nil {

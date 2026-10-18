@@ -211,10 +211,9 @@ or spend names a `Max`, or `Unlimited: true` to lift the ceiling — so a ceilin
 left out fails closed instead of opening up.
 
 **The rule**: only a parent granted `OpShare` may delegate — without it,
-`ErrOpNotAllowed` — and a child may only be narrower. `OpShare` gates the
-issuer minting a new principal, not Biscuit copies: whoever holds a Biscuit
-form attenuates it and hands it on without `OpShare`, as the same
-capability. A capability that must not be passed on gets no Biscuit form. Ask for an operation the parent
+`ErrOpNotAllowed` — and a child may only be narrower. `Issuer.Biscuit`
+requires `OpShare` too: whoever holds a Biscuit form attenuates it and hands
+it on offline, so a capability that must not be passed on gets none. Ask for an operation the parent
 lacks, a wider scope, a bigger budget, a wider audience or another tenant —
 or drop the parent's key binding or `IdempotencyKeyRequired`, or grant an
 `AllowTaintedRead` it lacks — and you get `ErrDelegationTooWide`; a
