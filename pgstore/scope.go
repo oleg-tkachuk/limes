@@ -27,6 +27,13 @@ const (
 // pooled connection carries nothing into the next one.
 const sqlSetLocal = `SELECT set_config($1, $2, true)`
 
+// sqlSetScope sets both of the settings the policies read, for the rest of
+// the transaction: the tenant, then whether every tenant is in scope.
+const sqlSetScope = `SELECT set_config($1, $2, true), set_config($3, $4, true)`
+
+// settingUnset is a setting the policies read as not set.
+const settingUnset = ""
+
 // scopeKey is the context key of a call's scope.
 type scopeKey struct{}
 
@@ -94,25 +101,23 @@ func checkSchemaReadOnly(ctx context.Context, tx pgx.Tx) error {
 
 // ScopeFromContext is the Scope a store uses when Config sets none: it sets
 // the settings the schema's policies read from WithTenant, WithAllTenants or
-// WithAllTenantsReadOnly.
+// WithAllTenantsReadOnly. It sets both of them every time — the one the scope
+// does not use to nothing — so a default the role, the database or the
+// session gives either one cannot widen the scope: a call scoped to no
+// tenant sees no row, whatever the defaults.
 func ScopeFromContext(ctx context.Context, tx pgx.Tx) error {
-	s, ok := ctx.Value(scopeKey{}).(scope)
-	switch {
-	case !ok:
-		return nil
-	case s.readOnly:
-		_, err := tx.Exec(ctx, sqlSetLocal, settingAllTenants, settingRead)
-		return err
-	case s.all:
-		return allTenants(ctx, tx)
+	tenant, all := settingUnset, settingUnset
+	if s, ok := ctx.Value(scopeKey{}).(scope); ok {
+		switch {
+		case s.readOnly:
+			all = settingRead
+		case s.all:
+			all = settingOn
+		default:
+			tenant = s.tenant.String()
+		}
 	}
-	_, err := tx.Exec(ctx, sqlSetLocal, settingTenant, s.tenant.String())
-	return err
-}
-
-// allTenants scopes tx to every tenant.
-func allTenants(ctx context.Context, tx pgx.Tx) error {
-	_, err := tx.Exec(ctx, sqlSetLocal, settingAllTenants, settingOn)
+	_, err := tx.Exec(ctx, sqlSetScope, settingTenant, tenant, settingAllTenants, all)
 	return err
 }
 
