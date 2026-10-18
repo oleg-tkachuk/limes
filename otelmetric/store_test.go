@@ -32,13 +32,13 @@ const (
 )
 
 // meteredStore is a metered memstore whose measurements reader collects.
-func meteredStore(t *testing.T, opts ...otelmetric.Option) (meter.UsageStore[struct{}], *sdkmetric.ManualReader, *memstore.Store) {
+func meteredStore(t *testing.T, opts ...otelmetric.Option) (meter.UsageStore, *sdkmetric.ManualReader, *memstore.Store) {
 	t.Helper()
 	return meteredStoreAt(t, time.Now, opts...)
 }
 
 // meteredStoreAt is meteredStore with its records read against now.
-func meteredStoreAt(t *testing.T, now func() time.Time, opts ...otelmetric.Option) (meter.UsageStore[struct{}], *sdkmetric.ManualReader, *memstore.Store) {
+func meteredStoreAt(t *testing.T, now func() time.Time, opts ...otelmetric.Option) (meter.UsageStore, *sdkmetric.ManualReader, *memstore.Store) {
 	t.Helper()
 	reader := sdkmetric.NewManualReader()
 	opts = append(opts, otelmetric.WithMeterProvider(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))))
@@ -46,11 +46,11 @@ func meteredStoreAt(t *testing.T, now func() time.Time, opts ...otelmetric.Optio
 	if err != nil {
 		t.Fatal(err)
 	}
-	inner, err := memstore.NewUsageStore(memstore.UsageStoreConfig[struct{}]{Records: records})
+	inner, err := memstore.NewUsageStore(memstore.UsageStoreConfig{Records: records})
 	if err != nil {
 		t.Fatal(err)
 	}
-	usage, err := otelmetric.Instrument[struct{}](inner, opts...)
+	usage, err := otelmetric.Instrument(inner, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestMeteringLabelsAmountsAndOutcomes(t *testing.T) {
 	failing := eur("0.1")
 	// A capability with room, so the callback runs.
 	failing.Subject = recordedSubject(ctx, t, records, subjectSpec{capID: uuid.New(), tenant: tenant, budget: budgetOf(limes.MustParseAmount("5")), unit: "EUR"})
-	if _, err := usage.Charge(ctx, failing, func(context.Context, meter.Charged[struct{}]) error { return boom }); !errors.Is(err, boom) {
+	if _, err := usage.Charge(ctx, failing, func(context.Context, meter.Charged) error { return boom }); !errors.Is(err, boom) {
 		t.Fatal(err)
 	}
 	held := recordedSubject(ctx, t, records, subjectSpec{capID: uuid.New(), tenant: tenant, unit: "EUR"})
@@ -208,20 +208,20 @@ func TestMeteringTenantAttributeIsOptIn(t *testing.T) {
 // hiddenCopies is a UsageStore that reads no copy counters: memstore's
 // usage store with CopyUsage out of reach.
 type hiddenCopies struct {
-	meter.UsageStore[struct{}]
+	meter.UsageStore
 }
 
 // The decorator reads copy counters exactly when the store it wraps does.
 func TestInstrumentKeepsCopyUsage(t *testing.T) {
-	if _, err := otelmetric.Instrument[struct{}](nil); err == nil {
+	if _, err := otelmetric.Instrument(nil); err == nil {
 		t.Fatal("Instrument(nil) wrapped nothing without an error")
 	}
 	records := newMemstoreRecords(t)
-	inner, err := memstore.NewUsageStore(memstore.UsageStoreConfig[struct{}]{Records: records})
+	inner, err := memstore.NewUsageStore(memstore.UsageStoreConfig{Records: records})
 	if err != nil {
 		t.Fatal(err)
 	}
-	wrap := func(u meter.UsageStore[struct{}]) meter.UsageStore[struct{}] {
+	wrap := func(u meter.UsageStore) meter.UsageStore {
 		t.Helper()
 		m, err := otelmetric.Instrument(u)
 		if err != nil {

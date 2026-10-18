@@ -14,6 +14,11 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## otelmetric/v0.3.0
+
+- `Instrument` loses its type parameter: it takes and returns the
+  non-generic `meter.UsageStore` of v0.101.0.
+
 ## v0.101.0
 
 - `meter.UsageStore`, `meter.Meter` and `meter.Charged` lose their type
