@@ -21,6 +21,10 @@ const contractTTL = time.Hour
 // child never outlives its parent by the time between their inserts.
 var contractExpiry = time.Now().Add(contractTTL)
 
+// contractCopyQuota is the quota of copies per capability the contract's
+// usage store is built with: above every check's own copies.
+const contractCopyQuota = 16
+
 func TestMeterContract(t *testing.T) {
 	metertest.Run(t, func(t *testing.T) metertest.Env[struct{}] {
 		t.Helper()
@@ -31,15 +35,16 @@ func TestMeterContract(t *testing.T) {
 		start := time.Now()
 		var offset atomic.Int64 // how far Advance has moved the clock
 		now := func() time.Time { return start.Add(time.Duration(offset.Load())) }
-		usage := mustUsage(t, UsageStoreConfig[struct{}]{Records: records, Now: now})
+		usage := mustUsage(t, UsageStoreConfig[struct{}]{Records: records, Now: now, MaxCopiesPerCapability: contractCopyQuota})
 		return metertest.Env[struct{}]{
-			Ctx:              context.Background(),
-			Usage:            usage,
-			Ledger:           NewLedger(usage),
-			Now:              now,
-			Tenant:           tenant,
-			Advance:          func(d time.Duration) { offset.Add(int64(d)) },
-			DeleteCapability: removeRecord(records),
+			MaxCopiesPerCapability: contractCopyQuota,
+			Ctx:                    context.Background(),
+			Usage:                  usage,
+			Ledger:                 NewLedger(usage),
+			Now:                    now,
+			Tenant:                 tenant,
+			Advance:                func(d time.Duration) { offset.Add(int64(d)) },
+			DeleteCapability:       removeRecord(records),
 			NewCapability: func(spec metertest.CapabilitySpec) (uuid.UUID, error) {
 				c := limes.Capability{
 					ID: uuid.New(), ParentID: spec.Parent, ExpiresAt: contractExpiry,

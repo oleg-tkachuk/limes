@@ -14,6 +14,16 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.97.0
+
+- A `UsageStore` counts at most a quota of Biscuit copies per capability —
+  `DefaultMaxCopiesPerCapability` unless configured — and `Bump`, `Charge`
+  and `Reserve` refuse a call that would count one more as
+  `ErrCopyLimitExceeded`. memstore and pgstore take
+  `MaxCopiesPerCapability` in their configuration; a store of your own
+  enforces a quota too, and passes it to metertest as
+  `Env.MaxCopiesPerCapability`.
+
 ## v0.96.0
 
 - `Issuer.Biscuit` refuses a capability whose caveats do not allow

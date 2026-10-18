@@ -123,6 +123,11 @@ type Env[TX any] struct {
 	// refused with limes.ErrScopeMismatch and changes nothing. Optional:
 	// without it, the checks of that are skipped.
 	ScopesTenants bool
+	// MaxCopiesPerCapability is the quota of Biscuit copies per capability
+	// the store under test was built with (limes.Meter, "Copies of a
+	// Biscuit"). Optional: without it, the check of the quota is skipped. Set
+	// it above any check's own copies — 16 is room enough.
+	MaxCopiesPerCapability int
 	// ReadOnlyCtx is a context scoped to reading every tenant's rows and
 	// writing none, as the store's consumer scopes it — by the store's own
 	// context or by a scope of the consumer's: Tenant's usage reads under
@@ -376,6 +381,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"OverrunRecordCrossesACopyBudget", checkCopyOverrun[TX]},
 		{"ACopyCountsForItsCapabilityAndGoesWithIt", checkCopyCountersGo[TX]},
 		{"ACopyIDSharedByTwoCapabilitiesCountsApart", checkCopySharedID[TX]},
+		{"CopiesPastTheQuotaAreRefused", checkCopyQuota[TX]},
 		{"CopyUsageRefusesAnInvalidRequest", checkCopyUsageRefusesInvalid[TX]},
 		{"TenantBudgetReadsAgree", checkTenantBudgetReads[TX]},
 		{"ReservationsReadBack", checkReservations[TX]},
@@ -1753,6 +1759,57 @@ func checkCopySharedID[TX any](t *testing.T, f fixture[TX]) {
 	}
 	if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: mine}); !errors.Is(err, limes.ErrRequestLimitExceeded) {
 		t.Errorf("a request past the copy's ceiling after the other capability's DeleteUsage: err = %v, want ErrRequestLimitExceeded", err)
+	}
+}
+
+// checkCopyQuota holds a store to its quota of copies per capability: a call
+// that would count one copy past it is refused, by Bump, Charge and Reserve
+// alike, and counts nothing; a copy already counted goes on being metered;
+// and the quota is the capability's, so dropping its usage frees it.
+func checkCopyQuota[TX any](t *testing.T, f fixture[TX]) {
+	quota := f.MaxCopiesPerCapability
+	if quota == 0 {
+		t.Skip("Env.MaxCopiesPerCapability not set")
+	}
+	capID, err := f.newCapability(uuid.Nil, unlimitedBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copies := func(prefix string, n int) []limes.CopyCeiling {
+		out := make([]limes.CopyCeiling, n)
+		for i := range out {
+			out[i] = limes.CopyCeiling{RevocationID: []byte(prefix + strconv.Itoa(i)), Requests: &limes.RequestCeiling{Unlimited: true}}
+		}
+		return out
+	}
+	subject := func(c []limes.CopyCeiling) limes.MeterSubject {
+		return newSubject(subjectSpec{capID: capID, tenant: f.Tenant, copies: c})
+	}
+	full := copies("counted-", quota)
+	if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: subject(full)}); err != nil {
+		t.Fatalf("Bump of %d copies, the quota: %v", quota, err)
+	}
+	past := slices.Concat(full[:1], copies("past-", 1))
+	if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: subject(past)}); !errors.Is(err, limes.ErrCopyLimitExceeded) || !errors.Is(err, limes.ErrRequestLimitExceeded) {
+		t.Errorf("Bump of a copy past the quota: err = %v, want ErrCopyLimitExceeded, matching ErrRequestLimitExceeded", err)
+	}
+	if _, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: subject(past), Amount: one}, nil); !errors.Is(err, limes.ErrCopyLimitExceeded) {
+		t.Errorf("Charge of a copy past the quota: err = %v, want ErrCopyLimitExceeded", err)
+	}
+	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: subject(past), Amount: one}); !errors.Is(err, limes.ErrCopyLimitExceeded) {
+		t.Errorf("Reserve of a copy past the quota: err = %v, want ErrCopyLimitExceeded", err)
+	}
+	if u, err := f.Usage.GetUsage(f.Ctx, capID); err != nil || u.RequestCount != 1 || u.SpentAmount != 0 || u.ReservedAmount != 0 {
+		t.Errorf("usage after the refused calls = %+v, %v; want only the first request counted", u, err)
+	}
+	if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: subject(full[:1])}); err != nil {
+		t.Errorf("Bump of a copy already counted, at the quota: %v", err)
+	}
+	if err := f.Usage.DeleteUsage(f.Ctx, limes.DeleteUsageRequest{CapabilityID: capID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: subject(past)}); err != nil {
+		t.Errorf("Bump of a new copy once the capability's usage was dropped: %v", err)
 	}
 }
 

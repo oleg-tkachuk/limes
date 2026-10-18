@@ -33,7 +33,7 @@ func (s *UsageStore) Bump(ctx context.Context, req limes.BumpRequest) (limes.Bum
 		c, err := lock(ctx, tx, lockRequest{
 			now:     s.clock(),
 			created: append([]uuid.UUID{subject.CapabilityID()}, ancestorIDs(ancestors)...), usageTenant: subject.TenantID(),
-			copies: copyIDs(subject.Copies()), createCopies: true, copiesCapID: subject.CapabilityID(),
+			copies: copyIDs(subject.Copies()), createCopies: true, copiesCapID: subject.CapabilityID(), maxCopies: s.maxCopies,
 		})
 		if err != nil {
 			return err
@@ -213,7 +213,7 @@ func (s *UsageStore) lockCharge(ctx context.Context, tx pgx.Tx, spec chargeSpec)
 		tenantID: spec.tenantID, tenantUnit: spec.unit,
 		created:     append([]uuid.UUID{spec.capID}, ancestorIDs(spec.ancestors)...),
 		usageTenant: spec.tenantID,
-		copies:      copyIDs(spec.copies), createCopies: true, copiesCapID: spec.capID,
+		copies:      copyIDs(spec.copies), createCopies: true, copiesCapID: spec.capID, maxCopies: s.maxCopies,
 	}
 	if spec.settling != nil {
 		l.existing = spec.settling.ancestors

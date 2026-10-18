@@ -83,6 +83,7 @@ var sentinelMatrix = map[string]sentinelCase{
 	"ErrBudgetExceeded":         {ErrBudgetExceeded, nil, ReasonBudgetExceeded, http.StatusForbidden},
 	"ErrTenantBudgetExceeded":   {ErrTenantBudgetExceeded, nil, ReasonTenantBudgetExceeded, http.StatusForbidden},
 	"ErrRequestLimitExceeded":   {ErrRequestLimitExceeded, nil, ReasonRequestLimitExceeded, http.StatusForbidden},
+	"ErrCopyLimitExceeded":      {ErrCopyLimitExceeded, nil, ReasonRequestLimitExceeded, http.StatusForbidden},
 
 	"ErrInvalidRequest": {ErrInvalidRequest, []string{famRequest}, "", http.StatusInternalServerError},
 	"ErrInvalidCaveats": {ErrInvalidCaveats, []string{famRequest}, "", http.StatusInternalServerError},

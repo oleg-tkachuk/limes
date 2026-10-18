@@ -201,6 +201,8 @@ INSERT INTO limes.copy_usage (revocation_id, capability_id, tenant_id)
 SELECT id, $2, $3 FROM unnest($1::bytea[]) AS id ORDER BY id
 ON CONFLICT (capability_id, revocation_id) DO NOTHING`
 
+	sqlCountCopies = `SELECT count(*) FROM limes.copy_usage WHERE capability_id = $1`
+
 	sqlLockCopies = `
 SELECT revocation_id, capability_id, request_count, spent, reserved
 FROM limes.copy_usage WHERE capability_id = $1 AND revocation_id = ANY ($2)
@@ -324,8 +326,21 @@ func lock(ctx context.Context, tx pgx.Tx, l lockRequest) (*counters, error) {
 	}
 	if len(l.copies) > 0 {
 		if l.createCopies {
-			if _, err := tx.Exec(ctx, sqlCreateCopies, l.copies, l.copiesCapID, l.usageTenant); err != nil {
+			tag, err := tx.Exec(ctx, sqlCreateCopies, l.copies, l.copiesCapID, l.usageTenant)
+			if err != nil {
 				return nil, err
+			}
+			// Copies new to the capability count against its quota. The
+			// capability's usage row, locked above, keeps two calls from
+			// counting past it together.
+			if tag.RowsAffected() > 0 {
+				var counted int
+				if err := tx.QueryRow(ctx, sqlCountCopies, l.copiesCapID).Scan(&counted); err != nil {
+					return nil, err
+				}
+				if counted > l.maxCopies {
+					return nil, fmt.Errorf("%w: capability %s would count %d, quota %d", limes.ErrCopyLimitExceeded, l.copiesCapID, counted, l.maxCopies)
+				}
 			}
 		}
 		rows, err := tx.Query(ctx, sqlLockCopies, l.copiesCapID, l.copies)
@@ -377,7 +392,10 @@ type lockRequest struct {
 	// revocation id alone can turn up on another capability's chain.
 	copies       [][]byte
 	createCopies bool
-	copiesCapID  uuid.UUID
+	// maxCopies is the store's quota of copies per capability, which
+	// createCopies may not take copiesCapID past.
+	maxCopies   int
+	copiesCapID uuid.UUID
 }
 
 // write stores every counter c holds, as it now stands.

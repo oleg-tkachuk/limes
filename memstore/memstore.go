@@ -90,8 +90,10 @@ type UsageStore[TX any] struct {
 	txFactory     func() TX
 
 	// copies counts each Biscuit copy that set limits of its own, by its
-	// capability and its block's revocation id.
-	copies map[copyKey]copyCounter
+	// capability and its block's revocation id; at most maxCopies of one
+	// capability.
+	copies    map[copyKey]copyCounter
+	maxCopies int
 
 	// periods counts each tenant's accounting periods: SetTenantBudget with
 	// ResetSpend starts the next one. A ledger entry records the period it
@@ -119,6 +121,36 @@ type copyKey struct {
 
 func copyKeyOf(capID uuid.UUID, revocationID []byte) copyKey {
 	return copyKey{capID: capID, id: string(revocationID)}
+}
+
+// hasKey reports whether m holds k.
+func hasKey[K comparable, V any](m map[K]V, k K) bool {
+	_, ok := m[k]
+	return ok
+}
+
+// admitCopiesLocked refuses copies that would take capID past maxCopies
+// counted copies, the ones it already counts aside. s.mu must be held.
+func (s *UsageStore[TX]) admitCopiesLocked(capID uuid.UUID, copies []limes.CopyCeiling) error {
+	added := map[copyKey]bool{}
+	for _, c := range copies {
+		if key := copyKeyOf(capID, c.RevocationID); !hasKey(s.copies, key) {
+			added[key] = true
+		}
+	}
+	if len(added) == 0 {
+		return nil
+	}
+	counted := 0
+	for k := range s.copies {
+		if k.capID == capID {
+			counted++
+		}
+	}
+	if counted+len(added) > s.maxCopies {
+		return fmt.Errorf("%w: capability %s counts %d, quota %d", limes.ErrCopyLimitExceeded, capID, counted, s.maxCopies)
+	}
+	return nil
 }
 
 // copyCounter is one Biscuit copy's own counters.
@@ -204,6 +236,10 @@ type UsageStoreConfig[TX any] struct {
 	Now func() time.Time
 	// TxFactory makes the handle passed to onCharged. Nil: the zero TX.
 	TxFactory func() TX
+	// MaxCopiesPerCapability is how many Biscuit copies the store counts
+	// for one capability (limes.Meter, "Copies of a Biscuit"). Zero:
+	// limes.DefaultMaxCopiesPerCapability; negative is refused.
+	MaxCopiesPerCapability int
 }
 
 // NewUsageStore returns an empty usage store.
@@ -217,14 +253,21 @@ func NewUsageStore[TX any](cfg UsageStoreConfig[TX]) (*UsageStore[TX], error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
+	switch {
+	case cfg.MaxCopiesPerCapability < 0:
+		return nil, fmt.Errorf("memstore: UsageStoreConfig.MaxCopiesPerCapability %d is negative", cfg.MaxCopiesPerCapability)
+	case cfg.MaxCopiesPerCapability == 0:
+		cfg.MaxCopiesPerCapability = limes.DefaultMaxCopiesPerCapability
+	}
 	return &UsageStore[TX]{
-		usage:    map[uuid.UUID]limes.Usage{},
-		tenantOf: map[uuid.UUID]uuid.UUID{},
-		budgets:  map[uuid.UUID]limes.TenantBudget{},
-		holds:    map[uuid.UUID]hold{},
-		copies:   map[copyKey]copyCounter{},
-		periods:  map[uuid.UUID]uint64{},
-		erased:   map[uuid.UUID]struct{}{},
+		maxCopies: cfg.MaxCopiesPerCapability,
+		usage:     map[uuid.UUID]limes.Usage{},
+		tenantOf:  map[uuid.UUID]uuid.UUID{},
+		budgets:   map[uuid.UUID]limes.TenantBudget{},
+		holds:     map[uuid.UUID]hold{},
+		copies:    map[copyKey]copyCounter{},
+		periods:   map[uuid.UUID]uint64{},
+		erased:    map[uuid.UUID]struct{}{},
 
 		byCharge:      map[uuid.UUID]int{},
 		byRef:         map[refKey]int{},
@@ -652,6 +695,9 @@ func (s *UsageStore[TX]) Bump(_ context.Context, req limes.BumpRequest) (limes.B
 	if err != nil {
 		return limes.BumpReceipt{}, err
 	}
+	if err := s.admitCopiesLocked(req.Subject.CapabilityID(), req.Subject.Copies()); err != nil {
+		return limes.BumpReceipt{}, err
+	}
 	u := s.usage[req.Subject.CapabilityID()]
 	next := u.RequestCount + 1
 	for _, c := range req.Subject.Copies() {
@@ -745,6 +791,9 @@ func (s *UsageStore[TX]) Charge(
 	}
 	ancestors, err := s.lineage(req.Subject.CapabilityID())
 	if err != nil {
+		return limes.ChargeReceipt{}, err
+	}
+	if err := s.admitCopiesLocked(req.Subject.CapabilityID(), req.Subject.Copies()); err != nil {
 		return limes.ChargeReceipt{}, err
 	}
 	return s.chargeLocked(ctx, req, unit, ancestors, nil, onCharged)
@@ -1101,6 +1150,9 @@ func (s *UsageStore[TX]) Reserve(_ context.Context, req limes.ReserveRequest) (l
 	}
 	ancestors, err := s.lineage(req.Subject.CapabilityID())
 	if err != nil {
+		return limes.Reservation{}, err
+	}
+	if err := s.admitCopiesLocked(req.Subject.CapabilityID(), req.Subject.Copies()); err != nil {
 		return limes.Reservation{}, err
 	}
 
