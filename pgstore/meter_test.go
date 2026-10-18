@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/meter"
@@ -29,7 +28,7 @@ WITH unhooked AS (
 DELETE FROM ` + schema + `.capabilities WHERE id = $1`
 
 func TestMeterContract(t *testing.T) {
-	metertest.Run(t, func(t *testing.T) metertest.Env[pgx.Tx] {
+	metertest.Run(t, func(t *testing.T) metertest.Env {
 		t.Helper()
 		return meterEnv(t, Config{}, WithAllTenantsReadOnly)
 	})
@@ -38,7 +37,7 @@ func TestMeterContract(t *testing.T) {
 // The contract holds under a consumer's Scope that sets the schema's own
 // settings — its read-only marker among them — and CheckSchemaScope.
 func TestMeterContractUnderAConsumersScope(t *testing.T) {
-	metertest.Run(t, func(t *testing.T) metertest.Env[pgx.Tx] {
+	metertest.Run(t, func(t *testing.T) metertest.Env {
 		t.Helper()
 		return meterEnv(t, Config{Scope: consumerScope, CheckScope: CheckSchemaScope}, consumerReadOnly)
 	})
@@ -50,7 +49,7 @@ const contractCopyQuota = 16
 
 // meterEnv is the contract's Env over stores of cfg's scope, readOnly giving the
 // context that scope reads as reading every tenant.
-func meterEnv(t *testing.T, cfg Config, readOnly func(context.Context) context.Context) metertest.Env[pgx.Tx] {
+func meterEnv(t *testing.T, cfg Config, readOnly func(context.Context) context.Context) metertest.Env {
 	t.Helper()
 	fresh(t)
 	clock := newFakeClock()
@@ -71,7 +70,7 @@ func meterEnv(t *testing.T, cfg Config, readOnly func(context.Context) context.C
 	if err != nil {
 		t.Fatal(err)
 	}
-	return metertest.Env[pgx.Tx]{
+	return metertest.Env{
 		MaxCopiesPerCapability: contractCopyQuota,
 		Ctx:                    WithTenant(t.Context(), tenant),
 		ScopesTenants:          true,
@@ -120,7 +119,7 @@ func TestMeterRefusesACounterRowOfAnotherTenant(t *testing.T) {
 		t.Errorf("Bump over another tenant's row: err = %v, want errCounterHidden", err)
 	}
 	called := false
-	onCharged := func(context.Context, meter.Charged[pgx.Tx]) error { called = true; return nil }
+	onCharged := func(context.Context, meter.Charged) error { called = true; return nil }
 	if _, err := f.usage.Charge(ctx, meter.ChargeRequest{Subject: subject, Amount: 1}, onCharged); !errors.Is(err, errCounterHidden) {
 		t.Errorf("Charge over another tenant's row: err = %v, want errCounterHidden", err)
 	}

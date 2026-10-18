@@ -6,7 +6,7 @@
 // twice. Run it from the store's own tests:
 //
 //	func TestMeterContract(t *testing.T) {
-//		metertest.Run(t, func(t *testing.T) metertest.Env[pgx.Tx] { … })
+//		metertest.Run(t, func(t *testing.T) metertest.Env { … })
 //	}
 //
 // The checks cover what a charge does at its ceilings and when it arrives
@@ -61,13 +61,13 @@ import (
 const DefaultCheckTimeout = watchdog.DefaultLimit
 
 // Env is one store under test, fresh for each check.
-type Env[TX any] struct {
+type Env struct {
 	// Ctx is the context every call for Tenant runs under — scoped to it, if
 	// the store needs that. A write for a tenant from NewTenant runs under
 	// TenantCtx, and ListTenantBudgets under ListCtx, when the Env sets them.
 	Ctx context.Context
 	// Usage is the store under test, with no usage recorded.
-	Usage meter.UsageStore[TX]
+	Usage meter.UsageStore
 	// Tenant is a tenant the store can charge, with no ceiling yet.
 	Tenant uuid.UUID
 	// NewCapability records a capability of Tenant as spec describes it, so
@@ -154,7 +154,7 @@ type CapabilitySpec struct {
 
 // newCapability records a capability under parent with the given budget and
 // no request ceiling.
-func (e Env[TX]) newCapability(parent uuid.UUID, budget limes.BudgetCeiling) (uuid.UUID, error) {
+func (e Env) newCapability(parent uuid.UUID, budget limes.BudgetCeiling) (uuid.UUID, error) {
 	return e.NewCapability(CapabilitySpec{Parent: parent, Requests: limes.RequestCeiling{Unlimited: true}, Budget: inUnit(budget)})
 }
 
@@ -167,7 +167,7 @@ func inUnit(c limes.BudgetCeiling) limes.BudgetCeiling {
 }
 
 // newTenant is another tenant, from NewTenant when the Env has one.
-func (e Env[TX]) newTenant() (uuid.UUID, error) {
+func (e Env) newTenant() (uuid.UUID, error) {
 	if e.NewTenant == nil {
 		return uuid.New(), nil
 	}
@@ -175,7 +175,7 @@ func (e Env[TX]) newTenant() (uuid.UUID, error) {
 }
 
 // tenantCtx is the context a write for tenant runs under.
-func (e Env[TX]) tenantCtx(tenant uuid.UUID) context.Context {
+func (e Env) tenantCtx(tenant uuid.UUID) context.Context {
 	if e.TenantCtx == nil {
 		return e.Ctx
 	}
@@ -183,7 +183,7 @@ func (e Env[TX]) tenantCtx(tenant uuid.UUID) context.Context {
 }
 
 // listCtx is the context a read across tenants runs under.
-func (e Env[TX]) listCtx() context.Context {
+func (e Env) listCtx() context.Context {
 	if e.ListCtx == nil {
 		return e.Ctx
 	}
@@ -217,15 +217,15 @@ const (
 )
 
 // fixture is an Env with a root, a child under it, and the tenant's ceiling set.
-type fixture[TX any] struct {
-	Env[TX]
+type fixture struct {
+	Env
 	root, child uuid.UUID
 }
 
-func newFixture[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) fixture[TX] {
+func newFixture(t *testing.T, setup func(t *testing.T) Env) fixture {
 	t.Helper()
 	env := setup(t)
-	f := fixture[TX]{Env: env}
+	f := fixture{Env: env}
 	var err error
 	if f.root, err = env.newCapability(uuid.Nil, limes.BudgetCeiling{Max: rootBudget}); err != nil {
 		t.Fatalf("root capability: %v", err)
@@ -294,13 +294,13 @@ func budgetOf(n limes.Nanos) *limes.BudgetCeiling { return &limes.BudgetCeiling{
 func requestsOf(n int64) *limes.RequestCeiling    { return &limes.RequestCeiling{Max: n} }
 
 // childSubject is the fixture's child as a verified capability would give it.
-func (f fixture[TX]) childSubject() limes.MeterSubject {
+func (f fixture) childSubject() limes.MeterSubject {
 	return newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget)})
 }
 
 // charge charges req against the fixture's child, its ceiling, tenant and
 // unit, unless the request's subject names another capability or ceiling.
-func (f fixture[TX]) charge(req meter.ChargeRequest, onCharged func(context.Context, meter.Charged[TX]) error) (meter.ChargeReceipt, error) {
+func (f fixture) charge(req meter.ChargeRequest, onCharged func(context.Context, meter.Charged) error) (meter.ChargeReceipt, error) {
 	s := req.Subject
 	requests, budget := s.Requests(), s.Budget()
 	spec := subjectSpec{capID: s.CapabilityID(), tenant: f.Tenant, requests: &requests, budget: &budget, copies: s.Copies()}
@@ -315,7 +315,7 @@ func (f fixture[TX]) charge(req meter.ChargeRequest, onCharged func(context.Cont
 	return f.Usage.Charge(f.Ctx, req, onCharged)
 }
 
-func (f fixture[TX]) spent(t *testing.T, id uuid.UUID) limes.Nanos {
+func (f fixture) spent(t *testing.T, id uuid.UUID) limes.Nanos {
 	t.Helper()
 	u, err := f.Usage.GetUsage(f.Ctx, id)
 	if errors.Is(err, meter.ErrUsageNotFound) {
@@ -327,7 +327,7 @@ func (f fixture[TX]) spent(t *testing.T, id uuid.UUID) limes.Nanos {
 	return u.SpentAmount
 }
 
-func (f fixture[TX]) tenantSpent(t *testing.T) limes.Nanos {
+func (f fixture) tenantSpent(t *testing.T) limes.Nanos {
 	t.Helper()
 	b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
 	if err != nil {
@@ -337,98 +337,98 @@ func (f fixture[TX]) tenantSpent(t *testing.T) limes.Nanos {
 }
 
 // Run runs every check as a subtest, each on a fresh Env from setup.
-func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
+func Run(t *testing.T, setup func(t *testing.T) Env) {
 	t.Helper()
 	checks := []struct {
 		name string
-		run  func(*testing.T, fixture[TX])
+		run  func(*testing.T, fixture)
 	}{
-		{"RejectionMovesNothing", checkRejectionMovesNothing[TX]},
-		{"ExternalRefChargesOnce", checkExternalRefChargesOnce[TX]},
-		{"ExternalRefChargesOnceConcurrently", checkExternalRefConcurrent[TX]},
-		{"ChargeByRef", checkChargeByRef[TX]},
-		{"MalformedRequestsAreRefused", checkMalformed[TX]},
-		{"OverrunRecordCrossesEveryCeiling", checkOverrunRecord[TX]},
-		{"SettleReplaysAndRecordsAnOverrun", checkSettle[TX]},
-		{"SettleOfNoReservationIsNotFound", checkSettleNil[TX]},
-		{"SettleOfAnotherCapabilitysHoldIsNotFound", checkSettleOwner[TX]},
-		{"SettleWithinTheHoldPassesACrossedCeiling", checkSettleWithinHold[TX]},
-		{"RefundOfAClosedPeriodLeavesTheTenantPeriod", checkRefundAcrossReset[TX]},
-		{"EveryCounterKeepsOneUnit", checkOneUnit[TX]},
-		{"AnAncestorCountsInTheUnitOfItsChildren", checkAncestorUnit[TX]},
-		{"ASubjectWithNoUnitCountsRequestsAlone", checkNoUnit[TX]},
-		{"ATenantCeilingCountsInTheUnitItNames", checkTenantCeilingUnit[TX]},
-		{"DeleteReleasesHolds", checkDeleteReleasesHolds[TX]},
-		{"AReplayIsAnsweredOnceTheCapabilityIsGone", checkReplayAfterRemoval[TX]},
-		{"AnAncestorAndATenantCeilingAreExact", checkExactCeilings[TX]},
-		{"AHoldAloneCountsOnItsTenant", checkHoldCreatesTenant[TX]},
-		{"ASettleReplayCommitsNothingAgain", checkSettleReplay[TX]},
-		{"ReleasingAHoldReturnsItToTheCopy", checkReleaseReturnsCopy[TX]},
-		{"ARefusedBumpCountsNothing", checkRefusedBump[TX]},
-		{"HoldsCountTowardsTheCounterRange", checkRangeCountsHolds[TX]},
-		{"ARefundOfExactlyWhatIsLeftRefundsIt", checkRefundExactRemainder[TX]},
-		{"ASettleWritesNoRowForARemovedAncestor", checkSettleAfterRemovedAncestor[TX]},
-		{"ASettleCountsOnAnAncestorWhoseRowWasDropped", checkSettleAfterAncestorDropped[TX]},
-		{"ConcurrentChargesKeepTheCeiling", checkConcurrentCeiling[TX]},
-		{"AnAncestorCeilingBoundsItsChildren", checkAncestorCeiling[TX]},
-		{"TheTenantCeilingBoundsEveryCapability", checkTenantCeiling[TX]},
-		{"AFailedCallbackMovesNothing", checkCallbackRollback[TX]},
-		{"TheCallbackSeesTheReceipt", checkCallbackSeesTheReceipt[TX]},
-		{"BumpCountsTheChain", checkBump[TX]},
-		{"RefundReturnsToEveryCounter", checkRefund[TX]},
-		{"AHoldCountsAgainstCharges", checkHoldBlocksCharge[TX]},
-		{"AnExpiredHoldIsReleased", checkExpiry[TX]},
-		{"ListTenantBudgetsPagesMostAtRiskFirst", checkListTenantBudgets[TX]},
-		{"OverrunRecordCrossesACopyBudget", checkCopyOverrun[TX]},
-		{"ACopyCountsForItsCapabilityAndGoesWithIt", checkCopyCountersGo[TX]},
-		{"ACopyIDSharedByTwoCapabilitiesCountsApart", checkCopySharedID[TX]},
-		{"CopiesPastTheQuotaAreRefused", checkCopyQuota[TX]},
-		{"CopyUsageRefusesAnInvalidRequest", checkCopyUsageRefusesInvalid[TX]},
-		{"TenantBudgetReadsAgree", checkTenantBudgetReads[TX]},
-		{"ReservationsReadBack", checkReservations[TX]},
-		{"AHoldNeverOutlivesItsCapability", checkHoldWithinCapability[TX]},
-		{"AHoldDatesTheTenantBudget", checkHoldDatesTenantBudget[TX]},
-		{"SumsExactly", checkSumsExactly[TX]},
-		{"ReservationsPage", checkReservationsPage[TX]},
-		{"AHoldWithNoTTLLastsTheDefault", checkDefaultReservationTTL[TX]},
-		{"ReservationsTiedOnExpiryPageInIDOrder", checkReservationsTied[TX]},
-		{"HousekeepingRefusesANegativeLimit", checkHousekeepingLimits[TX]},
-		{"PurgeOrphansReleasesWhatARemovedCapabilityHeld", checkPurgeOrphans[TX]},
-		{"AChainAtMaxDepthTakesAChildOnceItsTopIsRemoved", checkLineageAfterRemoval[TX]},
-		{"TenantBudgetKeepsItsPeriodEnd", checkPeriodEnd[TX]},
-		{"ACallScopedToAnotherTenantIsRefused", checkScopeMismatch[TX]},
-		{"AReadOnlyScopeWritesNothing", checkReadOnlyScope[TX]},
-		{"EraseTenantUsageDropsEveryRowOfTheTenant", checkEraseTenantUsage[TX]},
-		{"SumChargesGroupsAndPagesTheLedger", checkSumCharges[TX]},
-		{"SumChargesCutsBucketsAtUTCBoundaries", checkSumChargeBuckets[TX]},
-		{"SumChargesOrdersByAmountNotDigits", checkSumChargesOrderByAmount[TX]},
-		{"SumChargesCutsWeeksAtMonday", checkSumChargeWeeks[TX]},
-		{"SumChargesBoundsThePeriodFromIncludedToNot", checkSumChargesPeriodEdges[TX]},
-		{"SumChargesCountsARefundInItsChargesClosedBucket", checkSumChargesLateRefund[TX]},
-		{"ASumPastMaxNanosIsAnOverflow", checkSumChargesOverflow[TX]},
-		{"ATenantWithNoRowHasNoBudget", checkTenantBudgetNotFound[TX]},
-		{"ResetSpendAloneRollsThePeriodStart", checkPeriodStart[TX]},
-		{"TheZeroSubjectIsRefused", checkZeroSubject[TX]},
-		{"AnAncestorRequestCeilingBoundsBump", checkAncestorRequests[TX]},
-		{"ACopyRequestCeilingBoundsBump", checkCopyRequests[TX]},
-		{"AHoldCountsAgainstACopyBudget", checkCopyHold[TX]},
-		{"AStaleVersionIsRefused", checkStaleVersion[TX]},
-		{"ACapabilityNotOnRecordIsNotMetered", checkNotOnRecord[TX]},
-		{"ACounterNeverPassesMaxNanos", checkCounterOverflow[TX]},
-		{"ReleaseReturnsTheHoldToEveryCounter", checkRelease[TX]},
-		{"ReleaseIsTheReservingCopys", checkReleaseIsTheOwners[TX]},
-		{"AResetKeepsTheHolds", checkResetKeepsHolds[TX]},
-		{"AnAncestorCountsItsDescendantsHolds", checkDescendantHolds[TX]},
-		{"SettleAboveTheHoldCountsTheHoldOnce", checkSettleAboveHold[TX]},
-		{"ANestedCopySettlesOnlyItsOwnHold", checkNestedCopySettle[TX]},
-		{"TheUnitStaysWhileHoldsAreOpen", checkUnitWithHolds[TX]},
-		{"EveryCounterOnTheChainKeepsItsUnit", checkChainUnits[TX]},
-		{"ListTenantBudgetsRanksUnclamped", checkUnclampedRanking[TX]},
-		{"AThresholdIsMetExactly", checkThresholdBoundary[TX]},
-		{"ListTenantBudgetsRanksExactly", checkExactRanking[TX]},
-		{"HousekeepingKeepsItsLimit", checkHousekeepingBatches[TX]},
-		{"CopiesFollowSettleAndRefund", checkCopySettleRefund[TX]},
-		{"AZeroCeilingAllowsNothing", checkZeroCeilings[TX]},
+		{"RejectionMovesNothing", checkRejectionMovesNothing},
+		{"ExternalRefChargesOnce", checkExternalRefChargesOnce},
+		{"ExternalRefChargesOnceConcurrently", checkExternalRefConcurrent},
+		{"ChargeByRef", checkChargeByRef},
+		{"MalformedRequestsAreRefused", checkMalformed},
+		{"OverrunRecordCrossesEveryCeiling", checkOverrunRecord},
+		{"SettleReplaysAndRecordsAnOverrun", checkSettle},
+		{"SettleOfNoReservationIsNotFound", checkSettleNil},
+		{"SettleOfAnotherCapabilitysHoldIsNotFound", checkSettleOwner},
+		{"SettleWithinTheHoldPassesACrossedCeiling", checkSettleWithinHold},
+		{"RefundOfAClosedPeriodLeavesTheTenantPeriod", checkRefundAcrossReset},
+		{"EveryCounterKeepsOneUnit", checkOneUnit},
+		{"AnAncestorCountsInTheUnitOfItsChildren", checkAncestorUnit},
+		{"ASubjectWithNoUnitCountsRequestsAlone", checkNoUnit},
+		{"ATenantCeilingCountsInTheUnitItNames", checkTenantCeilingUnit},
+		{"DeleteReleasesHolds", checkDeleteReleasesHolds},
+		{"AReplayIsAnsweredOnceTheCapabilityIsGone", checkReplayAfterRemoval},
+		{"AnAncestorAndATenantCeilingAreExact", checkExactCeilings},
+		{"AHoldAloneCountsOnItsTenant", checkHoldCreatesTenant},
+		{"ASettleReplayCommitsNothingAgain", checkSettleReplay},
+		{"ReleasingAHoldReturnsItToTheCopy", checkReleaseReturnsCopy},
+		{"ARefusedBumpCountsNothing", checkRefusedBump},
+		{"HoldsCountTowardsTheCounterRange", checkRangeCountsHolds},
+		{"ARefundOfExactlyWhatIsLeftRefundsIt", checkRefundExactRemainder},
+		{"ASettleWritesNoRowForARemovedAncestor", checkSettleAfterRemovedAncestor},
+		{"ASettleCountsOnAnAncestorWhoseRowWasDropped", checkSettleAfterAncestorDropped},
+		{"ConcurrentChargesKeepTheCeiling", checkConcurrentCeiling},
+		{"AnAncestorCeilingBoundsItsChildren", checkAncestorCeiling},
+		{"TheTenantCeilingBoundsEveryCapability", checkTenantCeiling},
+		{"AFailedCallbackMovesNothing", checkCallbackRollback},
+		{"TheCallbackSeesTheReceipt", checkCallbackSeesTheReceipt},
+		{"BumpCountsTheChain", checkBump},
+		{"RefundReturnsToEveryCounter", checkRefund},
+		{"AHoldCountsAgainstCharges", checkHoldBlocksCharge},
+		{"AnExpiredHoldIsReleased", checkExpiry},
+		{"ListTenantBudgetsPagesMostAtRiskFirst", checkListTenantBudgets},
+		{"OverrunRecordCrossesACopyBudget", checkCopyOverrun},
+		{"ACopyCountsForItsCapabilityAndGoesWithIt", checkCopyCountersGo},
+		{"ACopyIDSharedByTwoCapabilitiesCountsApart", checkCopySharedID},
+		{"CopiesPastTheQuotaAreRefused", checkCopyQuota},
+		{"CopyUsageRefusesAnInvalidRequest", checkCopyUsageRefusesInvalid},
+		{"TenantBudgetReadsAgree", checkTenantBudgetReads},
+		{"ReservationsReadBack", checkReservations},
+		{"AHoldNeverOutlivesItsCapability", checkHoldWithinCapability},
+		{"AHoldDatesTheTenantBudget", checkHoldDatesTenantBudget},
+		{"SumsExactly", checkSumsExactly},
+		{"ReservationsPage", checkReservationsPage},
+		{"AHoldWithNoTTLLastsTheDefault", checkDefaultReservationTTL},
+		{"ReservationsTiedOnExpiryPageInIDOrder", checkReservationsTied},
+		{"HousekeepingRefusesANegativeLimit", checkHousekeepingLimits},
+		{"PurgeOrphansReleasesWhatARemovedCapabilityHeld", checkPurgeOrphans},
+		{"AChainAtMaxDepthTakesAChildOnceItsTopIsRemoved", checkLineageAfterRemoval},
+		{"TenantBudgetKeepsItsPeriodEnd", checkPeriodEnd},
+		{"ACallScopedToAnotherTenantIsRefused", checkScopeMismatch},
+		{"AReadOnlyScopeWritesNothing", checkReadOnlyScope},
+		{"EraseTenantUsageDropsEveryRowOfTheTenant", checkEraseTenantUsage},
+		{"SumChargesGroupsAndPagesTheLedger", checkSumCharges},
+		{"SumChargesCutsBucketsAtUTCBoundaries", checkSumChargeBuckets},
+		{"SumChargesOrdersByAmountNotDigits", checkSumChargesOrderByAmount},
+		{"SumChargesCutsWeeksAtMonday", checkSumChargeWeeks},
+		{"SumChargesBoundsThePeriodFromIncludedToNot", checkSumChargesPeriodEdges},
+		{"SumChargesCountsARefundInItsChargesClosedBucket", checkSumChargesLateRefund},
+		{"ASumPastMaxNanosIsAnOverflow", checkSumChargesOverflow},
+		{"ATenantWithNoRowHasNoBudget", checkTenantBudgetNotFound},
+		{"ResetSpendAloneRollsThePeriodStart", checkPeriodStart},
+		{"TheZeroSubjectIsRefused", checkZeroSubject},
+		{"AnAncestorRequestCeilingBoundsBump", checkAncestorRequests},
+		{"ACopyRequestCeilingBoundsBump", checkCopyRequests},
+		{"AHoldCountsAgainstACopyBudget", checkCopyHold},
+		{"AStaleVersionIsRefused", checkStaleVersion},
+		{"ACapabilityNotOnRecordIsNotMetered", checkNotOnRecord},
+		{"ACounterNeverPassesMaxNanos", checkCounterOverflow},
+		{"ReleaseReturnsTheHoldToEveryCounter", checkRelease},
+		{"ReleaseIsTheReservingCopys", checkReleaseIsTheOwners},
+		{"AResetKeepsTheHolds", checkResetKeepsHolds},
+		{"AnAncestorCountsItsDescendantsHolds", checkDescendantHolds},
+		{"SettleAboveTheHoldCountsTheHoldOnce", checkSettleAboveHold},
+		{"ANestedCopySettlesOnlyItsOwnHold", checkNestedCopySettle},
+		{"TheUnitStaysWhileHoldsAreOpen", checkUnitWithHolds},
+		{"EveryCounterOnTheChainKeepsItsUnit", checkChainUnits},
+		{"ListTenantBudgetsRanksUnclamped", checkUnclampedRanking},
+		{"AThresholdIsMetExactly", checkThresholdBoundary},
+		{"ListTenantBudgetsRanksExactly", checkExactRanking},
+		{"HousekeepingKeepsItsLimit", checkHousekeepingBatches},
+		{"CopiesFollowSettleAndRefund", checkCopySettleRefund},
+		{"AZeroCeilingAllowsNothing", checkZeroCeilings},
 	}
 	for _, c := range checks {
 		t.Run(c.name, func(t *testing.T) {
@@ -439,9 +439,9 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 	// Checks that need the tenant as setup leaves it, with no ceiling yet.
 	bare := []struct {
 		name string
-		run  func(*testing.T, Env[TX])
+		run  func(*testing.T, Env)
 	}{
-		{"TenantAggregateCountsBeforeACeiling", checkTenantCountsBeforeACeiling[TX]},
+		{"TenantAggregateCountsBeforeACeiling", checkTenantCountsBeforeACeiling},
 	}
 	for _, c := range bare {
 		t.Run(c.name, func(t *testing.T) {
@@ -454,7 +454,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 // checkTenantCountsBeforeACeiling holds a store to counting the tenant
 // aggregate from the first charge and hold: a ceiling set afterwards must see
 // them, or the spend before it is free and the holds before it are not held.
-func checkTenantCountsBeforeACeiling[TX any](t *testing.T, env Env[TX]) {
+func checkTenantCountsBeforeACeiling(t *testing.T, env Env) {
 	const (
 		spent   = 5 * one
 		held    = 8 * one
@@ -501,9 +501,9 @@ func checkTenantCountsBeforeACeiling[TX any](t *testing.T, env Env[TX]) {
 	}
 }
 
-func checkRejectionMovesNothing[TX any](t *testing.T, f fixture[TX]) {
+func checkRejectionMovesNothing(t *testing.T, f fixture) {
 	ran := false
-	r, err := f.charge(meter.ChargeRequest{Amount: childBudget + one}, func(context.Context, meter.Charged[TX]) error { ran = true; return nil })
+	r, err := f.charge(meter.ChargeRequest{Amount: childBudget + one}, func(context.Context, meter.Charged) error { ran = true; return nil })
 	if !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Fatalf("charge past the ceiling: err = %v, want ErrBudgetExceeded", err)
 	}
@@ -515,12 +515,12 @@ func checkRejectionMovesNothing[TX any](t *testing.T, f fixture[TX]) {
 	}
 }
 
-func checkExternalRefChargesOnce[TX any](t *testing.T, f fixture[TX]) {
+func checkExternalRefChargesOnce(t *testing.T, f fixture) {
 	// copyRequests is the request ceiling of the copy below: any, as a
 	// charge counts no requests.
 	const copyRequests = 10
 	fanOuts := 0
-	onCharged := func(context.Context, meter.Charged[TX]) error { fanOuts++; return nil }
+	onCharged := func(context.Context, meter.Charged) error { fanOuts++; return nil }
 	first, err := f.charge(meter.ChargeRequest{Amount: 2 * one, ExternalRef: "call-1"}, onCharged)
 	if err != nil || first.Replayed {
 		t.Fatalf("first charge = %+v, %v", first, err)
@@ -576,7 +576,7 @@ func checkExternalRefChargesOnce[TX any](t *testing.T, f fixture[TX]) {
 	}
 }
 
-func checkExternalRefConcurrent[TX any](t *testing.T, f fixture[TX]) {
+func checkExternalRefConcurrent(t *testing.T, f fixture) {
 	var (
 		wg      sync.WaitGroup
 		mu      sync.Mutex
@@ -610,7 +610,7 @@ func checkExternalRefConcurrent[TX any](t *testing.T, f fixture[TX]) {
 // chargedOp is the operation a ledger row names: a consumer's own.
 const chargedOp limes.Op = "index:search"
 
-func checkChargeByRef[TX any](t *testing.T, f fixture[TX]) {
+func checkChargeByRef(t *testing.T, f fixture) {
 	if _, err := f.Usage.ChargeByRef(f.Ctx, meter.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: "call-1"}); !errors.Is(err, meter.ErrChargeNotFound) {
 		t.Fatalf("before any charge: err = %v, want ErrChargeNotFound", err)
 	}
@@ -649,7 +649,7 @@ func checkChargeByRef[TX any](t *testing.T, f fixture[TX]) {
 	}
 }
 
-func checkMalformed[TX any](t *testing.T, f fixture[TX]) {
+func checkMalformed(t *testing.T, f fixture) {
 	for name, req := range map[string]meter.ChargeRequest{
 		"ref too long":      {ExternalRef: strings.Repeat("x", meter.MaxExternalRefBytes+1)},
 		"ref not printable": {ExternalRef: "call\n1"},
@@ -711,7 +711,7 @@ func checkMalformed[TX any](t *testing.T, f fixture[TX]) {
 // checkCounterOverflow holds a store to refusing, even past every ceiling,
 // a charge that would take a counter past MaxNanos: each amount is valid,
 // their sum has no room.
-func checkCounterOverflow[TX any](t *testing.T, f fixture[TX]) {
+func checkCounterOverflow(t *testing.T, f fixture) {
 	id, err := f.newCapability(uuid.Nil, unlimitedBudget)
 	if err != nil {
 		t.Fatal(err)
@@ -754,7 +754,7 @@ func checkCounterOverflow[TX any](t *testing.T, f fixture[TX]) {
 	}
 }
 
-func checkOverrunRecord[TX any](t *testing.T, f fixture[TX]) {
+func checkOverrunRecord(t *testing.T, f fixture) {
 	// 40 crosses the child's 20, the root's 25 and the tenant's 30.
 	const amount = 40 * one
 	if _, err := f.charge(meter.ChargeRequest{Amount: amount}, nil); err == nil {
@@ -781,7 +781,7 @@ func checkOverrunRecord[TX any](t *testing.T, f fixture[TX]) {
 	}
 }
 
-func checkSettle[TX any](t *testing.T, f fixture[TX]) {
+func checkSettle(t *testing.T, f fixture) {
 	res, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{
 		Subject: f.childSubject(),
 		Amount:  10 * one,
@@ -831,7 +831,7 @@ func checkSettle[TX any](t *testing.T, f fixture[TX]) {
 // checkSettleNil holds a store to keeping direct charges apart from settled
 // reservations: a direct charge has no reservation, and a store that files it
 // under the zero id would replay it to a Settle that names none.
-func checkSettleNil[TX any](t *testing.T, f fixture[TX]) {
+func checkSettleNil(t *testing.T, f fixture) {
 	if _, err := f.charge(meter.ChargeRequest{Amount: one}, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -848,7 +848,7 @@ func checkSettleNil[TX any](t *testing.T, f fixture[TX]) {
 // capability that made it: a reservation id is no bearer credential, so a
 // subject naming another capability finds no such hold, before the settle
 // and after it, and the hold stays where it was.
-func checkSettleOwner[TX any](t *testing.T, f fixture[TX]) {
+func checkSettleOwner(t *testing.T, f fixture) {
 	res, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: 2 * one})
 	if err != nil {
 		t.Fatal(err)
@@ -877,7 +877,7 @@ func checkSettleOwner[TX any](t *testing.T, f fixture[TX]) {
 // checkRefundAcrossReset holds a store to keeping accounting periods apart: a
 // charge counted before the tenant's spend was reset is not in the new
 // period's spend, so refunding it must not take it out of that spend.
-func checkRefundAcrossReset[TX any](t *testing.T, f fixture[TX]) {
+func checkRefundAcrossReset(t *testing.T, f fixture) {
 	const amount = 9 * one
 	before, err := f.charge(meter.ChargeRequest{Amount: amount}, nil)
 	if err != nil {
@@ -918,7 +918,7 @@ func checkRefundAcrossReset[TX any](t *testing.T, f fixture[TX]) {
 // checkAncestorUnit holds a store to giving an ancestor counted only through
 // a child — by a charge or by a hold — the unit the child counts in, as
 // GetUsage reads it back.
-func checkAncestorUnit[TX any](t *testing.T, f fixture[TX]) {
+func checkAncestorUnit(t *testing.T, f fixture) {
 	tree := func() (parent, child uuid.UUID) {
 		t.Helper()
 		parent, err := f.newCapability(uuid.Nil, unlimitedBudget)
@@ -950,7 +950,7 @@ func checkAncestorUnit[TX any](t *testing.T, f fixture[TX]) {
 // checkNoUnit holds a store to a subject that names no unit: it is bumped,
 // with its counters left in none, and no amount is charged, held or settled
 // on it; the first charge that names a unit pins it.
-func checkNoUnit[TX any](t *testing.T, f fixture[TX]) {
+func checkNoUnit(t *testing.T, f fixture) {
 	none := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, unitless: true})
 	if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: none}); err != nil {
 		t.Fatalf("Bump of a subject with no unit: %v", err)
@@ -989,7 +989,7 @@ func checkNoUnit[TX any](t *testing.T, f fixture[TX]) {
 // and a charge in another is ErrUnitCodeMismatch. A tenant with no ceiling
 // set counts in the unit of what it was first charged or held, under an
 // unlimited ceiling in that unit.
-func checkTenantCeilingUnit[TX any](t *testing.T, f fixture[TX]) {
+func checkTenantCeilingUnit(t *testing.T, f fixture) {
 	fresh := func() (tenant, id uuid.UUID, ctx context.Context) {
 		t.Helper()
 		tenant, err := f.newTenant()
@@ -1029,7 +1029,7 @@ func checkTenantCeilingUnit[TX any](t *testing.T, f fixture[TX]) {
 // checkOneUnit holds a store to counting each counter in one unit: an amount
 // in another is not comparable with what is there, and adding it would sum
 // two currencies as one.
-func checkOneUnit[TX any](t *testing.T, f fixture[TX]) {
+func checkOneUnit(t *testing.T, f fixture) {
 	if _, err := f.charge(meter.ChargeRequest{Amount: one}, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -1070,7 +1070,7 @@ func checkOneUnit[TX any](t *testing.T, f fixture[TX]) {
 // an ancestor whose row DeleteUsage dropped after the hold was made no
 // longer holds it, so the settled amount must fit its ceiling whole, and is
 // counted on it once it does.
-func checkSettleAfterAncestorDropped[TX any](t *testing.T, f fixture[TX]) {
+func checkSettleAfterAncestorDropped(t *testing.T, f fixture) {
 	// The root holds 8, spends 18 once its row is dropped, and then holds
 	// nothing of the hold: settling all 8 would take it to 26, past its 25;
 	// settling 7 takes it to exactly 25.
@@ -1104,7 +1104,7 @@ func checkSettleAfterAncestorDropped[TX any](t *testing.T, f fixture[TX]) {
 
 // checkExactCeilings holds a store to an ancestor's and a tenant's ceiling
 // to the nano: a charge reaching one exactly is admitted, a nano more is not.
-func checkExactCeilings[TX any](t *testing.T, f fixture[TX]) {
+func checkExactCeilings(t *testing.T, f fixture) {
 	const nano limes.Nanos = 1
 	under, err := f.newCapability(f.root, unlimitedBudget)
 	if err != nil {
@@ -1134,7 +1134,7 @@ func checkExactCeilings[TX any](t *testing.T, f fixture[TX]) {
 
 // checkHoldCreatesTenant holds a store to counting a hold on a tenant whose
 // first act it is: a ceiling set afterwards must see it.
-func checkHoldCreatesTenant[TX any](t *testing.T, f fixture[TX]) {
+func checkHoldCreatesTenant(t *testing.T, f fixture) {
 	tenant, err := f.newTenant()
 	if err != nil {
 		t.Fatal(err)
@@ -1155,7 +1155,7 @@ func checkHoldCreatesTenant[TX any](t *testing.T, f fixture[TX]) {
 // checkSettleReplay holds a store to a settle replayed: the same receipt,
 // and onCharged not run again, so a side effect committed with the first is
 // not committed twice; for another amount, a conflict.
-func checkSettleReplay[TX any](t *testing.T, f fixture[TX]) {
+func checkSettleReplay(t *testing.T, f fixture) {
 	r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: 2 * one, Op: "llm", Actor: "agent"})
 	if err != nil {
 		t.Fatal(err)
@@ -1166,7 +1166,7 @@ func checkSettleReplay[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatal(err)
 	}
 	ran := false
-	again, err := f.Usage.Settle(f.Ctx, req, func(context.Context, meter.Charged[TX]) error { ran = true; return nil })
+	again, err := f.Usage.Settle(f.Ctx, req, func(context.Context, meter.Charged) error { ran = true; return nil })
 	if err != nil || !again.Replayed || again.ChargeID != first.ChargeID || again.SpentAmount != first.SpentAmount {
 		t.Errorf("a replayed settle = %+v, %v; want the first's receipt %+v, replayed", again, err, first)
 	}
@@ -1177,7 +1177,7 @@ func checkSettleReplay[TX any](t *testing.T, f fixture[TX]) {
 	// is a conflict, not the first receipt, and moves nothing.
 	other := req
 	other.Amount = 2 * one
-	if _, err := f.Usage.Settle(f.Ctx, other, func(context.Context, meter.Charged[TX]) error { ran = true; return nil }); !errors.Is(err, meter.ErrSettleConflict) || !errors.Is(err, limes.ErrConflict) {
+	if _, err := f.Usage.Settle(f.Ctx, other, func(context.Context, meter.Charged) error { ran = true; return nil }); !errors.Is(err, meter.ErrSettleConflict) || !errors.Is(err, limes.ErrConflict) {
 		t.Errorf("a settle replayed for another amount: err = %v, want ErrSettleConflict, matching ErrConflict", err)
 	}
 	if ran || f.spent(t, f.child) != one {
@@ -1192,7 +1192,7 @@ func checkSettleReplay[TX any](t *testing.T, f fixture[TX]) {
 // checkReleaseReturnsCopy holds a store to returning a hold to the copy it
 // was made under, by Release and by ReleaseExpired: a hold left on the copy
 // blocks it for good.
-func checkReleaseReturnsCopy[TX any](t *testing.T, f fixture[TX]) {
+func checkReleaseReturnsCopy(t *testing.T, f fixture) {
 	reader, ok := f.Usage.(meter.CopyUsageReader)
 	if !ok {
 		return // a Meter that does not read copies back is checked no further
@@ -1229,7 +1229,7 @@ func checkReleaseReturnsCopy[TX any](t *testing.T, f fixture[TX]) {
 
 // checkRefusedBump holds a store to a Bump refused by a copy's request
 // ceiling moving no counter.
-func checkRefusedBump[TX any](t *testing.T, f fixture[TX]) {
+func checkRefusedBump(t *testing.T, f fixture) {
 	frozen := []limes.CopyCeiling{{RevocationID: []byte("frozen"), Requests: &limes.RequestCeiling{}}}
 	if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, copies: frozen})}); !errors.Is(err, limes.ErrRequestLimitExceeded) {
 		t.Fatalf("a bump past a frozen copy: err = %v, want ErrRequestLimitExceeded", err)
@@ -1248,7 +1248,7 @@ func checkRefusedBump[TX any](t *testing.T, f fixture[TX]) {
 // checkRangeCountsHolds holds a store to the counter range with what is held
 // counted: holds summing past MaxNanos would leave a counter it cannot
 // keep, so the one that would is ErrCounterOverflow.
-func checkRangeCountsHolds[TX any](t *testing.T, f fixture[TX]) {
+func checkRangeCountsHolds(t *testing.T, f fixture) {
 	tenant, err := f.newTenant()
 	if err != nil {
 		t.Fatal(err)
@@ -1271,7 +1271,7 @@ func checkRangeCountsHolds[TX any](t *testing.T, f fixture[TX]) {
 
 // checkRefundExactRemainder holds a store to a refund of an Amount exactly
 // what is left of the charge: it is refunded whole, not refused.
-func checkRefundExactRemainder[TX any](t *testing.T, f fixture[TX]) {
+func checkRefundExactRemainder(t *testing.T, f fixture) {
 	const charged, first = 3 * one, one
 	receipt, err := f.charge(meter.ChargeRequest{Amount: charged}, nil)
 	if err != nil {
@@ -1295,7 +1295,7 @@ func checkRefundExactRemainder[TX any](t *testing.T, f fixture[TX]) {
 // checkSettleAfterRemovedAncestor holds a store to writing no row for an
 // ancestor that PurgeOrphans has dropped: a hold settled afterwards counts
 // on the lineage still on record, and the removed one stays gone.
-func checkSettleAfterRemovedAncestor[TX any](t *testing.T, f fixture[TX]) {
+func checkSettleAfterRemovedAncestor(t *testing.T, f fixture) {
 	if f.DeleteCapability == nil {
 		t.Skip("Env.DeleteCapability not set")
 	}
@@ -1320,7 +1320,7 @@ func checkSettleAfterRemovedAncestor[TX any](t *testing.T, f fixture[TX]) {
 // checkReplayAfterRemoval holds a store to answering a replay the same way
 // for a charge and a settle once the capability is off record: each gets the
 // receipt it was given, Replayed, and moves nothing.
-func checkReplayAfterRemoval[TX any](t *testing.T, f fixture[TX]) {
+func checkReplayAfterRemoval(t *testing.T, f fixture) {
 	if f.DeleteCapability == nil {
 		t.Skip("Env.DeleteCapability not set")
 	}
@@ -1354,7 +1354,7 @@ func checkReplayAfterRemoval[TX any](t *testing.T, f fixture[TX]) {
 // capability held: nothing can settle or release a hold of a capability that
 // is gone, so a hold left behind counts against its ancestors and its tenant
 // until the store is rebuilt.
-func checkDeleteReleasesHolds[TX any](t *testing.T, f fixture[TX]) {
+func checkDeleteReleasesHolds(t *testing.T, f fixture) {
 	res, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{
 		Subject: f.childSubject(),
 		Amount:  3 * one,
@@ -1382,7 +1382,7 @@ func checkDeleteReleasesHolds[TX any](t *testing.T, f fixture[TX]) {
 
 // GetTenantBudget, SetTenantBudget and ListTenantBudgets read one row; each
 // returns all of it.
-func checkTenantBudgetReads[TX any](t *testing.T, f fixture[TX]) {
+func checkTenantBudgetReads(t *testing.T, f fixture) {
 	const held = 3 * one
 	if _, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{
 		Subject: f.childSubject(),
@@ -1481,7 +1481,7 @@ func sameCeiling[T comparable](a, b *T) bool {
 // checkHoldDatesTenantBudget holds a store to dating the tenant's aggregate
 // whenever it writes it: a tenant that has only ever reserved reads back
 // when that happened, and a release dates it again.
-func checkHoldDatesTenantBudget[TX any](t *testing.T, f fixture[TX]) {
+func checkHoldDatesTenantBudget(t *testing.T, f fixture) {
 	if f.Now == nil || f.Advance == nil {
 		t.Skip("Env.Now or Env.Advance not set")
 	}
@@ -1511,7 +1511,7 @@ func checkHoldDatesTenantBudget[TX any](t *testing.T, f fixture[TX]) {
 // capability: a TTL past the capability's expiry is cut to it, so a hold no
 // one can settle any more does not keep the ancestors' and the tenant's
 // budget held.
-func checkHoldWithinCapability[TX any](t *testing.T, f fixture[TX]) {
+func checkHoldWithinCapability(t *testing.T, f fixture) {
 	if f.Now == nil {
 		t.Skip("Env.Now not set")
 	}
@@ -1535,7 +1535,7 @@ func checkHoldWithinCapability[TX any](t *testing.T, f fixture[TX]) {
 	}
 }
 
-func checkReservations[TX any](t *testing.T, f fixture[TX]) {
+func checkReservations(t *testing.T, f fixture) {
 	const (
 		held   = 2 * one
 		sooner = time.Minute
@@ -1635,7 +1635,7 @@ func checkReservations[TX any](t *testing.T, f fixture[TX]) {
 
 // checkCopyUsageRefusesInvalid holds a CopyUsageReader to the request's
 // bounds: no copy, more than MaxCopyUsageIDs, or an empty id is refused.
-func checkCopyUsageRefusesInvalid[TX any](t *testing.T, f fixture[TX]) {
+func checkCopyUsageRefusesInvalid(t *testing.T, f fixture) {
 	reader, ok := f.Usage.(meter.CopyUsageReader)
 	if !ok {
 		return // a Meter that does not read copies back is checked no further
@@ -1660,7 +1660,7 @@ func checkCopyUsageRefusesInvalid[TX any](t *testing.T, f fixture[TX]) {
 // copy counts for, and to dropping the copy's counters with the
 // capability's usage: by DeleteUsage, and by PurgeOrphans once the
 // capability is off record.
-func checkCopyCountersGo[TX any](t *testing.T, f fixture[TX]) {
+func checkCopyCountersGo(t *testing.T, f fixture) {
 	reader, ok := f.Usage.(meter.CopyUsageReader)
 	if !ok {
 		return // a Meter that does not read copies back is checked no further
@@ -1711,7 +1711,7 @@ func checkCopyCountersGo[TX any](t *testing.T, f fixture[TX]) {
 // cover the block before it, so a holder of two Biscuits can graft one's
 // block onto the other: two capabilities, here of two tenants, then carry
 // the same id. Neither may spend, refund or drop the other's counter.
-func checkCopySharedID[TX any](t *testing.T, f fixture[TX]) {
+func checkCopySharedID(t *testing.T, f fixture) {
 	reader, ok := f.Usage.(meter.CopyUsageReader)
 	if !ok {
 		return // a Meter that does not read copies back is checked no further
@@ -1767,7 +1767,7 @@ func checkCopySharedID[TX any](t *testing.T, f fixture[TX]) {
 // that would count one copy past it is refused, by Bump, Charge and Reserve
 // alike, and counts nothing; a copy already counted goes on being metered;
 // and the quota is the capability's, so dropping its usage frees it.
-func checkCopyQuota[TX any](t *testing.T, f fixture[TX]) {
+func checkCopyQuota(t *testing.T, f fixture) {
 	quota := f.MaxCopiesPerCapability
 	if quota == 0 {
 		t.Skip("Env.MaxCopiesPerCapability not set")
@@ -1815,7 +1815,7 @@ func checkCopyQuota[TX any](t *testing.T, f fixture[TX]) {
 }
 
 // copyUsage is what reader holds for the copy copyID of capability capID.
-func (f fixture[TX]) copyUsage(t *testing.T, reader meter.CopyUsageReader, capID uuid.UUID, copyID []byte) []meter.CopyUsage {
+func (f fixture) copyUsage(t *testing.T, reader meter.CopyUsageReader, capID uuid.UUID, copyID []byte) []meter.CopyUsage {
 	t.Helper()
 	res, err := reader.CopyUsage(f.Ctx, meter.CopyUsageRequest{CapabilityID: capID, RevocationIDs: [][]byte{copyID}})
 	if err != nil {
@@ -1824,7 +1824,7 @@ func (f fixture[TX]) copyUsage(t *testing.T, reader meter.CopyUsageReader, capID
 	return res.Copies
 }
 
-func checkCopyOverrun[TX any](t *testing.T, f fixture[TX]) {
+func checkCopyOverrun(t *testing.T, f fixture) {
 	copyID := []byte("copy-1")
 	copies := []limes.CopyCeiling{{RevocationID: copyID, Budget: &limes.BudgetCeiling{Max: one, UnitCode: unit}}}
 	if _, err := f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{copies: copies}), Amount: 2 * one}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
@@ -1854,7 +1854,7 @@ func checkCopyOverrun[TX any](t *testing.T, f fixture[TX]) {
 // checkSumsExactly holds a store to exact amounts: a tenth and two tenths fit
 // under a ceiling of three tenths with not a nano to spare, and seven tenths
 // add up to seven tenths — the sums a float64 gets wrong.
-func checkSumsExactly[TX any](t *testing.T, f fixture[TX]) {
+func checkSumsExactly(t *testing.T, f fixture) {
 	tenth, threeTenths := one/10, 3*one/10
 	id, err := f.newCapability(uuid.Nil, limes.BudgetCeiling{Max: threeTenths})
 	if err != nil {
@@ -1884,7 +1884,7 @@ func checkSumsExactly[TX any](t *testing.T, f fixture[TX]) {
 // checkConcurrentCeiling holds a store to checking and moving a ceiling as
 // one step: charges racing to the last of a budget must not all see room for
 // themselves. A read-then-write without a lock is the bug this catches.
-func checkConcurrentCeiling[TX any](t *testing.T, f fixture[TX]) {
+func checkConcurrentCeiling(t *testing.T, f fixture) {
 	var (
 		wg       sync.WaitGroup
 		accepted atomic.Int64
@@ -1913,7 +1913,7 @@ func checkConcurrentCeiling[TX any](t *testing.T, f fixture[TX]) {
 // checkAncestorCeiling holds a store to reading each ancestor's ceiling from
 // its record: two children each within their own budget must not sum past
 // their parent's.
-func checkAncestorCeiling[TX any](t *testing.T, f fixture[TX]) {
+func checkAncestorCeiling(t *testing.T, f fixture) {
 	sibling, err := f.newCapability(f.root, limes.BudgetCeiling{Max: childBudget})
 	if err != nil {
 		t.Fatal(err)
@@ -1933,7 +1933,7 @@ func checkAncestorCeiling[TX any](t *testing.T, f fixture[TX]) {
 
 // checkAncestorRequests holds Bump to an ancestor's request ceiling: a child
 // with none of its own still stops at its root's.
-func checkAncestorRequests[TX any](t *testing.T, f fixture[TX]) {
+func checkAncestorRequests(t *testing.T, f fixture) {
 	const limit = 1
 	root, err := f.NewCapability(CapabilitySpec{Requests: limes.RequestCeiling{Max: limit}, Budget: unlimitedBudget})
 	if err != nil {
@@ -1959,7 +1959,7 @@ func checkAncestorRequests[TX any](t *testing.T, f fixture[TX]) {
 
 // checkCopyRequests holds Bump to a copy's request ceiling, which binds the
 // copy while the capability's own allows more.
-func checkCopyRequests[TX any](t *testing.T, f fixture[TX]) {
+func checkCopyRequests(t *testing.T, f fixture) {
 	const limit = 1
 	copies := []limes.CopyCeiling{{RevocationID: []byte("copy-requests"), Requests: &limes.RequestCeiling{Max: limit}}}
 	bump := func() error {
@@ -1978,7 +1978,7 @@ func checkCopyRequests[TX any](t *testing.T, f fixture[TX]) {
 
 // checkCopyHold holds a store to counting a hold against the copy it was
 // made under, as against every other ceiling.
-func checkCopyHold[TX any](t *testing.T, f fixture[TX]) {
+func checkCopyHold(t *testing.T, f fixture) {
 	copies := []limes.CopyCeiling{{RevocationID: []byte("copy-hold"), Budget: &limes.BudgetCeiling{Max: one, UnitCode: unit}}}
 	subject := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), copies: copies})
 	if _, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: subject, Amount: one}); err != nil {
@@ -1992,7 +1992,7 @@ func checkCopyHold[TX any](t *testing.T, f fixture[TX]) {
 // checkStaleVersion holds SetTenantBudget to its optimistic-concurrency
 // guard: a write carrying a version another write has moved past is
 // refused, and leaves the ceiling as it was.
-func checkStaleVersion[TX any](t *testing.T, f fixture[TX]) {
+func checkStaleVersion(t *testing.T, f fixture) {
 	b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
 	if err != nil {
 		t.Fatal(err)
@@ -2017,7 +2017,7 @@ func checkStaleVersion[TX any](t *testing.T, f fixture[TX]) {
 // checkZeroCeilings holds a store to a ceiling of 0 allowing nothing — on
 // the subject's requests and budget, on a hold, on an ancestor and on the
 // tenant — rather than standing for no limit, which only Unlimited does.
-func checkZeroCeilings[TX any](t *testing.T, f fixture[TX]) {
+func checkZeroCeilings(t *testing.T, f fixture) {
 	zero := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, requests: requestsOf(0), budget: budgetOf(0)})
 	if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: zero}); !errors.Is(err, limes.ErrRequestLimitExceeded) {
 		t.Errorf("a bump under a request ceiling of 0: err = %v, want ErrRequestLimitExceeded", err)
@@ -2058,7 +2058,7 @@ func checkZeroCeilings[TX any](t *testing.T, f fixture[TX]) {
 
 // checkRelease holds Release to returning a hold to every counter it
 // counted against: the capability's, each ancestor's and the tenant's.
-func checkRelease[TX any](t *testing.T, f fixture[TX]) {
+func checkRelease(t *testing.T, f fixture) {
 	r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: 15 * one})
 	if err != nil {
 		t.Fatal(err)
@@ -2083,7 +2083,7 @@ func checkRelease[TX any](t *testing.T, f fixture[TX]) {
 // another capability, another tenant, another copy or none, the hold stays
 // in place, as Settle refuses it, so a copy cannot free a sibling's hold to
 // spend past its own limits. A request naming no subject is refused.
-func checkReleaseIsTheOwners[TX any](t *testing.T, f fixture[TX]) {
+func checkReleaseIsTheOwners(t *testing.T, f fixture) {
 	const held = 3 * one
 	copies := []limes.CopyCeiling{{RevocationID: []byte("holder"), Budget: &limes.BudgetCeiling{Max: childBudget, UnitCode: unit}}}
 	owner := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: unit, copies: copies})
@@ -2129,7 +2129,7 @@ func checkReleaseIsTheOwners[TX any](t *testing.T, f fixture[TX]) {
 
 // checkResetKeepsHolds holds a store to ResetSpend resetting the spend only:
 // a hold still open counts against the tenant's new period.
-func checkResetKeepsHolds[TX any](t *testing.T, f fixture[TX]) {
+func checkResetKeepsHolds(t *testing.T, f fixture) {
 	const held = 10 * one
 	if _, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: held}); err != nil {
 		t.Fatal(err)
@@ -2158,7 +2158,7 @@ func checkResetKeepsHolds[TX any](t *testing.T, f fixture[TX]) {
 
 // checkDescendantHolds holds an ancestor's ceiling to counting what its
 // descendants hold, not only what they spent.
-func checkDescendantHolds[TX any](t *testing.T, f fixture[TX]) {
+func checkDescendantHolds(t *testing.T, f fixture) {
 	sibling, err := f.newCapability(f.root, limes.BudgetCeiling{Max: childBudget})
 	if err != nil {
 		t.Fatal(err)
@@ -2176,7 +2176,7 @@ func checkDescendantHolds[TX any](t *testing.T, f fixture[TX]) {
 // checkSettleAboveHold holds Settle to counting the hold once: settling 20
 // of a 19 hold adds 1 to every counter, so it fits a ceiling of 20 — the
 // capability's, a copy's — with nothing to spare.
-func checkSettleAboveHold[TX any](t *testing.T, f fixture[TX]) {
+func checkSettleAboveHold(t *testing.T, f fixture) {
 	copies := []limes.CopyCeiling{{RevocationID: []byte("settle-copy"), Budget: &limes.BudgetCeiling{Max: childBudget, UnitCode: unit}}}
 	subject := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), copies: copies})
 	r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: subject, Amount: childBudget - one})
@@ -2201,7 +2201,7 @@ func checkSettleAboveHold[TX any](t *testing.T, f fixture[TX]) {
 // outermost: copies run innermost first, so a child copy C of P presents
 // [C, P], and settling P's hold under [C, P] — or C's under [P] — would move
 // spend past a copy's own limits.
-func checkNestedCopySettle[TX any](t *testing.T, f fixture[TX]) {
+func checkNestedCopySettle(t *testing.T, f fixture) {
 	p := limes.CopyCeiling{RevocationID: []byte("copy-p"), Budget: &limes.BudgetCeiling{Max: childBudget, UnitCode: unit}}
 	c := limes.CopyCeiling{RevocationID: []byte("copy-c"), Budget: &limes.BudgetCeiling{Max: one, UnitCode: unit}}
 	under := func(copies ...limes.CopyCeiling) limes.MeterSubject {
@@ -2223,7 +2223,7 @@ func checkNestedCopySettle[TX any](t *testing.T, f fixture[TX]) {
 
 // checkUnitWithHolds holds a store to keeping a tenant's unit while a hold in
 // it is open: the hold could never settle in another.
-func checkUnitWithHolds[TX any](t *testing.T, f fixture[TX]) {
+func checkUnitWithHolds(t *testing.T, f fixture) {
 	if _, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: one}); err != nil {
 		t.Fatal(err)
 	}
@@ -2243,7 +2243,7 @@ func checkUnitWithHolds[TX any](t *testing.T, f fixture[TX]) {
 // unit, not only the tenant's: once the tenant moves to another unit, a
 // capability that counted in the first — or whose ancestor did — refuses an
 // amount in the second.
-func checkChainUnits[TX any](t *testing.T, f fixture[TX]) {
+func checkChainUnits(t *testing.T, f fixture) {
 	parent, err := f.newCapability(uuid.Nil, unlimitedBudget)
 	if err != nil {
 		t.Fatal(err)
@@ -2275,7 +2275,7 @@ func checkChainUnits[TX any](t *testing.T, f fixture[TX]) {
 // checkUnclampedRanking holds ListTenantBudgets to ranking by spend over the
 // ceiling unclamped: of two tenants past their ceilings, the further leads,
 // whatever their ids.
-func checkUnclampedRanking[TX any](t *testing.T, f fixture[TX]) {
+func checkUnclampedRanking(t *testing.T, f fixture) {
 	const ceiling = 10 * one
 	type overspender struct{ tenant, capability uuid.UUID }
 	newOverspender := func() overspender {
@@ -2321,7 +2321,7 @@ func checkUnclampedRanking[TX any](t *testing.T, f fixture[TX]) {
 // checkThresholdBoundary holds ThresholdBasisPoints to spent / max ≥
 // threshold exactly: 29 of 100 is at 29%, which a float quotient reads as
 // just under, and one nano under it is not.
-func checkThresholdBoundary[TX any](t *testing.T, f fixture[TX]) {
+func checkThresholdBoundary(t *testing.T, f fixture) {
 	// 29 of 100 at 29%, 11 of 1000 at 1.1%, and a nano short of 29% under
 	// it.
 	for _, tc := range []struct {
@@ -2360,7 +2360,7 @@ func checkThresholdBoundary[TX any](t *testing.T, f fixture[TX]) {
 // checkExactRanking holds ListTenantBudgets to ranking by spent / max
 // exactly: a third and a nano past a third are one float64, and the second
 // must still lead, whatever the tenant ids.
-func checkExactRanking[TX any](t *testing.T, f fixture[TX]) {
+func checkExactRanking(t *testing.T, f fixture) {
 	const third = limes.MaxNanos / 3
 	type spec struct {
 		tenant         uuid.UUID
@@ -2404,7 +2404,7 @@ func checkExactRanking[TX any](t *testing.T, f fixture[TX]) {
 
 // checkHousekeepingBatches holds ReleaseExpired and PurgeOrphans to their
 // Limit: a batch of one does one.
-func checkHousekeepingBatches[TX any](t *testing.T, f fixture[TX]) {
+func checkHousekeepingBatches(t *testing.T, f fixture) {
 	if f.Advance == nil {
 		t.Skip("Env.Advance is not set")
 	}
@@ -2445,7 +2445,7 @@ func checkHousekeepingBatches[TX any](t *testing.T, f fixture[TX]) {
 // checkCopySettleRefund holds a store's copy counters to following Settle and
 // Refund as every other counter does: a settle moves the hold to spend, a
 // refund returns it.
-func checkCopySettleRefund[TX any](t *testing.T, f fixture[TX]) {
+func checkCopySettleRefund(t *testing.T, f fixture) {
 	reader, ok := f.Usage.(meter.CopyUsageReader)
 	if !ok {
 		t.Skip("the store reads no copy counters back")
@@ -2473,7 +2473,7 @@ func checkCopySettleRefund[TX any](t *testing.T, f fixture[TX]) {
 
 // checkTenantCeiling holds a store to the tenant aggregate: capabilities each
 // within their own budgets must not sum past the tenant's.
-func checkTenantCeiling[TX any](t *testing.T, f fixture[TX]) {
+func checkTenantCeiling(t *testing.T, f fixture) {
 	other, err := f.newCapability(uuid.Nil, limes.BudgetCeiling{Max: rootBudget})
 	if err != nil {
 		t.Fatal(err)
@@ -2494,9 +2494,9 @@ func checkTenantCeiling[TX any](t *testing.T, f fixture[TX]) {
 // checkCallbackRollback holds a store to the atomicity of onCharged: its
 // error is returned as it is, and no counter, ledger row or ExternalRef
 // survives it.
-func checkCallbackRollback[TX any](t *testing.T, f fixture[TX]) {
+func checkCallbackRollback(t *testing.T, f fixture) {
 	boom := errors.New("side effect failed")
-	if _, err := f.charge(meter.ChargeRequest{Amount: one, ExternalRef: "call-1"}, func(context.Context, meter.Charged[TX]) error { return boom }); !errors.Is(err, boom) {
+	if _, err := f.charge(meter.ChargeRequest{Amount: one, ExternalRef: "call-1"}, func(context.Context, meter.Charged) error { return boom }); !errors.Is(err, boom) {
 		t.Fatalf("charge with a failing callback: err = %v, want the callback's", err)
 	}
 	if f.spent(t, f.child) != 0 || f.spent(t, f.root) != 0 || f.tenantSpent(t) != 0 {
@@ -2518,7 +2518,7 @@ func checkCallbackRollback[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatal(err)
 	}
 	if _, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: f.childSubject(), ReservationID: res.ID, Amount: 2 * one},
-		func(context.Context, meter.Charged[TX]) error { return boom }); !errors.Is(err, boom) {
+		func(context.Context, meter.Charged) error { return boom }); !errors.Is(err, boom) {
 		t.Fatalf("settle with a failing callback: err = %v, want the callback's", err)
 	}
 	if _, err := f.Usage.GetReservation(f.Ctx, res.ID); err != nil {
@@ -2532,10 +2532,10 @@ func checkCallbackRollback[TX any](t *testing.T, f fixture[TX]) {
 // checkCallbackSeesTheReceipt holds a store to handing onCharged the charge
 // it runs inside: the receipt the call then returns, so a side effect such as
 // an outbox row can name the ChargeID, the spend and an overrun.
-func checkCallbackSeesTheReceipt[TX any](t *testing.T, f fixture[TX]) {
+func checkCallbackSeesTheReceipt(t *testing.T, f fixture) {
 	var seen meter.ChargeReceipt
 	runs := 0
-	onCharged := func(_ context.Context, c meter.Charged[TX]) error {
+	onCharged := func(_ context.Context, c meter.Charged) error {
 		seen = c.Receipt
 		runs++
 		return nil
@@ -2577,7 +2577,7 @@ func checkCallbackSeesTheReceipt[TX any](t *testing.T, f fixture[TX]) {
 
 // checkBump holds a store to counting requests on the capability and every
 // ancestor, and to refusing past the capability's own limit without counting.
-func checkBump[TX any](t *testing.T, f fixture[TX]) {
+func checkBump(t *testing.T, f fixture) {
 	const limit = 2
 	bump := func() (int64, error) {
 		r, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, requests: requestsOf(limit)})})
@@ -2602,7 +2602,7 @@ func checkBump[TX any](t *testing.T, f fixture[TX]) {
 
 // checkRefund holds a store to the Refund contract: back to every counter
 // the charge moved, never past what it took, and a full refund idempotent.
-func checkRefund[TX any](t *testing.T, f fixture[TX]) {
+func checkRefund(t *testing.T, f fixture) {
 	r, err := f.charge(meter.ChargeRequest{Amount: 3 * one}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -2643,7 +2643,7 @@ func checkRefund[TX any](t *testing.T, f fixture[TX]) {
 
 // checkHoldBlocksCharge holds a store to counting holds against charges as
 // spend is counted.
-func checkHoldBlocksCharge[TX any](t *testing.T, f fixture[TX]) {
+func checkHoldBlocksCharge(t *testing.T, f fixture) {
 	if _, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{
 		Subject: f.childSubject(),
 		Amount:  15 * one,
@@ -2660,7 +2660,7 @@ func checkHoldBlocksCharge[TX any](t *testing.T, f fixture[TX]) {
 
 // checkExpiry holds a store to letting a reservation lapse: past its TTL it
 // cannot be settled, still counts until ReleaseExpired runs, and then does not.
-func checkExpiry[TX any](t *testing.T, f fixture[TX]) {
+func checkExpiry(t *testing.T, f fixture) {
 	if f.Advance == nil {
 		t.Skip("Env.Advance is not set")
 	}
@@ -2705,7 +2705,7 @@ func checkExpiry[TX any](t *testing.T, f fixture[TX]) {
 
 // checkListTenantBudgets holds a store to ListTenantBudgets' order, filters
 // and paging: most at risk first, then by tenant id, a page at a time.
-func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
+func checkListTenantBudgets(t *testing.T, f fixture) {
 	for name, req := range map[string]meter.ListTenantBudgetsRequest{
 		"a negative limit":             {Limit: -1},
 		"a threshold past 100%":        {Filter: meter.TenantBudgetFilterAtOrPast, ThresholdBasisPoints: meter.BasisPointsPerWhole + 1},
@@ -2828,7 +2828,7 @@ const longestTTL = time.Duration(math.MaxInt64)
 // at the same instant: ascending ID, bytewise, page after page. Ties form
 // only when the store's clock stands still between the holds; without one
 // there is nothing to order and the check is skipped.
-func checkReservationsTied[TX any](t *testing.T, f fixture[TX]) {
+func checkReservationsTied(t *testing.T, f fixture) {
 	const holds = 4
 	var want []meter.Reservation
 	for range holds {
@@ -2875,7 +2875,7 @@ const clockSlack = time.Second
 // checkDefaultReservationTTL holds a store to giving a hold with no TTL
 // DefaultReservationTTL: it expires when one asking for that TTL outright
 // does.
-func checkDefaultReservationTTL[TX any](t *testing.T, f fixture[TX]) {
+func checkDefaultReservationTTL(t *testing.T, f fixture) {
 	reserve := func(ttl time.Duration) time.Time {
 		t.Helper()
 		r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: one, TTL: ttl})
@@ -2893,7 +2893,7 @@ func checkDefaultReservationTTL[TX any](t *testing.T, f fixture[TX]) {
 // checkReservationsPage holds a store to paging a capability's reservations
 // in their order — the last two expiring past year 2262, where a cursor
 // counting Unix nanoseconds overflows — and to refusing a negative page size.
-func checkReservationsPage[TX any](t *testing.T, f fixture[TX]) {
+func checkReservationsPage(t *testing.T, f fixture) {
 	// Soonest first; the last one ends with its capability, after the others.
 	ttls := []time.Duration{time.Minute, 2 * time.Minute, longestTTL}
 	holds := len(ttls)
@@ -2934,7 +2934,7 @@ func checkReservationsPage[TX any](t *testing.T, f fixture[TX]) {
 
 // checkHousekeepingLimits holds a store to refusing a negative batch, and a
 // DeleteUsage naming no capability.
-func checkHousekeepingLimits[TX any](t *testing.T, f fixture[TX]) {
+func checkHousekeepingLimits(t *testing.T, f fixture) {
 	if _, err := f.Usage.ReleaseExpired(f.Ctx, meter.ReleaseExpiredRequest{Limit: -1}); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("ReleaseExpired with a negative limit: err = %v, want ErrInvalidRequest", err)
 	}
@@ -2949,7 +2949,7 @@ func checkHousekeepingLimits[TX any](t *testing.T, f fixture[TX]) {
 // checkLineageAfterRemoval holds a store to counting only the ancestors
 // still on record: a chain MaxDelegationDepth deep charges, takes no child,
 // and once its top is removed takes one, which charges like any other.
-func checkLineageAfterRemoval[TX any](t *testing.T, f fixture[TX]) {
+func checkLineageAfterRemoval(t *testing.T, f fixture) {
 	if f.DeleteCapability == nil {
 		t.Skip("Env.DeleteCapability not set")
 	}
@@ -2987,7 +2987,7 @@ func checkLineageAfterRemoval[TX any](t *testing.T, f fixture[TX]) {
 
 // checkPurgeOrphans holds a store to deleting the usage of a capability no
 // longer on record, and to returning what it held to its ancestor.
-func checkPurgeOrphans[TX any](t *testing.T, f fixture[TX]) {
+func checkPurgeOrphans(t *testing.T, f fixture) {
 	if f.DeleteCapability == nil {
 		t.Skip("Env.DeleteCapability not set")
 	}
@@ -3018,7 +3018,7 @@ func checkPurgeOrphans[TX any](t *testing.T, f fixture[TX]) {
 // checkNotOnRecord holds a store to refusing a capability whose record is
 // gone: its ancestors can no longer be read, and metering it alone would let
 // it spend past its live root's ceiling.
-func checkNotOnRecord[TX any](t *testing.T, f fixture[TX]) {
+func checkNotOnRecord(t *testing.T, f fixture) {
 	if f.DeleteCapability == nil {
 		t.Skip("Env.DeleteCapability not set")
 	}
@@ -3099,7 +3099,7 @@ func riskyPct(s meter.TenantBudget) float64 {
 
 // checkPeriodEnd holds a store to keeping a tenant's PeriodEnd as set, and a
 // zero one as zero: an open-ended window.
-func checkPeriodEnd[TX any](t *testing.T, f fixture[TX]) {
+func checkPeriodEnd(t *testing.T, f fixture) {
 	// Microseconds: the finest a timestamp column keeps.
 	end := time.Now().UTC().Add(periodLength).Truncate(time.Microsecond)
 	for _, want := range []time.Time{end, {}} {
@@ -3122,7 +3122,7 @@ func checkPeriodEnd[TX any](t *testing.T, f fixture[TX]) {
 // checkPeriodStart holds a store to rolling a tenant's PeriodStart to its
 // clock's now on ResetSpend, and only then: a new ceiling mid-window keeps
 // the window it is in.
-func checkPeriodStart[TX any](t *testing.T, f fixture[TX]) {
+func checkPeriodStart(t *testing.T, f fixture) {
 	if f.Advance == nil {
 		t.Skip("Env.Advance is not set")
 	}
@@ -3163,7 +3163,7 @@ func checkPeriodStart[TX any](t *testing.T, f fixture[TX]) {
 // to what is already counted, so a ceiling crossed meanwhile — by an
 // OverrunPolicyRecord charge elsewhere in the chain, or a tenant ceiling
 // lowered — does not refuse it, and the whole hold is released everywhere it counted.
-func checkSettleWithinHold[TX any](t *testing.T, f fixture[TX]) {
+func checkSettleWithinHold(t *testing.T, f fixture) {
 	const held, actual = 10 * one, 4 * one
 	r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: held})
 	if err != nil {
@@ -3218,7 +3218,7 @@ func checkSettleWithinHold[TX any](t *testing.T, f fixture[TX]) {
 // checkZeroSubject holds a store to refusing the zero MeterSubject — one no
 // verifier or record made, naming no capability and no tenant — rather than
 // counting it under the nil id.
-func checkZeroSubject[TX any](t *testing.T, f fixture[TX]) {
+func checkZeroSubject(t *testing.T, f fixture) {
 	var zero limes.MeterSubject
 	if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: zero}); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("Bump: err = %v, want ErrInvalidRequest", err)
@@ -3240,7 +3240,7 @@ func checkZeroSubject[TX any](t *testing.T, f fixture[TX]) {
 // A call naming Tenant, made under another tenant's context, is refused as
 // one: the rows are there, so answering as if they were not would read as a
 // bad request or a miss. Nothing it would have moved moves.
-func checkScopeMismatch[TX any](t *testing.T, f fixture[TX]) {
+func checkScopeMismatch(t *testing.T, f fixture) {
 	if !f.ScopesTenants {
 		t.Skip("Env.ScopesTenants not set")
 	}
@@ -3312,7 +3312,7 @@ func checkScopeMismatch[TX any](t *testing.T, f fixture[TX]) {
 // writes, housekeeping included, is refused as out of scope rather than let
 // through as no rows, runs no onCharged, and moves no counter, hold or
 // ceiling.
-func checkReadOnlyScope[TX any](t *testing.T, f fixture[TX]) {
+func checkReadOnlyScope(t *testing.T, f fixture) {
 	ro := f.ReadOnlyCtx
 	if ro == nil {
 		t.Skip("Env.ReadOnlyCtx not set")
@@ -3330,7 +3330,7 @@ func checkReadOnlyScope[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatalf("GetUsage under the read-only scope: %v", err)
 	}
 	ran := false
-	onCharged := func(context.Context, meter.Charged[TX]) error {
+	onCharged := func(context.Context, meter.Charged) error {
 		ran = true
 		return nil
 	}
@@ -3408,7 +3408,7 @@ func checkReadOnlyScope[TX any](t *testing.T, f fixture[TX]) {
 
 // Erasing a tenant's usage drops its counters, holds, copies' counters,
 // charges and aggregate, and no other tenant's.
-func checkEraseTenantUsage[TX any](t *testing.T, f fixture[TX]) {
+func checkEraseTenantUsage(t *testing.T, f fixture) {
 	eraser, ok := f.Usage.(meter.TenantUsageEraser)
 	if !ok {
 		t.Skip("the UsageStore does not implement meter.TenantUsageEraser")
@@ -3530,7 +3530,7 @@ func checkEraseTenantUsage[TX any](t *testing.T, f fixture[TX]) {
 const sumWindow = 24 * time.Hour
 
 // sumPeriod is a period holding every charge a check takes.
-func (f fixture[TX]) sumPeriod() (from, to time.Time) {
+func (f fixture) sumPeriod() (from, to time.Time) {
 	now := time.Now()
 	if f.Now != nil {
 		now = f.Now()
@@ -3540,7 +3540,7 @@ func (f fixture[TX]) sumPeriod() (from, to time.Time) {
 
 // SumCharges sums Tenant's charges alone, grouped as asked, the largest
 // first, a refund in its charge's group, and pages them.
-func checkSumCharges[TX any](t *testing.T, f fixture[TX]) {
+func checkSumCharges(t *testing.T, f fixture) {
 	if f.Ledger == nil {
 		t.Skip("Env.Ledger not set")
 	}
@@ -3643,7 +3643,7 @@ func checkSumCharges[TX any](t *testing.T, f fixture[TX]) {
 // lengths come largest first, whole and within each bucket, and a walk one
 // row at a time yields what one page does. A refund stays in its charge's
 // group throughout.
-func checkSumChargesOrderByAmount[TX any](t *testing.T, f fixture[TX]) {
+func checkSumChargesOrderByAmount(t *testing.T, f fixture) {
 	if f.Ledger == nil {
 		t.Skip("Env.Ledger not set")
 	}
@@ -3740,7 +3740,7 @@ func checkSumChargesOrderByAmount[TX any](t *testing.T, f fixture[TX]) {
 // Buckets are cut at UTC boundaries: a charge a microsecond — the finest a
 // timestamp column keeps — before midnight falls in that day and hour, and
 // one at midnight in the next. No bucket sums them together.
-func checkSumChargeBuckets[TX any](t *testing.T, f fixture[TX]) {
+func checkSumChargeBuckets(t *testing.T, f fixture) {
 	if f.Ledger == nil || f.Now == nil || f.Advance == nil {
 		t.Skip("Env.Ledger, Now or Advance not set")
 	}
@@ -3794,7 +3794,7 @@ func checkSumChargeBuckets[TX any](t *testing.T, f fixture[TX]) {
 
 // A week bucket is an ISO week: a charge a microsecond before Monday 00:00
 // UTC falls in the week before, one at it in the week it starts.
-func checkSumChargeWeeks[TX any](t *testing.T, f fixture[TX]) {
+func checkSumChargeWeeks(t *testing.T, f fixture) {
 	if f.Ledger == nil || f.Now == nil || f.Advance == nil {
 		t.Skip("Env.Ledger, Now or Advance not set")
 	}
@@ -3826,7 +3826,7 @@ func checkSumChargeWeeks[TX any](t *testing.T, f fixture[TX]) {
 // sameSums compares sums, their bucket starts as instants.
 // The period is [From, To): a charge taken at From is in it, and one taken
 // at To is not.
-func checkSumChargesPeriodEdges[TX any](t *testing.T, f fixture[TX]) {
+func checkSumChargesPeriodEdges(t *testing.T, f fixture) {
 	if f.Ledger == nil || f.Now == nil || f.Advance == nil {
 		t.Skip("Env.Ledger, Now or Advance not set")
 	}
@@ -3854,7 +3854,7 @@ func checkSumChargesPeriodEdges[TX any](t *testing.T, f fixture[TX]) {
 // A refund made once its charge's bucket has closed still counts in that
 // bucket, and opens none of its own in the bucket it was made in: a closed
 // period's sums still move.
-func checkSumChargesLateRefund[TX any](t *testing.T, f fixture[TX]) {
+func checkSumChargesLateRefund(t *testing.T, f fixture) {
 	if f.Ledger == nil || f.Now == nil || f.Advance == nil {
 		t.Skip("Env.Ledger, Now or Advance not set")
 	}
@@ -3881,7 +3881,7 @@ func checkSumChargesLateRefund[TX any](t *testing.T, f fixture[TX]) {
 // A sum past MaxNanos is ErrCounterOverflow, never a wrapped or clipped
 // total: two charges of MaxNanos, the tenant's spend reset between them, sum
 // to twice what a counter holds, while each capability's group holds one.
-func checkSumChargesOverflow[TX any](t *testing.T, f fixture[TX]) {
+func checkSumChargesOverflow(t *testing.T, f fixture) {
 	if f.Ledger == nil {
 		t.Skip("Env.Ledger not set")
 	}
@@ -3923,7 +3923,7 @@ func checkSumChargesOverflow[TX any](t *testing.T, f fixture[TX]) {
 
 // GetTenantBudget of a tenant with no row — no ceiling set, nothing charged
 // or held — is ErrTenantBudgetNotFound, which matches ErrNotFound.
-func checkTenantBudgetNotFound[TX any](t *testing.T, f fixture[TX]) {
+func checkTenantBudgetNotFound(t *testing.T, f fixture) {
 	other, err := f.newTenant()
 	if err != nil {
 		t.Fatalf("NewTenant: %v", err)

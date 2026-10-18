@@ -14,7 +14,7 @@ import (
 // A usage store with no records to read lineage from is refused: no
 // ancestor's ceiling would bind, and PurgeOrphans could tell nothing gone.
 func TestUsageStoreRequiresRecords(t *testing.T) {
-	if _, err := NewUsageStore(UsageStoreConfig[struct{}]{}); err == nil {
+	if _, err := NewUsageStore(UsageStoreConfig{}); err == nil {
 		t.Error("NewUsageStore accepted no Records")
 	}
 }

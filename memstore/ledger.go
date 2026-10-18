@@ -17,13 +17,13 @@ import (
 )
 
 // Ledger implements meter.LedgerReader over a UsageStore's ledger.
-type Ledger[TX any] struct {
-	usage *UsageStore[TX]
+type Ledger struct {
+	usage *UsageStore
 }
 
 // NewLedger returns the ledger reader of usage.
-func NewLedger[TX any](usage *UsageStore[TX]) *Ledger[TX] {
-	return &Ledger[TX]{usage: usage}
+func NewLedger(usage *UsageStore) *Ledger {
+	return &Ledger{usage: usage}
 }
 
 // sumKey is one group of SumCharges: the fields it groups by.
@@ -43,7 +43,7 @@ type sumPlace struct {
 }
 
 // SumCharges implements meter.LedgerReader.
-func (l *Ledger[TX]) SumCharges(_ context.Context, req meter.SumChargesRequest) (limes.Page[meter.ChargeSum], error) {
+func (l *Ledger) SumCharges(_ context.Context, req meter.SumChargesRequest) (limes.Page[meter.ChargeSum], error) {
 	if err := req.Validate(); err != nil {
 		return limes.Page[meter.ChargeSum]{}, err
 	}
@@ -72,7 +72,7 @@ func (l *Ledger[TX]) SumCharges(_ context.Context, req meter.SumChargesRequest) 
 }
 
 // sum groups the tenant's charges in the period as req asks.
-func (l *Ledger[TX]) sum(req meter.SumChargesRequest) ([]meter.ChargeSum, error) {
+func (l *Ledger) sum(req meter.SumChargesRequest) ([]meter.ChargeSum, error) {
 	l.usage.mu.Lock()
 	defer l.usage.mu.Unlock()
 	groups := map[sumKey]*meter.ChargeSum{}
@@ -162,4 +162,4 @@ func decodeSumCursor(s string) (sumPlace, error) {
 	return p, nil
 }
 
-var _ meter.LedgerReader = (*Ledger[struct{}])(nil)
+var _ meter.LedgerReader = (*Ledger)(nil)

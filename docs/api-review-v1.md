@@ -184,6 +184,12 @@ major the module path does not carry.
   into its API. `MeterSubject`, the ceilings, `Nanos` and the refusals
   `ErrorResponse` answers stay in `limes`. Its OpenTelemetry instruments
   had already moved, to the module `otelmetric` (round three).
+- The meter's type parameter. **Done** in v0.101.0: `Meter[TX]` named the
+  store's transaction type in the contract, so a service metering through
+  stores of two kinds could not hold one `UsageStore`. The store now puts
+  its transaction in the context `onCharged` receives and reads it with an
+  accessor of its own (`pgstore.TxFrom`); the guarantee that the side effect
+  commits with the charge is unchanged.
 - A Postgres reference store in its own module, to prove `Store` and
   `UsageStore` against row-level security before they freeze. **Done:**
   `pgstore`, held to storetest and metertest under row-level security; it

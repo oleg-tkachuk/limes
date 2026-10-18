@@ -11,26 +11,27 @@ import (
 	"github.com/oleg-tkachuk/limes/meter"
 )
 
-// fakeTx is a transaction handle the store threads to onCharged.
-type fakeTx struct{ id int }
+// callerKey keys a value a test puts in the caller's context.
+type callerKey struct{}
 
-// The factory's handle is the one a charge's callback receives.
-func TestTxFactoryThreadsTheHandle(t *testing.T) {
-	const handleID = 42
-	u, err := NewUsageStore(UsageStoreConfig[*fakeTx]{Records: newTestStore(), TxFactory: func() *fakeTx { return &fakeTx{id: handleID} }})
+// With no transaction of its own, the store hands onCharged the caller's
+// context: what the caller put in it is there.
+func TestOnChargedRunsOnTheCallersContext(t *testing.T) {
+	const marker = "the caller's"
+	u, err := NewUsageStore(UsageStoreConfig{Records: newTestStore()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got *fakeTx
-	ctx := t.Context()
+	var got any
+	ctx := context.WithValue(t.Context(), callerKey{}, marker)
 	if _, err := u.Charge(ctx, meter.ChargeRequest{
 		Subject: recordedSubject(ctx, t, u, subjectSpec{capID: uuid.New(), tenant: uuid.New()}),
 		Amount:  limes.MustParseAmount("1"),
-	}, func(_ context.Context, c meter.Charged[*fakeTx]) error { got = c.Tx; return nil }); err != nil {
+	}, func(ctx context.Context, _ meter.Charged) error { got = ctx.Value(callerKey{}); return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if got == nil || got.id != handleID {
-		t.Fatalf("onCharged received %+v, want the factory's handle", got)
+	if got != marker {
+		t.Fatalf("onCharged's context holds %v, want the caller's value", got)
 	}
 }
 
@@ -70,7 +71,7 @@ func TestStoreClockDrivesPurge(t *testing.T) {
 
 // A negative quota of copies is refused rather than read as none.
 func TestNewUsageStoreRefusesANegativeCopyQuota(t *testing.T) {
-	if _, err := NewUsageStore(UsageStoreConfig[struct{}]{Records: newTestStore(), MaxCopiesPerCapability: -1}); err == nil {
+	if _, err := NewUsageStore(UsageStoreConfig{Records: newTestStore(), MaxCopiesPerCapability: -1}); err == nil {
 		t.Fatal("a negative MaxCopiesPerCapability was accepted")
 	}
 }

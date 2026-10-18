@@ -362,7 +362,10 @@ func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 			ran = true
 			return nil
 		}
-		onCharged := func(ctx context.Context, c meter.Charged[pgx.Tx]) error { return consumer(ctx, c.Tx) }
+		onCharged := func(ctx context.Context, _ meter.Charged) error {
+			tx, _ := TxFrom(ctx)
+			return consumer(ctx, tx)
+		}
 		onErased := func(ctx context.Context, e Erased) error { return consumer(ctx, e.Tx) }
 		c := f.parent
 		c.ID, c.ParentID = uuid.New(), uuid.Nil

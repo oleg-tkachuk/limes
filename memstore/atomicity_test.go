@@ -13,7 +13,7 @@ import (
 
 // The charge-atomicity guard.
 //
-// This property is why UsageStore is generic in TX at all: onCharged runs
+// This property is why onCharged exists at all: it runs
 // inside the charge so a consumer's outbox write commits with the spend,
 // closing the dual-write window (ADR-0003). Before this file, it had NO test
 // anywhere in the repository — verified by grepping every *_test.go for
@@ -48,7 +48,7 @@ func TestChargeRollsBackWhenSideEffectFails(t *testing.T) {
 
 	// Now a charge whose side effect fails.
 	boom := errors.New("outbox insert failed")
-	spent, err := usage.Charge(ctx, meter.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: tenantID, budget: budgetOf(limes.MustParseAmount("100")), unit: "USD"}), Amount: limes.MustParseAmount("25"), Op: "write", Actor: "alice"}, func(context.Context, meter.Charged[struct{}]) error { return boom })
+	spent, err := usage.Charge(ctx, meter.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: tenantID, budget: budgetOf(limes.MustParseAmount("100")), unit: "USD"}), Amount: limes.MustParseAmount("25"), Op: "write", Actor: "alice"}, func(context.Context, meter.Charged) error { return boom })
 
 	if !errors.Is(err, boom) {
 		t.Fatalf("want the side-effect error, got %v", err)
@@ -90,7 +90,7 @@ func TestChargeRetryAfterRollbackIsClean(t *testing.T) {
 	usage := newTestUsage(newTestStore())
 
 	boom := errors.New("transient")
-	if _, err := usage.Charge(ctx, meter.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: tenantID, budget: budgetOf(limes.MustParseAmount("100")), unit: "USD"}), Amount: limes.MustParseAmount("7"), Op: "op", Actor: "actor"}, func(context.Context, meter.Charged[struct{}]) error { return boom }); !errors.Is(err, boom) {
+	if _, err := usage.Charge(ctx, meter.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: tenantID, budget: budgetOf(limes.MustParseAmount("100")), unit: "USD"}), Amount: limes.MustParseAmount("7"), Op: "op", Actor: "actor"}, func(context.Context, meter.Charged) error { return boom }); !errors.Is(err, boom) {
 		t.Fatalf("want the failure, got %v", err)
 	}
 
@@ -167,7 +167,7 @@ func TestChargeTenantCeilingLeavesBothCountersUnmutated(t *testing.T) {
 }
 
 // The no-transaction mode (contracts §1.2): a consumer with no transactional
-// storage instantiates UsageStore[struct{}] and always passes nil. Everything
+// storage instantiates UsageStore and always passes nil. Everything
 // works; only the atomic-side-effect guarantee is forgone.
 func TestNoTransactionModeWorksEndToEnd(t *testing.T) {
 	ctx := context.Background()

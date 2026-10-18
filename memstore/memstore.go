@@ -66,12 +66,9 @@ type Store struct {
 	nowFn         func() time.Time
 }
 
-// UsageStore implements meter.UsageStore[TX] — request and spend counters.
-//
-// TX is the consumer's transaction handle. This store has no transactions of
-// its own, so it never constructs one unless given a factory; it only threads
-// the handle back to onCharged.
-type UsageStore[TX any] struct {
+// UsageStore implements meter.UsageStore — request and spend counters. It
+// has no transactions, so onCharged runs on the caller's context.
+type UsageStore struct {
 	mu sync.Mutex
 
 	usage map[uuid.UUID]meter.Usage
@@ -88,7 +85,6 @@ type UsageStore[TX any] struct {
 	records       *Store // lineage and ceilings of ancestors
 	holds         map[uuid.UUID]hold
 	nowFn         func() time.Time
-	txFactory     func() TX
 
 	// copies counts each Biscuit copy that set limits of its own, by its
 	// capability and its block's revocation id; at most maxCopies of one
@@ -132,7 +128,7 @@ func hasKey[K comparable, V any](m map[K]V, k K) bool {
 
 // admitCopiesLocked refuses copies that would take capID past maxCopies
 // counted copies, the ones it already counts aside. s.mu must be held.
-func (s *UsageStore[TX]) admitCopiesLocked(capID uuid.UUID, copies []limes.CopyCeiling) error {
+func (s *UsageStore) admitCopiesLocked(capID uuid.UUID, copies []limes.CopyCeiling) error {
 	added := map[copyKey]bool{}
 	for _, c := range copies {
 		if key := copyKeyOf(capID, c.RevocationID); !hasKey(s.copies, key) {
@@ -225,9 +221,8 @@ func NewStore(cfg StoreConfig) (*Store, error) {
 	}, nil
 }
 
-// UsageStoreConfig configures a UsageStore. TX is the consumer's
-// transaction handle, threaded back to onCharged.
-type UsageStoreConfig[TX any] struct {
+// UsageStoreConfig configures a UsageStore.
+type UsageStoreConfig struct {
 	// Records is how the usage store finds each capability's ancestors and
 	// their ceilings, and which capabilities still exist for PurgeOrphans.
 	// Required: without it no ancestor's ceiling would bind, which a store
@@ -235,8 +230,6 @@ type UsageStoreConfig[TX any] struct {
 	Records *Store
 	// Now is the clock, read as a wall clock (wallClock). Nil: time.Now.
 	Now func() time.Time
-	// TxFactory makes the handle passed to onCharged. Nil: the zero TX.
-	TxFactory func() TX
 	// MaxCopiesPerCapability is how many Biscuit copies the store counts
 	// for one capability (meter.Meter, "Copies of a Biscuit"). Zero:
 	// meter.DefaultMaxCopiesPerCapability; negative is refused.
@@ -245,9 +238,8 @@ type UsageStoreConfig[TX any] struct {
 
 // NewUsageStore returns an empty usage store.
 //
-//	memstore.NewUsageStore(memstore.UsageStoreConfig[struct{}]{Records: records}) // no transactions
-//	memstore.NewUsageStore(memstore.UsageStoreConfig[pgx.Tx]{Records: records, TxFactory: begin}) // a real handle
-func NewUsageStore[TX any](cfg UsageStoreConfig[TX]) (*UsageStore[TX], error) {
+//	memstore.NewUsageStore(memstore.UsageStoreConfig{Records: records})
+func NewUsageStore(cfg UsageStoreConfig) (*UsageStore, error) {
 	if cfg.Records == nil {
 		return nil, errors.New("memstore: UsageStoreConfig.Records required")
 	}
@@ -260,7 +252,7 @@ func NewUsageStore[TX any](cfg UsageStoreConfig[TX]) (*UsageStore[TX], error) {
 	case cfg.MaxCopiesPerCapability == 0:
 		cfg.MaxCopiesPerCapability = meter.DefaultMaxCopiesPerCapability
 	}
-	return &UsageStore[TX]{
+	return &UsageStore{
 		maxCopies: cfg.MaxCopiesPerCapability,
 		usage:     map[uuid.UUID]meter.Usage{},
 		tenantOf:  map[uuid.UUID]uuid.UUID{},
@@ -275,7 +267,6 @@ func NewUsageStore[TX any](cfg UsageStoreConfig[TX]) (*UsageStore[TX], error) {
 		byReservation: map[uuid.UUID]int{},
 		records:       cfg.Records,
 		nowFn:         wallClock(cfg.Now),
-		txFactory:     cfg.TxFactory,
 	}, nil
 }
 
@@ -657,7 +648,7 @@ const percent = 100
 // bytewise, as UUIDs compare.
 func uuidLess(a, b uuid.UUID) bool { return bytes.Compare(a[:], b[:]) < 0 }
 
-// ─── meter.UsageStore[TX] ─────────────────────────────────────────────
+// ─── meter.UsageStore ─────────────────────────────────────────────
 
 // sameCopies reports whether two lists of copy limits name the same copies,
 // in the same order: a hold is settled under the copies it was made under.
@@ -675,14 +666,14 @@ func sameCopyIDs(ids [][]byte, copies []limes.CopyCeiling) bool {
 // ErrNotFound when capID itself is not on record: with no record its
 // ancestors cannot be read, and metering it alone would let it spend past
 // every live ancestor's ceiling.
-func (s *UsageStore[TX]) lineage(capID uuid.UUID) ([]limes.Capability, error) {
+func (s *UsageStore) lineage(capID uuid.UUID) ([]limes.Capability, error) {
 	return s.records.lineageOf(capID)
 }
 
 // Bump returns ErrRequestLimitExceeded WITHOUT mutating when the
 // increment would cross the capability's ceiling or any ancestor's. A
 // rejected call must be safe to retry.
-func (s *UsageStore[TX]) Bump(_ context.Context, req meter.BumpRequest) (meter.BumpReceipt, error) {
+func (s *UsageStore) Bump(_ context.Context, req meter.BumpRequest) (meter.BumpReceipt, error) {
 	if err := req.Validate(); err != nil {
 		return meter.BumpReceipt{}, err
 	}
@@ -762,10 +753,10 @@ type hold struct {
 // ledger published. A rejection by any ceiling, or an error from onCharged,
 // therefore leaves EVERY counter and the ledger exactly as they were — which
 // is the atomicity guarantee.
-func (s *UsageStore[TX]) Charge(
+func (s *UsageStore) Charge(
 	ctx context.Context,
 	req meter.ChargeRequest,
-	onCharged func(ctx context.Context, c meter.Charged[TX]) error,
+	onCharged func(ctx context.Context, c meter.Charged) error,
 ) (meter.ChargeReceipt, error) {
 	if err := req.Validate(); err != nil {
 		return meter.ChargeReceipt{}, err
@@ -804,7 +795,7 @@ func (s *UsageStore[TX]) Charge(
 }
 
 // ChargeByRef returns the charge a capability took under externalRef.
-func (s *UsageStore[TX]) ChargeByRef(_ context.Context, req meter.ChargeByRefRequest) (meter.ChargeRecord, error) {
+func (s *UsageStore) ChargeByRef(_ context.Context, req meter.ChargeByRefRequest) (meter.ChargeRecord, error) {
 	if err := req.Validate(); err != nil {
 		return meter.ChargeRecord{}, err
 	}
@@ -819,7 +810,7 @@ func (s *UsageStore[TX]) ChargeByRef(_ context.Context, req meter.ChargeByRefReq
 }
 
 // GetCharge returns one charge of the ledger by its id.
-func (s *UsageStore[TX]) GetCharge(_ context.Context, chargeID uuid.UUID) (meter.ChargeRecord, error) {
+func (s *UsageStore) GetCharge(_ context.Context, chargeID uuid.UUID) (meter.ChargeRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e, ok := entryLocked(s, s.byCharge, chargeID)
@@ -839,7 +830,7 @@ func (e ledgerEntry) record() meter.ChargeRecord {
 
 // entryLocked returns the ledger entry index files under key. s.mu must be
 // held.
-func entryLocked[TX any, K comparable](s *UsageStore[TX], index map[K]int, key K) (ledgerEntry, bool) {
+func entryLocked[K comparable](s *UsageStore, index map[K]int, key K) (ledgerEntry, bool) {
 	i, ok := index[key]
 	if !ok {
 		return ledgerEntry{}, false
@@ -848,19 +839,19 @@ func entryLocked[TX any, K comparable](s *UsageStore[TX], index map[K]int, key K
 }
 
 // putUsageLocked writes capID's usage row, of tenant. s.mu must be held.
-func (s *UsageStore[TX]) putUsageLocked(capID, tenant uuid.UUID, u meter.Usage) {
+func (s *UsageStore) putUsageLocked(capID, tenant uuid.UUID, u meter.Usage) {
 	s.usage[capID] = u
 	s.tenantOf[capID] = tenant
 }
 
 // dropUsageLocked removes capID's usage row. s.mu must be held.
-func (s *UsageStore[TX]) dropUsageLocked(capID uuid.UUID) {
+func (s *UsageStore) dropUsageLocked(capID uuid.UUID) {
 	delete(s.usage, capID)
 	delete(s.tenantOf, capID)
 }
 
 // appendLocked adds entry to the ledger and its indexes. s.mu must be held.
-func (s *UsageStore[TX]) appendLocked(entry ledgerEntry) {
+func (s *UsageStore) appendLocked(entry ledgerEntry) {
 	i := len(s.ledger)
 	s.ledger = append(s.ledger, entry)
 	s.byCharge[entry.ID] = i
@@ -874,7 +865,7 @@ func (s *UsageStore[TX]) appendLocked(entry ledgerEntry) {
 
 // replayLocked is the receipt for a charge already in the ledger, returned
 // when the same charge arrives again. s.mu must be held.
-func (s *UsageStore[TX]) replayLocked(e ledgerEntry) meter.ChargeReceipt {
+func (s *UsageStore) replayLocked(e ledgerEntry) meter.ChargeReceipt {
 	return meter.ChargeReceipt{
 		ChargeID: e.ID, SpentAmount: s.usage[e.CapabilityID].SpentAmount,
 		Replayed: true, Overrun: e.Overrun, TenantID: e.TenantID, UnitCode: e.UnitCode,
@@ -895,13 +886,13 @@ func ancestorIDs(ancestors []limes.Capability) []uuid.UUID {
 // ancestors that hold it, which a row dropped since may have left. Held
 // amounts count against each ceiling, except the one being settled where it
 // is held. s.mu must be held.
-func (s *UsageStore[TX]) chargeLocked(
+func (s *UsageStore) chargeLocked(
 	ctx context.Context,
 	req meter.ChargeRequest,
 	unit string,
 	ancestors []limes.Capability,
 	settling *hold,
-	onCharged func(ctx context.Context, c meter.Charged[TX]) error,
+	onCharged func(ctx context.Context, c meter.Charged) error,
 ) (meter.ChargeReceipt, error) {
 	var released limes.Nanos
 	var holders []uuid.UUID
@@ -935,14 +926,10 @@ func (s *UsageStore[TX]) chargeLocked(
 		ChargeID: uuid.New(), SpentAmount: stagedSpent, Overrun: overrun, TenantID: req.Subject.TenantID(), UnitCode: unit,
 	}
 
-	// the caller's side effect, on the caller's handle, before anything is
-	// published
+	// the caller's side effect, on the caller's context — this store has no
+	// transaction to put in it — before anything is published
 	if onCharged != nil {
-		var tx TX
-		if s.txFactory != nil {
-			tx = s.txFactory()
-		}
-		if err := onCharged(ctx, meter.Charged[TX]{Tx: tx, Receipt: receipt}); err != nil {
+		if err := onCharged(ctx, meter.Charged{Receipt: receipt}); err != nil {
 			// Nothing has been published — nothing to compensate.
 			return meter.ChargeReceipt{SpentAmount: u.SpentAmount, TenantID: req.Subject.TenantID(), UnitCode: unit}, err
 		}
@@ -1001,7 +988,7 @@ func (s *UsageStore[TX]) chargeLocked(
 // the first charge or hold, not from the first SetTenantBudget, so a ceiling
 // set later is measured against what the tenant has already spent and
 // holds. s.mu must be held.
-func (s *UsageStore[TX]) tenantLocked(tenantID uuid.UUID, unit string) meter.TenantBudget {
+func (s *UsageStore) tenantLocked(tenantID uuid.UUID, unit string) meter.TenantBudget {
 	if b, ok := s.budgets[tenantID]; ok {
 		if b.Ceiling.UnitCode == "" {
 			b.Ceiling.UnitCode = unit
@@ -1034,7 +1021,7 @@ type ceilingCheck struct {
 // with whatever is already spent and held, when c adds to it. Each ceiling c would cross goes
 // to crossed, which returns the error to stop on or nil to carry on.
 // s.mu must be held.
-func (s *UsageStore[TX]) checkCeilingsLocked(c ceilingCheck, crossed func(error) error) error {
+func (s *UsageStore) checkCeilingsLocked(c ceilingCheck, crossed func(error) error) error {
 	if err := s.checkUnitsLocked(c); err != nil {
 		return err
 	}
@@ -1090,7 +1077,7 @@ func (s *UsageStore[TX]) checkCeilingsLocked(c ceilingCheck, crossed func(error)
 // checkUnitsLocked refuses an amount in a unit other than one a counter it
 // would move already counts in. Like the range, it is not a ceiling an
 // overrun may cross: the sum would mean nothing. s.mu must be held.
-func (s *UsageStore[TX]) checkUnitsLocked(c ceilingCheck) error {
+func (s *UsageStore) checkUnitsLocked(c ceilingCheck) error {
 	differs := func(have string) bool { return have != "" && have != c.unit }
 	if differs(s.usage[c.capID].UnitCode) {
 		return fmt.Errorf("%w: capability %s counts in %s, not %s",
@@ -1110,7 +1097,7 @@ func (s *UsageStore[TX]) checkUnitsLocked(c ceilingCheck) error {
 // checkRangeLocked keeps every counter c would move within MaxNanos, the
 // range a store holds. Unlike a ceiling it is not an overrun to record: past
 // it the amount could not be counted at all. s.mu must be held.
-func (s *UsageStore[TX]) checkRangeLocked(c ceilingCheck) error {
+func (s *UsageStore) checkRangeLocked(c ceilingCheck) error {
 	fits := func(spent, reserved limes.Nanos) bool {
 		return spent+max0(reserved-c.released) <= limes.MaxNanos-c.amount
 	}
@@ -1135,7 +1122,7 @@ func (s *UsageStore[TX]) checkRangeLocked(c ceilingCheck) error {
 }
 
 // Reserve holds an amount against every ceiling Charge checks.
-func (s *UsageStore[TX]) Reserve(_ context.Context, req meter.ReserveRequest) (meter.Reservation, error) {
+func (s *UsageStore) Reserve(_ context.Context, req meter.ReserveRequest) (meter.Reservation, error) {
 	if err := req.Validate(); err != nil {
 		return meter.Reservation{}, err
 	}
@@ -1192,7 +1179,7 @@ func (s *UsageStore[TX]) Reserve(_ context.Context, req meter.ReserveRequest) (m
 }
 
 // applyHoldLocked adds (sign +1) or removes (sign -1) a hold on every counter.
-func (s *UsageStore[TX]) applyHoldLocked(h hold, sign limes.Nanos) {
+func (s *UsageStore) applyHoldLocked(h hold, sign limes.Nanos) {
 	for _, id := range append([]uuid.UUID{h.capID}, h.ancestors...) {
 		u := s.usage[id]
 		u.CapabilityID = id
@@ -1215,10 +1202,10 @@ func (s *UsageStore[TX]) applyHoldLocked(h hold, sign limes.Nanos) {
 }
 
 // Settle charges the actual cost in place of a reservation.
-func (s *UsageStore[TX]) Settle(
+func (s *UsageStore) Settle(
 	ctx context.Context,
 	req meter.SettleRequest,
-	onCharged func(ctx context.Context, c meter.Charged[TX]) error,
+	onCharged func(ctx context.Context, c meter.Charged) error,
 ) (meter.ChargeReceipt, error) {
 	if err := req.Validate(); err != nil {
 		return meter.ChargeReceipt{}, err
@@ -1295,7 +1282,7 @@ func heldCopies(copies []limes.CopyCeiling) []meter.HeldCopy {
 }
 
 // GetReservation returns a hold that still counts, expired or not.
-func (s *UsageStore[TX]) GetReservation(_ context.Context, reservationID uuid.UUID) (meter.Reservation, error) {
+func (s *UsageStore) GetReservation(_ context.Context, reservationID uuid.UUID) (meter.Reservation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	h, ok := s.holds[reservationID]
@@ -1306,7 +1293,7 @@ func (s *UsageStore[TX]) GetReservation(_ context.Context, reservationID uuid.UU
 }
 
 // ListReservations returns the capability's own holds, soonest to expire first.
-func (s *UsageStore[TX]) ListReservations(_ context.Context, req meter.ListReservationsRequest) (limes.Page[meter.Reservation], error) {
+func (s *UsageStore) ListReservations(_ context.Context, req meter.ListReservationsRequest) (limes.Page[meter.Reservation], error) {
 	if err := req.Validate(); err != nil {
 		return limes.Page[meter.Reservation]{}, err
 	}
@@ -1386,7 +1373,7 @@ func parseReservationPlace(cursor string) (reservationPlace, error) {
 
 // Release ends a reservation without charging. Idempotent; a hold of
 // another capability or tenant, or of other copies, is left held.
-func (s *UsageStore[TX]) Release(_ context.Context, req meter.ReleaseRequest) error {
+func (s *UsageStore) Release(_ context.Context, req meter.ReleaseRequest) error {
 	if err := req.Validate(); err != nil {
 		return err
 	}
@@ -1402,7 +1389,7 @@ func (s *UsageStore[TX]) Release(_ context.Context, req meter.ReleaseRequest) er
 }
 
 // ReleaseExpired releases every hold past its expiry.
-func (s *UsageStore[TX]) ReleaseExpired(_ context.Context, req meter.ReleaseExpiredRequest) (meter.ReleaseExpiredResult, error) {
+func (s *UsageStore) ReleaseExpired(_ context.Context, req meter.ReleaseExpiredRequest) (meter.ReleaseExpiredResult, error) {
 	if err := req.Validate(); err != nil {
 		return meter.ReleaseExpiredResult{}, err
 	}
@@ -1428,7 +1415,7 @@ func (s *UsageStore[TX]) ReleaseExpired(_ context.Context, req meter.ReleaseExpi
 }
 
 // Refund returns spend from one ledger entry to the counters it debited.
-func (s *UsageStore[TX]) Refund(_ context.Context, req meter.RefundRequest) (meter.RefundReceipt, error) {
+func (s *UsageStore) Refund(_ context.Context, req meter.RefundRequest) (meter.RefundReceipt, error) {
 	if err := req.Validate(); err != nil {
 		return meter.RefundReceipt{}, err
 	}
@@ -1479,7 +1466,7 @@ func (s *UsageStore[TX]) Refund(_ context.Context, req meter.RefundRequest) (met
 }
 
 // GetUsage reads one capability's counters.
-func (s *UsageStore[TX]) GetUsage(_ context.Context, capID uuid.UUID) (meter.Usage, error) {
+func (s *UsageStore) GetUsage(_ context.Context, capID uuid.UUID) (meter.Usage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	u, ok := s.usage[capID]
@@ -1490,7 +1477,7 @@ func (s *UsageStore[TX]) GetUsage(_ context.Context, capID uuid.UUID) (meter.Usa
 }
 
 // CopyUsage implements meter.CopyUsageReader.
-func (s *UsageStore[TX]) CopyUsage(_ context.Context, req meter.CopyUsageRequest) (meter.CopyUsageResult, error) {
+func (s *UsageStore) CopyUsage(_ context.Context, req meter.CopyUsageRequest) (meter.CopyUsageResult, error) {
 	if err := req.Validate(); err != nil {
 		return meter.CopyUsageResult{}, err
 	}
@@ -1509,7 +1496,7 @@ func (s *UsageStore[TX]) CopyUsage(_ context.Context, req meter.CopyUsageRequest
 }
 
 // GetTenantBudget reads one tenant's aggregate and ceiling.
-func (s *UsageStore[TX]) GetTenantBudget(_ context.Context, tenantID uuid.UUID) (meter.TenantBudget, error) {
+func (s *UsageStore) GetTenantBudget(_ context.Context, tenantID uuid.UUID) (meter.TenantBudget, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	b, ok := s.budgets[tenantID]
@@ -1520,7 +1507,7 @@ func (s *UsageStore[TX]) GetTenantBudget(_ context.Context, tenantID uuid.UUID) 
 }
 
 // SetTenantBudget sets a tenant's ceiling under the request's version guard.
-func (s *UsageStore[TX]) SetTenantBudget(_ context.Context, args meter.SetTenantBudgetRequest) (meter.TenantBudget, error) {
+func (s *UsageStore) SetTenantBudget(_ context.Context, args meter.SetTenantBudgetRequest) (meter.TenantBudget, error) {
 	if err := args.Validate(); err != nil {
 		return meter.TenantBudget{}, err
 	}
@@ -1575,7 +1562,7 @@ func (s *UsageStore[TX]) SetTenantBudget(_ context.Context, args meter.SetTenant
 }
 
 // ListTenantBudgets pages the tenants' aggregates, most at risk first.
-func (s *UsageStore[TX]) ListTenantBudgets(_ context.Context, args meter.ListTenantBudgetsRequest) (limes.Page[meter.TenantBudget], error) {
+func (s *UsageStore) ListTenantBudgets(_ context.Context, args meter.ListTenantBudgetsRequest) (limes.Page[meter.TenantBudget], error) {
 	if err := args.Validate(); err != nil {
 		return limes.Page[meter.TenantBudget]{}, err
 	}
@@ -1710,7 +1697,7 @@ func (r budgetRow) before(o budgetRow) bool {
 
 // releaseHoldsLocked releases every hold of a capability gone reports as
 // gone. s.mu must be held.
-func (s *UsageStore[TX]) releaseHoldsLocked(gone func(capID uuid.UUID) bool) {
+func (s *UsageStore) releaseHoldsLocked(gone func(capID uuid.UUID) bool) {
 	for id, h := range s.holds {
 		if gone(h.capID) {
 			s.applyHoldLocked(h, -1)
@@ -1722,7 +1709,7 @@ func (s *UsageStore[TX]) releaseHoldsLocked(gone func(capID uuid.UUID) bool) {
 // DeleteUsage drops the capability's counters and releases its holds first:
 // nothing could settle or release them once it is gone, and they would keep
 // counting against its ancestors and its tenant.
-func (s *UsageStore[TX]) DeleteUsage(_ context.Context, req meter.DeleteUsageRequest) error {
+func (s *UsageStore) DeleteUsage(_ context.Context, req meter.DeleteUsageRequest) error {
 	if err := req.Validate(); err != nil {
 		return err
 	}
@@ -1740,7 +1727,7 @@ func (s *UsageStore[TX]) DeleteUsage(_ context.Context, req meter.DeleteUsageReq
 // holds that remain: a descendant's hold still names a dropped row's
 // capability, and releasing or settling it later must not write that row
 // back. s.mu must be held.
-func (s *UsageStore[TX]) forgetAncestorLocked(gone func(uuid.UUID) bool) {
+func (s *UsageStore) forgetAncestorLocked(gone func(uuid.UUID) bool) {
 	for id, h := range s.holds {
 		if slices.ContainsFunc(h.ancestors, gone) {
 			h.ancestors = slices.DeleteFunc(slices.Clone(h.ancestors), gone)
@@ -1751,7 +1738,7 @@ func (s *UsageStore[TX]) forgetAncestorLocked(gone func(uuid.UUID) bool) {
 
 // EraseTenantUsage implements meter.TenantUsageEraser: it drops the
 // tenant's holds, counters, copies' counters, ledger entries and aggregate.
-func (s *UsageStore[TX]) EraseTenantUsage(_ context.Context, req meter.EraseTenantUsageRequest) error {
+func (s *UsageStore) EraseTenantUsage(_ context.Context, req meter.EraseTenantUsageRequest) error {
 	if err := req.Validate(); err != nil {
 		return err
 	}
@@ -1782,7 +1769,7 @@ func (s *UsageStore[TX]) EraseTenantUsage(_ context.Context, req meter.EraseTena
 
 // notErasedLocked refuses a tenant EraseTenantUsage removed. s.mu must be
 // held.
-func (s *UsageStore[TX]) notErasedLocked(tenant uuid.UUID) error {
+func (s *UsageStore) notErasedLocked(tenant uuid.UUID) error {
 	if _, ok := s.erased[tenant]; ok {
 		return fmt.Errorf("%w: %s", limes.ErrTenantErased, tenant)
 	}
@@ -1791,7 +1778,7 @@ func (s *UsageStore[TX]) notErasedLocked(tenant uuid.UUID) error {
 
 // PurgeOrphans drops the counters of capabilities no longer on record, a
 // batch at a time, releasing their holds first.
-func (s *UsageStore[TX]) PurgeOrphans(_ context.Context, req meter.PurgeOrphansRequest) (meter.PurgeOrphansResult, error) {
+func (s *UsageStore) PurgeOrphans(_ context.Context, req meter.PurgeOrphansRequest) (meter.PurgeOrphansResult, error) {
 	if err := req.Validate(); err != nil {
 		return meter.PurgeOrphansResult{}, err
 	}
@@ -1844,11 +1831,11 @@ func max0(n limes.Nanos) limes.Nanos {
 // nothing but this module. If either assertion breaks, a third party cannot
 // implement the contract either.
 var (
-	_ limes.TenantRecordEraser   = (*Store)(nil)
-	_ limes.Store                = (*Store)(nil)
-	_ limes.IssuanceStore        = (*Store)(nil)
-	_ meter.UsageStore[struct{}] = (*UsageStore[struct{}])(nil)
-	_ meter.TenantUsageEraser    = (*UsageStore[struct{}])(nil)
+	_ limes.TenantRecordEraser = (*Store)(nil)
+	_ limes.Store              = (*Store)(nil)
+	_ limes.IssuanceStore      = (*Store)(nil)
+	_ meter.UsageStore         = (*UsageStore)(nil)
+	_ meter.TenantUsageEraser  = (*UsageStore)(nil)
 )
 
-var _ meter.CopyUsageReader = (*UsageStore[struct{}])(nil)
+var _ meter.CopyUsageReader = (*UsageStore)(nil)

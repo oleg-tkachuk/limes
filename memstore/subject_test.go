@@ -80,8 +80,8 @@ func newTestStore() *Store {
 	return s
 }
 
-func newTestUsage(records *Store) *UsageStore[struct{}] {
-	u, err := NewUsageStore(UsageStoreConfig[struct{}]{Records: records})
+func newTestUsage(records *Store) *UsageStore {
+	u, err := NewUsageStore(UsageStoreConfig{Records: records})
 	if err != nil {
 		panic(err)
 	}
@@ -89,7 +89,7 @@ func newTestUsage(records *Store) *UsageStore[struct{}] {
 }
 
 // mustUsage is NewUsageStore of cfg, failing the test on an error.
-func mustUsage(t testing.TB, cfg UsageStoreConfig[struct{}]) *UsageStore[struct{}] {
+func mustUsage(t testing.TB, cfg UsageStoreConfig) *UsageStore {
 	t.Helper()
 	u, err := NewUsageStore(cfg)
 	if err != nil {
@@ -101,7 +101,7 @@ func mustUsage(t testing.TB, cfg UsageStoreConfig[struct{}]) *UsageStore[struct{
 // recordedSubject records spec's capability as a root in u's record store,
 // unless it is already there, and returns its subject: the Meter meters only
 // a capability on record.
-func recordedSubject[TX any](ctx context.Context, t testing.TB, u *UsageStore[TX], spec subjectSpec) limes.MeterSubject {
+func recordedSubject(ctx context.Context, t testing.TB, u *UsageStore, spec subjectSpec) limes.MeterSubject {
 	t.Helper()
 	c := limes.Capability{
 		ID: spec.capID, Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: spec.tenant, Subject: "agent"},

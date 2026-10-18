@@ -16,7 +16,7 @@ import (
 	"github.com/oleg-tkachuk/limes/meter"
 )
 
-// UsageStore implements meter.UsageStore[pgx.Tx] and meter.CopyUsageReader:
+// UsageStore implements meter.UsageStore and meter.CopyUsageReader:
 // request and spend counters, holds, the charges ledger and the tenant
 // aggregates. It reads each capability's lineage and ceilings from the
 // records a Store over the same database keeps.

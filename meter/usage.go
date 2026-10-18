@@ -16,8 +16,8 @@ import (
 // interceptor, a handler) can depend on Meter alone, a reporter on
 // MeterReader, and code which only administers tenant ceilings on
 // TenantBudgets.
-type UsageStore[TX any] interface {
-	Meter[TX]
+type UsageStore interface {
+	Meter
 	MeterReader
 	TenantBudgets
 	UsageHousekeeping
@@ -75,7 +75,7 @@ type UsageStore[TX any] interface {
 // calls run as the pool has connections — each holds one and waits for
 // another — which a large pool under a light load never shows. Run metertest
 // against a pool of one or two connections to catch it.
-type Meter[TX any] interface {
+type Meter interface {
 	// Bump increments the request counter of the capability and of
 	// each ancestor, and returns the capability's new count. When any
 	// ceiling in the chain would be crossed it returns
@@ -95,8 +95,10 @@ type Meter[TX any] interface {
 	//
 	// Any rejection, or an error from onCharged, leaves every counter and
 	// the ledger untouched. onCharged runs inside the charge, atomically
-	// with it, once every ceiling has passed. It receives the consumer's
-	// transaction handle and the receipt the call will return (Charged), so
+	// with it, once every ceiling has passed. It receives a context carrying
+	// the store's transaction, which the store's own accessor reads
+	// (pgstore.TxFrom; a store with none hands the caller's context on), and
+	// the receipt the call will return (Charged), so
 	// a side effect such as an outbox write commits with the spend and names
 	// the ChargeID. The ledger row is written after onCharged returns: it is
 	// not there yet to read. Pass nil to skip it. It must not call back into the Meter: an implementation may
@@ -115,7 +117,7 @@ type Meter[TX any] interface {
 	// nothing. With req.Overrun = OverrunPolicyRecord, a charge that
 	// would cross a ceiling is committed anyway and the receipt reports it
 	// (ChargeReceipt.Overrun); see OverrunPolicy.
-	Charge(ctx context.Context, req ChargeRequest, onCharged func(ctx context.Context, c Charged[TX]) error) (ChargeReceipt, error)
+	Charge(ctx context.Context, req ChargeRequest, onCharged func(ctx context.Context, c Charged) error) (ChargeReceipt, error)
 
 	// Refund returns spend from one recorded charge to every counter that
 	// charge debited (capability, ancestors, tenant aggregate), and records
@@ -168,7 +170,7 @@ type Meter[TX any] interface {
 	// reservation made by another capability or tenant, or under other Biscuit copies
 	// than req.Subject carries: a hold is settled by the copy that made it,
 	// so a copy cannot settle a sibling's hold past its own limits.
-	Settle(ctx context.Context, req SettleRequest, onCharged func(ctx context.Context, c Charged[TX]) error) (ChargeReceipt, error)
+	Settle(ctx context.Context, req SettleRequest, onCharged func(ctx context.Context, c Charged) error) (ChargeReceipt, error)
 
 	// Release ends a reservation without charging. Idempotent: releasing
 	// one that is gone is a no-op. So is releasing a reservation made by
@@ -415,10 +417,9 @@ type ChargeReceipt struct {
 }
 
 // Charged is what Meter.Charge and Meter.Settle hand onCharged: the charge
-// it runs inside, before the call commits it.
-type Charged[TX any] struct {
-	// Tx is the consumer's transaction handle the charge commits on.
-	Tx TX
+// it runs inside, before the call commits it. The transaction it commits on
+// travels in onCharged's context, read through the store's own accessor.
+type Charged struct {
 	// Receipt is the receipt the call returns once the charge commits:
 	// ChargeID names the ledger row it writes. Replayed is never set, as a
 	// replay runs no onCharged.

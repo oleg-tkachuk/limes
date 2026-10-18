@@ -12,10 +12,10 @@ import (
 	"github.com/oleg-tkachuk/limes/meter"
 )
 
-func reservationFixture(t *testing.T) (*UsageStore[struct{}], uuid.UUID, uuid.UUID, *time.Time) {
+func reservationFixture(t *testing.T) (*UsageStore, uuid.UUID, uuid.UUID, *time.Time) {
 	t.Helper()
 	now := time.Unix(1_800_000_000, 0)
-	u := mustUsage(t, UsageStoreConfig[struct{}]{Records: newTestStore(), Now: func() time.Time { return now }})
+	u := mustUsage(t, UsageStoreConfig{Records: newTestStore(), Now: func() time.Time { return now }})
 	tenant := uuid.New()
 	if _, err := u.SetTenantBudget(context.Background(), meter.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("100"), UnitCode: defaultTestUnit}}); err != nil {
 		t.Fatal(err)
@@ -155,7 +155,7 @@ func TestReservationsCountAgainstTheTenantBudget(t *testing.T) {
 // time equal to its own Round(0), compared with ==, carries none.
 func TestHoldExpiryIsAWallTime(t *testing.T) {
 	ctx := context.Background()
-	u := mustUsage(t, UsageStoreConfig[struct{}]{Records: newTestStore()}) // time.Now, which carries one
+	u := mustUsage(t, UsageStoreConfig{Records: newTestStore()}) // time.Now, which carries one
 	capID, tenant := uuid.New(), uuid.New()
 	r, err := u.Reserve(ctx, meter.ReserveRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant}), Amount: unit})
 	if err != nil {

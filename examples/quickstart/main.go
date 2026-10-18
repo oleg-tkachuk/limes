@@ -41,7 +41,7 @@ func main() {
 	//    of our own we instantiate it over struct{} and pass nil callbacks.
 	records, err := memstore.NewStore(memstore.StoreConfig{})
 	must(err, "record store")
-	usage, err := memstore.NewUsageStore(memstore.UsageStoreConfig[struct{}]{Records: records})
+	usage, err := memstore.NewUsageStore(memstore.UsageStoreConfig{Records: records})
 	must(err, "usage store")
 
 	signer, err := limes.NewSigner(limes.SignerConfig{KeyID: kid, Key: priv})

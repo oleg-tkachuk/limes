@@ -49,7 +49,7 @@ func main() {
 	demo.Must(log, err, "records store")
 	// UsageStore is generic in the transaction a charge runs its callback
 	// in; the in-memory one has none, so struct{} and nil callbacks.
-	usage, err := memstore.NewUsageStore(memstore.UsageStoreConfig[struct{}]{Records: records})
+	usage, err := memstore.NewUsageStore(memstore.UsageStoreConfig{Records: records})
 	demo.Must(log, err, "usage store")
 	signer, err := limes.NewSigner(limes.SignerConfig{KeyID: key.KeyID, Key: key.Private})
 	demo.Must(log, err, "signer")

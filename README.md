@@ -64,7 +64,7 @@ key, _ := limes.GenerateKey()
 kid, pub, priv := key.KeyID, key.Public(), key.Private
 
 records, _ := memstore.NewStore(memstore.StoreConfig{}) // your Store
-usage, _ := memstore.NewUsageStore(memstore.UsageStoreConfig[struct{}]{Records: records})
+usage, _ := memstore.NewUsageStore(memstore.UsageStoreConfig{Records: records})
 
 signer, _ := limes.NewSigner(limes.SignerConfig{KeyID: kid, Key: priv})
 issuer, _ := limes.NewIssuer(limes.IssuerConfig{
@@ -138,13 +138,13 @@ own, pgstore included, logging what happens.
 | **Answer refusals** | `ErrorResponse` maps a refusal to its status, an RFC 6750 / RFC 9449 `WWW-Authenticate` challenge and an RFC 9457 problem body, without the error's own text. |
 
 You implement `Store` and a `KeyResolver`, which `jwks.Static` and
-`jwks.Remote` already are, and, to meter, `meter.UsageStore[TX]` — or use
+`jwks.Remote` already are, and, to meter, `meter.UsageStore` — or use
 `memstore`, or `pgstore` over PostgreSQL — and check your implementation from
 its own tests with `storetest`, `metertest` and `jwkstest` (`dpoptest` for a
 DPoP replay cache or nonce source). Metering lives in the package `meter`, so
-a service that only verifies tokens never imports it. `meter.UsageStore` is
-generic in your transaction type, so a charge can commit together with, say,
-an outbox write; with no transactions, use `meter.UsageStore[struct{}]`.
+a service that only verifies tokens never imports it. A charge runs your
+callback inside the store's transaction — `pgstore.TxFrom` reads it from the
+callback's context — so it can commit together with, say, an outbox write.
 Optional contracts serve one feature each: `BiscuitRevocationStore` and
 `meter.CopyUsageReader` for Biscuit copies, `meter.LedgerReader` for billing
 reads, `RecordCensus` for a census of records, and `TenantRecordEraser` and
@@ -223,7 +223,7 @@ its checks while unset.
 | [dpop/](dpop) | proof of possession (RFC 9449): signing and checking proofs, replay cache, server nonces |
 | [inspect/](inspect) | reading a token without verifying it, for tooling |
 | [memstore/](memstore) | the in-memory reference implementation of every storage contract |
-| [pgstore/](pgstore) | the reference PostgreSQL store, a module of its own: `Store`, `BiscuitRevocationStore`, `meter.UsageStore[pgx.Tx]`, `meter.CopyUsageReader`, a `Ledger`, a `Census` and both tenant erasers under row-level security per tenant, with `EraseTenant` and a `RevocationWatcher`; held to storetest and metertest; released as `pgstore/vX.Y.Z` |
+| [pgstore/](pgstore) | the reference PostgreSQL store, a module of its own: `Store`, `BiscuitRevocationStore`, `meter.UsageStore`, `meter.CopyUsageReader`, a `Ledger`, a `Census` and both tenant erasers under row-level security per tenant, with `EraseTenant` and a `RevocationWatcher`; held to storetest and metertest; released as `pgstore/vX.Y.Z` |
 | [redisreplay/](redisreplay) | a `dpop.ReplayCache` over Redis, a module of its own, for verifiers behind several replicas; released as `redisreplay/vX.Y.Z` |
 | [otelmetric/](otelmetric) | OpenTelemetry instruments around a `meter.UsageStore`, a module of its own so limes resolves no OpenTelemetry; released as `otelmetric/vX.Y.Z` |
 | [internal/](internal) | the module's own shared packages, not importable from outside it: JOSE pieces (`jose`), HTTP header names (`httpx`), RFC 3986 URI normalisation (`rfc3986`), access to unexported root internals for sibling packages (`link`), and field coverage and per-check deadlines for the conformance suites (`fields`, `watchdog`) |

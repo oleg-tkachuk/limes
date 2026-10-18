@@ -14,24 +14,27 @@
 //
 // [UsageStore] — request and spend counters and the charges ledger; the
 // union of [Meter], [MeterReader], [TenantBudgets] and [UsageHousekeeping].
-// Every charge and request also counts against each ancestor. Generic in TX,
-// the consumer's transaction handle; see "No-transaction mode" below. More
+// Every charge and request also counts against each ancestor; see
+// "Transactions" below. More
 // are needed only with the feature they serve: [CopyUsageReader] to show a
 // Biscuit copy's own counters, [LedgerReader] to sum a tenant's charges, and
 // [TenantUsageEraser] to remove a tenant. memstore ships them in memory,
 // pgstore over PostgreSQL, and metertest checks any implementation.
 //
-// # No-transaction mode
+// # Transactions
 //
 // Meter.Charge and Meter.Settle take an onCharged callback that runs inside
-// the charge, receiving the consumer's transaction handle and the charge's
-// receipt (Charged), so a side effect such as an outbox write commits
-// atomically with the spend and names the charge. The module never
-// constructs, inspects or constrains that handle — it only threads it back.
-// That is what keeps this package free of any database dependency.
+// the charge, receiving the charge's receipt (Charged) and a context that
+// carries the store's transaction, so a side effect such as an outbox write
+// commits atomically with the spend and names the charge. The store puts
+// its transaction there and reads it back with an accessor of its own —
+// pgstore.TxFrom — so neither the contract nor a caller holding a
+// UsageStore names a transaction type, and one service can meter through
+// stores of different kinds. That is what keeps this package free of any
+// database dependency.
 //
-// A consumer with no transactional storage instantiates UsageStore[struct{}]
-// and always passes nil for onCharged. Everything else behaves identically;
-// only the atomic-side-effect guarantee is forgone, and that limitation is
+// A store with no transactions, such as memstore, hands onCharged the
+// caller's context. Everything else behaves identically; only the
+// atomic-side-effect guarantee is forgone, and that limitation is
 // store-dependent rather than a degradation of the primitive.
 package meter
