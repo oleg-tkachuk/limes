@@ -67,7 +67,7 @@ func interfaceMethods(t *testing.T) map[string][]string {
 				continue
 			}
 			embedded := field.Type
-			if ix, ok := embedded.(*ast.IndexExpr); ok { // a generic, as Meter[TX]
+			if ix, ok := embedded.(*ast.IndexExpr); ok { // a generic interface, embedded instantiated
 				embedded = ix.X
 			}
 			if id, ok := embedded.(*ast.Ident); ok {
@@ -101,27 +101,27 @@ func hasMethods(t reflect.Type, names []string) bool {
 // memstore, but not to the decorator, fails here rather than vanishing behind
 // a wrapped store.
 func TestInstrumentForwardsEveryInterfaceTheStoreImplements(t *testing.T) {
-	inner, err := memstore.NewUsageStore(memstore.UsageStoreConfig[struct{}]{Records: newMemstoreRecords(t)})
+	inner, err := memstore.NewUsageStore(memstore.UsageStoreConfig{Records: newMemstoreRecords(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Every mix of the optional interfaces: the decorator claims each the
 	// store has, and none it lacks.
-	stores := map[string]meter.UsageStore[struct{}]{
+	stores := map[string]meter.UsageStore{
 		"every one": inner,
 		"CopyUsageReader alone": struct {
-			meter.UsageStore[struct{}]
+			meter.UsageStore
 			meter.CopyUsageReader
 		}{inner, inner},
 		"TenantUsageEraser alone": struct {
-			meter.UsageStore[struct{}]
+			meter.UsageStore
 			meter.TenantUsageEraser
 		}{inner, inner},
-		"none": struct{ meter.UsageStore[struct{}] }{inner},
+		"none": struct{ meter.UsageStore }{inner},
 	}
 	checked := map[string]bool{}
 	for mix, store := range stores {
-		wrapped, err := otelmetric.Instrument[struct{}](store)
+		wrapped, err := otelmetric.Instrument(store)
 		if err != nil {
 			t.Fatal(err)
 		}

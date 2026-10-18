@@ -14,8 +14,8 @@ import (
 // counter mutation, so the store implementation stays free of metrics
 // concerns and every meter.UsageStore user gets the same observability surface.
 // Cardinality discipline lives in metrics.go.
-type meteringStore[TX any] struct {
-	inner meter.UsageStore[TX]
+type meteringStore struct {
+	inner meter.UsageStore
 	in    *meteringInstruments
 }
 
@@ -27,7 +27,7 @@ type meteringStore[TX any] struct {
 // the optional meter.CopyUsageReader and meter.TenantUsageEraser — so wrapping a store
 // never hides what it can do. A decorator forwards a fixed list of optional
 // interfaces, and a test fails when the list misses one the store has.
-func Instrument[TX any](inner meter.UsageStore[TX], opts ...Option) (meter.UsageStore[TX], error) {
+func Instrument(inner meter.UsageStore, opts ...Option) (meter.UsageStore, error) {
 	if inner == nil {
 		return nil, errors.New("limes: Instrument needs a meter.UsageStore")
 	}
@@ -39,19 +39,19 @@ func Instrument[TX any](inner meter.UsageStore[TX], opts ...Option) (meter.Usage
 	if err != nil {
 		return nil, err
 	}
-	m := &meteringStore[TX]{inner: inner, in: in}
+	m := &meteringStore{inner: inner, in: in}
 	reader, reads := inner.(meter.CopyUsageReader)
 	eraser, erases := inner.(meter.TenantUsageEraser)
 	switch {
 	case reads && erases:
-		return &meteringCopyErasingStore[TX]{
-			meteringCopyStore: &meteringCopyStore[TX]{meteringStore: m, copies: reader},
+		return &meteringCopyErasingStore{
+			meteringCopyStore: &meteringCopyStore{meteringStore: m, copies: reader},
 			tenantUsageEraser: tenantUsageEraser{eraser},
 		}, nil
 	case reads:
-		return &meteringCopyStore[TX]{meteringStore: m, copies: reader}, nil
+		return &meteringCopyStore{meteringStore: m, copies: reader}, nil
 	case erases:
-		return &meteringErasingStore[TX]{meteringStore: m, tenantUsageEraser: tenantUsageEraser{eraser}}, nil
+		return &meteringErasingStore{meteringStore: m, tenantUsageEraser: tenantUsageEraser{eraser}}, nil
 	}
 	return m, nil
 }
@@ -68,31 +68,31 @@ func (e tenantUsageEraser) EraseTenantUsage(ctx context.Context, req meter.Erase
 
 // meteringErasingStore is meteringStore over a store that also erases a
 // tenant's usage.
-type meteringErasingStore[TX any] struct {
-	*meteringStore[TX]
+type meteringErasingStore struct {
+	*meteringStore
 	tenantUsageEraser
 }
 
 // meteringCopyErasingStore is meteringCopyStore over a store that also
 // erases a tenant's usage.
-type meteringCopyErasingStore[TX any] struct {
-	*meteringCopyStore[TX]
+type meteringCopyErasingStore struct {
+	*meteringCopyStore
 	tenantUsageEraser
 }
 
 // meteringCopyStore is meteringStore over a store that also reads Biscuit
 // copies' counters. Reading moves nothing, so it emits no metric.
-type meteringCopyStore[TX any] struct {
-	*meteringStore[TX]
+type meteringCopyStore struct {
+	*meteringStore
 	copies meter.CopyUsageReader
 }
 
-func (s *meteringCopyStore[TX]) CopyUsage(ctx context.Context, req meter.CopyUsageRequest) (meter.CopyUsageResult, error) {
+func (s *meteringCopyStore) CopyUsage(ctx context.Context, req meter.CopyUsageRequest) (meter.CopyUsageResult, error) {
 	return s.copies.CopyUsage(ctx, req)
 }
 
 // Bump emits limes.request.bumps.
-func (s *meteringStore[TX]) Bump(ctx context.Context, req meter.BumpRequest) (meter.BumpReceipt, error) {
+func (s *meteringStore) Bump(ctx context.Context, req meter.BumpRequest) (meter.BumpReceipt, error) {
 	receipt, err := s.inner.Bump(ctx, req)
 	s.in.recordBump(ctx, req.Subject.TenantID(), err)
 	return receipt, err
@@ -100,7 +100,7 @@ func (s *meteringStore[TX]) Bump(ctx context.Context, req meter.BumpRequest) (me
 
 // Charge emits limes.charge.{decisions,amount,current_spend}. A replay moved
 // nothing, so it counts nothing: counting it would report spend twice.
-func (s *meteringStore[TX]) Charge(ctx context.Context, req meter.ChargeRequest, onCharged func(ctx context.Context, c meter.Charged[TX]) error) (meter.ChargeReceipt, error) {
+func (s *meteringStore) Charge(ctx context.Context, req meter.ChargeRequest, onCharged func(ctx context.Context, c meter.Charged) error) (meter.ChargeReceipt, error) {
 	receipt, err := s.inner.Charge(ctx, req, onCharged)
 	if err == nil && receipt.Replayed {
 		return receipt, nil
@@ -110,7 +110,7 @@ func (s *meteringStore[TX]) Charge(ctx context.Context, req meter.ChargeRequest,
 }
 
 // Refund emits limes.refund.amount.
-func (s *meteringStore[TX]) Refund(ctx context.Context, req meter.RefundRequest) (meter.RefundReceipt, error) {
+func (s *meteringStore) Refund(ctx context.Context, req meter.RefundRequest) (meter.RefundReceipt, error) {
 	r, err := s.inner.Refund(ctx, req)
 	if err == nil && r.Amount > 0 {
 		s.in.recordRefund(ctx, r)
@@ -119,7 +119,7 @@ func (s *meteringStore[TX]) Refund(ctx context.Context, req meter.RefundRequest)
 }
 
 // Reserve emits limes.reservation.decisions.
-func (s *meteringStore[TX]) Reserve(ctx context.Context, req meter.ReserveRequest) (meter.Reservation, error) {
+func (s *meteringStore) Reserve(ctx context.Context, req meter.ReserveRequest) (meter.Reservation, error) {
 	r, err := s.inner.Reserve(ctx, req)
 	s.in.recordReservation(ctx, req.Subject.TenantID(), err)
 	return r, err
@@ -127,7 +127,7 @@ func (s *meteringStore[TX]) Reserve(ctx context.Context, req meter.ReserveReques
 
 // Settle is a charge as far as the metrics are concerned, attributed to the
 // subject's tenant as a charge is: a refused settle has no receipt to name it.
-func (s *meteringStore[TX]) Settle(ctx context.Context, req meter.SettleRequest, onCharged func(ctx context.Context, c meter.Charged[TX]) error) (meter.ChargeReceipt, error) {
+func (s *meteringStore) Settle(ctx context.Context, req meter.SettleRequest, onCharged func(ctx context.Context, c meter.Charged) error) (meter.ChargeReceipt, error) {
 	receipt, err := s.inner.Settle(ctx, req, onCharged)
 	if err == nil && receipt.Replayed {
 		return receipt, nil
@@ -138,50 +138,50 @@ func (s *meteringStore[TX]) Settle(ctx context.Context, req meter.SettleRequest,
 
 // Pure pass-throughs — reads and admin writes don't move counters, no metric.
 
-func (s *meteringStore[TX]) GetReservation(ctx context.Context, reservationID uuid.UUID) (meter.Reservation, error) {
+func (s *meteringStore) GetReservation(ctx context.Context, reservationID uuid.UUID) (meter.Reservation, error) {
 	return s.inner.GetReservation(ctx, reservationID)
 }
 
-func (s *meteringStore[TX]) ListReservations(ctx context.Context, req meter.ListReservationsRequest) (limes.Page[meter.Reservation], error) {
+func (s *meteringStore) ListReservations(ctx context.Context, req meter.ListReservationsRequest) (limes.Page[meter.Reservation], error) {
 	return s.inner.ListReservations(ctx, req)
 }
 
-func (s *meteringStore[TX]) GetCharge(ctx context.Context, chargeID uuid.UUID) (meter.ChargeRecord, error) {
+func (s *meteringStore) GetCharge(ctx context.Context, chargeID uuid.UUID) (meter.ChargeRecord, error) {
 	return s.inner.GetCharge(ctx, chargeID)
 }
 
-func (s *meteringStore[TX]) ChargeByRef(ctx context.Context, req meter.ChargeByRefRequest) (meter.ChargeRecord, error) {
+func (s *meteringStore) ChargeByRef(ctx context.Context, req meter.ChargeByRefRequest) (meter.ChargeRecord, error) {
 	return s.inner.ChargeByRef(ctx, req)
 }
 
-func (s *meteringStore[TX]) GetUsage(ctx context.Context, capID uuid.UUID) (meter.Usage, error) {
+func (s *meteringStore) GetUsage(ctx context.Context, capID uuid.UUID) (meter.Usage, error) {
 	return s.inner.GetUsage(ctx, capID)
 }
 
-func (s *meteringStore[TX]) GetTenantBudget(ctx context.Context, tenantID uuid.UUID) (meter.TenantBudget, error) {
+func (s *meteringStore) GetTenantBudget(ctx context.Context, tenantID uuid.UUID) (meter.TenantBudget, error) {
 	return s.inner.GetTenantBudget(ctx, tenantID)
 }
 
-func (s *meteringStore[TX]) SetTenantBudget(ctx context.Context, args meter.SetTenantBudgetRequest) (meter.TenantBudget, error) {
+func (s *meteringStore) SetTenantBudget(ctx context.Context, args meter.SetTenantBudgetRequest) (meter.TenantBudget, error) {
 	return s.inner.SetTenantBudget(ctx, args)
 }
 
-func (s *meteringStore[TX]) ListTenantBudgets(ctx context.Context, args meter.ListTenantBudgetsRequest) (limes.Page[meter.TenantBudget], error) {
+func (s *meteringStore) ListTenantBudgets(ctx context.Context, args meter.ListTenantBudgetsRequest) (limes.Page[meter.TenantBudget], error) {
 	return s.inner.ListTenantBudgets(ctx, args)
 }
 
-func (s *meteringStore[TX]) DeleteUsage(ctx context.Context, req meter.DeleteUsageRequest) error {
+func (s *meteringStore) DeleteUsage(ctx context.Context, req meter.DeleteUsageRequest) error {
 	return s.inner.DeleteUsage(ctx, req)
 }
 
-func (s *meteringStore[TX]) PurgeOrphans(ctx context.Context, req meter.PurgeOrphansRequest) (meter.PurgeOrphansResult, error) {
+func (s *meteringStore) PurgeOrphans(ctx context.Context, req meter.PurgeOrphansRequest) (meter.PurgeOrphansResult, error) {
 	return s.inner.PurgeOrphans(ctx, req)
 }
 
-func (s *meteringStore[TX]) Release(ctx context.Context, req meter.ReleaseRequest) error {
+func (s *meteringStore) Release(ctx context.Context, req meter.ReleaseRequest) error {
 	return s.inner.Release(ctx, req)
 }
 
-func (s *meteringStore[TX]) ReleaseExpired(ctx context.Context, req meter.ReleaseExpiredRequest) (meter.ReleaseExpiredResult, error) {
+func (s *meteringStore) ReleaseExpired(ctx context.Context, req meter.ReleaseExpiredRequest) (meter.ReleaseExpiredResult, error) {
 	return s.inner.ReleaseExpired(ctx, req)
 }
