@@ -680,6 +680,12 @@ run as the pool has connections. Every suite bounds each check by
 `CheckTimeout` (a minute unless the Env sets it); a check that outlives it
 stops the test binary with every goroutine's stack, naming the check.
 
+The suites grow: a minor release may add a check of a promise the contract
+already made, which a store that broke the promise then fails — that is the
+suite finding a bug, not a break of the API. A new optional Env field skips
+its checks while unset, so an Env written for an earlier release still
+compiles and runs everything it ran before.
+
 `memstore` and `pgstore` run the same checks from their own tests — `pgstore`
 against PostgreSQL in a container, as a role that owns no table, on a pool of
 two connections — `dpop` and `jwks` run theirs against their shipped

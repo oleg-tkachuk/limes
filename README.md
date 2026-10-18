@@ -193,6 +193,12 @@ issuers mint it after (`SignerConfig.TokenType`), so no token in flight is
 refused during the change. Tokens are signed with Ed25519 throughout 1.x; another
 algorithm would be another token version, never a runtime choice.
 
+The conformance suites — `storetest`, `metertest`, `dpoptest`, `jwkstest` —
+may gain checks in any release: a check of a promise the contract already
+made is the suite finding a bug in a store, not a break of the API. An `Env`
+written for an earlier release still compiles; a new optional field skips
+its checks while unset.
+
 ## Documentation
 
 | Document | Covers |
