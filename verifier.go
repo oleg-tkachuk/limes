@@ -55,7 +55,7 @@ type VerifierConfig struct {
 
 	// Revocations answers whether a capability — or any ancestor in its
 	// delegation chain — is revoked. Wrap the store in a
-	// CachedRevocationChecker to keep the per-call cost flat.
+	// RevocationCache to keep the per-call cost flat.
 	Revocations RevocationLookup
 
 	// TrustedIssuers is the set of issuer values the verifier accepts.
@@ -107,7 +107,7 @@ type VerifierConfig struct {
 
 	// BiscuitRevocations answers whether a copy of a Biscuit is revoked on
 	// its own. Required when AcceptBiscuit is set; wrap the store in a
-	// CachedBiscuitRevocationChecker.
+	// BiscuitRevocationCache.
 	BiscuitRevocations BiscuitRevocationLookup
 
 	// AcceptTokenTypes are the token formats (the JWT "typ") the verifier
@@ -163,7 +163,7 @@ type AuthorizeRequest struct {
 // Verifier is the production verifier — signature first, then
 // claims, then issuer / tenant / time / audience / revocation gates. A
 // deployment typically resolves keys through a cached JWKS (jwks.Remote) and
-// checks revocation through a short-TTL cache (CachedRevocationChecker), so
+// checks revocation through a short-TTL cache (RevocationCache), so
 // revocation propagates quickly without hammering the store. A consumer that
 // mocks it declares the narrow interface it needs.
 //

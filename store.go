@@ -85,7 +85,7 @@ func (r InsertRequest) Validate() error {
 //
 // Records are append-mostly: capabilities aren't mutated after issuance
 // except via Revoke. Revocations are checked by the verifier on every
-// request; put a CachedRevocationChecker in front to keep the per-call
+// request; put a RevocationCache in front to keep the per-call
 // cost flat.
 type Store interface {
 	IssuanceStore

@@ -29,7 +29,7 @@ const DefaultRevocationCacheTTL = 2 * time.Second
 // never unbounded memory, and never the answers cached for everyone else.
 const DefaultRevocationCacheEntries = 100_000
 
-// CachedRevocationChecker is a small in-memory cache for IsRevoked answers.
+// RevocationCache is a small in-memory cache for IsRevoked answers.
 //
 // A cached answer about a capability is also an answer about its ancestors,
 // so revoking a parent reaches a child's cached "live" entry only when that
@@ -38,12 +38,12 @@ const DefaultRevocationCacheEntries = 100_000
 // cache does not know which entries are a revoked id's descendants.
 //
 // Concurrent misses for the same id share one upstream call.
-type CachedRevocationChecker struct {
+type RevocationCache struct {
 	upstream RevocationLookup
 	cache    *ttlCache[uuid.UUID]
 }
 
-// RevocationCacheConfig configures a CachedRevocationChecker.
+// RevocationCacheConfig configures a RevocationCache.
 type RevocationCacheConfig struct {
 	// Upstream answers what the cache does not hold. Required.
 	Upstream RevocationLookup
@@ -55,10 +55,10 @@ type RevocationCacheConfig struct {
 	Now func() time.Time
 }
 
-// NewCachedRevocationChecker wires a cache over cfg.Upstream. A negative TTL
+// NewRevocationCache wires a cache over cfg.Upstream. A negative TTL
 // or bound is refused; a deployment that wants no cache passes its store to
 // the verifier directly.
-func NewCachedRevocationChecker(cfg RevocationCacheConfig) (*CachedRevocationChecker, error) {
+func NewRevocationCache(cfg RevocationCacheConfig) (*RevocationCache, error) {
 	if cfg.Upstream == nil {
 		return nil, errors.New("limes: RevocationCacheConfig.Upstream required")
 	}
@@ -66,7 +66,7 @@ func NewCachedRevocationChecker(cfg RevocationCacheConfig) (*CachedRevocationChe
 	if err != nil {
 		return nil, err
 	}
-	return &CachedRevocationChecker{upstream: cfg.Upstream, cache: newTTLCache[uuid.UUID](c)}, nil
+	return &RevocationCache{upstream: cfg.Upstream, cache: newTTLCache[uuid.UUID](c)}, nil
 }
 
 // cacheConfig is what either checker's cache runs on.
@@ -100,7 +100,7 @@ func newCacheConfig(ttl time.Duration, maxEntries int, now func() time.Time) (ca
 // IsRevoked serves a fresh cached answer, or asks upstream once on behalf of
 // every concurrent caller asking about the same id. An upstream error is
 // returned to all of them and is never cached.
-func (c *CachedRevocationChecker) IsRevoked(ctx context.Context, id uuid.UUID) (bool, error) {
+func (c *RevocationCache) IsRevoked(ctx context.Context, id uuid.UUID) (bool, error) {
 	return c.cache.get(ctx, id, func(ctx context.Context) (bool, error) { return c.upstream.IsRevoked(ctx, id) })
 }
 
@@ -109,12 +109,12 @@ func (c *CachedRevocationChecker) IsRevoked(ctx context.Context, id uuid.UUID) (
 // check goes upstream at once instead of waiting out the TTL. It drops
 // everything, not only the revoked id, because an answer cached for a
 // descendant is also an answer about the revoked ancestor.
-func (c *CachedRevocationChecker) Clear() { c.cache.clear() }
+func (c *RevocationCache) Clear() { c.cache.clear() }
 
 // Sweep drops every expired entry and returns how many it dropped.
 // Optional housekeeping — lookups skip stale entries, and every new answer
 // drops the expired ones before it.
-func (c *CachedRevocationChecker) Sweep() int { return c.cache.sweep() }
+func (c *RevocationCache) Sweep() int { return c.cache.sweep() }
 
 // ttlCache caches a yes/no answer per key for a TTL, bounded in size, with
 // concurrent misses for one key sharing one lookup. Both revocation checkers

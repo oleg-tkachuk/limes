@@ -404,7 +404,7 @@ name another tenant's copy under its own capability. Passing it to
 that copy and every copy attenuated from it, and leaves the copy it came from,
 its siblings and the capability's JWT working. A verifier that accepts
 Biscuits needs `BiscuitRevocations` — wrap the store in a
-`CachedBiscuitRevocationChecker` and clear it with the other cache.
+`BiscuitRevocationCache` and clear it with the other cache.
 
 The Biscuit seals an ordinary signed token, so a KMS-held signing key works.
 That token carries the root of the Biscuit's signature chain, whose private
@@ -706,13 +706,13 @@ through an ancestor has none, so ask `IsRevoked` whether it verifies.
 `ListByPrincipal` leaves expired and revoked records out unless
 `IncludeExpired` or `IncludeRevoked` asks for them.
 Verifiers that cache revocation answers learn of it within the cache TTL
-(`DefaultRevocationCacheTTL`, two seconds), or at once if you call `CachedRevocationChecker.Clear` when a
+(`DefaultRevocationCacheTTL`, two seconds), or at once if you call `RevocationCache.Clear` when a
 revocation is announced — on a Postgres `NOTIFY`, for example. `Clear`
 drops the whole cache, and there is no per-id drop: an answer cached for a
 descendant is also an answer about the revoked ancestor. The next check of
 each id then asks the store once, so batch a burst of signals into one
-`Clear`. Build the caches with `NewCachedRevocationChecker` and
-`NewCachedBiscuitRevocationChecker` over your store; `Sweep` drops their
+`Clear`. Build the caches with `NewRevocationCache` and
+`NewBiscuitRevocationCache` over your store; `Sweep` drops their
 expired entries on a timer of yours, optional since lookups skip and replace
 them anyway. Over `pgstore`, run a `pgstore.RevocationWatcher` beside each
 verifier: the schema notifies `pgstore.RevocationChannel` on every

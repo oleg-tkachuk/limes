@@ -22,8 +22,8 @@ const (
 	watchRetryMost  = 10 * time.Second
 )
 
-// Clearer is a cache the watcher clears: limes.CachedRevocationChecker and
-// limes.CachedBiscuitRevocationChecker are.
+// Clearer is a cache the watcher clears: limes.RevocationCache and
+// limes.BiscuitRevocationCache are.
 type Clearer interface {
 	Clear()
 }

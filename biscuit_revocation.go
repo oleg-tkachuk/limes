@@ -131,9 +131,9 @@ func init() {
 	}
 }
 
-// CachedBiscuitRevocationChecker caches IsBiscuitRevoked answers per
+// BiscuitRevocationCache caches IsBiscuitRevoked answers per
 // revocation id, under the same TTL, bound and sharing of concurrent misses
-// as CachedRevocationChecker. A token is revoked when any of its ids is: the
+// as RevocationCache. A token is revoked when any of its ids is: the
 // ids a token shares with the copies it was attenuated from stay cached, and
 // the ones the cache does not hold are asked about together, in one upstream
 // lookup. A fresh attenuation — which anyone holding a copy can make offline
@@ -141,13 +141,13 @@ func init() {
 // has never seen one lookup in all, not one per block.
 //
 // A revoked id's cached "live" answer lasts until the TTL, as in
-// CachedRevocationChecker; Clear drops every entry at once.
-type CachedBiscuitRevocationChecker struct {
+// RevocationCache; Clear drops every entry at once.
+type BiscuitRevocationCache struct {
 	upstream BiscuitRevocationLookup
 	cache    *ttlCache[string]
 }
 
-// BiscuitRevocationCacheConfig configures a CachedBiscuitRevocationChecker;
+// BiscuitRevocationCacheConfig configures a BiscuitRevocationCache;
 // its fields read as RevocationCacheConfig's do, MaxEntries counting
 // revocation ids.
 type BiscuitRevocationCacheConfig struct {
@@ -158,9 +158,9 @@ type BiscuitRevocationCacheConfig struct {
 	Now        func() time.Time
 }
 
-// NewCachedBiscuitRevocationChecker wires a cache over cfg.Upstream, as
-// NewCachedRevocationChecker does.
-func NewCachedBiscuitRevocationChecker(cfg BiscuitRevocationCacheConfig) (*CachedBiscuitRevocationChecker, error) {
+// NewBiscuitRevocationCache wires a cache over cfg.Upstream, as
+// NewRevocationCache does.
+func NewBiscuitRevocationCache(cfg BiscuitRevocationCacheConfig) (*BiscuitRevocationCache, error) {
 	if cfg.Upstream == nil {
 		return nil, errors.New("limes: BiscuitRevocationCacheConfig.Upstream required")
 	}
@@ -168,7 +168,7 @@ func NewCachedBiscuitRevocationChecker(cfg BiscuitRevocationCacheConfig) (*Cache
 	if err != nil {
 		return nil, err
 	}
-	return &CachedBiscuitRevocationChecker{upstream: cfg.Upstream, cache: newTTLCache[string](c)}, nil
+	return &BiscuitRevocationCache{upstream: cfg.Upstream, cache: newTTLCache[string](c)}, nil
 }
 
 // IsBiscuitRevoked answers from the cache for each id that has a fresh
@@ -177,7 +177,7 @@ func NewCachedBiscuitRevocationChecker(cfg BiscuitRevocationCacheConfig) (*Cache
 // cached for each of them; a "revoked" one for that set alone, as upstream
 // does not say which id it is. An upstream error is returned and never
 // cached.
-func (c *CachedBiscuitRevocationChecker) IsBiscuitRevoked(ctx context.Context, revocationIDs [][]byte) (bool, error) {
+func (c *BiscuitRevocationCache) IsBiscuitRevoked(ctx context.Context, revocationIDs [][]byte) (bool, error) {
 	keys := make([]string, len(revocationIDs))
 	for i, id := range revocationIDs {
 		keys[i] = idKey(id)
@@ -225,11 +225,11 @@ func setKey(ids [][]byte) string {
 }
 
 // Clear drops every entry; wire it to the same revocation notification as
-// CachedRevocationChecker.Clear.
-func (c *CachedBiscuitRevocationChecker) Clear() { c.cache.clear() }
+// RevocationCache.Clear.
+func (c *BiscuitRevocationCache) Clear() { c.cache.clear() }
 
 // Sweep drops every expired entry and returns how many it dropped.
-func (c *CachedBiscuitRevocationChecker) Sweep() int { return c.cache.sweep() }
+func (c *BiscuitRevocationCache) Sweep() int { return c.cache.sweep() }
 
 // errNoBiscuitRevocations is returned by NewVerifier when Biscuits
 // are accepted with nothing to check their copies against.
