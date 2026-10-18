@@ -831,8 +831,11 @@ be checked so, and answers a row out of scope as not found.
 context. Every time it writes comes from
 `Config.Now`, never from the database's clock.
 
-Run `Migrate` as the role that owns the schema and serve as another one: the
-owner is not bound by the policies. `MigrateOptions.RuntimeRoles` grants the
+Run `Migrate` as the role that owns the schema and serve as another one. The
+policies bind the owner too (`FORCE ROW LEVEL SECURITY`), and `Migrate` scopes
+its run to every tenant; but the owner may turn them off, and a superuser or a
+role with `BYPASSRLS` is never bound, so `CheckSchema` refuses a pool of any of
+the three with `ErrRuntimeRole`. `MigrateOptions.RuntimeRoles` grants the
 serving roles the schema, its tables and the tables of later versions, and
 only reads of the version table. Run it before any migration of yours that
 refers to its tables. It holds the advisory lock every `tern` migration

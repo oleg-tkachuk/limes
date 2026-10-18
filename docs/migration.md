@@ -14,6 +14,16 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## pgstore/v0.22.0
+
+- Migration `010_force_row_security.sql` makes row-level security bind the
+  schema's owner too; run `Migrate` before deploying. A query of yours run as
+  the owner sees no tenant's rows unless it sets `limes.all_tenants` (or
+  `limes.tenant_id`); `Migrate` sets it for its own run.
+- `CheckSchema` returns `ErrRuntimeRole` for a pool of a superuser, a role
+  with `BYPASSRLS` or the schema's owner: serve as a role that owns nothing,
+  as `MigrateOptions.RuntimeRoles` grants it.
+
 ## otelmetric/v0.3.0
 
 - `Instrument` loses its type parameter: it takes and returns the
