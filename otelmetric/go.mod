@@ -1,4 +1,4 @@
-// OpenTelemetry instruments for a limes.UsageStore. A module of its own so
+// OpenTelemetry instruments for a meter.UsageStore. A module of its own so
 // that limes itself never resolves an OpenTelemetry dependency.
 module github.com/oleg-tkachuk/limes/otelmetric
 

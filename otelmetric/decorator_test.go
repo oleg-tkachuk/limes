@@ -10,31 +10,31 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/memstore"
+	"github.com/oleg-tkachuk/limes/meter"
 	"github.com/oleg-tkachuk/limes/otelmetric"
 )
 
-// limesPackage is the package whose interfaces Instrument forwards.
-const limesPackage = "github.com/oleg-tkachuk/limes"
+// meterPackage is the package whose interfaces Instrument forwards.
+const meterPackage = "github.com/oleg-tkachuk/limes/meter"
 
-// limesDir is the directory of the limes this module builds against, as the
-// go command resolves it.
-func limesDir(t *testing.T) string {
+// meterDir is the directory of the meter package this module builds
+// against, as the go command resolves it.
+func meterDir(t *testing.T) string {
 	t.Helper()
-	out, err := exec.CommandContext(t.Context(), "go", "list", "-f", "{{.Dir}}", limesPackage).Output()
+	out, err := exec.CommandContext(t.Context(), "go", "list", "-f", "{{.Dir}}", meterPackage).Output()
 	if err != nil {
-		t.Fatalf("go list %s: %v", limesPackage, err)
+		t.Fatalf("go list %s: %v", meterPackage, err)
 	}
 	return strings.TrimSpace(string(out))
 }
 
-// interfaceMethods reads every interface package limes declares, with the
+// interfaceMethods reads every interface package meter declares, with the
 // methods of the interfaces it embeds, keyed by interface name.
 func interfaceMethods(t *testing.T) map[string][]string {
 	t.Helper()
 	fset := token.NewFileSet()
-	paths, err := filepath.Glob(filepath.Join(limesDir(t), "*.go"))
+	paths, err := filepath.Glob(filepath.Join(meterDir(t), "*.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,8 +96,8 @@ func hasMethods(t reflect.Type, names []string) bool {
 	return len(names) > 0
 }
 
-// The decorator rule: Instrument forwards every interface of package limes
-// the store it wraps implements. An optional interface added to limes and to
+// The decorator rule: Instrument forwards every interface of package meter
+// the store it wraps implements. An optional interface added to meter and to
 // memstore, but not to the decorator, fails here rather than vanishing behind
 // a wrapped store.
 func TestInstrumentForwardsEveryInterfaceTheStoreImplements(t *testing.T) {
@@ -107,17 +107,17 @@ func TestInstrumentForwardsEveryInterfaceTheStoreImplements(t *testing.T) {
 	}
 	// Every mix of the optional interfaces: the decorator claims each the
 	// store has, and none it lacks.
-	stores := map[string]limes.UsageStore[struct{}]{
+	stores := map[string]meter.UsageStore[struct{}]{
 		"every one": inner,
 		"CopyUsageReader alone": struct {
-			limes.UsageStore[struct{}]
-			limes.CopyUsageReader
+			meter.UsageStore[struct{}]
+			meter.CopyUsageReader
 		}{inner, inner},
 		"TenantUsageEraser alone": struct {
-			limes.UsageStore[struct{}]
-			limes.TenantUsageEraser
+			meter.UsageStore[struct{}]
+			meter.TenantUsageEraser
 		}{inner, inner},
-		"none": struct{ limes.UsageStore[struct{}] }{inner},
+		"none": struct{ meter.UsageStore[struct{}] }{inner},
 	}
 	checked := map[string]bool{}
 	for mix, store := range stores {
