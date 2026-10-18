@@ -670,9 +670,11 @@ func (s *UsageStore[TX]) Charge(
 	// receipt, as a settled hold does.
 	if req.ExternalRef != "" {
 		if e, ok := entryLocked(s, s.byRef, refKey{req.Subject.CapabilityID(), req.ExternalRef}); ok {
-			if e.Amount != req.Amount || e.UnitCode != unit || e.TenantID != req.Subject.TenantID() {
-				return limes.ChargeReceipt{}, fmt.Errorf("%w: %q was %s %s for tenant %s",
-					limes.ErrExternalRefConflict, req.ExternalRef, e.Amount, e.UnitCode, e.TenantID)
+			// Another copy charges its own counters, and the receipt is the
+			// first copy's, so it conflicts as another cost does. The error
+			// names the ref, never the other charge.
+			if e.Amount != req.Amount || e.UnitCode != unit || e.TenantID != req.Subject.TenantID() || !sameCopyIDs(e.Copies, req.Subject.Copies()) {
+				return limes.ChargeReceipt{}, fmt.Errorf("%w: %q", limes.ErrExternalRefConflict, req.ExternalRef)
 			}
 			return s.replayLocked(e), nil
 		}
