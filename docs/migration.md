@@ -14,6 +14,12 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.95.0
+
+- `Reserve` refuses a capability whose record has already expired as
+  `ErrExpired`, rather than holding until an instant already past. A
+  `UsageStore` of your own does the same: metertest checks it.
+
 ## v0.94.0
 
 - `EraseTenantUsage` marks the tenant erased: `Bump`, `Charge`, `Reserve`

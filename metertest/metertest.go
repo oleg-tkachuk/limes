@@ -1506,6 +1506,15 @@ func checkHoldWithinCapability[TX any](t *testing.T, f fixture[TX]) {
 	if !r.ExpiresAt.Before(f.Now().Add(farTTL)) {
 		t.Errorf("a hold asked for %s expires at %s, past its capability", farTTL, r.ExpiresAt)
 	}
+	if f.Advance == nil {
+		return // the record's expiry needs a clock the check can move
+	}
+	// Past its record's expiry a capability — still on record, a late cost
+	// names it — holds nothing: no one could settle the hold.
+	f.Advance(farTTL)
+	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one}); !errors.Is(err, limes.ErrExpired) {
+		t.Errorf("Reserve for a capability past its expiry: err = %v, want ErrExpired", err)
+	}
 }
 
 func checkReservations[TX any](t *testing.T, f fixture[TX]) {

@@ -135,8 +135,9 @@ type Meter[TX any] interface {
 	// reservations exactly as spend does, until the reservation is
 	// settled, released or expires. A hold expires req.TTL from now, or when
 	// its capability's record does if that comes sooner: past it no one can
-	// settle the hold. Rejections return the Charge sentinels and hold
-	// nothing.
+	// settle the hold. A capability whose record has already expired — one
+	// a late cost names through StoredMeterSubject — is refused ErrExpired.
+	// Rejections return the Charge sentinels and hold nothing.
 	Reserve(ctx context.Context, req ReserveRequest) (Reservation, error)
 
 	// Settle ends a reservation and charges the actual cost in its place,
@@ -252,7 +253,9 @@ type TenantBudgets interface {
 // UsageHousekeeping reclaims usage rows of capabilities that are gone.
 type UsageHousekeeping interface {
 	// DeleteUsage drops the capability's row and the counters of its Biscuit
-	// copies. Called when the capability is reaped. It releases the
+	// copies. Called when the capability is reaped: on a capability still on
+	// record it restarts the capability's own counters, and its ceilings with
+	// them, from zero — PurgeOrphans drops only the rows of records gone. It releases the
 	// capability's open reservations first,
 	// returning their holds to its ancestors and its tenant: nothing could
 	// settle or release them afterwards. A capability with no row is no
