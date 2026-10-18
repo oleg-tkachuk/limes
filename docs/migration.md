@@ -19,7 +19,7 @@ API, and this file stops growing.
 - `pgstore.SchemaVersion.Applied` and `Expected` are `int`, not `int32`, the
   width of tern's column: compare them as Go's integers.
 
-## v0.91.0
+## v0.90.0
 
 - `RevokeRequest`, `DeleteUsageRequest`, `ChargeByRefRequest`,
   `PurgeOrphansRequest` and `ReleaseExpiredRequest` gain `Validate`, which
@@ -30,14 +30,14 @@ API, and this file stops growing.
   to pass storetest and metertest. `HousekeepingLimit` resolves a batch's
   `Limit` as `PageLimit` resolves a page's.
 
-## v0.90.0
+## v0.89.0
 
 - `ChargeBucketUnspecified` is gone: it meant what `ChargeBucketNone` does,
   which is now the zero value. The buckets are numbered shortest first —
   none, hour, day, week, month — so a bucket stored or sent as its number
   reads differently; store and send its name (`String`).
 
-## v0.89.0
+## v0.88.0
 
 - `ListTenantBudgetsRequest.ThresholdPct float64` →
   `ThresholdBasisPoints int`, in hundredths of a percent, 0..the new
@@ -46,19 +46,16 @@ API, and this file stops growing.
   `UsageStore` of your own compares `spent × BasisPointsPerWhole ≥ max ×
   ThresholdBasisPoints` in integers wide enough for the product.
 
-## v0.88.0
+## v0.87.0
 
+- `dpop.ProofRequest` → `dpop.SignRequest`: the request `dpop.Sign` takes,
+  named for it, as `dpop.Request` is what `Verify` and `Check` take.
 - `VerifierConfig.AcceptBiscuit`, `MeterCopies` and `BiscuitRevocations` →
   `VerifierConfig.Biscuit *BiscuitConfig`, with `Revocations` and
   `MeterCopies`: write `Biscuit: &limes.BiscuitConfig{Revocations: r}` for
   `AcceptBiscuit: true, BiscuitRevocations: r`. Nil refuses Biscuits, as
   `AcceptBiscuit: false` did; a copy setting with no Biscuit to apply to can
   no longer be written.
-
-## v0.87.0
-
-- `dpop.ProofRequest` → `dpop.SignRequest`: the request `dpop.Sign` takes,
-  named for it, as `dpop.Request` is what `Verify` and `Check` take.
 
 ## v0.86.0
 
