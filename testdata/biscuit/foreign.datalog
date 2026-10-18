@@ -1,0 +1,4 @@
+limes_op("get");
+limes_resource_prefix("corpus/public/");
+limes_expires(2026-01-01T00:30:00Z);
+limes_max_requests(3);

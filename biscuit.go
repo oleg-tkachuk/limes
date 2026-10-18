@@ -580,6 +580,28 @@ func parseBiscuit(token string) (*biscuit.Biscuit, error) {
 	return b, nil
 }
 
+const (
+	// base64Pad is base64url's padding, which biscuit-rust and the libraries
+	// built on it write after a Biscuit and biscuit-go does not.
+	base64Pad = "="
+	// base64Quantum is the length padding rounds an encoding up to.
+	base64Quantum = 4
+)
+
+// unB64Biscuit decodes a Biscuit written with or without padding, strictly
+// either way: padding, when present, is exactly what the length needs. The
+// encoding is not the token's identity — a copy is revoked by its blocks'
+// signatures — so both spellings are the same token.
+func unB64Biscuit(token string) ([]byte, error) {
+	if bare := strings.TrimRight(token, base64Pad); bare != token {
+		if len(token)%base64Quantum != 0 || len(token)-len(bare) != (base64Quantum-len(bare)%base64Quantum)%base64Quantum {
+			return nil, errors.New("base64url: wrong padding")
+		}
+		token = bare
+	}
+	return jose.UnB64(token)
+}
+
 // decodeBiscuitContainer reads token's bytes and its container, refusing a
 // container biscuit-go would trip over: no authority block, or a proof that
 // is neither a next secret of a seed's length nor a final signature of a
@@ -587,7 +609,7 @@ func parseBiscuit(token string) (*biscuit.Biscuit, error) {
 // hands the proof's secret to ed25519.NewKeyFromSeed as it is, which panics
 // on any other length.
 func decodeBiscuitContainer(token string) ([]byte, *pb.Biscuit, error) {
-	raw, err := jose.UnB64(token)
+	raw, err := unB64Biscuit(token)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: biscuit encoding: %w", ErrInvalidToken, err)
 	}
