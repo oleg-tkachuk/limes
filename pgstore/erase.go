@@ -10,9 +10,9 @@ import (
 
 // The statements of an erase, in the order the meter locks: a tenant's
 // holds, its records in id order, its aggregate, its counters in id order,
-// its copies' counters, then the ledger, which no call locks. Each lock is
-// taken before a row is written, so an erase and a meter call never wait on
-// each other in a cycle.
+// its copies' counters, then the ledger, which a refund locks last too. Each
+// lock is taken before a row is written, so an erase and a meter call never
+// wait on each other in a cycle.
 const (
 	sqlLockTenantHolds = `
 SELECT id FROM limes.reservations WHERE tenant_id = $1 ORDER BY id FOR UPDATE`

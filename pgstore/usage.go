@@ -23,7 +23,27 @@ func (s *UsageStore) Refund(ctx context.Context, req limes.RefundRequest) (limes
 	}
 	var receipt limes.RefundReceipt
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
-		e, ok, err := readEntry(ctx, tx, sqlChargeByID+` FOR UPDATE`, req.ChargeID)
+		// The charge is read once to learn which counters it debited, which
+		// are locked first, and locked last, as every call locks the ledger:
+		// an erase that holds the aggregate and deletes the charges does not
+		// meet a refund holding the charge and waiting for the aggregate.
+		e, ok, err := readEntry(ctx, tx, sqlChargeByID, req.ChargeID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return limes.ErrChargeNotFound
+		}
+		c, err := lock(ctx, tx, lockRequest{
+			now:      s.clock(),
+			tenantID: e.TenantID,
+			existing: append([]uuid.UUID{e.CapabilityID}, e.ancestors...),
+			copies:   e.copies,
+		})
+		if err != nil {
+			return err
+		}
+		e, ok, err = readEntry(ctx, tx, sqlChargeByID+` FOR UPDATE`, req.ChargeID)
 		if err != nil {
 			return err
 		}
@@ -41,15 +61,6 @@ func (s *UsageStore) Refund(ctx context.Context, req limes.RefundRequest) (limes
 		}
 		if amount == 0 {
 			return nil
-		}
-		c, err := lock(ctx, tx, lockRequest{
-			now:      s.clock(),
-			tenantID: e.TenantID,
-			existing: append([]uuid.UUID{e.CapabilityID}, e.ancestors...),
-			copies:   e.copies,
-		})
-		if err != nil {
-			return err
 		}
 		for _, u := range c.usage {
 			u.spent = max0(u.spent - amount)
@@ -562,17 +573,26 @@ func parseTenantPlace(s string) (tenantPlace, error) {
 const (
 	// sqlDueHolds reads the holds past their expiry, and those of a
 	// capability revoked, itself or an ancestor: no one can settle either.
+	//
+	// The batch is the soonest due, and its holds are locked in id order,
+	// the order every call that locks several takes.
 	sqlDueHolds = `
 SELECT ` + sqlHoldColumns + ` FROM limes.reservations
-WHERE expires_at <= $1
-   OR EXISTS (SELECT 1 FROM limes.is_revoked(capability_id, $3) v WHERE v.in_chain)
-ORDER BY expires_at, id
-LIMIT $2
+WHERE id IN (
+    SELECT id FROM limes.reservations
+    WHERE expires_at <= $1
+       OR EXISTS (SELECT 1 FROM limes.is_revoked(capability_id, $3) v WHERE v.in_chain)
+    ORDER BY expires_at, id
+    LIMIT $2)
+ORDER BY id
 FOR UPDATE`
 
-	sqlHoldsOf = `
+	// sqlHoldsNaming locks every hold of the capabilities $1 or naming one
+	// of them as an ancestor, in id order, before any counter is: dropping
+	// those capabilities releases the first and rewrites the second.
+	sqlHoldsNaming = `
 SELECT ` + sqlHoldColumns + ` FROM limes.reservations
-WHERE capability_id = ANY ($1)
+WHERE capability_id = ANY ($1) OR ancestors && $1
 ORDER BY id
 FOR UPDATE`
 
@@ -704,10 +724,11 @@ func (s *UsageStore) PurgeOrphans(ctx context.Context, req limes.PurgeOrphansReq
 // ancestors' counters — then drops their counters and their copies', and
 // strikes them from the ancestors of the holds that remain.
 func (s *UsageStore) dropUsage(ctx context.Context, tx pgx.Tx, ids []uuid.UUID) error {
-	holds, err := collectHolds(ctx, tx, sqlHoldsOf, ids)
+	locked, err := collectHolds(ctx, tx, sqlHoldsNaming, ids)
 	if err != nil {
 		return err
 	}
+	holds := slices.DeleteFunc(locked, func(h hold) bool { return !slices.Contains(ids, h.capID) })
 	if err := s.releaseHolds(ctx, tx, holds); err != nil {
 		return err
 	}
