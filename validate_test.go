@@ -283,13 +283,25 @@ func TestDelegationStartIsExact(t *testing.T) {
 	}
 }
 
-// An insert names the capability it records: the zero id is refused.
+// An insert names the capability it records, and one that expires: the zero
+// id and no expiry are refused.
 func TestInsertRequestValidate(t *testing.T) {
-	if err := (InsertRequest{}).Validate(); !errors.Is(err, ErrInvalidRequest) {
-		t.Errorf("an insert with no id: err = %v, want ErrInvalidRequest", err)
-	}
-	if err := (InsertRequest{Capability: Capability{ID: uuid.New()}}).Validate(); err != nil {
-		t.Errorf("an insert with an id: %v", err)
+	expires := time.Now().Add(time.Hour)
+	for name, tc := range map[string]struct {
+		c  Capability
+		ok bool
+	}{
+		"an id and an expiry": {Capability{ID: uuid.New(), ExpiresAt: expires}, true},
+		"no id":               {Capability{ExpiresAt: expires}, false},
+		"no expiry":           {Capability{ID: uuid.New()}, false},
+	} {
+		err := (InsertRequest{Capability: tc.c}).Validate()
+		if tc.ok && err != nil {
+			t.Errorf("an insert with %s: %v", name, err)
+		}
+		if !tc.ok && !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("an insert with %s: err = %v, want ErrInvalidRequest", name, err)
+		}
 	}
 }
 

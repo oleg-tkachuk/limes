@@ -907,9 +907,8 @@ func checkPurgeKeepsLineage(t *testing.T, f fixture) {
 
 // checkInsertKeepsLineage holds Insert to a lineage Purge and IsRevoked can
 // rely on: no record without an id, none under a parent not on record, and
-// no child expiring after its parent — one with no expiry under a parent
-// that has one among them, as Purge would leave it with no parent. None of
-// them is recorded.
+// no record that never expires, which no verifier accepts and Purge never
+// removes, and no child expiring after its parent. None of them is recorded.
 func checkInsertKeepsLineage(t *testing.T, f fixture) {
 	parent := f.live(t, "agent:parent", uuid.Nil)
 	noID := f.newCapability("agent:no-id", uuid.Nil, f.now.Add(ttl))
@@ -917,6 +916,7 @@ func checkInsertKeepsLineage(t *testing.T, f fixture) {
 	orphan := f.newCapability("agent:orphan", uuid.New(), f.now.Add(ttl))
 	outliving := f.newCapability("agent:outliving", parent.ID, parent.ExpiresAt.Add(time.Second))
 	unexpiring := f.newCapability("agent:unexpiring", parent.ID, time.Time{})
+	endlessRoot := f.newCapability("agent:endless", uuid.Nil, time.Time{})
 	other, err := f.newTenant()
 	if err != nil {
 		t.Fatalf("NewTenant: %v", err)
@@ -939,7 +939,8 @@ func checkInsertKeepsLineage(t *testing.T, f fixture) {
 		"no id":                        {noID, limes.ErrInvalidRequest},
 		"a parent not on record":       {orphan, limes.ErrInvalidRequest},
 		"a child outliving its parent": {outliving, limes.ErrDelegationTooWide},
-		"a child with no expiry":       {unexpiring, limes.ErrDelegationTooWide},
+		"a child with no expiry":       {unexpiring, limes.ErrInvalidRequest},
+		"a root with no expiry":        {endlessRoot, limes.ErrInvalidRequest},
 		"a child in another tenant":    {elsewhere, elsewhereRefusal},
 	} {
 		if err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: tc.c, IssuedBy: issuedBy}); !errors.Is(err, tc.want) {
@@ -1173,8 +1174,6 @@ func checkEraseTenant(t *testing.T, f fixture) {
 			t.Fatalf("RevokeBiscuit of the expired record's copy: %v", err)
 		}
 	}
-	// No expiry: nothing ever purges it, so it stays, revoked.
-	endless := f.insert(t, f.newCapability("agent:endless", uuid.Nil, time.Time{}))
 	// Expired, but not for MinPurgeRetention: a verifier may still take it.
 	recent := f.insert(t, f.newCapability("agent:recent", uuid.Nil, f.now.Add(-limes.MinPurgeRetention/2)))
 	theirs := f.newCapability("agent:theirs", uuid.Nil, f.now.Add(ttl))
@@ -1192,11 +1191,11 @@ func checkEraseTenant(t *testing.T, f fixture) {
 		t.Errorf("EraseTenantRecords naming no tenant: err = %v, want ErrInvalidRequest", err)
 	}
 	got, err := eraser.EraseTenantRecords(f.Ctx, req)
-	want := limes.EraseTenantResult{Revoked: 5, Removed: 1, Kept: 5}
+	want := limes.EraseTenantResult{Revoked: 4, Removed: 1, Kept: 4}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("EraseTenantRecords = %+v, %v; want %+v", got, err, want)
 	}
-	for _, c := range []limes.Capability{root, child, revoked, recent, endless} {
+	for _, c := range []limes.Capability{root, child, revoked, recent} {
 		if !f.revoked(t, c.ID) {
 			t.Errorf("%s verifies after its tenant was erased", c.Subject.Subject)
 		}
@@ -1213,16 +1212,13 @@ func checkEraseTenant(t *testing.T, f fixture) {
 			t.Errorf("GetBiscuitRevocation of a removed record's copy = %+v, %v; want ErrNotFound, gone with its record", r, err)
 		}
 	}
-	if _, err := f.get(endless.ID); err != nil {
-		t.Errorf("GetRecord of a record with no expiry after the erase: %v, want it kept", err)
-	}
 	if _, err := f.get(expired.ID); !errors.Is(err, limes.ErrNotFound) {
 		t.Errorf("GetRecord of a record Purge would take, after the erase: err = %v, want ErrNotFound", err)
 	}
 	if r, err := f.Store.GetRecord(f.tenantCtx(other), theirs.ID); err != nil || r.Revocation != nil {
 		t.Errorf("another tenant's record after the erase = %+v, %v; want it on record and not revoked", r, err)
 	}
-	if again, err := eraser.EraseTenantRecords(f.Ctx, req); err != nil || !reflect.DeepEqual(again, limes.EraseTenantResult{Kept: 5}) {
+	if again, err := eraser.EraseTenantRecords(f.Ctx, req); err != nil || !reflect.DeepEqual(again, limes.EraseTenantResult{Kept: 4}) {
 		t.Errorf("EraseTenantRecords again = %+v, %v; want nothing revoked or removed", again, err)
 	}
 }
@@ -1307,8 +1303,7 @@ func (f fixture) countAll(t *testing.T, ctx context.Context, req limes.CountReco
 }
 
 // A census of no record is an empty page; a Biscuit copy's revocation is
-// not its record's and counts nowhere; and a record with no expiry counts as
-// expired, since no verifier accepts it.
+// not its record's and counts nowhere.
 func checkCensusEdges(t *testing.T, f fixture) {
 	if f.Census == nil || f.Now == nil {
 		t.Skip("Env.Census or Env.Now not set")
@@ -1323,8 +1318,7 @@ func checkCensusEdges(t *testing.T, f fixture) {
 			t.Fatalf("RevokeBiscuit: %v", err)
 		}
 	}
-	f.insert(t, f.newCapability("agent:endless", uuid.Nil, time.Time{}))
-	want := []limes.RecordCount{{Total: 2, Active: 1, Expired: 1}}
+	want := []limes.RecordCount{{Total: 1, Active: 1}}
 	if got := f.countAll(t, f.Ctx, mine); !reflect.DeepEqual(got, want) {
 		t.Errorf("census = %+v, want %+v", got, want)
 	}
