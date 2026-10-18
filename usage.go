@@ -234,7 +234,10 @@ type TenantBudgets interface {
 	//     with a ceiling.
 	//   - TenantBudgetFilterUnlimited: rows whose ceiling is Unlimited.
 	// Limit is the page size, as PageLimit reads it.
-	// It refuses what ListTenantBudgetsRequest.Validate refuses.
+	// It refuses what ListTenantBudgetsRequest.Validate refuses, and a store
+	// that scopes tenants refuses with ErrScopeMismatch a call whose scope
+	// admits fewer than every tenant, as CountRecords does: under it the
+	// page would read as every tenant's while it showed fewer.
 	//
 	// Rows come most at risk first. Ceilings of 0, which allow nothing,
 	// lead; bounded ceilings follow by spent / max descending, compared
