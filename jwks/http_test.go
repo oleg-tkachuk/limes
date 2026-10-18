@@ -176,7 +176,13 @@ func TestRemoteJWKSKeepsTheSetWhenNoKeyIsUsable(t *testing.T) {
 		t.Fatal(err)
 	}
 	var foreign atomic.Bool
+	// served, when set, is the body every response carries.
+	var served atomic.Pointer[string]
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if body := served.Load(); body != nil {
+			_, _ = w.Write([]byte(*body))
+			return
+		}
 		if foreign.Load() {
 			_, _ = w.Write([]byte(`{"keys":[{"kty":"OKP","crv":"Ed448","kid":"k2","x":"AA"}]}`))
 			return
@@ -198,6 +204,15 @@ func TestRemoteJWKSKeepsTheSetWhenNoKeyIsUsable(t *testing.T) {
 	clock.Advance(10 * time.Minute) // past RefreshInterval, inside MaxStale
 	if got, err := r.PublicKey(ctx, kid); err != nil || !got.Equal(pub) {
 		t.Fatalf("after a response with no usable key: %v, %v; want the last good key", got, err)
+	}
+	// A document with no "keys" array is broken too (RFC 7517 §5), not a
+	// withdrawal: the last good key is still served.
+	for _, body := range []string{`null`, `{}`, `{"keys":null}`} {
+		served.Store(&body)
+		clock.Advance(10 * time.Minute)
+		if got, err := r.PublicKey(ctx, kid); err != nil || !got.Equal(pub) {
+			t.Fatalf("after a response of %s: %v, %v; want the last good key", body, got, err)
+		}
 	}
 	// An empty set is an issuer withdrawing every key, and is taken as such.
 	if keys, skipped, err := parse([]byte(`{"keys":[]}`)); err != nil || len(keys) != 0 || skipped != 0 {

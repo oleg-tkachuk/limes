@@ -37,7 +37,9 @@ import (
 // rotation cadence, and one shared document would conflate two trust
 // roots.
 type document struct {
-	Keys []entry `json:"keys"`
+	// Keys is nil when the document has no "keys" member, or a null one:
+	// RFC 7517 §5 requires it, and only an empty array withdraws every key.
+	Keys *[]entry `json:"keys"`
 }
 
 // entry is one entry in the JWKS — exactly the fields needed to verify
@@ -55,13 +57,13 @@ type entry struct {
 // map, with entries sorted by kid so the same key set always serialises to
 // the same bytes (cacheable, diffable, ETag-able).
 func Marshal(keys map[string]ed25519.PublicKey) ([]byte, error) {
-	doc := document{Keys: make([]entry, 0, len(keys))}
+	entries := make([]entry, 0, len(keys))
 	for _, kid := range slices.Sorted(maps.Keys(keys)) {
 		pub := keys[kid]
 		if len(pub) != ed25519.PublicKeySize {
 			return nil, fmt.Errorf("jwks: public key %q wrong size for Ed25519", kid)
 		}
-		doc.Keys = append(doc.Keys, entry{
+		entries = append(entries, entry{
 			Kty: jose.KtyOKP,
 			Crv: jose.CrvEd25519,
 			Alg: jose.AlgEd25519,
@@ -69,7 +71,7 @@ func Marshal(keys map[string]ed25519.PublicKey) ([]byte, error) {
 			X:   jose.B64(pub),
 		})
 	}
-	return json.Marshal(doc)
+	return json.Marshal(document{Keys: &entries})
 }
 
 // Parse decodes a JWKS document into a kid → public key map. Entries
@@ -78,7 +80,8 @@ func Marshal(keys map[string]ed25519.PublicKey) ([]byte, error) {
 // document: one malformed or foreign entry must not take every other key —
 // and so every token signed with them — out of service during a rotation.
 // Two entries naming one kid are both skipped. A document that is not JSON
-// at all, or names a member twice, is an error.
+// at all, names a member twice, or has no "keys" array (RFC 7517 §5) is an
+// error: only `{"keys":[]}` withdraws every key.
 func Parse(raw []byte) (map[string]ed25519.PublicKey, error) {
 	keys, _, err := parse(raw)
 	return keys, err
@@ -91,13 +94,17 @@ func parse(raw []byte) (map[string]ed25519.PublicKey, int, error) {
 	if err := jsonv2.Unmarshal(raw, &doc); err != nil {
 		return nil, 0, fmt.Errorf("jwks: parse JWKS: %w", err)
 	}
-	out := make(map[string]ed25519.PublicKey, len(doc.Keys))
-	seen := make(map[string]int, len(doc.Keys)) // entries per kid
-	for _, k := range doc.Keys {
+	if doc.Keys == nil {
+		return nil, 0, errors.New(`jwks: parse JWKS: no "keys" array`)
+	}
+	entries := *doc.Keys
+	out := make(map[string]ed25519.PublicKey, len(entries))
+	seen := make(map[string]int, len(entries)) // entries per kid
+	for _, k := range entries {
 		seen[k.Kid]++
 	}
 	skipped := 0
-	for _, k := range doc.Keys {
+	for _, k := range entries {
 		// A kid named twice is used for neither key: which one signs is not
 		// for the reader to guess.
 		if k.Kty != jose.KtyOKP || k.Crv != jose.CrvEd25519 || k.Kid == "" || seen[k.Kid] > 1 {
