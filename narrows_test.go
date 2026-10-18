@@ -49,6 +49,15 @@ func TestMatchResourceRespectsSegmentBoundaries(t *testing.T) {
 		{"corpus/public", "corpus/public/%252%65%252%65/private", false},
 		{"corpus/public", "corpus/public/..%25%32%66private", false},
 		{"corpus/public", "corpus/public/..%25%35%63private", false},
+		// Nor with path parameters, which a servlet-style backend drops
+		// before it resolves the segment.
+		{"corpus/public", "corpus/public/..;/private", false},
+		{"corpus/public", "corpus/public/..;jsessionid=x/private", false},
+		{"corpus/public", "corpus/public/.;x/private", false},
+		{"corpus/public", "corpus/public/..%3B/private", false},
+		{"corpus/public", "corpus/public/..%253b/private", false},
+		{"corpus/public", "corpus/public/a;b", true},
+		{"corpus/public", "corpus/public/..a;b", true},
 		// A stray "%" decodes as itself and stops nothing.
 		{"corpus/public", "corpus/public/50%/..", false},
 		{"corpus/public", "corpus/public/50%x", true},
