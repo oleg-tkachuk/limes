@@ -249,6 +249,15 @@ func (c *countingBiscuitLookup) IsBiscuitRevoked(context.Context, [][]byte) (boo
 	return c.revoked, c.err
 }
 
+// both asks each of its lookups and answers with the first.
+type both [2]BiscuitRevocationLookup
+
+func (b both) IsBiscuitRevoked(ctx context.Context, ids [][]byte) (bool, error) {
+	r, err := b[0].IsBiscuitRevoked(ctx, ids)
+	_, _ = b[1].IsBiscuitRevoked(ctx, ids)
+	return r, err
+}
+
 // perIDLookup answers for one revocation id at a time, counting the times
 // it is asked about each.
 type perIDLookup struct {
@@ -298,8 +307,8 @@ func TestCachedBiscuitRevocationChecker(t *testing.T) {
 		_, _ = c.IsBiscuitRevoked(ctx, ids)
 		c.Clear()
 		_, _ = c.IsBiscuitRevoked(ctx, ids)
-		if want := 2 * len(ids); up.calls != want {
-			t.Fatalf("upstream calls = %d, want %d: each id, twice", up.calls, want)
+		if up.calls != 2 {
+			t.Fatalf("upstream calls = %d, want 2: the token's ids together, twice", up.calls)
 		}
 	})
 
@@ -312,9 +321,9 @@ func TestCachedBiscuitRevocationChecker(t *testing.T) {
 		}
 		up.err = nil
 		_, _ = c.IsBiscuitRevoked(ctx, ids)
-		// The failed first id is asked again, then the second.
-		if want := 1 + len(ids); up.calls != want {
-			t.Fatalf("upstream calls = %d, want %d", up.calls, want)
+		// The failed lookup is asked again.
+		if up.calls != 2 {
+			t.Fatalf("upstream calls = %d, want 2", up.calls)
 		}
 	})
 
@@ -323,14 +332,14 @@ func TestCachedBiscuitRevocationChecker(t *testing.T) {
 		c := newBiscuitCache(t, BiscuitRevocationCacheConfig{Upstream: up, TTL: ttl})
 		_, _ = c.IsBiscuitRevoked(ctx, ids)
 		_, _ = c.IsBiscuitRevoked(ctx, [][]byte{[]byte("a"), []byte("bc")})
-		if up.calls != 4 {
-			t.Fatalf("upstream calls = %d, want 4", up.calls)
+		if up.calls != 2 {
+			t.Fatalf("upstream calls = %d, want 2: neither list is the other", up.calls)
 		}
 	})
 
 	// A fresh attenuation adds one block to a token: the ids it shares with
 	// the copy it came from are answered from the cache, and only its own is
-	// asked about. A revoked id stops the walk.
+	// asked about.
 	t.Run("a fresh attenuation asks only about its new block", func(t *testing.T) {
 		const copies = 50
 		up := &perIDLookup{revoked: map[string]bool{"revoked": true}}
@@ -347,8 +356,28 @@ func TestCachedBiscuitRevocationChecker(t *testing.T) {
 		if r, err := c.IsBiscuitRevoked(ctx, [][]byte{authority, []byte("revoked"), []byte("after")}); err != nil || !r {
 			t.Errorf("a token with a revoked block = %v, %v; want revoked", r, err)
 		}
-		if up.asked["after"] != 0 {
-			t.Error("a block after a revoked one was asked about")
+	})
+
+	// A token whose blocks the cache has never seen — a holder can attenuate
+	// up to MaxBiscuitBlocks fresh ones offline — costs one upstream lookup,
+	// not one per block, and its ids are then cached one by one.
+	t.Run("a token of fresh blocks costs one lookup", func(t *testing.T) {
+		up := &perIDLookup{}
+		calls := &countingBiscuitLookup{}
+		c := newBiscuitCache(t, BiscuitRevocationCacheConfig{Upstream: both{up, calls}, TTL: ttl})
+		fresh := make([][]byte, MaxBiscuitBlocks+1)
+		for i := range fresh {
+			fresh[i] = []byte{byte(i), 'f'}
+		}
+		if r, err := c.IsBiscuitRevoked(ctx, fresh); err != nil || r {
+			t.Fatalf("a token of fresh blocks = %v, %v; want live", r, err)
+		}
+		if calls.calls != 1 {
+			t.Errorf("upstream calls = %d, want 1", calls.calls)
+		}
+		// Each of its ids now answers for another token that shares it.
+		if r, err := c.IsBiscuitRevoked(ctx, fresh[:2]); err != nil || r || calls.calls != 1 {
+			t.Errorf("a token of two of those ids = %v, %v after %d calls; want live from the cache", r, err, calls.calls)
 		}
 	})
 

@@ -196,6 +196,48 @@ func (c *ttlCache[K]) get(ctx context.Context, key K, lookup func(context.Contex
 	return call.revoked, call.err
 }
 
+// cached reads the fresh answers keys have: whether any of them is revoked,
+// the keys with none, and the epoch a lookup of those starts in.
+func (c *ttlCache[K]) cached(keys []K) (revoked bool, missing []K, epoch uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := c.cfg.now()
+	for _, k := range keys {
+		e, ok := c.entries[k]
+		switch {
+		case !ok || !e.expires.After(now):
+			missing = append(missing, k)
+		case e.revoked:
+			return true, nil, c.epoch
+		}
+	}
+	return false, missing, c.epoch
+}
+
+// seedLive caches keys as not revoked, as a lookup of them all that started
+// in epoch answered, unless a clear has happened since; a key that has a
+// fresh answer or a lookup of its own in flight keeps that.
+func (c *ttlCache[K]) seedLive(keys []K, epoch uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.epoch != epoch {
+		return
+	}
+	now := c.cfg.now()
+	for _, k := range keys {
+		if e, ok := c.entries[k]; ok && e.expires.After(now) {
+			continue
+		}
+		if _, ok := c.inflight[k]; ok {
+			continue
+		}
+		c.makeRoomLocked()
+		expires := now.Add(c.cfg.ttl)
+		c.entries[k] = cacheEntry{expires: expires}
+		c.order = append(c.order, queued[K]{key: k, expires: expires})
+	}
+}
+
 // finish publishes call's answer to its waiters and caches it, unless it
 // failed or a clear happened while it ran.
 func (c *ttlCache[K]) finish(key K, call *lookupCall, epoch uint64) {
