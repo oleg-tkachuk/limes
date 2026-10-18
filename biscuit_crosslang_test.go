@@ -54,11 +54,8 @@ func goldenBiscuitVerifier(t *testing.T) *Verifier {
 		Revocations:    revLookup{},
 		TrustedIssuers: []string{goldenIssuer},
 		Now:            goldenClock,
-		AcceptBiscuit:  true,
-		MeterCopies:    true,
+		Biscuit:        &BiscuitConfig{Revocations: revLookup{}, MeterCopies: true},
 		DPoP:           newVerifier(t, dpop.VerifierConfig{Replay: newReplay(t, dpop.MemoryReplayCacheConfig{}), Now: goldenClock}),
-
-		BiscuitRevocations: revLookup{},
 	})
 	if err != nil {
 		t.Fatalf("verifier: %v", err)

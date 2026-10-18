@@ -233,4 +233,4 @@ func (c *BiscuitRevocationCache) Sweep() int { return c.cache.sweep() }
 
 // errNoBiscuitRevocations is returned by NewVerifier when Biscuits
 // are accepted with nothing to check their copies against.
-var errNoBiscuitRevocations = errors.New("limes: VerifierConfig.BiscuitRevocations required when AcceptBiscuit is set")
+var errNoBiscuitRevocations = errors.New("limes: VerifierConfig.Biscuit.Revocations required")

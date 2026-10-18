@@ -23,10 +23,8 @@ func biscuitFixture(t *testing.T) (*Issuer, *Verifier, *memStore, Capability, st
 		Keys:           staticKeys(t, map[string]ed25519.PublicKey{"k1": pub}),
 		Revocations:    store,
 		TrustedIssuers: []string{"limes-test"},
-		AcceptBiscuit:  true,
+		Biscuit:        &BiscuitConfig{Revocations: store},
 		DPoP:           newVerifier(t, dpop.VerifierConfig{Replay: newReplay(t, dpop.MemoryReplayCacheConfig{})}),
-
-		BiscuitRevocations: store,
 	})
 	if err != nil {
 		t.Fatal(err)
