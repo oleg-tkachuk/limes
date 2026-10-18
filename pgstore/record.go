@@ -17,7 +17,6 @@ import (
 // fails it.
 
 // capabilityRecord is a limes.Capability as the capability column holds it.
-// BiscuitRoot and Copies are not kept: issuance never records them.
 type capabilityRecord struct {
 	ID              uuid.UUID       `json:"id"`
 	Issuer          string          `json:"issuer"`
