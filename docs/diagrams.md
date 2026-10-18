@@ -790,8 +790,10 @@ Holds and housekeeping, in `memstore` and `pgstore` as the contract has them:
 - `Reserve` checks the same ceilings — never overrun — and holds the amount on
   the capability, each ancestor, the tenant (creating its row) and each copy;
   `Release` and `ReleaseExpired` take it off again. A hold never settled lapses
-  at its `ExpiresAt` (default `DefaultReservationTTL`, five minutes) but keeps
-  counting until `ReleaseExpired` runs, which errs towards refusing spend.
+  at its `ExpiresAt` — `DefaultReservationTTL`, five minutes, by default, and
+  never later than its capability's expiry — but keeps counting until
+  `ReleaseExpired` runs, which errs towards refusing spend. A revoked
+  capability's hold stays settleable until then.
 - `DeleteUsage` releases the capability's holds before it drops its counters
   and its copies', and `PurgeOrphans` releases the holds of every capability
   no longer on record, a batch of `Limit` at a time: nothing could settle or
