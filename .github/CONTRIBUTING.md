@@ -65,8 +65,9 @@ Both are jobs CI requires before a release.
   only what its own `.github/` says. A pull request from a fork is never
   merged automatically, and neither is one that changes what CI runs —
   `.github/` (workflows, scripts, release tooling), `Taskfile.yaml`,
-  `.golangci.yml`, `tools/` or the root `go.mod`, whose `go` and `toolchain`
-  lines pick the Go every job sets up: its green check is no evidence on its own, so
+  `.golangci.yml`, `tools/`, `go.work`, `renovate.json` or the root `go.mod`,
+  whose `go` and `toolchain` lines pick the Go every job sets up: its green
+  check is no evidence on its own, so
   a person reads those files and merges it. Auto-merge decides this from
   `main`'s own workflow when the pull request's CI run passes, and merges
   only the commit that run tested, so a pull request cannot change the rule
