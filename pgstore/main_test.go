@@ -23,10 +23,15 @@ import (
 const (
 	// postgresImage is the PostgreSQL the store is tested on.
 	postgresImage = "postgres:18.6-alpine"
-	// The container's owner role, which migrates and empties the tables.
+	// The container's own role, a superuser, which row-level security never
+	// binds: it sets each check's rows up and empties the tables.
 	ownerUser     = "limes_owner"
 	ownerPassword = "limes-owner-test"
 	databaseName  = "limes"
+	// migratorUser owns the schema, as a deployment's migration role does:
+	// no superuser, so the policies bind it (010_force_row_security.sql).
+	migratorUser     = "limes_migrator"
+	migratorPassword = "limes-migrator-test"
 	// appUser is the role the store under test connects as: it owns no
 	// table, so row-level security binds it as it binds a deployed service.
 	appUser     = "limes_app"
@@ -39,6 +44,11 @@ const (
 
 // createApp creates appUser, which Migrate grants as a runtime role.
 const createApp = `CREATE ROLE ` + appUser + ` LOGIN PASSWORD '` + appPassword + `'`
+
+// createMigrator creates migratorUser, free to create the store's schema in
+// the database.
+const createMigrator = `CREATE ROLE ` + migratorUser + ` LOGIN PASSWORD '` + migratorPassword + `';
+GRANT CREATE ON DATABASE ` + databaseName + ` TO ` + migratorUser
 
 // The tenants a consumer keeps, as the tests stand one in: a table of their
 // own, read by Config.CheckTenant.
@@ -84,6 +94,8 @@ var (
 	owner, app *pgxpool.Pool
 	// ownerDSN reaches the container's database as the owner.
 	ownerDSN string
+	// migrator is a pool as migratorUser, the schema's owner.
+	migrator *pgxpool.Pool
 )
 
 func TestMain(m *testing.M) {
@@ -119,7 +131,14 @@ func run(m *testing.M) (int, error) {
 	if _, err := owner.Exec(ctx, createApp); err != nil {
 		return 0, err
 	}
-	err = owner.AcquireFunc(ctx, func(c *pgxpool.Conn) error {
+	if _, err := owner.Exec(ctx, createMigrator); err != nil {
+		return 0, err
+	}
+	if migrator, err = poolAs(ctx, dsn, migratorUser, migratorPassword); err != nil {
+		return 0, err
+	}
+	defer migrator.Close()
+	err = migrator.AcquireFunc(ctx, func(c *pgxpool.Conn) error {
 		return Migrate(ctx, c.Conn(), MigrateOptions{RuntimeRoles: []string{appUser}})
 	})
 	if err != nil {
@@ -128,17 +147,22 @@ func run(m *testing.M) (int, error) {
 	if _, err := owner.Exec(ctx, createTenants); err != nil {
 		return 0, err
 	}
-	cfg, err := pgxpool.ParseConfig(dsn)
-	if err != nil {
-		return 0, err
-	}
-	cfg.ConnConfig.User, cfg.ConnConfig.Password = appUser, appPassword
-	cfg.MaxConns = appPoolConns
-	if app, err = pgxpool.NewWithConfig(ctx, cfg); err != nil {
+	if app, err = poolAs(ctx, dsn, appUser, appPassword); err != nil {
 		return 0, err
 	}
 	defer app.Close()
 	return m.Run(), nil
+}
+
+// poolAs is a pool of appPoolConns connections to dsn's database as user.
+func poolAs(ctx context.Context, dsn, user, password string) (*pgxpool.Pool, error) {
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, err
+	}
+	cfg.ConnConfig.User, cfg.ConnConfig.Password = user, password
+	cfg.MaxConns = appPoolConns
+	return pgxpool.NewWithConfig(ctx, cfg)
 }
 
 // fresh empties the tables for a check of its own.

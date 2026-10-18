@@ -89,10 +89,41 @@ func Migrate(ctx context.Context, conn *pgx.Conn, opts MigrateOptions) error {
 	if err := m.LoadMigrations(dir); err != nil {
 		return fmt.Errorf("pgstore: migrate: load: %w", err)
 	}
+	if err := migrateAllTenants(ctx, conn, m); err != nil {
+		return err
+	}
+	return grant(ctx, conn, opts.RuntimeRoles)
+}
+
+// sqlSetSession sets a setting for the rest of the session, and
+// sqlSettingNow reads one, empty when unset.
+const (
+	sqlSetSession = `SELECT set_config($1, $2, false)`
+	sqlSettingNow = `SELECT coalesce(current_setting($1, true), '')`
+)
+
+// migrateAllTenants runs the migrations scoped to every tenant, to read and
+// write: row-level security binds the owner (010_force_row_security.sql), so
+// a migration that moves data would otherwise see no row and change none
+// without a word. The session's own value comes back after, so a consumer's
+// migration run on the same connection keeps what it set.
+func migrateAllTenants(ctx context.Context, conn *pgx.Conn, m *migrate.Migrator) (err error) {
+	var before string
+	if err := conn.QueryRow(ctx, sqlSettingNow, SettingAllTenants).Scan(&before); err != nil {
+		return fmt.Errorf("pgstore: migrate: read the scope: %w", err)
+	}
+	if _, err := conn.Exec(ctx, sqlSetSession, SettingAllTenants, SettingAllTenantsOn); err != nil {
+		return fmt.Errorf("pgstore: migrate: scope to every tenant: %w", err)
+	}
+	defer func() {
+		if _, rerr := conn.Exec(ctx, sqlSetSession, SettingAllTenants, before); rerr != nil && err == nil {
+			err = fmt.Errorf("pgstore: migrate: restore the scope: %w", rerr)
+		}
+	}()
 	if err := m.Migrate(ctx); err != nil {
 		return fmt.Errorf("pgstore: migrate: %w", err)
 	}
-	return grant(ctx, conn, opts.RuntimeRoles)
+	return nil
 }
 
 // ErrSchemaOwner is Migrate finding the store's schema owned by another role
@@ -207,9 +238,26 @@ func ReadSchemaVersion(ctx context.Context, db DB) (SchemaVersion, error) {
 	return v, nil
 }
 
-// CheckSchema returns ErrSchemaMismatch when the schema is not at the version
-// this package queries, for a readiness check: a store over it would fail on
-// a table or column it expects.
+// ErrRuntimeRole is CheckSchema finding the store served by a role
+// row-level security does not hold to its tenant: a superuser or a role with
+// BYPASSRLS, which it never binds, or the schema's owner, which may turn it
+// off. The owner migrates; a role that owns nothing serves (Migrate's
+// RuntimeRoles).
+var ErrRuntimeRole = errors.New("pgstore: the store is served by a role row-level security does not hold")
+
+// sqlRuntimeRole reads what CheckSchema refuses of the role the store is
+// served by: superuser, BYPASSRLS, and membership in the role that owns the
+// schema, which grants the owner's rights.
+const sqlRuntimeRole = `
+SELECT r.rolsuper, r.rolbypassrls, pg_has_role(current_user, n.nspowner, 'MEMBER')
+FROM pg_roles r, pg_namespace n
+WHERE r.rolname = current_user AND n.nspname = $1`
+
+// CheckSchema is a readiness check for the stores over db. It returns
+// ErrSchemaMismatch when the schema is not at the version this package
+// queries — a store over it would fail on a table or column it expects —
+// and ErrRuntimeRole when db is served by a role row-level security does not
+// hold to its tenant, so a store over it would isolate no tenant.
 func CheckSchema(ctx context.Context, db DB) error {
 	v, err := ReadSchemaVersion(ctx, db)
 	if err != nil {
@@ -217,6 +265,18 @@ func CheckSchema(ctx context.Context, db DB) error {
 	}
 	if v.Applied != v.Expected {
 		return fmt.Errorf("%w: the database is at %d, this package needs %d", ErrSchemaMismatch, v.Applied, v.Expected)
+	}
+	var super, bypass, owns bool
+	if err := db.QueryRow(ctx, sqlRuntimeRole, schema).Scan(&super, &bypass, &owns); err != nil {
+		return fmt.Errorf("pgstore: runtime role: %w", err)
+	}
+	switch {
+	case super:
+		return fmt.Errorf("%w: it is a superuser", ErrRuntimeRole)
+	case bypass:
+		return fmt.Errorf("%w: it has BYPASSRLS", ErrRuntimeRole)
+	case owns:
+		return fmt.Errorf("%w: it owns %s, or is a member of the role that does", ErrRuntimeRole, schema)
 	}
 	return nil
 }
