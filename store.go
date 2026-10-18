@@ -94,7 +94,8 @@ type Store interface {
 	// Revoke adds an entry to the revocation list. Idempotent: a
 	// duplicate revoke is a no-op. An id not on record — or not visible
 	// to the caller — returns ErrNotFound and writes nothing, so a caller
-	// is never told "revoked" about a capability nothing stopped.
+	// is never told "revoked" about a capability nothing stopped. It
+	// refuses what RevokeRequest.Validate refuses.
 	//
 	// Every descendant stops verifying either way, because IsRevoked
 	// walks the chain. CascadeChildren=true additionally writes a
@@ -205,6 +206,16 @@ type RevokeRequest struct {
 	// CascadeChildren records a revocation entry for every descendant as
 	// well. Descendants stop verifying regardless; see Store.Revoke.
 	CascadeChildren bool
+}
+
+// Validate refuses a request naming no capability, as ErrInvalidRequest:
+// nothing could be revoked under the zero id, and answering ErrNotFound
+// would hide the caller's bug.
+func (r RevokeRequest) Validate() error {
+	if r.CapabilityID == uuid.Nil {
+		return invalidRequest("revoke: capability id required")
+	}
+	return nil
 }
 
 // DefaultHousekeepingLimit is how many rows one housekeeping batch —

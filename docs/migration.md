@@ -14,6 +14,17 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.91.0
+
+- `RevokeRequest`, `DeleteUsageRequest`, `ChargeByRefRequest`,
+  `PurgeOrphansRequest` and `ReleaseExpiredRequest` gain `Validate`, which
+  the stores and the contract suites now apply: `Revoke` and `DeleteUsage`
+  naming the zero id, and `ChargeByRef` with no capability or an empty
+  reference, are `ErrInvalidRequest` — they were `ErrNotFound`, a no-op and
+  `ErrChargeNotFound`. A `Store` or `UsageStore` of your own calls `Validate`
+  to pass storetest and metertest. `HousekeepingLimit` resolves a batch's
+  `Limit` as `PageLimit` resolves a page's.
+
 ## v0.90.0
 
 - `ChargeBucketUnspecified` is gone: it meant what `ChargeBucketNone` does,

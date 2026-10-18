@@ -176,8 +176,9 @@ type MeterReader interface {
 
 	// ChargeByRef returns the charge a capability took under an external
 	// reference (ChargeRequest.ExternalRef), so a reporter can reconcile
-	// its own records with the ledger. ErrChargeNotFound when there is none,
-	// an empty reference included: no charge is taken under no name.
+	// its own records with the ledger. ErrChargeNotFound when there is none.
+	// It refuses what ChargeByRefRequest.Validate refuses, an empty
+	// reference among them: no charge is taken under no name.
 	ChargeByRef(ctx context.Context, req ChargeByRefRequest) (ChargeRecord, error)
 
 	// GetReservation returns a reservation still holding budget — open,
@@ -255,18 +256,21 @@ type UsageHousekeeping interface {
 	// capability's open reservations first,
 	// returning their holds to its ancestors and its tenant: nothing could
 	// settle or release them afterwards. A capability with no row is no
-	// error: there is nothing to drop.
+	// error: there is nothing to drop. It refuses what
+	// DeleteUsageRequest.Validate refuses.
 	DeleteUsage(ctx context.Context, req DeleteUsageRequest) error
 
 	// PurgeOrphans deletes the usage rows of capabilities no longer on
 	// record (Store.Purge), with their copies' counters, releasing their
 	// reservations as DeleteUsage does, at
-	// most req.Limit of them; the caller loops while a batch comes back
-	// full.
+	// most req.Limit of them (HousekeepingLimit); the caller loops while a
+	// batch comes back full. It refuses what PurgeOrphansRequest.Validate
+	// refuses.
 	PurgeOrphans(ctx context.Context, req PurgeOrphansRequest) (PurgeOrphansResult, error)
 
 	// ReleaseExpired releases the reservations past their expiry, at most
-	// req.Limit of them; a hold expires with its capability at the latest
+	// req.Limit of them (HousekeepingLimit), refusing what
+	// ReleaseExpiredRequest.Validate refuses; a hold expires with its capability at the latest
 	// (Meter.Reserve). A revoked capability's hold is not released early: it
 	// can still be settled, as a cost already incurred belongs in the ledger
 	// (StoredMeterSubject). Run on a timer: until it runs, an expired hold
@@ -908,6 +912,11 @@ type PurgeOrphansRequest struct {
 	Limit int
 }
 
+// Validate refuses a negative Limit, as ErrInvalidRequest.
+func (r PurgeOrphansRequest) Validate() error {
+	return validateHousekeepingLimit("purge orphans", r.Limit)
+}
+
 // PurgeOrphansResult is what one PurgeOrphans deleted.
 type PurgeOrphansResult struct {
 	Purged int64
@@ -919,6 +928,28 @@ type ReleaseExpiredRequest struct {
 	// Limit bounds the reservations released. Zero:
 	// DefaultHousekeepingLimit; negative is refused.
 	Limit int
+}
+
+// Validate refuses a negative Limit, as ErrInvalidRequest.
+func (r ReleaseExpiredRequest) Validate() error {
+	return validateHousekeepingLimit("release expired", r.Limit)
+}
+
+// validateHousekeepingLimit refuses a negative batch limit for call.
+func validateHousekeepingLimit(call string, limit int) error {
+	if limit < 0 {
+		return invalidRequest("%s: limit %d is negative", call, limit)
+	}
+	return nil
+}
+
+// HousekeepingLimit is the batch a housekeeping request's Limit asks for:
+// DefaultHousekeepingLimit for zero. Validate refuses a negative one first.
+func HousekeepingLimit(limit int) int {
+	if limit == 0 {
+		return DefaultHousekeepingLimit
+	}
+	return limit
 }
 
 // ReleaseExpiredResult is what one ReleaseExpired released.
@@ -935,7 +966,28 @@ type ChargeByRefRequest struct {
 	ExternalRef string
 }
 
+// Validate refuses, as ErrInvalidRequest, a request that names no charge: no
+// capability, no reference — a charge taken without one has no reference to
+// find it by — or a reference ValidateExternalRef refuses.
+func (r ChargeByRefRequest) Validate() error {
+	switch {
+	case r.CapabilityID == uuid.Nil:
+		return invalidRequest("charge by ref: capability id required")
+	case r.ExternalRef == "":
+		return invalidRequest("charge by ref: external ref required")
+	}
+	return ValidateExternalRef(r.ExternalRef)
+}
+
 // DeleteUsageRequest names the capability whose usage row DeleteUsage drops.
 type DeleteUsageRequest struct {
 	CapabilityID uuid.UUID
+}
+
+// Validate refuses a request naming no capability, as ErrInvalidRequest.
+func (r DeleteUsageRequest) Validate() error {
+	if r.CapabilityID == uuid.Nil {
+		return invalidRequest("delete usage: capability id required")
+	}
+	return nil
 }

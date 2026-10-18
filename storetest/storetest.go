@@ -371,12 +371,16 @@ func checkUnknown(t *testing.T, f fixture) {
 		if _, err := f.get(id); !errors.Is(err, limes.ErrNotFound) {
 			t.Errorf("Get %s: err = %v, want ErrNotFound", id, err)
 		}
-		if err := f.Store.Revoke(f.Ctx, limes.RevokeRequest{CapabilityID: id}); !errors.Is(err, limes.ErrNotFound) {
-			t.Errorf("Revoke %s: err = %v, want ErrNotFound", id, err)
-		}
 		if f.revoked(t, id) {
 			t.Errorf("IsRevoked %s = true for an id not on record", id)
 		}
+	}
+	if err := f.Store.Revoke(f.Ctx, limes.RevokeRequest{CapabilityID: uuid.New()}); !errors.Is(err, limes.ErrNotFound) {
+		t.Errorf("Revoke of an id not on record: err = %v, want ErrNotFound", err)
+	}
+	// The zero id names nothing: the caller's bug (RevokeRequest.Validate).
+	if err := f.Store.Revoke(f.Ctx, limes.RevokeRequest{}); !errors.Is(err, limes.ErrInvalidRequest) {
+		t.Errorf("Revoke naming no capability: err = %v, want ErrInvalidRequest", err)
 	}
 }
 
