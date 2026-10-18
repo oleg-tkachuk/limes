@@ -599,6 +599,9 @@ func (s *UsageStore) Settle(ctx context.Context, req limes.SettleRequest, onChar
 				return err
 			}
 			if settled && e.CapabilityID == subject.CapabilityID() && e.TenantID == subject.TenantID() && sameCopyIDs(e.copies, subject.Copies()) {
+				if e.Amount != req.Amount {
+					return fmt.Errorf("%w: %s", limes.ErrSettleConflict, req.ReservationID)
+				}
 				receipt, err = replay(ctx, tx, e)
 				return err
 			}
