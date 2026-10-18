@@ -43,6 +43,15 @@ func TestMatchResourceRespectsSegmentBoundaries(t *testing.T) {
 		{"corpus/public", "corpus/public/..%252fsecret", false},
 		{"corpus/public", "corpus/public/..%255Csecret", false},
 		{"corpus/public", "corpus/public/100%25.txt", true},
+		// Nor encoded twice with the second escape's own hex digits encoded.
+		{"corpus/public", "corpus/public/%25%32%65%25%32%65/private", false},
+		{"corpus/public", "corpus/public/%25%32e%25%32E/private", false},
+		{"corpus/public", "corpus/public/%252%65%252%65/private", false},
+		{"corpus/public", "corpus/public/..%25%32%66private", false},
+		{"corpus/public", "corpus/public/..%25%35%63private", false},
+		// A stray "%" decodes as itself and stops nothing.
+		{"corpus/public", "corpus/public/50%/..", false},
+		{"corpus/public", "corpus/public/50%x", true},
 	}
 	for _, tc := range cases {
 		if got := MatchResource(tc.prefix, tc.uri); got != tc.want {

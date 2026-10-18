@@ -2,6 +2,7 @@ package limes
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -32,9 +33,10 @@ func MatchResource(prefix, uri string) bool {
 // dotSegmentEncoded is a "." percent-encoded, in lower case.
 const dotSegmentEncoded = "%2e"
 
-// percentEncoded is a "%" percent-encoded: "%252e" decodes once to "%2e"
-// and twice to ".".
-const percentEncoded = "%25"
+// consumerDecodes is how many times a consumer may percent-decode a resource
+// before it resolves the path: the check below looks for a dot segment in
+// the resource as given and after each of these decodings.
+const consumerDecodes = 2
 
 // segmentSeparators read as a "/" when looking for a dot segment: the
 // percent-encoded slash, and the backslash and its encoding, which a consumer
@@ -44,19 +46,44 @@ var segmentSeparators = strings.NewReplacer("%2f", "/", `\`, "/", "%5c", "/")
 
 // hasDotSegment reports whether s has a segment that is "." or "..",
 // counting "%2e" (any case) as a dot and every segmentSeparators entry as a
-// "/", each also encoded once more ("%252e", "%252f") — the segments RFC 3986
-// resolves away, which make a resource's text name somewhere other than it
-// reads, also for a consumer that decodes before it resolves, once or twice. Caveats.Validate refuses a resource with one, and no request
-// naming one matches a restricted capability.
+// "/" — the segments RFC 3986 resolves away, which make a resource's text
+// name somewhere other than it reads — in s as given and after each of up to
+// consumerDecodes percent-decodings, so also for a consumer that decodes
+// before it resolves, once or twice, however the second escape is spelled
+// ("%252e", "%25%32%65"). Caveats.Validate refuses a resource with one, and
+// no request naming one matches a restricted capability.
 func hasDotSegment(s string) bool {
-	decoded := strings.ReplaceAll(strings.ToLower(s), percentEncoded, "%")
-	for seg := range strings.SplitSeq(segmentSeparators.Replace(decoded), "/") {
-		switch strings.ReplaceAll(seg, dotSegmentEncoded, ".") {
-		case ".", "..":
-			return true
+	for pass := 0; ; pass++ {
+		for seg := range strings.SplitSeq(segmentSeparators.Replace(strings.ToLower(s)), "/") {
+			switch strings.ReplaceAll(seg, dotSegmentEncoded, ".") {
+			case ".", "..":
+				return true
+			}
 		}
+		if pass == consumerDecodes {
+			return false
+		}
+		s = percentDecode(s)
 	}
-	return false
+}
+
+// percentDecode decodes every well-formed "%XX" in s and keeps any other "%"
+// as it is, the way a lenient consumer does, so a stray "%" can neither hide
+// a dot segment nor make a resource unreadable.
+func percentDecode(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '%' && i+2 < len(s) {
+			if v, err := strconv.ParseUint(s[i+1:i+3], 16, 8); err == nil {
+				b.WriteByte(byte(v))
+				i += 2
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }
 
 // RestrictsResources reports whether the caveats confine the capability to a
