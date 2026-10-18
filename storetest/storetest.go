@@ -20,7 +20,7 @@
 // and when Env.ReadOnlyCtx is set, every write under a read-only scope is.
 // When Env.Census is set, a census counts each record under one disposition —
 // revoked, through an ancestor too, over expired over active — by tenant and
-// by principal type, a page at a time. A check that does not finish within Env.CheckTimeout stops the
+// by principal type, a page at a time, and counts no Biscuit copy. A check that does not finish within Env.CheckTimeout stops the
 // test binary with every goroutine's stack, naming the check.
 package storetest
 
@@ -254,6 +254,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"AReadOnlyScopeWritesNothing", checkReadOnlyScope},
 		{"CensusCountsEachRecordOnce", checkCensus},
 		{"CensusPagesAndRefusesAMalformedRequest", checkCensusPages},
+		{"CensusCountsNoBiscuitCopyAndNoEmptyGroup", checkCensusEdges},
 		{"EraseTenantRecordsKeepsWhatAVerifierStillNeeds", checkEraseTenant},
 	}
 	for _, c := range checks {
@@ -466,6 +467,11 @@ func checkPurge(t *testing.T, f fixture) {
 	}
 	if f.revoked(t, expired.ID) {
 		t.Error("a purged capability is still revoked")
+	}
+	// An id not on record is not revoked whether or not its record is there,
+	// so only a second Insert of the id shows the record gone, not hidden.
+	if err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: unrevoked, IssuedBy: issuedBy}); err != nil {
+		t.Errorf("Insert of a purged record's id: %v, want it free again", err)
 	}
 	if _, err := f.get(live.ID); err != nil || !f.revoked(t, live.ID) {
 		t.Errorf("Purge must keep a live record and its revocation: %v", err)
@@ -1088,6 +1094,14 @@ func checkScopeMismatch(t *testing.T, f fixture) {
 	}); !errors.Is(err, limes.ErrScopeMismatch) {
 		t.Errorf("ListByPrincipal of Tenant under another tenant's context: err = %v, want ErrScopeMismatch", err)
 	}
+	// Revoke names no tenant, so its scope hides the record rather than
+	// refusing the call: not visible to the caller is not found.
+	if err := f.Store.Revoke(wrong, limes.RevokeRequest{CapabilityID: parent.ID, Actor: "storetest"}); !errors.Is(err, limes.ErrNotFound) {
+		t.Errorf("Revoke of Tenant's record under another tenant's context: err = %v, want ErrNotFound", err)
+	}
+	if f.revoked(t, parent.ID) {
+		t.Error("a Revoke under another tenant's context revoked the record")
+	}
 }
 
 // A read-only scope reads Tenant's records and writes none: every call that
@@ -1171,6 +1185,14 @@ func checkEraseTenant(t *testing.T, f fixture) {
 		}
 	}
 	expired := f.insert(t, f.newCapability("agent:expired", uuid.Nil, f.now.Add(-expiredAgo)))
+	expiredCopyID := []byte("erased-tenant-expired-copy")
+	if withBiscuits {
+		if err := biscuits.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(expired.ID, expiredCopyID)}); err != nil {
+			t.Fatalf("RevokeBiscuit of the expired record's copy: %v", err)
+		}
+	}
+	// No expiry: nothing ever purges it, so it stays, revoked.
+	endless := f.insert(t, f.newCapability("agent:endless", uuid.Nil, time.Time{}))
 	// Expired, but not for MinPurgeRetention: a verifier may still take it.
 	recent := f.insert(t, f.newCapability("agent:recent", uuid.Nil, f.now.Add(-limes.MinPurgeRetention/2)))
 	theirs := f.newCapability("agent:theirs", uuid.Nil, f.now.Add(ttl))
@@ -1188,11 +1210,11 @@ func checkEraseTenant(t *testing.T, f fixture) {
 		t.Errorf("EraseTenantRecords naming no tenant: err = %v, want ErrInvalidRequest", err)
 	}
 	got, err := eraser.EraseTenantRecords(f.Ctx, req)
-	want := limes.EraseTenantResult{Revoked: 4, Removed: 1, Kept: 4}
+	want := limes.EraseTenantResult{Revoked: 5, Removed: 1, Kept: 5}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("EraseTenantRecords = %+v, %v; want %+v", got, err, want)
 	}
-	for _, c := range []limes.Capability{root, child, revoked, recent} {
+	for _, c := range []limes.Capability{root, child, revoked, recent, endless} {
 		if !f.revoked(t, c.ID) {
 			t.Errorf("%s verifies after its tenant was erased", c.Subject.Subject)
 		}
@@ -1205,6 +1227,12 @@ func checkEraseTenant(t *testing.T, f fixture) {
 		if copyRevoked, err := biscuits.IsBiscuitRevoked(f.Ctx, [][]byte{copyID}); err != nil || !copyRevoked {
 			t.Errorf("IsBiscuitRevoked of a live child's copy after the erase = %v, %v; want revoked", copyRevoked, err)
 		}
+		if r, err := biscuits.GetBiscuitRevocation(f.Ctx, expiredCopyID); !errors.Is(err, limes.ErrNotFound) {
+			t.Errorf("GetBiscuitRevocation of a removed record's copy = %+v, %v; want ErrNotFound, gone with its record", r, err)
+		}
+	}
+	if _, err := f.get(endless.ID); err != nil {
+		t.Errorf("GetRecord of a record with no expiry after the erase: %v, want it kept", err)
 	}
 	if _, err := f.get(expired.ID); !errors.Is(err, limes.ErrNotFound) {
 		t.Errorf("GetRecord of a record Purge would take, after the erase: err = %v, want ErrNotFound", err)
@@ -1212,7 +1240,7 @@ func checkEraseTenant(t *testing.T, f fixture) {
 	if r, err := f.Store.GetRecord(f.tenantCtx(other), theirs.ID); err != nil || r.Revocation != nil {
 		t.Errorf("another tenant's record after the erase = %+v, %v; want it on record and not revoked", r, err)
 	}
-	if again, err := eraser.EraseTenantRecords(f.Ctx, req); err != nil || !reflect.DeepEqual(again, limes.EraseTenantResult{Kept: 4}) {
+	if again, err := eraser.EraseTenantRecords(f.Ctx, req); err != nil || !reflect.DeepEqual(again, limes.EraseTenantResult{Kept: 5}) {
 		t.Errorf("EraseTenantRecords again = %+v, %v; want nothing revoked or removed", again, err)
 	}
 }
@@ -1293,6 +1321,30 @@ func (f fixture) countAll(t *testing.T, ctx context.Context, req limes.CountReco
 			t.Fatalf("CountRecords handed back cursor %q again", page.Next)
 		}
 		req.Cursor = page.Next
+	}
+}
+
+// A census of no record is an empty page; a Biscuit copy's revocation is
+// not its record's and counts nowhere; and a record with no expiry counts as
+// expired, since no verifier accepts it.
+func checkCensusEdges(t *testing.T, f fixture) {
+	if f.Census == nil || f.Now == nil {
+		t.Skip("Env.Census or Env.Now not set")
+	}
+	mine := limes.CountRecordsRequest{TenantID: f.Tenant}
+	if got := f.countAll(t, f.Ctx, mine); len(got) != 0 {
+		t.Errorf("census of a tenant with no record = %+v, want an empty page", got)
+	}
+	live := f.live(t, "agent:copied", uuid.Nil)
+	if biscuits, ok := f.Store.(limes.BiscuitRevocationStore); ok {
+		if err := biscuits.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(live.ID, []byte("census-copy"))}); err != nil {
+			t.Fatalf("RevokeBiscuit: %v", err)
+		}
+	}
+	f.insert(t, f.newCapability("agent:endless", uuid.Nil, time.Time{}))
+	want := []limes.RecordCount{{Total: 2, Active: 1, Expired: 1}}
+	if got := f.countAll(t, f.Ctx, mine); !reflect.DeepEqual(got, want) {
+		t.Errorf("census = %+v, want %+v", got, want)
 	}
 }
 
