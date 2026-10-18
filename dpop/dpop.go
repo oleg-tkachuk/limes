@@ -141,8 +141,8 @@ func accessTokenHash(token string) string {
 	return jose.B64(sum[:])
 }
 
-// ProofRequest is the request a proof is signed for.
-type ProofRequest struct {
+// SignRequest is the request a proof is signed for.
+type SignRequest struct {
 	// Method and URL are the request's, the method exactly as sent: it is
 	// case-sensitive (RFC 9110 §9.1).
 	Method string
@@ -166,9 +166,9 @@ type contextSigner interface {
 // Sign signs a proof for one request. key is any crypto.Signer whose
 // public key is Ed25519 or ECDSA P-256; one that also has SignContext is
 // given ctx, so a slow or cancelled remote signature is bounded by it.
-func Sign(ctx context.Context, key crypto.Signer, req ProofRequest) (string, error) {
+func Sign(ctx context.Context, key crypto.Signer, req SignRequest) (string, error) {
 	if req.IssuedAt.IsZero() {
-		return "", errors.New("dpop: ProofRequest.IssuedAt required")
+		return "", errors.New("dpop: SignRequest.IssuedAt required")
 	}
 	jwk, err := publicJWK(key.Public())
 	if err != nil {

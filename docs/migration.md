@@ -14,6 +14,11 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.87.0
+
+- `dpop.ProofRequest` → `dpop.SignRequest`: the request `dpop.Sign` takes,
+  named for it, as `dpop.Request` is what `Verify` and `Check` take.
+
 ## v0.86.0
 
 - `CachedRevocationChecker`, `NewCachedRevocationChecker` →
