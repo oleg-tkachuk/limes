@@ -22,5 +22,5 @@ from `main`'s own workflow, which a pull request cannot change.
 
 ## Supported versions
 
-Pre-1.0: only the latest release of each module — `limes`, `pgstore` and
-`redisreplay`. There are no maintenance branches.
+Pre-1.0: only the latest release of each module — `limes`, `pgstore`,
+`redisreplay` and `otelmetric`. There are no maintenance branches.

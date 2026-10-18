@@ -70,7 +70,7 @@
       "matchManagers": ["gomod"],
       "matchPackageNames": ["github.com/oleg-tkachuk/limes"],
       "enabled": false,
-      "description": "redisreplay and pgstore require the limes module of this repository. release.yaml proposes each release of it to them the moment it is cut (.github/scripts/require-released-limes.sh): pgstore's own release waits on that merge, so it does not wait on an external service."
+      "description": "redisreplay, pgstore and otelmetric require the limes module of this repository. release.yaml proposes each release of it to them the moment it is cut (.github/scripts/require-released-limes.sh): pgstore's own release waits on that merge, so it does not wait on an external service."
     },
     {
       "matchManagers": ["gomod"],

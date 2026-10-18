@@ -46,6 +46,10 @@ const moduleCases = {
     // A nested module's build change releases that module, not limes.
     ["build(pgstore): require limes v0.64.0", null],
     ["build(redisreplay): require limes v0.64.0", null],
+    // And otelmetric.
+    ["feat(otelmetric): count holds", null],
+    ["feat(otelmetric)!: rename an option", null],
+    ["build(otelmetric): require limes v0.64.0", null],
   ],
   // A nested module's own build change is a patch of it: the go.mod its users
   // resolve has changed. The first is the subject require-released-limes.sh
@@ -58,6 +62,10 @@ const moduleCases = {
   [modules.PGSTORE_MODULE]: [
     ["build(pgstore): require limes v0.64.0", "patch"],
     ["build(redisreplay): require limes v0.64.0", null],
+  ],
+  [modules.OTELMETRIC_MODULE]: [
+    ["build(otelmetric): require limes v0.64.0", "patch"],
+    ["build(pgstore): require limes v0.64.0", null],
   ],
 };
 

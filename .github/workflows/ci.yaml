@@ -116,7 +116,7 @@ jobs:
             ~/.cache/go-build
             ~/go/pkg/mod
             ~/.cache/golangci-lint
-          key: go-${{ runner.os }}-verify-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum', 'tools/go.sum', 'tools/yq/go.sum', 'tools/golangci-lint/go.sum', 'redisreplay/go.sum', 'pgstore/go.sum') }}
+          key: go-${{ runner.os }}-verify-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum', 'tools/go.sum', 'tools/yq/go.sum', 'tools/golangci-lint/go.sum', 'redisreplay/go.sum', 'otelmetric/go.sum', 'pgstore/go.sum') }}
           restore-keys: |
             go-${{ runner.os }}-verify-${{ steps.go.outputs.go-version }}-
 
@@ -327,6 +327,14 @@ jobs:
 
       - name: go test redisreplay
         working-directory: redisreplay
+        run: go test -race ./...
+
+      - name: go vet otelmetric
+        working-directory: otelmetric
+        run: go vet ./...
+
+      - name: go test otelmetric
+        working-directory: otelmetric
         run: go test -race ./...
 
   # The release is computed from commit types, so a break of the Go API that

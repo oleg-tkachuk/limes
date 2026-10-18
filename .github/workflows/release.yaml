@@ -38,6 +38,7 @@ env:
   # when a module there is not released here.
   REDISREPLAY_MODULE: redisreplay
   PGSTORE_MODULE: pgstore
+  OTELMETRIC_MODULE: otelmetric
 
 jobs:
   release:
@@ -196,6 +197,22 @@ jobs:
           RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes-redisreplay.md
         run: ./.github/scripts/publish-release.sh new "$RUNNER_TEMP/tags-before" "$REDISREPLAY_MODULE/"
 
+      - name: Compute and push the tag of otelmetric
+        if: steps.catchup.outputs.release == 'true'
+        working-directory: .github/release
+        run: ../scripts/without-workflow-commands.sh npx semantic-release --no-ci
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_MODULE: ${{ env.OTELMETRIC_MODULE }}
+          RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes-otelmetric.md
+
+      - name: Publish the release of otelmetric
+        if: steps.catchup.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes-otelmetric.md
+        run: ./.github/scripts/publish-release.sh new "$RUNNER_TEMP/tags-before" "$OTELMETRIC_MODULE/"
+
       # pgstore is released only once its tests against the limes its go.mod
       # requires passed in the dispatching run: a change to limes that pgstore
       # must follow lands with pgstore, and pgstore waits here, released with
@@ -239,6 +256,7 @@ jobs:
           ./.github/scripts/publish-release.sh left-behind
           ./.github/scripts/publish-release.sh left-behind "$REDISREPLAY_MODULE/"
           ./.github/scripts/publish-release.sh left-behind "$PGSTORE_MODULE/"
+          ./.github/scripts/publish-release.sh left-behind "$OTELMETRIC_MODULE/"
 
   # Each limes release is followed by a pull request per nested module that
   # raises the module's requirement to it: pgstore is released only once its
@@ -286,7 +304,7 @@ jobs:
         run: |
           set -uo pipefail
           failed=0
-          for module in "$REDISREPLAY_MODULE" "$PGSTORE_MODULE"; do
+          for module in "$REDISREPLAY_MODULE" "$PGSTORE_MODULE" "$OTELMETRIC_MODULE"; do
             ./.github/scripts/require-released-limes.sh "$module" "$LIMES_TAG" || failed=1
           done
           exit "$failed"

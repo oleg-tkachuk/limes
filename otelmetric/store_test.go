@@ -1,4 +1,4 @@
-package limes_test
+package otelmetric_test
 
 import (
 	"context"
@@ -14,6 +14,7 @@ import (
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/internal/link"
 	"github.com/oleg-tkachuk/limes/memstore"
+	"github.com/oleg-tkachuk/limes/otelmetric"
 )
 
 // Instrument names and attributes as an exporter reads them.
@@ -29,10 +30,10 @@ const (
 )
 
 // meteredStore is a metered memstore whose measurements reader collects.
-func meteredStore(t *testing.T, opts ...limes.InstrumentOption) (limes.UsageStore[struct{}], *sdkmetric.ManualReader, *memstore.Store) {
+func meteredStore(t *testing.T, opts ...otelmetric.Option) (limes.UsageStore[struct{}], *sdkmetric.ManualReader, *memstore.Store) {
 	t.Helper()
 	reader := sdkmetric.NewManualReader()
-	opts = append(opts, limes.WithMeterProvider(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))))
+	opts = append(opts, otelmetric.WithMeterProvider(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))))
 	records, err := memstore.NewStore(memstore.StoreConfig{})
 	if err != nil {
 		t.Fatal(err)
@@ -41,7 +42,7 @@ func meteredStore(t *testing.T, opts ...limes.InstrumentOption) (limes.UsageStor
 	if err != nil {
 		t.Fatal(err)
 	}
-	usage, err := limes.Instrument[struct{}](inner, opts...)
+	usage, err := otelmetric.Instrument[struct{}](inner, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +185,7 @@ func TestMeteringLabelsAmountsAndOutcomes(t *testing.T) {
 
 // WithTenantAttribute labels measurements with the tenant.
 func TestMeteringTenantAttributeIsOptIn(t *testing.T) {
-	usage, reader, records := meteredStore(t, limes.WithTenantAttribute())
+	usage, reader, records := meteredStore(t, otelmetric.WithTenantAttribute())
 	ctx := context.Background()
 	tenant := uuid.New()
 	if _, err := usage.Bump(ctx, limes.BumpRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: uuid.New(), tenant: tenant, requests: requestsOf(1)})}); err != nil {
@@ -204,7 +205,7 @@ type hiddenCopies struct {
 
 // The decorator reads copy counters exactly when the store it wraps does.
 func TestInstrumentKeepsCopyUsage(t *testing.T) {
-	if _, err := limes.Instrument[struct{}](nil); err == nil {
+	if _, err := otelmetric.Instrument[struct{}](nil); err == nil {
 		t.Fatal("Instrument(nil) wrapped nothing without an error")
 	}
 	records := newMemstoreRecords(t)
@@ -214,7 +215,7 @@ func TestInstrumentKeepsCopyUsage(t *testing.T) {
 	}
 	wrap := func(u limes.UsageStore[struct{}]) limes.UsageStore[struct{}] {
 		t.Helper()
-		m, err := limes.Instrument(u)
+		m, err := otelmetric.Instrument(u)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -337,7 +338,7 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 // A refused settle is counted under its tenant, as a refused charge is: the
 // receipt of a refusal still names the tenant and the unit.
 func TestMeteringLabelsARefusedSettleWithItsTenant(t *testing.T) {
-	usage, reader, records := meteredStore(t, limes.WithTenantAttribute())
+	usage, reader, records := meteredStore(t, otelmetric.WithTenantAttribute())
 	ctx := context.Background()
 	tenant, capID := uuid.New(), uuid.New()
 	res, err := usage.Reserve(ctx, limes.ReserveRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("2"))}), Amount: limes.MustParseAmount("1")})
@@ -430,7 +431,7 @@ func requestsOf(n int64) *limes.RequestCeiling    { return &limes.RequestCeiling
 // A refused settle is attributed to the subject's tenant, as a refused charge
 // is, not to the zero tenant of the empty receipt.
 func TestMeteringAttributesARefusedSettle(t *testing.T) {
-	usage, reader, records := meteredStore(t, limes.WithTenantAttribute())
+	usage, reader, records := meteredStore(t, otelmetric.WithTenantAttribute())
 	ctx := context.Background()
 	tenant := uuid.New()
 	subject := recordedSubject(ctx, t, records, subjectSpec{capID: uuid.New(), tenant: tenant})

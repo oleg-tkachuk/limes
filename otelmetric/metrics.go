@@ -1,4 +1,4 @@
-package limes
+package otelmetric
 
 import (
 	"context"
@@ -9,22 +9,24 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+
+	"github.com/oleg-tkachuk/limes"
 )
 
-// OpenTelemetry instruments of a metered UsageStore (Instrument).
+// OpenTelemetry instruments of a metered limes.UsageStore (Instrument).
 //
 // Cardinality:
 //
 //   - tenant_id is the one unbounded attribute, so it is opt-in
 //     (WithTenantAttribute): a deployment with many tenants multiplies every
 //     series by their number. Capability id is never an attribute.
-//   - unit_code is bounded by ISO 4217 (IsUnitCode). Amounts are only
+//   - unit_code is bounded by ISO 4217 (limes.IsUnitCode). Amounts are only
 //     meaningful per unit: summing USD and EUR is not a number, so every
 //     amount carries its unit and no instrument has a fixed unit of its own.
 //   - outcome is one of the outcome* constants below.
 
 // instrumentationScope names the meter the instruments are created on.
-const instrumentationScope = "github.com/oleg-tkachuk/limes"
+const instrumentationScope = "github.com/oleg-tkachuk/limes/otelmetric"
 
 // Instrument names, as an exporter shows them.
 const (
@@ -47,23 +49,23 @@ const (
 const (
 	// outcomeAllowed — every ceiling admitted it.
 	outcomeAllowed = "allowed"
-	// outcomeOverrun — committed past a ceiling under OverrunPolicyRecord.
+	// outcomeOverrun — committed past a ceiling under limes.OverrunPolicyRecord.
 	outcomeOverrun = "overrun"
 	// outcomeCapExceeded — a capability's, an ancestor's or a copy's ceiling
 	// refused it. The refusals carry their Reason's name, so a dashboard and
 	// a refused response say the same thing.
-	outcomeCapExceeded = string(ReasonBudgetExceeded)
+	outcomeCapExceeded = string(limes.ReasonBudgetExceeded)
 	// outcomeTenantExceeded — the tenant aggregate refused it.
-	outcomeTenantExceeded = string(ReasonTenantBudgetExceeded)
+	outcomeTenantExceeded = string(limes.ReasonTenantBudgetExceeded)
 	// outcomeLimitExceeded — a request limit refused a Bump.
-	outcomeLimitExceeded = string(ReasonRequestLimitExceeded)
+	outcomeLimitExceeded = string(limes.ReasonRequestLimitExceeded)
 	// outcomeError — it failed for any other reason: a malformed request, a
 	// failed onCharged, a store error.
 	outcomeError = "error"
 )
 
-// InstrumentOption configures Instrument.
-type InstrumentOption func(*meteringConfig)
+// Option configures Instrument.
+type Option func(*meteringConfig)
 
 type meteringConfig struct {
 	provider metric.MeterProvider
@@ -72,13 +74,13 @@ type meteringConfig struct {
 
 // WithMeterProvider creates the instruments on p rather than on the global
 // provider (otel.GetMeterProvider).
-func WithMeterProvider(p metric.MeterProvider) InstrumentOption {
+func WithMeterProvider(p metric.MeterProvider) Option {
 	return func(c *meteringConfig) { c.provider = p }
 }
 
 // WithTenantAttribute labels every measurement with tenant_id. Off by
 // default: it multiplies each series by the number of tenants.
-func WithTenantAttribute() InstrumentOption {
+func WithTenantAttribute() Option {
 	return func(c *meteringConfig) { c.tenant = true }
 }
 
@@ -111,11 +113,11 @@ func newMeteringInstruments(cfg meteringConfig) (*meteringInstruments, error) {
 	in.refundAmount, errs[3] = meter.Float64Counter(metricRefundAmount,
 		metric.WithDescription("Amount refunded from recorded charges, by unit_code."))
 	in.reservations, errs[4] = meter.Int64Counter(metricReservations,
-		metric.WithDescription("Reservation attempts, by outcome."))
+		metric.WithDescription("limes.Reservation attempts, by outcome."))
 	in.currentSpend, errs[5] = meter.Float64Histogram(metricCurrentSpend,
 		metric.WithDescription("A capability's spend after each charge, by unit_code."))
 	if err := errors.Join(errs[:]...); err != nil {
-		return nil, fmt.Errorf("limes: metering instruments: %w", err)
+		return nil, fmt.Errorf("otelmetric: instruments: %w", err)
 	}
 	return in, nil
 }
@@ -130,15 +132,15 @@ func (in *meteringInstruments) attrs(tenantID uuid.UUID, kv ...attribute.KeyValu
 }
 
 // chargeOutcome classifies a charge or settle that was not replayed.
-func chargeOutcome(receipt ChargeReceipt, err error) string {
+func chargeOutcome(receipt limes.ChargeReceipt, err error) string {
 	switch {
 	case err == nil && receipt.Overrun:
 		return outcomeOverrun
 	case err == nil:
 		return outcomeAllowed
-	case errors.Is(err, ErrTenantBudgetExceeded):
+	case errors.Is(err, limes.ErrTenantBudgetExceeded):
 		return outcomeTenantExceeded
-	case errors.Is(err, ErrBudgetExceeded):
+	case errors.Is(err, limes.ErrBudgetExceeded):
 		return outcomeCapExceeded
 	default:
 		return outcomeError
@@ -149,7 +151,7 @@ func chargeOutcome(receipt ChargeReceipt, err error) string {
 // its amount and the capability's spend after it, in the receipt's unit. The
 // instruments count float64, the metrics contract; amounts are exact up to
 // that boundary.
-func (in *meteringInstruments) recordCharge(ctx context.Context, tenantID uuid.UUID, amount Nanos, receipt ChargeReceipt, err error) {
+func (in *meteringInstruments) recordCharge(ctx context.Context, tenantID uuid.UUID, amount limes.Nanos, receipt limes.ChargeReceipt, err error) {
 	outcome := chargeOutcome(receipt, err)
 	in.chargeDecisions.Add(ctx, 1, in.attrs(tenantID, attribute.String(attrOutcome, outcome)))
 	if err != nil {
@@ -164,7 +166,7 @@ func (in *meteringInstruments) recordCharge(ctx context.Context, tenantID uuid.U
 func (in *meteringInstruments) recordBump(ctx context.Context, tenantID uuid.UUID, err error) {
 	outcome := outcomeAllowed
 	switch {
-	case errors.Is(err, ErrRequestLimitExceeded):
+	case errors.Is(err, limes.ErrRequestLimitExceeded):
 		outcome = outcomeLimitExceeded
 	case err != nil:
 		outcome = outcomeError
@@ -173,12 +175,12 @@ func (in *meteringInstruments) recordBump(ctx context.Context, tenantID uuid.UUI
 }
 
 // recordRefund counts one committed refund, in the charge's unit.
-func (in *meteringInstruments) recordRefund(ctx context.Context, r RefundReceipt) {
+func (in *meteringInstruments) recordRefund(ctx context.Context, r limes.RefundReceipt) {
 	in.refundAmount.Add(ctx, r.Amount.Float64(), in.attrs(r.TenantID, attribute.String(attrUnitCode, r.UnitCode)))
 }
 
 // recordReservation counts one Reserve attempt.
 func (in *meteringInstruments) recordReservation(ctx context.Context, tenantID uuid.UUID, err error) {
-	outcome := chargeOutcome(ChargeReceipt{}, err)
+	outcome := chargeOutcome(limes.ChargeReceipt{}, err)
 	in.reservations.Add(ctx, 1, in.attrs(tenantID, attribute.String(attrOutcome, outcome)))
 }

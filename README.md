@@ -132,7 +132,7 @@ own, pgstore included, logging what happens.
 | **Delegate** | `Issuer.Delegate` issues a child that may only be narrower — operations, resources, limits and audience; anything wider is `ErrDelegationTooWide`. Its validity window is fitted inside the parent's: a TTL past the parent's expiry is clipped to it, and a `NotBefore` before the parent's start is raised to it. The child counts in the parent's unit; naming another is `ErrUnitCodeMismatch`. The parent must allow `OpShare`, or the delegation is `ErrOpNotAllowed`, and an expired or revoked parent delegates nothing. |
 | **Attenuate offline** | The Biscuit v3 form of a capability can be narrowed by its holder with no key and no network; each copy can get its own limits and be revoked on its own. |
 | **Bind to a key** | RFC 9449 DPoP: `Verify` refuses a key-bound capability without a fresh proof from that key, presented under the `DPoP` scheme; server nonces (`dpop.HMACNonces`) work across replicas without shared state. |
-| **Meter** | Requests count against the capability and every ancestor; spend against those and the tenant, atomically with your own side effect. Reserve an estimate, settle the actual cost, refund a charge. Amounts are exact integers of billionths of an ISO 4217 unit. `Instrument` adds OpenTelemetry instruments. |
+| **Meter** | Requests count against the capability and every ancestor; spend against those and the tenant, atomically with your own side effect. Reserve an estimate, settle the actual cost, refund a charge. Amounts are exact integers of billionths of an ISO 4217 unit. `otelmetric.Instrument`, a module of its own, adds OpenTelemetry instruments. |
 | **Revoke** | One call stops a capability and everything delegated from it; verifiers learn of it within a cache TTL, or at once on `Clear`, which `pgstore.RevocationWatcher` calls on every revocation. |
 | **Report** | `LedgerReader.SumCharges` sums a tenant's charges over a period by unit, whole or by UTC hour, day, ISO week or month, and by operation, actor or capability, the largest first. `RecordCensus.CountRecords` counts capability records — active, expired, revoked, delegated, expiring soon — for one tenant or all, by tenant and principal type. |
 | **Answer refusals** | `ErrorResponse` maps a refusal to its status, an RFC 6750 / RFC 9449 `WWW-Authenticate` challenge and an RFC 9457 problem body, without the error's own text. |
@@ -159,8 +159,8 @@ commit together with, say, an outbox write; with no transactions, use
 - **A bound token needs its key**, and its children stay bound.
 - **The token format is pinned.** Golden fixtures in `testdata/` fail CI on any
   wire-format drift, because tokens outlive deployments.
-- **No hidden dependencies.** `isolation_test.go` fails if a database driver or
-  an object-storage SDK enters the resolved dependency graph.
+- **No hidden dependencies.** `isolation_test.go` fails if a database driver,
+  an object-storage SDK or OpenTelemetry enters the resolved dependency graph.
 - **The root module's tests need nothing**: no database, no network, no
   container. `pgstore`'s run against PostgreSQL in a container, and
   `redisreplay`'s against miniredis and, in CI, a real Redis.
@@ -173,12 +173,13 @@ pre-1.0, so a breaking change is a minor too — **the Go API may change between
 minor versions**; read the release notes, which list breaking changes first,
 before bumping.
 
-`redisreplay` and `pgstore` are modules of their own, each with a release
-line of its own — `redisreplay/vX.Y.Z`, `pgstore/vX.Y.Z` — cut by the same
+`redisreplay`, `pgstore` and `otelmetric` are modules of their own, each with
+a release line of its own — `redisreplay/vX.Y.Z`, `pgstore/vX.Y.Z`,
+`otelmetric/vX.Y.Z` — cut by the same
 rules from the commits that touch it, plus one: a module's own `build`
 commit, such as `build(pgstore): require limes vX.Y.Z`, is a patch of it. A
 commit releases, by its type, each module whose files it changes; one scoped
-`pgstore` or `redisreplay` never releases limes, breaking or not.
+`pgstore`, `redisreplay` or `otelmetric` never releases limes, breaking or not.
 
 The token wire format — claims, `typ: limes-cap-v5+jwt`, the Biscuit facts —
 is a separate promise: a token is a credential that outlives the process that
@@ -215,6 +216,7 @@ algorithm would be another token version, never a runtime choice.
 | [memstore/](memstore) | the in-memory reference implementation of every storage contract |
 | [pgstore/](pgstore) | the reference PostgreSQL store, a module of its own: `Store`, `BiscuitRevocationStore`, `UsageStore[pgx.Tx]`, `CopyUsageReader`, a `Ledger`, a `Census` and both tenant erasers under row-level security per tenant, with `EraseTenant` and a `RevocationWatcher`; held to storetest and metertest; released as `pgstore/vX.Y.Z` |
 | [redisreplay/](redisreplay) | a `dpop.ReplayCache` over Redis, a module of its own, for verifiers behind several replicas; released as `redisreplay/vX.Y.Z` |
+| [otelmetric/](otelmetric) | OpenTelemetry instruments around a `UsageStore`, a module of its own so limes resolves no OpenTelemetry; released as `otelmetric/vX.Y.Z` |
 | [internal/](internal) | the module's own shared packages, not importable from outside it: JOSE pieces (`jose`), HTTP header names (`httpx`), RFC 3986 URI normalisation (`rfc3986`), access to unexported root internals for sibling packages (`link`), and field coverage and per-check deadlines for the conformance suites (`fields`, `watchdog`) |
 | [storetest/](storetest), [metertest/](metertest), [dpop/dpoptest](dpop/dpoptest), [jwks/jwkstest](jwks/jwkstest) | conformance suites to run from your own implementation's tests |
 | [examples/](examples) | runnable programs: the five-minute walkthrough (`quickstart`), and one topic each, logging every step to stdout — issuing and verifying, delegation, metering, and pgstore over PostgreSQL; a module of its own, never released |

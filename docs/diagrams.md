@@ -15,9 +15,11 @@ process.
 The module ships the primitive and its contracts; the consumer supplies the
 storage behind them, or takes one of the stores this repository ships:
 `memstore` in memory, and the nested modules `pgstore`, every store contract
-over PostgreSQL with row-level security, and `redisreplay`, a
-`dpop.ReplayCache` over Redis. Each nested module has its own `go.mod` and its
-own tag line, so the root module's dependency graph stays free of a driver.
+over PostgreSQL with row-level security, `redisreplay`, a
+`dpop.ReplayCache` over Redis, and `otelmetric`, OpenTelemetry instruments
+around a `UsageStore`. Each nested module has its own `go.mod` and its own tag
+line, so the root module's dependency graph stays free of a driver and of
+OpenTelemetry.
 The two Biscuit contracts are needed only by a consumer that accepts the
 Biscuit form, `dpop.ReplayCache` and `dpop.Nonces` only by one that binds
 capabilities to keys, `LedgerReader` only by one that bills or reports from the
@@ -41,7 +43,6 @@ flowchart LR
         cache["CachedRevocationChecker<br/>TTL · bounded, oldest out · single-flight"]
         bcache["CachedBiscuitRevocationChecker<br/>per revocation id · TTL · bounded · single-flight"]
         attenuate["<b>Attenuate</b><br/>offline · no key"]
-        metering["Instrument<br/>OTel counters · spend histogram<br/>WithMeterProvider · WithTenantAttribute"]
         static["jwks.Static<br/>SetKey · RemoveKey"]
         remote["jwks.Remote<br/>ETag · Cache-Control · MaxStale<br/>held keys served, refreshed behind"]
         dpop["dpop.Verifier<br/>VerifierConfig.DPoP · dpop.Sign"]
@@ -67,6 +68,7 @@ flowchart LR
     impl[("memstore · your own store")]
     pg["<b>pgstore</b> (nested module)<br/>Store · BiscuitRevocationStore · erasers<br/>UsageStore[pgx.Tx] · CopyUsageReader · Ledger · Census<br/>Migrate · CheckSchema · EraseTenant<br/>WithTenant · WithAllTenants · WithAllTenantsReadOnly<br/>RevocationWatcher · row-level security"]
     rr["<b>redisreplay</b> (nested module)<br/>Cache: dpop.ReplayCache over Redis"]
+    metering["<b>otelmetric</b> (nested module)<br/>Instrument: OTel counters · spend histogram<br/>WithMeterProvider · WithTenantAttribute"]
     pgdb{{"PostgreSQL"}}
     redis{{"Redis"}}
     jwks{{"Issuer JWKS endpoint"}}

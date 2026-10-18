@@ -41,13 +41,15 @@ const BREAKING_IS_A_MINOR_BEFORE_1_0 = { breaking: true, release: "minor" };
 // The nested modules: each one's name, directory and commit scope.
 const PGSTORE_MODULE = "pgstore";
 const REDISREPLAY_MODULE = "redisreplay";
-// A pgstore or redisreplay commit cuts no release of the limes module. Their
+const OTELMETRIC_MODULE = "otelmetric";
+// A pgstore, redisreplay or otelmetric commit cuts no release of the limes module. Their
 // directories are left out of its commits already, each module being on a
 // line of its own; these cover a commit scoped to one that also touches a
 // path outside it. A rule releasing nothing outranks the breaking rule
 // above, so a breaking change scoped to one cuts no limes release either.
 const PGSTORE_RELEASES_NOTHING = { scope: PGSTORE_MODULE, release: false };
 const REDISREPLAY_RELEASES_NOTHING = { scope: REDISREPLAY_MODULE, release: false };
+const OTELMETRIC_RELEASES_NOTHING = { scope: OTELMETRIC_MODULE, release: false };
 
 // buildIsAPatch is the rule that releases a build change scoped to the nested
 // module name as a patch of it.
@@ -103,6 +105,7 @@ const MODULES = {
       BREAKING_IS_A_MINOR_BEFORE_1_0,
       PGSTORE_RELEASES_NOTHING,
       REDISREPLAY_RELEASES_NOTHING,
+      OTELMETRIC_RELEASES_NOTHING,
     ],
   },
   [REDISREPLAY_MODULE]: {
@@ -114,6 +117,11 @@ const MODULES = {
     dir: PGSTORE_MODULE,
     releaseRules: [SECURITY_IS_A_PATCH, BREAKING_IS_A_MINOR_BEFORE_1_0, buildIsAPatch(PGSTORE_MODULE)],
     notesTypes: buildIsListed(PGSTORE_MODULE),
+  },
+  [OTELMETRIC_MODULE]: {
+    dir: OTELMETRIC_MODULE,
+    releaseRules: [SECURITY_IS_A_PATCH, BREAKING_IS_A_MINOR_BEFORE_1_0, buildIsAPatch(OTELMETRIC_MODULE)],
+    notesTypes: buildIsListed(OTELMETRIC_MODULE),
   },
 };
 
@@ -165,6 +173,7 @@ module.exports = {
   ROOT_MODULE,
   PGSTORE_MODULE,
   REDISREPLAY_MODULE,
+  OTELMETRIC_MODULE,
   breaksAreMinor,
   configFor,
   tagPrefix,

@@ -62,8 +62,8 @@ expect "a push, each module from its own tag, one never released" 0 \
     "$(printf 'marker-check v0.1.0 %s limes\nmarker-check redisreplay/v0.1.0 %s redisreplay' "$later" "$later")" \
     markers push "" "" "$later"
 # Every module of the table, in its order, for a pull request.
-pr_calls="$(printf 'api-break-check %s %s limes\napi-break-check %s %s redisreplay\napi-break-check %s %s pgstore' \
-    "$first" "$later" "$first" "$later" "$first" "$later")"
+pr_calls="$(printf 'api-break-check %s %s limes\napi-break-check %s %s redisreplay\napi-break-check %s %s pgstore\napi-break-check %s %s otelmetric' \
+    "$first" "$later" "$first" "$later" "$first" "$later" "$first" "$later")"
 expect "a pull request" 0 "$pr_calls" api pull_request "$first" "$later" "$later"
 FAIL_MODULE=limes expect "one module failing, the others still checked" 1 "$pr_calls" \
     api pull_request "$first" "$later" "$later"

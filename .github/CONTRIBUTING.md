@@ -15,8 +15,8 @@ task verify-all
 runs gofmt, `go mod tidy` and `go mod verify`, golangci-lint, `go vet` of a
 32-bit build, the unit suite, govulncheck, actionlint,
 the tests of the workflow scripts, the release-rule, release-notes, major-guard and
-module-commits tests, the gate of `redisreplay` (its tests on miniredis
-included), the static checks of `pgstore` and the examples that need no
+module-commits tests, the gates of `redisreplay` (its tests on miniredis
+included) and `otelmetric`, the static checks of `pgstore` and the examples that need no
 database, run end to end — the same task CI runs. It
 needs no database and no container; it does need the network, for the shared
 Taskfile include, `go mod verify` and govulncheck's database.
@@ -34,7 +34,7 @@ in `pgstore/go.mod`, they are part of the required check: limes may not break
 pgstore. Against the limes that `go.mod` requires, which is what a consumer's
 build resolves (`task test:pgstore:pinned`, the job **PostgreSQL store,
 released limes**), they gate pgstore's release instead: a run in which they
-fail releases limes and redisreplay, and holds pgstore back.
+fail releases limes, redisreplay and otelmetric, and holds pgstore back.
 
 So a limes change that pgstore must follow — a value pgstore names
 exhaustively, such as a `ChargeBucket`, or an API pgstore calls — lands with

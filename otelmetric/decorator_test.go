@@ -1,9 +1,10 @@
-package limes_test
+package otelmetric_test
 
 import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -11,17 +12,29 @@ import (
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/memstore"
+	"github.com/oleg-tkachuk/limes/otelmetric"
 )
 
-// limesDir is the directory of package limes, which the tests run in.
-const limesDir = "."
+// limesPackage is the package whose interfaces Instrument forwards.
+const limesPackage = "github.com/oleg-tkachuk/limes"
+
+// limesDir is the directory of the limes this module builds against, as the
+// go command resolves it.
+func limesDir(t *testing.T) string {
+	t.Helper()
+	out, err := exec.CommandContext(t.Context(), "go", "list", "-f", "{{.Dir}}", limesPackage).Output()
+	if err != nil {
+		t.Fatalf("go list %s: %v", limesPackage, err)
+	}
+	return strings.TrimSpace(string(out))
+}
 
 // interfaceMethods reads every interface package limes declares, with the
 // methods of the interfaces it embeds, keyed by interface name.
 func interfaceMethods(t *testing.T) map[string][]string {
 	t.Helper()
 	fset := token.NewFileSet()
-	paths, err := filepath.Glob(filepath.Join(limesDir, "*.go"))
+	paths, err := filepath.Glob(filepath.Join(limesDir(t), "*.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +121,7 @@ func TestInstrumentForwardsEveryInterfaceTheStoreImplements(t *testing.T) {
 	}
 	checked := map[string]bool{}
 	for mix, store := range stores {
-		wrapped, err := limes.Instrument[struct{}](store)
+		wrapped, err := otelmetric.Instrument[struct{}](store)
 		if err != nil {
 			t.Fatal(err)
 		}
