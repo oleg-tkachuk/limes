@@ -41,7 +41,7 @@ exhaustively, such as a `ChargeBucket`, or an API pgstore calls — lands with
 pgstore in one pull request. Its released-limes job fails, as nothing released
 has the change yet; the merge releases limes, and the release workflow opens
 a pull request raising each nested module's requirement to that release
-(`build(pgstore): require limes vX.Y.Z`, queued to merge once green). That
+(`build(pgstore): require limes vX.Y.Z`, merged once green). That
 pull request passes the job, and its merge releases pgstore with every change
 it held: a nested module's own `build` commit is a patch of it, so the raised
 requirement is released even when nothing else waits. A pgstore change that needs
@@ -68,7 +68,10 @@ Both are jobs CI requires before a release.
   `.golangci.yml`, `tools/` or the root `go.mod`, whose `go` and `toolchain`
   lines pick the Go every job sets up: its green check is no evidence on its own, so
   a person reads those files and merges it. Auto-merge decides this from
-  `main`'s own workflow, so a pull request cannot change the rule. Renovate's
+  `main`'s own workflow when the pull request's CI run passes, and merges
+  only the commit that run tested, so a pull request cannot change the rule
+  and a later push cannot ride on an earlier decision. Mark a pull request
+  draft to hold it. Renovate's
   own pull requests are the exception: Renovate merges them itself once green
   (`renovate.json`), those bumping workflow actions, pinned tools or the task
   library included.

@@ -8,7 +8,7 @@
 # once its tests against the limes it requires pass (release.yaml). So every
 # limes release is followed by raising that requirement: this commits it on
 # a branch of the module's own and opens its pull request, or updates the
-# one still open to the newer release. auto-merge.yaml queues it, and its
+# one still open to the newer release. auto-merge.yaml merges it once green, and its
 # merge releases the module: a build commit scoped to a nested module is a
 # patch of it (.github/release/modules.cjs).
 #

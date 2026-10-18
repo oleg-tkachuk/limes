@@ -1,13 +1,14 @@
 # shellcheck shell=bash
-# merge-policy.sh — who the automation acts for, and on which branch.
+# merge-policy.sh — who the automation acts for, on which branch, and which
+# changes it leaves to a person.
 #
 # Usage: source gh-retry.sh, then this; REPO names the repository.
 #
-# Shared by queue-auto-merge.sh, which arms a merge through AUTOMERGE_TOKEN,
-# and rebase-behind.sh, which rewrites a branch through it: both act only for
-# a pull request into BASE_BRANCH whose author could have pushed the change
-# themselves, so the token never does for someone what they could not do.
-# auto-merge.yaml's pull_request_target branches filter names the same branch.
+# Shared by merge-green.sh, which merges a pull request through
+# AUTOMERGE_TOKEN, and rebase-behind.sh, which rewrites a branch through it:
+# both act only for a pull request into BASE_BRANCH whose author could have
+# pushed the change themselves, so the token never does for someone what they
+# could not do.
 
 # The branch the automation merges into and rebases onto.
 # shellcheck disable=SC2034 # read by the scripts that source this one
@@ -15,6 +16,39 @@ readonly BASE_BRANCH=main
 # The repository permissions that can push a branch, as the collaborator
 # permission API names them (maintain reads as write there).
 readonly PUSH_PERMISSIONS='^(admin|write)$'
+# How gh names Renovate as the author of a pull request. Renovate merges and
+# rebases its own, once a release is old enough (renovate.json).
+# shellcheck disable=SC2034 # read by the scripts that source this one
+readonly RENOVATE=app/renovate
+
+# The paths that decide what CI runs: the workflows and their scripts, the
+# tasks CI calls, the linter's configuration, the pinned tools, and the root
+# go.mod, whose go and toolchain lines pick the Go every job sets up. A pull
+# request runs the workflows and tasks of its own head, so one that changes
+# them can make "All checks passed" pass without the checks behind it: its
+# green check is no evidence, and it is left for a person. Task and
+# golangci-lint each read whichever of several file names exists, and Task
+# prefers Taskfile.yml to Taskfile.yaml, so a new file under another of those
+# names replaces the reviewed one: every spelling counts. A nested module's
+# go.mod is left out on purpose: the release raises its requirement of limes
+# in a pull request merged this way (require-released-limes.sh).
+readonly CI_DEFINITION=(
+    '.github/*'
+    '[Tt]askfile.*'
+    '.golangci.*'
+    'tools/*'
+    'go.mod'
+)
+
+# defines_ci reports whether path is one CI_DEFINITION names.
+defines_ci() {
+    local pattern
+    for pattern in "${CI_DEFINITION[@]}"; do
+        # shellcheck disable=SC2053 # the glob is the point
+        [[ $1 == $pattern ]] && return 0
+    done
+    return 1
+}
 
 # can_push reports whether login can push to REPO. An author the API does not
 # know as a collaborator — an app, a user with no access — cannot, and nor can

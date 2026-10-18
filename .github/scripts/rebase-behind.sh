@@ -33,8 +33,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/merge-policy.sh"
 
 # The most pull requests one run looks at.
 readonly PR_LIMIT=200
-# How gh names Renovate as the author of a pull request.
-readonly RENOVATE=app/renovate
 # The merge state of a pull request whose branch conflicts with main.
 readonly DIRTY=DIRTY
 
