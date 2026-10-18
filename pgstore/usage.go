@@ -571,17 +571,13 @@ func parseTenantPlace(s string) (tenantPlace, error) {
 }
 
 const (
-	// sqlDueHolds reads the holds past their expiry, and those of a
-	// capability revoked, itself or an ancestor: no one can settle either.
-	//
-	// The batch is the soonest due, and its holds are locked in id order,
-	// the order every call that locks several takes.
+	// sqlDueHolds reads the soonest holds past their expiry, and locks them
+	// in id order, the order every call that locks several takes.
 	sqlDueHolds = `
 SELECT ` + sqlHoldColumns + ` FROM limes.reservations
 WHERE id IN (
     SELECT id FROM limes.reservations
     WHERE expires_at <= $1
-       OR EXISTS (SELECT 1 FROM limes.is_revoked(capability_id, $3) v WHERE v.in_chain)
     ORDER BY expires_at, id
     LIMIT $2)
 ORDER BY id
@@ -642,7 +638,7 @@ func (s *UsageStore) ReleaseExpired(ctx context.Context, req limes.ReleaseExpire
 	}
 	var released int64
 	err = s.inTx(ctx, func(tx pgx.Tx) error {
-		holds, err := collectHolds(ctx, tx, sqlDueHolds, s.clock(), limit, limes.MaxDelegationDepth)
+		holds, err := collectHolds(ctx, tx, sqlDueHolds, s.clock(), limit)
 		if err != nil {
 			return err
 		}

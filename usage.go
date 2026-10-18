@@ -264,11 +264,13 @@ type UsageHousekeeping interface {
 	// full.
 	PurgeOrphans(ctx context.Context, req PurgeOrphansRequest) (PurgeOrphansResult, error)
 
-	// ReleaseExpired releases the reservations past their expiry, and those
-	// of a capability revoked — itself or an ancestor — which no one can
-	// settle any more, at most req.Limit of them. Run on a timer: until it
-	// runs, such a hold keeps counting against the ceilings, which errs
-	// towards refusing spend, never towards allowing too much.
+	// ReleaseExpired releases the reservations past their expiry, at most
+	// req.Limit of them; a hold expires with its capability at the latest
+	// (Meter.Reserve). A revoked capability's hold is not released early: it
+	// can still be settled, as a cost already incurred belongs in the ledger
+	// (StoredMeterSubject). Run on a timer: until it runs, an expired hold
+	// keeps counting against the ceilings, which errs towards refusing
+	// spend, never towards allowing too much.
 	ReleaseExpired(ctx context.Context, req ReleaseExpiredRequest) (ReleaseExpiredResult, error)
 }
 

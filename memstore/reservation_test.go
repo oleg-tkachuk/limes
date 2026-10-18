@@ -171,33 +171,42 @@ func TestHoldExpiryIsAWallTime(t *testing.T) {
 	}
 }
 
-// A hold ends with its capability at the latest, and ReleaseExpired takes
-// the hold of a revoked capability without waiting for its expiry: no one
-// can settle either any more, and both would keep the budget held.
+// A hold ends with its capability at the latest. A revoked capability's
+// hold still counts until then, and can still be settled: a cost already
+// incurred belongs in the ledger, which is what a late-cost reporter's
+// StoredMeterSubject is for. ReleaseExpired takes it only once it expires.
 func TestAHoldEndsWithItsCapability(t *testing.T) {
 	// farTTL outlives the capability recordedSubject records.
 	const farTTL = 24 * time.Hour
 	ctx := context.Background()
 	u, capID, tenant, now := reservationFixture(t)
 	subject := recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("10"))})
-	r, err := u.Reserve(ctx, limes.ReserveRequest{Subject: subject, Amount: unit, TTL: farTTL})
-	if err != nil {
-		t.Fatal(err)
+	reserve := func() limes.Reservation {
+		t.Helper()
+		r, err := u.Reserve(ctx, limes.ReserveRequest{Subject: subject, Amount: unit, TTL: farTTL})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
 	}
-	if want := now.Add(contractTTL); !r.ExpiresAt.Equal(want) {
-		t.Errorf("a hold asked for %s expires at %s, want its capability's expiry %s", farTTL, r.ExpiresAt, want)
-	}
-
-	if got, err := u.ReleaseExpired(ctx, limes.ReleaseExpiredRequest{}); err != nil || got.Released != 0 {
-		t.Fatalf("ReleaseExpired before any revocation = %+v, %v; want nothing released", got, err)
+	settled, left := reserve(), reserve()
+	if want := now.Add(contractTTL); !settled.ExpiresAt.Equal(want) {
+		t.Errorf("a hold asked for %s expires at %s, want its capability's expiry %s", farTTL, settled.ExpiresAt, want)
 	}
 	if err := u.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: capID}); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := u.ReleaseExpired(ctx, limes.ReleaseExpiredRequest{}); err != nil || got.Released != 1 {
-		t.Fatalf("ReleaseExpired after the revocation = %+v, %v; want the hold released", got, err)
+	if got, err := u.ReleaseExpired(ctx, limes.ReleaseExpiredRequest{}); err != nil || got.Released != 0 {
+		t.Fatalf("ReleaseExpired after the revocation = %+v, %v; want nothing released before the holds expire", got, err)
 	}
-	if usage, _ := u.GetUsage(ctx, capID); usage.ReservedAmount != 0 {
-		t.Errorf("after the release the capability holds %s, want nothing", usage.ReservedAmount)
+	if _, err := u.Settle(ctx, limes.SettleRequest{Subject: subject, ReservationID: settled.ID, Amount: unit}, nil); err != nil {
+		t.Fatalf("settling a revoked capability's hold: %v", err)
+	}
+	*now = left.ExpiresAt
+	if got, err := u.ReleaseExpired(ctx, limes.ReleaseExpiredRequest{}); err != nil || got.Released != 1 {
+		t.Fatalf("ReleaseExpired once the capability expired = %+v, %v; want the other hold released", got, err)
+	}
+	if usage, _ := u.GetUsage(ctx, capID); usage.ReservedAmount != 0 || usage.SpentAmount != unit {
+		t.Errorf("after both the capability holds %s and spent %s, want nothing held and %s spent", usage.ReservedAmount, usage.SpentAmount, unit)
 	}
 }
