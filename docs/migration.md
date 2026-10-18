@@ -14,6 +14,33 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.100.0
+
+- Metering moved out of `limes` into the package
+  `github.com/oleg-tkachuk/limes/meter`: `UsageStore`, `Meter`,
+  `MeterReader`, `TenantBudgets`, `UsageHousekeeping`, `CopyUsageReader`,
+  `LedgerReader`, `TenantUsageEraser`, `TenantBudgetLister`,
+  `AllTenantBudgets`, `HeldCopy`, `HousekeepingLimit`, `ValidateExternalRef`
+  and every metering request, receipt, record and constant. Import `meter`
+  and rename `limes.X` to `meter.X`; nothing else about them changed.
+- The meter's own sentinels moved with it: `ErrChargeNotFound`,
+  `ErrReservationNotFound`, `ErrUsageNotFound`, `ErrTenantBudgetNotFound`,
+  `ErrTenantBudgetVersionMismatch`, `ErrExternalRefConflict`,
+  `ErrSettleConflict`, `ErrCopyLimitExceeded`, `ErrCounterOverflow` and
+  `ErrRefundExceedsCharge` are `meter.Err…`, in the same families. The
+  refusals `ErrorResponse` answers — `ErrRequestLimitExceeded`,
+  `ErrBudgetExceeded`, `ErrTenantBudgetExceeded` — and `ErrInvalidAmount`
+  stay in `limes`.
+- `MeterSubject`, the ceilings and `Nanos` stay in `limes`; `MeterSubject`
+  gains `Validate` and `ValidateAmounts`, and `AllPages` walks any paged list
+  as `AllByPrincipal` does.
+
+## pgstore/v0.19.0
+
+- The usage store, ledger and erasers implement the contracts of the package
+  `meter` (see v0.100.0): their methods take and return `meter.X` where they
+  took `limes.X`.
+
 ## v0.99.0
 
 - `Store.Insert` refuses a child whose budget names another unit than its

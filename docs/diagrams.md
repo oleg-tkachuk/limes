@@ -17,12 +17,12 @@ storage behind them, or takes one of the stores this repository ships:
 `memstore` in memory, and the nested modules `pgstore`, every store contract
 over PostgreSQL with row-level security, `redisreplay`, a
 `dpop.ReplayCache` over Redis, and `otelmetric`, OpenTelemetry instruments
-around a `UsageStore`. Each nested module has its own `go.mod` and its own tag
+around a `meter.UsageStore`. Each nested module has its own `go.mod` and its own tag
 line, so the root module's dependency graph stays free of a driver and of
 OpenTelemetry.
 The two Biscuit contracts are needed only by a consumer that accepts the
 Biscuit form, `dpop.ReplayCache` and `dpop.Nonces` only by one that binds
-capabilities to keys, `LedgerReader` only by one that bills or reports from the
+capabilities to keys, `meter.LedgerReader` only by one that bills or reports from the
 charges ledger, `RecordCensus` only by one that reports on records, and the two tenant erasers only by one that removes a tenant. `storetest`, `metertest`, `dpop/dpoptest` and
 `jwks/jwkstest` check an implementation against its contract from its own
 tests — the Biscuit and copy contracts too, when the store under test
@@ -54,15 +54,15 @@ flowchart LR
     subgraph contracts ["contracts the consumer implements"]
         direction TB
         store["<b>Store</b> = IssuanceStore + admin<br/>Insert · IsRevoked · GetRecord · Revoke<br/>Purge · ListByPrincipal"]
-        usage["<b>UsageStore[TX]</b><br/>Meter[TX]: Bump · Charge · Reserve · Settle · Refund · Release<br/>MeterReader: GetUsage · GetCharge · ChargeByRef · GetReservation · ListReservations<br/>TenantBudgets · UsageHousekeeping"]
+        usage["<b>meter.UsageStore[TX]</b><br/>Meter[TX]: Bump · Charge · Reserve · Settle · Refund · Release<br/>MeterReader: GetUsage · GetCharge · ChargeByRef · GetReservation · ListReservations<br/>TenantBudgets · UsageHousekeeping"]
         keys["<b>KeyResolver</b><br/>PublicKey(kid)"]
         brev["<b>BiscuitRevocationStore</b><br/>IsBiscuitRevoked · RevokeBiscuit<br/>GetBiscuitRevocation"]
-        cusage["<b>CopyUsageReader</b><br/>CopyUsage(CopyUsageRequest{CapabilityID, RevocationIDs})<br/>→ CopyUsageResult{Copies}"]
+        cusage["<b>meter.CopyUsageReader</b><br/>CopyUsage(CopyUsageRequest{CapabilityID, RevocationIDs})<br/>→ CopyUsageResult{Copies}"]
         replay["<b>dpop.ReplayCache</b><br/>Seen(ctx, ReplayEntry) · MemoryReplayCache ships"]
         nonces["<b>dpop.Nonces</b><br/>Nonce · Valid"]
-        ledger["<b>LedgerReader</b><br/>SumCharges(SumChargesRequest) → Page[ChargeSum]<br/>by unit · bucket none/hour/day/week/month · op · actor · capability"]
+        ledger["<b>meter.LedgerReader</b><br/>SumCharges(SumChargesRequest) → Page[ChargeSum]<br/>by unit · bucket none/hour/day/week/month · op · actor · capability"]
         census["<b>RecordCensus</b><br/>CountRecords(CountRecordsRequest) → Page[RecordCount]<br/>one tenant or all · by tenant · principal type<br/>active · expired · revoked · delegated · expiring soon"]
-        erasers["<b>TenantRecordEraser · TenantUsageEraser</b><br/>EraseTenantRecords · EraseTenantUsage"]
+        erasers["<b>TenantRecordEraser · meter.TenantUsageEraser</b><br/>EraseTenantRecords · EraseTenantUsage"]
     end
 
     impl[("memstore · your own store")]

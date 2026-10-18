@@ -78,19 +78,20 @@ func (s MeterSubject) UnitCode() string { return s.maxBudget.UnitCode }
 // Copies are the limits of the Biscuit copy presented, a copy of them.
 func (s MeterSubject) Copies() []CopyCeiling { return cloneCopyCeilings(s.copies) }
 
-// validate refuses a subject that names no capability or no tenant — the
-// zero MeterSubject, a request that set none — or an unknown unit.
-func (s MeterSubject) validate() error {
+// Validate refuses a subject that names no capability or no tenant — the
+// zero MeterSubject, a request that set none — or an unknown unit. A
+// metering request's Validate calls it.
+func (s MeterSubject) Validate() error {
 	if s.capabilityID == uuid.Nil || s.tenantID == uuid.Nil {
 		return invalidRequest("the meter subject names no capability or no tenant")
 	}
 	return validUnitCode(s.maxBudget.UnitCode)
 }
 
-// validateAmounts is validate for a request that moves an amount, which
+// ValidateAmounts is Validate for a request that moves an amount, which
 // needs a unit to count it in: no unit is ever assumed.
-func (s MeterSubject) validateAmounts() error {
-	if err := s.validate(); err != nil {
+func (s MeterSubject) ValidateAmounts() error {
+	if err := s.Validate(); err != nil {
 		return err
 	}
 	if s.maxBudget.UnitCode == "" {

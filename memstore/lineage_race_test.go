@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // raceTree inserts root and child (child under root) in one tenant.
@@ -50,23 +51,23 @@ func TestChargeRacingDeleteLeavesTheAncestorDeleted(t *testing.T) {
 		wg.Add(2)
 		go func() { // B: holds the usage lock in onCharged, then barges with Delete
 			defer wg.Done()
-			_, _ = u.Charge(ctx, limes.ChargeRequest{Subject: other, Amount: unit}, func(context.Context, limes.Charged[struct{}]) error {
+			_, _ = u.Charge(ctx, meter.ChargeRequest{Subject: other, Amount: unit}, func(context.Context, meter.Charged[struct{}]) error {
 				close(holding)
 				<-release
 				return nil
 			})
-			_ = u.DeleteUsage(ctx, limes.DeleteUsageRequest{CapabilityID: root})
+			_ = u.DeleteUsage(ctx, meter.DeleteUsageRequest{CapabilityID: root})
 		}()
 		<-holding
 		go func() { // R: reads lineage now, parks on the usage lock
 			defer wg.Done()
-			_, _ = u.Charge(ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: child, tenant: tenant}), Amount: unit}, nil)
+			_, _ = u.Charge(ctx, meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: child, tenant: tenant}), Amount: unit}, nil)
 		}()
 		runtime.Gosched()
 		dropRecord(records, root)
 		close(release)
 		wg.Wait()
-		if _, err := u.GetUsage(ctx, root); !errors.Is(err, limes.ErrUsageNotFound) {
+		if _, err := u.GetUsage(ctx, root); !errors.Is(err, meter.ErrUsageNotFound) {
 			resurrected++
 		}
 	}
@@ -90,28 +91,28 @@ func TestReserveRacingDeleteLeavesTheAncestorDeleted(t *testing.T) {
 
 		holding, release := make(chan struct{}), make(chan struct{})
 		var wg sync.WaitGroup
-		var res limes.Reservation
+		var res meter.Reservation
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			_, _ = u.Charge(ctx, limes.ChargeRequest{Subject: other, Amount: unit}, func(context.Context, limes.Charged[struct{}]) error {
+			_, _ = u.Charge(ctx, meter.ChargeRequest{Subject: other, Amount: unit}, func(context.Context, meter.Charged[struct{}]) error {
 				close(holding)
 				<-release
 				return nil
 			})
-			_ = u.DeleteUsage(ctx, limes.DeleteUsageRequest{CapabilityID: root})
+			_ = u.DeleteUsage(ctx, meter.DeleteUsageRequest{CapabilityID: root})
 		}()
 		<-holding
 		go func() {
 			defer wg.Done()
-			res, _ = u.Reserve(ctx, limes.ReserveRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: child, tenant: tenant}), Amount: unit})
+			res, _ = u.Reserve(ctx, meter.ReserveRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: child, tenant: tenant}), Amount: unit})
 		}()
 		runtime.Gosched()
 		dropRecord(records, root)
 		close(release)
 		wg.Wait()
-		_ = u.Release(ctx, limes.ReleaseRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: child, tenant: tenant}), ReservationID: res.ID})
-		if _, err := u.GetUsage(ctx, root); !errors.Is(err, limes.ErrUsageNotFound) {
+		_ = u.Release(ctx, meter.ReleaseRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: child, tenant: tenant}), ReservationID: res.ID})
+		if _, err := u.GetUsage(ctx, root); !errors.Is(err, meter.ErrUsageNotFound) {
 			resurrected++
 		}
 	}
@@ -130,21 +131,21 @@ func TestPurgeOrphansForgetsTheAncestorInHolds(t *testing.T) {
 	records, tenant, root, child := raceTree(t)
 	u := newTestUsage(records)
 	subject := newSubject(subjectSpec{capID: child, tenant: tenant})
-	r, err := u.Reserve(ctx, limes.ReserveRequest{Subject: subject, Amount: 2 * unit})
+	r, err := u.Reserve(ctx, meter.ReserveRequest{Subject: subject, Amount: 2 * unit})
 	if err != nil {
 		t.Fatal(err)
 	}
 	dropRecord(records, root) // Store.Purge took root, child still on record
-	if got, err := u.PurgeOrphans(ctx, limes.PurgeOrphansRequest{}); err != nil || got.Purged != 1 {
+	if got, err := u.PurgeOrphans(ctx, meter.PurgeOrphansRequest{}); err != nil || got.Purged != 1 {
 		t.Fatalf("PurgeOrphans = %+v, %v", got, err)
 	}
-	if _, err := u.GetUsage(ctx, root); !errors.Is(err, limes.ErrUsageNotFound) {
+	if _, err := u.GetUsage(ctx, root); !errors.Is(err, meter.ErrUsageNotFound) {
 		t.Fatalf("root row after PurgeOrphans: %v", err)
 	}
-	if _, err := u.Settle(ctx, limes.SettleRequest{Subject: subject, ReservationID: r.ID, Amount: unit}, nil); err != nil {
+	if _, err := u.Settle(ctx, meter.SettleRequest{Subject: subject, ReservationID: r.ID, Amount: unit}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := u.GetUsage(ctx, root); !errors.Is(err, limes.ErrUsageNotFound) {
+	if got, err := u.GetUsage(ctx, root); !errors.Is(err, meter.ErrUsageNotFound) {
 		t.Errorf("root (purged, its row purged) after a descendant's Settle = %+v, %v; want ErrUsageNotFound", got, err)
 	}
 }

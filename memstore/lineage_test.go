@@ -11,6 +11,7 @@ import (
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/jwks"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // tree inserts a root with the given caveats and n children each holding
@@ -51,8 +52,8 @@ func TestChildrenCannotSpendPastTheirParentsBudget(t *testing.T) {
 		limes.Caveats{Ops: []limes.Op{limes.OpGet}, Budget: limes.BudgetCeiling{Max: limes.MustParseAmount("20"), UnitCode: "USD"}},
 	)
 
-	charge := func(id uuid.UUID, amount limes.Nanos) (limes.ChargeReceipt, error) {
-		return u.Charge(ctx, limes.ChargeRequest{
+	charge := func(id uuid.UUID, amount limes.Nanos) (meter.ChargeReceipt, error) {
+		return u.Charge(ctx, meter.ChargeRequest{
 			Subject: newSubject(subjectSpec{capID: id, tenant: tenant, budget: budgetOf(limes.MustParseAmount("20")), unit: "USD"}),
 			Amount:  amount,
 		}, nil)
@@ -77,7 +78,7 @@ func TestChildrenCannotSpendPastTheirParentsBudget(t *testing.T) {
 	}
 
 	// A refund returns spend to the parent too, re-opening room for siblings.
-	if _, err := u.Refund(ctx, limes.RefundRequest{ChargeID: first.ChargeID, Remaining: true}); err != nil {
+	if _, err := u.Refund(ctx, meter.RefundRequest{ChargeID: first.ChargeID, Remaining: true}); err != nil {
 		t.Fatalf("Refund: %v", err)
 	}
 	root, _ = u.GetUsage(ctx, rootID)
@@ -99,7 +100,7 @@ func TestChildrenCannotExceedTheirParentsRequestCount(t *testing.T) {
 		limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Max: 3}},
 	)
 	bump := func(id uuid.UUID) error {
-		_, err := u.Bump(ctx, limes.BumpRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: id, tenant: tenant, requests: requestsOf(3)})})
+		_, err := u.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: id, tenant: tenant, requests: requestsOf(3)})})
 		return err
 	}
 	for i, id := range []uuid.UUID{kids[0], kids[0], kids[1]} {

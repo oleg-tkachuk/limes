@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 	"github.com/oleg-tkachuk/limes/metertest"
 )
 
@@ -119,7 +120,7 @@ type listRecorder struct {
 	scopedWrites, strayWrites atomic.Int64
 }
 
-func (r *listRecorder) wrap(u *UsageStore[struct{}]) limes.UsageStore[struct{}] {
+func (r *listRecorder) wrap(u *UsageStore[struct{}]) meter.UsageStore[struct{}] {
 	return &recordingUsage{UsageStore: u, r: r}
 }
 
@@ -128,7 +129,7 @@ type recordingUsage struct {
 	r *listRecorder
 }
 
-func (u *recordingUsage) ListTenantBudgets(ctx context.Context, req limes.ListTenantBudgetsRequest) (limes.Page[limes.TenantBudget], error) {
+func (u *recordingUsage) ListTenantBudgets(ctx context.Context, req meter.ListTenantBudgetsRequest) (limes.Page[meter.TenantBudget], error) {
 	if ctx.Value(listScope{}) != nil {
 		u.r.inside.Add(1)
 	} else {
@@ -139,7 +140,7 @@ func (u *recordingUsage) ListTenantBudgets(ctx context.Context, req limes.ListTe
 
 // SetTenantBudget for a tenant NewTenant issued must run under that tenant's
 // TenantCtx; one for the Env's own Tenant runs under Ctx.
-func (u *recordingUsage) SetTenantBudget(ctx context.Context, req limes.SetTenantBudgetRequest) (limes.TenantBudget, error) {
+func (u *recordingUsage) SetTenantBudget(ctx context.Context, req meter.SetTenantBudgetRequest) (meter.TenantBudget, error) {
 	if _, ok := u.r.issued.Load(req.TenantID); ok {
 		if scope, _ := ctx.Value(tenantScope{}).(uuid.UUID); scope == req.TenantID {
 			u.r.scopedWrites.Add(1)

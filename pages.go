@@ -26,13 +26,6 @@ type CapabilityLister interface {
 	ListByPrincipal(ctx context.Context, req ListByPrincipalRequest) (Page[Capability], error)
 }
 
-// TenantBudgetLister lists tenant budgets a page at a time. Every
-// TenantBudgets is one.
-type TenantBudgetLister interface {
-	// ListTenantBudgets returns one page (TenantBudgets.ListTenantBudgets).
-	ListTenantBudgets(ctx context.Context, req ListTenantBudgetsRequest) (Page[TenantBudget], error)
-}
-
 // AllByPrincipal walks ListByPrincipal page by page, from req.Cursor, and
 // yields every capability in its order. req.Limit sets the page size, not how
 // many are yielded.
@@ -44,29 +37,28 @@ type TenantBudgetLister interface {
 func AllByPrincipal(ctx context.Context, l CapabilityLister, req ListByPrincipalRequest) iter.Seq2[Capability, error] {
 	return func(yield func(Capability, error) bool) {
 		page := req // each range walks from req.Cursor with a request of its own
-		walkPages(ctx, req.Cursor, func(ctx context.Context, cursor string) (Page[Capability], error) {
+		AllPages(ctx, req.Cursor, func(ctx context.Context, cursor string) (Page[Capability], error) {
 			page.Cursor = cursor
 			return l.ListByPrincipal(ctx, page)
-		}, yield)
+		})(yield)
 	}
 }
 
-// AllTenantBudgets walks ListTenantBudgets page by page, from req.Cursor, and
-// yields every row in its order, as AllByPrincipal does. Spend moves between
-// pages, so a tenant may be yielded twice or not at all; see
-// TenantBudgets.ListTenantBudgets.
-func AllTenantBudgets(ctx context.Context, l TenantBudgetLister, req ListTenantBudgetsRequest) iter.Seq2[TenantBudget, error] {
-	return func(yield func(TenantBudget, error) bool) {
-		page := req // each range walks from req.Cursor with a request of its own
-		walkPages(ctx, req.Cursor, func(ctx context.Context, cursor string) (Page[TenantBudget], error) {
-			page.Cursor = cursor
-			return l.ListTenantBudgets(ctx, page)
-		}, yield)
-	}
+// AllPages walks a paged list from cursor, fetching each page with page
+// until one returns an empty cursor, and yields every item in its order, for
+// a lister of a package other than this one; AllByPrincipal is one walk.
+//
+// An error is yielded once, with a zero T, and ends the walk; so does a
+// page handing back a cursor already fetched (ErrCursorRepeated). Breaking
+// out of the loop fetches no further page.
+func AllPages[T any](
+	ctx context.Context,
+	cursor string,
+	page func(ctx context.Context, cursor string) (Page[T], error),
+) iter.Seq2[T, error] {
+	return func(yield func(T, error) bool) { walkPages(ctx, cursor, page, yield) }
 }
 
-// walkPages fetches pages from cursor until one returns an empty cursor,
-// yielding each item, and yields the first error it meets instead.
 func walkPages[T any](
 	ctx context.Context,
 	cursor string,

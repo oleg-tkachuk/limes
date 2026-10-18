@@ -13,9 +13,10 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
-// Ledger implements limes.LedgerReader over a UsageStore's ledger.
+// Ledger implements meter.LedgerReader over a UsageStore's ledger.
 type Ledger[TX any] struct {
 	usage *UsageStore[TX]
 }
@@ -41,40 +42,40 @@ type sumPlace struct {
 	Charged limes.Nanos
 }
 
-// SumCharges implements limes.LedgerReader.
-func (l *Ledger[TX]) SumCharges(_ context.Context, req limes.SumChargesRequest) (limes.Page[limes.ChargeSum], error) {
+// SumCharges implements meter.LedgerReader.
+func (l *Ledger[TX]) SumCharges(_ context.Context, req meter.SumChargesRequest) (limes.Page[meter.ChargeSum], error) {
 	if err := req.Validate(); err != nil {
-		return limes.Page[limes.ChargeSum]{}, err
+		return limes.Page[meter.ChargeSum]{}, err
 	}
 	var after *sumPlace
 	if req.Cursor != "" {
 		p, err := decodeSumCursor(req.Cursor)
 		if err != nil {
-			return limes.Page[limes.ChargeSum]{}, err
+			return limes.Page[meter.ChargeSum]{}, err
 		}
 		after = &p
 	}
 	sums, err := l.sum(req)
 	if err != nil {
-		return limes.Page[limes.ChargeSum]{}, err
+		return limes.Page[meter.ChargeSum]{}, err
 	}
-	slices.SortFunc(sums, func(a, b limes.ChargeSum) int { return compareSums(sumPlaceOf(a), sumPlaceOf(b)) })
+	slices.SortFunc(sums, func(a, b meter.ChargeSum) int { return compareSums(sumPlaceOf(a), sumPlaceOf(b)) })
 	if after != nil {
-		sums = slices.DeleteFunc(sums, func(s limes.ChargeSum) bool { return compareSums(sumPlaceOf(s), *after) <= 0 })
+		sums = slices.DeleteFunc(sums, func(s meter.ChargeSum) bool { return compareSums(sumPlaceOf(s), *after) <= 0 })
 	}
 	limit := limes.PageLimit(req.Limit)
 	if len(sums) <= limit {
-		return limes.Page[limes.ChargeSum]{Items: sums}, nil
+		return limes.Page[meter.ChargeSum]{Items: sums}, nil
 	}
 	sums = sums[:limit]
-	return limes.Page[limes.ChargeSum]{Items: sums, Next: sumPlaceOf(sums[len(sums)-1]).encode()}, nil
+	return limes.Page[meter.ChargeSum]{Items: sums, Next: sumPlaceOf(sums[len(sums)-1]).encode()}, nil
 }
 
 // sum groups the tenant's charges in the period as req asks.
-func (l *Ledger[TX]) sum(req limes.SumChargesRequest) ([]limes.ChargeSum, error) {
+func (l *Ledger[TX]) sum(req meter.SumChargesRequest) ([]meter.ChargeSum, error) {
 	l.usage.mu.Lock()
 	defer l.usage.mu.Unlock()
-	groups := map[sumKey]*limes.ChargeSum{}
+	groups := map[sumKey]*meter.ChargeSum{}
 	for _, e := range l.usage.ledger {
 		if e.TenantID != req.TenantID || e.At.Before(req.From) || !e.At.Before(req.To) {
 			continue
@@ -91,7 +92,7 @@ func (l *Ledger[TX]) sum(req limes.SumChargesRequest) ([]limes.ChargeSum, error)
 		}
 		g, ok := groups[k]
 		if !ok {
-			g = &limes.ChargeSum{BucketStart: k.Bucket, UnitCode: k.Unit, Op: k.Op, Actor: k.Actor, CapabilityID: k.CapID}
+			g = &meter.ChargeSum{BucketStart: k.Bucket, UnitCode: k.Unit, Op: k.Op, Actor: k.Actor, CapabilityID: k.CapID}
 			groups[k] = g
 		}
 		var err error
@@ -103,7 +104,7 @@ func (l *Ledger[TX]) sum(req limes.SumChargesRequest) ([]limes.ChargeSum, error)
 		}
 		g.Charges++
 	}
-	out := make([]limes.ChargeSum, 0, len(groups))
+	out := make([]meter.ChargeSum, 0, len(groups))
 	for _, g := range groups {
 		out = append(out, *g)
 	}
@@ -116,11 +117,11 @@ func addSum(a, b limes.Nanos) (limes.Nanos, error) {
 	if s := a + b; s <= limes.MaxNanos {
 		return s, nil
 	}
-	return 0, fmt.Errorf("%w: a charge sum past %s", limes.ErrCounterOverflow, limes.MaxNanos)
+	return 0, fmt.Errorf("%w: a charge sum past %s", meter.ErrCounterOverflow, limes.MaxNanos)
 }
 
 // sumPlaceOf is s's place in SumCharges' order.
-func sumPlaceOf(s limes.ChargeSum) sumPlace {
+func sumPlaceOf(s meter.ChargeSum) sumPlace {
 	return sumPlace{Key: sumKey{Bucket: s.BucketStart, Unit: s.UnitCode, Op: s.Op, Actor: s.Actor, CapID: s.CapabilityID}, Charged: s.Charged}
 }
 
@@ -161,4 +162,4 @@ func decodeSumCursor(s string) (sumPlace, error) {
 	return p, nil
 }
 
-var _ limes.LedgerReader = (*Ledger[struct{}])(nil)
+var _ meter.LedgerReader = (*Ledger[struct{}])(nil)

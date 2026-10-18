@@ -126,7 +126,7 @@ type Store interface {
 	// would not), and among records expiring together Purge takes the
 	// deepest first. The IsRevoked walk and the Meter's lineage, which stop
 	// at the first ancestor no longer on record, therefore miss no
-	// revocation and no ceiling. Once records go, UsageHousekeeping.PurgeOrphans
+	// revocation and no ceiling. Once records go, meter.UsageHousekeeping.PurgeOrphans
 	// releases what the meter still holds for them.
 	Purge(ctx context.Context, req PurgeRequest) (PurgeResult, error)
 
@@ -138,7 +138,7 @@ type Store interface {
 }
 
 // ErrNotFound is the family of every not-found error: Store.GetRecord returns
-// it, and the meter's not-found sentinels (ErrUsageNotFound and the others)
+// it, and the meter's not-found sentinels (meter.ErrUsageNotFound and the others)
 // match it under errors.Is. It lives in the core package rather than in a
 // store implementation so that any consumer — in-memory, relational, or
 // otherwise — can satisfy the Store contract using only what this package
@@ -226,7 +226,7 @@ func (r RevokeRequest) Validate() error {
 }
 
 // DefaultHousekeepingLimit is how many rows one housekeeping batch —
-// Store.Purge, UsageHousekeeping.ReleaseExpired or PurgeOrphans — handles
+// Store.Purge, meter.UsageHousekeeping.ReleaseExpired or PurgeOrphans — handles
 // when the request names no limit.
 const DefaultHousekeepingLimit = 1_000
 

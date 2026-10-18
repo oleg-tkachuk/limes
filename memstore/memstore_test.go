@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // Behavioural coverage for the reference store (T042). These are the store
@@ -119,12 +120,12 @@ func TestBumpRequestRejectsWithoutMutating(t *testing.T) {
 	id := uuid.New()
 
 	for i := int64(1); i <= 2; i++ {
-		r, err := u.Bump(ctx, limes.BumpRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: id, tenant: testTenant, requests: requestsOf(2)})})
+		r, err := u.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: id, tenant: testTenant, requests: requestsOf(2)})})
 		if err != nil || r.RequestCount != i {
 			t.Fatalf("bump %d: n=%d err=%v", i, r.RequestCount, err)
 		}
 	}
-	n, err := u.Bump(ctx, limes.BumpRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: id, tenant: testTenant, requests: requestsOf(2)})})
+	n, err := u.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: id, tenant: testTenant, requests: requestsOf(2)})})
 	if !errors.Is(err, limes.ErrRequestLimitExceeded) {
 		t.Fatalf("want ErrRequestLimitExceeded, got %v", err)
 	}
@@ -143,7 +144,7 @@ func TestBumpRequestUnlimited(t *testing.T) {
 	u := newTestUsage(newTestStore())
 	id := uuid.New()
 	for i := range 50 {
-		if _, err := u.Bump(ctx, limes.BumpRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: id, tenant: testTenant})}); err != nil {
+		if _, err := u.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: id, tenant: testTenant})}); err != nil {
 			t.Fatalf("unlimited bump %d: %v", i, err)
 		}
 	}
@@ -154,7 +155,7 @@ func TestBumpRequestUnlimited(t *testing.T) {
 func TestSetTenantBudgetAssumesNoUnit(t *testing.T) {
 	ctx := context.Background()
 	u := newTestUsage(newTestStore())
-	b, err := u.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
+	b, err := u.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{
 		TenantID: uuid.New(), Ceiling: limes.BudgetCeiling{},
 	})
 	if err != nil {
@@ -163,7 +164,7 @@ func TestSetTenantBudgetAssumesNoUnit(t *testing.T) {
 	if b.Ceiling.UnitCode != "" {
 		t.Errorf("UnitCode = %q, want none", b.Ceiling.UnitCode)
 	}
-	if _, err := u.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
+	if _, err := u.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{
 		TenantID: uuid.New(), Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("10")},
 	}); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("a ceiling of 10 in no unit: err = %v, want ErrInvalidRequest", err)
@@ -174,8 +175,8 @@ func TestRefundReturnsSpendToEveryCounterOnce(t *testing.T) {
 	ctx := context.Background()
 	u := newTestUsage(newTestStore())
 	id, tenant := uuid.New(), uuid.New()
-	_, _ = u.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("100")}})
-	receipt, err := u.Charge(ctx, limes.ChargeRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: id, tenant: tenant, budget: budgetOf(limes.MustParseAmount("100")), unit: "USD"}), Amount: limes.MustParseAmount("5")}, nil)
+	_, _ = u.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("100")}})
+	receipt, err := u.Charge(ctx, meter.ChargeRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: id, tenant: tenant, budget: budgetOf(limes.MustParseAmount("100")), unit: "USD"}), Amount: limes.MustParseAmount("5")}, nil)
 	if err != nil {
 		t.Fatalf("Charge: %v", err)
 	}
@@ -183,19 +184,19 @@ func TestRefundReturnsSpendToEveryCounterOnce(t *testing.T) {
 	// A partial refund, then a refund of "the rest": the second must return
 	// exactly what the first left, and a third must return nothing — a
 	// retried full refund is a no-op, not a second credit.
-	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("2")}); err != nil || got.Amount != 2*unit {
+	if got, err := u.Refund(ctx, meter.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("2")}); err != nil || got.Amount != 2*unit {
 		t.Fatalf("partial refund = %v, %v; want 2, nil", got, err)
 	}
-	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Remaining: true}); err != nil || got.Amount != 3*unit {
+	if got, err := u.Refund(ctx, meter.RefundRequest{ChargeID: receipt.ChargeID, Remaining: true}); err != nil || got.Amount != 3*unit {
 		t.Fatalf("remainder refund = %v, %v; want 3, nil", got, err)
 	}
-	if got, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Remaining: true}); err != nil || got.Amount != 0 {
+	if got, err := u.Refund(ctx, meter.RefundRequest{ChargeID: receipt.ChargeID, Remaining: true}); err != nil || got.Amount != 0 {
 		t.Fatalf("repeated full refund = %v, %v; want 0, nil", got, err)
 	}
-	if _, err := u.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("1")}); !errors.Is(err, limes.ErrRefundExceedsCharge) {
+	if _, err := u.Refund(ctx, meter.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("1")}); !errors.Is(err, meter.ErrRefundExceedsCharge) {
 		t.Fatalf("over-refund err = %v, want ErrRefundExceedsCharge", err)
 	}
-	if _, err := u.Refund(ctx, limes.RefundRequest{ChargeID: uuid.New(), Remaining: true}); !errors.Is(err, limes.ErrChargeNotFound) {
+	if _, err := u.Refund(ctx, meter.RefundRequest{ChargeID: uuid.New(), Remaining: true}); !errors.Is(err, meter.ErrChargeNotFound) {
 		t.Fatalf("unknown charge err = %v, want ErrChargeNotFound", err)
 	}
 
@@ -213,7 +214,7 @@ func TestChargeRejectsInvalidAmounts(t *testing.T) {
 	ctx := context.Background()
 	u := newTestUsage(newTestStore())
 	for _, amt := range []limes.Nanos{-1, limes.MaxNanos + 1} {
-		_, err := u.Charge(ctx, limes.ChargeRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: uuid.New(), tenant: uuid.New()}), Amount: amt}, nil)
+		_, err := u.Charge(ctx, meter.ChargeRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: uuid.New(), tenant: uuid.New()}), Amount: amt}, nil)
 		if !errors.Is(err, limes.ErrInvalidAmount) {
 			t.Errorf("Charge(%v) err = %v, want ErrInvalidAmount", amt, err)
 		}
@@ -274,21 +275,21 @@ func TestPurgeOrphansReleasesHolds(t *testing.T) {
 	u := newTestUsage(records)
 	tenant, gone := uuid.New(), uuid.New() // held while on record, then purged
 	const held = 3 * limes.NanosPerUnit
-	res, err := u.Reserve(ctx, limes.ReserveRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: gone, tenant: tenant}), Amount: held})
+	res, err := u.Reserve(ctx, meter.ReserveRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: gone, tenant: tenant}), Amount: held})
 	if err != nil {
 		t.Fatal(err)
 	}
 	dropRecord(records, gone)
-	if r, err := u.PurgeOrphans(ctx, limes.PurgeOrphansRequest{}); err != nil || r.Purged != 1 {
+	if r, err := u.PurgeOrphans(ctx, meter.PurgeOrphansRequest{}); err != nil || r.Purged != 1 {
 		t.Fatalf("PurgeOrphans = %+v, %v; want the one orphan row", r, err)
 	}
-	if _, err := u.GetReservation(ctx, res.ID); !errors.Is(err, limes.ErrReservationNotFound) {
+	if _, err := u.GetReservation(ctx, res.ID); !errors.Is(err, meter.ErrReservationNotFound) {
 		t.Errorf("the orphan's hold: err = %v, want ErrReservationNotFound", err)
 	}
 	if b, err := u.GetTenantBudget(ctx, tenant); err != nil || b.ReservedAmount != 0 {
 		t.Errorf("tenant after the purge = %+v, %v; want nothing held", b, err)
 	}
-	if _, err := u.GetUsage(ctx, gone); !errors.Is(err, limes.ErrUsageNotFound) {
+	if _, err := u.GetUsage(ctx, gone); !errors.Is(err, meter.ErrUsageNotFound) {
 		t.Errorf("the orphan's usage row: err = %v, want ErrUsageNotFound", err)
 	}
 }

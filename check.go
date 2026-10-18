@@ -61,7 +61,7 @@ func (req CheckRequest) Mutating() (bool, error) {
 //
 // The source-IP caveat is per connection rather than per operation, so it is
 // checked separately by CheckSource. Budget and request-count caveats are
-// stateful and enforced by the UsageStore.
+// stateful and enforced by the meter (package meter).
 func (c Caveats) Check(req CheckRequest) error {
 	mutating, err := req.Mutating()
 	if err != nil {

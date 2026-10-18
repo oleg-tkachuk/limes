@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // A tenant budget cursor holds the last row's spend and ceiling exactly, and
@@ -81,8 +82,8 @@ func TestAtOrPastIsExact(t *testing.T) {
 		{29 * unit, 100 * unit, 2900, true},
 		{29*unit - 1, 100 * unit, 2900, false},
 		{1, 3, 3333, true},
-		{limes.MaxNanos, limes.MaxNanos, limes.BasisPointsPerWhole, true},
-		{limes.MaxNanos - 1, limes.MaxNanos, limes.BasisPointsPerWhole, false},
+		{limes.MaxNanos, limes.MaxNanos, meter.BasisPointsPerWhole, true},
+		{limes.MaxNanos - 1, limes.MaxNanos, meter.BasisPointsPerWhole, false},
 	} {
 		if got := atOrPast(tc.spent, tc.ceiling, tc.basisPoints); got != tc.want {
 			t.Errorf("atOrPast(%s, %s, %d) = %v, want %v", tc.spent, tc.ceiling, tc.basisPoints, got, tc.want)

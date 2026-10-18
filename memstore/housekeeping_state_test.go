@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // A usage store with no records to read lineage from is refused: no
@@ -31,17 +32,17 @@ func TestDeleteIsNotUndoneByADescendantsHold(t *testing.T) {
 	}
 	u := newTestUsage(records)
 	subject := recordedSubject(ctx, t, u, subjectSpec{capID: child, tenant: tenant})
-	r, err := u.Reserve(ctx, limes.ReserveRequest{Subject: subject, Amount: unit})
+	r, err := u.Reserve(ctx, meter.ReserveRequest{Subject: subject, Amount: unit})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := u.DeleteUsage(ctx, limes.DeleteUsageRequest{CapabilityID: root}); err != nil {
+	if err := u.DeleteUsage(ctx, meter.DeleteUsageRequest{CapabilityID: root}); err != nil {
 		t.Fatal(err)
 	}
-	if err := u.Release(ctx, limes.ReleaseRequest{Subject: subject, ReservationID: r.ID}); err != nil {
+	if err := u.Release(ctx, meter.ReleaseRequest{Subject: subject, ReservationID: r.ID}); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := u.GetUsage(ctx, root); !errors.Is(err, limes.ErrUsageNotFound) {
+	if got, err := u.GetUsage(ctx, root); !errors.Is(err, meter.ErrUsageNotFound) {
 		t.Errorf("the deleted root after its child's hold was released = %+v, %v; want ErrUsageNotFound", got, err)
 	}
 }

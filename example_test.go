@@ -15,6 +15,7 @@ import (
 	"github.com/oleg-tkachuk/limes/dpop"
 	"github.com/oleg-tkachuk/limes/jwks"
 	"github.com/oleg-tkachuk/limes/memstore"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // The issuer's name, and the audience every example's tokens are minted for.
@@ -331,8 +332,8 @@ func Example_charge() {
 	// The ceilings come from what the verifier accepted, never from the caller.
 	subject := s.verified(token).MeterSubject()
 
-	charge := func(amount string) (limes.ChargeReceipt, error) {
-		return s.usage.Charge(ctx, limes.ChargeRequest{
+	charge := func(amount string) (meter.ChargeReceipt, error) {
+		return s.usage.Charge(ctx, meter.ChargeRequest{
 			Subject: subject, Amount: limes.MustParseAmount(amount), Op: "search",
 		}, nil)
 	}
@@ -344,7 +345,7 @@ func Example_charge() {
 	_, err = charge("999")
 	fmt.Println(errors.Is(err, limes.ErrBudgetExceeded))
 
-	refund, err := s.usage.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Remaining: true})
+	refund, err := s.usage.Refund(ctx, meter.RefundRequest{ChargeID: receipt.ChargeID, Remaining: true})
 	fmt.Println(err, refund.Amount)
 	// Output:
 	// <nil> 0.35
@@ -389,13 +390,13 @@ func Example_backdatedCharges() {
 	}
 	for _, day := range []int{0, 1, 8} { // Monday, Tuesday, and Tuesday a week on
 		at = start.AddDate(0, 0, day)
-		if _, err := usage.Charge(ctx, limes.ChargeRequest{Subject: subject, Amount: limes.MustParseAmount("1.5")}, nil); err != nil {
+		if _, err := usage.Charge(ctx, meter.ChargeRequest{Subject: subject, Amount: limes.MustParseAmount("1.5")}, nil); err != nil {
 			log.Fatal(err)
 		}
 	}
 
-	page, err := ledger.SumCharges(ctx, limes.SumChargesRequest{
-		TenantID: c.Subject.TenantID, From: start, To: start.Add(period), Bucket: limes.ChargeBucketWeek,
+	page, err := ledger.SumCharges(ctx, meter.SumChargesRequest{
+		TenantID: c.Subject.TenantID, From: start, To: start.Add(period), Bucket: meter.ChargeBucketWeek,
 	})
 	if err != nil {
 		log.Fatal(err)

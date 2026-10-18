@@ -33,9 +33,9 @@ import (
 //	├── ErrInvalidCaveats, ErrInvalidAmount, ErrEffectConflict
 //	└── ErrMalformedAuthorization  the client's Authorization header (400)
 //	ErrNotFound              what the request names is not on record
-//	└── ErrChargeNotFound, ErrReservationNotFound, ErrUsageNotFound, …
+//	└── meter.ErrChargeNotFound, meter.ErrUsageNotFound, …
 //	ErrConflict              a well-formed request disagrees with what is on record
-//	└── ErrAlreadyExists, ErrExternalRefConflict, ErrTenantBudgetVersionMismatch
+//	└── ErrAlreadyExists, meter.ErrExternalRefConflict, …
 var (
 	// ErrUnauthenticated is the family of every refusal of the presented
 	// credentials, token or proof: the one errors.Is a consumer needs to
@@ -66,7 +66,25 @@ var (
 	ErrAudienceMismatch  error = &familyError{"limes: audience mismatch", ErrUnauthenticated}
 	ErrCaveatViolation         = errors.New("limes: caveat violation")
 	ErrBudgetExceeded          = errors.New("limes: budget exceeded")
-	ErrDelegationTooWide       = errors.New("limes: child wider than parent")
+
+	// ErrInvalidAmount — an amount that is negative or above MaxNanos, or a
+	// decimal that is not one (ParseAmount). Refunds are explicit; a
+	// negative charge is not one. A malformed request, so it matches
+	// ErrInvalidRequest.
+	ErrInvalidAmount error = &familyError{"limes: invalid amount", ErrInvalidRequest}
+
+	// ErrRequestLimitExceeded — the capability, a Biscuit copy or an
+	// ancestor used every request its ceiling allows; the next was blocked.
+	ErrRequestLimitExceeded = errors.New("limes: request limit exceeded")
+
+	// ErrTenantBudgetExceeded — the tenant aggregate cap has been
+	// hit. Distinct from ErrBudgetExceeded because the remedy differs:
+	// an operator raises a tenant's ceiling with SetTenantBudget, while a
+	// capability's ceiling is in its token and lifting it means issuing a
+	// new one.
+	ErrTenantBudgetExceeded = errors.New("limes: tenant aggregate budget exceeded")
+
+	ErrDelegationTooWide = errors.New("limes: child wider than parent")
 	// ErrUnitCodeMismatch — two units that would have to be one: a
 	// delegated child declaring a unit_code other than its parent's, or an
 	// amount in a unit other than the one a counter (a capability's, an
@@ -313,16 +331,6 @@ func (c CopyCeiling) AdmitsRequests(n int64) bool { return c.Requests == nil || 
 // its own budget; with none of its own, any amount does.
 func (c CopyCeiling) AdmitsBudget(amount Nanos) bool {
 	return c.Budget == nil || c.Budget.Admits(amount)
-}
-
-// HeldCopy is a Biscuit copy a hold is on: a hold counts no requests, so it
-// carries the copy's budget alone.
-type HeldCopy struct {
-	// RevocationID is the copy's revocation id.
-	RevocationID []byte
-	// Budget is the copy's own budget the hold counts against; nil when the
-	// copy has none of its own.
-	Budget *BudgetCeiling
 }
 
 // Caveats is a typed bag of restrictions, AND-combined. Ops is required; an

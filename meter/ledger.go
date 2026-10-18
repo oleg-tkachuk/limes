@@ -1,4 +1,4 @@
-package limes
+package meter
 
 import (
 	"context"
@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/oleg-tkachuk/limes"
 )
 
 // LedgerReader sums a tenant's charges ledger over a period, for billing and
@@ -24,7 +26,7 @@ type LedgerReader interface {
 	// rows is the top Limit; buckets come in time order. A refund counts in
 	// the group of the charge it returns, whenever it is made: a closed
 	// period's sums still move. A sum past MaxNanos is ErrCounterOverflow.
-	SumCharges(ctx context.Context, req SumChargesRequest) (Page[ChargeSum], error)
+	SumCharges(ctx context.Context, req SumChargesRequest) (limes.Page[ChargeSum], error)
 }
 
 // SumChargesRequest asks for one page of a tenant's charge sums.
@@ -70,14 +72,14 @@ type ChargeSum struct {
 	// period sums only the charges within it.
 	BucketStart time.Time
 	UnitCode    string
-	Op          Op
+	Op          limes.Op
 	Actor       string
 	// CapabilityID is the capability charged.
 	CapabilityID uuid.UUID
 	// Charged is what the group's charges took; Refunded, what has been
 	// returned from them since. Charged less Refunded is the net.
-	Charged  Nanos
-	Refunded Nanos
+	Charged  limes.Nanos
+	Refunded limes.Nanos
 	// Charges counts the group's charges.
 	Charges int64
 	_       noCompare

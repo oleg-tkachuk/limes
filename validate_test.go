@@ -3,13 +3,10 @@ package limes
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-
-	"github.com/oleg-tkachuk/limes/internal/link"
 )
 
 // ─── validation ────────────────────────────────────────────────────────────
@@ -301,58 +298,6 @@ func TestInsertRequestValidate(t *testing.T) {
 		}
 		if !tc.ok && !errors.Is(err, ErrInvalidRequest) {
 			t.Errorf("an insert with %s: err = %v, want ErrInvalidRequest", name, err)
-		}
-	}
-}
-
-// The meter's requests refuse what every store would refuse, so a store
-// calling Validate enforces a rule added later without a change of its own.
-func TestMeterRequestsValidate(t *testing.T) {
-	subject := link.NewMeterSubject(link.MeterSubjectFields{
-		CapabilityID: uuid.New(), TenantID: uuid.New(), Budget: BudgetCeiling{UnitCode: "EUR"},
-	}).(MeterSubject)
-	noTenant := link.NewMeterSubject(link.MeterSubjectFields{CapabilityID: uuid.New()}).(MeterSubject)
-	badUnit := link.NewMeterSubject(link.MeterSubjectFields{
-		CapabilityID: uuid.New(), TenantID: uuid.New(), Budget: BudgetCeiling{UnitCode: "euro"},
-	}).(MeterSubject)
-	const one = Nanos(1)
-	longRef := strings.Repeat("r", MaxExternalRefBytes+1)
-
-	for name, tc := range map[string]struct {
-		req   interface{ Validate() error }
-		valid bool
-	}{
-		"bump":                    {BumpRequest{Subject: subject}, true},
-		"bump, no subject":        {BumpRequest{}, false},
-		"bump, no tenant":         {BumpRequest{Subject: noTenant}, false},
-		"bump, unknown unit":      {BumpRequest{Subject: badUnit}, false},
-		"charge":                  {ChargeRequest{Subject: subject, Amount: one, ExternalRef: "call-1", Overrun: OverrunPolicyRecord}, true},
-		"charge of nothing":       {ChargeRequest{Subject: subject}, true},
-		"charge, negative":        {ChargeRequest{Subject: subject, Amount: -one}, false},
-		"charge, past MaxNanos":   {ChargeRequest{Subject: subject, Amount: MaxNanos + 1}, false},
-		"charge, unknown overrun": {ChargeRequest{Subject: subject, Amount: one, Overrun: OverrunPolicyRecord + 1}, false},
-		"charge, ref too long":    {ChargeRequest{Subject: subject, Amount: one, ExternalRef: longRef}, false},
-		"charge, no subject":      {ChargeRequest{Amount: one}, false},
-		"reserve":                 {ReserveRequest{Subject: subject, Amount: one, TTL: time.Minute}, true},
-		"reserve, default TTL":    {ReserveRequest{Subject: subject, Amount: one}, true},
-		"reserve, negative TTL":   {ReserveRequest{Subject: subject, Amount: one, TTL: -time.Second}, false},
-		"reserve, negative":       {ReserveRequest{Subject: subject, Amount: -one}, false},
-		"reserve, no subject":     {ReserveRequest{Amount: one}, false},
-		"settle":                  {SettleRequest{Subject: subject, ReservationID: uuid.New(), Amount: one}, true},
-		"settle, no reservation":  {SettleRequest{Subject: subject, Amount: one}, true},
-		"settle, negative":        {SettleRequest{Subject: subject, ReservationID: uuid.New(), Amount: -one}, false},
-		"settle, unknown overrun": {SettleRequest{Subject: subject, ReservationID: uuid.New(), Overrun: OverrunPolicyRecord + 1}, false},
-		"settle, no subject":      {SettleRequest{ReservationID: uuid.New(), Amount: one}, false},
-		"release":                 {ReleaseRequest{Subject: subject, ReservationID: uuid.New()}, true},
-		"release, no subject":     {ReleaseRequest{ReservationID: uuid.New()}, false},
-		"release, unknown unit":   {ReleaseRequest{Subject: badUnit, ReservationID: uuid.New()}, false},
-	} {
-		err := tc.req.Validate()
-		if tc.valid && err != nil {
-			t.Errorf("%s: refused: %v", name, err)
-		}
-		if !tc.valid && !errors.Is(err, ErrInvalidRequest) {
-			t.Errorf("%s: err = %v, want ErrInvalidRequest", name, err)
 		}
 	}
 }

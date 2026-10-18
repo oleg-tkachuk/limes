@@ -1,4 +1,4 @@
-package limes
+package meter
 
 import (
 	"errors"
@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/oleg-tkachuk/limes"
 )
 
 // Every bucket this module defines has a name of its own and starts where
@@ -50,7 +52,7 @@ func TestChargeBucketStart(t *testing.T) {
 	if int(b) != len(want) {
 		t.Errorf("the module defines %d buckets, the test names %d", b, len(want))
 	}
-	if !errors.Is(b.Validate(), ErrInvalidRequest) {
+	if !errors.Is(b.Validate(), limes.ErrInvalidRequest) {
 		t.Errorf("%s.Validate() = %v, want ErrInvalidRequest", b, b.Validate())
 	}
 }
@@ -93,7 +95,7 @@ func TestSumChargesRequestValidate(t *testing.T) {
 	} {
 		r := ok
 		change(&r)
-		if err := r.Validate(); !errors.Is(err, ErrInvalidRequest) {
+		if err := r.Validate(); !errors.Is(err, limes.ErrInvalidRequest) {
 			t.Errorf("%s: Validate() = %v, want ErrInvalidRequest", name, err)
 		}
 	}

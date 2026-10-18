@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // fakeTx is a transaction handle the store threads to onCharged.
@@ -22,10 +23,10 @@ func TestTxFactoryThreadsTheHandle(t *testing.T) {
 	}
 	var got *fakeTx
 	ctx := t.Context()
-	if _, err := u.Charge(ctx, limes.ChargeRequest{
+	if _, err := u.Charge(ctx, meter.ChargeRequest{
 		Subject: recordedSubject(ctx, t, u, subjectSpec{capID: uuid.New(), tenant: uuid.New()}),
 		Amount:  limes.MustParseAmount("1"),
-	}, func(_ context.Context, c limes.Charged[*fakeTx]) error { got = c.Tx; return nil }); err != nil {
+	}, func(_ context.Context, c meter.Charged[*fakeTx]) error { got = c.Tx; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if got == nil || got.id != handleID {

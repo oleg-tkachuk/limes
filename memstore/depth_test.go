@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // A capability deeper than MaxDelegationDepth is metered against no partial
@@ -27,13 +28,13 @@ func TestMeteringRefusesAChainPastMaxDelegationDepth(t *testing.T) {
 	}
 	u := newTestUsage(records)
 	subject := newSubject(subjectSpec{capID: parent, tenant: tenant})
-	if _, err := u.Bump(ctx, limes.BumpRequest{Subject: subject}); !errors.Is(err, limes.ErrDelegationTooDeep) {
+	if _, err := u.Bump(ctx, meter.BumpRequest{Subject: subject}); !errors.Is(err, limes.ErrDelegationTooDeep) {
 		t.Errorf("Bump: err = %v, want ErrDelegationTooDeep", err)
 	}
-	if _, err := u.Charge(ctx, limes.ChargeRequest{Subject: subject, Amount: unit}, nil); !errors.Is(err, limes.ErrDelegationTooDeep) {
+	if _, err := u.Charge(ctx, meter.ChargeRequest{Subject: subject, Amount: unit}, nil); !errors.Is(err, limes.ErrDelegationTooDeep) {
 		t.Errorf("Charge: err = %v, want ErrDelegationTooDeep", err)
 	}
-	if _, err := u.Reserve(ctx, limes.ReserveRequest{Subject: subject, Amount: unit}); !errors.Is(err, limes.ErrDelegationTooDeep) {
+	if _, err := u.Reserve(ctx, meter.ReserveRequest{Subject: subject, Amount: unit}); !errors.Is(err, limes.ErrDelegationTooDeep) {
 		t.Errorf("Reserve: err = %v, want ErrDelegationTooDeep", err)
 	}
 	if revoked, err := records.IsRevoked(ctx, parent); !errors.Is(err, limes.ErrDelegationTooDeep) {
