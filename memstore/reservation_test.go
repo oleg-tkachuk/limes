@@ -75,7 +75,7 @@ func TestSettleChargesTheActualCostAndReleasesTheHold(t *testing.T) {
 	if l := u.committedLedger(); len(l) != 1 || l[0].Op != "llm" || l[0].Actor != "agent" {
 		t.Errorf("ledger = %+v, want one charge carrying the reservation's op and actor", l)
 	}
-	again, err := u.Settle(ctx, limes.SettleRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("10"))}), ReservationID: r.ID, Amount: limes.MustParseAmount("1")}, nil)
+	again, err := u.Settle(ctx, limes.SettleRequest{Subject: recordedSubject(ctx, t, u, subjectSpec{capID: capID, tenant: tenant, budget: budgetOf(limes.MustParseAmount("10"))}), ReservationID: r.ID, Amount: limes.MustParseAmount("3")}, nil)
 	if err != nil || !again.Replayed || again.ChargeID != receipt.ChargeID {
 		t.Errorf("second settle = %+v, %v; want a replay of charge %s", again, err, receipt.ChargeID)
 	}

@@ -800,7 +800,8 @@ func checkSettle[TX any](t *testing.T, f fixture[TX]) {
 	if u, err := f.Usage.GetUsage(f.Ctx, f.root); err != nil || u.ReservedAmount != 0 {
 		t.Errorf("root after settling = %+v, %v; want nothing held", u, err)
 	}
-	again, err := settle(one, limes.OverrunPolicyReject)
+	// Replayed for the same amount, under any policy: the first receipt.
+	again, err := settle(24*one, limes.OverrunPolicyReject)
 	if err != nil || !again.Replayed || !again.Overrun || again.ChargeID != r.ChargeID || again.SpentAmount != 24*one {
 		t.Errorf("settling again = %+v, %v; want a replay of %s", again, err, r.ChargeID)
 	}
@@ -1146,7 +1147,7 @@ func checkHoldCreatesTenant[TX any](t *testing.T, f fixture[TX]) {
 
 // checkSettleReplay holds a store to a settle replayed: the same receipt,
 // and onCharged not run again, so a side effect committed with the first is
-// not committed twice.
+// not committed twice; for another amount, a conflict.
 func checkSettleReplay[TX any](t *testing.T, f fixture[TX]) {
 	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: 2 * one, Op: "llm", Actor: "agent"})
 	if err != nil {
@@ -1164,6 +1165,16 @@ func checkSettleReplay[TX any](t *testing.T, f fixture[TX]) {
 	}
 	if ran {
 		t.Error("a replayed settle ran onCharged again")
+	}
+	// The reservation names one cost: settling it again for another amount
+	// is a conflict, not the first receipt, and moves nothing.
+	other := req
+	other.Amount = 2 * one
+	if _, err := f.Usage.Settle(f.Ctx, other, func(context.Context, limes.Charged[TX]) error { ran = true; return nil }); !errors.Is(err, limes.ErrSettleConflict) || !errors.Is(err, limes.ErrConflict) {
+		t.Errorf("a settle replayed for another amount: err = %v, want ErrSettleConflict, matching ErrConflict", err)
+	}
+	if ran || f.spent(t, f.child) != one {
+		t.Errorf("a settle replayed for another amount ran onCharged or moved spend to %v; want %v", f.spent(t, f.child), one)
 	}
 	charge, err := f.Usage.GetCharge(f.Ctx, first.ChargeID)
 	if err != nil || charge.Op != "llm" || charge.Actor != "agent" {

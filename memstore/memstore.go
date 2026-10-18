@@ -1182,6 +1182,9 @@ func (s *UsageStore[TX]) Settle(
 		// other copies, is none of this one's: its receipt is not this
 		// subject's to read back either.
 		if e, settled := entryLocked(s, s.byReservation, req.ReservationID); settled && e.CapabilityID == subject && e.TenantID == req.Subject.TenantID() && sameCopyIDs(e.Copies, req.Subject.Copies()) {
+			if e.Amount != req.Amount {
+				return limes.ChargeReceipt{}, fmt.Errorf("%w: %s", limes.ErrSettleConflict, req.ReservationID)
+			}
 			return s.replayLocked(e), nil
 		}
 	}
