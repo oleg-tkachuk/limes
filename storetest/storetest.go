@@ -771,6 +771,10 @@ func checkBiscuit(t *testing.T, f fixture) {
 	live := f.live(t, "agent:biscuit", uuid.Nil)
 	expired := f.insert(t, f.newCapability("agent:biscuit-old", uuid.Nil, f.now.Add(-expiredAgo)))
 	copyID, oldCopyID, otherID := []byte("copy"), []byte("old-copy"), []byte("other")
+	// sharedID is one revocation id carried by chains of both capabilities:
+	// a Biscuit block's signature does not cover the block before it, so a
+	// holder of two Biscuits can graft one's block onto the other.
+	sharedID := []byte("grafted-copy")
 	revoke := func(capID uuid.UUID, id []byte) error {
 		return store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(capID, id), Note: "test", Actor: "storetest"})
 	}
@@ -807,22 +811,44 @@ func checkBiscuit(t *testing.T, f fixture) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := store.GetBiscuitRevocation(f.Ctx, copyID)
+	got, err := store.GetBiscuitRevocation(f.Ctx, biscuitCopy(live.ID, copyID))
 	if err != nil || got.CapabilityID != live.ID || !bytes.Equal(got.RevocationID, copyID) ||
 		got.Note != "test" || got.Actor != "storetest" || got.RevokedAt.IsZero() {
 		t.Errorf("GetBiscuitRevocation = %+v, %v; want the first revoke of %s", got, err, live.ID)
 	}
-	if _, err := store.GetBiscuitRevocation(f.Ctx, otherID); !errors.Is(err, limes.ErrNotFound) {
+	if _, err := store.GetBiscuitRevocation(f.Ctx, biscuitCopy(live.ID, otherID)); !errors.Is(err, limes.ErrNotFound) {
 		t.Errorf("GetBiscuitRevocation of an id never revoked: err = %v, want ErrNotFound", err)
+	}
+	if _, err := store.GetBiscuitRevocation(f.Ctx, limes.BiscuitCopy{}); !errors.Is(err, limes.ErrInvalidRequest) {
+		t.Errorf("GetBiscuitRevocation naming no copy: err = %v, want ErrInvalidRequest", err)
 	}
 	if err := revoke(expired.ID, oldCopyID); err != nil {
 		t.Fatal(err)
+	}
+	// The grafted copy is revoked under the expired capability first; the
+	// live capability's own revocation of the id is still its own.
+	if err := revoke(expired.ID, sharedID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{
+		Copy: biscuitCopy(live.ID, sharedID), Note: "live", Actor: "operator",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := store.GetBiscuitRevocation(f.Ctx, biscuitCopy(live.ID, sharedID)); err != nil || got.CapabilityID != live.ID || got.Note != "live" {
+		t.Errorf("GetBiscuitRevocation of the live capability's copy = %+v, %v; want its own revocation, not the expired one's", got, err)
 	}
 	if got, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace}); err != nil || got.Purged != 1 {
 		t.Fatalf("Purge = %+v, %v; want the expired capability's record", got, err)
 	}
 	if isRevoked(oldCopyID) || !isRevoked(copyID) {
 		t.Error("Purge must drop the expired capability's copy and keep the live one's")
+	}
+	if !isRevoked(sharedID) {
+		t.Error("Purge of one capability must keep another capability's revocation of the same id")
+	}
+	if _, err := store.GetBiscuitRevocation(f.Ctx, biscuitCopy(expired.ID, sharedID)); !errors.Is(err, limes.ErrNotFound) {
+		t.Errorf("GetBiscuitRevocation of the purged capability's copy: err = %v, want ErrNotFound", err)
 	}
 }
 
@@ -1038,12 +1064,12 @@ func checkRecordIsItsOwn(t *testing.T, f fixture) {
 	if err := store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(issued.ID, copyID)}); err != nil {
 		t.Fatal(err)
 	}
-	rev, err := store.GetBiscuitRevocation(f.Ctx, copyID)
+	rev, err := store.GetBiscuitRevocation(f.Ctx, biscuitCopy(issued.ID, copyID))
 	if err != nil {
 		t.Fatal(err)
 	}
 	rev.RevocationID[0] = 'X'
-	if again, err := store.GetBiscuitRevocation(f.Ctx, copyID); err != nil || !bytes.Equal(again.RevocationID, copyID) {
+	if again, err := store.GetBiscuitRevocation(f.Ctx, biscuitCopy(issued.ID, copyID)); err != nil || !bytes.Equal(again.RevocationID, copyID) {
 		t.Errorf("a Biscuit revocation after changing one read = %q, %v; want %q", again.RevocationID, err, copyID)
 	}
 }
@@ -1137,7 +1163,7 @@ func checkReadOnlyScope(t *testing.T, f fixture) {
 		t.Errorf("an expired record after a refused Purge: %v", err)
 	}
 	if withBiscuits {
-		if _, err := biscuits.GetBiscuitRevocation(f.Ctx, copyID); !errors.Is(err, limes.ErrNotFound) {
+		if _, err := biscuits.GetBiscuitRevocation(f.Ctx, biscuitCopy(live.ID, copyID)); !errors.Is(err, limes.ErrNotFound) {
 			t.Errorf("GetBiscuitRevocation after a refused RevokeBiscuit: err = %v, want ErrNotFound", err)
 		}
 	}
@@ -1208,7 +1234,7 @@ func checkEraseTenant(t *testing.T, f fixture) {
 		if copyRevoked, err := biscuits.IsBiscuitRevoked(f.Ctx, [][]byte{copyID}); err != nil || !copyRevoked {
 			t.Errorf("IsBiscuitRevoked of a live child's copy after the erase = %v, %v; want revoked", copyRevoked, err)
 		}
-		if r, err := biscuits.GetBiscuitRevocation(f.Ctx, expiredCopyID); !errors.Is(err, limes.ErrNotFound) {
+		if r, err := biscuits.GetBiscuitRevocation(f.Ctx, biscuitCopy(expired.ID, expiredCopyID)); !errors.Is(err, limes.ErrNotFound) {
 			t.Errorf("GetBiscuitRevocation of a removed record's copy = %+v, %v; want ErrNotFound, gone with its record", r, err)
 		}
 	}

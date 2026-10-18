@@ -14,6 +14,17 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.93.0
+
+- A Biscuit copy is counted, and its revocation kept, under its capability
+  and revocation id together: a block's id alone can turn up on another
+  capability's chain. `CopyUsageRequest` takes a `CapabilityID`, which
+  `Validate` requires; `BiscuitRevocationStore.GetBiscuitRevocation` takes
+  the `BiscuitCopy` that `RevokeBiscuit` took, not a revocation id. A store
+  of your own keys its copy counters and copy revocations by both, keeps
+  `IsBiscuitRevoked` matching an id under any capability, and drops only the
+  purged or erased capability's own: metertest and storetest check it.
+
 ## v0.92.0
 
 - `InsertRequest.Validate` refuses a capability with no `ExpiresAt` as

@@ -55,9 +55,13 @@ type Store struct {
 	caps     map[uuid.UUID]limes.Capability
 	issuedBy map[uuid.UUID]limes.Principal
 	revoked  map[uuid.UUID]limes.Revocation
-	// revokedCopies maps a revoked Biscuit copy's revocation id to the
-	// capability it belongs to.
-	revokedCopies map[string]limes.BiscuitRevocation
+	// revokedCopies holds each revoked Biscuit copy under the capability it
+	// was revoked under, and revokedIDs counts those entries per revocation
+	// id: a copy's id is a block signature, which a chain of another
+	// capability can carry too, so one capability's purge must not take
+	// another's revocation with it, while a lookup refuses the id under any.
+	revokedCopies map[copyKey]limes.BiscuitRevocation
+	revokedIDs    map[string]int
 	nowFn         func() time.Time
 }
 
@@ -86,8 +90,8 @@ type UsageStore[TX any] struct {
 	txFactory     func() TX
 
 	// copies counts each Biscuit copy that set limits of its own, by its
-	// block's revocation id.
-	copies map[string]copyCounter
+	// capability and its block's revocation id.
+	copies map[copyKey]copyCounter
 
 	// periods counts each tenant's accounting periods: SetTenantBudget with
 	// ResetSpend starts the next one. A ledger entry records the period it
@@ -101,9 +105,20 @@ type refKey struct {
 	ref   string
 }
 
+// copyKey names one Biscuit copy under one capability. The revocation id
+// alone does not: biscuit-go signs a block without the signature before it,
+// so a block can be grafted onto a chain of another capability.
+type copyKey struct {
+	capID uuid.UUID
+	id    string
+}
+
+func copyKeyOf(capID uuid.UUID, revocationID []byte) copyKey {
+	return copyKey{capID: capID, id: string(revocationID)}
+}
+
 // copyCounter is one Biscuit copy's own counters.
 type copyCounter struct {
-	capID    uuid.UUID // the capability the copy belongs to
 	requests int64
 	spent    limes.Nanos
 	reserved limes.Nanos
@@ -168,7 +183,8 @@ func NewStore(cfg StoreConfig) (*Store, error) {
 		revoked:  map[uuid.UUID]limes.Revocation{},
 		nowFn:    wallClock(cfg.Now),
 
-		revokedCopies: map[string]limes.BiscuitRevocation{},
+		revokedCopies: map[copyKey]limes.BiscuitRevocation{},
+		revokedIDs:    map[string]int{},
 	}, nil
 }
 
@@ -202,7 +218,7 @@ func NewUsageStore[TX any](cfg UsageStoreConfig[TX]) (*UsageStore[TX], error) {
 		tenantOf: map[uuid.UUID]uuid.UUID{},
 		budgets:  map[uuid.UUID]limes.TenantBudget{},
 		holds:    map[uuid.UUID]hold{},
-		copies:   map[string]copyCounter{},
+		copies:   map[copyKey]copyCounter{},
 		periods:  map[uuid.UUID]uint64{},
 
 		byCharge:      map[uuid.UUID]int{},
@@ -382,7 +398,7 @@ func (s *Store) IsBiscuitRevoked(_ context.Context, revocationIDs [][]byte) (boo
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, id := range revocationIDs {
-		if _, ok := s.revokedCopies[string(id)]; ok {
+		if s.revokedIDs[string(id)] > 0 {
 			return true, nil
 		}
 	}
@@ -400,20 +416,25 @@ func (s *Store) RevokeBiscuit(_ context.Context, args limes.RevokeBiscuitRequest
 	if _, ok := s.caps[capID]; !ok {
 		return limes.ErrNotFound
 	}
-	if _, ok := s.revokedCopies[string(revocationID)]; !ok { // the first entry stands
-		s.revokedCopies[string(revocationID)] = limes.BiscuitRevocation{
+	key := copyKeyOf(capID, revocationID)
+	if _, ok := s.revokedCopies[key]; !ok { // the first entry stands
+		s.revokedCopies[key] = limes.BiscuitRevocation{
 			CapabilityID: capID, RevocationID: revocationID,
 			RevokedAt: s.nowFn(), Note: args.Note, Actor: args.Actor,
 		}
+		s.revokedIDs[key.id]++
 	}
 	return nil
 }
 
-// GetBiscuitRevocation returns what RevokeBiscuit wrote for revocationID.
-func (s *Store) GetBiscuitRevocation(_ context.Context, revocationID []byte) (limes.BiscuitRevocation, error) {
+// GetBiscuitRevocation returns what RevokeBiscuit wrote for the copy.
+func (s *Store) GetBiscuitRevocation(_ context.Context, bc limes.BiscuitCopy) (limes.BiscuitRevocation, error) {
+	if err := bc.Validate(); err != nil {
+		return limes.BiscuitRevocation{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r, ok := s.revokedCopies[string(revocationID)]
+	r, ok := s.revokedCopies[copyKeyOf(bc.CapabilityID(), bc.RevocationID())]
 	if !ok {
 		return limes.BiscuitRevocation{}, limes.ErrNotFound
 	}
@@ -456,7 +477,7 @@ func (s *Store) Purge(_ context.Context, req limes.PurgeRequest) (limes.PurgeRes
 		delete(s.caps, c.ID)
 		delete(s.revoked, c.ID)
 		delete(s.issuedBy, c.ID)
-		maps.DeleteFunc(s.revokedCopies, func(_ string, r limes.BiscuitRevocation) bool { return r.CapabilityID == c.ID })
+		s.forgetCopyRevocationsLocked(c.ID)
 	}
 	return limes.PurgeResult{Purged: int64(len(due))}, nil
 }
@@ -490,10 +511,24 @@ func (s *Store) EraseTenantRecords(_ context.Context, req limes.EraseTenantReque
 		delete(s.caps, id)
 		delete(s.revoked, id)
 		delete(s.issuedBy, id)
-		maps.DeleteFunc(s.revokedCopies, func(_ string, r limes.BiscuitRevocation) bool { return r.CapabilityID == id })
+		s.forgetCopyRevocationsLocked(id)
 		out.Removed++
 	}
 	return out, nil
+}
+
+// forgetCopyRevocationsLocked drops the copy revocations listed under capID,
+// and with them only that capability's share of each id. s.mu must be held.
+func (s *Store) forgetCopyRevocationsLocked(capID uuid.UUID) {
+	maps.DeleteFunc(s.revokedCopies, func(k copyKey, _ limes.BiscuitRevocation) bool {
+		if k.capID != capID {
+			return false
+		}
+		if s.revokedIDs[k.id]--; s.revokedIDs[k.id] == 0 {
+			delete(s.revokedIDs, k.id)
+		}
+		return true
+	})
 }
 
 // depthLocked is how many of c's ancestors are on record, counted no
@@ -600,7 +635,7 @@ func (s *UsageStore[TX]) Bump(_ context.Context, req limes.BumpRequest) (limes.B
 	u := s.usage[req.Subject.CapabilityID()]
 	next := u.RequestCount + 1
 	for _, c := range req.Subject.Copies() {
-		if !c.AdmitsRequests(s.copies[string(c.RevocationID)].requests + 1) {
+		if !c.AdmitsRequests(s.copies[copyKeyOf(req.Subject.CapabilityID(), c.RevocationID)].requests + 1) {
 			return limes.BumpReceipt{RequestCount: u.RequestCount}, fmt.Errorf("%w: copy %x", limes.ErrRequestLimitExceeded, c.RevocationID)
 		}
 	}
@@ -622,10 +657,10 @@ func (s *UsageStore[TX]) Bump(_ context.Context, req limes.BumpRequest) (limes.B
 		s.putUsageLocked(a.ID, req.Subject.TenantID(), au)
 	}
 	for _, c := range req.Subject.Copies() {
-		cc := s.copies[string(c.RevocationID)]
-		cc.capID = req.Subject.CapabilityID()
+		key := copyKeyOf(req.Subject.CapabilityID(), c.RevocationID)
+		cc := s.copies[key]
 		cc.requests++
-		s.copies[string(c.RevocationID)] = cc
+		s.copies[key] = cc
 	}
 	u.CapabilityID = req.Subject.CapabilityID()
 	u.RequestCount = next
@@ -866,11 +901,11 @@ func (s *UsageStore[TX]) chargeLocked(
 	copies := req.Subject.Copies()
 	copyIDs := make([][]byte, 0, len(copies))
 	for _, c := range copies {
-		cc := s.copies[string(c.RevocationID)]
-		cc.capID = req.Subject.CapabilityID()
+		key := copyKeyOf(req.Subject.CapabilityID(), c.RevocationID)
+		cc := s.copies[key]
 		cc.spent += req.Amount
 		cc.reserved = max0(cc.reserved - released)
-		s.copies[string(c.RevocationID)] = cc
+		s.copies[key] = cc
 		copyIDs = append(copyIDs, c.RevocationID)
 	}
 	entry := ledgerEntry{
@@ -936,7 +971,7 @@ func (s *UsageStore[TX]) checkCeilingsLocked(c ceilingCheck, crossed func(error)
 	// hold it takes the whole amount.
 	withinHold := c.amount <= c.released
 	for _, cp := range c.copies {
-		cc := s.copies[string(cp.RevocationID)]
+		cc := s.copies[copyKeyOf(c.capID, cp.RevocationID)]
 		if withinHold {
 			continue
 		}
@@ -1005,7 +1040,7 @@ func (s *UsageStore[TX]) checkRangeLocked(c ceilingCheck) error {
 	}
 	ok := true
 	for _, cp := range c.copies {
-		cc := s.copies[string(cp.RevocationID)]
+		cc := s.copies[copyKeyOf(c.capID, cp.RevocationID)]
 		ok = ok && fits(cc.spent, cc.reserved)
 	}
 	u := s.usage[c.capID]
@@ -1084,10 +1119,10 @@ func (s *UsageStore[TX]) applyHoldLocked(h hold, sign limes.Nanos) {
 	b.UpdatedAt = s.nowFn()
 	s.budgets[h.tenantID] = b
 	for _, c := range h.copies {
-		cc := s.copies[string(c.RevocationID)]
-		cc.capID = h.capID
+		key := copyKeyOf(h.capID, c.RevocationID)
+		cc := s.copies[key]
 		cc.reserved = max0(cc.reserved + sign*h.amount)
-		s.copies[string(c.RevocationID)] = cc
+		s.copies[key] = cc
 	}
 }
 
@@ -1341,9 +1376,10 @@ func (s *UsageStore[TX]) Refund(_ context.Context, req limes.RefundRequest) (lim
 		s.budgets[e.TenantID] = b
 	}
 	for _, id := range e.Copies {
-		if cc, ok := s.copies[string(id)]; ok {
+		key := copyKeyOf(e.CapabilityID, id)
+		if cc, ok := s.copies[key]; ok {
 			cc.spent = max0(cc.spent - amount)
-			s.copies[string(id)] = cc
+			s.copies[key] = cc
 		}
 	}
 	e.RefundedAmount += amount
@@ -1371,9 +1407,9 @@ func (s *UsageStore[TX]) CopyUsage(_ context.Context, req limes.CopyUsageRequest
 	defer s.mu.Unlock()
 	var out []limes.CopyUsage
 	for _, id := range req.RevocationIDs {
-		if c, ok := s.copies[string(id)]; ok {
+		if c, ok := s.copies[copyKeyOf(req.CapabilityID, id)]; ok {
 			out = append(out, limes.CopyUsage{
-				RevocationID: slices.Clone(id), CapabilityID: c.capID,
+				RevocationID: slices.Clone(id), CapabilityID: req.CapabilityID,
 				RequestCount: c.requests, SpentAmount: c.spent, ReservedAmount: c.reserved,
 			})
 		}
@@ -1601,7 +1637,7 @@ func (s *UsageStore[TX]) DeleteUsage(_ context.Context, req limes.DeleteUsageReq
 	defer s.mu.Unlock()
 	s.releaseHoldsLocked(func(id uuid.UUID) bool { return id == capID })
 	s.dropUsageLocked(capID)
-	maps.DeleteFunc(s.copies, func(_ string, c copyCounter) bool { return c.capID == capID })
+	maps.DeleteFunc(s.copies, func(k copyKey, _ copyCounter) bool { return k.capID == capID })
 	s.forgetAncestorLocked(func(id uuid.UUID) bool { return id == capID })
 	return nil
 }
@@ -1630,7 +1666,7 @@ func (s *UsageStore[TX]) EraseTenantUsage(_ context.Context, req limes.EraseTena
 	defer s.mu.Unlock()
 	mine := func(capID uuid.UUID) bool { return s.tenantOf[capID] == tenant }
 	maps.DeleteFunc(s.holds, func(_ uuid.UUID, h hold) bool { return h.tenantID == tenant })
-	maps.DeleteFunc(s.copies, func(_ string, c copyCounter) bool { return mine(c.capID) })
+	maps.DeleteFunc(s.copies, func(k copyKey, _ copyCounter) bool { return mine(k.capID) })
 	for id := range s.usage {
 		if mine(id) {
 			s.dropUsageLocked(id)
@@ -1687,7 +1723,7 @@ func (s *UsageStore[TX]) PurgeOrphans(_ context.Context, req limes.PurgeOrphansR
 		s.dropUsageLocked(id)
 	}
 	s.forgetAncestorLocked(func(id uuid.UUID) bool { return batch[id] })
-	maps.DeleteFunc(s.copies, func(_ string, c copyCounter) bool { return batch[c.capID] })
+	maps.DeleteFunc(s.copies, func(k copyKey, _ copyCounter) bool { return batch[k.capID] })
 	return limes.PurgeOrphansResult{Purged: int64(len(ids))}, nil
 }
 

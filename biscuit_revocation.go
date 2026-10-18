@@ -49,10 +49,11 @@ type BiscuitRevocationStore interface {
 	// see, and ErrInvalidRequest for a request naming no copy.
 	RevokeBiscuit(ctx context.Context, req RevokeBiscuitRequest) error
 
-	// GetBiscuitRevocation reads back what RevokeBiscuit wrote for one
-	// revocation id. ErrNotFound when the id is not revoked, or belongs to a
-	// capability the caller cannot see.
-	GetBiscuitRevocation(ctx context.Context, revocationID []byte) (BiscuitRevocation, error)
+	// GetBiscuitRevocation reads back what RevokeBiscuit wrote for one copy,
+	// under the capability it was revoked under. ErrNotFound when the copy is
+	// not revoked under that capability, or the capability is one the caller
+	// cannot see; ErrInvalidRequest for the zero BiscuitCopy.
+	GetBiscuitRevocation(ctx context.Context, copy BiscuitCopy) (BiscuitRevocation, error)
 }
 
 // BiscuitRevocation is one revoked Biscuit copy, as RevokeBiscuit wrote it.
@@ -75,8 +76,8 @@ type RevokeBiscuitRequest struct {
 
 // Validate refuses a request naming no copy as ErrInvalidRequest.
 func (r RevokeBiscuitRequest) Validate() error {
-	if r.Copy.capabilityID == uuid.Nil || len(r.Copy.revocationID) == 0 {
-		return invalidRequest("revoke biscuit: no copy; read one with Verifier.BiscuitCopy")
+	if err := r.Copy.Validate(); err != nil {
+		return fmt.Errorf("revoke biscuit: %w", err)
 	}
 	return nil
 }
@@ -90,6 +91,15 @@ type BiscuitCopy struct {
 	capabilityID uuid.UUID
 	revocationID []byte
 	copies       []CopyCeiling
+}
+
+// Validate refuses the zero BiscuitCopy, which names no copy, as
+// ErrInvalidRequest.
+func (c BiscuitCopy) Validate() error {
+	if c.capabilityID == uuid.Nil || len(c.revocationID) == 0 {
+		return invalidRequest("no biscuit copy; read one with Verifier.BiscuitCopy")
+	}
+	return nil
 }
 
 // CapabilityID is the capability the Biscuit seals.

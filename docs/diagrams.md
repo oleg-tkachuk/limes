@@ -57,7 +57,7 @@ flowchart LR
         usage["<b>UsageStore[TX]</b><br/>Meter[TX]: Bump · Charge · Reserve · Settle · Refund · Release<br/>MeterReader: GetUsage · GetCharge · ChargeByRef · GetReservation · ListReservations<br/>TenantBudgets · UsageHousekeeping"]
         keys["<b>KeyResolver</b><br/>PublicKey(kid)"]
         brev["<b>BiscuitRevocationStore</b><br/>IsBiscuitRevoked · RevokeBiscuit<br/>GetBiscuitRevocation"]
-        cusage["<b>CopyUsageReader</b><br/>CopyUsage(CopyUsageRequest{RevocationIDs})<br/>→ CopyUsageResult{Copies}"]
+        cusage["<b>CopyUsageReader</b><br/>CopyUsage(CopyUsageRequest{CapabilityID, RevocationIDs})<br/>→ CopyUsageResult{Copies}"]
         replay["<b>dpop.ReplayCache</b><br/>Seen(ctx, ReplayEntry) · MemoryReplayCache ships"]
         nonces["<b>dpop.Nonces</b><br/>Nonce · Valid"]
         ledger["<b>LedgerReader</b><br/>SumCharges(SumChargesRequest) → Page[ChargeSum]<br/>by unit · bucket none/hour/day/week/month · op · actor · capability"]
