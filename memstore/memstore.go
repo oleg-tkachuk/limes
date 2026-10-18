@@ -1114,8 +1114,14 @@ func (s *UsageStore[TX]) Reserve(_ context.Context, req limes.ReserveRequest) (l
 
 	// A hold ends with its capability at the latest: past it no one can
 	// settle the hold, and it would keep the ancestors' budget held.
-	expires := s.nowFn().Add(ttl)
-	if capExpires := s.records.expiryOf(req.Subject.CapabilityID()); !capExpires.IsZero() && capExpires.Before(expires) {
+	now := s.nowFn()
+	expires := now.Add(ttl)
+	capExpires := s.records.expiryOf(req.Subject.CapabilityID())
+	// A capability already expired could hold nothing anyone may settle.
+	if !capExpires.IsZero() && !capExpires.After(now) {
+		return limes.Reservation{}, limes.ErrExpired
+	}
+	if !capExpires.IsZero() && capExpires.Before(expires) {
 		expires = capExpires
 	}
 	h := hold{
