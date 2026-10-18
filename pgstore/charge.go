@@ -147,9 +147,11 @@ func replayByRef(ctx context.Context, tx pgx.Tx, req limes.ChargeRequest, unit s
 	if err != nil || !ok {
 		return limes.ChargeReceipt{}, false, err
 	}
-	if e.Amount != req.Amount || e.UnitCode != unit || e.TenantID != req.Subject.TenantID() {
-		return limes.ChargeReceipt{}, true, fmt.Errorf("%w: %q was %s %s for tenant %s",
-			limes.ErrExternalRefConflict, req.ExternalRef, e.Amount, e.UnitCode, e.TenantID)
+	// Another copy charges its own counters, and the receipt is the first
+	// copy's, so it conflicts as another cost does. The error names the ref,
+	// never the other charge.
+	if e.Amount != req.Amount || e.UnitCode != unit || e.TenantID != req.Subject.TenantID() || !sameCopyIDs(e.copies, req.Subject.Copies()) {
+		return limes.ChargeReceipt{}, true, fmt.Errorf("%w: %q", limes.ErrExternalRefConflict, req.ExternalRef)
 	}
 	r, err := replay(ctx, tx, e)
 	return r, true, err
