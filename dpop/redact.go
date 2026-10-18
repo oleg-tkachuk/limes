@@ -45,17 +45,18 @@ func (cfg HMACNoncesConfig) view() hmacNoncesView {
 	return hmacNoncesView{Keys: redactedKeys(len(cfg.Keys)), Lifetime: cfg.Lifetime}
 }
 
-// Format prints n with its keys redacted.
-func (n *HMACNonces) Format(f fmt.State, verb rune) {
+// Format prints n with its keys redacted. On the value, as Signer's: a
+// copy of an HMACNonces formats as the pointer does.
+func (n HMACNonces) Format(f fmt.State, verb rune) {
 	_, _ = fmt.Fprintf(f, fmt.FormatString(f, verb), n.view())
 }
 
 // MarshalJSON encodes n with its keys redacted.
-func (n *HMACNonces) MarshalJSON() ([]byte, error) { return json.Marshal(n.view()) }
+func (n HMACNonces) MarshalJSON() ([]byte, error) { return json.Marshal(n.view()) }
 
 // LogValue logs n with its keys redacted, under any slog handler.
-func (n *HMACNonces) LogValue() slog.Value { return slog.AnyValue(n.view()) }
+func (n HMACNonces) LogValue() slog.Value { return slog.AnyValue(n.view()) }
 
-func (n *HMACNonces) view() hmacNoncesView {
+func (n HMACNonces) view() hmacNoncesView {
 	return hmacNoncesView{Keys: redactedKeys(len(n.keys)), Lifetime: n.lifetime}
 }
