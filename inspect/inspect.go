@@ -6,6 +6,7 @@ package inspect
 
 import (
 	"crypto/ed25519"
+	"errors"
 	"fmt"
 
 	"github.com/oleg-tkachuk/limes"
@@ -26,9 +27,14 @@ func checkSize(token string) error {
 	return nil
 }
 
+// ErrInvalidKey is VerifySignature handed a key that is no Ed25519 public
+// key: the caller's mistake, which says nothing about the token.
+var ErrInvalidKey = errors.New("inspect: not an Ed25519 public key")
+
 // Decode reads a compact token's claims without checking its signature. A
-// token it cannot read, or one longer than MaxTokenBytes, is
-// limes.ErrInvalidToken, as VerifySignature reports one.
+// token it cannot read — one whose header names another alg than Ed25519
+// (RFC 9864), EdDSA included, as a verifier refuses it — or one longer than
+// MaxTokenBytes, is limes.ErrInvalidToken, as VerifySignature reports one.
 func Decode(token string) (limes.Capability, error) {
 	if err := checkSize(token); err != nil {
 		return limes.Capability{}, err
@@ -42,8 +48,12 @@ func Decode(token string) (limes.Capability, error) {
 
 // VerifySignature checks the Ed25519 signature on a compact token against
 // pub, and nothing else. A forged or altered token, or one longer than
-// MaxTokenBytes, is limes.ErrInvalidToken.
+// MaxTokenBytes, is limes.ErrInvalidToken; a pub that is no Ed25519 public
+// key is ErrInvalidKey.
 func VerifySignature(token string, pub ed25519.PublicKey) error {
+	if len(pub) != ed25519.PublicKeySize {
+		return fmt.Errorf("%w: %d bytes, want %d", ErrInvalidKey, len(pub), ed25519.PublicKeySize)
+	}
 	if err := checkSize(token); err != nil {
 		return err
 	}

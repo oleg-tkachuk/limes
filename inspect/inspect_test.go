@@ -81,10 +81,16 @@ func TestVerifySignature(t *testing.T) {
 		"another key": {token, other},
 		"tampered":    {tampered, pub},
 		"not a token": {"x", pub},
-		"a short key": {token, pub[:8]},
 	} {
 		if err := inspect.VerifySignature(tc.token, tc.key); !errors.Is(err, limes.ErrInvalidToken) {
 			t.Errorf("%s: err = %v, want ErrInvalidToken", name, err)
+		}
+	}
+	// A key that is no Ed25519 public key is the caller's mistake, not the
+	// token's: it says nothing about whether the token is genuine.
+	for name, key := range map[string]ed25519.PublicKey{"a short key": pub[:8], "no key": nil, "a long key": append(append(ed25519.PublicKey{}, pub...), 0)} {
+		if err := inspect.VerifySignature(token, key); !errors.Is(err, inspect.ErrInvalidKey) || errors.Is(err, limes.ErrInvalidToken) {
+			t.Errorf("%s: err = %v, want ErrInvalidKey and not ErrInvalidToken", name, err)
 		}
 	}
 }
