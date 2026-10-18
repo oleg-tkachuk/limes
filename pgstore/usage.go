@@ -474,7 +474,9 @@ func (s *UsageStore) ListTenantBudgets(ctx context.Context, req limes.ListTenant
 		class, spent, ceiling, tenant = &after.class, int64(after.spent), int64(after.max), after.tenantID
 	}
 	var rows []budgetRow
-	err = s.inReadTx(ctx, func(tx pgx.Tx) error {
+	// A list across tenants refuses a scope that admits fewer, as the
+	// census does: under it the page would read as every tenant's.
+	err = s.inEveryTenantReadTx(ctx, func(tx pgx.Tx) error {
 		r, err := tx.Query(ctx, sqlListTenants,
 			keep, threshold.Num().String(), threshold.Denom().String(),
 			class, spent, ceiling, tenant, limit+1, utilizationScale)

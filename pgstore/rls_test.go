@@ -138,9 +138,10 @@ func TestRowSecurityKeepsTheMeterApart(t *testing.T) {
 		if err := f.usage.Release(other, limes.ReleaseRequest{Subject: meterSubject(f.child.ID, f.mine), ReservationID: uuid.New()}); !errors.Is(err, limes.ErrScopeMismatch) {
 			t.Errorf("%s: Release: err = %v, want ErrScopeMismatch", name, err)
 		}
-		page, err := f.usage.ListTenantBudgets(other, limes.ListTenantBudgetsRequest{})
-		if err != nil || len(page.Items) != 0 {
-			t.Errorf("%s: ListTenantBudgets = %d rows, %v; want none", name, len(page.Items), err)
+		// A list across tenants under a narrower scope would read as every
+		// tenant while it showed fewer, so it is refused, as the census is.
+		if page, err := f.usage.ListTenantBudgets(other, limes.ListTenantBudgetsRequest{}); !errors.Is(err, limes.ErrScopeMismatch) {
+			t.Errorf("%s: ListTenantBudgets = %d rows, %v; want ErrScopeMismatch", name, len(page.Items), err)
 		}
 	}
 	page, err := f.usage.ListTenantBudgets(WithAllTenants(t.Context()), limes.ListTenantBudgetsRequest{})
