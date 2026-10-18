@@ -13,9 +13,10 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
-// UsageStore implements limes.UsageStore[pgx.Tx] and limes.CopyUsageReader:
+// UsageStore implements meter.UsageStore[pgx.Tx] and meter.CopyUsageReader:
 // request and spend counters, holds, the charges ledger and the tenant
 // aggregates. It reads each capability's lineage and ceilings from the
 // records a Store over the same database keeps.
@@ -163,11 +164,11 @@ type budgetRow struct {
 	persisted bool // false for a tenant with no row yet
 }
 
-func (b budgetRow) budget() limes.TenantBudget {
+func (b budgetRow) budget() meter.TenantBudget {
 	// The row keeps one unit, the tenant's; the ceiling is in it.
 	ceiling := b.ceiling
 	ceiling.UnitCode = b.unit
-	out := limes.TenantBudget{
+	out := meter.TenantBudget{
 		TenantID: b.tenantID, Ceiling: ceiling, SpentAmount: b.spent, ReservedAmount: b.reserved,
 		PeriodStart: b.start, UpdatedAt: b.updated, ResourceVersion: b.version,
 	}
@@ -339,7 +340,7 @@ func lock(ctx context.Context, tx pgx.Tx, l lockRequest) (*counters, error) {
 					return nil, err
 				}
 				if counted > l.maxCopies {
-					return nil, fmt.Errorf("%w: capability %s would count %d, quota %d", limes.ErrCopyLimitExceeded, l.copiesCapID, counted, l.maxCopies)
+					return nil, fmt.Errorf("%w: capability %s would count %d, quota %d", meter.ErrCopyLimitExceeded, l.copiesCapID, counted, l.maxCopies)
 				}
 			}
 		}

@@ -14,14 +14,15 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // Refund returns spend from one ledger entry to the counters it debited.
-func (s *UsageStore) Refund(ctx context.Context, req limes.RefundRequest) (limes.RefundReceipt, error) {
+func (s *UsageStore) Refund(ctx context.Context, req meter.RefundRequest) (meter.RefundReceipt, error) {
 	if err := req.Validate(); err != nil {
-		return limes.RefundReceipt{}, err
+		return meter.RefundReceipt{}, err
 	}
-	var receipt limes.RefundReceipt
+	var receipt meter.RefundReceipt
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		// The charge is read once to learn which counters it debited, which
 		// are locked first, and locked last, as every call locks the ledger:
@@ -32,7 +33,7 @@ func (s *UsageStore) Refund(ctx context.Context, req limes.RefundRequest) (limes
 			return err
 		}
 		if !ok {
-			return limes.ErrChargeNotFound
+			return meter.ErrChargeNotFound
 		}
 		c, err := lock(ctx, tx, lockRequest{
 			now:      s.clock(),
@@ -48,16 +49,16 @@ func (s *UsageStore) Refund(ctx context.Context, req limes.RefundRequest) (limes
 			return err
 		}
 		if !ok {
-			return limes.ErrChargeNotFound
+			return meter.ErrChargeNotFound
 		}
-		receipt = limes.RefundReceipt{ChargeID: e.ID, TenantID: e.TenantID, UnitCode: e.UnitCode}
+		receipt = meter.RefundReceipt{ChargeID: e.ID, TenantID: e.TenantID, UnitCode: e.UnitCode}
 		remaining := e.Amount - e.RefundedAmount
 		amount := req.Amount
 		if req.Remaining {
 			amount = remaining
 		}
 		if amount > remaining {
-			return fmt.Errorf("%w: %v requested, %v of %v left", limes.ErrRefundExceedsCharge, amount, remaining, e.Amount)
+			return fmt.Errorf("%w: %v requested, %v of %v left", meter.ErrRefundExceedsCharge, amount, remaining, e.Amount)
 		}
 		if amount == 0 {
 			return nil
@@ -84,7 +85,7 @@ func (s *UsageStore) Refund(ctx context.Context, req limes.RefundRequest) (limes
 		return nil
 	})
 	if err != nil {
-		return limes.RefundReceipt{}, err
+		return meter.RefundReceipt{}, err
 	}
 	return receipt, nil
 }
@@ -92,28 +93,28 @@ func (s *UsageStore) Refund(ctx context.Context, req limes.RefundRequest) (limes
 const sqlRefunded = `UPDATE limes.charges SET refunded = refunded + $2 WHERE id = $1`
 
 // GetCharge returns one charge of the ledger by its id.
-func (s *UsageStore) GetCharge(ctx context.Context, chargeID uuid.UUID) (limes.ChargeRecord, error) {
+func (s *UsageStore) GetCharge(ctx context.Context, chargeID uuid.UUID) (meter.ChargeRecord, error) {
 	return s.readCharge(ctx, sqlChargeByID, chargeID)
 }
 
 // ChargeByRef returns the charge a capability took under an external
 // reference; none is taken under the empty one.
-func (s *UsageStore) ChargeByRef(ctx context.Context, req limes.ChargeByRefRequest) (limes.ChargeRecord, error) {
+func (s *UsageStore) ChargeByRef(ctx context.Context, req meter.ChargeByRefRequest) (meter.ChargeRecord, error) {
 	if err := req.Validate(); err != nil {
-		return limes.ChargeRecord{}, err
+		return meter.ChargeRecord{}, err
 	}
 	return s.readCharge(ctx, sqlChargeByRef, req.CapabilityID, req.ExternalRef)
 }
 
-func (s *UsageStore) readCharge(ctx context.Context, query string, args ...any) (limes.ChargeRecord, error) {
-	var out limes.ChargeRecord
+func (s *UsageStore) readCharge(ctx context.Context, query string, args ...any) (meter.ChargeRecord, error) {
+	var out meter.ChargeRecord
 	err := s.inReadTx(ctx, func(tx pgx.Tx) error {
 		e, ok, err := readEntry(ctx, tx, query, args...)
 		if err != nil {
 			return err
 		}
 		if !ok {
-			return limes.ErrChargeNotFound
+			return meter.ErrChargeNotFound
 		}
 		out = e.ChargeRecord
 		return nil
@@ -122,12 +123,12 @@ func (s *UsageStore) readCharge(ctx context.Context, query string, args ...any) 
 }
 
 // GetReservation returns a hold that still counts, expired or not.
-func (s *UsageStore) GetReservation(ctx context.Context, reservationID uuid.UUID) (limes.Reservation, error) {
-	var out limes.Reservation
+func (s *UsageStore) GetReservation(ctx context.Context, reservationID uuid.UUID) (meter.Reservation, error) {
+	var out meter.Reservation
 	err := s.inReadTx(ctx, func(tx pgx.Tx) error {
 		h, err := scanHold(tx.QueryRow(ctx, sqlGetHold, reservationID))
 		if errors.Is(err, pgx.ErrNoRows) {
-			return limes.ErrReservationNotFound
+			return meter.ErrReservationNotFound
 		}
 		out = h.reservation()
 		return err
@@ -145,15 +146,15 @@ ORDER BY expires_at, id
 LIMIT $4`
 
 // ListReservations returns the capability's own holds a page at a time.
-func (s *UsageStore) ListReservations(ctx context.Context, req limes.ListReservationsRequest) (limes.Page[limes.Reservation], error) {
+func (s *UsageStore) ListReservations(ctx context.Context, req meter.ListReservationsRequest) (limes.Page[meter.Reservation], error) {
 	if err := req.Validate(); err != nil {
-		return limes.Page[limes.Reservation]{}, err
+		return limes.Page[meter.Reservation]{}, err
 	}
 	var after holdPlace
 	if req.Cursor != "" {
 		p, err := parseHoldPlace(req.Cursor)
 		if err != nil {
-			return limes.Page[limes.Reservation]{}, err
+			return limes.Page[meter.Reservation]{}, err
 		}
 		after = p
 	}
@@ -168,18 +169,18 @@ func (s *UsageStore) ListReservations(ctx context.Context, req limes.ListReserva
 		return err
 	})
 	if err != nil {
-		return limes.Page[limes.Reservation]{}, err
+		return limes.Page[meter.Reservation]{}, err
 	}
-	out := make([]limes.Reservation, 0, len(holds))
+	out := make([]meter.Reservation, 0, len(holds))
 	for _, h := range holds {
 		out = append(out, h.reservation())
 	}
 	if len(out) <= limit {
-		return limes.Page[limes.Reservation]{Items: out}, nil
+		return limes.Page[meter.Reservation]{Items: out}, nil
 	}
 	out = out[:limit]
 	last := out[len(out)-1]
-	return limes.Page[limes.Reservation]{Items: out, Next: holdPlace{expires: last.ExpiresAt, id: last.ID}.String()}, nil
+	return limes.Page[meter.Reservation]{Items: out, Next: holdPlace{expires: last.ExpiresAt, id: last.ID}.String()}, nil
 }
 
 // holdPlace is a hold's place in ListReservations' order, and the cursor:
@@ -232,19 +233,19 @@ func parseHoldPlace(cursor string) (holdPlace, error) {
 const sqlGetUsage = `SELECT request_count, spent, reserved, unit_code FROM limes.usage WHERE capability_id = $1`
 
 // GetUsage returns a capability's counters, its children's included.
-func (s *UsageStore) GetUsage(ctx context.Context, capID uuid.UUID) (limes.Usage, error) {
-	u := limes.Usage{CapabilityID: capID}
+func (s *UsageStore) GetUsage(ctx context.Context, capID uuid.UUID) (meter.Usage, error) {
+	u := meter.Usage{CapabilityID: capID}
 	err := s.inReadTx(ctx, func(tx pgx.Tx) error {
 		var spent, reserved int64
 		err := tx.QueryRow(ctx, sqlGetUsage, capID).Scan(&u.RequestCount, &spent, &reserved, &u.UnitCode)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return limes.ErrUsageNotFound
+			return meter.ErrUsageNotFound
 		}
 		u.SpentAmount, u.ReservedAmount = limes.Nanos(spent), limes.Nanos(reserved)
 		return err
 	})
 	if err != nil {
-		return limes.Usage{}, err
+		return meter.Usage{}, err
 	}
 	return u, nil
 }
@@ -254,18 +255,18 @@ SELECT revocation_id, capability_id, request_count, spent, reserved
 FROM limes.copy_usage WHERE capability_id = $1 AND revocation_id = ANY ($2)`
 
 // CopyUsage returns the counters of each copy named that has been used.
-func (s *UsageStore) CopyUsage(ctx context.Context, req limes.CopyUsageRequest) (limes.CopyUsageResult, error) {
+func (s *UsageStore) CopyUsage(ctx context.Context, req meter.CopyUsageRequest) (meter.CopyUsageResult, error) {
 	if err := req.Validate(); err != nil {
-		return limes.CopyUsageResult{}, err
+		return meter.CopyUsageResult{}, err
 	}
-	var out []limes.CopyUsage
+	var out []meter.CopyUsage
 	err := s.inReadTx(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, sqlCopyUsage, req.CapabilityID, req.RevocationIDs)
 		if err != nil {
 			return err
 		}
-		out, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (limes.CopyUsage, error) {
-			var c limes.CopyUsage
+		out, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (meter.CopyUsage, error) {
+			var c meter.CopyUsage
 			var spent, reserved int64
 			err := row.Scan(&c.RevocationID, &c.CapabilityID, &c.RequestCount, &spent, &reserved)
 			c.SpentAmount, c.ReservedAmount = limes.Nanos(spent), limes.Nanos(reserved)
@@ -274,24 +275,24 @@ func (s *UsageStore) CopyUsage(ctx context.Context, req limes.CopyUsageRequest) 
 		return err
 	})
 	if err != nil {
-		return limes.CopyUsageResult{}, err
+		return meter.CopyUsageResult{}, err
 	}
 	if len(out) == 0 {
 		out = nil
 	}
-	return limes.CopyUsageResult{Copies: out}, nil
+	return meter.CopyUsageResult{Copies: out}, nil
 }
 
 // GetTenantBudget returns a tenant's aggregate.
-func (s *UsageStore) GetTenantBudget(ctx context.Context, tenantID uuid.UUID) (limes.TenantBudget, error) {
-	var out limes.TenantBudget
+func (s *UsageStore) GetTenantBudget(ctx context.Context, tenantID uuid.UUID) (meter.TenantBudget, error) {
+	var out meter.TenantBudget
 	err := s.inTenantReadTx(ctx, tenantID, func(tx pgx.Tx) error {
 		b, err := readTenant(ctx, tx, sqlGetTenant, tenantID)
 		if err != nil {
 			return err
 		}
 		if !b.persisted {
-			return limes.ErrTenantBudgetNotFound
+			return meter.ErrTenantBudgetNotFound
 		}
 		out = b.budget()
 		return nil
@@ -322,11 +323,11 @@ func readTenant(ctx context.Context, tx pgx.Tx, query string, tenantID uuid.UUID
 }
 
 // SetTenantBudget upserts a tenant's ceiling under its version guard.
-func (s *UsageStore) SetTenantBudget(ctx context.Context, req limes.SetTenantBudgetRequest) (limes.TenantBudget, error) {
+func (s *UsageStore) SetTenantBudget(ctx context.Context, req meter.SetTenantBudgetRequest) (meter.TenantBudget, error) {
 	if err := req.Validate(); err != nil {
-		return limes.TenantBudget{}, err
+		return meter.TenantBudget{}, err
 	}
-	var out limes.TenantBudget
+	var out meter.TenantBudget
 	err := s.inTenantTx(ctx, req.TenantID, func(tx pgx.Tx) error {
 		if err := notErased(ctx, tx, req.TenantID); err != nil {
 			return err
@@ -345,7 +346,7 @@ func (s *UsageStore) SetTenantBudget(ctx context.Context, req limes.SetTenantBud
 		// A budget with no ceiling set yet expects version 0; an existing one
 		// its current version.
 		if req.ExpectedVersion != b.version {
-			return limes.ErrTenantBudgetVersionMismatch
+			return meter.ErrTenantBudgetVersionMismatch
 		}
 		// A ceiling that names no unit — the zero one — keeps the tenant's.
 		unit := req.Ceiling.UnitCode
@@ -408,13 +409,13 @@ const (
 // keepOf is the rows f keeps, as sqlListTenants names them. A filter this
 // package does not name — one a later limes adds — is refused rather than
 // read as another: a filter that narrows must never list every tenant.
-func keepOf(f limes.TenantBudgetFilter) (string, error) {
+func keepOf(f meter.TenantBudgetFilter) (string, error) {
 	switch f {
-	case limes.TenantBudgetFilterUnspecified, limes.TenantBudgetFilterAll:
+	case meter.TenantBudgetFilterUnspecified, meter.TenantBudgetFilterAll:
 		return keepEvery, nil
-	case limes.TenantBudgetFilterUnlimited:
+	case meter.TenantBudgetFilterUnlimited:
 		return keepUnlimited, nil
-	case limes.TenantBudgetFilterAtOrPast:
+	case meter.TenantBudgetFilterAtOrPast:
 		return keepAtOrPast, nil
 	}
 	return "", fmt.Errorf("%w: pgstore: list tenant budgets: filter %s is not one this store knows", limes.ErrInvalidRequest, f)
@@ -452,21 +453,21 @@ ORDER BY r.class, r.utilization DESC, r.tenant_id
 LIMIT $8`
 
 // ListTenantBudgets returns the aggregates most at risk first.
-func (s *UsageStore) ListTenantBudgets(ctx context.Context, req limes.ListTenantBudgetsRequest) (limes.Page[limes.TenantBudget], error) {
+func (s *UsageStore) ListTenantBudgets(ctx context.Context, req meter.ListTenantBudgetsRequest) (limes.Page[meter.TenantBudget], error) {
 	if err := req.Validate(); err != nil {
-		return limes.Page[limes.TenantBudget]{}, err
+		return limes.Page[meter.TenantBudget]{}, err
 	}
 	var after *tenantPlace
 	if req.Cursor != "" {
 		p, err := parseTenantPlace(req.Cursor)
 		if err != nil {
-			return limes.Page[limes.TenantBudget]{}, err
+			return limes.Page[meter.TenantBudget]{}, err
 		}
 		after = &p
 	}
 	keep, err := keepOf(req.Filter)
 	if err != nil {
-		return limes.Page[limes.TenantBudget]{}, err
+		return limes.Page[meter.TenantBudget]{}, err
 	}
 	limit := limes.PageLimit(req.Limit)
 	var class *int
@@ -480,7 +481,7 @@ func (s *UsageStore) ListTenantBudgets(ctx context.Context, req limes.ListTenant
 	// census does: under it the page would read as every tenant's.
 	err = s.inEveryTenantReadTx(ctx, func(tx pgx.Tx) error {
 		r, err := tx.Query(ctx, sqlListTenants,
-			keep, req.ThresholdBasisPoints, limes.BasisPointsPerWhole,
+			keep, req.ThresholdBasisPoints, meter.BasisPointsPerWhole,
 			class, spent, ceiling, tenant, limit+1, utilizationScale)
 		if err != nil {
 			return err
@@ -496,18 +497,18 @@ func (s *UsageStore) ListTenantBudgets(ctx context.Context, req limes.ListTenant
 		return err
 	})
 	if err != nil {
-		return limes.Page[limes.TenantBudget]{}, err
+		return limes.Page[meter.TenantBudget]{}, err
 	}
 	next := ""
 	if len(rows) > limit {
 		rows = rows[:limit]
 		next = placeOf(rows[limit-1]).encode()
 	}
-	out := make([]limes.TenantBudget, 0, len(rows))
+	out := make([]meter.TenantBudget, 0, len(rows))
 	for _, b := range rows {
 		out = append(out, b.budget())
 	}
-	return limes.Page[limes.TenantBudget]{Items: out, Next: next}, nil
+	return limes.Page[meter.TenantBudget]{Items: out, Next: next}, nil
 }
 
 // tenantPlace is an aggregate's place in ListTenantBudgets' order, and the
@@ -624,11 +625,11 @@ WHERE ancestors && $1`
 )
 
 // ReleaseExpired releases the holds past their expiry, oldest first.
-func (s *UsageStore) ReleaseExpired(ctx context.Context, req limes.ReleaseExpiredRequest) (limes.ReleaseExpiredResult, error) {
+func (s *UsageStore) ReleaseExpired(ctx context.Context, req meter.ReleaseExpiredRequest) (meter.ReleaseExpiredResult, error) {
 	if err := req.Validate(); err != nil {
-		return limes.ReleaseExpiredResult{}, err
+		return meter.ReleaseExpiredResult{}, err
 	}
-	limit := limes.HousekeepingLimit(req.Limit)
+	limit := meter.HousekeepingLimit(req.Limit)
 	var released int64
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		holds, err := collectHolds(ctx, tx, sqlDueHolds, s.clock(), limit)
@@ -642,9 +643,9 @@ func (s *UsageStore) ReleaseExpired(ctx context.Context, req limes.ReleaseExpire
 		return nil
 	})
 	if err != nil {
-		return limes.ReleaseExpiredResult{}, err
+		return meter.ReleaseExpiredResult{}, err
 	}
-	return limes.ReleaseExpiredResult{Released: released}, nil
+	return meter.ReleaseExpiredResult{Released: released}, nil
 }
 
 func collectHolds(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]hold, error) {
@@ -674,7 +675,7 @@ func (s *UsageStore) releaseHolds(ctx context.Context, tx pgx.Tx, holds []hold) 
 
 // DeleteUsage drops a capability's counters and its copies', releasing its
 // holds first: nothing could settle or release them once it is gone.
-func (s *UsageStore) DeleteUsage(ctx context.Context, req limes.DeleteUsageRequest) error {
+func (s *UsageStore) DeleteUsage(ctx context.Context, req meter.DeleteUsageRequest) error {
 	if err := req.Validate(); err != nil {
 		return err
 	}
@@ -685,11 +686,11 @@ func (s *UsageStore) DeleteUsage(ctx context.Context, req limes.DeleteUsageReque
 
 // PurgeOrphans drops the counters of capabilities no longer on record, as
 // DeleteUsage does, a batch at a time.
-func (s *UsageStore) PurgeOrphans(ctx context.Context, req limes.PurgeOrphansRequest) (limes.PurgeOrphansResult, error) {
+func (s *UsageStore) PurgeOrphans(ctx context.Context, req meter.PurgeOrphansRequest) (meter.PurgeOrphansResult, error) {
 	if err := req.Validate(); err != nil {
-		return limes.PurgeOrphansResult{}, err
+		return meter.PurgeOrphansResult{}, err
 	}
-	limit := limes.HousekeepingLimit(req.Limit)
+	limit := meter.HousekeepingLimit(req.Limit)
 	var purged int64
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, sqlForgetErased); err != nil {
@@ -710,9 +711,9 @@ func (s *UsageStore) PurgeOrphans(ctx context.Context, req limes.PurgeOrphansReq
 		return s.dropUsage(ctx, tx, ids)
 	})
 	if err != nil {
-		return limes.PurgeOrphansResult{}, err
+		return meter.PurgeOrphansResult{}, err
 	}
-	return limes.PurgeOrphansResult{Purged: purged}, nil
+	return meter.PurgeOrphansResult{Purged: purged}, nil
 }
 
 // dropUsage releases the holds of ids — first, as releasing one writes its
@@ -736,6 +737,6 @@ func (s *UsageStore) dropUsage(ctx context.Context, tx pgx.Tx, ids []uuid.UUID) 
 }
 
 var (
-	_ limes.UsageStore[pgx.Tx] = (*UsageStore)(nil)
-	_ limes.CopyUsageReader    = (*UsageStore)(nil)
+	_ meter.UsageStore[pgx.Tx] = (*UsageStore)(nil)
+	_ meter.CopyUsageReader    = (*UsageStore)(nil)
 )

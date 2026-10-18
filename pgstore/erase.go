@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // An erase of a tenant's usage and a call that meters the tenant are ordered
@@ -152,7 +153,7 @@ func (s *Store) EraseTenant(ctx context.Context, req limes.EraseTenantRequest, o
 		if out, err = s.eraseRecords(ctx, tx, req); err != nil {
 			return err
 		}
-		if err := eraseUsage(ctx, tx, limes.EraseTenantUsageRequest{TenantID: req.TenantID}); err != nil {
+		if err := eraseUsage(ctx, tx, meter.EraseTenantUsageRequest{TenantID: req.TenantID}); err != nil {
 			return err
 		}
 		if onErased != nil {
@@ -183,10 +184,10 @@ func (s *Store) eraseRecords(ctx context.Context, tx pgx.Tx, req limes.EraseTena
 	return out, err
 }
 
-// EraseTenantUsage implements limes.TenantUsageEraser: it marks the tenant
+// EraseTenantUsage implements meter.TenantUsageEraser: it marks the tenant
 // erased and removes its holds, aggregate, counters, copies' counters and
 // charges in one transaction scoped to the tenant (Config.CheckScope).
-func (s *UsageStore) EraseTenantUsage(ctx context.Context, req limes.EraseTenantUsageRequest) error {
+func (s *UsageStore) EraseTenantUsage(ctx context.Context, req meter.EraseTenantUsageRequest) error {
 	if err := req.Validate(); err != nil {
 		return err
 	}
@@ -200,7 +201,7 @@ func (s *UsageStore) EraseTenantUsage(ctx context.Context, req limes.EraseTenant
 
 // eraseUsage locks the tenant's meter rows in the meter's order, then
 // removes them and the ledger.
-func eraseUsage(ctx context.Context, tx pgx.Tx, req limes.EraseTenantUsageRequest) error {
+func eraseUsage(ctx context.Context, tx pgx.Tx, req meter.EraseTenantUsageRequest) error {
 	steps := []string{
 		sqlLockTenantHolds, sqlLockTenant, sqlLockTenantUsage, sqlLockTenantCopies,
 		sqlDeleteTenantHolds, sqlDeleteTenantBudget, sqlDeleteTenantUsage, sqlDeleteTenantCopies, sqlDeleteTenantCharges,
@@ -221,5 +222,5 @@ func lockAll(ctx context.Context, tx pgx.Tx, sql string, req limes.EraseTenantRe
 
 var (
 	_ limes.TenantRecordEraser = (*Store)(nil)
-	_ limes.TenantUsageEraser  = (*UsageStore)(nil)
+	_ meter.TenantUsageEraser  = (*UsageStore)(nil)
 )

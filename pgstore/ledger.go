@@ -12,9 +12,10 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
-// Ledger implements limes.LedgerReader over the store's charges ledger.
+// Ledger implements meter.LedgerReader over the store's charges ledger.
 //
 // A charge carries the store's time, so a test of a report backdates its
 // charges through Config.Now rather than by writing the charges table, whose
@@ -29,7 +30,7 @@ import (
 //	_ = records.Insert(ctx, limes.InsertRequest{Capability: c}) // c.ExpiresAt past the period
 //	subject, _ := limes.StoredMeterSubject(ctx, records, c.ID)
 //	at = start.AddDate(0, 0, 1)
-//	_, _ = usage.Charge(ctx, limes.ChargeRequest{Subject: subject, Amount: amount}, nil)
+//	_, _ = usage.Charge(ctx, meter.ChargeRequest{Subject: subject, Amount: amount}, nil)
 type Ledger struct {
 	conn
 }
@@ -58,17 +59,17 @@ const (
 // which sums the period whole.
 // A bucket this store does not name is refused rather than summed as
 // another.
-func truncOf(b limes.ChargeBucket) (string, bool, error) {
+func truncOf(b meter.ChargeBucket) (string, bool, error) {
 	switch b {
-	case limes.ChargeBucketNone:
+	case meter.ChargeBucketNone:
 		return "", false, nil
-	case limes.ChargeBucketHour:
+	case meter.ChargeBucketHour:
 		return truncHour, true, nil
-	case limes.ChargeBucketDay:
+	case meter.ChargeBucketDay:
 		return truncDay, true, nil
-	case limes.ChargeBucketMonth:
+	case meter.ChargeBucketMonth:
 		return truncMonth, true, nil
-	case limes.ChargeBucketWeek:
+	case meter.ChargeBucketWeek:
 		return truncWeek, true, nil
 	default:
 		return "", false, fmt.Errorf("%w: pgstore: sum charges: bucket %s is not one this store knows", limes.ErrInvalidRequest, b)
@@ -119,15 +120,15 @@ type sumCursor struct {
 	CapID   uuid.UUID `json:"i"`
 }
 
-// SumCharges implements limes.LedgerReader, in one transaction scoped to
+// SumCharges implements meter.LedgerReader, in one transaction scoped to
 // the tenant (Config.CheckScope).
-func (l *Ledger) SumCharges(ctx context.Context, req limes.SumChargesRequest) (limes.Page[limes.ChargeSum], error) {
+func (l *Ledger) SumCharges(ctx context.Context, req meter.SumChargesRequest) (limes.Page[meter.ChargeSum], error) {
 	if err := req.Validate(); err != nil {
-		return limes.Page[limes.ChargeSum]{}, err
+		return limes.Page[meter.ChargeSum]{}, err
 	}
 	field, bucketed, err := truncOf(req.Bucket)
 	if err != nil {
-		return limes.Page[limes.ChargeSum]{}, err
+		return limes.Page[meter.ChargeSum]{}, err
 	}
 	var trunc *string
 	if bucketed {
@@ -136,11 +137,11 @@ func (l *Ledger) SumCharges(ctx context.Context, req limes.SumChargesRequest) (l
 	var after sumCursor
 	if req.Cursor != "" {
 		if after, err = decodeSumCursor(req.Cursor); err != nil {
-			return limes.Page[limes.ChargeSum]{}, err
+			return limes.Page[meter.ChargeSum]{}, err
 		}
 	}
 	limit := limes.PageLimit(req.Limit)
-	var out []limes.ChargeSum
+	var out []meter.ChargeSum
 	err = l.inTenantReadTx(ctx, req.TenantID, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, sqlSumCharges,
 			req.TenantID, req.From, req.To, trunc, req.ByOp, req.ByActor, req.ByCapability,
@@ -151,7 +152,7 @@ func (l *Ledger) SumCharges(ctx context.Context, req limes.SumChargesRequest) (l
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var s limes.ChargeSum
+			var s meter.ChargeSum
 			var bucket time.Time
 			var op, charged, refunded string
 			if err := rows.Scan(&bucket, &s.UnitCode, &op, &s.Actor, &s.CapabilityID, &charged, &refunded, &s.Charges); err != nil {
@@ -172,18 +173,18 @@ func (l *Ledger) SumCharges(ctx context.Context, req limes.SumChargesRequest) (l
 		return rows.Err()
 	})
 	if err != nil {
-		return limes.Page[limes.ChargeSum]{}, err
+		return limes.Page[meter.ChargeSum]{}, err
 	}
 	if len(out) <= limit {
-		return limes.Page[limes.ChargeSum]{Items: out}, nil
+		return limes.Page[meter.ChargeSum]{Items: out}, nil
 	}
 	out = out[:limit]
-	return limes.Page[limes.ChargeSum]{Items: out, Next: placeOfSum(out[len(out)-1], bucketed).encode()}, nil
+	return limes.Page[meter.ChargeSum]{Items: out, Next: placeOfSum(out[len(out)-1], bucketed).encode()}, nil
 }
 
 // placeOfSum is s's place in the query's order. Its bucket is the one the
 // query compares by: the epoch for a period summed whole.
-func placeOfSum(s limes.ChargeSum, bucketed bool) sumCursor {
+func placeOfSum(s meter.ChargeSum, bucketed bool) sumCursor {
 	bucket := time.Unix(0, 0).UTC()
 	if bucketed {
 		bucket = s.BucketStart
@@ -195,7 +196,7 @@ func placeOfSum(s limes.ChargeSum, bucketed bool) sumCursor {
 func sumOf(text string) (limes.Nanos, error) {
 	n, err := strconv.ParseInt(text, 10, 64)
 	if err != nil || limes.Nanos(n) > limes.MaxNanos {
-		return 0, fmt.Errorf("%w: a charge sum of %s, past %s", limes.ErrCounterOverflow, text, limes.MaxNanos)
+		return 0, fmt.Errorf("%w: a charge sum of %s, past %s", meter.ErrCounterOverflow, text, limes.MaxNanos)
 	}
 	return limes.Nanos(n), nil
 }
@@ -224,4 +225,4 @@ func decodeSumCursor(s string) (sumCursor, error) {
 	return c, nil
 }
 
-var _ limes.LedgerReader = (*Ledger)(nil)
+var _ meter.LedgerReader = (*Ledger)(nil)

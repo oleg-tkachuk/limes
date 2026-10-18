@@ -11,6 +11,7 @@ import (
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/internal/link"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // eraseHolds is how many holds the concurrent erase check settles beside it.
@@ -36,7 +37,7 @@ const countRevocations = `SELECT count(*) FROM ` + schema + `.revocations WHERE 
 func TestEraseTenantTakesRecordsAndUsageTogether(t *testing.T) {
 	f := newTenantFixture(t)
 	ctx := WithTenant(t.Context(), f.mine)
-	if _, err := f.usage.Charge(ctx, limes.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}, nil); err != nil {
+	if _, err := f.usage.Charge(ctx, meter.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}, nil); err != nil {
 		t.Fatal(err)
 	}
 	req := limes.EraseTenantRequest{TenantID: f.mine, Note: "tenant removed", Actor: "test"}
@@ -69,7 +70,7 @@ func TestEraseTenantTakesRecordsAndUsageTogether(t *testing.T) {
 	if revoked, err := f.records.IsRevoked(ctx, f.child.ID); err != nil || !revoked {
 		t.Errorf("IsRevoked of the child after the erase = %v, %v; want revoked", revoked, err)
 	}
-	if _, err := f.usage.GetUsage(ctx, f.child.ID); !errors.Is(err, limes.ErrUsageNotFound) {
+	if _, err := f.usage.GetUsage(ctx, f.child.ID); !errors.Is(err, meter.ErrUsageNotFound) {
 		t.Errorf("usage after the erase: err = %v, want ErrUsageNotFound", err)
 	}
 	if _, err := f.records.EraseTenant(WithTenant(t.Context(), f.theirs), req, nil); !errors.Is(err, limes.ErrScopeMismatch) {
@@ -84,9 +85,9 @@ func TestEraseTenantBesideTheMeter(t *testing.T) {
 	f := newTenantFixture(t)
 	ctx := WithTenant(t.Context(), f.mine)
 	subject := meterSubject(f.child.ID, f.mine)
-	holds := make([]limes.Reservation, eraseHolds)
+	holds := make([]meter.Reservation, eraseHolds)
 	for i := range holds {
-		r, err := f.usage.Reserve(ctx, limes.ReserveRequest{Subject: subject, Amount: 1})
+		r, err := f.usage.Reserve(ctx, meter.ReserveRequest{Subject: subject, Amount: 1})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -96,13 +97,13 @@ func TestEraseTenantBesideTheMeter(t *testing.T) {
 	errs := make(chan error, 2*eraseHolds+1)
 	for _, h := range holds {
 		wg.Go(func() {
-			_, err := f.usage.Settle(ctx, limes.SettleRequest{Subject: subject, ReservationID: h.ID, Amount: 1}, nil)
-			if !errors.Is(err, limes.ErrReservationNotFound) {
+			_, err := f.usage.Settle(ctx, meter.SettleRequest{Subject: subject, ReservationID: h.ID, Amount: 1}, nil)
+			if !errors.Is(err, meter.ErrReservationNotFound) {
 				errs <- err
 			}
 		})
 		wg.Go(func() {
-			_, err := f.usage.Charge(ctx, limes.ChargeRequest{Subject: subject, Amount: 1}, nil)
+			_, err := f.usage.Charge(ctx, meter.ChargeRequest{Subject: subject, Amount: 1}, nil)
 			if !errors.Is(err, limes.ErrTenantErased) {
 				errs <- err
 			}
@@ -132,10 +133,10 @@ func TestPurgeOrphansForgetsAnErasedTenantWithNoRecordLeft(t *testing.T) {
 		t.Fatal(err)
 	}
 	setBudget := func() error {
-		_, err := f.usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: testUnit}})
+		_, err := f.usage.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: testUnit}})
 		return err
 	}
-	if _, err := f.usage.PurgeOrphans(all, limes.PurgeOrphansRequest{}); err != nil {
+	if _, err := f.usage.PurgeOrphans(all, meter.PurgeOrphansRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := setBudget(); !errors.Is(err, limes.ErrTenantErased) {
@@ -145,7 +146,7 @@ func TestPurgeOrphansForgetsAnErasedTenantWithNoRecordLeft(t *testing.T) {
 	if _, err := f.records.Purge(all, limes.PurgeRequest{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.usage.PurgeOrphans(all, limes.PurgeOrphansRequest{}); err != nil {
+	if _, err := f.usage.PurgeOrphans(all, meter.PurgeOrphansRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := setBudget(); err != nil {

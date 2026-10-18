@@ -10,8 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-
-	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // sqlDeadlockDetected is PostgreSQL's code for a transaction it aborted to
@@ -63,7 +62,7 @@ func TestRefundLocksTheLedgerLast(t *testing.T) {
 	const amount = 5
 	f := newTenantFixture(t)
 	mine := WithTenant(context.Background(), f.mine)
-	charged, err := f.usage.Charge(mine, limes.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: amount}, nil)
+	charged, err := f.usage.Charge(mine, meter.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: amount}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +72,7 @@ func TestRefundLocksTheLedgerLast(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := f.usage.Refund(mine, limes.RefundRequest{ChargeID: charged.ChargeID, Remaining: true})
+		_, err := f.usage.Refund(mine, meter.RefundRequest{ChargeID: charged.ChargeID, Remaining: true})
 		done <- err
 	}()
 	awaitLockWait(t)
@@ -83,7 +82,7 @@ func TestRefundLocksTheLedgerLast(t *testing.T) {
 	if err := erase.Commit(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if err := <-done; isDeadlock(err) || !errors.Is(err, limes.ErrChargeNotFound) {
+	if err := <-done; isDeadlock(err) || !errors.Is(err, meter.ErrChargeNotFound) {
 		t.Errorf("Refund of a charge erased meanwhile: err = %v, want ErrChargeNotFound", err)
 	}
 }
@@ -95,7 +94,7 @@ func TestRefundLocksTheLedgerLast(t *testing.T) {
 func TestDeleteUsageLocksTheHoldsFirst(t *testing.T) {
 	f := newTenantFixture(t)
 	mine := WithTenant(context.Background(), f.mine)
-	held, err := f.usage.Reserve(mine, limes.ReserveRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1})
+	held, err := f.usage.Reserve(mine, meter.ReserveRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +104,7 @@ func TestDeleteUsageLocksTheHoldsFirst(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		done <- f.usage.DeleteUsage(mine, limes.DeleteUsageRequest{CapabilityID: f.parent.ID})
+		done <- f.usage.DeleteUsage(mine, meter.DeleteUsageRequest{CapabilityID: f.parent.ID})
 	}()
 	awaitLockWait(t)
 	if _, err := release.Exec(context.Background(), `SELECT 1 FROM `+schema+`.usage WHERE capability_id = $1 FOR UPDATE`, f.parent.ID); err != nil {
@@ -127,7 +126,7 @@ func TestReleaseExpiredLocksHoldsInIDOrder(t *testing.T) {
 	mine := WithTenant(context.Background(), f.mine)
 	var ids [2]uuid.UUID
 	for i := range ids {
-		r, err := f.usage.Reserve(mine, limes.ReserveRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1})
+		r, err := f.usage.Reserve(mine, meter.ReserveRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -149,7 +148,7 @@ func TestReleaseExpiredLocksHoldsInIDOrder(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := f.usage.ReleaseExpired(WithAllTenants(context.Background()), limes.ReleaseExpiredRequest{})
+		_, err := f.usage.ReleaseExpired(WithAllTenants(context.Background()), meter.ReleaseExpiredRequest{})
 		done <- err
 	}()
 	awaitLockWait(t)

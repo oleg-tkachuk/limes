@@ -5,19 +5,20 @@ import (
 	"testing"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // Every filter limes defines is one this store names, each as what it
 // keeps; one limes adds later fails here until the store names it, rather
 // than list every tenant for a filter that narrows.
 func TestKeepOfNamesEveryFilter(t *testing.T) {
-	want := map[limes.TenantBudgetFilter]string{
-		limes.TenantBudgetFilterUnspecified: keepEvery,
-		limes.TenantBudgetFilterAll:         keepEvery,
-		limes.TenantBudgetFilterAtOrPast:    keepAtOrPast,
-		limes.TenantBudgetFilterUnlimited:   keepUnlimited,
+	want := map[meter.TenantBudgetFilter]string{
+		meter.TenantBudgetFilterUnspecified: keepEvery,
+		meter.TenantBudgetFilterAll:         keepEvery,
+		meter.TenantBudgetFilterAtOrPast:    keepAtOrPast,
+		meter.TenantBudgetFilterUnlimited:   keepUnlimited,
 	}
-	f := limes.TenantBudgetFilter(0)
+	f := meter.TenantBudgetFilter(0)
 	for ; f.Validate() == nil; f++ {
 		got, err := keepOf(f)
 		if w, ok := want[f]; !ok || err != nil || got != w {
@@ -36,14 +37,14 @@ func TestKeepOfNamesEveryFilter(t *testing.T) {
 // date_trunc field; one limes adds later fails here until the store names
 // it, rather than sum by another.
 func TestTruncOfNamesEveryBucket(t *testing.T) {
-	want := map[limes.ChargeBucket]string{
-		limes.ChargeBucketNone:  "",
-		limes.ChargeBucketHour:  truncHour,
-		limes.ChargeBucketDay:   truncDay,
-		limes.ChargeBucketWeek:  truncWeek,
-		limes.ChargeBucketMonth: truncMonth,
+	want := map[meter.ChargeBucket]string{
+		meter.ChargeBucketNone:  "",
+		meter.ChargeBucketHour:  truncHour,
+		meter.ChargeBucketDay:   truncDay,
+		meter.ChargeBucketWeek:  truncWeek,
+		meter.ChargeBucketMonth: truncMonth,
 	}
-	b := limes.ChargeBucket(0)
+	b := meter.ChargeBucket(0)
 	for ; b.Validate() == nil; b++ {
 		got, bucketed, err := truncOf(b)
 		if w, ok := want[b]; !ok || err != nil || got != w || bucketed != (w != "") {

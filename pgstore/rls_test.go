@@ -13,6 +13,7 @@ import (
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/internal/link"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // rlsTTL is how long the capabilities of these tests live.
@@ -121,7 +122,7 @@ func TestRevocationChecksSeeEveryTenant(t *testing.T) {
 func TestRowSecurityKeepsTheMeterApart(t *testing.T) {
 	f := newTenantFixture(t)
 	ctx := WithTenant(t.Context(), f.mine)
-	if _, err := f.usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
+	if _, err := f.usage.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{
 		TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: testUnit},
 	}); err != nil {
 		t.Fatal(err)
@@ -135,16 +136,16 @@ func TestRowSecurityKeepsTheMeterApart(t *testing.T) {
 		}
 		// Release names its subject's tenant, so it is refused as scoped
 		// to another one, not answered as a no-op.
-		if err := f.usage.Release(other, limes.ReleaseRequest{Subject: meterSubject(f.child.ID, f.mine), ReservationID: uuid.New()}); !errors.Is(err, limes.ErrScopeMismatch) {
+		if err := f.usage.Release(other, meter.ReleaseRequest{Subject: meterSubject(f.child.ID, f.mine), ReservationID: uuid.New()}); !errors.Is(err, limes.ErrScopeMismatch) {
 			t.Errorf("%s: Release: err = %v, want ErrScopeMismatch", name, err)
 		}
 		// A list across tenants under a narrower scope would read as every
 		// tenant while it showed fewer, so it is refused, as the census is.
-		if page, err := f.usage.ListTenantBudgets(other, limes.ListTenantBudgetsRequest{}); !errors.Is(err, limes.ErrScopeMismatch) {
+		if page, err := f.usage.ListTenantBudgets(other, meter.ListTenantBudgetsRequest{}); !errors.Is(err, limes.ErrScopeMismatch) {
 			t.Errorf("%s: ListTenantBudgets = %d rows, %v; want ErrScopeMismatch", name, len(page.Items), err)
 		}
 	}
-	page, err := f.usage.ListTenantBudgets(WithAllTenants(t.Context()), limes.ListTenantBudgetsRequest{})
+	page, err := f.usage.ListTenantBudgets(WithAllTenants(t.Context()), meter.ListTenantBudgetsRequest{})
 	if err != nil || len(page.Items) != 1 {
 		t.Errorf("ListTenantBudgets across every tenant = %d rows, %v; want this tenant's", len(page.Items), err)
 	}
@@ -156,22 +157,22 @@ func TestRowSecurityKeepsTheMeterApart(t *testing.T) {
 func TestHoldIsItsTenantsAcrossTenants(t *testing.T) {
 	f := newTenantFixture(t)
 	mine := WithTenant(t.Context(), f.mine)
-	if _, err := f.usage.SetTenantBudget(mine, limes.SetTenantBudgetRequest{
+	if _, err := f.usage.SetTenantBudget(mine, meter.SetTenantBudgetRequest{
 		TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: testUnit},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	const held, settled = 3, 1
-	hold, err := f.usage.Reserve(mine, limes.ReserveRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: held})
+	hold, err := f.usage.Reserve(mine, meter.ReserveRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: held})
 	if err != nil {
 		t.Fatal(err)
 	}
 	every := WithAllTenants(t.Context())
 	elsewhere := meterSubject(f.child.ID, f.theirs)
-	if _, err := f.usage.Settle(every, limes.SettleRequest{Subject: elsewhere, ReservationID: hold.ID, Amount: settled}, nil); !errors.Is(err, limes.ErrReservationNotFound) {
+	if _, err := f.usage.Settle(every, meter.SettleRequest{Subject: elsewhere, ReservationID: hold.ID, Amount: settled}, nil); !errors.Is(err, meter.ErrReservationNotFound) {
 		t.Errorf("Settle under another tenant: err = %v, want ErrReservationNotFound", err)
 	}
-	if err := f.usage.Release(every, limes.ReleaseRequest{Subject: elsewhere, ReservationID: hold.ID}); err != nil {
+	if err := f.usage.Release(every, meter.ReleaseRequest{Subject: elsewhere, ReservationID: hold.ID}); err != nil {
 		t.Errorf("Release under another tenant: %v", err)
 	}
 	if _, err := f.usage.GetReservation(every, hold.ID); err != nil {
@@ -185,13 +186,13 @@ func TestHoldIsItsTenantsAcrossTenants(t *testing.T) {
 func TestRowSecurityKeepsRefundsApart(t *testing.T) {
 	f := newTenantFixture(t)
 	mine := WithTenant(t.Context(), f.mine)
-	if _, err := f.usage.SetTenantBudget(mine, limes.SetTenantBudgetRequest{
+	if _, err := f.usage.SetTenantBudget(mine, meter.SetTenantBudgetRequest{
 		TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: testUnit},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	const amount = 5
-	charged, err := f.usage.Charge(mine, limes.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: amount}, nil)
+	charged, err := f.usage.Charge(mine, meter.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: amount}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,11 +200,11 @@ func TestRowSecurityKeepsRefundsApart(t *testing.T) {
 		"another tenant": WithTenant(t.Context(), f.theirs),
 		"no scope":       t.Context(),
 	} {
-		for kind, req := range map[string]limes.RefundRequest{
+		for kind, req := range map[string]meter.RefundRequest{
 			"in part":      {ChargeID: charged.ChargeID, Amount: 1},
 			"what remains": {ChargeID: charged.ChargeID, Remaining: true},
 		} {
-			if _, err := f.usage.Refund(other, req); !errors.Is(err, limes.ErrChargeNotFound) {
+			if _, err := f.usage.Refund(other, req); !errors.Is(err, meter.ErrChargeNotFound) {
 				t.Errorf("%s: Refund %s: err = %v, want ErrChargeNotFound", name, kind, err)
 			}
 		}
@@ -281,9 +282,9 @@ func TestCheckScopeBesideAScopeOfTheConsumers(t *testing.T) {
 		cfg  Config
 		want error
 	}{
-		"no check":                 {Config{DB: app, Scope: setTenant(f.theirs)}, limes.ErrTenantBudgetNotFound},
+		"no check":                 {Config{DB: app, Scope: setTenant(f.theirs)}, meter.ErrTenantBudgetNotFound},
 		"CheckSchemaScope":         {Config{DB: app, Scope: setTenant(f.theirs), CheckScope: CheckSchemaScope}, limes.ErrScopeMismatch},
-		"CheckSchemaScope, admits": {Config{DB: app, Scope: setTenant(f.mine), CheckScope: CheckSchemaScope}, limes.ErrTenantBudgetNotFound},
+		"CheckSchemaScope, admits": {Config{DB: app, Scope: setTenant(f.mine), CheckScope: CheckSchemaScope}, meter.ErrTenantBudgetNotFound},
 	} {
 		usage, err := NewUsageStore(tc.cfg)
 		if err != nil {
@@ -302,16 +303,16 @@ func TestCheckScopeBesideAScopeOfTheConsumers(t *testing.T) {
 func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 	f := newTenantFixture(t)
 	mine := WithTenant(t.Context(), f.mine)
-	if _, err := f.usage.SetTenantBudget(mine, limes.SetTenantBudgetRequest{
+	if _, err := f.usage.SetTenantBudget(mine, meter.SetTenantBudgetRequest{
 		TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: testUnit},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	charged, err := f.usage.Charge(mine, limes.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}, nil)
+	charged, err := f.usage.Charge(mine, meter.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	held, err := f.usage.Reserve(mine, limes.ReserveRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1})
+	held, err := f.usage.Reserve(mine, meter.ReserveRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +323,7 @@ func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 	if _, err := f.usage.GetTenantBudget(ro, f.mine); err != nil {
 		t.Errorf("GetTenantBudget under a read-only scope: %v", err)
 	}
-	if page, err := f.usage.ListTenantBudgets(ro, limes.ListTenantBudgetsRequest{}); err != nil || len(page.Items) != 1 {
+	if page, err := f.usage.ListTenantBudgets(ro, meter.ListTenantBudgetsRequest{}); err != nil || len(page.Items) != 1 {
 		t.Errorf("ListTenantBudgets under a read-only scope = %d rows, %v; want this tenant's", len(page.Items), err)
 	}
 	// Past the hold's expiry and the records' retention, so housekeeping
@@ -361,7 +362,7 @@ func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 			ran = true
 			return nil
 		}
-		onCharged := func(ctx context.Context, c limes.Charged[pgx.Tx]) error { return consumer(ctx, c.Tx) }
+		onCharged := func(ctx context.Context, c meter.Charged[pgx.Tx]) error { return consumer(ctx, c.Tx) }
 		onErased := func(ctx context.Context, e Erased) error { return consumer(ctx, e.Tx) }
 		c := f.parent
 		c.ID, c.ParentID = uuid.New(), uuid.Nil
@@ -385,45 +386,45 @@ func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 				return err
 			},
 			"Bump": func() error {
-				_, err := s.usage.Bump(s.ctx, limes.BumpRequest{Subject: subject})
+				_, err := s.usage.Bump(s.ctx, meter.BumpRequest{Subject: subject})
 				return err
 			},
 			"Charge": func() error {
-				_, err := s.usage.Charge(s.ctx, limes.ChargeRequest{Subject: subject, Amount: 1}, onCharged)
+				_, err := s.usage.Charge(s.ctx, meter.ChargeRequest{Subject: subject, Amount: 1}, onCharged)
 				return err
 			},
 			"Reserve": func() error {
-				_, err := s.usage.Reserve(s.ctx, limes.ReserveRequest{Subject: subject, Amount: 1})
+				_, err := s.usage.Reserve(s.ctx, meter.ReserveRequest{Subject: subject, Amount: 1})
 				return err
 			},
 			"Settle": func() error {
-				_, err := s.usage.Settle(s.ctx, limes.SettleRequest{Subject: subject, ReservationID: held.ID, Amount: 1}, onCharged)
+				_, err := s.usage.Settle(s.ctx, meter.SettleRequest{Subject: subject, ReservationID: held.ID, Amount: 1}, onCharged)
 				return err
 			},
 			"Release": func() error {
-				return s.usage.Release(s.ctx, limes.ReleaseRequest{Subject: subject, ReservationID: held.ID})
+				return s.usage.Release(s.ctx, meter.ReleaseRequest{Subject: subject, ReservationID: held.ID})
 			},
 			"Refund": func() error {
-				_, err := s.usage.Refund(s.ctx, limes.RefundRequest{ChargeID: charged.ChargeID, Remaining: true})
+				_, err := s.usage.Refund(s.ctx, meter.RefundRequest{ChargeID: charged.ChargeID, Remaining: true})
 				return err
 			},
 			"SetTenantBudget": func() error {
-				_, err := s.usage.SetTenantBudget(s.ctx, limes.SetTenantBudgetRequest{
+				_, err := s.usage.SetTenantBudget(s.ctx, meter.SetTenantBudgetRequest{
 					TenantID: f.mine, Ceiling: limes.BudgetCeiling{Max: 1, UnitCode: testUnit},
 				})
 				return err
 			},
 			"ReleaseExpired": func() error {
-				_, err := s.usage.ReleaseExpired(s.ctx, limes.ReleaseExpiredRequest{})
+				_, err := s.usage.ReleaseExpired(s.ctx, meter.ReleaseExpiredRequest{})
 				return err
 			},
 			"PurgeOrphans": func() error {
-				_, err := s.usage.PurgeOrphans(s.ctx, limes.PurgeOrphansRequest{})
+				_, err := s.usage.PurgeOrphans(s.ctx, meter.PurgeOrphansRequest{})
 				return err
 			},
-			"DeleteUsage": func() error { return s.usage.DeleteUsage(s.ctx, limes.DeleteUsageRequest{CapabilityID: f.child.ID}) },
+			"DeleteUsage": func() error { return s.usage.DeleteUsage(s.ctx, meter.DeleteUsageRequest{CapabilityID: f.child.ID}) },
 			"EraseTenantUsage": func() error {
-				return s.usage.EraseTenantUsage(s.ctx, limes.EraseTenantUsageRequest{TenantID: f.mine})
+				return s.usage.EraseTenantUsage(s.ctx, meter.EraseTenantUsageRequest{TenantID: f.mine})
 			},
 		} {
 			if err := write(); !errors.Is(err, limes.ErrScopeMismatch) {
@@ -468,14 +469,14 @@ var scopedTables = []string{
 // and none be changed or removed, statement by statement.
 func TestReadOnlyPoliciesOfEveryTable(t *testing.T) {
 	f := newTenantFixture(t)
-	if _, err := f.usage.Charge(WithTenant(t.Context(), f.mine), limes.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}, nil); err != nil {
+	if _, err := f.usage.Charge(WithTenant(t.Context(), f.mine), meter.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.usage.Reserve(WithTenant(t.Context(), f.mine), limes.ReserveRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}); err != nil {
+	if _, err := f.usage.Reserve(WithTenant(t.Context(), f.mine), meter.ReserveRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}); err != nil {
 		t.Fatal(err)
 	}
 	// The other tenant's erase leaves its mark, a row of erased_tenants.
-	if err := f.usage.EraseTenantUsage(WithTenant(t.Context(), f.theirs), limes.EraseTenantUsageRequest{TenantID: f.theirs}); err != nil {
+	if err := f.usage.EraseTenantUsage(WithTenant(t.Context(), f.theirs), meter.EraseTenantUsageRequest{TenantID: f.theirs}); err != nil {
 		t.Fatal(err)
 	}
 	err := pgx.BeginFunc(t.Context(), app, func(tx pgx.Tx) error {
