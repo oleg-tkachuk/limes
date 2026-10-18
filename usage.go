@@ -136,8 +136,10 @@ type Meter[TX any] interface {
 	// the tenant aggregate, checking every ceiling against spend plus
 	// what is already held. Holds count against later charges and
 	// reservations exactly as spend does, until the reservation is
-	// settled, released or expires. Rejections return the Charge
-	// sentinels and hold nothing.
+	// settled, released or expires. A hold expires req.TTL from now, or when
+	// its capability's record does if that comes sooner: past it no one can
+	// settle the hold. Rejections return the Charge sentinels and hold
+	// nothing.
 	Reserve(ctx context.Context, req ReserveRequest) (Reservation, error)
 
 	// Settle ends a reservation and charges the actual cost in its place,
@@ -262,10 +264,11 @@ type UsageHousekeeping interface {
 	// full.
 	PurgeOrphans(ctx context.Context, req PurgeOrphansRequest) (PurgeOrphansResult, error)
 
-	// ReleaseExpired releases the reservations past their expiry, at most
-	// req.Limit of them. Run on a timer: until it runs, an expired hold
-	// keeps counting against the ceilings, which errs towards refusing
-	// spend, never towards allowing too much.
+	// ReleaseExpired releases the reservations past their expiry, and those
+	// of a capability revoked — itself or an ancestor — which no one can
+	// settle any more, at most req.Limit of them. Run on a timer: until it
+	// runs, such a hold keeps counting against the ceilings, which errs
+	// towards refusing spend, never towards allowing too much.
 	ReleaseExpired(ctx context.Context, req ReleaseExpiredRequest) (ReleaseExpiredResult, error)
 }
 
@@ -428,8 +431,9 @@ type ReserveRequest struct {
 	// Amount to hold, in the subject's unit. Within 0..MaxNanos
 	// (Nanos.Validate).
 	Amount Nanos
-	// TTL is how long the hold lasts if never settled or released.
-	// 0 = DefaultReservationTTL; negative is ErrInvalidRequest.
+	// TTL is how long the hold lasts if never settled or released, at most
+	// until its capability expires. 0 = DefaultReservationTTL; negative is
+	// ErrInvalidRequest.
 	TTL time.Duration
 	// Op and Actor are carried onto the charge Settle records.
 	Op    Op

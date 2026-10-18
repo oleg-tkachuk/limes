@@ -316,6 +316,14 @@ func (s *Store) lineageOf(id uuid.UUID) ([]limes.Capability, error) {
 	return s.ancestorsLocked(id)
 }
 
+// expiryOf is when id's record expires: the zero time for one that never
+// does or is not on record.
+func (s *Store) expiryOf(id uuid.UUID) time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.caps[id].ExpiresAt
+}
+
 func (s *Store) ancestorsLocked(id uuid.UUID) ([]limes.Capability, error) {
 	var out []limes.Capability
 	c, ok := s.caps[id]
@@ -1045,11 +1053,17 @@ func (s *UsageStore[TX]) Reserve(_ context.Context, req limes.ReserveRequest) (l
 		return limes.Reservation{}, err
 	}
 
+	// A hold ends with its capability at the latest: past it no one can
+	// settle the hold, and it would keep the ancestors' budget held.
+	expires := s.nowFn().Add(ttl)
+	if capExpires := s.records.expiryOf(req.Subject.CapabilityID()); !capExpires.IsZero() && capExpires.Before(expires) {
+		expires = capExpires
+	}
 	h := hold{
 		id:    uuid.New(),
 		capID: req.Subject.CapabilityID(), ancestors: ancestorIDs(ancestors), tenantID: req.Subject.TenantID(),
 		amount: req.Amount, unit: unit, op: req.Op, actor: req.Actor,
-		expires: s.nowFn().Add(ttl), copies: req.Subject.Copies(),
+		expires: expires, copies: req.Subject.Copies(),
 	}
 	s.applyHoldLocked(h, +1)
 	s.holds[h.id] = h
@@ -1263,7 +1277,7 @@ func (s *UsageStore[TX]) Release(_ context.Context, req limes.ReleaseRequest) er
 }
 
 // ReleaseExpired releases every hold past its expiry.
-func (s *UsageStore[TX]) ReleaseExpired(_ context.Context, req limes.ReleaseExpiredRequest) (limes.ReleaseExpiredResult, error) {
+func (s *UsageStore[TX]) ReleaseExpired(ctx context.Context, req limes.ReleaseExpiredRequest) (limes.ReleaseExpiredResult, error) {
 	limit, err := housekeepingLimit(req.Limit)
 	if err != nil {
 		return limes.ReleaseExpiredResult{}, err
@@ -1274,6 +1288,16 @@ func (s *UsageStore[TX]) ReleaseExpired(_ context.Context, req limes.ReleaseExpi
 	var due []hold
 	for _, h := range s.holds {
 		if !h.expires.After(now) {
+			due = append(due, h)
+			continue
+		}
+		// A hold of a revoked capability, or of one an ancestor's revocation
+		// stops, can be settled no more.
+		revoked, err := s.records.IsRevoked(ctx, h.capID)
+		if err != nil && !errors.Is(err, limes.ErrDelegationTooDeep) {
+			return limes.ReleaseExpiredResult{}, err
+		}
+		if revoked {
 			due = append(due, h)
 		}
 	}

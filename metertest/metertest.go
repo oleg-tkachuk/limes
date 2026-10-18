@@ -369,6 +369,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"CopyUsageRefusesAnInvalidRequest", checkCopyUsageRefusesInvalid[TX]},
 		{"TenantBudgetReadsAgree", checkTenantBudgetReads[TX]},
 		{"ReservationsReadBack", checkReservations[TX]},
+		{"AHoldNeverOutlivesItsCapability", checkHoldWithinCapability[TX]},
 		{"SumsExactly", checkSumsExactly[TX]},
 		{"ReservationsPage", checkReservationsPage[TX]},
 		{"AHoldWithNoTTLLastsTheDefault", checkDefaultReservationTTL[TX]},
@@ -1434,6 +1435,25 @@ func sameCeiling[T comparable](a, b *T) bool {
 
 // Reserve, GetReservation and ListReservations read one hold the same way,
 // and a settled or released hold is gone from both.
+// checkHoldWithinCapability holds a store to ending a hold no later than its
+// capability: a TTL past the capability's expiry is cut to it, so a hold no
+// one can settle any more does not keep the ancestors' and the tenant's
+// budget held.
+func checkHoldWithinCapability[TX any](t *testing.T, f fixture[TX]) {
+	if f.Now == nil {
+		t.Skip("Env.Now not set")
+	}
+	// farTTL outlives any capability an Env records.
+	const farTTL = 100 * 365 * 24 * time.Hour
+	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one, TTL: farTTL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.ExpiresAt.Before(f.Now().Add(farTTL)) {
+		t.Errorf("a hold asked for %s expires at %s, past its capability", farTTL, r.ExpiresAt)
+	}
+}
+
 func checkReservations[TX any](t *testing.T, f fixture[TX]) {
 	const (
 		held   = 2 * one
@@ -2601,8 +2621,9 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 	}
 }
 
-// longestTTL is the longest hold a ReserveRequest can ask for: it expires
-// centuries out, past what a count of nanoseconds since 1970 can hold.
+// longestTTL is the longest hold a ReserveRequest can ask for: it would
+// expire centuries out, past what a count of nanoseconds since 1970 can hold,
+// and the hold ends with its capability instead.
 const longestTTL = time.Duration(math.MaxInt64)
 
 // checkReservationsTied holds a store to its order among holds that expire
@@ -2675,7 +2696,8 @@ func checkDefaultReservationTTL[TX any](t *testing.T, f fixture[TX]) {
 // in their order — the last two expiring past year 2262, where a cursor
 // counting Unix nanoseconds overflows — and to refusing a negative page size.
 func checkReservationsPage[TX any](t *testing.T, f fixture[TX]) {
-	ttls := []time.Duration{time.Minute, longestTTL - time.Minute, longestTTL}
+	// Soonest first; the last one ends with its capability, after the others.
+	ttls := []time.Duration{time.Minute, 2 * time.Minute, longestTTL}
 	holds := len(ttls)
 	var want []uuid.UUID
 	for _, ttl := range ttls {
