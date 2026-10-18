@@ -568,8 +568,8 @@ delivered at least once. Two things change for such a cost.
 **It may arrive twice.** Name it with the id your records already give it, and
 the capability is charged once per name; a repeat returns the first receipt
 with `Replayed` set and runs no callback. A name arriving again with a
-different amount, unit or tenant is `ErrExternalRefConflict`: one name is one
-cost.
+different amount, unit or tenant, or under another Biscuit copy, is
+`ErrExternalRefConflict`: one name is one cost.
 
 ```go
 subject, err := limes.StoredMeterSubject(ctx, records, capID) // no token in hand

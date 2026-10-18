@@ -199,7 +199,12 @@ sequenceDiagram
 
 `Verifier.Verify` reads nothing from the claims until the signature
 over them has verified, checks a key-bound capability's proof of possession,
-and asks the revocation store last so that cheap rejections never reach it.
+and asks the revocation store after every check that needs no I/O, so that
+cheap rejections never reach it. A token carrying a Biscuit copy's own limits
+is then refused at a verifier without `MeterCopies`, and only a token accepted
+after all of that has its proof's id recorded in the replay cache: that room is
+shared by every copy of the capability, so a revoked or refused token spends
+none of it.
 Every refusal is a sentinel the caller maps to its own transport status, or
 hands to `ErrorResponse`. An outage is not a refusal: a key resolver other
 than for an unknown kid, a revocation lookup, a replay cache or a nonce
@@ -225,9 +230,11 @@ flowchart TB
     aud{"Audience ∈ token's audience"}
     scheme{"Scheme, if set, matches the binding<br/>DPoP for a key-bound token, Bearer otherwise"}
     bound{"key-bound: a dpop.Verifier<br/>is configured"}
-    pop{"dpop.Verifier.Verify<br/>the proof checks out"}
+    pop{"dpop.Verifier.Check<br/>the proof checks out"}
     rev{"RevocationLookup.IsRevoked<br/>this capability or an ancestor"}
     brev{"Biscuit: IsBiscuitRevoked<br/>any block of this copy"}
+    meter{"carries a copy's own limits,<br/>and no MeterCopies"}
+    rec{"key-bound: dpop.Verifier.Record<br/>the proof's id, in the replay cache"}
     ok(["VerifiedCapability"])
 
     bad["ErrInvalidToken"]
@@ -240,13 +247,14 @@ flowchart TB
     keysDown["jwks.ErrUnavailable<br/>(503, the server's fault)"]
     outage["the store's, resolver's, replay cache's<br/>or nonce source's error, wrapped (500)"]
     revoked["ErrRevoked"]
+    unmetered["ErrCopyCountersNotMetered<br/>(500, the deployment's fault)"]
     biscuit["the Biscuit path below"]
     noCreds["ErrNoCredentials"]
     invalid["ErrInvalidRequest<br/>(the server's own call)"]
 
     tok --> pre -- yes --> size -- yes --> form -- no --> hdr -- yes --> key -- found --> sig -- valid --> claims -- yes --> iss -- yes --> tenant -- yes --> sealed -- yes --> nbf
     form -- yes --> biscuit
-    nbf -- yes --> exp -- yes --> aud -- yes --> scheme -- yes --> bound -- "unbound, or configured" --> pop -- "unbound, or valid proof" --> rev -- no --> brev -- "no, or not a Biscuit" --> ok
+    nbf -- yes --> exp -- yes --> aud -- yes --> scheme -- yes --> bound -- "unbound, or configured" --> pop -- "unbound, or valid proof" --> rev -- no --> brev -- "no, or not a Biscuit" --> meter -- no --> rec -- "unbound, or first use" --> ok
     pre -- "no token" --> noCreds
     pre -- "no audience" --> invalid
     size -- no --> bad
@@ -271,15 +279,18 @@ flowchart TB
     rev -- "lookup fails" --> outage
     brev -- yes --> revoked
     brev -- "lookup fails" --> outage
+    meter -- yes --> unmetered
+    rec -- "seen before" --> dpopErr
+    rec -- "cannot answer" --> outage
 
     classDef client fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E
     classDef role fill:#DCFCE7,stroke:#16A34A,color:#14532D
     classDef store fill:#FEF3C7,stroke:#D97706,color:#78350F
     classDef external fill:#FCE7F3,stroke:#DB2777,color:#831843
     class tok,ok client
-    class pre,size,form,hdr,sig,claims,iss,tenant,sealed,nbf,exp,aud,scheme,bound,pop role
-    class key,rev,brev store
-    class bad,early,expired,mism,wrong,dpopErr,unsup,keysDown,outage,revoked,biscuit,noCreds,invalid external
+    class pre,size,form,hdr,sig,claims,iss,tenant,sealed,nbf,exp,aud,scheme,bound,pop,meter role
+    class key,rev,brev,rec store
+    class bad,early,expired,mism,wrong,dpopErr,unsup,keysDown,outage,revoked,unmetered,biscuit,noCreds,invalid external
 ```
 
 An unknown kid, an untrusted issuer, a kid bound to another issuer and a
@@ -301,7 +312,7 @@ and then each attenuation block is folded in. The time window, the audience,
 the scheme and the proof of possession — over the Biscuit as presented — apply
 once, to the narrowed capability that comes out; both revocation lists are
 asked after them, and only then is a copy with counters refused at a verifier
-that does not meter them.
+that does not meter them; the proof's id is recorded last, as for any token.
 
 ```mermaid
 flowchart TB
@@ -325,6 +336,7 @@ flowchart TB
     rev{"IsRevoked(capability)"}
     brev{"IsBiscuitRevoked(revocation ids)<br/>any block of this token"}
     meter{"Copies set, and<br/>no MeterCopies?"}
+    rec["key-bound: the proof's id recorded<br/>in the replay cache"]
     ok(["VerifiedCapability with Copies"])
 
     bad["ErrInvalidToken"]
@@ -341,7 +353,7 @@ flowchart TB
     post --> rev
     auth -- no --> bad
     sealed -- no --> bad
-    rev -- no --> brev -- no --> meter -- no --> ok
+    rev -- no --> brev -- no --> meter -- no --> rec --> ok
     on -- no --> bad
     chain -- no --> bad
     vocab -- no --> att
@@ -358,7 +370,7 @@ flowchart TB
     classDef external fill:#FCE7F3,stroke:#DB2777,color:#831843
     class tok,ok client
     class on,auth,sealed,chain,vocab,narrow,lim,meter,fit,copies,cval,post role
-    class rev,brev store
+    class rev,brev,rec store
     class bad,att,unmetered,revoked external
 ```
 
@@ -687,7 +699,7 @@ flowchart TB
     hold{"reservation open, unexpired,<br/>the subject's own, under the same copies"}
     val{"Nanos.Validate · Overrun.Validate · ValidateExternalRef<br/>subject set · a unit named"}
     seen{"ExternalRef already charged<br/>to this capability"}
-    same{"same Amount · UnitCode · TenantID"}
+    same{"same Amount · UnitCode · TenantID<br/>· Biscuit copies"}
     lin{"capability on record<br/>lineage read: its ancestors still on record"}
 
     subgraph stage ["stage — compute, publish nothing"]
@@ -770,7 +782,8 @@ follows under `OverrunPolicyReject`. A mismatched unit or a counter past `MaxNan
 is refused even then: neither is a ceiling an overrun may cross. A charge
 named by `ExternalRef`, or a settle of a reservation already settled, returns
 the earlier charge and moves nothing; the same `ExternalRef` with another
-amount, unit or tenant is `ErrExternalRefConflict`.
+amount, unit, tenant or Biscuit copy is `ErrExternalRefConflict`: another copy
+charges its own counters, which the earlier receipt never touched.
 
 Holds and housekeeping, in `memstore` and `pgstore` as the contract has them:
 
