@@ -65,6 +65,19 @@ func TestJWKS_SkipsNonEd25519(t *testing.T) {
 	}
 }
 
+// A document with no "keys" array is refused (RFC 7517 §5): only an empty
+// array withdraws every key.
+func TestParseRequiresAKeysArray(t *testing.T) {
+	for _, raw := range []string{`null`, `{}`, `{"keys":null}`} {
+		if keys, err := Parse([]byte(raw)); err == nil || keys != nil {
+			t.Errorf("Parse(%s) = %v, %v; want an error", raw, keys, err)
+		}
+	}
+	if keys, err := Parse([]byte(`{"keys":[]}`)); err != nil || keys == nil || len(keys) != 0 {
+		t.Errorf(`Parse({"keys":[]}) = %v, %v; want an empty set`, keys, err)
+	}
+}
+
 // A key set is read with JSON's own rules — names in their exact case — and
 // a kid named twice is used for neither key: which one signs is not for the
 // reader to guess.
@@ -72,8 +85,9 @@ func TestParseJWKSIsStrict(t *testing.T) {
 	_, a, _, _ := generateKeypair()
 	_, b, _, _ := generateKeypair()
 	upper := fmt.Sprintf(`{"KEYS":[{"KTY":"OKP","CRV":"Ed25519","KID":"k","X":%q}]}`, jose.B64(a))
-	if keys, err := Parse([]byte(upper)); err != nil || len(keys) != 0 {
-		t.Errorf("members in another case = %v, %v; want no key", keys, err)
+	// "KEYS" is not "keys", so the document has no key set at all.
+	if keys, err := Parse([]byte(upper)); err == nil || len(keys) != 0 {
+		t.Errorf("members in another case = %v, %v; want no key and an error", keys, err)
 	}
 	dup := fmt.Sprintf(`{"keys":[{"kty":"OKP","crv":"Ed25519","kid":"k","x":%q},{"kty":"OKP","crv":"Ed25519","kid":"k","x":%q},{"kty":"OKP","crv":"Ed25519","kid":"other","x":%q}]}`, jose.B64(a), jose.B64(b), jose.B64(b))
 	keys, err := Parse([]byte(dup))
@@ -139,7 +153,7 @@ func TestMarshalWritesTheFullySpecifiedAlgorithm(t *testing.T) {
 		t.Fatal(err)
 	}
 	var set document
-	if err := json.Unmarshal(doc, &set); err != nil || set.Keys[0].Alg != jose.AlgEd25519 {
+	if err := json.Unmarshal(doc, &set); err != nil || set.Keys == nil || (*set.Keys)[0].Alg != jose.AlgEd25519 {
 		t.Errorf("JWKS alg = %+v, %v; want %q", set, err, jose.AlgEd25519)
 	}
 
