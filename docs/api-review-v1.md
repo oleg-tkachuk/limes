@@ -3,8 +3,9 @@
 Review of the exported API of `github.com/oleg-tkachuk/limes`, taken at
 v0.7.0, when the root package exported 173 top-level identifiers and
 `memstore`, `metertest` and `storetest` 9. Steps 1–7 of the [plan](#plan) have
-shipped since: at v0.69.0 the root exports 257, and `jwks`, `dpop` and
-`inspect` are public packages beside those three. After v1.0 every exported
+shipped since, and a third round ([section 9](#9-round-three)) after them:
+`jwks`, `dpop` and `inspect` are public packages beside those three, and
+`otelmetric` a module of its own. After v1.0 every exported
 identifier, and every method of every interface a consumer implements, is
 frozen until a `/v2` module path.
 
@@ -18,7 +19,7 @@ compatibility is not a constraint before 1.0.
 
 | # | Question | Decision | Why |
 |---|---|---|---|
-| 1 | Wire format through 1.x | `VerifierConfig.AcceptTokenTypes`; v4 accepted throughout 1.x (the format reached v4 before 1.0), so a v5 ships in a minor: verifiers first, then issuers. | Versioned format with a controlled migration. Reading unknown claims leniently is refused: a caveat a verifier does not know is one it does not enforce. |
+| 1 | Wire format through 1.x | `VerifierConfig.AcceptTokenTypes` and `SignerConfig.TokenType`; 1.0 reads one format, v5 (round three retired v4), so a later one ships in a minor: verifiers first, then issuers. | Versioned format with a controlled migration. Reading unknown claims leniently is refused: a caveat a verifier does not know is one it does not enforce. |
 | 2 | Token algorithm | Ed25519 only for 1.x; another algorithm is another `typ`. | No runtime algorithm choice (RFC 8725); versioning the protocol replaces algorithm agility, and decision 1 carries the version. |
 | 3 | What `Delegate` trusts | `Verify` returns a `VerifiedCapability` with unexported fields, and `Delegate` accepts only that type. | "Parse, don't validate": the compiler, not a doc comment, guarantees the parent was verified; a token's caveats are immutable, so no store read is needed beyond the revocation check `Delegate` already makes. |
 | 4 | Proof-of-possession errors | A family of their own, `ErrProofOfPossession`, beside `ErrInvalidSignature` — renamed `ErrInvalidToken`, which it always meant, RFC 6750's `invalid_token` — and both under an umbrella `ErrUnauthenticated`. | `errors.Is` asserts identity: a missing or replayed proof is not an invalid signature. The overlap needed `reasonAliases`, made table order load-bearing and once made a nonce challenge read as permanent. |
@@ -147,20 +148,22 @@ nothing, on caveats, Biscuit copies, the meter subject and tenant budgets.
 **P4 — configuration.** One shape: `NewX(XConfig) (*X, error)` for anything
 with a default or a check, concrete return types, a `Now` field for the clock;
 functional options only for decorators. **Done:** one option type,
-`InstrumentOption`, for the one decorator.
+`otelmetric.Option`, for the one decorator.
 
 **P5 — wire format.** Decided: (b), decision 1. The verifier reads claims strictly and
 accepts one `typ`, so any new caveat or Biscuit fact is refused by every
 deployed verifier.
 - (a) Freeze the claim set and the Biscuit vocabulary for all of 1.x; a new
   caveat means v2.
-- (b) `VerifierConfig.AcceptTokenTypes`, v4 accepted throughout 1.x, so a v5
-  ships in a minor: verifiers first, then issuers. Recommended. **Done:** `VerifierConfig.AcceptTokenTypes`; the format reached v4 before 1.0
-  (explicit unlimited, P3), so `TokenTypeV4` is the one every 1.x verifier accepts.
+- (b) `VerifierConfig.AcceptTokenTypes`, so a new format ships in a minor:
+  verifiers first, then issuers. Recommended. **Done:**
+  `VerifierConfig.AcceptTokenTypes` and `SignerConfig.TokenType`. v5 shipped
+  that way in round three, and v4 was then retired, so `TokenTypeV5` is the
+  one format every 1.x verifier accepts.
 
 **P6 — cutting 1.0.** Remove `BREAKING_IS_A_MINOR_BEFORE_1_0` from the root module's rules in
-`.github/release/modules.cjs` — `pgstore` and `redisreplay` keep it, each on
-its own line — and flip its case in
+`.github/release/modules.cjs` — `pgstore`, `redisreplay` and `otelmetric`
+keep it, each on its own line — and flip its case in
 `release-rules.test.mjs`, in the same pull request as a commit carrying a
 `BREAKING CHANGE:` footer — that commit cuts 1.0.0. Update README
 "Versioning".
@@ -175,18 +178,44 @@ major the module path does not carry.
 ## 8. Deferred
 
 - Moving the meter out of the root: it leans on the capability types, so it
-  stays until a v2 (decision 7 splits only `jwks` and `dpop`).
+  stays until a v2 (decision 7 splits only `jwks` and `dpop`). Its
+  OpenTelemetry instruments did move, to the module `otelmetric` (round
+  three), so the root resolves no OpenTelemetry.
 - A Postgres reference store in its own module, to prove `Store` and
   `UsageStore` against row-level security before they freeze. **Done:**
   `pgstore`, held to storetest and metertest under row-level security; it
   moved one rule into the contract — `Store.Insert` refuses a child in
   another tenant than its parent.
 
+## 9. Round three
+
+A review of v0.78 for bugs, documentation that said more than the code did,
+and API worth settling before 1.0, taken on 2026-10-18 with 1.0 not yet due.
+Bugs went first, then documentation, then the API; each item is one pull
+request, and docs/migration.md names the release of each break.
+
+| Area | Change | Release |
+|---|---|---|
+| Holds | A revoked capability's hold stays settleable until it expires, and expires with its capability at the latest: a cost already incurred belongs in the ledger. | v0.80.0 |
+| Token lexicon | v5: `Generation` and `limes_gen` gone; the domain operations `presign`, `tag`, `search`, `embed` left to consumers, namespaced; `AgentPrincipal.ParentRunID`, set by `Delegate` from the parent's `RunID` rather than taken from the caller. `MCPClient` and `Model` keep their names. | v0.81.0 |
+| Token format | v4 retired: v5 alone is read and minted. | v0.91.0 |
+| Verification internals | A Biscuit copy's limits and root leave `Capability` (`VerifiedCapability.Copies`). | v0.83.0 |
+| Errors | `ErrConflict` family (`ErrAlreadyExists`, `ErrExternalRefConflict`, `ErrTenantBudgetVersionMismatch`); a problem body's `reason` member and a type per `Reason`. | v0.82.0, v0.84.0 |
+| Modules | `Instrument` moved to `otelmetric`. | v0.85.0 |
+| Names | `RevocationCache`, `BiscuitRevocationCache`; `dpop.SignRequest`; `VerifierConfig.Biscuit *BiscuitConfig`. | v0.86.0, v0.87.0 |
+| Data types | `ThresholdBasisPoints int` for `ExactPercent`'s float; `ChargeBucketNone` as the zero bucket, buckets shortest first; `pgstore.SchemaVersion` in `int`. | v0.88.0, v0.89.0, pgstore/v0.16.0 |
+| Requests | `Validate` on every request a store takes, `HousekeepingLimit`; `InsertRequest.Validate` refuses a capability that never expires. | v0.90.0, v0.92.0 |
+
+Kept as they are, on purpose: `inspect.Decode` (its name says what it does,
+beside `VerifySignature`), and `pgstore.RevocationWatcher` without a
+constructor (`Run` checks `Connect`, which is all a constructor would). The
+conformance suites may gain checks in any release (README, Versioning).
+
 ## Plan
 
 Each pull request is breaking and cuts a minor; the order puts code in its
-final package before it is reshaped there. Steps 1–7 are done; step 8 waits
-for the release decision.
+final package before it is reshaped there. Steps 1–7 are done, and round
+three (section 9) after them; step 8 waits for the release decision.
 
 1. **Errors** — `ErrUnauthenticated` over `ErrInvalidSignature` and the new
    `ErrProofOfPossession` family (decision 4); every not-found matching
