@@ -143,6 +143,28 @@ check_module "a nested break, marked on its commit" pass "$NESTED" "fix($NESTED)
 check_module "a nested break, marked on a root commit only" fail "$NESTED" "fix($NESTED): drop R" "docs!: say R is gone"
 check_module "a nested break, checked for the root" pass limes "fix($NESTED): drop R"
 
+# check_root name, want, message: one commit moves A out of the root module
+# into the nested one, so it touches both.
+check_root() {
+    local name="$1" want="$2" message="$3"
+    git -C "$nested" checkout --quiet -B case main
+    printf 'package m\n' >"$nested/m.go"
+    printf 'package %s\n\nfunc R() {}\n\nfunc A() {}\n' "$NESTED" >"$nested/$NESTED/r.go"
+    git -C "$nested" commit --quiet -a -m "$message"
+    local got=pass
+    (cd "$nested" && "$script" main case limes >/dev/null 2>&1) || got=fail
+    if [ "$want" != "$got" ]; then
+        printf 'FAIL %s: want %s, got %s\n' "$name" "$want" "$got"
+        failures=$((failures + 1))
+    fi
+}
+
+check_root "a root break, marked for the root" pass "refactor!: move A to $NESTED"
+# The root module's rules release nothing of a commit scoped to a nested
+# module, breaking or not, so its marker is none of the root's.
+check_root "a root break, marked only under the nested scope" fail "refactor($NESTED)!: move A to $NESTED"
+check_root "a root break, a nested-scoped footer" fail "$(printf 'refactor(%s): move A\n\nBREAKING CHANGE: A moved' "$NESTED")"
+
 # A module the merge base does not hold yet has no API to break.
 git -C "$nested" checkout --quiet -B case without-nested
 git -C "$nested" checkout --quiet -B base main~1

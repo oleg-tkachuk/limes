@@ -79,7 +79,9 @@ released_modules() {
     node -e 'console.log(Object.keys(require(process.argv[1]).MODULES).join("\n"))' "$config"
 }
 
-# module_commits prints the commits in <from>..<to> that touch the module.
+# module_commits prints the commits in <from>..<to> that touch the module
+# and that its own release rules cut a release for: a marker scoped to
+# another module, which those rules release nothing of, never reaches it.
 module_commits() {
     local config
     config="$(modules_config)"
@@ -87,11 +89,11 @@ module_commits() {
         git log --format=%H "$1..$2"
         return 0
     fi
-    git log --format=%H "$1..$2" | node "$MODULE_COMMITS" "$config" "$MODULE_NAME"
+    git log --format=%H "$1..$2" | node "$MODULE_COMMITS" "$config" "$MODULE_NAME" --released
 }
 
 # marks_breaking reports whether a commit in the range <from>..<to> that
-# touches the module marks itself breaking: only those reach its release.
+# touches the module marks itself breaking, and is one its release counts.
 marks_breaking() {
     local hash message
     while IFS= read -r hash; do

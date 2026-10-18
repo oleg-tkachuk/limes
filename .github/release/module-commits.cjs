@@ -60,19 +60,49 @@ async function generateNotes(pluginConfig, context) {
 
 module.exports = { analyzeCommits, generateNotes, changedPaths, touches };
 
+// releases reports whether the module's own analyzer cuts a release for the
+// commit: a scope its rules release nothing of outranks a breaking marker,
+// so such a marker says nothing of this module.
+async function releases(analyzer, hash, message) {
+  const { analyzeCommits: analyze } = await import("@semantic-release/commit-analyzer");
+  const logger = { log() {}, error() {}, warn() {}, success() {} };
+  const got = await analyze(analyzer, { commits: [{ hash, message }], logger, cwd: process.cwd(), options: {} });
+  return got != null;
+}
+
+module.exports.releases = releases;
+
+// RELEASED_FLAG narrows the command's output to the commits the module's
+// analyzer releases.
+const RELEASED_FLAG = "--released";
+
 // Run as a command, it reads commit hashes from stdin, one a line, and prints
 // those that touch the module named, as modules.cjs at the path given scopes
 // it — so the checks of breaking markers count the commits the release does.
+// With --released, only those the module's analyzer cuts a release for.
 //
-//   node module-commits.cjs <modules.cjs> <module> <hashes
+//   node module-commits.cjs <modules.cjs> <module> [--released] <hashes
 if (require.main === module) {
-  const [modulesPath, name] = process.argv.slice(2);
-  const { configFor } = require(require("node:path").resolve(modulesPath));
-  const scope = configFor(name).plugins.find((p) => Array.isArray(p) && p[0] === "./module-commits.cjs")[1];
-  const hashes = require("node:fs").readFileSync(0, "utf8").split("\n").filter((h) => h !== "");
-  for (const hash of hashes) {
-    if (touches(changedPaths(process.cwd(), hash), scope)) {
+  (async () => {
+    const [modulesPath, name, flag] = process.argv.slice(2);
+    const { configFor } = require(require("node:path").resolve(modulesPath));
+    const cfg = configFor(name);
+    const scope = cfg.plugins.find((p) => Array.isArray(p) && p[0] === "./module-commits.cjs")[1];
+    const hashes = require("node:fs").readFileSync(0, "utf8").split("\n").filter((h) => h !== "");
+    for (const hash of hashes) {
+      if (!touches(changedPaths(process.cwd(), hash), scope)) {
+        continue;
+      }
+      if (flag === RELEASED_FLAG) {
+        const message = execFileSync("git", ["log", "-1", "--format=%B", hash], { cwd: process.cwd(), encoding: "utf8" });
+        if (!(await releases(cfg.analyzer, hash, message))) {
+          continue;
+        }
+      }
       console.log(hash);
     }
-  }
+  })().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
 }
