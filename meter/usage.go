@@ -1,13 +1,14 @@
-package limes
+package meter
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 	"unicode"
 
 	"github.com/google/uuid"
+
+	"github.com/oleg-tkachuk/limes"
 )
 
 // UsageStore is everything a consumer implements for runtime accounting. It
@@ -203,7 +204,7 @@ type MeterReader interface {
 	// itself — not its delegated children — soonest to expire first, and
 	// holds expiring at the same instant in ascending ID, compared bytewise.
 	// It refuses what ListReservationsRequest.Validate refuses.
-	ListReservations(ctx context.Context, req ListReservationsRequest) (Page[Reservation], error)
+	ListReservations(ctx context.Context, req ListReservationsRequest) (limes.Page[Reservation], error)
 
 	// GetUsage returns the current snapshot. Returns ErrUsageNotFound when no
 	// row exists for the capability — typically means it's never been
@@ -257,7 +258,7 @@ type TenantBudgets interface {
 	// the next one, empty on the last page. Spend moves between pages, so
 	// a tenant may show on two of them, or on none; a cursor is a place in
 	// the order, not a snapshot.
-	ListTenantBudgets(ctx context.Context, req ListTenantBudgetsRequest) (Page[TenantBudget], error)
+	ListTenantBudgets(ctx context.Context, req ListTenantBudgetsRequest) (limes.Page[TenantBudget], error)
 }
 
 // UsageHousekeeping reclaims usage rows of capabilities that are gone.
@@ -297,12 +298,12 @@ type BumpRequest struct {
 	// Subject is the capability counted, with its ceiling and copy limits:
 	// VerifiedCapability.MeterSubject. Ancestors' ceilings come from their
 	// records.
-	Subject MeterSubject
+	Subject limes.MeterSubject
 }
 
 // Validate refuses a request whose subject names no capability, no tenant or
 // an unknown unit.
-func (r BumpRequest) Validate() error { return r.Subject.validate() }
+func (r BumpRequest) Validate() error { return r.Subject.Validate() }
 
 // ChargeRequest is the input to Meter.Charge.
 type ChargeRequest struct {
@@ -312,13 +313,13 @@ type ChargeRequest struct {
 	// capability's, an ancestor's, the tenant's — that already counts in
 	// another unit refuses it with ErrUnitCodeMismatch, and so does a
 	// reservation.
-	Subject MeterSubject
+	Subject limes.MeterSubject
 	// Amount is the cost, in the subject's unit. Within 0..MaxNanos
 	// (Nanos.Validate).
-	Amount Nanos
+	Amount limes.Nanos
 	// Op and Actor are stamped on the ledger row for attribution only;
 	// both may be empty and neither affects enforcement.
-	Op    Op
+	Op    limes.Op
 	Actor string
 	// ExternalRef names the cost in the consumer's own records — the id of
 	// the call or the event that reported it — and makes the charge
@@ -342,7 +343,7 @@ func (r ChargeRequest) Validate() error {
 	if err := ValidateExternalRef(r.ExternalRef); err != nil {
 		return err
 	}
-	return r.Subject.validateAmounts()
+	return r.Subject.ValidateAmounts()
 }
 
 // ChargeRecord is one charge as the ledger holds it.
@@ -352,8 +353,8 @@ type ChargeRecord struct {
 	TenantID     uuid.UUID
 	// Amount is what the charge took; RefundedAmount is what has been returned
 	// from it since.
-	Amount         Nanos
-	RefundedAmount Nanos
+	Amount         limes.Nanos
+	RefundedAmount limes.Nanos
 	UnitCode       string
 	// ExternalRef is the charge's ChargeRequest.ExternalRef; empty for none.
 	ExternalRef string
@@ -361,7 +362,7 @@ type ChargeRecord struct {
 	Overrun bool
 	// Op and Actor are what the charge was for and who made it, as the
 	// request named them; At is when it was committed.
-	Op    Op
+	Op    limes.Op
 	Actor string
 	At    time.Time
 	_     noCompare
@@ -397,7 +398,7 @@ type ChargeReceipt struct {
 	ChargeID uuid.UUID
 	// SpentAmount is the capability's spend as this call returns (its subtree's,
 	// when it has delegated children).
-	SpentAmount Nanos
+	SpentAmount limes.Nanos
 	// Replayed reports that the charge was already in the ledger — the same
 	// ExternalRef, or a reservation already settled — so this call moved
 	// nothing and ChargeID names the earlier charge.
@@ -431,7 +432,7 @@ type RefundReceipt struct {
 	ChargeID uuid.UUID
 	// Amount is the amount this call returned; zero when nothing was
 	// left to refund.
-	Amount Nanos
+	Amount limes.Nanos
 	// TenantID and UnitCode are the charge's.
 	TenantID uuid.UUID
 	UnitCode string
@@ -447,16 +448,16 @@ type ReserveRequest struct {
 	// Subject is the capability the hold counts against
 	// (VerifiedCapability.MeterSubject). The reservation keeps the
 	// presented copy's limits, and Settle checks and charges them.
-	Subject MeterSubject
+	Subject limes.MeterSubject
 	// Amount to hold, in the subject's unit. Within 0..MaxNanos
 	// (Nanos.Validate).
-	Amount Nanos
+	Amount limes.Nanos
 	// TTL is how long the hold lasts if never settled or released, at most
 	// until its capability expires. 0 = DefaultReservationTTL; negative is
 	// ErrInvalidRequest.
 	TTL time.Duration
 	// Op and Actor are carried onto the charge Settle records.
-	Op    Op
+	Op    limes.Op
 	Actor string
 }
 
@@ -466,13 +467,23 @@ func (r ReserveRequest) Validate() error {
 	if err := r.Amount.Validate(); err != nil {
 		return err
 	}
-	if err := r.Subject.validateAmounts(); err != nil {
+	if err := r.Subject.ValidateAmounts(); err != nil {
 		return err
 	}
 	if r.TTL < 0 {
 		return invalidRequest("reservation TTL %s is negative", r.TTL)
 	}
 	return nil
+}
+
+// HeldCopy is a Biscuit copy a hold is on: a hold counts no requests, so it
+// carries the copy's budget alone.
+type HeldCopy struct {
+	// RevocationID is the copy's revocation id.
+	RevocationID []byte
+	// Budget is the copy's own budget the hold counts against; nil when the
+	// copy has none of its own.
+	Budget *limes.BudgetCeiling
 }
 
 // Reservation is a committed hold, as Reserve made it and as GetReservation
@@ -482,10 +493,10 @@ type Reservation struct {
 	CapabilityID uuid.UUID
 	TenantID     uuid.UUID
 	// Amount is held in UnitCode.
-	Amount   Nanos
+	Amount   limes.Nanos
 	UnitCode string
 	// Op and Actor are what Settle will stamp on the charge.
-	Op    Op
+	Op    limes.Op
 	Actor string
 	// Copies are the Biscuit copies the hold is also on, innermost first,
 	// with the budget each is held against.
@@ -498,10 +509,10 @@ type SettleRequest struct {
 	// Subject is the capability settling, whose ceiling the charge meets
 	// (VerifiedCapability.MeterSubject). A reservation of another
 	// capability is ErrReservationNotFound.
-	Subject       MeterSubject
+	Subject       limes.MeterSubject
 	ReservationID uuid.UUID
 	// Amount is the actual cost to charge. Within 0..MaxNanos (Nanos.Validate).
-	Amount Nanos
+	Amount limes.Nanos
 	// Overrun is what happens when Amount would cross a ceiling.
 	Overrun OverrunPolicy
 }
@@ -511,7 +522,7 @@ type SettleRequest struct {
 // policy. The zero ReservationID is not refused here: it names no
 // reservation, which Settle reports as ErrReservationNotFound.
 func (r SettleRequest) Validate() error {
-	if err := r.Subject.validateAmounts(); err != nil {
+	if err := r.Subject.ValidateAmounts(); err != nil {
 		return err
 	}
 	if err := r.Amount.Validate(); err != nil {
@@ -525,7 +536,7 @@ func (r SettleRequest) Validate() error {
 type RefundRequest struct {
 	ChargeID uuid.UUID
 	// Amount to refund, above zero and within MaxNanos (Nanos.Validate).
-	Amount Nanos
+	Amount limes.Nanos
 	// Remaining refunds whatever of the charge is not yet refunded, which
 	// makes a full refund idempotent: once nothing remains, it returns
 	// nothing.
@@ -555,10 +566,10 @@ type TenantBudget struct {
 	// the tenant counts in: Ceiling.UnitCode, which the first charge or
 	// hold records when no ceiling named it. A tenant whose ceiling was
 	// never set counts Unlimited.
-	Ceiling     BudgetCeiling
-	SpentAmount Nanos
+	Ceiling     limes.BudgetCeiling
+	SpentAmount limes.Nanos
 	// ReservedAmount is held by the tenant's open reservations.
-	ReservedAmount Nanos
+	ReservedAmount limes.Nanos
 	PeriodStart    time.Time
 	// PeriodEnd is when the accounting window closes; zero for an
 	// open-ended one.
@@ -596,7 +607,7 @@ type SetTenantBudgetRequest struct {
 	// Ceiling is the tenant's new ceiling, in the unit it names: the zero
 	// value freezes the tenant's spend, in whatever unit it counts, and
 	// BudgetCeiling{Unlimited: true, UnitCode: u} lifts it.
-	Ceiling BudgetCeiling
+	Ceiling limes.BudgetCeiling
 	// PeriodEnd pins a closing time for the accounting window; zero leaves
 	// it open-ended (typical for "just set the cap, I'll roll later").
 	PeriodEnd time.Time
@@ -710,10 +721,10 @@ func (r ListTenantBudgetsRequest) Validate() error {
 type Usage struct {
 	CapabilityID uuid.UUID
 	RequestCount int64
-	SpentAmount  Nanos
+	SpentAmount  limes.Nanos
 	// ReservedAmount is held by open reservations (its subtree's, for a
 	// capability with delegated children).
-	ReservedAmount Nanos
+	ReservedAmount limes.Nanos
 	// UnitCode is the unit the counters count in: the subject's, recorded
 	// by the first Bump, Charge or Reserve of a subject that names one, so
 	// a capability that has only been bumped reads its unit too. Empty
@@ -728,8 +739,8 @@ type CopyUsage struct {
 	RevocationID   []byte
 	CapabilityID   uuid.UUID
 	RequestCount   int64
-	SpentAmount    Nanos
-	ReservedAmount Nanos
+	SpentAmount    limes.Nanos
+	ReservedAmount limes.Nanos
 }
 
 // CopyUsageReader reads the counters of Biscuit copies. It is separate from
@@ -751,7 +762,7 @@ const DefaultMaxCopiesPerCapability = 1024
 
 // MaxCopyUsageIDs is the most revocation ids one CopyUsage reads, as a page
 // of any listing holds.
-const MaxCopyUsageIDs = MaxListLimit
+const MaxCopyUsageIDs = limes.MaxListLimit
 
 // CopyUsageRequest names the copies CopyUsage reads, all of one capability:
 // a copy is counted under the capability whose chain carried it, since a
@@ -791,87 +802,12 @@ type CopyUsageResult struct {
 	_      noCompare
 }
 
-// Usage-related sentinels; ErrBudgetExceeded lives in types.go.
-var (
-	// ErrInvalidAmount — an amount that is negative or above MaxNanos, or a
-	// decimal that is not one (ParseAmount). Refunds are explicit; a
-	// negative charge is not one. A malformed request, so it matches
-	// ErrInvalidRequest.
-	ErrInvalidAmount error = &familyError{"limes: invalid amount", ErrInvalidRequest}
-
-	// ErrCounterOverflow — an amount, each valid on its own, that would take
-	// a counter past MaxNanos. The request is well formed; the counter has
-	// no room for it.
-	ErrCounterOverflow = errors.New("limes: counter would pass MaxNanos")
-
-	// ErrChargeNotFound — Refund, GetCharge or ChargeByRef named a charge
-	// with no ledger row.
-	ErrChargeNotFound error = &familyError{"limes: charge not found", ErrNotFound}
-
-	// ErrRefundExceedsCharge — Refund would return more than the charge
-	// took, counting earlier refunds of the same charge.
-	ErrRefundExceedsCharge = errors.New("limes: refund exceeds charge")
-
-	// ErrReservationNotFound — Settle named a reservation that does not
-	// exist, was released, or has expired. One already settled is not an
-	// error: Settle returns its charge again (ChargeReceipt.Replayed).
-	ErrReservationNotFound error = &familyError{"limes: reservation not found", ErrNotFound}
-
-	// ErrRequestLimitExceeded — the capability, a Biscuit copy or an
-	// ancestor used every request its ceiling allows; the next was blocked.
-	ErrRequestLimitExceeded = errors.New("limes: request limit exceeded")
-
-	// ErrCopyLimitExceeded — counting one more Biscuit copy of the
-	// capability would pass the store's quota of copies per capability
-	// (Meter, "Copies of a Biscuit"). The request is refused and nothing is
-	// counted. Matches ErrRequestLimitExceeded: the capability has used what
-	// it may.
-	ErrCopyLimitExceeded error = &familyError{"limes: copy limit exceeded", ErrRequestLimitExceeded}
-
-	// ErrUsageNotFound — no usage row exists for this capability.
-	// Get-only; bump/charge always inserts on first hit.
-	ErrUsageNotFound error = &familyError{"limes: usage row not found", ErrNotFound}
-
-	// ErrTenantBudgetExceeded — the tenant aggregate cap has been
-	// hit. Distinct from ErrBudgetExceeded because the remedy differs:
-	// an operator raises a tenant's ceiling with SetTenantBudget, while a
-	// capability's ceiling is in its token and lifting it means issuing a
-	// new one.
-	ErrTenantBudgetExceeded = errors.New("limes: tenant aggregate budget exceeded")
-
-	// ErrTenantBudgetNotFound — Get-only; the tenant has no ceiling set
-	// and has never been charged. A tenant charged before any ceiling was
-	// set has a row, Unlimited, with ResourceVersion 0.
-	ErrTenantBudgetNotFound error = &familyError{"limes: tenant budget row not found", ErrNotFound}
-
-	// ErrTenantBudgetVersionMismatch — SetTenantBudget's OCC guard refused the
-	// write: the stored resource_version is not the one the caller read, so
-	// someone else changed the cap in between. The caller re-reads and decides,
-	// rather than silently overwriting a change it never saw. Matches
-	// ErrConflict.
-	ErrTenantBudgetVersionMismatch error = &familyError{"limes: tenant budget resource_version mismatch", ErrConflict}
-)
-
-// ErrExternalRefConflict — Charge named an ExternalRef its capability already
-// charged under, for a different amount, unit or tenant, or under other
-// Biscuit copies. One reference names one cost; replaying the first receipt
-// would report the second as booked. The error names the reference, never
-// the charge it names. Matches ErrConflict: the request is well formed, and
-// would have charged had the reference been free.
-var ErrExternalRefConflict error = &familyError{"limes: external ref already names a different charge", ErrConflict}
-
-// ErrSettleConflict — Settle named a reservation already settled, for a
-// different amount. One reservation names one cost; replaying the first
-// receipt would report the second as booked. Matches ErrConflict, as
-// ErrExternalRefConflict does.
-var ErrSettleConflict error = &familyError{"limes: reservation already settled for a different amount", ErrConflict}
-
 // Validate reports whether p is an OverrunPolicy this package defines.
 // Implementations call it before touching state, so an unknown policy is never
 // read as either one.
 func (p OverrunPolicy) Validate() error {
 	if p > OverrunPolicyRecord {
-		return fmt.Errorf("%w: unknown overrun policy %s", ErrInvalidRequest, p)
+		return fmt.Errorf("%w: unknown overrun policy %s", limes.ErrInvalidRequest, p)
 	}
 	return nil
 }
@@ -895,11 +831,11 @@ func (p OverrunPolicy) String() string {
 // MaxExternalRefBytes.
 func ValidateExternalRef(ref string) error {
 	if len(ref) > MaxExternalRefBytes {
-		return fmt.Errorf("%w: external ref is %d bytes, at most %d", ErrInvalidRequest, len(ref), MaxExternalRefBytes)
+		return fmt.Errorf("%w: external ref is %d bytes, at most %d", limes.ErrInvalidRequest, len(ref), MaxExternalRefBytes)
 	}
 	for _, r := range ref {
 		if !unicode.IsPrint(r) {
-			return fmt.Errorf("%w: external ref %q contains a non-printable character", ErrInvalidRequest, ref)
+			return fmt.Errorf("%w: external ref %q contains a non-printable character", limes.ErrInvalidRequest, ref)
 		}
 	}
 	return nil
@@ -917,13 +853,13 @@ type ReleaseRequest struct {
 	// Subject is the capability releasing, as it reserved
 	// (VerifiedCapability.MeterSubject). A reservation of another
 	// capability, or of other copies, is left held.
-	Subject       MeterSubject
+	Subject       limes.MeterSubject
 	ReservationID uuid.UUID
 }
 
 // Validate refuses a request whose subject names no capability, no tenant or
 // an unknown unit.
-func (r ReleaseRequest) Validate() error { return r.Subject.validate() }
+func (r ReleaseRequest) Validate() error { return r.Subject.Validate() }
 
 // ListReservationsRequest asks for one page of a capability's reservations.
 type ListReservationsRequest struct {
@@ -987,7 +923,7 @@ func validateHousekeepingLimit(call string, limit int) error {
 // DefaultHousekeepingLimit for zero. Validate refuses a negative one first.
 func HousekeepingLimit(limit int) int {
 	if limit == 0 {
-		return DefaultHousekeepingLimit
+		return limes.DefaultHousekeepingLimit
 	}
 	return limit
 }

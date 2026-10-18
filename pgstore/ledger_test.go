@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // sqlLedgerCharge writes a charge straight into the ledger, as the owner:
@@ -32,10 +33,10 @@ func TestSumChargesRefusesASumPastMaxNanos(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = ledger.SumCharges(WithTenant(t.Context(), tenant), limes.SumChargesRequest{
+	_, err = ledger.SumCharges(WithTenant(t.Context(), tenant), meter.SumChargesRequest{
 		TenantID: tenant, From: at.Add(-time.Hour), To: at.Add(time.Hour),
 	})
-	if !errors.Is(err, limes.ErrCounterOverflow) {
+	if !errors.Is(err, meter.ErrCounterOverflow) {
 		t.Errorf("SumCharges past MaxNanos: err = %v, want ErrCounterOverflow", err)
 	}
 }
@@ -88,7 +89,7 @@ func TestChargesLandWhereTheStoresClockSays(t *testing.T) {
 	days := []int{0, 1, 8} // Monday, Tuesday, and Tuesday a week on
 	for _, day := range days {
 		at = start.AddDate(0, 0, day)
-		receipt, err := usage.Charge(ctx, limes.ChargeRequest{Subject: subject, Amount: amount}, nil)
+		receipt, err := usage.Charge(ctx, meter.ChargeRequest{Subject: subject, Amount: amount}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -96,7 +97,7 @@ func TestChargesLandWhereTheStoresClockSays(t *testing.T) {
 			t.Errorf("the charge made on day %d is at %s, %v; want %s", day, got.At, err, at)
 		}
 	}
-	page, err := ledger.SumCharges(ctx, limes.SumChargesRequest{TenantID: tenant, From: start, To: start.Add(period), Bucket: limes.ChargeBucketDay})
+	page, err := ledger.SumCharges(ctx, meter.SumChargesRequest{TenantID: tenant, From: start, To: start.Add(period), Bucket: meter.ChargeBucketDay})
 	if err != nil {
 		t.Fatal(err)
 	}

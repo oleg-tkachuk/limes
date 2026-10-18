@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // watchWait bounds how long a check waits for the watcher to clear.
@@ -101,7 +102,7 @@ func TestRevocationWatcherIgnoresOtherWrites(t *testing.T) {
 	if err := f.records.Insert(mine, limes.InsertRequest{Capability: c}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.usage.Charge(mine, limes.ChargeRequest{Subject: meterSubject(c.ID, f.mine), Amount: 1}, nil); err != nil {
+	if _, err := f.usage.Charge(mine, meter.ChargeRequest{Subject: meterSubject(c.ID, f.mine), Amount: 1}, nil); err != nil {
 		t.Fatal(err)
 	}
 	// The parent's revocation is on record already, so revoking it again

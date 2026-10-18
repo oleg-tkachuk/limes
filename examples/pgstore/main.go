@@ -22,6 +22,7 @@ import (
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/examples/internal/demo"
 	"github.com/oleg-tkachuk/limes/jwks"
+	"github.com/oleg-tkachuk/limes/meter"
 	"github.com/oleg-tkachuk/limes/pgstore"
 )
 
@@ -117,7 +118,7 @@ func main() {
 	tenant := uuid.New()
 	inTenant := pgstore.WithTenant(ctx, tenant)
 
-	_, err = usage.SetTenantBudget(inTenant, limes.SetTenantBudgetRequest{
+	_, err = usage.SetTenantBudget(inTenant, meter.SetTenantBudgetRequest{
 		TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("100.00"), UnitCode: unit},
 	})
 	demo.Must(log, err, "set the tenant's budget")
@@ -146,9 +147,9 @@ func main() {
 		"capability", verified.Capability().ID)
 
 	const query = "limes capability tokens"
-	receipt, err := usage.Charge(inTenant, limes.ChargeRequest{
+	receipt, err := usage.Charge(inTenant, meter.ChargeRequest{
 		Subject: verified.MeterSubject(), Amount: limes.MustParseAmount("0.35"), Op: "search", Actor: "research-agent",
-	}, func(ctx context.Context, charged limes.Charged[pgx.Tx]) error {
+	}, func(ctx context.Context, charged meter.Charged[pgx.Tx]) error {
 		// Inside the charge's transaction: this row commits with the charge,
 		// or neither does, and names the charge it records.
 		log.Info("inside the charge's transaction: recording the call in the service's own table",
@@ -167,7 +168,7 @@ func main() {
 	_, err = records.GetRecord(elsewhere, c.ID)
 	demo.Refused(log, err, limes.ErrNotFound, "read the capability scoped to another tenant")
 	_, err = usage.GetUsage(elsewhere, c.ID)
-	demo.Refused(log, err, limes.ErrUsageNotFound, "read its usage scoped to another tenant")
+	demo.Refused(log, err, meter.ErrUsageNotFound, "read its usage scoped to another tenant")
 
 	demo.Must(log, records.Revoke(inTenant, limes.RevokeRequest{CapabilityID: c.ID, Note: "agent finished", Actor: "operator"}), "revoke")
 	log.Info("revoked the capability", "capability", c.ID)

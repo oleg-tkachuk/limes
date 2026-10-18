@@ -9,9 +9,10 @@
 //
 //   - Per-call attribution: every call carries the capability ID, so audit and
 //     cost roll up by it, down to which run of which agent spent what.
-//   - Budget enforcement at the authorisation boundary: the Meter refuses a
-//     charge once a ceiling is exhausted, rather than business logic
-//     discovering it three calls deep.
+//   - Budget enforcement at the authorisation boundary: the meter
+//     ([github.com/oleg-tkachuk/limes/meter]) refuses a charge once a
+//     ceiling is exhausted, rather than business logic discovering it three
+//     calls deep.
 //   - Mid-flight revocation: a compromised agent's capability is revoked,
 //     together with everything it delegated.
 //   - Sub-capabilities without an operator: an orchestrator narrows its own
@@ -32,8 +33,11 @@
 // Two standards the verifier relies on are packages of their own, usable
 // without the rest: [github.com/oleg-tkachuk/limes/jwks] for key sets (RFC
 // 7517) and [github.com/oleg-tkachuk/limes/dpop] for proof of possession
-// (RFC 9449). [github.com/oleg-tkachuk/limes/inspect] reads a token without
-// verifying it, for tooling. memstore, storetest and metertest serve stores;
+// (RFC 9449). [github.com/oleg-tkachuk/limes/meter] counts requests and
+// spend against a capability's ceilings and keeps the charges ledger; a
+// consumer that only verifies tokens never imports it.
+// [github.com/oleg-tkachuk/limes/inspect] reads a token without verifying
+// it, for tooling. memstore, storetest and metertest serve stores;
 // dpop/dpoptest and jwks/jwkstest check a replay cache, a nonce source and a
 // key resolver. Two modules of their own ship stores with a driver the root
 // module does not resolve: github.com/oleg-tkachuk/limes/pgstore, every store
@@ -52,21 +56,17 @@
 //     in-memory map is a valid implementation. A store that scopes calls to
 //     a tenant refuses one whose request names another with
 //     [ErrScopeMismatch].
-//   - [UsageStore] — request and spend counters and the charges ledger; the
-//     union of [Meter], [MeterReader], [TenantBudgets] and [UsageHousekeeping]. Every charge
-//     and request also counts against each ancestor. Generic in TX, the
-//     consumer's transaction handle; see "No-transaction mode" below.
+//   - [meter.UsageStore] — request and spend counters and the charges
+//     ledger, for a consumer that meters; see package meter.
 //   - [KeyResolver] — public verification keys. [jwks.Static] ships as a
 //     working implementation and supports rotation via SetKey / RemoveKey;
 //     [jwks.Remote] fetches an issuer's JWKS for verifiers that run
 //     apart from it.
 //
-// Eight more are needed only with the feature they serve:
-// [BiscuitRevocationStore] to accept Biscuit tokens, [CopyUsageReader] to
-// show a Biscuit copy's own counters, [LedgerReader] to sum a tenant's
-// charges for billing and reports, [RecordCensus] to count capability
-// records by disposition across tenants, [TenantRecordEraser] and
-// [TenantUsageEraser] to remove a tenant, [dpop.ReplayCache] to share DPoP replay
+// More are needed only with the feature they serve:
+// [BiscuitRevocationStore] to accept Biscuit tokens, [RecordCensus] to count
+// capability records by disposition across tenants, [TenantRecordEraser] to
+// remove a tenant, [dpop.ReplayCache] to share DPoP replay
 // state across replicas ([dpop.MemoryReplayCache] ships for one process), and
 // [dpop.Nonces] to require server nonces ([dpop.HMACNonces] ships, and works
 // across replicas holding the same keys).
@@ -80,23 +80,8 @@
 // to the consumer.
 //
 // Every read names what it reads — Store.GetRecord a capability,
-// MeterReader.GetUsage the counters, TenantBudgets.GetTenantBudget a ceiling —
-// so one type may implement Store and UsageStore together, or each apart as
-// memstore does.
-//
-// # No-transaction mode
-//
-// Meter.Charge and Meter.Settle take an onCharged callback that runs inside
-// the charge, receiving the consumer's transaction handle and the charge's
-// receipt (Charged), so a side effect such as an outbox write commits
-// atomically with the spend and names the charge. The module never
-// constructs, inspects or constrains that handle — it only threads it back.
-// That is what keeps this package free of any database dependency.
-//
-// A consumer with no transactional storage instantiates UsageStore[struct{}]
-// and always passes nil for onCharged. Everything else behaves identically;
-// only the atomic-side-effect guarantee is forgone, and that limitation is
-// store-dependent rather than a degradation of the primitive.
+// meter.MeterReader.GetUsage the counters — so one type may implement Store
+// and meter.UsageStore together, or each apart as memstore does.
 //
 // # Guarantees
 //

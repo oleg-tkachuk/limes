@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // A hold ends with its capability at the latest. A revoked capability's
@@ -26,9 +27,9 @@ func TestAHoldEndsWithItsCapability(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := meterSubject(c.ID, f.mine)
-	reserve := func() limes.Reservation {
+	reserve := func() meter.Reservation {
 		t.Helper()
-		r, err := f.usage.Reserve(mine, limes.ReserveRequest{Subject: subject, Amount: 1, TTL: farTTL})
+		r, err := f.usage.Reserve(mine, meter.ReserveRequest{Subject: subject, Amount: 1, TTL: farTTL})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -41,14 +42,14 @@ func TestAHoldEndsWithItsCapability(t *testing.T) {
 	if err := f.records.Revoke(mine, limes.RevokeRequest{CapabilityID: c.ID}); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := f.usage.ReleaseExpired(every, limes.ReleaseExpiredRequest{}); err != nil || got.Released != 0 {
+	if got, err := f.usage.ReleaseExpired(every, meter.ReleaseExpiredRequest{}); err != nil || got.Released != 0 {
 		t.Fatalf("ReleaseExpired after the revocation = %+v, %v; want nothing released before the holds expire", got, err)
 	}
-	if _, err := f.usage.Settle(mine, limes.SettleRequest{Subject: subject, ReservationID: settled.ID, Amount: 1}, nil); err != nil {
+	if _, err := f.usage.Settle(mine, meter.SettleRequest{Subject: subject, ReservationID: settled.ID, Amount: 1}, nil); err != nil {
 		t.Fatalf("settling a revoked capability's hold: %v", err)
 	}
 	f.clock.Advance(left.ExpiresAt.Sub(f.clock.Now()))
-	if got, err := f.usage.ReleaseExpired(every, limes.ReleaseExpiredRequest{}); err != nil || got.Released != 1 {
+	if got, err := f.usage.ReleaseExpired(every, meter.ReleaseExpiredRequest{}); err != nil || got.Released != 1 {
 		t.Fatalf("ReleaseExpired once the capability expired = %+v, %v; want the other hold released", got, err)
 	}
 	if usage, err := f.usage.GetUsage(mine, c.ID); err != nil || usage.ReservedAmount != 0 || usage.SpentAmount != 1 {

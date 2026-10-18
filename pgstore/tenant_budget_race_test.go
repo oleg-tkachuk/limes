@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // sqlFirstCharge stands in for a first charge in flight: it creates the
@@ -53,7 +54,7 @@ func setBudgetDuringFirstCharge(t *testing.T, usage *UsageStore, tenant uuid.UUI
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := usage.SetTenantBudget(WithTenant(ctx, tenant), limes.SetTenantBudgetRequest{
+		_, err := usage.SetTenantBudget(WithTenant(ctx, tenant), meter.SetTenantBudgetRequest{
 			TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: raceCeiling, UnitCode: unit},
 		})
 		done <- err

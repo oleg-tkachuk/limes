@@ -177,10 +177,13 @@ major the module path does not carry.
 
 ## 8. Deferred
 
-- Moving the meter out of the root: it leans on the capability types, so it
-  stays until a v2 (decision 7 splits only `jwks` and `dpop`). Its
-  OpenTelemetry instruments did move, to the module `otelmetric` (round
-  three), so the root resolves no OpenTelemetry.
+- Moving the meter out of the root. **Done** before 1.0, in v0.100.0: the
+  package `meter` holds the usage store, the ledger and their types and
+  sentinels, and depends on `limes` for the capability types, never the
+  other way, so a consumer that only verifies tokens does not take billing
+  into its API. `MeterSubject`, the ceilings, `Nanos` and the refusals
+  `ErrorResponse` answers stay in `limes`. Its OpenTelemetry instruments
+  had already moved, to the module `otelmetric` (round three).
 - A Postgres reference store in its own module, to prove `Store` and
   `UsageStore` against row-level security before they freeze. **Done:**
   `pgstore`, held to storetest and metertest under row-level security; it

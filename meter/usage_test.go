@@ -1,4 +1,4 @@
-package limes
+package meter
 
 import (
 	"errors"
@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+
+	"github.com/oleg-tkachuk/limes"
 )
 
 // A meter request names its ceilings only through the subject: a field of
@@ -29,12 +31,12 @@ func TestRefundRequestNamesOneAmount(t *testing.T) {
 		req  RefundRequest
 		want error
 	}{
-		"an amount":          {RefundRequest{ChargeID: charge, Amount: NanosPerUnit}, nil},
+		"an amount":          {RefundRequest{ChargeID: charge, Amount: limes.NanosPerUnit}, nil},
 		"remaining":          {RefundRequest{ChargeID: charge, Remaining: true}, nil},
-		"neither":            {RefundRequest{ChargeID: charge}, ErrInvalidRequest},
-		"both":               {RefundRequest{ChargeID: charge, Amount: NanosPerUnit, Remaining: true}, ErrInvalidRequest},
-		"a negative amount":  {RefundRequest{ChargeID: charge, Amount: -NanosPerUnit}, ErrInvalidAmount},
-		"past the most kept": {RefundRequest{ChargeID: charge, Amount: MaxNanos + 1}, ErrInvalidAmount},
+		"neither":            {RefundRequest{ChargeID: charge}, limes.ErrInvalidRequest},
+		"both":               {RefundRequest{ChargeID: charge, Amount: limes.NanosPerUnit, Remaining: true}, limes.ErrInvalidRequest},
+		"a negative amount":  {RefundRequest{ChargeID: charge, Amount: -limes.NanosPerUnit}, limes.ErrInvalidAmount},
+		"past the most kept": {RefundRequest{ChargeID: charge, Amount: limes.MaxNanos + 1}, limes.ErrInvalidAmount},
 	}
 	for name, tc := range cases {
 		if err := tc.req.Validate(); !errors.Is(err, tc.want) || (tc.want == nil && err != nil) {
@@ -44,18 +46,18 @@ func TestRefundRequestNamesOneAmount(t *testing.T) {
 }
 
 func TestTenantBudgetUtilization(t *testing.T) {
-	const ceiling = 10 * NanosPerUnit
+	const ceiling = 10 * limes.NanosPerUnit
 	cases := map[string]struct {
 		budget  TenantBudget
 		pct     float64
 		limited bool
 	}{
-		"no ceiling":       {TenantBudget{Ceiling: BudgetCeiling{Unlimited: true}, SpentAmount: ceiling}, 0, false},
+		"no ceiling":       {TenantBudget{Ceiling: limes.BudgetCeiling{Unlimited: true}, SpentAmount: ceiling}, 0, false},
 		"a ceiling of 0":   {TenantBudget{SpentAmount: 0}, wholePct, true},
-		"nothing spent":    {TenantBudget{Ceiling: BudgetCeiling{Max: ceiling}}, 0, true},
-		"a quarter spent":  {TenantBudget{Ceiling: BudgetCeiling{Max: ceiling}, SpentAmount: ceiling / 4}, wholePct / 4, true},
-		"all spent":        {TenantBudget{Ceiling: BudgetCeiling{Max: ceiling}, SpentAmount: ceiling}, wholePct, true},
-		"past the ceiling": {TenantBudget{Ceiling: BudgetCeiling{Max: ceiling}, SpentAmount: 2 * ceiling}, wholePct, true},
+		"nothing spent":    {TenantBudget{Ceiling: limes.BudgetCeiling{Max: ceiling}}, 0, true},
+		"a quarter spent":  {TenantBudget{Ceiling: limes.BudgetCeiling{Max: ceiling}, SpentAmount: ceiling / 4}, wholePct / 4, true},
+		"all spent":        {TenantBudget{Ceiling: limes.BudgetCeiling{Max: ceiling}, SpentAmount: ceiling}, wholePct, true},
+		"past the ceiling": {TenantBudget{Ceiling: limes.BudgetCeiling{Max: ceiling}, SpentAmount: 2 * ceiling}, wholePct, true},
 	}
 	for name, tc := range cases {
 		if pct, limited := tc.budget.Utilization(); pct != tc.pct || limited != tc.limited {
@@ -79,7 +81,7 @@ func TestOverrunPolicyNamesAndValidates(t *testing.T) {
 		if got := tc.policy.String(); got != tc.name {
 			t.Errorf("String() = %q, want %q", got, tc.name)
 		}
-		if err := tc.policy.Validate(); tc.valid != (err == nil) || (err != nil && !errors.Is(err, ErrInvalidRequest)) {
+		if err := tc.policy.Validate(); tc.valid != (err == nil) || (err != nil && !errors.Is(err, limes.ErrInvalidRequest)) {
 			t.Errorf("%s: Validate() = %v, want valid=%v", tc.policy, err, tc.valid)
 		}
 	}
@@ -98,10 +100,10 @@ func TestCopyUsageRequestValidate(t *testing.T) {
 	}{
 		"one id":        {capID, [][]byte{[]byte("copy")}, nil},
 		"at the limit":  {capID, atLimit, nil},
-		"no capability": {uuid.Nil, [][]byte{[]byte("copy")}, ErrInvalidRequest},
-		"no id":         {capID, nil, ErrInvalidRequest},
-		"past limit":    {capID, append(atLimit[:MaxCopyUsageIDs:MaxCopyUsageIDs], []byte("one more")), ErrInvalidRequest},
-		"empty id":      {capID, [][]byte{[]byte("copy"), {}}, ErrInvalidRequest},
+		"no capability": {uuid.Nil, [][]byte{[]byte("copy")}, limes.ErrInvalidRequest},
+		"no id":         {capID, nil, limes.ErrInvalidRequest},
+		"past limit":    {capID, append(atLimit[:MaxCopyUsageIDs:MaxCopyUsageIDs], []byte("one more")), limes.ErrInvalidRequest},
+		"empty id":      {capID, [][]byte{[]byte("copy"), {}}, limes.ErrInvalidRequest},
 	}
 	for name, tc := range cases {
 		if err := (CopyUsageRequest{CapabilityID: tc.capID, RevocationIDs: tc.ids}).Validate(); !errors.Is(err, tc.want) {

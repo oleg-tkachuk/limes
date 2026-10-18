@@ -2,7 +2,6 @@ package limes
 
 import (
 	"context"
-	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -124,29 +123,5 @@ func TestLinkedMeterSubjectRefusesAMistypedPart(t *testing.T) {
 	s = link.NewMeterSubject(link.MeterSubjectFields{Copies: copies}).(MeterSubject)
 	if !reflect.DeepEqual(s.Copies(), copies) {
 		t.Errorf("copies = %+v, want %+v", s.Copies(), copies)
-	}
-}
-
-// An amount is counted in a unit, and none is assumed: a request that moves
-// one refuses a subject naming none, while a bump, which counts a request
-// alone, takes it.
-func TestAnAmountNeedsAUnit(t *testing.T) {
-	none := MeterSubject{capabilityID: uuid.New(), tenantID: uuid.New()}
-	for name, err := range map[string]error{
-		"Charge":  ChargeRequest{Subject: none, Amount: NanosPerUnit}.Validate(),
-		"Reserve": ReserveRequest{Subject: none, Amount: NanosPerUnit}.Validate(),
-		"Settle":  SettleRequest{Subject: none, Amount: NanosPerUnit}.Validate(),
-	} {
-		if !errors.Is(err, ErrInvalidRequest) {
-			t.Errorf("%s of a subject naming no unit: err = %v, want ErrInvalidRequest", name, err)
-		}
-	}
-	for name, err := range map[string]error{
-		"Bump":    BumpRequest{Subject: none}.Validate(),
-		"Release": ReleaseRequest{Subject: none}.Validate(),
-	} {
-		if err != nil {
-			t.Errorf("%s of a subject naming no unit: %v", name, err)
-		}
 	}
 }

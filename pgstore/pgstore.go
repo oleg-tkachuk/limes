@@ -1,9 +1,9 @@
 // Package pgstore is the reference implementation of the limes storage
 // contracts over PostgreSQL: limes.Store and limes.BiscuitRevocationStore for
-// capability records and revocations, limes.UsageStore[pgx.Tx] and
-// limes.CopyUsageReader for the meter, limes.LedgerReader and
+// capability records and revocations, meter.UsageStore[pgx.Tx] and
+// meter.CopyUsageReader for the meter, meter.LedgerReader and
 // limes.RecordCensus for reports, and
-// limes.TenantRecordEraser and limes.TenantUsageEraser for removing a
+// limes.TenantRecordEraser and meter.TenantUsageEraser for removing a
 // tenant. It passes the module's own contract
 // suites, storetest and metertest, which is how a consumer knows it keeps
 // every rule a store must keep.
@@ -59,7 +59,7 @@
 // within the caches' TTL.
 //
 // A Ledger sums a tenant's charges for billing and reports
-// (limes.LedgerReader), so a consumer reads the ledger through it rather
+// (meter.LedgerReader), so a consumer reads the ledger through it rather
 // than through the charges table, whose columns are this package's own. A
 // Census counts the capability records (limes.RecordCensus) for the same
 // reason: of one tenant, scoped to it as every call naming a tenant, or of
@@ -83,8 +83,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-
-	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // schema is the PostgreSQL schema every table of the store lives in. The
@@ -145,8 +144,8 @@ type Config struct {
 	// the schema's own settings passes CheckSchemaScope here.
 	CheckScope func(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error
 	// MaxCopiesPerCapability is how many Biscuit copies the usage store
-	// counts for one capability (limes.Meter, "Copies of a Biscuit"). Zero:
-	// limes.DefaultMaxCopiesPerCapability; negative is refused. The record
+	// counts for one capability (meter.Meter, "Copies of a Biscuit"). Zero:
+	// meter.DefaultMaxCopiesPerCapability; negative is refused. The record
 	// store ignores it.
 	MaxCopiesPerCapability int
 }
@@ -200,7 +199,7 @@ func newConn(cfg Config) (conn, error) {
 	case cfg.MaxCopiesPerCapability < 0:
 		return conn{}, fmt.Errorf("pgstore: Config.MaxCopiesPerCapability %d is negative", cfg.MaxCopiesPerCapability)
 	case cfg.MaxCopiesPerCapability == 0:
-		cfg.MaxCopiesPerCapability = limes.DefaultMaxCopiesPerCapability
+		cfg.MaxCopiesPerCapability = meter.DefaultMaxCopiesPerCapability
 	}
 	checkReadOnly, checkEvery := checkSchemaReadOnly, checkSchemaAdmitsEvery
 	if cfg.CheckScope == nil && cfg.Scope == nil {

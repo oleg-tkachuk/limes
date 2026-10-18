@@ -1,4 +1,4 @@
-// Package metertest checks a limes.UsageStore against the module's contract
+// Package metertest checks a meter.UsageStore against the module's contract
 // — its Meter, tenant budgets and housekeeping — the way testing/fstest
 // checks an fs.FS. A UsageStore is the consumer's to write,
 // and most of its contract lives in request fields — a store that ignores
@@ -54,6 +54,7 @@ import (
 	"github.com/oleg-tkachuk/limes/internal/fields"
 	"github.com/oleg-tkachuk/limes/internal/link"
 	"github.com/oleg-tkachuk/limes/internal/watchdog"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // DefaultCheckTimeout bounds a check whose Env sets no CheckTimeout.
@@ -66,7 +67,7 @@ type Env[TX any] struct {
 	// TenantCtx, and ListTenantBudgets under ListCtx, when the Env sets them.
 	Ctx context.Context
 	// Usage is the store under test, with no usage recorded.
-	Usage limes.UsageStore[TX]
+	Usage meter.UsageStore[TX]
 	// Tenant is a tenant the store can charge, with no ceiling yet.
 	Tenant uuid.UUID
 	// NewCapability records a capability of Tenant as spec describes it, so
@@ -110,8 +111,8 @@ type Env[TX any] struct {
 	// tenants. Optional: without it, Ctx.
 	ListCtx context.Context
 	// Ledger reads the store's charges ledger. Optional: without it, the
-	// checks of limes.LedgerReader are skipped.
-	Ledger limes.LedgerReader
+	// checks of meter.LedgerReader are skipped.
+	Ledger meter.LedgerReader
 	// Now reads the store's clock, which stands still while a check runs
 	// but for Advance. Optional: without it, the checks of the ledger's
 	// time buckets, of a hold ending with its capability and of a hold
@@ -124,7 +125,7 @@ type Env[TX any] struct {
 	// without it, the checks of that are skipped.
 	ScopesTenants bool
 	// MaxCopiesPerCapability is the quota of Biscuit copies per capability
-	// the store under test was built with (limes.Meter, "Copies of a
+	// the store under test was built with (meter.Meter, "Copies of a
 	// Biscuit"). Optional: without it, the check of the quota is skipped. Set
 	// it above any check's own copies — 16 is room enough.
 	MaxCopiesPerCapability int
@@ -232,7 +233,7 @@ func newFixture[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) fixture[
 	if f.child, err = env.newCapability(f.root, limes.BudgetCeiling{Max: childBudget}); err != nil {
 		t.Fatalf("child capability: %v", err)
 	}
-	if _, err := env.Usage.SetTenantBudget(env.Ctx, limes.SetTenantBudgetRequest{
+	if _, err := env.Usage.SetTenantBudget(env.Ctx, meter.SetTenantBudgetRequest{
 		TenantID: env.Tenant, Ceiling: limes.BudgetCeiling{Max: tenantBudget, UnitCode: unit},
 	}); err != nil {
 		t.Fatalf("tenant budget: %v", err)
@@ -299,7 +300,7 @@ func (f fixture[TX]) childSubject() limes.MeterSubject {
 
 // charge charges req against the fixture's child, its ceiling, tenant and
 // unit, unless the request's subject names another capability or ceiling.
-func (f fixture[TX]) charge(req limes.ChargeRequest, onCharged func(context.Context, limes.Charged[TX]) error) (limes.ChargeReceipt, error) {
+func (f fixture[TX]) charge(req meter.ChargeRequest, onCharged func(context.Context, meter.Charged[TX]) error) (meter.ChargeReceipt, error) {
 	s := req.Subject
 	requests, budget := s.Requests(), s.Budget()
 	spec := subjectSpec{capID: s.CapabilityID(), tenant: f.Tenant, requests: &requests, budget: &budget, copies: s.Copies()}
@@ -317,7 +318,7 @@ func (f fixture[TX]) charge(req limes.ChargeRequest, onCharged func(context.Cont
 func (f fixture[TX]) spent(t *testing.T, id uuid.UUID) limes.Nanos {
 	t.Helper()
 	u, err := f.Usage.GetUsage(f.Ctx, id)
-	if errors.Is(err, limes.ErrUsageNotFound) {
+	if errors.Is(err, meter.ErrUsageNotFound) {
 		return 0
 	}
 	if err != nil {
@@ -463,14 +464,14 @@ func checkTenantCountsBeforeACeiling[TX any](t *testing.T, env Env[TX]) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := env.Usage.Charge(env.Ctx, limes.ChargeRequest{
+	if _, err := env.Usage.Charge(env.Ctx, meter.ChargeRequest{
 		Subject: newSubject(subjectSpec{capID: id, tenant: env.Tenant, unit: unit}),
 		Amount:  spent,
 	}, nil); err != nil {
 		t.Fatalf("charge: %v", err)
 	}
 	reserve := func() error {
-		_, err := env.Usage.Reserve(env.Ctx, limes.ReserveRequest{
+		_, err := env.Usage.Reserve(env.Ctx, meter.ReserveRequest{
 			Subject: newSubject(subjectSpec{capID: id, tenant: env.Tenant, unit: unit}),
 			Amount:  held,
 		})
@@ -483,7 +484,7 @@ func checkTenantCountsBeforeACeiling[TX any](t *testing.T, env Env[TX]) {
 	if err != nil || b.SpentAmount != spent || b.ReservedAmount != held || !b.Ceiling.Unlimited || b.ResourceVersion != 0 {
 		t.Fatalf("GetTenantBudget before any ceiling = %+v, %v; want %v spent, %v held, no ceiling, version 0", b, err, spent, held)
 	}
-	set, err := env.Usage.SetTenantBudget(env.Ctx, limes.SetTenantBudgetRequest{
+	set, err := env.Usage.SetTenantBudget(env.Ctx, meter.SetTenantBudgetRequest{
 		TenantID: env.Tenant, Ceiling: limes.BudgetCeiling{Max: ceiling, UnitCode: unit},
 	})
 	if err != nil || set.SpentAmount != spent || set.ReservedAmount != held {
@@ -492,7 +493,7 @@ func checkTenantCountsBeforeACeiling[TX any](t *testing.T, env Env[TX]) {
 	if err := reserve(); !errors.Is(err, limes.ErrTenantBudgetExceeded) {
 		t.Errorf("a hold past the new ceiling: err = %v, want ErrTenantBudgetExceeded", err)
 	}
-	if _, err := env.Usage.Charge(env.Ctx, limes.ChargeRequest{
+	if _, err := env.Usage.Charge(env.Ctx, meter.ChargeRequest{
 		Subject: newSubject(subjectSpec{capID: id, tenant: env.Tenant, unit: unit}),
 		Amount:  one,
 	}, nil); !errors.Is(err, limes.ErrTenantBudgetExceeded) {
@@ -502,7 +503,7 @@ func checkTenantCountsBeforeACeiling[TX any](t *testing.T, env Env[TX]) {
 
 func checkRejectionMovesNothing[TX any](t *testing.T, f fixture[TX]) {
 	ran := false
-	r, err := f.charge(limes.ChargeRequest{Amount: childBudget + one}, func(context.Context, limes.Charged[TX]) error { ran = true; return nil })
+	r, err := f.charge(meter.ChargeRequest{Amount: childBudget + one}, func(context.Context, meter.Charged[TX]) error { ran = true; return nil })
 	if !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Fatalf("charge past the ceiling: err = %v, want ErrBudgetExceeded", err)
 	}
@@ -519,18 +520,18 @@ func checkExternalRefChargesOnce[TX any](t *testing.T, f fixture[TX]) {
 	// charge counts no requests.
 	const copyRequests = 10
 	fanOuts := 0
-	onCharged := func(context.Context, limes.Charged[TX]) error { fanOuts++; return nil }
-	first, err := f.charge(limes.ChargeRequest{Amount: 2 * one, ExternalRef: "call-1"}, onCharged)
+	onCharged := func(context.Context, meter.Charged[TX]) error { fanOuts++; return nil }
+	first, err := f.charge(meter.ChargeRequest{Amount: 2 * one, ExternalRef: "call-1"}, onCharged)
 	if err != nil || first.Replayed {
 		t.Fatalf("first charge = %+v, %v", first, err)
 	}
-	again, err := f.charge(limes.ChargeRequest{Amount: 2 * one, ExternalRef: "call-1"}, onCharged)
+	again, err := f.charge(meter.ChargeRequest{Amount: 2 * one, ExternalRef: "call-1"}, onCharged)
 	if err != nil || !again.Replayed || again.ChargeID != first.ChargeID || again.SpentAmount != 2*one {
 		t.Fatalf("repeated charge = %+v, %v; want a replay of %s at spend 2", again, err, first.ChargeID)
 	}
 	// The same name for a different cost is the caller's bug; replaying the
 	// first receipt would hide it.
-	if r, err := f.charge(limes.ChargeRequest{Amount: 5 * one, ExternalRef: "call-1"}, onCharged); !errors.Is(err, limes.ErrExternalRefConflict) {
+	if r, err := f.charge(meter.ChargeRequest{Amount: 5 * one, ExternalRef: "call-1"}, onCharged); !errors.Is(err, meter.ErrExternalRefConflict) {
 		t.Fatalf("the ref again for another amount = %+v, %v; want ErrExternalRefConflict", r, err)
 	}
 	// So is the same name for the same amount in another unit or for
@@ -543,13 +544,13 @@ func checkExternalRefChargesOnce[TX any](t *testing.T, f fixture[TX]) {
 		"under a Biscuit copy": newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget),
 			copies: []limes.CopyCeiling{{RevocationID: []byte("another-copy"), Requests: &limes.RequestCeiling{Max: copyRequests}}}}),
 	} {
-		want := limes.ErrExternalRefConflict
+		want := meter.ErrExternalRefConflict
 		// A store that scopes tenants refuses the call before it reads
 		// the ledger: Ctx is not that tenant's.
 		if f.ScopesTenants && subject.TenantID() != f.Tenant {
 			want = limes.ErrScopeMismatch
 		}
-		r, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: subject, Amount: 2 * one, ExternalRef: "call-1"}, onCharged)
+		r, err := f.Usage.Charge(f.Ctx, meter.ChargeRequest{Subject: subject, Amount: 2 * one, ExternalRef: "call-1"}, onCharged)
 		if !errors.Is(err, want) {
 			t.Errorf("the ref again %s = %+v, %v; want %v", name, r, err, want)
 		}
@@ -562,11 +563,11 @@ func checkExternalRefChargesOnce[TX any](t *testing.T, f fixture[TX]) {
 		t.Errorf("onCharged ran %d times, want once", fanOuts)
 	}
 	// The name is per capability, and no name never deduplicates.
-	if r, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: f.root, budget: budgetOf(rootBudget)}), Amount: one, ExternalRef: "call-1"}, nil); err != nil || r.Replayed {
+	if r, err := f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: f.root, budget: budgetOf(rootBudget)}), Amount: one, ExternalRef: "call-1"}, nil); err != nil || r.Replayed {
 		t.Errorf("same ref on another capability = %+v, %v; want a fresh charge", r, err)
 	}
 	for range 2 {
-		if r, err := f.charge(limes.ChargeRequest{Amount: one}, nil); err != nil || r.Replayed {
+		if r, err := f.charge(meter.ChargeRequest{Amount: one}, nil); err != nil || r.Replayed {
 			t.Errorf("charge without a ref = %+v, %v; want a fresh charge", r, err)
 		}
 	}
@@ -584,7 +585,7 @@ func checkExternalRefConcurrent[TX any](t *testing.T, f fixture[TX]) {
 	)
 	for range concurrentDeliveries {
 		wg.Go(func() {
-			r, err := f.charge(limes.ChargeRequest{Amount: 2 * one, ExternalRef: "call-1"}, nil)
+			r, err := f.charge(meter.ChargeRequest{Amount: 2 * one, ExternalRef: "call-1"}, nil)
 			if err != nil {
 				t.Errorf("charge: %v", err)
 				return
@@ -610,18 +611,18 @@ func checkExternalRefConcurrent[TX any](t *testing.T, f fixture[TX]) {
 const chargedOp limes.Op = "index:search"
 
 func checkChargeByRef[TX any](t *testing.T, f fixture[TX]) {
-	if _, err := f.Usage.ChargeByRef(f.Ctx, limes.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: "call-1"}); !errors.Is(err, limes.ErrChargeNotFound) {
+	if _, err := f.Usage.ChargeByRef(f.Ctx, meter.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: "call-1"}); !errors.Is(err, meter.ErrChargeNotFound) {
 		t.Fatalf("before any charge: err = %v, want ErrChargeNotFound", err)
 	}
 	const actor = "reporter"
-	r, err := f.charge(limes.ChargeRequest{Amount: 3 * one, ExternalRef: "call-1", Op: chargedOp, Actor: actor}, nil)
+	r, err := f.charge(meter.ChargeRequest{Amount: 3 * one, ExternalRef: "call-1", Op: chargedOp, Actor: actor}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: r.ChargeID, Amount: one}); err != nil {
+	if _, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Amount: one}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := f.Usage.ChargeByRef(f.Ctx, limes.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: "call-1"})
+	got, err := f.Usage.ChargeByRef(f.Ctx, meter.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: "call-1"})
 	if err != nil || got.ID != r.ChargeID || got.CapabilityID != f.child || got.Amount != 3*one ||
 		got.RefundedAmount != one || got.ExternalRef != "call-1" || got.UnitCode != unit || got.Overrun ||
 		got.TenantID != f.Tenant || got.Op != chargedOp || got.Actor != actor || got.At.IsZero() {
@@ -630,15 +631,15 @@ func checkChargeByRef[TX any](t *testing.T, f fixture[TX]) {
 	if byID, err := f.Usage.GetCharge(f.Ctx, r.ChargeID); err != nil || !reflect.DeepEqual(byID, got) {
 		t.Errorf("GetCharge = %+v, %v; want what ChargeByRef read, %+v", byID, err, got)
 	}
-	if _, err := f.Usage.GetCharge(f.Ctx, uuid.New()); !errors.Is(err, limes.ErrChargeNotFound) {
+	if _, err := f.Usage.GetCharge(f.Ctx, uuid.New()); !errors.Is(err, meter.ErrChargeNotFound) {
 		t.Errorf("GetCharge of an unknown id: err = %v, want ErrChargeNotFound", err)
 	}
-	if _, err := f.Usage.ChargeByRef(f.Ctx, limes.ChargeByRefRequest{CapabilityID: f.root, ExternalRef: "call-1"}); !errors.Is(err, limes.ErrChargeNotFound) {
+	if _, err := f.Usage.ChargeByRef(f.Ctx, meter.ChargeByRefRequest{CapabilityID: f.root, ExternalRef: "call-1"}); !errors.Is(err, meter.ErrChargeNotFound) {
 		t.Errorf("the ref on another capability: err = %v, want ErrChargeNotFound", err)
 	}
 	// A request that names no charge is the caller's bug, not a charge
 	// missing (ChargeByRefRequest.Validate).
-	for name, req := range map[string]limes.ChargeByRefRequest{
+	for name, req := range map[string]meter.ChargeByRefRequest{
 		"an empty ref":  {CapabilityID: f.child},
 		"no capability": {ExternalRef: "call-1"},
 	} {
@@ -649,22 +650,22 @@ func checkChargeByRef[TX any](t *testing.T, f fixture[TX]) {
 }
 
 func checkMalformed[TX any](t *testing.T, f fixture[TX]) {
-	for name, req := range map[string]limes.ChargeRequest{
-		"ref too long":      {ExternalRef: strings.Repeat("x", limes.MaxExternalRefBytes+1)},
+	for name, req := range map[string]meter.ChargeRequest{
+		"ref too long":      {ExternalRef: strings.Repeat("x", meter.MaxExternalRefBytes+1)},
 		"ref not printable": {ExternalRef: "call\n1"},
-		"unknown overrun":   {Overrun: limes.OverrunPolicyRecord + 1},
+		"unknown overrun":   {Overrun: meter.OverrunPolicyRecord + 1},
 	} {
 		req.Amount = 1
 		if _, err := f.charge(req, nil); !errors.Is(err, limes.ErrInvalidRequest) {
 			t.Errorf("%s: err = %v, want ErrInvalidRequest", name, err)
 		}
 	}
-	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{
-		Subject: f.childSubject(), ReservationID: uuid.New(), Amount: one, Overrun: limes.OverrunPolicyRecord + 1,
+	if _, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{
+		Subject: f.childSubject(), ReservationID: uuid.New(), Amount: one, Overrun: meter.OverrunPolicyRecord + 1,
 	}, nil); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("settle with an unknown overrun: err = %v, want ErrInvalidRequest", err)
 	}
-	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
+	if _, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{
 		Subject: f.childSubject(),
 		Amount:  one,
 		TTL:     -time.Minute,
@@ -674,27 +675,27 @@ func checkMalformed[TX any](t *testing.T, f fixture[TX]) {
 	// A malformed amount or unit is a malformed request, whatever else it
 	// matches.
 	for name, amount := range map[string]limes.Nanos{"negative": -one, "past MaxNanos": limes.MaxNanos + 1} {
-		if _, err := f.charge(limes.ChargeRequest{Amount: amount}, nil); !errors.Is(err, limes.ErrInvalidAmount) || !errors.Is(err, limes.ErrInvalidRequest) {
+		if _, err := f.charge(meter.ChargeRequest{Amount: amount}, nil); !errors.Is(err, limes.ErrInvalidAmount) || !errors.Is(err, limes.ErrInvalidRequest) {
 			t.Errorf("a charge of a %s amount: err = %v, want ErrInvalidAmount and ErrInvalidRequest", name, err)
 		}
-		if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: amount}); !errors.Is(err, limes.ErrInvalidRequest) {
+		if _, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: amount}); !errors.Is(err, limes.ErrInvalidRequest) {
 			t.Errorf("a hold of a %s amount: err = %v, want ErrInvalidRequest", name, err)
 		}
 	}
 	// A settle of a malformed amount, below its hold or past MaxNanos: below
 	// the hold no ceiling is asked, so only the amount's own check stops a
 	// negative one lowering every counter.
-	held, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one})
+	held, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: one})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for name, amount := range map[string]limes.Nanos{"negative": -one, "past MaxNanos": limes.MaxNanos + 1} {
-		_, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: f.childSubject(), ReservationID: held.ID, Amount: amount}, nil)
+		_, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: f.childSubject(), ReservationID: held.ID, Amount: amount}, nil)
 		if !errors.Is(err, limes.ErrInvalidAmount) {
 			t.Errorf("a settle of a %s amount: err = %v, want ErrInvalidAmount", name, err)
 		}
 	}
-	for name, req := range map[string]limes.SetTenantBudgetRequest{
+	for name, req := range map[string]meter.SetTenantBudgetRequest{
 		"in a unit that is not one": {TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: one, UnitCode: "usd"}},
 		"for no tenant":             {Ceiling: limes.BudgetCeiling{Max: one}},
 	} {
@@ -716,10 +717,10 @@ func checkCounterOverflow[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatal(err)
 	}
 	subject := newSubject(subjectSpec{capID: id, tenant: f.Tenant})
-	if _, err := f.charge(limes.ChargeRequest{Subject: subject, Amount: limes.MaxNanos, Overrun: limes.OverrunPolicyRecord}, nil); err != nil {
+	if _, err := f.charge(meter.ChargeRequest{Subject: subject, Amount: limes.MaxNanos, Overrun: meter.OverrunPolicyRecord}, nil); err != nil {
 		t.Fatalf("a charge of MaxNanos: %v", err)
 	}
-	if _, err := f.charge(limes.ChargeRequest{Subject: subject, Amount: 1, Overrun: limes.OverrunPolicyRecord}, nil); !errors.Is(err, limes.ErrCounterOverflow) || errors.Is(err, limes.ErrInvalidRequest) {
+	if _, err := f.charge(meter.ChargeRequest{Subject: subject, Amount: 1, Overrun: meter.OverrunPolicyRecord}, nil); !errors.Is(err, meter.ErrCounterOverflow) || errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("a nano past MaxNanos on the counter: err = %v, want ErrCounterOverflow and not ErrInvalidRequest", err)
 	}
 	if got := f.spent(t, id); got != limes.MaxNanos {
@@ -732,14 +733,14 @@ func checkCounterOverflow[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: fresh}), Amount: 1, Overrun: limes.OverrunPolicyRecord}, nil); !errors.Is(err, limes.ErrCounterOverflow) {
+	if _, err := f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: fresh}), Amount: 1, Overrun: meter.OverrunPolicyRecord}, nil); !errors.Is(err, meter.ErrCounterOverflow) {
 		t.Errorf("a nano past MaxNanos on the tenant alone: err = %v, want ErrCounterOverflow", err)
 	}
 	b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
+	if _, err := f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{
 		TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: unit}, ResetSpend: true, ExpectedVersion: b.ResourceVersion,
 	}); err != nil {
 		t.Fatal(err)
@@ -748,7 +749,7 @@ func checkCounterOverflow[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: child}), Amount: 1, Overrun: limes.OverrunPolicyRecord}, nil); !errors.Is(err, limes.ErrCounterOverflow) {
+	if _, err := f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: child}), Amount: 1, Overrun: meter.OverrunPolicyRecord}, nil); !errors.Is(err, meter.ErrCounterOverflow) {
 		t.Errorf("a nano past MaxNanos on the parent alone: err = %v, want ErrCounterOverflow", err)
 	}
 }
@@ -756,10 +757,10 @@ func checkCounterOverflow[TX any](t *testing.T, f fixture[TX]) {
 func checkOverrunRecord[TX any](t *testing.T, f fixture[TX]) {
 	// 40 crosses the child's 20, the root's 25 and the tenant's 30.
 	const amount = 40 * one
-	if _, err := f.charge(limes.ChargeRequest{Amount: amount}, nil); err == nil {
+	if _, err := f.charge(meter.ChargeRequest{Amount: amount}, nil); err == nil {
 		t.Fatal("a rejecting charge past every ceiling was accepted")
 	}
-	r, err := f.charge(limes.ChargeRequest{Amount: amount, Overrun: limes.OverrunPolicyRecord}, nil)
+	r, err := f.charge(meter.ChargeRequest{Amount: amount, Overrun: meter.OverrunPolicyRecord}, nil)
 	if err != nil || !r.Overrun || r.Replayed || r.SpentAmount != amount {
 		t.Fatalf("recording charge = %+v, %v; want %v spent, overrun", r, err, amount)
 	}
@@ -769,10 +770,10 @@ func checkOverrunRecord[TX any](t *testing.T, f fixture[TX]) {
 	if got := f.tenantSpent(t); got != amount {
 		t.Errorf("tenant spent %v, want %v", got, amount)
 	}
-	if _, err := f.charge(limes.ChargeRequest{Amount: cent}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
+	if _, err := f.charge(meter.ChargeRequest{Amount: cent}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Errorf("after an overrun a rejecting charge: err = %v, want ErrBudgetExceeded", err)
 	}
-	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
+	if _, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{
 		Subject: f.childSubject(),
 		Amount:  cent,
 	}); !errors.Is(err, limes.ErrBudgetExceeded) {
@@ -781,25 +782,25 @@ func checkOverrunRecord[TX any](t *testing.T, f fixture[TX]) {
 }
 
 func checkSettle[TX any](t *testing.T, f fixture[TX]) {
-	res, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
+	res, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{
 		Subject: f.childSubject(),
 		Amount:  10 * one,
 	})
 	if err != nil {
 		t.Fatalf("reserve: %v", err)
 	}
-	settle := func(amount limes.Nanos, p limes.OverrunPolicy) (limes.ChargeReceipt, error) {
-		return f.Usage.Settle(f.Ctx, limes.SettleRequest{
+	settle := func(amount limes.Nanos, p meter.OverrunPolicy) (meter.ChargeReceipt, error) {
+		return f.Usage.Settle(f.Ctx, meter.SettleRequest{
 			Subject:       f.childSubject(),
 			ReservationID: res.ID,
 			Amount:        amount,
 			Overrun:       p,
 		}, nil)
 	}
-	if _, err := settle(24*one, limes.OverrunPolicyReject); !errors.Is(err, limes.ErrBudgetExceeded) {
+	if _, err := settle(24*one, meter.OverrunPolicyReject); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Fatalf("rejecting settle past the ceiling: err = %v, want ErrBudgetExceeded", err)
 	}
-	r, err := settle(24*one, limes.OverrunPolicyRecord)
+	r, err := settle(24*one, meter.OverrunPolicyRecord)
 	if err != nil || !r.Overrun || r.SpentAmount != 24*one {
 		t.Fatalf("recording settle = %+v, %v; want 24 spent, overrun", r, err)
 	}
@@ -807,22 +808,22 @@ func checkSettle[TX any](t *testing.T, f fixture[TX]) {
 		t.Errorf("root after settling = %+v, %v; want nothing held", u, err)
 	}
 	// Replayed for the same amount, under any policy: the first receipt.
-	again, err := settle(24*one, limes.OverrunPolicyReject)
+	again, err := settle(24*one, meter.OverrunPolicyReject)
 	if err != nil || !again.Replayed || !again.Overrun || again.ChargeID != r.ChargeID || again.SpentAmount != 24*one {
 		t.Errorf("settling again = %+v, %v; want a replay of %s", again, err, r.ChargeID)
 	}
-	if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{Subject: f.childSubject(), ReservationID: res.ID}); err != nil {
+	if err := f.Usage.Release(f.Ctx, meter.ReleaseRequest{Subject: f.childSubject(), ReservationID: res.ID}); err != nil {
 		t.Errorf("releasing a settled reservation: %v", err)
 	}
 	onRoot := newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, budget: budgetOf(rootBudget), unit: unit})
-	other, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: onRoot, Amount: 0})
+	other, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: onRoot, Amount: 0})
 	if err != nil {
 		t.Fatalf("reserve nothing: %v", err)
 	}
-	if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{Subject: onRoot, ReservationID: other.ID}); err != nil {
+	if err := f.Usage.Release(f.Ctx, meter.ReleaseRequest{Subject: onRoot, ReservationID: other.ID}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, budget: budgetOf(rootBudget)}), ReservationID: other.ID, Amount: 0}, nil); !errors.Is(err, limes.ErrReservationNotFound) {
+	if _, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, budget: budgetOf(rootBudget)}), ReservationID: other.ID, Amount: 0}, nil); !errors.Is(err, meter.ErrReservationNotFound) {
 		t.Errorf("settling a released reservation: err = %v, want ErrReservationNotFound", err)
 	}
 }
@@ -831,11 +832,11 @@ func checkSettle[TX any](t *testing.T, f fixture[TX]) {
 // reservations: a direct charge has no reservation, and a store that files it
 // under the zero id would replay it to a Settle that names none.
 func checkSettleNil[TX any](t *testing.T, f fixture[TX]) {
-	if _, err := f.charge(limes.ChargeRequest{Amount: one}, nil); err != nil {
+	if _, err := f.charge(meter.ChargeRequest{Amount: one}, nil); err != nil {
 		t.Fatal(err)
 	}
-	r, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: f.childSubject(), ReservationID: uuid.Nil, Amount: one}, nil)
-	if !errors.Is(err, limes.ErrReservationNotFound) {
+	r, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: f.childSubject(), ReservationID: uuid.Nil, Amount: one}, nil)
+	if !errors.Is(err, meter.ErrReservationNotFound) {
 		t.Fatalf("Settle of the zero reservation id = %+v, %v; want ErrReservationNotFound", r, err)
 	}
 	if got := f.spent(t, f.child); got != one {
@@ -848,27 +849,27 @@ func checkSettleNil[TX any](t *testing.T, f fixture[TX]) {
 // subject naming another capability finds no such hold, before the settle
 // and after it, and the hold stays where it was.
 func checkSettleOwner[TX any](t *testing.T, f fixture[TX]) {
-	res, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: 2 * one})
+	res, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: 2 * one})
 	if err != nil {
 		t.Fatal(err)
 	}
 	stranger := newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, budget: budgetOf(rootBudget)})
-	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: stranger, ReservationID: res.ID, Amount: one}, nil); !errors.Is(err, limes.ErrReservationNotFound) {
+	if _, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: stranger, ReservationID: res.ID, Amount: one}, nil); !errors.Is(err, meter.ErrReservationNotFound) {
 		t.Errorf("settling the child's hold as the root: err = %v, want ErrReservationNotFound", err)
 	}
 	// The hold's capability under another tenant is not its owner either; a
 	// store that scopes tenants may refuse the call as out of scope instead.
 	elsewhere := newSubject(subjectSpec{capID: f.child, tenant: uuid.New(), budget: budgetOf(childBudget)})
-	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: elsewhere, ReservationID: res.ID, Amount: one}, nil); !errors.Is(err, limes.ErrReservationNotFound) && !errors.Is(err, limes.ErrScopeMismatch) {
+	if _, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: elsewhere, ReservationID: res.ID, Amount: one}, nil); !errors.Is(err, meter.ErrReservationNotFound) && !errors.Is(err, limes.ErrScopeMismatch) {
 		t.Errorf("settling the child's hold under another tenant: err = %v, want ErrReservationNotFound or ErrScopeMismatch", err)
 	}
 	if u, err := f.Usage.GetUsage(f.Ctx, f.child); err != nil || u.ReservedAmount != 2*one || u.SpentAmount != 0 {
 		t.Errorf("child after a refused settle = %+v, %v; want 2 held, nothing spent", u, err)
 	}
-	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: f.childSubject(), ReservationID: res.ID, Amount: one}, nil); err != nil {
+	if _, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: f.childSubject(), ReservationID: res.ID, Amount: one}, nil); err != nil {
 		t.Fatalf("settling as the owner: %v", err)
 	}
-	if r, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: stranger, ReservationID: res.ID, Amount: one}, nil); !errors.Is(err, limes.ErrReservationNotFound) {
+	if r, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: stranger, ReservationID: res.ID, Amount: one}, nil); !errors.Is(err, meter.ErrReservationNotFound) {
 		t.Errorf("replaying the settle as the root = %+v, %v; want ErrReservationNotFound", r, err)
 	}
 }
@@ -878,7 +879,7 @@ func checkSettleOwner[TX any](t *testing.T, f fixture[TX]) {
 // period's spend, so refunding it must not take it out of that spend.
 func checkRefundAcrossReset[TX any](t *testing.T, f fixture[TX]) {
 	const amount = 9 * one
-	before, err := f.charge(limes.ChargeRequest{Amount: amount}, nil)
+	before, err := f.charge(meter.ChargeRequest{Amount: amount}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -886,17 +887,17 @@ func checkRefundAcrossReset[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
+	if _, err := f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{
 		TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: tenantBudget, UnitCode: unit},
 		ResetSpend: true, ExpectedVersion: b.ResourceVersion,
 	}); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
-	after, err := f.charge(limes.ChargeRequest{Amount: amount}, nil)
+	after, err := f.charge(meter.ChargeRequest{Amount: amount}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: before.ChargeID, Remaining: true}); err != nil || r.Amount != amount {
+	if r, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: before.ChargeID, Remaining: true}); err != nil || r.Amount != amount {
 		t.Fatalf("refund of the earlier period's charge = %+v, %v; want %v", r, err, amount)
 	}
 	if got := f.tenantSpent(t); got != amount {
@@ -906,7 +907,7 @@ func checkRefundAcrossReset[TX any](t *testing.T, f fixture[TX]) {
 		t.Errorf("child spent %v, want %v: the refund still returns to the capability", got, amount)
 	}
 	// A charge of the new period returns to it.
-	if _, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: after.ChargeID, Remaining: true}); err != nil {
+	if _, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: after.ChargeID, Remaining: true}); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.tenantSpent(t); got != 0 {
@@ -931,11 +932,11 @@ func checkAncestorUnit[TX any](t *testing.T, f fixture[TX]) {
 		return parent, child
 	}
 	charged, chargedChild := tree()
-	if _, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: chargedChild, tenant: f.Tenant, unit: unit}), Amount: one}, nil); err != nil {
+	if _, err := f.Usage.Charge(f.Ctx, meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: chargedChild, tenant: f.Tenant, unit: unit}), Amount: one}, nil); err != nil {
 		t.Fatal(err)
 	}
 	held, heldChild := tree()
-	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: heldChild, tenant: f.Tenant, unit: unit}), Amount: one}); err != nil {
+	if _, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: newSubject(subjectSpec{capID: heldChild, tenant: f.Tenant, unit: unit}), Amount: one}); err != nil {
 		t.Fatal(err)
 	}
 	for name, id := range map[string]uuid.UUID{"charged": charged, "held": held} {
@@ -951,7 +952,7 @@ func checkAncestorUnit[TX any](t *testing.T, f fixture[TX]) {
 // on it; the first charge that names a unit pins it.
 func checkNoUnit[TX any](t *testing.T, f fixture[TX]) {
 	none := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, unitless: true})
-	if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: none}); err != nil {
+	if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: none}); err != nil {
 		t.Fatalf("Bump of a subject with no unit: %v", err)
 	}
 	if u, err := f.Usage.GetUsage(f.Ctx, f.child); err != nil || u.UnitCode != "" || u.RequestCount != 1 {
@@ -959,15 +960,15 @@ func checkNoUnit[TX any](t *testing.T, f fixture[TX]) {
 	}
 	for name, call := range map[string]func() error{
 		"Charge": func() error {
-			_, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: none, Amount: one}, nil)
+			_, err := f.Usage.Charge(f.Ctx, meter.ChargeRequest{Subject: none, Amount: one}, nil)
 			return err
 		},
 		"Reserve": func() error {
-			_, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: none, Amount: one})
+			_, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: none, Amount: one})
 			return err
 		},
 		"Settle": func() error {
-			_, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: none, ReservationID: uuid.New(), Amount: one}, nil)
+			_, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: none, ReservationID: uuid.New(), Amount: one}, nil)
 			return err
 		},
 	} {
@@ -975,7 +976,7 @@ func checkNoUnit[TX any](t *testing.T, f fixture[TX]) {
 			t.Errorf("%s of a subject with no unit: err = %v, want ErrInvalidRequest", name, err)
 		}
 	}
-	if _, err := f.charge(limes.ChargeRequest{Amount: one}, nil); err != nil {
+	if _, err := f.charge(meter.ChargeRequest{Amount: one}, nil); err != nil {
 		t.Fatalf("charge in %s: %v", unit, err)
 	}
 	if u, err := f.Usage.GetUsage(f.Ctx, f.child); err != nil || u.UnitCode != unit {
@@ -1002,21 +1003,21 @@ func checkTenantCeilingUnit[TX any](t *testing.T, f fixture[TX]) {
 		return tenant, id, f.tenantCtx(tenant)
 	}
 	tenant, id, ctx := fresh()
-	if _, err := f.Usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Unlimited: true}}); !errors.Is(err, limes.ErrInvalidRequest) {
+	if _, err := f.Usage.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Unlimited: true}}); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("SetTenantBudget, an unlimited ceiling in no unit: err = %v, want ErrInvalidRequest", err)
 	}
-	b, err := f.Usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: otherUnit}})
+	b, err := f.Usage.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: otherUnit}})
 	if err != nil || b.Ceiling.UnitCode != otherUnit {
 		t.Fatalf("SetTenantBudget in %s = %+v, %v; want a ceiling in it", otherUnit, b, err)
 	}
-	if _, err := f.Usage.Charge(ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant, unit: unit}), Amount: one}, nil); !errors.Is(err, limes.ErrUnitCodeMismatch) {
+	if _, err := f.Usage.Charge(ctx, meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant, unit: unit}), Amount: one}, nil); !errors.Is(err, limes.ErrUnitCodeMismatch) {
 		t.Errorf("a charge in %s on a tenant ceiling in %s: err = %v, want ErrUnitCodeMismatch", unit, otherUnit, err)
 	}
-	if _, err := f.Usage.Charge(ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant, unit: otherUnit}), Amount: one}, nil); err != nil {
+	if _, err := f.Usage.Charge(ctx, meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant, unit: otherUnit}), Amount: one}, nil); err != nil {
 		t.Errorf("a charge in the tenant ceiling's %s: %v", otherUnit, err)
 	}
 	held, heldID, heldCtx := fresh()
-	if _, err := f.Usage.Reserve(heldCtx, limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: heldID, tenant: held, unit: otherUnit}), Amount: one}); err != nil {
+	if _, err := f.Usage.Reserve(heldCtx, meter.ReserveRequest{Subject: newSubject(subjectSpec{capID: heldID, tenant: held, unit: otherUnit}), Amount: one}); err != nil {
 		t.Fatalf("hold in %s: %v", otherUnit, err)
 	}
 	want := limes.BudgetCeiling{Unlimited: true, UnitCode: otherUnit}
@@ -1029,14 +1030,14 @@ func checkTenantCeilingUnit[TX any](t *testing.T, f fixture[TX]) {
 // in another is not comparable with what is there, and adding it would sum
 // two currencies as one.
 func checkOneUnit[TX any](t *testing.T, f fixture[TX]) {
-	if _, err := f.charge(limes.ChargeRequest{Amount: one}, nil); err != nil {
+	if _, err := f.charge(meter.ChargeRequest{Amount: one}, nil); err != nil {
 		t.Fatal(err)
 	}
-	other := limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: otherUnit}), Amount: one}
+	other := meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: otherUnit}), Amount: one}
 	if _, err := f.Usage.Charge(f.Ctx, other, nil); !errors.Is(err, limes.ErrUnitCodeMismatch) {
 		t.Errorf("a charge in %s on a %s counter: err = %v, want ErrUnitCodeMismatch", otherUnit, unit, err)
 	}
-	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
+	if _, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{
 		Subject: newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: otherUnit}),
 		Amount:  one,
 	}); !errors.Is(err, limes.ErrUnitCodeMismatch) {
@@ -1058,7 +1059,7 @@ func checkOneUnit[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
+	if _, err := f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{
 		TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: tenantBudget, UnitCode: otherUnit}, ExpectedVersion: b.ResourceVersion,
 	}); !errors.Is(err, limes.ErrUnitCodeMismatch) {
 		t.Errorf("re-denominating a tenant with %s spent: err = %v, want ErrUnitCodeMismatch", unit, err)
@@ -1074,20 +1075,20 @@ func checkSettleAfterAncestorDropped[TX any](t *testing.T, f fixture[TX]) {
 	// nothing of the hold: settling all 8 would take it to 26, past its 25;
 	// settling 7 takes it to exactly 25.
 	const held, rootSpend, admitted = 8 * one, 18 * one, 7 * one
-	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: held})
+	r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: held})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.Usage.DeleteUsage(f.Ctx, limes.DeleteUsageRequest{CapabilityID: f.root}); err != nil {
+	if err := f.Usage.DeleteUsage(f.Ctx, meter.DeleteUsageRequest{CapabilityID: f.root}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{
+	if _, err := f.Usage.Charge(f.Ctx, meter.ChargeRequest{
 		Subject: newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, budget: budgetOf(rootBudget)}), Amount: rootSpend,
 	}, nil); err != nil {
 		t.Fatal(err)
 	}
 	settle := func(amount limes.Nanos) error {
-		_, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: f.childSubject(), ReservationID: r.ID, Amount: amount}, nil)
+		_, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: f.childSubject(), ReservationID: r.ID, Amount: amount}, nil)
 		return err
 	}
 	if err := settle(held); !errors.Is(err, limes.ErrBudgetExceeded) {
@@ -1110,7 +1111,7 @@ func checkExactCeilings[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatal(err)
 	}
 	charge := func(capID uuid.UUID, amount limes.Nanos) error {
-		_, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: f.Tenant}), Amount: amount}, nil)
+		_, err := f.Usage.Charge(f.Ctx, meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: f.Tenant}), Amount: amount}, nil)
 		return err
 	}
 	if err := charge(under, rootBudget); err != nil {
@@ -1142,7 +1143,7 @@ func checkHoldCreatesTenant[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Usage.Reserve(f.tenantCtx(tenant), limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant}), Amount: one}); err != nil {
+	if _, err := f.Usage.Reserve(f.tenantCtx(tenant), meter.ReserveRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant}), Amount: one}); err != nil {
 		t.Fatal(err)
 	}
 	b, err := f.Usage.GetTenantBudget(f.tenantCtx(tenant), tenant)
@@ -1155,17 +1156,17 @@ func checkHoldCreatesTenant[TX any](t *testing.T, f fixture[TX]) {
 // and onCharged not run again, so a side effect committed with the first is
 // not committed twice; for another amount, a conflict.
 func checkSettleReplay[TX any](t *testing.T, f fixture[TX]) {
-	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: 2 * one, Op: "llm", Actor: "agent"})
+	r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: 2 * one, Op: "llm", Actor: "agent"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := limes.SettleRequest{Subject: f.childSubject(), ReservationID: r.ID, Amount: one}
+	req := meter.SettleRequest{Subject: f.childSubject(), ReservationID: r.ID, Amount: one}
 	first, err := f.Usage.Settle(f.Ctx, req, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ran := false
-	again, err := f.Usage.Settle(f.Ctx, req, func(context.Context, limes.Charged[TX]) error { ran = true; return nil })
+	again, err := f.Usage.Settle(f.Ctx, req, func(context.Context, meter.Charged[TX]) error { ran = true; return nil })
 	if err != nil || !again.Replayed || again.ChargeID != first.ChargeID || again.SpentAmount != first.SpentAmount {
 		t.Errorf("a replayed settle = %+v, %v; want the first's receipt %+v, replayed", again, err, first)
 	}
@@ -1176,7 +1177,7 @@ func checkSettleReplay[TX any](t *testing.T, f fixture[TX]) {
 	// is a conflict, not the first receipt, and moves nothing.
 	other := req
 	other.Amount = 2 * one
-	if _, err := f.Usage.Settle(f.Ctx, other, func(context.Context, limes.Charged[TX]) error { ran = true; return nil }); !errors.Is(err, limes.ErrSettleConflict) || !errors.Is(err, limes.ErrConflict) {
+	if _, err := f.Usage.Settle(f.Ctx, other, func(context.Context, meter.Charged[TX]) error { ran = true; return nil }); !errors.Is(err, meter.ErrSettleConflict) || !errors.Is(err, limes.ErrConflict) {
 		t.Errorf("a settle replayed for another amount: err = %v, want ErrSettleConflict, matching ErrConflict", err)
 	}
 	if ran || f.spent(t, f.child) != one {
@@ -1192,18 +1193,18 @@ func checkSettleReplay[TX any](t *testing.T, f fixture[TX]) {
 // was made under, by Release and by ReleaseExpired: a hold left on the copy
 // blocks it for good.
 func checkReleaseReturnsCopy[TX any](t *testing.T, f fixture[TX]) {
-	reader, ok := f.Usage.(limes.CopyUsageReader)
+	reader, ok := f.Usage.(meter.CopyUsageReader)
 	if !ok {
 		return // a Meter that does not read copies back is checked no further
 	}
 	const ttl = time.Minute
 	for name, release := range map[string]func(subject limes.MeterSubject, id uuid.UUID) error{
 		"Release": func(subject limes.MeterSubject, id uuid.UUID) error {
-			return f.Usage.Release(f.Ctx, limes.ReleaseRequest{Subject: subject, ReservationID: id})
+			return f.Usage.Release(f.Ctx, meter.ReleaseRequest{Subject: subject, ReservationID: id})
 		},
 		"ReleaseExpired": func(limes.MeterSubject, uuid.UUID) error {
 			f.Advance(2 * ttl)
-			_, err := f.Usage.ReleaseExpired(f.Ctx, limes.ReleaseExpiredRequest{})
+			_, err := f.Usage.ReleaseExpired(f.Ctx, meter.ReleaseExpiredRequest{})
 			return err
 		},
 	} {
@@ -1213,7 +1214,7 @@ func checkReleaseReturnsCopy[TX any](t *testing.T, f fixture[TX]) {
 		copyID := []byte("copy-" + name)
 		copies := []limes.CopyCeiling{{RevocationID: copyID, Budget: &limes.BudgetCeiling{Max: childBudget, UnitCode: unit}}}
 		subject := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, copies: copies})
-		r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: subject, Amount: one, TTL: ttl})
+		r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: subject, Amount: one, TTL: ttl})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1230,12 +1231,12 @@ func checkReleaseReturnsCopy[TX any](t *testing.T, f fixture[TX]) {
 // ceiling moving no counter.
 func checkRefusedBump[TX any](t *testing.T, f fixture[TX]) {
 	frozen := []limes.CopyCeiling{{RevocationID: []byte("frozen"), Requests: &limes.RequestCeiling{}}}
-	if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, copies: frozen})}); !errors.Is(err, limes.ErrRequestLimitExceeded) {
+	if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, copies: frozen})}); !errors.Is(err, limes.ErrRequestLimitExceeded) {
 		t.Fatalf("a bump past a frozen copy: err = %v, want ErrRequestLimitExceeded", err)
 	}
 	for name, id := range map[string]uuid.UUID{"capability": f.child, "root": f.root} {
 		u, err := f.Usage.GetUsage(f.Ctx, id)
-		if err != nil && !errors.Is(err, limes.ErrUsageNotFound) {
+		if err != nil && !errors.Is(err, meter.ErrUsageNotFound) {
 			t.Fatal(err)
 		}
 		if u.RequestCount != 0 {
@@ -1257,13 +1258,13 @@ func checkRangeCountsHolds[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatal(err)
 	}
 	reserve := func(amount limes.Nanos) error {
-		_, err := f.Usage.Reserve(f.tenantCtx(tenant), limes.ReserveRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant}), Amount: amount})
+		_, err := f.Usage.Reserve(f.tenantCtx(tenant), meter.ReserveRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant}), Amount: amount})
 		return err
 	}
 	if err := reserve(limes.MaxNanos); err != nil {
 		t.Fatal(err)
 	}
-	if err := reserve(1); !errors.Is(err, limes.ErrCounterOverflow) {
+	if err := reserve(1); !errors.Is(err, meter.ErrCounterOverflow) {
 		t.Errorf("a hold past MaxNanos held: err = %v, want ErrCounterOverflow", err)
 	}
 }
@@ -1272,12 +1273,12 @@ func checkRangeCountsHolds[TX any](t *testing.T, f fixture[TX]) {
 // what is left of the charge: it is refunded whole, not refused.
 func checkRefundExactRemainder[TX any](t *testing.T, f fixture[TX]) {
 	const charged, first = 3 * one, one
-	receipt, err := f.charge(limes.ChargeRequest{Amount: charged}, nil)
+	receipt, err := f.charge(meter.ChargeRequest{Amount: charged}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	refund := func(amount limes.Nanos) (limes.RefundReceipt, error) {
-		return f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Amount: amount})
+	refund := func(amount limes.Nanos) (meter.RefundReceipt, error) {
+		return f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: receipt.ChargeID, Amount: amount})
 	}
 	if _, err := refund(first); err != nil {
 		t.Fatal(err)
@@ -1298,20 +1299,20 @@ func checkSettleAfterRemovedAncestor[TX any](t *testing.T, f fixture[TX]) {
 	if f.DeleteCapability == nil {
 		t.Skip("Env.DeleteCapability not set")
 	}
-	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one})
+	r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: one})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := f.DeleteCapability(f.root); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Usage.PurgeOrphans(f.Ctx, limes.PurgeOrphansRequest{}); err != nil {
+	if _, err := f.Usage.PurgeOrphans(f.Ctx, meter.PurgeOrphansRequest{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: f.childSubject(), ReservationID: r.ID, Amount: one}, nil); err != nil {
+	if _, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: f.childSubject(), ReservationID: r.ID, Amount: one}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if u, err := f.Usage.GetUsage(f.Ctx, f.root); !errors.Is(err, limes.ErrUsageNotFound) {
+	if u, err := f.Usage.GetUsage(f.Ctx, f.root); !errors.Is(err, meter.ErrUsageNotFound) {
 		t.Errorf("the removed root after a settle: %+v, %v; want no row", u, err)
 	}
 }
@@ -1324,16 +1325,16 @@ func checkReplayAfterRemoval[TX any](t *testing.T, f fixture[TX]) {
 		t.Skip("Env.DeleteCapability not set")
 	}
 	const ref = "cost-1"
-	charge := limes.ChargeRequest{Subject: f.childSubject(), Amount: one, ExternalRef: ref}
+	charge := meter.ChargeRequest{Subject: f.childSubject(), Amount: one, ExternalRef: ref}
 	charged, err := f.Usage.Charge(f.Ctx, charge, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one})
+	r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: one})
 	if err != nil {
 		t.Fatal(err)
 	}
-	settle := limes.SettleRequest{Subject: f.childSubject(), ReservationID: r.ID, Amount: one}
+	settle := meter.SettleRequest{Subject: f.childSubject(), ReservationID: r.ID, Amount: one}
 	settled, err := f.Usage.Settle(f.Ctx, settle, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1354,7 +1355,7 @@ func checkReplayAfterRemoval[TX any](t *testing.T, f fixture[TX]) {
 // is gone, so a hold left behind counts against its ancestors and its tenant
 // until the store is rebuilt.
 func checkDeleteReleasesHolds[TX any](t *testing.T, f fixture[TX]) {
-	res, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
+	res, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{
 		Subject: f.childSubject(),
 		Amount:  3 * one,
 	})
@@ -1362,13 +1363,13 @@ func checkDeleteReleasesHolds[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatal(err)
 	}
 	// A capability with no row is no error: there is nothing to drop.
-	if err := f.Usage.DeleteUsage(f.Ctx, limes.DeleteUsageRequest{CapabilityID: uuid.New()}); err != nil {
+	if err := f.Usage.DeleteUsage(f.Ctx, meter.DeleteUsageRequest{CapabilityID: uuid.New()}); err != nil {
 		t.Errorf("DeleteUsage of a capability with no row: %v", err)
 	}
-	if err := f.Usage.DeleteUsage(f.Ctx, limes.DeleteUsageRequest{CapabilityID: f.child}); err != nil {
+	if err := f.Usage.DeleteUsage(f.Ctx, meter.DeleteUsageRequest{CapabilityID: f.child}); err != nil {
 		t.Fatalf("DeleteUsage: %v", err)
 	}
-	if _, err := f.Usage.GetReservation(f.Ctx, res.ID); !errors.Is(err, limes.ErrReservationNotFound) {
+	if _, err := f.Usage.GetReservation(f.Ctx, res.ID); !errors.Is(err, meter.ErrReservationNotFound) {
 		t.Errorf("the deleted capability's hold: err = %v, want ErrReservationNotFound", err)
 	}
 	if u, err := f.Usage.GetUsage(f.Ctx, f.root); err != nil || u.ReservedAmount != 0 {
@@ -1383,7 +1384,7 @@ func checkDeleteReleasesHolds[TX any](t *testing.T, f fixture[TX]) {
 // returns all of it.
 func checkTenantBudgetReads[TX any](t *testing.T, f fixture[TX]) {
 	const held = 3 * one
-	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
+	if _, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{
 		Subject: f.childSubject(),
 		Amount:  held,
 	}); err != nil {
@@ -1393,7 +1394,7 @@ func checkTenantBudgetReads[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil || got.ReservedAmount != held || got.ResourceVersion == 0 {
 		t.Fatalf("GetTenantBudget = %+v, %v; want %v held and a version", got, err, held)
 	}
-	set, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
+	set, err := f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{
 		TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: tenantBudget, UnitCode: unit}, ExpectedVersion: got.ResourceVersion,
 	})
 	// The version is an opaque token: a write changes it, and it is never 0
@@ -1413,18 +1414,18 @@ func checkTenantBudgetReads[TX any](t *testing.T, f fixture[TX]) {
 		t.Errorf("GetTenantBudget = %+v, SetTenantBudget returned %+v: %s", read, set, diff)
 	}
 	for _, ceiling := range []limes.Nanos{-1, limes.MaxNanos + 1} {
-		if _, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
+		if _, err := f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{
 			TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: ceiling, UnitCode: unit}, ExpectedVersion: set.ResourceVersion,
 		}); !errors.Is(err, limes.ErrInvalidAmount) {
 			t.Errorf("SetTenantBudget(%s): err = %v, want ErrInvalidAmount", ceiling, err)
 		}
 	}
-	listedPage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{})
+	listedPage, err := f.Usage.ListTenantBudgets(f.listCtx(), meter.ListTenantBudgetsRequest{})
 	listed := listedPage.Items
 	if err != nil {
 		t.Fatal(err)
 	}
-	i := slices.IndexFunc(listed, func(s limes.TenantBudget) bool { return s.TenantID == f.Tenant })
+	i := slices.IndexFunc(listed, func(s meter.TenantBudget) bool { return s.TenantID == f.Tenant })
 	if i < 0 {
 		t.Fatalf("ListTenantBudgets left out the tenant: %+v", listed)
 	}
@@ -1436,7 +1437,7 @@ func checkTenantBudgetReads[TX any](t *testing.T, f fixture[TX]) {
 // sameReservation names how got differs from want, or returns "". Every
 // field counts, so one the store does not keep is a difference; the expiry
 // compares as an instant, whatever its zone.
-func sameReservation(got, want limes.Reservation) string {
+func sameReservation(got, want meter.Reservation) string {
 	if !got.ExpiresAt.Equal(want.ExpiresAt) {
 		return "expiry differs"
 	}
@@ -1449,7 +1450,7 @@ func sameReservation(got, want limes.Reservation) string {
 
 // sameTenantBudget names how got differs from want, or returns "". Every
 // field counts; the times compare as instants.
-func sameTenantBudget(got, want limes.TenantBudget) string {
+func sameTenantBudget(got, want meter.TenantBudget) string {
 	for _, f := range []struct {
 		name      string
 		got, want time.Time
@@ -1486,7 +1487,7 @@ func checkHoldDatesTenantBudget[TX any](t *testing.T, f fixture[TX]) {
 	}
 	// later is how far the clock moves before the release.
 	const later = time.Minute
-	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one})
+	r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: one})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1498,7 +1499,7 @@ func checkHoldDatesTenantBudget[TX any](t *testing.T, f fixture[TX]) {
 		t.Errorf("after the first hold the aggregate is dated %s, want %s", b.UpdatedAt, f.Now())
 	}
 	f.Advance(later)
-	if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{Subject: f.childSubject(), ReservationID: r.ID}); err != nil {
+	if err := f.Usage.Release(f.Ctx, meter.ReleaseRequest{Subject: f.childSubject(), ReservationID: r.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if b, err = f.Usage.GetTenantBudget(f.Ctx, f.Tenant); err != nil || !b.UpdatedAt.Equal(f.Now()) {
@@ -1516,7 +1517,7 @@ func checkHoldWithinCapability[TX any](t *testing.T, f fixture[TX]) {
 	}
 	// farTTL outlives any capability an Env records.
 	const farTTL = 100 * 365 * 24 * time.Hour
-	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one, TTL: farTTL})
+	r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: one, TTL: farTTL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1529,7 +1530,7 @@ func checkHoldWithinCapability[TX any](t *testing.T, f fixture[TX]) {
 	// Past its record's expiry a capability — still on record, a late cost
 	// names it — holds nothing: no one could settle the hold.
 	f.Advance(farTTL)
-	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one}); !errors.Is(err, limes.ErrExpired) {
+	if _, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: one}); !errors.Is(err, limes.ErrExpired) {
 		t.Errorf("Reserve for a capability past its expiry: err = %v, want ErrExpired", err)
 	}
 }
@@ -1545,9 +1546,9 @@ func checkReservations[TX any](t *testing.T, f fixture[TX]) {
 	copies := []limes.CopyCeiling{{
 		RevocationID: []byte("copy-1"), Requests: &limes.RequestCeiling{Max: copyLimit}, Budget: &limes.BudgetCeiling{Max: copyLimit * one, UnitCode: unit},
 	}}
-	reserve := func(capID uuid.UUID, ceiling limes.Nanos, ttl time.Duration) limes.Reservation {
+	reserve := func(capID uuid.UUID, ceiling limes.Nanos, ttl time.Duration) meter.Reservation {
 		t.Helper()
-		r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
+		r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{
 			Subject: newSubject(subjectSpec{capID: capID, tenant: f.Tenant, budget: budgetOf(ceiling), unit: unit, copies: copies}),
 			Amount:  held,
 			TTL:     ttl,
@@ -1581,7 +1582,7 @@ func checkReservations[TX any](t *testing.T, f fixture[TX]) {
 	}
 	list := func(capID uuid.UUID) []uuid.UUID {
 		t.Helper()
-		rs, err := f.Usage.ListReservations(f.Ctx, limes.ListReservationsRequest{CapabilityID: capID})
+		rs, err := f.Usage.ListReservations(f.Ctx, meter.ListReservationsRequest{CapabilityID: capID})
 		if err != nil {
 			t.Fatalf("ListReservations: %v", err)
 		}
@@ -1603,27 +1604,27 @@ func checkReservations[TX any](t *testing.T, f fixture[TX]) {
 	other := []limes.CopyCeiling{{RevocationID: []byte("copy-2")}}
 	for name, c := range map[string][]limes.CopyCeiling{"no copy": nil, "another copy": other} {
 		subject := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: unit, copies: c})
-		if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: subject, ReservationID: first.ID, Amount: held}, nil); !errors.Is(err, limes.ErrReservationNotFound) {
+		if _, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: subject, ReservationID: first.ID, Amount: held}, nil); !errors.Is(err, meter.ErrReservationNotFound) {
 			t.Errorf("a copy's hold settled under %s: err = %v, want ErrReservationNotFound", name, err)
 		}
 	}
 	byCopy := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: unit, copies: copies})
-	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: byCopy, ReservationID: first.ID, Amount: held}, nil); err != nil {
+	if _, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: byCopy, ReservationID: first.ID, Amount: held}, nil); err != nil {
 		t.Fatal(err)
 	}
 	// Settled, the hold's receipt reads back to its copy alone.
-	if r, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: byCopy, ReservationID: first.ID, Amount: held}, nil); err != nil || !r.Replayed {
+	if r, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: byCopy, ReservationID: first.ID, Amount: held}, nil); err != nil || !r.Replayed {
 		t.Errorf("the copy settling its hold again = %+v, %v; want the replay", r, err)
 	}
 	another := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: unit, copies: other})
-	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: another, ReservationID: first.ID, Amount: held}, nil); !errors.Is(err, limes.ErrReservationNotFound) {
+	if _, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: another, ReservationID: first.ID, Amount: held}, nil); !errors.Is(err, meter.ErrReservationNotFound) {
 		t.Errorf("another copy settling a settled hold: err = %v, want ErrReservationNotFound, not the receipt", err)
 	}
-	if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{Subject: byCopy, ReservationID: second.ID}); err != nil {
+	if err := f.Usage.Release(f.Ctx, meter.ReleaseRequest{Subject: byCopy, ReservationID: second.ID}); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []uuid.UUID{first.ID, second.ID, uuid.New()} {
-		if _, err := f.Usage.GetReservation(f.Ctx, id); !errors.Is(err, limes.ErrReservationNotFound) {
+		if _, err := f.Usage.GetReservation(f.Ctx, id); !errors.Is(err, meter.ErrReservationNotFound) {
 			t.Errorf("GetReservation %s: err = %v, want ErrReservationNotFound", id, err)
 		}
 	}
@@ -1635,15 +1636,15 @@ func checkReservations[TX any](t *testing.T, f fixture[TX]) {
 // checkCopyUsageRefusesInvalid holds a CopyUsageReader to the request's
 // bounds: no copy, more than MaxCopyUsageIDs, or an empty id is refused.
 func checkCopyUsageRefusesInvalid[TX any](t *testing.T, f fixture[TX]) {
-	reader, ok := f.Usage.(limes.CopyUsageReader)
+	reader, ok := f.Usage.(meter.CopyUsageReader)
 	if !ok {
 		return // a Meter that does not read copies back is checked no further
 	}
-	tooMany := make([][]byte, limes.MaxCopyUsageIDs+1)
+	tooMany := make([][]byte, meter.MaxCopyUsageIDs+1)
 	for i := range tooMany {
 		tooMany[i] = []byte(strconv.Itoa(i))
 	}
-	for name, req := range map[string]limes.CopyUsageRequest{
+	for name, req := range map[string]meter.CopyUsageRequest{
 		"no capability": {RevocationIDs: [][]byte{[]byte("copy-1")}},
 		"no id":         {CapabilityID: f.child},
 		"too many":      {CapabilityID: f.child, RevocationIDs: tooMany},
@@ -1660,16 +1661,16 @@ func checkCopyUsageRefusesInvalid[TX any](t *testing.T, f fixture[TX]) {
 // capability's usage: by DeleteUsage, and by PurgeOrphans once the
 // capability is off record.
 func checkCopyCountersGo[TX any](t *testing.T, f fixture[TX]) {
-	reader, ok := f.Usage.(limes.CopyUsageReader)
+	reader, ok := f.Usage.(meter.CopyUsageReader)
 	if !ok {
 		return // a Meter that does not read copies back is checked no further
 	}
 	// requests is each copy's ceiling: the one request it is counted with.
 	const requests = 1
-	counted := func(capID uuid.UUID, copyID []byte) []limes.CopyUsage {
+	counted := func(capID uuid.UUID, copyID []byte) []meter.CopyUsage {
 		t.Helper()
 		copies := []limes.CopyCeiling{{RevocationID: copyID, Requests: &limes.RequestCeiling{Max: requests}}}
-		if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: f.Tenant, copies: copies})}); err != nil {
+		if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: f.Tenant, copies: copies})}); err != nil {
 			t.Fatal(err)
 		}
 		return f.copyUsage(t, reader, capID, copyID)
@@ -1678,7 +1679,7 @@ func checkCopyCountersGo[TX any](t *testing.T, f fixture[TX]) {
 	if got := counted(f.child, deleted); len(got) != 1 || got[0].CapabilityID != f.child {
 		t.Fatalf("copy usage = %+v; want one copy counting for %s", got, f.child)
 	}
-	if err := f.Usage.DeleteUsage(f.Ctx, limes.DeleteUsageRequest{CapabilityID: f.child}); err != nil {
+	if err := f.Usage.DeleteUsage(f.Ctx, meter.DeleteUsageRequest{CapabilityID: f.child}); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.copyUsage(t, reader, f.child, deleted); len(got) != 0 {
@@ -1697,7 +1698,7 @@ func checkCopyCountersGo[TX any](t *testing.T, f fixture[TX]) {
 	if err := f.DeleteCapability(orphan); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Usage.PurgeOrphans(f.Ctx, limes.PurgeOrphansRequest{}); err != nil {
+	if _, err := f.Usage.PurgeOrphans(f.Ctx, meter.PurgeOrphansRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.copyUsage(t, reader, orphan, purged); len(got) != 0 {
@@ -1711,7 +1712,7 @@ func checkCopyCountersGo[TX any](t *testing.T, f fixture[TX]) {
 // block onto the other: two capabilities, here of two tenants, then carry
 // the same id. Neither may spend, refund or drop the other's counter.
 func checkCopySharedID[TX any](t *testing.T, f fixture[TX]) {
-	reader, ok := f.Usage.(limes.CopyUsageReader)
+	reader, ok := f.Usage.(meter.CopyUsageReader)
 	if !ok {
 		return // a Meter that does not read copies back is checked no further
 	}
@@ -1734,30 +1735,30 @@ func checkCopySharedID[TX any](t *testing.T, f fixture[TX]) {
 	mine := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, copies: shared})
 	theirs := newSubject(subjectSpec{capID: theirCap, tenant: tenant, copies: shared})
 
-	if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: mine}); err != nil {
+	if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: mine}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Usage.Bump(theirCtx, limes.BumpRequest{Subject: theirs}); err != nil {
+	if _, err := f.Usage.Bump(theirCtx, meter.BumpRequest{Subject: theirs}); err != nil {
 		t.Errorf("the other capability's first request under the shared id: err = %v, want it counted apart", err)
 	}
-	theirCharge, err := f.Usage.Charge(theirCtx, limes.ChargeRequest{Subject: theirs, Amount: one}, nil)
+	theirCharge, err := f.Usage.Charge(theirCtx, meter.ChargeRequest{Subject: theirs, Amount: one}, nil)
 	if err != nil {
 		t.Fatalf("the other capability's charge under the shared id: %v", err)
 	}
-	if _, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: mine, Amount: one}, nil); err != nil {
+	if _, err := f.Usage.Charge(f.Ctx, meter.ChargeRequest{Subject: mine, Amount: one}, nil); err != nil {
 		t.Errorf("a charge within the copy's own budget: err = %v, want it admitted", err)
 	}
-	if _, err := f.Usage.Refund(theirCtx, limes.RefundRequest{ChargeID: theirCharge.ChargeID, Amount: one}); err != nil {
+	if _, err := f.Usage.Refund(theirCtx, meter.RefundRequest{ChargeID: theirCharge.ChargeID, Amount: one}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.Usage.DeleteUsage(theirCtx, limes.DeleteUsageRequest{CapabilityID: theirCap}); err != nil {
+	if err := f.Usage.DeleteUsage(theirCtx, meter.DeleteUsageRequest{CapabilityID: theirCap}); err != nil {
 		t.Fatal(err)
 	}
 	got := f.copyUsage(t, reader, f.child, shared[0].RevocationID)
 	if len(got) != 1 || got[0].CapabilityID != f.child || got[0].RequestCount != requests || got[0].SpentAmount != one {
 		t.Errorf("the copy after the other capability's refund and DeleteUsage = %+v; want %d request and %v spent, untouched", got, requests, one)
 	}
-	if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: mine}); !errors.Is(err, limes.ErrRequestLimitExceeded) {
+	if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: mine}); !errors.Is(err, limes.ErrRequestLimitExceeded) {
 		t.Errorf("a request past the copy's ceiling after the other capability's DeleteUsage: err = %v, want ErrRequestLimitExceeded", err)
 	}
 }
@@ -1786,37 +1787,37 @@ func checkCopyQuota[TX any](t *testing.T, f fixture[TX]) {
 		return newSubject(subjectSpec{capID: capID, tenant: f.Tenant, copies: c})
 	}
 	full := copies("counted-", quota)
-	if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: subject(full)}); err != nil {
+	if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: subject(full)}); err != nil {
 		t.Fatalf("Bump of %d copies, the quota: %v", quota, err)
 	}
 	past := slices.Concat(full[:1], copies("past-", 1))
-	if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: subject(past)}); !errors.Is(err, limes.ErrCopyLimitExceeded) || !errors.Is(err, limes.ErrRequestLimitExceeded) {
+	if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: subject(past)}); !errors.Is(err, meter.ErrCopyLimitExceeded) || !errors.Is(err, limes.ErrRequestLimitExceeded) {
 		t.Errorf("Bump of a copy past the quota: err = %v, want ErrCopyLimitExceeded, matching ErrRequestLimitExceeded", err)
 	}
-	if _, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: subject(past), Amount: one}, nil); !errors.Is(err, limes.ErrCopyLimitExceeded) {
+	if _, err := f.Usage.Charge(f.Ctx, meter.ChargeRequest{Subject: subject(past), Amount: one}, nil); !errors.Is(err, meter.ErrCopyLimitExceeded) {
 		t.Errorf("Charge of a copy past the quota: err = %v, want ErrCopyLimitExceeded", err)
 	}
-	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: subject(past), Amount: one}); !errors.Is(err, limes.ErrCopyLimitExceeded) {
+	if _, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: subject(past), Amount: one}); !errors.Is(err, meter.ErrCopyLimitExceeded) {
 		t.Errorf("Reserve of a copy past the quota: err = %v, want ErrCopyLimitExceeded", err)
 	}
 	if u, err := f.Usage.GetUsage(f.Ctx, capID); err != nil || u.RequestCount != 1 || u.SpentAmount != 0 || u.ReservedAmount != 0 {
 		t.Errorf("usage after the refused calls = %+v, %v; want only the first request counted", u, err)
 	}
-	if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: subject(full[:1])}); err != nil {
+	if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: subject(full[:1])}); err != nil {
 		t.Errorf("Bump of a copy already counted, at the quota: %v", err)
 	}
-	if err := f.Usage.DeleteUsage(f.Ctx, limes.DeleteUsageRequest{CapabilityID: capID}); err != nil {
+	if err := f.Usage.DeleteUsage(f.Ctx, meter.DeleteUsageRequest{CapabilityID: capID}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: subject(past)}); err != nil {
+	if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: subject(past)}); err != nil {
 		t.Errorf("Bump of a new copy once the capability's usage was dropped: %v", err)
 	}
 }
 
 // copyUsage is what reader holds for the copy copyID of capability capID.
-func (f fixture[TX]) copyUsage(t *testing.T, reader limes.CopyUsageReader, capID uuid.UUID, copyID []byte) []limes.CopyUsage {
+func (f fixture[TX]) copyUsage(t *testing.T, reader meter.CopyUsageReader, capID uuid.UUID, copyID []byte) []meter.CopyUsage {
 	t.Helper()
-	res, err := reader.CopyUsage(f.Ctx, limes.CopyUsageRequest{CapabilityID: capID, RevocationIDs: [][]byte{copyID}})
+	res, err := reader.CopyUsage(f.Ctx, meter.CopyUsageRequest{CapabilityID: capID, RevocationIDs: [][]byte{copyID}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1826,7 +1827,7 @@ func (f fixture[TX]) copyUsage(t *testing.T, reader limes.CopyUsageReader, capID
 func checkCopyOverrun[TX any](t *testing.T, f fixture[TX]) {
 	copyID := []byte("copy-1")
 	copies := []limes.CopyCeiling{{RevocationID: copyID, Budget: &limes.BudgetCeiling{Max: one, UnitCode: unit}}}
-	if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{copies: copies}), Amount: 2 * one}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
+	if _, err := f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{copies: copies}), Amount: 2 * one}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Fatalf("rejecting charge past the copy's budget: err = %v, want ErrBudgetExceeded", err)
 	}
 	// The copy is checked first, but its refusal must not leave the
@@ -1835,15 +1836,15 @@ func checkCopyOverrun[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatalf("a charge refused at the copy's budget moved the chain: child %v, root %v, tenant %v",
 			f.spent(t, f.child), f.spent(t, f.root), f.tenantSpent(t))
 	}
-	r, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{copies: copies}), Amount: 2 * one, Overrun: limes.OverrunPolicyRecord}, nil)
+	r, err := f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{copies: copies}), Amount: 2 * one, Overrun: meter.OverrunPolicyRecord}, nil)
 	if err != nil || !r.Overrun {
 		t.Fatalf("recording charge = %+v, %v; want an overrun", r, err)
 	}
-	reader, ok := f.Usage.(limes.CopyUsageReader)
+	reader, ok := f.Usage.(meter.CopyUsageReader)
 	if !ok {
 		return // a Meter that does not read copies back is checked no further
 	}
-	res, err := reader.CopyUsage(f.Ctx, limes.CopyUsageRequest{CapabilityID: f.child, RevocationIDs: [][]byte{copyID}})
+	res, err := reader.CopyUsage(f.Ctx, meter.CopyUsageRequest{CapabilityID: f.child, RevocationIDs: [][]byte{copyID}})
 	got := res.Copies
 	if err != nil || len(got) != 1 || got[0].SpentAmount != 2*one {
 		t.Errorf("copy usage = %+v, %v; want 2 spent", got, err)
@@ -1860,18 +1861,18 @@ func checkSumsExactly[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatal(err)
 	}
 	for _, amount := range []limes.Nanos{tenth, 2 * tenth} {
-		if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, budget: budgetOf(threeTenths)}), Amount: amount}, nil); err != nil {
+		if _, err := f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, budget: budgetOf(threeTenths)}), Amount: amount}, nil); err != nil {
 			t.Fatalf("charging %s under a ceiling of %s: %v", amount, threeTenths, err)
 		}
 	}
 	if got := f.spent(t, id); got != threeTenths {
 		t.Errorf("spent %s, want exactly %s", got, threeTenths)
 	}
-	if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, budget: budgetOf(threeTenths)}), Amount: 1}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
+	if _, err := f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, budget: budgetOf(threeTenths)}), Amount: 1}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Errorf("a nano past the ceiling: err = %v, want ErrBudgetExceeded", err)
 	}
 	for range 7 {
-		if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: f.root, budget: budgetOf(rootBudget)}), Amount: tenth}, nil); err != nil {
+		if _, err := f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: f.root, budget: budgetOf(rootBudget)}), Amount: tenth}, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1890,7 +1891,7 @@ func checkConcurrentCeiling[TX any](t *testing.T, f fixture[TX]) {
 	)
 	for range concurrentDeliveries {
 		wg.Go(func() {
-			_, err := f.charge(limes.ChargeRequest{Amount: 2 * one}, nil)
+			_, err := f.charge(meter.ChargeRequest{Amount: 2 * one}, nil)
 			switch {
 			case err == nil:
 				accepted.Add(1)
@@ -1917,11 +1918,11 @@ func checkAncestorCeiling[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.charge(limes.ChargeRequest{Amount: 15 * one}, nil); err != nil {
+	if _, err := f.charge(meter.ChargeRequest{Amount: 15 * one}, nil); err != nil {
 		t.Fatal(err)
 	}
 	// 15 + 15 is within each child's 20, past the root's 25.
-	_, err = f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: sibling}), Amount: 15 * one}, nil)
+	_, err = f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: sibling}), Amount: 15 * one}, nil)
 	if !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Fatalf("a sibling's charge past the root's ceiling: err = %v, want ErrBudgetExceeded", err)
 	}
@@ -1943,7 +1944,7 @@ func checkAncestorRequests[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatal(err)
 	}
 	bump := func() error {
-		_, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: child, tenant: f.Tenant})})
+		_, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: newSubject(subjectSpec{capID: child, tenant: f.Tenant})})
 		return err
 	}
 	for range limit {
@@ -1962,7 +1963,7 @@ func checkCopyRequests[TX any](t *testing.T, f fixture[TX]) {
 	const limit = 1
 	copies := []limes.CopyCeiling{{RevocationID: []byte("copy-requests"), Requests: &limes.RequestCeiling{Max: limit}}}
 	bump := func() error {
-		_, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, copies: copies})})
+		_, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, copies: copies})})
 		return err
 	}
 	for range limit {
@@ -1980,10 +1981,10 @@ func checkCopyRequests[TX any](t *testing.T, f fixture[TX]) {
 func checkCopyHold[TX any](t *testing.T, f fixture[TX]) {
 	copies := []limes.CopyCeiling{{RevocationID: []byte("copy-hold"), Budget: &limes.BudgetCeiling{Max: one, UnitCode: unit}}}
 	subject := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), copies: copies})
-	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: subject, Amount: one}); err != nil {
+	if _, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: subject, Amount: one}); err != nil {
 		t.Fatalf("a hold of the copy's whole budget: %v", err)
 	}
-	if _, err := f.charge(limes.ChargeRequest{Subject: subject, Amount: cent}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
+	if _, err := f.charge(meter.ChargeRequest{Subject: subject, Amount: cent}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Errorf("a charge past the copy's budget with the hold: err = %v, want ErrBudgetExceeded", err)
 	}
 }
@@ -1997,7 +1998,7 @@ func checkStaleVersion[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatal(err)
 	}
 	set := func(max limes.Nanos) error {
-		_, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
+		_, err := f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{
 			TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: max, UnitCode: unit}, ExpectedVersion: b.ResourceVersion,
 		})
 		return err
@@ -2005,7 +2006,7 @@ func checkStaleVersion[TX any](t *testing.T, f fixture[TX]) {
 	if err := set(tenantBudget + one); err != nil {
 		t.Fatalf("a write at the current version: %v", err)
 	}
-	if err := set(tenantBudget + 2*one); !errors.Is(err, limes.ErrTenantBudgetVersionMismatch) {
+	if err := set(tenantBudget + 2*one); !errors.Is(err, meter.ErrTenantBudgetVersionMismatch) {
 		t.Errorf("a write at a stale version: err = %v, want ErrTenantBudgetVersionMismatch", err)
 	}
 	if got, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant); err != nil || got.Ceiling != (limes.BudgetCeiling{Max: tenantBudget + one, UnitCode: unit}) {
@@ -2018,13 +2019,13 @@ func checkStaleVersion[TX any](t *testing.T, f fixture[TX]) {
 // tenant — rather than standing for no limit, which only Unlimited does.
 func checkZeroCeilings[TX any](t *testing.T, f fixture[TX]) {
 	zero := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, requests: requestsOf(0), budget: budgetOf(0)})
-	if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: zero}); !errors.Is(err, limes.ErrRequestLimitExceeded) {
+	if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: zero}); !errors.Is(err, limes.ErrRequestLimitExceeded) {
 		t.Errorf("a bump under a request ceiling of 0: err = %v, want ErrRequestLimitExceeded", err)
 	}
-	if _, err := f.charge(limes.ChargeRequest{Subject: zero, Amount: cent}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
+	if _, err := f.charge(meter.ChargeRequest{Subject: zero, Amount: cent}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Errorf("a charge under a budget of 0: err = %v, want ErrBudgetExceeded", err)
 	}
-	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: zero, Amount: cent}); !errors.Is(err, limes.ErrBudgetExceeded) {
+	if _, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: zero, Amount: cent}); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Errorf("a hold under a budget of 0: err = %v, want ErrBudgetExceeded", err)
 	}
 
@@ -2036,7 +2037,7 @@ func checkZeroCeilings[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: under}), Amount: cent}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
+	if _, err := f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: under}), Amount: cent}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Errorf("a charge under an ancestor's budget of 0: err = %v, want ErrBudgetExceeded", err)
 	}
 	if f.spent(t, f.child) != 0 || f.spent(t, under) != 0 || f.tenantSpent(t) != 0 {
@@ -2047,10 +2048,10 @@ func checkZeroCeilings[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{UnitCode: unit}, ExpectedVersion: b.ResourceVersion}); err != nil {
+	if _, err := f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{UnitCode: unit}, ExpectedVersion: b.ResourceVersion}); err != nil {
 		t.Fatalf("tenant ceiling of 0: %v", err)
 	}
-	if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: f.root}), Amount: cent}, nil); !errors.Is(err, limes.ErrTenantBudgetExceeded) {
+	if _, err := f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: f.root}), Amount: cent}, nil); !errors.Is(err, limes.ErrTenantBudgetExceeded) {
 		t.Errorf("a charge under a tenant ceiling of 0: err = %v, want ErrTenantBudgetExceeded", err)
 	}
 }
@@ -2058,11 +2059,11 @@ func checkZeroCeilings[TX any](t *testing.T, f fixture[TX]) {
 // checkRelease holds Release to returning a hold to every counter it
 // counted against: the capability's, each ancestor's and the tenant's.
 func checkRelease[TX any](t *testing.T, f fixture[TX]) {
-	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: 15 * one})
+	r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: 15 * one})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{Subject: f.childSubject(), ReservationID: r.ID}); err != nil {
+	if err := f.Usage.Release(f.Ctx, meter.ReleaseRequest{Subject: f.childSubject(), ReservationID: r.ID}); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []uuid.UUID{f.child, f.root} {
@@ -2073,7 +2074,7 @@ func checkRelease[TX any](t *testing.T, f fixture[TX]) {
 	if b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant); err != nil || b.ReservedAmount != 0 {
 		t.Errorf("the tenant still holds %s after Release, %v", b.ReservedAmount, err)
 	}
-	if _, err := f.charge(limes.ChargeRequest{Amount: 10 * one}, nil); err != nil {
+	if _, err := f.charge(meter.ChargeRequest{Amount: 10 * one}, nil); err != nil {
 		t.Errorf("a charge the released hold made room for: %v", err)
 	}
 }
@@ -2086,7 +2087,7 @@ func checkReleaseIsTheOwners[TX any](t *testing.T, f fixture[TX]) {
 	const held = 3 * one
 	copies := []limes.CopyCeiling{{RevocationID: []byte("holder"), Budget: &limes.BudgetCeiling{Max: childBudget, UnitCode: unit}}}
 	owner := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: unit, copies: copies})
-	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: owner, Amount: held})
+	r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: owner, Amount: held})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2106,19 +2107,19 @@ func checkReleaseIsTheOwners[TX any](t *testing.T, f fixture[TX]) {
 		"another copy":       newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: unit, copies: sibling}),
 		"no copy":            f.childSubject(),
 	} {
-		if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{Subject: subject, ReservationID: r.ID}); err != nil && !errors.Is(err, limes.ErrScopeMismatch) {
+		if err := f.Usage.Release(f.Ctx, meter.ReleaseRequest{Subject: subject, ReservationID: r.ID}); err != nil && !errors.Is(err, limes.ErrScopeMismatch) {
 			t.Errorf("a release by %s: %v", name, err)
 		}
 		stillHeld(name)
 	}
-	if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{ReservationID: r.ID}); !errors.Is(err, limes.ErrInvalidRequest) {
+	if err := f.Usage.Release(f.Ctx, meter.ReleaseRequest{ReservationID: r.ID}); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("a release naming no subject: err = %v, want ErrInvalidRequest", err)
 	}
 	stillHeld("no subject")
-	if err := f.Usage.Release(f.Ctx, limes.ReleaseRequest{Subject: owner, ReservationID: r.ID}); err != nil {
+	if err := f.Usage.Release(f.Ctx, meter.ReleaseRequest{Subject: owner, ReservationID: r.ID}); err != nil {
 		t.Fatalf("the owner's release: %v", err)
 	}
-	if _, err := f.Usage.GetReservation(f.Ctx, r.ID); !errors.Is(err, limes.ErrReservationNotFound) {
+	if _, err := f.Usage.GetReservation(f.Ctx, r.ID); !errors.Is(err, meter.ErrReservationNotFound) {
 		t.Errorf("after the owner's release: GetReservation = %v, want ErrReservationNotFound", err)
 	}
 	if u, err := f.Usage.GetUsage(f.Ctx, f.child); err != nil || u.ReservedAmount != 0 {
@@ -2130,14 +2131,14 @@ func checkReleaseIsTheOwners[TX any](t *testing.T, f fixture[TX]) {
 // a hold still open counts against the tenant's new period.
 func checkResetKeepsHolds[TX any](t *testing.T, f fixture[TX]) {
 	const held = 10 * one
-	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: held}); err != nil {
+	if _, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: held}); err != nil {
 		t.Fatal(err)
 	}
 	b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
+	if _, err := f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{
 		TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: tenantBudget, UnitCode: unit}, ResetSpend: true, ExpectedVersion: b.ResourceVersion,
 	}); err != nil {
 		t.Fatal(err)
@@ -2150,7 +2151,7 @@ func checkResetKeepsHolds[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatal(err)
 	}
 	// 10 held + 25 is past the tenant's 30.
-	if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: other}), Amount: 25 * one}, nil); !errors.Is(err, limes.ErrTenantBudgetExceeded) {
+	if _, err := f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: other}), Amount: 25 * one}, nil); !errors.Is(err, limes.ErrTenantBudgetExceeded) {
 		t.Errorf("a charge past the tenant's ceiling with the hold: err = %v, want ErrTenantBudgetExceeded", err)
 	}
 }
@@ -2162,11 +2163,11 @@ func checkDescendantHolds[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: 15 * one}); err != nil {
+	if _, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: 15 * one}); err != nil {
 		t.Fatal(err)
 	}
 	// 15 held by the child + 15 is past the root's 25.
-	_, err = f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: sibling, budget: budgetOf(childBudget)}), Amount: 15 * one}, nil)
+	_, err = f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: sibling, budget: budgetOf(childBudget)}), Amount: 15 * one}, nil)
 	if !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Errorf("a sibling's charge past the root's ceiling with the child's hold: err = %v, want ErrBudgetExceeded", err)
 	}
@@ -2178,11 +2179,11 @@ func checkDescendantHolds[TX any](t *testing.T, f fixture[TX]) {
 func checkSettleAboveHold[TX any](t *testing.T, f fixture[TX]) {
 	copies := []limes.CopyCeiling{{RevocationID: []byte("settle-copy"), Budget: &limes.BudgetCeiling{Max: childBudget, UnitCode: unit}}}
 	subject := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), copies: copies})
-	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: subject, Amount: childBudget - one})
+	r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: subject, Amount: childBudget - one})
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: subject, ReservationID: r.ID, Amount: childBudget}, nil)
+	got, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: subject, ReservationID: r.ID, Amount: childBudget}, nil)
 	if err != nil || got.Overrun {
 		t.Fatalf("settling the whole ceiling over a hold just under it = %+v, %v; want accepted, no overrun", got, err)
 	}
@@ -2210,11 +2211,11 @@ func checkNestedCopySettle[TX any](t *testing.T, f fixture[TX]) {
 		"the parent's hold by the child": {under(p), under(c, p)},
 		"the child's hold by the parent": {under(c, p), under(p)},
 	} {
-		r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: tc.held, Amount: one})
+		r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: tc.held, Amount: one})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: tc.settling, ReservationID: r.ID, Amount: one}, nil); !errors.Is(err, limes.ErrReservationNotFound) {
+		if _, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: tc.settling, ReservationID: r.ID, Amount: one}, nil); !errors.Is(err, meter.ErrReservationNotFound) {
 			t.Errorf("%s: err = %v, want ErrReservationNotFound", name, err)
 		}
 	}
@@ -2223,14 +2224,14 @@ func checkNestedCopySettle[TX any](t *testing.T, f fixture[TX]) {
 // checkUnitWithHolds holds a store to keeping a tenant's unit while a hold in
 // it is open: the hold could never settle in another.
 func checkUnitWithHolds[TX any](t *testing.T, f fixture[TX]) {
-	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one}); err != nil {
+	if _, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: one}); err != nil {
 		t.Fatal(err)
 	}
 	b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
+	_, err = f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{
 		TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: tenantBudget, UnitCode: otherUnit}, ResetSpend: true, ExpectedVersion: b.ResourceVersion,
 	})
 	if !errors.Is(err, limes.ErrUnitCodeMismatch) {
@@ -2251,20 +2252,20 @@ func checkChainUnits[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: parent}), Amount: one}, nil); err != nil {
+	if _, err := f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: parent}), Amount: one}, nil); err != nil {
 		t.Fatal(err)
 	}
 	b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
+	if _, err := f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{
 		TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: tenantBudget, UnitCode: otherUnit}, ResetSpend: true, ExpectedVersion: b.ResourceVersion,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	for name, id := range map[string]uuid.UUID{"its own counter": parent, "its ancestor's counter": child} {
-		_, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: f.Tenant, unit: otherUnit}), Amount: one}, nil)
+		_, err := f.Usage.Charge(f.Ctx, meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: f.Tenant, unit: otherUnit}), Amount: one}, nil)
 		if !errors.Is(err, limes.ErrUnitCodeMismatch) {
 			t.Errorf("an amount in %s against %s in %s: err = %v, want ErrUnitCodeMismatch", otherUnit, name, unit, err)
 		}
@@ -2283,7 +2284,7 @@ func checkUnclampedRanking[TX any](t *testing.T, f fixture[TX]) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := f.Usage.SetTenantBudget(f.tenantCtx(tenant), limes.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: ceiling, UnitCode: unit}}); err != nil {
+		if _, err := f.Usage.SetTenantBudget(f.tenantCtx(tenant), meter.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: ceiling, UnitCode: unit}}); err != nil {
 			t.Fatal(err)
 		}
 		id, err := f.NewCapability(CapabilitySpec{Tenant: tenant, Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget})
@@ -2299,18 +2300,18 @@ func checkUnclampedRanking[TX any](t *testing.T, f fixture[TX]) {
 		nearer, further = further, nearer
 	}
 	for o, spent := range map[overspender]limes.Nanos{nearer: 2 * ceiling, further: 3 * ceiling} {
-		if _, err := f.Usage.Charge(f.tenantCtx(o.tenant), limes.ChargeRequest{
-			Subject: newSubject(subjectSpec{capID: o.capability, tenant: o.tenant}), Amount: spent, Overrun: limes.OverrunPolicyRecord,
+		if _, err := f.Usage.Charge(f.tenantCtx(o.tenant), meter.ChargeRequest{
+			Subject: newSubject(subjectSpec{capID: o.capability, tenant: o.tenant}), Amount: spent, Overrun: meter.OverrunPolicyRecord,
 		}, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
-	page, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterAtOrPast, ThresholdBasisPoints: limes.BasisPointsPerWhole})
+	page, err := f.Usage.ListTenantBudgets(f.listCtx(), meter.ListTenantBudgetsRequest{Filter: meter.TenantBudgetFilterAtOrPast, ThresholdBasisPoints: meter.BasisPointsPerWhole})
 	if err != nil {
 		t.Fatal(err)
 	}
 	at := func(tenant uuid.UUID) int {
-		return slices.IndexFunc(page.Items, func(r limes.TenantBudget) bool { return r.TenantID == tenant })
+		return slices.IndexFunc(page.Items, func(r meter.TenantBudget) bool { return r.TenantID == tenant })
 	}
 	if fi, ni := at(further.tenant), at(nearer.tenant); fi < 0 || ni < 0 || fi > ni {
 		t.Errorf("listed the tenant at 300%% at %d and the one at 200%% at %d; want the further first", fi, ni)
@@ -2336,21 +2337,21 @@ func checkThresholdBoundary[TX any](t *testing.T, f fixture[TX]) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := f.Usage.SetTenantBudget(f.tenantCtx(tenant), limes.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: tc.ceiling, UnitCode: unit}}); err != nil {
+		if _, err := f.Usage.SetTenantBudget(f.tenantCtx(tenant), meter.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: tc.ceiling, UnitCode: unit}}); err != nil {
 			t.Fatal(err)
 		}
 		id, err := f.NewCapability(CapabilitySpec{Tenant: tenant, Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := f.Usage.Charge(f.tenantCtx(tenant), limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant}), Amount: tc.spent}, nil); err != nil {
+		if _, err := f.Usage.Charge(f.tenantCtx(tenant), meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant}), Amount: tc.spent}, nil); err != nil {
 			t.Fatal(err)
 		}
-		page, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterAtOrPast, ThresholdBasisPoints: tc.threshold})
+		page, err := f.Usage.ListTenantBudgets(f.listCtx(), meter.ListTenantBudgetsRequest{Filter: meter.TenantBudgetFilterAtOrPast, ThresholdBasisPoints: tc.threshold})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := slices.ContainsFunc(page.Items, func(r limes.TenantBudget) bool { return r.TenantID == tenant }); got != tc.listed {
+		if got := slices.ContainsFunc(page.Items, func(r meter.TenantBudget) bool { return r.TenantID == tenant }); got != tc.listed {
 			t.Errorf("%s spent of %s at a threshold of %d basis points: listed %v, want %v", tc.spent, tc.ceiling, tc.threshold, got, tc.listed)
 		}
 	}
@@ -2378,23 +2379,23 @@ func checkExactRanking[TX any](t *testing.T, f fixture[TX]) {
 	slices.SortFunc(tenants, func(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) })
 	nearer, further := spec{tenants[0], 3, 1}, spec{tenants[1], 3 * third, third + 1}
 	for _, s := range []spec{nearer, further} {
-		if _, err := f.Usage.SetTenantBudget(f.tenantCtx(s.tenant), limes.SetTenantBudgetRequest{TenantID: s.tenant, Ceiling: limes.BudgetCeiling{Max: s.ceiling, UnitCode: unit}}); err != nil {
+		if _, err := f.Usage.SetTenantBudget(f.tenantCtx(s.tenant), meter.SetTenantBudgetRequest{TenantID: s.tenant, Ceiling: limes.BudgetCeiling{Max: s.ceiling, UnitCode: unit}}); err != nil {
 			t.Fatal(err)
 		}
 		id, err := f.NewCapability(CapabilitySpec{Tenant: s.tenant, Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := f.Usage.Charge(f.tenantCtx(s.tenant), limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: s.tenant}), Amount: s.spent}, nil); err != nil {
+		if _, err := f.Usage.Charge(f.tenantCtx(s.tenant), meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: s.tenant}), Amount: s.spent}, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
-	page, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterAtOrPast})
+	page, err := f.Usage.ListTenantBudgets(f.listCtx(), meter.ListTenantBudgetsRequest{Filter: meter.TenantBudgetFilterAtOrPast})
 	if err != nil {
 		t.Fatal(err)
 	}
 	at := func(tenant uuid.UUID) int {
-		return slices.IndexFunc(page.Items, func(r limes.TenantBudget) bool { return r.TenantID == tenant })
+		return slices.IndexFunc(page.Items, func(r meter.TenantBudget) bool { return r.TenantID == tenant })
 	}
 	if fi, ni := at(further.tenant), at(nearer.tenant); fi < 0 || ni < 0 || fi > ni {
 		t.Errorf("listed a nano past a third at %d and a third at %d; want the further first", fi, ni)
@@ -2409,12 +2410,12 @@ func checkHousekeepingBatches[TX any](t *testing.T, f fixture[TX]) {
 	}
 	const rows, batch = 2, 1
 	for range rows {
-		if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one, TTL: time.Minute}); err != nil {
+		if _, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: one, TTL: time.Minute}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	f.Advance(time.Hour)
-	if r, err := f.Usage.ReleaseExpired(f.Ctx, limes.ReleaseExpiredRequest{Limit: batch}); err != nil || r.Released != batch {
+	if r, err := f.Usage.ReleaseExpired(f.Ctx, meter.ReleaseExpiredRequest{Limit: batch}); err != nil || r.Released != batch {
 		t.Errorf("ReleaseExpired with a limit of %d = %+v, %v", batch, r, err)
 	}
 	if f.DeleteCapability == nil {
@@ -2426,7 +2427,7 @@ func checkHousekeepingBatches[TX any](t *testing.T, f fixture[TX]) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: id}), Amount: one}, nil); err != nil {
+		if _, err := f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: id}), Amount: one}, nil); err != nil {
 			t.Fatal(err)
 		}
 		gone = append(gone, id)
@@ -2436,7 +2437,7 @@ func checkHousekeepingBatches[TX any](t *testing.T, f fixture[TX]) {
 			t.Fatal(err)
 		}
 	}
-	if r, err := f.Usage.PurgeOrphans(f.Ctx, limes.PurgeOrphansRequest{Limit: batch}); err != nil || r.Purged != batch {
+	if r, err := f.Usage.PurgeOrphans(f.Ctx, meter.PurgeOrphansRequest{Limit: batch}); err != nil || r.Purged != batch {
 		t.Errorf("PurgeOrphans with a limit of %d = %+v, %v", batch, r, err)
 	}
 }
@@ -2445,25 +2446,25 @@ func checkHousekeepingBatches[TX any](t *testing.T, f fixture[TX]) {
 // Refund as every other counter does: a settle moves the hold to spend, a
 // refund returns it.
 func checkCopySettleRefund[TX any](t *testing.T, f fixture[TX]) {
-	reader, ok := f.Usage.(limes.CopyUsageReader)
+	reader, ok := f.Usage.(meter.CopyUsageReader)
 	if !ok {
 		t.Skip("the store reads no copy counters back")
 	}
 	copyID := []byte("copy-settle-refund")
 	copies := []limes.CopyCeiling{{RevocationID: copyID, Budget: &limes.BudgetCeiling{Max: childBudget, UnitCode: unit}}}
 	subject := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), copies: copies})
-	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: subject, Amount: 2 * one})
+	r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: subject, Amount: 2 * one})
 	if err != nil {
 		t.Fatal(err)
 	}
-	settled, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: subject, ReservationID: r.ID, Amount: 3 * one}, nil)
+	settled, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: subject, ReservationID: r.ID, Amount: 3 * one}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: settled.ChargeID, Amount: one}); err != nil {
+	if _, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: settled.ChargeID, Amount: one}); err != nil {
 		t.Fatal(err)
 	}
-	res, err := reader.CopyUsage(f.Ctx, limes.CopyUsageRequest{CapabilityID: f.child, RevocationIDs: [][]byte{copyID}})
+	res, err := reader.CopyUsage(f.Ctx, meter.CopyUsageRequest{CapabilityID: f.child, RevocationIDs: [][]byte{copyID}})
 	got := res.Copies
 	if err != nil || len(got) != 1 || got[0].SpentAmount != 2*one || got[0].ReservedAmount != 0 {
 		t.Errorf("the copy after a settle of 3 and a refund of 1 = %+v, %v; want 2 spent, nothing held", got, err)
@@ -2477,11 +2478,11 @@ func checkTenantCeiling[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: f.root, budget: budgetOf(rootBudget)}), Amount: 20 * one}, nil); err != nil {
+	if _, err := f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: f.root, budget: budgetOf(rootBudget)}), Amount: 20 * one}, nil); err != nil {
 		t.Fatal(err)
 	}
 	// 20 + 20 is within each root's 25, past the tenant's 30.
-	_, err = f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: other, budget: budgetOf(rootBudget)}), Amount: 20 * one}, nil)
+	_, err = f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: other, budget: budgetOf(rootBudget)}), Amount: 20 * one}, nil)
 	if !errors.Is(err, limes.ErrTenantBudgetExceeded) {
 		t.Fatalf("a charge past the tenant's ceiling: err = %v, want ErrTenantBudgetExceeded", err)
 	}
@@ -2495,29 +2496,29 @@ func checkTenantCeiling[TX any](t *testing.T, f fixture[TX]) {
 // survives it.
 func checkCallbackRollback[TX any](t *testing.T, f fixture[TX]) {
 	boom := errors.New("side effect failed")
-	if _, err := f.charge(limes.ChargeRequest{Amount: one, ExternalRef: "call-1"}, func(context.Context, limes.Charged[TX]) error { return boom }); !errors.Is(err, boom) {
+	if _, err := f.charge(meter.ChargeRequest{Amount: one, ExternalRef: "call-1"}, func(context.Context, meter.Charged[TX]) error { return boom }); !errors.Is(err, boom) {
 		t.Fatalf("charge with a failing callback: err = %v, want the callback's", err)
 	}
 	if f.spent(t, f.child) != 0 || f.spent(t, f.root) != 0 || f.tenantSpent(t) != 0 {
 		t.Error("a charge whose callback failed moved spend")
 	}
-	if _, err := f.Usage.ChargeByRef(f.Ctx, limes.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: "call-1"}); !errors.Is(err, limes.ErrChargeNotFound) {
+	if _, err := f.Usage.ChargeByRef(f.Ctx, meter.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: "call-1"}); !errors.Is(err, meter.ErrChargeNotFound) {
 		t.Errorf("the failed charge's ref: err = %v, want ErrChargeNotFound", err)
 	}
 	// The ref is free again: a retry charges.
-	if r, err := f.charge(limes.ChargeRequest{Amount: one, ExternalRef: "call-1"}, nil); err != nil || r.Replayed {
+	if r, err := f.charge(meter.ChargeRequest{Amount: one, ExternalRef: "call-1"}, nil); err != nil || r.Replayed {
 		t.Errorf("the retry = %+v, %v; want a fresh charge", r, err)
 	}
 
-	res, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
+	res, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{
 		Subject: f.childSubject(),
 		Amount:  2 * one,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: f.childSubject(), ReservationID: res.ID, Amount: 2 * one},
-		func(context.Context, limes.Charged[TX]) error { return boom }); !errors.Is(err, boom) {
+	if _, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: f.childSubject(), ReservationID: res.ID, Amount: 2 * one},
+		func(context.Context, meter.Charged[TX]) error { return boom }); !errors.Is(err, boom) {
 		t.Fatalf("settle with a failing callback: err = %v, want the callback's", err)
 	}
 	if _, err := f.Usage.GetReservation(f.Ctx, res.ID); err != nil {
@@ -2532,14 +2533,14 @@ func checkCallbackRollback[TX any](t *testing.T, f fixture[TX]) {
 // it runs inside: the receipt the call then returns, so a side effect such as
 // an outbox row can name the ChargeID, the spend and an overrun.
 func checkCallbackSeesTheReceipt[TX any](t *testing.T, f fixture[TX]) {
-	var seen limes.ChargeReceipt
+	var seen meter.ChargeReceipt
 	runs := 0
-	onCharged := func(_ context.Context, c limes.Charged[TX]) error {
+	onCharged := func(_ context.Context, c meter.Charged[TX]) error {
 		seen = c.Receipt
 		runs++
 		return nil
 	}
-	same := func(how string, got limes.ChargeReceipt) {
+	same := func(how string, got meter.ChargeReceipt) {
 		t.Helper()
 		if runs != 1 {
 			t.Fatalf("%s: onCharged ran %d times, want once", how, runs)
@@ -2551,23 +2552,23 @@ func checkCallbackSeesTheReceipt[TX any](t *testing.T, f fixture[TX]) {
 		runs = 0
 	}
 
-	got, err := f.charge(limes.ChargeRequest{Amount: one}, onCharged)
+	got, err := f.charge(meter.ChargeRequest{Amount: one}, onCharged)
 	if err != nil {
 		t.Fatal(err)
 	}
 	same("a charge", got)
 
-	res, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one})
+	res, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: one})
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err = f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: f.childSubject(), ReservationID: res.ID, Amount: one}, onCharged)
+	got, err = f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: f.childSubject(), ReservationID: res.ID, Amount: one}, onCharged)
 	if err != nil {
 		t.Fatal(err)
 	}
 	same("a settle", got)
 
-	got, err = f.charge(limes.ChargeRequest{Amount: childBudget, Overrun: limes.OverrunPolicyRecord}, onCharged)
+	got, err = f.charge(meter.ChargeRequest{Amount: childBudget, Overrun: meter.OverrunPolicyRecord}, onCharged)
 	if err != nil || !got.Overrun {
 		t.Fatalf("a charge past the ceiling = %+v, %v; want it recorded as an overrun", got, err)
 	}
@@ -2579,7 +2580,7 @@ func checkCallbackSeesTheReceipt[TX any](t *testing.T, f fixture[TX]) {
 func checkBump[TX any](t *testing.T, f fixture[TX]) {
 	const limit = 2
 	bump := func() (int64, error) {
-		r, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, requests: requestsOf(limit)})})
+		r, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, requests: requestsOf(limit)})})
 		return r.RequestCount, err
 	}
 	for want := int64(1); want <= limit; want++ {
@@ -2602,24 +2603,24 @@ func checkBump[TX any](t *testing.T, f fixture[TX]) {
 // checkRefund holds a store to the Refund contract: back to every counter
 // the charge moved, never past what it took, and a full refund idempotent.
 func checkRefund[TX any](t *testing.T, f fixture[TX]) {
-	r, err := f.charge(limes.ChargeRequest{Amount: 3 * one}, nil)
+	r, err := f.charge(meter.ChargeRequest{Amount: 3 * one}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if r.TenantID != f.Tenant || r.UnitCode != unit {
 		t.Errorf("charge receipt names tenant %s in %q, want %s in %q", r.TenantID, r.UnitCode, f.Tenant, unit)
 	}
-	refund := func(amount limes.Nanos) (limes.RefundReceipt, error) {
-		return f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: r.ChargeID, Amount: amount})
+	refund := func(amount limes.Nanos) (meter.RefundReceipt, error) {
+		return f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Amount: amount})
 	}
 	if got, err := refund(one); err != nil || got.Amount != one || got.ChargeID != r.ChargeID ||
 		got.TenantID != f.Tenant || got.UnitCode != unit {
 		t.Fatalf("partial refund = %+v, %v; want 1 of charge %s, tenant %s in %q", got, err, r.ChargeID, f.Tenant, unit)
 	}
-	if _, err := refund(3 * one); !errors.Is(err, limes.ErrRefundExceedsCharge) {
+	if _, err := refund(3 * one); !errors.Is(err, meter.ErrRefundExceedsCharge) {
 		t.Errorf("refunding past what is left: err = %v, want ErrRefundExceedsCharge", err)
 	}
-	for name, req := range map[string]limes.RefundRequest{
+	for name, req := range map[string]meter.RefundRequest{
 		"neither an amount nor Remaining": {ChargeID: r.ChargeID},
 		"an amount and Remaining":         {ChargeID: r.ChargeID, Amount: one, Remaining: true},
 	} {
@@ -2628,14 +2629,14 @@ func checkRefund[TX any](t *testing.T, f fixture[TX]) {
 		}
 	}
 	for range 2 { // the rest, then nothing: a full refund is idempotent
-		if _, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: r.ChargeID, Remaining: true}); err != nil {
+		if _, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Remaining: true}); err != nil {
 			t.Fatalf("full refund: %v", err)
 		}
 	}
 	if f.spent(t, f.child) != 0 || f.spent(t, f.root) != 0 || f.tenantSpent(t) != 0 {
 		t.Error("a full refund left spend on a counter the charge moved")
 	}
-	if _, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: uuid.New(), Remaining: true}); !errors.Is(err, limes.ErrChargeNotFound) {
+	if _, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: uuid.New(), Remaining: true}); !errors.Is(err, meter.ErrChargeNotFound) {
 		t.Errorf("refund of an unknown charge: err = %v, want ErrChargeNotFound", err)
 	}
 }
@@ -2643,16 +2644,16 @@ func checkRefund[TX any](t *testing.T, f fixture[TX]) {
 // checkHoldBlocksCharge holds a store to counting holds against charges as
 // spend is counted.
 func checkHoldBlocksCharge[TX any](t *testing.T, f fixture[TX]) {
-	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
+	if _, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{
 		Subject: f.childSubject(),
 		Amount:  15 * one,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.charge(limes.ChargeRequest{Amount: 10 * one}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
+	if _, err := f.charge(meter.ChargeRequest{Amount: 10 * one}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Errorf("a charge past the ceiling with the hold: err = %v, want ErrBudgetExceeded", err)
 	}
-	if _, err := f.charge(limes.ChargeRequest{Amount: 5 * one}, nil); err != nil {
+	if _, err := f.charge(meter.ChargeRequest{Amount: 5 * one}, nil); err != nil {
 		t.Errorf("a charge within the ceiling with the hold: %v", err)
 	}
 }
@@ -2664,7 +2665,7 @@ func checkExpiry[TX any](t *testing.T, f fixture[TX]) {
 		t.Skip("Env.Advance is not set")
 	}
 	const ttl = time.Minute
-	res, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
+	res, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{
 		Subject: f.childSubject(),
 		Amount:  15 * one,
 		TTL:     ttl,
@@ -2673,7 +2674,7 @@ func checkExpiry[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatal(err)
 	}
 	// A hold that outlives the clock's step: ReleaseExpired leaves it.
-	long, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
+	long, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{
 		Subject: newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, budget: budgetOf(rootBudget)}),
 		Amount:  one,
 		TTL:     time.Hour,
@@ -2682,22 +2683,22 @@ func checkExpiry[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatal(err)
 	}
 	f.Advance(2 * ttl)
-	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: f.childSubject(), ReservationID: res.ID, Amount: one}, nil); !errors.Is(err, limes.ErrReservationNotFound) {
+	if _, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: f.childSubject(), ReservationID: res.ID, Amount: one}, nil); !errors.Is(err, meter.ErrReservationNotFound) {
 		t.Errorf("settling an expired reservation: err = %v, want ErrReservationNotFound", err)
 	}
 	if _, err := f.Usage.GetReservation(f.Ctx, res.ID); err != nil {
 		t.Errorf("an expired hold not yet released still reads back: %v", err)
 	}
-	if _, err := f.charge(limes.ChargeRequest{Amount: 10 * one}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
+	if _, err := f.charge(meter.ChargeRequest{Amount: 10 * one}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Errorf("before ReleaseExpired the hold still counts: err = %v, want ErrBudgetExceeded", err)
 	}
-	if r, err := f.Usage.ReleaseExpired(f.Ctx, limes.ReleaseExpiredRequest{}); err != nil || r.Released != 1 {
+	if r, err := f.Usage.ReleaseExpired(f.Ctx, meter.ReleaseExpiredRequest{}); err != nil || r.Released != 1 {
 		t.Fatalf("ReleaseExpired = %+v, %v; want 1 released", r, err)
 	}
 	if _, err := f.Usage.GetReservation(f.Ctx, long.ID); err != nil {
 		t.Errorf("ReleaseExpired released a hold that has not expired: %v", err)
 	}
-	if _, err := f.charge(limes.ChargeRequest{Amount: 10 * one}, nil); err != nil {
+	if _, err := f.charge(meter.ChargeRequest{Amount: 10 * one}, nil); err != nil {
 		t.Errorf("after ReleaseExpired: %v", err)
 	}
 }
@@ -2705,13 +2706,13 @@ func checkExpiry[TX any](t *testing.T, f fixture[TX]) {
 // checkListTenantBudgets holds a store to ListTenantBudgets' order, filters
 // and paging: most at risk first, then by tenant id, a page at a time.
 func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
-	for name, req := range map[string]limes.ListTenantBudgetsRequest{
+	for name, req := range map[string]meter.ListTenantBudgetsRequest{
 		"a negative limit":             {Limit: -1},
-		"a threshold past 100%":        {Filter: limes.TenantBudgetFilterAtOrPast, ThresholdBasisPoints: limes.BasisPointsPerWhole + 1},
-		"a negative threshold":         {Filter: limes.TenantBudgetFilterAtOrPast, ThresholdBasisPoints: -1},
+		"a threshold past 100%":        {Filter: meter.TenantBudgetFilterAtOrPast, ThresholdBasisPoints: meter.BasisPointsPerWhole + 1},
+		"a negative threshold":         {Filter: meter.TenantBudgetFilterAtOrPast, ThresholdBasisPoints: -1},
 		"a threshold with no filter":   {ThresholdBasisPoints: 1},
-		"a threshold beside unlimited": {Filter: limes.TenantBudgetFilterUnlimited, ThresholdBasisPoints: 1},
-		"a filter this package lacks":  {Filter: limes.TenantBudgetFilterUnlimited + 1},
+		"a threshold beside unlimited": {Filter: meter.TenantBudgetFilterUnlimited, ThresholdBasisPoints: 1},
+		"a filter this package lacks":  {Filter: meter.TenantBudgetFilterUnlimited + 1},
 	} {
 		if _, err := f.Usage.ListTenantBudgets(f.listCtx(), req); !errors.Is(err, limes.ErrInvalidRequest) {
 			t.Errorf("ListTenantBudgets with %s: err = %v, want ErrInvalidRequest", name, err)
@@ -2720,7 +2721,7 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 	// The fixture's tenant has a ceiling of 30 and spends half of it; two
 	// more have ceilings and spend nothing, so they tie and their ids order
 	// them; and one more is unlimited.
-	if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: f.root, budget: budgetOf(rootBudget)}), Amount: 15 * one}, nil); err != nil {
+	if _, err := f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: f.root, budget: budgetOf(rootBudget)}), Amount: 15 * one}, nil); err != nil {
 		t.Fatal(err)
 	}
 	newTenant := func(ceiling limes.BudgetCeiling) uuid.UUID {
@@ -2729,7 +2730,7 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := f.Usage.SetTenantBudget(f.tenantCtx(id), limes.SetTenantBudgetRequest{TenantID: id, Ceiling: inUnit(ceiling)}); err != nil {
+		if _, err := f.Usage.SetTenantBudget(f.tenantCtx(id), meter.SetTenantBudgetRequest{TenantID: id, Ceiling: inUnit(ceiling)}); err != nil {
 			t.Fatal(err)
 		}
 		return id
@@ -2740,7 +2741,7 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 	unlimited := newTenant(unlimitedBudget)
 	frozen := newTenant(limes.BudgetCeiling{})
 	all := map[uuid.UUID]bool{}
-	var order []limes.TenantBudget
+	var order []meter.TenantBudget
 	cursor := ""
 	// One page per tenant listed, and one more to see the end: a cursor that
 	// does not advance fails here rather than looping forever.
@@ -2749,7 +2750,7 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 		if page > listed {
 			t.Fatalf("paging did not end after %d pages of one tenant each", listed)
 		}
-		pagePage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Limit: 1, Cursor: cursor})
+		pagePage, err := f.Usage.ListTenantBudgets(f.listCtx(), meter.ListTenantBudgetsRequest{Limit: 1, Cursor: cursor})
 		page, next := pagePage.Items, pagePage.Next
 		if err != nil {
 			t.Fatal(err)
@@ -2789,25 +2790,25 @@ func checkListTenantBudgets[TX any](t *testing.T, f fixture[TX]) {
 		}
 	}
 	const half = 50
-	riskyPage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterAtOrPast, ThresholdBasisPoints: half * basisPointsPerPercent})
+	riskyPage, err := f.Usage.ListTenantBudgets(f.listCtx(), meter.ListTenantBudgetsRequest{Filter: meter.TenantBudgetFilterAtOrPast, ThresholdBasisPoints: half * basisPointsPerPercent})
 	risky := riskyPage.Items
 	if err != nil || len(risky) != 2 || risky[0].TenantID != frozen || risky[1].TenantID != f.Tenant || riskyPct(risky[1]) != half {
 		t.Errorf("tenants at 50%% or more = %+v, %v; want %s, at a ceiling of 0, then %s at 50%%", risky, err, frozen, f.Tenant)
 	}
 	// At a threshold of 0, every tenant with a ceiling and none without.
-	ceiled, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterAtOrPast})
-	if err != nil || slices.ContainsFunc(ceiled.Items, func(s limes.TenantBudget) bool { return s.TenantID == unlimited }) ||
-		!slices.ContainsFunc(ceiled.Items, func(s limes.TenantBudget) bool { return s.TenantID == f.Tenant }) {
+	ceiled, err := f.Usage.ListTenantBudgets(f.listCtx(), meter.ListTenantBudgetsRequest{Filter: meter.TenantBudgetFilterAtOrPast})
+	if err != nil || slices.ContainsFunc(ceiled.Items, func(s meter.TenantBudget) bool { return s.TenantID == unlimited }) ||
+		!slices.ContainsFunc(ceiled.Items, func(s meter.TenantBudget) bool { return s.TenantID == f.Tenant }) {
 		t.Errorf("tenants with a ceiling = %+v, %v; want %s and not %s", ceiled.Items, err, f.Tenant, unlimited)
 	}
-	unlPage, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterUnlimited})
+	unlPage, err := f.Usage.ListTenantBudgets(f.listCtx(), meter.ListTenantBudgetsRequest{Filter: meter.TenantBudgetFilterUnlimited})
 	unl := unlPage.Items
-	if err != nil || slices.ContainsFunc(unl, func(s limes.TenantBudget) bool { return s.TenantID == f.Tenant }) ||
-		!slices.ContainsFunc(unl, func(s limes.TenantBudget) bool { return s.TenantID == unlimited }) {
+	if err != nil || slices.ContainsFunc(unl, func(s meter.TenantBudget) bool { return s.TenantID == f.Tenant }) ||
+		!slices.ContainsFunc(unl, func(s meter.TenantBudget) bool { return s.TenantID == unlimited }) {
 		t.Errorf("unlimited tenants = %+v, %v; want %s and not %s", unl, err, unlimited, f.Tenant)
 	}
 	// TenantBudgetFilterAll names the filter a request that names none takes.
-	named, err := f.Usage.ListTenantBudgets(f.listCtx(), limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterAll, Limit: listed})
+	named, err := f.Usage.ListTenantBudgets(f.listCtx(), meter.ListTenantBudgetsRequest{Filter: meter.TenantBudgetFilterAll, Limit: listed})
 	if err != nil || len(named.Items) != len(order) {
 		t.Fatalf("every tenant, by name = %d rows, %v; want %d", len(named.Items), err, len(order))
 	}
@@ -2829,24 +2830,24 @@ const longestTTL = time.Duration(math.MaxInt64)
 // there is nothing to order and the check is skipped.
 func checkReservationsTied[TX any](t *testing.T, f fixture[TX]) {
 	const holds = 4
-	var want []limes.Reservation
+	var want []meter.Reservation
 	for range holds {
-		r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one, TTL: time.Minute})
+		r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: one, TTL: time.Minute})
 		if err != nil {
 			t.Fatal(err)
 		}
 		want = append(want, r)
 	}
-	slices.SortFunc(want, func(a, b limes.Reservation) int {
+	slices.SortFunc(want, func(a, b meter.Reservation) int {
 		return cmp.Or(a.ExpiresAt.Compare(b.ExpiresAt), bytes.Compare(a.ID[:], b.ID[:]))
 	})
-	if !slices.ContainsFunc(want[1:], func(r limes.Reservation) bool { return r.ExpiresAt.Equal(want[0].ExpiresAt) }) {
+	if !slices.ContainsFunc(want[1:], func(r meter.Reservation) bool { return r.ExpiresAt.Equal(want[0].ExpiresAt) }) {
 		t.Skip("the store's clock moved between the holds; none expire together")
 	}
 	var got []uuid.UUID
 	cursor := ""
 	for range holds + 1 {
-		page, err := f.Usage.ListReservations(f.Ctx, limes.ListReservationsRequest{CapabilityID: f.child, Limit: 1, Cursor: cursor})
+		page, err := f.Usage.ListReservations(f.Ctx, meter.ListReservationsRequest{CapabilityID: f.child, Limit: 1, Cursor: cursor})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2877,13 +2878,13 @@ const clockSlack = time.Second
 func checkDefaultReservationTTL[TX any](t *testing.T, f fixture[TX]) {
 	reserve := func(ttl time.Duration) time.Time {
 		t.Helper()
-		r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one, TTL: ttl})
+		r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: one, TTL: ttl})
 		if err != nil {
 			t.Fatal(err)
 		}
 		return r.ExpiresAt
 	}
-	defaulted, explicit := reserve(0), reserve(limes.DefaultReservationTTL)
+	defaulted, explicit := reserve(0), reserve(meter.DefaultReservationTTL)
 	if gap := explicit.Sub(defaulted); gap < 0 || gap > clockSlack {
 		t.Errorf("a hold with no TTL expires at %v, %v before one of DefaultReservationTTL; want within %v", defaulted, gap, clockSlack)
 	}
@@ -2898,7 +2899,7 @@ func checkReservationsPage[TX any](t *testing.T, f fixture[TX]) {
 	holds := len(ttls)
 	var want []uuid.UUID
 	for _, ttl := range ttls {
-		r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
+		r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{
 			Subject: f.childSubject(),
 			Amount:  one,
 			TTL:     ttl,
@@ -2911,7 +2912,7 @@ func checkReservationsPage[TX any](t *testing.T, f fixture[TX]) {
 	var got []uuid.UUID
 	cursor := ""
 	for range holds + 1 {
-		page, err := f.Usage.ListReservations(f.Ctx, limes.ListReservationsRequest{CapabilityID: f.child, Limit: 1, Cursor: cursor})
+		page, err := f.Usage.ListReservations(f.Ctx, meter.ListReservationsRequest{CapabilityID: f.child, Limit: 1, Cursor: cursor})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2926,7 +2927,7 @@ func checkReservationsPage[TX any](t *testing.T, f fixture[TX]) {
 	if !slices.Equal(got, want) {
 		t.Errorf("paged one at a time, the holds = %v, want %v soonest first", got, want)
 	}
-	if _, err := f.Usage.ListReservations(f.Ctx, limes.ListReservationsRequest{CapabilityID: f.child, Limit: -1}); !errors.Is(err, limes.ErrInvalidRequest) {
+	if _, err := f.Usage.ListReservations(f.Ctx, meter.ListReservationsRequest{CapabilityID: f.child, Limit: -1}); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("ListReservations with a negative limit: err = %v, want ErrInvalidRequest", err)
 	}
 }
@@ -2934,13 +2935,13 @@ func checkReservationsPage[TX any](t *testing.T, f fixture[TX]) {
 // checkHousekeepingLimits holds a store to refusing a negative batch, and a
 // DeleteUsage naming no capability.
 func checkHousekeepingLimits[TX any](t *testing.T, f fixture[TX]) {
-	if _, err := f.Usage.ReleaseExpired(f.Ctx, limes.ReleaseExpiredRequest{Limit: -1}); !errors.Is(err, limes.ErrInvalidRequest) {
+	if _, err := f.Usage.ReleaseExpired(f.Ctx, meter.ReleaseExpiredRequest{Limit: -1}); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("ReleaseExpired with a negative limit: err = %v, want ErrInvalidRequest", err)
 	}
-	if _, err := f.Usage.PurgeOrphans(f.Ctx, limes.PurgeOrphansRequest{Limit: -1}); !errors.Is(err, limes.ErrInvalidRequest) {
+	if _, err := f.Usage.PurgeOrphans(f.Ctx, meter.PurgeOrphansRequest{Limit: -1}); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("PurgeOrphans with a negative limit: err = %v, want ErrInvalidRequest", err)
 	}
-	if err := f.Usage.DeleteUsage(f.Ctx, limes.DeleteUsageRequest{}); !errors.Is(err, limes.ErrInvalidRequest) {
+	if err := f.Usage.DeleteUsage(f.Ctx, meter.DeleteUsageRequest{}); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("DeleteUsage naming no capability: err = %v, want ErrInvalidRequest", err)
 	}
 }
@@ -2963,7 +2964,7 @@ func checkLineageAfterRemoval[TX any](t *testing.T, f fixture[TX]) {
 		}
 	}
 	charge := func(capID uuid.UUID) error {
-		_, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: f.Tenant}), Amount: one}, nil)
+		_, err := f.Usage.Charge(f.Ctx, meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: f.Tenant}), Amount: one}, nil)
 		return err
 	}
 	if err := charge(leaf); err != nil {
@@ -2990,10 +2991,10 @@ func checkPurgeOrphans[TX any](t *testing.T, f fixture[TX]) {
 	if f.DeleteCapability == nil {
 		t.Skip("Env.DeleteCapability not set")
 	}
-	if _, err := f.charge(limes.ChargeRequest{Amount: one}, nil); err != nil {
+	if _, err := f.charge(meter.ChargeRequest{Amount: one}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{
+	if _, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{
 		Subject: f.childSubject(),
 		Amount:  one,
 	}); err != nil {
@@ -3002,11 +3003,11 @@ func checkPurgeOrphans[TX any](t *testing.T, f fixture[TX]) {
 	if err := f.DeleteCapability(f.child); err != nil {
 		t.Fatal(err)
 	}
-	got, err := f.Usage.PurgeOrphans(f.Ctx, limes.PurgeOrphansRequest{})
+	got, err := f.Usage.PurgeOrphans(f.Ctx, meter.PurgeOrphansRequest{})
 	if err != nil || got.Purged < 1 {
 		t.Fatalf("PurgeOrphans = %+v, %v; want the removed capability's row", got, err)
 	}
-	if _, err := f.Usage.GetUsage(f.Ctx, f.child); !errors.Is(err, limes.ErrUsageNotFound) {
+	if _, err := f.Usage.GetUsage(f.Ctx, f.child); !errors.Is(err, meter.ErrUsageNotFound) {
 		t.Errorf("the removed capability's usage outlived PurgeOrphans: %v", err)
 	}
 	if u, err := f.Usage.GetUsage(f.Ctx, f.root); err != nil || u.ReservedAmount != 0 {
@@ -3021,7 +3022,7 @@ func checkNotOnRecord[TX any](t *testing.T, f fixture[TX]) {
 	if f.DeleteCapability == nil {
 		t.Skip("Env.DeleteCapability not set")
 	}
-	held, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one})
+	held, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: one})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3029,16 +3030,16 @@ func checkNotOnRecord[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatal(err)
 	}
 	subject := f.childSubject()
-	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: subject, ReservationID: held.ID, Amount: one}, nil); !errors.Is(err, limes.ErrNotFound) {
+	if _, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: subject, ReservationID: held.ID, Amount: one}, nil); !errors.Is(err, limes.ErrNotFound) {
 		t.Errorf("a settle of a capability not on record: err = %v, want ErrNotFound", err)
 	}
-	if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: subject}); !errors.Is(err, limes.ErrNotFound) {
+	if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: subject}); !errors.Is(err, limes.ErrNotFound) {
 		t.Errorf("a bump of a capability not on record: err = %v, want ErrNotFound", err)
 	}
-	if _, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: subject, Amount: one}, nil); !errors.Is(err, limes.ErrNotFound) {
+	if _, err := f.Usage.Charge(f.Ctx, meter.ChargeRequest{Subject: subject, Amount: one}, nil); !errors.Is(err, limes.ErrNotFound) {
 		t.Errorf("a charge of a capability not on record: err = %v, want ErrNotFound", err)
 	}
-	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: subject, Amount: one}); !errors.Is(err, limes.ErrNotFound) {
+	if _, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: subject, Amount: one}); !errors.Is(err, limes.ErrNotFound) {
 		t.Errorf("a hold of a capability not on record: err = %v, want ErrNotFound", err)
 	}
 	if u, err := f.Usage.GetUsage(f.Ctx, f.root); err == nil && (u.SpentAmount != 0 || u.RequestCount != 0) {
@@ -3063,7 +3064,7 @@ const (
 	rankUnlimited
 )
 
-func riskOf(b limes.TenantBudget) risk {
+func riskOf(b meter.TenantBudget) risk {
 	switch {
 	case b.Ceiling.Unlimited:
 		return risk{rank: rankUnlimited}
@@ -3085,10 +3086,10 @@ func (r risk) after(o risk) bool {
 // into basis points.
 const (
 	fullPct               = 100
-	basisPointsPerPercent = limes.BasisPointsPerWhole / fullPct
+	basisPointsPerPercent = meter.BasisPointsPerWhole / fullPct
 )
 
-func riskyPct(s limes.TenantBudget) float64 {
+func riskyPct(s meter.TenantBudget) float64 {
 	pct, limited := s.Utilization()
 	if !limited {
 		return noUtilization
@@ -3106,7 +3107,7 @@ func checkPeriodEnd[TX any](t *testing.T, f fixture[TX]) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		set, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
+		set, err := f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{
 			TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: tenantBudget, UnitCode: unit}, PeriodEnd: want, ExpectedVersion: cur.ResourceVersion,
 		})
 		if err != nil || !set.PeriodEnd.Equal(want) {
@@ -3126,14 +3127,14 @@ func checkPeriodStart[TX any](t *testing.T, f fixture[TX]) {
 		t.Skip("Env.Advance is not set")
 	}
 	const step = time.Hour
-	set := func(reset bool) limes.TenantBudget {
+	set := func(reset bool) meter.TenantBudget {
 		t.Helper()
 		f.Advance(step)
 		cur, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
+		if _, err := f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{
 			TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: tenantBudget, UnitCode: unit}, ResetSpend: reset, ExpectedVersion: cur.ResourceVersion,
 		}); err != nil {
 			t.Fatal(err)
@@ -3164,23 +3165,23 @@ func checkPeriodStart[TX any](t *testing.T, f fixture[TX]) {
 // lowered — does not refuse it, and the whole hold is released everywhere it counted.
 func checkSettleWithinHold[TX any](t *testing.T, f fixture[TX]) {
 	const held, actual = 10 * one, 4 * one
-	r, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: held})
+	r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: held})
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one})
+	again, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: one})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// The root spends past its ceiling, its child's hold still counted.
-	if _, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{
+	if _, err := f.Usage.Charge(f.Ctx, meter.ChargeRequest{
 		Subject: newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, budget: budgetOf(rootBudget)}),
 		Amount:  rootBudget,
-		Overrun: limes.OverrunPolicyRecord,
+		Overrun: meter.OverrunPolicyRecord,
 	}, nil); err != nil {
 		t.Fatal(err)
 	}
-	got, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: f.childSubject(), ReservationID: r.ID, Amount: actual}, nil)
+	got, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: f.childSubject(), ReservationID: r.ID, Amount: actual}, nil)
 	if err != nil {
 		t.Fatalf("settle below the hold after the root crossed its ceiling: %v", err)
 	}
@@ -3204,12 +3205,12 @@ func checkSettleWithinHold[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
+	if _, err := f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{
 		TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: cent, UnitCode: unit}, ExpectedVersion: cur.ResourceVersion,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: f.childSubject(), ReservationID: again.ID, Amount: one}, nil); err != nil {
+	if _, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: f.childSubject(), ReservationID: again.ID, Amount: one}, nil); err != nil {
 		t.Errorf("settle at the hold after the tenant ceiling was lowered under it: %v", err)
 	}
 }
@@ -3219,19 +3220,19 @@ func checkSettleWithinHold[TX any](t *testing.T, f fixture[TX]) {
 // counting it under the nil id.
 func checkZeroSubject[TX any](t *testing.T, f fixture[TX]) {
 	var zero limes.MeterSubject
-	if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: zero}); !errors.Is(err, limes.ErrInvalidRequest) {
+	if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: zero}); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("Bump: err = %v, want ErrInvalidRequest", err)
 	}
-	if _, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: zero, Amount: one}, nil); !errors.Is(err, limes.ErrInvalidRequest) {
+	if _, err := f.Usage.Charge(f.Ctx, meter.ChargeRequest{Subject: zero, Amount: one}, nil); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("Charge: err = %v, want ErrInvalidRequest", err)
 	}
-	if _, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: zero, Amount: one}); !errors.Is(err, limes.ErrInvalidRequest) {
+	if _, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: zero, Amount: one}); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("Reserve: err = %v, want ErrInvalidRequest", err)
 	}
-	if _, err := f.Usage.Settle(f.Ctx, limes.SettleRequest{Subject: zero, ReservationID: uuid.New(), Amount: one}, nil); !errors.Is(err, limes.ErrInvalidRequest) {
+	if _, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: zero, ReservationID: uuid.New(), Amount: one}, nil); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("Settle: err = %v, want ErrInvalidRequest", err)
 	}
-	if _, err := f.Usage.GetUsage(f.Ctx, uuid.Nil); !errors.Is(err, limes.ErrUsageNotFound) {
+	if _, err := f.Usage.GetUsage(f.Ctx, uuid.Nil); !errors.Is(err, meter.ErrUsageNotFound) {
 		t.Errorf("GetUsage(nil id) = %v; want ErrUsageNotFound, nothing counted", err)
 	}
 }
@@ -3247,7 +3248,7 @@ func checkScopeMismatch[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil {
 		t.Fatalf("NewTenant: %v", err)
 	}
-	held, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one})
+	held, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: one})
 	if err != nil {
 		t.Fatalf("reserve: %v", err)
 	}
@@ -3258,19 +3259,19 @@ func checkScopeMismatch[TX any](t *testing.T, f fixture[TX]) {
 	wrong := f.tenantCtx(other)
 	for name, call := range map[string]func() error{
 		"Bump": func() error {
-			_, err := f.Usage.Bump(wrong, limes.BumpRequest{Subject: f.childSubject()})
+			_, err := f.Usage.Bump(wrong, meter.BumpRequest{Subject: f.childSubject()})
 			return err
 		},
 		"Charge": func() error {
-			_, err := f.Usage.Charge(wrong, limes.ChargeRequest{Subject: f.childSubject(), Amount: one}, nil)
+			_, err := f.Usage.Charge(wrong, meter.ChargeRequest{Subject: f.childSubject(), Amount: one}, nil)
 			return err
 		},
 		"Reserve": func() error {
-			_, err := f.Usage.Reserve(wrong, limes.ReserveRequest{Subject: f.childSubject(), Amount: one})
+			_, err := f.Usage.Reserve(wrong, meter.ReserveRequest{Subject: f.childSubject(), Amount: one})
 			return err
 		},
 		"Settle": func() error {
-			_, err := f.Usage.Settle(wrong, limes.SettleRequest{Subject: f.childSubject(), ReservationID: held.ID, Amount: one}, nil)
+			_, err := f.Usage.Settle(wrong, meter.SettleRequest{Subject: f.childSubject(), ReservationID: held.ID, Amount: one}, nil)
 			return err
 		},
 		"GetTenantBudget": func() error {
@@ -3278,7 +3279,7 @@ func checkScopeMismatch[TX any](t *testing.T, f fixture[TX]) {
 			return err
 		},
 		"SetTenantBudget": func() error {
-			_, err := f.Usage.SetTenantBudget(wrong, limes.SetTenantBudgetRequest{
+			_, err := f.Usage.SetTenantBudget(wrong, meter.SetTenantBudgetRequest{
 				TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: unit},
 			})
 			return err
@@ -3316,11 +3317,11 @@ func checkReadOnlyScope[TX any](t *testing.T, f fixture[TX]) {
 	if ro == nil {
 		t.Skip("Env.ReadOnlyCtx not set")
 	}
-	charged, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: f.childSubject(), Amount: one}, nil)
+	charged, err := f.Usage.Charge(f.Ctx, meter.ChargeRequest{Subject: f.childSubject(), Amount: one}, nil)
 	if err != nil {
 		t.Fatalf("charge: %v", err)
 	}
-	held, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one})
+	held, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: one})
 	if err != nil {
 		t.Fatalf("reserve: %v", err)
 	}
@@ -3329,53 +3330,53 @@ func checkReadOnlyScope[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatalf("GetUsage under the read-only scope: %v", err)
 	}
 	ran := false
-	onCharged := func(context.Context, limes.Charged[TX]) error {
+	onCharged := func(context.Context, meter.Charged[TX]) error {
 		ran = true
 		return nil
 	}
 	writes := map[string]func() error{
 		"Bump": func() error {
-			_, err := f.Usage.Bump(ro, limes.BumpRequest{Subject: f.childSubject()})
+			_, err := f.Usage.Bump(ro, meter.BumpRequest{Subject: f.childSubject()})
 			return err
 		},
 		"Charge": func() error {
-			_, err := f.Usage.Charge(ro, limes.ChargeRequest{Subject: f.childSubject(), Amount: one}, onCharged)
+			_, err := f.Usage.Charge(ro, meter.ChargeRequest{Subject: f.childSubject(), Amount: one}, onCharged)
 			return err
 		},
 		"Reserve": func() error {
-			_, err := f.Usage.Reserve(ro, limes.ReserveRequest{Subject: f.childSubject(), Amount: one})
+			_, err := f.Usage.Reserve(ro, meter.ReserveRequest{Subject: f.childSubject(), Amount: one})
 			return err
 		},
 		"Settle": func() error {
-			_, err := f.Usage.Settle(ro, limes.SettleRequest{Subject: f.childSubject(), ReservationID: held.ID, Amount: one}, onCharged)
+			_, err := f.Usage.Settle(ro, meter.SettleRequest{Subject: f.childSubject(), ReservationID: held.ID, Amount: one}, onCharged)
 			return err
 		},
 		"Release": func() error {
-			return f.Usage.Release(ro, limes.ReleaseRequest{Subject: f.childSubject(), ReservationID: held.ID})
+			return f.Usage.Release(ro, meter.ReleaseRequest{Subject: f.childSubject(), ReservationID: held.ID})
 		},
 		"Refund": func() error {
-			_, err := f.Usage.Refund(ro, limes.RefundRequest{ChargeID: charged.ChargeID, Remaining: true})
+			_, err := f.Usage.Refund(ro, meter.RefundRequest{ChargeID: charged.ChargeID, Remaining: true})
 			return err
 		},
 		"SetTenantBudget": func() error {
-			_, err := f.Usage.SetTenantBudget(ro, limes.SetTenantBudgetRequest{
+			_, err := f.Usage.SetTenantBudget(ro, meter.SetTenantBudgetRequest{
 				TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: unit},
 			})
 			return err
 		},
 		"ReleaseExpired": func() error {
-			_, err := f.Usage.ReleaseExpired(ro, limes.ReleaseExpiredRequest{})
+			_, err := f.Usage.ReleaseExpired(ro, meter.ReleaseExpiredRequest{})
 			return err
 		},
 		"PurgeOrphans": func() error {
-			_, err := f.Usage.PurgeOrphans(ro, limes.PurgeOrphansRequest{})
+			_, err := f.Usage.PurgeOrphans(ro, meter.PurgeOrphansRequest{})
 			return err
 		},
-		"DeleteUsage": func() error { return f.Usage.DeleteUsage(ro, limes.DeleteUsageRequest{CapabilityID: f.child}) },
+		"DeleteUsage": func() error { return f.Usage.DeleteUsage(ro, meter.DeleteUsageRequest{CapabilityID: f.child}) },
 	}
-	if eraser, ok := f.Usage.(limes.TenantUsageEraser); ok {
+	if eraser, ok := f.Usage.(meter.TenantUsageEraser); ok {
 		writes["EraseTenantUsage"] = func() error {
-			return eraser.EraseTenantUsage(ro, limes.EraseTenantUsageRequest{TenantID: f.Tenant})
+			return eraser.EraseTenantUsage(ro, meter.EraseTenantUsageRequest{TenantID: f.Tenant})
 		}
 	}
 	for name, write := range writes {
@@ -3408,9 +3409,9 @@ func checkReadOnlyScope[TX any](t *testing.T, f fixture[TX]) {
 // Erasing a tenant's usage drops its counters, holds, copies' counters,
 // charges and aggregate, and no other tenant's.
 func checkEraseTenantUsage[TX any](t *testing.T, f fixture[TX]) {
-	eraser, ok := f.Usage.(limes.TenantUsageEraser)
+	eraser, ok := f.Usage.(meter.TenantUsageEraser)
 	if !ok {
-		t.Skip("the UsageStore does not implement limes.TenantUsageEraser")
+		t.Skip("the UsageStore does not implement meter.TenantUsageEraser")
 	}
 	other, err := f.newTenant()
 	if err != nil {
@@ -3421,58 +3422,58 @@ func checkEraseTenantUsage[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatalf("capability of another tenant: %v", err)
 	}
 	theirCtx := f.tenantCtx(other)
-	if _, err := f.Usage.SetTenantBudget(theirCtx, limes.SetTenantBudgetRequest{
+	if _, err := f.Usage.SetTenantBudget(theirCtx, meter.SetTenantBudgetRequest{
 		TenantID: other, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: unit},
 	}); err != nil {
 		t.Fatalf("budget of another tenant: %v", err)
 	}
 	theirSubject := newSubject(subjectSpec{capID: theirCap, tenant: other})
-	theirCharge, err := f.Usage.Charge(theirCtx, limes.ChargeRequest{Subject: theirSubject, Amount: one}, nil)
+	theirCharge, err := f.Usage.Charge(theirCtx, meter.ChargeRequest{Subject: theirSubject, Amount: one}, nil)
 	if err != nil {
 		t.Fatalf("charge of another tenant: %v", err)
 	}
 	copyID := []byte("erased-tenant-copy")
 	mine := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget),
 		copies: []limes.CopyCeiling{{RevocationID: copyID, Budget: &limes.BudgetCeiling{Max: childBudget, UnitCode: unit}}}})
-	charged, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: mine, Amount: one, ExternalRef: "erased"}, nil)
+	charged, err := f.Usage.Charge(f.Ctx, meter.ChargeRequest{Subject: mine, Amount: one, ExternalRef: "erased"}, nil)
 	if err != nil {
 		t.Fatalf("charge: %v", err)
 	}
-	held, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one})
+	held, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: one})
 	if err != nil {
 		t.Fatalf("reserve: %v", err)
 	}
-	req := limes.EraseTenantUsageRequest{TenantID: f.Tenant}
+	req := meter.EraseTenantUsageRequest{TenantID: f.Tenant}
 	if f.ScopesTenants {
 		if err := eraser.EraseTenantUsage(theirCtx, req); !errors.Is(err, limes.ErrScopeMismatch) {
 			t.Errorf("EraseTenantUsage under another tenant's context: err = %v, want ErrScopeMismatch", err)
 		}
 	}
-	if err := eraser.EraseTenantUsage(f.Ctx, limes.EraseTenantUsageRequest{}); !errors.Is(err, limes.ErrInvalidRequest) {
+	if err := eraser.EraseTenantUsage(f.Ctx, meter.EraseTenantUsageRequest{}); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("EraseTenantUsage naming no tenant: err = %v, want ErrInvalidRequest", err)
 	}
 	if err := eraser.EraseTenantUsage(f.Ctx, req); err != nil {
 		t.Fatalf("EraseTenantUsage: %v", err)
 	}
 	for _, id := range []uuid.UUID{f.root, f.child} {
-		if u, err := f.Usage.GetUsage(f.Ctx, id); !errors.Is(err, limes.ErrUsageNotFound) {
+		if u, err := f.Usage.GetUsage(f.Ctx, id); !errors.Is(err, meter.ErrUsageNotFound) {
 			t.Errorf("usage of %s after the erase = %+v, %v; want ErrUsageNotFound", id, u, err)
 		}
 	}
-	if _, err := f.Usage.GetCharge(f.Ctx, charged.ChargeID); !errors.Is(err, limes.ErrChargeNotFound) {
+	if _, err := f.Usage.GetCharge(f.Ctx, charged.ChargeID); !errors.Is(err, meter.ErrChargeNotFound) {
 		t.Errorf("GetCharge after the erase: err = %v, want ErrChargeNotFound", err)
 	}
-	if _, err := f.Usage.ChargeByRef(f.Ctx, limes.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: "erased"}); !errors.Is(err, limes.ErrChargeNotFound) {
+	if _, err := f.Usage.ChargeByRef(f.Ctx, meter.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: "erased"}); !errors.Is(err, meter.ErrChargeNotFound) {
 		t.Errorf("ChargeByRef after the erase: err = %v, want ErrChargeNotFound", err)
 	}
-	if _, err := f.Usage.GetReservation(f.Ctx, held.ID); !errors.Is(err, limes.ErrReservationNotFound) {
+	if _, err := f.Usage.GetReservation(f.Ctx, held.ID); !errors.Is(err, meter.ErrReservationNotFound) {
 		t.Errorf("GetReservation after the erase: err = %v, want ErrReservationNotFound", err)
 	}
-	if _, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant); !errors.Is(err, limes.ErrTenantBudgetNotFound) {
+	if _, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant); !errors.Is(err, meter.ErrTenantBudgetNotFound) {
 		t.Errorf("GetTenantBudget after the erase: err = %v, want ErrTenantBudgetNotFound", err)
 	}
-	if copies, ok := f.Usage.(limes.CopyUsageReader); ok {
-		got, err := copies.CopyUsage(f.Ctx, limes.CopyUsageRequest{CapabilityID: f.child, RevocationIDs: [][]byte{copyID}})
+	if copies, ok := f.Usage.(meter.CopyUsageReader); ok {
+		got, err := copies.CopyUsage(f.Ctx, meter.CopyUsageRequest{CapabilityID: f.child, RevocationIDs: [][]byte{copyID}})
 		if err != nil || len(got.Copies) != 0 {
 			t.Errorf("CopyUsage after the erase = %+v, %v; want no copy", got, err)
 		}
@@ -3492,19 +3493,19 @@ func checkEraseTenantUsage[TX any](t *testing.T, f fixture[TX]) {
 	// still on record, revoked, but no row of it comes back.
 	afterErase := map[string]func() error{
 		"Bump": func() error {
-			_, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: f.childSubject()})
+			_, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: f.childSubject()})
 			return err
 		},
 		"Charge": func() error {
-			_, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: f.childSubject(), Amount: one}, nil)
+			_, err := f.Usage.Charge(f.Ctx, meter.ChargeRequest{Subject: f.childSubject(), Amount: one}, nil)
 			return err
 		},
 		"Reserve": func() error {
-			_, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one})
+			_, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: one})
 			return err
 		},
 		"SetTenantBudget": func() error {
-			_, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: unit}})
+			_, err := f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: unit}})
 			return err
 		},
 	}
@@ -3513,13 +3514,13 @@ func checkEraseTenantUsage[TX any](t *testing.T, f fixture[TX]) {
 			t.Errorf("%s after the erase: err = %v, want ErrTenantErased, matching ErrRevoked", name, err)
 		}
 	}
-	if u, err := f.Usage.GetUsage(f.Ctx, f.child); !errors.Is(err, limes.ErrUsageNotFound) {
+	if u, err := f.Usage.GetUsage(f.Ctx, f.child); !errors.Is(err, meter.ErrUsageNotFound) {
 		t.Errorf("usage after metering an erased tenant = %+v, %v; want ErrUsageNotFound", u, err)
 	}
-	if _, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant); !errors.Is(err, limes.ErrTenantBudgetNotFound) {
+	if _, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant); !errors.Is(err, meter.ErrTenantBudgetNotFound) {
 		t.Errorf("GetTenantBudget after metering an erased tenant: err = %v, want ErrTenantBudgetNotFound", err)
 	}
-	if _, err := f.Usage.Bump(theirCtx, limes.BumpRequest{Subject: theirSubject}); err != nil {
+	if _, err := f.Usage.Bump(theirCtx, meter.BumpRequest{Subject: theirSubject}); err != nil {
 		t.Errorf("another tenant's request after the erase: %v", err)
 	}
 }
@@ -3551,11 +3552,11 @@ func checkSumCharges[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil {
 		t.Fatalf("capability of another tenant: %v", err)
 	}
-	if _, err := f.Usage.Charge(f.tenantCtx(other), limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: theirCap, tenant: other}), Amount: 7 * one}, nil); err != nil {
+	if _, err := f.Usage.Charge(f.tenantCtx(other), meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: theirCap, tenant: other}), Amount: 7 * one}, nil); err != nil {
 		t.Fatalf("charge of another tenant: %v", err)
 	}
 	root := newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, budget: budgetOf(rootBudget)})
-	for _, c := range []limes.ChargeRequest{
+	for _, c := range []meter.ChargeRequest{
 		{Amount: 2 * one, Op: limes.OpGet, Actor: "a"},
 		{Amount: 3 * one, Op: limes.OpPut, Actor: "b"},
 		{Subject: root, Amount: 6 * one, Op: limes.OpGet, Actor: "a"},
@@ -3565,13 +3566,13 @@ func checkSumCharges[TX any](t *testing.T, f fixture[TX]) {
 			t.Fatalf("charge: %v", err)
 		}
 		if c.Op == limes.OpPut {
-			if _, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: r.ChargeID, Amount: one}); err != nil {
+			if _, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Amount: one}); err != nil {
 				t.Fatalf("refund: %v", err)
 			}
 		}
 	}
 	from, to := f.sumPeriod()
-	sums := func(req limes.SumChargesRequest) []limes.ChargeSum {
+	sums := func(req meter.SumChargesRequest) []meter.ChargeSum {
 		t.Helper()
 		req.TenantID, req.From, req.To = f.Tenant, from, to
 		page, err := f.Ledger.SumCharges(f.Ctx, req)
@@ -3581,21 +3582,21 @@ func checkSumCharges[TX any](t *testing.T, f fixture[TX]) {
 		return page.Items
 	}
 	for name, tc := range map[string]struct {
-		req  limes.SumChargesRequest
-		want []limes.ChargeSum
+		req  meter.SumChargesRequest
+		want []meter.ChargeSum
 	}{
-		"the whole period": {limes.SumChargesRequest{}, []limes.ChargeSum{
+		"the whole period": {meter.SumChargesRequest{}, []meter.ChargeSum{
 			{UnitCode: unit, Charged: 11 * one, Refunded: one, Charges: 3},
 		}},
-		"by operation": {limes.SumChargesRequest{ByOp: true}, []limes.ChargeSum{
+		"by operation": {meter.SumChargesRequest{ByOp: true}, []meter.ChargeSum{
 			{UnitCode: unit, Op: limes.OpGet, Charged: 8 * one, Charges: 2},
 			{UnitCode: unit, Op: limes.OpPut, Charged: 3 * one, Refunded: one, Charges: 1},
 		}},
-		"by actor": {limes.SumChargesRequest{ByActor: true}, []limes.ChargeSum{
+		"by actor": {meter.SumChargesRequest{ByActor: true}, []meter.ChargeSum{
 			{UnitCode: unit, Actor: "a", Charged: 8 * one, Charges: 2},
 			{UnitCode: unit, Actor: "b", Charged: 3 * one, Refunded: one, Charges: 1},
 		}},
-		"by capability": {limes.SumChargesRequest{ByCapability: true}, []limes.ChargeSum{
+		"by capability": {meter.SumChargesRequest{ByCapability: true}, []meter.ChargeSum{
 			{UnitCode: unit, CapabilityID: f.root, Charged: 6 * one, Charges: 1},
 			{UnitCode: unit, CapabilityID: f.child, Charged: 5 * one, Refunded: one, Charges: 2},
 		}},
@@ -3605,7 +3606,7 @@ func checkSumCharges[TX any](t *testing.T, f fixture[TX]) {
 		}
 	}
 	// The top one, then the rest after its cursor.
-	req := limes.SumChargesRequest{TenantID: f.Tenant, From: from, To: to, ByCapability: true, Limit: 1}
+	req := meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: to, ByCapability: true, Limit: 1}
 	first, err := f.Ledger.SumCharges(f.Ctx, req)
 	if err != nil || len(first.Items) != 1 || first.Items[0].CapabilityID != f.root || first.Next == "" {
 		t.Fatalf("the first page of one = %+v, %v; want the root and a cursor", first, err)
@@ -3616,14 +3617,14 @@ func checkSumCharges[TX any](t *testing.T, f fixture[TX]) {
 		t.Errorf("the page after it = %+v, %v; want the child, and the last page", second, err)
 	}
 	// A period that ends before the charges holds none of them.
-	if page, err := f.Ledger.SumCharges(f.Ctx, limes.SumChargesRequest{TenantID: f.Tenant, From: from, To: from.Add(time.Second)}); err != nil || len(page.Items) != 0 {
+	if page, err := f.Ledger.SumCharges(f.Ctx, meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: from.Add(time.Second)}); err != nil || len(page.Items) != 0 {
 		t.Errorf("SumCharges of a period before the charges = %+v, %v; want none", page, err)
 	}
-	for name, bad := range map[string]limes.SumChargesRequest{
+	for name, bad := range map[string]meter.SumChargesRequest{
 		"no tenant":         {From: from, To: to},
 		"an empty period":   {TenantID: f.Tenant, From: to, To: from},
 		"no period":         {TenantID: f.Tenant},
-		"an unknown bucket": {TenantID: f.Tenant, From: from, To: to, Bucket: limes.ChargeBucket(math.MaxUint8)},
+		"an unknown bucket": {TenantID: f.Tenant, From: from, To: to, Bucket: meter.ChargeBucket(math.MaxUint8)},
 		"a negative limit":  {TenantID: f.Tenant, From: from, To: to, Limit: -1},
 		"a foreign cursor":  {TenantID: f.Tenant, From: from, To: to, Cursor: "not a cursor"},
 	} {
@@ -3632,7 +3633,7 @@ func checkSumCharges[TX any](t *testing.T, f fixture[TX]) {
 		}
 	}
 	if f.ScopesTenants {
-		if _, err := f.Ledger.SumCharges(f.tenantCtx(other), limes.SumChargesRequest{TenantID: f.Tenant, From: from, To: to}); !errors.Is(err, limes.ErrScopeMismatch) {
+		if _, err := f.Ledger.SumCharges(f.tenantCtx(other), meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: to}); !errors.Is(err, limes.ErrScopeMismatch) {
 			t.Errorf("SumCharges under another tenant's context: err = %v, want ErrScopeMismatch", err)
 		}
 	}
@@ -3652,7 +3653,7 @@ func checkSumChargesOrderByAmount[TX any](t *testing.T, f fixture[TX]) {
 	if err != nil {
 		t.Fatalf("tenant budget: %v", err)
 	}
-	if _, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
+	if _, err := f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{
 		TenantID: f.Tenant, Ceiling: unlimitedBudget, ExpectedVersion: b.ResourceVersion,
 	}); err != nil {
 		t.Fatalf("tenant budget: %v", err)
@@ -3664,19 +3665,19 @@ func checkSumChargesOrderByAmount[TX any](t *testing.T, f fixture[TX]) {
 	subject := newSubject(subjectSpec{capID: capID, tenant: f.Tenant})
 	charge := func(actor string, amount, refund limes.Nanos) {
 		t.Helper()
-		r, err := f.charge(limes.ChargeRequest{Subject: subject, Amount: amount, Actor: actor}, nil)
+		r, err := f.charge(meter.ChargeRequest{Subject: subject, Amount: amount, Actor: actor}, nil)
 		if err != nil {
 			t.Fatalf("charge of %s by %s: %v", amount, actor, err)
 		}
 		if refund == 0 {
 			return
 		}
-		if _, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: r.ChargeID, Amount: refund}); err != nil {
+		if _, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Amount: refund}); err != nil {
 			t.Fatalf("refund: %v", err)
 		}
 	}
 	from, to := f.sumPeriod()
-	walk := func(req limes.SumChargesRequest, want []limes.ChargeSum) {
+	walk := func(req meter.SumChargesRequest, want []meter.ChargeSum) {
 		t.Helper()
 		req.TenantID, req.From, req.To, req.ByActor = f.Tenant, from, to, true
 		page, err := f.Ledger.SumCharges(f.Ctx, req)
@@ -3684,7 +3685,7 @@ func checkSumChargesOrderByAmount[TX any](t *testing.T, f fixture[TX]) {
 			t.Errorf("SumCharges by %s = %+v, %q, %v; want %+v on one page", req.Bucket, page.Items, page.Next, err, want)
 		}
 		req.Limit = 1
-		var walked []limes.ChargeSum
+		var walked []meter.ChargeSum
 		for range len(want) + 1 {
 			page, err := f.Ledger.SumCharges(f.Ctx, req)
 			if err != nil {
@@ -3704,7 +3705,7 @@ func checkSumChargesOrderByAmount[TX any](t *testing.T, f fixture[TX]) {
 	charge("x", 12*one, one)
 	charge("y", 2*one, 0)
 	charge("z", one/2, 0)
-	walk(limes.SumChargesRequest{}, []limes.ChargeSum{
+	walk(meter.SumChargesRequest{}, []meter.ChargeSum{
 		{UnitCode: unit, Actor: "x", Charged: 12 * one, Refunded: one, Charges: 1},
 		{UnitCode: unit, Actor: "y", Charged: 2 * one, Charges: 1},
 		{UnitCode: unit, Actor: "z", Charged: one / 2, Charges: 1},
@@ -3721,12 +3722,12 @@ func checkSumChargesOrderByAmount[TX any](t *testing.T, f fixture[TX]) {
 	charge("x", 7*one, 0)
 	charge("y", 9*cent, 0)
 	_, to = f.sumPeriod()
-	walk(limes.SumChargesRequest{}, []limes.ChargeSum{
+	walk(meter.SumChargesRequest{}, []meter.ChargeSum{
 		{UnitCode: unit, Actor: "z", Charged: 100*one + one/2, Charges: 2},
 		{UnitCode: unit, Actor: "x", Charged: 19 * one, Refunded: one, Charges: 2},
 		{UnitCode: unit, Actor: "y", Charged: 2*one + 9*cent, Charges: 2},
 	})
-	walk(limes.SumChargesRequest{Bucket: limes.ChargeBucketDay}, []limes.ChargeSum{
+	walk(meter.SumChargesRequest{Bucket: meter.ChargeBucketDay}, []meter.ChargeSum{
 		{BucketStart: firstDay, UnitCode: unit, Actor: "x", Charged: 12 * one, Refunded: one, Charges: 1},
 		{BucketStart: firstDay, UnitCode: unit, Actor: "y", Charged: 2 * one, Charges: 1},
 		{BucketStart: firstDay, UnitCode: unit, Actor: "z", Charged: one / 2, Charges: 1},
@@ -3748,20 +3749,20 @@ func checkSumChargeBuckets[TX any](t *testing.T, f fixture[TX]) {
 	y, m, d := from.UTC().Date()
 	midnight := time.Date(y, m, d+1, 0, 0, 0, 0, time.UTC)
 	f.Advance(midnight.Sub(from) - tick)
-	if _, err := f.charge(limes.ChargeRequest{Amount: 2 * one}, nil); err != nil {
+	if _, err := f.charge(meter.ChargeRequest{Amount: 2 * one}, nil); err != nil {
 		t.Fatalf("charge before midnight: %v", err)
 	}
 	f.Advance(tick)
-	if _, err := f.charge(limes.ChargeRequest{Amount: 3 * one}, nil); err != nil {
+	if _, err := f.charge(meter.ChargeRequest{Amount: 3 * one}, nil); err != nil {
 		t.Fatalf("charge at midnight: %v", err)
 	}
 	to := midnight.Add(time.Second)
-	for b, before := range map[limes.ChargeBucket]time.Time{
-		limes.ChargeBucketHour: midnight.Add(-time.Hour),
-		limes.ChargeBucketDay:  midnight.AddDate(0, 0, -1),
+	for b, before := range map[meter.ChargeBucket]time.Time{
+		meter.ChargeBucketHour: midnight.Add(-time.Hour),
+		meter.ChargeBucketDay:  midnight.AddDate(0, 0, -1),
 	} {
-		page, err := f.Ledger.SumCharges(f.Ctx, limes.SumChargesRequest{TenantID: f.Tenant, From: from, To: to, Bucket: b})
-		want := []limes.ChargeSum{
+		page, err := f.Ledger.SumCharges(f.Ctx, meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: to, Bucket: b})
+		want := []meter.ChargeSum{
 			{BucketStart: before, UnitCode: unit, Charged: 2 * one, Charges: 1},
 			{BucketStart: midnight, UnitCode: unit, Charged: 3 * one, Charges: 1},
 		}
@@ -3770,14 +3771,14 @@ func checkSumChargeBuckets[TX any](t *testing.T, f fixture[TX]) {
 		}
 	}
 	// No bucket, named or left zero, sums the period whole.
-	for _, b := range []limes.ChargeBucket{limes.ChargeBucketNone, 0} {
-		page, err := f.Ledger.SumCharges(f.Ctx, limes.SumChargesRequest{TenantID: f.Tenant, From: from, To: to, Bucket: b})
-		want := []limes.ChargeSum{{UnitCode: unit, Charged: 5 * one, Charges: 2}}
+	for _, b := range []meter.ChargeBucket{meter.ChargeBucketNone, 0} {
+		page, err := f.Ledger.SumCharges(f.Ctx, meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: to, Bucket: b})
+		want := []meter.ChargeSum{{UnitCode: unit, Charged: 5 * one, Charges: 2}}
 		if err != nil || !sameSums(page.Items, want) {
 			t.Errorf("SumCharges by %s = %+v, %v; want %+v", b, page.Items, err, want)
 		}
 	}
-	page, err := f.Ledger.SumCharges(f.Ctx, limes.SumChargesRequest{TenantID: f.Tenant, From: from, To: to, Bucket: limes.ChargeBucketMonth})
+	page, err := f.Ledger.SumCharges(f.Ctx, meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: to, Bucket: meter.ChargeBucketMonth})
 	months := map[time.Time]bool{}
 	for _, s := range page.Items {
 		months[s.BucketStart] = true
@@ -3805,15 +3806,15 @@ func checkSumChargeWeeks[TX any](t *testing.T, f fixture[TX]) {
 		monday = monday.AddDate(0, 0, 1)
 	}
 	f.Advance(monday.Sub(from) - tick)
-	if _, err := f.charge(limes.ChargeRequest{Amount: 2 * one}, nil); err != nil {
+	if _, err := f.charge(meter.ChargeRequest{Amount: 2 * one}, nil); err != nil {
 		t.Fatalf("charge before Monday: %v", err)
 	}
 	f.Advance(tick)
-	if _, err := f.charge(limes.ChargeRequest{Amount: 3 * one}, nil); err != nil {
+	if _, err := f.charge(meter.ChargeRequest{Amount: 3 * one}, nil); err != nil {
 		t.Fatalf("charge at Monday: %v", err)
 	}
-	page, err := f.Ledger.SumCharges(f.Ctx, limes.SumChargesRequest{TenantID: f.Tenant, From: from, To: monday.Add(time.Second), Bucket: limes.ChargeBucketWeek})
-	want := []limes.ChargeSum{
+	page, err := f.Ledger.SumCharges(f.Ctx, meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: monday.Add(time.Second), Bucket: meter.ChargeBucketWeek})
+	want := []meter.ChargeSum{
 		{BucketStart: monday.AddDate(0, 0, -7), UnitCode: unit, Charged: 2 * one, Charges: 1},
 		{BucketStart: monday, UnitCode: unit, Charged: 3 * one, Charges: 1},
 	}
@@ -3833,17 +3834,17 @@ func checkSumChargesPeriodEdges[TX any](t *testing.T, f fixture[TX]) {
 	now := f.Now()
 	f.Advance(now.Truncate(time.Second).Add(time.Second).Sub(now))
 	at := f.Now()
-	if _, err := f.charge(limes.ChargeRequest{Amount: 2 * one}, nil); err != nil {
+	if _, err := f.charge(meter.ChargeRequest{Amount: 2 * one}, nil); err != nil {
 		t.Fatalf("charge: %v", err)
 	}
 	for name, tc := range map[string]struct {
 		from, to time.Time
-		want     []limes.ChargeSum
+		want     []meter.ChargeSum
 	}{
-		"From at the charge": {at, at.Add(time.Microsecond), []limes.ChargeSum{{UnitCode: unit, Charged: 2 * one, Charges: 1}}},
+		"From at the charge": {at, at.Add(time.Microsecond), []meter.ChargeSum{{UnitCode: unit, Charged: 2 * one, Charges: 1}}},
 		"To at the charge":   {at.Add(-time.Second), at, nil},
 	} {
-		page, err := f.Ledger.SumCharges(f.Ctx, limes.SumChargesRequest{TenantID: f.Tenant, From: tc.from, To: tc.to})
+		page, err := f.Ledger.SumCharges(f.Ctx, meter.SumChargesRequest{TenantID: f.Tenant, From: tc.from, To: tc.to})
 		if err != nil || !sameSums(page.Items, tc.want) {
 			t.Errorf("%s: SumCharges = %+v, %v; want %+v", name, page.Items, err, tc.want)
 		}
@@ -3860,18 +3861,18 @@ func checkSumChargesLateRefund[TX any](t *testing.T, f fixture[TX]) {
 	from := f.Now()
 	y, m, d := from.UTC().Date()
 	midnight := time.Date(y, m, d+1, 0, 0, 0, 0, time.UTC)
-	r, err := f.charge(limes.ChargeRequest{Amount: 3 * one}, nil)
+	r, err := f.charge(meter.ChargeRequest{Amount: 3 * one}, nil)
 	if err != nil {
 		t.Fatalf("charge: %v", err)
 	}
 	f.Advance(midnight.Sub(from))
-	if _, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: r.ChargeID, Amount: one}); err != nil {
+	if _, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Amount: one}); err != nil {
 		t.Fatalf("refund the next day: %v", err)
 	}
-	page, err := f.Ledger.SumCharges(f.Ctx, limes.SumChargesRequest{
-		TenantID: f.Tenant, From: from, To: midnight.Add(time.Second), Bucket: limes.ChargeBucketDay,
+	page, err := f.Ledger.SumCharges(f.Ctx, meter.SumChargesRequest{
+		TenantID: f.Tenant, From: from, To: midnight.Add(time.Second), Bucket: meter.ChargeBucketDay,
 	})
-	want := []limes.ChargeSum{{BucketStart: midnight.AddDate(0, 0, -1), UnitCode: unit, Charged: 3 * one, Refunded: one, Charges: 1}}
+	want := []meter.ChargeSum{{BucketStart: midnight.AddDate(0, 0, -1), UnitCode: unit, Charged: 3 * one, Refunded: one, Charges: 1}}
 	if err != nil || !sameSums(page.Items, want) {
 		t.Errorf("SumCharges by day = %+v, %v; want %+v", page.Items, err, want)
 	}
@@ -3890,7 +3891,7 @@ func checkSumChargesOverflow[TX any](t *testing.T, f fixture[TX]) {
 		if err != nil {
 			t.Fatalf("tenant budget: %v", err)
 		}
-		if _, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
+		if _, err := f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{
 			TenantID: f.Tenant, Ceiling: unlimitedBudget, ResetSpend: true, ExpectedVersion: b.ResourceVersion,
 		}); err != nil {
 			t.Fatalf("tenant budget: %v", err)
@@ -3899,13 +3900,13 @@ func checkSumChargesOverflow[TX any](t *testing.T, f fixture[TX]) {
 		if err != nil {
 			t.Fatalf("capability: %v", err)
 		}
-		if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: f.Tenant}), Amount: limes.MaxNanos}, nil); err != nil {
+		if _, err := f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: f.Tenant}), Amount: limes.MaxNanos}, nil); err != nil {
 			t.Fatalf("charge of MaxNanos: %v", err)
 		}
 	}
 	from, to := f.sumPeriod()
-	req := limes.SumChargesRequest{TenantID: f.Tenant, From: from, To: to}
-	if page, err := f.Ledger.SumCharges(f.Ctx, req); !errors.Is(err, limes.ErrCounterOverflow) {
+	req := meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: to}
+	if page, err := f.Ledger.SumCharges(f.Ctx, req); !errors.Is(err, meter.ErrCounterOverflow) {
 		t.Errorf("SumCharges of the whole period = %+v, %v; want ErrCounterOverflow", page.Items, err)
 	}
 	req.ByCapability = true
@@ -3928,13 +3929,13 @@ func checkTenantBudgetNotFound[TX any](t *testing.T, f fixture[TX]) {
 		t.Fatalf("NewTenant: %v", err)
 	}
 	b, err := f.Usage.GetTenantBudget(f.tenantCtx(other), other)
-	if !errors.Is(err, limes.ErrTenantBudgetNotFound) || !errors.Is(err, limes.ErrNotFound) {
+	if !errors.Is(err, meter.ErrTenantBudgetNotFound) || !errors.Is(err, limes.ErrNotFound) {
 		t.Errorf("GetTenantBudget of a tenant with no row = %+v, %v; want ErrTenantBudgetNotFound", b, err)
 	}
 }
 
-func sameSums(got, want []limes.ChargeSum) bool {
-	return slices.EqualFunc(got, want, func(a, b limes.ChargeSum) bool {
+func sameSums(got, want []meter.ChargeSum) bool {
+	return slices.EqualFunc(got, want, func(a, b meter.ChargeSum) bool {
 		a.BucketStart, b.BucketStart = a.BucketStart.UTC(), b.BucketStart.UTC()
 		return reflect.DeepEqual(a, b)
 	})

@@ -225,14 +225,12 @@ func TestSentinelsAreIndividuallyMatchable(t *testing.T) {
 		"ErrBudgetExceeded":       ErrBudgetExceeded,
 		"ErrDelegationTooWide":    ErrDelegationTooWide,
 		"ErrUnitCodeMismatch":     ErrUnitCodeMismatch,
-		"ErrUsageNotFound":        ErrUsageNotFound,
-		"ErrTenantBudgetNotFound": ErrTenantBudgetNotFound,
 		"ErrTenantBudgetExceeded": ErrTenantBudgetExceeded,
 		"ErrRequestLimitExceeded": ErrRequestLimitExceeded,
 		"jwks.ErrUnknownKID":      jwks.ErrUnknownKID,
 	}
-	if len(all) != 14 {
-		t.Fatalf("expected 14 sentinels, listed %d", len(all))
+	if len(all) != 12 {
+		t.Fatalf("expected 12 sentinels, listed %d", len(all))
 	}
 	for nameA, a := range all {
 		for nameB, b := range all {

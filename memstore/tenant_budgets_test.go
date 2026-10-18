@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // seedBudget sets a tenant's ceiling and charges spent against it.
@@ -17,14 +18,14 @@ func seedBudget(t *testing.T, u *UsageStore[struct{}], ceiling limes.BudgetCeili
 	t.Helper()
 	ctx := context.Background()
 	tenant := uuid.New()
-	if _, err := u.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{TenantID: tenant, Ceiling: ceiling}); err != nil {
+	if _, err := u.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{TenantID: tenant, Ceiling: ceiling}); err != nil {
 		t.Fatal(err)
 	}
 	if spent > 0 {
-		if _, err := u.Charge(ctx, limes.ChargeRequest{
+		if _, err := u.Charge(ctx, meter.ChargeRequest{
 			Subject: recordedSubject(ctx, t, u, subjectSpec{capID: uuid.New(), tenant: tenant}),
 			Amount:  spent,
-			Overrun: limes.OverrunPolicyRecord,
+			Overrun: meter.OverrunPolicyRecord,
 		}, nil); err != nil {
 			t.Fatal(err)
 		}
@@ -42,14 +43,14 @@ func TestListTenantBudgets(t *testing.T) {
 
 	cases := []struct {
 		name string
-		req  limes.ListTenantBudgetsRequest
+		req  meter.ListTenantBudgetsRequest
 		want []uuid.UUID
 	}{
-		{"most at risk first", limes.ListTenantBudgetsRequest{}, []uuid.UUID{over, half, low, unlimited}},
-		{"threshold", limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterAtOrPast, ThresholdBasisPoints: 5000}, []uuid.UUID{over, half}},
-		{"unlimited only", limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterUnlimited}, []uuid.UUID{unlimited}},
-		{"every ceiling", limes.ListTenantBudgetsRequest{Filter: limes.TenantBudgetFilterAtOrPast}, []uuid.UUID{over, half, low}},
-		{"limit", limes.ListTenantBudgetsRequest{Limit: 2}, []uuid.UUID{over, half}},
+		{"most at risk first", meter.ListTenantBudgetsRequest{}, []uuid.UUID{over, half, low, unlimited}},
+		{"threshold", meter.ListTenantBudgetsRequest{Filter: meter.TenantBudgetFilterAtOrPast, ThresholdBasisPoints: 5000}, []uuid.UUID{over, half}},
+		{"unlimited only", meter.ListTenantBudgetsRequest{Filter: meter.TenantBudgetFilterUnlimited}, []uuid.UUID{unlimited}},
+		{"every ceiling", meter.ListTenantBudgetsRequest{Filter: meter.TenantBudgetFilterAtOrPast}, []uuid.UUID{over, half, low}},
+		{"limit", meter.ListTenantBudgetsRequest{Limit: 2}, []uuid.UUID{over, half}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -72,7 +73,7 @@ func TestListTenantBudgets(t *testing.T) {
 			}
 		})
 	}
-	page, _ := u.ListTenantBudgets(ctx, limes.ListTenantBudgetsRequest{Limit: 1})
+	page, _ := u.ListTenantBudgets(ctx, meter.ListTenantBudgetsRequest{Limit: 1})
 	got := page.Items
 	if pct, limited := got[0].Utilization(); !limited || pct != percent {
 		t.Errorf("a tenant past its ceiling reads %v%% (limited %v), want %d%%", pct, limited, percent)
@@ -87,25 +88,25 @@ func TestSetTenantBudgetResetSpend(t *testing.T) {
 	tenant := seedBudget(t, u, limes.BudgetCeiling{Max: 10 * unit, UnitCode: defaultTestUnit}, 4*unit)
 	b, _ := u.GetTenantBudget(ctx, tenant)
 
-	b, err := u.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
+	b, err := u.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{
 		TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("20"), UnitCode: defaultTestUnit}, ExpectedVersion: b.ResourceVersion,
 	})
 	if err != nil || b.SpentAmount != 4*unit || b.Ceiling != (limes.BudgetCeiling{Max: 20 * unit, UnitCode: defaultTestUnit}) {
 		t.Fatalf("raising the ceiling = %+v, %v; want 20 with 4 still spent", b, err)
 	}
 	start := b.PeriodStart
-	b, err = u.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
+	b, err = u.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{
 		TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("20"), UnitCode: defaultTestUnit}, ResetSpend: true, ExpectedVersion: b.ResourceVersion,
 	})
 	if err != nil || b.SpentAmount != 0 || b.PeriodStart.Before(start) {
 		t.Fatalf("closing the period = %+v, %v; want nothing spent and a new period", b, err)
 	}
-	if _, err := u.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
+	if _, err := u.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{
 		TenantID: tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("30"), UnitCode: defaultTestUnit}, ExpectedVersion: b.ResourceVersion - 1,
-	}); !errors.Is(err, limes.ErrTenantBudgetVersionMismatch) {
+	}); !errors.Is(err, meter.ErrTenantBudgetVersionMismatch) {
 		t.Errorf("a stale version: err = %v, want ErrTenantBudgetVersionMismatch", err)
 	}
-	if _, err := u.GetTenantBudget(ctx, uuid.New()); !errors.Is(err, limes.ErrTenantBudgetNotFound) {
+	if _, err := u.GetTenantBudget(ctx, uuid.New()); !errors.Is(err, meter.ErrTenantBudgetNotFound) {
 		t.Errorf("an unknown tenant: err = %v, want ErrTenantBudgetNotFound", err)
 	}
 }
@@ -124,7 +125,7 @@ func TestListTenantBudgetsPages(t *testing.T) {
 
 	const pageSize = 2
 	var got []uuid.UUID
-	req := limes.ListTenantBudgetsRequest{Limit: pageSize}
+	req := meter.ListTenantBudgetsRequest{Limit: pageSize}
 	for pages := 0; ; pages++ {
 		pagePage, err := u.ListTenantBudgets(ctx, req)
 		page, next := pagePage.Items, pagePage.Next
@@ -147,7 +148,7 @@ func TestListTenantBudgetsPages(t *testing.T) {
 	}
 
 	var walked []uuid.UUID
-	for s, err := range limes.AllTenantBudgets(ctx, u, limes.ListTenantBudgetsRequest{Limit: pageSize}) {
+	for s, err := range meter.AllTenantBudgets(ctx, u, meter.ListTenantBudgetsRequest{Limit: pageSize}) {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -158,7 +159,7 @@ func TestListTenantBudgetsPages(t *testing.T) {
 	}
 
 	for _, bad := range []string{"garbage", tenantBudgetCursor{class: classBounded, tenantID: half}.encode()} {
-		if _, err := u.ListTenantBudgets(ctx, limes.ListTenantBudgetsRequest{Cursor: bad}); !errors.Is(err, limes.ErrInvalidRequest) {
+		if _, err := u.ListTenantBudgets(ctx, meter.ListTenantBudgetsRequest{Cursor: bad}); !errors.Is(err, limes.ErrInvalidRequest) {
 			t.Errorf("cursor %q: err = %v, want ErrInvalidRequest", bad, err)
 		}
 	}

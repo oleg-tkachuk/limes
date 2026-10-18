@@ -144,13 +144,6 @@ func TestListRequestsRefuseANegativeLimit(t *testing.T) {
 	if err := list.Validate(); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("ListByPrincipalRequest with Limit -1: Validate = %v, want ErrInvalidRequest", err)
 	}
-	budgets := ListTenantBudgetsRequest{Limit: -1}
-	if err := budgets.Validate(); !errors.Is(err, ErrInvalidRequest) {
-		t.Errorf("ListTenantBudgetsRequest with Limit -1: Validate = %v, want ErrInvalidRequest", err)
-	}
-	if err := (ListTenantBudgetsRequest{Filter: TenantBudgetFilterAtOrPast, ThresholdBasisPoints: BasisPointsPerWhole + 1}).Validate(); !errors.Is(err, ErrInvalidRequest) {
-		t.Errorf("a threshold past 100%%: Validate = %v, want ErrInvalidRequest", err)
-	}
 }
 
 // issuanceOnly is a store with no more than an Issuer needs.
@@ -249,18 +242,6 @@ func TestSeveralIssuersNeedAKeyDecision(t *testing.T) {
 		if _, err := NewVerifier(cfg); (err == nil) != tc.ok {
 			t.Errorf("%s: err = %v, want ok=%v", name, err, tc.ok)
 		}
-	}
-}
-
-// A tenant budget filter names itself, and one this package lacks is refused.
-func TestTenantBudgetFilter(t *testing.T) {
-	for f, want := range map[TenantBudgetFilter]string{TenantBudgetFilterUnspecified: "unspecified", TenantBudgetFilterAll: "all", TenantBudgetFilterAtOrPast: "at-or-past", TenantBudgetFilterUnlimited: "unlimited"} {
-		if f.String() != want || f.Validate() != nil {
-			t.Errorf("%d: String = %q, Validate = %v; want %q, nil", f, f.String(), f.Validate(), want)
-		}
-	}
-	if err := (TenantBudgetFilterUnlimited + 1).Validate(); !errors.Is(err, ErrInvalidRequest) {
-		t.Errorf("an unknown filter: err = %v, want ErrInvalidRequest", err)
 	}
 }
 

@@ -431,7 +431,7 @@ cannot be re-wrapped in a fresh Biscuit.
 ## Charge against the budget
 
 ```go
-receipt, err := usage.Charge(ctx, limes.ChargeRequest{
+receipt, err := usage.Charge(ctx, meter.ChargeRequest{
     Subject: granted.MeterSubject(),
     Amount:  limes.MustParseAmount("0.35"), Op: "index:search", Actor: "orchestrator",
 }, nil)
@@ -454,8 +454,8 @@ it is `ErrRequestLimitExceeded`.
 `receipt.ChargeID` names the ledger row. Refund against it:
 
 ```go
-usage.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("0.10")}) // partial
-usage.Refund(ctx, limes.RefundRequest{ChargeID: receipt.ChargeID, Remaining: true})                       // the rest
+usage.Refund(ctx, meter.RefundRequest{ChargeID: receipt.ChargeID, Amount: limes.MustParseAmount("0.10")}) // partial
+usage.Refund(ctx, meter.RefundRequest{ChargeID: receipt.ChargeID, Remaining: true})                       // the rest
 ```
 
 A refund returns spend to every counter the charge took it from — except the
@@ -533,11 +533,11 @@ then settle the actual cost:
 
 ```go
 subject := granted.MeterSubject()
-r, err := usage.Reserve(ctx, limes.ReserveRequest{
+r, err := usage.Reserve(ctx, meter.ReserveRequest{
     Subject: subject, Amount: limes.MustParseAmount("0.50"), TTL: 2 * time.Minute,
 })
 // … the call runs …
-receipt, err := usage.Settle(ctx, limes.SettleRequest{
+receipt, err := usage.Settle(ctx, meter.SettleRequest{
     Subject: subject, ReservationID: r.ID, Amount: actualCost,
 }, nil)
 ```
@@ -566,7 +566,7 @@ your side effects commit atomically with the spend. It also hands over the
 receipt the call will return, so the side effect can name the charge:
 
 ```go
-usage.Charge(ctx, req, func(ctx context.Context, c limes.Charged[MyTx]) error {
+usage.Charge(ctx, req, func(ctx context.Context, c meter.Charged[MyTx]) error {
     // commits with the charge
     return myOutbox.Enqueue(ctx, c.Tx, c.Receipt.ChargeID, c.Receipt.SpentAmount)
 })
@@ -594,11 +594,11 @@ different amount, unit or tenant, or under another Biscuit copy, is
 
 ```go
 subject, err := limes.StoredMeterSubject(ctx, records, capID) // no token in hand
-receipt, err := usage.Charge(ctx, limes.ChargeRequest{
+receipt, err := usage.Charge(ctx, meter.ChargeRequest{
     Subject:     subject,
     Amount:      cost,
     ExternalRef: event.CallID,
-    Overrun:     limes.OverrunPolicyRecord,
+    Overrun:     meter.OverrunPolicyRecord,
 }, nil)
 ```
 
@@ -709,7 +709,7 @@ against PostgreSQL in a container, as a role that owns no table, on a pool of
 two connections — `dpop` and `jwks` run theirs against their shipped
 implementations, and `redisreplay` runs `dpoptest` against Redis.
 
-`otelmetric.Instrument` wraps a `UsageStore` and keeps every interface of `limes` the
+`otelmetric.Instrument` wraps a `meter.UsageStore` and keeps every interface of `meter` the
 store implements — the optional `CopyUsageReader` and `TenantUsageEraser`. A decorator of your
 own should do the same: assert each optional interface on the store it wraps
 and forward it, or a caller checking for it finds it gone.
@@ -857,11 +857,11 @@ Elsewhere, implement these and you are done:
 |---|---|---|
 | `Store` = `IssuanceStore` + admin | Capability records + revocations; an `Issuer` needs only `IssuanceStore` (`Insert`, `IsRevoked`) | No |
 | `BiscuitRevocationStore` | Revoked Biscuit copies (only if you accept Biscuits) | No |
-| `CopyUsageReader` | Reads Biscuit copies' own counters (only to show them) | No |
-| `LedgerReader` | Sums a tenant's charges for billing and reports (optional; a type of its own beside `UsageStore`) | No |
+| `meter.CopyUsageReader` | Reads Biscuit copies' own counters (only to show them) | No |
+| `meter.LedgerReader` | Sums a tenant's charges for billing and reports (optional; a type of its own beside `meter.UsageStore`) | No |
 | `RecordCensus` | Counts capability records by disposition, for one tenant or every tenant (optional; a type of its own beside `Store`) | No |
-| `TenantRecordEraser`, `TenantUsageEraser` | Erase a tenant's records and usage (optional) | No |
-| `UsageStore[TX]` = `Meter[TX]` + `MeterReader` + `TenantBudgets` + `UsageHousekeeping` | Request and spend counters, the charges ledger, tenant ceilings; `DeleteUsage` and `PurgeOrphans` release a reaped capability's holds | Only for atomic side effects |
+| `TenantRecordEraser`, `meter.TenantUsageEraser` | Erase a tenant's records and usage (optional) | No |
+| `meter.UsageStore[TX]` = `Meter[TX]` + `MeterReader` + `TenantBudgets` + `UsageHousekeeping` (only to meter) | Request and spend counters, the charges ledger, tenant ceilings; `DeleteUsage` and `PurgeOrphans` release a reaped capability's holds | Only for atomic side effects |
 | `KeyResolver` | Public verification keys; an unknown kid is `jwks.ErrUnknownKID`, the token's fault (`ErrInvalidToken`), and any other error the resolver's own (`jwks.Static` and `jwks.Remote` ship; `jwkstest` checks yours) | No |
 | `dpop.ReplayCache` | DPoP proof ids seen, per key, each counted against its holder: `Seen(ctx, dpop.ReplayEntry)` reports a holder past its share as seen, and returns an error when its store cannot answer — an outage, not a refused proof (only for key-bound tokens; `dpop.MemoryReplayCache` ships for one process — behind several replicas, the `redisreplay` module ships one over Redis, or implement it over another shared store) | No |
 | `dpop.Nonces` | Server-provided DPoP nonces (optional; `dpop.HMACNonces` ships and needs no store) | No |
@@ -915,7 +915,7 @@ _ = records.Insert(ctx, limes.InsertRequest{Capability: c})
 meterSubject, _ := limes.StoredMeterSubject(ctx, records, c.ID)
 for _, day := range []int{0, 1, 8} {
 	at = start.AddDate(0, 0, day)
-	_, _ = usage.Charge(ctx, limes.ChargeRequest{Subject: meterSubject, Amount: amount}, nil)
+	_, _ = usage.Charge(ctx, meter.ChargeRequest{Subject: meterSubject, Amount: amount}, nil)
 }
 ```
 
@@ -928,7 +928,7 @@ the clock forward only: holds, revocations and expiry are all measured by it.
 `Example_backdatedCharges` runs the whole route on `memstore`.
 
 To remove a tenant, a store may implement `TenantRecordEraser` and
-`TenantUsageEraser` (optional; `storetest` and `metertest` check them when
+`meter.TenantUsageEraser` (optional; `storetest` and `metertest` check them when
 present, and `memstore` and `pgstore` implement both). `EraseTenantRecords`
 revokes every capability of the tenant and removes only the records `Purge`
 would remove: an id not on record is not revoked, so erasing a record whose
@@ -987,17 +987,17 @@ answers the family 409 too.
 Every write and every listing takes a `…Request`, a read by id takes the id,
 every list is a `Page`, and every read names what
 it reads (`GetRecord`, `GetUsage`, `GetTenantBudget`), so one type may implement `Store` and
-`UsageStore` together, or each apart as `memstore` does.
+`meter.UsageStore` together, or each apart as `memstore` does.
 
-`UsageStore` is generic in `TX` — *your* transaction type. Have none?
-Instantiate `UsageStore[struct{}]` and always pass `nil` for the callback.
+`meter.UsageStore` is generic in `TX` — *your* transaction type. Have none?
+Instantiate `meter.UsageStore[struct{}]` and always pass `nil` for the callback.
 Everything works identically; you forgo the atomic-side-effect
 guarantee.
 
 Every listing — `ListByPrincipal`, `ListTenantBudgets`, `ListReservations`
 (soonest to expire first, ties by id), `SumCharges` and `CountRecords` — is a
 page with an opaque cursor, so an API can hand a page token to its client. To
-read `ListByPrincipal` or `ListTenantBudgets` whole, range over `AllByPrincipal` or `AllTenantBudgets`: they walk
+read `ListByPrincipal` or `ListTenantBudgets` whole, range over `AllByPrincipal` or `meter.AllTenantBudgets`: they walk
 the pages from `req.Cursor` afresh on every range, stop fetching when the loop
 breaks, and refuse a page that returns a cursor already fetched
 (`ErrCursorRepeated`). Spend moves between pages, so `AllTenantBudgets` may

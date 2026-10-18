@@ -3,8 +3,6 @@ package limes
 import (
 	"errors"
 	"testing"
-
-	"github.com/google/uuid"
 )
 
 // A ceiling's zero value allows nothing; only Unlimited lifts it.
@@ -90,37 +88,6 @@ func TestCeilingString(t *testing.T) {
 	}
 	if got := (BudgetCeiling{Max: 3 * NanosPerUnit / 2}).String(); got != "1.5" {
 		t.Errorf("String = %q, want 1.5", got)
-	}
-}
-
-// A tenant budget request is refused as malformed before any store reads it.
-func TestSetTenantBudgetRequestValidate(t *testing.T) {
-	tenant := uuid.New()
-	ok := SetTenantBudgetRequest{TenantID: tenant, Ceiling: BudgetCeiling{Max: NanosPerUnit, UnitCode: "USD"}}
-	if err := ok.Validate(); err != nil {
-		t.Fatalf("a well-formed request: %v", err)
-	}
-	for name, req := range map[string]SetTenantBudgetRequest{
-		"no tenant":          {Ceiling: BudgetCeiling{Max: NanosPerUnit}},
-		"a negative version": {TenantID: tenant, ExpectedVersion: -1},
-		"a negative ceiling": {TenantID: tenant, Ceiling: BudgetCeiling{Max: -1}},
-		"a lower-case unit":  {TenantID: tenant, Ceiling: BudgetCeiling{Max: 1, UnitCode: "usd"}},
-		"spend in no unit":   {TenantID: tenant, Ceiling: BudgetCeiling{Unlimited: true}},
-	} {
-		if err := req.Validate(); !errors.Is(err, ErrInvalidRequest) {
-			t.Errorf("%s: err = %v, want ErrInvalidRequest", name, err)
-		}
-	}
-}
-
-// A threshold is a whole number of basis points within a whole; anything
-// else is refused before any store compares against it.
-func TestThresholdBasisPointsBounds(t *testing.T) {
-	for bp, ok := range map[int]bool{0: true, 1: true, BasisPointsPerWhole: true, -1: false, BasisPointsPerWhole + 1: false} {
-		err := (ListTenantBudgetsRequest{Filter: TenantBudgetFilterAtOrPast, ThresholdBasisPoints: bp}).Validate()
-		if ok && err != nil || !ok && !errors.Is(err, ErrInvalidRequest) {
-			t.Errorf("a threshold of %d basis points: err = %v, want accepted: %v", bp, err, ok)
-		}
 	}
 }
 

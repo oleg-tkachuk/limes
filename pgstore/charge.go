@@ -11,17 +11,18 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // Bump counts one request against the capability, each ancestor and each
 // copy, or none when a ceiling would be crossed.
-func (s *UsageStore) Bump(ctx context.Context, req limes.BumpRequest) (limes.BumpReceipt, error) {
+func (s *UsageStore) Bump(ctx context.Context, req meter.BumpRequest) (meter.BumpReceipt, error) {
 	if err := req.Validate(); err != nil {
-		return limes.BumpReceipt{}, err
+		return meter.BumpReceipt{}, err
 	}
 	unit := req.Subject.UnitCode()
 	subject := req.Subject
-	var receipt limes.BumpReceipt
+	var receipt meter.BumpReceipt
 	err := s.inTenantTx(ctx, subject.TenantID(), func(tx pgx.Tx) error {
 		if err := notErased(ctx, tx, subject.TenantID()); err != nil {
 			return err
@@ -67,7 +68,7 @@ func (s *UsageStore) Bump(ctx context.Context, req limes.BumpRequest) (limes.Bum
 		return c.write(ctx, tx, s.clock(), false)
 	})
 	if err != nil {
-		return limes.BumpReceipt{RequestCount: receipt.RequestCount}, err
+		return meter.BumpReceipt{RequestCount: receipt.RequestCount}, err
 	}
 	return receipt, nil
 }
@@ -99,7 +100,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`
 
 // ledgerEntry is one row of the charges ledger.
 type ledgerEntry struct {
-	limes.ChargeRecord
+	meter.ChargeRecord
 	ancestors     []uuid.UUID
 	copies        [][]byte
 	reservationID *uuid.UUID
@@ -126,13 +127,13 @@ func readEntry(ctx context.Context, tx pgx.Tx, query string, args ...any) (ledge
 
 // replay is the receipt of a charge already in the ledger, returned when the
 // same charge arrives again.
-func replay(ctx context.Context, tx pgx.Tx, e ledgerEntry) (limes.ChargeReceipt, error) {
+func replay(ctx context.Context, tx pgx.Tx, e ledgerEntry) (meter.ChargeReceipt, error) {
 	var spent int64
 	err := tx.QueryRow(ctx, sqlSpent, e.CapabilityID).Scan(&spent)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return limes.ChargeReceipt{}, err
+		return meter.ChargeReceipt{}, err
 	}
-	return limes.ChargeReceipt{
+	return meter.ChargeReceipt{
 		ChargeID: e.ID, SpentAmount: limes.Nanos(spent), Replayed: true, Overrun: e.Overrun,
 		TenantID: e.TenantID, UnitCode: e.UnitCode,
 	}, nil
@@ -141,19 +142,19 @@ func replay(ctx context.Context, tx pgx.Tx, e ledgerEntry) (limes.ChargeReceipt,
 // replayByRef answers a charge whose (capability, ExternalRef) is already in
 // the ledger: its receipt again, or ErrExternalRefConflict when it names
 // another cost.
-func replayByRef(ctx context.Context, tx pgx.Tx, req limes.ChargeRequest, unit string) (limes.ChargeReceipt, bool, error) {
+func replayByRef(ctx context.Context, tx pgx.Tx, req meter.ChargeRequest, unit string) (meter.ChargeReceipt, bool, error) {
 	if req.ExternalRef == "" {
-		return limes.ChargeReceipt{}, false, nil
+		return meter.ChargeReceipt{}, false, nil
 	}
 	e, ok, err := readEntry(ctx, tx, sqlChargeByRef, req.Subject.CapabilityID(), req.ExternalRef)
 	if err != nil || !ok {
-		return limes.ChargeReceipt{}, false, err
+		return meter.ChargeReceipt{}, false, err
 	}
 	// Another copy charges its own counters, and the receipt is the first
 	// copy's, so it conflicts as another cost does. The error names the ref,
 	// never the other charge.
 	if e.Amount != req.Amount || e.UnitCode != unit || e.TenantID != req.Subject.TenantID() || !sameCopyIDs(e.copies, req.Subject.Copies()) {
-		return limes.ChargeReceipt{}, true, fmt.Errorf("%w: %q", limes.ErrExternalRefConflict, req.ExternalRef)
+		return meter.ChargeReceipt{}, true, fmt.Errorf("%w: %q", meter.ErrExternalRefConflict, req.ExternalRef)
 	}
 	r, err := replay(ctx, tx, e)
 	return r, true, err
@@ -161,12 +162,12 @@ func replayByRef(ctx context.Context, tx pgx.Tx, req limes.ChargeRequest, unit s
 
 // Charge applies the ceiling chain and commits the charge, onCharged
 // included, in one transaction.
-func (s *UsageStore) Charge(ctx context.Context, req limes.ChargeRequest, onCharged func(ctx context.Context, c limes.Charged[pgx.Tx]) error) (limes.ChargeReceipt, error) {
+func (s *UsageStore) Charge(ctx context.Context, req meter.ChargeRequest, onCharged func(ctx context.Context, c meter.Charged[pgx.Tx]) error) (meter.ChargeReceipt, error) {
 	if err := req.Validate(); err != nil {
-		return limes.ChargeReceipt{}, err
+		return meter.ChargeReceipt{}, err
 	}
 	unit := req.Subject.UnitCode()
-	var receipt limes.ChargeReceipt
+	var receipt meter.ChargeReceipt
 	err := s.inTenantTx(ctx, req.Subject.TenantID(), func(tx pgx.Tx) error {
 		// A replay is answered before the lineage is read: it moves nothing,
 		// so it needs no record, and a capability purged since still gets its
@@ -234,7 +235,7 @@ type chargeSpec struct {
 	op          limes.Op
 	actor       string
 	externalRef string
-	overrun     limes.OverrunPolicy
+	overrun     meter.OverrunPolicy
 	// ancestors are the lineage the charge spends on, as it stands.
 	ancestors []ancestor
 	// settling is the hold the charge settles; nil for a direct charge.
@@ -246,17 +247,17 @@ type chargeSpec struct {
 // settles. The charge is spent on the lineage as it stands; the hold is
 // released from the ancestors that hold it, which a row dropped since may
 // have left.
-func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, spec chargeSpec, onCharged func(context.Context, limes.Charged[pgx.Tx]) error) (limes.ChargeReceipt, error) {
+func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, spec chargeSpec, onCharged func(context.Context, meter.Charged[pgx.Tx]) error) (meter.ChargeReceipt, error) {
 	var released limes.Nanos
 	var holders []uuid.UUID
 	var reservationID *uuid.UUID
 	if spec.settling != nil {
 		released, holders, reservationID = spec.settling.amount, spec.settling.ancestors, &spec.settling.id
 	}
-	refused := limes.ChargeReceipt{SpentAmount: c.usageOf(spec.capID).spent, TenantID: spec.tenantID, UnitCode: spec.unit}
+	refused := meter.ChargeReceipt{SpentAmount: c.usageOf(spec.capID).spent, TenantID: spec.tenantID, UnitCode: spec.unit}
 	overrun := false
 	crossed := func(err error) error {
-		if spec.overrun == limes.OverrunPolicyRecord {
+		if spec.overrun == meter.OverrunPolicyRecord {
 			overrun = true
 			return nil
 		}
@@ -268,12 +269,12 @@ func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, s
 	}, crossed); err != nil {
 		return refused, err
 	}
-	receipt := limes.ChargeReceipt{
+	receipt := meter.ChargeReceipt{
 		ChargeID: uuid.New(), SpentAmount: c.usageOf(spec.capID).spent + spec.amount, Overrun: overrun,
 		TenantID: spec.tenantID, UnitCode: spec.unit,
 	}
 	if onCharged != nil {
-		if err := onCharged(ctx, limes.Charged[pgx.Tx]{Tx: tx, Receipt: receipt}); err != nil {
+		if err := onCharged(ctx, meter.Charged[pgx.Tx]{Tx: tx, Receipt: receipt}); err != nil {
 			return refused, err
 		}
 	}
@@ -425,7 +426,7 @@ func checkRange(c *counters, k ceilingCheck) error {
 	}
 	ok = ok && fits(c.tenant.spent, c.tenant.reserved)
 	if !ok {
-		return fmt.Errorf("%w: %s more", limes.ErrCounterOverflow, k.amount)
+		return fmt.Errorf("%w: %s more", meter.ErrCounterOverflow, k.amount)
 	}
 	return nil
 }
@@ -444,13 +445,13 @@ type hold struct {
 	expires   time.Time
 }
 
-func (h hold) reservation() limes.Reservation {
-	r := limes.Reservation{
+func (h hold) reservation() meter.Reservation {
+	r := meter.Reservation{
 		ID: h.id, CapabilityID: h.capID, TenantID: h.tenantID, Amount: h.amount, UnitCode: h.unit,
 		Op: h.op, Actor: h.actor, ExpiresAt: h.expires,
 	}
 	for _, c := range h.copies {
-		r.Copies = append(r.Copies, limes.HeldCopy{RevocationID: c.RevocationID, Budget: c.Budget})
+		r.Copies = append(r.Copies, meter.HeldCopy{RevocationID: c.RevocationID, Budget: c.Budget})
 	}
 	return r
 }
@@ -485,21 +486,21 @@ func scanHold(row pgx.Row) (hold, error) {
 }
 
 // Reserve holds an amount against every ceiling Charge checks.
-func (s *UsageStore) Reserve(ctx context.Context, req limes.ReserveRequest) (limes.Reservation, error) {
+func (s *UsageStore) Reserve(ctx context.Context, req meter.ReserveRequest) (meter.Reservation, error) {
 	if err := req.Validate(); err != nil {
-		return limes.Reservation{}, err
+		return meter.Reservation{}, err
 	}
 	unit := req.Subject.UnitCode()
 	ttl := req.TTL
 	if ttl == 0 {
-		ttl = limes.DefaultReservationTTL
+		ttl = meter.DefaultReservationTTL
 	}
 	subject := req.Subject
 	copies, err := encodeHeldCopies(subject.Copies())
 	if err != nil {
-		return limes.Reservation{}, err
+		return meter.Reservation{}, err
 	}
-	var out limes.Reservation
+	var out meter.Reservation
 	err = s.inTenantTx(ctx, subject.TenantID(), func(tx pgx.Tx) error {
 		if err := notErased(ctx, tx, subject.TenantID()); err != nil {
 			return err
@@ -578,16 +579,16 @@ func applyHold(c *counters, h hold, sign limes.Nanos) {
 }
 
 // Settle charges the actual cost in place of a reservation.
-func (s *UsageStore) Settle(ctx context.Context, req limes.SettleRequest, onCharged func(ctx context.Context, c limes.Charged[pgx.Tx]) error) (limes.ChargeReceipt, error) {
+func (s *UsageStore) Settle(ctx context.Context, req meter.SettleRequest, onCharged func(ctx context.Context, c meter.Charged[pgx.Tx]) error) (meter.ChargeReceipt, error) {
 	if err := req.Validate(); err != nil {
-		return limes.ChargeReceipt{}, err
+		return meter.ChargeReceipt{}, err
 	}
 	// A direct charge has no reservation id, so the zero id names none.
 	if req.ReservationID == uuid.Nil {
-		return limes.ChargeReceipt{}, limes.ErrReservationNotFound
+		return meter.ChargeReceipt{}, meter.ErrReservationNotFound
 	}
 	subject := req.Subject
-	var receipt limes.ChargeReceipt
+	var receipt meter.ChargeReceipt
 	err := s.inTenantTx(ctx, subject.TenantID(), func(tx pgx.Tx) error {
 		h, err := scanHold(tx.QueryRow(ctx, sqlLockHold, req.ReservationID))
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -600,18 +601,18 @@ func (s *UsageStore) Settle(ctx context.Context, req limes.SettleRequest, onChar
 			}
 			if settled && e.CapabilityID == subject.CapabilityID() && e.TenantID == subject.TenantID() && sameCopyIDs(e.copies, subject.Copies()) {
 				if e.Amount != req.Amount {
-					return fmt.Errorf("%w: %s", limes.ErrSettleConflict, req.ReservationID)
+					return fmt.Errorf("%w: %s", meter.ErrSettleConflict, req.ReservationID)
 				}
 				receipt, err = replay(ctx, tx, e)
 				return err
 			}
-			return limes.ErrReservationNotFound
+			return meter.ErrReservationNotFound
 		}
 		if err != nil {
 			return err
 		}
 		if h.capID != subject.CapabilityID() || h.tenantID != subject.TenantID() || !h.expires.After(s.clock()) || !sameCopyIDs(copyIDs(h.copies), subject.Copies()) {
-			return limes.ErrReservationNotFound
+			return meter.ErrReservationNotFound
 		}
 		ancestors, err := lineage(ctx, tx, h.capID)
 		if err != nil {
@@ -640,7 +641,7 @@ func (s *UsageStore) Settle(ctx context.Context, req limes.SettleRequest, onChar
 // Release ends a reservation without charging. Releasing one that is gone
 // is a no-op, and so is releasing one of another capability or tenant, or
 // of other copies: it is left held.
-func (s *UsageStore) Release(ctx context.Context, req limes.ReleaseRequest) error {
+func (s *UsageStore) Release(ctx context.Context, req meter.ReleaseRequest) error {
 	if err := req.Validate(); err != nil {
 		return err
 	}

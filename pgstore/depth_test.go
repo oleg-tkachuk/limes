@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // depthTTL is how long the capabilities of these tests live.
@@ -64,7 +65,7 @@ func TestAChainPastMaxDelegationDepthIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := usage.Charge(ctx, limes.ChargeRequest{Subject: subject, Amount: 1}, nil); !errors.Is(err, limes.ErrDelegationTooDeep) {
+	if _, err := usage.Charge(ctx, meter.ChargeRequest{Subject: subject, Amount: 1}, nil); !errors.Is(err, limes.ErrDelegationTooDeep) {
 		t.Errorf("Charge: err = %v, want ErrDelegationTooDeep", err)
 	}
 }

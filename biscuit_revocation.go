@@ -111,7 +111,7 @@ func (c BiscuitCopy) RevocationID() []byte { return slices.Clone(c.revocationID)
 
 // Copies are the request and budget limits in force on the copy — its own
 // and those of the copies it was attenuated from — innermost first;
-// CopyUsageReader reads their counters.
+// meter.CopyUsageReader reads their counters.
 func (c BiscuitCopy) Copies() []CopyCeiling { return cloneCopyCeilings(c.copies) }
 
 // BiscuitCopy reads which copy token is, after checking it as Verify does —

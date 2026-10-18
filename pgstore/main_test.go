@@ -33,7 +33,7 @@ const (
 	appPassword = "limes-app-test"
 	// appPoolConns is the pool the store under test gets: small, so a call
 	// that takes a second connection while it holds one deadlocks here
-	// (limes.Meter's contract).
+	// (meter.Meter's contract).
 	appPoolConns = 2
 )
 

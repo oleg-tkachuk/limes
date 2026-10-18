@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // The charge-atomicity guard.
@@ -24,14 +25,14 @@ func TestChargeRollsBackWhenSideEffectFails(t *testing.T) {
 	capID, tenantID := uuid.New(), uuid.New()
 
 	usage := newTestUsage(newTestStore())
-	if _, err := usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
+	if _, err := usage.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{
 		TenantID: tenantID, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("100"), UnitCode: "USD"},
 	}); err != nil {
 		t.Fatalf("SetTenantBudget: %v", err)
 	}
 
 	// A first charge that succeeds, so there is real state to preserve.
-	if _, err := usage.Charge(ctx, limes.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: tenantID, budget: budgetOf(limes.MustParseAmount("100")), unit: "USD"}), Amount: limes.MustParseAmount("10"), Op: "read", Actor: "alice"}, nil); err != nil {
+	if _, err := usage.Charge(ctx, meter.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: tenantID, budget: budgetOf(limes.MustParseAmount("100")), unit: "USD"}), Amount: limes.MustParseAmount("10"), Op: "read", Actor: "alice"}, nil); err != nil {
 		t.Fatalf("first charge: %v", err)
 	}
 
@@ -47,7 +48,7 @@ func TestChargeRollsBackWhenSideEffectFails(t *testing.T) {
 
 	// Now a charge whose side effect fails.
 	boom := errors.New("outbox insert failed")
-	spent, err := usage.Charge(ctx, limes.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: tenantID, budget: budgetOf(limes.MustParseAmount("100")), unit: "USD"}), Amount: limes.MustParseAmount("25"), Op: "write", Actor: "alice"}, func(context.Context, limes.Charged[struct{}]) error { return boom })
+	spent, err := usage.Charge(ctx, meter.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: tenantID, budget: budgetOf(limes.MustParseAmount("100")), unit: "USD"}), Amount: limes.MustParseAmount("25"), Op: "write", Actor: "alice"}, func(context.Context, meter.Charged[struct{}]) error { return boom })
 
 	if !errors.Is(err, boom) {
 		t.Fatalf("want the side-effect error, got %v", err)
@@ -89,11 +90,11 @@ func TestChargeRetryAfterRollbackIsClean(t *testing.T) {
 	usage := newTestUsage(newTestStore())
 
 	boom := errors.New("transient")
-	if _, err := usage.Charge(ctx, limes.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: tenantID, budget: budgetOf(limes.MustParseAmount("100")), unit: "USD"}), Amount: limes.MustParseAmount("7"), Op: "op", Actor: "actor"}, func(context.Context, limes.Charged[struct{}]) error { return boom }); !errors.Is(err, boom) {
+	if _, err := usage.Charge(ctx, meter.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: tenantID, budget: budgetOf(limes.MustParseAmount("100")), unit: "USD"}), Amount: limes.MustParseAmount("7"), Op: "op", Actor: "actor"}, func(context.Context, meter.Charged[struct{}]) error { return boom }); !errors.Is(err, boom) {
 		t.Fatalf("want the failure, got %v", err)
 	}
 
-	spent, err := usage.Charge(ctx, limes.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: tenantID, budget: budgetOf(limes.MustParseAmount("100")), unit: "USD"}), Amount: limes.MustParseAmount("7"), Op: "op", Actor: "actor"}, nil)
+	spent, err := usage.Charge(ctx, meter.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: tenantID, budget: budgetOf(limes.MustParseAmount("100")), unit: "USD"}), Amount: limes.MustParseAmount("7"), Op: "op", Actor: "actor"}, nil)
 	if err != nil {
 		t.Fatalf("retry: %v", err)
 	}
@@ -111,18 +112,18 @@ func TestChargeCapabilityCeilingLeavesBothCountersUnmutated(t *testing.T) {
 	ctx := context.Background()
 	capID, tenantID := uuid.New(), uuid.New()
 	usage := newTestUsage(newTestStore())
-	if _, err := usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
+	if _, err := usage.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{
 		TenantID: tenantID, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("1000"), UnitCode: "USD"},
 	}); err != nil {
 		t.Fatalf("SetTenantBudget: %v", err)
 	}
 
-	_, err := usage.Charge(ctx, limes.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: tenantID, budget: budgetOf(limes.MustParseAmount("10")), unit: "USD"}), Amount: limes.MustParseAmount("50"), Op: "op", Actor: "actor"}, nil)
+	_, err := usage.Charge(ctx, meter.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: tenantID, budget: budgetOf(limes.MustParseAmount("10")), unit: "USD"}), Amount: limes.MustParseAmount("50"), Op: "op", Actor: "actor"}, nil)
 	if !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Fatalf("want ErrBudgetExceeded, got %v", err)
 	}
 
-	if _, err := usage.GetUsage(ctx, capID); !errors.Is(err, limes.ErrUsageNotFound) {
+	if _, err := usage.GetUsage(ctx, capID); !errors.Is(err, meter.ErrUsageNotFound) {
 		t.Errorf("a rejected first charge must create no usage row, got %v", err)
 	}
 	b, err := usage.GetTenantBudget(ctx, tenantID)
@@ -141,19 +142,19 @@ func TestChargeTenantCeilingLeavesBothCountersUnmutated(t *testing.T) {
 	ctx := context.Background()
 	capID, tenantID := uuid.New(), uuid.New()
 	usage := newTestUsage(newTestStore())
-	if _, err := usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{
+	if _, err := usage.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{
 		TenantID: tenantID, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("20"), UnitCode: "USD"},
 	}); err != nil {
 		t.Fatalf("SetTenantBudget: %v", err)
 	}
 
 	// Comfortably inside the capability ceiling, over the tenant one.
-	_, err := usage.Charge(ctx, limes.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: tenantID, budget: budgetOf(limes.MustParseAmount("1000")), unit: "USD"}), Amount: limes.MustParseAmount("50"), Op: "op", Actor: "actor"}, nil)
+	_, err := usage.Charge(ctx, meter.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: tenantID, budget: budgetOf(limes.MustParseAmount("1000")), unit: "USD"}), Amount: limes.MustParseAmount("50"), Op: "op", Actor: "actor"}, nil)
 	if !errors.Is(err, limes.ErrTenantBudgetExceeded) {
 		t.Fatalf("want ErrTenantBudgetExceeded, got %v", err)
 	}
 
-	if _, err := usage.GetUsage(ctx, capID); !errors.Is(err, limes.ErrUsageNotFound) {
+	if _, err := usage.GetUsage(ctx, capID); !errors.Is(err, meter.ErrUsageNotFound) {
 		t.Errorf("capability counter was mutated before the tenant check rejected: %v", err)
 	}
 	b, _ := usage.GetTenantBudget(ctx, tenantID)
@@ -173,10 +174,10 @@ func TestNoTransactionModeWorksEndToEnd(t *testing.T) {
 	capID := uuid.New()
 	usage := newTestUsage(newTestStore())
 
-	if _, err := usage.Bump(ctx, limes.BumpRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: testTenant, requests: requestsOf(5)})}); err != nil {
+	if _, err := usage.Bump(ctx, meter.BumpRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: testTenant, requests: requestsOf(5)})}); err != nil {
 		t.Fatalf("Bump: %v", err)
 	}
-	spent, err := usage.Charge(ctx, limes.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: uuid.New(), budget: budgetOf(limes.MustParseAmount("10")), unit: defaultTestUnit}), Amount: limes.MustParseAmount("3"), Op: "op", Actor: "actor"}, nil)
+	spent, err := usage.Charge(ctx, meter.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: uuid.New(), budget: budgetOf(limes.MustParseAmount("10")), unit: defaultTestUnit}), Amount: limes.MustParseAmount("3"), Op: "op", Actor: "actor"}, nil)
 	if err != nil {
 		t.Fatalf("Charge: %v", err)
 	}

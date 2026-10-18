@@ -103,10 +103,10 @@ if err != nil {
     return err // a refusal, e.g. limes.ErrResourceNotAllowed outside corpus/public/
 }
 subject := granted.MeterSubject()
-if _, err := usage.Bump(ctx, limes.BumpRequest{Subject: subject}); err != nil {
+if _, err := usage.Bump(ctx, meter.BumpRequest{Subject: subject}); err != nil {
     return err // limes.ErrRequestLimitExceeded past the 500th request
 }
-if _, err := usage.Charge(ctx, limes.ChargeRequest{
+if _, err := usage.Charge(ctx, meter.ChargeRequest{
     Subject: subject, Amount: limes.MustParseAmount("0.35"),
 }, nil); err != nil {
     return err // limes.ErrBudgetExceeded past 25.00, with nothing counted
@@ -137,16 +137,18 @@ own, pgstore included, logging what happens.
 | **Report** | `LedgerReader.SumCharges` sums a tenant's charges over a period by unit, whole or by UTC hour, day, ISO week or month, and by operation, actor or capability, the largest first. `RecordCensus.CountRecords` counts capability records — active, expired, revoked, delegated, expiring soon — for one tenant or all, by tenant and principal type. |
 | **Answer refusals** | `ErrorResponse` maps a refusal to its status, an RFC 6750 / RFC 9449 `WWW-Authenticate` challenge and an RFC 9457 problem body, without the error's own text. |
 
-You implement `Store` and `UsageStore[TX]` — or use `memstore`, or `pgstore`
-over PostgreSQL — and a `KeyResolver`, which `jwks.Static` and `jwks.Remote`
-already are, and check your implementation from its own tests with `storetest`,
-`metertest` and `jwkstest` (`dpoptest` for a DPoP replay cache or nonce source). `UsageStore` is generic in your transaction type, so a charge can
-commit together with, say, an outbox write; with no transactions, use
-`UsageStore[struct{}]`. Optional contracts serve one feature each:
-`BiscuitRevocationStore` and `CopyUsageReader` for Biscuit copies,
-`LedgerReader` for billing reads, `RecordCensus` for a census of records, and
-`TenantRecordEraser` and
-`TenantUsageEraser` to remove a tenant.
+You implement `Store` and a `KeyResolver`, which `jwks.Static` and
+`jwks.Remote` already are, and, to meter, `meter.UsageStore[TX]` — or use
+`memstore`, or `pgstore` over PostgreSQL — and check your implementation from
+its own tests with `storetest`, `metertest` and `jwkstest` (`dpoptest` for a
+DPoP replay cache or nonce source). Metering lives in the package `meter`, so
+a service that only verifies tokens never imports it. `meter.UsageStore` is
+generic in your transaction type, so a charge can commit together with, say,
+an outbox write; with no transactions, use `meter.UsageStore[struct{}]`.
+Optional contracts serve one feature each: `BiscuitRevocationStore` and
+`meter.CopyUsageReader` for Biscuit copies, `meter.LedgerReader` for billing
+reads, `RecordCensus` for a census of records, and `TenantRecordEraser` and
+`meter.TenantUsageEraser` to remove a tenant.
 
 ## Guarantees
 
@@ -215,14 +217,15 @@ its checks while unset.
 
 | Path | Holds |
 |------|-------|
-| [`/`](.) | the `limes` package: issuer, verifier, caveats, Biscuit, metering, contracts |
+| [`/`](.) | the `limes` package: issuer, verifier, caveats, Biscuit, contracts |
+| [meter/](meter) | metering: request and spend counters, holds, tenant budgets and the charges ledger, against a verified capability's ceilings |
 | [jwks/](jwks) | key sets (RFC 7517): the JWKS document and handler, remote and static key resolvers |
 | [dpop/](dpop) | proof of possession (RFC 9449): signing and checking proofs, replay cache, server nonces |
 | [inspect/](inspect) | reading a token without verifying it, for tooling |
 | [memstore/](memstore) | the in-memory reference implementation of every storage contract |
-| [pgstore/](pgstore) | the reference PostgreSQL store, a module of its own: `Store`, `BiscuitRevocationStore`, `UsageStore[pgx.Tx]`, `CopyUsageReader`, a `Ledger`, a `Census` and both tenant erasers under row-level security per tenant, with `EraseTenant` and a `RevocationWatcher`; held to storetest and metertest; released as `pgstore/vX.Y.Z` |
+| [pgstore/](pgstore) | the reference PostgreSQL store, a module of its own: `Store`, `BiscuitRevocationStore`, `meter.UsageStore[pgx.Tx]`, `meter.CopyUsageReader`, a `Ledger`, a `Census` and both tenant erasers under row-level security per tenant, with `EraseTenant` and a `RevocationWatcher`; held to storetest and metertest; released as `pgstore/vX.Y.Z` |
 | [redisreplay/](redisreplay) | a `dpop.ReplayCache` over Redis, a module of its own, for verifiers behind several replicas; released as `redisreplay/vX.Y.Z` |
-| [otelmetric/](otelmetric) | OpenTelemetry instruments around a `UsageStore`, a module of its own so limes resolves no OpenTelemetry; released as `otelmetric/vX.Y.Z` |
+| [otelmetric/](otelmetric) | OpenTelemetry instruments around a `meter.UsageStore`, a module of its own so limes resolves no OpenTelemetry; released as `otelmetric/vX.Y.Z` |
 | [internal/](internal) | the module's own shared packages, not importable from outside it: JOSE pieces (`jose`), HTTP header names (`httpx`), RFC 3986 URI normalisation (`rfc3986`), access to unexported root internals for sibling packages (`link`), and field coverage and per-check deadlines for the conformance suites (`fields`, `watchdog`) |
 | [storetest/](storetest), [metertest/](metertest), [dpop/dpoptest](dpop/dpoptest), [jwks/jwkstest](jwks/jwkstest) | conformance suites to run from your own implementation's tests |
 | [examples/](examples) | runnable programs: the five-minute walkthrough (`quickstart`), and one topic each, logging every step to stdout — issuing and verifying, delegation, metering, and pgstore over PostgreSQL; a module of its own, never released |

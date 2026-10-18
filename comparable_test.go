@@ -10,12 +10,9 @@ import (
 // stay comparable.
 func TestWhichStructsCompare(t *testing.T) {
 	for _, ty := range []reflect.Type{
-		reflect.TypeFor[ChargeRecord](), reflect.TypeFor[ChargeReceipt](), reflect.TypeFor[RefundReceipt](),
-		reflect.TypeFor[BumpReceipt](), reflect.TypeFor[TenantBudget](), reflect.TypeFor[Usage](),
 		reflect.TypeFor[Revocation](), reflect.TypeFor[Problem](), reflect.TypeFor[Principal](),
-		reflect.TypeFor[AgentPrincipal](), reflect.TypeFor[PurgeResult](), reflect.TypeFor[PurgeOrphansResult](),
-		reflect.TypeFor[ReleaseExpiredResult](), reflect.TypeFor[EraseTenantResult](), reflect.TypeFor[RecordCount](),
-		reflect.TypeFor[ChargeSum](),
+		reflect.TypeFor[AgentPrincipal](), reflect.TypeFor[PurgeResult](), reflect.TypeFor[EraseTenantResult](),
+		reflect.TypeFor[RecordCount](),
 	} {
 		if ty.Comparable() {
 			t.Errorf("%s is comparable; a field added in 1.x could break a caller's ==", ty.Name())

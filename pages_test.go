@@ -51,18 +51,6 @@ func (f *fakeLister) ListByPrincipal(_ context.Context, req ListByPrincipalReque
 	return Page[Capability]{Items: caps, Next: p.next}, p.err
 }
 
-func (f *fakeLister) ListTenantBudgets(_ context.Context, req ListTenantBudgetsRequest) (Page[TenantBudget], error) {
-	if err := f.ask(req.Cursor); err != nil {
-		return Page[TenantBudget]{}, err
-	}
-	p := f.pages[req.Cursor]
-	rows := make([]TenantBudget, 0, len(p.ids))
-	for _, id := range p.ids {
-		rows = append(rows, TenantBudget{TenantID: id})
-	}
-	return Page[TenantBudget]{Items: rows, Next: p.next}, p.err
-}
-
 // The cursors of a three-page listing.
 const (
 	cursorSecond = "second"
@@ -215,20 +203,6 @@ func TestAllByPrincipalStopsWhenTheLoopBreaks(t *testing.T) {
 	}
 }
 
-func TestAllTenantBudgets(t *testing.T) {
-	l := &fakeLister{pages: threePages()}
-	var ids []uuid.UUID
-	for row, err := range AllTenantBudgets(context.Background(), l, ListTenantBudgetsRequest{}) {
-		if err != nil {
-			t.Fatal(err)
-		}
-		ids = append(ids, row.TenantID)
-	}
-	if want := []uuid.UUID{idA, idB, idC, idD}; !slices.Equal(ids, want) {
-		t.Errorf("tenants = %v, want %v", ids, want)
-	}
-}
-
 // A walk can be ranged again, and from where it was asked to start: each
 // range pages with a request of its own, never the cursor a previous range
 // reached.
@@ -236,7 +210,6 @@ func TestAllWalksRangeAgain(t *testing.T) {
 	want := []uuid.UUID{idC, idD}
 	l := &fakeLister{pages: threePages()}
 	capabilities := AllByPrincipal(context.Background(), l, ListByPrincipalRequest{Cursor: cursorSecond})
-	budgets := AllTenantBudgets(context.Background(), l, ListTenantBudgetsRequest{Cursor: cursorSecond})
 	for pass := range 2 {
 		l.asked = nil // each range is a walk of its own
 		var got []uuid.UUID
@@ -248,17 +221,6 @@ func TestAllWalksRangeAgain(t *testing.T) {
 		}
 		if !slices.Equal(got, want) {
 			t.Errorf("AllByPrincipal, range %d = %v, want %v", pass+1, got, want)
-		}
-		l.asked = nil
-		got = nil
-		for row, err := range budgets {
-			if err != nil {
-				t.Fatal(err)
-			}
-			got = append(got, row.TenantID)
-		}
-		if !slices.Equal(got, want) {
-			t.Errorf("AllTenantBudgets, range %d = %v, want %v", pass+1, got, want)
 		}
 	}
 }

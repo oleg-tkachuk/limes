@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 	"github.com/oleg-tkachuk/limes/metertest"
 )
 
@@ -115,12 +116,12 @@ func TestMeterRefusesACounterRowOfAnotherTenant(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := meterSubject(f.child.ID, f.mine)
-	if _, err := f.usage.Bump(ctx, limes.BumpRequest{Subject: subject}); !errors.Is(err, errCounterHidden) {
+	if _, err := f.usage.Bump(ctx, meter.BumpRequest{Subject: subject}); !errors.Is(err, errCounterHidden) {
 		t.Errorf("Bump over another tenant's row: err = %v, want errCounterHidden", err)
 	}
 	called := false
-	onCharged := func(context.Context, limes.Charged[pgx.Tx]) error { called = true; return nil }
-	if _, err := f.usage.Charge(ctx, limes.ChargeRequest{Subject: subject, Amount: 1}, onCharged); !errors.Is(err, errCounterHidden) {
+	onCharged := func(context.Context, meter.Charged[pgx.Tx]) error { called = true; return nil }
+	if _, err := f.usage.Charge(ctx, meter.ChargeRequest{Subject: subject, Amount: 1}, onCharged); !errors.Is(err, errCounterHidden) {
 		t.Errorf("Charge over another tenant's row: err = %v, want errCounterHidden", err)
 	}
 	if called {

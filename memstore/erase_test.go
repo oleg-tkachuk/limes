@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // An erased tenant stays erased while any of its records is left, so a
@@ -12,21 +13,21 @@ import (
 // the last record is gone, as nothing of the tenant can be metered then.
 func TestPurgeOrphansForgetsAnErasedTenantWithNoRecordLeft(t *testing.T) {
 	ctx, u, capID, tenant := newCopyFixture(t)
-	if err := u.EraseTenantUsage(ctx, limes.EraseTenantUsageRequest{TenantID: tenant}); err != nil {
+	if err := u.EraseTenantUsage(ctx, meter.EraseTenantUsageRequest{TenantID: tenant}); err != nil {
 		t.Fatal(err)
 	}
 	setBudget := func() error {
-		_, err := u.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: limes.AbstractUnitCode}})
+		_, err := u.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: limes.AbstractUnitCode}})
 		return err
 	}
-	if _, err := u.PurgeOrphans(ctx, limes.PurgeOrphansRequest{}); err != nil {
+	if _, err := u.PurgeOrphans(ctx, meter.PurgeOrphansRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := setBudget(); !errors.Is(err, limes.ErrTenantErased) {
 		t.Fatalf("SetTenantBudget with a record of the tenant left: err = %v, want ErrTenantErased", err)
 	}
 	dropRecord(u.records, capID)
-	if _, err := u.PurgeOrphans(ctx, limes.PurgeOrphansRequest{}); err != nil {
+	if _, err := u.PurgeOrphans(ctx, meter.PurgeOrphansRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := setBudget(); err != nil {
