@@ -34,8 +34,8 @@ type SumChargesRequest struct {
 	TenantID uuid.UUID
 	// From and To bound the period, From included, To not; From before To.
 	From, To time.Time
-	// Bucket splits the period at UTC boundaries; ChargeBucketNone sums it
-	// whole, and so does ChargeBucketUnspecified, which takes it.
+	// Bucket splits the period at UTC boundaries; the zero value,
+	// ChargeBucketNone, sums it whole.
 	Bucket ChargeBucket
 	// ByOp, ByActor and ByCapability group the sums by the charge's Op,
 	// Actor and capability as well.
@@ -86,27 +86,23 @@ type ChargeSum struct {
 // ChargeBucket is how SumCharges splits a period in time.
 type ChargeBucket uint8
 
-// The buckets, each cut at UTC boundaries. A new one is appended, so that no
-// bucket's number changes.
+// The buckets, each cut at UTC boundaries, shortest first. A new one is
+// appended, so that no bucket's number changes.
 const (
-	// ChargeBucketUnspecified takes the default, ChargeBucketNone: a request
-	// that names no bucket sums its period whole.
-	ChargeBucketUnspecified ChargeBucket = iota
+	// ChargeBucketNone, the zero value, sums the period whole, in one
+	// bucket: a request that names no bucket gets it.
+	ChargeBucketNone ChargeBucket = iota
 	ChargeBucketHour
 	ChargeBucketDay
-	ChargeBucketMonth
 	// ChargeBucketWeek is an ISO week, from Monday 00:00 UTC.
 	ChargeBucketWeek
-	// ChargeBucketNone sums the period whole, in one bucket.
-	ChargeBucketNone
+	ChargeBucketMonth
 	chargeBucketEnd // one past the last
 )
 
 // String is the bucket's name.
 func (b ChargeBucket) String() string {
 	switch b {
-	case ChargeBucketUnspecified:
-		return "unspecified"
 	case ChargeBucketNone:
 		return "none"
 	case ChargeBucketHour:
@@ -131,8 +127,7 @@ func (b ChargeBucket) Validate() error {
 }
 
 // Start is where the bucket holding t begins, in UTC; the zero time for
-// ChargeBucketNone, which holds the whole period, and for
-// ChargeBucketUnspecified, which takes it.
+// ChargeBucketNone, which holds the whole period.
 func (b ChargeBucket) Start(t time.Time) time.Time {
 	t = t.UTC()
 	switch b {

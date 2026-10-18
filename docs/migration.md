@@ -14,6 +14,13 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.90.0
+
+- `ChargeBucketUnspecified` is gone: it meant what `ChargeBucketNone` does,
+  which is now the zero value. The buckets are numbered shortest first —
+  none, hour, day, week, month — so a bucket stored or sent as its number
+  reads differently; store and send its name (`String`).
+
 ## v0.89.0
 
 - `ListTenantBudgetsRequest.ThresholdPct float64` →
