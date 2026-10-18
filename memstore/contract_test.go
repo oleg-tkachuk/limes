@@ -27,7 +27,7 @@ var contractExpiry = time.Now().Add(contractTTL)
 const contractCopyQuota = 16
 
 func TestMeterContract(t *testing.T) {
-	metertest.Run(t, func(t *testing.T) metertest.Env[struct{}] {
+	metertest.Run(t, func(t *testing.T) metertest.Env {
 		t.Helper()
 		records := newTestStore()
 		tenant := uuid.New()
@@ -36,8 +36,8 @@ func TestMeterContract(t *testing.T) {
 		start := time.Now()
 		var offset atomic.Int64 // how far Advance has moved the clock
 		now := func() time.Time { return start.Add(time.Duration(offset.Load())) }
-		usage := mustUsage(t, UsageStoreConfig[struct{}]{Records: records, Now: now, MaxCopiesPerCapability: contractCopyQuota})
-		return metertest.Env[struct{}]{
+		usage := mustUsage(t, UsageStoreConfig{Records: records, Now: now, MaxCopiesPerCapability: contractCopyQuota})
+		return metertest.Env{
 			MaxCopiesPerCapability: contractCopyQuota,
 			Ctx:                    context.Background(),
 			Usage:                  usage,
@@ -72,12 +72,12 @@ func TestMeterContractUsesTheTenantHooks(t *testing.T) {
 	base := t.Context()
 	listCtx := context.WithValue(base, listScope{}, true)
 	listed := &listRecorder{}
-	metertest.Run(t, func(t *testing.T) metertest.Env[struct{}] {
+	metertest.Run(t, func(t *testing.T) metertest.Env {
 		t.Helper()
 		ctx := base
 		records := newTestStore()
 		tenant := uuid.New()
-		return metertest.Env[struct{}]{
+		return metertest.Env{
 			Ctx:    ctx,
 			Usage:  listed.wrap(newTestUsage(records)),
 			Tenant: tenant,
@@ -120,12 +120,12 @@ type listRecorder struct {
 	scopedWrites, strayWrites atomic.Int64
 }
 
-func (r *listRecorder) wrap(u *UsageStore[struct{}]) meter.UsageStore[struct{}] {
+func (r *listRecorder) wrap(u *UsageStore) meter.UsageStore {
 	return &recordingUsage{UsageStore: u, r: r}
 }
 
 type recordingUsage struct {
-	*UsageStore[struct{}]
+	*UsageStore
 	r *listRecorder
 }
 

@@ -14,6 +14,24 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.101.0
+
+- `meter.UsageStore`, `meter.Meter` and `meter.Charged` lose their type
+  parameter: `onCharged` is `func(ctx, meter.Charged) error`, and
+  `Charged.Tx` is gone. The store's transaction travels in the context
+  `onCharged` receives, read through the store's own accessor —
+  `pgstore.TxFrom(ctx)` for pgstore. A store of your own puts its
+  transaction in that context and exports an accessor for it.
+- memstore: `UsageStore`, `UsageStoreConfig` and `Ledger` lose their type
+  parameter, and `UsageStoreConfig.TxFactory` is gone: `onCharged` runs on
+  the caller's context. `metertest.Env` and `metertest.Run` lose theirs too.
+
+## pgstore/v0.21.0
+
+- `UsageStore` implements the non-generic `meter.UsageStore`: `onCharged`
+  reads the charge's transaction with `TxFrom(ctx)` instead of
+  `Charged.Tx`.
+
 ## otelmetric/v0.2.0
 
 - `Instrument` takes and returns a `meter.UsageStore`, which moved out of
@@ -41,7 +59,7 @@ API, and this file stops growing.
   gains `Validate` and `ValidateAmounts`, and `AllPages` walks any paged list
   as `AllByPrincipal` does.
 
-## pgstore/v0.19.0
+## pgstore/v0.20.0
 
 - The usage store, ledger and erasers implement the contracts of the package
   `meter` (see v0.100.0): their methods take and return `meter.X` where they

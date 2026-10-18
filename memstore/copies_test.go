@@ -21,7 +21,7 @@ func copyCeiling(id string, requests int64, budget limes.Nanos) limes.CopyCeilin
 	return limes.CopyCeiling{RevocationID: []byte(id), Requests: &limes.RequestCeiling{Max: requests}, Budget: &limes.BudgetCeiling{Max: budget}}
 }
 
-func newCopyFixture(t *testing.T) (context.Context, *UsageStore[struct{}], uuid.UUID, uuid.UUID) {
+func newCopyFixture(t *testing.T) (context.Context, *UsageStore, uuid.UUID, uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
 	records := newTestStore()

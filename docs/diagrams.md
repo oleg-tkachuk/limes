@@ -54,7 +54,7 @@ flowchart LR
     subgraph contracts ["contracts the consumer implements"]
         direction TB
         store["<b>Store</b> = IssuanceStore + admin<br/>Insert · IsRevoked · GetRecord · Revoke<br/>Purge · ListByPrincipal"]
-        usage["<b>meter.UsageStore[TX]</b><br/>Meter[TX]: Bump · Charge · Reserve · Settle · Refund · Release<br/>MeterReader: GetUsage · GetCharge · ChargeByRef · GetReservation · ListReservations<br/>TenantBudgets · UsageHousekeeping"]
+        usage["<b>meter.UsageStore</b><br/>Meter: Bump · Charge · Reserve · Settle · Refund · Release<br/>MeterReader: GetUsage · GetCharge · ChargeByRef · GetReservation · ListReservations<br/>TenantBudgets · UsageHousekeeping"]
         keys["<b>KeyResolver</b><br/>PublicKey(kid)"]
         brev["<b>BiscuitRevocationStore</b><br/>IsBiscuitRevoked · RevokeBiscuit<br/>GetBiscuitRevocation"]
         cusage["<b>meter.CopyUsageReader</b><br/>CopyUsage(CopyUsageRequest{CapabilityID, RevocationIDs})<br/>→ CopyUsageResult{Copies}"]
@@ -66,7 +66,7 @@ flowchart LR
     end
 
     impl[("memstore · your own store")]
-    pg["<b>pgstore</b> (nested module)<br/>Store · BiscuitRevocationStore · erasers<br/>UsageStore[pgx.Tx] · CopyUsageReader · Ledger · Census<br/>Migrate · CheckSchema · EraseTenant<br/>WithTenant · WithAllTenants · WithAllTenantsReadOnly<br/>RevocationWatcher · row-level security"]
+    pg["<b>pgstore</b> (nested module)<br/>Store · BiscuitRevocationStore · erasers<br/>UsageStore · CopyUsageReader · Ledger · Census<br/>Migrate · CheckSchema · EraseTenant<br/>WithTenant · WithAllTenants · WithAllTenantsReadOnly<br/>RevocationWatcher · row-level security"]
     rr["<b>redisreplay</b> (nested module)<br/>Cache: dpop.ReplayCache over Redis"]
     metering["<b>otelmetric</b> (nested module)<br/>Instrument: OTel counters · spend histogram<br/>WithMeterProvider · WithTenantAttribute"]
     pgdb{{"PostgreSQL"}}
@@ -148,9 +148,10 @@ the store vouched for.
 
 Every read names what it reads — `Store.GetRecord`, `MeterReader.GetUsage`,
 `TenantBudgets.GetTenantBudget` — so one type may implement `Store` and
-`UsageStore` together, or each apart as `memstore` does. `TX` is the
-consumer's transaction handle; the module only threads it back through
-`Meter.Charge` and `Meter.Settle`, which is why it has no database dependency.
+`UsageStore` together, or each apart as `memstore` does. A store puts its
+transaction in the context `Meter.Charge` and `Meter.Settle` hand
+`onCharged`, read through its own accessor (`pgstore.TxFrom`); the module
+never names a transaction type, which is why it has no database dependency.
 
 ## Lifecycle of a capability
 
@@ -711,7 +712,7 @@ flowchart TB
         c1{"own spend + reserved + Amount ≤ Subject.Budget<br/>(ceiling from the verified token or stored record)"}
         c2{"each ancestor: spend + reserved + Amount<br/>≤ its Budget<br/>(ceiling from the stored record)"}
         c3{"tenant spend + reserved + Amount<br/>≤ TenantBudget.Ceiling<br/>(Unlimited until one is set)"}
-        cb{"onCharged(ctx, Charged{Tx, Receipt})<br/>consumer's side effect on its own TX"}
+        cb{"onCharged(ctx with the store's tx, Charged{Receipt})<br/>consumer's side effect in the same transaction"}
         c00 -- yes --> c0 -- yes --> c1 -- yes --> c2 -- yes --> c3 -- yes --> cb
     end
 
@@ -806,11 +807,10 @@ Holds and housekeeping, in `memstore` and `pgstore` as the contract has them:
   spent in it unless `ResetSpend` closes that spend, and with `ResetSpend` opens a new accounting period, so a refund of an
   earlier period's charge leaves the new period's spend alone.
 
-A store with transactions runs stage and commit inside one, and passes its own
-handle as `Charged.Tx`, beside the receipt the call will return; `onCharged`
-may be `nil`. A store without them, or a consumer
-with none, uses `UsageStore[struct{}]`; `memstore` still runs `onCharged`
-before it publishes, with the zero `TX` or the handle `TxFactory` makes.
+A store with transactions runs stage and commit inside one, and hands
+`onCharged` a context carrying it, beside the receipt the call will return
+(`Charged`); `onCharged` may be `nil`. A store without them hands on the
+caller's context; `memstore` still runs `onCharged` before it publishes.
 
 `pgstore` runs each call in one transaction, `onCharged` on that same
 `pgx.Tx`, so a rejection or a failing side effect rolls everything back.

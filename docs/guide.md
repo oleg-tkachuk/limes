@@ -561,14 +561,15 @@ still counts — open, or expired and not yet released — and is
 capability's own holds.
 
 The trailing `nil` is an optional in-transaction callback. If your store has
-transactions, pass a function and the module threads **your** handle back so
-your side effects commit atomically with the spend. It also hands over the
-receipt the call will return, so the side effect can name the charge:
+transactions, pass a function: its context carries the store's transaction,
+which the store's own accessor reads, so your side effects commit atomically
+with the spend. It also hands over the receipt the call will return, so the
+side effect can name the charge:
 
 ```go
-usage.Charge(ctx, req, func(ctx context.Context, c meter.Charged[MyTx]) error {
-    // commits with the charge
-    return myOutbox.Enqueue(ctx, c.Tx, c.Receipt.ChargeID, c.Receipt.SpentAmount)
+usage.Charge(ctx, req, func(ctx context.Context, c meter.Charged) error {
+    tx, _ := pgstore.TxFrom(ctx) // commits with the charge
+    return myOutbox.Enqueue(ctx, tx, c.Receipt.ChargeID, c.Receipt.SpentAmount)
 })
 ```
 
@@ -826,7 +827,8 @@ scope that does not admit that tenant returns `ErrScopeMismatch`, never
 `ErrNotFound` or `ErrInvalidRequest`. A call that names only an id
 (`GetRecord`, `Revoke`, `Refund`, `GetUsage`, `GetCharge`, …) cannot
 be checked so, and answers a row out of scope as not found.
-`onCharged` runs on the store's own `pgx.Tx`. Every time it writes comes from
+`onCharged` runs on the store's own `pgx.Tx`, which `TxFrom` reads from its
+context. Every time it writes comes from
 `Config.Now`, never from the database's clock.
 
 Run `Migrate` as the role that owns the schema and serve as another one: the
@@ -861,7 +863,7 @@ Elsewhere, implement these and you are done:
 | `meter.LedgerReader` | Sums a tenant's charges for billing and reports (optional; a type of its own beside `meter.UsageStore`) | No |
 | `RecordCensus` | Counts capability records by disposition, for one tenant or every tenant (optional; a type of its own beside `Store`) | No |
 | `TenantRecordEraser`, `meter.TenantUsageEraser` | Erase a tenant's records and usage (optional) | No |
-| `meter.UsageStore[TX]` = `Meter[TX]` + `MeterReader` + `TenantBudgets` + `UsageHousekeeping` (only to meter) | Request and spend counters, the charges ledger, tenant ceilings; `DeleteUsage` and `PurgeOrphans` release a reaped capability's holds | Only for atomic side effects |
+| `meter.UsageStore` = `Meter` + `MeterReader` + `TenantBudgets` + `UsageHousekeeping` (only to meter) | Request and spend counters, the charges ledger, tenant ceilings; `DeleteUsage` and `PurgeOrphans` release a reaped capability's holds | Only for atomic side effects |
 | `KeyResolver` | Public verification keys; an unknown kid is `jwks.ErrUnknownKID`, the token's fault (`ErrInvalidToken`), and any other error the resolver's own (`jwks.Static` and `jwks.Remote` ship; `jwkstest` checks yours) | No |
 | `dpop.ReplayCache` | DPoP proof ids seen, per key, each counted against its holder: `Seen(ctx, dpop.ReplayEntry)` reports a holder past its share as seen, and returns an error when its store cannot answer — an outage, not a refused proof (only for key-bound tokens; `dpop.MemoryReplayCache` ships for one process — behind several replicas, the `redisreplay` module ships one over Redis, or implement it over another shared store) | No |
 | `dpop.Nonces` | Server-provided DPoP nonces (optional; `dpop.HMACNonces` ships and needs no store) | No |
@@ -989,8 +991,8 @@ every list is a `Page`, and every read names what
 it reads (`GetRecord`, `GetUsage`, `GetTenantBudget`), so one type may implement `Store` and
 `meter.UsageStore` together, or each apart as `memstore` does.
 
-`meter.UsageStore` is generic in `TX` — *your* transaction type. Have none?
-Instantiate `meter.UsageStore[struct{}]` and always pass `nil` for the callback.
+`meter.UsageStore` names no transaction type: a store carries its own in
+the callback's context. Have no transactions? Pass `nil` for the callback.
 Everything works identically; you forgo the atomic-side-effect
 guarantee.
 

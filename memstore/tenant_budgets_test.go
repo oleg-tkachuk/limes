@@ -14,7 +14,7 @@ import (
 )
 
 // seedBudget sets a tenant's ceiling and charges spent against it.
-func seedBudget(t *testing.T, u *UsageStore[struct{}], ceiling limes.BudgetCeiling, spent limes.Nanos) uuid.UUID {
+func seedBudget(t *testing.T, u *UsageStore, ceiling limes.BudgetCeiling, spent limes.Nanos) uuid.UUID {
 	t.Helper()
 	ctx := context.Background()
 	tenant := uuid.New()

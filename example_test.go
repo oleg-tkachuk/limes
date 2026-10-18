@@ -30,7 +30,7 @@ type exampleStack struct {
 	issuer   *limes.Issuer
 	verifier *limes.Verifier
 	records  *memstore.Store
-	usage    *memstore.UsageStore[struct{}]
+	usage    *memstore.UsageStore
 	tenantID uuid.UUID
 }
 
@@ -44,7 +44,7 @@ func newExampleStack() exampleStack {
 	if err != nil {
 		log.Fatal(err)
 	}
-	usage, err := memstore.NewUsageStore(memstore.UsageStoreConfig[struct{}]{Records: records})
+	usage, err := memstore.NewUsageStore(memstore.UsageStoreConfig{Records: records})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -367,7 +367,7 @@ func Example_backdatedCharges() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	usage, err := memstore.NewUsageStore(memstore.UsageStoreConfig[struct{}]{Records: records, Now: clock})
+	usage, err := memstore.NewUsageStore(memstore.UsageStoreConfig{Records: records, Now: clock})
 	if err != nil {
 		log.Fatal(err)
 	}
