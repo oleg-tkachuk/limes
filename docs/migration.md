@@ -14,6 +14,13 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.79.0
+
+- `inspect.VerifySignature` answered a `pub` that is no Ed25519 public key
+  with `limes.ErrInvalidToken`, as if the token were forged → it is the new
+  `inspect.ErrInvalidKey`, and the token is not blamed: match it to tell a
+  wrong key from a bad token.
+
 ## v0.78.0
 
 - A reservation lasted `ReserveRequest.TTL` whatever its capability did → it
