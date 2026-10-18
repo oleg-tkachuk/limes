@@ -19,8 +19,9 @@
 // limes.TenantUsageEraser.
 //
 // It is NOT a production store: each store keeps its maps behind one mutex,
-// which the usage store holds while onCharged runs, nothing survives a restart, and the charges
-// ledger is kept whole for as long as the store lives.
+// which the usage store holds while onCharged runs, nothing survives a
+// restart, and the charges ledger only grows for as long as the store lives:
+// EraseTenantUsage is all that removes an entry.
 package memstore
 
 import (
