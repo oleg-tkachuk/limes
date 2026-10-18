@@ -515,10 +515,20 @@ func (s *UsageStore) Reserve(ctx context.Context, req limes.ReserveRequest) (lim
 			return err
 		}
 		now := s.clock()
+		// A hold ends with its capability at the latest: past it no one can
+		// settle the hold, and it would keep the ancestors' budget held.
+		expires := now.Add(ttl)
+		var capExpires *time.Time
+		if err := tx.QueryRow(ctx, sqlCapabilityExpiry, subject.CapabilityID()).Scan(&capExpires); err != nil {
+			return err
+		}
+		if capExpires != nil && capExpires.Before(expires) {
+			expires = *capExpires
+		}
 		h := hold{
 			id: uuid.New(), capID: subject.CapabilityID(), tenantID: subject.TenantID(), ancestors: ancestorIDs(ancestors),
 			amount: req.Amount, unit: unit, op: req.Op, actor: req.Actor, copies: subject.Copies(),
-			expires: now.Add(ttl).Truncate(timeResolution),
+			expires: expires.Truncate(timeResolution),
 		}
 		applyHold(c, h, +1)
 		if err := c.write(ctx, tx, now, true); err != nil {

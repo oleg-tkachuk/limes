@@ -560,9 +560,12 @@ func parseTenantPlace(s string) (tenantPlace, error) {
 }
 
 const (
+	// sqlDueHolds reads the holds past their expiry, and those of a
+	// capability revoked, itself or an ancestor: no one can settle either.
 	sqlDueHolds = `
 SELECT ` + sqlHoldColumns + ` FROM limes.reservations
 WHERE expires_at <= $1
+   OR EXISTS (SELECT 1 FROM limes.is_revoked(capability_id, $3) v WHERE v.in_chain)
 ORDER BY expires_at, id
 LIMIT $2
 FOR UPDATE`
@@ -619,7 +622,7 @@ func (s *UsageStore) ReleaseExpired(ctx context.Context, req limes.ReleaseExpire
 	}
 	var released int64
 	err = s.inTx(ctx, func(tx pgx.Tx) error {
-		holds, err := collectHolds(ctx, tx, sqlDueHolds, s.clock(), limit)
+		holds, err := collectHolds(ctx, tx, sqlDueHolds, s.clock(), limit, limes.MaxDelegationDepth)
 		if err != nil {
 			return err
 		}

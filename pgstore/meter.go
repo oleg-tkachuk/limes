@@ -59,6 +59,10 @@ WITH RECURSIVE chain (id, parent_id, depth) AS (
 )
 SELECT id FROM chain ORDER BY depth`
 
+	// sqlCapabilityExpiry reads when a capability's record expires, NULL for
+	// one that never does.
+	sqlCapabilityExpiry = `SELECT expires_at FROM limes.capabilities WHERE id = $1`
+
 	// sqlHoldRecords locks the records of a lineage for share, in id order,
 	// so Purge cannot drop one while the call counts against it.
 	sqlHoldRecords = `
