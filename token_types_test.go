@@ -11,13 +11,15 @@ import (
 	"github.com/oleg-tkachuk/limes/internal/jose"
 )
 
-// What the retired v4 format carried and v5 does not: its typ, a claim, an
-// unnamespaced operation and the old name of the parent's run.
+// retiredV4Type is the typ of the retired v4 format.
+const retiredV4Type TokenType = "limes-cap-v4+jwt" //nolint:gosec // G101: a JWT type label, not a credential
+
+// What v4 carried and v5 does not: a claim, an unnamespaced operation and the
+// old name of the parent's run.
 const (
-	retiredV4Type        TokenType = "limes-cap-v4+jwt" //nolint:gosec // G101: a JWT type label, not a credential
-	retiredGenerationKey           = "limes_gen"
-	retiredV4Op                    = "search"
-	retiredParentRunKey            = "parent_agent_id"
+	retiredGenerationKey = "limes_gen"
+	retiredV4Op          = "search"
+	retiredParentRunKey  = "parent_agent_id"
 )
 
 // headerOf is the protected header of a token of type typ, signed by key k1.
