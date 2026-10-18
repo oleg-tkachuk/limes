@@ -28,7 +28,6 @@ type capabilityRecord struct {
 	NotBefore       time.Time       `json:"not_before"`
 	ExpiresAt       time.Time       `json:"expires_at"`
 	ParentID        uuid.UUID       `json:"parent_id"`
-	Generation      int64           `json:"generation"`
 	ConfirmationJKT string          `json:"confirmation_jkt"`
 }
 
@@ -100,7 +99,7 @@ func toCapabilityRecord(c limes.Capability) capabilityRecord {
 			IdempotencyKeyRequired: cv.IdempotencyKeyRequired, SourceIPCIDR: cv.SourceIPCIDR,
 		},
 		IssuedAt: c.IssuedAt, NotBefore: c.NotBefore, ExpiresAt: c.ExpiresAt, ParentID: c.ParentID,
-		Generation: c.Generation, ConfirmationJKT: c.ConfirmationJKT,
+		ConfirmationJKT: c.ConfirmationJKT,
 	}
 }
 
@@ -116,7 +115,7 @@ func (r capabilityRecord) capability() limes.Capability {
 			IdempotencyKeyRequired: cv.IdempotencyKeyRequired, SourceIPCIDR: cv.SourceIPCIDR,
 		},
 		IssuedAt: r.IssuedAt, NotBefore: r.NotBefore, ExpiresAt: r.ExpiresAt, ParentID: r.ParentID,
-		Generation: r.Generation, ConfirmationJKT: r.ConfirmationJKT,
+		ConfirmationJKT: r.ConfirmationJKT,
 	}
 }
 
