@@ -8,6 +8,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"errors"
+	"net/netip"
 	"testing"
 	"time"
 
@@ -180,6 +181,46 @@ func TestARevokedCopySpendsNoReplayRoom(t *testing.T) {
 	}
 	if _, err := v.Verify(ctx, withProof(ctx, t, liveKey, live, audienceData, time.Now())); err != nil {
 		t.Fatalf("live sibling after the revoked copy's proofs: %v", err)
+	}
+}
+
+// A request Authorize refuses for a caveat spends none of the replay room:
+// a presenter outside the allowed networks, holding the token and its key,
+// cannot lock the capability's other holders out with refused requests.
+func TestARefusedCaveatSpendsNoReplayRoom(t *testing.T) {
+	ctx := context.Background()
+	issuer, _, store, pub := buildIssuerVerifier(t)
+	key := dpopKeys(t)["Ed25519"]
+	jkt, _ := dpop.Thumbprint(key.Public())
+	_, token, err := issuer.issue(ctx, IssueRequest{
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
+		Audience: []string{audienceData}, TTL: time.Hour, ConfirmationJKT: jkt,
+		Caveats: Caveats{
+			Ops: []Op{OpGet}, SourceIPCIDR: []string{"10.0.0.0/8"},
+			Requests: RequestCeiling{Unlimited: true}, Budget: BudgetCeiling{Unlimited: true, UnitCode: "USD"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := replayVerifier(t, store, pub, 10*replayShare)
+	inside, outside := netip.MustParseAddr("10.1.2.3"), netip.MustParseAddr("203.0.113.5")
+	authorize := func(op Op, addr netip.Addr) error {
+		_, err := v.Authorize(ctx, AuthorizeRequest{
+			Verify: withProof(ctx, t, key, token, audienceData, time.Now()), Check: CheckRequest{Op: op}, ClientAddr: addr,
+		})
+		return err
+	}
+	for i := range replayShare {
+		if err := authorize(OpGet, outside); !errors.Is(err, ErrSourceIPNotAllowed) {
+			t.Fatalf("outside the allowed networks, proof %d: err = %v, want ErrSourceIPNotAllowed", i+1, err)
+		}
+		if err := authorize(OpPut, inside); !errors.Is(err, ErrOpNotAllowed) {
+			t.Fatalf("an operation not allowed, proof %d: err = %v, want ErrOpNotAllowed", i+1, err)
+		}
+	}
+	if err := authorize(OpGet, inside); err != nil {
+		t.Fatalf("an allowed request after the refused ones: %v", err)
 	}
 }
 
