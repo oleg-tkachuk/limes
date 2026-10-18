@@ -14,6 +14,14 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.84.0
+
+- A problem body's `type` named the kind of refusal — `invalid-token` for an
+  expired token as for a forged one → it ends with the refusal's `Reason`
+  (`…/problems/expired`), and the body carries the reason as `reason`. A
+  refusal with no reason keeps its family's type. Match `reason`, or the new
+  type URIs, where a client matched the old ones.
+
 ## v0.83.0
 
 - `Capability.Copies` → `VerifiedCapability.Copies()`, and
