@@ -14,6 +14,13 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## pgstore/v0.15.0
+
+- `UsageStore.ListTenantBudgets` under `WithTenant`, or with no scope,
+  returned the rows that scope let through, read as every tenant's → it is
+  `limes.ErrScopeMismatch`, as `CountRecords` across tenants is: list under
+  `WithAllTenantsReadOnly` (or `WithAllTenants`).
+
 ## v0.80.0
 
 - `UsageHousekeeping.ReleaseExpired` released the hold of a revoked
