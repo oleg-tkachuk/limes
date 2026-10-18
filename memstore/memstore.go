@@ -350,6 +350,9 @@ func (s *Store) exists(id uuid.UUID) bool {
 // Revoke is idempotent. CascadeChildren walks the delegation tree by ParentID
 // so revoking an orchestrator takes the sub-agents it spawned with it.
 func (s *Store) Revoke(_ context.Context, args limes.RevokeRequest) error {
+	if err := args.Validate(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.caps[args.CapabilityID]; !ok {
@@ -696,10 +699,10 @@ func (s *UsageStore[TX]) Charge(
 
 // ChargeByRef returns the charge a capability took under externalRef.
 func (s *UsageStore[TX]) ChargeByRef(_ context.Context, req limes.ChargeByRefRequest) (limes.ChargeRecord, error) {
-	capID, externalRef := req.CapabilityID, req.ExternalRef
-	if externalRef == "" {
-		return limes.ChargeRecord{}, limes.ErrChargeNotFound
+	if err := req.Validate(); err != nil {
+		return limes.ChargeRecord{}, err
 	}
+	capID, externalRef := req.CapabilityID, req.ExternalRef
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e, ok := entryLocked(s, s.byRef, refKey{capID, externalRef})
@@ -1279,10 +1282,10 @@ func (s *UsageStore[TX]) Release(_ context.Context, req limes.ReleaseRequest) er
 
 // ReleaseExpired releases every hold past its expiry.
 func (s *UsageStore[TX]) ReleaseExpired(_ context.Context, req limes.ReleaseExpiredRequest) (limes.ReleaseExpiredResult, error) {
-	limit, err := housekeepingLimit(req.Limit)
-	if err != nil {
+	if err := req.Validate(); err != nil {
 		return limes.ReleaseExpiredResult{}, err
 	}
+	limit := limes.HousekeepingLimit(req.Limit)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.nowFn()
@@ -1595,6 +1598,9 @@ func (s *UsageStore[TX]) releaseHoldsLocked(gone func(capID uuid.UUID) bool) {
 // nothing could settle or release them once it is gone, and they would keep
 // counting against its ancestors and its tenant.
 func (s *UsageStore[TX]) DeleteUsage(_ context.Context, req limes.DeleteUsageRequest) error {
+	if err := req.Validate(); err != nil {
+		return err
+	}
 	capID := req.CapabilityID
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1651,10 +1657,10 @@ func (s *UsageStore[TX]) EraseTenantUsage(_ context.Context, req limes.EraseTena
 // PurgeOrphans drops the counters of capabilities no longer on record, a
 // batch at a time, releasing their holds first.
 func (s *UsageStore[TX]) PurgeOrphans(_ context.Context, req limes.PurgeOrphansRequest) (limes.PurgeOrphansResult, error) {
-	limit, err := housekeepingLimit(req.Limit)
-	if err != nil {
+	if err := req.Validate(); err != nil {
 		return limes.PurgeOrphansResult{}, err
 	}
+	limit := limes.HousekeepingLimit(req.Limit)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	gone := func(id uuid.UUID) bool { return !s.records.exists(id) }
@@ -1688,17 +1694,6 @@ func (s *UsageStore[TX]) PurgeOrphans(_ context.Context, req limes.PurgeOrphansR
 	s.forgetAncestorLocked(func(id uuid.UUID) bool { return batch[id] })
 	maps.DeleteFunc(s.copies, func(_ string, c copyCounter) bool { return batch[c.capID] })
 	return limes.PurgeOrphansResult{Purged: int64(len(ids))}, nil
-}
-
-// housekeepingLimit resolves a batch limit, refusing a negative one.
-func housekeepingLimit(limit int) (int, error) {
-	if limit < 0 {
-		return 0, fmt.Errorf("%w: memstore: housekeeping limit %d is negative", limes.ErrInvalidRequest, limit)
-	}
-	if limit == 0 {
-		return limes.DefaultHousekeepingLimit, nil
-	}
-	return limit, nil
 }
 
 func max0(n limes.Nanos) limes.Nanos {

@@ -629,8 +629,15 @@ func checkChargeByRef[TX any](t *testing.T, f fixture[TX]) {
 	if _, err := f.Usage.ChargeByRef(f.Ctx, limes.ChargeByRefRequest{CapabilityID: f.root, ExternalRef: "call-1"}); !errors.Is(err, limes.ErrChargeNotFound) {
 		t.Errorf("the ref on another capability: err = %v, want ErrChargeNotFound", err)
 	}
-	if _, err := f.Usage.ChargeByRef(f.Ctx, limes.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: ""}); !errors.Is(err, limes.ErrChargeNotFound) {
-		t.Errorf("an empty ref: err = %v, want ErrChargeNotFound", err)
+	// A request that names no charge is the caller's bug, not a charge
+	// missing (ChargeByRefRequest.Validate).
+	for name, req := range map[string]limes.ChargeByRefRequest{
+		"an empty ref":  {CapabilityID: f.child},
+		"no capability": {ExternalRef: "call-1"},
+	} {
+		if _, err := f.Usage.ChargeByRef(f.Ctx, req); !errors.Is(err, limes.ErrInvalidRequest) {
+			t.Errorf("ChargeByRef with %s: err = %v, want ErrInvalidRequest", name, err)
+		}
 	}
 }
 
@@ -2788,13 +2795,17 @@ func checkReservationsPage[TX any](t *testing.T, f fixture[TX]) {
 	}
 }
 
-// checkHousekeepingLimits holds a store to refusing a negative batch.
+// checkHousekeepingLimits holds a store to refusing a negative batch, and a
+// DeleteUsage naming no capability.
 func checkHousekeepingLimits[TX any](t *testing.T, f fixture[TX]) {
 	if _, err := f.Usage.ReleaseExpired(f.Ctx, limes.ReleaseExpiredRequest{Limit: -1}); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("ReleaseExpired with a negative limit: err = %v, want ErrInvalidRequest", err)
 	}
 	if _, err := f.Usage.PurgeOrphans(f.Ctx, limes.PurgeOrphansRequest{Limit: -1}); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("PurgeOrphans with a negative limit: err = %v, want ErrInvalidRequest", err)
+	}
+	if err := f.Usage.DeleteUsage(f.Ctx, limes.DeleteUsageRequest{}); !errors.Is(err, limes.ErrInvalidRequest) {
+		t.Errorf("DeleteUsage naming no capability: err = %v, want ErrInvalidRequest", err)
 	}
 }
 

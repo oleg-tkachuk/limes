@@ -99,8 +99,8 @@ func (s *UsageStore) GetCharge(ctx context.Context, chargeID uuid.UUID) (limes.C
 // ChargeByRef returns the charge a capability took under an external
 // reference; none is taken under the empty one.
 func (s *UsageStore) ChargeByRef(ctx context.Context, req limes.ChargeByRefRequest) (limes.ChargeRecord, error) {
-	if req.ExternalRef == "" {
-		return limes.ChargeRecord{}, limes.ErrChargeNotFound
+	if err := req.Validate(); err != nil {
+		return limes.ChargeRecord{}, err
 	}
 	return s.readCharge(ctx, sqlChargeByRef, req.CapabilityID, req.ExternalRef)
 }
@@ -620,25 +620,14 @@ SET ancestors = coalesce(
 WHERE ancestors && $1`
 )
 
-// housekeepingLimit resolves a batch limit, refusing a negative one.
-func housekeepingLimit(limit int) (int, error) {
-	if limit < 0 {
-		return 0, fmt.Errorf("%w: pgstore: housekeeping limit %d is negative", limes.ErrInvalidRequest, limit)
-	}
-	if limit == 0 {
-		return limes.DefaultHousekeepingLimit, nil
-	}
-	return limit, nil
-}
-
 // ReleaseExpired releases the holds past their expiry, oldest first.
 func (s *UsageStore) ReleaseExpired(ctx context.Context, req limes.ReleaseExpiredRequest) (limes.ReleaseExpiredResult, error) {
-	limit, err := housekeepingLimit(req.Limit)
-	if err != nil {
+	if err := req.Validate(); err != nil {
 		return limes.ReleaseExpiredResult{}, err
 	}
+	limit := limes.HousekeepingLimit(req.Limit)
 	var released int64
-	err = s.inTx(ctx, func(tx pgx.Tx) error {
+	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		holds, err := collectHolds(ctx, tx, sqlDueHolds, s.clock(), limit)
 		if err != nil {
 			return err
@@ -683,6 +672,9 @@ func (s *UsageStore) releaseHolds(ctx context.Context, tx pgx.Tx, holds []hold) 
 // DeleteUsage drops a capability's counters and its copies', releasing its
 // holds first: nothing could settle or release them once it is gone.
 func (s *UsageStore) DeleteUsage(ctx context.Context, req limes.DeleteUsageRequest) error {
+	if err := req.Validate(); err != nil {
+		return err
+	}
 	return s.inTx(ctx, func(tx pgx.Tx) error {
 		return s.dropUsage(ctx, tx, []uuid.UUID{req.CapabilityID})
 	})
@@ -691,12 +683,12 @@ func (s *UsageStore) DeleteUsage(ctx context.Context, req limes.DeleteUsageReque
 // PurgeOrphans drops the counters of capabilities no longer on record, as
 // DeleteUsage does, a batch at a time.
 func (s *UsageStore) PurgeOrphans(ctx context.Context, req limes.PurgeOrphansRequest) (limes.PurgeOrphansResult, error) {
-	limit, err := housekeepingLimit(req.Limit)
-	if err != nil {
+	if err := req.Validate(); err != nil {
 		return limes.PurgeOrphansResult{}, err
 	}
+	limit := limes.HousekeepingLimit(req.Limit)
 	var purged int64
-	err = s.inTx(ctx, func(tx pgx.Tx) error {
+	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, sqlOrphans, limit)
 		if err != nil {
 			return err

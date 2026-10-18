@@ -237,6 +237,9 @@ ON CONFLICT (capability_id) DO NOTHING`
 // Revoke writes the capability's revocation entry, and with CascadeChildren
 // one for every descendant. The first entry of each stands.
 func (s *Store) Revoke(ctx context.Context, req limes.RevokeRequest) error {
+	if err := req.Validate(); err != nil {
+		return err
+	}
 	return s.inTx(ctx, func(tx pgx.Tx) error {
 		var tenant uuid.UUID
 		err := tx.QueryRow(ctx, sqlCapabilityTenant, req.CapabilityID).Scan(&tenant)
