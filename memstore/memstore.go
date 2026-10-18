@@ -1527,7 +1527,7 @@ func listed(args limes.ListTenantBudgetsRequest, row budgetRow) bool {
 		case classZero:
 			return true
 		case classBounded:
-			return atOrPast(row.spent, row.max, args.ThresholdPct)
+			return atOrPast(row.spent, row.max, args.ThresholdBasisPoints)
 		case classUnlimited:
 			return false
 		}
@@ -1535,15 +1535,13 @@ func listed(args limes.ListTenantBudgetsRequest, row budgetRow) bool {
 	return false // Validate refused any other filter
 }
 
-// atOrPast reports whether spent is at least pct percent of ceiling, exactly:
-// spent × 100 ≥ pct × ceiling in rationals, where a float quotient would put
-// 29 of 100 just under 29%. pct is read as the decimal it is written as —
-// 1.1 is eleven tenths, not the float64 a hair above it.
-func atOrPast(spent, ceiling limes.Nanos, pct float64) bool {
-	threshold := limes.ExactPercent(pct)
-	threshold.Mul(threshold, new(big.Rat).SetInt64(int64(ceiling)))
-	used := new(big.Rat).SetInt64(int64(spent))
-	used.Mul(used, new(big.Rat).SetInt64(percent))
+// atOrPast reports whether spent is at least basisPoints of ceiling, exactly:
+// spent × BasisPointsPerWhole ≥ basisPoints × ceiling in integers, where a
+// float quotient would put 29 of 100 just under 29%. The products pass
+// int64, hence big.Int.
+func atOrPast(spent, ceiling limes.Nanos, basisPoints int) bool {
+	used := new(big.Int).Mul(big.NewInt(int64(spent)), big.NewInt(limes.BasisPointsPerWhole))
+	threshold := new(big.Int).Mul(big.NewInt(int64(ceiling)), big.NewInt(int64(basisPoints)))
 	return used.Cmp(threshold) >= 0
 }
 

@@ -148,7 +148,7 @@ func TestListRequestsRefuseANegativeLimit(t *testing.T) {
 	if err := budgets.Validate(); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("ListTenantBudgetsRequest with Limit -1: Validate = %v, want ErrInvalidRequest", err)
 	}
-	if err := (ListTenantBudgetsRequest{Filter: TenantBudgetFilterAtOrPast, ThresholdPct: maxThresholdPct + 1}).Validate(); !errors.Is(err, ErrInvalidRequest) {
+	if err := (ListTenantBudgetsRequest{Filter: TenantBudgetFilterAtOrPast, ThresholdBasisPoints: BasisPointsPerWhole + 1}).Validate(); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("a threshold past 100%%: Validate = %v, want ErrInvalidRequest", err)
 	}
 }

@@ -14,6 +14,15 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.89.0
+
+- `ListTenantBudgetsRequest.ThresholdPct float64` →
+  `ThresholdBasisPoints int`, in hundredths of a percent, 0..the new
+  `BasisPointsPerWhole`: write `ThresholdBasisPoints: 2900` for
+  `ThresholdPct: 29`, `110` for `1.1`. `ExactPercent` is gone; a
+  `UsageStore` of your own compares `spent × BasisPointsPerWhole ≥ max ×
+  ThresholdBasisPoints` in integers wide enough for the product.
+
 ## v0.88.0
 
 - `VerifierConfig.AcceptBiscuit`, `MeterCopies` and `BiscuitRevocations` →

@@ -4,9 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
-	"math/big"
-	"strconv"
 	"time"
 	"unicode"
 
@@ -229,7 +226,8 @@ type TenantBudgets interface {
 	// own tenant data to them by TenantID. Filter picks the rows:
 	//   - TenantBudgetFilterUnspecified, TenantBudgetFilterAll: every one.
 	//   - TenantBudgetFilterAtOrPast: rows with a ceiling — a bound or 0 — where
-	//     spent / max * 100 >= ThresholdPct, exactly; a ceiling of 0 is
+	//     spent * BasisPointsPerWhole >= max * ThresholdBasisPoints, in
+	//     integers; a ceiling of 0 is
 	//     spent through at any threshold. At a threshold of 0, every row
 	//     with a ceiling.
 	//   - TenantBudgetFilterUnlimited: rows whose ceiling is Unlimited.
@@ -622,7 +620,7 @@ const (
 	// TenantBudgetFilterAll lists every tenant: no filter.
 	TenantBudgetFilterAll
 	// TenantBudgetFilterAtOrPast lists tenants with a ceiling spent to
-	// ListTenantBudgetsRequest.ThresholdPct or past it.
+	// ListTenantBudgetsRequest.ThresholdBasisPoints or past it.
 	TenantBudgetFilterAtOrPast
 	// TenantBudgetFilterUnlimited lists tenants with no ceiling.
 	TenantBudgetFilterUnlimited
@@ -657,30 +655,21 @@ func (f TenantBudgetFilter) Validate() error {
 type ListTenantBudgetsRequest struct {
 	// Filter picks the rows; the zero value lists every tenant.
 	Filter TenantBudgetFilter
-	// ThresholdPct is the utilization TenantBudgetFilterAtOrPast lists from,
-	// 0..100. Any other filter takes none.
-	ThresholdPct float64
+	// ThresholdBasisPoints is the utilization TenantBudgetFilterAtOrPast
+	// lists from, in basis points — hundredths of a percent, so 2900 is 29%
+	// and 110 is 1.1% — 0..BasisPointsPerWhole. An integer, so a threshold
+	// means one exact fraction and a store compares it without rounding.
+	// Any other filter takes none.
+	ThresholdBasisPoints int
 	// Limit is the page size; see PageLimit. Negative is refused.
 	Limit int
 	// Cursor is the one the previous page returned; empty for the first.
 	Cursor string
 }
 
-// ExactPercent is pct as the decimal it is written as — the shortest decimal
-// that reads back as the same float64 — so a threshold of 1.1 means eleven
-// tenths exactly, not the binary fraction a hair above it. A store compares
-// spent / max × 100 against it without rounding. It is nil for NaN or an
-// infinity, which ListTenantBudgetsRequest.Validate refuses.
-func ExactPercent(pct float64) *big.Rat {
-	if math.IsNaN(pct) || math.IsInf(pct, 0) {
-		return nil
-	}
-	r, _ := new(big.Rat).SetString(strconv.FormatFloat(pct, 'g', -1, 64))
-	return r
-}
-
-// maxThresholdPct is the highest utilization a threshold can name.
-const maxThresholdPct = wholePct
+// BasisPointsPerWhole is the basis points in a whole: a ceiling spent
+// through is at BasisPointsPerWhole, the highest threshold there is.
+const BasisPointsPerWhole = 10_000
 
 // Validate refuses a request no page can answer: a negative page size, an
 // unknown filter, a threshold outside 0..100, or a threshold beside a filter
@@ -692,9 +681,9 @@ func (r ListTenantBudgetsRequest) Validate() error {
 	switch {
 	case r.Limit < 0:
 		return invalidRequest("list tenant budgets: limit %d is negative", r.Limit)
-	case math.IsNaN(r.ThresholdPct) || r.ThresholdPct < 0 || r.ThresholdPct > maxThresholdPct:
-		return invalidRequest("list tenant budgets: threshold %v%% is outside 0..%d", r.ThresholdPct, maxThresholdPct)
-	case r.ThresholdPct != 0 && r.Filter != TenantBudgetFilterAtOrPast:
+	case r.ThresholdBasisPoints < 0 || r.ThresholdBasisPoints > BasisPointsPerWhole:
+		return invalidRequest("list tenant budgets: threshold of %d basis points is outside 0..%d", r.ThresholdBasisPoints, BasisPointsPerWhole)
+	case r.ThresholdBasisPoints != 0 && r.Filter != TenantBudgetFilterAtOrPast:
 		return invalidRequest("list tenant budgets: a threshold with filter %s, which takes none", r.Filter)
 	}
 	return nil

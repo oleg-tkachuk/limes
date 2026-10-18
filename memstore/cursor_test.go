@@ -75,23 +75,23 @@ func TestAtOrPastIsExact(t *testing.T) {
 	const unit = limes.NanosPerUnit
 	for _, tc := range []struct {
 		spent, ceiling limes.Nanos
-		pct            float64
+		basisPoints    int
 		want           bool
 	}{
-		{29 * unit, 100 * unit, 29, true},
-		{29*unit - 1, 100 * unit, 29, false},
-		{1, 3, 33.3, true},
-		{limes.MaxNanos, limes.MaxNanos, 100, true},
-		{limes.MaxNanos - 1, limes.MaxNanos, 100, false},
+		{29 * unit, 100 * unit, 2900, true},
+		{29*unit - 1, 100 * unit, 2900, false},
+		{1, 3, 3333, true},
+		{limes.MaxNanos, limes.MaxNanos, limes.BasisPointsPerWhole, true},
+		{limes.MaxNanos - 1, limes.MaxNanos, limes.BasisPointsPerWhole, false},
 	} {
-		if got := atOrPast(tc.spent, tc.ceiling, tc.pct); got != tc.want {
-			t.Errorf("atOrPast(%s, %s, %v) = %v, want %v", tc.spent, tc.ceiling, tc.pct, got, tc.want)
+		if got := atOrPast(tc.spent, tc.ceiling, tc.basisPoints); got != tc.want {
+			t.Errorf("atOrPast(%s, %s, %d) = %v, want %v", tc.spent, tc.ceiling, tc.basisPoints, got, tc.want)
 		}
 	}
 }
 
 // Utilizations compare exactly: two that a float64 reads as equal still
-// order by their true size, and a non-dyadic threshold is met at its value.
+// order by their true size, and a threshold is met at its value.
 func TestUtilizationIsExact(t *testing.T) {
 	const third = 333_333_333_333_333_333
 	a := budgetRow{class: classBounded, spent: third + 1, max: 3 * third}
@@ -102,7 +102,8 @@ func TestUtilizationIsExact(t *testing.T) {
 	if compareUtilization(a, b) <= 0 || compareUtilization(b, a) >= 0 {
 		t.Error("a utilization just past a third did not rank above a third")
 	}
-	if !atOrPast(11, 1000, 1.1) || atOrPast(10, 1000, 1.1) {
+	const oneAndATenthPercent = 110 // basis points
+	if !atOrPast(11, 1000, oneAndATenthPercent) || atOrPast(10, 1000, oneAndATenthPercent) {
 		t.Error("11 of 1000 must be at 1.1%, and 10 of 1000 under it")
 	}
 }
