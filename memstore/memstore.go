@@ -1279,7 +1279,7 @@ func (s *UsageStore[TX]) Release(_ context.Context, req limes.ReleaseRequest) er
 }
 
 // ReleaseExpired releases every hold past its expiry.
-func (s *UsageStore[TX]) ReleaseExpired(ctx context.Context, req limes.ReleaseExpiredRequest) (limes.ReleaseExpiredResult, error) {
+func (s *UsageStore[TX]) ReleaseExpired(_ context.Context, req limes.ReleaseExpiredRequest) (limes.ReleaseExpiredResult, error) {
 	limit, err := housekeepingLimit(req.Limit)
 	if err != nil {
 		return limes.ReleaseExpiredResult{}, err
@@ -1290,16 +1290,6 @@ func (s *UsageStore[TX]) ReleaseExpired(ctx context.Context, req limes.ReleaseEx
 	var due []hold
 	for _, h := range s.holds {
 		if !h.expires.After(now) {
-			due = append(due, h)
-			continue
-		}
-		// A hold of a revoked capability, or of one an ancestor's revocation
-		// stops, can be settled no more.
-		revoked, err := s.records.IsRevoked(ctx, h.capID)
-		if err != nil && !errors.Is(err, limes.ErrDelegationTooDeep) {
-			return limes.ReleaseExpiredResult{}, err
-		}
-		if revoked {
 			due = append(due, h)
 		}
 	}

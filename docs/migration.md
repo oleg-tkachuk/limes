@@ -14,6 +14,14 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.80.0
+
+- `UsageHousekeeping.ReleaseExpired` released the hold of a revoked
+  capability before it expired → it releases expired holds only, as before
+  v0.78.0: a revoked capability's hold can still be settled, since a cost
+  already incurred belongs in the ledger (`StoredMeterSubject`). The hold
+  still expires with its capability at the latest.
+
 ## v0.79.0
 
 - `inspect.VerifySignature` answered a `pub` that is no Ed25519 public key
