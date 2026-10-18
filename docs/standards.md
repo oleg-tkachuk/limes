@@ -124,11 +124,14 @@ answers alike, and `WriteErrorResponse` writes them:
 
 A verifier with DPoP configured also adds a `DPoP algs="…"` challenge to a
 `Bearer` one, as §7.1 allows. The body is `application/problem+json` with a
-type URI per kind of refusal. Descriptions are fixed per kind: an error's own
+type URI per refusal, ending in its `Reason`, which the body also carries as
+a `reason` extension member (§3.2); a refusal with no reason has its family's
+type. Descriptions are fixed per kind: an error's own
 text, which can name kids, issuers or stores, never reaches the client, and
 the values keep to the characters RFC 6750 §3 allows. *Held by*
 `TestErrorResponse`, `TestErrorResponseLeaksNothing`,
-`TestAuthParamKeepsTheQuotedStringWhole`, `TestWriteErrorResponse`.
+`TestAuthParamKeepsTheQuotedStringWhole`, `TestWriteErrorResponse`,
+`TestProblemNamesTheReason`.
 
 ## Keys
 

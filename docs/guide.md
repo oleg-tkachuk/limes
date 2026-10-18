@@ -1022,10 +1022,11 @@ reach past `MaxStale`, or lacking the token's kid while the endpoint fails, is
 503 — the server's trouble, not the token's; anything else, a store outage or
 a verifier with no `DPoP` given a key-bound token (`ErrProofUnsupported`)
 included, is 500. A refusal for want of a nonce carries a fresh one in `DPoP-Nonce`. The
-body is `application/problem+json` with a type per kind of refusal and fixed
-text — the error's own message, which can name kids or stores, stays in your
-log. `ReasonOf(err)` gives the refusal's stable `Reason` (`budget_exceeded`,
-`revoked`, …) for your own wire format, and `Reason.Permanent()` whether the
+body is `application/problem+json` with fixed text — the error's own
+message, which can name kids or stores, stays in your log — and the
+refusal's stable `Reason` (`budget_exceeded`, `revoked`, …) as its `reason`
+member and the end of its type URI. `ReasonOf(err)` gives the same `Reason`
+for your own wire format, and `Reason.Permanent()` whether the
 same request with the same capability can ever succeed, so a caller knows to
 stop rather than retry. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
 

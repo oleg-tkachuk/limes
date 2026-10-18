@@ -241,3 +241,28 @@ func TestDPoPChallengeAdvertisesAlgsOnlyWhenConfigured(t *testing.T) {
 		}
 	}
 }
+
+// A refusal with a Reason names it twice: as the problem's reason member and
+// as the end of its type. One with none keeps its family's type and no
+// reason.
+func TestProblemNamesTheReason(t *testing.T) {
+	v := &Verifier{}
+	for name, c := range sentinelMatrix {
+		p := v.ErrorResponse(context.Background(), c.err, AuthSchemeBearer).Problem
+		if p.Reason != c.reason {
+			t.Errorf("%s: Problem.Reason = %q, want %q", name, p.Reason, c.reason)
+		}
+		if c.reason != "" && p.Type != problemTypeBase+string(c.reason) {
+			t.Errorf("%s: Problem.Type = %q, want %q", name, p.Type, problemTypeBase+string(c.reason))
+		}
+		if c.reason == "" && strings.TrimPrefix(p.Type, problemTypeBase) == "" {
+			t.Errorf("%s: Problem.Type = %q, want a family's", name, p.Type)
+		}
+	}
+	rec := httptest.NewRecorder()
+	WriteErrorResponse(rec, v.ErrorResponse(context.Background(), ErrExpired, AuthSchemeBearer))
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body["reason"] != string(ReasonExpired) {
+		t.Errorf("body = %s, %v; want reason %q", rec.Body, err, ReasonExpired)
+	}
+}

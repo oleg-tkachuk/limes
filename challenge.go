@@ -49,7 +49,8 @@ const (
 
 // Problem is an RFC 9457 problem details object.
 type Problem struct {
-	// Type is a URI naming the kind of problem.
+	// Type is a URI naming the kind of problem: the refusal's Reason after
+	// a fixed base, or for a refusal with none the family it belongs to.
 	Type string `json:"type"`
 	// Title is a short, fixed summary of the kind.
 	Title string `json:"title"`
@@ -57,6 +58,10 @@ type Problem struct {
 	Status int `json:"status"`
 	// Detail explains this occurrence, in terms safe to show the client.
 	Detail string `json:"detail,omitempty"`
+	// Reason is the refusal's Reason, an extension member (RFC 9457 §3.2):
+	// the stable name a client branches on, which the Type URI ends with.
+	// Empty for a refusal with none.
+	Reason Reason `json:"reason,omitempty"`
 	_      noCompare
 }
 
@@ -80,7 +85,7 @@ type refusal struct {
 	code   string // RFC 6750 / RFC 9449 error code; "" for no challenge
 	dpop   bool   // the challenge is DPoP's
 	bare   bool   // challenge with no error code: the client sent nothing to fault
-	slug   string // the problem type, after problemTypeBase
+	slug   string // the problem type, after problemTypeBase, of a refusal with no Reason
 	title  string
 }
 
@@ -101,24 +106,24 @@ var (
 // its text.
 var internalError = refusal{status: http.StatusInternalServerError, slug: "internal", title: "The request could not be authorised"}
 
-// answerFor is the answer to err: that of the first rule it matches.
-func answerFor(err error) refusal {
-	if rule, ok := ruleFor(err); ok {
-		return rule.answer
-	}
-	return internalError
-}
-
 // ErrorResponse is how to answer a request refused with err, presented
 // under scheme. A refusal about the token is challenged under the scheme the
 // client used (Bearer when it named none); one about the proof, under DPoP.
 // A verifier with DPoP configured also advertises its algorithms in a DPoP
 // challenge, and hands out a fresh nonce with use_dpop_nonce.
 func (v *Verifier) ErrorResponse(ctx context.Context, err error, scheme AuthScheme) ErrorResponse {
-	r := answerFor(err)
+	// The first rule err matches answers it; none, the server's fault.
+	r, kind := internalError, internalError.slug
+	rule, ok := ruleFor(err)
+	if ok {
+		r, kind = rule.answer, rule.answer.slug
+	}
+	if rule.reason != "" {
+		kind = string(rule.reason)
+	}
 	resp := ErrorResponse{
 		Status:  r.status,
-		Problem: Problem{Type: problemTypeBase + r.slug, Title: r.title, Status: r.status},
+		Problem: Problem{Type: problemTypeBase + kind, Title: r.title, Status: r.status, Reason: rule.reason},
 	}
 	if r.code == "" && !r.bare {
 		return resp
