@@ -21,6 +21,13 @@ API, and this file stops growing.
   `ErrRevoked`, until `PurgeOrphans` finds none of its records left. A
   `TenantUsageEraser` of your own does the same: metertest checks it.
 
+## pgstore/v0.18.0
+
+- Migration `009_erased_tenants.sql` adds `limes.erased_tenants`; run
+  `Migrate` before deploying. An erase and the meter calls of its tenant
+  take a transaction-scoped advisory lock on the tenant, with the class key
+  `0x6c696d65`, which no lock of your own should use.
+
 ## v0.93.0
 
 - A Biscuit copy is counted, and its revocation kept, under its capability

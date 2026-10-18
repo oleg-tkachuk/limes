@@ -78,7 +78,8 @@ func TestEraseTenantTakesRecordsAndUsageTogether(t *testing.T) {
 }
 
 // An erase locks in the meter's order, so beside settles and charges of the
-// same tenant it finishes, and so do they: none fails on a deadlock.
+// same tenant it finishes, and so do they: none fails on a deadlock. A charge
+// that comes after the erase is refused, the tenant erased.
 func TestEraseTenantBesideTheMeter(t *testing.T) {
 	f := newTenantFixture(t)
 	ctx := WithTenant(t.Context(), f.mine)
@@ -102,7 +103,9 @@ func TestEraseTenantBesideTheMeter(t *testing.T) {
 		})
 		wg.Go(func() {
 			_, err := f.usage.Charge(ctx, limes.ChargeRequest{Subject: subject, Amount: 1}, nil)
-			errs <- err
+			if !errors.Is(err, limes.ErrTenantErased) {
+				errs <- err
+			}
 		})
 	}
 	wg.Go(func() {
@@ -115,5 +118,37 @@ func TestEraseTenantBesideTheMeter(t *testing.T) {
 		if err != nil {
 			t.Errorf("beside an erase: %v", err)
 		}
+	}
+}
+
+// An erased tenant stays erased while any of its records is left; once Purge
+// has removed the last, PurgeOrphans forgets the mark, as nothing of the
+// tenant can be metered then.
+func TestPurgeOrphansForgetsAnErasedTenantWithNoRecordLeft(t *testing.T) {
+	f := newTenantFixture(t)
+	ctx := WithTenant(t.Context(), f.mine)
+	all := WithAllTenants(t.Context())
+	if _, err := f.records.EraseTenant(ctx, limes.EraseTenantRequest{TenantID: f.mine}, nil); err != nil {
+		t.Fatal(err)
+	}
+	setBudget := func() error {
+		_, err := f.usage.SetTenantBudget(ctx, limes.SetTenantBudgetRequest{TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: testUnit}})
+		return err
+	}
+	if _, err := f.usage.PurgeOrphans(all, limes.PurgeOrphansRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := setBudget(); !errors.Is(err, limes.ErrTenantErased) {
+		t.Fatalf("SetTenantBudget with records of the tenant left: err = %v, want ErrTenantErased", err)
+	}
+	f.clock.Advance(rlsTTL + 2*limes.MinPurgeRetention)
+	if _, err := f.records.Purge(all, limes.PurgeRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.usage.PurgeOrphans(all, limes.PurgeOrphansRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := setBudget(); err != nil {
+		t.Fatalf("SetTenantBudget once no record of the tenant is left: %v", err)
 	}
 }

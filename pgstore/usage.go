@@ -328,6 +328,9 @@ func (s *UsageStore) SetTenantBudget(ctx context.Context, req limes.SetTenantBud
 	}
 	var out limes.TenantBudget
 	err := s.inTenantTx(ctx, req.TenantID, func(tx pgx.Tx) error {
+		if err := notErased(ctx, tx, req.TenantID); err != nil {
+			return err
+		}
 		// The aggregate is created, with no unit yet, before it is locked:
 		// locking a row that is not there locks nothing, and a first charge
 		// that created it meanwhile would be overwritten by the write below.
@@ -689,6 +692,9 @@ func (s *UsageStore) PurgeOrphans(ctx context.Context, req limes.PurgeOrphansReq
 	limit := limes.HousekeepingLimit(req.Limit)
 	var purged int64
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, sqlForgetErased); err != nil {
+			return err
+		}
 		rows, err := tx.Query(ctx, sqlOrphans, limit)
 		if err != nil {
 			return err

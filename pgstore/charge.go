@@ -23,6 +23,9 @@ func (s *UsageStore) Bump(ctx context.Context, req limes.BumpRequest) (limes.Bum
 	subject := req.Subject
 	var receipt limes.BumpReceipt
 	err := s.inTenantTx(ctx, subject.TenantID(), func(tx pgx.Tx) error {
+		if err := notErased(ctx, tx, subject.TenantID()); err != nil {
+			return err
+		}
 		ancestors, err := lineage(ctx, tx, subject.CapabilityID())
 		if err != nil {
 			return err
@@ -168,6 +171,9 @@ func (s *UsageStore) Charge(ctx context.Context, req limes.ChargeRequest, onChar
 		// A replay is answered before the lineage is read: it moves nothing,
 		// so it needs no record, and a capability purged since still gets its
 		// receipt, as a settled hold does.
+		if err := notErased(ctx, tx, req.Subject.TenantID()); err != nil {
+			return err
+		}
 		r, replayed, err := replayByRef(ctx, tx, req, unit)
 		if replayed || err != nil {
 			receipt = r
@@ -495,6 +501,9 @@ func (s *UsageStore) Reserve(ctx context.Context, req limes.ReserveRequest) (lim
 	}
 	var out limes.Reservation
 	err = s.inTenantTx(ctx, subject.TenantID(), func(tx pgx.Tx) error {
+		if err := notErased(ctx, tx, subject.TenantID()); err != nil {
+			return err
+		}
 		ancestors, err := lineage(ctx, tx, subject.CapabilityID())
 		if err != nil {
 			return err
