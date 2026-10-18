@@ -11,16 +11,19 @@ import (
 )
 
 // The settings the row-level security policies read (migrations/
-// 003_row_security.sql), each set local to one transaction.
+// 003_row_security.sql), each set local to one transaction. A Scope of the
+// consumer's (Config.Scope) that sets them is scoped as the package's own
+// is, and CheckSchemaScope reads them back.
 const (
-	// settingTenant holds the tenant a transaction is scoped to.
-	settingTenant = "limes.tenant_id"
-	// settingAllTenants is settingOn in a transaction scoped to every
-	// tenant, and settingRead in one that may read every tenant's rows and
-	// write none.
-	settingAllTenants = "limes.all_tenants"
-	settingOn         = "on"
-	settingRead       = "read"
+	// SettingTenant holds the tenant a transaction is scoped to, as a
+	// UUID's text.
+	SettingTenant = "limes.tenant_id"
+	// SettingAllTenants is SettingAllTenantsOn in a transaction scoped to
+	// every tenant, and SettingAllTenantsRead in one that may read every
+	// tenant's rows and write none.
+	SettingAllTenants     = "limes.all_tenants"
+	SettingAllTenantsOn   = "on"
+	SettingAllTenantsRead = "read"
 )
 
 // sqlSetLocal sets a setting for the rest of the transaction only, so a
@@ -81,7 +84,7 @@ func readOnly(ctx context.Context) bool {
 
 // sqlScopeReadOnly is whether the transaction is scoped to reading only, as
 // the schema's settings hold it: unset reads as not.
-const sqlScopeReadOnly = `SELECT coalesce(current_setting('` + settingAllTenants + `', true) = '` + settingRead + `', false)`
+const sqlScopeReadOnly = `SELECT coalesce(current_setting('` + SettingAllTenants + `', true) = '` + SettingAllTenantsRead + `', false)`
 
 // checkSchemaReadOnly refuses with limes.ErrScopeMismatch a transaction that
 // a Scope of the consumer's scoped to reading only, before the call writes:
@@ -110,14 +113,14 @@ func ScopeFromContext(ctx context.Context, tx pgx.Tx) error {
 	if s, ok := ctx.Value(scopeKey{}).(scope); ok {
 		switch {
 		case s.readOnly:
-			all = settingRead
+			all = SettingAllTenantsRead
 		case s.all:
-			all = settingOn
+			all = SettingAllTenantsOn
 		default:
 			tenant = s.tenant.String()
 		}
 	}
-	_, err := tx.Exec(ctx, sqlSetScope, settingTenant, tenant, settingAllTenants, all)
+	_, err := tx.Exec(ctx, sqlSetScope, SettingTenant, tenant, SettingAllTenants, all)
 	return err
 }
 
@@ -166,7 +169,7 @@ func scopeMismatch(tenant uuid.UUID) error {
 // rows: the role is not bound by row-level security on the schema's tables,
 // or the schema's settings scope it to every tenant, to read and write or to
 // read.
-const sqlScopeAdmitsEvery = `SELECT NOT row_security_active('` + schema + `.capabilities') OR coalesce(current_setting('` + settingAllTenants + `', true) IN ('` + settingOn + `', '` + settingRead + `'), false)`
+const sqlScopeAdmitsEvery = `SELECT NOT row_security_active('` + schema + `.capabilities') OR coalesce(current_setting('` + SettingAllTenants + `', true) IN ('` + SettingAllTenantsOn + `', '` + SettingAllTenantsRead + `'), false)`
 
 // errScopeNotEvery is a call across every tenant made under a scope that
 // admits fewer.

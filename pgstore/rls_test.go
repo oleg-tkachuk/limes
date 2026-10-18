@@ -273,7 +273,7 @@ func TestCheckScopeBesideAScopeOfTheConsumers(t *testing.T) {
 	f := newTenantFixture(t)
 	setTenant := func(tenant uuid.UUID) func(context.Context, pgx.Tx) error {
 		return func(ctx context.Context, tx pgx.Tx) error {
-			_, err := tx.Exec(ctx, sqlSetLocal, settingTenant, tenant.String())
+			_, err := tx.Exec(ctx, sqlSetLocal, SettingTenant, tenant.String())
 			return err
 		}
 	}
@@ -332,7 +332,7 @@ func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 	// A consumer's Scope that maps a marker of its own to the read-only
 	// setting: the store never sees WithAllTenantsReadOnly.
 	readEvery := func(ctx context.Context, tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, sqlSetLocal, settingAllTenants, settingRead)
+		_, err := tx.Exec(ctx, sqlSetLocal, SettingAllTenants, SettingAllTenantsRead)
 		return err
 	}
 	records, err := NewStore(Config{DB: app, Now: f.clock.Now, Scope: readEvery})
@@ -475,7 +475,7 @@ func TestReadOnlyPoliciesOfEveryTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := pgx.BeginFunc(t.Context(), app, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), sqlSetLocal, settingAllTenants, settingRead); err != nil {
+		if _, err := tx.Exec(t.Context(), sqlSetLocal, SettingAllTenants, SettingAllTenantsRead); err != nil {
 			return err
 		}
 		for _, table := range scopedTables {

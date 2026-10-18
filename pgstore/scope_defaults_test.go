@@ -13,7 +13,7 @@ import (
 
 // sqlWidenSession gives a session every tenant by default, as a role or
 // database setting (ALTER ROLE … SET limes.all_tenants = 'on') would.
-const sqlWidenSession = `SET ` + settingAllTenants + ` = '` + settingOn + `'`
+const sqlWidenSession = `SET ` + SettingAllTenants + ` = '` + SettingAllTenantsOn + `'`
 
 // A scope is the whole of what a call may see: WithTenant, and a call with
 // no scope at all, override whatever the session or the role set by default,

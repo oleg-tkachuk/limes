@@ -187,7 +187,7 @@ func consumerReadOnly(ctx context.Context) context.Context {
 // theirs as ScopeFromContext does.
 func consumerScope(ctx context.Context, tx pgx.Tx) error {
 	if ctx.Value(consumerReadOnlyKey{}) != nil {
-		_, err := tx.Exec(ctx, sqlSetLocal, settingAllTenants, settingRead)
+		_, err := tx.Exec(ctx, sqlSetLocal, SettingAllTenants, SettingAllTenantsRead)
 		return err
 	}
 	return ScopeFromContext(ctx, tx)
