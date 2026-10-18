@@ -62,9 +62,7 @@ func FuzzOpenBiscuit(f *testing.F) {
 		if err != nil {
 			return
 		}
-		for _, typ := range tokenTypes {
-			_, _, _ = attenuate(&grant{biscuitRoot: anyRoot}, typ)
-		}
+		_, _, _ = attenuate(&grant{biscuitRoot: anyRoot})
 	})
 }
 
