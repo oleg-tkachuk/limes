@@ -186,7 +186,7 @@ tasks:
   verify:scripts:
     desc: "Test the shell scripts the workflows and tasks run"
     cmds:
-      - for: [api-break-check, check-modules, check-range, ci-diff, ci-job-passed, ci-relevant, ci-run-check, gh-retry, go-floor-check, marker-check, new-release-tag, publish-release, queue-auto-merge, rebase-behind, release-catch-up, release-head-check, require-released-limes, tidy-replacing-modules, unpublished-tags, warm-go-proxy, without-workflow-commands]
+      - for: [api-break-check, check-modules, check-range, ci-diff, ci-job-passed, ci-relevant, ci-run-check, gh-retry, go-floor-check, marker-check, merge-green, new-release-tag, publish-release, rebase-behind, release-catch-up, release-head-check, require-released-limes, tidy-replacing-modules, unpublished-tags, warm-go-proxy, without-workflow-commands]
         cmd: bash .github/scripts/{{.ITEM}}.test.sh
 
   verify:release-rules:

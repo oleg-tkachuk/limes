@@ -2,9 +2,9 @@ name: Auto-merge
 
 # Two automations over every pull request into main:
 #
-#   - auto-merge: each pull request is queued to merge (a merge commit, as
-#     every merge into main has been) the moment its required checks and
-#     reviews pass;
+#   - merge: when ci.yaml passes for a pull request, it is merged (a merge
+#     commit, as every merge into main has been) at the very commit that run
+#     tested;
 #   - auto-rebase: on each push to main, every open pull request that has
 #     fallen behind is rebased onto the new head, so it is tested against
 #     what it would actually merge into.
@@ -17,34 +17,28 @@ name: Auto-merge
 # run, so ci.yaml would never dispatch the release. Without the secret both
 # jobs warn and do nothing.
 #
-# Same-repository pull requests only. A fork's branch belongs to its author:
-# rewriting it is not ours to do, and merging it stays a person's decision.
-# So does one that changes what CI runs — .github/, the tasks, the linter's
-# configuration, the pinned tools (.github/scripts/queue-auto-merge.sh): it
-# runs its own checks, so its green check is no evidence. The decision runs
-# under pull_request_target, from main's own copy of this workflow and of the
-# script, so a pull request cannot rewrite the rule that holds it; nothing of
-# the pull request is checked out or run, only its list of changed files read.
-# A draft is left alone until it is marked ready. Auto-merge is queued once,
-# when a pull request opens or becomes ready, not on every push: a push —
-# the rebase below among them — would otherwise queue again a pull request a
-# maintainer took off the queue to hold it. A push is still read, though: one
-# that makes the pull request change what CI runs takes it off the queue, as
-# the gate would have refused it had that been its first commit. Renovate's are left to
-# Renovate, which merges them itself only once a release is old enough
-# (renovate.json, minimumReleaseAge) and rebases its own branches: queueing
-# them here merged them while that check was still pending.
+# The merge is decided when the run that tested the pull request completes,
+# not armed ahead of it: workflow_run runs main's copy of this workflow and of
+# .github/scripts/merge-green.sh, which reads the pull request then and merges
+# it with --match-head-commit at the tested commit. A push since moves the
+# head, the merge is refused, and the new head's own run decides. So no
+# earlier verdict can merge a later push, and a pull request cannot rewrite
+# the rule that holds it; nothing of it is checked out or run, only its
+# metadata and the names of its files read. Left for a person
+# (.github/scripts/merge-policy.sh): a draft — mark one draft to hold it —, a
+# fork's, Renovate's (Renovate merges its own once a release is old enough,
+# renovate.json), one into another branch, one whose author cannot push here,
+# and one that changes what CI runs, whose green check is no evidence.
 #
 # Repository settings this relies on (Settings → General → Pull Requests):
-# "Allow auto-merge" and "Allow merge commits" on, and branch protection or a
-# ruleset on main requiring the "All checks passed" check — without a
-# required check, auto-merge would merge immediately.
+# "Allow merge commits" on, and branch protection or a ruleset on main
+# requiring the "All checks passed" check, so nothing else merges a pull
+# request ahead of it.
 
 on:
-  pull_request_target:
-    types: [opened, reopened, ready_for_review, synchronize]
-    # BASE_BRANCH in .github/scripts/merge-policy.sh.
-    branches: [main]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
   push:
     branches: [main]
 
@@ -52,40 +46,38 @@ on:
 permissions: {}
 
 concurrency:
-  group: auto-merge-${{ github.event.pull_request.number || github.ref }}
+  group: auto-merge-${{ github.event.workflow_run.head_sha || github.ref }}
   cancel-in-progress: false
 
 jobs:
-  enable:
-    name: Enable auto-merge
+  merge:
+    name: Merge a green pull request
     if: >-
-      github.event_name == 'pull_request_target' &&
-      !github.event.pull_request.draft &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.user.login != 'renovate[bot]'
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: read # the checkout below; the merge itself acts through AUTOMERGE_TOKEN
     steps:
-      # main's script, not the pull request's: pull_request_target checks out
-      # the base branch.
-      - name: Check out the queueing script
+      # main's script: workflow_run runs the default branch's workflow, and
+      # its checkout is the default branch's, never the pull request's.
+      - name: Check out the merge script
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           sparse-checkout: .github/scripts
 
-      - name: Queue the pull request to merge when it is green
+      - name: Merge the pull request at the commit its run tested
         env:
           GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
-          PR: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
-          ACTION: ${{ github.event.action }}
-          AUTHOR: ${{ github.event.pull_request.user.login }}
-          BASE: ${{ github.event.pull_request.base.ref }}
-        # .github/scripts/queue-auto-merge.sh
-        run: ./.github/scripts/queue-auto-merge.sh
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          PULL_REQUESTS: ${{ toJSON(github.event.workflow_run.pull_requests) }}
+        # .github/scripts/merge-green.sh
+        run: ./.github/scripts/merge-green.sh
 
   rebase:
     name: Rebase open pull requests onto main

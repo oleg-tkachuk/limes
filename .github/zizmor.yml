@@ -15,8 +15,8 @@ rules:
     ignore:
       # auto-merge.yaml decides whether a pull request may merge on its own,
       # so that decision must not be the pull request's to rewrite: it runs
-      # under pull_request_target, from main's copy. It checks out main's
-      # scripts only, never the pull request's head, runs no code of it, and
-      # reads nothing of it but the names of the files it changes; a fork's
-      # pull request is filtered out before any step.
+      # under workflow_run, from main's copy. It checks out main's scripts
+      # only, never the pull request's head, runs no code of it, and reads
+      # nothing of it but its metadata and the names of the files it changes;
+      # a fork's run is filtered out before any step.
       - auto-merge.yaml

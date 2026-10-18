@@ -245,7 +245,7 @@ jobs:
   # tests pass against the limes it requires, so its release waits for that
   # merge. It acts through AUTOMERGE_TOKEN, never GITHUB_TOKEN: a branch
   # pushed with GITHUB_TOKEN would get no CI, and its pull request would wait
-  # forever on its required check (auto-merge.yaml, which then queues it).
+  # forever on its required check (auto-merge.yaml, which then merges it).
   # Without the secret it warns and does nothing. See
   # .github/scripts/require-released-limes.sh.
   require-released-limes:
