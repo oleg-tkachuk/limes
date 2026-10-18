@@ -1083,6 +1083,7 @@ func (s *UsageStore[TX]) applyHoldLocked(h hold, sign limes.Nanos) {
 	}
 	b := s.tenantLocked(h.tenantID, h.unit)
 	b.ReservedAmount = max0(b.ReservedAmount + sign*h.amount)
+	b.UpdatedAt = s.nowFn()
 	s.budgets[h.tenantID] = b
 	for _, c := range h.copies {
 		cc := s.copies[string(c.RevocationID)]
