@@ -3,6 +3,7 @@ package pgstore
 import (
 	"cmp"
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -95,5 +96,29 @@ func meterEnv(t *testing.T, cfg Config, readOnly func(context.Context) context.C
 func TestNewUsageStoreRequiresADB(t *testing.T) {
 	if _, err := NewUsageStore(Config{}); err == nil {
 		t.Fatal("NewUsageStore without a DB: no error")
+	}
+}
+
+// A counter row of the same id under another tenant — which pgstore never
+// writes, ids being random or signed — is invisible to the call and left in
+// place by its ON CONFLICT DO NOTHING. The call is refused before any ceiling
+// is read as zero or onCharged runs, never a nil dereference.
+func TestMeterRefusesACounterRowOfAnotherTenant(t *testing.T) {
+	f := newTenantFixture(t)
+	ctx := WithTenant(t.Context(), f.mine)
+	if _, err := owner.Exec(t.Context(), `INSERT INTO `+schema+`.usage (capability_id, tenant_id) VALUES ($1, $2)`, f.child.ID, f.theirs); err != nil {
+		t.Fatal(err)
+	}
+	subject := meterSubject(f.child.ID, f.mine)
+	if _, err := f.usage.Bump(ctx, limes.BumpRequest{Subject: subject}); !errors.Is(err, errCounterHidden) {
+		t.Errorf("Bump over another tenant's row: err = %v, want errCounterHidden", err)
+	}
+	called := false
+	onCharged := func(context.Context, limes.Charged[pgx.Tx]) error { called = true; return nil }
+	if _, err := f.usage.Charge(ctx, limes.ChargeRequest{Subject: subject, Amount: 1}, onCharged); !errors.Is(err, errCounterHidden) {
+		t.Errorf("Charge over another tenant's row: err = %v, want errCounterHidden", err)
+	}
+	if called {
+		t.Error("onCharged ran for a charge refused over another tenant's row")
 	}
 }
