@@ -9,7 +9,7 @@ toolchain go1.27.2
 require (
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/google/uuid v1.6.0
-	github.com/oleg-tkachuk/limes v0.91.0
+	github.com/oleg-tkachuk/limes v0.92.0
 	github.com/redis/go-redis/v9 v9.23.0
 )
 
