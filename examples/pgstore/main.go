@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"crypto/ed25519"
+	"errors"
 	"fmt"
 	"time"
 
@@ -149,12 +150,16 @@ func main() {
 	const query = "limes capability tokens"
 	receipt, err := usage.Charge(inTenant, meter.ChargeRequest{
 		Subject: verified.MeterSubject(), Amount: limes.MustParseAmount("0.35"), Op: "search", Actor: "research-agent",
-	}, func(ctx context.Context, charged meter.Charged[pgx.Tx]) error {
+	}, func(ctx context.Context, charged meter.Charged) error {
 		// Inside the charge's transaction: this row commits with the charge,
 		// or neither does, and names the charge it records.
 		log.Info("inside the charge's transaction: recording the call in the service's own table",
 			"query", query, "charge", charged.Receipt.ChargeID)
-		return insertChargedCall(ctx, charged.Tx, charged.Receipt.ChargeID, query)
+		tx, ok := pgstore.TxFrom(ctx)
+		if !ok {
+			return errors.New("the charge handed onCharged no transaction")
+		}
+		return insertChargedCall(ctx, tx, charged.Receipt.ChargeID, query)
 	})
 	demo.Must(log, err, "charge")
 	log.Info("charged the search; the charge and the call's row committed together",
