@@ -337,9 +337,9 @@ func parseClaims(seg string, typ TokenType) (*grant, error) {
 		return nil, fmt.Errorf("limes: sub %q differs from limes_principal.subject %q", claims.Subject, claims.Principal.Subject)
 	}
 
-	id, err := uuid.Parse(claims.ID)
+	id, err := canonicalUUID("jti", claims.ID)
 	if err != nil {
-		return nil, fmt.Errorf("limes: parse jti: %w", err)
+		return nil, err
 	}
 	cap := &Capability{
 		ID:        id,
@@ -354,16 +354,36 @@ func parseClaims(seg string, typ TokenType) (*grant, error) {
 	}
 	cap.Subject = claims.Principal.principal()
 	if claims.Confirmation != nil {
+		// A cnf the signer writes always names a key; an empty one would read
+		// as an unbound capability.
+		if claims.Confirmation.JKT == "" {
+			return nil, errors.New("limes: cnf names no jkt")
+		}
 		cap.ConfirmationJKT = claims.Confirmation.JKT
 	}
 	if claims.ParentID != "" {
-		pid, err := uuid.Parse(claims.ParentID)
+		pid, err := canonicalUUID("limes_parent_id", claims.ParentID)
 		if err != nil {
-			return nil, fmt.Errorf("limes: parse parent_id: %w", err)
+			return nil, err
 		}
 		cap.ParentID = pid
 	}
 	return &grant{Capability: *cap, biscuitRoot: claims.BiscuitRoot}, nil
+}
+
+// canonicalUUID reads claim's value as the signer writes a UUID: lowercase,
+// hyphenated, and not the nil UUID. uuid.Parse also reads braces, a urn:uuid:
+// prefix, uppercase and no hyphens, which would give one capability several
+// signed spellings.
+func canonicalUUID(claim, s string) (uuid.UUID, error) {
+	id, err := uuid.Parse(s)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("limes: parse %s: %w", claim, err)
+	}
+	if id == uuid.Nil || id.String() != s {
+		return uuid.Nil, fmt.Errorf("limes: %s %q is not a canonical UUID", claim, s)
+	}
+	return id, nil
 }
 
 func init() { link.DecodeToken = decodeToken }

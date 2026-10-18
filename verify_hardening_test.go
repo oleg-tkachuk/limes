@@ -206,3 +206,34 @@ func TestVerifierConfigIsItsOwn(t *testing.T) {
 		t.Errorf("a token the config now binds k1 to: err = %v, want ErrInvalidToken", err)
 	}
 }
+
+// A capability's ids are read in the one spelling the signer writes, and a
+// cnf names a key: anything else is refused, not read another way.
+func TestVerifyRefusesNonCanonicalClaimIDs(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	v := verifierFor(t, pub, VerifierConfig{})
+	header := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV5}
+	id := uuid.New()
+	spellings := map[string]string{
+		"uppercase":   strings.ToUpper(id.String()),
+		"braces":      "{" + id.String() + "}",
+		"a urn":       "urn:uuid:" + id.String(),
+		"no hyphens":  strings.ReplaceAll(id.String(), "-", ""),
+		"the nil one": uuid.Nil.String(),
+	}
+	for name, spelling := range spellings {
+		for _, claim := range []string{"jti", "limes_parent_id"} {
+			claims := validClaims(uuid.New())
+			claims[claim] = spelling
+			_, err := v.Verify(context.Background(), VerifyRequest{Token: resign(t, priv, header, claims), Audience: "data"})
+			if !errors.Is(err, ErrInvalidToken) {
+				t.Errorf("%s as %s: err = %v, want ErrInvalidToken", claim, name, err)
+			}
+		}
+	}
+	claims := validClaims(uuid.New())
+	claims["cnf"] = map[string]any{"jkt": ""}
+	if _, err := v.Verify(context.Background(), VerifyRequest{Token: resign(t, priv, header, claims), Audience: "data"}); !errors.Is(err, ErrInvalidToken) {
+		t.Errorf("a cnf naming no jkt: err = %v, want ErrInvalidToken", err)
+	}
+}
