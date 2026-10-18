@@ -16,6 +16,11 @@ import (
 // A uri with a dot segment — "." or "..", percent-encoded or not, between
 // slashes that may be encoded or backslashes — matches nothing: what it names depends on how the consumer resolves it, so the
 // match it seems to make by its text proves nothing about where it leads.
+// That covers a consumer that percent-decodes at most twice
+// before it resolves the path, and no other notation: one that decodes more
+// often, or whose backend resolves Unicode look-alikes (U+FF0E), overlong
+// UTF-8 (%c0%ae), %u escapes or trailing dots and spaces as a dot segment,
+// canonicalises the resource itself before it asks.
 //
 // This is the single definition of a resource match. Delegation narrowing and
 // request-time enforcement both go through it, so the two can never disagree
