@@ -38,9 +38,6 @@ var (
 	completionCost     = limes.MustParseAmount("0.42")
 )
 
-// money is an amount or a budget in the examples' currency.
-func money(v fmt.Stringer) string { return v.String() + " " + unit }
-
 func main() {
 	ctx := context.Background()
 	log := demo.New("metering")
@@ -68,7 +65,7 @@ func main() {
 	})
 	demo.Must(log, err, "set the tenant's budget")
 	log.Info("set the tenant's budget: every capability in the tenant spends from it too",
-		"tenant", tenant, "ceiling", money(tenantBudget.Ceiling))
+		"tenant", tenant, "ceiling", tenantBudget.Ceiling)
 
 	issued, err := issuer.Issue(ctx, limes.IssueRequest{
 		IssuedBy: limes.Principal{Type: limes.PrincipalTypeUser, TenantID: tenant, Subject: "operator@example.com"},
@@ -84,7 +81,7 @@ func main() {
 	demo.Must(log, err, "issue")
 	c := issued.Capability
 	log.Info("issued a capability with its own ceilings",
-		"capability", c.ID, "requests", c.Caveats.Requests, "budget", money(c.Caveats.Budget))
+		"capability", c.ID, "requests", c.Caveats.Requests, "budget", c.Caveats.Budget)
 
 	// The meter charges the subject the verifier hands back for the token:
 	// the capability with its ceilings, and its tenant.
@@ -105,7 +102,7 @@ func main() {
 	}, nil)
 	demo.Must(log, err, "charge a search")
 	log.Info("charged a search directly: its cost is known up front",
-		"amount", money(searchCost), "charge", receipt.ChargeID, "spent so far", money(receipt.SpentAmount))
+		"amount", demo.Money(searchCost, unit), "charge", receipt.ChargeID, "spent so far", demo.Money(receipt.SpentAmount, unit))
 
 	// A call whose cost is known only afterwards holds an estimate first,
 	// then settles at what it cost.
@@ -114,7 +111,7 @@ func main() {
 	})
 	demo.Must(log, err, "reserve an estimate")
 	log.Info("held an estimate for a completion whose cost is known only afterwards",
-		"reservation", hold.ID, "held", money(hold.Amount), "released unless settled by", hold.ExpiresAt.UTC().Format(time.RFC3339))
+		"reservation", hold.ID, "held", demo.Money(hold.Amount, unit), "released unless settled by", hold.ExpiresAt.UTC().Format(time.RFC3339))
 	logUsage(ctx, log, usage, c.ID)
 
 	settled, err := usage.Settle(ctx, limes.SettleRequest{
@@ -122,7 +119,7 @@ func main() {
 	}, nil)
 	demo.Must(log, err, "settle at the actual cost")
 	log.Info("settled the hold at what the completion actually cost; the rest of the estimate is freed",
-		"actual cost", money(completionCost), "spent so far", money(settled.SpentAmount))
+		"actual cost", demo.Money(completionCost, unit), "spent so far", demo.Money(settled.SpentAmount, unit))
 	logUsage(ctx, log, usage, c.ID)
 
 	_, err = usage.Charge(ctx, limes.ChargeRequest{
@@ -134,7 +131,7 @@ func main() {
 	b, err := usage.GetTenantBudget(ctx, tenant)
 	demo.Must(log, err, "read the tenant's budget")
 	log.Info("the tenant's budget moved with every charge",
-		"spent", money(b.SpentAmount), "held", money(b.ReservedAmount), "ceiling", money(b.Ceiling))
+		"spent", demo.Money(b.SpentAmount, unit), "held", demo.Money(b.ReservedAmount, unit), "ceiling", b.Ceiling)
 	log.Info("done: every step behaved as described")
 }
 
@@ -146,5 +143,5 @@ func logUsage(ctx context.Context, log *slog.Logger, usage limes.MeterReader, id
 		return
 	}
 	log.Info("what the meter holds for the capability now",
-		"requests", u.RequestCount, "spent", money(u.SpentAmount), "held", money(u.ReservedAmount))
+		"requests", u.RequestCount, "spent", demo.Money(u.SpentAmount, unit), "held", demo.Money(u.ReservedAmount, unit))
 }
