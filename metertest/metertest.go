@@ -13,15 +13,17 @@
 // again: rejection that moves nothing — by a Biscuit copy's, the capability's,
 // an ancestor's or the tenant's ceiling, by a failed onCharged, under
 // concurrent charges — idempotency on ExternalRef and on a settled
-// reservation, also once the capability is gone, ChargeByRef,
+// reservation, also once the capability is gone (Env.DeleteCapability), ChargeByRef,
 // OverrunPolicyRecord past every ceiling, refunds, holds, their listing and their expiry, request
 // counts, copy counters and CopyUsage, units, counters that never pass
-// MaxNanos, a capability not on record, DeleteUsage and PurgeOrphans, the
+// MaxNanos, a capability not on record and PurgeOrphans (Env.DeleteCapability),
+// DeleteUsage, the
 // tenant aggregate, its version guard and its listing, and the validation of
 // the request; and, where the Env enables them, EraseTenantUsage,
 // limes.ErrScopeMismatch under another tenant's scope and for every write
 // under a read-only one, and a LedgerReader's
-// sums, their order, paging and UTC buckets. They need a real ledger, not a
+// sums, their order, paging, UTC buckets, period edges, late refunds and
+// overflow. They need a real ledger, not a
 // fake.
 //
 // Several checks call the store from many goroutines at once. Give the Env a
@@ -78,11 +80,17 @@ type Env[TX any] struct {
 	// DefaultCheckTimeout.
 	CheckTimeout time.Duration
 	// Advance moves the store's clock forward by d. Optional: without it,
-	// the checks of reservation expiry are skipped.
+	// the checks that need time to pass are skipped or cut short — a hold's
+	// expiry and ReleaseExpired, its batches, a hold dating the tenant
+	// budget, the accounting period's start, and the ledger's day and week
+	// buckets.
 	Advance func(d time.Duration)
 	// DeleteCapability removes a capability's record, as Store.Purge does
-	// once it has expired. Optional: without it, the check of PurgeOrphans
-	// is skipped.
+	// once it has expired. Optional: without it, the checks of what follows
+	// a record's removal are skipped or cut short — PurgeOrphans, a replay
+	// once the capability is gone, a settle under a removed ancestor, a
+	// chain's depth once its top is removed, a capability not on record,
+	// and a copy's counters going with their capability.
 	//
 	// Some checks remove an ancestor whose children stay on record, which
 	// Purge never does: a store whose records refer to their parent (a
@@ -106,7 +114,8 @@ type Env[TX any] struct {
 	Ledger limes.LedgerReader
 	// Now reads the store's clock, which stands still while a check runs
 	// but for Advance. Optional: without it, the checks of the ledger's
-	// time buckets are skipped.
+	// time buckets, of a hold ending with its capability and of a hold
+	// dating the tenant budget are skipped.
 	Now func() time.Time
 	// ScopesTenants reports that the store keeps each tenant's rows apart
 	// by the call's context, TenantCtx giving each tenant's: a call whose
@@ -386,6 +395,10 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"SumChargesCutsBucketsAtUTCBoundaries", checkSumChargeBuckets[TX]},
 		{"SumChargesOrdersByAmountNotDigits", checkSumChargesOrderByAmount[TX]},
 		{"SumChargesCutsWeeksAtMonday", checkSumChargeWeeks[TX]},
+		{"SumChargesBoundsThePeriodFromIncludedToNot", checkSumChargesPeriodEdges[TX]},
+		{"SumChargesCountsARefundInItsChargesClosedBucket", checkSumChargesLateRefund[TX]},
+		{"ASumPastMaxNanosIsAnOverflow", checkSumChargesOverflow[TX]},
+		{"ATenantWithNoRowHasNoBudget", checkTenantBudgetNotFound[TX]},
 		{"ResetSpendAloneRollsThePeriodStart", checkPeriodStart[TX]},
 		{"TheZeroSubjectIsRefused", checkZeroSubject[TX]},
 		{"AnAncestorRequestCeilingBoundsBump", checkAncestorRequests[TX]},
@@ -1669,6 +1682,12 @@ func checkCopyOverrun[TX any](t *testing.T, f fixture[TX]) {
 	copies := []limes.CopyCeiling{{RevocationID: copyID, Budget: &limes.BudgetCeiling{Max: one, UnitCode: unit}}}
 	if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{copies: copies}), Amount: 2 * one}, nil); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Fatalf("rejecting charge past the copy's budget: err = %v, want ErrBudgetExceeded", err)
+	}
+	// The copy is checked first, but its refusal must not leave the
+	// capability's chain charged.
+	if f.spent(t, f.child) != 0 || f.spent(t, f.root) != 0 || f.tenantSpent(t) != 0 {
+		t.Fatalf("a charge refused at the copy's budget moved the chain: child %v, root %v, tenant %v",
+			f.spent(t, f.child), f.spent(t, f.root), f.tenantSpent(t))
 	}
 	r, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{copies: copies}), Amount: 2 * one, Overrun: limes.OverrunPolicyRecord}, nil)
 	if err != nil || !r.Overrun {
@@ -3612,6 +3631,116 @@ func checkSumChargeWeeks[TX any](t *testing.T, f fixture[TX]) {
 }
 
 // sameSums compares sums, their bucket starts as instants.
+// The period is [From, To): a charge taken at From is in it, and one taken
+// at To is not.
+func checkSumChargesPeriodEdges[TX any](t *testing.T, f fixture[TX]) {
+	if f.Ledger == nil || f.Now == nil || f.Advance == nil {
+		t.Skip("Env.Ledger, Now or Advance not set")
+	}
+	// A whole second, which every store keeps exactly.
+	now := f.Now()
+	f.Advance(now.Truncate(time.Second).Add(time.Second).Sub(now))
+	at := f.Now()
+	if _, err := f.charge(limes.ChargeRequest{Amount: 2 * one}, nil); err != nil {
+		t.Fatalf("charge: %v", err)
+	}
+	for name, tc := range map[string]struct {
+		from, to time.Time
+		want     []limes.ChargeSum
+	}{
+		"From at the charge": {at, at.Add(time.Microsecond), []limes.ChargeSum{{UnitCode: unit, Charged: 2 * one, Charges: 1}}},
+		"To at the charge":   {at.Add(-time.Second), at, nil},
+	} {
+		page, err := f.Ledger.SumCharges(f.Ctx, limes.SumChargesRequest{TenantID: f.Tenant, From: tc.from, To: tc.to})
+		if err != nil || !sameSums(page.Items, tc.want) {
+			t.Errorf("%s: SumCharges = %+v, %v; want %+v", name, page.Items, err, tc.want)
+		}
+	}
+}
+
+// A refund made once its charge's bucket has closed still counts in that
+// bucket, and opens none of its own in the bucket it was made in: a closed
+// period's sums still move.
+func checkSumChargesLateRefund[TX any](t *testing.T, f fixture[TX]) {
+	if f.Ledger == nil || f.Now == nil || f.Advance == nil {
+		t.Skip("Env.Ledger, Now or Advance not set")
+	}
+	from := f.Now()
+	y, m, d := from.UTC().Date()
+	midnight := time.Date(y, m, d+1, 0, 0, 0, 0, time.UTC)
+	r, err := f.charge(limes.ChargeRequest{Amount: 3 * one}, nil)
+	if err != nil {
+		t.Fatalf("charge: %v", err)
+	}
+	f.Advance(midnight.Sub(from))
+	if _, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: r.ChargeID, Amount: one}); err != nil {
+		t.Fatalf("refund the next day: %v", err)
+	}
+	page, err := f.Ledger.SumCharges(f.Ctx, limes.SumChargesRequest{
+		TenantID: f.Tenant, From: from, To: midnight.Add(time.Second), Bucket: limes.ChargeBucketDay,
+	})
+	want := []limes.ChargeSum{{BucketStart: midnight.AddDate(0, 0, -1), UnitCode: unit, Charged: 3 * one, Refunded: one, Charges: 1}}
+	if err != nil || !sameSums(page.Items, want) {
+		t.Errorf("SumCharges by day = %+v, %v; want %+v", page.Items, err, want)
+	}
+}
+
+// A sum past MaxNanos is ErrCounterOverflow, never a wrapped or clipped
+// total: two charges of MaxNanos, the tenant's spend reset between them, sum
+// to twice what a counter holds, while each capability's group holds one.
+func checkSumChargesOverflow[TX any](t *testing.T, f fixture[TX]) {
+	if f.Ledger == nil {
+		t.Skip("Env.Ledger not set")
+	}
+	const charges = 2
+	for range charges {
+		b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
+		if err != nil {
+			t.Fatalf("tenant budget: %v", err)
+		}
+		if _, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{
+			TenantID: f.Tenant, Ceiling: unlimitedBudget, ResetSpend: true, ExpectedVersion: b.ResourceVersion,
+		}); err != nil {
+			t.Fatalf("tenant budget: %v", err)
+		}
+		capID, err := f.NewCapability(CapabilitySpec{Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget})
+		if err != nil {
+			t.Fatalf("capability: %v", err)
+		}
+		if _, err := f.charge(limes.ChargeRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: f.Tenant}), Amount: limes.MaxNanos}, nil); err != nil {
+			t.Fatalf("charge of MaxNanos: %v", err)
+		}
+	}
+	from, to := f.sumPeriod()
+	req := limes.SumChargesRequest{TenantID: f.Tenant, From: from, To: to}
+	if page, err := f.Ledger.SumCharges(f.Ctx, req); !errors.Is(err, limes.ErrCounterOverflow) {
+		t.Errorf("SumCharges of the whole period = %+v, %v; want ErrCounterOverflow", page.Items, err)
+	}
+	req.ByCapability = true
+	page, err := f.Ledger.SumCharges(f.Ctx, req)
+	if err != nil || len(page.Items) != charges {
+		t.Fatalf("SumCharges by capability = %+v, %v; want %d sums", page.Items, err, charges)
+	}
+	for _, s := range page.Items {
+		if s.Charged != limes.MaxNanos {
+			t.Errorf("a capability's sum = %+v, want %v charged", s, limes.MaxNanos)
+		}
+	}
+}
+
+// GetTenantBudget of a tenant with no row — no ceiling set, nothing charged
+// or held — is ErrTenantBudgetNotFound, which matches ErrNotFound.
+func checkTenantBudgetNotFound[TX any](t *testing.T, f fixture[TX]) {
+	other, err := f.newTenant()
+	if err != nil {
+		t.Fatalf("NewTenant: %v", err)
+	}
+	b, err := f.Usage.GetTenantBudget(f.tenantCtx(other), other)
+	if !errors.Is(err, limes.ErrTenantBudgetNotFound) || !errors.Is(err, limes.ErrNotFound) {
+		t.Errorf("GetTenantBudget of a tenant with no row = %+v, %v; want ErrTenantBudgetNotFound", b, err)
+	}
+}
+
 func sameSums(got, want []limes.ChargeSum) bool {
 	return slices.EqualFunc(got, want, func(a, b limes.ChargeSum) bool {
 		a.BucketStart, b.BucketStart = a.BucketStart.UTC(), b.BucketStart.UTC()
