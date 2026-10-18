@@ -34,7 +34,7 @@ func biscuitFixture(t *testing.T) (*Issuer, *Verifier, *memStore, Capability, st
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData, audienceMCP},
 		Caveats: Caveats{
-			Ops:              []Op{OpGet, OpList, OpPut},
+			Ops:              []Op{OpGet, OpList, OpPut, OpShare},
 			ResourcePrefixes: []string{"corpus/"},
 			Requests:         RequestCeiling{Unlimited: true}, Budget: BudgetCeiling{Unlimited: true, UnitCode: "USD"},
 		},
@@ -59,7 +59,7 @@ func TestBiscuitVerifiesAsItsCapability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
-	if got.Capability().ID != cap.ID || len(got.Capability().Caveats.Ops) != 3 {
+	if got.Capability().ID != cap.ID || len(got.Capability().Caveats.Ops) != len(cap.Caveats.Ops) {
 		t.Fatalf("got %+v", got)
 	}
 }
@@ -107,7 +107,7 @@ func TestBiscuitAttenuationNarrowsOffline(t *testing.T) {
 	if got, err := v.Verify(context.Background(), VerifyRequest{Token: again, Audience: audienceData}); err != nil || len(got.Capability().Caveats.ResourceURIs) != 1 {
 		t.Fatalf("two blocks: %+v, %v", got, err)
 	}
-	if got, err := v.Verify(context.Background(), VerifyRequest{Token: token, Audience: audienceMCP}); err != nil || len(got.Capability().Caveats.Ops) != 3 {
+	if got, err := v.Verify(context.Background(), VerifyRequest{Token: token, Audience: audienceMCP}); err != nil || len(got.Capability().Caveats.Ops) != len(cap.Caveats.Ops) {
 		t.Fatalf("original after attenuation: %v", err)
 	}
 }
@@ -375,5 +375,32 @@ func TestBiscuitTakesOnlyAVerifiedCapabilityOfItsOwn(t *testing.T) {
 	}
 	if _, err := issuer.biscuit(ctx, vc); !errors.Is(err, ErrRevoked) {
 		t.Errorf("a revoked capability: err = %v, want ErrRevoked", err)
+	}
+}
+
+// A Biscuit form is handed on offline, so it is a share: a capability
+// granted without OpShare gets none, as it gets no Delegate child.
+func TestBiscuitRequiresOpShare(t *testing.T) {
+	issuer, _, _, _ := buildIssuerVerifier(t)
+	ctx := context.Background()
+	for name, tc := range map[string]struct {
+		ops  []Op
+		want error
+	}{
+		"without share": {[]Op{OpGet}, ErrOpNotAllowed},
+		"with share":    {[]Op{OpGet, OpShare}, nil},
+	} {
+		cap, _, err := issuer.issue(ctx, IssueRequest{
+			IssuedBy: Principal{Subject: "op"},
+			Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
+			Audience: []string{audienceData}, Caveats: Caveats{Ops: tc.ops}, TTL: time.Hour,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = issuer.Biscuit(ctx, BiscuitRequest{Capability: asVerified(cap)})
+		if !errors.Is(err, tc.want) {
+			t.Errorf("%s: err = %v, want %v", name, err, tc.want)
+		}
 	}
 }

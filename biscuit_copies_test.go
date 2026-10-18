@@ -29,7 +29,7 @@ func limitedBiscuit(t *testing.T) (*Verifier, Capability, string) {
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData},
 		Caveats: Caveats{
-			Ops: []Op{OpGet}, Requests: RequestCeiling{Max: copyTestCapRequests},
+			Ops: []Op{OpGet, OpShare}, Requests: RequestCeiling{Max: copyTestCapRequests},
 			Budget: BudgetCeiling{Max: copyTestCapBudget, UnitCode: "USD"},
 		},
 		TTL: time.Hour,

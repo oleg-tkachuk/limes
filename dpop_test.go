@@ -150,7 +150,7 @@ func TestARevokedCopySpendsNoReplayRoom(t *testing.T) {
 	cap, _, err := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, TTL: time.Hour,
-		Caveats: Caveats{Ops: []Op{OpGet}, Requests: RequestCeiling{Unlimited: true}, Budget: BudgetCeiling{Unlimited: true, UnitCode: "USD"}},
+		Caveats: Caveats{Ops: []Op{OpGet, OpShare}, Requests: RequestCeiling{Unlimited: true}, Budget: BudgetCeiling{Unlimited: true, UnitCode: "USD"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -236,7 +236,7 @@ func TestAnUnmeteredCopySpendsNoReplayRoom(t *testing.T) {
 	cap, _, err := issuer.issue(ctx, IssueRequest{
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, TTL: time.Hour,
-		Caveats: Caveats{Ops: []Op{OpGet}, Requests: RequestCeiling{Unlimited: true}, Budget: BudgetCeiling{Unlimited: true, UnitCode: "USD"}},
+		Caveats: Caveats{Ops: []Op{OpGet, OpShare}, Requests: RequestCeiling{Unlimited: true}, Budget: BudgetCeiling{Unlimited: true, UnitCode: "USD"}},
 	})
 	if err != nil {
 		t.Fatal(err)
