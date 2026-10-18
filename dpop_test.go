@@ -183,6 +183,51 @@ func TestARevokedCopySpendsNoReplayRoom(t *testing.T) {
 	}
 }
 
+// A copy this verifier refuses for limits it cannot meter spends none of the
+// replay room either: a proof is recorded only for a request Verify accepts,
+// so a live sibling bound to another key still verifies.
+func TestAnUnmeteredCopySpendsNoReplayRoom(t *testing.T) {
+	// limitedRequests is the copy's own request ceiling; any, as the
+	// verifier refuses the copy before it would count.
+	const limitedRequests = 5
+	ctx := context.Background()
+	issuer, _, store, pub := buildIssuerVerifier(t)
+	cap, _, err := issuer.issue(ctx, IssueRequest{
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
+		Audience: []string{audienceData}, TTL: time.Hour,
+		Caveats: Caveats{Ops: []Op{OpGet}, Requests: RequestCeiling{Unlimited: true}, Budget: BudgetCeiling{Unlimited: true, UnitCode: "USD"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := issuer.biscuit(ctx, asVerified(cap))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := replayVerifier(t, store, pub, 10*replayShare)
+	keys := dpopKeys(t)
+	liveKey, limitedKey := keys["Ed25519"], keys["P-256"]
+	liveJKT, _ := dpop.Thumbprint(liveKey.Public())
+	limitedJKT, _ := dpop.Thumbprint(limitedKey.Public())
+	live, err := Attenuate(root, Attenuation{ConfirmationJKT: liveJKT})
+	if err != nil {
+		t.Fatal(err)
+	}
+	limited, err := Attenuate(root, Attenuation{ConfirmationJKT: limitedJKT, Requests: &RequestCeiling{Max: limitedRequests}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := range replayShare {
+		if _, err := v.Verify(ctx, withProof(ctx, t, limitedKey, limited, audienceData, time.Now())); !errors.Is(err, ErrCopyCountersNotMetered) {
+			t.Fatalf("limited copy, proof %d: err = %v, want ErrCopyCountersNotMetered", i+1, err)
+		}
+	}
+	if _, err := v.Verify(ctx, withProof(ctx, t, liveKey, live, audienceData, time.Now())); err != nil {
+		t.Fatalf("live sibling after the limited copy's proofs: %v", err)
+	}
+}
+
 // Revoked capabilities of one tenant do not fill the replay cache's overall
 // bound and lock out another tenant's live capability.
 func TestRevokedCapabilitiesSpendNoReplayRoom(t *testing.T) {

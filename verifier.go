@@ -251,8 +251,8 @@ func NewVerifier(cfg VerifierConfig) (*Verifier, error) {
 // verified. The checks that need no I/O come before the revocation lookup —
 // the proof of possession among them, so a holder of a key-bound token
 // without its key learns nothing of the token's revocation and causes no
-// lookup — and the proof's id is recorded in the replay cache after it, so a
-// revoked token never records one.
+// lookup — and the proof's id is recorded in the replay cache last, so
+// neither a revoked token nor a copy this verifier cannot meter records one.
 func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapability, error) {
 	token, audience := req.Token, req.Audience
 	if token == "" {
@@ -346,19 +346,20 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapab
 		}
 	}
 
-	// 10) The proof's id, recorded in the replay cache. After revocation:
-	// the cache's room is shared by every copy of the capability, and a
-	// revoked token must not spend it.
+	// 10) A copy's own limits need a Meter that counts copies. After every
+	// check of the token, so a token refused for what it is gets that
+	// refusal, not this one, which is about the verifier.
+	if len(cap.Copies) > 0 && !v.cfg.MeterCopies {
+		return VerifiedCapability{}, ErrCopyCountersNotMetered
+	}
+	// 11) The proof's id, recorded in the replay cache, last: the cache's
+	// room is shared by every copy of the capability, so only a request this
+	// verifier accepts spends it — not a revoked token, nor a copy it cannot
+	// meter.
 	if cap.ConfirmationJKT != "" {
 		if err := v.cfg.DPoP.Record(ctx, proof); err != nil {
 			return VerifiedCapability{}, proofError(err)
 		}
-	}
-	// 11) A copy's own limits need a Meter that counts copies. Last, so a
-	// token refused for what it is gets that refusal, not this one, which
-	// is about the verifier.
-	if len(cap.Copies) > 0 && !v.cfg.MeterCopies {
-		return VerifiedCapability{}, ErrCopyCountersNotMetered
 	}
 
 	return VerifiedCapability{c: *cap, fromBiscuit: biscuitIDs != nil}, nil
