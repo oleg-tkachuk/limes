@@ -2,11 +2,64 @@ package pgstore
 
 import (
 	"context"
+	"fmt"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/oleg-tkachuk/limes"
 )
+
+// An erase of a tenant's usage and a call that meters the tenant are ordered
+// by an advisory lock on the tenant, taken first in each transaction: the
+// erase holds it alone, each meter call shares it. A call that comes after
+// the erase waits for it, then finds the tenant marked erased; an erase that
+// comes after a call waits for the call, then removes what it wrote.
+const (
+	// eraseLockClass is the first key of those advisory locks, which sets
+	// them apart from any a consumer takes on the same database: "lime".
+	eraseLockClass int32 = 0x6c696d65
+
+	sqlLockTenantForErase = `SELECT pg_advisory_xact_lock($1, hashtext($2::text))`
+	sqlLockTenantForMeter = `SELECT pg_advisory_xact_lock_shared($1, hashtext($2::text))`
+
+	sqlIsErased   = `SELECT EXISTS (SELECT 1 FROM limes.erased_tenants WHERE tenant_id = $1)`
+	sqlMarkErased = `
+INSERT INTO limes.erased_tenants (tenant_id, erased_at) VALUES ($1, $2)
+ON CONFLICT (tenant_id) DO NOTHING`
+	// sqlForgetErased drops the mark of each erased tenant none of whose
+	// records is left: no capability of it can be metered any more.
+	sqlForgetErased = `
+DELETE FROM limes.erased_tenants e
+WHERE NOT EXISTS (SELECT 1 FROM limes.capabilities c WHERE c.tenant_id = e.tenant_id)`
+)
+
+// markErased takes the tenant's erase lock and marks it erased, first in an
+// erase's transaction.
+func markErased(ctx context.Context, tx pgx.Tx, tenant uuid.UUID, now time.Time) error {
+	if _, err := tx.Exec(ctx, sqlLockTenantForErase, eraseLockClass, tenant); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, sqlMarkErased, tenant, now)
+	return err
+}
+
+// notErased shares the tenant's erase lock and refuses a tenant marked
+// erased, first in a meter call's transaction.
+func notErased(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error {
+	if _, err := tx.Exec(ctx, sqlLockTenantForMeter, eraseLockClass, tenant); err != nil {
+		return err
+	}
+	var erased bool
+	if err := tx.QueryRow(ctx, sqlIsErased, tenant).Scan(&erased); err != nil {
+		return err
+	}
+	if erased {
+		return fmt.Errorf("%w: %s", limes.ErrTenantErased, tenant)
+	}
+	return nil
+}
 
 // The statements of an erase, in the order the meter locks: a tenant's
 // holds, its records in id order, its aggregate, its counters in id order,
@@ -87,6 +140,9 @@ func (s *Store) EraseTenant(ctx context.Context, req limes.EraseTenantRequest, o
 	}
 	var out limes.EraseTenantResult
 	err := s.inTenantTx(ctx, req.TenantID, func(tx pgx.Tx) error {
+		if err := markErased(ctx, tx, req.TenantID, s.clock()); err != nil {
+			return err
+		}
 		// The holds are locked first, as a Settle locks its hold before
 		// the records.
 		if err := lockAll(ctx, tx, sqlLockTenantHolds, req); err != nil {
@@ -127,14 +183,17 @@ func (s *Store) eraseRecords(ctx context.Context, tx pgx.Tx, req limes.EraseTena
 	return out, err
 }
 
-// EraseTenantUsage implements limes.TenantUsageEraser: it removes the
-// tenant's holds, aggregate, counters, copies' counters and charges in one
-// transaction scoped to the tenant (Config.CheckScope).
+// EraseTenantUsage implements limes.TenantUsageEraser: it marks the tenant
+// erased and removes its holds, aggregate, counters, copies' counters and
+// charges in one transaction scoped to the tenant (Config.CheckScope).
 func (s *UsageStore) EraseTenantUsage(ctx context.Context, req limes.EraseTenantUsageRequest) error {
 	if err := req.Validate(); err != nil {
 		return err
 	}
 	return s.inTenantTx(ctx, req.TenantID, func(tx pgx.Tx) error {
+		if err := markErased(ctx, tx, req.TenantID, s.clock()); err != nil {
+			return err
+		}
 		return eraseUsage(ctx, tx, req)
 	})
 }

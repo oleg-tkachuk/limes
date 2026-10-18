@@ -14,6 +14,20 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.94.0
+
+- `EraseTenantUsage` marks the tenant erased: `Bump`, `Charge`, `Reserve`
+  and `SetTenantBudget` for it return `ErrTenantErased`, which matches
+  `ErrRevoked`, until `PurgeOrphans` finds none of its records left. A
+  `TenantUsageEraser` of your own does the same: metertest checks it.
+
+## pgstore/v0.18.0
+
+- Migration `009_erased_tenants.sql` adds `limes.erased_tenants`; run
+  `Migrate` before deploying. An erase and the meter calls of its tenant
+  take a transaction-scoped advisory lock on the tenant, with the class key
+  `0x6c696d65`, which no lock of your own should use.
+
 ## v0.93.0
 
 - A Biscuit copy is counted, and its revocation kept, under its capability

@@ -925,7 +925,12 @@ revokes every capability of the tenant and removes only the records `Purge`
 would remove: an id not on record is not revoked, so erasing a record whose
 token may still verify would let it through again. `Purge` takes the rest as
 it expires. `EraseTenantUsage` drops the tenant's counters, holds, charges
-and aggregate — its billing history, which does not come back. In
+and aggregate — its billing history, which does not come back — and marks
+the tenant erased: a request verified before the erase, or a late cost of a
+record `Purge` has not taken yet, is refused `ErrTenantErased` (a kind of
+`ErrRevoked`) by `Bump`, `Charge`, `Reserve` and `SetTenantBudget` rather
+than counted again. `PurgeOrphans` forgets the mark once none of the
+tenant's records is left. In
 `pgstore`, `Store.EraseTenant` does both in one transaction and runs a
 callback of yours in it, so your own rows of the tenant go with them or not
 at all; it is handed a `pgstore.Erased`, the transaction as `Tx` and the
