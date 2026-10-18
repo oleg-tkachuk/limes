@@ -14,7 +14,15 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
-## v0.97.0
+## v0.99.0
+
+- `Store.Insert` refuses a child whose budget names another unit than its
+  parent's, as `ErrUnitCodeMismatch`: metering a child spends from every
+  ancestor, so a lineage counts in one unit. `Delegate` already kept it so;
+  a record written by `Insert` directly must too. A `Store` of your own
+  refuses it as well: storetest checks it.
+
+## v0.98.0
 
 - A `UsageStore` counts at most a quota of Biscuit copies per capability —
   `DefaultMaxCopiesPerCapability` unless configured — and `Bump`, `Charge`
@@ -24,18 +32,18 @@ API, and this file stops growing.
   enforces a quota too, and passes it to metertest as
   `Env.MaxCopiesPerCapability`.
 
-## v0.96.0
-
-- `Issuer.Biscuit` refuses a capability whose caveats do not allow
-  `OpShare`, as `ErrOpNotAllowed`, as `Delegate` does: a Biscuit form is
-  handed on offline. Grant `OpShare` to a capability you mint a Biscuit for.
-
-## v0.98.0
+## v0.97.0
 
 - `Settle` of a reservation already settled for another amount returns
   `ErrSettleConflict` (an `ErrConflict`, answered 409) instead of the first
   receipt; the same amount is still a replay. A `UsageStore` of your own
   does the same: metertest checks it.
+
+## v0.96.0
+
+- `Issuer.Biscuit` refuses a capability whose caveats do not allow
+  `OpShare`, as `ErrOpNotAllowed`, as `Delegate` does: a Biscuit form is
+  handed on offline. Grant `OpShare` to a capability you mint a Biscuit for.
 
 ## v0.95.0
 

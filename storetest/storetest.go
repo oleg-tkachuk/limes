@@ -934,7 +934,8 @@ func checkPurgeKeepsLineage(t *testing.T, f fixture) {
 // checkInsertKeepsLineage holds Insert to a lineage Purge and IsRevoked can
 // rely on: no record without an id, none under a parent not on record, and
 // no record that never expires, which no verifier accepts and Purge never
-// removes, and no child expiring after its parent. None of them is recorded.
+// removes, no child expiring after its parent, and no child counting in
+// another unit than its parent. None of them is recorded.
 func checkInsertKeepsLineage(t *testing.T, f fixture) {
 	parent := f.live(t, "agent:parent", uuid.Nil)
 	noID := f.newCapability("agent:no-id", uuid.Nil, f.now.Add(ttl))
@@ -952,6 +953,10 @@ func checkInsertKeepsLineage(t *testing.T, f fixture) {
 	// walk would miss a revoked ancestor.
 	elsewhere := f.newCapability("agent:elsewhere", parent.ID, parent.ExpiresAt)
 	elsewhere.Subject.TenantID = other
+	// A lineage counts in one unit, as Delegate keeps it: metering a child
+	// spends from every ancestor.
+	otherUnit := f.newCapability("agent:other-unit", parent.ID, parent.ExpiresAt)
+	otherUnit.Caveats.Budget.UnitCode = "USD"
 	// A store that scopes tenants refuses the child in another tenant
 	// before it reads the parent: Ctx is not that tenant's.
 	elsewhereRefusal := limes.ErrDelegationTooWide
@@ -968,6 +973,7 @@ func checkInsertKeepsLineage(t *testing.T, f fixture) {
 		"a child with no expiry":       {unexpiring, limes.ErrInvalidRequest},
 		"a root with no expiry":        {endlessRoot, limes.ErrInvalidRequest},
 		"a child in another tenant":    {elsewhere, elsewhereRefusal},
+		"a child in another unit":      {otherUnit, limes.ErrUnitCodeMismatch},
 	} {
 		if err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: tc.c, IssuedBy: issuedBy}); !errors.Is(err, tc.want) {
 			t.Errorf("Insert of %s: err = %v, want %v", name, err, tc.want)

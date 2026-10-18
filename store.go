@@ -27,7 +27,9 @@ type IssuanceStore interface {
 	// It refuses what InsertRequest.Validate refuses, a parent not on
 	// record as ErrInvalidRequest, a child expiring after its parent or in
 	// another tenant as
-	// ErrDelegationTooWide, and a child that would have
+	// ErrDelegationTooWide, a child whose budget names another unit than its
+	// parent's as ErrUnitCodeMismatch — metering a child spends from every
+	// ancestor, so a lineage counts in one unit — and a child that would have
 	// more than MaxDelegationDepth ancestors still on record — counted as
 	// IsRevoked counts them — as ErrDelegationTooDeep: Purge and the
 	// IsRevoked walk rely on a lineage that is whole, no deeper than the
