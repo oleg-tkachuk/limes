@@ -58,7 +58,6 @@ func (s *UsageStore) Bump(ctx context.Context, req limes.BumpRequest) (limes.Bum
 			}
 		}
 		for _, row := range c.copies {
-			row.capID = subject.CapabilityID()
 			row.requests++
 		}
 		receipt.RequestCount = next
@@ -296,7 +295,6 @@ func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, s
 	}
 	for _, cp := range spec.copies {
 		r := c.copies[string(cp.RevocationID)]
-		r.capID = spec.capID
 		r.spent += spec.amount
 		r.reserved = max0(r.reserved - released)
 	}
@@ -561,7 +559,6 @@ func applyHold(c *counters, h hold, sign limes.Nanos) {
 	}
 	for _, cp := range h.copies {
 		if r, ok := c.copies[string(cp.RevocationID)]; ok {
-			r.capID = h.capID
 			r.reserved = max0(r.reserved + sign*h.amount)
 		}
 	}
@@ -654,7 +651,7 @@ func (s *UsageStore) releaseHold(ctx context.Context, tx pgx.Tx, h hold) error {
 		now:      s.clock(),
 		tenantID: h.tenantID,
 		existing: append([]uuid.UUID{h.capID}, h.ancestors...),
-		copies:   copyIDs(h.copies),
+		copies:   copyIDs(h.copies), copiesCapID: h.capID,
 	})
 	if err != nil {
 		return err

@@ -733,16 +733,23 @@ type CopyUsageReader interface {
 // of any listing holds.
 const MaxCopyUsageIDs = MaxListLimit
 
-// CopyUsageRequest names the copies CopyUsage reads.
+// CopyUsageRequest names the copies CopyUsage reads, all of one capability:
+// a copy is counted under the capability whose chain carried it, since a
+// block's revocation id alone can turn up on another capability's chain.
 type CopyUsageRequest struct {
+	// CapabilityID is the capability the copies belong to.
+	CapabilityID uuid.UUID
 	// RevocationIDs are the copies' revocation ids: at least one, at most
 	// MaxCopyUsageIDs, none empty.
 	RevocationIDs [][]byte
 }
 
-// Validate refuses a request naming no copy, more than MaxCopyUsageIDs, or
-// an empty revocation id, as ErrInvalidRequest.
+// Validate refuses a request naming no capability, no copy, more than
+// MaxCopyUsageIDs, or an empty revocation id, as ErrInvalidRequest.
 func (r CopyUsageRequest) Validate() error {
+	if r.CapabilityID == uuid.Nil {
+		return invalidRequest("copy usage: no capability")
+	}
 	switch n := len(r.RevocationIDs); {
 	case n == 0:
 		return invalidRequest("copy usage: no revocation id")

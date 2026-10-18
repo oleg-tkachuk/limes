@@ -90,18 +90,21 @@ func TestCopyUsageRequestValidate(t *testing.T) {
 	for i := range atLimit {
 		atLimit[i] = []byte(strconv.Itoa(i))
 	}
+	capID := uuid.New()
 	cases := map[string]struct {
-		ids  [][]byte
-		want error
+		capID uuid.UUID
+		ids   [][]byte
+		want  error
 	}{
-		"one id":       {[][]byte{[]byte("copy")}, nil},
-		"at the limit": {atLimit, nil},
-		"no id":        {nil, ErrInvalidRequest},
-		"past limit":   {append(atLimit[:MaxCopyUsageIDs:MaxCopyUsageIDs], []byte("one more")), ErrInvalidRequest},
-		"empty id":     {[][]byte{[]byte("copy"), {}}, ErrInvalidRequest},
+		"one id":        {capID, [][]byte{[]byte("copy")}, nil},
+		"at the limit":  {capID, atLimit, nil},
+		"no capability": {uuid.Nil, [][]byte{[]byte("copy")}, ErrInvalidRequest},
+		"no id":         {capID, nil, ErrInvalidRequest},
+		"past limit":    {capID, append(atLimit[:MaxCopyUsageIDs:MaxCopyUsageIDs], []byte("one more")), ErrInvalidRequest},
+		"empty id":      {capID, [][]byte{[]byte("copy"), {}}, ErrInvalidRequest},
 	}
 	for name, tc := range cases {
-		if err := (CopyUsageRequest{RevocationIDs: tc.ids}).Validate(); !errors.Is(err, tc.want) {
+		if err := (CopyUsageRequest{CapabilityID: tc.capID, RevocationIDs: tc.ids}).Validate(); !errors.Is(err, tc.want) {
 			t.Errorf("%s: Validate() = %v, want %v", name, err, tc.want)
 		}
 	}

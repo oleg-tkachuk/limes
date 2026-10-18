@@ -363,10 +363,10 @@ const (
 	sqlRevokeBiscuit = `
 INSERT INTO limes.biscuit_revocations (revocation_id, capability_id, tenant_id, revoked_at, note, actor)
 VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (revocation_id) DO NOTHING`
+ON CONFLICT (revocation_id, capability_id) DO NOTHING`
 
 	sqlGetBiscuitRevocation = `
-SELECT capability_id, revoked_at, note, actor FROM limes.biscuit_revocations WHERE revocation_id = $1`
+SELECT revoked_at, note, actor FROM limes.biscuit_revocations WHERE revocation_id = $1 AND capability_id = $2`
 )
 
 // IsBiscuitRevoked reports whether any of revocationIDs is revoked, across
@@ -401,11 +401,14 @@ func (s *Store) RevokeBiscuit(ctx context.Context, req limes.RevokeBiscuitReques
 	})
 }
 
-// GetBiscuitRevocation reads back what RevokeBiscuit wrote for revocationID.
-func (s *Store) GetBiscuitRevocation(ctx context.Context, revocationID []byte) (limes.BiscuitRevocation, error) {
-	r := limes.BiscuitRevocation{RevocationID: revocationID}
+// GetBiscuitRevocation reads back what RevokeBiscuit wrote for the copy.
+func (s *Store) GetBiscuitRevocation(ctx context.Context, bc limes.BiscuitCopy) (limes.BiscuitRevocation, error) {
+	if err := bc.Validate(); err != nil {
+		return limes.BiscuitRevocation{}, err
+	}
+	r := limes.BiscuitRevocation{CapabilityID: bc.CapabilityID(), RevocationID: bc.RevocationID()}
 	err := s.inReadTx(ctx, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, sqlGetBiscuitRevocation, revocationID).Scan(&r.CapabilityID, &r.RevokedAt, &r.Note, &r.Actor)
+		return tx.QueryRow(ctx, sqlGetBiscuitRevocation, r.RevocationID, r.CapabilityID).Scan(&r.RevokedAt, &r.Note, &r.Actor)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return limes.BiscuitRevocation{}, limes.ErrNotFound
@@ -413,7 +416,6 @@ func (s *Store) GetBiscuitRevocation(ctx context.Context, revocationID []byte) (
 	if err != nil {
 		return limes.BiscuitRevocation{}, err
 	}
-	r.RevocationID = append([]byte(nil), revocationID...)
 	return r, nil
 }
 

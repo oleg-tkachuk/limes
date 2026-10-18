@@ -373,7 +373,7 @@ count, and revoking the capability revokes every copy.
 A copy can also get limits of its own: `Requests` and `Budget` on the
 `Attenuation` (nil sets none; a ceiling of 0 freezes the copy). A copy's
 `Budget` names no `UnitCode`: it is in its capability's unit, which the block
-does not carry, and the verifier gives it. Each is counted under the revocation id of the block that
+does not carry, and the verifier gives it. Each is counted under its capability and the revocation id of the block that
 set it, so siblings narrowed apart count apart, while the capability's own
 limits still bound them all; a limit must fit every limit already in force,
 and an `Unlimited` one is refused: a copy only narrows.
@@ -387,9 +387,14 @@ invalid token, and returned only once the token has passed every other
 check.
 `verifier.BiscuitCopy` names the limits in force on a copy, on any verifier,
 and a `CopyUsageReader` (`memstore` and `pgstore` implement one) reads what each has
-counted: `CopyUsage` takes a `CopyUsageRequest` of up to `MaxCopyUsageIDs`
-revocation ids and returns, in a `CopyUsageResult`, the counters of those
-used; a copy never used is absent. A copy cannot delegate — a server-side child would be an ordinary
+counted: `CopyUsage` takes a `CopyUsageRequest` naming a capability and up to
+`MaxCopyUsageIDs` revocation ids of its copies and returns, in a
+`CopyUsageResult`, the counters of those used; a copy never used is absent.
+A revocation id alone does not name a copy: biscuit-go signs a block without
+the signature before it, so a holder of two Biscuits can graft a block of one
+onto the other, and the same id then turns up under two capabilities. Each
+counts it apart, and neither's metering, refund or deletion reaches the
+other's. A copy cannot delegate — a server-side child would be an ordinary
 token of the capability, which revoking the copy would not reach and the
 copy's limits would not bound — so `Delegate` refuses any capability read
 from a Biscuit (`VerifiedCapability.FromBiscuit`) with
@@ -402,7 +407,10 @@ the revocation id of its last block, which only it pairs, so a caller cannot
 name another tenant's copy under its own capability. Passing it to
 `BiscuitRevocationStore.RevokeBiscuit` (`RevokeBiscuitRequest{Copy: …}`) stops
 that copy and every copy attenuated from it, and leaves the copy it came from,
-its siblings and the capability's JWT working. A verifier that accepts
+its siblings and the capability's JWT working. `GetBiscuitRevocation` reads
+it back by the same copy. The revocation belongs to that capability and goes
+only with its record, while a token carrying the id is refused under any
+capability. A verifier that accepts
 Biscuits needs `BiscuitConfig.Revocations` — wrap the store in a
 `BiscuitRevocationCache` and clear it with the other cache.
 
@@ -1056,7 +1064,7 @@ stop rather than retry. The full table is in [diagrams.md](diagrams.md#answering
 | `ListByPrincipalRequest.Limit` · `ListTenantBudgetsRequest.Limit` · `ListReservationsRequest.Limit` · `SumChargesRequest.Limit` · `CountRecordsRequest.Limit` | `DefaultListLimit` 50, at most `MaxListLimit` 500 |
 | `PurgeRequest` · `ReleaseExpiredRequest` · `PurgeOrphansRequest` | `DefaultHousekeepingLimit` 1 000 a batch; `PurgeRequest.ExpiredFor` `MinPurgeRetention`, 6 minutes, and no less |
 | `MaxDelegationDepth` · `MaxBiscuitBlocks` | 64 ancestors · 32 attenuation blocks |
-| `CopyUsageRequest.RevocationIDs` | at most `MaxCopyUsageIDs`, 500 |
+| `CopyUsageRequest.RevocationIDs` | at most `MaxCopyUsageIDs`, 500, of one `CapabilityID` |
 | `RevocationCacheConfig` · `BiscuitRevocationCacheConfig` | `DefaultRevocationCacheTTL` 2 seconds · `DefaultRevocationCacheEntries` 100 000, the oldest dropped first past it; a negative TTL or bound is refused — for no cache, give the verifier the store itself |
 | `jwks.RemoteConfig` | `jwks.DefaultFetchTimeout` 10s · `DefaultRefreshInterval` 5m · `DefaultMinRefreshInterval` 10s · `DefaultMaxStale` 1h · `DefaultMaxDocumentBytes` 1 MiB |
 | `dpop.VerifierConfig.Window` | `dpop.DefaultWindow`, 1 minute; a proof's id is remembered for `Window` plus `dpop.ReplayClockSkew`, 5 seconds |

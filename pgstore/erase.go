@@ -41,7 +41,7 @@ DELETE FROM limes.capabilities WHERE tenant_id = $1 AND expires_at < $2`
 SELECT capability_id FROM limes.usage WHERE tenant_id = $1 ORDER BY capability_id FOR UPDATE`
 
 	sqlLockTenantCopies = `
-SELECT revocation_id FROM limes.copy_usage WHERE tenant_id = $1 ORDER BY revocation_id FOR UPDATE`
+SELECT revocation_id FROM limes.copy_usage WHERE tenant_id = $1 ORDER BY capability_id, revocation_id FOR UPDATE`
 
 	sqlDeleteTenantHolds   = `DELETE FROM limes.reservations WHERE tenant_id = $1`
 	sqlDeleteTenantBudget  = `DELETE FROM limes.tenant_budgets WHERE tenant_id = $1`

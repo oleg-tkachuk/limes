@@ -375,6 +375,7 @@ func Run[TX any](t *testing.T, setup func(t *testing.T) Env[TX]) {
 		{"ListTenantBudgetsPagesMostAtRiskFirst", checkListTenantBudgets[TX]},
 		{"OverrunRecordCrossesACopyBudget", checkCopyOverrun[TX]},
 		{"ACopyCountsForItsCapabilityAndGoesWithIt", checkCopyCountersGo[TX]},
+		{"ACopyIDSharedByTwoCapabilitiesCountsApart", checkCopySharedID[TX]},
 		{"CopyUsageRefusesAnInvalidRequest", checkCopyUsageRefusesInvalid[TX]},
 		{"TenantBudgetReadsAgree", checkTenantBudgetReads[TX]},
 		{"ReservationsReadBack", checkReservations[TX]},
@@ -1202,7 +1203,7 @@ func checkReleaseReturnsCopy[TX any](t *testing.T, f fixture[TX]) {
 		if err := release(subject, r.ID); err != nil {
 			t.Fatal(err)
 		}
-		if got := f.copyUsage(t, reader, copyID); len(got) != 1 || got[0].ReservedAmount != 0 {
+		if got := f.copyUsage(t, reader, f.child, copyID); len(got) != 1 || got[0].ReservedAmount != 0 {
 			t.Errorf("the copy after %s = %+v; want nothing held", name, got)
 		}
 	}
@@ -1616,12 +1617,13 @@ func checkCopyUsageRefusesInvalid[TX any](t *testing.T, f fixture[TX]) {
 	for i := range tooMany {
 		tooMany[i] = []byte(strconv.Itoa(i))
 	}
-	for name, ids := range map[string][][]byte{
-		"no id":    nil,
-		"too many": tooMany,
-		"empty id": {[]byte("copy-1"), {}},
+	for name, req := range map[string]limes.CopyUsageRequest{
+		"no capability": {RevocationIDs: [][]byte{[]byte("copy-1")}},
+		"no id":         {CapabilityID: f.child},
+		"too many":      {CapabilityID: f.child, RevocationIDs: tooMany},
+		"empty id":      {CapabilityID: f.child, RevocationIDs: [][]byte{[]byte("copy-1"), {}}},
 	} {
-		if _, err := reader.CopyUsage(f.Ctx, limes.CopyUsageRequest{RevocationIDs: ids}); !errors.Is(err, limes.ErrInvalidRequest) {
+		if _, err := reader.CopyUsage(f.Ctx, req); !errors.Is(err, limes.ErrInvalidRequest) {
 			t.Errorf("CopyUsage with %s: err = %v, want ErrInvalidRequest", name, err)
 		}
 	}
@@ -1644,7 +1646,7 @@ func checkCopyCountersGo[TX any](t *testing.T, f fixture[TX]) {
 		if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: newSubject(subjectSpec{capID: capID, tenant: f.Tenant, copies: copies})}); err != nil {
 			t.Fatal(err)
 		}
-		return f.copyUsage(t, reader, copyID)
+		return f.copyUsage(t, reader, capID, copyID)
 	}
 	deleted := []byte("copy-deleted")
 	if got := counted(f.child, deleted); len(got) != 1 || got[0].CapabilityID != f.child {
@@ -1653,7 +1655,7 @@ func checkCopyCountersGo[TX any](t *testing.T, f fixture[TX]) {
 	if err := f.Usage.DeleteUsage(f.Ctx, limes.DeleteUsageRequest{CapabilityID: f.child}); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.copyUsage(t, reader, deleted); len(got) != 0 {
+	if got := f.copyUsage(t, reader, f.child, deleted); len(got) != 0 {
 		t.Errorf("copy usage after DeleteUsage of its capability = %+v; want none", got)
 	}
 
@@ -1672,15 +1674,72 @@ func checkCopyCountersGo[TX any](t *testing.T, f fixture[TX]) {
 	if _, err := f.Usage.PurgeOrphans(f.Ctx, limes.PurgeOrphansRequest{}); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.copyUsage(t, reader, purged); len(got) != 0 {
+	if got := f.copyUsage(t, reader, orphan, purged); len(got) != 0 {
 		t.Errorf("copy usage after PurgeOrphans of its capability = %+v; want none", got)
 	}
 }
 
-// copyUsage is what reader holds for the copy copyID.
-func (f fixture[TX]) copyUsage(t *testing.T, reader limes.CopyUsageReader, copyID []byte) []limes.CopyUsage {
+// checkCopySharedID holds a store to counting a copy under its capability,
+// not under its revocation id alone. A Biscuit block's signature does not
+// cover the block before it, so a holder of two Biscuits can graft one's
+// block onto the other: two capabilities, here of two tenants, then carry
+// the same id. Neither may spend, refund or drop the other's counter.
+func checkCopySharedID[TX any](t *testing.T, f fixture[TX]) {
+	reader, ok := f.Usage.(limes.CopyUsageReader)
+	if !ok {
+		return // a Meter that does not read copies back is checked no further
+	}
+	tenant, err := f.newTenant()
+	if err != nil {
+		t.Fatal(err)
+	}
+	theirCap, err := f.NewCapability(CapabilitySpec{Tenant: tenant, Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget})
+	if err != nil {
+		t.Fatal(err)
+	}
+	theirCtx := f.tenantCtx(tenant)
+	// requests is the copy's request ceiling, and its budget is one unit.
+	const requests = 1
+	shared := []limes.CopyCeiling{{
+		RevocationID: []byte("copy-shared"),
+		Requests:     &limes.RequestCeiling{Max: requests},
+		Budget:       &limes.BudgetCeiling{Max: one, UnitCode: unit},
+	}}
+	mine := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, copies: shared})
+	theirs := newSubject(subjectSpec{capID: theirCap, tenant: tenant, copies: shared})
+
+	if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: mine}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Usage.Bump(theirCtx, limes.BumpRequest{Subject: theirs}); err != nil {
+		t.Errorf("the other capability's first request under the shared id: err = %v, want it counted apart", err)
+	}
+	theirCharge, err := f.Usage.Charge(theirCtx, limes.ChargeRequest{Subject: theirs, Amount: one}, nil)
+	if err != nil {
+		t.Fatalf("the other capability's charge under the shared id: %v", err)
+	}
+	if _, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: mine, Amount: one}, nil); err != nil {
+		t.Errorf("a charge within the copy's own budget: err = %v, want it admitted", err)
+	}
+	if _, err := f.Usage.Refund(theirCtx, limes.RefundRequest{ChargeID: theirCharge.ChargeID, Amount: one}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Usage.DeleteUsage(theirCtx, limes.DeleteUsageRequest{CapabilityID: theirCap}); err != nil {
+		t.Fatal(err)
+	}
+	got := f.copyUsage(t, reader, f.child, shared[0].RevocationID)
+	if len(got) != 1 || got[0].CapabilityID != f.child || got[0].RequestCount != requests || got[0].SpentAmount != one {
+		t.Errorf("the copy after the other capability's refund and DeleteUsage = %+v; want %d request and %v spent, untouched", got, requests, one)
+	}
+	if _, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: mine}); !errors.Is(err, limes.ErrRequestLimitExceeded) {
+		t.Errorf("a request past the copy's ceiling after the other capability's DeleteUsage: err = %v, want ErrRequestLimitExceeded", err)
+	}
+}
+
+// copyUsage is what reader holds for the copy copyID of capability capID.
+func (f fixture[TX]) copyUsage(t *testing.T, reader limes.CopyUsageReader, capID uuid.UUID, copyID []byte) []limes.CopyUsage {
 	t.Helper()
-	res, err := reader.CopyUsage(f.Ctx, limes.CopyUsageRequest{RevocationIDs: [][]byte{copyID}})
+	res, err := reader.CopyUsage(f.Ctx, limes.CopyUsageRequest{CapabilityID: capID, RevocationIDs: [][]byte{copyID}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1707,7 +1766,7 @@ func checkCopyOverrun[TX any](t *testing.T, f fixture[TX]) {
 	if !ok {
 		return // a Meter that does not read copies back is checked no further
 	}
-	res, err := reader.CopyUsage(f.Ctx, limes.CopyUsageRequest{RevocationIDs: [][]byte{copyID}})
+	res, err := reader.CopyUsage(f.Ctx, limes.CopyUsageRequest{CapabilityID: f.child, RevocationIDs: [][]byte{copyID}})
 	got := res.Copies
 	if err != nil || len(got) != 1 || got[0].SpentAmount != 2*one {
 		t.Errorf("copy usage = %+v, %v; want 2 spent", got, err)
@@ -2327,7 +2386,7 @@ func checkCopySettleRefund[TX any](t *testing.T, f fixture[TX]) {
 	if _, err := f.Usage.Refund(f.Ctx, limes.RefundRequest{ChargeID: settled.ChargeID, Amount: one}); err != nil {
 		t.Fatal(err)
 	}
-	res, err := reader.CopyUsage(f.Ctx, limes.CopyUsageRequest{RevocationIDs: [][]byte{copyID}})
+	res, err := reader.CopyUsage(f.Ctx, limes.CopyUsageRequest{CapabilityID: f.child, RevocationIDs: [][]byte{copyID}})
 	got := res.Copies
 	if err != nil || len(got) != 1 || got[0].SpentAmount != 2*one || got[0].ReservedAmount != 0 {
 		t.Errorf("the copy after a settle of 3 and a refund of 1 = %+v, %v; want 2 spent, nothing held", got, err)
@@ -3336,7 +3395,7 @@ func checkEraseTenantUsage[TX any](t *testing.T, f fixture[TX]) {
 		t.Errorf("GetTenantBudget after the erase: err = %v, want ErrTenantBudgetNotFound", err)
 	}
 	if copies, ok := f.Usage.(limes.CopyUsageReader); ok {
-		got, err := copies.CopyUsage(f.Ctx, limes.CopyUsageRequest{RevocationIDs: [][]byte{copyID}})
+		got, err := copies.CopyUsage(f.Ctx, limes.CopyUsageRequest{CapabilityID: f.child, RevocationIDs: [][]byte{copyID}})
 		if err != nil || len(got.Copies) != 0 {
 			t.Errorf("CopyUsage after the erase = %+v, %v; want no copy", got, err)
 		}
