@@ -39,12 +39,13 @@ type principalRecord struct {
 }
 
 type agentRecord struct {
-	AgentType     string    `json:"agent_type"`
-	AgentVersion  string    `json:"agent_version"`
-	RunID         uuid.UUID `json:"run_id"`
-	ParentAgentID uuid.UUID `json:"parent_agent_id"`
-	Model         string    `json:"model"`
-	MCPClient     string    `json:"mcp_client"`
+	AgentType    string    `json:"agent_type"`
+	AgentVersion string    `json:"agent_version"`
+	RunID        uuid.UUID `json:"run_id"`
+	// ParentRunID keeps the key it was first stored under.
+	ParentRunID uuid.UUID `json:"parent_agent_id"`
+	Model       string    `json:"model"`
+	MCPClient   string    `json:"mcp_client"`
 }
 
 type caveatsRecord struct {
@@ -70,7 +71,7 @@ func toPrincipalRecord(p limes.Principal) principalRecord {
 	if a := p.Agent; a != nil {
 		r.Agent = &agentRecord{
 			AgentType: a.AgentType, AgentVersion: a.AgentVersion, RunID: a.RunID,
-			ParentAgentID: a.ParentAgentID, Model: a.Model, MCPClient: a.MCPClient,
+			ParentRunID: a.ParentRunID, Model: a.Model, MCPClient: a.MCPClient,
 		}
 	}
 	return r
@@ -81,7 +82,7 @@ func (r principalRecord) principal() limes.Principal {
 	if a := r.Agent; a != nil {
 		p.Agent = &limes.AgentPrincipal{
 			AgentType: a.AgentType, AgentVersion: a.AgentVersion, RunID: a.RunID,
-			ParentAgentID: a.ParentAgentID, Model: a.Model, MCPClient: a.MCPClient,
+			ParentRunID: a.ParentRunID, Model: a.Model, MCPClient: a.MCPClient,
 		}
 	}
 	return p
