@@ -58,7 +58,10 @@ func TestParseAuthorization(t *testing.T) {
 func TestParseAuthorizationKeepsTheCredentialOutOfItsError(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)
 	_, token := issueFor(t, issuer)
-	for _, header := range []string{token, "Bearer\t" + token, "Bearer:" + token, "Bearer," + token, "DPoP;" + token, "sk_live_abcdef"} {
+	for _, header := range []string{token, "Bearer\t" + token, "Bearer:" + token, "Bearer," + token, "DPoP;" + token, "sk_live_abcdef",
+		// Bare keys of letters, digits and "-" alone, which read as a scheme
+		// name: a 32-hex key and a 20-character access key id.
+		"0123456789abcdef0123456789abcdef", "AKIAIOSFODNN7EXAMPLE"} {
 		_, _, err := ParseAuthorization(header)
 		if !errors.Is(err, ErrNoCredentials) {
 			t.Errorf("ParseAuthorization(%.20q…): err = %v, want ErrNoCredentials", header, err)
