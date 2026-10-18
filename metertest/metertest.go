@@ -3409,6 +3409,42 @@ func checkEraseTenantUsage[TX any](t *testing.T, f fixture[TX]) {
 	if b, err := f.Usage.GetTenantBudget(theirCtx, other); err != nil || b.SpentAmount != one {
 		t.Errorf("another tenant's budget after the erase = %+v, %v; want %v spent", b, err, one)
 	}
+
+	// A call made after the erase — a request verified before it, a late
+	// cost — counts nothing of the tenant again: its capabilities are
+	// still on record, revoked, but no row of it comes back.
+	afterErase := map[string]func() error{
+		"Bump": func() error {
+			_, err := f.Usage.Bump(f.Ctx, limes.BumpRequest{Subject: f.childSubject()})
+			return err
+		},
+		"Charge": func() error {
+			_, err := f.Usage.Charge(f.Ctx, limes.ChargeRequest{Subject: f.childSubject(), Amount: one}, nil)
+			return err
+		},
+		"Reserve": func() error {
+			_, err := f.Usage.Reserve(f.Ctx, limes.ReserveRequest{Subject: f.childSubject(), Amount: one})
+			return err
+		},
+		"SetTenantBudget": func() error {
+			_, err := f.Usage.SetTenantBudget(f.Ctx, limes.SetTenantBudgetRequest{TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: unit}})
+			return err
+		},
+	}
+	for name, call := range afterErase {
+		if err := call(); !errors.Is(err, limes.ErrTenantErased) || !errors.Is(err, limes.ErrRevoked) {
+			t.Errorf("%s after the erase: err = %v, want ErrTenantErased, matching ErrRevoked", name, err)
+		}
+	}
+	if u, err := f.Usage.GetUsage(f.Ctx, f.child); !errors.Is(err, limes.ErrUsageNotFound) {
+		t.Errorf("usage after metering an erased tenant = %+v, %v; want ErrUsageNotFound", u, err)
+	}
+	if _, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant); !errors.Is(err, limes.ErrTenantBudgetNotFound) {
+		t.Errorf("GetTenantBudget after metering an erased tenant: err = %v, want ErrTenantBudgetNotFound", err)
+	}
+	if _, err := f.Usage.Bump(theirCtx, limes.BumpRequest{Subject: theirSubject}); err != nil {
+		t.Errorf("another tenant's request after the erase: %v", err)
+	}
 }
 
 // sumWindow is how far either side of a check's clock SumCharges looks when

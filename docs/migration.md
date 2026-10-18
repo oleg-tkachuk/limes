@@ -14,6 +14,13 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.94.0
+
+- `EraseTenantUsage` marks the tenant erased: `Bump`, `Charge`, `Reserve`
+  and `SetTenantBudget` for it return `ErrTenantErased`, which matches
+  `ErrRevoked`, until `PurgeOrphans` finds none of its records left. A
+  `TenantUsageEraser` of your own does the same: metertest checks it.
+
 ## v0.93.0
 
 - A Biscuit copy is counted, and its revocation kept, under its capability

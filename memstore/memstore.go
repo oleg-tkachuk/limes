@@ -97,6 +97,10 @@ type UsageStore[TX any] struct {
 	// ResetSpend starts the next one. A ledger entry records the period it
 	// was counted in, so a refund leaves a later period's spend alone.
 	periods map[uuid.UUID]uint64
+
+	// erased marks the tenants EraseTenantUsage removed, which nothing
+	// counts again until PurgeOrphans finds none of their records left.
+	erased map[uuid.UUID]struct{}
 }
 
 // refKey is what ChargeRequest.ExternalRef makes a charge idempotent on.
@@ -220,6 +224,7 @@ func NewUsageStore[TX any](cfg UsageStoreConfig[TX]) (*UsageStore[TX], error) {
 		holds:    map[uuid.UUID]hold{},
 		copies:   map[copyKey]copyCounter{},
 		periods:  map[uuid.UUID]uint64{},
+		erased:   map[uuid.UUID]struct{}{},
 
 		byCharge:      map[uuid.UUID]int{},
 		byRef:         map[refKey]int{},
@@ -349,6 +354,18 @@ func (s *Store) ancestorsLocked(id uuid.UUID) ([]limes.Capability, error) {
 		}
 	}
 	return out, nil
+}
+
+// holdsTenant reports whether any record of tenant is on record.
+func (s *Store) holdsTenant(tenant uuid.UUID) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, c := range s.caps {
+		if c.Subject.TenantID == tenant {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Store) exists(id uuid.UUID) bool {
@@ -628,6 +645,9 @@ func (s *UsageStore[TX]) Bump(_ context.Context, req limes.BumpRequest) (limes.B
 	// its row written back.
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.notErasedLocked(req.Subject.TenantID()); err != nil {
+		return limes.BumpReceipt{}, err
+	}
 	ancestors, err := s.lineage(req.Subject.CapabilityID())
 	if err != nil {
 		return limes.BumpReceipt{}, err
@@ -719,6 +739,9 @@ func (s *UsageStore[TX]) Charge(
 			}
 			return s.replayLocked(e), nil
 		}
+	}
+	if err := s.notErasedLocked(req.Subject.TenantID()); err != nil {
+		return limes.ChargeReceipt{}, err
 	}
 	ancestors, err := s.lineage(req.Subject.CapabilityID())
 	if err != nil {
@@ -1073,6 +1096,9 @@ func (s *UsageStore[TX]) Reserve(_ context.Context, req limes.ReserveRequest) (l
 	// its row written back.
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.notErasedLocked(req.Subject.TenantID()); err != nil {
+		return limes.Reservation{}, err
+	}
 	ancestors, err := s.lineage(req.Subject.CapabilityID())
 	if err != nil {
 		return limes.Reservation{}, err
@@ -1435,6 +1461,9 @@ func (s *UsageStore[TX]) SetTenantBudget(_ context.Context, args limes.SetTenant
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.notErasedLocked(args.TenantID); err != nil {
+		return limes.TenantBudget{}, err
+	}
 
 	b, exists := s.budgets[args.TenantID]
 
@@ -1682,6 +1711,16 @@ func (s *UsageStore[TX]) EraseTenantUsage(_ context.Context, req limes.EraseTena
 	}
 	delete(s.budgets, tenant)
 	delete(s.periods, tenant)
+	s.erased[tenant] = struct{}{}
+	return nil
+}
+
+// notErasedLocked refuses a tenant EraseTenantUsage removed. s.mu must be
+// held.
+func (s *UsageStore[TX]) notErasedLocked(tenant uuid.UUID) error {
+	if _, ok := s.erased[tenant]; ok {
+		return fmt.Errorf("%w: %s", limes.ErrTenantErased, tenant)
+	}
 	return nil
 }
 
@@ -1724,6 +1763,8 @@ func (s *UsageStore[TX]) PurgeOrphans(_ context.Context, req limes.PurgeOrphansR
 	}
 	s.forgetAncestorLocked(func(id uuid.UUID) bool { return batch[id] })
 	maps.DeleteFunc(s.copies, func(k copyKey, _ copyCounter) bool { return batch[k.capID] })
+	// An erased tenant with no record left has no capability to meter.
+	maps.DeleteFunc(s.erased, func(tenant uuid.UUID, _ struct{}) bool { return !s.records.holdsTenant(tenant) })
 	return limes.PurgeOrphansResult{Purged: int64(len(ids))}, nil
 }
 
