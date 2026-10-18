@@ -109,6 +109,17 @@ rebased_only 9 a9 || fail "updated: $(updates | tr '\n' ';'), want #9 alone, at 
 list="$(grep '^pr list' "$CALLS")"
 [[ " $list " == *" --base main "* && " $list " == *" --state open "* ]] || fail "pr list asked for the wrong pull requests: $list"
 
+# Only the latest run of the required check counts: a run cancelled when
+# another replaced it on the same head reports a failure that no longer
+# stands. A failure that is the latest still takes the pull request out.
+superseded='[{"name": "All checks passed", "conclusion": "FAILURE", "startedAt": "2026-10-18T18:44:40Z"},
+             {"name": "All checks passed", "conclusion": "SUCCESS", "startedAt": "2026-10-18T18:47:44Z"}]'
+regressed='[{"name": "All checks passed", "conclusion": "SUCCESS", "startedAt": "2026-10-18T18:44:40Z"},
+            {"name": "All checks passed", "conclusion": "FAILURE", "startedAt": "2026-10-18T18:47:44Z"}]'
+FAKE_PRS="$(prs "$(pr 1 a1 "statusCheckRollup=$regressed")" "$(pr 2 a2 "statusCheckRollup=$superseded")")"
+run "a superseded failed run"
+rebased_only 2 a2 || fail "updated: $(updates | tr '\n' ';'), want #2, whose latest run passed, and not #1, whose latest failed"
+
 # A CI change with auto-merge on merges itself, so it is in line.
 FAKE_PRS="$(prs "$(pr 7 a7 'autoMergeRequest={"mergeMethod":"MERGE"}')" "$(pr 9 a9)")"
 run "a CI change with auto-merge"

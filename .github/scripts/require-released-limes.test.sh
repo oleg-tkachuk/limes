@@ -137,6 +137,21 @@ git -C "$work/repo" fetch --quiet origin
 grep -q '^pr edit 7 .*--title build('"$MODULE"'): require limes v0.3.0' "$CALLS" || fail "the open pull request not updated: $(cat "$CALLS")"
 ! grep -q '^pr create' "$CALLS" || fail "a second pull request opened"
 
+# main moved on origin since this checkout last fetched — an earlier pull
+# request raising the module merged meanwhile: the branch is cut from main as
+# origin has it now, so it builds on that merge rather than conflicting with it.
+scratch "$REQUIRED"
+other="$work/other"
+rm -rf "$other"
+git clone --quiet "$work/origin.git" "$other"
+git -C "$other" -c user.name=t -c user.email=t@example.invalid commit --quiet --allow-empty -m "merged meanwhile"
+git -C "$other" push --quiet origin main
+moved="$(git -C "$other" rev-parse HEAD)"
+run "$MODULE" v0.2.0 >/dev/null || fail "after main moved: failed"
+git -C "$work/repo" fetch --quiet origin
+[ "$(git -C "$work/repo" rev-parse "origin/require-limes/$MODULE~1")" = "$moved" ] ||
+    fail "the branch was cut from a stale main, not from $moved"
+
 # A fork's pull request from a branch of the same name is not ours: a pull
 # request of our own is opened beside it, and the fork's is not touched.
 scratch "$REQUIRED"

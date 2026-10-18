@@ -47,7 +47,10 @@ readonly PR_LIMIT=200
 # The merge state of a pull request whose branch conflicts with main.
 readonly DIRTY=DIRTY
 # The check main requires, and the conclusion that takes a pull request out
-# of line until it is pushed to or its run is retried.
+# of line until it is pushed to or its run is retried. Only the latest run of
+# the check counts: a run superseded on the same head — the pull request's
+# title edited, say — is cancelled, and reports the check failed beside the
+# run that replaced it.
 readonly REQUIRED_CHECK="All checks passed"
 readonly FAILED=FAILURE
 
@@ -64,7 +67,7 @@ candidates="$(gh_retry pr list --repo "$REPO" --base "$BASE_BRANCH" --state open
         'sort_by(.number) | .[] | select(.isDraft | not) | select(.isCrossRepository | not)
              | select(.author.login != $renovate)
              | select(.mergeStateStatus != $dirty)
-             | select([.statusCheckRollup[]? | select((.name // .context) == $check) | .conclusion] | index($failed) | not)
+             | select(([.statusCheckRollup[]? | select((.name // .context) == $check)] | sort_by(.startedAt // "") | last | .conclusion) != $failed)
              | "\(.number) \(.headRefOid) \(.author.login) \(.autoMergeRequest != null)"')"
 
 # merges_itself reports whether pull request <n>, without GitHub's
