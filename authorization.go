@@ -64,7 +64,12 @@ func ParseAuthorization(header string) (AuthScheme, string, error) {
 	case strings.EqualFold(name, string(AuthSchemeDPoP)):
 		scheme = AuthSchemeDPoP
 	default:
-		// Another scheme's credentials are none of ours to judge.
+		// Another scheme's credentials are none of ours to judge. Its name
+		// goes in the error only when it can be no credential: with no
+		// single space after the scheme, the whole header is the "name".
+		if !isSchemeName(name) {
+			return "", "", ErrNoCredentials
+		}
 		return "", "", fmt.Errorf("%w: scheme %q", ErrNoCredentials, name)
 	}
 	credential = strings.TrimLeft(credential, " ")
@@ -72,6 +77,29 @@ func ParseAuthorization(header string) (AuthScheme, string, error) {
 		return scheme, "", fmt.Errorf("%w: the credential is not a token68", ErrMalformedAuthorization)
 	}
 	return scheme, credential, nil
+}
+
+// maxSchemeNameBytes bounds a scheme name an error repeats: longer than any
+// registered authentication scheme ("AWS4-HMAC-SHA256" is 16), shorter than
+// any credential this module reads.
+const maxSchemeNameBytes = 32
+
+// isSchemeName reports whether s reads as a registered authentication scheme
+// name — letters, digits and "-", at most maxSchemeNameBytes — and so can be
+// repeated in an error without repeating a credential, which carries ".",
+// "_", "=", "+", "/" or more bytes.
+func isSchemeName(s string) bool {
+	if s == "" || len(s) > maxSchemeNameBytes {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // isToken68 reports whether s is an RFC 9110 §11.2 token68:

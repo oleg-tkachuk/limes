@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -47,6 +48,31 @@ func TestParseAuthorization(t *testing.T) {
 	for _, none := range []string{"", "Basic dXNlcjpwdw==", "Negotiate abc"} {
 		if _, _, err := ParseAuthorization(none); !errors.Is(err, ErrNoCredentials) || errors.Is(err, ErrMalformedAuthorization) {
 			t.Errorf("ParseAuthorization(%q): err = %v, want ErrNoCredentials", none, err)
+		}
+	}
+}
+
+// An error is for the server's log, so it never repeats a credential: a
+// header with no single space after the scheme is all credential, and the
+// scheme name it would report is the token itself.
+func TestParseAuthorizationKeepsTheCredentialOutOfItsError(t *testing.T) {
+	issuer, _, _, _ := buildIssuerVerifier(t)
+	_, token := issueFor(t, issuer)
+	for _, header := range []string{token, "Bearer\t" + token, "Bearer:" + token, "Bearer," + token, "DPoP;" + token, "sk_live_abcdef"} {
+		_, _, err := ParseAuthorization(header)
+		if !errors.Is(err, ErrNoCredentials) {
+			t.Errorf("ParseAuthorization(%.20q…): err = %v, want ErrNoCredentials", header, err)
+			continue
+		}
+		credential := header[strings.IndexAny(header, "\t:,;")+1:]
+		if strings.Contains(err.Error(), credential) {
+			t.Errorf("ParseAuthorization(%.20q…): the error repeats the credential: %v", header, err)
+		}
+	}
+	// A scheme that is only a scheme is still named, for the log to say what came.
+	for _, scheme := range []string{"Basic", "Negotiate", "AWS4-HMAC-SHA256"} {
+		if _, _, err := ParseAuthorization(scheme + " abc"); err == nil || !strings.Contains(err.Error(), scheme) {
+			t.Errorf("ParseAuthorization(%q): err = %v, want it to name the scheme", scheme+" abc", err)
 		}
 	}
 }
