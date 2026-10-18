@@ -30,7 +30,7 @@ func TestHMACNonceKeysAreRedacted(t *testing.T) {
 	// keyCount is how many keys the values hold, which they still show.
 	const keyCount = 1
 	shown := fmt.Sprintf(redactedKeysFormat, keyCount)
-	values := map[string]any{"HMACNoncesConfig": cfg, "*HMACNoncesConfig": &cfg, "*HMACNonces": nonces}
+	values := map[string]any{"HMACNoncesConfig": cfg, "*HMACNoncesConfig": &cfg, "*HMACNonces": nonces, "HMACNonces": *nonces}
 	for name, v := range values {
 		for _, verb := range verbsThatShowBytes {
 			got := fmt.Sprintf(verb, v)
