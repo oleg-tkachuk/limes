@@ -3,6 +3,7 @@ package otelmetric_test
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,9 +33,15 @@ const (
 // meteredStore is a metered memstore whose measurements reader collects.
 func meteredStore(t *testing.T, opts ...otelmetric.Option) (limes.UsageStore[struct{}], *sdkmetric.ManualReader, *memstore.Store) {
 	t.Helper()
+	return meteredStoreAt(t, time.Now, opts...)
+}
+
+// meteredStoreAt is meteredStore with its records read against now.
+func meteredStoreAt(t *testing.T, now func() time.Time, opts ...otelmetric.Option) (limes.UsageStore[struct{}], *sdkmetric.ManualReader, *memstore.Store) {
+	t.Helper()
 	reader := sdkmetric.NewManualReader()
 	opts = append(opts, otelmetric.WithMeterProvider(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))))
-	records, err := memstore.NewStore(memstore.StoreConfig{})
+	records, err := memstore.NewStore(memstore.StoreConfig{Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,10 +239,11 @@ func TestInstrumentKeepsCopyUsage(t *testing.T) {
 	usage := wrap(inner)
 	copyID := []byte("copy-1")
 	copies := []limes.CopyCeiling{{RevocationID: copyID, Requests: &limes.RequestCeiling{Max: 10}}}
-	if _, err := usage.Bump(ctx, limes.BumpRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: uuid.New(), tenant: uuid.New(), copies: copies})}); err != nil {
+	capID := uuid.New()
+	if _, err := usage.Bump(ctx, limes.BumpRequest{Subject: recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: uuid.New(), copies: copies})}); err != nil {
 		t.Fatal(err)
 	}
-	res, err := usage.(limes.CopyUsageReader).CopyUsage(ctx, limes.CopyUsageRequest{RevocationIDs: [][]byte{copyID}})
+	res, err := usage.(limes.CopyUsageReader).CopyUsage(ctx, limes.CopyUsageRequest{CapabilityID: capID, RevocationIDs: [][]byte{copyID}})
 	got := res.Copies
 	if err != nil || len(got) != 1 || got[0].RequestCount != 1 {
 		t.Errorf("CopyUsage through the decorator = %+v, %v; want one request counted", got, err)
@@ -245,19 +253,26 @@ func TestInstrumentKeepsCopyUsage(t *testing.T) {
 // Every method reaches the store the decorator wraps, and the ones that move
 // a counter are measured.
 func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
-	usage, reader, records := meteredStore(t)
+	// The records' clock moves past the capability's expiry before Purge, so
+	// its usage ends an orphan; until then the Meter meters it like any other.
+	var later atomic.Bool
+	purgeAt := time.Now().Add(time.Hour + 2*limes.MinPurgeRetention)
+	usage, reader, records := meteredStoreAt(t, func() time.Time {
+		if later.Load() {
+			return purgeAt
+		}
+		return time.Now()
+	})
 	ctx := context.Background()
 	tenant, capID := uuid.New(), uuid.New()
-	// Expired long enough ago that Purge removes it, so its usage ends an
-	// orphan; until then the Meter reads its lineage like any other.
-	expired := limes.Capability{
+	record := limes.Capability{
 		ID: capID, Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: tenant, Subject: "agent"},
 		Caveats: limes.Caveats{
 			Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true, UnitCode: "USD"},
 		},
-		ExpiresAt: time.Now().Add(-limes.MinPurgeRetention - time.Hour),
+		ExpiresAt: time.Now().Add(time.Hour),
 	}
-	if err := records.Insert(ctx, limes.InsertRequest{Capability: expired, IssuedBy: limes.Principal{Subject: "issuer"}}); err != nil {
+	if err := records.Insert(ctx, limes.InsertRequest{Capability: record, IssuedBy: limes.Principal{Subject: "issuer"}}); err != nil {
 		t.Fatal(err)
 	}
 	measured := func(name, metric string, call func() error) {
@@ -323,6 +338,7 @@ func TestMeteringStorePassesEveryCallThrough(t *testing.T) {
 	if err := usage.DeleteUsage(ctx, limes.DeleteUsageRequest{CapabilityID: uuid.New()}); err != nil {
 		t.Errorf("Delete of a row never written: %v", err)
 	}
+	later.Store(true)
 	if _, err := records.Purge(ctx, limes.PurgeRequest{}); err != nil {
 		t.Fatal(err)
 	}
