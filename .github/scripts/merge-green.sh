@@ -15,8 +15,8 @@
 # Left for a person (merge-policy.sh): a draft — mark a pull request draft to
 # hold it —, a fork's, Renovate's, one into another branch than BASE_BRANCH,
 # one whose author cannot push here, and one that changes CI_DEFINITION,
-# whose green check is no evidence. Its files are read through the pull
-# request files API, as GitHub lists them, not from a diff's headers.
+# whose green check is no evidence. Its files are those of HEAD_SHA, read
+# through the compare API as GitHub lists them, not from a diff's headers.
 #
 # Without GH_TOKEN it warns and does nothing: a merge made with the workflow's
 # own GITHUB_TOKEN would start no CI on main (auto-merge.yaml).

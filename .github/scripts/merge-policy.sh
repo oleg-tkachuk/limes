@@ -54,12 +54,10 @@ readonly CI_DEFINITION=(
     '.renovaterc*'
 )
 
-# The most files GitHub's pull request files API lists: past it the rest are
-# never seen, so a pull request that reaches it is left for a person.
-# shellcheck disable=SC2034 # read by the scripts that source this one
-readonly FILES_API_CAP=3000
 # The most files the compare API lists for two commits, which lists a
-# commit's own files rather than those of a head that may move.
+# commit's own files rather than those of a head that may move: past it the
+# rest are never seen, so a pull request that reaches it is left for a
+# person.
 # shellcheck disable=SC2034 # read by the scripts that source this one
 readonly COMPARE_FILES_CAP=300
 
