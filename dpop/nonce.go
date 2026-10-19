@@ -114,11 +114,19 @@ func NewHMACNonces(cfg HMACNoncesConfig) (*HMACNonces, error) {
 	return &HMACNonces{keys: cfg.Keys.k, lifetime: cfg.Lifetime, now: cfg.Now}, nil
 }
 
-// Nonce implements Nonces.
+// errNoNonceKey is Nonce of an HMACNonces holding no key: the zero value,
+// not one NewHMACNonces made.
+var errNoNonceKey = errors.New("dpop: HMACNonces holds no key; make it with NewHMACNonces")
+
+// Nonce implements Nonces. The zero HMACNonces holds no key and issues none.
 func (n *HMACNonces) Nonce(context.Context) (string, error) {
+	keys := n.keys.get()
+	if len(keys) == 0 || n.now == nil {
+		return "", errNoNonceKey
+	}
 	var issued [nonceTimeBytes]byte
 	binary.BigEndian.PutUint64(issued[:], uint64(n.now().Unix())) //nolint:gosec // G115: a time after 1970 is positive
-	return base64.RawURLEncoding.EncodeToString(append(issued[:], mac(n.keys.get()[0], issued[:])...)), nil
+	return base64.RawURLEncoding.EncodeToString(append(issued[:], mac(keys[0], issued[:])...)), nil
 }
 
 // Valid implements Nonces: a nonce one of the keys signed, issued no
