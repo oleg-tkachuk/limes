@@ -831,6 +831,11 @@ func (s *UsageStore) Charge(
 	// its row written back.
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// An erased tenant is refused before anything, a replay included, as
+	// pgstore refuses it: nothing of the tenant is counted or answered again.
+	if err := s.notErasedLocked(req.Subject.TenantID()); err != nil {
+		return meter.ChargeReceipt{}, err
+	}
 	// A replay is answered before the lineage is read: it moves nothing, so
 	// it needs no record, and a capability purged since still gets its
 	// receipt, as a settled hold does.
@@ -844,9 +849,6 @@ func (s *UsageStore) Charge(
 			}
 			return s.replayLocked(e), nil
 		}
-	}
-	if err := s.notErasedLocked(req.Subject.TenantID()); err != nil {
-		return meter.ChargeReceipt{}, err
 	}
 	ancestors, err := s.lineage(req.Subject.CapabilityID())
 	if err != nil {
