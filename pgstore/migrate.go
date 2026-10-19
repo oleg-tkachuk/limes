@@ -104,21 +104,35 @@ const (
 	sqlSettingNow = `SELECT coalesce(current_setting($1, true), '')`
 )
 
+// scopeMigration scopes conn's session to every tenant as a migration
+// starts. A variable so that a test can make it fail.
+var scopeMigration = func(ctx context.Context, conn *pgx.Conn) error {
+	_, err := conn.Exec(ctx, sqlSetSession, SettingAllTenants, SettingAllTenantsOn)
+	return err
+}
+
 // runMigrations runs m's migrations on conn scoped to every tenant, each of
 // them: tern resets the session's settings after every migration, so the
-// scope is set again as each one starts. A scope that cannot be set fails
-// the run.
+// scope is set again as each one starts. tern runs a migration whatever its
+// OnStart finds, so a scope that cannot be set closes the connection: the
+// migration fails before it runs unscoped, its version is not recorded, and
+// the run ends with the error.
 func runMigrations(ctx context.Context, conn *pgx.Conn, m *migrate.Migrator) error {
 	var scopeErr error
 	m.OnStart = func(int32, string, string, string) {
-		if _, err := conn.Exec(ctx, sqlSetSession, SettingAllTenants, SettingAllTenantsOn); err != nil && scopeErr == nil {
-			scopeErr = fmt.Errorf("pgstore: migrate: scope a migration to every tenant: %w", err)
+		if scopeErr != nil {
+			return
+		}
+		if err := scopeMigration(ctx, conn); err != nil {
+			scopeErr = fmt.Errorf("pgstore: migrate: scope a migration to every tenant, connection closed: %w", err)
+			_ = conn.Close(context.WithoutCancel(ctx))
 		}
 	}
-	if err := migrateAllTenants(ctx, conn, m.Migrate); err != nil {
-		return err
+	err := migrateAllTenants(ctx, conn, m.Migrate)
+	if scopeErr != nil {
+		return errors.Join(scopeErr, err)
 	}
-	return scopeErr
+	return err
 }
 
 // restoreScopeTimeout bounds putting the session's scope back after a run,
@@ -284,10 +298,17 @@ var ErrRuntimeRole = errors.New("pgstore: the store is served by a role row-leve
 // BYPASSRLS; an owner of the schema $1, or of a table, sequence, view or
 // function in it, which may disable its row-level security, drop a policy or
 // replace the functions the policies and revocation checks call. It asks of
-// the session's role as well as the current one: a session opened as one of
-// these that SET ROLE to another can RESET ROLE back.
+// the session's role and of the role the connection logged in as as well as
+// the current one: a session opened as one of these that SET ROLE, or SET
+// SESSION AUTHORIZATION, to another can RESET either back. The login role is
+// the backend's in pg_stat_activity, which SET SESSION AUTHORIZATION leaves
+// alone.
 const sqlRuntimeRole = `
-WITH serving (role) AS (VALUES (current_user), (session_user))
+WITH serving (role) AS (
+    VALUES (current_user), (session_user)
+  UNION
+    SELECT usename FROM pg_stat_activity WHERE pid = pg_backend_pid() AND usename IS NOT NULL
+)
 SELECT
     EXISTS (SELECT 1 FROM serving s, pg_roles r WHERE r.rolsuper AND pg_has_role(s.role, r.oid, 'MEMBER')),
     EXISTS (SELECT 1 FROM serving s, pg_roles r WHERE r.rolbypassrls AND pg_has_role(s.role, r.oid, 'MEMBER')),
