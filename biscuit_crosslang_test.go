@@ -31,6 +31,9 @@ const (
 	biscuitWriteEnv       = "LIMES_WRITE_BISCUIT"
 	biscuitWriteFlag      = "1"
 	biscuitSeedTTL        = time.Hour
+	// biscuitSeedCopies is the seed's quota of copies: bounded, so an SDK
+	// is checked against a quota that is a number, not only Unlimited.
+	biscuitSeedCopies = 8
 )
 
 func biscuitFixturePath(name string) string {
@@ -88,7 +91,7 @@ func TestGenerateBiscuitFixtures(t *testing.T) {
 		Caveats: Caveats{
 			Ops: []Op{OpGet, OpList, OpPut, OpShare}, ResourcePrefixes: []string{"corpus/"},
 			Requests: RequestCeiling{Unlimited: true}, Budget: BudgetCeiling{Unlimited: true, UnitCode: "USD"},
-			Copies: CopyQuota{Unlimited: true},
+			Copies: CopyQuota{Max: biscuitSeedCopies},
 		},
 		TTL: biscuitSeedTTL,
 	})
