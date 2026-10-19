@@ -143,6 +143,9 @@ type usageRow struct {
 	spent    limes.Nanos
 	reserved limes.Nanos
 	unit     string
+	// copiesUnder counts the copies of the capability and of those
+	// delegated from it.
+	copiesUnder int64
 }
 
 // copyRow is one Biscuit copy's counters.
@@ -190,16 +193,17 @@ SELECT id, $2 FROM unnest($1::uuid[]) AS id ORDER BY id
 ON CONFLICT (capability_id) DO NOTHING`
 
 	sqlLockUsage = `
-SELECT capability_id, request_count, spent, reserved, unit_code
+SELECT capability_id, request_count, spent, reserved, unit_code, copies_under
 FROM limes.usage WHERE capability_id = ANY ($1)
 ORDER BY capability_id
 FOR UPDATE`
 
 	sqlWriteUsage = `
 UPDATE limes.usage u
-SET request_count = v.request_count, spent = v.spent, reserved = v.reserved, unit_code = v.unit_code
-FROM unnest($1::uuid[], $2::bigint[], $3::bigint[], $4::bigint[], $5::text[])
-    AS v (capability_id, request_count, spent, reserved, unit_code)
+SET request_count = v.request_count, spent = v.spent, reserved = v.reserved, unit_code = v.unit_code,
+    copies_under = v.copies_under
+FROM unnest($1::uuid[], $2::bigint[], $3::bigint[], $4::bigint[], $5::text[], $6::bigint[])
+    AS v (capability_id, request_count, spent, reserved, unit_code, copies_under)
 WHERE u.capability_id = v.capability_id`
 
 	sqlCreateCopies = `
@@ -208,18 +212,6 @@ SELECT id, $2, $3 FROM unnest($1::bytea[]) AS id ORDER BY id
 ON CONFLICT (capability_id, revocation_id) DO NOTHING`
 
 	sqlCountCopies = `SELECT count(*) FROM limes.copy_usage WHERE capability_id = $1`
-	// sqlCountSubtreeCopies counts the copies of $1 and of every capability
-	// delegated from it, down to $2 (limes.MaxDelegationDepth) levels.
-	sqlCountSubtreeCopies = `
-WITH RECURSIVE subtree (id, depth) AS (
-    SELECT $1::uuid, 0
-  UNION ALL
-    SELECT c.id, subtree.depth + 1
-    FROM limes.capabilities c
-    JOIN subtree ON c.parent_id = subtree.id
-    WHERE subtree.depth < $2
-)
-SELECT count(*) FROM limes.copy_usage WHERE capability_id IN (SELECT id FROM subtree)`
 
 	sqlLockCopies = `
 SELECT revocation_id, capability_id, request_count, spent, reserved
@@ -323,7 +315,7 @@ func lock(ctx context.Context, tx pgx.Tx, l lockRequest) (*counters, error) {
 		for rows.Next() {
 			u := &usageRow{}
 			var spent, reserved int64
-			if err := rows.Scan(&u.id, &u.requests, &spent, &reserved, &u.unit); err != nil {
+			if err := rows.Scan(&u.id, &u.requests, &spent, &reserved, &u.unit, &u.copiesUnder); err != nil {
 				rows.Close()
 				return nil, err
 			}
@@ -360,19 +352,17 @@ func lock(ctx context.Context, tx pgx.Tx, l lockRequest) (*counters, error) {
 					return nil, fmt.Errorf("%w: capability %s would count %d, quota %d", meter.ErrCopyLimitExceeded, l.copiesCapID, counted, l.maxCopies)
 				}
 				// And each capability on the chain counts the copies of
-				// everything delegated from it against its own quota. The
-				// chain's usage rows, locked above, keep two calls under one
+				// everything delegated from it against its own quota, on its
+				// usage row: locked above, it keeps two calls under one
 				// ancestor from counting past it together.
 				for _, q := range l.chainQuotas {
-					if q.quota.Unlimited {
-						continue
+					u, ok := c.usage[q.id]
+					if !ok {
+						return nil, fmt.Errorf("%w: %s", errCounterHidden, q.id)
 					}
-					var under int64
-					if err := tx.QueryRow(ctx, sqlCountSubtreeCopies, q.id, limes.MaxDelegationDepth).Scan(&under); err != nil {
-						return nil, err
-					}
-					if !q.quota.Admits(under) {
-						return nil, fmt.Errorf("%w: capability %s and those delegated from it would count %d, quota %s", meter.ErrCopyLimitExceeded, q.id, under, q.quota)
+					u.copiesUnder += tag.RowsAffected()
+					if !q.quota.Admits(u.copiesUnder) {
+						return nil, fmt.Errorf("%w: capability %s and those delegated from it would count %d, quota %s", meter.ErrCopyLimitExceeded, q.id, u.copiesUnder, q.quota)
 					}
 				}
 			}
@@ -432,7 +422,7 @@ type lockRequest struct {
 	maxCopies   int64
 	copiesCapID uuid.UUID
 	// chainQuotas are the quotas of copiesCapID and its ancestors, each
-	// counting the copies of its whole subtree.
+	// counting the copies of its whole subtree on its usage row.
 	chainQuotas []chainQuota
 }
 
@@ -466,7 +456,7 @@ func (c *counters) write(ctx context.Context, tx pgx.Tx, now time.Time, writeTen
 	}
 	if len(c.usage) > 0 {
 		var ids []uuid.UUID
-		var requests, spent, reserved []int64
+		var requests, spent, reserved, copiesUnder []int64
 		var units []string
 		for _, u := range c.usage {
 			ids = append(ids, u.id)
@@ -474,8 +464,9 @@ func (c *counters) write(ctx context.Context, tx pgx.Tx, now time.Time, writeTen
 			spent = append(spent, int64(u.spent))
 			reserved = append(reserved, int64(u.reserved))
 			units = append(units, u.unit)
+			copiesUnder = append(copiesUnder, u.copiesUnder)
 		}
-		if _, err := tx.Exec(ctx, sqlWriteUsage, ids, requests, spent, reserved, units); err != nil {
+		if _, err := tx.Exec(ctx, sqlWriteUsage, ids, requests, spent, reserved, units, copiesUnder); err != nil {
 			return err
 		}
 	}

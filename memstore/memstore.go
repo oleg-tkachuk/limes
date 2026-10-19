@@ -99,6 +99,10 @@ type UsageStore struct {
 	// copyCount is how many copies s.copies counts for each capability, so
 	// that admitting one reads one entry rather than every copy.
 	copyCount map[uuid.UUID]int64
+	// copiesUnder is how many copies each capability and those delegated
+	// from it have counted, as its request count counts their requests: a
+	// copy dropped with its capability stays counted under the ancestors.
+	copiesUnder map[uuid.UUID]int64
 
 	// periods counts each tenant's accounting periods: SetTenantBudget with
 	// ResetSpend starts the next one. A ledger entry records the period it
@@ -138,8 +142,8 @@ func hasKey[K comparable, V any](m map[K]V, k K) bool {
 // carries, and each ancestor, under the quota its record carries — counts
 // the copies of its whole subtree against its quota, as it counts their
 // requests and spend: a delegated child does not multiply the copies its
-// root allows. A copy whose capability is no longer on record counts under
-// no ancestor.
+// root allows. A copy stays counted under the ancestors once its
+// capability's counters are dropped, as its requests do.
 func (s *UsageStore) admitCopiesLocked(subject limes.MeterSubject, ancestors []limes.Capability) error {
 	capID, copies := subject.CapabilityID(), subject.Copies()
 	quota := subject.CopyQuota().Bounded(s.maxCopies)
@@ -170,48 +174,34 @@ func (s *UsageStore) admitCopiesLocked(subject limes.MeterSubject, ancestors []l
 		if c.quota.Unlimited {
 			continue
 		}
-		if under := s.subtreeCopiesLocked(c.id); !c.quota.Admits(under + int64(len(added))) {
+		if under := s.copiesUnder[c.id]; !c.quota.Admits(under + int64(len(added))) {
 			return fmt.Errorf("%w: capability %s and those delegated from it count %d, quota %s", meter.ErrCopyLimitExceeded, c.id, under, c.quota)
 		}
 	}
 	return nil
 }
 
-// subtreeCopiesLocked is how many copies the store counts for top and every
-// capability delegated from it, as far as their records reach. s.mu must be
-// held.
-func (s *UsageStore) subtreeCopiesLocked(top uuid.UUID) int64 {
-	var n int64
-	for capID, count := range s.copyCount {
-		if capID == top {
-			n += count
-			continue
-		}
-		ancestors, err := s.lineage(capID)
-		if err != nil {
-			continue // an orphan's place in a tree is no longer known
-		}
-		if slices.ContainsFunc(ancestors, func(a limes.Capability) bool { return a.ID == top }) {
-			n += count
-		}
-	}
-	return n
-}
-
 // putCopyLocked stores a copy's counters, counting the copy for its
-// capability when it is new. s.mu must be held.
+// capability and every ancestor on record when it is new. s.mu must be
+// held.
 func (s *UsageStore) putCopyLocked(key copyKey, cc copyCounter) {
 	if !hasKey(s.copies, key) {
 		s.copyCount[key.capID]++
+		s.copiesUnder[key.capID]++
+		ancestors, _ := s.lineage(key.capID) // admitted on the same chain, under s.mu
+		for _, a := range ancestors {
+			s.copiesUnder[a.ID]++
+		}
 	}
 	s.copies[key] = cc
 }
 
 // dropCopiesLocked removes every copy of each capability gone says, with
-// its count. s.mu must be held.
+// its counts; an ancestor's count of them stands. s.mu must be held.
 func (s *UsageStore) dropCopiesLocked(gone func(uuid.UUID) bool) {
 	maps.DeleteFunc(s.copies, func(k copyKey, _ copyCounter) bool { return gone(k.capID) })
 	maps.DeleteFunc(s.copyCount, func(id uuid.UUID, _ int64) bool { return gone(id) })
+	maps.DeleteFunc(s.copiesUnder, func(id uuid.UUID, _ int64) bool { return gone(id) })
 }
 
 // copyCounter is one Biscuit copy's own counters.
@@ -325,7 +315,9 @@ func NewUsageStore(cfg UsageStoreConfig) (*UsageStore, error) {
 		holds:     map[uuid.UUID]hold{},
 		copies:    map[copyKey]copyCounter{},
 		copyCount: map[uuid.UUID]int64{},
-		periods:   map[uuid.UUID]uint64{},
+
+		copiesUnder: map[uuid.UUID]int64{},
+		periods:     map[uuid.UUID]uint64{},
 
 		byCharge:      map[uuid.UUID]int{},
 		byRef:         map[refKey]int{},

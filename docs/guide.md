@@ -398,7 +398,8 @@ budget ceilings: its zero value counts no copy with limits of its own,
 child counts no more than its parent. It bounds the copies of the
 capability and of everything delegated from it together, as the request and
 budget ceilings bound their requests and spend, so delegating does not
-multiply it. A store counts no more than its own bound either —
+multiply it, and a child's copies stay counted once its usage is dropped. A
+store counts no more than its own bound either —
 `memstore.UsageStoreConfig.MaxCopiesPerCapability` or
 `pgstore.Config.MaxCopiesPerCapability`, `DefaultMaxCopiesPerCapability`
 (1 024) when unset — and refuses a request that would count one more than the
