@@ -91,6 +91,9 @@ type UsageStore struct {
 	// capability.
 	copies    map[copyKey]copyCounter
 	maxCopies int64
+	// copyCount is how many copies s.copies counts for each capability, so
+	// that admitting one reads one entry rather than every copy.
+	copyCount map[uuid.UUID]int64
 
 	// periods counts each tenant's accounting periods: SetTenantBudget with
 	// ResetSpend starts the next one. A ledger entry records the period it
@@ -141,16 +144,27 @@ func (s *UsageStore) admitCopiesLocked(subject limes.MeterSubject) error {
 	if len(added) == 0 {
 		return nil
 	}
-	var counted int64
-	for k := range s.copies {
-		if k.capID == capID {
-			counted++
-		}
-	}
+	counted := s.copyCount[capID]
 	if counted+int64(len(added)) > quota {
 		return fmt.Errorf("%w: capability %s counts %d, quota %d", meter.ErrCopyLimitExceeded, capID, counted, quota)
 	}
 	return nil
+}
+
+// putCopyLocked stores a copy's counters, counting the copy for its
+// capability when it is new. s.mu must be held.
+func (s *UsageStore) putCopyLocked(key copyKey, cc copyCounter) {
+	if !hasKey(s.copies, key) {
+		s.copyCount[key.capID]++
+	}
+	s.copies[key] = cc
+}
+
+// dropCopiesLocked removes every copy of each capability gone says, with
+// its count. s.mu must be held.
+func (s *UsageStore) dropCopiesLocked(gone func(uuid.UUID) bool) {
+	maps.DeleteFunc(s.copies, func(k copyKey, _ copyCounter) bool { return gone(k.capID) })
+	maps.DeleteFunc(s.copyCount, func(id uuid.UUID, _ int64) bool { return gone(id) })
 }
 
 // copyCounter is one Biscuit copy's own counters.
@@ -262,6 +276,7 @@ func NewUsageStore(cfg UsageStoreConfig) (*UsageStore, error) {
 		budgets:   map[uuid.UUID]meter.TenantBudget{},
 		holds:     map[uuid.UUID]hold{},
 		copies:    map[copyKey]copyCounter{},
+		copyCount: map[uuid.UUID]int64{},
 		periods:   map[uuid.UUID]uint64{},
 		erased:    map[uuid.UUID]struct{}{},
 
@@ -724,7 +739,7 @@ func (s *UsageStore) Bump(_ context.Context, req meter.BumpRequest) (meter.BumpR
 		key := copyKeyOf(req.Subject.CapabilityID(), c.RevocationID)
 		cc := s.copies[key]
 		cc.requests++
-		s.copies[key] = cc
+		s.putCopyLocked(key, cc)
 	}
 	u.CapabilityID = req.Subject.CapabilityID()
 	u.RequestCount = next
@@ -971,7 +986,7 @@ func (s *UsageStore) chargeLocked(
 		cc := s.copies[key]
 		cc.spent += req.Amount
 		cc.reserved = max0(cc.reserved - released)
-		s.copies[key] = cc
+		s.putCopyLocked(key, cc)
 		copyIDs = append(copyIDs, c.RevocationID)
 	}
 	entry := ledgerEntry{
@@ -1200,7 +1215,7 @@ func (s *UsageStore) applyHoldLocked(h hold, sign limes.Nanos) {
 		key := copyKeyOf(h.capID, c.RevocationID)
 		cc := s.copies[key]
 		cc.reserved = max0(cc.reserved + sign*h.amount)
-		s.copies[key] = cc
+		s.putCopyLocked(key, cc)
 	}
 }
 
@@ -1460,7 +1475,7 @@ func (s *UsageStore) Refund(_ context.Context, req meter.RefundRequest) (meter.R
 		key := copyKeyOf(e.CapabilityID, id)
 		if cc, ok := s.copies[key]; ok {
 			cc.spent = max0(cc.spent - amount)
-			s.copies[key] = cc
+			s.putCopyLocked(key, cc)
 		}
 	}
 	e.RefundedAmount += amount
@@ -1721,7 +1736,7 @@ func (s *UsageStore) DeleteUsage(_ context.Context, req meter.DeleteUsageRequest
 	defer s.mu.Unlock()
 	s.releaseHoldsLocked(func(id uuid.UUID) bool { return id == capID })
 	s.dropUsageLocked(capID)
-	maps.DeleteFunc(s.copies, func(k copyKey, _ copyCounter) bool { return k.capID == capID })
+	s.dropCopiesLocked(func(id uuid.UUID) bool { return id == capID })
 	s.forgetAncestorLocked(func(id uuid.UUID) bool { return id == capID })
 	return nil
 }
@@ -1750,7 +1765,7 @@ func (s *UsageStore) EraseTenantUsage(_ context.Context, req meter.EraseTenantUs
 	defer s.mu.Unlock()
 	mine := func(capID uuid.UUID) bool { return s.tenantOf[capID] == tenant }
 	maps.DeleteFunc(s.holds, func(_ uuid.UUID, h hold) bool { return h.tenantID == tenant })
-	maps.DeleteFunc(s.copies, func(k copyKey, _ copyCounter) bool { return mine(k.capID) })
+	s.dropCopiesLocked(mine)
 	for id := range s.usage {
 		if mine(id) {
 			s.dropUsageLocked(id)
@@ -1817,7 +1832,7 @@ func (s *UsageStore) PurgeOrphans(_ context.Context, req meter.PurgeOrphansReque
 		s.dropUsageLocked(id)
 	}
 	s.forgetAncestorLocked(func(id uuid.UUID) bool { return batch[id] })
-	maps.DeleteFunc(s.copies, func(k copyKey, _ copyCounter) bool { return batch[k.capID] })
+	s.dropCopiesLocked(func(id uuid.UUID) bool { return batch[id] })
 	// An erased tenant with no record left has no capability to meter.
 	maps.DeleteFunc(s.erased, func(tenant uuid.UUID, _ struct{}) bool { return !s.records.holdsTenant(tenant) })
 	return meter.PurgeOrphansResult{Purged: int64(len(ids))}, nil

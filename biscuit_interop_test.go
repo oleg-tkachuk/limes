@@ -89,6 +89,10 @@ func TestBiscuitPadding(t *testing.T) {
 		{"one pad short", base64.RawURLEncoding.EncodeToString(twoPads) + base64Pad, false},
 		{"one pad too many", base64.URLEncoding.EncodeToString(onePad) + base64Pad, false},
 		{"only padding", strings.Repeat(base64Pad, base64Quantum), false},
+		// "YWI=" is "ab"; the same quantum with spare bits set names no
+		// bytes of its own, and a padded spelling holds no line break either.
+		{"padded, spare bits set", "YWJ" + base64Pad, false},
+		{"padded, a line break", "YW\nI" + base64Pad, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
