@@ -14,6 +14,17 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## pgstore/v0.27.0
+
+- In `onCharged`, `TxFrom(ctx).Conn()` is nil: the connection is the store's.
+  A charge whose transaction `onCharged` ended with SQL of its own (`COMMIT`,
+  `ROLLBACK`) is refused with `ErrChargeTransaction` rather than written
+  outside it.
+- `CheckSchema` refuses a pool whose session role is a superuser, a
+  `BYPASSRLS` role or an owner even when it `SET ROLE` to a runtime role, and
+  `Migrate` scopes every migration of a run to every tenant, not only the
+  first.
+
 ## v0.105.0
 
 - `SignerConfig.Key` is a `SealedKey`: wrap a key with `limes.SealKey(key)`

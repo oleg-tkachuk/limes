@@ -284,6 +284,9 @@ func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, s
 		if err != nil {
 			return refused, err
 		}
+		if err := stillOpen(tx); err != nil {
+			return refused, err
+		}
 	}
 
 	u := c.usage[spec.capID]

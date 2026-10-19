@@ -227,16 +227,28 @@ func TestMigrateRestoresTheScopeWhenTheContextEnds(t *testing.T) {
 	}
 }
 
+// sqlSchemaFunctions lists every function of schema $1 by its signature.
+const sqlSchemaFunctions = `SELECT p.oid::regprocedure::text FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = $1`
+
 // sqlMayCall is whether role $1 may call the schema's function $2.
 const sqlMayCall = `SELECT has_function_privilege($1, $2, 'EXECUTE')`
 
-// The schema's functions are the runtime roles' to call alone: a role that
-// reaches the schema but was not granted by Migrate cannot ask whether any
-// tenant's capability is revoked.
+// The schema's functions — every one of them, so that one a later migration
+// adds without revoking it is caught — are the runtime roles' to call
+// alone: a role that reaches the schema but was not granted by Migrate cannot
+// ask whether any tenant's capability is revoked.
 func TestOnlyRuntimeRolesCallTheFunctions(t *testing.T) {
 	const outsider = "limes_outsider"
 	loginRole(t, outsider, "")
-	for _, fn := range []string{schema + ".is_revoked(uuid, integer)", schema + ".is_biscuit_revoked(bytea[])", schema + ".tenant_visible(uuid)"} {
+	rows, err := owner.Query(t.Context(), sqlSchemaFunctions, schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	functions, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil || len(functions) == 0 {
+		t.Fatalf("the schema's functions = %v, %v; want some", functions, err)
+	}
+	for _, fn := range functions {
 		for role, want := range map[string]bool{appUser: true, outsider: false} {
 			var may bool
 			if err := owner.QueryRow(t.Context(), sqlMayCall, role, fn).Scan(&may); err != nil {
@@ -246,5 +258,24 @@ func TestOnlyRuntimeRolesCallTheFunctions(t *testing.T) {
 				t.Errorf("%s may call %s: %v, want %v", role, fn, may, want)
 			}
 		}
+	}
+}
+
+// A session opened as a role the policies do not hold, that SET ROLE to the
+// runtime role, is refused all the same: RESET ROLE takes it back.
+func TestCheckSchemaRefusesASessionOfAnotherRole(t *testing.T) {
+	ctx := t.Context()
+	err := owner.AcquireFunc(ctx, func(c *pgxpool.Conn) error {
+		if _, err := c.Exec(ctx, "SET ROLE "+pgx.Identifier{appUser}.Sanitize()); err != nil {
+			return err
+		}
+		defer func() { _, _ = c.Exec(context.WithoutCancel(ctx), "RESET ROLE") }()
+		if err := CheckSchema(ctx, c.Conn()); !errors.Is(err, ErrRuntimeRole) {
+			t.Errorf("CheckSchema as the runtime role, in a superuser's session: err = %v, want ErrRuntimeRole", err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

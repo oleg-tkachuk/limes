@@ -91,7 +91,7 @@ func Migrate(ctx context.Context, conn *pgx.Conn, opts MigrateOptions) error {
 	if err := m.LoadMigrations(dir); err != nil {
 		return fmt.Errorf("pgstore: migrate: load: %w", err)
 	}
-	if err := migrateAllTenants(ctx, conn, m.Migrate); err != nil {
+	if err := runMigrations(ctx, conn, m); err != nil {
 		return err
 	}
 	return grant(ctx, conn, opts.RuntimeRoles)
@@ -103,6 +103,23 @@ const (
 	sqlSetSession = `SELECT set_config($1, $2, false)`
 	sqlSettingNow = `SELECT coalesce(current_setting($1, true), '')`
 )
+
+// runMigrations runs m's migrations on conn scoped to every tenant, each of
+// them: tern resets the session's settings after every migration, so the
+// scope is set again as each one starts. A scope that cannot be set fails
+// the run.
+func runMigrations(ctx context.Context, conn *pgx.Conn, m *migrate.Migrator) error {
+	var scopeErr error
+	m.OnStart = func(int32, string, string, string) {
+		if _, err := conn.Exec(ctx, sqlSetSession, SettingAllTenants, SettingAllTenantsOn); err != nil && scopeErr == nil {
+			scopeErr = fmt.Errorf("pgstore: migrate: scope a migration to every tenant: %w", err)
+		}
+	}
+	if err := migrateAllTenants(ctx, conn, m.Migrate); err != nil {
+		return err
+	}
+	return scopeErr
+}
 
 // restoreScopeTimeout bounds putting the session's scope back after a run,
 // which goes ahead when the caller's context is done: the connection is the
@@ -266,16 +283,19 @@ var ErrRuntimeRole = errors.New("pgstore: the store is served by a role row-leve
 // every role it can act as or inherits from: a superuser; a role with
 // BYPASSRLS; an owner of the schema $1, or of a table, sequence, view or
 // function in it, which may disable its row-level security, drop a policy or
-// replace the functions the policies and revocation checks call.
+// replace the functions the policies and revocation checks call. It asks of
+// the session's role as well as the current one: a session opened as one of
+// these that SET ROLE to another can RESET ROLE back.
 const sqlRuntimeRole = `
+WITH serving (role) AS (VALUES (current_user), (session_user))
 SELECT
-    EXISTS (SELECT 1 FROM pg_roles r WHERE r.rolsuper AND pg_has_role(current_user, r.oid, 'MEMBER')),
-    EXISTS (SELECT 1 FROM pg_roles r WHERE r.rolbypassrls AND pg_has_role(current_user, r.oid, 'MEMBER')),
-    EXISTS (SELECT 1 FROM pg_namespace n WHERE n.nspname = $1 AND pg_has_role(current_user, n.nspowner, 'MEMBER'))
-    OR EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-               WHERE n.nspname = $1 AND pg_has_role(current_user, c.relowner, 'MEMBER'))
-    OR EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-               WHERE n.nspname = $1 AND pg_has_role(current_user, p.proowner, 'MEMBER'))`
+    EXISTS (SELECT 1 FROM serving s, pg_roles r WHERE r.rolsuper AND pg_has_role(s.role, r.oid, 'MEMBER')),
+    EXISTS (SELECT 1 FROM serving s, pg_roles r WHERE r.rolbypassrls AND pg_has_role(s.role, r.oid, 'MEMBER')),
+    EXISTS (SELECT 1 FROM serving s, pg_namespace n WHERE n.nspname = $1 AND pg_has_role(s.role, n.nspowner, 'MEMBER'))
+    OR EXISTS (SELECT 1 FROM serving s, pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+               WHERE n.nspname = $1 AND pg_has_role(s.role, c.relowner, 'MEMBER'))
+    OR EXISTS (SELECT 1 FROM serving s, pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+               WHERE n.nspname = $1 AND pg_has_role(s.role, p.proowner, 'MEMBER'))`
 
 // CheckSchema is a readiness check for the stores over db. It returns
 // ErrSchemaMismatch when the schema is not at the version this package

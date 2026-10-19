@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/jackc/pgx/v5"
@@ -29,8 +30,9 @@ var ErrChargeTransaction = errors.New("pgstore: the charge's transaction is the 
 // pgx.ErrTxClosed, and a call still running then is waited for before the
 // store writes the charge. Calls are taken one at a time, as a pgx.Tx needs.
 // Commit and Rollback return ErrChargeTransaction; a savepoint (Begin) is
-// onCharged's to end. Conn and LargeObjects reach the connection itself, so
-// neither is kept past onCharged either.
+// onCharged's to end. Conn is nil, as the connection is the store's, and a
+// charge whose transaction onCharged ended with SQL of its own — COMMIT,
+// ROLLBACK — is refused with ErrChargeTransaction.
 func TxFrom(ctx context.Context) (pgx.Tx, bool) {
 	tx, ok := ctx.Value(txKey{}).(*callbackTx)
 	if !ok {
@@ -172,11 +174,22 @@ func (t *callbackTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.
 	return row
 }
 
-// Conn is the transaction's connection; nil once onCharged has returned.
-func (t *callbackTx) Conn() *pgx.Conn {
-	var c *pgx.Conn
-	_ = t.guard.run(func() error { c = t.tx.Conn(); return nil })
-	return c
+// Conn is nil: the connection is the store's, and through it onCharged could
+// end the charge's transaction or run beside it.
+func (t *callbackTx) Conn() *pgx.Conn { return nil }
+
+// txStatusInTransaction is the transaction status PostgreSQL reports of a
+// connection in an open transaction block (ReadyForQuery 'T').
+const txStatusInTransaction = 'T'
+
+// stillOpen refuses a charge whose transaction onCharged ended with SQL of
+// its own — COMMIT, ROLLBACK — rather than through the Tx, which refuses:
+// what the store writes next would no longer commit with the charge.
+func stillOpen(tx pgx.Tx) error {
+	if status := tx.Conn().PgConn().TxStatus(); status != txStatusInTransaction {
+		return fmt.Errorf("%w: onCharged ended it (status %q)", ErrChargeTransaction, status)
+	}
+	return nil
 }
 
 // closedRow is a QueryRow on a transaction onCharged no longer holds.
