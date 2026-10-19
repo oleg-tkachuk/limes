@@ -32,7 +32,8 @@ var ErrChargeTransaction = errors.New("pgstore: the charge's transaction is the 
 // Commit and Rollback return ErrChargeTransaction; a savepoint (Begin) is
 // onCharged's to end. Conn is nil, as the connection is the store's, and a
 // charge whose transaction onCharged ended with SQL of its own — COMMIT,
-// ROLLBACK — is refused with ErrChargeTransaction.
+// ROLLBACK, or either followed by BEGIN — is refused with
+// ErrChargeTransaction.
 func TxFrom(ctx context.Context) (pgx.Tx, bool) {
 	tx, ok := ctx.Value(txKey{}).(*callbackTx)
 	if !ok {
@@ -182,12 +183,33 @@ func (t *callbackTx) Conn() *pgx.Conn { return nil }
 // connection in an open transaction block (ReadyForQuery 'T').
 const txStatusInTransaction = 'T'
 
+// sqlCurrentXact is the id of the transaction the statement runs in,
+// assigned first if it has none yet.
+const sqlCurrentXact = `SELECT pg_current_xact_id()::text`
+
+// currentXact is the id of tx's transaction, which stillOpen compares once
+// onCharged returns.
+func currentXact(ctx context.Context, tx pgx.Tx) (string, error) {
+	var xact string
+	err := tx.QueryRow(ctx, sqlCurrentXact).Scan(&xact)
+	return xact, err
+}
+
 // stillOpen refuses a charge whose transaction onCharged ended with SQL of
-// its own — COMMIT, ROLLBACK — rather than through the Tx, which refuses:
-// what the store writes next would no longer commit with the charge.
-func stillOpen(tx pgx.Tx) error {
+// its own — COMMIT, ROLLBACK, or either followed by BEGIN in the same
+// statement — rather than through the Tx, which refuses: what the store
+// writes next would no longer commit with the charge, nor under the locks
+// it took. xact is the transaction's id before onCharged ran.
+func stillOpen(ctx context.Context, tx pgx.Tx, xact string) error {
 	if status := tx.Conn().PgConn().TxStatus(); status != txStatusInTransaction {
 		return fmt.Errorf("%w: onCharged ended it (status %q)", ErrChargeTransaction, status)
+	}
+	now, err := currentXact(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if now != xact {
+		return fmt.Errorf("%w: onCharged ended it and began another", ErrChargeTransaction)
 	}
 	return nil
 }
