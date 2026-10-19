@@ -37,8 +37,8 @@ func main() {
 	must(err, "generate keypair")
 
 	// 2. Wire an issuer and a verifier. Storage is yours — here, in memory.
-	//    UsageStore is generic in the transaction handle; with no transactions
-	//    of our own we instantiate it over struct{} and pass nil callbacks.
+	//    The usage store reads each capability's ancestors from the records,
+	//    and with no side effect of our own each charge passes a nil callback.
 	records, err := memstore.NewStore(memstore.StoreConfig{})
 	must(err, "record store")
 	usage, err := memstore.NewUsageStore(memstore.UsageStoreConfig{Records: records})
