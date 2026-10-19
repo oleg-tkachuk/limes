@@ -1,6 +1,7 @@
 // What a step tells the Actions runner: outputs for later steps, and
 // annotations in the log.
 
+import { randomBytes } from "node:crypto";
 import { appendFileSync } from "node:fs";
 
 import { requireEnv } from "./env.ts";
@@ -38,4 +39,21 @@ export function error(message: string): void {
 
 export function info(message: string): void {
   console.error(message);
+}
+
+// TOKEN_BYTES is how much randomness a stop-commands token carries.
+const TOKEN_BYTES = 16;
+
+// withoutWorkflowCommands runs fn with the runner reading no workflow
+// command from the log until it returns: what fn prints — commit messages a
+// release tool logs, say — can then never act as one. The token that resumes
+// them is fresh and printed only to resume.
+export async function withoutWorkflowCommands<T>(fn: () => Promise<T>): Promise<T> {
+  const token = randomBytes(TOKEN_BYTES).toString("hex");
+  console.log(`::stop-commands::${token}`);
+  try {
+    return await fn();
+  } finally {
+    console.log(`::${token}::`);
+  }
 }

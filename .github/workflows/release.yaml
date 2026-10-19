@@ -28,14 +28,6 @@ concurrency:
   group: release
   cancel-in-progress: false
 
-env:
-  # Each nested module's name in .github/release/modules.cjs, which is also
-  # its directory and the prefix of its tags. release-rules.test.mjs fails
-  # when a module there is not released here.
-  REDISREPLAY_MODULE: redisreplay
-  PGSTORE_MODULE: pgstore
-  OTELMETRIC_MODULE: otelmetric
-
 jobs:
   release:
     name: Tag and publish the release
@@ -43,17 +35,17 @@ jobs:
     # not the control: any write token can send a repository_dispatch, and the
     # payload is the sender's to write. The control is the step below, which
     # asks the API whether the run the payload names passed on main, for the
-    # commit it names (.github/scripts/ci-run-check.sh).
+    # commit it names (.github/ci/ci-run.ts).
     if: github.event.sender.login == 'github-actions[bot]'
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
-      contents: write # semantic-release pushes the tag; gh creates the release
+      contents: write # semantic-release pushes the tag; the API publishes the release
       actions: read # the dispatching CI run and its jobs
     outputs:
       # The root module's release tag this run pushed or published; empty
       # when none.
-      limes-tag: ${{ steps.limes-tag.outputs.tag }}
+      limes-tag: ${{ steps.modules.outputs.limes-tag }}
     steps:
       # No persist-credentials: false — semantic-release pushes the tag it
       # creates, so this is the one checkout here that needs its credentials.
@@ -77,18 +69,20 @@ jobs:
           CI_RUN: ${{ github.event.client_payload.ci_run_id }}
         run: printf 'dispatched by CI run %s for commit %s\n' "${CI_RUN:-unknown}" "${SHA:-unknown}"
 
-      - name: Require the dispatching CI run to have passed
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SHA: ${{ github.event.client_payload.sha }}
-          CI_RUN: ${{ github.event.client_payload.ci_run_id }}
-        run: ./.github/scripts/ci-run-check.sh "$CI_RUN" "$SHA"
-
       # Node and the CI scripts, with no dependency cache — this job holds a
       # write token, and a cache another run wrote is not something to
       # restore into it — and no package's install script.
       - name: Set up the CI scripts
         uses: ./.github/actions/setup-ci
+
+      # The control behind the sender filter above: the API's answer about
+      # the run the payload names. See .github/ci/ci-run.ts.
+      - name: Require the dispatching CI run to have passed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.event.client_payload.sha }}
+          CI_RUN: ${{ github.event.client_payload.ci_run_id }}
+        run: node .github/ci/ci-run.ts vouches "$CI_RUN" "$SHA"
 
       # The checkout above is main's head, which can be newer than the commit
       # whose CI dispatched this run. Only that commit's code is released: a
@@ -121,138 +115,24 @@ jobs:
           SHA: ${{ github.event.client_payload.sha }}
         run: node .github/ci/release-head.ts catch-up "$SHA"
 
-      # What HEAD carried before this run, so the steps after it can tell a tag
-      # it pushed from one an earlier dispatch to the same commit pushed.
-      - name: Note the tags already on HEAD
-        if: steps.catchup.outputs.release == 'true'
-        run: git tag --points-at HEAD >"$RUNNER_TEMP/tags-before"
-
-      # Each module is released on its own line, from the commits that touch
-      # it: the root module first, then each nested one, whose tags carry its
-      # directory (.github/release/modules.cjs). A failure of a nested
-      # module's release leaves the root's published.
-      #
-      # Run where its config and lockfile live; git finds the repository from
-      # there. semantic-release logs every commit message it reads, and this
-      # step holds a write token: no line of that log may act as a workflow
-      # command. See .github/scripts/without-workflow-commands.sh.
-      - name: Compute and push the tag of the root module
-        if: steps.catchup.outputs.release == 'true'
-        working-directory: .github/release
-        run: ../scripts/without-workflow-commands.sh npx semantic-release --no-ci
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # release-notes-file.cjs writes the notes generated from the
-          # commits here, breaking changes first.
-          RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes.md
-
-      # For the job below, which proposes the nested modules' requirement of
-      # it. Noted before the release is published: a re-run publishing a tag
-      # an earlier attempt pushed finds it only while it has no release, and
-      # its nested modules are proposed all the same. See
-      # .github/scripts/new-release-tag.sh.
-      - name: Note the root module's release
-        id: limes-tag
-        if: steps.catchup.outputs.release == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: printf 'tag=%s\n' "$(./.github/scripts/new-release-tag.sh "$RUNNER_TEMP/tags-before")" >>"$GITHUB_OUTPUT"
-
-      # Read from git rather than parsing semantic-release's prose. A tag on
-      # HEAD with no release, left by a run that failed after pushing it, is
-      # published by a re-run — see .github/scripts/new-release-tag.sh.
-      #
-      # Notes for people: the ones semantic-release generated from the
-      # commits — breaking changes first, whatever the pull requests' labels —
-      # then GitHub's list of merged pull requests since the module's previous
-      # tag, shaped by .github/release.yml. A re-run publishing an earlier
-      # run's tag has no generated notes and gets the list alone. Then the Go
-      # proxy is told of the tag, so `go get …@latest` sees it now rather than
-      # whenever the proxy next refreshes; the release stands without it. See
-      # .github/scripts/publish-release.sh.
-      - name: Publish the release of the root module
-        if: steps.catchup.outputs.release == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes.md
-        run: ./.github/scripts/publish-release.sh new "$RUNNER_TEMP/tags-before"
-
-      - name: Compute and push the tag of redisreplay
-        if: steps.catchup.outputs.release == 'true'
-        working-directory: .github/release
-        run: ../scripts/without-workflow-commands.sh npx semantic-release --no-ci
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_MODULE: ${{ env.REDISREPLAY_MODULE }}
-          RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes-redisreplay.md
-
-      - name: Publish the release of redisreplay
-        if: steps.catchup.outputs.release == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes-redisreplay.md
-        run: ./.github/scripts/publish-release.sh new "$RUNNER_TEMP/tags-before" "$REDISREPLAY_MODULE/"
-
-      - name: Compute and push the tag of otelmetric
-        if: steps.catchup.outputs.release == 'true'
-        working-directory: .github/release
-        run: ../scripts/without-workflow-commands.sh npx semantic-release --no-ci
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_MODULE: ${{ env.OTELMETRIC_MODULE }}
-          RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes-otelmetric.md
-
-      - name: Publish the release of otelmetric
-        if: steps.catchup.outputs.release == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes-otelmetric.md
-        run: ./.github/scripts/publish-release.sh new "$RUNNER_TEMP/tags-before" "$OTELMETRIC_MODULE/"
-
-      # pgstore is released only once its tests against the limes its go.mod
-      # requires passed in the dispatching run: a change to limes that pgstore
-      # must follow lands with pgstore, and pgstore waits here, released with
-      # everything since, until the job below raises its requirement to the
-      # limes this run released. See .github/scripts/ci-job-passed.sh.
-      - name: Require pgstore's tests against the released limes
-        id: pgstore-gate
+      # Every module, each on its own line from the commits that touch it
+      # (.github/release/modules.cjs): its tag computed and pushed by the
+      # pinned semantic-release, its GitHub release published — the notes
+      # generated from the commits, breaking changes first, then GitHub's list
+      # of merged pull requests since its previous tag (.github/release.yml) —
+      # and the Go proxy told of it. pgstore waits for its tests against the
+      # released limes to have passed in the dispatching run. Then every tag
+      # an earlier run pushed and left unpublished is published. semantic-
+      # release logs every commit message it reads, and this step holds a
+      # write token: no line of that log may act as a workflow command. See
+      # .github/ci/release.ts.
+      - name: Release every module
+        id: modules
         if: steps.catchup.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CI_RUN: ${{ github.event.client_payload.ci_run_id }}
-        run: ./.github/scripts/ci-job-passed.sh "$CI_RUN" "PostgreSQL store, released limes" >>"$GITHUB_OUTPUT"
-
-      - name: Compute and push the tag of pgstore
-        if: steps.catchup.outputs.release == 'true' && steps.pgstore-gate.outputs.passed == 'true'
-        working-directory: .github/release
-        run: ../scripts/without-workflow-commands.sh npx semantic-release --no-ci
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_MODULE: ${{ env.PGSTORE_MODULE }}
-          RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes-pgstore.md
-
-      - name: Publish the release of pgstore
-        if: steps.catchup.outputs.release == 'true' && steps.pgstore-gate.outputs.passed == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes-pgstore.md
-        run: ./.github/scripts/publish-release.sh new "$RUNNER_TEMP/tags-before" "$PGSTORE_MODULE/"
-
-      # A run that pushed its tag and failed before publishing it is re-run
-      # above only while that tag is still on HEAD. Once main has moved on,
-      # this publishes it: every recent tag below HEAD with no release, as
-      # not the latest, with GitHub's list of merged pull requests for notes.
-      # See .github/scripts/unpublished-tags.sh.
-      - name: Publish releases an earlier run left behind
-        if: steps.catchup.outputs.release == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          ./.github/scripts/publish-release.sh left-behind
-          ./.github/scripts/publish-release.sh left-behind "$REDISREPLAY_MODULE/"
-          ./.github/scripts/publish-release.sh left-behind "$PGSTORE_MODULE/"
-          ./.github/scripts/publish-release.sh left-behind "$OTELMETRIC_MODULE/"
+        run: node .github/ci/release.ts
 
   # Each limes release is followed by a pull request per nested module that
   # raises the module's requirement to it: pgstore is released only once its
@@ -261,7 +141,7 @@ jobs:
   # pushed with GITHUB_TOKEN would get no CI, and its pull request would wait
   # forever on its required check (auto-merge.yaml, which then merges it).
   # Without the secret it warns and does nothing. See
-  # .github/scripts/require-released-limes.sh.
+  # .github/ci/require-limes.ts.
   require-released-limes:
     name: Propose the nested modules' requirement of the released limes
     needs: release
@@ -287,20 +167,16 @@ jobs:
           # run wrote is not something to restore into it.
           cache: false
 
+      - name: Set up the CI scripts
+        uses: ./.github/actions/setup-ci
+
+      # One module's failure leaves the others proposed, and fails the step.
       - name: Propose each nested module's requirement
         env:
           GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
-          REPO: ${{ github.repository }}
           LIMES_TAG: ${{ needs.release.outputs.limes-tag }}
           GIT_AUTHOR_NAME: github-actions[bot]
           GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
           GIT_COMMITTER_NAME: github-actions[bot]
           GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
-        # One module's failure leaves the others proposed, and fails the step.
-        run: |
-          set -uo pipefail
-          failed=0
-          for module in "$REDISREPLAY_MODULE" "$PGSTORE_MODULE" "$OTELMETRIC_MODULE"; do
-            ./.github/scripts/require-released-limes.sh "$module" "$LIMES_TAG" || failed=1
-          done
-          exit "$failed"
+        run: node .github/ci/require-limes.ts "$LIMES_TAG"

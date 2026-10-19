@@ -512,7 +512,7 @@ jobs:
 
   # It waits for the one required check, which stands for every job a merge
   # needs, and for pgstore-released-limes, whose result release.yaml reads to
-  # decide pgstore alone (ci-job-passed.sh), so a release never starts before
+  # decide pgstore alone (.github/ci/release.ts), so a release never starts before
   # it is known.
   dispatch-release:
     name: Dispatch release
@@ -532,32 +532,19 @@ jobs:
     permissions:
       contents: write # POST /repos/{owner}/{repo}/dispatches needs write
     steps:
-      # gh-retry.sh, beside its test: one 5xx must not lose the release.
-      - name: Check out the retry helper
+      - name: Check out the dispatch script
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: .github/scripts
+          sparse-checkout: |
+            .github/ci
+            .github/actions
+
+      - name: Set up the CI scripts
+        uses: ./.github/actions/setup-ci
+
+      # Both values come from Actions itself. See .github/ci/dispatch-release.ts.
       - name: Dispatch the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          source .github/scripts/gh-retry.sh
-          # --input rather than -f: client_payload is nested and the form
-          # syntax cannot express that. Both values come from Actions itself
-          # and arrive through env, so nothing here is substituted into the
-          # script before the shell runs. A file rather than stdin, so a
-          # retry sends it again.
-          payload="$RUNNER_TEMP/dispatch.json"
-          cat >"$payload" <<JSON
-          {
-            "event_type": "release",
-            "client_payload": {
-              "sha": "${GITHUB_SHA}",
-              "ci_run_id": "${GITHUB_RUN_ID}"
-            }
-          }
-          JSON
-          gh_retry api "repos/${GITHUB_REPOSITORY}/dispatches" --input "$payload"
-          printf '%s\n' "dispatched release for ${GITHUB_SHA}"
+        run: node .github/ci/dispatch-release.ts

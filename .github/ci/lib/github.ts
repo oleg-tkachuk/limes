@@ -73,6 +73,39 @@ export interface Comparison {
   files: ChangedFile[];
 }
 
+// WorkflowRun is what the release reads of a workflow run.
+export interface WorkflowRun {
+  path: string;
+  event: string;
+  headBranch: string;
+  headSha: string;
+  repository: string;
+}
+
+// Job is one job of a workflow run; conclusion is undefined until it ends.
+export interface Job {
+  name: string;
+  status: string;
+  conclusion: string | undefined;
+}
+
+// NewRelease is a GitHub release to publish for a tag already pushed.
+export interface NewRelease {
+  tag: string;
+  // notes come first in the body, before GitHub's generated list of the
+  // pull requests merged since previousTag.
+  notes: string;
+  previousTag: string | undefined;
+  // latest marks it Latest; otherwise GitHub is told it is not.
+  latest: boolean;
+}
+
+// PullRequestText is a pull request's title and body.
+export interface PullRequestText {
+  title: string;
+  body: string;
+}
+
 // GitHub is everything the commands ask of the API.
 export interface GitHub {
   pullRequest(number: number): Promise<PullRequest>;
@@ -88,6 +121,19 @@ export interface GitHub {
   // rebaseBranch rebases a pull request's branch onto its base, refused
   // unless its head is expectedHeadSha.
   rebaseBranch(number: number, expectedHeadSha: string): Promise<void>;
+  workflowRun(runId: number): Promise<WorkflowRun>;
+  runJobs(runId: number): Promise<Job[]>;
+  releaseExists(tag: string): Promise<boolean>;
+  // publishRelease publishes a release of a tag the repository holds; one
+  // published already, by a call whose answer was lost, stands.
+  publishRelease(release: NewRelease): Promise<void>;
+  // sameRepoPullRequest is the open pull request from this repository's
+  // branch head into base, if any: a fork's of the same branch name is not.
+  sameRepoPullRequest(head: string, base: string): Promise<number | undefined>;
+  createPullRequest(head: string, base: string, text: PullRequestText): Promise<number>;
+  editPullRequest(number: number, text: PullRequestText): Promise<void>;
+  // dispatch sends a repository_dispatch event of eventType with payload.
+  dispatch(eventType: string, payload: Record<string, string>): Promise<void>;
 }
 
 // MERGE_METHOD is how the automation merges: a merge commit, whose body is
@@ -285,8 +331,82 @@ export function gitHubOver(octokit: Octokit, repo: Repo): GitHub {
       const params = { ...repo, pull_number: number, expected_head_sha: expectedHeadSha, update_method: UPDATE_METHOD };
       await octokit.request("PUT /repos/{owner}/{repo}/pulls/{pull_number}/update-branch", params);
     },
+    async workflowRun(runId) {
+      const { data } = await octokit.rest.actions.getWorkflowRun({ ...repo, run_id: runId });
+      return {
+        path: data.path,
+        event: data.event,
+        headBranch: data.head_branch ?? "",
+        headSha: data.head_sha,
+        repository: data.repository.full_name,
+      };
+    },
+    async runJobs(runId) {
+      const jobs = await octokit.paginate(octokit.rest.actions.listJobsForWorkflowRun, { ...repo, run_id: runId, per_page: PAGE_SIZE });
+      return jobs.map((j) => ({ name: j.name, status: j.status, conclusion: j.conclusion ?? undefined }));
+    },
+    async releaseExists(tag) {
+      return existsBy(() => octokit.rest.repos.getReleaseByTag({ ...repo, tag }));
+    },
+    async publishRelease(release) {
+      // The tag must be pushed already: a release of a missing tag would
+      // create it at the default branch's head.
+      if (!(await existsBy(() => octokit.rest.git.getRef({ ...repo, ref: `tags/${release.tag}` })))) {
+        throw new Error(`tag ${release.tag} is not in the repository`);
+      }
+      const { data: generated } = await octokit.rest.repos.generateReleaseNotes({
+        ...repo,
+        tag_name: release.tag,
+        ...(release.previousTag === undefined ? {} : { previous_tag_name: release.previousTag }),
+      });
+      const body = release.notes === "" ? generated.body : `${release.notes}\n${generated.body}`;
+      try {
+        await octokit.rest.repos.createRelease({
+          ...repo,
+          tag_name: release.tag,
+          name: release.tag,
+          body,
+          ...(release.latest ? {} : { make_latest: MAKE_LATEST_FALSE }),
+        });
+      } catch (err) {
+        if (!(await this.releaseExists(release.tag))) {
+          throw err;
+        }
+      }
+    },
+    async sameRepoPullRequest(head, base) {
+      const { data } = await octokit.rest.pulls.list({ ...repo, head: `${repo.owner}:${head}`, base, state: "open" });
+      return data.find((p) => p.head.repo?.full_name === `${repo.owner}/${repo.repo}`)?.number;
+    },
+    async createPullRequest(head, base, text) {
+      const { data } = await octokit.rest.pulls.create({ ...repo, head, base, title: text.title, body: text.body });
+      return data.number;
+    },
+    async editPullRequest(number, text) {
+      await octokit.rest.pulls.update({ ...repo, pull_number: number, title: text.title, body: text.body });
+    },
+    async dispatch(eventType, payload) {
+      await octokit.rest.repos.createDispatchEvent({ ...repo, event_type: eventType, client_payload: payload });
+    },
   };
 }
+
+// existsBy reports whether lookup finds what it looks for: a 404 is no,
+// any other failure is thrown.
+async function existsBy(lookup: () => Promise<unknown>): Promise<boolean> {
+  try {
+    await lookup();
+    return true;
+  } catch (err) {
+    if (statusOf(err) === NOT_FOUND) {
+      return false;
+    }
+    throw err;
+  }
+}
+
+// MAKE_LATEST_FALSE tells GitHub a release is not the Latest.
+const MAKE_LATEST_FALSE = "false";
 
 // gitHubFor is the GitHub of the repository fullName, owner/name, acting
 // with token.

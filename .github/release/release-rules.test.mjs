@@ -52,7 +52,7 @@ const moduleCases = {
     ["build(otelmetric): require limes v0.64.0", null],
   ],
   // A nested module's own build change is a patch of it: the go.mod its users
-  // resolve has changed. The first is the subject require-released-limes.sh
+  // resolve has changed. The first is the subject .github/ci/require-limes.ts
   // commits, which once merged and released nothing.
   [modules.REDISREPLAY_MODULE]: [
     ["build(redisreplay): require limes v0.64.0", "patch"],
@@ -102,16 +102,8 @@ if (config.tagFormat !== modules.configFor(modules.ROOT_MODULE).tagFormat) {
   console.log(`FAIL release.config.cjs releases ${config.tagFormat} with ${modules.MODULE_ENV} unset`);
   failed = 1;
 }
-// A module here that release.yaml never releases would never be tagged, and
-// nothing would say so: every nested one must be named there.
-const { readFileSync } = await import("node:fs");
-const workflow = readFileSync(new URL("../workflows/release.yaml", import.meta.url), "utf8");
-for (const [name, module] of Object.entries(modules.MODULES)) {
-  if (module.dir !== "" && !new RegExp(`^\\s+[A-Z_]+_MODULE: ${name}$`, "m").test(workflow)) {
-    console.log(`FAIL release.yaml does not release the ${name} module`);
-    failed = 1;
-  }
-}
+// release.yaml releases every module of the table through .github/ci/release.ts,
+// which reads it, so none can be left out.
 
 let unknownRefused = false;
 try {

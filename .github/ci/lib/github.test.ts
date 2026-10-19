@@ -22,7 +22,8 @@ function clientAnswering(answer: (r: Recorded) => { status: number; body: unknow
     const r: Recorded = { method: init?.method ?? "GET", url: String(url), body: init?.body ? JSON.parse(String(init.body)) : undefined };
     sent.push(r);
     const { status, body } = answer(r);
-    return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+    // A 204 carries no body.
+    return new Response(status === 204 ? null : JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   };
   const octokit = new Octokit({ auth: "token", request: { fetch, retries: 0 }, retry: { enabled: false }, throttle: { enabled: false } });
   return { octokit, sent };
@@ -186,5 +187,31 @@ describe("gitHubOver", () => {
     }));
     await gitHubOver(octokit, REPO).openPullRequests("main", 3);
     assert.equal((sent[0]?.body as { variables: { first: number } }).variables.first, 3);
+  });
+
+  test("a nested module's tag reaches the API escaped, as GitHub reads it", async () => {
+    const { octokit, sent } = clientAnswering((r) =>
+      r.url.includes("/releases/tags/") ? { status: 404, body: { message: "Not Found" } } : { status: 200, body: { body: "list" } },
+    );
+    const github = gitHubOver(octokit, REPO);
+    assert.equal(await github.releaseExists("pgstore/v0.29.2"), false);
+    assert.match(sent[0]?.url ?? "", /\/releases\/tags\/pgstore%2Fv0\.29\.2$/);
+    await github.publishRelease({ tag: "pgstore/v0.30.0", notes: "", previousTag: "pgstore/v0.29.2", latest: false });
+    assert.match(sent[1]?.url ?? "", /\/git\/ref\/tags%2Fpgstore%2Fv0\.30\.0$/);
+    assert.deepEqual(sent[2]?.body, { tag_name: "pgstore/v0.30.0", previous_tag_name: "pgstore/v0.29.2" });
+    assert.deepEqual(sent[3]?.body, { tag_name: "pgstore/v0.30.0", name: "pgstore/v0.30.0", body: "list", make_latest: "false" });
+  });
+
+  test("a published release's body is the notes, then GitHub's list", async () => {
+    const { octokit, sent } = clientAnswering(() => ({ status: 200, body: { body: "list" } }));
+    await gitHubOver(octokit, REPO).publishRelease({ tag: "v1.2.3", notes: "notes\n", previousTag: undefined, latest: true });
+    assert.deepEqual(sent[2]?.body, { tag_name: "v1.2.3", name: "v1.2.3", body: "notes\n\nlist" });
+  });
+
+  test("dispatches a release", async () => {
+    const { octokit, sent } = clientAnswering(() => ({ status: 204, body: {} }));
+    await gitHubOver(octokit, REPO).dispatch("release", { sha: "abc", ci_run_id: "1" });
+    assert.match(sent[0]?.url ?? "", /\/dispatches$/);
+    assert.deepEqual(sent[0]?.body, { event_type: "release", client_payload: { sha: "abc", ci_run_id: "1" } });
   });
 });
