@@ -190,6 +190,14 @@ major the module path does not carry.
   its transaction in the context `onCharged` receives and reads it with an
   accessor of its own (`pgstore.TxFrom`); the guarantee that the side effect
   commits with the charge is unchanged.
+- Reports across tenants. **Done** in v0.102.0: `SumCharges` took one tenant
+  and three grouping flags, so a report across tenants meant a query per
+  tenant or reading the store's tables. Its request is now a dimensional
+  query as cost and metering APIs shape theirs — a period, a bucket, a list
+  of dimensions to group by (tenant among them), a filter, a page — so that
+  a dimension is added later without a field or a break. Reading every
+  tenant stays a store scope the consumer grants, not a flag the library
+  trusts.
 - A Postgres reference store in its own module, to prove `Store` and
   `UsageStore` against row-level security before they freeze. **Done:**
   `pgstore`, held to storetest and metertest under row-level security; it

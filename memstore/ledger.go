@@ -30,6 +30,7 @@ func NewLedger(usage *UsageStore) *Ledger {
 type sumKey struct {
 	Bucket time.Time
 	Unit   string
+	Tenant uuid.UUID
 	Op     limes.Op
 	Actor  string
 	CapID  uuid.UUID
@@ -71,28 +72,33 @@ func (l *Ledger) SumCharges(_ context.Context, req meter.SumChargesRequest) (lim
 	return limes.Page[meter.ChargeSum]{Items: sums, Next: sumPlaceOf(sums[len(sums)-1]).encode()}, nil
 }
 
-// sum groups the tenant's charges in the period as req asks.
+// sum groups the charges of the tenant, or of every tenant, in the period
+// and the filter as req asks.
 func (l *Ledger) sum(req meter.SumChargesRequest) ([]meter.ChargeSum, error) {
 	l.usage.mu.Lock()
 	defer l.usage.mu.Unlock()
 	groups := map[sumKey]*meter.ChargeSum{}
 	for _, e := range l.usage.ledger {
-		if e.TenantID != req.TenantID || e.At.Before(req.From) || !e.At.Before(req.To) {
+		if !req.AllTenants && e.TenantID != req.TenantID || e.At.Before(req.From) || !e.At.Before(req.To) ||
+			!req.Filter.Admits(e.TenantID, e.Op, e.Actor, e.CapabilityID) {
 			continue
 		}
 		k := sumKey{Bucket: req.Bucket.Start(e.At), Unit: e.UnitCode}
-		if req.ByOp {
+		if req.Groups(meter.ChargeDimensionTenant) {
+			k.Tenant = e.TenantID
+		}
+		if req.Groups(meter.ChargeDimensionOp) {
 			k.Op = e.Op
 		}
-		if req.ByActor {
+		if req.Groups(meter.ChargeDimensionActor) {
 			k.Actor = e.Actor
 		}
-		if req.ByCapability {
+		if req.Groups(meter.ChargeDimensionCapability) {
 			k.CapID = e.CapabilityID
 		}
 		g, ok := groups[k]
 		if !ok {
-			g = &meter.ChargeSum{BucketStart: k.Bucket, UnitCode: k.Unit, Op: k.Op, Actor: k.Actor, CapabilityID: k.CapID}
+			g = &meter.ChargeSum{BucketStart: k.Bucket, UnitCode: k.Unit, TenantID: k.Tenant, Op: k.Op, Actor: k.Actor, CapabilityID: k.CapID}
 			groups[k] = g
 		}
 		var err error
@@ -122,16 +128,18 @@ func addSum(a, b limes.Nanos) (limes.Nanos, error) {
 
 // sumPlaceOf is s's place in SumCharges' order.
 func sumPlaceOf(s meter.ChargeSum) sumPlace {
-	return sumPlace{Key: sumKey{Bucket: s.BucketStart, Unit: s.UnitCode, Op: s.Op, Actor: s.Actor, CapID: s.CapabilityID}, Charged: s.Charged}
+	return sumPlace{Key: sumKey{Bucket: s.BucketStart, Unit: s.UnitCode, Tenant: s.TenantID, Op: s.Op, Actor: s.Actor, CapID: s.CapabilityID}, Charged: s.Charged}
 }
 
 // compareSums is SumCharges' order: buckets in time order, the largest
-// charged first within one, then the group's fields ascending.
+// charged first within one, then the group's fields ascending — unit,
+// tenant, operation, actor, capability.
 func compareSums(a, b sumPlace) int {
 	return cmp.Or(
 		a.Key.Bucket.Compare(b.Key.Bucket),
 		cmp.Compare(b.Charged, a.Charged),
 		cmp.Compare(a.Key.Unit, b.Key.Unit),
+		bytes.Compare(a.Key.Tenant[:], b.Key.Tenant[:]),
 		cmp.Compare(a.Key.Op, b.Key.Op),
 		cmp.Compare(a.Key.Actor, b.Key.Actor),
 		bytes.Compare(a.Key.CapID[:], b.Key.CapID[:]),

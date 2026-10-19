@@ -111,3 +111,42 @@ func TestWhichStructsCompare(t *testing.T) {
 		}
 	}
 }
+
+// sumLister serves charge sums by cursor, one page per cursor of
+// threeBudgetPages, a sum per id, and records the requests it was asked.
+type sumLister struct {
+	pages map[string]budgetPage
+	reqs  []SumChargesRequest
+}
+
+func (l *sumLister) SumCharges(_ context.Context, req SumChargesRequest) (limes.Page[ChargeSum], error) {
+	l.reqs = append(l.reqs, req)
+	p := l.pages[req.Cursor]
+	sums := make([]ChargeSum, 0, len(p.ids))
+	for _, id := range p.ids {
+		sums = append(sums, ChargeSum{TenantID: id})
+	}
+	return limes.Page[ChargeSum]{Items: sums, Next: p.next}, nil
+}
+
+// AllChargeSums yields every sum of every page, in order, asking each page
+// with the caller's request, only the cursor moving.
+func TestAllChargeSums(t *testing.T) {
+	l := &sumLister{pages: threeBudgetPages()}
+	req := SumChargesRequest{AllTenants: true, GroupBy: []ChargeDimension{ChargeDimensionTenant}, Limit: 2}
+	var got []uuid.UUID
+	for s, err := range AllChargeSums(context.Background(), l, req) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, s.TenantID)
+	}
+	if want := []uuid.UUID{idA, idB, idC, idD}; !slices.Equal(got, want) {
+		t.Errorf("tenants = %v, want %v", got, want)
+	}
+	for i, asked := range l.reqs {
+		if !asked.AllTenants || asked.Limit != req.Limit || !slices.Equal(asked.GroupBy, req.GroupBy) {
+			t.Errorf("page %d asked with %+v, want the caller's request", i, asked)
+		}
+	}
+}

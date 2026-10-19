@@ -14,6 +14,25 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.102.0
+
+- `meter.SumChargesRequest`: `ByOp`, `ByActor` and `ByCapability` are gone;
+  name the dimensions in `GroupBy` instead (`ChargeDimensionOp`,
+  `ChargeDimensionActor`, `ChargeDimensionCapability`, and the new
+  `ChargeDimensionTenant`). The request holds slices now, so it no longer
+  compares with `==`.
+- `SumCharges` sums every tenant's charges with `AllTenants` (exactly one of
+  `TenantID` and `AllTenants`), keeps charges by `Filter`, and fills
+  `ChargeSum.TenantID` when grouped by tenant. A `LedgerReader` of your own
+  does the same, and refuses a sum across tenants under one tenant's scope:
+  metertest checks it.
+
+## pgstore/v0.23.0
+
+- Migration `011_ledger_indexes.sql` indexes the charges by tenant and time
+  and by time; run `Migrate` before deploying. `Ledger.SumCharges` with
+  `AllTenants` runs only under `WithAllTenantsReadOnly` or `WithAllTenants`.
+
 ## pgstore/v0.22.0
 
 - Migration `010_force_row_security.sql` makes row-level security bind the
