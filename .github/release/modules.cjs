@@ -3,7 +3,7 @@
 //
 // It requires nothing: the CI checks evaluate a copy of it from an earlier
 // commit, on its own, to learn which rules a module released by there
-// (.github/scripts/breaking-markers.sh).
+// (.github/ci/lib/modules.ts).
 //
 // A release computes the next SemVer from Conventional Commits, writes the
 // release notes and creates the git tag — nothing else. Run by

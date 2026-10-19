@@ -172,11 +172,11 @@ keep it, each on its own line — and flip its case in
 "Versioning".
 
 **P7 — after 1.0.** semantic-release would tag a break `v2.0.0`, which the Go
-proxy ignores without a `/v2` module path. So `api-break-check.sh` fails any
+proxy ignores without a `/v2` module path. So the API check fails any
 incompatible change on the v1 line, marked or not; a v2 is a deliberate module
-move. **Done:** `api-break-check.sh` and `marker-check.sh`, both reading the
-line through `breaking-markers.sh`, and `major-guard.cjs`, which refuses a
-major the module path does not carry.
+move. **Done:** the API and marker checks in `.github/ci/release-checks.ts`,
+both reading the line through `.github/ci/lib/modules.ts`, and
+`major-guard.cjs`, which refuses a major the module path does not carry.
 
 ## 8. Deferred, then done before 1.0
 
