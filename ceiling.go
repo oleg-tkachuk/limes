@@ -35,10 +35,12 @@ type BudgetCeiling struct {
 
 // CopyQuota bounds how many Biscuit copies of a capability a meter counts
 // — the copies that carry limits of their own, each a counter it keeps: at
-// most Max, or as many as the store allows when Unlimited. Every holder of
-// the capability's copies shares it, as they share its request and budget
-// ceilings. A store counts no more than its own bound either
-// (meter.DefaultMaxCopiesPerCapability), whatever the quota.
+// most Max, or as many as the store allows when Unlimited. It counts the
+// copies of the capability and of every capability delegated from it, as
+// its request and budget ceilings count theirs, so a delegated child does
+// not multiply them. A store counts no more than its own bound per
+// capability either (meter.DefaultMaxCopiesPerCapability), whatever the
+// quota.
 type CopyQuota struct {
 	// Max is the most copies counted; 0 counts none, so a copy with limits
 	// of its own is refused. Within 0..MaxIJSONInteger, and 0 when
@@ -117,6 +119,9 @@ func (c RequestCeiling) Within(outer RequestCeiling) bool {
 func (q CopyQuota) Within(outer CopyQuota) bool {
 	return outer.Unlimited || (!q.Unlimited && q.Max <= outer.Max)
 }
+
+// Admits reports whether n copies in all stay within the quota.
+func (q CopyQuota) Admits(n int64) bool { return q.Unlimited || n <= q.Max }
 
 // Bounded is the quota a store holding at most bound copies applies: q, or
 // bound when q allows more.

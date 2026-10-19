@@ -132,7 +132,14 @@ func hasKey[K comparable, V any](m map[K]V, k K) bool {
 // admitCopiesLocked refuses copies that would take the subject's capability
 // past its quota of counted copies — its own, bounded by the store's — the
 // ones it already counts aside. s.mu must be held.
-func (s *UsageStore) admitCopiesLocked(subject limes.MeterSubject) error {
+//
+// Every capability on the chain — the subject's, under the quota its token
+// carries, and each ancestor, under the quota its record carries — counts
+// the copies of its whole subtree against its quota, as it counts their
+// requests and spend: a delegated child does not multiply the copies its
+// root allows. A copy whose capability is no longer on record counts under
+// no ancestor.
+func (s *UsageStore) admitCopiesLocked(subject limes.MeterSubject, ancestors []limes.Capability) error {
 	capID, copies := subject.CapabilityID(), subject.Copies()
 	quota := subject.CopyQuota().Bounded(s.maxCopies)
 	added := map[copyKey]bool{}
@@ -148,7 +155,46 @@ func (s *UsageStore) admitCopiesLocked(subject limes.MeterSubject) error {
 	if counted+int64(len(added)) > quota {
 		return fmt.Errorf("%w: capability %s counts %d, quota %d", meter.ErrCopyLimitExceeded, capID, counted, quota)
 	}
+	chain := []struct {
+		id    uuid.UUID
+		quota limes.CopyQuota
+	}{{capID, subject.CopyQuota()}}
+	for _, a := range ancestors {
+		chain = append(chain, struct {
+			id    uuid.UUID
+			quota limes.CopyQuota
+		}{a.ID, a.Caveats.Copies})
+	}
+	for _, c := range chain {
+		if c.quota.Unlimited {
+			continue
+		}
+		if under := s.subtreeCopiesLocked(c.id); !c.quota.Admits(under + int64(len(added))) {
+			return fmt.Errorf("%w: capability %s and those delegated from it count %d, quota %s", meter.ErrCopyLimitExceeded, c.id, under, c.quota)
+		}
+	}
 	return nil
+}
+
+// subtreeCopiesLocked is how many copies the store counts for top and every
+// capability delegated from it, as far as their records reach. s.mu must be
+// held.
+func (s *UsageStore) subtreeCopiesLocked(top uuid.UUID) int64 {
+	var n int64
+	for capID, count := range s.copyCount {
+		if capID == top {
+			n += count
+			continue
+		}
+		ancestors, err := s.lineage(capID)
+		if err != nil {
+			continue // an orphan's place in a tree is no longer known
+		}
+		if slices.ContainsFunc(ancestors, func(a limes.Capability) bool { return a.ID == top }) {
+			n += count
+		}
+	}
+	return n
 }
 
 // putCopyLocked stores a copy's counters, counting the copy for its
@@ -708,7 +754,7 @@ func (s *UsageStore) Bump(_ context.Context, req meter.BumpRequest) (meter.BumpR
 	if err != nil {
 		return meter.BumpReceipt{}, err
 	}
-	if err := s.admitCopiesLocked(req.Subject); err != nil {
+	if err := s.admitCopiesLocked(req.Subject, ancestors); err != nil {
 		return meter.BumpReceipt{}, err
 	}
 	u := s.usage[req.Subject.CapabilityID()]
@@ -806,7 +852,7 @@ func (s *UsageStore) Charge(
 	if err != nil {
 		return meter.ChargeReceipt{}, err
 	}
-	if err := s.admitCopiesLocked(req.Subject); err != nil {
+	if err := s.admitCopiesLocked(req.Subject, ancestors); err != nil {
 		return meter.ChargeReceipt{}, err
 	}
 	return s.chargeLocked(ctx, req, unit, ancestors, nil, onCharged)
@@ -1161,7 +1207,7 @@ func (s *UsageStore) Reserve(_ context.Context, req meter.ReserveRequest) (meter
 	if err != nil {
 		return meter.Reservation{}, err
 	}
-	if err := s.admitCopiesLocked(req.Subject); err != nil {
+	if err := s.admitCopiesLocked(req.Subject, ancestors); err != nil {
 		return meter.Reservation{}, err
 	}
 

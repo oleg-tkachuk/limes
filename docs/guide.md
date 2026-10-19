@@ -395,8 +395,10 @@ as it likes, so the issuer bounds how many a meter counts for the capability
 — `Caveats.Copies`, a `CopyQuota` signed into the token like the request and
 budget ceilings: its zero value counts no copy with limits of its own,
 `CopyQuota{Unlimited: true}` as many as the store allows, and a delegated
-child counts no more than its parent. Every holder of the capability's
-copies shares it. A store counts no more than its own bound either —
+child counts no more than its parent. It bounds the copies of the
+capability and of everything delegated from it together, as the request and
+budget ceilings bound their requests and spend, so delegating does not
+multiply it. A store counts no more than its own bound either —
 `memstore.UsageStoreConfig.MaxCopiesPerCapability` or
 `pgstore.Config.MaxCopiesPerCapability`, `DefaultMaxCopiesPerCapability`
 (1 024) when unset — and refuses a request that would count one more than the
