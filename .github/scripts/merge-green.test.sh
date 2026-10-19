@@ -6,7 +6,7 @@
 # token.
 #
 # A fake gh stands in for the API. It logs every call's arguments to CALLS;
-# `pr view` answers from the FAKE_* variables, the files API with FAKE_FILES —
+# `pr view` answers from the FAKE_* variables, the compare API with FAKE_FILES —
 # one path a line, or old>new for a rename — shaped as GitHub answers and
 # put through the script's own --jq,
 # a collaborator's permission from FAKE_PERMISSIONS keyed by login (a login
@@ -32,12 +32,12 @@ case "$1 $2" in
     "pr merge")
         [ -z "${FAKE_MERGE_FAILS:-}" ] || { echo "GraphQL: Head branch was modified" >&2; exit 1; }
         ;;
-    "api repos/"*/files)
+    "api repos/"*/compare/*)
         while [ "$1" != --jq ]; do shift; done
         printf '%s\n' "$FAKE_FILES" | jq -R -s '
-            split("\n") | map(select(. != "") | split(">")
+            {files: split("\n") | map(select(. != "") | split(">")
                 | if length == 2 then {filename: .[1], previous_filename: .[0], status: "renamed"}
-                  else {filename: .[0], status: "modified"} end)' | jq -r "$2"
+                  else {filename: .[0], status: "modified"} end)}' | jq -r "$2"
         ;;
     "api repos/"*/permission)
         login="${2%/permission}"
@@ -114,6 +114,15 @@ check "a count that is not one" false FAKE_CHANGED=null
 check "more files changed than listed" false FAKE_FILES="verifier.go" FAKE_CHANGED=2
 # More files listed than GitHub counts: the answers are of different heads.
 check "more files listed than changed" false FAKE_FILES="$(printf 'a.go\nb.go')" FAKE_CHANGED=1
+# The compare API lists no more than its cap: a listing that reaches it may
+# have left a CI definition out.
+check "as many files as the compare API lists" false FAKE_FILES="$(seq -f 'f%g.go' 300)"
+
+# The files read are the tested commit's, not those of a head that may have
+# moved and come back.
+check "Go source, listed at the tested commit" true
+grep -q -- "^api repos/$REPO/compare/main\.\.\.$SHA " "$CALLS" || fail "files not listed at the tested commit: $(grep '^api' "$CALLS" | tr '\n' ';')"
+
 # A refused merge — the head moved between the read and the merge — is
 # reported and leaves the pull request as it is.
 check "a merge GitHub refuses" true FAKE_MERGE_FAILS=1
