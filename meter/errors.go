@@ -31,8 +31,9 @@ var (
 	ErrReservationNotFound error = &familyError{"limes: reservation not found", limes.ErrNotFound}
 
 	// ErrCopyLimitExceeded — counting one more Biscuit copy of the
-	// capability would pass the store's quota of copies per capability
-	// (Meter, "Copies of a Biscuit"). The request is refused and nothing is
+	// capability would pass the copy quota of the capability or of an
+	// ancestor (limes.Caveats.Copies), or the store's bound of copies per
+	// capability (Meter, "Copies of a Biscuit"). The request is refused and nothing is
 	// counted. Matches ErrRequestLimitExceeded: the capability has used what
 	// it may.
 	ErrCopyLimitExceeded error = &familyError{"limes: copy limit exceeded", limes.ErrRequestLimitExceeded}

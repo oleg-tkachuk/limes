@@ -8,13 +8,16 @@
 // refusals a ceiling answers with — [limes.ErrRequestLimitExceeded],
 // [limes.ErrBudgetExceeded], [limes.ErrTenantBudgetExceeded] — are limes's,
 // so [limes.Verifier.ErrorResponse] answers a metering refusal as it answers
-// a verification one.
+// a verification one. A call for a tenant whose usage was erased is refused
+// with [limes.ErrTenantErased], a kind of [limes.ErrRevoked].
 //
 // # What you implement
 //
 // [UsageStore] — request and spend counters and the charges ledger; the
 // union of [Meter], [MeterReader], [TenantBudgets] and [UsageHousekeeping].
-// Every charge and request also counts against each ancestor; see
+// Every charge and request also counts against each ancestor, and every
+// Biscuit copy with limits of its own against the copy quota of the
+// capability and of each ancestor; see
 // "Transactions" below. More
 // are needed only with the feature they serve: [CopyUsageReader] to show a
 // Biscuit copy's own counters, [LedgerReader] to sum a tenant's charges, and
@@ -26,7 +29,9 @@
 // Meter.Charge and Meter.Settle take an onCharged callback that runs inside
 // the charge, receiving the charge's receipt (Charged) and a context that
 // carries the store's transaction, so a side effect such as an outbox write
-// commits atomically with the spend and names the charge. The store puts
+// commits atomically with the spend and names the charge. The transaction is
+// onCharged's to write through while it runs, and the store's to end:
+// onCharged never commits or rolls it back. The store puts
 // its transaction there and reads it back with an accessor of its own —
 // pgstore.TxFrom — so neither the contract nor a caller holding a
 // UsageStore names a transaction type, and one service can meter through

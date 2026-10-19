@@ -16,7 +16,9 @@
 // NewLedger reads a usage store's ledger as a meter.LedgerReader, NewCensus
 // counts a record store's records as a limes.RecordCensus, and the
 // stores erase a tenant as limes.TenantRecordEraser and
-// meter.TenantUsageEraser.
+// meter.TenantUsageEraser; EraseTenantUsage leaves a mark on the usage
+// store's Records store, whose Insert then refuses the tenant with
+// limes.ErrTenantErased until PurgeOrphans forgets it.
 //
 // It is NOT a production store: each store keeps its maps behind one mutex,
 // which the usage store holds while onCharged runs, nothing survives a

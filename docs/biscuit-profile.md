@@ -74,9 +74,13 @@ A copy limit must be within the capability's own limit and every enclosing
 copy's. A verifier refuses a token carrying a copy limit unless its
 `BiscuitConfig.MeterCopies` says the meter behind it counts copies
 (`ErrCopyCountersNotMetered`). A copy limit makes the copy one the meter
-counts, and a meter counts no more copies than the capability's quota
-(`Caveats.Copies`, which no block changes) and its store's bound allow
-(`ErrCopyLimitExceeded`).
+counts. The capability's quota (`Caveats.Copies`, signed in its token, which
+no block changes) bounds the copies counted for it and for every capability
+delegated from it, as its request and budget ceilings bound theirs; a
+delegated child's quota is within its parent's. A copy once counted stays
+counted under the ancestors after its own capability's usage is dropped. A
+meter also counts no more copies per capability than its store's bound; past
+either, a call is refused with `ErrCopyLimitExceeded`.
 
 ## What limes refuses
 

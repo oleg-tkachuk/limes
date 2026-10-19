@@ -37,7 +37,9 @@ type IssuanceStore interface {
 	// store that scopes rows by tenant sees all of it. A refused record is
 	// not written. A
 	// store that knows tenants returns ErrUnknownTenant or ErrTenantDeleted
-	// for a tenant it cannot mint for.
+	// for a tenant it cannot mint for. A store beside a meter.TenantUsageEraser
+	// refuses a tenant whose usage it erased as ErrTenantErased, until
+	// PurgeOrphans forgets the mark.
 	Insert(ctx context.Context, req InsertRequest) error
 
 	// IsRevoked reports whether the capability, or any ancestor of it

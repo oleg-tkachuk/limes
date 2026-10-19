@@ -129,10 +129,10 @@ own, pgstore included, logging what happens.
 |---|---|
 | **Verify** | Local Ed25519 JWT verification (`alg: Ed25519`, RFC 9864) against a resolved key — static, or an issuer's JWKS fetched by `jwks.Remote`, which revalidates by ETag and honours `Cache-Control`. Claims are read strictly: no unknown or duplicate member, integers within I-JSON's range. Rejections match sentinel errors (`errors.Is`) in families — `ErrUnauthenticated` over `ErrInvalidToken` and `ErrProofOfPossession` — and kinds that must not tell an attacker which check failed share `ErrInvalidToken`. |
 | **Enforce** | `Authorize` verifies and checks every stateless caveat in one call: allowed ops, resource prefixes matched at `/` boundaries (a `.` or `..` segment never matches), idempotency keys for writes, tainted reads, source networks. Request and budget limits are the `Meter`'s. |
-| **Delegate** | `Issuer.Delegate` issues a child that may only be narrower — operations, resources, limits and audience; anything wider is `ErrDelegationTooWide`. Its validity window is fitted inside the parent's: a TTL past the parent's expiry is clipped to it, and a `NotBefore` before the parent's start is raised to it. The child counts in the parent's unit; naming another is `ErrUnitCodeMismatch`. The parent must allow `OpShare`, or the delegation is `ErrOpNotAllowed`, and an expired or revoked parent delegates nothing. |
-| **Attenuate offline** | The Biscuit v3 form of a capability can be narrowed by its holder with no key and no network; each copy can get its own limits and be revoked on its own. |
+| **Delegate** | `Issuer.Delegate` issues a child that may only be narrower — operations, resources, limits and audience; anything wider is `ErrDelegationTooWide`. Its validity window is fitted inside the parent's: a TTL past the parent's expiry is clipped to it, and a `NotBefore` before the parent's start is raised to it. The child counts in the parent's unit; naming another is `ErrUnitCodeMismatch`, a conflict (`ErrConflict`, 409). The parent must allow `OpShare`, or the delegation is `ErrOpNotAllowed`, and an expired or revoked parent delegates nothing. |
+| **Attenuate offline** | The Biscuit v3 form of a capability can be narrowed by its holder with no key and no network; each copy can get its own limits — as many copies with limits as the quota signed in the token (`Caveats.Copies`) allows across the delegation chain — and be revoked on its own. |
 | **Bind to a key** | RFC 9449 DPoP: `Verify` refuses a key-bound capability without a fresh proof from that key, presented under the `DPoP` scheme; server nonces (`dpop.HMACNonces`) work across replicas without shared state. |
-| **Meter** | Requests count against the capability and every ancestor; spend against those and the tenant, atomically with your own side effect. Reserve an estimate, settle the actual cost, refund a charge. Amounts are exact integers of billionths of an ISO 4217 unit. `otelmetric.Instrument`, a module of its own, adds OpenTelemetry instruments. |
+| **Meter** | Requests count against the capability, every ancestor and each Biscuit copy with limits presented; spend against those and the tenant, atomically with your own side effect. Each copy with limits of its own counts against the copy quota of the capability and of every ancestor. Reserve an estimate, settle the actual cost, refund a charge. Amounts are exact integers of billionths of an ISO 4217 unit. `otelmetric.Instrument`, a module of its own, adds OpenTelemetry instruments. |
 | **Revoke** | One call stops a capability and everything delegated from it; verifiers learn of it within a cache TTL, or at once on `Clear`, which `pgstore.RevocationWatcher` calls on every revocation. |
 | **Report** | `LedgerReader.SumCharges` sums the charges of one tenant or of every tenant over a period by unit, whole or by UTC hour, day, ISO week or month, grouped by any of tenant, operation, actor and capability and filtered by them, the largest first. `RecordCensus.CountRecords` counts capability records — active, expired, revoked, delegated, expiring soon — for one tenant or all, by tenant and principal type. |
 | **Answer refusals** | `ErrorResponse` maps a refusal to its status, an RFC 6750 / RFC 9449 `WWW-Authenticate` challenge and an RFC 9457 problem body, without the error's own text. |
@@ -145,6 +145,9 @@ DPoP replay cache or nonce source). Metering lives in the package `meter`, so
 a service that only verifies tokens never imports it. A charge runs your
 callback inside the store's transaction — `pgstore.TxFrom` reads it from the
 callback's context — so it can commit together with, say, an outbox write.
+The transaction stays the store's: the callback writes through it and never
+commits or rolls it back (`pgstore.ErrChargeTransaction`), and it closes when
+the callback returns.
 Optional contracts serve one feature each: `BiscuitRevocationStore` and
 `meter.CopyUsageReader` for Biscuit copies, `meter.LedgerReader` for billing
 reads, `RecordCensus` for a census of records, and `TenantRecordEraser` and
@@ -159,6 +162,10 @@ reads, `RecordCensus` for a census of records, and `TenantRecordEraser` and
   resource the parent cannot; an offline Biscuit block that asks for more
   invalidates the token.
 - **A bound token needs its key**, and its children stay bound.
+- **Keys never reach a log.** A signing key is held as a `SealedKey`
+  (`SealKey`) and HMAC nonce keys as `dpop.NonceKeys` (`dpop.SealNonceKeys`):
+  under any format verb, in JSON and in slog they print redacted, and both
+  keep a copy, so the caller may clear its own.
 - **The token format is pinned.** Golden fixtures in `testdata/` fail CI on any
   wire-format drift, because tokens outlive deployments.
 - **No hidden dependencies.** `isolation_test.go` fails if a database driver,

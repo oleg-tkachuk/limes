@@ -55,7 +55,9 @@
 //     ancestors deep. No transactions required; an
 //     in-memory map is a valid implementation. A store that scopes calls to
 //     a tenant refuses one whose request names another with
-//     [ErrScopeMismatch].
+//     [ErrScopeMismatch]. A store paired with a meter.TenantUsageEraser
+//     refuses Insert for a tenant whose usage was erased with
+//     [ErrTenantErased].
 //   - [meter.UsageStore] — request and spend counters and the charges
 //     ledger, for a consumer that meters; see package meter.
 //   - [KeyResolver] — public verification keys. [jwks.Static] ships as a
@@ -87,8 +89,8 @@
 //
 // Rejections are matchable sentinels, so a consumer can map each to its own
 // transport status, or let Verifier.ErrorResponse map it to HTTP. A
-// charge rejected by any ceiling — the capability's, an ancestor's, the
-// tenant's — leaves every counter and the ledger unmutated, so retrying after
+// charge rejected by any ceiling — a Biscuit copy's, the capability's, an
+// ancestor's, the tenant's — leaves every counter and the ledger unmutated, so retrying after
 // a rejection is safe. Delegation needs [OpShare] on the parent and can only
 // narrow: any widening returns
 // [ErrDelegationTooWide], and a differing unit code returns
