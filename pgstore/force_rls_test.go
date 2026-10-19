@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -261,21 +262,27 @@ func TestOnlyRuntimeRolesCallTheFunctions(t *testing.T) {
 	}
 }
 
-// A session opened as a role the policies do not hold, that SET ROLE to the
-// runtime role, is refused all the same: RESET ROLE takes it back.
+// A session opened as a role the policies do not hold, that SET ROLE or SET
+// SESSION AUTHORIZATION to the runtime role, is refused all the same: RESET
+// takes it back.
 func TestCheckSchemaRefusesASessionOfAnotherRole(t *testing.T) {
 	ctx := t.Context()
-	err := owner.AcquireFunc(ctx, func(c *pgxpool.Conn) error {
-		if _, err := c.Exec(ctx, "SET ROLE "+pgx.Identifier{appUser}.Sanitize()); err != nil {
-			return err
+	for set, reset := range map[string]string{
+		"SET ROLE ":                  "RESET ROLE",
+		"SET SESSION AUTHORIZATION ": "RESET SESSION AUTHORIZATION",
+	} {
+		err := owner.AcquireFunc(ctx, func(c *pgxpool.Conn) error {
+			if _, err := c.Exec(ctx, set+pgx.Identifier{appUser}.Sanitize()); err != nil {
+				return err
+			}
+			defer func() { _, _ = c.Exec(context.WithoutCancel(ctx), reset) }()
+			if err := CheckSchema(ctx, c.Conn()); !errors.Is(err, ErrRuntimeRole) {
+				t.Errorf("CheckSchema after %q the runtime role, in a superuser's session: err = %v, want ErrRuntimeRole", strings.TrimSpace(set), err)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
-		defer func() { _, _ = c.Exec(context.WithoutCancel(ctx), "RESET ROLE") }()
-		if err := CheckSchema(ctx, c.Conn()); !errors.Is(err, ErrRuntimeRole) {
-			t.Errorf("CheckSchema as the runtime role, in a superuser's session: err = %v, want ErrRuntimeRole", err)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 }

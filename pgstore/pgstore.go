@@ -103,9 +103,16 @@ const timeResolution = time.Microsecond
 // and a single statement for a revocation check. *pgxpool.Pool and *pgx.Conn
 // implement it.
 type DB interface {
-	Begin(ctx context.Context) (pgx.Tx, error)
+	BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
+
+// txOptions are those of every transaction the store opens. READ COMMITTED
+// whatever the database's default: a call that waits on a lock — a tenant's
+// erase lock, a counter row — reads what committed while it waited, such as
+// the erase it waited for. Under REPEATABLE READ its snapshot would predate
+// the wait.
+var txOptions = pgx.TxOptions{IsoLevel: pgx.ReadCommitted}
 
 // Config configures a store.
 type Config struct {
@@ -250,7 +257,7 @@ func (c conn) inTx(ctx context.Context, fn func(pgx.Tx) error) error {
 // inReadTx runs fn, a call that only reads, in one transaction, scoped
 // first.
 func (c conn) inReadTx(ctx context.Context, fn func(pgx.Tx) error) error {
-	return pgx.BeginFunc(ctx, c.db, func(tx pgx.Tx) error {
+	return pgx.BeginTxFunc(ctx, c.db, txOptions, func(tx pgx.Tx) error {
 		if err := c.scope(ctx, tx); err != nil {
 			return fmt.Errorf("pgstore: scope: %w", err)
 		}

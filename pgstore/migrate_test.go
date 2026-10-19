@@ -239,3 +239,57 @@ func ptrText(p *string) string {
 	}
 	return *p
 }
+
+// errScopeRefused stands in for a scope the session refuses.
+var errScopeRefused = errors.New("scope refused")
+
+// A migration whose scope cannot be set does not run unscoped, even one tern
+// runs outside a transaction, and its version is not recorded: the run fails
+// there.
+func TestAMigrationThatCannotBeScopedDoesNotRun(t *testing.T) {
+	conn := freshConn(t)
+	ctx := t.Context()
+	m, err := migrate.NewMigratorEx(ctx, conn, probeVersionTable, &migrate.MigratorOptions{DisableTx: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.AppendMigration("create the probe", createProbe, "")
+	m.AppendMigration("record the scope", recordProbe, "")
+	scoped := 0
+	original := scopeMigration
+	scopeMigration = func(ctx context.Context, conn *pgx.Conn) error {
+		if scoped++; scoped > 1 {
+			return errScopeRefused
+		}
+		return original(ctx, conn)
+	}
+	t.Cleanup(func() { scopeMigration = original })
+	if err := runMigrations(ctx, conn, m); !errors.Is(err, errScopeRefused) {
+		t.Fatalf("runMigrations with a scope refused: err = %v, want errScopeRefused", err)
+	}
+
+	cfg, err := pgx.ParseConfig(ownerDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Database = freshDatabase
+	after, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = after.Close(context.WithoutCancel(ctx)) }()
+	var recorded int
+	if err := after.QueryRow(ctx, `SELECT count(*) FROM public.scope_probe`).Scan(&recorded); err != nil {
+		t.Fatal(err)
+	}
+	if recorded != 0 {
+		t.Errorf("the migration that could not be scoped ran: %d rows recorded", recorded)
+	}
+	var version int32
+	if err := after.QueryRow(ctx, `SELECT version FROM `+probeVersionTable).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if want := int32(1); version != want {
+		t.Errorf("version after the refused migration = %d, want %d", version, want)
+	}
+}

@@ -130,9 +130,9 @@ type countingDB struct {
 	begins, statements atomic.Int64
 }
 
-func (d *countingDB) Begin(ctx context.Context) (pgx.Tx, error) {
+func (d *countingDB) BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error) {
 	d.begins.Add(1)
-	return d.DB.Begin(ctx)
+	return d.DB.BeginTx(ctx, opts)
 }
 
 func (d *countingDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
