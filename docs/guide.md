@@ -207,14 +207,15 @@ delegated, err := issuer.Delegate(ctx, limes.DelegateRequest{ // .Capability, .T
 ```
 
 A ceiling's zero value allows nothing: a capability that should make requests
-or spend names a `Max`, or `Unlimited: true` to lift the ceiling — so a ceiling
-left out fails closed instead of opening up.
+or spend names a `Max`, or `Unlimited: true` to lift the ceiling, and so does
+one whose Biscuit copies should carry limits of their own (`Copies`, a
+`CopyQuota`) — so a ceiling left out fails closed instead of opening up.
 
 **The rule**: only a parent granted `OpShare` may delegate — without it,
 `ErrOpNotAllowed` — and a child may only be narrower. `Issuer.Biscuit`
 requires `OpShare` too: whoever holds a Biscuit form attenuates it and hands
 it on offline, so a capability that must not be passed on gets none. Ask for an operation the parent
-lacks, a wider scope, a bigger budget, a wider audience or another tenant —
+lacks, a wider scope, a bigger budget, a larger copy quota, a wider audience or another tenant —
 or drop the parent's key binding or `IdempotencyKeyRequired`, or grant an
 `AllowTaintedRead` it lacks — and you get `ErrDelegationTooWide`; a
 TTL that would outlive the parent is cut to the parent's expiry, and a child
@@ -402,11 +403,14 @@ multiply it, and a child's copies stay counted once its usage is dropped. A
 store counts no more than its own bound either —
 `memstore.UsageStoreConfig.MaxCopiesPerCapability` or
 `pgstore.Config.MaxCopiesPerCapability`, `DefaultMaxCopiesPerCapability`
-(1 024) when unset — and refuses a request that would count one more than the
-lower of the two with `ErrCopyLimitExceeded`, a kind of
-`ErrRequestLimitExceeded`. A copy already
-counted goes on being metered, and dropping the capability's usage frees its
-quota.
+(1 024) when unset. `Bump`, `Charge` and `Reserve` refuse a call that would
+take the capability's own copies past that bound, or the copies under any
+capability on the chain past its quota, with `ErrCopyLimitExceeded`, a kind
+of `ErrRequestLimitExceeded`, counting nothing. A copy already counted goes on
+being metered. It stays counted under every ancestor once its own
+capability's usage is dropped (`DeleteUsage`, `PurgeOrphans`), as its requests
+and spend do; dropping a capability's own usage restarts its count of copies
+with its other counters.
 A revocation id alone does not name a copy: biscuit-go signs a block without
 the signature before it, so a holder of two Biscuits can graft a block of one
 onto the other, and the same id then turns up under two capabilities. Each
@@ -449,8 +453,8 @@ if errors.Is(err, limes.ErrBudgetExceeded) {
 }
 ```
 
-The subject carries the capability's id, tenant, ceilings, unit and the
-Biscuit copy's limits, all as the token states them: a request has no field
+The subject carries the capability's id, tenant, ceilings, quota of copies,
+unit and the Biscuit copy's limits, all as the token states them: a request has no field
 to type a ceiling into, or to leave at zero and so lift one.
 
 Every ceiling is checked: each Biscuit copy's own, the capability's, each ancestor's, then the tenant aggregate. If **any**
@@ -586,9 +590,9 @@ The ledger row is written after the callback returns, so the callback cannot
 read it back yet; the receipt is what it has.
 
 `Settle` takes the same callback. It must not call back into the `Meter`: a
-store may hold its counters while the callback runs. The module never
-inspects `MyTx` — it only hands it back. That is why this
-library has no database dependency.
+store may hold its counters while the callback runs. The module never names
+the transaction's type — the store puts it in the callback's context and its
+own accessor reads it — which is why this library has no database dependency.
 
 ## Charge a cost reported after the fact
 
@@ -668,15 +672,19 @@ from your store's tests — `storetest` for a `Store` (and a
 
 ```go
 func TestMeterContract(t *testing.T) {
-    metertest.Run(t, func(t *testing.T) metertest.Env[MyTx] {
-        return metertest.Env[MyTx]{Ctx: ctx, Usage: newStore(t), Tenant: tenant,
+    metertest.Run(t, func(t *testing.T) metertest.Env {
+        return metertest.Env{Ctx: ctx, Usage: newStore(t), Tenant: tenant,
             NewCapability: recordCapability,
             Advance: clock.Advance} // optional: reservation-expiry checks, and with Ledger and Now the ledger's bucket checks
     })
 }
 ```
 
-`Ctx` is the context of every call for `Tenant`. A store that refers to its
+`Ctx` is the context of every call for `Tenant`. `NewCapability` records each
+spec's ceilings and its quota of copies (`CapabilitySpec.Copies`) on the
+record, as the `Meter` reads an ancestor's from it. `MaxCopiesPerCapability`
+names the bound the store was built with; without it, the check of that bound
+is skipped. A store that refers to its
 tenants, or scopes each tenant's rows, also sets `NewTenant` (another tenant
 it can charge), `TenantCtx` (the context a write for that tenant runs under)
 and `ListCtx` (the context of `ListTenantBudgets`, a read across tenants). One
@@ -825,6 +833,13 @@ usage, _ := pgstore.NewUsageStore(pgstore.Config{DB: pool})
 err = records.Revoke(pgstore.WithTenant(ctx, tenant), limes.RevokeRequest{CapabilityID: id})
 ```
 
+`Config.DB` is a `pgstore.DB` — `BeginTx` and `QueryRow`, which
+`*pgxpool.Pool` and `*pgx.Conn` implement. Every transaction the store opens
+is READ COMMITTED, whatever the database's default, so a call that waited on
+a lock reads what committed meanwhile; a `DB` of your own passes on the
+`pgx.TxOptions` it is given, or the store runs at the database's default
+isolation.
+
 A role that does not own the tables sees only the rows of the tenant a call
 is scoped to, and none when it is scoped to no tenant; the revocation checks
 see every tenant, as the verifier asks them before it knows the token's. A
@@ -836,18 +851,25 @@ scope that does not admit that tenant returns `ErrScopeMismatch`, never
 `ErrNotFound` or `ErrInvalidRequest`. A call that names only an id
 (`GetRecord`, `Revoke`, `Refund`, `GetUsage`, `GetCharge`, …) cannot
 be checked so, and answers a row out of scope as not found.
-`onCharged` runs on the store's own `pgx.Tx`, which `TxFrom` reads from its
-context and which is `onCharged`'s only while it runs: kept past it, a call
-fails with `pgx.ErrTxClosed`, and `Commit` or `Rollback` on it is
-`ErrChargeTransaction`. Every time it writes comes from
+`onCharged` runs on the store's own transaction, which `TxFrom` reads from
+its context and which is `onCharged`'s only while it runs: kept past it, a
+call fails with `pgx.ErrTxClosed`. It is the store's to end — `Commit` or
+`Rollback` on it returns `ErrChargeTransaction`, and a charge whose
+transaction `onCharged` ended with SQL of its own (`COMMIT`, `ROLLBACK`, or
+either followed by `BEGIN`) is refused with `ErrChargeTransaction`; a
+savepoint it begins is its own to end. Every time it writes comes from
 `Config.Now`, never from the database's clock.
 
 Run `Migrate` as the role that owns the schema and serve as another one. The
 policies bind the owner too (`FORCE ROW LEVEL SECURITY`), and `Migrate` scopes
-its run to every tenant; but the owner may turn them off, and a superuser or a
-role with `BYPASSRLS` is never bound, so `CheckSchema` refuses a pool of any of
-the three — or of a role owning anything in the schema, or able to act as one
-of these — with `ErrRuntimeRole`. `MigrateOptions.RuntimeRoles` grants the
+each migration of its run to every tenant — one whose scope cannot be set
+closes the connection, so it never runs unscoped and the run fails; but the
+owner may turn them off, and a superuser or a role with `BYPASSRLS` is never
+bound, so `CheckSchema` refuses a pool of any of the three — or of a role
+owning anything in the schema, or able to act as one of these — with
+`ErrRuntimeRole`. It checks the session's role and the role the connection
+logged in as as well as the current one, since a session that switched with
+`SET ROLE` or `SET SESSION AUTHORIZATION` can switch back. `MigrateOptions.RuntimeRoles` grants the
 serving roles the schema, its tables and the tables of later versions, the
 schema's functions — which no other role may call — and only reads of the
 version table. Run it before any migration of yours that
@@ -1000,7 +1022,10 @@ ancestors still on record as `ErrDelegationTooDeep`, writing nothing:
 deeper than the walk reaches. It should tell a missing tenant
 from a failure: return
 `ErrUnknownTenant` for a tenant it does not hold and `ErrTenantDeleted` for one
-in the trash. A store that keeps each tenant's rows apart by the call's
+in the trash. A store whose usage store erases tenants
+(`meter.TenantUsageEraser`) refuses a record of a tenant marked erased with
+`ErrTenantErased`, a kind of `ErrRevoked`, until `PurgeOrphans` forgets the
+mark. A store that keeps each tenant's rows apart by the call's
 context returns `ErrScopeMismatch` for a call scoped to another tenant than
 the one its request names, rather than answer as if the rows were not there. `Issue` and `Delegate` pass them through, wrapped, beside
 `ErrInvalidRequest`, which every check on the request itself matches — a
@@ -1016,7 +1041,9 @@ its own where the contract names one: `ErrChargeNotFound` (`Refund`,
 capability never bumped or charged) and `ErrTenantBudgetNotFound`.
 A well-formed write that disagrees with what is on record matches
 `ErrConflict` — map the family to 409 and read again: `ErrAlreadyExists`
-(`Insert`), `ErrExternalRefConflict` (`Charge`) and
+(`Insert`), `ErrUnitCodeMismatch` (`Insert`, `Delegate`, and a `Charge`,
+`Reserve` or `Settle` in another unit than a counter already counts in),
+`ErrExternalRefConflict` (`Charge`), `ErrSettleConflict` (`Settle`) and
 `ErrTenantBudgetVersionMismatch` (`SetTenantBudget`). `ErrorResponse`
 answers the family 409 too.
 
@@ -1084,7 +1111,10 @@ through any `crypto.Signer` whose key is Ed25519 — an `ed25519.PrivateKey`, or
 key held in a KMS or an HSM; the token format stays inside the module. A key is
 held sealed — `limes.SealedKey` (`SigningKey.Private` is one already), and
 `dpop.NonceKeys` for nonce keys — so no formatting of a value that holds it,
-under any verb or from any field, prints it. A key that
+under any verb or from any field, prints it. `SealKey` keeps a copy of an
+`ed25519.PrivateKey`, or of one behind a pointer, and `dpop.SealNonceKeys`
+copies its keys, so clearing or reusing the caller's key afterwards leaves
+the sealed one whole. A key that
 implements `ContextSigner` signs under the request's context, so a slow or
 cancelled call is bounded by the request that asked for the token.
 
@@ -1104,7 +1134,10 @@ if err != nil {
 A malformed `Authorization` header is 400; a bad token or proof is 401, with a
 `Bearer` or `DPoP` challenge naming the error code (and `algs` for DPoP, when the verifier checks proofs); a
 refused operation is 403 `insufficient_scope`; an exhausted budget or request
-limit is 403 with no challenge; an issuer's key set never fetched, out of
+limit is 403 with no challenge; a conflict with what is on record
+(`ErrConflict`: an id already on record, a unit mismatch, an external
+reference or settle naming another cost, a stale budget version) is 409; an
+issuer's key set never fetched, out of
 reach past `MaxStale`, or lacking the token's kid while the endpoint fails, is
 503 — the server's trouble, not the token's; anything else, a store outage or
 a verifier with no `DPoP` given a key-bound token (`ErrProofUnsupported`)
@@ -1125,8 +1158,8 @@ stop rather than retry. The full table is in [diagrams.md](diagrams.md#answering
 | `VerifierConfig.Leeway` | `DefaultLeeway`, 30 seconds; `VerifierConfig.NoLeeway: true` for none |
 | `VerifierConfig.MaxTokenBytes` · `IssuerConfig.MaxTokenBytes` | `DefaultMaxTokenBytes`, 16 KiB |
 | `VerifierConfig.Leeway` bound | `MaxLeeway`, 5 minutes |
-| `VerifierConfig.AcceptTokenTypes` | `TokenTypeV5` |
-| `SignerConfig.TokenType` | `TokenTypeV5` |
+| `VerifierConfig.AcceptTokenTypes` | `TokenTypeV6` (`limes-cap-v6+jwt`), the one format the package reads |
+| `SignerConfig.TokenType` | `TokenTypeV6` |
 | `VerifierConfig.Realm` | `DefaultRealm`, `limes` |
 | `jwks.HandlerConfig.MaxAge` | `jwks.DefaultMaxAge`, 5 minutes; `HandlerConfig.Revalidate: true` for `max-age=0` |
 | `ListByPrincipalRequest.Limit` · `ListTenantBudgetsRequest.Limit` · `ListReservationsRequest.Limit` · `SumChargesRequest.Limit` · `CountRecordsRequest.Limit` | `DefaultListLimit` 50, at most `MaxListLimit` 500 |
@@ -1141,6 +1174,8 @@ stop rather than retry. The full table is in [diagrams.md](diagrams.md#answering
 | `redisreplay.Config` | `redisreplay.DefaultKeyPrefix`, `limes:dpop:replay:`; `dpop.DefaultReplayEntriesPerHolder`, 1 000, per capability |
 | `dpop.HMACNoncesConfig` | `dpop.DefaultNonceLifetime`, 5 minutes; `dpop.HMACNonceClockSkew`, 5 seconds, for a nonce issued ahead of this replica's clock; keys of at least `dpop.HMACNonceKeyBytes`, 32 |
 | `DefaultReservationTTL` | 5 minutes |
+| `memstore.UsageStoreConfig.MaxCopiesPerCapability` · `pgstore.Config.MaxCopiesPerCapability` | `meter.DefaultMaxCopiesPerCapability`, 1 024; negative is refused |
+| `Caveats.Copies` | the zero `CopyQuota`: no copy with limits of its own is counted |
 | `BudgetCeiling.UnitCode` left empty | allowed only on the zero ceiling, which spends nothing |
 | `PurgeClockSkew` | 1 minute |
 | `MaxExternalRefBytes` | 200 |

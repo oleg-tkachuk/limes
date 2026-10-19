@@ -81,7 +81,7 @@ and a `jti` not seen before.
   `dpop.HMACNonces` issues them statelessly — its issuance time and an HMAC of it
   — so replicas sharing a key, with clocks within `dpop.HMACNonceClockSkew` of each
   other, share nonces without sharing state, and keys rotate by putting the
-  new one first. Such a nonce is bound to no client or key and may be reused
+  new one first (`dpop.SealNonceKeys`). Such a nonce is bound to no client or key and may be reused
   until it expires: it bounds how long before use a proof can be signed, and
   no more.
 - **The scheme (§7.1, §7.2).** `ParseAuthorization` reads
@@ -120,6 +120,7 @@ answers alike, and `WriteErrorResponse` writes them:
 | the issuer's JWKS never fetched, unreachable past `MaxStale`, or lacking the token's kid while the endpoint fails | 503 | none |
 | a caveat refuses the operation | 403 | `error="insufficient_scope"` |
 | a request or budget limit is exhausted | 403 | none |
+| a well-formed request that disagrees with what is on record (`ErrConflict`: `ErrAlreadyExists`, `ErrUnitCodeMismatch`, `meter.ErrExternalRefConflict`, `meter.ErrSettleConflict`, `meter.ErrTenantBudgetVersionMismatch`) | 409 | none |
 | anything else — an outage, or a key-bound token at a verifier with no DPoP (`ErrProofUnsupported`) | 500 | none |
 
 A verifier with DPoP configured also adds a `DPoP algs="…"` challenge to a
