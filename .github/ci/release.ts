@@ -31,14 +31,14 @@
 
 import { join } from "node:path";
 
-import { error, info, setOutput, summarize, table, withoutWorkflowCommands } from "./lib/actions.ts";
+import { error, info, notice, setOutput, summarize, table, withoutWorkflowCommands } from "./lib/actions.ts";
 import { optionalEnv, requireEnv } from "./lib/env.ts";
 import { git } from "./lib/git.ts";
 import { gitHubFor, type GitHub } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
 import { ROOT_MODULE, releaseCommits, releasedModules, selectModule, type Module, type ReleaseCommits } from "./lib/modules.ts";
 import { candidateTag } from "./lib/prerelease.ts";
-import { isDue, loadPolicy, pendingCommits, type Policy } from "./lib/release-policy.ts";
+import { isDue, lastStableTag, loadPolicy, pendingCommits, type Policy } from "./lib/release-policy.ts";
 import { newReleaseTag, notesFrom, publish, publishLeftBehind, tagsOnHead, warmGoProxy, type Fetch } from "./lib/releases.ts";
 import { runInherited } from "./lib/spawn.ts";
 import { jobPassed, runIdOf } from "./ci-run.ts";
@@ -99,12 +99,17 @@ export interface Outcome {
   note: string;
 }
 
+// sinceTag is the module's last release, as a note names it.
+async function sinceTag(module: Module, root: string): Promise<string> {
+  return (await lastStableTag(module, "HEAD", root)) ?? "its first commit";
+}
+
 // prereleaseModule tags and publishes the module's next release candidate,
 // if anything is pending.
 export async function prereleaseModule(r: Release, module: Module): Promise<Outcome> {
   const tag = await candidateTag(module, await pendingCommits(module, "HEAD", r.commits, r.root), r.root);
   if (tag === undefined) {
-    return { note: "nothing pending to release a candidate of" };
+    return { note: `no commit since ${await sinceTag(module, r.root)} cuts a release, so no candidate` };
   }
   await git(["tag", tag], r.root);
   await r.pushTag(tag);
@@ -132,7 +137,7 @@ export async function releaseModule(r: Release, module: Module, before: readonly
   await r.runSemanticRelease(module, notesFile);
   const tag = await newReleaseTag(r.github, before, module.prefix, r.root);
   if (tag === undefined) {
-    return { note: "no new tag from this run — no release was due" };
+    return { note: `no commit since ${await sinceTag(module, r.root)} cuts a release` };
   }
   if (module.name === ROOT_MODULE) {
     r.onRootTag(tag);
@@ -179,6 +184,11 @@ export async function releaseAll(r: Release): Promise<boolean> {
     }
   }
   summarize(`### Release (${r.channel}${r.manual ? ", by hand" : ""})\n\n${table(SUMMARY_HEADER, rows)}`);
+  // A run by hand that released nothing says so where it is seen: a green run
+  // with no tag otherwise reads as a release that went missing.
+  if (r.manual && ok && rows.every(([, tag]) => tag === "")) {
+    notice(`nothing ${r.channel === Channel.Prerelease ? "pre-" : ""}released: ${rows.map(([name, , note]) => `${name}: ${note}`).join("; ")}`);
+  }
   return ok;
 }
 
