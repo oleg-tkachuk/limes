@@ -164,3 +164,32 @@ func TestMigrateRestoresTheSessionScope(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A run whose context ends before Migrate puts the session's scope back
+// still puts it back: the connection is the caller's, and a pool would hand
+// it on scoped to every tenant.
+func TestMigrateRestoresTheScopeWhenTheContextEnds(t *testing.T) {
+	err := migrator.AcquireFunc(t.Context(), func(c *pgxpool.Conn) error {
+		if _, err := c.Exec(t.Context(), sqlSetSession, SettingAllTenants, SettingAllTenantsRead); err != nil {
+			return err
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		cancelled := func(context.Context) error { cancel(); return nil }
+		if err := migrateAllTenants(ctx, c.Conn(), cancelled); err != nil {
+			return err
+		}
+		var scope string
+		if err := c.QueryRow(t.Context(), sqlSettingNow, SettingAllTenants).Scan(&scope); err != nil {
+			return err
+		}
+		if scope != SettingAllTenantsRead {
+			t.Errorf("the session's scope after a run its context ended in = %q, want %q as before", scope, SettingAllTenantsRead)
+		}
+		_, err := c.Exec(t.Context(), sqlSetSession, SettingAllTenants, settingUnset)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
