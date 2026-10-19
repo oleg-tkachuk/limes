@@ -198,6 +198,12 @@ major the module path does not carry.
   a dimension is added later without a field or a break. Reading every
   tenant stays a store scope the consumer grants, not a flag the library
   trusts.
+- The quota of Biscuit copies. **Done** in v0.104.0: it was the store's
+  alone, one number for every capability, so the issuer could not say how
+  far a capability's copies may be multiplied. It is now a signed caveat,
+  `Caveats.Copies`, narrowed by delegation like the other ceilings, under
+  the store's own bound; adding it to the claims made the token type v6
+  (P5).
 - A Postgres reference store in its own module, to prove `Store` and
   `UsageStore` against row-level security before they freeze. **Done:**
   `pgstore`, held to storetest and metertest under row-level security; it

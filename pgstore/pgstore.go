@@ -190,7 +190,7 @@ type conn struct {
 	// admits fewer.
 	checkEvery func(ctx context.Context, tx pgx.Tx) error
 	// maxCopies is Config.MaxCopiesPerCapability, its default applied.
-	maxCopies int
+	maxCopies int64
 }
 
 func newConn(cfg Config) (conn, error) {
@@ -218,7 +218,7 @@ func newConn(cfg Config) (conn, error) {
 		db: cfg.DB, now: cfg.Now, scope: cfg.Scope,
 		checkTenant: cfg.CheckTenant, checkScope: cfg.CheckScope,
 		checkReadOnly: checkReadOnly, checkEvery: checkEvery,
-		maxCopies: cfg.MaxCopiesPerCapability,
+		maxCopies: int64(cfg.MaxCopiesPerCapability),
 	}, nil
 }
 

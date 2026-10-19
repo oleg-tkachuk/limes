@@ -184,12 +184,19 @@ func TestNarrows_RejectsWidening(t *testing.T) {
 			ResourcePrefixes: []string{"object://acme/"},
 			Budget:           BudgetCeiling{Max: MustParseAmount("1.00")},
 			Requests:         RequestCeiling{Max: 50},
+			Copies:           CopyQuota{Max: 4},
 		},
 		IssuedAt:  now,
 		ExpiresAt: now.Add(15 * time.Minute),
 	}
 
 	cases := map[string]func(c *Capability){
+		"more copies": func(c *Capability) {
+			c.Caveats.Copies = CopyQuota{Max: 5}
+		},
+		"unlimited copies": func(c *Capability) {
+			c.Caveats.Copies = CopyQuota{Unlimited: true}
+		},
 		"extra op": func(c *Capability) {
 			c.Caveats.Ops = append(c.Caveats.Ops, OpDelete)
 		},

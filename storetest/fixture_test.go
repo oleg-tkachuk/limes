@@ -17,7 +17,7 @@ func TestFixturesSetEveryField(t *testing.T) {
 	f := fixture{Env: Env{Tenant: uuid.New()}, now: time.Now()}
 	unset := []string{
 		// Zero beside a Max; checkRoundTrip sets each in a capability of its own.
-		"Caveats.Requests.Unlimited", "Caveats.Budget.Unlimited",
+		"Caveats.Requests.Unlimited", "Caveats.Budget.Unlimited", "Caveats.Copies.Unlimited",
 	}
 	if got := fields.Unset(f.newCapability("agent:s", uuid.New(), f.now.Add(ttl))); !slices.Equal(got, unset) {
 		t.Errorf("newCapability leaves %q unset, want only %q", got, unset)

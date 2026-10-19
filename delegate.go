@@ -88,6 +88,12 @@ func narrowsCaveats(parent, child Caveats) error {
 			ErrDelegationTooWide, child.Requests, parent.Requests)
 	}
 
+	// Copies: a child counts no more Biscuit copies than its parent.
+	if !child.Copies.Within(parent.Copies) {
+		return fmt.Errorf("%w: child copies %s would exceed parent %s",
+			ErrDelegationTooWide, child.Copies, parent.Copies)
+	}
+
 	// Unit code: a child budget counts in the parent's unit. We don't
 	// auto-convert between currencies — a delegated child in EUR off a
 	// USD parent is a configuration mistake (which budget does the

@@ -98,7 +98,7 @@ type VerifierConfig struct {
 	Biscuit *BiscuitConfig
 
 	// AcceptTokenTypes are the token formats (the JWT "typ") the verifier
-	// accepts. Empty: every type this package reads, TokenTypeV5 alone. A new format ships so: verifiers accept it first,
+	// accepts. Empty: every type this package reads, TokenTypeV6 alone. A new format ships so: verifiers accept it first,
 	// issuers mint it after (SignerConfig.TokenType). A type this package
 	// has no schema for is refused: a verifier cannot enforce a format it
 	// cannot read.

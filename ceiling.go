@@ -33,6 +33,21 @@ type BudgetCeiling struct {
 	UnitCode string
 }
 
+// CopyQuota bounds how many Biscuit copies of a capability a meter counts
+// — the copies that carry limits of their own, each a counter it keeps: at
+// most Max, or as many as the store allows when Unlimited. Every holder of
+// the capability's copies shares it, as they share its request and budget
+// ceilings. A store counts no more than its own bound either
+// (meter.DefaultMaxCopiesPerCapability), whatever the quota.
+type CopyQuota struct {
+	// Max is the most copies counted; 0 counts none, so a copy with limits
+	// of its own is refused. Within 0..MaxIJSONInteger, and 0 when
+	// Unlimited.
+	Max int64
+	// Unlimited lifts the quota to the store's bound.
+	Unlimited bool
+}
+
 // unlimitedWithMax says what is wrong with a ceiling that both names a bound
 // and lifts it.
 const unlimitedWithMax = "a ceiling is either Unlimited or has a Max, not both"
@@ -45,6 +60,18 @@ func (c RequestCeiling) Validate() error {
 		return invalidRequest("requests: %s (Max %d)", unlimitedWithMax, c.Max)
 	case c.Max < 0 || c.Max > MaxIJSONInteger:
 		return invalidRequest("requests: Max %d is outside 0..%d", c.Max, int64(MaxIJSONInteger))
+	}
+	return nil
+}
+
+// Validate refuses a negative or out-of-range Max, and a Max beside
+// Unlimited, as ErrInvalidRequest.
+func (q CopyQuota) Validate() error {
+	switch {
+	case q.Unlimited && q.Max != 0:
+		return invalidRequest("copies: %s (Max %d)", unlimitedWithMax, q.Max)
+	case q.Max < 0 || q.Max > MaxIJSONInteger:
+		return invalidRequest("copies: Max %d is outside 0..%d", q.Max, int64(MaxIJSONInteger))
 	}
 	return nil
 }
@@ -84,6 +111,28 @@ func (c BudgetCeiling) Admits(amount Nanos) bool { return c.Unlimited || amount 
 // higher.
 func (c RequestCeiling) Within(outer RequestCeiling) bool {
 	return outer.Unlimited || (!c.Unlimited && c.Max <= outer.Max)
+}
+
+// Within reports whether q allows no more copies than outer.
+func (q CopyQuota) Within(outer CopyQuota) bool {
+	return outer.Unlimited || (!q.Unlimited && q.Max <= outer.Max)
+}
+
+// Bounded is the quota a store holding at most bound copies applies: q, or
+// bound when q allows more.
+func (q CopyQuota) Bounded(bound int64) int64 {
+	if q.Unlimited || q.Max > bound {
+		return bound
+	}
+	return q.Max
+}
+
+// String is the quota for logs and errors: its Max, or "unlimited".
+func (q CopyQuota) String() string {
+	if q.Unlimited {
+		return unlimitedText
+	}
+	return fmt.Sprint(q.Max)
 }
 
 // Within reports whether c allows no more than outer, by amount alone:

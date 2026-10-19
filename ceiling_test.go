@@ -118,3 +118,55 @@ func TestCopyCeilingAdmits(t *testing.T) {
 		}
 	}
 }
+
+// A copy quota validates, narrows and prints as a request ceiling does, and
+// a store's bound caps it: Unlimited means the bound, and a quota above the
+// bound counts no more than it.
+func TestCopyQuota(t *testing.T) {
+	for name, tc := range map[string]struct {
+		q    CopyQuota
+		want error
+	}{
+		"within range":        {CopyQuota{Max: MaxIJSONInteger}, nil},
+		"zero":                {CopyQuota{}, nil},
+		"unlimited":           {CopyQuota{Unlimited: true}, nil},
+		"negative":            {CopyQuota{Max: -1}, ErrInvalidRequest},
+		"past I-JSON":         {CopyQuota{Max: MaxIJSONInteger + 1}, ErrInvalidRequest},
+		"unlimited and a Max": {CopyQuota{Max: 1, Unlimited: true}, ErrInvalidRequest},
+	} {
+		if err := tc.q.Validate(); tc.want == nil && err != nil || tc.want != nil && !errors.Is(err, tc.want) {
+			t.Errorf("%s: Validate() = %v, want %v", name, err, tc.want)
+		}
+	}
+	unlimited, five, three := CopyQuota{Unlimited: true}, CopyQuota{Max: 5}, CopyQuota{Max: 3}
+	for name, tc := range map[string]struct {
+		inner, outer CopyQuota
+		want         bool
+	}{
+		"a bound under unlimited": {five, unlimited, true},
+		"a lower bound":           {three, five, true},
+		"a higher bound":          {five, three, false},
+		"unlimited under a bound": {unlimited, five, false},
+	} {
+		if got := tc.inner.Within(tc.outer); got != tc.want {
+			t.Errorf("%s: Within = %v, want %v", name, got, tc.want)
+		}
+	}
+	const bound = 4
+	for name, tc := range map[string]struct {
+		q    CopyQuota
+		want int64
+	}{
+		"unlimited":       {unlimited, bound},
+		"above the bound": {five, bound},
+		"under the bound": {three, 3},
+		"zero":            {CopyQuota{}, 0},
+	} {
+		if got := tc.q.Bounded(bound); got != tc.want {
+			t.Errorf("%s: Bounded(%d) = %d, want %d", name, bound, got, tc.want)
+		}
+	}
+	if five.String() != "5" || unlimited.String() != unlimitedText {
+		t.Errorf("String = %q, %q; want 5 and %q", five, unlimited, unlimitedText)
+	}
+}

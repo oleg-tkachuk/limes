@@ -37,6 +37,8 @@ type wireCaveats struct {
 	MaxBudget              Nanos    `json:"max_budget,omitzero"`
 	UnlimitedBudget        bool     `json:"unlimited_budget,omitzero"`
 	UnitCode               string   `json:"unit_code,omitempty"`
+	MaxCopies              int64    `json:"max_copies,omitzero"`
+	UnlimitedCopies        bool     `json:"unlimited_copies,omitzero"`
 	AllowTaintedRead       bool     `json:"allow_tainted_read,omitzero"`
 	IdempotencyKeyRequired bool     `json:"idempotency_key_required,omitzero"`
 	SourceIPCIDR           []string `json:"source_ip_cidr,omitempty"`
@@ -72,6 +74,7 @@ func toWireCaveats(c Caveats) wireCaveats {
 		MaxRequests: c.Requests.Max, UnlimitedRequests: c.Requests.Unlimited,
 		MaxBudget: c.Budget.Max, UnlimitedBudget: c.Budget.Unlimited,
 		UnitCode: c.Budget.UnitCode, AllowTaintedRead: c.AllowTaintedRead,
+		MaxCopies: c.Copies.Max, UnlimitedCopies: c.Copies.Unlimited,
 		IdempotencyKeyRequired: c.IdempotencyKeyRequired, SourceIPCIDR: c.SourceIPCIDR,
 	}
 }
@@ -81,6 +84,7 @@ func (w wireCaveats) caveats() Caveats {
 		Ops: w.Ops, ResourcePrefixes: w.ResourcePrefixes, ResourceURIs: w.ResourceURIs,
 		Requests:               RequestCeiling{Max: w.MaxRequests, Unlimited: w.UnlimitedRequests},
 		Budget:                 BudgetCeiling{Max: w.MaxBudget, Unlimited: w.UnlimitedBudget, UnitCode: w.UnitCode},
+		Copies:                 CopyQuota{Max: w.MaxCopies, Unlimited: w.UnlimitedCopies},
 		AllowTaintedRead:       w.AllowTaintedRead,
 		IdempotencyKeyRequired: w.IdempotencyKeyRequired, SourceIPCIDR: w.SourceIPCIDR,
 	}

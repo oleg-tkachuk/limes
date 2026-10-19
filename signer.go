@@ -47,7 +47,7 @@ type SignerConfig struct {
 	// a crypto.Signer over a key held elsewhere — one that also implements
 	// ContextSigner is given the request's context. Required.
 	Key crypto.Signer
-	// TokenType is the format the signer mints. Empty: TokenTypeV5, the
+	// TokenType is the format the signer mints. Empty: TokenTypeV6, the
 	// one this package reads. A later format is minted here once every
 	// verifier of the tokens accepts it (VerifierConfig.AcceptTokenTypes).
 	TokenType TokenType
@@ -79,7 +79,7 @@ func NewSigner(cfg SignerConfig) (*Signer, error) {
 	if !ok || len(pub) != ed25519.PublicKeySize {
 		return nil, fmt.Errorf("limes: SignerConfig.Key must be Ed25519, not %T", cfg.Key.Public())
 	}
-	typ := cmp.Or(cfg.TokenType, TokenTypeV5)
+	typ := cmp.Or(cfg.TokenType, TokenTypeV6)
 	if !slices.Contains(tokenTypes, typ) {
 		return nil, fmt.Errorf("limes: SignerConfig.TokenType %q is not one of %q", typ, tokenTypes)
 	}
@@ -253,19 +253,21 @@ func (s *Signer) signGrant(ctx context.Context, g grant) (string, error) {
 // cannot be presented as a capability, and it reads each type's claims
 // under that type's schema.
 //
-// v5 spells every ceiling out — an absent max_requests or max_budget is a
-// ceiling of 0, and only unlimited_requests or unlimited_budget lifts it —
-// names the parent agent's run parent_run_id, and knows only the built-in
-// operations and namespaced ones. Earlier formats are not accepted: v4, with
-// limes_gen, parent_agent_id and the unnamespaced presign, tag, search and
-// embed, nor v3, which read an absent bound as none.
-const TokenTypeV5 TokenType = "limes-cap-v5+jwt" //nolint:gosec // G101: a JWT type label, not a credential
+// v6 spells every ceiling out — an absent max_requests, max_budget or
+// max_copies is a ceiling of 0, and only unlimited_requests,
+// unlimited_budget or unlimited_copies lifts it — names the parent agent's
+// run parent_run_id, and knows only the built-in operations and namespaced
+// ones. Earlier formats are not accepted: v5, which had no quota of Biscuit
+// copies (max_copies), v4, with limes_gen, parent_agent_id and the
+// unnamespaced presign, tag, search and embed, nor v3, which read an absent
+// bound as none.
+const TokenTypeV6 TokenType = "limes-cap-v6+jwt" //nolint:gosec // G101: a JWT type label, not a credential
 
 // TokenType is a token format, as the JWT "typ" header names it.
 type TokenType string
 
 // tokenTypes are the token types this package has a schema for.
-var tokenTypes = []TokenType{TokenTypeV5}
+var tokenTypes = []TokenType{TokenTypeV6}
 
 func parseHeader(seg string) (jwtHeader, error) {
 	raw, err := jose.UnB64(seg)
@@ -321,7 +323,7 @@ func parseClaims(seg string, typ TokenType) (*grant, error) {
 	}
 	var claims jwtClaims
 	switch typ {
-	case TokenTypeV5:
+	case TokenTypeV6:
 		if err := json.Unmarshal(raw, &claims, strictClaims); err != nil {
 			return nil, fmt.Errorf("limes: parse claims: %w", err)
 		}

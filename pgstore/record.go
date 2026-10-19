@@ -53,13 +53,15 @@ type caveatsRecord struct {
 	ResourceURIs           []string      `json:"resource_uris"`
 	Requests               ceilingRecord `json:"requests"`
 	Budget                 ceilingRecord `json:"budget"`
+	Copies                 ceilingRecord `json:"copies"`
 	UnitCode               string        `json:"unit_code"`
 	AllowTaintedRead       bool          `json:"allow_tainted_read"`
 	IdempotencyKeyRequired bool          `json:"idempotency_key_required"`
 	SourceIPCIDR           []string      `json:"source_ip_cidr"`
 }
 
-// ceilingRecord is a RequestCeiling or a BudgetCeiling: a Max, or Unlimited.
+// ceilingRecord is a RequestCeiling, a BudgetCeiling or a CopyQuota: a Max,
+// or Unlimited.
 type ceilingRecord struct {
 	Max       int64 `json:"max"`
 	Unlimited bool  `json:"unlimited"`
@@ -95,6 +97,7 @@ func toCapabilityRecord(c limes.Capability) capabilityRecord {
 			Ops: cv.Ops, ResourcePrefixes: cv.ResourcePrefixes, ResourceURIs: cv.ResourceURIs,
 			Requests: ceilingRecord{Max: cv.Requests.Max, Unlimited: cv.Requests.Unlimited},
 			Budget:   ceilingRecord{Max: int64(cv.Budget.Max), Unlimited: cv.Budget.Unlimited},
+			Copies:   ceilingRecord{Max: cv.Copies.Max, Unlimited: cv.Copies.Unlimited},
 			UnitCode: cv.Budget.UnitCode, AllowTaintedRead: cv.AllowTaintedRead,
 			IdempotencyKeyRequired: cv.IdempotencyKeyRequired, SourceIPCIDR: cv.SourceIPCIDR,
 		},
@@ -111,6 +114,7 @@ func (r capabilityRecord) capability() limes.Capability {
 			Ops: cv.Ops, ResourcePrefixes: cv.ResourcePrefixes, ResourceURIs: cv.ResourceURIs,
 			Requests:               limes.RequestCeiling{Max: cv.Requests.Max, Unlimited: cv.Requests.Unlimited},
 			Budget:                 limes.BudgetCeiling{Max: limes.Nanos(cv.Budget.Max), Unlimited: cv.Budget.Unlimited, UnitCode: cv.UnitCode},
+			Copies:                 limes.CopyQuota{Max: cv.Copies.Max, Unlimited: cv.Copies.Unlimited},
 			AllowTaintedRead:       cv.AllowTaintedRead,
 			IdempotencyKeyRequired: cv.IdempotencyKeyRequired, SourceIPCIDR: cv.SourceIPCIDR,
 		},

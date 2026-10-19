@@ -139,6 +139,10 @@ type fixture struct {
 }
 
 // newCapability is a capability with every field set, so a store that drops
+// fixtureCopyQuota is the quota of copies the fixture's capabilities carry,
+// so that a store that drops it fails the round trip.
+const fixtureCopyQuota = 5
+
 // one fails the round trip.
 func (f fixture) newCapability(subject string, parent uuid.UUID, expires time.Time) limes.Capability {
 	return limes.Capability{
@@ -157,6 +161,7 @@ func (f fixture) newCapability(subject string, parent uuid.UUID, expires time.Ti
 			ResourceURIs:           []string{"corpus/index.json"},
 			Requests:               limes.RequestCeiling{Max: 7},
 			Budget:                 limes.BudgetCeiling{Max: 3 * limes.NanosPerUnit / 2, UnitCode: "EUR"}, // 1.5 EUR
+			Copies:                 limes.CopyQuota{Max: fixtureCopyQuota},
 			AllowTaintedRead:       true,
 			IdempotencyKeyRequired: true,
 			SourceIPCIDR:           []string{"10.0.0.0/8"},
@@ -282,6 +287,7 @@ func checkRoundTrip(t *testing.T, f fixture) {
 	for name, lift := range map[string]func(*limes.Caveats){
 		"requests unlimited": func(c *limes.Caveats) { c.Requests = limes.RequestCeiling{Unlimited: true} },
 		"budget unlimited":   func(c *limes.Caveats) { c.Budget = limes.BudgetCeiling{Unlimited: true, UnitCode: c.Budget.UnitCode} },
+		"copies unlimited":   func(c *limes.Caveats) { c.Copies = limes.CopyQuota{Unlimited: true} },
 	} {
 		c := f.newCapability("agent:unlimited", uuid.Nil, f.now.Add(ttl))
 		lift(&c.Caveats)

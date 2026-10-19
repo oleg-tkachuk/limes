@@ -80,6 +80,9 @@ func (c Caveats) Validate() error {
 	if err := c.Budget.Validate(); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidCaveats, err)
 	}
+	if err := c.Copies.Validate(); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidCaveats, err)
+	}
 	for _, cidr := range c.SourceIPCIDR {
 		p, err := netip.ParsePrefix(cidr)
 		if err != nil {
