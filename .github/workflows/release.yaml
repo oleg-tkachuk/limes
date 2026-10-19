@@ -153,6 +153,18 @@ jobs:
           # commits here, breaking changes first.
           RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes.md
 
+      # For the job below, which proposes the nested modules' requirement of
+      # it. Noted before the release is published: a re-run publishing a tag
+      # an earlier attempt pushed finds it only while it has no release, and
+      # its nested modules are proposed all the same. See
+      # .github/scripts/new-release-tag.sh.
+      - name: Note the root module's release
+        id: limes-tag
+        if: steps.catchup.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf 'tag=%s\n' "$(./.github/scripts/new-release-tag.sh "$RUNNER_TEMP/tags-before")" >>"$GITHUB_OUTPUT"
+
       # Read from git rather than parsing semantic-release's prose. A tag on
       # HEAD with no release, left by a run that failed after pushing it, is
       # published by a re-run — see .github/scripts/new-release-tag.sh.
@@ -171,15 +183,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_NOTES_FILE: ${{ runner.temp }}/release-notes.md
         run: ./.github/scripts/publish-release.sh new "$RUNNER_TEMP/tags-before"
-
-      # For the job below, which proposes the nested modules' requirement of
-      # it. See .github/scripts/new-release-tag.sh.
-      - name: Note the root module's release
-        id: limes-tag
-        if: steps.catchup.outputs.release == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: printf 'tag=%s\n' "$(./.github/scripts/new-release-tag.sh "$RUNNER_TEMP/tags-before")" >>"$GITHUB_OUTPUT"
 
       - name: Compute and push the tag of redisreplay
         if: steps.catchup.outputs.release == 'true'
