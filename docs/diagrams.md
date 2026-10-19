@@ -36,7 +36,7 @@ flowchart LR
     subgraph mod ["limes (this module)"]
         direction TB
         issuer["<b>Issuer</b><br/>Issue · Delegate · Biscuit"]
-        signer["<b>Signer</b><br/>NewSigner · JWT Ed25519"]
+        signer["<b>Signer</b><br/>NewSigner · SealKey → SealedKey · JWT Ed25519"]
         narrows["<b>Narrows</b><br/>child ⊆ parent"]
         verifier["<b>Verifier</b><br/>Authorize · Verify · BiscuitCopy<br/>ErrorResponse · DPoPNonce"]
         caveats["<b>Caveats</b><br/>Check · CheckSource · AllowsResource"]
@@ -48,7 +48,7 @@ flowchart LR
         dpop["dpop.Verifier<br/>VerifierConfig.DPoP · dpop.Sign"]
         suites["storetest · metertest<br/>dpoptest · jwkstest<br/>conformance suites · CheckTimeout"]
         jwksh["jwks.NewHandler<br/>ETag · max-age"]
-        nonce["dpop.HMACNonces<br/>stateless DPoP nonces"]
+        nonce["dpop.HMACNonces<br/>stateless DPoP nonces · SealNonceKeys"]
     end
 
     subgraph contracts ["contracts the consumer implements"]
@@ -171,7 +171,7 @@ sequenceDiagram
     Op->>I: Issue(IssueRequest)
     I->>I: Caveats.Validate · TTL → ExpiresAt, after IssuedAt
     I->>I: sign with the Signer, within MaxTokenBytes
-    I->>St: Store.Insert(InsertRequest{cap, IssuedBy})
+    I->>St: Store.Insert(InsertRequest{cap, IssuedBy}) — ErrTenantErased once the tenant's usage is erased
     I-->>O: token
 
     O->>I: Delegate(DelegateRequest{Parent: Verify(token), Caveats})
@@ -439,7 +439,8 @@ flowchart TB
     class req,inv,nn,rp,down external
 ```
 
-`dpop.HMACNonces` makes a nonce of its issuance time and an HMAC of it, so replicas
+`dpop.HMACNonces` makes a nonce of its issuance time and an HMAC of it under
+keys sealed with `dpop.SealNonceKeys`, so replicas
 holding the same keys accept each other's nonces with no shared state, given
 clocks within `dpop.HMACNonceClockSkew`. `dpop.MemoryReplayCache` gives each holder — the
 capability the token carries — a share of its own, so one past its share has
@@ -466,7 +467,8 @@ error's own text never reaches the client.
 | `dpop.ErrRequired` · `dpop.ErrInvalid` · `dpop.ErrReplayed`, and any other `ErrProofOfPossession` | 401 | `DPoP error="invalid_dpop_proof", algs="Ed25519 ES256"` |
 | `ErrAuthSchemeMismatch` · `ErrInvalidToken` · `ErrExpired` · `ErrNotYetValid` · `ErrRevoked` · `ErrAudienceMismatch`, and any other `ErrUnauthenticated` | 401 | `error="invalid_token"` under the client's scheme (Bearer when unknown) |
 | any `ErrCaveatViolation` | 403 | `error="insufficient_scope"` |
-| `ErrBudgetExceeded` · `ErrTenantBudgetExceeded` · `ErrRequestLimitExceeded` | 403 | none |
+| `ErrBudgetExceeded` · `ErrTenantBudgetExceeded` · `ErrRequestLimitExceeded` (`meter.ErrCopyLimitExceeded` included) | 403 | none |
+| `ErrUnitCodeMismatch` · `meter.ErrExternalRefConflict` · `ErrAlreadyExists`, and any other `ErrConflict` | 409 | none |
 | anything else — a store or key resolver outage, `ErrProofUnsupported`, `ErrEffectConflict`, `ErrCopyCountersNotMetered` | 500 | none |
 
 A verifier with DPoP configured adds a `DPoP algs="…"` challenge with no
@@ -551,11 +553,12 @@ flowchart TB
         n1["Ops ⊆ parent.Ops"]
         n2["every resource reachable by the parent<br/>exact-URI parent admits no child prefix"]
         n3["Requests within the parent's: any under Unlimited,<br/>a bound no higher under a bound"]
+        n3c["Copies within the parent's, the same way"]
         n4["Budget.UnitCode = parent's<br/>(none taken as the parent's)"]
         n5["Budget within the parent's, the same way"]
         n6["AllowTaintedRead only if the parent has it<br/>IdempotencyKeyRequired never relaxed"]
         n7["SourceIPCIDR inside a parent network"]
-        n0 --> n1 --> n2 --> n3 --> n4 --> n5 --> n6 --> n7
+        n0 --> n1 --> n2 --> n3 --> n3c --> n4 --> n5 --> n6 --> n7
     end
 
     sign["Issuer.sign: Signer.sign(ctx, child)<br/>token within MaxTokenBytes"]
@@ -591,7 +594,7 @@ flowchart TB
     classDef store fill:#FEF3C7,stroke:#D97706,color:#78350F
     classDef external fill:#FCE7F3,stroke:#DB2777,color:#831843
     class req,ok client
-    class pid,fill,valid,copyp,own,share,clamp,start,sign,n0,n1,n2,n3,n4,n5,n6,n7 role
+    class pid,fill,valid,copyp,own,share,clamp,start,sign,n0,n1,n2,n3,n3c,n4,n5,n6,n7 role
     class alive,persist,depth store
     class wide,unit,noshare,dead,inval,stored external
 ```
@@ -631,7 +634,7 @@ a holder's copy can have on its own: a revocation, and limits.
 
 ```mermaid
 flowchart TB
-    cap(["capability<br/>Requests 100 · budget 10.00"])
+    cap(["capability<br/>Requests 100 · budget 10.00 · Copies 3"])
     root["<b>root Biscuit</b><br/>authority block: id A"]
     w1["<b>worker 1</b><br/>ids A · B<br/>block B: limes_max_requests 30"]
     w2["<b>worker 2</b><br/>ids A · C<br/>block C: limes_max_budget_nanos 2000000000 (2.00)"]
@@ -646,9 +649,11 @@ flowchart TB
 
     revB["RevokeBiscuit(worker 1)<br/>lists B: worker 1 and the sub-agent stop;<br/>root, worker 2 and the JWT do not"]
     cntD["a request by the sub-agent counts on D, on B<br/>and on the capability; each limit is checked"]
+    quota["B, C and D, once metered, are the three copies Copies 3 counts;<br/>a fourth block with limits is ErrCopyLimitExceeded"]
 
     w1 -.-> revB
     sub -.-> cntD
+    cap -.-> quota
 
     classDef client fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E
     classDef role fill:#DCFCE7,stroke:#16A34A,color:#14532D
@@ -656,7 +661,7 @@ flowchart TB
     classDef store fill:#FEF3C7,stroke:#D97706,color:#78350F
     class cap client
     class root,w1,w2,sub,jwt role
-    class revB,cntD store
+    class revB,cntD,quota store
 ```
 
 - **Revocation.** `BiscuitCopy` checks that a copy is genuine — its size, the
@@ -669,7 +674,14 @@ flowchart TB
   every limit in force. The `Meter` counts each under the block's id, beside
   the capability's own counters, and a charge or reservation records the ids
   it debited so a refund, settle or release returns to them.
-  `CopyUsageReader` reads the counters back.
+  `CopyUsageReader` reads the counters back. How many copies are counted is
+  bounded by `Caveats.Copies`, a `CopyQuota` signed into the token, which no
+  block changes. The quota covers the copies of the capability and of every
+  capability delegated from it, kept as a running count on each capability's
+  counters (`copies_under` in `pgstore`, migration 013), and the store's own
+  bound, `DefaultMaxCopiesPerCapability` unless configured, applies too. A
+  copy past either is `ErrCopyLimitExceeded`, a kind of
+  `ErrRequestLimitExceeded`.
 - **No delegation from a copy.** `Issuer.Delegate` refuses any `Parent` read
   from a Biscuit (`VerifiedCapability.FromBiscuit`, with limits or without)
   as `ErrInvalidRequest`; see the delegation section above.
@@ -679,8 +691,11 @@ flowchart TB
 Every amount on this path is `Nanos`, an `int64` count of billionths of the
 unit, so each comparison and sum below is exact.
 
-`Meter.Charge` checks every ceiling — each Biscuit copy's, the capability's,
-each ancestor's and the tenant's — and runs the consumer's side effect before
+`Meter.Charge` refuses a tenant whose usage was erased (`ErrTenantErased`),
+admits each Biscuit copy it has not counted yet against the copy quota of the
+capability and of every ancestor (`ErrCopyLimitExceeded`), then checks every
+ceiling — each Biscuit copy's, the capability's, each ancestor's and the
+tenant's — and runs the consumer's side effect before
 any counter moves. A rejection at any stage, or a failing `onCharged`, leaves
 the capability's counter, every ancestor's, the tenant aggregate and the
 ledger exactly as they were, so a retry after a rejection is safe.
@@ -696,24 +711,26 @@ amount past the hold, or an ancestor that does not hold it, is checked.
 
 ```mermaid
 flowchart TB
-    req(["ChargeRequest<br/>Subject (id · tenant · ceilings · unit · copies) · Amount<br/>ExternalRef · Overrun"])
+    req(["ChargeRequest<br/>Subject (id · tenant · ceilings · unit · copy quota · copies) · Amount<br/>ExternalRef · Overrun"])
     sreq(["SettleRequest<br/>Subject · ReservationID · Amount · Overrun"])
     sval{"subject set, a unit named · Nanos.Validate · Overrun.Validate<br/>ReservationID not zero"}
     hold{"reservation open, unexpired,<br/>the subject's own, under the same copies"}
     val{"Nanos.Validate · Overrun.Validate · ValidateExternalRef<br/>subject set · a unit named"}
+    erased{"tenant not marked erased<br/>(EraseTenantUsage)"}
     seen{"ExternalRef already charged<br/>to this capability"}
     same{"same Amount · UnitCode · TenantID<br/>· Biscuit copies"}
     lin{"capability on record<br/>lineage read: its ancestors still on record"}
 
     subgraph stage ["stage — compute, publish nothing"]
         direction TB
+        cq{"each copy not counted yet: within the store's bound for the capability<br/>and the copy quota of the capability and of each ancestor,<br/>counted over its subtree (the copies under it)"}
         c00{"Amount in the unit the capability, each ancestor and the tenant count in<br/>no counter, copies included, past MaxNanos"}
         c0{"each Biscuit copy, innermost first:<br/>spend + reserved + Amount ≤ its budget"}
         c1{"own spend + reserved + Amount ≤ Subject.Budget<br/>(ceiling from the verified token or stored record)"}
         c2{"each ancestor: spend + reserved + Amount<br/>≤ its Budget<br/>(ceiling from the stored record)"}
         c3{"tenant spend + reserved + Amount<br/>≤ TenantBudget.Ceiling<br/>(Unlimited until one is set)"}
         cb{"onCharged(ctx with the store's tx, Charged{Receipt})<br/>consumer's side effect in the same transaction"}
-        c00 -- yes --> c0 -- yes --> c1 -- yes --> c2 -- yes --> c3 -- yes --> cb
+        cq -- yes --> c00 -- yes --> c0 -- yes --> c1 -- yes --> c2 -- yes --> c3 -- yes --> cb
     end
 
     subgraph commit ["commit — all together"]
@@ -722,7 +739,7 @@ flowchart TB
         w2["each ancestor on the lineage as read now:<br/>spend += Amount"]
         w0["settling: each ancestor that held it<br/>and still has a row: its hold leaves reserved"]
         w3["tenant spend += Amount · settling: its hold leaves reserved<br/>(the row created, with no ceiling, if missing)"]
-        w5["each copy's spend += Amount<br/>settling: its hold leaves reserved"]
+        w5["each copy's spend += Amount<br/>settling: its hold leaves reserved<br/>a new copy: counted under the capability and each ancestor"]
         w4["ledger row: ChargeID · TenantID · Amount · UnitCode · At<br/>Ancestors · copy ids · Op · Actor · ExternalRef<br/>ReservationID · Overrun · tenant period"]
         w6["settling: the reservation is deleted"]
     end
@@ -739,12 +756,17 @@ flowchart TB
     e5["ErrReservationNotFound"]
     e6["ErrExternalRefConflict"]
     e7["ErrNotFound · ErrDelegationTooDeep"]
+    e8["ErrTenantErased"]
+    e9["ErrCopyLimitExceeded"]
+    e10["pgstore.ErrChargeTransaction"]
 
-    req --> val -- ok --> seen -- no --> lin
+    req --> val -- ok --> erased -- no --> seen -- no --> lin
+    erased -- yes --> e8
     seen -- yes --> same -- yes --> replay
     same -- no --> e6
     sreq --> sval -- ok --> hold -- yes --> lin
-    lin -- yes --> c00
+    lin -- yes --> cq
+    cq -- "no, under any policy" --> e9
     lin -- no --> e7
     sval -- "invalid" --> e0
     sval -- "zero id" --> e5
@@ -758,6 +780,7 @@ flowchart TB
     c2 -- "no, OverrunPolicyReject" --> e2
     c3 -- "no, OverrunPolicyReject" --> e3
     cb -- error --> e4
+    cb -- "pgstore: it ended the transaction" --> e10
     c00 -- no --> e0
 
     classDef client fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E
@@ -766,14 +789,14 @@ flowchart TB
     classDef optional fill:#F1F5F9,stroke:#64748B,color:#334155,stroke-dasharray:5 4
     classDef external fill:#FCE7F3,stroke:#DB2777,color:#831843
     class req,sreq,ok,replay client
-    class val,sval,seen,same,hold,lin,c00,c0,c1,c2,c3 role
+    class val,sval,erased,seen,same,hold,lin,cq,c00,c0,c1,c2,c3 role
     class cb optional
     class w1,w2,w0,w3,w5,w4,w6,refund store
-    class e0,e1,e2,e3,e4,e5,e6,e7 external
+    class e0,e1,e2,e3,e4,e5,e6,e7,e8,e9,e10 external
 ```
 
-`Bump` takes the same order for requests: each copy's limit, then the
-capability's, then each ancestor's. A reservation keeps its copies' budgets,
+`Bump` takes the same order for requests: the erased-tenant check, the copy
+quota, then each copy's limit, the capability's, then each ancestor's. A reservation keeps its copies' budgets,
 so `Settle` checks them without being handed them again; the subject settling
 must still carry the same copies.
 
@@ -801,7 +824,10 @@ Holds and housekeeping, in `memstore` and `pgstore` as the contract has them:
   and its copies', and `PurgeOrphans` releases the holds of every capability
   no longer on record, a batch of `Limit` at a time: nothing could settle or
   release them afterwards. Either takes the dropped ids off the ancestor
-  lists of the holds that remain.
+  lists of the holds that remain. Each copy dropped stays counted against
+  the copy quota of every ancestor, as its requests and spend do;
+  `DeleteUsage` of an ancestor itself restarts that ancestor's count with its
+  other counters.
 - `SetTenantBudget` is guarded by `ExpectedVersion` (0 for a tenant with no
   ceiling yet), refuses a new unit while anything is held in the old one, or
   spent in it unless `ResetSpend` closes that spend, and with `ResetSpend` opens a new accounting period, so a refund of an
@@ -812,16 +838,24 @@ A store with transactions runs stage and commit inside one, and hands
 (`Charged`); `onCharged` may be `nil`. A store without them hands on the
 caller's context; `memstore` still runs `onCharged` before it publishes.
 
-`pgstore` runs each call in one transaction, `onCharged` on that same
-`pgx.Tx`, so a rejection or a failing side effect rolls everything back.
+`pgstore` runs each call in one READ COMMITTED transaction and hands
+`onCharged` that transaction through `TxFrom`, so a rejection or a failing
+side effect rolls everything back. The transaction is `onCharged`'s only
+while it runs: afterwards every call on it fails with `pgx.ErrTxClosed`.
+`Commit` and `Rollback` on it return `ErrChargeTransaction`, and a charge
+whose `onCharged` ended the transaction with SQL of its own — `COMMIT`,
+`ROLLBACK`, or either followed by `BEGIN` — is refused with
+`ErrChargeTransaction`.
 `Bump`, `Charge`, `Reserve`, `Settle` and `Release` first refuse a scope that does not
 admit the subject's tenant, as `ErrScopeMismatch`, before any row is read. It
 locks in one order, so two calls never wait on each other in a cycle: the
-reservation being settled or released, then the lineage's records `FOR SHARE`
+tenant's erase lock (shared; an erase holds it alone), the reservation being
+settled or released, then the lineage's records `FOR SHARE`
 in id order — a purge locks its batch in the same order — then the tenant's
 row, the usage rows by capability id and the copies' rows by revocation id. An
 `ExternalRef` is looked up again once the locks are held, since a concurrent
-delivery may have committed in between. A call holds one connection, so a
+delivery may have committed in between; if one has, the call rolls back what
+it locked and returns that delivery's receipt. A call holds one connection, so a
 small pool serves as many calls at once as it has connections.
 
 ## Revocation reaches the verifiers
@@ -915,20 +949,26 @@ tenant, before it reads a row, rather than answer as rows that are not there.
 A call that writes is refused so under a read-only scope: before the
 transaction under `WithAllTenantsReadOnly`, and once a `Config.Scope` of the
 consumer's has run when it set `limes.all_tenants` to `read`. Row-level security then binds every statement: `tenant_visible` for reads,
-`tenant_writable` for writes. The table owner, as `Migrate` runs, is not bound.
+`tenant_writable` for writes. It binds the table owner too; `Migrate` scopes
+each migration to every tenant and stops when it cannot. A superuser or a
+`BYPASSRLS` role is never bound, so `CheckSchema` refuses with
+`ErrRuntimeRole` a connection whose current, session or login role is one of
+those or owns anything in the schema. Only the `MigrateOptions.RuntimeRoles`
+may execute the schema's functions. Every transaction is READ COMMITTED,
+whatever the database's default.
 
 ```mermaid
 flowchart TB
     ctx(["ctx: WithTenant(id) · WithAllTenants · WithAllTenantsReadOnly · none"])
     ro{"the call writes,<br/>under WithAllTenantsReadOnly"}
-    begin["BEGIN · Config.Scope(ctx, tx)<br/>default ScopeFromContext: set_config, local to the transaction<br/>limes.tenant_id = id · limes.all_tenants = on · = read"]
+    begin["DB.BeginTx: READ COMMITTED · Config.Scope(ctx, tx)<br/>default ScopeFromContext: set_config, local to the transaction<br/>limes.tenant_id = id · limes.all_tenants = on · = read"]
     roset{"the call writes, under a Config.Scope of the consumer's<br/>that set limes.all_tenants = read (one SELECT)"}
     named{"the request names a tenant<br/>Insert · ListByPrincipal · Bump · Charge · Reserve · Settle · Release<br/>Get/SetTenantBudget · erasers · SumCharges · CountRecords"}
     check{"Config.CheckScope admits it<br/>default: the context's scope is every tenant or that one;<br/>none: CheckSchemaScope asks the database"}
     rls["statements under row-level security<br/>read: tenant_visible — all_tenants on or read, or tenant_id matches<br/>write: tenant_writable — all_tenants on, or tenant_id matches"]
     commit(["COMMIT"])
     idonly["a call naming only an id<br/>(GetRecord · Revoke · Refund · GetUsage · …):<br/>a row out of scope is not found"]
-    definer["IsRevoked · IsBiscuitRevoked<br/>one statement, no transaction:<br/>a SECURITY DEFINER function sees every tenant"]
+    definer["IsRevoked · IsBiscuitRevoked<br/>one statement, no transaction:<br/>a SECURITY DEFINER function sees every tenant<br/>EXECUTE: the runtime roles alone"]
     every{"the request reads every tenant<br/>CountRecords AllTenants"}
     evcheck{"the scope admits every tenant<br/>default: WithAllTenants or WithAllTenantsReadOnly;<br/>otherwise the database is asked"}
     mismatch["ErrScopeMismatch"]
@@ -971,6 +1011,7 @@ flowchart TB
     req(["EraseTenantRequest{TenantID, Note, Actor} · onErased"])
     val{"Validate"}
     tx["inTenantTx: scoped, CheckScope admits the tenant"]
+    mark["take the tenant's erase lock · mark it erased<br/>(Insert and the meter refuse it as ErrTenantErased)"]
     holds["lock the tenant's holds, in id order"]
     recs["lock its records, in id order"]
     revoke["revoke every record not revoked yet<br/>(when any is newly revoked, the notify trigger fires: watchers Clear)"]
@@ -981,7 +1022,7 @@ flowchart TB
     ok(["EraseTenantResult{Revoked, Removed, Kept}"])
     back["rolled back: nothing erased"]
 
-    req --> val -- ok --> tx --> holds --> recs --> revoke --> remove --> kept --> usage --> cb -- nil --> ok
+    req --> val -- ok --> tx --> mark --> holds --> recs --> revoke --> remove --> kept --> usage --> cb -- nil --> ok
     val -- invalid --> inval["ErrInvalidRequest"]
     tx -- "scope does not admit it" --> mismatch["ErrScopeMismatch"]
     cb -- error --> back
@@ -994,11 +1035,16 @@ flowchart TB
     class req,ok client
     class val,tx role
     class cb optional
-    class holds,recs,revoke,remove,kept,usage store
+    class mark,holds,recs,revoke,remove,kept,usage store
     class inval,mismatch,back external
 ```
 
 A record kept stays revoked: an id not on record is not revoked, so removing
 a live record early would let its token through. The separate
 `EraseTenantRecords` and `UsageStore.EraseTenantUsage` do each half alone, and
-`memstore` implements both.
+`memstore` implements both. Called apart, `EraseTenantUsage` goes first: the
+mark it sets makes `Insert` refuse the tenant with `ErrTenantErased`, so
+`EraseTenantRecords` then finds every record there will be and revokes them
+all. The other way round, a record inserted between the two calls stays on
+record unrevoked. `PurgeOrphans` forgets the mark once none of the tenant's
+records is left.
