@@ -1,0 +1,24 @@
+name: Set up the CI scripts
+description: >-
+  Node at the pinned version and the CI scripts' dependencies from their
+  lockfile, with no install script run, so a step can run
+  `node .github/ci/<command>.ts`.
+
+inputs:
+  node-version:
+    description: The exact Node version, the workflow's NODE_VERSION.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: ${{ inputs.node-version }}
+        package-manager-cache: false
+
+    - name: Install the CI scripts' dependencies
+      shell: bash
+      working-directory: .github/ci
+      run: npm ci --ignore-scripts

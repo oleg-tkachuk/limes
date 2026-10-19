@@ -1,8 +1,8 @@
 # zizmor configuration.
 #
-# Each relaxed audit is relaxed for one file, with the reason stated. Everything else
-# runs: actions are pinned to commit SHAs, no workflow input reaches a shell,
-# and every job asks for the narrowest token it needs.
+# Each relaxed audit states why. Everything else runs: actions are pinned to
+# commit SHAs, no workflow input reaches a shell, and every job asks for the
+# narrowest token it needs.
 rules:
   artipacked:
     ignore:
@@ -20,3 +20,10 @@ rules:
       # nothing of it but its metadata and the names of the files it changes;
       # a fork's run is filtered out before any step.
       - auto-merge.yaml
+  self-repository:
+    # It asks for `$/…` in place of `./…` for this repository's own action,
+    # .github/actions/setup-ci, which actionlint (v1.7.12, the newest) refuses
+    # as an action with no ref. `./…` runs the action from the checkout each
+    # job makes, which is the commit the job runs anyway. Lift this when
+    # actionlint reads the syntax.
+    disable: true

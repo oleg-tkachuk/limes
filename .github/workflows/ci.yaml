@@ -28,8 +28,8 @@ concurrency:
 # Pinned tools, one place each. A floating tool changes what the gate checks
 # with no commit of ours in between.
 env:
-  # The release tooling's runtime, exact so a patch arrives as a reviewed
-  # change rather than whatever the runner image caches.
+  # The runtime of the CI scripts and the release tooling, exact so a patch
+  # arrives as a reviewed change rather than whatever the runner image caches.
   # renovate: datasource=node-version depName=node
   NODE_VERSION: "24.21.0"
   # renovate: datasource=github-releases depName=go-task/task
@@ -47,7 +47,7 @@ env:
   GO_FLOOR_VERSION: "1.26.9"
 
 jobs:
-  # Whether anything the checks below read has changed. .github/scripts/ci-relevant.sh
+  # Whether anything the checks below read has changed. .github/ci/changes.ts
   # holds the list of documentation paths that change nothing.
   changes:
     name: Changed paths
@@ -65,6 +65,11 @@ jobs:
           # The diff below needs both ends of it.
           fetch-depth: 0
 
+      - name: Set up the CI scripts
+        uses: ./.github/actions/setup-ci
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
       - name: Classify the diff
         id: filter
         env:
@@ -74,8 +79,8 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.sha }}
-        # Which diff, and whether it reaches code: .github/scripts/ci-diff.sh.
-        run: ./.github/scripts/ci-diff.sh >>"$GITHUB_OUTPUT"
+        # Which diff, and whether it reaches code: .github/ci/changes.ts.
+        run: node .github/ci/changes.ts
 
   # `task verify-all`, exactly as a developer runs it.
   verify:
@@ -128,13 +133,13 @@ jobs:
       - name: Mark the run's start for the cache trim
         run: touch -d '2 hours ago' "$RUNNER_TEMP/go-cache-mark"
 
-      # verify:release-rules runs the pinned commit analyzer and notes generator against
+      # verify:ci type-checks and tests the CI scripts; verify:release-rules
+      # runs the pinned commit analyzer and notes generator against
       # release.config.cjs. Node 24, as release.yaml runs it.
-      - name: Set up Node
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - name: Set up the CI scripts
+        uses: ./.github/actions/setup-ci
         with:
           node-version: ${{ env.NODE_VERSION }}
-          package-manager-cache: false
 
       - name: Install the release tooling
         working-directory: .github/release
@@ -486,7 +491,7 @@ jobs:
         run: |
           set -euo pipefail
           pipx run "zizmor==${ZIZMOR_VERSION}" \
-            --config .github/zizmor.yml --persona=regular --format=plain .github/workflows/
+            --config .github/zizmor.yml --persona=regular --format=plain .github/workflows/ .github/actions/
 
   # The one check a ruleset requires. A skipped job was not reached by the
   # change, which is a pass; a failure or a cancellation anywhere is not.
@@ -524,7 +529,7 @@ jobs:
     # Not for a documentation-only push: its code is byte-identical to the
     # commit before it. Its commits are not lost — semantic-release counts them
     # in the next release, and a release dispatched by the code commit before
-    # it releases past it (release-head-check.sh).
+    # it releases past it (.github/ci/release-head.ts).
     if: >-
       always() &&
       needs.changes.outputs.relevant == 'true' &&

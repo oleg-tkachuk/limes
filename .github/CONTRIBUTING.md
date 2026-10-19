@@ -3,7 +3,8 @@
 ## Building and testing
 
 Go (the `toolchain` in `go.mod`; the `go` directive is the oldest Go the
-module supports, and CI runs the suite on it too) and [Task](https://taskfile.dev); Node and
+module supports, and CI runs the suite on it too) and [Task](https://taskfile.dev); Node 24 and
+`npm ci --ignore-scripts --prefix .github/ci` for the TypeScript the workflows run, and
 `npm ci --ignore-scripts --prefix .github/release` for the release-rule, release-notes, major-guard and
 module-commits tests. govulncheck, actionlint and apidiff are pinned in `tools/go.mod`, yq in
 `tools/yq/go.mod`, golangci-lint in `tools/golangci-lint/go.mod`, and all run through `go tool`, so they need no install.
@@ -14,7 +15,8 @@ task verify-all
 
 runs gofmt, `go mod tidy` and `go mod verify`, golangci-lint, `go vet` of a
 32-bit build, the unit suite, govulncheck, actionlint,
-the tests of the workflow scripts, the release-rule, release-notes, major-guard and
+the type check and tests of the TypeScript the workflows run (`.github/ci`), the tests of the
+workflow scripts, the release-rule, release-notes, major-guard and
 module-commits tests, the gates of `redisreplay` (its tests on miniredis
 included) and `otelmetric`, the static checks of `pgstore` and the examples that need no
 database, run end to end — the same task CI runs. It
