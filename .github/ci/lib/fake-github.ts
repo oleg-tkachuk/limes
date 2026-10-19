@@ -128,6 +128,9 @@ export function fakeGitHub(data: FakeData): GitHub {
     async editPullRequest(number, text) {
       data.editedPulls.push({ number, text });
     },
+    async passedRunsOf(workflow, branch, sha) {
+      return [...data.runs.entries()].filter(([, r]) => r.headSha === sha && r.headBranch === branch && r.path === workflow).map(([id]) => id).reverse();
+    },
     async dispatch(eventType, payload) {
       data.dispatched.push({ eventType, payload });
     },

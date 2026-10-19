@@ -9,7 +9,8 @@ import type { Module } from "./lib/modules.ts";
 import { isReleaseTag, newReleaseTag, previousTag, proxyInfoURL, tagsOnHead, unpublishedTags, warmGoProxy } from "./lib/releases.ts";
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
 import { withoutWorkflowCommands } from "./lib/actions.ts";
-import { GATES, releaseAll, type Release } from "./release.ts";
+import { releaseCommits } from "./lib/modules.ts";
+import { Channel, GATES, releaseAll, type Release } from "./release.ts";
 
 const REPO = "oleg-tkachuk/limes";
 const RELEASE = new URL("../release/", import.meta.url).pathname;
@@ -172,6 +173,14 @@ describe("releaseAll", () => {
       onRootTag: (tag) => {
         rootTag = tag;
       },
+      channel: Channel.Release,
+      only: undefined,
+      manual: true,
+      policy: { minorCommits: 3, patchCommits: 5, immediateTypes: ["security", "build"] },
+      commits: releaseCommits(),
+      pushTag: async (tag) => {
+        data.tags.add(tag);
+      },
     };
   }
 
@@ -237,4 +246,125 @@ describe("releaseAll", () => {
     };
     await releaseAll(r);
   });
+
+  // A release nobody asked for waits for the policy's thresholds.
+  describe("by the policy", () => {
+    async function commits(...subjects: string[]): Promise<void> {
+      for (const subject of subjects) {
+        repo.write("x.go", `// ${subject}\n`);
+        await repo.commit(subject);
+      }
+    }
+    async function released(): Promise<boolean> {
+      next = { limes: "v0.2.0" };
+      await releaseAll({ ...release(), manual: false });
+      return data.published.some((r) => r.tag === "v0.2.0");
+    }
+    beforeEach(async () => {
+      await repo.run("tag", "v0.1.0");
+      data.released.add("v0.1.0");
+    });
+
+    test("two features are not due", async () => {
+      await commits("feat: a", "feat: b", "docs: c");
+      assert.equal(await released(), false);
+    });
+    test("three features are", async () => {
+      await commits("feat: a", "feat: b", "feat: c");
+      assert.equal(await released(), true);
+    });
+    test("four fixes are not due", async () => {
+      await commits("fix: a", "fix: b", "perf: c", "fix: d");
+      assert.equal(await released(), false);
+    });
+    test("five fixes are", async () => {
+      await commits("fix: a", "fix: b", "perf: c", "fix: d", "fix: e");
+      assert.equal(await released(), true);
+    });
+    test("a security fix is released at once", async () => {
+      await commits("security: seal");
+      assert.equal(await released(), true);
+    });
+    test("a breaking change is released at once", async () => {
+      await commits("feat!: change");
+      assert.equal(await released(), true);
+    });
+    test("commits before the last release are not counted", async () => {
+      await commits("feat: a", "feat: b");
+      await repo.run("tag", "v0.1.1");
+      data.released.add("v0.1.1");
+      await commits("feat: c");
+      assert.equal(await released(), false);
+    });
+    test("a merge commit does not count its pull request twice", async () => {
+      await repo.run("checkout", "--quiet", "-b", "topic");
+      await commits("feat: a", "feat: b");
+      await repo.run("checkout", "--quiet", "main");
+      await repo.run("-c", "user.name=t", "-c", "user.email=t@example.invalid", "merge", "--quiet", "--no-ff", "-m", "feat: a and b", "topic");
+      assert.equal(await released(), false);
+    });
+    test("a release by hand ignores the thresholds", async () => {
+      await commits("fix: a");
+      next = { limes: "v0.1.1" };
+      await releaseAll({ ...release(), manual: true });
+      assert.deepEqual(data.published.map((r) => r.tag), ["v0.1.1"]);
+    });
+  });
+
+  describe("release candidates", () => {
+    beforeEach(async () => {
+      await repo.run("tag", "v0.1.0");
+      data.released.add("v0.1.0");
+      data.tags.add("v0.1.0");
+    });
+    async function candidate(only = "limes"): Promise<string[]> {
+      await releaseAll({ ...release(), channel: Channel.Prerelease, only });
+      return data.published.filter((r) => r.prerelease === true).map((r) => r.tag);
+    }
+
+    test("the next version, as rc.1, then rc.2", async () => {
+      repo.write("x.go", "// a\n");
+      await repo.commit("feat: a");
+      assert.deepEqual(await candidate(), ["v0.2.0-rc.1"]);
+      assert.equal(data.published[0]?.latest, false);
+      repo.write("x.go", "// b\n");
+      await repo.commit("fix: b");
+      assert.deepEqual(await candidate(), ["v0.2.0-rc.1", "v0.2.0-rc.2"]);
+    });
+    test("a patch's candidate", async () => {
+      repo.write("x.go", "// a\n");
+      await repo.commit("fix: a");
+      assert.deepEqual(await candidate(), ["v0.1.1-rc.1"]);
+    });
+    test("nothing pending, no candidate", async () => {
+      assert.deepEqual(await candidate(), []);
+    });
+    test("a candidate is no release line for the next stable release", async () => {
+      repo.write("x.go", "// a\n");
+      await repo.commit("feat: a");
+      await candidate();
+      const { lastStableTag } = await import("./lib/release-policy.ts");
+      const { selectModule } = await import("./lib/modules.ts");
+      assert.equal(await lastStableTag(selectModule(repo.dir), "HEAD", repo.dir), "v0.1.0");
+    });
+    test("an unknown module is refused", async () => {
+      await assert.rejects(releaseAll({ ...release(), channel: Channel.Prerelease, only: "nope" }));
+    });
+  });
+});
+
+// A run by hand offers every module of the table, all of them, and each
+// channel the release knows, and no other.
+test("release.yaml's inputs are the table's modules and the channels", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { parse } = await import("yaml");
+  const { releasedModules } = await import("./lib/modules.ts");
+  const { ALL_MODULES } = await import("./release.ts");
+  const workflow = parse(readFileSync(new URL("../workflows/release.yaml", import.meta.url), "utf8")) as {
+    on: { workflow_dispatch: { inputs: Record<string, { options: string[] }> } };
+  };
+  const inputs = workflow.on.workflow_dispatch.inputs;
+  const root = new URL("../../", import.meta.url).pathname;
+  assert.deepEqual([...(inputs.module?.options ?? [])].sort(), [ALL_MODULES, ...releasedModules(root)].sort());
+  assert.deepEqual([...(inputs.channel?.options ?? [])].sort(), Object.values(Channel).sort());
 });

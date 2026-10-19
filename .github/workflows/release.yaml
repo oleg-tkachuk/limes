@@ -1,6 +1,14 @@
 name: Release
 
-# Dispatched by ci.yaml once the checks on a push to main have passed.
+# Dispatched by ci.yaml once the checks on a push to main have passed, and
+# run by hand from main.
+#
+# A run CI dispatched releases a module only once the commits since its last
+# release are due by .github/release/release-policy.json: enough of them, by
+# the level each cuts, or one that is released at once. A run by hand
+# releases whatever is pending, or with the prerelease channel tags a release
+# candidate, vX.Y.Z-rc.N; either may name one module. Every run, by hand
+# too, releases only a commit a CI run on main passed.
 #
 # A release is a vX.Y.Z tag — the Go proxy reads the tag, so nothing else is
 # published — and the GitHub release that announces it. A nested module's tag
@@ -12,12 +20,21 @@ name: Release
 # repository_dispatch is one of the documented exceptions that always create a
 # run, so CI dispatches this with its own GITHUB_TOKEN — no extra credential,
 # no dangerous trigger.
-#
-# Deliberately no workflow_dispatch: it would let a release be cut from an
-# untested main with one click, which is what the gate in ci.yaml prevents.
 on:
   repository_dispatch:
     types: [release]
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: A release, or a release candidate (vX.Y.Z-rc.N)
+        type: choice
+        options: [release, prerelease]
+        default: release
+      module:
+        description: The module to release, or all of them (.github/release/modules.cjs)
+        type: choice
+        options: [all, limes, redisreplay, pgstore, otelmetric]
+        default: all
 
 permissions: {}
 
@@ -36,7 +53,10 @@ jobs:
     # payload is the sender's to write. The control is the step below, which
     # asks the API whether the run the payload names passed on main, for the
     # commit it names (.github/ci/ci-run.ts).
-    if: github.event.sender.login == 'github-actions[bot]'
+    # A run by hand needs write access to start, and releases only from main.
+    if: >-
+      (github.event_name == 'repository_dispatch' && github.event.sender.login == 'github-actions[bot]') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
@@ -63,11 +83,12 @@ jobs:
       # A dispatched run is not linked to its trigger in the UI the way a
       # workflow_run is, so without this the run says nothing about where it
       # came from.
-      - name: Say what dispatched this
+      - name: Say what started this
         env:
-          SHA: ${{ github.event.client_payload.sha }}
+          EVENT: ${{ github.event_name }}
+          SHA: ${{ github.event.client_payload.sha || github.sha }}
           CI_RUN: ${{ github.event.client_payload.ci_run_id }}
-        run: printf 'dispatched by CI run %s for commit %s\n' "${CI_RUN:-unknown}" "${SHA:-unknown}"
+        run: printf '%s for commit %s, CI run %s\n' "$EVENT" "${SHA:-unknown}" "${CI_RUN:-to be found}"
 
       # Node and the CI scripts, with no dependency cache — this job holds a
       # write token, and a cache another run wrote is not something to
@@ -75,13 +96,24 @@ jobs:
       - name: Set up the CI scripts
         uses: ./.github/actions/setup-ci
 
+      # A run by hand has no dispatching CI run: the newest passed push run of
+      # ci.yaml on main for the commit stands in for it, and none at all
+      # stops the release.
+      - name: Find the CI run that passed this commit
+        id: find
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.sha }}
+        run: node .github/ci/ci-run.ts find "$SHA"
+
       # The control behind the sender filter above: the API's answer about
       # the run the payload names. See .github/ci/ci-run.ts.
       - name: Require the dispatching CI run to have passed
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SHA: ${{ github.event.client_payload.sha }}
-          CI_RUN: ${{ github.event.client_payload.ci_run_id }}
+          SHA: ${{ github.event.client_payload.sha || github.sha }}
+          CI_RUN: ${{ github.event.client_payload.ci_run_id || steps.find.outputs.run-id }}
         run: node .github/ci/ci-run.ts vouches "$CI_RUN" "$SHA"
 
       # The checkout above is main's head, which can be newer than the commit
@@ -91,7 +123,7 @@ jobs:
       - name: Release only the commit CI passed
         id: head
         env:
-          SHA: ${{ github.event.client_payload.sha }}
+          SHA: ${{ github.event.client_payload.sha || github.sha }}
         run: node .github/ci/release-head.ts check "$SHA"
 
       # .github/release/package-lock.json pins semantic-release and its preset,
@@ -112,7 +144,7 @@ jobs:
         id: catchup
         if: steps.head.outputs.release == 'true'
         env:
-          SHA: ${{ github.event.client_payload.sha }}
+          SHA: ${{ github.event.client_payload.sha || github.sha }}
         run: node .github/ci/release-head.ts catch-up "$SHA"
 
       # Every module, each on its own line from the commits that touch it
@@ -131,7 +163,11 @@ jobs:
         if: steps.catchup.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CI_RUN: ${{ github.event.client_payload.ci_run_id }}
+          CI_RUN: ${{ github.event.client_payload.ci_run_id || steps.find.outputs.run-id }}
+          # Set by hand; a dispatched run releases by the policy.
+          CHANNEL: ${{ inputs.channel || 'release' }}
+          MODULE: ${{ inputs.module || 'all' }}
+          MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
         run: node .github/ci/release.ts
 
   # Each limes release is followed by a pull request per nested module that
