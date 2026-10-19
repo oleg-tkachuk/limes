@@ -28,10 +28,6 @@ concurrency:
 # Pinned tools, one place each. A floating tool changes what the gate checks
 # with no commit of ours in between.
 env:
-  # The runtime of the CI scripts and the release tooling, exact so a patch
-  # arrives as a reviewed change rather than whatever the runner image caches.
-  # renovate: datasource=node-version depName=node
-  NODE_VERSION: "24.21.0"
   # renovate: datasource=github-releases depName=go-task/task
   TASK_VERSION: "3.54.0"
   # The SHA256 of that release's task_linux_amd64.tar.gz, from its
@@ -67,8 +63,6 @@ jobs:
 
       - name: Set up the CI scripts
         uses: ./.github/actions/setup-ci
-        with:
-          node-version: ${{ env.NODE_VERSION }}
 
       - name: Classify the diff
         id: filter
@@ -138,8 +132,6 @@ jobs:
       # release.config.cjs. Node 24, as release.yaml runs it.
       - name: Set up the CI scripts
         uses: ./.github/actions/setup-ci
-        with:
-          node-version: ${{ env.NODE_VERSION }}
 
       - name: Install the release tooling
         working-directory: .github/release
@@ -373,11 +365,8 @@ jobs:
           cache: false
 
       # The module table the checks read is JavaScript: .github/release/modules.cjs.
-      - name: Set up Node
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          package-manager-cache: false
+      - name: Set up the CI scripts
+        uses: ./.github/actions/setup-ci
 
       # A marker counts for a module only when its own release analyzer
       # releases the commit: .github/release/module-commits.cjs.
@@ -417,11 +406,8 @@ jobs:
           fetch-depth: 0
 
       # The module table the checks read is JavaScript: .github/release/modules.cjs.
-      - name: Set up Node
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          package-manager-cache: false
+      - name: Set up the CI scripts
+        uses: ./.github/actions/setup-ci
 
       # A marker counts for a module only when its own release analyzer
       # releases the commit: .github/release/module-commits.cjs.

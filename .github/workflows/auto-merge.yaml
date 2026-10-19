@@ -12,7 +12,7 @@ name: Auto-merge
 #     merge. On each push to main, and each completed CI run of a pull
 #     request (the first in line may have failed), the first in line is
 #     rebased if it is behind; the rest wait their turn
-#     (.github/scripts/rebase-behind.sh).
+#     (.github/ci/rebase-behind.ts).
 #
 # Both act through AUTOMERGE_TOKEN — a fine-grained token or GitHub App token
 # with Contents and Pull requests write on this repository — and never through
@@ -30,13 +30,13 @@ name: Auto-merge
 #
 # The merge is decided when the run that tested the pull request completes,
 # not armed ahead of it: workflow_run runs main's copy of this workflow and of
-# .github/scripts/merge-green.sh, which reads the pull request then and merges
-# it with --match-head-commit at the tested commit. A push since moves the
+# .github/ci/merge-green.ts, which reads the pull request then and merges it
+# only at the tested commit. A push since moves the
 # head, the merge is refused, and the new head's own run decides. So no
 # earlier verdict can merge a later push, and a pull request cannot rewrite
 # the rule that holds it; nothing of it is checked out or run, only its
 # metadata and the names of its files read. Left for a person
-# (.github/scripts/merge-policy.sh): a draft — mark one draft to hold it —, a
+# (.github/ci/merge-policy.ts): a draft — mark one draft to hold it —, a
 # fork's, Renovate's (Renovate merges its own once a release is old enough,
 # renovate.json), one into another branch, one whose author cannot push here,
 # and one that changes what CI runs, whose green check is no evidence.
@@ -75,13 +75,19 @@ jobs:
     permissions:
       contents: read # the checkout below; the merge itself acts through AUTOMERGE_TOKEN
     steps:
-      # main's script: workflow_run runs the default branch's workflow, and
+      # main's scripts: workflow_run runs the default branch's workflow, and
       # its checkout is the default branch's, never the pull request's.
       - name: Check out the merge script
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: .github/scripts
+          sparse-checkout: |
+            .github/ci
+            .github/actions
+
+      # Before the token reaches any step: no package's install script runs.
+      - name: Set up the CI scripts
+        uses: ./.github/actions/setup-ci
 
       - name: Merge the pull request at the commit its run tested
         env:
@@ -89,8 +95,7 @@ jobs:
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           PULL_REQUESTS: ${{ toJSON(github.event.workflow_run.pull_requests) }}
-        # .github/scripts/merge-green.sh
-        run: ./.github/scripts/merge-green.sh
+        run: node .github/ci/merge-green.ts
 
   rebase:
     name: Rebase the first pull request in line onto main
@@ -114,11 +119,15 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: .github/scripts
+          sparse-checkout: |
+            .github/ci
+            .github/actions
+
+      - name: Set up the CI scripts
+        uses: ./.github/actions/setup-ci
 
       - name: Rebase the first pull request in line if it is behind main
         env:
           GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
           REPO: ${{ github.repository }}
-        # .github/scripts/rebase-behind.sh
-        run: ./.github/scripts/rebase-behind.sh
+        run: node .github/ci/rebase-behind.ts

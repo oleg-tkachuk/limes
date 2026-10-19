@@ -28,11 +28,7 @@ concurrency:
   group: release
   cancel-in-progress: false
 
-
 env:
-  # The release tooling's runtime, as ci.yaml pins it.
-  # renovate: datasource=node-version depName=node
-  NODE_VERSION: "24.21.0"
   # Each nested module's name in .github/release/modules.cjs, which is also
   # its directory and the prefix of its tags. release-rules.test.mjs fails
   # when a module there is not released here.
@@ -93,8 +89,6 @@ jobs:
       # restore into it — and no package's install script.
       - name: Set up the CI scripts
         uses: ./.github/actions/setup-ci
-        with:
-          node-version: ${{ env.NODE_VERSION }}
 
       # The checkout above is main's head, which can be newer than the commit
       # whose CI dispatched this run. Only that commit's code is released: a
