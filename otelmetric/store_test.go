@@ -414,7 +414,20 @@ func newSubject(spec subjectSpec) limes.MeterSubject {
 	return link.NewMeterSubject(link.MeterSubjectFields{
 		CapabilityID: spec.capID, TenantID: spec.tenant,
 		Requests: spec.requestCeiling(), Budget: spec.budgetCeiling(), Copies: spec.copies,
+		CopyQuota: copyQuotaOf(spec.capID),
 	}).(limes.MeterSubject)
+}
+
+// limitedCopies are the capabilities whose subjects carry a quota of one
+// copy, by TestMeteringLabelsLimitRefusals; every other subject's quota is
+// Unlimited.
+var limitedCopies = map[uuid.UUID]bool{}
+
+func copyQuotaOf(capID uuid.UUID) limes.CopyQuota {
+	if limitedCopies[capID] {
+		return limes.CopyQuota{Max: 1}
+	}
+	return limes.CopyQuota{Unlimited: true}
 }
 
 func (spec subjectSpec) requestCeiling() limes.RequestCeiling {
@@ -461,5 +474,35 @@ func TestMeteringAttributesARefusedSettle(t *testing.T) {
 	}
 	if got := valueAt(decisions, attrTenant, uuid.Nil.String()); got != 0 {
 		t.Errorf("refused settles for the zero tenant = %v, want 0", got)
+	}
+}
+
+// A charge, a hold or a settle refused for a limit on requests — a copy past
+// its capability's quota among them — is counted as request_limit_exceeded,
+// as a refused Bump is, not as an error.
+func TestMeteringLabelsLimitRefusals(t *testing.T) {
+	usage, reader, records := meteredStore(t)
+	ctx := context.Background()
+	capID := uuid.New()
+	limitedCopies[capID] = true
+	t.Cleanup(func() { delete(limitedCopies, capID) })
+	copyOf := func(id string) limes.CopyCeiling {
+		return limes.CopyCeiling{RevocationID: []byte(id), Requests: &limes.RequestCeiling{Unlimited: true}}
+	}
+	two := recordedSubject(ctx, t, records, subjectSpec{capID: capID, tenant: uuid.New(), copies: []limes.CopyCeiling{copyOf("a"), copyOf("b")}})
+	if _, err := usage.Charge(ctx, meter.ChargeRequest{Subject: two, Amount: limes.MustParseAmount("1")}, nil); !errors.Is(err, limes.ErrRequestLimitExceeded) {
+		t.Fatalf("a charge of two copies under a quota of one: %v", err)
+	}
+	if _, err := usage.Reserve(ctx, meter.ReserveRequest{Subject: two, Amount: limes.MustParseAmount("1")}); !errors.Is(err, limes.ErrRequestLimitExceeded) {
+		t.Fatalf("a hold of two copies under a quota of one: %v", err)
+	}
+	for _, name := range []string{metricChargeDecisions, metricReservations} {
+		ps := points(t, reader, name)
+		if got := valueAt(ps, attrOutcome, string(limes.ReasonRequestLimitExceeded)); got != 1 {
+			t.Errorf("%s request_limit_exceeded = %v, want 1", name, got)
+		}
+		if got := valueAt(ps, attrOutcome, "error"); got != 0 {
+			t.Errorf("%s error = %v, want 0", name, got)
+		}
 	}
 }
