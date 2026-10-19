@@ -34,7 +34,7 @@ func (s *UsageStore) Bump(ctx context.Context, req meter.BumpRequest) (meter.Bum
 		c, err := lock(ctx, tx, lockRequest{
 			now:     s.clock(),
 			created: append([]uuid.UUID{subject.CapabilityID()}, ancestorIDs(ancestors)...), usageTenant: subject.TenantID(),
-			copies: copyIDs(subject.Copies()), createCopies: true, copiesCapID: subject.CapabilityID(), maxCopies: s.maxCopies,
+			copies: copyIDs(subject.Copies()), createCopies: true, copiesCapID: subject.CapabilityID(), maxCopies: subject.CopyQuota().Bounded(s.maxCopies),
 		})
 		if err != nil {
 			return err
@@ -186,7 +186,7 @@ func (s *UsageStore) Charge(ctx context.Context, req meter.ChargeRequest, onChar
 		}
 		spec := chargeSpec{
 			capID: req.Subject.CapabilityID(), tenantID: req.Subject.TenantID(), budget: req.Subject.Budget(),
-			unit: unit, copies: req.Subject.Copies(), amount: req.Amount, op: req.Op, actor: req.Actor,
+			unit: unit, copies: req.Subject.Copies(), copyQuota: req.Subject.CopyQuota(), amount: req.Amount, op: req.Op, actor: req.Actor,
 			externalRef: req.ExternalRef, overrun: req.Overrun, ancestors: ancestors,
 		}
 		c, err := s.lockCharge(ctx, tx, spec)
@@ -214,7 +214,7 @@ func (s *UsageStore) lockCharge(ctx context.Context, tx pgx.Tx, spec chargeSpec)
 		tenantID: spec.tenantID, tenantUnit: spec.unit,
 		created:     append([]uuid.UUID{spec.capID}, ancestorIDs(spec.ancestors)...),
 		usageTenant: spec.tenantID,
-		copies:      copyIDs(spec.copies), createCopies: true, copiesCapID: spec.capID, maxCopies: s.maxCopies,
+		copies:      copyIDs(spec.copies), createCopies: true, copiesCapID: spec.capID, maxCopies: spec.copyQuota.Bounded(s.maxCopies),
 	}
 	if spec.settling != nil {
 		l.existing = spec.settling.ancestors
@@ -229,8 +229,10 @@ type chargeSpec struct {
 	// budget is the capability's own ceiling, from its token.
 	budget limes.BudgetCeiling
 	// unit is normalised.
-	unit        string
-	copies      []limes.CopyCeiling
+	unit   string
+	copies []limes.CopyCeiling
+	// copyQuota is the capability's quota of copies, from its token.
+	copyQuota   limes.CopyQuota
 	amount      limes.Nanos
 	op          limes.Op
 	actor       string
@@ -515,7 +517,7 @@ func (s *UsageStore) Reserve(ctx context.Context, req meter.ReserveRequest) (met
 			return err
 		}
 		c, err := s.lockCharge(ctx, tx, chargeSpec{
-			capID: subject.CapabilityID(), tenantID: subject.TenantID(), unit: unit, copies: subject.Copies(), ancestors: ancestors,
+			capID: subject.CapabilityID(), tenantID: subject.TenantID(), unit: unit, copies: subject.Copies(), copyQuota: subject.CopyQuota(), ancestors: ancestors,
 		})
 		if err != nil {
 			return err
@@ -626,7 +628,7 @@ func (s *UsageStore) Settle(ctx context.Context, req meter.SettleRequest, onChar
 		// The charge is the reservation's: its tenant, unit and the copy
 		// limits it was made under, against the subject's own ceiling.
 		spec := chargeSpec{
-			capID: h.capID, tenantID: h.tenantID, budget: subject.Budget(), unit: h.unit, copies: h.copies,
+			capID: h.capID, tenantID: h.tenantID, budget: subject.Budget(), unit: h.unit, copies: h.copies, copyQuota: subject.CopyQuota(),
 			amount: req.Amount, op: h.op, actor: h.actor, overrun: req.Overrun, ancestors: ancestors, settling: &h,
 		}
 		c, err := s.lockCharge(ctx, tx, spec)

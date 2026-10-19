@@ -335,7 +335,7 @@ func lock(ctx context.Context, tx pgx.Tx, l lockRequest) (*counters, error) {
 			// capability's usage row, locked above, keeps two calls from
 			// counting past it together.
 			if tag.RowsAffected() > 0 {
-				var counted int
+				var counted int64
 				if err := tx.QueryRow(ctx, sqlCountCopies, l.copiesCapID).Scan(&counted); err != nil {
 					return nil, err
 				}
@@ -393,9 +393,10 @@ type lockRequest struct {
 	// revocation id alone can turn up on another capability's chain.
 	copies       [][]byte
 	createCopies bool
-	// maxCopies is the store's quota of copies per capability, which
-	// createCopies may not take copiesCapID past.
-	maxCopies   int
+	// maxCopies is the quota of copies per capability — the capability's
+	// own, bounded by the store's — which createCopies may not take
+	// copiesCapID past.
+	maxCopies   int64
 	copiesCapID uuid.UUID
 }
 
