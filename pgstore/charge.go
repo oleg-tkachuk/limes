@@ -35,6 +35,7 @@ func (s *UsageStore) Bump(ctx context.Context, req meter.BumpRequest) (meter.Bum
 			now:     s.clock(),
 			created: append([]uuid.UUID{subject.CapabilityID()}, ancestorIDs(ancestors)...), usageTenant: subject.TenantID(),
 			copies: copyIDs(subject.Copies()), createCopies: true, copiesCapID: subject.CapabilityID(), maxCopies: subject.CopyQuota().Bounded(s.maxCopies),
+			chainQuotas: quotasOf(subject.CapabilityID(), subject.CopyQuota(), ancestors),
 		})
 		if err != nil {
 			return err
@@ -215,6 +216,7 @@ func (s *UsageStore) lockCharge(ctx context.Context, tx pgx.Tx, spec chargeSpec)
 		created:     append([]uuid.UUID{spec.capID}, ancestorIDs(spec.ancestors)...),
 		usageTenant: spec.tenantID,
 		copies:      copyIDs(spec.copies), createCopies: true, copiesCapID: spec.capID, maxCopies: spec.copyQuota.Bounded(s.maxCopies),
+		chainQuotas: quotasOf(spec.capID, spec.copyQuota, spec.ancestors),
 	}
 	if spec.settling != nil {
 		l.existing = spec.settling.ancestors
