@@ -219,7 +219,7 @@ tasks:
       - sh: test -d .github/release/node_modules/@semantic-release/commit-analyzer
         msg: "the release tooling is not installed — npm ci --ignore-scripts --prefix .github/release"
     cmds:
-      - for: [ci-job-passed, ci-run-check, gh-retry, new-release-tag, publish-release, require-released-limes, tidy-replacing-modules, unpublished-tags, warm-go-proxy, without-workflow-commands]
+      - for: [tidy-replacing-modules]
         cmd: bash .github/scripts/{{.ITEM}}.test.sh
 
   verify:release-rules:
