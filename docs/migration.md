@@ -14,6 +14,18 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## pgstore/v0.29.0
+
+- `pgstore.DB` asks for `BeginTx(ctx, pgx.TxOptions)` in place of `Begin`:
+  the store opens every transaction READ COMMITTED, whatever the database's
+  default, so a call that waited on a tenant's erase lock sees the erase.
+  `*pgxpool.Pool` and `*pgx.Conn` implement both; a `DB` of your own adds
+  `BeginTx`.
+- `CheckSchema` refuses a connection that logged in as a superuser, a
+  `BYPASSRLS` role or an owner even after `SET SESSION AUTHORIZATION` to a
+  runtime role, and `Migrate` stops at a migration it cannot scope to every
+  tenant, closing the connection, rather than run it unscoped.
+
 ## v0.108.0
 
 - A copy counted under a capability's `Caveats.Copies` stays counted under
