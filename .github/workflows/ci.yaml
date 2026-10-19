@@ -685,23 +685,25 @@ jobs:
     if: always()
     runs-on: ubuntu-26.04
     timeout-minutes: 5
-    permissions: {}
+    permissions:
+      contents: read
     steps:
+      - name: Check out the scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/ci
+            .github/actions
+
+      - name: Set up the CI scripts
+        uses: ./.github/actions/setup-ci
+
+      # See .github/ci/checks.ts.
       - name: Require every job to have passed or been skipped
         env:
-          RESULTS: ${{ join(needs.*.result, ' ') }}
-        run: |
-          set -euo pipefail
-          printf 'results: %s\n' "$RESULTS"
-          for result in $RESULTS; do
-            case "$result" in
-              success | skipped) ;;
-              *)
-                printf '%s\n' "a required job ended as ${result}"
-                exit 1
-                ;;
-            esac
-          done
+          NEEDS: ${{ toJSON(needs) }}
+        run: node .github/ci/checks.ts
 
   # It waits for the one required check, which stands for every job a merge
   # needs, and for pgstore-released-limes, whose result release.yaml reads to
