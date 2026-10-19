@@ -281,7 +281,9 @@ type UsageStoreConfig struct {
 	// Records is how the usage store finds each capability's ancestors and
 	// their ceilings, and which capabilities still exist for PurgeOrphans.
 	// Required: without it no ancestor's ceiling would bind, which a store
-	// over a database never does.
+	// over a database never does. It is the Store that serves Insert: the
+	// mark EraseTenantUsage leaves, which makes Insert refuse the tenant, is
+	// kept there.
 	Records *Store
 	// Now is the clock, read as a wall clock (wallClock). Nil: time.Now.
 	Now func() time.Time

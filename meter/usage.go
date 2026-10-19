@@ -67,7 +67,8 @@ type UsageStore interface {
 // ErrCopyLimitExceeded, counting nothing. A copy already counted goes on
 // being metered, and it stays counted under the ancestors once its
 // capability's usage is dropped (DeleteUsage, PurgeOrphans), as its requests
-// and spend do. A store keeps that count on each capability's counters
+// and spend do; dropping an ancestor's own usage restarts its count with its
+// other counters. A store keeps that count on each capability's counters
 // rather than walking its subtree, so admitting a copy costs the length of
 // the chain, not the size of the tree.
 //
