@@ -112,6 +112,8 @@ check "a nested vendor directory" false FAKE_FILES="pgstore/vendor/modules.txt"
 check "a count that is not one" false FAKE_CHANGED=null
 # A file the files API did not list could be a CI definition.
 check "more files changed than listed" false FAKE_FILES="verifier.go" FAKE_CHANGED=2
+# More files listed than GitHub counts: the answers are of different heads.
+check "more files listed than changed" false FAKE_FILES="$(printf 'a.go\nb.go')" FAKE_CHANGED=1
 # A refused merge — the head moved between the read and the merge — is
 # reported and leaves the pull request as it is.
 check "a merge GitHub refuses" true FAKE_MERGE_FAILS=1

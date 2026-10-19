@@ -60,11 +60,13 @@ readonly CI_DEFINITION=(
 readonly FILES_API_CAP=3000
 
 # files_listed_in_full reports whether <listed> files of a pull request
-# GitHub says changes <changed> are all of them: changed is a count, none is
-# missing, and the listing did not stop at the files API's cap. A count that
-# is not one — empty, null — is never read as a complete listing.
+# GitHub says changes <changed> are all of them: changed is a count, the two
+# agree, and the listing did not stop at the files API's cap. A count that is
+# not one — empty, null — is never read as a complete listing, and neither
+# is one the listing disagrees with either way: more files than changed
+# means the two answers describe different heads.
 files_listed_in_full() {
-    [[ $1 =~ ^[0-9]+$ && $2 =~ ^[0-9]+$ ]] && [ "$1" -ge "$2" ] && [ "$1" -lt "$FILES_API_CAP" ]
+    [[ $1 =~ ^[0-9]+$ && $2 =~ ^[0-9]+$ ]] && [ "$1" -eq "$2" ] && [ "$1" -lt "$FILES_API_CAP" ]
 }
 
 # defines_ci reports whether path is one CI_DEFINITION names.
