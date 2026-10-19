@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 
 import { Octokit } from "octokit";
 
-import { authorOf, checkRunOf, gitHubOver, parseRepo, queuedOf, type GraphQLPullRequest } from "./github.ts";
+import { PAGE_SIZE, authorOf, checkRunOf, gitHubOver, parseRepo, queuedOf, type GraphQLPullRequest } from "./github.ts";
 
 const REPO = { owner: "oleg-tkachuk", repo: "limes" };
 
@@ -147,10 +147,44 @@ describe("gitHubOver", () => {
     });
   });
 
-  test("lists the open pull requests into a branch", async () => {
-    const { octokit, sent } = clientAnswering(() => ({ status: 200, body: { data: { repository: { pullRequests: { nodes: [] } } } } }));
-    assert.deepEqual(await gitHubOver(octokit, REPO).openPullRequests("main", 200), []);
-    const variables = (sent[0]?.body as { variables: Record<string, unknown> }).variables;
-    assert.deepEqual({ ...variables, checks: undefined }, { ...REPO, base: "main", limit: 200, checks: undefined });
+  test("lists the open pull requests into a branch a page at a time", async () => {
+    const node = (number: number) => ({
+      number,
+      state: "OPEN",
+      isDraft: false,
+      isCrossRepository: false,
+      mergeStateStatus: "BEHIND",
+      baseRefName: "main",
+      headRefOid: `h${number}`,
+      changedFiles: 1,
+      author: { login: "someone", __typename: "User" },
+      autoMergeRequest: null,
+      commits: { nodes: [] },
+    });
+    const pages = [
+      { pageInfo: { hasNextPage: true, endCursor: "c1" }, nodes: Array.from({ length: PAGE_SIZE }, (_, i) => node(i + 1)) },
+      { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [node(PAGE_SIZE + 1)] },
+    ];
+    let page = 0;
+    const { octokit, sent } = clientAnswering(() => ({ status: 200, body: { data: { repository: { pullRequests: pages[page++] } } } }));
+    const listed = await gitHubOver(octokit, REPO).openPullRequests("main", 200);
+    assert.equal(listed.length, PAGE_SIZE + 1);
+    const variables = sent.map((r) => (r.body as { variables: Record<string, unknown> }).variables);
+    assert.deepEqual(
+      variables.map((v) => [v.first, v.after, v.base]),
+      [
+        [PAGE_SIZE, null, "main"],
+        [PAGE_SIZE, "c1", "main"],
+      ],
+    );
+  });
+
+  test("lists no more than the limit", async () => {
+    const { octokit, sent } = clientAnswering(() => ({
+      status: 200,
+      body: { data: { repository: { pullRequests: { pageInfo: { hasNextPage: true, endCursor: "c" }, nodes: [] } } } },
+    }));
+    await gitHubOver(octokit, REPO).openPullRequests("main", 3);
+    assert.equal((sent[0]?.body as { variables: { first: number } }).variables.first, 3);
   });
 });
