@@ -76,14 +76,16 @@ candidates="$(gh_retry pr list --repo "$REPO" --base "$BASE_BRANCH" --state open
                        | $c == "" or $c == $pending or ($passing | index($c)))
              | "\(.number) \(.headRefOid) \(.author.login) \(.autoMergeRequest != null) \(.changedFiles)"')"
 
-# merges_itself reports whether pull request <n>, changing <changed> files,
-# is one merge-green merges without GitHub's auto-merge: every file it
-# changes is listed, and none is a CI definition.
+# merges_itself reports whether a pull request whose head compares with
+# BASE_BRANCH as <comparison>, changing <changed> files, is one merge-green
+# merges without GitHub's auto-merge: every file its head changes is listed,
+# and none is a CI definition. The files are the head's the rebase names, as
+# merge-green reads those of the commit it merges.
 merges_itself() {
     local entries listed files path
-    entries="$(gh_retry api "repos/${REPO}/pulls/$1/files" --paginate --jq '.[] | [.filename, (.previous_filename // "")] | @tsv')" || return 1
+    entries="$(jq -r '.files[]? | [.filename, (.previous_filename // "")] | @tsv' <<<"$1")" || return 1
     listed="$(grep -c . <<<"$entries" || true)"
-    if ! files_listed_in_full "$listed" "$2" "$FILES_API_CAP"; then
+    if ! files_listed_in_full "$listed" "$2" "$COMPARE_FILES_CAP"; then
         return 1
     fi
     files="$(tr '\t' '\n' <<<"$entries")"
@@ -101,14 +103,15 @@ while read -r pr head author auto changed; do
         echo "::notice::#${pr} is by ${author}, who cannot push here; it is not in line"
         continue
     fi
-    if [ "$auto" != true ] && ! merges_itself "$pr" "$changed"; then
-        echo "::notice::#${pr} changes what CI runs, or more files than were listed, and has no auto-merge; it waits for a person, not in line"
-        continue
-    fi
-    if ! by="$(gh_retry api "repos/${REPO}/compare/${BASE_BRANCH}...${head}" | jq -r '.behind_by')"; then
+    if ! comparison="$(gh_retry api "repos/${REPO}/compare/${BASE_BRANCH}...${head}")"; then
         echo "::warning::could not compare #${pr} with ${BASE_BRANCH}; the next in line goes first"
         continue
     fi
+    if [ "$auto" != true ] && ! merges_itself "$comparison" "$changed"; then
+        echo "::notice::#${pr} changes what CI runs, or more files than were listed, and has no auto-merge; it waits for a person, not in line"
+        continue
+    fi
+    by="$(jq -r '.behind_by' <<<"$comparison")"
     if [ "$by" -eq 0 ]; then
         echo "rebase-behind: #${pr} is first in line and up to date"
         exit 0

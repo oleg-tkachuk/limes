@@ -10,9 +10,9 @@
 # A fake gh stands in for the API. It logs every call's arguments to CALLS;
 # for `pr list` it answers FAKE_PRS cut down to the fields --json asked for, so
 # a script reading a field it did not request reads nothing; for a pull
-# request's files it answers FAKE_FILES[number] (none when missing) through
-# the script's own --jq; for a compare it answers behind_by from FAKE_BEHIND,
-# keyed by head sha, and fails one sha missing there; for a collaborator's
+# compare it answers behind_by from FAKE_BEHIND and files from FAKE_FILES
+# (none when missing), both keyed by head sha, and fails a sha missing from
+# FAKE_BEHIND; for a collaborator's
 # permission it answers from FAKE_PERMISSIONS, keyed by login, and fails a
 # login missing there; it fails the update-branch call of FAIL_PR.
 #
@@ -43,16 +43,11 @@ case "$1 $2" in
         jq -e --arg l "$login" 'has($l)' <<<"$FAKE_PERMISSIONS" >/dev/null || { echo "HTTP 404: Not Found" >&2; exit 1; }
         jq -r --arg l "$login" '.[$l]' <<<"$FAKE_PERMISSIONS"
         ;;
-    "api repos/"*/files)
-        number="${2%/files}"
-        number="${number##*/}"
-        while [ "$1" != --jq ]; do shift; done
-        jq --arg n "$number" '.[$n] // []' <<<"${FAKE_FILES:-{\}}" | jq -r "$2"
-        ;;
-    "api repos/"*)
+    "api repos/"*/compare/*)
         sha="${2##*...}"
         jq -e --arg sha "$sha" 'has($sha)' <<<"$FAKE_BEHIND" >/dev/null || exit 1
-        jq --arg sha "$sha" '{behind_by: .[$sha]}' <<<"$FAKE_BEHIND"
+        jq -n --arg sha "$sha" --argjson behind "$FAKE_BEHIND" --argjson files "${FAKE_FILES:-{\}}" \
+            '{behind_by: $behind[$sha], files: ($files[$sha] // [])}'
         ;;
     "api --method") [[ "$4" != */"$FAIL_PR"/* ]] ;;
     *) echo "unexpected gh $*" >&2; exit 2 ;;
@@ -97,7 +92,7 @@ red='[{"name": "All checks passed", "conclusion": "FAILURE"}]'
 # Renovate's, a reader's, a red one, and one changing CI with no auto-merge.
 # #9 is rebased; #11, behind it, waits. Listed out of order: the lowest
 # number goes first.
-export FAKE_FILES='{"7": [{"filename": ".github/workflows/ci.yaml"}], "9": [{"filename": "verifier.go"}]}'
+export FAKE_FILES='{"a7": [{"filename": ".github/workflows/ci.yaml"}], "a9": [{"filename": "verifier.go"}]}'
 export FAKE_PRS
 FAKE_PRS="$(prs "$(pr 11 b1)" "$(pr 9 a9 changedFiles=1)" "$(pr 1 a1 isDraft=true)" "$(pr 2 a2 isCrossRepository=true)" \
     "$(pr 3 a3 'mergeStateStatus="DIRTY"')" "$(pr 4 a4 'author={"login":"app/renovate"}')" \
@@ -128,20 +123,20 @@ FAKE_PRS="$(prs "$(pr 1 a1 "statusCheckRollup=$cancelled")" "$(pr 2 a2 "statusCh
 run "a cancelled latest run"
 rebased_only 2 a2 || fail "updated: $(updates | tr '\n' ';'), want #2, whose run is still going, and not #1, whose latest was cancelled"
 
-# A pull request with more files than the files API listed may hide a CI
+# A pull request with more files than the compare API listed may hide a CI
 # definition: merge-green would leave it for a person, so it is not in line.
 FAKE_PRS="$(prs "$(pr 1 a1 changedFiles=2)" "$(pr 2 a2)")"
-FAKE_FILES='{"1": [{"filename": "verifier.go"}]}' run "files left unlisted"
+FAKE_FILES='{"a1": [{"filename": "verifier.go"}]}' run "files left unlisted"
 rebased_only 2 a2 || fail "updated: $(updates | tr '\n' ';'), want #2, not #1 with a file unlisted"
 
 # More files listed than counted: the answers are of different heads.
 FAKE_PRS="$(prs "$(pr 1 a1 changedFiles=1)" "$(pr 2 a2)")"
-FAKE_FILES='{"1": [{"filename": "a.go"}, {"filename": "b.go"}]}' run "more files listed than changed"
+FAKE_FILES='{"a1": [{"filename": "a.go"}, {"filename": "b.go"}]}' run "more files listed than changed"
 rebased_only 2 a2 || fail "updated: $(updates | tr '\n' ';'), want #2, not #1 whose listing disagrees with its count"
 
 # A count of changed files that is not one leaves the pull request out of line.
 FAKE_PRS="$(prs "$(pr 1 a1 changedFiles=null)" "$(pr 2 a2)")"
-FAKE_FILES='{"1": [{"filename": "verifier.go"}]}' run "a count that is not one"
+FAKE_FILES='{"a1": [{"filename": "verifier.go"}]}' run "a count that is not one"
 rebased_only 2 a2 || fail "updated: $(updates | tr '\n' ';'), want #2, not #1 with no count of its files"
 
 # A CI change with auto-merge on merges itself, so it is in line.
@@ -154,6 +149,14 @@ rebased_only 7 a7 || fail "updated: $(updates | tr '\n' ';'), want #7, which aut
 FAKE_PRS="$(prs "$(pr 10 b0)" "$(pr 11 b1)")"
 run "an up-to-date first"
 [ -z "$(updates)" ] || fail "with the first in line up to date, rebased: $(updates | tr '\n' ';')"
+
+# The files are those of the head the rebase names, not of the head the
+# pull request has now: a push after the listing moves the head, and the
+# rebase at the listed one is refused.
+FAKE_PRS="$(prs "$(pr 9 a9 changedFiles=1)")"
+run "the files of the listed head"
+grep -q -- "^api repos/oleg-tkachuk/limes/compare/main\.\.\.a9$" "$CALLS" || fail "files not listed at the head rebased: $(grep '^api' "$CALLS" | tr '\n' ';')"
+! grep -q -- "/files" "$CALLS" || fail "files read from the pull request's moving head: $(grep '^api' "$CALLS" | tr '\n' ';')"
 
 # A first that cannot be rebased, or compared, gives its place to the next.
 FAKE_PRS="$(prs "$(pr 1 a1)" "$(pr 2 a2)")"
