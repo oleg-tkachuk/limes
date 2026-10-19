@@ -223,7 +223,35 @@ describe("releaseAll", () => {
     const summary = readFileSync(page, "utf8");
     assert.match(summary, /\| limes \| v0\.2\.0 \| released by hand \|/);
     assert.match(summary, /\| pgstore \|  \| 'PostgreSQL store, released limes' did not pass; not released this run \|/);
-    assert.match(summary, /\| redisreplay \|  \| no new tag from this run/);
+    assert.match(summary, /\| redisreplay \|  \| no commit since its first commit cuts a release \|/);
+  });
+
+  // A run by hand that released nothing says so as an annotation, naming
+  // each module's last release; one that released something does not.
+  async function noticesOf(run: () => Promise<unknown>): Promise<string[]> {
+    const printed: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => void printed.push(line);
+    try {
+      await run();
+    } finally {
+      console.log = log;
+    }
+    return printed.filter((l) => l.startsWith("notice: ") || l.startsWith("::notice::"));
+  }
+  test("a run by hand that released nothing says so", async () => {
+    await repo.run("tag", "v0.1.0");
+    data.released.add("v0.1.0");
+    const notices = await noticesOf(() => releaseAll({ ...release(), channel: Channel.Prerelease }));
+    assert.equal(notices.length, 1, notices.join("\n"));
+    assert.match(notices[0] ?? "", /nothing pre-released: limes: no commit since v0\.1\.0 cuts a release, so no candidate/);
+  });
+  test("a run by hand that released something says nothing more", async () => {
+    next = { limes: "v0.2.0" };
+    assert.deepEqual(await noticesOf(() => releaseAll(release())), []);
+  });
+  test("a run nobody asked for that released nothing says nothing more", async () => {
+    assert.deepEqual(await noticesOf(() => releaseAll({ ...release(), manual: false })), []);
   });
 
   test("no release due publishes nothing", async () => {
