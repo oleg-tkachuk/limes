@@ -104,21 +104,35 @@ const (
 	sqlSettingNow = `SELECT coalesce(current_setting($1, true), '')`
 )
 
+// scopeMigration scopes conn's session to every tenant as a migration
+// starts. A variable so that a test can make it fail.
+var scopeMigration = func(ctx context.Context, conn *pgx.Conn) error {
+	_, err := conn.Exec(ctx, sqlSetSession, SettingAllTenants, SettingAllTenantsOn)
+	return err
+}
+
 // runMigrations runs m's migrations on conn scoped to every tenant, each of
 // them: tern resets the session's settings after every migration, so the
-// scope is set again as each one starts. A scope that cannot be set fails
-// the run.
+// scope is set again as each one starts. tern runs a migration whatever its
+// OnStart finds, so a scope that cannot be set closes the connection: the
+// migration fails before it runs unscoped, its version is not recorded, and
+// the run ends with the error.
 func runMigrations(ctx context.Context, conn *pgx.Conn, m *migrate.Migrator) error {
 	var scopeErr error
 	m.OnStart = func(int32, string, string, string) {
-		if _, err := conn.Exec(ctx, sqlSetSession, SettingAllTenants, SettingAllTenantsOn); err != nil && scopeErr == nil {
-			scopeErr = fmt.Errorf("pgstore: migrate: scope a migration to every tenant: %w", err)
+		if scopeErr != nil {
+			return
+		}
+		if err := scopeMigration(ctx, conn); err != nil {
+			scopeErr = fmt.Errorf("pgstore: migrate: scope a migration to every tenant, connection closed: %w", err)
+			_ = conn.Close(context.WithoutCancel(ctx))
 		}
 	}
-	if err := migrateAllTenants(ctx, conn, m.Migrate); err != nil {
-		return err
+	err := migrateAllTenants(ctx, conn, m.Migrate)
+	if scopeErr != nil {
+		return errors.Join(scopeErr, err)
 	}
-	return scopeErr
+	return err
 }
 
 // restoreScopeTimeout bounds putting the session's scope back after a run,
