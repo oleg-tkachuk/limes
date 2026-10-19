@@ -209,6 +209,23 @@ describe("releaseAll", () => {
     assert.ok(GATES.pgstore !== undefined);
   });
 
+  test("the run's summary says what happened to each module", async () => {
+    const page = join(notesDir, "summary.md");
+    process.env.GITHUB_STEP_SUMMARY = page;
+    try {
+      next = { limes: "v0.2.0" };
+      gatesPassing = false;
+      await releaseAll(release());
+    } finally {
+      delete process.env.GITHUB_STEP_SUMMARY;
+    }
+    const { readFileSync } = await import("node:fs");
+    const summary = readFileSync(page, "utf8");
+    assert.match(summary, /\| limes \| v0\.2\.0 \| released by hand \|/);
+    assert.match(summary, /\| pgstore \|  \| 'PostgreSQL store, released limes' did not pass; not released this run \|/);
+    assert.match(summary, /\| redisreplay \|  \| no new tag from this run/);
+  });
+
   test("no release due publishes nothing", async () => {
     assert.equal(await releaseAll(release()), true);
     assert.deepEqual(data.published, []);

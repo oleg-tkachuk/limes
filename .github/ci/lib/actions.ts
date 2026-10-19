@@ -6,8 +6,10 @@ import { appendFileSync } from "node:fs";
 
 import { requireEnv } from "./env.ts";
 
-// OUTPUT_FILE names the file a step appends its outputs to.
+// OUTPUT_FILE names the file a step appends its outputs to; SUMMARY_FILE,
+// the one it appends the Markdown of the run's summary page to.
 const OUTPUT_FILE = "GITHUB_OUTPUT";
+const SUMMARY_FILE = "GITHUB_STEP_SUMMARY";
 
 // setOutput records name=value for the steps after this one. A value is one
 // line: a newline in it would start an output of the value's choosing.
@@ -16,6 +18,27 @@ export function setOutput(name: string, value: string): void {
     throw new Error(`output ${name}: a value spans lines`);
   }
   appendFileSync(requireEnv(OUTPUT_FILE), `${name}=${value}\n`);
+}
+
+// summarize appends markdown to the run's summary page; outside a run, with
+// no page to write to, it does nothing.
+export function summarize(markdown: string): void {
+  const file = process.env[SUMMARY_FILE];
+  if (file !== undefined && file !== "") {
+    appendFileSync(file, markdown.endsWith("\n") ? markdown : `${markdown}\n`);
+  }
+}
+
+// cell is text as one cell of a Markdown table: no line break, no column
+// separator of its own.
+export function cell(text: string): string {
+  return text.replaceAll("\r", " ").replaceAll("\n", " ").replaceAll("|", "\\|");
+}
+
+// table is a Markdown table of rows under header.
+export function table(header: readonly string[], rows: readonly (readonly string[])[]): string {
+  const line = (cells: readonly string[]) => `| ${cells.map(cell).join(" | ")} |`;
+  return [line(header), line(header.map(() => "---")), ...rows.map(line)].join("\n") + "\n";
 }
 
 // escapeData escapes a workflow command's message, as the runner unescapes

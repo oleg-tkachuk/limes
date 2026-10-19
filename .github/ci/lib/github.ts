@@ -90,6 +90,20 @@ export interface PullRequestText {
   body: string;
 }
 
+// RunState is the newest finished run of a workflow: how it ended, the
+// commit it ran for, and where to read it.
+export interface RunState {
+  conclusion: string;
+  headSha: string;
+  url: string;
+}
+
+// OpenPullRequest is an open pull request's number and head.
+export interface OpenPullRequest {
+  number: number;
+  headSha: string;
+}
+
 // GitHub is everything the commands ask of the API.
 export interface GitHub {
   pullRequest(number: number): Promise<PullRequest>;
@@ -115,6 +129,20 @@ export interface GitHub {
   // passedRunsOf is the ids of the completed, successful push runs of the
   // workflow file on branch that tested sha, newest first.
   passedRunsOf(workflow: string, branch: string, sha: string): Promise<number[]>;
+  // latestRunOf is the newest finished push run of the workflow file on
+  // branch, if any.
+  latestRunOf(workflow: string, branch: string): Promise<RunState | undefined>;
+  // openPullRequestsInto is every open, ready pull request from this
+  // repository into base.
+  openPullRequestsInto(base: string): Promise<OpenPullRequest[]>;
+  // checkConclusion is how the newest run of the check named name at sha
+  // ended; undefined while it runs or when it has not.
+  checkConclusion(sha: string, name: string): Promise<string | undefined>;
+  // openIssueTitled is the number of the open issue titled title, if any.
+  openIssueTitled(title: string): Promise<number | undefined>;
+  createIssue(title: string, body: string): Promise<number>;
+  commentOnIssue(number: number, body: string): Promise<void>;
+  closeIssue(number: number): Promise<void>;
   // dispatch sends a repository_dispatch event of eventType with payload.
   dispatch(eventType: string, payload: Record<string, string>): Promise<void>;
 }
@@ -247,6 +275,42 @@ export function gitHubOver(octokit: Octokit, repo: Repo): GitHub {
         per_page: PAGE_SIZE,
       });
       return data.workflow_runs.sort((a, b) => b.run_number - a.run_number).map((r) => r.id);
+    },
+    async latestRunOf(workflow, branch) {
+      const { data } = await octokit.rest.actions.listWorkflowRuns({
+        ...repo,
+        workflow_id: workflow.split("/").at(-1) ?? workflow,
+        branch,
+        event: "push",
+        status: "completed",
+        per_page: 1,
+      });
+      const run = data.workflow_runs[0];
+      return run === undefined ? undefined : { conclusion: run.conclusion ?? "", headSha: run.head_sha, url: run.html_url };
+    },
+    async openPullRequestsInto(base) {
+      const pulls = await octokit.paginate(octokit.rest.pulls.list, { ...repo, base, state: "open", per_page: PAGE_SIZE });
+      return pulls
+        .filter((p) => !(p.draft ?? false) && p.head.repo?.full_name === `${repo.owner}/${repo.repo}`)
+        .map((p) => ({ number: p.number, headSha: p.head.sha }));
+    },
+    async checkConclusion(sha, name) {
+      const { data } = await octokit.rest.checks.listForRef({ ...repo, ref: sha, check_name: name, filter: "latest" });
+      return data.check_runs[0]?.conclusion ?? undefined;
+    },
+    async openIssueTitled(title) {
+      const issues = await octokit.paginate(octokit.rest.issues.listForRepo, { ...repo, state: "open", per_page: PAGE_SIZE });
+      return issues.find((i) => i.pull_request === undefined && i.title === title)?.number;
+    },
+    async createIssue(title, body) {
+      const { data } = await octokit.rest.issues.create({ ...repo, title, body });
+      return data.number;
+    },
+    async commentOnIssue(number, body) {
+      await octokit.rest.issues.createComment({ ...repo, issue_number: number, body });
+    },
+    async closeIssue(number) {
+      await octokit.rest.issues.update({ ...repo, issue_number: number, state: "closed", state_reason: "completed" });
     },
     async dispatch(eventType, payload) {
       await octokit.rest.repos.createDispatchEvent({ ...repo, event_type: eventType, client_payload: payload });
