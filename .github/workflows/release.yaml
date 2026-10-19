@@ -90,11 +90,14 @@ jobs:
           CI_RUN: ${{ github.event.client_payload.ci_run_id }}
         run: printf '%s for commit %s, CI run %s\n' "$EVENT" "${SHA:-unknown}" "${CI_RUN:-to be found}"
 
-      # Node and the CI scripts, with no dependency cache — this job holds a
-      # write token, and a cache another run wrote is not something to
-      # restore into it — and no package's install script.
+      # Node, the CI scripts and the semantic-release that
+      # .github/release/package-lock.json pins, with no dependency cache —
+      # this job holds a write token, and a cache another run wrote is not
+      # something to restore into it — and no package's install script.
       - name: Set up the CI scripts
         uses: ./.github/actions/setup-ci
+        with:
+          release-tooling: true
 
       # A run by hand has no dispatching CI run: the newest passed push run of
       # ci.yaml on main for the commit stands in for it, and none at all
@@ -125,16 +128,6 @@ jobs:
         env:
           SHA: ${{ github.event.client_payload.sha || github.sha }}
         run: node .github/ci/release-head.ts check "$SHA"
-
-      # .github/release/package-lock.json pins semantic-release and its preset,
-      # so this installs the versions committed here rather than a marketplace
-      # action's own.
-      - name: Install semantic-release
-        if: steps.head.outputs.release == 'true'
-        working-directory: .github/release
-        # No package's install script runs while this job's write token sits
-        # in the checkout.
-        run: npm ci --ignore-scripts
 
       # semantic-release publishes nothing from a branch behind its remote,
       # and says so with exit 0: whatever landed on main since the checkout

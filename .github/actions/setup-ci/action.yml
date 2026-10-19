@@ -4,6 +4,12 @@ description: >-
   dependencies from their lockfile with no install script run, so a step can
   run `node .github/ci/<command>.ts`.
 
+inputs:
+  release-tooling:
+    description: Also install the release tooling in .github/release (semantic-release and its preset).
+    required: false
+    default: "false"
+
 runs:
   using: composite
   steps:
@@ -17,7 +23,13 @@ runs:
         node-version-file: .github/ci/.node-version
         package-manager-cache: false
 
+    # Bounded in time and tried again: npm once hung on the registry for a
+    # whole job. See .github/ci/install.ts.
     - name: Install the CI scripts' dependencies
       shell: bash
-      working-directory: .github/ci
-      run: npm ci --ignore-scripts
+      run: node .github/ci/install.ts .github/ci
+
+    - name: Install the release tooling
+      if: inputs.release-tooling == 'true'
+      shell: bash
+      run: node .github/ci/install.ts .github/release

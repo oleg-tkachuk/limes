@@ -123,10 +123,8 @@ jobs:
       # release.config.cjs. Node 24, as release.yaml runs it.
       - name: Set up the CI scripts
         uses: ./.github/actions/setup-ci
-
-      - name: Install the release tooling
-        working-directory: .github/release
-        run: npm ci --ignore-scripts
+        with:
+          release-tooling: true
 
       - name: Set up Task
         uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
@@ -556,15 +554,13 @@ jobs:
           job: api
           go-version: ${{ steps.go.outputs.go-version }}
 
-      # The module table the checks read is JavaScript: .github/release/modules.cjs.
+      # The module table the checks read is JavaScript: .github/release/modules.cjs;
+      # a marker counts for a module only when its own release analyzer
+      # releases the commit: .github/release/module-commits.cjs.
       - name: Set up the CI scripts
         uses: ./.github/actions/setup-ci
-
-      # A marker counts for a module only when its own release analyzer
-      # releases the commit: .github/release/module-commits.cjs.
-      - name: Install the release tooling
-        working-directory: .github/release
-        run: npm ci --ignore-scripts
+        with:
+          release-tooling: true
 
       # Every module, each from its own last release on a push: see
       # .github/ci/check-modules.ts.
@@ -608,15 +604,13 @@ jobs:
           # that say which release line it builds on.
           fetch-depth: 0
 
-      # The module table the checks read is JavaScript: .github/release/modules.cjs.
+      # The module table the checks read is JavaScript: .github/release/modules.cjs;
+      # a marker counts for a module only when its own release analyzer
+      # releases the commit: .github/release/module-commits.cjs.
       - name: Set up the CI scripts
         uses: ./.github/actions/setup-ci
-
-      # A marker counts for a module only when its own release analyzer
-      # releases the commit: .github/release/module-commits.cjs.
-      - name: Install the release tooling
-        working-directory: .github/release
-        run: npm ci --ignore-scripts
+        with:
+          release-tooling: true
 
       - name: Refuse a breaking marker on a stable release line
         env:
