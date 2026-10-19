@@ -65,8 +65,11 @@ type UsageStore interface {
 // — its configuration's, or DefaultMaxCopiesPerCapability. Bump, Charge and
 // Reserve refuse a call that would take any of these past it as
 // ErrCopyLimitExceeded, counting nothing. A copy already counted goes on
-// being metered; one whose capability is no longer on record counts under no
-// ancestor.
+// being metered, and it stays counted under the ancestors once its
+// capability's usage is dropped (DeleteUsage, PurgeOrphans), as its requests
+// and spend do. A store keeps that count on each capability's counters
+// rather than walking its subtree, so admitting a copy costs the length of
+// the chain, not the size of the tree.
 //
 // All methods are concurrency-safe. A rejected call mutates nothing, so a
 // retry after rejection is safe. Each method first refuses a request whose

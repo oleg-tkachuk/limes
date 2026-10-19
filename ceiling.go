@@ -38,7 +38,8 @@ type BudgetCeiling struct {
 // most Max, or as many as the store allows when Unlimited. It counts the
 // copies of the capability and of every capability delegated from it, as
 // its request and budget ceilings count theirs, so a delegated child does
-// not multiply them. A store counts no more than its own bound per
+// not multiply them, and goes on counting them once a child's usage is
+// dropped. A store counts no more than its own bound per
 // capability either (meter.DefaultMaxCopiesPerCapability), whatever the
 // quota.
 type CopyQuota struct {
