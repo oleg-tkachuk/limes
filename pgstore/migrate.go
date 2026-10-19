@@ -284,10 +284,17 @@ var ErrRuntimeRole = errors.New("pgstore: the store is served by a role row-leve
 // BYPASSRLS; an owner of the schema $1, or of a table, sequence, view or
 // function in it, which may disable its row-level security, drop a policy or
 // replace the functions the policies and revocation checks call. It asks of
-// the session's role as well as the current one: a session opened as one of
-// these that SET ROLE to another can RESET ROLE back.
+// the session's role and of the role the connection logged in as as well as
+// the current one: a session opened as one of these that SET ROLE, or SET
+// SESSION AUTHORIZATION, to another can RESET either back. The login role is
+// the backend's in pg_stat_activity, which SET SESSION AUTHORIZATION leaves
+// alone.
 const sqlRuntimeRole = `
-WITH serving (role) AS (VALUES (current_user), (session_user))
+WITH serving (role) AS (
+    VALUES (current_user), (session_user)
+  UNION
+    SELECT usename FROM pg_stat_activity WHERE pid = pg_backend_pid() AND usename IS NOT NULL
+)
 SELECT
     EXISTS (SELECT 1 FROM serving s, pg_roles r WHERE r.rolsuper AND pg_has_role(s.role, r.oid, 'MEMBER')),
     EXISTS (SELECT 1 FROM serving s, pg_roles r WHERE r.rolbypassrls AND pg_has_role(s.role, r.oid, 'MEMBER')),
