@@ -58,7 +58,8 @@ const (
 	outcomeCapExceeded = string(limes.ReasonBudgetExceeded)
 	// outcomeTenantExceeded — the tenant aggregate refused it.
 	outcomeTenantExceeded = string(limes.ReasonTenantBudgetExceeded)
-	// outcomeLimitExceeded — a request limit refused a Bump.
+	// outcomeLimitExceeded — a request limit, or a copy quota, refused the
+	// call.
 	outcomeLimitExceeded = string(limes.ReasonRequestLimitExceeded)
 	// outcomeError — it failed for any other reason: a malformed request, a
 	// failed onCharged, a store error.

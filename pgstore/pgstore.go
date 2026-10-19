@@ -20,15 +20,25 @@
 // CheckSchema returns ErrSchemaMismatch while the schema is not the version
 // this package queries, and ErrRuntimeRole when the pool is a role the
 // policies do not hold — a superuser, one with BYPASSRLS, an owner of the
-// schema or of anything in it, or a role that can act as one — for a
-// readiness check; ReadSchemaVersion reports both versions and
+// schema or of anything in it, or a role that can act as one — asked of the
+// current role, the session's and the one the connection logged in as, since
+// a session opened as such a role can reset back to it — for a readiness
+// check; ReadSchemaVersion reports both versions and
 // needs only the SELECT that Migrate grants a runtime role.
 //
-// Every call runs in one transaction on one connection — but for the two
-// revocation checks, each a single statement (see Tenants) — and every time it
+// Every call runs in one READ COMMITTED transaction on one connection,
+// whatever the database's default — but for the two revocation checks, each
+// a single statement (see Tenants) — and every time it
 // writes or compares against comes from Config.Now, never from the database's
 // own clock: the store's clock is the one limes measures expiry and purging
 // by, and a database clock beside it would be a second one.
+//
+// Charge and Settle hand onCharged the charge's transaction, which TxFrom
+// reads from its context, so a write of the consumer's commits with the
+// charge or not at all. The transaction is the store's to end: Commit and
+// Rollback on it return ErrChargeTransaction, a charge whose transaction
+// onCharged ended with SQL of its own is refused with ErrChargeTransaction,
+// and once onCharged returns every call on it fails with pgx.ErrTxClosed.
 //
 // # Tenants
 //
@@ -44,15 +54,18 @@
 // the verifier asks them before it knows the token's tenant, on every
 // request, so each is one statement calling a function of the schema that
 // runs as the tables' owner and scopes itself to every tenant, read only,
-// for its own query — one round trip, no transaction. Migrate runs as the
+// for its own query — one round trip, no transaction. Only the roles
+// Migrate grants (MigrateOptions.RuntimeRoles) may execute the schema's
+// functions. Migrate runs as the
 // owner, scoped to every tenant for its run; serve as a role that owns
 // nothing, which CheckSchema checks, so that no call can turn the policies
 // off. Config.CheckTenant lets a consumer that keeps its own
 // tenants refuse one it does not hold.
 //
 // A call whose request names its tenant — Insert, ListByPrincipal, Bump,
-// Charge, Reserve, Settle, Release, GetTenantBudget, SetTenantBudget, the erasers and
-// Ledger.SumCharges — under a scope
+// Charge, Reserve, Settle, Release, GetTenantBudget, SetTenantBudget, the
+// erasers, Ledger.SumCharges and Census.CountRecords for one tenant — under a
+// scope
 // that does not admit that tenant returns limes.ErrScopeMismatch rather than
 // answer as if the tenant's rows were not there (Config.CheckScope). A call
 // that names only an id cannot be checked so, and answers a row out of scope
@@ -74,7 +87,10 @@
 // To remove a tenant, Store.EraseTenant revokes its capabilities, removes
 // the records Purge would and every meter row of the tenant — the charges
 // ledger included — in one transaction, and runs the consumer's own removal
-// in it. The records it keeps stay revoked until Purge takes them: an id not
+// in it. It marks the tenant erased, as EraseTenantUsage does, so Insert and
+// the meter refuse it with limes.ErrTenantErased afterwards; PurgeOrphans
+// forgets the mark once none of the tenant's records is left. The records it
+// keeps stay revoked until Purge takes them: an id not
 // on record is not revoked, so a token whose record went early would verify
 // again.
 package pgstore
