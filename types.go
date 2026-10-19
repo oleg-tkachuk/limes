@@ -53,9 +53,10 @@ var (
 	ErrExpired           error = &familyError{"limes: expired", ErrUnauthenticated}
 	ErrNotYetValid       error = &familyError{"limes: not yet valid", ErrUnauthenticated}
 	ErrRevoked           error = &familyError{"limes: revoked", ErrUnauthenticated}
-	// ErrTenantErased is a metering call for a tenant whose usage
-	// EraseTenantUsage removed: nothing of it is counted again. Its
-	// capabilities were revoked with it, so it matches ErrRevoked.
+	// ErrTenantErased is a metering call, or a Store.Insert, for a tenant
+	// whose usage EraseTenantUsage removed: nothing of it is recorded or
+	// counted again. Its capabilities were revoked with it, so it matches
+	// ErrRevoked.
 	ErrTenantErased error = &familyError{"limes: tenant erased", ErrRevoked}
 	// ErrDelegationTooDeep — a capability with more than MaxDelegationDepth
 	// ancestors on record. Its root lies past the bounded IsRevoked walk,

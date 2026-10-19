@@ -18,7 +18,7 @@ type TenantUsageEraser interface {
 	// It also marks the tenant erased, so that a call made after it — a
 	// request verified before the erase, a late cost — counts nothing of
 	// the tenant again: Bump, Charge, Reserve and SetTenantBudget for it
-	// return ErrTenantErased. PurgeOrphans forgets the mark once none of the
+	// return ErrTenantErased, and so does the limes.Store's Insert. PurgeOrphans forgets the mark once none of the
 	// tenant's records is left, and with it any call that could be metered.
 	EraseTenantUsage(ctx context.Context, req EraseTenantUsageRequest) error
 }

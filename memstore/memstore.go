@@ -64,6 +64,11 @@ type Store struct {
 	revokedCopies map[copyKey]limes.BiscuitRevocation
 	revokedIDs    map[string]int
 	nowFn         func() time.Time
+
+	// erased marks the tenants a UsageStore over this store erased
+	// (EraseTenantUsage): nothing of them is recorded or counted again
+	// until PurgeOrphans finds none of their records left.
+	erased map[uuid.UUID]struct{}
 }
 
 // UsageStore implements meter.UsageStore — request and spend counters. It
@@ -99,10 +104,6 @@ type UsageStore struct {
 	// ResetSpend starts the next one. A ledger entry records the period it
 	// was counted in, so a refund leaves a later period's spend alone.
 	periods map[uuid.UUID]uint64
-
-	// erased marks the tenants EraseTenantUsage removed, which nothing
-	// counts again until PurgeOrphans finds none of their records left.
-	erased map[uuid.UUID]struct{}
 }
 
 // refKey is what ChargeRequest.ExternalRef makes a charge idempotent on.
@@ -281,6 +282,7 @@ func NewStore(cfg StoreConfig) (*Store, error) {
 
 		revokedCopies: map[copyKey]limes.BiscuitRevocation{},
 		revokedIDs:    map[string]int{},
+		erased:        map[uuid.UUID]struct{}{},
 	}, nil
 }
 
@@ -324,7 +326,6 @@ func NewUsageStore(cfg UsageStoreConfig) (*UsageStore, error) {
 		copies:    map[copyKey]copyCounter{},
 		copyCount: map[uuid.UUID]int64{},
 		periods:   map[uuid.UUID]uint64{},
-		erased:    map[uuid.UUID]struct{}{},
 
 		byCharge:      map[uuid.UUID]int{},
 		byRef:         map[refKey]int{},
@@ -339,7 +340,8 @@ func NewUsageStore(cfg UsageStoreConfig) (*UsageStore, error) {
 // Insert records req.Capability with req.IssuedBy beside it, so the in-memory
 // store answers the same attribution questions a relational one does — a test
 // double that silently dropped the initiator would let an unattributed
-// issuance pass.
+// issuance pass. A tenant whose usage EraseTenantUsage removed is refused
+// with limes.ErrTenantErased.
 func (s *Store) Insert(_ context.Context, req limes.InsertRequest) error {
 	if err := req.Validate(); err != nil {
 		return err
@@ -349,6 +351,9 @@ func (s *Store) Insert(_ context.Context, req limes.InsertRequest) error {
 	defer s.mu.Unlock()
 	if _, ok := s.caps[c.ID]; ok {
 		return fmt.Errorf("%w: %s", limes.ErrAlreadyExists, c.ID)
+	}
+	if err := s.notErasedLocked(c.Subject.TenantID); err != nil {
+		return err
 	}
 	if c.ParentID != uuid.Nil {
 		parent, ok := s.caps[c.ParentID]
@@ -458,16 +463,38 @@ func (s *Store) ancestorsLocked(id uuid.UUID) ([]limes.Capability, error) {
 	return out, nil
 }
 
-// holdsTenant reports whether any record of tenant is on record.
-func (s *Store) holdsTenant(tenant uuid.UUID) bool {
+// markErased marks tenant erased.
+func (s *Store) markErased(tenant uuid.UUID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, c := range s.caps {
-		if c.Subject.TenantID == tenant {
-			return true
-		}
+	s.erased[tenant] = struct{}{}
+}
+
+// notErased refuses a tenant marked erased.
+func (s *Store) notErased(tenant uuid.UUID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.notErasedLocked(tenant)
+}
+
+// notErasedLocked refuses a tenant marked erased. s.mu must be held.
+func (s *Store) notErasedLocked(tenant uuid.UUID) error {
+	if _, ok := s.erased[tenant]; ok {
+		return fmt.Errorf("%w: %s", limes.ErrTenantErased, tenant)
 	}
-	return false
+	return nil
+}
+
+// forgetErased drops the mark of each erased tenant none of whose records
+// is left: no capability of it can be metered any more.
+func (s *Store) forgetErased() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	held := map[uuid.UUID]bool{}
+	for _, c := range s.caps {
+		held[c.Subject.TenantID] = true
+	}
+	maps.DeleteFunc(s.erased, func(tenant uuid.UUID, _ struct{}) bool { return !held[tenant] })
 }
 
 func (s *Store) exists(id uuid.UUID) bool {
@@ -1829,17 +1856,14 @@ func (s *UsageStore) EraseTenantUsage(_ context.Context, req meter.EraseTenantUs
 	}
 	delete(s.budgets, tenant)
 	delete(s.periods, tenant)
-	s.erased[tenant] = struct{}{}
+	s.records.markErased(tenant)
 	return nil
 }
 
 // notErasedLocked refuses a tenant EraseTenantUsage removed. s.mu must be
 // held.
 func (s *UsageStore) notErasedLocked(tenant uuid.UUID) error {
-	if _, ok := s.erased[tenant]; ok {
-		return fmt.Errorf("%w: %s", limes.ErrTenantErased, tenant)
-	}
-	return nil
+	return s.records.notErased(tenant)
 }
 
 // PurgeOrphans drops the counters of capabilities no longer on record, a
@@ -1882,7 +1906,7 @@ func (s *UsageStore) PurgeOrphans(_ context.Context, req meter.PurgeOrphansReque
 	s.forgetAncestorLocked(func(id uuid.UUID) bool { return batch[id] })
 	s.dropCopiesLocked(func(id uuid.UUID) bool { return batch[id] })
 	// An erased tenant with no record left has no capability to meter.
-	maps.DeleteFunc(s.erased, func(tenant uuid.UUID, _ struct{}) bool { return !s.records.holdsTenant(tenant) })
+	s.records.forgetErased()
 	return meter.PurgeOrphansResult{Purged: int64(len(ids))}, nil
 }
 

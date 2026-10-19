@@ -14,6 +14,14 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.107.0
+
+- `Store.Insert` refuses a tenant whose usage `EraseTenantUsage` removed with
+  `ErrTenantErased`, until `PurgeOrphans` forgets the mark: a record written
+  after the erase would be one its revocation missed, metered from nothing.
+  memstore and pgstore do it; a `limes.Store` of your own beside a
+  `meter.TenantUsageEraser` does too, and metertest checks it.
+
 ## v0.106.0
 
 - A capability's quota of Biscuit copies (`Caveats.Copies`) counts the copies

@@ -4,13 +4,15 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/meter"
 )
 
 // An erased tenant stays erased while any of its records is left, so a
-// capability on record cannot be metered; PurgeOrphans forgets the mark once
-// the last record is gone, as nothing of the tenant can be metered then.
+// capability on record cannot be metered and none is recorded beside it;
+// PurgeOrphans forgets the mark once the last record is gone, as nothing of
+// the tenant can be metered then.
 func TestPurgeOrphansForgetsAnErasedTenantWithNoRecordLeft(t *testing.T) {
 	ctx, u, capID, tenant := newCopyFixture(t)
 	if err := u.EraseTenantUsage(ctx, meter.EraseTenantUsageRequest{TenantID: tenant}); err != nil {
@@ -20,11 +22,17 @@ func TestPurgeOrphansForgetsAnErasedTenantWithNoRecordLeft(t *testing.T) {
 		_, err := u.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: limes.AbstractUnitCode}})
 		return err
 	}
+	insert := func() error {
+		return u.records.Insert(ctx, limes.InsertRequest{Capability: mkCap(uuid.New(), uuid.Nil, tenant, "agent"), IssuedBy: limes.Principal{Subject: "op"}})
+	}
 	if _, err := u.PurgeOrphans(ctx, meter.PurgeOrphansRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := setBudget(); !errors.Is(err, limes.ErrTenantErased) {
 		t.Fatalf("SetTenantBudget with a record of the tenant left: err = %v, want ErrTenantErased", err)
+	}
+	if err := insert(); !errors.Is(err, limes.ErrTenantErased) {
+		t.Fatalf("Insert with a record of the tenant left: err = %v, want ErrTenantErased", err)
 	}
 	dropRecord(u.records, capID)
 	if _, err := u.PurgeOrphans(ctx, meter.PurgeOrphansRequest{}); err != nil {
@@ -32,5 +40,8 @@ func TestPurgeOrphansForgetsAnErasedTenantWithNoRecordLeft(t *testing.T) {
 	}
 	if err := setBudget(); err != nil {
 		t.Fatalf("SetTenantBudget once no record of the tenant is left: %v", err)
+	}
+	if err := insert(); err != nil {
+		t.Fatalf("Insert once no record of the tenant is left: %v", err)
 	}
 }
