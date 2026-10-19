@@ -14,6 +14,17 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.108.0
+
+- A copy counted under a capability's `Caveats.Copies` stays counted under
+  its ancestors once its capability's usage is dropped (`DeleteUsage`,
+  `PurgeOrphans`), as its requests and spend do: dropping a child's usage no
+  longer frees room in its root's quota. A `UsageStore` of your own keeps
+  that count on each capability's counters; metertest checks it.
+- pgstore keeps the count in `limes.usage.copies_under` (migration 013, which
+  counts the copies already recorded), so admitting a copy reads the chain's
+  rows rather than walking the subtree.
+
 ## v0.107.0
 
 - `Store.Insert` refuses a tenant whose usage `EraseTenantUsage` removed with
