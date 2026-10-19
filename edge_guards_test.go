@@ -16,7 +16,7 @@ import (
 
 func testIssuer(t *testing.T, kid string, priv ed25519.PrivateKey, now func() time.Time) *Issuer {
 	t.Helper()
-	signer, err := NewSigner(SignerConfig{KeyID: kid, Key: priv})
+	signer, err := NewSigner(SignerConfig{KeyID: kid, Key: SealKey(priv)})
 	if err != nil {
 		t.Fatalf("signer: %v", err)
 	}

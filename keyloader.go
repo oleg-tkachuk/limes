@@ -54,16 +54,15 @@ func loadPrivateKey(path string) (ed25519.PrivateKey, error) {
 // the private key alone, and Public derives the public half from it, so the
 // two cannot disagree.
 type SigningKey struct {
-	KeyID   string
-	Private ed25519.PrivateKey
+	KeyID string
+	// Private is the private key, sealed: SignerConfig.Key takes it as it
+	// is, and no formatting of a SigningKey reaches it.
+	Private SealedKey
 }
 
-// Public is the public half of Private; nil when Private is not an Ed25519
-// private key.
+// Public is the public half of Private; nil when Private holds no Ed25519
+// key.
 func (k SigningKey) Public() ed25519.PublicKey {
-	if len(k.Private) != ed25519.PrivateKeySize {
-		return nil
-	}
 	pub, _ := k.Private.Public().(ed25519.PublicKey)
 	return pub
 }
@@ -79,7 +78,7 @@ func LoadKey(path string) (SigningKey, error) {
 	if err != nil {
 		return SigningKey{}, err
 	}
-	key := SigningKey{Private: priv}
+	key := SigningKey{Private: SealKey(priv)}
 	key.KeyID = jwks.KeyID(key.Public())
 	return key, nil
 }

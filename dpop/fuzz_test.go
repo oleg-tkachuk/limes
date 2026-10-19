@@ -46,7 +46,7 @@ func FuzzDPoPCheck(f *testing.F) {
 // every nonce it accepts carries the issued nonce's bytes.
 func FuzzHMACNonceValid(f *testing.F) {
 	issuedAt := time.Unix(1_800_000_000, 0)
-	nonces, err := NewHMACNonces(HMACNoncesConfig{Keys: [][]byte{bytes.Repeat([]byte{1}, HMACNonceKeyBytes)}})
+	nonces, err := NewHMACNonces(HMACNoncesConfig{Keys: SealNonceKeys(bytes.Repeat([]byte{1}, HMACNonceKeyBytes))})
 	if err != nil {
 		f.Fatal(err)
 	}

@@ -19,7 +19,7 @@ import (
 
 func TestErrorResponse(t *testing.T) {
 	_, v, _, _ := buildIssuerVerifier(t) // DPoP configured
-	nonces, err := dpop.NewHMACNonces(dpop.HMACNoncesConfig{Lifetime: time.Minute, Keys: [][]byte{nonceKey(1)}})
+	nonces, err := dpop.NewHMACNonces(dpop.HMACNoncesConfig{Lifetime: time.Minute, Keys: dpop.SealNonceKeys(nonceKey(1))})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,7 +4,9 @@ import (
 	"crypto"
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 )
 
@@ -36,6 +38,73 @@ type sealedSigner struct{ open func() crypto.Signer }
 func sealSigner(key crypto.Signer) *sealedSigner {
 	return &sealedSigner{open: func() crypto.Signer { return key }}
 }
+
+// SealedKey is a private key where no formatting reaches it: under any
+// verb, %p included, in JSON and in slog, and wherever it sits — a field of
+// a struct of yours, exported or not — it reads redactedKeyText. A plain
+// key field cannot promise that: fmt walks into a field it cannot call a
+// method on, and under a verb a value does not take. SealKey makes one; the
+// zero SealedKey holds no key. It is a crypto.Signer over the key it holds.
+type SealedKey struct{ s *sealedSigner }
+
+// SealKey seals key: an ed25519.PrivateKey, or a crypto.Signer over a key
+// held elsewhere. A nil key gives the zero SealedKey.
+func SealKey(key crypto.Signer) SealedKey {
+	if key == nil {
+		return SealedKey{}
+	}
+	return SealedKey{sealSigner(key)}
+}
+
+// signer is the key sealed; nil for the zero SealedKey.
+func (k SealedKey) signer() crypto.Signer {
+	if k.s == nil {
+		return nil
+	}
+	return k.s.open()
+}
+
+// usable is the key sealed, nil when there is none or it is an
+// ed25519.PrivateKey of the wrong length, whose Public and Sign panic.
+func (k SealedKey) usable() crypto.Signer {
+	s := k.signer()
+	if p, ok := s.(ed25519.PrivateKey); ok && len(p) != ed25519.PrivateKeySize {
+		return nil
+	}
+	return s
+}
+
+// IsZero reports whether k holds no key.
+func (k SealedKey) IsZero() bool { return k.s == nil }
+
+// Public is the key's public half; nil when k holds no usable key.
+func (k SealedKey) Public() crypto.PublicKey {
+	s := k.usable()
+	if s == nil {
+		return nil
+	}
+	return s.Public()
+}
+
+// Sign signs digest with the key, as crypto.Signer; an error when k holds
+// no usable key.
+func (k SealedKey) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, error) {
+	s := k.usable()
+	if s == nil {
+		return nil, errors.New("limes: a SealedKey holding no usable key")
+	}
+	return s.Sign(rand, digest, opts)
+}
+
+func (SealedKey) String() string   { return redactedKeyText }
+func (SealedKey) GoString() string { return redactedKeyText }
+
+// Format prints the key as redactedKeyText under every verb.
+func (SealedKey) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, redactedKeyText) }
+
+// MarshalText makes encoding/json and slog's handlers write the key as
+// redactedKeyText too.
+func (SealedKey) MarshalText() ([]byte, error) { return []byte(redactedKeyText), nil }
 
 // signingKeyView is a SigningKey as it is formatted.
 type signingKeyView struct {

@@ -272,7 +272,7 @@ Behind several replicas, give the `dpop.Verifier` server nonces, with the same
 key on every replica:
 
 ```go
-nonces, err := dpop.NewHMACNonces(dpop.HMACNoncesConfig{Keys: [][]byte{key}}) // key ≥ 32 bytes
+nonces, err := dpop.NewHMACNonces(dpop.HMACNoncesConfig{Keys: dpop.SealNonceKeys(key)}) // key ≥ 32 bytes
 proofs, err := dpop.NewVerifier(dpop.VerifierConfig{Replay: replay, Nonces: nonces})
 ```
 
@@ -1066,9 +1066,12 @@ without a key file chooses between the two itself, and knows which it chose.
 Either key's kid is `jwks.KeyID`'s: its RFC 7638 thumbprint, the same wherever
 it is derived; set `SigningKey.KeyID` to name it otherwise.
 
-`NewSigner(limes.SignerConfig{KeyID: kid, Key: key})` signs through any
-`crypto.Signer` whose key is Ed25519 — an `ed25519.PrivateKey`, or a key held
-in a KMS or an HSM; the token format stays inside the module. A key that
+`NewSigner(limes.SignerConfig{KeyID: kid, Key: limes.SealKey(key)})` signs
+through any `crypto.Signer` whose key is Ed25519 — an `ed25519.PrivateKey`, or a
+key held in a KMS or an HSM; the token format stays inside the module. A key is
+held sealed — `limes.SealedKey` (`SigningKey.Private` is one already), and
+`dpop.NonceKeys` for nonce keys — so no formatting of a value that holds it,
+under any verb or from any field, prints it. A key that
 implements `ContextSigner` signs under the request's context, so a slow or
 cancelled call is bounded by the request that asked for the token.
 

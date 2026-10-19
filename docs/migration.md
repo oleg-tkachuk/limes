@@ -14,6 +14,19 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.105.0
+
+- `SignerConfig.Key` is a `SealedKey`: wrap a key with `limes.SealKey(key)`
+  (an `ed25519.PrivateKey` or a KMS `crypto.Signer`). `SigningKey.Private` is
+  a `SealedKey` already, so `SignerConfig{KeyID: k.KeyID, Key: k.Private}`
+  is unchanged; code that read the raw `ed25519.PrivateKey` from it uses the
+  key it loaded instead. A `SealedKey` is a `crypto.Signer` and prints as
+  `[redacted]` however it is reached — under `%p`, from a field of a struct of
+  yours, through slog's text handler — which a plain key field could not
+  promise.
+- dpop: `HMACNoncesConfig.Keys` is a `dpop.NonceKeys`: `dpop.SealNonceKeys(k1,
+  k2)` in place of `[][]byte{k1, k2}`. It holds copies of the keys.
+
 ## pgstore/v0.26.0
 
 - Migration `012_function_execute.sql` takes EXECUTE on the schema's

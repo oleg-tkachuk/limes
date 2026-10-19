@@ -465,7 +465,7 @@ func TestConstructorsRefuseABadConfiguration(t *testing.T) {
 			t.Errorf("NewMemoryReplayCache, %s: accepted", name)
 		}
 	}
-	if _, err := NewHMACNonces(HMACNoncesConfig{Keys: [][]byte{nonceKey(1)}, Lifetime: -time.Second}); err == nil {
+	if _, err := NewHMACNonces(HMACNoncesConfig{Keys: SealNonceKeys(nonceKey(1)), Lifetime: -time.Second}); err == nil {
 		t.Error("NewHMACNonces accepted a negative lifetime")
 	}
 }

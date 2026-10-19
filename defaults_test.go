@@ -19,7 +19,7 @@ func TestConfigDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: priv})
+	signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(priv)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestConfigRefusesNegatives(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: priv})
+	signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(priv)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestIssuerNeedsOnlyAnIssuanceStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: priv})
+	signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(priv)})
 	if err != nil {
 		t.Fatal(err)
 	}

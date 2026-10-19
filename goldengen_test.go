@@ -89,7 +89,7 @@ func TestGenerateGoldenToken(t *testing.T) {
 	}
 
 	priv := ed25519.NewKeyFromSeed(goldenSeed[:])
-	signer, err := NewSigner(SignerConfig{KeyID: goldenKID, Key: priv, TokenType: TokenTypeV6})
+	signer, err := NewSigner(SignerConfig{KeyID: goldenKID, Key: SealKey(priv), TokenType: TokenTypeV6})
 	if err != nil {
 		t.Fatalf("signer: %v", err)
 	}

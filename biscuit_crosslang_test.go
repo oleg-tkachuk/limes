@@ -70,7 +70,7 @@ func TestGenerateBiscuitFixtures(t *testing.T) {
 	if os.Getenv(biscuitWriteEnv) != biscuitWriteFlag {
 		t.Skipf("set %s=%s to (re)generate the fixtures", biscuitWriteEnv, biscuitWriteFlag)
 	}
-	signer, err := NewSigner(SignerConfig{KeyID: goldenKID, Key: ed25519.NewKeyFromSeed(goldenSeed[:])})
+	signer, err := NewSigner(SignerConfig{KeyID: goldenKID, Key: SealKey(ed25519.NewKeyFromSeed(goldenSeed[:]))})
 	if err != nil {
 		t.Fatal(err)
 	}

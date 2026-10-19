@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -22,7 +23,7 @@ func TestHMACNonceKeysAreRedacted(t *testing.T) {
 	if _, err := rand.Read(key); err != nil {
 		t.Fatal(err)
 	}
-	cfg := HMACNoncesConfig{Keys: [][]byte{key}}
+	cfg := HMACNoncesConfig{Keys: SealNonceKeys(key)}
 	nonces, err := NewHMACNonces(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +70,7 @@ func TestCarriersOfHMACNoncesLeaveTheKeysOut(t *testing.T) {
 	if _, err := rand.Read(key); err != nil {
 		t.Fatal(err)
 	}
-	nonces, err := NewHMACNonces(HMACNoncesConfig{Keys: [][]byte{key}})
+	nonces, err := NewHMACNonces(HMACNoncesConfig{Keys: SealNonceKeys(key)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,5 +102,53 @@ func TestCarriersOfHMACNoncesLeaveTheKeysOut(t *testing.T) {
 	}
 	if got := fmt.Sprintf("%v", HMACNonces{}); !strings.Contains(got, fmt.Sprintf(redactedKeysFormat, 0)) {
 		t.Errorf("a zero HMACNonces under %%v = %q, want no keys", got)
+	}
+}
+
+// HMACNoncesConfig and NonceKeys format without the keys however they are
+// reached — under %p, from an unexported field, through slog's text handler
+// — and SealNonceKeys holds copies, so changing a slice after sealing it
+// changes no key.
+func TestNonceKeysLeaveTheKeysOutEverywhere(t *testing.T) {
+	key := make([]byte, HMACNonceKeyBytes)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatal(err)
+	}
+	cfg := HMACNoncesConfig{Keys: SealNonceKeys(key)}
+	verbs := append(slices.Clone(verbsThatShowBytes), "%p")
+	for name, v := range map[string]any{
+		"HMACNoncesConfig":            cfg,
+		"NonceKeys":                   cfg.Keys,
+		"a struct with a config":      struct{ cfg HMACNoncesConfig }{cfg},
+		"a struct with the NonceKeys": struct{ k NonceKeys }{cfg.Keys},
+	} {
+		for _, verb := range verbs {
+			got := fmt.Sprintf(verb, v)
+			for _, spelling := range verbsThatShowBytes {
+				if strings.Contains(got, fmt.Sprintf(spelling, key)) {
+					t.Errorf("%s under %s = %q: carries the key", name, verb, got)
+				}
+			}
+		}
+		var text bytes.Buffer
+		slog.New(slog.NewTextHandler(&text, nil)).Info("nonces", "value", v)
+		if strings.Contains(text.String(), fmt.Sprintf("%v", key)) || strings.Contains(text.String(), fmt.Sprintf("%x", key)) {
+			t.Errorf("%s through slog's text handler = %s: carries the key", name, text.String())
+		}
+	}
+	nonces, err := NewHMACNonces(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issued, err := nonces.Nonce(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	key[0] ^= 0xff // a slice changed after sealing
+	if ok, err := nonces.Valid(t.Context(), issued); err != nil || !ok {
+		t.Errorf("a nonce issued before the caller changed its slice: %v, %v; want valid", ok, err)
+	}
+	if cfg.Keys.Len() != 1 || (NonceKeys{}).Len() != 0 {
+		t.Errorf("Len = %d and %d, want 1 and 0", cfg.Keys.Len(), (NonceKeys{}).Len())
 	}
 }
