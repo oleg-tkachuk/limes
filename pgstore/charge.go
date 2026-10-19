@@ -195,16 +195,29 @@ func (s *UsageStore) Charge(ctx context.Context, req meter.ChargeRequest, onChar
 			return err
 		}
 		// Another delivery of the same reference may have committed while
-		// this one waited for the locks.
+		// this one waited for the locks. Its receipt is the answer, and what
+		// locking made here — counters, a copy recorded again after its
+		// counters were dropped — is rolled back: a replay moves nothing.
 		if r, replayed, err := replayByRef(ctx, tx, req, unit); replayed || err != nil {
 			receipt = r
-			return err
+			if err != nil {
+				return err
+			}
+			return errReplayedAfterLock
 		}
 		receipt, err = s.commitCharge(ctx, tx, c, spec, onCharged)
 		return err
 	})
+	if errors.Is(err, errReplayedAfterLock) {
+		return receipt, nil
+	}
 	return receipt, err
 }
+
+// errReplayedAfterLock rolls back a Charge that found its reference
+// committed by another delivery once it held the locks; Charge answers
+// with that delivery's receipt.
+var errReplayedAfterLock = errors.New("pgstore: charge replayed after its locks")
 
 // lockCharge locks what spec moves: its tenant, the capability's and its
 // ancestors' counters, those of the ancestors holding the hold it settles,

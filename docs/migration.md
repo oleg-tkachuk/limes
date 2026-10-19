@@ -36,6 +36,12 @@ API, and this file stops growing.
 - pgstore keeps the count in `limes.usage.copies_under` (migration 013, which
   counts the copies already recorded), so admitting a copy reads the chain's
   rows rather than walking the subtree.
+- Stop every pgstore older than pgstore/v0.28.3 before `Migrate` applies
+  migration 013: it counts the copies recorded so far once, and a copy an
+  older store admits after that is never counted under its ancestors.
+- `DeleteUsage` of a capability that has delegated restarts its own count
+  with its other counters, so the copies of its subtree no longer count
+  against its quota; before, they were counted from the subtree each time.
 
 ## v0.107.0
 

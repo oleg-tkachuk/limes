@@ -101,7 +101,9 @@ const timeResolution = time.Microsecond
 
 // DB is what the store needs of a connection pool: a transaction per call,
 // and a single statement for a revocation check. *pgxpool.Pool and *pgx.Conn
-// implement it.
+// implement it. A DB of your own opens each transaction with the options it
+// is given: one that drops them leaves the store at the database's default
+// isolation, which txOptions exists to override.
 type DB interface {
 	BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row

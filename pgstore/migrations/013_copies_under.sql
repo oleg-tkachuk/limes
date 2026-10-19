@@ -7,13 +7,16 @@ ALTER TABLE limes.usage
     ADD COLUMN copies_under bigint NOT NULL DEFAULT 0 CHECK (copies_under >= 0);
 
 -- Every copy counted so far, under its capability and each ancestor on
--- record.
+-- record. Each step goes to a parent of smaller depth, as every parent the
+-- store records is, so the walk ends whatever parent_id a row was given by
+-- hand.
 WITH RECURSIVE chain (id) AS (
     SELECT capability_id FROM limes.copy_usage
   UNION ALL
-    SELECT c.parent_id
-    FROM chain JOIN limes.capabilities c ON c.id = chain.id
-    WHERE c.parent_id IS NOT NULL
+    SELECT p.id
+    FROM chain
+    JOIN limes.capabilities c ON c.id = chain.id
+    JOIN limes.capabilities p ON p.id = c.parent_id AND p.depth < c.depth
 )
 UPDATE limes.usage u
 SET copies_under = n.copies
