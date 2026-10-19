@@ -164,3 +164,23 @@ func TestZeroHMACNoncesIsInert(t *testing.T) {
 		t.Errorf("Valid of the zero HMACNonces = %v, %v; want false", ok, err)
 	}
 }
+
+// SealNonceKeys keeps copies of the keys: a caller that clears its own
+// slices once they are sealed leaves the sealed keys whole.
+func TestSealNonceKeysKeepsCopies(t *testing.T) {
+	ctx := t.Context()
+	key := nonceKey(1)
+	cleared, err := NewHMACNonces(HMACNoncesConfig{Keys: SealNonceKeys(key)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clear(key)
+	whole, err := NewHMACNonces(HMACNoncesConfig{Keys: SealNonceKeys(nonceKey(1))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonce, err := cleared.Nonce(ctx)
+	if err != nil || !valid(t, whole, nonce) {
+		t.Errorf("a nonce issued after the caller cleared its key = %q, %v; not valid under the key itself", nonce, err)
+	}
+}

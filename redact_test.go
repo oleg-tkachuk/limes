@@ -236,3 +236,19 @@ func TestSealedKey(t *testing.T) {
 		t.Error("IsZero does not tell a SealedKey with no key from one with a key")
 	}
 }
+
+// SealKey keeps a copy of an Ed25519 key: a caller that clears its own slice
+// once the key is sealed, as key hygiene asks, leaves the sealed key whole.
+func TestSealKeyKeepsACopy(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := SealKey(priv)
+	clear(priv)
+	msg := []byte("message")
+	sig, err := k.Sign(nil, msg, crypto.Hash(0))
+	if err != nil || !ed25519.Verify(pub, msg, sig) {
+		t.Errorf("Sign after the caller cleared its key = %v; the signature does not verify", err)
+	}
+}
