@@ -30,6 +30,8 @@ vars:
   # The runnable examples, a module of their own since one of them uses
   # pgstore and its driver.
   EXAMPLES_DIR: examples
+  # The TypeScript the workflows run, a Node package of its own.
+  CI_DIR: .github/ci
   # LIMES_MODULE is the root module's path, which pgstore replaces with this
   # checkout.
   LIMES_MODULE: github.com/oleg-tkachuk/limes
@@ -62,7 +64,7 @@ tasks:
       - bash .github/scripts/tidy-replacing-modules.sh
 
   verify-all:
-    desc: "gofmt + go mod tidy/verify + golangci-lint + a 32-bit build + the unit suite + govulncheck + actionlint + the workflow scripts + the release rules and notes + the redisreplay and otelmetric modules + pgstore's static checks + the examples that need no database — what CI runs, but test:pgstore and test:examples:pgstore"
+    desc: "gofmt + go mod tidy/verify + golangci-lint + a 32-bit build + the unit suite + govulncheck + actionlint + the CI scripts + the workflow scripts + the release rules and notes + the redisreplay and otelmetric modules + pgstore's static checks + the examples that need no database — what CI runs, but test:pgstore and test:examples:pgstore"
     cmds:
       - task: fmt:check
       - task: verify:tidy
@@ -71,6 +73,7 @@ tasks:
       - task: test
       - task: vuln
       - task: verify:workflows
+      - task: verify:ci
       - task: verify:scripts
       - task: verify:release-rules
       - task: verify:redisreplay
@@ -197,13 +200,23 @@ tasks:
     cmds:
       - go tool -modfile={{.TOOLS_MODFILE}} actionlint
 
+  verify:ci:
+    desc: "Type-check and test the TypeScript the workflows run (.github/ci)"
+    dir: '{{.CI_DIR}}'
+    preconditions:
+      - sh: test -d node_modules/typescript
+        msg: "the CI scripts' dependencies are not installed — npm ci --ignore-scripts --prefix .github/ci"
+    cmds:
+      - node_modules/.bin/tsc -p .
+      - node --test
+
   verify:scripts:
     desc: "Test the shell scripts the workflows and tasks run"
     preconditions:
       - sh: test -d .github/release/node_modules/@semantic-release/commit-analyzer
         msg: "the release tooling is not installed — npm ci --ignore-scripts --prefix .github/release"
     cmds:
-      - for: [api-break-check, check-modules, check-range, ci-diff, ci-job-passed, ci-relevant, ci-run-check, gh-retry, go-floor-check, marker-check, merge-green, new-release-tag, publish-release, rebase-behind, release-catch-up, release-head-check, require-released-limes, tidy-replacing-modules, unpublished-tags, warm-go-proxy, without-workflow-commands]
+      - for: [api-break-check, check-modules, check-range, ci-job-passed, ci-run-check, gh-retry, go-floor-check, marker-check, merge-green, new-release-tag, publish-release, rebase-behind, require-released-limes, tidy-replacing-modules, unpublished-tags, warm-go-proxy, without-workflow-commands]
         cmd: bash .github/scripts/{{.ITEM}}.test.sh
 
   verify:release-rules:
