@@ -24,7 +24,7 @@ func TestTokenIntegersStayWithinIJSON(t *testing.T) {
 	}
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	v := verifierFor(t, pub, VerifierConfig{})
-	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV5}
+	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV6}
 	for name, mod := range map[string]func(map[string]any){
 		"exp": func(c map[string]any) { c["exp"] = int64(MaxIJSONInteger) + 1 },
 		"max_requests": func(c map[string]any) {
@@ -41,7 +41,7 @@ func TestTokenIntegersStayWithinIJSON(t *testing.T) {
 
 // RFC 7493 §2.1: a token's JSON is UTF-8; one that is not is refused.
 func TestTokenClaimsAreUTF8(t *testing.T) {
-	if _, err := parseClaims(jose.B64([]byte("{\"iss\":\"\xff\"}")), TokenTypeV5); err == nil {
+	if _, err := parseClaims(jose.B64([]byte("{\"iss\":\"\xff\"}")), TokenTypeV6); err == nil {
 		t.Error("claims with invalid UTF-8 were read")
 	}
 }

@@ -18,8 +18,8 @@ type MeterSubjectFields struct {
 	// Requests is a limes.RequestCeiling, Budget a limes.BudgetCeiling,
 	// which carries the subject's unit.
 	Requests, Budget any
-	// Copies is a []limes.CopyCeiling.
-	Copies any
+	// Copies is a []limes.CopyCeiling, CopyQuota a limes.CopyQuota.
+	Copies, CopyQuota any
 }
 
 // NewMeterSubject builds a limes.MeterSubject from its parts, for the

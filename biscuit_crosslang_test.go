@@ -86,8 +86,9 @@ func TestGenerateBiscuitFixtures(t *testing.T) {
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.MustParse(goldenTenant), Subject: goldenSubject},
 		Audience: []string{audienceData, audienceMCP},
 		Caveats: Caveats{
-			Ops: []Op{OpGet, OpList, OpPut}, ResourcePrefixes: []string{"corpus/"},
+			Ops: []Op{OpGet, OpList, OpPut, OpShare}, ResourcePrefixes: []string{"corpus/"},
 			Requests: RequestCeiling{Unlimited: true}, Budget: BudgetCeiling{Unlimited: true, UnitCode: "USD"},
+			Copies: CopyQuota{Unlimited: true},
 		},
 		TTL: biscuitSeedTTL,
 	})

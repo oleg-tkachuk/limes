@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Mints the TokenTypeV5 golden-token fixture golden_test.go verifies. Run
+// Mints the TokenTypeV6 golden-token fixture golden_test.go verifies. Run
 // explicitly, and only for a deliberate wire-format change:
 //
 //	LIMES_WRITE_GOLDEN=1 go test . -run TestGenerateGoldenToken
@@ -43,12 +43,20 @@ const (
 // goldenFiles are the fixtures of the token types this package reads, one
 // each: what TestGenerateGoldenToken writes.
 var goldenFiles = map[TokenType]string{
-	TokenTypeV5: "golden_token_v5.jwt",
+	TokenTypeV6: "golden_token_v6.jwt",
 }
 
-// retiredV4Fixture is a v4 token from before v4 was retired, kept to show
-// it is refused rather than read under another schema.
-const retiredV4Fixture = "golden_token_v4.jwt"
+// retiredFixtures are tokens of the retired formats, each from before its
+// type was retired, kept to show they are refused rather than read under
+// another schema.
+var retiredFixtures = map[string]string{
+	"v4": "golden_token_v4.jwt",
+	"v5": "golden_token_v5.jwt",
+}
+
+// goldenCopyQuota is the golden capability's quota of Biscuit copies, so
+// that the fixture carries max_copies.
+const goldenCopyQuota = 8
 
 // goldenPath is the fixture of token type typ.
 func goldenPath(typ TokenType) string { return filepath.Join("testdata", goldenFiles[typ]) }
@@ -81,7 +89,7 @@ func TestGenerateGoldenToken(t *testing.T) {
 	}
 
 	priv := ed25519.NewKeyFromSeed(goldenSeed[:])
-	signer, err := NewSigner(SignerConfig{KeyID: goldenKID, Key: priv, TokenType: TokenTypeV5})
+	signer, err := NewSigner(SignerConfig{KeyID: goldenKID, Key: priv, TokenType: TokenTypeV6})
 	if err != nil {
 		t.Fatalf("signer: %v", err)
 	}
@@ -111,6 +119,7 @@ func TestGenerateGoldenToken(t *testing.T) {
 			ResourcePrefixes: []string{"golden/"},
 			Requests:         RequestCeiling{Max: 10},
 			Budget:           BudgetCeiling{Max: 3 * NanosPerUnit / 2, UnitCode: "USD"}, // 1.5 USD
+			Copies:           CopyQuota{Max: goldenCopyQuota},
 		},
 		TTL: time.Hour,
 	})
@@ -118,7 +127,7 @@ func TestGenerateGoldenToken(t *testing.T) {
 		t.Fatalf("issue: %v", err)
 	}
 
-	out := goldenPath(TokenTypeV5)
+	out := goldenPath(TokenTypeV6)
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}

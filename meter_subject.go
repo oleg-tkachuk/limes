@@ -22,6 +22,7 @@ type MeterSubject struct {
 	tenantID     uuid.UUID
 	maxRequests  RequestCeiling
 	maxBudget    BudgetCeiling
+	copyQuota    CopyQuota
 	copies       []CopyCeiling
 }
 
@@ -32,6 +33,7 @@ func (v VerifiedCapability) MeterSubject() MeterSubject {
 		tenantID:     v.c.Subject.TenantID,
 		maxRequests:  v.c.Caveats.Requests,
 		maxBudget:    v.c.Caveats.Budget,
+		copyQuota:    v.c.Caveats.Copies,
 		copies:       cloneCopyCeilings(v.copies),
 	}
 }
@@ -55,6 +57,7 @@ func StoredMeterSubject(ctx context.Context, records RecordReader, capabilityID 
 		tenantID:     c.Subject.TenantID,
 		maxRequests:  c.Caveats.Requests,
 		maxBudget:    c.Caveats.Budget,
+		copyQuota:    c.Caveats.Copies,
 	}, nil
 }
 
@@ -74,6 +77,10 @@ func (s MeterSubject) Budget() BudgetCeiling { return s.maxBudget }
 // UnitCode is the unit the capability counts in, its budget's; empty when
 // that names none, and then it counts requests alone.
 func (s MeterSubject) UnitCode() string { return s.maxBudget.UnitCode }
+
+// CopyQuota is how many of the capability's Biscuit copies a meter counts
+// (Caveats.Copies).
+func (s MeterSubject) CopyQuota() CopyQuota { return s.copyQuota }
 
 // Copies are the limits of the Biscuit copy presented, a copy of them.
 func (s MeterSubject) Copies() []CopyCeiling { return cloneCopyCeilings(s.copies) }
@@ -105,9 +112,10 @@ func init() {
 		copies := linkedPart[[]CopyCeiling]("Copies", f.Copies)
 		requests := linkedPart[RequestCeiling]("Requests", f.Requests)
 		budget := linkedPart[BudgetCeiling]("Budget", f.Budget)
+		quota := linkedPart[CopyQuota]("CopyQuota", f.CopyQuota)
 		return MeterSubject{
 			capabilityID: f.CapabilityID, tenantID: f.TenantID,
-			maxRequests: requests, maxBudget: budget, copies: copies,
+			maxRequests: requests, maxBudget: budget, copyQuota: quota, copies: copies,
 		}
 	}
 }

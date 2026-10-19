@@ -58,7 +58,7 @@ has. Every rejection is a distinct sentinel; map each to whatever status your
 transport uses, or let `ErrorResponse` answer it the HTTP way (below).
 
 The token must carry a `typ` the verifier accepts (`AcceptTokenTypes`, by
-default `limes-cap-v5+jwt`, the one format the package reads), a tenant and a principal of a
+default `limes-cap-v6+jwt`, the one format the package reads), a tenant and a principal of a
 known kind (`PrincipalTypeUser`, `PrincipalTypeAgent` or `PrincipalTypeService`; agent
 details only on an agent — `Principal.Validate`, which `Issue` and `Delegate`
 run too; an agent's `AgentPrincipal` — `AgentType`, `AgentVersion`, `RunID`,
@@ -391,11 +391,17 @@ and a `CopyUsageReader` (`memstore` and `pgstore` implement one) reads what each
 counted: `CopyUsage` takes a `CopyUsageRequest` naming a capability and up to
 `MaxCopyUsageIDs` revocation ids of its copies and returns, in a
 `CopyUsageResult`, the counters of those used; a copy never used is absent. A holder mints copies offline, as many
-as it likes, so a store counts at most a quota of them per capability —
+as it likes, so the issuer bounds how many a meter counts for the capability
+— `Caveats.Copies`, a `CopyQuota` signed into the token like the request and
+budget ceilings: its zero value counts no copy with limits of its own,
+`CopyQuota{Unlimited: true}` as many as the store allows, and a delegated
+child counts no more than its parent. Every holder of the capability's
+copies shares it. A store counts no more than its own bound either —
 `memstore.UsageStoreConfig.MaxCopiesPerCapability` or
 `pgstore.Config.MaxCopiesPerCapability`, `DefaultMaxCopiesPerCapability`
-(1 024) when unset — and refuses a request that would count one more with
-`ErrCopyLimitExceeded`, a kind of `ErrRequestLimitExceeded`. A copy already
+(1 024) when unset — and refuses a request that would count one more than the
+lower of the two with `ErrCopyLimitExceeded`, a kind of
+`ErrRequestLimitExceeded`. A copy already
 counted goes on being metered, and dropping the capability's usage frees its
 quota.
 A revocation id alone does not name a copy: biscuit-go signs a block without

@@ -14,6 +14,24 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.104.0
+
+- Tokens are `limes-cap-v6+jwt`, the one type a verifier accepts:
+  `TokenTypeV6` replaces `TokenTypeV5`, and a v5 token is refused. Upgrade
+  verifiers and issuers together and reissue the capabilities in flight.
+- `Caveats.Copies`, a `CopyQuota` (`max_copies`, `unlimited_copies` on the
+  wire), bounds how many Biscuit copies of a capability a meter counts — the
+  copies whose blocks set limits of their own. Like `Requests` and `Budget`
+  its zero value allows none: a capability that hands out Biscuits whose
+  holders attenuate them with request or budget limits needs a quota, or
+  `CopyQuota{Unlimited: true}`, or the first such copy is
+  `ErrCopyLimitExceeded`. A delegated child's quota is within its parent's.
+  `MeterSubject.CopyQuota` carries it to the meter.
+- The store's `MaxCopiesPerCapability` is now the most it counts whatever a
+  capability allows; the lower of the two applies. A `UsageStore` of your
+  own reads the quota from the subject (`CopyQuota().Bounded(bound)`):
+  metertest checks it.
+
 ## pgstore/v0.24.0
 
 - The transaction `TxFrom` returns in `onCharged` is `onCharged`'s while it

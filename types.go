@@ -380,6 +380,13 @@ type Caveats struct {
 	// whose budget names no unit takes its parent's.
 	Budget BudgetCeiling
 
+	// Copies is how many Biscuit copies of the capability a meter counts —
+	// the copies whose blocks set request or budget limits of their own,
+	// each a counter the store keeps; the zero value counts none, and
+	// CopyQuota{Unlimited: true} as many as the store allows. A block that
+	// sets no limit makes no copy a meter counts, so it needs none.
+	Copies CopyQuota
+
 	// AllowTaintedRead permits non-mutating operations on resources the
 	// consumer has flagged with prompt-injection / PII / secrets signals.
 	// Off by default. Enforced by Caveats.Check, which can only act on a

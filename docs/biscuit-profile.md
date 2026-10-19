@@ -50,7 +50,7 @@ Exactly one fact, and no rule or check:
 
 | Fact | Term | Meaning |
 |---|---|---|
-| `limes_capability` | string | The sealed capability token (a JWT, `typ: limes-cap-v5+jwt`). |
+| `limes_capability` | string | The sealed capability token (a JWT, `typ: limes-cap-v6+jwt`). |
 
 A holder never writes this block.
 
@@ -73,8 +73,10 @@ number of facts, in any order, and the same fact more than once.
 A copy limit must be within the capability's own limit and every enclosing
 copy's. A verifier refuses a token carrying a copy limit unless its
 `BiscuitConfig.MeterCopies` says the meter behind it counts copies
-(`ErrCopyCountersNotMetered`), and a store counts at most a quota of copies
-per capability (`ErrCopyLimitExceeded`).
+(`ErrCopyCountersNotMetered`). A copy limit makes the copy one the meter
+counts, and a meter counts no more copies than the capability's quota
+(`Caveats.Copies`, which no block changes) and its store's bound allow
+(`ErrCopyLimitExceeded`).
 
 ## What limes refuses
 

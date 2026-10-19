@@ -257,6 +257,8 @@ type subjectSpec struct {
 	unit     string
 	unitless bool
 	copies   []limes.CopyCeiling
+	// copyQuota is the subject's quota of copies; nil is Unlimited.
+	copyQuota *limes.CopyQuota
 }
 
 // newSubject is the MeterSubject a verified capability with spec's parts
@@ -265,7 +267,15 @@ func newSubject(spec subjectSpec) limes.MeterSubject {
 	return link.NewMeterSubject(link.MeterSubjectFields{
 		CapabilityID: spec.capID, TenantID: spec.tenant,
 		Requests: spec.requestCeiling(), Budget: spec.budgetCeiling(), Copies: spec.copies,
+		CopyQuota: spec.quota(),
 	}).(limes.MeterSubject)
+}
+
+func (spec subjectSpec) quota() limes.CopyQuota {
+	if spec.copyQuota == nil {
+		return limes.CopyQuota{Unlimited: true}
+	}
+	return *spec.copyQuota
 }
 
 func (spec subjectSpec) requestCeiling() limes.RequestCeiling {
@@ -383,6 +393,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"ACopyCountsForItsCapabilityAndGoesWithIt", checkCopyCountersGo},
 		{"ACopyIDSharedByTwoCapabilitiesCountsApart", checkCopySharedID},
 		{"CopiesPastTheQuotaAreRefused", checkCopyQuota},
+		{"TheCapabilitysCopyQuotaBinds", checkCopyQuotaCaveat},
 		{"CopyUsageRefusesAnInvalidRequest", checkCopyUsageRefusesInvalid},
 		{"TenantBudgetReadsAgree", checkTenantBudgetReads},
 		{"ReservationsReadBack", checkReservations},
@@ -1813,6 +1824,57 @@ func checkCopyQuota(t *testing.T, f fixture) {
 	if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: subject(past)}); err != nil {
 		t.Errorf("Bump of a new copy once the capability's usage was dropped: %v", err)
 	}
+}
+
+// capabilityCopyQuota is the quota a capability carries in
+// checkCopyQuotaCaveat, under any store's own bound.
+const capabilityCopyQuota = 2
+
+// checkCopyQuotaCaveat holds a store to the capability's own quota of copies
+// (Caveats.Copies) under its own bound: a capability allowing two counts two
+// and refuses a third, a copy already counted is still metered, and the zero
+// quota refuses the first copy while the capability itself, presented with
+// no copy, is metered as before.
+func checkCopyQuotaCaveat(t *testing.T, f fixture) {
+	if f.MaxCopiesPerCapability != 0 && f.MaxCopiesPerCapability <= capabilityCopyQuota {
+		t.Skipf("Env.MaxCopiesPerCapability %d leaves no room under it", f.MaxCopiesPerCapability)
+	}
+	limited := func(id string) limes.CopyCeiling {
+		return limes.CopyCeiling{RevocationID: []byte(id), Requests: &limes.RequestCeiling{Unlimited: true}}
+	}
+	subjectOf := func(t *testing.T, quota limes.CopyQuota, copies ...limes.CopyCeiling) limes.MeterSubject {
+		t.Helper()
+		capID, err := f.newCapability(uuid.Nil, unlimitedBudget)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return newSubject(subjectSpec{capID: capID, tenant: f.Tenant, copies: copies, copyQuota: &quota})
+	}
+	t.Run("a quota of two", func(t *testing.T) {
+		two := subjectOf(t, limes.CopyQuota{Max: capabilityCopyQuota}, limited("first"), limited("second"))
+		if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: two}); err != nil {
+			t.Fatalf("Bump of two copies under a quota of two: %v", err)
+		}
+		third := newSubject(subjectSpec{capID: two.CapabilityID(), tenant: f.Tenant, copies: []limes.CopyCeiling{limited("third")},
+			copyQuota: &limes.CopyQuota{Max: capabilityCopyQuota}})
+		if _, err := f.Usage.Charge(f.Ctx, meter.ChargeRequest{Subject: third, Amount: one}, nil); !errors.Is(err, meter.ErrCopyLimitExceeded) {
+			t.Errorf("Charge of a third copy under a quota of two: err = %v, want ErrCopyLimitExceeded", err)
+		}
+		again := newSubject(subjectSpec{capID: two.CapabilityID(), tenant: f.Tenant, copies: []limes.CopyCeiling{limited("first")},
+			copyQuota: &limes.CopyQuota{Max: capabilityCopyQuota}})
+		if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: again}); err != nil {
+			t.Errorf("Bump of a copy already counted, at the quota: %v", err)
+		}
+	})
+	t.Run("the zero quota", func(t *testing.T) {
+		none := subjectOf(t, limes.CopyQuota{}, limited("limited"))
+		if _, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: none, Amount: one}); !errors.Is(err, meter.ErrCopyLimitExceeded) {
+			t.Errorf("Reserve of a copy with limits under the zero quota: err = %v, want ErrCopyLimitExceeded", err)
+		}
+		if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: newSubject(subjectSpec{capID: none.CapabilityID(), tenant: f.Tenant, copyQuota: &limes.CopyQuota{}})}); err != nil {
+			t.Errorf("Bump of the capability itself under the zero quota: %v", err)
+		}
+	})
 }
 
 // copyUsage is what reader holds for the copy copyID of capability capID.

@@ -25,6 +25,8 @@ type subjectSpec struct {
 	unit     string
 	unitless bool
 	copies   []limes.CopyCeiling
+	// copyQuota is the subject's quota of copies; nil is Unlimited.
+	copyQuota *limes.CopyQuota
 }
 
 // defaultTestUnit is the unit of a subject whose spec names none.
@@ -36,7 +38,15 @@ func newSubject(spec subjectSpec) limes.MeterSubject {
 	return link.NewMeterSubject(link.MeterSubjectFields{
 		CapabilityID: spec.capID, TenantID: spec.tenant,
 		Requests: spec.requestCeiling(), Budget: spec.budgetCeiling(), Copies: spec.copies,
+		CopyQuota: spec.quota(),
 	}).(limes.MeterSubject)
+}
+
+func (spec subjectSpec) quota() limes.CopyQuota {
+	if spec.copyQuota == nil {
+		return limes.CopyQuota{Unlimited: true}
+	}
+	return *spec.copyQuota
 }
 
 func (spec subjectSpec) requestCeiling() limes.RequestCeiling {

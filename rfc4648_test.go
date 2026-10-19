@@ -20,7 +20,7 @@ import (
 func TestVerifyReadsTokenSegmentsAsUnpaddedBase64URL(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	v := verifierFor(t, pub, VerifierConfig{})
-	header, _ := json.Marshal(map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV5})
+	header, _ := json.Marshal(map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV6})
 	claims, _ := json.Marshal(validClaims(uuid.New()))
 	// signedWith encodes header and claims with enc and signs exactly that
 	// input, so only the encoding can fail.

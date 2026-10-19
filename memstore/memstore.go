@@ -90,7 +90,7 @@ type UsageStore struct {
 	// capability and its block's revocation id; at most maxCopies of one
 	// capability.
 	copies    map[copyKey]copyCounter
-	maxCopies int
+	maxCopies int64
 
 	// periods counts each tenant's accounting periods: SetTenantBudget with
 	// ResetSpend starts the next one. A ledger entry records the period it
@@ -126,9 +126,12 @@ func hasKey[K comparable, V any](m map[K]V, k K) bool {
 	return ok
 }
 
-// admitCopiesLocked refuses copies that would take capID past maxCopies
-// counted copies, the ones it already counts aside. s.mu must be held.
-func (s *UsageStore) admitCopiesLocked(capID uuid.UUID, copies []limes.CopyCeiling) error {
+// admitCopiesLocked refuses copies that would take the subject's capability
+// past its quota of counted copies — its own, bounded by the store's — the
+// ones it already counts aside. s.mu must be held.
+func (s *UsageStore) admitCopiesLocked(subject limes.MeterSubject) error {
+	capID, copies := subject.CapabilityID(), subject.Copies()
+	quota := subject.CopyQuota().Bounded(s.maxCopies)
 	added := map[copyKey]bool{}
 	for _, c := range copies {
 		if key := copyKeyOf(capID, c.RevocationID); !hasKey(s.copies, key) {
@@ -138,14 +141,14 @@ func (s *UsageStore) admitCopiesLocked(capID uuid.UUID, copies []limes.CopyCeili
 	if len(added) == 0 {
 		return nil
 	}
-	counted := 0
+	var counted int64
 	for k := range s.copies {
 		if k.capID == capID {
 			counted++
 		}
 	}
-	if counted+len(added) > s.maxCopies {
-		return fmt.Errorf("%w: capability %s counts %d, quota %d", meter.ErrCopyLimitExceeded, capID, counted, s.maxCopies)
+	if counted+int64(len(added)) > quota {
+		return fmt.Errorf("%w: capability %s counts %d, quota %d", meter.ErrCopyLimitExceeded, capID, counted, quota)
 	}
 	return nil
 }
@@ -253,7 +256,7 @@ func NewUsageStore(cfg UsageStoreConfig) (*UsageStore, error) {
 		cfg.MaxCopiesPerCapability = meter.DefaultMaxCopiesPerCapability
 	}
 	return &UsageStore{
-		maxCopies: cfg.MaxCopiesPerCapability,
+		maxCopies: int64(cfg.MaxCopiesPerCapability),
 		usage:     map[uuid.UUID]meter.Usage{},
 		tenantOf:  map[uuid.UUID]uuid.UUID{},
 		budgets:   map[uuid.UUID]meter.TenantBudget{},
@@ -690,7 +693,7 @@ func (s *UsageStore) Bump(_ context.Context, req meter.BumpRequest) (meter.BumpR
 	if err != nil {
 		return meter.BumpReceipt{}, err
 	}
-	if err := s.admitCopiesLocked(req.Subject.CapabilityID(), req.Subject.Copies()); err != nil {
+	if err := s.admitCopiesLocked(req.Subject); err != nil {
 		return meter.BumpReceipt{}, err
 	}
 	u := s.usage[req.Subject.CapabilityID()]
@@ -788,7 +791,7 @@ func (s *UsageStore) Charge(
 	if err != nil {
 		return meter.ChargeReceipt{}, err
 	}
-	if err := s.admitCopiesLocked(req.Subject.CapabilityID(), req.Subject.Copies()); err != nil {
+	if err := s.admitCopiesLocked(req.Subject); err != nil {
 		return meter.ChargeReceipt{}, err
 	}
 	return s.chargeLocked(ctx, req, unit, ancestors, nil, onCharged)
@@ -1143,7 +1146,7 @@ func (s *UsageStore) Reserve(_ context.Context, req meter.ReserveRequest) (meter
 	if err != nil {
 		return meter.Reservation{}, err
 	}
-	if err := s.admitCopiesLocked(req.Subject.CapabilityID(), req.Subject.Copies()); err != nil {
+	if err := s.admitCopiesLocked(req.Subject); err != nil {
 		return meter.Reservation{}, err
 	}
 

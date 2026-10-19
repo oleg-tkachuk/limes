@@ -32,6 +32,7 @@ func TestWireStructsMirrorTheExportedTypes(t *testing.T) {
 	ceilings := map[string][]string{
 		"Requests": {"MaxRequests", "UnlimitedRequests"},
 		"Budget":   {"MaxBudget", "UnlimitedBudget", "UnitCode"},
+		"Copies":   {"MaxCopies", "UnlimitedCopies"},
 	}
 	caveats, wire := reflect.TypeFor[Caveats](), reflect.TypeFor[wireCaveats]()
 	want := 0

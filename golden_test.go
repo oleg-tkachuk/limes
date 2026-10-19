@@ -24,10 +24,16 @@ import (
 // Regenerating the fixture is a deliberate act, not a fix: it declares the old
 // format dead. Do it only with the format change reviewed on its own merits.
 
-// A v4 token, valid when it was minted, is refused: its typ is no longer one
-// a verifier accepts.
-func TestRetiredV4TokenIsRefused(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("testdata", retiredV4Fixture))
+// A token of a retired format, valid when it was minted, is refused: its typ
+// is no longer one a verifier accepts.
+func TestRetiredTokensAreRefused(t *testing.T) {
+	for format, file := range retiredFixtures {
+		t.Run(format, func(t *testing.T) { checkRetiredRefused(t, file) })
+	}
+}
+
+func checkRetiredRefused(t *testing.T, file string) {
+	raw, err := os.ReadFile(filepath.Join("testdata", file))
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
@@ -42,7 +48,7 @@ func TestRetiredV4TokenIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := verifier.Verify(context.Background(), VerifyRequest{Token: string(raw), Audience: goldenAudience}); !errors.Is(err, ErrInvalidToken) {
-		t.Errorf("a v4 token: err = %v, want ErrInvalidToken", err)
+		t.Errorf("%s: err = %v, want ErrInvalidToken", file, err)
 	}
 }
 
@@ -147,7 +153,7 @@ func checkGoldenRejectsWrongAudience(t *testing.T, typ TokenType) {
 // changed omission rule or a moved claim fails here even where the decoded
 // fields still compare equal.
 func TestGoldenClaimsRoundTripExactly(t *testing.T) {
-	raw, err := os.ReadFile(goldenPath(TokenTypeV5))
+	raw, err := os.ReadFile(goldenPath(TokenTypeV6))
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
@@ -155,7 +161,7 @@ func TestGoldenClaimsRoundTripExactly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := parseClaims(parts.Payload, TokenTypeV5)
+	c, err := parseClaims(parts.Payload, TokenTypeV6)
 	if err != nil {
 		t.Fatal(err)
 	}
