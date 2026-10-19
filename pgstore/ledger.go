@@ -76,12 +76,15 @@ func truncOf(b meter.ChargeBucket) (string, bool, error) {
 	}
 }
 
-// sqlSumCharges sums one tenant's charges in [$2, $3), grouped by unit and by
-// the bucket ($4, a date_trunc field, in UTC; NULL for none) and whichever of
-// op ($5), actor ($6) and capability ($7) the request names, then pages
-// them past the cursor's place ($8, a flag, then $9..$14) in SumCharges'
-// order: buckets in time order, the largest charged first, then the group's
-// fields ascending, bytewise. A group not named is one value — ” or the
+// sqlSumCharges sums the charges of one tenant ($1), or of every tenant
+// when $1 is NULL, in [$2, $3), kept by the filter's lists ($4 tenants, $5
+// operations, $6 actors, $7 capabilities; an empty list keeps all), grouped
+// by unit and by the bucket ($8, a date_trunc field, in UTC; NULL for none)
+// and whichever of tenant ($9), op ($10), actor ($11) and capability ($12)
+// the request names, then pages them past the cursor's place ($13, a flag,
+// then $14..$20) in SumCharges' order: buckets in time order, the largest
+// charged first, then the group's fields ascending, bytewise — unit,
+// tenant, op, actor, capability. A group not named is one value — ” or the
 // nil uuid — and a period summed whole is one bucket at the epoch, so every
 // column orders and compares. The sums are numeric, exact past bigint, and
 // they order and compare as numbers: their text, which the scan reads, is
@@ -89,25 +92,30 @@ func truncOf(b meter.ChargeBucket) (string, bool, error) {
 const sqlSumCharges = `
 WITH sums AS (
     SELECT
-        CASE WHEN $4::text IS NULL THEN to_timestamp(0) ELSE date_trunc($4::text, at, 'UTC') END AS bucket,
+        CASE WHEN $8::text IS NULL THEN to_timestamp(0) ELSE date_trunc($8::text, at, 'UTC') END AS bucket,
         unit_code,
-        CASE WHEN $5::boolean THEN op ELSE '' END AS op,
-        CASE WHEN $6::boolean THEN actor ELSE '' END AS actor,
-        CASE WHEN $7::boolean THEN capability_id ELSE '00000000-0000-0000-0000-000000000000'::uuid END AS capability_id,
+        CASE WHEN $9::boolean THEN tenant_id ELSE '00000000-0000-0000-0000-000000000000'::uuid END AS tenant_id,
+        CASE WHEN $10::boolean THEN op ELSE '' END AS op,
+        CASE WHEN $11::boolean THEN actor ELSE '' END AS actor,
+        CASE WHEN $12::boolean THEN capability_id ELSE '00000000-0000-0000-0000-000000000000'::uuid END AS capability_id,
         sum(amount) AS charged,
         sum(refunded) AS refunded,
         count(*) AS charges
     FROM limes.charges
-    WHERE tenant_id = $1 AND at >= $2 AND at < $3
-    GROUP BY 1, 2, 3, 4, 5
+    WHERE ($1::uuid IS NULL OR tenant_id = $1) AND at >= $2 AND at < $3
+      AND (cardinality($4::uuid[]) = 0 OR tenant_id = ANY ($4::uuid[]))
+      AND (cardinality($5::text[]) = 0 OR op = ANY ($5::text[]))
+      AND (cardinality($6::text[]) = 0 OR actor = ANY ($6::text[]))
+      AND (cardinality($7::uuid[]) = 0 OR capability_id = ANY ($7::uuid[]))
+    GROUP BY 1, 2, 3, 4, 5, 6
 )
-SELECT bucket, unit_code, op, actor, capability_id, charged::text AS charged_text, refunded::text AS refunded_text, charges
+SELECT bucket, unit_code, tenant_id, op, actor, capability_id, charged::text AS charged_text, refunded::text AS refunded_text, charges
 FROM sums
-WHERE NOT $8::boolean
-   OR (bucket, -charged, unit_code COLLATE "C", op COLLATE "C", actor COLLATE "C", capability_id)
-    > ($9::timestamptz, -($10::numeric), $11::text COLLATE "C", $12::text COLLATE "C", $13::text COLLATE "C", $14::uuid)
-ORDER BY sums.bucket, sums.charged DESC, sums.unit_code COLLATE "C", sums.op COLLATE "C", sums.actor COLLATE "C", sums.capability_id
-LIMIT $15`
+WHERE NOT $13::boolean
+   OR (bucket, -charged, unit_code COLLATE "C", tenant_id, op COLLATE "C", actor COLLATE "C", capability_id)
+    > ($14::timestamptz, -($15::numeric), $16::text COLLATE "C", $17::uuid, $18::text COLLATE "C", $19::text COLLATE "C", $20::uuid)
+ORDER BY sums.bucket, sums.charged DESC, sums.unit_code COLLATE "C", sums.tenant_id, sums.op COLLATE "C", sums.actor COLLATE "C", sums.capability_id
+LIMIT $21`
 
 // sumCursor is pgstore's cursor of SumCharges: the last row's place, as
 // the query orders by it.
@@ -115,13 +123,15 @@ type sumCursor struct {
 	Bucket  time.Time `json:"b"`
 	Charged int64     `json:"c"`
 	Unit    string    `json:"u"`
+	Tenant  uuid.UUID `json:"t"`
 	Op      string    `json:"o"`
 	Actor   string    `json:"a"`
 	CapID   uuid.UUID `json:"i"`
 }
 
 // SumCharges implements meter.LedgerReader, in one transaction scoped to
-// the tenant (Config.CheckScope).
+// the tenant (Config.CheckScope) or, with AllTenants, to every tenant to
+// read (WithAllTenantsReadOnly), as ListTenantBudgets is.
 func (l *Ledger) SumCharges(ctx context.Context, req meter.SumChargesRequest) (limes.Page[meter.ChargeSum], error) {
 	if err := req.Validate(); err != nil {
 		return limes.Page[meter.ChargeSum]{}, err
@@ -141,11 +151,21 @@ func (l *Ledger) SumCharges(ctx context.Context, req meter.SumChargesRequest) (l
 		}
 	}
 	limit := limes.PageLimit(req.Limit)
+	var tenant *uuid.UUID
+	if !req.AllTenants {
+		tenant = &req.TenantID
+	}
+	ops := make([]string, len(req.Filter.Ops))
+	for i, op := range req.Filter.Ops {
+		ops[i] = string(op)
+	}
 	var out []meter.ChargeSum
-	err = l.inTenantReadTx(ctx, req.TenantID, func(tx pgx.Tx) error {
+	sum := func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, sqlSumCharges,
-			req.TenantID, req.From, req.To, trunc, req.ByOp, req.ByActor, req.ByCapability,
-			req.Cursor != "", after.Bucket, strconv.FormatInt(after.Charged, 10), after.Unit, after.Op, after.Actor, after.CapID,
+			tenant, req.From, req.To, nonNil(req.Filter.Tenants), ops, nonNil(req.Filter.Actors), nonNil(req.Filter.Capabilities),
+			trunc, req.Groups(meter.ChargeDimensionTenant), req.Groups(meter.ChargeDimensionOp),
+			req.Groups(meter.ChargeDimensionActor), req.Groups(meter.ChargeDimensionCapability),
+			req.Cursor != "", after.Bucket, strconv.FormatInt(after.Charged, 10), after.Unit, after.Tenant, after.Op, after.Actor, after.CapID,
 			limit+1)
 		if err != nil {
 			return err
@@ -155,7 +175,7 @@ func (l *Ledger) SumCharges(ctx context.Context, req meter.SumChargesRequest) (l
 			var s meter.ChargeSum
 			var bucket time.Time
 			var op, charged, refunded string
-			if err := rows.Scan(&bucket, &s.UnitCode, &op, &s.Actor, &s.CapabilityID, &charged, &refunded, &s.Charges); err != nil {
+			if err := rows.Scan(&bucket, &s.UnitCode, &s.TenantID, &op, &s.Actor, &s.CapabilityID, &charged, &refunded, &s.Charges); err != nil {
 				return err
 			}
 			s.Op = limes.Op(op)
@@ -171,7 +191,12 @@ func (l *Ledger) SumCharges(ctx context.Context, req meter.SumChargesRequest) (l
 			out = append(out, s)
 		}
 		return rows.Err()
-	})
+	}
+	if req.AllTenants {
+		err = l.inEveryTenantReadTx(ctx, sum)
+	} else {
+		err = l.inTenantReadTx(ctx, req.TenantID, sum)
+	}
 	if err != nil {
 		return limes.Page[meter.ChargeSum]{}, err
 	}
@@ -189,7 +214,16 @@ func placeOfSum(s meter.ChargeSum, bucketed bool) sumCursor {
 	if bucketed {
 		bucket = s.BucketStart
 	}
-	return sumCursor{Bucket: bucket, Charged: int64(s.Charged), Unit: s.UnitCode, Op: string(s.Op), Actor: s.Actor, CapID: s.CapabilityID}
+	return sumCursor{Bucket: bucket, Charged: int64(s.Charged), Unit: s.UnitCode, Tenant: s.TenantID, Op: string(s.Op), Actor: s.Actor, CapID: s.CapabilityID}
+}
+
+// nonNil is list, or an empty one for nil: a nil slice reaches SQL as NULL,
+// whose cardinality is NULL rather than 0, which would keep no charge.
+func nonNil[T any](list []T) []T {
+	if list == nil {
+		return []T{}
+	}
+	return list
 }
 
 // sumOf reads a numeric sum, or ErrCounterOverflow past MaxNanos.
