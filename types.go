@@ -35,7 +35,7 @@ import (
 //	ErrNotFound              what the request names is not on record
 //	└── meter.ErrChargeNotFound, meter.ErrUsageNotFound, …
 //	ErrConflict              a well-formed request disagrees with what is on record
-//	└── ErrAlreadyExists, meter.ErrExternalRefConflict, …
+//	└── ErrAlreadyExists, ErrUnitCodeMismatch, meter.ErrExternalRefConflict, …
 var (
 	// ErrUnauthenticated is the family of every refusal of the presented
 	// credentials, token or proof: the one errors.Is a consumer needs to
@@ -90,8 +90,9 @@ var (
 	// amount in a unit other than the one a counter (a capability's, an
 	// ancestor's, a tenant's) already counts in. Nothing converts between
 	// currencies, so cross-currency delegation is refused at issuance and a
-	// cross-currency charge at the Meter.
-	ErrUnitCodeMismatch = errors.New("limes: unit_code mismatch")
+	// cross-currency charge at the Meter. The request is well formed and
+	// disagrees with what is on record, so it matches ErrConflict.
+	ErrUnitCodeMismatch error = &familyError{"limes: unit_code mismatch", ErrConflict}
 	// ErrInvalidRequest is a request malformed in itself: a missing tenant,
 	// an empty audience entry, a negative TTL, a thumbprint that is not one,
 	// a not-before past the expiry, caveats or an amount that do not

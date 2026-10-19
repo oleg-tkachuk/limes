@@ -14,6 +14,13 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.103.0
+
+- `ErrUnitCodeMismatch` matches `ErrConflict`, and `ErrorResponse` answers it
+  409 instead of 500: an amount or a child in another unit than the record's
+  is a well-formed request that disagrees with what is on record. A caller
+  mapping `ErrConflict` maps it too.
+
 ## v0.102.0
 
 - `meter.SumChargesRequest`: `ByOp`, `ByActor` and `ByCapability` are gone;

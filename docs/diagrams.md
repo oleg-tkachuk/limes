@@ -731,7 +731,7 @@ flowchart TB
     replay(["ChargeReceipt{Replayed}<br/>the earlier charge; nothing moves"])
     refund["Refund(RefundRequest{ChargeID, Amount or Remaining}) → RefundReceipt<br/>returns spend to every counter the charge took it from;<br/>the tenant's only within the same accounting period"]
 
-    e0["ErrInvalidRequest (ErrInvalidAmount)<br/>ErrUnitCodeMismatch · ErrCounterOverflow"]
+    e0["ErrInvalidRequest (ErrInvalidAmount)<br/>ErrConflict (ErrUnitCodeMismatch) · ErrCounterOverflow"]
     e1["ErrBudgetExceeded"]
     e2["ErrBudgetExceeded: ancestor"]
     e3["ErrTenantBudgetExceeded"]
