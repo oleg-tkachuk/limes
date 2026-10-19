@@ -963,8 +963,9 @@ and aggregate — its billing history, which does not come back — and marks
 the tenant erased: a request verified before the erase, or a late cost of a
 record `Purge` has not taken yet, is refused `ErrTenantErased` (a kind of
 `ErrRevoked`) by `Bump`, `Charge`, `Reserve` and `SetTenantBudget` rather
-than counted again. `PurgeOrphans` forgets the mark once none of the
-tenant's records is left. In
+than counted again, and `Insert` refuses a new record of the tenant, which
+the erase's revocation would have missed. `PurgeOrphans` forgets the mark
+once none of the tenant's records is left. In
 `pgstore`, `Store.EraseTenant` does both in one transaction and runs a
 callback of yours in it, so your own rows of the tenant go with them or not
 at all; it is handed a `pgstore.Erased`, the transaction as `Tx` and the

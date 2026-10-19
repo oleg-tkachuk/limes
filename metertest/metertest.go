@@ -3635,6 +3635,12 @@ func checkEraseTenantUsage(t *testing.T, f fixture) {
 			_, err := f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: unit}})
 			return err
 		},
+		// A record inserted after the erase would be one its revocation
+		// missed, metered from nothing.
+		"Insert": func() error {
+			_, err := f.NewCapability(CapabilitySpec{Tenant: f.Tenant, Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget})
+			return err
+		},
 	}
 	for name, call := range afterErase {
 		if err := call(); !errors.Is(err, limes.ErrTenantErased) || !errors.Is(err, limes.ErrRevoked) {
