@@ -176,17 +176,26 @@ reads, `RecordCensus` for a census of records, and `TenantRecordEraser` and
 
 ## Versioning
 
-Releases are `vX.Y.Z` tags, cut from Conventional Commits on `main` when CI
-passes: `feat` is a minor; `fix`, `perf` and `security` a patch. The module is
-pre-1.0, so a breaking change is a minor too — **the Go API may change between
-minor versions**; read the release notes, which list breaking changes first,
-before bumping.
+Releases are `vX.Y.Z` tags, cut from Conventional Commits on `main` once CI
+has passed: `feat` is a minor; `fix`, `perf` and `security` a patch. The module
+is pre-1.0, so a breaking change is a minor too — **the Go API may change
+between minor versions**; read the release notes, which list breaking changes
+first, before bumping.
+
+A release is not cut for every merge. It is cut once enough commits have
+gathered since the last one — three that cut a minor, or five that cut a
+patch — or at once for a breaking change or a `security` fix
+([.github/release/release-policy.json](.github/release/release-policy.json)),
+or whenever the Release workflow is run by hand. Run by hand with the
+`prerelease` channel, it tags a release candidate, `vX.Y.Z-rc.N`, of what the
+next release would be.
 
 `redisreplay`, `pgstore` and `otelmetric` are modules of their own, each with
 a release line of its own — `redisreplay/vX.Y.Z`, `pgstore/vX.Y.Z`,
 `otelmetric/vX.Y.Z` — cut by the same
 rules from the commits that touch it, plus one: a module's own `build`
-commit, such as `build(pgstore): require limes vX.Y.Z`, is a patch of it. A
+commit, such as `build(pgstore): require limes vX.Y.Z`, is a patch of it, and
+is released at once. A
 commit releases, by its type, each module whose files it changes; one scoped
 `pgstore`, `redisreplay` or `otelmetric` never releases limes, breaking or not.
 
