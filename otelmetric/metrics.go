@@ -143,6 +143,8 @@ func chargeOutcome(receipt meter.ChargeReceipt, err error) string {
 		return outcomeTenantExceeded
 	case errors.Is(err, limes.ErrBudgetExceeded):
 		return outcomeCapExceeded
+	case errors.Is(err, limes.ErrRequestLimitExceeded):
+		return outcomeLimitExceeded
 	default:
 		return outcomeError
 	}
