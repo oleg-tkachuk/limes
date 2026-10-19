@@ -1,21 +1,18 @@
 // A GitHub that answers from fixed data and records what it was asked, for
 // tests.
 
-import type { ChangedFile, GitHub, Job, NewRelease, PullRequest, PullRequestText, QueuedPullRequest, WorkflowRun } from "./github.ts";
+import type { ChangedFile, GitHub, Job, NewRelease, PullRequest, PullRequestText, WorkflowRun } from "./github.ts";
 
 // FakeGitHub is the data a FakeGitHub answers with, and its log.
 export interface FakeData {
   pulls: Map<number, PullRequest>;
-  queue: QueuedPullRequest[];
   // permissions by login; a login missing is unknown to the API.
   permissions: Record<string, string>;
   // files and behindBy by head sha; a sha missing fails the comparison.
   files: Record<string, ChangedFile[]>;
   behindBy: Record<string, number>;
-  // mergeFails and rebaseFails name the pull requests whose merge or rebase
-  // GitHub refuses.
+  // mergeFails names the pull requests whose merge GitHub refuses.
   mergeFails: Set<number>;
-  rebaseFails: Set<number>;
   // runs and jobs by run id; a run missing is not found.
   runs: Map<number, WorkflowRun>;
   jobs: Map<number, Job[]>;
@@ -36,12 +33,10 @@ export interface FakeData {
 export function fakeData(): FakeData {
   return {
     pulls: new Map(),
-    queue: [],
     permissions: {},
     files: {},
     behindBy: {},
     mergeFails: new Set(),
-    rebaseFails: new Set(),
     runs: new Map(),
     jobs: new Map(),
     released: new Set(),
@@ -66,10 +61,6 @@ export function fakeGitHub(data: FakeData): GitHub {
       }
       return pr;
     },
-    async openPullRequests(base, limit) {
-      data.calls.push(`list ${base} ${limit}`);
-      return data.queue;
-    },
     async permission(login) {
       data.calls.push(`permission ${login}`);
       return data.permissions[login];
@@ -86,12 +77,6 @@ export function fakeGitHub(data: FakeData): GitHub {
       data.calls.push(`merge ${number} ${sha}`);
       if (data.mergeFails.has(number)) {
         throw new Error("Head branch was modified");
-      }
-    },
-    async rebaseBranch(number, sha) {
-      data.calls.push(`rebase ${number} ${sha}`);
-      if (data.rebaseFails.has(number)) {
-        throw new Error("merge conflict");
       }
     },
     async workflowRun(runId) {
