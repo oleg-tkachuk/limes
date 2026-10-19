@@ -283,16 +283,19 @@ var ErrRuntimeRole = errors.New("pgstore: the store is served by a role row-leve
 // every role it can act as or inherits from: a superuser; a role with
 // BYPASSRLS; an owner of the schema $1, or of a table, sequence, view or
 // function in it, which may disable its row-level security, drop a policy or
-// replace the functions the policies and revocation checks call.
+// replace the functions the policies and revocation checks call. It asks of
+// the session's role as well as the current one: a session opened as one of
+// these that SET ROLE to another can RESET ROLE back.
 const sqlRuntimeRole = `
+WITH serving (role) AS (VALUES (current_user), (session_user))
 SELECT
-    EXISTS (SELECT 1 FROM pg_roles r WHERE r.rolsuper AND pg_has_role(current_user, r.oid, 'MEMBER')),
-    EXISTS (SELECT 1 FROM pg_roles r WHERE r.rolbypassrls AND pg_has_role(current_user, r.oid, 'MEMBER')),
-    EXISTS (SELECT 1 FROM pg_namespace n WHERE n.nspname = $1 AND pg_has_role(current_user, n.nspowner, 'MEMBER'))
-    OR EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-               WHERE n.nspname = $1 AND pg_has_role(current_user, c.relowner, 'MEMBER'))
-    OR EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-               WHERE n.nspname = $1 AND pg_has_role(current_user, p.proowner, 'MEMBER'))`
+    EXISTS (SELECT 1 FROM serving s, pg_roles r WHERE r.rolsuper AND pg_has_role(s.role, r.oid, 'MEMBER')),
+    EXISTS (SELECT 1 FROM serving s, pg_roles r WHERE r.rolbypassrls AND pg_has_role(s.role, r.oid, 'MEMBER')),
+    EXISTS (SELECT 1 FROM serving s, pg_namespace n WHERE n.nspname = $1 AND pg_has_role(s.role, n.nspowner, 'MEMBER'))
+    OR EXISTS (SELECT 1 FROM serving s, pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+               WHERE n.nspname = $1 AND pg_has_role(s.role, c.relowner, 'MEMBER'))
+    OR EXISTS (SELECT 1 FROM serving s, pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+               WHERE n.nspname = $1 AND pg_has_role(s.role, p.proowner, 'MEMBER'))`
 
 // CheckSchema is a readiness check for the stores over db. It returns
 // ErrSchemaMismatch when the schema is not at the version this package
