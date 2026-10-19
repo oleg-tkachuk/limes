@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 )
 
 // redactedKey stands in for a private key wherever a value holding one is
@@ -47,11 +48,16 @@ func sealSigner(key crypto.Signer) *sealedSigner {
 // zero SealedKey holds no key. It is a crypto.Signer over the key it holds.
 type SealedKey struct{ s *sealedSigner }
 
-// SealKey seals key: an ed25519.PrivateKey, or a crypto.Signer over a key
-// held elsewhere. A nil key gives the zero SealedKey.
+// SealKey seals key: an ed25519.PrivateKey, of which it keeps a copy, so
+// clearing or reusing the caller's slice after leaves the sealed key whole,
+// or a crypto.Signer over a key held elsewhere. A nil key gives the zero
+// SealedKey.
 func SealKey(key crypto.Signer) SealedKey {
 	if key == nil {
 		return SealedKey{}
+	}
+	if p, ok := key.(ed25519.PrivateKey); ok {
+		key = slices.Clone(p)
 	}
 	return SealedKey{sealSigner(key)}
 }
