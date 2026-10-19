@@ -91,7 +91,7 @@ func TestTxFromEndsWithTheCallback(t *testing.T) {
 		t.Errorf("Begin after onCharged: err = %v, want pgx.ErrTxClosed", err)
 	}
 	if kept.Conn() != nil {
-		t.Error("Conn after onCharged is not nil")
+		t.Error("Conn of the charge's transaction is not nil")
 	}
 }
 
@@ -152,5 +152,31 @@ func TestTxFromWaitsForACallInFlight(t *testing.T) {
 	}
 	if err := <-done; err != nil && !errors.Is(err, pgx.ErrTxClosed) {
 		t.Errorf("the call in flight: err = %v, want it run whole or refused as closed", err)
+	}
+}
+
+// SQL that ends a transaction — the end onCharged cannot reach through the
+// Tx — refuses the charge rather than let the store write it outside the
+// transaction.
+func TestTxFromRefusesATransactionEndedBySQL(t *testing.T) {
+	for _, end := range []string{"COMMIT", "ROLLBACK"} {
+		t.Run(end, func(t *testing.T) {
+			f := newTenantFixture(t)
+			ctx := WithTenant(t.Context(), f.mine)
+			onCharged := func(ctx context.Context, _ meter.Charged) error {
+				tx, _ := TxFrom(ctx)
+				if tx.Conn() != nil {
+					t.Error("Conn in onCharged is not nil")
+				}
+				_, err := tx.Exec(ctx, end)
+				return err
+			}
+			if _, err := f.usage.Charge(ctx, meter.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}, onCharged); !errors.Is(err, ErrChargeTransaction) {
+				t.Errorf("a charge whose onCharged ran %s: err = %v, want ErrChargeTransaction", end, err)
+			}
+			if u, err := f.usage.GetUsage(ctx, f.child.ID); err == nil && u.SpentAmount != 0 {
+				t.Errorf("usage after a refused charge = %+v; want nothing spent", u)
+			}
+		})
 	}
 }
