@@ -48,15 +48,20 @@ func sealSigner(key crypto.Signer) *sealedSigner {
 // zero SealedKey holds no key. It is a crypto.Signer over the key it holds.
 type SealedKey struct{ s *sealedSigner }
 
-// SealKey seals key: an ed25519.PrivateKey, of which it keeps a copy, so
-// clearing or reusing the caller's slice after leaves the sealed key whole,
-// or a crypto.Signer over a key held elsewhere. A nil key gives the zero
-// SealedKey.
+// SealKey seals key: an ed25519.PrivateKey, or a pointer to one, of which
+// it keeps a copy, so clearing or reusing the caller's key after leaves the
+// sealed key whole, or a crypto.Signer over a key held elsewhere. A nil
+// key, or a nil pointer to an ed25519.PrivateKey, gives the zero SealedKey.
 func SealKey(key crypto.Signer) SealedKey {
-	if key == nil {
+	switch p := key.(type) {
+	case nil:
 		return SealedKey{}
-	}
-	if p, ok := key.(ed25519.PrivateKey); ok {
+	case *ed25519.PrivateKey:
+		if p == nil {
+			return SealedKey{}
+		}
+		key = slices.Clone(*p)
+	case ed25519.PrivateKey:
 		key = slices.Clone(p)
 	}
 	return SealedKey{sealSigner(key)}
