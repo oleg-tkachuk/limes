@@ -17,7 +17,7 @@ replace (
 require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/oleg-tkachuk/limes v0.101.1
+	github.com/oleg-tkachuk/limes v0.102.0
 	github.com/oleg-tkachuk/limes/pgstore v0.10.1
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0
