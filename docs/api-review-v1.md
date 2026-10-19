@@ -4,8 +4,8 @@ Review of the exported API of `github.com/oleg-tkachuk/limes`, taken at
 v0.7.0, when the root package exported 173 top-level identifiers and
 `memstore`, `metertest` and `storetest` 9. Steps 1–7 of the [plan](#plan) have
 shipped since, and a third round ([section 9](#9-round-three)) after them:
-`jwks`, `dpop` and `inspect` are public packages beside those three, and
-`otelmetric` a module of its own. After v1.0 every exported
+`jwks`, `dpop`, `inspect` and `meter` are public packages beside those three,
+and `otelmetric`, `pgstore` and `redisreplay` modules of their own. After v1.0 every exported
 identifier, and every method of every interface a consumer implements, is
 frozen until a `/v2` module path.
 
@@ -19,13 +19,13 @@ compatibility is not a constraint before 1.0.
 
 | # | Question | Decision | Why |
 |---|---|---|---|
-| 1 | Wire format through 1.x | `VerifierConfig.AcceptTokenTypes` and `SignerConfig.TokenType`; 1.0 reads one format, v5 (round three retired v4), so a later one ships in a minor: verifiers first, then issuers. | Versioned format with a controlled migration. Reading unknown claims leniently is refused: a caveat a verifier does not know is one it does not enforce. |
+| 1 | Wire format through 1.x | `VerifierConfig.AcceptTokenTypes` and `SignerConfig.TokenType`; 1.0 reads one format, v6 (round three retired v4, v0.104.0 v5), so a later one ships in a minor: verifiers first, then issuers. | Versioned format with a controlled migration. Reading unknown claims leniently is refused: a caveat a verifier does not know is one it does not enforce. |
 | 2 | Token algorithm | Ed25519 only for 1.x; another algorithm is another `typ`. | No runtime algorithm choice (RFC 8725); versioning the protocol replaces algorithm agility, and decision 1 carries the version. |
 | 3 | What `Delegate` trusts | `Verify` returns a `VerifiedCapability` with unexported fields, and `Delegate` accepts only that type. | "Parse, don't validate": the compiler, not a doc comment, guarantees the parent was verified; a token's caveats are immutable, so no store read is needed beyond the revocation check `Delegate` already makes. |
 | 4 | Proof-of-possession errors | A family of their own, `ErrProofOfPossession`, beside `ErrInvalidSignature` — renamed `ErrInvalidToken`, which it always meant, RFC 6750's `invalid_token` — and both under an umbrella `ErrUnauthenticated`. | `errors.Is` asserts identity: a missing or replayed proof is not an invalid signature. The overlap needed `reasonAliases`, made table order load-bearing and once made a nonce challenge read as permanent. |
 | 5 | `Decode`, `VerifySignature` | A subpackage, `limes/inspect`. | A debugging tool kept apart from the API that authorises, as `net/http/httputil` is from `net/http`. |
 | 6 | `TenantBudgetCursor` | Moves into memstore; every list cursor is the store's own and opaque. | One rule for both lists; the format is the store's implementation detail. |
-| 7 | Package layout | `jwks` and `dpop` become leaf packages the root imports; the meter stays in the root. | Both implement standards (RFC 7517/7638, RFC 9449) without depending on `Capability`, so they split without cycles and are usable on their own. |
+| 7 | Package layout | `jwks` and `dpop` become leaf packages the root imports; the meter, kept in the root at first, moved to package `meter` in v0.100.0 (section 8). | Both implement standards (RFC 7517/7638, RFC 9449) without depending on `Capability`, so they split without cycles and are usable on their own. |
 | P3 | Zero values | Adopted as written below. | |
 | P4 | Configuration | Adopted as written below. | |
 
@@ -53,7 +53,7 @@ Adding a method to any of these after 1.0 breaks every implementation.
 | I5 | `Meter` | 11 methods, five of them reads an interceptor never needs; `Bump` returns a bare `int64`; `Release` and `ChargeByRef` are positional; `ListReservations` is unbounded where both other lists page. | Split `MeterReader` from `Meter`; `Bump` returns a receipt; request structs for `Release` and `ListReservations` (paged). **Done.** | Every `UsageStore`, `WithMetering`. |
 | I6 | `UsageHousekeeping` | `Delete`, `PurgeOrphans`, `ReleaseExpired` take no limit; `PurgeOrphans` is untested by `metertest`; `Delete` of an unknown id is undocumented. | Request structs with `Limit`; a `metertest` check for `PurgeOrphans`. **Done**; `Delete` is `DeleteUsage(DeleteUsageRequest)`, which takes no `Limit`: it drops one capability's rows. | Every `UsageStore`. |
 | I7 | `KeyResolver` | Decided: Ed25519 for 1.x (decision 2). `PublicKey` returns `ed25519.PublicKey`, so a second token algorithm needs a new interface. | Either declare Ed25519 permanent for 1.x (the token `typ` already versions the format), or return `crypto.PublicKey` now. **Done:** Ed25519 is permanent for 1.x, stated on `KeyResolver` and in the README. | — / every resolver. |
-| I8 | decorators | `WithMetering` needs a second wrapper type to forward one optional interface (metering_store.go:38-51); a second optional interface doubles them again. | Pick a rule: a fixed forwarding list pinned by a test, or an `Unwrap()` convention. **Chosen: the fixed list** — `Instrument` is the one decorator, and the optional interfaces it forwards are `CopyUsageReader` and `TenantUsageEraser`; a test reads the package's interfaces from source and fails when the decorator hides one its store implements. **Done**, pinned by decorator_test.go. | Nothing. |
+| I8 | decorators | `WithMetering` needs a second wrapper type to forward one optional interface (metering_store.go:38-51); a second optional interface doubles them again. | Pick a rule: a fixed forwarding list pinned by a test, or an `Unwrap()` convention. **Chosen: the fixed list** — `otelmetric.Instrument` is the one decorator, and the optional interfaces it forwards are `meter.CopyUsageReader` and `meter.TenantUsageEraser`; a test reads package `meter`'s interfaces from source and fails when the decorator hides one its store implements. **Done**, pinned by decorator_test.go. | Nothing. |
 | I9 | conformance | `storetest.Env` has one `Ctx`; `metertest.Env` has `TenantCtx`/`ListCtx`. `ReplayCache`, `DPoPNonces`, `KeyResolver` have no suite. | Align the two `Env`s; a suite for each interface a consumer implements. **Done:** `storetest.Env` gains `NewTenant` and `TenantCtx`; `dpop/dpoptest` checks `ReplayCache` and `Nonces`, `jwks/jwkstest` checks `KeyResolver`. | Code comparing `storetest.Env` values. |
 
 ## 3. Data types
@@ -89,17 +89,18 @@ High confidence, nothing outside the package uses them:
 `VerifySignature` move to `inspect` (decision 5).
 
 Keep — implementers need them, as memstore shows: `PageLimit`,
-`DefaultListLimit`, `MaxListLimit`, `ValidateAmount`, `ValidateExternalRef`,
-`MaxExternalRefBytes`, `NormaliseUnitCode`, `DefaultReservationTTL`,
-`MaxNanos`, `NanosPerUnit`.
+`DefaultListLimit`, `MaxListLimit`, `MaxNanos`, `NanosPerUnit`, `IsUnitCode`;
+and, since the meter moved, `meter.ValidateExternalRef`,
+`meter.MaxExternalRefBytes` and `meter.DefaultReservationTTL`.
 
 **Done:** every name above is unexported or gone except `TokenType`, which
 P5 (b) brought back as the type of `AcceptTokenTypes`: a verifier names the
 formats it accepts, so the value is part of the contract; and
 `DPoPSigningAlgorithms`, now `dpop.SigningAlgorithms`, exported because the
 root's challenges advertise it. `PublicJWK` and `JWK`
-live in `internal/jose`, `Decode` and `VerifySignature` in `inspect`, and
-`NormaliseUnitCode` is `NormalizeUnitCode` (T3).
+live in `internal/jose`, `Decode` and `VerifySignature` in `inspect`,
+`ValidateAmount` is `Nanos.Validate`, and `NormaliseUnitCode`, renamed
+`NormalizeUnitCode` (T3), went in v0.75.0 for `IsUnitCode`.
 
 ## 6. Merge and reshape
 
@@ -117,13 +118,13 @@ live in `internal/jose`, `Decode` and `VerifySignature` in `inspect`, and
 
 **Done:** one thumbprint path in `internal/jose`, one JWK type, `GenerateKey`
 returning the key, `Nanos.Validate`, the cursor in memstore, `dpop.Sign`, and
-`Instrument`.
+`Instrument` (now `otelmetric.Instrument`).
 
 ## 7. Policies to write down before tagging
 
 **P1 — interfaces grow only by new interfaces.** A new capability is a new
-single-method interface discovered by type assertion, as `CopyUsageReader`
-already is; conformance suites skip what a store does not implement. Never a
+single-method interface discovered by type assertion, as
+`meter.CopyUsageReader` and `meter.TenantUsageEraser` are; conformance suites skip what a store does not implement. Never a
 method added to a published interface (go.dev/blog/module-compatibility).
 
 **P2 — methods that may grow take a request and return a result struct**;
@@ -141,9 +142,10 @@ coerced. "Disabled", "unlimited" and "generate" are explicit — a field, a
 constructor or a constant — never a reserved number or an empty string. Today:
 cache `ttl < 0` disables, `WithMaxEntries(0)` silently does nothing,
 `LoadOrGenerateKey("")` generates, `UtilisationPct` 0 means both "unused" and
-"unlimited". **Done**, including the ceilings: `RequestCeiling` and
-`BudgetCeiling` carry `Unlimited` explicitly and their zero value allows
-nothing, on caveats, Biscuit copies, the meter subject and tenant budgets.
+"unlimited". **Done**, including the ceilings: `RequestCeiling`,
+`BudgetCeiling` and `CopyQuota` carry `Unlimited` explicitly and their zero
+value allows nothing, on caveats, Biscuit copies, the meter subject and tenant
+budgets.
 
 **P4 — configuration.** One shape: `NewX(XConfig) (*X, error)` for anything
 with a default or a check, concrete return types, a `Now` field for the clock;
@@ -158,8 +160,9 @@ deployed verifier.
 - (b) `VerifierConfig.AcceptTokenTypes`, so a new format ships in a minor:
   verifiers first, then issuers. Recommended. **Done:**
   `VerifierConfig.AcceptTokenTypes` and `SignerConfig.TokenType`. v5 shipped
-  that way in round three, and v4 was then retired, so `TokenTypeV5` is the
-  one format every 1.x verifier accepts.
+  that way in round three and v4 was then retired; v6 replaced v5 in v0.104.0
+  (`Caveats.Copies`), so `TokenTypeV6` is the one format every 1.x verifier
+  accepts.
 
 **P6 — cutting 1.0.** Remove `BREAKING_IS_A_MINOR_BEFORE_1_0` from the root module's rules in
 `.github/release/modules.cjs` — `pgstore`, `redisreplay` and `otelmetric`
@@ -175,7 +178,7 @@ move. **Done:** `api-break-check.sh` and `marker-check.sh`, both reading the
 line through `breaking-markers.sh`, and `major-guard.cjs`, which refuses a
 major the module path does not carry.
 
-## 8. Deferred
+## 8. Deferred, then done before 1.0
 
 - Moving the meter out of the root. **Done** before 1.0, in v0.100.0: the
   package `meter` holds the usage store, the ledger and their types and
@@ -189,15 +192,18 @@ major the module path does not carry.
   stores of two kinds could not hold one `UsageStore`. The store now puts
   its transaction in the context `onCharged` receives and reads it with an
   accessor of its own (`pgstore.TxFrom`); the guarantee that the side effect
-  commits with the charge is unchanged.
+  commits with the charge is unchanged. The transaction is `onCharged`'s
+  only while it runs, and its `Commit` and `Rollback` return
+  `pgstore.ErrChargeTransaction` (pgstore/v0.24.0).
 - Reports across tenants. **Done** in v0.102.0: `SumCharges` took one tenant
   and three grouping flags, so a report across tenants meant a query per
   tenant or reading the store's tables. Its request is now a dimensional
-  query as cost and metering APIs shape theirs — a period, a bucket, a list
-  of dimensions to group by (tenant among them), a filter, a page — so that
-  a dimension is added later without a field or a break. Reading every
-  tenant stays a store scope the consumer grants, not a flag the library
-  trusts.
+  query as cost and metering APIs shape theirs — one tenant or
+  `AllTenants`, a period, a bucket, `GroupBy` dimensions (tenant among them),
+  a `Filter`, a page — so that a dimension is added later without a field or
+  a break. `AllTenants` only asks: a store that scopes calls to a tenant
+  refuses it under a narrower scope with `ErrScopeMismatch`, so reading
+  every tenant stays a scope the consumer grants.
 - The quota of Biscuit copies. **Done** in v0.104.0: it was the store's
   alone, one number for every capability, so the issuer could not say how
   far a capability's copies may be multiplied. It is now a signed caveat,
@@ -208,7 +214,10 @@ major the module path does not carry.
   `UsageStore` against row-level security before they freeze. **Done:**
   `pgstore`, held to storetest and metertest under row-level security; it
   moved one rule into the contract — `Store.Insert` refuses a child in
-  another tenant than its parent.
+  another tenant than its parent. Since pgstore/v0.22.0 the policies bind
+  the schema's owner too (FORCE), `CheckSchema` refuses a pool they do not
+  hold (`ErrRuntimeRole`), and since pgstore/v0.26.0 only
+  `MigrateOptions.RuntimeRoles` may call the schema's functions.
 
 ## 9. Round three
 
@@ -223,11 +232,11 @@ request, and docs/migration.md names the release of each break.
 | Token lexicon | v5: `Generation` and `limes_gen` gone; the domain operations `presign`, `tag`, `search`, `embed` left to consumers, namespaced; `AgentPrincipal.ParentRunID`, set by `Delegate` from the parent's `RunID` rather than taken from the caller. `MCPClient` and `Model` keep their names. | v0.81.0 |
 | Token format | v4 retired: v5 alone is read and minted. | v0.91.0 |
 | Verification internals | A Biscuit copy's limits and root leave `Capability` (`VerifiedCapability.Copies`). | v0.83.0 |
-| Errors | `ErrConflict` family (`ErrAlreadyExists`, `ErrExternalRefConflict`, `ErrTenantBudgetVersionMismatch`); a problem body's `reason` member and a type per `Reason`. | v0.82.0, v0.84.0 |
+| Errors | `ErrConflict` family (`ErrAlreadyExists`, `ErrUnitCodeMismatch`; `meter.ErrExternalRefConflict`, `meter.ErrTenantBudgetVersionMismatch`, `meter.ErrSettleConflict`); a problem body's `reason` member and a type per `Reason`. | v0.82.0, v0.84.0, v0.97.0, v0.103.0 |
 | Modules | `Instrument` moved to `otelmetric`. | v0.85.0 |
 | Names | `RevocationCache`, `BiscuitRevocationCache`; `dpop.SignRequest`; `VerifierConfig.Biscuit *BiscuitConfig`. | v0.86.0, v0.87.0 |
 | Data types | `ThresholdBasisPoints int` for `ExactPercent`'s float; `ChargeBucketNone` as the zero bucket, buckets shortest first; `pgstore.SchemaVersion` in `int`. | v0.88.0, v0.89.0, pgstore/v0.16.0 |
-| Requests | `Validate` on every request a store takes, `HousekeepingLimit`; `InsertRequest.Validate` refuses a capability that never expires. | v0.90.0, v0.92.0 |
+| Requests | `Validate` on every request a store takes, `meter.HousekeepingLimit` over `DefaultHousekeepingLimit`; `InsertRequest.Validate` refuses a capability that never expires. | v0.90.0, v0.92.0 |
 
 Kept as they are, on purpose: `inspect.Decode` (its name says what it does,
 beside `VerifySignature`), and `pgstore.RevocationWatcher` without a
