@@ -87,6 +87,20 @@ test("ci.yaml's dispatch waits for what the release reads", () => {
   assert.ok(REQUIRED.includes("Verify") && REQUIRED.length > 1);
 });
 
+// A gate the release reads runs on every push to main that reaches code: a
+// push that skipped it would read as a pass, and let through a module an
+// earlier run held back.
+test("every release gate runs on a push to main", () => {
+  const doc = parse(CI) as { jobs: Record<string, { name?: string; if?: string }> };
+  for (const gate of Object.values(GATES)) {
+    const job = Object.values(doc.jobs).find((j) => j.name === gate);
+    assert.match(job?.if ?? "", /github\.event_name == 'push' && needs\.changes\.outputs\.relevant == 'true'/, gate);
+  }
+  // And a push that skipped them dispatches no release.
+  const dispatch = (doc.jobs["dispatch-release"] as { if?: string } | undefined)?.if ?? "";
+  assert.match(dispatch, /needs\.changes\.outputs\.relevant == 'true'/);
+});
+
 describe("passedRunFor", () => {
   test("the newest passed run for the commit", async () => {
     const data = fakeData();
