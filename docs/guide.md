@@ -966,7 +966,13 @@ record `Purge` has not taken yet, is refused `ErrTenantErased` (a kind of
 `ErrRevoked`) by `Bump`, `Charge`, `Reserve` and `SetTenantBudget` rather
 than counted again, and `Insert` refuses a new record of the tenant, which
 the erase's revocation would have missed. `PurgeOrphans` forgets the mark
-once none of the tenant's records is left. In
+once none of the tenant's records is left.
+
+Called apart, `EraseTenantUsage` goes first and `EraseTenantRecords` second:
+the mark the first sets makes `Insert` refuse the tenant, so every record
+the second finds is every record there will be, and it revokes them all.
+The other way round, a record inserted between the two calls is on record
+after the records' erase, unrevoked, and its token goes on verifying. In
 `pgstore`, `Store.EraseTenant` does both in one transaction and runs a
 callback of yours in it, so your own rows of the tenant go with them or not
 at all; it is handed a `pgstore.Erased`, the transaction as `Tx` and the
