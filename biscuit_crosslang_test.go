@@ -166,6 +166,8 @@ type biscuitCase struct {
 		CopyMaxRequests  int64     `json:"copy_max_requests"`
 		CopyMaxBudget    int64     `json:"copy_max_budget_nanos"`
 		CopyUnitCode     string    `json:"copy_unit_code"`
+		MaxCopies        int64     `json:"max_copies"`
+		UnlimitedCopies  bool      `json:"unlimited_copies"`
 	} `json:"expect"`
 }
 
@@ -210,6 +212,9 @@ func TestSharedAttenuationVerifies(t *testing.T) {
 	}
 	if got.Capability().ConfirmationJKT != want.ConfirmationJKT {
 		t.Errorf("ConfirmationJKT = %q, want %q", got.Capability().ConfirmationJKT, want.ConfirmationJKT)
+	}
+	if wantCopies := (CopyQuota{Max: want.MaxCopies, Unlimited: want.UnlimitedCopies}); got.Capability().Caveats.Copies != wantCopies {
+		t.Errorf("Caveats.Copies = %v, want %v", got.Capability().Caveats.Copies, wantCopies)
 	}
 	if len(got.Copies()) != 1 || !ceilingIs(got.Copies()[0].Requests, RequestCeiling{Max: want.CopyMaxRequests}) ||
 		!ceilingIs(got.Copies()[0].Budget, BudgetCeiling{Max: Nanos(want.CopyMaxBudget), UnitCode: want.CopyUnitCode}) {
