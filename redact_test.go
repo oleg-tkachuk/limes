@@ -14,7 +14,7 @@ import (
 
 // verbsThatShowBytes are the verbs under which fmt would print a private
 // key's bytes, in one notation or another, from a value that holds it.
-var verbsThatShowBytes = []string{"%v", "%+v", "%#v", "%s", "%x", "%X", "%q", "%d"}
+var verbsThatShowBytes = []string{"%v", "%+v", "%#v", "%s", "%x", "%X", "%q", "%d", "%t"}
 
 // keySpelling is how fmt writes key under verb. A value that holds the key
 // in a field writes the field the same way, so finding this in the value's
@@ -49,6 +49,44 @@ func TestFormattingRedactsPrivateKeys(t *testing.T) {
 		got := fmt.Sprintf("%v", v)
 		if !strings.Contains(got, key.KeyID) || !strings.Contains(got, redactedKeyText) {
 			t.Errorf("%s under %%v = %q: want its kid and %s", name, got, redactedKeyText)
+		}
+	}
+}
+
+// A value that holds a Signer where fmt cannot call its Format — an Issuer,
+// or any struct keeping one in an unexported field — formats without the
+// key under every verb: under one a pointer does not take, fmt prints the
+// pointer's target field by field, which reaches the key unless it is out of
+// that walk.
+func TestCarriersOfASignerLeaveItsKeyOut(t *testing.T) {
+	key, err := GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := NewSigner(SignerConfig{KeyID: key.KeyID, Key: key.Private})
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuer, err := NewIssuer(IssuerConfig{Signer: signer, Store: genStore{}, IssuerName: goldenIssuer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, v := range map[string]any{
+		"*Issuer":                     issuer,
+		"Issuer":                      *issuer,
+		"a struct with an Issuer":     struct{ issuer *Issuer }{issuer},
+		"a struct with a Signer":      struct{ signer *Signer }{signer},
+		"a struct with a Signer copy": struct{ signer Signer }{*signer},
+	} {
+		for _, verb := range verbsThatShowBytes {
+			got := fmt.Sprintf(verb, v)
+			// fmt prints a field it reaches this way under %v, whatever
+			// the verb, so the key is looked for in every spelling.
+			for _, spelling := range verbsThatShowBytes {
+				if strings.Contains(got, keySpelling(spelling, key.Private)) {
+					t.Errorf("%s under %s = %q: carries the private key", name, verb, got)
+				}
+			}
 		}
 	}
 }

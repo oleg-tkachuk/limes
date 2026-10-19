@@ -1,6 +1,7 @@
 package limes
 
 import (
+	"crypto"
 	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
@@ -23,6 +24,18 @@ func (redactedKey) GoString() string { return redactedKeyText }
 // MarshalText makes encoding/json and slog's handlers write the key as
 // redactedKeyText too.
 func (redactedKey) MarshalText() ([]byte, error) { return []byte(redactedKeyText), nil }
+
+// sealedSigner holds a Signer's key where no formatting reaches it. Signer's
+// own Format redacts the key, but fmt does not call it on a Signer it meets
+// in an unexported field — an Issuer's, a consumer's — and under a verb a
+// pointer does not take (%s, %q, %t) it prints that pointer's target
+// field by field instead. Behind a func the key is out of that walk: fmt
+// prints a func as its address under every verb.
+type sealedSigner struct{ open func() crypto.Signer }
+
+func sealSigner(key crypto.Signer) *sealedSigner {
+	return &sealedSigner{open: func() crypto.Signer { return key }}
+}
 
 // signingKeyView is a SigningKey as it is formatted.
 type signingKeyView struct {

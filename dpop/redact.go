@@ -24,6 +24,26 @@ func (n redactedKeys) GoString() string { return n.String() }
 // String does.
 func (n redactedKeys) MarshalText() ([]byte, error) { return []byte(n.String()), nil }
 
+// sealedKeys holds HMACNonces' keys where no formatting reaches them.
+// HMACNonces' own Format redacts them, but fmt does not call it on an
+// HMACNonces it meets in an unexported field — a Verifier's, a consumer's —
+// and under a verb a pointer does not take (%s, %q, %t) it prints that
+// pointer's target field by field instead. Behind a func the keys are out of
+// that walk: fmt prints a func as its address under every verb.
+type sealedKeys struct{ open func() [][]byte }
+
+func sealKeys(keys [][]byte) *sealedKeys {
+	return &sealedKeys{open: func() [][]byte { return keys }}
+}
+
+// get returns the keys; none for a zero HMACNonces, which holds no seal.
+func (k *sealedKeys) get() [][]byte {
+	if k == nil {
+		return nil
+	}
+	return k.open()
+}
+
 // hmacNoncesView is an HMACNoncesConfig or HMACNonces as it is formatted.
 type hmacNoncesView struct {
 	Keys     redactedKeys
@@ -58,5 +78,5 @@ func (n HMACNonces) MarshalJSON() ([]byte, error) { return json.Marshal(n.view()
 func (n HMACNonces) LogValue() slog.Value { return slog.AnyValue(n.view()) }
 
 func (n HMACNonces) view() hmacNoncesView {
-	return hmacNoncesView{Keys: redactedKeys(len(n.keys)), Lifetime: n.lifetime}
+	return hmacNoncesView{Keys: redactedKeys(len(n.keys.get())), Lifetime: n.lifetime}
 }

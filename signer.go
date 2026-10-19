@@ -29,7 +29,7 @@ import (
 // request.
 type Signer struct {
 	keyID string
-	key   crypto.Signer
+	key   *sealedSigner
 	// pub is the key's public half, read once: each signature is checked
 	// against it before a token carries it. An array, so Signer stays
 	// comparable.
@@ -83,7 +83,7 @@ func NewSigner(cfg SignerConfig) (*Signer, error) {
 	if !slices.Contains(tokenTypes, typ) {
 		return nil, fmt.Errorf("limes: SignerConfig.TokenType %q is not one of %q", typ, tokenTypes)
 	}
-	return &Signer{keyID: cfg.KeyID, key: cfg.Key, pub: [ed25519.PublicKeySize]byte(pub), typ: typ}, nil
+	return &Signer{keyID: cfg.KeyID, key: sealSigner(cfg.Key), pub: [ed25519.PublicKeySize]byte(pub), typ: typ}, nil
 }
 
 // jwtHeader is the protected header. We use compact serialization:
@@ -226,10 +226,10 @@ func (s *Signer) signGrant(ctx context.Context, g grant) (string, error) {
 	// Ed25519 hashes the message itself (PureEdDSA): crypto.Hash(0) is the
 	// stdlib's way to ask for it.
 	var sig []byte
-	if cs, ok := s.key.(ContextSigner); ok {
+	if cs, ok := s.key.open().(ContextSigner); ok {
 		sig, err = cs.SignContext(ctx, rand.Reader, []byte(signingInput), crypto.Hash(0))
 	} else {
-		sig, err = s.key.Sign(rand.Reader, []byte(signingInput), crypto.Hash(0))
+		sig, err = s.key.open().Sign(rand.Reader, []byte(signingInput), crypto.Hash(0))
 	}
 	if err != nil {
 		return "", fmt.Errorf("limes: sign: %w", err)
