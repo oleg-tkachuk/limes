@@ -1,18 +1,10 @@
 // git, run as an argument vector: no shell ever sees a ref or a path.
 
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
-const run = promisify(execFile);
-
-// MAX_OUTPUT_BYTES bounds what one git call may print: a diff's name list in
-// a large change is the most any caller reads.
-const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
+import { execute } from "./exec.ts";
 
 // git runs git with args in cwd and returns its standard output.
 export async function git(args: readonly string[], cwd?: string): Promise<string> {
-  const { stdout } = await run("git", [...args], { cwd, maxBuffer: MAX_OUTPUT_BYTES, encoding: "utf8" });
-  return stdout;
+  return execute("git", args, { cwd });
 }
 
 // lines splits output into its non-empty lines.

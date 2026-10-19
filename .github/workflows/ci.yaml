@@ -308,8 +308,11 @@ jobs:
           go-version: ${{ env.GO_FLOOR_VERSION }}
           cache: false
 
+      - name: Set up the CI scripts
+        uses: ./.github/actions/setup-ci
+
       - name: Require GO_FLOOR_VERSION to match the go directive
-        run: ./.github/scripts/go-floor-check.sh "$GO_FLOOR_VERSION" "$(go mod edit -json | jq -r .Go)"
+        run: node .github/ci/go-floor.ts "$GO_FLOOR_VERSION"
 
       - name: go vet
         run: go vet ./...
@@ -341,7 +344,7 @@ jobs:
   # change needs a `!` or a BREAKING CHANGE: footer in one of its commits.
   # A push to main is checked again from the last release, and the release
   # waits for it: a push past the pull request rule was checked by nothing
-  # else. See .github/scripts/check-range.sh.
+  # else. See .github/ci/release-checks.ts.
   api:
     name: API compatibility
     needs: [changes]
@@ -375,20 +378,21 @@ jobs:
         run: npm ci --ignore-scripts
 
       # Every module, each from its own last release on a push: see
-      # .github/scripts/check-modules.sh.
+      # .github/ci/check-modules.ts.
       - name: Require a break of the API to be marked breaking
         env:
           EVENT: ${{ github.event_name }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
-        run: ./.github/scripts/check-modules.sh api "$EVENT" "$PR_BASE" "$PR_HEAD" "$GITHUB_SHA"
+          SHA: ${{ github.sha }}
+        run: node .github/ci/check-modules.ts api
 
   # From v1.0.0 on no commit may mark itself breaking: the release would cut
   # a major the Go proxy ignores. Git alone answers it, so it runs on every
   # pull request — a documentation-only one too, whose marker breaks the
   # release as surely as one beside code — and on every push to main, from
   # the last release, as the API check does. See
-  # .github/scripts/marker-check.sh.
+  # .github/ci/release-checks.ts.
   markers:
     name: Breaking markers
     if: github.event_name != 'workflow_dispatch'
@@ -421,7 +425,8 @@ jobs:
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
           PR_TITLE: ${{ github.event.pull_request.title }}
-        run: ./.github/scripts/check-modules.sh markers "$EVENT" "$PR_BASE" "$PR_HEAD" "$GITHUB_SHA"
+          SHA: ${{ github.sha }}
+        run: node .github/ci/check-modules.ts markers
 
   # Two jobs over the same files, and the halves do not overlap. actionlint
   # covers whether a workflow is correct at all — schema, expression syntax,
