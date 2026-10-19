@@ -75,7 +75,7 @@ const (
 // trip allows. Rotate by putting the new key first: it issues,
 // and the old ones are still accepted until their nonces expire.
 type HMACNonces struct {
-	keys     [][]byte
+	keys     *sealedKeys
 	lifetime time.Duration
 	now      func() time.Time
 }
@@ -115,14 +115,14 @@ func NewHMACNonces(cfg HMACNoncesConfig) (*HMACNonces, error) {
 	for i, k := range cfg.Keys {
 		keys[i] = slices.Clone(k)
 	}
-	return &HMACNonces{keys: keys, lifetime: cfg.Lifetime, now: cfg.Now}, nil
+	return &HMACNonces{keys: sealKeys(keys), lifetime: cfg.Lifetime, now: cfg.Now}, nil
 }
 
 // Nonce implements Nonces.
 func (n *HMACNonces) Nonce(context.Context) (string, error) {
 	var issued [nonceTimeBytes]byte
 	binary.BigEndian.PutUint64(issued[:], uint64(n.now().Unix())) //nolint:gosec // G115: a time after 1970 is positive
-	return base64.RawURLEncoding.EncodeToString(append(issued[:], mac(n.keys[0], issued[:])...)), nil
+	return base64.RawURLEncoding.EncodeToString(append(issued[:], mac(n.keys.get()[0], issued[:])...)), nil
 }
 
 // Valid implements Nonces: a nonce one of the keys signed, issued no
@@ -136,7 +136,7 @@ func (n *HMACNonces) Valid(_ context.Context, nonce string) (bool, error) {
 	}
 	issuedBytes, sum := raw[:nonceTimeBytes], raw[nonceTimeBytes:]
 	signed := false
-	for _, k := range n.keys {
+	for _, k := range n.keys.get() {
 		signed = signed || hmac.Equal(sum, mac(k, issuedBytes))
 	}
 	if !signed {

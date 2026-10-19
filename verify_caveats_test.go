@@ -28,7 +28,7 @@ func signUnchecked(t *testing.T, s *Signer, c Capability) string {
 		t.Fatal(err)
 	}
 	input := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(claims)
-	sig, err := s.key.Sign(rand.Reader, []byte(input), crypto.Hash(0))
+	sig, err := s.key.open().Sign(rand.Reader, []byte(input), crypto.Hash(0))
 	if err != nil {
 		t.Fatal(err)
 	}
