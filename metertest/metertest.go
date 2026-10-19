@@ -400,6 +400,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"AReadOnlyScopeWritesNothing", checkReadOnlyScope},
 		{"EraseTenantUsageDropsEveryRowOfTheTenant", checkEraseTenantUsage},
 		{"SumChargesGroupsAndPagesTheLedger", checkSumCharges},
+		{"SumChargesAcrossTenants", checkSumChargesAcrossTenants},
 		{"SumChargesCutsBucketsAtUTCBoundaries", checkSumChargeBuckets},
 		{"SumChargesOrdersByAmountNotDigits", checkSumChargesOrderByAmount},
 		{"SumChargesCutsWeeksAtMonday", checkSumChargeWeeks},
@@ -3588,15 +3589,15 @@ func checkSumCharges(t *testing.T, f fixture) {
 		"the whole period": {meter.SumChargesRequest{}, []meter.ChargeSum{
 			{UnitCode: unit, Charged: 11 * one, Refunded: one, Charges: 3},
 		}},
-		"by operation": {meter.SumChargesRequest{ByOp: true}, []meter.ChargeSum{
+		"by operation": {meter.SumChargesRequest{GroupBy: []meter.ChargeDimension{meter.ChargeDimensionOp}}, []meter.ChargeSum{
 			{UnitCode: unit, Op: limes.OpGet, Charged: 8 * one, Charges: 2},
 			{UnitCode: unit, Op: limes.OpPut, Charged: 3 * one, Refunded: one, Charges: 1},
 		}},
-		"by actor": {meter.SumChargesRequest{ByActor: true}, []meter.ChargeSum{
+		"by actor": {meter.SumChargesRequest{GroupBy: []meter.ChargeDimension{meter.ChargeDimensionActor}}, []meter.ChargeSum{
 			{UnitCode: unit, Actor: "a", Charged: 8 * one, Charges: 2},
 			{UnitCode: unit, Actor: "b", Charged: 3 * one, Refunded: one, Charges: 1},
 		}},
-		"by capability": {meter.SumChargesRequest{ByCapability: true}, []meter.ChargeSum{
+		"by capability": {meter.SumChargesRequest{GroupBy: []meter.ChargeDimension{meter.ChargeDimensionCapability}}, []meter.ChargeSum{
 			{UnitCode: unit, CapabilityID: f.root, Charged: 6 * one, Charges: 1},
 			{UnitCode: unit, CapabilityID: f.child, Charged: 5 * one, Refunded: one, Charges: 2},
 		}},
@@ -3606,7 +3607,7 @@ func checkSumCharges(t *testing.T, f fixture) {
 		}
 	}
 	// The top one, then the rest after its cursor.
-	req := meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: to, ByCapability: true, Limit: 1}
+	req := meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: to, GroupBy: []meter.ChargeDimension{meter.ChargeDimensionCapability}, Limit: 1}
 	first, err := f.Ledger.SumCharges(f.Ctx, req)
 	if err != nil || len(first.Items) != 1 || first.Items[0].CapabilityID != f.root || first.Next == "" {
 		t.Fatalf("the first page of one = %+v, %v; want the root and a cursor", first, err)
@@ -3621,12 +3622,20 @@ func checkSumCharges(t *testing.T, f fixture) {
 		t.Errorf("SumCharges of a period before the charges = %+v, %v; want none", page, err)
 	}
 	for name, bad := range map[string]meter.SumChargesRequest{
-		"no tenant":         {From: from, To: to},
-		"an empty period":   {TenantID: f.Tenant, From: to, To: from},
-		"no period":         {TenantID: f.Tenant},
-		"an unknown bucket": {TenantID: f.Tenant, From: from, To: to, Bucket: meter.ChargeBucket(math.MaxUint8)},
-		"a negative limit":  {TenantID: f.Tenant, From: from, To: to, Limit: -1},
-		"a foreign cursor":  {TenantID: f.Tenant, From: from, To: to, Cursor: "not a cursor"},
+		"no tenant":                       {From: from, To: to},
+		"a tenant and every tenant":       {TenantID: f.Tenant, AllTenants: true, From: from, To: to},
+		"a tenant filter beside a tenant": {TenantID: f.Tenant, From: from, To: to, Filter: meter.ChargeFilter{Tenants: []uuid.UUID{f.Tenant}}},
+		"a dimension named twice":         {TenantID: f.Tenant, From: from, To: to, GroupBy: []meter.ChargeDimension{meter.ChargeDimensionOp, meter.ChargeDimensionOp}},
+		"no dimension":                    {TenantID: f.Tenant, From: from, To: to, GroupBy: []meter.ChargeDimension{meter.ChargeDimensionUnspecified}},
+		"an unknown dimension":            {TenantID: f.Tenant, From: from, To: to, GroupBy: []meter.ChargeDimension{meter.ChargeDimension(math.MaxUint8)}},
+		"a nil id in a filter":            {TenantID: f.Tenant, From: from, To: to, Filter: meter.ChargeFilter{Capabilities: []uuid.UUID{uuid.Nil}}},
+		"an empty actor in a filter":      {TenantID: f.Tenant, From: from, To: to, Filter: meter.ChargeFilter{Actors: []string{""}}},
+		"a filter past its bound":         {TenantID: f.Tenant, From: from, To: to, Filter: meter.ChargeFilter{Actors: slices.Repeat([]string{"a"}, meter.MaxChargeFilterValues+1)}},
+		"an empty period":                 {TenantID: f.Tenant, From: to, To: from},
+		"no period":                       {TenantID: f.Tenant},
+		"an unknown bucket":               {TenantID: f.Tenant, From: from, To: to, Bucket: meter.ChargeBucket(math.MaxUint8)},
+		"a negative limit":                {TenantID: f.Tenant, From: from, To: to, Limit: -1},
+		"a foreign cursor":                {TenantID: f.Tenant, From: from, To: to, Cursor: "not a cursor"},
 	} {
 		if _, err := f.Ledger.SumCharges(f.Ctx, bad); !errors.Is(err, limes.ErrInvalidRequest) {
 			t.Errorf("SumCharges with %s: err = %v, want ErrInvalidRequest", name, err)
@@ -3635,6 +3644,116 @@ func checkSumCharges(t *testing.T, f fixture) {
 	if f.ScopesTenants {
 		if _, err := f.Ledger.SumCharges(f.tenantCtx(other), meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: to}); !errors.Is(err, limes.ErrScopeMismatch) {
 			t.Errorf("SumCharges under another tenant's context: err = %v, want ErrScopeMismatch", err)
+		}
+	}
+}
+
+// A sum across tenants is the sum of each tenant's: grouped by tenant it
+// gives each one's on its own row, the largest first, without mixing units;
+// a filter keeps the charges it names, of a tenant, an operation, an actor
+// or a capability; a walk a row at a time yields what one page does; and a
+// store that scopes calls to a tenant refuses it under one tenant's scope.
+func checkSumChargesAcrossTenants(t *testing.T, f fixture) {
+	if f.Ledger == nil {
+		t.Skip("Env.Ledger not set")
+	}
+	other, err := f.newTenant()
+	if err != nil {
+		t.Fatalf("NewTenant: %v", err)
+	}
+	theirCap, err := f.NewCapability(CapabilitySpec{Tenant: other, Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget})
+	if err != nil {
+		t.Fatalf("capability of another tenant: %v", err)
+	}
+	theirs := newSubject(subjectSpec{capID: theirCap, tenant: other})
+	for _, c := range []meter.ChargeRequest{
+		{Subject: theirs, Amount: 7 * one, Op: limes.OpGet, Actor: "c"},
+		{Subject: theirs, Amount: 4 * one, Op: limes.OpPut, Actor: "a"},
+	} {
+		if _, err := f.Usage.Charge(f.tenantCtx(other), c, nil); err != nil {
+			t.Fatalf("charge of another tenant: %v", err)
+		}
+	}
+	for _, c := range []meter.ChargeRequest{
+		{Amount: 2 * one, Op: limes.OpGet, Actor: "a"},
+		{Amount: 3 * one, Op: limes.OpPut, Actor: "b"},
+	} {
+		if _, err := f.charge(c, nil); err != nil {
+			t.Fatalf("charge: %v", err)
+		}
+	}
+	from, to := f.sumPeriod()
+	byTenant := []meter.ChargeDimension{meter.ChargeDimensionTenant}
+	every := func(req meter.SumChargesRequest) []meter.ChargeSum {
+		t.Helper()
+		req.AllTenants, req.From, req.To = true, from, to
+		page, err := f.Ledger.SumCharges(f.listCtx(), req)
+		if err != nil {
+			t.Fatalf("SumCharges(%+v) across tenants: %v", req, err)
+		}
+		return page.Items
+	}
+	// Each tenant's sum on its own row, the largest first, as each one's
+	// own request gives it.
+	want := []meter.ChargeSum{
+		{UnitCode: unit, TenantID: other, Charged: 11 * one, Charges: 2},
+		{UnitCode: unit, TenantID: f.Tenant, Charged: 5 * one, Charges: 2},
+	}
+	if got := every(meter.SumChargesRequest{GroupBy: byTenant}); !reflect.DeepEqual(got, want) {
+		t.Errorf("SumCharges across tenants by tenant = %+v, want %+v", got, want)
+	}
+	for _, w := range want {
+		page, err := f.Ledger.SumCharges(f.tenantCtx(w.TenantID), meter.SumChargesRequest{TenantID: w.TenantID, From: from, To: to})
+		if err != nil || len(page.Items) != 1 || page.Items[0].Charged != w.Charged || page.Items[0].Charges != w.Charges {
+			t.Errorf("SumCharges of tenant %s = %+v, %v; want %s in %d charges, as across tenants", w.TenantID, page.Items, err, w.Charged, w.Charges)
+		}
+	}
+	for name, tc := range map[string]struct {
+		req  meter.SumChargesRequest
+		want []meter.ChargeSum
+	}{
+		"every tenant whole": {meter.SumChargesRequest{}, []meter.ChargeSum{
+			{UnitCode: unit, Charged: 16 * one, Charges: 4},
+		}},
+		"a tenant filter": {meter.SumChargesRequest{GroupBy: byTenant, Filter: meter.ChargeFilter{Tenants: []uuid.UUID{other}}}, []meter.ChargeSum{
+			{UnitCode: unit, TenantID: other, Charged: 11 * one, Charges: 2},
+		}},
+		"an operation filter": {meter.SumChargesRequest{GroupBy: byTenant, Filter: meter.ChargeFilter{Ops: []limes.Op{limes.OpGet}}}, []meter.ChargeSum{
+			{UnitCode: unit, TenantID: other, Charged: 7 * one, Charges: 1},
+			{UnitCode: unit, TenantID: f.Tenant, Charged: 2 * one, Charges: 1},
+		}},
+		"an actor filter, by actor": {meter.SumChargesRequest{GroupBy: []meter.ChargeDimension{meter.ChargeDimensionActor}, Filter: meter.ChargeFilter{Actors: []string{"a"}}}, []meter.ChargeSum{
+			{UnitCode: unit, Actor: "a", Charged: 6 * one, Charges: 2},
+		}},
+		"a capability filter": {meter.SumChargesRequest{GroupBy: byTenant, Filter: meter.ChargeFilter{Capabilities: []uuid.UUID{theirCap}}}, []meter.ChargeSum{
+			{UnitCode: unit, TenantID: other, Charged: 11 * one, Charges: 2},
+		}},
+	} {
+		if got := every(tc.req); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: SumCharges across tenants = %+v, want %+v", name, got, tc.want)
+		}
+	}
+	// A row at a time, across tenants and their operations, with two rows
+	// that differ by tenant alone: the tenants' puts, four each.
+	if _, err := f.charge(meter.ChargeRequest{Amount: one, Op: limes.OpPut, Actor: "b"}, nil); err != nil {
+		t.Fatalf("charge: %v", err)
+	}
+	req := meter.SumChargesRequest{AllTenants: true, From: from, To: to, Limit: 1,
+		GroupBy: []meter.ChargeDimension{meter.ChargeDimensionOp, meter.ChargeDimensionTenant}}
+	var walked []meter.ChargeSum
+	for sum, err := range meter.AllChargeSums(f.listCtx(), f.Ledger, req) {
+		if err != nil {
+			t.Fatalf("AllChargeSums across tenants: %v", err)
+		}
+		walked = append(walked, sum)
+	}
+	whole := every(meter.SumChargesRequest{GroupBy: req.GroupBy})
+	if len(whole) != len(want)*2 || !reflect.DeepEqual(walked, whole) {
+		t.Errorf("AllChargeSums a row at a time = %+v, want the page %+v", walked, whole)
+	}
+	if f.ScopesTenants {
+		if _, err := f.Ledger.SumCharges(f.tenantCtx(f.Tenant), meter.SumChargesRequest{AllTenants: true, From: from, To: to}); !errors.Is(err, limes.ErrScopeMismatch) {
+			t.Errorf("SumCharges across tenants under one tenant's context: err = %v, want ErrScopeMismatch", err)
 		}
 	}
 }
@@ -3679,7 +3798,7 @@ func checkSumChargesOrderByAmount(t *testing.T, f fixture) {
 	from, to := f.sumPeriod()
 	walk := func(req meter.SumChargesRequest, want []meter.ChargeSum) {
 		t.Helper()
-		req.TenantID, req.From, req.To, req.ByActor = f.Tenant, from, to, true
+		req.TenantID, req.From, req.To, req.GroupBy = f.Tenant, from, to, []meter.ChargeDimension{meter.ChargeDimensionActor}
 		page, err := f.Ledger.SumCharges(f.Ctx, req)
 		if err != nil || page.Next != "" || !sameSums(page.Items, want) {
 			t.Errorf("SumCharges by %s = %+v, %q, %v; want %+v on one page", req.Bucket, page.Items, page.Next, err, want)
@@ -3909,7 +4028,7 @@ func checkSumChargesOverflow(t *testing.T, f fixture) {
 	if page, err := f.Ledger.SumCharges(f.Ctx, req); !errors.Is(err, meter.ErrCounterOverflow) {
 		t.Errorf("SumCharges of the whole period = %+v, %v; want ErrCounterOverflow", page.Items, err)
 	}
-	req.ByCapability = true
+	req.GroupBy = []meter.ChargeDimension{meter.ChargeDimensionCapability}
 	page, err := f.Ledger.SumCharges(f.Ctx, req)
 	if err != nil || len(page.Items) != charges {
 		t.Fatalf("SumCharges by capability = %+v, %v; want %d sums", page.Items, err, charges)

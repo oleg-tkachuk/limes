@@ -873,19 +873,27 @@ Elsewhere, implement these and you are done:
 | `dpop.Nonces` | Server-provided DPoP nonces (optional; `dpop.HMACNonces` ships and needs no store) | No |
 
 To bill or report from the charges ledger, read it through a
-`LedgerReader` rather than a store's tables: `SumCharges` sums a tenant's
-charges taken in [`From`, `To`), by the store's clock, grouped by unit and, as
-`SumChargesRequest` asks, by bucket — the zero `ChargeBucketNone` for
-the period whole, or the UTC `ChargeBucketHour`, `Day`, `Week` (ISO, from Monday 00:00) or
-`Month` — and by operation, actor or capability. Buckets come in time order
-and, within each, the largest `Charged` first, ties by unit, operation, actor
-and capability, bytewise; so with `ChargeBucketNone` the first page of `Limit`
-rows is the top `Limit`. Each `ChargeSum` carries `Charged`, `Refunded` and
+`LedgerReader` rather than a store's tables: `SumCharges` sums the charges of
+`TenantID`, or of every tenant with `AllTenants`, taken in [`From`, `To`), by
+the store's clock, grouped by unit and, as `SumChargesRequest` asks, by bucket
+— the zero `ChargeBucketNone` for the period whole, or the UTC
+`ChargeBucketHour`, `Day`, `Week` (ISO, from Monday 00:00) or `Month` — and by
+each dimension `GroupBy` names: `ChargeDimensionTenant`, `Op`, `Actor`,
+`Capability`. `Filter` keeps the charges of the tenants, operations, actors or
+capabilities it lists, at most `MaxChargeFilterValues` each. Amounts in
+different units are never summed together. Buckets come in time order and,
+within each, the largest `Charged` first, ties by unit, tenant, operation,
+actor and capability, bytewise; so with `ChargeBucketNone` the first page of
+`Limit` rows is the top `Limit` — across tenants, grouped by tenant, the
+largest spenders. `meter.AllChargeSums` walks every page. Each `ChargeSum` carries `Charged`, `Refunded` and
 `Charges`; the net is `Charged − Refunded`. A refund counts with the charge it
 returns, so a closed period's sums still move, and a sum past `MaxNanos` is
 `ErrCounterOverflow`.
 `memstore.NewLedger` and `pgstore.NewLedger` read their stores' ledgers, the
-latter scoped to the tenant as every other read; `metertest` checks a reader
+latter scoped to the tenant as every other read, and a sum across tenants only
+under `WithAllTenantsReadOnly` (or `WithAllTenants`), as `ListTenantBudgets`:
+under one tenant's scope it is `ErrScopeMismatch`. Who may read every tenant's
+spend is the consumer's to decide, by who gets that scope; `metertest` checks a reader
 its `Env.Ledger` names.
 
 To report on capability records, count them through a `RecordCensus`:

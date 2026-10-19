@@ -86,17 +86,99 @@ func TestSumChargesRequestValidate(t *testing.T) {
 		t.Fatalf("a whole request: %v", err)
 	}
 	for name, change := range map[string]func(*SumChargesRequest){
-		"no tenant":         func(r *SumChargesRequest) { r.TenantID = uuid.Nil },
-		"no From":           func(r *SumChargesRequest) { r.From = time.Time{} },
-		"no To":             func(r *SumChargesRequest) { r.To = time.Time{} },
-		"an empty period":   func(r *SumChargesRequest) { r.To = r.From },
-		"a negative limit":  func(r *SumChargesRequest) { r.Limit = -1 },
-		"an unknown bucket": func(r *SumChargesRequest) { r.Bucket = chargeBucketEnd },
+		"no tenant":                 func(r *SumChargesRequest) { r.TenantID = uuid.Nil },
+		"no From":                   func(r *SumChargesRequest) { r.From = time.Time{} },
+		"no To":                     func(r *SumChargesRequest) { r.To = time.Time{} },
+		"an empty period":           func(r *SumChargesRequest) { r.To = r.From },
+		"a negative limit":          func(r *SumChargesRequest) { r.Limit = -1 },
+		"an unknown bucket":         func(r *SumChargesRequest) { r.Bucket = chargeBucketEnd },
+		"a tenant and every tenant": func(r *SumChargesRequest) { r.AllTenants = true },
+		"a tenant filter beside a tenant": func(r *SumChargesRequest) {
+			r.Filter.Tenants = []uuid.UUID{r.TenantID}
+		},
+		"no dimension":         func(r *SumChargesRequest) { r.GroupBy = []ChargeDimension{ChargeDimensionUnspecified} },
+		"an unknown dimension": func(r *SumChargesRequest) { r.GroupBy = []ChargeDimension{chargeDimensionEnd} },
+		"a dimension named twice": func(r *SumChargesRequest) {
+			r.GroupBy = []ChargeDimension{ChargeDimensionOp, ChargeDimensionActor, ChargeDimensionOp}
+		},
+		"a nil tenant in a filter": func(r *SumChargesRequest) {
+			r.TenantID, r.AllTenants, r.Filter.Tenants = uuid.Nil, true, []uuid.UUID{uuid.Nil}
+		},
+		"a nil capability in a filter":   func(r *SumChargesRequest) { r.Filter.Capabilities = []uuid.UUID{uuid.Nil} },
+		"an empty operation in a filter": func(r *SumChargesRequest) { r.Filter.Ops = []limes.Op{""} },
+		"an empty actor in a filter":     func(r *SumChargesRequest) { r.Filter.Actors = []string{""} },
+		"a filter past its bound": func(r *SumChargesRequest) {
+			r.Filter.Ops = slices.Repeat([]limes.Op{limes.OpGet}, MaxChargeFilterValues+1)
+		},
 	} {
 		r := ok
 		change(&r)
 		if err := r.Validate(); !errors.Is(err, limes.ErrInvalidRequest) {
 			t.Errorf("%s: Validate() = %v, want ErrInvalidRequest", name, err)
+		}
+	}
+}
+
+// A request across tenants, with every dimension and a filter at its bound,
+// is whole.
+func TestSumChargesRequestAcrossTenants(t *testing.T) {
+	from := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	r := SumChargesRequest{
+		AllTenants: true, From: from, To: from.Add(time.Hour),
+		GroupBy: []ChargeDimension{ChargeDimensionCapability, ChargeDimensionTenant, ChargeDimensionActor, ChargeDimensionOp},
+		Filter:  ChargeFilter{Tenants: slices.Repeat([]uuid.UUID{uuid.New()}, MaxChargeFilterValues)},
+	}
+	if err := r.Validate(); err != nil {
+		t.Fatalf("a request across tenants: %v", err)
+	}
+	if !r.Groups(ChargeDimensionTenant) || (SumChargesRequest{}).Groups(ChargeDimensionTenant) {
+		t.Error("Groups does not report the dimensions GroupBy names")
+	}
+}
+
+// Every dimension this module defines has a name of its own and is
+// accepted; the zero value and one past the last are refused.
+func TestChargeDimension(t *testing.T) {
+	want := map[ChargeDimension]string{
+		ChargeDimensionTenant: "tenant", ChargeDimensionOp: "op",
+		ChargeDimensionActor: "actor", ChargeDimensionCapability: "capability",
+	}
+	if len(want) != int(chargeDimensionEnd)-1 {
+		t.Fatalf("%d dimensions named here, %d defined", len(want), int(chargeDimensionEnd)-1)
+	}
+	for d, name := range want {
+		if d.String() != name || d.Validate() != nil {
+			t.Errorf("%d: String() = %q, Validate() = %v; want %q and accepted", d, d.String(), d.Validate(), name)
+		}
+	}
+	for _, d := range []ChargeDimension{ChargeDimensionUnspecified, chargeDimensionEnd} {
+		if err := d.Validate(); !errors.Is(err, limes.ErrInvalidRequest) {
+			t.Errorf("%s: Validate() = %v, want ErrInvalidRequest", d, err)
+		}
+	}
+}
+
+// A filter keeps a charge only when every list it sets names the charge's
+// value; an empty list keeps every value of its field.
+func TestChargeFilterAdmits(t *testing.T) {
+	tenant, capID := uuid.New(), uuid.New()
+	for name, tc := range map[string]struct {
+		f    ChargeFilter
+		want bool
+	}{
+		"no filter":               {ChargeFilter{}, true},
+		"its tenant":              {ChargeFilter{Tenants: []uuid.UUID{uuid.New(), tenant}}, true},
+		"another tenant":          {ChargeFilter{Tenants: []uuid.UUID{uuid.New()}}, false},
+		"its operation":           {ChargeFilter{Ops: []limes.Op{limes.OpGet}}, true},
+		"another operation":       {ChargeFilter{Ops: []limes.Op{limes.OpPut}}, false},
+		"its actor":               {ChargeFilter{Actors: []string{"a"}}, true},
+		"another actor":           {ChargeFilter{Actors: []string{"b"}}, false},
+		"its capability":          {ChargeFilter{Capabilities: []uuid.UUID{capID}}, true},
+		"another capability":      {ChargeFilter{Capabilities: []uuid.UUID{uuid.New()}}, false},
+		"one list keeps, one not": {ChargeFilter{Ops: []limes.Op{limes.OpGet}, Actors: []string{"b"}}, false},
+	} {
+		if got := tc.f.Admits(tenant, limes.OpGet, "a", capID); got != tc.want {
+			t.Errorf("%s: Admits = %v, want %v", name, got, tc.want)
 		}
 	}
 }

@@ -27,3 +27,17 @@ func AllTenantBudgets(ctx context.Context, l TenantBudgetLister, req ListTenantB
 		})(yield)
 	}
 }
+
+// AllChargeSums walks SumCharges page by page, from req.Cursor, and yields
+// every sum in its order, as AllTenantBudgets does. A charge or a refund
+// made during the walk moves a sum between pages, so a group may be yielded
+// twice or not at all; see LedgerReader.SumCharges.
+func AllChargeSums(ctx context.Context, l LedgerReader, req SumChargesRequest) iter.Seq2[ChargeSum, error] {
+	return func(yield func(ChargeSum, error) bool) {
+		page := req // each range walks from req.Cursor with a request of its own
+		limes.AllPages(ctx, req.Cursor, func(ctx context.Context, cursor string) (limes.Page[ChargeSum], error) {
+			page.Cursor = cursor
+			return l.SumCharges(ctx, page)
+		})(yield)
+	}
+}
