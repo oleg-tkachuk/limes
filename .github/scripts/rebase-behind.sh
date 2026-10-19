@@ -83,7 +83,7 @@ merges_itself() {
     local entries listed files path
     entries="$(gh_retry api "repos/${REPO}/pulls/$1/files" --paginate --jq '.[] | [.filename, (.previous_filename // "")] | @tsv')" || return 1
     listed="$(grep -c . <<<"$entries" || true)"
-    if [ "$listed" -lt "$2" ] || [ "$listed" -ge "$FILES_API_CAP" ]; then
+    if ! files_listed_in_full "$listed" "$2"; then
         return 1
     fi
     files="$(tr '\t' '\n' <<<"$entries")"

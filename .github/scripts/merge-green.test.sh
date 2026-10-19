@@ -108,6 +108,8 @@ check "a workspace in a nested module" false FAKE_FILES="pgstore/go.work"
 check "a vendor directory" false FAKE_FILES="vendor/modules.txt"
 check "Task's cache of a remote include" false FAKE_FILES=".task/remote/taskfile.yaml"
 check "a nested vendor directory" false FAKE_FILES="pgstore/vendor/modules.txt"
+# A count of changed files GitHub did not give is not a complete listing.
+check "a count that is not one" false FAKE_CHANGED=null
 # A file the files API did not list could be a CI definition.
 check "more files changed than listed" false FAKE_FILES="verifier.go" FAKE_CHANGED=2
 # A refused merge — the head moved between the read and the merge — is
