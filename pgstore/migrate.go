@@ -33,8 +33,9 @@ type MigrateOptions struct {
 	// RuntimeRoles are the roles the stores serve as: roles that do not own
 	// the tables, so row-level security binds them. Each gets USAGE on the
 	// schema, SELECT, INSERT, UPDATE and DELETE on its tables, SELECT alone
-	// on the version table (for CheckSchema), and the same on every table a
-	// later migration creates. Granting is idempotent, so each Migrate
+	// on the version table (for CheckSchema), EXECUTE on its functions —
+	// which no other role has — and the same on every table a later
+	// migration creates. Granting is idempotent, so each Migrate
 	// grants again. Empty: Migrate grants nothing, and the roles are the
 	// consumer's to grant.
 	RuntimeRoles []string
@@ -184,6 +185,9 @@ func grant(ctx context.Context, conn *pgx.Conn, roles []string) error {
 				// only reads it.
 				"REVOKE " + tablePrivileges + " ON " + versions + " FROM " + role,
 				"GRANT SELECT ON " + versions + " TO " + role,
+				// The schema's functions: the policies' scope checks and
+				// the revocation checks, which no other role may call.
+				"GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA " + schemaName + " TO " + role,
 				"ALTER DEFAULT PRIVILEGES IN SCHEMA " + schemaName + " GRANT " + tablePrivileges + " ON TABLES TO " + role,
 			} {
 				if _, err := tx.Exec(ctx, stmt); err != nil {

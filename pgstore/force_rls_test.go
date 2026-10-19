@@ -75,22 +75,24 @@ SELECT (SELECT self FROM ` + schema + `.is_revoked($1, 1)), ` + schema + `.is_bi
 // transaction keeps the scope it had, never every tenant's rows.
 func TestRevocationChecksLeaveTheCallersScope(t *testing.T) {
 	f := newTenantFixture(t)
-	err := pgx.BeginFunc(t.Context(), app, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), sqlSetLocal, SettingAllTenants, settingUnset); err != nil {
-			return err
+	for _, caller := range []string{settingUnset, SettingAllTenantsOn, SettingAllTenantsRead} {
+		err := pgx.BeginFunc(t.Context(), app, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(t.Context(), sqlSetLocal, SettingAllTenants, caller); err != nil {
+				return err
+			}
+			var self, copyRevoked bool
+			var scope string
+			if err := tx.QueryRow(t.Context(), sqlCallerScopeAfterChecks, f.parent.ID, []byte("any")).Scan(&self, &copyRevoked, &scope); err != nil {
+				return err
+			}
+			if scope != caller {
+				t.Errorf("the caller's scope after the checks = %q, want %q as before", scope, caller)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("a caller scoped %q: %v", caller, err)
 		}
-		var self, copyRevoked bool
-		var scope string
-		if err := tx.QueryRow(t.Context(), sqlCallerScopeAfterChecks, f.parent.ID, []byte("any")).Scan(&self, &copyRevoked, &scope); err != nil {
-			return err
-		}
-		if scope != settingUnset {
-			t.Errorf("the caller's scope after the checks = %q, want it unset as before", scope)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -222,5 +224,27 @@ func TestMigrateRestoresTheScopeWhenTheContextEnds(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// sqlMayCall is whether role $1 may call the schema's function $2.
+const sqlMayCall = `SELECT has_function_privilege($1, $2, 'EXECUTE')`
+
+// The schema's functions are the runtime roles' to call alone: a role that
+// reaches the schema but was not granted by Migrate cannot ask whether any
+// tenant's capability is revoked.
+func TestOnlyRuntimeRolesCallTheFunctions(t *testing.T) {
+	const outsider = "limes_outsider"
+	loginRole(t, outsider, "")
+	for _, fn := range []string{schema + ".is_revoked(uuid, integer)", schema + ".is_biscuit_revoked(bytea[])", schema + ".tenant_visible(uuid)"} {
+		for role, want := range map[string]bool{appUser: true, outsider: false} {
+			var may bool
+			if err := owner.QueryRow(t.Context(), sqlMayCall, role, fn).Scan(&may); err != nil {
+				t.Fatal(err)
+			}
+			if may != want {
+				t.Errorf("%s may call %s: %v, want %v", role, fn, may, want)
+			}
+		}
 	}
 }
