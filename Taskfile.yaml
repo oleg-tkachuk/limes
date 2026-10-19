@@ -61,10 +61,10 @@ tasks:
     desc: "deps:update for the root, then go mod tidy in each nested module that builds it through a replace — pgstore and examples — whose go.mod a root bump changes too"
     cmds:
       - task: deps:update
-      - bash .github/scripts/tidy-replacing-modules.sh
+      - node .github/ci/tidy-modules.ts
 
   verify-all:
-    desc: "gofmt + go mod tidy/verify + golangci-lint + a 32-bit build + the unit suite + govulncheck + actionlint + the CI scripts + the workflow scripts + the release rules and notes + the redisreplay and otelmetric modules + pgstore's static checks + the examples that need no database — what CI runs, but test:pgstore and test:examples:pgstore"
+    desc: "gofmt + go mod tidy/verify + golangci-lint + a 32-bit build + the unit suite + govulncheck + actionlint + the CI scripts + the release rules and notes + the redisreplay and otelmetric modules + pgstore's static checks + the examples that need no database — what CI runs, but test:pgstore and test:examples:pgstore"
     cmds:
       - task: fmt:check
       - task: verify:tidy
@@ -74,7 +74,6 @@ tasks:
       - task: vuln
       - task: verify:workflows
       - task: verify:ci
-      - task: verify:scripts
       - task: verify:release-rules
       - task: verify:redisreplay
       - task: verify:otelmetric
@@ -212,15 +211,6 @@ tasks:
     cmds:
       - node_modules/.bin/tsc -p .
       - node --test
-
-  verify:scripts:
-    desc: "Test the shell scripts the workflows and tasks run"
-    preconditions:
-      - sh: test -d .github/release/node_modules/@semantic-release/commit-analyzer
-        msg: "the release tooling is not installed — npm ci --ignore-scripts --prefix .github/release"
-    cmds:
-      - for: [tidy-replacing-modules]
-        cmd: bash .github/scripts/{{.ITEM}}.test.sh
 
   verify:release-rules:
     desc: "Fail when a commit type cuts a different release than it should, or a breaking change is missing from the notes"
