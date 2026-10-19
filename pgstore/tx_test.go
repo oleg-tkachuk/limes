@@ -159,7 +159,7 @@ func TestTxFromWaitsForACallInFlight(t *testing.T) {
 // Tx — refuses the charge rather than let the store write it outside the
 // transaction.
 func TestTxFromRefusesATransactionEndedBySQL(t *testing.T) {
-	for _, end := range []string{"COMMIT", "ROLLBACK"} {
+	for _, end := range []string{"COMMIT", "ROLLBACK", "COMMIT; BEGIN", "ROLLBACK; BEGIN"} {
 		t.Run(end, func(t *testing.T) {
 			f := newTenantFixture(t)
 			ctx := WithTenant(t.Context(), f.mine)
