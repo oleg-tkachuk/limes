@@ -14,6 +14,14 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## pgstore/v0.26.0
+
+- Migration `012_function_execute.sql` takes EXECUTE on the schema's
+  functions — the revocation checks, which read every tenant's revocations,
+  and the scope checks the policies call — away from every role, and
+  `Migrate` grants it to `MigrateOptions.RuntimeRoles`. A role you grant by
+  hand instead needs `GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA limes`.
+
 ## v0.104.0
 
 - Tokens are `limes-cap-v6+jwt`, the one type a verifier accepts:
