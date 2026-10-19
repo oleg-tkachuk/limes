@@ -94,42 +94,73 @@ func TestRevocationChecksLeaveTheCallersScope(t *testing.T) {
 	}
 }
 
-// bypassRole is a role row-level security never binds, short of superuser.
+// The roles TestCheckSchemaRefusesARoleTheyDoNotHold serves as, and the
+// password each logs in with.
 const (
-	bypassRole     = "limes_bypass"
-	bypassPassword = "limes-bypass-test"
+	bypassRole        = "limes_bypass"
+	bypassGroup       = "limes_bypass_group"
+	bypassMember      = "limes_bypass_member"
+	objectOwnerRole   = "limes_object_owner"
+	ownerMemberRole   = "limes_owner_member"
+	checkRolePassword = "limes-check-role-test"
+	// probeFunction is a function of the schema objectOwnerRole owns.
+	probeFunction = schema + ".check_role_probe()"
 )
 
-// CheckSchema refuses a store served by a role the policies do not hold —
-// a superuser, one with BYPASSRLS, the schema's owner — and accepts one that
-// owns nothing.
-func TestCheckSchemaRefusesARoleTheyDoNotHold(t *testing.T) {
+// loginRole creates a role that logs in and can read the schema version,
+// runs setup as the superuser, and returns a pool as the role; all of it goes
+// when the test ends.
+func loginRole(t *testing.T, name, attributes string, setup ...string) *pgxpool.Pool {
+	t.Helper()
 	ctx := t.Context()
-	role := pgx.Identifier{bypassRole}.Sanitize()
-	if _, err := owner.Exec(ctx, "DROP ROLE IF EXISTS "+role); err != nil {
-		t.Fatal(err)
+	role := pgx.Identifier{name}.Sanitize()
+	stmts := append([]string{
+		"DROP ROLE IF EXISTS " + role,
+		"CREATE ROLE " + role + " LOGIN " + attributes + " PASSWORD '" + checkRolePassword + "'",
+		"GRANT USAGE ON SCHEMA " + schema + " TO " + role,
+		"GRANT SELECT ON " + versionTable + " TO " + role,
+	}, setup...)
+	for _, stmt := range stmts {
+		if _, err := owner.Exec(ctx, stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
 	}
-	if _, err := owner.Exec(ctx, "CREATE ROLE "+role+" LOGIN BYPASSRLS PASSWORD '"+bypassPassword+"'"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := owner.Exec(ctx, "GRANT USAGE ON SCHEMA "+schema+" TO "+role+"; GRANT SELECT ON "+versionTable+" TO "+role); err != nil {
-		t.Fatal(err)
-	}
-	bypass, err := poolAs(ctx, ownerDSN, bypassRole, bypassPassword)
+	pool, err := poolAs(ctx, ownerDSN, name, checkRolePassword)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		bypass.Close()
+		pool.Close()
 		_, _ = owner.Exec(context.Background(), "DROP OWNED BY "+role+"; DROP ROLE IF EXISTS "+role)
 	})
+	return pool
+}
+
+// CheckSchema refuses a store served by a role the policies do not hold —
+// a superuser, one with BYPASSRLS, an owner of the schema or of anything in
+// it, or a role that can act as any of these — and accepts one that owns
+// nothing.
+func TestCheckSchemaRefusesARoleTheyDoNotHold(t *testing.T) {
+	ctx := t.Context()
+	group := pgx.Identifier{bypassGroup}.Sanitize()
+	if _, err := owner.Exec(ctx, "DROP ROLE IF EXISTS "+group+"; CREATE ROLE "+group+" NOLOGIN BYPASSRLS"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = owner.Exec(context.Background(), "DROP ROLE IF EXISTS "+group) })
 	for name, tc := range map[string]struct {
 		db      DB
 		refused bool
 	}{
-		"a superuser":      {owner, true},
-		"BYPASSRLS":        {bypass, true},
-		"the owner":        {migrator, true},
+		"a superuser": {owner, true},
+		"BYPASSRLS":   {loginRole(t, bypassRole, "BYPASSRLS"), true},
+		"a member of a BYPASSRLS role": {loginRole(t, bypassMember, "",
+			"GRANT "+group+" TO "+pgx.Identifier{bypassMember}.Sanitize()), true},
+		"the owner": {migrator, true},
+		"a member of the owner": {loginRole(t, ownerMemberRole, "",
+			"GRANT "+pgx.Identifier{migratorUser}.Sanitize()+" TO "+pgx.Identifier{ownerMemberRole}.Sanitize()), true},
+		"an owner of a function in the schema": {loginRole(t, objectOwnerRole, "",
+			"CREATE FUNCTION "+probeFunction+" RETURNS integer LANGUAGE sql AS 'SELECT 1'",
+			"ALTER FUNCTION "+probeFunction+" OWNER TO "+pgx.Identifier{objectOwnerRole}.Sanitize()), true},
 		"the runtime role": {app, false},
 	} {
 		err := CheckSchema(ctx, tc.db)

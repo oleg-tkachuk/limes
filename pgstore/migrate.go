@@ -251,18 +251,27 @@ func ReadSchemaVersion(ctx context.Context, db DB) (SchemaVersion, error) {
 
 // ErrRuntimeRole is CheckSchema finding the store served by a role
 // row-level security does not hold to its tenant: a superuser or a role with
-// BYPASSRLS, which it never binds, or the schema's owner, which may turn it
-// off. The owner migrates; a role that owns nothing serves (Migrate's
-// RuntimeRoles).
+// BYPASSRLS, which it never binds, or an owner of the schema or of anything
+// in it, which may turn it off or replace what enforces it — that role
+// itself, or one it can act as (SET ROLE) or inherits from. The owner
+// migrates; a role that owns nothing serves (Migrate's RuntimeRoles).
 var ErrRuntimeRole = errors.New("pgstore: the store is served by a role row-level security does not hold")
 
 // sqlRuntimeRole reads what CheckSchema refuses of the role the store is
-// served by: superuser, BYPASSRLS, and membership in the role that owns the
-// schema, which grants the owner's rights.
+// served by — each through membership, which takes in the role itself and
+// every role it can act as or inherits from: a superuser; a role with
+// BYPASSRLS; an owner of the schema $1, or of a table, sequence, view or
+// function in it, which may disable its row-level security, drop a policy or
+// replace the functions the policies and revocation checks call.
 const sqlRuntimeRole = `
-SELECT r.rolsuper, r.rolbypassrls, pg_has_role(current_user, n.nspowner, 'MEMBER')
-FROM pg_roles r, pg_namespace n
-WHERE r.rolname = current_user AND n.nspname = $1`
+SELECT
+    EXISTS (SELECT 1 FROM pg_roles r WHERE r.rolsuper AND pg_has_role(current_user, r.oid, 'MEMBER')),
+    EXISTS (SELECT 1 FROM pg_roles r WHERE r.rolbypassrls AND pg_has_role(current_user, r.oid, 'MEMBER')),
+    EXISTS (SELECT 1 FROM pg_namespace n WHERE n.nspname = $1 AND pg_has_role(current_user, n.nspowner, 'MEMBER'))
+    OR EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+               WHERE n.nspname = $1 AND pg_has_role(current_user, c.relowner, 'MEMBER'))
+    OR EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+               WHERE n.nspname = $1 AND pg_has_role(current_user, p.proowner, 'MEMBER'))`
 
 // CheckSchema is a readiness check for the stores over db. It returns
 // ErrSchemaMismatch when the schema is not at the version this package
@@ -283,11 +292,11 @@ func CheckSchema(ctx context.Context, db DB) error {
 	}
 	switch {
 	case super:
-		return fmt.Errorf("%w: it is a superuser", ErrRuntimeRole)
+		return fmt.Errorf("%w: it is, or can act as, a superuser", ErrRuntimeRole)
 	case bypass:
-		return fmt.Errorf("%w: it has BYPASSRLS", ErrRuntimeRole)
+		return fmt.Errorf("%w: it has, or can act as a role with, BYPASSRLS", ErrRuntimeRole)
 	case owns:
-		return fmt.Errorf("%w: it owns %s, or is a member of the role that does", ErrRuntimeRole, schema)
+		return fmt.Errorf("%w: it owns, or can act as a role that owns, %s or something in it", ErrRuntimeRole, schema)
 	}
 	return nil
 }
