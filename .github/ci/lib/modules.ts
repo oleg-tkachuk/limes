@@ -46,6 +46,7 @@ export interface ReleaseCommits {
   changedPaths(cwd: string, hash: string): string[];
   touches(paths: string[], scope: Scope): boolean;
   releases(analyzer: unknown, hash: string, message: string): Promise<boolean>;
+  releaseType(analyzer: unknown, hash: string, message: string): Promise<string | null>;
 }
 
 // releaseCommits loads the release's filter beside these scripts.
@@ -107,7 +108,10 @@ export function releasedModules(root: string): string[] {
 // releaseLine is the module's newest release tag reachable from rev, or
 // undefined before any.
 export async function releaseLine(module: Module, rev: string, cwd?: string): Promise<string | undefined> {
-  return lines(await git(["tag", "--merged", rev, "--list", `${module.prefix}v[0-9]*`, "--sort=-v:refname"], cwd))[0];
+  // A prerelease is no release line: an rc of 1.0.0 does not make the API
+  // stable.
+  const tags = lines(await git(["tag", "--merged", rev, "--list", `${module.prefix}v[0-9]*`, "--sort=-v:refname"], cwd));
+  return tags.find((t) => !t.slice(module.prefix.length).includes("-"));
 }
 
 // onStableLine reports whether the release line tag keeps its API.

@@ -6,7 +6,7 @@ import { parse } from "yaml";
 
 import { fakeData, fakeGitHub, type FakeData } from "./lib/fake-github.ts";
 import type { Job, WorkflowRun } from "./lib/github.ts";
-import { CI_WORKFLOW, jobPassed, problemsWithRun, requiredJobs, runIdOf } from "./ci-run.ts";
+import { CI_WORKFLOW, jobPassed, passedRunFor, problemsWithRun, requiredJobs, runIdOf } from "./ci-run.ts";
 import { GATES } from "./release.ts";
 
 const REPO = "oleg-tkachuk/limes";
@@ -85,4 +85,16 @@ test("ci.yaml's dispatch waits for what the release reads", () => {
     assert.ok(id !== undefined && waited.includes(id), `dispatch-release does not wait for '${gate}'`);
   }
   assert.ok(REQUIRED.includes("Verify") && REQUIRED.length > 1);
+});
+
+describe("passedRunFor", () => {
+  test("the newest passed run for the commit", async () => {
+    const data = fakeData();
+    data.runs.set(7, good);
+    data.runs.set(9, good);
+    data.runs.set(11, { ...good, headSha: OTHER });
+    assert.equal(await passedRunFor(fakeGitHub(data), SHA), 9);
+  });
+  test("none is an error", async () => assert.rejects(passedRunFor(fakeGitHub(fakeData()), SHA), /no passed CI run/));
+  test("a sha that is not one", async () => assert.rejects(passedRunFor(fakeGitHub(fakeData()), "main")));
 });

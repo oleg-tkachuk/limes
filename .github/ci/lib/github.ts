@@ -98,6 +98,8 @@ export interface NewRelease {
   previousTag: string | undefined;
   // latest marks it Latest; otherwise GitHub is told it is not.
   latest: boolean;
+  // prerelease marks a release candidate, which is never the Latest.
+  prerelease?: boolean;
 }
 
 // PullRequestText is a pull request's title and body.
@@ -132,6 +134,9 @@ export interface GitHub {
   sameRepoPullRequest(head: string, base: string): Promise<number | undefined>;
   createPullRequest(head: string, base: string, text: PullRequestText): Promise<number>;
   editPullRequest(number: number, text: PullRequestText): Promise<void>;
+  // passedRunsOf is the ids of the completed, successful push runs of the
+  // workflow file on branch that tested sha, newest first.
+  passedRunsOf(workflow: string, branch: string, sha: string): Promise<number[]>;
   // dispatch sends a repository_dispatch event of eventType with payload.
   dispatch(eventType: string, payload: Record<string, string>): Promise<void>;
 }
@@ -366,7 +371,8 @@ export function gitHubOver(octokit: Octokit, repo: Repo): GitHub {
           tag_name: release.tag,
           name: release.tag,
           body,
-          ...(release.latest ? {} : { make_latest: MAKE_LATEST_FALSE }),
+          ...(release.latest && release.prerelease !== true ? {} : { make_latest: MAKE_LATEST_FALSE }),
+          ...(release.prerelease === true ? { prerelease: true } : {}),
         });
       } catch (err) {
         if (!(await this.releaseExists(release.tag))) {
@@ -384,6 +390,18 @@ export function gitHubOver(octokit: Octokit, repo: Repo): GitHub {
     },
     async editPullRequest(number, text) {
       await octokit.rest.pulls.update({ ...repo, pull_number: number, title: text.title, body: text.body });
+    },
+    async passedRunsOf(workflow, branch, sha) {
+      const { data } = await octokit.rest.actions.listWorkflowRuns({
+        ...repo,
+        workflow_id: workflow.split("/").at(-1) ?? workflow,
+        branch,
+        event: "push",
+        status: "success",
+        head_sha: sha,
+        per_page: PAGE_SIZE,
+      });
+      return data.workflow_runs.sort((a, b) => b.run_number - a.run_number).map((r) => r.id);
     },
     async dispatch(eventType, payload) {
       await octokit.rest.repos.createDispatchEvent({ ...repo, event_type: eventType, client_payload: payload });

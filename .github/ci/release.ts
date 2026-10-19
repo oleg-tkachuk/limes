@@ -1,6 +1,15 @@
 // Release every module the repository releases, each on its own line.
 //
-// Usage: GH_TOKEN=… GITHUB_REPOSITORY=… CI_RUN=<run id> RUNNER_TEMP=… node release.ts
+// Usage: GH_TOKEN=… GITHUB_REPOSITORY=… CI_RUN=<run id> RUNNER_TEMP=…
+//        [CHANNEL=release|prerelease] [MODULE=all|<name>] [MANUAL=true] node release.ts
+//
+// A release nobody asked for by hand — CI's dispatch after a green push —
+// releases a module only once its pending commits are due by the policy in
+// .github/release/release-policy.json (lib/release-policy.ts). A release by
+// hand (MANUAL) releases whatever is pending. A prerelease, by hand only,
+// tags the version the next release would be as -rc.N on the checked-out
+// commit and publishes it as a GitHub prerelease. MODULE narrows either to
+// one module.
 //
 // Run from release.yaml once the dispatching CI run vouched for the commit
 // and the head was found releasable (release-head.ts). For each module of
@@ -23,11 +32,13 @@
 import { join } from "node:path";
 
 import { error, info, setOutput, withoutWorkflowCommands } from "./lib/actions.ts";
-import { requireEnv } from "./lib/env.ts";
+import { optionalEnv, requireEnv } from "./lib/env.ts";
 import { git } from "./lib/git.ts";
 import { gitHubFor, type GitHub } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
-import { ROOT_MODULE, releasedModules, selectModule, type Module } from "./lib/modules.ts";
+import { ROOT_MODULE, releaseCommits, releasedModules, selectModule, type Module, type ReleaseCommits } from "./lib/modules.ts";
+import { candidateTag } from "./lib/prerelease.ts";
+import { isDue, loadPolicy, pendingCommits, type Policy } from "./lib/release-policy.ts";
 import { newReleaseTag, notesFrom, publish, publishLeftBehind, tagsOnHead, warmGoProxy, type Fetch } from "./lib/releases.ts";
 import { runInherited } from "./lib/spawn.ts";
 import { jobPassed, runIdOf } from "./ci-run.ts";
@@ -40,6 +51,14 @@ export const OUTPUT_LIMES_TAG = "limes-tag";
 // limes its go.mod requires, so a change to limes that pgstore must follow
 // lands with pgstore.
 export const GATES: Readonly<Record<string, string>> = { pgstore: "PostgreSQL store, released limes" };
+// Channel is what a run releases: releases, or release candidates.
+export const Channel = { Release: "release", Prerelease: "prerelease" } as const;
+export type Channel = (typeof Channel)[keyof typeof Channel];
+// ALL_MODULES releases every module.
+export const ALL_MODULES = "all";
+// REMOTE is where a candidate's tag is pushed.
+const REMOTE = "origin";
+
 // RELEASE_DIR is where semantic-release runs, beside its config and lockfile.
 const RELEASE_DIR = ".github/release";
 // MODULE_ENV picks the module semantic-release releases (modules.cjs).
@@ -62,6 +81,30 @@ export interface Release {
   notesDir: string;
   // onRootTag is told the root module's tag, before it is published.
   onRootTag(tag: string): void;
+  channel: Channel;
+  // only names the one module to release; undefined for every one.
+  only: string | undefined;
+  // manual: asked for by hand, so the policy's thresholds do not apply.
+  manual: boolean;
+  policy: Policy;
+  commits: ReleaseCommits;
+  // pushTag pushes a tag made on the checked-out commit.
+  pushTag(tag: string): Promise<void>;
+}
+
+// prereleaseModule tags and publishes the module's next release candidate,
+// and reports its tag, if anything is pending.
+export async function prereleaseModule(r: Release, module: Module): Promise<string | undefined> {
+  const tag = await candidateTag(module, await pendingCommits(module, "HEAD", r.commits, r.root), r.root);
+  if (tag === undefined) {
+    info(`${module.name}: nothing pending to release a candidate of`);
+    return undefined;
+  }
+  await git(["tag", tag], r.root);
+  await r.pushTag(tag);
+  await publish(r.github, tag, module.prefix, "", false, r.root, true);
+  await warmGoProxy(tag, r.repository, r.fetchInfo);
+  return tag;
 }
 
 // releaseModule releases one module, and reports its new tag, if any.
@@ -70,6 +113,16 @@ export async function releaseModule(r: Release, module: Module, before: readonly
   if (gate !== undefined && !(await r.gatePassed(gate))) {
     info(`${module.name}: '${gate}' did not pass; not released this run`);
     return undefined;
+  }
+  if (r.channel === Channel.Prerelease) {
+    return prereleaseModule(r, module);
+  }
+  if (!r.manual) {
+    const due = isDue(await pendingCommits(module, "HEAD", r.commits, r.root), r.policy);
+    info(`${module.name}: ${due.reason}`);
+    if (!due.due) {
+      return undefined;
+    }
   }
   const notesFile = join(r.notesDir, `release-notes-${module.name}.md`);
   await r.runSemanticRelease(module, notesFile);
@@ -93,7 +146,11 @@ export async function releaseModule(r: Release, module: Module, before: readonly
 export async function releaseAll(r: Release): Promise<boolean> {
   const before = await tagsOnHead(r.root);
   let ok = true;
-  const modules = releasedModules(r.root).map((name) => selectModule(r.root, name));
+  const names = releasedModules(r.root);
+  if (r.only !== undefined && !names.includes(r.only)) {
+    throw new Error(`no module ${r.only}; known: ${names.join(", ")}`);
+  }
+  const modules = names.filter((n) => r.only === undefined || n === r.only).map((name) => selectModule(r.root, name));
   for (const module of modules) {
     try {
       await releaseModule(r, module, before);
@@ -103,7 +160,12 @@ export async function releaseAll(r: Release): Promise<boolean> {
     }
   }
   for (const module of modules) {
-    await publishLeftBehind(r.github, module.prefix, r.root);
+    try {
+      await publishLeftBehind(r.github, module.prefix, r.root);
+    } catch (err) {
+      error(`${module.name}: publishing what an earlier run left behind: ${err instanceof Error ? err.message : String(err)}`);
+      ok = false;
+    }
   }
   return ok;
 }
@@ -132,7 +194,22 @@ async function main(): Promise<void> {
   const runId = runIdOf(requireEnv("CI_RUN"));
   const github = gitHubFor(token, repository);
   const root = (await git(["rev-parse", "--show-toplevel"])).trim();
+  const channel = optionalEnv("CHANNEL") ?? Channel.Release;
+  if (channel !== Channel.Release && channel !== Channel.Prerelease) {
+    throw new Error(`CHANNEL ${channel} is neither ${Channel.Release} nor ${Channel.Prerelease}`);
+  }
+  const manual = optionalEnv("MANUAL") === "true";
+  if (channel === Channel.Prerelease && !manual) {
+    throw new Error("a prerelease is cut by hand only");
+  }
+  const module = optionalEnv("MODULE") ?? ALL_MODULES;
   const ok = await releaseAll({
+    channel,
+    manual,
+    only: module === ALL_MODULES ? undefined : module,
+    policy: loadPolicy(root),
+    commits: releaseCommits(),
+    pushTag: async (tag) => void (await git(["push", "--quiet", REMOTE, `refs/tags/${tag}`], root)),
     github,
     repository,
     root,

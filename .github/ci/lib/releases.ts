@@ -40,10 +40,11 @@ export async function newReleaseTag(github: GitHub, before: readonly string[], p
   return undefined;
 }
 
-// releaseTagsBelow is the module's release tags reachable from rev, newest
-// first.
+// releaseTagsBelow is the module's release tags reachable from rev that
+// name no prerelease, newest first: a prerelease run publishes its own.
 async function releaseTagsBelow(rev: string, prefix: string, cwd?: string): Promise<string[]> {
-  return lines(await git(["tag", "--merged", rev, "--list", `${prefix}v[0-9]*`, "--sort=-v:refname"], cwd));
+  const tags = lines(await git(["tag", "--merged", rev, "--list", `${prefix}v[0-9]*`, "--sort=-v:refname"], cwd));
+  return tags.filter((t) => !t.slice(prefix.length).includes("-"));
 }
 
 // previousTag is the module's newest release tag below tag, the start of its
@@ -78,8 +79,8 @@ export function notesFrom(file: string | undefined): string {
 
 // publish publishes tag: notes first, then GitHub's list of the pull
 // requests merged since the module's previous tag.
-export async function publish(github: GitHub, tag: string, prefix: string, notes: string, latest: boolean, cwd?: string): Promise<void> {
-  await github.publishRelease({ tag, notes, previousTag: await previousTag(tag, prefix, cwd), latest });
+export async function publish(github: GitHub, tag: string, prefix: string, notes: string, latest: boolean, cwd?: string, prerelease = false): Promise<void> {
+  await github.publishRelease({ tag, notes, previousTag: await previousTag(tag, prefix, cwd), latest, prerelease });
   info(`published ${tag}`);
 }
 
@@ -100,15 +101,15 @@ export const GO_PROXY = "https://proxy.golang.org";
 const PROXY_ATTEMPTS = 5;
 const PROXY_PAUSE_MS = 10_000;
 // RELEASE_TAG is an optional module directory — lower-case path segments —
-// then the version.
-const RELEASE_TAG = /^((?:[a-z0-9][a-z0-9._-]*\/)*)(v[0-9]+\.[0-9]+\.[0-9]+)$/;
+// then the version, a release candidate's included.
+const RELEASE_TAG = /^((?:[a-z0-9][a-z0-9._-]*\/)*)(v[0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?)$/;
 
 // proxyInfoURL is the proxy's .info of tag's version, under the module path
 // of the repository and the tag's directory.
 export function proxyInfoURL(tag: string, repository: string, proxy: string = GO_PROXY): string {
   const match = RELEASE_TAG.exec(tag);
   if (match === null) {
-    throw new Error(`${tag} is not a release tag ([<dir>/]vX.Y.Z)`);
+    throw new Error(`${tag} is not a release tag ([<dir>/]vX.Y.Z[-rc.N])`);
   }
   const dir = (match[1] ?? "").replace(/\/$/, "");
   const module = `github.com/${repository}${dir === "" ? "" : `/${dir}`}`;
