@@ -94,7 +94,7 @@ var sentinelMatrix = map[string]sentinelCase{
 	"ErrAlreadyExists":     {ErrAlreadyExists, []string{famConflict}, "", http.StatusConflict},
 	"ErrInvalidAmount":     {ErrInvalidAmount, []string{famRequest}, "", http.StatusInternalServerError},
 	"ErrDelegationTooWide": {ErrDelegationTooWide, nil, "", http.StatusInternalServerError},
-	"ErrUnitCodeMismatch":  {ErrUnitCodeMismatch, nil, "", http.StatusInternalServerError},
+	"ErrUnitCodeMismatch":  {ErrUnitCodeMismatch, []string{famConflict}, "", http.StatusConflict},
 	"ErrUnknownTenant":     {ErrUnknownTenant, nil, "", http.StatusInternalServerError},
 	"ErrTenantDeleted":     {ErrTenantDeleted, nil, "", http.StatusInternalServerError},
 	"ErrScopeMismatch":     {ErrScopeMismatch, nil, "", http.StatusInternalServerError},
