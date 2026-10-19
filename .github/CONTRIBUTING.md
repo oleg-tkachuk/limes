@@ -15,8 +15,8 @@ task verify-all
 
 runs gofmt, `go mod tidy` and `go mod verify`, golangci-lint, `go vet` of a
 32-bit build, the unit suite, govulncheck, actionlint,
-the type check and tests of the TypeScript the workflows run (`.github/ci`), the tests of the
-workflow scripts, the release-rule, release-notes, major-guard and
+the type check and tests of the TypeScript the workflows run (`.github/ci`), the release-rule,
+release-notes, major-guard and
 module-commits tests, the gates of `redisreplay` (its tests on miniredis
 included) and `otelmetric`, the static checks of `pgstore` and the examples that need no
 database, run end to end — the same task CI runs. It
@@ -66,7 +66,7 @@ Both are jobs CI requires before a release.
 - A pull request runs the workflows it brings, so its required check proves
   only what its own `.github/` says. A pull request from a fork is never
   merged automatically, and neither is one that changes what CI runs —
-  `.github/` (workflows, scripts, release tooling), `Taskfile.yaml`,
+  `.github/` (workflows, the CI scripts, release tooling), `Taskfile.yaml`,
   `.golangci.yml`, `tools/`, `go.work`, `renovate.json` or the root `go.mod`,
   whose `go` and `toolchain` lines pick the Go every job sets up: its green
   check is no evidence on its own, so
