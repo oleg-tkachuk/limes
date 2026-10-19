@@ -845,8 +845,9 @@ its run to every tenant; but the owner may turn them off, and a superuser or a
 role with `BYPASSRLS` is never bound, so `CheckSchema` refuses a pool of any of
 the three — or of a role owning anything in the schema, or able to act as one
 of these — with `ErrRuntimeRole`. `MigrateOptions.RuntimeRoles` grants the
-serving roles the schema, its tables and the tables of later versions, and
-only reads of the version table. Run it before any migration of yours that
+serving roles the schema, its tables and the tables of later versions, the
+schema's functions — which no other role may call — and only reads of the
+version table. Run it before any migration of yours that
 refers to its tables. It holds the advisory lock every `tern` migration
 takes, which is reentrant per session: a consumer migrating with `tern` calls
 `Migrate` on the connection its own run holds. `CheckSchema` tells a readiness
