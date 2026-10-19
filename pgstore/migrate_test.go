@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/tern/v2/migrate"
 )
 
 // The database and role the migration checks start from nothing in.
@@ -191,4 +192,50 @@ func TestMigrateRefusesASchemaAnotherRoleOwns(t *testing.T) {
 	if err := Migrate(ctx, conn, MigrateOptions{}); !errors.Is(err, ErrSchemaOwner) {
 		t.Fatalf("Migrate into a schema %s owns: err = %v, want ErrSchemaOwner", intruderRole, err)
 	}
+}
+
+// The scope a probe migration reads, and the table it writes it to.
+const (
+	probeVersionTable = "public.scope_probe_version"
+	createProbe       = `CREATE TABLE public.scope_probe (scope text)`
+	recordProbe       = `INSERT INTO public.scope_probe VALUES (current_setting('limes.all_tenants', true))`
+	readProbe         = `SELECT scope FROM public.scope_probe`
+)
+
+// Every migration of a run reads and writes every tenant's rows, not only
+// the first: tern resets the session's settings after each one.
+func TestEveryMigrationRunsScopedToEveryTenant(t *testing.T) {
+	conn := freshConn(t)
+	ctx := t.Context()
+	m, err := migrate.NewMigrator(ctx, conn, probeVersionTable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.AppendMigration("create the probe", createProbe, "")
+	m.AppendMigration("record the scope", recordProbe, "")
+	m.AppendMigration("record it again", recordProbe, "")
+	if err := runMigrations(ctx, conn, m); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := conn.Query(ctx, readProbe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopes, err := pgx.CollectRows(rows, pgx.RowTo[*string])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, scope := range scopes {
+		if got := ptrText(scope); got != SettingAllTenantsOn {
+			t.Errorf("migration %d ran scoped to %q, want %q", i+2, got, SettingAllTenantsOn)
+		}
+	}
+}
+
+// ptrText is *p, or "<unset>" for nil.
+func ptrText(p *string) string {
+	if p == nil {
+		return "<unset>"
+	}
+	return *p
 }

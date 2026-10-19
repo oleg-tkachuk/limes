@@ -91,7 +91,7 @@ func Migrate(ctx context.Context, conn *pgx.Conn, opts MigrateOptions) error {
 	if err := m.LoadMigrations(dir); err != nil {
 		return fmt.Errorf("pgstore: migrate: load: %w", err)
 	}
-	if err := migrateAllTenants(ctx, conn, m.Migrate); err != nil {
+	if err := runMigrations(ctx, conn, m); err != nil {
 		return err
 	}
 	return grant(ctx, conn, opts.RuntimeRoles)
@@ -103,6 +103,23 @@ const (
 	sqlSetSession = `SELECT set_config($1, $2, false)`
 	sqlSettingNow = `SELECT coalesce(current_setting($1, true), '')`
 )
+
+// runMigrations runs m's migrations on conn scoped to every tenant, each of
+// them: tern resets the session's settings after every migration, so the
+// scope is set again as each one starts. A scope that cannot be set fails
+// the run.
+func runMigrations(ctx context.Context, conn *pgx.Conn, m *migrate.Migrator) error {
+	var scopeErr error
+	m.OnStart = func(int32, string, string, string) {
+		if _, err := conn.Exec(ctx, sqlSetSession, SettingAllTenants, SettingAllTenantsOn); err != nil && scopeErr == nil {
+			scopeErr = fmt.Errorf("pgstore: migrate: scope a migration to every tenant: %w", err)
+		}
+	}
+	if err := migrateAllTenants(ctx, conn, m.Migrate); err != nil {
+		return err
+	}
+	return scopeErr
+}
 
 // restoreScopeTimeout bounds putting the session's scope back after a run,
 // which goes ahead when the caller's context is done: the connection is the
