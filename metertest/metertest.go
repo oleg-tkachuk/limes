@@ -1899,7 +1899,8 @@ const lineageCopyQuota = 2
 // two counts two across all it delegated, each child under a quota of its own
 // of two, so a second child's first copy is refused; so is the root's own;
 // and dropping one child's usage leaves its copies counted under the root,
-// as its requests are.
+// as its requests are; dropping the root's own restarts its count, as it
+// restarts its other counters.
 func checkCopyQuotaLineage(t *testing.T, f fixture) {
 	if f.MaxCopiesPerCapability != 0 && f.MaxCopiesPerCapability <= lineageCopyQuota {
 		t.Skipf("Env.MaxCopiesPerCapability %d leaves no room under it", f.MaxCopiesPerCapability)
@@ -1939,6 +1940,12 @@ func checkCopyQuotaLineage(t *testing.T, f fixture) {
 	}
 	if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: copies(b, "b1")}); !errors.Is(err, meter.ErrCopyLimitExceeded) {
 		t.Errorf("Bump of a copy of the second child once the first's usage was dropped: err = %v, want ErrCopyLimitExceeded", err)
+	}
+	if err := f.Usage.DeleteUsage(f.Ctx, meter.DeleteUsageRequest{CapabilityID: root}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: copies(b, "b1")}); err != nil {
+		t.Errorf("Bump of a copy of the second child once the root's own usage was dropped: %v", err)
 	}
 }
 
