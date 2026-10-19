@@ -127,6 +127,25 @@ try {
     console.log(`FAIL the ${NESTED} notes hold another module's change, or lack their own:\n${notes}`);
     failed = 1;
   }
+
+  // The release each commit cuts, by the module's own rules: a breaking
+  // change is a minor before 1.0, a dependency bump a patch of the nested
+  // module, and a change scoped to another module none of the root.
+  const types = [
+    [root, "feat: add", "minor"],
+    [root, "fix: mend", "patch"],
+    [root, "security: seal", "patch"],
+    [root, "docs: say", null],
+    [root, `feat(${NESTED}): add`, null],
+    [nested, `build(${NESTED}): require limes v0.2.0`, "patch"],
+  ];
+  for (const [cfg, message, want] of types) {
+    const got = await plugin.releaseType(cfg.analyzer, "0".repeat(40), message);
+    if (got !== want) {
+      console.log(`FAIL releaseType ${JSON.stringify(message)}: got ${got}, want ${want}`);
+      failed = 1;
+    }
+  }
 } finally {
   rmSync(repo, { recursive: true, force: true });
 }

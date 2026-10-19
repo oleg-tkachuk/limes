@@ -64,13 +64,19 @@ module.exports = { analyzeCommits, generateNotes, changedPaths, touches };
 // commit: a scope its rules release nothing of outranks a breaking marker,
 // so such a marker says nothing of this module.
 async function releases(analyzer, hash, message) {
+  return (await releaseType(analyzer, hash, message)) != null;
+}
+
+// releaseType is the release the module's own analyzer cuts for the commit —
+// major, minor or patch — or null for none.
+async function releaseType(analyzer, hash, message) {
   const { analyzeCommits: analyze } = await import("@semantic-release/commit-analyzer");
   const logger = { log() {}, error() {}, warn() {}, success() {} };
-  const got = await analyze(analyzer, { commits: [{ hash, message }], logger, cwd: process.cwd(), options: {} });
-  return got != null;
+  return (await analyze(analyzer, { commits: [{ hash, message }], logger, cwd: process.cwd(), options: {} })) ?? null;
 }
 
 module.exports.releases = releases;
+module.exports.releaseType = releaseType;
 
 // RELEASED_FLAG narrows the command's output to the commits the module's
 // analyzer releases.
