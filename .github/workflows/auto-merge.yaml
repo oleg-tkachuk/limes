@@ -5,7 +5,9 @@ name: Auto-merge
 # run tested. main does not require a pull request to be up to date with it,
 # so a green one merges at once and no merge makes another wait for a rebase
 # and a second run; a change that only breaks beside another is caught by the
-# CI run of main itself after the merge.
+# CI run of main itself after the merge. While that run is red, an issue says
+# so and nothing is merged; once main is green again, what waited is merged
+# (the main job below).
 #
 # The merge acts through AUTOMERGE_TOKEN — a fine-grained token or GitHub App
 # token with Contents and Pull requests write on this repository — and never
@@ -86,3 +88,41 @@ jobs:
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           PULL_REQUESTS: ${{ toJSON(github.event.workflow_run.pull_requests) }}
         run: node .github/ci/merge-green.ts
+
+  # When ci.yaml completes on a push to main: an issue stands open while main
+  # is red, and merge-green holds every merge until it is green; once it is,
+  # the issue closes and each pull request that waited is merged. See
+  # .github/ci/main-health.ts.
+  main:
+    name: Watch main's CI
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    # AUTOMERGE_TOKEN lives in this environment, which only main may deploy to.
+    environment: automerge
+    permissions:
+      contents: read # the checkout below; the merges act through AUTOMERGE_TOKEN
+      issues: write # the issue that says main is red
+    steps:
+      - name: Check out the scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/ci
+            .github/actions
+
+      - name: Set up the CI scripts
+        uses: ./.github/actions/setup-ci
+
+      - name: Report main's health and merge what waited for it
+        env:
+          ISSUES_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: node .github/ci/main-health.ts

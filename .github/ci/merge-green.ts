@@ -17,10 +17,16 @@
 // whose green check is no evidence. Its files are those of HEAD_SHA, read
 // through the compare API as GitHub lists them, not from a diff's headers.
 //
+// While main's own newest CI run failed, nothing is merged: two pull requests
+// each green alone can break main together, and merging more onto a broken
+// main hides which change broke it. Each pull request held so is merged once
+// main is green again (main-health.ts). What each run decided goes on its
+// summary page.
+//
 // Without GH_TOKEN it warns and does nothing: a merge made with the
 // workflow's own GITHUB_TOKEN would start no CI on main (auto-merge.yaml).
 
-import { notice, warning } from "./lib/actions.ts";
+import { notice, summarize, table, warning } from "./lib/actions.ts";
 import { optionalEnv, requireEnv } from "./lib/env.ts";
 import { gitHubFor, type GitHub, type PullRequest } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
@@ -28,6 +34,35 @@ import { BASE_BRANCH, canPush, changesCi, filesListedInFull, isRenovate } from "
 
 // COMMIT_ID is a full commit id, the only HEAD_SHA a run passes.
 const COMMIT_ID = /^[0-9a-f]{40}$/;
+// CI_WORKFLOW is the workflow whose runs on main say whether main is green.
+export const CI_WORKFLOW = ".github/workflows/ci.yaml";
+// RED are the conclusions of a run that leave main broken.
+const RED: readonly string[] = ["failure", "timed_out", "startup_failure"];
+
+// Decision is what was done with one pull request, and why.
+export interface Decision {
+  number: number;
+  merged: boolean;
+  note: string;
+}
+
+// SUMMARY_HEADER heads the summary table.
+const SUMMARY_HEADER = ["Pull request", "Merged", "Why"];
+
+// summarizeDecisions puts decisions on the run's summary page.
+export function summarizeDecisions(title: string, decisions: readonly Decision[]): void {
+  summarize(`### ${title}\n\n${table(SUMMARY_HEADER, decisions.map((d) => [`#${d.number}`, d.merged ? "yes" : "no", d.note]))}`);
+}
+
+// mainIsRed is why merges wait for main, or undefined while main's newest
+// finished CI run passed.
+export async function mainIsRed(github: GitHub): Promise<string | undefined> {
+  const run = await github.latestRunOf(CI_WORKFLOW, BASE_BRANCH);
+  if (run === undefined || !RED.includes(run.conclusion)) {
+    return undefined;
+  }
+  return `${BASE_BRANCH} is red at ${run.headSha.slice(0, 7)} (${run.url}); merging waits until it is green`;
+}
 
 // heldBack is why a pull request is not this run's to merge, or undefined
 // when it may be merged once its files are read.
@@ -49,16 +84,18 @@ export function heldBack(pr: PullRequest, headSha: string): string | undefined {
 
 // mergeIfGreen merges pull request number at headSha if nothing leaves it
 // for a person, and says why not otherwise.
-export async function mergeIfGreen(github: GitHub, number: number, headSha: string): Promise<void> {
+export async function mergeIfGreen(github: GitHub, number: number, headSha: string): Promise<Decision> {
+  const decided = (merged: boolean, note: string): Decision => {
+    notice(note);
+    return { number, merged, note };
+  };
   const pr = await github.pullRequest(number);
   const held = heldBack(pr, headSha);
   if (held !== undefined) {
-    notice(held);
-    return;
+    return decided(false, held);
   }
   if (!(await canPush(github, pr.author.login))) {
-    notice(`#${number} is by ${pr.author.login}, who cannot push here; left for a person to merge`);
-    return;
+    return decided(false, `#${number} is by ${pr.author.login}, who cannot push here; left for a person to merge`);
   }
   // The files of headSha itself, the commit the run tested and the merge
   // names: the pull request's own listing is of its head now, which may have
@@ -67,21 +104,21 @@ export async function mergeIfGreen(github: GitHub, number: number, headSha: stri
   // Every file the pull request changes must have been listed: one the API
   // left out could be a CI definition.
   if (!filesListedInFull(files.length, pr.changedFiles)) {
-    notice(`#${number} changes ${pr.changedFiles ?? "an unknown number of"} files and ${files.length} were listed; left for a person to merge`);
-    return;
+    return decided(false, `#${number} changes ${pr.changedFiles ?? "an unknown number of"} files and ${files.length} were listed; left for a person to merge`);
   }
   const ci = changesCi(files);
   if (ci !== undefined) {
-    notice(`#${number} changes ${ci}, which decides what CI runs; left for a person to merge`);
-    return;
+    return decided(false, `#${number} changes ${ci}, which decides what CI runs; left for a person to merge`);
   }
   // Refused if the head moved since it was read: the run tested headSha,
   // whose files are the ones read above.
   try {
     await github.merge(number, headSha);
-    notice(`#${number} merged at ${headSha}`);
+    return decided(true, `#${number} merged at ${headSha}`);
   } catch (err) {
-    warning(`#${number} could not be merged at ${headSha}; left as it is: ${err instanceof Error ? err.message : String(err)}`);
+    const note = `#${number} could not be merged at ${headSha}; left as it is: ${err instanceof Error ? err.message : String(err)}`;
+    warning(note);
+    return { number, merged: false, note };
   }
 }
 
@@ -101,14 +138,44 @@ export function pullRequestNumbers(json: string): number[] {
   });
 }
 
-// mergeGreen decides every pull request of the run, in turn.
-export async function mergeGreen(github: GitHub, headSha: string, pullRequests: string): Promise<void> {
+// mergeGreen decides every pull request of the run, in turn, unless main is
+// red.
+export async function mergeGreen(github: GitHub, headSha: string, pullRequests: string): Promise<Decision[]> {
   if (!COMMIT_ID.test(headSha)) {
     throw new Error(`HEAD_SHA ${headSha} is not a commit id`);
   }
-  for (const number of pullRequestNumbers(pullRequests)) {
-    await mergeIfGreen(github, number, headSha);
+  const numbers = pullRequestNumbers(pullRequests);
+  const red = await mainIsRed(github);
+  const decisions: Decision[] = [];
+  for (const number of numbers) {
+    if (red !== undefined) {
+      notice(`#${number}: ${red}`);
+      decisions.push({ number, merged: false, note: red });
+    } else {
+      decisions.push(await mergeIfGreen(github, number, headSha));
+    }
   }
+  summarizeDecisions("Merge", decisions);
+  return decisions;
+}
+
+// SUCCESS is the conclusion of a passed check run.
+const SUCCESS = "success";
+
+// mergeWaiting merges every open pull request whose required check passed at
+// its head: those a red main held back, once it is green again.
+export async function mergeWaiting(github: GitHub, requiredCheck: string): Promise<Decision[]> {
+  const decisions: Decision[] = [];
+  if ((await mainIsRed(github)) !== undefined) {
+    return decisions;
+  }
+  for (const pr of await github.openPullRequestsInto(BASE_BRANCH)) {
+    if ((await github.checkConclusion(pr.headSha, requiredCheck)) === SUCCESS) {
+      decisions.push(await mergeIfGreen(github, pr.number, pr.headSha));
+    }
+  }
+  summarizeDecisions("Merge what waited for main", decisions);
+  return decisions;
 }
 
 async function main(): Promise<void> {

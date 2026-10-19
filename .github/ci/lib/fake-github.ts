@@ -1,7 +1,7 @@
 // A GitHub that answers from fixed data and records what it was asked, for
 // tests.
 
-import type { ChangedFile, GitHub, Job, NewRelease, PullRequest, PullRequestText, WorkflowRun } from "./github.ts";
+import type { ChangedFile, GitHub, Job, NewRelease, OpenPullRequest, PullRequest, PullRequestText, RunState, WorkflowRun } from "./github.ts";
 
 // FakeGitHub is the data a FakeGitHub answers with, and its log.
 export interface FakeData {
@@ -27,6 +27,14 @@ export interface FakeData {
   createdPulls: { head: string; base: string; text: PullRequestText }[];
   editedPulls: { number: number; text: PullRequestText }[];
   dispatched: { eventType: string; payload: Record<string, string> }[];
+  // mainRun is the newest finished run on main; open, the open pull
+  // requests; checks, the required check's conclusion by head sha.
+  mainRun: RunState | undefined;
+  open: OpenPullRequest[];
+  checks: Record<string, string>;
+  // issues are the open issues by number, with their comments.
+  issues: Map<number, { title: string; body: string; comments: string[] }>;
+  closed: number[];
   calls: string[];
 }
 
@@ -46,6 +54,11 @@ export function fakeData(): FakeData {
     createdPulls: [],
     editedPulls: [],
     dispatched: [],
+    mainRun: undefined,
+    open: [],
+    checks: {},
+    issues: new Map(),
+    closed: [],
     calls: [],
   };
 }
@@ -118,6 +131,30 @@ export function fakeGitHub(data: FakeData): GitHub {
     },
     async dispatch(eventType, payload) {
       data.dispatched.push({ eventType, payload });
+    },
+    async latestRunOf() {
+      return data.mainRun;
+    },
+    async openPullRequestsInto() {
+      return data.open;
+    },
+    async checkConclusion(sha) {
+      return data.checks[sha];
+    },
+    async openIssueTitled(title) {
+      return [...data.issues.entries()].find(([, i]) => i.title === title)?.[0];
+    },
+    async createIssue(title, body) {
+      const number = 1000 + data.issues.size + data.closed.length;
+      data.issues.set(number, { title, body, comments: [] });
+      return number;
+    },
+    async commentOnIssue(number, body) {
+      data.issues.get(number)?.comments.push(body);
+    },
+    async closeIssue(number) {
+      data.issues.delete(number);
+      data.closed.push(number);
     },
   };
 }
