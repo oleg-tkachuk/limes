@@ -152,3 +152,15 @@ func TestNonceKeysLeaveTheKeysOutEverywhere(t *testing.T) {
 		t.Errorf("Len = %d and %d, want 1 and 0", cfg.Keys.Len(), (NonceKeys{}).Len())
 	}
 }
+
+// The zero HMACNonces, which NewHMACNonces did not make, issues no nonce and
+// accepts none, rather than panic.
+func TestZeroHMACNoncesIsInert(t *testing.T) {
+	var zero HMACNonces
+	if nonce, err := zero.Nonce(t.Context()); err == nil || nonce != "" {
+		t.Errorf("Nonce of the zero HMACNonces = %q, %v; want an error", nonce, err)
+	}
+	if ok, err := zero.Valid(t.Context(), "anything"); ok || err != nil {
+		t.Errorf("Valid of the zero HMACNonces = %v, %v; want false", ok, err)
+	}
+}
