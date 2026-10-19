@@ -971,6 +971,9 @@ once none of the tenant's records is left.
 Called apart, `EraseTenantUsage` goes first and `EraseTenantRecords` second:
 the mark the first sets makes `Insert` refuse the tenant, so every record
 the second finds is every record there will be, and it revokes them all.
+`PurgeOrphans` forgets the mark once none of the tenant's records is left;
+run between the two calls, it lets a new root record in, which the
+records' erase then revokes with the rest.
 The other way round, a record inserted between the two calls is on record
 after the records' erase, unrevoked, and its token goes on verifying. In
 `pgstore`, `Store.EraseTenant` does both in one transaction and runs a
