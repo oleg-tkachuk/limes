@@ -8,9 +8,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 )
+
+// rawKey is the Ed25519 private key k seals, for a test that looks for its
+// bytes.
+func rawKey(k SealedKey) ed25519.PrivateKey {
+	p, _ := k.signer().(ed25519.PrivateKey)
+	return p
+}
 
 // verbsThatShowBytes are the verbs under which fmt would print a private
 // key's bytes, in one notation or another, from a value that holds it.
@@ -42,7 +50,7 @@ func TestFormattingRedactsPrivateKeys(t *testing.T) {
 	} {
 		for _, verb := range verbsThatShowBytes {
 			got := fmt.Sprintf(verb, v)
-			if strings.Contains(got, keySpelling(verb, key.Private)) {
+			if strings.Contains(got, keySpelling(verb, rawKey(key.Private))) {
 				t.Errorf("%s under %s = %q: carries the private key", name, verb, got)
 			}
 		}
@@ -83,7 +91,7 @@ func TestCarriersOfASignerLeaveItsKeyOut(t *testing.T) {
 			// fmt prints a field it reaches this way under %v, whatever
 			// the verb, so the key is looked for in every spelling.
 			for _, spelling := range verbsThatShowBytes {
-				if strings.Contains(got, keySpelling(spelling, key.Private)) {
+				if strings.Contains(got, keySpelling(spelling, rawKey(key.Private))) {
 					t.Errorf("%s under %s = %q: carries the private key", name, verb, got)
 				}
 			}
@@ -100,12 +108,12 @@ func TestKeySpellingFindsAnUnredactedKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, v := range map[string]any{
-		"a key field":      struct{ Key ed25519.PrivateKey }{key.Private},
-		"a crypto.Signer":  struct{ Key crypto.Signer }{key.Private},
-		"behind a pointer": &struct{ Key ed25519.PrivateKey }{key.Private},
+		"a key field":      struct{ Key ed25519.PrivateKey }{rawKey(key.Private)},
+		"a crypto.Signer":  struct{ Key crypto.Signer }{rawKey(key.Private)},
+		"behind a pointer": &struct{ Key ed25519.PrivateKey }{rawKey(key.Private)},
 	} {
 		for _, verb := range verbsThatShowBytes {
-			if got := fmt.Sprintf(verb, v); !strings.Contains(got, keySpelling(verb, key.Private)) {
+			if got := fmt.Sprintf(verb, v); !strings.Contains(got, keySpelling(verb, rawKey(key.Private))) {
 				t.Errorf("%s under %s = %q: the key's spelling is not found", name, verb, got)
 			}
 		}
@@ -131,7 +139,7 @@ func TestEncodingRedactsPrivateKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	spellings := []string{base64.StdEncoding.EncodeToString(key.Private), fmt.Sprintf("%x", []byte(key.Private))}
+	spellings := []string{base64.StdEncoding.EncodeToString(rawKey(key.Private)), fmt.Sprintf("%x", []byte(rawKey(key.Private)))}
 	for name, v := range map[string]any{
 		"SigningKey":    key,
 		"*SigningKey":   &key,
@@ -155,5 +163,76 @@ func TestEncodingRedactsPrivateKeys(t *testing.T) {
 				t.Errorf("%s under %s = %s: want its kid and %s", name, how, got, redactedKeyText)
 			}
 		}
+	}
+}
+
+// A value that holds a key in a field of its own type — SigningKey,
+// SignerConfig — formats without it however it is reached: under %p, which
+// fmt prints field by field, and from an unexported field of a struct, where
+// fmt cannot call its Format, in fmt and in slog's text handler alike.
+func TestKeyHoldersLeaveTheKeyOutEverywhere(t *testing.T) {
+	key, err := GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := rawKey(key.Private)
+	cfg := SignerConfig{KeyID: key.KeyID, Key: key.Private}
+	verbs := append(slices.Clone(verbsThatShowBytes), "%p")
+	for name, v := range map[string]any{
+		"SigningKey":                 key,
+		"SignerConfig":               cfg,
+		"SealedKey":                  key.Private,
+		"a struct with a SigningKey": struct{ key SigningKey }{key},
+		"a struct with a config":     struct{ cfg SignerConfig }{cfg},
+		"a struct with a SealedKey":  struct{ k SealedKey }{key.Private},
+	} {
+		for _, verb := range verbs {
+			got := fmt.Sprintf(verb, v)
+			for _, spelling := range verbsThatShowBytes {
+				if strings.Contains(got, keySpelling(spelling, raw)) {
+					t.Errorf("%s under %s = %q: carries the private key", name, verb, got)
+				}
+			}
+		}
+		var text bytes.Buffer
+		slog.New(slog.NewTextHandler(&text, nil)).Info("key", "value", v)
+		for _, spelling := range verbsThatShowBytes {
+			if strings.Contains(text.String(), keySpelling(spelling, raw)) {
+				t.Errorf("%s through slog's text handler = %s: carries the private key", name, text.String())
+			}
+		}
+	}
+}
+
+// A SealedKey signs and names its public key as the key it seals does; one
+// holding no key, or an Ed25519 key of the wrong length, has neither, and
+// NewSigner refuses it.
+func TestSealedKey(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := SealKey(priv)
+	if got, ok := k.Public().(ed25519.PublicKey); !ok || !got.Equal(pub) {
+		t.Errorf("Public = %v, want the sealed key's", k.Public())
+	}
+	msg := []byte("message")
+	sig, err := k.Sign(nil, msg, crypto.Hash(0))
+	if err != nil || !ed25519.Verify(pub, msg, sig) {
+		t.Errorf("Sign = %v; the signature does not verify", err)
+	}
+	for name, bad := range map[string]SealedKey{"the zero SealedKey": {}, "a nil key": SealKey(nil), "a short key": SealKey(priv[:ed25519.SeedSize])} {
+		if bad.Public() != nil {
+			t.Errorf("%s: Public = %v, want nil", name, bad.Public())
+		}
+		if _, err := bad.Sign(nil, msg, crypto.Hash(0)); err == nil {
+			t.Errorf("%s: Sign succeeded", name)
+		}
+		if _, err := NewSigner(SignerConfig{KeyID: "k1", Key: bad}); err == nil {
+			t.Errorf("%s: NewSigner accepted it", name)
+		}
+	}
+	if !(SealedKey{}).IsZero() || k.IsZero() {
+		t.Error("IsZero does not tell a SealedKey with no key from one with a key")
 	}
 }

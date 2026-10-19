@@ -40,7 +40,7 @@ func TestHMACNoncesContract(t *testing.T) {
 	dpoptest.RunNonces(t, func(t *testing.T) dpoptest.NoncesEnv {
 		t.Helper()
 		clock := &contractClock{now: contractEpoch}
-		nonces, err := dpop.NewHMACNonces(dpop.HMACNoncesConfig{Keys: [][]byte{bytes.Repeat([]byte{1}, dpop.HMACNonceKeyBytes)}, Now: clock.Now})
+		nonces, err := dpop.NewHMACNonces(dpop.HMACNoncesConfig{Keys: dpop.SealNonceKeys(bytes.Repeat([]byte{1}, dpop.HMACNonceKeyBytes)), Now: clock.Now})
 		if err != nil {
 			t.Fatal(err)
 		}

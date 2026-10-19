@@ -3,7 +3,9 @@ package dpop
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"slices"
 	"time"
 )
 
@@ -44,6 +46,34 @@ func (k *sealedKeys) get() [][]byte {
 	return k.open()
 }
 
+// NonceKeys are HMAC nonce keys where no formatting reaches them: under any
+// verb, %p included, in JSON and in slog, and wherever they sit, they read
+// as how many there are. SealNonceKeys makes them; the zero NonceKeys holds
+// none.
+type NonceKeys struct{ k *sealedKeys }
+
+// SealNonceKeys seals copies of keys, in order: the first signs new nonces.
+func SealNonceKeys(keys ...[]byte) NonceKeys {
+	held := make([][]byte, len(keys))
+	for i, k := range keys {
+		held[i] = slices.Clone(k)
+	}
+	return NonceKeys{sealKeys(held)}
+}
+
+// Len is how many keys k holds.
+func (k NonceKeys) Len() int { return len(k.k.get()) }
+
+func (k NonceKeys) String() string   { return redactedKeys(k.Len()).String() }
+func (k NonceKeys) GoString() string { return k.String() }
+
+// Format prints the keys as their count under every verb.
+func (k NonceKeys) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, k.String()) }
+
+// MarshalText makes encoding/json and slog's handlers write the keys as
+// String does.
+func (k NonceKeys) MarshalText() ([]byte, error) { return []byte(k.String()), nil }
+
 // hmacNoncesView is an HMACNoncesConfig or HMACNonces as it is formatted.
 type hmacNoncesView struct {
 	Keys     redactedKeys
@@ -62,7 +92,7 @@ func (cfg HMACNoncesConfig) MarshalJSON() ([]byte, error) { return json.Marshal(
 func (cfg HMACNoncesConfig) LogValue() slog.Value { return slog.AnyValue(cfg.view()) }
 
 func (cfg HMACNoncesConfig) view() hmacNoncesView {
-	return hmacNoncesView{Keys: redactedKeys(len(cfg.Keys)), Lifetime: cfg.Lifetime}
+	return hmacNoncesView{Keys: redactedKeys(cfg.Keys.Len()), Lifetime: cfg.Lifetime}
 }
 
 // Format prints n with its keys redacted. On the value, as Signer's: a

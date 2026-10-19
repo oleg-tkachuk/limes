@@ -8,7 +8,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/oleg-tkachuk/limes/internal/jose"
@@ -83,8 +82,8 @@ type HMACNonces struct {
 // HMACNoncesConfig configures HMACNonces.
 type HMACNoncesConfig struct {
 	// Keys check nonces; the first also signs new ones. Each is at least
-	// HMACNonceKeyBytes long. Required.
-	Keys [][]byte
+	// HMACNonceKeyBytes long. Required; SealNonceKeys makes them.
+	Keys NonceKeys
 	// Lifetime is how long a nonce is accepted. Zero: DefaultNonceLifetime.
 	Lifetime time.Duration
 	// Now is the clock. Nil: time.Now.
@@ -94,10 +93,11 @@ type HMACNoncesConfig struct {
 // NewHMACNonces builds HMACNonces, refusing no key, a short one, or a
 // negative lifetime.
 func NewHMACNonces(cfg HMACNoncesConfig) (*HMACNonces, error) {
-	if len(cfg.Keys) == 0 {
+	given := cfg.Keys.k.get()
+	if len(given) == 0 {
 		return nil, errors.New("dpop: HMACNonces needs a key")
 	}
-	for i, k := range cfg.Keys {
+	for i, k := range given {
 		if len(k) < HMACNonceKeyBytes {
 			return nil, fmt.Errorf("dpop: HMACNonces key %d is %d bytes, at least %d", i, len(k), HMACNonceKeyBytes)
 		}
@@ -111,11 +111,7 @@ func NewHMACNonces(cfg HMACNoncesConfig) (*HMACNonces, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	keys := make([][]byte, len(cfg.Keys))
-	for i, k := range cfg.Keys {
-		keys[i] = slices.Clone(k)
-	}
-	return &HMACNonces{keys: sealKeys(keys), lifetime: cfg.Lifetime, now: cfg.Now}, nil
+	return &HMACNonces{keys: cfg.Keys.k, lifetime: cfg.Lifetime, now: cfg.Now}, nil
 }
 
 // Nonce implements Nonces.

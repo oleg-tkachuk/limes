@@ -81,7 +81,7 @@ func TestLoadKey(t *testing.T) {
 	path := writePEM(t, "PRIVATE KEY", der)
 
 	k, err := LoadKey(path)
-	if err != nil || !k.Private.Equal(priv) || !k.Public().Equal(priv.Public()) ||
+	if err != nil || !rawKey(k.Private).Equal(priv) || !k.Public().Equal(priv.Public()) ||
 		k.KeyID != jwks.KeyID(k.Public()) {
 		t.Fatalf("from a file = %+v, %v; want the file's key under its derived kid", k, err)
 	}
@@ -138,18 +138,18 @@ func TestStaticKeyResolverRotation(t *testing.T) {
 
 func TestNewSigner(t *testing.T) {
 	key, err := GenerateKey()
-	priv := key.Private
+	priv := rawKey(key.Private)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := NewSigner(SignerConfig{KeyID: "k1", Key: priv})
+	s, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(priv)})
 	if err != nil || s.keyID != "k1" {
 		t.Fatalf("NewSigner = %v, kid %q", err, s.keyID)
 	}
-	if _, err := NewSigner(SignerConfig{KeyID: "", Key: priv}); err == nil {
+	if _, err := NewSigner(SignerConfig{KeyID: "", Key: SealKey(priv)}); err == nil {
 		t.Error("an empty key id was accepted")
 	}
-	if _, err := NewSigner(SignerConfig{KeyID: "k1", Key: priv[:10]}); err == nil {
+	if _, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(priv[:10])}); err == nil {
 		t.Error("a short key was accepted")
 	}
 }
@@ -161,12 +161,12 @@ func TestSigningKeyPublic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := (SigningKey{Private: priv}).Public(); !got.Equal(pub) {
+	if got := (SigningKey{Private: SealKey(priv)}).Public(); !got.Equal(pub) {
 		t.Errorf("Public = %x, want the private key's %x", got, pub)
 	}
 	for name, k := range map[string]SigningKey{
 		"no private key": {},
-		"a short one":    {Private: priv[:ed25519.SeedSize]},
+		"a short one":    {Private: SealKey(priv[:ed25519.SeedSize])},
 	} {
 		if got := k.Public(); got != nil {
 			t.Errorf("%s: Public = %x, want nil", name, got)

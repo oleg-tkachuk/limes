@@ -77,7 +77,7 @@ func TestTokenIsReadUnderTheV6Schema(t *testing.T) {
 func TestSignerMintsTheTypeItIsConfiguredWith(t *testing.T) {
 	_, priv, _ := ed25519.GenerateKey(nil)
 	for _, configured := range []TokenType{"", TokenTypeV6} {
-		s, err := NewSigner(SignerConfig{KeyID: "k1", Key: priv, TokenType: configured})
+		s, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(priv), TokenType: configured})
 		if err != nil {
 			t.Fatalf("NewSigner(%q): %v", configured, err)
 		}
@@ -98,7 +98,7 @@ func TestSignerMintsTheTypeItIsConfiguredWith(t *testing.T) {
 		}
 	}
 	for _, typ := range []TokenType{retiredV4Type, retiredV5Type, "limes-cap-v7+jwt"} {
-		if _, err := NewSigner(SignerConfig{KeyID: "k1", Key: priv, TokenType: typ}); err == nil {
+		if _, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(priv), TokenType: typ}); err == nil {
 			t.Errorf("NewSigner built a signer for %q, which nothing reads", typ)
 		}
 	}

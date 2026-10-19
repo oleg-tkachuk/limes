@@ -18,7 +18,7 @@ func nonceKey(b byte) []byte { return bytes.Repeat([]byte{b}, dpop.HMACNonceKeyB
 // nonce lets the retry through.
 func TestVerifyRequiresTheServerNonce(t *testing.T) {
 	issuer, base, _, _ := buildIssuerVerifier(t)
-	nonces, err := dpop.NewHMACNonces(dpop.HMACNoncesConfig{Lifetime: time.Minute, Keys: [][]byte{nonceKey(1)}})
+	nonces, err := dpop.NewHMACNonces(dpop.HMACNoncesConfig{Lifetime: time.Minute, Keys: dpop.SealNonceKeys(nonceKey(1))})
 	if err != nil {
 		t.Fatal(err)
 	}

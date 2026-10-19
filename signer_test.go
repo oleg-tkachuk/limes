@@ -26,7 +26,7 @@ func TestSign_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
-	signer, err := NewSigner(SignerConfig{KeyID: "test-key-1", Key: priv})
+	signer, err := NewSigner(SignerConfig{KeyID: "test-key-1", Key: SealKey(priv)})
 	if err != nil {
 		t.Fatalf("new signer: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestSign_RejectsInvalid(t *testing.T) {
 	t.Parallel()
 
 	_, priv, _ := ed25519.GenerateKey(rand.Reader)
-	signer, _ := NewSigner(SignerConfig{KeyID: "k", Key: priv})
+	signer, _ := NewSigner(SignerConfig{KeyID: "k", Key: SealKey(priv)})
 
 	now := time.Now()
 	base := func() Capability {
@@ -136,7 +136,7 @@ func TestSign_TamperDetection(t *testing.T) {
 	t.Parallel()
 
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
-	signer, _ := NewSigner(SignerConfig{KeyID: "k", Key: priv})
+	signer, _ := NewSigner(SignerConfig{KeyID: "k", Key: SealKey(priv)})
 
 	now := time.Now()
 	cap := Capability{
@@ -355,7 +355,7 @@ func TestIssuerSignsUnderTheCallersContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := &ctxKey{PrivateKey: priv}
-	signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: key})
+	signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(key)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,7 +419,7 @@ func TestSignerSignsThroughAnOpaqueKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: opaqueKey{priv}})
+	signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(opaqueKey{priv})})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,9 +439,9 @@ func TestSignerSignsThroughAnOpaqueKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, cfg := range map[string]SignerConfig{
-		"no kid":      {Key: priv},
+		"no kid":      {Key: SealKey(priv)},
 		"no key":      {KeyID: "k1"},
-		"a P-256 key": {KeyID: "k1", Key: ec},
+		"a P-256 key": {KeyID: "k1", Key: SealKey(ec)},
 	} {
 		if _, err := NewSigner(cfg); err == nil {
 			t.Errorf("NewSigner with %s: accepted", name)
@@ -492,7 +492,7 @@ func TestSignerRefusesASignatureItsKeyDoesNotVerify(t *testing.T) {
 		"another key's signature": misreportingKey{reported: pub, signs: other},
 		"no signature at all":     garbageKey{reported: pub},
 	} {
-		signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: key})
+		signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(key)})
 		if err != nil {
 			t.Fatal(err)
 		}

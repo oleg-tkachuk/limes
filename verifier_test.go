@@ -80,7 +80,7 @@ func buildIssuerVerifier(t *testing.T) (*Issuer, *Verifier, *memStore, ed25519.P
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
-	signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: priv})
+	signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(priv)})
 	if err != nil {
 		t.Fatalf("signer: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestVerify_AudienceMismatch(t *testing.T) {
 func TestVerify_Expired(t *testing.T) {
 	t.Parallel()
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
-	signer, _ := NewSigner(SignerConfig{KeyID: "k1", Key: priv})
+	signer, _ := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(priv)})
 	store := newMemStore()
 	cache := store
 	keys := staticKeys(t, map[string]ed25519.PublicKey{"k1": pub})
@@ -226,7 +226,7 @@ func TestVerify_Revoked(t *testing.T) {
 func TestVerify_UntrustedIssuer(t *testing.T) {
 	t.Parallel()
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
-	signer, _ := NewSigner(SignerConfig{KeyID: "k1", Key: priv})
+	signer, _ := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(priv)})
 	store := newMemStore()
 
 	rogueIssuer, _ := NewIssuer(IssuerConfig{

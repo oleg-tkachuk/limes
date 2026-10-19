@@ -76,7 +76,7 @@ func TestIssueKeepsTheStoreErrorApartFromTheRequest(t *testing.T) {
 		"an outage":         {outage, outage},
 	} {
 		t.Run(name, func(t *testing.T) {
-			signer, err := NewSigner(SignerConfig{KeyID: goldenKID, Key: ed25519.NewKeyFromSeed(goldenSeed[:])})
+			signer, err := NewSigner(SignerConfig{KeyID: goldenKID, Key: SealKey(ed25519.NewKeyFromSeed(goldenSeed[:]))})
 			if err != nil {
 				t.Fatal(err)
 			}

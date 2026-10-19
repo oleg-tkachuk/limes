@@ -43,10 +43,11 @@ type SignerConfig struct {
 	// KeyID is the kid tokens carry, by which verifiers find the key.
 	// Required.
 	KeyID string
-	// Key signs. Its public key must be Ed25519: an ed25519.PrivateKey, or
-	// a crypto.Signer over a key held elsewhere — one that also implements
-	// ContextSigner is given the request's context. Required.
-	Key crypto.Signer
+	// Key signs, sealed (SealKey): an ed25519.PrivateKey, or a
+	// crypto.Signer over a key held elsewhere — one that also implements
+	// ContextSigner is given the request's context. Its public key must be
+	// Ed25519. Required.
+	Key SealedKey
 	// TokenType is the format the signer mints. Empty: TokenTypeV6, the
 	// one this package reads. A later format is minted here once every
 	// verifier of the tokens accepts it (VerifierConfig.AcceptTokenTypes).
@@ -68,22 +69,23 @@ func NewSigner(cfg SignerConfig) (*Signer, error) {
 	if cfg.KeyID == "" {
 		return nil, errors.New("limes: SignerConfig.KeyID required")
 	}
-	if cfg.Key == nil {
+	key := cfg.Key.signer()
+	if key == nil {
 		return nil, errors.New("limes: SignerConfig.Key required")
 	}
 	// An ed25519.PrivateKey of the wrong length panics in Public.
-	if k, ok := cfg.Key.(ed25519.PrivateKey); ok && len(k) != ed25519.PrivateKeySize {
+	if k, ok := key.(ed25519.PrivateKey); ok && len(k) != ed25519.PrivateKeySize {
 		return nil, fmt.Errorf("limes: SignerConfig.Key is %d bytes, not an Ed25519 private key's %d", len(k), ed25519.PrivateKeySize)
 	}
-	pub, ok := cfg.Key.Public().(ed25519.PublicKey)
+	pub, ok := key.Public().(ed25519.PublicKey)
 	if !ok || len(pub) != ed25519.PublicKeySize {
-		return nil, fmt.Errorf("limes: SignerConfig.Key must be Ed25519, not %T", cfg.Key.Public())
+		return nil, fmt.Errorf("limes: SignerConfig.Key must be Ed25519, not %T", key.Public())
 	}
 	typ := cmp.Or(cfg.TokenType, TokenTypeV6)
 	if !slices.Contains(tokenTypes, typ) {
 		return nil, fmt.Errorf("limes: SignerConfig.TokenType %q is not one of %q", typ, tokenTypes)
 	}
-	return &Signer{keyID: cfg.KeyID, key: sealSigner(cfg.Key), pub: [ed25519.PublicKeySize]byte(pub), typ: typ}, nil
+	return &Signer{keyID: cfg.KeyID, key: cfg.Key.s, pub: [ed25519.PublicKeySize]byte(pub), typ: typ}, nil
 }
 
 // jwtHeader is the protected header. We use compact serialization:
