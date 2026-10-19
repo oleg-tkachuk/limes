@@ -1,32 +1,24 @@
 name: Auto-merge
 
-# Two automations over every pull request into main:
+# When ci.yaml passes for a pull request into main, the pull request is merged
+# (a merge commit, as every merge into main has been) at the very commit that
+# run tested. main does not require a pull request to be up to date with it,
+# so a green one merges at once and no merge makes another wait for a rebase
+# and a second run; a change that only breaks beside another is caught by the
+# CI run of main itself after the merge.
 #
-#   - merge: when ci.yaml passes for a pull request, it is merged (a merge
-#     commit, as every merge into main has been) at the very commit that run
-#     tested;
-#   - merge queue: main requires a pull request to be up to date before it
-#     merges, so one that falls behind is rebased onto main and tested again
-#     against what it would actually merge into. Only the first in line is:
-#     rebasing every one after each merge reran CI on all of them for one to
-#     merge. On each push to main, and each completed CI run of a pull
-#     request (the first in line may have failed), the first in line is
-#     rebased if it is behind; the rest wait their turn
-#     (.github/ci/rebase-behind.ts).
-#
-# Both act through AUTOMERGE_TOKEN — a fine-grained token or GitHub App token
-# with Contents and Pull requests write on this repository — and never through
-# GITHUB_TOKEN. That is not a style choice. A push or merge made with
-# GITHUB_TOKEN starts no workflow: a rebased branch would get no CI and wait
-# forever on its required check, and a merge would land on main with no CI
-# run, so ci.yaml would never dispatch the release. Without the secret both
-# jobs warn and do nothing.
+# The merge acts through AUTOMERGE_TOKEN — a fine-grained token or GitHub App
+# token with Contents and Pull requests write on this repository — and never
+# through GITHUB_TOKEN. That is not a style choice: a merge made with
+# GITHUB_TOKEN starts no workflow, so it would land on main with no CI run,
+# and ci.yaml would never dispatch the release. Without the secret it warns
+# and does nothing.
 #
 # The token is a secret of the automerge environment, not of the repository,
 # and that environment admits main alone (Settings → Environments →
 # automerge → Deployment branches: main). A workflow a collaborator pushes on
-# any other branch therefore cannot read it: only the reviewed copies of
-# these jobs, and of release.yaml's, on main can.
+# any other branch therefore cannot read it: only the reviewed copy of this
+# job, and of release.yaml's, on main can.
 #
 # The merge is decided when the run that tested the pull request completes,
 # not armed ahead of it: workflow_run runs main's copy of this workflow and of
@@ -42,16 +34,14 @@ name: Auto-merge
 # and one that changes what CI runs, whose green check is no evidence.
 #
 # Repository settings this relies on (Settings → General → Pull Requests):
-# "Allow merge commits" on, and branch protection or a ruleset on main
-# requiring the "All checks passed" check, so nothing else merges a pull
-# request ahead of it.
+# "Allow merge commits" on, and a ruleset on main requiring the "All checks
+# passed" check, so nothing else merges a pull request ahead of it, without
+# requiring branches to be up to date.
 
 on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-  push:
-    branches: [main]
 
 # Nothing at the top level; the token that acts is AUTOMERGE_TOKEN.
 permissions: {}
@@ -96,38 +86,3 @@ jobs:
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           PULL_REQUESTS: ${{ toJSON(github.event.workflow_run.pull_requests) }}
         run: node .github/ci/merge-green.ts
-
-  rebase:
-    name: Rebase the first pull request in line onto main
-    if: >-
-      github.event_name == 'push' ||
-      (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' &&
-       github.event.workflow_run.head_repository.full_name == github.repository)
-    # One queue: two runs at once could each rebase a different first in line.
-    concurrency:
-      group: merge-queue
-      cancel-in-progress: false
-    runs-on: ubuntu-26.04
-    timeout-minutes: 10
-    # AUTOMERGE_TOKEN lives in this environment, which only main may deploy to.
-    environment: automerge
-    permissions:
-      contents: read # the checkout below; the rebase itself acts through AUTOMERGE_TOKEN
-    steps:
-      # The script lives in the repository, beside its test.
-      - name: Check out the rebase script
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          sparse-checkout: |
-            .github/ci
-            .github/actions
-
-      - name: Set up the CI scripts
-        uses: ./.github/actions/setup-ci
-
-      - name: Rebase the first pull request in line if it is behind main
-        env:
-          GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
-          REPO: ${{ github.repository }}
-        run: node .github/ci/rebase-behind.ts

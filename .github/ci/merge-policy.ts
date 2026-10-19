@@ -1,24 +1,22 @@
 // Who the merge automation acts for, on which branch, and which changes it
 // leaves to a person.
 //
-// Shared by merge-green.ts, which merges a pull request through
-// AUTOMERGE_TOKEN, and rebase-behind.ts, which rewrites a branch through it:
-// both act only for a pull request into BASE_BRANCH whose author could have
-// pushed the change themselves, so the token never does for someone what they
-// could not do.
+// merge-green.ts merges a pull request through AUTOMERGE_TOKEN only for one
+// into BASE_BRANCH whose author could have pushed the change themselves, so
+// the token never does for someone what they could not do.
 
 import type { Author, ChangedFile, GitHub } from "./lib/github.ts";
 import { shellPatternToRegExp } from "./lib/glob.ts";
 
-// BASE_BRANCH is the branch the automation merges into and rebases onto.
+// BASE_BRANCH is the branch the automation merges into.
 export const BASE_BRANCH = "main";
 
 // PUSH_PERMISSIONS are the repository permissions that can push a branch, as
 // the collaborator permission API names them (maintain reads as write there).
 const PUSH_PERMISSIONS: readonly string[] = ["admin", "write"];
 
-// RENOVATE is Renovate as the author of a pull request. Renovate merges and
-// rebases its own, once a release is old enough (renovate.json).
+// RENOVATE is Renovate as the author of a pull request. Renovate merges its
+// own, once a release is old enough (renovate.json).
 const RENOVATE: Author = { login: "renovate", bot: true };
 
 // CI_DEFINITION are the paths that decide what CI runs, as bash patterns,
