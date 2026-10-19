@@ -14,6 +14,14 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## pgstore/v0.24.0
+
+- The transaction `TxFrom` returns in `onCharged` is `onCharged`'s while it
+  runs and no longer: kept past it, every call fails with `pgx.ErrTxClosed`.
+  `Commit` and `Rollback` on it return `ErrChargeTransaction` (a savepoint
+  from `Begin` is still yours to end), and calls from several goroutines are
+  taken one at a time.
+
 ## v0.103.0
 
 - `ErrUnitCodeMismatch` matches `ErrConflict`, and `ErrorResponse` answers it

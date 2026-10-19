@@ -828,7 +828,9 @@ scope that does not admit that tenant returns `ErrScopeMismatch`, never
 (`GetRecord`, `Revoke`, `Refund`, `GetUsage`, `GetCharge`, …) cannot
 be checked so, and answers a row out of scope as not found.
 `onCharged` runs on the store's own `pgx.Tx`, which `TxFrom` reads from its
-context. Every time it writes comes from
+context and which is `onCharged`'s only while it runs: kept past it, a call
+fails with `pgx.ErrTxClosed`, and `Commit` or `Rollback` on it is
+`ErrChargeTransaction`. Every time it writes comes from
 `Config.Now`, never from the database's clock.
 
 Run `Migrate` as the role that owns the schema and serve as another one. The

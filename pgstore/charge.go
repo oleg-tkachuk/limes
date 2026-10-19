@@ -274,7 +274,12 @@ func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, s
 		TenantID: spec.tenantID, UnitCode: spec.unit,
 	}
 	if onCharged != nil {
-		if err := onCharged(withTx(ctx, tx), meter.Charged{Receipt: receipt}); err != nil {
+		callbackCtx, end := withTx(ctx, tx)
+		err := func() error {
+			defer end()
+			return onCharged(callbackCtx, meter.Charged{Receipt: receipt})
+		}()
+		if err != nil {
 			return refused, err
 		}
 	}
