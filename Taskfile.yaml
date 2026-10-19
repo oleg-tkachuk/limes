@@ -66,9 +66,14 @@ tasks:
   verify-all:
     desc: "gofmt + go mod tidy/verify + golangci-lint + a 32-bit build + the unit suite + govulncheck + actionlint + the CI scripts + the release rules and notes + the redisreplay and otelmetric modules + pgstore's static checks + the examples that need no database — what CI runs, but test:pgstore and test:examples:pgstore"
     cmds:
+      - task: verify:gate
+      - task: lint:all
+
+  verify:gate:
+    desc: "verify-all but golangci-lint, which CI runs as a job of its own (lint:all)"
+    cmds:
       - task: fmt:check
       - task: verify:tidy
-      - task: lint
       - task: verify:32-bit
       - task: test
       - task: vuln
@@ -81,45 +86,41 @@ tasks:
       - task: verify:examples
 
   verify:redisreplay:
-    desc: "The redisreplay module's own gate: go mod tidy/verify, go vet, golangci-lint, the unit suite and govulncheck — ./... at the root does not reach a nested module"
+    desc: "The redisreplay module's own gate: go mod tidy/verify, go vet, the unit suite and govulncheck — ./... at the root does not reach a nested module"
     dir: '{{.REDISREPLAY_DIR}}'
     cmds:
       - go mod tidy -diff
       - go mod verify
       - go vet ./...
-      - go tool -modfile=../{{.GOLANGCI_LINT_MODFILE}} golangci-lint run --config ../.golangci.yml ./...
       - go test -race -short ./...
       - go tool -modfile=../{{.TOOLS_MODFILE}} govulncheck ./...
 
   verify:otelmetric:
-    desc: "The otelmetric module's own gate: go mod tidy/verify, go vet, golangci-lint, the unit suite and govulncheck — ./... at the root does not reach a nested module"
+    desc: "The otelmetric module's own gate: go mod tidy/verify, go vet, the unit suite and govulncheck — ./... at the root does not reach a nested module"
     dir: '{{.OTELMETRIC_DIR}}'
     cmds:
       - go mod tidy -diff
       - go mod verify
       - go vet ./...
-      - go tool -modfile=../{{.GOLANGCI_LINT_MODFILE}} golangci-lint run --config ../.golangci.yml ./...
       - go test -race -short ./...
       - go tool -modfile=../{{.TOOLS_MODFILE}} govulncheck ./...
 
   verify:pgstore:
-    desc: "pgstore, its own module: go mod tidy/verify, go vet, golangci-lint and govulncheck — what needs no database; test:pgstore runs its tests"
+    desc: "pgstore, its own module: go mod tidy/verify, go vet and govulncheck — what needs no database; test:pgstore runs its tests"
     dir: '{{.PGSTORE_DIR}}'
     cmds:
       - go mod tidy -diff
       - go mod verify
       - go vet ./...
-      - go tool -modfile=../{{.GOLANGCI_LINT_MODFILE}} golangci-lint run --config ../.golangci.yml ./...
       - go tool -modfile=../{{.TOOLS_MODFILE}} govulncheck ./...
 
   verify:examples:
-    desc: "The examples module: go mod tidy/verify, go vet, golangci-lint, its tests, and every example that needs no database, run to the end — each exits non-zero on a step that does not do what it says"
+    desc: "The examples module: go mod tidy/verify, go vet, its tests, and every example that needs no database, run to the end — each exits non-zero on a step that does not do what it says"
     dir: '{{.EXAMPLES_DIR}}'
     cmds:
       - go mod tidy -diff
       - go mod verify
       - go vet ./...
-      - go tool -modfile=../{{.GOLANGCI_LINT_MODFILE}} golangci-lint run --config ../.golangci.yml ./...
       - go test -race -short ./...
       - go run ./quickstart
       - go run ./issue-verify
@@ -163,6 +164,22 @@ tasks:
       LIMES_REDIS_REQUIRED: "1"
     cmds:
       - go test -race -count=1 -run '^TestContractOnRedis$' ./...
+
+  lint:all:
+    desc: "golangci-lint over every module, the root and each nested one — ./... at the root does not reach a nested module"
+    cmds:
+      - task: lint
+      - for: ['{{.REDISREPLAY_DIR}}', '{{.OTELMETRIC_DIR}}', '{{.PGSTORE_DIR}}', '{{.EXAMPLES_DIR}}']
+        task: lint:module
+        vars:
+          DIR: '{{.ITEM}}'
+
+  lint:module:
+    internal: true
+    desc: "golangci-lint over the nested module in DIR, with the root's configuration"
+    dir: '{{.DIR}}'
+    cmds:
+      - go tool -modfile=../{{.GOLANGCI_LINT_MODFILE}} golangci-lint run --config ../.golangci.yml ./...
 
   lint:
     desc: "golangci-lint over the module, the version tools/golangci-lint pins — the one CI runs; flags go after --, as in task lint -- --concurrency 1"
