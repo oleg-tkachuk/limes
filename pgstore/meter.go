@@ -46,6 +46,9 @@ type ancestor struct {
 	id       uuid.UUID
 	requests limes.RequestCeiling
 	budget   limes.BudgetCeiling
+	// copies is its quota of Biscuit copies; a record written before it was
+	// kept has none, the zero quota.
+	copies limes.CopyQuota
 }
 
 const (
@@ -69,7 +72,8 @@ SELECT id FROM chain ORDER BY depth`
 	// sqlHoldRecords locks the records of a lineage for share, in id order,
 	// so Purge cannot drop one while the call counts against it.
 	sqlHoldRecords = `
-SELECT id, capability -> 'caveats' -> 'requests', capability -> 'caveats' -> 'budget'
+SELECT id, capability -> 'caveats' -> 'requests', capability -> 'caveats' -> 'budget',
+       coalesce(capability -> 'caveats' -> 'copies', '{}'::jsonb)
 FROM limes.capabilities
 WHERE id = ANY ($1)
 ORDER BY id
@@ -102,8 +106,8 @@ func lineage(ctx context.Context, tx pgx.Tx, capID uuid.UUID) ([]ancestor, error
 	held := map[uuid.UUID]ancestor{}
 	for rows.Next() {
 		var id uuid.UUID
-		var requests, budget ceilingRecord
-		if err := rows.Scan(&id, &requests, &budget); err != nil {
+		var requests, budget, copies ceilingRecord
+		if err := rows.Scan(&id, &requests, &budget, &copies); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -111,6 +115,7 @@ func lineage(ctx context.Context, tx pgx.Tx, capID uuid.UUID) ([]ancestor, error
 			id:       id,
 			requests: limes.RequestCeiling{Max: requests.Max, Unlimited: requests.Unlimited},
 			budget:   limes.BudgetCeiling{Max: limes.Nanos(budget.Max), Unlimited: budget.Unlimited},
+			copies:   limes.CopyQuota{Max: copies.Max, Unlimited: copies.Unlimited},
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -203,6 +208,18 @@ SELECT id, $2, $3 FROM unnest($1::bytea[]) AS id ORDER BY id
 ON CONFLICT (capability_id, revocation_id) DO NOTHING`
 
 	sqlCountCopies = `SELECT count(*) FROM limes.copy_usage WHERE capability_id = $1`
+	// sqlCountSubtreeCopies counts the copies of $1 and of every capability
+	// delegated from it, down to $2 (limes.MaxDelegationDepth) levels.
+	sqlCountSubtreeCopies = `
+WITH RECURSIVE subtree (id, depth) AS (
+    SELECT $1::uuid, 0
+  UNION ALL
+    SELECT c.id, subtree.depth + 1
+    FROM limes.capabilities c
+    JOIN subtree ON c.parent_id = subtree.id
+    WHERE subtree.depth < $2
+)
+SELECT count(*) FROM limes.copy_usage WHERE capability_id IN (SELECT id FROM subtree)`
 
 	sqlLockCopies = `
 SELECT revocation_id, capability_id, request_count, spent, reserved
@@ -342,6 +359,22 @@ func lock(ctx context.Context, tx pgx.Tx, l lockRequest) (*counters, error) {
 				if counted > l.maxCopies {
 					return nil, fmt.Errorf("%w: capability %s would count %d, quota %d", meter.ErrCopyLimitExceeded, l.copiesCapID, counted, l.maxCopies)
 				}
+				// And each capability on the chain counts the copies of
+				// everything delegated from it against its own quota. The
+				// chain's usage rows, locked above, keep two calls under one
+				// ancestor from counting past it together.
+				for _, q := range l.chainQuotas {
+					if q.quota.Unlimited {
+						continue
+					}
+					var under int64
+					if err := tx.QueryRow(ctx, sqlCountSubtreeCopies, q.id, limes.MaxDelegationDepth).Scan(&under); err != nil {
+						return nil, err
+					}
+					if !q.quota.Admits(under) {
+						return nil, fmt.Errorf("%w: capability %s and those delegated from it would count %d, quota %s", meter.ErrCopyLimitExceeded, q.id, under, q.quota)
+					}
+				}
 			}
 		}
 		rows, err := tx.Query(ctx, sqlLockCopies, l.copiesCapID, l.copies)
@@ -398,6 +431,25 @@ type lockRequest struct {
 	// copiesCapID past.
 	maxCopies   int64
 	copiesCapID uuid.UUID
+	// chainQuotas are the quotas of copiesCapID and its ancestors, each
+	// counting the copies of its whole subtree.
+	chainQuotas []chainQuota
+}
+
+// chainQuota is one capability's quota of copies, over its subtree.
+type chainQuota struct {
+	id    uuid.UUID
+	quota limes.CopyQuota
+}
+
+// quotasOf is the chain's quotas: self's, from its token, then each
+// ancestor's, from its record.
+func quotasOf(self uuid.UUID, quota limes.CopyQuota, ancestors []ancestor) []chainQuota {
+	out := []chainQuota{{self, quota}}
+	for _, a := range ancestors {
+		out = append(out, chainQuota{a.id, a.copies})
+	}
+	return out
 }
 
 // write stores every counter c holds, as it now stands.

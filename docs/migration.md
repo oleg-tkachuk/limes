@@ -14,6 +14,20 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.106.0
+
+- A capability's quota of Biscuit copies (`Caveats.Copies`) counts the copies
+  of every capability delegated from it too, as its request and budget
+  ceilings count their requests and spend: a child can no longer multiply
+  the copies its root allows. A `UsageStore` of your own checks every
+  capability on the chain — the subject's quota from its token, each
+  ancestor's from its record — against the copies of its subtree:
+  metertest checks it. `CopyQuota.Admits` reads a count against a quota.
+  `metertest.CapabilitySpec` gains `Copies` (nil is Unlimited), which an
+  `Env.NewCapability` writes into the record.
+- pgstore reads an ancestor's quota from its record; a record written before
+  v0.104.0 holds none and counts as the zero quota.
+
 ## pgstore/v0.27.0
 
 - In `onCharged`, `TxFrom(ctx).Conn()` is nil: the connection is the store's.

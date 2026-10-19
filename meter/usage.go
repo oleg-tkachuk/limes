@@ -57,11 +57,16 @@ type UsageStore interface {
 // not be paired with a verifier that sets BiscuitConfig.MeterCopies.
 //
 // A holder mints copies offline, as many as it likes, and each one metered
-// is a counter the store keeps until the capability's usage goes. So a store
-// counts at most a quota of copies per capability — its configuration's, or
-// DefaultMaxCopiesPerCapability — and Bump, Charge and Reserve refuse a call
-// that would count one more as ErrCopyLimitExceeded, counting nothing. A copy
-// already counted goes on being metered.
+// is a counter the store keeps until the capability's usage goes. So each
+// capability bounds the copies counted for it and for every capability
+// delegated from it by its quota (limes.Caveats.Copies — the subject's from
+// its token, an ancestor's from its record), as it bounds their requests and
+// spend, and a store counts at most its own bound of copies per capability
+// — its configuration's, or DefaultMaxCopiesPerCapability. Bump, Charge and
+// Reserve refuse a call that would take any of these past it as
+// ErrCopyLimitExceeded, counting nothing. A copy already counted goes on
+// being metered; one whose capability is no longer on record counts under no
+// ancestor.
 //
 // All methods are concurrency-safe. A rejected call mutates nothing, so a
 // retry after rejection is safe. Each method first refuses a request whose

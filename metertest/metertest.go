@@ -150,6 +150,18 @@ type CapabilitySpec struct {
 	// the capability counts in.
 	Requests limes.RequestCeiling
 	Budget   limes.BudgetCeiling
+	// Copies is its quota of Biscuit copies; nil is Unlimited. CopyQuota
+	// reads it as the record should hold it.
+	Copies *limes.CopyQuota
+}
+
+// CopyQuota is the quota of copies the record holds: Copies, or Unlimited
+// when the spec names none.
+func (s CapabilitySpec) CopyQuota() limes.CopyQuota {
+	if s.Copies == nil {
+		return limes.CopyQuota{Unlimited: true}
+	}
+	return *s.Copies
 }
 
 // newCapability records a capability under parent with the given budget and
@@ -394,6 +406,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"ACopyIDSharedByTwoCapabilitiesCountsApart", checkCopySharedID},
 		{"CopiesPastTheQuotaAreRefused", checkCopyQuota},
 		{"TheCapabilitysCopyQuotaBinds", checkCopyQuotaCaveat},
+		{"ACopyQuotaBindsTheWholeLineage", checkCopyQuotaLineage},
 		{"CopyUsageRefusesAnInvalidRequest", checkCopyUsageRefusesInvalid},
 		{"TenantBudgetReadsAgree", checkTenantBudgetReads},
 		{"ReservationsReadBack", checkReservations},
@@ -1875,6 +1888,57 @@ func checkCopyQuotaCaveat(t *testing.T, f fixture) {
 			t.Errorf("Bump of the capability itself under the zero quota: %v", err)
 		}
 	})
+}
+
+// lineageCopyQuota is the quota of the root in checkCopyQuotaLineage, under
+// any store's own bound.
+const lineageCopyQuota = 2
+
+// checkCopyQuotaLineage holds a store to counting a capability's copies under
+// every capability above it, as it counts requests and spend: a root allowing
+// two counts two across all it delegated, each child under a quota of its own
+// of two, so a second child's first copy is refused; so is the root's own;
+// and dropping one child's usage frees the room.
+func checkCopyQuotaLineage(t *testing.T, f fixture) {
+	if f.MaxCopiesPerCapability != 0 && f.MaxCopiesPerCapability <= lineageCopyQuota {
+		t.Skipf("Env.MaxCopiesPerCapability %d leaves no room under it", f.MaxCopiesPerCapability)
+	}
+	quota := limes.CopyQuota{Max: lineageCopyQuota}
+	root, err := f.NewCapability(CapabilitySpec{Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget, Copies: &quota})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := func() uuid.UUID {
+		t.Helper()
+		id, err := f.NewCapability(CapabilitySpec{Parent: root, Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget, Copies: &quota})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	a, b := child(), child()
+	copies := func(capID uuid.UUID, ids ...string) limes.MeterSubject {
+		out := make([]limes.CopyCeiling, len(ids))
+		for i, id := range ids {
+			out[i] = limes.CopyCeiling{RevocationID: []byte(id), Requests: &limes.RequestCeiling{Unlimited: true}}
+		}
+		return newSubject(subjectSpec{capID: capID, tenant: f.Tenant, copies: out, copyQuota: &quota})
+	}
+	if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: copies(a, "a1", "a2")}); err != nil {
+		t.Fatalf("Bump of two copies of a child, the root's quota: %v", err)
+	}
+	if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: copies(b, "b1")}); !errors.Is(err, meter.ErrCopyLimitExceeded) {
+		t.Errorf("Bump of a copy of a second child past the root's quota: err = %v, want ErrCopyLimitExceeded", err)
+	}
+	if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: copies(root, "r1")}); !errors.Is(err, meter.ErrCopyLimitExceeded) {
+		t.Errorf("Bump of a copy of the root, its children holding its quota: err = %v, want ErrCopyLimitExceeded", err)
+	}
+	if err := f.Usage.DeleteUsage(f.Ctx, meter.DeleteUsageRequest{CapabilityID: a}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: copies(b, "b1")}); err != nil {
+		t.Errorf("Bump of a copy of the second child once the first's usage was dropped: %v", err)
+	}
 }
 
 // copyUsage is what reader holds for the copy copyID of capability capID.

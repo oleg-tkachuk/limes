@@ -209,7 +209,7 @@ major the module path does not carry.
   far a capability's copies may be multiplied. It is now a signed caveat,
   `Caveats.Copies`, narrowed by delegation like the other ceilings, under
   the store's own bound; adding it to the claims made the token type v6
-  (P5).
+  (P5). Since v0.106.0 it bounds the whole lineage, as the other ceilings do.
 - A Postgres reference store in its own module, to prove `Store` and
   `UsageStore` against row-level security before they freeze. **Done:**
   `pgstore`, held to storetest and metertest under row-level security; it

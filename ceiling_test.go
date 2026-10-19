@@ -166,6 +166,11 @@ func TestCopyQuota(t *testing.T) {
 			t.Errorf("%s: Bounded(%d) = %d, want %d", name, bound, got, tc.want)
 		}
 	}
+	for n, want := range map[int64]bool{4: true, 5: true, 6: false} {
+		if five.Admits(n) != want || !unlimited.Admits(n) {
+			t.Errorf("Admits(%d) = %v / %v, want %v under 5 and true unlimited", n, five.Admits(n), unlimited.Admits(n), want)
+		}
+	}
 	if five.String() != "5" || unlimited.String() != unlimitedText {
 		t.Errorf("String = %q, %q; want 5 and %q", five, unlimited, unlimitedText)
 	}
