@@ -19,8 +19,9 @@
 //
 // CheckSchema returns ErrSchemaMismatch while the schema is not the version
 // this package queries, and ErrRuntimeRole when the pool is a role the
-// policies do not hold — a superuser, one with BYPASSRLS, or the schema's
-// owner — for a readiness check; ReadSchemaVersion reports both versions and
+// policies do not hold — a superuser, one with BYPASSRLS, an owner of the
+// schema or of anything in it, or a role that can act as one — for a
+// readiness check; ReadSchemaVersion reports both versions and
 // needs only the SELECT that Migrate grants a runtime role.
 //
 // Every call runs in one transaction on one connection — but for the two
