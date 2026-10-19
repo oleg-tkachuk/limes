@@ -69,8 +69,9 @@ export const ALL_GROUPS: readonly Group[] = Object.values(Group);
 // documentation; OUTPUT_VERIFY_TASKS, the tasks the Verify job runs.
 export const OUTPUT_RELEVANT = "relevant";
 export const OUTPUT_VERIFY_TASKS = "verify-tasks";
-// VERIFY_ALL is the whole gate; SCRIPTS_TASKS, its part over the scripts.
-export const VERIFY_ALL = "verify-all";
+// VERIFY_GATE is the whole gate but golangci-lint, which CI runs as a job of
+// its own; SCRIPTS_TASKS, its part over the scripts.
+export const VERIFY_GATE = "verify:gate";
 export const SCRIPTS_TASKS = "verify:ci verify:release-rules";
 
 // ZERO_SHA is the BEFORE of a push that created its branch.
@@ -116,7 +117,7 @@ export function reachedGroups(paths: readonly string[]): Set<Group> {
 // verifyTasks is what the Verify job runs for groups: the scripts' part
 // alone when nothing else is reached, else the whole gate.
 export function verifyTasks(groups: ReadonlySet<Group>): string {
-  return groups.size === 1 && groups.has(Group.Scripts) ? SCRIPTS_TASKS : VERIFY_ALL;
+  return groups.size === 1 && groups.has(Group.Scripts) ? SCRIPTS_TASKS : VERIFY_GATE;
 }
 
 // candidateRange is the diff the event names: a pull request's ends win over a

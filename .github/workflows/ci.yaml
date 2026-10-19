@@ -84,7 +84,8 @@ jobs:
         # Which diff, and which checks it reaches: .github/ci/changes.ts.
         run: node .github/ci/changes.ts
 
-  # `task verify-all`, exactly as a developer runs it.
+  # `task verify-all`, exactly as a developer runs it, but its golangci-lint,
+  # which the Lint job runs beside it.
   verify:
     name: Verify
     needs: [changes]
@@ -116,7 +117,6 @@ jobs:
           mode: restore
           job: verify
           go-version: ${{ steps.go.outputs.go-version }}
-          extra-paths: ~/.cache/golangci-lint
 
       # verify:ci type-checks and tests the CI scripts; verify:release-rules
       # runs the pinned commit analyzer and notes generator against
@@ -138,7 +138,7 @@ jobs:
       # --yes accepts the first-fetch trust prompt for the shared task library
       # include; unattended, that prompt is a hang rather than a question. A
       # change to the scripts alone runs their part of the gate.
-      - name: task verify-all
+      - name: task verify:gate
         env:
           TASKS: ${{ needs.changes.outputs.verify-tasks }}
         # One of two fixed lists changes.ts sets, a task name a word.
@@ -152,6 +152,61 @@ jobs:
         with:
           mode: save
           job: verify
+          go-version: ${{ steps.go.outputs.go-version }}
+          cache-hit: ${{ steps.go-cache.outputs.cache-hit }}
+          primary-key: ${{ steps.go-cache.outputs.cache-primary-key }}
+
+  # golangci-lint over every module, as `task lint:all` runs it: the part of
+  # verify-all with a cache of its own, so neither waits on the other.
+  lint:
+    name: Lint
+    needs: [changes]
+    if: >-
+      needs.changes.outputs.root == 'true' || needs.changes.outputs.pgstore == 'true' ||
+      needs.changes.outputs.redisreplay == 'true' || needs.changes.outputs.otelmetric == 'true' ||
+      needs.changes.outputs.examples == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        id: go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Restore the Go caches
+        id: go-cache
+        uses: ./.github/actions/go-cache
+        with:
+          mode: restore
+          job: lint
+          go-version: ${{ steps.go.outputs.go-version }}
+          extra-paths: ~/.cache/golangci-lint
+
+      - name: Set up Task
+        uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+        with:
+          version: ${{ env.TASK_VERSION }}
+          checksum: ${{ env.TASK_SHA256 }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: task lint:all
+        run: task --yes lint:all
+
+      - name: Save the Go caches
+        if: success()
+        uses: ./.github/actions/go-cache
+        with:
+          mode: save
+          job: lint
           go-version: ${{ steps.go.outputs.go-version }}
           extra-paths: ~/.cache/golangci-lint
           cache-hit: ${{ steps.go-cache.outputs.cache-hit }}
@@ -632,7 +687,7 @@ jobs:
   # change, which is a pass; a failure or a cancellation anywhere is not.
   checks:
     name: All checks passed
-    needs: [changes, verify, pgstore, examples-pgstore, redis, floor, api, markers, syntax, audit]
+    needs: [changes, verify, lint, pgstore, examples-pgstore, redis, floor, api, markers, syntax, audit]
     if: always()
     runs-on: ubuntu-26.04
     timeout-minutes: 5

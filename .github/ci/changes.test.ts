@@ -4,7 +4,7 @@ import { after, before, describe, test } from "node:test";
 
 import { parse } from "yaml";
 
-import { ALL_GROUPS, Group, INERT, SCRIPTS_TASKS, VERIFY_ALL, candidateRange, classify, reachedGroups, reachesCode, verifyTasks } from "./changes.ts";
+import { ALL_GROUPS, Group, INERT, SCRIPTS_TASKS, VERIFY_GATE, candidateRange, classify, reachedGroups, reachesCode, verifyTasks } from "./changes.ts";
 import { globToRegExp } from "./lib/glob.ts";
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
 
@@ -127,14 +127,14 @@ describe("reachedGroups", () => {
 
 describe("verifyTasks", () => {
   test("the scripts alone run the scripts' part", () => assert.equal(verifyTasks(new Set([Group.Scripts])), SCRIPTS_TASKS));
-  test("anything more runs the whole gate", () => assert.equal(verifyTasks(new Set([Group.Scripts, Group.Root])), VERIFY_ALL));
-  test("a nested module runs the whole gate", () => assert.equal(verifyTasks(new Set([Group.Pgstore])), VERIFY_ALL));
+  test("anything more runs the whole gate", () => assert.equal(verifyTasks(new Set([Group.Scripts, Group.Root])), VERIFY_GATE));
+  test("a nested module runs the whole gate", () => assert.equal(verifyTasks(new Set([Group.Pgstore])), VERIFY_GATE));
   // The Verify job splits the value into task names: it is only ever one of
   // the two fixed strings.
   test("only ever one of the two fixed task lists", () => {
     const all = [new Set<Group>(), ...ALL_GROUPS.map((g) => new Set([g])), new Set(ALL_GROUPS)];
     for (const groups of all) {
-      assert.ok([SCRIPTS_TASKS, VERIFY_ALL].includes(verifyTasks(groups)));
+      assert.ok([SCRIPTS_TASKS, VERIFY_GATE].includes(verifyTasks(groups)));
     }
   });
 });
