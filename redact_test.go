@@ -239,6 +239,45 @@ func TestSealedKey(t *testing.T) {
 
 // SealKey keeps a copy of an Ed25519 key: a caller that clears its own slice
 // once the key is sealed, as key hygiene asks, leaves the sealed key whole.
+// TestSealKeyKeepsACopyBehindAPointer: a *ed25519.PrivateKey is a
+// crypto.Signer too, and is sealed as the key it points to.
+func TestSealKeyKeepsACopyBehindAPointer(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := SealKey(&priv)
+	clear(priv)
+	msg := []byte("message")
+	sig, err := k.Sign(nil, msg, crypto.Hash(0))
+	if err != nil || !ed25519.Verify(pub, msg, sig) {
+		t.Errorf("Sign after the caller cleared the key it pointed to = %v; the signature does not verify", err)
+	}
+}
+
+func TestSealKeyOfANilPointerIsZero(t *testing.T) {
+	var p *ed25519.PrivateKey
+	if k := SealKey(p); !k.IsZero() {
+		t.Error("SealKey of a nil *ed25519.PrivateKey holds a key")
+	}
+}
+
+// TestNewSignerRefusesAShortKeyBehindAPointer: a key of the wrong length
+// is refused, not left to panic in Public, however it is passed.
+func TestNewSignerRefusesAShortKeyBehindAPointer(t *testing.T) {
+	short := ed25519.PrivateKey(make([]byte, 10))
+	for name, key := range map[string]crypto.Signer{"value": short, "pointer": &short} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := NewSigner(SignerConfig{KeyID: "kid", Key: SealKey(key)}); err == nil {
+				t.Error("NewSigner accepted a 10-byte key")
+			}
+			if pub := SealKey(key).Public(); pub != nil {
+				t.Errorf("Public of a 10-byte key = %v, want nil", pub)
+			}
+		})
+	}
+}
+
 func TestSealKeyKeepsACopy(t *testing.T) {
 	pub, priv, err := ed25519.GenerateKey(nil)
 	if err != nil {

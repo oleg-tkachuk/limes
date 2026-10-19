@@ -79,6 +79,8 @@ func LoadKey(path string) (SigningKey, error) {
 		return SigningKey{}, err
 	}
 	key := SigningKey{Private: SealKey(priv)}
+	// SealKey keeps a copy; the key is held there alone.
+	clear(priv)
 	key.KeyID = jwks.KeyID(key.Public())
 	return key, nil
 }

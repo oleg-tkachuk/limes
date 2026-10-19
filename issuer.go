@@ -492,7 +492,10 @@ func GenerateKey() (SigningKey, error) {
 	if err != nil {
 		return SigningKey{}, fmt.Errorf("limes: generate key: %w", err)
 	}
-	return SigningKey{KeyID: jwks.KeyID(pub), Private: SealKey(priv)}, nil
+	key := SigningKey{KeyID: jwks.KeyID(pub), Private: SealKey(priv)}
+	// SealKey keeps a copy; the key is held there alone.
+	clear(priv)
+	return key, nil
 }
 
 // validateThumbprint accepts "" (unbound) or a base64url SHA-256 thumbprint.
