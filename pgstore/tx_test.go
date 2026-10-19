@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/oleg-tkachuk/limes/meter"
@@ -58,5 +59,98 @@ func TestTxFromIsTheChargesTransaction(t *testing.T) {
 func TestTxFromAnotherContext(t *testing.T) {
 	if tx, ok := TxFrom(t.Context()); ok || tx != nil {
 		t.Errorf("TxFrom(a plain context) = %v, %v; want none", tx, ok)
+	}
+}
+
+// sqlOne is a statement any transaction can run.
+const sqlOne = `SELECT 1`
+
+// The transaction is onCharged's while it runs and no longer: kept past it,
+// every call fails as a closed transaction, and the charge is written all
+// the same.
+func TestTxFromEndsWithTheCallback(t *testing.T) {
+	f := newTenantFixture(t)
+	ctx := WithTenant(t.Context(), f.mine)
+	var kept pgx.Tx
+	onCharged := func(ctx context.Context, _ meter.Charged) error {
+		kept, _ = TxFrom(ctx)
+		_, err := kept.Exec(ctx, sqlOne)
+		return err
+	}
+	if _, err := f.usage.Charge(ctx, meter.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}, onCharged); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := kept.Exec(ctx, sqlOne); !errors.Is(err, pgx.ErrTxClosed) {
+		t.Errorf("Exec after onCharged: err = %v, want pgx.ErrTxClosed", err)
+	}
+	var one int
+	if err := kept.QueryRow(ctx, sqlOne).Scan(&one); !errors.Is(err, pgx.ErrTxClosed) {
+		t.Errorf("QueryRow after onCharged: err = %v, want pgx.ErrTxClosed", err)
+	}
+	if _, err := kept.Begin(ctx); !errors.Is(err, pgx.ErrTxClosed) {
+		t.Errorf("Begin after onCharged: err = %v, want pgx.ErrTxClosed", err)
+	}
+	if kept.Conn() != nil {
+		t.Error("Conn after onCharged is not nil")
+	}
+}
+
+// onCharged may not end the charge's transaction, but may end a savepoint
+// of its own: a rolled-back savepoint undoes its writes alone, and the
+// charge commits.
+func TestTxFromKeepsTheTransactionTheStores(t *testing.T) {
+	f := newTenantFixture(t)
+	ctx := WithTenant(t.Context(), f.mine)
+	onCharged := func(ctx context.Context, _ meter.Charged) error {
+		tx, _ := TxFrom(ctx)
+		if err := tx.Commit(ctx); !errors.Is(err, ErrChargeTransaction) {
+			t.Errorf("Commit in onCharged: err = %v, want ErrChargeTransaction", err)
+		}
+		if err := tx.Rollback(ctx); !errors.Is(err, ErrChargeTransaction) {
+			t.Errorf("Rollback in onCharged: err = %v, want ErrChargeTransaction", err)
+		}
+		sp, err := tx.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		if _, err := sp.Exec(ctx, sqlOne); err != nil {
+			return err
+		}
+		return sp.Rollback(ctx)
+	}
+	subject := meterSubject(f.child.ID, f.mine)
+	if _, err := f.usage.Charge(ctx, meter.ChargeRequest{Subject: subject, Amount: 1}, onCharged); err != nil {
+		t.Fatalf("a charge whose onCharged tried to end its transaction: %v", err)
+	}
+	if u, err := f.usage.GetUsage(ctx, f.child.ID); err != nil || u.SpentAmount != 1 {
+		t.Errorf("usage after the charge = %+v, %v; want it written", u, err)
+	}
+}
+
+// slowStatement holds the connection long enough for the charge to go on
+// while it runs, were it not waited for.
+const slowStatement = `SELECT pg_sleep(0.2)`
+
+// A call from another goroutine still running when onCharged returns is
+// waited for before the store writes the charge, not run beside it.
+func TestTxFromWaitsForACallInFlight(t *testing.T) {
+	f := newTenantFixture(t)
+	ctx := WithTenant(t.Context(), f.mine)
+	started, done := make(chan struct{}), make(chan error, 1)
+	onCharged := func(ctx context.Context, _ meter.Charged) error {
+		tx, _ := TxFrom(ctx)
+		go func() {
+			close(started)
+			_, err := tx.Exec(ctx, slowStatement)
+			done <- err
+		}()
+		<-started
+		return nil
+	}
+	if _, err := f.usage.Charge(ctx, meter.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}, onCharged); err != nil {
+		t.Fatalf("a charge beside a call in flight: %v", err)
+	}
+	if err := <-done; err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+		t.Errorf("the call in flight: err = %v, want it run whole or refused as closed", err)
 	}
 }
