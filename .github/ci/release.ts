@@ -31,7 +31,7 @@
 
 import { join } from "node:path";
 
-import { error, info, setOutput, withoutWorkflowCommands } from "./lib/actions.ts";
+import { error, info, setOutput, summarize, table, withoutWorkflowCommands } from "./lib/actions.ts";
 import { optionalEnv, requireEnv } from "./lib/env.ts";
 import { git } from "./lib/git.ts";
 import { gitHubFor, type GitHub } from "./lib/github.ts";
@@ -92,44 +92,47 @@ export interface Release {
   pushTag(tag: string): Promise<void>;
 }
 
+// Outcome is what a run did with one module: the tag it released, if any,
+// and why.
+export interface Outcome {
+  tag?: string;
+  note: string;
+}
+
 // prereleaseModule tags and publishes the module's next release candidate,
-// and reports its tag, if anything is pending.
-export async function prereleaseModule(r: Release, module: Module): Promise<string | undefined> {
+// if anything is pending.
+export async function prereleaseModule(r: Release, module: Module): Promise<Outcome> {
   const tag = await candidateTag(module, await pendingCommits(module, "HEAD", r.commits, r.root), r.root);
   if (tag === undefined) {
-    info(`${module.name}: nothing pending to release a candidate of`);
-    return undefined;
+    return { note: "nothing pending to release a candidate of" };
   }
   await git(["tag", tag], r.root);
   await r.pushTag(tag);
   await publish(r.github, tag, module.prefix, "", false, r.root, true);
   await warmGoProxy(tag, r.repository, r.fetchInfo);
-  return tag;
+  return { tag, note: "release candidate published" };
 }
 
-// releaseModule releases one module, and reports its new tag, if any.
-export async function releaseModule(r: Release, module: Module, before: readonly string[]): Promise<string | undefined> {
+// releaseModule releases one module, and says what it did.
+export async function releaseModule(r: Release, module: Module, before: readonly string[]): Promise<Outcome> {
   const gate = GATES[module.name];
   if (gate !== undefined && !(await r.gatePassed(gate))) {
-    info(`${module.name}: '${gate}' did not pass; not released this run`);
-    return undefined;
+    return { note: `'${gate}' did not pass; not released this run` };
   }
   if (r.channel === Channel.Prerelease) {
     return prereleaseModule(r, module);
   }
   if (!r.manual) {
     const due = isDue(await pendingCommits(module, "HEAD", r.commits, r.root), r.policy);
-    info(`${module.name}: ${due.reason}`);
     if (!due.due) {
-      return undefined;
+      return { note: due.reason };
     }
   }
   const notesFile = join(r.notesDir, `release-notes-${module.name}.md`);
   await r.runSemanticRelease(module, notesFile);
   const tag = await newReleaseTag(r.github, before, module.prefix, r.root);
   if (tag === undefined) {
-    info(`${module.name}: no new tag from this run — no release was due`);
-    return undefined;
+    return { note: "no new tag from this run — no release was due" };
   }
   if (module.name === ROOT_MODULE) {
     r.onRootTag(tag);
@@ -138,8 +141,11 @@ export async function releaseModule(r: Release, module: Module, before: readonly
   // module's is never it.
   await publish(r.github, tag, module.prefix, notesFrom(notesFile), module.name === ROOT_MODULE, r.root);
   await warmGoProxy(tag, r.repository, r.fetchInfo);
-  return tag;
+  return { tag, note: r.manual ? "released by hand" : "released" };
 }
+
+// SUMMARY_HEADER heads the run's summary table.
+const SUMMARY_HEADER = ["Module", "Tag", "What happened"];
 
 // releaseAll releases every module, then publishes what earlier runs left
 // behind, and reports whether every module's release went through.
@@ -151,11 +157,16 @@ export async function releaseAll(r: Release): Promise<boolean> {
     throw new Error(`no module ${r.only}; known: ${names.join(", ")}`);
   }
   const modules = names.filter((n) => r.only === undefined || n === r.only).map((name) => selectModule(r.root, name));
+  const rows: string[][] = [];
   for (const module of modules) {
     try {
-      await releaseModule(r, module, before);
+      const outcome = await releaseModule(r, module, before);
+      info(`${module.name}: ${outcome.note}`);
+      rows.push([module.name, outcome.tag ?? "", outcome.note]);
     } catch (err) {
-      error(`${module.name}: ${err instanceof Error ? err.message : String(err)}`);
+      const message = err instanceof Error ? err.message : String(err);
+      error(`${module.name}: ${message}`);
+      rows.push([module.name, "", `failed: ${message}`]);
       ok = false;
     }
   }
@@ -167,6 +178,7 @@ export async function releaseAll(r: Release): Promise<boolean> {
       ok = false;
     }
   }
+  summarize(`### Release (${r.channel}${r.manual ? ", by hand" : ""})\n\n${table(SUMMARY_HEADER, rows)}`);
   return ok;
 }
 
