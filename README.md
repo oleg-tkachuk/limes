@@ -25,12 +25,12 @@ far authority reaches ([Wiktionary](https://en.wiktionary.org/wiki/Limes),
 [Wikipedia](https://en.wikipedia.org/wiki/Limes_(Roman_Empire))).
 
 ```mermaid
-flowchart LR
+flowchart TB
     op(["Operator"])
     orch(["Orchestrator agent"])
     worker(["Sub-agent"])
     svc["<b>Your service</b><br/>Authorize · Bump · Charge"]
-    store[("<b>Your storage</b><br/>Store · UsageStore · KeyResolver")]
+    store[("<b>Your storage</b><br/>Store · UsageStore<br/>KeyResolver")]
 
     op -- "Issue" --> orch
     orch -- "Delegate / Attenuate<br/>narrower only" --> worker
