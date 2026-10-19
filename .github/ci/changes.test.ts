@@ -4,7 +4,7 @@ import { after, before, describe, test } from "node:test";
 
 import { parse } from "yaml";
 
-import { INERT, candidateRange, classify, reachesCode } from "./changes.ts";
+import { ALL_GROUPS, Group, INERT, SCRIPTS_TASKS, VERIFY_ALL, candidateRange, classify, reachedGroups, reachesCode, verifyTasks } from "./changes.ts";
 import { globToRegExp } from "./lib/glob.ts";
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
 
@@ -93,6 +93,48 @@ describe("classify", () => {
     ["a run by hand, with no diff", () => ({ after: sha.docs }), true],
   ];
   for (const [name, env, want] of cases) {
-    test(name, async () => assert.equal(await classify(env(), repo.dir), want));
+    test(name, async () => assert.equal((await classify(env(), repo.dir)).size > 0, want));
   }
+  test("no diff reaches every group", async () => assert.deepEqual([...(await classify({ after: sha.docs }, repo.dir))].sort(), [...ALL_GROUPS].sort()));
+});
+
+describe("reachedGroups", () => {
+  const cases: [string, string[], Group[]][] = [
+    ["documentation", ["README.md", "pgstore/README.md"], []],
+    ["the root module's code", ["verifier.go"], [Group.Root]],
+    ["a root fixture", ["testdata/golden_token.jwt"], [Group.Root]],
+    ["pgstore", ["pgstore/charge.go"], [Group.Pgstore]],
+    ["redisreplay", ["redisreplay/seen.lua"], [Group.Redisreplay]],
+    ["otelmetric", ["otelmetric/store.go"], [Group.Otelmetric]],
+    ["an example", ["examples/quickstart/main.go"], [Group.Examples]],
+    ["a CI script", [".github/ci/changes.ts"], [Group.Scripts]],
+    ["the release tooling", [".github/release/modules.cjs"], [Group.Scripts]],
+    ["two modules", ["pgstore/a.go", "otelmetric/b.go"], [Group.Otelmetric, Group.Pgstore]],
+    // What decides what CI runs reaches every check.
+    ["a workflow", [".github/workflows/ci.yaml"], [...ALL_GROUPS]],
+    ["the setup action", [".github/actions/setup-ci/action.yml"], [...ALL_GROUPS]],
+    ["the cache action", [".github/actions/go-cache/action.yml"], [...ALL_GROUPS]],
+    ["the Taskfile", ["Taskfile.yaml"], [...ALL_GROUPS]],
+    ["a pinned tool", ["tools/go.mod"], [...ALL_GROUPS]],
+    ["the root go.mod", ["go.mod"], [...ALL_GROUPS]],
+    ["the linter's configuration", [".golangci.yml"], [...ALL_GROUPS]],
+    ["a file type nobody listed", ["something.new"], [Group.Root]],
+  ];
+  for (const [name, paths, want] of cases) {
+    test(name, () => assert.deepEqual([...reachedGroups(paths)].sort(), [...want].sort()));
+  }
+});
+
+describe("verifyTasks", () => {
+  test("the scripts alone run the scripts' part", () => assert.equal(verifyTasks(new Set([Group.Scripts])), SCRIPTS_TASKS));
+  test("anything more runs the whole gate", () => assert.equal(verifyTasks(new Set([Group.Scripts, Group.Root])), VERIFY_ALL));
+  test("a nested module runs the whole gate", () => assert.equal(verifyTasks(new Set([Group.Pgstore])), VERIFY_ALL));
+  // The Verify job splits the value into task names: it is only ever one of
+  // the two fixed strings.
+  test("only ever one of the two fixed task lists", () => {
+    const all = [new Set<Group>(), ...ALL_GROUPS.map((g) => new Set([g])), new Set(ALL_GROUPS)];
+    for (const groups of all) {
+      assert.ok([SCRIPTS_TASKS, VERIFY_ALL].includes(verifyTasks(groups)));
+    }
+  });
 });

@@ -1,0 +1,80 @@
+name: Go caches
+description: >-
+  Restore, or save, one job's Go build and module caches. Keyed by the job,
+  the Go and every go.sum of the repository — not by the
+  commit: the dependencies and the standard library are most of the build,
+  and they change with those. A run on a push to main writes a new entry,
+  only when the key changes and trimmed to what that run used; a pull request
+  only restores main's, so it cannot seed what main builds from.
+
+inputs:
+  mode:
+    description: restore, as the job starts, or save, as it ends.
+    required: true
+  job:
+    description: The job's own name in the key, so jobs that build different things keep apart.
+    required: true
+  go-version:
+    description: The Go the job set up (setup-go's go-version output).
+    required: true
+  extra-paths:
+    description: Other caches the job keeps beside Go's, one a line.
+    required: false
+    default: ""
+  cache-hit:
+    description: save only — the restore step's cache-hit output.
+    required: false
+    default: "false"
+  primary-key:
+    description: save only — the restore step's cache-primary-key output.
+    required: false
+    default: ""
+
+outputs:
+  cache-hit:
+    description: Whether an entry under the exact key was restored.
+    value: ${{ steps.restore.outputs.cache-hit }}
+  cache-primary-key:
+    description: The key a save writes under.
+    value: ${{ steps.restore.outputs.cache-primary-key }}
+
+runs:
+  using: composite
+  steps:
+    - name: Restore the Go caches
+      id: restore
+      if: inputs.mode == 'restore'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+          ${{ inputs.extra-paths }}
+        key: go-${{ runner.os }}-${{ inputs.job }}-${{ inputs.go-version }}-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          go-${{ runner.os }}-${{ inputs.job }}-${{ inputs.go-version }}-
+
+    # A build cache entry a run uses is touched by go once it is an hour old,
+    # so anything not newer than two hours before the run is one the run did
+    # not use; the trim before the save drops those. Were go to touch less
+    # often, the trim would drop entries it used, a slower next run, never a
+    # wrong one.
+    - name: Mark the run's start for the cache trim
+      if: inputs.mode == 'restore'
+      shell: bash
+      run: touch -d '2 hours ago' "$RUNNER_TEMP/go-cache-mark"
+
+    - name: Trim the build cache to what this run used
+      if: inputs.mode == 'save' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.cache-hit != 'true'
+      shell: bash
+      run: find ~/.cache/go-build -type f ! -newer "$RUNNER_TEMP/go-cache-mark" -delete
+
+    - name: Save the Go caches
+      if: inputs.mode == 'save' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+          ${{ inputs.extra-paths }}
+        key: ${{ inputs.primary-key }}

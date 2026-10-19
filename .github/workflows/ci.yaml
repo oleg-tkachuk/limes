@@ -43,8 +43,9 @@ env:
   GO_FLOOR_VERSION: "1.26.9"
 
 jobs:
-  # Whether anything the checks below read has changed. .github/ci/changes.ts
-  # holds the list of documentation paths that change nothing.
+  # Which of the checks below the change reaches: one output per group of
+  # them, and whether it is more than documentation. .github/ci/changes.ts
+  # holds the groups and the list of documentation paths that change nothing.
   changes:
     name: Changed paths
     runs-on: ubuntu-26.04
@@ -53,6 +54,13 @@ jobs:
       contents: read
     outputs:
       relevant: ${{ steps.filter.outputs.relevant }}
+      root: ${{ steps.filter.outputs.root }}
+      pgstore: ${{ steps.filter.outputs.pgstore }}
+      redisreplay: ${{ steps.filter.outputs.redisreplay }}
+      otelmetric: ${{ steps.filter.outputs.otelmetric }}
+      examples: ${{ steps.filter.outputs.examples }}
+      scripts: ${{ steps.filter.outputs.scripts }}
+      verify-tasks: ${{ steps.filter.outputs.verify-tasks }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -73,7 +81,7 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.sha }}
-        # Which diff, and whether it reaches code: .github/ci/changes.ts.
+        # Which diff, and which checks it reaches: .github/ci/changes.ts.
         run: node .github/ci/changes.ts
 
   # `task verify-all`, exactly as a developer runs it.
@@ -101,31 +109,14 @@ jobs:
           # The cache below replaces setup-go's, which only main should write.
           cache: false
 
-      # Keyed by what decides the cache's contents — the Go and every
-      # module's go.sum, the linter's among them — not by the commit: the dependencies and the
-      # standard library are most of the build, and they change with those.
-      # main writes a new entry only when the key changes, and a pull request
-      # restores main's, so a pull request cannot seed what main builds from.
-      # A key with the commit wrote ~2 GiB on every merge and kept four.
       - name: Restore the Go caches
         id: go-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: ./.github/actions/go-cache
         with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-            ~/.cache/golangci-lint
-          key: go-${{ runner.os }}-verify-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum', 'tools/go.sum', 'tools/yq/go.sum', 'tools/golangci-lint/go.sum', 'redisreplay/go.sum', 'otelmetric/go.sum', 'pgstore/go.sum', 'examples/go.sum') }}
-          restore-keys: |
-            go-${{ runner.os }}-verify-${{ steps.go.outputs.go-version }}-
-
-      # A build cache entry this run uses is touched by go once it is an hour
-      # old, so anything not newer than two hours before the run is one the
-      # run did not use; the trim before the save drops those. Were go to
-      # touch less often, the trim would drop entries it used, a slower next
-      # run, never a wrong one.
-      - name: Mark the run's start for the cache trim
-        run: touch -d '2 hours ago' "$RUNNER_TEMP/go-cache-mark"
+          mode: restore
+          job: verify
+          go-version: ${{ steps.go.outputs.go-version }}
+          extra-paths: ~/.cache/golangci-lint
 
       # verify:ci type-checks and tests the CI scripts; verify:release-rules
       # runs the pinned commit analyzer and notes generator against
@@ -145,33 +136,35 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       # --yes accepts the first-fetch trust prompt for the shared task library
-      # include; unattended, that prompt is a hang rather than a question.
+      # include; unattended, that prompt is a hang rather than a question. A
+      # change to the scripts alone runs their part of the gate.
       - name: task verify-all
-        run: task --yes verify-all
-
-      - name: Trim the build cache to what this run used
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true'
-        run: find ~/.cache/go-build -type f ! -newer "$RUNNER_TEMP/go-cache-mark" -delete
+        env:
+          TASKS: ${{ needs.changes.outputs.verify-tasks }}
+        # One of two fixed lists changes.ts sets, a task name a word.
+        run: |
+          read -r -a tasks <<<"$TASKS"
+          task --yes "${tasks[@]}"
 
       - name: Save the Go caches
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.go-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success()
+        uses: ./.github/actions/go-cache
         with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-            ~/.cache/golangci-lint
-          key: ${{ steps.go-cache.outputs.cache-primary-key }}
+          mode: save
+          job: verify
+          go-version: ${{ steps.go.outputs.go-version }}
+          extra-paths: ~/.cache/golangci-lint
+          cache-hit: ${{ steps.go-cache.outputs.cache-hit }}
+          primary-key: ${{ steps.go-cache.outputs.cache-primary-key }}
 
   # pgstore's tests — storetest and metertest among them — against PostgreSQL
   # in a container, which verify-all leaves out so that it needs no Docker,
   # with the limes of this commit: limes may not break pgstore. The runner's
   # Docker serves testcontainers.
-  # The pgstore example runs here too, for the same Docker.
   pgstore:
     name: PostgreSQL store
     needs: [changes]
-    if: needs.changes.outputs.relevant == 'true'
+    if: needs.changes.outputs.root == 'true' || needs.changes.outputs.pgstore == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
@@ -183,10 +176,19 @@ jobs:
           persist-credentials: false
 
       - name: Set up Go
+        id: go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: pgstore/go.mod
           cache: false
+
+      - name: Restore the Go caches
+        id: go-cache
+        uses: ./.github/actions/go-cache
+        with:
+          mode: restore
+          job: pgstore
+          go-version: ${{ steps.go.outputs.go-version }}
 
       - name: Set up Task
         uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
@@ -198,8 +200,66 @@ jobs:
       - name: task test:pgstore
         run: task --yes test:pgstore
 
+      - name: Save the Go caches
+        if: success()
+        uses: ./.github/actions/go-cache
+        with:
+          mode: save
+          job: pgstore
+          go-version: ${{ steps.go.outputs.go-version }}
+          cache-hit: ${{ steps.go-cache.outputs.cache-hit }}
+          primary-key: ${{ steps.go-cache.outputs.cache-primary-key }}
+
+  # The pgstore example, run to the end against PostgreSQL in a container: a
+  # job of its own beside pgstore's tests, so neither waits on the other.
+  examples-pgstore:
+    name: PostgreSQL example
+    needs: [changes]
+    if: needs.changes.outputs.root == 'true' || needs.changes.outputs.pgstore == 'true' || needs.changes.outputs.examples == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        id: go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: examples/go.mod
+          cache: false
+
+      - name: Restore the Go caches
+        id: go-cache
+        uses: ./.github/actions/go-cache
+        with:
+          mode: restore
+          job: examples-pgstore
+          go-version: ${{ steps.go.outputs.go-version }}
+
+      - name: Set up Task
+        uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
+        with:
+          version: ${{ env.TASK_VERSION }}
+          checksum: ${{ env.TASK_SHA256 }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: task test:examples:pgstore
         run: task --yes test:examples:pgstore
+
+      - name: Save the Go caches
+        if: success()
+        uses: ./.github/actions/go-cache
+        with:
+          mode: save
+          job: examples-pgstore
+          go-version: ${{ steps.go.outputs.go-version }}
+          cache-hit: ${{ steps.go-cache.outputs.cache-hit }}
+          primary-key: ${{ steps.go-cache.outputs.cache-primary-key }}
 
   # The same tests against the limes pgstore's go.mod requires, which is what
   # a consumer's build resolves. This gates pgstore's release, not a merge: a
@@ -207,10 +267,15 @@ jobs:
   # request, which fails here until limes is released and Renovate raises
   # pgstore's requirement. Until then release.yaml releases limes and holds
   # pgstore back, so no pgstore is published that a consumer cannot build.
+  #
+  # It runs on every push to main, whatever the push changed: release.yaml
+  # reads its result to decide whether pgstore's pending commits may go out,
+  # and a run that skipped it would let through a pgstore an earlier run held
+  # back.
   pgstore-released-limes:
     name: PostgreSQL store, released limes
     needs: [changes]
-    if: needs.changes.outputs.relevant == 'true'
+    if: (github.event_name == 'push' && needs.changes.outputs.relevant == 'true') || needs.changes.outputs.pgstore == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
@@ -222,10 +287,19 @@ jobs:
           persist-credentials: false
 
       - name: Set up Go
+        id: go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: pgstore/go.mod
           cache: false
+
+      - name: Restore the Go caches
+        id: go-cache
+        uses: ./.github/actions/go-cache
+        with:
+          mode: restore
+          job: pgstore-pinned
+          go-version: ${{ steps.go.outputs.go-version }}
 
       - name: Set up Task
         uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
@@ -237,13 +311,23 @@ jobs:
       - name: task test:pgstore:pinned
         run: task --yes test:pgstore:pinned
 
+      - name: Save the Go caches
+        if: success()
+        uses: ./.github/actions/go-cache
+        with:
+          mode: save
+          job: pgstore-pinned
+          go-version: ${{ steps.go.outputs.go-version }}
+          cache-hit: ${{ steps.go-cache.outputs.cache-hit }}
+          primary-key: ${{ steps.go-cache.outputs.cache-primary-key }}
+
   # redisreplay's contract against a real Redis: verify-all runs it on
   # miniredis, whose scripts run on another Lua. The image is pinned by digest;
   # Renovate moves both together.
   redis:
     name: Redis replay cache
     needs: [changes]
-    if: needs.changes.outputs.relevant == 'true'
+    if: needs.changes.outputs.redisreplay == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
@@ -265,10 +349,19 @@ jobs:
           persist-credentials: false
 
       - name: Set up Go
+        id: go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: redisreplay/go.mod
           cache: false
+
+      - name: Restore the Go caches
+        id: go-cache
+        uses: ./.github/actions/go-cache
+        with:
+          mode: restore
+          job: redis
+          go-version: ${{ steps.go.outputs.go-version }}
 
       - name: Set up Task
         uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
@@ -282,6 +375,16 @@ jobs:
           LIMES_REDIS_ADDR: localhost:6379
         run: task --yes test:redisreplay
 
+      - name: Save the Go caches
+        if: success()
+        uses: ./.github/actions/go-cache
+        with:
+          mode: save
+          job: redis
+          go-version: ${{ steps.go.outputs.go-version }}
+          cache-hit: ${{ steps.go-cache.outputs.cache-hit }}
+          primary-key: ${{ steps.go-cache.outputs.cache-primary-key }}
+
   # verify-all runs on the toolchain go.mod pins. A consumer builds this module
   # with their own Go, as old as the `go` directive allows, so the suite runs
   # on that floor as well — with GOTOOLCHAIN=local, so it cannot quietly
@@ -289,7 +392,7 @@ jobs:
   floor:
     name: Test on the oldest supported Go
     needs: [changes]
-    if: needs.changes.outputs.relevant == 'true'
+    if: needs.changes.outputs.root == 'true' || needs.changes.outputs.redisreplay == 'true' || needs.changes.outputs.otelmetric == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
@@ -303,10 +406,19 @@ jobs:
           persist-credentials: false
 
       - name: Set up Go
+        id: go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ env.GO_FLOOR_VERSION }}
           cache: false
+
+      - name: Restore the Go caches
+        id: go-cache
+        uses: ./.github/actions/go-cache
+        with:
+          mode: restore
+          job: floor
+          go-version: ${{ steps.go.outputs.go-version }}
 
       - name: Set up the CI scripts
         uses: ./.github/actions/setup-ci
@@ -337,6 +449,16 @@ jobs:
         working-directory: otelmetric
         run: go test -race ./...
 
+      - name: Save the Go caches
+        if: success()
+        uses: ./.github/actions/go-cache
+        with:
+          mode: save
+          job: floor
+          go-version: ${{ steps.go.outputs.go-version }}
+          cache-hit: ${{ steps.go-cache.outputs.cache-hit }}
+          primary-key: ${{ steps.go-cache.outputs.cache-primary-key }}
+
   # The release is computed from commit types, so a break of the Go API that
   # no commit marks breaking would ship as a patch or a feature. Each module
   # the repository releases is checked against the commits that touch it. apidiff
@@ -348,7 +470,10 @@ jobs:
   api:
     name: API compatibility
     needs: [changes]
-    if: github.event_name != 'workflow_dispatch' && needs.changes.outputs.relevant == 'true'
+    if: >-
+      github.event_name != 'workflow_dispatch' &&
+      (needs.changes.outputs.root == 'true' || needs.changes.outputs.pgstore == 'true' || needs.changes.outputs.redisreplay == 'true' ||
+       needs.changes.outputs.otelmetric == 'true' || needs.changes.outputs.scripts == 'true')
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
@@ -362,10 +487,19 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Go
+        id: go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: false
+
+      - name: Restore the Go caches
+        id: go-cache
+        uses: ./.github/actions/go-cache
+        with:
+          mode: restore
+          job: api
+          go-version: ${{ steps.go.outputs.go-version }}
 
       # The module table the checks read is JavaScript: .github/release/modules.cjs.
       - name: Set up the CI scripts
@@ -386,6 +520,16 @@ jobs:
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
           SHA: ${{ github.sha }}
         run: node .github/ci/check-modules.ts api
+
+      - name: Save the Go caches
+        if: success()
+        uses: ./.github/actions/go-cache
+        with:
+          mode: save
+          job: api
+          go-version: ${{ steps.go.outputs.go-version }}
+          cache-hit: ${{ steps.go-cache.outputs.cache-hit }}
+          primary-key: ${{ steps.go-cache.outputs.cache-primary-key }}
 
   # From v1.0.0 on no commit may mark itself breaking: the release would cut
   # a major the Go proxy ignores. Git alone answers it, so it runs on every
@@ -488,7 +632,7 @@ jobs:
   # change, which is a pass; a failure or a cancellation anywhere is not.
   checks:
     name: All checks passed
-    needs: [changes, verify, pgstore, redis, floor, api, markers, syntax, audit]
+    needs: [changes, verify, pgstore, examples-pgstore, redis, floor, api, markers, syntax, audit]
     if: always()
     runs-on: ubuntu-26.04
     timeout-minutes: 5
