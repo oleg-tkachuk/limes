@@ -99,13 +99,17 @@ const UPDATE_METHOD = "rebase";
 const NOT_FOUND = 404;
 // CHECKS_PER_HEAD bounds the check runs and statuses read at a head.
 const CHECKS_PER_HEAD = 100;
+// PAGE_SIZE is the most nodes the GraphQL API returns for one connection
+// page; a longer listing is read a page at a time.
+export const PAGE_SIZE = 100;
 
 // OPEN_PULL_REQUESTS reads the open pull requests into a branch with what
 // the merge queue decides on. `gh pr list` read the same fields.
 const OPEN_PULL_REQUESTS = `
-query ($owner: String!, $repo: String!, $base: String!, $limit: Int!, $checks: Int!) {
+query ($owner: String!, $repo: String!, $base: String!, $first: Int!, $after: String, $checks: Int!) {
   repository(owner: $owner, name: $repo) {
-    pullRequests(states: OPEN, baseRefName: $base, first: $limit, orderBy: {field: CREATED_AT, direction: ASC}) {
+    pullRequests(states: OPEN, baseRefName: $base, first: $first, after: $after, orderBy: {field: CREATED_AT, direction: ASC}) {
+      pageInfo { hasNextPage endCursor }
       nodes {
         number
         state
@@ -160,6 +164,11 @@ export interface GraphQLPullRequest {
   author: { login: string; __typename: string } | null;
   autoMergeRequest: { enabledAt: string } | null;
   commits: { nodes: { commit: { statusCheckRollup: { contexts: { nodes: GraphQLContext[] } } | null } }[] };
+}
+
+// PullRequestPage is one page of the query above.
+interface PullRequestPage {
+  repository: { pullRequests: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: GraphQLPullRequest[] } };
 }
 
 // GRAPHQL_OPEN and GRAPHQL_BOT are how the GraphQL API spells an open pull
@@ -230,13 +239,25 @@ export function gitHubOver(octokit: Octokit, repo: Repo): GitHub {
       };
     },
     async openPullRequests(base, limit) {
-      const data = await octokit.graphql<{ repository: { pullRequests: { nodes: GraphQLPullRequest[] } } }>(OPEN_PULL_REQUESTS, {
-        ...repo,
-        base,
-        limit,
-        checks: CHECKS_PER_HEAD,
-      });
-      return data.repository.pullRequests.nodes.map(queuedOf);
+      const listed: QueuedPullRequest[] = [];
+      let after: string | null = null;
+      while (listed.length < limit) {
+        const page: PullRequestPage = await octokit.graphql<PullRequestPage>(OPEN_PULL_REQUESTS, {
+          ...repo,
+          base,
+          first: Math.min(PAGE_SIZE, limit - listed.length),
+          after,
+          checks: CHECKS_PER_HEAD,
+        });
+        const { nodes, pageInfo } = page.repository.pullRequests;
+        listed.push(...nodes.map(queuedOf));
+        // An empty page ends the listing whatever it says follows it.
+        if (!pageInfo.hasNextPage || nodes.length === 0) {
+          break;
+        }
+        after = pageInfo.endCursor;
+      }
+      return listed;
     },
     async permission(login) {
       try {
