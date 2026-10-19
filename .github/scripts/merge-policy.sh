@@ -58,15 +58,20 @@ readonly CI_DEFINITION=(
 # never seen, so a pull request that reaches it is left for a person.
 # shellcheck disable=SC2034 # read by the scripts that source this one
 readonly FILES_API_CAP=3000
+# The most files the compare API lists for two commits, which lists a
+# commit's own files rather than those of a head that may move.
+# shellcheck disable=SC2034 # read by the scripts that source this one
+readonly COMPARE_FILES_CAP=300
 
 # files_listed_in_full reports whether <listed> files of a pull request
 # GitHub says changes <changed> are all of them: changed is a count, the two
-# agree, and the listing did not stop at the files API's cap. A count that is
-# not one — empty, null — is never read as a complete listing, and neither
-# is one the listing disagrees with either way: more files than changed
-# means the two answers describe different heads.
+# agree, and the listing did not stop at <cap>, the cap of the API that
+# listed them. A count that is not one — empty, null — is never read as a
+# complete listing, and neither is one the listing disagrees with either
+# way: more files than changed means the two answers describe different
+# heads.
 files_listed_in_full() {
-    [[ $1 =~ ^[0-9]+$ && $2 =~ ^[0-9]+$ ]] && [ "$1" -eq "$2" ] && [ "$1" -lt "$FILES_API_CAP" ]
+    [[ $1 =~ ^[0-9]+$ && $2 =~ ^[0-9]+$ ]] && [ "$1" -eq "$2" ] && [ "$1" -lt "$3" ]
 }
 
 # defines_ci reports whether path is one CI_DEFINITION names.

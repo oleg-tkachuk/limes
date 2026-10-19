@@ -71,16 +71,18 @@ merge_if_green() {
         echo "::notice::#$pr is by $author, who cannot push here; left for a person to merge"
         return 0
     fi
-    # A renamed file names its old path only in previous_filename: moving a
-    # CI definition out of its place changes what CI runs as surely as
-    # deleting it does.
+    # The files of HEAD_SHA itself, the commit the run tested and the merge
+    # names: the pull request's own listing is of its head now, which may
+    # have moved and come back between the reads. A renamed file names its
+    # old path only in previous_filename: moving a CI definition out of its
+    # place changes what CI runs as surely as deleting it does.
     local entries files
-    entries="$(gh_retry api "repos/${REPO}/pulls/${pr}/files" --paginate --jq '.[] | [.filename, (.previous_filename // "")] | @tsv')"
+    entries="$(gh_retry api "repos/${REPO}/compare/${BASE_BRANCH}...${HEAD_SHA}" --jq '.files[] | [.filename, (.previous_filename // "")] | @tsv')"
     # Every file the pull request changes must have been listed: one the
     # API left out could be a CI definition.
     local listed
     listed="$(grep -c . <<<"$entries" || true)"
-    if ! files_listed_in_full "$listed" "$changed"; then
+    if ! files_listed_in_full "$listed" "$changed" "$COMPARE_FILES_CAP"; then
         echo "::notice::#$pr changes $changed files and $listed were listed; left for a person to merge"
         return 0
     fi
@@ -93,7 +95,7 @@ merge_if_green() {
         fi
     done <<<"$files"
     # Refused if the head moved since it was read: the run tested HEAD_SHA,
-    # and the files above are HEAD_SHA's only while the head stays there.
+    # whose files are the ones read above.
     if gh_retry pr merge "$pr" --repo "$REPO" --merge --match-head-commit "$HEAD_SHA"; then
         echo "::notice::#$pr merged at $HEAD_SHA"
     else
