@@ -835,7 +835,8 @@ Run `Migrate` as the role that owns the schema and serve as another one. The
 policies bind the owner too (`FORCE ROW LEVEL SECURITY`), and `Migrate` scopes
 its run to every tenant; but the owner may turn them off, and a superuser or a
 role with `BYPASSRLS` is never bound, so `CheckSchema` refuses a pool of any of
-the three with `ErrRuntimeRole`. `MigrateOptions.RuntimeRoles` grants the
+the three — or of a role owning anything in the schema, or able to act as one
+of these — with `ErrRuntimeRole`. `MigrateOptions.RuntimeRoles` grants the
 serving roles the schema, its tables and the tables of later versions, and
 only reads of the version table. Run it before any migration of yours that
 refers to its tables. It holds the advisory lock every `tern` migration
