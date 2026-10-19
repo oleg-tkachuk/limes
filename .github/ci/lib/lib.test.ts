@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 
-import { escapeData, setOutput } from "./actions.ts";
+import { ANNOTATIONS_ENV, ANNOTATIONS_OFF, Level, annotation, escapeData, setOutput } from "./actions.ts";
 import { optionalEnv, requireEnv } from "./env.ts";
 import { lines } from "./git.ts";
 
@@ -56,3 +56,30 @@ describe("env", () => {
 });
 
 test("lines drops empty lines", () => assert.deepEqual(lines("a\n\nb\n"), ["a", "b"]));
+
+describe("annotation", () => {
+  const saved = process.env[ANNOTATIONS_ENV];
+  afterEach(() => {
+    if (saved === undefined) delete process.env[ANNOTATIONS_ENV];
+    else process.env[ANNOTATIONS_ENV] = saved;
+  });
+  test("a workflow command, escaped", () => {
+    delete process.env[ANNOTATIONS_ENV];
+    assert.equal(annotation(Level.Error, "a\nb"), "::error::a%0Ab");
+  });
+  test("a plain line while annotations are off", () => {
+    process.env[ANNOTATIONS_ENV] = ANNOTATIONS_OFF;
+    assert.equal(annotation(Level.Warning, "x"), "warning: x");
+  });
+});
+
+// The Taskfile turns annotations off for these tests by the same name and
+// value actions.ts reads.
+test("verify:ci runs the tests with annotations off", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { parse } = await import("yaml");
+  const taskfile = parse(readFileSync(new URL("../../../Taskfile.yaml", import.meta.url), "utf8")) as {
+    tasks: Record<string, { env?: Record<string, string> }>;
+  };
+  assert.equal(taskfile.tasks["verify:ci"]?.env?.[ANNOTATIONS_ENV], ANNOTATIONS_OFF);
+});

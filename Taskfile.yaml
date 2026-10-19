@@ -225,6 +225,10 @@ tasks:
       # The marker checks count commits through the release's own analyzer.
       - sh: test -d ../release/node_modules/@semantic-release/commit-analyzer
         msg: "the release tooling is not installed — npm ci --ignore-scripts --prefix .github/release"
+    # The tests drive commands through refusals on purpose: those print as
+    # plain lines, not as annotations of the run (lib/actions.ts).
+    env:
+      LIMES_CI_ANNOTATIONS: "off"
     cmds:
       - node_modules/.bin/tsc -p .
       - node --test

@@ -24,17 +24,33 @@ export function escapeData(message: string): string {
   return message.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
 }
 
+// ANNOTATIONS_ENV, set to ANNOTATIONS_OFF, writes an annotation as a plain
+// log line: the tests that drive a command through its refusals set it, so
+// a refusal a test expects is not shown on the run as one of the run's own.
+export const ANNOTATIONS_ENV = "LIMES_CI_ANNOTATIONS";
+export const ANNOTATIONS_OFF = "off";
+
+// Level is the kind of an annotation.
+export const Level = { Notice: "notice", Warning: "warning", Error: "error" } as const;
+export type Level = (typeof Level)[keyof typeof Level];
+
+// annotation is the line that annotates the run with message at level, or
+// the plain line that stands for it while annotations are off.
+export function annotation(level: Level, message: string): string {
+  return process.env[ANNOTATIONS_ENV] === ANNOTATIONS_OFF ? `${level}: ${message}` : `::${level}::${escapeData(message)}`;
+}
+
 // notice, warning and error annotate the run; info is a plain log line.
 export function notice(message: string): void {
-  console.log(`::notice::${escapeData(message)}`);
+  console.log(annotation(Level.Notice, message));
 }
 
 export function warning(message: string): void {
-  console.log(`::warning::${escapeData(message)}`);
+  console.log(annotation(Level.Warning, message));
 }
 
 export function error(message: string): void {
-  console.log(`::error::${escapeData(message)}`);
+  console.log(annotation(Level.Error, message));
 }
 
 export function info(message: string): void {
