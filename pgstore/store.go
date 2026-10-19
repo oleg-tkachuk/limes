@@ -47,6 +47,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
 // Insert records req.Capability and who asked for it. The parent must be on
 // record, in the same tenant, and expire no earlier than the child, and the
 // child may have no more than limes.MaxDelegationDepth ancestors on record.
+// A tenant whose usage EraseTenantUsage removed is refused with
+// limes.ErrTenantErased.
 func (s *Store) Insert(ctx context.Context, req limes.InsertRequest) error {
 	if err := req.Validate(); err != nil {
 		return err
@@ -61,6 +63,11 @@ func (s *Store) Insert(ctx context.Context, req limes.InsertRequest) error {
 		return err
 	}
 	err = s.inTenantTx(ctx, c.Subject.TenantID, func(tx pgx.Tx) error {
+		// Shares the tenant's erase lock: an erase that commits first is
+		// seen, one that comes after waits for this insert.
+		if err := notErased(ctx, tx, c.Subject.TenantID); err != nil {
+			return err
+		}
 		var exists bool
 		if err := tx.QueryRow(ctx, sqlCapabilityExists, c.ID).Scan(&exists); err != nil {
 			return err

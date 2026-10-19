@@ -136,11 +136,19 @@ func TestPurgeOrphansForgetsAnErasedTenantWithNoRecordLeft(t *testing.T) {
 		_, err := f.usage.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{TenantID: f.mine, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: testUnit}})
 		return err
 	}
+	insert := func() error {
+		c := f.parent
+		c.ID, c.ExpiresAt = uuid.New(), f.clock.Now().Add(rlsTTL)
+		return f.records.Insert(ctx, limes.InsertRequest{Capability: c})
+	}
 	if _, err := f.usage.PurgeOrphans(all, meter.PurgeOrphansRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := setBudget(); !errors.Is(err, limes.ErrTenantErased) {
 		t.Fatalf("SetTenantBudget with records of the tenant left: err = %v, want ErrTenantErased", err)
+	}
+	if err := insert(); !errors.Is(err, limes.ErrTenantErased) {
+		t.Fatalf("Insert with records of the tenant left: err = %v, want ErrTenantErased", err)
 	}
 	f.clock.Advance(rlsTTL + 2*limes.MinPurgeRetention)
 	if _, err := f.records.Purge(all, limes.PurgeRequest{}); err != nil {
@@ -151,5 +159,8 @@ func TestPurgeOrphansForgetsAnErasedTenantWithNoRecordLeft(t *testing.T) {
 	}
 	if err := setBudget(); err != nil {
 		t.Fatalf("SetTenantBudget once no record of the tenant is left: %v", err)
+	}
+	if err := insert(); err != nil {
+		t.Fatalf("Insert once no record of the tenant is left: %v", err)
 	}
 }
