@@ -181,16 +181,16 @@ func (s *UsageStore) admitCopiesLocked(subject limes.MeterSubject, ancestors []l
 	return nil
 }
 
-// putCopyLocked stores a copy's counters, counting the copy for its
-// capability and every ancestor on record when it is new. s.mu must be
-// held.
-func (s *UsageStore) putCopyLocked(key copyKey, cc copyCounter) {
+// putCopyLocked stores a copy's counters. A new copy is counted for its
+// capability and for ancestors, those admitCopiesLocked checked it against:
+// the records are locked apart, so a lineage read again here could be
+// shorter than the one admitted. s.mu must be held.
+func (s *UsageStore) putCopyLocked(key copyKey, cc copyCounter, ancestors []uuid.UUID) {
 	if !hasKey(s.copies, key) {
 		s.copyCount[key.capID]++
 		s.copiesUnder[key.capID]++
-		ancestors, _ := s.lineage(key.capID) // admitted on the same chain, under s.mu
-		for _, a := range ancestors {
-			s.copiesUnder[a.ID]++
+		for _, id := range ancestors {
+			s.copiesUnder[id]++
 		}
 	}
 	s.copies[key] = cc
@@ -804,7 +804,7 @@ func (s *UsageStore) Bump(_ context.Context, req meter.BumpRequest) (meter.BumpR
 		key := copyKeyOf(req.Subject.CapabilityID(), c.RevocationID)
 		cc := s.copies[key]
 		cc.requests++
-		s.putCopyLocked(key, cc)
+		s.putCopyLocked(key, cc, ancestorIDs(ancestors))
 	}
 	u.CapabilityID = req.Subject.CapabilityID()
 	u.RequestCount = next
@@ -1053,7 +1053,7 @@ func (s *UsageStore) chargeLocked(
 		cc := s.copies[key]
 		cc.spent += req.Amount
 		cc.reserved = max0(cc.reserved - released)
-		s.putCopyLocked(key, cc)
+		s.putCopyLocked(key, cc, ancestorIDs(ancestors))
 		copyIDs = append(copyIDs, c.RevocationID)
 	}
 	entry := ledgerEntry{
@@ -1278,11 +1278,17 @@ func (s *UsageStore) applyHoldLocked(h hold, sign limes.Nanos) {
 	b.ReservedAmount = max0(b.ReservedAmount + sign*h.amount)
 	b.UpdatedAt = s.nowFn()
 	s.budgets[h.tenantID] = b
+	// Placing a hold counts a new copy under the ancestors it was admitted
+	// against; removing one only lowers what a copy still on record holds,
+	// so it never brings back, and counts again, a copy since dropped.
 	for _, c := range h.copies {
 		key := copyKeyOf(h.capID, c.RevocationID)
-		cc := s.copies[key]
+		cc, ok := s.copies[key]
+		if !ok && sign < 0 {
+			continue
+		}
 		cc.reserved = max0(cc.reserved + sign*h.amount)
-		s.putCopyLocked(key, cc)
+		s.putCopyLocked(key, cc, h.ancestors)
 	}
 }
 
@@ -1542,7 +1548,7 @@ func (s *UsageStore) Refund(_ context.Context, req meter.RefundRequest) (meter.R
 		key := copyKeyOf(e.CapabilityID, id)
 		if cc, ok := s.copies[key]; ok {
 			cc.spent = max0(cc.spent - amount)
-			s.putCopyLocked(key, cc)
+			s.putCopyLocked(key, cc, nil)
 		}
 	}
 	e.RefundedAmount += amount
