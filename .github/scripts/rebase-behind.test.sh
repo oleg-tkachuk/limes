@@ -134,6 +134,11 @@ FAKE_PRS="$(prs "$(pr 1 a1 changedFiles=2)" "$(pr 2 a2)")"
 FAKE_FILES='{"1": [{"filename": "verifier.go"}]}' run "files left unlisted"
 rebased_only 2 a2 || fail "updated: $(updates | tr '\n' ';'), want #2, not #1 with a file unlisted"
 
+# A count of changed files that is not one leaves the pull request out of line.
+FAKE_PRS="$(prs "$(pr 1 a1 changedFiles=null)" "$(pr 2 a2)")"
+FAKE_FILES='{"1": [{"filename": "verifier.go"}]}' run "a count that is not one"
+rebased_only 2 a2 || fail "updated: $(updates | tr '\n' ';'), want #2, not #1 with no count of its files"
+
 # A CI change with auto-merge on merges itself, so it is in line.
 FAKE_PRS="$(prs "$(pr 7 a7 'autoMergeRequest={"mergeMethod":"MERGE"}')" "$(pr 9 a9)")"
 run "a CI change with auto-merge"

@@ -59,6 +59,14 @@ readonly CI_DEFINITION=(
 # shellcheck disable=SC2034 # read by the scripts that source this one
 readonly FILES_API_CAP=3000
 
+# files_listed_in_full reports whether <listed> files of a pull request
+# GitHub says changes <changed> are all of them: changed is a count, none is
+# missing, and the listing did not stop at the files API's cap. A count that
+# is not one — empty, null — is never read as a complete listing.
+files_listed_in_full() {
+    [[ $1 =~ ^[0-9]+$ && $2 =~ ^[0-9]+$ ]] && [ "$1" -ge "$2" ] && [ "$1" -lt "$FILES_API_CAP" ]
+}
+
 # defines_ci reports whether path is one CI_DEFINITION names.
 defines_ci() {
     local pattern

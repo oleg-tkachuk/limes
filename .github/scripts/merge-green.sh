@@ -80,7 +80,7 @@ merge_if_green() {
     # API left out could be a CI definition.
     local listed
     listed="$(grep -c . <<<"$entries" || true)"
-    if [ "$listed" -lt "$changed" ] || [ "$listed" -ge "$FILES_API_CAP" ]; then
+    if ! files_listed_in_full "$listed" "$changed"; then
         echo "::notice::#$pr changes $changed files and $listed were listed; left for a person to merge"
         return 0
     fi
