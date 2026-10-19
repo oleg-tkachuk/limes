@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -89,7 +90,7 @@ func Migrate(ctx context.Context, conn *pgx.Conn, opts MigrateOptions) error {
 	if err := m.LoadMigrations(dir); err != nil {
 		return fmt.Errorf("pgstore: migrate: load: %w", err)
 	}
-	if err := migrateAllTenants(ctx, conn, m); err != nil {
+	if err := migrateAllTenants(ctx, conn, m.Migrate); err != nil {
 		return err
 	}
 	return grant(ctx, conn, opts.RuntimeRoles)
@@ -102,12 +103,19 @@ const (
 	sqlSettingNow = `SELECT coalesce(current_setting($1, true), '')`
 )
 
-// migrateAllTenants runs the migrations scoped to every tenant, to read and
-// write: row-level security binds the owner (010_force_row_security.sql), so
-// a migration that moves data would otherwise see no row and change none
+// restoreScopeTimeout bounds putting the session's scope back after a run,
+// which goes ahead when the caller's context is done: the connection is the
+// caller's, and a pool would hand it on still scoped to every tenant.
+const restoreScopeTimeout = 5 * time.Second
+
+// migrateAllTenants runs the migrations (run) scoped to every tenant, to read
+// and write: row-level security binds the owner (010_force_row_security.sql),
+// so a migration that moves data would otherwise see no row and change none
 // without a word. The session's own value comes back after, so a consumer's
-// migration run on the same connection keeps what it set.
-func migrateAllTenants(ctx context.Context, conn *pgx.Conn, m *migrate.Migrator) (err error) {
+// migration run on the same connection keeps what it set — even when ctx
+// ends during the run. When it cannot come back, the connection is closed
+// rather than left scoped to every tenant.
+func migrateAllTenants(ctx context.Context, conn *pgx.Conn, run func(context.Context) error) (err error) {
 	var before string
 	if err := conn.QueryRow(ctx, sqlSettingNow, SettingAllTenants).Scan(&before); err != nil {
 		return fmt.Errorf("pgstore: migrate: read the scope: %w", err)
@@ -116,11 +124,14 @@ func migrateAllTenants(ctx context.Context, conn *pgx.Conn, m *migrate.Migrator)
 		return fmt.Errorf("pgstore: migrate: scope to every tenant: %w", err)
 	}
 	defer func() {
-		if _, rerr := conn.Exec(ctx, sqlSetSession, SettingAllTenants, before); rerr != nil && err == nil {
-			err = fmt.Errorf("pgstore: migrate: restore the scope: %w", rerr)
+		restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), restoreScopeTimeout)
+		defer cancel()
+		if _, rerr := conn.Exec(restoreCtx, sqlSetSession, SettingAllTenants, before); rerr != nil {
+			_ = conn.Close(restoreCtx)
+			err = errors.Join(err, fmt.Errorf("pgstore: migrate: restore the scope, connection closed: %w", rerr))
 		}
 	}()
-	if err := m.Migrate(ctx); err != nil {
+	if err := run(ctx); err != nil {
 		return fmt.Errorf("pgstore: migrate: %w", err)
 	}
 	return nil
