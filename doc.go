@@ -24,9 +24,8 @@
 // docs/standards.md lists every standard followed. Verification is local:
 // the signature is checked against a resolved public key, and the store
 // reads, whether the capability is revoked and, for a Biscuit, whether its
-// copy is, go through short-lived caches ([RevocationCache],
-// [BiscuitRevocationCache]), so consumers scale horizontally without
-// contending on a shared store.
+// copy is, go through one short-lived cache ([RevocationCache]), so
+// consumers scale horizontally without contending on a shared store.
 //
 // # Packages
 //

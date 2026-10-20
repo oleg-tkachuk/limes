@@ -2,6 +2,7 @@ package limes
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -37,7 +38,7 @@ func (s *slowBiscuitLookup) IsBiscuitRevoked(context.Context, [][]byte) (bool, e
 func TestBiscuitRevocationCacheCoalescesConcurrentMisses(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		up := &slowBiscuitLookup{release: make(chan struct{})}
-		c := newBiscuitCache(t, BiscuitRevocationCacheConfig{Upstream: up, TTL: cacheTTL})
+		c := newBiscuitCache(t, RevocationCacheConfig{Biscuits: up, TTL: cacheTTL})
 		ids := [][]byte{[]byte("a"), []byte("b")}
 
 		var wg sync.WaitGroup
@@ -58,29 +59,24 @@ func TestBiscuitRevocationCacheCoalescesConcurrentMisses(t *testing.T) {
 	})
 }
 
-// Sweep drops what has expired and keeps what has not, in both caches.
-func TestRevocationCachesSweep(t *testing.T) {
+// Sweep drops what has expired and keeps what has not, of both kinds.
+func TestRevocationCacheSweep(t *testing.T) {
 	ctx := context.Background()
 	now := time.Unix(1_800_000_000, 0)
 	clock := func() time.Time { return now }
-	caps := newRevocationCache(t, RevocationCacheConfig{Upstream: newMemStore(), TTL: cacheTTL, Now: clock})
-	copies := newBiscuitCache(t, BiscuitRevocationCacheConfig{Upstream: &countingBiscuitLookup{}, TTL: cacheTTL, Now: clock})
+	c := newRevocationCache(t, RevocationCacheConfig{Capabilities: newMemStore(), Biscuits: &countingBiscuitLookup{}, TTL: cacheTTL, Now: clock})
 
-	old := uuid.New()
-	_, _ = caps.IsRevoked(ctx, old)
-	_, _ = copies.IsBiscuitRevoked(ctx, [][]byte{[]byte("old")})
+	_, _ = c.IsRevoked(ctx, uuid.New())
+	_, _ = c.IsBiscuitRevoked(ctx, [][]byte{[]byte("old")})
 	now = now.Add(cacheTTL / 2)
-	_, _ = caps.IsRevoked(ctx, uuid.New())
-	_, _ = copies.IsBiscuitRevoked(ctx, [][]byte{[]byte("new")})
+	_, _ = c.IsRevoked(ctx, uuid.New())
+	_, _ = c.IsBiscuitRevoked(ctx, [][]byte{[]byte("new")})
 	now = now.Add(cacheTTL / 2) // the old ones expire, the new ones live on
 
-	if n := caps.Sweep(); n != 1 || caps.cache.Len() != 1 {
-		t.Errorf("capability cache Sweep = %d, %d left; want 1 dropped, 1 left", n, caps.cache.Len())
+	if n := c.Sweep(); n != 2 || c.caps.Len() != 1 || c.copies.Len() != 1 {
+		t.Errorf("Sweep = %d, %d and %d left; want 2 dropped, one of each kind left", n, c.caps.Len(), c.copies.Len())
 	}
-	if n := copies.Sweep(); n != 1 || copies.cache.Len() != 1 {
-		t.Errorf("Biscuit cache Sweep = %d, %d left; want 1 dropped, 1 left", n, copies.cache.Len())
-	}
-	if n := caps.Sweep(); n != 0 {
+	if n := c.Sweep(); n != 0 {
 		t.Errorf("a second Sweep dropped %d", n)
 	}
 }
@@ -113,7 +109,7 @@ func (s *staleThenRevoked) IsRevoked(context.Context, uuid.UUID) (bool, error) {
 func TestRevocationCacheClearDuringLookupIsNotUndone(t *testing.T) {
 	ctx := context.Background()
 	up := newStaleThenRevoked()
-	c := newRevocationCache(t, RevocationCacheConfig{Upstream: up, TTL: cacheTTL})
+	c := newRevocationCache(t, RevocationCacheConfig{Capabilities: up, TTL: cacheTTL})
 	id := uuid.New()
 
 	stale := make(chan bool)
@@ -158,7 +154,7 @@ func (p *panickingLookup) IsRevoked(context.Context, uuid.UUID) (bool, error) {
 func TestRevocationCacheLookupPanicReleasesWaiters(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		up := &panickingLookup{entered: make(chan struct{}), release: make(chan struct{})}
-		c := newRevocationCache(t, RevocationCacheConfig{Upstream: up, TTL: cacheTTL})
+		c := newRevocationCache(t, RevocationCacheConfig{Capabilities: up, TTL: cacheTTL})
 		id := uuid.New()
 
 		go func() {
@@ -209,7 +205,7 @@ func TestRevocationCacheEvictsTheOldestWhenFull(t *testing.T) {
 	const bound = 4
 	ctx := context.Background()
 	up := &countingLookup{}
-	c := newRevocationCache(t, RevocationCacheConfig{Upstream: up, TTL: time.Hour, MaxEntries: bound})
+	c := newRevocationCache(t, RevocationCacheConfig{Capabilities: up, TTL: time.Hour, MaxEntries: bound})
 	ids := make([]uuid.UUID, bound)
 	for i := range ids {
 		ids[i] = uuid.New()
@@ -227,7 +223,7 @@ func TestRevocationCacheEvictsTheOldestWhenFull(t *testing.T) {
 	if n := up.calls.Load() - before; n != 1 {
 		t.Errorf("the oldest answer was kept past the bound (%d upstream calls, want 1)", n)
 	}
-	if n := c.cache.Len(); n > bound {
+	if n := c.caps.Len(); n > bound {
 		t.Errorf("cache holds %d entries, bound %d", n, bound)
 	}
 }
@@ -238,7 +234,7 @@ func TestRevocationCacheOrderStaysBounded(t *testing.T) {
 	const bound, churn = 10, 10_000
 	ctx := context.Background()
 	clock := &mutableClock{now: time.Unix(0, 0)}
-	c := newRevocationCache(t, RevocationCacheConfig{Upstream: &countingLookup{}, TTL: cacheTTL, MaxEntries: bound, Now: func() time.Time { return clock.now }})
+	c := newRevocationCache(t, RevocationCacheConfig{Capabilities: &countingLookup{}, TTL: cacheTTL, MaxEntries: bound, Now: func() time.Time { return clock.now }})
 	ids := make([]uuid.UUID, bound/2)
 	for i := range ids {
 		ids[i] = uuid.New()
@@ -249,7 +245,7 @@ func TestRevocationCacheOrderStaysBounded(t *testing.T) {
 		_, _ = c.IsRevoked(ctx, ids[i%len(ids)])
 		clock.now = clock.now.Add(cacheTTL / 3)
 	}
-	if n, e := c.cache.Queued(), c.cache.Len(); n > bound || n != e {
+	if n, e := c.caps.Queued(), c.caps.Len(); n > bound || n != e {
 		t.Errorf("the eviction order holds %d places for %d entries and a bound of %d", n, e, bound)
 	}
 }
@@ -265,34 +261,82 @@ func newRevocationCache(t testing.TB, cfg RevocationCacheConfig) *RevocationCach
 	return c
 }
 
-// newBiscuitCache is NewBiscuitRevocationCache, failing the test on a
-// refused configuration.
-func newBiscuitCache(t testing.TB, cfg BiscuitRevocationCacheConfig) *BiscuitRevocationCache {
+// newBiscuitCache is newRevocationCache for a test of Biscuit answers: one
+// that sets no capability upstream gets an empty store.
+func newBiscuitCache(t testing.TB, cfg RevocationCacheConfig) *RevocationCache {
 	t.Helper()
-	c, err := NewBiscuitRevocationCache(cfg)
-	if err != nil {
-		t.Fatal(err)
+	if cfg.Capabilities == nil {
+		cfg.Capabilities = newMemStore()
 	}
-	return c
+	return newRevocationCache(t, cfg)
 }
 
-// A configuration with no upstream, or a negative TTL or bound, is refused
-// rather than read as "no cache" or "the default".
-func TestRevocationCachesRefuseABadConfiguration(t *testing.T) {
+// A configuration with no capability upstream, or a negative TTL or bound,
+// is refused rather than read as "no cache" or "the default". A Biscuit
+// upstream alone is no capability upstream.
+func TestRevocationCacheRefusesABadConfiguration(t *testing.T) {
 	for name, cfg := range map[string]RevocationCacheConfig{
-		"no upstream":    {},
-		"negative TTL":   {Upstream: newMemStore(), TTL: -time.Second},
-		"negative bound": {Upstream: newMemStore(), MaxEntries: -1},
+		"no upstream":         {},
+		"a Biscuit one alone": {Biscuits: &countingBiscuitLookup{}},
+		"negative TTL":        {Capabilities: newMemStore(), TTL: -time.Second},
+		"negative bound":      {Capabilities: newMemStore(), MaxEntries: -1},
 	} {
 		if _, err := NewRevocationCache(cfg); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
-		bcfg := BiscuitRevocationCacheConfig{TTL: cfg.TTL, MaxEntries: cfg.MaxEntries}
-		if cfg.Upstream != nil {
-			bcfg.Upstream = &countingBiscuitLookup{}
-		}
-		if _, err := NewBiscuitRevocationCache(bcfg); err == nil {
-			t.Errorf("%s: the Biscuit cache accepted it", name)
-		}
+	}
+}
+
+// A cache with no Biscuit upstream refuses a Biscuit question rather than
+// answer "live", and NewVerifier refuses it where Biscuits are read.
+func TestRevocationCacheWithoutBiscuits(t *testing.T) {
+	c := newRevocationCache(t, RevocationCacheConfig{Capabilities: newMemStore(), TTL: cacheTTL})
+	if revoked, err := c.IsBiscuitRevoked(context.Background(), [][]byte{[]byte("a")}); !errors.Is(err, errNoBiscuitLookup) || revoked {
+		t.Errorf("IsBiscuitRevoked = %v, %v; want errNoBiscuitLookup", revoked, err)
+	}
+	_, err := NewVerifier(VerifierConfig{
+		Keys: staticKeys(t, map[string]ed25519.PublicKey{}), Revocations: c, TrustedIssuers: []string{goldenIssuer},
+		Biscuit: &BiscuitConfig{Revocations: c},
+	})
+	if !errors.Is(err, errNoBiscuitLookup) {
+		t.Errorf("NewVerifier = %v, want errNoBiscuitLookup", err)
+	}
+}
+
+// One Clear drops the answers of both kinds: a revocation notification wired
+// to it reaches every answer the verifier holds.
+func TestRevocationCacheClearDropsBothKinds(t *testing.T) {
+	ctx := context.Background()
+	caps, copies := &countingLookup{}, &countingBiscuitLookup{}
+	c := newRevocationCache(t, RevocationCacheConfig{Capabilities: caps, Biscuits: copies, TTL: cacheTTL})
+	id, copyID := uuid.New(), [][]byte{[]byte("a")}
+	_, _ = c.IsRevoked(ctx, id)
+	_, _ = c.IsBiscuitRevoked(ctx, copyID)
+	c.Clear()
+	_, _ = c.IsRevoked(ctx, id)
+	_, _ = c.IsBiscuitRevoked(ctx, copyID)
+	if caps.calls.Load() != 2 || copies.calls != 2 {
+		t.Errorf("after Clear: %d capability and %d Biscuit lookups, want 2 of each", caps.calls.Load(), copies.calls)
+	}
+}
+
+// Each kind of answer has a bound of its own: a flood of Biscuit ids does
+// not evict the capability answers.
+func TestRevocationCacheBoundsEachKind(t *testing.T) {
+	ctx := context.Background()
+	const bound = 2
+	caps := &countingLookup{}
+	c := newRevocationCache(t, RevocationCacheConfig{Capabilities: caps, Biscuits: &countingBiscuitLookup{}, TTL: cacheTTL, MaxEntries: bound})
+	id := uuid.New()
+	_, _ = c.IsRevoked(ctx, id)
+	for i := range 4 * bound {
+		_, _ = c.IsBiscuitRevoked(ctx, [][]byte{{byte(i)}})
+	}
+	_, _ = c.IsRevoked(ctx, id)
+	if caps.calls.Load() != 1 {
+		t.Errorf("the capability answer was evicted by Biscuit answers: %d lookups", caps.calls.Load())
+	}
+	if c.copies.Len() > bound {
+		t.Errorf("%d Biscuit entries, bound %d", c.copies.Len(), bound)
 	}
 }
