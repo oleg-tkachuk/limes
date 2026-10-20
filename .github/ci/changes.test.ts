@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join, normalize } from "node:path";
 import { after, before, describe, test } from "node:test";
 
 import { parse } from "yaml";
 
-import { ALL_GROUPS, Group, INERT, OUTPUT_CODE, PUSH_EVENT, SCRIPTS_TASKS, VERIFY_GATE, candidateRange, checkedGroups, classify, reachedGroups, reachesCode, verifyTasks } from "./changes.ts";
+import { ALL_GROUPS, Group, INERT, READ_BY_TESTS, OUTPUT_CODE, PUSH_EVENT, SCRIPTS_TASKS, VERIFY_GATE, candidateRange, checkedGroups, classify, reachedGroups, reachesCode, verifyTasks } from "./changes.ts";
 import { globToRegExp } from "./lib/glob.ts";
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
 
@@ -120,9 +122,34 @@ describe("classify", () => {
   test("no diff reaches every group", async () => assert.deepEqual([...(await classify({ after: sha.docs }, repo.dir))].sort(), [...ALL_GROUPS].sort()));
 });
 
+// A file of INERT that a test reads is no documentation to the checks: a
+// change to it must run that test.
+describe("paths a test reads", () => {
+  test("the README reaches the examples, whose test runs its walkthrough", () =>
+    assert.deepEqual([...reachedGroups(["README.md"])], [Group.Examples]));
+  test("other documentation still reaches nothing", () => assert.equal(reachedGroups(["docs/guide.md", "pgstore/README.md"]).size, 0));
+  test("every inert path a Go test names is listed", () => {
+    const root = join(import.meta.dirname, "..", "..");
+    const tests = execFileSync("git", ["ls-files", "*_test.go"], { cwd: root, encoding: "utf8" }).split("\n").filter(Boolean);
+    const read = new Set<string>();
+    for (const file of tests) {
+      for (const [, literal] of readFileSync(join(root, file), "utf8").matchAll(/"([^"\s]+\.[A-Za-z0-9]+)"/g)) {
+        const path = normalize(join(dirname(file), literal ?? ""));
+        if (!path.startsWith("..") && existsSync(join(root, path)) && INERT.some((g) => globToRegExp(g).test(path))) {
+          read.add(path);
+        }
+      }
+    }
+    assert.ok(read.size > 0, "no Go test reads an inert path: this check found nothing");
+    for (const path of read) {
+      assert.ok(READ_BY_TESTS[path] !== undefined, `${path} is read by a test and inert to the checks`);
+    }
+  });
+});
+
 describe("reachedGroups", () => {
   const cases: [string, string[], Group[]][] = [
-    ["documentation", ["README.md", "pgstore/README.md"], []],
+    ["documentation", ["docs/guide.md", "pgstore/README.md"], []],
     ["the root module's code", ["verifier.go"], [Group.Root]],
     ["a root fixture", ["testdata/golden_token.jwt"], [Group.Root]],
     ["pgstore", ["pgstore/charge.go"], [Group.Pgstore]],

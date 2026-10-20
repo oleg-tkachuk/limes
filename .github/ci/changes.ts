@@ -110,8 +110,18 @@ export function reachesCode(paths: readonly string[]): boolean {
   return paths.some((path) => !matchesAny(path, INERT));
 }
 
+// READ_BY_TESTS are the inert-looking paths a test reads, with the group
+// whose checks run it: the README's five-minute walkthrough runs as
+// examples/internal/readme's test. changes.test.ts fails when a test reads a
+// path of INERT that is not listed here.
+export const READ_BY_TESTS: Readonly<Record<string, Group>> = { "README.md": Group.Examples };
+
 // groupsOf is the groups one path reaches.
 export function groupsOf(path: string): readonly Group[] {
+  const readBy = READ_BY_TESTS[path];
+  if (readBy !== undefined) {
+    return [readBy];
+  }
   if (matchesAny(path, INERT)) {
     return [];
   }
