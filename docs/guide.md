@@ -759,7 +759,12 @@ each id then asks the store once, so batch a burst of signals into one
 `Clear`. Build the cache with `NewRevocationCache` over your store, as
 `Capabilities` and, if the verifier reads Biscuits, `Biscuits`; `Sweep` drops
 its expired entries on a timer of yours, optional since lookups skip and replace
-them anyway. Over `pgstore`, run a `pgstore.RevocationWatcher` beside each
+them anyway. `Stats` reads what the cache has counted, for each kind of
+answer: the questions answered from it (`Hits`) and not (`Misses`), the
+upstream lookups those ran (`Lookups`, fewer when concurrent misses share
+one), the live answers dropped to stay within the bound (`Evictions`, which
+growing says `MaxEntries` is too small), the answers held (`Entries`), and
+the `Clears`; `otelmetric.InstrumentRevocationCache` exports them. Over `pgstore`, run a `pgstore.RevocationWatcher` beside each
 verifier: the schema notifies `pgstore.RevocationChannel` on every
 revocation, and the watcher clears the caches it is given on each
 notification and after each connection it opens:

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -388,5 +389,33 @@ func TestIsNilValue(t *testing.T) {
 		if got := isNilValue(c.v); got != c.want {
 			t.Errorf("%s: isNilValue = %v, want %v", name, got, c.want)
 		}
+	}
+}
+
+// Stats counts each kind's questions apart, a Biscuit question as a hit only
+// when every id of the token has a fresh answer, and the clears.
+func TestRevocationCacheStats(t *testing.T) {
+	ctx := context.Background()
+	c := newRevocationCache(t, RevocationCacheConfig{Capabilities: &countingLookup{}, Biscuits: &countingBiscuitLookup{}, TTL: cacheTTL})
+	id := uuid.New()
+	_, _ = c.IsRevoked(ctx, id)
+	_, _ = c.IsRevoked(ctx, id)
+	a, b, other := []byte("a"), []byte("b"), []byte("c")
+	_, _ = c.IsBiscuitRevoked(ctx, [][]byte{a, b})     // a miss, one lookup for both
+	_, _ = c.IsBiscuitRevoked(ctx, [][]byte{a, b})     // a hit: both seeded live
+	_, _ = c.IsBiscuitRevoked(ctx, [][]byte{a, other}) // a miss, for the new id
+	got := c.Stats()
+	if want := (RevocationCacheCounts{Hits: 1, Misses: 1, Lookups: 1, Entries: 1}); !reflect.DeepEqual(got.Capabilities, want) {
+		t.Errorf("Capabilities = %+v, want %+v", got.Capabilities, want)
+	}
+	// The set {a, b} and its ids a and b, then c.
+	const biscuitEntries = 4
+	if want := (RevocationCacheCounts{Hits: 1, Misses: 2, Lookups: 2, Entries: biscuitEntries}); !reflect.DeepEqual(got.Biscuits, want) {
+		t.Errorf("Biscuits = %+v, want %+v", got.Biscuits, want)
+	}
+	c.Clear()
+	got = c.Stats()
+	if got.Clears != 1 || got.Capabilities.Entries != 0 || got.Biscuits.Entries != 0 || got.Capabilities.Hits != 1 {
+		t.Errorf("after Clear: %+v, want 1 clear, no entries, the counts kept", got)
 	}
 }
