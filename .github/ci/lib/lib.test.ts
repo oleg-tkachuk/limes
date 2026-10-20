@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 
-import { ANNOTATIONS_ENV, ANNOTATIONS_OFF, Level, annotation, cell, escapeData, setOutput, table } from "./actions.ts";
+import { ANNOTATIONS_ENV, ANNOTATIONS_OFF, Level, annotation, cell, escapeData, infoLines, setOutput, table } from "./actions.ts";
 import { optionalEnv, requireEnv } from "./env.ts";
 import { lines } from "./git.ts";
 
@@ -56,6 +56,13 @@ describe("env", () => {
 });
 
 test("lines drops empty lines", () => assert.deepEqual(lines("a\n\nb\n"), ["a", "b"]));
+
+// A log line a change chose — a path named like a command — is no command.
+describe("infoLines", () => {
+  test("plain text is one line", () => assert.deepEqual(infoLines("a.go\nb.go", "t"), ["a.go\nb.go"]));
+  test("anything like a command is fenced off", () =>
+    assert.deepEqual(infoLines("a.go\n::warning::x.go", "t0k"), ["::stop-commands::t0k", "a.go\n::warning::x.go", "::t0k::"]));
+});
 
 describe("annotation", () => {
   const saved = process.env[ANNOTATIONS_ENV];

@@ -10,7 +10,7 @@ import { isReleaseTag, isStableReleaseTag, newReleaseTag, previousTag, proxyInfo
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
 import { withoutWorkflowCommands } from "./lib/actions.ts";
 import { releaseCommits } from "./lib/modules.ts";
-import { Channel, GATED, GATES, gateOf, releaseAll, type Release } from "./release.ts";
+import { Channel, GATED, GATES, gateOf, releaseAll, semanticReleaseCommand, type Release } from "./release.ts";
 
 const REPO = "oleg-tkachuk/limes";
 const RELEASE = new URL("../release/", import.meta.url).pathname;
@@ -449,4 +449,12 @@ test("release.yaml's inputs are the table's modules and the channels", async () 
   const root = new URL("../../", import.meta.url).pathname;
   assert.deepEqual([...(inputs.module?.options ?? [])].sort(), [ALL_MODULES, ...releasedModules(root)].sort());
   assert.deepEqual([...(inputs.channel?.options ?? [])].sort(), Object.values(Channel).sort());
+});
+
+// The release runs the semantic-release npm ci installed from the lockfile,
+// and nothing npx could fetch.
+test("semantic-release runs from the release tooling's own install", () => {
+  const [file, args] = semanticReleaseCommand("/repo");
+  assert.equal(file, "/repo/.github/release/node_modules/.bin/semantic-release");
+  assert.deepEqual(args, ["--no-ci"]);
 });

@@ -76,19 +76,42 @@ export function error(message: string): void {
   console.log(annotation(Level.Error, message));
 }
 
-export function info(message: string): void {
-  console.error(message);
-}
-
 // TOKEN_BYTES is how much randomness a stop-commands token carries.
 const TOKEN_BYTES = 16;
+
+// COMMAND_PREFIX starts a line the runner reads as a workflow command.
+const COMMAND_PREFIX = "::";
+
+// freshToken is a stop-commands token no log line can have guessed.
+function freshToken(): string {
+  return randomBytes(TOKEN_BYTES).toString("hex");
+}
+
+// infoLines is message as the lines that log it: inside a stop-commands
+// block under token when it holds anything the runner could read as a
+// workflow command — a path, a branch name or a title a change chose.
+export function infoLines(message: string, token: string): string[] {
+  if (!message.includes(COMMAND_PREFIX)) {
+    return [message];
+  }
+  return [`${COMMAND_PREFIX}stop-commands${COMMAND_PREFIX}${token}`, message, `${COMMAND_PREFIX}${token}${COMMAND_PREFIX}`];
+}
+
+// info is a plain log line, never a workflow command. The block's markers go
+// to the stream the message does: the runner reads two streams in no order
+// between them.
+export function info(message: string): void {
+  for (const line of infoLines(message, freshToken())) {
+    console.error(line);
+  }
+}
 
 // withoutWorkflowCommands runs fn with the runner reading no workflow
 // command from the log until it returns: what fn prints — commit messages a
 // release tool logs, say — can then never act as one. The token that resumes
 // them is fresh and printed only to resume.
 export async function withoutWorkflowCommands<T>(fn: () => Promise<T>): Promise<T> {
-  const token = randomBytes(TOKEN_BYTES).toString("hex");
+  const token = freshToken();
   console.log(`::stop-commands::${token}`);
   try {
     return await fn();
