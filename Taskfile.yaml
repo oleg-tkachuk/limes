@@ -15,7 +15,7 @@ silent: true
 
 vars:
   # Shared task library — github.com/oleg-tkachuk/taskfiles, pinned.
-  TASKLIB: 'https://github.com/oleg-tkachuk/taskfiles.git//%s?ref=v11.2.2'
+  TASKLIB: 'https://github.com/oleg-tkachuk/taskfiles.git//%s?ref=v12.0.0'
   # The developer tools' own module; see its go.mod.
   TOOLS_MODFILE: tools/go.mod
   # golangci-lint's module, apart from TOOLS_MODFILE; see its go.mod.
@@ -43,7 +43,7 @@ includes:
     # the gate runs it with --yes, so a moved tag fails rather than runs.
     # Task does not template this field; bump it with the ref, from the
     # checksum Task reports it got.
-    checksum: 4de07ad9c5fdd046002f1fd22bb68c40e4456d07f8d7b6c3e51253940267dada
+    checksum: 35407bf1753cf634f8507561392f8a6b730eb19879122700bd0137d8c4d1e573
     dir: .
     flatten: true
     # Its vuln and lint run a govulncheck and a golangci-lint from PATH; the
