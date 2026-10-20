@@ -17,6 +17,13 @@ export function isReleaseTag(tag: string, prefix: string): boolean {
   return tag.startsWith(`${prefix}v`) && /^[0-9]/.test(tag.slice(prefix.length + 1));
 }
 
+// isStableReleaseTag reports whether tag is a release tag of the module
+// whose tags start with prefix that names no prerelease: no -rc.N, nothing
+// after the patch number.
+export function isStableReleaseTag(tag: string, prefix: string): boolean {
+  return isReleaseTag(tag, prefix) && !tag.slice(prefix.length).includes("-");
+}
+
 // tagsOnHead is every tag on the checked-out commit.
 export async function tagsOnHead(cwd?: string): Promise<string[]> {
   return lines(await git(["tag", "--points-at", "HEAD"], cwd));
@@ -25,9 +32,11 @@ export async function tagsOnHead(cwd?: string): Promise<string[]> {
 // newReleaseTag is the module's release tag this run pushed — on HEAD and
 // not in before — or, when it pushed none, one on HEAD with no GitHub
 // release, which an earlier run pushed and failed to publish. Undefined when
-// there is neither: no release was due.
+// there is neither: no release was due. A prerelease tag is never one: it
+// is published by the run that cuts it, as a prerelease, and taken here it
+// would be published as a release and marked Latest.
 export async function newReleaseTag(github: GitHub, before: readonly string[], prefix: string, cwd?: string): Promise<string | undefined> {
-  const onHead = (await tagsOnHead(cwd)).filter((t) => isReleaseTag(t, prefix));
+  const onHead = (await tagsOnHead(cwd)).filter((t) => isStableReleaseTag(t, prefix));
   const pushed = onHead.find((t) => !before.includes(t));
   if (pushed !== undefined) {
     return pushed;
@@ -44,7 +53,7 @@ export async function newReleaseTag(github: GitHub, before: readonly string[], p
 // name no prerelease, newest first: a prerelease run publishes its own.
 async function releaseTagsBelow(rev: string, prefix: string, cwd?: string): Promise<string[]> {
   const tags = lines(await git(["tag", "--merged", rev, "--list", `${prefix}v[0-9]*`, "--sort=-v:refname"], cwd));
-  return tags.filter((t) => !t.slice(prefix.length).includes("-"));
+  return tags.filter((t) => isStableReleaseTag(t, prefix));
 }
 
 // previousTag is the module's newest release tag below tag, the start of its
