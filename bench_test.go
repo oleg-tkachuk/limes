@@ -17,6 +17,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -45,6 +46,9 @@ const (
 	// all holders and of the benchmark's one: past any run's proofs, so a
 	// full cache refusing a fresh proof as replayed is never what is timed.
 	benchProofIDs = 1 << 22
+	// benchCachedIDs is how many capabilities the many-keys cache benchmark
+	// asks about.
+	benchCachedIDs = 1024
 )
 
 // benchEnv is an issuer and a verifier over one in-memory store, and the
@@ -361,6 +365,25 @@ func BenchmarkRevocationCacheHitParallel(b *testing.B) {
 	}
 	parallel(b, func() error {
 		_, err := env.cache.IsRevoked(context.Background(), id)
+		return err
+	})
+}
+
+// Every processor asks about capabilities of its own, as a service's
+// handlers serving many callers do.
+func BenchmarkRevocationCacheHitParallelManyKeys(b *testing.B) {
+	env := newBenchEnv(b, nil)
+	ctx := context.Background()
+	ids := make([]uuid.UUID, benchCachedIDs)
+	for i := range ids {
+		ids[i] = uuid.New()
+		if _, err := env.cache.IsRevoked(ctx, ids[i]); err != nil {
+			b.Fatal(err)
+		}
+	}
+	var next atomic.Int64
+	parallel(b, func() error {
+		_, err := env.cache.IsRevoked(ctx, ids[next.Add(1)%benchCachedIDs])
 		return err
 	})
 }
