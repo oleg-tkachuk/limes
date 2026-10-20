@@ -15,6 +15,7 @@ import { info, summarize, warning } from "./lib/actions.ts";
 import { optionalEnv, requireEnv } from "./lib/env.ts";
 import { gitHubFor, type GitHub } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
+import { RED } from "./lib/runs.ts";
 import { mergeWaiting } from "./merge-green.ts";
 
 // RED_ISSUE is the title of the issue that stands open while main is red.
@@ -22,7 +23,6 @@ export const RED_ISSUE = "CI is failing on main";
 // REQUIRED_CHECK is the check main requires of a pull request.
 export const REQUIRED_CHECK = "All checks passed";
 const SUCCESS = "success";
-const RED: readonly string[] = ["failure", "timed_out", "startup_failure"];
 
 // Run is the CI run on main this reports on.
 export interface Run {

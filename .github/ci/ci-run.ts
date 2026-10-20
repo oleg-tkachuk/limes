@@ -23,16 +23,13 @@ import { info, setOutput } from "./lib/actions.ts";
 import { requireEnv } from "./lib/env.ts";
 import { gitHubFor, type GitHub, type Job } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
+import { CI_WORKFLOW, COMPLETED, PASSING } from "./lib/runs.ts";
 
-// CI_WORKFLOW is the workflow whose push runs vouch for a release.
-export const CI_WORKFLOW = ".github/workflows/ci.yaml";
 // REQUIRED_CHECK_JOB is the id of the job main requires, whose needs are the
 // jobs a merge stands on.
 const REQUIRED_CHECK_JOB = "checks";
 const RELEASE_BRANCH = "main";
 const PUSH_EVENT = "push";
-const COMPLETED = "completed";
-const PASSING: readonly string[] = ["success", "skipped"];
 // OUTPUT_PASSED is the step output job-passed sets, OUTPUT_RUN_ID the one
 // find sets.
 export const OUTPUT_PASSED = "passed";

@@ -30,14 +30,11 @@ import { notice, summarize, table, warning } from "./lib/actions.ts";
 import { optionalEnv, requireEnv } from "./lib/env.ts";
 import { gitHubFor, type GitHub, type PullRequest } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
+import { CI_WORKFLOW, RED } from "./lib/runs.ts";
 import { BASE_BRANCH, canPush, changesCi, filesListedInFull, isRenovate } from "./merge-policy.ts";
 
 // COMMIT_ID is a full commit id, the only HEAD_SHA a run passes.
 const COMMIT_ID = /^[0-9a-f]{40}$/;
-// CI_WORKFLOW is the workflow whose runs on main say whether main is green.
-export const CI_WORKFLOW = ".github/workflows/ci.yaml";
-// RED are the conclusions of a run that leave main broken.
-const RED: readonly string[] = ["failure", "timed_out", "startup_failure"];
 
 // Decision is what was done with one pull request, and why.
 export interface Decision {

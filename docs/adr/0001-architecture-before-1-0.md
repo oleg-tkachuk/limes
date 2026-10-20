@@ -155,11 +155,11 @@ freeze allows now and names the rest, so the API items can be decided before
     (`release.test.ts`); `changes.ts`'s `Group`, `ci.yaml`'s outputs and
     `if:`s, the floor job's directories, the Taskfile's `*_DIR` variables and
     `require-limes.ts`'s `FOLLOWERS` are not.
-13. [ ] One module for the run conclusions and the CI workflow path:
+13. [x] One module for the run conclusions and the CI workflow path:
     `RED` (`merge-green.ts:40`, `main-health.ts:25`), `PASSING`
     (`checks.ts:16`, `ci-run.ts:35`), `CI_WORKFLOW` (`merge-green.ts:38`,
     `ci-run.ts:28`).
-14. [ ] Pin `auto-merge.yaml`'s `workflows: [CI]` to `ci.yaml`'s
+14. [x] Pin `auto-merge.yaml`'s `workflows: [CI]` to `ci.yaml`'s
     `name: CI`: a rename leaves merging dead with nothing said.
 15. [ ] Read the tag semantic-release cut from its result rather than by
     diffing the tags on HEAD before and after the run

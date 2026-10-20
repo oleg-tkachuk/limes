@@ -6,7 +6,8 @@ import { parse } from "yaml";
 
 import { fakeData, fakeGitHub, type FakeData } from "./lib/fake-github.ts";
 import type { Job, WorkflowRun } from "./lib/github.ts";
-import { CI_WORKFLOW, jobPassed, passedRunFor, problemsWithRun, requiredJobs, runIdOf } from "./ci-run.ts";
+import { jobPassed, passedRunFor, problemsWithRun, requiredJobs, runIdOf } from "./ci-run.ts";
+import { CI_WORKFLOW } from "./lib/runs.ts";
 import { GATED, GATES, gateOf } from "./release.ts";
 
 const REPO = "oleg-tkachuk/limes";
