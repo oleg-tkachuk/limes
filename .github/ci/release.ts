@@ -201,13 +201,27 @@ export async function releaseAll(r: Release): Promise<boolean> {
   return ok;
 }
 
+// SEMANTIC_RELEASE_BIN is the pinned semantic-release's executable, as npm
+// ci installs it beside the release tooling's lockfile.
+const SEMANTIC_RELEASE_BIN = ["node_modules", ".bin", "semantic-release"];
+// SEMANTIC_RELEASE_ARGS run it outside the CI it would otherwise detect.
+const SEMANTIC_RELEASE_ARGS = ["--no-ci"];
+
+// semanticReleaseCommand is the command that runs the pinned semantic-release
+// in root's checkout: its installed executable, never npx, which would fetch
+// one from the registry were it missing.
+export function semanticReleaseCommand(root: string): [string, string[]] {
+  return [join(root, RELEASE_DIR, ...SEMANTIC_RELEASE_BIN), [...SEMANTIC_RELEASE_ARGS]];
+}
+
 // semanticRelease runs the pinned semantic-release for module, with the
 // runner reading no workflow command from its log: it logs every commit
 // message it reads, and this job holds a write token.
 function semanticRelease(root: string, token: string): Release["runSemanticRelease"] {
+  const [file, args] = semanticReleaseCommand(root);
   return (module, notesFile) =>
     withoutWorkflowCommands(() =>
-      runInherited("npx", ["semantic-release", "--no-ci"], {
+      runInherited(file, args, {
         cwd: join(root, RELEASE_DIR),
         env: {
           ...process.env,
