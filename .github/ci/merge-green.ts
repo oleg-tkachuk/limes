@@ -31,7 +31,7 @@ import { optionalEnv, requireEnv } from "./lib/env.ts";
 import { gitHubFor, type GitHub, type PullRequest, type PullRequestRun } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
 import { CI_WORKFLOW, COMPLETED, RED, SUCCESS } from "./lib/runs.ts";
-import { BASE_BRANCH, canPush, changesCi, filesListedInFull, isRenovate } from "./merge-policy.ts";
+import { BASE_BRANCH, canPush, changesCi, filesListedInFull, isRenovate, nestedModuleChange } from "./merge-policy.ts";
 
 // COMMIT_ID is a full commit id, the only HEAD_SHA a run passes.
 const COMMIT_ID = /^[0-9a-f]{40}$/;
@@ -137,6 +137,10 @@ export async function mergeIfGreen(github: GitHub, number: number, headSha: stri
   const ci = changesCi(files);
   if (ci !== undefined) {
     return decided(false, `#${number} changes ${ci}, which decides what CI runs; left for a person to merge`);
+  }
+  const nested = await nestedModuleChange(github, files, BASE_BRANCH, headSha);
+  if (nested !== undefined) {
+    return decided(false, `#${number} changes ${nested} beyond its requirements, which decides what CI tests; left for a person to merge`);
   }
   // Refused if the head moved since it was read: the run tested headSha,
   // whose files are the ones read above.

@@ -122,6 +122,9 @@ export interface GitHub {
   // collaborator.
   permission(login: string): Promise<string | undefined>;
   compare(base: string, head: string): Promise<Comparison>;
+  // fileAt is the text of the file at path in ref, or undefined when ref
+  // holds none.
+  fileAt(path: string, ref: string): Promise<string | undefined>;
   // merge merges a pull request with a merge commit whose body is message,
   // refused unless its head is sha.
   merge(number: number, sha: string, message: string): Promise<void>;
@@ -215,6 +218,17 @@ export function gitHubOver(octokit: Octokit, repo: Repo): GitHub {
         behindBy: data.behind_by,
         files: (data.files ?? []).map((f) => ({ filename: f.filename, previousFilename: f.previous_filename })),
       };
+    },
+    async fileAt(path, ref) {
+      try {
+        const { data } = await octokit.rest.repos.getContent({ ...repo, path, ref, mediaType: { format: "raw" } });
+        return String(data);
+      } catch (err) {
+        if (typeof err === "object" && err !== null && "status" in err && err.status === NOT_FOUND) {
+          return undefined;
+        }
+        throw err;
+      }
     },
     async merge(number, sha, message) {
       await octokit.rest.pulls.merge({ ...repo, pull_number: number, sha, merge_method: MERGE_METHOD, commit_message: message });

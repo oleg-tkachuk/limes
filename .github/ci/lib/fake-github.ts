@@ -11,6 +11,8 @@ export interface FakeData {
   // files and behindBy by head sha; a sha missing fails the comparison.
   files: Record<string, ChangedFile[]>;
   behindBy: Record<string, number>;
+  // contents are file texts by `ref:path`; one missing is not in that ref.
+  contents: Record<string, string>;
   // mergeFails names the pull requests whose merge GitHub refuses.
   mergeFails: Set<number>;
   // runs and jobs by run id; a run missing is not found.
@@ -46,6 +48,7 @@ export function fakeData(): FakeData {
     permissions: {},
     files: {},
     behindBy: {},
+    contents: {},
     mergeFails: new Set(),
     runs: new Map(),
     jobs: new Map(),
@@ -88,6 +91,9 @@ export function fakeGitHub(data: FakeData): GitHub {
         throw new Error(`cannot compare ${head}`);
       }
       return { behindBy, files: data.files[head] ?? [] };
+    },
+    async fileAt(path, ref) {
+      return data.contents[`${ref}:${path}`];
     },
     async merge(number, sha, message) {
       data.calls.push(`merge ${number} ${sha}`);

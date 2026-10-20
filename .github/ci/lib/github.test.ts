@@ -66,6 +66,14 @@ describe("gitHubOver", () => {
     ]);
   });
 
+  test("reads a file's text at a ref, and none where the ref has none", async () => {
+    const { octokit, sent } = clientAnswering((req) => (/missing/.test(req.url) ? { status: 404, body: { message: "Not Found" } } : { status: 200, body: "module x\n" }));
+    const github = gitHubOver(octokit, REPO);
+    assert.equal(await github.fileAt("pgstore/go.mod", "abc"), "module x\n");
+    assert.match(sent[0]?.url ?? "", /\/contents\/pgstore(\/|%2F)go\.mod\?ref=abc$/);
+    assert.equal(await github.fileAt("missing/go.mod", "abc"), undefined);
+  });
+
   test("a refused merge throws", async () => {
     const { octokit } = clientAnswering(() => ({ status: 409, body: { message: "Head branch was modified" } }));
     await assert.rejects(gitHubOver(octokit, REPO).merge(7, "abc", "feat: x"));

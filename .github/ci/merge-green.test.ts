@@ -48,7 +48,6 @@ describe("mergeGreen", () => {
     ["Go source by a writer", true, {}, ["verifier.go"]],
     ["documentation", true, {}, ["README.md", "docs/guide.md"]],
     ["an admin's", true, { author: { login: "keeper", bot: false } }, ["verifier.go"]],
-    ["a nested module's definition", true, {}, ["pgstore/go.mod", "pgstore/go.sum"]],
     ["a draft", false, { draft: true }, ["verifier.go"]],
     ["a fork's", false, { fromFork: true }, ["verifier.go"]],
     ["a closed one", false, { open: false }, ["verifier.go"]],
@@ -110,6 +109,25 @@ describe("mergeGreen", () => {
     await mergeGreen(fakeGitHub(data), SHA, JSON.stringify([{ number: 7 }, { number: 8 }]));
     assert.deepEqual(data.calls.filter((c) => c.startsWith("merge")), [`merge 7 ${SHA}`, `merge 8 ${SHA}`]);
   });
+
+  // A nested module's go.mod merges when only its requirements change — the
+  // release raises them so — and is held when anything else does.
+  const NESTED = "pgstore/go.mod";
+  const goMod = (extra = "", limes = "v0.108.3") => `module example.com/pgstore\n\ngo 1.26.0\n\nreplace example.com/limes => ../\n${extra}\nrequire example.com/limes ${limes}\n`;
+  const nested: [string, string | undefined, string | undefined, boolean][] = [
+    ["a nested module's requirement raised", goMod(), goMod("", "v0.109.0"), true],
+    ["a nested module's replace dropped", goMod(), goMod().replace("replace example.com/limes => ../\n", ""), false],
+    ["a nested module's toolchain set", goMod(), goMod("toolchain go1.26.0"), false],
+    ["a nested module's packages ignored", goMod(), goMod("ignore ./store"), false],
+    ["a new nested module", undefined, goMod(), false],
+  ];
+  for (const [name, before, after, want] of nested) {
+    test(name, async () => {
+      if (before !== undefined) data.contents[`main:${NESTED}`] = before;
+      if (after !== undefined) data.contents[`${SHA}:${NESTED}`] = after;
+      assert.equal(await run({}, [NESTED, "pgstore/go.sum"]), want);
+    });
+  }
 
   // The verdict that merges a pull request is its own run's into main: a
   // green run of another pull request at the same commit is not.
