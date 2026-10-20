@@ -3,6 +3,9 @@ package limes_test
 // Benchmarks of the paths a service runs on every request — verifying and
 // authorizing a token, a JWT or a Biscuit, with or without a proof of
 // possession — and of minting one, against the in-memory reference store.
+// Each reports its allocations; the Parallel ones run the path from every
+// processor at once, through one verifier, as a service's handlers do, so
+// their ns/op set against the serial one's is how it scales.
 //
 // The weekly benchmark workflow runs this file on this commit and, copied
 // in, on the newest limes release, and compares the two with benchstat
@@ -58,6 +61,7 @@ type benchEnv struct {
 
 func newBenchEnv(b *testing.B, bound ed25519.PublicKey) benchEnv {
 	b.Helper()
+	b.ReportAllocs()
 	ctx := context.Background()
 	key, err := limes.GenerateKey()
 	if err != nil {
@@ -283,4 +287,88 @@ func BenchmarkRefusal(b *testing.B) {
 		}
 		_ = env.verifier.ErrorResponse(ctx, refused, limes.AuthSchemeBearer)
 	}
+}
+
+// parallel runs op from every processor at once until the benchmark ends,
+// reporting the first error op returns.
+func parallel(b *testing.B, op func() error) {
+	b.Helper()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			if err := op(); err != nil {
+				b.Error(err)
+				return
+			}
+		}
+	})
+}
+
+func BenchmarkVerifyJWTParallel(b *testing.B) {
+	env := newBenchEnv(b, nil)
+	req := limes.VerifyRequest{Token: env.token, Audience: benchAudience}
+	parallel(b, func() error {
+		_, err := env.verifier.Verify(context.Background(), req)
+		return err
+	})
+}
+
+func BenchmarkAuthorizeJWTParallel(b *testing.B) {
+	env := newBenchEnv(b, nil)
+	req := limes.AuthorizeRequest{
+		Verify: limes.VerifyRequest{Token: env.token, Audience: benchAudience},
+		Check:  limes.CheckRequest{Op: limes.OpGet, Resource: benchResource},
+	}
+	parallel(b, func() error {
+		_, err := env.verifier.Authorize(context.Background(), req)
+		return err
+	})
+}
+
+// Every processor's proofs meet in the one replay cache.
+func BenchmarkVerifyJWTWithDPoPParallel(b *testing.B) {
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		b.Fatal(err)
+	}
+	env := newBenchEnv(b, pub)
+	parallel(b, func() error {
+		ctx := context.Background()
+		proof, err := dpop.Sign(ctx, priv, dpop.SignRequest{Method: benchProofMethod, URL: benchProofURL, Token: env.token, IssuedAt: time.Now()})
+		if err != nil {
+			return err
+		}
+		_, err = env.verifier.Verify(ctx, limes.VerifyRequest{Token: env.token, Audience: benchAudience, DPoP: dpop.Proof{JWT: proof, Method: benchProofMethod, URL: benchProofURL}})
+		return err
+	})
+}
+
+func BenchmarkVerifyBiscuitParallel(b *testing.B) {
+	env := newBenchEnv(b, nil)
+	req := limes.VerifyRequest{Token: benchBiscuit(b, env, benchBlocks), Audience: benchAudience}
+	parallel(b, func() error {
+		_, err := env.verifier.Verify(context.Background(), req)
+		return err
+	})
+}
+
+// Every processor asks the one cache about the one capability: the cache's
+// lock is all they share.
+func BenchmarkRevocationCacheHitParallel(b *testing.B) {
+	env := newBenchEnv(b, nil)
+	id := env.verified.Capability().ID
+	if _, err := env.cache.IsRevoked(context.Background(), id); err != nil {
+		b.Fatal(err)
+	}
+	parallel(b, func() error {
+		_, err := env.cache.IsRevoked(context.Background(), id)
+		return err
+	})
+}
+
+func BenchmarkIssueParallel(b *testing.B) {
+	env := newBenchEnv(b, nil)
+	parallel(b, func() error {
+		_, err := env.issuer.Issue(context.Background(), env.request)
+		return err
+	})
 }
