@@ -3,6 +3,7 @@ package limes
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -324,5 +325,25 @@ func TestABudgetNeedsAUnit(t *testing.T) {
 		if !tc.ok && !errors.Is(err, ErrInvalidCaveats) {
 			t.Errorf("%s: err = %v, want ErrInvalidCaveats", name, err)
 		}
+	}
+}
+
+// An operation neither built in nor namespaced is refused with the built-in
+// ones named, so a caller that used an old unnamespaced op sees what to use.
+func TestUnknownOpNamesTheBuiltins(t *testing.T) {
+	err := Op("presign").Validate()
+	if !errors.Is(err, ErrInvalidCaveats) {
+		t.Fatalf("err = %v, want ErrInvalidCaveats", err)
+	}
+	for _, op := range []Op{OpGet, OpPut, OpList, OpDelete, OpShare, OpManage} {
+		if !op.Builtin() || op.Validate() != nil {
+			t.Errorf("%q is not accepted as built in", op)
+		}
+		if !strings.Contains(err.Error(), string(op)) {
+			t.Errorf("error %q does not name %q", err, op)
+		}
+	}
+	if len(builtinOps) != len(builtinOpList) {
+		t.Errorf("builtinOps has %d ops, builtinOpList %d", len(builtinOps), len(builtinOpList))
 	}
 }
