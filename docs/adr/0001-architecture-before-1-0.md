@@ -150,7 +150,7 @@ freeze allows now and names the rest, so the API items can be decided before
 
 ### CI and release
 
-12. [ ] Derive the module list from one place. `modules.cjs` and
+12. [x] Derive the module list from one place. `modules.cjs` and
     `release.yaml`'s choice options are pinned together
     (`release.test.ts`); `changes.ts`'s `Group`, `ci.yaml`'s outputs and
     `if:`s, the floor job's directories, the Taskfile's `*_DIR` variables and
