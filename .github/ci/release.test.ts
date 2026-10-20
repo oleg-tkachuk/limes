@@ -10,7 +10,7 @@ import { isReleaseTag, newReleaseTag, previousTag, proxyInfoURL, tagsOnHead, unp
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
 import { withoutWorkflowCommands } from "./lib/actions.ts";
 import { releaseCommits } from "./lib/modules.ts";
-import { Channel, GATES, releaseAll, type Release } from "./release.ts";
+import { Channel, GATED, GATES, gateOf, releaseAll, type Release } from "./release.ts";
 
 const REPO = "oleg-tkachuk/limes";
 const RELEASE = new URL("../release/", import.meta.url).pathname;
@@ -131,6 +131,8 @@ describe("releaseAll", () => {
   // next is the tag each module's semantic-release pushes this run, if any.
   let next: Record<string, string | undefined>;
   let gatesPassing: boolean;
+  // failedGates are the gating jobs that did not pass, beside gatesPassing.
+  let failedGates: Set<string>;
   let rootTag: string | undefined;
   let failing: string | undefined;
 
@@ -146,6 +148,7 @@ describe("releaseAll", () => {
     data = fakeData();
     next = {};
     gatesPassing = true;
+    failedGates = new Set();
     rootTag = undefined;
     failing = undefined;
   });
@@ -167,7 +170,7 @@ describe("releaseAll", () => {
           writeFileSync(notesFile, `notes of ${tag}\n`);
         }
       },
-      gatePassed: async () => gatesPassing,
+      gatePassed: async (job) => gatesPassing && !failedGates.has(job),
       fetchInfo: async () => ({ ok: true, status: 200 }),
       notesDir,
       onRootTag: (tag) => {
@@ -209,6 +212,19 @@ describe("releaseAll", () => {
     assert.ok(GATES.pgstore !== undefined);
   });
 
+  // Every nested module is gated, each by its own job: one failing holds
+  // back that module alone.
+  test("each gated module waits for its own CI job alone", async () => {
+    failedGates = new Set([gateOf("redisreplay")]);
+    next = { limes: "v0.2.0", redisreplay: "redisreplay/v0.1.0", pgstore: "pgstore/v0.1.0", otelmetric: "otelmetric/v0.1.0" };
+    await releaseAll(release());
+    assert.deepEqual(
+      data.published.map((r) => r.tag),
+      ["v0.2.0", "pgstore/v0.1.0", "otelmetric/v0.1.0"],
+    );
+    assert.deepEqual([...GATED].sort(), ["otelmetric", "pgstore", "redisreplay"]);
+  });
+
   test("the run's summary says what happened to each module", async () => {
     const page = join(notesDir, "summary.md");
     process.env.GITHUB_STEP_SUMMARY = page;
@@ -222,8 +238,8 @@ describe("releaseAll", () => {
     const { readFileSync } = await import("node:fs");
     const summary = readFileSync(page, "utf8");
     assert.match(summary, /\| limes \| v0\.2\.0 \| released by hand \|/);
-    assert.match(summary, /\| pgstore \|  \| 'PostgreSQL store, released limes' did not pass; not released this run \|/);
-    assert.match(summary, /\| redisreplay \|  \| no commit since its first commit cuts a release \|/);
+    assert.match(summary, /\| pgstore \|  \| 'Released limes, pgstore' did not pass; not released this run \|/);
+    assert.match(summary, /\| redisreplay \|  \| 'Released limes, redisreplay' did not pass; not released this run \|/);
   });
 
   // A run by hand that released nothing says so as an annotation, naming

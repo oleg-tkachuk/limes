@@ -46,11 +46,20 @@ import { jobPassed, runIdOf } from "./ci-run.ts";
 // OUTPUT_LIMES_TAG is the step output the job proposing the nested modules'
 // requirement reads.
 export const OUTPUT_LIMES_TAG = "limes-tag";
+// GATED are the nested modules that build against the limes of the same
+// commit through a replace, so a change to limes one must follow lands with
+// it. Each is released only once its tests against the limes its go.mod
+// requires passed in the dispatching run: ci.yaml's released-limes job, one
+// matrix entry per module.
+export const GATED: readonly string[] = ["pgstore", "redisreplay", "otelmetric"];
+// gateOf is the name of the released-limes job of module, as ci.yaml spells
+// it.
+export function gateOf(module: string): string {
+  return `Released limes, ${module}`;
+}
 // GATES names, by module, the CI job that must have passed in the
-// dispatching run for the module to be released: pgstore's tests against the
-// limes its go.mod requires, so a change to limes that pgstore must follow
-// lands with pgstore.
-export const GATES: Readonly<Record<string, string>> = { pgstore: "PostgreSQL store, released limes" };
+// dispatching run for the module to be released.
+export const GATES: Readonly<Record<string, string>> = Object.fromEntries(GATED.map((m) => [m, gateOf(m)]));
 // Channel is what a run releases: releases, or release candidates.
 export const Channel = { Release: "release", Prerelease: "prerelease" } as const;
 export type Channel = (typeof Channel)[keyof typeof Channel];

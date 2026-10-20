@@ -314,25 +314,36 @@ jobs:
           cache-hit: ${{ steps.go-cache.outputs.cache-hit }}
           primary-key: ${{ steps.go-cache.outputs.cache-primary-key }}
 
-  # The same tests against the limes pgstore's go.mod requires, which is what
-  # a consumer's build resolves. This gates pgstore's release, not a merge: a
-  # change to limes that pgstore must follow lands with pgstore in one pull
-  # request, which fails here until limes is released and Renovate raises
-  # pgstore's requirement. Until then release.yaml releases limes and holds
-  # pgstore back, so no pgstore is published that a consumer cannot build.
+  # Each nested module's tests against the limes its go.mod requires, which
+  # is what a consumer's build resolves; every other job builds it against the
+  # limes of the same commit, through the replace in its go.mod. This gates
+  # the module's release, not a merge: a change to limes that a module must
+  # follow lands with the module in one pull request, which fails here until
+  # limes is released and require-limes.ts raises the module's requirement.
+  # Until then release.yaml releases limes and holds the module back, so no
+  # module is published that a consumer cannot build. The modules are
+  # release.ts's GATED; ci-run.test.ts pins the two lists together.
   #
   # It runs on every push to main, whatever the push changed: release.yaml
-  # reads its result to decide whether pgstore's pending commits may go out,
-  # and a run that skipped it would let through a pgstore an earlier run held
+  # reads its result to decide whether a module's pending commits may go out,
+  # and a run that skipped it would let through a module an earlier run held
   # back.
-  pgstore-released-limes:
-    name: PostgreSQL store, released limes
+  released-limes:
+    name: Released limes, ${{ matrix.module }}
     needs: [changes]
-    if: (github.event_name == 'push' && needs.changes.outputs.relevant == 'true') || needs.changes.outputs.pgstore == 'true'
+    if: >-
+      (github.event_name == 'push' && needs.changes.outputs.relevant == 'true') ||
+      needs.changes.outputs.pgstore == 'true' || needs.changes.outputs.redisreplay == 'true' ||
+      needs.changes.outputs.otelmetric == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       contents: read
+    strategy:
+      # Each module's result gates its own release alone.
+      fail-fast: false
+      matrix:
+        module: [pgstore, redisreplay, otelmetric]
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -343,7 +354,7 @@ jobs:
         id: go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: pgstore/go.mod
+          go-version-file: ${{ matrix.module }}/go.mod
           cache: false
 
       - name: Restore the Go caches
@@ -351,7 +362,7 @@ jobs:
         uses: ./.github/actions/go-cache
         with:
           mode: restore
-          job: pgstore-pinned
+          job: pinned-${{ matrix.module }}
           go-version: ${{ steps.go.outputs.go-version }}
 
       - name: Set up Task
@@ -361,26 +372,29 @@ jobs:
           checksum: ${{ env.TASK_SHA256 }}
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: task test:pgstore:pinned
-        run: task --yes test:pgstore:pinned
+      - name: task test:pinned
+        env:
+          MODULE: ${{ matrix.module }}
+        run: task --yes test:pinned MODULE="$MODULE"
 
       - name: Save the Go caches
         if: success()
         uses: ./.github/actions/go-cache
         with:
           mode: save
-          job: pgstore-pinned
+          job: pinned-${{ matrix.module }}
           go-version: ${{ steps.go.outputs.go-version }}
           cache-hit: ${{ steps.go-cache.outputs.cache-hit }}
           primary-key: ${{ steps.go-cache.outputs.cache-primary-key }}
 
   # redisreplay's contract against a real Redis: verify-all runs it on
   # miniredis, whose scripts run on another Lua. The image is pinned by digest;
-  # Renovate moves both together.
+  # Renovate moves both together. redisreplay builds the limes of the same
+  # commit, so a change to limes reaches it too.
   redis:
     name: Redis replay cache
     needs: [changes]
-    if: needs.changes.outputs.redisreplay == 'true'
+    if: needs.changes.outputs.root == 'true' || needs.changes.outputs.redisreplay == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
@@ -706,12 +720,12 @@ jobs:
         run: node .github/ci/checks.ts
 
   # It waits for the one required check, which stands for every job a merge
-  # needs, and for pgstore-released-limes, whose result release.yaml reads to
-  # decide pgstore alone (.github/ci/release.ts), so a release never starts before
-  # it is known.
+  # needs, and for released-limes, whose results release.yaml reads to decide
+  # each nested module alone (.github/ci/release.ts), so a release never
+  # starts before they are known.
   dispatch-release:
     name: Dispatch release
-    needs: [changes, checks, pgstore-released-limes]
+    needs: [changes, checks, released-limes]
     # Not for a documentation-only push: its code is byte-identical to the
     # commit before it. Its commits are not lost — semantic-release counts them
     # in the next release, and a release dispatched by the code commit before
@@ -721,7 +735,7 @@ jobs:
       needs.changes.outputs.relevant == 'true' &&
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
       needs.checks.result == 'success' &&
-      needs.pgstore-released-limes.result != 'cancelled'
+      needs.released-limes.result != 'cancelled'
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:

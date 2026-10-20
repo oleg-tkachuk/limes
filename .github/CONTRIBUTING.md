@@ -31,23 +31,26 @@ Docker, and run apart:
 task test:pgstore
 ```
 
-CI runs them twice. Against the limes of the same commit, through the replace
-in `pgstore/go.mod`, they are part of the required check: limes may not break
-pgstore. Against the limes that `go.mod` requires, which is what a consumer's
-build resolves (`task test:pgstore:pinned`, the job **PostgreSQL store,
-released limes**), they gate pgstore's release instead: a run in which they
-fail releases limes, redisreplay and otelmetric, and holds pgstore back.
+Every nested module — `pgstore`, `redisreplay`, `otelmetric` — builds against
+the limes of the same commit, through the replace in its `go.mod`, so CI runs
+its tests twice. Against that limes they are part of the required check: limes
+may not break a nested module. Against the limes its `go.mod` requires, which
+is what a consumer's build resolves (`task test:pinned MODULE=<module>`, the
+job **Released limes, <module>**), they gate that module's release
+instead: a run in which they fail releases the other modules and holds that
+one back.
 
-So a limes change that pgstore must follow — a value pgstore names
-exhaustively, such as a `ChargeBucket`, or an API pgstore calls — lands with
-pgstore in one pull request. Its released-limes job fails, as nothing released
-has the change yet; the merge releases limes, and the release workflow opens
-a pull request raising each nested module's requirement to that release
-(`build(pgstore): require limes vX.Y.Z`, merged once green). That
-pull request passes the job, and its merge releases pgstore with every change
-it held: a nested module's own `build` commit is a patch of it, so the raised
-requirement is released even when nothing else waits. A pgstore change that needs
-a limes already released raises the requirement in its own `go.mod`.
+So a limes change that a nested module must follow — a value pgstore names
+exhaustively, such as a `ChargeBucket`, or an API the module calls — lands
+with the module in one pull request. Its released-limes job fails, as nothing
+released has the change yet; the merge releases limes, and the release
+workflow opens a pull request raising each nested module's requirement to that
+release (`build(<module>): require limes vX.Y.Z`, merged once green). That
+pull request passes the job, and its merge releases the module with every
+change it held: a nested module's own `build` commit is a patch of it, so the
+raised requirement is released even when nothing else waits. A module change
+that needs a limes already released raises the requirement in its own
+`go.mod`.
 
 `redisreplay`'s contract against a real Redis runs apart too, at the address
 `LIMES_REDIS_ADDR` names (`host:port`); miniredis runs another Lua, so this is

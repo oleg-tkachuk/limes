@@ -2,8 +2,8 @@
 //
 // Usage: GH_TOKEN=… GITHUB_REPOSITORY=… node require-limes.ts <limes tag>
 //
-// A nested module requires a released limes, and pgstore is released only
-// once its tests against the limes it requires pass (release.ts). So every
+// A nested module requires a released limes, and is released only once its
+// tests against the limes it requires pass (release.ts). So every
 // limes release is followed by raising that requirement: for each nested
 // module of .github/release/modules.cjs, this commits it on a branch of the
 // module's own and opens its pull request, or updates the one still open to
