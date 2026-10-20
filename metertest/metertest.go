@@ -2942,6 +2942,26 @@ func checkListTenantBudgets(t *testing.T, f fixture) {
 		!slices.ContainsFunc(unl, func(s meter.TenantBudget) bool { return s.TenantID == unlimited }) {
 		t.Errorf("unlimited tenants = %+v, %v; want %s and not %s", unl, err, unlimited, f.Tenant)
 	}
+	// Each filter, paged one row at a time, lists exactly its rows and in the
+	// order of the list with no filter: a store that maps a filter to the
+	// wrong rows, or loses it between pages, fails here.
+	var withCeiling []uuid.UUID
+	for _, row := range order {
+		if row.TenantID != unlimited {
+			withCeiling = append(withCeiling, row.TenantID)
+		}
+	}
+	for name, c := range map[string]struct {
+		req  meter.ListTenantBudgetsRequest
+		want []uuid.UUID
+	}{
+		"with a ceiling": {meter.ListTenantBudgetsRequest{Filter: meter.TenantBudgetFilterAtOrPast}, withCeiling},
+		"unlimited":      {meter.ListTenantBudgetsRequest{Filter: meter.TenantBudgetFilterUnlimited}, []uuid.UUID{unlimited}},
+	} {
+		if got := listedOneByOne(t, f, c.req, listed); !slices.Equal(got, c.want) {
+			t.Errorf("tenants %s, a page of one at a time = %v, want %v", name, got, c.want)
+		}
+	}
 	// TenantBudgetFilterAll names the filter a request that names none takes.
 	named, err := f.Usage.ListTenantBudgets(f.listCtx(), meter.ListTenantBudgetsRequest{Filter: meter.TenantBudgetFilterAll, Limit: listed})
 	if err != nil || len(named.Items) != len(order) {
@@ -2951,6 +2971,30 @@ func checkListTenantBudgets(t *testing.T, f fixture) {
 		if row.TenantID != order[i].TenantID {
 			t.Errorf("every tenant, by name: row %d is %s, want %s as with no filter", i, row.TenantID, order[i].TenantID)
 		}
+	}
+}
+
+// listedOneByOne is every tenant req lists, read a page of one row at a
+// time; past pages pages, the cursor is taken not to advance.
+func listedOneByOne(t *testing.T, f fixture, req meter.ListTenantBudgetsRequest, pages int) []uuid.UUID {
+	t.Helper()
+	var got []uuid.UUID
+	req.Limit = 1
+	for page := 0; ; page++ {
+		if page > pages {
+			t.Fatalf("paging %+v did not end after %d pages of one tenant each", req, pages)
+		}
+		rows, err := f.Usage.ListTenantBudgets(f.listCtx(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range rows.Items {
+			got = append(got, row.TenantID)
+		}
+		if rows.Next == "" {
+			return got
+		}
+		req.Cursor = rows.Next
 	}
 }
 

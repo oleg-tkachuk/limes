@@ -136,7 +136,7 @@ freeze allows now and names the rest, so the API items can be decided before
    included.
 8. [x] Run `otelmetric.Instrument` over memstore through `metertest.Run`: it
    returns a `meter.UsageStore` no suite checks.
-9. [ ] Check that `metertest` has a case for every tenant-budget filter:
+9. [x] Check that `metertest` has a case for every tenant-budget filter:
    memstore runs it in Go (`memstore.go:1729`), pgstore in SQL
    (`pgstore/usage.go:412`), and `pgstore/go.mod` already retracts a release
    where the two disagreed. The small helpers both carry (`max0`,
