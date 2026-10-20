@@ -3,6 +3,7 @@ package ttlcache
 import (
 	"context"
 	"errors"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -184,5 +185,110 @@ func TestAPanickingLookupReleasesItsKey(t *testing.T) {
 	var calls atomic.Int32
 	if _, _, err := c.Get(t.Context(), "a", counted(false, &calls)); err != nil || calls.Load() != 1 {
 		t.Errorf("after a panic: %d lookups, %v; want the key asked again", calls.Load(), err)
+	}
+}
+
+// shardedEntries is a bound big enough to give every shard its fill.
+const shardedEntries = maxShards * minShardEntries
+
+// keysInShards are two keys of c that land in different shards.
+func keysInShards(t *testing.T, c *Cache[string]) (string, string) {
+	t.Helper()
+	first := "k0"
+	for i := 1; i < 1000; i++ {
+		k := "k" + strconv.Itoa(i)
+		if c.shardOf(k) != c.shardOf(first) {
+			return first, k
+		}
+	}
+	t.Fatal("no two keys in different shards")
+	return "", ""
+}
+
+func TestShardsShareOutTheBound(t *testing.T) {
+	for _, c := range []struct{ maxEntries, shards int }{
+		{1, 1}, {4, 1}, {minShardEntries*2 - 1, 1}, {minShardEntries * 2, 2}, {shardedEntries, maxShards}, {100_000, maxShards},
+	} {
+		cache := New[string](Config{TTL: testTTL, MaxEntries: c.maxEntries, Now: time.Now})
+		total := 0
+		for _, s := range cache.shards {
+			total += s.maxEntries
+		}
+		if len(cache.shards) != c.shards || total != c.maxEntries {
+			t.Errorf("MaxEntries %d: %d shards sharing %d, want %d sharing all of it", c.maxEntries, len(cache.shards), total, c.shards)
+		}
+	}
+}
+
+// A caller asking about a key of one shard does not wait on another shard's
+// lock: what the shards are for.
+func TestAShardDoesNotWaitOnAnother(t *testing.T) {
+	c, _ := newCache(shardedEntries)
+	busy, free := keysInShards(t, c)
+	var calls atomic.Int32
+	held := c.shardOf(busy)
+	held.mu.Lock()
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := c.Get(t.Context(), free, counted(false, &calls))
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		held.mu.Unlock()
+		t.Fatal("a key of another shard waited on the held shard's lock")
+	}
+	held.mu.Unlock()
+}
+
+// One Clear reaches every shard: an answer read before it is cached in none,
+// and a set read before it seeds none.
+func TestClearReachesEveryShard(t *testing.T) {
+	c, clk := newCache(shardedEntries)
+	a, b := keysInShards(t, c)
+	var calls atomic.Int32
+	for _, k := range []string{a, b} {
+		_, _, _ = c.Get(t.Context(), k, counted(false, &calls))
+	}
+	c.Clear()
+	if c.Len() != 0 {
+		t.Fatalf("%d entries left after Clear", c.Len())
+	}
+	_, missing, epoch := c.Cached([]string{a, b})
+	c.Clear()
+	c.SeedLive(missing, epoch, clk.Now().Add(testTTL))
+	if c.Len() != 0 {
+		t.Errorf("a set read before a clear was seeded in %d shards' entries", c.Len())
+	}
+	// A lookup on one shard that a clear interrupts caches nothing there,
+	// however far from the shard the clear began.
+	lookup := func(context.Context) (bool, error) {
+		c.Clear()
+		return false, nil
+	}
+	for _, k := range []string{a, b} {
+		if _, _, err := c.Get(t.Context(), k, lookup); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if c.Len() != 0 {
+		t.Errorf("an answer read before a clear was cached")
+	}
+}
+
+// However the keys fall into shards, the cache never holds more than its
+// bound.
+func TestShardedCacheKeepsItsBound(t *testing.T) {
+	c, _ := newCache(shardedEntries)
+	var calls atomic.Int32
+	for i := range 3 * shardedEntries {
+		_, _, _ = c.Get(t.Context(), "k"+strconv.Itoa(i), counted(false, &calls))
+	}
+	if n := c.Len(); n > shardedEntries || n < shardedEntries/2 {
+		t.Errorf("%d entries, want at most %d and most of it used", n, shardedEntries)
 	}
 }
