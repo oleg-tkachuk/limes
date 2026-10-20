@@ -33,3 +33,14 @@ test("fmt is gofmt alone, never goimports", () => {
   assert.ok(cmds.some((c) => c.startsWith("gofmt -s -w")), "fmt does not run gofmt -s -w");
   assert.ok(!cmds.some((c) => c.includes(GOIMPORTS)), "fmt runs goimports");
 });
+
+// The weekly workflow runs the soak as test:pgstore:soak does, without Task.
+test("the weekly soak runs the command test:pgstore:soak runs", () => {
+  const workflow = parse(readFileSync(join(import.meta.dirname, "..", "workflows", "bench.yaml"), "utf8")) as {
+    jobs: { soak: { steps: { name?: string; run?: string; "working-directory"?: string }[] } };
+  };
+  const step = workflow.jobs.soak.steps.find((s) => s.name === "Soak");
+  const task = (taskfile.tasks["test:pgstore:soak"]?.cmds ?? []).map((c) => (typeof c === "string" ? c : (c.cmd ?? "")));
+  assert.deepEqual([step?.run], task);
+  assert.equal(step?.["working-directory"], "pgstore");
+});

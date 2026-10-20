@@ -1,0 +1,85 @@
+name: Benchmarks and soak
+
+# Once a week, and by hand: pgstore under concurrent workers for a while,
+# every counter then checked against what they did (pgstore/soak_test.go),
+# and pgstore's benchmarks on this commit beside the newest pgstore release
+# (.github/ci/bench.ts). A hosted runner is too noisy for numbers that
+# stand alone, so the two sides run one after the other on one runner, and
+# the comparison is a report on the run's summary page: a slower number never
+# fails it. A soak that finds a counter out of step does.
+
+on:
+  schedule:
+    - cron: "41 4 * * 2"
+  workflow_dispatch:
+    inputs:
+      soak-duration:
+        description: How long the soak runs, as Go reads a duration (45m, 2h)
+        type: string
+        default: 45m
+
+permissions: {}
+
+concurrency:
+  group: bench
+  cancel-in-progress: false
+
+env:
+  # How long a scheduled soak runs; a run by hand may ask for another.
+  SOAK_DURATION: 45m
+
+jobs:
+  soak:
+    name: Soak pgstore
+    runs-on: ubuntu-26.04
+    # Above the longest soak a run by hand should ask for, with the
+    # container and the final checks.
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: pgstore/go.mod
+          cache: false
+
+      # As task test:pgstore:soak runs it; the duration is parsed by the test,
+      # which refuses anything but a positive Go duration.
+      - name: Soak
+        working-directory: pgstore
+        env:
+          LIMES_SOAK_DURATION: ${{ inputs.soak-duration || env.SOAK_DURATION }}
+        run: go test -tags soak -count=1 -run '^TestSoak$' -timeout 3h -v .
+
+  bench:
+    name: Benchmark pgstore against its newest release
+    runs-on: ubuntu-26.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The newest pgstore release is found among the tags, and checked
+          # out beside this commit.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: pgstore/go.mod
+          cache: false
+
+      - name: Set up the CI scripts
+        uses: ./.github/actions/setup-ci
+
+      - name: Benchmark and compare
+        run: node .github/ci/bench.ts

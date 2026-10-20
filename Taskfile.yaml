@@ -158,6 +158,22 @@ tasks:
       - go mod edit -dropreplace={{.LIMES_MODULE}} '{{.PINNED_DIR}}/go.mod'
       - go test -modfile='{{.PINNED_DIR}}/go.mod' -mod=mod -race -count=1 ./...
 
+  test:pgstore:soak:
+    desc: "pgstore under concurrent workers for SOAK_DURATION (default 20s), then every counter checked against what they did — needs a running Docker"
+    dir: '{{.PGSTORE_DIR}}'
+    vars:
+      SOAK_DURATION: '{{.SOAK_DURATION | default "20s"}}'
+    env:
+      LIMES_SOAK_DURATION: '{{.SOAK_DURATION}}'
+    cmds:
+      # -timeout bounds the soak past any duration the weekly run asks for.
+      - go test -tags soak -count=1 -run '^TestSoak$' -timeout 3h -v .
+
+  bench:pgstore:
+    desc: "pgstore's benchmarks on this commit beside the newest pgstore release, compared by benchstat — needs a running Docker and the release's tag"
+    cmds:
+      - node .github/ci/bench.ts
+
   test:redisreplay:
     desc: "redisreplay's contract against a real Redis at LIMES_REDIS_ADDR (host:port) — miniredis runs another Lua, so this is the check of the script itself"
     dir: '{{.REDISREPLAY_DIR}}'
