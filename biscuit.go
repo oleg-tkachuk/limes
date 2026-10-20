@@ -87,6 +87,11 @@ func isBiscuit(token string) bool {
 // wrapping a copy again would shed its attenuation and its revocation id;
 // its holder attenuates it instead — and one that has expired or that the
 // store reports revoked.
+//
+// It needs no OpShare: a copy attenuated from the form allows no more than
+// the capability, which its bearer could hand on as it is, and a copy that
+// sets limits of its own is counted against Caveats.Copies. Delegate, which
+// has the issuer mint a new principal, still requires OpShare.
 func (i *Issuer) Biscuit(ctx context.Context, req BiscuitRequest) (BiscuitResult, error) {
 	token, err := i.biscuit(ctx, req.Capability)
 	if err != nil {
@@ -119,11 +124,6 @@ func (i *Issuer) biscuit(ctx context.Context, vc VerifiedCapability) (string, er
 		return "", invalidRequest("capability %s was read from a Biscuit; attenuate that instead", c.ID)
 	case c.Issuer != i.issuerName:
 		return "", invalidRequest("capability %s was issued by %q, not %q", c.ID, c.Issuer, i.issuerName)
-	}
-	// A Biscuit form is handed on offline, so it is a share as Delegate's
-	// child is: a capability granted without OpShare gets none.
-	if !slices.Contains(c.Caveats.Ops, OpShare) {
-		return "", fmt.Errorf("%w: capability %s does not allow %q, which a Biscuit form needs", ErrOpNotAllowed, c.ID, OpShare)
 	}
 	if !i.clock().Before(c.ExpiresAt) {
 		return "", fmt.Errorf("limes: biscuit of %s: %w", c.ID, ErrExpired)
