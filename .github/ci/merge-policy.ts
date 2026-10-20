@@ -7,6 +7,7 @@
 
 import type { Author, ChangedFile, GitHub } from "./lib/github.ts";
 import { shellPatternToRegExp } from "./lib/glob.ts";
+import { changesBeyondRequirements } from "./lib/gomod.ts";
 
 // BASE_BRANCH is the branch the automation merges into.
 export const BASE_BRANCH = "main";
@@ -33,8 +34,10 @@ const RENOVATE: Author = { login: "renovate", bot: true };
 // is left for a person. Task and golangci-lint each read whichever of several
 // file names exists, and Task prefers Taskfile.yml to Taskfile.yaml, so a new
 // file under another of those names replaces the reviewed one: every spelling
-// counts. A nested module's go.mod is left out on purpose: the release raises
-// its requirement of limes in a pull request merged this way.
+// counts. A nested module's go.mod is not one of them: the release raises its
+// requirement of limes in a pull request merged this way. Its other lines —
+// replace, ignore, go, toolchain — decide what CI tests as surely, so a change
+// to them is held all the same (nestedModuleChange).
 export const CI_DEFINITION: readonly string[] = [
   ".github/*",
   "[Tt]askfile.*",
@@ -90,6 +93,28 @@ export function filesListedInFull(listed: number, changed: number | undefined, c
 // undefined when none does.
 export function changesCi(files: readonly ChangedFile[]): string | undefined {
   return pathsOf(files).find(definesCi);
+}
+
+// GO_MOD names a module's definition.
+const GO_MOD = "go.mod";
+
+// isNestedGoMod reports whether path is a go.mod below the root: the root's
+// is a CI definition outright.
+export function isNestedGoMod(path: string): boolean {
+  return path.endsWith(`/${GO_MOD}`);
+}
+
+// nestedModuleChange is the first nested go.mod of files that changes more
+// than its requirements between base and head — or that one of them does not
+// hold — or undefined when none does.
+export async function nestedModuleChange(github: GitHub, files: readonly ChangedFile[], base: string, head: string): Promise<string | undefined> {
+  for (const path of pathsOf(files).filter(isNestedGoMod)) {
+    const [before, after] = await Promise.all([github.fileAt(path, base), github.fileAt(path, head)]);
+    if (before === undefined || after === undefined || changesBeyondRequirements(before, after)) {
+      return path;
+    }
+  }
+  return undefined;
 }
 
 // canPush reports whether login can push to the repository. An author the API
