@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -49,6 +50,7 @@ type RevocationCache struct {
 	biscuits BiscuitRevocationLookup
 	caps     *ttlcache.Cache[uuid.UUID]
 	copies   *ttlcache.Cache[string]
+	clears   atomic.Uint64
 }
 
 // RevocationCacheConfig configures a RevocationCache.
@@ -149,6 +151,7 @@ func (c *RevocationCache) IsRevoked(ctx context.Context, id uuid.UUID) (bool, er
 // everything, not only the revoked id, because an answer cached for a
 // descendant is also an answer about the revoked ancestor.
 func (c *RevocationCache) Clear() {
+	c.clears.Add(1)
 	c.caps.Clear()
 	c.copies.Clear()
 }
@@ -157,3 +160,53 @@ func (c *RevocationCache) Clear() {
 // dropped. Optional housekeeping — lookups skip stale entries, and every new
 // answer drops the expired ones before it.
 func (c *RevocationCache) Sweep() int { return c.caps.Sweep() + c.copies.Sweep() }
+
+// RevocationCacheStats is what a RevocationCache has counted since it was
+// made, and what it holds now: of each kind of answer, and its clears. The
+// counts only grow, so a metrics exporter reads them as counters
+// (otelmetric.InstrumentRevocationCache).
+type RevocationCacheStats struct {
+	// Capabilities counts the IsRevoked questions.
+	Capabilities RevocationCacheCounts
+	// Biscuits counts the IsBiscuitRevoked questions.
+	Biscuits RevocationCacheCounts
+	// Clears counts the calls to Clear.
+	Clears uint64
+	_      noCompare
+}
+
+// RevocationCacheCounts is one kind of answer's share of
+// RevocationCacheStats.
+type RevocationCacheCounts struct {
+	// Hits counts the questions answered from the cache, Misses the ones
+	// that waited on an upstream lookup: each question is one or the
+	// other. A Biscuit question is a hit only when every id of the token
+	// has a fresh answer.
+	Hits, Misses uint64
+	// Lookups counts the upstream lookups run for the misses: fewer than
+	// Misses when concurrent misses share one.
+	Lookups uint64
+	// Evictions counts the live answers dropped to stay within
+	// RevocationCacheConfig.MaxEntries: a count that keeps growing says
+	// the bound is too small for the ids in use.
+	Evictions uint64
+	// Entries is how many answers the cache holds, fresh or not yet
+	// swept.
+	Entries int
+	_       noCompare
+}
+
+// Stats reads the cache's counts. Each kind is read shard by shard, without
+// stopping the cache, so the counts of a cache in use are each a moment
+// apart.
+func (c *RevocationCache) Stats() RevocationCacheStats {
+	return RevocationCacheStats{
+		Capabilities: countsOf(c.caps.Stats()),
+		Biscuits:     countsOf(c.copies.Stats()),
+		Clears:       c.clears.Load(),
+	}
+}
+
+func countsOf(st ttlcache.Stats) RevocationCacheCounts {
+	return RevocationCacheCounts{Hits: st.Hits, Misses: st.Misses, Lookups: st.Lookups, Evictions: st.Evictions, Entries: st.Entries}
+}

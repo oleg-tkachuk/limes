@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -290,5 +291,96 @@ func TestShardedCacheKeepsItsBound(t *testing.T) {
 	}
 	if n := c.Len(); n > shardedEntries || n < shardedEntries/2 {
 		t.Errorf("%d entries, want at most %d and most of it used", n, shardedEntries)
+	}
+}
+
+// Every question is one hit or one miss, and the misses that find a lookup
+// in flight run none of their own.
+func TestStatsCountHitsMissesAndLookups(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c, _ := newCache(10)
+		var calls atomic.Int32
+		for range 3 {
+			_, _, _ = c.Get(t.Context(), "a", counted(false, &calls))
+		}
+		release := make(chan struct{})
+		blocked := func(context.Context) (bool, error) {
+			<-release
+			return false, nil
+		}
+		const waiters = 4
+		var wg sync.WaitGroup
+		wg.Go(func() { _, _, _ = c.Get(t.Context(), "b", blocked) })
+		synctest.Wait()
+		for range waiters {
+			wg.Go(func() { _, _, _ = c.Get(t.Context(), "b", counted(false, &calls)) })
+		}
+		synctest.Wait()
+		close(release)
+		wg.Wait()
+		want := Stats{Hits: 2, Misses: 2 + waiters, Lookups: 2, Entries: 2}
+		if got := c.Stats(); got != want || calls.Load() != 1 {
+			t.Errorf("Stats = %+v, want %+v (%d counted lookups, want 1)", got, want, calls.Load())
+		}
+	})
+}
+
+// A waiter whose leader's own context ended asks again, and is still the one
+// question: one miss, though it runs a lookup of its own.
+func TestAWaiterThatAsksAgainIsOneMiss(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c, _ := newCache(10)
+		release := make(chan struct{})
+		var calls atomic.Int32
+		lookup := func(context.Context) (bool, error) {
+			if calls.Add(1) == 1 {
+				<-release
+				return false, context.Canceled
+			}
+			return false, nil
+		}
+		var wg sync.WaitGroup
+		wg.Go(func() { _, _, _ = c.Get(t.Context(), "a", lookup) })
+		synctest.Wait()
+		wg.Go(func() {
+			if _, _, err := c.Get(t.Context(), "a", lookup); err != nil {
+				t.Errorf("the waiter asking again: %v", err)
+			}
+		})
+		synctest.Wait()
+		close(release)
+		wg.Wait()
+		if got := c.Stats(); got.Misses != 2 || got.Lookups != 2 || got.Hits != 0 {
+			t.Errorf("Stats = %+v, want 2 misses and 2 lookups", got)
+		}
+	})
+}
+
+// Cached counts a hit for a question it answers in full, and nothing for one
+// it leaves keys of: the Get of those counts it.
+func TestCachedCountsAHitOnlyWhenAnswered(t *testing.T) {
+	c, clk := newCache(10)
+	_, _, epoch := c.Cached([]string{"a", "b"})
+	c.SeedLive([]string{"a", "b"}, epoch, clk.Now().Add(testTTL))
+	if _, missing, _ := c.Cached([]string{"a", "b"}); len(missing) != 0 {
+		t.Fatalf("missing %v after seeding", missing)
+	}
+	_, _, _ = c.Cached([]string{"a", "c"})
+	if got := c.Stats(); got.Hits != 1 || got.Misses != 0 {
+		t.Errorf("Stats = %+v, want 1 hit and no miss", got)
+	}
+}
+
+// An eviction is a live entry dropped to stay within the bound; an expired
+// one swept is none.
+func TestEvictionsCountOnlyLiveDrops(t *testing.T) {
+	c, clk := newCache(1)
+	var calls atomic.Int32
+	_, _, _ = c.Get(t.Context(), "a", counted(false, &calls))
+	_, _, _ = c.Get(t.Context(), "b", counted(false, &calls))
+	clk.advance(testTTL)
+	_, _, _ = c.Get(t.Context(), "c", counted(false, &calls))
+	if got := c.Stats(); got.Evictions != 1 || got.Entries != 1 {
+		t.Errorf("Stats = %+v, want 1 eviction and 1 entry", got)
 	}
 }

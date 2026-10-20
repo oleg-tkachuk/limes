@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"hash/maphash"
+	"math/rand/v2"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,6 +32,17 @@ const (
 // cacheLine is how far apart two shards' locks are kept, so a processor
 // taking one does not take the other's cache line from another processor.
 const cacheLine = 64
+
+// hitStripes is how many counters the hits are spread over, each on a line
+// of its own: callers of one hot key share its shard, and a single counter
+// there would have them take turns on one more line for every hit.
+const hitStripes = 16
+
+// stripe is one of the counters hits are spread over.
+type stripe struct {
+	n atomic.Uint64
+	_ [cacheLine - 8]byte
+}
 
 // Config is what a Cache runs on. Every field is required: the caller
 // resolves its defaults.
@@ -54,6 +66,9 @@ type Cache[K comparable] struct {
 	// epoch counts clears. A lookup that started before one may have read
 	// the state it invalidated, so its answer is not cached.
 	epoch atomic.Uint64
+	// hits counts the questions answered from the cache, on a stripe each
+	// caller picks at random.
+	hits [hitStripes]stripe
 }
 
 // shard is the entries, lookups and expiry order of the keys that hash to
@@ -74,7 +89,12 @@ type shard[K comparable] struct {
 	// since a key is cached again only once its place has expired and been
 	// dropped.
 	order []queued[K]
-	_     [cacheLine]byte
+	// misses and lookups count the shard's questions not answered from
+	// it and the upstream lookups run for them; evictions the live entries
+	// it dropped to stay within its bound, under mu.
+	misses, lookups atomic.Uint64
+	evictions       uint64
+	_               [cacheLine]byte
 }
 
 type cacheEntry struct {
@@ -123,15 +143,23 @@ func (c *Cache[K]) shardOf(key K) *shard[K] {
 
 // Get serves a fresh entry for key, or runs lookup once for every
 // concurrent caller missing it, with when the answer stops being fresh. An
-// error is returned and never cached.
+// error is returned and never cached. It counts one hit or one miss.
 func (c *Cache[K]) Get(ctx context.Context, key K, lookup func(context.Context) (bool, error)) (bool, time.Time, error) {
 	s := c.shardOf(key)
 	s.mu.RLock()
 	e, ok := s.entries[key]
 	s.mu.RUnlock()
 	if ok && e.expires.After(c.cfg.Now()) {
+		c.countHit()
 		return e.revoked, e.expires, nil
 	}
+	s.misses.Add(1)
+	return c.get(ctx, s, key, lookup)
+}
+
+// get is Get past its first read, counting nothing more: a waiter that asks
+// again is still the one question.
+func (c *Cache[K]) get(ctx context.Context, s *shard[K], key K, lookup func(context.Context) (bool, error)) (bool, time.Time, error) {
 	s.mu.Lock()
 	// Read again under the write lock: another caller may have cached it, or
 	// started its lookup, since.
@@ -148,7 +176,7 @@ func (c *Cache[K]) Get(ctx context.Context, key K, lookup func(context.Context) 
 			// whose own context is still live asks again — through the
 			// cache, so the waiters retrying together share one lookup.
 			if call.err != nil && isContextErr(call.err) && ctx.Err() == nil {
-				return c.Get(ctx, key, lookup)
+				return c.get(ctx, s, key, lookup)
 			}
 			return call.revoked, call.expires, call.err
 		case <-ctx.Done():
@@ -159,6 +187,7 @@ func (c *Cache[K]) Get(ctx context.Context, key K, lookup func(context.Context) 
 	s.inflight[key] = call
 	epoch := c.epoch.Load()
 	s.mu.Unlock()
+	s.lookups.Add(1)
 
 	// Deferred so that a lookup that panics still releases its waiters and
 	// the key.
@@ -168,7 +197,8 @@ func (c *Cache[K]) Get(ctx context.Context, key K, lookup func(context.Context) 
 }
 
 // Cached reads the fresh answers keys have: whether any of them is revoked,
-// the keys with none, and the epoch a lookup of those starts in.
+// the keys with none, and the epoch a lookup of those starts in. Answered
+// in full, it counts a hit; otherwise the Get of the missing keys counts.
 func (c *Cache[K]) Cached(keys []K) (revoked bool, missing []K, epoch uint64) {
 	// Read first: a clear while the keys are read makes this epoch stale,
 	// and SeedLive then seeds nothing.
@@ -183,10 +213,19 @@ func (c *Cache[K]) Cached(keys []K) (revoked bool, missing []K, epoch uint64) {
 		case !ok || !e.expires.After(now):
 			missing = append(missing, k)
 		case e.revoked:
+			c.countHit()
 			return true, nil, epoch
 		}
 	}
+	if len(missing) == 0 {
+		c.countHit()
+	}
 	return false, missing, epoch
+}
+
+// countHit counts a question answered from the cache.
+func (c *Cache[K]) countHit() {
+	c.hits[rand.Uint32()%hitStripes].n.Add(1) //nolint:gosec // G404: picks a stripe to spread contention, nothing to guess
 }
 
 // SeedLive caches keys as not revoked until expires, as an answer about them
@@ -241,7 +280,14 @@ func (c *Cache[K]) finish(s *shard[K], key K, call *lookupCall, epoch uint64) {
 // entries go first and, if that frees nothing, the oldest live one does.
 func (s *shard[K]) makeRoomLocked(now time.Time) {
 	s.sweepLocked(now)
-	for len(s.entries) >= s.maxEntries && s.popLocked() {
+	for len(s.entries) >= s.maxEntries {
+		before := len(s.entries)
+		if !s.popLocked() {
+			return
+		}
+		if len(s.entries) < before {
+			s.evictions++
+		}
 	}
 }
 
@@ -320,9 +366,39 @@ func (c *Cache[K]) Queued() int {
 func (c *Cache[K]) sum(count func(*shard[K]) int) int {
 	n := 0
 	for _, s := range c.shards {
-		s.mu.Lock()
+		s.mu.RLock()
 		n += count(s)
-		s.mu.Unlock()
+		s.mu.RUnlock()
 	}
 	return n
+}
+
+// Stats is what a Cache has counted since New, and what it holds now.
+type Stats struct {
+	// Hits and Misses count the questions answered from the cache and not.
+	Hits, Misses uint64
+	// Lookups counts the upstream lookups run for the misses: fewer than
+	// Misses when concurrent ones share a lookup.
+	Lookups uint64
+	// Evictions counts the live entries dropped to stay within MaxEntries.
+	Evictions uint64
+	// Entries is Len.
+	Entries int
+}
+
+// Stats sums every shard's counts, each shard read under its lock.
+func (c *Cache[K]) Stats() Stats {
+	var st Stats
+	for i := range c.hits {
+		st.Hits += c.hits[i].n.Load()
+	}
+	for _, s := range c.shards {
+		s.mu.RLock()
+		st.Misses += s.misses.Load()
+		st.Lookups += s.lookups.Load()
+		st.Evictions += s.evictions
+		st.Entries += len(s.entries)
+		s.mu.RUnlock()
+	}
+	return st
 }
