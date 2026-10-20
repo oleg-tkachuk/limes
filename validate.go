@@ -14,12 +14,28 @@ import (
 // matches ErrInvalidRequest.
 var ErrInvalidCaveats error = &familyError{"limes: invalid caveats", ErrInvalidRequest}
 
-// builtinOps is the closed set this package defines. Consumers add their own
-// operations as namespaced names ("tool:search", "mcp:github/create_issue");
-// see Op.
-var builtinOps = map[Op]bool{
-	OpGet: true, OpPut: true, OpList: true, OpDelete: true, OpShare: true, OpManage: true,
-}
+// builtinOpList is the closed set this package defines, in the order an
+// error lists it. Consumers add their own operations as namespaced names
+// ("tool:search", "mcp:github/create_issue"); see Op.
+var builtinOpList = []Op{OpGet, OpPut, OpList, OpDelete, OpShare, OpManage}
+
+// builtinOps is builtinOpList as a set.
+var builtinOps = func() map[Op]bool {
+	set := make(map[Op]bool, len(builtinOpList))
+	for _, op := range builtinOpList {
+		set[op] = true
+	}
+	return set
+}()
+
+// builtinOpNames is builtinOpList as an error names it.
+var builtinOpNames = func() string {
+	names := make([]string, len(builtinOpList))
+	for i, op := range builtinOpList {
+		names[i] = string(op)
+	}
+	return strings.Join(names, ", ")
+}()
 
 // readOnlyOps are the built-in operations that do not change state. Anything
 // else — including every consumer-defined operation, whose effect this package
@@ -40,8 +56,8 @@ func (op Op) Validate() error {
 	s := string(op)
 	ns, name, ok := strings.Cut(s, ":")
 	if !ok || ns == "" || name == "" {
-		return fmt.Errorf("%w: unknown op %q (custom ops are namespaced, e.g. \"tool:search\")",
-			ErrInvalidCaveats, s)
+		return fmt.Errorf("%w: unknown op %q: the built-in ops are %s; a custom op is namespaced, e.g. \"tool:search\"",
+			ErrInvalidCaveats, s, builtinOpNames)
 	}
 	for _, r := range s {
 		if r > unicode.MaxASCII || !unicode.IsPrint(r) || unicode.IsSpace(r) {
