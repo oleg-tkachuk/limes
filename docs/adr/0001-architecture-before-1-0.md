@@ -109,7 +109,7 @@ freeze allows now and names the rest, so the API items can be decided before
 
 ### Root package
 
-1. [ ] Pin `proofRefusals` (`verifier.go:502`) to the four dpop rows of
+1. [x] Pin `proofRefusals` (`verifier.go:502`) to the four dpop rows of
    `refusalRules` (`reason.go:69-72`), or derive it from them: today no test
    fails when the two disagree.
 2. [ ] Extract the validation sequence `issue` (`issuer.go:181`) and
@@ -127,14 +127,14 @@ freeze allows now and names the rest, so the API items can be decided before
 
 ### Modules
 
-6. [ ] Add a Redis client prefix to `forbiddenImports`
+6. [x] Add a Redis client prefix to `forbiddenImports`
    (`isolation_test.go:52`): `redisreplay/go.mod` promises limes never
    resolves one, and nothing checks it.
 7. [ ] Stop the nested modules' tests importing `internal/link`
    (`pgstore/*_test.go`, `otelmetric/store_test.go`). A change to that package
    breaks their build against the released limes, the pinned pgstore job
    included.
-8. [ ] Run `otelmetric.Instrument` over memstore through `metertest.Run`: it
+8. [x] Run `otelmetric.Instrument` over memstore through `metertest.Run`: it
    returns a `meter.UsageStore` no suite checks.
 9. [ ] Check that `metertest` has a case for every tenant-budget filter:
    memstore runs it in Go (`memstore.go:1729`), pgstore in SQL
@@ -142,9 +142,9 @@ freeze allows now and names the rest, so the API items can be decided before
    where the two disagreed. The small helpers both carry (`max0`,
    `sameCopyIDs`) stay duplicated: sharing them needs an exported name or
    another cross-module `internal` import (item 7).
-10. [ ] Raise `examples`' pgstore requirement from v0.10.1, which the
+10. [x] Raise `examples`' pgstore requirement from v0.10.1, which the
     `replace` hides (`examples/go.mod:21`).
-11. [ ] Fix two stale comments: `go.mod:9` names `UsageStore[TX]`, generic no
+11. [x] Fix two stale comments: `go.mod:9` names `UsageStore[TX]`, generic no
     longer; `ci.yaml:320` says Renovate raises pgstore's requirement, which
     `require-limes.ts` does.
 
