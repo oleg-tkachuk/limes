@@ -7,7 +7,7 @@ import { parse } from "yaml";
 import { fakeData, fakeGitHub, type FakeData } from "./lib/fake-github.ts";
 import type { Job, WorkflowRun } from "./lib/github.ts";
 import { CI_WORKFLOW, jobPassed, passedRunFor, problemsWithRun, requiredJobs, runIdOf } from "./ci-run.ts";
-import { GATES } from "./release.ts";
+import { GATED, GATES, gateOf } from "./release.ts";
 
 const REPO = "oleg-tkachuk/limes";
 const SHA = "0123456789abcdef0123456789abcdef01234567";
@@ -59,7 +59,7 @@ describe("runIdOf", () => {
 });
 
 describe("jobPassed", () => {
-  const JOB = "PostgreSQL store, released limes";
+  const JOB = gateOf("pgstore");
   async function passed(jobs: Job[], name = JOB): Promise<boolean> {
     const data = fakeData();
     data.jobs.set(RUN, jobs);
@@ -74,14 +74,33 @@ describe("jobPassed", () => {
   test("no job name", async () => assert.rejects(passed([], "")));
 });
 
+// CiJob is what these tests read of a ci.yaml job.
+interface CiJob {
+  name?: string;
+  if?: string;
+  needs?: string[];
+  strategy?: { matrix?: { module?: string[] } };
+}
+const MATRIX_MODULE = "${{ matrix.module }}";
+
+// jobNamed is the id and job of ci.yaml that runs as name, a matrix job
+// once for each of its modules.
+function jobNamed(jobs: Record<string, CiJob>, name: string): [string, CiJob] | undefined {
+  return Object.entries(jobs).find(([, j]) =>
+    (j.strategy?.matrix?.module ?? [undefined]).some((m) => (m === undefined ? j.name : j.name?.replaceAll(MATRIX_MODULE, m)) === name),
+  );
+}
+
+const ciJobs = () => (parse(CI) as { jobs: Record<string, CiJob> }).jobs;
+
 // The jobs the release reads are ones ci.yaml runs, and dispatch-release
 // waits for them and for the required check.
 test("ci.yaml's dispatch waits for what the release reads", () => {
-  const doc = parse(CI) as { jobs: Record<string, { name?: string; needs?: string[] }> };
-  const waited = doc.jobs["dispatch-release"]?.needs ?? [];
+  const jobs = ciJobs();
+  const waited = jobs["dispatch-release"]?.needs ?? [];
   assert.ok(waited.includes("checks"), "dispatch-release does not wait for the required check");
   for (const gate of Object.values(GATES)) {
-    const id = Object.entries(doc.jobs).find(([, j]) => j.name === gate)?.[0];
+    const id = jobNamed(jobs, gate)?.[0];
     assert.ok(id !== undefined && waited.includes(id), `dispatch-release does not wait for '${gate}'`);
   }
   assert.ok(REQUIRED.includes("Verify") && REQUIRED.length > 1);
@@ -91,14 +110,22 @@ test("ci.yaml's dispatch waits for what the release reads", () => {
 // push that skipped it would read as a pass, and let through a module an
 // earlier run held back.
 test("every release gate runs on a push to main", () => {
-  const doc = parse(CI) as { jobs: Record<string, { name?: string; if?: string }> };
+  const jobs = ciJobs();
   for (const gate of Object.values(GATES)) {
-    const job = Object.values(doc.jobs).find((j) => j.name === gate);
+    const job = jobNamed(jobs, gate)?.[1];
     assert.match(job?.if ?? "", /github\.event_name == 'push' && needs\.changes\.outputs\.relevant == 'true'/, gate);
   }
   // And a push that skipped them dispatches no release.
-  const dispatch = (doc.jobs["dispatch-release"] as { if?: string } | undefined)?.if ?? "";
+  const dispatch = jobs["dispatch-release"]?.if ?? "";
   assert.match(dispatch, /needs\.changes\.outputs\.relevant == 'true'/);
+});
+
+// The released-limes job runs once for each gated module, and for no other:
+// a module it skipped would never be released, one the release does not read
+// would gate nothing.
+test("the released-limes matrix is the gated modules", () => {
+  const job = jobNamed(ciJobs(), gateOf(GATED[0] ?? ""))?.[1];
+  assert.deepEqual([...(job?.strategy?.matrix?.module ?? [])].sort(), [...GATED].sort());
 });
 
 describe("passedRunFor", () => {

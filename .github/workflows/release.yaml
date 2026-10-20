@@ -145,9 +145,10 @@ jobs:
       # pinned semantic-release, its GitHub release published — the notes
       # generated from the commits, breaking changes first, then GitHub's list
       # of merged pull requests since its previous tag (.github/release.yml) —
-      # and the Go proxy told of it. pgstore waits for its tests against the
-      # released limes to have passed in the dispatching run. Then every tag
-      # an earlier run pushed and left unpublished is published. semantic-
+      # and the Go proxy told of it. A nested module waits for its tests
+      # against the released limes to have passed in the dispatching run.
+      # Then every tag an earlier run pushed and left unpublished is
+      # published. semantic-
       # release logs every commit message it reads, and this step holds a
       # write token: no line of that log may act as a workflow command. See
       # .github/ci/release.ts.

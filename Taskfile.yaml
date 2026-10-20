@@ -32,8 +32,8 @@ vars:
   EXAMPLES_DIR: examples
   # The TypeScript the workflows run, a Node package of its own.
   CI_DIR: .github/ci
-  # LIMES_MODULE is the root module's path, which pgstore replaces with this
-  # checkout.
+  # LIMES_MODULE is the root module's path, which every nested module
+  # replaces with this checkout.
   LIMES_MODULE: github.com/oleg-tkachuk/limes
 
 includes:
@@ -58,7 +58,7 @@ tasks:
       - task --list
 
   deps:update:all:
-    desc: "deps:update for the root, then go mod tidy in each nested module that builds it through a replace — pgstore and examples — whose go.mod a root bump changes too"
+    desc: "deps:update for the root, then go mod tidy in each nested module that builds it through a replace, whose go.mod a root bump changes too"
     cmds:
       - task: deps:update
       - node .github/ci/tidy-modules.ts
@@ -139,9 +139,11 @@ tasks:
     cmds:
       - go test -race -count=1 ./...
 
-  test:pgstore:pinned:
-    desc: "pgstore's tests against the limes its go.mod requires, as a consumer's build resolves it, not the limes of this commit — needs a running Docker and the module proxy"
-    dir: '{{.PGSTORE_DIR}}'
+  test:pinned:
+    desc: "A nested module's tests against the limes its go.mod requires, as a consumer's build resolves it, not the limes of this commit — MODULE is pgstore, redisreplay or otelmetric; needs the module proxy, and Docker for pgstore"
+    requires:
+      vars: [MODULE]
+    dir: '{{.MODULE}}'
     vars:
       # A copy of go.mod without the replace, in a scratch directory: the
       # tracked go.mod and go.sum stay as they are.

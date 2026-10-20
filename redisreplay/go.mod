@@ -6,6 +6,11 @@ go 1.26.0
 
 toolchain go1.27.2
 
+// The replace builds this module against the limes of the same commit, which
+// is what CI tests; a consumer of this module, whose build ignores the
+// replace, gets the version required here.
+replace github.com/oleg-tkachuk/limes => ../
+
 require (
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/google/uuid v1.6.0
