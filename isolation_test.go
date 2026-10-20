@@ -14,16 +14,17 @@ import (
 // This module must be usable by a third party that runs neither object
 // storage nor a particular database, so its RESOLVED dependency graph — not
 // its go.mod, a transitive pull disqualifies it just as much — may contain no
-// database driver, no object-storage SDK and no OpenTelemetry, which the
-// otelmetric module brings for a consumer that wants it. The check lives in the module's
-// own suite so that `task verify-all`, and through it CI, cannot run without
-// it.
+// database driver, no object-storage SDK, no Redis client, which the
+// redisreplay module brings, and no OpenTelemetry, which the otelmetric module
+// brings for a consumer that wants it. The check lives in the module's own
+// suite so that `task verify-all`, and through it CI, cannot run without it.
 
-// Labels for the two properties, as the failure message states them.
+// Labels for the properties, as the failure message states them.
 const (
 	labelDatabaseDriver = "a database driver"
 	labelStorageSDK     = "an object-storage SDK"
 	labelTelemetry      = "OpenTelemetry"
+	labelRedisClient    = "a Redis client"
 )
 
 // modulePath is this module's own import path. The live check
@@ -62,6 +63,12 @@ var forbiddenImports = []forbiddenImport{
 	{prefix: "cloud.google.com/go/storage", label: labelStorageSDK},
 	{prefix: "github.com/Azure/azure-sdk-for-go", label: labelStorageSDK},
 	{prefix: "go.opentelemetry.io", label: labelTelemetry},
+	{prefix: "github.com/redis/go-redis", label: labelRedisClient},
+	{prefix: "github.com/redis/rueidis", label: labelRedisClient},
+	{prefix: "github.com/go-redis/redis", label: labelRedisClient},
+	{prefix: "github.com/gomodule/redigo", label: labelRedisClient},
+	{prefix: "github.com/valkey-io/valkey-go", label: labelRedisClient},
+	{prefix: "github.com/alicebob/miniredis", label: labelRedisClient},
 }
 
 // dependencyViolation is one forbidden package found in the graph.
@@ -130,6 +137,14 @@ func TestFindForbidden(t *testing.T) {
 			name:  "opentelemetry stays in its own module",
 			paths: []string{"go.opentelemetry.io/otel/metric"},
 			want:  []dependencyViolation{{importPath: "go.opentelemetry.io/otel/metric", label: labelTelemetry}},
+		},
+		{
+			name:  "a redis client stays in its own module",
+			paths: []string{"github.com/redis/go-redis/v9", "github.com/alicebob/miniredis/v2/server"},
+			want: []dependencyViolation{
+				{importPath: "github.com/redis/go-redis/v9", label: labelRedisClient},
+				{importPath: "github.com/alicebob/miniredis/v2/server", label: labelRedisClient},
+			},
 		},
 		{
 			name:  "one database driver",
