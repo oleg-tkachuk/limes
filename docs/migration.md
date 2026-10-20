@@ -14,6 +14,12 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## pgstore/v0.30.0
+
+- Nothing of pgstore's own API changed: this release follows limes v0.109.0,
+  whose one `RevocationCache` answers for capabilities and Biscuit copies.
+  `RevocationWatcher.Caches` holds that one cache where it held the two.
+
 ## v0.109.0
 
 - `BiscuitRevocationCache`, `BiscuitRevocationCacheConfig` and
