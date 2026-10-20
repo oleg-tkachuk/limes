@@ -122,7 +122,9 @@ type BiscuitConfig struct {
 	// Revocations answers whether a copy of a Biscuit is revoked on its
 	// own. Required; wrap the store in the RevocationCache that
 	// VerifierConfig.Revocations holds, with RevocationCacheConfig.Biscuits
-	// set.
+	// set. NewVerifier refuses a *RevocationCache without it, or a nil one;
+	// a type of yours that wraps such a cache is not seen through, and
+	// refuses every Biscuit at Verify instead.
 	Revocations BiscuitRevocationLookup
 
 	// MeterCopies admits Biscuits whose attenuation blocks set a copy's own
@@ -201,7 +203,7 @@ func NewVerifier(cfg VerifierConfig) (*Verifier, error) {
 	// type accepts the call either way, so the gap is refused here rather
 	// than at the first Biscuit presented.
 	if cfg.Biscuit != nil {
-		if c, ok := cfg.Biscuit.Revocations.(*RevocationCache); ok && !c.answersBiscuits() {
+		if c, ok := cfg.Biscuit.Revocations.(*RevocationCache); ok && (c == nil || !c.answersBiscuits()) {
 			return nil, errNoBiscuitLookup
 		}
 	}
