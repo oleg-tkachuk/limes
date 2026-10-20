@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	mathrand "math/rand/v2"
+	"slices"
 	"testing"
 	"time"
 
@@ -17,6 +18,12 @@ import (
 )
 
 func biscuitFixture(t *testing.T) (*Issuer, *Verifier, *memStore, Capability, string) {
+	t.Helper()
+	return biscuitFixtureOf(t, []Op{OpGet, OpList, OpPut, OpShare})
+}
+
+// biscuitFixtureOf is biscuitFixture for a capability allowing ops.
+func biscuitFixtureOf(t *testing.T, ops []Op) (*Issuer, *Verifier, *memStore, Capability, string) {
 	t.Helper()
 	issuer, _, store, pub := buildIssuerVerifier(t)
 	verifier, err := NewVerifier(VerifierConfig{
@@ -34,7 +41,7 @@ func biscuitFixture(t *testing.T) (*Issuer, *Verifier, *memStore, Capability, st
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData, audienceMCP},
 		Caveats: Caveats{
-			Ops:              []Op{OpGet, OpList, OpPut, OpShare},
+			Ops:              ops,
 			ResourcePrefixes: []string{"corpus/"},
 			Requests:         RequestCeiling{Unlimited: true}, Budget: BudgetCeiling{Unlimited: true, UnitCode: "USD"},
 		},
@@ -378,29 +385,30 @@ func TestBiscuitTakesOnlyAVerifiedCapabilityOfItsOwn(t *testing.T) {
 	}
 }
 
-// A Biscuit form is handed on offline, so it is a share: a capability
-// granted without OpShare gets none, as it gets no Delegate child.
-func TestBiscuitRequiresOpShare(t *testing.T) {
-	issuer, _, _, _ := buildIssuerVerifier(t)
-	ctx := context.Background()
-	for name, tc := range map[string]struct {
-		ops  []Op
-		want error
-	}{
-		"without share": {[]Op{OpGet}, ErrOpNotAllowed},
-		"with share":    {[]Op{OpGet, OpShare}, nil},
-	} {
-		cap, _, err := issuer.issue(ctx, IssueRequest{
-			IssuedBy: Principal{Subject: "op"},
-			Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
-			Audience: []string{audienceData}, Caveats: Caveats{Ops: tc.ops}, TTL: time.Hour,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, err = issuer.Biscuit(ctx, BiscuitRequest{Capability: asVerified(cap)})
-		if !errors.Is(err, tc.want) {
-			t.Errorf("%s: err = %v, want %v", name, err, tc.want)
-		}
+// A Biscuit form needs no OpShare: its holder narrows it offline, to one
+// object and a shorter expiry, while Delegate still refuses the capability.
+func TestBiscuitNeedsNoOpShare(t *testing.T) {
+	issuer, v, _, cap, token := biscuitFixtureOf(t, []Op{OpGet})
+	const object = "corpus/public/a.txt"
+	soon := time.Now().Add(time.Minute).Truncate(time.Second)
+	narrowed, err := Attenuate(token, Attenuation{ResourceURIs: []string{object}, ExpiresAt: soon})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := v.Verify(context.Background(), VerifyRequest{Token: narrowed, Audience: audienceData})
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	c := got.Capability()
+	if c.ID != cap.ID || !slices.Equal(c.Caveats.ResourceURIs, []string{object}) || len(c.Caveats.ResourcePrefixes) != 0 || !c.ExpiresAt.Equal(soon) {
+		t.Errorf("narrowed copy = %+v", c)
+	}
+	_, err = issuer.Delegate(context.Background(), DelegateRequest{
+		Parent:  asVerified(cap),
+		Subject: Principal{Type: PrincipalTypeAgent, TenantID: cap.Subject.TenantID, Subject: "sub-agent"},
+		Caveats: Caveats{Ops: []Op{OpGet}},
+	})
+	if !errors.Is(err, ErrOpNotAllowed) {
+		t.Errorf("Delegate without OpShare: err = %v, want ErrOpNotAllowed", err)
 	}
 }

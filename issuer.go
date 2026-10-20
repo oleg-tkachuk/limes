@@ -379,9 +379,7 @@ type DelegateRequest struct {
 // ErrDelegationTooDeep, refused by Store.Insert before it is on record. A parent whose caveats do not allow
 // OpShare — the right to delegate — is ErrOpNotAllowed: delegating is the
 // share operation, and a capability granted without it may not have the
-// issuer mint a new principal any part of it. Issuer.Biscuit requires it
-// too: a Biscuit form is attenuated and handed on offline, with no key, so
-// it is a share as well.
+// issuer mint a new principal any part of it.
 func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (IssueResult, error) {
 	return result(i.delegate(ctx, req))
 }
