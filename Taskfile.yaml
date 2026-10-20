@@ -172,7 +172,12 @@ tasks:
   bench:pgstore:
     desc: "pgstore's benchmarks on this commit beside the newest pgstore release, compared by benchstat — needs a running Docker and the release's tag"
     cmds:
-      - node .github/ci/bench.ts
+      - node .github/ci/bench.ts pgstore
+
+  bench:limes:
+    desc: "limes's benchmarks on this commit beside the newest limes release, compared by benchstat — needs the release's tag"
+    cmds:
+      - node .github/ci/bench.ts limes
 
   test:redisreplay:
     desc: "redisreplay's contract against a real Redis at LIMES_REDIS_ADDR (host:port) — miniredis runs another Lua, so this is the check of the script itself"
