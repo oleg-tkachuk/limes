@@ -7,7 +7,8 @@ import { parse } from "yaml";
 import { changed, fakeData, fakeGitHub, type FakeData } from "./lib/fake-github.ts";
 import type { PullRequest } from "./lib/github.ts";
 import { RED_ISSUE, REQUIRED_CHECK, State, reportHealth, stateOf } from "./main-health.ts";
-import { CI_WORKFLOW, mergeGreen, mergeWaiting } from "./merge-green.ts";
+import { CI_WORKFLOW } from "./lib/runs.ts";
+import { mergeGreen, mergeWaiting } from "./merge-green.ts";
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 const MAIN = "1111111111111111111111111111111111111111";

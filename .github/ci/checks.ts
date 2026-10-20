@@ -11,9 +11,8 @@
 import { info, summarize, table } from "./lib/actions.ts";
 import { requireEnv } from "./lib/env.ts";
 import { runMain } from "./lib/main.ts";
+import { PASSING } from "./lib/runs.ts";
 
-// PASSING are the results of a job that let the required check pass.
-const PASSING: readonly string[] = ["success", "skipped"];
 // SUMMARY_HEADER heads the summary table.
 const SUMMARY_HEADER = ["Job", "Result"];
 
