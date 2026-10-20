@@ -93,6 +93,25 @@
 // keeps stay revoked until Purge takes them: an id not
 // on record is not revoked, so a token whose record went early would verify
 // again.
+//
+// # Throughput
+//
+// A tenant's ceiling holds exactly because every call that moves the
+// tenant's spend or holds — Charge, Reserve, Settle, Refund, Release,
+// ReleaseExpired, SetTenantBudget — locks the tenant's budget row for the
+// rest of its transaction. One tenant's charges therefore commit one at a
+// time, whichever capabilities they are on: its throughput is about one
+// charge per charge transaction, and adding connections or replicas does not
+// raise it. Different tenants' charges do not wait on each other, nor does
+// any tenant's Bump, which counts requests and takes no tenant lock, nor
+// IsRevoked. In the package's benchmarks, against PostgreSQL on the same
+// host, a charge transaction took 1.4–3ms — some 350–700 charges a second
+// for one tenant (BenchmarkChargeParallel beside
+// BenchmarkChargeParallelTenants). A network between the service and the
+// database adds its round trip to every statement of the transaction, and
+// onCharged runs inside it, holding the lock: keep it short. A tenant that
+// needs more charges a second than that is a sizing question — fewer,
+// larger charges, as Reserve and Settle allow — not a setting.
 package pgstore
 
 import (

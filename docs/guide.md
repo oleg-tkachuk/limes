@@ -862,6 +862,18 @@ either followed by `BEGIN`) is refused with `ErrChargeTransaction`; a
 savepoint it begins is its own to end. Every time it writes comes from
 `Config.Now`, never from the database's clock.
 
+A tenant's ceiling is exact because every call that moves its spend or holds
+— `Charge`, `Reserve`, `Settle`, `Refund`, `Release`, `ReleaseExpired`,
+`SetTenantBudget` — locks the tenant's budget row until it commits. One
+tenant's charges therefore commit one at a time, on whatever capabilities, and
+no number of connections or replicas raises that: pgstore's benchmarks, with
+PostgreSQL on the same host, put it at some 350–700 charges a second for one
+tenant. Other tenants do not wait on it, nor do `Bump` and the revocation
+checks. A network to the database adds its round trip to every statement of
+the transaction, and `onCharged` runs while the lock is held, so keep it
+short; a tenant that needs more is served by fewer, larger charges — a
+`Reserve` settled once for many units of work — not by a setting.
+
 Run `Migrate` as the role that owns the schema and serve as another one. The
 policies bind the owner too (`FORCE ROW LEVEL SECURITY`), and `Migrate` scopes
 each migration of its run to every tenant — one whose scope cannot be set
