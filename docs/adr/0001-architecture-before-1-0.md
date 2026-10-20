@@ -118,7 +118,7 @@ freeze allows now and names the rest, so the API items can be decided before
    `delegate` is 137 lines, `Verifier.verify` (`verifier.go:271`) 117.
 3. [x] Move the generic `ttlCache` (`cache.go:120` to the end) to
    `internal/`; it uses no root type.
-4. [ ] Split `types.go` (errors, units, `Op`, `Principal`, `Capability`,
+4. [x] Split `types.go` (errors, units, `Op`, `Principal`, `Capability`,
    `grant`, `Caveats`) and `biscuit_revocation.go` (interfaces, `BiscuitCopy`,
    a `Verifier` method, the cache) by concern. File moves only.
 5. [ ] **API.** `RevocationCache` and `BiscuitRevocationCache` have the same

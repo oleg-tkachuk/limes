@@ -1,167 +1,11 @@
 package limes
 
 import (
-	"errors"
-	"fmt"
 	"slices"
 	"time"
 
 	"github.com/google/uuid"
-	"golang.org/x/text/currency"
 )
-
-// Errors exposed to callers, which switch on them with errors.Is. A
-// consumer maps them to its transport, or lets Verifier.ErrorResponse
-// map them to HTTP.
-//
-// Some are families that more specific sentinels match as well, so a caller
-// branches on the one it needs:
-//
-//	ErrUnauthenticated       the presented credentials were refused (401)
-//	├── ErrNoCredentials     none were presented
-//	├── ErrInvalidToken      the token is not genuine, or not this verifier's
-//	│   └── ErrBiscuitAttenuation
-//	├── ErrProofOfPossession the proof of possession is missing or wrong
-//	│   └── ErrAuthSchemeMismatch
-//	├── ErrRevoked
-//	│   └── ErrDelegationTooDeep
-//	└── ErrExpired, ErrNotYetValid, ErrAudienceMismatch
-//	ErrCaveatViolation       a caveat refuses the operation (403)
-//	ErrBudgetExceeded, ErrTenantBudgetExceeded, ErrRequestLimitExceeded
-//	                         a ceiling refuses the request (403)
-//	ErrInvalidRequest        the request itself is malformed
-//	├── ErrInvalidCaveats, ErrInvalidAmount, ErrEffectConflict
-//	└── ErrMalformedAuthorization  the client's Authorization header (400)
-//	ErrNotFound              what the request names is not on record
-//	└── meter.ErrChargeNotFound, meter.ErrUsageNotFound, …
-//	ErrConflict              a well-formed request disagrees with what is on record
-//	└── ErrAlreadyExists, ErrUnitCodeMismatch, meter.ErrExternalRefConflict, …
-var (
-	// ErrUnauthenticated is the family of every refusal of the presented
-	// credentials, token or proof: the one errors.Is a consumer needs to
-	// answer them all as unauthenticated.
-	ErrUnauthenticated = errors.New("limes: unauthenticated")
-	// ErrInvalidToken — the token is not genuine or not this verifier's
-	// to accept: a bad signature, an unknown kid, an untrusted issuer, a
-	// malformed header or claims. One sentinel for all, so a caller cannot
-	// tell an attacker which check failed.
-	ErrInvalidToken error = &familyError{"limes: invalid token", ErrUnauthenticated}
-	// ErrProofOfPossession is the family of every proof-of-possession
-	// refusal: the token may be genuine, the proof that its holder sent it
-	// is what failed. The verifier wraps each dpop refusal in it.
-	ErrProofOfPossession error = &familyError{"limes: proof of possession refused", ErrUnauthenticated}
-	ErrExpired           error = &familyError{"limes: expired", ErrUnauthenticated}
-	ErrNotYetValid       error = &familyError{"limes: not yet valid", ErrUnauthenticated}
-	ErrRevoked           error = &familyError{"limes: revoked", ErrUnauthenticated}
-	// ErrTenantErased is a metering call, or a Store.Insert, for a tenant
-	// whose usage EraseTenantUsage removed: nothing of it is recorded or
-	// counted again. Its capabilities were revoked with it, so it matches
-	// ErrRevoked.
-	ErrTenantErased error = &familyError{"limes: tenant erased", ErrRevoked}
-	// ErrDelegationTooDeep — a capability with more than MaxDelegationDepth
-	// ancestors on record. Its root lies past the bounded IsRevoked walk,
-	// so a revocation there would go unseen: it is refused as revoked,
-	// never accepted, and Delegate refuses to mint one. A store answers it
-	// as an error, which no revocation cache keeps.
-	ErrDelegationTooDeep error = &familyError{"limes: delegation chain too deep", ErrRevoked}
-	ErrAudienceMismatch  error = &familyError{"limes: audience mismatch", ErrUnauthenticated}
-	ErrCaveatViolation         = errors.New("limes: caveat violation")
-	ErrBudgetExceeded          = errors.New("limes: budget exceeded")
-
-	// ErrInvalidAmount — an amount that is negative or above MaxNanos, or a
-	// decimal that is not one (ParseAmount). Refunds are explicit; a
-	// negative charge is not one. A malformed request, so it matches
-	// ErrInvalidRequest.
-	ErrInvalidAmount error = &familyError{"limes: invalid amount", ErrInvalidRequest}
-
-	// ErrRequestLimitExceeded — the capability, a Biscuit copy or an
-	// ancestor used every request its ceiling allows; the next was blocked.
-	ErrRequestLimitExceeded = errors.New("limes: request limit exceeded")
-
-	// ErrTenantBudgetExceeded — the tenant aggregate cap has been
-	// hit. Distinct from ErrBudgetExceeded because the remedy differs:
-	// an operator raises a tenant's ceiling with SetTenantBudget, while a
-	// capability's ceiling is in its token and lifting it means issuing a
-	// new one.
-	ErrTenantBudgetExceeded = errors.New("limes: tenant aggregate budget exceeded")
-
-	ErrDelegationTooWide = errors.New("limes: child wider than parent")
-	// ErrUnitCodeMismatch — two units that would have to be one: a
-	// delegated child declaring a unit_code other than its parent's, or an
-	// amount in a unit other than the one a counter (a capability's, an
-	// ancestor's, a tenant's) already counts in. Nothing converts between
-	// currencies, so cross-currency delegation is refused at issuance and a
-	// cross-currency charge at the Meter. The request is well formed and
-	// disagrees with what is on record, so it matches ErrConflict.
-	ErrUnitCodeMismatch error = &familyError{"limes: unit_code mismatch", ErrConflict}
-	// ErrInvalidRequest is a request malformed in itself: a missing tenant,
-	// an empty audience entry, a negative TTL, a thumbprint that is not one,
-	// a not-before past the expiry, caveats or an amount that do not
-	// validate. Nothing was done. Every such error matches it, so a caller
-	// maps the whole family to its "bad request" without listing it. A
-	// request that is well formed but asks for more than is allowed has its
-	// own sentinel instead: ErrDelegationTooWide, ErrUnitCodeMismatch.
-	ErrInvalidRequest = errors.New("limes: invalid request")
-	// ErrUnknownTenant is an issuance for a tenant that does not exist —
-	// typically one whose provisioning has not finished. The Store returns it.
-	ErrUnknownTenant = errors.New("limes: unknown tenant")
-	// ErrTenantDeleted is an issuance for a tenant in the trash: it exists,
-	// so its rows may be restored, but nothing new is minted for it. The
-	// Store returns it.
-	ErrTenantDeleted = errors.New("limes: tenant deleted")
-	// ErrScopeMismatch is a store call whose context is scoped to a tenant
-	// other than the one its request names — or to none — under a store
-	// that keeps each tenant's rows apart. The rows are there; the call may
-	// not see them. It is the caller's wiring that is wrong, not the
-	// request, so it matches neither ErrInvalidRequest nor ErrNotFound, and
-	// ErrorResponse answers it 500.
-	ErrScopeMismatch = errors.New("limes: call scoped to another tenant than its request names")
-	// ErrProofUnsupported is a key-bound capability presented to a verifier
-	// with no DPoP configured: no proof the client sends could be checked.
-	// It is the deployment's fault, not the request's, so it matches no
-	// ErrUnauthenticated sentinel and ErrorResponse invites no retry.
-	ErrProofUnsupported = errors.New("limes: key-bound capability, and this verifier checks no proof")
-)
-
-// familyError is a sentinel with a name of its own that also matches the
-// family it belongs to, and that family's own: errors.Is(dpop.ErrReplayed,
-// ErrProofOfPossession) and errors.Is(dpop.ErrReplayed, ErrUnauthenticated)
-// both hold.
-type familyError struct {
-	msg    string
-	family error
-}
-
-func (e *familyError) Error() string { return e.msg }
-func (e *familyError) Is(target error) bool {
-	return target == e.family || errors.Is(e.family, target)
-}
-
-// invalidRequest is an ErrInvalidRequest saying what was wrong.
-func invalidRequest(format string, args ...any) error {
-	return fmt.Errorf("%w: "+format, append([]any{ErrInvalidRequest}, args...)...)
-}
-
-// AbstractUnitCode is the unit of a budget that is not money — requests,
-// credits, anything metered: ISO 4217's XXX, "no currency involved".
-const AbstractUnitCode = "XXX"
-
-// IsUnitCode reports whether u is an ISO 4217 currency code, in its
-// canonical upper-case spelling: "USD", "JPY", "XXX". Empty is not one: it
-// names no unit, and no unit is ever assumed for it.
-func IsUnitCode(u string) bool {
-	unit, err := currency.ParseISO(u)
-	return err == nil && unit.String() == u
-}
-
-// validUnitCode refuses a unit that is neither empty — none named — nor an
-// ISO 4217 code.
-func validUnitCode(u string) error {
-	if u != "" && !IsUnitCode(u) {
-		return invalidRequest("unit_code %q is not an ISO 4217 code in upper case", u)
-	}
-	return nil
-}
 
 // Op is an operation an agent may perform. The package defines a small
 // built-in set (below); a consumer adds its own as namespaced names of the
@@ -190,62 +34,6 @@ const (
 // can have written a comparison it would stop compiling. Compare them field
 // by field, or with reflect.DeepEqual.
 type noCompare [0]func()
-
-// Principal identifies the subject the capability is issued to. It is
-// written into a token as the limes_principal claim (wire.go). Agent
-// principals have a richer shape than service principals: they carry
-// the run / tool-call lineage that audit and cost attribution need.
-type Principal struct {
-	// Type discriminates the principal kind.
-	Type PrincipalType
-	// TenantID is required for every principal — capability without
-	// tenant scope is malformed and the verifier rejects it.
-	TenantID uuid.UUID
-	// Subject is the stable identity (user UUID, agent run ID, service
-	// account name). Format depends on Type.
-	Subject string
-	// Agent fields are populated only for Type == PrincipalTypeAgent.
-	Agent *AgentPrincipal
-	_     noCompare
-}
-
-// PrincipalType discriminates Principal.Type.
-type PrincipalType string
-
-// The principal kinds. The zero value, PrincipalTypeUnspecified, names none
-// and is refused wherever a kind is required.
-const (
-	PrincipalTypeUnspecified PrincipalType = ""
-	PrincipalTypeUser        PrincipalType = "user"    // a person
-	PrincipalTypeAgent       PrincipalType = "agent"   // an AI agent; Principal.Agent says which
-	PrincipalTypeService     PrincipalType = "service" // a service account
-)
-
-// AgentPrincipal carries the fields specific to AI-agent principals.
-// Threaded into audit + lineage so per-tool-call replay reconstructs
-// the call graph without joining across half a dozen tables.
-type AgentPrincipal struct {
-	// AgentType is a human-meaningful label ("research-orchestrator",
-	// "code-reviewer-bot"). Used for grouping, dashboards, anomaly
-	// baselines.
-	AgentType string
-	// AgentVersion pins the build / git-sha of the agent runtime.
-	AgentVersion string
-	// RunID is a UUID minted by the agent host at session start.
-	RunID uuid.UUID
-	// ParentRunID is the RunID of the agent whose capability this one was
-	// delegated from. Issuer.Delegate sets it from the parent, and refuses
-	// a request naming another; zero for a root capability, or one
-	// delegated from a principal that is no agent or names no run.
-	ParentRunID uuid.UUID
-	// Model identifies the LLM behind the agent ("example-model-1",
-	// "gpt-5-pro"). Used for cost attribution.
-	Model string
-	// MCPClient is the agent host's user-agent ("example-host@1.4.0",
-	// "cursor@0.44"). Useful for compatibility tracking.
-	MCPClient string
-	_         noCompare
-}
 
 // Capability is the in-memory representation of a token. The wire form is
 // a JWT; this struct is what the Issuer fills before signing, and what
@@ -416,19 +204,6 @@ func (c Caveats) clone() Caveats {
 	c.ResourceURIs = slices.Clone(c.ResourceURIs)
 	c.SourceIPCIDR = slices.Clone(c.SourceIPCIDR)
 	return c
-}
-
-// Clone is p with agent details of its own: a store keeps, and hands out,
-// a principal no caller can alter through a pointer it kept.
-func (p Principal) Clone() Principal { return p.clone() }
-
-// clone is p with agent details of its own.
-func (p Principal) clone() Principal {
-	if p.Agent != nil {
-		agent := *p.Agent
-		p.Agent = &agent
-	}
-	return p
 }
 
 // Clone is c with slices and pointers of its own: a store keeps, and hands
