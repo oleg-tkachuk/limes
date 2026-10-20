@@ -23,7 +23,7 @@ import { info, setOutput } from "./lib/actions.ts";
 import { requireEnv } from "./lib/env.ts";
 import { gitHubFor, type GitHub, type Job } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
-import { CI_WORKFLOW, COMPLETED, PASSING } from "./lib/runs.ts";
+import { CI_WORKFLOW, COMPLETED, PASSING, SUCCESS } from "./lib/runs.ts";
 
 // REQUIRED_CHECK_JOB is the id of the job main requires, whose needs are the
 // jobs a merge stands on.
@@ -91,8 +91,8 @@ export async function problemsWithRun(github: GitHub, repository: string, runId:
   return problems;
 }
 
-// jobPassed reports whether the job named name passed or was skipped; one
-// missing or unfinished is an error.
+// jobPassed reports whether the job named name ran and passed; one missing
+// or unfinished is an error.
 export async function jobPassed(github: GitHub, runId: number, name: string): Promise<boolean> {
   if (name === "") {
     throw new Error("no job name");
@@ -101,7 +101,9 @@ export async function jobPassed(github: GitHub, runId: number, name: string): Pr
   if (job === undefined || job.status !== COMPLETED) {
     throw new Error(`job '${name}' of CI run ${runId} is ${job?.status ?? "missing"}`);
   }
-  if (!PASSING.includes(job.conclusion ?? "")) {
+  // A gate passes only by running: a push run checks everything
+  // (changes.ts), so a skipped gate means the run tested nothing it needs.
+  if (job.conclusion !== SUCCESS) {
     info(`job '${name}' of CI run ${runId} ended as ${job.conclusion ?? "nothing"}`);
     return false;
   }

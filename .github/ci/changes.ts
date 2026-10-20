@@ -15,6 +15,14 @@
 // A push that created the branch reports an all-zero BEFORE, a force-push can
 // name a commit this clone does not have, and a run by hand names none at
 // all. None of them is a diff, so each reaches everything.
+//
+// A push to main checks everything, whatever its diff reaches: its run is
+// what a release is vouched for by (.github/ci/ci-run.ts) and what says
+// whether main is green (main-health.ts), and a run that skipped a check
+// would pass for code it never tested — the code commit under a
+// documentation-only one, say, whose own run failed. The diff still decides
+// `code`, whether the push changed anything but documentation, which is what
+// a release is dispatched on.
 
 import { info, setOutput } from "./lib/actions.ts";
 import { optionalEnv } from "./lib/env.ts";
@@ -69,6 +77,11 @@ export const ALL_GROUPS: readonly Group[] = Object.values(Group);
 // OUTPUT_RELEVANT is the output that says the change is more than
 // documentation; OUTPUT_VERIFY_TASKS, the tasks the Verify job runs.
 export const OUTPUT_RELEVANT = "relevant";
+// OUTPUT_CODE says the diff itself reaches more than documentation, whatever
+// the run checks; ci.yaml's dispatch-release reads it.
+export const OUTPUT_CODE = "code";
+// PUSH_EVENT is the event of a run on main after a merge or a push.
+export const PUSH_EVENT = "push";
 export const OUTPUT_VERIFY_TASKS = "verify-tasks";
 // VERIFY_GATE is the whole gate but golangci-lint, which CI runs as a job of
 // its own; SCRIPTS_TASKS, its part over the scripts.
@@ -144,19 +157,31 @@ export async function classify(env: DiffEnv, cwd?: string): Promise<Set<Group>> 
   return reachedGroups(paths);
 }
 
+// checkedGroups is the groups a run of event checks, given those its diff
+// reaches: every one for a push, the reached ones otherwise.
+export function checkedGroups(event: string | undefined, reached: ReadonlySet<Group>): Set<Group> {
+  return event === PUSH_EVENT ? new Set(ALL_GROUPS) : new Set(reached);
+}
+
 async function main(): Promise<void> {
-  const groups = await classify({
+  const reached = await classify({
     base: optionalEnv("BASE"),
     head: optionalEnv("HEAD"),
     before: optionalEnv("BEFORE"),
     after: optionalEnv("AFTER"),
   });
+  const event = optionalEnv("EVENT");
+  const groups = checkedGroups(event, reached);
+  if (event === PUSH_EVENT) {
+    info("a push to main checks everything, whatever its diff reaches");
+  }
   if (groups.size === 0) {
     info("documentation only — the checks below will report as skipped");
   } else {
     info(`reaches: ${[...groups].join(", ")}`);
   }
   setOutput(OUTPUT_RELEVANT, String(groups.size > 0));
+  setOutput(OUTPUT_CODE, String(reached.size > 0));
   for (const group of ALL_GROUPS) {
     setOutput(group, String(groups.has(group)));
   }

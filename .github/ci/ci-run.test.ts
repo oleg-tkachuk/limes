@@ -67,7 +67,7 @@ describe("jobPassed", () => {
     return jobPassed(fakeGitHub(data), RUN, name);
   }
   test("a passed job", async () => assert.equal(await passed([{ name: JOB, status: "completed", conclusion: "success" }]), true));
-  test("a skipped job", async () => assert.equal(await passed([{ name: JOB, status: "completed", conclusion: "skipped" }]), true));
+  test("a skipped job is no pass", async () => assert.equal(await passed([{ name: JOB, status: "completed", conclusion: "skipped" }]), false));
   test("a failed job", async () => assert.equal(await passed([{ name: JOB, status: "completed", conclusion: "failure" }]), false));
   test("a cancelled job", async () => assert.equal(await passed([{ name: JOB, status: "completed", conclusion: "cancelled" }]), false));
   test("a running job", async () => assert.rejects(passed([{ name: JOB, status: "in_progress", conclusion: undefined }])));
@@ -116,9 +116,9 @@ test("every release gate runs on a push to main", () => {
     const job = jobNamed(jobs, gate)?.[1];
     assert.match(job?.if ?? "", /github\.event_name == 'push' && needs\.changes\.outputs\.relevant == 'true'/, gate);
   }
-  // And a push that skipped them dispatches no release.
+  // And a documentation-only push dispatches no release.
   const dispatch = jobs["dispatch-release"]?.if ?? "";
-  assert.match(dispatch, /needs\.changes\.outputs\.relevant == 'true'/);
+  assert.match(dispatch, /needs\.changes\.outputs\.code == 'true'/);
 });
 
 // The released-limes job runs once for each gated module, and for no other:

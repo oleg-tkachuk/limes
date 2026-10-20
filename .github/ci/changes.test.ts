@@ -4,12 +4,14 @@ import { after, before, describe, test } from "node:test";
 
 import { parse } from "yaml";
 
-import { ALL_GROUPS, Group, INERT, SCRIPTS_TASKS, VERIFY_GATE, candidateRange, classify, reachedGroups, reachesCode, verifyTasks } from "./changes.ts";
+import { ALL_GROUPS, Group, INERT, OUTPUT_CODE, PUSH_EVENT, SCRIPTS_TASKS, VERIFY_GATE, candidateRange, checkedGroups, classify, reachedGroups, reachesCode, verifyTasks } from "./changes.ts";
 import { globToRegExp } from "./lib/glob.ts";
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
 
 // CODEQL is the workflow whose paths-ignore must be INERT.
 const CODEQL = new URL("../workflows/codeql.yaml", import.meta.url);
+// CI is the workflow whose changes job runs this script.
+const CI = new URL("../workflows/ci.yaml", import.meta.url);
 
 describe("reachesCode", () => {
   const cases: [string, string[], boolean][] = [
@@ -52,6 +54,26 @@ test("codeql.yaml ignores exactly the inert paths", () => {
   const workflow = parse(readFileSync(CODEQL, "utf8"));
   assert.deepEqual([...workflow.on.push["paths-ignore"]].sort(), [...INERT].sort());
   assert.deepEqual([...workflow.on.pull_request["paths-ignore"]].sort(), [...INERT].sort());
+});
+
+// A push run vouches for releases and says whether main is green, so it
+// checks everything; a pull request checks what its diff reaches.
+describe("checkedGroups", () => {
+  test("a push checks every group, even for documentation", () => assert.deepEqual([...checkedGroups(PUSH_EVENT, new Set())].sort(), [...ALL_GROUPS].sort()));
+  test("a push of the scripts checks every group", () =>
+    assert.deepEqual([...checkedGroups(PUSH_EVENT, new Set([Group.Scripts]))].sort(), [...ALL_GROUPS].sort()));
+  test("a pull request checks what it reaches", () => assert.deepEqual([...checkedGroups("pull_request", new Set([Group.Pgstore]))], [Group.Pgstore]));
+  test("a pull request of documentation checks nothing", () => assert.equal(checkedGroups("pull_request", new Set()).size, 0));
+});
+
+test("ci.yaml tells the changes step its event and dispatches on the diff", () => {
+  const ci = parse(readFileSync(CI, "utf8")) as {
+    jobs: Record<string, { outputs?: Record<string, string>; steps?: { id?: string; env?: Record<string, string> }[]; if?: string }>;
+  };
+  const step = ci.jobs.changes?.steps?.find((s) => s.id === "filter");
+  assert.equal(step?.env?.EVENT, "${{ github.event_name }}");
+  assert.ok(ci.jobs.changes?.outputs?.[OUTPUT_CODE] !== undefined);
+  assert.match(ci.jobs["dispatch-release"]?.if ?? "", new RegExp(`needs\\.changes\\.outputs\\.${OUTPUT_CODE} == 'true'`));
 });
 
 test("a push that created the branch names no diff", () => {
