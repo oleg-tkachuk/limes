@@ -1,6 +1,6 @@
 # ADR-0001: Consolidate the architecture behind the frozen layout
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-20
 **Deciders:** Oleg Tkachuk
 
