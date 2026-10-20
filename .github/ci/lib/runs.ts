@@ -10,9 +10,11 @@ export const CI_WORKFLOW = ".github/workflows/ci.yaml";
 export const CI_WORKFLOW_NAME = "CI";
 // COMPLETED is the status of a run or job that has finished.
 export const COMPLETED = "completed";
+// SUCCESS is the conclusion of a run or job that ran and passed.
+export const SUCCESS = "success";
 // PASSING are the conclusions of a job that pass: one the change did not
 // reach is skipped, which is a pass.
-export const PASSING: readonly string[] = ["success", "skipped"];
+export const PASSING: readonly string[] = [SUCCESS, "skipped"];
 // RED are the conclusions of a run that leave its branch broken. A
 // cancelled run says nothing about the code.
 export const RED: readonly string[] = ["failure", "timed_out", "startup_failure"];

@@ -54,6 +54,7 @@ jobs:
       contents: read
     outputs:
       relevant: ${{ steps.filter.outputs.relevant }}
+      code: ${{ steps.filter.outputs.code }}
       root: ${{ steps.filter.outputs.root }}
       pgstore: ${{ steps.filter.outputs.pgstore }}
       redisreplay: ${{ steps.filter.outputs.redisreplay }}
@@ -81,6 +82,8 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.sha }}
+          # A push to main checks everything, whatever its diff reaches.
+          EVENT: ${{ github.event_name }}
         # Which diff, and which checks it reaches: .github/ci/changes.ts.
         run: node .github/ci/changes.ts
 
@@ -726,13 +729,13 @@ jobs:
   dispatch-release:
     name: Dispatch release
     needs: [changes, checks, released-limes]
-    # Not for a documentation-only push: its code is byte-identical to the
-    # commit before it. Its commits are not lost — semantic-release counts them
+    # Not for a documentation-only push (`code`, its diff, not what the run
+    # checked): its code is byte-identical to the commit before it. Its commits are not lost — semantic-release counts them
     # in the next release, and a release dispatched by the code commit before
     # it releases past it (.github/ci/release-head.ts).
     if: >-
       always() &&
-      needs.changes.outputs.relevant == 'true' &&
+      needs.changes.outputs.code == 'true' &&
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
       needs.checks.result == 'success' &&
       needs.released-limes.result != 'cancelled'
