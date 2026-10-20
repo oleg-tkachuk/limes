@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -657,7 +658,8 @@ func collectHolds(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]
 }
 
 // releaseHolds releases each of holds, locked, tenant by tenant in id order,
-// the order every call locks aggregates in.
+// the order every call locks aggregates in. Every counter the releases write
+// is locked first, together (lockReleased).
 func (s *UsageStore) releaseHolds(ctx context.Context, tx pgx.Tx, holds []hold) error {
 	slices.SortFunc(holds, func(a, b hold) int {
 		if c := slices.Compare(a.tenantID[:], b.tenantID[:]); c != 0 {
@@ -665,12 +667,68 @@ func (s *UsageStore) releaseHolds(ctx context.Context, tx pgx.Tx, holds []hold) 
 		}
 		return slices.Compare(a.id[:], b.id[:])
 	})
+	if err := lockReleased(ctx, tx, holds); err != nil {
+		return err
+	}
 	for _, h := range holds {
 		if err := s.releaseHold(ctx, tx, h); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// lockReleased locks every counter releasing holds writes, before any is
+// written, in the one order every call takes: the tenants' aggregates in
+// tenant id order, then the counters of every capability the holds are on
+// or under, together, in capability id order, then each capability's copies.
+// Locked hold by hold instead, each hold's would be in order and the
+// transaction's would not: one hold's root, then another's middle, against
+// a call that holds the middle and waits for the root.
+func lockReleased(ctx context.Context, tx pgx.Tx, holds []hold) error {
+	var tenants, counters []uuid.UUID
+	copies := map[uuid.UUID][][]byte{}
+	for _, h := range holds {
+		tenants = append(tenants, h.tenantID)
+		counters = append(counters, h.capID)
+		counters = append(counters, h.ancestors...)
+		copies[h.capID] = append(copies[h.capID], copyIDs(h.copies)...)
+	}
+	for _, t := range sortedUnique(tenants) {
+		if _, err := lockTenant(ctx, tx, t); err != nil {
+			return err
+		}
+	}
+	if err := drain(tx.Query(ctx, sqlLockUsage, sortedUnique(counters))); err != nil {
+		return err
+	}
+	for _, capID := range sortedUnique(slices.Collect(maps.Keys(copies))) {
+		if ids := copies[capID]; len(ids) > 0 {
+			if err := drain(tx.Query(ctx, sqlLockCopies, capID, ids)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// sortedUnique is ids in id order, each once.
+func sortedUnique(ids []uuid.UUID) []uuid.UUID {
+	ids = slices.Clone(ids)
+	slices.SortFunc(ids, func(a, b uuid.UUID) int { return slices.Compare(a[:], b[:]) })
+	return slices.Compact(ids)
+}
+
+// drain reads every row a locking query returns, which is when it holds
+// their locks, and reports its error.
+func drain(rows pgx.Rows, err error) error {
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+	}
+	rows.Close()
+	return rows.Err()
 }
 
 // DeleteUsage drops a capability's counters and its copies', releasing its
