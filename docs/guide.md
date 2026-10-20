@@ -1180,7 +1180,7 @@ stop rather than retry. The full table is in [diagrams.md](diagrams.md#answering
 | `PurgeRequest` · `ReleaseExpiredRequest` · `PurgeOrphansRequest` | `DefaultHousekeepingLimit` 1 000 a batch; `PurgeRequest.ExpiredFor` `MinPurgeRetention`, 6 minutes, and no less |
 | `MaxDelegationDepth` · `MaxBiscuitBlocks` | 64 ancestors · 32 attenuation blocks |
 | `CopyUsageRequest.RevocationIDs` | at most `MaxCopyUsageIDs`, 500, of one `CapabilityID` |
-| `RevocationCacheConfig` | `DefaultRevocationCacheTTL` 2 seconds · `DefaultRevocationCacheEntries` 100 000 of each kind, capabilities and Biscuit copies, the oldest dropped first past it; a negative TTL or bound is refused — for no cache, give the verifier the store itself |
+| `RevocationCacheConfig` | `DefaultRevocationCacheTTL` 2 seconds · `DefaultRevocationCacheEntries` 100 000 of each kind, capabilities and Biscuit copies, spread over shards with a lock each — past the bound the oldest of the shard is dropped, the oldest of all in a cache of fewer than 512 entries, which is one shard; a negative TTL or bound is refused — for no cache, give the verifier the store itself |
 | `jwks.RemoteConfig` | `jwks.DefaultFetchTimeout` 10s · `DefaultRefreshInterval` 5m · `DefaultMinRefreshInterval` 10s · `DefaultMaxStale` 1h · `DefaultMaxDocumentBytes` 1 MiB |
 | `dpop.VerifierConfig.Window` | `dpop.DefaultWindow`, 1 minute; a proof's id is remembered for `Window` plus `dpop.ReplayClockSkew`, 5 seconds |
 | `dpop.VerifierConfig.MaxProofBytes` | `dpop.DefaultMaxProofBytes`, 4 KiB; a `jti` past `dpop.MaxJTIBytes`, 128 bytes, is refused |
