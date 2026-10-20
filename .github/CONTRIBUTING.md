@@ -62,6 +62,25 @@ task test:redisreplay
 
 Both are jobs CI requires before a release.
 
+## Benchmarks and soak
+
+```bash
+task bench:limes
+task bench:pgstore
+task test:pgstore:soak SOAK_DURATION=5m
+```
+
+`bench:limes` and `bench:pgstore` run a module's benchmarks on this commit and
+on its newest release, a round of each in turn, and compare them with
+benchstat; `pgstore`'s need Docker. Each benchmark reports its allocations,
+and the `Parallel` ones run a path from every processor at once. The soak
+runs concurrent workers against `pgstore` — charges, refunds, holds settled,
+released and abandoned, requests counted — and then checks every counter
+against what they did, that no hold is left and that the pool has every
+connection back. A weekly workflow, **Benchmarks and soak**, runs all three,
+and can be run by hand: a slower number is a report on its summary page and
+fails nothing, a soak whose counters drift fails it.
+
 ## How a change lands
 
 - Every change goes through a pull request into `main`; CI's
@@ -73,10 +92,18 @@ Both are jobs CI requires before a release.
   `.golangci.yml`, `tools/`, `go.work`, `renovate.json` or the root `go.mod`,
   whose `go` and `toolchain` lines pick the Go every job sets up: its green
   check is no evidence on its own, so
-  a person reads those files and merges it. Auto-merge decides this from
+  a person reads those files and merges it. A nested module's `go.mod` is held
+  the same way unless only its requirements change, as the release's own
+  raise of a requirement of limes does: its `replace`, `ignore`, `go` and
+  `toolchain` lines decide what CI tests too. Auto-merge decides this from
   `main`'s own workflow when the pull request's CI run passes, and merges
   only the commit that run tested, so a pull request cannot change the rule
-  and a later push cannot ride on an earlier decision. Mark a pull request
+  and a later push cannot ride on an earlier decision. The run must be the
+  pull request's own, into `main` — not another pull request's at the same
+  commit — and the merge commit carries the title that run checked. While
+  `main` is red, nothing merges; once it is green again, what waited is
+  merged. Every push to `main` runs every check, whatever it changed, since
+  its run is what a release is vouched for by and what says `main` is green. Mark a pull request
   draft to hold it. Renovate's
   own pull requests are the exception: Renovate merges them itself once green
   (`renovate.json`), those bumping workflow actions, pinned tools or the task

@@ -169,10 +169,29 @@ reads, `RecordCensus` for a census of records, and `TenantRecordEraser` and
 - **The token format is pinned.** Golden fixtures in `testdata/` fail CI on any
   wire-format drift, because tokens outlive deployments.
 - **No hidden dependencies.** `isolation_test.go` fails if a database driver,
-  an object-storage SDK or OpenTelemetry enters the resolved dependency graph.
+  an object-storage SDK, a Redis client or OpenTelemetry enters the resolved
+  dependency graph.
 - **The root module's tests need nothing**: no database, no network, no
   container. `pgstore`'s run against PostgreSQL in a container, and
   `redisreplay`'s against miniredis and, in CI, a real Redis.
+
+## Performance
+
+Checking a token is mostly checking its Ed25519 signature: on an Apple M3 Max
+core, `Verify` of a JWT takes about 39µs, of which the signature is 33µs, and
+`Authorize` adds a microsecond or two. A Biscuit takes about 92µs, and each
+attenuation block another signature's worth; a DPoP proof another signature.
+A cached revocation answer takes about 45ns, and the verifier scales with the
+processors: from four at once, a `Verify` comes out every 10µs. With
+`pgstore`, a charge is a transaction of a few statements, 1.4–3ms against
+PostgreSQL on the same host, and one tenant's charges commit one at a time —
+the price of a tenant ceiling that is never crossed — so some 350–700 a
+second for one tenant, while different tenants' run side by side.
+
+The benchmarks behind these numbers are `bench_test.go` and
+`pgstore/bench_test.go`; a weekly workflow runs them on this commit and on the
+newest release, taking turns on one runner, and soaks `pgstore` under
+concurrent workers ([CONTRIBUTING](.github/CONTRIBUTING.md)).
 
 ## Versioning
 

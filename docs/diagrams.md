@@ -40,7 +40,7 @@ flowchart LR
         narrows["<b>Narrows</b><br/>child ⊆ parent"]
         verifier["<b>Verifier</b><br/>Authorize · Verify · BiscuitCopy<br/>ErrorResponse · DPoPNonce"]
         caveats["<b>Caveats</b><br/>Check · CheckSource · AllowsResource"]
-        cache["RevocationCache<br/>capabilities · Biscuit copies<br/>TTL · bounded per kind, oldest out · single-flight"]
+        cache["RevocationCache<br/>capabilities · Biscuit copies<br/>TTL · bounded per kind · single-flight<br/>sharded, a hit read-locked"]
         attenuate["<b>Attenuate</b><br/>offline · no key"]
         static["jwks.Static<br/>SetKey · RemoveKey"]
         remote["jwks.Remote<br/>ETag · Cache-Control · MaxStale<br/>held keys served, refreshed behind"]
@@ -851,7 +851,15 @@ locks in one order, so two calls never wait on each other in a cycle: the
 tenant's erase lock (shared; an erase holds it alone), the reservation being
 settled or released, then the lineage's records `FOR SHARE`
 in id order — a purge locks its batch in the same order — then the tenant's
-row, the usage rows by capability id and the copies' rows by revocation id. An
+row, the usage rows by capability id and the copies' rows by revocation id. A
+release of several holds — `ReleaseExpired`, or `DeleteUsage` dropping a
+capability's — locks every counter it will write before it writes any, in that
+same order, rather than hold by hold: locked hold by hold, a hold on a chain's
+root and then one on its leaf would take the root before the middle, against
+a `Bump` on the leaf holding the middle. The tenant's row is held until commit,
+so one tenant's charges, holds, settles, refunds and releases commit one at a
+time, whatever their capabilities (pgstore's package doc, Throughput); `Bump`
+takes no tenant row and waits on none of them. An
 `ExternalRef` is looked up again once the locks are held, since a concurrent
 delivery may have committed in between; if one has, the call rolls back what
 it locked and returns that delivery's receipt. A call holds one connection, so a
@@ -869,7 +877,7 @@ flowchart LR
     store[("<b>Store</b><br/>revoked set<br/>ParentID links")]
     cascade["CascadeChildren:<br/>a revocation entry per descendant,<br/>MaxDelegationDepth generations down,<br/>for the audit trail; an earlier entry stands"]
     chain["IsRevoked(id):<br/>id revoked, or any ancestor still on record revoked<br/>past MaxDelegationDepth: ErrDelegationTooDeep<br/>pgstore: one statement, every tenant"]
-    cache["<b>RevocationCache</b><br/>answer cached for TTL (default 2s)<br/>one upstream call per id at a time<br/>Biscuit copies: per revocation id, the ones it lacks in one call<br/>bounded per kind: the oldest answer makes room<br/>errors never cached · a Clear mid-lookup<br/>discards that lookup's answer"]
+    cache["<b>RevocationCache</b><br/>answer cached for TTL (default 2s)<br/>one upstream call per id at a time<br/>Biscuit copies: per revocation id, the ones it lacks in one call<br/>bounded per kind: the oldest answer of its shard makes room<br/>keys spread over shards; a hit takes a shared read lock<br/>errors never cached · a Clear mid-lookup<br/>discards that lookup's answer"]
     notify{{"revocation signal<br/>pgstore: RevocationWatcher LISTENs on<br/>RevocationChannel; memstore: none"}}
     bop(["RevokeBiscuit(RevokeBiscuitRequest{Copy: Verifier.BiscuitCopy(token)})"])
     blist[("<b>BiscuitRevocationStore</b><br/>revoked block ids")]
