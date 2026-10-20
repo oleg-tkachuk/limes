@@ -130,10 +130,14 @@ freeze allows now and names the rest, so the API items can be decided before
 6. [x] Add a Redis client prefix to `forbiddenImports`
    (`isolation_test.go:52`): `redisreplay/go.mod` promises limes never
    resolves one, and nothing checks it.
-7. [ ] Stop the nested modules' tests importing `internal/link`
-   (`pgstore/*_test.go`, `otelmetric/store_test.go`). A change to that package
-   breaks their build against the released limes, the pinned pgstore job
-   included.
+7. [ ] ~~Stop the nested modules' tests importing `internal/link`~~
+   (`pgstore/*_test.go`, `otelmetric/store_test.go`). **Declined on
+   2026-10-20.** The import is how those tests build a `MeterSubject` and a
+   `BiscuitCopy` without a verified token; the public replacement would be a
+   constructor exported from `metertest`, which lets any importer make a
+   subject with ceilings no issuer signed. Since every nested module builds
+   against the limes of its commit, only the released-limes job can break,
+   and that holds the module's release until its requirement is raised.
 8. [x] Run `otelmetric.Instrument` over memstore through `metertest.Run`: it
    returns a `meter.UsageStore` no suite checks.
 9. [x] Check that `metertest` has a case for every tenant-budget filter:
@@ -161,9 +165,12 @@ freeze allows now and names the rest, so the API items can be decided before
     `ci-run.ts:28`).
 14. [x] Pin `auto-merge.yaml`'s `workflows: [CI]` to `ci.yaml`'s
     `name: CI`: a rename leaves merging dead with nothing said.
-15. [ ] Read the tag semantic-release cut from its result rather than by
-    diffing the tags on HEAD before and after the run
-    (`.github/ci/lib/releases.ts`).
+15. [ ] ~~Read the tag semantic-release cut from its result rather than by
+    diffing the tags on HEAD before and after the run~~
+    (`.github/ci/lib/releases.ts`). **Declined on 2026-10-20.** The same
+    diff finds a tag an earlier run pushed and never published, so it stays
+    whatever reports the new tag; a plugin writing that tag to a file would
+    add a file and a plugin and remove nothing.
 
 ## Open questions
 
