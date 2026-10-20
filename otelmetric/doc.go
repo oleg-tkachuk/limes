@@ -14,4 +14,13 @@
 //		otelmetric.WithMeterProvider(provider), // default: the global provider
 //		otelmetric.WithTenantAttribute(),       // opt-in: one series per tenant
 //	)
+//
+// InstrumentRevocationCache reports a limes.RevocationCache's counts —
+// hits, misses, upstream lookups, evictions and entries, each by kind
+// (capability or biscuit), and its clears — as observable instruments,
+// read only when the provider collects:
+//
+//	reg, err := otelmetric.InstrumentRevocationCache(cache,
+//		otelmetric.WithMeterProvider(provider))
+//	defer reg.Unregister()
 package otelmetric
