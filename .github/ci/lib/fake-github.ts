@@ -1,7 +1,7 @@
 // A GitHub that answers from fixed data and records what it was asked, for
 // tests.
 
-import type { ChangedFile, GitHub, Job, NewRelease, OpenPullRequest, PullRequest, PullRequestText, RunState, WorkflowRun } from "./github.ts";
+import type { ChangedFile, GitHub, Job, NewRelease, OpenPullRequest, PullRequest, PullRequestRun, PullRequestText, RunState, WorkflowRun } from "./github.ts";
 
 // FakeGitHub is the data a FakeGitHub answers with, and its log.
 export interface FakeData {
@@ -28,10 +28,12 @@ export interface FakeData {
   editedPulls: { number: number; text: PullRequestText }[];
   dispatched: { eventType: string; payload: Record<string, string> }[];
   // mainRun is the newest finished run on main; open, the open pull
-  // requests; checks, the required check's conclusion by head sha.
+  // requests; prRuns, the pull_request runs of CI by head sha, newest first;
+  // merged, the merge commit body each merged pull request got.
   mainRun: RunState | undefined;
   open: OpenPullRequest[];
-  checks: Record<string, string>;
+  prRuns: Record<string, PullRequestRun[]>;
+  merged: Map<number, string>;
   // issues are the open issues by number, with their comments.
   issues: Map<number, { title: string; body: string; comments: string[] }>;
   closed: number[];
@@ -56,7 +58,8 @@ export function fakeData(): FakeData {
     dispatched: [],
     mainRun: undefined,
     open: [],
-    checks: {},
+    prRuns: {},
+    merged: new Map(),
     issues: new Map(),
     closed: [],
     calls: [],
@@ -86,11 +89,12 @@ export function fakeGitHub(data: FakeData): GitHub {
       }
       return { behindBy, files: data.files[head] ?? [] };
     },
-    async merge(number, sha) {
+    async merge(number, sha, message) {
       data.calls.push(`merge ${number} ${sha}`);
       if (data.mergeFails.has(number)) {
         throw new Error("Head branch was modified");
       }
+      data.merged.set(number, message);
     },
     async workflowRun(runId) {
       const run = data.runs.get(runId);
@@ -138,8 +142,8 @@ export function fakeGitHub(data: FakeData): GitHub {
     async openPullRequestsInto() {
       return data.open;
     },
-    async checkConclusion(sha) {
-      return data.checks[sha];
+    async pullRequestRuns(_workflow, headSha) {
+      return data.prRuns[headSha] ?? [];
     },
     async openIssueTitled(title) {
       return [...data.issues.entries()].find(([, i]) => i.title === title)?.[0];
@@ -165,4 +169,19 @@ export function changed(...paths: string[]): ChangedFile[] {
     const [from, to] = p.split(">");
     return to === undefined ? { filename: p, previousFilename: undefined } : { filename: to, previousFilename: from };
   });
+}
+
+// PULL_REQUEST_TITLE is the title a fake pull_request run ran under.
+export const PULL_REQUEST_TITLE = "feat: a change";
+
+// RUNNING stands for a run that has not ended; SUCCESS_CONCLUSION, one that
+// passed.
+export const RUNNING = "running";
+const SUCCESS_CONCLUSION = "success";
+
+// prRun is a pull_request run of CI for pull request number into baseRef,
+// ended as conclusion, or still going for RUNNING.
+export function prRun(number: number, conclusion: string = SUCCESS_CONCLUSION, baseRef = "main", title = PULL_REQUEST_TITLE): PullRequestRun {
+  const running = conclusion === RUNNING;
+  return { status: running ? "in_progress" : "completed", conclusion: running ? undefined : conclusion, title, pullRequests: [{ number, baseRef }] };
 }

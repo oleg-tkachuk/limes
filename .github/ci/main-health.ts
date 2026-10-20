@@ -8,7 +8,8 @@
 // one still open, so a broken main is seen, not only read in a log; while it
 // is red, merge-green merges nothing. A run that passed closes that issue and
 // merges, through GH_TOKEN (AUTOMERGE_TOKEN), each open pull request whose
-// required check passed at its head: the ones the red main held back. A run
+// own CI run into main passed at its head: the ones the red main held back
+// (merge-green.ts). A run
 // that ended otherwise — cancelled, skipped — says nothing about main.
 
 import { info, summarize, warning } from "./lib/actions.ts";
@@ -20,8 +21,6 @@ import { mergeWaiting } from "./merge-green.ts";
 
 // RED_ISSUE is the title of the issue that stands open while main is red.
 export const RED_ISSUE = "CI is failing on main";
-// REQUIRED_CHECK is the check main requires of a pull request.
-export const REQUIRED_CHECK = "All checks passed";
 
 // Run is the CI run on main this reports on.
 export interface Run {
@@ -77,7 +76,7 @@ async function main(): Promise<void> {
     warning("AUTOMERGE_TOKEN is not set; nothing merged (see auto-merge.yaml)");
     return;
   }
-  await mergeWaiting(gitHubFor(token, repository), REQUIRED_CHECK);
+  await mergeWaiting(gitHubFor(token, repository));
 }
 
 if (import.meta.main) {

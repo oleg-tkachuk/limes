@@ -42,17 +42,33 @@ describe("authorOf", () => {
 });
 
 describe("gitHubOver", () => {
-  test("merges with a merge commit, only at the tested head", async () => {
+  test("merges with a merge commit, only at the tested head, with the body given", async () => {
     const { octokit, sent } = clientAnswering(() => ({ status: 200, body: { merged: true } }));
-    await gitHubOver(octokit, REPO).merge(7, "abc");
+    await gitHubOver(octokit, REPO).merge(7, "abc", "feat: what was checked");
     assert.equal(sent[0]?.method, "PUT");
     assert.match(sent[0]?.url ?? "", /\/repos\/oleg-tkachuk\/limes\/pulls\/7\/merge$/);
-    assert.deepEqual(sent[0]?.body, { sha: "abc", merge_method: "merge" });
+    assert.deepEqual(sent[0]?.body, { sha: "abc", merge_method: "merge", commit_message: "feat: what was checked" });
+  });
+
+  test("reads a commit's pull_request runs, newest first, with their pull requests' bases", async () => {
+    const run = (n: number, conclusion: string | null, number: number, base: string) => ({
+      id: n, run_number: n, status: conclusion === null ? "in_progress" : "completed", conclusion, display_title: `title ${n}`,
+      pull_requests: [{ number, base: { ref: base } }],
+    });
+    const { octokit, sent } = clientAnswering(() => ({ status: 200, body: { total_count: 2, workflow_runs: [run(1, "success", 7, "main"), run(2, null, 8, "z")] } }));
+    const runs = await gitHubOver(octokit, REPO).pullRequestRuns(".github/workflows/ci.yaml", "abc");
+    assert.match(sent[0]?.url ?? "", /\/actions\/workflows\/ci\.yaml\/runs\?/);
+    assert.match(sent[0]?.url ?? "", /event=pull_request/);
+    assert.match(sent[0]?.url ?? "", /head_sha=abc/);
+    assert.deepEqual(runs, [
+      { status: "in_progress", conclusion: undefined, title: "title 2", pullRequests: [{ number: 8, baseRef: "z" }] },
+      { status: "completed", conclusion: "success", title: "title 1", pullRequests: [{ number: 7, baseRef: "main" }] },
+    ]);
   });
 
   test("a refused merge throws", async () => {
     const { octokit } = clientAnswering(() => ({ status: 409, body: { message: "Head branch was modified" } }));
-    await assert.rejects(gitHubOver(octokit, REPO).merge(7, "abc"));
+    await assert.rejects(gitHubOver(octokit, REPO).merge(7, "abc", "feat: x"));
   });
 
   test("an unknown collaborator has no permission", async () => {
