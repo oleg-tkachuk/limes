@@ -116,7 +116,7 @@ freeze allows now and names the rest, so the API items can be decided before
    `delegate` (`issuer.go:350`) share — subject, audience, caveats,
    thumbprint, expiry, id, not-before, sign, insert — into one function;
    `delegate` is 137 lines, `Verifier.verify` (`verifier.go:271`) 117.
-3. [ ] Move the generic `ttlCache` (`cache.go:120` to the end) to
+3. [x] Move the generic `ttlCache` (`cache.go:120` to the end) to
    `internal/`; it uses no root type.
 4. [ ] Split `types.go` (errors, units, `Op`, `Principal`, `Capability`,
    `grant`, `Caveats`) and `biscuit_revocation.go` (interfaces, `BiscuitCopy`,

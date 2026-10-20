@@ -329,7 +329,7 @@ func TestBiscuitRevocationCache(t *testing.T) {
 		up := &countingBiscuitLookup{}
 		c := newBiscuitCache(t, BiscuitRevocationCacheConfig{Upstream: up, TTL: ttl, Now: func() time.Time { return now }})
 		// The set's answer alone, cached at 0 and fresh until ttl.
-		if _, _, err := c.cache.get(ctx, setKey(ids), func(ctx context.Context) (bool, error) { return up.IsBiscuitRevoked(ctx, ids) }); err != nil {
+		if _, _, err := c.cache.Get(ctx, setKey(ids), func(ctx context.Context) (bool, error) { return up.IsBiscuitRevoked(ctx, ids) }); err != nil {
 			t.Fatal(err)
 		}
 		now = now.Add(ttl - time.Millisecond)
@@ -432,8 +432,8 @@ func TestBiscuitRevocationCache(t *testing.T) {
 		c := newBiscuitCache(t, BiscuitRevocationCacheConfig{Upstream: up, TTL: ttl, MaxEntries: bound})
 		for i := range bound * 3 {
 			_, _ = c.IsBiscuitRevoked(ctx, [][]byte{{byte(i)}})
-			if len(c.cache.entries) > bound {
-				t.Fatalf("%d entries, bound %d", len(c.cache.entries), bound)
+			if c.cache.Len() > bound {
+				t.Fatalf("%d entries, bound %d", c.cache.Len(), bound)
 			}
 		}
 	})

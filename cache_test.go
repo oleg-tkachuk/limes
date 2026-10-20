@@ -74,11 +74,11 @@ func TestRevocationCachesSweep(t *testing.T) {
 	_, _ = copies.IsBiscuitRevoked(ctx, [][]byte{[]byte("new")})
 	now = now.Add(cacheTTL / 2) // the old ones expire, the new ones live on
 
-	if n := caps.Sweep(); n != 1 || len(caps.cache.entries) != 1 {
-		t.Errorf("capability cache Sweep = %d, %d left; want 1 dropped, 1 left", n, len(caps.cache.entries))
+	if n := caps.Sweep(); n != 1 || caps.cache.Len() != 1 {
+		t.Errorf("capability cache Sweep = %d, %d left; want 1 dropped, 1 left", n, caps.cache.Len())
 	}
-	if n := copies.Sweep(); n != 1 || len(copies.cache.entries) != 1 {
-		t.Errorf("Biscuit cache Sweep = %d, %d left; want 1 dropped, 1 left", n, len(copies.cache.entries))
+	if n := copies.Sweep(); n != 1 || copies.cache.Len() != 1 {
+		t.Errorf("Biscuit cache Sweep = %d, %d left; want 1 dropped, 1 left", n, copies.cache.Len())
 	}
 	if n := caps.Sweep(); n != 0 {
 		t.Errorf("a second Sweep dropped %d", n)
@@ -227,7 +227,7 @@ func TestRevocationCacheEvictsTheOldestWhenFull(t *testing.T) {
 	if n := up.calls.Load() - before; n != 1 {
 		t.Errorf("the oldest answer was kept past the bound (%d upstream calls, want 1)", n)
 	}
-	if n := len(c.cache.entries); n > bound {
+	if n := c.cache.Len(); n > bound {
 		t.Errorf("cache holds %d entries, bound %d", n, bound)
 	}
 }
@@ -249,7 +249,7 @@ func TestRevocationCacheOrderStaysBounded(t *testing.T) {
 		_, _ = c.IsRevoked(ctx, ids[i%len(ids)])
 		clock.now = clock.now.Add(cacheTTL / 3)
 	}
-	if n, e := len(c.cache.order), len(c.cache.entries); n > bound || n != e {
+	if n, e := c.cache.Queued(), c.cache.Len(); n > bound || n != e {
 		t.Errorf("the eviction order holds %d places for %d entries and a bound of %d", n, e, bound)
 	}
 }
