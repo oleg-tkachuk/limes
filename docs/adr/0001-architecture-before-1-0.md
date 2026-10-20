@@ -112,7 +112,7 @@ freeze allows now and names the rest, so the API items can be decided before
 1. [x] Pin `proofRefusals` (`verifier.go:502`) to the four dpop rows of
    `refusalRules` (`reason.go:69-72`), or derive it from them: today no test
    fails when the two disagree.
-2. [ ] Extract the validation sequence `issue` (`issuer.go:181`) and
+2. [x] Extract the validation sequence `issue` (`issuer.go:181`) and
    `delegate` (`issuer.go:350`) share — subject, audience, caveats,
    thumbprint, expiry, id, not-before, sign, insert — into one function;
    `delegate` is 137 lines, `Verifier.verify` (`verifier.go:271`) 117.

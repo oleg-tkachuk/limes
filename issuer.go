@@ -188,13 +188,7 @@ func (i *Issuer) issue(ctx context.Context, req IssueRequest) (Capability, strin
 	if req.IssuedBy.Subject == "" {
 		return Capability{}, "", invalidRequest("IssuedBy is required")
 	}
-	if err := validateAudience(req.Audience); err != nil {
-		return Capability{}, "", err
-	}
-	if err := req.Caveats.Validate(); err != nil {
-		return Capability{}, "", err
-	}
-	if err := validateThumbprint(req.ConfirmationJKT); err != nil {
+	if err := validateTerms(req.Audience, req.Caveats, req.ConfirmationJKT); err != nil {
 		return Capability{}, "", err
 	}
 
@@ -203,19 +197,12 @@ func (i *Issuer) issue(ctx context.Context, req IssueRequest) (Capability, strin
 	if err != nil {
 		return Capability{}, "", err
 	}
-	id, err := uuid.NewV7()
+	cap, err := i.mint(grantTerms{
+		Subject: req.Subject, Audience: req.Audience, Caveats: req.Caveats,
+		ConfirmationJKT: req.ConfirmationJKT, IssuedAt: now, ExpiresAt: expires,
+	})
 	if err != nil {
-		return Capability{}, "", fmt.Errorf("limes: capability id: %w", err)
-	}
-	cap := Capability{
-		ID:              id,
-		Issuer:          i.issuerName,
-		Subject:         req.Subject.clone(),
-		Audience:        slices.Clone(req.Audience),
-		Caveats:         req.Caveats.clone(),
-		IssuedAt:        now.Truncate(tokenTimeResolution),
-		ExpiresAt:       expires,
-		ConfirmationJKT: req.ConfirmationJKT,
+		return Capability{}, "", err
 	}
 	if err := checkLifetime(cap); err != nil {
 		return Capability{}, "", err
@@ -224,16 +211,69 @@ func (i *Issuer) issue(ctx context.Context, req IssueRequest) (Capability, strin
 		return Capability{}, "", err
 	}
 
-	// Signed first: a capability whose token cannot be minted, or would be
-	// too long to use, is never recorded.
-	token, err := i.sign(ctx, cap)
+	token, err := i.signAndRecord(ctx, cap, req.IssuedBy, "issuance")
 	if err != nil {
 		return Capability{}, "", err
 	}
-	if err := i.store.Insert(ctx, InsertRequest{Capability: cap, IssuedBy: req.IssuedBy}); err != nil {
-		return Capability{}, "", fmt.Errorf("limes: persist issuance: %w", err)
-	}
 	return cap, token, nil
+}
+
+// validateTerms checks what an issued and a delegated capability both
+// carry, in this order: its audience, its caveats and its key binding.
+func validateTerms(audience []string, caveats Caveats, jkt string) error {
+	if err := validateAudience(audience); err != nil {
+		return err
+	}
+	if err := caveats.Validate(); err != nil {
+		return err
+	}
+	return validateThumbprint(jkt)
+}
+
+// grantTerms are the fields of a capability its request decides.
+type grantTerms struct {
+	Subject         Principal
+	Audience        []string
+	Caveats         Caveats
+	ConfirmationJKT string
+	IssuedAt        time.Time
+	ExpiresAt       time.Time
+	ParentID        uuid.UUID
+}
+
+// mint is a capability of t under a fresh id, issued by i. It holds copies
+// of t's slices and pointers, so the caller's request cannot alter it.
+func (i *Issuer) mint(t grantTerms) (Capability, error) {
+	id, err := uuid.NewV7()
+	if err != nil {
+		return Capability{}, fmt.Errorf("limes: capability id: %w", err)
+	}
+	return Capability{
+		ID:              id,
+		Issuer:          i.issuerName,
+		Subject:         t.Subject.clone(),
+		Audience:        slices.Clone(t.Audience),
+		Caveats:         t.Caveats.clone(),
+		IssuedAt:        t.IssuedAt.Truncate(tokenTimeResolution),
+		ExpiresAt:       t.ExpiresAt,
+		ParentID:        t.ParentID,
+		ConfirmationJKT: t.ConfirmationJKT,
+	}, nil
+}
+
+// signAndRecord signs c and records it as issued by issuedBy, and returns
+// its token. Signed first: a capability whose token cannot be minted, or
+// would be too long to use, is never recorded. what names the record in an
+// error from the store.
+func (i *Issuer) signAndRecord(ctx context.Context, c Capability, issuedBy Principal, what string) (string, error) {
+	token, err := i.sign(ctx, c)
+	if err != nil {
+		return "", err
+	}
+	if err := i.store.Insert(ctx, InsertRequest{Capability: c, IssuedBy: issuedBy}); err != nil {
+		return "", fmt.Errorf("limes: persist %s: %w", what, err)
+	}
+	return token, nil
 }
 
 // expiry resolves a requested TTL against the default. A negative TTL is a
@@ -391,13 +431,7 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 	if req.Caveats.Budget.UnitCode == "" {
 		req.Caveats.Budget.UnitCode = parent.Caveats.Budget.UnitCode
 	}
-	if err := validateAudience(req.Audience); err != nil {
-		return Capability{}, "", err
-	}
-	if err := req.Caveats.Validate(); err != nil {
-		return Capability{}, "", err
-	}
-	if err := validateThumbprint(req.ConfirmationJKT); err != nil {
+	if err := validateTerms(req.Audience, req.Caveats, req.ConfirmationJKT); err != nil {
 		return Capability{}, "", err
 	}
 
@@ -420,21 +454,12 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 	if expires.After(parent.ExpiresAt) {
 		expires = parent.ExpiresAt
 	}
-	id, err := uuid.NewV7()
+	child, err := i.mint(grantTerms{
+		Subject: req.Subject, Audience: req.Audience, Caveats: req.Caveats,
+		ConfirmationJKT: req.ConfirmationJKT, IssuedAt: now, ExpiresAt: expires, ParentID: parent.ID,
+	})
 	if err != nil {
-		return Capability{}, "", fmt.Errorf("limes: capability id: %w", err)
-	}
-
-	child := Capability{
-		ID:              id,
-		Issuer:          i.issuerName,
-		Subject:         req.Subject.clone(),
-		Audience:        slices.Clone(req.Audience),
-		Caveats:         req.Caveats.clone(),
-		IssuedAt:        now.Truncate(tokenTimeResolution),
-		ExpiresAt:       expires,
-		ParentID:        parent.ID,
-		ConfirmationJKT: req.ConfirmationJKT,
+		return Capability{}, "", err
 	}
 	if child.ConfirmationJKT == "" {
 		child.ConfirmationJKT = parent.ConfirmationJKT
@@ -469,12 +494,9 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 	// A delegation is requested by whoever holds the parent — that is not a
 	// caller-supplied fact, it is what delegation means, so it is derived
 	// rather than accepted as an argument.
-	token, err := i.sign(ctx, child)
+	token, err := i.signAndRecord(ctx, child, parent.Subject, "delegation")
 	if err != nil {
 		return Capability{}, "", err
-	}
-	if err := i.store.Insert(ctx, InsertRequest{Capability: child, IssuedBy: parent.Subject}); err != nil {
-		return Capability{}, "", fmt.Errorf("limes: persist delegation: %w", err)
 	}
 	// Insert refuses a child past MaxDelegationDepth. A store that does not
 	// is still caught here, before a token no verifier would accept leaves:
