@@ -33,7 +33,7 @@ func TestRevocationCacheDropReachesADescendant(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cache := newRevocationCache(t, limes.RevocationCacheConfig{Upstream: s.records, TTL: cacheLongerThanTheTest})
+	cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: s.records, TTL: cacheLongerThanTheTest})
 	if revoked, err := cache.IsRevoked(ctx, child.ID); err != nil || revoked {
 		t.Fatalf("child before the revocation = %v, %v; want live", revoked, err)
 	}

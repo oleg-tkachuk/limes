@@ -374,7 +374,7 @@ func TestDelegate_RefusesACopyWithLimitsOfItsOwn(t *testing.T) {
 func TestCache_HitsAndMisses(t *testing.T) {
 	t.Parallel()
 	store := newMemStore()
-	cache := newRevocationCache(t, RevocationCacheConfig{Upstream: store, TTL: time.Second})
+	cache := newRevocationCache(t, RevocationCacheConfig{Capabilities: store, TTL: time.Second})
 	id := uuid.New()
 	ctx := context.Background()
 

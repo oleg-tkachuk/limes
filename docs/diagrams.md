@@ -40,8 +40,7 @@ flowchart LR
         narrows["<b>Narrows</b><br/>child ⊆ parent"]
         verifier["<b>Verifier</b><br/>Authorize · Verify · BiscuitCopy<br/>ErrorResponse · DPoPNonce"]
         caveats["<b>Caveats</b><br/>Check · CheckSource · AllowsResource"]
-        cache["RevocationCache<br/>TTL · bounded, oldest out · single-flight"]
-        bcache["BiscuitRevocationCache<br/>per revocation id · TTL · bounded · single-flight"]
+        cache["RevocationCache<br/>capabilities · Biscuit copies<br/>TTL · bounded per kind, oldest out · single-flight"]
         attenuate["<b>Attenuate</b><br/>offline · no key"]
         static["jwks.Static<br/>SetKey · RemoveKey"]
         remote["jwks.Remote<br/>ETag · Cache-Control · MaxStale<br/>held keys served, refreshed behind"]
@@ -84,7 +83,7 @@ flowchart LR
     issuer --> store
     verifier --> keys
     verifier --> cache --> store
-    verifier -. "VerifierConfig.Biscuit" .-> bcache --> brev
+    verifier -. "VerifierConfig.Biscuit" .-> cache --> brev
     caller -. "admin read" .-> cusage
     caller -. "billing read" .-> ledger
     caller -. "records report" .-> census
@@ -133,7 +132,7 @@ flowchart LR
     classDef external fill:#FCE7F3,stroke:#DB2777,color:#831843
     class caller client
     class issuer,signer,narrows,verifier,caveats role
-    class cache,metering,static,remote,bcache,attenuate,dpop,suites,jwksh,nonce,pg,rr optional
+    class cache,metering,static,remote,attenuate,dpop,suites,jwksh,nonce,pg,rr optional
     class store,usage,keys,impl,brev,cusage,replay,nonces,ledger,census,erasers store
     class jwks,otel,pgdb,redis external
 ```
@@ -870,11 +869,10 @@ flowchart LR
     store[("<b>Store</b><br/>revoked set<br/>ParentID links")]
     cascade["CascadeChildren:<br/>a revocation entry per descendant,<br/>MaxDelegationDepth generations down,<br/>for the audit trail; an earlier entry stands"]
     chain["IsRevoked(id):<br/>id revoked, or any ancestor still on record revoked<br/>past MaxDelegationDepth: ErrDelegationTooDeep<br/>pgstore: one statement, every tenant"]
-    cache["<b>RevocationCache</b><br/>answer cached for TTL (default 2s)<br/>one upstream call per id at a time<br/>bounded: the oldest answer makes room<br/>errors never cached · a Clear mid-lookup<br/>discards that lookup's answer"]
+    cache["<b>RevocationCache</b><br/>answer cached for TTL (default 2s)<br/>one upstream call per id at a time<br/>Biscuit copies: per revocation id, the ones it lacks in one call<br/>bounded per kind: the oldest answer makes room<br/>errors never cached · a Clear mid-lookup<br/>discards that lookup's answer"]
     notify{{"revocation signal<br/>pgstore: RevocationWatcher LISTENs on<br/>RevocationChannel; memstore: none"}}
     bop(["RevokeBiscuit(RevokeBiscuitRequest{Copy: Verifier.BiscuitCopy(token)})"])
     blist[("<b>BiscuitRevocationStore</b><br/>revoked block ids")]
-    bcache["<b>BiscuitRevocationCache</b><br/>per revocation id, in turn; stops at the first revoked<br/>cached for TTL · one upstream call per id at a time<br/>bounded · dropped by Clear"]
     v1["Verifier"]
     v2["Verifier"]
 
@@ -886,10 +884,7 @@ flowchart LR
     store -. "pgstore: statement trigger on an INSERT<br/>that adds a row to limes.revocations → pg_notify" .-> notify
     blist -. "pgstore: statement trigger on an INSERT<br/>that adds a row to limes.biscuit_revocations → pg_notify" .-> notify
     notify -. "Clear() once listening<br/>and on each notification" .-> cache
-    bop --> blist --> bcache
-    bcache --> v1
-    bcache --> v2
-    notify -. "Clear() once listening<br/>and on each notification" .-> bcache
+    bop --> blist --> cache
 
     classDef client fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E
     classDef role fill:#DCFCE7,stroke:#16A34A,color:#14532D
@@ -897,7 +892,7 @@ flowchart LR
     classDef store fill:#FEF3C7,stroke:#D97706,color:#78350F
     classDef external fill:#FCE7F3,stroke:#DB2777,color:#831843
     class op,bop client
-    class v1,v2,cache,bcache role
+    class v1,v2,cache role
     class cascade optional
     class store,chain,blist store
     class notify external

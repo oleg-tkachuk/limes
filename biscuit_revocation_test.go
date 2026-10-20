@@ -305,7 +305,7 @@ func TestBiscuitRevocationCache(t *testing.T) {
 	t.Run("serves a fresh answer, then asks again once it expires", func(t *testing.T) {
 		now := time.Unix(0, 0)
 		up := &countingBiscuitLookup{revoked: true}
-		c := newBiscuitCache(t, BiscuitRevocationCacheConfig{Upstream: up, TTL: ttl, Now: func() time.Time { return now }})
+		c := newBiscuitCache(t, RevocationCacheConfig{Biscuits: up, TTL: ttl, Now: func() time.Time { return now }})
 		for range 3 {
 			if got, _ := c.IsBiscuitRevoked(ctx, ids); !got {
 				t.Fatal("want revoked")
@@ -327,9 +327,9 @@ func TestBiscuitRevocationCache(t *testing.T) {
 	t.Run("ids seeded from a cached set's answer expire with it", func(t *testing.T) {
 		now := time.Unix(0, 0)
 		up := &countingBiscuitLookup{}
-		c := newBiscuitCache(t, BiscuitRevocationCacheConfig{Upstream: up, TTL: ttl, Now: func() time.Time { return now }})
+		c := newBiscuitCache(t, RevocationCacheConfig{Biscuits: up, TTL: ttl, Now: func() time.Time { return now }})
 		// The set's answer alone, cached at 0 and fresh until ttl.
-		if _, _, err := c.cache.Get(ctx, setKey(ids), func(ctx context.Context) (bool, error) { return up.IsBiscuitRevoked(ctx, ids) }); err != nil {
+		if _, _, err := c.copies.Get(ctx, setKey(ids), func(ctx context.Context) (bool, error) { return up.IsBiscuitRevoked(ctx, ids) }); err != nil {
 			t.Fatal(err)
 		}
 		now = now.Add(ttl - time.Millisecond)
@@ -348,7 +348,7 @@ func TestBiscuitRevocationCache(t *testing.T) {
 
 	t.Run("Clear sends the next check upstream", func(t *testing.T) {
 		up := &countingBiscuitLookup{}
-		c := newBiscuitCache(t, BiscuitRevocationCacheConfig{Upstream: up, TTL: ttl})
+		c := newBiscuitCache(t, RevocationCacheConfig{Biscuits: up, TTL: ttl})
 		_, _ = c.IsBiscuitRevoked(ctx, ids)
 		c.Clear()
 		_, _ = c.IsBiscuitRevoked(ctx, ids)
@@ -360,7 +360,7 @@ func TestBiscuitRevocationCache(t *testing.T) {
 	t.Run("an error is returned and not cached", func(t *testing.T) {
 		boom := errors.New("down")
 		up := &countingBiscuitLookup{err: boom}
-		c := newBiscuitCache(t, BiscuitRevocationCacheConfig{Upstream: up, TTL: ttl})
+		c := newBiscuitCache(t, RevocationCacheConfig{Biscuits: up, TTL: ttl})
 		if _, err := c.IsBiscuitRevoked(ctx, ids); !errors.Is(err, boom) {
 			t.Fatalf("err = %v", err)
 		}
@@ -374,7 +374,7 @@ func TestBiscuitRevocationCache(t *testing.T) {
 
 	t.Run("lists that concatenate alike share no id", func(t *testing.T) {
 		up := &countingBiscuitLookup{}
-		c := newBiscuitCache(t, BiscuitRevocationCacheConfig{Upstream: up, TTL: ttl})
+		c := newBiscuitCache(t, RevocationCacheConfig{Biscuits: up, TTL: ttl})
 		_, _ = c.IsBiscuitRevoked(ctx, ids)
 		_, _ = c.IsBiscuitRevoked(ctx, [][]byte{[]byte("a"), []byte("bc")})
 		if up.calls != 2 {
@@ -388,7 +388,7 @@ func TestBiscuitRevocationCache(t *testing.T) {
 	t.Run("a fresh attenuation asks only about its new block", func(t *testing.T) {
 		const copies = 50
 		up := &perIDLookup{revoked: map[string]bool{"revoked": true}}
-		c := newBiscuitCache(t, BiscuitRevocationCacheConfig{Upstream: up, TTL: ttl})
+		c := newBiscuitCache(t, RevocationCacheConfig{Biscuits: up, TTL: ttl})
 		authority := []byte("authority")
 		for i := range copies {
 			if r, err := c.IsBiscuitRevoked(ctx, [][]byte{authority, {byte(i)}}); err != nil || r {
@@ -409,7 +409,7 @@ func TestBiscuitRevocationCache(t *testing.T) {
 	t.Run("a token of fresh blocks costs one lookup", func(t *testing.T) {
 		up := &perIDLookup{}
 		calls := &countingBiscuitLookup{}
-		c := newBiscuitCache(t, BiscuitRevocationCacheConfig{Upstream: both{up, calls}, TTL: ttl})
+		c := newBiscuitCache(t, RevocationCacheConfig{Biscuits: both{up, calls}, TTL: ttl})
 		fresh := make([][]byte, MaxBiscuitBlocks+1)
 		for i := range fresh {
 			fresh[i] = []byte{byte(i), 'f'}
@@ -429,11 +429,11 @@ func TestBiscuitRevocationCache(t *testing.T) {
 	t.Run("stays within its bound", func(t *testing.T) {
 		const bound = 2
 		up := &countingBiscuitLookup{}
-		c := newBiscuitCache(t, BiscuitRevocationCacheConfig{Upstream: up, TTL: ttl, MaxEntries: bound})
+		c := newBiscuitCache(t, RevocationCacheConfig{Biscuits: up, TTL: ttl, MaxEntries: bound})
 		for i := range bound * 3 {
 			_, _ = c.IsBiscuitRevoked(ctx, [][]byte{{byte(i)}})
-			if c.cache.Len() > bound {
-				t.Fatalf("%d entries, bound %d", c.cache.Len(), bound)
+			if c.copies.Len() > bound {
+				t.Fatalf("%d entries, bound %d", c.copies.Len(), bound)
 			}
 		}
 	})
