@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes/internal/link"
+	"github.com/oleg-tkachuk/limes/internal/ttlcache"
 )
 
 // Revoking one copy of a Biscuit.
@@ -154,7 +155,7 @@ func init() {
 // RevocationCache; Clear drops every entry at once.
 type BiscuitRevocationCache struct {
 	upstream BiscuitRevocationLookup
-	cache    *ttlCache[string]
+	cache    *ttlcache.Cache[string]
 }
 
 // BiscuitRevocationCacheConfig configures a BiscuitRevocationCache;
@@ -181,7 +182,7 @@ func NewBiscuitRevocationCache(cfg BiscuitRevocationCacheConfig) (*BiscuitRevoca
 	if err != nil {
 		return nil, err
 	}
-	return &BiscuitRevocationCache{upstream: cfg.Upstream, cache: newTTLCache[string](c)}, nil
+	return &BiscuitRevocationCache{upstream: cfg.Upstream, cache: ttlcache.New[string](c)}, nil
 }
 
 // IsBiscuitRevoked answers from the cache for each id that has a fresh
@@ -195,7 +196,7 @@ func (c *BiscuitRevocationCache) IsBiscuitRevoked(ctx context.Context, revocatio
 	for i, id := range revocationIDs {
 		keys[i] = idKey(id)
 	}
-	revoked, missing, epoch := c.cache.cached(keys)
+	revoked, missing, epoch := c.cache.Cached(keys)
 	if revoked || len(missing) == 0 {
 		return revoked, nil
 	}
@@ -207,11 +208,11 @@ func (c *BiscuitRevocationCache) IsBiscuitRevoked(ctx context.Context, revocatio
 	if len(missing) > 1 {
 		key = setKey(ids)
 	}
-	revoked, expires, err := c.cache.get(ctx, key, func(ctx context.Context) (bool, error) {
+	revoked, expires, err := c.cache.Get(ctx, key, func(ctx context.Context) (bool, error) {
 		return c.upstream.IsBiscuitRevoked(ctx, ids)
 	})
 	if err == nil && !revoked && len(missing) > 1 {
-		c.cache.seedLive(missing, epoch, expires)
+		c.cache.SeedLive(missing, epoch, expires)
 	}
 	return revoked, err
 }
@@ -239,10 +240,10 @@ func setKey(ids [][]byte) string {
 
 // Clear drops every entry; wire it to the same revocation notification as
 // RevocationCache.Clear.
-func (c *BiscuitRevocationCache) Clear() { c.cache.clear() }
+func (c *BiscuitRevocationCache) Clear() { c.cache.Clear() }
 
 // Sweep drops every expired entry and returns how many it dropped.
-func (c *BiscuitRevocationCache) Sweep() int { return c.cache.sweep() }
+func (c *BiscuitRevocationCache) Sweep() int { return c.cache.Sweep() }
 
 // errNoBiscuitRevocations is returned by NewVerifier when Biscuits
 // are accepted with nothing to check their copies against.
