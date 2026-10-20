@@ -103,8 +103,7 @@ freeze allows now and names the rest, so the API items can be decided before
   pinned by a test that fails on drift.
 - The root package stays one package; navigating it is done by file, so
   files that mix concerns are split by concern without changing a name.
-- To revisit: whether redisreplay and otelmetric follow pgstore's `replace`
-  and gate (question 1), and the **API** items (question 2).
+- To revisit: the **API** items (question 2). Question 1 is decided.
 
 ## Action items
 
@@ -170,6 +169,7 @@ freeze allows now and names the rest, so the API items can be decided before
 
 1. **Module layout.** Should redisreplay and otelmetric build against the
    limes of the same commit, as pgstore does, with a job against the released
-   limes gating their release? Today a limes change they must follow cannot
-   land with them in one pull request.
+   limes gating their release? **Decided on 2026-10-20: yes.** Every nested
+   module carries the `replace`, and ci.yaml's `released-limes` job gates each
+   one's release (`GATED` in `.github/ci/release.ts`).
 2. **API items.** Should item 5 land before 1.0, or wait for v2?
