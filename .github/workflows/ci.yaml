@@ -493,8 +493,10 @@ jobs:
       - name: Set up the CI scripts
         uses: ./.github/actions/setup-ci
 
-      - name: Require GO_FLOOR_VERSION to match the go directive
-        run: node .github/ci/go-floor.ts "$GO_FLOOR_VERSION"
+      # Every module this job tests, by the directory its steps run in:
+      # go-floor.test.ts pins the list to them.
+      - name: Require GO_FLOOR_VERSION to match each go directive
+        run: node .github/ci/go-floor.ts "$GO_FLOOR_VERSION" . redisreplay otelmetric
 
       - name: go vet
         run: go vet ./...
