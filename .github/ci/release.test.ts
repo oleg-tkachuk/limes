@@ -6,7 +6,7 @@ import { after, afterEach, before, beforeEach, describe, test } from "node:test"
 
 import { fakeData, fakeGitHub, type FakeData } from "./lib/fake-github.ts";
 import type { Module } from "./lib/modules.ts";
-import { isReleaseTag, newReleaseTag, previousTag, proxyInfoURL, tagsOnHead, unpublishedTags, warmGoProxy } from "./lib/releases.ts";
+import { isReleaseTag, isStableReleaseTag, newReleaseTag, previousTag, proxyInfoURL, tagsOnHead, unpublishedTags, warmGoProxy } from "./lib/releases.ts";
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
 import { withoutWorkflowCommands } from "./lib/actions.ts";
 import { releaseCommits } from "./lib/modules.ts";
@@ -21,6 +21,15 @@ test("isReleaseTag", () => {
   assert.equal(isReleaseTag("sub/v0.2.0", ""), false);
   assert.equal(isReleaseTag("vnext", ""), false);
   assert.equal(isReleaseTag("other/v1.0.0", "sub/"), false);
+  assert.equal(isReleaseTag("v0.2.0-rc.1", ""), true);
+});
+
+test("isStableReleaseTag", () => {
+  assert.equal(isStableReleaseTag("v0.2.0", ""), true);
+  assert.equal(isStableReleaseTag("sub/v0.2.0", "sub/"), true);
+  assert.equal(isStableReleaseTag("v0.2.0-rc.1", ""), false);
+  assert.equal(isStableReleaseTag("sub/v0.2.0-rc.3", "sub/"), false);
+  assert.equal(isStableReleaseTag("sub/v0.2.0", ""), false);
 });
 
 describe("tags on a repository", () => {
@@ -33,6 +42,18 @@ describe("tags on a repository", () => {
     await repo.run("tag", "v0.1.0");
   });
   afterEach(() => repo.cleanup());
+
+  // A release candidate left on HEAD with no GitHub release, by a
+  // prerelease run whose publish failed, is never taken for a release that
+  // run left behind: it would be published as a release and marked Latest.
+  test("newReleaseTag never names a release candidate", async () => {
+    const github = fakeGitHub(data);
+    data.released.add("v0.1.0");
+    await repo.commit("feat: more");
+    await repo.run("tag", "v0.2.0-rc.1");
+    assert.equal(await newReleaseTag(github, [], "", repo.dir), undefined, "a candidate this run would have pushed");
+    assert.equal(await newReleaseTag(github, ["v0.2.0-rc.1"], "", repo.dir), undefined, "a candidate left unpublished");
+  });
 
   test("newReleaseTag names only the tag a run added", async () => {
     const github = fakeGitHub(data);
