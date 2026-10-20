@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/google/uuid"
@@ -58,7 +59,8 @@ type RevocationCacheConfig struct {
 	// Biscuits answers IsBiscuitRevoked for what the cache does not hold.
 	// Optional: without it the cache refuses every Biscuit question, and
 	// NewVerifier refuses it as BiscuitConfig.Revocations. A store that
-	// implements both, as pgstore's does, is passed as both.
+	// implements both, as pgstore's does, is passed as both. A nil pointer
+	// held here is refused.
 	Biscuits BiscuitRevocationLookup
 	// TTL is how long an answer is served. Zero: DefaultRevocationCacheTTL.
 	TTL time.Duration
@@ -77,8 +79,13 @@ type RevocationCacheConfig struct {
 // bound is refused; a deployment that wants no cache passes its store to the
 // verifier directly.
 func NewRevocationCache(cfg RevocationCacheConfig) (*RevocationCache, error) {
-	if cfg.Capabilities == nil {
+	if isNilValue(cfg.Capabilities) {
 		return nil, errors.New("limes: RevocationCacheConfig.Capabilities required")
+	}
+	// An interface holding a nil pointer is not nil: unchecked, it would read
+	// as an upstream here and panic at the first Biscuit presented.
+	if cfg.Biscuits != nil && isNilValue(cfg.Biscuits) {
+		return nil, errors.New("limes: RevocationCacheConfig.Biscuits holds a nil value")
 	}
 	c, err := newCacheConfig(cfg.TTL, cfg.MaxEntries, cfg.Now)
 	if err != nil {
@@ -90,6 +97,21 @@ func NewRevocationCache(cfg RevocationCacheConfig) (*RevocationCache, error) {
 		caps:         ttlcache.New[uuid.UUID](c),
 		copies:       ttlcache.New[string](c),
 	}, nil
+}
+
+// isNilValue reports whether v is nil, or an interface holding a nil
+// pointer, map, slice, function or channel — a typed nil, which compares
+// unequal to nil and panics at its first call.
+func isNilValue(v any) bool {
+	if v == nil {
+		return true
+	}
+	switch r := reflect.ValueOf(v); r.Kind() {
+	case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan, reflect.Interface:
+		return r.IsNil()
+	default:
+		return false
+	}
 }
 
 // newCacheConfig resolves a configuration's zero values to the defaults and

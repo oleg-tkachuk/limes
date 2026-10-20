@@ -340,3 +340,53 @@ func TestRevocationCacheBoundsEachKind(t *testing.T) {
 		t.Errorf("%d Biscuit entries, bound %d", c.copies.Len(), bound)
 	}
 }
+
+// An upstream that is an interface holding a nil pointer is no upstream:
+// refused at construction rather than panicking at the first lookup.
+func TestRevocationCacheRefusesATypedNilUpstream(t *testing.T) {
+	var noStore *memStore
+	var noBiscuits *countingBiscuitLookup
+	for name, cfg := range map[string]RevocationCacheConfig{
+		"nil capability store": {Capabilities: noStore},
+		"nil Biscuit lookup":   {Capabilities: newMemStore(), Biscuits: noBiscuits},
+	} {
+		if _, err := NewRevocationCache(cfg); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+// A nil *RevocationCache as BiscuitConfig.Revocations is refused by
+// NewVerifier, not dereferenced.
+func TestNewVerifierRefusesANilRevocationCache(t *testing.T) {
+	var none *RevocationCache
+	c := newRevocationCache(t, RevocationCacheConfig{Capabilities: newMemStore(), TTL: cacheTTL})
+	_, err := NewVerifier(VerifierConfig{
+		Keys: staticKeys(t, map[string]ed25519.PublicKey{}), Revocations: c, TrustedIssuers: []string{goldenIssuer},
+		Biscuit: &BiscuitConfig{Revocations: none},
+	})
+	if !errors.Is(err, errNoBiscuitLookup) {
+		t.Errorf("NewVerifier = %v, want errNoBiscuitLookup", err)
+	}
+}
+
+func TestIsNilValue(t *testing.T) {
+	var p *memStore
+	var m map[string]int
+	var f func()
+	for name, c := range map[string]struct {
+		v    any
+		want bool
+	}{
+		"nil":         {nil, true},
+		"nil pointer": {p, true},
+		"nil map":     {m, true},
+		"nil func":    {f, true},
+		"a pointer":   {newMemStore(), false},
+		"a value":     {0, false},
+	} {
+		if got := isNilValue(c.v); got != c.want {
+			t.Errorf("%s: isNilValue = %v, want %v", name, got, c.want)
+		}
+	}
+}
