@@ -28,9 +28,9 @@
 
 import { notice, summarize, table, warning } from "./lib/actions.ts";
 import { optionalEnv, requireEnv } from "./lib/env.ts";
-import { gitHubFor, type GitHub, type PullRequest } from "./lib/github.ts";
+import { gitHubFor, type GitHub, type PullRequest, type PullRequestRun } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
-import { CI_WORKFLOW, RED } from "./lib/runs.ts";
+import { CI_WORKFLOW, COMPLETED, RED, SUCCESS } from "./lib/runs.ts";
 import { BASE_BRANCH, canPush, changesCi, filesListedInFull, isRenovate } from "./merge-policy.ts";
 
 // COMMIT_ID is a full commit id, the only HEAD_SHA a run passes.
@@ -79,8 +79,34 @@ export function heldBack(pr: PullRequest, headSha: string): string | undefined {
   return undefined;
 }
 
-// mergeIfGreen merges pull request number at headSha if nothing leaves it
-// for a person, and says why not otherwise.
+// ownRun is the run that decides pr: the newest pull_request run of CI at its
+// head that ran for it into main. A green check of the same name at the same
+// commit — another pull request's run into another base, another app's — is
+// not its verdict.
+export async function ownRun(github: GitHub, pr: PullRequest): Promise<PullRequestRun | undefined> {
+  const runs = await github.pullRequestRuns(CI_WORKFLOW, pr.headSha);
+  return runs.find((r) => r.pullRequests.some((p) => p.number === pr.number && p.baseRef === BASE_BRANCH));
+}
+
+// unpassed is why pr's own run does not let it merge, or undefined when it
+// passed.
+export function unpassed(pr: PullRequest, run: PullRequestRun | undefined): string | undefined {
+  if (run === undefined) {
+    return `#${pr.number} has no CI run of its own into ${BASE_BRANCH} at ${pr.headSha}; left alone`;
+  }
+  if (run.status !== COMPLETED) {
+    return `#${pr.number}'s newest run is still going; its end decides it`;
+  }
+  if (run.conclusion !== SUCCESS) {
+    return `#${pr.number}'s own run ended as ${run.conclusion ?? "nothing"}; left alone`;
+  }
+  return undefined;
+}
+
+// mergeIfGreen merges pull request number at headSha if its own CI run passed
+// and nothing leaves it for a person, and says why not otherwise. The merge
+// commit's body is the title that run checked, not the title now: one
+// edited since has a run of its own still to pass.
 export async function mergeIfGreen(github: GitHub, number: number, headSha: string): Promise<Decision> {
   const decided = (merged: boolean, note: string): Decision => {
     notice(note);
@@ -90,6 +116,11 @@ export async function mergeIfGreen(github: GitHub, number: number, headSha: stri
   const held = heldBack(pr, headSha);
   if (held !== undefined) {
     return decided(false, held);
+  }
+  const run = await ownRun(github, pr);
+  const failed = unpassed(pr, run);
+  if (failed !== undefined || run === undefined) {
+    return decided(false, failed ?? "");
   }
   if (!(await canPush(github, pr.author.login))) {
     return decided(false, `#${number} is by ${pr.author.login}, who cannot push here; left for a person to merge`);
@@ -110,7 +141,7 @@ export async function mergeIfGreen(github: GitHub, number: number, headSha: stri
   // Refused if the head moved since it was read: the run tested headSha,
   // whose files are the ones read above.
   try {
-    await github.merge(number, headSha);
+    await github.merge(number, headSha, run.title);
     return decided(true, `#${number} merged at ${headSha}`);
   } catch (err) {
     const note = `#${number} could not be merged at ${headSha}; left as it is: ${err instanceof Error ? err.message : String(err)}`;
@@ -156,19 +187,18 @@ export async function mergeGreen(github: GitHub, headSha: string, pullRequests: 
   return decisions;
 }
 
-// SUCCESS is the conclusion of a passed check run.
-const SUCCESS = "success";
-
-// mergeWaiting merges every open pull request whose required check passed at
-// its head: those a red main held back, once it is green again.
-export async function mergeWaiting(github: GitHub, requiredCheck: string): Promise<Decision[]> {
+// mergeWaiting merges every open pull request whose own CI run passed at its
+// head: those a red main held back, once it is green again. One whose run did
+// not pass is left out of the summary: its own run's end decides it.
+export async function mergeWaiting(github: GitHub): Promise<Decision[]> {
   const decisions: Decision[] = [];
   if ((await mainIsRed(github)) !== undefined) {
     return decisions;
   }
-  for (const pr of await github.openPullRequestsInto(BASE_BRANCH)) {
-    if ((await github.checkConclusion(pr.headSha, requiredCheck)) === SUCCESS) {
-      decisions.push(await mergeIfGreen(github, pr.number, pr.headSha));
+  for (const open of await github.openPullRequestsInto(BASE_BRANCH)) {
+    const pr = await github.pullRequest(open.number);
+    if (unpassed(pr, await ownRun(github, pr)) === undefined) {
+      decisions.push(await mergeIfGreen(github, pr.number, open.headSha));
     }
   }
   summarizeDecisions("Merge what waited for main", decisions);

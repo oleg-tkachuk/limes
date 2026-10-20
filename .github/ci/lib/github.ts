@@ -98,6 +98,16 @@ export interface RunState {
   url: string;
 }
 
+// PullRequestRun is a pull_request run of a workflow: whether and how it
+// ended, the title it ran under — the pull request's title then, which its
+// checks read — and the pull requests, with their base, it ran for.
+export interface PullRequestRun {
+  status: string;
+  conclusion: string | undefined;
+  title: string;
+  pullRequests: { number: number; baseRef: string }[];
+}
+
 // OpenPullRequest is an open pull request's number and head.
 export interface OpenPullRequest {
   number: number;
@@ -112,9 +122,9 @@ export interface GitHub {
   // collaborator.
   permission(login: string): Promise<string | undefined>;
   compare(base: string, head: string): Promise<Comparison>;
-  // merge merges a pull request with a merge commit, refused unless its
-  // head is sha.
-  merge(number: number, sha: string): Promise<void>;
+  // merge merges a pull request with a merge commit whose body is message,
+  // refused unless its head is sha.
+  merge(number: number, sha: string, message: string): Promise<void>;
   workflowRun(runId: number): Promise<WorkflowRun>;
   runJobs(runId: number): Promise<Job[]>;
   releaseExists(tag: string): Promise<boolean>;
@@ -135,9 +145,9 @@ export interface GitHub {
   // openPullRequestsInto is every open, ready pull request from this
   // repository into base.
   openPullRequestsInto(base: string): Promise<OpenPullRequest[]>;
-  // checkConclusion is how the newest run of the check named name at sha
-  // ended; undefined while it runs or when it has not.
-  checkConclusion(sha: string, name: string): Promise<string | undefined>;
+  // pullRequestRuns is the pull_request runs of the workflow file at
+  // headSha, newest first.
+  pullRequestRuns(workflow: string, headSha: string): Promise<PullRequestRun[]>;
   // openIssueTitled is the number of the open issue titled title, if any.
   openIssueTitled(title: string): Promise<number | undefined>;
   createIssue(title: string, body: string): Promise<number>;
@@ -147,8 +157,8 @@ export interface GitHub {
   dispatch(eventType: string, payload: Record<string, string>): Promise<void>;
 }
 
-// MERGE_METHOD is how the automation merges: a merge commit, whose body is
-// the pull request's title the release reads.
+// MERGE_METHOD is how the automation merges: a merge commit, whose body —
+// the title the merged run checked — the release reads.
 const MERGE_METHOD = "merge";
 // NOT_FOUND is the status of an unknown collaborator.
 const NOT_FOUND = 404;
@@ -206,8 +216,8 @@ export function gitHubOver(octokit: Octokit, repo: Repo): GitHub {
         files: (data.files ?? []).map((f) => ({ filename: f.filename, previousFilename: f.previous_filename })),
       };
     },
-    async merge(number, sha) {
-      await octokit.rest.pulls.merge({ ...repo, pull_number: number, sha, merge_method: MERGE_METHOD });
+    async merge(number, sha, message) {
+      await octokit.rest.pulls.merge({ ...repo, pull_number: number, sha, merge_method: MERGE_METHOD, commit_message: message });
     },
     async workflowRun(runId) {
       const { data } = await octokit.rest.actions.getWorkflowRun({ ...repo, run_id: runId });
@@ -294,9 +304,22 @@ export function gitHubOver(octokit: Octokit, repo: Repo): GitHub {
         .filter((p) => !(p.draft ?? false) && p.head.repo?.full_name === `${repo.owner}/${repo.repo}`)
         .map((p) => ({ number: p.number, headSha: p.head.sha }));
     },
-    async checkConclusion(sha, name) {
-      const { data } = await octokit.rest.checks.listForRef({ ...repo, ref: sha, check_name: name, filter: "latest" });
-      return data.check_runs[0]?.conclusion ?? undefined;
+    async pullRequestRuns(workflow, headSha) {
+      const { data } = await octokit.rest.actions.listWorkflowRuns({
+        ...repo,
+        workflow_id: workflow.split("/").at(-1) ?? workflow,
+        event: "pull_request",
+        head_sha: headSha,
+        per_page: PAGE_SIZE,
+      });
+      return data.workflow_runs
+        .sort((a, b) => b.run_number - a.run_number)
+        .map((r) => ({
+          status: r.status ?? "",
+          conclusion: r.conclusion ?? undefined,
+          title: r.display_title,
+          pullRequests: (r.pull_requests ?? []).map((p) => ({ number: p.number, baseRef: p.base.ref })),
+        }));
     },
     async openIssueTitled(title) {
       const issues = await octokit.paginate(octokit.rest.issues.listForRepo, { ...repo, state: "open", per_page: PAGE_SIZE });

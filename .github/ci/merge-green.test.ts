@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, test } from "node:test";
 
 import type { PullRequest } from "./lib/github.ts";
-import { changed, fakeData, fakeGitHub, type FakeData } from "./lib/fake-github.ts";
-import { mergeGreen, pullRequestNumbers } from "./merge-green.ts";
+import { PULL_REQUEST_TITLE, RUNNING, changed, fakeData, fakeGitHub, prRun, type FakeData } from "./lib/fake-github.ts";
+import { mergeGreen, pullRequestNumbers, unpassed } from "./merge-green.ts";
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 const OTHER_SHA = "fedcba9876543210fedcba9876543210fedcba98";
@@ -32,6 +32,7 @@ describe("mergeGreen", () => {
     data = fakeData();
     data.permissions = { someone: "write", keeper: "admin", reader: "read", renovate: "write" };
     data.behindBy[SHA] = 0;
+    data.prRuns[SHA] = [prRun(PR)];
   });
 
   // run decides one pull request changing files, counted as listed unless
@@ -103,10 +104,37 @@ describe("mergeGreen", () => {
 
   test("every pull request of the run is decided", async () => {
     data.files[SHA] = changed("verifier.go");
+    data.prRuns[SHA] = [{ ...prRun(7), pullRequests: [{ number: 7, baseRef: "main" }, { number: 8, baseRef: "main" }] }];
     data.pulls.set(7, pull({ number: 7, changedFiles: 1 }));
     data.pulls.set(8, pull({ number: 8, changedFiles: 1 }));
     await mergeGreen(fakeGitHub(data), SHA, JSON.stringify([{ number: 7 }, { number: 8 }]));
     assert.deepEqual(data.calls.filter((c) => c.startsWith("merge")), [`merge 7 ${SHA}`, `merge 8 ${SHA}`]);
+  });
+
+  // The verdict that merges a pull request is its own run's into main: a
+  // green run of another pull request at the same commit is not.
+  const verdicts: [string, boolean, ReturnType<typeof prRun>[]][] = [
+    ["its own run passed", true, [prRun(PR)]],
+    ["its own run failed", false, [prRun(PR, "failure")]],
+    ["its newest run is still going", false, [prRun(PR, RUNNING), prRun(PR)]],
+    ["only another pull request's run passed", false, [prRun(PR + 1)]],
+    ["only a run into another base passed", false, [prRun(PR, "success", "release/v1")]],
+    ["its own run failed beside another's that passed", false, [prRun(PR + 1), prRun(PR, "failure")]],
+    ["no run at all", false, []],
+  ];
+  for (const [name, want, runs] of verdicts) {
+    test(name, async () => {
+      data.prRuns[SHA] = runs;
+      assert.equal(await run({}, ["verifier.go"]), want);
+    });
+  }
+
+  // The merge commit's body is the title the run checked, not the title now.
+  test("the merge commit carries the title its run checked", async () => {
+    data.prRuns[SHA] = [prRun(PR, "success", "main", "fix: what was checked")];
+    await run({}, ["verifier.go"]);
+    assert.equal(data.merged.get(PR), "fix: what was checked");
+    assert.notEqual(data.merged.get(PR), PULL_REQUEST_TITLE);
   });
 
   // Inputs that are not what the workflow passes are refused, not used.
@@ -121,4 +149,12 @@ describe("pullRequestNumbers", () => {
   for (const bad of ['[{"number": "7; rm -rf /"}]', '[{"number": 1.5}]', '[{"number": -1}]', '[{}]', '{"number": 7}']) {
     test(`refuses ${bad}`, () => assert.throws(() => pullRequestNumbers(bad)));
   }
+});
+
+// Why a pull request's own run does not let it merge, each case named.
+describe("unpassed", () => {
+  test("passed", () => assert.equal(unpassed(pull(), prRun(PR)), undefined));
+  test("still going", () => assert.match(unpassed(pull(), prRun(PR, RUNNING)) ?? "", /still going/));
+  test("failed", () => assert.match(unpassed(pull(), prRun(PR, "failure")) ?? "", /ended as failure/));
+  test("no run", () => assert.match(unpassed(pull(), undefined) ?? "", /no CI run of its own/));
 });

@@ -1,13 +1,9 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { beforeEach, describe, test } from "node:test";
 
-import { parse } from "yaml";
-
-import { changed, fakeData, fakeGitHub, type FakeData } from "./lib/fake-github.ts";
+import { changed, fakeData, fakeGitHub, prRun, type FakeData } from "./lib/fake-github.ts";
 import type { PullRequest } from "./lib/github.ts";
-import { RED_ISSUE, REQUIRED_CHECK, State, reportHealth, stateOf } from "./main-health.ts";
-import { CI_WORKFLOW } from "./lib/runs.ts";
+import { RED_ISSUE, State, reportHealth, stateOf } from "./main-health.ts";
 import { mergeGreen, mergeWaiting } from "./merge-green.ts";
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
@@ -75,6 +71,7 @@ describe("a red main", () => {
     data.behindBy[SHA] = 0;
     data.files[SHA] = changed("verifier.go");
     data.pulls.set(7, pull(7, SHA));
+    data.prRuns[SHA] = [prRun(7)];
   });
 
   test("holds a green pull request", async () => {
@@ -91,30 +88,32 @@ describe("a red main", () => {
     assert.equal(decision?.merged, true);
   });
 
-  test("once green, what waited is merged, and only what passed its check", async () => {
+  test("once green, what waited is merged, and only what its own run passed", async () => {
     data.mainRun = green;
     const OTHER = "2222222222222222222222222222222222222222";
+    const THIRD = "3333333333333333333333333333333333333333";
     data.pulls.set(8, pull(8, OTHER));
+    data.pulls.set(9, pull(9, THIRD));
+    data.behindBy[OTHER] = 0;
+    data.behindBy[THIRD] = 0;
+    data.files[OTHER] = changed("verifier.go");
+    data.files[THIRD] = changed("verifier.go");
     data.open = [
       { number: 7, headSha: SHA },
       { number: 8, headSha: OTHER },
+      { number: 9, headSha: THIRD },
     ];
-    data.checks = { [SHA]: "success", [OTHER]: "failure" };
-    const decisions = await mergeWaiting(fakeGitHub(data), REQUIRED_CHECK);
+    // #8's own run failed; #9's never ran into main, though a run of another
+    // pull request into another base passed at its head.
+    data.prRuns = { [SHA]: [prRun(7)], [OTHER]: [prRun(8, "failure")], [THIRD]: [prRun(10, "success", "release/v1")] };
+    const decisions = await mergeWaiting(fakeGitHub(data));
     assert.deepEqual(decisions.map((d) => [d.number, d.merged]), [[7, true]]);
   });
 
   test("while still red, nothing that waited is merged", async () => {
     data.mainRun = red;
     data.open = [{ number: 7, headSha: SHA }];
-    data.checks = { [SHA]: "success" };
-    assert.deepEqual(await mergeWaiting(fakeGitHub(data), REQUIRED_CHECK), []);
+    data.prRuns = { [SHA]: [prRun(7)] };
+    assert.deepEqual(await mergeWaiting(fakeGitHub(data)), []);
   });
-});
-
-// The check main-health waits on is the one ci.yaml's required job is named,
-// and the workflow it reads is ci.yaml.
-test("the required check is ci.yaml's", () => {
-  const ci = parse(readFileSync(new URL(`../../${CI_WORKFLOW}`, import.meta.url), "utf8")) as { jobs: Record<string, { name?: string }> };
-  assert.equal(ci.jobs.checks?.name, REQUIRED_CHECK);
 });
