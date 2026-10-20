@@ -53,8 +53,9 @@ export const Group = {
 } as const;
 export type Group = (typeof Group)[keyof typeof Group];
 
-// GROUP_DIRS is the directory each group but the root holds.
-const GROUP_DIRS: Readonly<Record<Exclude<Group, typeof Group.Root>, readonly string[]>> = {
+// GROUP_DIRS is the directory each group but the root holds. Every nested
+// module of .github/release/modules.cjs has a group: module-lists.test.ts.
+export const GROUP_DIRS: Readonly<Record<Exclude<Group, typeof Group.Root>, readonly string[]>> = {
   pgstore: ["pgstore/"],
   redisreplay: ["redisreplay/"],
   otelmetric: ["otelmetric/"],
