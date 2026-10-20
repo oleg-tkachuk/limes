@@ -11,6 +11,8 @@
 # Code coverage profiles and other test artifacts
 *.out
 coverage.*
+# test:coverage's report directory
+coverage/
 *.coverprofile
 profile.cov
 

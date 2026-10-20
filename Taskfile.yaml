@@ -47,8 +47,11 @@ includes:
     dir: .
     flatten: true
     # Its vuln and lint run a govulncheck and a golangci-lint from PATH; the
-    # ones below run the versions tools/ pins.
-    excludes: [vuln, lint]
+    # ones below run the versions tools/ pins. Its fmt also runs a goimports
+    # from PATH, which reads a package-level name of another test file as a
+    # package and imports one for it; the fmt below is gofmt alone. Its build
+    # builds the binaries of ./cmd/..., and this module has none.
+    excludes: [vuln, lint, fmt, build]
     # GO_TEST_FLAGS spelled out, so a bump of the library cannot drop -race.
     vars: { PROJECT_NAME: limes, GO_TEST_FLAGS: -race -short }
 
@@ -166,6 +169,11 @@ tasks:
       LIMES_REDIS_REQUIRED: "1"
     cmds:
       - go test -race -count=1 -run '^TestContractOnRedis$' ./...
+
+  fmt:
+    desc: "gofmt -s -w over every module — the half of fmt:check that rewrites; goimports is not run, as it adds imports this tree does not use"
+    cmds:
+      - gofmt -s -w .
 
   lint:all:
     desc: "golangci-lint over every module, the root and each nested one — ./... at the root does not reach a nested module"
