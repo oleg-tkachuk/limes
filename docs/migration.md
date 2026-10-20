@@ -14,6 +14,17 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.109.0
+
+- `BiscuitRevocationCache`, `BiscuitRevocationCacheConfig` and
+  `NewBiscuitRevocationCache` are gone: `RevocationCache` answers
+  `IsBiscuitRevoked` too, and one `Clear` drops both kinds of answer.
+  `RevocationCacheConfig.Upstream` is `Capabilities`, and its new `Biscuits`
+  takes the Biscuit upstream — the same store, if it implements both. Pass
+  the one cache as `VerifierConfig.Revocations` and
+  `BiscuitConfig.Revocations`; `NewVerifier` refuses a cache without
+  `Biscuits` as the latter. `MaxEntries` bounds each kind on its own.
+
 ## pgstore/v0.29.0
 
 - `pgstore.DB` asks for `BeginTx(ctx, pgx.TxOptions)` in place of `Begin`:

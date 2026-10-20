@@ -432,8 +432,10 @@ its siblings and the capability's JWT working. `GetBiscuitRevocation` reads
 it back by the same copy. The revocation belongs to that capability and goes
 only with its record, while a token carrying the id is refused under any
 capability. A verifier that accepts
-Biscuits needs `BiscuitConfig.Revocations` — wrap the store in a
-`BiscuitRevocationCache` and clear it with the other cache.
+Biscuits needs `BiscuitConfig.Revocations`: pass the same `RevocationCache`
+as `VerifierConfig.Revocations`, built with the store as
+`RevocationCacheConfig.Biscuits` too, so one `Clear` reaches both kinds of
+answer. `NewVerifier` refuses a cache built without it.
 
 The Biscuit seals an ordinary signed token, so a KMS-held signing key works.
 That token carries the root of the Biscuit's signature chain, whose private
@@ -753,9 +755,9 @@ revocation is announced — on a Postgres `NOTIFY`, for example. `Clear`
 drops the whole cache, and there is no per-id drop: an answer cached for a
 descendant is also an answer about the revoked ancestor. The next check of
 each id then asks the store once, so batch a burst of signals into one
-`Clear`. Build the caches with `NewRevocationCache` and
-`NewBiscuitRevocationCache` over your store; `Sweep` drops their
-expired entries on a timer of yours, optional since lookups skip and replace
+`Clear`. Build the cache with `NewRevocationCache` over your store, as
+`Capabilities` and, if the verifier reads Biscuits, `Biscuits`; `Sweep` drops
+its expired entries on a timer of yours, optional since lookups skip and replace
 them anyway. Over `pgstore`, run a `pgstore.RevocationWatcher` beside each
 verifier: the schema notifies `pgstore.RevocationChannel` on every
 revocation, and the watcher clears the caches it is given on each
@@ -771,7 +773,7 @@ w := pgstore.RevocationWatcher{
         }
         return c.Hijack(), nil
     },
-    Caches:  []pgstore.Clearer{revocations, biscuitRevocations},
+    Caches:  []pgstore.Clearer{revocations},
     OnError: func(err error) { log.Printf("revocation watcher: %v", err) },
 }
 go w.Run(ctx) // reconnects with backoff until ctx ends
@@ -1166,7 +1168,7 @@ stop rather than retry. The full table is in [diagrams.md](diagrams.md#answering
 | `PurgeRequest` · `ReleaseExpiredRequest` · `PurgeOrphansRequest` | `DefaultHousekeepingLimit` 1 000 a batch; `PurgeRequest.ExpiredFor` `MinPurgeRetention`, 6 minutes, and no less |
 | `MaxDelegationDepth` · `MaxBiscuitBlocks` | 64 ancestors · 32 attenuation blocks |
 | `CopyUsageRequest.RevocationIDs` | at most `MaxCopyUsageIDs`, 500, of one `CapabilityID` |
-| `RevocationCacheConfig` · `BiscuitRevocationCacheConfig` | `DefaultRevocationCacheTTL` 2 seconds · `DefaultRevocationCacheEntries` 100 000, the oldest dropped first past it; a negative TTL or bound is refused — for no cache, give the verifier the store itself |
+| `RevocationCacheConfig` | `DefaultRevocationCacheTTL` 2 seconds · `DefaultRevocationCacheEntries` 100 000 of each kind, capabilities and Biscuit copies, the oldest dropped first past it; a negative TTL or bound is refused — for no cache, give the verifier the store itself |
 | `jwks.RemoteConfig` | `jwks.DefaultFetchTimeout` 10s · `DefaultRefreshInterval` 5m · `DefaultMinRefreshInterval` 10s · `DefaultMaxStale` 1h · `DefaultMaxDocumentBytes` 1 MiB |
 | `dpop.VerifierConfig.Window` | `dpop.DefaultWindow`, 1 minute; a proof's id is remembered for `Window` plus `dpop.ReplayClockSkew`, 5 seconds |
 | `dpop.VerifierConfig.MaxProofBytes` | `dpop.DefaultMaxProofBytes`, 4 KiB; a `jti` past `dpop.MaxJTIBytes`, 128 bytes, is refused |

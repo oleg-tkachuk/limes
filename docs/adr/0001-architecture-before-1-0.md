@@ -121,7 +121,7 @@ freeze allows now and names the rest, so the API items can be decided before
 4. [x] Split `types.go` (errors, units, `Op`, `Principal`, `Capability`,
    `grant`, `Caveats`) and `biscuit_revocation.go` (interfaces, `BiscuitCopy`,
    a `Verifier` method, the cache) by concern. File moves only.
-5. [ ] **API.** `RevocationCache` and `BiscuitRevocationCache` have the same
+5. [x] **API.** `RevocationCache` and `BiscuitRevocationCache` have the same
    config, `Clear` and `Sweep` shape (`cache.go:41`,
    `biscuit_revocation.go:155`). Merging them changes exported types.
 
@@ -179,4 +179,5 @@ freeze allows now and names the rest, so the API items can be decided before
    limes gating their release? **Decided on 2026-10-20: yes.** Every nested
    module carries the `replace`, and ci.yaml's `released-limes` job gates each
    one's release (`GATED` in `.github/ci/release.ts`).
-2. **API items.** Should item 5 land before 1.0, or wait for v2?
+2. **API items.** Should item 5 land before 1.0, or wait for v2? **Decided on
+   2026-10-20: before 1.0**, in v0.109.0.
