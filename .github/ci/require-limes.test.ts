@@ -2,17 +2,19 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createRequire } from "node:module";
 import { after, afterEach, before, beforeEach, describe, test } from "node:test";
 
 import { fakeData, fakeGitHub, type FakeData } from "./lib/fake-github.ts";
 import { git } from "./lib/git.ts";
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
-import { BRANCH_PREFIX, LIMES_MODULE, Proposal, compareVersions, goEnv, proposeRequirement, type Context } from "./require-limes.ts";
+import { BRANCH, LIMES_MODULE, LIMES_REQUIREMENT_SCOPE, Proposal, compareVersions, goEnv, proposeRequirements, type Context } from "./require-limes.ts";
 
 const MODULE = "nested";
+const OTHER = "other";
 const FOLLOWER = "examples";
 const REQUIRED = "v0.1.0";
-const BRANCH = `${BRANCH_PREFIX}${MODULE}`;
+const TITLE = (tag: string) => `build(${LIMES_REQUIREMENT_SCOPE}): require limes ${tag}`;
 
 // GO_OFFLINE lets go tidy a module that requires limes through a replace
 // with no network, and git commit with no identity of the machine's.
@@ -34,6 +36,13 @@ test("compareVersions", () => {
   assert.ok(compareVersions("v0.1.0", "v0.2.0") < 0);
 });
 
+// The scope of the commit is the one the nested modules' release rules
+// release as a patch: another would merge and release none of them.
+test("the commit's scope is the one the release cuts a patch of", () => {
+  const modules = createRequire(import.meta.url)("../release/modules.cjs") as { LIMES_REQUIREMENT_SCOPE: string };
+  assert.equal(LIMES_REQUIREMENT_SCOPE, modules.LIMES_REQUIREMENT_SCOPE);
+});
+
 test("go never sees the token", () => {
   process.env.GH_TOKEN = "secret";
   try {
@@ -43,7 +52,7 @@ test("go never sees the token", () => {
   }
 });
 
-describe("proposeRequirement", () => {
+describe("proposeRequirements", () => {
   let work: string;
   let origin: string;
   let repo: TempRepo;
@@ -65,8 +74,9 @@ describe("proposeRequirement", () => {
 
   // scratch is a checkout of main whose origin is a bare repository beside
   // it: a stub limes at the root, MODULE requiring it at required (or not at
-  // all), and with follower, FOLLOWER building against both.
-  async function scratch(required: string | undefined, follower?: string): Promise<void> {
+  // all), OTHER at other, when given, and with follower, FOLLOWER building
+  // against limes and MODULE.
+  async function scratch(required: string | undefined, follower?: string, other?: string): Promise<void> {
     work = mkdtempSync(join(tmpdir(), "limes-require-"));
     origin = join(work, "origin.git");
     await git(["init", "--quiet", "--bare", "--initial-branch=main", origin]);
@@ -74,13 +84,19 @@ describe("proposeRequirement", () => {
     await repo.run("remote", "add", "origin", origin);
     repo.write("go.mod", `module ${LIMES_MODULE}\n\ngo 1.21\n`);
     repo.write("limes.go", "package limes\n");
-    if (required !== undefined) {
-      repo.write(`${MODULE}/go.mod`, `module example.com/${MODULE}\n\ngo 1.21\n\nrequire ${LIMES_MODULE} ${required}\n\nreplace ${LIMES_MODULE} => ../\n`);
-      repo.write(`${MODULE}/${MODULE}.go`, `package ${MODULE}\n\nimport _ "${LIMES_MODULE}"\n`);
-    } else {
-      repo.write(`${MODULE}/go.mod`, `module example.com/${MODULE}\n\ngo 1.21\n`);
+    const nested = (dir: string, version: string | undefined) => {
+      if (version !== undefined) {
+        repo.write(`${dir}/go.mod`, `module example.com/${dir}\n\ngo 1.21\n\nrequire ${LIMES_MODULE} ${version}\n\nreplace ${LIMES_MODULE} => ../\n`);
+        repo.write(`${dir}/${dir}.go`, `package ${dir}\n\nimport _ "${LIMES_MODULE}"\n`);
+      } else {
+        repo.write(`${dir}/go.mod`, `module example.com/${dir}\n\ngo 1.21\n`);
+      }
+      repo.write(`${dir}/go.sum`, "");
+    };
+    nested(MODULE, required);
+    if (other !== undefined) {
+      nested(OTHER, other);
     }
-    repo.write(`${MODULE}/go.sum`, "");
     if (follower !== undefined) {
       repo.write(
         `${FOLLOWER}/go.mod`,
@@ -109,27 +125,54 @@ describe("proposeRequirement", () => {
     rmSync(work, { recursive: true, force: true });
   });
 
-  test("a release past what the module requires: its own branch, one commit, a pull request", async () => {
-    await scratch(REQUIRED);
-    assert.equal(await proposeRequirement(ctx(), MODULE, "v0.2.0"), Proposal.Opened);
+  test("a release past what the modules require: one branch, one commit, one pull request", async () => {
+    await scratch(REQUIRED, undefined, REQUIRED);
+    const outcome = await proposeRequirements(ctx(), [MODULE, OTHER], "v0.2.0");
+    assert.equal(outcome.proposal, Proposal.Opened);
+    assert.deepEqual(outcome.raised, [
+      { dir: MODULE, from: REQUIRED },
+      { dir: OTHER, from: REQUIRED },
+    ]);
     assert.equal(await requiredOn(BRANCH, `${MODULE}/go.mod`), "v0.2.0");
+    assert.equal(await requiredOn(BRANCH, `${OTHER}/go.mod`), "v0.2.0");
     assert.equal((await git(["rev-list", "--count", `main..${BRANCH}`], origin)).trim(), "1");
-    assert.deepEqual(data.createdPulls.map((p) => [p.head, p.base, p.text.title]), [[BRANCH, "main", `build(${MODULE}): require limes v0.2.0`]]);
+    assert.deepEqual(data.createdPulls.map((p) => [p.head, p.base, p.text.title]), [[BRANCH, "main", TITLE("v0.2.0")]]);
+    assert.match(data.createdPulls[0]?.text.body ?? "", new RegExp(`- ${OTHER}: ${REQUIRED} → v0\\.2\\.0`));
+  });
+
+  test("a module that requires the release already is left out of it", async () => {
+    await scratch(REQUIRED, undefined, "v0.2.0");
+    const outcome = await proposeRequirements(ctx(), [MODULE, OTHER], "v0.2.0");
+    assert.deepEqual(outcome.raised.map((r) => r.dir), [MODULE]);
+    assert.equal((await git(["diff", "--name-only", "main", BRANCH, "--", OTHER], origin)).trim(), "");
   });
 
   test("a follower is tidied in the same commit", async () => {
     await scratch(REQUIRED, REQUIRED);
-    await proposeRequirement(ctx(), MODULE, "v0.2.0");
+    await proposeRequirements(ctx(), [MODULE], "v0.2.0");
     assert.equal(await requiredOn(BRANCH, `${FOLLOWER}/go.mod`), "v0.2.0");
   });
 
   test("a newer release while the pull request is open: retitled, not opened again", async () => {
     await scratch(REQUIRED);
-    await proposeRequirement(ctx(), MODULE, "v0.2.0");
-    assert.equal(await proposeRequirement(ctx(), MODULE, "v0.3.0"), Proposal.Updated);
+    await proposeRequirements(ctx(), [MODULE], "v0.2.0");
+    assert.equal((await proposeRequirements(ctx(), [MODULE], "v0.3.0")).proposal, Proposal.Updated);
     assert.equal(data.createdPulls.length, 1);
-    assert.equal(data.editedPulls[0]?.text.title, `build(${MODULE}): require limes v0.3.0`);
+    assert.equal(data.editedPulls[0]?.text.title, TITLE("v0.3.0"));
     assert.equal(await requiredOn(BRANCH, `${MODULE}/go.mod`), "v0.3.0");
+  });
+
+  test("a module that fails is left out, and the others proposed", async () => {
+    await scratch(REQUIRED, undefined, REQUIRED);
+    // A go.mod go cannot read.
+    repo.write(`${OTHER}/go.mod`, "not a go.mod\n");
+    await repo.commit("break other");
+    await repo.run("push", "--quiet", "origin", "main");
+    const outcome = await proposeRequirements(ctx(), [OTHER, MODULE], "v0.2.0");
+    assert.deepEqual(outcome.failed, [OTHER]);
+    assert.deepEqual(outcome.raised.map((r) => r.dir), [MODULE]);
+    assert.equal(outcome.proposal, Proposal.Opened);
+    assert.equal(await requiredOn(BRANCH, `${MODULE}/go.mod`), "v0.2.0");
   });
 
   test("main moved on the remote since the checkout fetched: the branch is cut from it", async () => {
@@ -142,27 +185,27 @@ describe("proposeRequirement", () => {
     } finally {
       other.cleanup();
     }
-    await proposeRequirement(ctx(), MODULE, "v0.2.0");
+    await proposeRequirements(ctx(), [MODULE], "v0.2.0");
     await git(["merge-base", "--is-ancestor", "main", BRANCH], origin);
   });
 
   test("nothing to raise", async () => {
     await scratch(REQUIRED);
-    assert.equal(await proposeRequirement(ctx(), MODULE, REQUIRED), Proposal.Unchanged, "the same release");
-    assert.equal(await proposeRequirement(ctx(), MODULE, "v0.0.9"), Proposal.Unchanged, "an older one");
+    assert.equal((await proposeRequirements(ctx(), [MODULE], REQUIRED)).proposal, Proposal.Unchanged, "the same release");
+    assert.equal((await proposeRequirements(ctx(), [MODULE], "v0.0.9")).proposal, Proposal.Unchanged, "an older one");
     repo.cleanup();
     rmSync(work, { recursive: true, force: true });
     await scratch(undefined);
-    assert.equal(await proposeRequirement(ctx(), MODULE, "v0.2.0"), Proposal.NoRequirement, "no requirement");
+    assert.deepEqual(await proposeRequirements(ctx(), [MODULE], "v0.2.0"), { proposal: Proposal.Unchanged, raised: [], failed: [] }, "no requirement");
     assert.deepEqual(data.createdPulls, []);
   });
 
   test("not a release's tag, or no module", async () => {
     await scratch(REQUIRED);
     for (const tag of ["latest", "v0.2", "0.2.0", "v0.2.0-rc.1"]) {
-      await assert.rejects(proposeRequirement(ctx(), MODULE, tag), Error, tag);
+      await assert.rejects(proposeRequirements(ctx(), [MODULE], tag), Error, tag);
     }
-    await assert.rejects(proposeRequirement(ctx(), "missing", "v0.2.0"));
-    await assert.rejects(proposeRequirement(ctx(), "", "v0.2.0"));
+    await assert.rejects(proposeRequirements(ctx(), ["missing"], "v0.2.0"));
+    await assert.rejects(proposeRequirements(ctx(), [""], "v0.2.0"));
   });
 });

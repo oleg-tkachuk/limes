@@ -5,9 +5,10 @@ name: Auto-merge
 # run tested. main does not require a pull request to be up to date with it,
 # so a green one merges at once and no merge makes another wait for a rebase
 # and a second run; a change that only breaks beside another is caught by the
-# CI run of main itself after the merge. While that run is red, an issue says
-# so and nothing is merged; once main is green again, what waited is merged
-# (the main job below).
+# CI run of main itself after the merge. While that run's required check is
+# red, an issue says so and nothing is merged; once main is green again, what
+# waited is merged (the main job below). A job outside the check — a
+# released-limes gate — fails the run without holding a merge.
 #
 # The merge acts through AUTOMERGE_TOKEN — a fine-grained token or GitHub App
 # token with Contents and Pull requests write on this repository — and never
@@ -108,6 +109,7 @@ jobs:
     permissions:
       contents: read # the checkout below; the merges act through AUTOMERGE_TOKEN
       issues: write # the issue that says main is red
+      actions: read # the jobs of the run, read for its required check
     steps:
       - name: Check out the scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -124,6 +126,7 @@ jobs:
         env:
           ISSUES_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
           CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}

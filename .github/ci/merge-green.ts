@@ -17,7 +17,8 @@
 // whose green check is no evidence. Its files are those of HEAD_SHA, read
 // through the compare API as GitHub lists them, not from a diff's headers.
 //
-// While main's own newest CI run failed, nothing is merged: two pull requests
+// While the required check of main's own newest CI run failed, nothing is
+// merged: two pull requests
 // each green alone can break main together, and merging more onto a broken
 // main hides which change broke it. Each pull request held so is merged once
 // main is green again (main-health.ts). What each run decided goes on its
@@ -30,7 +31,7 @@ import { notice, summarize, table, warning } from "./lib/actions.ts";
 import { optionalEnv, requireEnv } from "./lib/env.ts";
 import { gitHubFor, type GitHub, type PullRequest, type PullRequestRun } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
-import { CI_WORKFLOW, COMPLETED, RED, SUCCESS } from "./lib/runs.ts";
+import { CI_WORKFLOW, COMPLETED, RED, SUCCESS, requiredConclusion } from "./lib/runs.ts";
 import { BASE_BRANCH, canPush, changesCi, filesListedInFull, isRenovate, nestedModuleChange } from "./merge-policy.ts";
 
 // COMMIT_ID is a full commit id, the only HEAD_SHA a run passes.
@@ -51,11 +52,11 @@ export function summarizeDecisions(title: string, decisions: readonly Decision[]
   summarize(`### ${title}\n\n${table(SUMMARY_HEADER, decisions.map((d) => [`#${d.number}`, d.merged ? "yes" : "no", d.note]))}`);
 }
 
-// mainIsRed is why merges wait for main, or undefined while main's newest
-// finished CI run passed.
+// mainIsRed is why merges wait for main, or undefined while the required
+// check of main's newest finished CI run passed (requiredConclusion).
 export async function mainIsRed(github: GitHub): Promise<string | undefined> {
   const run = await github.latestRunOf(CI_WORKFLOW, BASE_BRANCH);
-  if (run === undefined || !RED.includes(run.conclusion)) {
+  if (run === undefined || !RED.includes(await requiredConclusion(github, run))) {
     return undefined;
   }
   return `${BASE_BRANCH} is red at ${run.headSha.slice(0, 7)} (${run.url}); merging waits until it is green`;

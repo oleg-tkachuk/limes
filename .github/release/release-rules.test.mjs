@@ -50,6 +50,8 @@ const moduleCases = {
     ["feat(otelmetric): count holds", null],
     ["feat(otelmetric)!: rename an option", null],
     ["build(otelmetric): require limes v0.64.0", null],
+    // The one commit raising every nested module's requirement, too.
+    ["build(limes): require limes v0.64.0", null],
   ],
   // A nested module's own build change is a patch of it: the go.mod its users
   // resolve has changed. The first is the subject .github/ci/require-limes.ts
@@ -58,14 +60,20 @@ const moduleCases = {
     ["build(redisreplay): require limes v0.64.0", "patch"],
     ["build(redisreplay): bump go-redis", "patch"],
     ["build(pgstore): require limes v0.64.0", null],
+    // The subject require-limes.ts commits now, for every nested module at
+    // once: module-commits.cjs hands it to the modules whose directory it
+    // changes.
+    ["build(limes): require limes v0.64.0", "patch"],
   ],
   [modules.PGSTORE_MODULE]: [
     ["build(pgstore): require limes v0.64.0", "patch"],
     ["build(redisreplay): require limes v0.64.0", null],
+    ["build(limes): require limes v0.64.0", "patch"],
   ],
   [modules.OTELMETRIC_MODULE]: [
     ["build(otelmetric): require limes v0.64.0", "patch"],
     ["build(pgstore): require limes v0.64.0", null],
+    ["build(limes): require limes v0.64.0", "patch"],
   ],
 };
 

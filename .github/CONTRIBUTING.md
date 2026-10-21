@@ -56,11 +56,13 @@ So a limes change that a nested module must follow — a value pgstore names
 exhaustively, such as a `ChargeBucket`, or an API the module calls — lands
 with the module in one pull request. The released-limes job of its merge fails,
 as nothing released has the change yet; the release then releases limes, and
-the release workflow opens a pull request raising each nested module's requirement to that
-release (`build(<module>): require limes vX.Y.Z`, merged once green). That
-pull request's merge passes the job and releases the module with every
-change it held: a nested module's own `build` commit is a patch of it, so the
-raised requirement is released even when nothing else waits. A module change
+the release workflow opens one pull request raising every nested module's
+requirement to that release (`build(limes): require limes vX.Y.Z`, merged
+once green). Its merge passes the job and releases each module it raised
+with every change the module held: a `build(limes)` commit is a patch of each
+nested module whose files it changes, so the raised requirement is released
+even when nothing else waits. A red released-limes job holds no merge: main
+is judged by its required check alone. A module change
 that needs a limes already released raises the requirement in its own
 `go.mod`.
 

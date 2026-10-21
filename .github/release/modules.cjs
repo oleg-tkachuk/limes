@@ -27,9 +27,12 @@
 // and docs/style/refactor/test/build/ci/chore release nothing. `security` is a
 // patch: the preset knows no such type. A nested module's own build change is
 // a patch of it: such a commit changes the go.mod its users resolve — above
-// all the release workflow's `build(<module>): require limes vX.Y.Z`, which
+// all the release workflow's `build(limes): require limes vX.Y.Z`, which
 // would otherwise leave the requirement unreleased — and is listed in its
-// notes, which the preset would leave empty, build being a hidden type.
+// notes, which the preset would leave empty, build being a hidden type. That
+// one commit raises every nested module's requirement at once, so its scope
+// is LIMES_REQUIREMENT_SCOPE, a patch of each nested module: module-commits.cjs
+// hands it only to those whose directory it changes.
 // Every module is pre-1.0, where a breaking change is a minor; that rule goes
 // from a module's own rules when it reaches 1.0. release-rules.test.mjs and
 // release-notes.test.mjs pin all of it. major-guard.cjs refuses a major the
@@ -50,6 +53,11 @@ const OTELMETRIC_MODULE = "otelmetric";
 const PGSTORE_RELEASES_NOTHING = { scope: PGSTORE_MODULE, release: false };
 const REDISREPLAY_RELEASES_NOTHING = { scope: REDISREPLAY_MODULE, release: false };
 const OTELMETRIC_RELEASES_NOTHING = { scope: OTELMETRIC_MODULE, release: false };
+
+// LIMES_REQUIREMENT_SCOPE scopes the build change that raises the nested
+// modules' requirement of limes (.github/ci/require-limes.ts). The root
+// module's rules leave it to the preset, where build releases nothing.
+const LIMES_REQUIREMENT_SCOPE = "limes";
 
 // buildIsAPatch is the rule that releases a build change scoped to the nested
 // module name as a patch of it.
@@ -78,14 +86,19 @@ const PRESET_TYPES = [
 const DEPENDENCIES_SECTION = "Dependencies";
 
 // buildIsListed is the nested module name's notes types: the preset's, with
-// the build changes scoped to it — the ones buildIsAPatch releases — listed
-// under DEPENDENCIES_SECTION rather than hidden, so such a release has notes.
-// The preset takes the first entry that matches a commit, so the scoped one
-// goes ahead of the hidden build type.
+// the build changes scoped to it or to LIMES_REQUIREMENT_SCOPE — the ones
+// nestedRules releases — listed under DEPENDENCIES_SECTION rather than
+// hidden, so such a release has notes. The preset takes the first entry that
+// matches a commit, so the scoped ones go ahead of the hidden build type.
 function buildIsListed(name) {
   const at = PRESET_TYPES.findIndex((t) => t.type === "build");
-  const listed = { type: "build", scope: name, section: DEPENDENCIES_SECTION, effect: "bump" };
-  return [...PRESET_TYPES.slice(0, at), listed, ...PRESET_TYPES.slice(at)];
+  const listed = [name, LIMES_REQUIREMENT_SCOPE].map((scope) => ({ type: "build", scope, section: DEPENDENCIES_SECTION, effect: "bump" }));
+  return [...PRESET_TYPES.slice(0, at), ...listed, ...PRESET_TYPES.slice(at)];
+}
+
+// nestedRules are the release rules of the nested module name.
+function nestedRules(name) {
+  return [SECURITY_IS_A_PATCH, BREAKING_IS_A_MINOR_BEFORE_1_0, buildIsAPatch(name), buildIsAPatch(LIMES_REQUIREMENT_SCOPE)];
 }
 
 // The variable that picks the module to release, and the one picked without it.
@@ -110,17 +123,17 @@ const MODULES = {
   },
   [REDISREPLAY_MODULE]: {
     dir: REDISREPLAY_MODULE,
-    releaseRules: [SECURITY_IS_A_PATCH, BREAKING_IS_A_MINOR_BEFORE_1_0, buildIsAPatch(REDISREPLAY_MODULE)],
+    releaseRules: nestedRules(REDISREPLAY_MODULE),
     notesTypes: buildIsListed(REDISREPLAY_MODULE),
   },
   [PGSTORE_MODULE]: {
     dir: PGSTORE_MODULE,
-    releaseRules: [SECURITY_IS_A_PATCH, BREAKING_IS_A_MINOR_BEFORE_1_0, buildIsAPatch(PGSTORE_MODULE)],
+    releaseRules: nestedRules(PGSTORE_MODULE),
     notesTypes: buildIsListed(PGSTORE_MODULE),
   },
   [OTELMETRIC_MODULE]: {
     dir: OTELMETRIC_MODULE,
-    releaseRules: [SECURITY_IS_A_PATCH, BREAKING_IS_A_MINOR_BEFORE_1_0, buildIsAPatch(OTELMETRIC_MODULE)],
+    releaseRules: nestedRules(OTELMETRIC_MODULE),
     notesTypes: buildIsListed(OTELMETRIC_MODULE),
   },
 };
@@ -168,6 +181,7 @@ function breaksAreMinor(name) {
 
 module.exports = {
   DEPENDENCIES_SECTION,
+  LIMES_REQUIREMENT_SCOPE,
   MODULES,
   MODULE_ENV,
   ROOT_MODULE,

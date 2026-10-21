@@ -8,7 +8,7 @@ import { mergeGreen, mergeWaiting } from "./merge-green.ts";
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
 const MAIN = "1111111111111111111111111111111111111111";
-const red = { conclusion: "failure", headSha: MAIN, url: "https://example.invalid/run/1" };
+const red = { id: 1, conclusion: "failure", headSha: MAIN, url: "https://example.invalid/run/1" };
 const green = { ...red, conclusion: "success" };
 
 function pull(number: number, headSha: string): PullRequest {
@@ -80,6 +80,23 @@ describe("a red main", () => {
     assert.equal(decision?.merged, false);
     assert.match(decision?.note ?? "", /main is red/);
     assert.ok(!data.calls.some((c) => c.startsWith("merge")));
+  });
+
+  test("a run on main red only outside its required check holds nothing", async () => {
+    data.mainRun = red;
+    data.jobs.set(red.id, [
+      { name: "All checks passed", status: "completed", conclusion: "success" },
+      { name: "Released limes (pgstore)", status: "completed", conclusion: "failure" },
+    ]);
+    const [decision] = await mergeGreen(fakeGitHub(data), SHA, JSON.stringify([{ number: 7 }]));
+    assert.equal(decision?.merged, true);
+  });
+
+  test("a red required check holds it", async () => {
+    data.mainRun = red;
+    data.jobs.set(red.id, [{ name: "All checks passed", status: "completed", conclusion: "failure" }]);
+    const [decision] = await mergeGreen(fakeGitHub(data), SHA, JSON.stringify([{ number: 7 }]));
+    assert.equal(decision?.merged, false);
   });
 
   test("a cancelled run on main holds nothing", async () => {

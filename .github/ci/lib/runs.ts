@@ -1,6 +1,8 @@
 // The CI workflow, and what the conclusions of its runs and jobs mean: one
 // place for every command that reads them.
 
+import type { GitHub } from "./github.ts";
+
 // CI_WORKFLOW is the workflow whose runs say whether a commit passed: its
 // push runs on main vouch for a release, and its latest run on main says
 // whether main is green.
@@ -18,3 +20,19 @@ export const PASSING: readonly string[] = [SUCCESS, "skipped"];
 // RED are the conclusions of a run that leave its branch broken. A
 // cancelled run says nothing about the code.
 export const RED: readonly string[] = ["failure", "timed_out", "startup_failure"];
+// REQUIRED_CHECK is the `name:` of ci.yaml's checks job, the one check main's
+// ruleset requires, which stands for every job a merge needs.
+// repo-settings.test.ts holds it to ci.yaml.
+export const REQUIRED_CHECK = "All checks passed";
+
+// requiredConclusion is what a CI run says about its branch: how its
+// REQUIRED_CHECK ended, or the run's own conclusion when that job did not
+// finish — a run that never started it, or was cancelled before it. A job
+// outside the check fails the run without breaking the branch: a
+// released-limes gate is red from a limes release until the nested modules
+// require it, and the pull request raising their requirement must not wait
+// for a green main it is the one to bring.
+export async function requiredConclusion(github: Pick<GitHub, "runJobs">, run: { id: number; conclusion: string }): Promise<string> {
+  const check = (await github.runJobs(run.id)).filter((j) => j.name === REQUIRED_CHECK).at(-1);
+  return check?.status === COMPLETED && check.conclusion !== undefined ? check.conclusion : run.conclusion;
+}

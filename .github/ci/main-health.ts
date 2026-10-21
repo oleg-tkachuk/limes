@@ -1,10 +1,12 @@
 // Say when main is red, and merge what waited once it is green again.
 //
-// Usage: ISSUES_TOKEN=… GITHUB_REPOSITORY=… CONCLUSION=… HEAD_SHA=… RUN_URL=…
-//        [GH_TOKEN=…] node main-health.ts
+// Usage: ISSUES_TOKEN=… GITHUB_REPOSITORY=… RUN_ID=… CONCLUSION=… HEAD_SHA=…
+//        RUN_URL=… [GH_TOKEN=…] node main-health.ts
 //
 // auto-merge.yaml runs this from main when ci.yaml completes on a push to
-// main. A run that failed opens an issue titled RED_ISSUE, or comments on the
+// main. A run is read by its required check (requiredConclusion): a job
+// outside it — a released-limes gate — says nothing about main. A run that
+// failed opens an issue titled RED_ISSUE, or comments on the
 // one still open, so a broken main is seen, not only read in a log; while it
 // is red, merge-green merges nothing. A run that passed closes that issue and
 // merges, through GH_TOKEN (AUTOMERGE_TOKEN), each open pull request whose
@@ -16,7 +18,7 @@ import { info, summarize, warning } from "./lib/actions.ts";
 import { optionalEnv, requireEnv } from "./lib/env.ts";
 import { gitHubFor, type GitHub } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
-import { RED, SUCCESS } from "./lib/runs.ts";
+import { RED, SUCCESS, requiredConclusion } from "./lib/runs.ts";
 import { mergeWaiting } from "./merge-green.ts";
 
 // RED_ISSUE is the title of the issue that stands open while main is red.
@@ -66,8 +68,14 @@ export async function reportHealth(issues: GitHub, run: Run): Promise<State> {
 
 async function main(): Promise<void> {
   const repository = requireEnv("GITHUB_REPOSITORY");
-  const run: Run = { conclusion: requireEnv("CONCLUSION"), headSha: requireEnv("HEAD_SHA"), url: requireEnv("RUN_URL") };
-  const state = await reportHealth(gitHubFor(requireEnv("ISSUES_TOKEN"), repository), run);
+  const issues = gitHubFor(requireEnv("ISSUES_TOKEN"), repository);
+  const runId = Number(requireEnv("RUN_ID"));
+  if (!Number.isSafeInteger(runId) || runId <= 0) {
+    throw new Error(`RUN_ID ${process.env.RUN_ID} is not a run id`);
+  }
+  const conclusion = await requiredConclusion(issues, { id: runId, conclusion: requireEnv("CONCLUSION") });
+  const run: Run = { conclusion, headSha: requireEnv("HEAD_SHA"), url: requireEnv("RUN_URL") };
+  const state = await reportHealth(issues, run);
   if (state !== State.Green) {
     return;
   }
