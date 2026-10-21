@@ -130,13 +130,39 @@ test("the released-limes matrix is the gated modules", () => {
 });
 
 describe("passedRunFor", () => {
+  const find = (data: FakeData, sha = SHA) => passedRunFor(fakeGitHub(data), REPO, sha, REQUIRED);
   test("the newest passed run for the commit", async () => {
     const data = fakeData();
-    data.runs.set(7, good);
-    data.runs.set(9, good);
+    for (const id of [7, 9]) {
+      data.runs.set(id, good);
+      data.jobs.set(id, jobsAll("success"));
+    }
     data.runs.set(11, { ...good, headSha: OTHER });
-    assert.equal(await passedRunFor(fakeGitHub(data), SHA), 9);
+    data.jobs.set(11, jobsAll("success"));
+    assert.equal(await find(data), 9);
   });
-  test("none is an error", async () => assert.rejects(passedRunFor(fakeGitHub(fakeData()), SHA), /no passed CI run/));
-  test("a sha that is not one", async () => assert.rejects(passedRunFor(fakeGitHub(fakeData()), "main")));
+  // A released-limes gate fails the run while a nested module follows a limes
+  // not yet released; the release reads that gate on its own.
+  test("a run whose only failure is outside the required check", async () => {
+    const data = fakeData();
+    data.runs.set(9, good);
+    data.jobs.set(9, [...jobsAll("success"), { name: "Released limes, pgstore", status: "completed", conclusion: "failure" }]);
+    assert.equal(await find(data), 9);
+  });
+  test("a newer run that failed a required job is passed over", async () => {
+    const data = fakeData();
+    data.runs.set(7, good);
+    data.jobs.set(7, jobsAll("success"));
+    data.runs.set(9, good);
+    data.jobs.set(9, jobsAll("failure"));
+    assert.equal(await find(data), 7);
+  });
+  test("a run that failed a required job is none", async () => {
+    const data = fakeData();
+    data.runs.set(9, good);
+    data.jobs.set(9, jobsAll("failure"));
+    await assert.rejects(find(data), /no passed CI run/);
+  });
+  test("none is an error", async () => assert.rejects(find(fakeData()), /no passed CI run/));
+  test("a sha that is not one", async () => assert.rejects(find(fakeData(), "main")));
 });

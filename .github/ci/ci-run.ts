@@ -11,9 +11,13 @@
 // write, so only the API's answer about the run it names is trusted.
 // job-passed sets the step output `passed`: true for a job that passed or was
 // skipped, false for one that failed; one missing or unfinished is an error.
-// find sets the step output `run-id` to the newest passed push run of
-// ci.yaml on main for sha, for a release asked for by hand, which no CI run
-// dispatched; none is an error.
+// find sets the step output `run-id` to the newest finished push run of
+// ci.yaml on main for sha that vouches for it, as vouches asks, for a release
+// asked for by hand, which no CI run dispatched; none is an error. A run is
+// not asked to have passed whole: a job outside the required check — a
+// released-limes gate, red while a nested module follows a limes not yet
+// released — fails the run without stopping a release, which reads that job
+// on its own.
 
 import { readFileSync } from "node:fs";
 
@@ -110,16 +114,20 @@ export async function jobPassed(github: GitHub, runId: number, name: string): Pr
   return true;
 }
 
-// passedRunFor is the newest passed push run of ci.yaml on main for sha.
-export async function passedRunFor(github: GitHub, sha: string): Promise<number> {
+// passedRunFor is the newest finished push run of ci.yaml on main for sha
+// that vouches for it: every job of required passed or was skipped.
+export async function passedRunFor(github: GitHub, repository: string, sha: string, required: readonly string[]): Promise<number> {
   if (!COMMIT_ID.test(sha)) {
     throw new Error(`sha ${JSON.stringify(sha)} is not a commit id`);
   }
-  const [runId] = await github.passedRunsOf(CI_WORKFLOW, RELEASE_BRANCH, sha);
-  if (runId === undefined) {
-    throw new Error(`no passed CI run on ${RELEASE_BRANCH} for ${sha}: a release is cut only from a commit CI passed`);
+  for (const runId of await github.finishedRunsOf(CI_WORKFLOW, RELEASE_BRANCH, sha)) {
+    const problems = await problemsWithRun(github, repository, runId, sha, required);
+    if (problems.length === 0) {
+      return runId;
+    }
+    info(`CI run ${runId} does not vouch for ${sha}: ${problems.join("; ")}`);
   }
-  return runId;
+  throw new Error(`no passed CI run on ${RELEASE_BRANCH} for ${sha}: a release is cut only from a commit CI passed`);
 }
 
 async function main(): Promise<void> {
@@ -127,7 +135,7 @@ async function main(): Promise<void> {
   const repository = requireEnv("GITHUB_REPOSITORY");
   const github = gitHubFor(requireEnv("GH_TOKEN"), repository);
   if (command === Command.Find) {
-    setOutput(OUTPUT_RUN_ID, String(await passedRunFor(github, runText)));
+    setOutput(OUTPUT_RUN_ID, String(await passedRunFor(github, repository, runText, requiredJobs(readFileSync(CI_WORKFLOW, "utf8")))));
     return;
   }
   const runId = runIdOf(runText);
