@@ -983,7 +983,9 @@ cursor is opaque and holds the order it was handed out for; one of the other
 order, like any the lister did not hand out, is `ErrInvalidRequest`.
 `memstore.NewCensus` and `pgstore.NewCensus` are each one too — pgstore lists
 a tenant under that tenant's scope, as `ListByPrincipal`, by the indexes of
-its migration 014 — and `storetest` checks a lister its `Env.Lister` names,
+its migrations 014 and 017; it reads whether a record is revoked from the
+record, a flag its revocation and its parent's set (migration 015), so a page
+reads the records it lists and no revocation — and `storetest` checks a lister its `Env.Lister` names,
 when the `Env` also sets `Now`.
 
 ```go

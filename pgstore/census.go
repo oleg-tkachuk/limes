@@ -14,27 +14,11 @@ import (
 	"github.com/oleg-tkachuk/limes"
 )
 
-// revokedWalkFrom and revokedWalkDown are, around a condition on the
-// revocation entries' tenant_id, the CTE revoked of the census and of
-// ListRecords: every record revoked itself or below a revoked one — the
-// walk down from each revocation entry the condition admits through
-// parent_id, as IsRevoked's walk up answers it. A child is in its parent's
-// tenant (Insert), so a walk for one tenant starts from that tenant's
-// entries alone. Each step reads the children of the step before by
-// capabilities_parent — the OFFSET keeps the planner from joining the step
-// to every record instead — so a walk reads the revoked records and no
-// other.
-const (
-	revokedWalkFrom = `revoked (id) AS (
-    SELECT capability_id FROM ` + schema + `.revocations
-    WHERE `
-	revokedWalkDown = `
-  UNION
-    SELECT c.id FROM revoked r CROSS JOIN LATERAL (
-        SELECT id FROM ` + schema + `.capabilities WHERE parent_id = r.id OFFSET 0
-    ) c
-)`
-)
+// A record's revoked column says whether it is revoked, itself or through
+// an ancestor still on record, as IsRevoked's walk up answers it: a
+// revocation entry marks its record and every record below it, and a record
+// inserted under a marked one is marked (migrations/015_revoked_flag.sql).
+// The census and ListRecords read it, so neither walks the revocations.
 
 // Census implements limes.RecordCensus and limes.RecordLister over the
 // store's capability records.
@@ -59,21 +43,20 @@ func NewCensus(cfg Config) (*Census, error) {
 // principal type, each ascending bytewise. A group not named is one value —
 // the nil uuid or ” — so every column orders and compares.
 //
-// revoked is the walk of revokedWalkFrom and revokedWalkDown. A disposition is one of revoked, then expired —
-// no expiry, or not after $4 — then active.
+// A disposition is one of revoked, then expired — no expiry, or not after
+// $4 — then active.
 const sqlCountRecords = `
-WITH RECURSIVE ` + revokedWalkFrom + `$1::uuid IS NULL OR tenant_id = $1` + revokedWalkDown + `,
-counts AS (
+WITH counts AS (
     SELECT
         CASE WHEN $2::boolean THEN c.tenant_id ELSE '00000000-0000-0000-0000-000000000000'::uuid END AS tenant_id,
         CASE WHEN $3::boolean THEN c.principal_type ELSE '' END AS principal_type,
         count(*) AS total,
-        count(*) FILTER (WHERE r.id IS NULL AND c.expires_at > $4) AS active,
-        count(*) FILTER (WHERE r.id IS NULL AND (c.expires_at IS NULL OR c.expires_at <= $4)) AS expired,
-        count(*) FILTER (WHERE r.id IS NOT NULL) AS revoked,
+        count(*) FILTER (WHERE NOT c.revoked AND c.expires_at > $4) AS active,
+        count(*) FILTER (WHERE NOT c.revoked AND (c.expires_at IS NULL OR c.expires_at <= $4)) AS expired,
+        count(*) FILTER (WHERE c.revoked) AS revoked,
         count(*) FILTER (WHERE c.parent_id IS NOT NULL) AS delegated,
-        count(*) FILTER (WHERE r.id IS NULL AND c.expires_at > $4 AND c.expires_at <= $5) AS expiring_soon
-    FROM ` + schema + `.capabilities c LEFT JOIN revoked r ON r.id = c.id
+        count(*) FILTER (WHERE NOT c.revoked AND c.expires_at > $4 AND c.expires_at <= $5) AS expiring_soon
+    FROM ` + schema + `.capabilities c
     WHERE $1::uuid IS NULL OR c.tenant_id = $1
     GROUP BY 1, 2
 )
@@ -174,23 +157,35 @@ func decodeCountCursor(s string) (countCursor, error) {
 }
 
 // sqlListRecords is ListRecords' query before its filters: tenant $1's
-// records, each with its own revocation entry and its disposition at $2 by
-// the census's rules — revoked (revokedWalkFrom), then expired, then active.
+// records, each with its own revocation entry, read by its key for each
+// record of the page (the OFFSET keeps the planner from joining every
+// entry instead), and its disposition at $2 by the census's rules: revoked,
+// then expired, then active.
 // listRecordsSQL adds a condition for each filter the request sets and
 // none for the rest, so each shape of request is a statement, and a plan, of
 // its own: one that pages by subject reads capabilities_principal, one that
-// pages a tenant or a principal type the index of migration 014.
+// pages a tenant or a principal type the index of migration 014, and one
+// of some dispositions the partial index of 017 for their revoked flag.
 const sqlListRecords = `
-WITH RECURSIVE ` + revokedWalkFrom + `tenant_id = $1` + revokedWalkDown + `
-SELECT c.capability, c.issued_by, v.revoked_at, v.note, v.actor, v.cascaded, d.disposition
-FROM ` + schema + `.capabilities c
-LEFT JOIN ` + schema + `.revocations v ON v.capability_id = c.id
-CROSS JOIN LATERAL (SELECT CASE
-    WHEN c.id IN (SELECT id FROM revoked) THEN 'revoked'
+SELECT c.capability, c.issued_by, v.revoked_at, v.note, v.actor, v.cascaded, CASE
+    WHEN c.revoked THEN 'revoked'
     WHEN c.expires_at IS NULL OR c.expires_at <= $2 THEN 'expired'
     ELSE 'active'
-END AS disposition) d
+END
+FROM ` + schema + `.capabilities c
+LEFT JOIN LATERAL (
+    SELECT revoked_at, note, actor, cascaded FROM ` + schema + `.revocations WHERE capability_id = c.id OFFSET 0
+) v ON true
 WHERE c.tenant_id = $1`
+
+// dispositionWhere is each disposition as a condition on a record's own
+// columns at $2, so that a listing of some dispositions reads the index of
+// the revoked flag they have (migrations/017_revoked_indexes.sql).
+var dispositionWhere = map[limes.RecordDisposition]string{
+	limes.RecordDispositionActive:  "(NOT c.revoked AND c.expires_at > $2)",
+	limes.RecordDispositionExpired: "(NOT c.revoked AND (c.expires_at IS NULL OR c.expires_at <= $2))",
+	limes.RecordDispositionRevoked: "c.revoked",
+}
 
 // listRecordsSQL is sqlListRecords with req's filters, past the cursor's id
 // after when it is not nil, ordered and limited, and its arguments: the
@@ -213,11 +208,21 @@ func listRecordsSQL(req limes.ListRecordsRequest, now time.Time, after *uuid.UUI
 		and("starts_with(c.subject, $%d)", req.SubjectPrefix)
 	}
 	if len(req.Dispositions) > 0 {
-		ds := make([]string, len(req.Dispositions))
-		for i, d := range req.Dispositions {
-			ds[i] = string(d)
+		var conds []string
+		for _, d := range []limes.RecordDisposition{limes.RecordDispositionActive, limes.RecordDispositionExpired, limes.RecordDispositionRevoked} {
+			if req.Admits(d) {
+				conds = append(conds, dispositionWhere[d])
+			}
 		}
-		and("d.disposition = ANY ($%d::text[])", ds)
+		// Not revoked, as both of its own dispositions are: the planner
+		// proves the partial index from that conjunct, not from the
+		// disjunction.
+		if !req.Admits(limes.RecordDispositionRevoked) {
+			conds = append([]string{"NOT c.revoked AND"}, "("+strings.Join(conds, " OR ")+")")
+			fmt.Fprintf(&q, "\n  AND %s", strings.Join(conds, " "))
+		} else {
+			fmt.Fprintf(&q, "\n  AND (%s)", strings.Join(conds, " OR "))
+		}
 	}
 	order := "ASC"
 	if req.Order == limes.ListOrderDescending {

@@ -54,6 +54,12 @@ type MigrateOptions struct {
 // holds, never on a second one, which would wait on that run for ever. A
 // consumer with another migration tool runs Migrate before it.
 //
+// Migration 015 adds limes.capabilities.revoked,
+// the flag ListRecords and CountRecords read: a change of the catalog, which
+// rewrites no row and holds the table only for that moment. 016 then marks
+// the records revoked before it, taking only their rows, and 017 builds its
+// indexes CONCURRENTLY.
+//
 // Migrate needs one connection, not a pool; over a pool:
 //
 //	err := pool.AcquireFunc(ctx, func(c *pgxpool.Conn) error {
