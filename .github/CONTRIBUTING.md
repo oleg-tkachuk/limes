@@ -131,6 +131,7 @@ the `automerge` environment admitting `main` alone, private vulnerability
 reporting — are set by an admin, by hand:
 
 ```bash
+npm ci --ignore-scripts --prefix .github/ci
 GH_TOKEN=$(gh auth token) node .github/ci/repo-settings.ts
 ```
 
