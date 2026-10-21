@@ -2,6 +2,7 @@ package pgstore
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -103,4 +104,86 @@ func seqScans(node map[string]any) []string {
 		out = append(out, seqScans(c.(map[string]any))...)
 	}
 	return out
+}
+
+// seedPage records, as the owner, planPageRecords records for tenant $1, a
+// half of them revoked: every other one (interleaved), or the older half
+// (block), whose records an ascending listing of the active ones would pass
+// over first.
+const (
+	planPageRecords = 10000
+	seedPage        = `
+INSERT INTO limes.capabilities (id, parent_id, tenant_id, principal_type, subject, expires_at, depth, capability, issued_by)
+SELECT uuidv7(), NULL, $1, 'agent', 'subject:' || (i % 100), $2::timestamptz + interval '1 hour', 0, '{}', '{}'
+FROM generate_series(1, $3::int) i ORDER BY i;
+INSERT INTO limes.revocations (capability_id, tenant_id, revoked_at, note, actor, cascaded)
+SELECT id, tenant_id, $2, 'plan', 'test', false
+FROM (SELECT id, tenant_id, row_number() OVER (ORDER BY id) i FROM limes.capabilities) c
+WHERE CASE $4 WHEN 'block' THEN i <= $3::int / 2 ELSE i % 2 = 0 END;
+ANALYZE limes.capabilities;
+ANALYZE limes.revocations`
+)
+
+// scanned is the rows a plan read from limes.capabilities, those it kept and
+// those its filters removed, and whether it walked anything recursively.
+func scanned(node map[string]any) (rows float64, recursive bool) {
+	if node["Relation Name"] == "capabilities" {
+		r, _ := node["Actual Rows"].(float64)
+		removed, _ := node["Rows Removed by Filter"].(float64)
+		loops, _ := node["Actual Loops"].(float64)
+		rows += (r + removed) * loops
+	}
+	if node["Node Type"] == "Recursive Union" || node["Node Type"] == "CTE Scan" {
+		recursive = true
+	}
+	children, _ := node["Plans"].([]any)
+	for _, c := range children {
+		r, rec := scanned(c.(map[string]any))
+		rows, recursive = rows+r, recursive || rec
+	}
+	return rows, recursive
+}
+
+// A page of a listing reads the records it lists and not many more,
+// however many of the tenant's records are revoked and wherever they fall:
+// of planPageRecords, half revoked, a page of active records or of revoked
+// ones reads at most two of its LIMIT from limes.capabilities, and walks no
+// revocation.
+func TestListRecordsPageReadsItsLimit(t *testing.T) {
+	const limit = limes.DefaultListLimit + 1
+	for _, layout := range []string{"interleaved", "block"} {
+		fresh(t)
+		mine := newTenant(t)
+		now := time.Now().UTC()
+		if _, err := owner.Exec(t.Context(), seedPage, pgx.QueryExecModeSimpleProtocol, mine, now, planPageRecords, layout); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		census, err := NewCensus(Config{DB: app, Now: func() time.Time { return now }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, d := range []limes.RecordDisposition{limes.RecordDispositionActive, limes.RecordDispositionRevoked} {
+			for _, order := range []limes.ListOrder{limes.ListOrderAscending, limes.ListOrderDescending} {
+				name := fmt.Sprintf("%s, %s, %s", layout, d, order)
+				req := limes.ListRecordsRequest{TenantID: mine, Dispositions: []limes.RecordDisposition{d}, Order: order}
+				query, args := listRecordsSQL(req, now, nil, limit)
+				var plan []byte
+				err := census.inTenantReadTx(WithTenant(t.Context(), mine), mine, func(tx pgx.Tx) error {
+					return tx.QueryRow(t.Context(), "EXPLAIN (ANALYZE, FORMAT JSON) "+query, args...).Scan(&plan)
+				})
+				if err != nil {
+					t.Fatalf("%s: EXPLAIN: %v", name, err)
+				}
+				var nodes []map[string]any
+				if err := json.Unmarshal(plan, &nodes); err != nil {
+					t.Fatalf("%s: plan: %v", name, err)
+				}
+				rows, recursive := scanned(nodes[0]["Plan"].(map[string]any))
+				t.Logf("%s: %.0f records read in %.2f ms", name, rows, nodes[0]["Execution Time"])
+				if recursive || rows > 2*limit {
+					t.Errorf("%s: read %.0f records (at most %d), walked recursively %v:\n%s", name, rows, 2*limit, recursive, plan)
+				}
+			}
+		}
+	}
 }

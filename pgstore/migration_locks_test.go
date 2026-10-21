@@ -33,6 +33,8 @@ type migrationFile struct {
 
 var (
 	lineComment   = regexp.MustCompile(`--[^\n]*`)
+	dollarQuoted  = regexp.MustCompile(`(?s)\$\$.*?\$\$`)
+	indexInBody   = regexp.MustCompile(`(?i)\bcreate\s+(?:unique\s+)?index\b`)
 	createTable   = regexp.MustCompile(`(?i)^create\s+table\s+(?:if\s+not\s+exists\s+)?([\w."]+)`)
 	createIndex   = regexp.MustCompile(`(?i)^create\s+(?:unique\s+)?index\s+(concurrently\s+)?(?:if\s+not\s+exists\s+)?([\w"]+)\s+on\s+(?:only\s+)?([\w."]+)`)
 	dropIndex     = regexp.MustCompile(`(?i)^drop\s+index\s+concurrently\s+if\s+exists\s+([\w."]+)\s*$`)
@@ -51,12 +53,12 @@ func baseName(name string) string {
 	return n[strings.LastIndex(n, ".")+1:]
 }
 
-// statements is sql split at its semicolons, comments dropped, each trimmed.
-// The migrations quote no semicolon and define no function after
-// lockedThrough, so the split is the statements.
+// statements is sql split at its semicolons, comments and the bodies of
+// functions and DO blocks ($$…$$) dropped, each trimmed. The migrations
+// quote no semicolon elsewhere, so the split is the statements.
 func statements(sql string) []string {
 	var out []string
-	for _, s := range strings.Split(lineComment.ReplaceAllString(sql, ""), ";") {
+	for _, s := range strings.Split(dollarQuoted.ReplaceAllString(lineComment.ReplaceAllString(sql, ""), "$$$$"), ";") {
 		if s = strings.Join(strings.Fields(s), " "); s != "" {
 			out = append(out, s)
 		}
@@ -126,6 +128,13 @@ func lintIndexBuilds(files []migrationFile) []string {
 		case marked && len(dropped) == 0:
 			problems = append(problems, f.name+": carries the "+disableTx+" marker but builds no index")
 		}
+		if f.seq > lockedThrough {
+			for _, body := range dollarQuoted.FindAllString(lineComment.ReplaceAllString(f.sql, ""), -1) {
+				if indexInBody.MatchString(body) {
+					problems = append(problems, f.name+": builds an index inside a function or DO block, where it cannot be built CONCURRENTLY")
+				}
+			}
+		}
 		for t := range created {
 			existing[t] = true
 		}
@@ -193,6 +202,8 @@ func TestLintIndexBuilds(t *testing.T) {
 		"a constraint over an index built concurrently": {"ALTER TABLE limes.capabilities ADD CONSTRAINT one_id UNIQUE USING INDEX capabilities_u;", ""},
 		"a column added to an existing table":           {"ALTER TABLE limes.capabilities ADD COLUMN note text;", ""},
 		"the marker with no index":                      {disableTx + "\n-- nothing", "builds no index"},
+		"a function whose body holds semicolons":        {"CREATE FUNCTION limes.f() RETURNS trigger LANGUAGE plpgsql AS $$\nBEGIN\n    UPDATE limes.capabilities SET id = id;\n    RETURN NULL;\nEND\n$$;", ""},
+		"an index built in a DO block":                  {"DO $$\nBEGIN\n    EXECUTE 'CREATE INDEX x ON limes.capabilities (id)';\nEND\n$$;", "inside a function or DO block"},
 	} {
 		problems := lintIndexBuilds(append(slices.Clone(base), migrationFile{seq: next, name: "015_next.sql", sql: tc.sql}))
 		switch {
