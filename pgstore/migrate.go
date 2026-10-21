@@ -54,6 +54,14 @@ type MigrateOptions struct {
 // holds, never on a second one, which would wait on that run for ever. A
 // consumer with another migration tool runs Migrate before it.
 //
+// Migration 014 (pgstore v0.31.0) builds three indexes with a plain CREATE
+// INDEX, which holds writes to limes.capabilities and limes.revocations
+// until each is built: Insert, Revoke, Purge and the erasers wait, while
+// reads, IsRevoked among them, go on. On a million records the builds take
+// some seconds; schedule the first Migrate of v0.31.0 or later for a quiet
+// moment on a store that large. Every later migration builds an index on an
+// existing table CONCURRENTLY, outside a transaction, holding no writes.
+//
 // Migrate needs one connection, not a pool; over a pool:
 //
 //	err := pool.AcquireFunc(ctx, func(c *pgxpool.Conn) error {
