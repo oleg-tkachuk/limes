@@ -1,7 +1,8 @@
 // Repository settings that live in the GitHub API, not in the codebase, as
 // the workflows rely on them. Idempotent; safe to run again.
 //
-// Usage: GH_TOKEN=$(gh auth token) node .github/ci/repo-settings.ts
+// Usage: npm ci --ignore-scripts --prefix .github/ci
+//        GH_TOKEN=$(gh auth token) node .github/ci/repo-settings.ts
 //
 // Run by hand, by a repository admin; no workflow runs it, and no workflow
 // token could: each call needs administration rights. It:
