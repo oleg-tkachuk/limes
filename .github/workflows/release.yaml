@@ -36,6 +36,16 @@ on:
         options: [all, limes, redisreplay, pgstore, otelmetric]
         default: all
 
+# Each run is named after what started it, so the run behind a release, or
+# behind one that stopped, is found by its name: CI's dispatch by the run
+# that vouches for it and the commit, a run by hand by its channel and
+# module. The version is derived inside the run by semantic-release, so no
+# name carries one.
+run-name: >-
+  ${{ github.event_name == 'repository_dispatch'
+      && format('Release dispatched by CI run {0} for {1}', github.event.client_payload.ci_run_id, github.event.client_payload.sha)
+      || format('Release by hand: {0} of {1} at {2}', inputs.channel, inputs.module, github.sha) }}
+
 permissions: {}
 
 concurrency:
