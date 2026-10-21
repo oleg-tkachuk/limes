@@ -1,8 +1,8 @@
 // Package pgstore is the reference implementation of the limes storage
 // contracts over PostgreSQL: limes.Store and limes.BiscuitRevocationStore for
 // capability records and revocations, meter.UsageStore and
-// meter.CopyUsageReader for the meter, meter.LedgerReader and
-// limes.RecordCensus for reports, and
+// meter.CopyUsageReader for the meter, meter.LedgerReader,
+// limes.RecordCensus and limes.RecordLister for reports, and
 // limes.TenantRecordEraser and meter.TenantUsageEraser for removing a
 // tenant. It passes the module's own contract
 // suites, storetest and metertest, which is how a consumer knows it keeps
@@ -64,7 +64,8 @@
 //
 // A call whose request names its tenant — Insert, ListByPrincipal, Bump,
 // Charge, Reserve, Settle, Release, GetTenantBudget, SetTenantBudget, the
-// erasers, Ledger.SumCharges and Census.CountRecords for one tenant — under a
+// erasers, Ledger.SumCharges, Census.ListRecords and Census.CountRecords for
+// one tenant — under a
 // scope
 // that does not admit that tenant returns limes.ErrScopeMismatch rather than
 // answer as if the tenant's rows were not there (Config.CheckScope). A call
@@ -83,6 +84,8 @@
 // reason: of one tenant, scoped to it as every call naming a tenant, or of
 // every tenant under WithAllTenantsReadOnly or WithAllTenants — a scope that
 // admits fewer is refused with limes.ErrScopeMismatch, not counted as all.
+// It lists a tenant's records too (limes.RecordLister), each with the
+// disposition it counts them under, scoped to that tenant.
 //
 // To remove a tenant, Store.EraseTenant revokes its capabilities, removes
 // the records Purge would and every meter row of the tenant — the charges
@@ -183,7 +186,7 @@ type Config struct {
 	// request names its tenant — Insert, ListByPrincipal, Bump, Charge,
 	// Reserve, Settle, Release, GetTenantBudget, SetTenantBudget, EraseTenant,
 	// EraseTenantRecords, EraseTenantUsage, Ledger.SumCharges and
-	// Census.CountRecords for one tenant — and
+	// Census.ListRecords and Census.CountRecords for one tenant — and
 	// refuses one
 	// whose scope does not admit that tenant with limes.ErrScopeMismatch,
 	// which the call returns as it is. Nil, under the default Scope: the

@@ -49,6 +49,7 @@ func storeEnv(t *testing.T, cfg Config, readOnly func(context.Context) context.C
 	tenant := newTenant(t)
 	return storetest.Env{
 		Census:        census,
+		Lister:        census,
 		Ctx:           WithTenant(t.Context(), tenant),
 		ScopesTenants: true,
 		ReadOnlyCtx:   readOnly(t.Context()),
