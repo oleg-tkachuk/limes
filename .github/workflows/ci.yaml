@@ -21,9 +21,17 @@ permissions: {}
 # push to main gets a group of its own: GitHub keeps one pending run per
 # group and cancels it when another joins, so a shared group would drop the
 # CI — and the release dispatch — of a commit merged between two others.
+#
+# An edit that changes neither the title nor the base cancels nothing: it
+# waits behind the run in flight. Such an edit leaves what that run checks as
+# it was, and GitHub sends one when a person merges a pull request or turns
+# on auto-merge, which would otherwise cancel the run the merge waits on and
+# leave it red.
 concurrency:
   group: ci-${{ github.event_name == 'push' && github.sha || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: >-
+    ${{ github.event_name == 'pull_request' && (github.event.action != 'edited' ||
+    github.event.changes.title != null || github.event.changes.base != null) }}
 
 # Pinned tools, one place each. A floating tool changes what the gate checks
 # with no commit of ours in between.
