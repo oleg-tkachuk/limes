@@ -276,3 +276,50 @@ func checkListRecordsMalformed(t *testing.T, f fixture) {
 		t.Errorf("ListRecords of Tenant under another tenant's context: err = %v, want ErrScopeMismatch", err)
 	}
 }
+
+// A cursor holds the filters it was handed out for: handed back with
+// another principal type, subject, subject prefix or set of dispositions, it
+// is refused rather than paged on from its id under them, which would give a
+// page of neither listing. The same dispositions in another order, or one
+// repeated, are the same filters.
+func checkListRecordsCursorFilters(t *testing.T, f fixture) {
+	f.skipUnlessLister(t)
+	censusFixture(t, f)
+	active, expired, revoked := limes.RecordDispositionActive, limes.RecordDispositionExpired, limes.RecordDispositionRevoked
+	req := limes.ListRecordsRequest{
+		TenantID: f.Tenant, PrincipalType: limes.PrincipalTypeAgent, SubjectPrefix: "agent:",
+		Dispositions: []limes.RecordDisposition{active, revoked}, Limit: 1,
+	}
+	first, err := f.Lister.ListRecords(f.Ctx, req)
+	if err != nil || first.Next == "" {
+		t.Fatalf("first page = %+v, %v; want a next page", first, err)
+	}
+	req.Cursor = first.Next
+	for name, change := range map[string]func(*limes.ListRecordsRequest){
+		"another principal type": func(r *limes.ListRecordsRequest) { r.PrincipalType = limes.PrincipalTypeUser },
+		"no principal type":      func(r *limes.ListRecordsRequest) { r.PrincipalType = limes.PrincipalTypeUnspecified },
+		"a subject":              func(r *limes.ListRecordsRequest) { r.SubjectPrefix, r.Subject = "", "agent:root" },
+		"another subject prefix": func(r *limes.ListRecordsRequest) { r.SubjectPrefix = "agent:r" },
+		"no subject prefix":      func(r *limes.ListRecordsRequest) { r.SubjectPrefix = "" },
+		"another disposition":    func(r *limes.ListRecordsRequest) { r.Dispositions = []limes.RecordDisposition{active, expired} },
+		"one disposition fewer":  func(r *limes.ListRecordsRequest) { r.Dispositions = []limes.RecordDisposition{active} },
+		"every disposition":      func(r *limes.ListRecordsRequest) { r.Dispositions = nil },
+	} {
+		other := req
+		change(&other)
+		if _, err := f.Lister.ListRecords(f.Ctx, other); !errors.Is(err, limes.ErrInvalidRequest) {
+			t.Errorf("ListRecords with the cursor and %s: err = %v, want ErrInvalidRequest", name, err)
+		}
+	}
+	for name, dispositions := range map[string][]limes.RecordDisposition{
+		"the same filters":                  {active, revoked},
+		"the dispositions in another order": {revoked, active},
+		"a disposition repeated":            {active, revoked, active},
+	} {
+		same := req
+		same.Dispositions = dispositions
+		if _, err := f.Lister.ListRecords(f.Ctx, same); err != nil {
+			t.Errorf("ListRecords with the cursor and %s: %v", name, err)
+		}
+	}
+}
