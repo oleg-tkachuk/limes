@@ -31,6 +31,17 @@ Docker, and run apart:
 task test:pgstore
 ```
 
+A pgstore migration that indexes a table an earlier migration created builds
+the index without holding the table's writes: `CREATE [UNIQUE] INDEX
+CONCURRENTLY`, after a `DROP INDEX CONCURRENTLY IF EXISTS` of the same index,
+in a migration of nothing else marked `---- tern: disable-tx ----`, which tern
+runs outside a transaction a statement at a time. A build that fails leaves an
+invalid index and its version unrecorded, so the next `Migrate` drops it and
+builds again. A constraint that needs an index (`PRIMARY KEY`, `UNIQUE`,
+`EXCLUDE`) goes on an existing table `USING INDEX` one built so.
+`TestMigrationsBuildIndexesWithoutALock` holds every migration after 014 to
+this.
+
 Every nested module — `pgstore`, `redisreplay`, `otelmetric` — builds against
 the limes of the same commit, through the replace in its `go.mod`, so CI runs
 its tests twice. Against that limes they are part of the required check: limes
