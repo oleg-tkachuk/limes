@@ -134,7 +134,7 @@ own, pgstore included, logging what happens.
 | **Bind to a key** | RFC 9449 DPoP: `Verify` refuses a key-bound capability without a fresh proof from that key, presented under the `DPoP` scheme; server nonces (`dpop.HMACNonces`) work across replicas without shared state. |
 | **Meter** | Requests count against the capability, every ancestor and each Biscuit copy with limits presented; spend against those and the tenant, atomically with your own side effect. Each copy with limits of its own counts against the copy quota of the capability and of every ancestor. Reserve an estimate, settle the actual cost, refund a charge. Amounts are exact integers of billionths of an ISO 4217 unit. `otelmetric.Instrument`, a module of its own, adds OpenTelemetry instruments. |
 | **Revoke** | One call stops a capability and everything delegated from it; verifiers learn of it within a cache TTL, or at once on `Clear`, which `pgstore.RevocationWatcher` calls on every revocation. |
-| **Report** | `LedgerReader.SumCharges` sums the charges of one tenant or of every tenant over a period by unit, whole or by UTC hour, day, ISO week or month, grouped by any of tenant, operation, actor and capability and filtered by them, the largest first. `RecordCensus.CountRecords` counts capability records — active, expired, revoked, delegated, expiring soon — for one tenant or all, by tenant and principal type. |
+| **Report** | `LedgerReader.SumCharges` sums the charges of one tenant or of every tenant over a period by unit, whole or by UTC hour, day, ISO week or month, grouped by any of tenant, operation, actor and capability and filtered by them, the largest first. `RecordCensus.CountRecords` counts capability records — active, expired, revoked, delegated, expiring soon — for one tenant or all, by tenant and principal type. `RecordLister.ListRecords` lists one tenant's records, each with its disposition by the census's rules, filtered by principal type, subject or subject prefix and disposition, oldest or newest first. |
 | **Answer refusals** | `ErrorResponse` maps a refusal to its status, an RFC 6750 / RFC 9449 `WWW-Authenticate` challenge and an RFC 9457 problem body, without the error's own text. |
 
 You implement `Store` and a `KeyResolver`, which `jwks.Static` and
@@ -150,7 +150,8 @@ commits or rolls it back (`pgstore.ErrChargeTransaction`), and it closes when
 the callback returns.
 Optional contracts serve one feature each: `BiscuitRevocationStore` and
 `meter.CopyUsageReader` for Biscuit copies, `meter.LedgerReader` for billing
-reads, `RecordCensus` for a census of records, and `TenantRecordEraser` and
+reads, `RecordCensus` for a census of records, `RecordLister` to list a
+tenant's records, and `TenantRecordEraser` and
 `meter.TenantUsageEraser` to remove a tenant.
 
 ## Guarantees

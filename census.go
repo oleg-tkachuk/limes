@@ -16,7 +16,8 @@ import (
 // columns, but not take the store's clock or share these rules with every
 // store. It is a type of its own, beside Store: a reporter holds it, an
 // issuer does not. memstore and pgstore each ship one; storetest checks it
-// when its Env sets one.
+// when its Env sets one. A RecordLister lists the records it counts, each
+// under the disposition it counts it under.
 //
 // Each record counts under exactly one disposition, by the store's clock,
 // the one expiry and purging are measured by:

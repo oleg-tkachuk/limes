@@ -66,7 +66,8 @@
 //
 // More are needed only with the feature they serve:
 // [BiscuitRevocationStore] to accept Biscuit tokens, [RecordCensus] to count
-// capability records by disposition across tenants, [TenantRecordEraser] to
+// capability records by disposition across tenants, [RecordLister] to list a
+// tenant's records with their dispositions, [TenantRecordEraser] to
 // remove a tenant, [dpop.ReplayCache] to share DPoP replay
 // state across replicas ([dpop.MemoryReplayCache] ships for one process), and
 // [dpop.Nonces] to require server nonces ([dpop.HMACNonces] ships, and works
