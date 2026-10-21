@@ -139,9 +139,9 @@ export interface GitHub {
   sameRepoPullRequest(head: string, base: string): Promise<number | undefined>;
   createPullRequest(head: string, base: string, text: PullRequestText): Promise<number>;
   editPullRequest(number: number, text: PullRequestText): Promise<void>;
-  // passedRunsOf is the ids of the completed, successful push runs of the
-  // workflow file on branch that tested sha, newest first.
-  passedRunsOf(workflow: string, branch: string, sha: string): Promise<number[]>;
+  // finishedRunsOf is the ids of the completed push runs of the workflow
+  // file on branch that tested sha, whatever they concluded, newest first.
+  finishedRunsOf(workflow: string, branch: string, sha: string): Promise<number[]>;
   // latestRunOf is the newest finished push run of the workflow file on
   // branch, if any.
   latestRunOf(workflow: string, branch: string): Promise<RunState | undefined>;
@@ -288,13 +288,13 @@ export function gitHubOver(octokit: Octokit, repo: Repo): GitHub {
     async editPullRequest(number, text) {
       await octokit.rest.pulls.update({ ...repo, pull_number: number, title: text.title, body: text.body });
     },
-    async passedRunsOf(workflow, branch, sha) {
+    async finishedRunsOf(workflow, branch, sha) {
       const { data } = await octokit.rest.actions.listWorkflowRuns({
         ...repo,
         workflow_id: workflow.split("/").at(-1) ?? workflow,
         branch,
         event: "push",
-        status: "success",
+        status: "completed",
         head_sha: sha,
         per_page: PAGE_SIZE,
       });
