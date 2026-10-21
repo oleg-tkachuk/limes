@@ -125,4 +125,16 @@ fails nothing, a soak whose counters drift fails it.
 - A change to the token wire format regenerates the golden fixtures in the
   same commit — see `goldengen_test.go` and `biscuit_crosslang_test.go`.
 
+The repository settings the workflows rely on — merge commits allowed, a
+ruleset on `main` requiring **All checks passed** (not up to date with it),
+the `automerge` environment admitting `main` alone, private vulnerability
+reporting — are set by an admin, by hand:
+
+```bash
+GH_TOKEN=$(gh auth token) node .github/ci/repo-settings.ts
+```
+
+It is idempotent, leaves visibility and secrets alone, and lists any other
+ruleset on `main` rather than change it.
+
 Security issues go through [SECURITY.md](SECURITY.md), not a public issue.
