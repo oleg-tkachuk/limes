@@ -14,7 +14,8 @@
 //     leaves counters unmutated.
 //
 // NewLedger reads a usage store's ledger as a meter.LedgerReader, NewCensus
-// counts a record store's records as a limes.RecordCensus, and the
+// counts a record store's records as a limes.RecordCensus and lists them
+// as a limes.RecordLister, and the
 // stores erase a tenant as limes.TenantRecordEraser and
 // meter.TenantUsageEraser; EraseTenantUsage leaves a mark on the usage
 // store's Records store, whose Insert then refuses the tenant with

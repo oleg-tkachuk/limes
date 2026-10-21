@@ -23,7 +23,7 @@ OpenTelemetry.
 The two Biscuit contracts are needed only by a consumer that accepts the
 Biscuit form, `dpop.ReplayCache` and `dpop.Nonces` only by one that binds
 capabilities to keys, `meter.LedgerReader` only by one that bills or reports from the
-charges ledger, `RecordCensus` only by one that reports on records, and the two tenant erasers only by one that removes a tenant. `storetest`, `metertest`, `dpop/dpoptest` and
+charges ledger, `RecordCensus` and `RecordLister` only by one that reports on records, and the two tenant erasers only by one that removes a tenant. `storetest`, `metertest`, `dpop/dpoptest` and
 `jwks/jwkstest` check an implementation against its contract from its own
 tests — the Biscuit and copy contracts too, when the store under test
 implements them — and bound every check by `Env.CheckTimeout`, so a store that
@@ -61,11 +61,12 @@ flowchart LR
         nonces["<b>dpop.Nonces</b><br/>Nonce · Valid"]
         ledger["<b>meter.LedgerReader</b><br/>SumCharges(SumChargesRequest) → Page[ChargeSum]<br/>one tenant or every tenant · by unit · bucket none/hour/day/week/month<br/>GroupBy tenant · op · actor · capability · Filter"]
         census["<b>RecordCensus</b><br/>CountRecords(CountRecordsRequest) → Page[RecordCount]<br/>one tenant or all · by tenant · principal type<br/>active · expired · revoked · delegated · expiring soon"]
+        lister["<b>RecordLister</b><br/>ListRecords(ListRecordsRequest) → Page[RecordListing]<br/>one tenant · by principal type · subject · prefix · disposition<br/>oldest or newest first"]
         erasers["<b>TenantRecordEraser · meter.TenantUsageEraser</b><br/>EraseTenantRecords · EraseTenantUsage"]
     end
 
     impl[("memstore · your own store")]
-    pg["<b>pgstore</b> (nested module)<br/>Store · BiscuitRevocationStore · erasers<br/>UsageStore · CopyUsageReader · Ledger · Census<br/>Migrate · CheckSchema · EraseTenant<br/>WithTenant · WithAllTenants · WithAllTenantsReadOnly<br/>RevocationWatcher · row-level security"]
+    pg["<b>pgstore</b> (nested module)<br/>Store · BiscuitRevocationStore · erasers<br/>UsageStore · CopyUsageReader · Ledger · Census (count, list)<br/>Migrate · CheckSchema · EraseTenant<br/>WithTenant · WithAllTenants · WithAllTenantsReadOnly<br/>RevocationWatcher · row-level security"]
     rr["<b>redisreplay</b> (nested module)<br/>Cache: dpop.ReplayCache over Redis"]
     metering["<b>otelmetric</b> (nested module)<br/>Instrument: OTel counters · spend histogram<br/>WithMeterProvider · WithTenantAttribute"]
     pgdb{{"PostgreSQL"}}
@@ -87,6 +88,7 @@ flowchart LR
     caller -. "admin read" .-> cusage
     caller -. "billing read" .-> ledger
     caller -. "records report" .-> census
+    caller -. "records listing" .-> lister
     caller -. "remove a tenant" .-> erasers
     metering --> usage
     metering -. "metrics" .-> otel
@@ -106,6 +108,7 @@ flowchart LR
     suites -. "check" .-> cusage
     suites -. "check" .-> ledger
     suites -. "check" .-> census
+    suites -. "check" .-> lister
     suites -. "check" .-> erasers
     store --> impl
     usage --> impl
@@ -113,6 +116,7 @@ flowchart LR
     cusage --> impl
     ledger --> impl
     census --> impl
+    lister --> impl
     erasers --> impl
     pg -. "implements" .-> store
     pg -. "implements" .-> usage
@@ -120,6 +124,7 @@ flowchart LR
     pg -. "implements" .-> cusage
     pg -. "implements" .-> ledger
     pg -. "implements" .-> census
+    pg -. "implements" .-> lister
     pg -. "implements" .-> erasers
     pg --> pgdb
     rr -. "implements" .-> replay
@@ -133,7 +138,7 @@ flowchart LR
     class caller client
     class issuer,signer,narrows,verifier,caveats role
     class cache,metering,static,remote,attenuate,dpop,suites,jwksh,nonce,pg,rr optional
-    class store,usage,keys,impl,brev,cusage,replay,nonces,ledger,census,erasers store
+    class store,usage,keys,impl,brev,cusage,replay,nonces,ledger,census,lister,erasers store
     class jwks,otel,pgdb,redis external
 ```
 

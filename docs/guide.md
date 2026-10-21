@@ -853,7 +853,7 @@ is scoped to, and none when it is scoped to no tenant; the revocation checks
 see every tenant, as the verifier asks them before it knows the token's. A
 call whose request names its tenant — `Insert`, `ListByPrincipal`, `Bump`,
 `Charge`, `Reserve`, `Settle`, `Release`, `GetTenantBudget`, `SetTenantBudget`, the
-tenant erasers, `Ledger.SumCharges` and `Census.CountRecords` for one tenant —
+tenant erasers, `Ledger.SumCharges`, `Census.ListRecords` and `Census.CountRecords` for one tenant —
 under a
 scope that does not admit that tenant returns `ErrScopeMismatch`, never
 `ErrNotFound` or `ErrInvalidRequest`. A call that names only an id
@@ -920,6 +920,7 @@ Elsewhere, implement these and you are done:
 | `meter.CopyUsageReader` | Reads Biscuit copies' own counters (only to show them) | No |
 | `meter.LedgerReader` | Sums a tenant's charges for billing and reports (optional; a type of its own beside `meter.UsageStore`) | No |
 | `RecordCensus` | Counts capability records by disposition, for one tenant or every tenant (optional; a type of its own beside `Store`) | No |
+| `RecordLister` | Lists one tenant's capability records with their dispositions, filtered and paged either way (optional; a type of its own beside `Store`) | No |
 | `TenantRecordEraser`, `meter.TenantUsageEraser` | Erase a tenant's records and usage (optional) | No |
 | `meter.UsageStore` = `Meter` + `MeterReader` + `TenantBudgets` + `UsageHousekeeping` (only to meter) | Request and spend counters, the charges ledger, tenant ceilings; `DeleteUsage` and `PurgeOrphans` release a reaped capability's holds | Only for atomic side effects |
 | `KeyResolver` | Public verification keys; an unknown kid is `jwks.ErrUnknownKID`, the token's fault (`ErrInvalidToken`), and any other error the resolver's own (`jwks.Static` and `jwks.Remote` ship; `jwkstest` checks yours) | No |
@@ -963,6 +964,35 @@ pgstore, a census of every tenant runs under `WithAllTenantsReadOnly` or
 `WithAllTenants`, and one under a narrower scope is `ErrScopeMismatch`.
 `storetest` checks a census its `Env.Census` names, when the `Env` also sets
 `Now`.
+
+To show a tenant's records, list them through
+a `RecordLister`: `ListRecords` pages the records of `TenantID` in id order,
+`ListOrderAscending` (the zero value, as `ListByPrincipal` pages) or
+`ListOrderDescending`, which is newest first, a capability's id being a
+UUIDv7. Every filter is optional: `PrincipalType`, `Subject` exactly or
+`SubjectPrefix` (bytewise; not both), and `Dispositions`, any of
+`RecordDispositionActive`, `Expired` and `Revoked`. Each `RecordListing`
+carries the `Record` — what `GetRecord` reads back — and its `Disposition`,
+by the census's rules: revoked through an ancestor on record too, unlike
+`ListByPrincipalRequest.IncludeRevoked`, and over expired. So a caller
+shows each record's state with no further read, and at one instant the
+records of each disposition in a full listing number what `CountRecords`
+counts. Each page is read on its own, though: a walk of many pages is no
+snapshot, and a record may expire or be revoked between two of them. The
+cursor is opaque and holds the order it was handed out for; one of the other
+order, like any the lister did not hand out, is `ErrInvalidRequest`.
+`memstore.NewCensus` and `pgstore.NewCensus` are each one too — pgstore lists
+a tenant under that tenant's scope, as `ListByPrincipal`, by the indexes of
+its migration 014 — and `storetest` checks a lister its `Env.Lister` names,
+when the `Env` also sets `Now`.
+
+```go
+page, err := census.ListRecords(ctx, limes.ListRecordsRequest{
+	TenantID:     tenant,
+	Dispositions: []limes.RecordDisposition{limes.RecordDispositionActive},
+	Order:        limes.ListOrderDescending, // newest first
+})
+```
 
 To test a report, backdate its charges through the store's clock, never by
 writing a store's tables, whose columns are the store's own and change

@@ -20,7 +20,11 @@
 // and when Env.ReadOnlyCtx is set, every write under a read-only scope is.
 // When Env.Census is set, a census counts each record under one disposition —
 // revoked, through an ancestor too, over expired over active — by tenant and
-// by principal type, a page at a time, and counts no Biscuit copy. A check that does not finish within Env.CheckTimeout stops the
+// by principal type, a page at a time, and counts no Biscuit copy. When
+// Env.Lister is set, a listing of a tenant's records pages in both orders
+// with no record skipped or repeated, filters by principal type, subject,
+// subject prefix and disposition, gives each record the disposition the
+// census counts it under, and shows no other tenant's. A check that does not finish within Env.CheckTimeout stops the
 // test binary with every goroutine's stack, naming the check.
 package storetest
 
@@ -97,6 +101,10 @@ type Env struct {
 	// Now, the checks of limes.RecordCensus are skipped. A count across
 	// every tenant runs under ReadOnlyCtx when the Env sets it, else Ctx.
 	Census limes.RecordCensus
+	// Lister lists the store's records. Optional: without it, or without
+	// Now, the checks of limes.RecordLister are skipped; without Census
+	// too, so are those that hold a listing to the census's counts.
+	Lister limes.RecordLister
 }
 
 // newTenant is another tenant, from NewTenant when the Env has one.
@@ -258,6 +266,10 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"CensusCountsEachRecordOnce", checkCensus},
 		{"CensusPagesAndRefusesAMalformedRequest", checkCensusPages},
 		{"CensusCountsNoBiscuitCopyAndNoEmptyGroup", checkCensusEdges},
+		{"ListRecordsGivesEachRecordItsCensusDisposition", checkListRecords},
+		{"ListRecordsFilters", checkListRecordsFilters},
+		{"ListRecordsPagesBothWays", checkListRecordsPages},
+		{"ListRecordsRefusesAMalformedRequest", checkListRecordsMalformed},
 		{"EraseTenantRecordsKeepsWhatAVerifierStillNeeds", checkEraseTenant},
 	}
 	for _, c := range checks {

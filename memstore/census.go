@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,7 +16,8 @@ import (
 	"github.com/oleg-tkachuk/limes"
 )
 
-// Census implements limes.RecordCensus over a Store's records.
+// Census implements limes.RecordCensus and limes.RecordLister over a
+// Store's records.
 type Census struct {
 	records *Store
 }
@@ -173,4 +175,127 @@ func decodeCountCursor(s string) (countKey, error) {
 	return k, nil
 }
 
-var _ limes.RecordCensus = (*Census)(nil)
+// listCursor is memstore's cursor of ListRecords: the last record's id, and
+// the order it was handed out for.
+type listCursor struct {
+	After uuid.UUID       `json:"a"`
+	Order limes.ListOrder `json:"o"`
+}
+
+// ListRecords implements limes.RecordLister.
+func (c *Census) ListRecords(_ context.Context, req limes.ListRecordsRequest) (limes.Page[limes.RecordListing], error) {
+	if err := req.Validate(); err != nil {
+		return limes.Page[limes.RecordListing]{}, err
+	}
+	var after *uuid.UUID
+	if req.Cursor != "" {
+		k, err := decodeListCursor(req.Cursor, req.Order)
+		if err != nil {
+			return limes.Page[limes.RecordListing]{}, err
+		}
+		after = &k.After
+	}
+	// past reports whether id comes after the cursor's, in the request's
+	// order.
+	past := func(id uuid.UUID) bool {
+		if after == nil {
+			return true
+		}
+		if req.Order == limes.ListOrderDescending {
+			return uuidLess(id, *after)
+		}
+		return uuidLess(*after, id)
+	}
+	out, err := c.list(req, past)
+	if err != nil {
+		return limes.Page[limes.RecordListing]{}, err
+	}
+	slices.SortFunc(out, func(a, b limes.RecordListing) int {
+		n := bytes.Compare(a.Record.Capability.ID[:], b.Record.Capability.ID[:])
+		if req.Order == limes.ListOrderDescending {
+			return -n
+		}
+		return n
+	})
+	limit := limes.PageLimit(req.Limit)
+	if len(out) <= limit {
+		return limes.Page[limes.RecordListing]{Items: out}, nil
+	}
+	out = out[:limit]
+	next := listCursor{After: out[len(out)-1].Record.Capability.ID, Order: req.Order}
+	return limes.Page[limes.RecordListing]{Items: out, Next: encodeCursor(next)}, nil
+}
+
+// list is every record req admits past the cursor, unordered, each with its
+// disposition by the census's rules.
+func (c *Census) list(req limes.ListRecordsRequest, past func(uuid.UUID) bool) ([]limes.RecordListing, error) {
+	s := c.records
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.nowFn()
+	out := []limes.RecordListing{}
+	for id, rec := range s.caps {
+		switch {
+		case rec.Subject.TenantID != req.TenantID,
+			req.PrincipalType != limes.PrincipalTypeUnspecified && rec.Subject.Type != req.PrincipalType,
+			req.Subject != "" && rec.Subject.Subject != req.Subject,
+			!strings.HasPrefix(rec.Subject.Subject, req.SubjectPrefix),
+			!past(id):
+			continue
+		}
+		revoked, err := s.revokedLocked(id)
+		if err != nil {
+			return nil, err
+		}
+		d := limes.RecordDispositionActive
+		switch {
+		case revoked:
+			d = limes.RecordDispositionRevoked
+		case expiredAt(rec.ExpiresAt, now):
+			d = limes.RecordDispositionExpired
+		}
+		if !req.Admits(d) {
+			continue
+		}
+		r := limes.Record{Capability: rec.Clone(), IssuedBy: s.issuedBy[id].Clone()}
+		if entry, ok := s.revoked[id]; ok {
+			r.Revocation = &entry
+		}
+		out = append(out, limes.RecordListing{Record: r, Disposition: d})
+	}
+	return out, nil
+}
+
+// decodeListCursor reads a cursor ListRecords handed out for order;
+// anything else, a cursor of the other order among it, is
+// ErrInvalidRequest.
+func decodeListCursor(s string, order limes.ListOrder) (listCursor, error) {
+	var k listCursor
+	if err := decodeCursor(s, &k); err != nil || k.After == uuid.Nil || k.Order != order {
+		return listCursor{}, fmt.Errorf("%w: memstore: record list cursor %q", limes.ErrInvalidRequest, s)
+	}
+	return k, nil
+}
+
+// encodeCursor is a cursor as the census hands it out: opaque, URL-safe.
+func encodeCursor(v any) string {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		panic(err) // the cursors are structs of uuids, strings and integers
+	}
+	return base64.RawURLEncoding.EncodeToString(raw)
+}
+
+// decodeCursor reads a cursor encodeCursor wrote into v.
+func decodeCursor(s string, v any) error {
+	raw, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(raw, v)
+}
+
+var (
+	_ limes.RecordCensus = (*Census)(nil)
+	_ limes.RecordLister = (*Census)(nil)
+)

@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -12,7 +14,30 @@ import (
 	"github.com/oleg-tkachuk/limes"
 )
 
-// Census implements limes.RecordCensus over the store's capability records.
+// revokedWalkFrom and revokedWalkDown are, around a condition on the
+// revocation entries' tenant_id, the CTE revoked of the census and of
+// ListRecords: every record revoked itself or below a revoked one — the
+// walk down from each revocation entry the condition admits through
+// parent_id, as IsRevoked's walk up answers it. A child is in its parent's
+// tenant (Insert), so a walk for one tenant starts from that tenant's
+// entries alone. Each step reads the children of the step before by
+// capabilities_parent — the OFFSET keeps the planner from joining the step
+// to every record instead — so a walk reads the revoked records and no
+// other.
+const (
+	revokedWalkFrom = `revoked (id) AS (
+    SELECT capability_id FROM ` + schema + `.revocations
+    WHERE `
+	revokedWalkDown = `
+  UNION
+    SELECT c.id FROM revoked r CROSS JOIN LATERAL (
+        SELECT id FROM ` + schema + `.capabilities WHERE parent_id = r.id OFFSET 0
+    ) c
+)`
+)
+
+// Census implements limes.RecordCensus and limes.RecordLister over the
+// store's capability records.
 type Census struct {
 	conn
 }
@@ -34,18 +59,10 @@ func NewCensus(cfg Config) (*Census, error) {
 // principal type, each ascending bytewise. A group not named is one value —
 // the nil uuid or ” — so every column orders and compares.
 //
-// revoked is every record revoked itself or below a revoked one: the walk
-// down from each revocation entry through parent_id, as IsRevoked's walk up
-// answers it. A child is in its parent's tenant (Insert), so a census of one
-// tenant starts from that tenant's entries alone. A disposition is one of
-// revoked, then expired — no expiry, or not after $4 — then active.
+// revoked is the walk of revokedWalkFrom and revokedWalkDown. A disposition is one of revoked, then expired —
+// no expiry, or not after $4 — then active.
 const sqlCountRecords = `
-WITH RECURSIVE revoked (id) AS (
-    SELECT capability_id FROM ` + schema + `.revocations
-    WHERE $1::uuid IS NULL OR tenant_id = $1
-  UNION
-    SELECT c.id FROM ` + schema + `.capabilities c JOIN revoked r ON c.parent_id = r.id
-),
+WITH RECURSIVE ` + revokedWalkFrom + `$1::uuid IS NULL OR tenant_id = $1` + revokedWalkDown + `,
 counts AS (
     SELECT
         CASE WHEN $2::boolean THEN c.tenant_id ELSE '00000000-0000-0000-0000-000000000000'::uuid END AS tenant_id,
@@ -156,4 +173,159 @@ func decodeCountCursor(s string) (countCursor, error) {
 	return c, nil
 }
 
-var _ limes.RecordCensus = (*Census)(nil)
+// sqlListRecords is ListRecords' query before its filters: tenant $1's
+// records, each with its own revocation entry and its disposition at $2 by
+// the census's rules — revoked (revokedWalkFrom), then expired, then active.
+// listRecordsSQL adds a condition for each filter the request sets and
+// none for the rest, so each shape of request is a statement, and a plan, of
+// its own: one that pages by subject reads capabilities_principal, one that
+// pages a tenant or a principal type the index of migration 014.
+const sqlListRecords = `
+WITH RECURSIVE ` + revokedWalkFrom + `tenant_id = $1` + revokedWalkDown + `
+SELECT c.capability, c.issued_by, v.revoked_at, v.note, v.actor, v.cascaded, d.disposition
+FROM ` + schema + `.capabilities c
+LEFT JOIN ` + schema + `.revocations v ON v.capability_id = c.id
+CROSS JOIN LATERAL (SELECT CASE
+    WHEN c.id IN (SELECT id FROM revoked) THEN 'revoked'
+    WHEN c.expires_at IS NULL OR c.expires_at <= $2 THEN 'expired'
+    ELSE 'active'
+END AS disposition) d
+WHERE c.tenant_id = $1`
+
+// listRecordsSQL is sqlListRecords with req's filters, past the cursor's id
+// after when it is not nil, ordered and limited, and its arguments: the
+// tenant, now, then each filter's in turn.
+func listRecordsSQL(req limes.ListRecordsRequest, now time.Time, after *uuid.UUID, limit int) (string, []any) {
+	var q strings.Builder
+	q.WriteString(sqlListRecords)
+	args := []any{req.TenantID, now}
+	and := func(cond string, arg any) {
+		args = append(args, arg)
+		fmt.Fprintf(&q, "\n  AND "+cond, len(args))
+	}
+	if req.PrincipalType != limes.PrincipalTypeUnspecified {
+		and("c.principal_type = $%d", string(req.PrincipalType))
+	}
+	if req.Subject != "" {
+		and("c.subject = $%d", req.Subject)
+	}
+	if req.SubjectPrefix != "" {
+		and("starts_with(c.subject, $%d)", req.SubjectPrefix)
+	}
+	if len(req.Dispositions) > 0 {
+		ds := make([]string, len(req.Dispositions))
+		for i, d := range req.Dispositions {
+			ds[i] = string(d)
+		}
+		and("d.disposition = ANY ($%d::text[])", ds)
+	}
+	order := "ASC"
+	if req.Order == limes.ListOrderDescending {
+		order = "DESC"
+		if after != nil {
+			and("c.id < $%d", *after)
+		}
+	} else if after != nil {
+		and("c.id > $%d", *after)
+	}
+	args = append(args, limit)
+	fmt.Fprintf(&q, "\nORDER BY c.id %s\nLIMIT $%d", order, len(args))
+	return q.String(), args
+}
+
+// listCursor is pgstore's cursor of ListRecords: the last record's id, and
+// the order it was handed out for.
+type listCursor struct {
+	After uuid.UUID       `json:"a"`
+	Order limes.ListOrder `json:"o"`
+}
+
+// ListRecords implements limes.RecordLister in one transaction, scoped to
+// the tenant the request names (Config.CheckScope), as ListByPrincipal is.
+func (c *Census) ListRecords(ctx context.Context, req limes.ListRecordsRequest) (limes.Page[limes.RecordListing], error) {
+	if err := req.Validate(); err != nil {
+		return limes.Page[limes.RecordListing]{}, err
+	}
+	var after *uuid.UUID
+	if req.Cursor != "" {
+		k, err := decodeListCursor(req.Cursor, req.Order)
+		if err != nil {
+			return limes.Page[limes.RecordListing]{}, err
+		}
+		after = &k.After
+	}
+	limit := limes.PageLimit(req.Limit)
+	query, args := listRecordsSQL(req, c.clock(), after, limit+1)
+	out := []limes.RecordListing{}
+	err := c.inTenantReadTx(ctx, req.TenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return err
+		}
+		out, err = pgx.CollectRows(rows, scanListing)
+		return err
+	})
+	if err != nil {
+		return limes.Page[limes.RecordListing]{}, err
+	}
+	if len(out) <= limit {
+		return limes.Page[limes.RecordListing]{Items: out}, nil
+	}
+	out = out[:limit]
+	next := listCursor{After: out[len(out)-1].Record.Capability.ID, Order: req.Order}
+	return limes.Page[limes.RecordListing]{Items: out, Next: encodeCursor(next)}, nil
+}
+
+// scanListing reads one row of sqlListRecords.
+func scanListing(row pgx.CollectableRow) (limes.RecordListing, error) {
+	var capability, issuedBy []byte
+	var revokedAt *time.Time
+	var note, actor *string
+	var cascaded *bool
+	var disposition string
+	if err := row.Scan(&capability, &issuedBy, &revokedAt, &note, &actor, &cascaded, &disposition); err != nil {
+		return limes.RecordListing{}, err
+	}
+	c, err := decodeCapability(capability)
+	if err != nil {
+		return limes.RecordListing{}, err
+	}
+	p, err := decodePrincipal(issuedBy)
+	if err != nil {
+		return limes.RecordListing{}, err
+	}
+	l := limes.RecordListing{Record: limes.Record{Capability: c, IssuedBy: p}, Disposition: limes.RecordDisposition(disposition)}
+	if revokedAt != nil {
+		l.Record.Revocation = &limes.Revocation{RevokedAt: *revokedAt, Note: *note, Actor: *actor, Cascaded: *cascaded}
+	}
+	return l, nil
+}
+
+// decodeListCursor reads a cursor ListRecords handed out for order;
+// anything else, a cursor of the other order among it, is
+// ErrInvalidRequest.
+func decodeListCursor(s string, order limes.ListOrder) (listCursor, error) {
+	var k listCursor
+	raw, err := base64.RawURLEncoding.DecodeString(s)
+	if err == nil {
+		err = json.Unmarshal(raw, &k)
+	}
+	if err != nil || k.After == uuid.Nil || k.Order != order {
+		return listCursor{}, fmt.Errorf("%w: pgstore: record list cursor %q", limes.ErrInvalidRequest, s)
+	}
+	return k, nil
+}
+
+// encodeCursor is a cursor as the census hands it out: opaque, URL-safe.
+func encodeCursor(v any) string {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		panic(err) // the cursors are structs of uuids, strings and integers
+	}
+	return base64.RawURLEncoding.EncodeToString(raw)
+}
+
+var (
+	_ limes.RecordCensus = (*Census)(nil)
+	_ limes.RecordLister = (*Census)(nil)
+)
