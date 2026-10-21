@@ -895,7 +895,14 @@ schema's functions — which no other role may call — and only reads of the
 version table. Run it before any migration of yours that
 refers to its tables. It holds the advisory lock every `tern` migration
 takes, which is reentrant per session: a consumer migrating with `tern` calls
-`Migrate` on the connection its own run holds. `CheckSchema` tells a readiness
+`Migrate` on the connection its own run holds. Migration 014, which pgstore
+v0.31.0 brought for `Census.ListRecords`, builds its three indexes with a
+plain `CREATE INDEX`: writes to `limes.capabilities` and `limes.revocations`
+wait until they are built — about five seconds for a million records on one
+core — while reads, `IsRevoked` among them, go on. Run the first `Migrate` of
+v0.31.0 or later on a large store at a quiet moment. Every later migration
+builds an index on an existing table `CONCURRENTLY`, outside a transaction,
+and holds no writes. `CheckSchema` tells a readiness
 check whether the schema is at the version the package queries, returning
 `ErrSchemaMismatch` when it is not — behind, `Migrate` has not run; ahead, a
 later pgstore migrated; `ReadSchemaVersion` reports both numbers (`Applied`,
@@ -979,8 +986,10 @@ shows each record's state with no further read, and at one instant the
 records of each disposition in a full listing number what `CountRecords`
 counts. Each page is read on its own, though: a walk of many pages is no
 snapshot, and a record may expire or be revoked between two of them. The
-cursor is opaque and holds the order it was handed out for; one of the other
-order, like any the lister did not hand out, is `ErrInvalidRequest`.
+cursor is opaque and holds the order and the filters it was handed out for;
+one of the other order, or of other filters — a caller that changes them
+starts from the first page —, like any the lister did not hand out, is
+`ErrInvalidRequest`.
 `memstore.NewCensus` and `pgstore.NewCensus` are each one too — pgstore lists
 a tenant under that tenant's scope, as `ListByPrincipal`, by the indexes of
 its migrations 014 and 017; it reads whether a record is revoked from the
