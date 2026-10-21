@@ -18,14 +18,18 @@
 //   4. Admits main alone to deploy to the automerge environment, whose
 //      AUTOMERGE_TOKEN only main's copy of a workflow may read
 //      (auto-merge.yaml). The secret itself is left alone.
-//   5. Creates or updates a branch ruleset on main: no deletion, no force
-//      push, and the "All checks passed" check required — not up to date with
-//      main, which auto-merge.yaml relies on to merge each green pull request
-//      at once.
+//   5. Creates or updates the ruleset on main: no deletion, no force push,
+//      every change through a pull request merged with a merge commit, and
+//      the "All checks passed" check required — reported by GitHub Actions
+//      alone, and not up to date with main, which auto-merge.yaml relies on
+//      to merge each green pull request at once.
+//   6. Creates or updates the ruleset on the release tags, every module's
+//      (vX.Y.Z and <dir>/vX.Y.Z): none deleted, moved or forced. The Go
+//      proxy and checksum database have read each tag as it was cut.
 //
 // Rulesets rather than classic branch protection: they are additive, never
-// clobbering protection set elsewhere. Another ruleset on main is listed,
-// never changed: one this run replaces is a person's to remove.
+// clobbering protection set elsewhere. A ruleset this run does not keep is
+// listed, never changed: one it replaces is a person's to remove.
 
 import { Octokit } from "octokit";
 
@@ -35,9 +39,16 @@ import { parseRepo, type Repo } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
 
 export const DEFAULT_REPOSITORY = "oleg-tkachuk/limes";
-export const RULESET_NAME = "protect-main";
+export const RULESET_NAME = "main-branch";
+export const TAGS_RULESET_NAME = "release-tags";
 export const MAIN_BRANCH = "main";
 export const MAIN_REF = `refs/heads/${MAIN_BRANCH}`;
+// RELEASE_TAG_REFS are the tags a release cuts: limes's vX.Y.Z and a nested
+// module's <dir>/vX.Y.Z (.github/release/modules.cjs).
+export const RELEASE_TAG_REFS: readonly string[] = ["refs/tags/v*", "refs/tags/*/v*"];
+// GITHUB_ACTIONS_APP_ID is the GitHub Actions app, the only one whose check
+// run of the required context counts: no other app can report it passed.
+export const GITHUB_ACTIONS_APP_ID = 15368;
 
 // REQUIRED_CONTEXTS are check-run names, which are the jobs' `name:` in
 // ci.yaml, not their ids: the required check's (the checks job), which
@@ -60,14 +71,29 @@ export const BYPASS_MODE = "pull_request";
 
 export interface Ruleset {
   name: string;
-  target: "branch";
+  target: "branch" | "tag";
   enforcement: "active";
   bypass_actors: { actor_id: number; actor_type: "RepositoryRole"; bypass_mode: "pull_request" }[];
   conditions: { ref_name: { include: string[]; exclude: string[] } };
   rules: (
     | { type: "deletion" }
     | { type: "non_fast_forward" }
-    | { type: "required_status_checks"; parameters: { strict_required_status_checks_policy: boolean; required_status_checks: { context: string }[] } }
+    | { type: "update" }
+    | {
+        type: "pull_request";
+        parameters: {
+          required_approving_review_count: number;
+          dismiss_stale_reviews_on_push: boolean;
+          require_code_owner_review: boolean;
+          require_last_push_approval: boolean;
+          required_review_thread_resolution: boolean;
+          allowed_merge_methods: "merge"[];
+        };
+      }
+    | {
+        type: "required_status_checks";
+        parameters: { strict_required_status_checks_policy: boolean; required_status_checks: { context: string; integration_id: number }[] };
+      }
   )[];
 }
 
@@ -83,10 +109,39 @@ export function mainRuleset(contexts: readonly string[] = REQUIRED_CONTEXTS): Ru
       { type: "deletion" },
       { type: "non_fast_forward" },
       {
+        // A pull request, merged as merge-green.ts merges it; no approval
+        // asked, as nobody but the maintainer reviews here.
+        type: "pull_request",
+        parameters: {
+          required_approving_review_count: 0,
+          dismiss_stale_reviews_on_push: false,
+          require_code_owner_review: false,
+          require_last_push_approval: false,
+          required_review_thread_resolution: false,
+          allowed_merge_methods: ["merge"],
+        },
+      },
+      {
         type: "required_status_checks",
-        parameters: { strict_required_status_checks_policy: false, required_status_checks: contexts.map((context) => ({ context })) },
+        parameters: {
+          strict_required_status_checks_policy: false,
+          required_status_checks: contexts.map((context) => ({ context, integration_id: GITHUB_ACTIONS_APP_ID })),
+        },
       },
     ],
+  };
+}
+
+// tagsRuleset keeps every module's release tags as they were cut; nobody
+// bypasses it, the release workflow creating each tag once.
+export function tagsRuleset(): Ruleset {
+  return {
+    name: TAGS_RULESET_NAME,
+    target: "tag",
+    enforcement: "active",
+    bypass_actors: [],
+    conditions: { ref_name: { include: [...RELEASE_TAG_REFS], exclude: [] } },
+    rules: [{ type: "deletion" }, { type: "non_fast_forward" }, { type: "update" }],
   };
 }
 
@@ -97,20 +152,23 @@ export interface RulesetsApi {
   update(id: number, ruleset: Ruleset): Promise<void>;
 }
 
-// upsertRuleset updates the ruleset carrying its name, or creates it when
-// none does, and reports what it did and which other rulesets there are.
-export async function upsertRuleset(api: RulesetsApi, ruleset: Ruleset): Promise<string[]> {
+// upsertRulesets updates each ruleset carrying the name of one of rulesets,
+// creates the rest, and reports what it did and which other rulesets there
+// are.
+export async function upsertRulesets(api: RulesetsApi, rulesets: readonly Ruleset[]): Promise<string[]> {
   const existing = await api.list();
-  const found = existing.find((r) => r.name === ruleset.name);
   const report = [];
-  if (found === undefined) {
-    await api.create(ruleset);
-    report.push(`created ruleset ${ruleset.name}`);
-  } else {
-    await api.update(found.id, ruleset);
-    report.push(`updated ruleset #${found.id} ${ruleset.name}`);
+  for (const ruleset of rulesets) {
+    const found = existing.find((r) => r.name === ruleset.name);
+    if (found === undefined) {
+      await api.create(ruleset);
+      report.push(`created ruleset ${ruleset.name}`);
+    } else {
+      await api.update(found.id, ruleset);
+      report.push(`updated ruleset #${found.id} ${ruleset.name}`);
+    }
   }
-  for (const other of existing.filter((r) => r.name !== ruleset.name)) {
+  for (const other of existing.filter((r) => !rulesets.some((k) => k.name === r.name))) {
     report.push(`left alone: ruleset #${other.id} ${other.name}`);
   }
   return report;
@@ -219,8 +277,8 @@ async function main(): Promise<void> {
     for (const line of await admitOnly(policies, environment, MAIN_BRANCH)) info(`    ${line}`);
   }
 
-  info(`==> Branch ruleset for ${MAIN_BRANCH}, requiring ${REQUIRED_CONTEXTS.join(", ")}`);
-  for (const line of await upsertRuleset(rulesetsOver(octokit, repo), mainRuleset())) info(`    ${line}`);
+  info(`==> Rulesets for ${MAIN_BRANCH}, requiring ${REQUIRED_CONTEXTS.join(", ")}, and for ${RELEASE_TAG_REFS.join(" ")}`);
+  for (const line of await upsertRulesets(rulesetsOver(octokit, repo), [mainRuleset(), tagsRuleset()])) info(`    ${line}`);
   info("Done.");
 }
 

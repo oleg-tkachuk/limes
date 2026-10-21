@@ -126,8 +126,10 @@ fails nothing, a soak whose counters drift fails it.
   same commit — see `goldengen_test.go` and `biscuit_crosslang_test.go`.
 
 The repository settings the workflows rely on — merge commits allowed, a
-ruleset on `main` requiring **All checks passed** (not up to date with it),
-the `automerge` environment admitting `main` alone, private vulnerability
+ruleset on `main` taking only a merged pull request whose **All checks
+passed**, reported by GitHub Actions, passed (not up to date with `main`), a
+ruleset keeping every module's release tags as they were cut, the
+`automerge` environment admitting `main` alone, private vulnerability
 reporting — are set by an admin, by hand:
 
 ```bash
