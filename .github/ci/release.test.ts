@@ -259,8 +259,8 @@ describe("releaseAll", () => {
     const { readFileSync } = await import("node:fs");
     const summary = readFileSync(page, "utf8");
     assert.match(summary, /\| limes \| v0\.2\.0 \| released by hand \|/);
-    assert.match(summary, /\| pgstore \|  \| 'Released limes, pgstore' did not pass; not released this run \|/);
-    assert.match(summary, /\| redisreplay \|  \| 'Released limes, redisreplay' did not pass; not released this run \|/);
+    assert.match(summary, /\| pgstore \|  \| 'Released limes \(pgstore\)' did not pass; not released this run \|/);
+    assert.match(summary, /\| redisreplay \|  \| 'Released limes \(redisreplay\)' did not pass; not released this run \|/);
   });
 
   // A run by hand that released nothing says so as an annotation, naming

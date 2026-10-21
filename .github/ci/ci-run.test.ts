@@ -137,12 +137,20 @@ interface CiJob {
 }
 const MATRIX_MODULE = "${{ matrix.module }}";
 
+// runName is the name a job runs as for module m of its matrix, if it has
+// one: its name with the module in place of the matrix expression, or, with
+// none in it, its name and the module in parentheses, as GitHub names it.
+function runName(name: string | undefined, m: string | undefined): string | undefined {
+  if (m === undefined || name === undefined) {
+    return name;
+  }
+  return name.includes(MATRIX_MODULE) ? name.replaceAll(MATRIX_MODULE, m) : `${name} (${m})`;
+}
+
 // jobNamed is the id and job of ci.yaml that runs as name, a matrix job
 // once for each of its modules.
 function jobNamed(jobs: Record<string, CiJob>, name: string): [string, CiJob] | undefined {
-  return Object.entries(jobs).find(([, j]) =>
-    (j.strategy?.matrix?.module ?? [undefined]).some((m) => (m === undefined ? j.name : j.name?.replaceAll(MATRIX_MODULE, m)) === name),
-  );
+  return Object.entries(jobs).find(([, j]) => (j.strategy?.matrix?.module ?? [undefined]).some((m) => runName(j.name, m) === name));
 }
 
 const ciJobs = () => (parse(CI) as { jobs: Record<string, CiJob> }).jobs;
@@ -177,6 +185,15 @@ test("every release gate runs on a push to main", () => {
   assert.match(dispatch, /needs\.changes\.outputs\.code == 'true'/);
 });
 
+// The released-limes job's name holds no matrix expression: skipped before
+// its matrix expands, as on every pull request, a job shows its name as
+// written, an expression in it unexpanded.
+test("the released-limes job is named without its matrix", () => {
+  const job = jobNamed(ciJobs(), gateOf(GATED[0] ?? ""))?.[1];
+  assert.ok(job !== undefined, "no job runs as the gate");
+  assert.doesNotMatch(job.name ?? "", /\$\{\{/);
+});
+
 // The released-limes job runs once for each gated module, and for no other:
 // a module it skipped would never be released, one the release does not read
 // would gate nothing.
@@ -202,7 +219,7 @@ describe("passedRunFor", () => {
   test("a run whose only failure is outside the required check", async () => {
     const data = fakeData();
     data.runs.set(9, good);
-    data.jobs.set(9, [...jobsAll("success"), { name: "Released limes, pgstore", status: "completed", conclusion: "failure" }]);
+    data.jobs.set(9, [...jobsAll("success"), { name: gateOf("pgstore"), status: "completed", conclusion: "failure" }]);
     assert.equal(await find(data), 9);
   });
   test("a newer run that failed a required job is passed over", async () => {
