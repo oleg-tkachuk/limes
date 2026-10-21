@@ -38,7 +38,9 @@ name: Auto-merge
 # Repository settings this relies on (Settings → General → Pull Requests):
 # "Allow merge commits" on, and a ruleset on main requiring the "All checks
 # passed" check, so nothing else merges a pull request ahead of it, without
-# requiring branches to be up to date.
+# requiring branches to be up to date. An admin sets them, and the automerge
+# environment's main-only deployment branches, by running
+# .github/ci/repo-settings.ts.
 
 on:
   workflow_run:
