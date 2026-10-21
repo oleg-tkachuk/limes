@@ -986,8 +986,10 @@ shows each record's state with no further read, and at one instant the
 records of each disposition in a full listing number what `CountRecords`
 counts. Each page is read on its own, though: a walk of many pages is no
 snapshot, and a record may expire or be revoked between two of them. The
-cursor is opaque and holds the order it was handed out for; one of the other
-order, like any the lister did not hand out, is `ErrInvalidRequest`.
+cursor is opaque and holds the order and the filters it was handed out for;
+one of the other order, or of other filters — a caller that changes them
+starts from the first page —, like any the lister did not hand out, is
+`ErrInvalidRequest`.
 `memstore.NewCensus` and `pgstore.NewCensus` are each one too — pgstore lists
 a tenant under that tenant's scope, as `ListByPrincipal`, by the indexes of
 its migration 014 — and `storetest` checks a lister its `Env.Lister` names,
