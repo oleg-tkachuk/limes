@@ -8,7 +8,8 @@
 // vouches fails unless the run is ci.yaml's, on a push to main, in this
 // repository, for sha, and every job the required check stands for passed or
 // was skipped: the payload of a repository_dispatch is its sender's to
-// write, so only the API's answer about the run it names is trusted.
+// write, so only the API's answer about the run it names is trusted. A job
+// that reads as unfinished is asked about again before that fails.
 // job-passed sets the step output `passed`: true for a job that passed or was
 // skipped, false for one that failed; one missing or unfinished is an error.
 // find sets the step output `run-id` to the newest finished push run of
@@ -27,6 +28,7 @@ import { info, setOutput } from "./lib/actions.ts";
 import { requireEnv } from "./lib/env.ts";
 import { gitHubFor, type GitHub, type Job } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
+import { retry, type RetryOptions } from "./lib/retry.ts";
 import { CI_WORKFLOW, COMPLETED, PASSING, SUCCESS } from "./lib/runs.ts";
 
 // REQUIRED_CHECK_JOB is the id of the job main requires, whose needs are the
@@ -70,11 +72,24 @@ export function runIdOf(text: string): number {
   return Number(text);
 }
 
+// Verdict is every reason a run does not vouch for a commit — none when it
+// does — and whether each is a job not finished, or not listed, yet: what
+// the API may answer differently a moment later.
+export interface Verdict {
+  problems: string[];
+  pending: boolean;
+}
+
 // problemsWithRun is every reason run does not vouch for sha; none when it
 // does.
 export async function problemsWithRun(github: GitHub, repository: string, runId: number, sha: string, required: readonly string[]): Promise<string[]> {
+  return (await verdictOn(github, repository, runId, sha, required)).problems;
+}
+
+// verdictOn is problemsWithRun's answer, with whether it is only pending.
+export async function verdictOn(github: GitHub, repository: string, runId: number, sha: string, required: readonly string[]): Promise<Verdict> {
   if (!COMMIT_ID.test(sha)) {
-    return [`sha ${JSON.stringify(sha)} is not a commit id`];
+    return { problems: [`sha ${JSON.stringify(sha)} is not a commit id`], pending: false };
   }
   const run = await github.workflowRun(runId);
   const problems: string[] = [];
@@ -83,16 +98,43 @@ export async function problemsWithRun(github: GitHub, repository: string, runId:
   if (run.headBranch !== RELEASE_BRANCH) problems.push(`run is on ${run.headBranch}, not ${RELEASE_BRANCH}`);
   if (run.headSha !== sha) problems.push(`run tested ${run.headSha}, not ${sha}`);
   if (run.repository !== repository) problems.push(`run belongs to ${run.repository}`);
+  const settled = problems.length;
   const jobs = await github.runJobs(runId);
+  let unfinished = 0;
   for (const name of required) {
     const job = latestJob(jobs, name);
     if (job === undefined || job.status !== COMPLETED) {
       problems.push(`job '${name}' is ${job?.status ?? "missing"}`);
+      unfinished++;
     } else if (!PASSING.includes(job.conclusion ?? "")) {
       problems.push(`job '${name}' ended as ${job.conclusion ?? "nothing"}`);
     }
   }
-  return problems;
+  return { problems, pending: settled === 0 && unfinished > 0 && unfinished === problems.length };
+}
+
+// RunPending is a run that does not vouch yet only because a job it needs
+// reads as unfinished.
+export class RunPending extends Error {}
+
+// vouch returns once run vouches for sha, and fails as soon as it cannot: a
+// run of another commit, branch, event or workflow, or a job that ended
+// otherwise than passed or skipped. A run that only reads a job as
+// unfinished is asked again, a while later each time (retry): the API has
+// answered in_progress for a job minutes after it ended.
+export async function vouch(github: GitHub, repository: string, runId: number, sha: string, required: readonly string[], options: RetryOptions = {}): Promise<void> {
+  await retry(
+    `CI run ${runId}`,
+    async () => {
+      const verdict = await verdictOn(github, repository, runId, sha, required);
+      if (verdict.problems.length === 0) {
+        return;
+      }
+      const message = `CI run ${runId} does not vouch for ${sha}: ${verdict.problems.join("; ")}`;
+      throw verdict.pending ? new RunPending(message) : new Error(message);
+    },
+    { ...options, retryable: (err) => err instanceof RunPending },
+  );
 }
 
 // jobPassed reports whether the job named name ran and passed; one missing
@@ -140,14 +182,10 @@ async function main(): Promise<void> {
   }
   const runId = runIdOf(runText);
   switch (command) {
-    case Command.Vouches: {
-      const problems = await problemsWithRun(github, repository, runId, arg, requiredJobs(readFileSync(CI_WORKFLOW, "utf8")));
-      if (problems.length > 0) {
-        throw new Error(`CI run ${runId} does not vouch for ${arg}: ${problems.join("; ")}`);
-      }
+    case Command.Vouches:
+      await vouch(github, repository, runId, arg, requiredJobs(readFileSync(CI_WORKFLOW, "utf8")));
       info(`CI run ${runId} passed for ${arg}`);
       break;
-    }
     case Command.JobPassed:
       setOutput(OUTPUT_PASSED, String(await jobPassed(github, runId, arg)));
       break;

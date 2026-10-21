@@ -5,8 +5,8 @@ import { beforeEach, describe, test } from "node:test";
 import { parse } from "yaml";
 
 import { fakeData, fakeGitHub, type FakeData } from "./lib/fake-github.ts";
-import type { Job, WorkflowRun } from "./lib/github.ts";
-import { jobPassed, passedRunFor, problemsWithRun, requiredJobs, runIdOf } from "./ci-run.ts";
+import type { GitHub, Job, WorkflowRun } from "./lib/github.ts";
+import { jobPassed, passedRunFor, problemsWithRun, requiredJobs, runIdOf, vouch } from "./ci-run.ts";
 import { CI_WORKFLOW } from "./lib/runs.ts";
 import { GATED, GATES, gateOf } from "./release.ts";
 
@@ -50,6 +50,59 @@ describe("problemsWithRun", () => {
       assert.equal(await vouches(run, jobs, sha), want);
     });
   }
+});
+
+describe("vouch", () => {
+  let data: FakeData;
+  let current: GitHub;
+  let waits: number[];
+  const sleep = async (ms: number) => void waits.push(ms);
+  beforeEach(() => {
+    data = fakeData();
+    waits = [];
+    data.runs.set(RUN, good);
+  });
+  // answers sets the jobs the API lists on each successive read, the last
+  // one standing after.
+  function answers(...reads: Job[][]): void {
+    const github = fakeGitHub(data);
+    let read = 0;
+    github.runJobs = async () => reads[Math.min(read++, reads.length - 1)] ?? [];
+    current = github;
+  }
+  const run = (attempts = 4) => vouch(current, REPO, RUN, SHA, REQUIRED, { attempts, delayMs: 10, sleep });
+
+  test("a passed run vouches at once", async () => {
+    answers(jobsAll("success"));
+    await run();
+    assert.deepEqual(waits, []);
+  });
+  test("a job read as unfinished is asked about again", async () => {
+    answers(jobsAll("", "in_progress"), jobsAll("", "in_progress"), jobsAll("success"));
+    await run();
+    assert.deepEqual(waits, [10, 20]);
+  });
+  test("a job not listed yet is asked about again", async () => {
+    answers(jobsAll("success").filter((j) => j.name !== "Verify"), jobsAll("success"));
+    await run();
+    assert.deepEqual(waits, [10]);
+  });
+  test("a job unfinished on every read fails once the attempts run out", async () => {
+    answers(jobsAll("", "in_progress"));
+    await assert.rejects(run(3), /does not vouch for .*job 'Verify' is in_progress/);
+    assert.deepEqual(waits, [10, 20]);
+  });
+  test("a failed job fails at once", async () => {
+    answers(jobsAll("failure"));
+    await assert.rejects(run(), /job 'Verify' ended as failure/);
+    assert.deepEqual(waits, []);
+  });
+  test("a run of another commit fails at once, unfinished jobs and all", async () => {
+    data.runs.set(RUN, { ...good, headSha: OTHER });
+    answers(jobsAll("", "in_progress"));
+    await assert.rejects(run(), /run tested/);
+    assert.deepEqual(waits, []);
+  });
 });
 
 describe("runIdOf", () => {
