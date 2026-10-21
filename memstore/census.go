@@ -260,27 +260,48 @@ func (c *Census) list(req limes.ListRecordsRequest, past func(uuid.UUID) bool) (
 			!past(id):
 			continue
 		}
-		revoked, err := s.revokedLocked(id)
+		l, err := s.listingLocked(id, now)
 		if err != nil {
 			return nil, err
 		}
-		d := limes.RecordDispositionActive
-		switch {
-		case revoked:
-			d = limes.RecordDispositionRevoked
-		case expiredAt(rec.ExpiresAt, now):
-			d = limes.RecordDispositionExpired
+		if req.Admits(l.Disposition) {
+			out = append(out, l)
 		}
-		if !req.Admits(d) {
-			continue
-		}
-		r := limes.Record{Capability: rec.Clone(), IssuedBy: s.issuedBy[id].Clone()}
-		if entry, ok := s.revoked[id]; ok {
-			r.Revocation = &entry
-		}
-		out = append(out, limes.RecordListing{Record: r, Disposition: d})
 	}
 	return out, nil
+}
+
+// GetRecordListing implements limes.RecordListingReader.
+func (c *Census) GetRecordListing(_ context.Context, id uuid.UUID) (limes.RecordListing, error) {
+	s := c.records
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.caps[id]; !ok {
+		return limes.RecordListing{}, limes.ErrNotFound
+	}
+	return s.listingLocked(id, s.nowFn())
+}
+
+// listingLocked is the record of id, which is on record, with its
+// disposition at now by the census's rules; s.mu is held.
+func (s *Store) listingLocked(id uuid.UUID, now time.Time) (limes.RecordListing, error) {
+	rec := s.caps[id]
+	revoked, err := s.revokedLocked(id)
+	if err != nil {
+		return limes.RecordListing{}, err
+	}
+	d := limes.RecordDispositionActive
+	switch {
+	case revoked:
+		d = limes.RecordDispositionRevoked
+	case expiredAt(rec.ExpiresAt, now):
+		d = limes.RecordDispositionExpired
+	}
+	r := limes.Record{Capability: rec.Clone(), IssuedBy: s.issuedBy[id].Clone()}
+	if entry, ok := s.revoked[id]; ok {
+		r.Revocation = &entry
+	}
+	return limes.RecordListing{Record: r, Disposition: d}, nil
 }
 
 // decodeListCursor reads a cursor ListRecords handed out for req's order and
@@ -313,6 +334,7 @@ func decodeCursor(s string, v any) error {
 }
 
 var (
-	_ limes.RecordCensus = (*Census)(nil)
-	_ limes.RecordLister = (*Census)(nil)
+	_ limes.RecordCensus        = (*Census)(nil)
+	_ limes.RecordLister        = (*Census)(nil)
+	_ limes.RecordListingReader = (*Census)(nil)
 )
