@@ -168,6 +168,9 @@ test("every release gate runs on a push to main", () => {
   for (const gate of Object.values(GATES)) {
     const job = jobNamed(jobs, gate)?.[1];
     assert.match(job?.if ?? "", /github\.event_name == 'push' && needs\.changes\.outputs\.relevant == 'true'/, gate);
+    // And on no pull request, where nothing reads it and a change that lands
+    // with its module fails it until limes is released.
+    assert.doesNotMatch(job?.if ?? "", /\|\||pull_request|outputs\.(pgstore|redisreplay|otelmetric)/, gate);
   }
   // And a documentation-only push dispatches no release.
   const dispatch = jobs["dispatch-release"]?.if ?? "";

@@ -330,14 +330,15 @@ jobs:
   # It runs on every push to main, whatever the push changed: release.yaml
   # reads its result to decide whether a module's pending commits may go out,
   # and a run that skipped it would let through a module an earlier run held
-  # back.
+  # back. It runs on no pull request: no merge and no release reads a pull
+  # request's result, and there it fails whenever main, or the pull request,
+  # holds a limes change a module follows that is not released yet — as a
+  # change that lands with its module does until the next release. A pull
+  # request's author runs it by hand: task test:pinned MODULE=<module>.
   released-limes:
     name: Released limes, ${{ matrix.module }}
     needs: [changes]
-    if: >-
-      (github.event_name == 'push' && needs.changes.outputs.relevant == 'true') ||
-      needs.changes.outputs.pgstore == 'true' || needs.changes.outputs.redisreplay == 'true' ||
-      needs.changes.outputs.otelmetric == 'true'
+    if: github.event_name == 'push' && needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:

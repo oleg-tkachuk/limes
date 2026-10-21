@@ -49,15 +49,16 @@ may not break a nested module. Against the limes its `go.mod` requires, which
 is what a consumer's build resolves (`task test:pinned MODULE=<module>`, the
 job **Released limes, <module>**), they gate that module's release
 instead: a run in which they fail releases the other modules and holds that
-one back.
+one back. That job runs on pushes to `main` alone, whose results the release
+reads; on a pull request run it by hand.
 
 So a limes change that a nested module must follow — a value pgstore names
 exhaustively, such as a `ChargeBucket`, or an API the module calls — lands
-with the module in one pull request. Its released-limes job fails, as nothing
-released has the change yet; the merge releases limes, and the release
-workflow opens a pull request raising each nested module's requirement to that
+with the module in one pull request. The released-limes job of its merge fails,
+as nothing released has the change yet; the release then releases limes, and
+the release workflow opens a pull request raising each nested module's requirement to that
 release (`build(<module>): require limes vX.Y.Z`, merged once green). That
-pull request passes the job, and its merge releases the module with every
+pull request's merge passes the job and releases the module with every
 change it held: a nested module's own `build` commit is a patch of it, so the
 raised requirement is released even when nothing else waits. A module change
 that needs a limes already released raises the requirement in its own
