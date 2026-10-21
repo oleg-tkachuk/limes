@@ -2,9 +2,11 @@ package pgstore
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -234,10 +236,26 @@ func listRecordsSQL(req limes.ListRecordsRequest, now time.Time, after *uuid.UUI
 }
 
 // listCursor is pgstore's cursor of ListRecords: the last record's id, and
-// the order it was handed out for.
+// the order and the filters it was handed out for (filtersKey).
 type listCursor struct {
-	After uuid.UUID       `json:"a"`
-	Order limes.ListOrder `json:"o"`
+	After   uuid.UUID       `json:"a"`
+	Order   limes.ListOrder `json:"o"`
+	Filters string          `json:"f"`
+}
+
+// filtersKey names the filters of req: its principal type, subject,
+// subject prefix and dispositions, these in any order and repeated or not.
+// A cursor holds it, so one handed back with other filters is refused rather
+// than paged on from its id under them, which would be neither listing.
+func filtersKey(req limes.ListRecordsRequest) string {
+	dispositions := slices.Clone(req.Dispositions)
+	slices.Sort(dispositions)
+	raw, err := json.Marshal([]any{req.PrincipalType, req.Subject, req.SubjectPrefix, slices.Compact(dispositions)})
+	if err != nil {
+		panic(err) // strings and a list of strings always encode
+	}
+	sum := sha256.Sum256(raw)
+	return base64.RawURLEncoding.EncodeToString(sum[:16])
 }
 
 // ListRecords implements limes.RecordLister in one transaction, scoped to
@@ -248,7 +266,7 @@ func (c *Census) ListRecords(ctx context.Context, req limes.ListRecordsRequest) 
 	}
 	var after *uuid.UUID
 	if req.Cursor != "" {
-		k, err := decodeListCursor(req.Cursor, req.Order)
+		k, err := decodeListCursor(req.Cursor, req)
 		if err != nil {
 			return limes.Page[limes.RecordListing]{}, err
 		}
@@ -272,7 +290,7 @@ func (c *Census) ListRecords(ctx context.Context, req limes.ListRecordsRequest) 
 		return limes.Page[limes.RecordListing]{Items: out}, nil
 	}
 	out = out[:limit]
-	next := listCursor{After: out[len(out)-1].Record.Capability.ID, Order: req.Order}
+	next := listCursor{After: out[len(out)-1].Record.Capability.ID, Order: req.Order, Filters: filtersKey(req)}
 	return limes.Page[limes.RecordListing]{Items: out, Next: encodeCursor(next)}, nil
 }
 
@@ -301,16 +319,16 @@ func scanListing(row pgx.CollectableRow) (limes.RecordListing, error) {
 	return l, nil
 }
 
-// decodeListCursor reads a cursor ListRecords handed out for order;
-// anything else, a cursor of the other order among it, is
-// ErrInvalidRequest.
-func decodeListCursor(s string, order limes.ListOrder) (listCursor, error) {
+// decodeListCursor reads a cursor ListRecords handed out for req's order and
+// filters; anything else, a cursor of the other order or of other filters
+// among it, is ErrInvalidRequest.
+func decodeListCursor(s string, req limes.ListRecordsRequest) (listCursor, error) {
 	var k listCursor
 	raw, err := base64.RawURLEncoding.DecodeString(s)
 	if err == nil {
 		err = json.Unmarshal(raw, &k)
 	}
-	if err != nil || k.After == uuid.Nil || k.Order != order {
+	if err != nil || k.After == uuid.Nil || k.Order != req.Order || k.Filters != filtersKey(req) {
 		return listCursor{}, fmt.Errorf("%w: pgstore: record list cursor %q", limes.ErrInvalidRequest, s)
 	}
 	return k, nil
