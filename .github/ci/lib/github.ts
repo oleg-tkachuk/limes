@@ -90,9 +90,10 @@ export interface PullRequestText {
   body: string;
 }
 
-// RunState is the newest finished run of a workflow: how it ended, the
-// commit it ran for, and where to read it.
+// RunState is the newest finished run of a workflow: its id, how it ended,
+// the commit it ran for, and where to read it.
 export interface RunState {
+  id: number;
   conclusion: string;
   headSha: string;
   url: string;
@@ -310,7 +311,7 @@ export function gitHubOver(octokit: Octokit, repo: Repo): GitHub {
         per_page: 1,
       });
       const run = data.workflow_runs[0];
-      return run === undefined ? undefined : { conclusion: run.conclusion ?? "", headSha: run.head_sha, url: run.html_url };
+      return run === undefined ? undefined : { id: run.id, conclusion: run.conclusion ?? "", headSha: run.head_sha, url: run.html_url };
     },
     async openPullRequestsInto(base) {
       const pulls = await octokit.paginate(octokit.rest.pulls.list, { ...repo, base, state: "open", per_page: PAGE_SIZE });

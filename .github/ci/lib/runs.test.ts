@@ -4,7 +4,8 @@ import { test } from "node:test";
 
 import { parse } from "yaml";
 
-import { CI_WORKFLOW, CI_WORKFLOW_NAME, PASSING, RED } from "./runs.ts";
+import type { Job } from "./github.ts";
+import { CI_WORKFLOW, CI_WORKFLOW_NAME, PASSING, RED, REQUIRED_CHECK, requiredConclusion } from "./runs.ts";
 
 // AUTO_MERGE_WORKFLOW runs on the end of every CI run, which it names by the
 // workflow's name.
@@ -26,4 +27,21 @@ test("a red run is never a passing one", () => {
     RED.some((c) => PASSING.includes(c)),
     false,
   );
+});
+
+test("the required check is ci.yaml's checks job", () => {
+  const ci = workflow(CI_WORKFLOW) as { jobs: Record<string, { name?: string }> };
+  assert.equal(ci.jobs.checks?.name, REQUIRED_CHECK);
+});
+
+test("requiredConclusion reads a run by its required check", async () => {
+  const jobsOf = (jobs: Job[]) => ({ runJobs: async () => jobs });
+  const gate = { name: "Released limes (pgstore)", status: "completed", conclusion: "failure" };
+  const check = (conclusion: string, status = "completed"): Job => ({ name: REQUIRED_CHECK, status, conclusion });
+  const run = { id: 1, conclusion: "failure" };
+  assert.equal(await requiredConclusion(jobsOf([gate, check("success")]), run), "success");
+  assert.equal(await requiredConclusion(jobsOf([gate, check("failure")]), { ...run, conclusion: "success" }), "failure");
+  // A check that never finished, or never ran, leaves the run's own.
+  assert.equal(await requiredConclusion(jobsOf([gate, check("", "in_progress")]), run), "failure");
+  assert.equal(await requiredConclusion(jobsOf([]), { ...run, conclusion: "startup_failure" }), "startup_failure");
 });

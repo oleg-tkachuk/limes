@@ -37,6 +37,7 @@ import { info, warning } from "./lib/actions.ts";
 import { optionalEnv, requireEnv } from "./lib/env.ts";
 import { parseRepo, type Repo } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
+import { REQUIRED_CHECK } from "./lib/runs.ts";
 
 export const DEFAULT_REPOSITORY = "oleg-tkachuk/limes";
 export const RULESET_NAME = "main-branch";
@@ -54,7 +55,7 @@ export const GITHUB_ACTIONS_APP_ID = 15368;
 // ci.yaml, not their ids: the required check's (the checks job), which
 // stands for every job a merge needs. repo-settings.test.ts holds it to
 // ci.yaml; a context no job reports would block every merge for good.
-export const REQUIRED_CONTEXTS: readonly string[] = ["All checks passed"];
+export const REQUIRED_CONTEXTS: readonly string[] = [REQUIRED_CHECK];
 
 // ENVIRONMENTS are the environments a workflow deploys to, each admitting
 // main alone; repo-settings.test.ts holds them to the workflows.
