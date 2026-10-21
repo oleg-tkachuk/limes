@@ -1,0 +1,72 @@
+name: Bug report
+description: Something behaves differently than documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Not for security issues.** A token that verifies when it should not,
+        a delegation that widens, a ceiling that can be spent past, a
+        revocation that does not stop a capability: close this and follow
+        [SECURITY.md](https://github.com/oleg-tkachuk/limes/blob/main/.github/SECURITY.md)
+        instead.
+
+  - type: dropdown
+    id: module
+    attributes:
+      label: Module
+      options:
+        - limes
+        - pgstore
+        - redisreplay
+        - otelmetric
+        - examples
+        - docs
+        - not sure
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The module's version, as go.mod requires it (`v0.110.0`, `pgstore/v0.30.5`), or a commit.
+    validations:
+      required: true
+
+  - type: input
+    id: go
+    attributes:
+      label: Go version
+      description: The output of `go version`.
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: >
+        What you called, what you expected, and what you got instead: the
+        returned error, and whether it matches the sentinel you expected
+        (`errors.Is`).
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: >
+        The shortest program or test that shows it. One against memstore is
+        the easiest to run; for pgstore, say the PostgreSQL version and
+        whether the store runs under row-level security as a role that owns
+        nothing.
+      render: go
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Redact tokens and keys before pasting.
+      render: shell
