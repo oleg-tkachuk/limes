@@ -17,7 +17,7 @@ import { generateNotes } from "@semantic-release/release-notes-generator";
 const require = createRequire(import.meta.url);
 const config = require("./release.config.cjs");
 const notesFile = require("./release-notes-file.cjs");
-const { MODULES, ROOT_MODULE, REDISREPLAY_MODULE, DEPENDENCIES_SECTION, configFor } = require("./modules.cjs");
+const { MODULES, ROOT_MODULE, REDISREPLAY_MODULE, DEPENDENCIES_SECTION, LIMES_REQUIREMENT_SCOPE, configFor } = require("./modules.cjs");
 
 const BREAKING_HEADING = "BREAKING CHANGES";
 
@@ -66,24 +66,27 @@ const UNSCOPED_BUILD_SUBJECT = "build the module with a newer Go";
 const presetNotes = (cs) => generateNotes({ preset: config.notes.preset }, { ...context, commits: cs });
 for (const name of Object.keys(MODULES)) {
   const moduleNotes = (cs) => generateNotes(configFor(name).notes, { ...context, commits: cs });
-  const scope = name === ROOT_MODULE ? REDISREPLAY_MODULE : name;
-  const build = [
-    { hash: "5555555", message: `build(${scope}): ${REQUIRE_SUBJECT}` },
-    { hash: "6666666", message: `build: ${UNSCOPED_BUILD_SUBJECT}` },
-  ];
-  const got = await moduleNotes(build);
-  const listed = got.includes(REQUIRE_SUBJECT) && got.includes(DEPENDENCIES_SECTION);
-  if (name === ROOT_MODULE && listed) {
-    console.log(`FAIL ${name} notes list build(${scope}): the root module's notes are the preset's`);
-    failed = 1;
-  }
-  if (name !== ROOT_MODULE && !listed) {
-    console.log(`FAIL ${name} notes lack build(${scope}) under ${DEPENDENCIES_SECTION}: the release it cuts would have none`);
-    failed = 1;
-  }
-  if (got.includes(UNSCOPED_BUILD_SUBJECT)) {
-    console.log(`FAIL ${name} notes list an unscoped build commit, which releases nothing`);
-    failed = 1;
+  // The module's own scope, and the one require-limes.ts commits for every
+  // nested module at once.
+  for (const scope of [name === ROOT_MODULE ? REDISREPLAY_MODULE : name, LIMES_REQUIREMENT_SCOPE]) {
+    const build = [
+      { hash: "5555555", message: `build(${scope}): ${REQUIRE_SUBJECT}` },
+      { hash: "6666666", message: `build: ${UNSCOPED_BUILD_SUBJECT}` },
+    ];
+    const got = await moduleNotes(build);
+    const listed = got.includes(REQUIRE_SUBJECT) && got.includes(DEPENDENCIES_SECTION);
+    if (name === ROOT_MODULE && listed) {
+      console.log(`FAIL ${name} notes list build(${scope}): the root module's notes are the preset's`);
+      failed = 1;
+    }
+    if (name !== ROOT_MODULE && !listed) {
+      console.log(`FAIL ${name} notes lack build(${scope}) under ${DEPENDENCIES_SECTION}: the release it cuts would have none`);
+      failed = 1;
+    }
+    if (got.includes(UNSCOPED_BUILD_SUBJECT)) {
+      console.log(`FAIL ${name} notes list an unscoped build commit, which releases nothing`);
+      failed = 1;
+    }
   }
   // Every other section renders as the preset's defaults.
   if ((await moduleNotes(commits)) !== (await presetNotes(commits))) {

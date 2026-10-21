@@ -175,8 +175,8 @@ jobs:
           MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
         run: node .github/ci/release.ts
 
-  # Each limes release is followed by a pull request per nested module that
-  # raises the module's requirement to it: pgstore is released only once its
+  # Each limes release is followed by one pull request that raises every
+  # nested module's requirement to it: pgstore is released only once its
   # tests pass against the limes it requires, so its release waits for that
   # merge. It acts through AUTOMERGE_TOKEN, never GITHUB_TOKEN: a branch
   # pushed with GITHUB_TOKEN would get no CI, and its pull request would wait
@@ -211,8 +211,9 @@ jobs:
       - name: Set up the CI scripts
         uses: ./.github/actions/setup-ci
 
-      # One module's failure leaves the others proposed, and fails the step.
-      - name: Propose each nested module's requirement
+      # One pull request for every nested module; one module's failure leaves
+      # it out, the others proposed, and fails the step.
+      - name: Propose the nested modules' requirement
         env:
           GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
           LIMES_TAG: ${{ needs.release.outputs.limes-tag }}
