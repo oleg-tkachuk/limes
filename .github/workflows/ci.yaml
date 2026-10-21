@@ -335,8 +335,12 @@ jobs:
   # holds a limes change a module follows that is not released yet — as a
   # change that lands with its module does until the next release. A pull
   # request's author runs it by hand: task test:pinned MODULE=<module>.
+  #
+  # Its name holds no matrix value: GitHub adds the module to it, as
+  # "Released limes (pgstore)", and a job skipped before its matrix expands,
+  # as on a pull request, would show an expression in its name unexpanded.
   released-limes:
-    name: Released limes, ${{ matrix.module }}
+    name: Released limes
     needs: [changes]
     if: github.event_name == 'push' && needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-26.04

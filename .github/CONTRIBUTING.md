@@ -47,7 +47,7 @@ the limes of the same commit, through the replace in its `go.mod`, so CI runs
 its tests twice. Against that limes they are part of the required check: limes
 may not break a nested module. Against the limes its `go.mod` requires, which
 is what a consumer's build resolves (`task test:pinned MODULE=<module>`, the
-job **Released limes, <module>**), they gate that module's release
+job **Released limes (&lt;module&gt;)**), they gate that module's release
 instead: a run in which they fail releases the other modules and holds that
 one back. That job runs on pushes to `main` alone, whose results the release
 reads; on a pull request run it by hand.
