@@ -84,7 +84,8 @@
 // reason: of one tenant, scoped to it as every call naming a tenant, or of
 // every tenant under WithAllTenantsReadOnly or WithAllTenants — a scope that
 // admits fewer is refused with limes.ErrScopeMismatch, not counted as all.
-// It lists a tenant's records too (limes.RecordLister), each with the
+// It lists a tenant's records too (limes.RecordLister), and reads one
+// (limes.RecordListingReader), each with the
 // disposition it counts them under, scoped to that tenant.
 //
 // To remove a tenant, Store.EraseTenant revokes its capabilities, removes
