@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -168,7 +169,13 @@ func decodeCountCursor(s string) (countCursor, error) {
 // its own: one that pages by subject reads capabilities_principal, one that
 // pages a tenant or a principal type the index of migration 014, and one
 // of some dispositions the partial index of 017 for their revoked flag.
-const sqlListRecords = `
+const sqlListRecords = sqlRecordListing + `
+WHERE c.tenant_id = $1`
+
+// sqlRecordListing is a record listing's columns, from capabilities c and
+// its own revocation entry, its disposition at $2: what ListRecords and
+// GetRecordListing read alike, so both give a record one disposition.
+const sqlRecordListing = `
 SELECT c.capability, c.issued_by, v.revoked_at, v.note, v.actor, v.cascaded, CASE
     WHEN c.revoked THEN 'revoked'
     WHEN c.expires_at IS NULL OR c.expires_at <= $2 THEN 'expired'
@@ -177,8 +184,31 @@ END
 FROM ` + schema + `.capabilities c
 LEFT JOIN LATERAL (
     SELECT revoked_at, note, actor, cascaded FROM ` + schema + `.revocations WHERE capability_id = c.id OFFSET 0
-) v ON true
-WHERE c.tenant_id = $1`
+) v ON true`
+
+// sqlGetRecordListing is the listing of the record of id $1 at $2.
+const sqlGetRecordListing = sqlRecordListing + `
+WHERE c.id = $1`
+
+// GetRecordListing implements limes.RecordListingReader: the record of id
+// with its disposition by the store's clock, as ListRecords gives it, in a
+// transaction of the call's scope, as GetRecord reads it; a record out of
+// that scope is not found.
+func (c *Census) GetRecordListing(ctx context.Context, id uuid.UUID) (limes.RecordListing, error) {
+	var l limes.RecordListing
+	err := c.inReadTx(ctx, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, sqlGetRecordListing, id, c.clock())
+		if err != nil {
+			return err
+		}
+		l, err = pgx.CollectExactlyOneRow(rows, scanListing)
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return limes.RecordListing{}, limes.ErrNotFound
+	}
+	return l, err
+}
 
 // dispositionWhere is each disposition as a condition on a record's own
 // columns at $2, so that a listing of some dispositions reads the index of
@@ -349,6 +379,7 @@ func encodeCursor(v any) string {
 }
 
 var (
-	_ limes.RecordCensus = (*Census)(nil)
-	_ limes.RecordLister = (*Census)(nil)
+	_ limes.RecordCensus        = (*Census)(nil)
+	_ limes.RecordLister        = (*Census)(nil)
+	_ limes.RecordListingReader = (*Census)(nil)
 )

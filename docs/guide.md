@@ -1005,6 +1005,16 @@ page, err := census.ListRecords(ctx, limes.ListRecordsRequest{
 })
 ```
 
+To show one record, read it through a `RecordListingReader`:
+`GetRecordListing(ctx, id)` gives the `RecordListing` a listing gives it —
+what `GetRecord` reads back and its disposition by the same rules and clock —
+and `ErrNotFound` for a record not on record or out of the call's scope.
+Working the disposition out from `IsRevoked` and the expiry instead would be
+a second rule beside the store's, and the store's clock is its own.
+`memstore.NewCensus` and `pgstore.NewCensus` are each one, and `storetest`
+checks that each record reads as its listing gives it, when the `Env.Lister`
+is one.
+
 To test a report, backdate its charges through the store's clock, never by
 writing a store's tables, whose columns are the store's own and change
 without notice. A charge carries the store's time (`ChargeRecord.At`), so

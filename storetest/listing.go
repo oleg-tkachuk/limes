@@ -2,6 +2,7 @@ package storetest
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"reflect"
 	"slices"
@@ -31,11 +32,17 @@ var censusDispositions = map[string]limes.RecordDisposition{
 // listAll is every record of the listing req asks for, a page at a time.
 func (f fixture) listRecordsAll(t *testing.T, req limes.ListRecordsRequest) []limes.RecordListing {
 	t.Helper()
+	return f.listRecordsAllIn(t, f.Ctx, req)
+}
+
+// listRecordsAllIn is listRecordsAll under ctx.
+func (f fixture) listRecordsAllIn(t *testing.T, ctx context.Context, req limes.ListRecordsRequest) []limes.RecordListing {
+	t.Helper()
 	var out []limes.RecordListing
 	fetched := map[string]bool{}
 	for {
 		fetched[req.Cursor] = true
-		page, err := f.Lister.ListRecords(f.Ctx, req)
+		page, err := f.Lister.ListRecords(ctx, req)
 		if err != nil {
 			t.Fatalf("ListRecords(%+v): %v", req, err)
 		}
@@ -321,5 +328,45 @@ func checkListRecordsCursorFilters(t *testing.T, f fixture) {
 		if _, err := f.Lister.ListRecords(f.Ctx, same); err != nil {
 			t.Errorf("ListRecords with the cursor and %s: %v", name, err)
 		}
+	}
+}
+
+// GetRecordListing reads each record as a listing gives it — the record
+// GetRecord reads back and the census's disposition — and a record not on
+// record, or another tenant's under a tenant's scope, as not found.
+func checkGetRecordListing(t *testing.T, f fixture) {
+	f.skipUnlessLister(t)
+	reader, ok := f.Lister.(limes.RecordListingReader)
+	if !ok {
+		t.Skip("Env.Lister is not a limes.RecordListingReader")
+	}
+	other := censusFixture(t, f)
+	for _, want := range f.listRecordsAll(t, limes.ListRecordsRequest{TenantID: f.Tenant}) {
+		id := want.Record.Capability.ID
+		got, err := reader.GetRecordListing(f.Ctx, id)
+		if err != nil {
+			t.Fatalf("GetRecordListing %s: %v", id, err)
+		}
+		if diff := diffCapabilities(got.Record.Capability, want.Record.Capability); diff != "" {
+			t.Errorf("%s: a capability other than the listing's: %s", want.Record.Capability.Subject.Subject, diff)
+		}
+		if got.Disposition != want.Disposition || !reflect.DeepEqual(got.Record.IssuedBy, want.Record.IssuedBy) || !reflect.DeepEqual(got.Record.Revocation, want.Record.Revocation) {
+			t.Errorf("%s: disposition %q, issued by %+v, revocation %+v; the listing gives %q, %+v, %+v",
+				want.Record.Capability.Subject.Subject, got.Disposition, got.Record.IssuedBy, got.Record.Revocation,
+				want.Disposition, want.Record.IssuedBy, want.Record.Revocation)
+		}
+	}
+	if _, err := reader.GetRecordListing(f.Ctx, uuid.New()); !errors.Is(err, limes.ErrNotFound) {
+		t.Errorf("GetRecordListing of an id not on record: err = %v, want ErrNotFound", err)
+	}
+	if !f.ScopesTenants {
+		return
+	}
+	theirs := f.listRecordsAllIn(t, f.tenantCtx(other), limes.ListRecordsRequest{TenantID: other})
+	if len(theirs) == 0 {
+		t.Fatal("the other tenant lists no record")
+	}
+	if _, err := reader.GetRecordListing(f.Ctx, theirs[0].Record.Capability.ID); !errors.Is(err, limes.ErrNotFound) {
+		t.Errorf("GetRecordListing of another tenant's record under Tenant's scope: err = %v, want ErrNotFound", err)
 	}
 }

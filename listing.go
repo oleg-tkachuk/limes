@@ -34,6 +34,21 @@ type RecordLister interface {
 	ListRecords(ctx context.Context, req ListRecordsRequest) (Page[RecordListing], error)
 }
 
+// RecordListingReader reads one record with its disposition, as a listing
+// gives it: what Store.GetRecord reads back, and the disposition by the
+// rules RecordLister and RecordCensus share, by the store's clock. A
+// consumer showing one record asks it rather than working the disposition
+// out from IsRevoked and the expiry, which would be a second rule beside
+// the store's. A type of its own beside RecordLister, as the lister is
+// beside Store: memstore's and pgstore's Census are each one, and storetest
+// checks it when its Env.Lister is one.
+type RecordListingReader interface {
+	// GetRecordListing reads the record of id with its disposition; one
+	// not on record, or not visible to the caller, is ErrNotFound, as
+	// GetRecord answers it.
+	GetRecordListing(ctx context.Context, id uuid.UUID) (RecordListing, error)
+}
+
 // RecordDisposition is what a record is now: RecordLister's and
 // RecordCensus's three, under which each record falls exactly once.
 type RecordDisposition string

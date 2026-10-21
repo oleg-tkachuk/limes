@@ -24,7 +24,8 @@
 // Env.Lister is set, a listing of a tenant's records pages in both orders
 // with no record skipped or repeated, filters by principal type, subject,
 // subject prefix and disposition, gives each record the disposition the
-// census counts it under, and shows no other tenant's. A check that does not finish within Env.CheckTimeout stops the
+// census counts it under, and shows no other tenant's; when the lister is a
+// limes.RecordListingReader too, it reads each record as the listing gives it. A check that does not finish within Env.CheckTimeout stops the
 // test binary with every goroutine's stack, naming the check.
 package storetest
 
@@ -271,6 +272,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"ListRecordsPagesBothWays", checkListRecordsPages},
 		{"ListRecordsRefusesAMalformedRequest", checkListRecordsMalformed},
 		{"ListRecordsRefusesACursorOfOtherFilters", checkListRecordsCursorFilters},
+		{"GetRecordListingIsTheListingOfTheRecord", checkGetRecordListing},
 		{"EraseTenantRecordsKeepsWhatAVerifierStillNeeds", checkEraseTenant},
 	}
 	for _, c := range checks {
