@@ -1,0 +1,47 @@
+name: Feature request
+description: Propose something the library should do and does not.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >
+        What are you trying to do that you cannot do today? Describe the
+        situation, not the solution.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: module
+    attributes:
+      label: Module
+      options:
+        - limes
+        - pgstore
+        - redisreplay
+        - otelmetric
+        - a new one
+        - not sure
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: >
+        Optional. A sketch of the API, if you have one: the type or method,
+        its request, and what it returns or refuses.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you tried instead
+      description: Workarounds you have used, and why they are not enough.
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: This would change an existing API or contract (rather than only add to it)
+        - label: I would be willing to implement this
