@@ -4,7 +4,7 @@ module github.com/oleg-tkachuk/limes/otelmetric
 
 go 1.26.0
 
-toolchain go1.27.2
+toolchain go1.27.3
 
 // The replace builds this module against the limes of the same commit, which
 // is what CI tests; a consumer of this module, whose build ignores the
