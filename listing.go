@@ -30,7 +30,8 @@ type RecordLister interface {
 	// cursor of the next page, empty on the last. The cursor is the store's
 	// own and opaque, and holds the order and the filters it was handed out
 	// for: a cursor of the other order, or of another principal type,
-	// subject, subject prefix or set of dispositions, is refused.
+	// subject, subject prefix or set of dispositions, is refused with
+	// ErrCursorMismatch.
 	ListRecords(ctx context.Context, req ListRecordsRequest) (Page[RecordListing], error)
 }
 

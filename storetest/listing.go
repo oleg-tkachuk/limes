@@ -265,12 +265,16 @@ func checkListRecordsMalformed(t *testing.T, f fixture) {
 		"a negative limit":          {TenantID: f.Tenant, Limit: -1},
 		"a foreign cursor":          {TenantID: f.Tenant, Cursor: "not-a-cursor"},
 		"an id for a cursor":        {TenantID: f.Tenant, Cursor: uuid.NewString()},
-		"a cursor of the other way": {TenantID: f.Tenant, Cursor: first.Next, Order: limes.ListOrderDescending},
 		"a truncated cursor":        {TenantID: f.Tenant, Cursor: first.Next[:len(first.Next)/2]},
 	} {
-		if _, err := f.Lister.ListRecords(f.Ctx, bad); !errors.Is(err, limes.ErrInvalidRequest) {
-			t.Errorf("ListRecords with %s: err = %v, want ErrInvalidRequest", name, err)
+		// Malformed, not a place in another listing.
+		if _, err := f.Lister.ListRecords(f.Ctx, bad); !errors.Is(err, limes.ErrInvalidRequest) || errors.Is(err, limes.ErrCursorMismatch) {
+			t.Errorf("ListRecords with %s: err = %v, want ErrInvalidRequest alone", name, err)
 		}
+	}
+	// A place in the listing of the other way: both.
+	if _, err := f.Lister.ListRecords(f.Ctx, limes.ListRecordsRequest{TenantID: f.Tenant, Cursor: first.Next, Order: limes.ListOrderDescending}); !errors.Is(err, limes.ErrCursorMismatch) || !errors.Is(err, limes.ErrInvalidRequest) {
+		t.Errorf("ListRecords with a cursor of the other way: err = %v, want ErrCursorMismatch, an ErrInvalidRequest", err)
 	}
 	if !f.ScopesTenants {
 		return
@@ -314,8 +318,8 @@ func checkListRecordsCursorFilters(t *testing.T, f fixture) {
 	} {
 		other := req
 		change(&other)
-		if _, err := f.Lister.ListRecords(f.Ctx, other); !errors.Is(err, limes.ErrInvalidRequest) {
-			t.Errorf("ListRecords with the cursor and %s: err = %v, want ErrInvalidRequest", name, err)
+		if _, err := f.Lister.ListRecords(f.Ctx, other); !errors.Is(err, limes.ErrCursorMismatch) || !errors.Is(err, limes.ErrInvalidRequest) {
+			t.Errorf("ListRecords with the cursor and %s: err = %v, want ErrCursorMismatch, an ErrInvalidRequest", name, err)
 		}
 	}
 	for name, dispositions := range map[string][]limes.RecordDisposition{
