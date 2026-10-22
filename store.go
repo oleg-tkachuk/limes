@@ -113,7 +113,10 @@ type Store interface {
 	// revocation entry for each descendant, so the audit trail names
 	// every capability that was stopped, not only the one an operator
 	// picked. A repeated cascading revoke writes the entries a descendant
-	// lacks, whatever the capability's own entry says.
+	// lacks, whatever the capability's own entry says. A store may keep
+	// work per descendant beside the entry — pgstore marks each one
+	// revoked, holding its row until the revoke commits — so a revoke's cost
+	// can grow with the subtree below the capability, flag or not.
 	Revoke(ctx context.Context, req RevokeRequest) (RevokeResult, error)
 
 	// Purge removes the capabilities expired for longer than the request's
