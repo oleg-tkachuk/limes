@@ -64,7 +64,7 @@ func TestRevocationWatcherClearsOnEveryRevocation(t *testing.T) {
 	}()
 	awaitClear(t, cleared, "once listening")
 	mine := WithTenant(t.Context(), f.mine)
-	if err := f.records.Revoke(mine, limes.RevokeRequest{CapabilityID: f.child.ID}); err != nil {
+	if _, err := f.records.Revoke(mine, limes.RevokeRequest{CapabilityID: f.child.ID}); err != nil {
 		t.Fatal(err)
 	}
 	awaitClear(t, cleared, "after Revoke")
@@ -107,11 +107,11 @@ func TestRevocationWatcherIgnoresOtherWrites(t *testing.T) {
 	}
 	// The parent's revocation is on record already, so revoking it again
 	// writes nothing.
-	if err := f.records.Revoke(mine, limes.RevokeRequest{CapabilityID: f.parent.ID}); err != nil {
+	if _, err := f.records.Revoke(mine, limes.RevokeRequest{CapabilityID: f.parent.ID}); err != nil {
 		t.Fatal(err)
 	}
 	// A revocation after them is the next notification the watcher hears.
-	if err := f.records.Revoke(mine, limes.RevokeRequest{CapabilityID: c.ID}); err != nil {
+	if _, err := f.records.Revoke(mine, limes.RevokeRequest{CapabilityID: c.ID}); err != nil {
 		t.Fatal(err)
 	}
 	awaitClear(t, cleared, "after Revoke")

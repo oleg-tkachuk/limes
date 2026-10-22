@@ -54,7 +54,7 @@ func newTenantFixture(t *testing.T) tenantFixture {
 			t.Fatal(err)
 		}
 	}
-	if err := f.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: f.parent.ID}); err != nil {
+	if _, err := f.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: f.parent.ID}); err != nil {
 		t.Fatal(err)
 	}
 	return f
@@ -73,7 +73,7 @@ func TestRowSecurityKeepsTenantsApart(t *testing.T) {
 		if _, err := f.records.GetRecord(ctx, f.parent.ID); !errors.Is(err, limes.ErrNotFound) {
 			t.Errorf("%s: GetRecord: err = %v, want ErrNotFound", name, err)
 		}
-		if err := f.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: f.child.ID}); !errors.Is(err, limes.ErrNotFound) {
+		if _, err := f.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: f.child.ID}); !errors.Is(err, limes.ErrNotFound) {
 			t.Errorf("%s: Revoke: err = %v, want ErrNotFound", name, err)
 		}
 		page, err := f.records.ListByPrincipal(ctx, limes.ListByPrincipalRequest{
@@ -372,7 +372,10 @@ func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 		subject := meterSubject(f.child.ID, f.mine)
 		for name, write := range map[string]func() error{
 			"Insert": func() error { return s.records.Insert(s.ctx, limes.InsertRequest{Capability: c}) },
-			"Revoke": func() error { return s.records.Revoke(s.ctx, limes.RevokeRequest{CapabilityID: f.child.ID}) },
+			"Revoke": func() error {
+				_, err := s.records.Revoke(s.ctx, limes.RevokeRequest{CapabilityID: f.child.ID})
+				return err
+			},
 			"RevokeBiscuit": func() error {
 				return s.records.RevokeBiscuit(s.ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(t, f.child.ID, []byte("read-only"))})
 			},

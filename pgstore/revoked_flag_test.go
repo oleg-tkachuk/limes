@@ -61,7 +61,7 @@ func TestTheRevokedFlagFollowsEveryRevocation(t *testing.T) {
 	}
 	revoke := func(id uuid.UUID, cascade bool) {
 		t.Helper()
-		if err := f.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: id, Note: "flag", Actor: "test", CascadeChildren: cascade}); err != nil {
+		if _, err := f.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: id, Note: "flag", Actor: "test", CascadeChildren: cascade}); err != nil {
 			t.Fatalf("revoke: %v", err)
 		}
 	}
@@ -101,7 +101,7 @@ func TestMigrationMarksTheRecordsRevokedBefore(t *testing.T) {
 		}
 		ids, parent = append(ids, c.ID), c.ID
 	}
-	if err := f.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: ids[2], Note: "before", Actor: "test"}); err != nil {
+	if _, err := f.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: ids[2], Note: "before", Actor: "test"}); err != nil {
 		t.Fatal(err)
 	}
 	// The records as they were before 015: no record marked.
