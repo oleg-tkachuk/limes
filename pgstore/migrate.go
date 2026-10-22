@@ -54,13 +54,13 @@ type MigrateOptions struct {
 // holds, never on a second one, which would wait on that run for ever. A
 // consumer with another migration tool runs Migrate before it.
 //
-// Migration 014 (pgstore v0.31.0) builds three indexes with a plain CREATE
-// INDEX, which holds writes to limes.capabilities and limes.revocations
-// until each is built: Insert, Revoke, Purge and the erasers wait, while
-// reads, IsRevoked among them, go on. On a million records the builds take
-// some seconds; schedule the first Migrate of v0.31.0 or later for a quiet
-// moment on a store that large. Every later migration builds an index on an
-// existing table CONCURRENTLY, outside a transaction, holding no writes.
+// Migration 014 (pgstore v0.31.0) builds its three indexes CONCURRENTLY,
+// outside a transaction, holding no writes, as every later migration that
+// indexes an existing table does, so a Migrate at startup holds none. Its
+// first form built them with a plain CREATE INDEX, which held writes to
+// limes.capabilities and limes.revocations for some seconds on a million
+// records; a store that ran that one has the indexes, and tern does not run
+// 014 there again.
 //
 // Migration 015 adds limes.capabilities.revoked,
 // the flag ListRecords and CountRecords read: a change of the catalog, which
