@@ -173,18 +173,36 @@ const sqlListRecords = sqlRecordListing + `
 WHERE c.tenant_id = $1`
 
 // sqlRecordListing is a record listing's columns, from capabilities c and
-// its own revocation entry, its disposition at $2: what ListRecords and
-// GetRecordListing read alike, so both give a record one disposition.
+// its own revocation entry, its disposition at $2, and for a record revoked
+// only through an ancestor the entry of the nearest ancestor that has one:
+// what ListRecords and GetRecordListing read alike, so both give a record
+// one disposition. The walk up runs for those records alone, a parent a
+// step by its key, and stops at an ancestor no longer on record, as
+// IsRevoked's does.
 const sqlRecordListing = `
 SELECT c.capability, c.issued_by, v.revoked_at, v.note, v.actor, v.cascaded, CASE
     WHEN c.revoked THEN 'revoked'
     WHEN c.expires_at IS NULL OR c.expires_at <= $2 THEN 'expired'
     ELSE 'active'
-END
+END,
+a.capability_id, a.revoked_at, a.note, a.actor, a.cascaded
 FROM ` + schema + `.capabilities c
 LEFT JOIN LATERAL (
     SELECT revoked_at, note, actor, cascaded FROM ` + schema + `.revocations WHERE capability_id = c.id OFFSET 0
-) v ON true`
+) v ON true
+LEFT JOIN LATERAL (
+    WITH RECURSIVE up (id, generation) AS (
+        SELECT c.parent_id, 1 WHERE c.revoked AND v.revoked_at IS NULL AND c.parent_id IS NOT NULL
+      UNION ALL
+        SELECT p.parent_id, up.generation + 1
+        FROM ` + schema + `.capabilities p JOIN up ON p.id = up.id
+        WHERE p.parent_id IS NOT NULL
+    )
+    SELECT r.capability_id, r.revoked_at, r.note, r.actor, r.cascaded
+    FROM up JOIN ` + schema + `.revocations r ON r.capability_id = up.id
+    ORDER BY up.generation
+    LIMIT 1
+) a ON true`
 
 // sqlGetRecordListing is the listing of the record of id $1 at $2.
 const sqlGetRecordListing = sqlRecordListing + `
@@ -336,7 +354,12 @@ func scanListing(row pgx.CollectableRow) (limes.RecordListing, error) {
 	var note, actor *string
 	var cascaded *bool
 	var disposition string
-	if err := row.Scan(&capability, &issuedBy, &revokedAt, &note, &actor, &cascaded, &disposition); err != nil {
+	var ancestor *uuid.UUID
+	var ancestorAt *time.Time
+	var ancestorNote, ancestorActor *string
+	var ancestorCascaded *bool
+	if err := row.Scan(&capability, &issuedBy, &revokedAt, &note, &actor, &cascaded, &disposition,
+		&ancestor, &ancestorAt, &ancestorNote, &ancestorActor, &ancestorCascaded); err != nil {
 		return limes.RecordListing{}, err
 	}
 	c, err := decodeCapability(capability)
@@ -350,6 +373,15 @@ func scanListing(row pgx.CollectableRow) (limes.RecordListing, error) {
 	l := limes.RecordListing{Record: limes.Record{Capability: c, IssuedBy: p}, Disposition: limes.RecordDisposition(disposition)}
 	if revokedAt != nil {
 		l.Record.Revocation = &limes.Revocation{RevokedAt: *revokedAt, Note: *note, Actor: *actor, Cascaded: *cascaded}
+	}
+	switch {
+	case l.Disposition != limes.RecordDispositionRevoked:
+	case l.Record.Revocation != nil:
+		l.StoppedBy = &limes.CapabilityRevocation{CapabilityID: c.ID, Revocation: *l.Record.Revocation}
+	case ancestor != nil:
+		l.StoppedBy = &limes.CapabilityRevocation{CapabilityID: *ancestor, Revocation: limes.Revocation{
+			RevokedAt: *ancestorAt, Note: *ancestorNote, Actor: *ancestorActor, Cascaded: *ancestorCascaded,
+		}}
 	}
 	return l, nil
 }

@@ -125,15 +125,18 @@ ANALYZE limes.revocations`
 )
 
 // scanned is the rows a plan read from limes.capabilities, those it kept and
-// those its filters removed, and whether it walked anything recursively.
+// those its filters removed, and whether it walked anything recursively: a
+// recursive union that yielded a row. A listing's walk up to a revoking
+// ancestor is in every plan, and runs for no record revoked by its own
+// entry or not revoked at all.
 func scanned(node map[string]any) (rows float64, recursive bool) {
+	r, _ := node["Actual Rows"].(float64)
+	loops, _ := node["Actual Loops"].(float64)
 	if node["Relation Name"] == "capabilities" {
-		r, _ := node["Actual Rows"].(float64)
 		removed, _ := node["Rows Removed by Filter"].(float64)
-		loops, _ := node["Actual Loops"].(float64)
 		rows += (r + removed) * loops
 	}
-	if node["Node Type"] == "Recursive Union" || node["Node Type"] == "CTE Scan" {
+	if node["Node Type"] == "Recursive Union" && r*loops > 0 {
 		recursive = true
 	}
 	children, _ := node["Plans"].([]any)
@@ -183,6 +186,116 @@ func TestListRecordsPageReadsItsLimit(t *testing.T) {
 				if recursive || rows > 2*limit {
 					t.Errorf("%s: read %.0f records (at most %d), walked recursively %v:\n%s", name, rows, 2*limit, recursive, plan)
 				}
+			}
+		}
+	}
+}
+
+// seedTree records, as the owner, a tree for tenant $1 under one revoked
+// root: planWideChildren children of the root, and a chain of planDeepChain
+// generations below the first of them. Each of the tree's records is
+// revoked only through the root.
+const (
+	planWideChildren = 2000
+	planDeepChain    = limes.MaxDelegationDepth - 2
+	seedTree         = `
+WITH root AS (
+    INSERT INTO limes.capabilities (id, parent_id, tenant_id, principal_type, subject, expires_at, depth, capability, issued_by)
+    VALUES (uuidv7(), NULL, $1, 'agent', 'root', $2::timestamptz + interval '1 hour', 0, '{}', '{}')
+    RETURNING id
+)
+INSERT INTO limes.capabilities (id, parent_id, tenant_id, principal_type, subject, expires_at, depth, capability, issued_by)
+SELECT uuidv7(), root.id, $1, 'agent', 'wide', $2::timestamptz + interval '1 hour', 1, '{}', '{}'
+FROM root, generate_series(1, $3::int);
+DO $$
+DECLARE parent uuid := (SELECT id FROM limes.capabilities WHERE subject = 'wide' ORDER BY id LIMIT 1);
+DECLARE child uuid;
+BEGIN
+    FOR generation IN 2..%d LOOP
+        child := uuidv7();
+        INSERT INTO limes.capabilities (id, parent_id, tenant_id, principal_type, subject, expires_at, depth, capability, issued_by)
+        SELECT child, id, tenant_id, 'agent', 'deep', expires_at, generation, '{}', '{}' FROM limes.capabilities WHERE id = parent;
+        parent := child;
+    END LOOP;
+END $$;
+INSERT INTO limes.revocations (capability_id, tenant_id, revoked_at, note, actor, cascaded)
+SELECT id, tenant_id, $2, 'plan', 'test', false FROM limes.capabilities WHERE subject = 'root';
+ANALYZE limes.capabilities;
+ANALYZE limes.revocations`
+)
+
+// walked is the records a plan's walks up read from limes.capabilities —
+// the scans under a recursive union — and the relations they scan
+// sequentially.
+func walked(node map[string]any, inWalk bool) (rows float64, seq []string) {
+	inWalk = inWalk || node["Node Type"] == "Recursive Union"
+	if inWalk && node["Relation Name"] == "capabilities" {
+		r, _ := node["Actual Rows"].(float64)
+		removed, _ := node["Rows Removed by Filter"].(float64)
+		loops, _ := node["Actual Loops"].(float64)
+		rows += (r + removed) * loops
+		if node["Node Type"] == "Seq Scan" {
+			seq = append(seq, "capabilities")
+		}
+	}
+	children, _ := node["Plans"].([]any)
+	for _, c := range children {
+		r, s := walked(c.(map[string]any), inWalk)
+		rows, seq = rows+r, append(seq, s...)
+	}
+	return rows, seq
+}
+
+// A listing of records revoked through an ancestor walks up to it a parent
+// at a time by key, over a wide tree and down a deep chain alike: the walk
+// scans no records sequentially, and reads a parent for each generation it
+// climbs — one for each of the wide tree's children, and for each record of
+// the chain every generation above it.
+func TestListRecordsWalksUpByKey(t *testing.T) {
+	const limit = limes.DefaultListLimit + 1
+	fresh(t)
+	mine := newTenant(t)
+	now := time.Now().UTC()
+	seed := strings.Replace(seedTree, "%d", fmt.Sprint(planDeepChain+1), 1)
+	if _, err := owner.Exec(t.Context(), seed, pgx.QueryExecModeSimpleProtocol, mine, now, planWideChildren); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	census, err := NewCensus(Config{DB: app, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	revoked := []limes.RecordDisposition{limes.RecordDispositionRevoked}
+	for name, tc := range map[string]struct {
+		req     limes.ListRecordsRequest
+		maxRows float64
+	}{
+		"wide": {limes.ListRecordsRequest{TenantID: mine, Subject: "wide", Dispositions: revoked}, limit},
+		"deep": {limes.ListRecordsRequest{TenantID: mine, Subject: "deep", Dispositions: revoked}, limit * (planDeepChain + 1)},
+	} {
+		query, args := listRecordsSQL(tc.req, now, nil, limit)
+		var plan []byte
+		err := census.inTenantReadTx(WithTenant(t.Context(), mine), mine, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), "EXPLAIN (ANALYZE, FORMAT JSON) "+query, args...).Scan(&plan)
+		})
+		if err != nil {
+			t.Fatalf("%s: EXPLAIN: %v", name, err)
+		}
+		var nodes []map[string]any
+		if err := json.Unmarshal(plan, &nodes); err != nil {
+			t.Fatalf("%s: plan: %v", name, err)
+		}
+		rows, seq := walked(nodes[0]["Plan"].(map[string]any), false)
+		t.Logf("%s: the walks read %.0f records in %.2f ms", name, rows, nodes[0]["Execution Time"])
+		if rows == 0 || rows > tc.maxRows || len(seq) > 0 {
+			t.Errorf("%s: the walks read %.0f records (1 to %.0f), %d sequentially:\n%s", name, rows, tc.maxRows, len(seq), plan)
+		}
+		page, err := census.ListRecords(WithTenant(t.Context(), mine), tc.req)
+		if err != nil || len(page.Items) == 0 {
+			t.Fatalf("%s: ListRecords = %d items, %v", name, len(page.Items), err)
+		}
+		for _, l := range page.Items {
+			if l.StoppedBy == nil || l.StoppedBy.Revocation.Note != "plan" {
+				t.Fatalf("%s: %s stopped by %+v, want the root's entry", name, l.Record.Capability.ID, l.StoppedBy)
 			}
 		}
 	}
