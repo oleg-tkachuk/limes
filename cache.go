@@ -78,8 +78,9 @@ type RevocationCache struct {
 	caps     *ttlcache.Cache[uuid.UUID]
 	copies   *ttlcache.Cache[string]
 	clears   atomic.Uint64
-	// clearsRevoked counts the calls to ClearRevoked that did not Clear.
-	clearsRevoked atomic.Uint64
+	// clearsRevoked counts the calls to ClearRevoked that did not Clear, and
+	// clearsWithoutLineage those that did.
+	clearsRevoked, clearsWithoutLineage atomic.Uint64
 }
 
 // RevocationCacheConfig configures a RevocationCache.
@@ -221,6 +222,7 @@ func (c *RevocationCache) Clear() {
 // revocation still takes Clear.
 func (c *RevocationCache) ClearRevoked(ids ...uuid.UUID) {
 	if c.lineage == nil {
+		c.clearsWithoutLineage.Add(1)
 		c.Clear()
 		return
 	}
@@ -246,6 +248,10 @@ type RevocationCacheStats struct {
 	// ClearRevoked that dropped only what a revocation outdates; one over
 	// an upstream that names no ancestors is a Clear.
 	Clears, ClearsRevoked uint64
+	// ClearsWithoutLineage counts the calls to ClearRevoked that cleared
+	// whole, as the upstream names no lineage: a part of Clears, apart from
+	// a Clear asked for. Growing, narrow invalidation is off (Lineage).
+	ClearsWithoutLineage uint64
 	// Lineage reports that the cache's upstream names each answer's
 	// ancestors, so ClearRevoked drops only what a revocation outdates;
 	// false, every ClearRevoked is a Clear.
@@ -279,11 +285,12 @@ type RevocationCacheCounts struct {
 // apart.
 func (c *RevocationCache) Stats() RevocationCacheStats {
 	return RevocationCacheStats{
-		Capabilities:  countsOf(c.caps.Stats()),
-		Biscuits:      countsOf(c.copies.Stats()),
-		Clears:        c.clears.Load(),
-		ClearsRevoked: c.clearsRevoked.Load(),
-		Lineage:       c.lineage != nil,
+		Capabilities:         countsOf(c.caps.Stats()),
+		Biscuits:             countsOf(c.copies.Stats()),
+		Clears:               c.clears.Load(),
+		ClearsRevoked:        c.clearsRevoked.Load(),
+		ClearsWithoutLineage: c.clearsWithoutLineage.Load(),
+		Lineage:              c.lineage != nil,
 	}
 }
 
