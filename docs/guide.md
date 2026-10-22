@@ -794,8 +794,10 @@ bounds how long a revoked capability still verifies. So the cache has two
 bounds. `TTL` — keep it as short as a revocation may go unseen — serves
 answers while no signal vouches for the cache; `SyncedTTL`, a little above
 the interval between two verifications of one token, serves them from
-`RevocationCache.Listening` to `NotListening`, which the watcher calls as its
-connection comes and goes. `NotListening` cuts short the answers cached
+`RevocationCache.Listening` to `NotListening`, which `pgstore.RevocationWatcher`
+calls on every cache that has them
+(`pgstore.Syncer`) as its connection comes and goes, passing each
+notification to `RevocationCache.Signal`. `NotListening` cuts short the answers cached
 under `SyncedTTL` at once, and `Listening` clears the cache before raising
 the bound. `Stats().Synced` says which bound is in force, `Syncs` counts
 the watcher's connections, `SyncsLost` and `LastSyncLoss` its losses, and
