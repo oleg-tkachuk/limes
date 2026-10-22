@@ -497,6 +497,26 @@ func (s *Store) forgetErased() {
 	maps.DeleteFunc(s.erased, func(tenant uuid.UUID, _ struct{}) bool { return !held[tenant] })
 }
 
+// RevocationLineage implements limes.RevocationLineageLookup: IsRevoked's
+// answer, and the ancestors still on record it read, nearest first.
+func (s *Store) RevocationLineage(_ context.Context, id uuid.UUID) (bool, []uuid.UUID, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	revoked, err := s.revokedLocked(id)
+	if err != nil {
+		return false, nil, err
+	}
+	ancestors, err := s.ancestorsLocked(id)
+	if err != nil {
+		return false, nil, err
+	}
+	ids := make([]uuid.UUID, len(ancestors))
+	for i, a := range ancestors {
+		ids[i] = a.ID
+	}
+	return revoked, ids, nil
+}
+
 func (s *Store) exists(id uuid.UUID) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1928,11 +1948,12 @@ func max0(n limes.Nanos) limes.Nanos {
 // nothing but this module. If either assertion breaks, a third party cannot
 // implement the contract either.
 var (
-	_ limes.TenantRecordEraser = (*Store)(nil)
-	_ limes.Store              = (*Store)(nil)
-	_ limes.IssuanceStore      = (*Store)(nil)
-	_ meter.UsageStore         = (*UsageStore)(nil)
-	_ meter.TenantUsageEraser  = (*UsageStore)(nil)
+	_ limes.TenantRecordEraser      = (*Store)(nil)
+	_ limes.Store                   = (*Store)(nil)
+	_ limes.RevocationLineageLookup = (*Store)(nil)
+	_ limes.IssuanceStore           = (*Store)(nil)
+	_ meter.UsageStore              = (*UsageStore)(nil)
+	_ meter.TenantUsageEraser       = (*UsageStore)(nil)
 )
 
 var _ meter.CopyUsageReader = (*UsageStore)(nil)

@@ -22,9 +22,26 @@ type RevocationLookup interface {
 	IsRevoked(ctx context.Context, id uuid.UUID) (bool, error)
 }
 
+// RevocationLineageLookup is a RevocationLookup that also names the
+// ancestors an answer covers. A RevocationCache over one keeps them beside
+// each "not revoked" answer, so ClearRevoked drops only the answers a
+// revocation outdates rather than every one. memstore's Store and pgstore's
+// are each one.
+type RevocationLineageLookup interface {
+	RevocationLookup
+	// RevocationLineage answers as IsRevoked does, and names the ancestors
+	// of id still on record that the answer read: every one, when id is
+	// not revoked.
+	RevocationLineage(ctx context.Context, id uuid.UUID) (revoked bool, ancestors []uuid.UUID, err error)
+}
+
 // DefaultRevocationCacheTTL bounds how long a cached answer is served. A
 // revocation therefore takes effect within this window on every verifier
-// that did not perform it.
+// that did not perform it and hears no signal of it. It suits the requests
+// of one exchange; a token verified less often — once per step of an agent
+// — wants a TTL a little above the interval between its checks, and a
+// revocation signal (Clear, ClearRevoked) reaches the cache at once
+// whatever the TTL.
 const DefaultRevocationCacheTTL = 2 * time.Second
 
 // DefaultRevocationCacheEntries bounds the cache. Past it, the oldest entry
@@ -40,17 +57,24 @@ const DefaultRevocationCacheEntries = 100_000
 // A cached answer about a capability is also an answer about its ancestors,
 // so revoking a parent reaches a child's cached "live" entry only when that
 // entry expires — within the TTL, like any other revocation seen from
-// another process — or when Clear drops it. There is no per-id drop: the
-// cache does not know which entries are a revoked id's descendants.
+// another process — or when Clear drops it. ClearRevoked drops only the
+// answers a revocation of some ids outdates, when the capabilities' upstream
+// is a RevocationLineageLookup and the cache knows each answer's ancestors;
+// over any other upstream it is Clear.
 //
 // Concurrent misses for the same question share one upstream call.
 type RevocationCache struct {
 	capabilities RevocationLookup
+	// lineage is capabilities as a RevocationLineageLookup; nil when it is
+	// not one.
+	lineage RevocationLineageLookup
 	// biscuits is nil for a cache that answers no Biscuit question.
 	biscuits BiscuitRevocationLookup
 	caps     *ttlcache.Cache[uuid.UUID]
 	copies   *ttlcache.Cache[string]
 	clears   atomic.Uint64
+	// clearsRevoked counts the calls to ClearRevoked that did not Clear.
+	clearsRevoked atomic.Uint64
 }
 
 // RevocationCacheConfig configures a RevocationCache.
@@ -93,8 +117,10 @@ func NewRevocationCache(cfg RevocationCacheConfig) (*RevocationCache, error) {
 	if err != nil {
 		return nil, err
 	}
+	lineage, _ := cfg.Capabilities.(RevocationLineageLookup)
 	return &RevocationCache{
 		capabilities: cfg.Capabilities,
+		lineage:      lineage,
 		biscuits:     cfg.Biscuits,
 		caps:         ttlcache.New[uuid.UUID](c),
 		copies:       ttlcache.New[string](c),
@@ -141,7 +167,13 @@ func newCacheConfig(ttl time.Duration, maxEntries int, now func() time.Time) (tt
 // every concurrent caller asking about the same id. An upstream error is
 // returned to all of them and is never cached.
 func (c *RevocationCache) IsRevoked(ctx context.Context, id uuid.UUID) (bool, error) {
-	revoked, _, err := c.caps.Get(ctx, id, func(ctx context.Context) (bool, error) { return c.capabilities.IsRevoked(ctx, id) })
+	if c.lineage == nil {
+		revoked, _, err := c.caps.Get(ctx, id, func(ctx context.Context) (bool, error) { return c.capabilities.IsRevoked(ctx, id) })
+		return revoked, err
+	}
+	revoked, _, err := c.caps.GetTagged(ctx, id, func(ctx context.Context) (bool, []uuid.UUID, error) {
+		return c.lineage.RevocationLineage(ctx, id)
+	})
 	return revoked, err
 }
 
@@ -154,6 +186,24 @@ func (c *RevocationCache) Clear() {
 	c.clears.Add(1)
 	c.caps.Clear()
 	c.copies.Clear()
+}
+
+// ClearRevoked drops what a revocation of ids outdates: each one's cached
+// "not revoked" answer and that of every descendant the cache holds one
+// for, which it knows by the ancestors its upstream named. Every other
+// answer stays, Biscuit copies' among them — revoking a capability revokes
+// no copy's own id — so a consumer that revokes often keeps the answers it
+// did not touch. A lookup in flight when it runs caches nothing, as with
+// Clear. Over an upstream that is no RevocationLineageLookup it is Clear:
+// the cache cannot tell a descendant from any other id. A Biscuit copy's
+// revocation still takes Clear.
+func (c *RevocationCache) ClearRevoked(ids ...uuid.UUID) {
+	if c.lineage == nil {
+		c.Clear()
+		return
+	}
+	c.clearsRevoked.Add(1)
+	c.caps.Forget(ids)
 }
 
 // Sweep drops every expired entry, of either kind, and returns how many it
@@ -170,9 +220,11 @@ type RevocationCacheStats struct {
 	Capabilities RevocationCacheCounts
 	// Biscuits counts the IsBiscuitRevoked questions.
 	Biscuits RevocationCacheCounts
-	// Clears counts the calls to Clear.
-	Clears uint64
-	_      noCompare
+	// Clears counts the calls to Clear, and ClearsRevoked those to
+	// ClearRevoked that dropped only what a revocation outdates; one over
+	// an upstream that names no ancestors is a Clear.
+	Clears, ClearsRevoked uint64
+	_                     noCompare
 }
 
 // RevocationCacheCounts is one kind of answer's share of
@@ -201,9 +253,10 @@ type RevocationCacheCounts struct {
 // apart.
 func (c *RevocationCache) Stats() RevocationCacheStats {
 	return RevocationCacheStats{
-		Capabilities: countsOf(c.caps.Stats()),
-		Biscuits:     countsOf(c.copies.Stats()),
-		Clears:       c.clears.Load(),
+		Capabilities:  countsOf(c.caps.Stats()),
+		Biscuits:      countsOf(c.copies.Stats()),
+		Clears:        c.clears.Load(),
+		ClearsRevoked: c.clearsRevoked.Load(),
 	}
 }
 

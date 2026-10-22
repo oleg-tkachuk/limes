@@ -79,15 +79,15 @@ type shard[K comparable] struct {
 	// it.
 	mu         sync.RWMutex
 	maxEntries int
-	entries    map[K]cacheEntry
-	inflight   map[K]*lookupCall
+	entries    map[K]cacheEntry[K]
+	inflight   map[K]*lookupCall[K]
 	// order holds the entries in the order they were cached, which every
 	// entry sharing one TTL makes the order they expire in, but for an id
 	// seeded from a set's answer, which expires with that answer: sweeping
 	// stops at the first place not yet expired, so such an id is dropped a
-	// little late, and never served past its expiry. One place per entry,
-	// since a key is cached again only once its place has expired and been
-	// dropped.
+	// little late, and never served past its expiry. A key Forget dropped
+	// can be cached again before its old place expires: that place then
+	// names an entry no longer its own, and dropping it leaves the new one.
 	order []queued[K]
 	// misses and lookups count the shard's questions not answered from
 	// it and the upstream lookups run for them; evictions the live entries
@@ -97,9 +97,12 @@ type shard[K comparable] struct {
 	_               [cacheLine]byte
 }
 
-type cacheEntry struct {
+type cacheEntry[K comparable] struct {
 	revoked bool
 	expires time.Time
+	// tags are the keys a "not revoked" answer also covers, which Forget
+	// drops it with (GetTagged).
+	tags []K
 }
 
 // queued is a key's place in Cache.order.
@@ -108,9 +111,10 @@ type queued[K comparable] struct {
 	expires time.Time
 }
 
-type lookupCall struct {
+type lookupCall[K comparable] struct {
 	done    chan struct{}
 	revoked bool
+	tags    []K
 	err     error
 	// expires is when the answer stops being fresh: a TTL from when the
 	// lookup started, no later than the entry finish caches.
@@ -131,7 +135,7 @@ func New[K comparable](cfg Config) *Cache[K] {
 		if i < cfg.MaxEntries%n {
 			share++
 		}
-		c.shards[i] = &shard[K]{maxEntries: share, entries: make(map[K]cacheEntry), inflight: make(map[K]*lookupCall)}
+		c.shards[i] = &shard[K]{maxEntries: share, entries: make(map[K]cacheEntry[K]), inflight: make(map[K]*lookupCall[K])}
 	}
 	return c
 }
@@ -145,6 +149,16 @@ func (c *Cache[K]) shardOf(key K) *shard[K] {
 // concurrent caller missing it, with when the answer stops being fresh. An
 // error is returned and never cached. It counts one hit or one miss.
 func (c *Cache[K]) Get(ctx context.Context, key K, lookup func(context.Context) (bool, error)) (bool, time.Time, error) {
+	return c.GetTagged(ctx, key, func(ctx context.Context) (bool, []K, error) {
+		revoked, err := lookup(ctx)
+		return revoked, nil, err
+	})
+}
+
+// GetTagged is Get with a lookup that also names the keys its answer
+// covers, its tags: Forget of any of them drops a "not revoked" answer
+// cached under key.
+func (c *Cache[K]) GetTagged(ctx context.Context, key K, lookup func(context.Context) (bool, []K, error)) (bool, time.Time, error) {
 	s := c.shardOf(key)
 	s.mu.RLock()
 	e, ok := s.entries[key]
@@ -159,7 +173,7 @@ func (c *Cache[K]) Get(ctx context.Context, key K, lookup func(context.Context) 
 
 // get is Get past its first read, counting nothing more: a waiter that asks
 // again is still the one question.
-func (c *Cache[K]) get(ctx context.Context, s *shard[K], key K, lookup func(context.Context) (bool, error)) (bool, time.Time, error) {
+func (c *Cache[K]) get(ctx context.Context, s *shard[K], key K, lookup func(context.Context) (bool, []K, error)) (bool, time.Time, error) {
 	s.mu.Lock()
 	// Read again under the write lock: another caller may have cached it, or
 	// started its lookup, since.
@@ -183,7 +197,7 @@ func (c *Cache[K]) get(ctx context.Context, s *shard[K], key K, lookup func(cont
 			return false, time.Time{}, ctx.Err()
 		}
 	}
-	call := &lookupCall{done: make(chan struct{}), err: errLookupAbandoned, expires: c.cfg.Now().Add(c.cfg.TTL)}
+	call := &lookupCall[K]{done: make(chan struct{}), err: errLookupAbandoned, expires: c.cfg.Now().Add(c.cfg.TTL)}
 	s.inflight[key] = call
 	epoch := c.epoch.Load()
 	s.mu.Unlock()
@@ -192,7 +206,7 @@ func (c *Cache[K]) get(ctx context.Context, s *shard[K], key K, lookup func(cont
 	// Deferred so that a lookup that panics still releases its waiters and
 	// the key.
 	defer c.finish(s, key, call, epoch)
-	call.revoked, call.err = lookup(ctx)
+	call.revoked, call.tags, call.err = lookup(ctx)
 	return call.revoked, call.expires, call.err
 }
 
@@ -251,7 +265,7 @@ func (c *Cache[K]) SeedLive(keys []K, epoch uint64, expires time.Time) {
 		_, inflight := s.inflight[k]
 		if e, ok := s.entries[k]; !inflight && (!ok || !e.expires.After(now)) {
 			s.makeRoomLocked(now)
-			s.entries[k] = cacheEntry{expires: expires}
+			s.entries[k] = cacheEntry[K]{expires: expires}
 			s.order = append(s.order, queued[K]{key: k, expires: expires})
 		}
 		s.mu.Unlock()
@@ -260,7 +274,7 @@ func (c *Cache[K]) SeedLive(keys []K, epoch uint64, expires time.Time) {
 
 // finish publishes call's answer to its waiters and caches it in s, unless
 // it failed or a clear happened while it ran.
-func (c *Cache[K]) finish(s *shard[K], key K, call *lookupCall, epoch uint64) {
+func (c *Cache[K]) finish(s *shard[K], key K, call *lookupCall[K], epoch uint64) {
 	s.mu.Lock()
 	if s.inflight[key] == call {
 		delete(s.inflight, key)
@@ -269,7 +283,7 @@ func (c *Cache[K]) finish(s *shard[K], key K, call *lookupCall, epoch uint64) {
 		now := c.cfg.Now()
 		s.makeRoomLocked(now)
 		expires := now.Add(c.cfg.TTL)
-		s.entries[key] = cacheEntry{revoked: call.revoked, expires: expires}
+		s.entries[key] = cacheEntry[K]{revoked: call.revoked, expires: expires, tags: call.tags}
 		s.order = append(s.order, queued[K]{key: key, expires: expires})
 	}
 	s.mu.Unlock()
@@ -334,6 +348,48 @@ func (c *Cache[K]) Clear() {
 		s.order = nil
 		s.mu.Unlock()
 	}
+}
+
+// Forget drops the "not revoked" answers keys outdate — each key's own, and
+// every one tagged with a key — and detaches every lookup in flight, so the
+// next check of those asks upstream. It is counted as a clear is, so a
+// lookup that started before it caches nothing: it may have read the state
+// a revocation of keys changed, about a key it does not name yet. A
+// "revoked" answer stays: no revocation is undone. It returns how many
+// answers it dropped.
+func (c *Cache[K]) Forget(keys []K) int {
+	gone := make(map[K]struct{}, len(keys))
+	for _, k := range keys {
+		gone[k] = struct{}{}
+	}
+	outdated := func(key K, e cacheEntry[K]) bool {
+		if e.revoked {
+			return false
+		}
+		if _, ok := gone[key]; ok {
+			return true
+		}
+		for _, t := range e.tags {
+			if _, ok := gone[t]; ok {
+				return true
+			}
+		}
+		return false
+	}
+	c.epoch.Add(1)
+	dropped := 0
+	for _, s := range c.shards {
+		s.mu.Lock()
+		clear(s.inflight)
+		for key, e := range s.entries {
+			if outdated(key, e) {
+				delete(s.entries, key)
+				dropped++
+			}
+		}
+		s.mu.Unlock()
+	}
+	return dropped
 }
 
 // Sweep drops every expired entry and returns how many it dropped.
