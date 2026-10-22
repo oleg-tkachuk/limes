@@ -739,13 +739,17 @@ and forward it, or a caller checking for it finds it gone.
 ## Revoke
 
 ```go
-records.Revoke(ctx, limes.RevokeRequest{
+result, err := records.Revoke(ctx, limes.RevokeRequest{
     CapabilityID: cap.ID, Note: "agent looping", Actor: "operator@example.com",
     CascadeChildren: true,   // also records each sub-agent's revocation, for the audit
 })
 ```
 
-Idempotent; an id not on record is `ErrNotFound` and writes nothing.
+Idempotent: a repeat keeps the first entry, and `result.AlreadyRevoked`
+says the capability had one before this call; `result.Revocation` is the
+entry that stands, so a caller learns whether it stopped the capability
+without a read beforehand, which a concurrent revoke could outdate. An id
+not on record is `ErrNotFound` and writes nothing.
 `GetRecord` reads the record back with `IssuedBy` and its own `Revocation`,
 whose `Cascaded` says a cascading revoke wrote it; a capability stopped only
 through an ancestor has none, so ask `IsRevoked` whether it verifies.
@@ -839,7 +843,7 @@ usage, _ := pgstore.NewUsageStore(pgstore.Config{DB: pool})
 // and a read across tenants, ListTenantBudgets among them,
 // pgstore.WithAllTenantsReadOnly(ctx), which admits no write: one is
 // refused with ErrScopeMismatch before it begins.
-err = records.Revoke(pgstore.WithTenant(ctx, tenant), limes.RevokeRequest{CapabilityID: id})
+_, err = records.Revoke(pgstore.WithTenant(ctx, tenant), limes.RevokeRequest{CapabilityID: id})
 ```
 
 `Config.DB` is a `pgstore.DB` — `BeginTx` and `QueryRow`, which

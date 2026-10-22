@@ -893,7 +893,7 @@ Revocation is a write to the `Store`; verifiers see it through
 
 ```mermaid
 flowchart LR
-    op(["Revoke(RevokeRequest{CapabilityID, Note, Actor, CascadeChildren})"])
+    op(["Revoke(RevokeRequest{CapabilityID, Note, Actor, CascadeChildren})<br/>→ RevokeResult{AlreadyRevoked, Revocation}"])
     store[("<b>Store</b><br/>revoked set<br/>ParentID links")]
     cascade["CascadeChildren:<br/>a revocation entry per descendant,<br/>MaxDelegationDepth generations down,<br/>for the audit trail; an earlier entry stands"]
     chain["IsRevoked(id):<br/>id revoked, or any ancestor still on record revoked<br/>past MaxDelegationDepth: ErrDelegationTooDeep<br/>pgstore: one statement, every tenant"]
