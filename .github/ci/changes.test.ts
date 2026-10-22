@@ -6,7 +6,7 @@ import { after, before, describe, test } from "node:test";
 
 import { parse } from "yaml";
 
-import { ALL_GROUPS, Group, INERT, READ_BY_TESTS, OUTPUT_CODE, PUSH_EVENT, SCRIPTS_TASKS, VERIFY_GATE, candidateRange, checkedGroups, classify, reachedGroups, reachesCode, verifyTasks } from "./changes.ts";
+import { ALL_GROUPS, Group, INERT, READ_BY_TESTS, OUTPUT_CODE, PUSH_EVENT, SCRIPTS_TASKS, VERIFY_GATE, candidateRange, changesSummary, checkedGroups, classify, reachedGroups, reachesCode, verifyTasks } from "./changes.ts";
 import { globToRegExp } from "./lib/glob.ts";
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
 
@@ -80,6 +80,24 @@ test("ci.yaml tells the changes step its event and dispatches on the diff", () =
 
 test("a push that created the branch names no diff", () => {
   assert.equal(candidateRange({ before: "0".repeat(40), after: "abc" }), undefined);
+});
+
+describe("changesSummary", () => {
+  test("a pull request says which groups it reaches and checks", () => {
+    const page = changesSummary("pull_request", new Set([Group.Pgstore]), new Set([Group.Pgstore]));
+    assert.match(page, /^### Changed paths\n/);
+    assert.match(page, /the jobs of the others report as skipped/);
+    assert.match(page, /\| pgstore \| yes \| yes \|/);
+    assert.match(page, /\| root \| no \| no \|/);
+    assert.equal(page.match(/^\| [a-z]+ \|/gm)?.length, ALL_GROUPS.length);
+  });
+  test("a push checks what its diff does not reach", () => {
+    const page = changesSummary(PUSH_EVENT, new Set(), new Set(ALL_GROUPS));
+    assert.match(page, /A push to main checks every group/);
+    assert.match(page, /\| root \| no \| yes \|/);
+  });
+  test("documentation alone checks nothing", () =>
+    assert.match(changesSummary("pull_request", new Set(), new Set()), /Documentation only/));
 });
 
 describe("classify", () => {
