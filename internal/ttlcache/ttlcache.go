@@ -146,6 +146,9 @@ func New[K comparable](cfg Config) *Cache[K] {
 	return c
 }
 
+// Now is the time by the cache's clock.
+func (c *Cache[K]) Now() time.Time { return c.cfg.Now() }
+
 // TTL is how long an answer is served now.
 func (c *Cache[K]) TTL() time.Duration { return time.Duration(c.ttl.Load()) }
 

@@ -81,8 +81,14 @@ type RevocationCache struct {
 	// revocation signal and while one vouches for the cache (synced).
 	ttl, syncedTTL time.Duration
 	synced         atomic.Bool
-	// syncs counts the calls to Listening.
-	syncs atomic.Uint64
+	// syncs counts the calls to Listening, syncsLost those to NotListening,
+	// and lastSyncLoss is the time of the last, in Unix nanoseconds: zero,
+	// none yet.
+	syncs, syncsLost atomic.Uint64
+	lastSyncLoss     atomic.Int64
+	// signals counts the calls to Signal, and signalsWhole those that named
+	// no id.
+	signals, signalsWhole atomic.Uint64
 	// clearsRevoked counts the calls to ClearRevoked that did not Clear, and
 	// clearsWithoutLineage those that did.
 	clearsRevoked, clearsWithoutLineage atomic.Uint64
@@ -269,8 +275,24 @@ func (c *RevocationCache) Listening() {
 // unheard, so every answer, those cached already among them, is served
 // for TTL alone until the next Listening.
 func (c *RevocationCache) NotListening() {
+	c.syncsLost.Add(1)
+	c.lastSyncLoss.Store(c.caps.Now().UnixNano())
 	c.synced.Store(false)
 	c.setTTL(c.ttl)
+}
+
+// Signal is a revocation signal's word that ids were revoked: ClearRevoked
+// of them, or Clear when it names none — a Biscuit copy's revocation, or
+// too many ids to name. pgstore.RevocationWatcher calls it on each
+// notification, so Stats counts what the signal said.
+func (c *RevocationCache) Signal(ids ...uuid.UUID) {
+	c.signals.Add(1)
+	if len(ids) == 0 {
+		c.signalsWhole.Add(1)
+		c.Clear()
+		return
+	}
+	c.ClearRevoked(ids...)
 }
 
 // setTTL is the TTL each kind of answer is served for.
@@ -307,6 +329,16 @@ type RevocationCacheStats struct {
 	// connections, its first and every reconnect.
 	Synced bool
 	Syncs  uint64
+	// SyncsLost counts the calls to NotListening, and LastSyncLoss is the
+	// time of the last: zero, none yet. A count growing as fast as Syncs
+	// says the watcher keeps losing its connection.
+	SyncsLost    uint64
+	LastSyncLoss time.Time
+	// Signals counts the notifications a revocation signal passed on
+	// (Signal), and SignalsWhole those that named no id and cleared whole,
+	// a part of Clears. Clears less Syncs, SignalsWhole and
+	// ClearsWithoutLineage is the Clears the consumer asked for itself.
+	Signals, SignalsWhole uint64
 	// Lineage reports that the cache's upstream names each answer's
 	// ancestors, so ClearRevoked drops only what a revocation outdates;
 	// false, every ClearRevoked is a Clear.
@@ -347,10 +379,22 @@ func (c *RevocationCache) Stats() RevocationCacheStats {
 		ClearsWithoutLineage: c.clearsWithoutLineage.Load(),
 		Synced:               c.synced.Load(),
 		Syncs:                c.syncs.Load(),
+		SyncsLost:            c.syncsLost.Load(),
+		LastSyncLoss:         unixNanoTime(c.lastSyncLoss.Load()),
+		Signals:              c.signals.Load(),
+		SignalsWhole:         c.signalsWhole.Load(),
 		Lineage:              c.lineage != nil,
 	}
 }
 
 func countsOf(st ttlcache.Stats) RevocationCacheCounts {
 	return RevocationCacheCounts{Hits: st.Hits, Misses: st.Misses, Lookups: st.Lookups, Evictions: st.Evictions, Entries: st.Entries}
+}
+
+// unixNanoTime is the time of ns Unix nanoseconds, the zero time for 0.
+func unixNanoTime(ns int64) time.Time {
+	if ns == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, ns)
 }

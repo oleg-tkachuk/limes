@@ -797,8 +797,12 @@ the interval between two verifications of one token, serves them from
 `RevocationCache.Listening` to `NotListening`, which the watcher calls as its
 connection comes and goes. `NotListening` cuts short the answers cached
 under `SyncedTTL` at once, and `Listening` clears the cache before raising
-the bound. `Stats().Synced` says which bound is in force, and `Syncs` counts
-the watcher's connections. A cache no watcher tells either way serves for
+the bound. `Stats().Synced` says which bound is in force, `Syncs` counts
+the watcher's connections, `SyncsLost` and `LastSyncLoss` its losses, and
+`Signals` the notifications it passed on through `RevocationCache.Signal` —
+`SignalsWhole` those that named no id and cleared whole. Of `Clears`, what
+`Syncs`, `SignalsWhole` and `ClearsWithoutLineage` do not account for is
+the consumer's own. A cache no watcher tells either way serves for
 `TTL` alone, as before. Build the cache with `NewRevocationCache` over your store, as
 `Capabilities` and, if the verifier reads Biscuits, `Biscuits`; `Sweep` drops
 its expired entries on a timer of yours, optional since lookups skip and replace

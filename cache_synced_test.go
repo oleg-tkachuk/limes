@@ -115,3 +115,38 @@ func TestSyncedTTLBounds(t *testing.T) {
 		t.Errorf("SyncedTTL unset, synced: %v, %v; want the revocation seen past TTL", revoked, err)
 	}
 }
+
+// Stats tells each cause of a whole clear apart: the signal's connections
+// (Syncs), its notifications naming no id (SignalsWhole), ClearRevoked
+// without lineage (ClearsWithoutLineage) and the consumer's own, the rest
+// of Clears; and when the signal was last lost.
+func TestStatsTellTheCausesOfAClear(t *testing.T) {
+	ctx := context.Background()
+	s := newExampleStack()
+	clk := &testClock{now: time.Now()}
+	cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: s.records, Now: clk.Now})
+	c, _ := s.issue()
+	cache.Listening()
+	if _, err := cache.IsRevoked(ctx, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	other, _ := s.issue()
+	cache.Signal(other.ID)
+	if st := cache.Stats(); st.Capabilities.Entries != 1 || st.ClearsRevoked != 1 {
+		t.Errorf("a signal naming an unrelated id: Stats = %+v; want the answer kept, one narrow clear", st)
+	}
+	cache.Signal()
+	clk.advance(time.Second)
+	cache.NotListening()
+	cache.Clear()
+	st := cache.Stats()
+	if st.Signals != 2 || st.SignalsWhole != 1 || st.Syncs != 1 || st.SyncsLost != 1 || !st.LastSyncLoss.Equal(clk.Now()) {
+		t.Errorf("Stats = %+v; want 2 signals, 1 whole, 1 sync, 1 lost at %s", st, clk.Now())
+	}
+	if own := st.Clears - st.Syncs - st.SignalsWhole - st.ClearsWithoutLineage; own != 1 {
+		t.Errorf("Clears %d less the causes counted = %d, want the 1 asked for", st.Clears, own)
+	}
+	if fresh := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: s.records}); !fresh.Stats().LastSyncLoss.IsZero() {
+		t.Error("LastSyncLoss set before any loss")
+	}
+}
