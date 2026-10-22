@@ -64,7 +64,11 @@ func TestRevocationWatcherClearsOnEveryRevocation(t *testing.T) {
 	}()
 	awaitClear(t, cleared, "once listening")
 	mine := WithTenant(t.Context(), f.mine)
-	if _, err := f.records.Revoke(mine, limes.RevokeRequest{CapabilityID: f.child.ID}); err != nil {
+	c := f.capability(f.mine)
+	if err := f.records.Insert(mine, limes.InsertRequest{Capability: c, IssuedBy: c.Subject}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.records.Revoke(mine, limes.RevokeRequest{CapabilityID: c.ID}); err != nil {
 		t.Fatal(err)
 	}
 	awaitClear(t, cleared, "after Revoke")

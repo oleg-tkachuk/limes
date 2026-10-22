@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -22,15 +24,34 @@ const (
 	watchRetryMost  = 10 * time.Second
 )
 
+// MaxNotifiedRevocations is the most capability ids one notification names
+// (migrations/018_revocation_lineage.sql spells it too, and a test holds
+// the two to one number): past it, the notification names none, and a cache
+// is cleared whole.
+const MaxNotifiedRevocations = 100
+
 // Clearer is a cache the watcher clears: limes.RevocationCache is.
 type Clearer interface {
 	Clear()
 }
 
+// RevokedClearer is a cache that can drop only what a revocation of some
+// capabilities outdates: limes.RevocationCache is.
+type RevokedClearer interface {
+	Clearer
+	ClearRevoked(ids ...uuid.UUID)
+}
+
 // RevocationWatcher clears revocation caches when any replica revokes: it
-// listens on RevocationChannel and clears every cache on each notification,
+// listens on RevocationChannel and, on each notification, drops from each
+// cache what the revocation outdates — with ClearRevoked, from a
+// RevokedClearer, when the notification names the capabilities revoked —
+// or clears it whole: a cache that is no RevokedClearer, a notification
+// that names none (a Biscuit copy's revocation, a statement revoking more
+// than MaxNotifiedRevocations capabilities that no ancestor's id covers),
 // and after each connection it opens, since a revocation made while it was
-// not listening sent a notification it never heard.
+// not listening sent a notification it never heard. Between connections, a
+// cache's TTL bounds how long a revocation may go unseen.
 type RevocationWatcher struct {
 	// Connect opens the connection the watcher listens on. It must be the
 	// watcher's own, not one a pool takes back with the LISTEN still on
@@ -86,17 +107,42 @@ func (w RevocationWatcher) listen(ctx context.Context) (listened bool, err error
 	}
 	// Listening now, so whatever was revoked before is in the store: what
 	// the caches hold from before may be stale.
-	w.clear()
+	w.clear(nil)
 	for {
-		if _, err := conn.WaitForNotification(ctx); err != nil {
+		n, err := conn.WaitForNotification(ctx)
+		if err != nil {
 			return true, fmt.Errorf("pgstore: watch revocations: %w", err)
 		}
-		w.clear()
+		w.clear(revokedIDs(n.Payload))
 	}
 }
 
-func (w RevocationWatcher) clear() {
+// revokedIDs is the capability ids a notification's payload names, nil for
+// one that names none or that does not parse.
+func revokedIDs(payload string) []uuid.UUID {
+	fields := strings.Fields(payload)
+	ids := make([]uuid.UUID, 0, len(fields))
+	for _, f := range fields {
+		id, err := uuid.Parse(f)
+		if err != nil {
+			return nil
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return ids
+}
+
+// clear drops what a revocation of ids outdates from each cache that can
+// tell, and clears the others and every cache when ids is nil.
+func (w RevocationWatcher) clear(ids []uuid.UUID) {
 	for _, c := range w.Caches {
+		if r, ok := c.(RevokedClearer); ok && ids != nil {
+			r.ClearRevoked(ids...)
+			continue
+		}
 		c.Clear()
 	}
 }
