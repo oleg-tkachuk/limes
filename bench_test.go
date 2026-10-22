@@ -146,6 +146,17 @@ func BenchmarkIssue(b *testing.B) {
 	}
 }
 
+// Minting the Biscuit form of a capability the verifier accepted.
+func BenchmarkBiscuit(b *testing.B) {
+	env := newBenchEnv(b, nil)
+	req := limes.BiscuitRequest{Capability: env.verified}
+	for b.Loop() {
+		if _, err := env.issuer.Biscuit(context.Background(), req); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func BenchmarkDelegate(b *testing.B) {
 	env := newBenchEnv(b, nil)
 	req := limes.DelegateRequest{
@@ -372,15 +383,63 @@ func BenchmarkRevocationCacheHitParallel(b *testing.B) {
 // Every processor asks about capabilities of its own, as a service's
 // handlers serving many callers do.
 func BenchmarkRevocationCacheHitParallelManyKeys(b *testing.B) {
-	env := newBenchEnv(b, nil)
+	env, ids := benchCachedEnv(b)
 	ctx := context.Background()
+	var next atomic.Int64
+	parallel(b, func() error {
+		_, err := env.cache.IsRevoked(ctx, ids[next.Add(1)%benchCachedIDs])
+		return err
+	})
+}
+
+// benchCachedEnv is a bench env whose cache holds benchCachedIDs answers,
+// and their ids.
+func benchCachedEnv(b *testing.B) (benchEnv, []uuid.UUID) {
+	b.Helper()
+	env := newBenchEnv(b, nil)
 	ids := make([]uuid.UUID, benchCachedIDs)
 	for i := range ids {
 		ids[i] = uuid.New()
-		if _, err := env.cache.IsRevoked(ctx, ids[i]); err != nil {
+		if _, err := env.cache.IsRevoked(context.Background(), ids[i]); err != nil {
 			b.Fatal(err)
 		}
 	}
+	return env, ids
+}
+
+// Reading the counts of a cache that holds answers in every shard, as a
+// metrics exporter does each time it collects.
+func BenchmarkRevocationCacheStats(b *testing.B) {
+	env, _ := benchCachedEnv(b)
+	for b.Loop() {
+		if env.cache.Stats().Capabilities.Entries < benchCachedIDs {
+			b.Fatal("the cache lost an answer")
+		}
+	}
+}
+
+// BenchmarkRevocationCacheHitParallelManyKeys with the counts read without
+// pause beside it: the gap between the two is what reading them costs the
+// checks.
+func BenchmarkRevocationCacheHitParallelUnderStats(b *testing.B) {
+	env, ids := benchCachedEnv(b)
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				env.cache.Stats()
+			}
+		}
+	}()
+	b.Cleanup(func() {
+		close(stop)
+		<-done
+	})
+	ctx := context.Background()
 	var next atomic.Int64
 	parallel(b, func() error {
 		_, err := env.cache.IsRevoked(ctx, ids[next.Add(1)%benchCachedIDs])
