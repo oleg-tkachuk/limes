@@ -4,6 +4,8 @@ name: Fuzz
 # target for real, once a week, so a parser of untrusted input is searched
 # for the inputs nobody thought to write down. A failure uploads the input
 # that found it; commit it under testdata/fuzz to keep it as a regression.
+# Each target's search, and a failure's input and how to run it again, go on
+# the run's summary page (.github/ci/fuzz-summary.ts).
 
 on:
   schedule:
@@ -87,11 +89,26 @@ jobs:
           go-version-file: go.mod
           cache: false
 
+      - name: Set up the CI scripts
+        uses: ./.github/actions/setup-ci
+
+      # Into the log as it runs, and into a file the summary reads.
       - name: Fuzz
+        id: fuzz
         env:
           PACKAGE: ${{ matrix.fuzz.package }}
           TARGET: ${{ matrix.fuzz.target }}
-        run: go test -run '^$' -fuzz "^${TARGET}\$" -fuzztime "$FUZZ_TIME" "$PACKAGE"
+        run: |
+          set -euo pipefail
+          go test -run '^$' -fuzz "^${TARGET}\$" -fuzztime "$FUZZ_TIME" "$PACKAGE" 2>&1 | tee "$RUNNER_TEMP/fuzz.log"
+
+      - name: Summarize
+        if: always() && steps.fuzz.outcome != 'skipped'
+        env:
+          PACKAGE: ${{ matrix.fuzz.package }}
+          TARGET: ${{ matrix.fuzz.target }}
+          OUTCOME: ${{ steps.fuzz.outcome }}
+        run: node .github/ci/fuzz-summary.ts "$RUNNER_TEMP/fuzz.log"
 
       - name: Upload the failing input
         if: failure()

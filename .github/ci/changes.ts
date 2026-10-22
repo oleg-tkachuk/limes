@@ -24,7 +24,7 @@
 // `code`, whether the push changed anything but documentation, which is what
 // a release is dispatched on.
 
-import { info, setOutput } from "./lib/actions.ts";
+import { info, setOutput, summarize, table } from "./lib/actions.ts";
 import { optionalEnv } from "./lib/env.ts";
 import { changedPaths, hasCommit } from "./lib/git.ts";
 import { matchesAny } from "./lib/glob.ts";
@@ -173,6 +173,25 @@ export function checkedGroups(event: string | undefined, reached: ReadonlySet<Gr
   return event === PUSH_EVENT ? new Set(ALL_GROUPS) : new Set(reached);
 }
 
+// SUMMARY_HEADER heads the summary table; YES and NO fill its cells.
+const SUMMARY_HEADER = ["Group", "Reached by the diff", "Checked"];
+const YES = "yes";
+const NO = "no";
+
+// changesSummary is the run's summary page section: why the run checks what
+// it does, and for each group whether the diff reaches it and whether it is
+// checked, so a skipped job says why on the page.
+export function changesSummary(event: string | undefined, reached: ReadonlySet<Group>, checked: ReadonlySet<Group>): string {
+  let why = "The groups the diff reaches are checked; the jobs of the others report as skipped.";
+  if (event === PUSH_EVENT) {
+    why = "A push to main checks every group, whatever its diff reaches.";
+  } else if (checked.size === 0) {
+    why = "Documentation only: every check reports as skipped.";
+  }
+  const rows = ALL_GROUPS.map((g) => [g, reached.has(g) ? YES : NO, checked.has(g) ? YES : NO]);
+  return `### Changed paths\n\n${why}\n\n${table(SUMMARY_HEADER, rows)}`;
+}
+
 async function main(): Promise<void> {
   const reached = await classify({
     base: optionalEnv("BASE"),
@@ -196,6 +215,7 @@ async function main(): Promise<void> {
     setOutput(group, String(groups.has(group)));
   }
   setOutput(OUTPUT_VERIFY_TASKS, verifyTasks(groups));
+  summarize(changesSummary(event, reached, groups));
 }
 
 if (import.meta.main) {

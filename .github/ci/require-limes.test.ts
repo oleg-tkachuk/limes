@@ -8,7 +8,7 @@ import { after, afterEach, before, beforeEach, describe, test } from "node:test"
 import { fakeData, fakeGitHub, type FakeData } from "./lib/fake-github.ts";
 import { git } from "./lib/git.ts";
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
-import { BRANCH, LIMES_MODULE, LIMES_REQUIREMENT_SCOPE, Proposal, compareVersions, goEnv, proposeRequirements, type Context } from "./require-limes.ts";
+import { BRANCH, LIMES_MODULE, LIMES_REQUIREMENT_SCOPE, Proposal, compareVersions, goEnv, proposeRequirements, requirementsSummary, type Context } from "./require-limes.ts";
 
 const MODULE = "nested";
 const OTHER = "other";
@@ -129,6 +129,7 @@ describe("proposeRequirements", () => {
     await scratch(REQUIRED, undefined, REQUIRED);
     const outcome = await proposeRequirements(ctx(), [MODULE, OTHER], "v0.2.0");
     assert.equal(outcome.proposal, Proposal.Opened);
+    assert.equal(typeof outcome.pullRequest, "number");
     assert.deepEqual(outcome.raised, [
       { dir: MODULE, from: REQUIRED },
       { dir: OTHER, from: REQUIRED },
@@ -208,4 +209,22 @@ describe("proposeRequirements", () => {
     await assert.rejects(proposeRequirements(ctx(), ["missing"], "v0.2.0"));
     await assert.rejects(proposeRequirements(ctx(), [""], "v0.2.0"));
   });
+});
+
+describe("requirementsSummary", () => {
+  test("names the pull request and what became of each module", () => {
+    const page = requirementsSummary("v0.2.0", ["pgstore", "otelmetric", "redisreplay"], {
+      proposal: Proposal.Opened,
+      pullRequest: 7,
+      raised: [{ dir: "pgstore", from: "v0.1.0" }],
+      failed: ["otelmetric"],
+    });
+    assert.match(page, /^### limes v0\.2\.0 required by the nested modules\n/);
+    assert.match(page, /Pull request #7 opened\./);
+    assert.match(page, /\| pgstore \| v0\.1\.0 → v0\.2\.0 \|/);
+    assert.match(page, /\| otelmetric \| failed/);
+    assert.match(page, /\| redisreplay \| left alone/);
+  });
+  test("with nothing to raise, no pull request", () =>
+    assert.match(requirementsSummary("v0.2.0", ["pgstore"], { proposal: Proposal.Unchanged, raised: [], failed: [] }), /No pull request: nothing to raise\./));
 });
