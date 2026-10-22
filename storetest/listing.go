@@ -340,9 +340,9 @@ func checkListRecordsCursorFilters(t *testing.T, f fixture) {
 // record, or another tenant's under a tenant's scope, as not found.
 func checkGetRecordListing(t *testing.T, f fixture) {
 	f.skipUnlessLister(t)
-	reader, ok := f.Lister.(limes.RecordListingReader)
+	reader, ok := f.Lister.(limes.RecordReporter)
 	if !ok {
-		t.Skip("Env.Lister is not a limes.RecordListingReader")
+		t.Skip("Env.Lister is not a limes.RecordReporter")
 	}
 	other := censusFixture(t, f)
 	for _, want := range f.listRecordsAll(t, limes.ListRecordsRequest{TenantID: f.Tenant}) {

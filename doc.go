@@ -70,7 +70,9 @@
 // [BiscuitRevocationStore] to revoke one copy of one, [RecordCensus] to count
 // capability records by disposition across tenants, [RecordLister] to list a
 // tenant's records with their dispositions and [RecordListingReader] to read
-// one with its disposition, [TenantRecordEraser] to
+// one with its disposition — [RecordReporter] is both, and the Census that
+// memstore.NewCensus and pgstore.NewCensus return serves all three —
+// [TenantRecordEraser] to
 // remove a tenant, [dpop.ReplayCache] to share DPoP replay
 // state across replicas ([dpop.MemoryReplayCache] ships for one process), and
 // [dpop.Nonces] to require server nonces ([dpop.HMACNonces] ships, and works

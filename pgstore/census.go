@@ -24,7 +24,8 @@ import (
 // The census and ListRecords read it, so neither walks the revocations.
 
 // Census implements limes.RecordCensus, limes.RecordLister and
-// limes.RecordListingReader over the store's capability records.
+// limes.RecordListingReader — limes.RecordReporter is the last two —
+// over the store's capability records.
 type Census struct {
 	conn
 }
@@ -417,4 +418,5 @@ var (
 	_ limes.RecordCensus        = (*Census)(nil)
 	_ limes.RecordLister        = (*Census)(nil)
 	_ limes.RecordListingReader = (*Census)(nil)
+	_ limes.RecordReporter      = (*Census)(nil)
 )

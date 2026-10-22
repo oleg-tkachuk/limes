@@ -934,6 +934,7 @@ Elsewhere, implement these and you are done:
 | `RecordCensus` | Counts capability records by disposition, for one tenant or every tenant (optional; a type of its own beside `Store`) | No |
 | `RecordLister` | Lists one tenant's capability records with their dispositions, filtered and paged either way (optional; a type of its own beside `Store`) | No |
 | `RecordListingReader` | Reads one record with its disposition, by the rules `RecordLister` and `RecordCensus` share (optional; a type of its own beside `RecordLister`) | No |
+| `RecordReporter` = `RecordLister` + `RecordListingReader` | Lists a tenant's records and reads one; `memstore.NewCensus` and `pgstore.NewCensus` return a `Census` that is both, and a `RecordCensus` | No |
 | `TenantRecordEraser`, `meter.TenantUsageEraser` | Erase a tenant's records and usage (optional) | No |
 | `meter.UsageStore` = `Meter` + `MeterReader` + `TenantBudgets` + `UsageHousekeeping` (only to meter) | Request and spend counters, the charges ledger, tenant ceilings; `DeleteUsage` and `PurgeOrphans` release a reaped capability's holds | Only for atomic side effects |
 | `KeyResolver` | Public verification keys; an unknown kid is `jwks.ErrUnknownKID`, the token's fault (`ErrInvalidToken`), and any other error the resolver's own (`jwks.Static` and `jwks.Remote` ship; `jwkstest` checks yours) | No |
@@ -987,10 +988,13 @@ UUIDv7. Every filter is optional: `PrincipalType`, `Subject` exactly or
 `RecordDispositionActive`, `Expired` and `Revoked`. Each `RecordListing`
 carries the `Record` — what `GetRecord` reads back — and its `Disposition`,
 by the census's rules: revoked through an ancestor on record too, unlike
-`ListByPrincipalRequest.IncludeRevoked`, and over expired. A revoked one
-also carries `StoppedBy`, the entry that revoked it and whose it is: its
-own, or that of the nearest ancestor with one, so a record stopped through
-an ancestor still says when and why. pgstore walks up to that ancestor a
+`ListByPrincipalRequest.IncludeRevoked`, and over expired. A record with
+no expiry, which `Insert` refuses but an older pgstore row may hold, is
+expired, not one that never expires; and a record whose every Biscuit copy
+is revoked is still active, as its JWT still verifies. A revoked one also
+carries `StoppedBy`, the entry that revoked it and whose it is: its own, or
+that of the nearest ancestor with one, so a record stopped through an
+ancestor still says when and why. pgstore walks up to that ancestor a
 parent at a time by key, for those records alone. So a caller
 shows each record's state with no further read, and at one instant the
 records of each disposition in a full listing number what `CountRecords`
@@ -1015,7 +1019,9 @@ page, err := census.ListRecords(ctx, limes.ListRecordsRequest{
 })
 ```
 
-To show one record, read it through a `RecordListingReader`:
+To show one record, read it through a `RecordListingReader` — the same
+`Census`; a reporter that lists and opens records holds it as a
+`RecordReporter`, both in one:
 `GetRecordListing(ctx, id)` gives the `RecordListing` a listing gives it —
 what `GetRecord` reads back and its disposition by the same rules and clock —
 and `ErrNotFound` for a record not on record or out of the call's scope.
