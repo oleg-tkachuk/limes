@@ -248,6 +248,10 @@ func (s *Store) RevocationLineage(ctx context.Context, id uuid.UUID) (bool, []uu
 const (
 	sqlCapabilityTenant = `SELECT tenant_id FROM limes.capabilities WHERE id = $1`
 
+	// sqlRevokeTarget is the tenant of the capability Revoke names, and what
+	// its disposition is read from: the revoked flag and the expiry.
+	sqlRevokeTarget = `SELECT tenant_id, revoked, expires_at FROM limes.capabilities WHERE id = $1`
+
 	sqlRevoke = `
 INSERT INTO limes.revocations (capability_id, tenant_id, revoked_at, note, actor, cascaded)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -295,7 +299,9 @@ func (s *Store) Revoke(ctx context.Context, req limes.RevokeRequest) (limes.Revo
 	var result limes.RevokeResult
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		var tenant uuid.UUID
-		err := tx.QueryRow(ctx, sqlCapabilityTenant, req.CapabilityID).Scan(&tenant)
+		var revoked bool
+		var expiresAt *time.Time
+		err := tx.QueryRow(ctx, sqlRevokeTarget, req.CapabilityID).Scan(&tenant, &revoked, &expiresAt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return limes.ErrNotFound
 		}
@@ -303,11 +309,14 @@ func (s *Store) Revoke(ctx context.Context, req limes.RevokeRequest) (limes.Revo
 			return err
 		}
 		now := s.clock()
-		result = limes.RevokeResult{}
+		result = limes.RevokeResult{Before: disposition(revoked, expiresAt, now)}
 		r := &result.Revocation
 		err = tx.QueryRow(ctx, sqlRevoke, req.CapabilityID, tenant, now, req.Note, req.Actor, req.CascadeChildren).Scan(&r.RevokedAt, &r.Note, &r.Actor, &r.Cascaded)
 		if errors.Is(err, pgx.ErrNoRows) {
-			result.AlreadyRevoked = true
+			// Its own entry was there, or another revoke wrote it while this
+			// one waited: revoked before this call either way, whatever the
+			// flag read first said.
+			result.AlreadyRevoked, result.Before = true, limes.RecordDispositionRevoked
 			err = tx.QueryRow(ctx, sqlRevocation, req.CapabilityID).Scan(&r.RevokedAt, &r.Note, &r.Actor, &r.Cascaded)
 		}
 		if err != nil {
@@ -488,3 +497,16 @@ var (
 	_ limes.Store                   = (*Store)(nil)
 	_ limes.BiscuitRevocationStore  = (*Store)(nil)
 )
+
+// disposition is a record's disposition at now from its revoked flag and
+// its expiry, by the census's rules (census.go's sqlRecordListing): revoked,
+// then expired — a record with no expiry among them — then active.
+func disposition(revoked bool, expiresAt *time.Time, now time.Time) limes.RecordDisposition {
+	switch {
+	case revoked:
+		return limes.RecordDispositionRevoked
+	case expiresAt == nil || !expiresAt.After(now):
+		return limes.RecordDispositionExpired
+	}
+	return limes.RecordDispositionActive
+}

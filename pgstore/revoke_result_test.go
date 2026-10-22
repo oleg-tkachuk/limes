@@ -37,6 +37,11 @@ func TestConcurrentRevokesReportOneWriter(t *testing.T) {
 		if !r.AlreadyRevoked {
 			writers++
 		}
+		// The writer found it active; every other one found it revoked,
+		// though it may have read the flag before the writer committed.
+		if want := map[bool]limes.RecordDisposition{false: limes.RecordDispositionActive, true: limes.RecordDispositionRevoked}[r.AlreadyRevoked]; r.Before != want {
+			t.Errorf("revoke %d: AlreadyRevoked %v, before %s; want %s", i, r.AlreadyRevoked, r.Before, want)
+		}
 		if !r.Revocation.RevokedAt.Equal(results[0].Revocation.RevokedAt) || r.Revocation.Note != "race" {
 			t.Errorf("revoke %d reported %+v; revoke 0 %+v", i, r.Revocation, results[0].Revocation)
 		}
