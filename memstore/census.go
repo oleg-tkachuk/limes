@@ -18,7 +18,8 @@ import (
 )
 
 // Census implements limes.RecordCensus, limes.RecordLister and
-// limes.RecordListingReader over a Store's records.
+// limes.RecordListingReader — limes.RecordReporter is the last two —
+// over a Store's records.
 type Census struct {
 	records *Store
 }
@@ -337,4 +338,5 @@ var (
 	_ limes.RecordCensus        = (*Census)(nil)
 	_ limes.RecordLister        = (*Census)(nil)
 	_ limes.RecordListingReader = (*Census)(nil)
+	_ limes.RecordReporter      = (*Census)(nil)
 )
