@@ -983,7 +983,10 @@ UUIDv7. Every filter is optional: `PrincipalType`, `Subject` exactly or
 `RecordDispositionActive`, `Expired` and `Revoked`. Each `RecordListing`
 carries the `Record` — what `GetRecord` reads back — and its `Disposition`,
 by the census's rules: revoked through an ancestor on record too, unlike
-`ListByPrincipalRequest.IncludeRevoked`, and over expired. So a caller
+`ListByPrincipalRequest.IncludeRevoked`, and over expired. A record with
+no expiry, which `Insert` refuses but an older pgstore row may hold, is
+expired, not one that never expires; and a record whose every Biscuit copy
+is revoked is still active, as its JWT still verifies. So a caller
 shows each record's state with no further read, and at one instant the
 records of each disposition in a full listing number what `CountRecords`
 counts. Each page is read on its own, though: a walk of many pages is no

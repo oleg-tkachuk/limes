@@ -22,7 +22,8 @@ import (
 // one instant, the records of each disposition a full listing yields number
 // what CountRecords counts for the tenant. Each page is read on its own, so
 // a walk of many pages is no snapshot: a record can expire, or be revoked,
-// between two of them.
+// between two of them. A Biscuit copy's revocation changes no record's
+// disposition (RecordDisposition).
 type RecordLister interface {
 	// ListRecords returns one page of req.TenantID's records, in id order —
 	// ascending, or descending with ListOrderDescending: a capability's id
@@ -39,7 +40,8 @@ type RecordLister interface {
 // rules RecordLister and RecordCensus share, by the store's clock. A
 // consumer showing one record asks it rather than working the disposition
 // out from IsRevoked and the expiry, which would be a second rule beside
-// the store's. A type of its own beside RecordLister, as the lister is
+// the store's. The disposition is the record's, whatever its Biscuit
+// copies' (RecordDisposition). A type of its own beside RecordLister, as the lister is
 // beside Store: memstore's and pgstore's Census are each one, and storetest
 // checks it when its Env.Lister is one.
 type RecordListingReader interface {
@@ -55,6 +57,16 @@ type RecordDisposition string
 
 // The dispositions. The zero value, RecordDispositionUnspecified, names
 // none.
+//
+// RecordDispositionExpired takes a record whose ExpiresAt is zero too: no
+// expiry is not "never expires". Store.Insert refuses a capability without
+// one, so such a record was written around it — a pgstore row from before
+// that check, with a NULL expires_at, or one inserted by hand.
+//
+// A disposition is the record's, never its Biscuit copies': a capability
+// whose every copy is revoked stays active while the record is not revoked,
+// and its JWT still verifies. Active is no promise that every credential
+// minted from the record works.
 const (
 	RecordDispositionUnspecified RecordDisposition = ""
 	RecordDispositionActive      RecordDisposition = "active"

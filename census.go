@@ -26,7 +26,8 @@ import (
 //     revoked — what Store.IsRevoked answers, so a child of a revoked parent
 //     is revoked here, unlike ListByPrincipalRequest.IncludeRevoked, which
 //     reads a record's own entry. Revoked wins over expired.
-//   - Expired: not revoked, and its ExpiresAt is not after now. A
+//   - Expired: not revoked, and its ExpiresAt is not after now, or zero
+//     (RecordDispositionExpired). A
 //     child expires no later than its parent (Store.Insert), so no ancestor
 //     need be read for it.
 //   - Active: neither.
