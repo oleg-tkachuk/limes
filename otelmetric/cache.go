@@ -15,7 +15,7 @@ import (
 
 // OpenTelemetry instruments of a limes.RevocationCache
 // (InstrumentRevocationCache), read from its Stats when the provider
-// collects. Every one but the clears carries kind: capability for IsRevoked,
+// collects. Every one but the two of clears carries kind: capability for IsRevoked,
 // biscuit for IsBiscuitRevoked.
 
 // Instrument names, as an exporter shows them.
@@ -26,6 +26,9 @@ const (
 	metricCacheEvictions = "limes.revocation_cache.evictions"
 	metricCacheEntries   = "limes.revocation_cache.entries"
 	metricCacheClears    = "limes.revocation_cache.clears"
+	// metricCacheClearsRevoked counts the narrow clears, which drop only
+	// the answers a revocation outdates.
+	metricCacheClearsRevoked = "limes.revocation_cache.clears_revoked"
 )
 
 // attrKind is the attribute naming the kind of answer.
@@ -56,9 +59,9 @@ func InstrumentRevocationCache(cache *limes.RevocationCache, opts ...Option) (me
 	}
 	meter := provider.Meter(instrumentationScope)
 	var (
-		errs                                     [6]error
-		hits, misses, lookups, evictions, clears metric.Int64ObservableCounter
-		entries                                  metric.Int64ObservableGauge
+		errs                                                    [7]error
+		hits, misses, lookups, evictions, clears, clearsRevoked metric.Int64ObservableCounter
+		entries                                                 metric.Int64ObservableGauge
 	)
 	hits, errs[0] = meter.Int64ObservableCounter(metricCacheHits,
 		metric.WithDescription("Revocation questions answered from the cache, by kind."))
@@ -72,6 +75,8 @@ func InstrumentRevocationCache(cache *limes.RevocationCache, opts ...Option) (me
 		metric.WithDescription("Answers the cache holds, by kind."))
 	clears, errs[5] = meter.Int64ObservableCounter(metricCacheClears,
 		metric.WithDescription("Calls to RevocationCache.Clear."))
+	clearsRevoked, errs[6] = meter.Int64ObservableCounter(metricCacheClearsRevoked,
+		metric.WithDescription("Calls to RevocationCache.ClearRevoked that dropped only what a revocation outdates."))
 	if err := errors.Join(errs[:]...); err != nil {
 		return nil, fmt.Errorf("otelmetric: cache instruments: %w", err)
 	}
@@ -93,8 +98,9 @@ func InstrumentRevocationCache(cache *limes.RevocationCache, opts ...Option) (me
 			o.ObserveInt64(entries, int64(c.Entries), k.attrs)
 		}
 		o.ObserveInt64(clears, saturated(st.Clears))
+		o.ObserveInt64(clearsRevoked, saturated(st.ClearsRevoked))
 		return nil
-	}, hits, misses, lookups, evictions, entries, clears)
+	}, hits, misses, lookups, evictions, entries, clears, clearsRevoked)
 	if err != nil {
 		return nil, fmt.Errorf("otelmetric: cache callback: %w", err)
 	}

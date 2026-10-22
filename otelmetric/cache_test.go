@@ -22,6 +22,7 @@ const (
 	metricCacheEvictions = "limes.revocation_cache.evictions"
 	metricCacheEntries   = "limes.revocation_cache.entries"
 	metricCacheClears    = "limes.revocation_cache.clears"
+	metricClearsRevoked  = "limes.revocation_cache.clears_revoked"
 	attrKind             = "kind"
 	kindCapability       = "capability"
 	kindBiscuit          = "biscuit"
@@ -108,6 +109,16 @@ func TestInstrumentRevocationCacheReportsItsCounts(t *testing.T) {
 	}
 	if v := valueAt(got[metricCacheEntries], attrKind, kindCapability); v != 0 {
 		t.Errorf("%s after Clear = %v, want 0", metricCacheEntries, v)
+	}
+	// memstore names each answer's ancestors, so ClearRevoked is narrow.
+	cache.ClearRevoked(id)
+	cache.ClearRevoked(id)
+	got = collected(t, reader)
+	if ps := got[metricClearsRevoked]; len(ps) != 1 || ps[0].value != 2 || ps[0].attrs.Len() != 0 {
+		t.Errorf("%s = %+v, want one point of 2 with no attributes", metricClearsRevoked, ps)
+	}
+	if ps := got[metricCacheClears]; len(ps) != 1 || ps[0].value != 1 {
+		t.Errorf("%s after ClearRevoked = %+v, want still 1", metricCacheClears, ps)
 	}
 }
 

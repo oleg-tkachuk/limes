@@ -111,6 +111,7 @@ func ExampleInstrumentRevocationCache() {
 	}
 	// Output:
 	// limes.revocation_cache.clears
+	// limes.revocation_cache.clears_revoked
 	// limes.revocation_cache.entries
 	// limes.revocation_cache.evictions
 	// limes.revocation_cache.hits
