@@ -89,8 +89,6 @@ type RevocationCache struct {
 	// signals counts the calls to Signal, and signalsWhole those that named
 	// no id.
 	signals, signalsWhole atomic.Uint64
-	// now is the clock.
-	now func() time.Time
 	// clearsRevoked counts the calls to ClearRevoked that did not Clear, and
 	// clearsWithoutLineage those that did.
 	clearsRevoked, clearsWithoutLineage atomic.Uint64
@@ -179,7 +177,6 @@ func NewRevocationCache(cfg RevocationCacheConfig) (*RevocationCache, error) {
 		copies:       ttlcache.New[string](c),
 		ttl:          c.TTL,
 		syncedTTL:    synced,
-		now:          c.Now,
 	}, nil
 }
 
@@ -279,7 +276,7 @@ func (c *RevocationCache) Listening() {
 // for TTL alone until the next Listening.
 func (c *RevocationCache) NotListening() {
 	c.syncsLost.Add(1)
-	c.lastSyncLoss.Store(c.now().UnixNano())
+	c.lastSyncLoss.Store(c.caps.Now().UnixNano())
 	c.synced.Store(false)
 	c.setTTL(c.ttl)
 }
