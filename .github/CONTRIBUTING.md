@@ -39,7 +39,7 @@ runs outside a transaction a statement at a time. A build that fails leaves an
 invalid index and its version unrecorded, so the next `Migrate` drops it and
 builds again. A constraint that needs an index (`PRIMARY KEY`, `UNIQUE`,
 `EXCLUDE`) goes on an existing table `USING INDEX` one built so.
-`TestMigrationsBuildIndexesWithoutALock` holds every migration after 014 to
+`TestMigrationsBuildIndexesWithoutALock` holds every migration after 013 to
 this.
 
 Every nested module — `pgstore`, `redisreplay`, `otelmetric` — builds against
