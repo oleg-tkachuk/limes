@@ -790,7 +790,7 @@ answer: the questions answered from it (`Hits`) and not (`Misses`), the
 upstream lookups those ran (`Lookups`, fewer when concurrent misses share
 one), the live answers dropped to stay within the bound (`Evictions`, which
 growing says `MaxEntries` is too small), the answers held (`Entries`), and
-the `Clears` and `ClearsRevoked`; `otelmetric.InstrumentRevocationCache` exports all but `ClearsRevoked`. Over `pgstore`, run a `pgstore.RevocationWatcher` beside each
+the `Clears` and `ClearsRevoked`; `otelmetric.InstrumentRevocationCache` exports them. Over `pgstore`, run a `pgstore.RevocationWatcher` beside each
 verifier: the schema notifies `pgstore.RevocationChannel` on every
 revocation, naming the capabilities revoked (migration 018), and the watcher
 calls `ClearRevoked` with them on each cache that has it

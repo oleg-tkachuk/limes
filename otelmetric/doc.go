@@ -17,7 +17,7 @@
 //
 // InstrumentRevocationCache reports a limes.RevocationCache's counts —
 // hits, misses, upstream lookups, evictions and entries, each by kind
-// (capability or biscuit), and its clears — as observable instruments,
+// (capability or biscuit), and its clears, whole and narrow — as observable instruments,
 // read only when the provider collects:
 //
 //	reg, err := otelmetric.InstrumentRevocationCache(cache,
