@@ -126,7 +126,8 @@ func FuzzCounters(f *testing.F) {
 				_, _, epoch := c.Cached(nil)
 				hits++
 				expires := now + int64(testTTL)/2
-				c.SeedLive([]string{key}, epoch, clk.Now().Add(testTTL/2))
+				// Read half a TTL ago: fresh for half a TTL more.
+				c.SeedLive([]string{key}, epoch, clk.Now().Add(-testTTL/2))
 				inserts = 1
 				// Seeded over an answer the cache dropped, or kept beside
 				// one it holds: either may be served after.
