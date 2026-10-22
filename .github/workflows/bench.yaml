@@ -2,11 +2,11 @@ name: Benchmarks and soak
 
 # Once a week, and by hand: pgstore under concurrent workers for a while,
 # every counter then checked against what they did (pgstore/soak_test.go),
-# and the benchmarks of limes and pgstore on this commit beside each one's
-# newest release (.github/ci/bench.ts). A hosted runner is too noisy for
-# numbers that stand alone, so the two sides run one after the other on one
-# runner, and the comparison is a report on the run's summary page: a slower
-# number never fails it. A soak that finds a counter out of step does.
+# and the benchmarks of limes, pgstore and otelmetric on this commit beside
+# each one's newest release (.github/ci/bench.ts). A hosted runner is too
+# noisy for numbers that stand alone, so the two sides run one after the
+# other on one runner, and the comparison is a report on the run's summary
+# page: a slower number never fails it. A soak that finds a counter out of step does.
 
 on:
   schedule:
@@ -68,7 +68,7 @@ jobs:
       fail-fast: false
       matrix:
         # bench.ts's BENCHED; bench.test.ts pins the two lists together.
-        module: [limes, pgstore]
+        module: [limes, pgstore, otelmetric]
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -190,7 +190,8 @@ the price of a tenant ceiling that is never crossed — so some 350–700 a
 second for one tenant, while different tenants' run side by side.
 
 The benchmarks behind these numbers are `bench_test.go` and
-`pgstore/bench_test.go`; a weekly workflow runs them on this commit and on the
+`pgstore/bench_test.go`, beside `otelmetric/bench_test.go` for what the
+instruments add; a weekly workflow runs them on this commit and on the
 newest release, taking turns on one runner, and soaks `pgstore` under
 concurrent workers ([CONTRIBUTING](.github/CONTRIBUTING.md)).
 

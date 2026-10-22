@@ -179,6 +179,11 @@ tasks:
     cmds:
       - node .github/ci/bench.ts limes
 
+  bench:otelmetric:
+    desc: "otelmetric's benchmarks on this commit beside the newest otelmetric release, compared by benchstat — needs the release's tag"
+    cmds:
+      - node .github/ci/bench.ts otelmetric
+
   test:redisreplay:
     desc: "redisreplay's contract against a real Redis at LIMES_REDIS_ADDR (host:port) — miniredis runs another Lua, so this is the check of the script itself"
     dir: '{{.REDISREPLAY_DIR}}'

@@ -81,17 +81,18 @@ Both are jobs CI requires before a release.
 ```bash
 task bench:limes
 task bench:pgstore
+task bench:otelmetric
 task test:pgstore:soak SOAK_DURATION=5m
 ```
 
-`bench:limes` and `bench:pgstore` run a module's benchmarks on this commit and
+`bench:limes`, `bench:pgstore` and `bench:otelmetric` run a module's benchmarks on this commit and
 on its newest release, a round of each in turn, and compare them with
 benchstat; `pgstore`'s need Docker. Each benchmark reports its allocations,
 and the `Parallel` ones run a path from every processor at once. The soak
 runs concurrent workers against `pgstore` — charges, refunds, holds settled,
 released and abandoned, requests counted — and then checks every counter
 against what they did, that no hold is left and that the pool has every
-connection back. A weekly workflow, **Benchmarks and soak**, runs all three,
+connection back. A weekly workflow, **Benchmarks and soak**, runs them all,
 and can be run by hand: a slower number is a report on its summary page and
 fails nothing, a soak whose counters drift fails it.
 
