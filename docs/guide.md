@@ -786,14 +786,20 @@ A consumer that revokes often keeps every answer it did not touch, where
 Choose the TTL from how often one token is verified, not from a request
 burst. The two-second default serves the requests of one HTTP exchange; an
 agent that calls a tool once per model step, seconds or minutes apart,
-finds every answer expired and gains nothing from it. Set the TTL a little
-above the interval between two verifications of one token. A longer TTL is
-safe as far as revocation signals reach: with a watcher, a revocation drops
-the answers it outdates at once whatever the TTL. The TTL bounds staleness
-only where no signal arrives — a verifier with no watcher, or one whose
-watcher is reconnecting (`pgstore.RevocationWatcher` waits up to ten
-seconds between attempts, and clears whole once it listens again) — so keep
-it no longer than a revocation may go unseen there. Build the cache with `NewRevocationCache` over your store, as
+finds every answer expired and gains nothing from it. A long TTL is safe
+only while a revocation signal reaches the cache: before a watcher's first
+`LISTEN`, and while it reconnects (`pgstore.RevocationWatcher` waits up to
+ten seconds between attempts), nothing clears the cache, and the TTL alone
+bounds how long a revoked capability still verifies. So the cache has two
+bounds. `TTL` — keep it as short as a revocation may go unseen — serves
+answers while no signal vouches for the cache; `SyncedTTL`, a little above
+the interval between two verifications of one token, serves them from
+`RevocationCache.Listening` to `NotListening`, which the watcher calls as its
+connection comes and goes. `NotListening` cuts short the answers cached
+under `SyncedTTL` at once, and `Listening` clears the cache before raising
+the bound. `Stats().Synced` says which bound is in force, and `Syncs` counts
+the watcher's connections. A cache no watcher tells either way serves for
+`TTL` alone, as before. Build the cache with `NewRevocationCache` over your store, as
 `Capabilities` and, if the verifier reads Biscuits, `Biscuits`; `Sweep` drops
 its expired entries on a timer of yours, optional since lookups skip and replace
 them anyway. `Stats` reads what the cache has counted, for each kind of
