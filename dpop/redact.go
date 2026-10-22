@@ -95,7 +95,7 @@ func (cfg HMACNoncesConfig) view() hmacNoncesView {
 	return hmacNoncesView{Keys: redactedKeys(cfg.Keys.Len()), Lifetime: cfg.Lifetime}
 }
 
-// Format prints n with its keys redacted. On the value, as Signer's: a
+// Format prints n with its keys redacted. On the value, as limes.Signer's: a
 // copy of an HMACNonces formats as the pointer does.
 func (n HMACNonces) Format(f fmt.State, verb rune) {
 	_, _ = fmt.Fprintf(f, fmt.FormatString(f, verb), n.view())

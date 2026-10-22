@@ -710,8 +710,8 @@ type ListTenantBudgetsRequest struct {
 const BasisPointsPerWhole = 10_000
 
 // Validate refuses a request no page can answer: a negative page size, an
-// unknown filter, a threshold outside 0..100, or a threshold beside a filter
-// that takes none.
+// unknown filter, a threshold outside 0..BasisPointsPerWhole, or a threshold
+// beside a filter that takes none.
 func (r ListTenantBudgetsRequest) Validate() error {
 	if err := r.Filter.Validate(); err != nil {
 		return err

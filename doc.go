@@ -57,17 +57,20 @@
 //     [ErrScopeMismatch]. A store paired with a meter.TenantUsageEraser
 //     refuses Insert for a tenant whose usage was erased with
 //     [ErrTenantErased].
-//   - [meter.UsageStore] — request and spend counters and the charges
-//     ledger, for a consumer that meters; see package meter.
+//   - [github.com/oleg-tkachuk/limes/meter.UsageStore] — request and
+//     spend counters and the charges ledger, for a consumer that meters;
+//     see package meter.
 //   - [KeyResolver] — public verification keys. [jwks.Static] ships as a
 //     working implementation and supports rotation via SetKey / RemoveKey;
 //     [jwks.Remote] fetches an issuer's JWKS for verifiers that run
 //     apart from it.
 //
 // More are needed only with the feature they serve:
-// [BiscuitRevocationStore] to accept Biscuit tokens, [RecordCensus] to count
+// [BiscuitRevocationLookup] to accept Biscuit tokens and
+// [BiscuitRevocationStore] to revoke one copy of one, [RecordCensus] to count
 // capability records by disposition across tenants, [RecordLister] to list a
-// tenant's records with their dispositions, [TenantRecordEraser] to
+// tenant's records with their dispositions and [RecordListingReader] to read
+// one with its disposition, [TenantRecordEraser] to
 // remove a tenant, [dpop.ReplayCache] to share DPoP replay
 // state across replicas ([dpop.MemoryReplayCache] ships for one process), and
 // [dpop.Nonces] to require server nonces ([dpop.HMACNonces] ships, and works
