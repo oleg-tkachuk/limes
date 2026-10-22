@@ -53,6 +53,9 @@ flowchart TB
 go get github.com/oleg-tkachuk/limes@latest
 ```
 
+`pgstore`, `otelmetric` and `redisreplay` are modules of their own, on tag
+lines of their own: pin each by its tag, as [Versioning](#versioning) says.
+
 ## Five minutes
 
 Setup errors are dropped below for brevity; each constructor returns one.
@@ -222,6 +225,14 @@ at once; so is the release workflow's `build(limes): require limes vX.Y.Z`,
 for each module whose `go.mod` it raises. A
 commit releases, by its type, each module whose files it changes; one scoped
 `pgstore`, `redisreplay` or `otelmetric` never releases limes, breaking or not.
+
+A nested module is tagged after the limes it needs, never with it: its
+`go.mod` must require a limes already released, so a root release's new API
+reaches `pgstore`, `otelmetric` or `redisreplay` only with that module's next
+tag, cut once the `require limes` change merges. Pin each module by its own
+tag — `go get github.com/oleg-tkachuk/limes/pgstore@pgstore/vX.Y.Z`, which
+brings the limes it requires — never a root tag's commit; and to take a new
+root API into a store, wait for the store's tag that requires that release.
 
 The token wire format — claims, `typ: limes-cap-v6+jwt`, the Biscuit facts —
 is a separate promise: a token is a credential that outlives the process that
