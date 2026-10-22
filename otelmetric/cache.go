@@ -29,7 +29,21 @@ const (
 	// metricCacheClearsRevoked counts the narrow clears, which drop only
 	// the answers a revocation outdates.
 	metricCacheClearsRevoked = "limes.revocation_cache.clears_revoked"
+	// The causes of a whole clear apart from the consumer's own, and the
+	// state of the revocation signal (RevocationCacheStats).
+	metricCacheClearsWithoutLineage = "limes.revocation_cache.clears_without_lineage"
+	metricCacheLineage              = "limes.revocation_cache.lineage"
+	metricCacheSynced               = "limes.revocation_cache.synced"
+	metricCacheSyncs                = "limes.revocation_cache.syncs"
+	metricCacheSyncsLost            = "limes.revocation_cache.syncs_lost"
+	metricCacheLastSyncLoss         = "limes.revocation_cache.last_sync_loss"
+	metricCacheSignals              = "limes.revocation_cache.signals"
+	metricCacheSignalsWhole         = "limes.revocation_cache.signals_whole"
 )
+
+// unitSeconds is the unit of a time instrument: seconds since the Unix
+// epoch.
+const unitSeconds = "s"
 
 // attrKind is the attribute naming the kind of answer.
 const attrKind = "kind"
@@ -59,9 +73,10 @@ func InstrumentRevocationCache(cache *limes.RevocationCache, opts ...Option) (me
 	}
 	meter := provider.Meter(instrumentationScope)
 	var (
-		errs                                                    [7]error
+		errs                                                    [15]error
 		hits, misses, lookups, evictions, clears, clearsRevoked metric.Int64ObservableCounter
-		entries                                                 metric.Int64ObservableGauge
+		clearsWithoutLineage, syncs, syncsLost, signals, whole  metric.Int64ObservableCounter
+		entries, lineage, synced, lastSyncLoss                  metric.Int64ObservableGauge
 	)
 	hits, errs[0] = meter.Int64ObservableCounter(metricCacheHits,
 		metric.WithDescription("Revocation questions answered from the cache, by kind."))
@@ -77,6 +92,22 @@ func InstrumentRevocationCache(cache *limes.RevocationCache, opts ...Option) (me
 		metric.WithDescription("Calls to RevocationCache.Clear."))
 	clearsRevoked, errs[6] = meter.Int64ObservableCounter(metricCacheClearsRevoked,
 		metric.WithDescription("Calls to RevocationCache.ClearRevoked that dropped only what a revocation outdates."))
+	clearsWithoutLineage, errs[7] = meter.Int64ObservableCounter(metricCacheClearsWithoutLineage,
+		metric.WithDescription("Calls to RevocationCache.ClearRevoked that cleared whole, as the upstream names no lineage."))
+	lineage, errs[8] = meter.Int64ObservableGauge(metricCacheLineage,
+		metric.WithDescription("1 when the cache's upstream names each answer's ancestors, so ClearRevoked is narrow; 0 otherwise."))
+	synced, errs[9] = meter.Int64ObservableGauge(metricCacheSynced,
+		metric.WithDescription("1 while a revocation signal vouches for the cache and SyncedTTL bounds its answers; 0 while TTL does."))
+	syncs, errs[10] = meter.Int64ObservableCounter(metricCacheSyncs,
+		metric.WithDescription("Calls to RevocationCache.Listening: the watcher's connections, each a clear."))
+	syncsLost, errs[11] = meter.Int64ObservableCounter(metricCacheSyncsLost,
+		metric.WithDescription("Calls to RevocationCache.NotListening: the watcher's lost connections."))
+	lastSyncLoss, errs[12] = meter.Int64ObservableGauge(metricCacheLastSyncLoss, metric.WithUnit(unitSeconds),
+		metric.WithDescription("When the revocation signal was last lost, in seconds since the Unix epoch; not reported before the first loss."))
+	signals, errs[13] = meter.Int64ObservableCounter(metricCacheSignals,
+		metric.WithDescription("Revocation notifications passed on through RevocationCache.Signal."))
+	whole, errs[14] = meter.Int64ObservableCounter(metricCacheSignalsWhole,
+		metric.WithDescription("Revocation notifications that named no capability and cleared the cache whole."))
 	if err := errors.Join(errs[:]...); err != nil {
 		return nil, fmt.Errorf("otelmetric: cache instruments: %w", err)
 	}
@@ -99,8 +130,19 @@ func InstrumentRevocationCache(cache *limes.RevocationCache, opts ...Option) (me
 		}
 		o.ObserveInt64(clears, saturated(st.Clears))
 		o.ObserveInt64(clearsRevoked, saturated(st.ClearsRevoked))
+		o.ObserveInt64(clearsWithoutLineage, saturated(st.ClearsWithoutLineage))
+		o.ObserveInt64(lineage, flag(st.Lineage))
+		o.ObserveInt64(synced, flag(st.Synced))
+		o.ObserveInt64(syncs, saturated(st.Syncs))
+		o.ObserveInt64(syncsLost, saturated(st.SyncsLost))
+		if !st.LastSyncLoss.IsZero() {
+			o.ObserveInt64(lastSyncLoss, st.LastSyncLoss.Unix())
+		}
+		o.ObserveInt64(signals, saturated(st.Signals))
+		o.ObserveInt64(whole, saturated(st.SignalsWhole))
 		return nil
-	}, hits, misses, lookups, evictions, entries, clears, clearsRevoked)
+	}, hits, misses, lookups, evictions, entries, clears, clearsRevoked,
+		clearsWithoutLineage, lineage, synced, syncs, syncsLost, lastSyncLoss, signals, whole)
 	if err != nil {
 		return nil, fmt.Errorf("otelmetric: cache callback: %w", err)
 	}
@@ -114,4 +156,12 @@ func saturated(n uint64) int64 {
 		return math.MaxInt64
 	}
 	return int64(n)
+}
+
+// flag is a yes or no as a gauge reports it: 1 or 0.
+func flag(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
 }
