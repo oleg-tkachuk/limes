@@ -214,7 +214,7 @@ patch — or at once for a breaking change or a `security` fix
 ([.github/release/release-policy.json](.github/release/release-policy.json)),
 or whenever the Release workflow is run by hand. Run by hand with the
 `prerelease` channel, it tags a release candidate, `vX.Y.Z-rc.N`, of what the
-next release would be.
+next release would be, published with the notes that release would have.
 
 `redisreplay`, `pgstore` and `otelmetric` are modules of their own, each with
 a release line of its own — `redisreplay/vX.Y.Z`, `pgstore/vX.Y.Z`,

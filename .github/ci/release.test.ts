@@ -32,6 +32,9 @@ test("isStableReleaseTag", () => {
   assert.equal(isStableReleaseTag("sub/v0.2.0", ""), false);
 });
 
+// CANDIDATE_NOTES opens the notes the stand-in dry run writes.
+const CANDIDATE_NOTES = "candidate notes";
+
 describe("tags on a repository", () => {
   let repo: TempRepo;
   let data: FakeData;
@@ -190,6 +193,9 @@ describe("releaseAll", () => {
           data.tags.add(tag);
           writeFileSync(notesFile, `notes of ${tag}\n`);
         }
+      },
+      async candidateNotes(module: Module, notesFile: string) {
+        writeFileSync(notesFile, `${CANDIDATE_NOTES} of ${module.name}\n`);
       },
       gatePassed: async (job) => gatesPassing && !failedGates.has(job),
       fetchInfo: async () => ({ ok: true, status: 200 }),
@@ -412,6 +418,12 @@ describe("releaseAll", () => {
       repo.write("x.go", "// b\n");
       await repo.commit("fix: b");
       assert.deepEqual(await candidate(), ["v0.2.0-rc.1", "v0.2.0-rc.2"]);
+    });
+    test("a candidate is published with the notes of the release it stands for", async () => {
+      repo.write("x.go", "// a\n");
+      await repo.commit("feat: a");
+      await candidate();
+      assert.equal(data.published[0]?.notes, `${CANDIDATE_NOTES} of limes\n`);
     });
     test("a patch's candidate", async () => {
       repo.write("x.go", "// a\n");

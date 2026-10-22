@@ -37,7 +37,7 @@ import { git } from "./lib/git.ts";
 import { gitHubFor, type GitHub } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
 import { ROOT_MODULE, releaseCommits, releasedModules, selectModule, type Module, type ReleaseCommits } from "./lib/modules.ts";
-import { candidateTag } from "./lib/prerelease.ts";
+import { candidateTag, RC } from "./lib/prerelease.ts";
 import { isDue, lastStableTag, loadPolicy, pendingCommits, type Policy } from "./lib/release-policy.ts";
 import { newReleaseTag, notesFrom, publish, publishLeftBehind, tagsOnHead, warmGoProxy, type Fetch } from "./lib/releases.ts";
 import { runInherited } from "./lib/spawn.ts";
@@ -85,6 +85,10 @@ export interface Release {
   // runSemanticRelease computes and pushes module's tag, writing its notes
   // to notesFile.
   runSemanticRelease(module: Module, notesFile: string): Promise<void>;
+  // candidateNotes writes to notesFile the notes module's next release
+  // would have, from a dry run that tags nothing, and nothing when no
+  // release is due.
+  candidateNotes(module: Module, notesFile: string): Promise<void>;
   // gatePassed reports whether a gating CI job passed.
   gatePassed(job: string): Promise<boolean>;
   fetchInfo: Fetch;
@@ -121,9 +125,13 @@ export async function prereleaseModule(r: Release, module: Module): Promise<Outc
   if (tag === undefined) {
     return { note: `no commit since ${await sinceTag(module, r.root)} cuts a release, so no candidate` };
   }
+  // Read before the tag is made: the candidate's notes are those of the
+  // release it stands for, from the last release on.
+  const notesFile = join(r.notesDir, `release-notes-${module.name}-${RC}.md`);
+  await r.candidateNotes(module, notesFile);
   await git(["tag", tag], r.root);
   await r.pushTag(tag);
-  await publish(r.github, tag, module.prefix, "", false, r.root, true);
+  await publish(r.github, tag, module.prefix, notesFrom(notesFile), false, r.root, true);
   await warmGoProxy(tag, r.repository, r.fetchInfo);
   return { tag, note: "release candidate published" };
 }
@@ -205,8 +213,10 @@ export async function releaseAll(r: Release): Promise<boolean> {
 // SEMANTIC_RELEASE_BIN is the pinned semantic-release's executable, as npm
 // ci installs it beside the release tooling's lockfile.
 const SEMANTIC_RELEASE_BIN = ["node_modules", ".bin", "semantic-release"];
-// SEMANTIC_RELEASE_ARGS run it outside the CI it would otherwise detect.
+// SEMANTIC_RELEASE_ARGS run it outside the CI it would otherwise detect, and
+// DRY_RUN_ARG without tagging: a candidate's notes.
 const SEMANTIC_RELEASE_ARGS = ["--no-ci"];
+const DRY_RUN_ARG = "--dry-run";
 
 // semanticReleaseCommand is the command that runs the pinned semantic-release
 // in root's checkout: its installed executable, never npx, which would fetch
@@ -218,11 +228,11 @@ export function semanticReleaseCommand(root: string): [string, string[]] {
 // semanticRelease runs the pinned semantic-release for module, with the
 // runner reading no workflow command from its log: it logs every commit
 // message it reads, and this job holds a write token.
-function semanticRelease(root: string, token: string): Release["runSemanticRelease"] {
+function semanticRelease(root: string, token: string, extra: readonly string[] = []): Release["runSemanticRelease"] {
   const [file, args] = semanticReleaseCommand(root);
   return (module, notesFile) =>
     withoutWorkflowCommands(() =>
-      runInherited(file, args, {
+      runInherited(file, [...args, ...extra], {
         cwd: join(root, RELEASE_DIR),
         env: {
           ...process.env,
@@ -260,6 +270,7 @@ async function main(): Promise<void> {
     repository,
     root,
     runSemanticRelease: semanticRelease(root, token),
+    candidateNotes: semanticRelease(root, token, [DRY_RUN_ARG]),
     gatePassed: (job) => jobPassed(github, runId, job),
     fetchInfo: (url) => fetch(url),
     notesDir: requireEnv("RUNNER_TEMP"),
