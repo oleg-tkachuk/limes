@@ -305,12 +305,15 @@ func (s *Store) listingLocked(id uuid.UUID, now time.Time) (limes.RecordListing,
 }
 
 // decodeListCursor reads a cursor ListRecords handed out for req's order and
-// filters; anything else, a cursor of the other order or of other filters
-// among it, is ErrInvalidRequest.
+// filters. One of the other order or of other filters is ErrCursorMismatch,
+// anything that is no cursor ErrInvalidRequest.
 func decodeListCursor(s string, req limes.ListRecordsRequest) (listCursor, error) {
 	var k listCursor
-	if err := decodeCursor(s, &k); err != nil || k.After == uuid.Nil || k.Order != req.Order || k.Filters != filtersKey(req) {
+	if err := decodeCursor(s, &k); err != nil || k.After == uuid.Nil {
 		return listCursor{}, fmt.Errorf("%w: memstore: record list cursor %q", limes.ErrInvalidRequest, s)
+	}
+	if k.Order != req.Order || k.Filters != filtersKey(req) {
+		return listCursor{}, fmt.Errorf("%w: memstore: record list cursor %q", limes.ErrCursorMismatch, s)
 	}
 	return k, nil
 }

@@ -69,6 +69,14 @@ var (
 	// ErrInvalidRequest.
 	ErrInvalidAmount error = &familyError{"limes: invalid amount", ErrInvalidRequest}
 
+	// ErrCursorMismatch — a cursor RecordLister.ListRecords handed out for
+	// another order or other filters, handed back with these: well formed,
+	// but a place in another listing. A caller that tells it from a
+	// malformed request starts again from the first page. It matches
+	// ErrInvalidRequest, as every refused request does; a cursor that is
+	// not one at all is ErrInvalidRequest alone.
+	ErrCursorMismatch error = &familyError{"limes: cursor of another listing", ErrInvalidRequest}
+
 	// ErrRequestLimitExceeded — the capability, a Biscuit copy or an
 	// ancestor used every request its ceiling allows; the next was blocked.
 	ErrRequestLimitExceeded = errors.New("limes: request limit exceeded")
