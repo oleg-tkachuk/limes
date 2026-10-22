@@ -27,7 +27,7 @@ import { isStableReleaseTag } from "./lib/releases.ts";
 
 // BENCHED are the modules with benchmarks to compare; bench.yaml's matrix
 // runs each (bench.test.ts).
-export const BENCHED: readonly string[] = [ROOT_MODULE, "pgstore"];
+export const BENCHED: readonly string[] = [ROOT_MODULE, "pgstore", "otelmetric"];
 // BENCH_FILE_NAME is a module's benchmarks, copied into the release's
 // worktree.
 const BENCH_FILE_NAME = "bench_test.go";
