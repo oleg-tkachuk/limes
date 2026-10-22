@@ -90,17 +90,18 @@ var sentinelMatrix = map[string]sentinelCase{
 
 	"ErrNotFound": {ErrNotFound, []string{famNotFound}, "", http.StatusInternalServerError},
 
-	"ErrConflict":          {ErrConflict, []string{famConflict}, "", http.StatusConflict},
-	"ErrAlreadyExists":     {ErrAlreadyExists, []string{famConflict}, "", http.StatusConflict},
-	"ErrInvalidAmount":     {ErrInvalidAmount, []string{famRequest}, "", http.StatusInternalServerError},
-	"ErrCursorMismatch":    {ErrCursorMismatch, []string{famRequest}, "", http.StatusInternalServerError},
-	"ErrDelegationTooWide": {ErrDelegationTooWide, nil, "", http.StatusInternalServerError},
-	"ErrUnitCodeMismatch":  {ErrUnitCodeMismatch, []string{famConflict}, "", http.StatusConflict},
-	"ErrUnknownTenant":     {ErrUnknownTenant, nil, "", http.StatusInternalServerError},
-	"ErrTenantDeleted":     {ErrTenantDeleted, nil, "", http.StatusInternalServerError},
-	"ErrScopeMismatch":     {ErrScopeMismatch, nil, "", http.StatusInternalServerError},
-	"ErrProofUnsupported":  {ErrProofUnsupported, nil, "", http.StatusInternalServerError},
-	"ErrCursorRepeated":    {ErrCursorRepeated, nil, "", http.StatusInternalServerError},
+	"ErrConflict":            {ErrConflict, []string{famConflict}, "", http.StatusConflict},
+	"ErrAlreadyExists":       {ErrAlreadyExists, []string{famConflict}, "", http.StatusConflict},
+	"ErrInvalidAmount":       {ErrInvalidAmount, []string{famRequest}, "", http.StatusInternalServerError},
+	"ErrCursorMismatch":      {ErrCursorMismatch, []string{famRequest}, "", http.StatusInternalServerError},
+	"ErrDelegationTooWide":   {ErrDelegationTooWide, nil, "", http.StatusInternalServerError},
+	"ErrUnitCodeMismatch":    {ErrUnitCodeMismatch, []string{famConflict}, "", http.StatusConflict},
+	"ErrUnknownTenant":       {ErrUnknownTenant, nil, "", http.StatusInternalServerError},
+	"ErrTenantDeleted":       {ErrTenantDeleted, nil, "", http.StatusInternalServerError},
+	"ErrScopeMismatch":       {ErrScopeMismatch, nil, "", http.StatusInternalServerError},
+	"ErrProofUnsupported":    {ErrProofUnsupported, nil, "", http.StatusInternalServerError},
+	"ErrCursorRepeated":      {ErrCursorRepeated, nil, "", http.StatusInternalServerError},
+	"ErrNoRevocationLineage": {ErrNoRevocationLineage, nil, "", http.StatusInternalServerError},
 }
 
 // Each sentinel matches exactly the families the matrix names, has the
