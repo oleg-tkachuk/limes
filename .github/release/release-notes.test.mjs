@@ -17,7 +17,7 @@ import { generateNotes } from "@semantic-release/release-notes-generator";
 const require = createRequire(import.meta.url);
 const config = require("./release.config.cjs");
 const notesFile = require("./release-notes-file.cjs");
-const { MODULES, ROOT_MODULE, REDISREPLAY_MODULE, DEPENDENCIES_SECTION, LIMES_REQUIREMENT_SCOPE, configFor } = require("./modules.cjs");
+const { MODULES, ROOT_MODULE, REDISREPLAY_MODULE, DEPENDENCIES_SECTION, LIMES_REQUIREMENT_SCOPE, FORMER_REQUIREMENT_SCOPE, configFor } = require("./modules.cjs");
 
 const BREAKING_HEADING = "BREAKING CHANGES";
 
@@ -68,7 +68,7 @@ for (const name of Object.keys(MODULES)) {
   const moduleNotes = (cs) => generateNotes(configFor(name).notes, { ...context, commits: cs });
   // The module's own scope, and the one require-limes.ts commits for every
   // nested module at once.
-  for (const scope of [name === ROOT_MODULE ? REDISREPLAY_MODULE : name, LIMES_REQUIREMENT_SCOPE]) {
+  for (const scope of [name === ROOT_MODULE ? REDISREPLAY_MODULE : name, LIMES_REQUIREMENT_SCOPE, FORMER_REQUIREMENT_SCOPE]) {
     const build = [
       { hash: "5555555", message: `build(${scope}): ${REQUIRE_SUBJECT}` },
       { hash: "6666666", message: `build: ${UNSCOPED_BUILD_SUBJECT}` },
