@@ -436,11 +436,11 @@ func checkRevoke(t *testing.T, f fixture) {
 	child := f.live(t, "agent:child", parent.ID)
 	grandchild := f.live(t, "agent:grandchild", child.ID)
 	other := f.live(t, "agent:other", uuid.Nil)
-	if r := f.revoke(t, parent.ID, false); r.AlreadyRevoked {
-		t.Error("first revoke: AlreadyRevoked")
+	if r := f.revoke(t, parent.ID, false); r.AlreadyRevoked || r.Before != limes.RecordDispositionActive {
+		t.Errorf("first revoke = %+v; want a new entry, active before", r)
 	}
-	if r := f.revoke(t, parent.ID, false); !r.AlreadyRevoked { // idempotent
-		t.Error("repeated revoke: not AlreadyRevoked")
+	if r := f.revoke(t, parent.ID, false); !r.AlreadyRevoked || r.Before != limes.RecordDispositionRevoked { // idempotent
+		t.Errorf("repeated revoke = %+v; want AlreadyRevoked, revoked before", r)
 	}
 	if !f.revoked(t, parent.ID) || !f.revoked(t, child.ID) {
 		t.Error("revoking a parent must stop it and its child")
@@ -450,8 +450,17 @@ func checkRevoke(t *testing.T, f fixture) {
 	}
 	// Stopped through its parent, the child has no entry of its own, so its
 	// first revoke writes one.
-	if r := f.revoke(t, child.ID, false); r.AlreadyRevoked || r.Revocation.Cascaded {
-		t.Errorf("first revoke of a child stopped through its parent = %+v; want a new entry, not cascading", r)
+	if r := f.revoke(t, child.ID, false); r.AlreadyRevoked || r.Revocation.Cascaded || r.Before != limes.RecordDispositionRevoked {
+		t.Errorf("first revoke of a child stopped through its parent = %+v; want a new entry, not cascading, revoked before", r)
+	}
+	// An expired capability is expired before its revoke, which still
+	// writes its entry.
+	expired := f.insert(t, f.newCapability("agent:expired", uuid.Nil, f.now.Add(-expiredAgo)))
+	if r := f.revoke(t, expired.ID, false); r.AlreadyRevoked || r.Before != limes.RecordDispositionExpired {
+		t.Errorf("revoke of an expired capability = %+v; want a new entry, expired before", r)
+	}
+	if rev := f.record(t, expired.ID).Revocation; rev == nil {
+		t.Error("revoke of an expired capability wrote no entry")
 	}
 	// A cascade over a capability already revoked keeps its entry, and
 	// those of its descendants that have one, and writes the others'.

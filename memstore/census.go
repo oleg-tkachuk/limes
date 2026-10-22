@@ -295,22 +295,31 @@ func (c *Census) GetRecordListing(_ context.Context, id uuid.UUID) (limes.Record
 // disposition at now by the census's rules; s.mu is held.
 func (s *Store) listingLocked(id uuid.UUID, now time.Time) (limes.RecordListing, error) {
 	rec := s.caps[id]
-	stoppedBy, err := s.stoppedByLocked(id)
+	d, stoppedBy, err := s.dispositionLocked(id, now)
 	if err != nil {
 		return limes.RecordListing{}, err
-	}
-	d := limes.RecordDispositionActive
-	switch {
-	case stoppedBy != nil:
-		d = limes.RecordDispositionRevoked
-	case expiredAt(rec.ExpiresAt, now):
-		d = limes.RecordDispositionExpired
 	}
 	r := limes.Record{Capability: rec.Clone(), IssuedBy: s.issuedBy[id].Clone()}
 	if entry, ok := s.revoked[id]; ok {
 		r.Revocation = &entry
 	}
 	return limes.RecordListing{Record: r, Disposition: d, StoppedBy: stoppedBy}, nil
+}
+
+// dispositionLocked is the disposition at now of the record of id, which is
+// on record, by the census's rules, and the entry that revokes it, if any;
+// s.mu is held.
+func (s *Store) dispositionLocked(id uuid.UUID, now time.Time) (limes.RecordDisposition, *limes.CapabilityRevocation, error) {
+	stoppedBy, err := s.stoppedByLocked(id)
+	switch {
+	case err != nil:
+		return limes.RecordDispositionUnspecified, nil, err
+	case stoppedBy != nil:
+		return limes.RecordDispositionRevoked, stoppedBy, nil
+	case expiredAt(s.caps[id].ExpiresAt, now):
+		return limes.RecordDispositionExpired, nil, nil
+	}
+	return limes.RecordDispositionActive, nil, nil
 }
 
 // decodeListCursor reads a cursor ListRecords handed out for req's order and
