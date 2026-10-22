@@ -47,8 +47,9 @@ export const FOLLOWERS: readonly string[] = ["examples"];
 export const BRANCH = "require-limes/modules";
 // LIMES_REQUIREMENT_SCOPE scopes the commit and its pull request's title, as
 // modules.cjs's of the same name releases it; require-limes.test.ts holds
-// the two together.
-export const LIMES_REQUIREMENT_SCOPE = "limes";
+// the two together. Not "limes": the change is the nested modules', which a
+// title scoped to limes would read as limes's own.
+export const LIMES_REQUIREMENT_SCOPE = "nested";
 // BASE_BRANCH is the branch the pull request merges into.
 export const BASE_BRANCH = "main";
 const REMOTE = "origin";
@@ -166,7 +167,7 @@ export async function proposeRequirements(ctx: Context, dirs: readonly string[],
       changed.push(join(follower, "go.mod"), join(follower, "go.sum"));
     }
   }
-  const title = `build(${LIMES_REQUIREMENT_SCOPE}): require limes ${tag}`;
+  const title = requirementTitle(tag, outcome.raised.map((r) => r.dir));
   await git(["add", "--", ...changed.filter((p) => existsSync(join(ctx.root, p)))], ctx.root);
   await git(["commit", "--quiet", "-m", title], ctx.root);
   await ctx.push(BRANCH);
@@ -188,6 +189,14 @@ export async function proposeRequirements(ctx: Context, dirs: readonly string[],
     outcome.pullRequest = number;
   }
   return outcome;
+}
+
+// requirementTitle is the subject of the commit, and the title of the pull
+// request, raising dirs' requirement to the limes release tag: the modules
+// named, so the title says whose go.mod changes.
+export function requirementTitle(tag: string, dirs: readonly string[]): string {
+  const named = dirs.length > 1 ? `${dirs.slice(0, -1).join(", ")} and ${dirs.at(-1)}` : (dirs[0] ?? "");
+  return `build(${LIMES_REQUIREMENT_SCOPE}): require limes ${tag} in ${named}`;
 }
 
 // SUMMARY_HEADER heads the summary table; LEFT_ALONE and FAILED fill the

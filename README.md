@@ -221,7 +221,7 @@ a release line of its own — `redisreplay/vX.Y.Z`, `pgstore/vX.Y.Z`,
 `otelmetric/vX.Y.Z` — cut by the same
 rules from the commits that touch it, plus one: a module's own `build`
 commit, such as `build(pgstore): bump pgx`, is a patch of it, and is released
-at once; so is the release workflow's `build(limes): require limes vX.Y.Z`,
+at once; so is the release workflow's `build(nested): require limes vX.Y.Z in …`,
 for each module whose `go.mod` it raises. A
 commit releases, by its type, each module whose files it changes; one scoped
 `pgstore`, `redisreplay` or `otelmetric` never releases limes, breaking or not.

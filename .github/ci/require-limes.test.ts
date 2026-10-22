@@ -8,13 +8,13 @@ import { after, afterEach, before, beforeEach, describe, test } from "node:test"
 import { fakeData, fakeGitHub, type FakeData } from "./lib/fake-github.ts";
 import { git } from "./lib/git.ts";
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
-import { BRANCH, LIMES_MODULE, LIMES_REQUIREMENT_SCOPE, Proposal, compareVersions, goEnv, proposeRequirements, requirementsSummary, type Context } from "./require-limes.ts";
+import { BRANCH, LIMES_MODULE, LIMES_REQUIREMENT_SCOPE, Proposal, compareVersions, goEnv, proposeRequirements, requirementTitle, requirementsSummary, type Context } from "./require-limes.ts";
 
 const MODULE = "nested";
 const OTHER = "other";
 const FOLLOWER = "examples";
 const REQUIRED = "v0.1.0";
-const TITLE = (tag: string) => `build(${LIMES_REQUIREMENT_SCOPE}): require limes ${tag}`;
+const TITLE = (tag: string, ...dirs: string[]) => `build(${LIMES_REQUIREMENT_SCOPE}): require limes ${tag} in ${dirs.join(" and ")}`;
 
 // GO_OFFLINE lets go tidy a module that requires limes through a replace
 // with no network, and git commit with no identity of the machine's.
@@ -137,7 +137,7 @@ describe("proposeRequirements", () => {
     assert.equal(await requiredOn(BRANCH, `${MODULE}/go.mod`), "v0.2.0");
     assert.equal(await requiredOn(BRANCH, `${OTHER}/go.mod`), "v0.2.0");
     assert.equal((await git(["rev-list", "--count", `main..${BRANCH}`], origin)).trim(), "1");
-    assert.deepEqual(data.createdPulls.map((p) => [p.head, p.base, p.text.title]), [[BRANCH, "main", TITLE("v0.2.0")]]);
+    assert.deepEqual(data.createdPulls.map((p) => [p.head, p.base, p.text.title]), [[BRANCH, "main", TITLE("v0.2.0", MODULE, OTHER)]]);
     assert.match(data.createdPulls[0]?.text.body ?? "", new RegExp(`- ${OTHER}: ${REQUIRED} → v0\\.2\\.0`));
   });
 
@@ -159,7 +159,7 @@ describe("proposeRequirements", () => {
     await proposeRequirements(ctx(), [MODULE], "v0.2.0");
     assert.equal((await proposeRequirements(ctx(), [MODULE], "v0.3.0")).proposal, Proposal.Updated);
     assert.equal(data.createdPulls.length, 1);
-    assert.equal(data.editedPulls[0]?.text.title, TITLE("v0.3.0"));
+    assert.equal(data.editedPulls[0]?.text.title, TITLE("v0.3.0", MODULE));
     assert.equal(await requiredOn(BRANCH, `${MODULE}/go.mod`), "v0.3.0");
   });
 
@@ -227,4 +227,15 @@ describe("requirementsSummary", () => {
   });
   test("with nothing to raise, no pull request", () =>
     assert.match(requirementsSummary("v0.2.0", ["pgstore"], { proposal: Proposal.Unchanged, raised: [], failed: [] }), /No pull request: nothing to raise\./));
+});
+
+describe("requirementTitle", () => {
+  test("names every module whose go.mod it raises", () => {
+    assert.equal(requirementTitle("v0.2.0", ["pgstore"]), `build(${LIMES_REQUIREMENT_SCOPE}): require limes v0.2.0 in pgstore`);
+    assert.equal(requirementTitle("v0.2.0", ["pgstore", "otelmetric"]), `build(${LIMES_REQUIREMENT_SCOPE}): require limes v0.2.0 in pgstore and otelmetric`);
+    assert.equal(
+      requirementTitle("v0.2.0", ["pgstore", "redisreplay", "otelmetric"]),
+      `build(${LIMES_REQUIREMENT_SCOPE}): require limes v0.2.0 in pgstore, redisreplay and otelmetric`,
+    );
+  });
 });

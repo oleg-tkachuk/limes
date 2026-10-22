@@ -27,7 +27,7 @@
 // and docs/style/refactor/test/build/ci/chore release nothing. `security` is a
 // patch: the preset knows no such type. A nested module's own build change is
 // a patch of it: such a commit changes the go.mod its users resolve — above
-// all the release workflow's `build(limes): require limes vX.Y.Z`, which
+// all the release workflow's `build(nested): require limes vX.Y.Z in …`, which
 // would otherwise leave the requirement unreleased — and is listed in its
 // notes, which the preset would leave empty, build being a hidden type. That
 // one commit raises every nested module's requirement at once, so its scope
@@ -55,9 +55,13 @@ const REDISREPLAY_RELEASES_NOTHING = { scope: REDISREPLAY_MODULE, release: false
 const OTELMETRIC_RELEASES_NOTHING = { scope: OTELMETRIC_MODULE, release: false };
 
 // LIMES_REQUIREMENT_SCOPE scopes the build change that raises the nested
-// modules' requirement of limes (.github/ci/require-limes.ts). The root
-// module's rules leave it to the preset, where build releases nothing.
-const LIMES_REQUIREMENT_SCOPE = "limes";
+// modules' requirement of limes (.github/ci/require-limes.ts), and
+// FORMER_REQUIREMENT_SCOPE the one it had before, released alike so a
+// change committed under it still releases. The root module's rules leave
+// both to the preset, where build releases nothing.
+const LIMES_REQUIREMENT_SCOPE = "nested";
+const FORMER_REQUIREMENT_SCOPE = "limes";
+const REQUIREMENT_SCOPES = [LIMES_REQUIREMENT_SCOPE, FORMER_REQUIREMENT_SCOPE];
 
 // buildIsAPatch is the rule that releases a build change scoped to the nested
 // module name as a patch of it.
@@ -92,13 +96,13 @@ const DEPENDENCIES_SECTION = "Dependencies";
 // matches a commit, so the scoped ones go ahead of the hidden build type.
 function buildIsListed(name) {
   const at = PRESET_TYPES.findIndex((t) => t.type === "build");
-  const listed = [name, LIMES_REQUIREMENT_SCOPE].map((scope) => ({ type: "build", scope, section: DEPENDENCIES_SECTION, effect: "bump" }));
+  const listed = [name, ...REQUIREMENT_SCOPES].map((scope) => ({ type: "build", scope, section: DEPENDENCIES_SECTION, effect: "bump" }));
   return [...PRESET_TYPES.slice(0, at), ...listed, ...PRESET_TYPES.slice(at)];
 }
 
 // nestedRules are the release rules of the nested module name.
 function nestedRules(name) {
-  return [SECURITY_IS_A_PATCH, BREAKING_IS_A_MINOR_BEFORE_1_0, buildIsAPatch(name), buildIsAPatch(LIMES_REQUIREMENT_SCOPE)];
+  return [SECURITY_IS_A_PATCH, BREAKING_IS_A_MINOR_BEFORE_1_0, buildIsAPatch(name), ...REQUIREMENT_SCOPES.map(buildIsAPatch)];
 }
 
 // The variable that picks the module to release, and the one picked without it.
@@ -181,6 +185,7 @@ function breaksAreMinor(name) {
 
 module.exports = {
   DEPENDENCIES_SECTION,
+  FORMER_REQUIREMENT_SCOPE,
   LIMES_REQUIREMENT_SCOPE,
   MODULES,
   MODULE_ENV,

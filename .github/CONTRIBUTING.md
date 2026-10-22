@@ -57,7 +57,7 @@ exhaustively, such as a `ChargeBucket`, or an API the module calls — lands
 with the module in one pull request. The released-limes job of its merge fails,
 as nothing released has the change yet; the release then releases limes, and
 the release workflow opens one pull request raising every nested module's
-requirement to that release (`build(limes): require limes vX.Y.Z`, merged
+requirement to that release (`build(nested): require limes vX.Y.Z in …`, merged
 once green). Its merge passes the job and releases each module it raised
 with every change the module held: a `build(limes)` commit is a patch of each
 nested module whose files it changes, so the raised requirement is released
