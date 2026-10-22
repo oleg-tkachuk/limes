@@ -113,7 +113,11 @@ type Store interface {
 	// revocation entry for each descendant, so the audit trail names
 	// every capability that was stopped, not only the one an operator
 	// picked. A repeated cascading revoke writes the entries a descendant
-	// lacks, whatever the capability's own entry says. A store may keep
+	// lacks, whatever the capability's own entry says. A capability already
+	// stopped through an ancestor, or expired, still gets its entry: the
+	// audit names who revoked it and why, and the entry stands if the
+	// ancestor's goes with a purge. RevokeResult.Before says it stopped
+	// nothing new. A store may keep
 	// work per descendant beside the entry — pgstore marks each one
 	// revoked, holding its row until the revoke commits — so a revoke's cost
 	// can grow with the subtree below the capability, flag or not.
@@ -233,6 +237,12 @@ type RevokeResult struct {
 	// Revocation is the capability's entry as it stands after the call:
 	// the one the call wrote, or the earlier one it kept.
 	Revocation Revocation
+	// Before is the capability's disposition just before the call, by the
+	// rules and the clock RecordCensus and RecordListingReader use: revoked
+	// — by its own entry or through an ancestor — then expired, then
+	// active. Only a revoke of an active capability stopped something new.
+	// AlreadyRevoked implies RecordDispositionRevoked.
+	Before RecordDisposition
 }
 
 // Validate refuses a request naming no capability, as ErrInvalidRequest:

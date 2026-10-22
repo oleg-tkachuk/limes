@@ -748,7 +748,11 @@ result, err := records.Revoke(ctx, limes.RevokeRequest{
 Idempotent: a repeat keeps the first entry, and `result.AlreadyRevoked`
 says the capability had one before this call; `result.Revocation` is the
 entry that stands, so a caller learns whether it stopped the capability
-without a read beforehand, which a concurrent revoke could outdate. An id
+without a read beforehand, which a concurrent revoke could outdate.
+`result.Before` is the capability's disposition just before the call, by the
+census's rules and clock: only a revoke of an `active` one stopped something
+new. A capability already revoked through an ancestor, or expired, still
+gets its own entry, for the audit and in case the ancestor's is purged. An id
 not on record is `ErrNotFound` and writes nothing. In pgstore a revoke also
 marks every record below the capability revoked, a generation at a time by
 key and by parent, inside its transaction: it holds those rows until it

@@ -535,10 +535,15 @@ func (s *Store) Revoke(_ context.Context, args limes.RevokeRequest) (limes.Revok
 	if _, ok := s.caps[args.CapabilityID]; !ok {
 		return limes.RevokeResult{}, limes.ErrNotFound
 	}
-	entry := limes.Revocation{
-		RevokedAt: s.nowFn(), Note: args.Note, Actor: args.Actor, Cascaded: args.CascadeChildren,
+	now := s.nowFn()
+	before, _, err := s.dispositionLocked(args.CapabilityID, now)
+	if err != nil {
+		return limes.RevokeResult{}, err
 	}
-	var result limes.RevokeResult
+	entry := limes.Revocation{
+		RevokedAt: now, Note: args.Note, Actor: args.Actor, Cascaded: args.CascadeChildren,
+	}
+	result := limes.RevokeResult{Before: before}
 	result.Revocation, result.AlreadyRevoked = s.revokeLocked(args.CapabilityID, entry)
 	if !args.CascadeChildren {
 		return result, nil
