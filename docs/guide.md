@@ -777,7 +777,9 @@ A decorator that embeds `limes.Store` has no `RevocationLineage` to promote
 and turns that off without a word: forward the method, set
 `RevocationCacheConfig.RequireLineage` to have `NewRevocationCache` refuse
 an upstream without it (`ErrNoRevocationLineage`), and read
-`Stats().Lineage` to see which the cache has.
+`Stats().Lineage` to see which the cache has. `Stats().ClearsWithoutLineage`
+counts the `ClearRevoked` calls that cleared whole for want of it, apart from
+a `Clear` asked for, though both count in `Clears`.
 A consumer that revokes often keeps every answer it did not touch, where
 `Clear` would make the next check of each id ask the store again.
 
