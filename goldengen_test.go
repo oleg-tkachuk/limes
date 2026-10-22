@@ -75,7 +75,9 @@ func (genStore) GetRecord(context.Context, uuid.UUID) (Record, error) {
 	return Record{}, errors.New("not found")
 }
 func (genStore) IsRevoked(context.Context, uuid.UUID) (bool, error) { return false, nil }
-func (genStore) Revoke(context.Context, RevokeRequest) error        { return nil }
+func (genStore) Revoke(context.Context, RevokeRequest) (RevokeResult, error) {
+	return RevokeResult{}, nil
+}
 func (genStore) Purge(context.Context, PurgeRequest) (PurgeResult, error) {
 	return PurgeResult{}, nil
 }

@@ -96,8 +96,8 @@ func ExampleStore_Revoke() {
 	parent := e.record("orchestrator", uuid.Nil)
 	child := e.record("worker", parent.ID)
 
-	err := e.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: parent.ID, Note: "agent looping", Actor: "operator@example.com"})
-	fmt.Println(err)
+	result, err := e.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: parent.ID, Note: "agent looping", Actor: "operator@example.com"})
+	fmt.Println(err, result.AlreadyRevoked, result.Revocation.Note)
 
 	// The child stops too: IsRevoked answers for the whole chain.
 	revoked, _ := e.records.IsRevoked(ctx, child.ID)
@@ -105,16 +105,17 @@ func ExampleStore_Revoke() {
 	fmt.Println(revoked, record.Revocation == nil)
 
 	// CascadeChildren also writes the child's own entry, for the audit trail.
-	err = e.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: parent.ID, CascadeChildren: true})
+	// The parent was revoked already: its first entry stands.
+	result, err = e.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: parent.ID, Note: "again", CascadeChildren: true})
 	record, _ = e.records.GetRecord(ctx, child.ID)
-	fmt.Println(err, record.Revocation.Cascaded)
+	fmt.Println(err, record.Revocation.Cascaded, result.AlreadyRevoked, result.Revocation.Note)
 
-	err = e.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: uuid.New()})
+	_, err = e.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: uuid.New()})
 	fmt.Println(errors.Is(err, limes.ErrNotFound))
 	// Output:
-	// <nil>
+	// <nil> false agent looping
 	// true true
-	// <nil> true
+	// <nil> true true agent looping
 	// true
 }
 
@@ -474,7 +475,7 @@ func ExampleNewCensus() {
 	census := memstore.NewCensus(e.records)
 	live := e.record("researcher", uuid.Nil)
 	revoked := e.record("worker", uuid.Nil)
-	if err := e.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: revoked.ID}); err != nil {
+	if _, err := e.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: revoked.ID}); err != nil {
 		log.Fatal(err)
 	}
 

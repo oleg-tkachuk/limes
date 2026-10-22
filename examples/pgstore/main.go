@@ -175,7 +175,8 @@ func main() {
 	_, err = usage.GetUsage(elsewhere, c.ID)
 	demo.Refused(log, err, meter.ErrUsageNotFound, "read its usage scoped to another tenant")
 
-	demo.Must(log, records.Revoke(inTenant, limes.RevokeRequest{CapabilityID: c.ID, Note: "agent finished", Actor: "operator"}), "revoke")
+	_, err = records.Revoke(inTenant, limes.RevokeRequest{CapabilityID: c.ID, Note: "agent finished", Actor: "operator"})
+	demo.Must(log, err, "revoke")
 	log.Info("revoked the capability", "capability", c.ID)
 	_, err = verifier.Verify(ctx, limes.VerifyRequest{Token: issued.Token, Audience: audience})
 	demo.Refused(log, err, limes.ErrRevoked, "verify the revoked token")

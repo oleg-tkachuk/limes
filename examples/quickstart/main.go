@@ -162,9 +162,10 @@ func main() {
 	demo.Refused(log, err, limes.ErrBudgetExceeded, "a charge over the budget")
 
 	// 7. Revoke, cascading to everything the orchestrator delegated.
-	must(records.Revoke(ctx, limes.RevokeRequest{
+	_, err = records.Revoke(ctx, limes.RevokeRequest{
 		CapabilityID: parent.ID, Note: "example finished", Actor: "operator", CascadeChildren: true,
-	}), "revoke")
+	})
+	must(err, "revoke")
 
 	// The child stops either way — IsRevoked walks the chain — but only the
 	// cascade writes a revocation entry of its own, naming it in the audit.

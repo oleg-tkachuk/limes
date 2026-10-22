@@ -294,7 +294,7 @@ func TestRevokedCapabilitiesSpendNoReplayRoom(t *testing.T) {
 	flooder := uuid.New()
 	for range revokedCaps {
 		c, tok := issue(flooder, revokedKey)
-		if err := store.Revoke(ctx, RevokeRequest{CapabilityID: c.ID, Note: "test"}); err != nil {
+		if _, err := store.Revoke(ctx, RevokeRequest{CapabilityID: c.ID, Note: "test"}); err != nil {
 			t.Fatal(err)
 		}
 		for i := range replayShare {
@@ -326,7 +326,7 @@ func TestAProofIsCheckedBeforeRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Revoke(ctx, RevokeRequest{CapabilityID: c.ID, Note: "test"}); err != nil {
+	if _, err := store.Revoke(ctx, RevokeRequest{CapabilityID: c.ID, Note: "test"}); err != nil {
 		t.Fatal(err)
 	}
 

@@ -100,18 +100,21 @@ type Store interface {
 	IssuanceStore
 	RecordReader
 
-	// Revoke adds an entry to the revocation list. Idempotent: a
-	// duplicate revoke is a no-op. An id not on record — or not visible
-	// to the caller — returns ErrNotFound and writes nothing, so a caller
-	// is never told "revoked" about a capability nothing stopped. It
-	// refuses what RevokeRequest.Validate refuses.
+	// Revoke adds an entry to the revocation list, and says whether the
+	// capability had one already. Idempotent: a duplicate revoke writes
+	// nothing for the capability, keeps the first entry, and reports it
+	// with RevokeResult.AlreadyRevoked. An id not on record — or not
+	// visible to the caller — returns ErrNotFound and writes nothing, so a
+	// caller is never told "revoked" about a capability nothing stopped.
+	// It refuses what RevokeRequest.Validate refuses.
 	//
 	// Every descendant stops verifying either way, because IsRevoked
 	// walks the chain. CascadeChildren=true additionally writes a
 	// revocation entry for each descendant, so the audit trail names
 	// every capability that was stopped, not only the one an operator
-	// picked.
-	Revoke(ctx context.Context, req RevokeRequest) error
+	// picked. A repeated cascading revoke writes the entries a descendant
+	// lacks, whatever the capability's own entry says.
+	Revoke(ctx context.Context, req RevokeRequest) (RevokeResult, error)
 
 	// Purge removes the capabilities expired for longer than the request's
 	// retention (PurgeRequest.Retention) — their records, their revocation
@@ -215,6 +218,18 @@ type RevokeRequest struct {
 	// CascadeChildren records a revocation entry for every descendant as
 	// well. Descendants stop verifying regardless; see Store.Revoke.
 	CascadeChildren bool
+}
+
+// RevokeResult is what Store.Revoke did to the capability it names.
+type RevokeResult struct {
+	// AlreadyRevoked reports that the capability had a revocation entry of
+	// its own before the call, so the call wrote none for it. A capability
+	// stopped only through an ancestor has none: its first revoke writes
+	// one.
+	AlreadyRevoked bool
+	// Revocation is the capability's entry as it stands after the call:
+	// the one the call wrote, or the earlier one it kept.
+	Revocation Revocation
 }
 
 // Validate refuses a request naming no capability, as ErrInvalidRequest:

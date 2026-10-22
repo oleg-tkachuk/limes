@@ -222,11 +222,29 @@ func (f fixture) revoked(t *testing.T, id uuid.UUID) bool {
 	return r
 }
 
-func (f fixture) revoke(t *testing.T, id uuid.UUID, cascade bool) {
+func (f fixture) revoke(t *testing.T, id uuid.UUID, cascade bool) limes.RevokeResult {
 	t.Helper()
-	if err := f.Store.Revoke(f.Ctx, limes.RevokeRequest{CapabilityID: id, Note: "test", Actor: "storetest", CascadeChildren: cascade}); err != nil {
+	r, err := f.Store.Revoke(f.Ctx, limes.RevokeRequest{CapabilityID: id, Note: "test", Actor: "storetest", CascadeChildren: cascade})
+	if err != nil {
 		t.Fatalf("revoke %s: %v", id, err)
 	}
+	return r
+}
+
+// record is GetRecord of id, failing the test on an error.
+func (f fixture) record(t *testing.T, id uuid.UUID) limes.Record {
+	t.Helper()
+	r, err := f.Store.GetRecord(f.Ctx, id)
+	if err != nil {
+		t.Fatalf("GetRecord %s: %v", id, err)
+	}
+	return r
+}
+
+// sameRevocation reports whether a and b are one entry, read back by the
+// store's precision either time.
+func sameRevocation(a, b limes.Revocation) bool {
+	return a.RevokedAt.Equal(b.RevokedAt) && a.Note == b.Note && a.Actor == b.Actor && a.Cascaded == b.Cascaded
 }
 
 // Run runs every check as a subtest, each on a fresh Env from setup.
@@ -324,11 +342,7 @@ func checkRecord(t *testing.T, f fixture) {
 	cascadeChild := f.live(t, "agent:cascade-child", cascadeRoot.ID)
 	record := func(id uuid.UUID) limes.Record {
 		t.Helper()
-		r, err := f.Store.GetRecord(f.Ctx, id)
-		if err != nil {
-			t.Fatalf("GetRecord %s: %v", id, err)
-		}
-		return r
+		return f.record(t, id)
 	}
 
 	issuer := f.issuer()
@@ -344,13 +358,24 @@ func checkRecord(t *testing.T, f fixture) {
 		t.Errorf("before any revoke: issued by %+v, revocation %+v; want %+v and none", r.IssuedBy, r.Revocation, issuer)
 	}
 
-	f.revoke(t, parent.ID, false)
-	if err := f.Store.Revoke(f.Ctx, limes.RevokeRequest{CapabilityID: parent.ID, Note: "again", Actor: "someone-else"}); err != nil {
+	first := f.revoke(t, parent.ID, false)
+	if first.AlreadyRevoked {
+		t.Errorf("first revoke of %s: AlreadyRevoked", parent.ID)
+	}
+	again, err := f.Store.Revoke(f.Ctx, limes.RevokeRequest{CapabilityID: parent.ID, Note: "again", Actor: "someone-else"})
+	if err != nil {
 		t.Fatal(err)
 	}
 	rev := record(parent.ID).Revocation
 	if rev == nil || rev.Note != "test" || rev.Actor != "storetest" || rev.Cascaded || rev.RevokedAt.IsZero() {
 		t.Errorf("revocation = %+v; want the first revoke's reason and actor, not cascading, with a time", rev)
+	} else {
+		if !sameRevocation(first.Revocation, *rev) {
+			t.Errorf("first revoke reported %+v; on record %+v", first.Revocation, rev)
+		}
+		if !again.AlreadyRevoked || !sameRevocation(again.Revocation, *rev) {
+			t.Errorf("repeated revoke = %+v; want AlreadyRevoked and the first entry %+v", again, rev)
+		}
 	}
 	if rev := record(child.ID).Revocation; rev != nil {
 		t.Errorf("a child stopped through its parent has an entry of its own: %+v", rev)
@@ -396,11 +421,11 @@ func checkUnknown(t *testing.T, f fixture) {
 			t.Errorf("IsRevoked %s = true for an id not on record", id)
 		}
 	}
-	if err := f.Store.Revoke(f.Ctx, limes.RevokeRequest{CapabilityID: uuid.New()}); !errors.Is(err, limes.ErrNotFound) {
+	if _, err := f.Store.Revoke(f.Ctx, limes.RevokeRequest{CapabilityID: uuid.New()}); !errors.Is(err, limes.ErrNotFound) {
 		t.Errorf("Revoke of an id not on record: err = %v, want ErrNotFound", err)
 	}
 	// The zero id names nothing: the caller's bug (RevokeRequest.Validate).
-	if err := f.Store.Revoke(f.Ctx, limes.RevokeRequest{}); !errors.Is(err, limes.ErrInvalidRequest) {
+	if _, err := f.Store.Revoke(f.Ctx, limes.RevokeRequest{}); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("Revoke naming no capability: err = %v, want ErrInvalidRequest", err)
 	}
 }
@@ -408,14 +433,36 @@ func checkUnknown(t *testing.T, f fixture) {
 func checkRevoke(t *testing.T, f fixture) {
 	parent := f.live(t, "agent:parent", uuid.Nil)
 	child := f.live(t, "agent:child", parent.ID)
+	grandchild := f.live(t, "agent:grandchild", child.ID)
 	other := f.live(t, "agent:other", uuid.Nil)
-	f.revoke(t, parent.ID, false)
-	f.revoke(t, parent.ID, false) // idempotent
+	if r := f.revoke(t, parent.ID, false); r.AlreadyRevoked {
+		t.Error("first revoke: AlreadyRevoked")
+	}
+	if r := f.revoke(t, parent.ID, false); !r.AlreadyRevoked { // idempotent
+		t.Error("repeated revoke: not AlreadyRevoked")
+	}
 	if !f.revoked(t, parent.ID) || !f.revoked(t, child.ID) {
 		t.Error("revoking a parent must stop it and its child")
 	}
 	if f.revoked(t, other.ID) {
 		t.Error("revoking one capability stopped an unrelated one")
+	}
+	// Stopped through its parent, the child has no entry of its own, so its
+	// first revoke writes one.
+	if r := f.revoke(t, child.ID, false); r.AlreadyRevoked || r.Revocation.Cascaded {
+		t.Errorf("first revoke of a child stopped through its parent = %+v; want a new entry, not cascading", r)
+	}
+	// A cascade over a capability already revoked keeps its entry, and
+	// those of its descendants that have one, and writes the others'.
+	r := f.revoke(t, parent.ID, true)
+	if !r.AlreadyRevoked || r.Revocation.Cascaded {
+		t.Errorf("cascade over a revoked capability = %+v; want AlreadyRevoked and the first, plain entry", r)
+	}
+	if rev := f.record(t, child.ID).Revocation; rev == nil || rev.Cascaded {
+		t.Errorf("child's own entry after the cascade = %+v; want it kept, not cascading", rev)
+	}
+	if rev := f.record(t, grandchild.ID).Revocation; rev == nil || !rev.Cascaded {
+		t.Errorf("grandchild after the cascade = %+v; want a cascading entry", rev)
 	}
 }
 
@@ -1132,7 +1179,7 @@ func checkScopeMismatch(t *testing.T, f fixture) {
 	}
 	// Revoke names no tenant, so its scope hides the record rather than
 	// refusing the call: not visible to the caller is not found.
-	if err := f.Store.Revoke(wrong, limes.RevokeRequest{CapabilityID: parent.ID, Actor: "storetest"}); !errors.Is(err, limes.ErrNotFound) {
+	if _, err := f.Store.Revoke(wrong, limes.RevokeRequest{CapabilityID: parent.ID, Actor: "storetest"}); !errors.Is(err, limes.ErrNotFound) {
 		t.Errorf("Revoke of Tenant's record under another tenant's context: err = %v, want ErrNotFound", err)
 	}
 	if f.revoked(t, parent.ID) {
@@ -1157,7 +1204,7 @@ func checkReadOnlyScope(t *testing.T, f fixture) {
 	copyID := []byte("read-only-copy")
 	writes := map[string]func() error{
 		"Insert": func() error { return f.Store.Insert(ro, limes.InsertRequest{Capability: fresh, IssuedBy: issuedBy}) },
-		"Revoke": func() error { return f.Store.Revoke(ro, limes.RevokeRequest{CapabilityID: live.ID}) },
+		"Revoke": func() error { _, err := f.Store.Revoke(ro, limes.RevokeRequest{CapabilityID: live.ID}); return err },
 		"Purge": func() error {
 			_, err := f.Store.Purge(ro, limes.PurgeRequest{ExpiredFor: purgeGrace})
 			return err

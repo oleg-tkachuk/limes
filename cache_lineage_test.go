@@ -38,7 +38,7 @@ func TestRevocationCacheDropReachesADescendant(t *testing.T) {
 		t.Fatalf("child before the revocation = %v, %v; want live", revoked, err)
 	}
 	// Not cascading: the child has no entry of its own, only its parent's.
-	if err := s.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: parent.Capability().ID}); err != nil {
+	if _, err := s.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: parent.Capability().ID}); err != nil {
 		t.Fatal(err)
 	}
 	cache.Clear()

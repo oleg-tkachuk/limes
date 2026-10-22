@@ -42,7 +42,7 @@ func TestDelegationStopsAtMaxDelegationDepth(t *testing.T) {
 		t.Errorf("records of the refused delegation = %d, %v; want none", len(left.Items), err)
 	}
 
-	if err := s.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: root.ID}); err != nil {
+	if _, err := s.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: root.ID}); err != nil {
 		t.Fatal(err)
 	}
 	_, err = s.verifier.Verify(ctx, limes.VerifyRequest{Token: token, Audience: exampleAudience})

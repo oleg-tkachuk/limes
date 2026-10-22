@@ -398,11 +398,14 @@ func (s *Store) GetRecord(_ context.Context, id uuid.UUID) (limes.Record, error)
 }
 
 // revokeLocked writes id's revocation entry unless it has one: the first
-// entry stands, as a repeated revoke is a no-op. s.mu must be held.
-func (s *Store) revokeLocked(id uuid.UUID, r limes.Revocation) {
-	if _, ok := s.revoked[id]; !ok {
-		s.revoked[id] = r
+// entry stands, as a repeated revoke is a no-op. It returns the entry that
+// stands, and whether it was there before. s.mu must be held.
+func (s *Store) revokeLocked(id uuid.UUID, r limes.Revocation) (limes.Revocation, bool) {
+	if first, ok := s.revoked[id]; ok {
+		return first, true
 	}
+	s.revoked[id] = r
+	return r, false
 }
 
 // isRevokedItselfLocked reports whether id has a revocation entry of its own.
@@ -503,21 +506,22 @@ func (s *Store) exists(id uuid.UUID) bool {
 
 // Revoke is idempotent. CascadeChildren walks the delegation tree by ParentID
 // so revoking an orchestrator takes the sub-agents it spawned with it.
-func (s *Store) Revoke(_ context.Context, args limes.RevokeRequest) error {
+func (s *Store) Revoke(_ context.Context, args limes.RevokeRequest) (limes.RevokeResult, error) {
 	if err := args.Validate(); err != nil {
-		return err
+		return limes.RevokeResult{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.caps[args.CapabilityID]; !ok {
-		return limes.ErrNotFound
+		return limes.RevokeResult{}, limes.ErrNotFound
 	}
 	entry := limes.Revocation{
 		RevokedAt: s.nowFn(), Note: args.Note, Actor: args.Actor, Cascaded: args.CascadeChildren,
 	}
-	s.revokeLocked(args.CapabilityID, entry)
+	var result limes.RevokeResult
+	result.Revocation, result.AlreadyRevoked = s.revokeLocked(args.CapabilityID, entry)
 	if !args.CascadeChildren {
-		return nil
+		return result, nil
 	}
 	// Breadth-first down the delegation tree from args.ID alone, to the
 	// depth IsRevoked walks: a capability revoked earlier without
@@ -533,7 +537,7 @@ func (s *Store) Revoke(_ context.Context, args limes.RevokeRequest) error {
 		}
 		level = next
 	}
-	return nil
+	return result, nil
 }
 
 // IsBiscuitRevoked implements limes.BiscuitRevocationLookup.

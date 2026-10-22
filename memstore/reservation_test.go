@@ -194,7 +194,7 @@ func TestAHoldEndsWithItsCapability(t *testing.T) {
 	if want := now.Add(contractTTL); !settled.ExpiresAt.Equal(want) {
 		t.Errorf("a hold asked for %s expires at %s, want its capability's expiry %s", farTTL, settled.ExpiresAt, want)
 	}
-	if err := u.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: capID}); err != nil {
+	if _, err := u.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: capID}); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := u.ReleaseExpired(ctx, meter.ReleaseExpiredRequest{}); err != nil || got.Released != 0 {
