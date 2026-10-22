@@ -10,9 +10,9 @@ const fs = require("node:fs");
 
 const NOTES_FILE_ENV = "RELEASE_NOTES_FILE";
 
-// prepare runs once the next version and its notes are known, before the tag
-// is pushed. Without the variable — a local run — nothing is written.
-async function prepare(_pluginConfig, { env, nextRelease, logger }) {
+// write puts the notes in the file RELEASE_NOTES_FILE names. Without the
+// variable — a local run — nothing is written.
+function write({ env, nextRelease, logger }) {
   const path = env[NOTES_FILE_ENV];
   if (!path) {
     logger.log(`${NOTES_FILE_ENV} is not set; the release notes are not written`);
@@ -21,4 +21,19 @@ async function prepare(_pluginConfig, { env, nextRelease, logger }) {
   fs.writeFileSync(path, nextRelease.notes ?? "");
 }
 
-module.exports = { prepare, NOTES_FILE_ENV };
+// generateNotes runs after the plugins listed before this one generated
+// theirs, which it is handed, and in a dry run too, which prepare is not:
+// a release candidate's notes come from a dry run (.github/ci/release.ts).
+// It adds nothing to the notes.
+async function generateNotes(_pluginConfig, context) {
+  write(context);
+  return "";
+}
+
+// prepare runs once the next version and its notes are known, before the tag
+// is pushed: the notes a release is published with.
+async function prepare(_pluginConfig, context) {
+  write(context);
+}
+
+module.exports = { generateNotes, prepare, NOTES_FILE_ENV };

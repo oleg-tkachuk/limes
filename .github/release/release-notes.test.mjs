@@ -116,6 +116,14 @@ try {
   }
   // Without the variable it writes nothing and does not fail the release.
   await notesFile.prepare({}, { ...context, nextRelease: { ...context.nextRelease, notes } });
+  // A dry run, a release candidate's, writes them from generateNotes, which
+  // adds nothing to the notes.
+  const dryPath = join(dir, "dry-notes.md");
+  const added = await notesFile.generateNotes({}, { ...context, env: { [notesFile.NOTES_FILE_ENV]: dryPath }, nextRelease: { ...context.nextRelease, notes } });
+  if (!existsSync(dryPath) || readFileSync(dryPath, "utf8") !== notes || added !== "") {
+    console.log(`FAIL generateNotes did not write the notes to ${notesFile.NOTES_FILE_ENV}, adding none`);
+    failed = 1;
+  }
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }
