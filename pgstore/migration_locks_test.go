@@ -17,8 +17,10 @@ import (
 // lockedThrough is the last migration that may build an index on a table an
 // earlier migration created with a plain CREATE INDEX, which holds the
 // table's writes until the index is built. Those migrations are applied in
-// the wild and stay as they are; 014 is the last of them (doc.go).
-const lockedThrough = 14
+// the wild and stay as they are. 014 was the last of them until it was
+// rewritten to build CONCURRENTLY: the same indexes, so a store that ran it
+// before is where it would be now (migrate.go).
+const lockedThrough = 13
 
 // disableTx is tern's marker of a migration run outside a transaction, one
 // statement at a time, which CREATE INDEX CONCURRENTLY needs.
