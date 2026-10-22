@@ -9,6 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/oleg-tkachuk/limes"
 )
 
 // RevocationChannel is the channel the schema notifies on every statement
@@ -42,6 +44,20 @@ type RevokedClearer interface {
 	ClearRevoked(ids ...uuid.UUID)
 }
 
+// Syncer is a cache the watcher keeps in step with its connection: told
+// when it starts to listen and when it stops, and given each notification.
+// limes.RevocationCache is: it serves its longer SyncedTTL only while the
+// watcher listens, and counts what it is told.
+type Syncer interface {
+	Clearer
+	Listening()
+	NotListening()
+	Signal(ids ...uuid.UUID)
+}
+
+// A RevocationCache is kept in step, not only cleared.
+var _ Syncer = (*limes.RevocationCache)(nil)
+
 // RevocationWatcher clears revocation caches when any replica revokes: it
 // listens on RevocationChannel and, on each notification, drops from each
 // cache what the revocation outdates — with ClearRevoked, from a
@@ -50,8 +66,11 @@ type RevokedClearer interface {
 // that names none (a Biscuit copy's revocation, a statement revoking more
 // than MaxNotifiedRevocations capabilities that no ancestor's id covers),
 // and after each connection it opens, since a revocation made while it was
-// not listening sent a notification it never heard. Between connections, a
-// cache's TTL bounds how long a revocation may go unseen.
+// not listening sent a notification it never heard. A Syncer is told
+// instead — Listening once it listens, Signal on each notification, and
+// NotListening when the connection is lost or Run ends — so it serves its
+// TTL alone while no notification can reach it. Between connections, that
+// TTL bounds how long a revocation may go unseen.
 type RevocationWatcher struct {
 	// Connect opens the connection the watcher listens on. It must be the
 	// watcher's own, not one a pool takes back with the LISTEN still on
@@ -107,13 +126,35 @@ func (w RevocationWatcher) listen(ctx context.Context) (listened bool, err error
 	}
 	// Listening now, so whatever was revoked before is in the store: what
 	// the caches hold from before may be stale.
-	w.clear(nil)
+	w.listening()
+	defer w.notListening()
 	for {
 		n, err := conn.WaitForNotification(ctx)
 		if err != nil {
 			return true, fmt.Errorf("pgstore: watch revocations: %w", err)
 		}
-		w.clear(revokedIDs(n.Payload))
+		w.signal(revokedIDs(n.Payload))
+	}
+}
+
+// listening tells each Syncer the watcher listens, which clears it, and
+// clears every other cache.
+func (w RevocationWatcher) listening() {
+	for _, c := range w.Caches {
+		if s, ok := c.(Syncer); ok {
+			s.Listening()
+			continue
+		}
+		c.Clear()
+	}
+}
+
+// notListening tells each Syncer the watcher stopped listening.
+func (w RevocationWatcher) notListening() {
+	for _, c := range w.Caches {
+		if s, ok := c.(Syncer); ok {
+			s.NotListening()
+		}
 	}
 }
 
@@ -135,10 +176,15 @@ func revokedIDs(payload string) []uuid.UUID {
 	return ids
 }
 
-// clear drops what a revocation of ids outdates from each cache that can
-// tell, and clears the others and every cache when ids is nil.
-func (w RevocationWatcher) clear(ids []uuid.UUID) {
+// signal passes a notification of ids on: to a Syncer as it is, and from
+// the others drops what a revocation of ids outdates in each cache that can
+// tell, clearing the rest, and every cache when ids is nil.
+func (w RevocationWatcher) signal(ids []uuid.UUID) {
 	for _, c := range w.Caches {
+		if s, ok := c.(Syncer); ok {
+			s.Signal(ids...)
+			continue
+		}
 		if r, ok := c.(RevokedClearer); ok && ids != nil {
 			r.ClearRevoked(ids...)
 			continue

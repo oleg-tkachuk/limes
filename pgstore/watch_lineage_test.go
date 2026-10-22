@@ -2,8 +2,10 @@ package pgstore
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -193,5 +195,84 @@ func TestRevocationWatcherKeepsUnrelatedAnswers(t *testing.T) {
 	}
 	if st := cache.Stats(); st.Clears != 1 {
 		t.Errorf("%d clears; want only the one once listening", st.Clears)
+	}
+}
+
+// unsyncedCacheTTL is the TTL of the disconnected-watcher check: short, so
+// an answer outlives it quickly once the watcher stops vouching.
+const unsyncedCacheTTL = watchQuiet
+
+// While the watcher is down a revocation sends a notification nobody hears,
+// so a cache it kept in step serves its short TTL, not its SyncedTTL: the
+// revoked capability stops verifying though the cache had answered live
+// under an hour's bound. Once the watcher listens again, a revocation
+// reaches the cache by notification.
+func TestRevocationWatcherDownServesTheShortTTL(t *testing.T) {
+	f := newTenantFixture(t)
+	cache, err := limes.NewRevocationCache(limes.RevocationCacheConfig{Capabilities: f.records, TTL: unsyncedCacheTTL, SyncedTTL: cacheTTL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var down atomic.Bool
+	errDown := errors.New("the database is unreachable")
+	connect := func(ctx context.Context) (*pgx.Conn, error) {
+		if down.Load() {
+			return nil, errDown
+		}
+		return connectApp(ctx)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go func() { _ = RevocationWatcher{Connect: connect, Caches: []Clearer{cache}}.Run(ctx) }()
+	await := func(what string, cond func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(watchWait)
+		for !cond() {
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: not within %s", what, watchWait)
+			}
+			time.Sleep(watchQuiet / 10)
+		}
+	}
+	revoked := func(id uuid.UUID) func() bool {
+		return func() bool {
+			r, err := cache.IsRevoked(t.Context(), id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return r
+		}
+	}
+	await("listening", func() bool { return cache.Stats().Synced })
+	ids := f.tree(t, root, root)
+	if revoked(ids[0])() {
+		t.Fatal("revoked before any revocation")
+	}
+
+	down.Store(true)
+	if _, err := owner.Exec(t.Context(), sqlEndWatcher, watcherName); err != nil {
+		t.Fatal(err)
+	}
+	await("the watcher stops vouching", func() bool { return !cache.Stats().Synced })
+	if st := cache.Stats(); st.SyncsLost == 0 || st.LastSyncLoss.IsZero() {
+		t.Errorf("Stats after the loss = %+v; want it counted and timed", st)
+	}
+	mine := WithTenant(t.Context(), f.mine)
+	if _, err := f.records.Revoke(mine, limes.RevokeRequest{CapabilityID: ids[0]}); err != nil {
+		t.Fatal(err)
+	}
+	await("the revocation seen while the watcher is down", revoked(ids[0]))
+
+	down.Store(false)
+	await("listening again", func() bool { st := cache.Stats(); return st.Synced && st.Syncs == 2 })
+	if revoked(ids[1])() {
+		t.Fatal("revoked before its revocation")
+	}
+	if _, err := f.records.Revoke(mine, limes.RevokeRequest{CapabilityID: ids[1]}); err != nil {
+		t.Fatal(err)
+	}
+	await("the revocation signalled once listening again", func() bool { return cache.Stats().Signals >= 1 })
+	if !revoked(ids[1])() {
+		t.Error("a signalled revocation not seen")
 	}
 }
