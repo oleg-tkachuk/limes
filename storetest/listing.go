@@ -354,6 +354,9 @@ func checkGetRecordListing(t *testing.T, f fixture) {
 		if diff := diffCapabilities(got.Record.Capability, want.Record.Capability); diff != "" {
 			t.Errorf("%s: a capability other than the listing's: %s", want.Record.Capability.Subject.Subject, diff)
 		}
+		if !reflect.DeepEqual(got.StoppedBy, want.StoppedBy) {
+			t.Errorf("%s: stopped by %+v; the listing gives %+v", want.Record.Capability.Subject.Subject, got.StoppedBy, want.StoppedBy)
+		}
 		if got.Disposition != want.Disposition || !reflect.DeepEqual(got.Record.IssuedBy, want.Record.IssuedBy) || !reflect.DeepEqual(got.Record.Revocation, want.Record.Revocation) {
 			t.Errorf("%s: disposition %q, issued by %+v, revocation %+v; the listing gives %q, %+v, %+v",
 				want.Record.Capability.Subject.Subject, got.Disposition, got.Record.IssuedBy, got.Record.Revocation,
@@ -373,4 +376,52 @@ func checkGetRecordListing(t *testing.T, f fixture) {
 	if _, err := reader.GetRecordListing(f.Ctx, theirs[0].Record.Capability.ID); !errors.Is(err, limes.ErrNotFound) {
 		t.Errorf("GetRecordListing of another tenant's record under Tenant's scope: err = %v, want ErrNotFound", err)
 	}
+}
+
+// A revoked record's listing names the entry that revoked it: its own, or
+// the nearest ancestor's — a parent's, a grandparent's, and once a nearer
+// ancestor is revoked too, that one's. A record that is not revoked names
+// none, and the listing and GetRecordListing name the same.
+func checkListingStoppedBy(t *testing.T, f fixture) {
+	f.skipUnlessLister(t)
+	grandparent := f.live(t, "agent:grandparent", uuid.Nil)
+	parent := f.live(t, "agent:parent", grandparent.ID)
+	child := f.live(t, "agent:child", parent.ID)
+	own := f.live(t, "agent:own", uuid.Nil)
+	active := f.live(t, "agent:active", uuid.Nil)
+	f.revoke(t, own.ID, false)
+	f.revoke(t, grandparent.ID, false)
+	stoppedBy := func(id uuid.UUID) *limes.CapabilityRevocation {
+		t.Helper()
+		for _, l := range f.listRecordsAll(t, limes.ListRecordsRequest{TenantID: f.Tenant}) {
+			if l.Record.Capability.ID == id {
+				if (l.StoppedBy != nil) != (l.Disposition == limes.RecordDispositionRevoked) {
+					t.Errorf("%s: %s, stopped by %+v", id, l.Disposition, l.StoppedBy)
+				}
+				if reader, ok := f.Lister.(limes.RecordListingReader); ok {
+					if got, err := reader.GetRecordListing(f.Ctx, id); err != nil || !reflect.DeepEqual(got.StoppedBy, l.StoppedBy) {
+						t.Errorf("%s: GetRecordListing stopped by %+v, %v; the listing %+v", id, got.StoppedBy, err, l.StoppedBy)
+					}
+				}
+				return l.StoppedBy
+			}
+		}
+		t.Fatalf("%s not listed", id)
+		return nil
+	}
+	expect := func(name string, id, by uuid.UUID) {
+		t.Helper()
+		got := stoppedBy(id)
+		if got == nil || got.CapabilityID != by || got.Revocation.Note != "test" || got.Revocation.RevokedAt.IsZero() {
+			t.Errorf("%s: stopped by %+v, want %s's entry", name, got, by)
+		}
+	}
+	expect("its own entry", own.ID, own.ID)
+	expect("through its parent", parent.ID, grandparent.ID)
+	expect("through its grandparent", child.ID, grandparent.ID)
+	if got := stoppedBy(active.ID); got != nil {
+		t.Errorf("an active record stopped by %+v", got)
+	}
+	f.revoke(t, parent.ID, false)
+	expect("through a parent revoked after its grandparent", child.ID, parent.ID)
 }

@@ -182,8 +182,21 @@ func (r ListRecordsRequest) Admits(d RecordDisposition) bool {
 
 // RecordListing is one record of a listing: what GetRecord reads back about
 // it — its own revocation entry among it, none when it is stopped only
-// through an ancestor — and its disposition now.
+// through an ancestor — its disposition now, and what revoked it.
 type RecordListing struct {
 	Record      Record
 	Disposition RecordDisposition
+	// StoppedBy is the entry that makes a revoked record revoked: its own,
+	// Record.Revocation, or for a record stopped only through an ancestor
+	// the entry of the nearest ancestor still on record that has one. Nil
+	// unless Disposition is RecordDispositionRevoked.
+	StoppedBy *CapabilityRevocation
+}
+
+// CapabilityRevocation is a revocation entry and the capability it is of.
+type CapabilityRevocation struct {
+	// CapabilityID is the record's own id, or the ancestor's whose entry
+	// it is.
+	CapabilityID uuid.UUID
+	Revocation   Revocation
 }
