@@ -355,16 +355,19 @@ func scanListing(row pgx.CollectableRow) (limes.RecordListing, error) {
 }
 
 // decodeListCursor reads a cursor ListRecords handed out for req's order and
-// filters; anything else, a cursor of the other order or of other filters
-// among it, is ErrInvalidRequest.
+// filters. One of the other order or of other filters is ErrCursorMismatch,
+// anything that is no cursor ErrInvalidRequest.
 func decodeListCursor(s string, req limes.ListRecordsRequest) (listCursor, error) {
 	var k listCursor
 	raw, err := base64.RawURLEncoding.DecodeString(s)
 	if err == nil {
 		err = json.Unmarshal(raw, &k)
 	}
-	if err != nil || k.After == uuid.Nil || k.Order != req.Order || k.Filters != filtersKey(req) {
+	if err != nil || k.After == uuid.Nil {
 		return listCursor{}, fmt.Errorf("%w: pgstore: record list cursor %q", limes.ErrInvalidRequest, s)
+	}
+	if k.Order != req.Order || k.Filters != filtersKey(req) {
+		return listCursor{}, fmt.Errorf("%w: pgstore: record list cursor %q", limes.ErrCursorMismatch, s)
 	}
 	return k, nil
 }
