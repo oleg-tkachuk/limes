@@ -987,7 +987,11 @@ UUIDv7. Every filter is optional: `PrincipalType`, `Subject` exactly or
 `RecordDispositionActive`, `Expired` and `Revoked`. Each `RecordListing`
 carries the `Record` — what `GetRecord` reads back — and its `Disposition`,
 by the census's rules: revoked through an ancestor on record too, unlike
-`ListByPrincipalRequest.IncludeRevoked`, and over expired. So a caller
+`ListByPrincipalRequest.IncludeRevoked`, and over expired. A revoked one
+also carries `StoppedBy`, the entry that revoked it and whose it is: its
+own, or that of the nearest ancestor with one, so a record stopped through
+an ancestor still says when and why. pgstore walks up to that ancestor a
+parent at a time by key, for those records alone. So a caller
 shows each record's state with no further read, and at one instant the
 records of each disposition in a full listing number what `CountRecords`
 counts. Each page is read on its own, though: a walk of many pages is no
