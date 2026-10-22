@@ -35,6 +35,11 @@ type RevocationLineageLookup interface {
 	RevocationLineage(ctx context.Context, id uuid.UUID) (revoked bool, ancestors []uuid.UUID, err error)
 }
 
+// ErrNoRevocationLineage is NewRevocationCache refusing, under
+// RevocationCacheConfig.RequireLineage, a Capabilities upstream that is no
+// RevocationLineageLookup.
+var ErrNoRevocationLineage = errors.New("limes: the revocation upstream names no lineage")
+
 // DefaultRevocationCacheTTL bounds how long a cached answer is served. A
 // revocation therefore takes effect within this window on every verifier
 // that did not perform it and hears no signal of it. It suits the requests
@@ -80,8 +85,22 @@ type RevocationCache struct {
 // RevocationCacheConfig configures a RevocationCache.
 type RevocationCacheConfig struct {
 	// Capabilities answers IsRevoked for what the cache does not hold.
-	// Required.
+	// Required. When it is a RevocationLineageLookup the cache asks
+	// RevocationLineage in place of IsRevoked, and ClearRevoked drops only
+	// what a revocation outdates. A decorator of a store keeps that only by
+	// having the method itself: a struct embedding limes.Store has no
+	// RevocationLineage to promote, so it forwards one —
+	//
+	//	func (c counting) RevocationLineage(ctx context.Context, id uuid.UUID) (bool, []uuid.UUID, error) {
+	//		return c.lineage.RevocationLineage(ctx, id)
+	//	}
+	//
+	// — and counts there what it counts in IsRevoked.
 	Capabilities RevocationLookup
+	// RequireLineage refuses a Capabilities that is no
+	// RevocationLineageLookup, with ErrNoRevocationLineage, where the cache
+	// would otherwise clear whole on every ClearRevoked.
+	RequireLineage bool
 	// Biscuits answers IsBiscuitRevoked for what the cache does not hold.
 	// Optional: without it the cache refuses every Biscuit question, and
 	// NewVerifier refuses it as BiscuitConfig.Revocations. A store that
@@ -118,6 +137,9 @@ func NewRevocationCache(cfg RevocationCacheConfig) (*RevocationCache, error) {
 		return nil, err
 	}
 	lineage, _ := cfg.Capabilities.(RevocationLineageLookup)
+	if cfg.RequireLineage && lineage == nil {
+		return nil, fmt.Errorf("%w: %T", ErrNoRevocationLineage, cfg.Capabilities)
+	}
 	return &RevocationCache{
 		capabilities: cfg.Capabilities,
 		lineage:      lineage,
@@ -224,7 +246,11 @@ type RevocationCacheStats struct {
 	// ClearRevoked that dropped only what a revocation outdates; one over
 	// an upstream that names no ancestors is a Clear.
 	Clears, ClearsRevoked uint64
-	_                     noCompare
+	// Lineage reports that the cache's upstream names each answer's
+	// ancestors, so ClearRevoked drops only what a revocation outdates;
+	// false, every ClearRevoked is a Clear.
+	Lineage bool
+	_       noCompare
 }
 
 // RevocationCacheCounts is one kind of answer's share of
@@ -257,6 +283,7 @@ func (c *RevocationCache) Stats() RevocationCacheStats {
 		Biscuits:      countsOf(c.copies.Stats()),
 		Clears:        c.clears.Load(),
 		ClearsRevoked: c.clearsRevoked.Load(),
+		Lineage:       c.lineage != nil,
 	}
 }
 
