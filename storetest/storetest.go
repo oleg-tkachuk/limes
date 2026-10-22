@@ -291,6 +291,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"ListRecordsRefusesAMalformedRequest", checkListRecordsMalformed},
 		{"ListRecordsRefusesACursorOfOtherFilters", checkListRecordsCursorFilters},
 		{"GetRecordListingIsTheListingOfTheRecord", checkGetRecordListing},
+		{"ListingNamesTheEntryThatRevokedARecord", checkListingStoppedBy},
 		{"EraseTenantRecordsKeepsWhatAVerifierStillNeeds", checkEraseTenant},
 	}
 	for _, c := range checks {

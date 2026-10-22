@@ -123,19 +123,27 @@ func expiredAt(expiresAt, now time.Time) bool {
 // revokedLocked reports whether id, or an ancestor of it still on record, is
 // revoked, as IsRevoked does; s.mu is held.
 func (s *Store) revokedLocked(id uuid.UUID) (bool, error) {
-	if _, ok := s.revoked[id]; ok {
-		return true, nil
+	by, err := s.stoppedByLocked(id)
+	return by != nil, err
+}
+
+// stoppedByLocked is the entry that revokes id: its own, or that of its
+// nearest ancestor still on record with one; nil when it is not revoked.
+// s.mu is held.
+func (s *Store) stoppedByLocked(id uuid.UUID) (*limes.CapabilityRevocation, error) {
+	if r, ok := s.revoked[id]; ok {
+		return &limes.CapabilityRevocation{CapabilityID: id, Revocation: r}, nil
 	}
 	ancestors, err := s.ancestorsLocked(id)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	for _, a := range ancestors {
-		if _, ok := s.revoked[a.ID]; ok {
-			return true, nil
+		if r, ok := s.revoked[a.ID]; ok {
+			return &limes.CapabilityRevocation{CapabilityID: a.ID, Revocation: r}, nil
 		}
 	}
-	return false, nil
+	return nil, nil
 }
 
 // countKeyOf is n's place in CountRecords' order.
@@ -286,13 +294,13 @@ func (c *Census) GetRecordListing(_ context.Context, id uuid.UUID) (limes.Record
 // disposition at now by the census's rules; s.mu is held.
 func (s *Store) listingLocked(id uuid.UUID, now time.Time) (limes.RecordListing, error) {
 	rec := s.caps[id]
-	revoked, err := s.revokedLocked(id)
+	stoppedBy, err := s.stoppedByLocked(id)
 	if err != nil {
 		return limes.RecordListing{}, err
 	}
 	d := limes.RecordDispositionActive
 	switch {
-	case revoked:
+	case stoppedBy != nil:
 		d = limes.RecordDispositionRevoked
 	case expiredAt(rec.ExpiresAt, now):
 		d = limes.RecordDispositionExpired
@@ -301,7 +309,7 @@ func (s *Store) listingLocked(id uuid.UUID, now time.Time) (limes.RecordListing,
 	if entry, ok := s.revoked[id]; ok {
 		r.Revocation = &entry
 	}
-	return limes.RecordListing{Record: r, Disposition: d}, nil
+	return limes.RecordListing{Record: r, Disposition: d, StoppedBy: stoppedBy}, nil
 }
 
 // decodeListCursor reads a cursor ListRecords handed out for req's order and
