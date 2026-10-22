@@ -5,7 +5,7 @@ import { copyFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
-import { Check, checkModules, moduleCheck, type ModuleCheck } from "./check-modules.ts";
+import { Check, Outcome, allPassed, checkModules, checkSummary, moduleCheck, type ModuleCheck } from "./check-modules.ts";
 
 const RELEASE = new URL("../release/", import.meta.url).pathname;
 
@@ -33,8 +33,13 @@ describe("checkModules", () => {
 
   test("a push checks each module from its own tag, skipping one never released", async () => {
     const calls: string[] = [];
-    assert.equal(await checkModules(repo.dir, { name: "push", prBase: "", prHead: "", sha: later }, recording(calls)), true);
+    const results = await checkModules(repo.dir, { name: "push", prBase: "", prHead: "", sha: later }, recording(calls));
+    assert.equal(allPassed(results), true);
     assert.deepEqual(calls, [`v0.1.0 ${later} limes`]);
+    assert.deepEqual(
+      results.map((r) => `${r.module} ${r.outcome}`),
+      ["limes passed", "redisreplay skipped", "pgstore skipped", "otelmetric skipped"],
+    );
     await repo.run("tag", "redisreplay/v0.1.0", first);
     calls.length = 0;
     await checkModules(repo.dir, { name: "push", prBase: "", prHead: "", sha: later }, recording(calls));
@@ -52,8 +57,22 @@ describe("checkModules", () => {
 
   test("one module failing, the others still checked", async () => {
     const calls: string[] = [];
-    assert.equal(await checkModules(repo.dir, { name: "pull_request", prBase: first, prHead: later, sha: later }, recording(calls, "limes")), false);
+    const results = await checkModules(repo.dir, { name: "pull_request", prBase: first, prHead: later, sha: later }, recording(calls, "limes"));
+    assert.equal(allPassed(results), false);
     assert.equal(calls.length, 4);
+    assert.deepEqual(results.map((r) => r.outcome), [Outcome.Failed, Outcome.Passed, Outcome.Passed, Outcome.Passed]);
+  });
+
+  test("the summary names each check's job and every module's outcome", () => {
+    const results = [
+      { module: "limes", outcome: Outcome.Failed, message: "limes: Foo | removed" },
+      { module: "pgstore", outcome: Outcome.Skipped, message: "no release to check from yet" },
+    ];
+    const api = checkSummary(Check.Api, results);
+    assert.match(api, /^### API compatibility\n/);
+    assert.match(api, /\| limes \| failed \| limes: Foo \\\| removed \|/);
+    assert.match(api, /\| pgstore \| skipped \|/);
+    assert.match(checkSummary(Check.Markers, results), /^### Breaking markers\n/);
   });
 
   test("an unknown check is refused", () => {
