@@ -41,7 +41,7 @@ flowchart LR
         narrows["<b>Narrows</b><br/>child ⊆ parent"]
         verifier["<b>Verifier</b><br/>Authorize · Verify · BiscuitCopy<br/>ErrorResponse · DPoPNonce"]
         caveats["<b>Caveats</b><br/>Check · CheckSource · AllowsResource"]
-        cache["RevocationCache<br/>capabilities · Biscuit copies<br/>TTL · bounded per kind · single-flight<br/>sharded, a hit read-locked<br/>Clear · Sweep · Stats"]
+        cache["RevocationCache<br/>capabilities · Biscuit copies<br/>TTL · bounded per kind · single-flight<br/>sharded, a hit read-locked<br/>Clear · ClearRevoked · Sweep · Stats"]
         attenuate["<b>Attenuate</b><br/>offline · no key"]
         static["jwks.Static<br/>SetKey · RemoveKey"]
         remote["jwks.Remote<br/>ETag · Cache-Control · MaxStale<br/>held keys served, refreshed behind"]
@@ -930,11 +930,13 @@ Revoking a capability stops everything delegated from it whether or not
 `CascadeChildren` is set, because `IsRevoked` walks the ancestors; the flag
 only adds the per-descendant entries that name each stopped capability. Without
 a revocation signal, a verifier learns of a revocation within the cache TTL;
-`pgstore`'s schema notifies a channel on every revocation, and its
-`RevocationWatcher` clears the caches on each notification and after each
-reconnect.
-Each cache is dropped whole: an answer cached for a descendant is also an
-answer about the revoked ancestor. A `Clear` also detaches any lookup in flight, whose answer may
+`pgstore`'s schema notifies a channel on every revocation, naming the
+capabilities revoked, and its `RevocationWatcher` calls `ClearRevoked` with
+them on each notification, and `Clear` after each reconnect.
+An answer cached for a descendant is also an answer about the revoked
+ancestor: over a store that names each answer's ancestors, `ClearRevoked`
+drops the revoked ids' answers and every one naming them among its
+ancestors, and over any other it drops the cache whole. Either detaches any lookup in flight, whose answer may
 predate the revocation, so it is neither cached nor shared with later checks.
 Revoked Biscuit copies travel the same way, on their own list but through the
 same cache, which keeps each kind of answer apart; one `Clear` drops both.

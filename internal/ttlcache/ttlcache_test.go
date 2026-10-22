@@ -384,3 +384,102 @@ func TestEvictionsCountOnlyLiveDrops(t *testing.T) {
 		t.Errorf("Stats = %+v, want 1 eviction and 1 entry", got)
 	}
 }
+
+// detachWait bounds how long a caller after Forget may wait on a lookup.
+const detachWait = time.Second
+
+// tagged is a lookup answering revoked with tags, counting its calls.
+func tagged(revoked bool, calls *atomic.Int32, tags ...string) func(context.Context) (bool, []string, error) {
+	return func(context.Context) (bool, []string, error) {
+		calls.Add(1)
+		return revoked, tags, nil
+	}
+}
+
+// Forget drops a key's own "not revoked" answer and every one tagged with
+// it, keeps a "revoked" answer and the others, and counts no eviction.
+func TestForgetDropsTheAnswersAKeyOutdates(t *testing.T) {
+	c, _ := newCache(10)
+	var calls atomic.Int32
+	ctx := t.Context()
+	for key, tags := range map[string][]string{"parent": nil, "child": {"parent"}, "grandchild": {"child", "parent"}, "other": {"elsewhere"}} {
+		if _, _, err := c.GetTagged(ctx, key, tagged(false, &calls, tags...)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := c.GetTagged(ctx, "revoked", tagged(true, &calls, "parent")); err != nil {
+		t.Fatal(err)
+	}
+	if dropped := c.Forget([]string{"parent"}); dropped != 3 {
+		t.Errorf("Forget dropped %d answers, want 3", dropped)
+	}
+	before := calls.Load()
+	for key, lookups := range map[string]int32{"other": 0, "revoked": 0, "parent": 1, "child": 1, "grandchild": 1} {
+		n := calls.Load()
+		if _, _, err := c.GetTagged(ctx, key, tagged(false, &calls)); err != nil {
+			t.Fatal(err)
+		}
+		if got := calls.Load() - n; got != lookups {
+			t.Errorf("%s after Forget: %d lookups, want %d", key, got, lookups)
+		}
+	}
+	if calls.Load()-before != 3 {
+		t.Errorf("%d lookups after Forget, want 3", calls.Load()-before)
+	}
+	if st := c.Stats(); st.Evictions != 0 {
+		t.Errorf("Forget counted %d evictions", st.Evictions)
+	}
+}
+
+// A lookup in flight when Forget runs may have read what the revocation
+// changed, about a key it does not name: its answer is served to whoever
+// asked, cached for nobody, and shared with no caller who asks after.
+func TestForgetDetachesALookupInFlight(t *testing.T) {
+	c, _ := newCache(10)
+	entered, release := make(chan struct{}), make(chan struct{})
+	done := make(chan bool)
+	go func() {
+		revoked, _, _ := c.GetTagged(t.Context(), "child", func(context.Context) (bool, []string, error) {
+			close(entered)
+			<-release
+			return false, []string{"parent"}, nil
+		})
+		done <- revoked
+	}()
+	<-entered
+	c.Forget([]string{"unrelated"})
+	var calls atomic.Int32
+	// Bounded: joined to the detached lookup, it would wait on it for good.
+	ctx, cancel := context.WithTimeout(t.Context(), detachWait)
+	defer cancel()
+	if _, _, err := c.GetTagged(ctx, "child", tagged(true, &calls)); err != nil || calls.Load() != 1 {
+		t.Errorf("a caller after Forget: %d lookups, %v; want one of its own", calls.Load(), err)
+	}
+	close(release)
+	if <-done {
+		t.Error("the detached lookup's caller got another's answer")
+	}
+	if revoked, _, _ := c.GetTagged(t.Context(), "child", tagged(false, &calls)); !revoked {
+		t.Error("the detached lookup's answer replaced the one asked after Forget")
+	}
+}
+
+// After Forget a key is cached again while its old place in the expiry
+// order is still queued: that place, once it expires, leaves the new entry.
+func TestARecachedKeyOutlivesItsOldPlace(t *testing.T) {
+	c, clk := newCache(10)
+	var calls atomic.Int32
+	if _, _, err := c.GetTagged(t.Context(), "a", tagged(false, &calls)); err != nil {
+		t.Fatal(err)
+	}
+	clk.advance(testTTL / 2)
+	c.Forget([]string{"a"})
+	if _, _, err := c.GetTagged(t.Context(), "a", tagged(false, &calls)); err != nil {
+		t.Fatal(err)
+	}
+	clk.advance(testTTL / 2)
+	c.Sweep()
+	if _, _, err := c.GetTagged(t.Context(), "a", tagged(false, &calls)); err != nil || calls.Load() != 2 {
+		t.Errorf("after the old place expired: %d lookups, %v; want the second answer served", calls.Load(), err)
+	}
+}

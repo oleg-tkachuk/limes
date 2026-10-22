@@ -758,10 +758,26 @@ through an ancestor has none, so ask `IsRevoked` whether it verifies.
 Verifiers that cache revocation answers learn of it within the cache TTL
 (`DefaultRevocationCacheTTL`, two seconds), or at once if you call `RevocationCache.Clear` when a
 revocation is announced — on a Postgres `NOTIFY`, for example. `Clear`
-drops the whole cache, and there is no per-id drop: an answer cached for a
-descendant is also an answer about the revoked ancestor. The next check of
-each id then asks the store once, so batch a burst of signals into one
-`Clear`. Build the cache with `NewRevocationCache` over your store, as
+drops the whole cache: an answer cached for a descendant is also an answer
+about the revoked ancestor. `RevocationCache.ClearRevoked(ids...)` drops
+only what a revocation of `ids` outdates — their answers and those of every
+descendant the cache holds one for — when the store is a
+`RevocationLineageLookup`, which names the ancestors each answer covers
+(memstore's and pgstore's `Store` are); over any other store it is `Clear`.
+A consumer that revokes often keeps every answer it did not touch, where
+`Clear` would make the next check of each id ask the store again.
+
+Choose the TTL from how often one token is verified, not from a request
+burst. The two-second default serves the requests of one HTTP exchange; an
+agent that calls a tool once per model step, seconds or minutes apart,
+finds every answer expired and gains nothing from it. Set the TTL a little
+above the interval between two verifications of one token. A longer TTL is
+safe as far as revocation signals reach: with a watcher, a revocation drops
+the answers it outdates at once whatever the TTL. The TTL bounds staleness
+only where no signal arrives — a verifier with no watcher, or one whose
+watcher is reconnecting (`pgstore.RevocationWatcher` waits up to ten
+seconds between attempts, and clears whole once it listens again) — so keep
+it no longer than a revocation may go unseen there. Build the cache with `NewRevocationCache` over your store, as
 `Capabilities` and, if the verifier reads Biscuits, `Biscuits`; `Sweep` drops
 its expired entries on a timer of yours, optional since lookups skip and replace
 them anyway. `Stats` reads what the cache has counted, for each kind of
@@ -769,10 +785,12 @@ answer: the questions answered from it (`Hits`) and not (`Misses`), the
 upstream lookups those ran (`Lookups`, fewer when concurrent misses share
 one), the live answers dropped to stay within the bound (`Evictions`, which
 growing says `MaxEntries` is too small), the answers held (`Entries`), and
-the `Clears`; `otelmetric.InstrumentRevocationCache` exports them. Over `pgstore`, run a `pgstore.RevocationWatcher` beside each
+the `Clears` and `ClearsRevoked`; `otelmetric.InstrumentRevocationCache` exports all but `ClearsRevoked`. Over `pgstore`, run a `pgstore.RevocationWatcher` beside each
 verifier: the schema notifies `pgstore.RevocationChannel` on every
-revocation, and the watcher clears the caches it is given on each
-notification and after each connection it opens:
+revocation, naming the capabilities revoked (migration 018), and the watcher
+calls `ClearRevoked` with them on each cache that has it
+(`pgstore.RevokedClearer`), and `Clear` on the others, on a notification
+that names none, and after each connection it opens:
 
 ```go
 w := pgstore.RevocationWatcher{
@@ -790,8 +808,13 @@ w := pgstore.RevocationWatcher{
 go w.Run(ctx) // reconnects with backoff until ctx ends
 ```
 
-A statement that writes no new revocation entry notifies nothing; a Biscuit
-copy's revocation notifies as a capability's does.
+A statement that writes no new revocation entry notifies nothing, and one
+that revokes only capabilities whose parent was revoked before names none of
+them and notifies nothing either: their answers were outdated by the
+parent's. A cascade names its top capability alone, whose descendants'
+answers name it. A Biscuit copy's revocation, and a statement naming more
+than `pgstore.MaxNotifiedRevocations` (100) capabilities, notify with no
+id, and the watcher clears whole.
 Revoking a capability revokes everything delegated from it, with or
 without the flag: `IsRevoked` answers for the whole chain. `CascadeChildren`
 also writes a revocation entry per descendant, so the audit trail names each
