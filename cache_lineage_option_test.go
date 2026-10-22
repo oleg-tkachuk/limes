@@ -65,6 +65,14 @@ func TestRevocationCacheLineageOfEachUpstream(t *testing.T) {
 			if whole := st.Clears == 1; whole == tc.lineage {
 				t.Errorf("%s, lineage required %v: ClearRevoked of an unrelated id cleared whole %v", name, require, whole)
 			}
+			if fallback := st.ClearsWithoutLineage == 1; fallback == tc.lineage {
+				t.Errorf("%s, lineage required %v: %d ClearRevoked counted as clearing whole for want of lineage", name, require, st.ClearsWithoutLineage)
+			}
+			// A Clear asked for is no fallback.
+			cache.Clear()
+			if after := cache.Stats(); after.ClearsWithoutLineage != st.ClearsWithoutLineage || after.Clears != st.Clears+1 {
+				t.Errorf("%s: a Clear moved ClearsWithoutLineage from %d to %d, Clears from %d to %d", name, st.ClearsWithoutLineage, after.ClearsWithoutLineage, st.Clears, after.Clears)
+			}
 		}
 	}
 }
