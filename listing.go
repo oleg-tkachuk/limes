@@ -50,6 +50,14 @@ type RecordListingReader interface {
 	GetRecordListing(ctx context.Context, id uuid.UUID) (RecordListing, error)
 }
 
+// RecordReporter is RecordLister and RecordListingReader together: what a
+// reporter that lists a tenant's records and opens one of them holds.
+// memstore's and pgstore's Census are each one, as NewCensus returns it.
+type RecordReporter interface {
+	RecordLister
+	RecordListingReader
+}
+
 // RecordDisposition is what a record is now: RecordLister's and
 // RecordCensus's three, under which each record falls exactly once.
 type RecordDisposition string
