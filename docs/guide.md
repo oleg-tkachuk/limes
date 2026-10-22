@@ -769,6 +769,11 @@ only what a revocation of `ids` outdates — their answers and those of every
 descendant the cache holds one for — when the store is a
 `RevocationLineageLookup`, which names the ancestors each answer covers
 (memstore's and pgstore's `Store` are); over any other store it is `Clear`.
+A decorator that embeds `limes.Store` has no `RevocationLineage` to promote
+and turns that off without a word: forward the method, set
+`RevocationCacheConfig.RequireLineage` to have `NewRevocationCache` refuse
+an upstream without it (`ErrNoRevocationLineage`), and read
+`Stats().Lineage` to see which the cache has.
 A consumer that revokes often keeps every answer it did not touch, where
 `Clear` would make the next check of each id ask the store again.
 
