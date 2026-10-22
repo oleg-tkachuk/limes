@@ -123,7 +123,8 @@ const seenReplay = 1
 
 // Seen implements dpop.ReplayCache. A holder past its share is refused as a
 // replay rather than accepted unrecorded; a Redis that cannot answer returns
-// the error, and dpop.Verify refuses the proof with it.
+// the error, and dpop.Verifier.Verify fails with it: an outage, not a refused
+// proof.
 func (c *Cache) Seen(ctx context.Context, e dpop.ReplayEntry) (bool, error) {
 	now := c.now()
 	got, err := seenScript.Run(ctx, c.client,

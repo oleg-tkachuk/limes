@@ -17,8 +17,8 @@ import (
 	"github.com/oleg-tkachuk/limes"
 )
 
-// Census implements limes.RecordCensus and limes.RecordLister over a
-// Store's records.
+// Census implements limes.RecordCensus, limes.RecordLister and
+// limes.RecordListingReader over a Store's records.
 type Census struct {
 	records *Store
 }

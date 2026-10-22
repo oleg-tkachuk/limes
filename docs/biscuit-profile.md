@@ -88,15 +88,16 @@ A token is refused as `ErrBiscuitAttenuation` â€” a kind of `ErrInvalidToken` â€
 when a block:
 
 - holds a rule or a check;
-- holds a fact outside the vocabulary above, a fact with other than one
-  term, or a term of another type (a string where a date is expected, a
-  negative limit, an empty resource, a malformed thumbprint);
+- holds a fact outside the vocabulary above, or a term its fact does not
+  take (a string where a date is expected, a negative limit, an empty
+  resource, a malformed thumbprint);
 - would widen what the token allows: an operation, resource, audience, or
   limit beyond the capability's or an enclosing copy's, or a new key for a
   bound token.
 
-A token whose container or signatures do not verify, whose authority block is
-not exactly one `limes_capability` fact, or that has more than
+A token whose container or signatures do not verify, with a fact of other
+than one term or a term neither string, date nor integer, whose authority
+block is not exactly one `limes_capability` fact, or that has more than
 `MaxBiscuitBlocks` blocks is refused as `ErrInvalidToken`. A refusal never
 depends on what a block leaves out: a block that names nothing narrows
 nothing.

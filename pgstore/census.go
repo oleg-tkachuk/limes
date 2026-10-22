@@ -23,8 +23,8 @@ import (
 // inserted under a marked one is marked (migrations/015_revoked_flag.sql).
 // The census and ListRecords read it, so neither walks the revocations.
 
-// Census implements limes.RecordCensus and limes.RecordLister over the
-// store's capability records.
+// Census implements limes.RecordCensus, limes.RecordLister and
+// limes.RecordListingReader over the store's capability records.
 type Census struct {
 	conn
 }

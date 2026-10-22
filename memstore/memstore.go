@@ -884,7 +884,7 @@ func (s *UsageStore) Charge(
 	return s.chargeLocked(ctx, req, unit, ancestors, nil, onCharged)
 }
 
-// ChargeByRef returns the charge a capability took under externalRef.
+// ChargeByRef returns the charge a capability took under req.ExternalRef.
 func (s *UsageStore) ChargeByRef(_ context.Context, req meter.ChargeByRefRequest) (meter.ChargeRecord, error) {
 	if err := req.Validate(); err != nil {
 		return meter.ChargeRecord{}, err

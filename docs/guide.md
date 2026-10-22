@@ -335,8 +335,9 @@ replay, err := redisreplay.New(redisreplay.Config{Client: rdb}) // any redis.Uni
 It keeps one sorted set per capability, so one call is one atomic script on
 one key, Redis Cluster included, and it decides what is live by the
 verifier's clock, never the server's. Run it with `maxmemory-policy
-noeviction`: full, Redis refuses the write and the proof is refused, where an
-eviction policy would forget a live id. Redis replicates asynchronously, so
+noeviction`: full, Redis refuses the write and the check fails as an outage,
+its own error and never a refused proof, where an eviction policy would
+forget a live id. Redis replicates asynchronously, so
 a failover can lose ids the old primary acknowledged and a proof can then be
 replayed once inside its window; where that matters, keep `Window` short or
 require server nonces.
@@ -928,6 +929,7 @@ Elsewhere, implement these and you are done:
 | `meter.LedgerReader` | Sums a tenant's charges for billing and reports (optional; a type of its own beside `meter.UsageStore`) | No |
 | `RecordCensus` | Counts capability records by disposition, for one tenant or every tenant (optional; a type of its own beside `Store`) | No |
 | `RecordLister` | Lists one tenant's capability records with their dispositions, filtered and paged either way (optional; a type of its own beside `Store`) | No |
+| `RecordListingReader` | Reads one record with its disposition, by the rules `RecordLister` and `RecordCensus` share (optional; a type of its own beside `RecordLister`) | No |
 | `TenantRecordEraser`, `meter.TenantUsageEraser` | Erase a tenant's records and usage (optional) | No |
 | `meter.UsageStore` = `Meter` + `MeterReader` + `TenantBudgets` + `UsageHousekeeping` (only to meter) | Request and spend counters, the charges ledger, tenant ceilings; `DeleteUsage` and `PurgeOrphans` release a reaped capability's holds | Only for atomic side effects |
 | `KeyResolver` | Public verification keys; an unknown kid is `jwks.ErrUnknownKID`, the token's fault (`ErrInvalidToken`), and any other error the resolver's own (`jwks.Static` and `jwks.Remote` ship; `jwkstest` checks yours) | No |
@@ -1084,7 +1086,8 @@ record. Code that only meters can depend on `Meter` alone; code that only
 administers tenant ceilings on `TenantBudgets` alone.
 
 `Store.Insert` returns `ErrAlreadyExists` for an id already on record, refuses
-a record with no id or under a parent not on record as `ErrInvalidRequest`,
+a record with no id, no expiry or under a parent not on record as
+`ErrInvalidRequest`,
 a child expiring after its parent or in another tenant as
 `ErrDelegationTooWide`, a child whose budget names another unit than its
 parent's as `ErrUnitCodeMismatch`, and a child with more than `MaxDelegationDepth`
@@ -1112,8 +1115,10 @@ its own where the contract names one: `ErrChargeNotFound` (`Refund`,
 capability never bumped or charged) and `ErrTenantBudgetNotFound`.
 A well-formed write that disagrees with what is on record matches
 `ErrConflict` — map the family to 409 and read again: `ErrAlreadyExists`
-(`Insert`), `ErrUnitCodeMismatch` (`Insert`, `Delegate`, and a `Charge`,
-`Reserve` or `Settle` in another unit than a counter already counts in),
+(`Insert`), `ErrUnitCodeMismatch` (`Insert`, `Delegate`, a `Charge`,
+`Reserve` or `Settle` in another unit than a counter already counts in, and
+a `SetTenantBudget` to another unit while anything is held in the old one,
+or spent in it and not reset),
 `ErrExternalRefConflict` (`Charge`), `ErrSettleConflict` (`Settle`) and
 `ErrTenantBudgetVersionMismatch` (`SetTenantBudget`). `ErrorResponse`
 answers the family 409 too.
@@ -1129,7 +1134,8 @@ Everything works identically; you forgo the atomic-side-effect
 guarantee.
 
 Every listing — `ListByPrincipal`, `ListTenantBudgets`, `ListReservations`
-(soonest to expire first, ties by id), `SumCharges` and `CountRecords` — is a
+(soonest to expire first, ties by id), `SumCharges`, `CountRecords` and
+`ListRecords` — is a
 page with an opaque cursor, so an API can hand a page token to its client. To
 read `ListByPrincipal` or `ListTenantBudgets` whole, range over `AllByPrincipal` or `meter.AllTenantBudgets`: they walk
 the pages from `req.Cursor` afresh on every range, stop fetching when the loop
@@ -1233,7 +1239,7 @@ stop rather than retry. The full table is in [diagrams.md](diagrams.md#answering
 | `SignerConfig.TokenType` | `TokenTypeV6` |
 | `VerifierConfig.Realm` | `DefaultRealm`, `limes` |
 | `jwks.HandlerConfig.MaxAge` | `jwks.DefaultMaxAge`, 5 minutes; `HandlerConfig.Revalidate: true` for `max-age=0` |
-| `ListByPrincipalRequest.Limit` · `ListTenantBudgetsRequest.Limit` · `ListReservationsRequest.Limit` · `SumChargesRequest.Limit` · `CountRecordsRequest.Limit` | `DefaultListLimit` 50, at most `MaxListLimit` 500 |
+| `ListByPrincipalRequest.Limit` · `ListTenantBudgetsRequest.Limit` · `ListReservationsRequest.Limit` · `SumChargesRequest.Limit` · `CountRecordsRequest.Limit` · `ListRecordsRequest.Limit` | `DefaultListLimit` 50, at most `MaxListLimit` 500 |
 | `PurgeRequest` · `ReleaseExpiredRequest` · `PurgeOrphansRequest` | `DefaultHousekeepingLimit` 1 000 a batch; `PurgeRequest.ExpiredFor` `MinPurgeRetention`, 6 minutes, and no less |
 | `MaxDelegationDepth` · `MaxBiscuitBlocks` | 64 ancestors · 32 attenuation blocks |
 | `CopyUsageRequest.RevocationIDs` | at most `MaxCopyUsageIDs`, 500, of one `CapabilityID` |
@@ -1244,13 +1250,13 @@ stop rather than retry. The full table is in [diagrams.md](diagrams.md#answering
 | `dpop.MemoryReplayCacheConfig` | `dpop.DefaultReplayCacheEntries`, 100 000 ids; `dpop.DefaultReplayEntriesPerHolder`, 1 000, per capability |
 | `redisreplay.Config` | `redisreplay.DefaultKeyPrefix`, `limes:dpop:replay:`; `dpop.DefaultReplayEntriesPerHolder`, 1 000, per capability |
 | `dpop.HMACNoncesConfig` | `dpop.DefaultNonceLifetime`, 5 minutes; `dpop.HMACNonceClockSkew`, 5 seconds, for a nonce issued ahead of this replica's clock; keys of at least `dpop.HMACNonceKeyBytes`, 32 |
-| `DefaultReservationTTL` | 5 minutes |
+| `meter.DefaultReservationTTL` | 5 minutes |
 | `memstore.UsageStoreConfig.MaxCopiesPerCapability` · `pgstore.Config.MaxCopiesPerCapability` | `meter.DefaultMaxCopiesPerCapability`, 1 024; negative is refused |
 | `Caveats.Copies` | the zero `CopyQuota`: no copy with limits of its own is counted |
 | `BudgetCeiling.UnitCode` left empty | allowed only on the zero ceiling, which spends nothing |
 | `PurgeClockSkew` | 1 minute |
-| `MaxExternalRefBytes` | 200 |
+| `meter.MaxExternalRefBytes` | 200 |
 | `MaxNanos` | just under a billion units |
 | `MaxIJSONInteger` | 2^53 − 1, for every integer in a token |
-| `Env.CheckTimeout` of every conformance suite | `DefaultCheckTimeout`, 1 minute a check |
+| `CheckTimeout` of every conformance suite's env (`storetest.Env`, `metertest.Env`, `jwkstest.Env`, `dpoptest.ReplayEnv`, `dpoptest.NoncesEnv`) | `DefaultCheckTimeout`, 1 minute a check |
 
