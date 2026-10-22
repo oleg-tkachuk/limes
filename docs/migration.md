@@ -14,6 +14,21 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## pgstore/v0.33.0
+
+- `(*Store).Revoke` returns `(limes.RevokeResult, error)` where it returned
+  `error`, as `limes.Store` now asks (v0.113.0).
+
+## v0.113.0
+
+- `Store.Revoke(ctx, req) error` is `Store.Revoke(ctx, req) (RevokeResult,
+  error)`. `RevokeResult.AlreadyRevoked` says the capability had a
+  revocation entry of its own before the call, and `RevokeResult.Revocation`
+  is the entry that stands — the first, as before. A caller that read the
+  record before revoking to learn this drops the read: `_, err :=
+  records.Revoke(…)` keeps the old behaviour. A `Store` of your own returns
+  the result; `storetest.Run` checks it for a first and a repeated revoke.
+
 ## pgstore/v0.30.0
 
 - Nothing of pgstore's own API changed: this release follows limes v0.109.0,

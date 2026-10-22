@@ -54,7 +54,7 @@ func TestStoredMeterSubjectCarriesTheStoredCeilings(t *testing.T) {
 	if err := store.Insert(ctx, InsertRequest{Capability: c, IssuedBy: Principal{Subject: "op"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Revoke(ctx, RevokeRequest{CapabilityID: c.ID}); err != nil {
+	if _, err := store.Revoke(ctx, RevokeRequest{CapabilityID: c.ID}); err != nil {
 		t.Fatal(err)
 	}
 	s, err := StoredMeterSubject(ctx, store, c.ID)

@@ -39,7 +39,7 @@ func TestAHoldEndsWithItsCapability(t *testing.T) {
 	if want := c.ExpiresAt.Truncate(timeResolution); !settled.ExpiresAt.Equal(want) {
 		t.Errorf("a hold asked for %s expires at %s, want its capability's expiry %s", farTTL, settled.ExpiresAt, want)
 	}
-	if err := f.records.Revoke(mine, limes.RevokeRequest{CapabilityID: c.ID}); err != nil {
+	if _, err := f.records.Revoke(mine, limes.RevokeRequest{CapabilityID: c.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := f.usage.ReleaseExpired(every, meter.ReleaseExpiredRequest{}); err != nil || got.Released != 0 {

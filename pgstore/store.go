@@ -228,7 +228,15 @@ const (
 	sqlRevoke = `
 INSERT INTO limes.revocations (capability_id, tenant_id, revoked_at, note, actor, cascaded)
 VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (capability_id) DO NOTHING`
+ON CONFLICT (capability_id) DO NOTHING
+RETURNING revoked_at, note, actor, cascaded`
+
+	// sqlRevocation reads the entry that kept sqlRevoke from writing. A
+	// statement of its own: under READ COMMITTED it sees an entry another
+	// transaction committed while sqlRevoke waited on it, which a snapshot
+	// taken before that wait would not.
+	sqlRevocation = `
+SELECT revoked_at, note, actor, cascaded FROM limes.revocations WHERE capability_id = $1`
 
 	// sqlRevokeDescendants writes an entry for every descendant of $1 to
 	// $2 (limes.MaxDelegationDepth) generations below it, as IsRevoked walks.
@@ -247,12 +255,14 @@ ON CONFLICT (capability_id) DO NOTHING`
 )
 
 // Revoke writes the capability's revocation entry, and with CascadeChildren
-// one for every descendant. The first entry of each stands.
-func (s *Store) Revoke(ctx context.Context, req limes.RevokeRequest) error {
+// one for every descendant. The first entry of each stands, and the result
+// carries the capability's.
+func (s *Store) Revoke(ctx context.Context, req limes.RevokeRequest) (limes.RevokeResult, error) {
 	if err := req.Validate(); err != nil {
-		return err
+		return limes.RevokeResult{}, err
 	}
-	return s.inTx(ctx, func(tx pgx.Tx) error {
+	var result limes.RevokeResult
+	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		var tenant uuid.UUID
 		err := tx.QueryRow(ctx, sqlCapabilityTenant, req.CapabilityID).Scan(&tenant)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -262,7 +272,14 @@ func (s *Store) Revoke(ctx context.Context, req limes.RevokeRequest) error {
 			return err
 		}
 		now := s.clock()
-		if _, err := tx.Exec(ctx, sqlRevoke, req.CapabilityID, tenant, now, req.Note, req.Actor, req.CascadeChildren); err != nil {
+		result = limes.RevokeResult{}
+		r := &result.Revocation
+		err = tx.QueryRow(ctx, sqlRevoke, req.CapabilityID, tenant, now, req.Note, req.Actor, req.CascadeChildren).Scan(&r.RevokedAt, &r.Note, &r.Actor, &r.Cascaded)
+		if errors.Is(err, pgx.ErrNoRows) {
+			result.AlreadyRevoked = true
+			err = tx.QueryRow(ctx, sqlRevocation, req.CapabilityID).Scan(&r.RevokedAt, &r.Note, &r.Actor, &r.Cascaded)
+		}
+		if err != nil {
 			return err
 		}
 		if !req.CascadeChildren {
@@ -271,6 +288,10 @@ func (s *Store) Revoke(ctx context.Context, req limes.RevokeRequest) error {
 		_, err = tx.Exec(ctx, sqlRevokeDescendants, req.CapabilityID, limes.MaxDelegationDepth, now, req.Note, req.Actor)
 		return err
 	})
+	if err != nil {
+		return limes.RevokeResult{}, err
+	}
+	return result, nil
 }
 
 // sqlPurge removes the oldest-expired records past the cutoff, deepest first

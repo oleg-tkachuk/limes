@@ -241,7 +241,7 @@ func TestBiscuitCannotBeStrippedOrForged(t *testing.T) {
 func TestBiscuitRevokedWithItsCapability(t *testing.T) {
 	_, v, store, cap, token := biscuitFixture(t)
 	narrowed, _ := Attenuate(token, Attenuation{Ops: []Op{OpGet}})
-	if err := store.Revoke(context.Background(), RevokeRequest{CapabilityID: cap.ID, Note: "test"}); err != nil {
+	if _, err := store.Revoke(context.Background(), RevokeRequest{CapabilityID: cap.ID, Note: "test"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := v.Verify(context.Background(), VerifyRequest{Token: narrowed, Audience: audienceData}); !errors.Is(err, ErrRevoked) {
@@ -377,7 +377,7 @@ func TestBiscuitTakesOnlyAVerifiedCapabilityOfItsOwn(t *testing.T) {
 			t.Errorf("%s: err = %v, want %v", name, err, tc.want)
 		}
 	}
-	if err := store.Revoke(ctx, RevokeRequest{CapabilityID: cap.ID}); err != nil {
+	if _, err := store.Revoke(ctx, RevokeRequest{CapabilityID: cap.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := issuer.biscuit(ctx, vc); !errors.Is(err, ErrRevoked) {

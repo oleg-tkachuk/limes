@@ -58,7 +58,7 @@ func TestPurgeKeepsARevocationAcrossClockSkew(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := records.Revoke(ctx, limes.RevokeRequest{CapabilityID: c.ID}); err != nil {
+	if _, err := records.Revoke(ctx, limes.RevokeRequest{CapabilityID: c.ID}); err != nil {
 		t.Fatal(err)
 	}
 	// The verifier is at the last instant it accepts the token; the store's

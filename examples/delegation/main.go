@@ -111,9 +111,10 @@ func main() {
 	})
 	demo.Refused(log, err, limes.ErrDelegationTooWide, "delegate a budget wider than the parent's")
 
-	demo.Must(log, records.Revoke(ctx, limes.RevokeRequest{
+	_, err = records.Revoke(ctx, limes.RevokeRequest{
 		CapabilityID: root.Capability.ID, Note: "run finished", Actor: "operator", CascadeChildren: true,
-	}), "revoke the orchestrator")
+	})
+	demo.Must(log, err, "revoke the orchestrator")
 	log.Info("revoked the orchestrator's capability, and with it everything it delegated", "capability", root.Capability.ID)
 
 	_, err = verifier.Verify(ctx, limes.VerifyRequest{Token: child.Token, Audience: audience})

@@ -414,7 +414,7 @@ func Example_revoke() {
 	s := newExampleStack()
 	c, token := s.issue()
 
-	err := s.records.Revoke(ctx, limes.RevokeRequest{
+	_, err := s.records.Revoke(ctx, limes.RevokeRequest{
 		CapabilityID: c.ID, Note: "agent looping", Actor: "operator@example.com", CascadeChildren: true,
 	})
 	fmt.Println(err)

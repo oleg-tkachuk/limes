@@ -39,7 +39,7 @@ func TestRevokeIsIdempotent(t *testing.T) {
 	}
 
 	for i := range 3 {
-		if err := s.Revoke(ctx, limes.RevokeRequest{CapabilityID: id, Note: "leak", Actor: "op"}); err != nil {
+		if _, err := s.Revoke(ctx, limes.RevokeRequest{CapabilityID: id, Note: "leak", Actor: "op"}); err != nil {
 			t.Fatalf("Revoke #%d: %v", i+1, err)
 		}
 	}
@@ -67,7 +67,7 @@ func TestRevokeCascadesToDescendants(t *testing.T) {
 		}
 	}
 
-	if err := s.Revoke(ctx, limes.RevokeRequest{CapabilityID: root, CascadeChildren: true}); err != nil {
+	if _, err := s.Revoke(ctx, limes.RevokeRequest{CapabilityID: root, CascadeChildren: true}); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
 	for name, id := range map[string]uuid.UUID{"root": root, "child": child, "grandchild": grandchild} {
@@ -92,7 +92,7 @@ func TestRevokingAParentRevokesItsChildrenWithoutCascade(t *testing.T) {
 	_ = s.Insert(ctx, limes.InsertRequest{Capability: mkCap(child, root, tenant, "child"), IssuedBy: limes.Principal{Subject: "test-operator"}})
 	_ = s.Insert(ctx, limes.InsertRequest{Capability: mkCap(grandchild, child, tenant, "grandchild"), IssuedBy: limes.Principal{Subject: "test-operator"}})
 
-	if err := s.Revoke(ctx, limes.RevokeRequest{CapabilityID: child}); err != nil {
+	if _, err := s.Revoke(ctx, limes.RevokeRequest{CapabilityID: child}); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
 	if r, _ := s.IsRevoked(ctx, root); r {
