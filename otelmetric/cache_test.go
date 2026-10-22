@@ -3,6 +3,7 @@ package otelmetric_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/metric"
@@ -16,16 +17,24 @@ import (
 
 // Cache instrument names and attributes as an exporter reads them.
 const (
-	metricCacheHits      = "limes.revocation_cache.hits"
-	metricCacheMisses    = "limes.revocation_cache.misses"
-	metricCacheLookups   = "limes.revocation_cache.lookups"
-	metricCacheEvictions = "limes.revocation_cache.evictions"
-	metricCacheEntries   = "limes.revocation_cache.entries"
-	metricCacheClears    = "limes.revocation_cache.clears"
-	metricClearsRevoked  = "limes.revocation_cache.clears_revoked"
-	attrKind             = "kind"
-	kindCapability       = "capability"
-	kindBiscuit          = "biscuit"
+	metricCacheHits       = "limes.revocation_cache.hits"
+	metricCacheMisses     = "limes.revocation_cache.misses"
+	metricCacheLookups    = "limes.revocation_cache.lookups"
+	metricCacheEvictions  = "limes.revocation_cache.evictions"
+	metricCacheEntries    = "limes.revocation_cache.entries"
+	metricCacheClears     = "limes.revocation_cache.clears"
+	metricClearsRevoked   = "limes.revocation_cache.clears_revoked"
+	metricClearsNoLineage = "limes.revocation_cache.clears_without_lineage"
+	metricLineage         = "limes.revocation_cache.lineage"
+	metricSynced          = "limes.revocation_cache.synced"
+	metricSyncs           = "limes.revocation_cache.syncs"
+	metricSyncsLost       = "limes.revocation_cache.syncs_lost"
+	metricLastSyncLoss    = "limes.revocation_cache.last_sync_loss"
+	metricSignals         = "limes.revocation_cache.signals"
+	metricSignalsWhole    = "limes.revocation_cache.signals_whole"
+	attrKind              = "kind"
+	kindCapability        = "capability"
+	kindBiscuit           = "biscuit"
 )
 
 // instrumentedCache is a RevocationCache over memstore whose counts reader
@@ -119,6 +128,42 @@ func TestInstrumentRevocationCacheReportsItsCounts(t *testing.T) {
 	}
 	if ps := got[metricCacheClears]; len(ps) != 1 || ps[0].value != 1 {
 		t.Errorf("%s after ClearRevoked = %+v, want still 1", metricCacheClears, ps)
+	}
+}
+
+// The revocation signal's state and the causes of a whole clear reach the
+// provider, each a single point; the time of the last loss only once there
+// was one.
+func TestInstrumentRevocationCacheReportsTheSignal(t *testing.T) {
+	cache, reader, _ := instrumentedCache(t)
+	if got := collected(t, reader); len(got[metricLastSyncLoss]) != 0 {
+		t.Errorf("%s before any loss = %+v, want no point", metricLastSyncLoss, got[metricLastSyncLoss])
+	}
+	cache.Listening()
+	cache.Signal(uuid.New())
+	cache.Signal()
+	before := time.Now().Unix()
+	cache.NotListening()
+	got := collected(t, reader)
+	for name, want := range map[string]float64{
+		metricLineage:         1,
+		metricSynced:          0,
+		metricSyncs:           1,
+		metricSyncsLost:       1,
+		metricSignals:         2,
+		metricSignalsWhole:    1,
+		metricClearsNoLineage: 0,
+	} {
+		if ps := got[name]; len(ps) != 1 || ps[0].value != want || ps[0].attrs.Len() != 0 {
+			t.Errorf("%s = %+v, want one point of %v with no attributes", name, ps, want)
+		}
+	}
+	if ps := got[metricLastSyncLoss]; len(ps) != 1 || ps[0].value < float64(before) {
+		t.Errorf("%s = %+v, want one point at or after %d", metricLastSyncLoss, ps, before)
+	}
+	cache.Listening()
+	if ps := collected(t, reader)[metricSynced]; len(ps) != 1 || ps[0].value != 1 {
+		t.Errorf("%s while listening = %+v, want 1", metricSynced, ps)
 	}
 }
 
