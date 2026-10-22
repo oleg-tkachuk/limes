@@ -47,7 +47,7 @@ type stripe struct {
 // Config is what a Cache runs on. Every field is required: the caller
 // resolves its defaults.
 type Config struct {
-	// TTL is how long an answer is served.
+	// TTL is how long an answer is served, until SetTTL changes it.
 	TTL time.Duration
 	// MaxEntries bounds the cache: past it, an entry makes room — the
 	// oldest of its shard's, which in a cache big enough to have several
@@ -63,6 +63,9 @@ type Cache[K comparable] struct {
 	cfg    Config
 	seed   maphash.Seed
 	shards []*shard[K]
+	// ttl is how long an answer is served, in nanoseconds: Config.TTL until
+	// SetTTL. Each answer is judged by the one in force when it is read.
+	ttl atomic.Int64
 	// epoch counts clears. A lookup that started before one may have read
 	// the state it invalidated, so its answer is not cached.
 	epoch atomic.Uint64
@@ -82,8 +85,8 @@ type shard[K comparable] struct {
 	entries    map[K]cacheEntry[K]
 	inflight   map[K]*lookupCall[K]
 	// order holds the entries in the order they were cached, which every
-	// entry sharing one TTL makes the order they expire in, but for an id
-	// seeded from a set's answer, which expires with that answer: sweeping
+	// entry being judged by one TTL makes the order they expire in, but for
+	// an id seeded from a set's answer, which expires with that answer: sweeping
 	// stops at the first place not yet expired, so such an id is dropped a
 	// little late, and never served past its expiry. A key Forget dropped
 	// can be cached again before its old place expires: that place then
@@ -99,7 +102,9 @@ type shard[K comparable] struct {
 
 type cacheEntry[K comparable] struct {
 	revoked bool
-	expires time.Time
+	// at is when the answer was read: fresh until the TTL in force has
+	// passed since.
+	at time.Time
 	// tags are the keys a "not revoked" answer also covers, which Forget
 	// drops it with (GetTagged).
 	tags []K
@@ -107,8 +112,8 @@ type cacheEntry[K comparable] struct {
 
 // queued is a key's place in Cache.order.
 type queued[K comparable] struct {
-	key     K
-	expires time.Time
+	key K
+	at  time.Time
 }
 
 type lookupCall[K comparable] struct {
@@ -116,9 +121,9 @@ type lookupCall[K comparable] struct {
 	revoked bool
 	tags    []K
 	err     error
-	// expires is when the answer stops being fresh: a TTL from when the
-	// lookup started, no later than the entry finish caches.
-	expires time.Time
+	// at is when the lookup started, no later than the entry finish caches:
+	// its answer is fresh until the TTL in force has passed since.
+	at time.Time
 }
 
 // errLookupAbandoned is what callers sharing a lookup receive when it ended
@@ -130,6 +135,7 @@ var errLookupAbandoned = errors.New("limes: revocation lookup ended without an a
 func New[K comparable](cfg Config) *Cache[K] {
 	n := min(maxShards, max(cfg.MaxEntries/minShardEntries, 1))
 	c := &Cache[K]{cfg: cfg, seed: maphash.MakeSeed(), shards: make([]*shard[K], n)}
+	c.ttl.Store(int64(cfg.TTL))
 	for i := range c.shards {
 		share := cfg.MaxEntries / n
 		if i < cfg.MaxEntries%n {
@@ -139,6 +145,17 @@ func New[K comparable](cfg Config) *Cache[K] {
 	}
 	return c
 }
+
+// TTL is how long an answer is served now.
+func (c *Cache[K]) TTL() time.Duration { return time.Duration(c.ttl.Load()) }
+
+// SetTTL changes how long an answer is served, every answer cached already
+// among them: a shorter TTL makes an answer read longer ago than it stale
+// at once.
+func (c *Cache[K]) SetTTL(ttl time.Duration) { c.ttl.Store(int64(ttl)) }
+
+// fresh reports whether an answer read at at may be served at now.
+func (c *Cache[K]) fresh(at, now time.Time) bool { return now.Before(at.Add(c.TTL())) }
 
 // shardOf is the shard key belongs to.
 func (c *Cache[K]) shardOf(key K) *shard[K] {
@@ -163,9 +180,9 @@ func (c *Cache[K]) GetTagged(ctx context.Context, key K, lookup func(context.Con
 	s.mu.RLock()
 	e, ok := s.entries[key]
 	s.mu.RUnlock()
-	if ok && e.expires.After(c.cfg.Now()) {
+	if ok && c.fresh(e.at, c.cfg.Now()) {
 		c.countHit()
-		return e.revoked, e.expires, nil
+		return e.revoked, e.at, nil
 	}
 	s.misses.Add(1)
 	return c.get(ctx, s, key, lookup)
@@ -177,9 +194,9 @@ func (c *Cache[K]) get(ctx context.Context, s *shard[K], key K, lookup func(cont
 	s.mu.Lock()
 	// Read again under the write lock: another caller may have cached it, or
 	// started its lookup, since.
-	if e, ok := s.entries[key]; ok && e.expires.After(c.cfg.Now()) {
+	if e, ok := s.entries[key]; ok && c.fresh(e.at, c.cfg.Now()) {
 		s.mu.Unlock()
-		return e.revoked, e.expires, nil
+		return e.revoked, e.at, nil
 	}
 	if call, ok := s.inflight[key]; ok {
 		s.mu.Unlock()
@@ -192,12 +209,12 @@ func (c *Cache[K]) get(ctx context.Context, s *shard[K], key K, lookup func(cont
 			if call.err != nil && isContextErr(call.err) && ctx.Err() == nil {
 				return c.get(ctx, s, key, lookup)
 			}
-			return call.revoked, call.expires, call.err
+			return call.revoked, call.at, call.err
 		case <-ctx.Done():
 			return false, time.Time{}, ctx.Err()
 		}
 	}
-	call := &lookupCall[K]{done: make(chan struct{}), err: errLookupAbandoned, expires: c.cfg.Now().Add(c.cfg.TTL)}
+	call := &lookupCall[K]{done: make(chan struct{}), err: errLookupAbandoned, at: c.cfg.Now()}
 	s.inflight[key] = call
 	epoch := c.epoch.Load()
 	s.mu.Unlock()
@@ -207,7 +224,7 @@ func (c *Cache[K]) get(ctx context.Context, s *shard[K], key K, lookup func(cont
 	// the key.
 	defer c.finish(s, key, call, epoch)
 	call.revoked, call.tags, call.err = lookup(ctx)
-	return call.revoked, call.expires, call.err
+	return call.revoked, call.at, call.err
 }
 
 // Cached reads the fresh answers keys have: whether any of them is revoked,
@@ -224,7 +241,7 @@ func (c *Cache[K]) Cached(keys []K) (revoked bool, missing []K, epoch uint64) {
 		e, ok := s.entries[k]
 		s.mu.RUnlock()
 		switch {
-		case !ok || !e.expires.After(now):
+		case !ok || !c.fresh(e.at, now):
 			missing = append(missing, k)
 		case e.revoked:
 			c.countHit()
@@ -242,17 +259,17 @@ func (c *Cache[K]) countHit() {
 	c.hits[rand.Uint32()%hitStripes].n.Add(1) //nolint:gosec // G404: picks a stripe to spread contention, nothing to guess
 }
 
-// SeedLive caches keys as not revoked until expires, as an answer about them
-// all, read in epoch and fresh until then, said; nothing when a clear has
-// happened since or the answer is no longer fresh. Seeded with a TTL of
-// their own, keys would outlive an answer served from the cache near its
-// end. A key that has a fresh answer or a lookup of its own in flight keeps
-// that.
-func (c *Cache[K]) SeedLive(keys []K, epoch uint64, expires time.Time) {
+// SeedLive caches keys as not revoked, as an answer about them all read at
+// at, in epoch, said; nothing when a clear has happened since or the answer
+// is no longer fresh. Seeded as read now, keys would outlive an answer
+// served from the cache near its end. A key that has a fresh answer or a
+// lookup of its own in flight keeps that.
+func (c *Cache[K]) SeedLive(keys []K, epoch uint64, at time.Time) {
 	now := c.cfg.Now()
-	if !expires.After(now) {
+	if !c.fresh(at, now) {
 		return
 	}
+	ttl := c.TTL()
 	for _, k := range keys {
 		s := c.shardOf(k)
 		s.mu.Lock()
@@ -263,10 +280,10 @@ func (c *Cache[K]) SeedLive(keys []K, epoch uint64, expires time.Time) {
 			return
 		}
 		_, inflight := s.inflight[k]
-		if e, ok := s.entries[k]; !inflight && (!ok || !e.expires.After(now)) {
-			s.makeRoomLocked(now)
-			s.entries[k] = cacheEntry[K]{expires: expires}
-			s.order = append(s.order, queued[K]{key: k, expires: expires})
+		if e, ok := s.entries[k]; !inflight && (!ok || !c.fresh(e.at, now)) {
+			s.makeRoomLocked(now, ttl)
+			s.entries[k] = cacheEntry[K]{at: at}
+			s.order = append(s.order, queued[K]{key: k, at: at})
 		}
 		s.mu.Unlock()
 	}
@@ -281,10 +298,9 @@ func (c *Cache[K]) finish(s *shard[K], key K, call *lookupCall[K], epoch uint64)
 	}
 	if call.err == nil && c.epoch.Load() == epoch {
 		now := c.cfg.Now()
-		s.makeRoomLocked(now)
-		expires := now.Add(c.cfg.TTL)
-		s.entries[key] = cacheEntry[K]{revoked: call.revoked, expires: expires, tags: call.tags}
-		s.order = append(s.order, queued[K]{key: key, expires: expires})
+		s.makeRoomLocked(now, c.TTL())
+		s.entries[key] = cacheEntry[K]{revoked: call.revoked, at: now, tags: call.tags}
+		s.order = append(s.order, queued[K]{key: key, at: now})
 	}
 	s.mu.Unlock()
 	close(call.done)
@@ -292,8 +308,8 @@ func (c *Cache[K]) finish(s *shard[K], key K, call *lookupCall[K], epoch uint64)
 
 // makeRoomLocked keeps the shard under its share of MaxEntries: expired
 // entries go first and, if that frees nothing, the oldest live one does.
-func (s *shard[K]) makeRoomLocked(now time.Time) {
-	s.sweepLocked(now)
+func (s *shard[K]) makeRoomLocked(now time.Time, ttl time.Duration) {
+	s.sweepLocked(now, ttl)
 	for len(s.entries) >= s.maxEntries {
 		before := len(s.entries)
 		if !s.popLocked() {
@@ -314,7 +330,7 @@ func (s *shard[K]) popLocked() bool {
 	q := s.order[0]
 	s.order[0] = queued[K]{} // let the key go
 	s.order = s.order[1:]
-	if e, ok := s.entries[q.key]; ok && e.expires.Equal(q.expires) {
+	if e, ok := s.entries[q.key]; ok && e.at.Equal(q.at) {
 		delete(s.entries, q.key)
 	}
 	return true
@@ -323,9 +339,9 @@ func (s *shard[K]) popLocked() bool {
 // sweepLocked drops every expired entry of the shard, oldest first, and
 // returns how many it dropped. It stops at the first place not yet expired:
 // every place after it expires later.
-func (s *shard[K]) sweepLocked(now time.Time) int {
+func (s *shard[K]) sweepLocked(now time.Time, ttl time.Duration) int {
 	dropped := 0
-	for len(s.order) > 0 && !s.order[0].expires.After(now) {
+	for len(s.order) > 0 && !now.Before(s.order[0].at.Add(ttl)) {
 		before := len(s.entries)
 		s.popLocked()
 		dropped += before - len(s.entries)
@@ -394,11 +410,11 @@ func (c *Cache[K]) Forget(keys []K) int {
 
 // Sweep drops every expired entry and returns how many it dropped.
 func (c *Cache[K]) Sweep() int {
-	now := c.cfg.Now()
+	now, ttl := c.cfg.Now(), c.TTL()
 	dropped := 0
 	for _, s := range c.shards {
 		s.mu.Lock()
-		dropped += s.sweepLocked(now)
+		dropped += s.sweepLocked(now, ttl)
 		s.mu.Unlock()
 	}
 	return dropped

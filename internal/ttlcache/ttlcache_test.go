@@ -141,14 +141,14 @@ func TestCachedAndSeedLive(t *testing.T) {
 	if revoked || len(missing) != 2 {
 		t.Fatalf("Cached = %v, %v; want none revoked, both missing", revoked, missing)
 	}
-	c.SeedLive(missing, epoch, clk.Now().Add(testTTL))
+	c.SeedLive(missing, epoch, clk.Now())
 	if _, missing, _ := c.Cached([]string{"a", "b"}); len(missing) != 0 {
 		t.Errorf("seeded keys still missing: %v", missing)
 	}
 	// A seed read before a clear is dropped.
 	_, missing, epoch = c.Cached([]string{"c"})
 	c.Clear()
-	c.SeedLive(missing, epoch, clk.Now().Add(testTTL))
+	c.SeedLive(missing, epoch, clk.Now())
 	if c.Len() != 0 {
 		t.Errorf("a seed read before a clear was cached")
 	}
@@ -261,7 +261,7 @@ func TestClearReachesEveryShard(t *testing.T) {
 	}
 	_, missing, epoch := c.Cached([]string{a, b})
 	c.Clear()
-	c.SeedLive(missing, epoch, clk.Now().Add(testTTL))
+	c.SeedLive(missing, epoch, clk.Now())
 	if c.Len() != 0 {
 		t.Errorf("a set read before a clear was seeded in %d shards' entries", c.Len())
 	}
@@ -361,7 +361,7 @@ func TestAWaiterThatAsksAgainIsOneMiss(t *testing.T) {
 func TestCachedCountsAHitOnlyWhenAnswered(t *testing.T) {
 	c, clk := newCache(10)
 	_, _, epoch := c.Cached([]string{"a", "b"})
-	c.SeedLive([]string{"a", "b"}, epoch, clk.Now().Add(testTTL))
+	c.SeedLive([]string{"a", "b"}, epoch, clk.Now())
 	if _, missing, _ := c.Cached([]string{"a", "b"}); len(missing) != 0 {
 		t.Fatalf("missing %v after seeding", missing)
 	}
@@ -481,5 +481,35 @@ func TestARecachedKeyOutlivesItsOldPlace(t *testing.T) {
 	c.Sweep()
 	if _, _, err := c.GetTagged(t.Context(), "a", tagged(false, &calls)); err != nil || calls.Load() != 2 {
 		t.Errorf("after the old place expired: %d lookups, %v; want the second answer served", calls.Load(), err)
+	}
+}
+
+// SetTTL judges every answer by the TTL in force when it is read: a
+// shorter one makes an answer read longer ago stale at once, a longer one
+// serves an answer longer, and Sweep drops by the one in force.
+func TestSetTTLJudgesEveryAnswer(t *testing.T) {
+	c, clk := newCache(10)
+	var calls atomic.Int32
+	long := testTTL * 10
+	c.SetTTL(long)
+	if _, _, err := c.Get(t.Context(), "a", counted(false, &calls)); err != nil {
+		t.Fatal(err)
+	}
+	clk.advance(testTTL * 2)
+	if _, _, _ = c.Get(t.Context(), "a", counted(false, &calls)); calls.Load() != 1 {
+		t.Fatalf("under the long TTL: %d lookups, want the answer served", calls.Load())
+	}
+	c.SetTTL(testTTL)
+	if c.TTL() != testTTL {
+		t.Fatalf("TTL = %s, want %s", c.TTL(), testTTL)
+	}
+	if _, missing, _ := c.Cached([]string{"a"}); len(missing) != 1 {
+		t.Error("an answer older than the shorter TTL still served by Cached")
+	}
+	if dropped := c.Sweep(); dropped != 1 {
+		t.Errorf("Sweep under the shorter TTL dropped %d, want 1", dropped)
+	}
+	if _, _, _ = c.Get(t.Context(), "a", counted(false, &calls)); calls.Load() != 2 {
+		t.Errorf("under the shorter TTL: %d lookups, want the answer read again", calls.Load())
 	}
 }

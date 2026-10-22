@@ -44,9 +44,8 @@ var ErrNoRevocationLineage = errors.New("limes: the revocation upstream names no
 // revocation therefore takes effect within this window on every verifier
 // that did not perform it and hears no signal of it. It suits the requests
 // of one exchange; a token verified less often — once per step of an agent
-// — wants a TTL a little above the interval between its checks, and a
-// revocation signal (Clear, ClearRevoked) reaches the cache at once
-// whatever the TTL.
+// — wants a longer bound while a revocation signal vouches for the cache:
+// RevocationCacheConfig.SyncedTTL.
 const DefaultRevocationCacheTTL = 2 * time.Second
 
 // DefaultRevocationCacheEntries bounds the cache. Past it, the oldest entry
@@ -78,6 +77,12 @@ type RevocationCache struct {
 	caps     *ttlcache.Cache[uuid.UUID]
 	copies   *ttlcache.Cache[string]
 	clears   atomic.Uint64
+	// ttl and syncedTTL are how long an answer is served without a
+	// revocation signal and while one vouches for the cache (synced).
+	ttl, syncedTTL time.Duration
+	synced         atomic.Bool
+	// syncs counts the calls to Listening.
+	syncs atomic.Uint64
 	// clearsRevoked counts the calls to ClearRevoked that did not Clear, and
 	// clearsWithoutLineage those that did.
 	clearsRevoked, clearsWithoutLineage atomic.Uint64
@@ -109,7 +114,17 @@ type RevocationCacheConfig struct {
 	// held here is refused.
 	Biscuits BiscuitRevocationLookup
 	// TTL is how long an answer is served. Zero: DefaultRevocationCacheTTL.
+	// It bounds how long a revocation may go unseen where no revocation
+	// signal reaches the cache.
 	TTL time.Duration
+	// SyncedTTL is how long an answer is served while a revocation signal
+	// vouches for the cache: from Listening to NotListening, which
+	// pgstore.RevocationWatcher calls as its connection comes and goes.
+	// A revocation then reaches the cache at once, so the TTL can be long.
+	// Before the first Listening and after NotListening, TTL bounds every
+	// answer, those cached under SyncedTTL among them. Zero: TTL; shorter
+	// than TTL is refused.
+	SyncedTTL time.Duration
 	// MaxEntries bounds each kind of answer on its own, so a flood of one
 	// never evicts the other. Zero: DefaultRevocationCacheEntries. A Biscuit
 	// answer is one entry per revocation id, and one per set of ids asked
@@ -137,6 +152,13 @@ func NewRevocationCache(cfg RevocationCacheConfig) (*RevocationCache, error) {
 	if err != nil {
 		return nil, err
 	}
+	synced := cfg.SyncedTTL
+	switch {
+	case synced == 0:
+		synced = c.TTL
+	case synced < c.TTL:
+		return nil, fmt.Errorf("limes: cache SyncedTTL %s is shorter than its TTL %s", synced, c.TTL)
+	}
 	lineage, _ := cfg.Capabilities.(RevocationLineageLookup)
 	if cfg.RequireLineage && lineage == nil {
 		return nil, fmt.Errorf("%w: %T", ErrNoRevocationLineage, cfg.Capabilities)
@@ -147,6 +169,8 @@ func NewRevocationCache(cfg RevocationCacheConfig) (*RevocationCache, error) {
 		biscuits:     cfg.Biscuits,
 		caps:         ttlcache.New[uuid.UUID](c),
 		copies:       ttlcache.New[string](c),
+		ttl:          c.TTL,
+		syncedTTL:    synced,
 	}, nil
 }
 
@@ -230,6 +254,31 @@ func (c *RevocationCache) ClearRevoked(ids ...uuid.UUID) {
 	c.caps.Forget(ids)
 }
 
+// Listening tells the cache a revocation signal reaches it from now on:
+// pgstore.RevocationWatcher calls it each time it starts to listen. It
+// clears the cache — a revocation made while nothing listened sent a
+// signal nobody heard — and then serves answers for SyncedTTL.
+func (c *RevocationCache) Listening() {
+	c.syncs.Add(1)
+	c.Clear()
+	c.synced.Store(true)
+	c.setTTL(c.syncedTTL)
+}
+
+// NotListening tells the cache the signal stopped: a revocation may now go
+// unheard, so every answer, those cached already among them, is served
+// for TTL alone until the next Listening.
+func (c *RevocationCache) NotListening() {
+	c.synced.Store(false)
+	c.setTTL(c.ttl)
+}
+
+// setTTL is the TTL each kind of answer is served for.
+func (c *RevocationCache) setTTL(ttl time.Duration) {
+	c.caps.SetTTL(ttl)
+	c.copies.SetTTL(ttl)
+}
+
 // Sweep drops every expired entry, of either kind, and returns how many it
 // dropped. Optional housekeeping — lookups skip stale entries, and every new
 // answer drops the expired ones before it.
@@ -252,6 +301,12 @@ type RevocationCacheStats struct {
 	// whole, as the upstream names no lineage: a part of Clears, apart from
 	// a Clear asked for. Growing, narrow invalidation is off (Lineage).
 	ClearsWithoutLineage uint64
+	// Synced reports that a revocation signal vouches for the cache now,
+	// and SyncedTTL bounds its answers; false, TTL does. Syncs counts the
+	// calls to Listening, each a Clear, among Clears: the watcher's
+	// connections, its first and every reconnect.
+	Synced bool
+	Syncs  uint64
 	// Lineage reports that the cache's upstream names each answer's
 	// ancestors, so ClearRevoked drops only what a revocation outdates;
 	// false, every ClearRevoked is a Clear.
@@ -290,6 +345,8 @@ func (c *RevocationCache) Stats() RevocationCacheStats {
 		Clears:               c.clears.Load(),
 		ClearsRevoked:        c.clearsRevoked.Load(),
 		ClearsWithoutLineage: c.clearsWithoutLineage.Load(),
+		Synced:               c.synced.Load(),
+		Syncs:                c.syncs.Load(),
 		Lineage:              c.lineage != nil,
 	}
 }

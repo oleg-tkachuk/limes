@@ -46,11 +46,11 @@ func (c *RevocationCache) IsBiscuitRevoked(ctx context.Context, revocationIDs []
 	if len(missing) > 1 {
 		key = setKey(ids)
 	}
-	revoked, expires, err := c.copies.Get(ctx, key, func(ctx context.Context) (bool, error) {
+	revoked, at, err := c.copies.Get(ctx, key, func(ctx context.Context) (bool, error) {
 		return c.biscuits.IsBiscuitRevoked(ctx, ids)
 	})
 	if err == nil && !revoked && len(missing) > 1 {
-		c.copies.SeedLive(missing, epoch, expires)
+		c.copies.SeedLive(missing, epoch, at)
 	}
 	return revoked, err
 }
