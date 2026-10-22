@@ -16,7 +16,8 @@
 // later one, is left alone. Each of FOLLOWERS is tidied in the same commit.
 // Only a pull request from this repository's branch is updated — a fork's of
 // the same name never is — and one module's failure leaves it out, the
-// others proposed, and fails the run.
+// others proposed, and fails the run. What it did with each module, and
+// the pull request, goes on the run's summary page.
 //
 // Without GH_TOKEN it warns and does nothing: a push made with the
 // workflow's own GITHUB_TOKEN would start no CI on the branch
@@ -26,7 +27,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { error, info, warning } from "./lib/actions.ts";
+import { error, info, summarize, table, warning } from "./lib/actions.ts";
 import { execute } from "./lib/exec.ts";
 import { optionalEnv, requireEnv } from "./lib/env.ts";
 import { git } from "./lib/git.ts";
@@ -59,10 +60,12 @@ const GITHUB_HOST = "https://github.com/";
 export const Proposal = { Opened: "opened", Updated: "updated", Unchanged: "unchanged" } as const;
 export type Proposal = (typeof Proposal)[keyof typeof Proposal];
 
-// Outcome is what a run did: with the pull request, and the modules it
-// raised, each from the limes it required, and those that failed.
+// Outcome is what a run did: with the pull request, which it names once
+// opened or updated, and the modules it raised, each from the limes it
+// required, and those that failed.
 export interface Outcome {
   proposal: Proposal;
+  pullRequest?: number;
   raised: { dir: string; from: string }[];
   failed: string[];
 }
@@ -177,12 +180,35 @@ export async function proposeRequirements(ctx: Context, dirs: readonly string[],
     await ctx.github.editPullRequest(open, text);
     info(`updated #${open}: ${title}`);
     outcome.proposal = Proposal.Updated;
+    outcome.pullRequest = open;
   } else {
     const number = await ctx.github.createPullRequest(BRANCH, BASE_BRANCH, text);
     info(`opened #${number}: ${title}`);
     outcome.proposal = Proposal.Opened;
+    outcome.pullRequest = number;
   }
   return outcome;
+}
+
+// SUMMARY_HEADER heads the summary table; LEFT_ALONE and FAILED fill the
+// cell of a module not raised.
+const SUMMARY_HEADER = ["Module", "Requirement of limes"];
+const LEFT_ALONE = "left alone: requires this release or a later one, or no limes";
+const FAILED = "failed: see the log";
+
+// requirementsSummary is the summary page section of what a run did for
+// tag over dirs.
+export function requirementsSummary(tag: string, dirs: readonly string[], outcome: Outcome): string {
+  const raised = new Map(outcome.raised.map((r) => [r.dir, r.from]));
+  const rows = dirs.map((dir) => {
+    const from = raised.get(dir);
+    if (from !== undefined) {
+      return [dir, `${from} → ${tag}`];
+    }
+    return [dir, outcome.failed.includes(dir) ? FAILED : LEFT_ALONE];
+  });
+  const pr = outcome.pullRequest === undefined ? "No pull request: nothing to raise." : `Pull request #${outcome.pullRequest} ${outcome.proposal}.`;
+  return `### limes ${tag} required by the nested modules\n\n${pr}\n\n${table(SUMMARY_HEADER, rows)}`;
 }
 
 // nestedModuleDirs is the directory of every nested module modules.cjs
@@ -216,8 +242,10 @@ async function main(): Promise<void> {
   const repository = requireEnv("GITHUB_REPOSITORY");
   const root = (await git(["rev-parse", "--show-toplevel"])).trim();
   const ctx: Context = { github: gitHubFor(token, repository), root, push: pushAs(token, repository, root) };
-  const { failed } = await proposeRequirements(ctx, nestedModuleDirs(root), tag);
-  if (failed.length > 0) {
+  const dirs = nestedModuleDirs(root);
+  const outcome = await proposeRequirements(ctx, dirs, tag);
+  summarize(requirementsSummary(tag, dirs, outcome));
+  if (outcome.failed.length > 0) {
     process.exitCode = 1;
   }
 }
