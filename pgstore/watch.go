@@ -76,6 +76,10 @@ var _ Syncer = (*limes.RevocationCache)(nil)
 // NotListening when the connection is lost or Run ends — so it serves its
 // TTL alone while no notification can reach it. Between connections, that
 // TTL bounds how long a revocation may go unseen.
+//
+// Connect reaches the primary: PostgreSQL notifies only the sessions of the
+// server a revocation committed on, and a hot standby refuses LISTEN, so a
+// watcher pointed at one never listens and its caches stay on their TTL.
 type RevocationWatcher struct {
 	// Connect opens the connection the watcher listens on. It must be the
 	// watcher's own, not one a pool takes back with the LISTEN still on
