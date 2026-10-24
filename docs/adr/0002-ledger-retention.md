@@ -1,6 +1,6 @@
 # ADR-0002: Bound the charges ledger before 1.0
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-24
 **Deciders:** Oleg Tkachuk
 
@@ -51,9 +51,9 @@ minor:
 2. Add `meter.MinChargeRetention`, the floor a store refuses a retention
    under: long enough for any retry and any refund a consumer's own process
    allows, so the default use never meets the window. Its value is decided
-   with the wording (a proposal: 400 days — a year of billing plus a month's
-   disputes).
-3. After 1.0, in a minor: an optional `meter.LedgerHousekeeping` interface,
+   with the wording: 400 days — a year of billing plus a month's disputes.
+3. An optional `meter.LedgerHousekeeping` interface — **decided on
+   2026-10-24 to land before 1.0 too**, rather than in a minor after it —
    `PurgeCharges(ctx, PurgeChargesRequest{Retention, Limit})
    (PurgeChargesResult, error)`, batched like `Store.Purge`, implemented by
    memstore and pgstore and checked by `metertest` — including that a
@@ -135,10 +135,10 @@ consumer may rely on — and defers what any minor can add.
 
 ## Action items
 
-1. [ ] Before 1.0: reword `Meter.Charge`, `Meter.Settle`, `Meter.Refund` and
+1. [x] Before 1.0: reword `Meter.Charge`, `Meter.Settle`, `Meter.Refund` and
    `LedgerReader` to hold while the charge is in the ledger; add
    `meter.MinChargeRetention` with its value; a guide paragraph on the
    ledger's growth.
-2. [ ] After 1.0, when a consumer asks: `meter.LedgerHousekeeping` with
+2. [ ] Before 1.0 (decided on 2026-10-24): `meter.LedgerHousekeeping` with
    `PurgeCharges`, memstore and pgstore implementations, `metertest` checks
    of the window, a pgstore plan test that the purge reads by `at`.
