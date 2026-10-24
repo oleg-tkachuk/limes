@@ -63,7 +63,7 @@ func TestRevokeWritesPastMaxDelegationDepth(t *testing.T) {
 	if revoked, err := records.IsRevoked(ctx, parent); err != nil || !revoked {
 		t.Errorf("IsRevoked = %v, %v; want revoked", revoked, err)
 	}
-	if revoked, ancestors, err := records.RevocationLineage(ctx, parent); err != nil || !revoked || ancestors != nil {
-		t.Errorf("RevocationLineage = %v, %v, %v; want revoked, as IsRevoked answers", revoked, ancestors, err)
+	if a, err := records.RevocationLineage(ctx, parent); err != nil || !a.Revoked || a.Ancestors != nil {
+		t.Errorf("RevocationLineage = %+v, %v; want revoked, as IsRevoked answers", a, err)
 	}
 }

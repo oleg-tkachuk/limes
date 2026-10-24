@@ -21,7 +21,7 @@ type forwardingStore struct {
 	lineage limes.RevocationLineageLookup
 }
 
-func (f forwardingStore) RevocationLineage(ctx context.Context, id uuid.UUID) (bool, []uuid.UUID, error) {
+func (f forwardingStore) RevocationLineage(ctx context.Context, id uuid.UUID) (limes.RevocationAnswer, error) {
 	return f.lineage.RevocationLineage(ctx, id)
 }
 

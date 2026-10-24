@@ -500,30 +500,30 @@ func (s *Store) forgetErased() {
 // RevocationLineage implements limes.RevocationLineageLookup: IsRevoked's
 // answer, and the ancestors still on record it read, nearest first; an id
 // not on record is ErrNotFound.
-func (s *Store) RevocationLineage(_ context.Context, id uuid.UUID) (bool, []uuid.UUID, error) {
+func (s *Store) RevocationLineage(_ context.Context, id uuid.UUID) (limes.RevocationAnswer, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.caps[id]; !ok {
-		return false, nil, limes.ErrNotFound
+		return limes.RevocationAnswer{}, limes.ErrNotFound
 	}
 	// Revoked by its own entry: IsRevoked's answer whatever lies above, and
 	// a revoked answer needs no ancestors (RevocationLineageLookup).
 	if _, ok := s.revoked[id]; ok {
-		return true, nil, nil
+		return limes.RevocationAnswer{Revoked: true}, nil
 	}
 	revoked, err := s.revokedLocked(id)
 	if err != nil {
-		return false, nil, err
+		return limes.RevocationAnswer{}, err
 	}
 	ancestors, err := s.ancestorsLocked(id)
 	if err != nil {
-		return false, nil, err
+		return limes.RevocationAnswer{}, err
 	}
 	ids := make([]uuid.UUID, len(ancestors))
 	for i, a := range ancestors {
 		ids[i] = a.ID
 	}
-	return revoked, ids, nil
+	return limes.RevocationAnswer{Revoked: revoked, Ancestors: ids}, nil
 }
 
 func (s *Store) exists(id uuid.UUID) bool {

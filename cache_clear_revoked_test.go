@@ -111,7 +111,7 @@ func TestRevocationCacheKeepsNoAnswerForAnIDNotOnRecord(t *testing.T) {
 	ctx := context.Background()
 	s := newExampleStack()
 	unknown := uuid.New()
-	if _, _, err := s.records.RevocationLineage(ctx, unknown); !errors.Is(err, limes.ErrNotFound) {
+	if _, err := s.records.RevocationLineage(ctx, unknown); !errors.Is(err, limes.ErrNotFound) {
 		t.Fatalf("memstore RevocationLineage of an id not on record: err = %v, want ErrNotFound", err)
 	}
 	cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: s.records, TTL: cacheLongerThanTheTest})

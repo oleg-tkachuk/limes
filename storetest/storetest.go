@@ -260,6 +260,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"GetRecordReadsBackIssuanceAndRevocation", checkRecord},
 		{"UnknownIDs", checkUnknown},
 		{"RevokeIsIdempotentAndReachesDescendants", checkRevoke},
+		{"RevocationLineageAnswersAsIsRevoked", checkRevocationLineage},
 		{"CascadeRecordsEveryDescendant", checkCascade},
 		{"RevocationReachesEveryGeneration", checkDeepChain},
 		{"RevocationReachesTheDeepestChainAndInsertRefusesADeeperOne", checkMaxDepth},
@@ -1518,5 +1519,44 @@ func checkCensusPages(t *testing.T, f fixture) {
 	}
 	if _, err := f.Census.CountRecords(f.Ctx, limes.CountRecordsRequest{AllTenants: true}); !errors.Is(err, limes.ErrScopeMismatch) {
 		t.Errorf("CountRecords of every tenant under one tenant's context: err = %v, want ErrScopeMismatch", err)
+	}
+}
+
+// checkRevocationLineage holds a store that names lineage
+// (limes.RevocationLineageLookup) to its contract, which a RevocationCache's
+// ClearRevoked rests on: it answers as IsRevoked at every place of a chain,
+// names every ancestor on record, nearest first, while the answer is live —
+// one it leaves out keeps a stale answer cached past its ancestor's
+// revocation — and an id not on record is ErrNotFound.
+func checkRevocationLineage(t *testing.T, f fixture) {
+	lineage, ok := f.Store.(limes.RevocationLineageLookup)
+	if !ok {
+		t.Skip("Env.Store is no limes.RevocationLineageLookup")
+	}
+	root := f.live(t, "agent:lineage-root", uuid.Nil)
+	child := f.live(t, "agent:lineage-child", root.ID)
+	grandchild := f.live(t, "agent:lineage-grandchild", child.ID)
+	expect := func(what string, id uuid.UUID, ancestors []uuid.UUID) {
+		t.Helper()
+		a, err := lineage.RevocationLineage(f.Ctx, id)
+		if err != nil {
+			t.Fatalf("%s: RevocationLineage: %v", what, err)
+		}
+		if revoked := f.revoked(t, id); a.Revoked != revoked {
+			t.Errorf("%s: RevocationLineage says revoked %v, IsRevoked %v", what, a.Revoked, revoked)
+		}
+		if !a.Revoked && !slices.Equal(a.Ancestors, ancestors) {
+			t.Errorf("%s: ancestors %v, want %v, nearest first", what, a.Ancestors, ancestors)
+		}
+	}
+	expect("a grandchild", grandchild.ID, []uuid.UUID{child.ID, root.ID})
+	expect("a child", child.ID, []uuid.UUID{root.ID})
+	expect("a root", root.ID, []uuid.UUID{})
+	f.revoke(t, child.ID, false)
+	expect("a grandchild under a revoked child", grandchild.ID, nil)
+	expect("the revoked child", child.ID, nil)
+	expect("a root above it", root.ID, []uuid.UUID{})
+	if _, err := lineage.RevocationLineage(f.Ctx, uuid.New()); !errors.Is(err, limes.ErrNotFound) {
+		t.Errorf("RevocationLineage of an id not on record: err = %v, want ErrNotFound", err)
 	}
 }
