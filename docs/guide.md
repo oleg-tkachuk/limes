@@ -797,7 +797,11 @@ the interval between two verifications of one token, serves them from
 `RevocationCache.Listening` to `NotListening`, which `pgstore.RevocationWatcher`
 calls on every cache that has them
 (`pgstore.Syncer`) as its connection comes and goes, passing each
-notification to `RevocationCache.Signal`. `NotListening` cuts short the answers cached
+notification to `RevocationCache.Signal`. A connection that dies without a
+word — a host gone, a network cut — is found by the watcher's heartbeat:
+it pings a quiet connection every `RevocationWatcher.Heartbeat` (30 seconds
+by default) and drops one that does not answer within as long again, so a
+dead connection vouches for the caches for at most twice the heartbeat. `NotListening` cuts short the answers cached
 under `SyncedTTL` at once, and `Listening` clears the cache before raising
 the bound. `Stats().Synced` says which bound is in force, `Syncs` counts
 the watcher's connections, `SyncsLost` and `LastSyncLoss` its losses, and
