@@ -15,7 +15,7 @@ silent: true
 
 vars:
   # Shared task library — github.com/oleg-tkachuk/taskfiles, pinned.
-  TASKLIB: 'https://github.com/oleg-tkachuk/taskfiles.git//%s?ref=v13.0.0'
+  TASKLIB: 'https://github.com/oleg-tkachuk/taskfiles.git//%s?ref=v14.1.0'
   # The developer tools' own module; see its go.mod.
   TOOLS_MODFILE: tools/go.mod
   # golangci-lint's module, apart from TOOLS_MODFILE; see its go.mod.
