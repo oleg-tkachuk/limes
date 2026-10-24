@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 
-import { ANNOTATIONS_ENV, ANNOTATIONS_OFF, Level, annotation, cell, escapeData, infoLines, setOutput, table } from "./actions.ts";
+import { ANNOTATIONS_ENV, ANNOTATIONS_OFF, Level, annotation, cell, code, escapeData, infoLines, setOutput, table } from "./actions.ts";
 import { optionalEnv, requireEnv } from "./env.ts";
 import { lines } from "./git.ts";
 
@@ -89,6 +89,13 @@ test("verify:ci runs the tests with annotations off", async () => {
     tasks: Record<string, { env?: Record<string, string> }>;
   };
   assert.equal(taskfile.tasks["verify:ci"]?.env?.[ANNOTATIONS_ENV], ANNOTATIONS_OFF);
+});
+
+test("a code span renders its text literally, whatever backticks it holds", () => {
+  assert.equal(code(""), "");
+  assert.equal(code("[x](y)"), "`[x](y)`");
+  assert.equal(code("a `b` c"), "``a `b` c``");
+  assert.equal(code("`edge`"), "`` `edge` ``");
 });
 
 test("a table cell holds no line break and no column separator", () => {
