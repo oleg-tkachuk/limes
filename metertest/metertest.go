@@ -4270,6 +4270,26 @@ func checkPurgeCharges(t *testing.T, f fixture) {
 		}
 	}
 	from := f.Now()
+	// Another tenant's charge, as old as the first: a purge under Tenant's
+	// scope does not reach it.
+	var otherCharge uuid.UUID
+	var otherCtx context.Context
+	if f.ScopesTenants {
+		other, err := f.newTenant()
+		if err != nil {
+			t.Fatal(err)
+		}
+		otherCap, err := f.NewCapability(CapabilitySpec{Tenant: other, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true, UnitCode: unit}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		otherCtx = f.tenantCtx(other)
+		r, err := f.Usage.Charge(otherCtx, meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: otherCap, tenant: other, unit: unit}), Amount: one}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		otherCharge = r.ChargeID
+	}
 	first, err := f.charge(meter.ChargeRequest{Subject: f.childSubject(), Amount: one, ExternalRef: "purge-1"}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -4332,6 +4352,15 @@ func checkPurgeCharges(t *testing.T, f fixture) {
 	// A removed charge's promises are gone with it.
 	if _, err := f.Usage.ChargeByRef(f.Ctx, meter.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: "purge-1"}); !errors.Is(err, meter.ErrChargeNotFound) {
 		t.Errorf("ChargeByRef of a purged charge: err = %v, want ErrChargeNotFound", err)
+	}
+	// Its reference charges anew: a charge of its own, no replay.
+	if again, err := f.charge(meter.ChargeRequest{Subject: f.childSubject(), Amount: one, ExternalRef: "purge-1"}, nil); err != nil || again.Replayed || again.ChargeID == first.ChargeID {
+		t.Errorf("the purged charge's reference again = %+v, %v; want a new charge, not replayed", again, err)
+	}
+	if f.ScopesTenants {
+		if _, err := f.Usage.GetCharge(otherCtx, otherCharge); err != nil {
+			t.Errorf("another tenant's charge after a purge under Tenant's scope: %v; want it kept", err)
+		}
 	}
 	if _, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: second.ChargeID, Remaining: true}); !errors.Is(err, meter.ErrChargeNotFound) {
 		t.Errorf("Refund of a purged charge: err = %v, want ErrChargeNotFound", err)
