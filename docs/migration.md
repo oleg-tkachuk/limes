@@ -14,6 +14,22 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## pgstore/v0.37.0
+
+- `(*Store).RevocationLineage` returns `(limes.RevocationAnswer, error)` where
+  it returned `(bool, []uuid.UUID, error)`, as `limes.RevocationLineageLookup`
+  now asks (v0.119.0).
+
+## v0.119.0
+
+- `RevocationLineageLookup.RevocationLineage(ctx, id) (bool, []uuid.UUID,
+  error)` is `RevocationLineage(ctx, id) (RevocationAnswer, error)`, the
+  answer's fields `Revoked` and `Ancestors`: a struct grows a field after
+  1.0 where a list of results cannot. A decorator forwarding the method
+  returns the answer as it gets it; a store of your own builds
+  `RevocationAnswer{Revoked: …, Ancestors: …}`. `storetest` now checks a
+  store that implements it.
+
 ## pgstore/v0.33.0
 
 - `(*Store).Revoke` returns `(limes.RevokeResult, error)` where it returned

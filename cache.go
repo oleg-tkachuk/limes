@@ -36,7 +36,19 @@ type RevocationLineageLookup interface {
 	// it not revoked, as IsRevoked does, but keeps no answer, which no
 	// ancestor's revocation could reach. One that answers such an id not
 	// revoked instead is cached as any other.
-	RevocationLineage(ctx context.Context, id uuid.UUID) (revoked bool, ancestors []uuid.UUID, err error)
+	RevocationLineage(ctx context.Context, id uuid.UUID) (RevocationAnswer, error)
+}
+
+// RevocationAnswer is RevocationLineageLookup's answer about a capability.
+type RevocationAnswer struct {
+	// Revoked is IsRevoked's answer: the capability, or an ancestor still
+	// on record, is revoked.
+	Revoked bool
+	// Ancestors are the ancestors still on record the answer read, nearest
+	// first: every one, when the capability is not revoked. A revoked
+	// answer needs none, as no revocation is undone.
+	Ancestors []uuid.UUID
+	_         noCompare
 }
 
 // ErrNoRevocationLineage is NewRevocationCache refusing, under
@@ -116,7 +128,7 @@ type RevocationCacheConfig struct {
 	// having the method itself: a struct embedding limes.Store has no
 	// RevocationLineage to promote, so it forwards one —
 	//
-	//	func (c counting) RevocationLineage(ctx context.Context, id uuid.UUID) (bool, []uuid.UUID, error) {
+	//	func (c counting) RevocationLineage(ctx context.Context, id uuid.UUID) (limes.RevocationAnswer, error) {
 	//		return c.lineage.RevocationLineage(ctx, id)
 	//	}
 	//
@@ -251,7 +263,8 @@ func (c *RevocationCache) IsRevoked(ctx context.Context, id uuid.UUID) (bool, er
 		return revoked, err
 	}
 	revoked, _, err := c.caps.GetTagged(ctx, id, func(ctx context.Context) (bool, []uuid.UUID, error) {
-		return c.lineage.RevocationLineage(ctx, id)
+		a, err := c.lineage.RevocationLineage(ctx, id)
+		return a.Revoked, a.Ancestors, err
 	})
 	// Not on record: not revoked, as IsRevoked answers it, and nothing
 	// cached, an error being kept by no cache.

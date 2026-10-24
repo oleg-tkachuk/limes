@@ -127,21 +127,21 @@ SELECT id, $2, now(), 'many', 'test', false FROM unnest($1::uuid[]) id`, roots, 
 func TestRevocationLineageNamesTheAncestors(t *testing.T) {
 	f := newTenantFixture(t)
 	ids := f.tree(t, root, 0, 1)
-	revoked, ancestors, err := f.records.RevocationLineage(t.Context(), ids[2])
-	if err != nil || revoked || !slices.Equal(ancestors, []uuid.UUID{ids[1], ids[0]}) {
-		t.Errorf("RevocationLineage = %v, %v, %v; want live under %v", revoked, ancestors, err, ids[:2])
+	a, err := f.records.RevocationLineage(t.Context(), ids[2])
+	if err != nil || a.Revoked || !slices.Equal(a.Ancestors, []uuid.UUID{ids[1], ids[0]}) {
+		t.Errorf("RevocationLineage = %+v, %v; want live under %v", a, err, ids[:2])
 	}
-	if revoked, ancestors, err := f.records.RevocationLineage(t.Context(), ids[0]); err != nil || revoked || len(ancestors) != 0 {
-		t.Errorf("RevocationLineage of a root = %v, %v, %v; want live and none", revoked, ancestors, err)
+	if a, err := f.records.RevocationLineage(t.Context(), ids[0]); err != nil || a.Revoked || len(a.Ancestors) != 0 {
+		t.Errorf("RevocationLineage of a root = %+v, %v; want live and none", a, err)
 	}
 	if _, err := f.records.Revoke(WithTenant(t.Context(), f.mine), limes.RevokeRequest{CapabilityID: ids[0]}); err != nil {
 		t.Fatal(err)
 	}
-	if revoked, _, err := f.records.RevocationLineage(t.Context(), ids[2]); err != nil || !revoked {
-		t.Errorf("RevocationLineage under a revoked root = %v, %v; want revoked", revoked, err)
+	if a, err := f.records.RevocationLineage(t.Context(), ids[2]); err != nil || !a.Revoked {
+		t.Errorf("RevocationLineage under a revoked root = %+v, %v; want revoked", a, err)
 	}
-	if revoked, ancestors, err := f.records.RevocationLineage(t.Context(), uuid.New()); !errors.Is(err, limes.ErrNotFound) || revoked || ancestors != nil {
-		t.Errorf("RevocationLineage of an id not on record = %v, %v, %v; want ErrNotFound", revoked, ancestors, err)
+	if a, err := f.records.RevocationLineage(t.Context(), uuid.New()); !errors.Is(err, limes.ErrNotFound) || a.Revoked || a.Ancestors != nil {
+		t.Errorf("RevocationLineage of an id not on record = %+v, %v; want ErrNotFound", a, err)
 	}
 }
 
@@ -302,12 +302,12 @@ func TestIsRevokedAnswersAsRevocationLineage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		lineage, _, err := f.records.RevocationLineage(t.Context(), id)
+		a, err := f.records.RevocationLineage(t.Context(), id)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if revoked != lineage {
-			t.Errorf("%s: IsRevoked %v, RevocationLineage %v", id, revoked, lineage)
+		if revoked != a.Revoked {
+			t.Errorf("%s: IsRevoked %v, RevocationLineage %v", id, revoked, a.Revoked)
 		}
 	}
 	if revoked, err := f.records.IsRevoked(t.Context(), uuid.New()); err != nil || revoked {

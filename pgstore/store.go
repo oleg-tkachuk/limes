@@ -232,22 +232,22 @@ func (s *Store) IsRevoked(ctx context.Context, id uuid.UUID) (bool, error) {
 // RevocationLineage implements limes.RevocationLineageLookup: IsRevoked's
 // answer, in one statement as IsRevoked's, and the ancestors on record it
 // read, nearest first; an id not on record is ErrNotFound.
-func (s *Store) RevocationLineage(ctx context.Context, id uuid.UUID) (bool, []uuid.UUID, error) {
+func (s *Store) RevocationLineage(ctx context.Context, id uuid.UUID) (limes.RevocationAnswer, error) {
 	var self, inChain, known bool
 	var deepest int
 	var ancestors []uuid.UUID
 	err := s.db.QueryRow(ctx, sqlRevocationLineage, id, limes.MaxDelegationDepth).Scan(&self, &deepest, &inChain, &ancestors, &known)
 	switch {
 	case err != nil:
-		return false, nil, err
+		return limes.RevocationAnswer{}, err
 	case !known:
-		return false, nil, limes.ErrNotFound
+		return limes.RevocationAnswer{}, limes.ErrNotFound
 	case self:
-		return true, ancestors, nil
+		return limes.RevocationAnswer{Revoked: true, Ancestors: ancestors}, nil
 	case deepest > limes.MaxDelegationDepth:
-		return false, nil, fmt.Errorf("%w: %s has more than %d ancestors", limes.ErrDelegationTooDeep, id, limes.MaxDelegationDepth)
+		return limes.RevocationAnswer{}, fmt.Errorf("%w: %s has more than %d ancestors", limes.ErrDelegationTooDeep, id, limes.MaxDelegationDepth)
 	}
-	return inChain, ancestors, nil
+	return limes.RevocationAnswer{Revoked: inChain, Ancestors: ancestors}, nil
 }
 
 const (
