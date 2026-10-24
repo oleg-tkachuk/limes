@@ -235,13 +235,16 @@ type RevokeResult struct {
 	// one.
 	AlreadyRevoked bool
 	// Revocation is the capability's entry as it stands after the call:
-	// the one the call wrote, or the earlier one it kept.
+	// the one the call wrote, or the earlier one it kept, as GetRecord
+	// reads it back — at the store's precision.
 	Revocation Revocation
 	// Before is the capability's disposition just before the call, by the
 	// rules and the clock RecordCensus and RecordListingReader use: revoked
 	// — by its own entry or through an ancestor — then expired, then
 	// active. Only a revoke of an active capability stopped something new.
-	// AlreadyRevoked implies RecordDispositionRevoked.
+	// AlreadyRevoked implies RecordDispositionRevoked. Unspecified when the
+	// store could not tell — a chain past MaxDelegationDepth — though it
+	// wrote the entry all the same.
 	Before RecordDisposition
 }
 

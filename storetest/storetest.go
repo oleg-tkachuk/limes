@@ -452,6 +452,8 @@ func checkRevoke(t *testing.T, f fixture) {
 	// first revoke writes one.
 	if r := f.revoke(t, child.ID, false); r.AlreadyRevoked || r.Revocation.Cascaded || r.Before != limes.RecordDispositionRevoked {
 		t.Errorf("first revoke of a child stopped through its parent = %+v; want a new entry, not cascading, revoked before", r)
+	} else if rev := f.record(t, child.ID).Revocation; rev == nil || !sameRevocation(r.Revocation, *rev) {
+		t.Errorf("first revoke of a child reported %+v; on record %+v", r.Revocation, rev)
 	}
 	// An expired capability is expired before its revoke, which still
 	// writes its entry.

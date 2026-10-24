@@ -412,8 +412,9 @@ func checkListingStoppedBy(t *testing.T, f fixture) {
 	expect := func(name string, id, by uuid.UUID) {
 		t.Helper()
 		got := stoppedBy(id)
-		if got == nil || got.CapabilityID != by || got.Revocation.Note != "test" || got.Revocation.RevokedAt.IsZero() {
-			t.Errorf("%s: stopped by %+v, want %s's entry", name, got, by)
+		want := f.record(t, by).Revocation
+		if got == nil || want == nil || got.CapabilityID != by || !sameRevocation(got.Revocation, *want) {
+			t.Errorf("%s: stopped by %+v, want %s's entry %+v", name, got, by, want)
 		}
 	}
 	expect("its own entry", own.ID, own.ID)

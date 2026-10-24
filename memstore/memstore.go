@@ -502,6 +502,11 @@ func (s *Store) forgetErased() {
 func (s *Store) RevocationLineage(_ context.Context, id uuid.UUID) (bool, []uuid.UUID, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Revoked by its own entry: IsRevoked's answer whatever lies above, and
+	// a revoked answer needs no ancestors (RevocationLineageLookup).
+	if _, ok := s.revoked[id]; ok {
+		return true, nil, nil
+	}
 	revoked, err := s.revokedLocked(id)
 	if err != nil {
 		return false, nil, err
@@ -536,9 +541,11 @@ func (s *Store) Revoke(_ context.Context, args limes.RevokeRequest) (limes.Revok
 		return limes.RevokeResult{}, limes.ErrNotFound
 	}
 	now := s.nowFn()
+	// A revoke is the way to stop a capability: it is written whatever its
+	// disposition, which a chain past MaxDelegationDepth leaves untold.
 	before, _, err := s.dispositionLocked(args.CapabilityID, now)
 	if err != nil {
-		return limes.RevokeResult{}, err
+		before = limes.RecordDispositionUnspecified
 	}
 	entry := limes.Revocation{
 		RevokedAt: now, Note: args.Note, Actor: args.Actor, Cascaded: args.CascadeChildren,

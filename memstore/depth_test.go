@@ -41,3 +41,29 @@ func TestMeteringRefusesAChainPastMaxDelegationDepth(t *testing.T) {
 		t.Errorf("IsRevoked = %v, %v; want ErrDelegationTooDeep", revoked, err)
 	}
 }
+
+// A revoke stops a capability past MaxDelegationDepth all the same, and
+// says it could not tell its disposition; its own entry then answers
+// RevocationLineage as it answers IsRevoked.
+func TestRevokeWritesPastMaxDelegationDepth(t *testing.T) {
+	ctx := context.Background()
+	records := newTestStore()
+	tenant := uuid.New()
+	parent := uuid.Nil
+	for range limes.MaxDelegationDepth + 2 {
+		id := uuid.New()
+		records.caps[id] = mkCap(id, parent, tenant, "agent")
+		records.issuedBy[id] = limes.Principal{Subject: "op"}
+		parent = id
+	}
+	r, err := records.Revoke(ctx, limes.RevokeRequest{CapabilityID: parent})
+	if err != nil || r.AlreadyRevoked || r.Before != limes.RecordDispositionUnspecified {
+		t.Fatalf("Revoke past the depth = %+v, %v; want the entry written, its disposition untold", r, err)
+	}
+	if revoked, err := records.IsRevoked(ctx, parent); err != nil || !revoked {
+		t.Errorf("IsRevoked = %v, %v; want revoked", revoked, err)
+	}
+	if revoked, ancestors, err := records.RevocationLineage(ctx, parent); err != nil || !revoked || ancestors != nil {
+		t.Errorf("RevocationLineage = %v, %v, %v; want revoked, as IsRevoked answers", revoked, ancestors, err)
+	}
+}
