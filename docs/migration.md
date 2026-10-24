@@ -14,6 +14,14 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## otelmetric/v0.9.0
+
+- `Instrument`'s attributes are under `limes.`: `outcome` is
+  `limes.outcome`, `unit_code` is `limes.unit_code`, and the opt-in
+  `tenant_id` is `limes.tenant_id`, as the revocation cache's `kind` became
+  `limes.revocation_cache.kind` in v0.8.0. Update the queries that group or
+  filter by them.
+
 ## otelmetric/v0.8.0
 
 - `InstrumentRevocationCache` renames what an exporter shows:
