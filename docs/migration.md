@@ -14,6 +14,20 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## pgstore/v0.38.0
+
+- `(*Store).RevokeBiscuit` returns `(limes.RevokeBiscuitResult, error)` where
+  it returned `error`, as `limes.BiscuitRevocationStore` now asks (v0.121.0).
+
+## v0.121.0
+
+- `BiscuitRevocationStore.RevokeBiscuit(ctx, req) error` is
+  `RevokeBiscuit(ctx, req) (RevokeBiscuitResult, error)`, as `Store.Revoke`
+  returns a `RevokeResult`: `AlreadyRevoked` says the copy had an entry
+  before the call, and `Revocation` is the entry that stands, the first as
+  before. `_, err := store.RevokeBiscuit(…)` keeps the old behaviour; a store
+  of your own returns the result, which `storetest` now checks.
+
 ## v0.120.0
 
 - `meter.MinChargeRetention` is 401 days where it was 400: a leap year of
