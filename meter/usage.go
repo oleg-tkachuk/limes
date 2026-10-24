@@ -279,9 +279,9 @@ type TenantBudgets interface {
 // A day, and the two spans MinChargeRetention adds up.
 const (
 	day = 24 * time.Hour
-	// billingYear is a year of charges, so a yearly bill is drawn from the
-	// ledger itself.
-	billingYear = 365 * day
+	// billingYear is a year of charges, a leap year's, so a yearly bill is
+	// drawn from the ledger itself whichever year it covers.
+	billingYear = 366 * day
 	// disputeWindow is how long after that a charge may still be disputed
 	// and refunded, or a payment retried under its reference.
 	disputeWindow = 35 * day
@@ -292,7 +292,8 @@ const (
 // hold replays its receipt, Refund finds it, and SumCharges counts it. A
 // ledger may remove a charge older than its retention, which is no shorter
 // than this, and those promises then lapse for it. Removing charges by hand
-// is held to it too.
+// is held to it too. Erasing a tenant (TenantUsageEraser) is not: it removes
+// every charge of the tenant, whatever its age.
 const MinChargeRetention = billingYear + disputeWindow
 
 // UsageHousekeeping reclaims usage rows of capabilities that are gone.

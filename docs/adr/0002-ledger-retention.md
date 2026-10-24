@@ -51,10 +51,12 @@ minor:
 2. Add `meter.MinChargeRetention`, the floor a store refuses a retention
    under: long enough for any retry and any refund a consumer's own process
    allows, so the default use never meets the window. Its value is decided
-   with the wording: 400 days — a year of billing plus a month's disputes.
+   with the wording: 401 days — a leap year of billing plus 35 days of
+   disputes, so a charge on a leap year's first day outlives its yearly
+   bill's dispute window (decided on 2026-10-25; 400 at first).
 3. An optional `meter.LedgerHousekeeping` interface — **decided on
    2026-10-24 to land before 1.0 too**, rather than in a minor after it —
-   `PurgeCharges(ctx, PurgeChargesRequest{Retention, Limit})
+   `PurgeCharges(ctx, PurgeChargesRequest{OlderThan, Limit})
    (PurgeChargesResult, error)`, batched like `Store.Purge`, implemented by
    memstore and pgstore and checked by `metertest` — including that a
    reference past the retention charges anew and a refund of a purged charge

@@ -14,6 +14,13 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.120.0
+
+- `meter.MinChargeRetention` is 401 days where it was 400: a leap year of
+  billing and 35 days of disputes. A `PurgeChargesRequest.OlderThan` of 400
+  days is now `ErrInvalidRequest`; pass 401 days or more, or zero for the
+  floor itself.
+
 ## pgstore/v0.37.0
 
 - `(*Store).RevocationLineage` returns `(limes.RevocationAnswer, error)` where
