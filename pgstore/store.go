@@ -211,6 +211,9 @@ const sqlRevocationLineage = `SELECT self, deepest, in_chain, ancestors, known F
 // IsRevoked answers for the capability and every ancestor still on record,
 // across every tenant whatever the call's scope, in one round trip: the
 // verifier asks it before it knows the token's tenant, on every request.
+// Ask the primary, as RevocationLineage: a standby behind a revocation
+// answers "not revoked", and a RevocationCache, cleared by the revocation's
+// notification an instant before, keeps that answer for its SyncedTTL.
 func (s *Store) IsRevoked(ctx context.Context, id uuid.UUID) (bool, error) {
 	var self, inChain bool
 	var deepest int

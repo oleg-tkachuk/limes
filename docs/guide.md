@@ -825,7 +825,13 @@ answer: the questions answered from it (`Hits`) and not (`Misses`), the
 upstream lookups those ran (`Lookups`, fewer when concurrent misses share
 one), the live answers dropped to stay within the bound (`Evictions`, which
 growing says `MaxEntries` is too small), the answers held (`Entries`), and
-the `Clears` and `ClearsRevoked`; `otelmetric.InstrumentRevocationCache` exports them. Over `pgstore`, run a `pgstore.RevocationWatcher` beside each
+the `Clears` and `ClearsRevoked`; `otelmetric.InstrumentRevocationCache` exports them. Point the store a `RevocationCache` reads, and the watcher's connection,
+at the primary, not at a read replica. A standby applies a revocation after
+the primary commits it and notifies, so a cache cleared by the notification
+can read "not revoked" from a standby still behind and keep it for its
+`SyncedTTL`; and a standby refuses `LISTEN`, so a watcher pointed at one
+never listens. Reports — `SumCharges`, `CountRecords`, `ListRecords` — may
+read a replica. Over `pgstore`, run a `pgstore.RevocationWatcher` beside each
 verifier: the schema notifies `pgstore.RevocationChannel` on every
 revocation, naming the capabilities revoked (migration 018), and the watcher
 calls `ClearRevoked` with them on each cache that has it
