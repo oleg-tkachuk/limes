@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { SUCCESS, fuzzSummary, parseFuzzLog } from "./fuzz-summary.ts";
+import { CANCELLED, SUCCESS, fuzzSummary, parseFuzzLog } from "./fuzz-summary.ts";
 
 const PKG = "github.com/oleg-tkachuk/limes/internal/ttlcache";
 const TARGET = "FuzzCounters";
@@ -63,6 +63,11 @@ describe("fuzzSummary", () => {
     assert.match(page, /`testdata\/fuzz\/FuzzCounters\/310637d0c4244160`/);
     assert.match(page, /artifact `fuzz-FuzzCounters`/);
     assert.match(page, new RegExp(`\`\`\`bash\\ngo test -run=FuzzCounters/310637d0c4244160 ${PKG.replaceAll(".", "\\.")}\\n\`\`\``));
+  });
+  test("a cancelled search: neither passed nor failed, and no failure to explain", () => {
+    const page = fuzzSummary(PKG, TARGET, CANCELLED, parseFuzzLog(PASSED));
+    assert.match(page, /\| cancelled \|/);
+    assert.doesNotMatch(page, /failed|before its search/);
   });
   test("a failure before the search: no input to name", () => {
     const page = fuzzSummary(PKG, TARGET, "failure", parseFuzzLog(SEED_FAILED));

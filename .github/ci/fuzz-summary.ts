@@ -22,8 +22,10 @@ const PROGRESS = /^fuzz: elapsed: (\S+), execs: (\d+) \((\d+)\/sec\), new intere
 const FAILING_INPUT = /^\s*Failing input written to (\S+)$/;
 const RERUN = /^\s*(go test -run=\S+)$/;
 
-// SUCCESS is the outcome of a step that passed.
+// SUCCESS is the outcome of a step that passed, and CANCELLED that of one
+// stopped before it finished, which says nothing of the target.
 export const SUCCESS = "success";
+export const CANCELLED = "cancelled";
 
 // FuzzRun is what a target's log says of its run.
 export interface FuzzRun {
@@ -71,9 +73,10 @@ const NONE = "—";
 // ended in outcome.
 export function fuzzSummary(pkg: string, target: string, outcome: string, run: FuzzRun): string {
   const passed = outcome === SUCCESS;
-  const row = [pkg, run.elapsed ?? NONE, run.executions?.toString() ?? NONE, run.interesting?.toString() ?? NONE, passed ? "passed" : "failed"];
+  const result = passed ? "passed" : outcome === CANCELLED ? "cancelled" : "failed";
+  const row = [pkg, run.elapsed ?? NONE, run.executions?.toString() ?? NONE, run.interesting?.toString() ?? NONE, result];
   const section = `### Fuzz ${target}\n\n${table(SUMMARY_HEADER, [row])}`;
-  if (passed) {
+  if (passed || outcome === CANCELLED) {
     return section;
   }
   if (run.input === undefined) {
