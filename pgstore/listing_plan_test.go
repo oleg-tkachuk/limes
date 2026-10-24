@@ -246,6 +246,28 @@ func walked(node map[string]any, inWalk bool) (rows float64, seq []string) {
 	return rows, seq
 }
 
+// seedStepped records under tenant %[1]s's root a chain of %[2]d
+// generations, subject "stepped", each even generation with an entry of its
+// own.
+const seedStepped = `
+DO $$
+DECLARE parent uuid := (SELECT id FROM limes.capabilities WHERE tenant_id = '%[1]s' AND subject = 'root');
+DECLARE child uuid;
+BEGIN
+    FOR generation IN 1..%[2]d LOOP
+        child := uuidv7();
+        INSERT INTO limes.capabilities (id, parent_id, tenant_id, principal_type, subject, expires_at, depth, capability, issued_by)
+        SELECT child, id, tenant_id, 'agent', 'stepped', expires_at, generation, '{}', '{}' FROM limes.capabilities WHERE id = parent;
+        IF generation %% 2 = 0 THEN
+            INSERT INTO limes.revocations (capability_id, tenant_id, revoked_at, note, actor, cascaded)
+            VALUES (child, '%[1]s', now(), 'step', 'test', false);
+        END IF;
+        parent := child;
+    END LOOP;
+END $$;
+ANALYZE limes.capabilities;
+ANALYZE limes.revocations`
+
 // A listing of records revoked through an ancestor walks up to it a parent
 // at a time by key, over a wide tree and down a deep chain alike: the walk
 // scans no records sequentially, and reads a parent for each generation it
@@ -260,17 +282,25 @@ func TestListRecordsWalksUpByKey(t *testing.T) {
 	if _, err := owner.Exec(t.Context(), seed, pgx.QueryExecModeSimpleProtocol, mine, now, planWideChildren); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
+	// A chain whose every other generation has an entry of its own: each
+	// record between them finds its parent's at the first step.
+	if _, err := owner.Exec(t.Context(), fmt.Sprintf(seedStepped, mine, planDeepChain), pgx.QueryExecModeSimpleProtocol); err != nil {
+		t.Fatalf("seed the stepped chain: %v", err)
+	}
 	census, err := NewCensus(Config{DB: app, Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	revoked := []limes.RecordDisposition{limes.RecordDispositionRevoked}
 	for name, tc := range map[string]struct {
-		req     limes.ListRecordsRequest
-		maxRows float64
+		req              limes.ListRecordsRequest
+		minRows, maxRows float64
 	}{
-		"wide": {limes.ListRecordsRequest{TenantID: mine, Subject: "wide", Dispositions: revoked}, limit},
-		"deep": {limes.ListRecordsRequest{TenantID: mine, Subject: "deep", Dispositions: revoked}, limit * (planDeepChain + 1)},
+		// The root, the children's parent, has the entry: no record read.
+		"wide": {limes.ListRecordsRequest{TenantID: mine, Subject: "wide", Dispositions: revoked}, 0, 0},
+		"deep": {limes.ListRecordsRequest{TenantID: mine, Subject: "deep", Dispositions: revoked}, 1, limit * (planDeepChain + 1)},
+		// Stopped at the nearest entry, never walked on to the root.
+		"stepped": {limes.ListRecordsRequest{TenantID: mine, Subject: "stepped", Dispositions: revoked}, 0, 0},
 	} {
 		query, args := listRecordsSQL(tc.req, now, nil, limit)
 		var plan []byte
@@ -286,16 +316,16 @@ func TestListRecordsWalksUpByKey(t *testing.T) {
 		}
 		rows, seq := walked(nodes[0]["Plan"].(map[string]any), false)
 		t.Logf("%s: the walks read %.0f records in %.2f ms", name, rows, nodes[0]["Execution Time"])
-		if rows == 0 || rows > tc.maxRows || len(seq) > 0 {
-			t.Errorf("%s: the walks read %.0f records (1 to %.0f), %d sequentially:\n%s", name, rows, tc.maxRows, len(seq), plan)
+		if rows < tc.minRows || rows > tc.maxRows || len(seq) > 0 {
+			t.Errorf("%s: the walks read %.0f records (%.0f to %.0f), %d sequentially:\n%s", name, rows, tc.minRows, tc.maxRows, len(seq), plan)
 		}
 		page, err := census.ListRecords(WithTenant(t.Context(), mine), tc.req)
 		if err != nil || len(page.Items) == 0 {
 			t.Fatalf("%s: ListRecords = %d items, %v", name, len(page.Items), err)
 		}
 		for _, l := range page.Items {
-			if l.StoppedBy == nil || l.StoppedBy.Revocation.Note != "plan" {
-				t.Fatalf("%s: %s stopped by %+v, want the root's entry", name, l.Record.Capability.ID, l.StoppedBy)
+			if l.StoppedBy == nil || l.StoppedBy.Revocation.Note == "" {
+				t.Fatalf("%s: %s stopped by %+v, want an entry", name, l.Record.Capability.ID, l.StoppedBy)
 			}
 		}
 	}
