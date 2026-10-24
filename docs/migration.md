@@ -14,6 +14,15 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## otelmetric/v0.8.0
+
+- `InstrumentRevocationCache` renames what an exporter shows:
+  `limes.revocation_cache.clears_revoked` is `…narrow_clears`,
+  `…last_sync_loss` is `…last_sync_loss_time`, and the attribute `kind` is
+  `limes.revocation_cache.kind`. The `lineage` and `synced` gauges carry no
+  unit, so Prometheus no longer names them `…_ratio`. Update the dashboards
+  and alerts that read them.
+
 ## pgstore/v0.39.0
 
 - `pgstore.Syncer` is gone. `RevocationWatcher.Run` opens a
