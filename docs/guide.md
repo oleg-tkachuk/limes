@@ -1049,7 +1049,8 @@ reach further back. `memstore.NewLedger` and `pgstore.NewLedger` are also a
 `meter.LedgerHousekeeping`: a worker of yours calls `PurgeCharges` until a
 batch comes back short of its limit, as it calls `Purge`; `OlderThan` zero
 is `MinChargeRetention`, and shorter is refused. pgstore removes the charges
-its scope reaches — every tenant's under `WithAllTenants` — oldest first, by
+its scope reaches — every tenant's under `WithAllTenants`, on the primary,
+not the replica its reports may read — oldest first, by
 their time's index and each by its key, and skips a charge a refund holds
 for the next batch. A deletion of your own, in SQL, is held to the same
 floor.

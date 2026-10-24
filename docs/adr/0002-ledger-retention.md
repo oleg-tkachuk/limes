@@ -56,7 +56,7 @@ minor:
    bill's dispute window (decided on 2026-10-25; 400 at first).
 3. An optional `meter.LedgerHousekeeping` interface — **decided on
    2026-10-24 to land before 1.0 too**, rather than in a minor after it —
-   `PurgeCharges(ctx, PurgeChargesRequest{Retention, Limit})
+   `PurgeCharges(ctx, PurgeChargesRequest{OlderThan, Limit})
    (PurgeChargesResult, error)`, batched like `Store.Purge`, implemented by
    memstore and pgstore and checked by `metertest` — including that a
    reference past the retention charges anew and a refund of a purged charge

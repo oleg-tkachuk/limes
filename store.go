@@ -259,8 +259,9 @@ func (r RevokeRequest) Validate() error {
 }
 
 // DefaultHousekeepingLimit is how many rows one housekeeping batch —
-// Store.Purge, meter.UsageHousekeeping.ReleaseExpired or PurgeOrphans — handles
-// when the request names no limit.
+// Store.Purge, meter.UsageHousekeeping.ReleaseExpired or PurgeOrphans,
+// meter.LedgerHousekeeping.PurgeCharges — handles when the request names no
+// limit.
 const DefaultHousekeepingLimit = 1_000
 
 // PurgeClockSkew is how far the clock of the store that purges may run ahead

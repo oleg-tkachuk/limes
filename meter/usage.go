@@ -292,7 +292,8 @@ const (
 // hold replays its receipt, Refund finds it, and SumCharges counts it. A
 // ledger may remove a charge older than its retention, which is no shorter
 // than this, and those promises then lapse for it. Removing charges by hand
-// is held to it too.
+// is held to it too. Erasing a tenant (TenantUsageEraser) is not: it removes
+// every charge of the tenant, whatever its age.
 const MinChargeRetention = billingYear + disputeWindow
 
 // UsageHousekeeping reclaims usage rows of capabilities that are gone.
