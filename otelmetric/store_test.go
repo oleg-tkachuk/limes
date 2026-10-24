@@ -26,9 +26,9 @@ const (
 	metricRequestBumps    = "limes.request.bumps"
 	metricRefundAmount    = "limes.refund.amount"
 	metricReservations    = "limes.reservation.decisions"
-	attrOutcome           = "outcome"
-	attrUnit              = "unit_code"
-	attrTenant            = "tenant_id"
+	attrOutcome           = "limes.outcome"
+	attrUnit              = "limes.unit_code"
+	attrTenant            = "limes.tenant_id"
 )
 
 // meteredStore is a metered memstore whose measurements reader collects.
@@ -185,7 +185,7 @@ func TestMeteringLabelsAmountsAndOutcomes(t *testing.T) {
 	for _, name := range []string{metricChargeDecisions, metricChargeAmount, metricRefundAmount} {
 		for _, p := range points(t, reader, name) {
 			if p.attrs.HasValue(attribute.Key(attrTenant)) {
-				t.Errorf("%s carries tenant_id without WithTenantAttribute", name)
+				t.Errorf("%s carries limes.tenant_id without WithTenantAttribute", name)
 			}
 		}
 	}
