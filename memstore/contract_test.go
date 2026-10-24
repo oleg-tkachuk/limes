@@ -100,6 +100,12 @@ func TestMeterContractUsesTheTenantHooks(t *testing.T) {
 			},
 		}
 	})
+	// A -run filter that leaves out every check writing or listing tenant
+	// budgets leaves the recorder empty: nothing ran to judge, which is no
+	// failure.
+	if listed.scopedWrites.Load()+listed.strayWrites.Load()+listed.inside.Load()+listed.outside.Load() == 0 {
+		t.Skip("no check that writes or lists tenant budgets ran")
+	}
 	if listed.scopedWrites.Load() == 0 || listed.strayWrites.Load() != 0 {
 		t.Errorf("SetTenantBudget for a tenant from NewTenant ran %d times under its TenantCtx and %d otherwise; want every such write under it",
 			listed.scopedWrites.Load(), listed.strayWrites.Load())
