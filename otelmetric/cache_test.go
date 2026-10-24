@@ -37,12 +37,28 @@ const (
 	kindBiscuit           = "biscuit"
 )
 
+// cacheTestUnit is the unit of the capabilities the cache checks are about.
+const cacheTestUnit = "USD"
+
 // instrumentedCache is a RevocationCache over memstore whose counts reader
-// collects.
-func instrumentedCache(t *testing.T) (*limes.RevocationCache, *sdkmetric.ManualReader, metric.Registration) {
+// collects, and a capability on record there: the cache keeps no answer
+// about one that is not.
+func instrumentedCache(t *testing.T) (*limes.RevocationCache, *sdkmetric.ManualReader, metric.Registration, uuid.UUID) {
 	t.Helper()
 	records, err := memstore.NewStore(memstore.StoreConfig{})
 	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	c := limes.Capability{
+		ID: uuid.New(), IssuedAt: now, ExpiresAt: now.Add(time.Hour),
+		Subject: limes.Principal{Type: limes.PrincipalTypeService, TenantID: uuid.New(), Subject: "svc"},
+		Caveats: limes.Caveats{
+			Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true},
+			Budget: limes.BudgetCeiling{Unlimited: true, UnitCode: cacheTestUnit},
+		},
+	}
+	if err := records.Insert(context.Background(), limes.InsertRequest{Capability: c}); err != nil {
 		t.Fatal(err)
 	}
 	cache, err := limes.NewRevocationCache(limes.RevocationCacheConfig{Capabilities: records, Biscuits: records})
@@ -54,7 +70,7 @@ func instrumentedCache(t *testing.T) (*limes.RevocationCache, *sdkmetric.ManualR
 	if err != nil {
 		t.Fatal(err)
 	}
-	return cache, reader, reg
+	return cache, reader, reg, c.ID
 }
 
 // collected is every int64 data point of a collection, sum or gauge, by
@@ -86,8 +102,7 @@ func collected(t *testing.T, reader *sdkmetric.ManualReader) map[string][]point 
 // The cache's counts reach the provider by kind, read at collection.
 func TestInstrumentRevocationCacheReportsItsCounts(t *testing.T) {
 	ctx := context.Background()
-	cache, reader, _ := instrumentedCache(t)
-	id := uuid.New()
+	cache, reader, _, id := instrumentedCache(t)
 	_, _ = cache.IsRevoked(ctx, id)
 	_, _ = cache.IsRevoked(ctx, id)
 	_, _ = cache.IsRevoked(ctx, id)
@@ -135,7 +150,7 @@ func TestInstrumentRevocationCacheReportsItsCounts(t *testing.T) {
 // provider, each a single point; the time of the last loss only once there
 // was one.
 func TestInstrumentRevocationCacheReportsTheSignal(t *testing.T) {
-	cache, reader, _ := instrumentedCache(t)
+	cache, reader, _, _ := instrumentedCache(t)
 	if got := collected(t, reader); len(got[metricLastSyncLoss]) != 0 {
 		t.Errorf("%s before any loss = %+v, want no point", metricLastSyncLoss, got[metricLastSyncLoss])
 	}
@@ -169,8 +184,8 @@ func TestInstrumentRevocationCacheReportsTheSignal(t *testing.T) {
 
 // Unregistered, the cache reports nothing more.
 func TestInstrumentRevocationCacheUnregisters(t *testing.T) {
-	cache, reader, reg := instrumentedCache(t)
-	_, _ = cache.IsRevoked(context.Background(), uuid.New())
+	cache, reader, reg, id := instrumentedCache(t)
+	_, _ = cache.IsRevoked(context.Background(), id)
 	if err := reg.Unregister(); err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +203,7 @@ func TestInstrumentRevocationCacheRefusesNoCache(t *testing.T) {
 
 // The flag gauges are dimensionless, unit "1", as OpenTelemetry spells it.
 func TestInstrumentRevocationCacheUnits(t *testing.T) {
-	_, reader, _ := instrumentedCache(t)
+	_, reader, _, _ := instrumentedCache(t)
 	var rm metricdata.ResourceMetrics
 	if err := reader.Collect(context.Background(), &rm); err != nil {
 		t.Fatal(err)

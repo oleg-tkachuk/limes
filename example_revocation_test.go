@@ -15,22 +15,20 @@ import (
 
 func ExampleNewRevocationCache() {
 	ctx := context.Background()
-	records, err := memstore.NewStore(memstore.StoreConfig{})
-	if err != nil {
-		log.Fatal(err)
-	}
+	s := newExampleStack()
 	// One cache answers for capabilities and Biscuit copies; memstore's
 	// Store is both upstreams.
 	cache, err := limes.NewRevocationCache(limes.RevocationCacheConfig{
-		Capabilities: records,
-		Biscuits:     records,
+		Capabilities: s.records,
+		Biscuits:     s.records,
 		TTL:          time.Second,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	id := uuid.New()
+	c, _ := s.issue()
+	id := c.ID
 	for range 3 {
 		if _, err := cache.IsRevoked(ctx, id); err != nil {
 			log.Fatal(err)
@@ -49,19 +47,17 @@ func ExampleNewRevocationCache() {
 
 func ExampleRevocationCache_Sweep() {
 	ctx := context.Background()
-	records, err := memstore.NewStore(memstore.StoreConfig{})
-	if err != nil {
-		log.Fatal(err)
-	}
+	s := newExampleStack()
 	now := time.Date(2026, time.March, 2, 9, 0, 0, 0, time.UTC)
 	cache, err := limes.NewRevocationCache(limes.RevocationCacheConfig{
-		Capabilities: records, TTL: time.Second, Now: func() time.Time { return now },
+		Capabilities: s.records, TTL: time.Second, Now: func() time.Time { return now },
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 	for range 2 {
-		if _, err := cache.IsRevoked(ctx, uuid.New()); err != nil {
+		c, _ := s.issue()
+		if _, err := cache.IsRevoked(ctx, c.ID); err != nil {
 			log.Fatal(err)
 		}
 	}

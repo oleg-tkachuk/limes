@@ -32,7 +32,10 @@ type RevocationLineageLookup interface {
 	RevocationLookup
 	// RevocationLineage answers as IsRevoked does, and names the ancestors
 	// of id still on record that the answer read: every one, when id is
-	// not revoked.
+	// not revoked. An id not on record is ErrNotFound: the cache answers
+	// it not revoked, as IsRevoked does, but keeps no answer, which no
+	// ancestor's revocation could reach. One that answers such an id not
+	// revoked instead is cached as any other.
 	RevocationLineage(ctx context.Context, id uuid.UUID) (revoked bool, ancestors []uuid.UUID, err error)
 }
 
@@ -250,6 +253,11 @@ func (c *RevocationCache) IsRevoked(ctx context.Context, id uuid.UUID) (bool, er
 	revoked, _, err := c.caps.GetTagged(ctx, id, func(ctx context.Context) (bool, []uuid.UUID, error) {
 		return c.lineage.RevocationLineage(ctx, id)
 	})
+	// Not on record: not revoked, as IsRevoked answers it, and nothing
+	// cached, an error being kept by no cache.
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
 	return revoked, err
 }
 
