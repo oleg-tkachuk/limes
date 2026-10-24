@@ -101,6 +101,11 @@ export interface Release {
   only: string | undefined;
   // manual: asked for by hand, so the policy's thresholds do not apply.
   manual: boolean;
+  // nextMajor: a prerelease run cutting a candidate of limes's next major,
+  // v1.0.0-rc.N, rather than of its next version by the pending commits.
+  // Between two such candidates the API may still break: it is 0.x on main
+  // until the release that cuts 1.0.
+  nextMajor: boolean;
   policy: Policy;
   commits: ReleaseCommits;
   // pushTag pushes a tag made on the checked-out commit.
@@ -122,7 +127,7 @@ async function sinceTag(module: Module, root: string): Promise<string> {
 // prereleaseModule tags and publishes the module's next release candidate,
 // if anything is pending.
 export async function prereleaseModule(r: Release, module: Module): Promise<Outcome> {
-  const tag = await candidateTag(module, await pendingCommits(module, "HEAD", r.commits, r.root), r.root);
+  const tag = await candidateTag(module, await pendingCommits(module, "HEAD", r.commits, r.root), r.root, r.nextMajor);
   if (tag === undefined) {
     return { note: `no commit since ${await sinceTag(module, r.root)} cuts a release, so no candidate` };
   }
@@ -140,10 +145,26 @@ export async function prereleaseModule(r: Release, module: Module): Promise<Outc
   }
   await git(["tag", tag], r.root);
   await r.pushTag(tag);
-  await publish(r.github, tag, module.prefix, notesFrom(notesFile), false, r.root, true);
+  await publish(r.github, tag, module.prefix, candidateNotesBody(notesFrom(notesFile)), false, r.root, true);
   await warmGoProxy(tag, r.repository, r.fetchInfo);
   return { tag, note: "release candidate published" };
 }
+
+// VERSION_HEADING is the heading semantic-release opens a release's notes
+// with: the version, linked to a comparison with the last release.
+const VERSION_HEADING = /^#{1,2} \[?[0-9]+\.[0-9]+\.[0-9]+[^\n]*\n+/;
+
+// candidateNotesBody is a dry run's notes without their heading: it names
+// the next version by the rules on main — 0.118.0 for a candidate of
+// 1.0.0 — and links a comparison with a tag that does not exist yet. The
+// candidate's own tag titles its release.
+export function candidateNotesBody(notes: string): string {
+  return notes.replace(VERSION_HEADING, "");
+}
+
+// NEXT_MAJOR_MODULE is the one module a candidate of the next major is cut
+// for: the nested modules stay on 0.x past limes's 1.0.
+const NEXT_MAJOR_MODULE = ROOT_MODULE;
 
 // releaseModule releases one module, and says what it did.
 export async function releaseModule(r: Release, module: Module, before: readonly string[]): Promise<Outcome> {
@@ -152,6 +173,9 @@ export async function releaseModule(r: Release, module: Module, before: readonly
     return { note: `'${gate}' did not pass; not released this run` };
   }
   if (r.channel === Channel.Prerelease) {
+    if (r.nextMajor && module.name !== NEXT_MAJOR_MODULE) {
+      return { note: `a candidate of the next major is cut for ${NEXT_MAJOR_MODULE} alone` };
+    }
     return prereleaseModule(r, module);
   }
   if (!r.manual) {
@@ -182,6 +206,9 @@ const SUMMARY_HEADER = ["Module", "Tag", "What happened"];
 // releaseAll releases every module, then publishes what earlier runs left
 // behind, and reports whether every module's release went through.
 export async function releaseAll(r: Release): Promise<boolean> {
+  if (r.nextMajor && r.channel !== Channel.Prerelease) {
+    throw new Error("a candidate of the next major is a prerelease: run the prerelease channel");
+  }
   const before = await tagsOnHead(r.root);
   let ok = true;
   const names = releasedModules(r.root);
@@ -271,6 +298,7 @@ async function main(): Promise<void> {
   const ok = await releaseAll({
     channel,
     manual,
+    nextMajor: optionalEnv("NEXT_MAJOR") === "true",
     only: module === ALL_MODULES ? undefined : module,
     policy: loadPolicy(root),
     commits: releaseCommits(),

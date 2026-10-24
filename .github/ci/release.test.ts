@@ -10,7 +10,7 @@ import { isReleaseTag, isStableReleaseTag, newReleaseTag, previousTag, proxyInfo
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
 import { withoutWorkflowCommands } from "./lib/actions.ts";
 import { releaseCommits } from "./lib/modules.ts";
-import { Channel, GATED, GATES, gateOf, releaseAll, semanticReleaseCommand, type Release } from "./release.ts";
+import { Channel, GATED, GATES, candidateNotesBody, gateOf, releaseAll, semanticReleaseCommand, type Release } from "./release.ts";
 
 const REPO = "oleg-tkachuk/limes";
 const RELEASE = new URL("../release/", import.meta.url).pathname;
@@ -210,6 +210,7 @@ describe("releaseAll", () => {
       channel: Channel.Release,
       only: undefined,
       manual: true,
+      nextMajor: false,
       policy: { minorCommits: 3, patchCommits: 5, immediateTypes: ["security", "build"] },
       commits: releaseCommits(),
       pushTag: async (tag) => {
@@ -444,6 +445,32 @@ describe("releaseAll", () => {
       await repo.commit("feat: a");
       await candidate();
       assert.equal(data.published[0]?.notes, `${CANDIDATE_NOTES} of limes\n`);
+    });
+    test("a candidate of the next major: v1.0.0-rc.N, breaking or not between them", async () => {
+      repo.write("x.go", "// a\n");
+      await repo.commit("fix: a");
+      const major = async () => {
+        await releaseAll({ ...release(), channel: Channel.Prerelease, only: "limes", nextMajor: true });
+        return data.published.filter((r) => r.prerelease === true).map((r) => r.tag);
+      };
+      assert.deepEqual(await major(), ["v1.0.0-rc.1"]);
+      repo.write("x.go", "// b\n");
+      await repo.commit("feat!: break the API before 1.0");
+      assert.deepEqual(await major(), ["v1.0.0-rc.1", "v1.0.0-rc.2"]);
+      // The next release by the rules on main is still 0.x.
+      assert.deepEqual(await candidate(), ["v1.0.0-rc.1", "v1.0.0-rc.2", "v0.2.0-rc.1"]);
+    });
+    test("a candidate of the next major is limes's alone, and a prerelease", async () => {
+      repo.write("x.go", "// a\n");
+      await repo.commit("fix: a");
+      await releaseAll({ ...release(), channel: Channel.Prerelease, nextMajor: true });
+      assert.deepEqual(data.published.map((r) => r.tag), ["v1.0.0-rc.1"]);
+      await assert.rejects(releaseAll({ ...release(), nextMajor: true }), /prerelease/);
+    });
+    test("a candidate's notes drop the heading naming the version by main's rules", () => {
+      const notes = "## [0.2.0](https://github.com/o/r/compare/v0.1.0...v0.2.0) (2026-10-24)\n\n### Features\n\n* a\n";
+      assert.equal(candidateNotesBody(notes), "### Features\n\n* a\n");
+      assert.equal(candidateNotesBody("### Features\n"), "### Features\n");
     });
     test("a patch's candidate", async () => {
       repo.write("x.go", "// a\n");
