@@ -139,6 +139,6 @@ consumer may rely on — and defers what any minor can add.
    `LedgerReader` to hold while the charge is in the ledger; add
    `meter.MinChargeRetention` with its value; a guide paragraph on the
    ledger's growth.
-2. [ ] Before 1.0 (decided on 2026-10-24): `meter.LedgerHousekeeping` with
+2. [x] Before 1.0 (decided on 2026-10-24): `meter.LedgerHousekeeping` with
    `PurgeCharges`, memstore and pgstore implementations, `metertest` checks
    of the window, a pgstore plan test that the purge reads by `at`.
