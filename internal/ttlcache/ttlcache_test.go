@@ -513,3 +513,57 @@ func TestSetTTLJudgesEveryAnswer(t *testing.T) {
 		t.Errorf("under the shorter TTL: %d lookups, want the answer read again", calls.Load())
 	}
 }
+
+// forgetRounds is how many rounds of caching and forgetting the order
+// bound check runs, far past what the bound holds.
+const forgetRounds = 100
+
+// Forget leaves places in the expiry order that no entry owns; the order
+// drops them, so it stays within orderSlack places per entry however many
+// answers Forget drops.
+func TestTheOrderStaysBoundedUnderForget(t *testing.T) {
+	const bound = 4
+	c, _ := newCache(bound)
+	c.SetTTL(testTTL * 10)
+	var calls atomic.Int32
+	for round := range forgetRounds {
+		keys := []string{keyName(round % fuzzKeys), keyName((round + 1) % fuzzKeys), keyName((round + 2) % fuzzKeys)}
+		for _, k := range keys {
+			if _, _, err := c.GetTagged(t.Context(), k, tagged(false, &calls)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		c.Forget(keys)
+		if q := c.Queued(); q > orderSlack*bound {
+			t.Fatalf("round %d: %d places queued, want at most %d", round, q, orderSlack*bound)
+		}
+	}
+}
+
+// An entry seeded with an older answer's time sits behind later places,
+// out of the sweep's reach; once it expires, room is made by dropping it,
+// not the live entry ahead of it.
+func TestAnExpiredSeedMakesRoomBeforeALiveEntry(t *testing.T) {
+	const bound = 3
+	c, clk := newCache(bound)
+	var calls atomic.Int32
+	if _, _, err := c.Get(t.Context(), "live", counted(false, &calls)); err != nil {
+		t.Fatal(err)
+	}
+	_, _, epoch := c.Cached([]string{"seeded"})
+	// Read almost a TTL ago: it expires soon, behind "live" in the order.
+	c.SeedLive([]string{"seeded"}, epoch, clk.Now().Add(-testTTL+time.Second))
+	clk.advance(2 * time.Second)
+	for _, k := range []string{"c", "d"} {
+		if _, _, err := c.Get(t.Context(), k, counted(false, &calls)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if st := c.Stats(); st.Evictions != 0 {
+		t.Errorf("%d live entries evicted while an expired one held room", st.Evictions)
+	}
+	before := calls.Load()
+	if _, _, err := c.Get(t.Context(), "live", counted(false, &calls)); err != nil || calls.Load() != before {
+		t.Errorf("the live entry was dropped: %d lookups after, %v", calls.Load()-before, err)
+	}
+}
