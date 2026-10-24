@@ -102,8 +102,9 @@ type shard[K comparable] struct {
 
 type cacheEntry[K comparable] struct {
 	revoked bool
-	// at is when the answer was read: fresh until the TTL in force has
-	// passed since.
+	// at is when the answer was cached — when its lookup finished, or, for
+	// an id seeded from a set's answer, when that set's lookup began:
+	// fresh until the TTL in force has passed since.
 	at time.Time
 	// tags are the keys a "not revoked" answer also covers, which Forget
 	// drops it with (GetTagged).
@@ -309,10 +310,21 @@ func (c *Cache[K]) finish(s *shard[K], key K, call *lookupCall[K], epoch uint64)
 	close(call.done)
 }
 
+// orderSlack bounds the expiry order at this many places per entry the
+// shard may hold: past it, the places no entry owns any more — left by
+// Forget, or by a key cached again — are dropped.
+const orderSlack = 2
+
 // makeRoomLocked keeps the shard under its share of MaxEntries: expired
-// entries go first and, if that frees nothing, the oldest live one does.
+// entries go first — those the expiry order reaches, then any other, such
+// as an id seeded behind a later answer — and, if that frees nothing, the
+// oldest live one does.
 func (s *shard[K]) makeRoomLocked(now time.Time, ttl time.Duration) {
+	s.compactLocked()
 	s.sweepLocked(now, ttl)
+	if len(s.entries) >= s.maxEntries {
+		s.dropExpiredLocked(now, ttl)
+	}
 	for len(s.entries) >= s.maxEntries {
 		before := len(s.entries)
 		if !s.popLocked() {
@@ -322,6 +334,37 @@ func (s *shard[K]) makeRoomLocked(now time.Time, ttl time.Duration) {
 			s.evictions++
 		}
 	}
+}
+
+// dropExpiredLocked drops every expired entry, wherever its place in the
+// order: one seeded with an older answer's time sits behind later places,
+// where sweepLocked does not reach it. It returns how many it dropped.
+func (s *shard[K]) dropExpiredLocked(now time.Time, ttl time.Duration) int {
+	dropped := 0
+	for key, e := range s.entries {
+		if !now.Before(e.at.Add(ttl)) {
+			delete(s.entries, key)
+			dropped++
+		}
+	}
+	return dropped
+}
+
+// compactLocked drops the places of the expiry order no entry owns, once
+// they outnumber the shard's bound orderSlack times over, so the order
+// stays bounded however many answers Forget drops.
+func (s *shard[K]) compactLocked() {
+	if len(s.order) <= orderSlack*s.maxEntries {
+		return
+	}
+	kept := s.order[:0]
+	for _, q := range s.order {
+		if e, ok := s.entries[q.key]; ok && e.at.Equal(q.at) {
+			kept = append(kept, q)
+		}
+	}
+	clear(s.order[len(kept):])
+	s.order = kept
 }
 
 // popLocked drops the oldest place in order, and its entry if the place is
@@ -406,6 +449,7 @@ func (c *Cache[K]) Forget(keys []K) int {
 				dropped++
 			}
 		}
+		s.compactLocked()
 		s.mu.Unlock()
 	}
 	return dropped
