@@ -29,7 +29,9 @@ type LedgerReader interface {
 	// first, so the first page of Limit rows is the top Limit; buckets come
 	// in time order. A refund counts in the group of the charge it returns,
 	// whenever it is made: a closed period's sums still move. A sum past
-	// MaxNanos is ErrCounterOverflow.
+	// MaxNanos is ErrCounterOverflow. It sums the charges the ledger still
+	// holds: one older than the ledger's retention (MinChargeRetention) may
+	// be gone, and a period that old sums what is left of it.
 	//
 	// A sum across tenants is a read of every tenant's ledger: a store that
 	// scopes calls to a tenant refuses it under any narrower scope, a tenant

@@ -120,7 +120,9 @@ type Meter interface {
 	// ExternalRef): a charge whose pair is already in the ledger moves
 	// nothing, does not run onCharged, and returns that charge's receipt
 	// with Replayed set — also once the capability is no longer on record,
-	// as Settle replays a settled hold. The pair names one cost: arriving again with a
+	// as Settle replays a settled hold — for as long as that charge stays in
+	// the ledger: a ledger may remove charges older than a retention of at
+	// least MinChargeRetention, and the pair then charges anew. The pair names one cost: arriving again with a
 	// different Amount, UnitCode or TenantID, or under other Biscuit copies
 	// than req.Subject carries, it returns ErrExternalRefConflict and moves
 	// nothing. With req.Overrun = OverrunPolicyRecord, a charge that
@@ -133,8 +135,9 @@ type Meter interface {
 	// the refund against the charge. req.Remaining refunds whatever
 	// remains, which makes a full refund idempotent; a partial refund that
 	// would take the total refunded past the charge returns
-	// ErrRefundExceedsCharge and changes nothing. An unknown charge ID
-	// returns ErrChargeNotFound, and a request naming neither an Amount nor
+	// ErrRefundExceedsCharge and changes nothing. An unknown charge ID —
+	// never charged, or removed from the ledger past its retention
+	// (MinChargeRetention) — returns ErrChargeNotFound, and a request naming neither an Amount nor
 	// Remaining, or both, ErrInvalidRequest. The receipt carries the amount
 	// actually refunded.
 	//
@@ -170,8 +173,9 @@ type Meter interface {
 	//
 	// Settle is idempotent on the reservation: settling one already
 	// settled for the same Amount moves nothing, does not run onCharged, and
-	// returns the receipt of the charge that settled it, with Replayed set.
-	// Settling it again for another Amount returns ErrSettleConflict and
+	// returns the receipt of the charge that settled it, with Replayed set,
+	// while that charge stays in the ledger (MinChargeRetention); past it,
+	// the reservation is unknown. Settling it again for another Amount returns ErrSettleConflict and
 	// moves nothing: the reservation names one cost, and replaying its
 	// receipt would report the second as booked. An unknown,
 	// released or expired reservation returns ErrReservationNotFound, and so
@@ -271,6 +275,25 @@ type TenantBudgets interface {
 	// the order, not a snapshot.
 	ListTenantBudgets(ctx context.Context, req ListTenantBudgetsRequest) (limes.Page[TenantBudget], error)
 }
+
+// A day, and the two spans MinChargeRetention adds up.
+const (
+	day = 24 * time.Hour
+	// billingYear is a year of charges, so a yearly bill is drawn from the
+	// ledger itself.
+	billingYear = 365 * day
+	// disputeWindow is how long after that a charge may still be disputed
+	// and refunded, or a payment retried under its reference.
+	disputeWindow = 35 * day
+)
+
+// MinChargeRetention is the least a ledger keeps a charge: until then the
+// charge's ExternalRef replays it rather than charging again, its settled
+// hold replays its receipt, Refund finds it, and SumCharges counts it. A
+// ledger may remove a charge older than its retention, which is no shorter
+// than this, and those promises then lapse for it. Removing charges by hand
+// is held to it too.
+const MinChargeRetention = billingYear + disputeWindow
 
 // UsageHousekeeping reclaims usage rows of capabilities that are gone.
 type UsageHousekeeping interface {

@@ -1029,6 +1029,19 @@ under one tenant's scope it is `ErrScopeMismatch`. Who may read every tenant's
 spend is the consumer's to decide, by who gets that scope; `metertest` checks a reader
 its `Env.Ledger` names.
 
+The ledger only grows: a store writes a row for every charge and removes
+none, but with its tenant. A row is more than history — an `ExternalRef`
+replays its charge rather than charging again, a settled hold replays its
+receipt, and `Refund` finds it — so those promises hold while the charge is
+in the ledger, and a ledger may remove charges older than a retention of at
+least `meter.MinChargeRetention`, 400 days: a year of billing and a month of
+disputes. Past it a reference charges anew, a settle of the hold finds no
+reservation, a refund is `ErrChargeNotFound`, and `SumCharges` sums what is
+left. Choose the retention from the longest a client may retry a charge or
+dispute one, and keep the ledger in a warehouse of your own if reports must
+reach further back. A deletion of your own, in SQL, is held to the same
+floor.
+
 To report on capability records, count them through a `RecordCensus`:
 `CountRecords` counts the records of `TenantID`, or of every tenant with
 `AllTenants`, whole or by tenant and principal type, a page at a time in that
