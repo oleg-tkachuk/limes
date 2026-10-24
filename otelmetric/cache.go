@@ -15,8 +15,10 @@ import (
 
 // OpenTelemetry instruments of a limes.RevocationCache
 // (InstrumentRevocationCache), read from its Stats when the provider
-// collects. Every one but the two of clears carries kind: capability for IsRevoked,
-// biscuit for IsBiscuitRevoked.
+// collects. Hits, misses, lookups, evictions and entries carry kind:
+// capability for IsRevoked, biscuit for IsBiscuitRevoked; the clears and
+// the revocation signal's instruments are of the whole cache and carry
+// none.
 
 // Instrument names, as an exporter shows them.
 const (
