@@ -68,6 +68,13 @@ type MigrateOptions struct {
 // the records revoked before it, taking only their rows, and 017 builds its
 // indexes CONCURRENTLY.
 //
+// Migrate before the pgstore that needs a migration serves: a pgstore reads
+// only the schema of its own version (CheckSchema says whether it is there).
+// 020, for one, gives limes.revocation_lineage a column the pgstore of that
+// version reads; an older pgstore reads the function by its columns' names
+// and goes on working beside it, so migrating first is the safe order of a
+// rolling upgrade.
+//
 // Migrate needs one connection, not a pool; over a pool:
 //
 //	err := pool.AcquireFunc(ctx, func(c *pgxpool.Conn) error {
