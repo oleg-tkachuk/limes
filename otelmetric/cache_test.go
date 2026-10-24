@@ -23,16 +23,16 @@ const (
 	metricCacheEvictions  = "limes.revocation_cache.evictions"
 	metricCacheEntries    = "limes.revocation_cache.entries"
 	metricCacheClears     = "limes.revocation_cache.clears"
-	metricClearsRevoked   = "limes.revocation_cache.clears_revoked"
+	metricNarrowClears    = "limes.revocation_cache.narrow_clears"
 	metricClearsNoLineage = "limes.revocation_cache.clears_without_lineage"
 	metricLineage         = "limes.revocation_cache.lineage"
 	metricSynced          = "limes.revocation_cache.synced"
 	metricSyncs           = "limes.revocation_cache.syncs"
 	metricSyncsLost       = "limes.revocation_cache.syncs_lost"
-	metricLastSyncLoss    = "limes.revocation_cache.last_sync_loss"
+	metricLastSyncLoss    = "limes.revocation_cache.last_sync_loss_time"
 	metricSignals         = "limes.revocation_cache.signals"
 	metricSignalsWhole    = "limes.revocation_cache.signals_whole"
-	attrKind              = "kind"
+	attrKind              = "limes.revocation_cache.kind"
 	kindCapability        = "capability"
 	kindBiscuit           = "biscuit"
 )
@@ -138,8 +138,8 @@ func TestInstrumentRevocationCacheReportsItsCounts(t *testing.T) {
 	cache.ClearRevoked(id)
 	cache.ClearRevoked(id)
 	got = collected(t, reader)
-	if ps := got[metricClearsRevoked]; len(ps) != 1 || ps[0].value != 2 || ps[0].attrs.Len() != 0 {
-		t.Errorf("%s = %+v, want one point of 2 with no attributes", metricClearsRevoked, ps)
+	if ps := got[metricNarrowClears]; len(ps) != 1 || ps[0].value != 2 || ps[0].attrs.Len() != 0 {
+		t.Errorf("%s = %+v, want one point of 2 with no attributes", metricNarrowClears, ps)
 	}
 	if ps := got[metricCacheClears]; len(ps) != 1 || ps[0].value != 1 {
 		t.Errorf("%s after ClearRevoked = %+v, want still 1", metricCacheClears, ps)
@@ -202,9 +202,13 @@ func TestInstrumentRevocationCacheRefusesNoCache(t *testing.T) {
 	}
 }
 
-// The flag gauges are dimensionless, unit "1", as OpenTelemetry spells it.
+// The flag gauges carry no unit, which an exporter would spell into their
+// names (Prometheus's _ratio); the time of the last loss is in seconds.
 func TestInstrumentRevocationCacheUnits(t *testing.T) {
-	_, reader, _, _ := instrumentedCache(t)
+	cache, reader, _, _ := instrumentedCache(t)
+	signal := cache.NewSignal()
+	signal.Listening()
+	signal.NotListening() // a loss, so its time is reported
 	var rm metricdata.ResourceMetrics
 	if err := reader.Collect(context.Background(), &rm); err != nil {
 		t.Fatal(err)
@@ -215,7 +219,7 @@ func TestInstrumentRevocationCacheUnits(t *testing.T) {
 			units[m.Name] = m.Unit
 		}
 	}
-	for name, want := range map[string]string{metricLineage: "1", metricSynced: "1"} {
+	for name, want := range map[string]string{metricLineage: "", metricSynced: "", metricLastSyncLoss: "s"} {
 		if got := units[name]; got != want {
 			t.Errorf("%s unit = %q, want %q", name, got, want)
 		}
