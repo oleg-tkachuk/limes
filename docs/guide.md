@@ -430,8 +430,10 @@ the revocation id of its last block, which only it pairs, so a caller cannot
 name another tenant's copy under its own capability. Passing it to
 `BiscuitRevocationStore.RevokeBiscuit` (`RevokeBiscuitRequest{Copy: …}`) stops
 that copy and every copy attenuated from it, and leaves the copy it came from,
-its siblings and the capability's JWT working. `GetBiscuitRevocation` reads
-it back by the same copy. The revocation belongs to that capability and goes
+its siblings and the capability's JWT working. It is idempotent and returns a
+`RevokeBiscuitResult`: `AlreadyRevoked` when the copy had an entry before the
+call, and the `Revocation` that stands, the first one written.
+`GetBiscuitRevocation` reads it back by the same copy. The revocation belongs to that capability and goes
 only with its record, while a token carrying the id is refused under any
 capability. A verifier that accepts
 Biscuits needs `BiscuitConfig.Revocations`: pass the same `RevocationCache`
@@ -827,8 +829,9 @@ answer: the questions answered from it (`Hits`) and not (`Misses`), the
 upstream lookups those ran (`Lookups`, fewer when concurrent misses share
 one), the live answers dropped to stay within the bound (`Evictions`, which
 growing says `MaxEntries` is too small), the answers held (`Entries`), and
-the `Clears` and `NarrowClears`; `otelmetric.InstrumentRevocationCache` exports them. Point the store a `RevocationCache` reads, and the watcher's connection,
-at the primary, not at a read replica. A standby applies a revocation after
+the `Clears` and `NarrowClears`; `otelmetric.InstrumentRevocationCache`
+exports them. Point the store a `RevocationCache` reads, and the watcher's
+connection, at the primary, not at a read replica. A standby applies a revocation after
 the primary commits it and notifies, so a cache cleared by the notification
 can read "not revoked" from a standby still behind and keep it for its
 `SyncedTTL`; and a standby refuses `LISTEN`, so a watcher pointed at one
@@ -836,9 +839,13 @@ never listens. Reports — `SumCharges`, `CountRecords`, `ListRecords` — may
 read a replica. Over `pgstore`, run a `pgstore.RevocationWatcher` beside each
 verifier: the schema notifies `pgstore.RevocationChannel` on every
 revocation, naming the capabilities revoked (migration 018), and the watcher
-calls `ClearRevoked` with them on each cache that has it
-(`pgstore.RevokedClearer`), and `Clear` on the others, on a notification
-that names none, and after each connection it opens:
+passes them to each `RevocationCache` through its `RevocationSignal` — the
+cache then drops what they outdate with `ClearRevoked` — calls
+`ClearRevoked` with them on any other cache that has it
+(`pgstore.RevokedClearer`), and `Clear` on the rest, on a notification that
+names none, and after each connection it opens. A signal of your own — a
+message bus, another database — opens one with `RevocationCache.NewSignal`
+and says through it what it hears, as the watcher does:
 
 ```go
 w := pgstore.RevocationWatcher{
