@@ -137,7 +137,7 @@ func ExampleVerifier_BiscuitCopy() {
 		log.Fatal(err)
 	}
 	fmt.Println(copyOf.CapabilityID() == c.ID)
-	if err := s.records.RevokeBiscuit(ctx, limes.RevokeBiscuitRequest{Copy: copyOf, Note: "leaked", Actor: "operator@example.com"}); err != nil {
+	if _, err := s.records.RevokeBiscuit(ctx, limes.RevokeBiscuitRequest{Copy: copyOf, Note: "leaked", Actor: "operator@example.com"}); err != nil {
 		log.Fatal(err)
 	}
 

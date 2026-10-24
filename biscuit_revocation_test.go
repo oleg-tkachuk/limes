@@ -19,7 +19,7 @@ func revokeCopy(t *testing.T, v *Verifier, store *memStore, token string) Biscui
 	if err != nil {
 		t.Fatalf("BiscuitCopy: %v", err)
 	}
-	if err := store.RevokeBiscuit(context.Background(), RevokeBiscuitRequest{Copy: c, Note: "test"}); err != nil {
+	if _, err := store.RevokeBiscuit(context.Background(), RevokeBiscuitRequest{Copy: c, Note: "test"}); err != nil {
 		t.Fatal(err)
 	}
 	return c

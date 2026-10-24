@@ -41,11 +41,13 @@ type BiscuitRevocationStore interface {
 
 	// RevokeBiscuit lists the revocation id of one Biscuit copy, under the
 	// capability the copy belongs to — the pair Verifier.BiscuitCopy read
-	// from the token, which no caller can assemble. Idempotent. Returns
+	// from the token, which no caller can assemble — and says whether the
+	// copy had an entry already. Idempotent: a repeat writes nothing, keeps
+	// the first entry and reports it with AlreadyRevoked. Returns
 	// ErrNotFound when the capability is not on record — or not visible to
 	// the caller — so a caller cannot revoke a copy of a capability it cannot
 	// see, and ErrInvalidRequest for a request naming no copy.
-	RevokeBiscuit(ctx context.Context, req RevokeBiscuitRequest) error
+	RevokeBiscuit(ctx context.Context, req RevokeBiscuitRequest) (RevokeBiscuitResult, error)
 
 	// GetBiscuitRevocation reads back what RevokeBiscuit wrote for one copy,
 	// under the capability it was revoked under. ErrNotFound when the copy is
@@ -70,6 +72,18 @@ type RevokeBiscuitRequest struct {
 	// Note and Actor are stored for audit, as on RevokeRequest.
 	Note  string
 	Actor string
+}
+
+// RevokeBiscuitResult is what BiscuitRevocationStore.RevokeBiscuit did to
+// the copy it names, as RevokeResult is Store.Revoke's.
+type RevokeBiscuitResult struct {
+	// AlreadyRevoked reports that the copy had an entry before the call, so
+	// the call wrote none.
+	AlreadyRevoked bool
+	// Revocation is the copy's entry as it stands after the call — the one
+	// the call wrote, or the earlier one it kept — as GetBiscuitRevocation
+	// reads it back, at the store's precision.
+	Revocation BiscuitRevocation
 }
 
 // Validate refuses a request naming no copy as ErrInvalidRequest.
