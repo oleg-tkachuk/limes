@@ -35,6 +35,23 @@ export function cell(text: string): string {
   return text.replaceAll("\r", " ").replaceAll("\n", " ").replaceAll("|", "\\|");
 }
 
+// BACKTICK delimits a Markdown code span.
+const BACKTICK = "`";
+
+// code is text as a Markdown code span, which renders it literally: a link,
+// an image or a tag in text that a pull request's author wrote — its title,
+// a commit subject — shows as written rather than as what it marks up. The
+// span is delimited by one backtick more than the longest run inside it.
+export function code(text: string): string {
+  if (text === "") {
+    return "";
+  }
+  const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = BACKTICK.repeat(longest + 1);
+  const pad = text.startsWith(BACKTICK) || text.endsWith(BACKTICK) ? " " : "";
+  return `${fence}${pad}${text}${pad}${fence}`;
+}
+
 // table is a Markdown table of rows under header.
 export function table(header: readonly string[], rows: readonly (readonly string[])[]): string {
   const line = (cells: readonly string[]) => `| ${cells.map(cell).join(" | ")} |`;

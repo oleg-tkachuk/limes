@@ -70,9 +70,14 @@ describe("checkModules", () => {
     ];
     const api = checkSummary(Check.Api, results);
     assert.match(api, /^### API compatibility\n/);
-    assert.match(api, /\| limes \| failed \| limes: Foo \\\| removed \|/);
+    assert.match(api, /\| limes \| failed \| `limes: Foo \\\| removed` \|/);
     assert.match(api, /\| pgstore \| skipped \|/);
     assert.match(checkSummary(Check.Markers, results), /^### Breaking markers\n/);
+  });
+
+  test("a message's markup shows as written", () => {
+    const page = checkSummary(Check.Markers, [{ module: "limes", outcome: Outcome.Failed, message: "feat!: [x](https://example.com) ![](https://example.com/p.png)" }]);
+    assert.match(page, /\| `feat!: \[x\]\(https:\/\/example\.com\) !\[\]\(https:\/\/example\.com\/p\.png\)` \|/);
   });
 
   test("an unknown check is refused", () => {

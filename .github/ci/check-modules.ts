@@ -9,7 +9,7 @@
 // module's verdict goes on the run's summary page. The marker check also
 // reads PR_TITLE, the title that becomes the merge commit's body.
 
-import { error, info, summarize, table } from "./lib/actions.ts";
+import { code, error, info, summarize, table } from "./lib/actions.ts";
 import { optionalEnv, requireEnv } from "./lib/env.ts";
 import { git } from "./lib/git.ts";
 import { runMain } from "./lib/main.ts";
@@ -82,7 +82,9 @@ const SUMMARY_HEADER = ["Module", "Result", "Detail"];
 
 // checkSummary is the summary page section of check over results.
 export function checkSummary(check: Check, results: readonly ModuleResult[]): string {
-  return `### ${TITLES[check]}\n\n${table(SUMMARY_HEADER, results.map((r) => [r.module, r.outcome, r.message]))}`;
+  // A message quotes the pull request's title and commit subjects, which
+  // its author wrote: shown as code, never as markup.
+  return `### ${TITLES[check]}\n\n${table(SUMMARY_HEADER, results.map((r) => [r.module, r.outcome, code(r.message)]))}`;
 }
 
 // moduleCheck is the check a run named, over the checkout at root.
