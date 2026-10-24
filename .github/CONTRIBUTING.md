@@ -59,8 +59,9 @@ as nothing released has the change yet; the release then releases limes, and
 the release workflow opens one pull request raising every nested module's
 requirement to that release (`build(nested): require limes vX.Y.Z in …`, merged
 once green). Its merge passes the job and releases each module it raised
-with every change the module held: a `build(limes)` commit is a patch of each
-nested module whose files it changes, so the raised requirement is released
+with every change the module held: a `build(nested)` commit — `build(limes)`
+before it was renamed — is a patch of each nested module whose files it
+changes, so the raised requirement is released
 even when nothing else waits. A red released-limes job holds no merge: main
 is judged by its required check alone. A module change
 that needs a limes already released raises the requirement in its own
