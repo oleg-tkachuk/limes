@@ -62,8 +62,11 @@ export async function nextCandidate(module: Module, version: string, cwd: string
 
 // candidateTag is the tag a release candidate of the module would take for
 // the pending commits, or undefined when none of them releases anything.
-export async function candidateTag(module: Module, pending: readonly Pending[], cwd: string): Promise<string | undefined> {
-  const level = highestLevel(pending);
+// With nextMajor it is a candidate of the next major whatever is pending —
+// limes's v1.0.0-rc.N while it is on 0.x — which the module's rules on main,
+// a breaking change being a minor before 1.0, would never reach.
+export async function candidateTag(module: Module, pending: readonly Pending[], cwd: string, nextMajor = false): Promise<string | undefined> {
+  const level = nextMajor ? Level.Major : highestLevel(pending);
   if (level === undefined) {
     return undefined;
   }

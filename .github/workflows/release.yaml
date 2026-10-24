@@ -7,7 +7,9 @@ name: Release
 # release are due by .github/release/release-policy.json: enough of them, by
 # the level each cuts, or one that is released at once. A run by hand
 # releases whatever is pending, or with the prerelease channel tags a release
-# candidate, vX.Y.Z-rc.N; either may name one module. Every run, by hand
+# candidate, vX.Y.Z-rc.N — with next_major, one of limes's next major,
+# v1.0.0-rc.N, whose API may still break before 1.0 —; either may name one
+# module. Every run, by hand
 # too, releases only a commit a CI run on main passed.
 #
 # A release is a vX.Y.Z tag — the Go proxy reads the tag, so nothing else is
@@ -35,6 +37,10 @@ on:
         type: choice
         options: [all, limes, redisreplay, pgstore, otelmetric]
         default: all
+      next_major:
+        description: With the prerelease channel, a candidate of limes's next major (v1.0.0-rc.N) rather than of its next version
+        type: boolean
+        default: false
 
 # Each run is named after what started it, so the run behind a release, or
 # behind one that stopped, is found by its name: CI's dispatch by the run
@@ -173,6 +179,7 @@ jobs:
           CHANNEL: ${{ inputs.channel || 'release' }}
           MODULE: ${{ inputs.module || 'all' }}
           MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
+          NEXT_MAJOR: ${{ inputs.next_major || false }}
         run: node .github/ci/release.ts
 
   # Each limes release is followed by one pull request that raises every
