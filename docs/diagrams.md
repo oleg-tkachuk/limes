@@ -893,13 +893,13 @@ Revocation is a write to the `Store`; verifiers see it through
 
 ```mermaid
 flowchart LR
-    op(["Revoke(RevokeRequest{CapabilityID, Note, Actor, CascadeChildren})<br/>→ RevokeResult{AlreadyRevoked, Revocation}"])
+    op(["Revoke(RevokeRequest{CapabilityID, Note, Actor, CascadeChildren})<br/>→ RevokeResult{AlreadyRevoked, Revocation, PriorDisposition}"])
     store[("<b>Store</b><br/>revoked set<br/>ParentID links")]
     cascade["CascadeChildren:<br/>a revocation entry per descendant,<br/>MaxDelegationDepth generations down,<br/>for the audit trail; an earlier entry stands"]
     chain["IsRevoked(id):<br/>id revoked, or any ancestor still on record revoked<br/>past MaxDelegationDepth: ErrDelegationTooDeep<br/>pgstore: one statement, every tenant"]
     cache["<b>RevocationCache</b><br/>answer cached for TTL (default 2s)<br/>one upstream call per id at a time<br/>Biscuit copies: per revocation id, the ones it lacks in one call<br/>bounded per kind: the oldest answer of its shard makes room<br/>keys spread over shards; a hit takes a shared read lock<br/>errors never cached · a Clear mid-lookup<br/>discards that lookup's answer<br/>Stats per kind · Sweep"]
     notify{{"revocation signal<br/>pgstore: RevocationWatcher LISTENs on<br/>RevocationChannel; memstore: none"}}
-    bop(["RevokeBiscuit(RevokeBiscuitRequest{Copy: Verifier.BiscuitCopy(token)})"])
+    bop(["RevokeBiscuit(RevokeBiscuitRequest{Copy: Verifier.BiscuitCopy(token)})<br/>→ RevokeBiscuitResult{AlreadyRevoked, Revocation}"])
     blist[("<b>BiscuitRevocationStore</b><br/>revoked block ids")]
     v1["Verifier"]
     v2["Verifier"]
@@ -911,7 +911,7 @@ flowchart LR
     cache --> v2
     store -. "pgstore: statement trigger on an INSERT<br/>that adds a row to limes.revocations → pg_notify" .-> notify
     blist -. "pgstore: statement trigger on an INSERT<br/>that adds a row to limes.biscuit_revocations → pg_notify" .-> notify
-    notify -. "Clear() once listening<br/>and on each notification" .-> cache
+    notify -. "RevocationSignal: Listening clears;<br/>Revoked(ids) or RevokedAll<br/>on each notification" .-> cache
     bop --> blist --> cache
 
     classDef client fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E
@@ -931,8 +931,10 @@ Revoking a capability stops everything delegated from it whether or not
 only adds the per-descendant entries that name each stopped capability. Without
 a revocation signal, a verifier learns of a revocation within the cache TTL;
 `pgstore`'s schema notifies a channel on every revocation, naming the
-capabilities revoked, and its `RevocationWatcher` calls `ClearRevoked` with
-them on each notification, and `Clear` after each reconnect.
+capabilities revoked, and its `RevocationWatcher` passes them to each
+cache's `RevocationSignal` on each notification — `Revoked(ids)`, or
+`RevokedAll` when it names none — and says `Listening`, which clears the
+cache, after each reconnect.
 An answer cached for a descendant is also an answer about the revoked
 ancestor: over a store that names each answer's ancestors, `ClearRevoked`
 drops the revoked ids' answers and every one naming them among its
