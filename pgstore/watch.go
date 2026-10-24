@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/oleg-tkachuk/limes"
 )
@@ -24,6 +25,10 @@ const RevocationChannel = "limes_revocations"
 const (
 	watchRetryFirst = 100 * time.Millisecond
 	watchRetryMost  = 10 * time.Second
+	// DefaultWatchHeartbeat is how long the watcher waits on a quiet
+	// connection before it checks the connection is alive
+	// (RevocationWatcher.Heartbeat).
+	DefaultWatchHeartbeat = 30 * time.Second
 )
 
 // MaxNotifiedRevocations is the most capability ids one notification names
@@ -81,6 +86,26 @@ type RevocationWatcher struct {
 	// OnError, when set, hears each failure the watcher recovers from by
 	// connecting again.
 	OnError func(error)
+	// Heartbeat is how long the watcher waits for a notification before it
+	// pings the connection, with as long again for the answer: a ping that
+	// fails or does not come back ends the connection as a lost one does,
+	// and a Syncer is told NotListening. A connection that died without a
+	// word — a host gone, a network cut — would otherwise go on vouching
+	// for the caches until TCP gave up on it, minutes later, while they
+	// serve their SyncedTTL; with it, for at most twice Heartbeat. Zero:
+	// DefaultWatchHeartbeat. Negative is refused.
+	Heartbeat time.Duration
+}
+
+// errNegativeHeartbeat is a RevocationWatcher with a negative Heartbeat.
+var errNegativeHeartbeat = errors.New("pgstore: RevocationWatcher.Heartbeat is negative")
+
+// heartbeat is the Heartbeat in force.
+func (w RevocationWatcher) heartbeat() time.Duration {
+	if w.Heartbeat == 0 {
+		return DefaultWatchHeartbeat
+	}
+	return w.Heartbeat
 }
 
 // errNoConnect is a RevocationWatcher with no Connect.
@@ -90,6 +115,9 @@ var errNoConnect = errors.New("pgstore: RevocationWatcher.Connect required")
 func (w RevocationWatcher) Run(ctx context.Context) error {
 	if w.Connect == nil {
 		return errNoConnect
+	}
+	if w.Heartbeat < 0 {
+		return errNegativeHeartbeat
 	}
 	wait := watchRetryFirst
 	for {
@@ -128,13 +156,43 @@ func (w RevocationWatcher) listen(ctx context.Context) (listened bool, err error
 	// the caches hold from before may be stale.
 	w.listening()
 	defer w.notListening()
+	beat := w.heartbeat()
 	for {
-		n, err := conn.WaitForNotification(ctx)
-		if err != nil {
+		n, err := waitForNotification(ctx, conn, beat)
+		switch {
+		case errors.Is(err, errQuiet):
+			if err := ping(ctx, conn, beat); err != nil {
+				return true, fmt.Errorf("pgstore: watch revocations: heartbeat: %w", err)
+			}
+		case err != nil:
 			return true, fmt.Errorf("pgstore: watch revocations: %w", err)
+		default:
+			w.signal(revokedIDs(n.Payload))
 		}
-		w.signal(revokedIDs(n.Payload))
 	}
+}
+
+// errQuiet is a wait for a notification that heard none within its bound.
+var errQuiet = errors.New("pgstore: no notification within the heartbeat")
+
+// waitForNotification waits on conn for a notification for at most beat;
+// errQuiet when none came. pgx ends a wait by a deadline on the socket,
+// which leaves the connection usable.
+func waitForNotification(ctx context.Context, conn *pgx.Conn, beat time.Duration) (*pgconn.Notification, error) {
+	waitCtx, cancel := context.WithTimeout(ctx, beat)
+	defer cancel()
+	n, err := conn.WaitForNotification(waitCtx)
+	if err != nil && ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
+		return nil, errQuiet
+	}
+	return n, err
+}
+
+// ping checks conn answers within beat.
+func ping(ctx context.Context, conn *pgx.Conn, beat time.Duration) error {
+	pingCtx, cancel := context.WithTimeout(ctx, beat)
+	defer cancel()
+	return conn.Ping(pingCtx)
 }
 
 // listening tells each Syncer the watcher listens, which clears it, and
