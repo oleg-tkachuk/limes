@@ -197,3 +197,43 @@ func TestLastSyncLossAtTheEpoch(t *testing.T) {
 		t.Errorf("Stats after a loss at the epoch = %+v; want LastSyncLoss %s", st, epoch)
 	}
 }
+
+// twoSignals is how many watchers the multi-signal check feeds a cache
+// from.
+const twoSignals = 2
+
+// A cache fed by two signals is synced only while both listen: one alone,
+// or one reconnecting while the other is down, leaves TTL in force, since a
+// revocation the other would carry goes unheard.
+func TestSyncedOnlyWhileEverySignalListens(t *testing.T) {
+	s := newExampleStack()
+	cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: s.records, TTL: unsyncedTTL, SyncedTTL: syncedTTL, Signals: twoSignals})
+	synced := func() bool { return cache.Stats().Synced }
+	cache.Listening() // a
+	if synced() {
+		t.Error("synced with one of two signals listening")
+	}
+	cache.Listening() // b
+	if !synced() {
+		t.Error("not synced with both signals listening")
+	}
+	cache.NotListening() // b lost
+	if synced() {
+		t.Error("synced after one of two signals was lost")
+	}
+	cache.NotListening() // a reconnects
+	cache.Listening()
+	if synced() {
+		t.Error("synced after the other signal reconnected while the lost one is still down")
+	}
+	cache.NotListening()
+	cache.NotListening() // one more loss than listens: no count below none
+	cache.Listening()
+	cache.Listening()
+	if !synced() {
+		t.Error("not synced once both signals listen again")
+	}
+	if _, err := limes.NewRevocationCache(limes.RevocationCacheConfig{Capabilities: s.records, Signals: -1}); err == nil {
+		t.Error("a negative Signals accepted")
+	}
+}

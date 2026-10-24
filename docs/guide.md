@@ -815,7 +815,9 @@ the watcher's connections, `SyncsLost` and `LastSyncLoss` its losses, and
 `SignalsWhole` those that named no id and cleared whole. Of `Clears`, what
 `Syncs`, `SignalsWhole` and `ClearsWithoutLineage` do not account for is
 the consumer's own. A cache no watcher tells either way serves for
-`TTL` alone, as before. Build the cache with `NewRevocationCache` over your store, as
+`TTL` alone, as before. A cache fed by more than one watcher — one per
+database, say — sets `RevocationCacheConfig.Signals` to their number:
+`SyncedTTL` then holds only while every one of them listens. Build the cache with `NewRevocationCache` over your store, as
 `Capabilities` and, if the verifier reads Biscuits, `Biscuits`; `Sweep` drops
 its expired entries on a timer of yours, optional since lookups skip and replace
 them anyway. `Stats` reads what the cache has counted, for each kind of
