@@ -215,6 +215,11 @@ patch — or at once for a breaking change or a `security` fix
 or whenever the Release workflow is run by hand. Run by hand with the
 `prerelease` channel, it tags a release candidate, `vX.Y.Z-rc.N`, of what the
 next release would be, published with the notes that release would have.
+With `next_major` as well, it tags a candidate of limes's 1.0, `v1.0.0-rc.N`,
+from main as it is; limes stays on 0.x on main until the release that cuts
+1.0, so its API may still break between two such candidates, as a
+pre-release's may. The nested modules have no such candidates: they stay on
+0.x past limes's 1.0.
 
 `redisreplay`, `pgstore` and `otelmetric` are modules of their own, each with
 a release line of its own — `redisreplay/vX.Y.Z`, `pgstore/vX.Y.Z`,
