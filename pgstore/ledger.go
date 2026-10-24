@@ -260,3 +260,41 @@ func decodeSumCursor(s string) (sumCursor, error) {
 }
 
 var _ meter.LedgerReader = (*Ledger)(nil)
+
+// sqlPurgeCharges removes the oldest charges taken before $1, at most $2 of
+// them, of the tenants the call's scope reaches, by charges_at
+// (migrations/011_ledger_indexes.sql), each then by its key: the batch as an
+// array, which the planner does not hash-join against the whole ledger. A
+// charge a refund holds is skipped, for a later batch, rather than waited
+// on.
+const sqlPurgeCharges = `
+WITH due AS (
+    SELECT id FROM limes.charges
+    WHERE at < $1
+    ORDER BY at, id
+    LIMIT $2
+    FOR UPDATE SKIP LOCKED
+)
+DELETE FROM limes.charges WHERE id = ANY (ARRAY(SELECT id FROM due))`
+
+// PurgeCharges implements meter.LedgerHousekeeping: the charges taken more
+// than req.Retention() ago by the store's clock, oldest first, at most the
+// batch's limit, in one transaction of the call's scope — every tenant's
+// under WithAllTenants, one tenant's under WithTenant.
+func (l *Ledger) PurgeCharges(ctx context.Context, req meter.PurgeChargesRequest) (meter.PurgeChargesResult, error) {
+	if err := req.Validate(); err != nil {
+		return meter.PurgeChargesResult{}, err
+	}
+	var purged int64
+	err := l.inTx(ctx, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, sqlPurgeCharges, l.clock().Add(-req.Retention()), meter.HousekeepingLimit(req.Limit))
+		purged = tag.RowsAffected()
+		return err
+	})
+	if err != nil {
+		return meter.PurgeChargesResult{}, err
+	}
+	return meter.PurgeChargesResult{Purged: purged}, nil
+}
+
+var _ meter.LedgerHousekeeping = (*Ledger)(nil)
