@@ -98,7 +98,7 @@ func TestRevocationNotificationNamesWhatItOutdates(t *testing.T) {
 	if got, ok := next(); ok {
 		t.Errorf("a child of a revoked parent: notified %q", got)
 	}
-	if err := f.records.RevokeBiscuit(ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(t, under[1], []byte("notified-copy"))}); err != nil {
+	if _, err := f.records.RevokeBiscuit(ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(t, under[1], []byte("notified-copy"))}); err != nil {
 		t.Fatal(err)
 	}
 	expect("a Biscuit copy", "")

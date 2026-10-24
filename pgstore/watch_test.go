@@ -72,7 +72,7 @@ func TestRevocationWatcherClearsOnEveryRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	awaitClear(t, cleared, "after Revoke")
-	if err := f.records.RevokeBiscuit(mine, limes.RevokeBiscuitRequest{Copy: biscuitCopy(t, f.child.ID, []byte("watched-copy"))}); err != nil {
+	if _, err := f.records.RevokeBiscuit(mine, limes.RevokeBiscuitRequest{Copy: biscuitCopy(t, f.child.ID, []byte("watched-copy"))}); err != nil {
 		t.Fatal(err)
 	}
 	awaitClear(t, cleared, "after RevokeBiscuit")

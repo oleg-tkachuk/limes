@@ -107,7 +107,7 @@ func TestRevocationChecksSeeEveryTenant(t *testing.T) {
 		}
 	}
 	copyID := []byte("rls-copy")
-	if err := f.records.RevokeBiscuit(WithTenant(t.Context(), f.mine), limes.RevokeBiscuitRequest{
+	if _, err := f.records.RevokeBiscuit(WithTenant(t.Context(), f.mine), limes.RevokeBiscuitRequest{
 		Copy: biscuitCopy(t, f.child.ID, copyID),
 	}); err != nil {
 		t.Fatal(err)
@@ -377,7 +377,8 @@ func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 				return err
 			},
 			"RevokeBiscuit": func() error {
-				return s.records.RevokeBiscuit(s.ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(t, f.child.ID, []byte("read-only"))})
+				_, err := s.records.RevokeBiscuit(s.ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(t, f.child.ID, []byte("read-only"))})
+				return err
 			},
 			"Purge": func() error {
 				_, err := s.records.Purge(s.ctx, limes.PurgeRequest{})
