@@ -154,11 +154,12 @@ func TestInstrumentRevocationCacheReportsTheSignal(t *testing.T) {
 	if got := collected(t, reader); len(got[metricLastSyncLoss]) != 0 {
 		t.Errorf("%s before any loss = %+v, want no point", metricLastSyncLoss, got[metricLastSyncLoss])
 	}
-	cache.Listening()
-	cache.Signal(uuid.New())
-	cache.Signal()
+	signal := cache.NewSignal()
+	signal.Listening()
+	signal.Revoked(uuid.New())
+	signal.RevokedAll()
 	before := time.Now().Unix()
-	cache.NotListening()
+	signal.NotListening()
 	got := collected(t, reader)
 	for name, want := range map[string]float64{
 		metricLineage:         1,
@@ -176,7 +177,7 @@ func TestInstrumentRevocationCacheReportsTheSignal(t *testing.T) {
 	if ps := got[metricLastSyncLoss]; len(ps) != 1 || ps[0].value < float64(before) {
 		t.Errorf("%s = %+v, want one point at or after %d", metricLastSyncLoss, ps, before)
 	}
-	cache.Listening()
+	signal.Listening()
 	if ps := collected(t, reader)[metricSynced]; len(ps) != 1 || ps[0].value != 1 {
 		t.Errorf("%s while listening = %+v, want 1", metricSynced, ps)
 	}
