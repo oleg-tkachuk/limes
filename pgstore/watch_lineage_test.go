@@ -277,6 +277,44 @@ func TestRevocationWatcherDownServesTheShortTTL(t *testing.T) {
 	}
 }
 
+// Each watcher holds a signal of its own on a cache: with two running, the
+// cache is synced once both listen; one that returns closes its signal, so
+// the other alone keeps the cache synced, and none left running leaves it
+// on its TTL.
+func TestRevocationWatchersEachHoldASignal(t *testing.T) {
+	f := newTenantFixture(t)
+	cache, err := limes.NewRevocationCache(limes.RevocationCacheConfig{Capabilities: f.records, TTL: unsyncedCacheTTL, SyncedTTL: cacheTTL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := func() (stop func()) {
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_ = RevocationWatcher{Connect: connectApp, Caches: []Clearer{cache}}.Run(ctx)
+		}()
+		return func() { cancel(); <-done }
+	}
+	stopA, stopB := run(), run()
+	defer stopB()
+	deadline := time.Now().Add(watchWait)
+	for st := cache.Stats(); !st.Synced || st.Syncs < 2; st = cache.Stats() {
+		if time.Now().After(deadline) {
+			t.Fatalf("both watchers listening: Stats = %+v, not within %s", st, watchWait)
+		}
+		time.Sleep(watchQuiet / 10)
+	}
+	stopA()
+	if st := cache.Stats(); !st.Synced {
+		t.Errorf("one of two watchers returned: Stats = %+v; want synced on the other's signal", st)
+	}
+	stopB()
+	if st := cache.Stats(); st.Synced {
+		t.Errorf("both watchers returned: Stats = %+v; want the TTL in force", st)
+	}
+}
+
 // sqlIsRevokedSource is limes.is_revoked's body.
 const sqlIsRevokedSource = `SELECT prosrc FROM pg_proc WHERE oid = 'limes.is_revoked(uuid, integer)'::regprocedure`
 

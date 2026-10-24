@@ -799,25 +799,27 @@ ten seconds between attempts), nothing clears the cache, and the TTL alone
 bounds how long a revoked capability still verifies. So the cache has two
 bounds. `TTL` — keep it as short as a revocation may go unseen — serves
 answers while no signal vouches for the cache; `SyncedTTL`, a little above
-the interval between two verifications of one token, serves them from
-`RevocationCache.Listening` to `NotListening`, which `pgstore.RevocationWatcher`
-calls on every cache that has them
-(`pgstore.Syncer`) as its connection comes and goes, passing each
-notification to `RevocationCache.Signal`. A connection that dies without a
-word — a host gone, a network cut — is found by the watcher's heartbeat:
-it pings a quiet connection every `RevocationWatcher.Heartbeat` (30 seconds
-by default) and drops one that does not answer within as long again, so a
-dead connection vouches for the caches for at most twice the heartbeat. `NotListening` cuts short the answers cached
-under `SyncedTTL` at once, and `Listening` clears the cache before raising
-the bound. `Stats().Synced` says which bound is in force, `Syncs` counts
-the watcher's connections, `SyncsLost` and `LastSyncLoss` its losses, and
-`Signals` the notifications it passed on through `RevocationCache.Signal` —
+the interval between two verifications of one token, serves them while
+the cache's revocation signals listen. `pgstore.RevocationWatcher` opens
+one on every cache that takes one (`limes.RevocationSignalTarget`) when
+`Run` starts and closes it when `Run` returns; through it, it says
+`Listening` and `NotListening` as its connection comes and goes, and
+passes each notification on as `Revoked` or, naming no id, `RevokedAll`.
+A connection that dies without a word — a host gone, a network cut — is
+found by the watcher's heartbeat: it pings a quiet connection every
+`RevocationWatcher.Heartbeat` (30 seconds by default) and drops one that
+does not answer within as long again, so a dead connection vouches for
+the caches for at most twice the heartbeat. `NotListening` cuts short the
+answers cached under `SyncedTTL` at once, and `Listening` clears the cache
+before raising the bound. `Stats().Synced` says which bound is in force,
+`Syncs` counts the watchers' connections, `SyncsLost` and `LastSyncLoss`
+their losses, and `Signals` the notifications they passed on —
 `SignalsWhole` those that named no id and cleared whole. Of `Clears`, what
 `Syncs`, `SignalsWhole` and `ClearsWithoutLineage` do not account for is
-the consumer's own. A cache no watcher tells either way serves for
-`TTL` alone, as before. A cache fed by more than one watcher — one per
-database, say — sets `RevocationCacheConfig.Signals` to their number:
-`SyncedTTL` then holds only while every one of them listens. Build the cache with `NewRevocationCache` over your store, as
+the consumer's own. A cache no signal is open on serves for `TTL` alone,
+as before. A cache fed by more than one watcher — one per database, say —
+holds `SyncedTTL` only while every one of their signals listens; one
+started later is not waited for, so start them together. Build the cache with `NewRevocationCache` over your store, as
 `Capabilities` and, if the verifier reads Biscuits, `Biscuits`; `Sweep` drops
 its expired entries on a timer of yours, optional since lookups skip and replace
 them anyway. `Stats` reads what the cache has counted, for each kind of

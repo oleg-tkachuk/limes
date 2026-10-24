@@ -105,13 +105,13 @@ func InstrumentRevocationCache(cache *limes.RevocationCache, opts ...Option) (me
 	synced, errs[9] = meter.Int64ObservableGauge(metricCacheSynced, metric.WithUnit(unitDimensionless),
 		metric.WithDescription("1 while a revocation signal vouches for the cache and SyncedTTL bounds its answers; 0 while TTL does."))
 	syncs, errs[10] = meter.Int64ObservableCounter(metricCacheSyncs,
-		metric.WithDescription("Calls to RevocationCache.Listening: the watcher's connections, each a clear."))
+		metric.WithDescription("Calls to RevocationSignal.Listening: the watchers' connections, each a clear."))
 	syncsLost, errs[11] = meter.Int64ObservableCounter(metricCacheSyncsLost,
-		metric.WithDescription("Calls to RevocationCache.NotListening: the watcher's lost connections."))
+		metric.WithDescription("Calls to RevocationSignal.NotListening: the watchers' lost connections."))
 	lastSyncLoss, errs[12] = meter.Int64ObservableGauge(metricCacheLastSyncLoss, metric.WithUnit(unitSeconds),
 		metric.WithDescription("When the revocation signal was last lost, in seconds since the Unix epoch; not reported before the first loss."))
 	signals, errs[13] = meter.Int64ObservableCounter(metricCacheSignals,
-		metric.WithDescription("Revocation notifications passed on through RevocationCache.Signal."))
+		metric.WithDescription("Revocation notifications passed on through RevocationSignal.Revoked and RevokedAll."))
 	whole, errs[14] = meter.Int64ObservableCounter(metricCacheSignalsWhole,
 		metric.WithDescription("Revocation notifications that named no capability and cleared the cache whole."))
 	if err := errors.Join(errs[:]...); err != nil {

@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/oleg-tkachuk/limes"
 )
 
@@ -35,7 +37,7 @@ func (c *testClock) advance(d time.Duration) {
 }
 
 // A revocation made while no signal reaches the cache shows within TTL,
-// however long SyncedTTL is: before the first Listening, and after
+// however long SyncedTTL is: before the signal's first Listening, and after
 // NotListening, which also cuts short the answers cached while synced.
 // While synced, an answer is served for SyncedTTL.
 func TestSyncedTTLHoldsOnlyWhileASignalVouches(t *testing.T) {
@@ -43,6 +45,7 @@ func TestSyncedTTLHoldsOnlyWhileASignalVouches(t *testing.T) {
 	s := newExampleStack()
 	clk := &testClock{now: time.Now()}
 	cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: s.records, TTL: unsyncedTTL, SyncedTTL: syncedTTL, Now: clk.Now})
+	signal := cache.NewSignal()
 	revokedAfter := func(c limes.Capability, wait time.Duration) bool {
 		t.Helper()
 		if revoked, err := cache.IsRevoked(ctx, c.ID); err != nil || revoked {
@@ -68,7 +71,7 @@ func TestSyncedTTLHoldsOnlyWhileASignalVouches(t *testing.T) {
 		t.Error("Synced before Listening")
 	}
 
-	cache.Listening()
+	signal.Listening()
 	if st := cache.Stats(); !st.Synced || st.Syncs != 1 || st.Clears != 1 {
 		t.Errorf("after Listening: Stats = %+v; want synced, one sync, one clear", st)
 	}
@@ -80,7 +83,7 @@ func TestSyncedTTLHoldsOnlyWhileASignalVouches(t *testing.T) {
 
 	// The signal stops: the answer cached while synced, older than TTL,
 	// is stale at once, and the revocation shows.
-	cache.NotListening()
+	signal.NotListening()
 	if revoked, err := cache.IsRevoked(ctx, second.ID); err != nil || !revoked {
 		t.Errorf("after NotListening: %v, %v; want the revocation seen", revoked, err)
 	}
@@ -102,7 +105,7 @@ func TestSyncedTTLBounds(t *testing.T) {
 	ctx := context.Background()
 	clk := &testClock{now: time.Now()}
 	cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: s.records, TTL: unsyncedTTL, Now: clk.Now})
-	cache.Listening()
+	cache.NewSignal().Listening()
 	c, _ := s.issue()
 	if _, err := cache.IsRevoked(ctx, c.ID); err != nil {
 		t.Fatal(err)
@@ -126,18 +129,19 @@ func TestStatsTellTheCausesOfAClear(t *testing.T) {
 	clk := &testClock{now: time.Now()}
 	cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: s.records, Now: clk.Now})
 	c, _ := s.issue()
-	cache.Listening()
+	signal := cache.NewSignal()
+	signal.Listening()
 	if _, err := cache.IsRevoked(ctx, c.ID); err != nil {
 		t.Fatal(err)
 	}
 	other, _ := s.issue()
-	cache.Signal(other.ID)
+	signal.Revoked(other.ID)
 	if st := cache.Stats(); st.Capabilities.Entries != 1 || st.NarrowClears != 1 {
 		t.Errorf("a signal naming an unrelated id: Stats = %+v; want the answer kept, one narrow clear", st)
 	}
-	cache.Signal()
+	signal.RevokedAll()
 	clk.advance(time.Second)
-	cache.NotListening()
+	signal.NotListening()
 	cache.Clear()
 	st := cache.Stats()
 	if st.Signals != 2 || st.SignalsWhole != 1 || st.Syncs != 1 || st.SyncsLost != 1 || !st.LastSyncLoss.Equal(clk.Now()) {
@@ -160,9 +164,10 @@ const statsReads = 20_000
 func TestStatsPartsNeverExceedClears(t *testing.T) {
 	s := newExampleStack()
 	cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: isRevokedOnly{s.records}})
+	signal := cache.NewSignal()
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
-	for _, clear := range []func(){cache.Listening, func() { cache.Signal() }, func() { cache.ClearRevoked() }} {
+	for _, clear := range []func(){signal.Listening, signal.RevokedAll, func() { cache.ClearRevoked(uuid.New()) }} {
 		wg.Go(func() {
 			for {
 				select {
@@ -192,48 +197,92 @@ func TestLastSyncLossAtTheEpoch(t *testing.T) {
 	s := newExampleStack()
 	epoch := time.Unix(0, 0).UTC()
 	cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: s.records, Now: func() time.Time { return epoch }})
-	cache.NotListening()
+	signal := cache.NewSignal()
+	signal.Listening()
+	signal.NotListening()
 	if st := cache.Stats(); st.SyncsLost != 1 || st.LastSyncLoss.IsZero() || !st.LastSyncLoss.Equal(epoch) {
 		t.Errorf("Stats after a loss at the epoch = %+v; want LastSyncLoss %s", st, epoch)
 	}
 }
 
-// twoSignals is how many watchers the multi-signal check feeds a cache
-// from.
-const twoSignals = 2
-
 // A cache fed by two signals is synced only while both listen: one alone,
 // or one reconnecting while the other is down, leaves TTL in force, since a
-// revocation the other would carry goes unheard.
+// revocation the other would carry goes unheard. A reconnect counts once,
+// a loss of a signal not listening counts none, and a closed signal no
+// longer counts: the cache is synced while the one left listens, and on
+// TTL once none is open.
 func TestSyncedOnlyWhileEverySignalListens(t *testing.T) {
 	s := newExampleStack()
-	cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: s.records, TTL: unsyncedTTL, SyncedTTL: syncedTTL, Signals: twoSignals})
+	cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: s.records, TTL: unsyncedTTL, SyncedTTL: syncedTTL})
 	synced := func() bool { return cache.Stats().Synced }
-	cache.Listening() // a
+	if synced() {
+		t.Error("synced with no signal open")
+	}
+	a, b := cache.NewSignal(), cache.NewSignal()
+	a.Listening()
 	if synced() {
 		t.Error("synced with one of two signals listening")
 	}
-	cache.Listening() // b
+	b.Listening()
 	if !synced() {
 		t.Error("not synced with both signals listening")
 	}
-	cache.NotListening() // b lost
+	b.NotListening()
 	if synced() {
 		t.Error("synced after one of two signals was lost")
 	}
-	cache.NotListening() // a reconnects
-	cache.Listening()
+	a.NotListening()
+	a.Listening()
 	if synced() {
 		t.Error("synced after the other signal reconnected while the lost one is still down")
 	}
-	cache.NotListening()
-	cache.NotListening() // one more loss than listens: no count below none
-	cache.Listening()
-	cache.Listening()
+	lost := cache.Stats().SyncsLost
+	b.NotListening() // not listening: no loss to count
+	if st := cache.Stats(); st.SyncsLost != lost {
+		t.Errorf("a loss of a signal not listening counted: SyncsLost %d, want %d", st.SyncsLost, lost)
+	}
+	a.Listening() // a reconnect, counted once
+	b.Listening()
 	if !synced() {
 		t.Error("not synced once both signals listen again")
 	}
-	if _, err := limes.NewRevocationCache(limes.RevocationCacheConfig{Capabilities: s.records, Signals: -1}); err == nil {
-		t.Error("a negative Signals accepted")
+	b.Close()
+	if !synced() {
+		t.Error("not synced with the one open signal listening")
+	}
+	a.Close()
+	if synced() {
+		t.Error("synced with no signal open")
+	}
+	syncs := cache.Stats().Syncs
+	a.Listening()
+	if st := cache.Stats(); st.Synced || st.Syncs != syncs {
+		t.Errorf("a closed signal's Listening: Stats = %+v; want nothing changed", st)
+	}
+}
+
+// A signal naming no id, a ClearRevoked naming none and a closed signal's
+// word drop nothing and count nothing, with lineage or without.
+func TestEmptyRevocationsDropNothing(t *testing.T) {
+	ctx := context.Background()
+	s := newExampleStack()
+	for name, upstream := range map[string]limes.RevocationLookup{"lineage": s.records, "no lineage": isRevokedOnly{s.records}} {
+		c, _ := s.issue()
+		t.Run(name, func(t *testing.T) {
+			cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: upstream})
+			if _, err := cache.IsRevoked(ctx, c.ID); err != nil {
+				t.Fatal(err)
+			}
+			signal := cache.NewSignal()
+			signal.Revoked()
+			cache.ClearRevoked()
+			signal.Close()
+			signal.Revoked(c.ID)
+			signal.RevokedAll()
+			st := cache.Stats()
+			if st.Capabilities.Entries != 1 || st.Clears != 0 || st.NarrowClears != 0 || st.Signals != 0 {
+				t.Errorf("Stats = %+v; want the answer kept and nothing counted", st)
+			}
+		})
 	}
 }

@@ -14,6 +14,26 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## pgstore/v0.39.0
+
+- `pgstore.Syncer` is gone. `RevocationWatcher.Run` opens a
+  `limes.RevocationSignal` on each cache that is a
+  `limes.RevocationSignalTarget` and closes it when it returns; a cache of
+  your own that implemented `Syncer` implements `NewSignal` instead, or is
+  only cleared.
+
+## v0.123.0
+
+- `RevocationCache.Listening`, `NotListening` and `Signal`, and
+  `RevocationCacheConfig.Signals`, are gone: each revocation signal holds a
+  `RevocationSignal` of its own, from `RevocationCache.NewSignal`, with
+  `Listening`, `NotListening`, `Revoked(ids...)`, `RevokedAll` and `Close`.
+  The cache is synced while at least one signal is open and every open one
+  listens, so a cache fed by several watchers needs no count. A watcher's
+  `Signal()` naming no id is `RevokedAll()`.
+- `ClearRevoked` and `RevocationSignal.Revoked` naming no id drop nothing,
+  where `ClearRevoked()` over an upstream naming no lineage was a `Clear`.
+
 ## v0.122.0
 
 - `RevokeResult.Before` is `RevokeResult.PriorDisposition`, and
