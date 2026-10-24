@@ -14,7 +14,7 @@ replace github.com/oleg-tkachuk/limes => ../
 require (
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/google/uuid v1.6.0
-	github.com/oleg-tkachuk/limes v0.120.0
+	github.com/oleg-tkachuk/limes v0.121.0
 	github.com/redis/go-redis/v9 v9.23.0
 )
 
