@@ -498,10 +498,14 @@ func (s *Store) forgetErased() {
 }
 
 // RevocationLineage implements limes.RevocationLineageLookup: IsRevoked's
-// answer, and the ancestors still on record it read, nearest first.
+// answer, and the ancestors still on record it read, nearest first; an id
+// not on record is ErrNotFound.
 func (s *Store) RevocationLineage(_ context.Context, id uuid.UUID) (bool, []uuid.UUID, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, ok := s.caps[id]; !ok {
+		return false, nil, limes.ErrNotFound
+	}
 	// Revoked by its own entry: IsRevoked's answer whatever lies above, and
 	// a revoked answer needs no ancestors (RevocationLineageLookup).
 	if _, ok := s.revoked[id]; ok {

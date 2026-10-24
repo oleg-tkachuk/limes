@@ -2,6 +2,7 @@ package limes_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -99,5 +100,27 @@ func TestClearRevokedWithoutLineageClears(t *testing.T) {
 	cache.ClearRevoked(uuid.New())
 	if st := cache.Stats(); st.Clears != 1 || st.ClearsRevoked != 0 || st.Capabilities.Entries != 0 {
 		t.Errorf("Stats = %+v; want one Clear and no answer left", st)
+	}
+}
+
+// An id not on record is live to the cache, as IsRevoked answers it, and
+// kept by none: RevocationLineage's ErrNotFound is no refusal, and no
+// ancestor's revocation could reach an answer kept for it. memstore names
+// it not found.
+func TestRevocationCacheKeepsNoAnswerForAnIDNotOnRecord(t *testing.T) {
+	ctx := context.Background()
+	s := newExampleStack()
+	unknown := uuid.New()
+	if _, _, err := s.records.RevocationLineage(ctx, unknown); !errors.Is(err, limes.ErrNotFound) {
+		t.Fatalf("memstore RevocationLineage of an id not on record: err = %v, want ErrNotFound", err)
+	}
+	cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: s.records, TTL: cacheLongerThanTheTest})
+	for range 2 {
+		if revoked, err := cache.IsRevoked(ctx, unknown); err != nil || revoked {
+			t.Fatalf("IsRevoked of an id not on record = %v, %v; want live", revoked, err)
+		}
+	}
+	if st := cache.Stats().Capabilities; st.Entries != 0 || st.Hits != 0 || st.Lookups != 2 {
+		t.Errorf("Stats = %+v; want both questions looked up, nothing kept", st)
 	}
 }
