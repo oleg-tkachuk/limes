@@ -288,3 +288,56 @@ func daysSinceMonday(d time.Weekday) int {
 
 // daysPerWeek is the length of a week, in days.
 const daysPerWeek = 7
+
+// LedgerHousekeeping removes old charges from the ledger, which otherwise
+// grows by a row for every charge for as long as the store lives
+// (ADR-0002). It is a type of its own beside UsageStore, as LedgerReader
+// is: a housekeeping worker holds it. memstore's and pgstore's Ledger are
+// each one; metertest checks it when its Env.Ledger is one and Env.Advance
+// is set.
+type LedgerHousekeeping interface {
+	// PurgeCharges removes the charges taken more than req.Retention() ago,
+	// by the store's clock, oldest first, at most req.Limit of them, of
+	// every tenant the call's scope reaches, and reports how many it
+	// removed. A worker calls it until a batch comes back short of the
+	// limit. A charge removed takes its promises with it: its ExternalRef
+	// charges anew, its settled hold is a reservation not found, Refund
+	// and GetCharge answer ErrChargeNotFound, and SumCharges no longer
+	// counts it. It refuses what PurgeChargesRequest.Validate refuses.
+	PurgeCharges(ctx context.Context, req PurgeChargesRequest) (PurgeChargesResult, error)
+}
+
+// PurgeChargesRequest is one batch of LedgerHousekeeping.PurgeCharges.
+type PurgeChargesRequest struct {
+	// OlderThan is how long ago a charge must have been taken to go. Zero:
+	// MinChargeRetention; anything shorter, negative included, is refused.
+	OlderThan time.Duration
+	// Limit bounds the charges removed. Zero: DefaultHousekeepingLimit;
+	// negative is refused.
+	Limit int
+}
+
+// Validate refuses a retention shorter than MinChargeRetention, other than
+// zero, and a negative Limit, as ErrInvalidRequest.
+func (r PurgeChargesRequest) Validate() error {
+	if r.OlderThan != 0 && r.OlderThan < MinChargeRetention {
+		return invalidRequest("purge charges: retention %s is shorter than %s", r.OlderThan, MinChargeRetention)
+	}
+	return validateHousekeepingLimit("purge charges", r.Limit)
+}
+
+// Retention is how long ago a charge must have been taken to go: OlderThan,
+// or MinChargeRetention when it is zero.
+func (r PurgeChargesRequest) Retention() time.Duration {
+	if r.OlderThan == 0 {
+		return MinChargeRetention
+	}
+	return r.OlderThan
+}
+
+// PurgeChargesResult is what one PurgeCharges removed.
+type PurgeChargesResult struct {
+	// Purged is the number of charges removed.
+	Purged int64
+	_      noCompare
+}

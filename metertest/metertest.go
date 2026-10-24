@@ -389,6 +389,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{"ARefusedBumpCountsNothing", checkRefusedBump},
 		{"HoldsCountTowardsTheCounterRange", checkRangeCountsHolds},
 		{"ARefundOfExactlyWhatIsLeftRefundsIt", checkRefundExactRemainder},
+		{"PurgeChargesKeepsTheRetentionAndTakesThePromises", checkPurgeCharges},
 		{"ASettleWritesNoRowForARemovedAncestor", checkSettleAfterRemovedAncestor},
 		{"ASettleCountsOnAnAncestorWhoseRowWasDropped", checkSettleAfterAncestorDropped},
 		{"ConcurrentChargesKeepTheCeiling", checkConcurrentCeiling},
@@ -4242,4 +4243,108 @@ func sameSums(got, want []meter.ChargeSum) bool {
 		a.BucketStart, b.BucketStart = a.BucketStart.UTC(), b.BucketStart.UTC()
 		return reflect.DeepEqual(a, b)
 	})
+}
+
+// purgeStep is how far apart in time checkPurgeCharges takes its charges, so
+// each has an age of its own.
+const purgeStep = time.Second
+
+// checkPurgeCharges holds a ledger that purges to its retention: a charge
+// exactly as old stays, older ones go oldest first in batches of the limit,
+// a younger one stays, and each removed charge takes its promises with it —
+// read, found by reference, refunded, its hold settled again, summed. It
+// needs Env.Ledger to be a meter.LedgerHousekeeping, and Env.Advance and
+// Env.Now.
+func checkPurgeCharges(t *testing.T, f fixture) {
+	housekeeping, ok := f.Ledger.(meter.LedgerHousekeeping)
+	if !ok || f.Advance == nil || f.Now == nil {
+		t.Skip("Env.Ledger is no meter.LedgerHousekeeping, or Env.Advance or Env.Now is not set")
+	}
+	for name, bad := range map[string]meter.PurgeChargesRequest{
+		"a retention under the floor": {OlderThan: meter.MinChargeRetention - purgeStep},
+		"a negative retention":        {OlderThan: -purgeStep},
+		"a negative limit":            {Limit: -1},
+	} {
+		if _, err := housekeeping.PurgeCharges(f.Ctx, bad); !errors.Is(err, limes.ErrInvalidRequest) {
+			t.Errorf("PurgeCharges with %s: err = %v, want ErrInvalidRequest", name, err)
+		}
+	}
+	from := f.Now()
+	first, err := f.charge(meter.ChargeRequest{Subject: f.childSubject(), Amount: one, ExternalRef: "purge-1"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Advance(purgeStep)
+	second, err := f.charge(meter.ChargeRequest{Subject: f.childSubject(), Amount: one, ExternalRef: "purge-2"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Advance(purgeStep)
+	hold, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: one})
+	if err != nil {
+		t.Fatal(err)
+	}
+	settle := meter.SettleRequest{Subject: f.childSubject(), ReservationID: hold.ID, Amount: one}
+	settled, err := f.Usage.Settle(f.Ctx, settle, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	purge := func(req meter.PurgeChargesRequest) int64 {
+		t.Helper()
+		r, err := housekeeping.PurgeCharges(f.Ctx, req)
+		if err != nil {
+			t.Fatalf("PurgeCharges(%+v): %v", req, err)
+		}
+		return r.Purged
+	}
+	kept := func(what string, id uuid.UUID, want bool) {
+		t.Helper()
+		_, err := f.Usage.GetCharge(f.Ctx, id)
+		if got := err == nil; got != want || (!want && !errors.Is(err, meter.ErrChargeNotFound)) {
+			t.Errorf("%s: GetCharge = %v; want kept %v, or ErrChargeNotFound", what, err, want)
+		}
+	}
+
+	// The first charge is exactly the retention old: it stays.
+	f.Advance(meter.MinChargeRetention - 2*purgeStep)
+	if n := purge(meter.PurgeChargesRequest{}); n != 0 {
+		t.Errorf("a charge exactly the retention old: %d purged, want none", n)
+	}
+	// Two are older now, the settled one is not; a batch of one takes the
+	// oldest.
+	f.Advance(purgeStep + purgeStep/2)
+	if n := purge(meter.PurgeChargesRequest{Limit: 1}); n != 1 {
+		t.Fatalf("a batch of one purged %d", n)
+	}
+	kept("the oldest charge", first.ChargeID, false)
+	kept("the second charge", second.ChargeID, true)
+	if n := purge(meter.PurgeChargesRequest{}); n != 1 {
+		t.Errorf("the next batch purged %d, want the second charge alone", n)
+	}
+	if n := purge(meter.PurgeChargesRequest{}); n != 0 {
+		t.Errorf("a batch with nothing older purged %d", n)
+	}
+	kept("the settled charge, younger than the retention", settled.ChargeID, true)
+	if got, err := f.Usage.Settle(f.Ctx, settle, nil); err != nil || !got.Replayed {
+		t.Errorf("a settle replayed while its charge is kept = %+v, %v; want the receipt, replayed", got, err)
+	}
+
+	// A removed charge's promises are gone with it.
+	if _, err := f.Usage.ChargeByRef(f.Ctx, meter.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: "purge-1"}); !errors.Is(err, meter.ErrChargeNotFound) {
+		t.Errorf("ChargeByRef of a purged charge: err = %v, want ErrChargeNotFound", err)
+	}
+	if _, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: second.ChargeID, Remaining: true}); !errors.Is(err, meter.ErrChargeNotFound) {
+		t.Errorf("Refund of a purged charge: err = %v, want ErrChargeNotFound", err)
+	}
+	f.Advance(purgeStep)
+	if n := purge(meter.PurgeChargesRequest{}); n != 1 {
+		t.Errorf("the settled charge, past the retention now: %d purged, want 1", n)
+	}
+	if _, err := f.Usage.Settle(f.Ctx, settle, nil); !errors.Is(err, meter.ErrReservationNotFound) {
+		t.Errorf("a settle of a hold whose charge is purged: err = %v, want ErrReservationNotFound", err)
+	}
+	page, err := f.Ledger.SumCharges(f.Ctx, meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: from.Add(3 * purgeStep)})
+	if err != nil || len(page.Items) != 0 {
+		t.Errorf("SumCharges of the purged charges' period = %+v, %v; want nothing", page.Items, err)
+	}
 }

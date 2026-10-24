@@ -16,7 +16,8 @@ import (
 	"github.com/oleg-tkachuk/limes/meter"
 )
 
-// Ledger implements meter.LedgerReader over a UsageStore's ledger.
+// Ledger implements meter.LedgerReader and meter.LedgerHousekeeping over a
+// UsageStore's ledger.
 type Ledger struct {
 	usage *UsageStore
 }
@@ -171,3 +172,44 @@ func decodeSumCursor(s string) (sumPlace, error) {
 }
 
 var _ meter.LedgerReader = (*Ledger)(nil)
+
+// PurgeCharges implements meter.LedgerHousekeeping: the charges taken more
+// than req.Retention() ago by the store's clock, oldest first, at most the
+// batch's limit, leave the ledger and its indexes.
+func (l *Ledger) PurgeCharges(_ context.Context, req meter.PurgeChargesRequest) (meter.PurgeChargesResult, error) {
+	if err := req.Validate(); err != nil {
+		return meter.PurgeChargesResult{}, err
+	}
+	s := l.usage
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cutoff := s.nowFn().Add(-req.Retention())
+	var due []int
+	for i, e := range s.ledger {
+		if e.At.Before(cutoff) {
+			due = append(due, i)
+		}
+	}
+	slices.SortStableFunc(due, func(a, b int) int { return s.ledger[a].At.Compare(s.ledger[b].At) })
+	due = due[:min(len(due), meter.HousekeepingLimit(req.Limit))]
+	if len(due) == 0 {
+		return meter.PurgeChargesResult{}, nil
+	}
+	gone := make(map[int]bool, len(due))
+	for _, i := range due {
+		gone[i] = true
+	}
+	kept := s.ledger
+	s.ledger = nil
+	clear(s.byCharge)
+	clear(s.byRef)
+	clear(s.byReservation)
+	for i, e := range kept {
+		if !gone[i] {
+			s.appendLocked(e)
+		}
+	}
+	return meter.PurgeChargesResult{Purged: int64(len(due))}, nil
+}
+
+var _ meter.LedgerHousekeeping = (*Ledger)(nil)
