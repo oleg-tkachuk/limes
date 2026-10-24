@@ -137,15 +137,22 @@ export async function prereleaseModule(r: Release, module: Module): Promise<Outc
   // A file from an earlier run would read as this dry run's notes.
   rmSync(notesFile, { force: true });
   await r.candidateNotes(module, notesFile);
-  // No notes: semantic-release found nothing to release where the policy
-  // found a candidate, and the two disagree on what is pending. Nothing is
-  // tagged rather than a candidate published with no notes.
-  if (!existsSync(notesFile)) {
-    throw new Error(`${module.name}: semantic-release's dry run releases nothing, though ${tag} was due; no candidate tagged`);
+  // No notes: semantic-release found nothing to release. For a candidate
+  // of the next major that is the last release's code as it is, cut as the
+  // 1.0 it stands for. For any other candidate the policy found one due and
+  // the two disagree on what is pending: nothing is tagged rather than a
+  // candidate published with no notes.
+  let notes: string;
+  if (existsSync(notesFile)) {
+    notes = candidateNotesBody(notesFrom(notesFile));
+  } else if (r.nextMajor) {
+    notes = unchangedSince(await sinceTag(module, r.root));
+  } else {
+    throw new Error(`semantic-release's dry run releases nothing, though ${tag} was due; no candidate tagged`);
   }
   await git(["tag", tag], r.root);
   await r.pushTag(tag);
-  await publish(r.github, tag, module.prefix, candidateNotesBody(notesFrom(notesFile)), false, r.root, true);
+  await publish(r.github, tag, module.prefix, notes, false, r.root, true);
   await warmGoProxy(tag, r.repository, r.fetchInfo);
   return { tag, note: "release candidate published" };
 }
@@ -160,6 +167,12 @@ const VERSION_HEADING = /^#{1,2} \[?[0-9]+\.[0-9]+\.[0-9]+[^\n]*\n+/;
 // candidate's own tag titles its release.
 export function candidateNotesBody(notes: string): string {
   return notes.replace(VERSION_HEADING, "");
+}
+
+// unchangedSince is the notes of a candidate of the next major cut from the
+// code of the release last, which nothing since changes enough to release.
+export function unchangedSince(last: string): string {
+  return `No change since ${last} cuts a release: this candidate is ${last}'s code, as the next major.\n`;
 }
 
 // NEXT_MAJOR_MODULE is the one module a candidate of the next major is cut

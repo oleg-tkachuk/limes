@@ -10,7 +10,7 @@ import { isReleaseTag, isStableReleaseTag, newReleaseTag, previousTag, proxyInfo
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
 import { withoutWorkflowCommands } from "./lib/actions.ts";
 import { releaseCommits } from "./lib/modules.ts";
-import { Channel, GATED, GATES, candidateNotesBody, gateOf, releaseAll, semanticReleaseCommand, type Release } from "./release.ts";
+import { Channel, GATED, GATES, candidateNotesBody, gateOf, releaseAll, semanticReleaseCommand, unchangedSince, type Release } from "./release.ts";
 
 const REPO = "oleg-tkachuk/limes";
 const RELEASE = new URL("../release/", import.meta.url).pathname;
@@ -459,6 +459,11 @@ describe("releaseAll", () => {
       assert.deepEqual(await major(), ["v1.0.0-rc.1", "v1.0.0-rc.2"]);
       // The next release by the rules on main is still 0.x.
       assert.deepEqual(await candidate(), ["v1.0.0-rc.1", "v1.0.0-rc.2", "v0.2.0-rc.1"]);
+    });
+    test("a candidate of the next major with nothing pending is the last release's code", async () => {
+      noCandidateNotes = true;
+      assert.equal(await releaseAll({ ...release(), channel: Channel.Prerelease, only: "limes", nextMajor: true }), true);
+      assert.deepEqual(data.published.map((r) => [r.tag, r.notes]), [["v1.0.0-rc.1", unchangedSince("v0.1.0")]]);
     });
     test("a candidate of the next major is limes's alone, and a prerelease", async () => {
       repo.write("x.go", "// a\n");
