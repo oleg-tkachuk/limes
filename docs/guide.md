@@ -672,7 +672,13 @@ Much of each contract lives in request fields and in which sentinel comes
 back, so a store that gets one wrong still compiles. Run the module's checks
 from your store's tests — `storetest` for a `Store` (and a
 `BiscuitRevocationStore`), `metertest` for a `UsageStore`, `jwkstest` for a
-`KeyResolver`, and `dpoptest` for a `dpop.ReplayCache` or `dpop.Nonces`:
+`KeyResolver`, and `dpoptest` for a `dpop.ReplayCache` or `dpop.Nonces`.
+`storetest` checks more than the compiler sees since v0.113.0: a revoke
+reports its entry as `GetRecord` reads it back, at the store's precision, and
+`RevokeResult.Before`; it writes an entry for an expired capability too; a
+cursor of another listing is `ErrCursorMismatch`; and a lister fills
+`RecordListing.StoppedBy`. A store that passed before fails these until it
+does:
 
 ```go
 func TestMeterContract(t *testing.T) {
