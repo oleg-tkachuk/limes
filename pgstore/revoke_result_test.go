@@ -41,8 +41,8 @@ func TestConcurrentRevokesReportOneWriter(t *testing.T) {
 		}
 		// The writer found it active; every other one found it revoked,
 		// though it may have read the flag before the writer committed.
-		if want := map[bool]limes.RecordDisposition{false: limes.RecordDispositionActive, true: limes.RecordDispositionRevoked}[r.AlreadyRevoked]; r.Before != want {
-			t.Errorf("revoke %d: AlreadyRevoked %v, before %s; want %s", i, r.AlreadyRevoked, r.Before, want)
+		if want := map[bool]limes.RecordDisposition{false: limes.RecordDispositionActive, true: limes.RecordDispositionRevoked}[r.AlreadyRevoked]; r.PriorDisposition != want {
+			t.Errorf("revoke %d: AlreadyRevoked %v, before %s; want %s", i, r.AlreadyRevoked, r.PriorDisposition, want)
 		}
 		if !r.Revocation.RevokedAt.Equal(results[0].Revocation.RevokedAt) || r.Revocation.Note != "race" {
 			t.Errorf("revoke %d reported %+v; revoke 0 %+v", i, r.Revocation, results[0].Revocation)
@@ -98,7 +98,7 @@ func TestRevokeWaitsForAnAncestorsRevoke(t *testing.T) {
 	if err := tx.Commit(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if r := <-done; r.AlreadyRevoked || r.Before != limes.RecordDispositionRevoked {
+	if r := <-done; r.AlreadyRevoked || r.PriorDisposition != limes.RecordDispositionRevoked {
 		t.Errorf("the child's revoke = %+v; want its own entry written, revoked before through its parent", r)
 	}
 }

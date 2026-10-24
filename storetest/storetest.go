@@ -437,10 +437,10 @@ func checkRevoke(t *testing.T, f fixture) {
 	child := f.live(t, "agent:child", parent.ID)
 	grandchild := f.live(t, "agent:grandchild", child.ID)
 	other := f.live(t, "agent:other", uuid.Nil)
-	if r := f.revoke(t, parent.ID, false); r.AlreadyRevoked || r.Before != limes.RecordDispositionActive {
+	if r := f.revoke(t, parent.ID, false); r.AlreadyRevoked || r.PriorDisposition != limes.RecordDispositionActive {
 		t.Errorf("first revoke = %+v; want a new entry, active before", r)
 	}
-	if r := f.revoke(t, parent.ID, false); !r.AlreadyRevoked || r.Before != limes.RecordDispositionRevoked { // idempotent
+	if r := f.revoke(t, parent.ID, false); !r.AlreadyRevoked || r.PriorDisposition != limes.RecordDispositionRevoked { // idempotent
 		t.Errorf("repeated revoke = %+v; want AlreadyRevoked, revoked before", r)
 	}
 	if !f.revoked(t, parent.ID) || !f.revoked(t, child.ID) {
@@ -451,7 +451,7 @@ func checkRevoke(t *testing.T, f fixture) {
 	}
 	// Stopped through its parent, the child has no entry of its own, so its
 	// first revoke writes one.
-	if r := f.revoke(t, child.ID, false); r.AlreadyRevoked || r.Revocation.Cascaded || r.Before != limes.RecordDispositionRevoked {
+	if r := f.revoke(t, child.ID, false); r.AlreadyRevoked || r.Revocation.Cascaded || r.PriorDisposition != limes.RecordDispositionRevoked {
 		t.Errorf("first revoke of a child stopped through its parent = %+v; want a new entry, not cascading, revoked before", r)
 	} else if rev := f.record(t, child.ID).Revocation; rev == nil || !sameRevocation(r.Revocation, *rev) {
 		t.Errorf("first revoke of a child reported %+v; on record %+v", r.Revocation, rev)
@@ -459,7 +459,7 @@ func checkRevoke(t *testing.T, f fixture) {
 	// An expired capability is expired before its revoke, which still
 	// writes its entry.
 	expired := f.insert(t, f.newCapability("agent:expired", uuid.Nil, f.now.Add(-expiredAgo)))
-	if r := f.revoke(t, expired.ID, false); r.AlreadyRevoked || r.Before != limes.RecordDispositionExpired {
+	if r := f.revoke(t, expired.ID, false); r.AlreadyRevoked || r.PriorDisposition != limes.RecordDispositionExpired {
 		t.Errorf("revoke of an expired capability = %+v; want a new entry, expired before", r)
 	}
 	if rev := f.record(t, expired.ID).Revocation; rev == nil {

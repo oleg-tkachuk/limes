@@ -675,8 +675,8 @@ from your store's tests — `storetest` for a `Store` (and a
 `KeyResolver`, and `dpoptest` for a `dpop.ReplayCache` or `dpop.Nonces`.
 `storetest` checks more than the compiler sees since v0.113.0: a revoke
 reports its entry as `GetRecord` reads it back, at the store's precision, and
-`RevokeResult.Before`; it writes an entry for an expired capability too; a
-cursor of another listing is `ErrCursorMismatch`; and a lister fills
+`RevokeResult.PriorDisposition`; it writes an entry for an expired capability
+too; a cursor of another listing is `ErrCursorMismatch`; and a lister fills
 `RecordListing.StoppedBy`. A store that passed before fails these until it
 does:
 
@@ -755,9 +755,9 @@ Idempotent: a repeat keeps the first entry, and `result.AlreadyRevoked`
 says the capability had one before this call; `result.Revocation` is the
 entry that stands, so a caller learns whether it stopped the capability
 without a read beforehand, which a concurrent revoke could outdate.
-`result.Before` is the capability's disposition just before the call, by the
-census's rules and clock: only a revoke of an `active` one stopped something
-new. A capability already revoked through an ancestor, or expired, still
+`result.PriorDisposition` is the capability's disposition just before the
+call, by the census's rules and clock: only a revoke of an `active` one
+stopped something new. A capability already revoked through an ancestor, or expired, still
 gets its own entry, for the audit and in case the ancestor's is purged. An id
 not on record is `ErrNotFound` and writes nothing. In pgstore a revoke also
 marks every record below the capability revoked, a generation at a time by

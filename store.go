@@ -116,11 +116,11 @@ type Store interface {
 	// lacks, whatever the capability's own entry says. A capability already
 	// stopped through an ancestor, or expired, still gets its entry: the
 	// audit names who revoked it and why, and the entry stands if the
-	// ancestor's goes with a purge. RevokeResult.Before says it stopped
-	// nothing new. A store may keep
-	// work per descendant beside the entry — pgstore marks each one
-	// revoked, holding its row until the revoke commits — so a revoke's cost
-	// can grow with the subtree below the capability, flag or not.
+	// ancestor's goes with a purge. RevokeResult.PriorDisposition says it
+	// stopped nothing new. A store may keep work per descendant beside the
+	// entry — pgstore marks each one revoked, holding its row until the
+	// revoke commits — so a revoke's cost can grow with the subtree below
+	// the capability, flag or not.
 	Revoke(ctx context.Context, req RevokeRequest) (RevokeResult, error)
 
 	// Purge removes the capabilities expired for longer than the request's
@@ -238,14 +238,14 @@ type RevokeResult struct {
 	// the one the call wrote, or the earlier one it kept, as GetRecord
 	// reads it back — at the store's precision.
 	Revocation Revocation
-	// Before is the capability's disposition just before the call, by the
-	// rules and the clock RecordCensus and RecordListingReader use: revoked
-	// — by its own entry or through an ancestor — then expired, then
-	// active. Only a revoke of an active capability stopped something new.
+	// PriorDisposition is the capability's disposition just before the
+	// call, by the rules and the clock RecordCensus and RecordListingReader
+	// use: revoked — by its own entry or through an ancestor — then
+	// expired, then active. Only a revoke of an active capability stopped something new.
 	// AlreadyRevoked implies RecordDispositionRevoked. Unspecified when the
 	// store could not tell — a chain past MaxDelegationDepth — though it
 	// wrote the entry all the same.
-	Before RecordDisposition
+	PriorDisposition RecordDisposition
 }
 
 // Validate refuses a request naming no capability, as ErrInvalidRequest:
