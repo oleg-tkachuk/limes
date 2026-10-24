@@ -114,9 +114,9 @@ type RevocationCache struct {
 	// signals counts the calls to Signal, and signalsWhole those that named
 	// no id.
 	signals, signalsWhole atomic.Uint64
-	// clearsRevoked counts the calls to ClearRevoked that did not Clear, and
+	// narrowClears counts the calls to ClearRevoked that did not Clear, and
 	// clearsWithoutLineage those that did.
-	clearsRevoked, clearsWithoutLineage atomic.Uint64
+	narrowClears, clearsWithoutLineage atomic.Uint64
 }
 
 // RevocationCacheConfig configures a RevocationCache.
@@ -302,7 +302,7 @@ func (c *RevocationCache) ClearRevoked(ids ...uuid.UUID) {
 		c.clearsWithoutLineage.Add(1)
 		return
 	}
-	c.clearsRevoked.Add(1)
+	c.narrowClears.Add(1)
 	c.caps.Forget(ids)
 }
 
@@ -378,10 +378,10 @@ type RevocationCacheStats struct {
 	Capabilities RevocationCacheCounts
 	// Biscuits counts the IsBiscuitRevoked questions.
 	Biscuits RevocationCacheCounts
-	// Clears counts the calls to Clear, and ClearsRevoked those to
+	// Clears counts the calls to Clear, and NarrowClears those to
 	// ClearRevoked that dropped only what a revocation outdates; one over
 	// an upstream that names no ancestors is a Clear.
-	Clears, ClearsRevoked uint64
+	Clears, NarrowClears uint64
 	// ClearsWithoutLineage counts the calls to ClearRevoked that cleared
 	// whole, as the upstream names no lineage: a part of Clears, apart from
 	// a Clear asked for. Growing, narrow invalidation is off (Lineage).
@@ -444,7 +444,7 @@ func (c *RevocationCache) Stats() RevocationCacheStats {
 	st.Clears = c.clears.Load()
 	st.Capabilities = countsOf(c.caps.Stats())
 	st.Biscuits = countsOf(c.copies.Stats())
-	st.ClearsRevoked = c.clearsRevoked.Load()
+	st.NarrowClears = c.narrowClears.Load()
 	st.Synced = c.synced.Load()
 	st.SyncsLost = c.syncsLost.Load()
 	if at := c.lastSyncLoss.Load(); at != nil {

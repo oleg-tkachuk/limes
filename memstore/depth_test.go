@@ -57,7 +57,7 @@ func TestRevokeWritesPastMaxDelegationDepth(t *testing.T) {
 		parent = id
 	}
 	r, err := records.Revoke(ctx, limes.RevokeRequest{CapabilityID: parent})
-	if err != nil || r.AlreadyRevoked || r.Before != limes.RecordDispositionUnspecified {
+	if err != nil || r.AlreadyRevoked || r.PriorDisposition != limes.RecordDispositionUnspecified {
 		t.Fatalf("Revoke past the depth = %+v, %v; want the entry written, its disposition untold", r, err)
 	}
 	if revoked, err := records.IsRevoked(ctx, parent); err != nil || !revoked {

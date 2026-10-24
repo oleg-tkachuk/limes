@@ -554,7 +554,7 @@ func (s *Store) Revoke(_ context.Context, args limes.RevokeRequest) (limes.Revok
 	entry := limes.Revocation{
 		RevokedAt: now, Note: args.Note, Actor: args.Actor, Cascaded: args.CascadeChildren,
 	}
-	result := limes.RevokeResult{Before: before}
+	result := limes.RevokeResult{PriorDisposition: before}
 	result.Revocation, result.AlreadyRevoked = s.revokeLocked(args.CapabilityID, entry)
 	if !args.CascadeChildren {
 		return result, nil

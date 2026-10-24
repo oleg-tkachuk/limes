@@ -318,14 +318,14 @@ func (s *Store) Revoke(ctx context.Context, req limes.RevokeRequest) (limes.Revo
 			return err
 		}
 		now := s.clock()
-		result = limes.RevokeResult{Before: disposition(revoked, expiresAt, now)}
+		result = limes.RevokeResult{PriorDisposition: disposition(revoked, expiresAt, now)}
 		r := &result.Revocation
 		err = tx.QueryRow(ctx, sqlRevoke, req.CapabilityID, tenant, now, req.Note, req.Actor, req.CascadeChildren).Scan(&r.RevokedAt, &r.Note, &r.Actor, &r.Cascaded)
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Its own entry was there, or another revoke wrote it while this
 			// one waited: revoked before this call either way, whatever the
 			// flag read first said.
-			result.AlreadyRevoked, result.Before = true, limes.RecordDispositionRevoked
+			result.AlreadyRevoked, result.PriorDisposition = true, limes.RecordDispositionRevoked
 			err = tx.QueryRow(ctx, sqlRevocation, req.CapabilityID).Scan(&r.RevokedAt, &r.Note, &r.Actor, &r.Cascaded)
 		}
 		if err != nil {

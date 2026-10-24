@@ -14,6 +14,13 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.122.0
+
+- `RevokeResult.Before` is `RevokeResult.PriorDisposition`, and
+  `RevocationCacheStats.ClearsRevoked` is `RevocationCacheStats.NarrowClears`:
+  the old names read as a time and as a count of revoked entries. Rename the
+  field; nothing else changes.
+
 ## pgstore/v0.38.0
 
 - `(*Store).RevokeBiscuit` returns `(limes.RevokeBiscuitResult, error)` where
