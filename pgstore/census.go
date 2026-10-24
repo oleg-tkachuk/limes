@@ -178,8 +178,8 @@ WHERE c.tenant_id = $1`
 // only through an ancestor the entry of the nearest ancestor that has one:
 // what ListRecords and GetRecordListing read alike, so both give a record
 // one disposition. The walk up runs for those records alone, a parent a
-// step by its key, and stops at an ancestor no longer on record, as
-// IsRevoked's does.
+// step by its key, and stops at the first ancestor with an entry, or at
+// one no longer on record, as IsRevoked's does.
 const sqlRecordListing = `
 SELECT c.capability, c.issued_by, v.revoked_at, v.note, v.actor, v.cascaded, CASE
     WHEN c.revoked THEN 'revoked'
@@ -198,6 +198,7 @@ LEFT JOIN LATERAL (
         SELECT p.parent_id, up.generation + 1
         FROM ` + schema + `.capabilities p JOIN up ON p.id = up.id
         WHERE p.parent_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM ` + schema + `.revocations e WHERE e.capability_id = up.id)
     )
     SELECT r.capability_id, r.revoked_at, r.note, r.actor, r.cascaded
     FROM up JOIN ` + schema + `.revocations r ON r.capability_id = up.id
