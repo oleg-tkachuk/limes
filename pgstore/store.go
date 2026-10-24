@@ -206,7 +206,7 @@ const sqlIsRevoked = `SELECT self, deepest, in_chain FROM limes.is_revoked($1, $
 
 // sqlRevocationLineage asks limes.revocation_lineage
 // (migrations/018_revocation_lineage.sql), as sqlIsRevoked asks is_revoked.
-const sqlRevocationLineage = `SELECT self, deepest, in_chain, ancestors FROM limes.revocation_lineage($1, $2)`
+const sqlRevocationLineage = `SELECT self, deepest, in_chain, ancestors, known FROM limes.revocation_lineage($1, $2)`
 
 // IsRevoked answers for the capability and every ancestor still on record,
 // across every tenant whatever the call's scope, in one round trip: the
@@ -228,15 +228,17 @@ func (s *Store) IsRevoked(ctx context.Context, id uuid.UUID) (bool, error) {
 
 // RevocationLineage implements limes.RevocationLineageLookup: IsRevoked's
 // answer, in one statement as IsRevoked's, and the ancestors on record it
-// read, nearest first.
+// read, nearest first; an id not on record is ErrNotFound.
 func (s *Store) RevocationLineage(ctx context.Context, id uuid.UUID) (bool, []uuid.UUID, error) {
-	var self, inChain bool
+	var self, inChain, known bool
 	var deepest int
 	var ancestors []uuid.UUID
-	err := s.db.QueryRow(ctx, sqlRevocationLineage, id, limes.MaxDelegationDepth).Scan(&self, &deepest, &inChain, &ancestors)
+	err := s.db.QueryRow(ctx, sqlRevocationLineage, id, limes.MaxDelegationDepth).Scan(&self, &deepest, &inChain, &ancestors, &known)
 	switch {
 	case err != nil:
 		return false, nil, err
+	case !known:
+		return false, nil, limes.ErrNotFound
 	case self:
 		return true, ancestors, nil
 	case deepest > limes.MaxDelegationDepth:

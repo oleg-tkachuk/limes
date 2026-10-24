@@ -140,8 +140,8 @@ func TestRevocationLineageNamesTheAncestors(t *testing.T) {
 	if revoked, _, err := f.records.RevocationLineage(t.Context(), ids[2]); err != nil || !revoked {
 		t.Errorf("RevocationLineage under a revoked root = %v, %v; want revoked", revoked, err)
 	}
-	if revoked, _, err := f.records.RevocationLineage(t.Context(), uuid.New()); err != nil || revoked {
-		t.Errorf("RevocationLineage of an id not on record = %v, %v; want live", revoked, err)
+	if revoked, ancestors, err := f.records.RevocationLineage(t.Context(), uuid.New()); !errors.Is(err, limes.ErrNotFound) || revoked || ancestors != nil {
+		t.Errorf("RevocationLineage of an id not on record = %v, %v, %v; want ErrNotFound", revoked, ancestors, err)
 	}
 }
 
@@ -281,8 +281,9 @@ func TestRevocationWatcherDownServesTheShortTTL(t *testing.T) {
 const sqlIsRevokedSource = `SELECT prosrc FROM pg_proc WHERE oid = 'limes.is_revoked(uuid, integer)'::regprocedure`
 
 // IsRevoked and RevocationLineage answer alike for every place in a chain —
-// a live leaf, a revoked root's descendants, one revoked itself, and an id
-// not on record — as is_revoked reads revocation_lineage's walk.
+// a live leaf, a revoked root's descendants, one revoked itself — as
+// is_revoked reads revocation_lineage's walk; an id not on record is live to
+// IsRevoked and not found to RevocationLineage.
 func TestIsRevokedAnswersAsRevocationLineage(t *testing.T) {
 	f := newTenantFixture(t)
 	var src string
@@ -296,7 +297,7 @@ func TestIsRevokedAnswersAsRevocationLineage(t *testing.T) {
 	if _, err := f.records.Revoke(WithTenant(t.Context(), f.mine), limes.RevokeRequest{CapabilityID: ids[1]}); err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range append(ids, uuid.New()) {
+	for _, id := range ids {
 		revoked, err := f.records.IsRevoked(t.Context(), id)
 		if err != nil {
 			t.Fatal(err)
@@ -308,5 +309,28 @@ func TestIsRevokedAnswersAsRevocationLineage(t *testing.T) {
 		if revoked != lineage {
 			t.Errorf("%s: IsRevoked %v, RevocationLineage %v", id, revoked, lineage)
 		}
+	}
+	if revoked, err := f.records.IsRevoked(t.Context(), uuid.New()); err != nil || revoked {
+		t.Errorf("IsRevoked of an id not on record = %v, %v; want live", revoked, err)
+	}
+}
+
+// Over the store, a RevocationCache answers an id not on record live, as
+// IsRevoked does, and keeps no answer for it: RevocationLineage's not found
+// is no refusal. This also holds pgstore's release to a limes that reads it
+// so.
+func TestRevocationCacheKeepsNoAnswerForAnUnknownID(t *testing.T) {
+	f := newTenantFixture(t)
+	cache, err := limes.NewRevocationCache(limes.RevocationCacheConfig{Capabilities: f.records, TTL: cacheTTL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if revoked, err := cache.IsRevoked(t.Context(), uuid.New()); err != nil || revoked {
+			t.Fatalf("IsRevoked of an id not on record = %v, %v; want live", revoked, err)
+		}
+	}
+	if st := cache.Stats().Capabilities; st.Entries != 0 || st.Hits != 0 {
+		t.Errorf("Stats = %+v; want nothing kept for an id not on record", st)
 	}
 }
