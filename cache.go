@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -48,6 +49,10 @@ var ErrNoRevocationLineage = errors.New("limes: the revocation upstream names no
 // RevocationCacheConfig.SyncedTTL.
 const DefaultRevocationCacheTTL = 2 * time.Second
 
+// defaultSignals is how many revocation signals a cache waits for when its
+// configuration names none (RevocationCacheConfig.Signals): one watcher.
+const defaultSignals = 1
+
 // DefaultRevocationCacheEntries bounds the cache. Past it, the oldest entry
 // makes room for the new one: a flood of distinct ids costs extra lookups,
 // never unbounded memory, and never the answers cached for everyone else.
@@ -81,6 +86,12 @@ type RevocationCache struct {
 	// revocation signal and while one vouches for the cache (synced).
 	ttl, syncedTTL time.Duration
 	synced         atomic.Bool
+	// signalsNeeded is how many signals must listen for the cache to be
+	// synced, and listening how many do, under syncMu, which orders the
+	// changes of synced and of the TTL in force.
+	signalsNeeded int
+	syncMu        sync.Mutex
+	listening     int
 	// syncs counts the calls to Listening, syncsLost those to NotListening,
 	// and lastSyncLoss is the time of the last: nil, none yet.
 	syncs, syncsLost atomic.Uint64
@@ -130,6 +141,11 @@ type RevocationCacheConfig struct {
 	// answer, those cached under SyncedTTL among them. Zero: TTL; shorter
 	// than TTL is refused.
 	SyncedTTL time.Duration
+	// Signals is how many revocation signals feed the cache, each a watcher
+	// calling Listening and NotListening: SyncedTTL holds only while every
+	// one of them listens, since a revocation the one not listening would
+	// have carried goes unheard. Zero: one; negative is refused.
+	Signals int
 	// MaxEntries bounds each kind of answer on its own, so a flood of one
 	// never evicts the other. Zero: DefaultRevocationCacheEntries. A Biscuit
 	// answer is one entry per revocation id, and one per set of ids asked
@@ -164,18 +180,26 @@ func NewRevocationCache(cfg RevocationCacheConfig) (*RevocationCache, error) {
 	case synced < c.TTL:
 		return nil, fmt.Errorf("limes: cache SyncedTTL %s is shorter than its TTL %s", synced, c.TTL)
 	}
+	signals := cfg.Signals
+	switch {
+	case signals == 0:
+		signals = defaultSignals
+	case signals < 0:
+		return nil, fmt.Errorf("limes: cache Signals %d is negative", signals)
+	}
 	lineage, _ := cfg.Capabilities.(RevocationLineageLookup)
 	if cfg.RequireLineage && lineage == nil {
 		return nil, fmt.Errorf("%w: %T", ErrNoRevocationLineage, cfg.Capabilities)
 	}
 	return &RevocationCache{
-		capabilities: cfg.Capabilities,
-		lineage:      lineage,
-		biscuits:     cfg.Biscuits,
-		caps:         ttlcache.New[uuid.UUID](c),
-		copies:       ttlcache.New[string](c),
-		ttl:          c.TTL,
-		syncedTTL:    synced,
+		capabilities:  cfg.Capabilities,
+		lineage:       lineage,
+		biscuits:      cfg.Biscuits,
+		caps:          ttlcache.New[uuid.UUID](c),
+		copies:        ttlcache.New[string](c),
+		ttl:           c.TTL,
+		syncedTTL:     synced,
+		signalsNeeded: signals,
 	}, nil
 }
 
@@ -268,8 +292,10 @@ func (c *RevocationCache) ClearRevoked(ids ...uuid.UUID) {
 func (c *RevocationCache) Listening() {
 	c.Clear()
 	c.syncs.Add(1)
-	c.synced.Store(true)
-	c.setTTL(c.syncedTTL)
+	c.syncMu.Lock()
+	defer c.syncMu.Unlock()
+	c.listening++
+	c.setSyncedLocked()
 }
 
 // NotListening tells the cache the signal stopped: a revocation may now go
@@ -279,7 +305,21 @@ func (c *RevocationCache) NotListening() {
 	c.syncsLost.Add(1)
 	at := c.caps.Now()
 	c.lastSyncLoss.Store(&at)
-	c.synced.Store(false)
+	c.syncMu.Lock()
+	defer c.syncMu.Unlock()
+	c.listening = max(c.listening-1, 0)
+	c.setSyncedLocked()
+}
+
+// setSyncedLocked makes the cache synced, and SyncedTTL the bound, while
+// every signal it needs listens, and TTL otherwise; syncMu is held.
+func (c *RevocationCache) setSyncedLocked() {
+	synced := c.listening >= c.signalsNeeded
+	c.synced.Store(synced)
+	if synced {
+		c.setTTL(c.syncedTTL)
+		return
+	}
 	c.setTTL(c.ttl)
 }
 
