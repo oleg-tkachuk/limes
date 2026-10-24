@@ -267,9 +267,9 @@ func TestEmptyRevocationsDropNothing(t *testing.T) {
 	ctx := context.Background()
 	s := newExampleStack()
 	for name, upstream := range map[string]limes.RevocationLookup{"lineage": s.records, "no lineage": isRevokedOnly{s.records}} {
+		c, _ := s.issue()
 		t.Run(name, func(t *testing.T) {
 			cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: upstream})
-			c, _ := s.issue()
 			if _, err := cache.IsRevoked(ctx, c.ID); err != nil {
 				t.Fatal(err)
 			}
