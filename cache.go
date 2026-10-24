@@ -82,10 +82,9 @@ type RevocationCache struct {
 	ttl, syncedTTL time.Duration
 	synced         atomic.Bool
 	// syncs counts the calls to Listening, syncsLost those to NotListening,
-	// and lastSyncLoss is the time of the last, in Unix nanoseconds: zero,
-	// none yet.
+	// and lastSyncLoss is the time of the last: nil, none yet.
 	syncs, syncsLost atomic.Uint64
-	lastSyncLoss     atomic.Int64
+	lastSyncLoss     atomic.Pointer[time.Time]
 	// signals counts the calls to Signal, and signalsWhole those that named
 	// no id.
 	signals, signalsWhole atomic.Uint64
@@ -252,8 +251,10 @@ func (c *RevocationCache) Clear() {
 // revocation still takes Clear.
 func (c *RevocationCache) ClearRevoked(ids ...uuid.UUID) {
 	if c.lineage == nil {
-		c.clearsWithoutLineage.Add(1)
+		// Counted after the Clear it is a part of: Stats reads the parts
+		// before Clears, so no part ever reads more than the whole.
 		c.Clear()
+		c.clearsWithoutLineage.Add(1)
 		return
 	}
 	c.clearsRevoked.Add(1)
@@ -265,8 +266,8 @@ func (c *RevocationCache) ClearRevoked(ids ...uuid.UUID) {
 // clears the cache — a revocation made while nothing listened sent a
 // signal nobody heard — and then serves answers for SyncedTTL.
 func (c *RevocationCache) Listening() {
-	c.syncs.Add(1)
 	c.Clear()
+	c.syncs.Add(1)
 	c.synced.Store(true)
 	c.setTTL(c.syncedTTL)
 }
@@ -276,7 +277,8 @@ func (c *RevocationCache) Listening() {
 // for TTL alone until the next Listening.
 func (c *RevocationCache) NotListening() {
 	c.syncsLost.Add(1)
-	c.lastSyncLoss.Store(c.caps.Now().UnixNano())
+	at := c.caps.Now()
+	c.lastSyncLoss.Store(&at)
 	c.synced.Store(false)
 	c.setTTL(c.ttl)
 }
@@ -288,8 +290,8 @@ func (c *RevocationCache) NotListening() {
 func (c *RevocationCache) Signal(ids ...uuid.UUID) {
 	c.signals.Add(1)
 	if len(ids) == 0 {
-		c.signalsWhole.Add(1)
 		c.Clear()
+		c.signalsWhole.Add(1)
 		return
 	}
 	c.ClearRevoked(ids...)
@@ -371,30 +373,27 @@ type RevocationCacheCounts struct {
 // stopping the cache, so the counts of a cache in use are each a moment
 // apart.
 func (c *RevocationCache) Stats() RevocationCacheStats {
-	return RevocationCacheStats{
-		Capabilities:         countsOf(c.caps.Stats()),
-		Biscuits:             countsOf(c.copies.Stats()),
-		Clears:               c.clears.Load(),
-		ClearsRevoked:        c.clearsRevoked.Load(),
+	// The parts of Clears first, then Clears: each part is counted after
+	// its Clear, so none reads more than the whole read after it.
+	st := RevocationCacheStats{
 		ClearsWithoutLineage: c.clearsWithoutLineage.Load(),
-		Synced:               c.synced.Load(),
 		Syncs:                c.syncs.Load(),
-		SyncsLost:            c.syncsLost.Load(),
-		LastSyncLoss:         unixNanoTime(c.lastSyncLoss.Load()),
-		Signals:              c.signals.Load(),
 		SignalsWhole:         c.signalsWhole.Load(),
-		Lineage:              c.lineage != nil,
 	}
+	st.Clears = c.clears.Load()
+	st.Capabilities = countsOf(c.caps.Stats())
+	st.Biscuits = countsOf(c.copies.Stats())
+	st.ClearsRevoked = c.clearsRevoked.Load()
+	st.Synced = c.synced.Load()
+	st.SyncsLost = c.syncsLost.Load()
+	if at := c.lastSyncLoss.Load(); at != nil {
+		st.LastSyncLoss = *at
+	}
+	st.Signals = c.signals.Load()
+	st.Lineage = c.lineage != nil
+	return st
 }
 
 func countsOf(st ttlcache.Stats) RevocationCacheCounts {
 	return RevocationCacheCounts{Hits: st.Hits, Misses: st.Misses, Lookups: st.Lookups, Evictions: st.Evictions, Entries: st.Entries}
-}
-
-// unixNanoTime is the time of ns Unix nanoseconds, the zero time for 0.
-func unixNanoTime(ns int64) time.Time {
-	if ns == 0 {
-		return time.Time{}
-	}
-	return time.Unix(0, ns)
 }

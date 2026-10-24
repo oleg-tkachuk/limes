@@ -150,3 +150,50 @@ func TestStatsTellTheCausesOfAClear(t *testing.T) {
 		t.Error("LastSyncLoss set before any loss")
 	}
 }
+
+// statsReads is how many times the concurrent check reads Stats.
+const statsReads = 20_000
+
+// Read while the cache clears for every cause at once, the parts of Clears
+// never add up to more than Clears: each is counted after its Clear and
+// read before the whole.
+func TestStatsPartsNeverExceedClears(t *testing.T) {
+	s := newExampleStack()
+	cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: isRevokedOnly{s.records}})
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for _, clear := range []func(){cache.Listening, func() { cache.Signal() }, func() { cache.ClearRevoked() }} {
+		wg.Go(func() {
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					clear()
+				}
+			}
+		})
+	}
+	defer func() {
+		close(stop)
+		wg.Wait()
+	}()
+	for range statsReads {
+		st := cache.Stats()
+		if parts := st.Syncs + st.SignalsWhole + st.ClearsWithoutLineage; parts > st.Clears {
+			t.Fatalf("Stats = %+v: its parts add up to %d, past Clears", st, parts)
+		}
+	}
+}
+
+// A loss at the Unix epoch is a loss: LastSyncLoss is unset only before
+// the first, whatever the clock says.
+func TestLastSyncLossAtTheEpoch(t *testing.T) {
+	s := newExampleStack()
+	epoch := time.Unix(0, 0).UTC()
+	cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: s.records, Now: func() time.Time { return epoch }})
+	cache.NotListening()
+	if st := cache.Stats(); st.SyncsLost != 1 || st.LastSyncLoss.IsZero() || !st.LastSyncLoss.Equal(epoch) {
+		t.Errorf("Stats after a loss at the epoch = %+v; want LastSyncLoss %s", st, epoch)
+	}
+}
