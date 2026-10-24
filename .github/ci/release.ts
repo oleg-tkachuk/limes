@@ -29,6 +29,7 @@
 // attempt pushed finds it only while it has no release, and the nested
 // modules are proposed their requirement of it all the same.
 
+import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 import { error, info, notice, setOutput, summarize, table, withoutWorkflowCommands } from "./lib/actions.ts";
@@ -128,7 +129,15 @@ export async function prereleaseModule(r: Release, module: Module): Promise<Outc
   // Read before the tag is made: the candidate's notes are those of the
   // release it stands for, from the last release on.
   const notesFile = join(r.notesDir, `release-notes-${module.name}-${RC}.md`);
+  // A file from an earlier run would read as this dry run's notes.
+  rmSync(notesFile, { force: true });
   await r.candidateNotes(module, notesFile);
+  // No notes: semantic-release found nothing to release where the policy
+  // found a candidate, and the two disagree on what is pending. Nothing is
+  // tagged rather than a candidate published with no notes.
+  if (!existsSync(notesFile)) {
+    throw new Error(`${module.name}: semantic-release's dry run releases nothing, though ${tag} was due; no candidate tagged`);
+  }
   await git(["tag", tag], r.root);
   await r.pushTag(tag);
   await publish(r.github, tag, module.prefix, notesFrom(notesFile), false, r.root, true);

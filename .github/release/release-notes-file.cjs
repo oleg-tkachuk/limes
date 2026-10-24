@@ -24,7 +24,13 @@ function write({ env, nextRelease, logger }) {
 // generateNotes runs after the plugins listed before this one generated
 // theirs, which it is handed, and in a dry run too, which prepare is not:
 // a release candidate's notes come from a dry run (.github/ci/release.ts).
-// It adds nothing to the notes.
+// It adds nothing to the notes. What it writes has not been through
+// semantic-release's masking of secrets yet, which runs after every plugin
+// generated its notes; a release's are then written again, masked, by
+// prepare, but a candidate's stay as written here — commit messages carry
+// no secrets, and nothing runs after the masking in a dry run. Their heading
+// is the release's version, linked to a comparison that exists once that
+// release is tagged.
 async function generateNotes(_pluginConfig, context) {
   write(context);
   return "";

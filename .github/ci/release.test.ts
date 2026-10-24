@@ -159,6 +159,7 @@ describe("releaseAll", () => {
   let failedGates: Set<string>;
   let rootTag: string | undefined;
   let failing: string | undefined;
+  let noCandidateNotes = false;
 
   before(async () => {
     notesDir = mkdtempSync(join(tmpdir(), "limes-notes-"));
@@ -175,6 +176,7 @@ describe("releaseAll", () => {
     failedGates = new Set();
     rootTag = undefined;
     failing = undefined;
+    noCandidateNotes = false;
   });
   afterEach(() => repo.cleanup());
 
@@ -195,7 +197,9 @@ describe("releaseAll", () => {
         }
       },
       async candidateNotes(module: Module, notesFile: string) {
-        writeFileSync(notesFile, `${CANDIDATE_NOTES} of ${module.name}\n`);
+        if (!noCandidateNotes) {
+          writeFileSync(notesFile, `${CANDIDATE_NOTES} of ${module.name}\n`);
+        }
       },
       gatePassed: async (job) => gatesPassing && !failedGates.has(job),
       fetchInfo: async () => ({ ok: true, status: 200 }),
@@ -418,6 +422,22 @@ describe("releaseAll", () => {
       repo.write("x.go", "// b\n");
       await repo.commit("fix: b");
       assert.deepEqual(await candidate(), ["v0.2.0-rc.1", "v0.2.0-rc.2"]);
+    });
+    test("a candidate whose dry run releases nothing is not tagged", async () => {
+      repo.write("x.go", "// a\n");
+      await repo.commit("feat: a");
+      noCandidateNotes = true;
+      const printed: string[] = [];
+      const log = console.log;
+      console.log = (line: string) => void printed.push(line);
+      try {
+        assert.equal(await releaseAll({ ...release(), channel: Channel.Prerelease, only: "limes" }), false);
+      } finally {
+        console.log = log;
+      }
+      assert.match(printed.join("\n"), /releases nothing/);
+      assert.equal(data.tags.has("v0.2.0-rc.1"), false);
+      assert.deepEqual(data.published, []);
     });
     test("a candidate is published with the notes of the release it stands for", async () => {
       repo.write("x.go", "// a\n");
