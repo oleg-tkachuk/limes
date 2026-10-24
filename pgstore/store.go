@@ -445,7 +445,8 @@ const (
 	sqlRevokeBiscuit = `
 INSERT INTO limes.biscuit_revocations (revocation_id, capability_id, tenant_id, revoked_at, note, actor)
 VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (revocation_id, capability_id) DO NOTHING`
+ON CONFLICT (revocation_id, capability_id) DO NOTHING
+RETURNING revoked_at, note, actor`
 
 	sqlGetBiscuitRevocation = `
 SELECT revoked_at, note, actor FROM limes.biscuit_revocations WHERE revocation_id = $1 AND capability_id = $2`
@@ -463,13 +464,16 @@ func (s *Store) IsBiscuitRevoked(ctx context.Context, revocationIDs [][]byte) (b
 }
 
 // RevokeBiscuit lists one copy's revocation id under its capability; the
-// first entry stands.
-func (s *Store) RevokeBiscuit(ctx context.Context, req limes.RevokeBiscuitRequest) error {
+// first entry stands, and the result carries it. The entry another revoke
+// wrote is read in a statement of its own, as Revoke reads one: under READ
+// COMMITTED it sees what committed while the insert waited.
+func (s *Store) RevokeBiscuit(ctx context.Context, req limes.RevokeBiscuitRequest) (limes.RevokeBiscuitResult, error) {
 	if err := req.Validate(); err != nil {
-		return err
+		return limes.RevokeBiscuitResult{}, err
 	}
 	capID, revocationID := req.Copy.CapabilityID(), req.Copy.RevocationID()
-	return s.inTx(ctx, func(tx pgx.Tx) error {
+	var result limes.RevokeBiscuitResult
+	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		var tenant uuid.UUID
 		err := tx.QueryRow(ctx, sqlCapabilityTenant, capID).Scan(&tenant)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -478,9 +482,19 @@ func (s *Store) RevokeBiscuit(ctx context.Context, req limes.RevokeBiscuitReques
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, sqlRevokeBiscuit, revocationID, capID, tenant, s.clock(), req.Note, req.Actor)
+		result = limes.RevokeBiscuitResult{Revocation: limes.BiscuitRevocation{CapabilityID: capID, RevocationID: revocationID}}
+		r := &result.Revocation
+		err = tx.QueryRow(ctx, sqlRevokeBiscuit, revocationID, capID, tenant, s.clock(), req.Note, req.Actor).Scan(&r.RevokedAt, &r.Note, &r.Actor)
+		if errors.Is(err, pgx.ErrNoRows) {
+			result.AlreadyRevoked = true
+			err = tx.QueryRow(ctx, sqlGetBiscuitRevocation, revocationID, capID).Scan(&r.RevokedAt, &r.Note, &r.Actor)
+		}
 		return err
 	})
+	if err != nil {
+		return limes.RevokeBiscuitResult{}, err
+	}
+	return result, nil
 }
 
 // GetBiscuitRevocation reads back what RevokeBiscuit wrote for the copy.

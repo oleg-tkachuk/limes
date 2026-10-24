@@ -232,14 +232,14 @@ func TestRevokeBiscuit(t *testing.T) {
 	}
 	copyID, other := []byte("copy"), []byte("other")
 
-	if err := s.RevokeBiscuit(ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(uuid.New(), copyID)}); !errors.Is(err, limes.ErrNotFound) {
+	if _, err := s.RevokeBiscuit(ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(uuid.New(), copyID)}); !errors.Is(err, limes.ErrNotFound) {
 		t.Fatalf("unknown capability: err = %v, want ErrNotFound", err)
 	}
-	if err := s.RevokeBiscuit(ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(id, nil)}); err == nil {
+	if _, err := s.RevokeBiscuit(ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(id, nil)}); err == nil {
 		t.Fatal("empty revocation id accepted")
 	}
 	for range 2 { // idempotent
-		if err := s.RevokeBiscuit(ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(id, copyID)}); err != nil {
+		if _, err := s.RevokeBiscuit(ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(id, copyID)}); err != nil {
 			t.Fatal(err)
 		}
 	}

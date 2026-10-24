@@ -857,7 +857,8 @@ func checkBiscuit(t *testing.T, f fixture) {
 	// holder of two Biscuits can graft one's block onto the other.
 	sharedID := []byte("grafted-copy")
 	revoke := func(capID uuid.UUID, id []byte) error {
-		return store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(capID, id), Note: "test", Actor: "storetest"})
+		_, err := store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(capID, id), Note: "test", Actor: "storetest"})
+		return err
 	}
 	isRevoked := func(ids ...[]byte) bool {
 		t.Helper()
@@ -874,12 +875,24 @@ func checkBiscuit(t *testing.T, f fixture) {
 	if err := revoke(live.ID, nil); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("an empty revocation id: err = %v, want ErrInvalidRequest", err)
 	}
-	if err := store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{}); !errors.Is(err, limes.ErrInvalidRequest) {
+	if _, err := store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{}); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("a request naming no copy: err = %v, want ErrInvalidRequest", err)
 	}
-	for range 2 { // idempotent
-		if err := revoke(live.ID, copyID); err != nil {
+	// The first revoke writes the entry and reports it; a repeat writes
+	// nothing and reports the first.
+	var firstEntry limes.BiscuitRevocation
+	for i := range 2 {
+		r, err := store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(live.ID, copyID), Note: "test", Actor: "storetest"})
+		if err != nil {
 			t.Fatalf("RevokeBiscuit: %v", err)
+		}
+		if r.AlreadyRevoked != (i > 0) || r.Revocation.CapabilityID != live.ID || !bytes.Equal(r.Revocation.RevocationID, copyID) || r.Revocation.Note != "test" {
+			t.Errorf("RevokeBiscuit, time %d = %+v; want AlreadyRevoked %v and the first entry", i+1, r, i > 0)
+		}
+		if i == 0 {
+			firstEntry = r.Revocation
+		} else if !r.Revocation.RevokedAt.Equal(firstEntry.RevokedAt) {
+			t.Errorf("a repeated RevokeBiscuit reported an entry of %s; the first was of %s", r.Revocation.RevokedAt, firstEntry.RevokedAt)
 		}
 	}
 	// A copy attenuated from a revoked one carries the revoked id before its
@@ -887,15 +900,15 @@ func checkBiscuit(t *testing.T, f fixture) {
 	if !isRevoked(otherID, copyID) || !isRevoked(copyID, otherID) || isRevoked(otherID) {
 		t.Error("IsBiscuitRevoked must hold for a token carrying a revoked id, wherever it is, and only then")
 	}
-	if err := store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{
+	if _, err := store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{
 		Copy: biscuitCopy(live.ID, copyID), Note: "again", Actor: "someone-else",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := store.GetBiscuitRevocation(f.Ctx, biscuitCopy(live.ID, copyID))
 	if err != nil || got.CapabilityID != live.ID || !bytes.Equal(got.RevocationID, copyID) ||
-		got.Note != "test" || got.Actor != "storetest" || got.RevokedAt.IsZero() {
-		t.Errorf("GetBiscuitRevocation = %+v, %v; want the first revoke of %s", got, err, live.ID)
+		got.Note != "test" || got.Actor != "storetest" || got.RevokedAt.IsZero() || !got.RevokedAt.Equal(firstEntry.RevokedAt) {
+		t.Errorf("GetBiscuitRevocation = %+v, %v; want the first revoke of %s, as RevokeBiscuit reported it", got, err, live.ID)
 	}
 	if _, err := store.GetBiscuitRevocation(f.Ctx, biscuitCopy(live.ID, otherID)); !errors.Is(err, limes.ErrNotFound) {
 		t.Errorf("GetBiscuitRevocation of an id never revoked: err = %v, want ErrNotFound", err)
@@ -911,7 +924,7 @@ func checkBiscuit(t *testing.T, f fixture) {
 	if err := revoke(expired.ID, sharedID); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{
+	if _, err := store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{
 		Copy: biscuitCopy(live.ID, sharedID), Note: "live", Actor: "operator",
 	}); err != nil {
 		t.Fatal(err)
@@ -1148,7 +1161,7 @@ func checkRecordIsItsOwn(t *testing.T, f fixture) {
 		return
 	}
 	copyID := []byte("own-copy")
-	if err := store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(issued.ID, copyID)}); err != nil {
+	if _, err := store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(issued.ID, copyID)}); err != nil {
 		t.Fatal(err)
 	}
 	rev, err := store.GetBiscuitRevocation(f.Ctx, biscuitCopy(issued.ID, copyID))
@@ -1226,7 +1239,8 @@ func checkReadOnlyScope(t *testing.T, f fixture) {
 	biscuits, withBiscuits := f.Store.(limes.BiscuitRevocationStore)
 	if withBiscuits {
 		writes["RevokeBiscuit"] = func() error {
-			return biscuits.RevokeBiscuit(ro, limes.RevokeBiscuitRequest{Copy: biscuitCopy(live.ID, copyID)})
+			_, err := biscuits.RevokeBiscuit(ro, limes.RevokeBiscuitRequest{Copy: biscuitCopy(live.ID, copyID)})
+			return err
 		}
 	}
 	if eraser, ok := f.Store.(limes.TenantRecordEraser); ok {
@@ -1276,14 +1290,14 @@ func checkEraseTenant(t *testing.T, f fixture) {
 	copyID := []byte("erased-tenant-copy")
 	biscuits, withBiscuits := f.Store.(limes.BiscuitRevocationStore)
 	if withBiscuits {
-		if err := biscuits.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(child.ID, copyID)}); err != nil {
+		if _, err := biscuits.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(child.ID, copyID)}); err != nil {
 			t.Fatalf("RevokeBiscuit: %v", err)
 		}
 	}
 	expired := f.insert(t, f.newCapability("agent:expired", uuid.Nil, f.now.Add(-expiredAgo)))
 	expiredCopyID := []byte("erased-tenant-expired-copy")
 	if withBiscuits {
-		if err := biscuits.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(expired.ID, expiredCopyID)}); err != nil {
+		if _, err := biscuits.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(expired.ID, expiredCopyID)}); err != nil {
 			t.Fatalf("RevokeBiscuit of the expired record's copy: %v", err)
 		}
 	}
@@ -1427,7 +1441,7 @@ func checkCensusEdges(t *testing.T, f fixture) {
 	}
 	live := f.live(t, "agent:copied", uuid.Nil)
 	if biscuits, ok := f.Store.(limes.BiscuitRevocationStore); ok {
-		if err := biscuits.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(live.ID, []byte("census-copy"))}); err != nil {
+		if _, err := biscuits.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(live.ID, []byte("census-copy"))}); err != nil {
 			t.Fatalf("RevokeBiscuit: %v", err)
 		}
 	}

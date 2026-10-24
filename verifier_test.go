@@ -62,9 +62,10 @@ func (m *memStore) IsBiscuitRevoked(_ context.Context, ids [][]byte) (bool, erro
 	}
 	return false, nil
 }
-func (m *memStore) RevokeBiscuit(_ context.Context, args RevokeBiscuitRequest) error {
+func (m *memStore) RevokeBiscuit(_ context.Context, args RevokeBiscuitRequest) (RevokeBiscuitResult, error) {
+	already := m.copies[string(args.Copy.RevocationID())]
 	m.copies[string(args.Copy.RevocationID())] = true
-	return nil
+	return RevokeBiscuitResult{AlreadyRevoked: already}, nil
 }
 func (m *memStore) Purge(context.Context, PurgeRequest) (PurgeResult, error) {
 	return PurgeResult{}, nil

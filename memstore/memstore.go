@@ -589,25 +589,28 @@ func (s *Store) IsBiscuitRevoked(_ context.Context, revocationIDs [][]byte) (boo
 }
 
 // RevokeBiscuit implements limes.BiscuitRevocationStore.
-func (s *Store) RevokeBiscuit(_ context.Context, args limes.RevokeBiscuitRequest) error {
+func (s *Store) RevokeBiscuit(_ context.Context, args limes.RevokeBiscuitRequest) (limes.RevokeBiscuitResult, error) {
 	if err := args.Validate(); err != nil {
-		return err
+		return limes.RevokeBiscuitResult{}, err
 	}
 	capID, revocationID := args.Copy.CapabilityID(), args.Copy.RevocationID()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.caps[capID]; !ok {
-		return limes.ErrNotFound
+		return limes.RevokeBiscuitResult{}, limes.ErrNotFound
 	}
 	key := copyKeyOf(capID, revocationID)
-	if _, ok := s.revokedCopies[key]; !ok { // the first entry stands
-		s.revokedCopies[key] = limes.BiscuitRevocation{
+	r, already := s.revokedCopies[key]
+	if !already { // the first entry stands
+		r = limes.BiscuitRevocation{
 			CapabilityID: capID, RevocationID: revocationID,
 			RevokedAt: s.nowFn(), Note: args.Note, Actor: args.Actor,
 		}
+		s.revokedCopies[key] = r
 		s.revokedIDs[key.id]++
 	}
-	return nil
+	r.RevocationID = slices.Clone(r.RevocationID)
+	return limes.RevokeBiscuitResult{AlreadyRevoked: already, Revocation: r}, nil
 }
 
 // GetBiscuitRevocation returns what RevokeBiscuit wrote for the copy.
