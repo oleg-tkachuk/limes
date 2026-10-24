@@ -111,7 +111,6 @@ func ExampleInstrumentRevocationCache() {
 	}
 	// Output:
 	// limes.revocation_cache.clears
-	// limes.revocation_cache.clears_revoked
 	// limes.revocation_cache.clears_without_lineage
 	// limes.revocation_cache.entries
 	// limes.revocation_cache.evictions
@@ -119,6 +118,7 @@ func ExampleInstrumentRevocationCache() {
 	// limes.revocation_cache.lineage
 	// limes.revocation_cache.lookups
 	// limes.revocation_cache.misses
+	// limes.revocation_cache.narrow_clears
 	// limes.revocation_cache.signals
 	// limes.revocation_cache.signals_whole
 	// limes.revocation_cache.synced

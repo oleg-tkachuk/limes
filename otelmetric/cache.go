@@ -15,10 +15,10 @@ import (
 
 // OpenTelemetry instruments of a limes.RevocationCache
 // (InstrumentRevocationCache), read from its Stats when the provider
-// collects. Hits, misses, lookups, evictions and entries carry kind:
-// capability for IsRevoked, biscuit for IsBiscuitRevoked; the clears and
-// the revocation signal's instruments are of the whole cache and carry
-// none.
+// collects. Hits, misses, lookups, evictions and entries carry
+// limes.revocation_cache.kind: capability for IsRevoked, biscuit for
+// IsBiscuitRevoked; the clears and the revocation signals' instruments are
+// of the whole cache and carry none.
 
 // Instrument names, as an exporter shows them.
 const (
@@ -28,9 +28,9 @@ const (
 	metricCacheEvictions = "limes.revocation_cache.evictions"
 	metricCacheEntries   = "limes.revocation_cache.entries"
 	metricCacheClears    = "limes.revocation_cache.clears"
-	// metricCacheClearsRevoked counts the narrow clears, which drop only
+	// metricCacheNarrowClears counts the narrow clears, which drop only
 	// the answers a revocation outdates.
-	metricCacheClearsRevoked = "limes.revocation_cache.clears_revoked"
+	metricCacheNarrowClears = "limes.revocation_cache.narrow_clears"
 	// The causes of a whole clear apart from the consumer's own, and the
 	// state of the revocation signal (RevocationCacheStats).
 	metricCacheClearsWithoutLineage = "limes.revocation_cache.clears_without_lineage"
@@ -38,7 +38,7 @@ const (
 	metricCacheSynced               = "limes.revocation_cache.synced"
 	metricCacheSyncs                = "limes.revocation_cache.syncs"
 	metricCacheSyncsLost            = "limes.revocation_cache.syncs_lost"
-	metricCacheLastSyncLoss         = "limes.revocation_cache.last_sync_loss"
+	metricCacheLastSyncLoss         = "limes.revocation_cache.last_sync_loss_time"
 	metricCacheSignals              = "limes.revocation_cache.signals"
 	metricCacheSignalsWhole         = "limes.revocation_cache.signals_whole"
 )
@@ -47,12 +47,9 @@ const (
 // epoch.
 const unitSeconds = "s"
 
-// unitDimensionless is the unit of a 0/1 flag, as UCUM, which OpenTelemetry
-// follows, spells a dimensionless value.
-const unitDimensionless = "1"
-
-// attrKind is the attribute naming the kind of answer.
-const attrKind = "kind"
+// attrKind is the attribute naming the kind of answer, under the cache's
+// namespace so it meets no other "kind" of the same series.
+const attrKind = "limes.revocation_cache.kind"
 
 // Kinds of answer.
 const (
@@ -79,10 +76,10 @@ func InstrumentRevocationCache(cache *limes.RevocationCache, opts ...Option) (me
 	}
 	meter := provider.Meter(instrumentationScope)
 	var (
-		errs                                                    [15]error
-		hits, misses, lookups, evictions, clears, clearsRevoked metric.Int64ObservableCounter
-		clearsWithoutLineage, syncs, syncsLost, signals, whole  metric.Int64ObservableCounter
-		entries, lineage, synced, lastSyncLoss                  metric.Int64ObservableGauge
+		errs                                                   [15]error
+		hits, misses, lookups, evictions, clears, narrowClears metric.Int64ObservableCounter
+		clearsWithoutLineage, syncs, syncsLost, signals, whole metric.Int64ObservableCounter
+		entries, lineage, synced, lastSyncLoss                 metric.Int64ObservableGauge
 	)
 	hits, errs[0] = meter.Int64ObservableCounter(metricCacheHits,
 		metric.WithDescription("Revocation questions answered from the cache, by kind."))
@@ -95,14 +92,14 @@ func InstrumentRevocationCache(cache *limes.RevocationCache, opts ...Option) (me
 	entries, errs[4] = meter.Int64ObservableGauge(metricCacheEntries,
 		metric.WithDescription("Answers the cache holds, by kind."))
 	clears, errs[5] = meter.Int64ObservableCounter(metricCacheClears,
-		metric.WithDescription("Calls to RevocationCache.Clear."))
-	clearsRevoked, errs[6] = meter.Int64ObservableCounter(metricCacheClearsRevoked,
+		metric.WithDescription("Whole clears of the cache: the consumer's own Clear, and those of a signal's Listening and RevokedAll and of a ClearRevoked without lineage."))
+	narrowClears, errs[6] = meter.Int64ObservableCounter(metricCacheNarrowClears,
 		metric.WithDescription("Calls to RevocationCache.ClearRevoked that dropped only what a revocation outdates."))
 	clearsWithoutLineage, errs[7] = meter.Int64ObservableCounter(metricCacheClearsWithoutLineage,
 		metric.WithDescription("Calls to RevocationCache.ClearRevoked that cleared whole, as the upstream names no lineage."))
-	lineage, errs[8] = meter.Int64ObservableGauge(metricCacheLineage, metric.WithUnit(unitDimensionless),
+	lineage, errs[8] = meter.Int64ObservableGauge(metricCacheLineage,
 		metric.WithDescription("1 when the cache's upstream names each answer's ancestors, so ClearRevoked is narrow; 0 otherwise."))
-	synced, errs[9] = meter.Int64ObservableGauge(metricCacheSynced, metric.WithUnit(unitDimensionless),
+	synced, errs[9] = meter.Int64ObservableGauge(metricCacheSynced,
 		metric.WithDescription("1 while a revocation signal vouches for the cache and SyncedTTL bounds its answers; 0 while TTL does."))
 	syncs, errs[10] = meter.Int64ObservableCounter(metricCacheSyncs,
 		metric.WithDescription("Calls to RevocationSignal.Listening: the watchers' connections, each a clear."))
@@ -135,7 +132,7 @@ func InstrumentRevocationCache(cache *limes.RevocationCache, opts ...Option) (me
 			o.ObserveInt64(entries, int64(c.Entries), k.attrs)
 		}
 		o.ObserveInt64(clears, saturated(st.Clears))
-		o.ObserveInt64(clearsRevoked, saturated(st.NarrowClears))
+		o.ObserveInt64(narrowClears, saturated(st.NarrowClears))
 		o.ObserveInt64(clearsWithoutLineage, saturated(st.ClearsWithoutLineage))
 		o.ObserveInt64(lineage, flag(st.Lineage))
 		o.ObserveInt64(synced, flag(st.Synced))
@@ -147,7 +144,7 @@ func InstrumentRevocationCache(cache *limes.RevocationCache, opts ...Option) (me
 		o.ObserveInt64(signals, saturated(st.Signals))
 		o.ObserveInt64(whole, saturated(st.SignalsWhole))
 		return nil
-	}, hits, misses, lookups, evictions, entries, clears, clearsRevoked,
+	}, hits, misses, lookups, evictions, entries, clears, narrowClears,
 		clearsWithoutLineage, lineage, synced, syncs, syncsLost, lastSyncLoss, signals, whole)
 	if err != nil {
 		return nil, fmt.Errorf("otelmetric: cache callback: %w", err)
