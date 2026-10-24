@@ -276,3 +276,37 @@ func TestRevocationWatcherDownServesTheShortTTL(t *testing.T) {
 		t.Error("a signalled revocation not seen")
 	}
 }
+
+// sqlIsRevokedSource is limes.is_revoked's body.
+const sqlIsRevokedSource = `SELECT prosrc FROM pg_proc WHERE oid = 'limes.is_revoked(uuid, integer)'::regprocedure`
+
+// IsRevoked and RevocationLineage answer alike for every place in a chain —
+// a live leaf, a revoked root's descendants, one revoked itself, and an id
+// not on record — as is_revoked reads revocation_lineage's walk.
+func TestIsRevokedAnswersAsRevocationLineage(t *testing.T) {
+	f := newTenantFixture(t)
+	var src string
+	if err := owner.QueryRow(t.Context(), sqlIsRevokedSource).Scan(&src); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(src, "limes.revocation_lineage(") {
+		t.Errorf("limes.is_revoked walks the chain on its own:\n%s", src)
+	}
+	ids := f.tree(t, root, 0, 1, root)
+	if _, err := f.records.Revoke(WithTenant(t.Context(), f.mine), limes.RevokeRequest{CapabilityID: ids[1]}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range append(ids, uuid.New()) {
+		revoked, err := f.records.IsRevoked(t.Context(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lineage, _, err := f.records.RevocationLineage(t.Context(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if revoked != lineage {
+			t.Errorf("%s: IsRevoked %v, RevocationLineage %v", id, revoked, lineage)
+		}
+	}
+}
