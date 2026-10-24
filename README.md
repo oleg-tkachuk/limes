@@ -153,7 +153,7 @@ commits or rolls it back (`pgstore.ErrChargeTransaction`), and it closes when
 the callback returns.
 Optional contracts serve one feature each: `BiscuitRevocationStore` and
 `meter.CopyUsageReader` for Biscuit copies, `meter.LedgerReader` for billing
-reads, `RecordCensus` for a census of records, `RecordLister` to list a
+reads and `meter.LedgerHousekeeping` to remove charges past their retention, `RecordCensus` for a census of records, `RecordLister` to list a
 tenant's records and `RecordListingReader` to read one — `RecordReporter`
 is both, and `memstore.NewCensus` and `pgstore.NewCensus` return the one
 `Census` that serves all three — and `TenantRecordEraser` and
