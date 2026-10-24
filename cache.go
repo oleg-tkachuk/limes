@@ -64,10 +64,6 @@ var ErrNoRevocationLineage = errors.New("limes: the revocation upstream names no
 // RevocationCacheConfig.SyncedTTL.
 const DefaultRevocationCacheTTL = 2 * time.Second
 
-// defaultSignals is how many revocation signals a cache waits for when its
-// configuration names none (RevocationCacheConfig.Signals): one watcher.
-const defaultSignals = 1
-
 // DefaultRevocationCacheEntries bounds the cache. Past it, the oldest entry
 // makes room for the new one: a flood of distinct ids costs extra lookups,
 // never unbounded memory, and never the answers cached for everyone else.
@@ -101,18 +97,17 @@ type RevocationCache struct {
 	// revocation signal and while one vouches for the cache (synced).
 	ttl, syncedTTL time.Duration
 	synced         atomic.Bool
-	// signalsNeeded is how many signals must listen for the cache to be
-	// synced, and listening how many do, under syncMu, which orders the
-	// changes of synced and of the TTL in force.
-	signalsNeeded int
-	syncMu        sync.Mutex
-	listening     int
-	// syncs counts the calls to Listening, syncsLost those to NotListening,
+	// open is how many RevocationSignals are open, and listening how many
+	// of them listen, under syncMu, which orders the changes of synced and
+	// of the TTL in force.
+	syncMu          sync.Mutex
+	open, listening int
+	// syncs counts the signals' Listening, syncsLost their NotListening,
 	// and lastSyncLoss is the time of the last: nil, none yet.
 	syncs, syncsLost atomic.Uint64
 	lastSyncLoss     atomic.Pointer[time.Time]
-	// signals counts the calls to Signal, and signalsWhole those that named
-	// no id.
+	// signals counts the signals' Revoked and RevokedAll, and signalsWhole
+	// the RevokedAll.
 	signals, signalsWhole atomic.Uint64
 	// narrowClears counts the calls to ClearRevoked that did not Clear, and
 	// clearsWithoutLineage those that did.
@@ -148,19 +143,14 @@ type RevocationCacheConfig struct {
 	// It bounds how long a revocation may go unseen where no revocation
 	// signal reaches the cache.
 	TTL time.Duration
-	// SyncedTTL is how long an answer is served while a revocation signal
-	// vouches for the cache: from Listening to NotListening, which
-	// pgstore.RevocationWatcher calls as its connection comes and goes.
-	// A revocation then reaches the cache at once, so the TTL can be long.
-	// Before the first Listening and after NotListening, TTL bounds every
-	// answer, those cached under SyncedTTL among them. Zero: TTL; shorter
-	// than TTL is refused.
+	// SyncedTTL is how long an answer is served while revocation signals
+	// vouch for the cache: while at least one RevocationSignal is open and
+	// every open one listens, as pgstore.RevocationWatcher's does while
+	// its connection listens. A revocation then reaches the cache at once,
+	// so the TTL can be long. Otherwise TTL bounds every answer, those
+	// cached under SyncedTTL among them. Zero: TTL; shorter than TTL is
+	// refused.
 	SyncedTTL time.Duration
-	// Signals is how many revocation signals feed the cache, each a watcher
-	// calling Listening and NotListening: SyncedTTL holds only while every
-	// one of them listens, since a revocation the one not listening would
-	// have carried goes unheard. Zero: one; negative is refused.
-	Signals int
 	// MaxEntries bounds each kind of answer on its own, so a flood of one
 	// never evicts the other. Zero: DefaultRevocationCacheEntries. A Biscuit
 	// answer is one entry per revocation id, and one per set of ids asked
@@ -195,26 +185,18 @@ func NewRevocationCache(cfg RevocationCacheConfig) (*RevocationCache, error) {
 	case synced < c.TTL:
 		return nil, fmt.Errorf("limes: cache SyncedTTL %s is shorter than its TTL %s", synced, c.TTL)
 	}
-	signals := cfg.Signals
-	switch {
-	case signals == 0:
-		signals = defaultSignals
-	case signals < 0:
-		return nil, fmt.Errorf("limes: cache Signals %d is negative", signals)
-	}
 	lineage, _ := cfg.Capabilities.(RevocationLineageLookup)
 	if cfg.RequireLineage && lineage == nil {
 		return nil, fmt.Errorf("%w: %T", ErrNoRevocationLineage, cfg.Capabilities)
 	}
 	return &RevocationCache{
-		capabilities:  cfg.Capabilities,
-		lineage:       lineage,
-		biscuits:      cfg.Biscuits,
-		caps:          ttlcache.New[uuid.UUID](c),
-		copies:        ttlcache.New[string](c),
-		ttl:           c.TTL,
-		syncedTTL:     synced,
-		signalsNeeded: signals,
+		capabilities: cfg.Capabilities,
+		lineage:      lineage,
+		biscuits:     cfg.Biscuits,
+		caps:         ttlcache.New[uuid.UUID](c),
+		copies:       ttlcache.New[string](c),
+		ttl:          c.TTL,
+		syncedTTL:    synced,
 	}, nil
 }
 
@@ -293,8 +275,11 @@ func (c *RevocationCache) Clear() {
 // did not touch. A lookup in flight when it runs caches nothing, as with
 // Clear. Over an upstream that is no RevocationLineageLookup it is Clear:
 // the cache cannot tell a descendant from any other id. A Biscuit copy's
-// revocation still takes Clear.
+// revocation still takes Clear. Named no id, it drops nothing.
 func (c *RevocationCache) ClearRevoked(ids ...uuid.UUID) {
+	if len(ids) == 0 {
+		return
+	}
 	if c.lineage == nil {
 		// Counted after the Clear it is a part of: Stats reads the parts
 		// before Clears, so no part ever reads more than the whole.
@@ -306,56 +291,137 @@ func (c *RevocationCache) ClearRevoked(ids ...uuid.UUID) {
 	c.caps.Forget(ids)
 }
 
-// Listening tells the cache a revocation signal reaches it from now on:
-// pgstore.RevocationWatcher calls it each time it starts to listen. It
-// clears the cache — a revocation made while nothing listened sent a
-// signal nobody heard — and then serves answers for SyncedTTL.
-func (c *RevocationCache) Listening() {
-	c.Clear()
-	c.syncs.Add(1)
+// RevocationSignalTarget is a cache a revocation signal keeps in step
+// through a RevocationSignal of its own: pgstore.RevocationWatcher takes
+// one from each such cache it serves. RevocationCache is one.
+type RevocationSignalTarget interface {
+	NewSignal() *RevocationSignal
+}
+
+var _ RevocationSignalTarget = (*RevocationCache)(nil)
+
+// RevocationSignal is one revocation signal's hold on a RevocationCache —
+// a watcher's: it says through it when it listens and what it hears, and
+// closes it when it stops for good. The cache serves SyncedTTL while at
+// least one signal is open and every open one listens, since a revocation
+// the one not listening would have carried goes unheard. A signal opened
+// later is not waited for: start the watchers that feed one cache
+// together. After Close, every call does nothing.
+type RevocationSignal struct {
+	c *RevocationCache
+	// listening and closed are under c.syncMu.
+	listening, closed bool
+}
+
+// NewSignal opens a revocation signal on the cache. Not listening yet, it
+// keeps the cache on TTL until it listens or closes.
+func (c *RevocationCache) NewSignal() *RevocationSignal {
 	c.syncMu.Lock()
 	defer c.syncMu.Unlock()
-	c.listening++
+	c.open++
+	c.setSyncedLocked()
+	return &RevocationSignal{c: c}
+}
+
+// Listening says the signal reaches the cache from now on, at each
+// connection a watcher opens: it clears the cache — a revocation made while
+// nothing listened sent a signal nobody heard — and counts toward synced.
+// Again while listening, it is a reconnect: it clears, and counts once.
+func (s *RevocationSignal) Listening() {
+	c := s.c
+	c.syncMu.Lock()
+	defer c.syncMu.Unlock()
+	if s.closed {
+		return
+	}
+	c.Clear()
+	c.syncs.Add(1)
+	if !s.listening {
+		s.listening = true
+		c.listening++
+	}
 	c.setSyncedLocked()
 }
 
-// NotListening tells the cache the signal stopped: a revocation may now go
-// unheard, so every answer, those cached already among them, is served
-// for TTL alone until the next Listening.
-func (c *RevocationCache) NotListening() {
+// NotListening says the signal stopped: a revocation may now go unheard, so
+// every answer, those cached already among them, is served for TTL alone
+// until it listens again. Not listening, it does nothing.
+func (s *RevocationSignal) NotListening() {
+	c := s.c
+	c.syncMu.Lock()
+	defer c.syncMu.Unlock()
+	if s.closed || !s.listening {
+		return
+	}
 	c.syncsLost.Add(1)
 	at := c.caps.Now()
 	c.lastSyncLoss.Store(&at)
-	c.syncMu.Lock()
-	defer c.syncMu.Unlock()
-	c.listening = max(c.listening-1, 0)
+	s.listening = false
+	c.listening--
 	c.setSyncedLocked()
 }
 
+// Revoked is the signal's word that ids were revoked: ClearRevoked of
+// them. Named no id, it does nothing; a revocation it cannot name is
+// RevokedAll.
+func (s *RevocationSignal) Revoked(ids ...uuid.UUID) {
+	if len(ids) == 0 || s.isClosed() {
+		return
+	}
+	s.c.signals.Add(1)
+	s.c.ClearRevoked(ids...)
+}
+
+// RevokedAll is the signal's word of a revocation it cannot name — a
+// Biscuit copy's, or too many ids to name: Clear.
+func (s *RevocationSignal) RevokedAll() {
+	if s.isClosed() {
+		return
+	}
+	c := s.c
+	c.signals.Add(1)
+	// Counted after the Clear it is a part of, as in ClearRevoked.
+	c.Clear()
+	c.signalsWhole.Add(1)
+}
+
+// Close ends the signal: it no longer counts toward synced, and the cache
+// is synced again only while another open signal listens. Once is enough;
+// again, it does nothing.
+func (s *RevocationSignal) Close() {
+	c := s.c
+	c.syncMu.Lock()
+	defer c.syncMu.Unlock()
+	if s.closed {
+		return
+	}
+	s.closed = true
+	if s.listening {
+		s.listening = false
+		c.listening--
+	}
+	c.open--
+	c.setSyncedLocked()
+}
+
+// isClosed reports whether Close ran.
+func (s *RevocationSignal) isClosed() bool {
+	s.c.syncMu.Lock()
+	defer s.c.syncMu.Unlock()
+	return s.closed
+}
+
 // setSyncedLocked makes the cache synced, and SyncedTTL the bound, while
-// every signal it needs listens, and TTL otherwise; syncMu is held.
+// a signal is open and every open one listens, and TTL otherwise; syncMu
+// is held.
 func (c *RevocationCache) setSyncedLocked() {
-	synced := c.listening >= c.signalsNeeded
+	synced := c.open > 0 && c.listening == c.open
 	c.synced.Store(synced)
 	if synced {
 		c.setTTL(c.syncedTTL)
 		return
 	}
 	c.setTTL(c.ttl)
-}
-
-// Signal is a revocation signal's word that ids were revoked: ClearRevoked
-// of them, or Clear when it names none — a Biscuit copy's revocation, or
-// too many ids to name. pgstore.RevocationWatcher calls it on each
-// notification, so Stats counts what the signal said.
-func (c *RevocationCache) Signal(ids ...uuid.UUID) {
-	c.signals.Add(1)
-	if len(ids) == 0 {
-		c.Clear()
-		c.signalsWhole.Add(1)
-		return
-	}
-	c.ClearRevoked(ids...)
 }
 
 // setTTL is the TTL each kind of answer is served for.
@@ -386,20 +452,20 @@ type RevocationCacheStats struct {
 	// whole, as the upstream names no lineage: a part of Clears, apart from
 	// a Clear asked for. Growing, narrow invalidation is off (Lineage).
 	ClearsWithoutLineage uint64
-	// Synced reports that a revocation signal vouches for the cache now,
-	// and SyncedTTL bounds its answers; false, TTL does. Syncs counts the
-	// calls to Listening, each a Clear, among Clears: the watcher's
-	// connections, its first and every reconnect.
+	// Synced reports that revocation signals vouch for the cache now, and
+	// SyncedTTL bounds its answers; false, TTL does. Syncs counts the
+	// signals' Listening, each a Clear, among Clears: the watchers'
+	// connections, their first and every reconnect.
 	Synced bool
 	Syncs  uint64
-	// SyncsLost counts the calls to NotListening, and LastSyncLoss is the
+	// SyncsLost counts the signals' NotListening, and LastSyncLoss is the
 	// time of the last: zero, none yet. A count growing as fast as Syncs
 	// says the watcher keeps losing its connection.
 	SyncsLost    uint64
 	LastSyncLoss time.Time
-	// Signals counts the notifications a revocation signal passed on
-	// (Signal), and SignalsWhole those that named no id and cleared whole,
-	// a part of Clears. Clears less Syncs, SignalsWhole and
+	// Signals counts the notifications revocation signals passed on
+	// (Revoked, RevokedAll), and SignalsWhole those that named no id and
+	// cleared whole (RevokedAll), a part of Clears. Clears less Syncs, SignalsWhole and
 	// ClearsWithoutLineage is the Clears the consumer asked for itself.
 	Signals, SignalsWhole uint64
 	// Lineage reports that the cache's upstream names each answer's
