@@ -180,7 +180,7 @@ func TestRevocationWatcherKeepsUnrelatedAnswers(t *testing.T) {
 	if _, err := f.records.Revoke(WithTenant(t.Context(), f.mine), limes.RevokeRequest{CapabilityID: ids[0]}); err != nil {
 		t.Fatal(err)
 	}
-	await(func(st limes.RevocationCacheStats) bool { return st.ClearsRevoked == 1 }, "ClearRevoked")
+	await(func(st limes.RevocationCacheStats) bool { return st.NarrowClears == 1 }, "ClearRevoked")
 	before := cache.Stats().Capabilities
 	if revoked, err := cache.IsRevoked(t.Context(), ids[2]); err != nil || revoked {
 		t.Errorf("the unrelated capability = %v, %v; want live", revoked, err)

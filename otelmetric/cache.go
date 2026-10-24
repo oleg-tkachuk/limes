@@ -135,7 +135,7 @@ func InstrumentRevocationCache(cache *limes.RevocationCache, opts ...Option) (me
 			o.ObserveInt64(entries, int64(c.Entries), k.attrs)
 		}
 		o.ObserveInt64(clears, saturated(st.Clears))
-		o.ObserveInt64(clearsRevoked, saturated(st.ClearsRevoked))
+		o.ObserveInt64(clearsRevoked, saturated(st.NarrowClears))
 		o.ObserveInt64(clearsWithoutLineage, saturated(st.ClearsWithoutLineage))
 		o.ObserveInt64(lineage, flag(st.Lineage))
 		o.ObserveInt64(synced, flag(st.Synced))

@@ -132,7 +132,7 @@ func TestStatsTellTheCausesOfAClear(t *testing.T) {
 	}
 	other, _ := s.issue()
 	cache.Signal(other.ID)
-	if st := cache.Stats(); st.Capabilities.Entries != 1 || st.ClearsRevoked != 1 {
+	if st := cache.Stats(); st.Capabilities.Entries != 1 || st.NarrowClears != 1 {
 		t.Errorf("a signal naming an unrelated id: Stats = %+v; want the answer kept, one narrow clear", st)
 	}
 	cache.Signal()

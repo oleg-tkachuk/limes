@@ -825,7 +825,7 @@ answer: the questions answered from it (`Hits`) and not (`Misses`), the
 upstream lookups those ran (`Lookups`, fewer when concurrent misses share
 one), the live answers dropped to stay within the bound (`Evictions`, which
 growing says `MaxEntries` is too small), the answers held (`Entries`), and
-the `Clears` and `ClearsRevoked`; `otelmetric.InstrumentRevocationCache` exports them. Point the store a `RevocationCache` reads, and the watcher's connection,
+the `Clears` and `NarrowClears`; `otelmetric.InstrumentRevocationCache` exports them. Point the store a `RevocationCache` reads, and the watcher's connection,
 at the primary, not at a read replica. A standby applies a revocation after
 the primary commits it and notifies, so a cache cleared by the notification
 can read "not revoked" from a standby still behind and keep it for its

@@ -79,8 +79,8 @@ func TestClearRevokedReachesADescendant(t *testing.T) {
 	if revoked, err := cache.IsRevoked(ctx, child.Capability.ID); err != nil || !revoked {
 		t.Errorf("child after ClearRevoked of its parent = %v, %v; want revoked", revoked, err)
 	}
-	if st := cache.Stats(); st.ClearsRevoked != 1 || st.Clears != 0 {
-		t.Errorf("Stats counted %d ClearRevoked and %d Clear; want 1 and 0", st.ClearsRevoked, st.Clears)
+	if st := cache.Stats(); st.NarrowClears != 1 || st.Clears != 0 {
+		t.Errorf("Stats counted %d ClearRevoked and %d Clear; want 1 and 0", st.NarrowClears, st.Clears)
 	}
 }
 
@@ -98,7 +98,7 @@ func TestClearRevokedWithoutLineageClears(t *testing.T) {
 		t.Fatal(err)
 	}
 	cache.ClearRevoked(uuid.New())
-	if st := cache.Stats(); st.Clears != 1 || st.ClearsRevoked != 0 || st.Capabilities.Entries != 0 {
+	if st := cache.Stats(); st.Clears != 1 || st.NarrowClears != 0 || st.Capabilities.Entries != 0 {
 		t.Errorf("Stats = %+v; want one Clear and no answer left", st)
 	}
 }
