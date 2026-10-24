@@ -279,9 +279,9 @@ type TenantBudgets interface {
 // A day, and the two spans MinChargeRetention adds up.
 const (
 	day = 24 * time.Hour
-	// billingYear is a year of charges, so a yearly bill is drawn from the
-	// ledger itself.
-	billingYear = 365 * day
+	// billingYear is a year of charges, a leap year's, so a yearly bill is
+	// drawn from the ledger itself whichever year it covers.
+	billingYear = 366 * day
 	// disputeWindow is how long after that a charge may still be disputed
 	// and refunded, or a payment retried under its reference.
 	disputeWindow = 35 * day
