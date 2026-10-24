@@ -11,7 +11,8 @@ name: Auto-merge
 # released-limes gate — fails the run without holding a merge.
 #
 # The merge acts through AUTOMERGE_TOKEN — a fine-grained token or GitHub App
-# token with Contents and Pull requests write on this repository — and never
+# token with Contents and Pull requests write on this repository, and
+# Actions read, as it reads main's newest CI run and its jobs — and never
 # through GITHUB_TOKEN. That is not a style choice: a merge made with
 # GITHUB_TOKEN starts no workflow, so it would land on main with no CI run,
 # and ci.yaml would never dispatch the release. Without the secret it warns

@@ -10,8 +10,9 @@
 // A commit touches the module in dir when a path it changes lies under dir;
 // the root module (dir empty) when a path lies outside every directory in
 // exclude, the other modules. Paths are read against the first parent, so a
-// merge commit — whose body is the pull request's title, which the analyzer
-// reads — counts for the modules its pull request changed.
+// merge commit counts for the modules its pull request changed; it cuts no
+// release itself, the preset finding no type in a merge's subject, and the
+// commits it brought are counted each on its own.
 
 const { execFileSync } = require("node:child_process");
 
