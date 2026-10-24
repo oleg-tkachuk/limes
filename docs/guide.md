@@ -1040,8 +1040,8 @@ none, but with its tenant. A row is more than history — an `ExternalRef`
 replays its charge rather than charging again, a settled hold replays its
 receipt, and `Refund` finds it — so those promises hold while the charge is
 in the ledger, and a ledger may remove charges older than a retention of at
-least `meter.MinChargeRetention`, 400 days: a year of billing and a month of
-disputes. Past it a reference charges anew, a settle of the hold finds no
+least `meter.MinChargeRetention`, 401 days: a leap year of billing and 35
+days of disputes. Past it a reference charges anew, a settle of the hold finds no
 reservation, a refund is `ErrChargeNotFound`, and `SumCharges` sums what is
 left. Choose the retention from the longest a client may retry a charge or
 dispute one, and keep the ledger in a warehouse of your own if reports must
