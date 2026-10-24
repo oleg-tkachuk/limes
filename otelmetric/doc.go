@@ -4,7 +4,7 @@
 // module of its own so that limes itself never resolves an OpenTelemetry
 // dependency; a consumer that wants the metrics adds this one.
 //
-// The outcome attribute is one of allowed; overrun, committed past a
+// The limes.outcome attribute is one of allowed; overrun, committed past a
 // ceiling under meter.OverrunPolicyRecord; budget_exceeded;
 // tenant_budget_exceeded; request_limit_exceeded, a request limit or a
 // Biscuit copy past its quota (meter.ErrCopyLimitExceeded), on a Bump,

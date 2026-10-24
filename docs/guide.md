@@ -647,11 +647,11 @@ until `ReleaseExpired` runs.
 `github.com/oleg-tkachuk/limes/otelmetric`, wraps a `UsageStore` in
 OpenTelemetry instruments — a module of its own, so limes itself resolves no
 OpenTelemetry dependency: charge and
-settle attempts, reservations and request bumps counted by outcome
+settle attempts, reservations and request bumps counted by `limes.outcome`
 (`allowed`, `overrun`, `budget_exceeded`, `tenant_budget_exceeded`,
 `request_limit_exceeded` — the refusals named as their `Reason` — and
 `error`); amounts charged and refunded, and a capability's spend after each
-charge, by `unit_code`. Instruments are created per store, and an error
+charge, by `limes.unit_code`. Instruments are created per store, and an error
 creating them is returned:
 
 ```go
@@ -661,8 +661,8 @@ usage, err := otelmetric.Instrument(store,
 )
 ```
 
-A replayed charge or settle moved nothing and is not counted. `tenant_id` is
-off by default because it multiplies every series by the number of tenants;
+A replayed charge or settle moved nothing and is not counted.
+`limes.tenant_id` is off by default because it multiplies every series by the number of tenants;
 with `WithTenantAttribute`, every measurement — a refused charge or settle
 included — carries the subject's tenant.
 

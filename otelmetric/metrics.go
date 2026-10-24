@@ -18,13 +18,16 @@ import (
 //
 // Cardinality:
 //
-//   - tenant_id is the one unbounded attribute, so it is opt-in
+//   - limes.tenant_id is the one unbounded attribute, so it is opt-in
 //     (WithTenantAttribute): a deployment with many tenants multiplies every
 //     series by their number. Capability id is never an attribute.
-//   - unit_code is bounded by ISO 4217 (limes.IsUnitCode). Amounts are only
+//   - limes.unit_code is bounded by ISO 4217 (limes.IsUnitCode). Amounts are only
 //     meaningful per unit: summing USD and EUR is not a number, so every
 //     amount carries its unit and no instrument has a fixed unit of its own.
-//   - outcome is one of the outcome* constants below.
+//   - limes.outcome is one of the outcome* constants below.
+//
+// Every key is under limes., so none meets another library's outcome or
+// tenant_id on the same series.
 
 // instrumentationScope names the meter the instruments are created on.
 const instrumentationScope = "github.com/oleg-tkachuk/limes/otelmetric"
@@ -41,9 +44,9 @@ const (
 
 // Attribute keys.
 const (
-	attrOutcome  = "outcome"
-	attrTenantID = "tenant_id"
-	attrUnitCode = "unit_code"
+	attrOutcome  = "limes.outcome"
+	attrTenantID = "limes.tenant_id"
+	attrUnitCode = "limes.unit_code"
 )
 
 // Outcomes of a metered call.
@@ -80,7 +83,7 @@ func WithMeterProvider(p metric.MeterProvider) Option {
 	return func(c *meteringConfig) { c.provider = p }
 }
 
-// WithTenantAttribute labels every measurement with tenant_id. Off by
+// WithTenantAttribute labels every measurement with limes.tenant_id. Off by
 // default: it multiplies each series by the number of tenants.
 func WithTenantAttribute() Option {
 	return func(c *meteringConfig) { c.tenant = true }
