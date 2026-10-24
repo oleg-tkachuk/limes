@@ -185,3 +185,23 @@ func TestInstrumentRevocationCacheRefusesNoCache(t *testing.T) {
 		t.Error("a nil cache was accepted")
 	}
 }
+
+// The flag gauges are dimensionless, unit "1", as OpenTelemetry spells it.
+func TestInstrumentRevocationCacheUnits(t *testing.T) {
+	_, reader, _ := instrumentedCache(t)
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatal(err)
+	}
+	units := map[string]string{}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			units[m.Name] = m.Unit
+		}
+	}
+	for name, want := range map[string]string{metricLineage: "1", metricSynced: "1"} {
+		if got := units[name]; got != want {
+			t.Errorf("%s unit = %q, want %q", name, got, want)
+		}
+	}
+}

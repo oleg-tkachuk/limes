@@ -47,6 +47,10 @@ const (
 // epoch.
 const unitSeconds = "s"
 
+// unitDimensionless is the unit of a 0/1 flag, as UCUM, which OpenTelemetry
+// follows, spells a dimensionless value.
+const unitDimensionless = "1"
+
 // attrKind is the attribute naming the kind of answer.
 const attrKind = "kind"
 
@@ -96,9 +100,9 @@ func InstrumentRevocationCache(cache *limes.RevocationCache, opts ...Option) (me
 		metric.WithDescription("Calls to RevocationCache.ClearRevoked that dropped only what a revocation outdates."))
 	clearsWithoutLineage, errs[7] = meter.Int64ObservableCounter(metricCacheClearsWithoutLineage,
 		metric.WithDescription("Calls to RevocationCache.ClearRevoked that cleared whole, as the upstream names no lineage."))
-	lineage, errs[8] = meter.Int64ObservableGauge(metricCacheLineage,
+	lineage, errs[8] = meter.Int64ObservableGauge(metricCacheLineage, metric.WithUnit(unitDimensionless),
 		metric.WithDescription("1 when the cache's upstream names each answer's ancestors, so ClearRevoked is narrow; 0 otherwise."))
-	synced, errs[9] = meter.Int64ObservableGauge(metricCacheSynced,
+	synced, errs[9] = meter.Int64ObservableGauge(metricCacheSynced, metric.WithUnit(unitDimensionless),
 		metric.WithDescription("1 while a revocation signal vouches for the cache and SyncedTTL bounds its answers; 0 while TTL does."))
 	syncs, errs[10] = meter.Int64ObservableCounter(metricCacheSyncs,
 		metric.WithDescription("Calls to RevocationCache.Listening: the watcher's connections, each a clear."))
