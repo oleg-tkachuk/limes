@@ -195,6 +195,9 @@ func TestStatsPartsNeverExceedClears(t *testing.T) {
 		if parts := st.Syncs + st.SignalsWhole + st.ClearsWithoutLineage; parts > st.Clears {
 			t.Fatalf("Stats = %+v: its parts add up to %d, past Clears", st, parts)
 		}
+		if st.SignalsWhole > st.Signals {
+			t.Fatalf("Stats = %+v: more whole signals than signals", st)
+		}
 	}
 }
 
