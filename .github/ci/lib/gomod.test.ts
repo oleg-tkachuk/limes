@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { changesBeyondRequirements, statementsBeyondRequirements } from "./gomod.ts";
+import { changesBeyondRequirements, commentStart, statementsBeyondRequirements } from "./gomod.ts";
 
 const BASE = `// A module.
 module example.com/nested
@@ -46,5 +46,22 @@ describe("changesBeyondRequirements", () => {
   ];
   for (const [name, after, want] of cases) {
     test(name, () => assert.equal(changesBeyondRequirements(BASE, after), want));
+  }
+  test("a quoted replace target changed after a //", () => {
+    const quoted = (target: string) => BASE.replace("replace example.com/root => ../", `replace example.com/root => "${target}"`);
+    assert.equal(changesBeyondRequirements(quoted("../a//b"), quoted("../a//c")), true);
+  });
+});
+
+describe("commentStart", () => {
+  const cases: [string, string, number][] = [
+    ["no comment", "go 1.26.0", -1],
+    ["a comment", "go 1.26.0 // why", 10],
+    ["a // inside an interpreted string", 'replace a => "../x//y" // why', 23],
+    ["an escaped quote inside an interpreted string", 'replace a => "../x\\"//y" // why', 25],
+    ["a // inside a raw string", "replace a => `../x//y`", -1],
+  ];
+  for (const [name, line, want] of cases) {
+    test(name, () => assert.equal(commentStart(line), want));
   }
 });
