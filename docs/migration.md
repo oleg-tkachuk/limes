@@ -14,6 +14,15 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.125.0
+
+- `RecordLister.ListRecords` binds its cursor to the tenant too: one handed
+  back for another tenant is `ErrCursorMismatch`, where it paged that
+  tenant's records on from its id. memstore and pgstore do it, and
+  `storetest` checks it, so a lister of your own that ignores the tenant
+  fails it. A cursor handed out before the upgrade is refused once: start
+  again from the first page.
+
 ## v0.124.0
 
 - `RevocationCacheConfig.SyncedTTL` longer than

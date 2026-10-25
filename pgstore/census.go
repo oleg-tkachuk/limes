@@ -298,14 +298,15 @@ type listCursor struct {
 	Filters string          `json:"f"`
 }
 
-// filtersKey names the filters of req: its principal type, subject,
-// subject prefix and dispositions, these in any order and repeated or not.
-// A cursor holds it, so one handed back with other filters is refused rather
-// than paged on from its id under them, which would be neither listing.
+// filtersKey names the filters of req: its tenant, principal type,
+// subject, subject prefix and dispositions, these in any order and repeated
+// or not. A cursor holds it, so one handed back with other filters — or for
+// another tenant — is refused rather than paged on from its id under them,
+// which would be neither listing.
 func filtersKey(req limes.ListRecordsRequest) string {
 	dispositions := slices.Clone(req.Dispositions)
 	slices.Sort(dispositions)
-	raw, err := json.Marshal([]any{req.PrincipalType, req.Subject, req.SubjectPrefix, slices.Compact(dispositions)})
+	raw, err := json.Marshal([]any{req.TenantID, req.PrincipalType, req.Subject, req.SubjectPrefix, slices.Compact(dispositions)})
 	if err != nil {
 		panic(err) // strings and a list of strings always encode
 	}

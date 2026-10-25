@@ -70,7 +70,7 @@ var (
 	ErrInvalidAmount error = &familyError{"limes: invalid amount", ErrInvalidRequest}
 
 	// ErrCursorMismatch — a cursor RecordLister.ListRecords handed out for
-	// another order or other filters, handed back with these: well formed,
+	// another order, tenant or other filters, handed back with these: well formed,
 	// but a place in another listing. A caller that tells it from a
 	// malformed request starts again from the first page. It matches
 	// ErrInvalidRequest, as every refused request does; a cursor that is
