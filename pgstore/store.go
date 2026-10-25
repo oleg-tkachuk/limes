@@ -255,11 +255,15 @@ const (
 
 	// sqlRevokeTarget is the tenant of the capability Revoke names, and what
 	// its disposition is read from: the revoked flag and the expiry. The row
-	// is held for share until the revoke commits, as Insert holds a parent:
-	// an ancestor's revoke marking it waits, or is waited for and read, so
-	// the disposition is the one the entry is written against; and Purge
-	// cannot drop it between this read and the entry's insert.
-	sqlRevokeTarget = `SELECT tenant_id, revoked, expires_at FROM limes.capabilities WHERE id = $1 FOR SHARE`
+	// is held for no key update until the revoke commits: an ancestor's
+	// revoke marking it waits, or is waited for and read, so the disposition
+	// is the one the entry is written against; Purge cannot drop it between
+	// this read and the entry's insert; and a second revoke of it waits
+	// here for the first to commit, then reads its entry. Held for share,
+	// two revokes at once each held the row the other's mark had to update,
+	// and one ended in a deadlock. Key share, a metered lineage's lock, does
+	// not conflict with it.
+	sqlRevokeTarget = `SELECT tenant_id, revoked, expires_at FROM limes.capabilities WHERE id = $1 FOR NO KEY UPDATE`
 
 	sqlRevoke = `
 INSERT INTO limes.revocations (capability_id, tenant_id, revoked_at, note, actor, cascaded)
