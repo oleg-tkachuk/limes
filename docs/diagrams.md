@@ -869,7 +869,7 @@ whose `onCharged` ended the transaction with SQL of its own — `COMMIT`,
 admit the subject's tenant, as `ErrScopeMismatch`, before any row is read. It
 locks in one order, so two calls never wait on each other in a cycle: the
 tenant's erase lock (shared; an erase holds it alone), the reservation being
-settled or released, then the lineage's records `FOR SHARE`
+settled or released, then the lineage's records `FOR KEY SHARE`
 in id order — a purge locks its batch in the same order — then the tenant's
 row, the usage rows by capability id and the copies' rows by revocation id. A
 release of several holds — `ReleaseExpired`, or `DeleteUsage` dropping a

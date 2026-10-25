@@ -69,15 +69,19 @@ SELECT id FROM chain ORDER BY depth`
 	// one that never does.
 	sqlCapabilityExpiry = `SELECT expires_at FROM limes.capabilities WHERE id = $1`
 
-	// sqlHoldRecords locks the records of a lineage for share, in id order,
-	// so Purge cannot drop one while the call counts against it.
+	// sqlHoldRecords locks the records of a lineage for key share, in id
+	// order, so Purge cannot drop one while the call counts against it. Key
+	// share conflicts with that delete and not with the revoked flag a
+	// revocation sets (migrations/015_revoked_flag.sql): with FOR SHARE,
+	// metered calls overlapping one another would hold a record without a
+	// gap, and its revoke's mark would wait behind them for as long.
 	sqlHoldRecords = `
 SELECT id, capability -> 'caveats' -> 'requests', capability -> 'caveats' -> 'budget',
        coalesce(capability -> 'caveats' -> 'copies', '{}'::jsonb)
 FROM limes.capabilities
 WHERE id = ANY ($1)
 ORDER BY id
-FOR SHARE`
+FOR KEY SHARE`
 )
 
 // lineage returns capID's ancestors still on record, nearest first, holding
