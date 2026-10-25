@@ -609,8 +609,9 @@ provider whose price arrives later, in a usage record or on an event stream
 delivered at least once. Two things change for such a cost.
 
 **It may arrive twice.** Name it with the id your records already give it, and
-the capability is charged once per name; a repeat returns the first receipt
-with `Replayed` set and runs no callback. A name arriving again with a
+the capability is charged once per name while that charge stays in the
+ledger — at least `meter.MinChargeRetention`, 401 days; a repeat returns the
+first receipt with `Replayed` set and runs no callback. A name arriving again with a
 different amount, unit or tenant, or under another Biscuit copy, is
 `ErrExternalRefConflict`: one name is one cost.
 
@@ -627,7 +628,8 @@ receipt, err := usage.Charge(ctx, meter.ChargeRequest{
 A settle is idempotent on its reservation in the same way: settling one twice
 for the same amount returns the first charge, and for another amount is
 `ErrSettleConflict`. A repeat is answered even once the capability's
-record is purged. A new charge is not: the `Meter` refuses a capability not on
+record is purged, while the charge stays in the ledger; past its retention
+the settled reservation is `ErrReservationNotFound`. A new charge is not: the `Meter` refuses a capability not on
 record with `ErrNotFound`, since no ancestor's ceiling could be read — so keep
 records (`PurgeRequest.ExpiredFor`) as long as costs may still arrive. `ChargeByRef` reads a named charge back, so a
 reporter can reconcile its own records with the ledger.
@@ -677,10 +679,12 @@ back, so a store that gets one wrong still compiles. Run the module's checks
 from your store's tests — `storetest` for a `Store` (and a
 `BiscuitRevocationStore`), `metertest` for a `UsageStore`, `jwkstest` for a
 `KeyResolver`, and `dpoptest` for a `dpop.ReplayCache` or `dpop.Nonces`.
-`storetest` checks more than the compiler sees since v0.113.0: a revoke
-reports its entry as `GetRecord` reads it back, at the store's precision, and
-`RevokeResult.PriorDisposition`; it writes an entry for an expired capability
-too; a cursor of another listing is `ErrCursorMismatch`; and a lister fills
+`storetest` checks more than the compiler sees, added from v0.113.0 to
+v0.125.0: a revoke reports its entry as `GetRecord` reads it back, at the
+store's precision, and `RevokeResult.PriorDisposition`; it writes an entry
+for an expired capability too; a cursor of another listing or another tenant
+is `ErrCursorMismatch`; a Biscuit revoke reports `RevokeBiscuitResult`; a
+`RevocationLineage` answers as `IsRevoked` does; and a lister fills
 `RecordListing.StoppedBy`. A store that passed before fails these until it
 does:
 
@@ -763,12 +767,14 @@ without a read beforehand, which a concurrent revoke could outdate.
 call, by the census's rules and clock: only a revoke of an `active` one
 stopped something new. A capability already revoked through an ancestor, or expired, still
 gets its own entry, for the audit and in case the ancestor's is purged. An id
-not on record is `ErrNotFound` and writes nothing. In pgstore a revoke also
-marks every record below the capability revoked, a generation at a time by
-key and by parent, inside its transaction: it holds those rows until it
-commits, so an `Insert` under one and a charge whose lineage holds one wait
-for it, and its cost grows with the subtree — about 30 ms for two thousand
-records on one core. A cascade marks the subtree once.
+not on record is `ErrNotFound` and writes nothing. In pgstore a revoke first
+takes the tenant's revoke lock alone, which every insert of a child shares,
+so it waits for the tenant's inserts and revokes already running and later
+ones wait for it; it then marks every record below the capability revoked,
+a generation at a time by key and by parent, holding those rows until it
+commits, and its cost grows with the subtree. A charge's lineage lock
+(`FOR KEY SHARE`) does not conflict with the mark: charges neither wait for
+a revoke nor hold one back. A cascade marks the subtree once.
 `GetRecord` reads the record back with `IssuedBy` and its own `Revocation`,
 whose `Cascaded` says a cascading revoke wrote it; a capability stopped only
 through an ancestor has none, so ask `IsRevoked` whether it verifies.
@@ -819,7 +825,8 @@ before raising the bound, as does closing the one signal that kept it on
 `TTL`. `SyncedTTL` is at most `MaxRevocationCacheSyncedTTL`, a day: a
 signal that listens and still carries nothing cannot keep an answer past
 it. `Stats().Synced` says which bound is in force,
-`Syncs` counts the watchers' connections, `SyncsLost` and `LastSyncLoss`
+`Syncs` counts the watchers' connections, and a `Close` that left every
+open signal listening, each a clear; `SyncsLost` and `LastSyncLoss`
 their losses, and `Signals` the notifications they passed on —
 `SignalsWhole` those that named no id and cleared whole. Of `Clears`, what
 `Syncs`, `SignalsWhole` and `ClearsWithoutLineage` do not account for is
@@ -843,7 +850,7 @@ can read "not revoked" from a standby still behind and keep it for its
 never listens. Reports — `SumCharges`, `CountRecords`, `ListRecords` — may
 read a replica. Over `pgstore`, run a `pgstore.RevocationWatcher` beside each
 verifier: the schema notifies `pgstore.RevocationChannel` on every
-revocation, naming the capabilities revoked (migration 018), and the watcher
+revocation, naming the capabilities revoked (migrations 018 and 021), and the watcher
 passes them to each `RevocationCache` through its `RevocationSignal` — the
 cache then drops what they outdate with `ClearRevoked` — calls
 `ClearRevoked` with them on any other cache that has it
@@ -872,9 +879,10 @@ A statement that writes no new revocation entry notifies nothing, and one
 that revokes only capabilities whose parent was revoked before names none of
 them and notifies nothing either: their answers were outdated by the
 parent's. A cascade names its top capability alone, whose descendants'
-answers name it. A Biscuit copy's revocation, and a statement naming more
-than `pgstore.MaxNotifiedRevocations` (100) capabilities, notify with no
-id, and the watcher clears whole.
+answers name it. A Biscuit copy's revocation, a statement naming more
+than `pgstore.MaxNotifiedRevocations` (100) capabilities, and one revoking
+a capability the writer's row-level security hides (migration 021) notify
+with no id, and the watcher clears whole.
 Revoking a capability revokes everything delegated from it, with or
 without the flag: `IsRevoked` answers for the whole chain. `CascadeChildren`
 also writes a revocation entry per descendant, so the audit trail names each
@@ -983,13 +991,15 @@ schema's functions — which no other role may call — and only reads of the
 version table. Run it before any migration of yours that
 refers to its tables. It holds the advisory lock every `tern` migration
 takes, which is reentrant per session: a consumer migrating with `tern` calls
-`Migrate` on the connection its own run holds. Every migration that builds
+`Migrate` on the connection its own run holds. Each migration that runs in a
+transaction runs `READ COMMITTED`, whatever the role's, the database's or the
+session's default. Every migration that builds
 an index on an existing table builds it `CONCURRENTLY`, outside a
 transaction, and holds no writes, so a `Migrate` at startup holds none.
 Migration 014, which pgstore v0.31.0 brought for `Census.ListRecords`, did
 not at first: earlier pgstore releases built its three indexes
 with a plain `CREATE INDEX`, which held writes to `limes.capabilities` and
-`limes.revocations` — about five seconds for a million records on one core.
+`limes.revocations` for some seconds on a million records.
 A store still at migration 13 skips that by upgrading straight to a release
 whose 014 builds `CONCURRENTLY`; one past 14 has the indexes already. `CheckSchema` tells a readiness
 check whether the schema is at the version the package queries, returning
@@ -1063,8 +1073,10 @@ reach further back. `memstore.NewLedger` and `pgstore.NewLedger` are also a
 `meter.LedgerHousekeeping`: a worker of yours calls `PurgeCharges` until a
 batch comes back short of its limit, as it calls `Purge`; `OlderThan` zero
 is `MinChargeRetention`, and shorter is refused. pgstore removes the charges
-its scope reaches — every tenant's under `WithAllTenants`, on the primary,
-not the replica its reports may read — oldest first, by
+its scope reaches — every tenant's under `WithAllTenants`, one tenant's
+under `WithTenant`, on the primary, not the replica its reports may read;
+a scope that admits no tenant is refused with `ErrScopeMismatch` rather
+than purging nothing on every call — oldest first, by
 their time's index and each by its key, and skips a charge a refund holds
 for the next batch. A deletion of your own, in SQL, is held to the same
 floor.
@@ -1104,10 +1116,11 @@ shows each record's state with no further read, and at one instant the
 records of each disposition in a full listing number what `CountRecords`
 counts. Each page is read on its own, though: a walk of many pages is no
 snapshot, and a record may expire or be revoked between two of them. The
-cursor is opaque and holds the order and the filters it was handed out for;
-one of the other order, or of other filters — a caller that changes them
-starts from the first page —, like any the lister did not hand out, is
-`ErrInvalidRequest`.
+cursor is opaque and holds the order, the tenant and the filters it was
+handed out for; one of the other order, of another tenant or of other
+filters — a caller that changes them starts from the first page — is
+`ErrCursorMismatch`, a kind of `ErrInvalidRequest`, and any the lister did
+not hand out is `ErrInvalidRequest`.
 `memstore.NewCensus` and `pgstore.NewCensus` are each one too — pgstore lists
 a tenant under that tenant's scope, as `ListByPrincipal`, by the indexes of
 its migrations 014 and 017; it reads whether a record is revoked from the
@@ -1359,9 +1372,11 @@ stop rather than retry. The full table is in [diagrams.md](diagrams.md#answering
 | `jwks.HandlerConfig.MaxAge` | `jwks.DefaultMaxAge`, 5 minutes; `HandlerConfig.Revalidate: true` for `max-age=0` |
 | `ListByPrincipalRequest.Limit` · `ListTenantBudgetsRequest.Limit` · `ListReservationsRequest.Limit` · `SumChargesRequest.Limit` · `CountRecordsRequest.Limit` · `ListRecordsRequest.Limit` | `DefaultListLimit` 50, at most `MaxListLimit` 500 |
 | `PurgeRequest` · `ReleaseExpiredRequest` · `PurgeOrphansRequest` | `DefaultHousekeepingLimit` 1 000 a batch; `PurgeRequest.ExpiredFor` `MinPurgeRetention`, 6 minutes, and no less |
+| `meter.PurgeChargesRequest` | `DefaultHousekeepingLimit` 1 000 a batch; `OlderThan` `meter.MinChargeRetention`, 401 days, and no less |
 | `MaxDelegationDepth` · `MaxBiscuitBlocks` | 64 ancestors · 32 attenuation blocks |
 | `CopyUsageRequest.RevocationIDs` | at most `MaxCopyUsageIDs`, 500, of one `CapabilityID` |
-| `RevocationCacheConfig` | `DefaultRevocationCacheTTL` 2 seconds · `DefaultRevocationCacheEntries` 100 000 of each kind, capabilities and Biscuit copies, spread over shards with a lock each — past the bound the oldest of the shard is dropped, the oldest of all in a cache of fewer than 512 entries, which is one shard; a negative TTL or bound is refused — for no cache, give the verifier the store itself |
+| `RevocationCacheConfig` | `DefaultRevocationCacheTTL` 2 seconds · `DefaultRevocationCacheEntries` 100 000 of each kind, capabilities and Biscuit copies, spread over shards with a lock each — past the bound the oldest of the shard is dropped, the oldest of all in a cache of fewer than 512 entries, which is one shard; `SyncedTTL` is `TTL` unless set, from `TTL` to `MaxRevocationCacheSyncedTTL`, 24 hours; a negative TTL or bound is refused — for no cache, give the verifier the store itself |
+| `pgstore.RevocationWatcher.Heartbeat` | `pgstore.DefaultWatchHeartbeat`, 30 seconds; negative is refused |
 | `jwks.RemoteConfig` | `jwks.DefaultFetchTimeout` 10s · `DefaultRefreshInterval` 5m · `DefaultMinRefreshInterval` 10s · `DefaultMaxStale` 1h · `DefaultMaxDocumentBytes` 1 MiB |
 | `dpop.VerifierConfig.Window` | `dpop.DefaultWindow`, 1 minute; a proof's id is remembered for `Window` plus `dpop.ReplayClockSkew`, 5 seconds |
 | `dpop.VerifierConfig.MaxProofBytes` | `dpop.DefaultMaxProofBytes`, 4 KiB; a `jti` past `dpop.MaxJTIBytes`, 128 bytes, is refused |
