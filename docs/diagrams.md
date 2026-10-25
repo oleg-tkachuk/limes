@@ -22,8 +22,10 @@ line, so the root module's dependency graph stays free of a driver and of
 OpenTelemetry.
 The two Biscuit contracts are needed only by a consumer that accepts the
 Biscuit form, `dpop.ReplayCache` and `dpop.Nonces` only by one that binds
-capabilities to keys, `meter.LedgerReader` only by one that bills or reports from the
-charges ledger, `RecordCensus`, `RecordLister` and `RecordListingReader` only by one that reports on records, and the two tenant erasers only by one that removes a tenant. `storetest`, `metertest`, `dpop/dpoptest` and
+capabilities to keys, `RevocationLineageLookup` only by one whose
+`RevocationCache` should drop only what a revocation outdates,
+`meter.LedgerReader` only by one that bills or reports from the
+charges ledger, `meter.LedgerHousekeeping` only by one that bounds it, `RecordCensus`, `RecordLister` and `RecordListingReader` only by one that reports on records, and the two tenant erasers only by one that removes a tenant. `storetest`, `metertest`, `dpop/dpoptest` and
 `jwks/jwkstest` check an implementation against its contract from its own
 tests — the Biscuit and copy contracts too, when the store under test
 implements them — and bound every check by their env's `CheckTimeout`
@@ -41,7 +43,7 @@ flowchart LR
         narrows["<b>Narrows</b><br/>child ⊆ parent"]
         verifier["<b>Verifier</b><br/>Authorize · Verify · BiscuitCopy<br/>ErrorResponse · DPoPNonce"]
         caveats["<b>Caveats</b><br/>Check · CheckSource · AllowsResource"]
-        cache["RevocationCache<br/>capabilities · Biscuit copies<br/>TTL · bounded per kind · single-flight<br/>sharded, a hit read-locked<br/>Clear · ClearRevoked · Sweep · Stats"]
+        cache["RevocationCache<br/>capabilities · Biscuit copies<br/>TTL · bounded per kind · single-flight<br/>sharded, a hit read-locked<br/>NewSignal · Clear · ClearRevoked · Sweep · Stats<br/>TTL, or SyncedTTL while its signals listen"]
         attenuate["<b>Attenuate</b><br/>offline · no key"]
         static["jwks.Static<br/>SetKey · RemoveKey"]
         remote["jwks.Remote<br/>ETag · Cache-Control · MaxStale<br/>held keys served, refreshed behind"]
@@ -53,23 +55,23 @@ flowchart LR
 
     subgraph contracts ["contracts the consumer implements"]
         direction TB
-        store["<b>Store</b> = IssuanceStore + admin<br/>Insert · IsRevoked · GetRecord · Revoke<br/>Purge · ListByPrincipal"]
+        store["<b>Store</b> = IssuanceStore + admin<br/>Insert · IsRevoked · GetRecord · Revoke<br/>Purge · ListByPrincipal<br/>RevocationLineageLookup: RevocationLineage → RevocationAnswer"]
         usage["<b>meter.UsageStore</b><br/>Meter: Bump · Charge · Reserve · Settle · Refund · Release<br/>MeterReader: GetUsage · GetCharge · ChargeByRef · GetReservation · ListReservations<br/>TenantBudgets · UsageHousekeeping"]
         keys["<b>KeyResolver</b><br/>PublicKey(kid)"]
         brev["<b>BiscuitRevocationStore</b><br/>IsBiscuitRevoked · RevokeBiscuit<br/>GetBiscuitRevocation"]
         cusage["<b>meter.CopyUsageReader</b><br/>CopyUsage(CopyUsageRequest{CapabilityID, RevocationIDs})<br/>→ CopyUsageResult{Copies}"]
         replay["<b>dpop.ReplayCache</b><br/>Seen(ctx, ReplayEntry) · MemoryReplayCache ships"]
         nonces["<b>dpop.Nonces</b><br/>Nonce · Valid"]
-        ledger["<b>meter.LedgerReader</b><br/>SumCharges(SumChargesRequest) → Page[ChargeSum]<br/>one tenant or every tenant · by unit · bucket none/hour/day/week/month<br/>GroupBy tenant · op · actor · capability · Filter"]
+        ledger["<b>meter.LedgerReader · meter.LedgerHousekeeping</b><br/>SumCharges(SumChargesRequest) → Page[ChargeSum]<br/>one tenant or every tenant · by unit · bucket none/hour/day/week/month<br/>GroupBy tenant · op · actor · capability · Filter<br/>PurgeCharges(PurgeChargesRequest) → PurgeChargesResult"]
         census["<b>RecordCensus</b><br/>CountRecords(CountRecordsRequest) → Page[RecordCount]<br/>one tenant or all · by tenant · principal type<br/>active · expired · revoked · delegated · expiring soon"]
-        lister["<b>RecordLister · RecordListingReader</b><br/>ListRecords(ListRecordsRequest) → Page[RecordListing]<br/>one tenant · by principal type · subject · prefix · disposition<br/>oldest or newest first<br/>GetRecordListing(id) → RecordListing"]
+        lister["<b>RecordLister · RecordListingReader</b><br/>ListRecords(ListRecordsRequest) → Page[RecordListing]<br/>one tenant · by principal type · subject · prefix · disposition<br/>oldest or newest first<br/>a cursor holds its tenant, order and filters (ErrCursorMismatch)<br/>GetRecordListing(id) → RecordListing"]
         erasers["<b>TenantRecordEraser · meter.TenantUsageEraser</b><br/>EraseTenantRecords · EraseTenantUsage"]
     end
 
     impl[("memstore · your own store")]
     pg["<b>pgstore</b> (nested module)<br/>Store · BiscuitRevocationStore · erasers<br/>UsageStore · CopyUsageReader · Ledger · Census (count, list)<br/>Migrate · CheckSchema · EraseTenant<br/>WithTenant · WithAllTenants · WithAllTenantsReadOnly<br/>RevocationWatcher · row-level security"]
     rr["<b>redisreplay</b> (nested module)<br/>Cache: dpop.ReplayCache over Redis"]
-    metering["<b>otelmetric</b> (nested module)<br/>Instrument: OTel counters · spend histogram<br/>InstrumentRevocationCache: cache Stats as observable counters<br/>WithMeterProvider · WithTenantAttribute"]
+    metering["<b>otelmetric</b> (nested module)<br/>Instrument: OTel counters · spend histogram<br/>InstrumentRevocationCache: cache Stats as observable counters and gauges<br/>WithMeterProvider · WithTenantAttribute"]
     pgdb{{"PostgreSQL"}}
     redis{{"Redis"}}
     jwks{{"Issuer JWKS endpoint"}}
@@ -199,7 +201,7 @@ sequenceDiagram
     S-->>W: response
 
     Op->>St: Store.Revoke(RevokeRequest{CapabilityID: parent, CascadeChildren})
-    Note over S,St: the next IsRevoked for the child answers true<br/>once the cache entry expires, or at once after Clear
+    Note over S,St: the next IsRevoked for the child answers true<br/>once the cache entry expires, or at once after Clear,<br/>ClearRevoked or a RevocationSignal's Revoked
     W->>S: request + child token
     S-->>W: ErrRevoked
 ```
@@ -557,7 +559,7 @@ flowchart TB
     own{"Parent.Issuer = this issuer"}
     share{"OpShare ∈ parent's Ops"}
     fill["unset tenant and audience taken from the parent<br/>InheritCaveats: the parent's caveats"]
-    valid{"Subject.Validate · audience valid<br/>Caveats.Validate · thumbprint valid"}
+    valid{"Subject.Validate · agent ParentRunID, if set, the parent's run<br/>and RunID not it · audience valid<br/>Caveats.Validate · thumbprint valid"}
     alive{"parent not expired<br/>Store.IsRevoked(parent) = false"}
     clamp["ExpiresAt = min(now + TTL, parent.ExpiresAt)<br/>unset binding taken from the parent"]
     start["starts no earlier than the parent:<br/>NotBefore raised to the parent's start<br/>(its NotBefore, else IssuedAt)"]
@@ -868,8 +870,8 @@ whose `onCharged` ended the transaction with SQL of its own — `COMMIT`,
 `Bump`, `Charge`, `Reserve`, `Settle` and `Release` first refuse a scope that does not
 admit the subject's tenant, as `ErrScopeMismatch`, before any row is read. It
 locks in one order, so two calls never wait on each other in a cycle: the
-tenant's erase lock (shared; an erase holds it alone), the reservation being
-settled or released, then the lineage's records `FOR KEY SHARE`
+tenant's erase lock, where the call takes one (`Bump`, `Charge`, `Reserve`;
+shared, an erase holds it alone), the reservation being settled or released, then the lineage's records `FOR KEY SHARE`
 in id order — a purge locks its batch in the same order — then the tenant's
 row, the usage rows by capability id and the copies' rows by revocation id. A
 release of several holds — `ReleaseExpired`, or `DeleteUsage` dropping a
@@ -896,8 +898,8 @@ flowchart LR
     op(["Revoke(RevokeRequest{CapabilityID, Note, Actor, CascadeChildren})<br/>→ RevokeResult{AlreadyRevoked, Revocation, PriorDisposition}"])
     store[("<b>Store</b><br/>revoked set<br/>ParentID links")]
     cascade["CascadeChildren:<br/>a revocation entry per descendant,<br/>MaxDelegationDepth generations down,<br/>for the audit trail; an earlier entry stands"]
-    chain["IsRevoked(id):<br/>id revoked, or any ancestor still on record revoked<br/>past MaxDelegationDepth: ErrDelegationTooDeep<br/>pgstore: one statement, every tenant"]
-    cache["<b>RevocationCache</b><br/>answer cached for TTL (default 2s)<br/>one upstream call per id at a time<br/>Biscuit copies: per revocation id, the ones it lacks in one call<br/>bounded per kind: the oldest answer of its shard makes room<br/>keys spread over shards; a hit takes a shared read lock<br/>errors never cached · a Clear mid-lookup<br/>discards that lookup's answer<br/>Stats per kind · Sweep"]
+    chain["IsRevoked(id):<br/>id revoked, or any ancestor still on record revoked<br/>past MaxDelegationDepth: ErrDelegationTooDeep<br/>RevocationLineage: the answer and the ancestors it read<br/>pgstore: one statement, every tenant"]
+    cache["<b>RevocationCache</b><br/>answer cached for TTL (default 2s),<br/>or SyncedTTL (at most 24h) while every open RevocationSignal listens<br/>one upstream call per id at a time<br/>Biscuit copies: per revocation id, the ones it lacks in one call<br/>bounded per kind: the oldest answer of its shard makes room<br/>keys spread over shards; a hit takes a shared read lock<br/>errors never cached · a Clear mid-lookup<br/>discards that lookup's answer<br/>Stats per kind · Sweep"]
     notify{{"revocation signal<br/>pgstore: RevocationWatcher LISTENs on<br/>RevocationChannel; memstore: none"}}
     bop(["RevokeBiscuit(RevokeBiscuitRequest{Copy: Verifier.BiscuitCopy(token)})<br/>→ RevokeBiscuitResult{AlreadyRevoked, Revocation}"])
     blist[("<b>BiscuitRevocationStore</b><br/>revoked block ids")]
@@ -911,7 +913,7 @@ flowchart LR
     cache --> v2
     store -. "pgstore: statement trigger on an INSERT<br/>that adds a row to limes.revocations → pg_notify" .-> notify
     blist -. "pgstore: statement trigger on an INSERT<br/>that adds a row to limes.biscuit_revocations → pg_notify" .-> notify
-    notify -. "RevocationSignal: Listening clears;<br/>Revoked(ids) or RevokedAll<br/>on each notification" .-> cache
+    notify -. "RevocationSignal: Listening clears, at each connection;<br/>Revoked(ids) or RevokedAll on each notification;<br/>NotListening when the connection or heartbeat fails" .-> cache
     bop --> blist --> cache
 
     classDef client fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E
@@ -930,11 +932,16 @@ Revoking a capability stops everything delegated from it whether or not
 `CascadeChildren` is set, because `IsRevoked` walks the ancestors; the flag
 only adds the per-descendant entries that name each stopped capability. Without
 a revocation signal, a verifier learns of a revocation within the cache TTL;
-`pgstore`'s schema notifies a channel on every revocation, naming the
-capabilities revoked, and its `RevocationWatcher` passes them to each
-cache's `RevocationSignal` on each notification — `Revoked(ids)`, or
-`RevokedAll` when it names none — and says `Listening`, which clears the
-cache, after each reconnect.
+`pgstore`'s schema notifies a channel on every statement that writes a
+revocation, naming each capability revoked whose parent has no revocation
+entry, up to `MaxNotifiedRevocations` (100); a Biscuit copy's revocation, a
+statement past that bound, or one revoking a capability the writer's
+row-level security hides names none, and a statement whose capabilities'
+parents were all revoked before notifies nothing. Its `RevocationWatcher`
+passes them to each cache's `RevocationSignal` on each notification —
+`Revoked(ids)`, or `RevokedAll` when it names none — says `Listening`, which
+clears the cache, after each reconnect, and `NotListening` when the
+connection or its heartbeat fails, which puts the cache back on its `TTL`.
 An answer cached for a descendant is also an answer about the revoked
 ancestor: over a store that names each answer's ancestors, `ClearRevoked`
 drops the revoked ids' answers and every one naming them among its
@@ -943,12 +950,21 @@ predate the revocation, so it is neither cached nor shared with later checks.
 Revoked Biscuit copies travel the same way, on their own list but through the
 same cache, which keeps each kind of answer apart; one `Clear` drops both.
 `Stats` counts each kind's hits, misses, upstream lookups, evictions and
-entries, and the clears, which `otelmetric.InstrumentRevocationCache`
-exports; `Sweep` drops expired answers ahead of the lookups that would.
+entries; the clears, whole and narrow (`Clears`, `NarrowClears`,
+`ClearsWithoutLineage`); the signals' syncs and losses (`Synced`, `Syncs`,
+`SyncsLost`, `LastSyncLoss`) and the notifications they passed (`Signals`,
+`SignalsWhole`); and whether the upstream names lineage (`Lineage`).
+`otelmetric.InstrumentRevocationCache` exports them all; `Sweep` drops
+expired answers ahead of the lookups that would.
 
-In `pgstore`, `Revoke` and `RevokeBiscuit` run under the caller's tenant —
-a capability it cannot see is `ErrNotFound` — while `IsRevoked` and
-`IsBiscuitRevoked` are each one statement calling a `SECURITY DEFINER`
+In `pgstore`, `Revoke` first takes the tenant's revoke lock alone — each
+insert of a child shares it — then holds the target `FOR NO KEY UPDATE` and
+marks it and every record below it revoked, a generation per statement; a
+metered call's `FOR KEY SHARE` lineage lock conflicts with neither, so
+charges neither wait for a revoke nor hold one back.
+`Revoke` and `RevokeBiscuit` run under the caller's tenant —
+a capability it cannot see is `ErrNotFound` — while `IsRevoked`,
+`RevocationLineage` and `IsBiscuitRevoked` are each one statement calling a `SECURITY DEFINER`
 function of the schema, which sees every tenant: the verifier asks before it
 knows the token's. A revocation entry is deleted with its record, so once
 `Purge` reaps an ancestor the walk no longer reaches it — by then it has
@@ -998,15 +1014,18 @@ flowchart TB
     rls["statements under row-level security<br/>read: tenant_visible — all_tenants on or read, or tenant_id matches<br/>write: tenant_writable — all_tenants on, or tenant_id matches"]
     commit(["COMMIT"])
     idonly["a call naming only an id<br/>(GetRecord · Revoke · Refund · GetUsage · …):<br/>a row out of scope is not found"]
-    definer["IsRevoked · IsBiscuitRevoked<br/>one statement, no transaction:<br/>a SECURITY DEFINER function sees every tenant<br/>EXECUTE: the runtime roles alone"]
+    definer["IsRevoked · RevocationLineage · IsBiscuitRevoked<br/>one statement, no transaction:<br/>a SECURITY DEFINER function sees every tenant<br/>EXECUTE: the runtime roles alone"]
     every{"the request reads every tenant<br/>CountRecords AllTenants · SumCharges AllTenants<br/>ListTenantBudgets"}
     evcheck{"the scope admits every tenant<br/>default: WithAllTenants or WithAllTenantsReadOnly do,<br/>WithTenant is refused at once;<br/>a context with no scope: the database is asked"}
+    anyone{"PurgeCharges: the scope admits some tenant<br/>(one SELECT): a scope of none is refused"}
     mismatch["ErrScopeMismatch"]
 
     ctx --> ro -- no --> begin --> roset -- no --> named -- yes --> check -- yes --> rls --> commit
     roset -- yes --> mismatch
     named -- no --> every -- yes --> evcheck -- yes --> rls
     every -- no --> rls
+    every -- "no, PurgeCharges" --> anyone -- yes --> rls
+    anyone -- no --> mismatch
     evcheck -- no --> mismatch
     rls -.-> idonly
     ro -- yes --> mismatch
@@ -1019,7 +1038,7 @@ flowchart TB
     classDef store fill:#FEF3C7,stroke:#D97706,color:#78350F
     classDef external fill:#FCE7F3,stroke:#DB2777,color:#831843
     class ctx,commit client
-    class ro,begin,roset,named,check,every,evcheck role
+    class ro,begin,roset,named,check,every,evcheck,anyone role
     class idonly,definer optional
     class rls store
     class mismatch external
@@ -1034,7 +1053,8 @@ settings.
 `Store.EraseTenant` removes a tenant from `pgstore` in one transaction scoped
 to it, and runs the consumer's `onErased` last in the same transaction, so the
 consumer's rows of the tenant go with the store's or not at all. It locks in
-the order the meter does, so it never waits on a meter call in a cycle.
+the order the meter does, so it never waits on a meter call in a cycle, and
+takes the tenant's revoke lock alone before its records, as `Revoke` does.
 
 ```mermaid
 flowchart TB
@@ -1043,8 +1063,9 @@ flowchart TB
     tx["inTenantTx: scoped, CheckScope admits the tenant"]
     mark["take the tenant's erase lock · mark it erased<br/>(Insert and the meter refuse it as ErrTenantErased)"]
     holds["lock the tenant's holds, in id order"]
+    revlock["take the tenant's revoke lock alone<br/>(an Insert of a child shares it)"]
     recs["lock its records, in id order"]
-    revoke["revoke every record not revoked yet<br/>(when any is newly revoked, the notify trigger fires: watchers Clear)"]
+    revoke["revoke every record not revoked yet<br/>(the notify trigger names the revoked roots: watchers ClearRevoked them,<br/>or Clear past MaxNotifiedRevocations)"]
     remove["remove the records Purge would:<br/>expired before now − MinPurgeRetention"]
     kept["count the records kept: revoked, until Purge takes them"]
     usage["lock aggregate · counters · copies' counters<br/>delete holds · tenant budget · usage · copy usage · charges"]
@@ -1052,7 +1073,7 @@ flowchart TB
     ok(["EraseTenantResult{Revoked, Removed, Kept}"])
     back["rolled back: nothing erased"]
 
-    req --> val -- ok --> tx --> mark --> holds --> recs --> revoke --> remove --> kept --> usage --> cb -- nil --> ok
+    req --> val -- ok --> tx --> mark --> holds --> revlock --> recs --> revoke --> remove --> kept --> usage --> cb -- nil --> ok
     val -- invalid --> inval["ErrInvalidRequest"]
     tx -- "scope does not admit it" --> mismatch["ErrScopeMismatch"]
     cb -- error --> back
@@ -1065,7 +1086,7 @@ flowchart TB
     class req,ok client
     class val,tx role
     class cb optional
-    class mark,holds,recs,revoke,remove,kept,usage store
+    class mark,holds,revlock,recs,revoke,remove,kept,usage store
     class inval,mismatch,back external
 ```
 
