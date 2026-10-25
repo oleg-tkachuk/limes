@@ -32,7 +32,7 @@ const (
 )
 
 // MaxNotifiedRevocations is the most capability ids one notification names
-// (migrations/018_revocation_lineage.sql spells it too, and a test holds
+// (migrations/021_notify_unseen_revocations.sql spells it too, and a test holds
 // the two to one number): past it, the notification names none, and a cache
 // is cleared whole.
 const MaxNotifiedRevocations = 100
