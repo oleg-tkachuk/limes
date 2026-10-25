@@ -172,6 +172,30 @@ func scopeMismatch(tenant uuid.UUID) error {
 // read.
 const sqlScopeAdmitsEvery = `SELECT NOT row_security_active('` + schema + `.capabilities') OR coalesce(current_setting('` + SettingAllTenants + `', true) IN ('` + SettingAllTenantsOn + `', '` + SettingAllTenantsRead + `'), false)`
 
+// sqlScopeAdmitsAny is whether the transaction may see any tenant's rows:
+// the role is not bound by row-level security on the schema's tables, or the
+// schema's settings scope it to every tenant or to one.
+const sqlScopeAdmitsAny = `SELECT NOT row_security_active('` + schema + `.capabilities') OR coalesce(current_setting('` + SettingAllTenants + `', true) IN ('` + SettingAllTenantsOn + `', '` + SettingAllTenantsRead + `'), false) OR coalesce(current_setting('` + SettingTenant + `', true), '') <> ''`
+
+// errScopeNone is a call that acts on the rows its scope reaches, made under
+// a scope that reaches none.
+var errScopeNone = fmt.Errorf("%w: pgstore: the scope admits no tenant", limes.ErrScopeMismatch)
+
+// checkSchemaAdmitsAny refuses with limes.ErrScopeMismatch a transaction
+// whose scope admits no tenant at all, when row-level security binds its
+// role: a call that acts on every row its scope reaches — a purge — would
+// otherwise find none and report doing nothing, call after call.
+func checkSchemaAdmitsAny(ctx context.Context, tx pgx.Tx) error {
+	var admits bool
+	if err := tx.QueryRow(ctx, sqlScopeAdmitsAny).Scan(&admits); err != nil {
+		return err
+	}
+	if !admits {
+		return errScopeNone
+	}
+	return nil
+}
+
 // errScopeNotEvery is a call across every tenant made under a scope that
 // admits fewer.
 var errScopeNotEvery = fmt.Errorf("%w: pgstore: the scope does not admit every tenant", limes.ErrScopeMismatch)

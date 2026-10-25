@@ -280,13 +280,18 @@ DELETE FROM limes.charges WHERE id = ANY (ARRAY(SELECT id FROM due))`
 // PurgeCharges implements meter.LedgerHousekeeping: the charges taken more
 // than req.Retention() ago by the store's clock, oldest first, at most the
 // batch's limit, in one transaction of the call's scope — every tenant's
-// under WithAllTenants, one tenant's under WithTenant.
+// under WithAllTenants, one tenant's under WithTenant. A scope that admits no
+// tenant is refused with limes.ErrScopeMismatch, rather than purging nothing
+// on every call while the ledger grows.
 func (l *Ledger) PurgeCharges(ctx context.Context, req meter.PurgeChargesRequest) (meter.PurgeChargesResult, error) {
 	if err := req.Validate(); err != nil {
 		return meter.PurgeChargesResult{}, err
 	}
 	var purged int64
 	err := l.inTx(ctx, func(tx pgx.Tx) error {
+		if err := checkSchemaAdmitsAny(ctx, tx); err != nil {
+			return err
+		}
 		tag, err := tx.Exec(ctx, sqlPurgeCharges, l.clock().Add(-req.Retention()), meter.HousekeepingLimit(req.Limit))
 		purged = tag.RowsAffected()
 		return err
