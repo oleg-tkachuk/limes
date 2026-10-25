@@ -71,8 +71,10 @@ const DefaultRevocationCacheTTL = 2 * time.Second
 const MaxRevocationCacheSyncedTTL = 24 * time.Hour
 
 // DefaultRevocationCacheEntries bounds the cache. Past it, the oldest entry
-// makes room for the new one: a flood of distinct ids costs extra lookups,
-// never unbounded memory, and never the answers cached for everyone else.
+// makes room for the new one: a flood of distinct ids costs extra lookups and
+// never unbounded memory. It does evict other callers' answers of the same
+// kind, each costing one lookup more; the other kind's are kept
+// (RevocationCacheConfig.MaxEntries).
 const DefaultRevocationCacheEntries = 100_000
 
 // RevocationCache is a small in-memory cache for revocation answers: of a
@@ -162,7 +164,11 @@ type RevocationCacheConfig struct {
 	// answer is one entry per revocation id, and one per set of ids asked
 	// about together, whose key holds every id of the set — up to
 	// MaxBiscuitBlocks+1 block signatures: size memory for MaxEntries times
-	// the largest such key, not one id.
+	// the largest such key, not one id. Over a RevocationLineageLookup a
+	// capability's "not revoked" answer keeps its ancestors' ids beside it,
+	// up to MaxDelegationDepth of them: about 16 bytes per generation, so a
+	// full cache of chains 64 deep holds some 100 MB of them at the default
+	// bound, against 32 to 80 bytes for chains two to five deep.
 	MaxEntries int
 	// Now is the clock. Nil: time.Now.
 	Now func() time.Time
