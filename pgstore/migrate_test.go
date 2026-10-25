@@ -293,3 +293,38 @@ func TestAMigrationThatCannotBeScopedDoesNotRun(t *testing.T) {
 		t.Errorf("version after the refused migration = %d, want %d", version, want)
 	}
 }
+
+// The isolation a probe migration runs at, and the table it writes it to.
+const (
+	isolationProbeVersionTable = "public.isolation_probe_version"
+	recordIsolation            = `CREATE TABLE public.isolation_probe AS SELECT current_setting('transaction_isolation') AS isolation`
+	readIsolation              = `SELECT isolation FROM public.isolation_probe`
+	sqlSessionRepeatableRead   = `SET default_transaction_isolation = 'repeatable read'`
+	readCommittedLevel         = "read committed"
+)
+
+// A migration runs read committed even where the session's default is
+// repeatable read: 016's walk reads each level of records by a statement's
+// own snapshot.
+func TestMigrationsRunReadCommitted(t *testing.T) {
+	conn := freshConn(t)
+	ctx := t.Context()
+	if _, err := conn.Exec(ctx, sqlSessionRepeatableRead); err != nil {
+		t.Fatal(err)
+	}
+	m, err := migrate.NewMigrator(ctx, conn, isolationProbeVersionTable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.AppendMigration("record the isolation", recordIsolation, "")
+	if err := runMigrations(ctx, conn, m); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := conn.QueryRow(ctx, readIsolation).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != readCommittedLevel {
+		t.Errorf("a migration ran at %q, want %q", got, readCommittedLevel)
+	}
+}
