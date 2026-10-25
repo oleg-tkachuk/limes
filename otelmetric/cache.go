@@ -102,7 +102,7 @@ func InstrumentRevocationCache(cache *limes.RevocationCache, opts ...Option) (me
 	synced, errs[9] = meter.Int64ObservableGauge(metricCacheSynced,
 		metric.WithDescription("1 while a revocation signal vouches for the cache and SyncedTTL bounds its answers; 0 while TTL does."))
 	syncs, errs[10] = meter.Int64ObservableCounter(metricCacheSyncs,
-		metric.WithDescription("Calls to RevocationSignal.Listening: the watchers' connections, each a clear."))
+		metric.WithDescription("Times revocation signals made the cache synced afresh — each Listening, and a Close that left every open signal listening — each a clear."))
 	syncsLost, errs[11] = meter.Int64ObservableCounter(metricCacheSyncsLost,
 		metric.WithDescription("Calls to RevocationSignal.NotListening: the watchers' lost connections."))
 	lastSyncLoss, errs[12] = meter.Int64ObservableGauge(metricCacheLastSyncLoss, metric.WithUnit(unitSeconds),

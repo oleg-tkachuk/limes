@@ -813,7 +813,10 @@ found by the watcher's heartbeat: it pings a quiet connection every
 does not answer within as long again, so a dead connection vouches for
 the caches for at most twice the heartbeat. `NotListening` cuts short the
 answers cached under `SyncedTTL` at once, and `Listening` clears the cache
-before raising the bound. `Stats().Synced` says which bound is in force,
+before raising the bound, as does closing the one signal that kept it on
+`TTL`. `SyncedTTL` is at most `MaxRevocationCacheSyncedTTL`, a day: a
+signal that listens and still carries nothing cannot keep an answer past
+it. `Stats().Synced` says which bound is in force,
 `Syncs` counts the watchers' connections, `SyncsLost` and `LastSyncLoss`
 their losses, and `Signals` the notifications they passed on —
 `SignalsWhole` those that named no id and cleared whole. Of `Clears`, what

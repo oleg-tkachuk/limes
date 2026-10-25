@@ -14,6 +14,12 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.124.0
+
+- `RevocationCacheConfig.SyncedTTL` longer than
+  `MaxRevocationCacheSyncedTTL` (24 hours) is refused by
+  `NewRevocationCache`, where any length was taken. Pass a day or less.
+
 ## otelmetric/v0.9.0
 
 - `Instrument`'s attributes are under `limes.`: `outcome` is

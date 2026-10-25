@@ -96,11 +96,18 @@ func TestSyncedTTLHoldsOnlyWhileASignalVouches(t *testing.T) {
 	}
 }
 
-// SyncedTTL zero is TTL; shorter than TTL is refused.
+// SyncedTTL zero is TTL; shorter than TTL, or longer than
+// MaxRevocationCacheSyncedTTL, is refused.
 func TestSyncedTTLBounds(t *testing.T) {
 	s := newExampleStack()
 	if _, err := limes.NewRevocationCache(limes.RevocationCacheConfig{Capabilities: s.records, TTL: unsyncedTTL, SyncedTTL: unsyncedTTL / 2}); err == nil {
 		t.Error("a SyncedTTL shorter than TTL accepted")
+	}
+	if _, err := limes.NewRevocationCache(limes.RevocationCacheConfig{Capabilities: s.records, SyncedTTL: limes.MaxRevocationCacheSyncedTTL + time.Nanosecond}); err == nil {
+		t.Error("a SyncedTTL past MaxRevocationCacheSyncedTTL accepted")
+	}
+	if _, err := limes.NewRevocationCache(limes.RevocationCacheConfig{Capabilities: s.records, SyncedTTL: limes.MaxRevocationCacheSyncedTTL}); err != nil {
+		t.Errorf("SyncedTTL at MaxRevocationCacheSyncedTTL: %v", err)
 	}
 	ctx := context.Background()
 	clk := &testClock{now: time.Now()}
@@ -284,5 +291,37 @@ func TestEmptyRevocationsDropNothing(t *testing.T) {
 				t.Errorf("Stats = %+v; want the answer kept and nothing counted", st)
 			}
 		})
+	}
+}
+
+// Closing the signal that kept the cache on TTL — lost while another
+// listens — clears the cache before SyncedTTL holds again: an answer cached
+// while it was down may predate a revocation it would have carried, which
+// the long bound would otherwise serve past.
+func TestClosingALostSignalClears(t *testing.T) {
+	ctx := context.Background()
+	s := newExampleStack()
+	clk := &testClock{now: time.Now()}
+	cache := newRevocationCache(t, limes.RevocationCacheConfig{Capabilities: s.records, TTL: unsyncedTTL, SyncedTTL: syncedTTL, Now: clk.Now})
+	kept, lost := cache.NewSignal(), cache.NewSignal()
+	kept.Listening()
+	lost.Listening()
+	lost.NotListening()
+	c, _ := s.issue()
+	if revoked, err := cache.IsRevoked(ctx, c.ID); err != nil || revoked {
+		t.Fatalf("before the revocation: %v, %v", revoked, err)
+	}
+	// Revoked where only the lost signal would have said so.
+	if _, err := s.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: c.ID}); err != nil {
+		t.Fatal(err)
+	}
+	syncs := cache.Stats().Syncs
+	lost.Close()
+	st := cache.Stats()
+	if !st.Synced || st.Syncs != syncs+1 {
+		t.Errorf("after the lost signal closed: Stats = %+v; want synced, one sync more", st)
+	}
+	if revoked, err := cache.IsRevoked(ctx, c.ID); err != nil || !revoked {
+		t.Errorf("after the lost signal closed: %v, %v; want the revocation seen", revoked, err)
 	}
 }

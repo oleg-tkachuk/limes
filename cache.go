@@ -64,6 +64,12 @@ var ErrNoRevocationLineage = errors.New("limes: the revocation upstream names no
 // RevocationCacheConfig.SyncedTTL.
 const DefaultRevocationCacheTTL = 2 * time.Second
 
+// MaxRevocationCacheSyncedTTL bounds RevocationCacheConfig.SyncedTTL. A
+// signal that listens and still carries nothing — a notification its
+// source never sends — leaves a revocation unseen for as long as the bound
+// in force, so even a synced cache asks again within a day.
+const MaxRevocationCacheSyncedTTL = 24 * time.Hour
+
 // DefaultRevocationCacheEntries bounds the cache. Past it, the oldest entry
 // makes room for the new one: a flood of distinct ids costs extra lookups,
 // never unbounded memory, and never the answers cached for everyone else.
@@ -148,8 +154,8 @@ type RevocationCacheConfig struct {
 	// every open one listens, as pgstore.RevocationWatcher's does while
 	// its connection listens. A revocation then reaches the cache at once,
 	// so the TTL can be long. Otherwise TTL bounds every answer, those
-	// cached under SyncedTTL among them. Zero: TTL; shorter than TTL is
-	// refused.
+	// cached under SyncedTTL among them. Zero: TTL; shorter than TTL, or
+	// longer than MaxRevocationCacheSyncedTTL, is refused.
 	SyncedTTL time.Duration
 	// MaxEntries bounds each kind of answer on its own, so a flood of one
 	// never evicts the other. Zero: DefaultRevocationCacheEntries. A Biscuit
@@ -184,6 +190,8 @@ func NewRevocationCache(cfg RevocationCacheConfig) (*RevocationCache, error) {
 		synced = c.TTL
 	case synced < c.TTL:
 		return nil, fmt.Errorf("limes: cache SyncedTTL %s is shorter than its TTL %s", synced, c.TTL)
+	case synced > MaxRevocationCacheSyncedTTL:
+		return nil, fmt.Errorf("limes: cache SyncedTTL %s is longer than %s", synced, MaxRevocationCacheSyncedTTL)
 	}
 	lineage, _ := cfg.Capabilities.(RevocationLineageLookup)
 	if cfg.RequireLineage && lineage == nil {
@@ -386,7 +394,10 @@ func (s *RevocationSignal) RevokedAll() {
 }
 
 // Close ends the signal: it no longer counts toward synced, and the cache
-// is synced again only while another open signal listens. Once is enough;
+// is synced again only while another open signal listens. Closing the one
+// signal that kept the cache on TTL — lost, or never listening — clears
+// it before SyncedTTL holds again, as Listening does: what was cached while
+// it was down may miss a revocation it would have carried. Once is enough;
 // again, it does nothing.
 func (s *RevocationSignal) Close() {
 	c := s.c
@@ -401,6 +412,10 @@ func (s *RevocationSignal) Close() {
 		c.listening--
 	}
 	c.open--
+	if !c.synced.Load() && c.open > 0 && c.listening == c.open {
+		c.Clear()
+		c.syncs.Add(1)
+	}
 	c.setSyncedLocked()
 }
 
@@ -454,8 +469,9 @@ type RevocationCacheStats struct {
 	ClearsWithoutLineage uint64
 	// Synced reports that revocation signals vouch for the cache now, and
 	// SyncedTTL bounds its answers; false, TTL does. Syncs counts the
-	// signals' Listening, each a Clear, among Clears: the watchers'
-	// connections, their first and every reconnect.
+	// signals' Listening, and the Close that left every open signal
+	// listening, each a Clear, among Clears: the watchers' connections,
+	// their first and every reconnect.
 	Synced bool
 	Syncs  uint64
 	// SyncsLost counts the signals' NotListening, and LastSyncLoss is the
