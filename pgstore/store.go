@@ -83,6 +83,9 @@ func (s *Store) Insert(ctx context.Context, req limes.InsertRequest) error {
 		depth := 0
 		var parentID *uuid.UUID
 		if c.ParentID != uuid.Nil {
+			if err := shareRevokeLock(ctx, tx, c.Subject.TenantID); err != nil {
+				return err
+			}
 			parentDepth, err := checkParent(ctx, tx, c)
 			if err != nil {
 				return err
@@ -298,12 +301,14 @@ ON CONFLICT (capability_id) DO NOTHING`
 // one for every descendant. Each entry also marks its record, and every
 // record below it not marked already, revoked — the flag the census and the
 // listing read (migrations/015_revoked_flag.sql) — one UPDATE a generation,
-// by key and by parent, inside this transaction. That takes the row lock of
-// every record of the subtree until the revoke commits: an Insert under one
-// of them waits for it, and the revoke waits for inserts and other revokes
-// already holding them. A metered call's lineage lock (FOR KEY SHARE) does
-// not conflict with the mark, so charges neither wait for a revoke nor hold
-// one back. A cascading revoke marks the subtree once, with its root's
+// by key and by parent, inside this transaction. It first takes the
+// tenant's revoke lock alone, which every insert of a child shares
+// (lockForRevoke): the revoke waits for the inserts and revokes of the
+// tenant already running, and those that come after wait for it, so no
+// stream of delegations under the capability holds it back. Its row locks
+// on the subtree then last until it commits. A metered call's lineage lock
+// (FOR KEY SHARE) does not conflict with the mark, so charges neither wait
+// for a revoke nor hold one back. A cascading revoke marks the subtree once, with its root's
 // entry; a capability under one revoked before costs nothing past its own
 // row. The first entry of each stands, and the result carries the
 // capability's.
@@ -314,9 +319,19 @@ func (s *Store) Revoke(ctx context.Context, req limes.RevokeRequest) (limes.Revo
 	var result limes.RevokeResult
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		var tenant uuid.UUID
+		err := tx.QueryRow(ctx, sqlCapabilityTenant, req.CapabilityID).Scan(&tenant)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return limes.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if err := lockForRevoke(ctx, tx, tenant); err != nil {
+			return err
+		}
 		var revoked bool
 		var expiresAt *time.Time
-		err := tx.QueryRow(ctx, sqlRevokeTarget, req.CapabilityID).Scan(&tenant, &revoked, &expiresAt)
+		err = tx.QueryRow(ctx, sqlRevokeTarget, req.CapabilityID).Scan(&tenant, &revoked, &expiresAt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return limes.ErrNotFound
 		}
