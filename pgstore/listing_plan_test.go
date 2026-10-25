@@ -30,7 +30,8 @@ FROM (SELECT * FROM limes.capabilities ORDER BY id LIMIT $4::int / 10) p;
 
 INSERT INTO limes.revocations (capability_id, tenant_id, revoked_at, note, actor, cascaded)
 SELECT id, tenant_id, $3::timestamptz, 'plan', 'test', false
-FROM limes.capabilities WHERE depth = 0 AND hashtext(id::text) % 50 = 0;
+FROM limes.capabilities WHERE depth = 0 AND hashtext(id::text) % 50 = 0
+ON CONFLICT (capability_id) DO NOTHING;
 
 ANALYZE limes.capabilities;
 ANALYZE limes.revocations`
