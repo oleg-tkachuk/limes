@@ -134,18 +134,23 @@ describe("the Go proxy", () => {
   });
 });
 
-test("withoutWorkflowCommands resumes with the token it stopped with, also on failure", async () => {
+test("withoutWorkflowCommands resumes with the token it stopped with, on both streams, also on failure", async () => {
   const printed: string[] = [];
+  const failed: string[] = [];
   const log = console.log;
+  const err = console.error;
   console.log = (line: string) => printed.push(line);
+  console.error = (line: string) => failed.push(line);
   try {
     await assert.rejects(withoutWorkflowCommands(async () => Promise.reject(new Error("boom"))));
   } finally {
     console.log = log;
+    console.error = err;
   }
   const token = /^::stop-commands::([0-9a-f]{32})$/.exec(printed[0] ?? "")?.[1];
   assert.ok(token !== undefined, printed.join("\n"));
   assert.equal(printed[1], `::${token}::`);
+  assert.deepEqual(failed, printed);
 });
 
 describe("releaseAll", () => {

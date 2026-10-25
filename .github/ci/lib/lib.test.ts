@@ -62,6 +62,8 @@ describe("infoLines", () => {
   test("plain text is one line", () => assert.deepEqual(infoLines("a.go\nb.go", "t"), ["a.go\nb.go"]));
   test("anything like a command is fenced off", () =>
     assert.deepEqual(infoLines("a.go\n::warning::x.go", "t0k"), ["::stop-commands::t0k", "a.go\n::warning::x.go", "::t0k::"]));
+  test("the older command form is fenced too", () =>
+    assert.deepEqual(infoLines("a.go\n##[error]x.go", "t0k"), ["::stop-commands::t0k", "a.go\n##[error]x.go", "::t0k::"]));
 });
 
 describe("annotation", () => {
@@ -77,6 +79,7 @@ describe("annotation", () => {
   test("a plain line while annotations are off", () => {
     process.env[ANNOTATIONS_ENV] = ANNOTATIONS_OFF;
     assert.equal(annotation(Level.Warning, "x"), "warning: x");
+    assert.equal(annotation(Level.Warning, "x\n::error::y"), "warning: x%0A::error::y");
   });
 });
 
