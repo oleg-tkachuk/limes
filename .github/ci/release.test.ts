@@ -11,6 +11,7 @@ import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
 import { withoutWorkflowCommands } from "./lib/actions.ts";
 import { releaseCommits } from "./lib/modules.ts";
 import { Channel, GATED, GATES, candidateNotesBody, gateOf, releaseAll, semanticReleaseCommand, unchangedSince, type Release } from "./release.ts";
+import { sinceCandidate } from "./lib/prerelease.ts";
 
 const REPO = "oleg-tkachuk/limes";
 const RELEASE = new URL("../release/", import.meta.url).pathname;
@@ -464,6 +465,49 @@ describe("releaseAll", () => {
       assert.deepEqual(await major(), ["v1.0.0-rc.1", "v1.0.0-rc.2"]);
       // The next release by the rules on main is still 0.x.
       assert.deepEqual(await candidate(), ["v1.0.0-rc.1", "v1.0.0-rc.2", "v0.2.0-rc.1"]);
+    });
+    // A candidate of the next major is cut beside the releases main goes on
+    // making: its notes start from the candidate before it, naming the
+    // releases between, and GitHub lists the pull requests since that
+    // candidate, not since the last release.
+    test("a candidate of the next major tells what changed since the one before", async () => {
+      const major = async () => {
+        await releaseAll({ ...release(), channel: Channel.Prerelease, only: "limes", nextMajor: true });
+        return data.published.filter((r) => r.prerelease === true);
+      };
+      repo.write("x.go", "// a\n");
+      await repo.commit("fix: a");
+      const [first] = await major();
+      assert.equal(first?.tag, "v1.0.0-rc.1");
+      assert.equal(first?.previousTag, "v0.1.0");
+      assert.equal(first?.notes, `${CANDIDATE_NOTES} of limes\n`);
+      for (const [file, subject, tag] of [["y.go", "feat: b", "v0.2.0"], ["z.go", "fix: c", "v0.2.1"]] as const) {
+        repo.write(file, "// x\n");
+        await repo.commit(subject);
+        await repo.run("tag", tag);
+        data.tags.add(tag);
+      }
+      noCandidateNotes = true;
+      const second = (await major())[1];
+      assert.equal(second?.tag, "v1.0.0-rc.2");
+      assert.equal(second?.previousTag, "v1.0.0-rc.1");
+      assert.equal(
+        second?.notes,
+        `${sinceCandidate("v1.0.0-rc.1", ["v0.2.0", "v0.2.1"], REPO)}${unchangedSince("v0.2.1")}`,
+      );
+      assert.match(second?.notes ?? "", /^Since v1\.0\.0-rc\.1: \[v0\.2\.0\]\(https:\/\/github\.com\/oleg-tkachuk\/limes\/releases\/tag\/v0\.2\.0\), \[v0\.2\.1\]/);
+    });
+    test("a candidate after one with no release between adds nothing before its notes", async () => {
+      repo.write("x.go", "// a\n");
+      await repo.commit("feat: a");
+      await candidate();
+      repo.write("x.go", "// b\n");
+      await repo.commit("fix: b");
+      await candidate();
+      const second = data.published[1];
+      assert.equal(second?.tag, "v0.2.0-rc.2");
+      assert.equal(second?.previousTag, "v0.2.0-rc.1");
+      assert.equal(second?.notes, `${CANDIDATE_NOTES} of limes\n`);
     });
     test("a candidate of the next major with nothing pending is the last release's code", async () => {
       noCandidateNotes = true;

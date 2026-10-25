@@ -2,6 +2,7 @@
 // tagged -rc.N on the checked-out commit, by hand only.
 
 import { git, lines } from "./git.ts";
+import { isStableReleaseTag } from "./releases.ts";
 import { Level, lastStableTag, type Pending } from "./release-policy.ts";
 import type { Module } from "./modules.ts";
 
@@ -75,4 +76,51 @@ export async function candidateTag(module: Module, pending: readonly Pending[], 
     throw new Error(`${module.name} has no release yet to cut a candidate after`);
   }
   return nextCandidate(module, nextVersion(parseVersion(last, module.prefix), level), cwd);
+}
+
+// candidateBase is tag's version and prerelease identifier, up to its
+// number: v1.0.0-rc. of v1.0.0-rc.3.
+function candidateBase(tag: string): string {
+  const marker = `-${RC}.`;
+  const at = tag.lastIndexOf(marker);
+  if (at < 0) {
+    throw new Error(`${tag} is not a release candidate`);
+  }
+  return tag.slice(0, at + marker.length);
+}
+
+// previousCandidate is the newest candidate of tag's version numbered below
+// it, the start of what tag's notes tell: undefined for the first.
+export async function previousCandidate(tag: string, cwd: string): Promise<string | undefined> {
+  const base = candidateBase(tag);
+  const own = Number(tag.slice(base.length));
+  const earlier = lines(await git(["tag", "--list", `${base}*`], cwd))
+    .map((t) => Number(t.slice(base.length)))
+    .filter((n) => Number.isInteger(n) && n < own);
+  return earlier.length === 0 ? undefined : `${base}${Math.max(...earlier)}`;
+}
+
+// releasesSince is the module's releases since the candidate previous, up to
+// HEAD, oldest first: a candidate of the next major is cut beside the
+// releases main goes on making, and what changed since the last candidate
+// is theirs as much as its own.
+export async function releasesSince(previous: string, prefix: string, cwd: string): Promise<string[]> {
+  const tags = lines(await git(["tag", "--merged", "HEAD", "--no-merged", previous, "--list", `${prefix}v[0-9]*`, "--sort=v:refname"], cwd));
+  return tags.filter((t) => isStableReleaseTag(t, prefix));
+}
+
+// releaseLink is a Markdown link to tag's release on GitHub.
+function releaseLink(repository: string, tag: string): string {
+  return `[${tag}](https://github.com/${repository}/releases/tag/${tag})`;
+}
+
+// sinceCandidate opens a candidate's notes with what it adds to previous:
+// the releases made since, whose notes tell what changed, before the
+// candidate's own. Empty when no release came between.
+export function sinceCandidate(previous: string, releases: readonly string[], repository: string): string {
+  if (releases.length === 0) {
+    return "";
+  }
+  const links = releases.map((t) => releaseLink(repository, t)).join(", ");
+  return `Since ${previous}: ${links}. Their notes tell what changed; what follows is what changed since the last of them.\n\n`;
 }

@@ -38,7 +38,7 @@ import { git } from "./lib/git.ts";
 import { gitHubFor, type GitHub } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
 import { ROOT_MODULE, releaseCommits, releasedModules, selectModule, type Module, type ReleaseCommits } from "./lib/modules.ts";
-import { candidateTag, RC } from "./lib/prerelease.ts";
+import { candidateTag, previousCandidate, RC, releasesSince, sinceCandidate } from "./lib/prerelease.ts";
 import { isDue, lastStableTag, loadPolicy, pendingCommits, type Policy } from "./lib/release-policy.ts";
 import { newReleaseTag, notesFrom, publish, publishLeftBehind, tagsOnHead, warmGoProxy, type Fetch } from "./lib/releases.ts";
 import { runInherited } from "./lib/spawn.ts";
@@ -150,9 +150,13 @@ export async function prereleaseModule(r: Release, module: Module): Promise<Outc
   } else {
     throw new Error(`semantic-release's dry run releases nothing, though ${tag} was due; no candidate tagged`);
   }
+  const previous = await previousCandidate(tag, r.root);
+  if (previous !== undefined) {
+    notes = sinceCandidate(previous, await releasesSince(previous, module.prefix, r.root), r.repository) + notes;
+  }
   await git(["tag", tag], r.root);
   await r.pushTag(tag);
-  await publish(r.github, tag, module.prefix, notes, false, r.root, true);
+  await publish(r.github, tag, module.prefix, notes, false, r.root, true, previous);
   await warmGoProxy(tag, r.repository, r.fetchInfo);
   return { tag, note: "release candidate published" };
 }

@@ -88,8 +88,10 @@ export function notesFrom(file: string | undefined): string {
 
 // publish publishes tag: notes first, then GitHub's list of the pull
 // requests merged since the module's previous tag.
-export async function publish(github: GitHub, tag: string, prefix: string, notes: string, latest: boolean, cwd?: string, prerelease = false): Promise<void> {
-  await github.publishRelease({ tag, notes, previousTag: await previousTag(tag, prefix, cwd), latest, prerelease });
+// A candidate passes since, its previous candidate, so the pull requests
+// listed are the ones it adds to it rather than to the last release.
+export async function publish(github: GitHub, tag: string, prefix: string, notes: string, latest: boolean, cwd?: string, prerelease = false, since?: string): Promise<void> {
+  await github.publishRelease({ tag, notes, previousTag: since ?? (await previousTag(tag, prefix, cwd)), latest, prerelease });
   info(`published ${tag}`);
 }
 
