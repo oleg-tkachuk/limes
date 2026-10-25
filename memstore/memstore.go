@@ -13,7 +13,8 @@
 //     no implementation in the module could show that a failed side effect
 //     leaves counters unmutated.
 //
-// NewLedger reads a usage store's ledger as a meter.LedgerReader, NewCensus
+// NewLedger reads a usage store's ledger as a meter.LedgerReader and purges
+// it as a meter.LedgerHousekeeping, NewCensus
 // counts a record store's records as a limes.RecordCensus and lists them
 // as a limes.RecordLister, and the
 // stores erase a tenant as limes.TenantRecordEraser and
@@ -23,8 +24,8 @@
 //
 // It is NOT a production store: each store keeps its maps behind one mutex,
 // which the usage store holds while onCharged runs, nothing survives a
-// restart, and the charges ledger only grows for as long as the store lives:
-// EraseTenantUsage is all that removes an entry.
+// restart, and the charges ledger grows until Ledger.PurgeCharges removes
+// charges past their retention, or EraseTenantUsage a tenant's.
 package memstore
 
 import (

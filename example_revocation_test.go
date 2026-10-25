@@ -37,12 +37,18 @@ func ExampleNewRevocationCache() {
 	stats := cache.Stats().Capabilities
 	fmt.Println(stats.Misses, stats.Hits, stats.Lookups, stats.Entries)
 
-	// A revocation notification clears every answer at once.
+	// A revocation of id drops what it outdates: id's answer and those of
+	// the capabilities delegated from it, the others' kept. A
+	// pgstore.RevocationWatcher does it on each revocation it hears.
+	cache.ClearRevoked(id)
+	fmt.Println(cache.Stats().NarrowClears, cache.Stats().Capabilities.Entries)
+	// Clear drops every answer, for a revocation that names no capability.
 	cache.Clear()
-	fmt.Println(cache.Stats().Clears, cache.Stats().Capabilities.Entries)
+	fmt.Println(cache.Stats().Clears)
 	// Output:
 	// 1 2 1 1
 	// 1 0
+	// 1
 }
 
 func ExampleRevocationCache_Sweep() {

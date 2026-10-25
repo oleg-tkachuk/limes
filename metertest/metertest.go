@@ -23,8 +23,8 @@
 // limes.ErrScopeMismatch under another tenant's scope and for every write
 // under a read-only one, and a LedgerReader's
 // sums, their order, paging, UTC buckets, period edges, late refunds and
-// overflow. They need a real ledger, not a
-// fake.
+// overflow, and, when the Ledger is a meter.LedgerHousekeeping, PurgeCharges
+// to its retention. They need a real ledger, not a fake.
 //
 // Several checks call the store from many goroutines at once. Give the Env a
 // connection pool of one or two connections: a call that takes a second

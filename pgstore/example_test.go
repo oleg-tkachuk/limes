@@ -101,7 +101,8 @@ func ExampleNewStore() {
 }
 
 // Housekeeping runs across tenants: WithAllTenants for the batches that
-// write, WithAllTenantsReadOnly for a report that only reads.
+// write — expired records, stale holds, orphaned counters and the charges
+// past their retention — WithAllTenantsReadOnly for a report that only reads.
 func ExampleWithAllTenants() {
 	ctx := context.Background()
 	pool := runtimePool(ctx)
@@ -130,6 +131,21 @@ func ExampleWithAllTenants() {
 	}
 	if _, err := usage.PurgeOrphans(all, meter.PurgeOrphansRequest{}); err != nil {
 		log.Fatal(err)
+	}
+	// The ledger keeps every charge until it is past its retention
+	// (meter.MinChargeRetention unless OlderThan says longer).
+	ledger, err := pgstore.NewLedger(pgstore.Config{DB: pool})
+	if err != nil {
+		log.Fatal(err)
+	}
+	for {
+		purged, err := ledger.PurgeCharges(all, meter.PurgeChargesRequest{})
+		if err != nil {
+			log.Fatal(err)
+		}
+		if purged.Purged < limes.DefaultHousekeepingLimit {
+			break
+		}
 	}
 }
 

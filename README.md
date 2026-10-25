@@ -136,7 +136,7 @@ own, pgstore included, logging what happens.
 | **Attenuate offline** | The Biscuit v3 form of a capability can be narrowed by its holder with no key and no network; each copy can get its own limits — as many copies with limits as the quota signed in the token (`Caveats.Copies`) allows across the delegation chain — and be revoked on its own. |
 | **Bind to a key** | RFC 9449 DPoP: `Verify` refuses a key-bound capability without a fresh proof from that key, and, given the scheme it came under, one not presented under `DPoP`; server nonces (`dpop.HMACNonces`) work across replicas without shared state. |
 | **Meter** | Requests count against the capability, every ancestor and each Biscuit copy with limits presented; spend against those and the tenant, atomically with your own side effect. Each copy with limits of its own counts against the copy quota of the capability and of every ancestor. Reserve an estimate, settle the actual cost, refund a charge. Amounts are exact integers of billionths of an ISO 4217 unit. `otelmetric.Instrument`, a module of its own, adds OpenTelemetry instruments. |
-| **Revoke** | One call stops a capability and everything delegated from it; verifiers learn of it within a cache TTL, or at once on `ClearRevoked`, which drops only the answers that revocation outdates and which `pgstore.RevocationWatcher` calls on every revocation; `otelmetric.InstrumentRevocationCache` exports the cache's counts. |
+| **Revoke** | One call stops a capability and everything delegated from it; verifiers learn of it within a cache TTL, or at once on `ClearRevoked`, which drops only the answers that revocation outdates and which `pgstore.RevocationWatcher` reaches through a `RevocationSignal` on each revocation it can name, clearing the cache whole otherwise; `otelmetric.InstrumentRevocationCache` exports the cache's counts. |
 | **Report** | `LedgerReader.SumCharges` sums the charges of one tenant or of every tenant over a period by unit, whole or by UTC hour, day, ISO week or month, grouped by any of tenant, operation, actor and capability and filtered by them, the largest first. `RecordCensus.CountRecords` counts capability records — active, expired, revoked, delegated, expiring soon — for one tenant or all, by tenant and principal type. `RecordLister.ListRecords` lists one tenant's records, each with its disposition by the census's rules, filtered by principal type, subject or subject prefix and disposition, oldest or newest first; `RecordListingReader.GetRecordListing` reads one record with its disposition by the same rules. |
 | **Answer refusals** | `ErrorResponse` maps a refusal to its status, an RFC 6750 / RFC 9449 `WWW-Authenticate` challenge and an RFC 9457 problem body, without the error's own text. |
 
@@ -151,7 +151,8 @@ callback's context — so it can commit together with, say, an outbox write.
 The transaction stays the store's: the callback writes through it and never
 commits or rolls it back (`pgstore.ErrChargeTransaction`), and it closes when
 the callback returns.
-Optional contracts serve one feature each: `BiscuitRevocationStore` and
+Optional contracts serve one feature each: `RevocationLineageLookup` so a
+`RevocationCache` drops only what a revocation outdates, `BiscuitRevocationStore` and
 `meter.CopyUsageReader` for Biscuit copies, `meter.LedgerReader` for billing
 reads and `meter.LedgerHousekeeping` to remove charges past their retention, `RecordCensus` for a census of records, `RecordLister` to list a
 tenant's records and `RecordListingReader` to read one — `RecordReporter`
@@ -285,7 +286,7 @@ its checks while unset.
 | [otelmetric/](otelmetric) | OpenTelemetry instruments around a `meter.UsageStore` and a `RevocationCache`, a module of its own so limes resolves no OpenTelemetry; released as `otelmetric/vX.Y.Z` |
 | [internal/](internal) | the module's own shared packages, not importable from outside it: JOSE pieces (`jose`), HTTP header names (`httpx`), RFC 3986 URI normalisation (`rfc3986`), access to unexported root internals for sibling packages (`link`), the sharded TTL cache behind `RevocationCache` (`ttlcache`), and field coverage and per-check deadlines for the conformance suites (`fields`, `watchdog`) |
 | [storetest/](storetest), [metertest/](metertest), [dpop/dpoptest](dpop/dpoptest), [jwks/jwkstest](jwks/jwkstest) | conformance suites to run from your own implementation's tests |
-| [examples/](examples) | runnable programs: the five-minute walkthrough (`quickstart`), and one topic each, logging every step to stdout — issuing and verifying, delegation, metering, and pgstore over PostgreSQL; a module of its own, never released. The Go documentation of every package carries `Example` functions for its calls; pgstore's compile without a database and do not run |
+| [examples/](examples) | runnable programs: the five-minute walkthrough (`quickstart`), and one topic each, logging every step to stdout — issuing and verifying, delegation, metering, and pgstore over PostgreSQL; a module of its own, never released. The Go documentation of every package but the conformance suites `metertest`, `jwkstest` and `dpoptest` carries `Example` functions for its calls; pgstore's compile without a database and do not run |
 | [testdata/](testdata) | golden tokens, and the Biscuit vocabulary and cases shared with SDKs in other languages |
 | [tools/](tools) | the developer tools, pinned in modules of their own and run with `go tool -modfile=tools/go.mod` (yq: `tools/yq/go.mod`, golangci-lint: `tools/golangci-lint/go.mod`) |
 
