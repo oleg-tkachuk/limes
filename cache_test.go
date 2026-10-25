@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/oleg-tkachuk/limes/jwks"
 )
 
 // cacheTTL is the lifetime of an entry in the tests below; they step a clock
@@ -368,6 +370,25 @@ func TestNewVerifierRefusesANilRevocationCache(t *testing.T) {
 	})
 	if !errors.Is(err, errNoBiscuitLookup) {
 		t.Errorf("NewVerifier = %v, want errNoBiscuitLookup", err)
+	}
+}
+
+// A nil pointer as VerifierConfig.Revocations or Keys is refused by
+// NewVerifier, as no value is, rather than dereferenced at the first token.
+func TestNewVerifierRefusesTypedNilWiring(t *testing.T) {
+	var noCache *RevocationCache
+	var noStore *memStore
+	var noKeys *jwks.Static
+	keys := staticKeys(t, map[string]ed25519.PublicKey{})
+	c := newRevocationCache(t, RevocationCacheConfig{Capabilities: newMemStore(), TTL: cacheTTL})
+	for name, cfg := range map[string]VerifierConfig{
+		"a nil *RevocationCache": {Keys: keys, Revocations: noCache, TrustedIssuers: []string{goldenIssuer}},
+		"a nil store":            {Keys: keys, Revocations: noStore, TrustedIssuers: []string{goldenIssuer}},
+		"a nil *jwks.Static":     {Keys: noKeys, Revocations: c, TrustedIssuers: []string{goldenIssuer}},
+	} {
+		if _, err := NewVerifier(cfg); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
 	}
 }
 

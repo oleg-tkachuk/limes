@@ -183,10 +183,12 @@ type Verifier struct {
 
 // NewVerifier validates wiring and builds the verifier.
 func NewVerifier(cfg VerifierConfig) (*Verifier, error) {
-	if cfg.Keys == nil {
+	// A nil pointer in an interface is not nil: unchecked, it would pass
+	// here and panic at the first token verified.
+	if isNilValue(cfg.Keys) {
 		return nil, errors.New("limes: VerifierConfig.Keys required")
 	}
-	if cfg.Revocations == nil {
+	if isNilValue(cfg.Revocations) {
 		return nil, errors.New("limes: VerifierConfig.Revocations required")
 	}
 	if len(cfg.TrustedIssuers) == 0 {
