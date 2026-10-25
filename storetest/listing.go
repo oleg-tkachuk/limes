@@ -307,6 +307,7 @@ func checkListRecordsCursorFilters(t *testing.T, f fixture) {
 	}
 	req.Cursor = first.Next
 	for name, change := range map[string]func(*limes.ListRecordsRequest){
+		"another tenant":         func(r *limes.ListRecordsRequest) { r.TenantID = uuid.New() },
 		"another principal type": func(r *limes.ListRecordsRequest) { r.PrincipalType = limes.PrincipalTypeUser },
 		"no principal type":      func(r *limes.ListRecordsRequest) { r.PrincipalType = limes.PrincipalTypeUnspecified },
 		"a subject":              func(r *limes.ListRecordsRequest) { r.SubjectPrefix, r.Subject = "", "agent:root" },
