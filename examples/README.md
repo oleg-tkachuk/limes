@@ -30,7 +30,7 @@ out to show, and `✗` when something did not go as described:
     operations       [get]
     resources under  [corpus/public/]
     expires          2026-10-15T14:21:40Z
-    token size       746 bytes
+    token size       696 bytes
 ✓ refused, as expected: verify the revoked token
     error  limes: revoked
 ```
