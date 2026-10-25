@@ -215,7 +215,9 @@ one whose Biscuit copies should carry limits of their own (`Copies`, a
 `ErrOpNotAllowed` — and a child may only be narrower. `Issuer.Biscuit`
 needs no `OpShare`: a copy attenuated from the form allows no more than the
 capability, whose bearer token could be handed on as it is, and a copy with
-limits of its own is counted against `Copies`. Ask for an operation the parent
+limits of its own is counted against `Copies`. So withholding `OpShare` no
+longer keeps a capability JWT-only: an endpoint of yours that turns a
+verified capability into its Biscuit form decides itself whom it serves. Ask for an operation the parent
 lacks, a wider scope, a bigger budget, a larger copy quota, a wider audience or another tenant —
 or drop the parent's key binding or `IdempotencyKeyRequired`, or grant an
 `AllowTaintedRead` it lacks — and you get `ErrDelegationTooWide`; a
