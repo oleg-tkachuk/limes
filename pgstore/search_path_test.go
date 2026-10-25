@@ -28,6 +28,14 @@ func TestPolicyFunctionsIgnoreTheSearchPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Release()
+	// No scope of the session's own: only the shadow function could then
+	// admit a tenant, whatever an earlier user of the connection set.
+	if _, err := conn.Exec(ctx, sqlSetSession, SettingAllTenants, settingUnset); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, sqlSetSession, SettingTenant, settingUnset); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := conn.Exec(ctx, sqlShadow); err != nil {
 		t.Fatal(err)
 	}
