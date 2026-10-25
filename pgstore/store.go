@@ -296,11 +296,13 @@ ON CONFLICT (capability_id) DO NOTHING`
 // listing read (migrations/015_revoked_flag.sql) — one UPDATE a generation,
 // by key and by parent, inside this transaction. That takes the row lock of
 // every record of the subtree until the revoke commits: an Insert under one
-// of them, and a charge whose lineage holds one (it locks its lineage FOR
-// SHARE), wait for it, and the revoke waits for charges already holding
-// them. A cascading revoke marks the subtree once, with its root's entry;
-// a capability under one revoked before costs nothing past its own row. The first entry of each stands, and the result
-// carries the capability's.
+// of them waits for it, and the revoke waits for inserts and other revokes
+// already holding them. A metered call's lineage lock (FOR KEY SHARE) does
+// not conflict with the mark, so charges neither wait for a revoke nor hold
+// one back. A cascading revoke marks the subtree once, with its root's
+// entry; a capability under one revoked before costs nothing past its own
+// row. The first entry of each stands, and the result carries the
+// capability's.
 func (s *Store) Revoke(ctx context.Context, req limes.RevokeRequest) (limes.RevokeResult, error) {
 	if err := req.Validate(); err != nil {
 		return limes.RevokeResult{}, err
