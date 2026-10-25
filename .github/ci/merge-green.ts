@@ -81,12 +81,15 @@ export function heldBack(pr: PullRequest, headSha: string): string | undefined {
 }
 
 // ownRun is the run that decides pr: the newest pull_request run of CI at its
-// head that ran for it into main. A green check of the same name at the same
-// commit — another pull request's run into another base, another app's — is
-// not its verdict.
+// head that ran for it into main and for nothing else. A green check of the
+// same name at the same commit — another pull request's run into another
+// base, another app's — is not its verdict, and neither is a run that also
+// lists another pull request: GitHub lists every open pull request of the
+// head branch on a run, so one opened by somebody else from the same branch
+// would otherwise lend pr its verdict and its title.
 export async function ownRun(github: GitHub, pr: PullRequest): Promise<PullRequestRun | undefined> {
   const runs = await github.pullRequestRuns(CI_WORKFLOW, pr.headSha);
-  return runs.find((r) => r.pullRequests.some((p) => p.number === pr.number && p.baseRef === BASE_BRANCH));
+  return runs.find((r) => r.pullRequests.length === 1 && r.pullRequests[0]?.number === pr.number && r.pullRequests[0]?.baseRef === BASE_BRANCH);
 }
 
 // unpassed is why pr's own run does not let it merge, or undefined when it
