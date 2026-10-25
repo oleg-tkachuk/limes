@@ -1,8 +1,9 @@
 // Package pgstore is the reference implementation of the limes storage
-// contracts over PostgreSQL: limes.Store and limes.BiscuitRevocationStore for
-// capability records and revocations, meter.UsageStore and
-// meter.CopyUsageReader for the meter, meter.LedgerReader,
-// limes.RecordCensus and limes.RecordLister for reports, and
+// contracts over PostgreSQL: limes.Store, limes.BiscuitRevocationStore and
+// limes.RevocationLineageLookup for capability records and revocations,
+// meter.UsageStore and meter.CopyUsageReader for the meter,
+// meter.LedgerReader, limes.RecordCensus and limes.RecordLister for reports,
+// meter.LedgerHousekeeping for bounding the ledger, and
 // limes.TenantRecordEraser and meter.TenantUsageEraser for removing a
 // tenant. It passes the module's own contract
 // suites, storetest and metertest, which is how a consumer knows it keeps
@@ -45,7 +46,8 @@
 // Every table keeps its rows' tenant, and the schema's row-level security
 // binds every role — the tables' owner too — to the tenant a call is scoped
 // to, short of a superuser or a role with BYPASSRLS: pass WithTenant(ctx, tenant) to a call for one tenant,
-// WithAllTenants(ctx) to housekeeping (Purge, ReleaseExpired, PurgeOrphans),
+// WithAllTenants(ctx) to housekeeping (Purge, ReleaseExpired, PurgeOrphans,
+// Ledger.PurgeCharges),
 // and WithAllTenantsReadOnly(ctx) to a read across tenants, such as
 // ListTenantBudgets: its policies admit reads only, and a call that writes
 // under it is refused with limes.ErrScopeMismatch, as one is under a Scope of
@@ -78,7 +80,8 @@
 // within the caches' TTL.
 //
 // A Ledger sums a tenant's charges for billing and reports
-// (meter.LedgerReader), so a consumer reads the ledger through it rather
+// (meter.LedgerReader), and removes those past their retention
+// (meter.LedgerHousekeeping), so a consumer reads the ledger through it rather
 // than through the charges table, whose columns are this package's own. A
 // Census counts the capability records (limes.RecordCensus) for the same
 // reason: of one tenant, scoped to it as every call naming a tenant, or of
