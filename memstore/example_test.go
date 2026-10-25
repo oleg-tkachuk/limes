@@ -527,3 +527,31 @@ func ExampleNewLedger() {
 	// model:embed 1 1 USD
 	// index:search 0.25 2 USD
 }
+
+// A charge stays in the ledger, answering its ExternalRef and its refunds,
+// until it is older than the retention; a worker then purges it, a batch at
+// a time.
+func ExampleLedger_PurgeCharges() {
+	ctx := context.Background()
+	e := newExampleEnv()
+	ledger := memstore.NewLedger(e.usage)
+	c := e.record("researcher", uuid.Nil)
+	if _, err := e.usage.Charge(ctx, meter.ChargeRequest{
+		Subject: e.subject(c), Op: "index:search", Amount: limes.MustParseAmount("0.10"),
+	}, nil); err != nil {
+		log.Fatal(err)
+	}
+	purge := func() int64 {
+		r, err := ledger.PurgeCharges(ctx, meter.PurgeChargesRequest{})
+		if err != nil {
+			log.Fatal(err)
+		}
+		return r.Purged
+	}
+	fmt.Println(purge())
+	e.now = e.now.Add(meter.MinChargeRetention + time.Second)
+	fmt.Println(purge())
+	// Output:
+	// 0
+	// 1
+}

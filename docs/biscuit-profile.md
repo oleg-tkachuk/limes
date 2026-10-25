@@ -80,7 +80,7 @@ delegated from it, as its request and budget ceilings bound theirs; a
 delegated child's quota is within its parent's. A copy once counted stays
 counted under the ancestors after its own capability's usage is dropped. A
 meter also counts no more copies per capability than its store's bound; past
-either, a call is refused with `ErrCopyLimitExceeded`.
+either, a call is refused with `meter.ErrCopyLimitExceeded`.
 
 ## What limes refuses
 

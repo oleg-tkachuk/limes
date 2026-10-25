@@ -66,7 +66,8 @@
 //     apart from it.
 //
 // More are needed only with the feature they serve:
-// [BiscuitRevocationLookup] to accept Biscuit tokens and
+// [RevocationLineageLookup] for a [RevocationCache] to drop only what a
+// revocation outdates, [BiscuitRevocationLookup] to accept Biscuit tokens and
 // [BiscuitRevocationStore] to revoke one copy of one, [RecordCensus] to count
 // capability records by disposition across tenants, [RecordLister] to list a
 // tenant's records with their dispositions and [RecordListingReader] to read

@@ -20,7 +20,8 @@
 // capability and of each ancestor; see
 // "Transactions" below. More
 // are needed only with the feature they serve: [CopyUsageReader] to show a
-// Biscuit copy's own counters, [LedgerReader] to sum a tenant's charges, and
+// Biscuit copy's own counters, [LedgerReader] to sum a tenant's charges,
+// [LedgerHousekeeping] to remove charges past [MinChargeRetention], and
 // [TenantUsageEraser] to remove a tenant. memstore ships them in memory,
 // pgstore over PostgreSQL, and metertest checks any implementation.
 //
