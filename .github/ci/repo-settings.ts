@@ -42,6 +42,7 @@ import { REQUIRED_CHECK } from "./lib/runs.ts";
 export const DEFAULT_REPOSITORY = "oleg-tkachuk/limes";
 export const RULESET_NAME = "main-branch";
 export const TAGS_RULESET_NAME = "release-tags";
+export const TAG_CREATION_RULESET_NAME = "release-tag-creation";
 export const MAIN_BRANCH = "main";
 export const MAIN_REF = `refs/heads/${MAIN_BRANCH}`;
 // RELEASE_TAG_REFS are the tags a release cuts: limes's vX.Y.Z and a nested
@@ -69,14 +70,22 @@ export const ADMIN_ROLE_ID = 5;
 // nothing to main directly: every change goes through a pull request
 // (CONTRIBUTING.md).
 export const BYPASS_MODE = "pull_request";
+// ALWAYS_BYPASS lets an actor past a ruleset's every rule: the GitHub Actions
+// app past tagCreationRuleset, the release workflow being the one that cuts
+// tags.
+export const ALWAYS_BYPASS = "always";
 
 export interface Ruleset {
   name: string;
   target: "branch" | "tag";
   enforcement: "active";
-  bypass_actors: { actor_id: number; actor_type: "RepositoryRole"; bypass_mode: "pull_request" }[];
+  bypass_actors: (
+    | { actor_id: number; actor_type: "RepositoryRole"; bypass_mode: typeof BYPASS_MODE }
+    | { actor_id: number; actor_type: "Integration"; bypass_mode: typeof ALWAYS_BYPASS }
+  )[];
   conditions: { ref_name: { include: string[]; exclude: string[] } };
   rules: (
+    | { type: "creation" }
     | { type: "deletion" }
     | { type: "non_fast_forward" }
     | { type: "update" }
@@ -143,6 +152,22 @@ export function tagsRuleset(): Ruleset {
     bypass_actors: [],
     conditions: { ref_name: { include: [...RELEASE_TAG_REFS], exclude: [] } },
     rules: [{ type: "deletion" }, { type: "non_fast_forward" }, { type: "update" }],
+  };
+}
+
+// tagCreationRuleset leaves creating a release tag to the release workflow:
+// the GitHub Actions app bypasses it, no person or other token does, so a
+// write token that leaks — a person's, another app's — cannot cut a release
+// the module proxy would keep for good. A ruleset of its own, as a bypass
+// passes every rule of its ruleset and tagsRuleset's are for everyone.
+export function tagCreationRuleset(): Ruleset {
+  return {
+    name: TAG_CREATION_RULESET_NAME,
+    target: "tag",
+    enforcement: "active",
+    bypass_actors: [{ actor_id: GITHUB_ACTIONS_APP_ID, actor_type: "Integration", bypass_mode: ALWAYS_BYPASS }],
+    conditions: { ref_name: { include: [...RELEASE_TAG_REFS], exclude: [] } },
+    rules: [{ type: "creation" }],
   };
 }
 
@@ -279,7 +304,7 @@ async function main(): Promise<void> {
   }
 
   info(`==> Rulesets for ${MAIN_BRANCH}, requiring ${REQUIRED_CONTEXTS.join(", ")}, and for ${RELEASE_TAG_REFS.join(" ")}`);
-  for (const line of await upsertRulesets(rulesetsOver(octokit, repo), [mainRuleset(), tagsRuleset()])) info(`    ${line}`);
+  for (const line of await upsertRulesets(rulesetsOver(octokit, repo), [mainRuleset(), tagsRuleset(), tagCreationRuleset()])) info(`    ${line}`);
   info("Done.");
 }
 
