@@ -103,7 +103,7 @@ describe("mergeGreen", () => {
 
   test("every pull request of the run is decided", async () => {
     data.files[SHA] = changed("verifier.go");
-    data.prRuns[SHA] = [{ ...prRun(7), pullRequests: [{ number: 7, baseRef: "main" }, { number: 8, baseRef: "main" }] }];
+    data.prRuns[SHA] = [prRun(7), prRun(8)];
     data.pulls.set(7, pull({ number: 7, changedFiles: 1 }));
     data.pulls.set(8, pull({ number: 8, changedFiles: 1 }));
     await mergeGreen(fakeGitHub(data), SHA, JSON.stringify([{ number: 7 }, { number: 8 }]));
@@ -138,6 +138,10 @@ describe("mergeGreen", () => {
     ["only another pull request's run passed", false, [prRun(PR + 1)]],
     ["only a run into another base passed", false, [prRun(PR, "success", "release/v1")]],
     ["its own run failed beside another's that passed", false, [prRun(PR + 1), prRun(PR, "failure")]],
+    // A run lists every open pull request of the head branch: one that also
+    // names another is that one's as much as this one's.
+    ["only a run that also lists another pull request passed", false, [{ ...prRun(PR), pullRequests: [{ number: PR, baseRef: "main" }, { number: PR + 1, baseRef: "main" }] }]],
+    ["a newer run listing another pull request passed, its own failed", false, [{ ...prRun(PR), pullRequests: [{ number: PR + 1, baseRef: "main" }, { number: PR, baseRef: "main" }] }, prRun(PR, "failure")]],
     ["no run at all", false, []],
   ];
   for (const [name, want, runs] of verdicts) {
