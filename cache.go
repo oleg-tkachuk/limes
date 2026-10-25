@@ -376,8 +376,10 @@ func (s *RevocationSignal) Revoked(ids ...uuid.UUID) {
 	if len(ids) == 0 || s.isClosed() {
 		return
 	}
-	s.c.signals.Add(1)
+	// Counted after the clear it caused: Stats never counts a signal whose
+	// clear has not happened yet.
 	s.c.ClearRevoked(ids...)
+	s.c.signals.Add(1)
 }
 
 // RevokedAll is the signal's word of a revocation it cannot name — a
@@ -387,10 +389,11 @@ func (s *RevocationSignal) RevokedAll() {
 		return
 	}
 	c := s.c
-	c.signals.Add(1)
-	// Counted after the Clear it is a part of, as in ClearRevoked.
+	// Counted after the Clear it caused and is a part of, as in
+	// ClearRevoked.
 	c.Clear()
 	c.signalsWhole.Add(1)
+	c.signals.Add(1)
 }
 
 // Close ends the signal: it no longer counts toward synced, and the cache
@@ -517,12 +520,13 @@ type RevocationCacheCounts struct {
 // apart.
 func (c *RevocationCache) Stats() RevocationCacheStats {
 	// The parts of Clears first, then Clears: each part is counted after
-	// its Clear, so none reads more than the whole read after it.
-	st := RevocationCacheStats{
-		ClearsWithoutLineage: c.clearsWithoutLineage.Load(),
-		Syncs:                c.syncs.Load(),
-		SignalsWhole:         c.signalsWhole.Load(),
-	}
+	// its Clear, so none reads more than the whole read after it. Signals
+	// before SignalsWhole, which RevokedAll counts first, so the part never
+	// reads more than the signals.
+	st := RevocationCacheStats{Signals: c.signals.Load()}
+	st.ClearsWithoutLineage = c.clearsWithoutLineage.Load()
+	st.Syncs = c.syncs.Load()
+	st.SignalsWhole = c.signalsWhole.Load()
 	st.Clears = c.clears.Load()
 	st.Capabilities = countsOf(c.caps.Stats())
 	st.Biscuits = countsOf(c.copies.Stats())
@@ -532,7 +536,6 @@ func (c *RevocationCache) Stats() RevocationCacheStats {
 	if at := c.lastSyncLoss.Load(); at != nil {
 		st.LastSyncLoss = *at
 	}
-	st.Signals = c.signals.Load()
 	st.Lineage = c.lineage != nil
 	return st
 }
