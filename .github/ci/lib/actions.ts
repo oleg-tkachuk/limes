@@ -75,9 +75,10 @@ export const Level = { Notice: "notice", Warning: "warning", Error: "error" } as
 export type Level = (typeof Level)[keyof typeof Level];
 
 // annotation is the line that annotates the run with message at level, or
-// the plain line that stands for it while annotations are off.
+// the plain line that stands for it while annotations are off — escaped as
+// well, so a line break in it cannot start a command of its own.
 export function annotation(level: Level, message: string): string {
-  return process.env[ANNOTATIONS_ENV] === ANNOTATIONS_OFF ? `${level}: ${message}` : `::${level}::${escapeData(message)}`;
+  return process.env[ANNOTATIONS_ENV] === ANNOTATIONS_OFF ? `${level}: ${escapeData(message)}` : `::${level}::${escapeData(message)}`;
 }
 
 // notice, warning and error annotate the run; info is a plain log line.
@@ -96,8 +97,10 @@ export function error(message: string): void {
 // TOKEN_BYTES is how much randomness a stop-commands token carries.
 const TOKEN_BYTES = 16;
 
-// COMMAND_PREFIX starts a line the runner reads as a workflow command.
+// COMMAND_PREFIX starts a line the runner reads as a workflow command, and
+// LEGACY_COMMAND_PREFIX one it still reads in the older form (##[group]).
 const COMMAND_PREFIX = "::";
+const LEGACY_COMMAND_PREFIX = "##[";
 
 // freshToken is a stop-commands token no log line can have guessed.
 function freshToken(): string {
@@ -108,7 +111,7 @@ function freshToken(): string {
 // block under token when it holds anything the runner could read as a
 // workflow command — a path, a branch name or a title a change chose.
 export function infoLines(message: string, token: string): string[] {
-  if (!message.includes(COMMAND_PREFIX)) {
+  if (!message.includes(COMMAND_PREFIX) && !message.includes(LEGACY_COMMAND_PREFIX)) {
     return [message];
   }
   return [`${COMMAND_PREFIX}stop-commands${COMMAND_PREFIX}${token}`, message, `${COMMAND_PREFIX}${token}${COMMAND_PREFIX}`];
@@ -126,13 +129,19 @@ export function info(message: string): void {
 // withoutWorkflowCommands runs fn with the runner reading no workflow
 // command from the log until it returns: what fn prints — commit messages a
 // release tool logs, say — can then never act as one. The token that resumes
-// them is fresh and printed only to resume.
+// them is fresh and printed only to resume. The markers go to both streams,
+// as fn may print to either and the runner reads them in no order between
+// them.
 export async function withoutWorkflowCommands<T>(fn: () => Promise<T>): Promise<T> {
   const token = freshToken();
-  console.log(`::stop-commands::${token}`);
+  const mark = (line: string) => {
+    console.log(line);
+    console.error(line);
+  };
+  mark(`${COMMAND_PREFIX}stop-commands${COMMAND_PREFIX}${token}`);
   try {
     return await fn();
   } finally {
-    console.log(`::${token}::`);
+    mark(`${COMMAND_PREFIX}${token}${COMMAND_PREFIX}`);
   }
 }
