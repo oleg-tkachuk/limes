@@ -29,9 +29,10 @@
 // attempt pushed finds it only while it has no release, and the nested
 // modules are proposed their requirement of it all the same.
 
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
+import { DEPLOY_KEY_ENV, pushUrl, useDeployKey } from "./lib/deploy-key.ts";
 import { error, info, notice, setOutput, summarize, table, withoutWorkflowCommands } from "./lib/actions.ts";
 import { optionalEnv, requireEnv } from "./lib/env.ts";
 import { git } from "./lib/git.ts";
@@ -67,8 +68,13 @@ export const Channel = { Release: "release", Prerelease: "prerelease" } as const
 export type Channel = (typeof Channel)[keyof typeof Channel];
 // ALL_MODULES releases every module.
 export const ALL_MODULES = "all";
-// REMOTE is where a candidate's tag is pushed.
-const REMOTE = "origin";
+// PUSH_URL_ENV hands semantic-release the URL it pushes a tag to:
+// modules.cjs reads it as repositoryUrl, and release.test.ts holds the two
+// to one name.
+export const PUSH_URL_ENV = "RELEASE_PUSH_URL";
+// SSH_DIR_PREFIX names the directory the deploy key is written to, under
+// the runner's temporary directory.
+const SSH_DIR_PREFIX = "release-ssh-";
 
 // RELEASE_DIR is where semantic-release runs, beside its config and lockfile.
 const RELEASE_DIR = ".github/release";
@@ -300,6 +306,22 @@ function semanticRelease(root: string, token: string, extra: readonly string[] =
 async function main(): Promise<void> {
   const repository = requireEnv("GITHUB_REPOSITORY");
   const token = requireEnv("GH_TOKEN");
+  // Every tag goes over SSH with the deploy key, which alone may create a
+  // release tag (repo-settings.ts); the key's text leaves the environment
+  // before any child process starts.
+  const sshDir = mkdtempSync(join(requireEnv("RUNNER_TEMP"), SSH_DIR_PREFIX));
+  process.env.GIT_SSH_COMMAND = useDeployKey(requireEnv(DEPLOY_KEY_ENV), sshDir);
+  delete process.env[DEPLOY_KEY_ENV];
+  const push = pushUrl(repository);
+  process.env[PUSH_URL_ENV] = push;
+  try {
+    await releaseFrom(repository, token, push);
+  } finally {
+    rmSync(sshDir, { recursive: true, force: true });
+  }
+}
+
+async function releaseFrom(repository: string, token: string, push: string): Promise<void> {
   const runId = runIdOf(requireEnv("CI_RUN"));
   const github = gitHubFor(token, repository);
   const root = (await git(["rev-parse", "--show-toplevel"])).trim();
@@ -319,7 +341,7 @@ async function main(): Promise<void> {
     only: module === ALL_MODULES ? undefined : module,
     policy: loadPolicy(root),
     commits: releaseCommits(),
-    pushTag: async (tag) => void (await git(["push", "--quiet", REMOTE, `refs/tags/${tag}`], root)),
+    pushTag: async (tag) => void (await git(["push", "--quiet", push, `refs/tags/${tag}`], root)),
     github,
     repository,
     root,

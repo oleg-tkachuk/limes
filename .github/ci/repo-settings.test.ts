@@ -110,15 +110,16 @@ test("every module's release tags are kept as they were cut", () => {
   assert.ok(!patterns.some((p) => p.test("refs/tags/nightly")), "a tag no release cuts is kept too");
 });
 
-// Only the release workflow, through the GitHub Actions app, creates a
-// release tag; the rules that keep tags as cut stay in a ruleset nobody
+// Only the release workflow, through its deploy key, creates a release tag
+// (GitHub admits the Actions app as a bypass actor in an organisation's
+// repository alone); the rules that keep tags as cut stay in a ruleset nobody
 // bypasses.
-test("only GitHub Actions creates a release tag", () => {
+test("only a deploy key creates a release tag", () => {
   const r = tagCreationRuleset();
   assert.equal(r.name, TAG_CREATION_RULESET_NAME);
   assert.equal(r.target, "tag");
   assert.deepEqual(r.rules, [{ type: "creation" }]);
-  assert.deepEqual(r.bypass_actors, [{ actor_id: GITHUB_ACTIONS_APP_ID, actor_type: "Integration", bypass_mode: "always" }]);
+  assert.deepEqual(r.bypass_actors, [{ actor_id: null, actor_type: "DeployKey", bypass_mode: "always" }]);
   assert.deepEqual(r.conditions.ref_name.include, [...RELEASE_TAG_REFS]);
   assert.ok(!tagsRuleset().rules.some((rule) => rule.type === "creation"), "creation sits beside rules a bypass would pass too");
 });

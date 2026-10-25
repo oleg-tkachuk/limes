@@ -70,9 +70,8 @@ export const ADMIN_ROLE_ID = 5;
 // nothing to main directly: every change goes through a pull request
 // (CONTRIBUTING.md).
 export const BYPASS_MODE = "pull_request";
-// ALWAYS_BYPASS lets an actor past a ruleset's every rule: the GitHub Actions
-// app past tagCreationRuleset, the release workflow being the one that cuts
-// tags.
+// ALWAYS_BYPASS lets an actor past a ruleset's every rule: a deploy key past
+// tagCreationRuleset, the release workflow pushing its tags with one.
 export const ALWAYS_BYPASS = "always";
 
 export interface Ruleset {
@@ -81,7 +80,7 @@ export interface Ruleset {
   enforcement: "active";
   bypass_actors: (
     | { actor_id: number; actor_type: "RepositoryRole"; bypass_mode: typeof BYPASS_MODE }
-    | { actor_id: number; actor_type: "Integration"; bypass_mode: typeof ALWAYS_BYPASS }
+    | { actor_id: null; actor_type: "DeployKey"; bypass_mode: typeof ALWAYS_BYPASS }
   )[];
   conditions: { ref_name: { include: string[]; exclude: string[] } };
   rules: (
@@ -155,17 +154,20 @@ export function tagsRuleset(): Ruleset {
   };
 }
 
-// tagCreationRuleset leaves creating a release tag to the release workflow:
-// the GitHub Actions app bypasses it, no person or other token does, so a
-// write token that leaks — a person's, another app's — cannot cut a release
-// the module proxy would keep for good. A ruleset of its own, as a bypass
-// passes every rule of its ruleset and tagsRuleset's are for everyone.
+// tagCreationRuleset leaves creating a release tag to the release workflow,
+// which pushes its tags with a deploy key (lib/deploy-key.ts): deploy keys
+// bypass it, no person or token does, so a write token that leaks cannot cut
+// a release the module proxy would keep for good. GitHub lets the GitHub
+// Actions app bypass a ruleset only in an organisation's repository; a deploy
+// key, any repository's. Keep the release's key the repository's only deploy
+// key with write access. A ruleset of its own, as a bypass passes every rule
+// of its ruleset and tagsRuleset's are for everyone.
 export function tagCreationRuleset(): Ruleset {
   return {
     name: TAG_CREATION_RULESET_NAME,
     target: "tag",
     enforcement: "active",
-    bypass_actors: [{ actor_id: GITHUB_ACTIONS_APP_ID, actor_type: "Integration", bypass_mode: ALWAYS_BYPASS }],
+    bypass_actors: [{ actor_id: null, actor_type: "DeployKey", bypass_mode: ALWAYS_BYPASS }],
     conditions: { ref_name: { include: [...RELEASE_TAG_REFS], exclude: [] } },
     rules: [{ type: "creation" }],
   };
