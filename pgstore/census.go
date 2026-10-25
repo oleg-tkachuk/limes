@@ -170,7 +170,7 @@ func decodeCountCursor(s string) (countCursor, error) {
 // its own: one that pages by subject reads capabilities_principal, one that
 // pages a tenant or a principal type the index of migration 014, and one
 // of some dispositions the partial index of 017 for their revoked flag.
-const sqlListRecords = sqlRecordListing + `
+var sqlListRecords = sqlRecordListing + `
 WHERE c.tenant_id = $1`
 
 // sqlRecordListing is a record listing's columns, from capabilities c and
@@ -178,36 +178,39 @@ WHERE c.tenant_id = $1`
 // only through an ancestor the entry of the nearest ancestor that has one:
 // what ListRecords and GetRecordListing read alike, so both give a record
 // one disposition. The walk up runs for those records alone, a parent a
-// step by its key, and stops at the first ancestor with an entry, or at
-// one no longer on record, as IsRevoked's does.
-const sqlRecordListing = `
+// step by its key, and stops at the first ancestor with an entry, at one no
+// longer on record, or past limes.MaxDelegationDepth generations, as
+// IsRevoked's does: a parent_id written by hand into a cycle would
+// otherwise walk for ever.
+var sqlRecordListing = fmt.Sprintf(`
 SELECT c.capability, c.issued_by, v.revoked_at, v.note, v.actor, v.cascaded, CASE
     WHEN c.revoked THEN 'revoked'
     WHEN c.expires_at IS NULL OR c.expires_at <= $2 THEN 'expired'
     ELSE 'active'
 END,
 a.capability_id, a.revoked_at, a.note, a.actor, a.cascaded
-FROM ` + schema + `.capabilities c
+FROM `+schema+`.capabilities c
 LEFT JOIN LATERAL (
-    SELECT revoked_at, note, actor, cascaded FROM ` + schema + `.revocations WHERE capability_id = c.id OFFSET 0
+    SELECT revoked_at, note, actor, cascaded FROM `+schema+`.revocations WHERE capability_id = c.id OFFSET 0
 ) v ON true
 LEFT JOIN LATERAL (
     WITH RECURSIVE up (id, generation) AS (
         SELECT c.parent_id, 1 WHERE c.revoked AND v.revoked_at IS NULL AND c.parent_id IS NOT NULL
       UNION ALL
         SELECT p.parent_id, up.generation + 1
-        FROM ` + schema + `.capabilities p JOIN up ON p.id = up.id
+        FROM `+schema+`.capabilities p JOIN up ON p.id = up.id
         WHERE p.parent_id IS NOT NULL
-          AND NOT EXISTS (SELECT 1 FROM ` + schema + `.revocations e WHERE e.capability_id = up.id)
+          AND up.generation <= %d
+          AND NOT EXISTS (SELECT 1 FROM `+schema+`.revocations e WHERE e.capability_id = up.id)
     )
     SELECT r.capability_id, r.revoked_at, r.note, r.actor, r.cascaded
-    FROM up JOIN ` + schema + `.revocations r ON r.capability_id = up.id
+    FROM up JOIN `+schema+`.revocations r ON r.capability_id = up.id
     ORDER BY up.generation
     LIMIT 1
-) a ON true`
+) a ON true`, limes.MaxDelegationDepth)
 
 // sqlGetRecordListing is the listing of the record of id $1 at $2.
-const sqlGetRecordListing = sqlRecordListing + `
+var sqlGetRecordListing = sqlRecordListing + `
 WHERE c.id = $1`
 
 // GetRecordListing implements limes.RecordListingReader: the record of id
