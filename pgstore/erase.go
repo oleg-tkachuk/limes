@@ -22,8 +22,14 @@ const (
 	// them apart from any a consumer takes on the same database: "lime".
 	eraseLockClass int32 = 0x6c696d65
 
-	sqlLockTenantForErase = `SELECT pg_advisory_xact_lock($1, hashtext($2::text))`
-	sqlLockTenantForMeter = `SELECT pg_advisory_xact_lock_shared($1, hashtext($2::text))`
+	// revokeLockClass is the first key of the advisory locks that order a
+	// revoke and the inserts of children of the same tenant: "limr".
+	revokeLockClass int32 = 0x6c696d72
+
+	// sqlTakeTenantLock takes the advisory lock of class $1 on tenant $2 alone,
+	// and sqlShareTenantLock shares it, until the transaction ends.
+	sqlTakeTenantLock  = `SELECT pg_advisory_xact_lock($1, hashtext($2::text))`
+	sqlShareTenantLock = `SELECT pg_advisory_xact_lock_shared($1, hashtext($2::text))`
 
 	sqlIsErased   = `SELECT EXISTS (SELECT 1 FROM limes.erased_tenants WHERE tenant_id = $1)`
 	sqlMarkErased = `
@@ -39,7 +45,7 @@ WHERE NOT EXISTS (SELECT 1 FROM limes.capabilities c WHERE c.tenant_id = e.tenan
 // markErased takes the tenant's erase lock and marks it erased, first in an
 // erase's transaction.
 func markErased(ctx context.Context, tx pgx.Tx, tenant uuid.UUID, now time.Time) error {
-	if _, err := tx.Exec(ctx, sqlLockTenantForErase, eraseLockClass, tenant); err != nil {
+	if _, err := tx.Exec(ctx, sqlTakeTenantLock, eraseLockClass, tenant); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, sqlMarkErased, tenant, now)
@@ -49,7 +55,7 @@ func markErased(ctx context.Context, tx pgx.Tx, tenant uuid.UUID, now time.Time)
 // notErased shares the tenant's erase lock and refuses a tenant marked
 // erased, first in a meter call's transaction.
 func notErased(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error {
-	if _, err := tx.Exec(ctx, sqlLockTenantForMeter, eraseLockClass, tenant); err != nil {
+	if _, err := tx.Exec(ctx, sqlShareTenantLock, eraseLockClass, tenant); err != nil {
 		return err
 	}
 	var erased bool
@@ -164,9 +170,13 @@ func (s *Store) EraseTenant(ctx context.Context, req limes.EraseTenantRequest, o
 	return out, err
 }
 
-// eraseRecords revokes and removes in tx, its records locked first.
+// eraseRecords revokes and removes in tx, its records locked first, after
+// the tenant's revoke lock, as a revoke takes it (lockForRevoke).
 func (s *Store) eraseRecords(ctx context.Context, tx pgx.Tx, req limes.EraseTenantRequest) (limes.EraseTenantResult, error) {
 	var out limes.EraseTenantResult
+	if err := lockForRevoke(ctx, tx, req.TenantID); err != nil {
+		return out, err
+	}
 	if err := lockAll(ctx, tx, sqlLockTenantRecords, req); err != nil {
 		return out, err
 	}
@@ -224,3 +234,27 @@ var (
 	_ limes.TenantRecordEraser = (*Store)(nil)
 	_ meter.TenantUsageEraser  = (*UsageStore)(nil)
 )
+
+// A revoke and an insert of a child in the same tenant are ordered by an
+// advisory lock on the tenant, taken before any record's row: a revoke —
+// and an erase of the tenant's records, which revokes them — holds it
+// alone, each insert of a child shares it. An insert holds its parent's row
+// for share, which the revoke's mark must update, and a row lock grants a
+// new share holder past an updater already waiting: inserts overlapping one
+// another under a capability would hold it without a gap, and its revoke
+// would wait for as long as they kept coming. An advisory lock queues them
+// instead, so an insert that comes after a waiting revoke waits behind it.
+
+// lockForRevoke takes tenant's revoke lock alone, first in a revoke's
+// transaction.
+func lockForRevoke(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error {
+	_, err := tx.Exec(ctx, sqlTakeTenantLock, revokeLockClass, tenant)
+	return err
+}
+
+// shareRevokeLock shares tenant's revoke lock, in an insert of a child
+// before its parent's row is locked.
+func shareRevokeLock(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error {
+	_, err := tx.Exec(ctx, sqlShareTenantLock, revokeLockClass, tenant)
+	return err
+}
