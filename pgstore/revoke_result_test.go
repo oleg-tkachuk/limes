@@ -76,7 +76,9 @@ func TestRevokeWaitsForAnAncestorsRevoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
-	if _, err := tx.Exec(t.Context(), sqlSetSession, SettingAllTenants, SettingAllTenantsOn); err != nil {
+	// Scoped for this transaction alone: a session setting would outlive it
+	// on the pool's connection and widen the next test that takes it.
+	if err := ScopeFromContext(WithAllTenants(t.Context()), tx); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tx.Exec(t.Context(), sqlRevokeParentOpen, ids[0], f.mine); err != nil {
