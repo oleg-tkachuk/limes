@@ -105,7 +105,8 @@ fails nothing, a soak whose counters drift fails it.
   only what its own `.github/` says. A pull request from a fork is never
   merged automatically, and neither is one that changes what CI runs —
   `.github/` (workflows, the CI scripts, release tooling), `Taskfile.yaml`,
-  `.golangci.yml`, `tools/`, `go.work`, `renovate.json` or the root `go.mod`,
+  `.taskrc*`, `.task/`, `.golangci.yml`, `tools/`, `go.work`, `vendor/`,
+  `renovate.json` or `.renovaterc*`, or the root `go.mod`,
   whose `go` and `toolchain` lines pick the Go every job sets up: its green
   check is no evidence on its own, so
   a person reads those files and merges it. A nested module's `go.mod` is held
