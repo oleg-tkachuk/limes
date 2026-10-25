@@ -132,9 +132,31 @@ var scopeMigration = func(ctx context.Context, conn *pgx.Conn) error {
 	return err
 }
 
+// sqlReadCommitted makes the transaction a migration runs in read committed,
+// whatever the role's, the database's or the session's default: 016 marks a
+// level of records a statement at a time and reads the next level's by the
+// next statement's snapshot, which under repeatable read would miss a child
+// inserted meanwhile. It must be the transaction's first statement.
+const sqlReadCommitted = `SET TRANSACTION ISOLATION LEVEL READ COMMITTED`
+
+// readCommitted runs sqlReadCommitted in the transaction tern has just begun
+// for a migration; one that runs outside a transaction (CONCURRENTLY) has
+// none to set.
+func readCommitted(ctx context.Context, conn *pgx.Conn) error {
+	if conn.PgConn().TxStatus() != pgTxInBlock {
+		return nil
+	}
+	_, err := conn.Exec(ctx, sqlReadCommitted)
+	return err
+}
+
+// pgTxInBlock is the transaction status PostgreSQL reports inside a
+// transaction block ('T').
+const pgTxInBlock = 'T'
+
 // runMigrations runs m's migrations on conn scoped to every tenant, each of
-// them: tern resets the session's settings after every migration, so the
-// scope is set again as each one starts. tern runs a migration whatever its
+// them, and read committed: tern resets the session's settings after every
+// migration, so the scope is set again as each one starts. tern runs a migration whatever its
 // OnStart finds, so a scope that cannot be set closes the connection: the
 // migration fails before it runs unscoped, its version is not recorded, and
 // the run ends with the error.
@@ -142,6 +164,11 @@ func runMigrations(ctx context.Context, conn *pgx.Conn, m *migrate.Migrator) err
 	var scopeErr error
 	m.OnStart = func(int32, string, string, string) {
 		if scopeErr != nil {
+			return
+		}
+		if err := readCommitted(ctx, conn); err != nil {
+			scopeErr = fmt.Errorf("pgstore: migrate: run a migration read committed, connection closed: %w", err)
+			_ = conn.Close(context.WithoutCancel(ctx))
 			return
 		}
 		if err := scopeMigration(ctx, conn); err != nil {
