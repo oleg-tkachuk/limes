@@ -156,4 +156,16 @@ GH_TOKEN=$(gh auth token) node .github/ci/repo-settings.ts
 It is idempotent, leaves visibility and secrets alone, and lists any other
 ruleset on `main` rather than change it.
 
+A release tag can be created only with a deploy key (the
+`release-tag-creation` ruleset), and the release workflow pushes its tags
+with the one in the `RELEASE_DEPLOY_KEY` secret. Make it once, keep it the
+repository's only deploy key with write access, and leave no copy behind:
+
+```bash
+ssh-keygen -t ed25519 -N '' -C limes-release -f release_deploy_key
+gh repo deploy-key add release_deploy_key.pub --repo oleg-tkachuk/limes --title release --allow-write
+gh secret set RELEASE_DEPLOY_KEY --repo oleg-tkachuk/limes < release_deploy_key
+rm -f release_deploy_key release_deploy_key.pub
+```
+
 Security issues go through [SECURITY.md](SECURITY.md), not a public issue.

@@ -107,6 +107,11 @@ function nestedRules(name) {
 
 // The variable that picks the module to release, and the one picked without it.
 const MODULE_ENV = "RELEASE_MODULE";
+// PUSH_URL_ENV is the URL release.ts has a tag pushed to, over SSH with the
+// release's deploy key; unset — a test, a dry run by hand — the repository's
+// HTTPS URL.
+const PUSH_URL_ENV = "RELEASE_PUSH_URL";
+const HTTPS_URL = "https://github.com/oleg-tkachuk/limes.git";
 const ROOT_MODULE = "limes";
 
 // Each Go module this repository releases. dir is the module's directory from
@@ -163,7 +168,7 @@ function configFor(name) {
   return {
     branches: ["main"],
     tagFormat: `${tagPrefix(module.dir)}v\${version}`,
-    repositoryUrl: "https://github.com/oleg-tkachuk/limes.git",
+    repositoryUrl: process.env[PUSH_URL_ENV] || HTTPS_URL,
     plugins: [
       ["./module-commits.cjs", { ...scope, analyzer, notes }],
       "./release-notes-file.cjs",
@@ -189,6 +194,7 @@ module.exports = {
   LIMES_REQUIREMENT_SCOPE,
   MODULES,
   MODULE_ENV,
+  PUSH_URL_ENV,
   ROOT_MODULE,
   PGSTORE_MODULE,
   REDISREPLAY_MODULE,

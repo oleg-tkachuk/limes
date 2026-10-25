@@ -571,3 +571,38 @@ test("semantic-release runs from the release tooling's own install", () => {
   assert.equal(file, "/repo/.github/release/node_modules/.bin/semantic-release");
   assert.deepEqual(args, ["--no-ci"]);
 });
+
+// release.ts hands semantic-release its push URL under the name modules.cjs
+// reads, which takes it as repositoryUrl, and the repository's HTTPS URL
+// when it is unset.
+test("semantic-release pushes to the URL release.ts hands it", async () => {
+  const { createRequire } = await import("node:module");
+  const { PUSH_URL_ENV } = await import("./release.ts");
+  const path = new URL("../release/modules.cjs", import.meta.url).pathname;
+  const require = createRequire(import.meta.url);
+  const table = require(path) as { PUSH_URL_ENV: string; ROOT_MODULE: string; configFor(name: string): { repositoryUrl: string } };
+  assert.equal(table.PUSH_URL_ENV, PUSH_URL_ENV);
+  const saved = process.env[PUSH_URL_ENV];
+  try {
+    process.env[PUSH_URL_ENV] = "git@github.com:o/r.git";
+    assert.equal(table.configFor(table.ROOT_MODULE).repositoryUrl, "git@github.com:o/r.git");
+    delete process.env[PUSH_URL_ENV];
+    assert.match(table.configFor(table.ROOT_MODULE).repositoryUrl, /^https:\/\/github\.com\//);
+  } finally {
+    if (saved === undefined) delete process.env[PUSH_URL_ENV];
+    else process.env[PUSH_URL_ENV] = saved;
+  }
+});
+
+// The release step has the deploy key, by the name release.ts reads, from
+// the secret of the same name.
+test("release.yaml hands the release its deploy key", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { parse } = await import("yaml");
+  const { DEPLOY_KEY_ENV } = await import("./lib/deploy-key.ts");
+  const workflow = parse(readFileSync(new URL("../workflows/release.yaml", import.meta.url), "utf8")) as {
+    jobs: Record<string, { steps: { id?: string; env?: Record<string, string> }[] }>;
+  };
+  const step = Object.values(workflow.jobs).flatMap((j) => j.steps).find((s) => s.id === "modules");
+  assert.equal(step?.env?.[DEPLOY_KEY_ENV], `\${{ secrets.${DEPLOY_KEY_ENV} }}`);
+});
