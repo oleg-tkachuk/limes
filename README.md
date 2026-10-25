@@ -185,11 +185,12 @@ is both, and `memstore.NewCensus` and `pgstore.NewCensus` return the one
 ## Performance
 
 Checking a token is mostly checking its Ed25519 signature: on an Apple M3 Max
-core, `Verify` of a JWT takes about 39µs, of which the signature is 33µs, and
-`Authorize` adds a microsecond or two. A Biscuit takes about 92µs, and each
-attenuation block another signature's worth; a DPoP proof another signature.
-A cached revocation answer takes about 45ns, and the verifier scales with the
-processors: from four at once, a `Verify` comes out every 10µs. With
+core, `Verify` of a JWT takes about 36µs, of which the signature is 33µs, and
+`Authorize` adds a microsecond or two. A Biscuit takes about 88µs, and each
+attenuation block another signature's worth; a DPoP proof adds some 60µs, its
+signature and its own checks. A cached revocation answer takes about 60ns,
+and the verifier scales with the processors: from four at once, a `Verify`
+comes out every 10µs. With
 `pgstore`, a charge is a transaction of a few statements, 1.4–3ms against
 PostgreSQL on the same host, and one tenant's charges commit one at a time —
 the price of a tenant ceiling that is never crossed — so some 350–700 a
