@@ -234,7 +234,13 @@ func (s *Store) IsRevoked(ctx context.Context, id uuid.UUID) (bool, error) {
 
 // RevocationLineage implements limes.RevocationLineageLookup: IsRevoked's
 // answer, in one statement as IsRevoked's, and the ancestors on record it
-// read, nearest first; an id not on record is ErrNotFound.
+// read, nearest first; an id not on record is ErrNotFound. Like IsRevoked it
+// reads every tenant whatever the call's scope, so it names the ancestors'
+// ids, and whether an id is on record at all, to the role that calls it:
+// expose it to no one who may not learn another tenant's ids. Migration 020
+// dropped and recreated limes.revocation_lineage, and Migrate grants it only
+// to MigrateOptions.RuntimeRoles: an EXECUTE granted by hand to another role
+// before then is gone and must be granted again.
 func (s *Store) RevocationLineage(ctx context.Context, id uuid.UUID) (limes.RevocationAnswer, error) {
 	var self, inChain, known bool
 	var deepest int
