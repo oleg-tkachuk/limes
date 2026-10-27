@@ -2,7 +2,7 @@
 // that limes itself never resolves an OpenTelemetry dependency.
 module github.com/oleg-tkachuk/limes/otelmetric
 
-go 1.26.0
+go 1.27.0
 
 toolchain go1.27.3
 
@@ -12,7 +12,6 @@ toolchain go1.27.3
 replace github.com/oleg-tkachuk/limes => ../
 
 require (
-	github.com/google/uuid v1.6.0
 	github.com/oleg-tkachuk/limes v0.125.1
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/metric v1.47.0
@@ -25,6 +24,7 @@ require (
 	github.com/go-json-experiment/json v0.0.0-20260820222146-c27c302e5fc3 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
 	go.opentelemetry.io/otel/sdk v1.47.0 // indirect

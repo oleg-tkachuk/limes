@@ -6,8 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
@@ -472,7 +472,7 @@ func TestMeteringAttributesARefusedSettle(t *testing.T) {
 	if got := valueAt(decisions, attrTenant, tenant.String()); got != 1 {
 		t.Errorf("refused settles for tenant %s = %v, want 1", tenant, got)
 	}
-	if got := valueAt(decisions, attrTenant, uuid.Nil.String()); got != 0 {
+	if got := valueAt(decisions, attrTenant, uuid.Nil().String()); got != 0 {
 		t.Errorf("refused settles for the zero tenant = %v, want 0", got)
 	}
 }

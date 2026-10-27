@@ -13,9 +13,9 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"uuid"
 
 	"github.com/go-json-experiment/json"
-	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes/internal/jose"
 	"github.com/oleg-tkachuk/limes/internal/link"
@@ -181,13 +181,13 @@ func (s *Signer) signGrant(ctx context.Context, g grant) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	if c.ID == uuid.Nil {
+	if c.ID == uuid.Nil() {
 		return "", errors.New("limes: ID required")
 	}
 	if c.Issuer == "" {
 		return "", errors.New("limes: Issuer required")
 	}
-	if c.Subject.TenantID == uuid.Nil {
+	if c.Subject.TenantID == uuid.Nil() {
 		return "", errors.New("limes: Subject.TenantID required")
 	}
 	if len(c.Caveats.Ops) == 0 {
@@ -306,7 +306,7 @@ func claimsOf(g grant) jwtClaims {
 	if !c.NotBefore.IsZero() {
 		claims.NotBefore = c.NotBefore.Unix()
 	}
-	if c.ParentID != uuid.Nil {
+	if c.ParentID != uuid.Nil() {
 		claims.ParentID = c.ParentID.String()
 	}
 	claims.BiscuitRoot = g.biscuitRoot
@@ -382,10 +382,10 @@ func parseClaims(seg string, typ TokenType) (*grant, error) {
 func canonicalUUID(claim, s string) (uuid.UUID, error) {
 	id, err := uuid.Parse(s)
 	if err != nil {
-		return uuid.Nil, fmt.Errorf("limes: parse %s: %w", claim, err)
+		return uuid.Nil(), fmt.Errorf("limes: parse %s: %w", claim, err)
 	}
-	if id == uuid.Nil || id.String() != s {
-		return uuid.Nil, fmt.Errorf("limes: %s %q is not a canonical UUID", claim, s)
+	if id == uuid.Nil() || id.String() != s {
+		return uuid.Nil(), fmt.Errorf("limes: %s %q is not a canonical UUID", claim, s)
 	}
 	return id, nil
 }

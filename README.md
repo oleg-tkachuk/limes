@@ -53,6 +53,9 @@ flowchart TB
 go get github.com/oleg-tkachuk/limes@latest
 ```
 
+limes needs Go 1.27 or later: its identifiers are the standard library's
+`uuid.UUID`.
+
 `pgstore`, `otelmetric` and `redisreplay` are modules of their own, on tag
 lines of their own: pin each by its tag, as [Versioning](#versioning) says.
 
@@ -62,7 +65,7 @@ Setup errors are dropped below for brevity; each constructor returns one.
 
 ```go
 ctx := context.Background()
-tenantID, runID := uuid.New(), uuid.New() // github.com/google/uuid
+tenantID, runID := uuid.New(), uuid.New() // the standard library's uuid
 key, _ := limes.GenerateKey()
 kid, pub, priv := key.KeyID, key.Public(), key.Private
 

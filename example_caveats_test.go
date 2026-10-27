@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"net/netip"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 )

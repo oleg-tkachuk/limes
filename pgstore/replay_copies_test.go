@@ -5,8 +5,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/oleg-tkachuk/limes"
@@ -43,7 +43,7 @@ func TestAChargeReplayedAfterItsLocksLeavesNothingBehind(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := f.parent
-	c.ID, c.ParentID = uuid.New(), uuid.Nil
+	c.ID, c.ParentID = uuid.New(), uuid.Nil()
 	if err := f.records.Insert(ctx, limes.InsertRequest{Capability: c}); err != nil {
 		t.Fatal(err)
 	}

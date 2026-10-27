@@ -7,8 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // failingInsert is an IssuanceStore whose Insert fails with errInsert.
@@ -75,16 +74,13 @@ func TestMintCopiesTheRequest(t *testing.T) {
 		ExpiresAt: issuedAt.Add(time.Hour),
 		ParentID:  parent,
 	}
-	c, err := iss.mint(terms)
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := iss.mint(terms)
 	terms.Audience[0] = "changed"
 	terms.Caveats.Ops[0] = OpPut
 	if c.Audience[0] != "api" || c.Caveats.Ops[0] != OpGet {
 		t.Errorf("the minted capability changed with its request: %+v", c)
 	}
-	if c.ID == uuid.Nil || c.ParentID != parent || c.Issuer != goldenIssuer {
+	if c.ID == uuid.Nil() || c.ParentID != parent || c.Issuer != goldenIssuer {
 		t.Errorf("id %s, parent %s, issuer %q", c.ID, c.ParentID, c.Issuer)
 	}
 	if !c.IssuedAt.Equal(issuedAt.Truncate(tokenTimeResolution)) {
@@ -96,14 +92,11 @@ func TestMintCopiesTheRequest(t *testing.T) {
 // recorded, with the store's error kept.
 func TestSignAndRecordNamesTheRecord(t *testing.T) {
 	iss := newTermsIssuer(t, failingInsert{newMemStore()})
-	c, err := iss.mint(grantTerms{
+	c := iss.mint(grantTerms{
 		Subject:  Principal{Type: PrincipalTypeService, TenantID: uuid.New(), Subject: "svc"},
 		Audience: []string{"api"}, Caveats: Caveats{Ops: []Op{OpGet}},
 		IssuedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour),
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	for _, what := range []string{"issuance", "delegation"} {
 		token, err := iss.signAndRecord(t.Context(), c, Principal{Subject: "op"}, what)
 		if token != "" || !errors.Is(err, errInsert) || !strings.Contains(err.Error(), "persist "+what) {

@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 )
@@ -70,11 +69,11 @@ type SumChargesRequest struct {
 // size.
 func (r SumChargesRequest) Validate() error {
 	switch {
-	case r.TenantID == uuid.Nil && !r.AllTenants:
+	case r.TenantID == uuid.Nil() && !r.AllTenants:
 		return invalidRequest("sum charges: a tenant id or AllTenants required")
-	case r.TenantID != uuid.Nil && r.AllTenants:
+	case r.TenantID != uuid.Nil() && r.AllTenants:
 		return invalidRequest("sum charges: tenant id %s beside AllTenants", r.TenantID)
-	case r.TenantID != uuid.Nil && len(r.Filter.Tenants) > 0:
+	case r.TenantID != uuid.Nil() && len(r.Filter.Tenants) > 0:
 		return invalidRequest("sum charges: a tenant filter beside tenant id %s", r.TenantID)
 	case r.From.IsZero() || r.To.IsZero():
 		return invalidRequest("sum charges: From and To required")
@@ -175,7 +174,7 @@ func (f ChargeFilter) Validate() error {
 			return invalidRequest("sum charges: %d %s in the filter, at most %d", n, name, MaxChargeFilterValues)
 		}
 	}
-	if slices.Contains(f.Tenants, uuid.Nil) || slices.Contains(f.Capabilities, uuid.Nil) {
+	if slices.Contains(f.Tenants, uuid.Nil()) || slices.Contains(f.Capabilities, uuid.Nil()) {
 		return invalidRequest("sum charges: a filter names the nil id")
 	}
 	if slices.Contains(f.Ops, "") || slices.Contains(f.Actors, "") {

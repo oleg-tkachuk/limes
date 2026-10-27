@@ -40,7 +40,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/jwks"

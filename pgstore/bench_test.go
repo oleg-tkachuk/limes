@@ -18,8 +18,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/oleg-tkachuk/limes"
@@ -80,7 +80,7 @@ func (f benchFixture) newChainOf(b *testing.B, tenant uuid.UUID) []limes.Capabil
 	// One instant for the whole chain: a child may not outlive its parent.
 	expiry := time.Now().Add(benchTTL)
 	var chain []limes.Capability
-	parent := uuid.Nil
+	parent := uuid.Nil()
 	for i := range benchChainDepth {
 		c := limes.Capability{
 			ID: uuid.New(), ParentID: parent, ExpiresAt: expiry,

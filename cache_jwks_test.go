@@ -8,8 +8,7 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // ─── revocation cache ──────────────────────────────────────────────────────

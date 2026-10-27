@@ -4,8 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/meter"
@@ -19,7 +18,7 @@ func TestMeteringRefusesAChainPastMaxDelegationDepth(t *testing.T) {
 	ctx := context.Background()
 	records := newTestStore()
 	tenant := uuid.New()
-	parent := uuid.Nil
+	parent := uuid.Nil()
 	for range limes.MaxDelegationDepth + 2 {
 		id := uuid.New()
 		records.caps[id] = mkCap(id, parent, tenant, "agent")
@@ -49,7 +48,7 @@ func TestRevokeWritesPastMaxDelegationDepth(t *testing.T) {
 	ctx := context.Background()
 	records := newTestStore()
 	tenant := uuid.New()
-	parent := uuid.Nil
+	parent := uuid.Nil()
 	for range limes.MaxDelegationDepth + 2 {
 		id := uuid.New()
 		records.caps[id] = mkCap(id, parent, tenant, "agent")

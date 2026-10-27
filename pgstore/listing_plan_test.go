@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/oleg-tkachuk/limes"
@@ -53,7 +53,7 @@ func TestListRecordsReadsByIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	after := uuid.Must(uuid.NewV7())
+	after := uuid.NewV7()
 	active := []limes.RecordDisposition{limes.RecordDispositionActive}
 	for name, req := range map[string]limes.ListRecordsRequest{
 		"the tenant":                  {},

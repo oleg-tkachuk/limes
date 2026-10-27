@@ -10,8 +10,7 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes/jwks"
 )

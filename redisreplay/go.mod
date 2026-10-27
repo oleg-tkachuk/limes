@@ -2,7 +2,7 @@
 // never resolves a Redis client.
 module github.com/oleg-tkachuk/limes/redisreplay
 
-go 1.26.0
+go 1.27.0
 
 toolchain go1.27.3
 
@@ -13,7 +13,6 @@ replace github.com/oleg-tkachuk/limes => ../
 
 require (
 	github.com/alicebob/miniredis/v2 v2.40.0
-	github.com/google/uuid v1.6.0
 	github.com/oleg-tkachuk/limes v0.125.1
 	github.com/redis/go-redis/v9 v9.23.0
 )

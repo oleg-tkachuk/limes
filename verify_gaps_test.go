@@ -6,8 +6,7 @@ import (
 	"net/netip"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // errLookupDown is a revocation store that cannot answer.
@@ -36,7 +35,7 @@ func TestVerifyFailsClosedWhenRevocationCannotBeChecked(t *testing.T) {
 		t.Fatal(err)
 	}
 	vc, err := down.Verify(context.Background(), VerifyRequest{Token: token, Audience: audienceData})
-	if !errors.Is(err, errLookupDown) || vc.Capability().ID != uuid.Nil {
+	if !errors.Is(err, errLookupDown) || vc.Capability().ID != uuid.Nil() {
 		t.Errorf("Verify with the store down = %v, %v; want the store's error and no capability", vc.Capability().ID, err)
 	}
 }

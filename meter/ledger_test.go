@@ -5,8 +5,7 @@ import (
 	"slices"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 )
@@ -86,7 +85,7 @@ func TestSumChargesRequestValidate(t *testing.T) {
 		t.Fatalf("a whole request: %v", err)
 	}
 	for name, change := range map[string]func(*SumChargesRequest){
-		"no tenant":                 func(r *SumChargesRequest) { r.TenantID = uuid.Nil },
+		"no tenant":                 func(r *SumChargesRequest) { r.TenantID = uuid.Nil() },
 		"no From":                   func(r *SumChargesRequest) { r.From = time.Time{} },
 		"no To":                     func(r *SumChargesRequest) { r.To = time.Time{} },
 		"an empty period":           func(r *SumChargesRequest) { r.To = r.From },
@@ -102,9 +101,9 @@ func TestSumChargesRequestValidate(t *testing.T) {
 			r.GroupBy = []ChargeDimension{ChargeDimensionOp, ChargeDimensionActor, ChargeDimensionOp}
 		},
 		"a nil tenant in a filter": func(r *SumChargesRequest) {
-			r.TenantID, r.AllTenants, r.Filter.Tenants = uuid.Nil, true, []uuid.UUID{uuid.Nil}
+			r.TenantID, r.AllTenants, r.Filter.Tenants = uuid.Nil(), true, []uuid.UUID{uuid.Nil()}
 		},
-		"a nil capability in a filter":   func(r *SumChargesRequest) { r.Filter.Capabilities = []uuid.UUID{uuid.Nil} },
+		"a nil capability in a filter":   func(r *SumChargesRequest) { r.Filter.Capabilities = []uuid.UUID{uuid.Nil()} },
 		"an empty operation in a filter": func(r *SumChargesRequest) { r.Filter.Ops = []limes.Op{""} },
 		"an empty actor in a filter":     func(r *SumChargesRequest) { r.Filter.Actors = []string{""} },
 		"a filter past its bound": func(r *SumChargesRequest) {

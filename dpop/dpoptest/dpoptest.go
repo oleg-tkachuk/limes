@@ -19,8 +19,7 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes/dpop"
 	"github.com/oleg-tkachuk/limes/internal/watchdog"
@@ -148,7 +147,7 @@ func (e ReplayEnv) entry(key string) dpop.ReplayEntry {
 
 // entryOf is a fresh id of key, counted against h.
 func (e ReplayEnv) entryOf(h, key string) dpop.ReplayEntry {
-	return dpop.ReplayEntry{JKT: key, JTI: uuid.NewString(), Holder: h, ExpiresAt: e.now().Add(proofLifetime)}
+	return dpop.ReplayEntry{JKT: key, JTI: uuid.New().String(), Holder: h, ExpiresAt: e.now().Add(proofLifetime)}
 }
 
 // keyOf is the i-th of a run of distinct key thumbprints.

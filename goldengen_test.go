@@ -8,8 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // Mints the TokenTypeV6 golden-token fixture golden_test.go verifies. Run

@@ -7,8 +7,7 @@ import (
 	"reflect"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 func TestPrincipalValidate(t *testing.T) {

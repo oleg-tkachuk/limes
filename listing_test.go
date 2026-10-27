@@ -3,8 +3,7 @@ package limes
 import (
 	"errors"
 	"testing"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // A listing names its tenant, at most one of a subject and a subject

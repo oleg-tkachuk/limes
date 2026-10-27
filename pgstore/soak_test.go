@@ -23,8 +23,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/oleg-tkachuk/limes"
@@ -140,7 +140,7 @@ func TestSoak(t *testing.T) {
 	expiry := time.Now().Add(soakCapTTL)
 	var chain []uuid.UUID
 	var subjects []limes.MeterSubject
-	parent := uuid.Nil
+	parent := uuid.Nil()
 	for i, ceiling := range []limes.BudgetCeiling{rootCeiling, unlimited, unlimited} {
 		c := limes.Capability{
 			ID: uuid.New(), ParentID: parent, ExpiresAt: expiry,

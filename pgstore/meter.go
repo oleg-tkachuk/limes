@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"slices"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/oleg-tkachuk/limes"
@@ -294,7 +294,7 @@ func lockTenant(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) (budgetRow, 
 // record stay absent.
 func lock(ctx context.Context, tx pgx.Tx, l lockRequest) (*counters, error) {
 	c := &counters{usage: map[uuid.UUID]*usageRow{}, copies: map[string]*copyRow{}}
-	if l.tenantID != uuid.Nil {
+	if l.tenantID != uuid.Nil() {
 		if l.tenantUnit != "" {
 			if _, err := tx.Exec(ctx, sqlCreateTenant, l.tenantID, l.tenantUnit, l.now); err != nil {
 				return nil, err

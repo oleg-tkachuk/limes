@@ -6,8 +6,7 @@ import (
 	"slices"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/meter"
@@ -35,7 +34,7 @@ func TestReleaseExpiredLocksEveryCounterInOneOrder(t *testing.T) {
 	slices.SortFunc(ids, func(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) })
 	mid, root, leaf := ids[0], ids[1], ids[2]
 	expiry := f.clock.Now().Add(rlsTTL)
-	for _, c := range []struct{ id, parent uuid.UUID }{{root, uuid.Nil}, {mid, root}, {leaf, mid}} {
+	for _, c := range []struct{ id, parent uuid.UUID }{{root, uuid.Nil()}, {mid, root}, {leaf, mid}} {
 		capability := limes.Capability{
 			ID: c.id, ParentID: c.parent, ExpiresAt: expiry,
 			Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: f.mine, Subject: "agent"},

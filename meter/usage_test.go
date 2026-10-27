@@ -5,8 +5,7 @@ import (
 	"reflect"
 	"strconv"
 	"testing"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 )
@@ -100,7 +99,7 @@ func TestCopyUsageRequestValidate(t *testing.T) {
 	}{
 		"one id":        {capID, [][]byte{[]byte("copy")}, nil},
 		"at the limit":  {capID, atLimit, nil},
-		"no capability": {uuid.Nil, [][]byte{[]byte("copy")}, limes.ErrInvalidRequest},
+		"no capability": {uuid.Nil(), [][]byte{[]byte("copy")}, limes.ErrInvalidRequest},
 		"no id":         {capID, nil, limes.ErrInvalidRequest},
 		"past limit":    {capID, append(atLimit[:MaxCopyUsageIDs:MaxCopyUsageIDs], []byte("one more")), limes.ErrInvalidRequest},
 		"empty id":      {capID, [][]byte{[]byte("copy"), {}}, limes.ErrInvalidRequest},

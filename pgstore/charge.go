@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"slices"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/oleg-tkachuk/limes"
@@ -613,7 +613,7 @@ func (s *UsageStore) Settle(ctx context.Context, req meter.SettleRequest, onChar
 		return meter.ChargeReceipt{}, err
 	}
 	// A direct charge has no reservation id, so the zero id names none.
-	if req.ReservationID == uuid.Nil {
+	if req.ReservationID == uuid.Nil() {
 		return meter.ChargeReceipt{}, meter.ErrReservationNotFound
 	}
 	subject := req.Subject

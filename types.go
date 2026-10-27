@@ -3,8 +3,7 @@ package limes
 import (
 	"slices"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // Op is an operation an agent may perform. The package defines a small

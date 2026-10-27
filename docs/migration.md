@@ -14,6 +14,31 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.126.0
+
+- Every identifier is the standard library's `uuid.UUID` (Go 1.27), where it
+  was `github.com/google/uuid`'s: `Principal.TenantID`, `Capability.ID`,
+  the store interfaces, `storetest` and `metertest`. Import `"uuid"` in
+  place of `"github.com/google/uuid"`; a value from code that keeps the old
+  package converts as `uuid.UUID(id)`, both being `[16]byte`. `uuid.Nil` is
+  `uuid.Nil()`, `uuid.NewV7` returns no error, and the type has no `Scan`,
+  `Value` or `Version`.
+- The `go` directive is 1.27.0: Go 1.26 no longer builds the module.
+
+## pgstore/v0.40.0
+
+- `WithTenant`, `CheckSchemaScope`, `GetRecord`, `IsRevoked` and every other
+  method take the standard library's `uuid.UUID`, as limes v0.126.0 does,
+  and the module needs Go 1.27.
+
+## otelmetric/v0.10.0
+
+- The module needs Go 1.27, as limes v0.126.0 does.
+
+## redisreplay/v0.2.0
+
+- The module needs Go 1.27, as limes v0.126.0 does.
+
 ## v0.125.0
 
 - `RecordLister.ListRecords` binds its cursor to the tenant too: one handed

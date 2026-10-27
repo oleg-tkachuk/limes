@@ -6,8 +6,7 @@ import (
 	"fmt"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // manyURIs is more resource URIs than a token of DefaultMaxTokenBytes holds.

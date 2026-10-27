@@ -6,7 +6,7 @@
 // each imports the root.
 package link
 
-import "github.com/google/uuid"
+import "uuid"
 
 // DecodeToken reads a compact capability token's header and claims without
 // checking its signature, returning a limes.Capability.

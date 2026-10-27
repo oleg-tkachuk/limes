@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -82,7 +82,7 @@ func (s *Store) Insert(ctx context.Context, req limes.InsertRequest) error {
 		}
 		depth := 0
 		var parentID *uuid.UUID
-		if c.ParentID != uuid.Nil {
+		if c.ParentID != uuid.Nil() {
 			if err := shareRevokeLock(ctx, tx, c.Subject.TenantID); err != nil {
 				return err
 			}

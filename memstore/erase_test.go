@@ -3,8 +3,8 @@ package memstore
 import (
 	"errors"
 	"testing"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/meter"
 )
@@ -23,7 +23,7 @@ func TestPurgeOrphansForgetsAnErasedTenantWithNoRecordLeft(t *testing.T) {
 		return err
 	}
 	insert := func() error {
-		return u.records.Insert(ctx, limes.InsertRequest{Capability: mkCap(uuid.New(), uuid.Nil, tenant, "agent"), IssuedBy: limes.Principal{Subject: "op"}})
+		return u.records.Insert(ctx, limes.InsertRequest{Capability: mkCap(uuid.New(), uuid.Nil(), tenant, "agent"), IssuedBy: limes.Principal{Subject: "op"}})
 	}
 	if _, err := u.PurgeOrphans(ctx, meter.PurgeOrphansRequest{}); err != nil {
 		t.Fatal(err)

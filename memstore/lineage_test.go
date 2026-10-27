@@ -6,8 +6,7 @@ import (
 	"errors"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/jwks"
@@ -21,7 +20,7 @@ func tree(t *testing.T, s *Store, root limes.Caveats, n int, child limes.Caveats
 	ctx := context.Background()
 	tenant := uuid.New()
 	rootID := uuid.New()
-	rc := mkCap(rootID, uuid.Nil, tenant, "orchestrator")
+	rc := mkCap(rootID, uuid.Nil(), tenant, "orchestrator")
 	rc.Caveats = root
 	if err := s.Insert(ctx, limes.InsertRequest{Capability: rc, IssuedBy: limes.Principal{Subject: "op"}}); err != nil {
 		t.Fatal(err)

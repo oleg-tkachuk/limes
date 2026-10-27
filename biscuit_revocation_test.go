@@ -8,8 +8,7 @@ import (
 	"errors"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // revokeCopy revokes token's copy through the store the fixture verifier reads.

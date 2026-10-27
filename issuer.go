@@ -7,8 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes/dpop"
 	"github.com/oleg-tkachuk/limes/jwks"
@@ -151,7 +150,7 @@ type IssueRequest struct {
 // zero for any other principal.
 func parentRunOf(p Principal) uuid.UUID {
 	if p.Agent == nil {
-		return uuid.Nil
+		return uuid.Nil()
 	}
 	return p.Agent.RunID
 }
@@ -179,7 +178,7 @@ func result(c Capability, token string, err error) (IssueResult, error) {
 
 // issue is Issue, returning the capability and its token apart.
 func (i *Issuer) issue(ctx context.Context, req IssueRequest) (Capability, string, error) {
-	if req.Subject.TenantID == uuid.Nil {
+	if req.Subject.TenantID == uuid.Nil() {
 		return Capability{}, "", invalidRequest("Issue requires Subject.TenantID")
 	}
 	if err := req.Subject.Validate(); err != nil {
@@ -197,13 +196,10 @@ func (i *Issuer) issue(ctx context.Context, req IssueRequest) (Capability, strin
 	if err != nil {
 		return Capability{}, "", err
 	}
-	cap, err := i.mint(grantTerms{
+	cap := i.mint(grantTerms{
 		Subject: req.Subject, Audience: req.Audience, Caveats: req.Caveats,
 		ConfirmationJKT: req.ConfirmationJKT, IssuedAt: now, ExpiresAt: expires,
 	})
-	if err != nil {
-		return Capability{}, "", err
-	}
 	if err := checkLifetime(cap); err != nil {
 		return Capability{}, "", err
 	}
@@ -243,13 +239,9 @@ type grantTerms struct {
 
 // mint is a capability of t under a fresh id, issued by i. It holds copies
 // of t's slices and pointers, so the caller's request cannot alter it.
-func (i *Issuer) mint(t grantTerms) (Capability, error) {
-	id, err := uuid.NewV7()
-	if err != nil {
-		return Capability{}, fmt.Errorf("limes: capability id: %w", err)
-	}
+func (i *Issuer) mint(t grantTerms) Capability {
 	return Capability{
-		ID:              id,
+		ID:              uuid.NewV7(),
 		Issuer:          i.issuerName,
 		Subject:         t.Subject.clone(),
 		Audience:        slices.Clone(t.Audience),
@@ -258,7 +250,7 @@ func (i *Issuer) mint(t grantTerms) (Capability, error) {
 		ExpiresAt:       t.ExpiresAt,
 		ParentID:        t.ParentID,
 		ConfirmationJKT: t.ConfirmationJKT,
-	}, nil
+	}
 }
 
 // signAndRecord signs c and records it as issued by issuedBy, and returns
@@ -387,7 +379,7 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (IssueResult
 // delegate is Delegate, returning the capability and its token apart.
 func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability, string, error) {
 	parent := req.Parent.c
-	if parent.ID == uuid.Nil {
+	if parent.ID == uuid.Nil() {
 		return Capability{}, "", invalidRequest("Delegate requires a Parent the verifier accepted")
 	}
 	// A Biscuit copy delegates nothing: the child would be an ordinary
@@ -403,19 +395,19 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 	if !slices.Contains(parent.Caveats.Ops, OpShare) {
 		return Capability{}, "", fmt.Errorf("%w: parent %s does not allow %q", ErrOpNotAllowed, parent.ID, OpShare)
 	}
-	if req.Subject.TenantID == uuid.Nil {
+	if req.Subject.TenantID == uuid.Nil() {
 		req.Subject.TenantID = parent.Subject.TenantID
 	}
 	if err := req.Subject.Validate(); err != nil {
 		return Capability{}, "", err
 	}
 	parentRun := parentRunOf(parent.Subject)
-	if a := req.Subject.Agent; a != nil && a.ParentRunID != uuid.Nil && a.ParentRunID != parentRun {
+	if a := req.Subject.Agent; a != nil && a.ParentRunID != uuid.Nil() && a.ParentRunID != parentRun {
 		return Capability{}, "", invalidRequest("Subject.Agent.ParentRunID %s is not the parent's RunID %s", a.ParentRunID, parentRun)
 	}
 	// A child run is another run than the one it was delegated from: the
 	// same id would make the run its own parent in an audit's run graph.
-	if a := req.Subject.Agent; a != nil && parentRun != uuid.Nil && a.RunID == parentRun {
+	if a := req.Subject.Agent; a != nil && parentRun != uuid.Nil() && a.RunID == parentRun {
 		return Capability{}, "", invalidRequest("Subject.Agent.RunID %s is the parent's own run", a.RunID)
 	}
 	if len(req.Audience) == 0 {
@@ -452,19 +444,16 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 	if expires.After(parent.ExpiresAt) {
 		expires = parent.ExpiresAt
 	}
-	child, err := i.mint(grantTerms{
+	child := i.mint(grantTerms{
 		Subject: req.Subject, Audience: req.Audience, Caveats: req.Caveats,
 		ConfirmationJKT: req.ConfirmationJKT, IssuedAt: now, ExpiresAt: expires, ParentID: parent.ID,
 	})
-	if err != nil {
-		return Capability{}, "", err
-	}
 	if child.ConfirmationJKT == "" {
 		child.ConfirmationJKT = parent.ConfirmationJKT
 	}
 	// The run a child agent was delegated from is the parent's, taken from
 	// the token the verifier accepted rather than on the caller's word.
-	if child.Subject.Type == PrincipalTypeAgent && parentRun != uuid.Nil {
+	if child.Subject.Type == PrincipalTypeAgent && parentRun != uuid.Nil() {
 		if child.Subject.Agent == nil {
 			child.Subject.Agent = &AgentPrincipal{}
 		}

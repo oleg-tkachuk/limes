@@ -11,8 +11,7 @@ import (
 	"io"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes/internal/jose"
 )
@@ -113,9 +112,9 @@ func TestSign_RejectsInvalid(t *testing.T) {
 	}
 
 	cases := map[string]func(c *Capability){
-		"missing ID":     func(c *Capability) { c.ID = uuid.Nil },
+		"missing ID":     func(c *Capability) { c.ID = uuid.Nil() },
 		"missing issuer": func(c *Capability) { c.Issuer = "" },
-		"missing tenant": func(c *Capability) { c.Subject.TenantID = uuid.Nil },
+		"missing tenant": func(c *Capability) { c.Subject.TenantID = uuid.Nil() },
 		"empty ops":      func(c *Capability) { c.Caveats.Ops = nil },
 		"reversed times": func(c *Capability) { c.ExpiresAt = c.IssuedAt.Add(-time.Minute) },
 	}

@@ -6,8 +6,8 @@ import (
 	"log"
 	"slices"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 

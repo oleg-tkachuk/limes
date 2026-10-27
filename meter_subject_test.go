@@ -5,8 +5,7 @@ import (
 	"reflect"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes/internal/link"
 )
@@ -70,7 +69,7 @@ func TestStoredMeterSubjectCarriesTheStoredCeilings(t *testing.T) {
 	if len(s.Copies()) != 0 {
 		t.Errorf("copies = %+v, want none from a stored record", s.Copies())
 	}
-	if got, err := StoredMeterSubject(ctx, store, uuid.New()); err == nil || got.CapabilityID() != uuid.Nil {
+	if got, err := StoredMeterSubject(ctx, store, uuid.New()); err == nil || got.CapabilityID() != uuid.Nil() {
 		t.Errorf("a capability not on record = %+v, %v; want the store's error and no subject", got, err)
 	}
 }

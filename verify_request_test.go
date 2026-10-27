@@ -9,8 +9,7 @@ import (
 	"reflect"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes/dpop"
 )
@@ -170,7 +169,7 @@ func TestAuthorize(t *testing.T) {
 				if err != nil {
 					t.Fatalf("err = %v", err)
 				}
-				if c.Capability().ID == uuid.Nil {
+				if c.Capability().ID == uuid.Nil() {
 					t.Fatal("no capability returned")
 				}
 				return

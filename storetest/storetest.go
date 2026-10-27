@@ -37,8 +37,7 @@ import (
 	"slices"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/internal/fields"
@@ -308,7 +307,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 }
 
 func checkRoundTrip(t *testing.T, f fixture) {
-	parent := f.live(t, "agent:parent", uuid.Nil)
+	parent := f.live(t, "agent:parent", uuid.Nil())
 	want := f.live(t, "agent:child", parent.ID)
 	got, err := f.get(want.ID)
 	if err != nil {
@@ -324,7 +323,7 @@ func checkRoundTrip(t *testing.T, f fixture) {
 		"budget unlimited":   func(c *limes.Caveats) { c.Budget = limes.BudgetCeiling{Unlimited: true, UnitCode: c.Budget.UnitCode} },
 		"copies unlimited":   func(c *limes.Caveats) { c.Copies = limes.CopyQuota{Unlimited: true} },
 	} {
-		c := f.newCapability("agent:unlimited", uuid.Nil, f.now.Add(ttl))
+		c := f.newCapability("agent:unlimited", uuid.Nil(), f.now.Add(ttl))
 		lift(&c.Caveats)
 		f.insert(t, c)
 		got, err := f.get(c.ID)
@@ -338,9 +337,9 @@ func checkRoundTrip(t *testing.T, f fixture) {
 }
 
 func checkRecord(t *testing.T, f fixture) {
-	parent := f.live(t, "agent:parent", uuid.Nil)
+	parent := f.live(t, "agent:parent", uuid.Nil())
 	child := f.live(t, "agent:child", parent.ID)
-	cascadeRoot := f.live(t, "agent:cascade", uuid.Nil)
+	cascadeRoot := f.live(t, "agent:cascade", uuid.Nil())
 	cascadeChild := f.live(t, "agent:cascade-child", cascadeRoot.ID)
 	record := func(id uuid.UUID) limes.Record {
 		t.Helper()
@@ -348,7 +347,7 @@ func checkRecord(t *testing.T, f fixture) {
 	}
 
 	issuer := f.issuer()
-	issued := f.newCapability("agent:issued", uuid.Nil, f.now.Add(ttl))
+	issued := f.newCapability("agent:issued", uuid.Nil(), f.now.Add(ttl))
 	if err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: issued, IssuedBy: issuer}); err != nil {
 		t.Fatalf("insert %s: %v", issued.ID, err)
 	}
@@ -395,7 +394,7 @@ func checkRecord(t *testing.T, f fixture) {
 			t.Errorf("%s: revocation %+v reads back with %v unset", id, rev, unset)
 		}
 	}
-	for _, id := range []uuid.UUID{uuid.New(), uuid.Nil} {
+	for _, id := range []uuid.UUID{uuid.New(), uuid.Nil()} {
 		if _, err := f.Store.GetRecord(f.Ctx, id); !errors.Is(err, limes.ErrNotFound) {
 			t.Errorf("GetRecord %s: err = %v, want ErrNotFound", id, err)
 		}
@@ -403,7 +402,7 @@ func checkRecord(t *testing.T, f fixture) {
 }
 
 func checkDuplicate(t *testing.T, f fixture) {
-	c := f.live(t, "agent:a", uuid.Nil)
+	c := f.live(t, "agent:a", uuid.Nil())
 	again := c
 	again.Subject.Subject = "agent:b"
 	if err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: again, IssuedBy: issuedBy}); !errors.Is(err, limes.ErrAlreadyExists) {
@@ -415,7 +414,7 @@ func checkDuplicate(t *testing.T, f fixture) {
 }
 
 func checkUnknown(t *testing.T, f fixture) {
-	for _, id := range []uuid.UUID{uuid.New(), uuid.Nil} {
+	for _, id := range []uuid.UUID{uuid.New(), uuid.Nil()} {
 		if _, err := f.get(id); !errors.Is(err, limes.ErrNotFound) {
 			t.Errorf("Get %s: err = %v, want ErrNotFound", id, err)
 		}
@@ -433,10 +432,10 @@ func checkUnknown(t *testing.T, f fixture) {
 }
 
 func checkRevoke(t *testing.T, f fixture) {
-	parent := f.live(t, "agent:parent", uuid.Nil)
+	parent := f.live(t, "agent:parent", uuid.Nil())
 	child := f.live(t, "agent:child", parent.ID)
 	grandchild := f.live(t, "agent:grandchild", child.ID)
-	other := f.live(t, "agent:other", uuid.Nil)
+	other := f.live(t, "agent:other", uuid.Nil())
 	if r := f.revoke(t, parent.ID, false); r.AlreadyRevoked || r.PriorDisposition != limes.RecordDispositionActive {
 		t.Errorf("first revoke = %+v; want a new entry, active before", r)
 	}
@@ -458,7 +457,7 @@ func checkRevoke(t *testing.T, f fixture) {
 	}
 	// An expired capability is expired before its revoke, which still
 	// writes its entry.
-	expired := f.insert(t, f.newCapability("agent:expired", uuid.Nil, f.now.Add(-expiredAgo)))
+	expired := f.insert(t, f.newCapability("agent:expired", uuid.Nil(), f.now.Add(-expiredAgo)))
 	if r := f.revoke(t, expired.ID, false); r.AlreadyRevoked || r.PriorDisposition != limes.RecordDispositionExpired {
 		t.Errorf("revoke of an expired capability = %+v; want a new entry, expired before", r)
 	}
@@ -483,9 +482,9 @@ func checkRevoke(t *testing.T, f fixture) {
 // it hides a capability revoked itself, not one revoked through an ancestor.
 func checkCascade(t *testing.T, f fixture) {
 	const subject = "agent:tree"
-	plainRoot := f.live(t, "agent:plain", uuid.Nil)
+	plainRoot := f.live(t, "agent:plain", uuid.Nil())
 	plainChild := f.live(t, subject, plainRoot.ID)
-	cascadeRoot := f.live(t, "agent:cascade", uuid.Nil)
+	cascadeRoot := f.live(t, "agent:cascade", uuid.Nil())
 	cascadeChild := f.live(t, subject, cascadeRoot.ID)
 	f.revoke(t, plainRoot.ID, false)
 	f.revoke(t, cascadeRoot.ID, true)
@@ -503,7 +502,7 @@ func checkCascade(t *testing.T, f fixture) {
 // walking to the root, passes the one-level checks above and misses a
 // grandchild. A cascade must also stay below where it started.
 func checkDeepChain(t *testing.T, f fixture) {
-	root := f.live(t, "agent:root", uuid.Nil)
+	root := f.live(t, "agent:root", uuid.Nil())
 	mid := f.live(t, "agent:mid", root.ID)
 	leaf := f.live(t, "agent:leaf", mid.ID)
 	f.revoke(t, root.ID, false)
@@ -511,7 +510,7 @@ func checkDeepChain(t *testing.T, f fixture) {
 		t.Error("revoking a root must stop its grandchild")
 	}
 
-	top := f.live(t, "agent:top", uuid.Nil)
+	top := f.live(t, "agent:top", uuid.Nil())
 	from := f.live(t, "agent:from", top.ID)
 	sibling := f.live(t, "agent:sibling", top.ID)
 	below := f.live(t, "agent:below", from.ID)
@@ -531,11 +530,11 @@ func checkDeepChain(t *testing.T, f fixture) {
 }
 
 func checkPurge(t *testing.T, f fixture) {
-	expired := f.insert(t, f.newCapability("agent:old", uuid.Nil, f.now.Add(-expiredAgo)))
-	unrevoked := f.insert(t, f.newCapability("agent:older", uuid.Nil, f.now.Add(-expiredAgo)))
-	live := f.live(t, "agent:new", uuid.Nil)
+	expired := f.insert(t, f.newCapability("agent:old", uuid.Nil(), f.now.Add(-expiredAgo)))
+	unrevoked := f.insert(t, f.newCapability("agent:older", uuid.Nil(), f.now.Add(-expiredAgo)))
+	live := f.live(t, "agent:new", uuid.Nil())
 	// Expired past MinPurgeRetention but within the retention asked for: kept.
-	recent := f.insert(t, f.newCapability("agent:recent", uuid.Nil, f.now.Add(-purgeGrace/2)))
+	recent := f.insert(t, f.newCapability("agent:recent", uuid.Nil(), f.now.Add(-purgeGrace/2)))
 	f.revoke(t, expired.ID, false)
 	f.revoke(t, live.ID, false)
 	got, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace})
@@ -569,7 +568,7 @@ func checkPurge(t *testing.T, f fixture) {
 func checkPurgeBatches(t *testing.T, f fixture) {
 	const total, batch = 3, 2
 	for range total {
-		f.insert(t, f.newCapability("agent:old", uuid.Nil, f.now.Add(-expiredAgo)))
+		f.insert(t, f.newCapability("agent:old", uuid.Nil(), f.now.Add(-expiredAgo)))
 	}
 	first, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace, Limit: batch})
 	if err != nil || first.Purged != batch {
@@ -594,7 +593,7 @@ func checkPurgeBatches(t *testing.T, f fixture) {
 // limit is asked for, rather than everything due in one go.
 func checkPurgeDefaultLimit(t *testing.T, f fixture) {
 	for range limes.DefaultHousekeepingLimit + 1 {
-		f.insert(t, f.newCapability("agent:old", uuid.Nil, f.now.Add(-expiredAgo)))
+		f.insert(t, f.newCapability("agent:old", uuid.Nil(), f.now.Add(-expiredAgo)))
 	}
 	got, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace})
 	if err != nil || got.Purged != limes.DefaultHousekeepingLimit {
@@ -611,7 +610,7 @@ func checkRevocationOutlastsTime(t *testing.T, f fixture) {
 	}
 	// Live well past the time that passes: several retentions.
 	const lives, passes = 4 * limes.MinPurgeRetention, 2 * limes.MinPurgeRetention
-	c := f.insert(t, f.newCapability("agent:long-lived", uuid.Nil, f.now.Add(lives)))
+	c := f.insert(t, f.newCapability("agent:long-lived", uuid.Nil(), f.now.Add(lives)))
 	f.revoke(t, c.ID, false)
 	f.Advance(passes)
 	if _, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{}); err != nil {
@@ -627,7 +626,7 @@ func checkRevocationOutlastsTime(t *testing.T, f fixture) {
 func checkListLimits(t *testing.T, f fixture) {
 	const subject = "agent:many"
 	for range limes.MaxListLimit + 1 {
-		f.live(t, subject, uuid.Nil)
+		f.live(t, subject, uuid.Nil())
 	}
 	for name, tc := range map[string]struct{ limit, want int }{
 		"no limit":      {0, limes.DefaultListLimit},
@@ -648,7 +647,7 @@ func checkListLimits(t *testing.T, f fixture) {
 func checkListFullLastPage(t *testing.T, f fixture) {
 	const subject = "agent:exact"
 	for range pageSize {
-		f.live(t, subject, uuid.Nil)
+		f.live(t, subject, uuid.Nil())
 	}
 	page, err := f.Store.ListByPrincipal(f.Ctx, limes.ListByPrincipalRequest{
 		TenantID: f.Tenant, PrincipalType: limes.PrincipalTypeAgent, Subject: subject, Limit: pageSize,
@@ -676,9 +675,9 @@ func checkListPages(t *testing.T, f fixture) {
 	const subject = "agent:paged"
 	var want []uuid.UUID
 	for range listed {
-		want = append(want, f.live(t, subject, uuid.Nil).ID)
+		want = append(want, f.live(t, subject, uuid.Nil()).ID)
 	}
-	f.live(t, "agent:someone-else", uuid.Nil)
+	f.live(t, "agent:someone-else", uuid.Nil())
 	req := limes.ListByPrincipalRequest{
 		TenantID: f.Tenant, PrincipalType: limes.PrincipalTypeAgent, Subject: subject, Limit: pageSize,
 	}
@@ -710,12 +709,12 @@ func checkListPages(t *testing.T, f fixture) {
 
 func checkListFilters(t *testing.T, f fixture) {
 	const subject = "agent:filtered"
-	live := f.live(t, subject, uuid.Nil)
-	expired := f.insert(t, f.newCapability(subject, uuid.Nil, f.now.Add(-expiredAgo)))
-	revoked := f.live(t, subject, uuid.Nil)
+	live := f.live(t, subject, uuid.Nil())
+	expired := f.insert(t, f.newCapability(subject, uuid.Nil(), f.now.Add(-expiredAgo)))
+	revoked := f.live(t, subject, uuid.Nil())
 	f.revoke(t, revoked.ID, false)
 	// The same subject under another principal type is another principal.
-	user := f.newCapability(subject, uuid.Nil, f.now.Add(ttl))
+	user := f.newCapability(subject, uuid.Nil(), f.now.Add(ttl))
 	user.Subject.Type, user.Subject.Agent = limes.PrincipalTypeUser, nil
 	f.insert(t, user)
 	base := limes.ListByPrincipalRequest{TenantID: f.Tenant, PrincipalType: limes.PrincipalTypeAgent, Subject: subject}
@@ -749,8 +748,8 @@ func checkListExpiryInstant(t *testing.T, f fixture) {
 		t.Skip("Env.Now is not set")
 	}
 	const subject = "agent:boundary"
-	atNow := f.insert(t, f.newCapability(subject, uuid.Nil, f.now))
-	justAfter := f.insert(t, f.newCapability(subject, uuid.Nil, f.now.Add(timestampResolution)))
+	atNow := f.insert(t, f.newCapability(subject, uuid.Nil(), f.now))
+	justAfter := f.insert(t, f.newCapability(subject, uuid.Nil(), f.now.Add(timestampResolution)))
 	base := limes.ListByPrincipalRequest{TenantID: f.Tenant, PrincipalType: limes.PrincipalTypeAgent, Subject: subject}
 	if got := f.listAll(t, base); !slices.Equal(got, []uuid.UUID{justAfter.ID}) {
 		t.Errorf("listed %v, want only %s: %s expires at the store's now", got, justAfter.ID, atNow.ID)
@@ -788,7 +787,7 @@ func checkInsertTenants(t *testing.T, f fixture) {
 		{"an unknown tenant", uuid.New(), limes.ErrUnknownTenant},
 		{"a deleted tenant", deleted, limes.ErrTenantDeleted},
 	} {
-		c := f.newCapability("agent:orphan", uuid.Nil, f.now.Add(ttl))
+		c := f.newCapability("agent:orphan", uuid.Nil(), f.now.Add(ttl))
 		c.Subject.TenantID = tc.tenant
 		if err := f.Store.Insert(f.tenantCtx(tc.tenant), limes.InsertRequest{Capability: c, IssuedBy: issuedBy}); !errors.Is(err, tc.want) {
 			t.Errorf("Insert for %s: err = %v, want %v", tc.name, err, tc.want)
@@ -807,8 +806,8 @@ func checkListTenants(t *testing.T, f fixture) {
 	if err != nil {
 		t.Fatalf("NewTenant: %v", err)
 	}
-	mine := f.live(t, subject, uuid.Nil)
-	theirs := f.newCapability(subject, uuid.Nil, f.now.Add(ttl))
+	mine := f.live(t, subject, uuid.Nil())
+	theirs := f.newCapability(subject, uuid.Nil(), f.now.Add(ttl))
 	theirs.Subject.TenantID = other
 	if err := f.Store.Insert(f.tenantCtx(other), limes.InsertRequest{Capability: theirs, IssuedBy: issuedBy}); err != nil {
 		t.Fatalf("insert for another tenant: %v", err)
@@ -822,7 +821,7 @@ func checkListTenants(t *testing.T, f fixture) {
 func checkListMalformed(t *testing.T, f fixture) {
 	base := limes.ListByPrincipalRequest{TenantID: f.Tenant, PrincipalType: limes.PrincipalTypeAgent, Subject: "agent:x"}
 	for name, mutate := range map[string]func(*limes.ListByPrincipalRequest){
-		"no tenant":              func(r *limes.ListByPrincipalRequest) { r.TenantID = uuid.Nil },
+		"no tenant":              func(r *limes.ListByPrincipalRequest) { r.TenantID = uuid.Nil() },
 		"no principal type":      func(r *limes.ListByPrincipalRequest) { r.PrincipalType = limes.PrincipalTypeUnspecified },
 		"unknown principal type": func(r *limes.ListByPrincipalRequest) { r.PrincipalType = "robot" },
 		"no subject":             func(r *limes.ListByPrincipalRequest) { r.Subject = "" },
@@ -849,8 +848,8 @@ func checkBiscuit(t *testing.T, f fixture) {
 	if !ok {
 		t.Skip("the store keeps no Biscuit revocations")
 	}
-	live := f.live(t, "agent:biscuit", uuid.Nil)
-	expired := f.insert(t, f.newCapability("agent:biscuit-old", uuid.Nil, f.now.Add(-expiredAgo)))
+	live := f.live(t, "agent:biscuit", uuid.Nil())
+	expired := f.insert(t, f.newCapability("agent:biscuit-old", uuid.Nil(), f.now.Add(-expiredAgo)))
 	copyID, oldCopyID, otherID := []byte("copy"), []byte("old-copy"), []byte("other")
 	// sharedID is one revocation id carried by chains of both capabilities:
 	// a Biscuit block's signature does not cover the block before it, so a
@@ -950,7 +949,7 @@ func checkBiscuit(t *testing.T, f fixture) {
 // deep, and Insert to refusing a deeper one, whose root the walk could not
 // reach, without writing it.
 func checkMaxDepth(t *testing.T, f fixture) {
-	root := f.live(t, "agent:root", uuid.Nil)
+	root := f.live(t, "agent:root", uuid.Nil())
 	leaf := root
 	for range limes.MaxDelegationDepth {
 		leaf = f.live(t, "agent:link", leaf.ID)
@@ -972,7 +971,7 @@ func checkMaxDepth(t *testing.T, f fixture) {
 // MaxDelegationDepth deep: each link gets an entry of its own, the deepest
 // included, not only the first few a shallow walk reaches.
 func checkMaxDepthCascade(t *testing.T, f fixture) {
-	root := f.live(t, "agent:root", uuid.Nil)
+	root := f.live(t, "agent:root", uuid.Nil())
 	links := make([]uuid.UUID, 0, limes.MaxDelegationDepth)
 	parent := root.ID
 	for range limes.MaxDelegationDepth {
@@ -995,7 +994,7 @@ func checkPurgeKeepsLineage(t *testing.T, f fixture) {
 	const chain = 4
 	expires := f.now.Add(-expiredAgo)
 	ids := make([]uuid.UUID, 0, chain)
-	parent := uuid.Nil
+	parent := uuid.Nil()
 	for range chain {
 		parent = f.insert(t, f.newCapability("agent:link", parent, expires)).ID
 		ids = append(ids, parent)
@@ -1031,13 +1030,13 @@ func checkPurgeKeepsLineage(t *testing.T, f fixture) {
 // removes, no child expiring after its parent, and no child counting in
 // another unit than its parent. None of them is recorded.
 func checkInsertKeepsLineage(t *testing.T, f fixture) {
-	parent := f.live(t, "agent:parent", uuid.Nil)
-	noID := f.newCapability("agent:no-id", uuid.Nil, f.now.Add(ttl))
-	noID.ID = uuid.Nil
+	parent := f.live(t, "agent:parent", uuid.Nil())
+	noID := f.newCapability("agent:no-id", uuid.Nil(), f.now.Add(ttl))
+	noID.ID = uuid.Nil()
 	orphan := f.newCapability("agent:orphan", uuid.New(), f.now.Add(ttl))
 	outliving := f.newCapability("agent:outliving", parent.ID, parent.ExpiresAt.Add(time.Second))
 	unexpiring := f.newCapability("agent:unexpiring", parent.ID, time.Time{})
-	endlessRoot := f.newCapability("agent:endless", uuid.Nil, time.Time{})
+	endlessRoot := f.newCapability("agent:endless", uuid.Nil(), time.Time{})
 	other, err := f.newTenant()
 	if err != nil {
 		t.Fatalf("NewTenant: %v", err)
@@ -1072,7 +1071,7 @@ func checkInsertKeepsLineage(t *testing.T, f fixture) {
 		if err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: tc.c, IssuedBy: issuedBy}); !errors.Is(err, tc.want) {
 			t.Errorf("Insert of %s: err = %v, want %v", name, err, tc.want)
 		}
-		if tc.c.ID == uuid.Nil {
+		if tc.c.ID == uuid.Nil() {
 			continue
 		}
 		if _, err := f.Store.GetRecord(f.Ctx, tc.c.ID); !errors.Is(err, limes.ErrNotFound) {
@@ -1085,8 +1084,8 @@ func checkInsertKeepsLineage(t *testing.T, f fixture) {
 // a capability expired for less is still inside a verifier's leeway, and its
 // revocation must stay where IsRevoked finds it.
 func checkPurgeRetention(t *testing.T, f fixture) {
-	recent := f.insert(t, f.newCapability("agent:recent", uuid.Nil, f.now.Add(-limes.MinPurgeRetention/2)))
-	old := f.insert(t, f.newCapability("agent:old", uuid.Nil, f.now.Add(-2*limes.MinPurgeRetention)))
+	recent := f.insert(t, f.newCapability("agent:recent", uuid.Nil(), f.now.Add(-limes.MinPurgeRetention/2)))
+	old := f.insert(t, f.newCapability("agent:old", uuid.Nil(), f.now.Add(-2*limes.MinPurgeRetention)))
 	f.revoke(t, recent.ID, false)
 	got, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{})
 	if err != nil || got.Purged != 1 {
@@ -1105,7 +1104,7 @@ func checkPurgeRetention(t *testing.T, f fixture) {
 // stored, so changing it changes no record.
 func checkRecordIsItsOwn(t *testing.T, f fixture) {
 	const subject = "agent:own"
-	c := f.newCapability(subject, uuid.Nil, f.now.Add(ttl))
+	c := f.newCapability(subject, uuid.Nil(), f.now.Add(ttl))
 	want := c.Clone()
 	f.insert(t, c)
 	scribble := func(c *limes.Capability) {
@@ -1143,7 +1142,7 @@ func checkRecordIsItsOwn(t *testing.T, f fixture) {
 
 	// Who issued it, and a Biscuit copy's revocation, are the store's too.
 	byAgent := limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: f.Tenant, Subject: "agent:issuer", Agent: &limes.AgentPrincipal{Model: "m"}}
-	issued := f.newCapability(subject, uuid.Nil, f.now.Add(ttl))
+	issued := f.newCapability(subject, uuid.Nil(), f.now.Add(ttl))
 	if err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: issued, IssuedBy: byAgent}); err != nil {
 		t.Fatal(err)
 	}
@@ -1186,9 +1185,9 @@ func checkScopeMismatch(t *testing.T, f fixture) {
 		t.Fatalf("NewTenant: %v", err)
 	}
 	wrong := f.tenantCtx(other)
-	parent := f.live(t, "agent:parent", uuid.Nil)
+	parent := f.live(t, "agent:parent", uuid.Nil())
 	for name, c := range map[string]limes.Capability{
-		"a root":            f.newCapability("agent:root", uuid.Nil, f.now.Add(ttl)),
+		"a root":            f.newCapability("agent:root", uuid.Nil(), f.now.Add(ttl)),
 		"a delegated child": f.newCapability("agent:child", parent.ID, parent.ExpiresAt),
 	} {
 		if err := f.Store.Insert(wrong, limes.InsertRequest{Capability: c, IssuedBy: issuedBy}); !errors.Is(err, limes.ErrScopeMismatch) {
@@ -1221,12 +1220,12 @@ func checkReadOnlyScope(t *testing.T, f fixture) {
 	if ro == nil {
 		t.Skip("Env.ReadOnlyCtx not set")
 	}
-	live := f.live(t, "agent:live", uuid.Nil)
-	expired := f.insert(t, f.newCapability("agent:expired", uuid.Nil, f.now.Add(-expiredAgo)))
+	live := f.live(t, "agent:live", uuid.Nil())
+	expired := f.insert(t, f.newCapability("agent:expired", uuid.Nil(), f.now.Add(-expiredAgo)))
 	if _, err := f.Store.GetRecord(ro, live.ID); err != nil {
 		t.Errorf("GetRecord under the read-only scope: %v", err)
 	}
-	fresh := f.newCapability("agent:fresh", uuid.Nil, f.now.Add(ttl))
+	fresh := f.newCapability("agent:fresh", uuid.Nil(), f.now.Add(ttl))
 	copyID := []byte("read-only-copy")
 	writes := map[string]func() error{
 		"Insert": func() error { return f.Store.Insert(ro, limes.InsertRequest{Capability: fresh, IssuedBy: issuedBy}) },
@@ -1283,9 +1282,9 @@ func checkEraseTenant(t *testing.T, f fixture) {
 	if err != nil {
 		t.Fatalf("NewTenant: %v", err)
 	}
-	root := f.live(t, "agent:root", uuid.Nil)
+	root := f.live(t, "agent:root", uuid.Nil())
 	child := f.live(t, "agent:child", root.ID)
-	revoked := f.live(t, "agent:revoked", uuid.Nil)
+	revoked := f.live(t, "agent:revoked", uuid.Nil())
 	f.revoke(t, revoked.ID, false)
 	copyID := []byte("erased-tenant-copy")
 	biscuits, withBiscuits := f.Store.(limes.BiscuitRevocationStore)
@@ -1294,7 +1293,7 @@ func checkEraseTenant(t *testing.T, f fixture) {
 			t.Fatalf("RevokeBiscuit: %v", err)
 		}
 	}
-	expired := f.insert(t, f.newCapability("agent:expired", uuid.Nil, f.now.Add(-expiredAgo)))
+	expired := f.insert(t, f.newCapability("agent:expired", uuid.Nil(), f.now.Add(-expiredAgo)))
 	expiredCopyID := []byte("erased-tenant-expired-copy")
 	if withBiscuits {
 		if _, err := biscuits.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(expired.ID, expiredCopyID)}); err != nil {
@@ -1302,8 +1301,8 @@ func checkEraseTenant(t *testing.T, f fixture) {
 		}
 	}
 	// Expired, but not for MinPurgeRetention: a verifier may still take it.
-	recent := f.insert(t, f.newCapability("agent:recent", uuid.Nil, f.now.Add(-limes.MinPurgeRetention/2)))
-	theirs := f.newCapability("agent:theirs", uuid.Nil, f.now.Add(ttl))
+	recent := f.insert(t, f.newCapability("agent:recent", uuid.Nil(), f.now.Add(-limes.MinPurgeRetention/2)))
+	theirs := f.newCapability("agent:theirs", uuid.Nil(), f.now.Add(ttl))
 	theirs.Subject.TenantID = other
 	if err := f.Store.Insert(f.tenantCtx(other), limes.InsertRequest{Capability: theirs, IssuedBy: issuedBy}); err != nil {
 		t.Fatalf("Insert for another tenant: %v", err)
@@ -1374,14 +1373,14 @@ func censusFixture(t *testing.T, f fixture) uuid.UUID {
 		}
 		return c
 	}
-	root := f.live(t, "agent:root", uuid.Nil)
+	root := f.live(t, "agent:root", uuid.Nil())
 	f.insert(t, f.newCapability("agent:soon", root.ID, f.now.Add(censusWindow/2)))
-	f.insert(t, f.newCapability("agent:edge", uuid.Nil, f.now.Add(censusWindow)))
-	revokedExpired := f.insert(t, f.newCapability("agent:revoked-expired", uuid.Nil, f.now.Add(-expiredAgo)))
+	f.insert(t, f.newCapability("agent:edge", uuid.Nil(), f.now.Add(censusWindow)))
+	revokedExpired := f.insert(t, f.newCapability("agent:revoked-expired", uuid.Nil(), f.now.Add(-expiredAgo)))
 	f.revoke(t, revokedExpired.ID, false)
-	f.insert(t, of(limes.PrincipalTypeService, f.newCapability("svc:old", uuid.Nil, f.now.Add(-expiredAgo))))
-	f.insert(t, of(limes.PrincipalTypeService, f.newCapability("svc:now", uuid.Nil, f.now)))
-	userRoot := f.insert(t, of(limes.PrincipalTypeUser, f.newCapability("user:root", uuid.Nil, f.now.Add(ttl))))
+	f.insert(t, of(limes.PrincipalTypeService, f.newCapability("svc:old", uuid.Nil(), f.now.Add(-expiredAgo))))
+	f.insert(t, of(limes.PrincipalTypeService, f.newCapability("svc:now", uuid.Nil(), f.now)))
+	userRoot := f.insert(t, of(limes.PrincipalTypeUser, f.newCapability("user:root", uuid.Nil(), f.now.Add(ttl))))
 	userChild := f.insert(t, of(limes.PrincipalTypeUser, f.newCapability("user:child", userRoot.ID, f.now.Add(ttl))))
 	f.revoke(t, userRoot.ID, false)
 	if !f.revoked(t, userChild.ID) {
@@ -1391,7 +1390,7 @@ func censusFixture(t *testing.T, f fixture) uuid.UUID {
 	if err != nil {
 		t.Fatalf("NewTenant: %v", err)
 	}
-	theirs := f.newCapability("agent:theirs", uuid.Nil, f.now.Add(ttl))
+	theirs := f.newCapability("agent:theirs", uuid.Nil(), f.now.Add(ttl))
 	theirs.Subject.TenantID = other
 	if err := f.Store.Insert(f.tenantCtx(other), limes.InsertRequest{Capability: theirs, IssuedBy: issuedBy}); err != nil {
 		t.Fatalf("Insert for another tenant: %v", err)
@@ -1439,7 +1438,7 @@ func checkCensusEdges(t *testing.T, f fixture) {
 	if got := f.countAll(t, f.Ctx, mine); len(got) != 0 {
 		t.Errorf("census of a tenant with no record = %+v, want an empty page", got)
 	}
-	live := f.live(t, "agent:copied", uuid.Nil)
+	live := f.live(t, "agent:copied", uuid.Nil())
 	if biscuits, ok := f.Store.(limes.BiscuitRevocationStore); ok {
 		if _, err := biscuits.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(live.ID, []byte("census-copy"))}); err != nil {
 			t.Fatalf("RevokeBiscuit: %v", err)
@@ -1547,7 +1546,7 @@ func checkRevocationLineage(t *testing.T, f fixture) {
 	if !ok {
 		t.Skip("Env.Store is no limes.RevocationLineageLookup")
 	}
-	root := f.live(t, "agent:lineage-root", uuid.Nil)
+	root := f.live(t, "agent:lineage-root", uuid.Nil())
 	child := f.live(t, "agent:lineage-child", root.ID)
 	grandchild := f.live(t, "agent:lineage-grandchild", child.ID)
 	expect := func(what string, id uuid.UUID, ancestors []uuid.UUID) {

@@ -10,11 +10,11 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"uuid"
 
 	biscuit "github.com/eclipse-biscuit/biscuit-go/v2"
 	"github.com/eclipse-biscuit/biscuit-go/v2/datalog"
 	"github.com/eclipse-biscuit/biscuit-go/v2/pb"
-	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/oleg-tkachuk/limes/internal/jose"
@@ -118,7 +118,7 @@ type BiscuitResult struct {
 func (i *Issuer) biscuit(ctx context.Context, vc VerifiedCapability) (string, error) {
 	c := vc.c
 	switch {
-	case c.ID == uuid.Nil:
+	case c.ID == uuid.Nil():
 		return "", invalidRequest("Biscuit requires a capability the verifier accepted")
 	case vc.fromBiscuit:
 		return "", invalidRequest("capability %s was read from a Biscuit; attenuate that instead", c.ID)

@@ -4,8 +4,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/internal/link"
@@ -32,7 +31,7 @@ func TestTwoChildrenRaceForTheirRootsLastCopy(t *testing.T) {
 		return c.ID
 	}
 	for round := range raceRounds {
-		root := insert(uuid.Nil, limes.CopyQuota{Max: 1})
+		root := insert(uuid.Nil(), limes.CopyQuota{Max: 1})
 		children := []uuid.UUID{insert(root, limes.CopyQuota{Unlimited: true}), insert(root, limes.CopyQuota{Unlimited: true})}
 		start := make(chan struct{})
 		errs := make([]error, len(children))

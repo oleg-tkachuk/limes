@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"uuid"
 
-	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -130,7 +130,7 @@ func newMeteringInstruments(cfg meteringConfig) (*meteringInstruments, error) {
 // attrs is the attribute set of one measurement: the tenant when enabled,
 // then kv.
 func (in *meteringInstruments) attrs(tenantID uuid.UUID, kv ...attribute.KeyValue) metric.MeasurementOption {
-	if in.tenant && tenantID != uuid.Nil {
+	if in.tenant && tenantID != uuid.Nil() {
 		kv = append(kv, attribute.String(attrTenantID, tenantID.String()))
 	}
 	return metric.WithAttributes(kv...)

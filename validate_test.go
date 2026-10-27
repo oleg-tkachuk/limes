@@ -6,8 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // ─── validation ────────────────────────────────────────────────────────────
@@ -181,9 +180,10 @@ func TestIssuedIDsAreVersion7(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const v7 uuid.Version = 7
+	// The version is the high four bits of octet 6 (RFC 9562 §4.2).
+	const versionOctet, versionShift, v7 = 6, 4, 7
 	for name, id := range map[string]uuid.UUID{"issued": parent.ID, "delegated": child.ID} {
-		if v := id.Version(); v != v7 {
+		if v := id[versionOctet] >> versionShift; v != v7 {
 			t.Errorf("%s id %s is version %d, want %d", name, id, v, v7)
 		}
 	}
@@ -198,7 +198,7 @@ func TestMintingResults(t *testing.T) {
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet, OpShare}}, TTL: time.Hour,
 	})
-	if err != nil || issued.Token == "" || issued.Capability.ID == uuid.Nil {
+	if err != nil || issued.Token == "" || issued.Capability.ID == uuid.Nil() {
 		t.Fatalf("Issue = %+v, %v; want a capability and its token", issued, err)
 	}
 	vc, err := v.Verify(ctx, VerifyRequest{Token: issued.Token, Audience: audienceData})
