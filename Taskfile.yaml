@@ -144,6 +144,10 @@ tasks:
       - go run ./delegation
       - go run ./metering
       - go run ./mcp-exchange
+      # Node's jose against limes tokens: internal/interop/node_fixture_test.go
+      # writes the fixture, and the Node test reads it.
+      - node ../{{.CI_DIR}}/install.ts internal/interop/testdata/node
+      - node --test internal/interop/testdata/node/interop.test.ts
 
   test:examples:pgstore:
     desc: "Run the pgstore example to the end against PostgreSQL in a container — needs a running Docker"

@@ -1,0 +1,23 @@
+{
+  "issuer": "interop-issuer",
+  "audience": "interop-api",
+  "subject": "reader",
+  "tenant": "09456deb-b3c3-4ee5-a6b4-762268f70423",
+  "resource": "corpus/public/report.pdf",
+  "verify_at": 1800000060,
+  "jwks": {
+    "keys": [
+      {
+        "kty": "OKP",
+        "crv": "Ed25519",
+        "kid": "iO16FDDlsDf1HGlxAeGdy5dYQIwG38qeV10Aa8EpGRg",
+        "alg": "Ed25519",
+        "x": "kkaLOnJrdfbeVt0b_URFQLhRRagGrR5l0XS8S84Xc5o"
+      }
+    ]
+  },
+  "tokens": {
+    "Ed25519": "eyJhbGciOiJFZDI1NTE5Iiwia2lkIjoiaU8xNkZERGxzRGYxSEdseEFlR2R5NWRZUUl3RzM4cWVWMTBBYThFcEdSZyIsInR5cCI6ImxpbWVzLWNhcC12Nitqd3QifQ.eyJpc3MiOiJpbnRlcm9wLWlzc3VlciIsInN1YiI6InJlYWRlciIsImF1ZCI6WyJpbnRlcm9wLWFwaSJdLCJpYXQiOjE4MDAwMDAwMDAsImV4cCI6MTgwMDAwMDkwMCwianRpIjoiMDFhMTdlMDctNzlkMi03MDg3LWFmMzQtNDc0OGFmMjc0NDRmIiwibGltZXNfcHJpbmNpcGFsIjp7InR5cGUiOiJzZXJ2aWNlIiwidGVuYW50X2lkIjoiMDk0NTZkZWItYjNjMy00ZWU1LWE2YjQtNzYyMjY4ZjcwNDIzIiwic3ViamVjdCI6InJlYWRlciJ9LCJsaW1lc19jYXZlYXRzIjp7Im9wcyI6WyJnZXQiXSwicmVzb3VyY2VfcHJlZml4ZXMiOlsiY29ycHVzL3B1YmxpYy9yZXBvcnQucGRmIl19fQ.G-RLe1uzzHCOwcxPGmzr51YrOsVs20Y_hAWscIv0b3GcmZTNrZCAP4KUh2839JHF-mCkR-CoxVyU_TLwBHkJDg",
+    "EdDSA": "eyJhbGciOiJFZERTQSIsImtpZCI6ImlPMTZGRERsc0RmMUhHbHhBZUdkeTVkWVFJd0czOHFlVjEwQWE4RXBHUmciLCJ0eXAiOiJsaW1lcy1jYXAtdjYrand0In0.eyJpc3MiOiJpbnRlcm9wLWlzc3VlciIsInN1YiI6InJlYWRlciIsImF1ZCI6WyJpbnRlcm9wLWFwaSJdLCJpYXQiOjE4MDAwMDAwMDAsImV4cCI6MTgwMDAwMDkwMCwianRpIjoiMDFhMTdlMDctNzlkMi03ODZhLWIzNmQtMmY4MzA1Njg5NjYyIiwibGltZXNfcHJpbmNpcGFsIjp7InR5cGUiOiJzZXJ2aWNlIiwidGVuYW50X2lkIjoiMDk0NTZkZWItYjNjMy00ZWU1LWE2YjQtNzYyMjY4ZjcwNDIzIiwic3ViamVjdCI6InJlYWRlciJ9LCJsaW1lc19jYXZlYXRzIjp7Im9wcyI6WyJnZXQiXSwicmVzb3VyY2VfcHJlZml4ZXMiOlsiY29ycHVzL3B1YmxpYy9yZXBvcnQucGRmIl19fQ.TXimVmWwwbTV-RJHwbHL74_bX_oUM78aRFreILeN9RE5GuT0m95dlEIbexslKw4S6RMDzML5F0vcUcAf60uqBA"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "limes-interop-node",
+  "private": true,
+  "description": "Checks that Node's jose verifies limes capability tokens (node_fixture_test.go writes the fixture).",
+  "type": "module",
+  "engines": {
+    "node": ">=24.2"
+  },
+  "dependencies": {
+    "jose": "6.2.13"
+  }
+}
