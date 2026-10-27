@@ -1,6 +1,7 @@
 package limes
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
@@ -171,11 +172,32 @@ func TestVerifyReadsClaimsStrictly(t *testing.T) {
 	}
 }
 
+// validClaimsJSON is validClaims(tenant) as JSON, which parseClaims reads.
+func validClaimsJSON(t *testing.T, tenant uuid.UUID) []byte {
+	t.Helper()
+	raw, err := json.Marshal(validClaims(tenant))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parseClaims(jose.B64(raw), TokenTypeV6); err != nil {
+		t.Fatalf("the valid claims were refused: %v", err)
+	}
+	return raw
+}
+
+// issClaim is validClaims' iss member as encoding/json writes it.
+const issClaim = `"iss":"iss"`
+
 // A duplicate member is refused: encoding/json would keep the last, another
-// parser the first.
+// parser the first. The duplicate repeats the same value, so nothing but the
+// repetition is wrong with the claims.
 func TestVerifyRefusesDuplicateClaims(t *testing.T) {
-	_, err := parseClaims(jose.B64([]byte(`{"iss":"a","iss":"b"}`)), TokenTypeV6)
-	if err == nil {
+	raw := validClaimsJSON(t, uuid.New())
+	dup := bytes.Replace(raw, []byte(issClaim), []byte(issClaim+","+issClaim), 1)
+	if bytes.Equal(dup, raw) {
+		t.Fatalf("no %s in %s", issClaim, raw)
+	}
+	if _, err := parseClaims(jose.B64(dup), TokenTypeV6); err == nil {
 		t.Fatal("claims with iss twice were read")
 	}
 }

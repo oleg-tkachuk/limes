@@ -1,6 +1,7 @@
 package limes
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"errors"
@@ -40,7 +41,14 @@ func TestTokenIntegersStayWithinIJSON(t *testing.T) {
 
 // RFC 7493 §2.1: a token's JSON is UTF-8; one that is not is refused.
 func TestTokenClaimsAreUTF8(t *testing.T) {
-	if _, err := parseClaims(jose.B64([]byte("{\"iss\":\"\xff\"}")), TokenTypeV6); err == nil {
+	raw := validClaimsJSON(t, uuid.New())
+	// invalidUTF8 is a byte that starts no UTF-8 sequence.
+	const invalidUTF8 = "\xff"
+	bad := bytes.Replace(raw, []byte(issClaim), []byte(strings.TrimSuffix(issClaim, `"`)+invalidUTF8+`"`), 1)
+	if bytes.Equal(bad, raw) {
+		t.Fatalf("no %s in %s", issClaim, raw)
+	}
+	if _, err := parseClaims(jose.B64(bad), TokenTypeV6); err == nil {
 		t.Error("claims with invalid UTF-8 were read")
 	}
 }

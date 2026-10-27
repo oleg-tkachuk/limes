@@ -14,6 +14,8 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/asn1"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -24,9 +26,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/go-json-experiment/json"
-	"github.com/go-json-experiment/json/jsontext"
 
 	"github.com/oleg-tkachuk/limes/internal/jose"
 	"github.com/oleg-tkachuk/limes/internal/rfc3986"

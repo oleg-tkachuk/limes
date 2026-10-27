@@ -5,12 +5,11 @@ import (
 	"crypto"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json/v2"
 	"errors"
 	"testing"
 	"time"
 	"uuid"
-
-	"github.com/go-json-experiment/json"
 
 	"github.com/oleg-tkachuk/limes/internal/jose"
 )
