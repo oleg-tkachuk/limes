@@ -22,32 +22,30 @@ the test that holds it there.
 
 ## The token
 
-**RFC 7519, RFC 8725.** A capability token is a JWS-signed JWT, in one of
-two formats. The algorithm is fixed by the verifier rather than read from
-the token (§3.1), and `iss` and `aud` are always checked (§3.8, §3.9).
+**RFC 7519, RFC 8725, RFC 9068.** A capability token is a JWS-signed JWT,
+typed `at+jwt`: an OAuth access token in the JWT profile of RFC 9068, so
+validators of that profile read it. The algorithm is fixed by the verifier
+rather than read from the token (§3.1), and `iss` and `aud` are always
+checked (§3.8, §3.9). The type names no format, so the claim `limes_v: 7`
+does, and the claims are read strictly under it: a token without `limes_v`
+7, a `client_id`, a `sub` and every `limes_` claim, or with a member the
+format does not define, is refused.
 
-- **v6** is explicitly typed `typ: limes-cap-v6+jwt` (§3.11), so no other
-  JWT signed by the same key passes as a capability, and the version is part
-  of the type: a token of another format is refused before any claim is
-  read under the wrong schema.
-- **v7** is typed `at+jwt`, RFC 9068's access token, so validators of that
-  profile read it. The format is named by the claim `limes_v: 7` instead, and
-  the claims are read strictly under it: an `at+jwt` without `limes_v` 7, a
-  `client_id` and every `limes_` claim, with no member the format does not
-  define, is refused. What tells a capability from an authorization server's
-  access token is then that schema and the issuer's key, which no
-  authorization server minting `at+jwt` may share
-  ([ADR-0004](adr/0004-token-format-v7.md)).
-
-Verifiers read both formats unless `VerifierConfig.AcceptTokenTypes`
-narrows them; a signer writes v6 unless `SignerConfig.TokenType` names v7.
-*Held by* `TestVerifyRequiresCapabilityTyp`, `TestVerifyFixesTheAlgorithm`,
+RFC 8725 §3.11's explicit typing kept other JWTs signed by the same key from
+passing as a capability; `at+jwt` is every authorization server's type, so
+the key does that instead. Its kid is in limes's namespace
+(`jwks.KeyIDPrefix`, `limes:`): a signer will not sign under any other, and
+a verifier refuses a token under any other before it looks a key up. A key
+that signs capabilities never signs an authorization server's access tokens
+([ADR-0006](adr/0006-one-token-format.md)). The retired formats, typed
+`limes-cap-v6+jwt` and earlier, are refused. *Held by*
+`TestVerifyRequiresCapabilityTyp`, `TestVerifyFixesTheAlgorithm`,
 `TestVerify_UntrustedIssuer`, `TestVerify_AudienceMismatch`,
-`TestV7IsAnAccessToken`, `TestEachFormatHasItsOwnClaims`,
-`TestClientIDByFormat`, `TestGoldenTokenStillVerifies`. Format changes
-after v6 land in v7: `limes_caveats.resource_name_prefixes`
-(`Caveats.ResourceNamePrefixes`) is v7's alone, and a v6 token naming it is
-refused (`TestNamePrefixesNeedV7`).
+`TestATokenIsAnAccessToken`, `TestClaimsAreReadUnderTheirFormat`,
+`TestClientIDIsRequired`, `TestSubjectIsRequired`,
+`TestSignerWritesAnAccessTokenUnderALimesKid`,
+`TestVerifyRefusesAKidOutsideTheNamespace`, `TestIsKeyID`,
+`TestRetiredTokensAreRefused` and `TestGoldenTokenStillVerifies`.
 
 **RFC 9864.** JWKS entries and DPoP proofs carry the fully-specified
 `alg: Ed25519`, and so do tokens by default. The polymorphic `EdDSA`, which
@@ -97,18 +95,15 @@ jwx signs under `Ed25519`, `EdDSA` and `ES256`. *Held by*
 `TestJWXVerifiesAnEdDSACapability`, in `examples/internal/interop`, and
 `interop.test.ts` beside its Node fixture.
 
-**RFC 9068.** A v7 capability is an OAuth access token in the JWT profile:
-a validator of the profile finds nothing wrong with it. A v6 one is not: the
-validator refuses it for its `typ` and for the `client_id` it does not
-carry, and finds every other claim the profile requires. An `at+jwt` signed
-with the issuer's own key passes as a capability only with a v7 payload; a
-v6 capability's payload under that type is refused. *Held by*
-`TestAV7CapabilityIsAnRFC9068AccessToken`,
-`TestACapabilityIsNotAnRFC9068AccessToken`,
+**RFC 9068.** A validator of the profile finds nothing wrong with a
+capability. An `at+jwt` jwx signs with the issuer's own key passes as one
+only with a capability's payload and under a limes kid; an access token's
+payload, a capability's under another type, or one under another kid, is
+refused. *Held by* `TestACapabilityIsAnRFC9068AccessToken`,
 `TestRFC9068ValidatorAcceptsAnAccessToken`, `TestLimesRefusesAnAccessToken`
 and `TestLimesRefusesAnAccessTokenPayload`.
 
-**RFC 8693 §4.1 in a token.** A v7 capability acting for another
+**RFC 8693 §4.1 in a token.** A capability acting for another
 (`Capability.OnBehalfOf`) names that principal as `sub`, as RFC 9068 §2.2
 has a resource owner named, the whole principal in `limes_on_behalf_of`,
 and its holder in `act`, the holders it was delegated through nested within
@@ -117,12 +112,11 @@ parent's principal, or for the parent's holder when the parent acts for
 itself. The holder stays `limes_principal`, which limes reads. A token whose
 `sub`, `act` and `limes_principal` disagree, whose `act` nests more than
 `MaxDelegationDepth` prior actors, or names prior actors without a parent, is
-refused. A v6 token carries neither claim
-([ADR-0005](adr/0005-acting-on-behalf.md)). *Held by*
-`TestActingOnBehalfOf`, `TestActingForItself`, `TestActingDroppedFromV6`,
+refused ([ADR-0005](adr/0005-acting-on-behalf.md)). *Held by*
+`TestActingOnBehalfOf`, `TestActingForItself`,
 `TestIssueRefusesOnBehalfOf`, `TestActingClaimsRefused`,
 `TestExchangeActsOnBehalfOfTheSubject` and
-`TestJWXReadsWhomAV7CapabilityActsFor`.
+`TestJWXReadsWhomACapabilityActsFor`.
 
 ## Proof of possession
 
@@ -281,7 +275,7 @@ at an RFC 8693 token endpoint (`Handler`):
   which alone reads it.
 - **Acting for the subject.** A policy may have the capability act on
   behalf of the subject token's subject (`IssueRequest.OnBehalfOf`), whose
-  v7 token then names them as `sub` and the holder as `act`, and on behalf
+  token then names them as `sub` and the holder as `act`, and on behalf
   of no one else: a policy naming another is the server's fault.
 - **The response.** A capability, `issued_token_type` its URI,
   `token_type` `DPoP` when bound and `Bearer` otherwise; `Cache-Control:
@@ -309,8 +303,7 @@ at an RFC 8693 token endpoint (`Handler`):
   tokens itself. It authenticates its caller (§2.1). An inactive token
   (expired, revoked, lifted out of its Biscuit, not a token) gets
   `{"active": false}` and nothing more (§2.2). An active one gets its
-  standard members, `sub` and `act` as a v7 token names them,
-  `client_id` where its format carries one,
+  standard members, `sub` and `act` as the token names them, `client_id`,
   `token_type` and `cnf` for a bound one (RFC 9449 §6.2), and what it
   grants as one `authorization_details` entry (RFC 9396 §9.2): of type
   `exchange.AuthorizationDetailsTypeCaveats`, its other members those of

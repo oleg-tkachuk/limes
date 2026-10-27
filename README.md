@@ -85,6 +85,7 @@ verifier, _ := limes.NewVerifier(limes.VerifierConfig{
 
 issued, _ := issuer.Issue(ctx, limes.IssueRequest{
     IssuedBy: limes.Principal{Subject: "operator@example.com"}, // who asked
+    ClientID: "my-agent", // the OAuth client: the software the agent runs as
     Subject: limes.Principal{
         Type: limes.PrincipalTypeAgent, TenantID: tenantID,
         Subject: "research-orchestrator",
@@ -245,17 +246,16 @@ tag — `go get github.com/oleg-tkachuk/limes/pgstore@pgstore/vX.Y.Z`, which
 brings the limes it requires — never a root tag's commit; and to take a new
 root API into a store, wait for the store's tag that requires that release.
 
-The token wire format — claims, `typ: limes-cap-v6+jwt`, the Biscuit facts —
-is a separate promise: a token is a credential that outlives the process that
-issued it, so the format changes only as a deliberate breaking change that
-moves the version in `typ`, with the golden fixtures regenerated in the same
-commit. A verifier refuses a token of a version it does not accept
-(`VerifierConfig.AcceptTokenTypes`) outright, rather than read its claims
-under the wrong schema. A new version ships so: verifiers accept it
-first (`AcceptTokenTypes` takes every version the package reads), and
-issuers mint it after (`SignerConfig.TokenType`), so no token in flight is
-refused during the change. Tokens are signed with Ed25519 throughout 1.x; another
-algorithm would be another token version, never a runtime choice.
+The token wire format — claims, `typ: at+jwt` with `limes_v: 7`, the
+Biscuit facts — is a separate promise: a token is a credential that outlives
+the process that issued it, so the format changes only as a deliberate
+change that moves `limes_v`, with the golden fixtures regenerated in the same
+commit. A verifier refuses a token of a format it does not read outright,
+rather than read its claims under the wrong schema; a new format would be
+read beside the old before any issuer mints it, so no token in flight is
+refused during the change. Tokens are signed with Ed25519 throughout 1.x,
+under a kid in limes's namespace (`jwks.KeyIDPrefix`); another algorithm
+would be another format, never a runtime choice.
 
 The conformance suites — `storetest`, `metertest`, `dpoptest`, `jwkstest` —
 may gain checks in any release: a check of a promise the contract already

@@ -57,8 +57,9 @@ with no round trip to the issuer, and nothing in the claims is read until it
 has. Every rejection is a distinct sentinel; map each to whatever status your
 transport uses, or let `ErrorResponse` answer it the HTTP way (below).
 
-The token must carry a `typ` the verifier accepts (`AcceptTokenTypes`, by
-default `limes-cap-v6+jwt`, the one format the package reads), a tenant and a principal of a
+The token must be typed `at+jwt` (`limes.TokenType`), signed under a kid in
+limes's namespace (`jwks.KeyIDPrefix`), with `limes_v` the format the
+package reads, a `client_id`, a tenant and a principal of a
 known kind (`PrincipalTypeUser`, `PrincipalTypeAgent` or `PrincipalTypeService`; agent
 details only on an agent — `Principal.Validate`, which `Issue` and `Delegate`
 run too; an agent's `AgentPrincipal` — `AgentType`, `AgentVersion`, `RunID`,
@@ -170,9 +171,7 @@ and `drafts/billing-q3/notes`, and not `drafts/billing`. The match is a
 plain string prefix, across segments, with the same refusal of dot
 segments. A child names a name prefix only within its parent's: one the
 parent's name prefix starts, or one past a parent segment prefix's
-boundary (`a/` under `a`, never `a` itself, which names `ab`). Name prefixes
-travel in a `TokenTypeV7` token alone; a v6 signer refuses a capability
-with any rather than drop the restriction.
+boundary (`a/` under `a`, never `a` itself, which names `ab`).
 `AllowTaintedRead` can only act on a taint signal you supply; if you track
 none, it protects nothing, and you should say so.
 
@@ -1354,19 +1353,18 @@ handler, _ := jwks.NewHandler(jwks.HandlerConfig{
 })
 ```
 
-Tokens are of the v6 format, typed `limes-cap-v6+jwt`, unless
-`SignerConfig.TokenType` is `limes.TokenTypeV7`: an RFC 9068 access token,
-typed `at+jwt`, which gateways and identity providers that validate that
-profile read too. A v7 capability names its OAuth client
-(`IssueRequest.ClientID`, RFC 9068's `client_id`); a v7 signer refuses one
-with none. Every verifier reads both formats, so switch an issuer to v7 only
-once every verifier of its tokens runs a version that does. A v7 capability
-is told from another access token by its claims and its key: never sign
-capabilities with a key an authorization server also mints `at+jwt` with
-([ADR-0004](adr/0004-token-format-v7.md)).
+Every token is an RFC 9068 access token, typed `at+jwt`, which gateways and
+identity providers that validate that profile read too. It names its OAuth
+client (`IssueRequest.ClientID`, RFC 9068's `client_id`) and its subject
+(`Subject.Subject`, `sub`); `Issue` refuses a request without either. A
+capability is told from another access token by its claims and its key,
+whose kid is in limes's namespace (`jwks.KeyIDPrefix`, which `jwks.KeyID`
+and `GenerateKey` write): a verifier refuses a token under any other kid,
+and no key that signs capabilities may also sign an authorization server's
+`at+jwt` ([ADR-0006](adr/0006-one-token-format.md)).
 
 An agent that works for a user holds a capability on the user's behalf:
-`IssueRequest.OnBehalfOf` names the user, of the subject's tenant. A v7
+`IssueRequest.OnBehalfOf` names the user, of the subject's tenant. The
 token then names the user as `sub` and the agent as RFC 8693's `act`, and a
 delegated child keeps the user, with each holder it passed through nested in
 `act`; `Delegate` derives this, and no request can change it. limes still
@@ -1423,8 +1421,6 @@ stop rather than retry. The full table is in [diagrams.md](diagrams.md#answering
 | `VerifierConfig.Leeway` | `DefaultLeeway`, 30 seconds; `VerifierConfig.NoLeeway: true` for none |
 | `VerifierConfig.MaxTokenBytes` · `IssuerConfig.MaxTokenBytes` | `DefaultMaxTokenBytes`, 16 KiB |
 | `VerifierConfig.Leeway` bound | `MaxLeeway`, 5 minutes |
-| `VerifierConfig.AcceptTokenTypes` | `TokenTypeV6` (`limes-cap-v6+jwt`), the one format the package reads |
-| `SignerConfig.TokenType` | `TokenTypeV6` |
 | `VerifierConfig.Realm` | `DefaultRealm`, `limes` |
 | `jwks.HandlerConfig.MaxAge` | `jwks.DefaultMaxAge`, 5 minutes; `HandlerConfig.Revalidate: true` for `max-age=0` |
 | `ListByPrincipalRequest.Limit` · `ListTenantBudgetsRequest.Limit` · `ListReservationsRequest.Limit` · `SumChargesRequest.Limit` · `CountRecordsRequest.Limit` · `ListRecordsRequest.Limit` | `DefaultListLimit` 50, at most `MaxListLimit` 500 |
