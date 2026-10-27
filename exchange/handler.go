@@ -134,13 +134,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 		return
 	}
-	req, err := h.readRequest(w, r)
+	req, subjectType, err := h.readRequest(w, r)
 	if err != nil {
 		h.cfg.Logger.WarnContext(r.Context(), "exchange request refused", slog.Any("error", err))
 		h.refuse(w, r, err)
 		return
 	}
-	res, err := h.cfg.Exchanger.Exchange(r.Context(), req)
+	var res Result
+	if subjectType == IssuedTokenTypeCapability {
+		res, err = h.cfg.Exchanger.Narrow(r.Context(), NarrowRequest(req))
+	} else {
+		res, err = h.cfg.Exchanger.Exchange(r.Context(), req)
+	}
 	if err != nil {
 		h.refuse(w, r, err)
 		return
@@ -151,22 +156,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// readRequest reads and authenticates a token exchange request.
-func (h *Handler) readRequest(w http.ResponseWriter, r *http.Request) (Request, error) {
+// readRequest reads and authenticates a token exchange request, and names
+// the type of its subject token.
+func (h *Handler) readRequest(w http.ResponseWriter, r *http.Request) (Request, string, error) {
 	if media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || media != formContentType {
-		return Request{}, fmt.Errorf("%w: the body must be %s", ErrInvalidRequest, formContentType)
+		return Request{}, "", fmt.Errorf("%w: the body must be %s", ErrInvalidRequest, formContentType)
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, h.cfg.MaxBodyBytes)
 	if err := r.ParseForm(); err != nil {
-		return Request{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
+		return Request{}, "", fmt.Errorf("%w: %w", ErrInvalidRequest, err)
 	}
 	form := r.PostForm
 	if err := checkForm(form); err != nil {
-		return Request{}, err
+		return Request{}, "", err
 	}
 	client, err := h.cfg.Authenticate(r)
 	if err != nil {
-		return Request{}, fmt.Errorf("%w: %w", ErrInvalidClient, err)
+		return Request{}, "", fmt.Errorf("%w: %w", ErrInvalidClient, err)
 	}
 	req := Request{
 		Client: client, SubjectToken: form.Get(paramSubjectToken),
@@ -180,9 +186,9 @@ func (h *Handler) readRequest(w http.ResponseWriter, r *http.Request) (Request, 
 	case 1:
 		req.DPoP = dpop.Proof{JWT: proofs[0], Method: r.Method, URL: h.cfg.EndpointURL}
 	default:
-		return Request{}, fmt.Errorf("%w: %d DPoP headers", dpop.ErrInvalid, len(proofs))
+		return Request{}, "", fmt.Errorf("%w: %d DPoP headers", dpop.ErrInvalid, len(proofs))
 	}
-	return req, nil
+	return req, form.Get(paramSubjectTokenType), nil
 }
 
 // checkForm checks a token exchange request's parameters, all but who sent
@@ -204,7 +210,7 @@ func checkForm(form url.Values) error {
 		return fmt.Errorf("%w: %s required", ErrInvalidRequest, paramSubjectToken)
 	}
 	switch typ := form.Get(paramSubjectTokenType); typ {
-	case TokenTypeAccessToken, TokenTypeJWT:
+	case TokenTypeAccessToken, TokenTypeJWT, IssuedTokenTypeCapability:
 	default:
 		return fmt.Errorf("%w: %s %q is not one this endpoint exchanges", ErrInvalidRequest, paramSubjectTokenType, typ)
 	}

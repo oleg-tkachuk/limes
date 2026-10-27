@@ -125,6 +125,13 @@ type Config struct {
 	Policy Policy
 	// DPoP checks proofs of possession; nil refuses every request with one.
 	DPoP *dpop.Verifier
+	// Capabilities verifies a capability given as the subject token, to
+	// narrow (Narrow); nil narrows none. CapabilityAudience is the audience
+	// such a capability must name: the exchange's own. NarrowPolicy decides
+	// each narrowing. All three, or none.
+	Capabilities       *limes.Verifier
+	CapabilityAudience string
+	NarrowPolicy       NarrowPolicy
 	// Now is the clock. Nil: time.Now.
 	Now func() time.Time
 	// Logger logs every exchange and refusal. Nil: slog.Default().
@@ -146,6 +153,8 @@ func NewExchanger(cfg Config) (*Exchanger, error) {
 		return nil, errors.New("exchange: Config.Subjects required")
 	case cfg.Policy == nil:
 		return nil, errors.New("exchange: Config.Policy required")
+	case (cfg.Capabilities != nil) != (cfg.CapabilityAudience != "") || (cfg.Capabilities != nil) != (cfg.NarrowPolicy != nil):
+		return nil, errors.New("exchange: Config.Capabilities, CapabilityAudience and NarrowPolicy go together")
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
