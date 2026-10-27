@@ -64,6 +64,15 @@ jwx signs under `Ed25519`, `EdDSA` and `ES256`. *Held by*
 `TestJWXReadsTheJWKS`, `TestLimesAcceptsJWXProofs` and
 `TestGolangJWTVerifiesWithAnAlias`, in `examples/internal/interop`.
 
+**RFC 9068.** A capability is not an OAuth access token in the JWT profile:
+a validator of that profile refuses it for its `typ` and for the `client_id`
+it does not carry, and finds every other claim the profile requires. An
+`at+jwt` token signed with the issuer's own key does not pass as a
+capability, even with a capability's payload. *Held by*
+`TestACapabilityIsNotAnRFC9068AccessToken`,
+`TestRFC9068ValidatorAcceptsAnAccessToken`, `TestLimesRefusesAnAccessToken`
+and `TestLimesRefusesAnAccessTokenPayload`.
+
 ## Proof of possession
 
 **RFC 9449 (DPoP), RFC 7800.** A key-bound capability carries the RFC 7638

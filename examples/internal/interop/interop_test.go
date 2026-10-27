@@ -68,9 +68,12 @@ type fixture struct {
 	issuer   *limes.Issuer
 	verifier *limes.Verifier
 	pub      ed25519.PublicKey
-	kid      string
-	jwksURL  string
-	tenant   uuid.UUID
+	// key is the issuer's signing key, for tokens another library signs
+	// with it.
+	key     crypto.Signer
+	kid     string
+	jwksURL string
+	tenant  uuid.UUID
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -117,7 +120,7 @@ func newFixture(t *testing.T) *fixture {
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 	return &fixture{
-		issuer: issuer, verifier: verifier, pub: key.Public(), kid: key.KeyID,
+		issuer: issuer, verifier: verifier, pub: key.Public(), key: key.Private, kid: key.KeyID,
 		jwksURL: srv.URL, tenant: uuid.New(),
 	}
 }
