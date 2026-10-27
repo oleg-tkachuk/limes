@@ -90,6 +90,11 @@ func (c Caveats) Validate() error {
 			return err
 		}
 	}
+	for _, n := range c.ResourceNamePrefixes {
+		if err := validResource("resource name prefix", n); err != nil {
+			return err
+		}
+	}
 	if err := c.Requests.Validate(); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidCaveats, err)
 	}

@@ -507,9 +507,12 @@ func (f blockFacts) narrow(cur Capability) Capability {
 	if len(f.ops) > 0 {
 		next.Caveats.Ops = f.ops
 	}
+	// A block's resources replace every resource caveat, name prefixes
+	// included: kept beside the block's, they would widen the copy.
 	if f.resources {
 		next.Caveats.ResourcePrefixes = f.prefixes
 		next.Caveats.ResourceURIs = f.uris
+		next.Caveats.ResourceNamePrefixes = nil
 	}
 	if len(f.planes) > 0 {
 		next.Audience = f.planes

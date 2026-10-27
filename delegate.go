@@ -154,6 +154,12 @@ func narrowsResources(parent, child Caveats) error {
 				ErrDelegationTooWide, c, parent.ResourcePrefixes)
 		}
 	}
+	for _, c := range child.ResourceNamePrefixes {
+		if !parent.coversNamePrefix(c) {
+			return fmt.Errorf("%w: child name prefix %q not within the parent's prefixes %v or name prefixes %v",
+				ErrDelegationTooWide, c, parent.ResourcePrefixes, parent.ResourceNamePrefixes)
+		}
+	}
 	for _, c := range child.ResourceURIs {
 		if !parent.AllowsResource(c) {
 			return fmt.Errorf("%w: child URI %q not in parent allowance",

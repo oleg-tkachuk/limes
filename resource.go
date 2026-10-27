@@ -103,10 +103,20 @@ func percentDecode(s string) string {
 	return b.String()
 }
 
+// MatchResourceName reports whether uri starts with prefix, as strings and
+// across segments: "drafts/billing-" covers "drafts/billing-q3" and
+// "drafts/billing-q3/notes", but not "drafts/billing". Like MatchResource, an
+// empty prefix matches nothing, and neither does a uri with a dot segment.
+// It is the single definition of a name-prefix match, for requests and for
+// delegation alike.
+func MatchResourceName(prefix, uri string) bool {
+	return prefix != "" && strings.HasPrefix(uri, prefix) && !hasDotSegment(uri)
+}
+
 // RestrictsResources reports whether the caveats confine the capability to a
 // set of resources. False means "any resource within the tenant".
 func (c Caveats) RestrictsResources() bool {
-	return len(c.ResourcePrefixes) > 0 || len(c.ResourceURIs) > 0
+	return len(c.ResourcePrefixes) > 0 || len(c.ResourceURIs) > 0 || len(c.ResourceNamePrefixes) > 0
 }
 
 // AllowsResource reports whether uri is reachable under the resource caveats:
@@ -130,15 +140,50 @@ func (c Caveats) AllowsResource(uri string) bool {
 			return true
 		}
 	}
+	for _, prefix := range c.ResourceNamePrefixes {
+		if MatchResourceName(prefix, uri) {
+			return true
+		}
+	}
 	return false
 }
 
-// coversPrefix reports whether every resource under child is reachable under
-// the parent caveats. Only a parent prefix can cover a child prefix: an exact
-// URI names one resource, while a prefix names an open-ended set beneath it.
+// coversPrefix reports whether every resource under the child segment prefix
+// child is reachable under the parent caveats. Only a parent prefix can cover
+// a child prefix: an exact URI names one resource, while a prefix names an
+// open-ended set beneath it. Every resource under child starts with child, so
+// a parent name prefix child starts with covers it.
 func (c Caveats) coversPrefix(child string) bool {
 	for _, p := range c.ResourcePrefixes {
 		if MatchResource(p, child) {
+			return true
+		}
+	}
+	for _, n := range c.ResourceNamePrefixes {
+		if MatchResourceName(n, child) {
+			return true
+		}
+	}
+	return false
+}
+
+// coversNamePrefix reports whether every resource starting with the child
+// name prefix child is reachable under the parent caveats:
+//
+//   - under a parent name prefix that child starts with;
+//   - under a parent segment prefix p only when child reaches past p's
+//     boundary: child starts with p+"/", or p ends in "/" and child starts
+//     with it. A child equal to p is not covered: "a" names "ab", which the
+//     segment prefix "a" does not reach;
+//   - under no parent URI: a name prefix names an open-ended set.
+func (c Caveats) coversNamePrefix(child string) bool {
+	for _, n := range c.ResourceNamePrefixes {
+		if MatchResourceName(n, child) {
+			return true
+		}
+	}
+	for _, p := range c.ResourcePrefixes {
+		if MatchResource(p, child) && (child != p || strings.HasSuffix(p, "/")) {
 			return true
 		}
 	}

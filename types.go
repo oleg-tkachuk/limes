@@ -160,6 +160,14 @@ type Caveats struct {
 	// child needs.
 	ResourceURIs []string
 
+	// ResourceNamePrefixes restricts the capability to URIs that start with
+	// any entry, as strings (MatchResourceName): "drafts/billing-" covers
+	// "drafts/billing-q3" and "drafts/billing-q3/notes", where a
+	// ResourcePrefixes entry covers whole segments alone. An empty entry is
+	// invalid. Carried by a TokenTypeV7 token alone: a v6 signer refuses a
+	// capability with any, rather than drop a restriction and widen it.
+	ResourceNamePrefixes []string
+
 	// Requests caps the total number of times the capability may be
 	// used within its TTL; the zero value allows none, and
 	// RequestCeiling{Unlimited: true} lifts the cap.
@@ -208,6 +216,7 @@ func (c Caveats) clone() Caveats {
 	c.Ops = slices.Clone(c.Ops)
 	c.ResourcePrefixes = slices.Clone(c.ResourcePrefixes)
 	c.ResourceURIs = slices.Clone(c.ResourceURIs)
+	c.ResourceNamePrefixes = slices.Clone(c.ResourceNamePrefixes)
 	c.SourceIPCIDR = slices.Clone(c.SourceIPCIDR)
 	return c
 }
