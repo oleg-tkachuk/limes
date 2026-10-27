@@ -7,10 +7,11 @@ go 1.27.0
 
 toolchain go1.27.3
 
-// The replaces build the examples against the limes and pgstore of the same
-// commit, so an example shows the code beside it.
+// The replaces build the examples against the limes, pgstore and exchange of
+// the same commit, so an example shows the code beside it.
 replace (
 	github.com/oleg-tkachuk/limes => ../
+	github.com/oleg-tkachuk/limes/exchange => ../exchange
 	github.com/oleg-tkachuk/limes/pgstore => ../pgstore
 )
 
@@ -20,6 +21,7 @@ require (
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/lestrrat-go/jwx/v3 v3.4.0
 	github.com/oleg-tkachuk/limes v0.127.0
+	github.com/oleg-tkachuk/limes/exchange v0.1.1
 	github.com/oleg-tkachuk/limes/pgstore v0.29.3
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0

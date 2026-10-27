@@ -143,6 +143,7 @@ tasks:
       - go run ./issue-verify
       - go run ./delegation
       - go run ./metering
+      - go run ./mcp-exchange
 
   test:examples:pgstore:
     desc: "Run the pgstore example to the end against PostgreSQL in a container — needs a running Docker"
