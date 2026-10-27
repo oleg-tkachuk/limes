@@ -144,6 +144,9 @@ type IssueRequest struct {
 	// ConfirmationJKT binds the capability to the key with this RFC 7638
 	// thumbprint (dpop.Thumbprint); empty issues a bearer capability.
 	ConfirmationJKT string
+	// ClientID is the OAuth client the capability is granted to
+	// (Capability.ClientID). Required by a signer of TokenTypeV7.
+	ClientID string
 }
 
 // parentRunOf is the run a capability of p delegates from: an agent's RunID,
@@ -198,7 +201,7 @@ func (i *Issuer) issue(ctx context.Context, req IssueRequest) (Capability, strin
 	}
 	cap := i.mint(grantTerms{
 		Subject: req.Subject, Audience: req.Audience, Caveats: req.Caveats,
-		ConfirmationJKT: req.ConfirmationJKT, IssuedAt: now, ExpiresAt: expires,
+		ConfirmationJKT: req.ConfirmationJKT, IssuedAt: now, ExpiresAt: expires, ClientID: req.ClientID,
 	})
 	if err := checkLifetime(cap); err != nil {
 		return Capability{}, "", err
@@ -235,6 +238,7 @@ type grantTerms struct {
 	IssuedAt        time.Time
 	ExpiresAt       time.Time
 	ParentID        uuid.UUID
+	ClientID        string
 }
 
 // mint is a capability of t under a fresh id, issued by i. It holds copies
@@ -250,6 +254,7 @@ func (i *Issuer) mint(t grantTerms) Capability {
 		ExpiresAt:       t.ExpiresAt,
 		ParentID:        t.ParentID,
 		ConfirmationJKT: t.ConfirmationJKT,
+		ClientID:        t.ClientID,
 	}
 }
 
@@ -355,6 +360,9 @@ type DelegateRequest struct {
 	// Empty keeps the parent's binding, if it has one: a bound parent's
 	// child is always bound.
 	ConfirmationJKT string
+	// ClientID is the OAuth client the child is granted to. Empty: the
+	// parent's.
+	ClientID string
 }
 
 // Delegate mints a child capability narrower than the supplied parent, which
@@ -447,9 +455,13 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 	child := i.mint(grantTerms{
 		Subject: req.Subject, Audience: req.Audience, Caveats: req.Caveats,
 		ConfirmationJKT: req.ConfirmationJKT, IssuedAt: now, ExpiresAt: expires, ParentID: parent.ID,
+		ClientID: req.ClientID,
 	})
 	if child.ConfirmationJKT == "" {
 		child.ConfirmationJKT = parent.ConfirmationJKT
+	}
+	if child.ClientID == "" {
+		child.ClientID = parent.ClientID
 	}
 	// The run a child agent was delegated from is the parent's, taken from
 	// the token the verifier accepted rather than on the caller's word.

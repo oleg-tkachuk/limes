@@ -27,6 +27,8 @@ type capabilityRecord struct {
 	ExpiresAt       time.Time       `json:"expires_at"`
 	ParentID        uuid.UUID       `json:"parent_id"`
 	ConfirmationJKT string          `json:"confirmation_jkt"`
+	// ClientID is absent from a record stored before it existed: none.
+	ClientID string `json:"client_id"`
 }
 
 type principalRecord struct {
@@ -101,7 +103,7 @@ func toCapabilityRecord(c limes.Capability) capabilityRecord {
 			IdempotencyKeyRequired: cv.IdempotencyKeyRequired, SourceIPCIDR: cv.SourceIPCIDR,
 		},
 		IssuedAt: c.IssuedAt, NotBefore: c.NotBefore, ExpiresAt: c.ExpiresAt, ParentID: c.ParentID,
-		ConfirmationJKT: c.ConfirmationJKT,
+		ConfirmationJKT: c.ConfirmationJKT, ClientID: c.ClientID,
 	}
 }
 
@@ -118,7 +120,7 @@ func (r capabilityRecord) capability() limes.Capability {
 			IdempotencyKeyRequired: cv.IdempotencyKeyRequired, SourceIPCIDR: cv.SourceIPCIDR,
 		},
 		IssuedAt: r.IssuedAt, NotBefore: r.NotBefore, ExpiresAt: r.ExpiresAt, ParentID: r.ParentID,
-		ConfirmationJKT: r.ConfirmationJKT,
+		ConfirmationJKT: r.ConfirmationJKT, ClientID: r.ClientID,
 	}
 }
 

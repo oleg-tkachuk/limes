@@ -115,6 +115,9 @@ func checkGoldenVerifies(t *testing.T, typ TokenType) {
 	if len(cap.Capability().Caveats.ResourcePrefixes) != 1 || cap.Capability().Caveats.ResourcePrefixes[0] != "golden/" {
 		t.Errorf("ResourcePrefixes = %v", cap.Capability().Caveats.ResourcePrefixes)
 	}
+	if got, want := cap.Capability().ClientID, goldenClientIDOf(typ); got != want {
+		t.Errorf("ClientID = %q, want %q", got, want)
+	}
 }
 
 // A token for one audience must not verify for another — the audience gate is
@@ -153,7 +156,13 @@ func checkGoldenRejectsWrongAudience(t *testing.T, typ TokenType) {
 // changed omission rule or a moved claim fails here even where the decoded
 // fields still compare equal.
 func TestGoldenClaimsRoundTripExactly(t *testing.T) {
-	raw, err := os.ReadFile(goldenPath(TokenTypeV6))
+	for typ := range goldenFiles {
+		t.Run(string(typ), func(t *testing.T) { checkGoldenRoundTrip(t, typ) })
+	}
+}
+
+func checkGoldenRoundTrip(t *testing.T, typ TokenType) {
+	raw, err := os.ReadFile(goldenPath(typ))
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
@@ -161,11 +170,11 @@ func TestGoldenClaimsRoundTripExactly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := parseClaims(parts.Payload, TokenTypeV6)
+	c, err := parseClaims(parts.Payload, typ)
 	if err != nil {
 		t.Fatal(err)
 	}
-	written, err := json.Marshal(claimsOf(*c))
+	written, err := json.Marshal(claimsOf(*c, typ))
 	if err != nil {
 		t.Fatal(err)
 	}

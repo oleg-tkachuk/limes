@@ -1344,6 +1344,17 @@ handler, _ := jwks.NewHandler(jwks.HandlerConfig{
 })
 ```
 
+Tokens are of the v6 format, typed `limes-cap-v6+jwt`, unless
+`SignerConfig.TokenType` is `limes.TokenTypeV7`: an RFC 9068 access token,
+typed `at+jwt`, which gateways and identity providers that validate that
+profile read too. A v7 capability names its OAuth client
+(`IssueRequest.ClientID`, RFC 9068's `client_id`); a v7 signer refuses one
+with none. Every verifier reads both formats, so switch an issuer to v7 only
+once every verifier of its tokens runs a version that does. A v7 capability
+is told from another access token by its claims and its key: never sign
+capabilities with a key an authorization server also mints `at+jwt` with
+([ADR-0004](adr/0004-token-format-v7.md)).
+
 ## Answer a refusal
 
 `ErrorResponse` turns any error `Verify`, `Authorize` or the `Meter` returns

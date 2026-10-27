@@ -49,9 +49,10 @@ type SignerConfig struct {
 	// ContextSigner is given the request's context. Its public key must be
 	// Ed25519. Required.
 	Key SealedKey
-	// TokenType is the format the signer mints. Empty: TokenTypeV6, the
-	// one this package reads. A later format is minted here once every
-	// verifier of the tokens accepts it (VerifierConfig.AcceptTokenTypes).
+	// TokenType is the format the signer mints. Empty: TokenTypeV6.
+	// TokenTypeV7, the RFC 9068 access token, is minted here once every
+	// verifier of the tokens reads it (VerifierConfig.AcceptTokenTypes), and
+	// needs each capability's ClientID.
 	TokenType TokenType
 	// Algorithm is the alg the tokens name. Empty: SigningAlgorithmEd25519,
 	// the name RFC 9864 gives the algorithm. SigningAlgorithmEdDSA names it
@@ -131,6 +132,12 @@ type jwtClaims struct {
 	// BiscuitRoot roots the signature chain of the Biscuit this token is
 	// sealed in; omitted on every ordinary token.
 	BiscuitRoot string `json:"limes_bsk,omitempty"`
+
+	// ClientID and Format are a TokenTypeV7 token's alone, and required of
+	// it: RFC 9068's client_id, and the capability format, which at+jwt
+	// leaves the type unable to name. A TokenTypeV6 token carries neither.
+	ClientID string `json:"client_id,omitempty"`
+	Format   int64  `json:"limes_v,omitzero"`
 }
 
 // MaxIJSONInteger is the largest integer a token carries: 2^53 − 1, the
@@ -215,7 +222,11 @@ func (s *Signer) signGrant(ctx context.Context, g grant) (string, error) {
 	}
 
 	header := jwtHeader{Alg: string(s.alg), Kid: s.keyID, Typ: string(s.typ)}
-	claims := claimsOf(g)
+	// RFC 9068 makes client_id required of an at+jwt: none is invented.
+	if s.typ == TokenTypeV7 && c.ClientID == "" {
+		return "", errors.New("limes: a TokenTypeV7 capability needs a ClientID (RFC 9068 client_id)")
+	}
+	claims := claimsOf(g, s.typ)
 	// Nothing is signed that the verifier would refuse to read.
 	if err := checkIJSONIntegers(claims); err != nil {
 		return "", err
@@ -275,11 +286,27 @@ func (s *Signer) signGrant(ctx context.Context, g grant) (string, error) {
 // bound as none.
 const TokenTypeV6 TokenType = "limes-cap-v6+jwt" //nolint:gosec // G101: a JWT type label, not a credential
 
+// TokenTypeV7 is the capability as an OAuth 2.0 access token in the JWT
+// profile of RFC 9068: typ at+jwt, so a resource server or gateway that
+// validates that profile reads it, with the claims the profile requires,
+// client_id among them, beside v6's. The type no longer names the format:
+// limes_v does, and a verifier reads the claims under the schema it names,
+// strictly as ever, so an at+jwt of another issuer's making, or a v6 payload
+// under this type, is refused before any claim is trusted. That makes the
+// issuer's key the one thing that tells a capability from another access
+// token: never share it with an authorization server that mints at+jwt
+// (docs/adr/0004-token-format-v7.md).
+const TokenTypeV7 TokenType = "at+jwt" //nolint:gosec // G101: a JWT type label, not a credential
+
+// formatV7 is the limes_v of a TokenTypeV7 token. A later format under the
+// same type would be read by dispatching on it, as on typ before.
+const formatV7 = 7
+
 // TokenType is a token format, as the JWT "typ" header names it.
 type TokenType string
 
 // tokenTypes are the token types this package has a schema for.
-var tokenTypes = []TokenType{TokenTypeV6}
+var tokenTypes = []TokenType{TokenTypeV6, TokenTypeV7}
 
 // SigningAlgorithm is the JWS alg a token names: Ed25519, by either of its
 // names.
@@ -317,9 +344,9 @@ func parseHeader(seg string) (jwtHeader, error) {
 	return h, nil
 }
 
-// claimsOf is the payload Sign writes for c: the one place a Capability
-// becomes claims.
-func claimsOf(g grant) jwtClaims {
+// claimsOf is the payload Sign writes for c under the token type typ: the
+// one place a Capability becomes claims.
+func claimsOf(g grant, typ TokenType) jwtClaims {
 	c := g.Capability
 	claims := jwtClaims{
 		Issuer:    c.Issuer,
@@ -341,6 +368,9 @@ func claimsOf(g grant) jwtClaims {
 	if c.ConfirmationJKT != "" {
 		claims.Confirmation = &cnfClaim{JKT: c.ConfirmationJKT}
 	}
+	if typ == TokenTypeV7 {
+		claims.ClientID, claims.Format = c.ClientID, formatV7
+	}
 	return claims
 }
 
@@ -352,10 +382,20 @@ func parseClaims(seg string, typ TokenType) (*grant, error) {
 		return nil, fmt.Errorf("limes: decode claims: %w", err)
 	}
 	var claims jwtClaims
+	if err := json.Unmarshal(raw, &claims, strictClaims); err != nil {
+		return nil, fmt.Errorf("limes: parse claims: %w", err)
+	}
 	switch typ {
 	case TokenTypeV6:
-		if err := json.Unmarshal(raw, &claims, strictClaims); err != nil {
-			return nil, fmt.Errorf("limes: parse claims: %w", err)
+		if claims.ClientID != "" || claims.Format != 0 {
+			return nil, errors.New("limes: a v6 token carries no client_id or limes_v")
+		}
+	case TokenTypeV7:
+		if claims.Format != formatV7 {
+			return nil, fmt.Errorf("limes: limes_v %d is not the format of typ %q (%d)", claims.Format, typ, formatV7)
+		}
+		if claims.ClientID == "" {
+			return nil, errors.New("limes: an at+jwt capability names its client_id (RFC 9068 §2.2)")
 		}
 	default:
 		return nil, fmt.Errorf("limes: no claims schema for typ %q", typ)
@@ -393,6 +433,7 @@ func parseClaims(seg string, typ TokenType) (*grant, error) {
 		}
 		cap.ConfirmationJKT = claims.Confirmation.JKT
 	}
+	cap.ClientID = claims.ClientID
 	if claims.ParentID != "" {
 		pid, err := canonicalUUID("limes_parent_id", claims.ParentID)
 		if err != nil {

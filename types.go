@@ -78,6 +78,13 @@ type Capability struct {
 	// delegated child of a bound capability is bound too. Carried in the
 	// token as `cnf.jkt`, and absent from tokens that are not bound.
 	ConfirmationJKT string
+
+	// ClientID is the OAuth client the capability was granted to, when one
+	// was: the client of the access token it was exchanged for, say.
+	// Carried as `client_id` in a TokenTypeV7 token, which RFC 9068 makes it
+	// required of; a TokenTypeV6 token has no member for it. It describes
+	// the grant and restricts nothing.
+	ClientID string
 }
 
 // grant is what a token says beyond its capability: the parts no record

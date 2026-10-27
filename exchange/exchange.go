@@ -241,6 +241,11 @@ func (e *Exchanger) exchange(ctx context.Context, req Request) (Result, Subject,
 	if issue.ConfirmationJKT != "" {
 		return Result{}, subject, fmt.Errorf("%w: it binds the capability itself", errPolicy)
 	}
+	// The client the identity provider issued the subject token to is the
+	// capability's, unless the policy names another.
+	if issue.ClientID == "" {
+		issue.ClientID = subject.ClientID
+	}
 	if issue.TTL == 0 {
 		issue.TTL = DefaultTTL
 	}

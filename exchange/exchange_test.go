@@ -20,7 +20,7 @@ func TestExchangeIssuesACapability(t *testing.T) {
 		t.Fatal(err)
 	}
 	if res.TokenType != TokenTypeBearer || !slices.Equal(res.Capability.Audience, []string{toolResource}) ||
-		res.Capability.Subject.Subject != userSubject || res.Capability.ConfirmationJKT != "" {
+		res.Capability.Subject.Subject != userSubject || res.Capability.ConfirmationJKT != "" || res.Capability.ClientID != idpClient {
 		t.Errorf("result %+v", res)
 	}
 	if _, err := f.verifier.Verify(t.Context(), limes.VerifyRequest{Token: res.Token, Audience: toolResource}); err != nil {
