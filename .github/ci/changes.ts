@@ -55,6 +55,7 @@ export const Group = {
   Pgstore: "pgstore",
   Redisreplay: "redisreplay",
   Otelmetric: "otelmetric",
+  Exchange: "exchange",
   Examples: "examples",
   // Scripts is the TypeScript the workflows run and the release tooling.
   Scripts: "scripts",
@@ -67,6 +68,7 @@ export const GROUP_DIRS: Readonly<Record<Exclude<Group, typeof Group.Root>, read
   pgstore: ["pgstore/"],
   redisreplay: ["redisreplay/"],
   otelmetric: ["otelmetric/"],
+  exchange: ["exchange/"],
   examples: ["examples/"],
   scripts: [".github/ci/", ".github/release/"],
 };

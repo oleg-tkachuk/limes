@@ -45,7 +45,8 @@ const BREAKING_IS_A_MINOR_BEFORE_1_0 = { breaking: true, release: "minor" };
 const PGSTORE_MODULE = "pgstore";
 const REDISREPLAY_MODULE = "redisreplay";
 const OTELMETRIC_MODULE = "otelmetric";
-// A pgstore, redisreplay or otelmetric commit cuts no release of the limes module. Their
+const EXCHANGE_MODULE = "exchange";
+// A pgstore, redisreplay, otelmetric or exchange commit cuts no release of the limes module. Their
 // directories are left out of its commits already, each module being on a
 // line of its own; these cover a commit scoped to one that also touches a
 // path outside it. A rule releasing nothing outranks the breaking rule
@@ -53,6 +54,7 @@ const OTELMETRIC_MODULE = "otelmetric";
 const PGSTORE_RELEASES_NOTHING = { scope: PGSTORE_MODULE, release: false };
 const REDISREPLAY_RELEASES_NOTHING = { scope: REDISREPLAY_MODULE, release: false };
 const OTELMETRIC_RELEASES_NOTHING = { scope: OTELMETRIC_MODULE, release: false };
+const EXCHANGE_RELEASES_NOTHING = { scope: EXCHANGE_MODULE, release: false };
 
 // LIMES_REQUIREMENT_SCOPE scopes the build change that raises the nested
 // modules' requirement of limes (.github/ci/require-limes.ts), and
@@ -128,6 +130,7 @@ const MODULES = {
       PGSTORE_RELEASES_NOTHING,
       REDISREPLAY_RELEASES_NOTHING,
       OTELMETRIC_RELEASES_NOTHING,
+      EXCHANGE_RELEASES_NOTHING,
     ],
   },
   [REDISREPLAY_MODULE]: {
@@ -144,6 +147,11 @@ const MODULES = {
     dir: OTELMETRIC_MODULE,
     releaseRules: nestedRules(OTELMETRIC_MODULE),
     notesTypes: buildIsListed(OTELMETRIC_MODULE),
+  },
+  [EXCHANGE_MODULE]: {
+    dir: EXCHANGE_MODULE,
+    releaseRules: nestedRules(EXCHANGE_MODULE),
+    notesTypes: buildIsListed(EXCHANGE_MODULE),
   },
 };
 
@@ -199,6 +207,7 @@ module.exports = {
   PGSTORE_MODULE,
   REDISREPLAY_MODULE,
   OTELMETRIC_MODULE,
+  EXCHANGE_MODULE,
   breaksAreMinor,
   configFor,
   tagPrefix,

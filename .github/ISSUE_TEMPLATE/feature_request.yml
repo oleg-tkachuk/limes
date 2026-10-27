@@ -21,6 +21,7 @@ body:
         - pgstore
         - redisreplay
         - otelmetric
+        - exchange
         - a new one
         - not sure
 
