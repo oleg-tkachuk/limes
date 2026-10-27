@@ -22,15 +22,29 @@ the test that holds it there.
 
 ## The token
 
-**RFC 7519, RFC 8725.** A capability token is a JWS-signed JWT. Following
-the JWT best current practice, it is explicitly typed — `typ:
-limes-cap-v6+jwt` (§3.11), so no other JWT signed by the same key passes as a
-capability — the algorithm is fixed by the verifier rather than read from the
-token (§3.1), and `iss` and `aud` are always checked (§3.8, §3.9). The
-version is part of `typ`: a token of another format version is refused
-before any claim is read under the wrong schema. *Held by*
-`TestVerifyRequiresCapabilityTyp`, `TestVerifyFixesTheAlgorithm`,
-`TestVerify_UntrustedIssuer`, `TestVerify_AudienceMismatch`.
+**RFC 7519, RFC 8725.** A capability token is a JWS-signed JWT, in one of
+two formats. The algorithm is fixed by the verifier rather than read from
+the token (§3.1), and `iss` and `aud` are always checked (§3.8, §3.9).
+
+- **v6** is explicitly typed `typ: limes-cap-v6+jwt` (§3.11), so no other
+  JWT signed by the same key passes as a capability, and the version is part
+  of the type: a token of another format is refused before any claim is
+  read under the wrong schema.
+- **v7** is typed `at+jwt`, RFC 9068's access token, so validators of that
+  profile read it. The format is named by the claim `limes_v: 7` instead, and
+  the claims are read strictly under it: an `at+jwt` without `limes_v` 7, a
+  `client_id` and every `limes_` claim, with no member the format does not
+  define, is refused. What tells a capability from an authorization server's
+  access token is then that schema and the issuer's key, which no
+  authorization server minting `at+jwt` may share
+  ([ADR-0004](adr/0004-token-format-v7.md)).
+
+Verifiers read both formats unless `VerifierConfig.AcceptTokenTypes`
+narrows them; a signer writes v6 unless `SignerConfig.TokenType` names v7.
+*Held by* `TestVerifyRequiresCapabilityTyp`, `TestVerifyFixesTheAlgorithm`,
+`TestVerify_UntrustedIssuer`, `TestVerify_AudienceMismatch`,
+`TestV7IsAnAccessToken`, `TestEachFormatHasItsOwnClaims`,
+`TestClientIDByFormat`, `TestGoldenTokenStillVerifies`.
 
 **RFC 9864.** JWKS entries and DPoP proofs carry the fully-specified
 `alg: Ed25519`, and so do tokens by default. The polymorphic `EdDSA`, which
@@ -80,11 +94,13 @@ jwx signs under `Ed25519`, `EdDSA` and `ES256`. *Held by*
 `TestJWXVerifiesAnEdDSACapability`, in `examples/internal/interop`, and
 `interop.test.ts` beside its Node fixture.
 
-**RFC 9068.** A capability is not an OAuth access token in the JWT profile:
-a validator of that profile refuses it for its `typ` and for the `client_id`
-it does not carry, and finds every other claim the profile requires. An
-`at+jwt` token signed with the issuer's own key does not pass as a
-capability, even with a capability's payload. *Held by*
+**RFC 9068.** A v7 capability is an OAuth access token in the JWT profile:
+a validator of the profile finds nothing wrong with it. A v6 one is not: the
+validator refuses it for its `typ` and for the `client_id` it does not
+carry, and finds every other claim the profile requires. An `at+jwt` signed
+with the issuer's own key passes as a capability only with a v7 payload; a
+v6 capability's payload under that type is refused. *Held by*
+`TestAV7CapabilityIsAnRFC9068AccessToken`,
 `TestACapabilityIsNotAnRFC9068AccessToken`,
 `TestRFC9068ValidatorAcceptsAnAccessToken`, `TestLimesRefusesAnAccessToken`
 and `TestLimesRefusesAnAccessTokenPayload`.
