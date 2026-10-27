@@ -147,6 +147,9 @@ type IssueRequest struct {
 	// ClientID is the OAuth client the capability is granted to
 	// (Capability.ClientID). Required by a signer of TokenTypeV7.
 	ClientID string
+	// OnBehalfOf is the principal Subject acts for (Capability.OnBehalfOf),
+	// of Subject's tenant; nil when Subject acts for itself.
+	OnBehalfOf *Principal
 }
 
 // parentRunOf is the run a capability of p delegates from: an agent's RunID,
@@ -190,6 +193,11 @@ func (i *Issuer) issue(ctx context.Context, req IssueRequest) (Capability, strin
 	if req.IssuedBy.Subject == "" {
 		return Capability{}, "", invalidRequest("IssuedBy is required")
 	}
+	if req.OnBehalfOf != nil {
+		if err := validateOnBehalfOf(*req.OnBehalfOf, req.Subject); err != nil {
+			return Capability{}, "", err
+		}
+	}
 	if err := validateTerms(req.Audience, req.Caveats, req.ConfirmationJKT); err != nil {
 		return Capability{}, "", err
 	}
@@ -202,6 +210,7 @@ func (i *Issuer) issue(ctx context.Context, req IssueRequest) (Capability, strin
 	cap := i.mint(grantTerms{
 		Subject: req.Subject, Audience: req.Audience, Caveats: req.Caveats,
 		ConfirmationJKT: req.ConfirmationJKT, IssuedAt: now, ExpiresAt: expires, ClientID: req.ClientID,
+		OnBehalfOf: req.OnBehalfOf,
 	})
 	if err := checkLifetime(cap); err != nil {
 		return Capability{}, "", err
@@ -239,11 +248,18 @@ type grantTerms struct {
 	ExpiresAt       time.Time
 	ParentID        uuid.UUID
 	ClientID        string
+	OnBehalfOf      *Principal
+	PriorActors     []string
 }
 
 // mint is a capability of t under a fresh id, issued by i. It holds copies
 // of t's slices and pointers, so the caller's request cannot alter it.
 func (i *Issuer) mint(t grantTerms) Capability {
+	var onBehalfOf *Principal
+	if t.OnBehalfOf != nil {
+		obo := t.OnBehalfOf.clone()
+		onBehalfOf = &obo
+	}
 	return Capability{
 		ID:              uuid.NewV7(),
 		Issuer:          i.issuerName,
@@ -255,6 +271,8 @@ func (i *Issuer) mint(t grantTerms) Capability {
 		ParentID:        t.ParentID,
 		ConfirmationJKT: t.ConfirmationJKT,
 		ClientID:        t.ClientID,
+		OnBehalfOf:      onBehalfOf,
+		PriorActors:     slices.Clone(t.PriorActors),
 	}
 }
 
@@ -452,10 +470,11 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 	if expires.After(parent.ExpiresAt) {
 		expires = parent.ExpiresAt
 	}
+	onBehalfOf, prior := actingOf(parent)
 	child := i.mint(grantTerms{
 		Subject: req.Subject, Audience: req.Audience, Caveats: req.Caveats,
 		ConfirmationJKT: req.ConfirmationJKT, IssuedAt: now, ExpiresAt: expires, ParentID: parent.ID,
-		ClientID: req.ClientID,
+		ClientID: req.ClientID, OnBehalfOf: &onBehalfOf, PriorActors: prior,
 	})
 	if child.ConfirmationJKT == "" {
 		child.ConfirmationJKT = parent.ConfirmationJKT
@@ -504,6 +523,17 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 		return Capability{}, "", fmt.Errorf("limes: delegate from parent %s: %w", parent.ID, err)
 	}
 	return child, token, nil
+}
+
+// actingOf is who a child of parent acts for, and through: the principal its
+// parent acts for, with the parent's holder the nearest prior actor, or, when
+// the parent acts for itself, its holder, with none prior. Derived, never
+// asked for: a child acts for whoever its parent's authority came from.
+func actingOf(parent Capability) (Principal, []string) {
+	if parent.OnBehalfOf == nil {
+		return parent.Subject.clone(), nil
+	}
+	return parent.OnBehalfOf.clone(), append([]string{parent.Subject.Subject}, parent.PriorActors...)
 }
 
 // GenerateKey makes a fresh Ed25519 signing key under the kid jwks.KeyID

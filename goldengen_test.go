@@ -36,6 +36,9 @@ const (
 	goldenTenant   = "11111111-1111-1111-1111-111111111111"
 	// goldenClientID is the client a v7 fixture names; a v6 one carries none.
 	goldenClientID = "golden-client"
+	// goldenUser is the user a v7 fixture's agent acts for; a v6 one names
+	// none.
+	goldenUser = "golden-user"
 
 	// goldenWriteEnv names the token type whose fixture is written anew.
 	goldenWriteEnv = "LIMES_WRITE_GOLDEN"
@@ -126,8 +129,9 @@ func TestGenerateGoldenToken(t *testing.T) {
 			Budget:           BudgetCeiling{Max: 3 * NanosPerUnit / 2, UnitCode: "USD"}, // 1.5 USD
 			Copies:           CopyQuota{Max: goldenCopyQuota},
 		},
-		TTL:      time.Hour,
-		ClientID: goldenClientIDOf(typ),
+		TTL:        time.Hour,
+		ClientID:   goldenClientIDOf(typ),
+		OnBehalfOf: goldenOnBehalfOfOf(typ),
 	})
 	if err != nil {
 		t.Fatalf("issue: %v", err)
@@ -152,6 +156,15 @@ func (revLookup) IsBiscuitRevoked(context.Context, [][]byte) (bool, error) { ret
 
 // goldenClientIDOf is the client a fixture of typ names: one only where the
 // format carries it.
+// goldenOnBehalfOfOf is the principal the fixture of typ acts for: the
+// user, in a v7 one, which carries it as sub and act.
+func goldenOnBehalfOfOf(typ TokenType) *Principal {
+	if typ != TokenTypeV7 {
+		return nil
+	}
+	return &Principal{Type: PrincipalTypeUser, TenantID: uuid.MustParse(goldenTenant), Subject: goldenUser}
+}
+
 func goldenClientIDOf(typ TokenType) string {
 	if typ == TokenTypeV7 {
 		return goldenClientID

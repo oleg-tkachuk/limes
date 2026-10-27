@@ -138,6 +138,47 @@ type jwtClaims struct {
 	// leaves the type unable to name. A TokenTypeV6 token carries neither.
 	ClientID string `json:"client_id,omitempty"`
 	Format   int64  `json:"limes_v,omitzero"`
+
+	// OnBehalfOf and Actor are a TokenTypeV7 token's whose capability acts
+	// on behalf of another (Capability.OnBehalfOf): that principal, whose
+	// subject sub then is, and RFC 8693's act naming the holder, prior
+	// actors nested within it. Present together or not at all.
+	OnBehalfOf *wirePrincipal `json:"limes_on_behalf_of,omitzero"`
+	Actor      *actClaim      `json:"act,omitzero"`
+}
+
+// actClaim is RFC 8693 §4.1's act: the party acting, and nested within it
+// the party that acted before it.
+type actClaim struct {
+	Subject string    `json:"sub"`
+	Actor   *actClaim `json:"act,omitzero"`
+}
+
+// actOf is the act claim of a holder and the prior actors it was delegated
+// through, nearest first.
+func actOf(holder string, prior []string) *actClaim {
+	act := &actClaim{Subject: holder}
+	for at, i := act, 0; i < len(prior); i++ {
+		at.Actor = &actClaim{Subject: prior[i]}
+		at = at.Actor
+	}
+	return act
+}
+
+// priorActors reads back what actOf wrote: the actors nested in act, nearest
+// first, refusing an empty subject and a chain longer than any delegation.
+func priorActors(act *actClaim) ([]string, error) {
+	var prior []string
+	for at := act.Actor; at != nil; at = at.Actor {
+		if at.Subject == "" {
+			return nil, errors.New("limes: an act names no sub")
+		}
+		if len(prior) == MaxDelegationDepth {
+			return nil, fmt.Errorf("limes: act nests more than %d prior actors", MaxDelegationDepth)
+		}
+		prior = append(prior, at.Subject)
+	}
+	return prior, nil
 }
 
 // MaxIJSONInteger is the largest integer a token carries: 2^53 − 1, the
@@ -230,6 +271,11 @@ func (s *Signer) signGrant(ctx context.Context, g grant) (string, error) {
 	// RFC 9068 makes client_id required of an at+jwt: none is invented.
 	if s.typ == TokenTypeV7 && c.ClientID == "" {
 		return "", errors.New("limes: a TokenTypeV7 capability needs a ClientID (RFC 9068 client_id)")
+	}
+	if s.typ == TokenTypeV7 {
+		if err := checkActing(c); err != nil {
+			return "", err
+		}
 	}
 	claims := claimsOf(g, s.typ)
 	// Nothing is signed that the verifier would refuse to read.
@@ -375,6 +421,11 @@ func claimsOf(g grant, typ TokenType) jwtClaims {
 	}
 	if typ == TokenTypeV7 {
 		claims.ClientID, claims.Format = c.ClientID, formatV7
+		if c.OnBehalfOf != nil {
+			obo := toWirePrincipal(*c.OnBehalfOf)
+			claims.Subject, claims.OnBehalfOf = c.OnBehalfOf.Subject, &obo
+			claims.Actor = actOf(c.Subject.Subject, c.PriorActors)
+		}
 	}
 	return claims
 }
@@ -398,6 +449,9 @@ func parseClaims(seg string, typ TokenType) (*grant, error) {
 		if len(claims.Caveats.ResourceNamePrefixes) > 0 {
 			return nil, errors.New("limes: a v6 token carries no resource_name_prefixes")
 		}
+		if claims.OnBehalfOf != nil || claims.Actor != nil {
+			return nil, errors.New("limes: a v6 token carries no limes_on_behalf_of or act")
+		}
 	case TokenTypeV7:
 		if claims.Format != formatV7 {
 			return nil, fmt.Errorf("limes: limes_v %d is not the format of typ %q (%d)", claims.Format, typ, formatV7)
@@ -411,10 +465,9 @@ func parseClaims(seg string, typ TokenType) (*grant, error) {
 	if err := checkIJSONIntegers(claims); err != nil {
 		return nil, err
 	}
-	// sub repeats the principal for JWT tooling; two subjects would be read
-	// differently by a parser that takes one and a parser that takes the other.
-	if claims.Subject != claims.Principal.Subject {
-		return nil, fmt.Errorf("limes: sub %q differs from limes_principal.subject %q", claims.Subject, claims.Principal.Subject)
+	onBehalfOf, prior, err := readActing(claims)
+	if err != nil {
+		return nil, err
 	}
 
 	id, err := canonicalUUID("jti", claims.ID)
@@ -442,6 +495,10 @@ func parseClaims(seg string, typ TokenType) (*grant, error) {
 		cap.ConfirmationJKT = claims.Confirmation.JKT
 	}
 	cap.ClientID = claims.ClientID
+	cap.OnBehalfOf, cap.PriorActors = onBehalfOf, prior
+	if len(prior) > 0 && claims.ParentID == "" {
+		return nil, errors.New("limes: prior actors in act, and no limes_parent_id")
+	}
 	if claims.ParentID != "" {
 		pid, err := canonicalUUID("limes_parent_id", claims.ParentID)
 		if err != nil {
@@ -450,6 +507,58 @@ func parseClaims(seg string, typ TokenType) (*grant, error) {
 		cap.ParentID = pid
 	}
 	return &grant{Capability: *cap, biscuitRoot: claims.BiscuitRoot}, nil
+}
+
+// checkActing refuses to sign what readActing would refuse to read.
+func checkActing(c Capability) error {
+	if c.OnBehalfOf == nil {
+		if len(c.PriorActors) > 0 {
+			return errors.New("limes: PriorActors need an OnBehalfOf")
+		}
+		return nil
+	}
+	if err := validateOnBehalfOf(*c.OnBehalfOf, c.Subject); err != nil {
+		return err
+	}
+	if len(c.PriorActors) > 0 && c.ParentID == uuid.Nil() {
+		return errors.New("limes: PriorActors need a ParentID")
+	}
+	if len(c.PriorActors) > MaxDelegationDepth || slices.Contains(c.PriorActors, "") {
+		return fmt.Errorf("limes: PriorActors are at most %d subjects, none empty", MaxDelegationDepth)
+	}
+	return nil
+}
+
+// readActing reads who a token's capability acts for and through. sub
+// repeats limes_principal's subject for JWT tooling, or, when the capability
+// acts on behalf of another, limes_on_behalf_of's, with act naming the
+// holder: each pair must agree, or a parser that takes one would read
+// another capability than one that takes the other.
+func readActing(claims jwtClaims) (*Principal, []string, error) {
+	if claims.OnBehalfOf == nil {
+		if claims.Actor != nil {
+			return nil, nil, errors.New("limes: act without limes_on_behalf_of")
+		}
+		if claims.Subject != claims.Principal.Subject {
+			return nil, nil, fmt.Errorf("limes: sub %q differs from limes_principal.subject %q", claims.Subject, claims.Principal.Subject)
+		}
+		return nil, nil, nil
+	}
+	obo := claims.OnBehalfOf.principal()
+	if err := validateOnBehalfOf(obo, claims.Principal.principal()); err != nil {
+		return nil, nil, err
+	}
+	if claims.Subject != obo.Subject {
+		return nil, nil, fmt.Errorf("limes: sub %q differs from limes_on_behalf_of.subject %q", claims.Subject, obo.Subject)
+	}
+	if claims.Actor == nil || claims.Actor.Subject != claims.Principal.Subject {
+		return nil, nil, errors.New("limes: act names not limes_principal.subject")
+	}
+	prior, err := priorActors(claims.Actor)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &obo, prior, nil
 }
 
 // canonicalUUID reads claim's value as the signer writes a UUID: lowercase,

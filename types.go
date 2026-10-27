@@ -85,6 +85,21 @@ type Capability struct {
 	// required of; a TokenTypeV6 token has no member for it. It describes
 	// the grant and restricts nothing.
 	ClientID string
+
+	// OnBehalfOf is the principal on whose behalf Subject acts, when it acts
+	// for another: the user an agent works for, as the identity provider
+	// names them. A delegated child keeps its parent's or, when the parent
+	// has none, acts on behalf of the parent's holder. In a TokenTypeV7
+	// token it is sub, with Subject as act (RFC 8693 §4.1); a TokenTypeV6
+	// token has no member for it. It describes the grant and restricts
+	// nothing: Subject is who the capability authorises.
+	OnBehalfOf *Principal
+
+	// PriorActors are the subjects of the holders this capability was
+	// delegated through on behalf of OnBehalfOf, nearest first: a
+	// TokenTypeV7 token's nested act. Empty for a capability issued rather
+	// than delegated, and for a child of a capability with no OnBehalfOf.
+	PriorActors []string
 }
 
 // grant is what a token says beyond its capability: the parts no record
@@ -256,5 +271,10 @@ func (c Capability) clone() Capability {
 	c.Subject = c.Subject.clone()
 	c.Audience = slices.Clone(c.Audience)
 	c.Caveats = c.Caveats.clone()
+	if c.OnBehalfOf != nil {
+		obo := c.OnBehalfOf.clone()
+		c.OnBehalfOf = &obo
+	}
+	c.PriorActors = slices.Clone(c.PriorActors)
 	return c
 }
