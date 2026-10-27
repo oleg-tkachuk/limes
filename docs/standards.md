@@ -7,7 +7,7 @@ the test that holds it there.
 | Standard | What it governs here | API |
 |---|---|---|
 | [RFC 7519](https://www.rfc-editor.org/rfc/rfc7519), [RFC 8725](https://www.rfc-editor.org/rfc/rfc8725) | The capability token: a JWT, explicitly typed | `Signer`, `Verifier.Verify` |
-| [RFC 9864](https://www.rfc-editor.org/rfc/rfc9864) | `alg: Ed25519` instead of the deprecated `EdDSA` | tokens, JWKS, DPoP |
+| [RFC 9864](https://www.rfc-editor.org/rfc/rfc9864) | `alg: Ed25519`, and the deprecated `EdDSA` read and, by choice, written | tokens, JWKS, DPoP |
 | [RFC 7493](https://www.rfc-editor.org/rfc/rfc7493) | I-JSON: the claims every JSON reader reads alike | claim parsing |
 | [RFC 9449](https://www.rfc-editor.org/rfc/rfc9449), [RFC 7800](https://www.rfc-editor.org/rfc/rfc7800) | Proof of possession (DPoP), `cnf.jkt`, nonces, the `DPoP` scheme | `dpop.Verifier`, `dpop.Sign`, `dpop.HMACNonces` |
 | [RFC 3986](https://www.rfc-editor.org/rfc/rfc3986) | URI normalisation for `htu` | DPoP checks |
@@ -31,15 +31,19 @@ before any claim is read under the wrong schema. *Held by*
 `TestVerifyRequiresCapabilityTyp`, `TestVerifyFixesTheAlgorithm`,
 `TestVerify_UntrustedIssuer`, `TestVerify_AudienceMismatch`.
 
-**RFC 9864.** Tokens, JWKS entries and DPoP proofs carry the fully-specified
-`alg: Ed25519`. The polymorphic `EdDSA` is deprecated by RFC 9864; a
-capability token naming it is refused, while a DPoP proof or a JWKS entry
-naming it is still read, since those come from clients and tools that may
-predate the RFC. DPoP challenges advertise `algs="Ed25519 ES256"`
-(`dpop.SigningAlgorithms`); `EdDSA` is never advertised.
-*Held by* `TestWritesTheFullySpecifiedAlgorithm`,
+**RFC 9864.** JWKS entries and DPoP proofs carry the fully-specified
+`alg: Ed25519`, and so do tokens by default. The polymorphic `EdDSA`, which
+RFC 9864 deprecates, names the same algorithm over the same key, and is
+read wherever it appears: in a token, a DPoP proof or a JWKS entry. A signer
+writes it when `SignerConfig.Algorithm` is `SigningAlgorithmEdDSA`, for the
+JOSE libraries, gateways and identity providers that know no other name;
+the JWKS still names `Ed25519`, which they accept for such a token. No
+other name is read or written, in any case but its own. DPoP challenges
+advertise `algs="Ed25519 ES256"` (`dpop.SigningAlgorithms`); `EdDSA` is
+never advertised. *Held by* `TestWritesTheFullySpecifiedAlgorithm`,
 `TestMarshalWritesTheFullySpecifiedAlgorithm`,
-`TestCapabilityTokenRefusesThePolymorphicAlgorithm`,
+`TestReadsEitherNameOfEd25519`, `TestSignerWritesTheConfiguredAlgorithm`,
+`TestNewSignerRefusesAnotherAlgorithm`, `TestVerifyFixesTheAlgorithm`,
 `TestReadsTheDeprecatedAlgorithmFromOthers`.
 
 **RFC 7493 (I-JSON).** The claims — the standard ones, and the
@@ -58,11 +62,15 @@ token the issuer signed. *Held by* `TestVerifyReadsClaimsStrictly`,
 through the issuer's JWKS, checking `iss`, `aud` and `exp` itself, and reads
 the `limes_` claims as JSON: jwx, which knows `Ed25519`, as it is, and
 golang-jwt, which knows the algorithm only as `EdDSA`, once the RFC 9864 name
-is registered for its Ed25519 method. In turn, limes accepts the DPoP proofs
+is registered for its Ed25519 method. A token whose signer writes `EdDSA`
+verifies under golang-jwt with no alias, and under go-jose, which refuses
+`Ed25519`. In turn, limes accepts the DPoP proofs
 jwx signs under `Ed25519`, `EdDSA` and `ES256`. *Held by*
 `TestJWXVerifiesACapability`, `TestJWXReadsTheCapabilityClaims`,
 `TestJWXReadsTheJWKS`, `TestLimesAcceptsJWXProofs` and
-`TestGolangJWTVerifiesWithAnAlias`, in `examples/internal/interop`.
+`TestGolangJWTVerifiesWithAnAlias`, `TestGoJOSEVerifiesAnEdDSACapability`,
+`TestGolangJWTVerifiesAnEdDSACapability` and
+`TestJWXVerifiesAnEdDSACapability`, in `examples/internal/interop`.
 
 **RFC 9068.** A capability is not an OAuth access token in the JWT profile:
 a validator of that profile refuses it for its `typ` and for the `client_id`

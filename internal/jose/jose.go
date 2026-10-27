@@ -19,12 +19,12 @@ import (
 
 // JWS algorithms and JWK members (RFC 7518, RFC 8037, RFC 9864).
 const (
-	// AlgEd25519 is Ed25519 as RFC 9864 fully specifies it: what tokens,
-	// JWKS entries and proofs this module writes carry.
+	// AlgEd25519 is Ed25519 as RFC 9864 fully specifies it: what JWKS
+	// entries and proofs this module writes carry, and tokens by default.
 	AlgEd25519 = "Ed25519"
-	// AlgEdDSA is the polymorphic identifier RFC 9864 deprecates. A DPoP
-	// proof or a JWKS entry from a client or tool that predates it is still
-	// read; nothing here writes it.
+	// AlgEdDSA is the polymorphic identifier RFC 9864 deprecates. A token,
+	// a DPoP proof or a JWKS entry naming it is read; a token names it when
+	// its signer is configured to, for JOSE libraries that know no other.
 	AlgEdDSA   = "EdDSA"
 	AlgES256   = "ES256"
 	KtyOKP     = "OKP"

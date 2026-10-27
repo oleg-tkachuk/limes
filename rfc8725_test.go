@@ -46,6 +46,7 @@ func TestVerifyFixesTheAlgorithm(t *testing.T) {
 		"RS256":                   signed("RS256", ed),
 		"no alg":                  signed("", ed),
 		"Ed25519 in lower case":   signed("ed25519", ed),
+		"EdDSA in lower case":     signed("eddsa", ed),
 	} {
 		if _, err := v.Verify(context.Background(), VerifyRequest{Token: token, Audience: audienceData}); !errors.Is(err, ErrInvalidToken) {
 			t.Errorf("%s: Verify = %v, want ErrInvalidToken", name, err)

@@ -78,6 +78,12 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
+	return newFixtureNaming(t, "")
+}
+
+// newFixtureNaming is a fixture whose tokens name alg, the default when empty.
+func newFixtureNaming(t *testing.T, alg limes.SigningAlgorithm) *fixture {
+	t.Helper()
 	key, err := limes.GenerateKey()
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +92,7 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer, err := limes.NewSigner(limes.SignerConfig{KeyID: key.KeyID, Key: key.Private})
+	signer, err := limes.NewSigner(limes.SignerConfig{KeyID: key.KeyID, Key: key.Private, Algorithm: alg})
 	if err != nil {
 		t.Fatal(err)
 	}
