@@ -254,13 +254,15 @@ describe("releaseAll", () => {
   // back that module alone.
   test("each gated module waits for its own CI job alone", async () => {
     failedGates = new Set([gateOf("redisreplay")]);
-    next = { limes: "v0.2.0", redisreplay: "redisreplay/v0.1.0", pgstore: "pgstore/v0.1.0", otelmetric: "otelmetric/v0.1.0" };
+    next = {
+      limes: "v0.2.0", redisreplay: "redisreplay/v0.1.0", pgstore: "pgstore/v0.1.0", otelmetric: "otelmetric/v0.1.0", exchange: "exchange/v0.1.0",
+    };
     await releaseAll(release());
     assert.deepEqual(
       data.published.map((r) => r.tag),
-      ["v0.2.0", "pgstore/v0.1.0", "otelmetric/v0.1.0"],
+      ["v0.2.0", "pgstore/v0.1.0", "otelmetric/v0.1.0", "exchange/v0.1.0"],
     );
-    assert.deepEqual([...GATED].sort(), ["otelmetric", "pgstore", "redisreplay"]);
+    assert.deepEqual([...GATED].sort(), ["exchange", "otelmetric", "pgstore", "redisreplay"]);
   });
 
   test("the run's summary says what happened to each module", async () => {

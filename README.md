@@ -56,8 +56,8 @@ go get github.com/oleg-tkachuk/limes@latest
 limes needs Go 1.27 or later: its identifiers are the standard library's
 `uuid.UUID`.
 
-`pgstore`, `otelmetric` and `redisreplay` are modules of their own, on tag
-lines of their own: pin each by its tag, as [Versioning](#versioning) says.
+`pgstore`, `otelmetric`, `redisreplay` and `exchange` are modules of their
+own, on tag lines of their own: pin each by its tag, as [Versioning](#versioning) says.
 
 ## Five minutes
 
@@ -226,19 +226,20 @@ from main as it is; limes stays on 0.x on main until the release that cuts
 pre-release's may. The nested modules have no such candidates: they stay on
 0.x past limes's 1.0.
 
-`redisreplay`, `pgstore` and `otelmetric` are modules of their own, each with
-a release line of its own — `redisreplay/vX.Y.Z`, `pgstore/vX.Y.Z`,
-`otelmetric/vX.Y.Z` — cut by the same
+`redisreplay`, `pgstore`, `otelmetric` and `exchange` are modules of their
+own, each with a release line of its own — `redisreplay/vX.Y.Z`,
+`pgstore/vX.Y.Z`, `otelmetric/vX.Y.Z`, `exchange/vX.Y.Z` — cut by the same
 rules from the commits that touch it, plus one: a module's own `build`
 commit, such as `build(pgstore): bump pgx`, is a patch of it, and is released
 at once; so is the release workflow's `build(nested): require limes vX.Y.Z in …`,
 for each module whose `go.mod` it raises. A
 commit releases, by its type, each module whose files it changes; one scoped
-`pgstore`, `redisreplay` or `otelmetric` never releases limes, breaking or not.
+`pgstore`, `redisreplay`, `otelmetric` or `exchange` never releases limes,
+breaking or not.
 
 A nested module is tagged after the limes it needs, never with it: its
 `go.mod` must require a limes already released, so a root release's new API
-reaches `pgstore`, `otelmetric` or `redisreplay` only with that module's next
+reaches `pgstore`, `otelmetric`, `redisreplay` or `exchange` only with that module's next
 tag, cut once the `require limes` change merges. Pin each module by its own
 tag — `go get github.com/oleg-tkachuk/limes/pgstore@pgstore/vX.Y.Z`, which
 brings the limes it requires — never a root tag's commit; and to take a new
@@ -288,6 +289,7 @@ its checks while unset.
 | [pgstore/](pgstore) | the reference PostgreSQL store, a module of its own: `Store`, `BiscuitRevocationStore`, `meter.UsageStore`, `meter.CopyUsageReader`, a `Ledger`, a `Census` and both tenant erasers under row-level security per tenant, with `EraseTenant` and a `RevocationWatcher`; held to storetest and metertest; released as `pgstore/vX.Y.Z` |
 | [redisreplay/](redisreplay) | a `dpop.ReplayCache` over Redis, a module of its own, for verifiers behind several replicas; released as `redisreplay/vX.Y.Z` |
 | [otelmetric/](otelmetric) | OpenTelemetry instruments around a `meter.UsageStore` and a `RevocationCache`, a module of its own so limes resolves no OpenTelemetry; released as `otelmetric/vX.Y.Z` |
+| [exchange/](exchange) | OAuth 2.0 Token Exchange (RFC 8693): an identity provider's access token (RFC 9068) exchanged for a capability, in process or at a token endpoint, under a policy of the consumer's; a module of its own so limes resolves no JOSE library; released as `exchange/vX.Y.Z` |
 | [internal/](internal) | the module's own shared packages, not importable from outside it: JOSE pieces (`jose`), HTTP header names (`httpx`), RFC 3986 URI normalisation (`rfc3986`), access to unexported root internals for sibling packages (`link`), the sharded TTL cache behind `RevocationCache` (`ttlcache`), and field coverage and per-check deadlines for the conformance suites (`fields`, `watchdog`) |
 | [storetest/](storetest), [metertest/](metertest), [dpop/dpoptest](dpop/dpoptest), [jwks/jwkstest](jwks/jwkstest) | conformance suites to run from your own implementation's tests |
 | [examples/](examples) | runnable programs: the five-minute walkthrough (`quickstart`), and one topic each, logging every step to stdout — issuing and verifying, delegation, metering, and pgstore over PostgreSQL; a module of its own, never released. The Go documentation of every package but the conformance suites `metertest`, `jwkstest` and `dpoptest` carries `Example` functions for its calls; pgstore's compile without a database and do not run |

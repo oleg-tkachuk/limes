@@ -160,7 +160,7 @@ them.
   longer holds there.
 - Capabilities do not become RFC 9068 tokens: the exchange issues
   `limes-cap-v6+jwt`, with `issued_token_type` naming it by a URI of the
-  module's own.
+  module's own, `https://github.com/oleg-tkachuk/limes/exchange#capability`.
 - To revisit: Option B, if limits must hold at the client; revocation of
   every capability exchanged for one identity-provider session, for which
   the module would record the session with each capability.
@@ -170,9 +170,14 @@ them.
 1. [x] Add to `dpop.Verifier` a check of a token-endpoint proof (RFC 9449
    §5) that returns the proof key's thumbprint, with the same refusals and
    replay recording as `Check` and `Record`.
-2. [ ] Module `exchange`: `SubjectVerifier` (jwx, RFC 9068 checks), the
-   policy callback, `Exchanger`, and the RFC 8693 `http.Handler`, with the
-   storetest-style contract tests and logging of every grant and refusal.
+2. [x] Module `exchange`: `SubjectVerifier` (jwx, RFC 9068 checks), the
+   policy callback, `Exchanger`, and the RFC 8693 `http.Handler`, with
+   logging of every grant and refusal.
 3. [ ] RFC 9728 and RFC 8414 document helpers; an example MCP server in
    `examples` that exchanges a token from a test identity provider.
-4. [ ] Register the module: release rules, CI group, seed tag.
+4. [ ] Register the module: release rules, CI group, seed tag. All but the
+   seed tag `exchange/v0.1.0` are done.
+5. [ ] A capability as the subject token, narrowed by `Issuer.Delegate`
+   (decision 4).
+6. [ ] `exchangetest`: a contract suite for `SubjectVerifier`
+   implementations other than `JWTVerifier`.

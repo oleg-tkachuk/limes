@@ -39,6 +39,6 @@ test("the floor job checks each module it tests", () => {
 test("every tested module's directive is on one line", () => {
   const root = new URL("../../", import.meta.url);
   const directive = (dir: string) => /^go (\S+)$/m.exec(readFileSync(new URL(`${dir}/go.mod`, root), "utf8"))?.[1] ?? "";
-  const lines = new Set([".", "redisreplay", "otelmetric"].map((d) => directive(d).split(".").slice(0, 2).join(".")));
+  const lines = new Set([".", "redisreplay", "otelmetric", "exchange"].map((d) => directive(d).split(".").slice(0, 2).join(".")));
   assert.equal(lines.size, 1);
 });

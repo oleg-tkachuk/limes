@@ -38,7 +38,7 @@ describe("checkModules", () => {
     assert.deepEqual(calls, [`v0.1.0 ${later} limes`]);
     assert.deepEqual(
       results.map((r) => `${r.module} ${r.outcome}`),
-      ["limes passed", "redisreplay skipped", "pgstore skipped", "otelmetric skipped"],
+      ["limes passed", "redisreplay skipped", "pgstore skipped", "otelmetric skipped", "exchange skipped"],
     );
     await repo.run("tag", "redisreplay/v0.1.0", first);
     calls.length = 0;
@@ -51,7 +51,7 @@ describe("checkModules", () => {
     await checkModules(repo.dir, { name: "pull_request", prBase: first, prHead: later, sha: later }, recording(calls));
     assert.deepEqual(
       calls,
-      ["limes", "redisreplay", "pgstore", "otelmetric"].map((m) => `${first} ${later} ${m}`),
+      ["limes", "redisreplay", "pgstore", "otelmetric", "exchange"].map((m) => `${first} ${later} ${m}`),
     );
   });
 
@@ -59,8 +59,8 @@ describe("checkModules", () => {
     const calls: string[] = [];
     const results = await checkModules(repo.dir, { name: "pull_request", prBase: first, prHead: later, sha: later }, recording(calls, "limes"));
     assert.equal(allPassed(results), false);
-    assert.equal(calls.length, 4);
-    assert.deepEqual(results.map((r) => r.outcome), [Outcome.Failed, Outcome.Passed, Outcome.Passed, Outcome.Passed]);
+    assert.equal(calls.length, 5);
+    assert.deepEqual(results.map((r) => r.outcome), [Outcome.Failed, Outcome.Passed, Outcome.Passed, Outcome.Passed, Outcome.Passed]);
   });
 
   test("the summary names each check's job and every module's outcome", () => {

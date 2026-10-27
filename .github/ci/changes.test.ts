@@ -173,6 +173,7 @@ describe("reachedGroups", () => {
     ["pgstore", ["pgstore/charge.go"], [Group.Pgstore]],
     ["redisreplay", ["redisreplay/seen.lua"], [Group.Redisreplay]],
     ["otelmetric", ["otelmetric/store.go"], [Group.Otelmetric]],
+    ["exchange", ["exchange/handler.go"], [Group.Exchange]],
     ["an example", ["examples/quickstart/main.go"], [Group.Examples]],
     ["a CI script", [".github/ci/changes.ts"], [Group.Scripts]],
     ["the release tooling", [".github/release/modules.cjs"], [Group.Scripts]],

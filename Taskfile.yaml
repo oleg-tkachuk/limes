@@ -7,9 +7,9 @@ version: "3"
 #   task verify-all      # before pushing; CI runs the same task
 #
 # The library is the module at the root, so the shared library's Go verbs are
-# flattened in: `task test`, not `task go:test`. The redisreplay and
-# otelmetric modules have gates of their own, verify:redisreplay and
-# verify:otelmetric.
+# flattened in: `task test`, not `task go:test`. The redisreplay, otelmetric
+# and exchange modules have gates of their own, verify:redisreplay,
+# verify:otelmetric and verify:exchange.
 
 silent: true
 
@@ -24,6 +24,9 @@ vars:
   # Redis client.
   REDISREPLAY_DIR: redisreplay
   OTELMETRIC_DIR: otelmetric
+  # The OAuth token exchange, a module of its own so the root never resolves
+  # a JOSE library.
+  EXCHANGE_DIR: exchange
   # The reference PostgreSQL store, a module of its own: `./...` from the
   # root does not reach it.
   PGSTORE_DIR: pgstore
@@ -67,7 +70,7 @@ tasks:
       - node .github/ci/tidy-modules.ts
 
   verify-all:
-    desc: "gofmt + go mod tidy/verify + golangci-lint + a 32-bit build + the unit suite + govulncheck + actionlint + the CI scripts + the release rules and notes + the redisreplay and otelmetric modules + pgstore's static checks + the examples that need no database — what CI runs, but test:pgstore and test:examples:pgstore"
+    desc: "gofmt + go mod tidy/verify + golangci-lint + a 32-bit build + the unit suite + govulncheck + actionlint + the CI scripts + the release rules and notes + the redisreplay, otelmetric and exchange modules + pgstore's static checks + the examples that need no database — what CI runs, but test:pgstore and test:examples:pgstore"
     cmds:
       - task: verify:gate
       - task: lint:all
@@ -85,6 +88,7 @@ tasks:
       - task: verify:release-rules
       - task: verify:redisreplay
       - task: verify:otelmetric
+      - task: verify:exchange
       - task: verify:pgstore
       - task: verify:examples
 
@@ -101,6 +105,16 @@ tasks:
   verify:otelmetric:
     desc: "The otelmetric module's own gate: go mod tidy/verify, go vet, the unit suite and govulncheck — ./... at the root does not reach a nested module"
     dir: '{{.OTELMETRIC_DIR}}'
+    cmds:
+      - go mod tidy -diff
+      - go mod verify
+      - go vet ./...
+      - go test -race -short ./...
+      - go tool -modfile=../{{.TOOLS_MODFILE}} govulncheck ./...
+
+  verify:exchange:
+    desc: "The exchange module's own gate: go mod tidy/verify, go vet, the unit suite and govulncheck — ./... at the root does not reach a nested module"
+    dir: '{{.EXCHANGE_DIR}}'
     cmds:
       - go mod tidy -diff
       - go mod verify
@@ -143,7 +157,7 @@ tasks:
       - go test -race -count=1 ./...
 
   test:pinned:
-    desc: "A nested module's tests against the limes its go.mod requires, as a consumer's build resolves it, not the limes of this commit — MODULE is pgstore, redisreplay or otelmetric; needs the module proxy, and Docker for pgstore"
+    desc: "A nested module's tests against the limes its go.mod requires, as a consumer's build resolves it, not the limes of this commit — MODULE is pgstore, redisreplay, otelmetric or exchange; needs the module proxy, and Docker for pgstore"
     requires:
       vars: [MODULE]
     dir: '{{.MODULE}}'
@@ -205,7 +219,7 @@ tasks:
     desc: "golangci-lint over every module, the root and each nested one — ./... at the root does not reach a nested module"
     cmds:
       - task: lint
-      - for: ['{{.REDISREPLAY_DIR}}', '{{.OTELMETRIC_DIR}}', '{{.PGSTORE_DIR}}', '{{.EXAMPLES_DIR}}']
+      - for: ['{{.REDISREPLAY_DIR}}', '{{.OTELMETRIC_DIR}}', '{{.EXCHANGE_DIR}}', '{{.PGSTORE_DIR}}', '{{.EXAMPLES_DIR}}']
         task: lint:module
         vars:
           DIR: '{{.ITEM}}'
