@@ -131,6 +131,64 @@ func TestAV7CapabilityIsAnRFC9068AccessToken(t *testing.T) {
 	}
 }
 
+// The subjects of a capability acting on a user's behalf (RFC 8693 §4.1):
+// the user, the agent the capability is issued to, and the sub-agent it is
+// delegated to.
+const (
+	claimActor    = "act"
+	actingUser    = "user-1"
+	actingAgent   = "agent-planner"
+	actingSubject = "agent-searcher"
+)
+
+// A v7 capability acting for a user, delegated on to a sub-agent, is read by
+// jwx as RFC 8693 and RFC 9068 describe it: sub the user, act the sub-agent,
+// the agent nested within as the prior actor; and it is still an RFC 9068
+// access token.
+func TestJWXReadsWhomAV7CapabilityActsFor(t *testing.T) {
+	f := newFixtureOf(t, "", limes.TokenTypeV7)
+	user := limes.Principal{Type: limes.PrincipalTypeUser, TenantID: f.tenant, Subject: actingUser}
+	parent, err := f.issuer.Issue(t.Context(), limes.IssueRequest{
+		ClientID: interopClient, OnBehalfOf: &user,
+		IssuedBy: limes.Principal{Type: limes.PrincipalTypeUser, TenantID: f.tenant, Subject: operatorSubject},
+		Subject:  limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: f.tenant, Subject: actingAgent},
+		Audience: []string{audience}, TTL: tokenTTL, Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet, limes.OpShare}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verified, err := f.verifier.Verify(t.Context(), limes.VerifyRequest{Token: parent.Token, Audience: audience})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := f.issuer.Delegate(t.Context(), limes.DelegateRequest{
+		Parent: verified, Subject: limes.Principal{Type: limes.PrincipalTypeAgent, Subject: actingSubject}, InheritCaveats: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := f.fetchKeys(t)
+	if faults := rfc9068Faults(t, child.Token, set); len(faults) != 0 {
+		t.Errorf("the delegated capability's faults as an RFC 9068 access token: %q", faults)
+	}
+	tok, err := jwt.ParseString(child.Token, jwt.WithKeySet(set), jwt.WithIssuer(issuerName), jwt.WithAudience(audience))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var act map[string]any
+	if err := tok.Get(claimActor, &act); err != nil {
+		t.Fatalf("jwx reads no act: %v", err)
+	}
+	var chain []string
+	for at := act; at != nil; at, _ = at[claimActor].(map[string]any) {
+		sub, _ := at[claimSubject].(string)
+		chain = append(chain, sub)
+	}
+	if sub, _ := tok.Subject(); sub != actingUser || !slices.Equal(chain, []string{actingSubject, actingAgent}) {
+		t.Errorf("jwx reads sub %q, act %v; want %s acted for by %s after %s", sub, chain, actingUser, actingSubject, actingAgent)
+	}
+}
+
 // An at+jwt signed with the issuer's own key passes as a capability only with
 // a v7 payload: a v6 capability's payload under the type, whose format
 // limes_v does not name, is refused, while the same payload under the v6
