@@ -222,6 +222,10 @@ at an RFC 8693 token endpoint (`Handler`):
   names the client in another claim, is read only by naming either in its
   config. A token bound otherwise than by a DPoP key (`cnf` without `jkt`,
   or with more) is refused: a bearer capability would drop the binding.
+  Keys its `KeySource` cannot give, the identity provider's JWKS never
+  fetched, are the server's failure, not a refusal of the token.
+  `exchangetest.TestSubjectVerifier` holds a verifier of one's own to the
+  same contract.
 - **The audience.** A subject token is accepted only when its `aud` names
   the client exchanging it. The capability's audience is drawn from the
   `resource` (RFC 8707: absolute URIs, no fragment) and `audience`
@@ -261,7 +265,8 @@ at an RFC 8693 token endpoint (`Handler`):
 `TestHandlerExchanges`, `TestHandlerRefusals`, `TestNarrowDelegates`,
 `TestNarrowHoldsABoundParentToItsKey`, `TestNarrowRefusals`,
 `TestWellKnownURLs`, `TestResourceMetadataHandler`,
-`TestAuthorizationServerMetadataHandler`, and the fuzz target
+`TestAuthorizationServerMetadataHandler`, `TestKeysOutageIsTheServers`,
+`TestJWTVerifierKeepsTheContract`, and the fuzz target
 `FuzzCheckForm`, in `exchange`; and the `mcp-exchange` example.
 
 ## Not adopted

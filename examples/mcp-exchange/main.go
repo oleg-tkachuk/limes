@@ -193,7 +193,7 @@ func main() {
 	must(err, "key set")
 	verifier, err := limes.NewVerifier(limes.VerifierConfig{Keys: keys, Revocations: records, TrustedIssuers: []string{limesIssuer}})
 	must(err, "verifier")
-	subjects, err := exchange.NewJWTVerifier(exchange.JWTVerifierConfig{Issuer: idpIssuer, Keys: provider.keys})
+	subjects, err := exchange.NewJWTVerifier(exchange.JWTVerifierConfig{Issuer: idpIssuer, Keys: exchange.StaticKeys(provider.keys)})
 	must(err, "subject verifier")
 
 	s := &server{tools: verifier, log: log, tenant: uuid.New()}

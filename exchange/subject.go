@@ -72,10 +72,9 @@ type JWTVerifierConfig struct {
 	// Issuer is the identity provider's issuer identifier, which a token's
 	// iss must equal. Required.
 	Issuer string
-	// Keys are the identity provider's public keys: a jwk.CachedSet over
-	// its JWKS URL keeps them fresh, under the lifetime of the jwk.Cache
-	// behind it. Required.
-	Keys jwk.Set
+	// Keys are the identity provider's public keys: CachedKeys over its JWKS
+	// URL keeps them fresh. Required.
+	Keys KeySource
 	// Types are the header types accepted, compared without regard to case.
 	// Empty: TypeAccessToken and TypeAccessTokenMedia, as RFC 9068 requires.
 	// A provider that types its access tokens otherwise ("JWT") is accepted
@@ -91,6 +90,40 @@ type JWTVerifierConfig struct {
 	// Now is the clock. Nil: time.Now.
 	Now func() time.Time
 }
+
+// KeySource gives the identity provider's current public keys, or an error
+// when it has none to give: its JWKS out of reach and never fetched. That is
+// the server's failure, answered as one, never a refusal of the token.
+type KeySource interface {
+	Keys(ctx context.Context) (jwk.Set, error)
+}
+
+// staticKeys is a KeySource of a fixed set.
+type staticKeys struct{ set jwk.Set }
+
+func (k staticKeys) Keys(context.Context) (jwk.Set, error) { return k.set, nil }
+
+// StaticKeys is a KeySource of a fixed key set.
+func StaticKeys(set jwk.Set) KeySource { return staticKeys{set: set} }
+
+// cachedKeys is a KeySource over a jwk.Cache.
+type cachedKeys struct {
+	cache *jwk.Cache
+	url   string
+}
+
+func (k cachedKeys) Keys(ctx context.Context) (jwk.Set, error) {
+	set, err := k.cache.Lookup(ctx, k.url)
+	if err != nil {
+		return nil, fmt.Errorf("exchange: the identity provider's keys at %s: %w", k.url, err)
+	}
+	return set, nil
+}
+
+// CachedKeys is a KeySource over cache, which keeps the JWKS at url fresh;
+// url must be registered with it (jwk.Cache.Register). A set fetched once is
+// served while the endpoint is out of reach; one never fetched is an error.
+func CachedKeys(cache *jwk.Cache, url string) KeySource { return cachedKeys{cache: cache, url: url} }
 
 // JWTVerifier is the SubjectVerifier for JWT access tokens (RFC 9068),
 // verified through jwx: the library that implements the format, as no
@@ -132,7 +165,8 @@ func NewJWTVerifier(cfg JWTVerifierConfig) (*JWTVerifier, error) {
 // VerifySubject verifies token as an RFC 9068 access token of the
 // configured issuer: its type and algorithm, its signature under the
 // issuer's keys, its lifetime, and every claim the profile requires. A
-// token it refuses is ErrInvalidGrant.
+// token it refuses is ErrInvalidGrant; keys it cannot get are another
+// error, the server's.
 func (v *JWTVerifier) VerifySubject(ctx context.Context, token string) (Subject, error) {
 	msg, err := jws.ParseString(token)
 	if err != nil || len(msg.Signatures()) != 1 {
@@ -147,8 +181,12 @@ func (v *JWTVerifier) VerifySubject(ctx context.Context, token string) (Subject,
 	if !slices.Contains(v.cfg.Algorithms, alg.String()) {
 		return Subject{}, fmt.Errorf("%w: alg %q is not one of %q", ErrInvalidGrant, alg, v.cfg.Algorithms)
 	}
+	keys, err := v.cfg.Keys.Keys(ctx)
+	if err != nil {
+		return Subject{}, err
+	}
 	opts := []jwt.ParseOption{
-		jwt.WithContext(ctx), jwt.WithKeySet(v.cfg.Keys), jwt.WithIssuer(v.cfg.Issuer),
+		jwt.WithContext(ctx), jwt.WithKeySet(keys), jwt.WithIssuer(v.cfg.Issuer),
 		jwt.WithClock(jwt.ClockFunc(v.cfg.Now)), jwt.WithAcceptableSkew(v.cfg.ClockSkew),
 	}
 	for _, claim := range []string{claimIssuer, claimExpiry, claimAudience, claimSubject, v.cfg.ClientIDClaim, claimIssuedAt, claimJWTID} {

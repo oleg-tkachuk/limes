@@ -29,7 +29,7 @@ func newJWTVerifier(t *testing.T, cfg JWTVerifierConfig) *JWTVerifier {
 // defines them.
 func TestJWTVerifierReadsAnAccessToken(t *testing.T) {
 	p := newIDP(t)
-	v := newJWTVerifier(t, JWTVerifierConfig{Issuer: idpIssuer, Keys: p.keys, Now: clock})
+	v := newJWTVerifier(t, JWTVerifierConfig{Issuer: idpIssuer, Keys: StaticKeys(p.keys), Now: clock})
 	claims := accessClaims()
 	for _, typ := range []string{TypeAccessToken, TypeAccessTokenMedia, "AT+JWT"} {
 		s, err := v.VerifySubject(t.Context(), p.sign(t, typ, claims))
@@ -48,7 +48,7 @@ func TestJWTVerifierReadsAnAccessToken(t *testing.T) {
 // issuer, keys, types and algorithms, a token lacking is refused.
 func TestJWTVerifierRefusals(t *testing.T) {
 	p, other := newIDP(t), newIDP(t)
-	v := newJWTVerifier(t, JWTVerifierConfig{Issuer: idpIssuer, Keys: p.keys, Now: clock})
+	v := newJWTVerifier(t, JWTVerifierConfig{Issuer: idpIssuer, Keys: StaticKeys(p.keys), Now: clock})
 	claims := accessClaims()
 	cases := map[string]string{
 		"typ JWT":                p.sign(t, typJWT, claims),
@@ -76,16 +76,16 @@ func TestJWTVerifierRefusals(t *testing.T) {
 // ones may be named.
 func TestJWTVerifierHoldsItsAlgorithms(t *testing.T) {
 	p := newIDP(t)
-	v := newJWTVerifier(t, JWTVerifierConfig{Issuer: idpIssuer, Keys: p.keys, Now: clock, Algorithms: []string{jwa.ES256().String()}})
+	v := newJWTVerifier(t, JWTVerifierConfig{Issuer: idpIssuer, Keys: StaticKeys(p.keys), Now: clock, Algorithms: []string{jwa.ES256().String()}})
 	if _, err := v.VerifySubject(t.Context(), p.sign(t, TypeAccessToken, accessClaims())); !errors.Is(err, ErrInvalidGrant) {
 		t.Errorf("an Ed25519 token at a verifier of ES256 alone: %v", err)
 	}
 	for _, alg := range []string{jwa.HS256().String(), jwa.NoSignature().String()} {
-		if _, err := NewJWTVerifier(JWTVerifierConfig{Issuer: idpIssuer, Keys: p.keys, Algorithms: []string{alg}}); err == nil {
+		if _, err := NewJWTVerifier(JWTVerifierConfig{Issuer: idpIssuer, Keys: StaticKeys(p.keys), Algorithms: []string{alg}}); err == nil {
 			t.Errorf("a verifier accepting %s was built", alg)
 		}
 	}
-	for name, cfg := range map[string]JWTVerifierConfig{"no issuer": {Keys: p.keys}, "no keys": {Issuer: idpIssuer}} {
+	for name, cfg := range map[string]JWTVerifierConfig{"no issuer": {Keys: StaticKeys(p.keys)}, "no keys": {Issuer: idpIssuer}} {
 		if _, err := NewJWTVerifier(cfg); err == nil {
 			t.Errorf("a verifier with %s was built", name)
 		}
@@ -97,7 +97,7 @@ func TestJWTVerifierHoldsItsAlgorithms(t *testing.T) {
 func TestJWTVerifierReadsAProviderOfItsOwn(t *testing.T) {
 	p := newIDP(t)
 	const azp = "azp"
-	v := newJWTVerifier(t, JWTVerifierConfig{Issuer: idpIssuer, Keys: p.keys, Now: clock, Types: []string{typJWT}, ClientIDClaim: azp})
+	v := newJWTVerifier(t, JWTVerifierConfig{Issuer: idpIssuer, Keys: StaticKeys(p.keys), Now: clock, Types: []string{typJWT}, ClientIDClaim: azp})
 	claims := with(accessClaims(), map[string]any{ClaimClientID: nil, azp: idpClient})
 	s, err := v.VerifySubject(t.Context(), p.sign(t, typJWT, claims))
 	if err != nil || s.ClientID != idpClient {
@@ -125,7 +125,7 @@ func TestJWTVerifierReadsTheBindingAndOtherAlgorithms(t *testing.T) {
 	if err := set.AddKey(pub); err != nil {
 		t.Fatal(err)
 	}
-	v := newJWTVerifier(t, JWTVerifierConfig{Issuer: idpIssuer, Keys: set, Now: clock})
+	v := newJWTVerifier(t, JWTVerifierConfig{Issuer: idpIssuer, Keys: StaticKeys(set), Now: clock})
 	const jkt = "0ZcOCORZNYy-DWpqq30jZyJGHTN0d2HglBV3uiguA4I"
 	token := signWith(t, key, jwa.ES256(), TypeAccessToken, with(accessClaims(), map[string]any{claimCnf: map[string]any{cnfJKT: jkt}}))
 	s, err := v.VerifySubject(t.Context(), token)

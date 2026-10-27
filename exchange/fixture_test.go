@@ -178,7 +178,7 @@ func newFixture(t testing.TB, fc fixtureConfig) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	subjects, err := NewJWTVerifier(JWTVerifierConfig{Issuer: idpIssuer, Keys: f.idp.keys, Now: clock})
+	subjects, err := NewJWTVerifier(JWTVerifierConfig{Issuer: idpIssuer, Keys: StaticKeys(f.idp.keys), Now: clock})
 	if err != nil {
 		t.Fatal(err)
 	}
