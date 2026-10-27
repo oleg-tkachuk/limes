@@ -178,5 +178,5 @@ them.
 4. [x] Register the module: release rules, CI group, seed tag.
 5. [x] A capability as the subject token, narrowed by `Issuer.Delegate`
    (decision 4).
-6. [ ] `exchangetest`: a contract suite for `SubjectVerifier`
+6. [x] `exchangetest`: a contract suite for `SubjectVerifier`
    implementations other than `JWTVerifier`.

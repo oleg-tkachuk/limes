@@ -14,6 +14,13 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## exchange/v0.2.0
+
+- `JWTVerifierConfig.Keys` is a `KeySource`, where it was a `jwk.Set`:
+  `exchange.StaticKeys(set)` for a fixed set, `exchange.CachedKeys(cache,
+  url)` over a `jwk.Cache`. Keys the source cannot give are the server's
+  failure (500), no longer the token's (`invalid_grant`).
+
 ## v0.126.0
 
 - Every identifier is the standard library's `uuid.UUID` (Go 1.27), where it
