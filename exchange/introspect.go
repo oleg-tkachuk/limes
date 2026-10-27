@@ -70,8 +70,9 @@ func NewIntrospectionHandler(cfg IntrospectionConfig) (*IntrospectionHandler, er
 
 // introspection is an answer (RFC 7662 §2.2): active alone for a token that
 // is not, so nothing about it leaks; for one that is, its standard members,
-// cnf when it is bound (RFC 9449 §6.2), client_id when it names one, and
-// what it allows as one authorization_details entry (RFC 9396 §9.2).
+// sub and act as a v7 token names them (RFC 8693 §4.1), cnf when it is bound
+// (RFC 9449 §6.2), client_id when it names one, and what it allows as one
+// authorization_details entry (RFC 9396 §9.2).
 type introspection struct {
 	Active    bool     `json:"active"`
 	Issuer    string   `json:"iss,omitempty"`
@@ -84,8 +85,32 @@ type introspection struct {
 	ClientID  string   `json:"client_id,omitempty"`
 	TokenType string   `json:"token_type,omitempty"`
 	Cnf       *cnf     `json:"cnf,omitempty"`
+	Act       *act     `json:"act,omitempty"`
 	// AuthorizationDetails holds one entry, of AuthorizationDetailsTypeCaveats.
 	AuthorizationDetails []json.RawMessage `json:"authorization_details,omitempty"`
+}
+
+// act is RFC 8693 §4.1's actor: the party acting, and nested within it the
+// party that acted before it.
+type act struct {
+	Subject string `json:"sub"`
+	Act     *act   `json:"act,omitempty"`
+}
+
+// actingOf is the sub and act of an answer about c: the principal it acts
+// on behalf of, acted for by its holder and the holders it was delegated
+// through, nearest first; or its holder alone, acting for itself.
+func actingOf(c limes.Capability) (string, *act) {
+	if c.OnBehalfOf == nil {
+		return c.Subject.Subject, nil
+	}
+	actor := &act{Subject: c.Subject.Subject}
+	at := actor
+	for _, prior := range c.PriorActors {
+		at.Act = &act{Subject: prior}
+		at = at.Act
+	}
+	return c.OnBehalfOf.Subject, actor
 }
 
 // cnf is a bound token's confirmation (RFC 7800, RFC 9449 §6.2).
@@ -126,8 +151,9 @@ func (h *IntrospectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: codeServerError}, log)
 			return
 		}
+		sub, actor := actingOf(c)
 		answer := introspection{
-			Active: true, Issuer: c.Issuer, Subject: c.Subject.Subject, Audience: c.Audience,
+			Active: true, Issuer: c.Issuer, Subject: sub, Act: actor, Audience: c.Audience,
 			ExpiresAt: c.ExpiresAt.Unix(), IssuedAt: c.IssuedAt.Unix(), ID: c.ID.String(), ClientID: c.ClientID,
 			TokenType: TokenTypeBearer, AuthorizationDetails: []json.RawMessage{detail},
 		}

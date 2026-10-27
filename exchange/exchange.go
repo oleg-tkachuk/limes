@@ -246,6 +246,12 @@ func (e *Exchanger) exchange(ctx context.Context, req Request) (Result, Subject,
 	if issue.ClientID == "" {
 		issue.ClientID = subject.ClientID
 	}
+	// A capability acting on behalf of another acts for the subject token's
+	// subject alone: naming anyone else would have the exchange speak for
+	// someone who presented nothing.
+	if issue.OnBehalfOf != nil && issue.OnBehalfOf.Subject != subject.Subject {
+		return Result{}, subject, fmt.Errorf("%w: it acts on behalf of %q, not the subject token's %q", errPolicy, issue.OnBehalfOf.Subject, subject.Subject)
+	}
 	if issue.TTL == 0 {
 		issue.TTL = DefaultTTL
 	}
