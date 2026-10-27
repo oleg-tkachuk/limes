@@ -179,6 +179,7 @@ func (f fixture) newCapability(subject string, parent uuid.UUID, expires time.Ti
 		ExpiresAt:       expires,
 		ParentID:        parent,
 		ConfirmationJKT: "jkt",
+		ClientID:        "storetest-client",
 	}
 }
 

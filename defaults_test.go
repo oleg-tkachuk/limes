@@ -44,8 +44,8 @@ func TestConfigDefaults(t *testing.T) {
 	if v.cfg.Leeway != 30*time.Second {
 		t.Errorf("verifier leeway = %s, want 30s", v.cfg.Leeway)
 	}
-	if !slices.Equal(v.cfg.AcceptTokenTypes, []TokenType{TokenTypeV6}) {
-		t.Errorf("verifier accepts %q, want only %q", v.cfg.AcceptTokenTypes, TokenTypeV6)
+	if !slices.Equal(v.cfg.AcceptTokenTypes, []TokenType{TokenTypeV6, TokenTypeV7}) {
+		t.Errorf("verifier accepts %q, want v6 and v7", v.cfg.AcceptTokenTypes)
 	}
 
 }
@@ -194,7 +194,7 @@ func TestAcceptTokenTypesRefusesWhatItCannotRead(t *testing.T) {
 			AcceptTokenTypes: types,
 		}
 	}
-	every := []TokenType{TokenTypeV6}
+	every := []TokenType{TokenTypeV6, TokenTypeV7}
 	for _, tc := range []struct{ types, want []TokenType }{
 		{[]TokenType{TokenTypeV6}, []TokenType{TokenTypeV6}},
 		{nil, every},

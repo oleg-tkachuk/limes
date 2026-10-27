@@ -11,10 +11,11 @@ import (
 	"uuid"
 )
 
-// Mints the TokenTypeV6 golden-token fixture golden_test.go verifies. Run
-// explicitly, and only for a deliberate wire-format change:
+// Mints the golden-token fixtures golden_test.go verifies, one per token
+// type. Run explicitly, and only for a deliberate wire-format change, naming
+// the type whose fixture to write; another type's stays as it was minted:
 //
-//	LIMES_WRITE_GOLDEN=1 go test . -run TestGenerateGoldenToken
+//	LIMES_WRITE_GOLDEN=at+jwt go test . -run TestGenerateGoldenToken
 //
 // Every input below is fixed so golden_test.go can reconstruct the same key
 // and clock.
@@ -33,16 +34,18 @@ const (
 	goldenAudience = "limes-data"
 	goldenSubject  = "golden-agent"
 	goldenTenant   = "11111111-1111-1111-1111-111111111111"
+	// goldenClientID is the client a v7 fixture names; a v6 one carries none.
+	goldenClientID = "golden-client"
 
-	// goldenWriteEnv set to goldenWriteFlag regenerates the fixture.
-	goldenWriteEnv  = "LIMES_WRITE_GOLDEN"
-	goldenWriteFlag = "1"
+	// goldenWriteEnv names the token type whose fixture is written anew.
+	goldenWriteEnv = "LIMES_WRITE_GOLDEN"
 )
 
 // goldenFiles are the fixtures of the token types this package reads, one
 // each: what TestGenerateGoldenToken writes.
 var goldenFiles = map[TokenType]string{
 	TokenTypeV6: "golden_token_v6.jwt",
+	TokenTypeV7: "golden_token_v7.jwt",
 }
 
 // retiredFixtures are tokens of the retired formats, each from before its
@@ -85,12 +88,13 @@ func (genStore) ListByPrincipal(context.Context, ListByPrincipalRequest) (Page[C
 }
 
 func TestGenerateGoldenToken(t *testing.T) {
-	if os.Getenv(goldenWriteEnv) != goldenWriteFlag {
-		t.Skipf("set %s=%s to (re)generate the fixture", goldenWriteEnv, goldenWriteFlag)
+	typ := TokenType(os.Getenv(goldenWriteEnv))
+	if _, ok := goldenFiles[typ]; !ok {
+		t.Skipf("set %s to a token type to (re)generate its fixture", goldenWriteEnv)
 	}
 
 	priv := ed25519.NewKeyFromSeed(goldenSeed[:])
-	signer, err := NewSigner(SignerConfig{KeyID: goldenKID, Key: SealKey(priv), TokenType: TokenTypeV6})
+	signer, err := NewSigner(SignerConfig{KeyID: goldenKID, Key: SealKey(priv), TokenType: typ})
 	if err != nil {
 		t.Fatalf("signer: %v", err)
 	}
@@ -122,13 +126,14 @@ func TestGenerateGoldenToken(t *testing.T) {
 			Budget:           BudgetCeiling{Max: 3 * NanosPerUnit / 2, UnitCode: "USD"}, // 1.5 USD
 			Copies:           CopyQuota{Max: goldenCopyQuota},
 		},
-		TTL: time.Hour,
+		TTL:      time.Hour,
+		ClientID: goldenClientIDOf(typ),
 	})
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
 
-	out := goldenPath(TokenTypeV6)
+	out := goldenPath(typ)
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -144,3 +149,12 @@ type revLookup struct{}
 func (revLookup) IsRevoked(context.Context, uuid.UUID) (bool, error) { return false, nil }
 
 func (revLookup) IsBiscuitRevoked(context.Context, [][]byte) (bool, error) { return false, nil }
+
+// goldenClientIDOf is the client a fixture of typ names: one only where the
+// format carries it.
+func goldenClientIDOf(typ TokenType) string {
+	if typ == TokenTypeV7 {
+		return goldenClientID
+	}
+	return ""
+}
