@@ -128,6 +128,19 @@ try {
     failed = 1;
   }
 
+  // Nor do the root's notes hold a change scoped to another module, though
+  // the commit touches the root too: its analyzer releases nothing for it, so
+  // its breaking marker says nothing of the root either.
+  const rootNotes = await plugin.generateNotes(scopeOf(root), {
+    ...context([rootFeat, scopedBreak, rootBreak]),
+    lastRelease: { gitTag: "v0.1.0", version: "0.1.0" },
+    nextRelease: { gitTag: "v0.2.0", version: "0.2.0", type: "minor" },
+  });
+  if (rootNotes.includes("move a type") || !rootNotes.includes("drop a type") || !rootNotes.includes("add a caveat")) {
+    console.log(`FAIL the root notes list a change scoped to ${NESTED}, or lack their own:\n${rootNotes}`);
+    failed = 1;
+  }
+
   // The release each commit cuts, by the module's own rules: a breaking
   // change is a minor before 1.0, a dependency bump a patch of the nested
   // module, and a change scoped to another module none of the root.

@@ -54,9 +54,21 @@ async function analyzeCommits(pluginConfig, context) {
   return analyze(pluginConfig.analyzer, moduleCommits(pluginConfig, context));
 }
 
+// generateNotes lists the module's commits that its own analyzer releases: a
+// commit scoped to another module, which the module's rules release nothing
+// of, stays out of its notes even when it touches the module's paths, and so
+// does its breaking marker.
 async function generateNotes(pluginConfig, context) {
   const { generateNotes: generate } = await import("@semantic-release/release-notes-generator");
-  return generate(pluginConfig.notes, moduleCommits(pluginConfig, context));
+  const narrowed = moduleCommits(pluginConfig, context);
+  const released = [];
+  for (const c of narrowed.commits) {
+    if (await releases(pluginConfig.analyzer, c.hash, c.message)) {
+      released.push(c);
+    }
+  }
+  context.logger.log(`${released.length} of them release the module in ${pluginConfig.dir || "the root"}, and are noted`);
+  return generate(pluginConfig.notes, { ...narrowed, commits: released });
 }
 
 module.exports = { analyzeCommits, generateNotes, changedPaths, touches };
