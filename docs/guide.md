@@ -1369,7 +1369,8 @@ A gateway that cannot read capability tokens can ask about one instead:
 `Verifier.Introspect` says whether a token is active (genuine, from a
 trusted issuer, within its window and not revoked) and what it carries,
 and `exchange.IntrospectionHandler` serves that as an RFC 7662 endpoint for
-authenticated callers. It checks no audience and no proof of possession,
+authenticated callers, with the caveats as an RFC 9396
+`authorization_details` entry. It checks no audience and no proof of possession,
 so its answer authorizes nothing: an active bound token is reported bound,
 with its key, not proved. A revocation store that cannot answer is the
 endpoint's error, never an inactive token.

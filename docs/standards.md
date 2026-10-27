@@ -289,12 +289,14 @@ at an RFC 8693 token endpoint (`Handler`):
   tokens itself. It authenticates its caller (§2.1). An inactive token
   (expired, revoked, lifted out of its Biscuit, not a token) gets
   `{"active": false}` and nothing more (§2.2). An active one gets its
-  standard members, `client_id` where its format carries one, and
-  `token_type` and `cnf` for a bound one (RFC 9449 §6.2). A store that
+  standard members, `client_id` where its format carries one,
+  `token_type` and `cnf` for a bound one (RFC 9449 §6.2), and what it
+  grants as one `authorization_details` entry (RFC 9396 §9.2): of type
+  `exchange.AuthorizationDetailsTypeCaveats`, its other members those of
+  the token's `limes_caveats` claim (`limes.MarshalCaveats`). A store that
   cannot answer is a 500, never an inactive token. Neither audience nor
   proof of possession is checked: the answer is no authorization, and
-  `Introspect` yields nothing `Delegate` takes. A capability's caveats are
-  for a verifier of limes tokens to read; the answer omits them.
+  `Introspect` yields nothing `Delegate` takes.
 
 *Held by* `TestJWTVerifierReadsAnAccessToken`, `TestJWTVerifierRefusals`,
 `TestExchangeHoldsThePolicyToTheRequest`,
@@ -306,7 +308,7 @@ at an RFC 8693 token endpoint (`Handler`):
 `TestAuthorizationServerMetadataHandler`, `TestKeysOutageIsTheServers`,
 `TestJWTVerifierKeepsTheContract`, `TestIntrospectionActive`,
 `TestIntrospectionInactive`, `TestIntrospectionOutage`, `TestIntrospectActive`,
-`TestIntrospectInactive`, `TestIntrospectOutageIsNotInactive`, and the fuzz target
+`TestIntrospectInactive`, `TestIntrospectOutageIsNotInactive`, `TestMarshalCaveatsIsTheClaim`, and the fuzz target
 `FuzzCheckForm`, in `exchange`; and the `mcp-exchange` example.
 
 ## Not adopted
@@ -317,8 +319,9 @@ ecosystem; they were adopted in v0.3.0 and removed again, since nothing on
 either side reads them. Each can return when something does.
 
 - **RFC 9396 in a token.** Caveats travel in `limes_caveats`, not as an
-  `authorization_details` entry; the token exchange reads the parameter in a
-  request only.
+  `authorization_details` entry, so a token holds them once; the token
+  exchange reads the parameter in a request, and introspection answers with
+  the caveats as an entry.
 - **RFC 8693 in a token.** Delegation is followed through
   `limes_parent_id`; a delegated token's `sub` is its own principal's, and it
   has no `act` claim.
