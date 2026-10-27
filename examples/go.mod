@@ -22,6 +22,7 @@ require (
 	github.com/oleg-tkachuk/limes/pgstore v0.29.3
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0
+	golang.org/x/mod v0.42.0
 )
 
 require (
