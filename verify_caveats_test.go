@@ -8,9 +8,9 @@ import (
 	"errors"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/go-json-experiment/json"
-	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes/internal/jose"
 )

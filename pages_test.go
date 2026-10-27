@@ -5,8 +5,7 @@ import (
 	"errors"
 	"slices"
 	"testing"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // fakePage is one page a fakeLister serves for a cursor.

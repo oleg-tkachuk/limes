@@ -47,8 +47,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/internal/fields"
@@ -141,9 +140,9 @@ type Env struct {
 // CapabilitySpec is a capability Env.NewCapability records: its parent and
 // the ceilings of its caveats.
 type CapabilitySpec struct {
-	// Parent is the capability it was delegated from; uuid.Nil for a root.
+	// Parent is the capability it was delegated from; uuid.Nil() for a root.
 	Parent uuid.UUID
-	// Tenant is the tenant it is issued in, one NewTenant created; uuid.Nil
+	// Tenant is the tenant it is issued in, one NewTenant created; uuid.Nil()
 	// for Env.Tenant.
 	Tenant uuid.UUID
 	// Requests and Budget are its caveats' ceilings; Budget names the unit
@@ -239,7 +238,7 @@ func newFixture(t *testing.T, setup func(t *testing.T) Env) fixture {
 	env := setup(t)
 	f := fixture{Env: env}
 	var err error
-	if f.root, err = env.newCapability(uuid.Nil, limes.BudgetCeiling{Max: rootBudget}); err != nil {
+	if f.root, err = env.newCapability(uuid.Nil(), limes.BudgetCeiling{Max: rootBudget}); err != nil {
 		t.Fatalf("root capability: %v", err)
 	}
 	if f.child, err = env.newCapability(f.root, limes.BudgetCeiling{Max: childBudget}); err != nil {
@@ -328,7 +327,7 @@ func (f fixture) charge(req meter.ChargeRequest, onCharged func(context.Context,
 	spec := subjectSpec{capID: s.CapabilityID(), tenant: f.Tenant, requests: &requests, budget: &budget, copies: s.Copies()}
 	// A subject naming no capability is the child's, under the child's
 	// budget and no request ceiling, with whatever copies it names.
-	if spec.capID == uuid.Nil {
+	if spec.capID == uuid.Nil() {
 		spec.capID = f.child
 		spec.budget = budgetOf(childBudget)
 		spec.requests = nil
@@ -486,7 +485,7 @@ func checkTenantCountsBeforeACeiling(t *testing.T, env Env) {
 		held    = 8 * one
 		ceiling = 10 * one
 	)
-	id, err := env.newCapability(uuid.Nil, unlimitedBudget)
+	id, err := env.newCapability(uuid.Nil(), unlimitedBudget)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -738,7 +737,7 @@ func checkMalformed(t *testing.T, f fixture) {
 // a charge that would take a counter past MaxNanos: each amount is valid,
 // their sum has no room.
 func checkCounterOverflow(t *testing.T, f fixture) {
-	id, err := f.newCapability(uuid.Nil, unlimitedBudget)
+	id, err := f.newCapability(uuid.Nil(), unlimitedBudget)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -755,7 +754,7 @@ func checkCounterOverflow(t *testing.T, f fixture) {
 	// Each counter on its own: a fresh capability under no full one meets
 	// only the tenant's full counter, and once the tenant is reset, a fresh
 	// child meets only its parent's.
-	fresh, err := f.newCapability(uuid.Nil, unlimitedBudget)
+	fresh, err := f.newCapability(uuid.Nil(), unlimitedBudget)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -861,7 +860,7 @@ func checkSettleNil(t *testing.T, f fixture) {
 	if _, err := f.charge(meter.ChargeRequest{Amount: one}, nil); err != nil {
 		t.Fatal(err)
 	}
-	r, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: f.childSubject(), ReservationID: uuid.Nil, Amount: one}, nil)
+	r, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: f.childSubject(), ReservationID: uuid.Nil(), Amount: one}, nil)
 	if !errors.Is(err, meter.ErrReservationNotFound) {
 		t.Fatalf("Settle of the zero reservation id = %+v, %v; want ErrReservationNotFound", r, err)
 	}
@@ -947,7 +946,7 @@ func checkRefundAcrossReset(t *testing.T, f fixture) {
 func checkAncestorUnit(t *testing.T, f fixture) {
 	tree := func() (parent, child uuid.UUID) {
 		t.Helper()
-		parent, err := f.newCapability(uuid.Nil, unlimitedBudget)
+		parent, err := f.newCapability(uuid.Nil(), unlimitedBudget)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1070,7 +1069,7 @@ func checkOneUnit(t *testing.T, f fixture) {
 		t.Errorf("a hold in %s on a %s counter: err = %v, want ErrUnitCodeMismatch", otherUnit, unit, err)
 	}
 	// A fresh capability has no unit of its own yet, but its tenant does.
-	fresh, err := f.newCapability(uuid.Nil, unlimitedBudget)
+	fresh, err := f.newCapability(uuid.Nil(), unlimitedBudget)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1146,7 +1145,7 @@ func checkExactCeilings(t *testing.T, f fixture) {
 	if err := charge(under, nano); !errors.Is(err, limes.ErrBudgetExceeded) {
 		t.Errorf("a nano past the root's ceiling: err = %v, want ErrBudgetExceeded", err)
 	}
-	other, err := f.newCapability(uuid.Nil, unlimitedBudget)
+	other, err := f.newCapability(uuid.Nil(), unlimitedBudget)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1715,7 +1714,7 @@ func checkCopyCountersGo(t *testing.T, f fixture) {
 	if f.DeleteCapability == nil {
 		return // PurgeOrphans needs a capability off record
 	}
-	orphan, err := f.newCapability(uuid.Nil, unlimitedBudget)
+	orphan, err := f.newCapability(uuid.Nil(), unlimitedBudget)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1798,7 +1797,7 @@ func checkCopyQuota(t *testing.T, f fixture) {
 	if quota == 0 {
 		t.Skip("Env.MaxCopiesPerCapability not set")
 	}
-	capID, err := f.newCapability(uuid.Nil, unlimitedBudget)
+	capID, err := f.newCapability(uuid.Nil(), unlimitedBudget)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1858,7 +1857,7 @@ func checkCopyQuotaCaveat(t *testing.T, f fixture) {
 	}
 	subjectOf := func(t *testing.T, quota limes.CopyQuota, copies ...limes.CopyCeiling) limes.MeterSubject {
 		t.Helper()
-		capID, err := f.newCapability(uuid.Nil, unlimitedBudget)
+		capID, err := f.newCapability(uuid.Nil(), unlimitedBudget)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1992,7 +1991,7 @@ func checkCopyOverrun(t *testing.T, f fixture) {
 // add up to seven tenths — the sums a float64 gets wrong.
 func checkSumsExactly(t *testing.T, f fixture) {
 	tenth, threeTenths := one/10, 3*one/10
-	id, err := f.newCapability(uuid.Nil, limes.BudgetCeiling{Max: threeTenths})
+	id, err := f.newCapability(uuid.Nil(), limes.BudgetCeiling{Max: threeTenths})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2165,7 +2164,7 @@ func checkZeroCeilings(t *testing.T, f fixture) {
 		t.Errorf("a hold under a budget of 0: err = %v, want ErrBudgetExceeded", err)
 	}
 
-	frozen, err := f.newCapability(uuid.Nil, limes.BudgetCeiling{})
+	frozen, err := f.newCapability(uuid.Nil(), limes.BudgetCeiling{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2282,7 +2281,7 @@ func checkResetKeepsHolds(t *testing.T, f fixture) {
 	if b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant); err != nil || b.ReservedAmount != held {
 		t.Errorf("after a reset the tenant holds %s, %v; want %s", b.ReservedAmount, err, held)
 	}
-	other, err := f.newCapability(uuid.Nil, unlimitedBudget)
+	other, err := f.newCapability(uuid.Nil(), unlimitedBudget)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2380,7 +2379,7 @@ func checkUnitWithHolds(t *testing.T, f fixture) {
 // capability that counted in the first — or whose ancestor did — refuses an
 // amount in the second.
 func checkChainUnits(t *testing.T, f fixture) {
-	parent, err := f.newCapability(uuid.Nil, unlimitedBudget)
+	parent, err := f.newCapability(uuid.Nil(), unlimitedBudget)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2559,7 +2558,7 @@ func checkHousekeepingBatches(t *testing.T, f fixture) {
 	}
 	var gone []uuid.UUID
 	for range rows {
-		id, err := f.newCapability(uuid.Nil, unlimitedBudget)
+		id, err := f.newCapability(uuid.Nil(), unlimitedBudget)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2610,7 +2609,7 @@ func checkCopySettleRefund(t *testing.T, f fixture) {
 // checkTenantCeiling holds a store to the tenant aggregate: capabilities each
 // within their own budgets must not sum past the tenant's.
 func checkTenantCeiling(t *testing.T, f fixture) {
-	other, err := f.newCapability(uuid.Nil, limes.BudgetCeiling{Max: rootBudget})
+	other, err := f.newCapability(uuid.Nil(), limes.BudgetCeiling{Max: rootBudget})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2681,7 +2680,7 @@ func checkCallbackSeesTheReceipt(t *testing.T, f fixture) {
 		if runs != 1 {
 			t.Fatalf("%s: onCharged ran %d times, want once", how, runs)
 		}
-		if seen.ChargeID == uuid.Nil || seen.ChargeID != got.ChargeID || seen.SpentAmount != got.SpentAmount ||
+		if seen.ChargeID == uuid.Nil() || seen.ChargeID != got.ChargeID || seen.SpentAmount != got.SpentAmount ||
 			seen.Overrun != got.Overrun || seen.Replayed || seen.TenantID != got.TenantID || seen.UnitCode != got.UnitCode {
 			t.Errorf("%s: onCharged saw %+v, the call returned %+v", how, seen, got)
 		}
@@ -3133,7 +3132,7 @@ func checkLineageAfterRemoval(t *testing.T, f fixture) {
 	if f.DeleteCapability == nil {
 		t.Skip("Env.DeleteCapability not set")
 	}
-	top, err := f.newCapability(uuid.Nil, unlimitedBudget)
+	top, err := f.newCapability(uuid.Nil(), unlimitedBudget)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3412,7 +3411,7 @@ func checkZeroSubject(t *testing.T, f fixture) {
 	if _, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: zero, ReservationID: uuid.New(), Amount: one}, nil); !errors.Is(err, limes.ErrInvalidRequest) {
 		t.Errorf("Settle: err = %v, want ErrInvalidRequest", err)
 	}
-	if _, err := f.Usage.GetUsage(f.Ctx, uuid.Nil); !errors.Is(err, meter.ErrUsageNotFound) {
+	if _, err := f.Usage.GetUsage(f.Ctx, uuid.Nil()); !errors.Is(err, meter.ErrUsageNotFound) {
 		t.Errorf("GetUsage(nil id) = %v; want ErrUsageNotFound, nothing counted", err)
 	}
 }
@@ -3813,7 +3812,7 @@ func checkSumCharges(t *testing.T, f fixture) {
 		"a dimension named twice":         {TenantID: f.Tenant, From: from, To: to, GroupBy: []meter.ChargeDimension{meter.ChargeDimensionOp, meter.ChargeDimensionOp}},
 		"no dimension":                    {TenantID: f.Tenant, From: from, To: to, GroupBy: []meter.ChargeDimension{meter.ChargeDimensionUnspecified}},
 		"an unknown dimension":            {TenantID: f.Tenant, From: from, To: to, GroupBy: []meter.ChargeDimension{meter.ChargeDimension(math.MaxUint8)}},
-		"a nil id in a filter":            {TenantID: f.Tenant, From: from, To: to, Filter: meter.ChargeFilter{Capabilities: []uuid.UUID{uuid.Nil}}},
+		"a nil id in a filter":            {TenantID: f.Tenant, From: from, To: to, Filter: meter.ChargeFilter{Capabilities: []uuid.UUID{uuid.Nil()}}},
 		"an empty actor in a filter":      {TenantID: f.Tenant, From: from, To: to, Filter: meter.ChargeFilter{Actors: []string{""}}},
 		"a filter past its bound":         {TenantID: f.Tenant, From: from, To: to, Filter: meter.ChargeFilter{Actors: slices.Repeat([]string{"a"}, meter.MaxChargeFilterValues+1)}},
 		"an empty period":                 {TenantID: f.Tenant, From: to, To: from},

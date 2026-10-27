@@ -3,8 +3,7 @@ package limes
 import (
 	"context"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // RecordCensus counts capability records by what they are now — active,
@@ -64,9 +63,9 @@ type CountRecordsRequest struct {
 // both, a negative window, or a negative page size.
 func (r CountRecordsRequest) Validate() error {
 	switch {
-	case r.TenantID == uuid.Nil && !r.AllTenants:
+	case r.TenantID == uuid.Nil() && !r.AllTenants:
 		return invalidRequest("count records: a tenant id or AllTenants required")
-	case r.TenantID != uuid.Nil && r.AllTenants:
+	case r.TenantID != uuid.Nil() && r.AllTenants:
 		return invalidRequest("count records: tenant id %s beside AllTenants", r.TenantID)
 	case r.ExpiringWithin < 0:
 		return invalidRequest("count records: ExpiringWithin %s is negative", r.ExpiringWithin)

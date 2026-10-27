@@ -6,8 +6,7 @@ import (
 	"errors"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // ─── resource matching and narrowing ───────────────────────────────────────

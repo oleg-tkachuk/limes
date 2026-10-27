@@ -6,8 +6,7 @@ import (
 	"errors"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // failingStore is genStore whose Insert fails as a store does: an outage, or
@@ -35,7 +34,7 @@ func validIssue() IssueRequest {
 func TestIssueRefusesAMalformedRequestAsInvalid(t *testing.T) {
 	iss := testIssuer(t, goldenKID, ed25519.NewKeyFromSeed(goldenSeed[:]), time.Now)
 	for name, mutate := range map[string]func(*IssueRequest){
-		"no tenant":              func(r *IssueRequest) { r.Subject.TenantID = uuid.Nil },
+		"no tenant":              func(r *IssueRequest) { r.Subject.TenantID = uuid.Nil() },
 		"no issuer principal":    func(r *IssueRequest) { r.IssuedBy = Principal{} },
 		"no audience":            func(r *IssueRequest) { r.Audience = nil },
 		"an empty audience":      func(r *IssueRequest) { r.Audience = []string{""} },

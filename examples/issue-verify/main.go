@@ -9,8 +9,7 @@ import (
 	"crypto/ed25519"
 	"fmt"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/examples/internal/demo"

@@ -49,7 +49,7 @@ type forbiddenImport struct {
 // cover aws-sdk-go-v2 by accident, so v2 is listed in its own right.
 //
 // Third-party drivers only: the stdlib `database/sql/driver` package is an
-// interface definition that google/uuid imports to implement sql.Scanner.
+// interface definition with no driver in it.
 var forbiddenImports = []forbiddenImport{
 	{prefix: "github.com/jackc/pgx", label: labelDatabaseDriver},
 	{prefix: "github.com/lib/pq", label: labelDatabaseDriver},
@@ -131,7 +131,7 @@ func TestFindForbidden(t *testing.T) {
 	}{
 		{
 			name:  "clean graph",
-			paths: []string{"fmt", "github.com/google/uuid", modulePath},
+			paths: []string{"fmt", "uuid", modulePath},
 		},
 		{
 			name:  "opentelemetry stays in its own module",
@@ -148,7 +148,7 @@ func TestFindForbidden(t *testing.T) {
 		},
 		{
 			name:  "one database driver",
-			paths: []string{"fmt", "github.com/lib/pq", "github.com/google/uuid"},
+			paths: []string{"fmt", "github.com/lib/pq", "uuid"},
 			want:  []dependencyViolation{{importPath: "github.com/lib/pq", label: labelDatabaseDriver}},
 		},
 		{

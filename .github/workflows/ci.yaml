@@ -48,7 +48,7 @@ env:
   # The newest patch of the oldest Go the module supports: the `go` directive
   # in go.mod, which is what binds a consumer. The floor job checks they agree.
   # renovate: datasource=golang-version depName=go-floor
-  GO_FLOOR_VERSION: "1.26.9"
+  GO_FLOOR_VERSION: "1.27.3"
 
 jobs:
   # Which of the checks below the change reaches: one output per group of

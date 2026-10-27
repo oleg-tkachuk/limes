@@ -3,8 +3,7 @@ package limes
 import (
 	"errors"
 	"testing"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // Each request a store takes refuses what names nothing it could act on, and

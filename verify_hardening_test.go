@@ -9,8 +9,7 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes/internal/jose"
 )
@@ -44,7 +43,7 @@ func validClaims(tenant uuid.UUID) map[string]any {
 	now := time.Now()
 	return map[string]any{
 		"iss": "iss", "sub": "s", "aud": []string{"data"},
-		"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(), "jti": uuid.NewString(),
+		"iat": now.Unix(), "exp": now.Add(time.Hour).Unix(), "jti": uuid.New().String(),
 		"limes_principal": map[string]any{"type": "agent", "tenant_id": tenant, "subject": "s"},
 		"limes_caveats":   map[string]any{"ops": []string{"get"}},
 	}
@@ -99,7 +98,7 @@ func TestVerifyRejectsTenantlessAndOversizedTokens(t *testing.T) {
 	ctx := context.Background()
 	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV6}
 
-	if _, err := v.Verify(ctx, VerifyRequest{Token: resign(t, priv, hdr, validClaims(uuid.Nil)), Audience: "data"}); !errors.Is(err, ErrInvalidToken) {
+	if _, err := v.Verify(ctx, VerifyRequest{Token: resign(t, priv, hdr, validClaims(uuid.Nil())), Audience: "data"}); !errors.Is(err, ErrInvalidToken) {
 		t.Errorf("tenantless token: Verify = %v, want ErrInvalidToken", err)
 	}
 
@@ -219,7 +218,7 @@ func TestVerifyRefusesNonCanonicalClaimIDs(t *testing.T) {
 		"braces":      "{" + id.String() + "}",
 		"a urn":       "urn:uuid:" + id.String(),
 		"no hyphens":  strings.ReplaceAll(id.String(), "-", ""),
-		"the nil one": uuid.Nil.String(),
+		"the nil one": uuid.Nil().String(),
 	}
 	for name, spelling := range spellings {
 		for _, claim := range []string{"jti", "limes_parent_id"} {

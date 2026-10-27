@@ -6,9 +6,9 @@ import (
 	"os"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/oleg-tkachuk/limes/dpop"
@@ -71,7 +71,7 @@ func newFixture(t *testing.T) fixture {
 // entry is a fresh id of testJKT, counted against testHolder and accepted for
 // proofLifetime from now.
 func (f fixture) entry() dpop.ReplayEntry {
-	return dpop.ReplayEntry{JKT: testJKT, JTI: uuid.NewString(), Holder: testHolder, ExpiresAt: f.clock.now.Add(proofLifetime)}
+	return dpop.ReplayEntry{JKT: testJKT, JTI: uuid.New().String(), Holder: testHolder, ExpiresAt: f.clock.now.Add(proofLifetime)}
 }
 
 func (f fixture) seen(t *testing.T, e dpop.ReplayEntry) bool {
@@ -109,7 +109,7 @@ func TestContractOnRedis(t *testing.T) {
 		clock := &testClock{now: testEpoch}
 		// A prefix of its own makes each check's cache fresh on a shared server.
 		cache, err := New(Config{
-			Client: client, KeyPrefix: DefaultKeyPrefix + uuid.NewString() + ":",
+			Client: client, KeyPrefix: DefaultKeyPrefix + uuid.New().String() + ":",
 			EntriesPerHolder: entriesPerHolder, Now: clock.Now,
 		})
 		if err != nil {

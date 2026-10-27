@@ -4,8 +4,7 @@ import (
 	"context"
 	"errors"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // IssuanceStore is what an Issuer needs of storage: to record what it mints,
@@ -80,7 +79,7 @@ type InsertRequest struct {
 // child under it would outlive nothing.
 func (r InsertRequest) Validate() error {
 	switch {
-	case r.Capability.ID == uuid.Nil:
+	case r.Capability.ID == uuid.Nil():
 		return invalidRequest("insert: the capability has no id")
 	case r.Capability.ExpiresAt.IsZero():
 		return invalidRequest("insert: capability %s never expires", r.Capability.ID)
@@ -252,7 +251,7 @@ type RevokeResult struct {
 // nothing could be revoked under the zero id, and answering ErrNotFound
 // would hide the caller's bug.
 func (r RevokeRequest) Validate() error {
-	if r.CapabilityID == uuid.Nil {
+	if r.CapabilityID == uuid.Nil() {
 		return invalidRequest("revoke: capability id required")
 	}
 	return nil
@@ -336,7 +335,7 @@ type ListByPrincipalRequest struct {
 // matches ErrInvalidRequest.
 func (r ListByPrincipalRequest) Validate() error {
 	switch {
-	case r.TenantID == uuid.Nil:
+	case r.TenantID == uuid.Nil():
 		return invalidRequest("list: tenant id required")
 	case r.PrincipalType.Validate() != nil:
 		return invalidRequest("list: principal type %q is not a principal kind", r.PrincipalType)

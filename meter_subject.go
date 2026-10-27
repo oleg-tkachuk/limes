@@ -3,8 +3,7 @@ package limes
 import (
 	"context"
 	"fmt"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes/internal/link"
 )
@@ -89,7 +88,7 @@ func (s MeterSubject) Copies() []CopyCeiling { return cloneCopyCeilings(s.copies
 // zero MeterSubject, a request that set none — or an unknown unit. A
 // metering request's Validate calls it.
 func (s MeterSubject) Validate() error {
-	if s.capabilityID == uuid.Nil || s.tenantID == uuid.Nil {
+	if s.capabilityID == uuid.Nil() || s.tenantID == uuid.Nil() {
 		return invalidRequest("the meter subject names no capability or no tenant")
 	}
 	return validUnitCode(s.maxBudget.UnitCode)

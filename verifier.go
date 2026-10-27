@@ -10,8 +10,7 @@ import (
 	"slices"
 	"strings"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes/dpop"
 	"github.com/oleg-tkachuk/limes/internal/jose"
@@ -495,7 +494,7 @@ func (v *Verifier) verifySigned(ctx context.Context, token string) (*grant, erro
 				ErrInvalidToken, header.Kid, cap.Issuer)
 		}
 	}
-	if cap.Subject.TenantID == uuid.Nil {
+	if cap.Subject.TenantID == uuid.Nil() {
 		return nil, fmt.Errorf("%w: capability has no tenant", ErrInvalidToken)
 	}
 	if err := cap.Subject.Validate(); err != nil {

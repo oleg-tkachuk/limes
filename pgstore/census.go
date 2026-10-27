@@ -10,8 +10,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/oleg-tkachuk/limes"
@@ -401,7 +401,7 @@ func decodeListCursor(s string, req limes.ListRecordsRequest) (listCursor, error
 	if err == nil {
 		err = json.Unmarshal(raw, &k)
 	}
-	if err != nil || k.After == uuid.Nil {
+	if err != nil || k.After == uuid.Nil() {
 		return listCursor{}, fmt.Errorf("%w: pgstore: record list cursor %q", limes.ErrInvalidRequest, s)
 	}
 	if k.Order != req.Order || k.Filters != filtersKey(req) {

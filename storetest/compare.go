@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 )

@@ -4,8 +4,7 @@ import (
 	"slices"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 type inner struct {

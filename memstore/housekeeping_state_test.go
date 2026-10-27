@@ -4,8 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/meter"
@@ -25,7 +24,7 @@ func TestDeleteIsNotUndoneByADescendantsHold(t *testing.T) {
 	ctx := context.Background()
 	records := newTestStore()
 	tenant, root, child := uuid.New(), uuid.New(), uuid.New()
-	for _, c := range []limes.Capability{mkCap(root, uuid.Nil, tenant, "root"), mkCap(child, root, tenant, "child")} {
+	for _, c := range []limes.Capability{mkCap(root, uuid.Nil(), tenant, "root"), mkCap(child, root, tenant, "child")} {
 		if err := records.Insert(ctx, limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "op"}}); err != nil {
 			t.Fatal(err)
 		}

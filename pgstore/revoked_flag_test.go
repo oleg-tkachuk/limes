@@ -6,8 +6,8 @@ import (
 	"path"
 	"testing"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -65,12 +65,12 @@ func TestTheRevokedFlagFollowsEveryRevocation(t *testing.T) {
 			t.Fatalf("revoke: %v", err)
 		}
 	}
-	root := insert(uuid.Nil)
+	root := insert(uuid.Nil())
 	child := insert(root)
 	grandchild := insert(child)
-	other := insert(uuid.Nil)
+	other := insert(uuid.Nil())
 	otherChild := insert(other)
-	kept := insert(uuid.Nil)
+	kept := insert(uuid.Nil())
 
 	revoke(child, false)
 	revoke(other, true)
@@ -92,7 +92,7 @@ func TestMigrationMarksTheRecordsRevokedBefore(t *testing.T) {
 	f := newTenantFixture(t)
 	ctx := WithTenant(t.Context(), f.mine)
 	var ids []uuid.UUID
-	parent := uuid.Nil
+	parent := uuid.Nil()
 	for range 5 {
 		c := f.capability(f.mine)
 		c.ParentID = parent
@@ -138,7 +138,7 @@ func TestTheRevokedFlagSurvivesAnInsertBesideARevoke(t *testing.T) {
 			if err := f.records.Insert(WithTenant(ctx, f.mine), limes.InsertRequest{Capability: parent, IssuedBy: parent.Subject}); err != nil {
 				t.Fatal(err)
 			}
-			child := uuid.Must(uuid.NewV7())
+			child := uuid.NewV7()
 			inserting, revoking := begin(t, owner), begin(t, owner)
 			insertChild := func() error {
 				if _, err := inserting.Exec(ctx, sqlLockParent, parent.ID); err != nil {
@@ -203,7 +203,7 @@ func begin(t *testing.T, pool *pgxpool.Pool) pgx.Tx {
 // capability is a root capability of tenant's, like the fixture's parent.
 func (f tenantFixture) capability(tenant uuid.UUID) limes.Capability {
 	c := f.parent
-	c.ID, c.ParentID = uuid.Must(uuid.NewV7()), uuid.Nil
+	c.ID, c.ParentID = uuid.NewV7(), uuid.Nil()
 	c.Subject.TenantID, c.Subject.Subject = tenant, "agent:"+c.ID.String()
 	return c
 }

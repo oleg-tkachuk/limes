@@ -6,8 +6,7 @@ import (
 	"fmt"
 	"log"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/memstore"
@@ -48,7 +47,7 @@ func newExampleEnv() *exampleEnv {
 // zero id — with a budget of 10 USD and 100 requests.
 func (e *exampleEnv) record(subject string, parent uuid.UUID) limes.Capability {
 	c := limes.Capability{
-		ID: uuid.Must(uuid.NewV7()), IssuedAt: e.now, ExpiresAt: e.now.Add(exampleTTL), ParentID: parent,
+		ID: uuid.NewV7(), IssuedAt: e.now, ExpiresAt: e.now.Add(exampleTTL), ParentID: parent,
 		Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: e.tenant, Subject: subject},
 		Caveats: limes.Caveats{
 			Ops:      []limes.Op{limes.OpGet},
@@ -76,7 +75,7 @@ func (e *exampleEnv) subject(c limes.Capability) limes.MeterSubject {
 func ExampleNewStore() {
 	ctx := context.Background()
 	e := newExampleEnv()
-	parent := e.record("orchestrator", uuid.Nil)
+	parent := e.record("orchestrator", uuid.Nil())
 	child := e.record("worker", parent.ID)
 
 	record, err := e.records.GetRecord(ctx, child.ID)
@@ -93,7 +92,7 @@ func ExampleNewStore() {
 func ExampleStore_Revoke() {
 	ctx := context.Background()
 	e := newExampleEnv()
-	parent := e.record("orchestrator", uuid.Nil)
+	parent := e.record("orchestrator", uuid.Nil())
 	child := e.record("worker", parent.ID)
 
 	result, err := e.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: parent.ID, Note: "agent looping", Actor: "operator@example.com"})
@@ -122,9 +121,9 @@ func ExampleStore_Revoke() {
 func ExampleStore_ListByPrincipal() {
 	ctx := context.Background()
 	e := newExampleEnv()
-	first := e.record("researcher", uuid.Nil)
-	e.record("researcher", uuid.Nil)
-	e.record("someone-else", uuid.Nil)
+	first := e.record("researcher", uuid.Nil())
+	e.record("researcher", uuid.Nil())
+	e.record("someone-else", uuid.Nil())
 
 	req := limes.ListByPrincipalRequest{
 		TenantID: e.tenant, PrincipalType: limes.PrincipalTypeAgent, Subject: "researcher", Limit: 1,
@@ -143,7 +142,7 @@ func ExampleStore_ListByPrincipal() {
 func ExampleStore_Purge() {
 	ctx := context.Background()
 	e := newExampleEnv()
-	c := e.record("researcher", uuid.Nil)
+	c := e.record("researcher", uuid.Nil())
 
 	// Expired, but not yet for MinPurgeRetention: kept.
 	e.now = c.ExpiresAt.Add(time.Minute)
@@ -167,7 +166,7 @@ func ExampleStore_Purge() {
 func ExampleStore_EraseTenantRecords() {
 	ctx := context.Background()
 	e := newExampleEnv()
-	c := e.record("researcher", uuid.Nil)
+	c := e.record("researcher", uuid.Nil())
 
 	// The token may still verify, so the record stays until Purge takes it.
 	result, err := e.records.EraseTenantRecords(ctx, limes.EraseTenantRequest{TenantID: e.tenant, Actor: "operator@example.com"})
@@ -188,7 +187,7 @@ func ExampleStore_EraseTenantRecords() {
 func ExampleNewUsageStore() {
 	ctx := context.Background()
 	e := newExampleEnv()
-	c := e.record("researcher", uuid.Nil)
+	c := e.record("researcher", uuid.Nil())
 
 	// Bump counts a request against the ceiling; it moves no amount.
 	receipt, err := e.usage.Bump(ctx, meter.BumpRequest{Subject: e.subject(c)})
@@ -204,7 +203,7 @@ func ExampleNewUsageStore() {
 func ExampleUsageStore_Charge() {
 	ctx := context.Background()
 	e := newExampleEnv()
-	c := e.record("researcher", uuid.Nil)
+	c := e.record("researcher", uuid.Nil())
 	req := meter.ChargeRequest{
 		Subject: e.subject(c), Amount: limes.MustParseAmount("0.40"), Op: "index:search",
 		Actor: "researcher", ExternalRef: "request-1",
@@ -237,7 +236,7 @@ func ExampleUsageStore_Charge() {
 func ExampleUsageStore_Charge_overrun() {
 	ctx := context.Background()
 	e := newExampleEnv()
-	c := e.record("researcher", uuid.Nil)
+	c := e.record("researcher", uuid.Nil())
 
 	// A cost already incurred is recorded past the ceiling, not lost.
 	receipt, err := e.usage.Charge(ctx, meter.ChargeRequest{
@@ -256,7 +255,7 @@ func ExampleUsageStore_Charge_overrun() {
 func ExampleUsageStore_ChargeByRef() {
 	ctx := context.Background()
 	e := newExampleEnv()
-	c := e.record("researcher", uuid.Nil)
+	c := e.record("researcher", uuid.Nil())
 	receipt, err := e.usage.Charge(ctx, meter.ChargeRequest{
 		Subject: e.subject(c), Amount: limes.MustParseAmount("0.25"), Op: "model:embed", ExternalRef: "invoice-7",
 	}, nil)
@@ -277,7 +276,7 @@ func ExampleUsageStore_ChargeByRef() {
 func ExampleUsageStore_Refund() {
 	ctx := context.Background()
 	e := newExampleEnv()
-	c := e.record("researcher", uuid.Nil)
+	c := e.record("researcher", uuid.Nil())
 	receipt, err := e.usage.Charge(ctx, meter.ChargeRequest{Subject: e.subject(c), Amount: limes.MustParseAmount("3")}, nil)
 	if err != nil {
 		log.Fatal(err)
@@ -301,7 +300,7 @@ func ExampleUsageStore_Refund() {
 func ExampleUsageStore_Reserve() {
 	ctx := context.Background()
 	e := newExampleEnv()
-	c := e.record("researcher", uuid.Nil)
+	c := e.record("researcher", uuid.Nil())
 	subject := e.subject(c)
 
 	hold, err := e.usage.Reserve(ctx, meter.ReserveRequest{Subject: subject, Amount: limes.MustParseAmount("2"), Op: "model:generate"})
@@ -330,7 +329,7 @@ func ExampleUsageStore_Reserve() {
 func ExampleUsageStore_ReleaseExpired() {
 	ctx := context.Background()
 	e := newExampleEnv()
-	c := e.record("researcher", uuid.Nil)
+	c := e.record("researcher", uuid.Nil())
 	if _, err := e.usage.Reserve(ctx, meter.ReserveRequest{Subject: e.subject(c), Amount: 1, TTL: time.Minute}); err != nil {
 		log.Fatal(err)
 	}
@@ -347,7 +346,7 @@ func ExampleUsageStore_ReleaseExpired() {
 func ExampleUsageStore_SetTenantBudget() {
 	ctx := context.Background()
 	e := newExampleEnv()
-	c := e.record("researcher", uuid.Nil)
+	c := e.record("researcher", uuid.Nil())
 
 	budget, err := e.usage.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{
 		TenantID: e.tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("5"), UnitCode: "USD"},
@@ -380,7 +379,7 @@ func ExampleUsageStore_SetTenantBudget() {
 func ExampleUsageStore_ListTenantBudgets() {
 	ctx := context.Background()
 	e := newExampleEnv()
-	c := e.record("researcher", uuid.Nil)
+	c := e.record("researcher", uuid.Nil())
 	if _, err := e.usage.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{
 		TenantID: e.tenant, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("10"), UnitCode: "USD"},
 	}); err != nil {
@@ -403,7 +402,7 @@ func ExampleUsageStore_ListTenantBudgets() {
 func ExampleUsageStore_CopyUsage() {
 	ctx := context.Background()
 	e := newExampleEnv()
-	c := e.record("researcher", uuid.Nil)
+	c := e.record("researcher", uuid.Nil())
 
 	// The counters of a capability's Biscuit copies, by revocation id
 	// (limes.Verifier.BiscuitCopy); none were counted for this one.
@@ -416,7 +415,7 @@ func ExampleUsageStore_CopyUsage() {
 func ExampleUsageStore_DeleteUsage() {
 	ctx := context.Background()
 	e := newExampleEnv()
-	c := e.record("researcher", uuid.Nil)
+	c := e.record("researcher", uuid.Nil())
 	if _, err := e.usage.Bump(ctx, meter.BumpRequest{Subject: e.subject(c)}); err != nil {
 		log.Fatal(err)
 	}
@@ -432,7 +431,7 @@ func ExampleUsageStore_DeleteUsage() {
 func ExampleUsageStore_PurgeOrphans() {
 	ctx := context.Background()
 	e := newExampleEnv()
-	c := e.record("researcher", uuid.Nil)
+	c := e.record("researcher", uuid.Nil())
 	if _, err := e.usage.Bump(ctx, meter.BumpRequest{Subject: e.subject(c)}); err != nil {
 		log.Fatal(err)
 	}
@@ -451,7 +450,7 @@ func ExampleUsageStore_PurgeOrphans() {
 func ExampleUsageStore_EraseTenantUsage() {
 	ctx := context.Background()
 	e := newExampleEnv()
-	c := e.record("researcher", uuid.Nil)
+	c := e.record("researcher", uuid.Nil())
 
 	fmt.Println(e.usage.EraseTenantUsage(ctx, meter.EraseTenantUsageRequest{TenantID: e.tenant}))
 	// Nothing of the tenant is counted, or issued, again.
@@ -473,8 +472,8 @@ func ExampleNewCensus() {
 	ctx := context.Background()
 	e := newExampleEnv()
 	census := memstore.NewCensus(e.records)
-	live := e.record("researcher", uuid.Nil)
-	revoked := e.record("worker", uuid.Nil)
+	live := e.record("researcher", uuid.Nil())
+	revoked := e.record("worker", uuid.Nil())
 	if _, err := e.records.Revoke(ctx, limes.RevokeRequest{CapabilityID: revoked.ID}); err != nil {
 		log.Fatal(err)
 	}
@@ -500,7 +499,7 @@ func ExampleNewLedger() {
 	ctx := context.Background()
 	e := newExampleEnv()
 	ledger := memstore.NewLedger(e.usage)
-	c := e.record("researcher", uuid.Nil)
+	c := e.record("researcher", uuid.Nil())
 	for _, charge := range []struct {
 		op     limes.Op
 		amount string
@@ -535,7 +534,7 @@ func ExampleLedger_PurgeCharges() {
 	ctx := context.Background()
 	e := newExampleEnv()
 	ledger := memstore.NewLedger(e.usage)
-	c := e.record("researcher", uuid.Nil)
+	c := e.record("researcher", uuid.Nil())
 	if _, err := e.usage.Charge(ctx, meter.ChargeRequest{
 		Subject: e.subject(c), Op: "index:search", Amount: limes.MustParseAmount("0.10"),
 	}, nil); err != nil {

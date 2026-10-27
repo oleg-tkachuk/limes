@@ -7,8 +7,8 @@ import (
 	"maps"
 	"testing"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/oleg-tkachuk/limes"
@@ -83,7 +83,7 @@ func TestRowSecurityKeepsTenantsApart(t *testing.T) {
 			t.Errorf("%s: ListByPrincipal = %d items, %v; want ErrScopeMismatch", name, len(page.Items), err)
 		}
 		c := f.parent
-		c.ID, c.ParentID = uuid.New(), uuid.Nil
+		c.ID, c.ParentID = uuid.New(), uuid.Nil()
 		if err := f.records.Insert(ctx, limes.InsertRequest{Capability: c}); !errors.Is(err, limes.ErrScopeMismatch) {
 			t.Errorf("%s: Insert of a capability of another tenant: err = %v, want ErrScopeMismatch", name, err)
 		}
@@ -368,7 +368,7 @@ func TestReadOnlyScopeReadsEveryTenantAndWritesNone(t *testing.T) {
 		}
 		onErased := func(ctx context.Context, e Erased) error { return consumer(ctx, e.Tx) }
 		c := f.parent
-		c.ID, c.ParentID = uuid.New(), uuid.Nil
+		c.ID, c.ParentID = uuid.New(), uuid.Nil()
 		subject := meterSubject(f.child.ID, f.mine)
 		for name, write := range map[string]func() error{
 			"Insert": func() error { return s.records.Insert(s.ctx, limes.InsertRequest{Capability: c}) },

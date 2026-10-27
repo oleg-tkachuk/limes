@@ -5,8 +5,7 @@ import (
 	"errors"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/meter"
@@ -67,7 +66,7 @@ func TestSettleChargesTheActualCostAndReleasesTheHold(t *testing.T) {
 		t.Fatalf("settle: %v", err)
 	}
 	got, _ := u.GetUsage(ctx, capID)
-	if got.SpentAmount != 3*unit || got.ReservedAmount != 0 || receipt.ChargeID == uuid.Nil {
+	if got.SpentAmount != 3*unit || got.ReservedAmount != 0 || receipt.ChargeID == uuid.Nil() {
 		t.Errorf("after settle usage = %+v receipt = %+v, want 3 spent, 0 held, a charge", got, receipt)
 	}
 	if b, _ := u.GetTenantBudget(ctx, tenant); b.SpentAmount != 3*unit || b.ReservedAmount != 0 {

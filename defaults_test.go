@@ -7,8 +7,7 @@ import (
 	"slices"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // RFC 8037 appendix A: the Ed25519 public key and its RFC 7638 thumbprint.

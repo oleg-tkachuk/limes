@@ -6,8 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes/internal/link"
 )
@@ -108,7 +107,7 @@ type BiscuitCopy struct {
 // Validate refuses the zero BiscuitCopy, which names no copy, as
 // ErrInvalidRequest.
 func (c BiscuitCopy) Validate() error {
-	if c.capabilityID == uuid.Nil || len(c.revocationID) == 0 {
+	if c.capabilityID == uuid.Nil() || len(c.revocationID) == 0 {
 		return invalidRequest("no biscuit copy; read one with Verifier.BiscuitCopy")
 	}
 	return nil

@@ -11,8 +11,7 @@ import (
 	"net/netip"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes/dpop"
 )

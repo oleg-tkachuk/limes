@@ -3,8 +3,7 @@ package limes
 import (
 	"reflect"
 	"testing"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // The exported types carry no wire format, and the wire structs carry every

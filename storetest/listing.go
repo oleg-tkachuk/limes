@@ -8,8 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 )
@@ -264,7 +263,7 @@ func checkListRecordsMalformed(t *testing.T, f fixture) {
 		"an unknown order":          {TenantID: f.Tenant, Order: limes.ListOrderDescending + 1},
 		"a negative limit":          {TenantID: f.Tenant, Limit: -1},
 		"a foreign cursor":          {TenantID: f.Tenant, Cursor: "not-a-cursor"},
-		"an id for a cursor":        {TenantID: f.Tenant, Cursor: uuid.NewString()},
+		"an id for a cursor":        {TenantID: f.Tenant, Cursor: uuid.New().String()},
 		"a truncated cursor":        {TenantID: f.Tenant, Cursor: first.Next[:len(first.Next)/2]},
 	} {
 		// Malformed, not a place in another listing.
@@ -385,11 +384,11 @@ func checkGetRecordListing(t *testing.T, f fixture) {
 // none, and the listing and GetRecordListing name the same.
 func checkListingStoppedBy(t *testing.T, f fixture) {
 	f.skipUnlessLister(t)
-	grandparent := f.live(t, "agent:grandparent", uuid.Nil)
+	grandparent := f.live(t, "agent:grandparent", uuid.Nil())
 	parent := f.live(t, "agent:parent", grandparent.ID)
 	child := f.live(t, "agent:child", parent.ID)
-	own := f.live(t, "agent:own", uuid.Nil)
-	active := f.live(t, "agent:active", uuid.Nil)
+	own := f.live(t, "agent:own", uuid.Nil())
+	active := f.live(t, "agent:active", uuid.Nil())
 	f.revoke(t, own.ID, false)
 	f.revoke(t, grandparent.ID, false)
 	stoppedBy := func(id uuid.UUID) *limes.CapabilityRevocation {

@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"time"
 	"unicode"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 )
@@ -664,7 +663,7 @@ type SetTenantBudgetRequest struct {
 // version conflict.
 func (r SetTenantBudgetRequest) Validate() error {
 	switch {
-	case r.TenantID == uuid.Nil:
+	case r.TenantID == uuid.Nil():
 		return invalidRequest("set tenant budget: no tenant")
 	case r.ExpectedVersion < 0:
 		return invalidRequest("set tenant budget: ExpectedVersion %d is negative", r.ExpectedVersion)
@@ -812,7 +811,7 @@ type CopyUsageRequest struct {
 // Validate refuses a request naming no capability, no copy, more than
 // MaxCopyUsageIDs, or an empty revocation id, as ErrInvalidRequest.
 func (r CopyUsageRequest) Validate() error {
-	if r.CapabilityID == uuid.Nil {
+	if r.CapabilityID == uuid.Nil() {
 		return invalidRequest("copy usage: no capability")
 	}
 	switch n := len(r.RevocationIDs); {
@@ -907,7 +906,7 @@ type ListReservationsRequest struct {
 // Validate refuses a request with no capability or a negative page size.
 func (r ListReservationsRequest) Validate() error {
 	switch {
-	case r.CapabilityID == uuid.Nil:
+	case r.CapabilityID == uuid.Nil():
 		return invalidRequest("list reservations: capability id required")
 	case r.Limit < 0:
 		return invalidRequest("list reservations: limit %d is negative", r.Limit)
@@ -981,7 +980,7 @@ type ChargeByRefRequest struct {
 // find it by — or a reference ValidateExternalRef refuses.
 func (r ChargeByRefRequest) Validate() error {
 	switch {
-	case r.CapabilityID == uuid.Nil:
+	case r.CapabilityID == uuid.Nil():
 		return invalidRequest("charge by ref: capability id required")
 	case r.ExternalRef == "":
 		return invalidRequest("charge by ref: external ref required")
@@ -996,7 +995,7 @@ type DeleteUsageRequest struct {
 
 // Validate refuses a request naming no capability, as ErrInvalidRequest.
 func (r DeleteUsageRequest) Validate() error {
-	if r.CapabilityID == uuid.Nil {
+	if r.CapabilityID == uuid.Nil() {
 		return invalidRequest("delete usage: capability id required")
 	}
 	return nil

@@ -4,8 +4,7 @@ import (
 	"errors"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // A census names one tenant or every tenant, never both nor neither, and

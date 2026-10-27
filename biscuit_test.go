@@ -10,9 +10,9 @@ import (
 	"slices"
 	"testing"
 	"time"
+	"uuid"
 
 	biscuit "github.com/eclipse-biscuit/biscuit-go/v2"
-	"github.com/google/uuid"
 
 	"github.com/oleg-tkachuk/limes/dpop"
 )

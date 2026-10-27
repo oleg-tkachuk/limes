@@ -1,6 +1,6 @@
 package limes
 
-import "github.com/google/uuid"
+import "uuid"
 
 // Principal identifies the subject the capability is issued to. It is
 // written into a token as the limes_principal claim (wire.go). Agent

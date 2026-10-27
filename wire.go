@@ -1,6 +1,6 @@
 package limes
 
-import "github.com/google/uuid"
+import "uuid"
 
 // The token's claims are these unexported structs, never the exported types
 // a caller holds: renaming a field of Principal, AgentPrincipal or Caveats is

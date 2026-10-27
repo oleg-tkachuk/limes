@@ -42,8 +42,7 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/internal/link"
@@ -235,7 +234,7 @@ type ledgerEntry struct {
 	Copies [][]byte
 	// ExternalRef is the charge's ChargeRequest.ExternalRef; empty for none.
 	ExternalRef string
-	// ReservationID is the reservation the charge settled; uuid.Nil for a
+	// ReservationID is the reservation the charge settled; uuid.Nil() for a
 	// charge made directly.
 	ReservationID uuid.UUID
 	// Overrun reports that the charge crossed a ceiling (OverrunPolicyRecord).
@@ -353,7 +352,7 @@ func (s *Store) Insert(_ context.Context, req limes.InsertRequest) error {
 	if err := s.notErasedLocked(c.Subject.TenantID); err != nil {
 		return err
 	}
-	if c.ParentID != uuid.Nil {
+	if c.ParentID != uuid.Nil() {
 		parent, ok := s.caps[c.ParentID]
 		if !ok {
 			return fmt.Errorf("%w: memstore: parent %s is not on record", limes.ErrInvalidRequest, c.ParentID)
@@ -449,7 +448,7 @@ func (s *Store) expiryOf(id uuid.UUID) time.Time {
 func (s *Store) ancestorsLocked(id uuid.UUID) ([]limes.Capability, error) {
 	var out []limes.Capability
 	c, ok := s.caps[id]
-	for ok && c.ParentID != uuid.Nil {
+	for ok && c.ParentID != uuid.Nil() {
 		if len(out) == limes.MaxDelegationDepth {
 			if _, more := s.caps[c.ParentID]; more {
 				return nil, fmt.Errorf("%w: %s has more than %d ancestors", limes.ErrDelegationTooDeep, id, limes.MaxDelegationDepth)
@@ -723,7 +722,7 @@ func (s *Store) forgetCopyRevocationsLocked(capID uuid.UUID) {
 // bounded on a chain too deep or a corrupt cycle. s.mu must be held.
 func (s *Store) depthLocked(c limes.Capability) int {
 	n := 0
-	for ok := true; ok && c.ParentID != uuid.Nil && n <= limes.MaxDelegationDepth; n++ {
+	for ok := true; ok && c.ParentID != uuid.Nil() && n <= limes.MaxDelegationDepth; n++ {
 		c, ok = s.caps[c.ParentID]
 		if !ok {
 			break
@@ -992,7 +991,7 @@ func (s *UsageStore) appendLocked(entry ledgerEntry) {
 	if entry.ExternalRef != "" {
 		s.byRef[refKey{entry.CapabilityID, entry.ExternalRef}] = i
 	}
-	if entry.ReservationID != uuid.Nil {
+	if entry.ReservationID != uuid.Nil() {
 		s.byReservation[entry.ReservationID] = i
 	}
 }
@@ -1030,7 +1029,7 @@ func (s *UsageStore) chargeLocked(
 ) (meter.ChargeReceipt, error) {
 	var released limes.Nanos
 	var holders []uuid.UUID
-	reservationID := uuid.Nil
+	reservationID := uuid.Nil()
 	if settling != nil {
 		released = settling.amount
 		holders = settling.ancestors
@@ -1352,7 +1351,7 @@ func (s *UsageStore) Settle(
 	}
 	// A direct charge is filed under the zero reservation id, so the zero id
 	// must not reach the replay lookup below.
-	if req.ReservationID == uuid.Nil {
+	if req.ReservationID == uuid.Nil() {
 		return meter.ChargeReceipt{}, meter.ErrReservationNotFound
 	}
 	s.mu.Lock()

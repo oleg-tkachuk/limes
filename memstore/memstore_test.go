@@ -5,8 +5,7 @@ import (
 	"errors"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/meter"
@@ -34,7 +33,7 @@ func TestRevokeIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore()
 	id := uuid.New()
-	if err := s.Insert(ctx, limes.InsertRequest{Capability: mkCap(id, uuid.Nil, uuid.New(), "a"), IssuedBy: limes.Principal{Subject: "test-operator"}}); err != nil {
+	if err := s.Insert(ctx, limes.InsertRequest{Capability: mkCap(id, uuid.Nil(), uuid.New(), "a"), IssuedBy: limes.Principal{Subject: "test-operator"}}); err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
 
@@ -58,7 +57,7 @@ func TestRevokeCascadesToDescendants(t *testing.T) {
 	root, child, grandchild := uuid.New(), uuid.New(), uuid.New()
 
 	for _, c := range []limes.Capability{
-		mkCap(root, uuid.Nil, tenant, "orchestrator"),
+		mkCap(root, uuid.Nil(), tenant, "orchestrator"),
 		mkCap(child, root, tenant, "worker"),
 		mkCap(grandchild, child, tenant, "sub-worker"),
 	} {
@@ -88,7 +87,7 @@ func TestRevokingAParentRevokesItsChildrenWithoutCascade(t *testing.T) {
 	s := newTestStore()
 	tenant := uuid.New()
 	root, child, grandchild := uuid.New(), uuid.New(), uuid.New()
-	_ = s.Insert(ctx, limes.InsertRequest{Capability: mkCap(root, uuid.Nil, tenant, "parent"), IssuedBy: limes.Principal{Subject: "test-operator"}})
+	_ = s.Insert(ctx, limes.InsertRequest{Capability: mkCap(root, uuid.Nil(), tenant, "parent"), IssuedBy: limes.Principal{Subject: "test-operator"}})
 	_ = s.Insert(ctx, limes.InsertRequest{Capability: mkCap(child, root, tenant, "child"), IssuedBy: limes.Principal{Subject: "test-operator"}})
 	_ = s.Insert(ctx, limes.InsertRequest{Capability: mkCap(grandchild, child, tenant, "grandchild"), IssuedBy: limes.Principal{Subject: "test-operator"}})
 
@@ -227,7 +226,7 @@ func TestRevokeBiscuit(t *testing.T) {
 	ctx := context.Background()
 	s := newTestStore()
 	id := uuid.New()
-	if err := s.Insert(ctx, limes.InsertRequest{Capability: mkCap(id, uuid.Nil, uuid.New(), "a"), IssuedBy: limes.Principal{Subject: "op"}}); err != nil {
+	if err := s.Insert(ctx, limes.InsertRequest{Capability: mkCap(id, uuid.Nil(), uuid.New(), "a"), IssuedBy: limes.Principal{Subject: "op"}}); err != nil {
 		t.Fatal(err)
 	}
 	copyID, other := []byte("copy"), []byte("other")

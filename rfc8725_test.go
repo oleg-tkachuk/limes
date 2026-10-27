@@ -9,8 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes/internal/jose"
 )

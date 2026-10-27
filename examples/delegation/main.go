@@ -9,8 +9,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/examples/internal/demo"

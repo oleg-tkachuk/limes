@@ -11,8 +11,7 @@ import (
 	"slices"
 	"strings"
 	"time"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 )
@@ -93,7 +92,7 @@ func (c *Census) count(req limes.CountRecordsRequest) ([]limes.RecordCount, erro
 			groups[k] = g
 		}
 		g.Total++
-		if rec.ParentID != uuid.Nil {
+		if rec.ParentID != uuid.Nil() {
 			g.Delegated++
 		}
 		switch {
@@ -328,7 +327,7 @@ func (s *Store) dispositionLocked(id uuid.UUID, now time.Time) (limes.RecordDisp
 // anything that is no cursor ErrInvalidRequest.
 func decodeListCursor(s string, req limes.ListRecordsRequest) (listCursor, error) {
 	var k listCursor
-	if err := decodeCursor(s, &k); err != nil || k.After == uuid.Nil {
+	if err := decodeCursor(s, &k); err != nil || k.After == uuid.Nil() {
 		return listCursor{}, fmt.Errorf("%w: memstore: record list cursor %q", limes.ErrInvalidRequest, s)
 	}
 	if k.Order != req.Order || k.Filters != filtersKey(req) {

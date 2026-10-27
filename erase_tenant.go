@@ -2,8 +2,7 @@ package limes
 
 import (
 	"context"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // TenantRecordEraser is a Store that erases one tenant's capability records,
@@ -34,7 +33,7 @@ type EraseTenantRequest struct {
 
 // Validate refuses a request naming no tenant.
 func (r EraseTenantRequest) Validate() error {
-	if r.TenantID == uuid.Nil {
+	if r.TenantID == uuid.Nil() {
 		return invalidRequest("erase tenant records: tenant id required")
 	}
 	return nil

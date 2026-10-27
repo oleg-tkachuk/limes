@@ -4,8 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/meter"
@@ -26,7 +25,7 @@ func newCopyFixture(t *testing.T) (context.Context, *UsageStore, uuid.UUID, uuid
 	ctx := context.Background()
 	records := newTestStore()
 	capID, tenant := uuid.New(), uuid.New()
-	if err := records.Insert(ctx, limes.InsertRequest{Capability: mkCap(capID, uuid.Nil, tenant, "agent"), IssuedBy: limes.Principal{Subject: "op"}}); err != nil {
+	if err := records.Insert(ctx, limes.InsertRequest{Capability: mkCap(capID, uuid.Nil(), tenant, "agent"), IssuedBy: limes.Principal{Subject: "op"}}); err != nil {
 		t.Fatal(err)
 	}
 	return ctx, newTestUsage(records), capID, tenant

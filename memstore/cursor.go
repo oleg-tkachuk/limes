@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 )

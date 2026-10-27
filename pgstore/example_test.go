@@ -10,8 +10,8 @@ import (
 	"log"
 	"os"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -80,7 +80,7 @@ func ExampleNewStore() {
 	now := time.Now()
 	err = records.Insert(pgstore.WithTenant(ctx, tenant), limes.InsertRequest{
 		Capability: limes.Capability{
-			ID: uuid.Must(uuid.NewV7()), IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute),
+			ID: uuid.NewV7(), IssuedAt: now, ExpiresAt: now.Add(15 * time.Minute),
 			Subject: limes.Principal{Type: limes.PrincipalTypeService, TenantID: tenant, Subject: "svc:reports"},
 			Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}},
 		},

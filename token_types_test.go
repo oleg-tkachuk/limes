@@ -5,8 +5,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"testing"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes/internal/jose"
 )
@@ -33,7 +32,7 @@ func headerOf(typ TokenType) map[string]any {
 // withParentRun names a parent run in the token's agent details, under member.
 func withParentRun(member string) func(map[string]any) {
 	return func(c map[string]any) {
-		c["limes_principal"].(map[string]any)["agent"] = map[string]any{member: uuid.NewString()}
+		c["limes_principal"].(map[string]any)["agent"] = map[string]any{member: uuid.New().String()}
 	}
 }
 

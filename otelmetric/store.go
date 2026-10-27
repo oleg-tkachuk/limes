@@ -3,8 +3,7 @@ package otelmetric
 import (
 	"context"
 	"errors"
-
-	"github.com/google/uuid"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/meter"

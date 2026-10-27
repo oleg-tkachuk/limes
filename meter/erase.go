@@ -2,8 +2,7 @@ package meter
 
 import (
 	"context"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // TenantUsageEraser is a UsageStore that erases one tenant's usage, for a
@@ -30,7 +29,7 @@ type EraseTenantUsageRequest struct {
 
 // Validate refuses a request naming no tenant.
 func (r EraseTenantUsageRequest) Validate() error {
-	if r.TenantID == uuid.Nil {
+	if r.TenantID == uuid.Nil() {
 		return invalidRequest("erase tenant usage: tenant id required")
 	}
 	return nil

@@ -3,7 +3,7 @@
 // database driver (limes/isolation_test.go); it is never released.
 module github.com/oleg-tkachuk/limes/examples
 
-go 1.26.0
+go 1.27.0
 
 toolchain go1.27.3
 
@@ -15,7 +15,6 @@ replace (
 )
 
 require (
-	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/oleg-tkachuk/limes v0.125.1
 	github.com/oleg-tkachuk/limes/pgstore v0.29.3
@@ -47,6 +46,7 @@ require (
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/huandu/xstrings v1.5.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect

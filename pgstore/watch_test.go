@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"uuid"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/oleg-tkachuk/limes"
@@ -102,7 +102,7 @@ func TestRevocationWatcherIgnoresOtherWrites(t *testing.T) {
 	awaitClear(t, cleared, "once listening")
 	mine := WithTenant(t.Context(), f.mine)
 	c := f.parent
-	c.ID, c.ParentID = uuid.New(), uuid.Nil
+	c.ID, c.ParentID = uuid.New(), uuid.Nil()
 	if err := f.records.Insert(mine, limes.InsertRequest{Capability: c}); err != nil {
 		t.Fatal(err)
 	}

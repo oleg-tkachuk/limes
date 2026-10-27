@@ -4,8 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
-
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // RecordLister lists one tenant's capability records a page at a time, each
@@ -154,7 +153,7 @@ type ListRecordsRequest struct {
 // order, or a negative page size. Every error matches ErrInvalidRequest.
 func (r ListRecordsRequest) Validate() error {
 	switch {
-	case r.TenantID == uuid.Nil:
+	case r.TenantID == uuid.Nil():
 		return invalidRequest("list records: tenant id required")
 	case r.PrincipalType != PrincipalTypeUnspecified && r.PrincipalType.Validate() != nil:
 		return invalidRequest("list records: principal type %q is not a principal kind", r.PrincipalType)
