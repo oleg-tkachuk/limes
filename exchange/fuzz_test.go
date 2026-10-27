@@ -22,7 +22,7 @@ func FuzzCheckForm(f *testing.F) {
 			form.Has(paramActorToken) || form.Has(paramActorTokenType) {
 			t.Fatalf("accepted %q", body)
 		}
-		if typ := form.Get(paramSubjectTokenType); typ != TokenTypeAccessToken && typ != TokenTypeJWT {
+		if typ := form.Get(paramSubjectTokenType); typ != TokenTypeAccessToken && typ != TokenTypeJWT && typ != IssuedTokenTypeCapability {
 			t.Fatalf("accepted subject type %q", typ)
 		}
 		for name, values := range form {

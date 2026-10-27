@@ -14,9 +14,10 @@ Run them from this directory:
 | `go run ./issue-verify` | issuing a capability token, checking it as a service would on every request, the refusals for another resource, op or audience, and revocation |
 | `go run ./delegation` | an orchestrator handing a narrower capability to a sub-agent, a wider one refused, and a revocation cascading down the chain |
 | `go run ./metering` | counting requests and charging spend against the capability's and the tenant's ceilings: a direct charge, a hold settled at its actual cost, and the refusals at a limit |
+| `go run ./mcp-exchange` | an MCP server behind standard OAuth: its RFC 9728 metadata and 401 challenge, the identity provider's access token exchanged for a capability (RFC 8693) and narrowed for a sub-agent, and a token for another server refused |
 | `go run ./pgstore` | the same over PostgreSQL, started in a container: the schema, row-level security per tenant, and a charge committed in one transaction with a write of the caller's own. Needs a running Docker |
 
-All but `pgstore` keep everything in memory (`memstore`). This directory is a
+All but `pgstore` keep everything in memory (`memstore`); `mcp-exchange` serves over TLS on loopback. This directory is a
 module of its own, so that the limes module never resolves a database driver;
 its `replace` lines build it against the limes and pgstore beside it.
 

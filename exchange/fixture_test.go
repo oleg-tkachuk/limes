@@ -151,6 +151,8 @@ type fixtureConfig struct {
 	policy Policy
 	nonces bool
 	noDPoP bool
+	// narrow lets the exchanger narrow capabilities.
+	narrow bool
 }
 
 func newFixture(t testing.TB, fc fixtureConfig) *fixture {
@@ -198,9 +200,6 @@ func newFixture(t testing.TB, fc fixtureConfig) *fixture {
 			t.Fatal(err)
 		}
 	}
-	if f.ex, err = NewExchanger(cfg); err != nil {
-		t.Fatal(err)
-	}
 	keys, err := jwks.NewStatic(jwks.StaticConfig{Keys: map[string]ed25519.PublicKey{key.KeyID: key.Public()}})
 	if err != nil {
 		t.Fatal(err)
@@ -216,6 +215,12 @@ func newFixture(t testing.TB, fc fixtureConfig) *fixture {
 	if f.verifier, err = limes.NewVerifier(limes.VerifierConfig{
 		Keys: keys, Revocations: mem, TrustedIssuers: []string{limesIssuer}, Now: clock, DPoP: proofs,
 	}); err != nil {
+		t.Fatal(err)
+	}
+	if fc.narrow {
+		cfg.Capabilities, cfg.CapabilityAudience, cfg.NarrowPolicy = f.verifier, exchangeAudience, f.narrowPolicy
+	}
+	if f.ex, err = NewExchanger(cfg); err != nil {
 		t.Fatal(err)
 	}
 	return f
@@ -257,4 +262,16 @@ func clientKey(t testing.TB) ed25519.PrivateKey {
 		t.Fatal(err)
 	}
 	return key
+}
+
+// exchangeAudience is the exchange's own audience, which a capability it
+// narrows must name, and subAgent the principal a narrowed capability is for.
+const (
+	exchangeAudience = "https://exchange.example.com"
+	subAgent         = "sub-agent"
+)
+
+// narrowPolicy delegates the parent's caveats to a sub-agent.
+func (f *fixture) narrowPolicy(context.Context, Narrowing) (limes.DelegateRequest, error) {
+	return limes.DelegateRequest{Subject: limes.Principal{Type: limes.PrincipalTypeAgent, Subject: subAgent}, InheritCaveats: true}, nil
 }
