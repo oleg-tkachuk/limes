@@ -105,10 +105,10 @@ func TestRFC9068ValidatorAcceptsAnAccessToken(t *testing.T) {
 	}
 }
 
-// A capability is not an RFC 9068 access token, and differs from one in two
-// things alone: its typ, which names the capability format, and the
-// client_id it has no use for. Every other claim RFC 9068 requires it
-// carries. A format that closes the gap changes this list.
+// A v6 capability is not an RFC 9068 access token, and differs from one in
+// two things alone: its typ, which names the capability format, and the
+// client_id it has no member for. Every other claim RFC 9068 requires it
+// carries.
 func TestACapabilityIsNotAnRFC9068AccessToken(t *testing.T) {
 	f := newFixture(t)
 	faults := rfc9068Faults(t, f.issue(t, "").Token, f.fetchKeys(t))
@@ -117,10 +117,24 @@ func TestACapabilityIsNotAnRFC9068AccessToken(t *testing.T) {
 	}
 }
 
-// An access token signed with the issuer's own key does not pass as a
-// capability (RFC 8725 §3.11): limes reads the type before any claim.
-// The payload is a capability's own, so the type is all that differs; the
-// same payload under the capability type verifies.
+// A v7 capability is an RFC 9068 access token: a validator of the profile
+// finds nothing wrong with it, and a limes verifier reads it.
+func TestAV7CapabilityIsAnRFC9068AccessToken(t *testing.T) {
+	f := newFixtureOf(t, "", limes.TokenTypeV7)
+	res := f.issue(t, "")
+	if faults := rfc9068Faults(t, res.Token, f.fetchKeys(t)); len(faults) != 0 {
+		t.Errorf("a v7 capability's faults as an RFC 9068 access token: %q", faults)
+	}
+	got, err := f.verifier.Verify(t.Context(), limes.VerifyRequest{Token: res.Token, Audience: audience})
+	if err != nil || got.Capability().ClientID != interopClient {
+		t.Errorf("Verify = client %q, %v; want %q", got.Capability().ClientID, err, interopClient)
+	}
+}
+
+// An at+jwt signed with the issuer's own key passes as a capability only with
+// a v7 payload: a v6 capability's payload under the type, whose format
+// limes_v does not name, is refused, while the same payload under the v6
+// type verifies.
 func TestLimesRefusesAnAccessToken(t *testing.T) {
 	f := newFixture(t)
 	token := f.issue(t, "").Token

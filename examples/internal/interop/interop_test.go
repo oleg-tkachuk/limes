@@ -84,6 +84,17 @@ func newFixture(t *testing.T) *fixture {
 // newFixtureNaming is a fixture whose tokens name alg, the default when empty.
 func newFixtureNaming(t *testing.T, alg limes.SigningAlgorithm) *fixture {
 	t.Helper()
+	return newFixtureOf(t, alg, "")
+}
+
+// interopClient is the OAuth client the fixture's capabilities name, which a
+// v7 token carries as client_id.
+const interopClient = "interop-client"
+
+// newFixtureOf is a fixture whose tokens name alg and are of the token type
+// typ, each the default when empty.
+func newFixtureOf(t *testing.T, alg limes.SigningAlgorithm, typ limes.TokenType) *fixture {
+	t.Helper()
 	key, err := limes.GenerateKey()
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +103,7 @@ func newFixtureNaming(t *testing.T, alg limes.SigningAlgorithm) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer, err := limes.NewSigner(limes.SignerConfig{KeyID: key.KeyID, Key: key.Private, Algorithm: alg})
+	signer, err := limes.NewSigner(limes.SignerConfig{KeyID: key.KeyID, Key: key.Private, Algorithm: alg, TokenType: typ})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,6 +156,7 @@ func newFixtureNaming(t *testing.T, alg limes.SigningAlgorithm) *fixture {
 func (f *fixture) issue(t *testing.T, jkt string) limes.IssueResult {
 	t.Helper()
 	res, err := f.issuer.Issue(t.Context(), limes.IssueRequest{
+		ClientID: interopClient,
 		IssuedBy: limes.Principal{Type: limes.PrincipalTypeUser, TenantID: f.tenant, Subject: operatorSubject},
 		Subject:  limes.Principal{Type: limes.PrincipalTypeService, TenantID: f.tenant, Subject: readerSubject},
 		Audience: []string{audience},
