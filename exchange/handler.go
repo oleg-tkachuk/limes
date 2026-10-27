@@ -283,10 +283,17 @@ func (h *Handler) refuse(w http.ResponseWriter, r *http.Request, err error) {
 
 // write writes body as a token endpoint's JSON response.
 func (h *Handler) write(w http.ResponseWriter, status int, body any) {
+	writeJSON(w, status, body, h.cfg.Logger)
+}
+
+// writeJSON writes body as a JSON response no cache keeps, as a token
+// endpoint's (RFC 6749 §5.1) and an introspection endpoint's (RFC 7662 §2.2)
+// must be, logging a write that fails.
+func writeJSON(w http.ResponseWriter, status int, body any, log *slog.Logger) {
 	w.Header().Set("Content-Type", jsonContentType)
 	w.Header().Set("Cache-Control", cacheNoStore)
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(body); err != nil {
-		h.cfg.Logger.Error("exchange: write response", slog.Any("error", err))
+		log.Error("exchange: write response", slog.Any("error", err))
 	}
 }

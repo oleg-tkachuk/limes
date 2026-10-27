@@ -284,6 +284,18 @@ at an RFC 8693 token endpoint (`Handler`):
   as an authorization server with a token endpoint alone: token exchange
   its one grant, and no response type.
 
+- **Introspection (RFC 7662).** `exchange.IntrospectionHandler`, over
+  `Verifier.Introspect`, answers a gateway that does not read capability
+  tokens itself. It authenticates its caller (§2.1). An inactive token
+  (expired, revoked, lifted out of its Biscuit, not a token) gets
+  `{"active": false}` and nothing more (§2.2). An active one gets its
+  standard members, `client_id` where its format carries one, and
+  `token_type` and `cnf` for a bound one (RFC 9449 §6.2). A store that
+  cannot answer is a 500, never an inactive token. Neither audience nor
+  proof of possession is checked: the answer is no authorization, and
+  `Introspect` yields nothing `Delegate` takes. A capability's caveats are
+  for a verifier of limes tokens to read; the answer omits them.
+
 *Held by* `TestJWTVerifierReadsAnAccessToken`, `TestJWTVerifierRefusals`,
 `TestExchangeHoldsThePolicyToTheRequest`,
 `TestExchangeCapsTheLifetimeAtTheSubjectToken`, `TestExchangeRefusals`,
@@ -292,7 +304,9 @@ at an RFC 8693 token endpoint (`Handler`):
 `TestNarrowHoldsABoundParentToItsKey`, `TestNarrowRefusals`,
 `TestWellKnownURLs`, `TestResourceMetadataHandler`,
 `TestAuthorizationServerMetadataHandler`, `TestKeysOutageIsTheServers`,
-`TestJWTVerifierKeepsTheContract`, and the fuzz target
+`TestJWTVerifierKeepsTheContract`, `TestIntrospectionActive`,
+`TestIntrospectionInactive`, `TestIntrospectionOutage`, `TestIntrospectActive`,
+`TestIntrospectInactive`, `TestIntrospectOutageIsNotInactive`, and the fuzz target
 `FuzzCheckForm`, in `exchange`; and the `mcp-exchange` example.
 
 ## Not adopted
@@ -313,9 +327,8 @@ either side reads them. Each can return when something does.
   `resource` to be one.
 - **RFC 8414 for limes itself.** Verifiers are configured with the JWKS
   URL; only the token exchange describes itself as an authorization server.
-- **RFC 7009 and RFC 7662 (revocation and introspection endpoints).**
-  Revocation is `Store.Revoke`, and a resource server verifies a token
-  itself; an HTTP surface for either is the consumer's to build.
+- **RFC 7009 (revocation endpoint).** Revocation is `Store.Revoke`; an
+  HTTP surface for it is the consumer's to build.
 
 - **The `Idempotency-Key` header** is an IETF draft
   (draft-ietf-httpapi-idempotency-key-header), not an RFC. The caveat

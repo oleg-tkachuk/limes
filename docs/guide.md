@@ -1365,6 +1365,15 @@ is told from another access token by its claims and its key: never sign
 capabilities with a key an authorization server also mints `at+jwt` with
 ([ADR-0004](adr/0004-token-format-v7.md)).
 
+A gateway that cannot read capability tokens can ask about one instead:
+`Verifier.Introspect` says whether a token is active (genuine, from a
+trusted issuer, within its window and not revoked) and what it carries,
+and `exchange.IntrospectionHandler` serves that as an RFC 7662 endpoint for
+authenticated callers. It checks no audience and no proof of possession,
+so its answer authorizes nothing: an active bound token is reported bound,
+with its key, not proved. A revocation store that cannot answer is the
+endpoint's error, never an inactive token.
+
 ## Answer a refusal
 
 `ErrorResponse` turns any error `Verify`, `Authorize` or the `Meter` returns

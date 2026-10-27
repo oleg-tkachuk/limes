@@ -291,41 +291,9 @@ func (v *Verifier) verify(ctx context.Context, req VerifyRequest, accept func(Ca
 		// The server's own call names no audience: its error, not the token's.
 		return VerifiedCapability{}, invalidRequest("VerifyRequest.Audience is required")
 	}
-	if len(token) > v.cfg.MaxTokenBytes {
-		return VerifiedCapability{}, fmt.Errorf("%w: token is %d bytes (limit %d)",
-			ErrInvalidToken, len(token), v.cfg.MaxTokenBytes)
-	}
-
-	var cap *grant
-	var biscuitIDs [][]byte // set for a Biscuit, from its verified chain
-	if isBiscuit(token) {
-		if v.cfg.Biscuit == nil {
-			return VerifiedCapability{}, fmt.Errorf("%w: Biscuit tokens are not accepted here", ErrInvalidToken)
-		}
-		var err error
-		if cap, biscuitIDs, err = v.verifyBiscuit(ctx, token); err != nil {
-			return VerifiedCapability{}, err
-		}
-	} else {
-		var err error
-		if cap, err = v.verifySigned(ctx, token); err != nil {
-			return VerifiedCapability{}, err
-		}
-		// The token sealed inside a Biscuit, lifted out to shed the
-		// Biscuit's attenuation.
-		if cap.biscuitRoot != "" {
-			return VerifiedCapability{}, fmt.Errorf("%w: token is sealed in a Biscuit; present the Biscuit", ErrInvalidToken)
-		}
-	}
-
-	// 4) Time window. Leeway absorbs clock skew on both ends.
-	now := v.cfg.Now()
-	if !cap.NotBefore.IsZero() && now.Add(v.cfg.Leeway).Before(cap.NotBefore) {
-		return VerifiedCapability{}, ErrNotYetValid
-	}
-	// RFC 7519 §4.1.4: refused on or after exp, less the leeway.
-	if cap.ExpiresAt.IsZero() || !now.Add(-v.cfg.Leeway).Before(cap.ExpiresAt) {
-		return VerifiedCapability{}, ErrExpired
+	cap, biscuitIDs, err := v.authenticate(ctx, token)
+	if err != nil {
+		return VerifiedCapability{}, err
 	}
 
 	// 5) Audience match.
@@ -354,25 +322,9 @@ func (v *Verifier) verify(ctx context.Context, req VerifyRequest, accept func(Ca
 		}
 	}
 
-	// 8) Revocation of this capability or any ancestor, after the checks
-	// that need no I/O.
-	revoked, err := v.cfg.Revocations.IsRevoked(ctx, cap.ID)
-	if err != nil {
-		return VerifiedCapability{}, fmt.Errorf("limes: revocation lookup: %w", err)
-	}
-	if revoked {
-		return VerifiedCapability{}, ErrRevoked
-	}
-	// 9) Revocation of this copy of a Biscuit, or a copy it was attenuated
-	// from.
-	if biscuitIDs != nil {
-		revoked, err := v.cfg.Biscuit.Revocations.IsBiscuitRevoked(ctx, biscuitIDs)
-		if err != nil {
-			return VerifiedCapability{}, fmt.Errorf("limes: biscuit revocation lookup: %w", err)
-		}
-		if revoked {
-			return VerifiedCapability{}, ErrRevoked
-		}
+	// 8–9) Revocation, after the checks that need no I/O.
+	if err := v.checkRevoked(ctx, cap, biscuitIDs); err != nil {
+		return VerifiedCapability{}, err
 	}
 
 	// 10) A copy's own limits need a Meter that counts copies. After every
@@ -398,6 +350,110 @@ func (v *Verifier) verify(ctx context.Context, req VerifyRequest, accept func(Ca
 	}
 
 	return VerifiedCapability{c: cap.Capability, copies: cap.copies, fromBiscuit: biscuitIDs != nil}, nil
+}
+
+// authenticate is what Verify and Introspect check of a token itself: its
+// size, its signatures and issuer (1–3), that it is not a token lifted out
+// of a Biscuit, and its time window (4). It returns the grant and, for a
+// Biscuit, the ids of its verified chain.
+func (v *Verifier) authenticate(ctx context.Context, token string) (*grant, [][]byte, error) {
+	if token == "" {
+		return nil, nil, ErrNoCredentials
+	}
+	if len(token) > v.cfg.MaxTokenBytes {
+		return nil, nil, fmt.Errorf("%w: token is %d bytes (limit %d)",
+			ErrInvalidToken, len(token), v.cfg.MaxTokenBytes)
+	}
+
+	var cap *grant
+	var biscuitIDs [][]byte // set for a Biscuit, from its verified chain
+	if isBiscuit(token) {
+		if v.cfg.Biscuit == nil {
+			return nil, nil, fmt.Errorf("%w: Biscuit tokens are not accepted here", ErrInvalidToken)
+		}
+		var err error
+		if cap, biscuitIDs, err = v.verifyBiscuit(ctx, token); err != nil {
+			return nil, nil, err
+		}
+	} else {
+		var err error
+		if cap, err = v.verifySigned(ctx, token); err != nil {
+			return nil, nil, err
+		}
+		// The token sealed inside a Biscuit, lifted out to shed the
+		// Biscuit's attenuation.
+		if cap.biscuitRoot != "" {
+			return nil, nil, fmt.Errorf("%w: token is sealed in a Biscuit; present the Biscuit", ErrInvalidToken)
+		}
+	}
+
+	// 4) Time window. Leeway absorbs clock skew on both ends.
+	now := v.cfg.Now()
+	if !cap.NotBefore.IsZero() && now.Add(v.cfg.Leeway).Before(cap.NotBefore) {
+		return nil, nil, ErrNotYetValid
+	}
+	// RFC 7519 §4.1.4: refused on or after exp, less the leeway.
+	if cap.ExpiresAt.IsZero() || !now.Add(-v.cfg.Leeway).Before(cap.ExpiresAt) {
+		return nil, nil, ErrExpired
+	}
+	return cap, biscuitIDs, nil
+}
+
+// checkRevoked refuses a capability revoked itself or through any ancestor
+// (8), and a Biscuit copy revoked itself or through a copy it was attenuated
+// from (9). A lookup that fails is the server's error, not a refusal.
+func (v *Verifier) checkRevoked(ctx context.Context, cap *grant, biscuitIDs [][]byte) error {
+	revoked, err := v.cfg.Revocations.IsRevoked(ctx, cap.ID)
+	if err != nil {
+		return fmt.Errorf("limes: revocation lookup: %w", err)
+	}
+	if revoked {
+		return ErrRevoked
+	}
+	if biscuitIDs != nil {
+		revoked, err := v.cfg.Biscuit.Revocations.IsBiscuitRevoked(ctx, biscuitIDs)
+		if err != nil {
+			return fmt.Errorf("limes: biscuit revocation lookup: %w", err)
+		}
+		if revoked {
+			return ErrRevoked
+		}
+	}
+	return nil
+}
+
+// Introspection is what Introspect says of an active token.
+type Introspection struct {
+	// Capability is the capability the token carries.
+	Capability Capability
+	// FromBiscuit reports that the token is a Biscuit.
+	FromBiscuit bool
+	_           noCompare
+}
+
+// Introspect answers an introspection endpoint (RFC 7662) about a token a
+// resource server or gateway holds a copy of: nil error if it is active —
+// genuine, from a trusted issuer, within its time window and not revoked,
+// itself, through an ancestor or, for a Biscuit, through a copy — with the
+// capability it carries. It checks neither an audience nor proof of
+// possession: a key-bound token is active though no key was proved, and the
+// answer says the token is bound, not that its presenter holds the key. A
+// token lifted out of the Biscuit it was sealed in is refused, as Verify
+// refuses it. A refusal is ErrUnauthenticated's family, which the endpoint
+// answers as inactive; any other error is the server's, such as a
+// revocation lookup that failed, and never reads as inactive.
+//
+// Introspect is no authorization: it yields no VerifiedCapability, so its
+// answer can be neither delegated from nor checked against a request.
+func (v *Verifier) Introspect(ctx context.Context, token string) (Introspection, error) {
+	cap, biscuitIDs, err := v.authenticate(ctx, token)
+	if err != nil {
+		return Introspection{}, err
+	}
+	if err := v.checkRevoked(ctx, cap, biscuitIDs); err != nil {
+		return Introspection{}, err
+	}
+	return Introspection{Capability: cap.Clone(), FromBiscuit: biscuitIDs != nil}, nil
 }
 
 // DPoPNonce is the nonce to send in the DPoP-Nonce header — with a
