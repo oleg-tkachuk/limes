@@ -163,6 +163,16 @@ with a `.` or `..` segment, plain or percent-encoded once or twice, is refused b
 resource-restricted capability and by `Validate`: what it names depends on how
 you resolve it, not on its text. Pass the resource as your storage will
 address it.
+
+To name resources by the start of their names rather than whole segments,
+use `ResourceNamePrefixes`: `drafts/billing-` covers `drafts/billing-q3`
+and `drafts/billing-q3/notes`, and not `drafts/billing`. The match is a
+plain string prefix, across segments, with the same refusal of dot
+segments. A child names a name prefix only within its parent's: one the
+parent's name prefix starts, or one past a parent segment prefix's
+boundary (`a/` under `a`, never `a` itself, which names `ab`). Name prefixes
+travel in a `TokenTypeV7` token alone; a v6 signer refuses a capability
+with any rather than drop the restriction.
 `AllowTaintedRead` can only act on a taint signal you supply; if you track
 none, it protects nothing, and you should say so.
 
