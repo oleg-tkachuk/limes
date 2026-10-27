@@ -16,6 +16,7 @@ the test that holds it there.
 | [RFC 7517](https://www.rfc-editor.org/rfc/rfc7517), [RFC 7638](https://www.rfc-editor.org/rfc/rfc7638), [RFC 8037](https://www.rfc-editor.org/rfc/rfc8037) | JWK Sets, thumbprints, Ed25519 keys | `jwks.Marshal`, `jwks.NewHandler`, `jwks.KeyID` |
 | [RFC 9111](https://www.rfc-editor.org/rfc/rfc9111) | How long a fetched JWK Set stays fresh | `jwks.Remote` |
 | [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562) | UUIDv7 capability ids | `Issuer.Issue` |
+| [RFC 8693](https://www.rfc-editor.org/rfc/rfc8693), [RFC 8707](https://www.rfc-editor.org/rfc/rfc8707), [RFC 9068](https://www.rfc-editor.org/rfc/rfc9068), [RFC 9396](https://www.rfc-editor.org/rfc/rfc9396) | An identity provider's access token exchanged for a capability | `exchange.Exchanger`, `exchange.Handler` |
 | [RFC 4648](https://www.rfc-editor.org/rfc/rfc4648) §5 | base64url without padding, everywhere | token segments, JWKS, DPoP, nonces |
 | ISO 4217 | Budget units | `IsUnitCode` |
 
@@ -206,6 +207,49 @@ spare bits set in the last character are refused, so a value has one
 spelling. *Held by* `TestVerifyReadsTokenSegmentsAsUnpaddedBase64URL`,
 `TestWritesUnpaddedBase64URL`, `TestUnB64IsStrict`, `TestParseReadsXStrictly`.
 
+## Token exchange
+
+**RFC 8693, RFC 8707, RFC 9068, RFC 9396.** The `exchange` module
+exchanges an identity provider's access token for a capability
+([ADR-0003](adr/0003-oauth-token-exchange.md)), in process (`Exchanger`) or
+at an RFC 8693 token endpoint (`Handler`):
+
+- **The subject token (RFC 9068).** `JWTVerifier` accepts an access token
+  of `typ: at+jwt` (or `application/at+jwt`), signed by an asymmetric
+  algorithm under the identity provider's keys, from its issuer, live, and
+  carrying every claim the profile requires: `iss`, `exp`, `aud`, `sub`,
+  `client_id`, `iat`, `jti`. A provider that types its tokens otherwise, or
+  names the client in another claim, is read only by naming either in its
+  config. A token bound otherwise than by a DPoP key (`cnf` without `jkt`,
+  or with more) is refused: a bearer capability would drop the binding.
+- **The audience.** A subject token is accepted only when its `aud` names
+  the client exchanging it. The capability's audience is drawn from the
+  `resource` (RFC 8707: absolute URIs, no fragment) and `audience`
+  parameters asked for, whatever the policy answers. The capability ends no
+  later than the subject token.
+- **The request (RFC 8693 §2.1).** `grant_type` is token exchange;
+  `subject_token_type` is an access token or a JWT; `requested_token_type`,
+  when sent, is the capability's own URI; `actor_token` is not supported;
+  no parameter but `resource` and `audience` is sent twice (RFC 6749 §3.2).
+  `authorization_details` (RFC 9396) is a JSON array, handed to the policy,
+  which alone reads it.
+- **The response.** A capability, `issued_token_type` its URI,
+  `token_type` `DPoP` when bound and `Bearer` otherwise; `Cache-Control:
+  no-store`. A refusal is RFC 6749 §5.2's JSON with RFC 8707's
+  `invalid_target` and RFC 9449's `invalid_dpop_proof` and
+  `use_dpop_nonce`, and a fixed description per code.
+- **Proof of possession (RFC 9449 §5).** A proof binds the capability to its
+  key, through `dpop.Verifier.CheckTokenRequest`, recorded before the
+  capability is issued; a subject token bound to a key is exchanged only with
+  a proof by that key.
+
+*Held by* `TestJWTVerifierReadsAnAccessToken`, `TestJWTVerifierRefusals`,
+`TestExchangeHoldsThePolicyToTheRequest`,
+`TestExchangeCapsTheLifetimeAtTheSubjectToken`, `TestExchangeRefusals`,
+`TestExchangeBindsToTheProofKey`, `TestExchangeHoldsABoundSubjectToItsKey`,
+`TestHandlerExchanges`, `TestHandlerRefusals`, and the fuzz target
+`FuzzCheckForm`, in `exchange`.
+
 ## Not adopted
 
 limes is not an OAuth authorization server, and its tokens are read by
@@ -213,13 +257,15 @@ limes alone. The standards below serve interoperability with that
 ecosystem; they were adopted in v0.3.0 and removed again, since nothing on
 either side reads them. Each can return when something does.
 
-- **RFC 9396 (Rich Authorization Requests).** Caveats travel in
-  `limes_caveats`, not as an `authorization_details` entry.
-- **RFC 8693 (Token Exchange).** Delegation is followed through
+- **RFC 9396 in a token.** Caveats travel in `limes_caveats`, not as an
+  `authorization_details` entry; the token exchange reads the parameter in a
+  request only.
+- **RFC 8693 in a token.** Delegation is followed through
   `limes_parent_id`; a delegated token's `sub` is its own principal's, and it
   has no `act` claim.
-- **RFC 8707 (Resource Indicators).** An audience is any non-empty string the
-  services agree on, not necessarily an absolute URI.
+- **RFC 8707 in a token.** An audience is any non-empty string the services
+  agree on, not necessarily an absolute URI; the token exchange asks a
+  `resource` to be one.
 - **RFC 8414 (Authorization Server Metadata).** Its well-known document
   describes an OAuth authorization server and requires members — such as
   `response_types_supported` — that limes has nothing to put in. Verifiers
