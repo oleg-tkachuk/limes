@@ -1326,6 +1326,12 @@ the sealed one whole. A key that
 implements `ContextSigner` signs under the request's context, so a slow or
 cancelled call is bounded by the request that asked for the token.
 
+Tokens name the algorithm `Ed25519`, as RFC 9864 does. Where the services
+reading them use a JOSE library, gateway or identity provider that knows only
+the deprecated name, set `SignerConfig.Algorithm` to
+`limes.SigningAlgorithmEdDSA`: the signature is the same, every limes verifier
+reads both names, and the JWKS needs no change.
+
 ## Answer a refusal
 
 `ErrorResponse` turns any error `Verify`, `Authorize` or the `Meter` returns

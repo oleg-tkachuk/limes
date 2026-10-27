@@ -35,6 +35,8 @@ type Signer struct {
 	pub [ed25519.PublicKeySize]byte
 	// typ is the token type it mints.
 	typ TokenType
+	// alg is the alg its tokens name.
+	alg SigningAlgorithm
 }
 
 // SignerConfig configures a Signer.
@@ -51,6 +53,11 @@ type SignerConfig struct {
 	// one this package reads. A later format is minted here once every
 	// verifier of the tokens accepts it (VerifierConfig.AcceptTokenTypes).
 	TokenType TokenType
+	// Algorithm is the alg the tokens name. Empty: SigningAlgorithmEd25519,
+	// the name RFC 9864 gives the algorithm. SigningAlgorithmEdDSA names it
+	// as JOSE libraries that predate RFC 9864 do; the signature is the same,
+	// and every verifier of this package reads both.
+	Algorithm SigningAlgorithm
 }
 
 // ContextSigner is a crypto.Signer that signs under a context, as a key
@@ -84,7 +91,11 @@ func NewSigner(cfg SignerConfig) (*Signer, error) {
 	if !slices.Contains(tokenTypes, typ) {
 		return nil, fmt.Errorf("limes: SignerConfig.TokenType %q is not one of %q", typ, tokenTypes)
 	}
-	return &Signer{keyID: cfg.KeyID, key: cfg.Key.s, pub: [ed25519.PublicKeySize]byte(pub), typ: typ}, nil
+	alg := cmp.Or(cfg.Algorithm, SigningAlgorithmEd25519)
+	if !slices.Contains(signingAlgorithms, alg) {
+		return nil, fmt.Errorf("limes: SignerConfig.Algorithm %q is not one of %q", alg, signingAlgorithms)
+	}
+	return &Signer{keyID: cfg.KeyID, key: cfg.Key.s, pub: [ed25519.PublicKeySize]byte(pub), typ: typ, alg: alg}, nil
 }
 
 // jwtHeader is the protected header. We use compact serialization:
@@ -203,7 +214,7 @@ func (s *Signer) signGrant(ctx context.Context, g grant) (string, error) {
 		return "", errors.New("limes: ExpiresAt must be after IssuedAt")
 	}
 
-	header := jwtHeader{Alg: jose.AlgEd25519, Kid: s.keyID, Typ: string(s.typ)}
+	header := jwtHeader{Alg: string(s.alg), Kid: s.keyID, Typ: string(s.typ)}
 	claims := claimsOf(g)
 	// Nothing is signed that the verifier would refuse to read.
 	if err := checkIJSONIntegers(claims); err != nil {
@@ -270,6 +281,22 @@ type TokenType string
 // tokenTypes are the token types this package has a schema for.
 var tokenTypes = []TokenType{TokenTypeV6}
 
+// SigningAlgorithm is the JWS alg a token names: Ed25519, by either of its
+// names.
+type SigningAlgorithm string
+
+// The names of Ed25519 a token may carry.
+const (
+	// SigningAlgorithmEd25519 is the fully-specified name of RFC 9864.
+	SigningAlgorithmEd25519 SigningAlgorithm = jose.AlgEd25519
+	// SigningAlgorithmEdDSA is the polymorphic name RFC 9864 deprecates, the
+	// only one many JOSE libraries, gateways and identity providers know.
+	SigningAlgorithmEdDSA SigningAlgorithm = jose.AlgEdDSA
+)
+
+// signingAlgorithms are the names a signer writes and a verifier reads.
+var signingAlgorithms = []SigningAlgorithm{SigningAlgorithmEd25519, SigningAlgorithmEdDSA}
+
 func parseHeader(seg string) (jwtHeader, error) {
 	raw, err := jose.UnB64(seg)
 	if err != nil {
@@ -279,11 +306,13 @@ func parseHeader(seg string) (jwtHeader, error) {
 	if err := json.Unmarshal(raw, &h, strictClaims); err != nil {
 		return jwtHeader{}, fmt.Errorf("limes: parse header: %w", err)
 	}
-	// Only the fully-specified identifier (RFC 9864): a capability token is
-	// this module's own, and none was ever written with another under any
-	// of its token types.
-	if h.Alg != jose.AlgEd25519 {
-		return jwtHeader{}, fmt.Errorf("limes: unexpected alg %q (want %s)", h.Alg, jose.AlgEd25519)
+	// Either name of Ed25519: the fully-specified one of RFC 9864, or the
+	// polymorphic EdDSA it deprecates, which a signer writes for JOSE
+	// libraries that know no other (SignerConfig.Algorithm). Both name one
+	// algorithm over the one key type a verifier resolves, so the header
+	// still chooses nothing (RFC 8725 §3.1).
+	if !slices.Contains(signingAlgorithms, SigningAlgorithm(h.Alg)) {
+		return jwtHeader{}, fmt.Errorf("limes: unexpected alg %q (want one of %q)", h.Alg, signingAlgorithms)
 	}
 	return h, nil
 }

@@ -42,12 +42,59 @@ func issueFor(t *testing.T, issuer *Issuer) (Capability, string) {
 	return c, token
 }
 
-func TestCapabilityTokenRefusesThePolymorphicAlgorithm(t *testing.T) {
+// A verifier reads a token under either name of Ed25519: the polymorphic
+// EdDSA names the same algorithm over the same key.
+func TestReadsEitherNameOfEd25519(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	v := verifierFor(t, pub, VerifierConfig{})
-	tok := resign(t, priv, map[string]any{"alg": jose.AlgEdDSA, "kid": "k1", "typ": TokenTypeV6}, validClaims(uuid.New()))
-	if _, err := v.Verify(context.Background(), VerifyRequest{Token: tok, Audience: audienceData}); !errors.Is(err, ErrInvalidToken) {
-		t.Fatalf("a token naming EdDSA: err = %v, want ErrInvalidToken", err)
+	for _, alg := range []SigningAlgorithm{SigningAlgorithmEd25519, SigningAlgorithmEdDSA} {
+		tok := resign(t, priv, map[string]any{"alg": alg, "kid": "k1", "typ": TokenTypeV6}, validClaims(uuid.New()))
+		if _, err := v.Verify(context.Background(), VerifyRequest{Token: tok, Audience: audienceData}); err != nil {
+			t.Errorf("a token naming %s: %v", alg, err)
+		}
+	}
+}
+
+// A signer names the algorithm it is configured with, Ed25519 by default,
+// and its tokens verify under either name.
+func TestSignerWritesTheConfiguredAlgorithm(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	v := verifierFor(t, pub, VerifierConfig{TrustedIssuers: []string{goldenIssuer}})
+	for configured, want := range map[SigningAlgorithm]SigningAlgorithm{
+		"":                      SigningAlgorithmEd25519,
+		SigningAlgorithmEd25519: SigningAlgorithmEd25519,
+		SigningAlgorithmEdDSA:   SigningAlgorithmEdDSA,
+	} {
+		signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(priv), Algorithm: configured})
+		if err != nil {
+			t.Fatal(err)
+		}
+		issuer, err := NewIssuer(IssuerConfig{Signer: signer, Store: newMemStore(), IssuerName: goldenIssuer})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, token := issueFor(t, issuer)
+		parts, err := jose.Split(token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if h, err := parseHeader(parts.Header); err != nil || SigningAlgorithm(h.Alg) != want {
+			t.Errorf("Algorithm %q: token alg = %q, %v; want %q", configured, h.Alg, err, want)
+		}
+		if _, err := v.Verify(t.Context(), VerifyRequest{Token: token, Audience: audienceData}); err != nil {
+			t.Errorf("Algorithm %q: %v", configured, err)
+		}
+	}
+}
+
+// A signer names no algorithm but Ed25519's two names: another would sign
+// tokens no verifier reads, or claim a signature the key does not make.
+func TestNewSignerRefusesAnotherAlgorithm(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(nil)
+	for _, alg := range []SigningAlgorithm{"none", jose.AlgES256, "eddsa", "ed25519"} {
+		if _, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(priv), Algorithm: alg}); err == nil {
+			t.Errorf("NewSigner accepted Algorithm %q", alg)
+		}
 	}
 }
 
