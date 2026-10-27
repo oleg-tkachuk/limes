@@ -76,6 +76,7 @@ func writeNodeFixture(t *testing.T) {
 			t.Fatal(err)
 		}
 		res, err := issuer.Issue(context.Background(), limes.IssueRequest{
+			ClientID: interopClient,
 			IssuedBy: limes.Principal{Type: limes.PrincipalTypeUser, TenantID: tenant, Subject: operatorSubject},
 			Subject:  limes.Principal{Type: limes.PrincipalTypeService, TenantID: tenant, Subject: readerSubject},
 			Audience: []string{audience}, TTL: tokenTTL,

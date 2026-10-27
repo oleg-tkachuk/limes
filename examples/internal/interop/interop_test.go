@@ -81,19 +81,12 @@ func newFixture(t *testing.T) *fixture {
 	return newFixtureNaming(t, "")
 }
 
-// newFixtureNaming is a fixture whose tokens name alg, the default when empty.
-func newFixtureNaming(t *testing.T, alg limes.SigningAlgorithm) *fixture {
-	t.Helper()
-	return newFixtureOf(t, alg, "")
-}
-
 // interopClient is the OAuth client the fixture's capabilities name, which a
-// v7 token carries as client_id.
+// token carries as client_id.
 const interopClient = "interop-client"
 
-// newFixtureOf is a fixture whose tokens name alg and are of the token type
-// typ, each the default when empty.
-func newFixtureOf(t *testing.T, alg limes.SigningAlgorithm, typ limes.TokenType) *fixture {
+// newFixtureNaming is a fixture whose tokens name alg, the default when empty.
+func newFixtureNaming(t *testing.T, alg limes.SigningAlgorithm) *fixture {
 	t.Helper()
 	key, err := limes.GenerateKey()
 	if err != nil {
@@ -103,7 +96,7 @@ func newFixtureOf(t *testing.T, alg limes.SigningAlgorithm, typ limes.TokenType)
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer, err := limes.NewSigner(limes.SignerConfig{KeyID: key.KeyID, Key: key.Private, Algorithm: alg, TokenType: typ})
+	signer, err := limes.NewSigner(limes.SignerConfig{KeyID: key.KeyID, Key: key.Private, Algorithm: alg})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,8 +226,8 @@ func TestJWXReadsTheCapabilityClaims(t *testing.T) {
 		t.Fatal(err)
 	}
 	headers := msg.Signatures()[0].ProtectedHeaders()
-	if typ, _ := headers.Type(); typ != string(limes.TokenTypeV6) {
-		t.Errorf("typ = %q, want %q", typ, limes.TokenTypeV6)
+	if typ, _ := headers.Type(); typ != limes.TokenType {
+		t.Errorf("typ = %q, want %q", typ, limes.TokenType)
 	}
 	if alg, _ := headers.Algorithm(); alg.String() != algEd25519 {
 		t.Errorf("alg = %q, want %q", alg, algEd25519)
@@ -312,8 +305,8 @@ func TestJWXReadsTheJWKS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := base64.RawURLEncoding.EncodeToString(sum); got != f.kid || got != jwks.KeyID(f.pub) {
-		t.Errorf("jwx thumbprint %s, kid %s", got, f.kid)
+	if got := base64.RawURLEncoding.EncodeToString(sum); jwks.KeyIDPrefix+got != f.kid || f.kid != jwks.KeyID(f.pub) {
+		t.Errorf("jwx thumbprint %s, kid %s; want the kid the thumbprint in limes's namespace", got, f.kid)
 	}
 }
 

@@ -22,6 +22,10 @@ const (
 	audience   = "search-service"
 )
 
+// clientID is the OAuth client the capability is granted to (RFC 9068
+// client_id): the software its subject runs as.
+const clientID = "example-agent"
+
 func main() {
 	ctx := context.Background()
 	log := demo.New("issue-verify")
@@ -50,6 +54,7 @@ func main() {
 
 	tenant := uuid.New()
 	issued, err := issuer.Issue(ctx, limes.IssueRequest{
+		ClientID: clientID,
 		IssuedBy: limes.Principal{Type: limes.PrincipalTypeUser, TenantID: tenant, Subject: "operator@example.com"},
 		Subject:  limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: tenant, Subject: "research-agent"},
 		Audience: []string{audience},

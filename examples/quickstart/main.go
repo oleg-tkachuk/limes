@@ -23,6 +23,10 @@ import (
 	"github.com/oleg-tkachuk/limes/meter"
 )
 
+// clientID is the OAuth client the capability is granted to (RFC 9068
+// client_id): the software its subject runs as.
+const clientID = "example-agent"
+
 func main() {
 	ctx := context.Background()
 	log := demo.New("quickstart")
@@ -63,6 +67,7 @@ func main() {
 	// 3. Issue to an orchestrator agent. Everything the authority permits is
 	//    described by the token itself — no role, no long-lived secret.
 	parentResult, err := issuer.Issue(ctx, limes.IssueRequest{
+		ClientID: clientID,
 		// Who asked for it — distinct from who it authorises, and required.
 		IssuedBy: limes.Principal{Type: limes.PrincipalTypeUser, TenantID: tenantID, Subject: "operator@example.com"},
 		Subject: limes.Principal{
