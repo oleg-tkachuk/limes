@@ -54,6 +54,9 @@ func TestExchangeHoldsThePolicyToTheRequest(t *testing.T) {
 	for name, change := range map[string]func(*limes.IssueRequest){
 		"another audience": func(r *limes.IssueRequest) { r.Audience = []string{toolResource, "https://elsewhere.example.com"} },
 		"a binding":        func(r *limes.IssueRequest) { r.ConfirmationJKT = "0ZcOCORZNYy-DWpqq30jZyJGHTN0d2HglBV3uiguA4I" },
+		"another to act for": func(r *limes.IssueRequest) {
+			r.OnBehalfOf = &limes.Principal{Type: limes.PrincipalTypeUser, TenantID: r.Subject.TenantID, Subject: "someone-else"}
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t, fixtureConfig{})

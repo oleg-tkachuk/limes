@@ -118,6 +118,10 @@ func checkGoldenVerifies(t *testing.T, typ TokenType) {
 	if got, want := cap.Capability().ClientID, goldenClientIDOf(typ); got != want {
 		t.Errorf("ClientID = %q, want %q", got, want)
 	}
+	if got, want := cap.Capability().OnBehalfOf, goldenOnBehalfOfOf(typ); (got == nil) != (want == nil) ||
+		got != nil && (got.Subject != want.Subject || got.Type != want.Type || got.TenantID != want.TenantID) {
+		t.Errorf("OnBehalfOf = %+v, want %+v", got, want)
+	}
 }
 
 // A token for one audience must not verify for another — the audience gate is

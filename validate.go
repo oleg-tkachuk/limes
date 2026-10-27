@@ -149,6 +149,22 @@ func (p Principal) Validate() error {
 	return nil
 }
 
+// validateOnBehalfOf checks the principal a capability of holder acts on
+// behalf of: a principal of holder's tenant, which a capability is pinned
+// to, named by a subject.
+func validateOnBehalfOf(obo, holder Principal) error {
+	if err := obo.Validate(); err != nil {
+		return err
+	}
+	if obo.Subject == "" {
+		return invalidRequest("OnBehalfOf names no subject")
+	}
+	if obo.TenantID != holder.TenantID {
+		return invalidRequest("OnBehalfOf is of tenant %s, not the subject's %s", obo.TenantID, holder.TenantID)
+	}
+	return nil
+}
+
 // Validate reports whether t is one of the principal kinds, spelled as the
 // constants spell it. Every error matches ErrInvalidRequest.
 func (t PrincipalType) Validate() error {

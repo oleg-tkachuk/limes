@@ -181,6 +181,8 @@ func (f fixture) newCapability(subject string, parent uuid.UUID, expires time.Ti
 		ParentID:        parent,
 		ConfirmationJKT: "jkt",
 		ClientID:        "storetest-client",
+		OnBehalfOf:      new(f.issuer()),
+		PriorActors:     []string{"agent:planner"},
 	}
 }
 
