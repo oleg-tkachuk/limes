@@ -9,6 +9,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
 	"maps"
@@ -17,8 +18,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	jsonv2 "github.com/go-json-experiment/json"
 
 	"github.com/oleg-tkachuk/limes/internal/httpx"
 	"github.com/oleg-tkachuk/limes/internal/jose"

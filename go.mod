@@ -19,10 +19,6 @@ toolchain go1.27.3
 
 require (
 	github.com/eclipse-biscuit/biscuit-go/v2 v2.2.2
-	// The upstream of encoding/json/v2, which Go 1.26 still keeps behind
-	// GOEXPERIMENT; replace it with the standard library once the go
-	// directive reaches the release that ships it.
-	github.com/go-json-experiment/json v0.0.0-20260820222146-c27c302e5fc3
 	golang.org/x/text v0.43.0
 	google.golang.org/protobuf v1.36.12
 )
