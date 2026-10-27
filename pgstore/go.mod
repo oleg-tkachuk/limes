@@ -20,7 +20,7 @@ retract v0.1.0
 require (
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/jackc/tern/v2 v2.4.3
-	github.com/oleg-tkachuk/limes v0.130.0
+	github.com/oleg-tkachuk/limes v0.131.0
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0
 )
