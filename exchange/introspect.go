@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,6 +16,15 @@ const (
 	paramToken         = "token"
 	paramTokenTypeHint = "token_type_hint"
 )
+
+// AuthorizationDetailsTypeCaveats is the RFC 9396 type of the
+// authorization_details entry an introspection answer carries: an active
+// capability's caveats, its members those of the token's limes_caveats claim.
+const AuthorizationDetailsTypeCaveats = "https://github.com/oleg-tkachuk/limes/exchange#caveats"
+
+// detailType is the member naming an authorization_details entry's type
+// (RFC 9396 §2).
+const detailType = "type"
 
 // IntrospectionConfig configures an IntrospectionHandler.
 type IntrospectionConfig struct {
@@ -60,9 +70,8 @@ func NewIntrospectionHandler(cfg IntrospectionConfig) (*IntrospectionHandler, er
 
 // introspection is an answer (RFC 7662 §2.2): active alone for a token that
 // is not, so nothing about it leaks; for one that is, its standard members,
-// cnf when it is bound (RFC 9449 §6.2), and client_id when it names one.
-// What the capability allows, its caveats, is for a verifier of limes
-// tokens to read.
+// cnf when it is bound (RFC 9449 §6.2), client_id when it names one, and
+// what it allows as one authorization_details entry (RFC 9396 §9.2).
 type introspection struct {
 	Active    bool     `json:"active"`
 	Issuer    string   `json:"iss,omitempty"`
@@ -75,6 +84,8 @@ type introspection struct {
 	ClientID  string   `json:"client_id,omitempty"`
 	TokenType string   `json:"token_type,omitempty"`
 	Cnf       *cnf     `json:"cnf,omitempty"`
+	// AuthorizationDetails holds one entry, of AuthorizationDetailsTypeCaveats.
+	AuthorizationDetails []json.RawMessage `json:"authorization_details,omitempty"`
 }
 
 // cnf is a bound token's confirmation (RFC 7800, RFC 9449 §6.2).
@@ -109,10 +120,16 @@ func (h *IntrospectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: codeServerError}, log)
 	default:
 		c := got.Capability
+		detail, err := caveatsDetail(c.Caveats)
+		if err != nil {
+			log.ErrorContext(r.Context(), "introspection: encode caveats", slog.String("capability", c.ID.String()), slog.Any("error", err))
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: codeServerError}, log)
+			return
+		}
 		answer := introspection{
 			Active: true, Issuer: c.Issuer, Subject: c.Subject.Subject, Audience: c.Audience,
 			ExpiresAt: c.ExpiresAt.Unix(), IssuedAt: c.IssuedAt.Unix(), ID: c.ID.String(), ClientID: c.ClientID,
-			TokenType: TokenTypeBearer,
+			TokenType: TokenTypeBearer, AuthorizationDetails: []json.RawMessage{detail},
 		}
 		if !c.NotBefore.IsZero() {
 			answer.NotBefore = c.NotBefore.Unix()
@@ -124,6 +141,25 @@ func (h *IntrospectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 			slog.String("capability", answer.ID), slog.String("token_type", answer.TokenType))
 		writeJSON(w, http.StatusOK, answer, log)
 	}
+}
+
+// caveatsDetail is c as an authorization_details entry: the members of the
+// limes_caveats claim, under AuthorizationDetailsTypeCaveats.
+func caveatsDetail(c limes.Caveats) (json.RawMessage, error) {
+	raw, err := limes.MarshalCaveats(c)
+	if err != nil {
+		return nil, err
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &members); err != nil {
+		return nil, err
+	}
+	typ, err := json.Marshal(AuthorizationDetailsTypeCaveats)
+	if err != nil {
+		return nil, err
+	}
+	members[detailType] = typ
+	return json.Marshal(members)
 }
 
 // readRequest reads and authenticates an introspection request: its token,
