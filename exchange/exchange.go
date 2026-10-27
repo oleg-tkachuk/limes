@@ -1,0 +1,291 @@
+package exchange
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"slices"
+	"time"
+
+	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/dpop"
+)
+
+// The refusals of an exchange, one per RFC 6749 §5.2 error (and RFC 8707's
+// invalid_target) the token endpoint answers with. A Policy refuses with
+// ErrInvalidGrant, ErrInvalidTarget or ErrInvalidScope; any other error it
+// returns is the server's, answered as such.
+var (
+	// ErrInvalidRequest is a request missing a parameter or malformed.
+	ErrInvalidRequest = errors.New("exchange: invalid request")
+	// ErrInvalidClient is a client the endpoint could not authenticate.
+	ErrInvalidClient = errors.New("exchange: client not authenticated")
+	// ErrInvalidGrant is a subject token refused: not genuine, expired, or
+	// not one the client may present.
+	ErrInvalidGrant = errors.New("exchange: subject token refused")
+	// ErrInvalidTarget is a resource or audience the exchange will not
+	// issue for.
+	ErrInvalidTarget = errors.New("exchange: target refused")
+	// ErrInvalidScope is a scope the exchange will not grant.
+	ErrInvalidScope = errors.New("exchange: scope refused")
+	// ErrUnsupportedGrantType is a token request for another grant.
+	ErrUnsupportedGrantType = errors.New("exchange: grant type unsupported")
+)
+
+// errPolicy is a policy that asked for more than the request allows: the
+// server's fault, never the client's.
+var errPolicy = errors.New("exchange: the policy's issue request exceeds the exchange")
+
+// Client is the client asking for the exchange, as the token endpoint
+// authenticated it, or as an in-process caller names itself.
+type Client struct {
+	// ID identifies the client: in logs, and as its share of the DPoP
+	// replay cache. Required.
+	ID string
+	// SubjectAudiences are the audiences a subject token the client presents
+	// may be issued for: a token is accepted only when its aud names one of
+	// them, so a client presents only a token issued to itself. Required.
+	SubjectAudiences []string
+}
+
+// Request is an exchange: the subject token, and what is asked for in
+// exchange (RFC 8693 §2.1).
+type Request struct {
+	Client Client
+	// SubjectToken is the token exchanged. Required.
+	SubjectToken string
+	// Resources are the RFC 8707 resources, and Audiences the RFC 8693
+	// audiences, the capability is asked for. At least one of either; the
+	// capability's audience is drawn from them.
+	Resources, Audiences []string
+	// Scopes are the scopes asked for.
+	Scopes []string
+	// AuthorizationDetails is the RFC 9396 authorization_details, a JSON
+	// array as sent; nil for none. The policy reads it.
+	AuthorizationDetails json.RawMessage
+	// DPoP is the request's proof of possession, binding the capability to
+	// its key (RFC 9449 §5); a zero Proof issues a bearer capability.
+	DPoP dpop.Proof
+}
+
+// Grant is what a Policy decides on: a verified subject, its client, and
+// what is asked for.
+type Grant struct {
+	Subject              Subject
+	Client               Client
+	Resources, Audiences []string
+	Scopes               []string
+	AuthorizationDetails json.RawMessage
+}
+
+// Policy turns a grant into the capability to issue, or refuses it with
+// ErrInvalidGrant, ErrInvalidTarget or ErrInvalidScope. Its IssueRequest's
+// Audience must be drawn from the grant's resources and audiences, or be
+// empty to take them all; its ConfirmationJKT must be empty, the Exchanger
+// setting it from the proof; its TTL is capped at the subject token's
+// remaining lifetime. Nothing is granted that the policy did not choose:
+// there is no default policy.
+type Policy func(ctx context.Context, g Grant) (limes.IssueRequest, error)
+
+// Result is an exchange's capability.
+type Result struct {
+	Capability limes.Capability
+	Token      string
+	// TokenType is how the capability is presented: TokenTypeDPoP when bound
+	// to a key, else TokenTypeBearer (RFC 9449 §5, RFC 6750).
+	TokenType string
+}
+
+// The token types of an exchange's response.
+const (
+	TokenTypeBearer = "Bearer"
+	TokenTypeDPoP   = "DPoP"
+	// IssuedTokenTypeCapability is the issued_token_type of a limes
+	// capability (RFC 8693 §3): a URI of this module's own.
+	IssuedTokenTypeCapability = "https://github.com/oleg-tkachuk/limes/exchange#capability" //nolint:gosec // G101: a token type URI, not a credential
+)
+
+// DefaultTTL is a capability's lifetime when the policy names none, still
+// capped at the subject token's.
+const DefaultTTL = 15 * time.Minute
+
+// minTTL is the shortest lifetime an issued capability may have: Issue
+// counts lifetimes in whole seconds.
+const minTTL = time.Second
+
+// Config configures an Exchanger.
+type Config struct {
+	// Issuer issues the capabilities. Required.
+	Issuer *limes.Issuer
+	// Subjects verifies subject tokens. Required.
+	Subjects SubjectVerifier
+	// Policy decides what each grant issues. Required.
+	Policy Policy
+	// DPoP checks proofs of possession; nil refuses every request with one.
+	DPoP *dpop.Verifier
+	// Now is the clock. Nil: time.Now.
+	Now func() time.Time
+	// Logger logs every exchange and refusal. Nil: slog.Default().
+	Logger *slog.Logger
+}
+
+// Exchanger exchanges subject tokens for capabilities.
+type Exchanger struct {
+	cfg Config
+}
+
+// NewExchanger builds an Exchanger, refusing a config without an issuer, a
+// subject verifier or a policy.
+func NewExchanger(cfg Config) (*Exchanger, error) {
+	switch {
+	case cfg.Issuer == nil:
+		return nil, errors.New("exchange: Config.Issuer required")
+	case cfg.Subjects == nil:
+		return nil, errors.New("exchange: Config.Subjects required")
+	case cfg.Policy == nil:
+		return nil, errors.New("exchange: Config.Policy required")
+	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
+	}
+	return &Exchanger{cfg: cfg}, nil
+}
+
+// Exchange exchanges req's subject token for a capability: it verifies the
+// token and that the client may present it, checks the proof of possession,
+// asks the policy, holds the policy's answer to the request, records the
+// proof and issues. A refusal is one of the errors above, or a dpop error
+// for the proof; every exchange and refusal is logged.
+func (e *Exchanger) Exchange(ctx context.Context, req Request) (Result, error) {
+	res, subject, err := e.exchange(ctx, req)
+	log := e.cfg.Logger.With(slog.String("client", req.Client.ID))
+	if subject.Subject != "" {
+		log = log.With(slog.String("subject_issuer", subject.Issuer), slog.String("subject", subject.Subject))
+	}
+	if err != nil {
+		level := slog.LevelWarn
+		if !isRefusal(err) {
+			level = slog.LevelError
+		}
+		log.Log(ctx, level, "exchange refused", slog.Any("error", err))
+		return Result{}, err
+	}
+	log.InfoContext(ctx, "exchange granted",
+		slog.String("capability", res.Capability.ID.String()),
+		slog.Any("audience", res.Capability.Audience),
+		slog.String("token_type", res.TokenType),
+		slog.Time("expires_at", res.Capability.ExpiresAt))
+	return res, nil
+}
+
+// exchange is Exchange, and the subject once verified, for the log.
+func (e *Exchanger) exchange(ctx context.Context, req Request) (Result, Subject, error) {
+	switch {
+	case req.Client.ID == "" || len(req.Client.SubjectAudiences) == 0:
+		return Result{}, Subject{}, fmt.Errorf("%w: a client with an id and the audiences it may present", ErrInvalidClient)
+	case req.SubjectToken == "":
+		return Result{}, Subject{}, fmt.Errorf("%w: subject_token required", ErrInvalidRequest)
+	case len(req.Resources) == 0 && len(req.Audiences) == 0:
+		return Result{}, Subject{}, fmt.Errorf("%w: a resource or an audience required", ErrInvalidTarget)
+	}
+	subject, err := e.cfg.Subjects.VerifySubject(ctx, req.SubjectToken)
+	if err != nil {
+		if !errors.Is(err, ErrInvalidGrant) {
+			return Result{}, Subject{}, fmt.Errorf("exchange: verify subject token: %w", err)
+		}
+		return Result{}, Subject{}, err
+	}
+	if !slices.ContainsFunc(subject.Audience, func(aud string) bool { return slices.Contains(req.Client.SubjectAudiences, aud) }) {
+		return Result{}, subject, fmt.Errorf("%w: issued for %q, not for the client", ErrInvalidGrant, subject.Audience)
+	}
+	remaining := subject.ExpiresAt.Sub(e.cfg.Now()).Truncate(time.Second)
+	if remaining < minTTL {
+		return Result{}, subject, fmt.Errorf("%w: expires within %s", ErrInvalidGrant, minTTL)
+	}
+
+	checked, bound, err := e.checkProof(ctx, req, subject)
+	if err != nil {
+		return Result{}, subject, err
+	}
+
+	issue, err := e.cfg.Policy(ctx, Grant{
+		Subject: subject, Client: req.Client, Resources: slices.Clone(req.Resources), Audiences: slices.Clone(req.Audiences),
+		Scopes: slices.Clone(req.Scopes), AuthorizationDetails: slices.Clone(req.AuthorizationDetails),
+	})
+	if err != nil {
+		return Result{}, subject, err
+	}
+	targets := append(slices.Clone(req.Resources), req.Audiences...)
+	if len(issue.Audience) == 0 {
+		issue.Audience = targets
+	}
+	for _, aud := range issue.Audience {
+		if !slices.Contains(targets, aud) {
+			return Result{}, subject, fmt.Errorf("%w: audience %q was not asked for", errPolicy, aud)
+		}
+	}
+	if issue.ConfirmationJKT != "" {
+		return Result{}, subject, fmt.Errorf("%w: it binds the capability itself", errPolicy)
+	}
+	if issue.TTL == 0 {
+		issue.TTL = DefaultTTL
+	}
+	issue.TTL = min(issue.TTL, remaining)
+
+	tokenType := TokenTypeBearer
+	if bound {
+		// Recorded only now, once everything else passed, and before the
+		// capability exists: a replayed proof never mints one.
+		if err := e.cfg.DPoP.Record(ctx, checked); err != nil {
+			return Result{}, subject, err
+		}
+		issue.ConfirmationJKT, tokenType = checked.JKT(), TokenTypeDPoP
+	}
+	minted, err := e.cfg.Issuer.Issue(ctx, issue)
+	if err != nil {
+		return Result{}, subject, fmt.Errorf("exchange: issue: %w", err)
+	}
+	return Result{Capability: minted.Capability, Token: minted.Token, TokenType: tokenType}, subject, nil
+}
+
+// checkProof checks req's proof of possession, if it has one, as a token
+// request's; a subject token bound to a key needs a proof by that key.
+// bound reports whether the capability is to be bound to checked's key.
+func (e *Exchanger) checkProof(ctx context.Context, req Request, subject Subject) (checked dpop.CheckedProof, bound bool, err error) {
+	if req.DPoP.JWT == "" {
+		if subject.JKT != "" {
+			return dpop.CheckedProof{}, false, fmt.Errorf("%w: the subject token is bound to a key", dpop.ErrRequired)
+		}
+		return dpop.CheckedProof{}, false, nil
+	}
+	if e.cfg.DPoP == nil {
+		return dpop.CheckedProof{}, false, fmt.Errorf("%w: this endpoint binds no capability to a key", dpop.ErrInvalid)
+	}
+	checked, err = e.cfg.DPoP.CheckTokenRequest(ctx, dpop.TokenRequest{Proof: req.DPoP, Holder: req.Client.ID})
+	if err != nil {
+		return dpop.CheckedProof{}, false, err
+	}
+	if subject.JKT != "" && checked.JKT() != subject.JKT {
+		return dpop.CheckedProof{}, false, fmt.Errorf("%w: the proof is not by the key the subject token is bound to", dpop.ErrInvalid)
+	}
+	return checked, true, nil
+}
+
+// isRefusal reports whether err is the client's: a refusal rather than the
+// server's failure.
+func isRefusal(err error) bool {
+	for _, refusal := range []error{
+		ErrInvalidRequest, ErrInvalidClient, ErrInvalidGrant, ErrInvalidTarget, ErrInvalidScope, ErrUnsupportedGrantType,
+		dpop.ErrRequired, dpop.ErrInvalid, dpop.ErrReplayed, dpop.ErrNonceRequired,
+	} {
+		if errors.Is(err, refusal) {
+			return true
+		}
+	}
+	return false
+}
