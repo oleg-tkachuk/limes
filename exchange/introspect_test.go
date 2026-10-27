@@ -46,17 +46,10 @@ func introspect(t *testing.T, h http.Handler, form url.Values) (*httptest.Respon
 	return w, body
 }
 
-// An active token's answer carries its standard members, its client where
-// its format carries one (v7), and, for a bound one, its key; the hint is
-// read and ignored.
+// An active token's answer carries its standard members, its client, and,
+// for a bound one, its key; the hint is read and ignored.
 func TestIntrospectionActive(t *testing.T) {
-	for typ, wantClient := range map[limes.TokenType]any{limes.TokenTypeV6: nil, limes.TokenTypeV7: idpClient} {
-		t.Run(string(typ), func(t *testing.T) { checkIntrospectionActive(t, typ, wantClient) })
-	}
-}
-
-func checkIntrospectionActive(t *testing.T, typ limes.TokenType, wantClient any) {
-	f := newFixture(t, fixtureConfig{tokenType: typ})
+	f := newFixture(t, fixtureConfig{})
 	h := newIntrospection(t, f.verifier)
 	key := clientKey(t)
 	jkt, err := dpop.Thumbprint(key.Public())
@@ -85,7 +78,7 @@ func checkIntrospectionActive(t *testing.T, typ limes.TokenType, wantClient any)
 		c := tc.res.Capability
 		if w.Code != http.StatusOK || w.Header().Get("Cache-Control") != cacheNoStore || body["active"] != true ||
 			body["jti"] != c.ID.String() || body["sub"] != c.Subject.Subject || body["iss"] != c.Issuer ||
-			body["client_id"] != wantClient || body["token_type"] != tc.tokenType || body["exp"] != float64(c.ExpiresAt.Unix()) {
+			body["client_id"] != idpClient || body["token_type"] != tc.tokenType || body["exp"] != float64(c.ExpiresAt.Unix()) {
 			t.Errorf("%s: status %d, body %v", name, w.Code, body)
 		}
 		cnfGot, _ := body["cnf"].(map[string]any)

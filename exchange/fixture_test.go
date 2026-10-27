@@ -156,8 +156,6 @@ type fixtureConfig struct {
 	noDPoP bool
 	// narrow lets the exchanger narrow capabilities.
 	narrow bool
-	// tokenType is the format the issuer signs; empty, the default.
-	tokenType limes.TokenType
 }
 
 func newFixture(t testing.TB, fc fixtureConfig) *fixture {
@@ -175,7 +173,7 @@ func newFixture(t testing.TB, fc fixtureConfig) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer, err := limes.NewSigner(limes.SignerConfig{KeyID: key.KeyID, Key: key.Private, TokenType: fc.tokenType})
+	signer, err := limes.NewSigner(limes.SignerConfig{KeyID: key.KeyID, Key: key.Private})
 	if err != nil {
 		t.Fatal(err)
 	}

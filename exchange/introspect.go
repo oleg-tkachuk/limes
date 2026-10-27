@@ -70,7 +70,7 @@ func NewIntrospectionHandler(cfg IntrospectionConfig) (*IntrospectionHandler, er
 
 // introspection is an answer (RFC 7662 §2.2): active alone for a token that
 // is not, so nothing about it leaks; for one that is, its standard members,
-// sub and act as a v7 token names them (RFC 8693 §4.1), cnf when it is bound
+// sub and act as the token names them (RFC 8693 §4.1), cnf when it is bound
 // (RFC 9449 §6.2), client_id when it names one, and what it allows as one
 // authorization_details entry (RFC 9396 §9.2).
 type introspection struct {
