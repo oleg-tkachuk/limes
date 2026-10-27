@@ -45,14 +45,10 @@ type nodeFixture struct {
 	Tokens map[limes.SigningAlgorithm]string `json:"tokens"`
 }
 
-// writeNodeFixture issues a capability under each name of Ed25519, with
-// one key, and writes the fixture.
+// writeNodeFixture issues a capability under each name of Ed25519, each
+// with a key of its own whose JWKS entry names it, and writes the fixture.
 func writeNodeFixture(t *testing.T) {
 	t.Helper()
-	key, err := limes.GenerateKey()
-	if err != nil {
-		t.Fatal(err)
-	}
 	records, err := memstore.NewStore(memstore.StoreConfig{})
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +58,13 @@ func writeNodeFixture(t *testing.T) {
 		Issuer: issuerName, Audience: audience, Subject: readerSubject, Tenant: tenant.String(), Resource: resourcePath,
 		VerifyAt: nodeIssuedAt.Add(nodeVerifyAfter).Unix(), Tokens: map[limes.SigningAlgorithm]string{},
 	}
+	keys, names := map[string]ed25519.PublicKey{}, map[string]string{}
 	for _, alg := range []limes.SigningAlgorithm{limes.SigningAlgorithmEd25519, limes.SigningAlgorithmEdDSA} {
+		key, err := limes.GenerateKey()
+		if err != nil {
+			t.Fatal(err)
+		}
+		keys[key.KeyID], names[key.KeyID] = key.Public(), string(alg)
 		signer, err := limes.NewSigner(limes.SignerConfig{KeyID: key.KeyID, Key: key.Private, Algorithm: alg})
 		if err != nil {
 			t.Fatal(err)
@@ -84,7 +86,7 @@ func writeNodeFixture(t *testing.T) {
 		}
 		fx.Tokens[alg] = res.Token
 	}
-	if fx.JWKS, err = jwks.Marshal(map[string]ed25519.PublicKey{key.KeyID: key.Public()}); err != nil {
+	if fx.JWKS, err = jwks.MarshalAlgorithms(keys, names); err != nil {
 		t.Fatal(err)
 	}
 	doc, err := json.MarshalIndent(fx, "", "  ")

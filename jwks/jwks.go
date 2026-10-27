@@ -52,20 +52,54 @@ type entry struct {
 	X   string `json:"x"`             // base64url-encoded raw public key
 }
 
+// The names a key's entry may give its algorithm (RFC 9864): the alg the
+// tokens it signs name, as limes.SignerConfig.Algorithm writes it. A JOSE
+// library that matches an entry's alg to a token's, Node's jose among them,
+// finds a key only under the name its tokens use.
+const (
+	AlgorithmEd25519 = jose.AlgEd25519
+	AlgorithmEdDSA   = jose.AlgEdDSA
+)
+
+// algorithms are the names an entry may give.
+var algorithms = []string{AlgorithmEd25519, AlgorithmEdDSA}
+
 // Marshal produces a JWKS document for the supplied kid → public key
 // map, with entries sorted by kid so the same key set always serialises to
-// the same bytes (cacheable, diffable, ETag-able).
+// the same bytes (cacheable, diffable, ETag-able). Every entry names
+// AlgorithmEd25519; MarshalAlgorithms names another.
 func Marshal(keys map[string]ed25519.PublicKey) ([]byte, error) {
+	return MarshalAlgorithms(keys, nil)
+}
+
+// MarshalAlgorithms is Marshal with each key's alg named by algs, kid →
+// name: AlgorithmEdDSA for a key whose signer writes EdDSA, so a library
+// that matches the names finds it. A key algs does not name is
+// AlgorithmEd25519's. A name for a kid keys does not hold, or a name that
+// is neither, is refused: it would describe no key, or one no token names.
+func MarshalAlgorithms(keys map[string]ed25519.PublicKey, algs map[string]string) ([]byte, error) {
+	for kid, alg := range algs {
+		if _, ok := keys[kid]; !ok {
+			return nil, fmt.Errorf("jwks: an algorithm for %q, which is no key of the set", kid)
+		}
+		if !slices.Contains(algorithms, alg) {
+			return nil, fmt.Errorf("jwks: algorithm %q for %q is not one of %q", alg, kid, algorithms)
+		}
+	}
 	entries := make([]entry, 0, len(keys))
 	for _, kid := range slices.Sorted(maps.Keys(keys)) {
 		pub := keys[kid]
 		if len(pub) != ed25519.PublicKeySize {
 			return nil, fmt.Errorf("jwks: public key %q wrong size for Ed25519", kid)
 		}
+		alg, ok := algs[kid]
+		if !ok {
+			alg = AlgorithmEd25519
+		}
 		entries = append(entries, entry{
 			Kty: jose.KtyOKP,
 			Crv: jose.CrvEd25519,
-			Alg: jose.AlgEd25519,
+			Alg: alg,
 			Kid: kid,
 			X:   jose.B64(pub),
 		})
@@ -128,6 +162,10 @@ func parse(raw []byte) (map[string]ed25519.PublicKey, int, error) {
 type HandlerConfig struct {
 	// Keys returns the keys to serve, kid → key. Required.
 	Keys func() map[string]ed25519.PublicKey
+	// Algorithms returns the alg each key's entry names, kid → name, as
+	// MarshalAlgorithms takes them: AlgorithmEdDSA for a key whose signer
+	// writes EdDSA. Nil, or a key it does not name: AlgorithmEd25519.
+	Algorithms func() map[string]string
 	// MaxAge is how long a client may keep the set (RFC 9111 §5.2.2.1).
 	// Keep it below the time between publishing a new key and signing with
 	// it, and between withdrawing an old key and the end of its tokens'
@@ -150,6 +188,7 @@ const DefaultMaxAge = DefaultRefreshInterval
 // (RFC 9110 §13.1.2), and fresh for MaxAge.
 type Handler struct {
 	keys   func() map[string]ed25519.PublicKey
+	algs   func() map[string]string
 	maxAge time.Duration
 }
 
@@ -171,7 +210,7 @@ func NewHandler(cfg HandlerConfig) (*Handler, error) {
 	case cfg.MaxAge == 0:
 		cfg.MaxAge = DefaultMaxAge
 	}
-	return &Handler{keys: cfg.Keys, maxAge: cfg.MaxAge}, nil
+	return &Handler{keys: cfg.Keys, algs: cfg.Algorithms, maxAge: cfg.MaxAge}, nil
 }
 
 // ServeHTTP answers GET and HEAD with the document, and anything else with
@@ -182,7 +221,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 		return
 	}
-	doc, err := Marshal(h.keys())
+	var algs map[string]string
+	if h.algs != nil {
+		algs = h.algs()
+	}
+	doc, err := MarshalAlgorithms(h.keys(), algs)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return

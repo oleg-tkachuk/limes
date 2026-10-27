@@ -38,16 +38,18 @@ RFC 9864 deprecates, names the same algorithm over the same key, and is
 read wherever it appears: in a token, a DPoP proof or a JWKS entry. A signer
 writes it when `SignerConfig.Algorithm` is `SigningAlgorithmEdDSA`, for the
 JOSE libraries, gateways and identity providers that know no other name.
-The JWKS still names `Ed25519`: go-jose, golang-jwt and jwx accept such a
-token under it, while Node's jose, matching a key's `alg` to the token's,
-finds no key for it. No
-other name is read or written, in any case but its own. DPoP challenges
+A JWKS entry names the alg of the tokens its key signs: `Ed25519` unless
+`jwks.MarshalAlgorithms` or `jwks.HandlerConfig.Algorithms` names `EdDSA`
+for it, as a library that matches a key's `alg` to the token's, Node's jose
+among them, finds a key only under the name its tokens use. No other name
+is read or written, in any case but its own. DPoP challenges
 advertise `algs="Ed25519 ES256"` (`dpop.SigningAlgorithms`); `EdDSA` is
 never advertised. *Held by* `TestWritesTheFullySpecifiedAlgorithm`,
 `TestMarshalWritesTheFullySpecifiedAlgorithm`,
 `TestReadsEitherNameOfEd25519`, `TestSignerWritesTheConfiguredAlgorithm`,
 `TestNewSignerRefusesAnotherAlgorithm`, `TestVerifyFixesTheAlgorithm`,
-`TestReadsTheDeprecatedAlgorithmFromOthers`.
+`TestReadsTheDeprecatedAlgorithmFromOthers`, `TestMarshalAlgorithms`,
+`TestHandlerAlgorithms`.
 
 **RFC 7493 (I-JSON).** The claims — the standard ones, and the
 capability's own under `limes_` (`limes_principal`, `limes_caveats`,
@@ -67,8 +69,9 @@ the `limes_` claims as JSON: jwx, which knows `Ed25519`, as it is, and
 golang-jwt, which knows the algorithm only as `EdDSA`, once the RFC 9864 name
 is registered for its Ed25519 method. A token whose signer writes `EdDSA`
 verifies under golang-jwt with no alias, and under go-jose, which refuses
-`Ed25519`. Node's jose verifies a capability naming `Ed25519` through the
-JWKS, and finds no key there for one naming `EdDSA`. In turn, limes accepts the DPoP proofs
+`Ed25519`. Node's jose verifies a capability under either name through a
+JWKS whose entries name each key's alg, and finds no key for an `EdDSA` one
+under an entry naming `Ed25519`. In turn, limes accepts the DPoP proofs
 jwx signs under `Ed25519`, `EdDSA` and `ES256`. *Held by*
 `TestJWXVerifiesACapability`, `TestJWXReadsTheCapabilityClaims`,
 `TestJWXReadsTheJWKS`, `TestLimesAcceptsJWXProofs` and

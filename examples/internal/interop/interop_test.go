@@ -119,7 +119,16 @@ func newFixtureNaming(t *testing.T, alg limes.SigningAlgorithm) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := jwks.NewHandler(jwks.HandlerConfig{Keys: func() map[string]ed25519.PublicKey { return keySet }})
+	// The key's entry names the alg its tokens name, as an issuer signing
+	// with EdDSA publishes it.
+	names := map[string]string{}
+	if alg != "" {
+		names[key.KeyID] = string(alg)
+	}
+	handler, err := jwks.NewHandler(jwks.HandlerConfig{
+		Keys:       func() map[string]ed25519.PublicKey { return keySet },
+		Algorithms: func() map[string]string { return names },
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
