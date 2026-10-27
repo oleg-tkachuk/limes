@@ -1365,6 +1365,14 @@ is told from another access token by its claims and its key: never sign
 capabilities with a key an authorization server also mints `at+jwt` with
 ([ADR-0004](adr/0004-token-format-v7.md)).
 
+An agent that works for a user holds a capability on the user's behalf:
+`IssueRequest.OnBehalfOf` names the user, of the subject's tenant. A v7
+token then names the user as `sub` and the agent as RFC 8693's `act`, and a
+delegated child keeps the user, with each holder it passed through nested in
+`act`; `Delegate` derives this, and no request can change it. limes still
+authorizes, meters and revokes by the holder, `Capability.Subject`
+([ADR-0005](adr/0005-acting-on-behalf.md)).
+
 A gateway that cannot read capability tokens can ask about one instead:
 `Verifier.Introspect` says whether a token is active (genuine, from a
 trusted issuer, within its window and not revoked) and what it carries,

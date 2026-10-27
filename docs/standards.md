@@ -108,6 +108,22 @@ v6 capability's payload under that type is refused. *Held by*
 `TestRFC9068ValidatorAcceptsAnAccessToken`, `TestLimesRefusesAnAccessToken`
 and `TestLimesRefusesAnAccessTokenPayload`.
 
+**RFC 8693 §4.1 in a token.** A v7 capability acting for another
+(`Capability.OnBehalfOf`) names that principal as `sub`, as RFC 9068 §2.2
+has a resource owner named, the whole principal in `limes_on_behalf_of`,
+and its holder in `act`, the holders it was delegated through nested within
+(`Capability.PriorActors`). Delegation derives both: a child acts for its
+parent's principal, or for the parent's holder when the parent acts for
+itself. The holder stays `limes_principal`, which limes reads. A token whose
+`sub`, `act` and `limes_principal` disagree, whose `act` nests more than
+`MaxDelegationDepth` prior actors, or names prior actors without a parent, is
+refused. A v6 token carries neither claim
+([ADR-0005](adr/0005-acting-on-behalf.md)). *Held by*
+`TestActingOnBehalfOf`, `TestActingForItself`, `TestActingDroppedFromV6`,
+`TestIssueRefusesOnBehalfOf`, `TestActingClaimsRefused`,
+`TestExchangeActsOnBehalfOfTheSubject` and
+`TestJWXReadsWhomAV7CapabilityActsFor`.
+
 ## Proof of possession
 
 **RFC 9449 (DPoP), RFC 7800.** A key-bound capability carries the RFC 7638
@@ -263,6 +279,10 @@ at an RFC 8693 token endpoint (`Handler`):
   no parameter but `resource` and `audience` is sent twice (RFC 6749 §3.2).
   `authorization_details` (RFC 9396) is a JSON array, handed to the policy,
   which alone reads it.
+- **Acting for the subject.** A policy may have the capability act on
+  behalf of the subject token's subject (`IssueRequest.OnBehalfOf`), whose
+  v7 token then names them as `sub` and the holder as `act`, and on behalf
+  of no one else: a policy naming another is the server's fault.
 - **The response.** A capability, `issued_token_type` its URI,
   `token_type` `DPoP` when bound and `Bearer` otherwise; `Cache-Control:
   no-store`. A refusal is RFC 6749 §5.2's JSON with RFC 8707's
@@ -289,7 +309,8 @@ at an RFC 8693 token endpoint (`Handler`):
   tokens itself. It authenticates its caller (§2.1). An inactive token
   (expired, revoked, lifted out of its Biscuit, not a token) gets
   `{"active": false}` and nothing more (§2.2). An active one gets its
-  standard members, `client_id` where its format carries one,
+  standard members, `sub` and `act` as a v7 token names them,
+  `client_id` where its format carries one,
   `token_type` and `cnf` for a bound one (RFC 9449 §6.2), and what it
   grants as one `authorization_details` entry (RFC 9396 §9.2): of type
   `exchange.AuthorizationDetailsTypeCaveats`, its other members those of
@@ -322,9 +343,6 @@ either side reads them. Each can return when something does.
   `authorization_details` entry, so a token holds them once; the token
   exchange reads the parameter in a request, and introspection answers with
   the caveats as an entry.
-- **RFC 8693 in a token.** Delegation is followed through
-  `limes_parent_id`; a delegated token's `sub` is its own principal's, and it
-  has no `act` claim.
 - **RFC 8707 in a token.** An audience is any non-empty string the services
   agree on, not necessarily an absolute URI; the token exchange asks a
   `resource` to be one.
