@@ -63,7 +63,7 @@ number of facts, in any order, and the same fact more than once.
 |---|---|---|
 | `limes_op` | string | The operations the copy keeps. Repeated facts add up; the set replaces the capability's and must be within it. |
 | `limes_resource_prefix` | non-empty string | A resource prefix the copy keeps. |
-| `limes_resource_uri` | non-empty string | A resource URI the copy keeps. A block naming either resource fact replaces both lists of the capability; each entry must be within them. |
+| `limes_resource_uri` | non-empty string | A resource URI the copy keeps. A block naming either resource fact replaces every resource caveat of the capability, its name prefixes (`ResourceNamePrefixes`) included; each entry must be within them. |
 | `limes_plane` | string | An audience the copy keeps. The set replaces the capability's and must be within it. |
 | `limes_expires` | date | An expiry. The earliest in the block wins; a later one than the capability's changes nothing. |
 | `limes_bind` | string | A JWK thumbprint (RFC 7638, base64url SHA-256) the copy is bound to, so it needs a DPoP proof by that key. Only an unbound capability can be bound offline; a bound one may restate its own key and no other. |

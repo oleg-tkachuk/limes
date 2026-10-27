@@ -222,6 +222,11 @@ func (s *Signer) signGrant(ctx context.Context, g grant) (string, error) {
 	}
 
 	header := jwtHeader{Alg: string(s.alg), Kid: s.keyID, Typ: string(s.typ)}
+	// A v6 token has no member for name prefixes: signing one without them
+	// would drop a restriction, and widen the capability.
+	if s.typ == TokenTypeV6 && len(c.Caveats.ResourceNamePrefixes) > 0 {
+		return "", errors.New("limes: ResourceNamePrefixes need a TokenTypeV7 signer")
+	}
 	// RFC 9068 makes client_id required of an at+jwt: none is invented.
 	if s.typ == TokenTypeV7 && c.ClientID == "" {
 		return "", errors.New("limes: a TokenTypeV7 capability needs a ClientID (RFC 9068 client_id)")
@@ -389,6 +394,9 @@ func parseClaims(seg string, typ TokenType) (*grant, error) {
 	case TokenTypeV6:
 		if claims.ClientID != "" || claims.Format != 0 {
 			return nil, errors.New("limes: a v6 token carries no client_id or limes_v")
+		}
+		if len(claims.Caveats.ResourceNamePrefixes) > 0 {
+			return nil, errors.New("limes: a v6 token carries no resource_name_prefixes")
 		}
 	case TokenTypeV7:
 		if claims.Format != formatV7 {

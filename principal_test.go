@@ -168,7 +168,7 @@ func TestCloneCoversEverySharedField(t *testing.T) {
 // clonedFields are the reference fields clone copies.
 var clonedFields = map[string]bool{
 	"Caveats.Ops": true, "Caveats.ResourcePrefixes": true, "Caveats.ResourceURIs": true,
-	"Caveats.SourceIPCIDR": true, "Principal.Agent": true,
+	"Caveats.SourceIPCIDR": true, "Caveats.ResourceNamePrefixes": true, "Principal.Agent": true,
 	"Capability.Audience": true, "CopyCeiling.RevocationID": true,
 	"CopyCeiling.Requests": true, "CopyCeiling.Budget": true,
 }

@@ -32,6 +32,7 @@ type wireCaveats struct {
 	Ops                    []Op     `json:"ops"`
 	ResourcePrefixes       []string `json:"resource_prefixes,omitempty"`
 	ResourceURIs           []string `json:"resource_uris,omitempty"`
+	ResourceNamePrefixes   []string `json:"resource_name_prefixes,omitempty"`
 	MaxRequests            int64    `json:"max_requests,omitzero"`
 	UnlimitedRequests      bool     `json:"unlimited_requests,omitzero"`
 	MaxBudget              Nanos    `json:"max_budget,omitzero"`
@@ -71,7 +72,8 @@ func (w wirePrincipal) principal() Principal {
 func toWireCaveats(c Caveats) wireCaveats {
 	return wireCaveats{
 		Ops: c.Ops, ResourcePrefixes: c.ResourcePrefixes, ResourceURIs: c.ResourceURIs,
-		MaxRequests: c.Requests.Max, UnlimitedRequests: c.Requests.Unlimited,
+		ResourceNamePrefixes: c.ResourceNamePrefixes,
+		MaxRequests:          c.Requests.Max, UnlimitedRequests: c.Requests.Unlimited,
 		MaxBudget: c.Budget.Max, UnlimitedBudget: c.Budget.Unlimited,
 		UnitCode: c.Budget.UnitCode, AllowTaintedRead: c.AllowTaintedRead,
 		MaxCopies: c.Copies.Max, UnlimitedCopies: c.Copies.Unlimited,
@@ -82,6 +84,7 @@ func toWireCaveats(c Caveats) wireCaveats {
 func (w wireCaveats) caveats() Caveats {
 	return Caveats{
 		Ops: w.Ops, ResourcePrefixes: w.ResourcePrefixes, ResourceURIs: w.ResourceURIs,
+		ResourceNamePrefixes:   w.ResourceNamePrefixes,
 		Requests:               RequestCeiling{Max: w.MaxRequests, Unlimited: w.UnlimitedRequests},
 		Budget:                 BudgetCeiling{Max: w.MaxBudget, Unlimited: w.UnlimitedBudget, UnitCode: w.UnitCode},
 		Copies:                 CopyQuota{Max: w.MaxCopies, Unlimited: w.UnlimitedCopies},

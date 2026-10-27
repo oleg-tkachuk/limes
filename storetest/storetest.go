@@ -167,6 +167,7 @@ func (f fixture) newCapability(subject string, parent uuid.UUID, expires time.Ti
 			Ops:                    []limes.Op{limes.OpGet, "tool:search"},
 			ResourcePrefixes:       []string{"corpus/"},
 			ResourceURIs:           []string{"corpus/index.json"},
+			ResourceNamePrefixes:   []string{"corpus/draft-"},
 			Requests:               limes.RequestCeiling{Max: 7},
 			Budget:                 limes.BudgetCeiling{Max: 3 * limes.NanosPerUnit / 2, UnitCode: "EUR"}, // 1.5 EUR
 			Copies:                 limes.CopyQuota{Max: fixtureCopyQuota},

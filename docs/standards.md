@@ -44,7 +44,10 @@ narrows them; a signer writes v6 unless `SignerConfig.TokenType` names v7.
 *Held by* `TestVerifyRequiresCapabilityTyp`, `TestVerifyFixesTheAlgorithm`,
 `TestVerify_UntrustedIssuer`, `TestVerify_AudienceMismatch`,
 `TestV7IsAnAccessToken`, `TestEachFormatHasItsOwnClaims`,
-`TestClientIDByFormat`, `TestGoldenTokenStillVerifies`.
+`TestClientIDByFormat`, `TestGoldenTokenStillVerifies`. Format changes
+after v6 land in v7: `limes_caveats.resource_name_prefixes`
+(`Caveats.ResourceNamePrefixes`) is v7's alone, and a v6 token naming it is
+refused (`TestNamePrefixesNeedV7`).
 
 **RFC 9864.** JWKS entries and DPoP proofs carry the fully-specified
 `alg: Ed25519`, and so do tokens by default. The polymorphic `EdDSA`, which
