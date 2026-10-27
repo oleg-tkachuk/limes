@@ -1,9 +1,17 @@
 package limes
 
 import (
+	"bytes"
+	"context"
+	"crypto/ed25519"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"reflect"
 	"testing"
+	"time"
 	"uuid"
+
+	"github.com/oleg-tkachuk/limes/internal/jose"
 )
 
 // The exported types carry no wire format, and the wire structs carry every
@@ -75,5 +83,46 @@ func TestWireStructsRoundTrip(t *testing.T) {
 	}
 	if got := toWireCaveats(c).caveats(); !reflect.DeepEqual(got, c) {
 		t.Errorf("caveats round trip = %+v, want %+v", got, c)
+	}
+}
+
+// MarshalCaveats writes the very bytes a token's limes_caveats claim holds,
+// so a reader shown them sees what the token says.
+func TestMarshalCaveatsIsTheClaim(t *testing.T) {
+	_, priv, _ := ed25519.GenerateKey(nil)
+	_, token, err := issuerOf(t, priv, TokenTypeV7).issue(context.Background(), IssueRequest{
+		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
+		Audience: []string{audienceData}, TTL: time.Hour, ClientID: testClientID,
+		Caveats: Caveats{
+			Ops: []Op{OpGet, OpShare}, ResourcePrefixes: []string{"reports/"}, ResourceNamePrefixes: []string{"drafts/billing-"},
+			Requests: RequestCeiling{Max: 10}, Budget: BudgetCeiling{Max: NanosPerUnit, UnitCode: "USD"}, Copies: CopyQuota{Max: 2},
+			SourceIPCIDR: []string{"10.0.0.0/8"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts, err := jose.Split(token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := jose.UnB64(parts.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var claims map[string]jsontext.Value
+	if err := json.Unmarshal(raw, &claims); err != nil {
+		t.Fatal(err)
+	}
+	cap, err := parseClaims(parts.Payload, TokenTypeV7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := MarshalCaveats(cap.Caveats)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := claims["limes_caveats"]; !bytes.Equal(got, want) {
+		t.Errorf("MarshalCaveats = %s, want the claim %s", got, want)
 	}
 }
