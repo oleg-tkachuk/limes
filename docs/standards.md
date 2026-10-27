@@ -122,11 +122,19 @@ and a `jti` not seen before.
   `dpop.DefaultReplayEntriesPerHolder`), so one capability — however many keys
   its copies are bound to — cannot crowd another's proofs out. Across replicas, nonces or a shared
   `dpop.ReplayCache` close the window.
+- **Token endpoints (§5).** `dpop.Verifier.CheckTokenRequest` checks the
+  proof that a token request carries the way `Check` checks any other, with
+  two differences: the proof names no access token (no `ath`), and any key
+  may sign it. `CheckedProof.JKT` is that key's thumbprint, to bind the
+  issued token to. The proof counts against the authenticated client's share
+  of the replay cache. `dpop.Sign` with no token signs such a proof.
 
 *Held by* `TestDPoPRefusals`, `TestDPoPRefusesAPrivateJWK`,
 `TestVerifyEnforcesProofOfPossession`, `TestBiscuitProofIsOverTheBiscuit`,
 `TestNormalize`, `TestRemoveDotSegments`, `TestDPoPMatchesNormalizedURIs`,
 `TestHMACNonces`, `TestVerifyRequiresTheServerNonce`,
+`TestCheckTokenRequestBindsToTheProofKey`, `TestCheckTokenRequestRefusals`,
+`TestCheckWantsATokenAndAProofOverIt`,
 `TestParseAuthorization`, `TestVerifyHoldsTheSchemeToTheBinding`, and the
 fuzz targets `FuzzDPoPCheck`, `FuzzNormalize`, `FuzzParseAuthorization`
 and `FuzzHMACNonceValid`.

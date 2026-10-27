@@ -1,6 +1,6 @@
 # ADR-0003: Bridge OAuth to capabilities by token exchange
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-27
 **Deciders:** Oleg Tkachuk
 
@@ -167,7 +167,7 @@ them.
 
 ## Action items
 
-1. [ ] Add to `dpop.Verifier` a check of a token-endpoint proof (RFC 9449
+1. [x] Add to `dpop.Verifier` a check of a token-endpoint proof (RFC 9449
    §5) that returns the proof key's thumbprint, with the same refusals and
    replay recording as `Check` and `Record`.
 2. [ ] Module `exchange`: `SubjectVerifier` (jwx, RFC 9068 checks), the
