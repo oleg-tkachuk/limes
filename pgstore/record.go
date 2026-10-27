@@ -29,6 +29,10 @@ type capabilityRecord struct {
 	ConfirmationJKT string          `json:"confirmation_jkt"`
 	// ClientID is absent from a record stored before it existed: none.
 	ClientID string `json:"client_id"`
+	// OnBehalfOf and PriorActors are absent from a record stored before they
+	// existed: a capability acting for itself.
+	OnBehalfOf  *principalRecord `json:"on_behalf_of"`
+	PriorActors []string         `json:"prior_actors"`
 }
 
 type principalRecord struct {
@@ -93,6 +97,11 @@ func (r principalRecord) principal() limes.Principal {
 
 func toCapabilityRecord(c limes.Capability) capabilityRecord {
 	cv := c.Caveats
+	var onBehalfOf *principalRecord
+	if c.OnBehalfOf != nil {
+		obo := toPrincipalRecord(*c.OnBehalfOf)
+		onBehalfOf = &obo
+	}
 	return capabilityRecord{
 		ID: c.ID, Issuer: c.Issuer, Subject: toPrincipalRecord(c.Subject), Audience: c.Audience,
 		Caveats: caveatsRecord{
@@ -106,11 +115,17 @@ func toCapabilityRecord(c limes.Capability) capabilityRecord {
 		},
 		IssuedAt: c.IssuedAt, NotBefore: c.NotBefore, ExpiresAt: c.ExpiresAt, ParentID: c.ParentID,
 		ConfirmationJKT: c.ConfirmationJKT, ClientID: c.ClientID,
+		OnBehalfOf: onBehalfOf, PriorActors: c.PriorActors,
 	}
 }
 
 func (r capabilityRecord) capability() limes.Capability {
 	cv := r.Caveats
+	var onBehalfOf *limes.Principal
+	if r.OnBehalfOf != nil {
+		obo := r.OnBehalfOf.principal()
+		onBehalfOf = &obo
+	}
 	return limes.Capability{
 		ID: r.ID, Issuer: r.Issuer, Subject: r.Subject.principal(), Audience: r.Audience,
 		Caveats: limes.Caveats{
@@ -124,6 +139,7 @@ func (r capabilityRecord) capability() limes.Capability {
 		},
 		IssuedAt: r.IssuedAt, NotBefore: r.NotBefore, ExpiresAt: r.ExpiresAt, ParentID: r.ParentID,
 		ConfirmationJKT: r.ConfirmationJKT, ClientID: r.ClientID,
+		OnBehalfOf: onBehalfOf, PriorActors: r.PriorActors,
 	}
 }
 
