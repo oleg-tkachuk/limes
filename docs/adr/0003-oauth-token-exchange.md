@@ -173,11 +173,10 @@ them.
 2. [x] Module `exchange`: `SubjectVerifier` (jwx, RFC 9068 checks), the
    policy callback, `Exchanger`, and the RFC 8693 `http.Handler`, with
    logging of every grant and refusal.
-3. [ ] RFC 9728 and RFC 8414 document helpers; an example MCP server in
+3. [x] RFC 9728 and RFC 8414 document helpers; an example MCP server in
    `examples` that exchanges a token from a test identity provider.
-4. [ ] Register the module: release rules, CI group, seed tag. All but the
-   seed tag `exchange/v0.1.0` are done.
-5. [ ] A capability as the subject token, narrowed by `Issuer.Delegate`
+4. [x] Register the module: release rules, CI group, seed tag.
+5. [x] A capability as the subject token, narrowed by `Issuer.Delegate`
    (decision 4).
 6. [ ] `exchangetest`: a contract suite for `SubjectVerifier`
    implementations other than `JWTVerifier`.

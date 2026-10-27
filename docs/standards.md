@@ -16,7 +16,7 @@ the test that holds it there.
 | [RFC 7517](https://www.rfc-editor.org/rfc/rfc7517), [RFC 7638](https://www.rfc-editor.org/rfc/rfc7638), [RFC 8037](https://www.rfc-editor.org/rfc/rfc8037) | JWK Sets, thumbprints, Ed25519 keys | `jwks.Marshal`, `jwks.NewHandler`, `jwks.KeyID` |
 | [RFC 9111](https://www.rfc-editor.org/rfc/rfc9111) | How long a fetched JWK Set stays fresh | `jwks.Remote` |
 | [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562) | UUIDv7 capability ids | `Issuer.Issue` |
-| [RFC 8693](https://www.rfc-editor.org/rfc/rfc8693), [RFC 8707](https://www.rfc-editor.org/rfc/rfc8707), [RFC 9068](https://www.rfc-editor.org/rfc/rfc9068), [RFC 9396](https://www.rfc-editor.org/rfc/rfc9396) | An identity provider's access token exchanged for a capability | `exchange.Exchanger`, `exchange.Handler` |
+| [RFC 8693](https://www.rfc-editor.org/rfc/rfc8693), [RFC 8707](https://www.rfc-editor.org/rfc/rfc8707), [RFC 9068](https://www.rfc-editor.org/rfc/rfc9068), [RFC 9396](https://www.rfc-editor.org/rfc/rfc9396), [RFC 9728](https://www.rfc-editor.org/rfc/rfc9728), [RFC 8414](https://www.rfc-editor.org/rfc/rfc8414) | An identity provider's access token exchanged for a capability, and the metadata an MCP server and the exchange publish | `exchange.Exchanger`, `exchange.Handler`, `exchange.NewResourceMetadataHandler` |
 | [RFC 4648](https://www.rfc-editor.org/rfc/rfc4648) §5 | base64url without padding, everywhere | token segments, JWKS, DPoP, nonces |
 | ISO 4217 | Budget units | `IsUnitCode` |
 
@@ -242,13 +242,27 @@ at an RFC 8693 token endpoint (`Handler`):
   key, through `dpop.Verifier.CheckTokenRequest`, recorded before the
   capability is issued; a subject token bound to a key is exchanged only with
   a proof by that key.
+- **A capability as the subject token.** `Narrow`, or the token endpoint
+  given `subject_token_type` of the capability's URI, delegates a narrower
+  capability from one addressed to the exchange (`Issuer.Delegate`): a
+  parent bound to a key needs a proof over it and its child keeps the
+  binding; an unbound parent's child is bound by a token request's proof.
+- **Metadata (RFC 9728, RFC 8414).** `NewResourceMetadataHandler` serves an
+  MCP server's protected resource metadata, `ResourceMetadataURL` names its
+  well-known URL, and `ResourceChallenge` the 401 challenge that points to
+  it. `NewAuthorizationServerMetadataHandler` describes the token exchange
+  as an authorization server with a token endpoint alone: token exchange
+  its one grant, and no response type.
 
 *Held by* `TestJWTVerifierReadsAnAccessToken`, `TestJWTVerifierRefusals`,
 `TestExchangeHoldsThePolicyToTheRequest`,
 `TestExchangeCapsTheLifetimeAtTheSubjectToken`, `TestExchangeRefusals`,
 `TestExchangeBindsToTheProofKey`, `TestExchangeHoldsABoundSubjectToItsKey`,
-`TestHandlerExchanges`, `TestHandlerRefusals`, and the fuzz target
-`FuzzCheckForm`, in `exchange`.
+`TestHandlerExchanges`, `TestHandlerRefusals`, `TestNarrowDelegates`,
+`TestNarrowHoldsABoundParentToItsKey`, `TestNarrowRefusals`,
+`TestWellKnownURLs`, `TestResourceMetadataHandler`,
+`TestAuthorizationServerMetadataHandler`, and the fuzz target
+`FuzzCheckForm`, in `exchange`; and the `mcp-exchange` example.
 
 ## Not adopted
 
@@ -266,10 +280,8 @@ either side reads them. Each can return when something does.
 - **RFC 8707 in a token.** An audience is any non-empty string the services
   agree on, not necessarily an absolute URI; the token exchange asks a
   `resource` to be one.
-- **RFC 8414 (Authorization Server Metadata).** Its well-known document
-  describes an OAuth authorization server and requires members — such as
-  `response_types_supported` — that limes has nothing to put in. Verifiers
-  are configured with the JWKS URL.
+- **RFC 8414 for limes itself.** Verifiers are configured with the JWKS
+  URL; only the token exchange describes itself as an authorization server.
 - **RFC 7009 and RFC 7662 (revocation and introspection endpoints).**
   Revocation is `Store.Revoke`, and a resource server verifies a token
   itself; an HTTP surface for either is the consumer's to build.
