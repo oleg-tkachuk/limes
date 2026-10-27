@@ -52,6 +52,7 @@ type caveatsRecord struct {
 	Ops                    []limes.Op    `json:"ops"`
 	ResourcePrefixes       []string      `json:"resource_prefixes"`
 	ResourceURIs           []string      `json:"resource_uris"`
+	ResourceNamePrefixes   []string      `json:"resource_name_prefixes"`
 	Requests               ceilingRecord `json:"requests"`
 	Budget                 ceilingRecord `json:"budget"`
 	Copies                 ceilingRecord `json:"copies"`
@@ -96,10 +97,11 @@ func toCapabilityRecord(c limes.Capability) capabilityRecord {
 		ID: c.ID, Issuer: c.Issuer, Subject: toPrincipalRecord(c.Subject), Audience: c.Audience,
 		Caveats: caveatsRecord{
 			Ops: cv.Ops, ResourcePrefixes: cv.ResourcePrefixes, ResourceURIs: cv.ResourceURIs,
-			Requests: ceilingRecord{Max: cv.Requests.Max, Unlimited: cv.Requests.Unlimited},
-			Budget:   ceilingRecord{Max: int64(cv.Budget.Max), Unlimited: cv.Budget.Unlimited},
-			Copies:   ceilingRecord{Max: cv.Copies.Max, Unlimited: cv.Copies.Unlimited},
-			UnitCode: cv.Budget.UnitCode, AllowTaintedRead: cv.AllowTaintedRead,
+			ResourceNamePrefixes: cv.ResourceNamePrefixes,
+			Requests:             ceilingRecord{Max: cv.Requests.Max, Unlimited: cv.Requests.Unlimited},
+			Budget:               ceilingRecord{Max: int64(cv.Budget.Max), Unlimited: cv.Budget.Unlimited},
+			Copies:               ceilingRecord{Max: cv.Copies.Max, Unlimited: cv.Copies.Unlimited},
+			UnitCode:             cv.Budget.UnitCode, AllowTaintedRead: cv.AllowTaintedRead,
 			IdempotencyKeyRequired: cv.IdempotencyKeyRequired, SourceIPCIDR: cv.SourceIPCIDR,
 		},
 		IssuedAt: c.IssuedAt, NotBefore: c.NotBefore, ExpiresAt: c.ExpiresAt, ParentID: c.ParentID,
@@ -113,6 +115,7 @@ func (r capabilityRecord) capability() limes.Capability {
 		ID: r.ID, Issuer: r.Issuer, Subject: r.Subject.principal(), Audience: r.Audience,
 		Caveats: limes.Caveats{
 			Ops: cv.Ops, ResourcePrefixes: cv.ResourcePrefixes, ResourceURIs: cv.ResourceURIs,
+			ResourceNamePrefixes:   cv.ResourceNamePrefixes,
 			Requests:               limes.RequestCeiling{Max: cv.Requests.Max, Unlimited: cv.Requests.Unlimited},
 			Budget:                 limes.BudgetCeiling{Max: limes.Nanos(cv.Budget.Max), Unlimited: cv.Budget.Unlimited, UnitCode: cv.UnitCode},
 			Copies:                 limes.CopyQuota{Max: cv.Copies.Max, Unlimited: cv.Copies.Unlimited},
