@@ -107,6 +107,7 @@ func newBenchEnv(b *testing.B, bound ed25519.PublicKey) benchEnv {
 	}
 	env := benchEnv{issuer: issuer, verifier: verifier, cache: cache, tenant: uuid.New()}
 	env.request = limes.IssueRequest{
+		ClientID: exampleClientID,
 		IssuedBy: limes.Principal{Type: limes.PrincipalTypeUser, TenantID: env.tenant, Subject: "operator"},
 		Subject:  limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: env.tenant, Subject: "agent"},
 		Audience: []string{benchAudience},

@@ -17,7 +17,7 @@ const actingAgent = "agent:planner"
 // user; introspection then answers sub as the user, act as the agent, and a
 // narrowed child's sub-agent acting for the user after the agent.
 func TestExchangeActsOnBehalfOfTheSubject(t *testing.T) {
-	f := newFixture(t, fixtureConfig{tokenType: limes.TokenTypeV7, narrow: true})
+	f := newFixture(t, fixtureConfig{narrow: true})
 	f.ex.cfg.Policy = func(ctx context.Context, g Grant) (limes.IssueRequest, error) {
 		issue, err := f.sharePolicy(ctx, g)
 		user := issue.Subject

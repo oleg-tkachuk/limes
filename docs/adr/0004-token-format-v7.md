@@ -1,6 +1,6 @@
 # ADR-0004: A capability format that is an RFC 9068 access token
 
-**Status:** Accepted, amended by [ADR-0005](0005-acting-on-behalf.md)
+**Status:** Accepted, amended by [ADR-0005](0005-acting-on-behalf.md) and [ADR-0006](0006-one-token-format.md)
 **Date:** 2026-10-27
 **Deciders:** Oleg Tkachuk
 

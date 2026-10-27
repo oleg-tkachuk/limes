@@ -50,7 +50,7 @@ Exactly one fact, and no rule or check:
 
 | Fact | Term | Meaning |
 |---|---|---|
-| `limes_capability` | string | The sealed capability token (a JWT, `typ: limes-cap-v6+jwt`). |
+| `limes_capability` | string | The sealed capability token (a JWT, `typ: at+jwt`). |
 
 A holder never writes this block.
 
@@ -124,5 +124,5 @@ to the shared seed (testdata/biscuit/).
 
 The vocabulary is part of the token's wire format: on the v1 line a fact is
 never renamed, retyped or given a looser meaning. A new fact is a new token
-type, accepted by verifiers before issuers mint it (`AcceptTokenTypes`,
-docs/api-review-v1.md P5), since a verifier refuses a fact it does not know.
+format (`limes_v`), read by verifiers before issuers mint it
+(docs/api-review-v1.md P5), since a verifier refuses a fact it does not know.

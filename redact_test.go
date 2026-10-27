@@ -228,7 +228,7 @@ func TestSealedKey(t *testing.T) {
 		if _, err := bad.Sign(nil, msg, crypto.Hash(0)); err == nil {
 			t.Errorf("%s: Sign succeeded", name)
 		}
-		if _, err := NewSigner(SignerConfig{KeyID: "k1", Key: bad}); err == nil {
+		if _, err := NewSigner(SignerConfig{KeyID: testKID, Key: bad}); err == nil {
 			t.Errorf("%s: NewSigner accepted it", name)
 		}
 	}

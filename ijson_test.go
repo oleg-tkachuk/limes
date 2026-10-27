@@ -24,7 +24,7 @@ func TestTokenIntegersStayWithinIJSON(t *testing.T) {
 	}
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	v := verifierFor(t, pub, VerifierConfig{})
-	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV6}
+	hdr := map[string]any{"alg": jose.AlgEd25519, "kid": testKID, "typ": TokenType}
 	for name, mod := range map[string]func(map[string]any){
 		"exp": func(c map[string]any) { c["exp"] = int64(MaxIJSONInteger) + 1 },
 		"max_requests": func(c map[string]any) {
@@ -48,7 +48,7 @@ func TestTokenClaimsAreUTF8(t *testing.T) {
 	if bytes.Equal(bad, raw) {
 		t.Fatalf("no %s in %s", issClaim, raw)
 	}
-	if _, err := parseClaims(jose.B64(bad), TokenTypeV6); err == nil {
+	if _, err := parseClaims(jose.B64(bad)); err == nil {
 		t.Error("claims with invalid UTF-8 were read")
 	}
 }
@@ -57,7 +57,7 @@ func TestTokenClaimsAreUTF8(t *testing.T) {
 // the I-JSON range fails the signing, not the next verification.
 func TestSignRefusesIntegersOutsideIJSON(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)
-	_, _, err := issuer.issue(context.Background(), IssueRequest{
+	_, _, err := issuer.issue(context.Background(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}},
 		NotBefore: time.Unix(-(MaxIJSONInteger + 1), 0),

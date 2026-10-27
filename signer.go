@@ -18,6 +18,7 @@ import (
 
 	"github.com/oleg-tkachuk/limes/internal/jose"
 	"github.com/oleg-tkachuk/limes/internal/link"
+	"github.com/oleg-tkachuk/limes/jwks"
 )
 
 // Signer holds the key an Issuer mints capability tokens with: it encodes a
@@ -33,8 +34,6 @@ type Signer struct {
 	// against it before a token carries it. An array, so Signer stays
 	// comparable.
 	pub [ed25519.PublicKeySize]byte
-	// typ is the token type it mints.
-	typ TokenType
 	// alg is the alg its tokens name.
 	alg SigningAlgorithm
 }
@@ -42,18 +41,14 @@ type Signer struct {
 // SignerConfig configures a Signer.
 type SignerConfig struct {
 	// KeyID is the kid tokens carry, by which verifiers find the key.
-	// Required.
+	// Required, in limes's namespace: jwks.KeyIDPrefix, as jwks.KeyID and
+	// GenerateKey write it.
 	KeyID string
 	// Key signs, sealed (SealKey): an ed25519.PrivateKey, or a
 	// crypto.Signer over a key held elsewhere — one that also implements
 	// ContextSigner is given the request's context. Its public key must be
 	// Ed25519. Required.
 	Key SealedKey
-	// TokenType is the format the signer mints. Empty: TokenTypeV6.
-	// TokenTypeV7, the RFC 9068 access token, is minted here once every
-	// verifier of the tokens reads it (VerifierConfig.AcceptTokenTypes), and
-	// needs each capability's ClientID.
-	TokenType TokenType
 	// Algorithm is the alg the tokens name. Empty: SigningAlgorithmEd25519,
 	// the name RFC 9864 gives the algorithm. SigningAlgorithmEdDSA names it
 	// as JOSE libraries that predate RFC 9864 do; the signature is the same,
@@ -70,11 +65,11 @@ type ContextSigner interface {
 	SignContext(ctx context.Context, rand io.Reader, message []byte, opts crypto.SignerOpts) ([]byte, error)
 }
 
-// NewSigner builds a Signer, refusing an empty kid or a key that is not
-// Ed25519.
+// NewSigner builds a Signer, refusing a kid outside limes's namespace or a
+// key that is not Ed25519.
 func NewSigner(cfg SignerConfig) (*Signer, error) {
-	if cfg.KeyID == "" {
-		return nil, errors.New("limes: SignerConfig.KeyID required")
+	if !jwks.IsKeyID(cfg.KeyID) {
+		return nil, fmt.Errorf("limes: SignerConfig.KeyID %q is not a limes kid (%q and a name)", cfg.KeyID, jwks.KeyIDPrefix)
 	}
 	key := cfg.Key.signer()
 	if key == nil {
@@ -88,15 +83,11 @@ func NewSigner(cfg SignerConfig) (*Signer, error) {
 	if !ok || len(pub) != ed25519.PublicKeySize {
 		return nil, fmt.Errorf("limes: SignerConfig.Key must be Ed25519, not %T", key.Public())
 	}
-	typ := cmp.Or(cfg.TokenType, TokenTypeV6)
-	if !slices.Contains(tokenTypes, typ) {
-		return nil, fmt.Errorf("limes: SignerConfig.TokenType %q is not one of %q", typ, tokenTypes)
-	}
 	alg := cmp.Or(cfg.Algorithm, SigningAlgorithmEd25519)
 	if !slices.Contains(signingAlgorithms, alg) {
 		return nil, fmt.Errorf("limes: SignerConfig.Algorithm %q is not one of %q", alg, signingAlgorithms)
 	}
-	return &Signer{keyID: cfg.KeyID, key: cfg.Key.s, pub: [ed25519.PublicKeySize]byte(pub), typ: typ, alg: alg}, nil
+	return &Signer{keyID: cfg.KeyID, key: cfg.Key.s, pub: [ed25519.PublicKeySize]byte(pub), alg: alg}, nil
 }
 
 // jwtHeader is the protected header. We use compact serialization:
@@ -133,16 +124,15 @@ type jwtClaims struct {
 	// sealed in; omitted on every ordinary token.
 	BiscuitRoot string `json:"limes_bsk,omitempty"`
 
-	// ClientID and Format are a TokenTypeV7 token's alone, and required of
-	// it: RFC 9068's client_id, and the capability format, which at+jwt
-	// leaves the type unable to name. A TokenTypeV6 token carries neither.
-	ClientID string `json:"client_id,omitempty"`
-	Format   int64  `json:"limes_v,omitzero"`
+	// ClientID and Format are required: RFC 9068's client_id, and the
+	// capability format, which at+jwt leaves the type unable to name.
+	ClientID string `json:"client_id"`
+	Format   int64  `json:"limes_v"`
 
-	// OnBehalfOf and Actor are a TokenTypeV7 token's whose capability acts
-	// on behalf of another (Capability.OnBehalfOf): that principal, whose
-	// subject sub then is, and RFC 8693's act naming the holder, prior
-	// actors nested within it. Present together or not at all.
+	// OnBehalfOf and Actor are a token's whose capability acts on behalf of
+	// another (Capability.OnBehalfOf): that principal, whose subject sub
+	// then is, and RFC 8693's act naming the holder, prior actors nested
+	// within it. Present together or not at all.
 	OnBehalfOf *wirePrincipal `json:"limes_on_behalf_of,omitzero"`
 	Actor      *actClaim      `json:"act,omitzero"`
 }
@@ -248,6 +238,9 @@ func (s *Signer) signGrant(ctx context.Context, g grant) (string, error) {
 	if c.Subject.TenantID == uuid.Nil() {
 		return "", errors.New("limes: Subject.TenantID required")
 	}
+	if c.Subject.Subject == "" {
+		return "", errors.New("limes: Subject.Subject required (RFC 9068 sub)")
+	}
 	if len(c.Caveats.Ops) == 0 {
 		return "", errors.New("limes: at least one Op required")
 	}
@@ -262,22 +255,15 @@ func (s *Signer) signGrant(ctx context.Context, g grant) (string, error) {
 		return "", errors.New("limes: ExpiresAt must be after IssuedAt")
 	}
 
-	header := jwtHeader{Alg: string(s.alg), Kid: s.keyID, Typ: string(s.typ)}
-	// A v6 token has no member for name prefixes: signing one without them
-	// would drop a restriction, and widen the capability.
-	if s.typ == TokenTypeV6 && len(c.Caveats.ResourceNamePrefixes) > 0 {
-		return "", errors.New("limes: ResourceNamePrefixes need a TokenTypeV7 signer")
-	}
+	header := jwtHeader{Alg: string(s.alg), Kid: s.keyID, Typ: TokenType}
 	// RFC 9068 makes client_id required of an at+jwt: none is invented.
-	if s.typ == TokenTypeV7 && c.ClientID == "" {
-		return "", errors.New("limes: a TokenTypeV7 capability needs a ClientID (RFC 9068 client_id)")
+	if c.ClientID == "" {
+		return "", errors.New("limes: a capability needs a ClientID (RFC 9068 client_id)")
 	}
-	if s.typ == TokenTypeV7 {
-		if err := checkActing(c); err != nil {
-			return "", err
-		}
+	if err := checkActing(c); err != nil {
+		return "", err
 	}
-	claims := claimsOf(g, s.typ)
+	claims := claimsOf(g)
 	// Nothing is signed that the verifier would refuse to read.
 	if err := checkIJSONIntegers(claims); err != nil {
 		return "", err
@@ -321,43 +307,23 @@ func (s *Signer) signGrant(ctx context.Context, g grant) (string, error) {
 	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig), nil
 }
 
-// A token's JWT "typ" header names its format. The verifier requires a type
-// it accepts (VerifierConfig.AcceptTokenTypes), so a different kind of EdDSA
-// JWT signed by the same key — an ID token, another product's token —
-// cannot be presented as a capability, and it reads each type's claims
-// under that type's schema.
-//
-// v6 spells every ceiling out — an absent max_requests, max_budget or
-// max_copies is a ceiling of 0, and only unlimited_requests,
-// unlimited_budget or unlimited_copies lifts it — names the parent agent's
-// run parent_run_id, and knows only the built-in operations and namespaced
-// ones. Earlier formats are not accepted: v5, which had no quota of Biscuit
-// copies (max_copies), v4, with limes_gen, parent_agent_id and the
-// unnamespaced presign, tag, search and embed, nor v3, which read an absent
-// bound as none.
-const TokenTypeV6 TokenType = "limes-cap-v6+jwt" //nolint:gosec // G101: a JWT type label, not a credential
-
-// TokenTypeV7 is the capability as an OAuth 2.0 access token in the JWT
-// profile of RFC 9068: typ at+jwt, so a resource server or gateway that
+// TokenType is the JWT typ of every capability token: an OAuth 2.0 access
+// token in the JWT profile of RFC 9068, so a resource server or gateway that
 // validates that profile reads it, with the claims the profile requires,
-// client_id among them, beside v6's. The type no longer names the format:
-// limes_v does, and a verifier reads the claims under the schema it names,
-// strictly as ever, so an at+jwt of another issuer's making, or a v6 payload
-// under this type, is refused before any claim is trusted. That makes the
-// issuer's key the one thing that tells a capability from another access
-// token: never share it with an authorization server that mints at+jwt
-// (docs/adr/0004-token-format-v7.md).
-const TokenTypeV7 TokenType = "at+jwt" //nolint:gosec // G101: a JWT type label, not a credential
+// client_id among them. The type does not name the format: limes_v does, and
+// a verifier reads the claims under the schema it names, strictly, so an
+// at+jwt of another issuer's making is refused before any claim is trusted.
+// What else tells a capability from another access token is its key, whose
+// kid is in limes's namespace (jwks.KeyIDPrefix): never share it with an
+// authorization server that mints at+jwt (docs/adr/0006-one-token-format.md).
+//
+// Earlier formats, each with a type of its own, are not accepted:
+// limes-cap-v6+jwt, v5, v4 and v3.
+const TokenType = "at+jwt" //nolint:gosec // G101: a JWT type label, not a credential
 
-// formatV7 is the limes_v of a TokenTypeV7 token. A later format under the
-// same type would be read by dispatching on it, as on typ before.
+// formatV7 is the limes_v of a capability token. A later format under the
+// same type would be read by dispatching on it.
 const formatV7 = 7
-
-// TokenType is a token format, as the JWT "typ" header names it.
-type TokenType string
-
-// tokenTypes are the token types this package has a schema for.
-var tokenTypes = []TokenType{TokenTypeV6, TokenTypeV7}
 
 // SigningAlgorithm is the JWS alg a token names: Ed25519, by either of its
 // names.
@@ -395,9 +361,9 @@ func parseHeader(seg string) (jwtHeader, error) {
 	return h, nil
 }
 
-// claimsOf is the payload Sign writes for c under the token type typ: the
-// one place a Capability becomes claims.
-func claimsOf(g grant, typ TokenType) jwtClaims {
+// claimsOf is the payload Sign writes for c: the one place a Capability
+// becomes claims.
+func claimsOf(g grant) jwtClaims {
 	c := g.Capability
 	claims := jwtClaims{
 		Issuer:    c.Issuer,
@@ -408,6 +374,8 @@ func claimsOf(g grant, typ TokenType) jwtClaims {
 		ID:        c.ID.String(),
 		Principal: toWirePrincipal(c.Subject),
 		Caveats:   toWireCaveats(c.Caveats),
+		ClientID:  c.ClientID,
+		Format:    formatV7,
 	}
 	if !c.NotBefore.IsZero() {
 		claims.NotBefore = c.NotBefore.Unix()
@@ -419,20 +387,16 @@ func claimsOf(g grant, typ TokenType) jwtClaims {
 	if c.ConfirmationJKT != "" {
 		claims.Confirmation = &cnfClaim{JKT: c.ConfirmationJKT}
 	}
-	if typ == TokenTypeV7 {
-		claims.ClientID, claims.Format = c.ClientID, formatV7
-		if c.OnBehalfOf != nil {
-			obo := toWirePrincipal(*c.OnBehalfOf)
-			claims.Subject, claims.OnBehalfOf = c.OnBehalfOf.Subject, &obo
-			claims.Actor = actOf(c.Subject.Subject, c.PriorActors)
-		}
+	if c.OnBehalfOf != nil {
+		obo := toWirePrincipal(*c.OnBehalfOf)
+		claims.Subject, claims.OnBehalfOf = c.OnBehalfOf.Subject, &obo
+		claims.Actor = actOf(c.Subject.Subject, c.PriorActors)
 	}
 	return claims
 }
 
-// parseClaims reads a payload under the schema of its token type typ, one
-// of tokenTypes.
-func parseClaims(seg string, typ TokenType) (*grant, error) {
+// parseClaims reads a payload under the schema its limes_v names.
+func parseClaims(seg string) (*grant, error) {
 	raw, err := jose.UnB64(seg)
 	if err != nil {
 		return nil, fmt.Errorf("limes: decode claims: %w", err)
@@ -441,26 +405,11 @@ func parseClaims(seg string, typ TokenType) (*grant, error) {
 	if err := json.Unmarshal(raw, &claims, strictClaims); err != nil {
 		return nil, fmt.Errorf("limes: parse claims: %w", err)
 	}
-	switch typ {
-	case TokenTypeV6:
-		if claims.ClientID != "" || claims.Format != 0 {
-			return nil, errors.New("limes: a v6 token carries no client_id or limes_v")
-		}
-		if len(claims.Caveats.ResourceNamePrefixes) > 0 {
-			return nil, errors.New("limes: a v6 token carries no resource_name_prefixes")
-		}
-		if claims.OnBehalfOf != nil || claims.Actor != nil {
-			return nil, errors.New("limes: a v6 token carries no limes_on_behalf_of or act")
-		}
-	case TokenTypeV7:
-		if claims.Format != formatV7 {
-			return nil, fmt.Errorf("limes: limes_v %d is not the format of typ %q (%d)", claims.Format, typ, formatV7)
-		}
-		if claims.ClientID == "" {
-			return nil, errors.New("limes: an at+jwt capability names its client_id (RFC 9068 §2.2)")
-		}
-	default:
-		return nil, fmt.Errorf("limes: no claims schema for typ %q", typ)
+	if claims.Format != formatV7 {
+		return nil, fmt.Errorf("limes: limes_v %d is not the format this package reads (%d)", claims.Format, formatV7)
+	}
+	if claims.ClientID == "" {
+		return nil, errors.New("limes: a capability names its client_id (RFC 9068 §2.2)")
 	}
 	if err := checkIJSONIntegers(claims); err != nil {
 		return nil, err
@@ -535,6 +484,9 @@ func checkActing(c Capability) error {
 // holder: each pair must agree, or a parser that takes one would read
 // another capability than one that takes the other.
 func readActing(claims jwtClaims) (*Principal, []string, error) {
+	if claims.Principal.Subject == "" {
+		return nil, nil, errors.New("limes: limes_principal names no subject (RFC 9068 sub)")
+	}
 	if claims.OnBehalfOf == nil {
 		if claims.Actor != nil {
 			return nil, nil, errors.New("limes: act without limes_on_behalf_of")
@@ -585,11 +537,10 @@ func decodeToken(token string) (any, error) {
 	if err != nil {
 		return Capability{}, err
 	}
-	h, err := parseHeader(parts.Header)
-	if err != nil {
+	if _, err := parseHeader(parts.Header); err != nil {
 		return Capability{}, err
 	}
-	c, err := parseClaims(parts.Payload, TokenType(h.Typ))
+	c, err := parseClaims(parts.Payload)
 	if err != nil {
 		return Capability{}, err
 	}

@@ -25,14 +25,14 @@ func TestSign_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
-	signer, err := NewSigner(SignerConfig{KeyID: "test-key-1", Key: SealKey(priv)})
+	signer, err := NewSigner(SignerConfig{KeyID: testKID, Key: SealKey(priv)})
 	if err != nil {
 		t.Fatalf("new signer: %v", err)
 	}
 
 	tenantID := uuid.New()
 	now := time.Now().UTC().Truncate(time.Second)
-	cap := Capability{
+	cap := Capability{ClientID: testClientID,
 		ID:     uuid.New(),
 		Issuer: "limes-test",
 		Subject: Principal{
@@ -94,11 +94,11 @@ func TestSign_RejectsInvalid(t *testing.T) {
 	t.Parallel()
 
 	_, priv, _ := ed25519.GenerateKey(rand.Reader)
-	signer, _ := NewSigner(SignerConfig{KeyID: "k", Key: SealKey(priv)})
+	signer, _ := NewSigner(SignerConfig{KeyID: testKID, Key: SealKey(priv)})
 
 	now := time.Now()
 	base := func() Capability {
-		return Capability{
+		return Capability{ClientID: testClientID,
 			ID:     uuid.New(),
 			Issuer: "i",
 			Subject: Principal{
@@ -135,19 +135,23 @@ func TestSign_TamperDetection(t *testing.T) {
 	t.Parallel()
 
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
-	signer, _ := NewSigner(SignerConfig{KeyID: "k", Key: SealKey(priv)})
+	signer, _ := NewSigner(SignerConfig{KeyID: testKID, Key: SealKey(priv)})
 
 	now := time.Now()
 	cap := Capability{
 		ID:        uuid.New(),
 		Issuer:    "i",
-		Subject:   Principal{TenantID: uuid.New(), Type: PrincipalTypeAgent},
+		Subject:   Principal{TenantID: uuid.New(), Type: PrincipalTypeAgent, Subject: "agent"},
 		Audience:  []string{audienceData},
 		Caveats:   Caveats{Ops: []Op{OpGet}},
 		IssuedAt:  now,
 		ExpiresAt: now.Add(time.Minute),
+		ClientID:  testClientID,
 	}
-	token, _ := signer.sign(context.Background(), cap)
+	token, err := signer.sign(context.Background(), cap)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Flip a byte in the middle of the payload segment.
 	mid := len(token) / 2
@@ -173,10 +177,10 @@ func TestNarrows_RejectsWidening(t *testing.T) {
 	tenantID := uuid.New()
 	now := time.Now().UTC()
 
-	parent := Capability{
+	parent := Capability{ClientID: testClientID,
 		ID:       uuid.New(),
 		Issuer:   "i",
-		Subject:  Principal{TenantID: tenantID, Type: PrincipalTypeAgent},
+		Subject:  Principal{TenantID: tenantID, Type: PrincipalTypeAgent, Subject: "agent"},
 		Audience: []string{audienceData},
 		Caveats: Caveats{
 			Ops:              []Op{OpGet, OpList},
@@ -253,10 +257,10 @@ func TestNarrows_RejectsCrossCurrency(t *testing.T) {
 	t.Parallel()
 	tenantID := uuid.New()
 	now := time.Now().UTC()
-	parent := Capability{
+	parent := Capability{ClientID: testClientID,
 		ID:       uuid.New(),
 		Issuer:   "i",
-		Subject:  Principal{TenantID: tenantID, Type: PrincipalTypeAgent},
+		Subject:  Principal{TenantID: tenantID, Type: PrincipalTypeAgent, Subject: "agent"},
 		Audience: []string{audienceData},
 		Caveats: Caveats{
 			Ops:    []Op{OpGet},
@@ -298,10 +302,10 @@ func TestNarrows_AcceptsValidNarrowing(t *testing.T) {
 
 	tenantID := uuid.New()
 	now := time.Now().UTC()
-	parent := Capability{
+	parent := Capability{ClientID: testClientID,
 		ID:       uuid.New(),
 		Issuer:   "i",
-		Subject:  Principal{TenantID: tenantID, Type: PrincipalTypeAgent},
+		Subject:  Principal{TenantID: tenantID, Type: PrincipalTypeAgent, Subject: "agent"},
 		Audience: []string{audienceData, audienceMCP},
 		Caveats: Caveats{
 			Ops:              []Op{OpGet, OpList, "index:search"},
@@ -312,10 +316,10 @@ func TestNarrows_AcceptsValidNarrowing(t *testing.T) {
 		IssuedAt:  now,
 		ExpiresAt: now.Add(time.Hour),
 	}
-	child := Capability{
+	child := Capability{ClientID: testClientID,
 		ID:       uuid.New(),
 		Issuer:   "i",
-		Subject:  Principal{TenantID: tenantID, Type: PrincipalTypeAgent},
+		Subject:  Principal{TenantID: tenantID, Type: PrincipalTypeAgent, Subject: "agent"},
 		Audience: []string{audienceData},
 		Caveats: Caveats{
 			Ops:              []Op{OpGet},
@@ -354,7 +358,7 @@ func TestIssuerSignsUnderTheCallersContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := &ctxKey{PrivateKey: priv}
-	signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(key)})
+	signer, err := NewSigner(SignerConfig{KeyID: testKID, Key: SealKey(key)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,7 +367,7 @@ func TestIssuerSignsUnderTheCallersContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.WithValue(context.Background(), requestValue{}, "request")
-	req := IssueRequest{
+	req := IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet, OpShare}},
 	}
@@ -418,14 +422,15 @@ func TestSignerSignsThroughAnOpaqueKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(opaqueKey{priv})})
+	signer, err := NewSigner(SignerConfig{KeyID: testKID, Key: SealKey(opaqueKey{priv})})
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
 	token, err := signer.sign(context.Background(), Capability{
-		ID: uuid.New(), Issuer: "i", Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New()},
+		ID: uuid.New(), Issuer: "i", Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, IssuedAt: now, ExpiresAt: now.Add(time.Minute),
+		ClientID: testClientID,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -439,8 +444,8 @@ func TestSignerSignsThroughAnOpaqueKey(t *testing.T) {
 	}
 	for name, cfg := range map[string]SignerConfig{
 		"no kid":      {Key: SealKey(priv)},
-		"no key":      {KeyID: "k1"},
-		"a P-256 key": {KeyID: "k1", Key: SealKey(ec)},
+		"no key":      {KeyID: testKID},
+		"a P-256 key": {KeyID: testKID, Key: SealKey(ec)},
 	} {
 		if _, err := NewSigner(cfg); err == nil {
 			t.Errorf("NewSigner with %s: accepted", name)
@@ -483,15 +488,15 @@ func TestSignerRefusesASignatureItsKeyDoesNotVerify(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	c := Capability{
-		ID: uuid.New(), Issuer: "i", Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New()},
+	c := Capability{ClientID: testClientID,
+		ID: uuid.New(), Issuer: "i", Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, IssuedAt: now, ExpiresAt: now.Add(time.Minute),
 	}
 	for name, key := range map[string]crypto.Signer{
 		"another key's signature": misreportingKey{reported: pub, signs: other},
 		"no signature at all":     garbageKey{reported: pub},
 	} {
-		signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(key)})
+		signer, err := NewSigner(SignerConfig{KeyID: testKID, Key: SealKey(key)})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -8,12 +8,14 @@ import (
 	"uuid"
 
 	"github.com/oleg-tkachuk/limes/internal/jose"
+	"github.com/oleg-tkachuk/limes/jwks"
 )
 
 // The typs of the retired formats.
 const (
-	retiredV4Type TokenType = "limes-cap-v4+jwt" //nolint:gosec // G101: a JWT type label, not a credential
-	retiredV5Type TokenType = "limes-cap-v5+jwt" //nolint:gosec // G101: a JWT type label, not a credential
+	retiredV4Type = "limes-cap-v4+jwt" //nolint:gosec // G101: a JWT type label, not a credential
+	retiredV5Type = "limes-cap-v5+jwt" //nolint:gosec // G101: a JWT type label, not a credential
+	retiredV6Type = "limes-cap-v6+jwt" //nolint:gosec // G101: a JWT type label, not a credential
 )
 
 // What v4 carried and v5 does not: a claim, an unnamespaced operation and the
@@ -24,9 +26,10 @@ const (
 	retiredParentRunKey  = "parent_agent_id"
 )
 
-// headerOf is the protected header of a token of type typ, signed by key k1.
-func headerOf(typ TokenType) map[string]any {
-	return map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": typ}
+// headerOf is the protected header of a token of type typ, signed under
+// testKID.
+func headerOf(typ string) map[string]any {
+	return map[string]any{"alg": jose.AlgEd25519, "kid": testKID, "typ": typ}
 }
 
 // withParentRun names a parent run in the token's agent details, under member.
@@ -36,25 +39,25 @@ func withParentRun(member string) func(map[string]any) {
 	}
 }
 
-// A v6 token is read under v6's schema alone: nothing v4 carried passes, a
-// copy quota does, and a token of the v4 or v5 type is refused however well
-// formed.
-func TestTokenIsReadUnderTheV6Schema(t *testing.T) {
+// A token is read under its schema alone: nothing v4 carried passes, a copy
+// quota does, and a token of a retired type is refused however well formed.
+func TestTokenIsReadUnderItsSchema(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	v := verifierFor(t, pub, VerifierConfig{})
 	for name, tc := range map[string]struct {
-		typ    TokenType
+		typ    string
 		mutate func(map[string]any)
 		ok     bool
 	}{
-		"v6":                             {TokenTypeV6, func(map[string]any) {}, true},
-		"v6 naming the parent run":       {TokenTypeV6, withParentRun("parent_run_id"), true},
-		"v6 with a copy quota":           {TokenTypeV6, func(c map[string]any) { c["limes_caveats"].(map[string]any)["max_copies"] = 3 }, true},
-		"v6 with limes_gen":              {TokenTypeV6, func(c map[string]any) { c[retiredGenerationKey] = 1 }, false},
-		"v6 with an unnamespaced v4 op":  {TokenTypeV6, func(c map[string]any) { c["limes_caveats"].(map[string]any)["ops"] = []string{retiredV4Op} }, false},
-		"v6 naming the parent run as v4": {TokenTypeV6, withParentRun(retiredParentRunKey), false},
-		"a v4 token":                     {retiredV4Type, func(map[string]any) {}, false},
-		"a v5 token":                     {retiredV5Type, func(map[string]any) {}, false},
+		"current":                     {TokenType, func(map[string]any) {}, true},
+		"naming the parent run":       {TokenType, withParentRun("parent_run_id"), true},
+		"with a copy quota":           {TokenType, func(c map[string]any) { c["limes_caveats"].(map[string]any)["max_copies"] = 3 }, true},
+		"with limes_gen":              {TokenType, func(c map[string]any) { c[retiredGenerationKey] = 1 }, false},
+		"with an unnamespaced v4 op":  {TokenType, func(c map[string]any) { c["limes_caveats"].(map[string]any)["ops"] = []string{retiredV4Op} }, false},
+		"naming the parent run as v4": {TokenType, withParentRun(retiredParentRunKey), false},
+		"a v4 token":                  {retiredV4Type, func(map[string]any) {}, false},
+		"a v5 token":                  {retiredV5Type, func(map[string]any) {}, false},
+		"a v6 token":                  {retiredV6Type, func(map[string]any) {}, false},
 	} {
 		claims := validClaims(uuid.New())
 		tc.mutate(claims)
@@ -71,36 +74,59 @@ func TestTokenIsReadUnderTheV6Schema(t *testing.T) {
 	}
 }
 
-// A Signer mints v6 by default, and refuses a type nothing reads — v4 and
-// v5 among them.
-func TestSignerMintsTheTypeItIsConfiguredWith(t *testing.T) {
+// A Signer writes at+jwt under its kid, which must be in limes's namespace.
+func TestSignerWritesAnAccessTokenUnderALimesKid(t *testing.T) {
 	_, priv, _ := ed25519.GenerateKey(nil)
-	for _, configured := range []TokenType{"", TokenTypeV6} {
-		s, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(priv), TokenType: configured})
-		if err != nil {
-			t.Fatalf("NewSigner(%q): %v", configured, err)
-		}
-		token, err := s.sign(context.Background(), signableCapability())
-		if err != nil {
-			t.Fatalf("sign: %v", err)
-		}
-		parts, err := jose.Split(token)
-		if err != nil {
-			t.Fatal(err)
-		}
-		h, err := parseHeader(parts.Header)
-		if err != nil || TokenType(h.Typ) != TokenTypeV6 {
-			t.Errorf("configured %q: typ = %q, %v; want %q", configured, h.Typ, err, TokenTypeV6)
-		}
-		if _, err := parseClaims(parts.Payload, TokenTypeV6); err != nil {
-			t.Errorf("configured %q: the claims do not read as v6: %v", configured, err)
+	s, err := NewSigner(SignerConfig{KeyID: testKID, Key: SealKey(priv)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := s.sign(context.Background(), signableCapability())
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	parts, err := jose.Split(token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h, err := parseHeader(parts.Header); err != nil || h.Typ != TokenType || h.Kid != testKID {
+		t.Errorf("header %+v, %v; want typ %q under %q", h, err, TokenType, testKID)
+	}
+	for _, kid := range []string{"", "k1", jwks.KeyIDPrefix, "LIMES:k1", " " + testKID} {
+		if _, err := NewSigner(SignerConfig{KeyID: kid, Key: SealKey(priv)}); err == nil {
+			t.Errorf("NewSigner signs under %q, outside limes's namespace", kid)
 		}
 	}
-	for _, typ := range []TokenType{retiredV4Type, retiredV5Type, "limes-cap-v7+jwt"} {
-		if _, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(priv), TokenType: typ}); err == nil {
-			t.Errorf("NewSigner built a signer for %q, which nothing reads", typ)
-		}
+}
+
+// A token under a kid outside limes's namespace is refused before any key is
+// looked up, even when the key it names would verify it.
+func TestVerifyRefusesAKidOutsideTheNamespace(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	const foreign = "k1"
+	lookups := &countingKeys{KeyResolver: staticKeys(t, map[string]ed25519.PublicKey{foreign: pub, testKID: pub})}
+	v, err := NewVerifier(VerifierConfig{Keys: lookups, Revocations: newMemStore(), TrustedIssuers: []string{"iss"}})
+	if err != nil {
+		t.Fatal(err)
 	}
+	token := resign(t, priv, map[string]any{"alg": jose.AlgEd25519, "kid": foreign, "typ": TokenType}, validClaims(uuid.New()))
+	if _, err := v.Verify(t.Context(), VerifyRequest{Token: token, Audience: audienceData}); !errors.Is(err, ErrInvalidToken) {
+		t.Errorf("a token under kid %q: %v, want ErrInvalidToken", foreign, err)
+	}
+	if lookups.n != 0 {
+		t.Errorf("%d key lookups for a kid outside the namespace", lookups.n)
+	}
+}
+
+// countingKeys counts the keys looked up.
+type countingKeys struct {
+	KeyResolver
+	n int
+}
+
+func (k *countingKeys) PublicKey(ctx context.Context, kid string) (ed25519.PublicKey, error) {
+	k.n++
+	return k.KeyResolver.PublicKey(ctx, kid)
 }
 
 // signableCapability is a capability sign accepts.
@@ -110,6 +136,6 @@ func signableCapability() Capability {
 		ID: uuid.New(), Issuer: "iss",
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "s"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}},
-		IssuedAt: now, ExpiresAt: now.Add(tokenTimeResolution),
+		IssuedAt: now, ExpiresAt: now.Add(tokenTimeResolution), ClientID: testClientID,
 	}
 }

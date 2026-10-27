@@ -14,6 +14,23 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.131.0
+
+- One token format: every capability is an RFC 9068 access token, typed
+  `at+jwt`. `TokenTypeV6`, `TokenTypeV7`, the `TokenType` type,
+  `SignerConfig.TokenType` and `VerifierConfig.AcceptTokenTypes` are gone;
+  `limes.TokenType` is the constant `"at+jwt"`. A `limes-cap-v6+jwt` token
+  is refused with `ErrInvalidToken`: issue it again.
+- `IssueRequest.ClientID` and `IssueRequest.Subject.Subject` are required
+  (RFC 9068's `client_id` and `sub`), as is `DelegateRequest.Subject.Subject`;
+  a request without them is `ErrInvalidRequest`. A delegated child still
+  takes its parent's client.
+- A signer's kid is in limes's namespace: `jwks.KeyIDPrefix` (`limes:`) and a
+  name. `jwks.KeyID` and `GenerateKey` write one; `NewSigner` refuses any
+  other, and a verifier refuses a token under any other before it looks a
+  key up. Rotate a key under a kid of your own choosing to one under
+  `jwks.KeyID`, publishing both until the old tokens expire.
+
 ## exchange/v0.2.0
 
 - `JWTVerifierConfig.Keys` is a `KeySource`, where it was a `jwk.Set`:

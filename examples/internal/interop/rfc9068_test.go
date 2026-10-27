@@ -16,6 +16,7 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwt"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/jwks"
 )
 
 // RFC 9068 (JWT profile for OAuth 2.0 access tokens): the types §2.1 allows
@@ -74,11 +75,22 @@ func accessTokenClaims() map[string]any {
 	}
 }
 
+// retiredCapabilityType is the typ of the capability format retired before
+// 1.0, which limes no longer reads.
+const retiredCapabilityType = "limes-cap-v6+jwt"
+
 // signAs is payload signed with the issuer's key by jwx, under typ.
 func (f *fixture) signAs(t *testing.T, typ string, payload []byte) string {
 	t.Helper()
+	return f.signUnder(t, typ, f.kid, payload)
+}
+
+// signUnder is payload signed with the issuer's key by jwx, under typ and
+// kid.
+func (f *fixture) signUnder(t *testing.T, typ, kid string, payload []byte) string {
+	t.Helper()
 	headers := jws.NewHeaders()
-	for name, value := range map[string]any{jws.TypeKey: typ, jws.KeyIDKey: f.kid} {
+	for name, value := range map[string]any{jws.TypeKey: typ, jws.KeyIDKey: kid} {
 		if err := headers.Set(name, value); err != nil {
 			t.Fatal(err)
 		}
@@ -105,25 +117,13 @@ func TestRFC9068ValidatorAcceptsAnAccessToken(t *testing.T) {
 	}
 }
 
-// A v6 capability is not an RFC 9068 access token, and differs from one in
-// two things alone: its typ, which names the capability format, and the
-// client_id it has no member for. Every other claim RFC 9068 requires it
-// carries.
-func TestACapabilityIsNotAnRFC9068AccessToken(t *testing.T) {
+// A capability is an RFC 9068 access token: a validator of the profile finds
+// nothing wrong with it, and a limes verifier reads it.
+func TestACapabilityIsAnRFC9068AccessToken(t *testing.T) {
 	f := newFixture(t)
-	faults := rfc9068Faults(t, f.issue(t, "").Token, f.fetchKeys(t))
-	if want := []string{headerType, claimClientID}; !slices.Equal(faults, want) {
-		t.Errorf("a capability's faults as an RFC 9068 access token: %q, want %q", faults, want)
-	}
-}
-
-// A v7 capability is an RFC 9068 access token: a validator of the profile
-// finds nothing wrong with it, and a limes verifier reads it.
-func TestAV7CapabilityIsAnRFC9068AccessToken(t *testing.T) {
-	f := newFixtureOf(t, "", limes.TokenTypeV7)
 	res := f.issue(t, "")
 	if faults := rfc9068Faults(t, res.Token, f.fetchKeys(t)); len(faults) != 0 {
-		t.Errorf("a v7 capability's faults as an RFC 9068 access token: %q", faults)
+		t.Errorf("a capability's faults as an RFC 9068 access token: %q", faults)
 	}
 	got, err := f.verifier.Verify(t.Context(), limes.VerifyRequest{Token: res.Token, Audience: audience})
 	if err != nil || got.Capability().ClientID != interopClient {
@@ -141,12 +141,12 @@ const (
 	actingSubject = "agent-searcher"
 )
 
-// A v7 capability acting for a user, delegated on to a sub-agent, is read by
+// A capability acting for a user, delegated on to a sub-agent, is read by
 // jwx as RFC 8693 and RFC 9068 describe it: sub the user, act the sub-agent,
 // the agent nested within as the prior actor; and it is still an RFC 9068
 // access token.
-func TestJWXReadsWhomAV7CapabilityActsFor(t *testing.T) {
-	f := newFixtureOf(t, "", limes.TokenTypeV7)
+func TestJWXReadsWhomACapabilityActsFor(t *testing.T) {
+	f := newFixture(t)
 	user := limes.Principal{Type: limes.PrincipalTypeUser, TenantID: f.tenant, Subject: actingUser}
 	parent, err := f.issuer.Issue(t.Context(), limes.IssueRequest{
 		ClientID: interopClient, OnBehalfOf: &user,
@@ -189,10 +189,9 @@ func TestJWXReadsWhomAV7CapabilityActsFor(t *testing.T) {
 	}
 }
 
-// An at+jwt signed with the issuer's own key passes as a capability only with
-// a v7 payload: a v6 capability's payload under the type, whose format
-// limes_v does not name, is refused, while the same payload under the v6
-// type verifies.
+// A capability's own payload, signed by jwx with the issuer's key, passes
+// only typed at+jwt and under a limes kid: under another type, a retired one
+// among them, or a kid outside limes's namespace, it is refused.
 func TestLimesRefusesAnAccessToken(t *testing.T) {
 	f := newFixture(t)
 	token := f.issue(t, "").Token
@@ -201,33 +200,33 @@ func TestLimesRefusesAnAccessToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
-		typ      string
+		typ, kid string
 		accepted bool
 	}{
-		{string(limes.TokenTypeV6), true},
-		{typAccessToken, false},
-		{typAccessTokenMedia, false},
+		{typAccessToken, f.kid, true},
+		{typAccessTokenMedia, f.kid, false},
+		{retiredCapabilityType, f.kid, false},
+		{typAccessToken, strings.TrimPrefix(f.kid, jwks.KeyIDPrefix), false},
 	} {
-		_, err := f.verifier.Verify(t.Context(), limes.VerifyRequest{Token: f.signAs(t, tc.typ, payload), Audience: audience})
+		_, err := f.verifier.Verify(t.Context(), limes.VerifyRequest{Token: f.signUnder(t, tc.typ, tc.kid, payload), Audience: audience})
 		switch {
 		case tc.accepted && err != nil:
-			t.Errorf("typ %s: %v", tc.typ, err)
+			t.Errorf("typ %s under %s: %v", tc.typ, tc.kid, err)
 		case !tc.accepted && !errors.Is(err, limes.ErrInvalidToken):
-			t.Errorf("typ %s: %v, want %v", tc.typ, err, limes.ErrInvalidToken)
+			t.Errorf("typ %s under %s: %v, want %v", tc.typ, tc.kid, err, limes.ErrInvalidToken)
 		}
 	}
 }
 
-// Nor does an RFC 9068 access token with every claim it requires, even under
-// the capability type: it has none of a capability's own claims, and a
-// client_id the capability schema does not define.
+// Nor does an RFC 9068 access token with every claim it requires, signed by
+// the issuer's key under its kid: it has none of a capability's own claims.
 func TestLimesRefusesAnAccessTokenPayload(t *testing.T) {
 	f := newFixture(t)
 	payload, err := json.Marshal(accessTokenClaims())
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, typ := range []string{string(limes.TokenTypeV6), typAccessToken} {
+	for _, typ := range []string{typAccessToken, typAccessTokenMedia} {
 		_, err := f.verifier.Verify(t.Context(), limes.VerifyRequest{Token: f.signAs(t, typ, payload), Audience: audience})
 		if !errors.Is(err, limes.ErrInvalidToken) {
 			t.Errorf("an access token payload typed %s: %v", typ, err)

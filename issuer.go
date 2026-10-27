@@ -145,7 +145,8 @@ type IssueRequest struct {
 	// thumbprint (dpop.Thumbprint); empty issues a bearer capability.
 	ConfirmationJKT string
 	// ClientID is the OAuth client the capability is granted to
-	// (Capability.ClientID). Required by a signer of TokenTypeV7.
+	// (Capability.ClientID): the client of the access token it was exchanged
+	// for, or the software the subject runs as. Required.
 	ClientID string
 	// OnBehalfOf is the principal Subject acts for (Capability.OnBehalfOf),
 	// of Subject's tenant; nil when Subject acts for itself.
@@ -187,11 +188,17 @@ func (i *Issuer) issue(ctx context.Context, req IssueRequest) (Capability, strin
 	if req.Subject.TenantID == uuid.Nil() {
 		return Capability{}, "", invalidRequest("Issue requires Subject.TenantID")
 	}
+	if req.Subject.Subject == "" {
+		return Capability{}, "", invalidRequest("Issue requires Subject.Subject (RFC 9068 sub)")
+	}
 	if err := req.Subject.Validate(); err != nil {
 		return Capability{}, "", err
 	}
 	if req.IssuedBy.Subject == "" {
 		return Capability{}, "", invalidRequest("IssuedBy is required")
+	}
+	if req.ClientID == "" {
+		return Capability{}, "", invalidRequest("ClientID is required (RFC 9068 client_id)")
 	}
 	if req.OnBehalfOf != nil {
 		if err := validateOnBehalfOf(*req.OnBehalfOf, req.Subject); err != nil {
@@ -423,6 +430,9 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 	}
 	if req.Subject.TenantID == uuid.Nil() {
 		req.Subject.TenantID = parent.Subject.TenantID
+	}
+	if req.Subject.Subject == "" {
+		return Capability{}, "", invalidRequest("Delegate requires Subject.Subject (RFC 9068 sub)")
 	}
 	if err := req.Subject.Validate(); err != nil {
 		return Capability{}, "", err

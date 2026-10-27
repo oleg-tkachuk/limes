@@ -90,7 +90,7 @@ func TestWireStructsRoundTrip(t *testing.T) {
 // so a reader shown them sees what the token says.
 func TestMarshalCaveatsIsTheClaim(t *testing.T) {
 	_, priv, _ := ed25519.GenerateKey(nil)
-	_, token, err := issuerOf(t, priv, TokenTypeV7).issue(context.Background(), IssueRequest{
+	_, token, err := issuerOf(t, priv).issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, TTL: time.Hour, ClientID: testClientID,
 		Caveats: Caveats{
@@ -114,7 +114,7 @@ func TestMarshalCaveatsIsTheClaim(t *testing.T) {
 	if err := json.Unmarshal(raw, &claims); err != nil {
 		t.Fatal(err)
 	}
-	cap, err := parseClaims(parts.Payload, TokenTypeV7)
+	cap, err := parseClaims(parts.Payload)
 	if err != nil {
 		t.Fatal(err)
 	}

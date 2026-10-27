@@ -25,7 +25,7 @@ const fixture = JSON.parse(readFileSync(new URL("fixture.json", import.meta.url)
 const ED25519 = "Ed25519";
 const EDDSA = "EdDSA";
 const ALGORITHMS = [ED25519, EDDSA];
-const TOKEN_TYPE = "limes-cap-v6+jwt";
+const TOKEN_TYPE = "at+jwt";
 // MS_PER_SECOND turns the fixture's seconds into a Date.
 const MS_PER_SECOND = 1000;
 // A clock past every token's end.

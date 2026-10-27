@@ -15,6 +15,9 @@ import (
 
 // tree inserts a root with the given caveats and n children each holding
 // childCaveats, returning the root and children IDs.
+// testClientID is the OAuth client the tests' capabilities name.
+const testClientID = "test-client"
+
 func tree(t *testing.T, s *Store, root limes.Caveats, n int, child limes.Caveats) (uuid.UUID, []uuid.UUID, uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
@@ -135,6 +138,7 @@ func TestVerifierRejectsChildOfRevokedParent(t *testing.T) {
 	})
 
 	parentResult, err := issuer.Issue(ctx, limes.IssueRequest{
+		ClientID: testClientID,
 		IssuedBy: limes.Principal{Subject: "op"},
 		Subject:  limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: uuid.New(), Subject: "orchestrator"},
 		Audience: []string{"data"},

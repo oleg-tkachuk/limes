@@ -20,18 +20,16 @@ import (
 // FuzzParseClaims holds the claims reader to its strictness: whatever it
 // accepts names a capability, and its sub is its principal's.
 func FuzzParseClaims(f *testing.F) {
-	f.Add([]byte(`{"iss":"i","sub":"s","aud":["data"],"iat":1,"exp":2,"jti":"0190a5c3-0000-7000-8000-000000000000","limes_principal":{"tenant_id":"11111111-1111-1111-1111-111111111111","subject":"s"},"limes_caveats":{"ops":["get"],"max_budget":"1.5"}}`))
+	f.Add([]byte(`{"iss":"i","sub":"s","aud":["data"],"iat":1,"exp":2,"jti":"0190a5c3-0000-7000-8000-000000000000","limes_principal":{"tenant_id":"11111111-1111-1111-1111-111111111111","subject":"s"},"limes_caveats":{"ops":["get"],"max_budget":"1.5"},"client_id":"c","limes_v":7}`))
 	f.Add([]byte(`{"iss":"a","iss":"b"}`))
 	f.Add([]byte(`{"limes_caveats":{"Ops":["get"]}}`))
 	f.Fuzz(func(t *testing.T, raw []byte) {
-		for _, typ := range tokenTypes {
-			c, err := parseClaims(jose.B64(raw), typ)
-			if err != nil {
-				continue
-			}
-			if c.Caveats.Budget.Max < 0 || c.Caveats.Budget.Max > MaxNanos {
-				t.Fatalf("%s accepted a budget of %d", typ, int64(c.Caveats.Budget.Max))
-			}
+		c, err := parseClaims(jose.B64(raw))
+		if err != nil {
+			return
+		}
+		if c.Caveats.Budget.Max < 0 || c.Caveats.Budget.Max > MaxNanos {
+			t.Fatalf("accepted a budget of %d", int64(c.Caveats.Budget.Max))
 		}
 	})
 }

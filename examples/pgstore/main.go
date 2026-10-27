@@ -58,6 +58,10 @@ GRANT INSERT, SELECT ON public.calls TO ` + appUser
 	countCharge = `SELECT count(*) FROM limes.charges`
 )
 
+// clientID is the OAuth client the capability is granted to (RFC 9068
+// client_id): the software its subject runs as.
+const clientID = "example-agent"
+
 func main() {
 	ctx := context.Background()
 	log := demo.New("pgstore")
@@ -125,6 +129,7 @@ func main() {
 	demo.Must(log, err, "set the tenant's budget")
 
 	issued, err := issuer.Issue(inTenant, limes.IssueRequest{
+		ClientID: clientID,
 		IssuedBy: limes.Principal{Type: limes.PrincipalTypeUser, TenantID: tenant, Subject: "operator@example.com"},
 		Subject:  limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: tenant, Subject: "research-agent"},
 		Audience: []string{audience},

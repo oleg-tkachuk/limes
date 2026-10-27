@@ -35,6 +35,7 @@ func exampleToken() (string, ed25519.PublicKey) {
 		log.Fatal(err)
 	}
 	issued, err := issuer.Issue(context.Background(), limes.IssueRequest{
+		ClientID: testClientID,
 		IssuedBy: limes.Principal{Subject: "operator@example.com"},
 		Subject:  limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: uuid.New(), Subject: "research-agent"},
 		Audience: []string{"my-service"},

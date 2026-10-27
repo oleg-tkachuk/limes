@@ -13,6 +13,9 @@ import (
 
 // Guards for edge cases no other test covers.
 
+// newKID is the kid of the key rotated in.
+const newKID = jwks.KeyIDPrefix + "new"
+
 func testIssuer(t *testing.T, kid string, priv ed25519.PrivateKey, now func() time.Time) *Issuer {
 	t.Helper()
 	signer, err := NewSigner(SignerConfig{KeyID: kid, Key: SealKey(priv)})
@@ -31,7 +34,7 @@ func testIssuer(t *testing.T, kid string, priv ed25519.PrivateKey, now func() ti
 
 func mintToken(t *testing.T, iss *Issuer) string {
 	t.Helper()
-	_, token, err := iss.issue(context.Background(), IssueRequest{
+	_, token, err := iss.issue(context.Background(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject: Principal{
 			Type: PrincipalTypeService, TenantID: uuid.MustParse(goldenTenant), Subject: "svc",
@@ -67,7 +70,7 @@ func TestRetiredButPublishedKeyStillVerifies(t *testing.T) {
 
 	// Step 1 of rotation: publish the new key alongside the old.
 	resolver := staticKeys(t, map[string]ed25519.PublicKey{goldenKID: oldPub})
-	if err := resolver.SetKey("new-kid", newPub); err != nil {
+	if err := resolver.SetKey(newKID, newPub); err != nil {
 		t.Fatal(err)
 	}
 
@@ -84,7 +87,7 @@ func TestRetiredButPublishedKeyStillVerifies(t *testing.T) {
 	}
 
 	// Step 2: new signing key issues tokens that also verify.
-	newToken := mintToken(t, testIssuer(t, "new-kid", newPriv, goldenClock))
+	newToken := mintToken(t, testIssuer(t, newKID, newPriv, goldenClock))
 	if _, err := verifier.Verify(context.Background(), VerifyRequest{Token: newToken, Audience: goldenAudience}); err != nil {
 		t.Fatalf("token under the new key must verify: %v", err)
 	}
@@ -103,7 +106,7 @@ func TestWithdrawnKeyStopsVerifying(t *testing.T) {
 
 	// The old kid is simply absent from the published set.
 	verifier, err := NewVerifier(VerifierConfig{
-		Keys:        staticKeys(t, map[string]ed25519.PublicKey{"new-kid": newPub}),
+		Keys:        staticKeys(t, map[string]ed25519.PublicKey{newKID: newPub}),
 		Revocations: revLookup{}, TrustedIssuers: []string{goldenIssuer}, Now: goldenClock,
 	})
 	if err != nil {

@@ -20,7 +20,7 @@ func (downLookup) IsRevoked(context.Context, uuid.UUID) (bool, error) { return f
 // lookup is never read as "not revoked".
 func TestVerifyFailsClosedWhenRevocationCannotBeChecked(t *testing.T) {
 	issuer, v, _, _ := buildIssuerVerifier(t)
-	_, token, err := issuer.issue(context.Background(), IssueRequest{
+	_, token, err := issuer.issue(context.Background(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Minute,

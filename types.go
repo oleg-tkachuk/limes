@@ -79,25 +79,23 @@ type Capability struct {
 	// token as `cnf.jkt`, and absent from tokens that are not bound.
 	ConfirmationJKT string
 
-	// ClientID is the OAuth client the capability was granted to, when one
-	// was: the client of the access token it was exchanged for, say.
-	// Carried as `client_id` in a TokenTypeV7 token, which RFC 9068 makes it
-	// required of; a TokenTypeV6 token has no member for it. It describes
-	// the grant and restricts nothing.
+	// ClientID is the OAuth client the capability was granted to: the
+	// client of the access token it was exchanged for, or the software its
+	// subject runs as. Carried as RFC 9068's client_id, which the profile
+	// makes required. It describes the grant and restricts nothing.
 	ClientID string
 
 	// OnBehalfOf is the principal on whose behalf Subject acts, when it acts
 	// for another: the user an agent works for, as the identity provider
 	// names them. A delegated child keeps its parent's or, when the parent
-	// has none, acts on behalf of the parent's holder. In a TokenTypeV7
-	// token it is sub, with Subject as act (RFC 8693 §4.1); a TokenTypeV6
-	// token has no member for it. It describes the grant and restricts
-	// nothing: Subject is who the capability authorises.
+	// has none, acts on behalf of the parent's holder. In the token it is
+	// sub, with Subject as act (RFC 8693 §4.1). It describes the grant and
+	// restricts nothing: Subject is who the capability authorises.
 	OnBehalfOf *Principal
 
 	// PriorActors are the subjects of the holders this capability was
-	// delegated through on behalf of OnBehalfOf, nearest first: a
-	// TokenTypeV7 token's nested act. Empty for a capability issued rather
+	// delegated through on behalf of OnBehalfOf, nearest first: the token's
+	// nested act. Empty for a capability issued rather
 	// than delegated, and for a child of a capability with no OnBehalfOf.
 	PriorActors []string
 }
@@ -179,8 +177,7 @@ type Caveats struct {
 	// any entry, as strings (MatchResourceName): "drafts/billing-" covers
 	// "drafts/billing-q3" and "drafts/billing-q3/notes", where a
 	// ResourcePrefixes entry covers whole segments alone. An empty entry is
-	// invalid. Carried by a TokenTypeV7 token alone: a v6 signer refuses a
-	// capability with any, rather than drop a restriction and widen it.
+	// invalid.
 	ResourceNamePrefixes []string
 
 	// Requests caps the total number of times the capability may be

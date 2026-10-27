@@ -15,6 +15,9 @@ import (
 )
 
 // issue mints a capability and returns it, its token and the issuer's key.
+// testClientID is the OAuth client the tests' capabilities name.
+const testClientID = "test-client"
+
 func issue(t *testing.T) (limes.Capability, string, ed25519.PublicKey) {
 	t.Helper()
 	key, err := limes.GenerateKey()
@@ -35,6 +38,7 @@ func issue(t *testing.T) (limes.Capability, string, ed25519.PublicKey) {
 		t.Fatal(err)
 	}
 	cResult, err := issuer.Issue(context.Background(), limes.IssueRequest{
+		ClientID: testClientID,
 		IssuedBy: limes.Principal{Subject: "op"},
 		Subject:  limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{"data"},

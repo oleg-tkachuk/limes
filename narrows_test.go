@@ -71,8 +71,8 @@ func TestMatchResourceRespectsSegmentBoundaries(t *testing.T) {
 func narrowFixture(parent, child Caveats) (Capability, Capability) {
 	tenant := uuid.New()
 	exp := time.Now().Add(time.Hour)
-	p := Capability{Audience: []string{"data"}, ExpiresAt: exp, Subject: Principal{Type: PrincipalTypeAgent, TenantID: tenant}, Caveats: parent}
-	c := Capability{Audience: []string{"data"}, ExpiresAt: exp, Subject: Principal{Type: PrincipalTypeAgent, TenantID: tenant}, Caveats: child}
+	p := Capability{Audience: []string{"data"}, ExpiresAt: exp, Subject: Principal{Type: PrincipalTypeAgent, TenantID: tenant, Subject: "agent"}, Caveats: parent}
+	c := Capability{Audience: []string{"data"}, ExpiresAt: exp, Subject: Principal{Type: PrincipalTypeAgent, TenantID: tenant, Subject: "agent"}, Caveats: child}
 	return p, c
 }
 
@@ -216,7 +216,7 @@ func TestNarrowsRefusesAnEarlierStart(t *testing.T) {
 func TestDelegateStartsNoEarlierThanItsParent(t *testing.T) {
 	now := goldenClock()
 	iss := testIssuer(t, goldenKID, ed25519.NewKeyFromSeed(goldenSeed[:]), func() time.Time { return now })
-	parent, _, err := iss.issue(context.Background(), IssueRequest{
+	parent, _, err := iss.issue(context.Background(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject:  Principal{Type: PrincipalTypeService, TenantID: uuid.MustParse(goldenTenant), Subject: "svc"},
 		Audience: []string{goldenAudience}, Caveats: Caveats{Ops: []Op{OpGet, OpShare}},

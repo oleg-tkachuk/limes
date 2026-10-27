@@ -112,6 +112,7 @@ func FuzzOpValidate(f *testing.F) {
 		ctx := context.Background()
 		tenant := uuid.New()
 		issued, issueErr := issuer.Issue(ctx, limes.IssueRequest{
+			ClientID: exampleClientID,
 			IssuedBy: limes.Principal{Subject: "operator"},
 			Subject:  limes.Principal{Type: limes.PrincipalTypeService, TenantID: tenant, Subject: "svc"},
 			Audience: []string{fuzzOpAudience},

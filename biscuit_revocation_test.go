@@ -59,7 +59,7 @@ func TestRevokingABiscuitCopy(t *testing.T) {
 func TestRevokingTheRootBiscuitLeavesTheJWT(t *testing.T) {
 	issuer, v, store, _, _ := biscuitFixture(t)
 	ctx := context.Background()
-	cap, jwt, err := issuer.issue(ctx, IssueRequest{
+	cap, jwt, err := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData},
@@ -115,7 +115,7 @@ func TestBiscuitCopyNamesTheLastBlock(t *testing.T) {
 func TestBiscuitCopyRefusesWhatVerifyRefuses(t *testing.T) {
 	issuer, v, _, cap, root := biscuitFixture(t)
 	ctx := context.Background()
-	_, jwt, err := issuer.issue(ctx, IssueRequest{
+	_, jwt, err := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData},
@@ -223,7 +223,7 @@ func TestBiscuitRevocationLookupFailsClosed(t *testing.T) {
 func TestVerifierNeedsBiscuitRevocationsToAcceptBiscuits(t *testing.T) {
 	pub, _, _ := ed25519.GenerateKey(nil)
 	cfg := VerifierConfig{
-		Keys:           staticKeys(t, map[string]ed25519.PublicKey{"k1": pub}),
+		Keys:           staticKeys(t, map[string]ed25519.PublicKey{testKID: pub}),
 		Revocations:    revLookup{},
 		TrustedIssuers: []string{"limes-test"},
 		Biscuit:        &BiscuitConfig{},
@@ -243,7 +243,7 @@ func TestVerifierKeepsItsOwnBiscuitConfig(t *testing.T) {
 	pub, _, _ := ed25519.GenerateKey(nil)
 	biscuit := &BiscuitConfig{Revocations: revLookup{}}
 	v, err := NewVerifier(VerifierConfig{
-		Keys:           staticKeys(t, map[string]ed25519.PublicKey{"k1": pub}),
+		Keys:           staticKeys(t, map[string]ed25519.PublicKey{testKID: pub}),
 		Revocations:    revLookup{},
 		TrustedIssuers: []string{"limes-test"},
 		Biscuit:        biscuit,

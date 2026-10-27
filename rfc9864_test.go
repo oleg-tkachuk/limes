@@ -32,7 +32,7 @@ func TestWritesTheFullySpecifiedAlgorithm(t *testing.T) {
 
 func issueFor(t *testing.T, issuer *Issuer) (Capability, string) {
 	t.Helper()
-	c, token, err := issuer.issue(context.Background(), IssueRequest{
+	c, token, err := issuer.issue(context.Background(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour,
 	})
@@ -48,7 +48,7 @@ func TestReadsEitherNameOfEd25519(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	v := verifierFor(t, pub, VerifierConfig{})
 	for _, alg := range []SigningAlgorithm{SigningAlgorithmEd25519, SigningAlgorithmEdDSA} {
-		tok := resign(t, priv, map[string]any{"alg": alg, "kid": "k1", "typ": TokenTypeV6}, validClaims(uuid.New()))
+		tok := resign(t, priv, map[string]any{"alg": alg, "kid": testKID, "typ": TokenType}, validClaims(uuid.New()))
 		if _, err := v.Verify(context.Background(), VerifyRequest{Token: tok, Audience: audienceData}); err != nil {
 			t.Errorf("a token naming %s: %v", alg, err)
 		}
@@ -65,7 +65,7 @@ func TestSignerWritesTheConfiguredAlgorithm(t *testing.T) {
 		SigningAlgorithmEd25519: SigningAlgorithmEd25519,
 		SigningAlgorithmEdDSA:   SigningAlgorithmEdDSA,
 	} {
-		signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(priv), Algorithm: configured})
+		signer, err := NewSigner(SignerConfig{KeyID: testKID, Key: SealKey(priv), Algorithm: configured})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -92,7 +92,7 @@ func TestSignerWritesTheConfiguredAlgorithm(t *testing.T) {
 func TestNewSignerRefusesAnotherAlgorithm(t *testing.T) {
 	_, priv, _ := ed25519.GenerateKey(nil)
 	for _, alg := range []SigningAlgorithm{"none", jose.AlgES256, "eddsa", "ed25519"} {
-		if _, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(priv), Algorithm: alg}); err == nil {
+		if _, err := NewSigner(SignerConfig{KeyID: testKID, Key: SealKey(priv), Algorithm: alg}); err == nil {
 			t.Errorf("NewSigner accepted Algorithm %q", alg)
 		}
 	}
