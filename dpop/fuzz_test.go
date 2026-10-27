@@ -98,9 +98,18 @@ func FuzzDPoPClaims(f *testing.F) {
 		f.Fatal(err)
 	}
 	f.Add(string(header), string(claims))
+	tokenRequest, err := Sign(context.Background(), key, SignRequest{Method: dpopMethod, URL: dpopURL, IssuedAt: now})
+	if err != nil {
+		f.Fatal(err)
+	}
+	if claims, err = base64.RawURLEncoding.DecodeString(strings.Split(tokenRequest, ".")[1]); err != nil {
+		f.Fatal(err)
+	}
+	f.Add(string(header), string(claims))
 	f.Fuzz(func(t *testing.T, header, claims string) {
 		input := jose.B64([]byte(header)) + "." + jose.B64([]byte(claims))
 		p := input + "." + jose.B64(ed25519.Sign(key, []byte(input)))
+		checkTokenRequest(t, p, claims, jkt, now)
 		v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }})
 		if err := v.Verify(context.Background(), Request{Proof: Proof{JWT: p, Method: dpopMethod, URL: dpopURL}, Token: "tok", JKT: jkt, Holder: testHolder}); err != nil {
 			return
@@ -115,4 +124,25 @@ func FuzzDPoPClaims(f *testing.F) {
 			t.Fatalf("accepted %+v for %s %s", c, dpopMethod, dpopURL)
 		}
 	})
+}
+
+// checkTokenRequest is FuzzDPoPClaims's check of p as a token request's
+// proof: what CheckTokenRequest accepts names no token, the request's
+// method and a time inside the window, and binds to the key that signed it.
+func checkTokenRequest(t *testing.T, p, claims, jkt string, now time.Time) {
+	t.Helper()
+	v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }})
+	checked, err := v.CheckTokenRequest(context.Background(), TokenRequest{Proof: Proof{JWT: p, Method: dpopMethod, URL: dpopURL}, Holder: testHolder})
+	if err != nil {
+		return
+	}
+	var c proofClaims
+	if err := decodeSegment(jose.B64([]byte(claims)), &c); err != nil {
+		t.Fatalf("accepted token-request claims that do not decode: %q", claims)
+	}
+	iat := time.Unix(int64(c.IAT), 0)
+	if c.HTM != dpopMethod || c.ATH != "" || c.JTI == "" || checked.JKT() != jkt ||
+		now.Sub(iat) > DefaultWindow+time.Second || iat.Sub(now) > DefaultWindow+time.Second {
+		t.Fatalf("accepted %+v as a token request's proof, bound to %s", c, checked.JKT())
+	}
 }

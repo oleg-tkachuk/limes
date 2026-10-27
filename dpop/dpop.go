@@ -3,6 +3,9 @@
 // server checks the proof against the key a token is bound to. It depends on
 // no token format: the server says which thumbprint the key must have and
 // which access token the proof must name.
+// An authorization server's token endpoint checks the proof a token request
+// carries with CheckTokenRequest, and binds what it issues to the key that
+// signed it (RFC 9449 §5).
 package dpop
 
 import (
@@ -146,7 +149,9 @@ type SignRequest struct {
 	// case-sensitive (RFC 9110 §9.1).
 	Method string
 	URL    string
-	// Token is the capability the request presents.
+	// Token is the capability the request presents. Empty for a request to
+	// a token endpoint, which presents none: the proof then has no ath
+	// (RFC 9449 §4.2, §5).
 	Token string
 	// Nonce is the last DPoP-Nonce the server sent, empty before it has
 	// sent one.
@@ -185,10 +190,14 @@ func Sign(ctx context.Context, key crypto.Signer, req SignRequest) (string, erro
 	if err != nil {
 		return "", err
 	}
+	ath := ""
+	if req.Token != "" {
+		ath = accessTokenHash(req.Token)
+	}
 	header, _ := json.Marshal(proofHeader{Typ: tokenType, Alg: alg, JWK: &jwk})
 	claims, _ := json.Marshal(proofClaims{
 		JTI: jose.B64(jti), HTM: req.Method, HTU: htu, IAT: float64(req.IssuedAt.Unix()),
-		ATH: accessTokenHash(req.Token), Nonce: req.Nonce,
+		ATH: ath, Nonce: req.Nonce,
 	})
 	input := jose.B64(header) + "." + jose.B64(claims)
 	sig, err := signProof(ctx, key, []byte(input))
@@ -405,6 +414,10 @@ type CheckedProof struct {
 	entry ReplayEntry
 }
 
+// JKT is the RFC 7638 thumbprint of the key that signed the proof: after
+// CheckTokenRequest, the key the issued token is to be bound to.
+func (p CheckedProof) JKT() string { return p.entry.JKT }
+
 // errNotChecked is a CheckedProof Check did not make.
 var errNotChecked = errors.New("dpop: CheckedProof not made by Check")
 
@@ -414,12 +427,50 @@ var errNotChecked = errors.New("dpop: CheckedProof not made by Check")
 // calls Record only once they pass, so a proof is recorded only for a
 // request that is otherwise accepted, and the cheap refusals come first.
 func (v *Verifier) Check(ctx context.Context, req Request) (CheckedProof, error) {
-	if v == nil || v.cfg.Replay == nil {
-		return CheckedProof{}, errNoReplayCache // a Verifier not made by NewVerifier
+	if req.Token == "" {
+		return CheckedProof{}, errors.New("dpop: Request.Token required")
 	}
-	p, token := req.Proof, req.Token
 	if req.Holder == "" {
 		return CheckedProof{}, errors.New("dpop: Request.Holder required")
+	}
+	return v.check(ctx, req.Proof, req.Holder, presented{token: req.Token, jkt: req.JKT})
+}
+
+// TokenRequest is what CheckTokenRequest checks: the proof an authorization
+// server's token endpoint receives (RFC 9449 §5), which presents no access
+// token, and whose key is the one the token it issues is to be bound to.
+type TokenRequest struct {
+	Proof Proof
+	// Holder names whose share of the replay cache the proof counts
+	// against: the client the token endpoint authenticated. Required.
+	Holder string
+}
+
+// CheckTokenRequest is Check for a proof sent to a token endpoint: every
+// check Check makes, but that the proof names no access token (no ath) and
+// may be by any key. The CheckedProof's JKT is that key's thumbprint, to
+// bind the issued token to; Record records the proof once the endpoint's
+// own checks pass.
+func (v *Verifier) CheckTokenRequest(ctx context.Context, req TokenRequest) (CheckedProof, error) {
+	if req.Holder == "" {
+		return CheckedProof{}, errors.New("dpop: TokenRequest.Holder required")
+	}
+	return v.check(ctx, req.Proof, req.Holder, presented{tokenRequest: true})
+}
+
+// presented is what the request a proof comes with presents: an access
+// token bound to the key with thumbprint jkt, or, for a token request,
+// neither, the proof's own key being the one to bind.
+type presented struct {
+	token, jkt   string
+	tokenRequest bool
+}
+
+// check is Check and CheckTokenRequest: the proof p, counted against
+// holder, for a request presenting what.
+func (v *Verifier) check(ctx context.Context, p Proof, holder string, what presented) (CheckedProof, error) {
+	if v == nil || v.cfg.Replay == nil {
+		return CheckedProof{}, errNoReplayCache // a Verifier not made by NewVerifier
 	}
 	if p.JWT == "" {
 		return CheckedProof{}, ErrRequired
@@ -442,7 +493,10 @@ func (v *Verifier) Check(ctx context.Context, req Request) (CheckedProof, error)
 		return CheckedProof{}, fmt.Errorf("%w: jwk carries a private key", ErrInvalid)
 	}
 	thumb, err := header.JWK.Thumbprint()
-	if err != nil || thumb != req.JKT {
+	if err != nil {
+		return CheckedProof{}, fmt.Errorf("%w: %w", ErrInvalid, err)
+	}
+	if !what.tokenRequest && thumb != what.jkt {
 		return CheckedProof{}, fmt.Errorf("%w: key is not the one the capability is bound to", ErrInvalid)
 	}
 	pub, err := header.JWK.PublicKey()
@@ -465,7 +519,13 @@ func (v *Verifier) Check(ctx context.Context, req Request) (CheckedProof, error)
 	if !htuMatches(claims.HTU, p.URL, v.cfg.MatchPathOnly) {
 		return CheckedProof{}, fmt.Errorf("%w: URL does not match the proof's htu", ErrInvalid)
 	}
-	if claims.ATH != accessTokenHash(token) {
+	// A token request presents no access token, so its proof names none
+	// (RFC 9449 §4.2); one that does was made for a resource request.
+	wantATH := ""
+	if !what.tokenRequest {
+		wantATH = accessTokenHash(what.token)
+	}
+	if claims.ATH != wantATH {
 		return CheckedProof{}, fmt.Errorf("%w: proof is for another token", ErrInvalid)
 	}
 	if math.IsNaN(claims.IAT) || math.IsInf(claims.IAT, 0) || math.Abs(claims.IAT) > jose.MaxIJSONInteger {
@@ -489,7 +549,7 @@ func (v *Verifier) Check(ctx context.Context, req Request) (CheckedProof, error)
 	// cache's clock can lag the verifier's: at iat+window it is still
 	// accepted, and a cache that dropped it then would let it through again.
 	return CheckedProof{entry: ReplayEntry{
-		JKT: thumb, JTI: claims.JTI, Holder: req.Holder, ExpiresAt: iat.Add(window).Add(ReplayClockSkew),
+		JKT: thumb, JTI: claims.JTI, Holder: holder, ExpiresAt: iat.Add(window).Add(ReplayClockSkew),
 	}}, nil
 }
 
