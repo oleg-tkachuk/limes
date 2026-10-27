@@ -19,7 +19,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/lestrrat-go/jwx/v3 v3.4.0
-	github.com/oleg-tkachuk/limes v0.126.0
+	github.com/oleg-tkachuk/limes v0.127.0
 	github.com/oleg-tkachuk/limes/pgstore v0.29.3
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0

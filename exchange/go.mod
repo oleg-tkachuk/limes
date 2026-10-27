@@ -14,7 +14,7 @@ replace github.com/oleg-tkachuk/limes => ../
 
 require (
 	github.com/lestrrat-go/jwx/v3 v3.4.0
-	github.com/oleg-tkachuk/limes v0.126.0
+	github.com/oleg-tkachuk/limes v0.127.0
 )
 
 require (
