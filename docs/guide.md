@@ -1330,9 +1330,19 @@ Tokens name the algorithm `Ed25519`, as RFC 9864 does. Where the services
 reading them use a JOSE library, gateway or identity provider that knows only
 the deprecated name, set `SignerConfig.Algorithm` to
 `limes.SigningAlgorithmEdDSA`: the signature is the same, and every limes
-verifier reads both names. go-jose, golang-jwt and jwx verify such a token
-under the JWKS limes writes, whose keys name `Ed25519`; Node's jose, which
-matches a key's `alg` to the token's, finds no key for it.
+verifier reads both names. Publish the key under the same name, through
+`jwks.HandlerConfig.Algorithms` (or `jwks.MarshalAlgorithms`): a library
+that matches a key's `alg` to the token's, Node's jose among them, finds no
+key for an `EdDSA` token under an entry naming `Ed25519`. Switch by
+rotating: sign with a new key named `EdDSA` while the old key, still named
+`Ed25519`, stays in the set until its tokens expire.
+
+```go
+handler, _ := jwks.NewHandler(jwks.HandlerConfig{
+    Keys:       func() map[string]ed25519.PublicKey { return keys },
+    Algorithms: func() map[string]string { return map[string]string{newKID: jwks.AlgorithmEdDSA} },
+})
+```
 
 ## Answer a refusal
 
