@@ -208,23 +208,23 @@ concurrent workers ([CONTRIBUTING](.github/CONTRIBUTING.md)).
 ## Versioning
 
 Releases are `vX.Y.Z` tags, cut from Conventional Commits on `main` once CI
-has passed: `feat` is a minor; `fix`, `perf` and `security` a patch. The module
-is pre-1.0, so a breaking change is a minor too — **the Go API may change
-between minor versions**; read the release notes, which list breaking changes
-first, before bumping.
+has passed: `feat` is a minor; `fix`, `perf` and `security` a patch. From
+1.0.0 the Go API is stable: no change on the v1 line breaks a caller, and CI
+refuses one that would. A breaking change would be a v2 under its own module
+path.
 
 A release is not cut for every merge. It is cut once enough commits have
 gathered since the last one — three that cut a minor, or five that cut a
-patch — or at once for a breaking change or a `security` fix
+patch — or at once for a `security` fix, or for a breaking change in a
+module before 1.0
 ([.github/release/release-policy.json](.github/release/release-policy.json)),
 or whenever the Release workflow is run by hand. Run by hand with the
 `prerelease` channel, it tags a release candidate, `vX.Y.Z-rc.N`, of what the
 next release would be, published with the notes that release would have.
-With `next_major` as well, it tags a candidate of limes's 1.0, `v1.0.0-rc.N`,
-from main as it is; limes stays on 0.x on main until the release that cuts
-1.0, so its API may still break between two such candidates, as a
-pre-release's may. The nested modules have no such candidates: they stay on
-0.x past limes's 1.0.
+With `next_major` as well, it tagged the candidates of limes's 1.0,
+`v1.0.0-rc.N`, while limes was on 0.x; on the v1 line there is no next major
+to cut a candidate of, a v2 being a new module path. The nested modules have
+no such candidates: they stay on 0.x past limes's 1.0.
 
 `redisreplay`, `pgstore` and `otelmetric` are modules of their own, each with
 a release line of its own — `redisreplay/vX.Y.Z`, `pgstore/vX.Y.Z`,
@@ -234,7 +234,9 @@ commit, such as `build(pgstore): bump pgx`, is a patch of it, and is released
 at once; so is the release workflow's `build(nested): require limes vX.Y.Z in …`,
 for each module whose `go.mod` it raises. A
 commit releases, by its type, each module whose files it changes; one scoped
-`pgstore`, `redisreplay` or `otelmetric` never releases limes, breaking or not.
+`pgstore`, `redisreplay` or `otelmetric` never releases limes, breaking or
+not. All three are pre-1.0: a breaking change there is a minor, listed first
+in the release notes and in [docs/migration.md](docs/migration.md).
 
 A nested module is tagged after the limes it needs, never with it: its
 `go.mod` must require a limes already released, so a root release's new API

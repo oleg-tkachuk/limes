@@ -463,8 +463,9 @@ describe("releaseAll", () => {
       repo.write("x.go", "// b\n");
       await repo.commit("feat!: break the API before 1.0");
       assert.deepEqual(await major(), ["v1.0.0-rc.1", "v1.0.0-rc.2"]);
-      // The next release by the rules on main is still 0.x.
-      assert.deepEqual(await candidate(), ["v1.0.0-rc.1", "v1.0.0-rc.2", "v0.2.0-rc.1"]);
+      // limes's rules make a breaking change a major, so the candidate by the
+      // rules on main is the next major's too.
+      assert.deepEqual(await candidate(), ["v1.0.0-rc.1", "v1.0.0-rc.2", "v1.0.0-rc.3"]);
     });
     // A candidate of the next major is cut beside the releases main goes on
     // making: its notes start from the candidate before it, naming the

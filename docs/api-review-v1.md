@@ -164,12 +164,13 @@ deployed verifier.
   (`Caveats.Copies`), so `TokenTypeV6` is the one format every 1.x verifier
   accepts.
 
-**P6 — cutting 1.0.** Remove `BREAKING_IS_A_MINOR_BEFORE_1_0` from the root module's rules in
-`.github/release/modules.cjs` — `pgstore`, `redisreplay` and `otelmetric`
+**P6 — cutting 1.0.** Remove `BREAKING_IS_A_MINOR_BEFORE_1_0` from the limes
+module's rules in `.github/release/modules.cjs` — `pgstore`, `redisreplay` and
+`otelmetric`
 keep it, each on its own line — and flip its case in
 `release-rules.test.mjs`, in the same pull request as a commit carrying a
 `BREAKING CHANGE:` footer — that commit cuts 1.0.0. Update README
-"Versioning".
+"Versioning". **Done.**
 
 **P7 — after 1.0.** semantic-release would tag a break `v2.0.0`, which the Go
 proxy ignores without a `/v2` module path. So the API check fails any
