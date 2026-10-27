@@ -139,12 +139,15 @@ func (s *countingStore) Insert(ctx context.Context, req limes.InsertRequest) err
 // fixture is an identity provider, an exchanger over a limes issuer, and a
 // verifier of what it issues.
 type fixture struct {
-	idp      *idp
-	tenant   uuid.UUID
-	store    *countingStore
-	ex       *Exchanger
-	verifier *limes.Verifier
-	nonces   *dpop.HMACNonces
+	idp *idp
+	// signingKID and signingKey are the capability issuer's.
+	signingKID string
+	signingKey ed25519.PublicKey
+	tenant     uuid.UUID
+	store      *countingStore
+	ex         *Exchanger
+	verifier   *limes.Verifier
+	nonces     *dpop.HMACNonces
 }
 
 type fixtureConfig struct {
@@ -153,6 +156,8 @@ type fixtureConfig struct {
 	noDPoP bool
 	// narrow lets the exchanger narrow capabilities.
 	narrow bool
+	// tokenType is the format the issuer signs; empty, the default.
+	tokenType limes.TokenType
 }
 
 func newFixture(t testing.TB, fc fixtureConfig) *fixture {
@@ -170,7 +175,7 @@ func newFixture(t testing.TB, fc fixtureConfig) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer, err := limes.NewSigner(limes.SignerConfig{KeyID: key.KeyID, Key: key.Private})
+	signer, err := limes.NewSigner(limes.SignerConfig{KeyID: key.KeyID, Key: key.Private, TokenType: fc.tokenType})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,6 +205,7 @@ func newFixture(t testing.TB, fc fixtureConfig) *fixture {
 			t.Fatal(err)
 		}
 	}
+	f.signingKID, f.signingKey = key.KeyID, key.Public()
 	keys, err := jwks.NewStatic(jwks.StaticConfig{Keys: map[string]ed25519.PublicKey{key.KeyID: key.Public()}})
 	if err != nil {
 		t.Fatal(err)
