@@ -36,19 +36,21 @@ const at = new Date(fixture.verify_at * MS_PER_SECOND);
 const verify = (token: string, audience = fixture.audience, currentDate = at) =>
   jwtVerify(token, keys, { issuer: fixture.issuer, audience, currentDate, typ: TOKEN_TYPE, algorithms: ALGORITHMS });
 
-// jose matches a key's alg to the token's: under the JWKS limes writes,
-// whose keys name Ed25519, it finds no key for a token naming EdDSA. The
-// same key named EdDSA, or naming no alg, verifies it.
-test("jose finds no key for an EdDSA capability in a JWKS naming Ed25519", async () => {
-  await assert.rejects(verify(fixture.tokens.EdDSA), { code: "ERR_JWKS_NO_MATCHING_KEY" });
-  for (const name of [EDDSA, undefined]) {
-    const jwks = structuredClone(fixture.jwks);
-    jwks.keys[0].alg = name;
-    await jwtVerify(fixture.tokens.EdDSA, createLocalJWKSet(jwks), { issuer: fixture.issuer, audience: fixture.audience, currentDate: at });
+// jose matches a key's alg to the token's, so each key's entry names the
+// alg of the tokens it signs (jwks.MarshalAlgorithms): under a JWKS naming
+// Ed25519 for every key, jose finds no key for a token naming EdDSA.
+test("jose finds no key for an EdDSA capability under an entry naming Ed25519", async () => {
+  const jwks = structuredClone(fixture.jwks);
+  for (const key of jwks.keys) {
+    key.alg = ED25519;
   }
+  await assert.rejects(
+    jwtVerify(fixture.tokens.EdDSA, createLocalJWKSet(jwks), { issuer: fixture.issuer, audience: fixture.audience, currentDate: at }),
+    { code: "ERR_JWKS_NO_MATCHING_KEY" },
+  );
 });
 
-for (const alg of [ED25519]) {
+for (const alg of ALGORITHMS) {
   const token = fixture.tokens[alg];
 
   test(`jose verifies a capability naming ${alg}, and reads its claims`, async () => {
