@@ -54,6 +54,16 @@ strings (`"max_budget": "1.5"`). A reader in any language therefore reads the
 token the issuer signed. *Held by* `TestVerifyReadsClaimsStrictly`,
 `TestTokenIntegersStayWithinIJSON`, `TestTokenClaimsAreUTF8`.
 
+**Other JOSE libraries.** A library that is not limes verifies a capability
+through the issuer's JWKS, checking `iss`, `aud` and `exp` itself, and reads
+the `limes_` claims as JSON: jwx, which knows `Ed25519`, as it is, and
+golang-jwt, which knows the algorithm only as `EdDSA`, once the RFC 9864 name
+is registered for its Ed25519 method. In turn, limes accepts the DPoP proofs
+jwx signs under `Ed25519`, `EdDSA` and `ES256`. *Held by*
+`TestJWXVerifiesACapability`, `TestJWXReadsTheCapabilityClaims`,
+`TestJWXReadsTheJWKS`, `TestLimesAcceptsJWXProofs` and
+`TestGolangJWTVerifiesWithAnAlias`, in `examples/internal/interop`.
+
 ## Proof of possession
 
 **RFC 9449 (DPoP), RFC 7800.** A key-bound capability carries the RFC 7638
