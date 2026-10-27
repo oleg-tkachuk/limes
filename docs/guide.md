@@ -1329,8 +1329,10 @@ cancelled call is bounded by the request that asked for the token.
 Tokens name the algorithm `Ed25519`, as RFC 9864 does. Where the services
 reading them use a JOSE library, gateway or identity provider that knows only
 the deprecated name, set `SignerConfig.Algorithm` to
-`limes.SigningAlgorithmEdDSA`: the signature is the same, every limes verifier
-reads both names, and the JWKS needs no change.
+`limes.SigningAlgorithmEdDSA`: the signature is the same, and every limes
+verifier reads both names. go-jose, golang-jwt and jwx verify such a token
+under the JWKS limes writes, whose keys name `Ed25519`; Node's jose, which
+matches a key's `alg` to the token's, finds no key for it.
 
 ## Answer a refusal
 
