@@ -99,7 +99,7 @@ func TestDeriveKeyIDIsTheThumbprint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := jwks.KeyID(ed25519.PublicKey(x)), "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k"; got != want {
+	if got, want := jwks.KeyID(ed25519.PublicKey(x)), jwks.KeyIDPrefix+"kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k"; got != want {
 		t.Errorf("jwks.KeyID = %s, want %s", got, want)
 	}
 	key, err := GenerateKey()
@@ -142,14 +142,14 @@ func TestNewSigner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(priv)})
-	if err != nil || s.keyID != "k1" {
+	s, err := NewSigner(SignerConfig{KeyID: testKID, Key: SealKey(priv)})
+	if err != nil || s.keyID != testKID {
 		t.Fatalf("NewSigner = %v, kid %q", err, s.keyID)
 	}
 	if _, err := NewSigner(SignerConfig{KeyID: "", Key: SealKey(priv)}); err == nil {
 		t.Error("an empty key id was accepted")
 	}
-	if _, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(priv[:10])}); err == nil {
+	if _, err := NewSigner(SignerConfig{KeyID: testKID, Key: SealKey(priv[:10])}); err == nil {
 		t.Error("a short key was accepted")
 	}
 }

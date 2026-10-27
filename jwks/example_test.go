@@ -151,8 +151,9 @@ func ExampleRemote_PublicKey() {
 func ExampleKeyID() {
 	pub := newPublicKey()
 	kid := jwks.KeyID(pub)
-	// The same key always gets the same kid, wherever it is derived.
-	fmt.Println(kid == jwks.KeyID(bytes.Clone(pub)), len(kid))
+	// The same key always gets the same kid, wherever it is derived, in
+	// limes's namespace.
+	fmt.Println(kid == jwks.KeyID(bytes.Clone(pub)), jwks.IsKeyID(kid), len(kid)-len(jwks.KeyIDPrefix))
 	// Output:
-	// true 43
+	// true true 43
 }

@@ -50,7 +50,7 @@ func TestIssueRejectsMalformedRequests(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
 	base := func() IssueRequest {
-		return IssueRequest{
+		return IssueRequest{ClientID: testClientID,
 			IssuedBy: Principal{Subject: "op"},
 			Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 			Audience: []string{"data"},
@@ -77,7 +77,7 @@ func TestIssueRejectsMalformedRequests(t *testing.T) {
 
 func issueRoot(t *testing.T, issuer *Issuer, caveats Caveats) Capability {
 	t.Helper()
-	c, _, err := issuer.issue(context.Background(), IssueRequest{
+	c, _, err := issuer.issue(context.Background(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "root"},
 		Audience: []string{"data"},
@@ -169,7 +169,7 @@ func TestDelegateRefusesRevokedOrExpiredParent(t *testing.T) {
 func TestIssuedIDsAreVersion7(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
-	parent, _, err := issuer.issue(ctx, IssueRequest{
+	parent, _, err := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet, OpShare}}, TTL: time.Hour,
 	})
@@ -194,7 +194,7 @@ func TestIssuedIDsAreVersion7(t *testing.T) {
 func TestMintingResults(t *testing.T) {
 	issuer, v, _, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
-	issued, err := issuer.Issue(ctx, IssueRequest{
+	issued, err := issuer.Issue(ctx, IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet, OpShare}}, TTL: time.Hour,
 	})

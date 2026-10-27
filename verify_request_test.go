@@ -21,7 +21,7 @@ func issueBound(t *testing.T, issuer *Issuer, key crypto.Signer) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, token, err := issuer.issue(context.Background(), IssueRequest{
+	_, token, err := issuer.issue(context.Background(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour, ConfirmationJKT: jkt,
 	})
@@ -73,7 +73,7 @@ func TestVerifyEnforcesProofOfPossession(t *testing.T) {
 
 func mintFor(t *testing.T, issuer *Issuer) string {
 	t.Helper()
-	_, token, err := issuer.issue(context.Background(), IssueRequest{
+	_, token, err := issuer.issue(context.Background(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour,
 	})
@@ -130,7 +130,7 @@ func TestBiscuitProofIsOverTheBiscuit(t *testing.T) {
 func TestAuthorize(t *testing.T) {
 	issuer, v, _, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
-	_, token, err := issuer.issue(ctx, IssueRequest{
+	_, token, err := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, TTL: time.Hour,
 		Caveats: Caveats{

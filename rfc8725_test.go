@@ -23,7 +23,7 @@ func TestVerifyFixesTheAlgorithm(t *testing.T) {
 	v := verifierFor(t, pub, VerifierConfig{})
 	claims := validClaims(uuid.New())
 	signed := func(alg string, sign func(input string) []byte) string {
-		header := map[string]any{"kid": "k1", "typ": TokenTypeV6}
+		header := map[string]any{"kid": testKID, "typ": TokenType}
 		if alg != "" {
 			header["alg"] = alg
 		}

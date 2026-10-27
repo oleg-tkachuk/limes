@@ -33,6 +33,10 @@ type exampleStack struct {
 	tenantID uuid.UUID
 }
 
+// exampleClientID is the OAuth client the examples' capabilities are granted
+// to (RFC 9068 client_id): the software the agent runs as.
+const exampleClientID = "example-agent"
+
 func newExampleStack() exampleStack {
 	key, err := limes.GenerateKey()
 	kid, pub, priv := key.KeyID, key.Public(), key.Private
@@ -92,6 +96,7 @@ func (s exampleStack) verified(token string) limes.VerifiedCapability {
 // 25.00 USD and 500 requests, for 15 minutes.
 func (s exampleStack) issue() (limes.Capability, string) {
 	cResult, err := s.issuer.Issue(context.Background(), limes.IssueRequest{
+		ClientID: exampleClientID,
 		IssuedBy: limes.Principal{Subject: "operator@example.com"},
 		Subject: limes.Principal{
 			Type: limes.PrincipalTypeAgent, TenantID: s.tenantID, Subject: "research-orchestrator",
@@ -129,6 +134,7 @@ func ExampleIssuer_Issue() {
 	})
 
 	cResult, err := issuer.Issue(ctx, limes.IssueRequest{
+		ClientID: exampleClientID,
 		IssuedBy: limes.Principal{Subject: "operator@example.com"},
 		Subject: limes.Principal{
 			Type: limes.PrincipalTypeAgent, TenantID: uuid.New(), Subject: "research-orchestrator",
@@ -248,6 +254,7 @@ func Example_proofOfPossession() {
 	_, agentKey, _ := ed25519.GenerateKey(rand.Reader)
 	jkt, _ := dpop.Thumbprint(agentKey.Public())
 	tokenResult, err := s.issuer.Issue(ctx, limes.IssueRequest{
+		ClientID: exampleClientID,
 		IssuedBy: limes.Principal{Subject: "operator@example.com"},
 		Subject:  limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: s.tenantID, Subject: "worker"},
 		Audience: []string{exampleAudience}, TTL: 15 * time.Minute,

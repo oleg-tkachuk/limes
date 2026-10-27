@@ -30,7 +30,7 @@ func TestIntrospectActive(t *testing.T) {
 		"a bearer token": {},
 		"a bound token":  {ConfirmationJKT: jkt},
 	} {
-		req.IssuedBy = Principal{Subject: "op"}
+		req.IssuedBy, req.ClientID = Principal{Subject: "op"}, testClientID
 		req.Subject = Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"}
 		req.Audience, req.Caveats, req.TTL = []string{"another-service"}, Caveats{Ops: []Op{OpGet}}, time.Hour
 		cap, token, err := issuer.issue(ctx, req)
@@ -61,7 +61,7 @@ func TestIntrospectInactive(t *testing.T) {
 	if err != nil || !got.FromBiscuit || got.Capability.ID != cap.ID {
 		t.Fatalf("a Biscuit: %+v, %v", got, err)
 	}
-	_, expired, err := issuer.issue(ctx, IssueRequest{
+	_, expired, err := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Second,
 	})
@@ -97,12 +97,12 @@ func TestIntrospectInactive(t *testing.T) {
 // inactive token: an outage must not read as a revocation.
 func TestIntrospectOutageIsNotInactive(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
-	_, token, err := issueClient(t, issuerOf(t, priv, TokenTypeV6), "")
+	_, token, err := issueClient(t, issuerOf(t, priv), testClientID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	v, err := NewVerifier(VerifierConfig{
-		Keys: staticKeys(t, map[string]ed25519.PublicKey{"k1": pub}), Revocations: downRevocations{}, TrustedIssuers: []string{"iss"},
+		Keys: staticKeys(t, map[string]ed25519.PublicKey{testKID: pub}), Revocations: downRevocations{}, TrustedIssuers: []string{"iss"},
 	})
 	if err != nil {
 		t.Fatal(err)

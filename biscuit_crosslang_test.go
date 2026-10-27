@@ -83,7 +83,7 @@ func TestGenerateBiscuitFixtures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cap, _, err := issuer.issue(context.Background(), IssueRequest{
+	cap, _, err := issuer.issue(context.Background(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.MustParse(goldenTenant), Subject: goldenSubject},
 		Audience: []string{audienceData, audienceMCP},

@@ -53,13 +53,7 @@ func checkRetiredRefused(t *testing.T, file string) {
 }
 
 func TestGoldenTokenStillVerifies(t *testing.T) {
-	for typ := range goldenFiles {
-		t.Run(string(typ), func(t *testing.T) { checkGoldenVerifies(t, typ) })
-	}
-}
-
-func checkGoldenVerifies(t *testing.T, typ TokenType) {
-	raw, err := os.ReadFile(goldenPath(typ))
+	raw, err := os.ReadFile(goldenPath())
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
@@ -115,11 +109,11 @@ func checkGoldenVerifies(t *testing.T, typ TokenType) {
 	if len(cap.Capability().Caveats.ResourcePrefixes) != 1 || cap.Capability().Caveats.ResourcePrefixes[0] != "golden/" {
 		t.Errorf("ResourcePrefixes = %v", cap.Capability().Caveats.ResourcePrefixes)
 	}
-	if got, want := cap.Capability().ClientID, goldenClientIDOf(typ); got != want {
-		t.Errorf("ClientID = %q, want %q", got, want)
+	if got := cap.Capability().ClientID; got != goldenClientID {
+		t.Errorf("ClientID = %q, want %q", got, goldenClientID)
 	}
-	if got, want := cap.Capability().OnBehalfOf, goldenOnBehalfOfOf(typ); (got == nil) != (want == nil) ||
-		got != nil && (got.Subject != want.Subject || got.Type != want.Type || got.TenantID != want.TenantID) {
+	if got, want := cap.Capability().OnBehalfOf, goldenOnBehalfOf(); got == nil ||
+		got.Subject != want.Subject || got.Type != want.Type || got.TenantID != want.TenantID {
 		t.Errorf("OnBehalfOf = %+v, want %+v", got, want)
 	}
 }
@@ -127,13 +121,7 @@ func checkGoldenVerifies(t *testing.T, typ TokenType) {
 // A token for one audience must not verify for another — the audience gate is
 // part of the format contract, not only of the runtime policy.
 func TestGoldenTokenRejectsWrongAudience(t *testing.T) {
-	for typ := range goldenFiles {
-		t.Run(string(typ), func(t *testing.T) { checkGoldenRejectsWrongAudience(t, typ) })
-	}
-}
-
-func checkGoldenRejectsWrongAudience(t *testing.T, typ TokenType) {
-	raw, err := os.ReadFile(goldenPath(typ))
+	raw, err := os.ReadFile(goldenPath())
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
@@ -160,13 +148,7 @@ func checkGoldenRejectsWrongAudience(t *testing.T, typ TokenType) {
 // changed omission rule or a moved claim fails here even where the decoded
 // fields still compare equal.
 func TestGoldenClaimsRoundTripExactly(t *testing.T) {
-	for typ := range goldenFiles {
-		t.Run(string(typ), func(t *testing.T) { checkGoldenRoundTrip(t, typ) })
-	}
-}
-
-func checkGoldenRoundTrip(t *testing.T, typ TokenType) {
-	raw, err := os.ReadFile(goldenPath(typ))
+	raw, err := os.ReadFile(goldenPath())
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
@@ -174,11 +156,11 @@ func checkGoldenRoundTrip(t *testing.T, typ TokenType) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := parseClaims(parts.Payload, typ)
+	c, err := parseClaims(parts.Payload)
 	if err != nil {
 		t.Fatal(err)
 	}
-	written, err := json.Marshal(claimsOf(*c, typ))
+	written, err := json.Marshal(claimsOf(*c))
 	if err != nil {
 		t.Fatal(err)
 	}

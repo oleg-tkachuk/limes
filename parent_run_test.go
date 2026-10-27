@@ -30,6 +30,7 @@ func TestDelegateDerivesTheParentRun(t *testing.T) {
 		t.Helper()
 		subject.TenantID = s.tenantID
 		r, err := s.issuer.Issue(ctx, limes.IssueRequest{
+			ClientID: exampleClientID,
 			IssuedBy: limes.Principal{Subject: "operator@example.com"},
 			Subject:  subject, Audience: []string{exampleAudience}, TTL: time.Minute,
 			Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet, limes.OpShare}},

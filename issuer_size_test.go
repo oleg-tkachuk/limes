@@ -24,7 +24,7 @@ func oversizedCaveats() Caveats {
 // nothing for one it refused.
 func TestIssueRefusesATokenPastMaxTokenBytes(t *testing.T) {
 	issuer, _, store, _ := buildIssuerVerifier(t)
-	_, _, err := issuer.issue(context.Background(), IssueRequest{
+	_, _, err := issuer.issue(context.Background(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData},
@@ -44,7 +44,7 @@ func TestDelegateAndBiscuitRefuseATokenPastMaxTokenBytes(t *testing.T) {
 	issuer, v, store, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
 	wide := oversizedCaveats()
-	parent, token, err := issuer.issue(ctx, IssueRequest{
+	parent, token, err := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData},

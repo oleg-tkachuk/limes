@@ -22,8 +22,8 @@ import (
 // fetches them from an issuer's JWKS endpoint with a cache.
 //
 // Keys are Ed25519 for all of 1.x: the token format, not the key, names
-// the algorithm, so another algorithm would be another token type
-// (AcceptTokenTypes) rather than a key this interface returns.
+// the algorithm, so another algorithm would be another format (limes_v)
+// rather than a key this interface returns.
 type KeyResolver interface {
 	// PublicKey returns the Ed25519 public key for the given kid.
 	// Returns jwks.ErrUnknownKID if the key set does not contain the kid,
@@ -95,14 +95,6 @@ type VerifierConfig struct {
 	// the JWT, as it says. Nil: a Biscuit is refused like any malformed
 	// token.
 	Biscuit *BiscuitConfig
-
-	// AcceptTokenTypes are the token formats (the JWT "typ") the verifier
-	// accepts. Empty: every type this package reads, TokenTypeV6 and
-	// TokenTypeV7. A new format ships so: verifiers accept it first,
-	// issuers mint it after (SignerConfig.TokenType). A type this package
-	// has no schema for is refused: a verifier cannot enforce a format it
-	// cannot read.
-	AcceptTokenTypes []TokenType
 
 	// DPoP checks the proof of possession a key-bound capability (one with
 	// a ConfirmationJKT) must come with. Without it the verifier refuses
@@ -246,15 +238,6 @@ func NewVerifier(cfg VerifierConfig) (*Verifier, error) {
 	if len(cfg.KeyIssuers) == 0 {
 		cfg.KeyIssuers = nil // no binding, whichever way it was spelled
 	}
-	if len(cfg.AcceptTokenTypes) == 0 {
-		cfg.AcceptTokenTypes = slices.Clone(tokenTypes)
-	}
-	for _, typ := range cfg.AcceptTokenTypes {
-		if !slices.Contains(tokenTypes, typ) {
-			return nil, fmt.Errorf("limes: VerifierConfig.AcceptTokenTypes names %q, which is not one of %q", typ, tokenTypes)
-		}
-	}
-	cfg.AcceptTokenTypes = slices.Clone(cfg.AcceptTokenTypes)
 	return &Verifier{cfg: cfg}, nil
 }
 
@@ -515,11 +498,14 @@ func (v *Verifier) verifySigned(ctx context.Context, token string) (*grant, erro
 	if err != nil {
 		return nil, refuseToken(ErrInvalidToken, err)
 	}
-	if !slices.Contains(v.cfg.AcceptTokenTypes, TokenType(header.Typ)) {
-		return nil, fmt.Errorf("%w: typ %q is not one of %q", ErrInvalidToken, header.Typ, v.cfg.AcceptTokenTypes)
+	if header.Typ != TokenType {
+		return nil, fmt.Errorf("%w: typ %q is not %q", ErrInvalidToken, header.Typ, TokenType)
 	}
-	if header.Kid == "" {
-		return nil, fmt.Errorf("%w: header missing kid", ErrInvalidToken)
+	// A kid outside limes's namespace names a key no limes issuer signs
+	// with, and is refused before any key is looked up: at+jwt no longer
+	// tells a capability from another access token, and the kid then does.
+	if !jwks.IsKeyID(header.Kid) {
+		return nil, fmt.Errorf("%w: kid %q is not a limes kid (%q and a name)", ErrInvalidToken, header.Kid, jwks.KeyIDPrefix)
 	}
 
 	// 2) Key and signature — the cryptographic gate.
@@ -537,8 +523,7 @@ func (v *Verifier) verifySigned(ctx context.Context, token string) (*grant, erro
 	}
 
 	// 3) Claims, now known to be the issuer's.
-	typ := TokenType(header.Typ)
-	cap, err := parseClaims(parts.Payload, typ)
+	cap, err := parseClaims(parts.Payload)
 	if err != nil {
 		return nil, refuseToken(ErrInvalidToken, err)
 	}

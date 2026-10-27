@@ -9,8 +9,6 @@ import (
 	"testing"
 	"time"
 	"uuid"
-
-	"github.com/oleg-tkachuk/limes/internal/jose"
 )
 
 // A name prefix matches as a string, across segments, and never a uri with a
@@ -85,32 +83,21 @@ func TestValidateNamePrefixes(t *testing.T) {
 	}
 }
 
-// Name prefixes travel in a v7 token alone: a v6 signer refuses them rather
-// than drop the restriction, and a v6 token carrying the member is refused.
-func TestNamePrefixesNeedV7(t *testing.T) {
+// Name prefixes travel in the token and read back as they were issued.
+func TestNamePrefixesTravelInTheToken(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	req := IssueRequest{
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, TTL: time.Hour, ClientID: testClientID,
 		Caveats: Caveats{Ops: []Op{OpGet}, ResourceNamePrefixes: []string{"drafts/billing-"}},
 	}
-	if _, _, err := issuerOf(t, priv, TokenTypeV6).issue(context.Background(), req); err == nil {
-		t.Error("a v6 signer signed name prefixes")
-	}
-	_, token, err := issuerOf(t, priv, TokenTypeV7).issue(context.Background(), req)
+	_, token, err := issuerOf(t, priv).issue(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	v := verifierFor(t, pub, VerifierConfig{})
-	got, err := v.Verify(t.Context(), VerifyRequest{Token: token, Audience: audienceData})
+	got, err := verifierFor(t, pub, VerifierConfig{}).Verify(t.Context(), VerifyRequest{Token: token, Audience: audienceData})
 	if err != nil || !slices.Equal(got.Capability().Caveats.ResourceNamePrefixes, []string{"drafts/billing-"}) {
-		t.Fatalf("v7 name prefixes read back as %v, %v", got.Capability().Caveats.ResourceNamePrefixes, err)
-	}
-	claims := validClaims(uuid.New())
-	claims["limes_caveats"] = map[string]any{"ops": []string{"get"}, "resource_name_prefixes": []string{"drafts/"}}
-	v6 := resign(t, priv, map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": TokenTypeV6}, claims)
-	if _, err := v.Verify(t.Context(), VerifyRequest{Token: v6, Audience: audienceData}); !errors.Is(err, ErrInvalidToken) {
-		t.Errorf("a v6 token with name prefixes: %v, want ErrInvalidToken", err)
+		t.Fatalf("name prefixes read back as %v, %v", got.Capability().Caveats.ResourceNamePrefixes, err)
 	}
 }
 

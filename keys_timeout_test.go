@@ -33,7 +33,7 @@ func TestKeysTimeoutIsUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	issued, err := issuer.Issue(t.Context(), IssueRequest{
+	issued, err := issuer.Issue(t.Context(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour,
 	})

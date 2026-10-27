@@ -27,7 +27,7 @@ func biscuitFixtureOf(t *testing.T, ops []Op) (*Issuer, *Verifier, *memStore, Ca
 	t.Helper()
 	issuer, _, store, pub := buildIssuerVerifier(t)
 	verifier, err := NewVerifier(VerifierConfig{
-		Keys:           staticKeys(t, map[string]ed25519.PublicKey{"k1": pub}),
+		Keys:           staticKeys(t, map[string]ed25519.PublicKey{testKID: pub}),
 		Revocations:    store,
 		TrustedIssuers: []string{"limes-test"},
 		Biscuit:        &BiscuitConfig{Revocations: store},
@@ -36,7 +36,7 @@ func biscuitFixtureOf(t *testing.T, ops []Op) (*Issuer, *Verifier, *memStore, Ca
 	if err != nil {
 		t.Fatal(err)
 	}
-	cap, _, err := issuer.issue(context.Background(), IssueRequest{
+	cap, _, err := issuer.issue(context.Background(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData, audienceMCP},
@@ -218,7 +218,7 @@ func TestBiscuitCannotBeStrippedOrForged(t *testing.T) {
 	}
 
 	// A Biscuit around an ordinary token (no root claim) is refused too.
-	_, plain, _ := issuer.issue(context.Background(), IssueRequest{
+	_, plain, _ := issuer.issue(context.Background(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: cap.Subject,
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour,
 	})

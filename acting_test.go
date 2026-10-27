@@ -89,7 +89,7 @@ func actChain(claims map[string]any) []string {
 // delegations nested within. limes still reads the holder as the subject.
 func TestActingOnBehalfOf(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
-	issuer, v := issuerOf(t, priv, TokenTypeV7), verifierFor(t, pub, VerifierConfig{})
+	issuer, v := issuerOf(t, priv), verifierFor(t, pub, VerifierConfig{})
 	user := actingPrincipal(t, PrincipalTypeUser, actingUser)
 	_, root := issueActing(t, issuer, actingPrincipal(t, PrincipalTypeAgent, actingAgent), &user)
 	_, child := delegateActing(t, issuer, v, root, actingPrincipal(t, PrincipalTypeAgent, actingChild))
@@ -124,7 +124,7 @@ func TestActingOnBehalfOf(t *testing.T) {
 // on behalf of its holder.
 func TestActingForItself(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
-	issuer, v := issuerOf(t, priv, TokenTypeV7), verifierFor(t, pub, VerifierConfig{})
+	issuer, v := issuerOf(t, priv), verifierFor(t, pub, VerifierConfig{})
 	_, root := issueActing(t, issuer, actingPrincipal(t, PrincipalTypeService, actingAgent), nil)
 	claims := payloadOf(t, root)
 	if claims["sub"] != actingAgent || claims["act"] != nil || claims["limes_on_behalf_of"] != nil {
@@ -141,23 +141,11 @@ func TestActingForItself(t *testing.T) {
 	}
 }
 
-// A v6 token has no member for whom a capability acts for: it names its
-// holder, as before.
-func TestActingDroppedFromV6(t *testing.T) {
-	_, priv, _ := ed25519.GenerateKey(nil)
-	user := actingPrincipal(t, PrincipalTypeUser, actingUser)
-	_, token := issueActing(t, issuerOf(t, priv, TokenTypeV6), actingPrincipal(t, PrincipalTypeAgent, actingAgent), &user)
-	claims := payloadOf(t, token)
-	if claims["sub"] != actingAgent || claims["act"] != nil || claims["limes_on_behalf_of"] != nil {
-		t.Errorf("v6: sub %v, act %v, limes_on_behalf_of %v", claims["sub"], claims["act"], claims["limes_on_behalf_of"])
-	}
-}
-
 // Issue refuses a principal to act for that a capability's tenant does not
 // hold, or that names no one.
 func TestIssueRefusesOnBehalfOf(t *testing.T) {
 	_, priv, _ := ed25519.GenerateKey(nil)
-	issuer := issuerOf(t, priv, TokenTypeV7)
+	issuer := issuerOf(t, priv)
 	for name, obo := range map[string]Principal{
 		"another tenant": {Type: PrincipalTypeUser, TenantID: uuid.New(), Subject: actingUser},
 		"no subject":     actingPrincipal(t, PrincipalTypeUser, ""),
@@ -200,10 +188,10 @@ func nestedAct(depth int) map[string]any {
 func TestActingClaimsRefused(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	v := verifierFor(t, pub, VerifierConfig{})
-	sign := func(typ TokenType, claims map[string]any) string {
-		return resign(t, priv, map[string]any{"alg": jose.AlgEd25519, "kid": "k1", "typ": typ}, claims)
+	sign := func(typ string, claims map[string]any) string {
+		return resign(t, priv, map[string]any{"alg": jose.AlgEd25519, "kid": testKID, "typ": typ}, claims)
 	}
-	if _, err := v.Verify(t.Context(), VerifyRequest{Token: sign(TokenTypeV7, actingClaims()), Audience: audienceData}); err != nil {
+	if _, err := v.Verify(t.Context(), VerifyRequest{Token: sign(TokenType, actingClaims()), Audience: audienceData}); err != nil {
 		t.Fatalf("the well-formed token: %v", err)
 	}
 	for name, edit := range map[string]func(map[string]any){
@@ -223,19 +211,14 @@ func TestActingClaimsRefused(t *testing.T) {
 	} {
 		claims := actingClaims()
 		edit(claims)
-		if _, err := v.Verify(t.Context(), VerifyRequest{Token: sign(TokenTypeV7, claims), Audience: audienceData}); !errors.Is(err, ErrInvalidToken) {
+		if _, err := v.Verify(t.Context(), VerifyRequest{Token: sign(TokenType, claims), Audience: audienceData}); !errors.Is(err, ErrInvalidToken) {
 			t.Errorf("%s: %v, want ErrInvalidToken", name, err)
 		}
 	}
 	deepest := actingClaims()
 	deepest["act"] = nestedAct(MaxDelegationDepth + 1)
-	if _, err := v.Verify(t.Context(), VerifyRequest{Token: sign(TokenTypeV7, deepest), Audience: audienceData}); err != nil {
+	if _, err := v.Verify(t.Context(), VerifyRequest{Token: sign(TokenType, deepest), Audience: audienceData}); err != nil {
 		t.Errorf("an act as deep as delegation goes: %v", err)
-	}
-	v6 := validClaims(uuid.MustParse(actingTenant))
-	v6["act"] = map[string]any{"sub": "s"}
-	if _, err := v.Verify(t.Context(), VerifyRequest{Token: sign(TokenTypeV6, v6), Audience: audienceData}); !errors.Is(err, ErrInvalidToken) {
-		t.Errorf("a v6 token with act: %v, want ErrInvalidToken", err)
 	}
 }
 

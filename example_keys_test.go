@@ -102,12 +102,13 @@ func ExampleNewSigner() {
 	signer, err := limes.NewSigner(limes.SignerConfig{KeyID: key.KeyID, Key: key.Private})
 	fmt.Println(err, signer != nil)
 
-	// A signer needs a kid for verifiers to find its key by.
-	_, err = limes.NewSigner(limes.SignerConfig{Key: key.Private})
+	// A signer needs a kid for verifiers to find its key by, in limes's
+	// namespace: GenerateKey's is.
+	_, err = limes.NewSigner(limes.SignerConfig{KeyID: "k1", Key: key.Private})
 	fmt.Println(err)
 	// Output:
 	// <nil> true
-	// limes: SignerConfig.KeyID required
+	// limes: SignerConfig.KeyID "k1" is not a limes kid ("limes:" and a name)
 }
 
 func ExampleSignerConfig_LogValue() {
@@ -115,7 +116,7 @@ func ExampleSignerConfig_LogValue() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	cfg := limes.SignerConfig{KeyID: "k1", Key: key.Private}
+	cfg := limes.SignerConfig{KeyID: "limes:k1", Key: key.Private}
 	asJSON, _ := json.Marshal(cfg)
 	fmt.Println(string(asJSON))
 
@@ -130,6 +131,6 @@ func ExampleSignerConfig_LogValue() {
 	}))
 	logger.Info("signer configured", "signer", cfg)
 	// Output:
-	// {"KeyID":"k1","Key":"[redacted]"}
-	// level=INFO msg="signer configured" signer="{KeyID:k1 Key:[redacted]}"
+	// {"KeyID":"limes:k1","Key":"[redacted]"}
+	// level=INFO msg="signer configured" signer="{KeyID:limes:k1 Key:[redacted]}"
 }

@@ -9,13 +9,14 @@ import (
 	"testing"
 	"time"
 	"uuid"
+
+	"github.com/oleg-tkachuk/limes/jwks"
 )
 
-// Mints the golden-token fixtures golden_test.go verifies, one per token
-// type. Run explicitly, and only for a deliberate wire-format change, naming
-// the type whose fixture to write; another type's stays as it was minted:
+// Mints the golden-token fixture golden_test.go verifies. Run explicitly,
+// and only for a deliberate wire-format change:
 //
-//	LIMES_WRITE_GOLDEN=at+jwt go test . -run TestGenerateGoldenToken
+//	LIMES_WRITE_GOLDEN=1 go test . -run TestGenerateGoldenToken
 //
 // Every input below is fixed so golden_test.go can reconstruct the same key
 // and clock.
@@ -29,32 +30,28 @@ var goldenSeed = [32]byte{
 }
 
 const (
-	goldenKID      = "golden-kid"
+	goldenKID      = jwks.KeyIDPrefix + "golden"
 	goldenIssuer   = "limes-golden"
 	goldenAudience = "limes-data"
 	goldenSubject  = "golden-agent"
 	goldenTenant   = "11111111-1111-1111-1111-111111111111"
-	// goldenClientID is the client a v7 fixture names; a v6 one carries none.
+	// goldenClientID is the client the fixture names.
 	goldenClientID = "golden-client"
-	// goldenUser is the user a v7 fixture's agent acts for; a v6 one names
-	// none.
+	// goldenUser is the user the fixture's agent acts for.
 	goldenUser = "golden-user"
 
-	// goldenWriteEnv names the token type whose fixture is written anew.
+	// goldenWriteEnv, set, has the fixture written anew.
 	goldenWriteEnv = "LIMES_WRITE_GOLDEN"
-)
 
-// goldenFiles are the fixtures of the token types this package reads, one
-// each: what TestGenerateGoldenToken writes.
-var goldenFiles = map[TokenType]string{
-	TokenTypeV6: "golden_token_v6.jwt",
-	TokenTypeV7: "golden_token_v7.jwt",
-}
+	// goldenFile is the fixture.
+	goldenFile = "golden_token_v7.jwt"
+)
 
 // retiredFixtures are tokens of the retired formats, each from before its
 // type was retired, kept to show they are refused rather than read under
 // another schema.
 var retiredFixtures = map[string]string{
+	"v6": "golden_token_v6.jwt",
 	"v4": "golden_token_v4.jwt",
 	"v5": "golden_token_v5.jwt",
 }
@@ -63,8 +60,8 @@ var retiredFixtures = map[string]string{
 // that the fixture carries max_copies.
 const goldenCopyQuota = 8
 
-// goldenPath is the fixture of token type typ.
-func goldenPath(typ TokenType) string { return filepath.Join("testdata", goldenFiles[typ]) }
+// goldenPath is the fixture's path.
+func goldenPath() string { return filepath.Join("testdata", goldenFile) }
 
 // goldenClock is the fixed issuance instant. The module-side verifier pins
 // the same value so nbf/exp stay inside the window forever.
@@ -91,13 +88,12 @@ func (genStore) ListByPrincipal(context.Context, ListByPrincipalRequest) (Page[C
 }
 
 func TestGenerateGoldenToken(t *testing.T) {
-	typ := TokenType(os.Getenv(goldenWriteEnv))
-	if _, ok := goldenFiles[typ]; !ok {
-		t.Skipf("set %s to a token type to (re)generate its fixture", goldenWriteEnv)
+	if os.Getenv(goldenWriteEnv) == "" {
+		t.Skipf("set %s to (re)generate the fixture", goldenWriteEnv)
 	}
 
 	priv := ed25519.NewKeyFromSeed(goldenSeed[:])
-	signer, err := NewSigner(SignerConfig{KeyID: goldenKID, Key: SealKey(priv), TokenType: typ})
+	signer, err := NewSigner(SignerConfig{KeyID: goldenKID, Key: SealKey(priv)})
 	if err != nil {
 		t.Fatalf("signer: %v", err)
 	}
@@ -130,14 +126,14 @@ func TestGenerateGoldenToken(t *testing.T) {
 			Copies:           CopyQuota{Max: goldenCopyQuota},
 		},
 		TTL:        time.Hour,
-		ClientID:   goldenClientIDOf(typ),
-		OnBehalfOf: goldenOnBehalfOfOf(typ),
+		ClientID:   goldenClientID,
+		OnBehalfOf: goldenOnBehalfOf(),
 	})
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
 
-	out := goldenPath(typ)
+	out := goldenPath()
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -154,20 +150,8 @@ func (revLookup) IsRevoked(context.Context, uuid.UUID) (bool, error) { return fa
 
 func (revLookup) IsBiscuitRevoked(context.Context, [][]byte) (bool, error) { return false, nil }
 
-// goldenClientIDOf is the client a fixture of typ names: one only where the
-// format carries it.
-// goldenOnBehalfOfOf is the principal the fixture of typ acts for: the
-// user, in a v7 one, which carries it as sub and act.
-func goldenOnBehalfOfOf(typ TokenType) *Principal {
-	if typ != TokenTypeV7 {
-		return nil
-	}
+// goldenOnBehalfOf is the principal the fixture acts for: the user, which
+// it carries as sub and act.
+func goldenOnBehalfOf() *Principal {
 	return &Principal{Type: PrincipalTypeUser, TenantID: uuid.MustParse(goldenTenant), Subject: goldenUser}
-}
-
-func goldenClientIDOf(typ TokenType) string {
-	if typ == TokenTypeV7 {
-		return goldenClientID
-	}
-	return ""
 }

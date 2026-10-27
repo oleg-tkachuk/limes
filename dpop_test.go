@@ -51,7 +51,7 @@ func TestKeyBindingSurvivesTheTokenAndDelegation(t *testing.T) {
 	key := dpopKeys(t)["Ed25519"]
 	jkt, _ := dpop.Thumbprint(key.Public())
 
-	parent, token, err := issuer.issue(ctx, IssueRequest{
+	parent, token, err := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet, OpShare}}, TTL: time.Hour,
 		ConfirmationJKT: jkt,
@@ -87,7 +87,7 @@ func TestKeyBindingSurvivesTheTokenAndDelegation(t *testing.T) {
 
 func TestIssueRefusesAMalformedBinding(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)
-	_, _, err := issuer.issue(context.Background(), IssueRequest{
+	_, _, err := issuer.issue(context.Background(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour,
 		ConfirmationJKT: "not-a-thumbprint",
@@ -128,7 +128,7 @@ const replayShare = 3
 func replayVerifier(t *testing.T, store *memStore, pub ed25519.PublicKey, maxEntries int) *Verifier {
 	t.Helper()
 	v, err := NewVerifier(VerifierConfig{
-		Keys: staticKeys(t, map[string]ed25519.PublicKey{"k1": pub}), Revocations: store,
+		Keys: staticKeys(t, map[string]ed25519.PublicKey{testKID: pub}), Revocations: store,
 		TrustedIssuers: []string{"limes-test"}, Biscuit: &BiscuitConfig{Revocations: store},
 		DPoP: newVerifier(t, dpop.VerifierConfig{Replay: newReplay(t, dpop.MemoryReplayCacheConfig{
 			EntriesPerHolder: replayShare, MaxEntries: maxEntries,
@@ -146,7 +146,7 @@ func replayVerifier(t *testing.T, store *memStore, pub ed25519.PublicKey, maxEnt
 func TestARevokedCopySpendsNoReplayRoom(t *testing.T) {
 	ctx := context.Background()
 	issuer, _, store, pub := buildIssuerVerifier(t)
-	cap, _, err := issuer.issue(ctx, IssueRequest{
+	cap, _, err := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, TTL: time.Hour,
 		Caveats: Caveats{Ops: []Op{OpGet, OpShare}, Requests: RequestCeiling{Unlimited: true}, Budget: BudgetCeiling{Unlimited: true, UnitCode: "USD"}},
@@ -191,7 +191,7 @@ func TestARefusedCaveatSpendsNoReplayRoom(t *testing.T) {
 	issuer, _, store, pub := buildIssuerVerifier(t)
 	key := dpopKeys(t)["Ed25519"]
 	jkt, _ := dpop.Thumbprint(key.Public())
-	_, token, err := issuer.issue(ctx, IssueRequest{
+	_, token, err := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, TTL: time.Hour, ConfirmationJKT: jkt,
 		Caveats: Caveats{
@@ -232,7 +232,7 @@ func TestAnUnmeteredCopySpendsNoReplayRoom(t *testing.T) {
 	const limitedRequests = 5
 	ctx := context.Background()
 	issuer, _, store, pub := buildIssuerVerifier(t)
-	cap, _, err := issuer.issue(ctx, IssueRequest{
+	cap, _, err := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, TTL: time.Hour,
 		Caveats: Caveats{Ops: []Op{OpGet, OpShare}, Requests: RequestCeiling{Unlimited: true}, Budget: BudgetCeiling{Unlimited: true, UnitCode: "USD"}},
@@ -280,7 +280,7 @@ func TestRevokedCapabilitiesSpendNoReplayRoom(t *testing.T) {
 	issue := func(tenant uuid.UUID, key crypto.Signer) (Capability, string) {
 		t.Helper()
 		jkt, _ := dpop.Thumbprint(key.Public())
-		c, tok, err := issuer.issue(ctx, IssueRequest{
+		c, tok, err := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
 			IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: tenant, Subject: "a"},
 			Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour, ConfirmationJKT: jkt,
 		})
@@ -318,7 +318,7 @@ func TestAProofIsCheckedBeforeRevocation(t *testing.T) {
 	keys := dpopKeys(t)
 	boundKey, otherKey := keys["Ed25519"], keys["P-256"]
 	jkt, _ := dpop.Thumbprint(boundKey.Public())
-	c, tok, err := issuer.issue(ctx, IssueRequest{
+	c, tok, err := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour, ConfirmationJKT: jkt,
 	})

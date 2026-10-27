@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
-	"slices"
 	"testing"
 	"time"
 	"uuid"
@@ -18,7 +17,7 @@ func TestConfigDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(priv)})
+	signer, err := NewSigner(SignerConfig{KeyID: testKID, Key: SealKey(priv)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +33,7 @@ func TestConfigDefaults(t *testing.T) {
 	}
 
 	v, err := NewVerifier(VerifierConfig{
-		Keys:           staticKeys(t, map[string]ed25519.PublicKey{"k1": pub}),
+		Keys:           staticKeys(t, map[string]ed25519.PublicKey{testKID: pub}),
 		Revocations:    newMemStore(),
 		TrustedIssuers: []string{goldenIssuer},
 	})
@@ -43,9 +42,6 @@ func TestConfigDefaults(t *testing.T) {
 	}
 	if v.cfg.Leeway != 30*time.Second {
 		t.Errorf("verifier leeway = %s, want 30s", v.cfg.Leeway)
-	}
-	if !slices.Equal(v.cfg.AcceptTokenTypes, []TokenType{TokenTypeV6, TokenTypeV7}) {
-		t.Errorf("verifier accepts %q, want v6 and v7", v.cfg.AcceptTokenTypes)
 	}
 
 }
@@ -58,7 +54,7 @@ func TestConfigRefusesNegatives(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(priv)})
+	signer, err := NewSigner(SignerConfig{KeyID: testKID, Key: SealKey(priv)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +66,7 @@ func TestConfigRefusesNegatives(t *testing.T) {
 	}
 
 	base := VerifierConfig{
-		Keys:           staticKeys(t, map[string]ed25519.PublicKey{"k1": pub}),
+		Keys:           staticKeys(t, map[string]ed25519.PublicKey{testKID: pub}),
 		Revocations:    newMemStore(),
 		TrustedIssuers: []string{goldenIssuer},
 	}
@@ -161,7 +157,7 @@ func TestIssuerNeedsOnlyAnIssuanceStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(priv)})
+	signer, err := NewSigner(SignerConfig{KeyID: testKID, Key: SealKey(priv)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,50 +166,12 @@ func TestIssuerNeedsOnlyAnIssuanceStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, _, err := issuer.issue(context.Background(), IssueRequest{
+	c, _, err := issuer.issue(context.Background(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{"data"}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Minute,
 	})
 	if err != nil || len(store.inserted) != 1 || store.inserted[0].Capability.ID != c.ID || store.inserted[0].IssuedBy.Subject != "op" {
 		t.Fatalf("Issue = %v; recorded %+v", err, store.inserted)
-	}
-}
-
-// AcceptTokenTypes names only formats this package can read; an empty list,
-// as a nil one, accepts every format it reads.
-func TestAcceptTokenTypesRefusesWhatItCannotRead(t *testing.T) {
-	pub, _, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg := func(types []TokenType) VerifierConfig {
-		return VerifierConfig{
-			Keys:             staticKeys(t, map[string]ed25519.PublicKey{"k1": pub}),
-			Revocations:      newMemStore(),
-			TrustedIssuers:   []string{goldenIssuer},
-			AcceptTokenTypes: types,
-		}
-	}
-	every := []TokenType{TokenTypeV6, TokenTypeV7}
-	for _, tc := range []struct{ types, want []TokenType }{
-		{[]TokenType{TokenTypeV6}, []TokenType{TokenTypeV6}},
-		{nil, every},
-		{[]TokenType{}, every},
-	} {
-		v, err := NewVerifier(cfg(tc.types))
-		if err != nil || !slices.Equal(v.cfg.AcceptTokenTypes, tc.want) {
-			t.Errorf("accepting %q: %v", tc.types, err)
-		}
-	}
-	for name, types := range map[string][]TokenType{
-		"an unknown format": {"limes-cap-v7+jwt"},
-		"the retired v4":    {"limes-cap-v4+jwt"},
-		"the retired v5":    {"limes-cap-v5+jwt"},
-		"an empty format":   {""},
-	} {
-		if _, err := NewVerifier(cfg(types)); err == nil {
-			t.Errorf("%s: a verifier was built", name)
-		}
 	}
 }
 
@@ -224,7 +182,7 @@ func TestSeveralIssuersNeedAKeyDecision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := VerifierConfig{Keys: staticKeys(t, map[string]ed25519.PublicKey{"k1": pub}), Revocations: newMemStore()}
+	base := VerifierConfig{Keys: staticKeys(t, map[string]ed25519.PublicKey{testKID: pub}), Revocations: newMemStore()}
 	for name, tc := range map[string]struct {
 		issuers []string
 		binding map[string]string
@@ -233,9 +191,9 @@ func TestSeveralIssuersNeedAKeyDecision(t *testing.T) {
 	}{
 		"one issuer, no binding":             {[]string{"a"}, nil, false, true},
 		"several issuers, no decision":       {[]string{"a", "b"}, nil, false, false},
-		"several issuers, a binding":         {[]string{"a", "b"}, map[string]string{"k1": "a"}, false, true},
+		"several issuers, a binding":         {[]string{"a", "b"}, map[string]string{testKID: "a"}, false, true},
 		"several issuers, shared keys":       {[]string{"a", "b"}, nil, true, true},
-		"a binding and shared keys together": {[]string{"a", "b"}, map[string]string{"k1": "a"}, true, false},
+		"a binding and shared keys together": {[]string{"a", "b"}, map[string]string{testKID: "a"}, true, false},
 	} {
 		cfg := base
 		cfg.TrustedIssuers, cfg.KeyIssuers, cfg.SharedKeys = tc.issuers, tc.binding, tc.shared
@@ -253,7 +211,7 @@ func TestIssuedTimesAreTheTokens(t *testing.T) {
 	at := time.Date(2026, time.October, 12, 9, 30, 0, 700_000_000, time.UTC) // x.7s
 	issuer.clock = func() time.Time { return at }
 	nbf := at.Add(10 * time.Second) // also x.7s: rounds up
-	issued, err := issuer.Issue(t.Context(), IssueRequest{
+	issued, err := issuer.Issue(t.Context(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour, NotBefore: nbf,
 	})
@@ -310,7 +268,7 @@ func TestIssueRefusesALifetimeUnderASecond(t *testing.T) {
 	at := time.Date(2026, time.October, 12, 9, 30, 0, 400_000_000, time.UTC) // x.4s
 	issuer.clock = func() time.Time { return at }
 	issue := func(ttl time.Duration) error {
-		_, err := issuer.Issue(t.Context(), IssueRequest{
+		_, err := issuer.Issue(t.Context(), IssueRequest{ClientID: testClientID,
 			IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 			Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: ttl,
 		})

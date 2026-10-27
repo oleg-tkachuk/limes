@@ -23,7 +23,7 @@ func newTermsIssuer(t *testing.T, store IssuanceStore) *Issuer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(priv)})
+	signer, err := NewSigner(SignerConfig{KeyID: testKID, Key: SealKey(priv)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestSignAndRecordNamesTheRecord(t *testing.T) {
 	c := iss.mint(grantTerms{
 		Subject:  Principal{Type: PrincipalTypeService, TenantID: uuid.New(), Subject: "svc"},
 		Audience: []string{"api"}, Caveats: Caveats{Ops: []Op{OpGet}},
-		IssuedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour),
+		IssuedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour), ClientID: testClientID,
 	})
 	for _, what := range []string{"issuance", "delegation"} {
 		token, err := iss.signAndRecord(t.Context(), c, Principal{Subject: "op"}, what)

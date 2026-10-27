@@ -81,7 +81,7 @@ func buildIssuerVerifier(t *testing.T) (*Issuer, *Verifier, *memStore, ed25519.P
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
-	signer, err := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(priv)})
+	signer, err := NewSigner(SignerConfig{KeyID: testKID, Key: SealKey(priv)})
 	if err != nil {
 		t.Fatalf("signer: %v", err)
 	}
@@ -96,7 +96,7 @@ func buildIssuerVerifier(t *testing.T) (*Issuer, *Verifier, *memStore, ed25519.P
 		t.Fatalf("issuer: %v", err)
 	}
 	cache := store // disable cache for deterministic tests
-	keys := staticKeys(t, map[string]ed25519.PublicKey{"k1": pub})
+	keys := staticKeys(t, map[string]ed25519.PublicKey{testKID: pub})
 	v, err := NewVerifier(VerifierConfig{
 		Keys:           keys,
 		Revocations:    cache,
@@ -116,7 +116,7 @@ func TestIssue_VerifyHappyPath(t *testing.T) {
 	issuer, verifier, _, _ := buildIssuerVerifier(t)
 
 	ctx := context.Background()
-	cap, token, err := issuer.issue(ctx, IssueRequest{
+	cap, token, err := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject: Principal{
 			Type:     PrincipalTypeAgent,
@@ -146,9 +146,9 @@ func TestVerify_AudienceMismatch(t *testing.T) {
 	t.Parallel()
 	issuer, verifier, _, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
-	_, token, _ := issuer.issue(ctx, IssueRequest{
+	_, token, _ := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New()},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 	})
@@ -162,10 +162,10 @@ func TestVerify_AudienceMismatch(t *testing.T) {
 func TestVerify_Expired(t *testing.T) {
 	t.Parallel()
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
-	signer, _ := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(priv)})
+	signer, _ := NewSigner(SignerConfig{KeyID: testKID, Key: SealKey(priv)})
 	store := newMemStore()
 	cache := store
-	keys := staticKeys(t, map[string]ed25519.PublicKey{"k1": pub})
+	keys := staticKeys(t, map[string]ed25519.PublicKey{testKID: pub})
 
 	// Inject a clock that returns a fixed past time at issue, then
 	// jumps an hour ahead at verify.
@@ -188,9 +188,9 @@ func TestVerify_Expired(t *testing.T) {
 	})
 
 	ctx := context.Background()
-	_, token, _ := issuer.issue(ctx, IssueRequest{
+	_, token, _ := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New()},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 	})
@@ -207,9 +207,9 @@ func TestVerify_Revoked(t *testing.T) {
 	t.Parallel()
 	issuer, verifier, store, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
-	cap, token, _ := issuer.issue(ctx, IssueRequest{
+	cap, token, _ := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New()},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 	})
@@ -227,7 +227,7 @@ func TestVerify_Revoked(t *testing.T) {
 func TestVerify_UntrustedIssuer(t *testing.T) {
 	t.Parallel()
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
-	signer, _ := NewSigner(SignerConfig{KeyID: "k1", Key: SealKey(priv)})
+	signer, _ := NewSigner(SignerConfig{KeyID: testKID, Key: SealKey(priv)})
 	store := newMemStore()
 
 	rogueIssuer, _ := NewIssuer(IssuerConfig{
@@ -235,15 +235,15 @@ func TestVerify_UntrustedIssuer(t *testing.T) {
 		Store:      store,
 		IssuerName: "limes-rogue",
 	})
-	_, token, _ := rogueIssuer.issue(context.Background(), IssueRequest{
+	_, token, _ := rogueIssuer.issue(context.Background(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New()},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet}},
 	})
 
 	cache := store
-	keys := staticKeys(t, map[string]ed25519.PublicKey{"k1": pub})
+	keys := staticKeys(t, map[string]ed25519.PublicKey{testKID: pub})
 	verifier, _ := NewVerifier(VerifierConfig{
 		Keys:           keys,
 		Revocations:    cache,
@@ -263,9 +263,9 @@ func TestDelegate_NarrowsAndPersists(t *testing.T) {
 	ctx := context.Background()
 	tenantID := uuid.New()
 
-	parent, _, err := issuer.issue(ctx, IssueRequest{
+	parent, _, err := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: tenantID},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: tenantID, Subject: "agent"},
 		Audience: []string{audienceData, audienceMCP},
 		Caveats: Caveats{
 			Ops:              []Op{OpGet, OpList, "index:search", OpShare},
@@ -310,9 +310,9 @@ func TestDelegate_RejectsWidening(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
 	tenantID := uuid.New()
-	parent, _, _ := issuer.issue(ctx, IssueRequest{
+	parent, _, _ := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: tenantID},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: tenantID, Subject: "agent"},
 		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet, OpShare}},
 		TTL:      time.Hour,
@@ -320,7 +320,7 @@ func TestDelegate_RejectsWidening(t *testing.T) {
 
 	_, _, err := issuer.delegate(ctx, DelegateRequest{
 		Parent:   asVerified(parent),
-		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: tenantID},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: tenantID, Subject: "agent"},
 		Audience: []string{audienceData, audienceAdmin}, // wider!
 		Caveats:  Caveats{Ops: []Op{OpGet, OpShare}},
 	})
@@ -336,9 +336,9 @@ func TestDelegate_RefusesACopyWithLimitsOfItsOwn(t *testing.T) {
 	issuer, _, store, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
 	tenantID := uuid.New()
-	parent, _, err := issuer.issue(ctx, IssueRequest{
+	parent, _, err := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: tenantID},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: tenantID, Subject: "agent"},
 		Audience: []string{audienceData},
 		Caveats:  Caveats{Ops: []Op{OpGet, OpShare}, Requests: RequestCeiling{Max: 100}},
 		TTL:      time.Hour,

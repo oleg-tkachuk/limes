@@ -24,7 +24,7 @@ func limitedBiscuit(t *testing.T) (*Verifier, Capability, string) {
 	t.Helper()
 	issuer, v, _, _, _ := biscuitFixture(t)
 	v.cfg.Biscuit.MeterCopies = true
-	cap, _, err := issuer.issue(context.Background(), IssueRequest{
+	cap, _, err := issuer.issue(context.Background(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData},

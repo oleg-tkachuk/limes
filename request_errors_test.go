@@ -19,7 +19,7 @@ type failingStore struct {
 func (s failingStore) Insert(context.Context, InsertRequest) error { return s.err }
 
 func validIssue() IssueRequest {
-	return IssueRequest{
+	return IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject:  Principal{Type: PrincipalTypeService, TenantID: uuid.MustParse(goldenTenant), Subject: "svc"},
 		Audience: []string{goldenAudience},
@@ -88,7 +88,7 @@ func TestIssueKeepsTheStoreErrorApartFromTheRequest(t *testing.T) {
 				t.Errorf("err = %v, want %v and not ErrInvalidRequest", err, tc.want)
 			}
 			parent := Capability{ID: uuid.New(), Issuer: goldenIssuer, Subject: validIssue().Subject, Audience: []string{goldenAudience},
-				Caveats: Caveats{Ops: []Op{OpGet, OpShare}}, ExpiresAt: time.Now().Add(time.Hour)}
+				Caveats: Caveats{Ops: []Op{OpGet, OpShare}}, ExpiresAt: time.Now().Add(time.Hour), ClientID: testClientID}
 			_, _, err = iss.delegate(context.Background(), DelegateRequest{Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"}, Parent: asVerified(parent), InheritCaveats: true, TTL: time.Minute})
 			if !errors.Is(err, tc.want) || errors.Is(err, ErrInvalidRequest) {
 				t.Errorf("delegate err = %v, want %v and not ErrInvalidRequest", err, tc.want)
@@ -99,7 +99,7 @@ func TestIssueKeepsTheStoreErrorApartFromTheRequest(t *testing.T) {
 
 func TestDelegateRefusesAMalformedRequestAsInvalid(t *testing.T) {
 	iss := testIssuer(t, goldenKID, ed25519.NewKeyFromSeed(goldenSeed[:]), time.Now)
-	parent := Capability{ID: uuid.New(), Issuer: goldenIssuer, Subject: validIssue().Subject, Audience: []string{goldenAudience},
+	parent := Capability{ClientID: testClientID, ID: uuid.New(), Issuer: goldenIssuer, Subject: validIssue().Subject, Audience: []string{goldenAudience},
 		Caveats: Caveats{Ops: []Op{OpGet, OpShare}}, ExpiresAt: time.Now().Add(time.Hour)}
 	for name, req := range map[string]DelegateRequest{
 		"no parent":              {InheritCaveats: true},

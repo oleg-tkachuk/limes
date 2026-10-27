@@ -54,7 +54,7 @@ func TestPrincipalTypeValidate(t *testing.T) {
 func TestIssueAndDelegateValidateTheSubject(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
-	if _, _, err := issuer.issue(ctx, IssueRequest{
+	if _, _, err := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{Type: "robot", TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{"data"},
@@ -81,7 +81,7 @@ func TestVerifyRefusesAnUnknownPrincipalType(t *testing.T) {
 	issuer, v, _, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
-	token := signUnchecked(t, issuer.signer, Capability{
+	token := signUnchecked(t, issuer.signer, Capability{ClientID: testClientID,
 		ID: uuid.New(), Issuer: "limes-test",
 		Subject:  Principal{Type: "robot", TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{"data"}, Caveats: Caveats{Ops: []Op{OpGet}},
@@ -98,7 +98,7 @@ func TestVerifyRefusesAnUnknownPrincipalType(t *testing.T) {
 func TestIssueAndDelegateKeepNoAliasOfTheCaller(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
-	req := IssueRequest{
+	req := IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a", Agent: &AgentPrincipal{AgentType: "worker"}},
 		Audience: []string{"data"},
