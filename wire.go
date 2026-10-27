@@ -1,6 +1,9 @@
 package limes
 
-import "uuid"
+import (
+	"encoding/json/v2"
+	"uuid"
+)
 
 // The token's claims are these unexported structs, never the exported types
 // a caller holds: renaming a field of Principal, AgentPrincipal or Caveats is
@@ -67,6 +70,13 @@ func (w wirePrincipal) principal() Principal {
 		p.Agent = &a
 	}
 	return p
+}
+
+// MarshalCaveats encodes c as a token's limes_caveats claim carries it, for
+// a reader outside limes to be shown the same members a token holds, such as
+// an RFC 7662 introspection answer.
+func MarshalCaveats(c Caveats) ([]byte, error) {
+	return json.Marshal(toWireCaveats(c))
 }
 
 func toWireCaveats(c Caveats) wireCaveats {

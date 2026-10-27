@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 	"uuid"
@@ -91,6 +92,33 @@ func checkIntrospectionActive(t *testing.T, typ limes.TokenType, wantClient any)
 		if (tc.jkt == "") != (cnfGot == nil) || (cnfGot != nil && cnfGot["jkt"] != tc.jkt) {
 			t.Errorf("%s: cnf %v, want jkt %q", name, body["cnf"], tc.jkt)
 		}
+		checkCaveatsDetail(t, name, body, c.Caveats)
+	}
+}
+
+// checkCaveatsDetail holds an answer's authorization_details to one entry of
+// the caveats type, whose other members are the token's limes_caveats claim.
+func checkCaveatsDetail(t *testing.T, name string, body map[string]any, caveats limes.Caveats) {
+	t.Helper()
+	details, _ := body["authorization_details"].([]any)
+	if len(details) != 1 {
+		t.Fatalf("%s: authorization_details %v, want one entry", name, body["authorization_details"])
+	}
+	entry, _ := details[0].(map[string]any)
+	if entry[detailType] != AuthorizationDetailsTypeCaveats {
+		t.Errorf("%s: entry type %v, want %q", name, entry[detailType], AuthorizationDetailsTypeCaveats)
+	}
+	raw, err := limes.MarshalCaveats(caveats)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want map[string]any
+	if err := json.Unmarshal(raw, &want); err != nil {
+		t.Fatal(err)
+	}
+	delete(entry, detailType)
+	if !reflect.DeepEqual(entry, want) {
+		t.Errorf("%s: entry %v, want the caveats %v", name, entry, want)
 	}
 }
 
