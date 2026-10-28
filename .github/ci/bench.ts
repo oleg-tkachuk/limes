@@ -149,6 +149,12 @@ function outputOf(err: unknown): string {
   return typeof cause === "object" && cause !== null && "stdout" in cause ? String(cause.stdout) : "";
 }
 
+// benchFailure is the error of a failed benchmark run: go test reports a
+// failed benchmark on its standard output, whose tail it carries.
+export function benchFailure(err: unknown): Error {
+  return new Error(`${err instanceof Error ? err.message : String(err)}\n${tail(outputOf(err))}`, { cause: err });
+}
+
 // tail is the last FAILURE_LINES lines of output.
 export function tail(output: string): string {
   return output.trimEnd().split("\n").slice(-FAILURE_LINES).join("\n");
@@ -159,38 +165,39 @@ export function tail(output: string): string {
 function bench(root: string, out: string, module: Benched): Bench {
   return {
     tags: async () => lines(await git(["tag", "--list", `${module.prefix}v*`, "--sort=-v:refname"], root)),
-    run: async (dir) => {
-      try {
-        return await execute("go", benchArgs(), { cwd: join(dir, module.dir) });
-      } catch (err) {
-        // go test reports a failed benchmark on its standard output.
-        throw new Error(`${err instanceof Error ? err.message : String(err)}\n${tail(outputOf(err))}`, { cause: err });
-      }
-    },
+    run: (dir) => runBenchmarks(join(dir, module.dir)),
     checkout: async (tag) => {
       const worktree = join(out, "base");
       await git(["worktree", "add", "--detach", worktree, tag], root);
       return worktree;
     },
     remove: async (worktree) => void (await git(["worktree", "remove", "--force", worktree], root)),
-    benchstat: async (outputs, labels) => {
-      // benchstat heads each column with the label an input names, as
-      // label=file.
-      const inputs = outputs.map((o, i) => {
-        const file = join(out, `${i}.txt`);
-        writeFileSync(file, o);
-        return `${labels[i] ?? String(i)}=${file}`;
-      });
-      return execute("go", ["tool", `-modfile=${TOOLS_MODFILE}`, "benchstat", ...inputs], { cwd: root });
-    },
+    benchstat: (outputs, labels) => benchstat(root, out, outputs, labels),
   };
 }
 
-async function main(): Promise<void> {
-  const [name, ...rest] = process.argv.slice(2);
-  if (name === undefined || rest.length > 0 || !BENCHED.includes(name)) {
-    throw new Error(`usage: bench.ts <${BENCHED.join("|")}>`);
+// runBenchmarks runs the benchmarks of the module in dir.
+async function runBenchmarks(dir: string): Promise<string> {
+  try {
+    return await execute("go", benchArgs(), { cwd: dir });
+  } catch (err) {
+    throw benchFailure(err);
   }
+}
+
+// benchstat compares outputs, each written to a file under out and headed
+// with its label, as label=file; one without a label is headed by its index.
+async function benchstat(root: string, out: string, outputs: readonly string[], labels: readonly string[]): Promise<string> {
+  const inputs = outputs.map((o, i) => {
+    const file = join(out, `${i}.txt`);
+    writeFileSync(file, o);
+    return `${labels[i] ?? String(i)}=${file}`;
+  });
+  return execute("go", ["tool", `-modfile=${TOOLS_MODFILE}`, "benchstat", ...inputs], { cwd: root });
+}
+
+async function main(): Promise<void> {
+  const name = benchedName(process.argv.slice(2));
   const root = (await git(["rev-parse", "--show-toplevel"])).trim();
   const module = selectModule(root, name);
   const out = mkdtempSync(join(tmpdir(), "limes-bench-"));
@@ -201,6 +208,16 @@ async function main(): Promise<void> {
   } finally {
     rmSync(out, { recursive: true, force: true });
   }
+}
+
+// benchedName is the one module args name, refusing none, more, or one not
+// benched.
+export function benchedName(args: readonly string[]): string {
+  const [name, ...rest] = args;
+  if (name === undefined || rest.length > 0 || !BENCHED.includes(name)) {
+    throw new Error(`usage: bench.ts <${BENCHED.join("|")}>`);
+  }
+  return name;
 }
 
 if (import.meta.main) {

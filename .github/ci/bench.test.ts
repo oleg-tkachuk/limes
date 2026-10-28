@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 
 import { parse } from "yaml";
 
-import { BENCHED, BENCH_ROUNDS, benchArgs, benchFile, compareBenchmarks, newestRelease, report, tail, type Bench, type Benched } from "./bench.ts";
+import { BENCHED, BENCH_ROUNDS, benchArgs, benchedName, benchFailure, benchFile, compareBenchmarks, newestRelease, report, tail, type Bench, type Benched } from "./bench.ts";
 import { selectModule } from "./lib/modules.ts";
 
 // PGSTORE is a nested module as the comparison sees it.
@@ -145,4 +145,25 @@ test("a failed run's error carries the end of its output", () => {
   const end = tail(`${output}\n`).split("\n");
   assert.equal(end.length, 20);
   assert.equal(end.at(-1), "line 29");
+});
+
+describe("benchedName", () => {
+  test("one benched module", () => assert.equal(benchedName([BENCHED[0] ?? ""]), BENCHED[0]));
+  for (const args of [[], ["exchange"], [BENCHED[0] ?? "", "more"]]) {
+    test(`refuses ${JSON.stringify(args)}`, () => assert.throws(() => benchedName(args), /usage: bench\.ts/));
+  }
+});
+
+describe("benchFailure", () => {
+  test("carries the tail of what go test printed", () => {
+    const failed = new Error("exit status 1", { cause: { stdout: "--- FAIL: BenchmarkVerify\nFAIL" } });
+    const err = benchFailure(failed);
+    assert.match(err.message, /^exit status 1\n/);
+    assert.match(err.message, /--- FAIL: BenchmarkVerify/);
+    assert.equal(err.cause, failed);
+  });
+  test("says only what failed when nothing was printed", () => {
+    assert.equal(benchFailure(new Error("not found")).message, "not found\n");
+    assert.equal(benchFailure("refused").message, "refused\n");
+  });
 });
