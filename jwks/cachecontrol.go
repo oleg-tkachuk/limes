@@ -14,6 +14,10 @@ import (
 // the two directives a key-set cache acts on, and the Age header, and nothing
 // else.
 
+// listSeparator separates the members of a header field's list (RFC 9110
+// §5.6.1): Cache-Control's directives, and an Age sent more than once.
+const listSeparator = ","
+
 // responseFreshness is how long a response stays fresh by its own headers:
 // max-age less the Age it has already spent in caches (RFC 9111 §4.2.1,
 // §4.2.3), zero for no-cache or no-store (§5.2.2.4, §5.2.2.5). ok is false
@@ -21,7 +25,7 @@ import (
 func responseFreshness(h http.Header) (freshness time.Duration, ok bool) {
 	maxAge, found := int64(-1), false
 	for _, line := range h.Values(httpx.HeaderCacheControl) {
-		for directive := range strings.SplitSeq(line, ",") {
+		for directive := range strings.SplitSeq(line, listSeparator) {
 			name, value, _ := strings.Cut(strings.TrimSpace(directive), "=")
 			switch strings.ToLower(name) {
 			case httpx.DirectiveNoCache, httpx.DirectiveNoStore:
@@ -42,7 +46,9 @@ func responseFreshness(h http.Header) (freshness time.Duration, ok bool) {
 	if !found {
 		return 0, false
 	}
-	age, ok := deltaSeconds(h.Get(httpx.HeaderAge))
+	// §5.1: of an Age sent as a list, the first member.
+	first, _, _ := strings.Cut(h.Get(httpx.HeaderAge), listSeparator)
+	age, ok := deltaSeconds(strings.TrimSpace(first))
 	if !ok {
 		age = 0
 	}

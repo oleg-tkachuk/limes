@@ -27,6 +27,10 @@ func TestResponseFreshness(t *testing.T) {
 		{"public, max-age=60", "15", 45 * time.Second, true},
 		{`MAX-AGE="30"`, "", 30 * time.Second, true},
 		{"max-age=10", "60", 0, true},
+		// §5.1: of a list-valued Age, the first member.
+		{"max-age=60", "30, 40", 30 * time.Second, true},
+		{"max-age=60", " 15 ,", 45 * time.Second, true},
+		{"max-age=60", "x, 10", time.Minute, true},
 		{"no-cache", "", 0, true},
 		{"max-age=60, no-store", "", 0, true},
 		{"max-age=abc", "", 0, true},
