@@ -9,6 +9,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -41,6 +42,9 @@ const (
 	headerDPoPNonce = "DPoP-Nonce"
 	// cacheNoStore keeps a token response out of every cache (RFC 6749 §5.1).
 	cacheNoStore = "no-store"
+	// pragmaNoCache is the Pragma a token response carries beside
+	// cacheNoStore, for HTTP/1.0 caches (RFC 6749 §5.1).
+	pragmaNoCache = "no-cache"
 )
 
 // repeatable are the parameters a request may send more than once (RFC
@@ -204,7 +208,20 @@ func readForm(w http.ResponseWriter, r *http.Request, maxBytes int64) (url.Value
 	if err := r.ParseForm(); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
 	}
+	dropEmpty(r.PostForm)
 	return r.PostForm, nil
+}
+
+// dropEmpty removes the values sent empty, and a parameter left with none:
+// a parameter sent without a value is treated as omitted (RFC 6749 §3.2).
+func dropEmpty(form url.Values) {
+	for name, values := range form {
+		if kept := slices.DeleteFunc(values, func(v string) bool { return v == "" }); len(kept) > 0 {
+			form[name] = kept
+		} else {
+			delete(form, name)
+		}
+	}
 }
 
 // proofOf is the request's DPoP proof, the zero Proof for none; more than
@@ -277,17 +294,12 @@ func checkTokenTypes(form url.Values) error {
 }
 
 // checkTargets refuses a resource that is no absolute URI without a
-// fragment (RFC 8707 §2), or an empty audience.
+// fragment (RFC 8707 §2).
 func checkTargets(form url.Values) error {
 	for _, resource := range form[paramResource] {
 		u, err := url.Parse(resource)
 		if err != nil || !u.IsAbs() || u.Fragment != "" || strings.Contains(resource, "#") {
 			return fmt.Errorf("%w: %s %q is not an absolute URI without a fragment", ErrInvalidTarget, paramResource, resource)
-		}
-	}
-	for _, audience := range form[paramAudience] {
-		if audience == "" {
-			return fmt.Errorf("%w: an empty %s", ErrInvalidTarget, paramAudience)
 		}
 	}
 	return nil
@@ -341,9 +353,9 @@ func (h *Handler) refuse(w http.ResponseWriter, r *http.Request, err error) {
 			}
 			if nonce == "" {
 				h.cfg.Logger.ErrorContext(r.Context(), "exchange: a nonce is required, and no verifier issues one; give Config.Capabilities and Config.DPoP the same nonces")
-			} else {
-				w.Header().Set(headerDPoPNonce, nonce)
+				break
 			}
+			w.Header().Set(headerDPoPNonce, nonce)
 		}
 		h.write(w, rule.status, errorResponse{Error: rule.code, Description: rule.description})
 		return
@@ -376,6 +388,7 @@ func (h *Handler) write(w http.ResponseWriter, status int, body any) {
 func writeJSON(w http.ResponseWriter, status int, body any, log *slog.Logger) {
 	w.Header().Set("Content-Type", jsonContentType)
 	w.Header().Set("Cache-Control", cacheNoStore)
+	w.Header().Set("Pragma", pragmaNoCache)
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(body); err != nil {
 		log.Error("exchange: write response", slog.Any("error", err))

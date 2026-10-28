@@ -37,8 +37,9 @@ func TestIntrospectionHoldsTheClientToItsAudiences(t *testing.T) {
 }
 
 // A narrowing endpoint needs its URL to check a bound parent's proof, and
-// one with no DPoP verifier of its own answers a nonce asked for by the
-// capabilities' verifier without failing.
+// one with no DPoP verifier of its own, asked for a nonce no verifier
+// issues, answers the server's failure: a use_dpop_nonce with no nonce is
+// one the client cannot satisfy (RFC 9449 §8).
 func TestHandlerNarrowingWithoutItsOwnDPoP(t *testing.T) {
 	f := newFixture(t, fixtureConfig{narrow: true, noDPoP: true})
 	if _, err := NewHandler(HandlerConfig{Exchanger: f.ex, Authenticate: func(*http.Request) (Client, error) { return client(), nil }}); err == nil {
@@ -49,7 +50,7 @@ func TestHandlerNarrowingWithoutItsOwnDPoP(t *testing.T) {
 	r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, tokenEndpoint, nil)
 	h.refuse(w, r, errors.Join(dpop.ErrNonceRequired))
 	var body errorResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || w.Code != http.StatusBadRequest || body.Error != codeUseDPoPNonce {
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || w.Code != http.StatusInternalServerError || body.Error != codeServerError {
 		t.Errorf("status %d, body %s", w.Code, w.Body)
 	}
 }
