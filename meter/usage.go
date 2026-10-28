@@ -876,7 +876,8 @@ func ValidateExternalRef(ref string) error {
 
 // BumpReceipt is what a Bump counted.
 type BumpReceipt struct {
-	// RequestCount is the capability's request count after this one.
+	// RequestCount is the capability's request count after this one; on a
+	// Bump refused past a ceiling, the count before it, unchanged.
 	RequestCount int64
 	_            noCompare
 }

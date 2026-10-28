@@ -2241,7 +2241,8 @@ func checkCallbackSeesTheReceipt(t *testing.T, f fixture) {
 }
 
 // checkBump holds a store to counting requests on the capability and every
-// ancestor, and to refusing past the capability's own limit without counting.
+// ancestor, and to refusing past the capability's own limit without counting,
+// with a receipt showing the count unchanged.
 func checkBump(t *testing.T, f fixture) {
 	const limit = 2
 	bump := func() (int64, error) {
@@ -2252,8 +2253,9 @@ func checkBump(t *testing.T, f fixture) {
 		n, err := bump()
 		expect.Must(t, err == nil && n == want, "bump = %d, %v; want %d", n, err, want)
 	}
-	_, err := bump()
+	n, err := bump()
 	expect.Must(t, errors.Is(err, limes.ErrRequestLimitExceeded), "a bump past the limit: err = %v, want ErrRequestLimitExceeded", err)
+	expect.That(t, n == limit, "a refused bump's receipt counts %d requests, want %d", n, limit)
 	// Counting requests alone records the subject's unit, so a reader
 	// shows the counters in it rather than in none.
 	for _, id := range []uuid.UUID{f.child, f.root} {
