@@ -69,22 +69,33 @@ export async function reportHealth(issues: GitHub, run: Run): Promise<State> {
 async function main(): Promise<void> {
   const repository = requireEnv("GITHUB_REPOSITORY");
   const issues = gitHubFor(requireEnv("ISSUES_TOKEN"), repository);
-  const runId = Number(requireEnv("RUN_ID"));
-  if (!Number.isSafeInteger(runId) || runId <= 0) {
-    throw new Error(`RUN_ID ${process.env.RUN_ID} is not a run id`);
-  }
+  const runId = runIdFrom(requireEnv("RUN_ID"));
   const conclusion = await requiredConclusion(issues, { id: runId, conclusion: requireEnv("CONCLUSION") });
   const run: Run = { conclusion, headSha: requireEnv("HEAD_SHA"), url: requireEnv("RUN_URL") };
   const state = await reportHealth(issues, run);
+  await mergeWhenGreen(state, optionalEnv("GH_TOKEN"), (token) => mergeWaiting(gitHubFor(token, repository)));
+}
+
+// runIdFrom reads a run id, refusing what is no positive integer.
+export function runIdFrom(text: string): number {
+  const runId = Number(text);
+  if (!Number.isSafeInteger(runId) || runId <= 0) {
+    throw new Error(`RUN_ID ${text} is not a run id`);
+  }
+  return runId;
+}
+
+// mergeWhenGreen merges the pull requests waiting on main, with token,
+// once main is green; without a token, it says why nothing is merged.
+export async function mergeWhenGreen(state: State, token: string | undefined, merge: (token: string) => Promise<unknown>): Promise<void> {
   if (state !== State.Green) {
     return;
   }
-  const token = optionalEnv("GH_TOKEN");
   if (token === undefined) {
     warning("AUTOMERGE_TOKEN is not set; nothing merged (see auto-merge.yaml)");
     return;
   }
-  await mergeWaiting(gitHubFor(token, repository));
+  await merge(token);
 }
 
 if (import.meta.main) {

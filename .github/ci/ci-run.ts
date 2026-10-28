@@ -173,25 +173,33 @@ export async function passedRunFor(github: GitHub, repository: string, sha: stri
 }
 
 async function main(): Promise<void> {
-  const [command, runText = "", arg = ""] = process.argv.slice(2);
+  const { command, runText, arg } = ciRunArgs(process.argv.slice(2));
   const repository = requireEnv("GITHUB_REPOSITORY");
   const github = gitHubFor(requireEnv("GH_TOKEN"), repository);
-  if (command === Command.Find) {
-    setOutput(OUTPUT_RUN_ID, String(await passedRunFor(github, repository, runText, requiredJobs(readFileSync(CI_WORKFLOW, "utf8")))));
-    return;
-  }
-  const runId = runIdOf(runText);
-  switch (command) {
-    case Command.Vouches:
-      await vouch(github, repository, runId, arg, requiredJobs(readFileSync(CI_WORKFLOW, "utf8")));
+  const required = () => requiredJobs(readFileSync(CI_WORKFLOW, "utf8"));
+  const commands: Record<CiRunCommand, () => Promise<void>> = {
+    [Command.Find]: async () => setOutput(OUTPUT_RUN_ID, String(await passedRunFor(github, repository, runText, required()))),
+    [Command.Vouches]: async () => {
+      const runId = runIdOf(runText);
+      await vouch(github, repository, runId, arg, required());
       info(`CI run ${runId} passed for ${arg}`);
-      break;
-    case Command.JobPassed:
-      setOutput(OUTPUT_PASSED, String(await jobPassed(github, runId, arg)));
-      break;
-    default:
-      throw new Error(`usage: ci-run.ts ${Command.Vouches}|${Command.JobPassed} <run-id> <sha|job> | ${Command.Find} <sha>`);
+    },
+    [Command.JobPassed]: async () => setOutput(OUTPUT_PASSED, String(await jobPassed(github, runIdOf(runText), arg))),
+  };
+  await commands[command]();
+}
+
+// CiRunCommand is a command ci-run.ts runs.
+export type CiRunCommand = (typeof Command)[keyof typeof Command];
+
+// ciRunArgs reads the command, the run (or, for find, the sha) and the
+// command's argument from args, refusing a command this script does not run.
+export function ciRunArgs(args: readonly string[]): { command: CiRunCommand; runText: string; arg: string } {
+  const [command, runText = "", arg = ""] = args;
+  if (!Object.values(Command).includes(command as CiRunCommand)) {
+    throw new Error(`usage: ci-run.ts ${Command.Vouches}|${Command.JobPassed} <run-id> <sha|job> | ${Command.Find} <sha>`);
   }
+  return { command: command as CiRunCommand, runText, arg };
 }
 
 if (import.meta.main) {

@@ -39,11 +39,17 @@ export function parseNeeds(json: string): Needs {
 async function main(): Promise<void> {
   const needs = parseNeeds(requireEnv("NEEDS"));
   summarize(`### All checks\n\n${table(SUMMARY_HEADER, Object.entries(needs).map(([id, job]) => [id, job.result ?? "no result"]))}`);
+  info(checkNeeds(needs));
+}
+
+// checkNeeds is what to say of needs when every required job passed or was
+// skipped, and throws naming those that did not.
+export function checkNeeds(needs: Needs): string {
   const failed = failedJobs(needs);
   if (failed.length > 0) {
     throw new Error(`a required job did not pass: ${failed.join(", ")}`);
   }
-  info(`every required job passed or was skipped: ${Object.keys(needs).join(", ")}`);
+  return `every required job passed or was skipped: ${Object.keys(needs).join(", ")}`;
 }
 
 if (import.meta.main) {

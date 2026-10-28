@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { describe, test } from "node:test";
 
-import { failedJobs, parseNeeds } from "./checks.ts";
+import { checkNeeds, failedJobs, parseNeeds } from "./checks.ts";
 
 test("passed and skipped jobs pass", () => {
   assert.deepEqual(failedJobs({ verify: { result: "success" }, redis: { result: "skipped" } }), []);
@@ -20,4 +20,13 @@ test("the needs context is read as an object of jobs", () => {
   for (const bad of ["[]", "{}", "null", '"x"']) {
     assert.throws(() => parseNeeds(bad), Error, bad);
   }
+});
+
+describe("checkNeeds", () => {
+  test("every required job passed or was skipped", () => {
+    assert.equal(checkNeeds({ a: { result: "success" }, b: { result: "skipped" } }), "every required job passed or was skipped: a, b");
+  });
+  test("a failed job is named", () => {
+    assert.throws(() => checkNeeds({ a: { result: "success" }, b: { result: "failure" } }), /did not pass: b \(failure\)$/);
+  });
 });

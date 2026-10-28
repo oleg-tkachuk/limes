@@ -203,21 +203,32 @@ async function main(): Promise<void> {
   });
   const event = optionalEnv("EVENT");
   const groups = checkedGroups(event, reached);
-  if (event === PUSH_EVENT) {
-    info("a push to main checks everything, whatever its diff reaches");
-  }
-  if (groups.size === 0) {
-    info("documentation only — the checks below will report as skipped");
-  } else {
-    info(`reaches: ${[...groups].join(", ")}`);
-  }
-  setOutput(OUTPUT_RELEVANT, String(groups.size > 0));
-  setOutput(OUTPUT_CODE, String(reached.size > 0));
-  for (const group of ALL_GROUPS) {
-    setOutput(group, String(groups.has(group)));
-  }
-  setOutput(OUTPUT_VERIFY_TASKS, verifyTasks(groups));
+  changesNotes(event, groups).forEach((note) => info(note));
+  Object.entries(changesOutputs(reached, groups)).forEach(([name, value]) => setOutput(name, value));
   summarize(changesSummary(event, reached, groups));
+}
+
+// changesNotes are what the log says of the groups an event checks: a push
+// to main checks everything, whatever its diff reaches; documentation alone
+// reaches none, and the checks report as skipped.
+export function changesNotes(event: string | undefined, groups: ReadonlySet<Group>): string[] {
+  const notes = event === PUSH_EVENT ? ["a push to main checks everything, whatever its diff reaches"] : [];
+  notes.push(groups.size === 0 ? "documentation only — the checks below will report as skipped" : `reaches: ${[...groups].join(", ")}`);
+  return notes;
+}
+
+// changesOutputs are the step's outputs: whether anything is checked,
+// whether code is reached, each group checked, and the verify tasks.
+export function changesOutputs(reached: ReadonlySet<Group>, groups: ReadonlySet<Group>): Record<string, string> {
+  const outputs: Record<string, string> = {
+    [OUTPUT_RELEVANT]: String(groups.size > 0),
+    [OUTPUT_CODE]: String(reached.size > 0),
+  };
+  for (const group of ALL_GROUPS) {
+    outputs[group] = String(groups.has(group));
+  }
+  outputs[OUTPUT_VERIFY_TASKS] = verifyTasks(groups);
+  return outputs;
 }
 
 if (import.meta.main) {

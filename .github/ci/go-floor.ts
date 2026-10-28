@@ -43,13 +43,20 @@ async function goDirective(dir: string): Promise<string> {
 }
 
 async function main(): Promise<void> {
-  const [floor, ...dirs] = process.argv.slice(2);
+  await checkFloor(process.argv.slice(2), goDirective);
+}
+
+// checkFloor refuses a floor, the first of args, that is not a patch of the
+// go directive of each module directory after it — the root's when none is
+// named — as directive reads it.
+export async function checkFloor(args: readonly string[], directive: (dir: string) => Promise<string>): Promise<void> {
+  const [floor, ...dirs] = args;
   if (floor === undefined) {
     throw new Error("usage: go-floor.ts <floor> [module directory ...]");
   }
   const directives: Record<string, string> = {};
   for (const dir of dirs.length > 0 ? dirs : [ROOT_DIR]) {
-    directives[dir] = await goDirective(dir);
+    directives[dir] = await directive(dir);
   }
   const off = offFloor(floor, directives);
   if (off.length > 0) {

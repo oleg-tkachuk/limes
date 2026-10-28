@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, test } from "node:test";
 
+import { withoutWorkflowCommands } from "./lib/actions.ts";
+
 import { changed, fakeData, fakeGitHub, prRun, type FakeData } from "./lib/fake-github.ts";
 import type { PullRequest } from "./lib/github.ts";
-import { RED_ISSUE, State, reportHealth, stateOf } from "./main-health.ts";
+import { mergeWhenGreen, RED_ISSUE, reportHealth, runIdFrom, State, stateOf } from "./main-health.ts";
 import { mergeGreen, mergeWaiting } from "./merge-green.ts";
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";
@@ -132,5 +134,36 @@ describe("a red main", () => {
     data.open = [{ number: 7, headSha: SHA }];
     data.prRuns = { [SHA]: [prRun(7)] };
     assert.deepEqual(await mergeWaiting(fakeGitHub(data)), []);
+  });
+});
+
+describe("runIdFrom", () => {
+  test("a run id", () => assert.equal(runIdFrom("42"), 42));
+  for (const bad of ["0", "-1", "1.5", "x", "9007199254740993"]) {
+    test(`refuses ${bad}`, () => assert.throws(() => runIdFrom(bad), /is not a run id/));
+  }
+});
+
+describe("mergeWhenGreen", () => {
+  const merging = () => {
+    const tokens: string[] = [];
+    return { tokens, merge: async (token: string) => void tokens.push(token) };
+  };
+  test("merges once main is green", async () => {
+    const m = merging();
+    await mergeWhenGreen(State.Green, "token", m.merge);
+    assert.deepEqual(m.tokens, ["token"]);
+  });
+  for (const state of [State.Red, State.Unknown]) {
+    test(`merges nothing while main is ${state}`, async () => {
+      const m = merging();
+      await mergeWhenGreen(state, "token", m.merge);
+      assert.deepEqual(m.tokens, []);
+    });
+  }
+  test("merges nothing without a token", async () => {
+    const m = merging();
+    await withoutWorkflowCommands(() => mergeWhenGreen(State.Green, undefined, m.merge));
+    assert.deepEqual(m.tokens, []);
   });
 });
