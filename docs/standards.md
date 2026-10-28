@@ -299,7 +299,9 @@ at an RFC 8693 token endpoint (`Handler`):
 - **Metadata (RFC 9728, RFC 8414).** `NewResourceMetadataHandler` serves an
   MCP server's protected resource metadata, `ResourceMetadataURL` names its
   well-known URL, and `ResourceChallenge` the 401 challenge that points to
-  it. `NewAuthorizationServerMetadataHandler` describes the token exchange
+  it for a request with no token. `WithResourceMetadata` adds that URL to
+  each challenge the verifier answers a refused token with, keeping its
+  error code, scheme and algorithms. `NewAuthorizationServerMetadataHandler` describes the token exchange
   as an authorization server with a token endpoint alone: token exchange
   its one grant, and no response type.
 

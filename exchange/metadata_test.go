@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"testing"
 
+	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/dpop"
 )
 
@@ -113,6 +115,32 @@ func TestResourceChallenge(t *testing.T) {
 	}
 	if got, want := ResourceChallenge(`https://x/"a\b`, nil), `Bearer resource_metadata="https://x/\"a\\b"`; got != want {
 		t.Errorf("got %s, want %s", got, want)
+	}
+}
+
+// A refusal the verifier answers keeps its challenges, their error codes and
+// schemes, and gains the resource metadata URL in each (RFC 9728 §5.1); the
+// verifier's answer itself is left as it was.
+func TestWithResourceMetadata(t *testing.T) {
+	const metadata = "https://mcp.example.com/.well-known/oauth-protected-resource"
+	f := newFixture(t, fixtureConfig{})
+	_, err := f.verifier.Verify(t.Context(), limes.VerifyRequest{Token: "a.b.c", Audience: toolResource})
+	refusal := f.verifier.ErrorResponse(t.Context(), err, limes.AuthSchemeBearer)
+	if len(refusal.Challenges) == 0 {
+		t.Fatalf("the verifier answered no challenge: %+v", refusal)
+	}
+	before := slices.Clone(refusal.Challenges)
+	got := WithResourceMetadata(refusal, metadata)
+	if got.Status != refusal.Status || !reflect.DeepEqual(got.Problem, refusal.Problem) || got.DPoPNonce != refusal.DPoPNonce || len(got.Challenges) != len(before) {
+		t.Fatalf("got %+v from %+v", got, refusal)
+	}
+	for i, c := range got.Challenges {
+		if want := before[i] + `, resource_metadata="` + metadata + `"`; c != want {
+			t.Errorf("challenge %d = %s, want %s", i, c, want)
+		}
+	}
+	if !slices.Equal(refusal.Challenges, before) {
+		t.Errorf("the verifier's answer changed: %q", refusal.Challenges)
 	}
 }
 
