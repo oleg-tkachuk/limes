@@ -500,48 +500,60 @@ func (s *UsageStore) ListTenantBudgets(ctx context.Context, req meter.ListTenant
 	if err := req.Validate(); err != nil {
 		return limes.Page[meter.TenantBudget]{}, err
 	}
-	var after *tenantPlace
-	if req.Cursor != "" {
-		p, err := parseTenantPlace(req.Cursor)
-		if err != nil {
-			return limes.Page[meter.TenantBudget]{}, err
-		}
-		after = &p
+	after, err := tenantCursorArgs(req.Cursor)
+	if err != nil {
+		return limes.Page[meter.TenantBudget]{}, err
 	}
 	keep, err := keepOf(req.Filter)
 	if err != nil {
 		return limes.Page[meter.TenantBudget]{}, err
 	}
 	limit := limes.PageLimit(req.Limit)
-	var class *int
-	var spent, ceiling int64
-	var tenant uuid.UUID
-	if after != nil {
-		class, spent, ceiling, tenant = &after.class, int64(after.spent), int64(after.max), after.tenantID
-	}
 	var rows []budgetRow
 	// A list across tenants refuses a scope that admits fewer, as the
 	// census does: under it the page would read as every tenant's.
 	err = s.inEveryTenantReadTx(ctx, func(tx pgx.Tx) error {
-		r, err := tx.Query(ctx, sqlListTenants,
-			keep, req.ThresholdBasisPoints, meter.BasisPointsPerWhole,
-			class, spent, ceiling, tenant, limit+1, utilizationScale)
+		args := append([]any{keep, req.ThresholdBasisPoints, meter.BasisPointsPerWhole}, after...)
+		r, err := tx.Query(ctx, sqlListTenants, append(args, limit+1, utilizationScale)...)
 		if err != nil {
 			return err
 		}
-		rows, err = pgx.CollectRows(r, func(row pgx.CollectableRow) (budgetRow, error) {
-			var b budgetRow
-			var ceilingMax, spent, reserved int64
-			err := row.Scan(&b.tenantID, &ceilingMax, &b.ceiling.Unlimited, &spent, &reserved, &b.unit,
-				&b.start, &b.end, &b.updated, &b.version, &b.period)
-			b.ceiling.Max, b.spent, b.reserved, b.persisted = limes.Nanos(ceilingMax), limes.Nanos(spent), limes.Nanos(reserved), true
-			return b, err
-		})
+		rows, err = pgx.CollectRows(r, scanListedBudget)
 		return err
 	})
 	if err != nil {
 		return limes.Page[meter.TenantBudget]{}, err
 	}
+	return tenantBudgetPage(rows, limit), nil
+}
+
+// tenantCursorArgs is the place a tenant budget cursor names, as
+// sqlListTenants takes it: its class, nil for none, spent, ceiling and
+// tenant.
+func tenantCursorArgs(cursor string) ([]any, error) {
+	if cursor == "" {
+		return []any{(*int)(nil), int64(0), int64(0), uuid.Nil()}, nil
+	}
+	p, err := parseTenantPlace(cursor)
+	if err != nil {
+		return nil, err
+	}
+	return []any{&p.class, int64(p.spent), int64(p.max), p.tenantID}, nil
+}
+
+// scanListedBudget reads one listed tenant budget.
+func scanListedBudget(row pgx.CollectableRow) (budgetRow, error) {
+	var b budgetRow
+	var ceilingMax, spent, reserved int64
+	err := row.Scan(&b.tenantID, &ceilingMax, &b.ceiling.Unlimited, &spent, &reserved, &b.unit,
+		&b.start, &b.end, &b.updated, &b.version, &b.period)
+	b.ceiling.Max, b.spent, b.reserved, b.persisted = limes.Nanos(ceilingMax), limes.Nanos(spent), limes.Nanos(reserved), true
+	return b, err
+}
+
+// tenantBudgetPage is the first limit of rows, and the cursor past the last
+// when more follow.
+func tenantBudgetPage(rows []budgetRow, limit int) limes.Page[meter.TenantBudget] {
 	next := ""
 	if len(rows) > limit {
 		rows = rows[:limit]
@@ -551,7 +563,7 @@ func (s *UsageStore) ListTenantBudgets(ctx context.Context, req meter.ListTenant
 	for _, b := range rows {
 		out = append(out, b.budget())
 	}
-	return limes.Page[meter.TenantBudget]{Items: out, Next: next}, nil
+	return limes.Page[meter.TenantBudget]{Items: out, Next: next}
 }
 
 // tenantPlace is an aggregate's place in ListTenantBudgets' order, and the
