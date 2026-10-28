@@ -808,7 +808,6 @@ func (s *UsageStore) Bump(_ context.Context, req meter.BumpRequest) (meter.BumpR
 	if err := req.Validate(); err != nil {
 		return meter.BumpReceipt{}, err
 	}
-	unit := req.Subject.UnitCode()
 	// The lineage is read under the usage lock, as DeleteUsage and PurgeOrphans
 	// take it: read before, an ancestor they dropped meanwhile would have
 	// its row written back.
@@ -824,43 +823,56 @@ func (s *UsageStore) Bump(_ context.Context, req meter.BumpRequest) (meter.BumpR
 	if err := s.admitCopiesLocked(req.Subject, ancestors); err != nil {
 		return meter.BumpReceipt{}, err
 	}
-	u := s.usage[req.Subject.CapabilityID()]
-	next := u.RequestCount + 1
-	for _, c := range req.Subject.Copies() {
-		if !c.AdmitsRequests(s.copies[copyKeyOf(req.Subject.CapabilityID(), c.RevocationID)].requests + 1) {
-			return meter.BumpReceipt{RequestCount: u.RequestCount}, fmt.Errorf("%w: copy %x", limes.ErrRequestLimitExceeded, c.RevocationID)
+	count := s.usage[req.Subject.CapabilityID()].RequestCount
+	if err := s.admitRequestLocked(req.Subject, ancestors); err != nil {
+		return meter.BumpReceipt{RequestCount: count}, err
+	}
+	s.countRequestLocked(req.Subject, ancestors)
+	return meter.BumpReceipt{RequestCount: count + 1}, nil
+}
+
+// admitRequestLocked refuses one more request of subject past a copy's,
+// its own or an ancestor's request ceiling. s.mu must be held.
+func (s *UsageStore) admitRequestLocked(subject limes.MeterSubject, ancestors []limes.Capability) error {
+	for _, c := range subject.Copies() {
+		if !c.AdmitsRequests(s.copies[copyKeyOf(subject.CapabilityID(), c.RevocationID)].requests + 1) {
+			return fmt.Errorf("%w: copy %x", limes.ErrRequestLimitExceeded, c.RevocationID)
 		}
 	}
-	if !req.Subject.Requests().Admits(next) {
-		return meter.BumpReceipt{RequestCount: u.RequestCount}, limes.ErrRequestLimitExceeded
+	if !subject.Requests().Admits(s.usage[subject.CapabilityID()].RequestCount + 1) {
+		return limes.ErrRequestLimitExceeded
 	}
 	for _, a := range ancestors {
 		if !a.Caveats.Requests.Admits(s.usage[a.ID].RequestCount + 1) {
-			return meter.BumpReceipt{RequestCount: u.RequestCount}, fmt.Errorf("%w: ancestor %s", limes.ErrRequestLimitExceeded, a.ID)
+			return fmt.Errorf("%w: ancestor %s", limes.ErrRequestLimitExceeded, a.ID)
 		}
 	}
+	return nil
+}
+
+// countRequestLocked counts one more request of subject on it, each
+// ancestor and each copy, and gives a counter that names no unit subject's.
+// s.mu must be held.
+func (s *UsageStore) countRequestLocked(subject limes.MeterSubject, ancestors []limes.Capability) {
+	unit := subject.UnitCode()
 	for _, a := range ancestors {
 		au := s.usage[a.ID]
 		au.CapabilityID = a.ID
 		au.RequestCount++
-		if au.UnitCode == "" {
-			au.UnitCode = unit
-		}
-		s.putUsageLocked(a.ID, req.Subject.TenantID(), au)
+		au.UnitCode = cmp.Or(au.UnitCode, unit)
+		s.putUsageLocked(a.ID, subject.TenantID(), au)
 	}
-	for _, c := range req.Subject.Copies() {
-		key := copyKeyOf(req.Subject.CapabilityID(), c.RevocationID)
+	for _, c := range subject.Copies() {
+		key := copyKeyOf(subject.CapabilityID(), c.RevocationID)
 		cc := s.copies[key]
 		cc.requests++
 		s.putCopyLocked(key, cc, ancestorIDs(ancestors))
 	}
-	u.CapabilityID = req.Subject.CapabilityID()
-	u.RequestCount = next
-	if u.UnitCode == "" {
-		u.UnitCode = unit
-	}
-	s.putUsageLocked(req.Subject.CapabilityID(), req.Subject.TenantID(), u)
-	return meter.BumpReceipt{RequestCount: next}, nil
+	u := s.usage[subject.CapabilityID()]
+	u.CapabilityID = subject.CapabilityID()
+	u.RequestCount++
+	u.UnitCode = cmp.Or(u.UnitCode, unit)
+	s.putUsageLocked(subject.CapabilityID(), subject.TenantID(), u)
 }
 
 // hold is one open reservation and every counter it holds against.
@@ -1713,33 +1725,42 @@ func (s *UsageStore) SetTenantBudget(_ context.Context, args meter.SetTenantBudg
 	if err := s.notErasedLocked(args.TenantID); err != nil {
 		return meter.TenantBudget{}, err
 	}
-
 	b, exists := s.budgets[args.TenantID]
-
 	// SetTenantBudgetRequest.ExpectedVersion's contract, held as every store
 	// must hold it, or tests pass against a memstore that permits writes a
 	// real store refuses. A missing budget expects version 0; an existing one
 	// expects its current version.
-	want := int64(0)
-	if exists {
-		want = b.ResourceVersion
-	}
-	if args.ExpectedVersion != want {
+	if args.ExpectedVersion != b.ResourceVersion {
 		return meter.TenantBudget{}, meter.ErrTenantBudgetVersionMismatch
 	}
-
 	// A ceiling that names no unit — the zero one — keeps the tenant's.
-	unit := args.Ceiling.UnitCode
-	if unit == "" {
-		unit = b.Ceiling.UnitCode
+	unit := cmp.Or(args.Ceiling.UnitCode, b.Ceiling.UnitCode)
+	if err := checkBudgetUnit(b, exists, args, unit); err != nil {
+		return meter.TenantBudget{}, err
 	}
-	// A reset closes the spend, never the holds still open in the old unit.
-	if have := b.Ceiling.UnitCode; exists && have != "" && unit != have &&
-		(b.ReservedAmount > 0 || (b.SpentAmount > 0 && !args.ResetSpend)) {
-		return meter.TenantBudget{}, fmt.Errorf("%w: tenant %s has %s counted in %s",
+	b = s.setBudgetLocked(b, args, unit)
+	s.budgets[args.TenantID] = b
+	return b, nil
+}
+
+// checkBudgetUnit refuses moving tenant budget b to unit while it counts
+// anything in another. A reset closes the spend, never the holds still open
+// in the old unit.
+func checkBudgetUnit(b meter.TenantBudget, exists bool, args meter.SetTenantBudgetRequest, unit string) error {
+	have := b.Ceiling.UnitCode
+	if !exists || have == "" || unit == have {
+		return nil
+	}
+	if b.ReservedAmount > 0 || (b.SpentAmount > 0 && !args.ResetSpend) {
+		return fmt.Errorf("%w: tenant %s has %s counted in %s",
 			limes.ErrUnitCodeMismatch, args.TenantID, b.SpentAmount+b.ReservedAmount, have)
 	}
+	return nil
+}
 
+// setBudgetLocked is b set as args asks, in unit, at a new version: a
+// reset closes the spend and opens a period. s.mu must be held.
+func (s *UsageStore) setBudgetLocked(b meter.TenantBudget, args meter.SetTenantBudgetRequest, unit string) meter.TenantBudget {
 	b.TenantID = args.TenantID
 	b.Ceiling = args.Ceiling
 	b.Ceiling.UnitCode = unit
@@ -1754,8 +1775,7 @@ func (s *UsageStore) SetTenantBudget(_ context.Context, args meter.SetTenantBudg
 	}
 	b.UpdatedAt = s.nowFn()
 	b.ResourceVersion++
-	s.budgets[args.TenantID] = b
-	return b, nil
+	return b
 }
 
 // ListTenantBudgets pages the tenants' aggregates, most at risk first.
