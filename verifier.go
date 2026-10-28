@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"net/netip"
 	"slices"
@@ -106,6 +107,10 @@ type VerifierConfig struct {
 	// ErrorResponse gives (RFC 9110 §11.5). Empty: DefaultRealm. Only the
 	// characters RFC 6750 §3 allows in an auth-param value.
 	Realm string
+
+	// Logger logs what ErrorResponse cannot answer the way the refusal
+	// asks: a nonce the DPoP verifier cannot give. Nil: slog.Default().
+	Logger *slog.Logger
 }
 
 // BiscuitConfig is how a verifier reads the Biscuit form

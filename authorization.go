@@ -80,6 +80,24 @@ func ParseAuthorization(header string) (AuthScheme, string, error) {
 	return scheme, credential, nil
 }
 
+// ParseAuthorizationValues reads every Authorization field a request
+// carries — r.Header.Values(AuthorizationHeader), or a gRPC metadata entry's
+// values — as ParseAuthorization reads one. More than one is
+// ErrMalformedAuthorization, with no scheme: RFC 9449 §7.2 refuses a request
+// that uses more than one authentication method, and RFC 6750 §2 one that
+// presents a token more than once, so none of them is chosen. None is
+// ErrNoCredentials.
+func ParseAuthorizationValues(values []string) (AuthScheme, string, error) {
+	switch len(values) {
+	case 0:
+		return ParseAuthorization("")
+	case 1:
+		return ParseAuthorization(values[0])
+	default:
+		return AuthSchemeUnspecified, "", fmt.Errorf("%w: %d %s fields", ErrMalformedAuthorization, len(values), AuthorizationHeader)
+	}
+}
+
 // maxSchemeNameBytes bounds a scheme name an error repeats: longer than any
 // registered authentication scheme ("AWS4-HMAC-SHA256" is 16), shorter than
 // any credential this module reads.

@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"encoding/json"
 	"errors"
+	"maps"
 	"testing"
 	"time"
 
@@ -35,6 +36,34 @@ func craftProof(t *testing.T, key crypto.Signer, at time.Time, edit func(*proofH
 	}
 	header, _ := json.Marshal(h)
 	claims, _ := json.Marshal(c)
+	return signCrafted(t, key, header, claims, sig)
+}
+
+// craftProofWith signs a proof as Sign would, with members added to its
+// header: what a client may put there that Sign never writes.
+func craftProofWith(t *testing.T, key crypto.Signer, at time.Time, members map[string]any) string {
+	t.Helper()
+	var header, claims map[string]any
+	parts, err := jose.Split(craftProof(t, key, at, nil, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := decodeSegment(parts.Header, &header); err != nil {
+		t.Fatal(err)
+	}
+	if err := decodeSegment(parts.Payload, &claims); err != nil {
+		t.Fatal(err)
+	}
+	maps.Copy(header, members)
+	h, _ := json.Marshal(header)
+	c, _ := json.Marshal(claims)
+	return signCrafted(t, key, h, c, nil)
+}
+
+// signCrafted is the compact JWS of header and claims, signed with key, its
+// signature passed through sig when there is one.
+func signCrafted(t *testing.T, key crypto.Signer, header, claims []byte, sig func([]byte) []byte) string {
+	t.Helper()
 	input := jose.B64(header) + "." + jose.B64(claims)
 	s, err := signProof(context.Background(), key, []byte(input))
 	if err != nil {
@@ -44,6 +73,50 @@ func craftProof(t *testing.T, key crypto.Signer, at time.Time, edit func(*proofH
 		s = sig(s)
 	}
 	return input + "." + jose.B64(s)
+}
+
+// RFC 7515 §4.1.11: a crit header parameter names extensions the recipient
+// must understand, and this package understands none, so a proof naming
+// any — or carrying a crit that names nothing — is refused. A member it
+// does not know and no crit names is ignored (RFC 7515 §4).
+func TestDPoPRefusesAProofWithCriticalExtensions(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	key := dpopKeys(t)["Ed25519"]
+	const extension = "x"
+	for name, tc := range map[string]struct {
+		members map[string]any
+		want    error
+	}{
+		"an extension no crit names": {map[string]any{extension: 1}, nil},
+		"crit naming an extension":   {map[string]any{headerCrit: []string{extension}, extension: 1}, ErrInvalid},
+		"an empty crit":              {map[string]any{headerCrit: []string{}}, ErrInvalid},
+		"a null crit":                {map[string]any{headerCrit: nil}, ErrInvalid},
+	} {
+		err := verifyAt(t, VerifierConfig{}, key, now, craftProofWith(t, key, now, tc.members))
+		if tc.want == nil && err != nil || tc.want != nil && !errors.Is(err, tc.want) {
+			t.Errorf("%s: err = %v, want %v", name, err, tc.want)
+		}
+	}
+}
+
+// RFC 9449 §4.3 (1): a request carries at most one DPoP field; with more,
+// no proof is chosen from among them, and the request is refused.
+func TestSingleProof(t *testing.T) {
+	const proof, other = "a.b.c", "d.e.f"
+	for name, tc := range map[string]struct {
+		values []string
+		jwt    string
+		want   error
+	}{
+		"none": {nil, "", nil},
+		"one":  {[]string{proof}, proof, nil},
+		"two":  {[]string{proof, other}, "", ErrInvalid},
+	} {
+		jwt, err := SingleProof(tc.values)
+		if jwt != tc.jwt || tc.want == nil && err != nil || tc.want != nil && !errors.Is(err, tc.want) {
+			t.Errorf("%s: = %q, %v; want %q, %v", name, jwt, err, tc.jwt, tc.want)
+		}
+	}
 }
 
 // padS is an ES256 signature with a zero byte before s: the same r and s,

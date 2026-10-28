@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -264,5 +265,31 @@ func TestProblemNamesTheReason(t *testing.T) {
 	var body map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body["reason"] != string(ReasonExpired) {
 		t.Errorf("body = %s, %v; want reason %q", rec.Body, err, ReasonExpired)
+	}
+}
+
+// RFC 9449 §9: a use_dpop_nonce challenge the client can satisfy carries a
+// DPoP-Nonce. When the nonce store cannot give one, the answer is the
+// server's failure, logged with its cause, never that challenge without it.
+func TestErrorResponseAnswersANonceOutageAsTheServers(t *testing.T) {
+	_, configured, _, _ := buildIssuerVerifier(t)
+	outage := errors.New("nonce store down")
+	var logged strings.Builder
+	cfg := configured.cfg
+	cfg.DPoP = newVerifier(t, dpop.VerifierConfig{Replay: newReplay(t, dpop.MemoryReplayCacheConfig{}), Nonces: failingNonces{outage}})
+	cfg.Logger = slog.New(slog.NewTextHandler(&logged, nil))
+	v, err := NewVerifier(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := v.ErrorResponse(t.Context(), dpop.ErrNonceRequired, AuthSchemeDPoP)
+	if resp.Status != http.StatusInternalServerError || resp.Problem.Status != http.StatusInternalServerError {
+		t.Errorf("status = %d / %d, want %d", resp.Status, resp.Problem.Status, http.StatusInternalServerError)
+	}
+	if len(resp.Challenges) != 0 || resp.DPoPNonce != "" || resp.Problem.Type != problemTypeBase+internalError.slug {
+		t.Errorf("response = %+v, want the server's failure with no challenge", resp)
+	}
+	if !strings.Contains(logged.String(), "level=ERROR") || !strings.Contains(logged.String(), outage.Error()) {
+		t.Errorf("log = %q, want an error naming %q", logged.String(), outage)
 	}
 }

@@ -153,7 +153,9 @@ and a `jti` not seen before.
   `Authorization: DPoP <token>` and `Authorization: Bearer <token>` (RFC 9110
   §11.6.2, token68). Given the scheme, `Verify` refuses a key-bound token
   presented as `Bearer` — the downgrade §7.2 names — and an unbound one
-  presented as `DPoP`.
+  presented as `DPoP`. `ParseAuthorizationValues` and `dpop.SingleProof`
+  read every field a request carries and refuse more than one
+  `Authorization` (§7.2) or `DPoP` (§4.3) field rather than choose one.
 - **Replay.** `dpop.MemoryReplayCache` remembers `jti`s for one process, keyed by
   the proof key's thumbprint, each capability within its own share
   (`dpop.MemoryReplayCacheConfig.EntriesPerHolder`, default

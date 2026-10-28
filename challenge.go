@@ -3,6 +3,7 @@ package limes
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -73,7 +74,9 @@ type ErrorResponse struct {
 	// refusal that is not about authentication.
 	Challenges []string
 	// DPoPNonce is the nonce to send in the DPoP-Nonce header, when the
-	// refusal asks for one.
+	// refusal asks for one. A use_dpop_nonce challenge always comes with it:
+	// when the nonce cannot be given, the refusal is answered as the
+	// server's failure instead (RFC 9449 §9).
 	DPoPNonce string
 	// Problem is the body.
 	Problem Problem
@@ -111,7 +114,10 @@ var internalError = refusal{status: http.StatusInternalServerError, slug: "inter
 // under scheme. A refusal about the token is challenged under the scheme the
 // client used (Bearer when it named none); one about the proof, under DPoP.
 // A verifier with DPoP configured also advertises its algorithms in a DPoP
-// challenge, and hands out a fresh nonce with use_dpop_nonce.
+// challenge, and hands out a fresh nonce with use_dpop_nonce; when it cannot
+// give one, it logs why (VerifierConfig.Logger) and answers the server's
+// failure, 500, for a challenge without a nonce is one the client cannot
+// satisfy.
 func (v *Verifier) ErrorResponse(ctx context.Context, err error, scheme AuthScheme) ErrorResponse {
 	// The first rule err matches answers it; none, the server's fault.
 	r, kind := internalError, internalError.slug
@@ -122,10 +128,7 @@ func (v *Verifier) ErrorResponse(ctx context.Context, err error, scheme AuthSche
 	if rule.reason != "" {
 		kind = string(rule.reason)
 	}
-	resp := ErrorResponse{
-		Status:  r.status,
-		Problem: Problem{Type: problemTypeBase + kind, Title: r.title, Status: r.status, Reason: rule.reason},
-	}
+	resp := answer(r, kind, rule.reason)
 	if r.code == "" && !r.bare {
 		return resp
 	}
@@ -140,9 +143,31 @@ func (v *Verifier) ErrorResponse(ctx context.Context, err error, scheme AuthSche
 		}
 	}
 	if r.code == codeUseDPoPNonce {
-		resp.DPoPNonce, _ = v.DPoPNonce(ctx) // without one the client retries and is refused again
+		nonce, nerr := v.DPoPNonce(ctx)
+		if nerr != nil {
+			v.logger().ErrorContext(ctx, "limes: no DPoP nonce for a use_dpop_nonce challenge; answering the server's failure",
+				slog.Any("error", nerr), slog.Any("reason", err))
+			return answer(internalError, internalError.slug, "")
+		}
+		resp.DPoPNonce = nonce
 	}
 	return resp
+}
+
+// answer is the response r gives, its problem typed kind, with reason.
+func answer(r refusal, kind string, reason Reason) ErrorResponse {
+	return ErrorResponse{
+		Status:  r.status,
+		Problem: Problem{Type: problemTypeBase + kind, Title: r.title, Status: r.status, Reason: reason},
+	}
+}
+
+// logger is VerifierConfig.Logger, or slog.Default() for none.
+func (v *Verifier) logger() *slog.Logger {
+	if v.cfg.Logger == nil {
+		return slog.Default()
+	}
+	return v.cfg.Logger
 }
 
 // challenge is one WWW-Authenticate challenge (RFC 9110 §11.6.1): the scheme,

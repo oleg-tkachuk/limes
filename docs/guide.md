@@ -7,10 +7,18 @@ start, [diagrams.md](diagrams.md) draws each path described here, and
 ## Authorize every call
 
 ```go
-scheme, token, err := limes.ParseAuthorization(r.Header.Get(limes.AuthorizationHeader))
+// Every field, not Header.Get's first: two Authorization fields, or two
+// DPoP fields, are refused rather than one chosen (RFC 9449 §4.3, §7.2).
+scheme, token, err := limes.ParseAuthorizationValues(r.Header.Values(limes.AuthorizationHeader))
 if err != nil {
     // No credentials (ErrNoCredentials): 401, a challenge with no error code.
-    // A malformed header (ErrMalformedAuthorization): 400.
+    // A malformed header, or more than one (ErrMalformedAuthorization): 400.
+    limes.WriteErrorResponse(w, verifier.ErrorResponse(ctx, err, scheme))
+    return
+}
+proof, err := dpop.SingleProof(r.Header.Values(dpop.Header))
+if err != nil {
+    // More than one DPoP field (dpop.ErrInvalid): 401, invalid_dpop_proof.
     limes.WriteErrorResponse(w, verifier.ErrorResponse(ctx, err, scheme))
     return
 }
@@ -18,7 +26,7 @@ granted, err := verifier.Authorize(ctx, limes.AuthorizeRequest{
     Verify: limes.VerifyRequest{
         Token: token, Scheme: scheme, Audience: "https://data.example.com",
         // Needed when the capability is key-bound; ignored when it is not.
-        DPoP: dpop.Proof{JWT: r.Header.Get(dpop.Header), Method: r.Method, URL: requestURL},
+        DPoP: dpop.Proof{JWT: proof, Method: r.Method, URL: requestURL},
     },
     Check: limes.CheckRequest{Op: limes.OpGet, Resource: "corpus/public/report.pdf"},
     ClientAddr:   clientAddr,
