@@ -185,30 +185,9 @@ func result(c Capability, token string, err error) (IssueResult, error) {
 
 // issue is Issue, returning the capability and its token apart.
 func (i *Issuer) issue(ctx context.Context, req IssueRequest) (Capability, string, error) {
-	if req.Subject.TenantID == uuid.Nil() {
-		return Capability{}, "", invalidRequest("Issue requires Subject.TenantID")
-	}
-	if req.Subject.Subject == "" {
-		return Capability{}, "", invalidRequest("Issue requires Subject.Subject (RFC 9068 sub)")
-	}
-	if err := req.Subject.Validate(); err != nil {
+	if err := checkIssueRequest(req); err != nil {
 		return Capability{}, "", err
 	}
-	if req.IssuedBy.Subject == "" {
-		return Capability{}, "", invalidRequest("IssuedBy is required")
-	}
-	if req.ClientID == "" {
-		return Capability{}, "", invalidRequest("ClientID is required (RFC 9068 client_id)")
-	}
-	if req.OnBehalfOf != nil {
-		if err := validateOnBehalfOf(*req.OnBehalfOf, req.Subject); err != nil {
-			return Capability{}, "", err
-		}
-	}
-	if err := validateTerms(req.Audience, req.Caveats, req.ConfirmationJKT); err != nil {
-		return Capability{}, "", err
-	}
-
 	now := i.clock().UTC()
 	expires, err := i.expiry(now, req.TTL)
 	if err != nil {
@@ -231,6 +210,39 @@ func (i *Issuer) issue(ctx context.Context, req IssueRequest) (Capability, strin
 		return Capability{}, "", err
 	}
 	return cap, token, nil
+}
+
+// checkIssueRequest refuses a request missing whom the capability is for,
+// who asks, or its client, or one whose terms are malformed.
+func checkIssueRequest(req IssueRequest) error {
+	if err := checkIssueSubject(req); err != nil {
+		return err
+	}
+	if req.IssuedBy.Subject == "" {
+		return invalidRequest("IssuedBy is required")
+	}
+	if req.ClientID == "" {
+		return invalidRequest("ClientID is required (RFC 9068 client_id)")
+	}
+	return validateTerms(req.Audience, req.Caveats, req.ConfirmationJKT)
+}
+
+// checkIssueSubject refuses a subject without a tenant or a sub, malformed,
+// or acting for a principal it may not act for.
+func checkIssueSubject(req IssueRequest) error {
+	if req.Subject.TenantID == uuid.Nil() {
+		return invalidRequest("Issue requires Subject.TenantID")
+	}
+	if req.Subject.Subject == "" {
+		return invalidRequest("Issue requires Subject.Subject (RFC 9068 sub)")
+	}
+	if err := req.Subject.Validate(); err != nil {
+		return err
+	}
+	if req.OnBehalfOf == nil {
+		return nil
+	}
+	return validateOnBehalfOf(*req.OnBehalfOf, req.Subject)
 }
 
 // validateTerms checks what an issued and a delegated capability both
