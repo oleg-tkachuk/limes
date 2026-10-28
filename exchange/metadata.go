@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/oleg-tkachuk/limes"
 )
 
 // The well-known paths the metadata documents are served under (RFC 9728
@@ -170,15 +172,34 @@ func wellKnown(raw, path string) string {
 }
 
 // ResourceChallenge is the WWW-Authenticate value an MCP server answers a
-// request without a valid token with: the Bearer scheme, the URL of its
+// request that sent no token with: the Bearer scheme, the URL of its
 // resource metadata, and the scopes the request needs, if any (RFC 9728
-// §5.1, RFC 6750 §3).
+// §5.1, RFC 6750 §3). It names no error, as a request with no credentials
+// gets none (RFC 6750 §3.1); a token the server refused is answered with
+// the verifier's challenges instead, through WithResourceMetadata.
 func ResourceChallenge(metadataURL string, scopes []string) string {
-	params := []string{"resource_metadata=" + quote(metadataURL)}
+	params := []string{authParamResourceMetadata + "=" + quote(metadataURL)}
 	if len(scopes) > 0 {
 		params = append(params, "scope="+quote(strings.Join(scopes, " ")))
 	}
 	return "Bearer " + strings.Join(params, ", ")
+}
+
+// authParamResourceMetadata is the auth-param naming a protected resource's
+// metadata URL in a challenge of any scheme (RFC 9728 §5.1).
+const authParamResourceMetadata = "resource_metadata"
+
+// WithResourceMetadata is resp, a verifier's answer to a request it refused,
+// with the URL of the resource's metadata added to each challenge (RFC 9728
+// §5.1): the error codes, the Bearer and DPoP schemes and the algorithms
+// stay the verifier's (RFC 6750 §3, RFC 9449 §7.1). resp is not changed.
+func WithResourceMetadata(resp limes.ErrorResponse, metadataURL string) limes.ErrorResponse {
+	challenges := make([]string, len(resp.Challenges))
+	for i, c := range resp.Challenges {
+		challenges[i] = c + ", " + authParamResourceMetadata + "=" + quote(metadataURL)
+	}
+	resp.Challenges = challenges
+	return resp
 }
 
 // quote is s as an RFC 9110 quoted-string.
