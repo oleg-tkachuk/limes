@@ -255,42 +255,10 @@ func (s *Signer) sign(ctx context.Context, c Capability) (string, error) {
 // signGrant is sign for a grant: a token sealed in a Biscuit names its
 // root. A grant's copies are the verifier's and never signed.
 func (s *Signer) signGrant(ctx context.Context, g grant) (string, error) {
-	c := g.Capability
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	if c.ID == uuid.Nil() {
-		return "", errors.New("limes: ID required")
-	}
-	if c.Issuer == "" {
-		return "", errors.New("limes: Issuer required")
-	}
-	if c.Subject.TenantID == uuid.Nil() {
-		return "", errors.New("limes: Subject.TenantID required")
-	}
-	if c.Subject.Subject == "" {
-		return "", errors.New("limes: Subject.Subject required (RFC 9068 sub)")
-	}
-	if len(c.Caveats.Ops) == 0 {
-		return "", errors.New("limes: at least one Op required")
-	}
-	// Nothing is signed that the verifier would refuse to read.
-	if err := c.Caveats.Validate(); err != nil {
-		return "", err
-	}
-	if err := c.Subject.Validate(); err != nil {
-		return "", err
-	}
-	if c.ExpiresAt.Before(c.IssuedAt) || c.ExpiresAt.IsZero() {
-		return "", errors.New("limes: ExpiresAt must be after IssuedAt")
-	}
-
-	header := jwtHeader{Alg: string(s.alg), Kid: s.keyID, Typ: TokenType}
-	// RFC 9068 makes client_id required of an at+jwt: none is invented.
-	if c.ClientID == "" {
-		return "", errors.New("limes: a capability needs a ClientID (RFC 9068 client_id)")
-	}
-	if err := checkActing(c); err != nil {
+	if err := checkSignable(g.Capability); err != nil {
 		return "", err
 	}
 	claims := claimsOf(g)
@@ -298,7 +266,59 @@ func (s *Signer) signGrant(ctx context.Context, g grant) (string, error) {
 	if err := checkIJSONIntegers(claims); err != nil {
 		return "", err
 	}
+	signingInput, err := s.signingInput(claims)
+	if err != nil {
+		return "", err
+	}
+	sig, err := s.signature(ctx, signingInput)
+	if err != nil {
+		return "", err
+	}
+	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig), nil
+}
 
+// checkSignable refuses a capability the verifier would refuse to read:
+// nothing is signed that it would not.
+func checkSignable(c Capability) error {
+	if err := checkRequired(c); err != nil {
+		return err
+	}
+	if err := c.Caveats.Validate(); err != nil {
+		return err
+	}
+	if err := c.Subject.Validate(); err != nil {
+		return err
+	}
+	if c.ExpiresAt.Before(c.IssuedAt) || c.ExpiresAt.IsZero() {
+		return errors.New("limes: ExpiresAt must be after IssuedAt")
+	}
+	return checkActing(c)
+}
+
+// checkRequired refuses a capability missing a member every token carries.
+func checkRequired(c Capability) error {
+	switch {
+	case c.ID == uuid.Nil():
+		return errors.New("limes: ID required")
+	case c.Issuer == "":
+		return errors.New("limes: Issuer required")
+	case c.Subject.TenantID == uuid.Nil():
+		return errors.New("limes: Subject.TenantID required")
+	case c.Subject.Subject == "":
+		return errors.New("limes: Subject.Subject required (RFC 9068 sub)")
+	case len(c.Caveats.Ops) == 0:
+		return errors.New("limes: at least one Op required")
+	case c.ClientID == "":
+		// RFC 9068 makes client_id required of an at+jwt: none is invented.
+		return errors.New("limes: a capability needs a ClientID (RFC 9068 client_id)")
+	}
+	return nil
+}
+
+// signingInput is the JWS signing input of a token carrying claims: its
+// header and claims, each base64url-encoded, joined by ".".
+func (s *Signer) signingInput(claims jwtClaims) (string, error) {
+	header := jwtHeader{Alg: string(s.alg), Kid: s.keyID, Typ: TokenType}
 	headerJSON, err := json.Marshal(header)
 	if err != nil {
 		return "", fmt.Errorf("limes: marshal header: %w", err)
@@ -307,34 +327,38 @@ func (s *Signer) signGrant(ctx context.Context, g grant) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("limes: marshal claims: %w", err)
 	}
-
-	signingInput := strings.Join([]string{
+	return strings.Join([]string{
 		base64.RawURLEncoding.EncodeToString(headerJSON),
 		base64.RawURLEncoding.EncodeToString(claimsJSON),
-	}, ".")
+	}, "."), nil
+}
 
+// signature signs signingInput with the signer's key, and refuses what is no
+// signature of it under the key's public key.
+func (s *Signer) signature(ctx context.Context, signingInput string) ([]byte, error) {
 	// Ed25519 hashes the message itself (PureEdDSA): crypto.Hash(0) is the
 	// stdlib's way to ask for it.
 	var sig []byte
+	var err error
 	if cs, ok := s.key.open().(ContextSigner); ok {
 		sig, err = cs.SignContext(ctx, rand.Reader, []byte(signingInput), crypto.Hash(0))
 	} else {
 		sig, err = s.key.open().Sign(rand.Reader, []byte(signingInput), crypto.Hash(0))
 	}
 	if err != nil {
-		return "", fmt.Errorf("limes: sign: %w", err)
+		return nil, fmt.Errorf("limes: sign: %w", err)
 	}
 	if len(sig) != ed25519.SignatureSize {
-		return "", fmt.Errorf("limes: sign: an Ed25519 signature is %d bytes, not %d", ed25519.SignatureSize, len(sig))
+		return nil, fmt.Errorf("limes: sign: an Ed25519 signature is %d bytes, not %d", ed25519.SignatureSize, len(sig))
 	}
 	// A key held elsewhere — a KMS, an HSM — may sign with another key than
 	// the one it reports, or return bytes that are no signature at all:
 	// a token carrying either would be refused by every verifier, and
 	// recorded as issued.
 	if !ed25519.Verify(s.pub[:], []byte(signingInput), sig) {
-		return "", errors.New("limes: sign: the signature does not verify under the key's public key")
+		return nil, errors.New("limes: sign: the signature does not verify under the key's public key")
 	}
-	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig), nil
+	return sig, nil
 }
 
 // TokenType is the JWT typ of every capability token: an OAuth 2.0 access
