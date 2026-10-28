@@ -1323,82 +1323,100 @@ func checkHoldWithinCapability(t *testing.T, f fixture) {
 }
 
 func checkReservations(t *testing.T, f fixture) {
-	const (
-		held   = 2 * one
-		sooner = time.Minute
-		later  = 2 * time.Minute
-		// copyLimit holds every reservation below, through the one copy.
-		copyLimit = 10
-	)
 	copies := []limes.CopyCeiling{{
-		RevocationID: []byte("copy-1"), Requests: &limes.RequestCeiling{Max: copyLimit}, Budget: &limes.BudgetCeiling{Max: copyLimit * one, UnitCode: unit},
+		RevocationID: []byte("copy-1"), Requests: &limes.RequestCeiling{Max: reservedCopyLimit}, Budget: &limes.BudgetCeiling{Max: reservedCopyLimit * one, UnitCode: unit},
 	}}
-	reserve := func(capID uuid.UUID, ceiling limes.Nanos, ttl time.Duration) meter.Reservation {
-		t.Helper()
-		r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{
-			Subject: newSubject(subjectSpec{capID: capID, tenant: f.Tenant, budget: budgetOf(ceiling), unit: unit, copies: copies}),
-			Amount:  held,
-			TTL:     ttl,
-			Op:      "llm",
-			Actor:   "agent",
-		})
-		expect.Must(t, err == nil, "reserve: %v", err)
-		return r
-	}
-	first := reserve(f.child, childBudget, sooner)
-	second := reserve(f.child, childBudget, later)
-	onRoot := reserve(f.root, rootBudget, sooner)
-	expect.That(t, !(first.CapabilityID != f.child || first.TenantID != f.Tenant || first.Amount != held ||
-		first.Op != "llm" || first.Actor != "agent" || len(first.Copies) != 1 || !sameCeiling(first.Copies[0].Budget, copies[0].Budget)), "Reserve returned %+v; want the whole hold, copies with their budgets alone", first)
-	// The copy's budget has a Max; every other field of this hold holds a
-	// value, so one the store does not keep reads back unset.
-	unset, want := fields.Unset(first), []string{"Copies[0].Budget.Unlimited"}
-	expect.That(t, slices.Equal(unset, want), "Reserve returned %+v with %v unset, want only %v", first, unset, want)
-
-	got, err := f.Usage.GetReservation(f.Ctx, first.ID)
-	expect.Must(t, err == nil, "GetReservation: %v", err)
-	diff := sameReservation(got, first)
-	expect.That(t, diff == "", "GetReservation = %+v, Reserve returned %+v: %s", got, first, diff)
-	list := func(capID uuid.UUID) []uuid.UUID {
-		t.Helper()
-		rs, err := f.Usage.ListReservations(f.Ctx, meter.ListReservationsRequest{CapabilityID: capID})
-		expect.Must(t, err == nil, "ListReservations: %v", err)
-		ids := []uuid.UUID{}
-		for _, r := range rs.Items {
-			ids = append(ids, r.ID)
-		}
-		return ids
-	}
-	holds := list(f.child)
+	first := reserveUnder(t, f, copies, f.child, childBudget, reservedSooner)
+	second := reserveUnder(t, f, copies, f.child, childBudget, reservedLater)
+	onRoot := reserveUnder(t, f, copies, f.root, rootBudget, reservedSooner)
+	checkReservedHold(t, f, first, copies)
+	holds := listHolds(t, f, f.child)
 	expect.That(t, slices.Equal(holds, []uuid.UUID{first.ID, second.ID}), "the child's holds = %v, want %v soonest first", holds, []uuid.UUID{first.ID, second.ID})
-	holds = list(f.root)
+	holds = listHolds(t, f, f.root)
 	expect.That(t, slices.Equal(holds, []uuid.UUID{onRoot.ID}), "the root's holds = %v, want only its own %v", holds, onRoot.ID)
-
-	// A hold is settled by the copy that made it: not by the capability
-	// without it, nor under another copy, whose own limits it would shed.
-	other := []limes.CopyCeiling{{RevocationID: []byte("copy-2")}}
-	for name, c := range map[string][]limes.CopyCeiling{"no copy": nil, "another copy": other} {
-		subject := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: unit, copies: c})
-		_, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: subject, ReservationID: first.ID, Amount: held}, nil)
-		expect.That(t, errors.Is(err, meter.ErrReservationNotFound), "a copy's hold settled under %s: err = %v, want ErrReservationNotFound", name, err)
-	}
+	checkHoldSettledByItsCopy(t, f, first, copies)
 	byCopy := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: unit, copies: copies})
-	_, err = f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: byCopy, ReservationID: first.ID, Amount: held}, nil)
-	expect.Must(t, err == nil, "%v", err)
-	// Settled, the hold's receipt reads back to its copy alone.
-	r, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: byCopy, ReservationID: first.ID, Amount: held}, nil)
-	expect.That(t, !(err != nil || !r.Replayed), "the copy settling its hold again = %+v, %v; want the replay", r, err)
-	another := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: unit, copies: other})
-	_, err = f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: another, ReservationID: first.ID, Amount: held}, nil)
-	expect.That(t, errors.Is(err, meter.ErrReservationNotFound), "another copy settling a settled hold: err = %v, want ErrReservationNotFound, not the receipt", err)
-	err = f.Usage.Release(f.Ctx, meter.ReleaseRequest{Subject: byCopy, ReservationID: second.ID})
+	err := f.Usage.Release(f.Ctx, meter.ReleaseRequest{Subject: byCopy, ReservationID: second.ID})
 	expect.Must(t, err == nil, "%v", err)
 	for _, id := range []uuid.UUID{first.ID, second.ID, uuid.New()} {
 		_, err := f.Usage.GetReservation(f.Ctx, id)
 		expect.That(t, errors.Is(err, meter.ErrReservationNotFound), "GetReservation %s: err = %v, want ErrReservationNotFound", id, err)
 	}
-	left := list(f.child)
+	left := listHolds(t, f, f.child)
 	expect.That(t, len(left) == 0, "holds left after settling and releasing: %v", left)
+}
+
+// reservedHold is the amount each hold of checkReservations holds, for
+// reservedSooner or reservedLater; reservedCopyLimit is the copy limit that
+// holds every one, through the one copy.
+const (
+	reservedHold      = 2 * one
+	reservedSooner    = time.Minute
+	reservedLater     = 2 * time.Minute
+	reservedCopyLimit = 10
+)
+
+// reserveUnder holds reservedHold of capID, under ceiling and copies, for
+// ttl.
+func reserveUnder(t *testing.T, f fixture, copies []limes.CopyCeiling, capID uuid.UUID, ceiling limes.Nanos, ttl time.Duration) meter.Reservation {
+	t.Helper()
+	r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{
+		Subject: newSubject(subjectSpec{capID: capID, tenant: f.Tenant, budget: budgetOf(ceiling), unit: unit, copies: copies}),
+		Amount:  reservedHold,
+		TTL:     ttl,
+		Op:      "llm",
+		Actor:   "agent",
+	})
+	expect.Must(t, err == nil, "reserve: %v", err)
+	return r
+}
+
+// checkReservedHold holds Reserve to returning the whole hold, its copies
+// with their budgets alone, as GetReservation reads it back. The copy's
+// budget has a Max; every other field of the hold holds a value, so one the
+// store does not keep reads back unset.
+func checkReservedHold(t *testing.T, f fixture, first meter.Reservation, copies []limes.CopyCeiling) {
+	expect.That(t, !(first.CapabilityID != f.child || first.TenantID != f.Tenant || first.Amount != reservedHold ||
+		first.Op != "llm" || first.Actor != "agent" || len(first.Copies) != 1 || !sameCeiling(first.Copies[0].Budget, copies[0].Budget)), "Reserve returned %+v; want the whole hold, copies with their budgets alone", first)
+	unset, want := fields.Unset(first), []string{"Copies[0].Budget.Unlimited"}
+	expect.That(t, slices.Equal(unset, want), "Reserve returned %+v with %v unset, want only %v", first, unset, want)
+	got, err := f.Usage.GetReservation(f.Ctx, first.ID)
+	expect.Must(t, err == nil, "GetReservation: %v", err)
+	diff := sameReservation(got, first)
+	expect.That(t, diff == "", "GetReservation = %+v, Reserve returned %+v: %s", got, first, diff)
+}
+
+// listHolds is the ids of capID's holds, as ListReservations orders them.
+func listHolds(t *testing.T, f fixture, capID uuid.UUID) []uuid.UUID {
+	t.Helper()
+	rs, err := f.Usage.ListReservations(f.Ctx, meter.ListReservationsRequest{CapabilityID: capID})
+	expect.Must(t, err == nil, "ListReservations: %v", err)
+	ids := []uuid.UUID{}
+	for _, r := range rs.Items {
+		ids = append(ids, r.ID)
+	}
+	return ids
+}
+
+// checkHoldSettledByItsCopy holds a hold to being settled by the copy that
+// made it: not by the capability without it, nor under another copy, whose
+// own limits it would shed; and, settled, its receipt to reading back to
+// that copy alone.
+func checkHoldSettledByItsCopy(t *testing.T, f fixture, first meter.Reservation, copies []limes.CopyCeiling) {
+	other := []limes.CopyCeiling{{RevocationID: []byte("copy-2")}}
+	for name, c := range map[string][]limes.CopyCeiling{"no copy": nil, "another copy": other} {
+		subject := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: unit, copies: c})
+		_, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: subject, ReservationID: first.ID, Amount: reservedHold}, nil)
+		expect.That(t, errors.Is(err, meter.ErrReservationNotFound), "a copy's hold settled under %s: err = %v, want ErrReservationNotFound", name, err)
+	}
+	byCopy := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: unit, copies: copies})
+	_, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: byCopy, ReservationID: first.ID, Amount: reservedHold}, nil)
+	expect.Must(t, err == nil, "%v", err)
+	r, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: byCopy, ReservationID: first.ID, Amount: reservedHold}, nil)
+	expect.That(t, !(err != nil || !r.Replayed), "the copy settling its hold again = %+v, %v; want the replay", r, err)
+	another := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: unit, copies: other})
+	_, err = f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: another, ReservationID: first.ID, Amount: reservedHold}, nil)
+	expect.That(t, errors.Is(err, meter.ErrReservationNotFound), "another copy settling a settled hold: err = %v, want ErrReservationNotFound, not the receipt", err)
 }
 
 // checkCopyUsageRefusesInvalid holds a CopyUsageReader to the request's
@@ -3581,80 +3599,113 @@ func checkPurgeCharges(t *testing.T, f fixture) {
 		expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "PurgeCharges with %s: err = %v, want ErrInvalidRequest", name, err)
 	}
 	from := f.Now()
-	// Another tenant's charge, as old as the first: a purge under Tenant's
-	// scope does not reach it.
-	var otherCharge uuid.UUID
-	var otherCtx context.Context
+	p := seedPurgedCharges(t, f)
+	checkPurgeBatches(t, f, housekeeping, p)
+	checkPurgedPromises(t, f, p)
+	f.Advance(purgeStep)
+	n := purgeCharges(t, f, housekeeping, meter.PurgeChargesRequest{})
+	expect.That(t, n == 1, "the settled charge, past the retention now: %d purged, want 1", n)
+	_, err := f.Usage.Settle(f.Ctx, p.settle, nil)
+	expect.That(t, errors.Is(err, meter.ErrReservationNotFound), "a settle of a hold whose charge is purged: err = %v, want ErrReservationNotFound", err)
+	page, err := f.Ledger.SumCharges(f.Ctx, meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: from.Add(3 * purgeStep)})
+	expect.That(t, !(err != nil || len(page.Items) != 0), "SumCharges of the purged charges' period = %+v, %v; want nothing", page.Items, err)
+}
+
+// purgedCharges are the charges checkPurgeCharges purges, a purgeStep
+// apart: first, second, then the hold settled; and, under tenant scope,
+// another tenant's as old as the first.
+type purgedCharges struct {
+	first, second, settled meter.ChargeReceipt
+	settle                 meter.SettleRequest
+	otherCtx               context.Context
+	otherCharge            uuid.UUID
+}
+
+// seedPurgedCharges charges the child twice a purgeStep apart, then
+// settles a hold of it; and, under tenant scope, charges another tenant
+// first, which a purge under Tenant's scope does not reach.
+func seedPurgedCharges(t *testing.T, f fixture) purgedCharges {
+	t.Helper()
+	var p purgedCharges
 	if f.ScopesTenants {
 		other, err := f.newTenant()
 		expect.Must(t, err == nil, "%v", err)
 		otherCap, err := f.NewCapability(CapabilitySpec{Tenant: other, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true, UnitCode: unit}})
 		expect.Must(t, err == nil, "%v", err)
-		otherCtx = f.tenantCtx(other)
-		r, err := f.Usage.Charge(otherCtx, meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: otherCap, tenant: other, unit: unit}), Amount: one}, nil)
+		p.otherCtx = f.tenantCtx(other)
+		r, err := f.Usage.Charge(p.otherCtx, meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: otherCap, tenant: other, unit: unit}), Amount: one}, nil)
 		expect.Must(t, err == nil, "%v", err)
-		otherCharge = r.ChargeID
+		p.otherCharge = r.ChargeID
 	}
-	first, err := f.charge(meter.ChargeRequest{Subject: f.childSubject(), Amount: one, ExternalRef: "purge-1"}, nil)
+	var err error
+	p.first, err = f.charge(meter.ChargeRequest{Subject: f.childSubject(), Amount: one, ExternalRef: "purge-1"}, nil)
 	expect.Must(t, err == nil, "%v", err)
 	f.Advance(purgeStep)
-	second, err := f.charge(meter.ChargeRequest{Subject: f.childSubject(), Amount: one, ExternalRef: "purge-2"}, nil)
+	p.second, err = f.charge(meter.ChargeRequest{Subject: f.childSubject(), Amount: one, ExternalRef: "purge-2"}, nil)
 	expect.Must(t, err == nil, "%v", err)
 	f.Advance(purgeStep)
 	hold, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: one})
 	expect.Must(t, err == nil, "%v", err)
-	settle := meter.SettleRequest{Subject: f.childSubject(), ReservationID: hold.ID, Amount: one}
-	settled, err := f.Usage.Settle(f.Ctx, settle, nil)
+	p.settle = meter.SettleRequest{Subject: f.childSubject(), ReservationID: hold.ID, Amount: one}
+	p.settled, err = f.Usage.Settle(f.Ctx, p.settle, nil)
 	expect.Must(t, err == nil, "%v", err)
-	purge := func(req meter.PurgeChargesRequest) int64 {
-		t.Helper()
-		r, err := housekeeping.PurgeCharges(f.Ctx, req)
-		expect.Must(t, err == nil, "PurgeCharges(%+v): %v", req, err)
-		return r.Purged
-	}
-	kept := func(what string, id uuid.UUID, want bool) {
-		t.Helper()
-		_, err := f.Usage.GetCharge(f.Ctx, id)
-		got := err == nil
-		expect.That(t, !(got != want || (!want && !errors.Is(err, meter.ErrChargeNotFound))), "%s: GetCharge = %v; want kept %v, or ErrChargeNotFound", what, err, want)
-	}
+	return p
+}
 
+// purgeCharges is how many charges PurgeCharges of req purged.
+func purgeCharges(t *testing.T, f fixture, housekeeping meter.LedgerHousekeeping, req meter.PurgeChargesRequest) int64 {
+	t.Helper()
+	r, err := housekeeping.PurgeCharges(f.Ctx, req)
+	expect.Must(t, err == nil, "PurgeCharges(%+v): %v", req, err)
+	return r.Purged
+}
+
+// chargeKept holds GetCharge of id to want: the charge, or
+// ErrChargeNotFound.
+func chargeKept(t *testing.T, f fixture, what string, id uuid.UUID, want bool) {
+	t.Helper()
+	_, err := f.Usage.GetCharge(f.Ctx, id)
+	got := err == nil
+	expect.That(t, !(got != want || (!want && !errors.Is(err, meter.ErrChargeNotFound))), "%s: GetCharge = %v; want kept %v, or ErrChargeNotFound", what, err, want)
+}
+
+// checkPurgeBatches holds PurgeCharges to keeping a charge exactly the
+// retention old, taking the oldest first, a batch at a time, and keeping
+// a younger settled charge, whose settle still replays.
+func checkPurgeBatches(t *testing.T, f fixture, housekeeping meter.LedgerHousekeeping, p purgedCharges) {
 	// The first charge is exactly the retention old: it stays.
 	f.Advance(meter.MinChargeRetention - 2*purgeStep)
-	n := purge(meter.PurgeChargesRequest{})
+	n := purgeCharges(t, f, housekeeping, meter.PurgeChargesRequest{})
 	expect.That(t, n == 0, "a charge exactly the retention old: %d purged, want none", n)
 	// Two are older now, the settled one is not; a batch of one takes the
 	// oldest.
 	f.Advance(purgeStep + purgeStep/2)
-	n = purge(meter.PurgeChargesRequest{Limit: 1})
+	n = purgeCharges(t, f, housekeeping, meter.PurgeChargesRequest{Limit: 1})
 	expect.Must(t, n == 1, "a batch of one purged %d", n)
-	kept("the oldest charge", first.ChargeID, false)
-	kept("the second charge", second.ChargeID, true)
-	n = purge(meter.PurgeChargesRequest{})
+	chargeKept(t, f, "the oldest charge", p.first.ChargeID, false)
+	chargeKept(t, f, "the second charge", p.second.ChargeID, true)
+	n = purgeCharges(t, f, housekeeping, meter.PurgeChargesRequest{})
 	expect.That(t, n == 1, "the next batch purged %d, want the second charge alone", n)
-	n = purge(meter.PurgeChargesRequest{})
+	n = purgeCharges(t, f, housekeeping, meter.PurgeChargesRequest{})
 	expect.That(t, n == 0, "a batch with nothing older purged %d", n)
-	kept("the settled charge, younger than the retention", settled.ChargeID, true)
-	got, err := f.Usage.Settle(f.Ctx, settle, nil)
+	chargeKept(t, f, "the settled charge, younger than the retention", p.settled.ChargeID, true)
+	got, err := f.Usage.Settle(f.Ctx, p.settle, nil)
 	expect.That(t, !(err != nil || !got.Replayed), "a settle replayed while its charge is kept = %+v, %v; want the receipt, replayed", got, err)
+}
 
-	// A removed charge's promises are gone with it.
-	_, err = f.Usage.ChargeByRef(f.Ctx, meter.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: "purge-1"})
+// checkPurgedPromises holds a purged charge's promises to going with it:
+// its reference charges anew, it refunds nothing, and another tenant's
+// charge stays.
+func checkPurgedPromises(t *testing.T, f fixture, p purgedCharges) {
+	_, err := f.Usage.ChargeByRef(f.Ctx, meter.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: "purge-1"})
 	expect.That(t, errors.Is(err, meter.ErrChargeNotFound), "ChargeByRef of a purged charge: err = %v, want ErrChargeNotFound", err)
 	// Its reference charges anew: a charge of its own, no replay.
 	again, err := f.charge(meter.ChargeRequest{Subject: f.childSubject(), Amount: one, ExternalRef: "purge-1"}, nil)
-	expect.That(t, !(err != nil || again.Replayed || again.ChargeID == first.ChargeID), "the purged charge's reference again = %+v, %v; want a new charge, not replayed", again, err)
+	expect.That(t, !(err != nil || again.Replayed || again.ChargeID == p.first.ChargeID), "the purged charge's reference again = %+v, %v; want a new charge, not replayed", again, err)
 	if f.ScopesTenants {
-		_, err := f.Usage.GetCharge(otherCtx, otherCharge)
+		_, err := f.Usage.GetCharge(p.otherCtx, p.otherCharge)
 		expect.That(t, err == nil, "another tenant's charge after a purge under Tenant's scope: %v; want it kept", err)
 	}
-	_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: second.ChargeID, Remaining: true})
+	_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: p.second.ChargeID, Remaining: true})
 	expect.That(t, errors.Is(err, meter.ErrChargeNotFound), "Refund of a purged charge: err = %v, want ErrChargeNotFound", err)
-	f.Advance(purgeStep)
-	n = purge(meter.PurgeChargesRequest{})
-	expect.That(t, n == 1, "the settled charge, past the retention now: %d purged, want 1", n)
-	_, err = f.Usage.Settle(f.Ctx, settle, nil)
-	expect.That(t, errors.Is(err, meter.ErrReservationNotFound), "a settle of a hold whose charge is purged: err = %v, want ErrReservationNotFound", err)
-	page, err := f.Ledger.SumCharges(f.Ctx, meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: from.Add(3 * purgeStep)})
-	expect.That(t, !(err != nil || len(page.Items) != 0), "SumCharges of the purged charges' period = %+v, %v; want nothing", page.Items, err)
 }
