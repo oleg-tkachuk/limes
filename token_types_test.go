@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"strings"
 	"testing"
 	"uuid"
 
@@ -137,5 +138,37 @@ func signableCapability() Capability {
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "s"},
 		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}},
 		IssuedAt: now, ExpiresAt: now.Add(tokenTimeResolution), ClientID: testClientID,
+	}
+}
+
+// An id inside a claim is read only as the signer spells it: lowercase and
+// hyphenated. Any other spelling of the same id is refused, so no reader
+// comparing strings sees two values for it.
+func TestClaimIDsAreCanonical(t *testing.T) {
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	v := verifierFor(t, pub, VerifierConfig{})
+	tenant := uuid.New()
+	run := uuid.New().String()
+	with := func(edit func(p map[string]any)) string {
+		c := validClaims(tenant)
+		p := c["limes_principal"].(map[string]any)
+		p["tenant_id"], p["agent"] = tenant.String(), map[string]any{"run_id": run}
+		edit(p)
+		return resign(t, priv, headerOf(TokenType), c)
+	}
+	if _, err := v.Verify(t.Context(), VerifyRequest{Token: with(func(map[string]any) {}), Audience: audienceData}); err != nil {
+		t.Fatalf("canonical ids: %v", err)
+	}
+	for name, edit := range map[string]func(p map[string]any){
+		"an uppercase tenant":      func(p map[string]any) { p["tenant_id"] = strings.ToUpper(tenant.String()) },
+		"a braced tenant":          func(p map[string]any) { p["tenant_id"] = "{" + tenant.String() + "}" },
+		"a urn tenant":             func(p map[string]any) { p["tenant_id"] = "urn:uuid:" + tenant.String() },
+		"an unhyphenated tenant":   func(p map[string]any) { p["tenant_id"] = strings.ReplaceAll(tenant.String(), "-", "") },
+		"an uppercase run":         func(p map[string]any) { p["agent"] = map[string]any{"run_id": strings.ToUpper(run)} },
+		"a parent run as a number": func(p map[string]any) { p["agent"] = map[string]any{"parent_run_id": 1} },
+	} {
+		if _, err := v.Verify(t.Context(), VerifyRequest{Token: with(edit), Audience: audienceData}); !errors.Is(err, ErrInvalidToken) {
+			t.Errorf("%s: %v, want ErrInvalidToken", name, err)
+		}
 	}
 }
