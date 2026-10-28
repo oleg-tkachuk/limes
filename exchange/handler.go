@@ -341,9 +341,9 @@ func (h *Handler) refuse(w http.ResponseWriter, r *http.Request, err error) {
 			}
 			if nonce == "" {
 				h.cfg.Logger.ErrorContext(r.Context(), "exchange: a nonce is required, and no verifier issues one; give Config.Capabilities and Config.DPoP the same nonces")
-			} else {
-				w.Header().Set(headerDPoPNonce, nonce)
+				break
 			}
+			w.Header().Set(headerDPoPNonce, nonce)
 		}
 		h.write(w, rule.status, errorResponse{Error: rule.code, Description: rule.description})
 		return
