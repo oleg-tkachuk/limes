@@ -74,9 +74,10 @@ func TestNamePrefixCoverage(t *testing.T) {
 }
 
 // A name prefix is a resource like any other: an empty one, or one with a
-// dot segment, is refused.
+// dot segment, is refused; so is one ending inside a percent-escape or a
+// UTF-8 sequence, which names no whole character.
 func TestValidateNamePrefixes(t *testing.T) {
-	for _, bad := range []string{"", "drafts/../hr-", "drafts/./x"} {
+	for _, bad := range []string{"", "drafts/../hr-", "drafts/./x", "drafts/a%", "drafts/a%2", "drafts/\xc3", "drafts/\xe2\x82"} {
 		if err := (Caveats{Ops: []Op{OpGet}, ResourceNamePrefixes: []string{bad}}).Validate(); !errors.Is(err, ErrInvalidCaveats) {
 			t.Errorf("name prefix %q: %v, want ErrInvalidCaveats", bad, err)
 		}
@@ -165,4 +166,13 @@ func FuzzNarrowingNeverWidens(f *testing.F) {
 			}
 		}
 	})
+}
+
+// A name prefix ending on whole characters, escaped or not, is accepted.
+func TestNamePrefixesOfWholeCharacters(t *testing.T) {
+	for _, good := range []string{"drafts/a%2F", "drafts/caf\u00e9-", "drafts/100%25-", "drafts/a"} {
+		if err := (Caveats{Ops: []Op{OpGet}, ResourceNamePrefixes: []string{good}}).Validate(); err != nil {
+			t.Errorf("name prefix %q: %v", good, err)
+		}
+	}
 }
