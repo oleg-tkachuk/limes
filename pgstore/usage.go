@@ -1,6 +1,7 @@
 package pgstore
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -352,59 +353,78 @@ func (s *UsageStore) SetTenantBudget(ctx context.Context, req meter.SetTenantBud
 	}
 	var out meter.TenantBudget
 	err := s.inTenantTx(ctx, req.TenantID, func(tx pgx.Tx) error {
-		if err := notErased(ctx, tx, req.TenantID); err != nil {
-			return err
-		}
-		// The aggregate is created, with no unit yet, before it is locked:
-		// locking a row that is not there locks nothing, and a first charge
-		// that created it meanwhile would be overwritten by the write below.
-		// Created here, the call waits for that charge and reads its counts.
-		if _, err := tx.Exec(ctx, sqlCreateTenant, req.TenantID, "", s.clock()); err != nil {
-			return err
-		}
-		b, err := lockTenant(ctx, tx, req.TenantID)
-		if err != nil {
-			return err
-		}
-		// A budget with no ceiling set yet expects version 0; an existing one
-		// its current version.
-		if req.ExpectedVersion != b.version {
-			return meter.ErrTenantBudgetVersionMismatch
-		}
-		// A ceiling that names no unit — the zero one — keeps the tenant's.
-		unit := req.Ceiling.UnitCode
-		if unit == "" {
-			unit = b.unit
-		}
-		// A reset closes the spend, never the holds still open in the old
-		// unit.
-		if b.persisted && b.unit != "" && unit != b.unit &&
-			(b.reserved > 0 || (b.spent > 0 && !req.ResetSpend)) {
-			return fmt.Errorf("%w: tenant %s has %s counted in %s",
-				limes.ErrUnitCodeMismatch, req.TenantID, b.spent+b.reserved, b.unit)
-		}
-		now := s.clock()
-		b.ceiling, b.unit, b.end = req.Ceiling, unit, nil
-		if !req.PeriodEnd.IsZero() {
-			end := req.PeriodEnd.UTC().Truncate(timeResolution)
-			b.end = &end
-		}
-		if req.ResetSpend {
-			b.spent, b.start = 0, now
-			b.period++
-		}
-		if b.start.IsZero() {
-			b.start = now
-		}
-		b.version++
-		c := &counters{tenant: b}
-		if err := c.write(ctx, tx, now, true); err != nil {
-			return err
-		}
-		out = c.tenant.budget()
-		return nil
+		var err error
+		out, err = s.setTenantBudget(ctx, tx, req)
+		return err
 	})
 	return out, err
+}
+
+// setTenantBudget is SetTenantBudget in tx.
+func (s *UsageStore) setTenantBudget(ctx context.Context, tx pgx.Tx, req meter.SetTenantBudgetRequest) (meter.TenantBudget, error) {
+	if err := notErased(ctx, tx, req.TenantID); err != nil {
+		return meter.TenantBudget{}, err
+	}
+	// The aggregate is created, with no unit yet, before it is locked:
+	// locking a row that is not there locks nothing, and a first charge
+	// that created it meanwhile would be overwritten by the write below.
+	// Created here, the call waits for that charge and reads its counts.
+	if _, err := tx.Exec(ctx, sqlCreateTenant, req.TenantID, "", s.clock()); err != nil {
+		return meter.TenantBudget{}, err
+	}
+	b, err := lockTenant(ctx, tx, req.TenantID)
+	if err != nil {
+		return meter.TenantBudget{}, err
+	}
+	// A budget with no ceiling set yet expects version 0; an existing one
+	// its current version.
+	if req.ExpectedVersion != b.version {
+		return meter.TenantBudget{}, meter.ErrTenantBudgetVersionMismatch
+	}
+	// A ceiling that names no unit — the zero one — keeps the tenant's.
+	unit := cmp.Or(req.Ceiling.UnitCode, b.unit)
+	if err := checkBudgetUnit(b, req, unit); err != nil {
+		return meter.TenantBudget{}, err
+	}
+	now := s.clock()
+	c := &counters{tenant: setBudget(b, req, unit, now)}
+	if err := c.write(ctx, tx, now, true); err != nil {
+		return meter.TenantBudget{}, err
+	}
+	return c.tenant.budget(), nil
+}
+
+// checkBudgetUnit refuses moving b to unit while it counts anything in
+// another. A reset closes the spend, never the holds still open in the old
+// unit.
+func checkBudgetUnit(b budgetRow, req meter.SetTenantBudgetRequest, unit string) error {
+	if !b.persisted || b.unit == "" || unit == b.unit {
+		return nil
+	}
+	if b.reserved > 0 || (b.spent > 0 && !req.ResetSpend) {
+		return fmt.Errorf("%w: tenant %s has %s counted in %s",
+			limes.ErrUnitCodeMismatch, req.TenantID, b.spent+b.reserved, b.unit)
+	}
+	return nil
+}
+
+// setBudget is b set as req asks, in unit, at now, at a new version: a
+// reset closes the spend and opens a period.
+func setBudget(b budgetRow, req meter.SetTenantBudgetRequest, unit string, now time.Time) budgetRow {
+	b.ceiling, b.unit, b.end = req.Ceiling, unit, nil
+	if !req.PeriodEnd.IsZero() {
+		end := req.PeriodEnd.UTC().Truncate(timeResolution)
+		b.end = &end
+	}
+	if req.ResetSpend {
+		b.spent, b.start = 0, now
+		b.period++
+	}
+	if b.start.IsZero() {
+		b.start = now
+	}
+	b.version++
+	return b
 }
 
 // The classes ListTenantBudgets ranks by: a ceiling of 0 allows nothing and

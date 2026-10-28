@@ -557,70 +557,83 @@ func (s *UsageStore) Reserve(ctx context.Context, req meter.ReserveRequest) (met
 	if err := req.Validate(); err != nil {
 		return meter.Reservation{}, err
 	}
-	unit := req.Subject.UnitCode()
-	ttl := req.TTL
-	if ttl == 0 {
-		ttl = meter.DefaultReservationTTL
-	}
-	subject := req.Subject
-	copies, err := encodeHeldCopies(subject.Copies())
+	copies, err := encodeHeldCopies(req.Subject.Copies())
 	if err != nil {
 		return meter.Reservation{}, err
 	}
 	var out meter.Reservation
-	err = s.inTenantTx(ctx, subject.TenantID(), func(tx pgx.Tx) error {
-		if err := notErased(ctx, tx, subject.TenantID()); err != nil {
-			return err
-		}
-		ancestors, err := lineage(ctx, tx, subject.CapabilityID())
-		if err != nil {
-			return err
-		}
-		c, err := s.lockCharge(ctx, tx, chargeSpec{
-			capID: subject.CapabilityID(), tenantID: subject.TenantID(), unit: unit, copies: subject.Copies(), copyQuota: subject.CopyQuota(), ancestors: ancestors,
-		})
-		if err != nil {
-			return err
-		}
-		refuse := func(err error) error { return err }
-		if err := checkCeilings(c, ceilingCheck{
-			amount: req.Amount, budget: subject.Budget(), unit: unit,
-			capID: subject.CapabilityID(), ancestors: ancestors, copies: subject.Copies(),
-		}, refuse); err != nil {
-			return err
-		}
-		now := s.clock()
-		// A hold ends with its capability at the latest: past it no one can
-		// settle the hold, and it would keep the ancestors' budget held.
-		expires := now.Add(ttl)
-		var capExpires *time.Time
-		if err := tx.QueryRow(ctx, sqlCapabilityExpiry, subject.CapabilityID()).Scan(&capExpires); err != nil {
-			return err
-		}
-		// A capability already expired could hold nothing anyone may settle.
-		if capExpires != nil && !capExpires.After(now) {
-			return limes.ErrExpired
-		}
-		if capExpires != nil && capExpires.Before(expires) {
-			expires = *capExpires
-		}
-		h := hold{
-			id: uuid.New(), capID: subject.CapabilityID(), tenantID: subject.TenantID(), ancestors: ancestorIDs(ancestors),
-			amount: req.Amount, unit: unit, op: req.Op, actor: req.Actor, copies: subject.Copies(),
-			expires: expires.Truncate(timeResolution),
-		}
-		applyHold(c, h, +1)
-		if err := c.write(ctx, tx, now, true); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, sqlInsertHold,
-			h.id, h.capID, h.tenantID, h.ancestors, int64(h.amount), h.unit, string(h.op), h.actor, copies, h.expires); err != nil {
-			return err
-		}
-		out = h.reservation()
-		return nil
+	err = s.inTenantTx(ctx, req.Subject.TenantID(), func(tx pgx.Tx) error {
+		var err error
+		out, err = s.reserve(ctx, tx, req, copies)
+		return err
 	})
 	return out, err
+}
+
+// reserve is Reserve in tx, copies the encoded copies the hold is under.
+func (s *UsageStore) reserve(ctx context.Context, tx pgx.Tx, req meter.ReserveRequest, copies []byte) (meter.Reservation, error) {
+	subject, unit := req.Subject, req.Subject.UnitCode()
+	if err := notErased(ctx, tx, subject.TenantID()); err != nil {
+		return meter.Reservation{}, err
+	}
+	ancestors, err := lineage(ctx, tx, subject.CapabilityID())
+	if err != nil {
+		return meter.Reservation{}, err
+	}
+	c, err := s.lockCharge(ctx, tx, chargeSpec{
+		capID: subject.CapabilityID(), tenantID: subject.TenantID(), unit: unit, copies: subject.Copies(), copyQuota: subject.CopyQuota(), ancestors: ancestors,
+	})
+	if err != nil {
+		return meter.Reservation{}, err
+	}
+	refuse := func(err error) error { return err }
+	if err := checkCeilings(c, ceilingCheck{
+		amount: req.Amount, budget: subject.Budget(), unit: unit,
+		capID: subject.CapabilityID(), ancestors: ancestors, copies: subject.Copies(),
+	}, refuse); err != nil {
+		return meter.Reservation{}, err
+	}
+	now := s.clock()
+	expires, err := holdExpiry(ctx, tx, subject.CapabilityID(), now, cmp.Or(req.TTL, meter.DefaultReservationTTL))
+	if err != nil {
+		return meter.Reservation{}, err
+	}
+	h := hold{
+		id: uuid.New(), capID: subject.CapabilityID(), tenantID: subject.TenantID(), ancestors: ancestorIDs(ancestors),
+		amount: req.Amount, unit: unit, op: req.Op, actor: req.Actor, copies: subject.Copies(),
+		expires: expires.Truncate(timeResolution),
+	}
+	applyHold(c, h, +1)
+	if err := c.write(ctx, tx, now, true); err != nil {
+		return meter.Reservation{}, err
+	}
+	if _, err := tx.Exec(ctx, sqlInsertHold,
+		h.id, h.capID, h.tenantID, h.ancestors, int64(h.amount), h.unit, string(h.op), h.actor, copies, h.expires); err != nil {
+		return meter.Reservation{}, err
+	}
+	return h.reservation(), nil
+}
+
+// holdExpiry is when a hold of capID made at now for ttl ends: with its
+// capability at the latest, since past it no one can settle the hold, and
+// it would keep the ancestors' budget held. A capability already expired
+// could hold nothing anyone may settle.
+func holdExpiry(ctx context.Context, tx pgx.Tx, capID uuid.UUID, now time.Time, ttl time.Duration) (time.Time, error) {
+	expires := now.Add(ttl)
+	var capExpires *time.Time
+	if err := tx.QueryRow(ctx, sqlCapabilityExpiry, capID).Scan(&capExpires); err != nil {
+		return time.Time{}, err
+	}
+	if capExpires == nil {
+		return expires, nil
+	}
+	if !capExpires.After(now) {
+		return time.Time{}, limes.ErrExpired
+	}
+	if capExpires.Before(expires) {
+		return *capExpires, nil
+	}
+	return expires, nil
 }
 
 // applyHold adds (sign +1) or removes (sign -1) h on every counter c holds
