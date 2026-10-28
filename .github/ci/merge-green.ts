@@ -129,22 +129,9 @@ export async function mergeIfGreen(github: GitHub, number: number, headSha: stri
   if (!(await canPush(github, pr.author.login))) {
     return decided(false, `#${number} is by ${pr.author.login}, who cannot push here; left for a person to merge`);
   }
-  // The files of headSha itself, the commit the run tested and the merge
-  // names: the pull request's own listing is of its head now, which may have
-  // moved and come back between the reads.
-  const { files } = await github.compare(BASE_BRANCH, headSha);
-  // Every file the pull request changes must have been listed: one the API
-  // left out could be a CI definition.
-  if (!filesListedInFull(files.length, pr.changedFiles)) {
-    return decided(false, `#${number} changes ${pr.changedFiles ?? "an unknown number of"} files and ${files.length} were listed; left for a person to merge`);
-  }
-  const ci = changesCi(files);
-  if (ci !== undefined) {
-    return decided(false, `#${number} changes ${ci}, which decides what CI runs; left for a person to merge`);
-  }
-  const nested = await nestedModuleChange(github, files, BASE_BRANCH, headSha);
-  if (nested !== undefined) {
-    return decided(false, `#${number} changes ${nested} beyond its requirements, which decides what CI tests; left for a person to merge`);
+  const refused = await filesRefusal(github, pr, headSha);
+  if (refused !== undefined) {
+    return decided(false, refused);
   }
   // Refused if the head moved since it was read: the run tested headSha,
   // whose files are the ones read above.
@@ -156,6 +143,30 @@ export async function mergeIfGreen(github: GitHub, number: number, headSha: stri
     warning(note);
     return { number, merged: false, note };
   }
+}
+
+// filesRefusal is why pr, at headSha, is left for a person for what it
+// changes: files the API did not list in full, CI's own definition, or a
+// nested module beyond its requirements. The files are those of headSha
+// itself, the commit the run tested and the merge names: the pull request's
+// own listing is of its head now, which may have moved and come back
+// between the reads.
+async function filesRefusal(github: GitHub, pr: PullRequest, headSha: string): Promise<string | undefined> {
+  const { files } = await github.compare(BASE_BRANCH, headSha);
+  // Every file the pull request changes must have been listed: one the API
+  // left out could be a CI definition.
+  if (!filesListedInFull(files.length, pr.changedFiles)) {
+    return `#${pr.number} changes ${pr.changedFiles ?? "an unknown number of"} files and ${files.length} were listed; left for a person to merge`;
+  }
+  const ci = changesCi(files);
+  if (ci !== undefined) {
+    return `#${pr.number} changes ${ci}, which decides what CI runs; left for a person to merge`;
+  }
+  const nested = await nestedModuleChange(github, files, BASE_BRANCH, headSha);
+  if (nested !== undefined) {
+    return `#${pr.number} changes ${nested} beyond its requirements, which decides what CI tests; left for a person to merge`;
+  }
+  return undefined;
 }
 
 // pullRequestNumbers reads the workflow_run's pull_requests, refusing any

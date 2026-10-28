@@ -31,7 +31,7 @@ import { error, info, summarize, table, warning } from "./lib/actions.ts";
 import { execute } from "./lib/exec.ts";
 import { optionalEnv, requireEnv } from "./lib/env.ts";
 import { git } from "./lib/git.ts";
-import { gitHubFor, type GitHub } from "./lib/github.ts";
+import { type GitHub, gitHubFor, type PullRequestText } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
 import { ROOT_MODULE, releasedModules, selectModule } from "./lib/modules.ts";
 
@@ -130,43 +130,16 @@ async function raise(root: string, dir: string, tag: string): Promise<string | u
 // BRANCH cut from main as the remote has it now, and opens or updates its
 // pull request.
 export async function proposeRequirements(ctx: Context, dirs: readonly string[], tag: string): Promise<Outcome> {
-  if (!RELEASE_TAG.test(tag)) {
-    throw new Error(`limes tag ${JSON.stringify(tag)} is not a release's vX.Y.Z`);
-  }
-  for (const dir of dirs) {
-    if (dir === "" || !existsSync(join(ctx.root, dir, "go.mod"))) {
-      throw new Error(`${JSON.stringify(dir)} is no module`);
-    }
-  }
+  checkProposal(ctx.root, dirs, tag);
   // Fetched afresh: a pull request raising the same requirement may have
   // merged since, and a branch cut from before it would conflict with it.
   await git(["fetch", "--quiet", REMOTE, BASE_BRANCH], ctx.root);
   await git(["switch", "--quiet", "--discard-changes", "-C", BRANCH, `${REMOTE}/${BASE_BRANCH}`], ctx.root);
-  const outcome: Outcome = { proposal: Proposal.Unchanged, raised: [], failed: [] };
-  const changed: string[] = [];
-  for (const dir of dirs) {
-    try {
-      const from = await raise(ctx.root, dir, tag);
-      if (from !== undefined) {
-        outcome.raised.push({ dir, from });
-        changed.push(join(dir, "go.mod"), join(dir, "go.sum"));
-      }
-    } catch (err) {
-      error(`${dir}: ${err instanceof Error ? err.message : String(err)}`);
-      outcome.failed.push(dir);
-      // Left as main has it: the others go ahead without it.
-      await git(["checkout", "--quiet", "HEAD", "--", dir], ctx.root);
-    }
-  }
+  const { outcome, changed } = await raiseEach(ctx.root, dirs, tag);
   if (outcome.raised.length === 0) {
     return outcome;
   }
-  for (const follower of FOLLOWERS) {
-    if (existsSync(join(ctx.root, follower, "go.mod"))) {
-      await go(["mod", "tidy"], join(ctx.root, follower));
-      changed.push(join(follower, "go.mod"), join(follower, "go.sum"));
-    }
-  }
+  changed.push(...(await tidyFollowers(ctx.root)));
   const title = requirementTitle(tag, outcome.raised.map((r) => r.dir));
   await git(["add", "--", ...changed.filter((p) => existsSync(join(ctx.root, p)))], ctx.root);
   await git(["commit", "--quiet", "-m", title], ctx.root);
@@ -176,19 +149,69 @@ export async function proposeRequirements(ctx: Context, dirs: readonly string[],
     title,
     body: `limes ${tag} is released. This raises the nested modules' requirement of it, so each is tested against, and released with, the limes it now requires:\n\n${modules}`,
   };
-  const open = await ctx.github.sameRepoPullRequest(BRANCH, BASE_BRANCH);
-  if (open !== undefined) {
-    await ctx.github.editPullRequest(open, text);
-    info(`updated #${open}: ${title}`);
-    outcome.proposal = Proposal.Updated;
-    outcome.pullRequest = open;
-  } else {
-    const number = await ctx.github.createPullRequest(BRANCH, BASE_BRANCH, text);
-    info(`opened #${number}: ${title}`);
-    outcome.proposal = Proposal.Opened;
-    outcome.pullRequest = number;
+  return { ...outcome, ...(await openOrUpdate(ctx.github, text)) };
+}
+
+// checkProposal refuses a tag that is no release's, or a directory that is
+// no module under root.
+function checkProposal(root: string, dirs: readonly string[], tag: string): void {
+  if (!RELEASE_TAG.test(tag)) {
+    throw new Error(`limes tag ${JSON.stringify(tag)} is not a release's vX.Y.Z`);
   }
-  return outcome;
+  for (const dir of dirs) {
+    if (dir === "" || !existsSync(join(root, dir, "go.mod"))) {
+      throw new Error(`${JSON.stringify(dir)} is no module`);
+    }
+  }
+}
+
+// raiseEach raises each module's requirement of limes to tag, one that
+// fails left as main has it while the others go ahead without it; changed
+// are the files raised.
+async function raiseEach(root: string, dirs: readonly string[], tag: string): Promise<{ outcome: Outcome; changed: string[] }> {
+  const outcome: Outcome = { proposal: Proposal.Unchanged, raised: [], failed: [] };
+  const changed: string[] = [];
+  for (const dir of dirs) {
+    try {
+      const from = await raise(root, dir, tag);
+      if (from !== undefined) {
+        outcome.raised.push({ dir, from });
+        changed.push(join(dir, "go.mod"), join(dir, "go.sum"));
+      }
+    } catch (err) {
+      error(`${dir}: ${err instanceof Error ? err.message : String(err)}`);
+      outcome.failed.push(dir);
+      await git(["checkout", "--quiet", "HEAD", "--", dir], root);
+    }
+  }
+  return { outcome, changed };
+}
+
+// tidyFollowers tidies each follower that is a module under root, and is
+// the files it may have changed.
+async function tidyFollowers(root: string): Promise<string[]> {
+  const changed: string[] = [];
+  for (const follower of FOLLOWERS) {
+    if (existsSync(join(root, follower, "go.mod"))) {
+      await go(["mod", "tidy"], join(root, follower));
+      changed.push(join(follower, "go.mod"), join(follower, "go.sum"));
+    }
+  }
+  return changed;
+}
+
+// openOrUpdate proposes text on BRANCH: the open pull request from it,
+// updated, or a new one.
+async function openOrUpdate(github: GitHub, text: PullRequestText): Promise<Pick<Outcome, "proposal" | "pullRequest">> {
+  const open = await github.sameRepoPullRequest(BRANCH, BASE_BRANCH);
+  if (open !== undefined) {
+    await github.editPullRequest(open, text);
+    info(`updated #${open}: ${text.title}`);
+    return { proposal: Proposal.Updated, pullRequest: open };
+  }
+  const number = await github.createPullRequest(BRANCH, BASE_BRANCH, text);
+  info(`opened #${number}: ${text.title}`);
+  return { proposal: Proposal.Opened, pullRequest: number };
 }
 
 // requirementTitle is the subject of the commit, and the title of the pull
