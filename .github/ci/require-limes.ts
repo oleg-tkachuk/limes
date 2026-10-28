@@ -241,12 +241,12 @@ export function pushAs(token: string, repository: string, root: string): Context
   };
 }
 
-async function main(): Promise<void> {
+async function main(): Promise<boolean> {
   const [tag = ""] = process.argv.slice(2);
   const token = optionalEnv("GH_TOKEN");
   if (token === undefined) {
     warning(`AUTOMERGE_TOKEN is not set; the nested modules' requirement of limes ${tag} is not proposed (see release.yaml)`);
-    return;
+    return true;
   }
   const repository = requireEnv("GITHUB_REPOSITORY");
   const root = (await git(["rev-parse", "--show-toplevel"])).trim();
@@ -254,9 +254,7 @@ async function main(): Promise<void> {
   const dirs = nestedModuleDirs(root);
   const outcome = await proposeRequirements(ctx, dirs, tag);
   summarize(requirementsSummary(tag, dirs, outcome));
-  if (outcome.failed.length > 0) {
-    process.exitCode = 1;
-  }
+  return outcome.failed.length === 0;
 }
 
 if (import.meta.main) {

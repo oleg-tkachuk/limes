@@ -102,21 +102,24 @@ export function moduleCheck(check: string, root: string, title: string | undefin
   }
 }
 
-async function main(): Promise<void> {
+async function main(): Promise<boolean> {
   const root = (await git(["rev-parse", "--show-toplevel"])).trim();
   const name = process.argv[2] ?? "";
   const check = moduleCheck(name, root, optionalEnv("PR_TITLE"), optionalEnv("APIDIFF"));
-  const event: Event = {
-    name: requireEnv("EVENT"),
-    prBase: optionalEnv("PR_BASE") ?? "",
-    prHead: optionalEnv("PR_HEAD") ?? "",
-    sha: requireEnv("SHA"),
-  };
-  const results = await checkModules(root, event, check);
+  const results = await checkModules(root, eventOf(requireEnv, optionalEnv), check);
   summarize(checkSummary(name as Check, results));
-  if (!allPassed(results)) {
-    process.exitCode = 1;
-  }
+  return allPassed(results);
+}
+
+// eventOf is the event the workflow names: EVENT and SHA, required, and the
+// pull request's PR_BASE and PR_HEAD, empty outside one.
+export function eventOf(required: (name: string) => string, optional: (name: string) => string | undefined): Event {
+  return {
+    name: required("EVENT"),
+    prBase: optional("PR_BASE") ?? "",
+    prHead: optional("PR_HEAD") ?? "",
+    sha: required("SHA"),
+  };
 }
 
 if (import.meta.main) {

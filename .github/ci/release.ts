@@ -337,7 +337,7 @@ function semanticRelease(root: string, token: string, extra: readonly string[] =
     );
 }
 
-async function main(): Promise<void> {
+async function main(): Promise<boolean> {
   const repository = requireEnv("GITHUB_REPOSITORY");
   const token = requireEnv("GH_TOKEN");
   // Every tag goes over SSH with the deploy key, which alone may create a
@@ -349,13 +349,13 @@ async function main(): Promise<void> {
   const push = pushUrl(repository);
   process.env[PUSH_URL_ENV] = push;
   try {
-    await releaseFrom(repository, token, push);
+    return await releaseFrom(repository, token, push);
   } finally {
     rmSync(sshDir, { recursive: true, force: true });
   }
 }
 
-async function releaseFrom(repository: string, token: string, push: string): Promise<void> {
+async function releaseFrom(repository: string, token: string, push: string): Promise<boolean> {
   const runId = runIdOf(requireEnv("CI_RUN"));
   const github = gitHubFor(token, repository);
   const root = (await git(["rev-parse", "--show-toplevel"])).trim();
@@ -374,9 +374,7 @@ async function releaseFrom(repository: string, token: string, push: string): Pro
     notesDir: requireEnv("RUNNER_TEMP"),
     onRootTag: (tag) => setOutput(OUTPUT_LIMES_TAG, tag),
   });
-  if (!ok) {
-    process.exitCode = 1;
-  }
+  return ok;
 }
 
 // ReleaseOptions are what a run asks of the release: its channel, whether
