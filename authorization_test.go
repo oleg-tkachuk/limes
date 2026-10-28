@@ -80,6 +80,39 @@ func TestParseAuthorizationKeepsTheCredentialOutOfItsError(t *testing.T) {
 	}
 }
 
+// A scheme is named in the error only when it reads as a registered scheme
+// name: letters, digits and "-", at most maxSchemeNameBytes. Every byte of
+// the range's bounds counts, as does every byte just past them.
+func TestParseAuthorizationNamesOnlyASchemeName(t *testing.T) {
+	longest := strings.Repeat("a", maxSchemeNameBytes)
+	for _, tc := range []struct {
+		scheme string
+		named  bool
+	}{
+		{"azAZ09-", true},
+		{longest, true},
+		{longest + "a", false},
+		{"_abc", false},
+		{"abc_", false},
+		{"a`b", false},
+		{"a{b", false},
+		{"a@b", false},
+		{"a[b", false},
+		{"a/b", false},
+		{"a:b", false},
+		{"a.b", false},
+	} {
+		_, _, err := ParseAuthorization(tc.scheme + " abc")
+		if !errors.Is(err, ErrNoCredentials) {
+			t.Errorf("ParseAuthorization(%q): err = %v, want ErrNoCredentials", tc.scheme+" abc", err)
+			continue
+		}
+		if named := strings.Contains(err.Error(), tc.scheme); named != tc.named {
+			t.Errorf("ParseAuthorization(%q): names the scheme = %t, want %t: %v", tc.scheme+" abc", named, tc.named, err)
+		}
+	}
+}
+
 // RFC 9449 §7.2: a key-bound token presented as Bearer is a downgrade and is
 // refused even with a valid proof; an unbound one presented as DPoP claims a
 // binding it does not have.
