@@ -63,46 +63,59 @@ func (s *Store) Insert(ctx context.Context, req limes.InsertRequest) error {
 		return err
 	}
 	err = s.inTenantTx(ctx, c.Subject.TenantID, func(tx pgx.Tx) error {
-		// Shares the tenant's erase lock: an erase that commits first is
-		// seen, one that comes after waits for this insert.
-		if err := notErased(ctx, tx, c.Subject.TenantID); err != nil {
-			return err
-		}
-		var exists bool
-		if err := tx.QueryRow(ctx, sqlCapabilityExists, c.ID).Scan(&exists); err != nil {
-			return err
-		}
-		if exists {
-			return fmt.Errorf("%w: %s", limes.ErrAlreadyExists, c.ID)
-		}
-		if s.checkTenant != nil {
-			if err := s.checkTenant(ctx, tx, c.Subject.TenantID); err != nil {
-				return err
-			}
-		}
-		depth := 0
-		var parentID *uuid.UUID
-		if c.ParentID != uuid.Nil() {
-			if err := shareRevokeLock(ctx, tx, c.Subject.TenantID); err != nil {
-				return err
-			}
-			parentDepth, err := checkParent(ctx, tx, c)
-			if err != nil {
-				return err
-			}
-			depth = parentDepth + 1
-			parentID = &c.ParentID
-		}
-		_, err := tx.Exec(ctx, sqlInsertCapability,
-			c.ID, parentID, c.Subject.TenantID, string(c.Subject.Type), c.Subject.Subject,
-			nullTime(c.ExpiresAt), depth, capability, issuedBy)
-		return err
+		return s.insert(ctx, tx, c, capability, issuedBy)
 	})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
 		return fmt.Errorf("%w: %s", limes.ErrAlreadyExists, c.ID)
 	}
 	return err
+}
+
+// insert is Insert in tx, c encoded as capability and its issuer as
+// issuedBy.
+func (s *Store) insert(ctx context.Context, tx pgx.Tx, c limes.Capability, capability, issuedBy []byte) error {
+	// Shares the tenant's erase lock: an erase that commits first is
+	// seen, one that comes after waits for this insert.
+	if err := notErased(ctx, tx, c.Subject.TenantID); err != nil {
+		return err
+	}
+	var exists bool
+	if err := tx.QueryRow(ctx, sqlCapabilityExists, c.ID).Scan(&exists); err != nil {
+		return err
+	}
+	if exists {
+		return fmt.Errorf("%w: %s", limes.ErrAlreadyExists, c.ID)
+	}
+	if s.checkTenant != nil {
+		if err := s.checkTenant(ctx, tx, c.Subject.TenantID); err != nil {
+			return err
+		}
+	}
+	depth, parentID, err := childDepth(ctx, tx, c)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, sqlInsertCapability,
+		c.ID, parentID, c.Subject.TenantID, string(c.Subject.Type), c.Subject.Subject,
+		nullTime(c.ExpiresAt), depth, capability, issuedBy)
+	return err
+}
+
+// childDepth is c's depth and its parent's id, nil for a root; a child is
+// held to its parent, under the tenant's revoke lock shared.
+func childDepth(ctx context.Context, tx pgx.Tx, c limes.Capability) (int, *uuid.UUID, error) {
+	if c.ParentID == uuid.Nil() {
+		return 0, nil, nil
+	}
+	if err := shareRevokeLock(ctx, tx, c.Subject.TenantID); err != nil {
+		return 0, nil, err
+	}
+	parentDepth, err := checkParent(ctx, tx, c)
+	if err != nil {
+		return 0, nil, err
+	}
+	return parentDepth + 1, &c.ParentID, nil
 }
 
 // checkParent holds c's parent on record for the rest of tx and refuses a
@@ -124,21 +137,8 @@ func checkParent(ctx context.Context, tx pgx.Tx, c limes.Capability) (int, error
 	if err != nil {
 		return 0, err
 	}
-	if c.ExpiresAt.After(parent.ExpiresAt) {
-		return 0, fmt.Errorf("%w: expires %s, after its parent %s", limes.ErrDelegationTooWide, c.ExpiresAt, parent.ExpiresAt)
-	}
-	// No expiry outlives every expiry: Purge could not drop the parent
-	// while the child, which it never purges, still refers to it.
-	if c.ExpiresAt.IsZero() && !parent.ExpiresAt.IsZero() {
-		return 0, fmt.Errorf("%w: never expires, under a parent expiring %s", limes.ErrDelegationTooWide, parent.ExpiresAt)
-	}
-	if c.Subject.TenantID != parent.Subject.TenantID {
-		return 0, fmt.Errorf("%w: tenant %s, not its parent's %s", limes.ErrDelegationTooWide, c.Subject.TenantID, parent.Subject.TenantID)
-	}
-	// Metering a child spends from every ancestor, so the lineage counts in
-	// one unit.
-	if c.Caveats.Budget.UnitCode != parent.Caveats.Budget.UnitCode {
-		return 0, fmt.Errorf("%w: budget in %q, under a parent in %q", limes.ErrUnitCodeMismatch, c.Caveats.Budget.UnitCode, parent.Caveats.Budget.UnitCode)
+	if err := checkUnderParent(c, parent); err != nil {
+		return 0, err
 	}
 	// The child's ancestors are its parent and the parent's own, counted as
 	// IsRevoked counts them: those still on record. The depth column keeps
@@ -155,6 +155,25 @@ func checkParent(ctx context.Context, tx pgx.Tx, c limes.Capability) (int, error
 		return 0, fmt.Errorf("%w: %s would have more than %d ancestors", limes.ErrDelegationTooDeep, c.ID, limes.MaxDelegationDepth)
 	}
 	return depth, nil
+}
+
+// checkUnderParent refuses a child its parent does not allow: a later
+// expiry, or none under one that expires — Purge could not drop the parent
+// while the child, which it never purges, still refers to it — another
+// tenant, or another budget unit: metering a child spends from every
+// ancestor, so the lineage counts in one unit.
+func checkUnderParent(c, parent limes.Capability) error {
+	switch {
+	case c.ExpiresAt.After(parent.ExpiresAt):
+		return fmt.Errorf("%w: expires %s, after its parent %s", limes.ErrDelegationTooWide, c.ExpiresAt, parent.ExpiresAt)
+	case c.ExpiresAt.IsZero() && !parent.ExpiresAt.IsZero():
+		return fmt.Errorf("%w: never expires, under a parent expiring %s", limes.ErrDelegationTooWide, parent.ExpiresAt)
+	case c.Subject.TenantID != parent.Subject.TenantID:
+		return fmt.Errorf("%w: tenant %s, not its parent's %s", limes.ErrDelegationTooWide, c.Subject.TenantID, parent.Subject.TenantID)
+	case c.Caveats.Budget.UnitCode != parent.Caveats.Budget.UnitCode:
+		return fmt.Errorf("%w: budget in %q, under a parent in %q", limes.ErrUnitCodeMismatch, c.Caveats.Budget.UnitCode, parent.Caveats.Budget.UnitCode)
+	}
+	return nil
 }
 
 // nullTime is t for a timestamptz column, NULL for the zero time.

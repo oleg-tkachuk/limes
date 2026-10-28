@@ -103,41 +103,60 @@ func lineage(ctx context.Context, tx pgx.Tx, capID uuid.UUID) ([]ancestor, error
 	if len(chain) > limes.MaxDelegationDepth+1 {
 		return nil, fmt.Errorf("%w: %s has more than %d ancestors", limes.ErrDelegationTooDeep, capID, limes.MaxDelegationDepth)
 	}
-	rows, err = tx.Query(ctx, sqlHoldRecords, chain)
+	held, err := holdRecords(ctx, tx, chain)
 	if err != nil {
-		return nil, err
-	}
-	held := map[uuid.UUID]ancestor{}
-	for rows.Next() {
-		var id uuid.UUID
-		var requests, budget, copies ceilingRecord
-		if err := rows.Scan(&id, &requests, &budget, &copies); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		held[id] = ancestor{
-			id:       id,
-			requests: limes.RequestCeiling{Max: requests.Max, Unlimited: requests.Unlimited},
-			budget:   limes.BudgetCeiling{Max: limes.Nanos(budget.Max), Unlimited: budget.Unlimited},
-			copies:   limes.CopyQuota{Max: copies.Max, Unlimited: copies.Unlimited},
-		}
-	}
-	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	if _, ok := held[capID]; !ok {
 		return nil, fmt.Errorf("%w: pgstore: capability %s is not on record", limes.ErrNotFound, capID)
 	}
-	// Nearest first, stopping at the first ancestor gone since the walk.
+	return nearestFirst(chain[1:], held), nil
+}
+
+// holdRecords reads the ceilings of chain's capabilities still on record.
+func holdRecords(ctx context.Context, tx pgx.Tx, chain []uuid.UUID) (map[uuid.UUID]ancestor, error) {
+	rows, err := tx.Query(ctx, sqlHoldRecords, chain)
+	if err != nil {
+		return nil, err
+	}
+	scanned, err := pgx.CollectRows(rows, scanAncestor)
+	if err != nil {
+		return nil, err
+	}
+	held := make(map[uuid.UUID]ancestor, len(scanned))
+	for _, a := range scanned {
+		held[a.id] = a
+	}
+	return held, nil
+}
+
+// scanAncestor reads one capability's ceilings.
+func scanAncestor(row pgx.CollectableRow) (ancestor, error) {
+	var id uuid.UUID
+	var requests, budget, copies ceilingRecord
+	if err := row.Scan(&id, &requests, &budget, &copies); err != nil {
+		return ancestor{}, err
+	}
+	return ancestor{
+		id:       id,
+		requests: limes.RequestCeiling{Max: requests.Max, Unlimited: requests.Unlimited},
+		budget:   limes.BudgetCeiling{Max: limes.Nanos(budget.Max), Unlimited: budget.Unlimited},
+		copies:   limes.CopyQuota{Max: copies.Max, Unlimited: copies.Unlimited},
+	}, nil
+}
+
+// nearestFirst is the ancestors of ids held, nearest first, stopping at the
+// first one gone since the walk.
+func nearestFirst(ids []uuid.UUID, held map[uuid.UUID]ancestor) []ancestor {
 	var out []ancestor
-	for _, id := range chain[1:] {
+	for _, id := range ids {
 		a, ok := held[id]
 		if !ok {
 			break
 		}
 		out = append(out, a)
 	}
-	return out, nil
+	return out
 }
 
 // usageRow is one capability's counters.

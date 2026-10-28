@@ -603,19 +603,29 @@ func parseTenantPlace(s string) (tenantPlace, error) {
 	if len(fields) != tenantCursorFields {
 		return tenantPlace{}, bad
 	}
+	p, ok := readTenantPlace(fields)
+	if !ok {
+		return tenantPlace{}, bad
+	}
+	return p, nil
+}
+
+// readTenantPlace reads a cursor's fields — class, spent, ceiling, tenant —
+// refusing any out of range, or a ceiling its class contradicts.
+func readTenantPlace(fields []string) (tenantPlace, bool) {
 	class, err := strconv.Atoi(fields[0])
 	if err != nil || class < classZero || class > classUnlimited {
-		return tenantPlace{}, bad
+		return tenantPlace{}, false
 	}
 	spent, err1 := strconv.ParseInt(fields[1], 10, 64)
 	ceiling, err2 := strconv.ParseInt(fields[2], 10, 64)
 	tenant, err3 := uuid.Parse(fields[3])
-	if err1 != nil || err2 != nil || err3 != nil ||
+	if err := errors.Join(err1, err2, err3); err != nil ||
 		limes.Nanos(spent).Validate() != nil || limes.Nanos(ceiling).Validate() != nil ||
 		(class == classBounded) != (ceiling > 0) {
-		return tenantPlace{}, bad
+		return tenantPlace{}, false
 	}
-	return tenantPlace{class: class, spent: limes.Nanos(spent), max: limes.Nanos(ceiling), tenantID: tenant}, nil
+	return tenantPlace{class: class, spent: limes.Nanos(spent), max: limes.Nanos(ceiling), tenantID: tenant}, true
 }
 
 const (
