@@ -315,7 +315,9 @@ at an RFC 8693 token endpoint (`Handler`):
   and budget ceiling lowered to the tightest a Biscuit copy's blocks set.
   A copy with limits of its own on a verifier without `MeterCopies` is
   answered inactive, as `Verify` refuses it. A store that
-  cannot answer is a 500, never an inactive token. Neither audience nor
+  cannot answer is a 500, never an inactive token. With
+  `IntrospectionConfig.Audiences`, a token whose `aud` names none of the
+  calling client's audiences is answered inactive (§4). Neither audience nor
   proof of possession is checked: the answer is no authorization, and
   `Introspect` yields nothing `Delegate` takes.
 
@@ -329,7 +331,7 @@ at an RFC 8693 token endpoint (`Handler`):
 `TestWellKnownURLs`, `TestResourceMetadataHandler`,
 `TestAuthorizationServerMetadataHandler`, `TestKeysOutageIsTheServers`,
 `TestJWTVerifierKeepsTheContract`, `TestIntrospectionActive`,
-`TestIntrospectionInactive`, `TestIntrospectionOutage`, `TestIntrospectionHoldsACopyToItsLimits`, `TestEffectiveCaveats`, `TestIntrospectHoldsACopyToItsLimits`, `TestIntrospectActive`,
+`TestIntrospectionInactive`, `TestIntrospectionOutage`, `TestIntrospectionHoldsACopyToItsLimits`, `TestIntrospectionHoldsTheClientToItsAudiences`, `TestEffectiveCaveats`, `TestIntrospectHoldsACopyToItsLimits`, `TestIntrospectActive`,
 `TestIntrospectInactive`, `TestIntrospectOutageIsNotInactive`, `TestMarshalCaveatsIsTheClaim`, and the fuzz target
 `FuzzCheckForm`, in `exchange`; and the `mcp-exchange` example.
 

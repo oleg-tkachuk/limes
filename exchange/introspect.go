@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"slices"
 
 	"github.com/oleg-tkachuk/limes"
 )
@@ -34,6 +35,11 @@ type IntrospectionConfig struct {
 	// RFC 7662 §2.1 requires, so the endpoint is no oracle for whoever holds
 	// a token. An error refuses the request as ErrInvalidClient. Required.
 	Authenticate func(r *http.Request) (Client, error)
+	// Audiences are the audiences of the tokens a client may learn about
+	// (RFC 7662 §4): a token whose aud names none of them is answered
+	// inactive, so one resource server learns nothing of tokens meant for
+	// another. Nil: any authenticated client learns about any token.
+	Audiences func(Client) []string
 	// MaxBodyBytes bounds the request body. Zero: DefaultMaxBodyBytes.
 	MaxBodyBytes int64
 	// Logger logs every answer: active at INFO, inactive at WARN with the
@@ -82,10 +88,13 @@ type introspection struct {
 	IssuedAt  int64    `json:"iat,omitempty"`
 	NotBefore int64    `json:"nbf,omitempty"`
 	ID        string   `json:"jti,omitempty"`
-	ClientID  string   `json:"client_id,omitempty"`
-	TokenType string   `json:"token_type,omitempty"`
-	Cnf       *cnf     `json:"cnf,omitempty"`
-	Act       *act     `json:"act,omitempty"`
+	// ClientID is the client the capability's grant began with, which a
+	// delegated child keeps, not the client presenting it; sub and act name
+	// the holders.
+	ClientID  string `json:"client_id,omitempty"`
+	TokenType string `json:"token_type,omitempty"`
+	Cnf       *cnf   `json:"cnf,omitempty"`
+	Act       *act   `json:"act,omitempty"`
 	// AuthorizationDetails holds one entry, of AuthorizationDetailsTypeCaveats.
 	AuthorizationDetails []json.RawMessage `json:"authorization_details,omitempty"`
 }
@@ -149,6 +158,12 @@ func (h *IntrospectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		// would refuse every request as if every token were revoked.
 		log.ErrorContext(r.Context(), "introspection failed", slog.Any("error", err))
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: codeServerError}, log)
+	case h.cfg.Audiences != nil && !slices.ContainsFunc(got.Capability.Audience, func(aud string) bool {
+		return slices.Contains(h.cfg.Audiences(client), aud)
+	}):
+		log.WarnContext(r.Context(), "introspection: token for an audience the client may not ask about; answered inactive",
+			slog.String("capability", got.Capability.ID.String()))
+		writeJSON(w, http.StatusOK, introspection{Active: false}, log)
 	default:
 		c := got.Capability
 		detail, err := caveatsDetail(effectiveCaveats(c.Caveats, got.Copies))
