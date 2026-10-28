@@ -307,7 +307,10 @@ at an RFC 8693 token endpoint (`Handler`):
   `token_type` and `cnf` for a bound one (RFC 9449 §6.2), and what it
   grants as one `authorization_details` entry (RFC 9396 §9.2): of type
   `exchange.AuthorizationDetailsTypeCaveats`, its other members those of
-  the token's `limes_caveats` claim (`limes.MarshalCaveats`). A store that
+  the token's `limes_caveats` claim (`limes.MarshalCaveats`), each request
+  and budget ceiling lowered to the tightest a Biscuit copy's blocks set.
+  A copy with limits of its own on a verifier without `MeterCopies` is
+  answered inactive, as `Verify` refuses it. A store that
   cannot answer is a 500, never an inactive token. Neither audience nor
   proof of possession is checked: the answer is no authorization, and
   `Introspect` yields nothing `Delegate` takes.
@@ -321,7 +324,7 @@ at an RFC 8693 token endpoint (`Handler`):
 `TestWellKnownURLs`, `TestResourceMetadataHandler`,
 `TestAuthorizationServerMetadataHandler`, `TestKeysOutageIsTheServers`,
 `TestJWTVerifierKeepsTheContract`, `TestIntrospectionActive`,
-`TestIntrospectionInactive`, `TestIntrospectionOutage`, `TestIntrospectActive`,
+`TestIntrospectionInactive`, `TestIntrospectionOutage`, `TestIntrospectionHoldsACopyToItsLimits`, `TestEffectiveCaveats`, `TestIntrospectHoldsACopyToItsLimits`, `TestIntrospectActive`,
 `TestIntrospectInactive`, `TestIntrospectOutageIsNotInactive`, `TestMarshalCaveatsIsTheClaim`, and the fuzz target
 `FuzzCheckForm`, in `exchange`; and the `mcp-exchange` example.
 
