@@ -648,28 +648,36 @@ const rootPath = "/"
 
 func htuMatches(htu, requestURL string, pathOnly bool) bool {
 	if pathOnly {
-		// The proof's htu is still a URI a request could have been made to:
-		// absolute, with a host, normalised.
-		normalised, err := rfc3986.Normalize(htu)
-		if err != nil {
-			return false
-		}
-		got, err1 := url.Parse(normalised)
-		want, err2 := url.Parse(requestURL)
-		if err1 != nil || err2 != nil || want.EscapedPath() == "" {
-			return false
-		}
-		g, w := got.EscapedPath(), rfc3986.NormalizePath(want.EscapedPath())
-		// A proxy may mount the service under a prefix it strips before
-		// forwarding, so the client's path may carry segments the server
-		// never sees. The server's path must still be the whole tail, from a
-		// segment boundary — and name a segment: the root's tail is every
-		// path that ends in a slash.
-		return g == w || w != rootPath && strings.HasSuffix(g, w) && strings.HasPrefix(w, rootPath)
+		return htuPathMatches(htu, requestURL)
 	}
 	got, err1 := rfc3986.Normalize(htu)
 	want, err2 := rfc3986.Normalize(requestURL)
 	return err1 == nil && err2 == nil && got == want
+}
+
+// htuPathMatches is htuMatches under pathOnly: the proof's htu is still a
+// URI a request could have been made to — absolute, with a host,
+// normalised — and its path ends in the request's.
+func htuPathMatches(htu, requestURL string) bool {
+	normalised, err := rfc3986.Normalize(htu)
+	if err != nil {
+		return false
+	}
+	got, err1 := url.Parse(normalised)
+	want, err2 := url.Parse(requestURL)
+	if err1 != nil || err2 != nil || want.EscapedPath() == "" {
+		return false
+	}
+	return pathTailMatches(got.EscapedPath(), rfc3986.NormalizePath(want.EscapedPath()))
+}
+
+// pathTailMatches reports whether the server's path w is g, or its whole
+// tail from a segment boundary. A proxy may mount the service under a
+// prefix it strips before forwarding, so the client's path may carry
+// segments the server never sees. The tail must name a segment: the root's
+// tail is every path that ends in a slash.
+func pathTailMatches(g, w string) bool {
+	return g == w || w != rootPath && strings.HasSuffix(g, w) && strings.HasPrefix(w, rootPath)
 }
 
 func decodeSegment(seg string, v any) error {
