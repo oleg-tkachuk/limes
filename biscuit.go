@@ -116,25 +116,48 @@ type BiscuitResult struct {
 
 // biscuit is Biscuit, returning the token alone.
 func (i *Issuer) biscuit(ctx context.Context, vc VerifiedCapability) (string, error) {
+	if err := i.checkSealable(ctx, vc); err != nil {
+		return "", err
+	}
+	out, err := i.seal(ctx, vc.c)
+	if err != nil {
+		return "", err
+	}
+	if err := i.fits(out); err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+// checkSealable refuses a capability this issuer gives no Biscuit form: one
+// the verifier did not accept, one already read from a Biscuit, another
+// issuer's, or one expired or revoked.
+func (i *Issuer) checkSealable(ctx context.Context, vc VerifiedCapability) error {
 	c := vc.c
 	switch {
 	case c.ID == uuid.Nil():
-		return "", invalidRequest("Biscuit requires a capability the verifier accepted")
+		return invalidRequest("Biscuit requires a capability the verifier accepted")
 	case vc.fromBiscuit:
-		return "", invalidRequest("capability %s was read from a Biscuit; attenuate that instead", c.ID)
+		return invalidRequest("capability %s was read from a Biscuit; attenuate that instead", c.ID)
 	case c.Issuer != i.issuerName:
-		return "", invalidRequest("capability %s was issued by %q, not %q", c.ID, c.Issuer, i.issuerName)
+		return invalidRequest("capability %s was issued by %q, not %q", c.ID, c.Issuer, i.issuerName)
 	}
 	if !i.clock().Before(c.ExpiresAt) {
-		return "", fmt.Errorf("limes: biscuit of %s: %w", c.ID, ErrExpired)
+		return fmt.Errorf("limes: biscuit of %s: %w", c.ID, ErrExpired)
 	}
 	revoked, err := i.store.IsRevoked(ctx, c.ID)
 	if err != nil {
-		return "", fmt.Errorf("limes: biscuit revocation lookup: %w", err)
+		return fmt.Errorf("limes: biscuit revocation lookup: %w", err)
 	}
 	if revoked {
-		return "", fmt.Errorf("limes: biscuit of %s: %w", c.ID, ErrRevoked)
+		return fmt.Errorf("limes: biscuit of %s: %w", c.ID, ErrRevoked)
 	}
+	return nil
+}
+
+// seal is c's Biscuit: an authority block carrying c's token, signed with a
+// fresh root key the token names.
+func (i *Issuer) seal(ctx context.Context, c Capability) (string, error) {
 	rootPub, rootPriv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return "", fmt.Errorf("limes: biscuit root key: %w", err)
@@ -151,14 +174,7 @@ func (i *Issuer) biscuit(ctx context.Context, vc VerifiedCapability) (string, er
 	if err != nil {
 		return "", fmt.Errorf("limes: build biscuit: %w", err)
 	}
-	out, err := serializeBiscuit(token)
-	if err != nil {
-		return "", err
-	}
-	if err := i.fits(out); err != nil {
-		return "", err
-	}
-	return out, nil
+	return serializeBiscuit(token)
 }
 
 // Attenuation is one offline narrowing. Empty fields leave that dimension as

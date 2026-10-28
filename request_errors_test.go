@@ -117,3 +117,38 @@ func TestDelegateRefusesAMalformedRequestAsInvalid(t *testing.T) {
 		})
 	}
 }
+
+// revocationOutageStore is genStore whose revocation lookup fails.
+type revocationOutageStore struct {
+	genStore
+	err error
+}
+
+func (s revocationOutageStore) IsRevoked(context.Context, uuid.UUID) (bool, error) {
+	return false, s.err
+}
+
+// A Biscuit is sealed only for a capability the store says is not revoked:
+// when the store cannot say, none is sealed, and the store's error comes
+// back as itself, never as a revoked capability or a bad request.
+func TestBiscuitKeepsTheStoreErrorApart(t *testing.T) {
+	outage := errors.New("connection refused")
+	signer, err := NewSigner(SignerConfig{KeyID: goldenKID, Key: SealKey(ed25519.NewKeyFromSeed(goldenSeed[:]))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	iss, err := NewIssuer(IssuerConfig{
+		Signer: signer, Store: revocationOutageStore{err: outage}, IssuerName: goldenIssuer, DefaultTTL: time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, _, err := iss.issue(context.Background(), validIssue())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = iss.Biscuit(context.Background(), BiscuitRequest{Capability: VerifiedCapability{c: c}})
+	if !errors.Is(err, outage) || errors.Is(err, ErrRevoked) || errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("Biscuit = %v, want the store's error alone", err)
+	}
+}
