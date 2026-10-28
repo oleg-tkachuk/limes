@@ -254,7 +254,11 @@ at an RFC 8693 token endpoint (`Handler`):
   of `typ: at+jwt` (or `application/at+jwt`), signed by an asymmetric
   algorithm under the identity provider's keys, from its issuer, live, and
   carrying every claim the profile requires: `iss`, `exp`, `aud`, `sub`,
-  `client_id`, `iat`, `jti`. A provider that types its tokens otherwise, or
+  `client_id`, `iat`, `jti`. The signature is checked under the
+  algorithm the header names, with the key its kid names only if that key
+  is of the algorithm's type and curve and names no other algorithm, so a
+  key set holding keys for several algorithms, an HMAC secret among them,
+  lends none to another. A provider that types its tokens otherwise, or
   names the client in another claim, is read only by naming either in its
   config. A token bound otherwise than by a DPoP key (`cnf` without `jkt`,
   or with more) is refused: a bearer capability would drop the binding.
@@ -313,6 +317,7 @@ at an RFC 8693 token endpoint (`Handler`):
   `Introspect` yields nothing `Delegate` takes.
 
 *Held by* `TestJWTVerifierReadsAnAccessToken`, `TestJWTVerifierRefusals`,
+`TestJWTVerifierHoldsTheKeyToTheHeaderAlg`,
 `TestExchangeHoldsThePolicyToTheRequest`,
 `TestExchangeCapsTheLifetimeAtTheSubjectToken`, `TestExchangeRefusals`,
 `TestExchangeBindsToTheProofKey`, `TestExchangeHoldsABoundSubjectToItsKey`,
