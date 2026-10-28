@@ -320,73 +320,101 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapab
 // check of the token and before the proof's id is recorded: a request accept
 // refuses spends none of the replay cache's room either.
 func (v *Verifier) verify(ctx context.Context, req VerifyRequest, accept func(Capability) error) (VerifiedCapability, error) {
-	token, audience := req.Token, req.Audience
-	if token == "" {
-		return VerifiedCapability{}, ErrNoCredentials
+	if err := checkVerifyRequest(req); err != nil {
+		return VerifiedCapability{}, err
 	}
-	if audience == "" {
-		// The server's own call names no audience: its error, not the token's.
-		return VerifiedCapability{}, invalidRequest("VerifyRequest.Audience is required")
-	}
-	cap, biscuitIDs, err := v.authenticate(ctx, token)
+	cap, biscuitIDs, err := v.authenticate(ctx, req.Token)
 	if err != nil {
 		return VerifiedCapability{}, err
 	}
-
 	// 5) Audience match.
-	if !slices.Contains(cap.Audience, audience) {
+	if !slices.Contains(cap.Audience, req.Audience) {
 		return VerifiedCapability{}, fmt.Errorf("%w: token audience %v lacks %q",
-			ErrAudienceMismatch, cap.Audience, audience)
+			ErrAudienceMismatch, cap.Audience, req.Audience)
 	}
-
-	// 6) The scheme the binding calls for, and a verifier able to check the
-	// proof it needs. No I/O, so before the revocation lookup.
-	if err := checkScheme(req.Scheme, cap.ConfirmationJKT != ""); err != nil {
+	// 6–7) The scheme and the proof of possession, which need no I/O.
+	proof, err := v.checkPossession(ctx, req, cap)
+	if err != nil {
 		return VerifiedCapability{}, err
 	}
-	if cap.ConfirmationJKT != "" && v.cfg.DPoP == nil {
-		return VerifiedCapability{}, ErrProofUnsupported
-	}
-	// 7) Proof of possession, for a key-bound capability — over the token
-	// as presented, the Biscuit when it is one. Everything but the replay
-	// check, which needs the cache and comes last.
-	var proof dpop.CheckedProof
-	if cap.ConfirmationJKT != "" {
-		var err error
-		proof, err = v.cfg.DPoP.Check(ctx, dpop.Request{Proof: req.DPoP, Token: token, JKT: cap.ConfirmationJKT, Holder: cap.ID.String()})
-		if err != nil {
-			return VerifiedCapability{}, proofError(err)
-		}
-	}
-
 	// 8–9) Revocation, after the checks that need no I/O.
 	if err := v.checkRevoked(ctx, cap, biscuitIDs); err != nil {
 		return VerifiedCapability{}, err
 	}
-
-	// 10) A copy's own limits need a Meter that counts copies. After every
-	// check of the token, so a token refused for what it is gets that
-	// refusal, not this one, which is about the verifier.
-	if len(cap.copies) > 0 && !v.cfg.Biscuit.MeterCopies {
-		return VerifiedCapability{}, ErrCopyCountersNotMetered
+	// 10–11) What the verifier and its caller require beyond the token.
+	if err := v.checkAccepted(cap, accept); err != nil {
+		return VerifiedCapability{}, err
 	}
-	// 11) The caller's own refusals: Authorize's caveats.
-	if accept != nil {
-		if err := accept(cap.Capability); err != nil {
-			return VerifiedCapability{}, err
-		}
+	// 12) The proof's id, recorded in the replay cache, last.
+	if err := v.recordProof(ctx, cap, proof); err != nil {
+		return VerifiedCapability{}, err
 	}
-	// 12) The proof's id, recorded in the replay cache, last: the cache's
-	// room is shared by every copy of the capability, so only a request this
-	// verifier accepts spends it — not a revoked token, a copy it cannot
-	// meter, nor a request a caveat refuses.
-	if cap.ConfirmationJKT != "" {
-		if err := v.cfg.DPoP.Record(ctx, proof); err != nil {
-			return VerifiedCapability{}, proofError(err)
-		}
-	}
-
 	return VerifiedCapability{c: cap.Capability, copies: cap.copies, fromBiscuit: biscuitIDs != nil}, nil
+}
+
+// checkVerifyRequest refuses a request with no token, or none of the
+// server's audience: the server's own call names no audience, its error, not
+// the token's.
+func checkVerifyRequest(req VerifyRequest) error {
+	if req.Token == "" {
+		return ErrNoCredentials
+	}
+	if req.Audience == "" {
+		return invalidRequest("VerifyRequest.Audience is required")
+	}
+	return nil
+}
+
+// checkPossession holds the request to what cap's binding calls for (6): the
+// scheme, and a verifier able to check the proof it needs; then, for a
+// key-bound capability, checks the proof (7) over the token as presented,
+// the Biscuit when it is one. Everything but the replay check, which needs
+// the cache and comes last.
+func (v *Verifier) checkPossession(ctx context.Context, req VerifyRequest, cap *grant) (dpop.CheckedProof, error) {
+	bound := cap.ConfirmationJKT != ""
+	if err := checkScheme(req.Scheme, bound); err != nil {
+		return dpop.CheckedProof{}, err
+	}
+	if !bound {
+		return dpop.CheckedProof{}, nil
+	}
+	if v.cfg.DPoP == nil {
+		return dpop.CheckedProof{}, ErrProofUnsupported
+	}
+	proof, err := v.cfg.DPoP.Check(ctx, dpop.Request{Proof: req.DPoP, Token: req.Token, JKT: cap.ConfirmationJKT, Holder: cap.ID.String()})
+	if err != nil {
+		return dpop.CheckedProof{}, proofError(err)
+	}
+	return proof, nil
+}
+
+// checkAccepted refuses what passes every check of the token but the
+// verifier or its caller does not accept: a copy whose own limits need a
+// Meter that counts copies (10), after every check of the token, so a token
+// refused for what it is gets that refusal, not this one, which is about the
+// verifier; then the caller's own refusals (11), Authorize's caveats.
+func (v *Verifier) checkAccepted(cap *grant, accept func(Capability) error) error {
+	if len(cap.copies) > 0 && !v.cfg.Biscuit.MeterCopies {
+		return ErrCopyCountersNotMetered
+	}
+	if accept == nil {
+		return nil
+	}
+	return accept(cap.Capability)
+}
+
+// recordProof records a key-bound capability's proof id in the replay
+// cache (12): the cache's room is shared by every copy of the capability, so
+// only a request this verifier accepts spends it — not a revoked token, a
+// copy it cannot meter, nor a request a caveat refuses.
+func (v *Verifier) recordProof(ctx context.Context, cap *grant, proof dpop.CheckedProof) error {
+	if cap.ConfirmationJKT == "" {
+		return nil
+	}
+	if err := v.cfg.DPoP.Record(ctx, proof); err != nil {
+		return proofError(err)
+	}
+	return nil
 }
 
 // authenticate is what Verify and Introspect check of a token itself: its
