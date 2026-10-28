@@ -93,7 +93,10 @@ type HandlerConfig struct {
 	// a client assertion, a shared secret — and names the audiences its
 	// subject tokens may be issued for. An error that is or wraps
 	// ErrUnauthorizedClient refuses an authenticated client that may not
-	// exchange: 400 unauthorized_client. Any other error refuses the client
+	// exchange: 400 unauthorized_client. One that is or wraps ErrServerError
+	// is the server's failure: 500 server_error, the error logged at ERROR
+	// and kept out of the body, so name the client in it. Any other error
+	// refuses the client
 	// as not authenticated, ErrInvalidClient: invalid_client, 401 with a
 	// challenge in the scheme of its Authorization header, or 400 when it
 	// sent none (mTLS, a client assertion). Required.
@@ -170,7 +173,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	req, subjectType, err := h.readRequest(w, r)
 	if err != nil {
-		h.cfg.Logger.WarnContext(r.Context(), "exchange request refused", slog.Any("error", err))
+		logRefusal(r, h.cfg.Logger, "exchange", err)
 		h.refuse(w, r, err)
 		return
 	}
@@ -220,12 +223,9 @@ func (h *Handler) readRequest(w http.ResponseWriter, r *http.Request) (Request, 
 	if err := checkForm(form); err != nil {
 		return Request{}, "", err
 	}
-	client, err := h.cfg.Authenticate(r)
-	switch {
-	case errors.Is(err, ErrUnauthorizedClient):
+	client, err := authenticate(h.cfg.Authenticate, r)
+	if err != nil {
 		return Request{}, "", err
-	case err != nil:
-		return Request{}, "", fmt.Errorf("%w: %w", ErrInvalidClient, err)
 	}
 	proof, err := h.proofOf(r)
 	if err != nil {
@@ -367,6 +367,30 @@ func checkDetails(form url.Values) error {
 		}
 	}
 	return nil
+}
+
+// authenticate is the client authenticate names for r. Its error is as
+// authenticate returned it when it is or wraps ErrUnauthorizedClient or
+// ErrServerError, and any other is ErrInvalidClient.
+func authenticate(authenticate func(*http.Request) (Client, error), r *http.Request) (Client, error) {
+	client, err := authenticate(r)
+	switch {
+	case err == nil:
+		return client, nil
+	case errors.Is(err, ErrUnauthorizedClient), errors.Is(err, ErrServerError):
+		return Client{}, err
+	}
+	return Client{}, fmt.Errorf("%w: %w", ErrInvalidClient, err)
+}
+
+// logRefusal logs err, the reason the endpoint named refuses r before it
+// reads further: at ERROR when it is the server's failure, WARN otherwise.
+func logRefusal(r *http.Request, log *slog.Logger, endpoint string, err error) {
+	if errors.Is(err, ErrServerError) {
+		log.ErrorContext(r.Context(), endpoint+": server error", slog.Any("error", err))
+		return
+	}
+	log.WarnContext(r.Context(), endpoint+" request refused", slog.Any("error", err))
 }
 
 // descriptionInvalidClient describes invalid_client, at either endpoint.

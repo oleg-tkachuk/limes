@@ -28,6 +28,12 @@ var (
 	// IntrospectionConfig.Authenticate return it, wrapped or not, to refuse
 	// such a client.
 	ErrUnauthorizedClient = errors.New("exchange: client not authorized to exchange")
+	// ErrServerError is the server failing to decide on a client: its
+	// client store unreachable, say. HandlerConfig.Authenticate and
+	// IntrospectionConfig.Authenticate return it, wrapped or not, so that
+	// the endpoint answers 500 server_error, logged at ERROR, rather than
+	// tell the client its credentials are wrong (RFC 6749 §5.2).
+	ErrServerError = errors.New("exchange: server error")
 	// ErrInvalidGrant is a subject token refused: not genuine, expired, or
 	// not one the client may present.
 	ErrInvalidGrant = errors.New("exchange: subject token refused")

@@ -304,8 +304,9 @@ func TestClientRefusalChallengesInTheClientsScheme(t *testing.T) {
 
 // An authenticated client not allowed to exchange is answered
 // unauthorized_client (400), wrapped or not; any other error of
-// Authenticate stays invalid_client (401). Each refusal is logged at WARN
-// with the authenticator's error.
+// Authenticate stays invalid_client (401), but a server error, 500
+// server_error with no detail. Each refusal is logged at WARN with the
+// authenticator's error, a server error at ERROR.
 func TestHandlerTellsAnUnauthorizedClientFromAnUnauthenticatedOne(t *testing.T) {
 	f := newFixture(t, fixtureConfig{})
 	token := f.idp.sign(t, TypeAccessToken, accessClaims())
@@ -313,10 +314,14 @@ func TestHandlerTellsAnUnauthorizedClientFromAnUnauthenticatedOne(t *testing.T) 
 		err    error
 		status int
 		code   string
+		level  slog.Level
+		msg    string
 	}{
-		"the sentinel":         {ErrUnauthorizedClient, http.StatusBadRequest, codeUnauthorizedClient},
-		"the sentinel wrapped": {fmt.Errorf("client %s may not exchange: %w", mcpServer, ErrUnauthorizedClient), http.StatusBadRequest, codeUnauthorizedClient},
-		"a plain error":        {errors.New("bad credentials"), http.StatusUnauthorized, codeInvalidClient},
+		"the sentinel":           {ErrUnauthorizedClient, http.StatusBadRequest, codeUnauthorizedClient, slog.LevelWarn, "exchange request refused"},
+		"the sentinel wrapped":   {fmt.Errorf("client %s may not exchange: %w", mcpServer, ErrUnauthorizedClient), http.StatusBadRequest, codeUnauthorizedClient, slog.LevelWarn, "exchange request refused"},
+		"a plain error":          {errors.New("bad credentials"), http.StatusUnauthorized, codeInvalidClient, slog.LevelWarn, "exchange request refused"},
+		"a server error":         {ErrServerError, http.StatusInternalServerError, codeServerError, slog.LevelError, "exchange: server error"},
+		"a server error wrapped": {fmt.Errorf("look up client %s: %w", mcpServer, ErrServerError), http.StatusInternalServerError, codeServerError, slog.LevelError, "exchange: server error"},
 	} {
 		logs := &records{}
 		h, err := NewHandler(HandlerConfig{
@@ -331,8 +336,11 @@ func TestHandlerTellsAnUnauthorizedClientFromAnUnauthenticatedOne(t *testing.T) 
 		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != tc.status || resp.Error != tc.code {
 			t.Errorf("%s: status %d, body %s; want %d %s", name, w.Code, w.Body, tc.status, tc.code)
 		}
-		if level, msg := logs.last(); level != slog.LevelWarn || msg != "exchange request refused" || !logs.lastWraps(tc.err) {
-			t.Errorf("%s logged %s %q, want a WARN refusal carrying %v", name, level, msg, tc.err)
+		if tc.code == codeServerError && (resp.Description != "" || strings.Contains(w.Body.String(), mcpServer)) {
+			t.Errorf("%s: the body tells the client why: %s", name, w.Body)
+		}
+		if level, msg := logs.last(); level != tc.level || msg != tc.msg || !logs.lastWraps(tc.err) {
+			t.Errorf("%s logged %s %q, want %s %q carrying %v", name, level, msg, tc.level, tc.msg, tc.err)
 		}
 		if logs.lastWraps(ErrInvalidClient) != (tc.code == codeInvalidClient) {
 			t.Errorf("%s: logged as an unauthenticated client: %v", name, logs.lastWraps(ErrInvalidClient))

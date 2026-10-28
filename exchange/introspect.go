@@ -35,7 +35,8 @@ type IntrospectionConfig struct {
 	// RFC 7662 §2.1 requires, so the endpoint is no oracle for whoever holds
 	// a token. An error that is or wraps ErrUnauthorizedClient refuses one
 	// authenticated but not allowed to introspect: 400 unauthorized_client.
-	// Any other error refuses it as ErrInvalidClient, answered as the token
+	// One that is or wraps ErrServerError is answered 500 server_error, as
+	// the token endpoint answers it. Any other error refuses it as ErrInvalidClient, answered as the token
 	// endpoint answers it (HandlerConfig.Authenticate). Required.
 	Authenticate func(r *http.Request) (Client, error)
 	// Audiences are the audiences of the tokens a client may learn about
@@ -140,7 +141,7 @@ func (h *IntrospectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	log := h.cfg.Logger
 	token, client, err := h.readRequest(w, r)
 	if err != nil {
-		log.WarnContext(r.Context(), "introspection request refused", slog.Any("error", err))
+		logRefusal(r, log, "introspection", err)
 		h.refuse(w, r, err)
 		return
 	}
@@ -257,12 +258,9 @@ func (h *IntrospectionHandler) readRequest(w http.ResponseWriter, r *http.Reques
 	if token == "" {
 		return "", Client{}, fmt.Errorf("%w: %s required", ErrInvalidRequest, paramToken)
 	}
-	client, err := h.cfg.Authenticate(r)
-	switch {
-	case errors.Is(err, ErrUnauthorizedClient):
+	client, err := authenticate(h.cfg.Authenticate, r)
+	if err != nil {
 		return "", Client{}, err
-	case err != nil:
-		return "", Client{}, fmt.Errorf("%w: %w", ErrInvalidClient, err)
 	}
 	return token, client, nil
 }
@@ -271,6 +269,8 @@ func (h *IntrospectionHandler) readRequest(w http.ResponseWriter, r *http.Reques
 func (h *IntrospectionHandler) refuse(w http.ResponseWriter, r *http.Request, err error) {
 	status, code, description := http.StatusBadRequest, codeInvalidRequest, "The request is malformed."
 	switch {
+	case errors.Is(err, ErrServerError):
+		status, code, description = http.StatusInternalServerError, codeServerError, ""
 	case errors.Is(err, ErrUnauthorizedClient):
 		code, description = codeUnauthorizedClient, "The client may not introspect tokens."
 	case errors.Is(err, ErrInvalidClient):
