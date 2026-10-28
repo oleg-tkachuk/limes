@@ -200,52 +200,90 @@ func (e *Exchanger) Exchange(ctx context.Context, req Request) (Result, error) {
 
 // exchange is Exchange, and the subject once verified, for the log.
 func (e *Exchanger) exchange(ctx context.Context, req Request) (Result, Subject, error) {
-	switch {
-	case req.Client.ID == "" || len(req.Client.SubjectAudiences) == 0:
-		return Result{}, Subject{}, fmt.Errorf("%w: a client with an id and the audiences it may present", ErrInvalidClient)
-	case req.SubjectToken == "":
-		return Result{}, Subject{}, fmt.Errorf("%w: subject_token required", ErrInvalidRequest)
-	case len(req.Resources) == 0 && len(req.Audiences) == 0:
-		return Result{}, Subject{}, fmt.Errorf("%w: a resource or an audience required", ErrInvalidTarget)
-	}
-	subject, err := e.cfg.Subjects.VerifySubject(ctx, req.SubjectToken)
-	if err != nil {
-		if !errors.Is(err, ErrInvalidGrant) {
-			return Result{}, Subject{}, fmt.Errorf("exchange: verify subject token: %w", err)
-		}
+	if err := checkExchangeRequest(req); err != nil {
 		return Result{}, Subject{}, err
 	}
-	if !slices.ContainsFunc(subject.Audience, func(aud string) bool { return slices.Contains(req.Client.SubjectAudiences, aud) }) {
-		return Result{}, subject, fmt.Errorf("%w: issued for %q, not for the client", ErrInvalidGrant, subject.Audience)
+	subject, remaining, err := e.verifySubject(ctx, req)
+	if err != nil {
+		return Result{}, subject, err
 	}
-	remaining := subject.ExpiresAt.Sub(e.cfg.Now()).Truncate(time.Second)
-	if remaining < minTTL {
-		return Result{}, subject, fmt.Errorf("%w: expires within %s", ErrInvalidGrant, minTTL)
-	}
-
 	checked, bound, err := e.checkProof(ctx, req, subject)
 	if err != nil {
 		return Result{}, subject, err
 	}
+	issue, err := e.grant(ctx, req, subject, remaining)
+	if err != nil {
+		return Result{}, subject, err
+	}
+	if bound {
+		// Recorded only now, once everything else passed, and before the
+		// capability exists: a replayed proof never mints one.
+		if err := e.cfg.DPoP.Record(ctx, checked); err != nil {
+			return Result{}, subject, err
+		}
+		issue.ConfirmationJKT = checked.JKT()
+	}
+	minted, err := e.cfg.Issuer.Issue(ctx, issue)
+	if err != nil {
+		return Result{}, subject, fmt.Errorf("exchange: issue: %w", err)
+	}
+	return resultOf(minted), subject, nil
+}
 
+// checkExchangeRequest refuses an exchange without a client that may present
+// subject tokens, without a subject token, or asking for no target.
+func checkExchangeRequest(req Request) error {
+	switch {
+	case req.Client.ID == "" || len(req.Client.SubjectAudiences) == 0:
+		return fmt.Errorf("%w: a client with an id and the audiences it may present", ErrInvalidClient)
+	case req.SubjectToken == "":
+		return fmt.Errorf("%w: subject_token required", ErrInvalidRequest)
+	}
+	return requireTarget(req.Resources, req.Audiences)
+}
+
+// requireTarget refuses a request asking for neither a resource nor an
+// audience: a capability is for somewhere.
+func requireTarget(resources, audiences []string) error {
+	if len(resources) == 0 && len(audiences) == 0 {
+		return fmt.Errorf("%w: a resource or an audience required", ErrInvalidTarget)
+	}
+	return nil
+}
+
+// verifySubject verifies req's subject token, and returns it with the time
+// it has left, refusing one issued for another client or about to expire.
+func (e *Exchanger) verifySubject(ctx context.Context, req Request) (Subject, time.Duration, error) {
+	subject, err := e.cfg.Subjects.VerifySubject(ctx, req.SubjectToken)
+	if err != nil {
+		if !errors.Is(err, ErrInvalidGrant) {
+			return Subject{}, 0, fmt.Errorf("exchange: verify subject token: %w", err)
+		}
+		return Subject{}, 0, err
+	}
+	if !slices.ContainsFunc(subject.Audience, func(aud string) bool { return slices.Contains(req.Client.SubjectAudiences, aud) }) {
+		return subject, 0, fmt.Errorf("%w: issued for %q, not for the client", ErrInvalidGrant, subject.Audience)
+	}
+	remaining := subject.ExpiresAt.Sub(e.cfg.Now()).Truncate(time.Second)
+	if remaining < minTTL {
+		return subject, 0, fmt.Errorf("%w: expires within %s", ErrInvalidGrant, minTTL)
+	}
+	return subject, remaining, nil
+}
+
+// grant is the issue request the policy makes of req, held to the
+// exchange: its targets, the subject token's client and subject, and a
+// lifetime within the subject token's remaining.
+func (e *Exchanger) grant(ctx context.Context, req Request, subject Subject, remaining time.Duration) (limes.IssueRequest, error) {
 	issue, err := e.cfg.Policy(ctx, Grant{
 		Subject: subject, Client: req.Client, Resources: slices.Clone(req.Resources), Audiences: slices.Clone(req.Audiences),
 		Scopes: slices.Clone(req.Scopes), AuthorizationDetails: slices.Clone(req.AuthorizationDetails),
 	})
 	if err != nil {
-		return Result{}, subject, err
+		return limes.IssueRequest{}, err
 	}
-	targets := append(slices.Clone(req.Resources), req.Audiences...)
-	if len(issue.Audience) == 0 {
-		issue.Audience = targets
-	}
-	for _, aud := range issue.Audience {
-		if !slices.Contains(targets, aud) {
-			return Result{}, subject, fmt.Errorf("%w: audience %q was not asked for", errPolicy, aud)
-		}
-	}
-	if issue.ConfirmationJKT != "" {
-		return Result{}, subject, fmt.Errorf("%w: it binds the capability itself", errPolicy)
+	if issue.Audience, err = holdPolicy(issue.Audience, issue.ConfirmationJKT, targetsOf(req.Resources, req.Audiences)); err != nil {
+		return limes.IssueRequest{}, err
 	}
 	// The client the identity provider issued the subject token to is the
 	// capability's, unless the policy names another.
@@ -256,27 +294,46 @@ func (e *Exchanger) exchange(ctx context.Context, req Request) (Result, Subject,
 	// subject alone: naming anyone else would have the exchange speak for
 	// someone who presented nothing.
 	if issue.OnBehalfOf != nil && issue.OnBehalfOf.Subject != subject.Subject {
-		return Result{}, subject, fmt.Errorf("%w: it acts on behalf of %q, not the subject token's %q", errPolicy, issue.OnBehalfOf.Subject, subject.Subject)
+		return limes.IssueRequest{}, fmt.Errorf("%w: it acts on behalf of %q, not the subject token's %q", errPolicy, issue.OnBehalfOf.Subject, subject.Subject)
 	}
 	if issue.TTL == 0 {
 		issue.TTL = DefaultTTL
 	}
 	issue.TTL = min(issue.TTL, remaining)
+	return issue, nil
+}
 
-	tokenType := TokenTypeBearer
-	if bound {
-		// Recorded only now, once everything else passed, and before the
-		// capability exists: a replayed proof never mints one.
-		if err := e.cfg.DPoP.Record(ctx, checked); err != nil {
-			return Result{}, subject, err
+// targetsOf is what a request asks for: its resources, then its audiences.
+func targetsOf(resources, audiences []string) []string {
+	return append(slices.Clone(resources), audiences...)
+}
+
+// holdPolicy is the audience a policy asked for, targets when it asked for
+// none, refused when it reaches past targets or binds the capability itself,
+// which only the request's proof may.
+func holdPolicy(audience []string, jkt string, targets []string) ([]string, error) {
+	if len(audience) == 0 {
+		audience = targets
+	}
+	for _, aud := range audience {
+		if !slices.Contains(targets, aud) {
+			return nil, fmt.Errorf("%w: audience %q was not asked for", errPolicy, aud)
 		}
-		issue.ConfirmationJKT, tokenType = checked.JKT(), TokenTypeDPoP
 	}
-	minted, err := e.cfg.Issuer.Issue(ctx, issue)
-	if err != nil {
-		return Result{}, subject, fmt.Errorf("exchange: issue: %w", err)
+	if jkt != "" {
+		return nil, fmt.Errorf("%w: it binds the capability itself", errPolicy)
 	}
-	return Result{Capability: minted.Capability, Token: minted.Token, TokenType: tokenType}, subject, nil
+	return audience, nil
+}
+
+// resultOf is the answer for a minted capability: a DPoP token when it is
+// bound to a key, a bearer token otherwise.
+func resultOf(minted limes.IssueResult) Result {
+	tokenType := TokenTypeBearer
+	if minted.Capability.ConfirmationJKT != "" {
+		tokenType = TokenTypeDPoP
+	}
+	return Result{Capability: minted.Capability, Token: minted.Token, TokenType: tokenType}
 }
 
 // checkProof checks req's proof of possession, if it has one, as a token
