@@ -97,8 +97,20 @@ func TestHandlerAlgorithms(t *testing.T) {
 	if before.Header().Get("ETag") == after.Header().Get("ETag") {
 		t.Error("the ETag did not change with the alg")
 	}
+	// A key withdrawn while its name is left behind leaves the document,
+	// rather than fail it: the clients would keep the withdrawn key.
+	keys["k2"] = newKey(t)
 	algs["k2"] = AlgorithmEdDSA
+	delete(keys, "k2")
+	w := get()
+	if got := algsOf(t, w.Body.Bytes()); w.Code != http.StatusOK || len(got) != 1 || got["k1"] != AlgorithmEdDSA {
+		t.Errorf("a withdrawn key's name left behind: status %d, algs %v", w.Code, got)
+	}
+	if algs["k2"] != AlgorithmEdDSA {
+		t.Error("serving changed the caller's names")
+	}
+	algs["k1"] = "ES256"
 	if w := get(); w.Code != http.StatusInternalServerError {
-		t.Errorf("an alg for no key: status %d", w.Code)
+		t.Errorf("a name no token gives: status %d", w.Code)
 	}
 }

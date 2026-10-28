@@ -164,7 +164,9 @@ type HandlerConfig struct {
 	Keys func() map[string]ed25519.PublicKey
 	// Algorithms returns the alg each key's entry names, kid → name, as
 	// MarshalAlgorithms takes them: AlgorithmEdDSA for a key whose signer
-	// writes EdDSA. Nil, or a key it does not name: AlgorithmEd25519.
+	// writes EdDSA. Nil, or a key it does not name: AlgorithmEd25519. A name
+	// for a kid Keys no longer returns is ignored, so withdrawing a key
+	// never waits on its name being removed.
 	Algorithms func() map[string]string
 	// MaxAge is how long a client may keep the set (RFC 9111 §5.2.2.1).
 	// Keep it below the time between publishing a new key and signing with
@@ -221,11 +223,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
 		return
 	}
+	keys := h.keys()
 	var algs map[string]string
 	if h.algs != nil {
-		algs = h.algs()
+		// A name for a key no longer served is dropped, not refused: a
+		// withdrawn key whose name was left behind would otherwise fail the
+		// whole document, and every client would keep the set it has,
+		// withdrawn key included, until it gives up on the set.
+		algs = maps.Clone(h.algs())
+		maps.DeleteFunc(algs, func(kid, _ string) bool { _, ok := keys[kid]; return !ok })
 	}
-	doc, err := MarshalAlgorithms(h.keys(), algs)
+	doc, err := MarshalAlgorithms(keys, algs)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
