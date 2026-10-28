@@ -242,11 +242,14 @@ type HandlerConfig struct {
 	// Keep it below the time between publishing a new key and signing with
 	// it, and between withdrawing an old key and the end of its tokens'
 	// TTL. Served in whole seconds, the fraction dropped, so under a second
-	// it is refused: it would read as Revalidate's max-age=0. Zero:
-	// DefaultMaxAge.
+	// it is refused: it would read as max-age=0, which still lets a cache
+	// serve the set stale. Zero: DefaultMaxAge.
 	MaxAge time.Duration
-	// Revalidate tells clients to revalidate the set on every use
-	// (max-age=0) instead of keeping it for MaxAge, which it excludes.
+	// Revalidate tells clients to revalidate the set on every use instead of
+	// keeping it for MaxAge, which it excludes. It is served as no-cache
+	// (RFC 9111 §5.2.2.4), not max-age=0: a response stale at once may
+	// still be reused stale where a cache is allowed to (§4.2.4), and
+	// no-cache allows none. Remote reads either as fresh for no time.
 	Revalidate bool
 }
 
@@ -259,10 +262,10 @@ const DefaultMaxAge = DefaultRefreshInterval
 // with a strong ETag of its bytes that answers If-None-Match with 304
 // (RFC 9110 §13.1.2), and fresh for MaxAge.
 type Handler struct {
-	keys   func() map[string]ed25519.PublicKey
-	algs   func() map[string]string
-	maxAge time.Duration
-	log    *slog.Logger
+	keys         func() map[string]ed25519.PublicKey
+	algs         func() map[string]string
+	cacheControl string
+	log          *slog.Logger
 }
 
 // NewHandler builds a Handler serving cfg.Keys(), refusing no Keys, a
@@ -271,33 +274,35 @@ func NewHandler(cfg HandlerConfig) (*Handler, error) {
 	if cfg.Keys == nil {
 		return nil, errors.New("jwks: HandlerConfig.Keys required")
 	}
-	maxAge, err := cfg.maxAge()
+	cacheControl, err := cfg.cacheControl()
 	if err != nil {
 		return nil, err
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
-	return &Handler{keys: cfg.Keys, algs: cfg.Algorithms, maxAge: maxAge, log: cfg.Logger}, nil
+	return &Handler{keys: cfg.Keys, algs: cfg.Algorithms, cacheControl: cacheControl, log: cfg.Logger}, nil
 }
 
-// maxAge is the max-age the handler serves: 0 for Revalidate, MaxAge, or
-// DefaultMaxAge for none. It refuses a negative MaxAge or one under a
-// second, or a MaxAge beside Revalidate.
-func (cfg HandlerConfig) maxAge() (time.Duration, error) {
+// cacheControl is the Cache-Control the handler serves: no-cache for
+// Revalidate, else max-age of MaxAge, or of DefaultMaxAge for none. It
+// refuses a negative MaxAge or one under a second, or a MaxAge beside
+// Revalidate.
+func (cfg HandlerConfig) cacheControl() (string, error) {
+	maxAge := cfg.MaxAge
 	switch {
-	case cfg.MaxAge < 0:
-		return 0, fmt.Errorf("jwks: HandlerConfig.MaxAge %s is negative", cfg.MaxAge)
-	case cfg.MaxAge > 0 && cfg.MaxAge < time.Second:
-		return 0, fmt.Errorf("jwks: HandlerConfig.MaxAge %s is under a second, the unit of max-age", cfg.MaxAge)
-	case cfg.Revalidate && cfg.MaxAge != 0:
-		return 0, fmt.Errorf("jwks: HandlerConfig.MaxAge %s beside Revalidate", cfg.MaxAge)
+	case maxAge < 0:
+		return "", fmt.Errorf("jwks: HandlerConfig.MaxAge %s is negative", maxAge)
+	case maxAge > 0 && maxAge < time.Second:
+		return "", fmt.Errorf("jwks: HandlerConfig.MaxAge %s is under a second, the unit of max-age", maxAge)
+	case cfg.Revalidate && maxAge != 0:
+		return "", fmt.Errorf("jwks: HandlerConfig.MaxAge %s beside Revalidate", maxAge)
 	case cfg.Revalidate:
-		return 0, nil
-	case cfg.MaxAge == 0:
-		return DefaultMaxAge, nil
+		return fmt.Sprintf("%s, %s", httpx.DirectivePublic, httpx.DirectiveNoCache), nil
+	case maxAge == 0:
+		maxAge = DefaultMaxAge
 	}
-	return cfg.MaxAge, nil
+	return fmt.Sprintf("%s, %s=%d", httpx.DirectivePublic, httpx.DirectiveMaxAge, int64(maxAge/time.Second)), nil
 }
 
 // ServeHTTP answers GET and HEAD with the document, and anything else with
@@ -319,7 +324,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	etag := `"` + jose.B64(sum[:]) + `"`
 	header := w.Header()
 	header.Set(httpx.HeaderETag, etag)
-	header.Set(httpx.HeaderCacheControl, fmt.Sprintf("%s, %s=%d", httpx.DirectivePublic, httpx.DirectiveMaxAge, int64(h.maxAge/time.Second)))
+	header.Set(httpx.HeaderCacheControl, h.cacheControl)
 	if etagMatches(r.Header.Values(httpx.HeaderIfNoneMatch), etag) {
 		w.WriteHeader(http.StatusNotModified)
 		return

@@ -105,7 +105,7 @@ verifier, err := limes.NewVerifier(limes.VerifierConfig{
 The issuer serves that document with `jwks.NewHandler` — `application/jwk-set+json`,
 a strong ETag answering `If-None-Match` with 304, `Cache-Control: public,
 max-age` in whole seconds (`DefaultMaxAge` unless `MaxAge` says otherwise;
-`Revalidate` serves `max-age=0` and excludes a `MaxAge`; a negative `MaxAge`,
+`Revalidate` serves `no-cache` and excludes a `MaxAge`; a negative `MaxAge`,
 or one under a second, is refused) — over a function returning its keys, such as
 `jwks.Static.Keys`:
 
@@ -1425,7 +1425,7 @@ stop rather than retry. The full table is in [diagrams.md](diagrams.md#answering
 | `VerifierConfig.MaxTokenBytes` · `IssuerConfig.MaxTokenBytes` | `DefaultMaxTokenBytes`, 16 KiB |
 | `VerifierConfig.Leeway` bound | `MaxLeeway`, 5 minutes |
 | `VerifierConfig.Realm` | `DefaultRealm`, `limes` |
-| `jwks.HandlerConfig.MaxAge` | `jwks.DefaultMaxAge`, 5 minutes; `HandlerConfig.Revalidate: true` for `max-age=0` |
+| `jwks.HandlerConfig.MaxAge` | `jwks.DefaultMaxAge`, 5 minutes; `HandlerConfig.Revalidate: true` for `no-cache` |
 | `ListByPrincipalRequest.Limit` · `ListTenantBudgetsRequest.Limit` · `ListReservationsRequest.Limit` · `SumChargesRequest.Limit` · `CountRecordsRequest.Limit` · `ListRecordsRequest.Limit` | `DefaultListLimit` 50, at most `MaxListLimit` 500 |
 | `PurgeRequest` · `ReleaseExpiredRequest` · `PurgeOrphansRequest` | `DefaultHousekeepingLimit` 1 000 a batch; `PurgeRequest.ExpiredFor` `MinPurgeRetention`, 6 minutes, and no less |
 | `meter.PurgeChargesRequest` | `DefaultHousekeepingLimit` 1 000 a batch; `OlderThan` `meter.MinChargeRetention`, 401 days, and no less |
