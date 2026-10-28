@@ -148,6 +148,8 @@ type fixture struct {
 	ex         *Exchanger
 	verifier   *limes.Verifier
 	nonces     *dpop.HMACNonces
+	// capabilityNonces are the nonces the capabilities' verifier asks for.
+	capabilityNonces *dpop.HMACNonces
 }
 
 type fixtureConfig struct {
@@ -156,6 +158,8 @@ type fixtureConfig struct {
 	noDPoP bool
 	// narrow lets the exchanger narrow capabilities.
 	narrow bool
+	// capabilityNonces has the capabilities' verifier require DPoP nonces.
+	capabilityNonces bool
 }
 
 func newFixture(t testing.TB, fc fixtureConfig) *fixture {
@@ -212,7 +216,14 @@ func newFixture(t testing.TB, fc fixtureConfig) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proofs, err := dpop.NewVerifier(dpop.VerifierConfig{Replay: replay, Now: clock})
+	pcfg := dpop.VerifierConfig{Replay: replay, Now: clock}
+	if fc.capabilityNonces {
+		if f.capabilityNonces, err = dpop.NewHMACNonces(dpop.HMACNoncesConfig{Keys: dpop.SealNonceKeys(make([]byte, dpop.HMACNonceKeyBytes)), Now: clock}); err != nil {
+			t.Fatal(err)
+		}
+		pcfg.Nonces = f.capabilityNonces
+	}
+	proofs, err := dpop.NewVerifier(pcfg)
 	if err != nil {
 		t.Fatal(err)
 	}

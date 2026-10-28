@@ -53,3 +53,17 @@ func TestHandlerNarrowingWithoutItsOwnDPoP(t *testing.T) {
 		t.Errorf("status %d, body %s", w.Code, w.Body)
 	}
 }
+
+// A narrow-only endpoint answers use_dpop_nonce with the nonce its
+// capabilities' verifier asked for, so the client can retry.
+func TestHandlerNarrowingNonceFromCapabilities(t *testing.T) {
+	f := newFixture(t, fixtureConfig{narrow: true, noDPoP: true, capabilityNonces: true})
+	h := newHandler(t, f)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, tokenEndpoint, nil)
+	h.refuse(w, r, errors.Join(dpop.ErrNonceRequired))
+	nonce := w.Header().Get(headerDPoPNonce)
+	if ok, err := f.capabilityNonces.Valid(r.Context(), nonce); err != nil || !ok || w.Code != http.StatusBadRequest {
+		t.Errorf("status %d, nonce %q valid %v (%v)", w.Code, nonce, ok, err)
+	}
+}
