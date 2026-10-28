@@ -29,18 +29,28 @@ const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 // has failed attempts times, and returns its result; what describes the call
 // in the log.
 export async function retry<T>(what: string, fn: () => Promise<T>, options: RetryOptions = {}): Promise<T> {
-  const attempts = options.attempts ?? RETRY_ATTEMPTS;
+  const { attempts, retryable, sleep } = settingsOf(options);
   let delay = options.delayMs ?? RETRY_DELAY_MS;
   for (let attempt = 1; ; attempt++) {
     try {
       return await fn();
     } catch (err) {
-      if (attempt >= attempts || !(options.retryable?.(err) ?? true)) {
+      if (attempt >= attempts || !retryable(err)) {
         throw err;
       }
       warning(`${what}: attempt ${attempt} of ${attempts} failed (${err instanceof Error ? err.message : String(err)}); again in ${delay} ms`);
-      await (options.sleep ?? pause)(delay);
+      await sleep(delay);
       delay *= 2;
     }
   }
+}
+
+// settingsOf is options with their defaults: RETRY_ATTEMPTS attempts, every
+// failure retryable, a real pause between them.
+function settingsOf(options: RetryOptions): { attempts: number; retryable: (err: unknown) => boolean; sleep: (ms: number) => Promise<void> } {
+  return {
+    attempts: options.attempts ?? RETRY_ATTEMPTS,
+    retryable: options.retryable ?? (() => true),
+    sleep: options.sleep ?? pause,
+  };
 }

@@ -57,29 +57,40 @@ export function statementsBeyondRequirements(text: string): string[] {
   const statements: string[] = [];
   let block: string | undefined;
   for (const raw of text.split("\n")) {
-    const at = commentStart(raw);
-    const line = (at < 0 ? raw : raw.slice(0, at)).trim().split(/\s+/).join(" ");
+    const line = statementOf(raw);
     if (line === "") {
       continue;
     }
-    if (block !== undefined) {
-      if (line === BLOCK_CLOSE) {
-        block = undefined;
-      } else if (block !== REQUIRE) {
-        statements.push(`${block} ${line}`);
-      }
-      continue;
-    }
-    const [keyword = "", ...rest] = line.split(" ");
-    if (rest.length === 1 && rest[0] === BLOCK_OPEN) {
-      block = keyword;
-      continue;
-    }
-    if (keyword !== REQUIRE) {
-      statements.push(line);
-    }
+    const read = block === undefined ? readStatement(line) : readInBlock(block, line);
+    block = read.block;
+    statements.push(...read.statements);
   }
   return statements;
+}
+
+// statementOf is raw without its comment, its space collapsed.
+function statementOf(raw: string): string {
+  const at = commentStart(raw);
+  return (at < 0 ? raw : raw.slice(0, at)).trim().split(/\s+/).join(" ");
+}
+
+// readStatement reads a line outside a block: one opening a block, or a
+// statement in its own right, a requirement being none beyond it.
+function readStatement(line: string): { block: string | undefined; statements: string[] } {
+  const [keyword = "", ...rest] = line.split(" ");
+  if (rest.length === 1 && rest[0] === BLOCK_OPEN) {
+    return { block: keyword, statements: [] };
+  }
+  return { block: undefined, statements: keyword === REQUIRE ? [] : [line] };
+}
+
+// readInBlock reads a line of block: its close, or its statement, a
+// requirement being none beyond it.
+function readInBlock(block: string, line: string): { block: string | undefined; statements: string[] } {
+  if (line === BLOCK_CLOSE) {
+    return { block: undefined, statements: [] };
+  }
+  return { block, statements: block === REQUIRE ? [] : [`${block} ${line}`] };
 }
 
 // changesBeyondRequirements reports whether two go.mod texts differ in
