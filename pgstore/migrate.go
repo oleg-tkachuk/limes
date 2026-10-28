@@ -88,13 +88,27 @@ func Migrate(ctx context.Context, conn *pgx.Conn, opts MigrateOptions) error {
 	if err := checkRuntimeRoles(opts.RuntimeRoles); err != nil {
 		return fmt.Errorf("pgstore: migrate: %w", err)
 	}
-	// The version table lives in the schema, so the schema comes first.
+	if err := ownSchema(ctx, conn); err != nil {
+		return err
+	}
+	m, err := loadMigrations(ctx, conn)
+	if err != nil {
+		return err
+	}
+	if err := runMigrations(ctx, conn, m); err != nil {
+		return err
+	}
+	return grant(ctx, conn, opts.RuntimeRoles)
+}
+
+// ownSchema creates the store's schema, which the version table lives in,
+// so it comes first; and refuses one of its name made earlier by another
+// role, which is that role's to change: it could drop or replace the tables
+// and policies Migrate puts in it.
+func ownSchema(ctx context.Context, conn *pgx.Conn) error {
 	if _, err := conn.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+pgx.Identifier{schema}.Sanitize()); err != nil {
 		return fmt.Errorf("pgstore: migrate: create schema: %w", err)
 	}
-	// A schema of the store's name made earlier by another role is that
-	// role's to change: it could drop or replace the tables and policies
-	// Migrate puts in it.
 	var owned bool
 	if err := conn.QueryRow(ctx, sqlSchemaOwned, schema).Scan(&owned); err != nil {
 		return fmt.Errorf("pgstore: migrate: schema owner: %w", err)
@@ -102,21 +116,23 @@ func Migrate(ctx context.Context, conn *pgx.Conn, opts MigrateOptions) error {
 	if !owned {
 		return fmt.Errorf("%w: %s is owned by another role than the one migrating", ErrSchemaOwner, schema)
 	}
+	return nil
+}
+
+// loadMigrations is a migrator holding the embedded migrations.
+func loadMigrations(ctx context.Context, conn *pgx.Conn) (*migrate.Migrator, error) {
 	m, err := migrate.NewMigrator(ctx, conn, versionTable)
 	if err != nil {
-		return fmt.Errorf("pgstore: migrate: %w", err)
+		return nil, fmt.Errorf("pgstore: migrate: %w", err)
 	}
 	dir, err := fs.Sub(migrationFiles, migrationsDir)
 	if err != nil {
-		return fmt.Errorf("pgstore: migrate: %w", err)
+		return nil, fmt.Errorf("pgstore: migrate: %w", err)
 	}
 	if err := m.LoadMigrations(dir); err != nil {
-		return fmt.Errorf("pgstore: migrate: load: %w", err)
+		return nil, fmt.Errorf("pgstore: migrate: load: %w", err)
 	}
-	if err := runMigrations(ctx, conn, m); err != nil {
-		return err
-	}
-	return grant(ctx, conn, opts.RuntimeRoles)
+	return m, nil
 }
 
 // sqlSetSession sets a setting for the rest of the session, and

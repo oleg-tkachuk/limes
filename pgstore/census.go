@@ -86,40 +86,20 @@ func (c *Census) CountRecords(ctx context.Context, req limes.CountRecordsRequest
 	if err := req.Validate(); err != nil {
 		return limes.Page[limes.RecordCount]{}, err
 	}
-	var after countCursor
-	if req.Cursor != "" {
-		var err error
-		if after, err = decodeCountCursor(req.Cursor); err != nil {
-			return limes.Page[limes.RecordCount]{}, err
-		}
+	args, err := c.countArgs(req)
+	if err != nil {
+		return limes.Page[limes.RecordCount]{}, err
 	}
-	var tenant *uuid.UUID
-	if !req.AllTenants {
-		tenant = &req.TenantID
-	}
-	now := c.clock()
 	limit := limes.PageLimit(req.Limit)
 	var out []limes.RecordCount
 	count := func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, sqlCountRecords,
-			tenant, req.ByTenant, req.ByPrincipalType, now, now.Add(req.ExpiringWithin),
-			req.Cursor != "", after.Tenant, after.Type, limit+1)
+		rows, err := tx.Query(ctx, sqlCountRecords, append(args, limit+1)...)
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
-		for rows.Next() {
-			var n limes.RecordCount
-			var kind string
-			if err := rows.Scan(&n.TenantID, &kind, &n.Total, &n.Active, &n.Expired, &n.Revoked, &n.Delegated, &n.ExpiringSoon); err != nil {
-				return err
-			}
-			n.PrincipalType = limes.PrincipalType(kind)
-			out = append(out, n)
-		}
-		return rows.Err()
+		out, err = pgx.CollectRows(rows, scanCount)
+		return err
 	}
-	var err error
 	if req.AllTenants {
 		err = c.inEveryTenantReadTx(ctx, count)
 	} else {
@@ -134,6 +114,38 @@ func (c *Census) CountRecords(ctx context.Context, req limes.CountRecordsRequest
 	out = out[:limit]
 	last := out[len(out)-1]
 	return limes.Page[limes.RecordCount]{Items: out, Next: countCursor{Tenant: last.TenantID, Type: string(last.PrincipalType)}.encode()}, nil
+}
+
+// countArgs is req as sqlCountRecords takes it, all but the limit,
+// refusing a cursor it cannot read.
+func (c *Census) countArgs(req limes.CountRecordsRequest) ([]any, error) {
+	var after countCursor
+	if req.Cursor != "" {
+		var err error
+		if after, err = decodeCountCursor(req.Cursor); err != nil {
+			return nil, err
+		}
+	}
+	var tenant *uuid.UUID
+	if !req.AllTenants {
+		tenant = &req.TenantID
+	}
+	now := c.clock()
+	return []any{
+		tenant, req.ByTenant, req.ByPrincipalType, now, now.Add(req.ExpiringWithin),
+		req.Cursor != "", after.Tenant, after.Type,
+	}, nil
+}
+
+// scanCount reads one group's counts.
+func scanCount(row pgx.CollectableRow) (limes.RecordCount, error) {
+	var n limes.RecordCount
+	var kind string
+	if err := row.Scan(&n.TenantID, &kind, &n.Total, &n.Active, &n.Expired, &n.Revoked, &n.Delegated, &n.ExpiringSoon); err != nil {
+		return limes.RecordCount{}, err
+	}
+	n.PrincipalType = limes.PrincipalType(kind)
+	return n, nil
 }
 
 // encode is the cursor as CountRecords hands it out: opaque, URL-safe.
@@ -246,51 +258,68 @@ var dispositionWhere = map[limes.RecordDisposition]string{
 // after when it is not nil, ordered and limited, and its arguments: the
 // tenant, now, then each filter's in turn.
 func listRecordsSQL(req limes.ListRecordsRequest, now time.Time, after *uuid.UUID, limit int) (string, []any) {
-	var q strings.Builder
-	q.WriteString(sqlListRecords)
-	args := []any{req.TenantID, now}
-	and := func(cond string, arg any) {
-		args = append(args, arg)
-		fmt.Fprintf(&q, "\n  AND "+cond, len(args))
-	}
+	w := &whereBuilder{args: []any{req.TenantID, now}}
+	w.q.WriteString(sqlListRecords)
 	if req.PrincipalType != limes.PrincipalTypeUnspecified {
-		and("c.principal_type = $%d", string(req.PrincipalType))
+		w.and("c.principal_type = $%d", string(req.PrincipalType))
 	}
 	if req.Subject != "" {
-		and("c.subject = $%d", req.Subject)
+		w.and("c.subject = $%d", req.Subject)
 	}
 	if req.SubjectPrefix != "" {
-		and("starts_with(c.subject, $%d)", req.SubjectPrefix)
+		w.and("starts_with(c.subject, $%d)", req.SubjectPrefix)
 	}
 	if len(req.Dispositions) > 0 {
-		var conds []string
-		for _, d := range []limes.RecordDisposition{limes.RecordDispositionActive, limes.RecordDispositionExpired, limes.RecordDispositionRevoked} {
-			if req.Admits(d) {
-				conds = append(conds, dispositionWhere[d])
-			}
-		}
-		// Not revoked, as both of its own dispositions are: the planner
-		// proves the partial index from that conjunct, not from the
-		// disjunction.
-		if !req.Admits(limes.RecordDispositionRevoked) {
-			conds = append([]string{"NOT c.revoked AND"}, "("+strings.Join(conds, " OR ")+")")
-			fmt.Fprintf(&q, "\n  AND %s", strings.Join(conds, " "))
-		} else {
-			fmt.Fprintf(&q, "\n  AND (%s)", strings.Join(conds, " OR "))
-		}
+		fmt.Fprintf(&w.q, "\n  AND %s", dispositionsWhere(req))
 	}
-	order := "ASC"
-	if req.Order == limes.ListOrderDescending {
-		order = "DESC"
+	order := w.orderAfter(req.Order, after)
+	w.args = append(w.args, limit)
+	fmt.Fprintf(&w.q, "\nORDER BY c.id %s\nLIMIT $%d", order, len(w.args))
+	return w.q.String(), w.args
+}
+
+// whereBuilder is a query whose conditions add their arguments in order.
+type whereBuilder struct {
+	q    strings.Builder
+	args []any
+}
+
+// and adds cond, which names its argument as $%d, with arg.
+func (w *whereBuilder) and(cond string, arg any) {
+	w.args = append(w.args, arg)
+	fmt.Fprintf(&w.q, "\n  AND "+cond, len(w.args))
+}
+
+// orderAfter adds the condition of a page past after in order, and is the
+// direction the page is sorted in.
+func (w *whereBuilder) orderAfter(order limes.ListOrder, after *uuid.UUID) string {
+	if order == limes.ListOrderDescending {
 		if after != nil {
-			and("c.id < $%d", *after)
+			w.and("c.id < $%d", *after)
 		}
-	} else if after != nil {
-		and("c.id > $%d", *after)
+		return "DESC"
 	}
-	args = append(args, limit)
-	fmt.Fprintf(&q, "\nORDER BY c.id %s\nLIMIT $%d", order, len(args))
-	return q.String(), args
+	if after != nil {
+		w.and("c.id > $%d", *after)
+	}
+	return "ASC"
+}
+
+// dispositionsWhere is the condition of the dispositions req admits. Not
+// revoked, as both of its own dispositions are, when it admits no revoked
+// record: the planner proves the partial index from that conjunct, not from
+// the disjunction.
+func dispositionsWhere(req limes.ListRecordsRequest) string {
+	var conds []string
+	for _, d := range []limes.RecordDisposition{limes.RecordDispositionActive, limes.RecordDispositionExpired, limes.RecordDispositionRevoked} {
+		if req.Admits(d) {
+			conds = append(conds, dispositionWhere[d])
+		}
+	}
+	if !req.Admits(limes.RecordDispositionRevoked) {
+		return "NOT c.revoked AND (" + strings.Join(conds, " OR ") + ")"
+	}
+	return "(" + strings.Join(conds, " OR ") + ")"
 }
 
 // listCursor is pgstore's cursor of ListRecords: the last record's id, and

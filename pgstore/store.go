@@ -343,50 +343,64 @@ func (s *Store) Revoke(ctx context.Context, req limes.RevokeRequest) (limes.Revo
 	}
 	var result limes.RevokeResult
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
-		var tenant uuid.UUID
-		err := tx.QueryRow(ctx, sqlCapabilityTenant, req.CapabilityID).Scan(&tenant)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return limes.ErrNotFound
-		}
-		if err != nil {
-			return err
-		}
-		if err := lockForRevoke(ctx, tx, tenant); err != nil {
-			return err
-		}
-		var revoked bool
-		var expiresAt *time.Time
-		err = tx.QueryRow(ctx, sqlRevokeTarget, req.CapabilityID).Scan(&tenant, &revoked, &expiresAt)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return limes.ErrNotFound
-		}
-		if err != nil {
-			return err
-		}
-		now := s.clock()
-		result = limes.RevokeResult{PriorDisposition: disposition(revoked, expiresAt, now)}
-		r := &result.Revocation
-		err = tx.QueryRow(ctx, sqlRevoke, req.CapabilityID, tenant, now, req.Note, req.Actor, req.CascadeChildren).Scan(&r.RevokedAt, &r.Note, &r.Actor, &r.Cascaded)
-		if errors.Is(err, pgx.ErrNoRows) {
-			// Its own entry was there, or another revoke wrote it while this
-			// one waited: revoked before this call either way, whatever the
-			// flag read first said.
-			result.AlreadyRevoked, result.PriorDisposition = true, limes.RecordDispositionRevoked
-			err = tx.QueryRow(ctx, sqlRevocation, req.CapabilityID).Scan(&r.RevokedAt, &r.Note, &r.Actor, &r.Cascaded)
-		}
-		if err != nil {
-			return err
-		}
-		if !req.CascadeChildren {
-			return nil
-		}
-		_, err = tx.Exec(ctx, sqlRevokeDescendants, req.CapabilityID, limes.MaxDelegationDepth, now, req.Note, req.Actor)
+		var err error
+		result, err = s.revoke(ctx, tx, req)
 		return err
 	})
 	if err != nil {
 		return limes.RevokeResult{}, err
 	}
 	return result, nil
+}
+
+// revoke is Revoke in tx: the target's tenant is read to take its revoke
+// lock, then the target itself, held.
+func (s *Store) revoke(ctx context.Context, tx pgx.Tx, req limes.RevokeRequest) (limes.RevokeResult, error) {
+	var tenant uuid.UUID
+	if err := scanFound(tx.QueryRow(ctx, sqlCapabilityTenant, req.CapabilityID), &tenant); err != nil {
+		return limes.RevokeResult{}, err
+	}
+	if err := lockForRevoke(ctx, tx, tenant); err != nil {
+		return limes.RevokeResult{}, err
+	}
+	var revoked bool
+	var expiresAt *time.Time
+	if err := scanFound(tx.QueryRow(ctx, sqlRevokeTarget, req.CapabilityID), &tenant, &revoked, &expiresAt); err != nil {
+		return limes.RevokeResult{}, err
+	}
+	now := s.clock()
+	result := limes.RevokeResult{PriorDisposition: disposition(revoked, expiresAt, now)}
+	if err := writeRevocation(ctx, tx, req, tenant, now, &result); err != nil {
+		return limes.RevokeResult{}, err
+	}
+	if !req.CascadeChildren {
+		return result, nil
+	}
+	_, err := tx.Exec(ctx, sqlRevokeDescendants, req.CapabilityID, limes.MaxDelegationDepth, now, req.Note, req.Actor)
+	return result, err
+}
+
+// scanFound scans row into dest, a missing row as limes.ErrNotFound.
+func scanFound(row pgx.Row, dest ...any) error {
+	err := row.Scan(dest...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return limes.ErrNotFound
+	}
+	return err
+}
+
+// writeRevocation writes req's entry into result, or, when the target's own
+// entry was there, or another revoke wrote it while this one waited, reads
+// that one: revoked before this call either way, whatever the flag read
+// first said.
+func writeRevocation(ctx context.Context, tx pgx.Tx, req limes.RevokeRequest, tenant uuid.UUID, now time.Time, result *limes.RevokeResult) error {
+	r := &result.Revocation
+	err := tx.QueryRow(ctx, sqlRevoke, req.CapabilityID, tenant, now, req.Note, req.Actor, req.CascadeChildren).Scan(&r.RevokedAt, &r.Note, &r.Actor, &r.Cascaded)
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	result.AlreadyRevoked, result.PriorDisposition = true, limes.RecordDispositionRevoked
+	return tx.QueryRow(ctx, sqlRevocation, req.CapabilityID).Scan(&r.RevokedAt, &r.Note, &r.Actor, &r.Cascaded)
 }
 
 // sqlPurge removes the oldest-expired records past the cutoff, deepest first
