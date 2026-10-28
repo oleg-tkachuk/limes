@@ -142,17 +142,7 @@ func (i *Issuer) checkSealable(ctx context.Context, vc VerifiedCapability) error
 	case c.Issuer != i.issuerName:
 		return invalidRequest("capability %s was issued by %q, not %q", c.ID, c.Issuer, i.issuerName)
 	}
-	if !i.clock().Before(c.ExpiresAt) {
-		return fmt.Errorf("limes: biscuit of %s: %w", c.ID, ErrExpired)
-	}
-	revoked, err := i.store.IsRevoked(ctx, c.ID)
-	if err != nil {
-		return fmt.Errorf("limes: biscuit revocation lookup: %w", err)
-	}
-	if revoked {
-		return fmt.Errorf("limes: biscuit of %s: %w", c.ID, ErrRevoked)
-	}
-	return nil
+	return i.checkLive(ctx, c, i.clock(), "biscuit of")
 }
 
 // seal is c's Biscuit: an authority block carrying c's token, signed with a

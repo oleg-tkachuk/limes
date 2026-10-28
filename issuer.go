@@ -412,113 +412,24 @@ func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (IssueResult
 // delegate is Delegate, returning the capability and its token apart.
 func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability, string, error) {
 	parent := req.Parent.c
-	if parent.ID == uuid.Nil() {
-		return Capability{}, "", invalidRequest("Delegate requires a Parent the verifier accepted")
-	}
-	// A Biscuit copy delegates nothing: the child would be an ordinary
-	// token of the capability, which neither RevokeBiscuit of the copy
-	// reaches nor the copy's own counters bound. Its holder attenuates it
-	// instead.
-	if req.Parent.fromBiscuit || len(req.Parent.copies) > 0 {
-		return Capability{}, "", invalidRequest("parent is a Biscuit copy; attenuate it instead")
-	}
-	if parent.Issuer != i.issuerName {
-		return Capability{}, "", invalidRequest("parent %s was issued by %q, not %q", parent.ID, parent.Issuer, i.issuerName)
-	}
-	if !slices.Contains(parent.Caveats.Ops, OpShare) {
-		return Capability{}, "", fmt.Errorf("%w: parent %s does not allow %q", ErrOpNotAllowed, parent.ID, OpShare)
-	}
-	if req.Subject.TenantID == uuid.Nil() {
-		req.Subject.TenantID = parent.Subject.TenantID
-	}
-	if req.Subject.Subject == "" {
-		return Capability{}, "", invalidRequest("Delegate requires Subject.Subject (RFC 9068 sub)")
-	}
-	if err := req.Subject.Validate(); err != nil {
+	if err := i.checkDelegable(req.Parent); err != nil {
 		return Capability{}, "", err
 	}
-	parentRun := parentRunOf(parent.Subject)
-	if a := req.Subject.Agent; a != nil && a.ParentRunID != uuid.Nil() && a.ParentRunID != parentRun {
-		return Capability{}, "", invalidRequest("Subject.Agent.ParentRunID %s is not the parent's RunID %s", a.ParentRunID, parentRun)
-	}
-	// A child run is another run than the one it was delegated from: the
-	// same id would make the run its own parent in an audit's run graph.
-	if a := req.Subject.Agent; a != nil && parentRun != uuid.Nil() && a.RunID == parentRun {
-		return Capability{}, "", invalidRequest("Subject.Agent.RunID %s is the parent's own run", a.RunID)
-	}
-	if len(req.Audience) == 0 {
-		req.Audience = append([]string(nil), parent.Audience...)
-	}
-	if req.InheritCaveats {
-		req.Caveats = parent.Caveats
-	}
-	// A child counts in its parent's unit; one that names none takes it,
-	// before its caveats are validated against it.
-	if req.Caveats.Budget.UnitCode == "" {
-		req.Caveats.Budget.UnitCode = parent.Caveats.Budget.UnitCode
-	}
-	if err := validateTerms(req.Audience, req.Caveats, req.ConfirmationJKT); err != nil {
+	req, err := childRequest(req, parent)
+	if err != nil {
 		return Capability{}, "", err
 	}
-
 	now := i.clock().UTC()
-	if !now.Before(parent.ExpiresAt) {
-		return Capability{}, "", fmt.Errorf("limes: delegate from parent %s: %w", parent.ID, ErrExpired)
+	if err := i.checkLive(ctx, parent, now, "delegate from parent"); err != nil {
+		return Capability{}, "", err
 	}
-	revoked, err := i.store.IsRevoked(ctx, parent.ID)
-	if err != nil {
-		return Capability{}, "", fmt.Errorf("limes: delegate revocation lookup: %w", err)
-	}
-	if revoked {
-		return Capability{}, "", fmt.Errorf("limes: delegate from parent %s: %w", parent.ID, ErrRevoked)
-	}
-
-	expires, err := i.expiry(now, req.TTL)
+	child, err := i.child(req, parent, now)
 	if err != nil {
 		return Capability{}, "", err
 	}
-	if expires.After(parent.ExpiresAt) {
-		expires = parent.ExpiresAt
-	}
-	onBehalfOf, prior := actingOf(parent)
-	child := i.mint(grantTerms{
-		Subject: req.Subject, Audience: req.Audience, Caveats: req.Caveats,
-		ConfirmationJKT: req.ConfirmationJKT, IssuedAt: now, ExpiresAt: expires, ParentID: parent.ID,
-		ClientID: req.ClientID, OnBehalfOf: &onBehalfOf, PriorActors: prior,
-	})
-	if child.ConfirmationJKT == "" {
-		child.ConfirmationJKT = parent.ConfirmationJKT
-	}
-	if child.ClientID == "" {
-		child.ClientID = parent.ClientID
-	}
-	// The run a child agent was delegated from is the parent's, taken from
-	// the token the verifier accepted rather than on the caller's word.
-	if child.Subject.Type == PrincipalTypeAgent && parentRun != uuid.Nil() {
-		if child.Subject.Agent == nil {
-			child.Subject.Agent = &AgentPrincipal{}
-		}
-		child.Subject.Agent.ParentRunID = parentRun
-	}
-	// A child starts no earlier than its parent, as it ends no later. The
-	// parent may start after now — a not-before ahead, or an issuer replica
-	// whose clock runs ahead of this one — and the child then waits for it.
-	nbf := req.NotBefore
-	childStart := nbf
-	if childStart.IsZero() {
-		childStart = now.Truncate(tokenTimeResolution) // as IssuedAt records it
-	}
-	if ps := validFrom(parent); childStart.Before(ps) {
-		nbf = ps
-	}
-	if err := setNotBefore(&child, nbf); err != nil {
-		return Capability{}, "", err
-	}
-
 	if err := Narrows(parent, child); err != nil {
 		return Capability{}, "", fmt.Errorf("limes: delegate %w", err)
 	}
-
 	// A delegation is requested by whoever holds the parent — that is not a
 	// caller-supplied fact, it is what delegation means, so it is derived
 	// rather than accepted as an argument.
@@ -533,6 +444,150 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 		return Capability{}, "", fmt.Errorf("limes: delegate from parent %s: %w", parent.ID, err)
 	}
 	return child, token, nil
+}
+
+// checkDelegable refuses a parent this issuer delegates nothing from: one
+// the verifier did not accept, a Biscuit copy, another issuer's, or one
+// whose caveats do not allow OpShare.
+func (i *Issuer) checkDelegable(p VerifiedCapability) error {
+	parent := p.c
+	switch {
+	case parent.ID == uuid.Nil():
+		return invalidRequest("Delegate requires a Parent the verifier accepted")
+	case p.fromBiscuit || len(p.copies) > 0:
+		// A Biscuit copy delegates nothing: the child would be an ordinary
+		// token of the capability, which neither RevokeBiscuit of the copy
+		// reaches nor the copy's own counters bound. Its holder attenuates
+		// it instead.
+		return invalidRequest("parent is a Biscuit copy; attenuate it instead")
+	case parent.Issuer != i.issuerName:
+		return invalidRequest("parent %s was issued by %q, not %q", parent.ID, parent.Issuer, i.issuerName)
+	case !slices.Contains(parent.Caveats.Ops, OpShare):
+		return fmt.Errorf("%w: parent %s does not allow %q", ErrOpNotAllowed, parent.ID, OpShare)
+	}
+	return nil
+}
+
+// childRequest is req with what it leaves out taken from parent — the
+// tenant, the audience, the caveats when inherited, the budget's unit —
+// refused when the child it asks for is malformed.
+func childRequest(req DelegateRequest, parent Capability) (DelegateRequest, error) {
+	if req.Subject.TenantID == uuid.Nil() {
+		req.Subject.TenantID = parent.Subject.TenantID
+	}
+	if req.Subject.Subject == "" {
+		return req, invalidRequest("Delegate requires Subject.Subject (RFC 9068 sub)")
+	}
+	if err := req.Subject.Validate(); err != nil {
+		return req, err
+	}
+	if err := checkChildRun(req.Subject.Agent, parentRunOf(parent.Subject)); err != nil {
+		return req, err
+	}
+	if len(req.Audience) == 0 {
+		req.Audience = append([]string(nil), parent.Audience...)
+	}
+	if req.InheritCaveats {
+		req.Caveats = parent.Caveats
+	}
+	// A child counts in its parent's unit; one that names none takes it,
+	// before its caveats are validated against it.
+	if req.Caveats.Budget.UnitCode == "" {
+		req.Caveats.Budget.UnitCode = parent.Caveats.Budget.UnitCode
+	}
+	return req, validateTerms(req.Audience, req.Caveats, req.ConfirmationJKT)
+}
+
+// checkChildRun refuses a child agent whose runs contradict its parent's
+// run: a parent run other than it, or the parent's own run as its run.
+func checkChildRun(a *AgentPrincipal, parentRun uuid.UUID) error {
+	if a == nil {
+		return nil
+	}
+	if a.ParentRunID != uuid.Nil() && a.ParentRunID != parentRun {
+		return invalidRequest("Subject.Agent.ParentRunID %s is not the parent's RunID %s", a.ParentRunID, parentRun)
+	}
+	// A child run is another run than the one it was delegated from: the
+	// same id would make the run its own parent in an audit's run graph.
+	if parentRun != uuid.Nil() && a.RunID == parentRun {
+		return invalidRequest("Subject.Agent.RunID %s is the parent's own run", a.RunID)
+	}
+	return nil
+}
+
+// checkLive refuses deriving anything from c, as what names the derivation
+// ("delegate from parent", "biscuit of"), once c has expired at now or is
+// revoked.
+func (i *Issuer) checkLive(ctx context.Context, c Capability, now time.Time, what string) error {
+	if !now.Before(c.ExpiresAt) {
+		return fmt.Errorf("limes: %s %s: %w", what, c.ID, ErrExpired)
+	}
+	revoked, err := i.store.IsRevoked(ctx, c.ID)
+	if err != nil {
+		return fmt.Errorf("limes: %s %s: revocation lookup: %w", what, c.ID, err)
+	}
+	if revoked {
+		return fmt.Errorf("limes: %s %s: %w", what, c.ID, ErrRevoked)
+	}
+	return nil
+}
+
+// child mints the capability req asks for under parent: ending no later
+// than parent, taking what it leaves out from parent, starting no earlier.
+func (i *Issuer) child(req DelegateRequest, parent Capability, now time.Time) (Capability, error) {
+	expires, err := i.expiry(now, req.TTL)
+	if err != nil {
+		return Capability{}, err
+	}
+	if expires.After(parent.ExpiresAt) {
+		expires = parent.ExpiresAt
+	}
+	onBehalfOf, prior := actingOf(parent)
+	child := i.mint(grantTerms{
+		Subject: req.Subject, Audience: req.Audience, Caveats: req.Caveats,
+		ConfirmationJKT: req.ConfirmationJKT, IssuedAt: now, ExpiresAt: expires, ParentID: parent.ID,
+		ClientID: req.ClientID, OnBehalfOf: &onBehalfOf, PriorActors: prior,
+	})
+	inheritFrom(&child, parent)
+	if err := setNotBefore(&child, childNotBefore(req.NotBefore, now, parent)); err != nil {
+		return Capability{}, err
+	}
+	return child, nil
+}
+
+// inheritFrom gives child what it does not name from parent: its key
+// binding, its client, and, for an agent, the run it was delegated from.
+func inheritFrom(child *Capability, parent Capability) {
+	if child.ConfirmationJKT == "" {
+		child.ConfirmationJKT = parent.ConfirmationJKT
+	}
+	if child.ClientID == "" {
+		child.ClientID = parent.ClientID
+	}
+	// The run a child agent was delegated from is the parent's, taken from
+	// the token the verifier accepted rather than on the caller's word.
+	parentRun := parentRunOf(parent.Subject)
+	if child.Subject.Type == PrincipalTypeAgent && parentRun != uuid.Nil() {
+		if child.Subject.Agent == nil {
+			child.Subject.Agent = &AgentPrincipal{}
+		}
+		child.Subject.Agent.ParentRunID = parentRun
+	}
+}
+
+// childNotBefore is the not-before of a child asked to start at requested:
+// a child starts no earlier than its parent, as it ends no later. The parent
+// may start after now — a not-before ahead, or an issuer replica whose clock
+// runs ahead of this one — and the child then waits for it.
+func childNotBefore(requested, now time.Time, parent Capability) time.Time {
+	start := requested
+	if start.IsZero() {
+		start = now.Truncate(tokenTimeResolution) // as IssuedAt records it
+	}
+	if ps := validFrom(parent); start.Before(ps) {
+		return ps
+	}
+	return requested
 }
 
 // actingOf is who a child of parent acts for, and through: the principal its
