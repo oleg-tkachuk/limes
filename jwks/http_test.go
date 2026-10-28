@@ -34,6 +34,22 @@ func TestResponseFreshness(t *testing.T) {
 		{"no-cache", "", 0, true},
 		{"max-age=60, no-store", "", 0, true},
 		{"max-age=abc", "", 0, true},
+		// §5.2: a quoted value only between two quotes; one left open, or
+		// closed without opening, is invalid.
+		{`max-age="5`, "", 0, true},
+		{`max-age=5"`, "", 0, true},
+		{`max-age="60`, "", 0, true},
+		{`max-age=60"`, "", 0, true},
+		{`max-age="`, "", 0, true},
+		{`max-age=""`, "", 0, true},
+		// A comma inside a quoted string separates no directives.
+		{`ext="a,max-age=1", max-age=60`, "", time.Minute, true},
+		{`ext="x,no-store,y", max-age=60`, "", time.Minute, true},
+		{`ext="a\",max-age=1", max-age=60`, "", time.Minute, true},
+		// A quoted string never closed runs to the end of the field.
+		{`ext="a, max-age=60`, "", 0, false},
+		// RFC 9110 §5.6.1: empty members are allowed, leading one included.
+		{",max-age=60", "", time.Minute, true},
 		{"public", "", 0, false},
 		// RFC 9111 §4.2.1: the first max-age stands.
 		{"max-age=10, max-age=3600", "", 10 * time.Second, true},
