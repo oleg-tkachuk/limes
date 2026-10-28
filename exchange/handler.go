@@ -12,7 +12,10 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
+	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/dpop"
 )
 
@@ -40,6 +43,16 @@ const (
 	jsonContentType = "application/json"
 	headerDPoP      = "DPoP"
 	headerDPoPNonce = "DPoP-Nonce"
+	// headerAuthorization carries the client's credentials when it
+	// authenticates by an HTTP scheme, and headerWWWAuthenticate the
+	// challenge refusing them (RFC 6749 §5.2).
+	headerAuthorization   = "Authorization"
+	headerWWWAuthenticate = "WWW-Authenticate"
+	// tokenSymbols are the characters besides letters and digits an RFC 9110
+	// §5.6.2 token may hold, as an authentication scheme is.
+	tokenSymbols = "!#$%&'*+-.^_`|~"
+	// schemeEnd ends an Authorization header's scheme (RFC 9110 §11.4).
+	schemeEnd = " \t"
 	// cacheNoStore keeps a token response out of every cache (RFC 6749 §5.1).
 	cacheNoStore = "no-store"
 	// pragmaNoCache is the Pragma a token response carries beside
@@ -81,7 +94,9 @@ type HandlerConfig struct {
 	// subject tokens may be issued for. An error that is or wraps
 	// ErrUnauthorizedClient refuses an authenticated client that may not
 	// exchange: 400 unauthorized_client. Any other error refuses the client
-	// as not authenticated, ErrInvalidClient: 401 invalid_client. Required.
+	// as not authenticated, ErrInvalidClient: invalid_client, 401 with a
+	// challenge in the scheme of its Authorization header, or 400 when it
+	// sent none (mTLS, a client assertion). Required.
 	Authenticate func(r *http.Request) (Client, error)
 	// EndpointURL is the token endpoint's URL as clients call it, which
 	// their DPoP proofs name (htu). Required when Exchanger checks DPoP.
@@ -354,6 +369,9 @@ func checkDetails(form url.Values) error {
 	return nil
 }
 
+// descriptionInvalidClient describes invalid_client, at either endpoint.
+const descriptionInvalidClient = "The client could not be authenticated."
+
 // refusals is each refusal's status, code and description, the first
 // matching rule answering.
 var refusals = []struct {
@@ -367,7 +385,8 @@ var refusals = []struct {
 	{dpop.ErrInvalid, http.StatusBadRequest, codeInvalidDPoPProof, "The DPoP proof is invalid."},
 	{dpop.ErrReplayed, http.StatusBadRequest, codeInvalidDPoPProof, "The DPoP proof was used before."},
 	{ErrUnauthorizedClient, http.StatusBadRequest, codeUnauthorizedClient, "The client may not exchange tokens."},
-	{ErrInvalidClient, http.StatusUnauthorized, codeInvalidClient, "The client could not be authenticated."},
+	// The status challengeClient answers with, when it has a challenge.
+	{ErrInvalidClient, http.StatusUnauthorized, codeInvalidClient, descriptionInvalidClient},
 	{ErrUnsupportedGrantType, http.StatusBadRequest, codeUnsupportedGrantType, "Only token exchange is supported."},
 	{ErrInvalidGrant, http.StatusBadRequest, codeInvalidGrant, "The subject token was refused."},
 	{ErrInvalidTarget, http.StatusBadRequest, codeInvalidTarget, "The resource or audience was refused."},
@@ -382,22 +401,59 @@ func (h *Handler) refuse(w http.ResponseWriter, r *http.Request, err error) {
 		if !errors.Is(err, rule.err) {
 			continue
 		}
-		if rule.code == codeUseDPoPNonce {
-			nonce, nerr := h.nonce(r.Context())
-			if nerr != nil {
-				h.cfg.Logger.ErrorContext(r.Context(), "exchange: DPoP nonce", slog.Any("error", nerr))
-				break
+		status := rule.status
+		switch rule.code {
+		case codeUseDPoPNonce:
+			if !h.setNonce(w, r) {
+				h.write(w, http.StatusInternalServerError, errorResponse{Error: codeServerError})
+				return
 			}
-			if nonce == "" {
-				h.cfg.Logger.ErrorContext(r.Context(), "exchange: a nonce is required, and no verifier issues one; give Config.Capabilities and Config.DPoP the same nonces")
-				break
-			}
-			w.Header().Set(headerDPoPNonce, nonce)
+		case codeInvalidClient:
+			status = challengeClient(w, r)
 		}
-		h.write(w, rule.status, errorResponse{Error: rule.code, Description: rule.description})
+		h.write(w, status, errorResponse{Error: rule.code, Description: rule.description})
 		return
 	}
 	h.write(w, http.StatusInternalServerError, errorResponse{Error: codeServerError})
+}
+
+// setNonce sets the nonce a use_dpop_nonce answer carries, reporting false,
+// and logging why, when there is none to give: the client could not satisfy
+// the answer, so it is the server's failure (RFC 9449 §8).
+func (h *Handler) setNonce(w http.ResponseWriter, r *http.Request) bool {
+	nonce, err := h.nonce(r.Context())
+	if err != nil {
+		h.cfg.Logger.ErrorContext(r.Context(), "exchange: DPoP nonce", slog.Any("error", err))
+		return false
+	}
+	if nonce == "" {
+		h.cfg.Logger.ErrorContext(r.Context(), "exchange: a nonce is required, and no verifier issues one; give Config.Capabilities and Config.DPoP the same nonces")
+		return false
+	}
+	w.Header().Set(headerDPoPNonce, nonce)
+	return true
+}
+
+// challengeClient answers a client not authenticated: it sets the challenge
+// in the scheme of r's Authorization header, with the realm, and is 401
+// (RFC 6749 §5.2, RFC 7617 §2); with no scheme in one it is 400, since a 401
+// must carry a challenge (RFC 9110 §15.5.2).
+func challengeClient(w http.ResponseWriter, r *http.Request) int {
+	authorization := r.Header.Get(headerAuthorization)
+	scheme := authorization
+	if end := strings.IndexAny(authorization, schemeEnd); end >= 0 {
+		scheme = authorization[:end]
+	}
+	if scheme == "" || strings.ContainsFunc(scheme, func(c rune) bool { return !tokenChar(c) }) {
+		return http.StatusBadRequest
+	}
+	w.Header().Set(headerWWWAuthenticate, scheme+" realm="+quote(limes.DefaultRealm))
+	return http.StatusUnauthorized
+}
+
+// tokenChar reports whether RFC 9110 §5.6.2 allows c in a token.
+func tokenChar(c rune) bool {
+	return c < utf8.RuneSelf && (unicode.IsLetter(c) || unicode.IsDigit(c) || strings.ContainsRune(tokenSymbols, c))
 }
 
 // nonce is the DPoP nonce a use_dpop_nonce answer carries: Config.DPoP's,

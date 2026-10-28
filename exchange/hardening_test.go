@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -66,5 +67,40 @@ func TestHandlerNarrowingNonceFromCapabilities(t *testing.T) {
 	nonce := w.Header().Get(headerDPoPNonce)
 	if ok, err := f.capabilityNonces.Valid(r.Context(), nonce); err != nil || !ok || w.Code != http.StatusBadRequest {
 		t.Errorf("status %d, nonce %q valid %v (%v)", w.Code, nonce, ok, err)
+	}
+}
+
+// failingNonces are server nonces whose store is down.
+type failingNonces struct{}
+
+func (failingNonces) Nonce(context.Context) (string, error) {
+	return "", errors.New("nonce store down")
+}
+func (failingNonces) Valid(context.Context, string) (bool, error) {
+	return false, errors.New("nonce store down")
+}
+
+// A nonce asked for that the server cannot produce is the server's failure,
+// logged at ERROR: the client gets no use_dpop_nonce it cannot satisfy.
+func TestHandlerAnswersAFailingNonceStoreAsTheServers(t *testing.T) {
+	f := newFixture(t, fixtureConfig{})
+	replay, err := dpop.NewMemoryReplayCache(dpop.MemoryReplayCacheConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.ex.cfg.DPoP, err = dpop.NewVerifier(dpop.VerifierConfig{Replay: replay, Nonces: failingNonces{}, Now: clock}); err != nil {
+		t.Fatal(err)
+	}
+	logs := &records{}
+	h := newHandler(t, f)
+	h.cfg.Logger = slog.New(logs)
+	w := httptest.NewRecorder()
+	h.refuse(w, httptest.NewRequestWithContext(t.Context(), http.MethodPost, tokenEndpoint, nil), dpop.ErrNonceRequired)
+	var body errorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || w.Code != http.StatusInternalServerError || body.Error != codeServerError || w.Header().Get(headerDPoPNonce) != "" {
+		t.Errorf("status %d, nonce %q, body %s", w.Code, w.Header().Get(headerDPoPNonce), w.Body)
+	}
+	if level, _ := logs.last(); level != slog.LevelError {
+		t.Errorf("logged %s, want ERROR", level)
 	}
 }
