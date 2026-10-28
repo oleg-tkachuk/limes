@@ -1,9 +1,11 @@
 package jwks
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -73,9 +75,11 @@ func TestMarshalAlgorithms(t *testing.T) {
 func TestHandlerAlgorithms(t *testing.T) {
 	keys := map[string]ed25519.PublicKey{"k1": newKey(t)}
 	algs := map[string]string{}
+	var logged bytes.Buffer
 	h, err := NewHandler(HandlerConfig{
 		Keys:       func() map[string]ed25519.PublicKey { return keys },
 		Algorithms: func() map[string]string { return algs },
+		Logger:     slog.New(slog.NewJSONHandler(&logged, nil)),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -109,8 +113,26 @@ func TestHandlerAlgorithms(t *testing.T) {
 	if algs["k2"] != AlgorithmEdDSA {
 		t.Error("serving changed the caller's names")
 	}
+	if line := logLine(t, &logged); line["level"] != slog.LevelWarn.String() || line["kid"] != "k2" {
+		t.Errorf("the dropped name was logged as %v", line)
+	}
+	delete(algs, "k2")
 	algs["k1"] = "ES256"
 	if w := get(); w.Code != http.StatusInternalServerError {
 		t.Errorf("a name no token gives: status %d", w.Code)
 	}
+	if line := logLine(t, &logged); line["level"] != slog.LevelError.String() || line["error"] == nil {
+		t.Errorf("the set it could not serve was logged as %v", line)
+	}
+}
+
+// logLine reads, and takes, the one JSON log line in logged.
+func logLine(t *testing.T, logged *bytes.Buffer) map[string]any {
+	t.Helper()
+	var line map[string]any
+	if err := json.Unmarshal(logged.Bytes(), &line); err != nil {
+		t.Fatalf("log %q: %v", logged, err)
+	}
+	logged.Reset()
+	return line
 }

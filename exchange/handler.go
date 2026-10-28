@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -325,23 +326,36 @@ func (h *Handler) refuse(w http.ResponseWriter, r *http.Request, err error) {
 		if !errors.Is(err, rule.err) {
 			continue
 		}
-		if rule.code == codeUseDPoPNonce && h.cfg.Exchanger.cfg.DPoP == nil {
-			// The nonce was asked for by Config.Capabilities' verifier, and
-			// this endpoint has none of its own to give one.
-			h.cfg.Logger.ErrorContext(r.Context(), "exchange: a nonce is required, and Config.DPoP is nil to issue one; give Config.Capabilities and Config.DPoP the same nonces")
-		}
-		if rule.code == codeUseDPoPNonce && h.cfg.Exchanger.cfg.DPoP != nil {
-			nonce, nerr := h.cfg.Exchanger.cfg.DPoP.Nonce(r.Context())
+		if rule.code == codeUseDPoPNonce {
+			nonce, nerr := h.nonce(r.Context())
 			if nerr != nil {
 				h.cfg.Logger.ErrorContext(r.Context(), "exchange: DPoP nonce", slog.Any("error", nerr))
 				break
 			}
-			w.Header().Set(headerDPoPNonce, nonce)
+			if nonce == "" {
+				h.cfg.Logger.ErrorContext(r.Context(), "exchange: a nonce is required, and no verifier issues one; give Config.Capabilities and Config.DPoP the same nonces")
+			} else {
+				w.Header().Set(headerDPoPNonce, nonce)
+			}
 		}
 		h.write(w, rule.status, errorResponse{Error: rule.code, Description: rule.description})
 		return
 	}
 	h.write(w, http.StatusInternalServerError, errorResponse{Error: codeServerError})
+}
+
+// nonce is the DPoP nonce a use_dpop_nonce answer carries: Config.DPoP's,
+// or, with none, that of Config.Capabilities' verifier, whose proof check
+// asked for it. It is empty when neither issues nonces.
+func (h *Handler) nonce(ctx context.Context) (string, error) {
+	cfg := h.cfg.Exchanger.cfg
+	switch {
+	case cfg.DPoP != nil:
+		return cfg.DPoP.Nonce(ctx)
+	case cfg.Capabilities != nil:
+		return cfg.Capabilities.DPoPNonce(ctx)
+	}
+	return "", nil
 }
 
 // write writes body as a token endpoint's JSON response.

@@ -6,12 +6,14 @@
 package jwks
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/json"
 	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"net/http"
 	"slices"
@@ -177,9 +179,13 @@ type HandlerConfig struct {
 	// Algorithms returns the alg each key's entry names, kid → name, as
 	// MarshalAlgorithms takes them: AlgorithmEdDSA for a key whose signer
 	// writes EdDSA. Nil, or a key it does not name: AlgorithmEd25519. A name
-	// for a kid Keys no longer returns is ignored, so withdrawing a key
-	// never waits on its name being removed.
+	// for a kid Keys no longer returns is ignored, and logged, so
+	// withdrawing a key never waits on its name being removed.
 	Algorithms func() map[string]string
+	// Logger logs a name Algorithms gives for a kid Keys does not return,
+	// at WARN, and a set the handler cannot serve, at ERROR. Nil:
+	// slog.Default().
+	Logger *slog.Logger
 	// MaxAge is how long a client may keep the set (RFC 9111 §5.2.2.1).
 	// Keep it below the time between publishing a new key and signing with
 	// it, and between withdrawing an old key and the end of its tokens'
@@ -204,6 +210,7 @@ type Handler struct {
 	keys   func() map[string]ed25519.PublicKey
 	algs   func() map[string]string
 	maxAge time.Duration
+	log    *slog.Logger
 }
 
 // NewHandler builds a Handler serving cfg.Keys(), refusing no Keys, a
@@ -212,19 +219,33 @@ func NewHandler(cfg HandlerConfig) (*Handler, error) {
 	if cfg.Keys == nil {
 		return nil, errors.New("jwks: HandlerConfig.Keys required")
 	}
+	maxAge, err := cfg.maxAge()
+	if err != nil {
+		return nil, err
+	}
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
+	}
+	return &Handler{keys: cfg.Keys, algs: cfg.Algorithms, maxAge: maxAge, log: cfg.Logger}, nil
+}
+
+// maxAge is the max-age the handler serves: 0 for Revalidate, MaxAge, or
+// DefaultMaxAge for none. It refuses a negative MaxAge or one under a
+// second, or a MaxAge beside Revalidate.
+func (cfg HandlerConfig) maxAge() (time.Duration, error) {
 	switch {
 	case cfg.MaxAge < 0:
-		return nil, fmt.Errorf("jwks: HandlerConfig.MaxAge %s is negative", cfg.MaxAge)
+		return 0, fmt.Errorf("jwks: HandlerConfig.MaxAge %s is negative", cfg.MaxAge)
 	case cfg.MaxAge > 0 && cfg.MaxAge < time.Second:
-		return nil, fmt.Errorf("jwks: HandlerConfig.MaxAge %s is under a second, the unit of max-age", cfg.MaxAge)
+		return 0, fmt.Errorf("jwks: HandlerConfig.MaxAge %s is under a second, the unit of max-age", cfg.MaxAge)
 	case cfg.Revalidate && cfg.MaxAge != 0:
-		return nil, fmt.Errorf("jwks: HandlerConfig.MaxAge %s beside Revalidate", cfg.MaxAge)
+		return 0, fmt.Errorf("jwks: HandlerConfig.MaxAge %s beside Revalidate", cfg.MaxAge)
 	case cfg.Revalidate:
-		// maxAge stays 0: max-age=0.
+		return 0, nil
 	case cfg.MaxAge == 0:
-		cfg.MaxAge = DefaultMaxAge
+		return DefaultMaxAge, nil
 	}
-	return &Handler{keys: cfg.Keys, algs: cfg.Algorithms, maxAge: cfg.MaxAge}, nil
+	return cfg.MaxAge, nil
 }
 
 // ServeHTTP answers GET and HEAD with the document, and anything else with
@@ -236,17 +257,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	keys := h.keys()
-	var algs map[string]string
-	if h.algs != nil {
-		// A name for a key no longer served is dropped, not refused: a
-		// withdrawn key whose name was left behind would otherwise fail the
-		// whole document, and every client would keep the set it has,
-		// withdrawn key included, until it gives up on the set.
-		algs = maps.Clone(h.algs())
-		maps.DeleteFunc(algs, func(kid, _ string) bool { _, ok := keys[kid]; return !ok })
-	}
-	doc, err := MarshalAlgorithms(keys, algs)
+	doc, err := MarshalAlgorithms(keys, h.servedAlgorithms(r.Context(), keys))
 	if err != nil {
+		h.log.ErrorContext(r.Context(), "jwks: the key set cannot be served", slog.Any("error", err))
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
@@ -262,6 +275,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	header.Set(httpx.HeaderContentType, mediaTypeJWKSet)
 	header.Set(httpx.HeaderContentLength, strconv.Itoa(len(doc)))
 	_, _ = w.Write(doc)
+}
+
+// servedAlgorithms is the names Algorithms gives for the kids in keys. A
+// name for a key no longer served is dropped, not refused: a withdrawn key
+// whose name was left behind would otherwise fail the whole document, and
+// every client would keep the set it has, withdrawn key included, until it
+// gives up on the set.
+func (h *Handler) servedAlgorithms(ctx context.Context, keys map[string]ed25519.PublicKey) map[string]string {
+	if h.algs == nil {
+		return nil
+	}
+	algs := maps.Clone(h.algs())
+	for kid := range algs {
+		if _, ok := keys[kid]; !ok {
+			delete(algs, kid)
+			h.log.WarnContext(ctx, "jwks: an algorithm named for a key not served is dropped", slog.String("kid", kid))
+		}
+	}
+	return algs
 }
 
 // etagMatches is If-None-Match's weak comparison (RFC 9110 §13.1.2): any

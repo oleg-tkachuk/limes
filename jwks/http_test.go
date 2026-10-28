@@ -231,6 +231,7 @@ func TestHandlerMaxAge(t *testing.T) {
 		"none named": {HandlerConfig{Keys: keys}, fmt.Sprintf("public, max-age=%d", int64(DefaultMaxAge/time.Second))},
 		"revalidate": {HandlerConfig{Keys: keys, Revalidate: true}, "public, max-age=0"},
 		"a minute":   {HandlerConfig{Keys: keys, MaxAge: time.Minute}, "public, max-age=60"},
+		"a second":   {HandlerConfig{Keys: keys, MaxAge: time.Second}, "public, max-age=1"},
 		// Whole seconds, the fraction dropped.
 		"a second and a half": {HandlerConfig{Keys: keys, MaxAge: 1500 * time.Millisecond}, "public, max-age=1"},
 	} {
@@ -256,7 +257,8 @@ func TestConfigsRefuseNegatives(t *testing.T) {
 		"negative max-age":          {Keys: keys, MaxAge: -time.Second},
 		"max-age beside revalidate": {Keys: keys, MaxAge: time.Second, Revalidate: true},
 		// Served in whole seconds, it would read max-age=0: Revalidate's.
-		"max-age under a second": {Keys: keys, MaxAge: 500 * time.Millisecond},
+		"max-age under a second":  {Keys: keys, MaxAge: 500 * time.Millisecond},
+		"max-age of a nanosecond": {Keys: keys, MaxAge: time.Nanosecond},
 	} {
 		if _, err := NewHandler(cfg); err == nil {
 			t.Errorf("NewHandler, %s: accepted", name)
