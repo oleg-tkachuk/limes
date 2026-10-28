@@ -86,7 +86,11 @@ type Grant struct {
 // empty to take them all; its ConfirmationJKT must be empty, the Exchanger
 // setting it from the proof; its TTL is capped at the subject token's
 // remaining lifetime. Nothing is granted that the policy did not choose:
-// there is no default policy.
+// there is no default policy. A subject token may be exchanged again and
+// again until it expires, each exchange issuing a capability of its own,
+// with ceilings of its own: a policy that grants a budget per user, not
+// per exchange, keys it on Grant.Subject (its Issuer and Subject, or its
+// ID for one capability per subject token).
 type Policy func(ctx context.Context, g Grant) (limes.IssueRequest, error)
 
 // Result is an exchange's capability.
@@ -128,7 +132,9 @@ type Config struct {
 	// Capabilities verifies a capability given as the subject token, to
 	// narrow (Narrow); nil narrows none. CapabilityAudience is the audience
 	// such a capability must name: the exchange's own. NarrowPolicy decides
-	// each narrowing. All three, or none.
+	// each narrowing. All three, or none. A bound capability's proof is
+	// checked by Capabilities' own DPoP verifier: give it the nonces of DPoP,
+	// so a nonce this endpoint hands out is one that verifier takes.
 	Capabilities       *limes.Verifier
 	CapabilityAudience string
 	NarrowPolicy       NarrowPolicy

@@ -97,7 +97,9 @@ func NewHandler(cfg HandlerConfig) (*Handler, error) {
 		return nil, errors.New("exchange: HandlerConfig.Exchanger required")
 	case cfg.Authenticate == nil:
 		return nil, errors.New("exchange: HandlerConfig.Authenticate required")
-	case cfg.Exchanger.cfg.DPoP != nil && cfg.EndpointURL == "":
+	case (cfg.Exchanger.cfg.DPoP != nil || cfg.Exchanger.cfg.Capabilities != nil) && cfg.EndpointURL == "":
+		// A bound capability is narrowed with a proof over it, which its
+		// verifier checks against this URL.
 		return nil, errors.New("exchange: HandlerConfig.EndpointURL required to check DPoP proofs")
 	case cfg.MaxBodyBytes < 0:
 		return nil, errors.New("exchange: HandlerConfig.MaxBodyBytes is negative")
@@ -267,7 +269,12 @@ func (h *Handler) refuse(w http.ResponseWriter, r *http.Request, err error) {
 		if !errors.Is(err, rule.err) {
 			continue
 		}
-		if rule.code == codeUseDPoPNonce {
+		if rule.code == codeUseDPoPNonce && h.cfg.Exchanger.cfg.DPoP == nil {
+			// The nonce was asked for by Config.Capabilities' verifier, and
+			// this endpoint has none of its own to give one.
+			h.cfg.Logger.ErrorContext(r.Context(), "exchange: a nonce is required, and Config.DPoP is nil to issue one; give Config.Capabilities and Config.DPoP the same nonces")
+		}
+		if rule.code == codeUseDPoPNonce && h.cfg.Exchanger.cfg.DPoP != nil {
 			nonce, nerr := h.cfg.Exchanger.cfg.DPoP.Nonce(r.Context())
 			if nerr != nil {
 				h.cfg.Logger.ErrorContext(r.Context(), "exchange: DPoP nonce", slog.Any("error", nerr))
