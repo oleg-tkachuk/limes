@@ -116,10 +116,11 @@ mux.Handle("/.well-known/jwks.json", h)
 
 `jwks.Marshal` writes the same document for a server of your own; `jwks.Parse`
 reads one back, for a resolver of your own. It skips an entry it cannot use — a foreign
-`kty` or `alg`, no kid, a malformed key — rather than refusing the set, so one bad
-entry does not take every other key out of service mid-rotation. Two entries
-naming one kid are both skipped: which one signs is not for the reader to
-guess. A document that is not JSON, or names a member twice, is refused.
+`kty` or `alg`, no kid, a `use` other than `sig` or a `key_ops` without `verify`,
+a malformed key, a member of the wrong JSON type — rather than refusing the set,
+so one bad entry does not take every other key out of service mid-rotation. Two
+Ed25519 keys naming one kid are both skipped: which one signs is not for the
+reader to guess. A document that is not JSON, or names a member twice, is refused.
 
 ### Inspect a token without trusting it
 

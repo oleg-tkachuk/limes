@@ -53,14 +53,35 @@ type received struct {
 }
 
 // entry is one entry in the JWKS — exactly the fields needed to verify
-// an Ed25519 signature; we do not embed `use` or `key_ops` because
-// the kid + alg pair fully constrains use here.
+// an Ed25519 signature. Marshal writes no `use` or `key_ops`, as the kid +
+// alg pair fully constrains use here; parse reads them, so a key another
+// issuer publishes for something else is not used to verify (RFC 7517 §4.2,
+// §4.3).
 type entry struct {
-	Kty string `json:"kty"`           // "OKP"
-	Crv string `json:"crv"`           // "Ed25519"
-	Kid string `json:"kid"`           // matches jwtHeader.Kid
-	Alg string `json:"alg,omitempty"` // "Ed25519" (RFC 9864); "EdDSA" is read
-	X   string `json:"x"`             // base64url-encoded raw public key
+	Kty    string   `json:"kty"`               // "OKP"
+	Crv    string   `json:"crv"`               // "Ed25519"
+	Kid    string   `json:"kid"`               // matches jwtHeader.Kid
+	Alg    string   `json:"alg,omitempty"`     // "Ed25519" (RFC 9864); "EdDSA" is read
+	Use    string   `json:"use,omitempty"`     // "sig" or none to verify with
+	KeyOps []string `json:"key_ops,omitempty"` // "verify" among them, or none
+	X      string   `json:"x"`                 // base64url-encoded raw public key
+}
+
+// What an entry's use and key_ops name when its key verifies signatures
+// (RFC 7517 §4.2, §4.3).
+const (
+	useSignature = "sig"
+	opVerify     = "verify"
+)
+
+// verifies reports whether k's use and key_ops let it verify a signature:
+// each unset, or naming that use.
+func (k entry) verifies() bool {
+	if k.Use != "" && k.Use != useSignature {
+		return false
+	}
+	// An empty key_ops is set, and names no operation.
+	return k.KeyOps == nil || slices.Contains(k.KeyOps, opVerify)
 }
 
 // The names a key's entry may give its algorithm (RFC 9864): the alg the
@@ -119,15 +140,17 @@ func MarshalAlgorithms(keys map[string]ed25519.PublicKey, algs map[string]string
 }
 
 // Parse decodes a JWKS document into a kid → public key map. Entries
-// that are not Ed25519 (a future kty), that lack a kid, or whose key does
+// that are not Ed25519 (a future kty), that lack a kid, whose use or
+// key_ops is not verifying signatures (RFC 7517 §4.2, §4.3), whose key does
 // not decode to an Ed25519 public key, or that are not of the shape a JWK
 // is read in — a member of another JSON type, no object at all — are skipped
 // rather than failing the document (RFC 7517 §5): one malformed or foreign
 // entry must not take every other key — and so every token signed with them
 // — out of service during a rotation. Two Ed25519 keys naming one kid are
-// both skipped; a kid an entry of another kind also names is not (§4.5). A document that is not JSON
-// at all, names a member twice, or has no "keys" array (RFC 7517 §5) is an
-// error: only `{"keys":[]}` withdraws every key.
+// both skipped; a kid an entry of another kind also names is not (§4.5).
+// A document that is not JSON at all, names a member twice, or has no
+// "keys" array (RFC 7517 §5) is an error: only `{"keys":[]}` withdraws
+// every key.
 func Parse(raw []byte) (map[string]ed25519.PublicKey, error) {
 	keys, _, err := parse(raw)
 	return keys, err
@@ -186,7 +209,7 @@ func usableKey(value jsontext.Value) (usable, bool) {
 	if err := jsonv2.Unmarshal(value, &k); err != nil {
 		return usable{}, false
 	}
-	if k.Kty != jose.KtyOKP || k.Crv != jose.CrvEd25519 || k.Kid == "" || !ed25519Alg(k.Alg) {
+	if k.Kty != jose.KtyOKP || k.Crv != jose.CrvEd25519 || k.Kid == "" || !ed25519Alg(k.Alg) || !k.verifies() {
 		return usable{}, false
 	}
 	decoded, err := jose.UnB64(k.X) // strict: one encoding per key, as every JOSE member

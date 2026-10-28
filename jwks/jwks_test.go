@@ -230,3 +230,38 @@ func TestParseSkipsAnEntryOfTheWrongShape(t *testing.T) {
 		}
 	}
 }
+
+// An entry is used to verify signatures only when its use and key_ops allow
+// it (RFC 7517 §4.2, §4.3): a key published for another purpose is skipped.
+func TestParseHonoursUseAndKeyOps(t *testing.T) {
+	kid, pub, _, err := generateKeypair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		members string
+		usable  bool
+	}{
+		"neither":                 {``, true},
+		"use sig":                 {`,"use":"sig"`, true},
+		"use enc":                 {`,"use":"enc"`, false},
+		"a use of its own":        {`,"use":"other"`, false},
+		"key_ops verify":          {`,"key_ops":["verify"]`, true},
+		"key_ops among others":    {`,"key_ops":["sign","verify"]`, true},
+		"key_ops sign":            {`,"key_ops":["sign"]`, false},
+		"key_ops encrypt":         {`,"key_ops":["encrypt"]`, false},
+		"key_ops empty":           {`,"key_ops":[]`, false},
+		"key_ops null":            {`,"key_ops":null`, true},
+		"use sig, key_ops sign":   {`,"use":"sig","key_ops":["sign"]`, false},
+		"use enc, key_ops verify": {`,"use":"enc","key_ops":["verify"]`, false},
+	} {
+		doc := fmt.Sprintf(`{"keys":[{"kty":"OKP","crv":"Ed25519","kid":%q,"x":%q%s}]}`, kid, jose.B64(pub), tc.members)
+		keys, err := Parse([]byte(doc))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := keys[kid].Equal(pub); got != tc.usable {
+			t.Errorf("%s: key used = %v, want %v", name, got, tc.usable)
+		}
+	}
+}
