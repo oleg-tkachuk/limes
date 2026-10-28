@@ -7,6 +7,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -207,8 +208,37 @@ func checkIJSONIntegers(c jwtClaims) error {
 // cannot enforce, and must not pass as one it did. Duplicate names are
 // refused and names match in their exact case — both by default in the
 // encoding/json/v2 semantics — so no two parsers can read one signed token
-// two ways.
-var strictClaims = json.RejectUnknownMembers(true)
+// two ways. An id inside a claim (a tenant, a run) is read only in the
+// canonical spelling the signer writes, as jti and limes_parent_id are
+// (canonicalUUID): a reader comparing the strings would otherwise see two
+// values for one id.
+var strictClaims = json.JoinOptions(
+	json.RejectUnknownMembers(true),
+	json.WithUnmarshalers(json.UnmarshalFromFunc(unmarshalCanonicalUUID)),
+)
+
+// unmarshalCanonicalUUID reads a JSON string into id only when it is the id's
+// canonical spelling: lowercase and hyphenated. The nil id is its own
+// canonical spelling here; whether it is allowed is the claim's to say.
+func unmarshalCanonicalUUID(dec *jsontext.Decoder, id *uuid.UUID) error {
+	tok, err := dec.ReadToken()
+	if err != nil {
+		return err
+	}
+	if tok.Kind() != '"' {
+		return fmt.Errorf("limes: a UUID is a JSON string, not %v", tok.Kind())
+	}
+	s := tok.String()
+	parsed, err := uuid.Parse(s)
+	if err != nil {
+		return fmt.Errorf("limes: parse UUID: %w", err)
+	}
+	if parsed.String() != s {
+		return fmt.Errorf("limes: %q is not a canonical UUID", s)
+	}
+	*id = parsed
+	return nil
+}
 
 type cnfClaim struct {
 	JKT string `json:"jkt"`

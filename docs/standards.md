@@ -29,7 +29,8 @@ rather than read from the token (§3.1), and `iss` and `aud` are always
 checked (§3.8, §3.9). The type names no format, so the claim `limes_v: 7`
 does, and the claims are read strictly under it: a token without `limes_v`
 7, a `client_id`, a `sub` and every `limes_` claim, or with a member the
-format does not define, is refused.
+format does not define, is refused. Every id in the claims (`jti`, `limes_parent_id`, a tenant, a run) is read
+only in the canonical spelling the signer writes.
 
 RFC 8725 §3.11's explicit typing kept other JWTs signed by the same key from
 passing as a capability; `at+jwt` is every authorization server's type, so
@@ -45,7 +46,7 @@ that signs capabilities never signs an authorization server's access tokens
 `TestClientIDIsRequired`, `TestSubjectIsRequired`,
 `TestSignerWritesAnAccessTokenUnderALimesKid`,
 `TestVerifyRefusesAKidOutsideTheNamespace`, `TestIsKeyID`,
-`TestRetiredTokensAreRefused` and `TestGoldenTokenStillVerifies`.
+`TestClaimIDsAreCanonical`, `TestRetiredTokensAreRefused` and `TestGoldenTokenStillVerifies`.
 
 **RFC 9864.** JWKS entries and DPoP proofs carry the fully-specified
 `alg: Ed25519`, and so do tokens by default. The polymorphic `EdDSA`, which

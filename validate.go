@@ -5,6 +5,7 @@ import (
 	"net/netip"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // ErrInvalidCaveats is returned when a caveat bag is malformed: a budget
@@ -94,6 +95,9 @@ func (c Caveats) Validate() error {
 		if err := validResource("resource name prefix", n); err != nil {
 			return err
 		}
+		if err := wholeCharacters(n); err != nil {
+			return err
+		}
 	}
 	if err := c.Requests.Validate(); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidCaveats, err)
@@ -117,6 +121,25 @@ func (c Caveats) Validate() error {
 	}
 	return nil
 }
+
+// wholeCharacters refuses a name prefix that ends inside a character: a
+// percent-escape cut short ("%" or "%2") or a UTF-8 sequence cut short. A
+// name prefix matches as a plain string, so one ending so would match only
+// names that complete the character, but read decoded it names no
+// character at all: the issuer cannot have meant it.
+func wholeCharacters(prefix string) error {
+	if !utf8.ValidString(prefix) {
+		return fmt.Errorf("%w: resource name prefix %q is not whole UTF-8", ErrInvalidCaveats, prefix)
+	}
+	if i := strings.LastIndexByte(prefix, '%'); i >= 0 && len(prefix)-i < percentEscapeLen {
+		return fmt.Errorf("%w: resource name prefix %q ends inside a percent-escape", ErrInvalidCaveats, prefix)
+	}
+	return nil
+}
+
+// percentEscapeLen is the length of a percent-escape: "%" and two hex digits
+// (RFC 3986 §2.1).
+const percentEscapeLen = 3
 
 func validResource(kind, s string) error {
 	if s == "" {
