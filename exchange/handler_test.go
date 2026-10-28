@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -151,6 +153,44 @@ func TestHandlerRefusals(t *testing.T) {
 		}
 		if strings.Contains(resp.Description, "exchange:") || w.Header().Get("Cache-Control") != cacheNoStore {
 			t.Errorf("%s: description %q, headers %v", name, resp.Description, w.Header())
+		}
+	}
+}
+
+// An authenticated client not allowed to exchange is answered
+// unauthorized_client (400), wrapped or not; any other error of
+// Authenticate stays invalid_client (401). Each refusal is logged at WARN
+// with the authenticator's error.
+func TestHandlerTellsAnUnauthorizedClientFromAnUnauthenticatedOne(t *testing.T) {
+	f := newFixture(t, fixtureConfig{})
+	token := f.idp.sign(t, TypeAccessToken, accessClaims())
+	for name, tc := range map[string]struct {
+		err    error
+		status int
+		code   string
+	}{
+		"the sentinel":         {ErrUnauthorizedClient, http.StatusBadRequest, codeUnauthorizedClient},
+		"the sentinel wrapped": {fmt.Errorf("client %s may not exchange: %w", mcpServer, ErrUnauthorizedClient), http.StatusBadRequest, codeUnauthorizedClient},
+		"a plain error":        {errors.New("bad assertion"), http.StatusUnauthorized, codeInvalidClient},
+	} {
+		logs := &records{}
+		h, err := NewHandler(HandlerConfig{
+			Exchanger: f.ex, EndpointURL: tokenEndpoint, Logger: slog.New(logs),
+			Authenticate: func(*http.Request) (Client, error) { return Client{}, tc.err },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		w := post(t, h, exchangeForm(token), nil)
+		var resp errorResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != tc.status || resp.Error != tc.code {
+			t.Errorf("%s: status %d, body %s; want %d %s", name, w.Code, w.Body, tc.status, tc.code)
+		}
+		if level, msg := logs.last(); level != slog.LevelWarn || msg != "exchange request refused" || !logs.lastWraps(tc.err) {
+			t.Errorf("%s logged %s %q, want a WARN refusal carrying %v", name, level, msg, tc.err)
+		}
+		if logs.lastWraps(ErrInvalidClient) != (tc.code == codeInvalidClient) {
+			t.Errorf("%s: logged as an unauthenticated client: %v", name, logs.lastWraps(ErrInvalidClient))
 		}
 	}
 }

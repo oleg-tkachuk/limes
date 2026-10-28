@@ -22,6 +22,10 @@ var (
 	ErrInvalidRequest = errors.New("exchange: invalid request")
 	// ErrInvalidClient is a client the endpoint could not authenticate.
 	ErrInvalidClient = errors.New("exchange: client not authenticated")
+	// ErrUnauthorizedClient is a client the endpoint authenticated that may
+	// not exchange tokens. HandlerConfig.Authenticate returns it, wrapped or
+	// not, to refuse such a client.
+	ErrUnauthorizedClient = errors.New("exchange: client not authorized to exchange")
 	// ErrInvalidGrant is a subject token refused: not genuine, expired, or
 	// not one the client may present.
 	ErrInvalidGrant = errors.New("exchange: subject token refused")
