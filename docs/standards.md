@@ -317,7 +317,7 @@ at an RFC 8693 token endpoint (`Handler`):
   `Introspect` yields nothing `Delegate` takes.
 
 *Held by* `TestJWTVerifierReadsAnAccessToken`, `TestJWTVerifierRefusals`,
-`TestJWTVerifierHoldsTheKeyToTheHeaderAlg`,
+`TestJWTVerifierHoldsTheKeyToTheHeaderAlg`, `TestJWTVerifierLendsNoHMACSecret`,
 `TestExchangeHoldsThePolicyToTheRequest`,
 `TestExchangeCapsTheLifetimeAtTheSubjectToken`, `TestExchangeRefusals`,
 `TestExchangeBindsToTheProofKey`, `TestExchangeHoldsABoundSubjectToItsKey`,

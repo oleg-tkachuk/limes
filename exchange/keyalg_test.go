@@ -90,7 +90,6 @@ func TestJWTVerifierHoldsTheKeyToTheHeaderAlg(t *testing.T) {
 		t.Fatal(err)
 	}
 	addKey(t, p.keys, secret, kidHMAC, nil)
-	addKey(t, p.keys, secret, kidHS256, jwa.HS256())
 	addKey(t, p.keys, p384.Public(), kidP384, nil)
 	addKey(t, p.keys, rsaKey.Public(), kidRSA256, jwa.RS256())
 	addKey(t, p.keys, edNoAlg.Public(), kidNoAlg, nil)
@@ -132,5 +131,25 @@ func TestJWTVerifierHoldsTheKeyToTheHeaderAlg(t *testing.T) {
 	}
 	if _, err := v.VerifySubject(t.Context(), rawJWS(t, header("Ed25519", kidNoAlg), claims, func(in []byte) []byte { return ed25519.Sign(edNoAlg, in) })); err != nil {
 		t.Errorf("an Ed25519 key naming no alg, headed Ed25519: %v", err)
+	}
+}
+
+// A key set holding an HMAC secret named for HS256 lends it to no token
+// headed with an algorithm the verifier admits: jwx would have verified
+// such a token with the secret, under HS256.
+func TestJWTVerifierLendsNoHMACSecret(t *testing.T) {
+	p := newIDP(t)
+	secret := make([]byte, hmacSecretBytes)
+	if _, err := rand.Read(secret); err != nil {
+		t.Fatal(err)
+	}
+	addKey(t, p.keys, secret, kidHS256, jwa.HS256())
+	v := newJWTVerifier(t, JWTVerifierConfig{Issuer: idpIssuer, Keys: StaticKeys(p.keys), Now: clock})
+	for _, alg := range []string{"RS256", "ES256", "EdDSA"} {
+		token := rawJWS(t, map[string]any{"alg": alg, "kid": kidHS256, "typ": TypeAccessToken}, accessClaims(),
+			func(in []byte) []byte { m := hmac.New(sha256.New, secret); m.Write(in); return m.Sum(nil) })
+		if _, err := v.VerifySubject(t.Context(), token); !errors.Is(err, ErrInvalidGrant) {
+			t.Errorf("an HMAC signature headed %s: %v, want ErrInvalidGrant", alg, err)
+		}
 	}
 }
