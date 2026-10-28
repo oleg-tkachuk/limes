@@ -124,7 +124,7 @@ func TestIssue_VerifyHappyPath(t *testing.T) {
 			Subject:  "agent-1",
 		},
 		Audience: []string{audienceData},
-		Caveats:  Caveats{Ops: []Op{OpGet, OpList}},
+		Caveats:  Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet, OpList}},
 		TTL:      time.Minute,
 	})
 	if err != nil {
@@ -248,6 +248,7 @@ func TestDelegate_NarrowsAndPersists(t *testing.T) {
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: tenantID, Subject: "agent"},
 		Audience: []string{audienceData, audienceMCP},
 		Caveats: Caveats{
+			Requests:         RequestCeiling{Unlimited: true},
 			Ops:              []Op{OpGet, OpList, "index:search", OpShare},
 			ResourcePrefixes: []string{"object://acme/"},
 			Budget:           BudgetCeiling{Max: MustParseAmount("1.00"), UnitCode: "USD"},
@@ -263,6 +264,7 @@ func TestDelegate_NarrowsAndPersists(t *testing.T) {
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: tenantID, Subject: "child"},
 		Audience: []string{audienceData},
 		Caveats: Caveats{
+			Requests:         RequestCeiling{Unlimited: true},
 			Ops:              []Op{OpGet, OpShare},
 			ResourcePrefixes: []string{"object://acme/run-42/"},
 			Budget:           BudgetCeiling{Max: NanosPerUnit / 10},
@@ -294,7 +296,7 @@ func TestDelegate_RejectsWidening(t *testing.T) {
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: tenantID, Subject: "agent"},
 		Audience: []string{audienceData},
-		Caveats:  Caveats{Ops: []Op{OpGet, OpShare}},
+		Caveats:  Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet, OpShare}},
 		TTL:      time.Hour,
 	})
 
@@ -302,7 +304,7 @@ func TestDelegate_RejectsWidening(t *testing.T) {
 		Parent:   asVerified(parent),
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: tenantID, Subject: "agent"},
 		Audience: []string{audienceData, audienceAdmin}, // wider!
-		Caveats:  Caveats{Ops: []Op{OpGet, OpShare}},
+		Caveats:  Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet, OpShare}},
 	})
 	if !errors.Is(err, ErrDelegationTooWide) {
 		t.Fatalf("expected ErrDelegationTooWide, got %v", err)
@@ -452,7 +454,7 @@ func issueAgentGet(t *testing.T, issuer *Issuer) (Capability, string) {
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData},
-		Caveats:  Caveats{Ops: []Op{OpGet}},
+		Caveats:  Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}},
 	})
 	if err != nil {
 		t.Fatalf("issue: %v", err)

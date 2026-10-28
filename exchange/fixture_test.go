@@ -247,7 +247,7 @@ func (f *fixture) readPolicy(_ context.Context, g Grant) (limes.IssueRequest, er
 	return limes.IssueRequest{
 		IssuedBy: limes.Principal{Type: limes.PrincipalTypeService, Subject: mcpServer},
 		Subject:  limes.Principal{Type: limes.PrincipalTypeUser, TenantID: f.tenant, Subject: g.Subject.Subject},
-		Caveats:  limes.Caveats{Ops: []limes.Op{limes.OpGet}},
+		Caveats:  limes.Caveats{Requests: limes.RequestCeiling{Unlimited: true}, Ops: []limes.Op{limes.OpGet}},
 	}, nil
 }
 

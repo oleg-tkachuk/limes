@@ -34,7 +34,7 @@ func issueActing(t *testing.T, issuer *Issuer, holder Principal, obo *Principal)
 	t.Helper()
 	cap, token, err := issuer.issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "op"}, Subject: holder, OnBehalfOf: obo,
-		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet, OpShare}}, TTL: time.Hour, ClientID: testClientID,
+		Audience: []string{audienceData}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet, OpShare}}, TTL: time.Hour, ClientID: testClientID,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -153,7 +153,7 @@ func TestIssueRefusesOnBehalfOf(t *testing.T) {
 	} {
 		_, _, err := issuer.issue(context.Background(), IssueRequest{
 			IssuedBy: Principal{Subject: "op"}, Subject: actingPrincipal(t, PrincipalTypeAgent, actingAgent), OnBehalfOf: &obo,
-			Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour, ClientID: testClientID,
+			Audience: []string{audienceData}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}}, TTL: time.Hour, ClientID: testClientID,
 		})
 		if !errors.Is(err, ErrInvalidRequest) {
 			t.Errorf("%s: %v, want ErrInvalidRequest", name, err)

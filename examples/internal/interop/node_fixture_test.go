@@ -80,7 +80,7 @@ func writeNodeFixture(t *testing.T) {
 			IssuedBy: limes.Principal{Type: limes.PrincipalTypeUser, TenantID: tenant, Subject: operatorSubject},
 			Subject:  limes.Principal{Type: limes.PrincipalTypeService, TenantID: tenant, Subject: readerSubject},
 			Audience: []string{audience}, TTL: tokenTTL,
-			Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, ResourcePrefixes: []string{resourcePath}},
+			Caveats: limes.Caveats{Requests: limes.RequestCeiling{Unlimited: true}, Ops: []limes.Op{limes.OpGet}, ResourcePrefixes: []string{resourcePath}},
 		})
 		if err != nil {
 			t.Fatal(err)

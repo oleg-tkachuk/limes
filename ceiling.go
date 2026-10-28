@@ -5,13 +5,15 @@ import "fmt"
 // A ceiling bounds what a capability, a copy of one or a tenant may use.
 // Its zero value is a ceiling of nothing — no request, no spend — so a bound
 // left out fails closed; Unlimited is the one way to lift it. No number
-// stands for "no limit".
+// stands for "no limit". A capability no request can use is never issued:
+// Issue and Delegate refuse the zero request ceiling, so set Requests
+// explicitly. The zero budget stands, a capability that may not spend.
 
 // RequestCeiling bounds a count of requests: at most Max, or none at all
 // when Unlimited.
 type RequestCeiling struct {
-	// Max is the most requests allowed; 0 allows none. Within
-	// 0..MaxIJSONInteger, and 0 when Unlimited.
+	// Max is the most requests allowed; 0 allows none, which Issue and
+	// Delegate refuse. Within 0..MaxIJSONInteger, and 0 when Unlimited.
 	Max int64
 	// Unlimited lifts the ceiling.
 	Unlimited bool

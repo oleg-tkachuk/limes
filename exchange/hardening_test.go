@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/dpop"
 )
 
@@ -102,5 +103,28 @@ func TestHandlerAnswersAFailingNonceStoreAsTheServers(t *testing.T) {
 	}
 	if level, _ := logs.last(); level != slog.LevelError {
 		t.Errorf("logged %s, want ERROR", level)
+	}
+}
+
+// A policy that leaves the request ceiling unset asks for a capability no
+// request can use: Issue refuses it, and the exchange answers it as the
+// server's failure, logged at ERROR with the cause, rather than hand the
+// client a capability every meter refuses.
+func TestExchangeAnswersAPolicyGrantingNoRequestAsTheServers(t *testing.T) {
+	var f *fixture
+	f = newFixture(t, fixtureConfig{policy: func(ctx context.Context, g Grant) (limes.IssueRequest, error) {
+		req, err := f.readPolicy(ctx, g)
+		req.Caveats.Requests = limes.RequestCeiling{}
+		return req, err
+	}})
+	logs := &records{}
+	f.ex.cfg.Logger = slog.New(logs)
+	w := post(t, newHandler(t, f), exchangeForm(f.idp.sign(t, TypeAccessToken, accessClaims())), nil)
+	var resp errorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != http.StatusInternalServerError || resp.Error != codeServerError {
+		t.Errorf("status %d: %s", w.Code, w.Body)
+	}
+	if level, msg := logs.last(); level != slog.LevelError || msg != "exchange refused" || !logs.lastWraps(limes.ErrInvalidCaveats) {
+		t.Errorf("logged %s %q, want an ERROR carrying ErrInvalidCaveats", level, msg)
 	}
 }

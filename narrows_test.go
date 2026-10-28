@@ -219,7 +219,7 @@ func TestDelegateStartsNoEarlierThanItsParent(t *testing.T) {
 	parent, _, err := iss.issue(context.Background(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "test-operator"},
 		Subject:  Principal{Type: PrincipalTypeService, TenantID: uuid.MustParse(goldenTenant), Subject: "svc"},
-		Audience: []string{goldenAudience}, Caveats: Caveats{Ops: []Op{OpGet, OpShare}},
+		Audience: []string{goldenAudience}, Caveats: Caveats{Ops: []Op{OpGet, OpShare}, Requests: RequestCeiling{Unlimited: true}},
 		NotBefore: now.Add(time.Minute), TTL: time.Hour,
 	})
 	if err != nil {

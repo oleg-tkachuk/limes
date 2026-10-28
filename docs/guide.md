@@ -228,6 +228,9 @@ A ceiling's zero value allows nothing: a capability that should make requests
 or spend names a `Max`, or `Unlimited: true` to lift the ceiling, and so does
 one whose Biscuit copies should carry limits of their own (`Copies`, a
 `CopyQuota`) — so a ceiling left out fails closed instead of opening up.
+`Issue` and `Delegate` refuse a capability whose `Requests` allows none, as
+`ErrInvalidCaveats`: no request could ever use it. A zero `Budget` stands, a
+capability that may not spend.
 
 **The rule**: only a parent granted `OpShare` may delegate — without it,
 `ErrOpNotAllowed` — and a child may only be narrower. `Issuer.Biscuit`

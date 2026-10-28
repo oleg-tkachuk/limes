@@ -171,7 +171,7 @@ func TestSign_TamperDetection(t *testing.T) {
 		Issuer:    "i",
 		Subject:   Principal{TenantID: uuid.New(), Type: PrincipalTypeAgent, Subject: "agent"},
 		Audience:  []string{audienceData},
-		Caveats:   Caveats{Ops: []Op{OpGet}},
+		Caveats:   Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}},
 		IssuedAt:  now,
 		ExpiresAt: now.Add(time.Minute),
 		ClientID:  testClientID,
@@ -291,8 +291,9 @@ func TestNarrows_RejectsCrossCurrency(t *testing.T) {
 		Subject:  Principal{TenantID: tenantID, Type: PrincipalTypeAgent, Subject: "agent"},
 		Audience: []string{audienceData},
 		Caveats: Caveats{
-			Ops:    []Op{OpGet},
-			Budget: BudgetCeiling{Max: MustParseAmount("10.0"), UnitCode: "USD"},
+			Requests: RequestCeiling{Unlimited: true},
+			Ops:      []Op{OpGet},
+			Budget:   BudgetCeiling{Max: MustParseAmount("10.0"), UnitCode: "USD"},
 		},
 		IssuedAt:  now,
 		ExpiresAt: now.Add(15 * time.Minute),
@@ -301,8 +302,9 @@ func TestNarrows_RejectsCrossCurrency(t *testing.T) {
 	child.ID = uuid.New()
 	child.ParentID = parent.ID
 	child.Caveats = Caveats{
-		Ops:    []Op{OpGet},
-		Budget: BudgetCeiling{Max: MustParseAmount("5.0")},
+		Requests: RequestCeiling{Unlimited: true},
+		Ops:      []Op{OpGet},
+		Budget:   BudgetCeiling{Max: MustParseAmount("5.0")},
 	}
 	// No unit is assumed for an empty one: it matches only another empty.
 	for _, tc := range []struct {
@@ -397,7 +399,7 @@ func TestIssuerSignsUnderTheCallersContext(t *testing.T) {
 	ctx := context.WithValue(context.Background(), requestValue{}, "request")
 	req := IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
-		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet, OpShare}},
+		Audience: []string{audienceData}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet, OpShare}},
 	}
 	c, _, err := issuer.issue(ctx, req)
 	if err != nil {
@@ -457,7 +459,7 @@ func TestSignerSignsThroughAnOpaqueKey(t *testing.T) {
 	now := time.Now().UTC()
 	token, err := signer.sign(context.Background(), Capability{
 		ID: uuid.New(), Issuer: "i", Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
-		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, IssuedAt: now, ExpiresAt: now.Add(time.Minute),
+		Audience: []string{audienceData}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}}, IssuedAt: now, ExpiresAt: now.Add(time.Minute),
 		ClientID: testClientID,
 	})
 	if err != nil {
@@ -545,7 +547,7 @@ func TestSignerRefusesASignatureItsKeyDoesNotVerify(t *testing.T) {
 	now := time.Now().UTC()
 	c := Capability{ClientID: testClientID,
 		ID: uuid.New(), Issuer: "i", Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
-		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, IssuedAt: now, ExpiresAt: now.Add(time.Minute),
+		Audience: []string{audienceData}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}}, IssuedAt: now, ExpiresAt: now.Add(time.Minute),
 	}
 	for name, key := range map[string]crypto.Signer{
 		"another key's signature": misreportingKey{reported: pub, signs: other},

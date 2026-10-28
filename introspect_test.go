@@ -32,7 +32,7 @@ func TestIntrospectActive(t *testing.T) {
 	} {
 		req.IssuedBy, req.ClientID = Principal{Subject: "op"}, testClientID
 		req.Subject = Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"}
-		req.Audience, req.Caveats, req.TTL = []string{"another-service"}, Caveats{Ops: []Op{OpGet}}, time.Hour
+		req.Audience, req.Caveats, req.TTL = []string{"another-service"}, Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}}, time.Hour
 		cap, token, err := issuer.issue(ctx, req)
 		if err != nil {
 			t.Fatal(err)
@@ -63,7 +63,7 @@ func TestIntrospectInactive(t *testing.T) {
 	}
 	_, expired, err := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
-		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Second,
+		Audience: []string{audienceData}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}}, TTL: time.Second,
 	})
 	if err != nil {
 		t.Fatal(err)

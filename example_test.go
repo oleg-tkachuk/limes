@@ -142,6 +142,7 @@ func ExampleIssuer_Issue() {
 		Audience: []string{exampleAudience},
 		TTL:      15 * time.Minute,
 		Caveats: limes.Caveats{
+			Requests:         limes.RequestCeiling{Unlimited: true},
 			Ops:              []limes.Op{limes.OpGet},
 			ResourcePrefixes: []string{"corpus/public/"},
 			Budget:           limes.BudgetCeiling{Max: limes.MustParseAmount("25.00"), UnitCode: "USD"},
@@ -163,6 +164,7 @@ func ExampleIssuer_Issue() {
 
 func ExampleCaveats_Check() {
 	caveats := limes.Caveats{
+		Requests:         limes.RequestCeiling{Unlimited: true},
 		Ops:              []limes.Op{limes.OpGet},
 		ResourcePrefixes: []string{"corpus/public/"},
 	}
@@ -210,8 +212,9 @@ func ExampleIssuer_Delegate() {
 		Subject: worker,
 		TTL:     time.Minute,
 		Caveats: limes.Caveats{
-			Ops:    []limes.Op{limes.OpGet},
-			Budget: limes.BudgetCeiling{Max: limes.MustParseAmount("999"), UnitCode: "USD"},
+			Requests: limes.RequestCeiling{Unlimited: true},
+			Ops:      []limes.Op{limes.OpGet},
+			Budget:   limes.BudgetCeiling{Max: limes.MustParseAmount("999"), UnitCode: "USD"},
 		},
 	})
 	fmt.Println(errors.Is(err, limes.ErrDelegationTooWide))
@@ -258,7 +261,7 @@ func Example_proofOfPossession() {
 		IssuedBy: limes.Principal{Subject: "operator@example.com"},
 		Subject:  limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: s.tenantID, Subject: "worker"},
 		Audience: []string{exampleAudience}, TTL: 15 * time.Minute,
-		Caveats:         limes.Caveats{Ops: []limes.Op{limes.OpGet}},
+		Caveats:         limes.Caveats{Requests: limes.RequestCeiling{Unlimited: true}, Ops: []limes.Op{limes.OpGet}},
 		ConfirmationJKT: jkt,
 	})
 	token := tokenResult.Token

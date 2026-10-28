@@ -49,6 +49,11 @@ const (
 	// must name; subAgent is who the narrowed capability is for.
 	exchangeAudience = "https://exchange.example.com"
 	subAgent         = "search-sub-agent"
+	// userRequests and subAgentRequests are the requests the user's and the
+	// sub-agent's capabilities allow: a capability no request can use is
+	// never issued.
+	userRequests     = 100
+	subAgentRequests = 10
 	// mcpPath is where the MCP server answers.
 	mcpPath     = "/mcp"
 	bearer      = "Bearer "
@@ -162,7 +167,10 @@ func (s *server) policy(_ context.Context, g exchange.Grant) (limes.IssueRequest
 	return limes.IssueRequest{
 		IssuedBy: limes.Principal{Type: limes.PrincipalTypeService, Subject: s.resource},
 		Subject:  limes.Principal{Type: limes.PrincipalTypeUser, TenantID: s.tenant, Subject: g.Subject.Subject},
-		Caveats:  limes.Caveats{Ops: []limes.Op{limes.OpGet, limes.OpShare}, ResourcePrefixes: []string{"tools/"}},
+		Caveats: limes.Caveats{
+			Ops: []limes.Op{limes.OpGet, limes.OpShare}, ResourcePrefixes: []string{"tools/"},
+			Requests: limes.RequestCeiling{Max: userRequests},
+		},
 	}, nil
 }
 
@@ -170,7 +178,10 @@ func (s *server) policy(_ context.Context, g exchange.Grant) (limes.IssueRequest
 func (s *server) narrowPolicy(context.Context, exchange.Narrowing) (limes.DelegateRequest, error) {
 	return limes.DelegateRequest{
 		Subject: limes.Principal{Type: limes.PrincipalTypeAgent, Subject: subAgent},
-		Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, ResourcePrefixes: []string{toolResource}},
+		Caveats: limes.Caveats{
+			Ops: []limes.Op{limes.OpGet}, ResourcePrefixes: []string{toolResource},
+			Requests: limes.RequestCeiling{Max: subAgentRequests},
+		},
 	}, nil
 }
 

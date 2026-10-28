@@ -180,7 +180,7 @@ func TestHandlerAnswersWhatWasGranted(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", w.Code, w.Body)
 	}
-	want, err := caveatsDetail(limes.Caveats{Ops: []limes.Op{limes.OpGet}})
+	want, err := caveatsDetail(limes.Caveats{Requests: limes.RequestCeiling{Unlimited: true}, Ops: []limes.Op{limes.OpGet}})
 	if err != nil {
 		t.Fatal(err)
 	}

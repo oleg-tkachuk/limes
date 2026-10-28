@@ -110,7 +110,10 @@ type Grant struct {
 // again until it expires, each exchange issuing a capability of its own,
 // with ceilings of its own: a policy that grants a budget per user, not
 // per exchange, keys it on Grant.Subject (its Issuer and Subject, or its
-// ID for one capability per subject token).
+// ID for one capability per subject token). Set both ceilings explicitly:
+// Caveats.Requests to a Max or Unlimited, since Issue refuses a capability
+// no request can use and the exchange answers that as the server's
+// failure; Caveats.Budget to what it may spend, the zero budget being none.
 type Policy func(ctx context.Context, g Grant) (limes.IssueRequest, error)
 
 // Result is an exchange's capability.

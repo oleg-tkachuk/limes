@@ -40,7 +40,7 @@ func validCapability() Capability {
 	return Capability{
 		ID: uuid.New(), Issuer: "limes-test",
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
-		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}},
+		Audience: []string{audienceData}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}},
 		IssuedAt: now, NotBefore: now, ExpiresAt: now.Add(time.Minute), ClientID: testClientID,
 	}
 }

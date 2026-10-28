@@ -23,7 +23,7 @@ func issueBound(t *testing.T, issuer *Issuer, key crypto.Signer) string {
 	}
 	_, token, err := issuer.issue(context.Background(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
-		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour, ConfirmationJKT: jkt,
+		Audience: []string{audienceData}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}}, TTL: time.Hour, ConfirmationJKT: jkt,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -75,7 +75,7 @@ func mintFor(t *testing.T, issuer *Issuer) string {
 	t.Helper()
 	_, token, err := issuer.issue(context.Background(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
-		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour,
+		Audience: []string{audienceData}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}}, TTL: time.Hour,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -134,7 +134,8 @@ func TestAuthorize(t *testing.T) {
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, TTL: time.Hour,
 		Caveats: Caveats{
-			Ops: []Op{OpGet, OpPut}, ResourcePrefixes: []string{"corpus/public"},
+			Requests: RequestCeiling{Unlimited: true},
+			Ops:      []Op{OpGet, OpPut}, ResourcePrefixes: []string{"corpus/public"},
 			IdempotencyKeyRequired: true, SourceIPCIDR: []string{"10.0.0.0/8"},
 		},
 	})

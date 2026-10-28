@@ -33,7 +33,7 @@ func TestDelegateDerivesTheParentRun(t *testing.T) {
 			ClientID: exampleClientID,
 			IssuedBy: limes.Principal{Subject: "operator@example.com"},
 			Subject:  subject, Audience: []string{exampleAudience}, TTL: time.Minute,
-			Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet, limes.OpShare}},
+			Caveats: limes.Caveats{Requests: limes.RequestCeiling{Unlimited: true}, Ops: []limes.Op{limes.OpGet, limes.OpShare}},
 		})
 		if err != nil {
 			t.Fatal(err)

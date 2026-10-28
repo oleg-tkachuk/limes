@@ -58,17 +58,17 @@ func TestIssueAndDelegateValidateTheSubject(t *testing.T) {
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{Type: "robot", TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{"data"},
-		Caveats:  Caveats{Ops: []Op{OpGet, OpShare}},
+		Caveats:  Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet, OpShare}},
 		TTL:      time.Minute,
 	}); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("Issue with an unknown principal type: err = %v, want ErrInvalidRequest", err)
 	}
 
-	parent := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet, OpShare}})
+	parent := issueRoot(t, issuer, Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet, OpShare}})
 	if _, _, err := issuer.delegate(ctx, DelegateRequest{
 		Parent:  asVerified(parent),
 		Subject: Principal{Type: PrincipalTypeService, Subject: "s", Agent: &AgentPrincipal{AgentType: "worker"}},
-		Caveats: Caveats{Ops: []Op{OpGet, OpShare}},
+		Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet, OpShare}},
 		TTL:     time.Minute,
 	}); !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("Delegate to a service with agent fields: err = %v, want ErrInvalidRequest", err)
@@ -84,7 +84,7 @@ func TestVerifyRefusesAnUnknownPrincipalType(t *testing.T) {
 	token := signUnchecked(t, issuer.signer, Capability{ClientID: testClientID,
 		ID: uuid.New(), Issuer: "limes-test",
 		Subject:  Principal{Type: "robot", TenantID: uuid.New(), Subject: "a"},
-		Audience: []string{"data"}, Caveats: Caveats{Ops: []Op{OpGet}},
+		Audience: []string{"data"}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}},
 		IssuedAt: now, NotBefore: now, ExpiresAt: now.Add(time.Minute),
 	})
 	if _, err := v.Verify(ctx, VerifyRequest{Token: token, Audience: "data"}); !errors.Is(err, ErrInvalidToken) {
@@ -103,7 +103,8 @@ func TestIssueAndDelegateKeepNoAliasOfTheCaller(t *testing.T) {
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a", Agent: &AgentPrincipal{AgentType: "worker"}},
 		Audience: []string{"data"},
 		Caveats: Caveats{
-			Ops: []Op{OpGet, OpShare}, ResourcePrefixes: []string{"a/"}, ResourceURIs: []string{"a/b"},
+			Requests: RequestCeiling{Unlimited: true},
+			Ops:      []Op{OpGet, OpShare}, ResourcePrefixes: []string{"a/"}, ResourceURIs: []string{"a/b"},
 			SourceIPCIDR: []string{"10.0.0.0/8"},
 		},
 		TTL: time.Minute,
