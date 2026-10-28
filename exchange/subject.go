@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/lestrrat-go/jwx/v3/jws"
 	"github.com/lestrrat-go/jwx/v3/jwt"
@@ -66,6 +67,23 @@ const (
 // when its config names none. A symmetric one would let anyone holding the
 // key, the identity provider's other clients among them, mint tokens.
 var DefaultAlgorithms = []string{"RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512", "EdDSA", "Ed25519"}
+
+// keyKind is the key type an algorithm verifies with and, for an elliptic
+// curve, the curve.
+type keyKind struct {
+	typ   jwa.KeyType
+	curve jwa.EllipticCurveAlgorithm
+}
+
+// keyKinds are the keys each of DefaultAlgorithms verifies with (RFC 7518
+// §3, RFC 8037, RFC 9864). An algorithm's signature is checked only under a
+// key of its kind, never under one another algorithm would use.
+var keyKinds = map[string]keyKind{
+	"RS256": {typ: jwa.RSA()}, "RS384": {typ: jwa.RSA()}, "RS512": {typ: jwa.RSA()},
+	"PS256": {typ: jwa.RSA()}, "PS384": {typ: jwa.RSA()}, "PS512": {typ: jwa.RSA()},
+	"ES256": {jwa.EC(), jwa.P256()}, "ES384": {jwa.EC(), jwa.P384()}, "ES512": {jwa.EC(), jwa.P521()},
+	"EdDSA": {jwa.OKP(), jwa.Ed25519()}, "Ed25519": {jwa.OKP(), jwa.Ed25519()},
+}
 
 // JWTVerifierConfig configures a JWTVerifier.
 type JWTVerifierConfig struct {
@@ -185,8 +203,13 @@ func (v *JWTVerifier) VerifySubject(ctx context.Context, token string) (Subject,
 	if err != nil {
 		return Subject{}, err
 	}
+	kid, _ := headers.KeyID()
+	key, err := keyFor(keys, kid, alg)
+	if err != nil {
+		return Subject{}, err
+	}
 	opts := []jwt.ParseOption{
-		jwt.WithContext(ctx), jwt.WithKeySet(keys), jwt.WithIssuer(v.cfg.Issuer),
+		jwt.WithContext(ctx), jwt.WithKey(alg, key), jwt.WithIssuer(v.cfg.Issuer),
 		jwt.WithClock(jwt.ClockFunc(v.cfg.Now)), jwt.WithAcceptableSkew(v.cfg.ClockSkew),
 	}
 	for _, claim := range []string{claimIssuer, claimExpiry, claimAudience, claimSubject, v.cfg.ClientIDClaim, claimIssuedAt, claimJWTID} {
@@ -197,6 +220,40 @@ func (v *JWTVerifier) VerifySubject(ctx context.Context, token string) (Subject,
 		return Subject{}, fmt.Errorf("%w: %w", ErrInvalidGrant, err)
 	}
 	return subjectOf(tok, v.cfg.ClientIDClaim)
+}
+
+// keyFor is the key of keys the header names by kid, if it is one alg
+// verifies with: of alg's key type and curve, and naming no other algorithm.
+// A key set may hold keys for several algorithms, and jwx would verify with
+// the algorithm a key names whatever the header says; the header's alg is
+// the one the configured algorithms admitted, so it is the one verified.
+func keyFor(keys jwk.Set, kid string, alg jwa.SignatureAlgorithm) (jwk.Key, error) {
+	if kid == "" {
+		return nil, fmt.Errorf("%w: no kid", ErrInvalidGrant)
+	}
+	key, ok := keys.LookupKeyID(kid)
+	if !ok {
+		return nil, fmt.Errorf("%w: kid %q is no key of the issuer's", ErrInvalidGrant, kid)
+	}
+	if named, ok := key.Algorithm(); ok && named.String() != alg.String() {
+		return nil, fmt.Errorf("%w: kid %q is a key for %q, not %q", ErrInvalidGrant, kid, named, alg)
+	}
+	kind := keyKinds[alg.String()]
+	if key.KeyType() != kind.typ {
+		return nil, fmt.Errorf("%w: kid %q is a %s key, not one %q verifies with", ErrInvalidGrant, kid, key.KeyType(), alg)
+	}
+	if kind.curve != (jwa.EllipticCurveAlgorithm{}) {
+		c, ok := key.(interface {
+			Crv() (jwa.EllipticCurveAlgorithm, bool)
+		})
+		if !ok {
+			return nil, fmt.Errorf("%w: kid %q names no curve", ErrInvalidGrant, kid)
+		}
+		if crv, ok := c.Crv(); !ok || crv != kind.curve {
+			return nil, fmt.Errorf("%w: kid %q is not on %s, as %q needs", ErrInvalidGrant, kid, kind.curve, alg)
+		}
+	}
+	return key, nil
 }
 
 // subjectOf is the Subject tok, a verified token, names.
