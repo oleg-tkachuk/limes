@@ -282,7 +282,7 @@ function branchPoliciesOver(octokit: Octokit, repo: Repo): BranchPoliciesApi {
     },
     async list(environment) {
       const { data } = await octokit.rest.repos.listDeploymentBranchPolicies({ ...repo, environment_name: environment });
-      return data.branch_policies.map((p) => ({ id: p.id ?? 0, name: p.name ?? "", type: p.type }));
+      return data.branch_policies.map(branchPolicyOf);
     },
     async create(environment, branch) {
       await octokit.rest.repos.createDeploymentBranchPolicy({ ...repo, environment_name: environment, name: branch, type: "branch" });
@@ -293,49 +293,66 @@ function branchPoliciesOver(octokit: Octokit, repo: Repo): BranchPoliciesApi {
   };
 }
 
+// branchPolicyOf is a deployment branch policy as the API answers it, an
+// absent id or name read as none.
+export function branchPolicyOf(p: { id?: number; name?: string; type?: string }): { id: number; name: string; type?: string | undefined } {
+  return { id: p.id ?? 0, name: p.name ?? "", type: p.type };
+}
+
 // tryEnable runs one enabling call; one already on, or not offered to this
 // repository, is a warning, not a failure.
-async function tryEnable(what: string, call: () => Promise<unknown>): Promise<void> {
+export async function tryEnable(what: string, call: () => Promise<unknown>): Promise<boolean> {
   try {
     await call();
     info(`    ${what}: enabled`);
+    return true;
   } catch (err) {
     warning(`${what}: could not enable (already on, or not available here): ${err instanceof Error ? err.message : String(err)}`);
+    return false;
   }
 }
 
 async function main(): Promise<void> {
   const repo = parseRepo(optionalEnv("REPO") ?? DEFAULT_REPOSITORY);
   const octokit = new Octokit({ auth: requireEnv("GH_TOKEN") });
-
-  const { data } = await octokit.rest.repos.get({ ...repo });
-  info(`Repository: ${repo.owner}/${repo.repo}`);
-  info(`Visibility (left unchanged): ${data.visibility ?? "unknown"}`);
-
-  info("==> Merge commits, and head branches deleted on merge");
-  const { data: updated } = await octokit.rest.repos.update({ ...repo, allow_merge_commit: true, delete_branch_on_merge: true });
-  info(`    allow_merge_commit = ${String(updated.allow_merge_commit)}, delete_branch_on_merge = ${String(updated.delete_branch_on_merge)}`);
-
+  await settleMerges(octokit, repo);
   info("==> Private vulnerability reporting and Dependabot alerts");
   await tryEnable("private vulnerability reporting", () => octokit.rest.repos.enablePrivateVulnerabilityReporting({ ...repo }));
   await tryEnable("Dependabot alerts", () => octokit.rest.repos.enableVulnerabilityAlerts({ ...repo }));
-
   info(`==> Environments admitting ${MAIN_BRANCH} alone: ${ENVIRONMENTS.join(", ")}`);
   const policies = branchPoliciesOver(octokit, repo);
   for (const environment of ENVIRONMENTS) {
     for (const line of await admitOnly(policies, environment, MAIN_BRANCH)) info(`    ${line}`);
   }
-
-  info("==> Secrets kept in their environments");
-  const { data: secrets } = await octokit.rest.actions.listRepoSecrets({ ...repo, per_page: 100 });
-  const misplaced = misplacedSecrets(secrets.secrets.map((s) => s.name));
-  for (const line of misplaced) warning(line);
-  if (misplaced.length === 0) info(`    none of ${Object.keys(ENVIRONMENT_SECRETS).join(", ")} is a repository secret`);
-
+  await reportSecrets(octokit, repo);
   info(`==> Rulesets for ${MAIN_BRANCH}, requiring ${REQUIRED_CONTEXTS.join(", ")}, and for ${RELEASE_TAG_REFS.join(" ")}`);
   for (const line of await upsertRulesets(rulesetsOver(octokit, repo), [mainRuleset(), tagsRuleset(), tagCreationRuleset()])) info(`    ${line}`);
   info("Done.");
 }
+
+// settleMerges names the repository, its visibility left unchanged, and
+// sets merge commits, with head branches deleted on merge.
+async function settleMerges(octokit: Octokit, repo: Repo): Promise<void> {
+  const { data } = await octokit.rest.repos.get({ ...repo });
+  info(`Repository: ${repo.owner}/${repo.repo}`);
+  info(`Visibility (left unchanged): ${data.visibility ?? "unknown"}`);
+  info("==> Merge commits, and head branches deleted on merge");
+  const { data: updated } = await octokit.rest.repos.update({ ...repo, allow_merge_commit: true, delete_branch_on_merge: true });
+  info(`    allow_merge_commit = ${String(updated.allow_merge_commit)}, delete_branch_on_merge = ${String(updated.delete_branch_on_merge)}`);
+}
+
+// reportSecrets warns of each environment's secret kept as a repository
+// secret, which every job could read.
+async function reportSecrets(octokit: Octokit, repo: Repo): Promise<void> {
+  info("==> Secrets kept in their environments");
+  const { data: secrets } = await octokit.rest.actions.listRepoSecrets({ ...repo, per_page: SECRETS_PAGE_SIZE });
+  const misplaced = misplacedSecrets(secrets.secrets.map((s) => s.name));
+  for (const line of misplaced) warning(line);
+  if (misplaced.length === 0) info(`    none of ${Object.keys(ENVIRONMENT_SECRETS).join(", ")} is a repository secret`);
+}
+
+// SECRETS_PAGE_SIZE is the API's largest page of repository secrets.
+const SECRETS_PAGE_SIZE = 100;
 
 if (import.meta.main) {
   await runMain(main);

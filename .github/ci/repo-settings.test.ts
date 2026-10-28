@@ -5,6 +5,8 @@ import { describe, test } from "node:test";
 
 import { parse } from "yaml";
 
+import { withoutWorkflowCommands } from "./lib/actions.ts";
+
 import {
   ADMIN_ROLE_ID,
   ENVIRONMENT_SECRETS,
@@ -17,10 +19,12 @@ import {
   TAG_CREATION_RULESET_NAME,
   TAGS_RULESET_NAME,
   admitOnly,
+  branchPolicyOf,
   mainRuleset,
   misplacedSecrets,
   tagCreationRuleset,
   tagsRuleset,
+  tryEnable,
   upsertRulesets,
   type BranchPoliciesApi,
   type Ruleset,
@@ -204,5 +208,19 @@ describe("admitOnly", () => {
     const report = await admitOnly(f.api, "automerge", "main");
     assert.deepEqual(f.calls, ["restrict automerge"]);
     assert.deepEqual(report, ["automerge: admits main alone already"]);
+  });
+});
+
+describe("branchPolicyOf", () => {
+  test("keeps what the API names", () => assert.deepEqual(branchPolicyOf({ id: 3, name: "main", type: "branch" }), { id: 3, name: "main", type: "branch" }));
+  test("reads an absent id or name as none", () => assert.deepEqual(branchPolicyOf({}), { id: 0, name: "", type: undefined }));
+});
+
+describe("tryEnable", () => {
+  test("reports a feature enabled", async () => {
+    assert.equal(await withoutWorkflowCommands(() => tryEnable("alerts", async () => {})), true);
+  });
+  test("carries on past one that cannot be", async () => {
+    assert.equal(await withoutWorkflowCommands(() => tryEnable("alerts", async () => { throw new Error("not available"); })), false);
   });
 });
