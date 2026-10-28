@@ -429,39 +429,49 @@ func (v *Verifier) authenticate(ctx context.Context, token string) (*grant, [][]
 		return nil, nil, fmt.Errorf("%w: token is %d bytes (limit %d)",
 			ErrInvalidToken, len(token), v.cfg.MaxTokenBytes)
 	}
+	cap, biscuitIDs, err := v.verifyToken(ctx, token)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := v.checkWindow(cap); err != nil {
+		return nil, nil, err
+	}
+	return cap, biscuitIDs, nil
+}
 
-	var cap *grant
-	var biscuitIDs [][]byte // set for a Biscuit, from its verified chain
+// verifyToken checks a Biscuit's chain or a JWT's signature (1–3), and
+// returns the grant and, for a Biscuit, the ids of its verified chain.
+func (v *Verifier) verifyToken(ctx context.Context, token string) (*grant, [][]byte, error) {
 	if isBiscuit(token) {
 		if v.cfg.Biscuit == nil {
 			return nil, nil, fmt.Errorf("%w: Biscuit tokens are not accepted here", ErrInvalidToken)
 		}
-		var err error
-		if cap, biscuitIDs, err = v.verifyBiscuit(ctx, token); err != nil {
-			return nil, nil, err
-		}
-	} else {
-		var err error
-		if cap, err = v.verifySigned(ctx, token); err != nil {
-			return nil, nil, err
-		}
-		// The token sealed inside a Biscuit, lifted out to shed the
-		// Biscuit's attenuation.
-		if cap.biscuitRoot != "" {
-			return nil, nil, fmt.Errorf("%w: token is sealed in a Biscuit; present the Biscuit", ErrInvalidToken)
-		}
+		return v.verifyBiscuit(ctx, token)
 	}
+	cap, err := v.verifySigned(ctx, token)
+	if err != nil {
+		return nil, nil, err
+	}
+	// The token sealed inside a Biscuit, lifted out to shed the
+	// Biscuit's attenuation.
+	if cap.biscuitRoot != "" {
+		return nil, nil, fmt.Errorf("%w: token is sealed in a Biscuit; present the Biscuit", ErrInvalidToken)
+	}
+	return cap, nil, nil
+}
 
-	// 4) Time window. Leeway absorbs clock skew on both ends.
+// checkWindow refuses a grant outside its time window (4). Leeway absorbs
+// clock skew on both ends.
+func (v *Verifier) checkWindow(cap *grant) error {
 	now := v.cfg.Now()
 	if !cap.NotBefore.IsZero() && now.Add(v.cfg.Leeway).Before(cap.NotBefore) {
-		return nil, nil, ErrNotYetValid
+		return ErrNotYetValid
 	}
 	// RFC 7519 §4.1.4: refused on or after exp, less the leeway.
 	if cap.ExpiresAt.IsZero() || !now.Add(-v.cfg.Leeway).Before(cap.ExpiresAt) {
-		return nil, nil, ErrExpired
+		return ErrExpired
 	}
-	return cap, biscuitIDs, nil
+	return nil
 }
 
 // checkRevoked refuses a capability revoked itself or through any ancestor
@@ -585,52 +595,64 @@ func (v *Verifier) verifyBiscuit(ctx context.Context, token string) (*grant, [][
 // everything about the token itself; the time, audience and revocation gates
 // run in Verify on the capability the token finally grants.
 func (v *Verifier) verifySigned(ctx context.Context, token string) (*grant, error) {
-	// 1) Header: structure, algorithm, type, key id.
+	parts, header, err := readSignedHeader(token)
+	if err != nil {
+		return nil, err
+	}
+	if err := v.checkSignature(ctx, parts, header.Kid); err != nil {
+		return nil, err
+	}
+	return v.readSignedClaims(parts.Payload, header.Kid)
+}
+
+// readSignedHeader splits a compact JWT and reads its header (1): its
+// structure, algorithm, type and key id.
+func readSignedHeader(token string) (jose.Parts, jwtHeader, error) {
 	parts, err := jose.Split(token)
 	if err != nil {
-		return nil, refuseToken(ErrInvalidToken, err)
+		return jose.Parts{}, jwtHeader{}, refuseToken(ErrInvalidToken, err)
 	}
 	header, err := parseHeader(parts.Header)
 	if err != nil {
-		return nil, refuseToken(ErrInvalidToken, err)
+		return jose.Parts{}, jwtHeader{}, refuseToken(ErrInvalidToken, err)
 	}
 	if header.Typ != TokenType {
-		return nil, fmt.Errorf("%w: typ %q is not %q", ErrInvalidToken, header.Typ, TokenType)
+		return jose.Parts{}, jwtHeader{}, fmt.Errorf("%w: typ %q is not %q", ErrInvalidToken, header.Typ, TokenType)
 	}
 	// A kid outside limes's namespace names a key no limes issuer signs
 	// with, and is refused before any key is looked up: at+jwt no longer
 	// tells a capability from another access token, and the kid then does.
 	if !jwks.IsKeyID(header.Kid) {
-		return nil, fmt.Errorf("%w: kid %q is not a limes kid (%q and a name)", ErrInvalidToken, header.Kid, jwks.KeyIDPrefix)
+		return jose.Parts{}, jwtHeader{}, fmt.Errorf("%w: kid %q is not a limes kid (%q and a name)", ErrInvalidToken, header.Kid, jwks.KeyIDPrefix)
 	}
+	return parts, header, nil
+}
 
-	// 2) Key and signature — the cryptographic gate.
-	pub, err := v.cfg.Keys.PublicKey(ctx, header.Kid)
+// checkSignature resolves kid and verifies the signature under it (2) —
+// the cryptographic gate.
+func (v *Verifier) checkSignature(ctx context.Context, parts jose.Parts, kid string) error {
+	pub, err := v.cfg.Keys.PublicKey(ctx, kid)
 	if err != nil {
 		// An unknown kid is the token's fault; a resolver that cannot
 		// answer — the issuer's keys out of reach, a store down — is ours.
 		if errors.Is(err, jwks.ErrUnknownKID) {
-			return nil, fmt.Errorf("%w: kid %q: %w", ErrInvalidToken, header.Kid, err)
+			return fmt.Errorf("%w: kid %q: %w", ErrInvalidToken, kid, err)
 		}
-		return nil, fmt.Errorf("limes: resolve kid %q: %w", header.Kid, err)
+		return fmt.Errorf("limes: resolve kid %q: %w", kid, err)
 	}
-	if err := verifyParts(parts, pub); err != nil {
-		return nil, err
-	}
+	return verifyParts(parts, pub)
+}
 
-	// 3) Claims, now known to be the issuer's.
-	cap, err := parseClaims(parts.Payload)
+// readSignedClaims reads the claims (3), now known to be signed under kid:
+// a trusted issuer kid may sign for, a tenant, and a principal and caveats
+// within the rules.
+func (v *Verifier) readSignedClaims(payload, kid string) (*grant, error) {
+	cap, err := parseClaims(payload)
 	if err != nil {
 		return nil, refuseToken(ErrInvalidToken, err)
 	}
-	if !slices.Contains(v.cfg.TrustedIssuers, cap.Issuer) {
-		return nil, fmt.Errorf("%w: untrusted issuer %q", ErrInvalidToken, cap.Issuer)
-	}
-	if v.cfg.KeyIssuers != nil {
-		if bound, ok := v.cfg.KeyIssuers[header.Kid]; !ok || bound != cap.Issuer {
-			return nil, fmt.Errorf("%w: kid %q may not sign for issuer %q",
-				ErrInvalidToken, header.Kid, cap.Issuer)
-		}
+	if err := v.checkIssuer(kid, cap.Issuer); err != nil {
+		return nil, err
 	}
 	if cap.Subject.TenantID == uuid.Nil() {
 		return nil, fmt.Errorf("%w: capability has no tenant", ErrInvalidToken)
@@ -644,8 +666,22 @@ func (v *Verifier) verifySigned(ctx context.Context, token string) (*grant, erro
 	if err := cap.Caveats.Validate(); err != nil {
 		return nil, refuseToken(ErrInvalidToken, err)
 	}
-
 	return cap, nil
+}
+
+// checkIssuer refuses an issuer the verifier does not trust, or one kid is
+// not bound to sign for.
+func (v *Verifier) checkIssuer(kid, issuer string) error {
+	if !slices.Contains(v.cfg.TrustedIssuers, issuer) {
+		return fmt.Errorf("%w: untrusted issuer %q", ErrInvalidToken, issuer)
+	}
+	if v.cfg.KeyIssuers == nil {
+		return nil
+	}
+	if bound, ok := v.cfg.KeyIssuers[kid]; !ok || bound != issuer {
+		return fmt.Errorf("%w: kid %q may not sign for issuer %q", ErrInvalidToken, kid, issuer)
+	}
+	return nil
 }
 
 // proofRefusals are the dpop errors that refuse a proof; any other error
