@@ -168,13 +168,22 @@ func TestIntrospectionOutage(t *testing.T) {
 
 // A resource server the endpoint authenticated but does not allow to
 // introspect is answered 400 unauthorized_client, wrapped or not, and logged
-// at WARN as a refusal (RFC 7662 §2.3, RFC 6749 §5.2).
-func TestIntrospectionTellsAnUnauthorizedClient(t *testing.T) {
+// at WARN as a refusal (RFC 7662 §2.3, RFC 6749 §5.2); a server error of
+// Authenticate is answered 500 server_error with no detail, logged at ERROR.
+func TestIntrospectionTellsAnUnauthorizedClientAndAServerError(t *testing.T) {
 	f := newFixture(t, fixtureConfig{})
-	for name, refusal := range map[string]error{
-		"the sentinel":         ErrUnauthorizedClient,
-		"the sentinel wrapped": fmt.Errorf("%s may not introspect: %w", mcpServer, ErrUnauthorizedClient),
+	for name, tc := range map[string]struct {
+		err    error
+		status int
+		code   string
+		level  slog.Level
+	}{
+		"the sentinel":           {ErrUnauthorizedClient, http.StatusBadRequest, codeUnauthorizedClient, slog.LevelWarn},
+		"the sentinel wrapped":   {fmt.Errorf("%s may not introspect: %w", mcpServer, ErrUnauthorizedClient), http.StatusBadRequest, codeUnauthorizedClient, slog.LevelWarn},
+		"a server error":         {ErrServerError, http.StatusInternalServerError, codeServerError, slog.LevelError},
+		"a server error wrapped": {fmt.Errorf("look up %s: %w", mcpServer, ErrServerError), http.StatusInternalServerError, codeServerError, slog.LevelError},
 	} {
+		refusal := tc.err
 		logs := &records{}
 		h, err := NewIntrospectionHandler(IntrospectionConfig{
 			Verifier: f.verifier, Logger: slog.New(logs),
@@ -185,10 +194,13 @@ func TestIntrospectionTellsAnUnauthorizedClient(t *testing.T) {
 		}
 		w := post(t, h, url.Values{paramToken: {"a"}}, http.Header{headerAuthorization: {basicCredentials}})
 		var resp errorResponse
-		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != http.StatusBadRequest || resp.Error != codeUnauthorizedClient {
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != tc.status || resp.Error != tc.code {
 			t.Errorf("%s: status %d, body %s", name, w.Code, w.Body)
 		}
-		if level, _ := logs.last(); level != slog.LevelWarn || !logs.lastWraps(refusal) || logs.lastWraps(ErrInvalidClient) {
+		if tc.code == codeServerError && resp.Description != "" {
+			t.Errorf("%s: the body tells the client why: %s", name, w.Body)
+		}
+		if level, _ := logs.last(); level != tc.level || !logs.lastWraps(refusal) || logs.lastWraps(ErrInvalidClient) {
 			t.Errorf("%s logged %s", name, level)
 		}
 	}
