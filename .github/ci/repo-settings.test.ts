@@ -22,6 +22,7 @@ import {
   branchPolicyOf,
   mainRuleset,
   misplacedSecrets,
+  secretsKept,
   tagCreationRuleset,
   tagsRuleset,
   tryEnable,
@@ -223,4 +224,9 @@ describe("tryEnable", () => {
   test("carries on past one that cannot be", async () => {
     assert.equal(await withoutWorkflowCommands(() => tryEnable("alerts", async () => { throw new Error("not available"); })), false);
   });
+});
+
+describe("secretsKept", () => {
+  test("says so when none is misplaced", () => assert.match(secretsKept([])[0] ?? "", /is a repository secret$/));
+  test("says nothing beside a warning", () => assert.deepEqual(secretsKept(["RELEASE_DEPLOY_KEY is a repository secret"]), []));
 });

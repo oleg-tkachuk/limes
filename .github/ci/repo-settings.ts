@@ -320,13 +320,10 @@ async function main(): Promise<void> {
   await tryEnable("private vulnerability reporting", () => octokit.rest.repos.enablePrivateVulnerabilityReporting({ ...repo }));
   await tryEnable("Dependabot alerts", () => octokit.rest.repos.enableVulnerabilityAlerts({ ...repo }));
   info(`==> Environments admitting ${MAIN_BRANCH} alone: ${ENVIRONMENTS.join(", ")}`);
-  const policies = branchPoliciesOver(octokit, repo);
-  for (const environment of ENVIRONMENTS) {
-    for (const line of await admitOnly(policies, environment, MAIN_BRANCH)) info(`    ${line}`);
-  }
+  await admitMainAlone(branchPoliciesOver(octokit, repo));
   await reportSecrets(octokit, repo);
   info(`==> Rulesets for ${MAIN_BRANCH}, requiring ${REQUIRED_CONTEXTS.join(", ")}, and for ${RELEASE_TAG_REFS.join(" ")}`);
-  for (const line of await upsertRulesets(rulesetsOver(octokit, repo), [mainRuleset(), tagsRuleset(), tagCreationRuleset()])) info(`    ${line}`);
+  infoEach(await upsertRulesets(rulesetsOver(octokit, repo), [mainRuleset(), tagsRuleset(), tagCreationRuleset()]));
   info("Done.");
 }
 
@@ -347,8 +344,26 @@ async function reportSecrets(octokit: Octokit, repo: Repo): Promise<void> {
   info("==> Secrets kept in their environments");
   const { data: secrets } = await octokit.rest.actions.listRepoSecrets({ ...repo, per_page: SECRETS_PAGE_SIZE });
   const misplaced = misplacedSecrets(secrets.secrets.map((s) => s.name));
-  for (const line of misplaced) warning(line);
-  if (misplaced.length === 0) info(`    none of ${Object.keys(ENVIRONMENT_SECRETS).join(", ")} is a repository secret`);
+  misplaced.forEach((line) => warning(line));
+  infoEach(secretsKept(misplaced));
+}
+
+// secretsKept is what to say when no environment's secret is misplaced:
+// that none of them is a repository secret.
+export function secretsKept(misplaced: readonly string[]): string[] {
+  return misplaced.length === 0 ? [`none of ${Object.keys(ENVIRONMENT_SECRETS).join(", ")} is a repository secret`] : [];
+}
+
+// admitMainAlone has each environment admit MAIN_BRANCH alone.
+async function admitMainAlone(policies: BranchPoliciesApi): Promise<void> {
+  for (const environment of ENVIRONMENTS) {
+    infoEach(await admitOnly(policies, environment, MAIN_BRANCH));
+  }
+}
+
+// infoEach logs each of lines, indented under its section.
+function infoEach(lines: readonly string[]): void {
+  lines.forEach((line) => info(`    ${line}`));
 }
 
 // SECRETS_PAGE_SIZE is the API's largest page of repository secrets.
