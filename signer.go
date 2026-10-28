@@ -572,14 +572,26 @@ func readActing(claims jwtClaims) (*Principal, []string, error) {
 		return nil, nil, errors.New("limes: limes_principal names no subject (RFC 9068 sub)")
 	}
 	if claims.OnBehalfOf == nil {
-		if claims.Actor != nil {
-			return nil, nil, errors.New("limes: act without limes_on_behalf_of")
-		}
-		if claims.Subject != claims.Principal.Subject {
-			return nil, nil, fmt.Errorf("limes: sub %q differs from limes_principal.subject %q", claims.Subject, claims.Principal.Subject)
-		}
-		return nil, nil, nil
+		return nil, nil, checkActingForItself(claims)
 	}
+	return readOnBehalfOf(claims)
+}
+
+// checkActingForItself refuses an act, or a sub other than the holder's, on
+// a capability that acts for its holder.
+func checkActingForItself(claims jwtClaims) error {
+	if claims.Actor != nil {
+		return errors.New("limes: act without limes_on_behalf_of")
+	}
+	if claims.Subject != claims.Principal.Subject {
+		return fmt.Errorf("limes: sub %q differs from limes_principal.subject %q", claims.Subject, claims.Principal.Subject)
+	}
+	return nil
+}
+
+// readOnBehalfOf reads whom a capability acts for and through, refusing a
+// sub other than that principal's or an act that does not name the holder.
+func readOnBehalfOf(claims jwtClaims) (*Principal, []string, error) {
 	obo := claims.OnBehalfOf.principal()
 	if err := validateOnBehalfOf(obo, claims.Principal.principal()); err != nil {
 		return nil, nil, err
