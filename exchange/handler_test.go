@@ -67,7 +67,7 @@ func post(t *testing.T, h http.Handler, form url.Values, header http.Header) *ht
 func TestHandlerExchanges(t *testing.T) {
 	f := newFixture(t, fixtureConfig{})
 	w := post(t, newHandler(t, f), exchangeForm(f.idp.sign(t, TypeAccessToken, accessClaims())), nil)
-	if w.Code != http.StatusOK || w.Header().Get("Cache-Control") != cacheNoStore || w.Header().Get("Content-Type") != jsonContentType {
+	if w.Code != http.StatusOK || w.Header().Get("Cache-Control") != cacheNoStore || w.Header().Get("Pragma") != pragmaNoCache || w.Header().Get("Content-Type") != jsonContentType {
 		t.Fatalf("status %d, headers %v: %s", w.Code, w.Header(), w.Body)
 	}
 	var resp tokenResponse
@@ -138,7 +138,6 @@ func TestHandlerRefusals(t *testing.T) {
 		"a resource fragment":     {change(map[string][]string{paramResource: {toolResource + "#x"}}), nil, http.StatusBadRequest, codeInvalidTarget},
 		"an empty fragment":       {change(map[string][]string{paramResource: {toolResource + "#"}}), nil, http.StatusBadRequest, codeInvalidTarget},
 		"an unparsable resource":  {change(map[string][]string{paramResource: {"https://[::1"}}), nil, http.StatusBadRequest, codeInvalidTarget},
-		"an empty audience":       {change(map[string][]string{paramAudience: {""}}), nil, http.StatusBadRequest, codeInvalidTarget},
 		"details not an array":    {change(map[string][]string{paramAuthorizationDetails: {`{"type":"x"}`}}), nil, http.StatusBadRequest, codeInvalidRequest},
 		"an unknown client":       {exchangeForm(token), http.Header{clientHeader: {"someone"}}, http.StatusUnauthorized, codeInvalidClient},
 		"a refused subject token": {change(map[string][]string{paramSubjectToken: {"a.b.c"}}), nil, http.StatusBadRequest, codeInvalidGrant},
@@ -151,8 +150,24 @@ func TestHandlerRefusals(t *testing.T) {
 			t.Errorf("%s: status %d, body %s; want %d %s", name, w.Code, w.Body, tc.status, tc.code)
 			continue
 		}
-		if strings.Contains(resp.Description, "exchange:") || w.Header().Get("Cache-Control") != cacheNoStore {
+		if strings.Contains(resp.Description, "exchange:") || w.Header().Get("Cache-Control") != cacheNoStore || w.Header().Get("Pragma") != pragmaNoCache {
 			t.Errorf("%s: description %q, headers %v", name, resp.Description, w.Header())
+		}
+	}
+}
+
+// A parameter sent without a value is treated as omitted (RFC 6749 §3.2):
+// the exchange goes through as if it had not been sent.
+func TestHandlerTreatsAnEmptyParameterAsOmitted(t *testing.T) {
+	f := newFixture(t, fixtureConfig{})
+	h := newHandler(t, f)
+	for _, name := range []string{
+		paramAudience, paramResource, paramActorToken, paramActorTokenType, paramRequestedTokenType, paramScope, paramAuthorizationDetails,
+	} {
+		form := exchangeForm(f.idp.sign(t, TypeAccessToken, accessClaims()))
+		form.Add(name, "")
+		if w := post(t, h, form, nil); w.Code != http.StatusOK {
+			t.Errorf("an empty %s: status %d: %s", name, w.Code, w.Body)
 		}
 	}
 }
