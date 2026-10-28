@@ -90,12 +90,19 @@ func TestParseJWKSIsStrict(t *testing.T) {
 		t.Errorf("members in another case = %v, %v; want no key and an error", keys, err)
 	}
 	dup := fmt.Sprintf(`{"keys":[{"kty":"OKP","crv":"Ed25519","kid":"k","x":%q},{"kty":"OKP","crv":"Ed25519","kid":"k","x":%q},{"kty":"OKP","crv":"Ed25519","kid":"other","x":%q}]}`, jose.B64(a), jose.B64(b), jose.B64(b))
-	keys, err := Parse([]byte(dup))
+	// Both are counted as skipped: a set holding only such keys is broken,
+	// not a withdrawal of every key.
+	keys, skipped, err := parse([]byte(dup))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := keys["k"]; ok || !keys["other"].Equal(b) {
-		t.Errorf("a kid named twice = %v; want it dropped and the rest kept", keys)
+	if _, ok := keys["k"]; ok || !keys["other"].Equal(b) || skipped != 2 {
+		t.Errorf("a kid named twice = %v, %d skipped; want it dropped, both skipped, and the rest kept", keys, skipped)
+	}
+	// A member named twice is refused in an entry as in the document.
+	twice := fmt.Sprintf(`{"keys":[{"kty":"OKP","kty":"OKP","crv":"Ed25519","kid":"k","x":%q}]}`, jose.B64(a))
+	if keys, err := Parse([]byte(twice)); err == nil || keys != nil {
+		t.Errorf("an entry naming a member twice = %v, %v; want an error", keys, err)
 	}
 }
 
@@ -191,5 +198,35 @@ func TestStaticRefusesAKeyItCannotServe(t *testing.T) {
 	got, err := s.PublicKey(context.Background(), "k")
 	if err != nil || got[0] == pub[0] {
 		t.Error("changing the caller's key changed the one the resolver serves")
+	}
+}
+
+// An entry of a shape the reader does not support — a member of another JSON
+// type, or no object at all — is skipped, not taken as the whole set's fault
+// (RFC 7517 §5), and a kid shared with an entry that is no usable Ed25519 key
+// still names its key: §4.5 allows one kid across key types.
+func TestParseSkipsAnEntryOfTheWrongShape(t *testing.T) {
+	kid, pub, _, err := generateKeypair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := fmt.Sprintf(`{"kty":"OKP","crv":"Ed25519","kid":%q,"x":%q}`, kid, jose.B64(pub))
+	for name, other := range map[string]string{
+		"a numeric kid":         `{"kty":"RSA","kid":5}`,
+		"a numeric x":           `{"kty":"OKP","crv":"Ed25519","kid":"n","x":1}`,
+		"a bare number":         `1`,
+		"a string":              `"key"`,
+		"an array":              `[]`,
+		"null":                  `null`,
+		"the kid of an RSA key": fmt.Sprintf(`{"kty":"RSA","kid":%q,"n":"abc","e":"AQAB"}`, kid),
+		"the kid of a bad key":  fmt.Sprintf(`{"kty":"OKP","crv":"Ed25519","kid":%q,"x":"AAAA"}`, kid),
+		// A key of the right length on another curve, or under another kty.
+		"the kid of an X25519 key":   fmt.Sprintf(`{"kty":"OKP","crv":"X25519","kid":%q,"x":%q}`, kid, jose.B64(pub)),
+		"the kid of an EC-typed key": fmt.Sprintf(`{"kty":"EC","crv":"Ed25519","kid":%q,"x":%q}`, kid, jose.B64(pub)),
+	} {
+		keys, skipped, err := parse([]byte(`{"keys":[` + other + `,` + valid + `]}`))
+		if err != nil || len(keys) != 1 || !keys[kid].Equal(pub) || skipped != 1 {
+			t.Errorf("beside %s: %v, %d skipped, %v; want the Ed25519 key and one skipped", name, keys, skipped, err)
+		}
 	}
 }

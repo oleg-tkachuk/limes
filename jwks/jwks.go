@@ -10,6 +10,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/json"
+	"encoding/json/jsontext"
 	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
@@ -41,6 +42,14 @@ type document struct {
 	// Keys is nil when the document has no "keys" member, or a null one:
 	// RFC 7517 §5 requires it, and only an empty array withdraws every key.
 	Keys *[]entry `json:"keys"`
+}
+
+// received is a document as parse reads it: each entry kept as the JSON it
+// is, so one of a shape the reader does not support is skipped on its own
+// rather than failing the set (RFC 7517 §5).
+type received struct {
+	// Keys is nil as document's is.
+	Keys *[]jsontext.Value `json:"keys"`
 }
 
 // entry is one entry in the JWKS — exactly the fields needed to verify
@@ -111,10 +120,12 @@ func MarshalAlgorithms(keys map[string]ed25519.PublicKey, algs map[string]string
 
 // Parse decodes a JWKS document into a kid → public key map. Entries
 // that are not Ed25519 (a future kty), that lack a kid, or whose key does
-// not decode to an Ed25519 public key are skipped rather than failing the
-// document: one malformed or foreign entry must not take every other key —
-// and so every token signed with them — out of service during a rotation.
-// Two entries naming one kid are both skipped. A document that is not JSON
+// not decode to an Ed25519 public key, or that are not of the shape a JWK
+// is read in — a member of another JSON type, no object at all — are skipped
+// rather than failing the document (RFC 7517 §5): one malformed or foreign
+// entry must not take every other key — and so every token signed with them
+// — out of service during a rotation. Two Ed25519 keys naming one kid are
+// both skipped; a kid an entry of another kind also names is not (§4.5). A document that is not JSON
 // at all, names a member twice, or has no "keys" array (RFC 7517 §5) is an
 // error: only `{"keys":[]}` withdraws every key.
 func Parse(raw []byte) (map[string]ed25519.PublicKey, error) {
@@ -124,7 +135,7 @@ func Parse(raw []byte) (map[string]ed25519.PublicKey, error) {
 
 // parse is Parse, also reporting how many entries it skipped.
 func parse(raw []byte) (map[string]ed25519.PublicKey, int, error) {
-	var doc document
+	var doc received
 	// JSON's own rules: names in their exact case, none twice in one object.
 	if err := jsonv2.Unmarshal(raw, &doc); err != nil {
 		return nil, 0, fmt.Errorf("jwks: parse JWKS: %w", err)
@@ -133,38 +144,56 @@ func parse(raw []byte) (map[string]ed25519.PublicKey, int, error) {
 		return nil, 0, errors.New(`jwks: parse JWKS: no "keys" array`)
 	}
 	entries := *doc.Keys
-	out := make(map[string]ed25519.PublicKey, len(entries))
-	seen := make(map[string]int, len(entries)) // entries per kid
-	for _, k := range entries {
-		seen[k.Kid]++
-	}
+	keys := make([]usable, 0, len(entries))
+	named := make(map[string]int, len(entries)) // usable keys per kid
 	skipped := 0
-	for _, k := range entries {
-		key, ok := usableKey(k, seen[k.Kid])
+	for _, value := range entries {
+		k, ok := usableKey(value)
 		if !ok {
 			skipped++
 			continue
 		}
-		out[k.Kid] = key
+		keys = append(keys, k)
+		named[k.kid]++
+	}
+	out := make(map[string]ed25519.PublicKey, len(keys))
+	for _, k := range keys {
+		// A kid named by two usable keys is used for neither: which one
+		// signs is not for the reader to guess. An entry of another kind
+		// naming it too does not count (RFC 7517 §4.5): no token verifies
+		// under that one.
+		if named[k.kid] > 1 {
+			skipped++
+			continue
+		}
+		out[k.kid] = k.key
 	}
 	return out, skipped, nil
 }
 
-// usableKey is k's Ed25519 key, when k is one a verifier can use: an
-// Ed25519 key under a kid named by no other entry (named, the number of
-// entries naming it), for an algorithm that is Ed25519's, encoded as JOSE
+// usable is an entry's Ed25519 key under its kid.
+type usable struct {
+	kid string
+	key ed25519.PublicKey
+}
+
+// usableKey is value's Ed25519 key, when value is an entry a verifier can
+// use: an object whose members are each of their JSON type, for an Ed25519
+// key under a kid, for an algorithm that is Ed25519's, encoded as JOSE
 // encodes every member, once.
-func usableKey(k entry, named int) (ed25519.PublicKey, bool) {
-	// A kid named twice is used for neither key: which one signs is not
-	// for the reader to guess.
-	if k.Kty != jose.KtyOKP || k.Crv != jose.CrvEd25519 || k.Kid == "" || named > 1 || !ed25519Alg(k.Alg) {
-		return nil, false
+func usableKey(value jsontext.Value) (usable, bool) {
+	var k entry
+	if err := jsonv2.Unmarshal(value, &k); err != nil {
+		return usable{}, false
+	}
+	if k.Kty != jose.KtyOKP || k.Crv != jose.CrvEd25519 || k.Kid == "" || !ed25519Alg(k.Alg) {
+		return usable{}, false
 	}
 	decoded, err := jose.UnB64(k.X) // strict: one encoding per key, as every JOSE member
 	if err != nil || len(decoded) != ed25519.PublicKeySize {
-		return nil, false
+		return usable{}, false
 	}
-	return ed25519.PublicKey(decoded), true
+	return usable{kid: k.Kid, key: ed25519.PublicKey(decoded)}, true
 }
 
 // ed25519Alg reports whether alg names Ed25519, or nothing.
