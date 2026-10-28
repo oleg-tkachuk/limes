@@ -450,57 +450,90 @@ func readBlockFacts(blk decodedBlock, boundJKT string) (blockFacts, error) {
 	return f, nil
 }
 
+// read adds fact to f, refusing one outside the vocabulary or with the
+// wrong term.
 func (f *blockFacts) read(fact decodedFact, boundJKT string) error {
-	s, isString := fact.term.(string)
 	switch fact.name {
-	case biscuitFactOp:
-		if !isString {
-			return errors.New("limes_op takes a string")
-		}
-		f.ops = append(f.ops, Op(s))
+	case biscuitFactOp, biscuitFactPlane:
+		return f.readListed(fact)
 	case biscuitFactResourcePrefix, biscuitFactResourceURI:
-		if !isString || s == "" {
-			return fmt.Errorf("%s takes a non-empty string", fact.name)
-		}
-		f.resources = true
-		if fact.name == biscuitFactResourcePrefix {
-			f.prefixes = append(f.prefixes, s)
-		} else {
-			f.uris = append(f.uris, s)
-		}
-	case biscuitFactPlane:
-		if !isString {
-			return errors.New("limes_plane takes a string")
-		}
-		f.planes = append(f.planes, s)
+		return f.readResource(fact)
 	case biscuitFactExpires:
-		t, ok := fact.term.(time.Time)
-		if !ok {
-			return errors.New("limes_expires takes a date")
-		}
-		if f.expires.IsZero() || t.Before(f.expires) {
-			f.expires = t
-		}
+		return f.readExpires(fact)
 	case biscuitFactBind:
-		if !isString || validateThumbprint(s) != nil {
-			return errors.New("limes_bind takes a JWK thumbprint")
-		}
-		if boundJKT != "" && boundJKT != s {
-			return errors.New("a key-bound token cannot be rebound offline")
-		}
-		f.bind = s
+		return f.readBind(fact, boundJKT)
 	case biscuitFactMaxRequests, biscuitFactMaxBudget:
-		n, ok := fact.term.(int64)
-		if !ok || n < 0 {
-			return fmt.Errorf("%s takes an integer of 0 or more", fact.name)
-		}
-		if fact.name == biscuitFactMaxRequests {
-			f.requests = &RequestCeiling{Max: n}
-		} else {
-			f.budget = &BudgetCeiling{Max: Nanos(n)}
-		}
-	default:
-		return fmt.Errorf("fact %q is not part of the attenuation vocabulary", fact.name)
+		return f.readCeiling(fact)
+	}
+	return fmt.Errorf("fact %q is not part of the attenuation vocabulary", fact.name)
+}
+
+// readListed adds an op or a plane, which accumulate.
+func (f *blockFacts) readListed(fact decodedFact) error {
+	s, ok := fact.term.(string)
+	if !ok {
+		return fmt.Errorf("%s takes a string", fact.name)
+	}
+	if fact.name == biscuitFactOp {
+		f.ops = append(f.ops, Op(s))
+	} else {
+		f.planes = append(f.planes, s)
+	}
+	return nil
+}
+
+// readResource adds a resource prefix or URI, which accumulate and replace
+// every resource caveat of the token.
+func (f *blockFacts) readResource(fact decodedFact) error {
+	s, ok := fact.term.(string)
+	if !ok || s == "" {
+		return fmt.Errorf("%s takes a non-empty string", fact.name)
+	}
+	f.resources = true
+	if fact.name == biscuitFactResourcePrefix {
+		f.prefixes = append(f.prefixes, s)
+	} else {
+		f.uris = append(f.uris, s)
+	}
+	return nil
+}
+
+// readExpires keeps the earliest expiry the block names.
+func (f *blockFacts) readExpires(fact decodedFact) error {
+	t, ok := fact.term.(time.Time)
+	if !ok {
+		return errors.New("limes_expires takes a date")
+	}
+	if f.expires.IsZero() || t.Before(f.expires) {
+		f.expires = t
+	}
+	return nil
+}
+
+// readBind keeps the key the block binds the token to, which may restate
+// boundJKT but not change it.
+func (f *blockFacts) readBind(fact decodedFact, boundJKT string) error {
+	s, ok := fact.term.(string)
+	if !ok || validateThumbprint(s) != nil {
+		return errors.New("limes_bind takes a JWK thumbprint")
+	}
+	if boundJKT != "" && boundJKT != s {
+		return errors.New("a key-bound token cannot be rebound offline")
+	}
+	f.bind = s
+	return nil
+}
+
+// readCeiling keeps the last request or budget limit the block sets.
+func (f *blockFacts) readCeiling(fact decodedFact) error {
+	n, ok := fact.term.(int64)
+	if !ok || n < 0 {
+		return fmt.Errorf("%s takes an integer of 0 or more", fact.name)
+	}
+	if fact.name == biscuitFactMaxRequests {
+		f.requests = &RequestCeiling{Max: n}
+	} else {
+		f.budget = &BudgetCeiling{Max: Nanos(n)}
 	}
 	return nil
 }
