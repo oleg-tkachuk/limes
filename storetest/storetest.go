@@ -331,38 +331,54 @@ func checkRoundTrip(t *testing.T, f fixture) {
 func checkRecord(t *testing.T, f fixture) {
 	parent := f.live(t, "agent:parent", uuid.Nil())
 	child := f.live(t, "agent:child", parent.ID)
-	cascadeRoot := f.live(t, "agent:cascade", uuid.Nil())
-	cascadeChild := f.live(t, "agent:cascade-child", cascadeRoot.ID)
-	record := func(id uuid.UUID) limes.Record {
-		t.Helper()
-		return f.record(t, id)
+	checkRecordReadsBack(t, f)
+	checkRecordFirstRevocation(t, f, parent.ID)
+	rev := f.record(t, child.ID).Revocation
+	expect.That(t, rev == nil, "a child stopped through its parent has an entry of its own: %+v", rev)
+	checkRecordCascade(t, f)
+	for _, id := range []uuid.UUID{uuid.New(), uuid.Nil()} {
+		_, err := f.Store.GetRecord(f.Ctx, id)
+		expect.That(t, errors.Is(err, limes.ErrNotFound), "GetRecord %s: err = %v, want ErrNotFound", id, err)
 	}
+}
 
+// checkRecordReadsBack holds GetRecord to the capability inserted, issued by
+// whom it was, and no revocation.
+func checkRecordReadsBack(t *testing.T, f fixture) {
 	issuer := f.issuer()
 	issued := f.newCapability("agent:issued", uuid.Nil(), f.now.Add(ttl))
 	err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: issued, IssuedBy: issuer})
 	expect.Must(t, err == nil, "insert %s: %v", issued.ID, err)
-	r := record(issued.ID)
+	r := f.record(t, issued.ID)
 	diff := diffCapabilities(r.Capability, issued)
 	expect.That(t, diff == "", "GetRecord read back a different capability: %s", diff)
 	expect.That(t, !(!reflect.DeepEqual(r.IssuedBy, issuer) || r.Revocation != nil), "before any revoke: issued by %+v, revocation %+v; want %+v and none", r.IssuedBy, r.Revocation, issuer)
+}
 
-	first := f.revoke(t, parent.ID, false)
-	expect.That(t, !(first.AlreadyRevoked), "first revoke of %s: AlreadyRevoked", parent.ID)
-	again, err := f.Store.Revoke(f.Ctx, limes.RevokeRequest{CapabilityID: parent.ID, Note: "again", Actor: "someone-else"})
+// checkRecordFirstRevocation holds a record to its first revoke's entry, as
+// both revokes reported it, however often it was revoked since.
+func checkRecordFirstRevocation(t *testing.T, f fixture, parent uuid.UUID) {
+	first := f.revoke(t, parent, false)
+	expect.That(t, !(first.AlreadyRevoked), "first revoke of %s: AlreadyRevoked", parent)
+	again, err := f.Store.Revoke(f.Ctx, limes.RevokeRequest{CapabilityID: parent, Note: "again", Actor: "someone-else"})
 	expect.Must(t, err == nil, "%v", err)
-	rev := record(parent.ID).Revocation
+	rev := f.record(t, parent).Revocation
 	if rev == nil || rev.Note != "test" || rev.Actor != "storetest" || rev.Cascaded || rev.RevokedAt.IsZero() {
 		t.Errorf("revocation = %+v; want the first revoke's reason and actor, not cascading, with a time", rev)
-	} else {
-		expect.That(t, sameRevocation(first.Revocation, *rev), "first revoke reported %+v; on record %+v", first.Revocation, rev)
-		expect.That(t, !(!again.AlreadyRevoked || !sameRevocation(again.Revocation, *rev)), "repeated revoke = %+v; want AlreadyRevoked and the first entry %+v", again, rev)
+		return
 	}
-	rev = record(child.ID).Revocation
-	expect.That(t, rev == nil, "a child stopped through its parent has an entry of its own: %+v", rev)
+	expect.That(t, sameRevocation(first.Revocation, *rev), "first revoke reported %+v; on record %+v", first.Revocation, rev)
+	expect.That(t, !(!again.AlreadyRevoked || !sameRevocation(again.Revocation, *rev)), "repeated revoke = %+v; want AlreadyRevoked and the first entry %+v", again, rev)
+}
+
+// checkRecordCascade holds a cascading revoke to a cascading entry on the
+// root and its child, with every field kept.
+func checkRecordCascade(t *testing.T, f fixture) {
+	cascadeRoot := f.live(t, "agent:cascade", uuid.Nil())
+	cascadeChild := f.live(t, "agent:cascade-child", cascadeRoot.ID)
 	f.revoke(t, cascadeRoot.ID, true)
 	for _, id := range []uuid.UUID{cascadeRoot.ID, cascadeChild.ID} {
-		rev := record(id).Revocation
+		rev := f.record(t, id).Revocation
 		if rev == nil || !rev.Cascaded {
 			t.Errorf("%s after a cascading revoke: revocation %+v, want a cascading entry", id, rev)
 			continue
@@ -371,10 +387,6 @@ func checkRecord(t *testing.T, f fixture) {
 		// keep reads back as unset.
 		unset := fields.Unset(*rev)
 		expect.That(t, !(len(unset) > 0), "%s: revocation %+v reads back with %v unset", id, rev, unset)
-	}
-	for _, id := range []uuid.UUID{uuid.New(), uuid.Nil()} {
-		_, err := f.Store.GetRecord(f.Ctx, id)
-		expect.That(t, errors.Is(err, limes.ErrNotFound), "GetRecord %s: err = %v, want ErrNotFound", id, err)
 	}
 }
 
@@ -405,36 +417,51 @@ func checkRevoke(t *testing.T, f fixture) {
 	parent := f.live(t, "agent:parent", uuid.Nil())
 	child := f.live(t, "agent:child", parent.ID)
 	grandchild := f.live(t, "agent:grandchild", child.ID)
-	other := f.live(t, "agent:other", uuid.Nil())
-	r := f.revoke(t, parent.ID, false)
-	expect.That(t, !(r.AlreadyRevoked || r.PriorDisposition != limes.RecordDispositionActive), "first revoke = %+v; want a new entry, active before", r)
-	if r := f.revoke(t, parent.ID, false); !r.AlreadyRevoked || r.PriorDisposition != limes.RecordDispositionRevoked { // idempotent
-		t.Errorf("repeated revoke = %+v; want AlreadyRevoked, revoked before", r)
-	}
-	expect.That(t, !(!f.revoked(t, parent.ID) || !f.revoked(t, child.ID)), "revoking a parent must stop it and its child")
-	expect.That(t, !(f.revoked(t, other.ID)), "revoking one capability stopped an unrelated one")
-	// Stopped through its parent, the child has no entry of its own, so its
-	// first revoke writes one.
-	if r := f.revoke(t, child.ID, false); r.AlreadyRevoked || r.Revocation.Cascaded || r.PriorDisposition != limes.RecordDispositionRevoked {
-		t.Errorf("first revoke of a child stopped through its parent = %+v; want a new entry, not cascading, revoked before", r)
-	} else if rev := f.record(t, child.ID).Revocation; rev == nil || !sameRevocation(r.Revocation, *rev) {
-		t.Errorf("first revoke of a child reported %+v; on record %+v", r.Revocation, rev)
-	}
-	// An expired capability is expired before its revoke, which still
-	// writes its entry.
-	expired := f.insert(t, f.newCapability("agent:expired", uuid.Nil(), f.now.Add(-expiredAgo)))
-	r = f.revoke(t, expired.ID, false)
-	expect.That(t, !(r.AlreadyRevoked || r.PriorDisposition != limes.RecordDispositionExpired), "revoke of an expired capability = %+v; want a new entry, expired before", r)
-	rev := f.record(t, expired.ID).Revocation
-	expect.That(t, rev != nil, "revoke of an expired capability wrote no entry")
+	checkRevokeIdempotent(t, f, parent.ID, child.ID)
+	checkRevokeStoppedChild(t, f, child.ID)
+	checkRevokeExpired(t, f)
 	// A cascade over a capability already revoked keeps its entry, and
 	// those of its descendants that have one, and writes the others'.
-	r = f.revoke(t, parent.ID, true)
+	r := f.revoke(t, parent.ID, true)
 	expect.That(t, !(!r.AlreadyRevoked || r.Revocation.Cascaded), "cascade over a revoked capability = %+v; want AlreadyRevoked and the first, plain entry", r)
-	rev = f.record(t, child.ID).Revocation
+	rev := f.record(t, child.ID).Revocation
 	expect.That(t, !(rev == nil || rev.Cascaded), "child's own entry after the cascade = %+v; want it kept, not cascading", rev)
 	rev = f.record(t, grandchild.ID).Revocation
 	expect.That(t, !(rev == nil || !rev.Cascaded), "grandchild after the cascade = %+v; want a cascading entry", rev)
+}
+
+// checkRevokeIdempotent holds Revoke to writing one entry and reporting it,
+// to stopping the parent and its child, and nothing unrelated.
+func checkRevokeIdempotent(t *testing.T, f fixture, parent, child uuid.UUID) {
+	other := f.live(t, "agent:other", uuid.Nil())
+	r := f.revoke(t, parent, false)
+	expect.That(t, !(r.AlreadyRevoked || r.PriorDisposition != limes.RecordDispositionActive), "first revoke = %+v; want a new entry, active before", r)
+	r = f.revoke(t, parent, false) // idempotent
+	expect.That(t, !(!r.AlreadyRevoked || r.PriorDisposition != limes.RecordDispositionRevoked), "repeated revoke = %+v; want AlreadyRevoked, revoked before", r)
+	expect.That(t, !(!f.revoked(t, parent) || !f.revoked(t, child)), "revoking a parent must stop it and its child")
+	expect.That(t, !(f.revoked(t, other.ID)), "revoking one capability stopped an unrelated one")
+}
+
+// checkRevokeStoppedChild holds Revoke to writing an entry for a child
+// stopped through its parent, which has none of its own.
+func checkRevokeStoppedChild(t *testing.T, f fixture, child uuid.UUID) {
+	r := f.revoke(t, child, false)
+	if r.AlreadyRevoked || r.Revocation.Cascaded || r.PriorDisposition != limes.RecordDispositionRevoked {
+		t.Errorf("first revoke of a child stopped through its parent = %+v; want a new entry, not cascading, revoked before", r)
+		return
+	}
+	rev := f.record(t, child).Revocation
+	expect.That(t, !(rev == nil || !sameRevocation(r.Revocation, *rev)), "first revoke of a child reported %+v; on record %+v", r.Revocation, rev)
+}
+
+// checkRevokeExpired holds Revoke to writing the entry of a capability
+// expired before its revoke, and reporting it expired.
+func checkRevokeExpired(t *testing.T, f fixture) {
+	expired := f.insert(t, f.newCapability("agent:expired", uuid.Nil(), f.now.Add(-expiredAgo)))
+	r := f.revoke(t, expired.ID, false)
+	expect.That(t, !(r.AlreadyRevoked || r.PriorDisposition != limes.RecordDispositionExpired), "revoke of an expired capability = %+v; want a new entry, expired before", r)
+	rev := f.record(t, expired.ID).Revocation
+	expect.That(t, rev != nil, "revoke of an expired capability wrote no entry")
 }
 
 // Cascade writes an entry for each descendant, which ListByPrincipal shows:
@@ -1142,57 +1169,94 @@ func checkEraseTenant(t *testing.T, f fixture) {
 	if !ok {
 		t.Skip("the Store does not implement limes.TenantRecordEraser")
 	}
-	other, err := f.newTenant()
-	expect.Must(t, err == nil, "NewTenant: %v", err)
-	root := f.live(t, "agent:root", uuid.Nil())
-	child := f.live(t, "agent:child", root.ID)
-	revoked := f.live(t, "agent:revoked", uuid.Nil())
-	f.revoke(t, revoked.ID, false)
-	copyID := []byte("erased-tenant-copy")
-	biscuits, withBiscuits := f.Store.(limes.BiscuitRevocationStore)
-	if withBiscuits {
-		_, err := biscuits.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(child.ID, copyID)})
-		expect.Must(t, err == nil, "RevokeBiscuit: %v", err)
-	}
-	expired := f.insert(t, f.newCapability("agent:expired", uuid.Nil(), f.now.Add(-expiredAgo)))
-	expiredCopyID := []byte("erased-tenant-expired-copy")
-	if withBiscuits {
-		_, err := biscuits.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(expired.ID, expiredCopyID)})
-		expect.Must(t, err == nil, "RevokeBiscuit of the expired record's copy: %v", err)
-	}
-	// Expired, but not for MinPurgeRetention: a verifier may still take it.
-	recent := f.insert(t, f.newCapability("agent:recent", uuid.Nil(), f.now.Add(-limes.MinPurgeRetention/2)))
-	theirs := f.newCapability("agent:theirs", uuid.Nil(), f.now.Add(ttl))
-	theirs.Subject.TenantID = other
-	err = f.Store.Insert(f.tenantCtx(other), limes.InsertRequest{Capability: theirs, IssuedBy: issuedBy})
-	expect.Must(t, err == nil, "Insert for another tenant: %v", err)
+	e := seedErasedTenant(t, f)
 	req := limes.EraseTenantRequest{TenantID: f.Tenant, Note: "tenant removed", Actor: "storetest"}
 	if f.ScopesTenants {
-		_, err := eraser.EraseTenantRecords(f.tenantCtx(other), req)
+		_, err := eraser.EraseTenantRecords(f.tenantCtx(e.other), req)
 		expect.That(t, errors.Is(err, limes.ErrScopeMismatch), "EraseTenantRecords under another tenant's context: err = %v, want ErrScopeMismatch", err)
 	}
-	_, err = eraser.EraseTenantRecords(f.Ctx, limes.EraseTenantRequest{})
+	_, err := eraser.EraseTenantRecords(f.Ctx, limes.EraseTenantRequest{})
 	expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "EraseTenantRecords naming no tenant: err = %v, want ErrInvalidRequest", err)
 	got, err := eraser.EraseTenantRecords(f.Ctx, req)
 	want := limes.EraseTenantResult{Revoked: 4, Removed: 1, Kept: 4}
 	expect.Must(t, !(err != nil || !reflect.DeepEqual(got, want)), "EraseTenantRecords = %+v, %v; want %+v", got, err, want)
-	for _, c := range []limes.Capability{root, child, revoked, recent} {
+	for _, c := range []limes.Capability{e.root, e.child, e.revoked, e.recent} {
 		expect.That(t, f.revoked(t, c.ID), "%s verifies after its tenant was erased", c.Subject.Subject)
 	}
-	r, err := f.Store.GetRecord(f.Ctx, root.ID)
-	expect.That(t, !(err != nil || r.Revocation == nil || r.Revocation.Note != req.Note || r.Revocation.Actor != req.Actor), "the erased root's record = %+v, %v; want its revocation, noted as the request asks", r, err)
-	if withBiscuits {
-		copyRevoked, err := biscuits.IsBiscuitRevoked(f.Ctx, [][]byte{copyID})
-		expect.That(t, !(err != nil || !copyRevoked), "IsBiscuitRevoked of a live child's copy after the erase = %v, %v; want revoked", copyRevoked, err)
-		r, err := biscuits.GetBiscuitRevocation(f.Ctx, biscuitCopy(expired.ID, expiredCopyID))
-		expect.That(t, errors.Is(err, limes.ErrNotFound), "GetBiscuitRevocation of a removed record's copy = %+v, %v; want ErrNotFound, gone with its record", r, err)
-	}
-	_, err = f.get(expired.ID)
-	expect.That(t, errors.Is(err, limes.ErrNotFound), "GetRecord of a record Purge would take, after the erase: err = %v, want ErrNotFound", err)
-	r, err = f.Store.GetRecord(f.tenantCtx(other), theirs.ID)
-	expect.That(t, !(err != nil || r.Revocation != nil), "another tenant's record after the erase = %+v, %v; want it on record and not revoked", r, err)
+	checkErasedRecords(t, f, e, req)
+	checkErasedBiscuits(t, f, e)
 	again, err := eraser.EraseTenantRecords(f.Ctx, req)
 	expect.That(t, !(err != nil || !reflect.DeepEqual(again, limes.EraseTenantResult{Kept: 4})), "EraseTenantRecords again = %+v, %v; want nothing revoked or removed", again, err)
+}
+
+// erasedTenant is what checkEraseTenant erases, and what it must leave.
+type erasedTenant struct {
+	other                        uuid.UUID
+	root, child, revoked, recent limes.Capability
+	expired, theirs              limes.Capability
+	copyID, expiredCopyID        []byte
+	biscuits                     limes.BiscuitRevocationStore
+}
+
+// seedErasedTenant gives the tenant a live root and child, a revoked
+// record, an expired one Purge would take and one it would not yet, and
+// Biscuit copies of a live child and of the expired record; and another
+// tenant a record of its own.
+func seedErasedTenant(t *testing.T, f fixture) erasedTenant {
+	t.Helper()
+	other, err := f.newTenant()
+	expect.Must(t, err == nil, "NewTenant: %v", err)
+	e := erasedTenant{other: other, copyID: []byte("erased-tenant-copy"), expiredCopyID: []byte("erased-tenant-expired-copy")}
+	e.root = f.live(t, "agent:root", uuid.Nil())
+	e.child = f.live(t, "agent:child", e.root.ID)
+	e.revoked = f.live(t, "agent:revoked", uuid.Nil())
+	f.revoke(t, e.revoked.ID, false)
+	e.biscuits, _ = f.Store.(limes.BiscuitRevocationStore)
+	e.revokeCopy(t, f, e.child.ID, e.copyID, "RevokeBiscuit")
+	e.expired = f.insert(t, f.newCapability("agent:expired", uuid.Nil(), f.now.Add(-expiredAgo)))
+	e.revokeCopy(t, f, e.expired.ID, e.expiredCopyID, "RevokeBiscuit of the expired record's copy")
+	// Expired, but not for MinPurgeRetention: a verifier may still take it.
+	e.recent = f.insert(t, f.newCapability("agent:recent", uuid.Nil(), f.now.Add(-limes.MinPurgeRetention/2)))
+	e.theirs = f.newCapability("agent:theirs", uuid.Nil(), f.now.Add(ttl))
+	e.theirs.Subject.TenantID = other
+	err = f.Store.Insert(f.tenantCtx(other), limes.InsertRequest{Capability: e.theirs, IssuedBy: issuedBy})
+	expect.Must(t, err == nil, "Insert for another tenant: %v", err)
+	return e
+}
+
+// revokeCopy revokes the copy id of capID, when the store keeps Biscuit
+// revocations.
+func (e erasedTenant) revokeCopy(t *testing.T, f fixture, capID uuid.UUID, id []byte, what string) {
+	t.Helper()
+	if e.biscuits == nil {
+		return
+	}
+	_, err := e.biscuits.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(capID, id)})
+	expect.Must(t, err == nil, "%s: %v", what, err)
+}
+
+// checkErasedRecords holds an erase to noting the root's revocation as the
+// request asks, removing the record Purge would take, and leaving another
+// tenant's record alone.
+func checkErasedRecords(t *testing.T, f fixture, e erasedTenant, req limes.EraseTenantRequest) {
+	r, err := f.Store.GetRecord(f.Ctx, e.root.ID)
+	expect.That(t, !(err != nil || r.Revocation == nil || r.Revocation.Note != req.Note || r.Revocation.Actor != req.Actor), "the erased root's record = %+v, %v; want its revocation, noted as the request asks", r, err)
+	_, err = f.get(e.expired.ID)
+	expect.That(t, errors.Is(err, limes.ErrNotFound), "GetRecord of a record Purge would take, after the erase: err = %v, want ErrNotFound", err)
+	r, err = f.Store.GetRecord(f.tenantCtx(e.other), e.theirs.ID)
+	expect.That(t, !(err != nil || r.Revocation != nil), "another tenant's record after the erase = %+v, %v; want it on record and not revoked", r, err)
+}
+
+// checkErasedBiscuits holds an erase to revoking a live child's copy, and
+// removing a removed record's copy with it.
+func checkErasedBiscuits(t *testing.T, f fixture, e erasedTenant) {
+	if e.biscuits == nil {
+		return
+	}
+	copyRevoked, err := e.biscuits.IsBiscuitRevoked(f.Ctx, [][]byte{e.copyID})
+	expect.That(t, !(err != nil || !copyRevoked), "IsBiscuitRevoked of a live child's copy after the erase = %v, %v; want revoked", copyRevoked, err)
+	r, err := e.biscuits.GetBiscuitRevocation(f.Ctx, biscuitCopy(e.expired.ID, e.expiredCopyID))
+	expect.That(t, errors.Is(err, limes.ErrNotFound), "GetBiscuitRevocation of a removed record's copy = %+v, %v; want ErrNotFound, gone with its record", r, err)
 }
 
 // censusWindow is the ExpiringWithin of the census checks: past the soonest
