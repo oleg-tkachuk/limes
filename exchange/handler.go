@@ -56,6 +56,7 @@ const DefaultMaxBodyBytes = 64 << 10
 const (
 	codeInvalidRequest       = "invalid_request"
 	codeInvalidClient        = "invalid_client"
+	codeUnauthorizedClient   = "unauthorized_client"
 	codeInvalidGrant         = "invalid_grant"
 	codeInvalidTarget        = "invalid_target"
 	codeInvalidScope         = "invalid_scope"
@@ -71,8 +72,10 @@ type HandlerConfig struct {
 	Exchanger *Exchanger
 	// Authenticate authenticates the client making the request — by mTLS,
 	// a client assertion, a shared secret — and names the audiences its
-	// subject tokens may be issued for. An error refuses the request as
-	// ErrInvalidClient. Required.
+	// subject tokens may be issued for. An error that is or wraps
+	// ErrUnauthorizedClient refuses an authenticated client that may not
+	// exchange: 400 unauthorized_client. Any other error refuses the client
+	// as not authenticated, ErrInvalidClient: 401 invalid_client. Required.
 	Authenticate func(r *http.Request) (Client, error)
 	// EndpointURL is the token endpoint's URL as clients call it, which
 	// their DPoP proofs name (htu). Required when Exchanger checks DPoP.
@@ -170,7 +173,10 @@ func (h *Handler) readRequest(w http.ResponseWriter, r *http.Request) (Request, 
 		return Request{}, "", err
 	}
 	client, err := h.cfg.Authenticate(r)
-	if err != nil {
+	switch {
+	case errors.Is(err, ErrUnauthorizedClient):
+		return Request{}, "", err
+	case err != nil:
 		return Request{}, "", fmt.Errorf("%w: %w", ErrInvalidClient, err)
 	}
 	proof, err := h.proofOf(r)
@@ -312,6 +318,7 @@ var refusals = []struct {
 	{dpop.ErrRequired, http.StatusBadRequest, codeInvalidDPoPProof, "A DPoP proof is required."},
 	{dpop.ErrInvalid, http.StatusBadRequest, codeInvalidDPoPProof, "The DPoP proof is invalid."},
 	{dpop.ErrReplayed, http.StatusBadRequest, codeInvalidDPoPProof, "The DPoP proof was used before."},
+	{ErrUnauthorizedClient, http.StatusBadRequest, codeUnauthorizedClient, "The client may not exchange tokens."},
 	{ErrInvalidClient, http.StatusUnauthorized, codeInvalidClient, "The client could not be authenticated."},
 	{ErrUnsupportedGrantType, http.StatusBadRequest, codeUnsupportedGrantType, "Only token exchange is supported."},
 	{ErrInvalidGrant, http.StatusBadRequest, codeInvalidGrant, "The subject token was refused."},

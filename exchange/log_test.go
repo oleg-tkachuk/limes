@@ -37,6 +37,23 @@ func (r *records) last() (slog.Level, string) {
 	return rec.Level, rec.Message
 }
 
+// lastWraps reports whether the last record's error attribute is or wraps
+// target.
+func (r *records) lastWraps(target error) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.recs) == 0 {
+		return false
+	}
+	found := false
+	r.recs[len(r.recs)-1].Attrs(func(a slog.Attr) bool {
+		err, ok := a.Value.Any().(error)
+		found = found || ok && errors.Is(err, target)
+		return true
+	})
+	return found
+}
+
 // Every exchange is logged: a grant at INFO, a refusal at WARN, the
 // server's failure at ERROR.
 func TestExchangeLogsEveryOutcome(t *testing.T) {
