@@ -175,71 +175,124 @@ type Verifier struct {
 
 // NewVerifier validates wiring and builds the verifier.
 func NewVerifier(cfg VerifierConfig) (*Verifier, error) {
+	if err := checkVerifierWiring(cfg); err != nil {
+		return nil, err
+	}
+	biscuitCfg, err := biscuitConfig(cfg.Biscuit)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Biscuit = biscuitCfg
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
+	if err := setLeeway(&cfg); err != nil {
+		return nil, err
+	}
+	if err := setMaxTokenBytes(&cfg); err != nil {
+		return nil, err
+	}
+	if err := setRealm(&cfg); err != nil {
+		return nil, err
+	}
+	cfg.TrustedIssuers = slices.Clone(cfg.TrustedIssuers)
+	if err := setKeyIssuers(&cfg); err != nil {
+		return nil, err
+	}
+	return &Verifier{cfg: cfg}, nil
+}
+
+// checkVerifierWiring refuses a config without its keys, its revocation
+// lookup or an issuer to trust.
+func checkVerifierWiring(cfg VerifierConfig) error {
 	// A nil pointer in an interface is not nil: unchecked, it would pass
 	// here and panic at the first token verified.
-	if isNilValue(cfg.Keys) {
-		return nil, errors.New("limes: VerifierConfig.Keys required")
+	switch {
+	case isNilValue(cfg.Keys):
+		return errors.New("limes: VerifierConfig.Keys required")
+	case isNilValue(cfg.Revocations):
+		return errors.New("limes: VerifierConfig.Revocations required")
+	case len(cfg.TrustedIssuers) == 0:
+		return errors.New("limes: VerifierConfig.TrustedIssuers required")
 	}
-	if isNilValue(cfg.Revocations) {
-		return nil, errors.New("limes: VerifierConfig.Revocations required")
+	return nil
+}
+
+// biscuitConfig is a copy of b, so the caller's struct stays the caller's,
+// refused when it has no revocation lookup for Biscuits; nil for none.
+func biscuitConfig(b *BiscuitConfig) (*BiscuitConfig, error) {
+	if b == nil {
+		return nil, nil
 	}
-	if len(cfg.TrustedIssuers) == 0 {
-		return nil, errors.New("limes: VerifierConfig.TrustedIssuers required")
-	}
-	if cfg.Biscuit != nil {
-		b := *cfg.Biscuit // the caller's struct stays the caller's
-		cfg.Biscuit = &b
-	}
+	own := *b
 	// A cache answers Biscuit questions only over an upstream for them: the
 	// type accepts the call either way, so the gap is refused here rather
 	// than at the first Biscuit presented. Any other nil lookup, a nil
 	// pointer included, is refused as none.
-	if cfg.Biscuit != nil {
-		if c, ok := cfg.Biscuit.Revocations.(*RevocationCache); ok && (c == nil || !c.answersBiscuits()) {
-			return nil, errNoBiscuitLookup
-		}
-		if isNilValue(cfg.Biscuit.Revocations) {
-			return nil, errNoBiscuitRevocations
-		}
+	if c, ok := own.Revocations.(*RevocationCache); ok && (c == nil || !c.answersBiscuits()) {
+		return nil, errNoBiscuitLookup
 	}
-	if cfg.Now == nil {
-		cfg.Now = time.Now
+	if isNilValue(own.Revocations) {
+		return nil, errNoBiscuitRevocations
 	}
+	return &own, nil
+}
+
+// setLeeway refuses a leeway outside 0..MaxLeeway or beside NoLeeway, and
+// gives an unset one DefaultLeeway.
+func setLeeway(cfg *VerifierConfig) error {
 	if cfg.Leeway < 0 || cfg.Leeway > MaxLeeway {
-		return nil, fmt.Errorf("limes: VerifierConfig.Leeway %s is outside 0..%s", cfg.Leeway, MaxLeeway)
-	}
-	if cfg.MaxTokenBytes < 0 {
-		return nil, fmt.Errorf("limes: VerifierConfig.MaxTokenBytes %d is negative", cfg.MaxTokenBytes)
+		return fmt.Errorf("limes: VerifierConfig.Leeway %s is outside 0..%s", cfg.Leeway, MaxLeeway)
 	}
 	switch {
 	case cfg.NoLeeway && cfg.Leeway != 0:
-		return nil, fmt.Errorf("limes: VerifierConfig.Leeway %s beside NoLeeway", cfg.Leeway)
+		return fmt.Errorf("limes: VerifierConfig.Leeway %s beside NoLeeway", cfg.Leeway)
 	case cfg.NoLeeway:
 		// Leeway stays 0: the window is exact.
 	case cfg.Leeway == 0:
 		cfg.Leeway = DefaultLeeway
 	}
+	return nil
+}
+
+// setMaxTokenBytes refuses a negative bound and gives an unset one
+// DefaultMaxTokenBytes.
+func setMaxTokenBytes(cfg *VerifierConfig) error {
+	if cfg.MaxTokenBytes < 0 {
+		return fmt.Errorf("limes: VerifierConfig.MaxTokenBytes %d is negative", cfg.MaxTokenBytes)
+	}
 	if cfg.MaxTokenBytes == 0 {
 		cfg.MaxTokenBytes = DefaultMaxTokenBytes
 	}
+	return nil
+}
+
+// setRealm refuses a realm RFC 6750 cannot carry and gives an unset one
+// DefaultRealm.
+func setRealm(cfg *VerifierConfig) error {
 	if strings.ContainsFunc(cfg.Realm, func(r rune) bool { return !authParamChar(r) }) {
-		return nil, fmt.Errorf("limes: VerifierConfig.Realm %q holds a character RFC 6750 does not allow", cfg.Realm)
+		return fmt.Errorf("limes: VerifierConfig.Realm %q holds a character RFC 6750 does not allow", cfg.Realm)
 	}
 	if cfg.Realm == "" {
 		cfg.Realm = DefaultRealm
 	}
-	cfg.TrustedIssuers = slices.Clone(cfg.TrustedIssuers)
+	return nil
+}
+
+// setKeyIssuers refuses a config that trusts several issuers without saying
+// which kid speaks for which, and keeps its own copy of the binding.
+func setKeyIssuers(cfg *VerifierConfig) error {
 	switch {
 	case len(cfg.KeyIssuers) > 0 && cfg.SharedKeys:
-		return nil, errors.New("limes: VerifierConfig.KeyIssuers and SharedKeys exclude each other")
+		return errors.New("limes: VerifierConfig.KeyIssuers and SharedKeys exclude each other")
 	case len(cfg.TrustedIssuers) > 1 && len(cfg.KeyIssuers) == 0 && !cfg.SharedKeys:
-		return nil, errors.New("limes: VerifierConfig trusts several issuers; bind each kid to one (KeyIssuers) or set SharedKeys")
+		return errors.New("limes: VerifierConfig trusts several issuers; bind each kid to one (KeyIssuers) or set SharedKeys")
 	}
 	cfg.KeyIssuers = maps.Clone(cfg.KeyIssuers)
 	if len(cfg.KeyIssuers) == 0 {
 		cfg.KeyIssuers = nil // no binding, whichever way it was spelled
 	}
-	return &Verifier{cfg: cfg}, nil
+	return nil
 }
 
 // Verify checks the token itself: its signature, issuer and tenant, its
