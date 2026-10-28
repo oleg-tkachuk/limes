@@ -189,14 +189,9 @@ func NewRevocationCache(cfg RevocationCacheConfig) (*RevocationCache, error) {
 	if err != nil {
 		return nil, err
 	}
-	synced := cfg.SyncedTTL
-	switch {
-	case synced == 0:
-		synced = c.TTL
-	case synced < c.TTL:
-		return nil, fmt.Errorf("limes: cache SyncedTTL %s is shorter than its TTL %s", synced, c.TTL)
-	case synced > MaxRevocationCacheSyncedTTL:
-		return nil, fmt.Errorf("limes: cache SyncedTTL %s is longer than %s", synced, MaxRevocationCacheSyncedTTL)
+	synced, err := syncedTTL(cfg.SyncedTTL, c.TTL)
+	if err != nil {
+		return nil, err
 	}
 	lineage, _ := cfg.Capabilities.(RevocationLineageLookup)
 	if cfg.RequireLineage && lineage == nil {
@@ -211,6 +206,20 @@ func NewRevocationCache(cfg RevocationCacheConfig) (*RevocationCache, error) {
 		ttl:          c.TTL,
 		syncedTTL:    synced,
 	}, nil
+}
+
+// syncedTTL is how long a synced cache holds an answer: synced, refused
+// below ttl or above MaxRevocationCacheSyncedTTL, or ttl when unset.
+func syncedTTL(synced, ttl time.Duration) (time.Duration, error) {
+	switch {
+	case synced == 0:
+		return ttl, nil
+	case synced < ttl:
+		return 0, fmt.Errorf("limes: cache SyncedTTL %s is shorter than its TTL %s", synced, ttl)
+	case synced > MaxRevocationCacheSyncedTTL:
+		return 0, fmt.Errorf("limes: cache SyncedTTL %s is longer than %s", synced, MaxRevocationCacheSyncedTTL)
+	}
+	return synced, nil
 }
 
 // isNilValue reports whether v is nil, or an interface holding a nil

@@ -57,24 +57,20 @@ const unlimitedWithMax = "a ceiling is either Unlimited or has a Max, not both"
 
 // Validate refuses a negative or out-of-range Max, and a Max beside
 // Unlimited, as ErrInvalidRequest.
-func (c RequestCeiling) Validate() error {
-	switch {
-	case c.Unlimited && c.Max != 0:
-		return invalidRequest("requests: %s (Max %d)", unlimitedWithMax, c.Max)
-	case c.Max < 0 || c.Max > MaxIJSONInteger:
-		return invalidRequest("requests: Max %d is outside 0..%d", c.Max, int64(MaxIJSONInteger))
-	}
-	return nil
-}
+func (c RequestCeiling) Validate() error { return validateCount("requests", c.Max, c.Unlimited) }
 
 // Validate refuses a negative or out-of-range Max, and a Max beside
 // Unlimited, as ErrInvalidRequest.
-func (q CopyQuota) Validate() error {
+func (q CopyQuota) Validate() error { return validateCount("copies", q.Max, q.Unlimited) }
+
+// validateCount refuses a count ceiling on axis whose Max is negative or
+// past I-JSON, or set beside Unlimited.
+func validateCount(axis string, max int64, unlimited bool) error {
 	switch {
-	case q.Unlimited && q.Max != 0:
-		return invalidRequest("copies: %s (Max %d)", unlimitedWithMax, q.Max)
-	case q.Max < 0 || q.Max > MaxIJSONInteger:
-		return invalidRequest("copies: Max %d is outside 0..%d", q.Max, int64(MaxIJSONInteger))
+	case unlimited && max != 0:
+		return invalidRequest("%s: %s (Max %d)", axis, unlimitedWithMax, max)
+	case max < 0 || max > MaxIJSONInteger:
+		return invalidRequest("%s: Max %d is outside 0..%d", axis, max, int64(MaxIJSONInteger))
 	}
 	return nil
 }
@@ -134,12 +130,7 @@ func (q CopyQuota) Bounded(bound int64) int64 {
 }
 
 // String is the quota for logs and errors: its Max, or "unlimited".
-func (q CopyQuota) String() string {
-	if q.Unlimited {
-		return unlimitedText
-	}
-	return fmt.Sprint(q.Max)
-}
+func (q CopyQuota) String() string { return countString(q.Max, q.Unlimited) }
 
 // Within reports whether c allows no more than outer, by amount alone:
 // whether the two count in one unit is the caller's to check, and to refuse
@@ -149,11 +140,15 @@ func (c BudgetCeiling) Within(outer BudgetCeiling) bool {
 }
 
 // String is the ceiling for logs and errors: its Max, or "unlimited".
-func (c RequestCeiling) String() string {
-	if c.Unlimited {
+func (c RequestCeiling) String() string { return countString(c.Max, c.Unlimited) }
+
+// countString is a count ceiling for logs and errors: its Max, or
+// "unlimited".
+func countString(max int64, unlimited bool) string {
+	if unlimited {
 		return unlimitedText
 	}
-	return fmt.Sprint(c.Max)
+	return fmt.Sprint(max)
 }
 
 // String is the ceiling for logs and errors: its Max, or "unlimited", and

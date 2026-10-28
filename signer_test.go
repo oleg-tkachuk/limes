@@ -9,6 +9,8 @@ import (
 	"crypto/rand"
 	"errors"
 	"io"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 	"uuid"
@@ -96,34 +98,60 @@ func TestSign_RejectsInvalid(t *testing.T) {
 	_, priv, _ := ed25519.GenerateKey(rand.Reader)
 	signer, _ := NewSigner(SignerConfig{KeyID: testKID, Key: SealKey(priv)})
 
-	now := time.Now()
-	base := func() Capability {
-		return Capability{ClientID: testClientID,
-			ID:     uuid.New(),
-			Issuer: "i",
-			Subject: Principal{
-				Type:     PrincipalTypeAgent,
-				TenantID: uuid.New(),
+	if _, err := signer.sign(context.Background(), signableCapability()); err != nil {
+		t.Fatalf("sign(signableCapability()) = %v, want a token", err)
+	}
+	// Each case breaks one thing in a capability that signs, and is refused
+	// for that thing: the error names it.
+	cases := map[string]struct {
+		edit func(c *Capability)
+		want string
+	}{
+		"missing ID":        {func(c *Capability) { c.ID = uuid.Nil() }, "ID required"},
+		"missing issuer":    {func(c *Capability) { c.Issuer = "" }, "Issuer required"},
+		"missing tenant":    {func(c *Capability) { c.Subject.TenantID = uuid.Nil() }, "TenantID required"},
+		"missing subject":   {func(c *Capability) { c.Subject.Subject = "" }, "Subject.Subject required"},
+		"empty ops":         {func(c *Capability) { c.Caveats.Ops = nil }, "Op required"},
+		"invalid caveats":   {func(c *Capability) { c.Caveats.Ops = []Op{""} }, "invalid caveats"},
+		"invalid subject":   {func(c *Capability) { c.Subject.Type = "" }, "principal"},
+		"reversed times":    {func(c *Capability) { c.ExpiresAt = c.IssuedAt.Add(-time.Minute) }, "ExpiresAt must be after"},
+		"no expiry":         {func(c *Capability) { c.IssuedAt, c.ExpiresAt = time.Time{}, time.Time{} }, "ExpiresAt must be after"},
+		"missing client id": {func(c *Capability) { c.ClientID = "" }, "ClientID"},
+		"prior actors acting for itself": {
+			func(c *Capability) { c.PriorActors = []string{"agent"} }, "PriorActors need an OnBehalfOf",
+		},
+		"acting for another tenant": {
+			func(c *Capability) {
+				c.OnBehalfOf = &Principal{Type: PrincipalTypeUser, TenantID: uuid.New(), Subject: "u"}
 			},
-			Caveats:   Caveats{Ops: []Op{OpGet}},
-			IssuedAt:  now,
-			ExpiresAt: now.Add(time.Minute),
-		}
+			"OnBehalfOf is of tenant",
+		},
+		"prior actors and no parent": {
+			func(c *Capability) { c.OnBehalfOf, c.PriorActors = onBehalfOfHolder(c), []string{"agent"} }, "PriorActors need a ParentID",
+		},
+		"an empty prior actor": {
+			func(c *Capability) {
+				c.OnBehalfOf, c.PriorActors, c.ParentID = onBehalfOfHolder(c), []string{""}, uuid.New()
+			},
+			"PriorActors are at most",
+		},
+		"prior actors past MaxDelegationDepth": {
+			func(c *Capability) {
+				c.OnBehalfOf, c.ParentID = onBehalfOfHolder(c), uuid.New()
+				c.PriorActors = slices.Repeat([]string{"agent"}, MaxDelegationDepth+1)
+			},
+			"PriorActors are at most",
+		},
+		"time beyond I-JSON": {
+			func(c *Capability) { c.ExpiresAt = time.Unix(MaxIJSONInteger+1, 0) }, "I-JSON",
+		},
 	}
-
-	cases := map[string]func(c *Capability){
-		"missing ID":     func(c *Capability) { c.ID = uuid.Nil() },
-		"missing issuer": func(c *Capability) { c.Issuer = "" },
-		"missing tenant": func(c *Capability) { c.Subject.TenantID = uuid.Nil() },
-		"empty ops":      func(c *Capability) { c.Caveats.Ops = nil },
-		"reversed times": func(c *Capability) { c.ExpiresAt = c.IssuedAt.Add(-time.Minute) },
-	}
-	for name, mut := range cases {
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			c := base()
-			mut(&c)
-			if _, err := signer.sign(context.Background(), c); err == nil {
-				t.Fatalf("expected error, got nil")
+			c := signableCapability()
+			tc.edit(&c)
+			if _, err := signer.sign(context.Background(), c); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("sign = %v, want an error naming %q", err, tc.want)
 			}
 		})
 	}
@@ -476,6 +504,33 @@ func (garbageKey) Sign(io.Reader, []byte, crypto.SignerOpts) ([]byte, error) {
 	return make([]byte, ed25519.SignatureSize), nil
 }
 
+// onBehalfOfHolder is a user of c's tenant for c to act for.
+func onBehalfOfHolder(c *Capability) *Principal {
+	return &Principal{Type: PrincipalTypeUser, TenantID: c.Subject.TenantID, Subject: "user"}
+}
+
+// shortKey reports a real public key and returns a signature one byte short.
+type shortKey struct{ reported ed25519.PublicKey }
+
+func (k shortKey) Public() crypto.PublicKey { return k.reported }
+
+func (shortKey) Sign(io.Reader, []byte, crypto.SignerOpts) ([]byte, error) {
+	return make([]byte, ed25519.SignatureSize-1), nil
+}
+
+// errKeyUnavailable is the failure of a key held elsewhere.
+var errKeyUnavailable = errors.New("key unavailable")
+
+// failingKey reports a real public key and cannot sign, as a KMS that is
+// down.
+type failingKey struct{ reported ed25519.PublicKey }
+
+func (k failingKey) Public() crypto.PublicKey { return k.reported }
+
+func (failingKey) Sign(io.Reader, []byte, crypto.SignerOpts) ([]byte, error) {
+	return nil, errKeyUnavailable
+}
+
 // A signature that does not verify under the key's own public key is never
 // put in a token, whatever signed it: every verifier would refuse that token.
 func TestSignerRefusesASignatureItsKeyDoesNotVerify(t *testing.T) {
@@ -495,6 +550,8 @@ func TestSignerRefusesASignatureItsKeyDoesNotVerify(t *testing.T) {
 	for name, key := range map[string]crypto.Signer{
 		"another key's signature": misreportingKey{reported: pub, signs: other},
 		"no signature at all":     garbageKey{reported: pub},
+		"a signature too short":   shortKey{reported: pub},
+		"a key that fails":        failingKey{reported: pub},
 	} {
 		signer, err := NewSigner(SignerConfig{KeyID: testKID, Key: SealKey(key)})
 		if err != nil {

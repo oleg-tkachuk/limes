@@ -255,42 +255,10 @@ func (s *Signer) sign(ctx context.Context, c Capability) (string, error) {
 // signGrant is sign for a grant: a token sealed in a Biscuit names its
 // root. A grant's copies are the verifier's and never signed.
 func (s *Signer) signGrant(ctx context.Context, g grant) (string, error) {
-	c := g.Capability
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	if c.ID == uuid.Nil() {
-		return "", errors.New("limes: ID required")
-	}
-	if c.Issuer == "" {
-		return "", errors.New("limes: Issuer required")
-	}
-	if c.Subject.TenantID == uuid.Nil() {
-		return "", errors.New("limes: Subject.TenantID required")
-	}
-	if c.Subject.Subject == "" {
-		return "", errors.New("limes: Subject.Subject required (RFC 9068 sub)")
-	}
-	if len(c.Caveats.Ops) == 0 {
-		return "", errors.New("limes: at least one Op required")
-	}
-	// Nothing is signed that the verifier would refuse to read.
-	if err := c.Caveats.Validate(); err != nil {
-		return "", err
-	}
-	if err := c.Subject.Validate(); err != nil {
-		return "", err
-	}
-	if c.ExpiresAt.Before(c.IssuedAt) || c.ExpiresAt.IsZero() {
-		return "", errors.New("limes: ExpiresAt must be after IssuedAt")
-	}
-
-	header := jwtHeader{Alg: string(s.alg), Kid: s.keyID, Typ: TokenType}
-	// RFC 9068 makes client_id required of an at+jwt: none is invented.
-	if c.ClientID == "" {
-		return "", errors.New("limes: a capability needs a ClientID (RFC 9068 client_id)")
-	}
-	if err := checkActing(c); err != nil {
+	if err := checkSignable(g.Capability); err != nil {
 		return "", err
 	}
 	claims := claimsOf(g)
@@ -298,7 +266,59 @@ func (s *Signer) signGrant(ctx context.Context, g grant) (string, error) {
 	if err := checkIJSONIntegers(claims); err != nil {
 		return "", err
 	}
+	signingInput, err := s.signingInput(claims)
+	if err != nil {
+		return "", err
+	}
+	sig, err := s.signature(ctx, signingInput)
+	if err != nil {
+		return "", err
+	}
+	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig), nil
+}
 
+// checkSignable refuses a capability the verifier would refuse to read:
+// nothing is signed that it would not.
+func checkSignable(c Capability) error {
+	if err := checkRequired(c); err != nil {
+		return err
+	}
+	if err := c.Caveats.Validate(); err != nil {
+		return err
+	}
+	if err := c.Subject.Validate(); err != nil {
+		return err
+	}
+	if c.ExpiresAt.Before(c.IssuedAt) || c.ExpiresAt.IsZero() {
+		return errors.New("limes: ExpiresAt must be after IssuedAt")
+	}
+	return checkActing(c)
+}
+
+// checkRequired refuses a capability missing a member every token carries.
+func checkRequired(c Capability) error {
+	switch {
+	case c.ID == uuid.Nil():
+		return errors.New("limes: ID required")
+	case c.Issuer == "":
+		return errors.New("limes: Issuer required")
+	case c.Subject.TenantID == uuid.Nil():
+		return errors.New("limes: Subject.TenantID required")
+	case c.Subject.Subject == "":
+		return errors.New("limes: Subject.Subject required (RFC 9068 sub)")
+	case len(c.Caveats.Ops) == 0:
+		return errors.New("limes: at least one Op required")
+	case c.ClientID == "":
+		// RFC 9068 makes client_id required of an at+jwt: none is invented.
+		return errors.New("limes: a capability needs a ClientID (RFC 9068 client_id)")
+	}
+	return nil
+}
+
+// signingInput is the JWS signing input of a token carrying claims: its
+// header and claims, each base64url-encoded, joined by ".".
+func (s *Signer) signingInput(claims jwtClaims) (string, error) {
+	header := jwtHeader{Alg: string(s.alg), Kid: s.keyID, Typ: TokenType}
 	headerJSON, err := json.Marshal(header)
 	if err != nil {
 		return "", fmt.Errorf("limes: marshal header: %w", err)
@@ -307,34 +327,38 @@ func (s *Signer) signGrant(ctx context.Context, g grant) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("limes: marshal claims: %w", err)
 	}
-
-	signingInput := strings.Join([]string{
+	return strings.Join([]string{
 		base64.RawURLEncoding.EncodeToString(headerJSON),
 		base64.RawURLEncoding.EncodeToString(claimsJSON),
-	}, ".")
+	}, "."), nil
+}
 
+// signature signs signingInput with the signer's key, and refuses what is no
+// signature of it under the key's public key.
+func (s *Signer) signature(ctx context.Context, signingInput string) ([]byte, error) {
 	// Ed25519 hashes the message itself (PureEdDSA): crypto.Hash(0) is the
 	// stdlib's way to ask for it.
 	var sig []byte
+	var err error
 	if cs, ok := s.key.open().(ContextSigner); ok {
 		sig, err = cs.SignContext(ctx, rand.Reader, []byte(signingInput), crypto.Hash(0))
 	} else {
 		sig, err = s.key.open().Sign(rand.Reader, []byte(signingInput), crypto.Hash(0))
 	}
 	if err != nil {
-		return "", fmt.Errorf("limes: sign: %w", err)
+		return nil, fmt.Errorf("limes: sign: %w", err)
 	}
 	if len(sig) != ed25519.SignatureSize {
-		return "", fmt.Errorf("limes: sign: an Ed25519 signature is %d bytes, not %d", ed25519.SignatureSize, len(sig))
+		return nil, fmt.Errorf("limes: sign: an Ed25519 signature is %d bytes, not %d", ed25519.SignatureSize, len(sig))
 	}
 	// A key held elsewhere — a KMS, an HSM — may sign with another key than
 	// the one it reports, or return bytes that are no signature at all:
 	// a token carrying either would be refused by every verifier, and
 	// recorded as issued.
 	if !ed25519.Verify(s.pub[:], []byte(signingInput), sig) {
-		return "", errors.New("limes: sign: the signature does not verify under the key's public key")
+		return nil, errors.New("limes: sign: the signature does not verify under the key's public key")
 	}
-	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig), nil
+	return sig, nil
 }
 
 // TokenType is the JWT typ of every capability token: an OAuth 2.0 access
@@ -427,65 +451,95 @@ func claimsOf(g grant) jwtClaims {
 
 // parseClaims reads a payload under the schema its limes_v names.
 func parseClaims(seg string) (*grant, error) {
+	claims, err := decodeClaims(seg)
+	if err != nil {
+		return nil, err
+	}
+	return grantOf(claims)
+}
+
+// decodeClaims decodes a payload strictly, refusing one of another format,
+// without a client_id, or with an integer outside I-JSON.
+func decodeClaims(seg string) (jwtClaims, error) {
 	raw, err := jose.UnB64(seg)
 	if err != nil {
-		return nil, fmt.Errorf("limes: decode claims: %w", err)
+		return jwtClaims{}, fmt.Errorf("limes: decode claims: %w", err)
 	}
 	var claims jwtClaims
 	if err := json.Unmarshal(raw, &claims, strictClaims); err != nil {
-		return nil, fmt.Errorf("limes: parse claims: %w", err)
+		return jwtClaims{}, fmt.Errorf("limes: parse claims: %w", err)
 	}
 	if claims.Format != formatV7 {
-		return nil, fmt.Errorf("limes: limes_v %d is not the format this package reads (%d)", claims.Format, formatV7)
+		return jwtClaims{}, fmt.Errorf("limes: limes_v %d is not the format this package reads (%d)", claims.Format, formatV7)
 	}
 	if claims.ClientID == "" {
-		return nil, errors.New("limes: a capability names its client_id (RFC 9068 §2.2)")
+		return jwtClaims{}, errors.New("limes: a capability names its client_id (RFC 9068 §2.2)")
 	}
-	if err := checkIJSONIntegers(claims); err != nil {
-		return nil, err
-	}
+	return claims, checkIJSONIntegers(claims)
+}
+
+// grantOf is the grant claims carry, refused when what they say of it
+// disagrees with itself.
+func grantOf(claims jwtClaims) (*grant, error) {
 	onBehalfOf, prior, err := readActing(claims)
 	if err != nil {
 		return nil, err
 	}
-
 	id, err := canonicalUUID("jti", claims.ID)
 	if err != nil {
 		return nil, err
 	}
-	cap := &Capability{
-		ID:        id,
-		Issuer:    claims.Issuer,
-		Audience:  claims.Audience,
-		Caveats:   claims.Caveats.caveats(),
-		IssuedAt:  time.Unix(claims.IssuedAt, 0).UTC(),
-		ExpiresAt: time.Unix(claims.ExpiresAt, 0).UTC(),
+	jkt, err := readConfirmation(claims.Confirmation)
+	if err != nil {
+		return nil, err
+	}
+	parentID, err := readParentID(claims.ParentID, prior)
+	if err != nil {
+		return nil, err
+	}
+	c := Capability{
+		ID:              id,
+		Issuer:          claims.Issuer,
+		Subject:         claims.Principal.principal(),
+		Audience:        claims.Audience,
+		Caveats:         claims.Caveats.caveats(),
+		IssuedAt:        time.Unix(claims.IssuedAt, 0).UTC(),
+		ExpiresAt:       time.Unix(claims.ExpiresAt, 0).UTC(),
+		ConfirmationJKT: jkt,
+		ClientID:        claims.ClientID,
+		OnBehalfOf:      onBehalfOf,
+		PriorActors:     prior,
+		ParentID:        parentID,
 	}
 	if claims.NotBefore != 0 {
-		cap.NotBefore = time.Unix(claims.NotBefore, 0).UTC()
+		c.NotBefore = time.Unix(claims.NotBefore, 0).UTC()
 	}
-	cap.Subject = claims.Principal.principal()
-	if claims.Confirmation != nil {
-		// A cnf the signer writes always names a key; an empty one would read
-		// as an unbound capability.
-		if claims.Confirmation.JKT == "" {
-			return nil, errors.New("limes: cnf names no jkt")
+	return &grant{Capability: c, biscuitRoot: claims.BiscuitRoot}, nil
+}
+
+// readConfirmation is the key a cnf binds the capability to, "" for none.
+func readConfirmation(cnf *cnfClaim) (string, error) {
+	if cnf == nil {
+		return "", nil
+	}
+	// A cnf the signer writes always names a key; an empty one would read
+	// as an unbound capability.
+	if cnf.JKT == "" {
+		return "", errors.New("limes: cnf names no jkt")
+	}
+	return cnf.JKT, nil
+}
+
+// readParentID reads limes_parent_id, which a capability with prior actors
+// must name: they are the holders it was delegated through.
+func readParentID(parentID string, prior []string) (uuid.UUID, error) {
+	if parentID == "" {
+		if len(prior) > 0 {
+			return uuid.Nil(), errors.New("limes: prior actors in act, and no limes_parent_id")
 		}
-		cap.ConfirmationJKT = claims.Confirmation.JKT
+		return uuid.Nil(), nil
 	}
-	cap.ClientID = claims.ClientID
-	cap.OnBehalfOf, cap.PriorActors = onBehalfOf, prior
-	if len(prior) > 0 && claims.ParentID == "" {
-		return nil, errors.New("limes: prior actors in act, and no limes_parent_id")
-	}
-	if claims.ParentID != "" {
-		pid, err := canonicalUUID("limes_parent_id", claims.ParentID)
-		if err != nil {
-			return nil, err
-		}
-		cap.ParentID = pid
-	}
-	return &grant{Capability: *cap, biscuitRoot: claims.BiscuitRoot}, nil
+	return canonicalUUID("limes_parent_id", parentID)
 }
 
 // checkActing refuses to sign what readActing would refuse to read.
@@ -518,14 +572,26 @@ func readActing(claims jwtClaims) (*Principal, []string, error) {
 		return nil, nil, errors.New("limes: limes_principal names no subject (RFC 9068 sub)")
 	}
 	if claims.OnBehalfOf == nil {
-		if claims.Actor != nil {
-			return nil, nil, errors.New("limes: act without limes_on_behalf_of")
-		}
-		if claims.Subject != claims.Principal.Subject {
-			return nil, nil, fmt.Errorf("limes: sub %q differs from limes_principal.subject %q", claims.Subject, claims.Principal.Subject)
-		}
-		return nil, nil, nil
+		return nil, nil, checkActingForItself(claims)
 	}
+	return readOnBehalfOf(claims)
+}
+
+// checkActingForItself refuses an act, or a sub other than the holder's, on
+// a capability that acts for its holder.
+func checkActingForItself(claims jwtClaims) error {
+	if claims.Actor != nil {
+		return errors.New("limes: act without limes_on_behalf_of")
+	}
+	if claims.Subject != claims.Principal.Subject {
+		return fmt.Errorf("limes: sub %q differs from limes_principal.subject %q", claims.Subject, claims.Principal.Subject)
+	}
+	return nil
+}
+
+// readOnBehalfOf reads whom a capability acts for and through, refusing a
+// sub other than that principal's or an act that does not name the holder.
+func readOnBehalfOf(claims jwtClaims) (*Principal, []string, error) {
 	obo := claims.OnBehalfOf.principal()
 	if err := validateOnBehalfOf(obo, claims.Principal.principal()); err != nil {
 		return nil, nil, err

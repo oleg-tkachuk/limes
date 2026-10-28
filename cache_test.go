@@ -387,6 +387,7 @@ func TestNewVerifierRefusesTypedNilWiring(t *testing.T) {
 		"a nil store for Biscuits": {
 			Keys: keys, Revocations: c, TrustedIssuers: []string{goldenIssuer}, Biscuit: &BiscuitConfig{Revocations: noStore},
 		},
+		"no trusted issuer": {Keys: keys, Revocations: c},
 	} {
 		if _, err := NewVerifier(cfg); err == nil {
 			t.Errorf("%s: accepted", name)

@@ -101,27 +101,30 @@ func parseDecimal(s string) (Nanos, bool, error) {
 	if !ok {
 		return 0, false, fmt.Errorf("%w: %q is not a decimal amount", ErrInvalidAmount, s)
 	}
-	if r.Sign() < 0 {
-		return 0, false, fmt.Errorf("%w: %s is negative", ErrInvalidAmount, s)
-	}
-	r.Mul(r, nanosPerUnitRat)
-	q, rem := new(big.Int).QuoRem(r.Num(), r.Denom(), new(big.Int))
-	exact := rem.Sign() == 0
-	if !exact {
-		// Round half to even on the remainder's share of the denominator.
-		switch new(big.Int).Lsh(rem, 1).Cmp(r.Denom()) {
-		case 1:
-			q.Add(q, big.NewInt(1))
-		case 0:
-			if q.Bit(0) == 1 {
-				q.Add(q, big.NewInt(1))
-			}
-		}
-	}
+	q, exact := roundHalfEven(r.Mul(r, nanosPerUnitRat))
 	if !q.IsInt64() || Nanos(q.Int64()) > MaxNanos {
 		return 0, false, fmt.Errorf("%w: %s exceeds %s", ErrInvalidAmount, s, MaxNanos)
 	}
 	return Nanos(q.Int64()), exact, nil
+}
+
+// roundHalfEven is r, which is not negative, rounded to the nearest
+// integer, halves to even, and whether that was exact.
+func roundHalfEven(r *big.Rat) (*big.Int, bool) {
+	q, rem := new(big.Int).QuoRem(r.Num(), r.Denom(), new(big.Int))
+	if rem.Sign() == 0 {
+		return q, true
+	}
+	// Round half to even on the remainder's share of the denominator.
+	switch new(big.Int).Lsh(rem, 1).Cmp(r.Denom()) {
+	case 1:
+		q.Add(q, big.NewInt(1))
+	case 0:
+		if q.Bit(0) == 1 {
+			q.Add(q, big.NewInt(1))
+		}
+	}
+	return q, false
 }
 
 // String writes n as a decimal number of units with no trailing zeros:

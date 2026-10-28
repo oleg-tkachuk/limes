@@ -117,3 +117,53 @@ func TestDelegateRefusesAMalformedRequestAsInvalid(t *testing.T) {
 		})
 	}
 }
+
+// revocationOutageStore is genStore whose revocation lookup fails.
+type revocationOutageStore struct {
+	genStore
+	err error
+}
+
+func (s revocationOutageStore) IsRevoked(context.Context, uuid.UUID) (bool, error) {
+	return false, s.err
+}
+
+// Nothing is derived from a capability the store cannot say is not revoked:
+// no Biscuit is sealed and no child delegated, and the store's error comes
+// back as itself, never as a revoked capability or a bad request.
+func TestDerivingKeepsTheStoreErrorApart(t *testing.T) {
+	outage := errors.New("connection refused")
+	signer, err := NewSigner(SignerConfig{KeyID: goldenKID, Key: SealKey(ed25519.NewKeyFromSeed(goldenSeed[:]))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	iss, err := NewIssuer(IssuerConfig{
+		Signer: signer, Store: revocationOutageStore{err: outage}, IssuerName: goldenIssuer, DefaultTTL: time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := validIssue()
+	req.Caveats.Ops = []Op{OpGet, OpShare}
+	c, _, err := iss.issue(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := VerifiedCapability{c: c}
+	for name, derive := range map[string]func() error{
+		"a Biscuit": func() error {
+			_, err := iss.Biscuit(context.Background(), BiscuitRequest{Capability: parent})
+			return err
+		},
+		"a delegation": func() error {
+			_, err := iss.Delegate(context.Background(), DelegateRequest{
+				Parent: parent, Subject: Principal{Type: PrincipalTypeService, Subject: "child"}, InheritCaveats: true,
+			})
+			return err
+		},
+	} {
+		if err := derive(); !errors.Is(err, outage) || errors.Is(err, ErrRevoked) || errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("%s: err = %v, want the store's error alone", name, err)
+		}
+	}
+}

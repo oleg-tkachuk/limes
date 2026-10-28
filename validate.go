@@ -73,32 +73,63 @@ func (op Op) Validate() error {
 // before minting anything, root or delegated, so every signed capability
 // carries caveats with one meaning.
 func (c Caveats) Validate() error {
-	if len(c.Ops) == 0 {
+	if err := validateOps(c.Ops); err != nil {
+		return err
+	}
+	if err := c.validateResources(); err != nil {
+		return err
+	}
+	if err := c.validateLimits(); err != nil {
+		return err
+	}
+	return validateSourceIPCIDRs(c.SourceIPCIDR)
+}
+
+// validateOps refuses no op at all, or one that is not well formed.
+func validateOps(ops []Op) error {
+	if len(ops) == 0 {
 		return fmt.Errorf("%w: at least one op required", ErrInvalidCaveats)
 	}
-	for _, op := range c.Ops {
+	for _, op := range ops {
 		if err := op.Validate(); err != nil {
 			return err
 		}
 	}
-	for _, p := range c.ResourcePrefixes {
-		if err := validResource("resource prefix", p); err != nil {
-			return err
-		}
+	return nil
+}
+
+// validateResources refuses a resource prefix, URI or name prefix that is
+// not well formed, or a name prefix that ends inside a character.
+func (c Caveats) validateResources() error {
+	if err := validResources("resource prefix", c.ResourcePrefixes); err != nil {
+		return err
 	}
-	for _, u := range c.ResourceURIs {
-		if err := validResource("resource URI", u); err != nil {
-			return err
-		}
+	if err := validResources("resource URI", c.ResourceURIs); err != nil {
+		return err
+	}
+	if err := validResources("resource name prefix", c.ResourceNamePrefixes); err != nil {
+		return err
 	}
 	for _, n := range c.ResourceNamePrefixes {
-		if err := validResource("resource name prefix", n); err != nil {
-			return err
-		}
 		if err := wholeCharacters(n); err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+// validResources is validResource of each of values, a kind of resource.
+func validResources(kind string, values []string) error {
+	for _, v := range values {
+		if err := validResource(kind, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateLimits refuses a request, budget or copy ceiling out of range.
+func (c Caveats) validateLimits() error {
 	if err := c.Requests.Validate(); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidCaveats, err)
 	}
@@ -108,7 +139,13 @@ func (c Caveats) Validate() error {
 	if err := c.Copies.Validate(); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidCaveats, err)
 	}
-	for _, cidr := range c.SourceIPCIDR {
+	return nil
+}
+
+// validateSourceIPCIDRs refuses a source prefix that is not a CIDR, or one
+// no client can match.
+func validateSourceIPCIDRs(cidrs []string) error {
+	for _, cidr := range cidrs {
 		p, err := netip.ParsePrefix(cidr)
 		if err != nil {
 			return fmt.Errorf("%w: source_ip_cidr %q: %w", ErrInvalidCaveats, cidr, err)

@@ -116,25 +116,38 @@ type BiscuitResult struct {
 
 // biscuit is Biscuit, returning the token alone.
 func (i *Issuer) biscuit(ctx context.Context, vc VerifiedCapability) (string, error) {
+	if err := i.checkSealable(ctx, vc); err != nil {
+		return "", err
+	}
+	out, err := i.seal(ctx, vc.c)
+	if err != nil {
+		return "", err
+	}
+	if err := i.fits(out); err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+// checkSealable refuses a capability this issuer gives no Biscuit form: one
+// the verifier did not accept, one already read from a Biscuit, another
+// issuer's, or one expired or revoked.
+func (i *Issuer) checkSealable(ctx context.Context, vc VerifiedCapability) error {
 	c := vc.c
 	switch {
 	case c.ID == uuid.Nil():
-		return "", invalidRequest("Biscuit requires a capability the verifier accepted")
+		return invalidRequest("Biscuit requires a capability the verifier accepted")
 	case vc.fromBiscuit:
-		return "", invalidRequest("capability %s was read from a Biscuit; attenuate that instead", c.ID)
+		return invalidRequest("capability %s was read from a Biscuit; attenuate that instead", c.ID)
 	case c.Issuer != i.issuerName:
-		return "", invalidRequest("capability %s was issued by %q, not %q", c.ID, c.Issuer, i.issuerName)
+		return invalidRequest("capability %s was issued by %q, not %q", c.ID, c.Issuer, i.issuerName)
 	}
-	if !i.clock().Before(c.ExpiresAt) {
-		return "", fmt.Errorf("limes: biscuit of %s: %w", c.ID, ErrExpired)
-	}
-	revoked, err := i.store.IsRevoked(ctx, c.ID)
-	if err != nil {
-		return "", fmt.Errorf("limes: biscuit revocation lookup: %w", err)
-	}
-	if revoked {
-		return "", fmt.Errorf("limes: biscuit of %s: %w", c.ID, ErrRevoked)
-	}
+	return i.checkLive(ctx, c, i.clock(), "biscuit of")
+}
+
+// seal is c's Biscuit: an authority block carrying c's token, signed with a
+// fresh root key the token names.
+func (i *Issuer) seal(ctx context.Context, c Capability) (string, error) {
 	rootPub, rootPriv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return "", fmt.Errorf("limes: biscuit root key: %w", err)
@@ -151,14 +164,7 @@ func (i *Issuer) biscuit(ctx context.Context, vc VerifiedCapability) (string, er
 	if err != nil {
 		return "", fmt.Errorf("limes: build biscuit: %w", err)
 	}
-	out, err := serializeBiscuit(token)
-	if err != nil {
-		return "", err
-	}
-	if err := i.fits(out); err != nil {
-		return "", err
-	}
-	return out, nil
+	return serializeBiscuit(token)
 }
 
 // Attenuation is one offline narrowing. Empty fields leave that dimension as
@@ -201,43 +207,13 @@ func Attenuate(token string, a Attenuation) (string, error) {
 	if attenuations := b.BlockCount(); attenuations >= MaxBiscuitBlocks {
 		return "", invalidRequest("the token already has %d attenuation blocks, MaxBiscuitBlocks", attenuations)
 	}
+	if err := checkAttenuation(a); err != nil {
+		return "", err
+	}
 	block := b.CreateBlock()
-	add := func(name string, term biscuit.Term) error {
-		return block.AddFact(biscuitFact(name, term))
-	}
 	var errs []error
-	for _, op := range a.Ops {
-		errs = append(errs, add(biscuitFactOp, biscuit.String(op)))
-	}
-	for _, p := range a.ResourcePrefixes {
-		errs = append(errs, add(biscuitFactResourcePrefix, biscuit.String(p)))
-	}
-	for _, u := range a.ResourceURIs {
-		errs = append(errs, add(biscuitFactResourceURI, biscuit.String(u)))
-	}
-	for _, p := range a.Audience {
-		errs = append(errs, add(biscuitFactPlane, biscuit.String(p)))
-	}
-	if !a.ExpiresAt.IsZero() {
-		errs = append(errs, add(biscuitFactExpires, biscuit.Date(a.ExpiresAt.UTC().Truncate(time.Second))))
-	}
-	if a.ConfirmationJKT != "" {
-		if err := validateThumbprint(a.ConfirmationJKT); err != nil {
-			return "", err
-		}
-		errs = append(errs, add(biscuitFactBind, biscuit.String(a.ConfirmationJKT)))
-	}
-	if r := a.Requests; r != nil {
-		if r.Unlimited || r.Validate() != nil {
-			return "", invalidRequest("a copy's request ceiling is a bound within 0..%d", int64(MaxIJSONInteger))
-		}
-		errs = append(errs, add(biscuitFactMaxRequests, biscuit.Integer(r.Max)))
-	}
-	if b := a.Budget; b != nil {
-		if b.Unlimited || b.Max.Validate() != nil || b.UnitCode != "" {
-			return "", invalidRequest("a copy's budget ceiling is a bound within 0..%s, in its capability's unit, which it does not name", MaxNanos)
-		}
-		errs = append(errs, add(biscuitFactMaxBudget, biscuit.Integer(b.Max)))
+	for _, fact := range attenuationFacts(a) {
+		errs = append(errs, block.AddFact(fact))
 	}
 	if err := errors.Join(errs...); err != nil {
 		return "", fmt.Errorf("limes: attenuation block: %w", err)
@@ -247,6 +223,63 @@ func Attenuate(token string, a Attenuation) (string, error) {
 		return "", fmt.Errorf("limes: append attenuation: %w", err)
 	}
 	return serializeBiscuit(next)
+}
+
+// checkAttenuation refuses an attenuation no block can carry: a binding
+// that is no thumbprint, or a copy limit that is not a bound.
+func checkAttenuation(a Attenuation) error {
+	if a.ConfirmationJKT != "" {
+		if err := validateThumbprint(a.ConfirmationJKT); err != nil {
+			return err
+		}
+	}
+	return checkCopyCeilings(a.Requests, a.Budget)
+}
+
+// checkCopyCeilings refuses a copy limit that is not a bound within range:
+// a copy only narrows. A budget names no unit: the copy counts in its
+// capability's.
+func checkCopyCeilings(r *RequestCeiling, b *BudgetCeiling) error {
+	if r != nil && (r.Unlimited || r.Validate() != nil) {
+		return invalidRequest("a copy's request ceiling is a bound within 0..%d", int64(MaxIJSONInteger))
+	}
+	if b != nil && (b.Unlimited || b.Max.Validate() != nil || b.UnitCode != "") {
+		return invalidRequest("a copy's budget ceiling is a bound within 0..%s, in its capability's unit, which it does not name", MaxNanos)
+	}
+	return nil
+}
+
+// attenuationFacts are the facts of the block that carries a, which
+// checkAttenuation accepted.
+func attenuationFacts(a Attenuation) []biscuit.Fact {
+	facts := slices.Concat(
+		stringFacts(biscuitFactOp, a.Ops),
+		stringFacts(biscuitFactResourcePrefix, a.ResourcePrefixes),
+		stringFacts(biscuitFactResourceURI, a.ResourceURIs),
+		stringFacts(biscuitFactPlane, a.Audience),
+	)
+	if !a.ExpiresAt.IsZero() {
+		facts = append(facts, biscuitFact(biscuitFactExpires, biscuit.Date(a.ExpiresAt.UTC().Truncate(time.Second))))
+	}
+	if a.ConfirmationJKT != "" {
+		facts = append(facts, biscuitFact(biscuitFactBind, biscuit.String(a.ConfirmationJKT)))
+	}
+	if a.Requests != nil {
+		facts = append(facts, biscuitFact(biscuitFactMaxRequests, biscuit.Integer(a.Requests.Max)))
+	}
+	if a.Budget != nil {
+		facts = append(facts, biscuitFact(biscuitFactMaxBudget, biscuit.Integer(a.Budget.Max)))
+	}
+	return facts
+}
+
+// stringFacts is one fact named name for each of values.
+func stringFacts[S ~string](name string, values []S) []biscuit.Fact {
+	facts := make([]biscuit.Fact, 0, len(values))
+	for _, v := range values {
+		facts = append(facts, biscuitFact(name, biscuit.String(v)))
+	}
+	return facts
 }
 
 // openBiscuit reads a Biscuit's sealed JWT and returns it with the function
@@ -270,41 +303,59 @@ func openBiscuit(token string) (string, func(parent *grant) (*grant, [][]byte, e
 	// The chain is checked once the sealed token has named its root; the
 	// caller verifies that token first and hands back what it vouches for.
 	attenuate := func(parent *grant) (*grant, [][]byte, error) {
-		root, err := jose.UnB64(parent.biscuitRoot)
-		if err != nil || len(root) != ed25519.PublicKeySize {
-			return nil, nil, fmt.Errorf("%w: sealed token names no biscuit root", ErrInvalidToken)
-		}
-		var ids [][]byte
-		if err := guardBiscuit(func() error {
-			b, err := biscuit.Unmarshal(raw)
-			if err != nil {
-				return err
-			}
-			if _, err := b.Authorizer(ed25519.PublicKey(root)); err != nil {
-				return fmt.Errorf("biscuit chain: %w", err)
-			}
-			ids = b.RevocationIds()
-			return nil
-		}); err != nil {
-			return nil, nil, err
-		}
-		cur := grant{Capability: parent.Capability}
-		for i, blk := range blocks[1:] {
-			next, err := applyAttenuation(cur, blk, ids[i+1])
-			if err != nil {
-				return nil, nil, refuseToken(ErrBiscuitAttenuation, fmt.Errorf("block %d: %w", i+1, err))
-			}
-			cur = next
-		}
-		// Each block narrows what it was handed, but the result must still
-		// be caveats the issuer could have minted, under the sealed token's
-		// type.
-		if err := cur.Caveats.Validate(); err != nil {
-			return nil, nil, refuseToken(ErrBiscuitAttenuation, err)
-		}
-		return &cur, ids, nil
+		return attenuateSealed(raw, blocks, parent)
 	}
 	return inner, attenuate, nil
+}
+
+// attenuateSealed verifies a Biscuit's chain against the root parent, its
+// verified sealed token, names, then folds each attenuation block into
+// parent. It returns the result and the token's revocation ids, authority
+// first, read from the chain it verified.
+func attenuateSealed(raw []byte, blocks []decodedBlock, parent *grant) (*grant, [][]byte, error) {
+	ids, err := verifyBiscuitChain(raw, parent.biscuitRoot)
+	if err != nil {
+		return nil, nil, err
+	}
+	cur := grant{Capability: parent.Capability}
+	for i, blk := range blocks[1:] {
+		next, err := applyAttenuation(cur, blk, ids[i+1])
+		if err != nil {
+			return nil, nil, refuseToken(ErrBiscuitAttenuation, fmt.Errorf("block %d: %w", i+1, err))
+		}
+		cur = next
+	}
+	// Each block narrows what it was handed, but the result must still
+	// be caveats the issuer could have minted, under the sealed token's
+	// type.
+	if err := cur.Caveats.Validate(); err != nil {
+		return nil, nil, refuseToken(ErrBiscuitAttenuation, err)
+	}
+	return &cur, ids, nil
+}
+
+// verifyBiscuitChain verifies the signature chain of the Biscuit raw under
+// the root rootB64 names, and returns its revocation ids, authority first.
+func verifyBiscuitChain(raw []byte, rootB64 string) ([][]byte, error) {
+	root, err := jose.UnB64(rootB64)
+	if err != nil || len(root) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("%w: sealed token names no biscuit root", ErrInvalidToken)
+	}
+	var ids [][]byte
+	if err := guardBiscuit(func() error {
+		b, err := biscuit.Unmarshal(raw)
+		if err != nil {
+			return err
+		}
+		if _, err := b.Authorizer(ed25519.PublicKey(root)); err != nil {
+			return fmt.Errorf("biscuit chain: %w", err)
+		}
+		ids = b.RevocationIds()
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return ids, nil
 }
 
 // decodedBlock is one block, its symbols resolved.
@@ -335,41 +386,67 @@ func decodeBiscuitBlocks(c *pb.Biscuit) ([]decodedBlock, error) {
 	symbols := &datalog.SymbolTable{}
 	out := make([]decodedBlock, 0, len(signed))
 	for i, sb := range signed {
-		var blk pb.Block
-		if err := proto.Unmarshal(sb.GetBlock(), &blk); err != nil {
+		d, err := decodeBlock(sb, symbols)
+		if err != nil {
 			return nil, fmt.Errorf("block %d: %w", i, err)
-		}
-		*symbols = append(*symbols, blk.GetSymbols()...)
-		d := decodedBlock{others: len(blk.GetRulesV2()) + len(blk.GetChecksV2())}
-		for _, f := range blk.GetFactsV2() {
-			p := f.GetPredicate()
-			name, err := biscuitSymbol(*symbols, p.GetName())
-			if err != nil {
-				return nil, fmt.Errorf("block %d: fact name: %w", i, err)
-			}
-			if len(p.GetTerms()) != 1 {
-				return nil, fmt.Errorf("block %d: fact %s takes one term", i, name)
-			}
-			var term any
-			switch t := p.GetTerms()[0].GetContent().(type) {
-			case *pb.TermV2_String_:
-				s, err := biscuitSymbol(*symbols, t.String_)
-				if err != nil {
-					return nil, fmt.Errorf("block %d: fact %s: %w", i, name, err)
-				}
-				term = s
-			case *pb.TermV2_Date:
-				term = time.Unix(int64(t.Date), 0).UTC() //nolint:gosec // a Biscuit date is seconds since the epoch
-			case *pb.TermV2_Integer:
-				term = t.Integer
-			default:
-				return nil, fmt.Errorf("block %d: fact %s has an unsupported term", i, name)
-			}
-			d.facts = append(d.facts, decodedFact{name: name, term: term})
 		}
 		out = append(out, d)
 	}
 	return out, nil
+}
+
+// decodeBlock reads one block's facts, adding its symbols to symbols: a
+// block's symbols extend those of the blocks before it.
+func decodeBlock(sb *pb.SignedBlock, symbols *datalog.SymbolTable) (decodedBlock, error) {
+	var blk pb.Block
+	if err := proto.Unmarshal(sb.GetBlock(), &blk); err != nil {
+		return decodedBlock{}, err
+	}
+	*symbols = append(*symbols, blk.GetSymbols()...)
+	d := decodedBlock{others: len(blk.GetRulesV2()) + len(blk.GetChecksV2())}
+	for _, f := range blk.GetFactsV2() {
+		fact, err := decodeFact(f, *symbols)
+		if err != nil {
+			return decodedBlock{}, err
+		}
+		d.facts = append(d.facts, fact)
+	}
+	return d, nil
+}
+
+// decodeFact reads a fact of one term.
+func decodeFact(f *pb.FactV2, symbols datalog.SymbolTable) (decodedFact, error) {
+	p := f.GetPredicate()
+	name, err := biscuitSymbol(symbols, p.GetName())
+	if err != nil {
+		return decodedFact{}, fmt.Errorf("fact name: %w", err)
+	}
+	if len(p.GetTerms()) != 1 {
+		return decodedFact{}, fmt.Errorf("fact %s takes one term", name)
+	}
+	term, err := decodeTerm(name, p.GetTerms()[0], symbols)
+	if err != nil {
+		return decodedFact{}, err
+	}
+	return decodedFact{name: name, term: term}, nil
+}
+
+// decodeTerm reads the term of the fact named name: a string, a date or an
+// integer, the only terms the attenuation vocabulary takes.
+func decodeTerm(name string, t *pb.TermV2, symbols datalog.SymbolTable) (any, error) {
+	switch t := t.GetContent().(type) {
+	case *pb.TermV2_String_:
+		s, err := biscuitSymbol(symbols, t.String_)
+		if err != nil {
+			return nil, fmt.Errorf("fact %s: %w", name, err)
+		}
+		return s, nil
+	case *pb.TermV2_Date:
+		return time.Unix(int64(t.Date), 0).UTC(), nil //nolint:gosec // a Biscuit date is seconds since the epoch
+	case *pb.TermV2_Integer:
+		return t.Integer, nil
+	}
+	return nil, fmt.Errorf("fact %s has an unsupported term", name)
 }
 
 // sealedToken is the JWT the authority block carries.
@@ -444,57 +521,90 @@ func readBlockFacts(blk decodedBlock, boundJKT string) (blockFacts, error) {
 	return f, nil
 }
 
+// read adds fact to f, refusing one outside the vocabulary or with the
+// wrong term.
 func (f *blockFacts) read(fact decodedFact, boundJKT string) error {
-	s, isString := fact.term.(string)
 	switch fact.name {
-	case biscuitFactOp:
-		if !isString {
-			return errors.New("limes_op takes a string")
-		}
-		f.ops = append(f.ops, Op(s))
+	case biscuitFactOp, biscuitFactPlane:
+		return f.readListed(fact)
 	case biscuitFactResourcePrefix, biscuitFactResourceURI:
-		if !isString || s == "" {
-			return fmt.Errorf("%s takes a non-empty string", fact.name)
-		}
-		f.resources = true
-		if fact.name == biscuitFactResourcePrefix {
-			f.prefixes = append(f.prefixes, s)
-		} else {
-			f.uris = append(f.uris, s)
-		}
-	case biscuitFactPlane:
-		if !isString {
-			return errors.New("limes_plane takes a string")
-		}
-		f.planes = append(f.planes, s)
+		return f.readResource(fact)
 	case biscuitFactExpires:
-		t, ok := fact.term.(time.Time)
-		if !ok {
-			return errors.New("limes_expires takes a date")
-		}
-		if f.expires.IsZero() || t.Before(f.expires) {
-			f.expires = t
-		}
+		return f.readExpires(fact)
 	case biscuitFactBind:
-		if !isString || validateThumbprint(s) != nil {
-			return errors.New("limes_bind takes a JWK thumbprint")
-		}
-		if boundJKT != "" && boundJKT != s {
-			return errors.New("a key-bound token cannot be rebound offline")
-		}
-		f.bind = s
+		return f.readBind(fact, boundJKT)
 	case biscuitFactMaxRequests, biscuitFactMaxBudget:
-		n, ok := fact.term.(int64)
-		if !ok || n < 0 {
-			return fmt.Errorf("%s takes an integer of 0 or more", fact.name)
-		}
-		if fact.name == biscuitFactMaxRequests {
-			f.requests = &RequestCeiling{Max: n}
-		} else {
-			f.budget = &BudgetCeiling{Max: Nanos(n)}
-		}
-	default:
-		return fmt.Errorf("fact %q is not part of the attenuation vocabulary", fact.name)
+		return f.readCeiling(fact)
+	}
+	return fmt.Errorf("fact %q is not part of the attenuation vocabulary", fact.name)
+}
+
+// readListed adds an op or a plane, which accumulate.
+func (f *blockFacts) readListed(fact decodedFact) error {
+	s, ok := fact.term.(string)
+	if !ok {
+		return fmt.Errorf("%s takes a string", fact.name)
+	}
+	if fact.name == biscuitFactOp {
+		f.ops = append(f.ops, Op(s))
+	} else {
+		f.planes = append(f.planes, s)
+	}
+	return nil
+}
+
+// readResource adds a resource prefix or URI, which accumulate and replace
+// every resource caveat of the token.
+func (f *blockFacts) readResource(fact decodedFact) error {
+	s, ok := fact.term.(string)
+	if !ok || s == "" {
+		return fmt.Errorf("%s takes a non-empty string", fact.name)
+	}
+	f.resources = true
+	if fact.name == biscuitFactResourcePrefix {
+		f.prefixes = append(f.prefixes, s)
+	} else {
+		f.uris = append(f.uris, s)
+	}
+	return nil
+}
+
+// readExpires keeps the earliest expiry the block names.
+func (f *blockFacts) readExpires(fact decodedFact) error {
+	t, ok := fact.term.(time.Time)
+	if !ok {
+		return errors.New("limes_expires takes a date")
+	}
+	if f.expires.IsZero() || t.Before(f.expires) {
+		f.expires = t
+	}
+	return nil
+}
+
+// readBind keeps the key the block binds the token to, which may restate
+// boundJKT but not change it.
+func (f *blockFacts) readBind(fact decodedFact, boundJKT string) error {
+	s, ok := fact.term.(string)
+	if !ok || validateThumbprint(s) != nil {
+		return errors.New("limes_bind takes a JWK thumbprint")
+	}
+	if boundJKT != "" && boundJKT != s {
+		return errors.New("a key-bound token cannot be rebound offline")
+	}
+	f.bind = s
+	return nil
+}
+
+// readCeiling keeps the last request or budget limit the block sets.
+func (f *blockFacts) readCeiling(fact decodedFact) error {
+	n, ok := fact.term.(int64)
+	if !ok || n < 0 {
+		return fmt.Errorf("%s takes an integer of 0 or more", fact.name)
+	}
+	if fact.name == biscuitFactMaxRequests {
+		f.requests = &RequestCeiling{Max: n}
+	} else {
+		f.budget = &BudgetCeiling{Max: Nanos(n)}
 	}
 	return nil
 }
@@ -529,33 +639,40 @@ func (f blockFacts) narrow(cur Capability) Capability {
 // copyCeilingNarrows checks a copy's ceilings against every one already in
 // force on cur: the capability's own and each enclosing copy's.
 func copyCeilingNarrows(cur grant, c CopyCeiling) error {
-	// A nil axis is one this block left alone: the copy keeps no ceiling of
-	// its own there, and the ones above it still bound it. A block sets only
-	// a bound (readBlockFacts), never an Unlimited ceiling.
-	if r := c.Requests; r != nil {
-		if err := r.Validate(); err != nil {
-			return fmt.Errorf("copy %w", err)
-		}
-		if !r.Within(cur.Caveats.Requests) {
-			return fmt.Errorf("copy requests %s exceed the capability's %s", r, cur.Caveats.Requests)
-		}
-		for _, o := range cur.copies {
-			if o.Requests != nil && !r.Within(*o.Requests) {
-				return fmt.Errorf("copy requests %s exceed an enclosing copy's %s", r, o.Requests)
-			}
-		}
+	err := copyAxisNarrows("requests", c.Requests, cur.Caveats.Requests, cur.copies,
+		func(o CopyCeiling) *RequestCeiling { return o.Requests })
+	if err != nil {
+		return err
 	}
-	if b := c.Budget; b != nil {
-		if err := b.Validate(); err != nil {
-			return fmt.Errorf("copy %w", err)
-		}
-		if !b.Within(cur.Caveats.Budget) {
-			return fmt.Errorf("copy budget %s exceeds the capability's %s", b, cur.Caveats.Budget)
-		}
-		for _, o := range cur.copies {
-			if o.Budget != nil && !b.Within(*o.Budget) {
-				return fmt.Errorf("copy budget %s exceeds an enclosing copy's %s", b, o.Budget)
-			}
+	return copyAxisNarrows("budget", c.Budget, cur.Caveats.Budget, cur.copies,
+		func(o CopyCeiling) *BudgetCeiling { return o.Budget })
+}
+
+// ceiling is a limit on one axis of a copy: RequestCeiling or BudgetCeiling.
+type ceiling[C any] interface {
+	Validate() error
+	Within(outer C) bool
+	fmt.Stringer
+}
+
+// copyAxisNarrows checks a copy's ceiling c on one axis against the
+// capability's on it and each enclosing copy's, which of reads. A nil c is
+// an axis the block left alone: the copy keeps no ceiling of its own there,
+// and the ones above it still bound it. A block sets only a bound
+// (readBlockFacts), never an Unlimited ceiling.
+func copyAxisNarrows[C ceiling[C]](axis string, c *C, capability C, enclosing []CopyCeiling, of func(CopyCeiling) *C) error {
+	if c == nil {
+		return nil
+	}
+	if err := (*c).Validate(); err != nil {
+		return fmt.Errorf("copy %w", err)
+	}
+	if !(*c).Within(capability) {
+		return fmt.Errorf("copy %s %s exceeds the capability's %s", axis, *c, capability)
+	}
+	for _, o := range enclosing {
+		if outer := of(o); outer != nil && !(*c).Within(*outer) {
+			return fmt.Errorf("copy %s %s exceeds an enclosing copy's %s", axis, *c, *outer)
 		}
 	}
 	return nil

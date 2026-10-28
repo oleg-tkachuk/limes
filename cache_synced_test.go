@@ -96,7 +96,7 @@ func TestSyncedTTLHoldsOnlyWhileASignalVouches(t *testing.T) {
 }
 
 // SyncedTTL zero is TTL; shorter than TTL, or longer than
-// MaxRevocationCacheSyncedTTL, is refused.
+// MaxRevocationCacheSyncedTTL, is refused; either bound itself is accepted.
 func TestSyncedTTLBounds(t *testing.T) {
 	s := newExampleStack()
 	if _, err := limes.NewRevocationCache(limes.RevocationCacheConfig{Capabilities: s.records, TTL: unsyncedTTL, SyncedTTL: unsyncedTTL / 2}); err == nil {
@@ -104,6 +104,9 @@ func TestSyncedTTLBounds(t *testing.T) {
 	}
 	if _, err := limes.NewRevocationCache(limes.RevocationCacheConfig{Capabilities: s.records, SyncedTTL: limes.MaxRevocationCacheSyncedTTL + time.Nanosecond}); err == nil {
 		t.Error("a SyncedTTL past MaxRevocationCacheSyncedTTL accepted")
+	}
+	if _, err := limes.NewRevocationCache(limes.RevocationCacheConfig{Capabilities: s.records, TTL: unsyncedTTL, SyncedTTL: unsyncedTTL}); err != nil {
+		t.Errorf("SyncedTTL equal to TTL: %v", err)
 	}
 	if _, err := limes.NewRevocationCache(limes.RevocationCacheConfig{Capabilities: s.records, SyncedTTL: limes.MaxRevocationCacheSyncedTTL}); err != nil {
 		t.Errorf("SyncedTTL at MaxRevocationCacheSyncedTTL: %v", err)

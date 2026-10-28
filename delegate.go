@@ -70,18 +70,35 @@ func validFrom(c Capability) time.Time {
 // narrowsCaveats compares the typed caveat bag. Every restriction in
 // the child must be at-least-as-strict as the parent.
 func narrowsCaveats(parent, child Caveats) error {
-	// Ops: child set ⊆ parent set.
-	for _, op := range child.Ops {
-		if !slices.Contains(parent.Ops, op) {
-			return fmt.Errorf("%w: child op %q not in parent ops %v",
-				ErrDelegationTooWide, op, parent.Ops)
-		}
+	if err := narrowsOps(parent.Ops, child.Ops); err != nil {
+		return err
 	}
-
 	if err := narrowsResources(parent, child); err != nil {
 		return err
 	}
+	if err := narrowsLimits(parent, child); err != nil {
+		return err
+	}
+	if err := narrowsFlags(parent, child); err != nil {
+		return err
+	}
+	return narrowsSourceIP(parent.SourceIPCIDR, child.SourceIPCIDR)
+}
 
+// narrowsOps requires the child's ops to be a subset of the parent's.
+func narrowsOps(parent, child []Op) error {
+	for _, op := range child {
+		if !slices.Contains(parent, op) {
+			return fmt.Errorf("%w: child op %q not in parent ops %v",
+				ErrDelegationTooWide, op, parent)
+		}
+	}
+	return nil
+}
+
+// narrowsLimits requires each of the child's ceilings — requests, copies,
+// budget — within the parent's, and its budget in the parent's unit.
+func narrowsLimits(parent, child Caveats) error {
 	// Requests: a child's ceiling may not lift or raise its parent's.
 	if !child.Requests.Within(parent.Requests) {
 		return fmt.Errorf("%w: child requests %s would exceed parent %s",
@@ -111,7 +128,12 @@ func narrowsCaveats(parent, child Caveats) error {
 		return fmt.Errorf("%w: child budget %s exceeds parent %s",
 			ErrDelegationTooWide, child.Budget, parent.Budget)
 	}
+	return nil
+}
 
+// narrowsFlags requires the child to grant no privilege the parent lacks
+// and to relax no requirement the parent sets.
+func narrowsFlags(parent, child Caveats) error {
 	// AllowTaintedRead: child cannot grant a privilege the parent lacks.
 	if child.AllowTaintedRead && !parent.AllowTaintedRead {
 		return fmt.Errorf("%w: child grants tainted_read; parent does not",
@@ -124,8 +146,7 @@ func narrowsCaveats(parent, child Caveats) error {
 		return fmt.Errorf("%w: child relaxes idempotency_key requirement",
 			ErrDelegationTooWide)
 	}
-
-	return narrowsSourceIP(parent.SourceIPCIDR, child.SourceIPCIDR)
+	return nil
 }
 
 // narrowsResources requires every resource the child can reach to be

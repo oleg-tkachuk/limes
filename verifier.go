@@ -175,71 +175,124 @@ type Verifier struct {
 
 // NewVerifier validates wiring and builds the verifier.
 func NewVerifier(cfg VerifierConfig) (*Verifier, error) {
+	if err := checkVerifierWiring(cfg); err != nil {
+		return nil, err
+	}
+	biscuitCfg, err := biscuitConfig(cfg.Biscuit)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Biscuit = biscuitCfg
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
+	if err := setLeeway(&cfg); err != nil {
+		return nil, err
+	}
+	if err := setMaxTokenBytes(&cfg); err != nil {
+		return nil, err
+	}
+	if err := setRealm(&cfg); err != nil {
+		return nil, err
+	}
+	cfg.TrustedIssuers = slices.Clone(cfg.TrustedIssuers)
+	if err := setKeyIssuers(&cfg); err != nil {
+		return nil, err
+	}
+	return &Verifier{cfg: cfg}, nil
+}
+
+// checkVerifierWiring refuses a config without its keys, its revocation
+// lookup or an issuer to trust.
+func checkVerifierWiring(cfg VerifierConfig) error {
 	// A nil pointer in an interface is not nil: unchecked, it would pass
 	// here and panic at the first token verified.
-	if isNilValue(cfg.Keys) {
-		return nil, errors.New("limes: VerifierConfig.Keys required")
+	switch {
+	case isNilValue(cfg.Keys):
+		return errors.New("limes: VerifierConfig.Keys required")
+	case isNilValue(cfg.Revocations):
+		return errors.New("limes: VerifierConfig.Revocations required")
+	case len(cfg.TrustedIssuers) == 0:
+		return errors.New("limes: VerifierConfig.TrustedIssuers required")
 	}
-	if isNilValue(cfg.Revocations) {
-		return nil, errors.New("limes: VerifierConfig.Revocations required")
+	return nil
+}
+
+// biscuitConfig is a copy of b, so the caller's struct stays the caller's,
+// refused when it has no revocation lookup for Biscuits; nil for none.
+func biscuitConfig(b *BiscuitConfig) (*BiscuitConfig, error) {
+	if b == nil {
+		return nil, nil
 	}
-	if len(cfg.TrustedIssuers) == 0 {
-		return nil, errors.New("limes: VerifierConfig.TrustedIssuers required")
-	}
-	if cfg.Biscuit != nil {
-		b := *cfg.Biscuit // the caller's struct stays the caller's
-		cfg.Biscuit = &b
-	}
+	own := *b
 	// A cache answers Biscuit questions only over an upstream for them: the
 	// type accepts the call either way, so the gap is refused here rather
 	// than at the first Biscuit presented. Any other nil lookup, a nil
 	// pointer included, is refused as none.
-	if cfg.Biscuit != nil {
-		if c, ok := cfg.Biscuit.Revocations.(*RevocationCache); ok && (c == nil || !c.answersBiscuits()) {
-			return nil, errNoBiscuitLookup
-		}
-		if isNilValue(cfg.Biscuit.Revocations) {
-			return nil, errNoBiscuitRevocations
-		}
+	if c, ok := own.Revocations.(*RevocationCache); ok && (c == nil || !c.answersBiscuits()) {
+		return nil, errNoBiscuitLookup
 	}
-	if cfg.Now == nil {
-		cfg.Now = time.Now
+	if isNilValue(own.Revocations) {
+		return nil, errNoBiscuitRevocations
 	}
+	return &own, nil
+}
+
+// setLeeway refuses a leeway outside 0..MaxLeeway or beside NoLeeway, and
+// gives an unset one DefaultLeeway.
+func setLeeway(cfg *VerifierConfig) error {
 	if cfg.Leeway < 0 || cfg.Leeway > MaxLeeway {
-		return nil, fmt.Errorf("limes: VerifierConfig.Leeway %s is outside 0..%s", cfg.Leeway, MaxLeeway)
-	}
-	if cfg.MaxTokenBytes < 0 {
-		return nil, fmt.Errorf("limes: VerifierConfig.MaxTokenBytes %d is negative", cfg.MaxTokenBytes)
+		return fmt.Errorf("limes: VerifierConfig.Leeway %s is outside 0..%s", cfg.Leeway, MaxLeeway)
 	}
 	switch {
 	case cfg.NoLeeway && cfg.Leeway != 0:
-		return nil, fmt.Errorf("limes: VerifierConfig.Leeway %s beside NoLeeway", cfg.Leeway)
+		return fmt.Errorf("limes: VerifierConfig.Leeway %s beside NoLeeway", cfg.Leeway)
 	case cfg.NoLeeway:
 		// Leeway stays 0: the window is exact.
 	case cfg.Leeway == 0:
 		cfg.Leeway = DefaultLeeway
 	}
+	return nil
+}
+
+// setMaxTokenBytes refuses a negative bound and gives an unset one
+// DefaultMaxTokenBytes.
+func setMaxTokenBytes(cfg *VerifierConfig) error {
+	if cfg.MaxTokenBytes < 0 {
+		return fmt.Errorf("limes: VerifierConfig.MaxTokenBytes %d is negative", cfg.MaxTokenBytes)
+	}
 	if cfg.MaxTokenBytes == 0 {
 		cfg.MaxTokenBytes = DefaultMaxTokenBytes
 	}
+	return nil
+}
+
+// setRealm refuses a realm RFC 6750 cannot carry and gives an unset one
+// DefaultRealm.
+func setRealm(cfg *VerifierConfig) error {
 	if strings.ContainsFunc(cfg.Realm, func(r rune) bool { return !authParamChar(r) }) {
-		return nil, fmt.Errorf("limes: VerifierConfig.Realm %q holds a character RFC 6750 does not allow", cfg.Realm)
+		return fmt.Errorf("limes: VerifierConfig.Realm %q holds a character RFC 6750 does not allow", cfg.Realm)
 	}
 	if cfg.Realm == "" {
 		cfg.Realm = DefaultRealm
 	}
-	cfg.TrustedIssuers = slices.Clone(cfg.TrustedIssuers)
+	return nil
+}
+
+// setKeyIssuers refuses a config that trusts several issuers without saying
+// which kid speaks for which, and keeps its own copy of the binding.
+func setKeyIssuers(cfg *VerifierConfig) error {
 	switch {
 	case len(cfg.KeyIssuers) > 0 && cfg.SharedKeys:
-		return nil, errors.New("limes: VerifierConfig.KeyIssuers and SharedKeys exclude each other")
+		return errors.New("limes: VerifierConfig.KeyIssuers and SharedKeys exclude each other")
 	case len(cfg.TrustedIssuers) > 1 && len(cfg.KeyIssuers) == 0 && !cfg.SharedKeys:
-		return nil, errors.New("limes: VerifierConfig trusts several issuers; bind each kid to one (KeyIssuers) or set SharedKeys")
+		return errors.New("limes: VerifierConfig trusts several issuers; bind each kid to one (KeyIssuers) or set SharedKeys")
 	}
 	cfg.KeyIssuers = maps.Clone(cfg.KeyIssuers)
 	if len(cfg.KeyIssuers) == 0 {
 		cfg.KeyIssuers = nil // no binding, whichever way it was spelled
 	}
-	return &Verifier{cfg: cfg}, nil
+	return nil
 }
 
 // Verify checks the token itself: its signature, issuer and tenant, its
@@ -267,73 +320,101 @@ func (v *Verifier) Verify(ctx context.Context, req VerifyRequest) (VerifiedCapab
 // check of the token and before the proof's id is recorded: a request accept
 // refuses spends none of the replay cache's room either.
 func (v *Verifier) verify(ctx context.Context, req VerifyRequest, accept func(Capability) error) (VerifiedCapability, error) {
-	token, audience := req.Token, req.Audience
-	if token == "" {
-		return VerifiedCapability{}, ErrNoCredentials
+	if err := checkVerifyRequest(req); err != nil {
+		return VerifiedCapability{}, err
 	}
-	if audience == "" {
-		// The server's own call names no audience: its error, not the token's.
-		return VerifiedCapability{}, invalidRequest("VerifyRequest.Audience is required")
-	}
-	cap, biscuitIDs, err := v.authenticate(ctx, token)
+	cap, biscuitIDs, err := v.authenticate(ctx, req.Token)
 	if err != nil {
 		return VerifiedCapability{}, err
 	}
-
 	// 5) Audience match.
-	if !slices.Contains(cap.Audience, audience) {
+	if !slices.Contains(cap.Audience, req.Audience) {
 		return VerifiedCapability{}, fmt.Errorf("%w: token audience %v lacks %q",
-			ErrAudienceMismatch, cap.Audience, audience)
+			ErrAudienceMismatch, cap.Audience, req.Audience)
 	}
-
-	// 6) The scheme the binding calls for, and a verifier able to check the
-	// proof it needs. No I/O, so before the revocation lookup.
-	if err := checkScheme(req.Scheme, cap.ConfirmationJKT != ""); err != nil {
+	// 6–7) The scheme and the proof of possession, which need no I/O.
+	proof, err := v.checkPossession(ctx, req, cap)
+	if err != nil {
 		return VerifiedCapability{}, err
 	}
-	if cap.ConfirmationJKT != "" && v.cfg.DPoP == nil {
-		return VerifiedCapability{}, ErrProofUnsupported
-	}
-	// 7) Proof of possession, for a key-bound capability — over the token
-	// as presented, the Biscuit when it is one. Everything but the replay
-	// check, which needs the cache and comes last.
-	var proof dpop.CheckedProof
-	if cap.ConfirmationJKT != "" {
-		var err error
-		proof, err = v.cfg.DPoP.Check(ctx, dpop.Request{Proof: req.DPoP, Token: token, JKT: cap.ConfirmationJKT, Holder: cap.ID.String()})
-		if err != nil {
-			return VerifiedCapability{}, proofError(err)
-		}
-	}
-
 	// 8–9) Revocation, after the checks that need no I/O.
 	if err := v.checkRevoked(ctx, cap, biscuitIDs); err != nil {
 		return VerifiedCapability{}, err
 	}
-
-	// 10) A copy's own limits need a Meter that counts copies. After every
-	// check of the token, so a token refused for what it is gets that
-	// refusal, not this one, which is about the verifier.
-	if len(cap.copies) > 0 && !v.cfg.Biscuit.MeterCopies {
-		return VerifiedCapability{}, ErrCopyCountersNotMetered
+	// 10–11) What the verifier and its caller require beyond the token.
+	if err := v.checkAccepted(cap, accept); err != nil {
+		return VerifiedCapability{}, err
 	}
-	// 11) The caller's own refusals: Authorize's caveats.
-	if accept != nil {
-		if err := accept(cap.Capability); err != nil {
-			return VerifiedCapability{}, err
-		}
+	// 12) The proof's id, recorded in the replay cache, last.
+	if err := v.recordProof(ctx, cap, proof); err != nil {
+		return VerifiedCapability{}, err
 	}
-	// 12) The proof's id, recorded in the replay cache, last: the cache's
-	// room is shared by every copy of the capability, so only a request this
-	// verifier accepts spends it — not a revoked token, a copy it cannot
-	// meter, nor a request a caveat refuses.
-	if cap.ConfirmationJKT != "" {
-		if err := v.cfg.DPoP.Record(ctx, proof); err != nil {
-			return VerifiedCapability{}, proofError(err)
-		}
-	}
-
 	return VerifiedCapability{c: cap.Capability, copies: cap.copies, fromBiscuit: biscuitIDs != nil}, nil
+}
+
+// checkVerifyRequest refuses a request with no token, or none of the
+// server's audience: the server's own call names no audience, its error, not
+// the token's.
+func checkVerifyRequest(req VerifyRequest) error {
+	if req.Token == "" {
+		return ErrNoCredentials
+	}
+	if req.Audience == "" {
+		return invalidRequest("VerifyRequest.Audience is required")
+	}
+	return nil
+}
+
+// checkPossession holds the request to what cap's binding calls for (6): the
+// scheme, and a verifier able to check the proof it needs; then, for a
+// key-bound capability, checks the proof (7) over the token as presented,
+// the Biscuit when it is one. Everything but the replay check, which needs
+// the cache and comes last.
+func (v *Verifier) checkPossession(ctx context.Context, req VerifyRequest, cap *grant) (dpop.CheckedProof, error) {
+	bound := cap.ConfirmationJKT != ""
+	if err := checkScheme(req.Scheme, bound); err != nil {
+		return dpop.CheckedProof{}, err
+	}
+	if !bound {
+		return dpop.CheckedProof{}, nil
+	}
+	if v.cfg.DPoP == nil {
+		return dpop.CheckedProof{}, ErrProofUnsupported
+	}
+	proof, err := v.cfg.DPoP.Check(ctx, dpop.Request{Proof: req.DPoP, Token: req.Token, JKT: cap.ConfirmationJKT, Holder: cap.ID.String()})
+	if err != nil {
+		return dpop.CheckedProof{}, proofError(err)
+	}
+	return proof, nil
+}
+
+// checkAccepted refuses what passes every check of the token but the
+// verifier or its caller does not accept: a copy whose own limits need a
+// Meter that counts copies (10), after every check of the token, so a token
+// refused for what it is gets that refusal, not this one, which is about the
+// verifier; then the caller's own refusals (11), Authorize's caveats.
+func (v *Verifier) checkAccepted(cap *grant, accept func(Capability) error) error {
+	if len(cap.copies) > 0 && !v.cfg.Biscuit.MeterCopies {
+		return ErrCopyCountersNotMetered
+	}
+	if accept == nil {
+		return nil
+	}
+	return accept(cap.Capability)
+}
+
+// recordProof records a key-bound capability's proof id in the replay
+// cache (12): the cache's room is shared by every copy of the capability, so
+// only a request this verifier accepts spends it — not a revoked token, a
+// copy it cannot meter, nor a request a caveat refuses.
+func (v *Verifier) recordProof(ctx context.Context, cap *grant, proof dpop.CheckedProof) error {
+	if cap.ConfirmationJKT == "" {
+		return nil
+	}
+	if err := v.cfg.DPoP.Record(ctx, proof); err != nil {
+		return proofError(err)
+	}
+	return nil
 }
 
 // authenticate is what Verify and Introspect check of a token itself: its
@@ -348,39 +429,49 @@ func (v *Verifier) authenticate(ctx context.Context, token string) (*grant, [][]
 		return nil, nil, fmt.Errorf("%w: token is %d bytes (limit %d)",
 			ErrInvalidToken, len(token), v.cfg.MaxTokenBytes)
 	}
+	cap, biscuitIDs, err := v.verifyToken(ctx, token)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := v.checkWindow(cap); err != nil {
+		return nil, nil, err
+	}
+	return cap, biscuitIDs, nil
+}
 
-	var cap *grant
-	var biscuitIDs [][]byte // set for a Biscuit, from its verified chain
+// verifyToken checks a Biscuit's chain or a JWT's signature (1–3), and
+// returns the grant and, for a Biscuit, the ids of its verified chain.
+func (v *Verifier) verifyToken(ctx context.Context, token string) (*grant, [][]byte, error) {
 	if isBiscuit(token) {
 		if v.cfg.Biscuit == nil {
 			return nil, nil, fmt.Errorf("%w: Biscuit tokens are not accepted here", ErrInvalidToken)
 		}
-		var err error
-		if cap, biscuitIDs, err = v.verifyBiscuit(ctx, token); err != nil {
-			return nil, nil, err
-		}
-	} else {
-		var err error
-		if cap, err = v.verifySigned(ctx, token); err != nil {
-			return nil, nil, err
-		}
-		// The token sealed inside a Biscuit, lifted out to shed the
-		// Biscuit's attenuation.
-		if cap.biscuitRoot != "" {
-			return nil, nil, fmt.Errorf("%w: token is sealed in a Biscuit; present the Biscuit", ErrInvalidToken)
-		}
+		return v.verifyBiscuit(ctx, token)
 	}
+	cap, err := v.verifySigned(ctx, token)
+	if err != nil {
+		return nil, nil, err
+	}
+	// The token sealed inside a Biscuit, lifted out to shed the
+	// Biscuit's attenuation.
+	if cap.biscuitRoot != "" {
+		return nil, nil, fmt.Errorf("%w: token is sealed in a Biscuit; present the Biscuit", ErrInvalidToken)
+	}
+	return cap, nil, nil
+}
 
-	// 4) Time window. Leeway absorbs clock skew on both ends.
+// checkWindow refuses a grant outside its time window (4). Leeway absorbs
+// clock skew on both ends.
+func (v *Verifier) checkWindow(cap *grant) error {
 	now := v.cfg.Now()
 	if !cap.NotBefore.IsZero() && now.Add(v.cfg.Leeway).Before(cap.NotBefore) {
-		return nil, nil, ErrNotYetValid
+		return ErrNotYetValid
 	}
 	// RFC 7519 §4.1.4: refused on or after exp, less the leeway.
 	if cap.ExpiresAt.IsZero() || !now.Add(-v.cfg.Leeway).Before(cap.ExpiresAt) {
-		return nil, nil, ErrExpired
+		return ErrExpired
 	}
-	return cap, biscuitIDs, nil
+	return nil
 }
 
 // checkRevoked refuses a capability revoked itself or through any ancestor
@@ -504,52 +595,64 @@ func (v *Verifier) verifyBiscuit(ctx context.Context, token string) (*grant, [][
 // everything about the token itself; the time, audience and revocation gates
 // run in Verify on the capability the token finally grants.
 func (v *Verifier) verifySigned(ctx context.Context, token string) (*grant, error) {
-	// 1) Header: structure, algorithm, type, key id.
+	parts, header, err := readSignedHeader(token)
+	if err != nil {
+		return nil, err
+	}
+	if err := v.checkSignature(ctx, parts, header.Kid); err != nil {
+		return nil, err
+	}
+	return v.readSignedClaims(parts.Payload, header.Kid)
+}
+
+// readSignedHeader splits a compact JWT and reads its header (1): its
+// structure, algorithm, type and key id.
+func readSignedHeader(token string) (jose.Parts, jwtHeader, error) {
 	parts, err := jose.Split(token)
 	if err != nil {
-		return nil, refuseToken(ErrInvalidToken, err)
+		return jose.Parts{}, jwtHeader{}, refuseToken(ErrInvalidToken, err)
 	}
 	header, err := parseHeader(parts.Header)
 	if err != nil {
-		return nil, refuseToken(ErrInvalidToken, err)
+		return jose.Parts{}, jwtHeader{}, refuseToken(ErrInvalidToken, err)
 	}
 	if header.Typ != TokenType {
-		return nil, fmt.Errorf("%w: typ %q is not %q", ErrInvalidToken, header.Typ, TokenType)
+		return jose.Parts{}, jwtHeader{}, fmt.Errorf("%w: typ %q is not %q", ErrInvalidToken, header.Typ, TokenType)
 	}
 	// A kid outside limes's namespace names a key no limes issuer signs
 	// with, and is refused before any key is looked up: at+jwt no longer
 	// tells a capability from another access token, and the kid then does.
 	if !jwks.IsKeyID(header.Kid) {
-		return nil, fmt.Errorf("%w: kid %q is not a limes kid (%q and a name)", ErrInvalidToken, header.Kid, jwks.KeyIDPrefix)
+		return jose.Parts{}, jwtHeader{}, fmt.Errorf("%w: kid %q is not a limes kid (%q and a name)", ErrInvalidToken, header.Kid, jwks.KeyIDPrefix)
 	}
+	return parts, header, nil
+}
 
-	// 2) Key and signature — the cryptographic gate.
-	pub, err := v.cfg.Keys.PublicKey(ctx, header.Kid)
+// checkSignature resolves kid and verifies the signature under it (2) —
+// the cryptographic gate.
+func (v *Verifier) checkSignature(ctx context.Context, parts jose.Parts, kid string) error {
+	pub, err := v.cfg.Keys.PublicKey(ctx, kid)
 	if err != nil {
 		// An unknown kid is the token's fault; a resolver that cannot
 		// answer — the issuer's keys out of reach, a store down — is ours.
 		if errors.Is(err, jwks.ErrUnknownKID) {
-			return nil, fmt.Errorf("%w: kid %q: %w", ErrInvalidToken, header.Kid, err)
+			return fmt.Errorf("%w: kid %q: %w", ErrInvalidToken, kid, err)
 		}
-		return nil, fmt.Errorf("limes: resolve kid %q: %w", header.Kid, err)
+		return fmt.Errorf("limes: resolve kid %q: %w", kid, err)
 	}
-	if err := verifyParts(parts, pub); err != nil {
-		return nil, err
-	}
+	return verifyParts(parts, pub)
+}
 
-	// 3) Claims, now known to be the issuer's.
-	cap, err := parseClaims(parts.Payload)
+// readSignedClaims reads the claims (3), now known to be signed under kid:
+// a trusted issuer kid may sign for, a tenant, and a principal and caveats
+// within the rules.
+func (v *Verifier) readSignedClaims(payload, kid string) (*grant, error) {
+	cap, err := parseClaims(payload)
 	if err != nil {
 		return nil, refuseToken(ErrInvalidToken, err)
 	}
-	if !slices.Contains(v.cfg.TrustedIssuers, cap.Issuer) {
-		return nil, fmt.Errorf("%w: untrusted issuer %q", ErrInvalidToken, cap.Issuer)
-	}
-	if v.cfg.KeyIssuers != nil {
-		if bound, ok := v.cfg.KeyIssuers[header.Kid]; !ok || bound != cap.Issuer {
-			return nil, fmt.Errorf("%w: kid %q may not sign for issuer %q",
-				ErrInvalidToken, header.Kid, cap.Issuer)
-		}
+	if err := v.checkIssuer(kid, cap.Issuer); err != nil {
+		return nil, err
 	}
 	if cap.Subject.TenantID == uuid.Nil() {
 		return nil, fmt.Errorf("%w: capability has no tenant", ErrInvalidToken)
@@ -563,8 +666,22 @@ func (v *Verifier) verifySigned(ctx context.Context, token string) (*grant, erro
 	if err := cap.Caveats.Validate(); err != nil {
 		return nil, refuseToken(ErrInvalidToken, err)
 	}
-
 	return cap, nil
+}
+
+// checkIssuer refuses an issuer the verifier does not trust, or one kid is
+// not bound to sign for.
+func (v *Verifier) checkIssuer(kid, issuer string) error {
+	if !slices.Contains(v.cfg.TrustedIssuers, issuer) {
+		return fmt.Errorf("%w: untrusted issuer %q", ErrInvalidToken, issuer)
+	}
+	if v.cfg.KeyIssuers == nil {
+		return nil
+	}
+	if bound, ok := v.cfg.KeyIssuers[kid]; !ok || bound != issuer {
+		return fmt.Errorf("%w: kid %q may not sign for issuer %q", ErrInvalidToken, kid, issuer)
+	}
+	return nil
 }
 
 // proofRefusals are the dpop errors that refuse a proof; any other error
