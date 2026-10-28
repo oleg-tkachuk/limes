@@ -207,6 +207,12 @@ export async function releaseModule(r: Release, module: Module, before: readonly
       return { note: due.reason };
     }
   }
+  return releaseDue(r, module, before);
+}
+
+// releaseDue releases module, due or asked for by hand: its tag, from
+// semantic-release, published with its notes and warmed in the Go proxy.
+async function releaseDue(r: Release, module: Module, before: readonly string[]): Promise<Outcome> {
   const notesFile = join(r.notesDir, `release-notes-${module.name}.md`);
   await r.runSemanticRelease(module, notesFile);
   const tag = await newReleaseTag(r.github, before, module.prefix, r.root);
@@ -229,37 +235,11 @@ const SUMMARY_HEADER = ["Module", "Tag", "What happened"];
 // releaseAll releases every module, then publishes what earlier runs left
 // behind, and reports whether every module's release went through.
 export async function releaseAll(r: Release): Promise<boolean> {
-  if (r.nextMajor && r.channel !== Channel.Prerelease) {
-    throw new Error("a candidate of the next major is a prerelease: run the prerelease channel");
-  }
+  const modules = modulesReleased(r);
   const before = await tagsOnHead(r.root);
-  let ok = true;
-  const names = releasedModules(r.root);
-  if (r.only !== undefined && !names.includes(r.only)) {
-    throw new Error(`no module ${r.only}; known: ${names.join(", ")}`);
-  }
-  const modules = names.filter((n) => r.only === undefined || n === r.only).map((name) => selectModule(r.root, name));
-  const rows: string[][] = [];
-  for (const module of modules) {
-    try {
-      const outcome = await releaseModule(r, module, before);
-      info(`${module.name}: ${outcome.note}`);
-      rows.push([module.name, outcome.tag ?? "", outcome.note]);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      error(`${module.name}: ${message}`);
-      rows.push([module.name, "", `failed: ${message}`]);
-      ok = false;
-    }
-  }
-  for (const module of modules) {
-    try {
-      await publishLeftBehind(r.github, module.prefix, r.root);
-    } catch (err) {
-      error(`${module.name}: publishing what an earlier run left behind: ${err instanceof Error ? err.message : String(err)}`);
-      ok = false;
-    }
-  }
+  const { rows, ok: released } = await releaseEach(r, modules, before);
+  const published = await publishAllLeftBehind(r, modules);
+  const ok = released && published;
   summarize(`### Release (${r.channel}${r.manual ? ", by hand" : ""})\n\n${table(SUMMARY_HEADER, rows)}`);
   // A run by hand that released nothing says so where it is seen: a green run
   // with no tag otherwise reads as a release that went missing.
@@ -267,6 +247,60 @@ export async function releaseAll(r: Release): Promise<boolean> {
     notice(`nothing ${r.channel === Channel.Prerelease ? "pre-" : ""}released: ${rows.map(([name, , note]) => `${name}: ${note}`).join("; ")}`);
   }
   return ok;
+}
+
+// modulesReleased are the modules r releases: every one, or the one it
+// names, refusing a module that is none, or a candidate of the next major
+// on any channel but the prerelease one.
+function modulesReleased(r: Release): Module[] {
+  if (r.nextMajor && r.channel !== Channel.Prerelease) {
+    throw new Error("a candidate of the next major is a prerelease: run the prerelease channel");
+  }
+  const names = releasedModules(r.root);
+  if (r.only !== undefined && !names.includes(r.only)) {
+    throw new Error(`no module ${r.only}; known: ${names.join(", ")}`);
+  }
+  return names.filter((n) => r.only === undefined || n === r.only).map((name) => selectModule(r.root, name));
+}
+
+// releaseEach releases each module, a failure of one no reason to skip the
+// next; rows are the summary's, and ok is false if any failed.
+async function releaseEach(r: Release, modules: Module[], before: readonly string[]): Promise<{ rows: string[][]; ok: boolean }> {
+  const rows: string[][] = [];
+  let ok = true;
+  for (const module of modules) {
+    try {
+      const outcome = await releaseModule(r, module, before);
+      info(`${module.name}: ${outcome.note}`);
+      rows.push([module.name, outcome.tag ?? "", outcome.note]);
+    } catch (err) {
+      const message = messageOf(err);
+      error(`${module.name}: ${message}`);
+      rows.push([module.name, "", `failed: ${message}`]);
+      ok = false;
+    }
+  }
+  return { rows, ok };
+}
+
+// publishAllLeftBehind publishes the releases an earlier run tagged but did
+// not publish, for each module; it is false if any failed.
+async function publishAllLeftBehind(r: Release, modules: Module[]): Promise<boolean> {
+  let ok = true;
+  for (const module of modules) {
+    try {
+      await publishLeftBehind(r.github, module.prefix, r.root);
+    } catch (err) {
+      error(`${module.name}: publishing what an earlier run left behind: ${messageOf(err)}`);
+      ok = false;
+    }
+  }
+  return ok;
+}
+
+// messageOf is what err says.
+function messageOf(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 // SEMANTIC_RELEASE_BIN is the pinned semantic-release's executable, as npm
@@ -325,20 +359,8 @@ async function releaseFrom(repository: string, token: string, push: string): Pro
   const runId = runIdOf(requireEnv("CI_RUN"));
   const github = gitHubFor(token, repository);
   const root = (await git(["rev-parse", "--show-toplevel"])).trim();
-  const channel = optionalEnv("CHANNEL") ?? Channel.Release;
-  if (channel !== Channel.Release && channel !== Channel.Prerelease) {
-    throw new Error(`CHANNEL ${channel} is neither ${Channel.Release} nor ${Channel.Prerelease}`);
-  }
-  const manual = optionalEnv("MANUAL") === "true";
-  if (channel === Channel.Prerelease && !manual) {
-    throw new Error("a prerelease is cut by hand only");
-  }
-  const module = optionalEnv("MODULE") ?? ALL_MODULES;
   const ok = await releaseAll({
-    channel,
-    manual,
-    nextMajor: optionalEnv("NEXT_MAJOR") === "true",
-    only: module === ALL_MODULES ? undefined : module,
+    ...releaseOptions(optionalEnv),
     policy: loadPolicy(root),
     commits: releaseCommits(),
     pushTag: async (tag) => void (await git(["push", "--quiet", push, `refs/tags/${tag}`], root)),
@@ -355,6 +377,27 @@ async function releaseFrom(repository: string, token: string, push: string): Pro
   if (!ok) {
     process.exitCode = 1;
   }
+}
+
+// ReleaseOptions are what a run asks of the release: its channel, whether
+// it is by hand, whether it cuts a candidate of the next major, and the one
+// module it releases, if not all.
+export type ReleaseOptions = Pick<Release, "channel" | "manual" | "nextMajor" | "only">;
+
+// releaseOptions reads a run's ReleaseOptions from env (CHANNEL, MANUAL,
+// NEXT_MAJOR, MODULE), refusing a channel this script does not cut, or a
+// prerelease not cut by hand.
+export function releaseOptions(env: (name: string) => string | undefined): ReleaseOptions {
+  const channel = env("CHANNEL") ?? Channel.Release;
+  if (channel !== Channel.Release && channel !== Channel.Prerelease) {
+    throw new Error(`CHANNEL ${channel} is neither ${Channel.Release} nor ${Channel.Prerelease}`);
+  }
+  const manual = env("MANUAL") === "true";
+  if (channel === Channel.Prerelease && !manual) {
+    throw new Error("a prerelease is cut by hand only");
+  }
+  const module = env("MODULE") ?? ALL_MODULES;
+  return { channel, manual, nextMajor: env("NEXT_MAJOR") === "true", only: module === ALL_MODULES ? undefined : module };
 }
 
 if (import.meta.main) {

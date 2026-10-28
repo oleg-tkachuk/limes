@@ -10,7 +10,7 @@ import { isReleaseTag, isStableReleaseTag, newReleaseTag, previousTag, proxyInfo
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
 import { withoutWorkflowCommands } from "./lib/actions.ts";
 import { releaseCommits } from "./lib/modules.ts";
-import { Channel, GATED, GATES, candidateNotesBody, gateOf, releaseAll, semanticReleaseCommand, unchangedSince, type Release } from "./release.ts";
+import { ALL_MODULES, candidateNotesBody, Channel, GATED, gateOf, GATES, type Release, releaseAll, releaseOptions, semanticReleaseCommand, unchangedSince } from "./release.ts";
 import { sinceCandidate } from "./lib/prerelease.ts";
 
 const REPO = "oleg-tkachuk/limes";
@@ -607,4 +607,25 @@ test("release.yaml hands the release its deploy key", async () => {
   };
   const step = Object.values(workflow.jobs).flatMap((j) => j.steps).find((s) => s.id === "modules");
   assert.equal(step?.env?.[DEPLOY_KEY_ENV], `\${{ secrets.${DEPLOY_KEY_ENV} }}`);
+});
+
+describe("releaseOptions", () => {
+  const envOf = (vars: Record<string, string>) => (name: string) => vars[name];
+  test("a run that names nothing releases every module on the release channel", () => {
+    assert.deepEqual(releaseOptions(envOf({})), { channel: Channel.Release, manual: false, nextMajor: false, only: undefined });
+  });
+  test("a run by hand of one module's candidate of the next major", () => {
+    assert.deepEqual(releaseOptions(envOf({ CHANNEL: Channel.Prerelease, MANUAL: "true", NEXT_MAJOR: "true", MODULE: "limes" })), {
+      channel: Channel.Prerelease, manual: true, nextMajor: true, only: "limes",
+    });
+  });
+  test("every module, named as such", () => {
+    assert.equal(releaseOptions(envOf({ MODULE: ALL_MODULES })).only, undefined);
+  });
+  test("refuses a channel it does not cut", () => {
+    assert.throws(() => releaseOptions(envOf({ CHANNEL: "nightly" })), /neither release nor prerelease/);
+  });
+  test("refuses a prerelease not cut by hand", () => {
+    assert.throws(() => releaseOptions(envOf({ CHANNEL: Channel.Prerelease })), /by hand only/);
+  });
 });
