@@ -140,10 +140,18 @@ func replayVerifier(t *testing.T, store *memStore, pub ed25519.PublicKey, maxEnt
 	return v
 }
 
-// A revoked copy keeps no claim on the replay room its capability's copies
-// share: its proofs are refused as revoked without being recorded, so a
-// live sibling bound to another key still verifies.
-func TestARevokedCopySpendsNoReplayRoom(t *testing.T) {
+// siblingCopies are two copies of one Biscuit capability, each bound to a
+// key of its own — live as issued, other narrowed further by its
+// attenuation — and a verifier with room for their proofs.
+type siblingCopies struct {
+	v                 *Verifier
+	store             *memStore
+	liveKey, otherKey crypto.Signer
+	live, other       string
+}
+
+func newSiblingCopies(t *testing.T, other Attenuation) siblingCopies {
+	t.Helper()
 	ctx := context.Background()
 	issuer, _, store, pub := buildIssuerVerifier(t)
 	cap, _, err := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
@@ -158,29 +166,42 @@ func TestARevokedCopySpendsNoReplayRoom(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v := replayVerifier(t, store, pub, 10*replayShare)
 	keys := dpopKeys(t)
-	liveKey, revokedKey := keys["Ed25519"], keys["P-256"]
-	liveJKT, _ := dpop.Thumbprint(liveKey.Public())
-	revokedJKT, _ := dpop.Thumbprint(revokedKey.Public())
-	live, err := Attenuate(root, Attenuation{ConfirmationJKT: liveJKT})
-	if err != nil {
+	s := siblingCopies{v: replayVerifier(t, store, pub, 10*replayShare), store: store, liveKey: keys["Ed25519"], otherKey: keys["P-256"]}
+	liveJKT, _ := dpop.Thumbprint(s.liveKey.Public())
+	if s.live, err = Attenuate(root, Attenuation{ConfirmationJKT: liveJKT}); err != nil {
 		t.Fatal(err)
 	}
-	revoked, err := Attenuate(root, Attenuation{ConfirmationJKT: revokedJKT})
-	if err != nil {
+	other.ConfirmationJKT, _ = dpop.Thumbprint(s.otherKey.Public())
+	if s.other, err = Attenuate(root, other); err != nil {
 		t.Fatal(err)
 	}
-	revokeCopy(t, v, store, revoked)
+	return s
+}
 
+// checkOtherSpendsNoReplayRoom presents the other copy a replay share's worth
+// of times, each refused with want, and then the live copy, which verifies:
+// the refused proofs took none of the room the copies share.
+func (s siblingCopies) checkOtherSpendsNoReplayRoom(t *testing.T, want error) {
+	t.Helper()
+	ctx := context.Background()
 	for i := range replayShare {
-		if _, err := v.Verify(ctx, withProof(ctx, t, revokedKey, revoked, audienceData, time.Now())); !errors.Is(err, ErrRevoked) {
-			t.Fatalf("revoked copy, proof %d: err = %v, want ErrRevoked", i+1, err)
+		if _, err := s.v.Verify(ctx, withProof(ctx, t, s.otherKey, s.other, audienceData, time.Now())); !errors.Is(err, want) {
+			t.Fatalf("the other copy, proof %d: err = %v, want %v", i+1, err, want)
 		}
 	}
-	if _, err := v.Verify(ctx, withProof(ctx, t, liveKey, live, audienceData, time.Now())); err != nil {
-		t.Fatalf("live sibling after the revoked copy's proofs: %v", err)
+	if _, err := s.v.Verify(ctx, withProof(ctx, t, s.liveKey, s.live, audienceData, time.Now())); err != nil {
+		t.Fatalf("the live sibling after the other copy's proofs: %v", err)
 	}
+}
+
+// A revoked copy keeps no claim on the replay room its capability's copies
+// share: its proofs are refused as revoked without being recorded, so a
+// live sibling bound to another key still verifies.
+func TestARevokedCopySpendsNoReplayRoom(t *testing.T) {
+	s := newSiblingCopies(t, Attenuation{})
+	revokeCopy(t, s.v, s.store, s.other)
+	s.checkOtherSpendsNoReplayRoom(t, ErrRevoked)
 }
 
 // A request Authorize refuses for a caveat spends none of the replay room:
@@ -230,42 +251,8 @@ func TestAnUnmeteredCopySpendsNoReplayRoom(t *testing.T) {
 	// limitedRequests is the copy's own request ceiling; any, as the
 	// verifier refuses the copy before it would count.
 	const limitedRequests = 5
-	ctx := context.Background()
-	issuer, _, store, pub := buildIssuerVerifier(t)
-	cap, _, err := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
-		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
-		Audience: []string{audienceData}, TTL: time.Hour,
-		Caveats: Caveats{Ops: []Op{OpGet, OpShare}, Requests: RequestCeiling{Unlimited: true}, Budget: BudgetCeiling{Unlimited: true, UnitCode: "USD"}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	root, err := issuer.biscuit(ctx, asVerified(cap))
-	if err != nil {
-		t.Fatal(err)
-	}
-	v := replayVerifier(t, store, pub, 10*replayShare)
-	keys := dpopKeys(t)
-	liveKey, limitedKey := keys["Ed25519"], keys["P-256"]
-	liveJKT, _ := dpop.Thumbprint(liveKey.Public())
-	limitedJKT, _ := dpop.Thumbprint(limitedKey.Public())
-	live, err := Attenuate(root, Attenuation{ConfirmationJKT: liveJKT})
-	if err != nil {
-		t.Fatal(err)
-	}
-	limited, err := Attenuate(root, Attenuation{ConfirmationJKT: limitedJKT, Requests: &RequestCeiling{Max: limitedRequests}})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for i := range replayShare {
-		if _, err := v.Verify(ctx, withProof(ctx, t, limitedKey, limited, audienceData, time.Now())); !errors.Is(err, ErrCopyCountersNotMetered) {
-			t.Fatalf("limited copy, proof %d: err = %v, want ErrCopyCountersNotMetered", i+1, err)
-		}
-	}
-	if _, err := v.Verify(ctx, withProof(ctx, t, liveKey, live, audienceData, time.Now())); err != nil {
-		t.Fatalf("live sibling after the limited copy's proofs: %v", err)
-	}
+	s := newSiblingCopies(t, Attenuation{Requests: &RequestCeiling{Max: limitedRequests}})
+	s.checkOtherSpendsNoReplayRoom(t, ErrCopyCountersNotMetered)
 }
 
 // Revoked capabilities of one tenant do not fill the replay cache's overall

@@ -146,12 +146,7 @@ func TestVerify_AudienceMismatch(t *testing.T) {
 	t.Parallel()
 	issuer, verifier, _, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
-	_, token, _ := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
-		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
-		Audience: []string{audienceData},
-		Caveats:  Caveats{Ops: []Op{OpGet}},
-	})
+	_, token := issueAgentGet(t, issuer)
 	_, err := verifier.Verify(ctx, VerifyRequest{Token: token, Audience: audienceAdmin})
 	if !errors.Is(err, ErrAudienceMismatch) {
 		t.Fatalf("expected ErrAudienceMismatch, got %v", err)
@@ -188,12 +183,7 @@ func TestVerify_Expired(t *testing.T) {
 	})
 
 	ctx := context.Background()
-	_, token, _ := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
-		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
-		Audience: []string{audienceData},
-		Caveats:  Caveats{Ops: []Op{OpGet}},
-	})
+	_, token := issueAgentGet(t, issuer)
 
 	clock.now = frozen.Add(time.Hour) // jump past expiry
 	_, err := verifier.Verify(ctx, VerifyRequest{Token: token, Audience: audienceData})
@@ -207,12 +197,7 @@ func TestVerify_Revoked(t *testing.T) {
 	t.Parallel()
 	issuer, verifier, store, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
-	cap, token, _ := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
-		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
-		Audience: []string{audienceData},
-		Caveats:  Caveats{Ops: []Op{OpGet}},
-	})
+	cap, token := issueAgentGet(t, issuer)
 	if _, err := store.Revoke(ctx, RevokeRequest{CapabilityID: cap.ID, Note: "test"}); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
@@ -235,12 +220,7 @@ func TestVerify_UntrustedIssuer(t *testing.T) {
 		Store:      store,
 		IssuerName: "limes-rogue",
 	})
-	_, token, _ := rogueIssuer.issue(context.Background(), IssueRequest{ClientID: testClientID,
-		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
-		Audience: []string{audienceData},
-		Caveats:  Caveats{Ops: []Op{OpGet}},
-	})
+	_, token := issueAgentGet(t, rogueIssuer)
 
 	cache := store
 	keys := staticKeys(t, map[string]ed25519.PublicKey{testKID: pub})
@@ -462,4 +442,20 @@ func staticKeys(t testing.TB, keys map[string]ed25519.PublicKey) *jwks.Static {
 		t.Fatal(err)
 	}
 	return s
+}
+
+// issueAgentGet issues, with issuer, an agent of a fresh tenant a token to
+// get from the data plane.
+func issueAgentGet(t *testing.T, issuer *Issuer) (Capability, string) {
+	t.Helper()
+	cap, token, err := issuer.issue(context.Background(), IssueRequest{ClientID: testClientID,
+		IssuedBy: Principal{Subject: "test-operator"},
+		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
+		Audience: []string{audienceData},
+		Caveats:  Caveats{Ops: []Op{OpGet}},
+	})
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	return cap, token
 }

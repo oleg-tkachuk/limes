@@ -105,63 +105,49 @@ func TestChargeRetryAfterRollbackIsClean(t *testing.T) {
 	}
 }
 
-// Rejection by the capability ceiling must leave both counters untouched, so a
-// caller can retry with a smaller amount without compensating anything.
-func TestChargeCapabilityCeilingLeavesBothCountersUnmutated(t *testing.T) {
-	ctx := context.Background()
-	capID, tenantID := uuid.New(), uuid.New()
-	usage := newTestUsage(newTestStore())
-	if _, err := usage.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{
-		TenantID: tenantID, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("1000"), UnitCode: "USD"},
-	}); err != nil {
-		t.Fatalf("SetTenantBudget: %v", err)
-	}
-
-	_, err := usage.Charge(ctx, meter.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: tenantID, budget: budgetOf(limes.MustParseAmount("10")), unit: "USD"}), Amount: limes.MustParseAmount("50"), Op: "op", Actor: "actor"}, nil)
-	if !errors.Is(err, limes.ErrBudgetExceeded) {
-		t.Fatalf("want ErrBudgetExceeded, got %v", err)
-	}
-
-	if _, err := usage.GetUsage(ctx, capID); !errors.Is(err, meter.ErrUsageNotFound) {
-		t.Errorf("a rejected first charge must create no usage row, got %v", err)
-	}
-	b, err := usage.GetTenantBudget(ctx, tenantID)
-	if err != nil {
-		t.Fatalf("GetTenantBudget: %v", err)
-	}
-	if b.SpentAmount != 0 {
-		t.Errorf("tenant spend = %v after a capability-ceiling rejection, want 0", b.SpentAmount)
-	}
-}
-
-// The tenant ceiling is checked AFTER the capability one, so this is the case
-// where a naive implementation would have already applied the capability side
-// and would need a compensating refund. Staging removes that need entirely.
-func TestChargeTenantCeilingLeavesBothCountersUnmutated(t *testing.T) {
-	ctx := context.Background()
-	capID, tenantID := uuid.New(), uuid.New()
-	usage := newTestUsage(newTestStore())
-	if _, err := usage.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{
-		TenantID: tenantID, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount("20"), UnitCode: "USD"},
-	}); err != nil {
-		t.Fatalf("SetTenantBudget: %v", err)
-	}
-
-	// Comfortably inside the capability ceiling, over the tenant one.
-	_, err := usage.Charge(ctx, meter.ChargeRequest{Subject: recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: tenantID, budget: budgetOf(limes.MustParseAmount("1000")), unit: "USD"}), Amount: limes.MustParseAmount("50"), Op: "op", Actor: "actor"}, nil)
-	if !errors.Is(err, limes.ErrTenantBudgetExceeded) {
-		t.Fatalf("want ErrTenantBudgetExceeded, got %v", err)
-	}
-
-	if _, err := usage.GetUsage(ctx, capID); !errors.Is(err, meter.ErrUsageNotFound) {
-		t.Errorf("capability counter was mutated before the tenant check rejected: %v", err)
-	}
-	b, _ := usage.GetTenantBudget(ctx, tenantID)
-	if b.SpentAmount != 0 {
-		t.Errorf("tenant spend = %v, want 0", b.SpentAmount)
-	}
-	if got := len(usage.committedLedger()); got != 0 {
-		t.Errorf("ledger has %d entries after a rejection, want 0", got)
+// A charge refused by either ceiling leaves both counters and the ledger
+// untouched, so a caller can retry with a smaller amount without
+// compensating anything. The tenant ceiling is checked after the capability
+// one: that is where a naive implementation would already have applied the
+// capability side and would need a compensating refund, which staging
+// removes the need for.
+func TestChargeRefusedByACeilingLeavesBothCountersUnmutated(t *testing.T) {
+	for name, tc := range map[string]struct {
+		tenantMax, capMax string
+		want              error
+	}{
+		"the capability ceiling": {tenantMax: "1000", capMax: "10", want: limes.ErrBudgetExceeded},
+		// Comfortably inside the capability ceiling, over the tenant one.
+		"the tenant ceiling": {tenantMax: "20", capMax: "1000", want: limes.ErrTenantBudgetExceeded},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			capID, tenantID := uuid.New(), uuid.New()
+			usage := newTestUsage(newTestStore())
+			if _, err := usage.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{
+				TenantID: tenantID, Ceiling: limes.BudgetCeiling{Max: limes.MustParseAmount(tc.tenantMax), UnitCode: "USD"},
+			}); err != nil {
+				t.Fatalf("SetTenantBudget: %v", err)
+			}
+			subject := recordedSubject(ctx, t, usage, subjectSpec{capID: capID, tenant: tenantID, budget: budgetOf(limes.MustParseAmount(tc.capMax)), unit: "USD"})
+			_, err := usage.Charge(ctx, meter.ChargeRequest{Subject: subject, Amount: limes.MustParseAmount("50"), Op: "op", Actor: "actor"}, nil)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("want %v, got %v", tc.want, err)
+			}
+			if _, err := usage.GetUsage(ctx, capID); !errors.Is(err, meter.ErrUsageNotFound) {
+				t.Errorf("a refused first charge created a usage row: %v", err)
+			}
+			b, err := usage.GetTenantBudget(ctx, tenantID)
+			if err != nil {
+				t.Fatalf("GetTenantBudget: %v", err)
+			}
+			if b.SpentAmount != 0 {
+				t.Errorf("tenant spend = %v after the refusal, want 0", b.SpentAmount)
+			}
+			if got := len(usage.committedLedger()); got != 0 {
+				t.Errorf("ledger has %d entries after the refusal, want 0", got)
+			}
+		})
 	}
 }
 
