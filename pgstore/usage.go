@@ -25,61 +25,16 @@ func (s *UsageStore) Refund(ctx context.Context, req meter.RefundRequest) (meter
 	}
 	var receipt meter.RefundReceipt
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
-		// The charge is read once to learn which counters it debited, which
-		// are locked first, and locked last, as every call locks the ledger:
-		// an erase that holds the aggregate and deletes the charges does not
-		// meet a refund holding the charge and waiting for the aggregate.
-		e, ok, err := readEntry(ctx, tx, sqlChargeByID, req.ChargeID)
+		e, c, err := s.lockRefunded(ctx, tx, req.ChargeID)
 		if err != nil {
 			return err
-		}
-		if !ok {
-			return meter.ErrChargeNotFound
-		}
-		c, err := lock(ctx, tx, lockRequest{
-			now:      s.clock(),
-			tenantID: e.TenantID,
-			existing: append([]uuid.UUID{e.CapabilityID}, e.ancestors...),
-			copies:   e.copies, copiesCapID: e.CapabilityID,
-		})
-		if err != nil {
-			return err
-		}
-		e, ok, err = readEntry(ctx, tx, sqlChargeByID+` FOR UPDATE`, req.ChargeID)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return meter.ErrChargeNotFound
 		}
 		receipt = meter.RefundReceipt{ChargeID: e.ID, TenantID: e.TenantID, UnitCode: e.UnitCode}
-		remaining := e.Amount - e.RefundedAmount
-		amount := req.Amount
-		if req.Remaining {
-			amount = remaining
-		}
-		if amount > remaining {
-			return fmt.Errorf("%w: %v requested, %v of %v left", meter.ErrRefundExceedsCharge, amount, remaining, e.Amount)
-		}
-		if amount == 0 {
-			return nil
-		}
-		for _, u := range c.usage {
-			u.spent = max0(u.spent - amount)
-		}
-		// A charge of a period since closed is history: the current period's
-		// spend never counted it, so it has nothing to give back.
-		refundTenant := c.tenant.persisted && c.tenant.period == e.tenantPeriod
-		if refundTenant {
-			c.tenant.spent = max0(c.tenant.spent - amount)
-		}
-		for _, r := range c.copies {
-			r.spent = max0(r.spent - amount)
-		}
-		if err := c.write(ctx, tx, s.clock(), refundTenant); err != nil {
+		amount, err := refundAmount(e, req)
+		if err != nil || amount == 0 {
 			return err
 		}
-		if _, err := tx.Exec(ctx, sqlRefunded, e.ID, int64(amount)); err != nil {
+		if err := s.refund(ctx, tx, c, e, amount); err != nil {
 			return err
 		}
 		receipt.Amount = amount
@@ -89,6 +44,73 @@ func (s *UsageStore) Refund(ctx context.Context, req meter.RefundRequest) (meter
 		return meter.RefundReceipt{}, err
 	}
 	return receipt, nil
+}
+
+// lockRefunded reads the charge id and locks the counters it debited, then
+// the charge itself. It is read once to learn which counters those are,
+// which are locked first, and locked last, as every call locks the ledger:
+// an erase that holds the aggregate and deletes the charges does not meet a
+// refund holding the charge and waiting for the aggregate.
+func (s *UsageStore) lockRefunded(ctx context.Context, tx pgx.Tx, id uuid.UUID) (ledgerEntry, *counters, error) {
+	e, ok, err := readEntry(ctx, tx, sqlChargeByID, id)
+	if err != nil {
+		return ledgerEntry{}, nil, err
+	}
+	if !ok {
+		return ledgerEntry{}, nil, meter.ErrChargeNotFound
+	}
+	c, err := lock(ctx, tx, lockRequest{
+		now:      s.clock(),
+		tenantID: e.TenantID,
+		existing: append([]uuid.UUID{e.CapabilityID}, e.ancestors...),
+		copies:   e.copies, copiesCapID: e.CapabilityID,
+	})
+	if err != nil {
+		return ledgerEntry{}, nil, err
+	}
+	e, ok, err = readEntry(ctx, tx, sqlChargeByID+` FOR UPDATE`, id)
+	if err != nil {
+		return ledgerEntry{}, nil, err
+	}
+	if !ok {
+		return ledgerEntry{}, nil, meter.ErrChargeNotFound
+	}
+	return e, c, nil
+}
+
+// refundAmount is what req gives back of the charge e: all that is left of
+// it, or the amount asked for, which may not exceed that.
+func refundAmount(e ledgerEntry, req meter.RefundRequest) (limes.Nanos, error) {
+	remaining := e.Amount - e.RefundedAmount
+	if req.Remaining {
+		return remaining, nil
+	}
+	if req.Amount > remaining {
+		return 0, fmt.Errorf("%w: %v requested, %v of %v left", meter.ErrRefundExceedsCharge, req.Amount, remaining, e.Amount)
+	}
+	return req.Amount, nil
+}
+
+// refund gives amount of the charge e back to every counter in c that spent
+// it, and records it on the charge. A charge of a period since closed is
+// history: the current period's spend never counted it, so it has nothing
+// to give back.
+func (s *UsageStore) refund(ctx context.Context, tx pgx.Tx, c *counters, e ledgerEntry, amount limes.Nanos) error {
+	for _, u := range c.usage {
+		u.spent = max0(u.spent - amount)
+	}
+	refundTenant := c.tenant.persisted && c.tenant.period == e.tenantPeriod
+	if refundTenant {
+		c.tenant.spent = max0(c.tenant.spent - amount)
+	}
+	for _, r := range c.copies {
+		r.spent = max0(r.spent - amount)
+	}
+	if err := c.write(ctx, tx, s.clock(), refundTenant); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, sqlRefunded, e.ID, int64(amount))
+	return err
 }
 
 const sqlRefunded = `UPDATE limes.charges SET refunded = refunded + $2 WHERE id = $1`

@@ -1,6 +1,7 @@
 package pgstore
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -290,50 +291,10 @@ func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, s
 		ChargeID: uuid.New(), SpentAmount: c.usageOf(spec.capID).spent + spec.amount, Overrun: overrun,
 		TenantID: spec.tenantID, UnitCode: spec.unit,
 	}
-	if onCharged != nil {
-		xact, err := currentXact(ctx, tx)
-		if err != nil {
-			return refused, err
-		}
-		callbackCtx, end := withTx(ctx, tx)
-		err = func() error {
-			defer end()
-			return onCharged(callbackCtx, meter.Charged{Receipt: receipt})
-		}()
-		if err != nil {
-			return refused, err
-		}
-		if err := stillOpen(ctx, tx, xact); err != nil {
-			return refused, err
-		}
+	if err := runOnCharged(ctx, tx, receipt, onCharged); err != nil {
+		return refused, err
 	}
-
-	u := c.usage[spec.capID]
-	u.spent += spec.amount
-	u.reserved = max0(u.reserved - released)
-	u.unit = spec.unit
-	for _, anc := range spec.ancestors {
-		au := c.usage[anc.id]
-		au.spent += spec.amount
-		if au.unit == "" {
-			au.unit = spec.unit
-		}
-	}
-	for _, id := range holders {
-		if au, ok := c.usage[id]; ok {
-			au.reserved = max0(au.reserved - released)
-		}
-	}
-	c.tenant.spent += spec.amount
-	c.tenant.reserved = max0(c.tenant.reserved - released)
-	if c.tenant.unit == "" {
-		c.tenant.unit = spec.unit
-	}
-	for _, cp := range spec.copies {
-		r := c.copies[string(cp.RevocationID)]
-		r.spent += spec.amount
-		r.reserved = max0(r.reserved - released)
-	}
+	spend(c, spec, holders, released)
 	now := s.clock()
 	if err := c.write(ctx, tx, now, true); err != nil {
 		return refused, err
@@ -344,6 +305,55 @@ func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, s
 		return refused, err
 	}
 	return receipt, nil
+}
+
+// runOnCharged runs the caller's onCharged, if any, in tx, and refuses a
+// callback that ended tx.
+func runOnCharged(ctx context.Context, tx pgx.Tx, receipt meter.ChargeReceipt, onCharged func(context.Context, meter.Charged) error) error {
+	if onCharged == nil {
+		return nil
+	}
+	xact, err := currentXact(ctx, tx)
+	if err != nil {
+		return err
+	}
+	callbackCtx, end := withTx(ctx, tx)
+	err = func() error {
+		defer end()
+		return onCharged(callbackCtx, meter.Charged{Receipt: receipt})
+	}()
+	if err != nil {
+		return err
+	}
+	return stillOpen(ctx, tx, xact)
+}
+
+// spend adds spec's amount to every counter in c it is spent on — the
+// capability, its ancestors, its tenant and its copies — releasing what
+// the holders held of it.
+func spend(c *counters, spec chargeSpec, holders []uuid.UUID, released limes.Nanos) {
+	u := c.usage[spec.capID]
+	u.spent += spec.amount
+	u.reserved = max0(u.reserved - released)
+	u.unit = spec.unit
+	for _, anc := range spec.ancestors {
+		au := c.usage[anc.id]
+		au.spent += spec.amount
+		au.unit = cmp.Or(au.unit, spec.unit)
+	}
+	for _, id := range holders {
+		if au, ok := c.usage[id]; ok {
+			au.reserved = max0(au.reserved - released)
+		}
+	}
+	c.tenant.spent += spec.amount
+	c.tenant.reserved = max0(c.tenant.reserved - released)
+	c.tenant.unit = cmp.Or(c.tenant.unit, spec.unit)
+	for _, cp := range spec.copies {
+		r := c.copies[string(cp.RevocationID)]
+		r.spent += spec.amount
+		r.reserved = max0(r.reserved - released)
+	}
 }
 
 // ceilingCheck is an amount measured against every ceiling. released is the
