@@ -48,6 +48,10 @@ const Header = "DPoP"
 // tokenType is the JWT "typ" of a proof.
 const tokenType = "dpop+jwt"
 
+// headerCrit is the JWS header parameter naming the extensions a recipient
+// must understand (RFC 7515 §4.1.11).
+const headerCrit = "crit"
+
 // DefaultWindow is how far a proof's iat may be from the verifier's clock.
 const DefaultWindow = time.Minute
 
@@ -104,6 +108,18 @@ func jwkHasPrivateMember(headerSeg string) bool {
 		_, ok := h.JWK[m]
 		return ok
 	})
+}
+
+// hasCriticalExtensions reports whether the header segment carries a crit
+// member, whatever its value: one naming extensions this package cannot
+// understand, or one RFC 7515 §4.1.11 forbids (empty, or not an array).
+func hasCriticalExtensions(headerSeg string) bool {
+	var h map[string]jsontext.Value
+	if decodeSegment(headerSeg, &h) != nil {
+		return true // unreadable: refuse rather than assume
+	}
+	_, ok := h[headerCrit]
+	return ok
 }
 
 type proofClaims struct {
@@ -546,6 +562,11 @@ func readProofHeader(seg string) (proofHeader, error) {
 	// RFC 9449 §4.3: the jwk must not contain a private key.
 	if jwkHasPrivateMember(seg) {
 		return proofHeader{}, fmt.Errorf("%w: jwk carries a private key", ErrInvalid)
+	}
+	// RFC 7515 §4.1.11: an extension the recipient does not understand
+	// makes the JWS invalid, and this package understands none.
+	if hasCriticalExtensions(seg) {
+		return proofHeader{}, fmt.Errorf("%w: header names critical extensions", ErrInvalid)
 	}
 	return header, nil
 }
