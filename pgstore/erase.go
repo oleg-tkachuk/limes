@@ -26,10 +26,18 @@ const (
 	// revoke and the inserts of children of the same tenant: "limr".
 	revokeLockClass int32 = 0x6c696d72
 
+	// tenantLockKey is the advisory lock key of class $1 on tenant $2: a 64-bit
+	// hash of the tenant seeded with the class, so two tenants share a lock
+	// only as rarely as two 64-bit hashes meet. A 32-bit hash beside the
+	// class, as the two-key form takes, made tenants collide from around a
+	// hundred thousand of them, serializing one's revokes and delegations
+	// behind another's.
+	tenantLockKey = `hashtextextended($2::text, $1)`
+
 	// sqlTakeTenantLock takes the advisory lock of class $1 on tenant $2 alone,
 	// and sqlShareTenantLock shares it, until the transaction ends.
-	sqlTakeTenantLock  = `SELECT pg_advisory_xact_lock($1, hashtext($2::text))`
-	sqlShareTenantLock = `SELECT pg_advisory_xact_lock_shared($1, hashtext($2::text))`
+	sqlTakeTenantLock  = `SELECT pg_advisory_xact_lock(` + tenantLockKey + `)`
+	sqlShareTenantLock = `SELECT pg_advisory_xact_lock_shared(` + tenantLockKey + `)`
 
 	sqlIsErased   = `SELECT EXISTS (SELECT 1 FROM limes.erased_tenants WHERE tenant_id = $1)`
 	sqlMarkErased = `
