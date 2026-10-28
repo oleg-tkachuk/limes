@@ -149,6 +149,58 @@ describe("gitHubOver", () => {
     assert.deepEqual(sent[2]?.body, { tag_name: "v1.2.3", name: "v1.2.3", body: "notes\n\nlist" });
   });
 
+  test("a prerelease is never the latest release", async () => {
+    const { octokit, sent } = clientAnswering(() => ({ status: 200, body: { body: "list" } }));
+    await gitHubOver(octokit, REPO).publishRelease({ tag: "v1.0.0-rc.1", notes: "", previousTag: undefined, latest: true, prerelease: true });
+    assert.deepEqual(sent[2]?.body, { tag_name: "v1.0.0-rc.1", name: "v1.0.0-rc.1", body: "list", make_latest: "false", prerelease: true });
+  });
+
+  test("a release of a tag not pushed is refused before anything is written", async () => {
+    const { octokit, sent } = clientAnswering(() => ({ status: 404, body: { message: "Not Found" } }));
+    await assert.rejects(gitHubOver(octokit, REPO).publishRelease({ tag: "v9.9.9", notes: "", previousTag: undefined, latest: true }), /not in the repository/);
+    assert.equal(sent.length, 1);
+  });
+
+  test("a release another run published meanwhile is no failure; one still missing is", async () => {
+    for (const [published, fails] of [[true, false], [false, true]] as const) {
+      const { octokit } = clientAnswering((r) =>
+        r.method === "POST" && r.url.endsWith("/releases")
+          ? { status: 422, body: { message: "already_exists" } }
+          : r.url.includes("/releases/tags/") && !published
+            ? { status: 404, body: { message: "Not Found" } }
+            : { status: 200, body: { body: "list" } },
+      );
+      const publish = gitHubOver(octokit, REPO).publishRelease({ tag: "v1.2.3", notes: "", previousTag: undefined, latest: true });
+      if (fails) {
+        await assert.rejects(publish);
+      } else {
+        await publish;
+      }
+    }
+  });
+
+  test("lists the open pull requests into a base, neither drafts nor forks", async () => {
+    const pull = (number: number, draft: boolean | null, fullName: string | null) => ({
+      number, draft, head: { sha: `sha${number}`, repo: fullName === null ? null : { full_name: fullName } },
+    });
+    const { octokit, sent } = clientAnswering(() => ({
+      status: 200,
+      body: [pull(1, false, "oleg-tkachuk/limes"), pull(2, true, "oleg-tkachuk/limes"), pull(3, null, "fork/limes"), pull(4, null, null), pull(5, null, "oleg-tkachuk/limes")],
+    }));
+    const pulls = await gitHubOver(octokit, REPO).openPullRequestsInto("main");
+    assert.match(sent[0]?.url ?? "", /\/pulls\?.*base=main/);
+    assert.deepEqual(pulls, [{ number: 1, headSha: "sha1" }, { number: 5, headSha: "sha5" }]);
+  });
+
+  test("reads a branch's latest finished push run, or none", async () => {
+    const run = { id: 9, conclusion: null, head_sha: "abc", html_url: "https://example.com/runs/9" };
+    for (const [runs, want] of [[[run], { id: 9, conclusion: "", headSha: "abc", url: "https://example.com/runs/9" }], [[], undefined]] as const) {
+      const { octokit, sent } = clientAnswering(() => ({ status: 200, body: { total_count: runs.length, workflow_runs: runs } }));
+      assert.deepEqual(await gitHubOver(octokit, REPO).latestRunOf(".github/workflows/ci.yaml", "main"), want);
+      assert.match(sent[0]?.url ?? "", /\/actions\/workflows\/ci\.yaml\/runs\?.*branch=main/);
+    }
+  });
+
   test("dispatches a release", async () => {
     const { octokit, sent } = clientAnswering(() => ({ status: 204, body: {} }));
     await gitHubOver(octokit, REPO).dispatch("release", { sha: "abc", ci_run_id: "1" });

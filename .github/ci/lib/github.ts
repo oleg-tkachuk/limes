@@ -188,171 +188,223 @@ function statusOf(err: unknown): number | undefined {
 
 // gitHubOver is the GitHub of repo through octokit.
 export function gitHubOver(octokit: Octokit, repo: Repo): GitHub {
-  return {
-    async pullRequest(number) {
-      const { data } = await octokit.rest.pulls.get({ ...repo, pull_number: number });
-      return {
-        number: data.number,
-        open: data.state === "open",
-        draft: data.draft ?? false,
-        fromFork: data.head.repo?.full_name !== data.base.repo.full_name,
-        author: authorOf(data.user.login, data.user.type === BOT_TYPE),
-        baseRef: data.base.ref,
-        headSha: data.head.sha,
-        changedFiles: data.changed_files,
-      };
-    },
-    async permission(login) {
-      try {
-        const { data } = await octokit.rest.repos.getCollaboratorPermissionLevel({ ...repo, username: login });
-        return data.permission;
-      } catch (err) {
-        if (statusOf(err) === NOT_FOUND) {
-          return undefined;
-        }
-        throw err;
+  return new OctokitGitHub(octokit, repo);
+}
+
+// workflowFile is a workflow's file name, which the REST API takes as its
+// id, from its path.
+function workflowFile(workflow: string): string {
+  return workflow.split("/").at(-1) ?? workflow;
+}
+
+// OctokitGitHub is the GitHub of repo through octokit's REST API.
+class OctokitGitHub implements GitHub {
+  private readonly octokit: Octokit;
+  private readonly repo: Repo;
+
+  constructor(octokit: Octokit, repo: Repo) {
+    this.octokit = octokit;
+    this.repo = repo;
+  }
+
+  async pullRequest(number: number): Promise<PullRequest> {
+    const { data } = await this.octokit.rest.pulls.get({ ...this.repo, pull_number: number });
+    return {
+      number: data.number,
+      open: data.state === "open",
+      draft: data.draft ?? false,
+      fromFork: data.head.repo?.full_name !== data.base.repo.full_name,
+      author: authorOf(data.user.login, data.user.type === BOT_TYPE),
+      baseRef: data.base.ref,
+      headSha: data.head.sha,
+      changedFiles: data.changed_files,
+    };
+  }
+
+  async permission(login: string): Promise<string | undefined> {
+    try {
+      const { data } = await this.octokit.rest.repos.getCollaboratorPermissionLevel({ ...this.repo, username: login });
+      return data.permission;
+    } catch (err) {
+      if (statusOf(err) === NOT_FOUND) {
+        return undefined;
       }
-    },
-    async compare(base, head) {
-      const { data } = await octokit.rest.repos.compareCommitsWithBasehead({ ...repo, basehead: `${base}...${head}` });
-      return {
-        behindBy: data.behind_by,
-        files: (data.files ?? []).map((f) => ({ filename: f.filename, previousFilename: f.previous_filename })),
-      };
-    },
-    async fileAt(path, ref) {
-      try {
-        const { data } = await octokit.rest.repos.getContent({ ...repo, path, ref, mediaType: { format: "raw" } });
-        return String(data);
-      } catch (err) {
-        if (typeof err === "object" && err !== null && "status" in err && err.status === NOT_FOUND) {
-          return undefined;
-        }
-        throw err;
+      throw err;
+    }
+  }
+
+  async compare(base: string, head: string): Promise<Comparison> {
+    const { data } = await this.octokit.rest.repos.compareCommitsWithBasehead({ ...this.repo, basehead: `${base}...${head}` });
+    return {
+      behindBy: data.behind_by,
+      files: (data.files ?? []).map((f) => ({ filename: f.filename, previousFilename: f.previous_filename })),
+    };
+  }
+
+  async fileAt(path: string, ref: string): Promise<string | undefined> {
+    try {
+      const { data } = await this.octokit.rest.repos.getContent({ ...this.repo, path, ref, mediaType: { format: "raw" } });
+      return String(data);
+    } catch (err) {
+      if (statusOf(err) === NOT_FOUND) {
+        return undefined;
       }
-    },
-    async merge(number, sha, message) {
-      await octokit.rest.pulls.merge({ ...repo, pull_number: number, sha, merge_method: MERGE_METHOD, commit_message: message });
-    },
-    async workflowRun(runId) {
-      const { data } = await octokit.rest.actions.getWorkflowRun({ ...repo, run_id: runId });
-      return {
-        path: data.path,
-        event: data.event,
-        headBranch: data.head_branch ?? "",
-        headSha: data.head_sha,
-        repository: data.repository.full_name,
-      };
-    },
-    async runJobs(runId) {
-      const jobs = await octokit.paginate(octokit.rest.actions.listJobsForWorkflowRun, { ...repo, run_id: runId, per_page: PAGE_SIZE });
-      return jobs.map((j) => ({ name: j.name, status: j.status, conclusion: j.conclusion ?? undefined }));
-    },
-    async releaseExists(tag) {
-      return existsBy(() => octokit.rest.repos.getReleaseByTag({ ...repo, tag }));
-    },
-    async publishRelease(release) {
-      // The tag must be pushed already: a release of a missing tag would
-      // create it at the default branch's head.
-      if (!(await existsBy(() => octokit.rest.git.getRef({ ...repo, ref: `tags/${release.tag}` })))) {
-        throw new Error(`tag ${release.tag} is not in the repository`);
-      }
-      const { data: generated } = await octokit.rest.repos.generateReleaseNotes({
-        ...repo,
+      throw err;
+    }
+  }
+
+  async merge(number: number, sha: string, message: string): Promise<void> {
+    await this.octokit.rest.pulls.merge({ ...this.repo, pull_number: number, sha, merge_method: MERGE_METHOD, commit_message: message });
+  }
+
+  async workflowRun(runId: number): Promise<WorkflowRun> {
+    const { data } = await this.octokit.rest.actions.getWorkflowRun({ ...this.repo, run_id: runId });
+    return {
+      path: data.path,
+      event: data.event,
+      headBranch: data.head_branch ?? "",
+      headSha: data.head_sha,
+      repository: data.repository.full_name,
+    };
+  }
+
+  async runJobs(runId: number): Promise<Job[]> {
+    const jobs = await this.octokit.paginate(this.octokit.rest.actions.listJobsForWorkflowRun, { ...this.repo, run_id: runId, per_page: PAGE_SIZE });
+    return jobs.map((j) => ({ name: j.name, status: j.status, conclusion: j.conclusion ?? undefined }));
+  }
+
+  async releaseExists(tag: string): Promise<boolean> {
+    return existsBy(() => this.octokit.rest.repos.getReleaseByTag({ ...this.repo, tag }));
+  }
+
+  async publishRelease(release: NewRelease): Promise<void> {
+    // The tag must be pushed already: a release of a missing tag would
+    // create it at the default branch's head.
+    if (!(await existsBy(() => this.octokit.rest.git.getRef({ ...this.repo, ref: `tags/${release.tag}` })))) {
+      throw new Error(`tag ${release.tag} is not in the repository`);
+    }
+    const { data: generated } = await this.octokit.rest.repos.generateReleaseNotes({
+      ...this.repo,
+      tag_name: release.tag,
+      ...previousTagOf(release),
+    });
+    const body = release.notes === "" ? generated.body : `${release.notes}\n${generated.body}`;
+    try {
+      await this.octokit.rest.repos.createRelease({
+        ...this.repo,
         tag_name: release.tag,
-        ...(release.previousTag === undefined ? {} : { previous_tag_name: release.previousTag }),
+        name: release.tag,
+        body,
+        ...standingOf(release),
       });
-      const body = release.notes === "" ? generated.body : `${release.notes}\n${generated.body}`;
-      try {
-        await octokit.rest.repos.createRelease({
-          ...repo,
-          tag_name: release.tag,
-          name: release.tag,
-          body,
-          ...(release.latest && release.prerelease !== true ? {} : { make_latest: MAKE_LATEST_FALSE }),
-          ...(release.prerelease === true ? { prerelease: true } : {}),
-        });
-      } catch (err) {
-        if (!(await this.releaseExists(release.tag))) {
-          throw err;
-        }
+    } catch (err) {
+      if (!(await this.releaseExists(release.tag))) {
+        throw err;
       }
-    },
-    async sameRepoPullRequest(head, base) {
-      const { data } = await octokit.rest.pulls.list({ ...repo, head: `${repo.owner}:${head}`, base, state: "open" });
-      return data.find((p) => p.head.repo?.full_name === `${repo.owner}/${repo.repo}`)?.number;
-    },
-    async createPullRequest(head, base, text) {
-      const { data } = await octokit.rest.pulls.create({ ...repo, head, base, title: text.title, body: text.body });
-      return data.number;
-    },
-    async editPullRequest(number, text) {
-      await octokit.rest.pulls.update({ ...repo, pull_number: number, title: text.title, body: text.body });
-    },
-    async finishedRunsOf(workflow, branch, sha) {
-      const { data } = await octokit.rest.actions.listWorkflowRuns({
-        ...repo,
-        workflow_id: workflow.split("/").at(-1) ?? workflow,
-        branch,
-        event: "push",
-        status: "completed",
-        head_sha: sha,
-        per_page: PAGE_SIZE,
-      });
-      return data.workflow_runs.sort((a, b) => b.run_number - a.run_number).map((r) => r.id);
-    },
-    async latestRunOf(workflow, branch) {
-      const { data } = await octokit.rest.actions.listWorkflowRuns({
-        ...repo,
-        workflow_id: workflow.split("/").at(-1) ?? workflow,
-        branch,
-        event: "push",
-        status: "completed",
-        per_page: 1,
-      });
-      const run = data.workflow_runs[0];
-      return run === undefined ? undefined : { id: run.id, conclusion: run.conclusion ?? "", headSha: run.head_sha, url: run.html_url };
-    },
-    async openPullRequestsInto(base) {
-      const pulls = await octokit.paginate(octokit.rest.pulls.list, { ...repo, base, state: "open", per_page: PAGE_SIZE });
-      return pulls
-        .filter((p) => !(p.draft ?? false) && p.head.repo?.full_name === `${repo.owner}/${repo.repo}`)
-        .map((p) => ({ number: p.number, headSha: p.head.sha }));
-    },
-    async pullRequestRuns(workflow, headSha) {
-      const { data } = await octokit.rest.actions.listWorkflowRuns({
-        ...repo,
-        workflow_id: workflow.split("/").at(-1) ?? workflow,
-        event: "pull_request",
-        head_sha: headSha,
-        per_page: PAGE_SIZE,
-      });
-      return data.workflow_runs
-        .sort((a, b) => b.run_number - a.run_number)
-        .map((r) => ({
-          status: r.status ?? "",
-          conclusion: r.conclusion ?? undefined,
-          title: r.display_title,
-          pullRequests: (r.pull_requests ?? []).map((p) => ({ number: p.number, baseRef: p.base.ref })),
-        }));
-    },
-    async openIssueTitled(title) {
-      const issues = await octokit.paginate(octokit.rest.issues.listForRepo, { ...repo, state: "open", per_page: PAGE_SIZE });
-      return issues.find((i) => i.pull_request === undefined && i.title === title)?.number;
-    },
-    async createIssue(title, body) {
-      const { data } = await octokit.rest.issues.create({ ...repo, title, body });
-      return data.number;
-    },
-    async commentOnIssue(number, body) {
-      await octokit.rest.issues.createComment({ ...repo, issue_number: number, body });
-    },
-    async closeIssue(number) {
-      await octokit.rest.issues.update({ ...repo, issue_number: number, state: "closed", state_reason: "completed" });
-    },
-    async dispatch(eventType, payload) {
-      await octokit.rest.repos.createDispatchEvent({ ...repo, event_type: eventType, client_payload: payload });
-    },
+    }
+  }
+
+  async sameRepoPullRequest(head: string, base: string): Promise<number | undefined> {
+    const { data } = await this.octokit.rest.pulls.list({ ...this.repo, head: `${this.repo.owner}:${head}`, base, state: "open" });
+    return data.find((p) => p.head.repo?.full_name === `${this.repo.owner}/${this.repo.repo}`)?.number;
+  }
+
+  async createPullRequest(head: string, base: string, text: PullRequestText): Promise<number> {
+    const { data } = await this.octokit.rest.pulls.create({ ...this.repo, head, base, title: text.title, body: text.body });
+    return data.number;
+  }
+
+  async editPullRequest(number: number, text: PullRequestText): Promise<void> {
+    await this.octokit.rest.pulls.update({ ...this.repo, pull_number: number, title: text.title, body: text.body });
+  }
+
+  async finishedRunsOf(workflow: string, branch: string, sha: string): Promise<number[]> {
+    const { data } = await this.octokit.rest.actions.listWorkflowRuns({
+      ...this.repo,
+      workflow_id: workflowFile(workflow),
+      branch,
+      event: "push",
+      status: "completed",
+      head_sha: sha,
+      per_page: PAGE_SIZE,
+    });
+    return data.workflow_runs.sort((a, b) => b.run_number - a.run_number).map((r) => r.id);
+  }
+
+  async latestRunOf(workflow: string, branch: string): Promise<RunState | undefined> {
+    const { data } = await this.octokit.rest.actions.listWorkflowRuns({
+      ...this.repo,
+      workflow_id: workflowFile(workflow),
+      branch,
+      event: "push",
+      status: "completed",
+      per_page: 1,
+    });
+    const run = data.workflow_runs[0];
+    return run === undefined ? undefined : { id: run.id, conclusion: run.conclusion ?? "", headSha: run.head_sha, url: run.html_url };
+  }
+
+  async openPullRequestsInto(base: string): Promise<OpenPullRequest[]> {
+    const pulls = await this.octokit.paginate(this.octokit.rest.pulls.list, { ...this.repo, base, state: "open", per_page: PAGE_SIZE });
+    return pulls
+      .filter((p) => !(p.draft ?? false) && p.head.repo?.full_name === `${this.repo.owner}/${this.repo.repo}`)
+      .map((p) => ({ number: p.number, headSha: p.head.sha }));
+  }
+
+  async pullRequestRuns(workflow: string, headSha: string): Promise<PullRequestRun[]> {
+    const { data } = await this.octokit.rest.actions.listWorkflowRuns({
+      ...this.repo,
+      workflow_id: workflowFile(workflow),
+      event: "pull_request",
+      head_sha: headSha,
+      per_page: PAGE_SIZE,
+    });
+    return data.workflow_runs
+      .sort((a, b) => b.run_number - a.run_number)
+      .map((r) => ({
+        status: r.status ?? "",
+        conclusion: r.conclusion ?? undefined,
+        title: r.display_title,
+        pullRequests: (r.pull_requests ?? []).map((p) => ({ number: p.number, baseRef: p.base.ref })),
+      }));
+  }
+
+  async openIssueTitled(title: string): Promise<number | undefined> {
+    const issues = await this.octokit.paginate(this.octokit.rest.issues.listForRepo, { ...this.repo, state: "open", per_page: PAGE_SIZE });
+    return issues.find((i) => i.pull_request === undefined && i.title === title)?.number;
+  }
+
+  async createIssue(title: string, body: string): Promise<number> {
+    const { data } = await this.octokit.rest.issues.create({ ...this.repo, title, body });
+    return data.number;
+  }
+
+  async commentOnIssue(number: number, body: string): Promise<void> {
+    await this.octokit.rest.issues.createComment({ ...this.repo, issue_number: number, body });
+  }
+
+  async closeIssue(number: number): Promise<void> {
+    await this.octokit.rest.issues.update({ ...this.repo, issue_number: number, state: "closed", state_reason: "completed" });
+  }
+
+  async dispatch(eventType: string, payload: Record<string, string>): Promise<void> {
+    await this.octokit.rest.repos.createDispatchEvent({ ...this.repo, event_type: eventType, client_payload: payload });
+  }
+}
+
+// previousTagOf is the release notes' starting point, when the release
+// names one; GitHub picks its own otherwise.
+function previousTagOf(release: NewRelease): { previous_tag_name?: string } {
+  return release.previousTag === undefined ? {} : { previous_tag_name: release.previousTag };
+}
+
+// standingOf is how a release stands among the others: a prerelease, or
+// one not the latest, says so; GitHub makes any other the latest.
+function standingOf(release: NewRelease): { make_latest?: typeof MAKE_LATEST_FALSE; prerelease?: true } {
+  const prerelease = release.prerelease === true;
+  return {
+    ...(release.latest && !prerelease ? {} : { make_latest: MAKE_LATEST_FALSE }),
+    ...(prerelease ? { prerelease: true as const } : {}),
   };
 }
 
