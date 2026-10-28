@@ -238,22 +238,32 @@ func keyFor(keys jwk.Set, kid string, alg jwa.SignatureAlgorithm) (jwk.Key, erro
 	if named, ok := key.Algorithm(); ok && named.String() != alg.String() {
 		return nil, fmt.Errorf("%w: kid %q is a key for %q, not %q", ErrInvalidGrant, kid, named, alg)
 	}
-	kind := keyKinds[alg.String()]
-	if key.KeyType() != kind.typ {
-		return nil, fmt.Errorf("%w: kid %q is a %s key, not one %q verifies with", ErrInvalidGrant, kid, key.KeyType(), alg)
-	}
-	if kind.curve != (jwa.EllipticCurveAlgorithm{}) {
-		c, ok := key.(interface {
-			Crv() (jwa.EllipticCurveAlgorithm, bool)
-		})
-		if !ok {
-			return nil, fmt.Errorf("%w: kid %q names no curve", ErrInvalidGrant, kid)
-		}
-		if crv, ok := c.Crv(); !ok || crv != kind.curve {
-			return nil, fmt.Errorf("%w: kid %q is not on %s, as %q needs", ErrInvalidGrant, kid, kind.curve, alg)
-		}
+	if err := checkKeyKind(key, kid, alg); err != nil {
+		return nil, err
 	}
 	return key, nil
+}
+
+// checkKeyKind refuses a key, kid, of another type than alg verifies with,
+// or on another curve than alg needs.
+func checkKeyKind(key jwk.Key, kid string, alg jwa.SignatureAlgorithm) error {
+	kind := keyKinds[alg.String()]
+	if key.KeyType() != kind.typ {
+		return fmt.Errorf("%w: kid %q is a %s key, not one %q verifies with", ErrInvalidGrant, kid, key.KeyType(), alg)
+	}
+	if kind.curve == (jwa.EllipticCurveAlgorithm{}) {
+		return nil
+	}
+	c, ok := key.(interface {
+		Crv() (jwa.EllipticCurveAlgorithm, bool)
+	})
+	if !ok {
+		return fmt.Errorf("%w: kid %q names no curve", ErrInvalidGrant, kid)
+	}
+	if crv, ok := c.Crv(); !ok || crv != kind.curve {
+		return fmt.Errorf("%w: kid %q is not on %s, as %q needs", ErrInvalidGrant, kid, kind.curve, alg)
+	}
+	return nil
 }
 
 // subjectOf is the Subject tok, a verified token, names.
@@ -268,33 +278,56 @@ func subjectOf(tok jwt.Token, clientIDClaim string) (Subject, error) {
 	if err := tok.Get(clientIDClaim, &s.ClientID); err != nil || s.ClientID == "" {
 		return Subject{}, fmt.Errorf("%w: %s is not a non-empty string", ErrInvalidGrant, clientIDClaim)
 	}
-	if tok.Has(claimScope) {
-		var scope string
-		if err := tok.Get(claimScope, &scope); err != nil {
-			return Subject{}, fmt.Errorf("%w: %s is not a string", ErrInvalidGrant, claimScope)
-		}
-		s.Scopes = strings.Fields(scope)
+	var err error
+	if s.Scopes, err = scopesOf(tok); err != nil {
+		return Subject{}, err
 	}
-	if tok.Has(claimCnf) {
-		var cnf map[string]any
-		if err := tok.Get(claimCnf, &cnf); err != nil {
-			return Subject{}, fmt.Errorf("%w: %s is not an object", ErrInvalidGrant, claimCnf)
-		}
-		// A binding this module cannot check, to a certificate (RFC 8705)
-		// or anything but a DPoP key, would be dropped by a bearer
-		// capability: such a token is refused.
-		jkt, ok := cnf[cnfJKT].(string)
-		if !ok || jkt == "" || len(cnf) != 1 {
-			return Subject{}, fmt.Errorf("%w: %s binds the token otherwise than by a DPoP key", ErrInvalidGrant, claimCnf)
-		}
-		s.JKT = jkt
+	if s.JKT, err = jktOf(tok); err != nil {
+		return Subject{}, err
 	}
-	s.Claims = map[string]any{}
+	s.Claims = claimsOf(tok)
+	return s, nil
+}
+
+// scopesOf is the token's scope claim, split; nil for none.
+func scopesOf(tok jwt.Token) ([]string, error) {
+	if !tok.Has(claimScope) {
+		return nil, nil
+	}
+	var scope string
+	if err := tok.Get(claimScope, &scope); err != nil {
+		return nil, fmt.Errorf("%w: %s is not a string", ErrInvalidGrant, claimScope)
+	}
+	return strings.Fields(scope), nil
+}
+
+// jktOf is the DPoP key the token's cnf binds it to, "" for none.
+func jktOf(tok jwt.Token) (string, error) {
+	if !tok.Has(claimCnf) {
+		return "", nil
+	}
+	var cnf map[string]any
+	if err := tok.Get(claimCnf, &cnf); err != nil {
+		return "", fmt.Errorf("%w: %s is not an object", ErrInvalidGrant, claimCnf)
+	}
+	// A binding this module cannot check, to a certificate (RFC 8705)
+	// or anything but a DPoP key, would be dropped by a bearer
+	// capability: such a token is refused.
+	jkt, ok := cnf[cnfJKT].(string)
+	if !ok || jkt == "" || len(cnf) != 1 {
+		return "", fmt.Errorf("%w: %s binds the token otherwise than by a DPoP key", ErrInvalidGrant, claimCnf)
+	}
+	return jkt, nil
+}
+
+// claimsOf is every claim of the token the policy may read.
+func claimsOf(tok jwt.Token) map[string]any {
+	claims := map[string]any{}
 	for _, key := range tok.Keys() {
 		var value any
 		if err := tok.Get(key, &value); err == nil {
-			s.Claims[key] = value
+			claims[key] = value
 		}
 	}
-	return s, nil
+	return claims
 }

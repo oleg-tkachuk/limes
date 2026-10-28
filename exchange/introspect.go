@@ -1,6 +1,7 @@
 package exchange
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -157,36 +158,50 @@ func (h *IntrospectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		// would refuse every request as if every token were revoked.
 		log.ErrorContext(r.Context(), "introspection failed", slog.Any("error", err))
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: codeServerError}, log)
-	case h.cfg.Audiences != nil && !slices.ContainsFunc(got.Capability.Audience, func(aud string) bool {
-		return slices.Contains(h.cfg.Audiences(client), aud)
-	}):
+	case !h.mayAsk(client, got.Capability.Audience):
 		log.WarnContext(r.Context(), "introspection: token for an audience the client may not ask about; answered inactive",
 			slog.String("capability", got.Capability.ID.String()))
 		writeJSON(w, http.StatusOK, introspection{Active: false}, log)
 	default:
-		c := got.Capability
-		detail, err := caveatsDetail(effectiveCaveats(c.Caveats, got.Copies))
-		if err != nil {
-			log.ErrorContext(r.Context(), "introspection: encode caveats", slog.String("capability", c.ID.String()), slog.Any("error", err))
-			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: codeServerError}, log)
-			return
-		}
-		sub, actor := actingOf(c)
-		answer := introspection{
-			Active: true, Issuer: c.Issuer, Subject: sub, Act: actor, Audience: c.Audience,
-			ExpiresAt: c.ExpiresAt.Unix(), IssuedAt: c.IssuedAt.Unix(), ID: c.ID.String(), ClientID: c.ClientID,
-			TokenType: TokenTypeBearer, AuthorizationDetails: []json.RawMessage{detail},
-		}
-		if !c.NotBefore.IsZero() {
-			answer.NotBefore = c.NotBefore.Unix()
-		}
-		if c.ConfirmationJKT != "" {
-			answer.TokenType, answer.Cnf = TokenTypeDPoP, &cnf{JKT: c.ConfirmationJKT}
-		}
-		log.InfoContext(r.Context(), "introspection: token active",
-			slog.String("capability", answer.ID), slog.String("token_type", answer.TokenType))
-		writeJSON(w, http.StatusOK, answer, log)
+		h.answerActive(r.Context(), w, log, got)
 	}
+}
+
+// mayAsk reports whether client may learn about a token of audience: any
+// client, when Audiences is nil, or one serving an audience the token names.
+func (h *IntrospectionHandler) mayAsk(client Client, audience []string) bool {
+	if h.cfg.Audiences == nil {
+		return true
+	}
+	served := h.cfg.Audiences(client)
+	return slices.ContainsFunc(audience, func(aud string) bool { return slices.Contains(served, aud) })
+}
+
+// answerActive writes the answer for an active token: its standard
+// members, who it acts for, its binding, and its caveats.
+func (h *IntrospectionHandler) answerActive(ctx context.Context, w http.ResponseWriter, log *slog.Logger, got limes.Introspection) {
+	c := got.Capability
+	detail, err := caveatsDetail(effectiveCaveats(c.Caveats, got.Copies))
+	if err != nil {
+		log.ErrorContext(ctx, "introspection: encode caveats", slog.String("capability", c.ID.String()), slog.Any("error", err))
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: codeServerError}, log)
+		return
+	}
+	sub, actor := actingOf(c)
+	answer := introspection{
+		Active: true, Issuer: c.Issuer, Subject: sub, Act: actor, Audience: c.Audience,
+		ExpiresAt: c.ExpiresAt.Unix(), IssuedAt: c.IssuedAt.Unix(), ID: c.ID.String(), ClientID: c.ClientID,
+		TokenType: TokenTypeBearer, AuthorizationDetails: []json.RawMessage{detail},
+	}
+	if !c.NotBefore.IsZero() {
+		answer.NotBefore = c.NotBefore.Unix()
+	}
+	if c.ConfirmationJKT != "" {
+		answer.TokenType, answer.Cnf = TokenTypeDPoP, &cnf{JKT: c.ConfirmationJKT}
+	}
+	log.InfoContext(ctx, "introspection: token active",
+		slog.String("capability", answer.ID), slog.String("token_type", answer.TokenType))
+	writeJSON(w, http.StatusOK, answer, log)
 }
 
 // effectiveCaveats are c with each request and budget ceiling lowered to the
