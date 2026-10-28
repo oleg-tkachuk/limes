@@ -40,6 +40,7 @@ import (
 	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/internal/expect"
 	"github.com/oleg-tkachuk/limes/internal/fields"
 	"github.com/oleg-tkachuk/limes/internal/link"
 	"github.com/oleg-tkachuk/limes/internal/watchdog"
@@ -199,9 +200,8 @@ func (f fixture) issuer() limes.Principal {
 
 func (f fixture) insert(t *testing.T, c limes.Capability) limes.Capability {
 	t.Helper()
-	if err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: c, IssuedBy: issuedBy}); err != nil {
-		t.Fatalf("insert %s: %v", c.ID, err)
-	}
+	err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: c, IssuedBy: issuedBy})
+	expect.Must(t, err == nil, "insert %s: %v", c.ID, err)
 	return c
 }
 
@@ -219,18 +219,14 @@ func (f fixture) get(id uuid.UUID) (limes.Capability, error) {
 func (f fixture) revoked(t *testing.T, id uuid.UUID) bool {
 	t.Helper()
 	r, err := f.Store.IsRevoked(f.Ctx, id)
-	if err != nil {
-		t.Fatalf("IsRevoked %s: %v", id, err)
-	}
+	expect.Must(t, err == nil, "IsRevoked %s: %v", id, err)
 	return r
 }
 
 func (f fixture) revoke(t *testing.T, id uuid.UUID, cascade bool) limes.RevokeResult {
 	t.Helper()
 	r, err := f.Store.Revoke(f.Ctx, limes.RevokeRequest{CapabilityID: id, Note: "test", Actor: "storetest", CascadeChildren: cascade})
-	if err != nil {
-		t.Fatalf("revoke %s: %v", id, err)
-	}
+	expect.Must(t, err == nil, "revoke %s: %v", id, err)
 	return r
 }
 
@@ -238,9 +234,7 @@ func (f fixture) revoke(t *testing.T, id uuid.UUID, cascade bool) limes.RevokeRe
 func (f fixture) record(t *testing.T, id uuid.UUID) limes.Record {
 	t.Helper()
 	r, err := f.Store.GetRecord(f.Ctx, id)
-	if err != nil {
-		t.Fatalf("GetRecord %s: %v", id, err)
-	}
+	expect.Must(t, err == nil, "GetRecord %s: %v", id, err)
 	return r
 }
 
@@ -314,12 +308,9 @@ func checkRoundTrip(t *testing.T, f fixture) {
 	parent := f.live(t, "agent:parent", uuid.Nil())
 	want := f.live(t, "agent:child", parent.ID)
 	got, err := f.get(want.ID)
-	if err != nil {
-		t.Fatalf("GetRecord: %v", err)
-	}
-	if diff := diffCapabilities(got, want); diff != "" {
-		t.Fatalf("Get read back a different capability: %s", diff)
-	}
+	expect.Must(t, err == nil, "GetRecord: %v", err)
+	diff := diffCapabilities(got, want)
+	expect.Must(t, diff == "", "Get read back a different capability: %s", diff)
 	// Each ceiling lifted in turn: a store that drops either Unlimited reads
 	// a ceiling of 0 back, and a capability that allows nothing.
 	for name, lift := range map[string]func(*limes.Caveats){
@@ -331,12 +322,9 @@ func checkRoundTrip(t *testing.T, f fixture) {
 		lift(&c.Caveats)
 		f.insert(t, c)
 		got, err := f.get(c.ID)
-		if err != nil {
-			t.Fatalf("%s: GetRecord: %v", name, err)
-		}
-		if diff := diffCapabilities(got, c); diff != "" {
-			t.Errorf("%s: Get read back a different capability: %s", name, diff)
-		}
+		expect.Must(t, err == nil, "%s: GetRecord: %v", name, err)
+		diff := diffCapabilities(got, c)
+		expect.That(t, diff == "", "%s: Get read back a different capability: %s", name, diff)
 	}
 }
 
@@ -352,39 +340,26 @@ func checkRecord(t *testing.T, f fixture) {
 
 	issuer := f.issuer()
 	issued := f.newCapability("agent:issued", uuid.Nil(), f.now.Add(ttl))
-	if err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: issued, IssuedBy: issuer}); err != nil {
-		t.Fatalf("insert %s: %v", issued.ID, err)
-	}
+	err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: issued, IssuedBy: issuer})
+	expect.Must(t, err == nil, "insert %s: %v", issued.ID, err)
 	r := record(issued.ID)
-	if diff := diffCapabilities(r.Capability, issued); diff != "" {
-		t.Errorf("GetRecord read back a different capability: %s", diff)
-	}
-	if !reflect.DeepEqual(r.IssuedBy, issuer) || r.Revocation != nil {
-		t.Errorf("before any revoke: issued by %+v, revocation %+v; want %+v and none", r.IssuedBy, r.Revocation, issuer)
-	}
+	diff := diffCapabilities(r.Capability, issued)
+	expect.That(t, diff == "", "GetRecord read back a different capability: %s", diff)
+	expect.That(t, !(!reflect.DeepEqual(r.IssuedBy, issuer) || r.Revocation != nil), "before any revoke: issued by %+v, revocation %+v; want %+v and none", r.IssuedBy, r.Revocation, issuer)
 
 	first := f.revoke(t, parent.ID, false)
-	if first.AlreadyRevoked {
-		t.Errorf("first revoke of %s: AlreadyRevoked", parent.ID)
-	}
+	expect.That(t, !(first.AlreadyRevoked), "first revoke of %s: AlreadyRevoked", parent.ID)
 	again, err := f.Store.Revoke(f.Ctx, limes.RevokeRequest{CapabilityID: parent.ID, Note: "again", Actor: "someone-else"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	expect.Must(t, err == nil, "%v", err)
 	rev := record(parent.ID).Revocation
 	if rev == nil || rev.Note != "test" || rev.Actor != "storetest" || rev.Cascaded || rev.RevokedAt.IsZero() {
 		t.Errorf("revocation = %+v; want the first revoke's reason and actor, not cascading, with a time", rev)
 	} else {
-		if !sameRevocation(first.Revocation, *rev) {
-			t.Errorf("first revoke reported %+v; on record %+v", first.Revocation, rev)
-		}
-		if !again.AlreadyRevoked || !sameRevocation(again.Revocation, *rev) {
-			t.Errorf("repeated revoke = %+v; want AlreadyRevoked and the first entry %+v", again, rev)
-		}
+		expect.That(t, sameRevocation(first.Revocation, *rev), "first revoke reported %+v; on record %+v", first.Revocation, rev)
+		expect.That(t, !(!again.AlreadyRevoked || !sameRevocation(again.Revocation, *rev)), "repeated revoke = %+v; want AlreadyRevoked and the first entry %+v", again, rev)
 	}
-	if rev := record(child.ID).Revocation; rev != nil {
-		t.Errorf("a child stopped through its parent has an entry of its own: %+v", rev)
-	}
+	rev = record(child.ID).Revocation
+	expect.That(t, rev == nil, "a child stopped through its parent has an entry of its own: %+v", rev)
 	f.revoke(t, cascadeRoot.ID, true)
 	for _, id := range []uuid.UUID{cascadeRoot.ID, cascadeChild.ID} {
 		rev := record(id).Revocation
@@ -394,14 +369,12 @@ func checkRecord(t *testing.T, f fixture) {
 		}
 		// Every field of a cascading entry is set, so one the store does not
 		// keep reads back as unset.
-		if unset := fields.Unset(*rev); len(unset) > 0 {
-			t.Errorf("%s: revocation %+v reads back with %v unset", id, rev, unset)
-		}
+		unset := fields.Unset(*rev)
+		expect.That(t, !(len(unset) > 0), "%s: revocation %+v reads back with %v unset", id, rev, unset)
 	}
 	for _, id := range []uuid.UUID{uuid.New(), uuid.Nil()} {
-		if _, err := f.Store.GetRecord(f.Ctx, id); !errors.Is(err, limes.ErrNotFound) {
-			t.Errorf("GetRecord %s: err = %v, want ErrNotFound", id, err)
-		}
+		_, err := f.Store.GetRecord(f.Ctx, id)
+		expect.That(t, errors.Is(err, limes.ErrNotFound), "GetRecord %s: err = %v, want ErrNotFound", id, err)
 	}
 }
 
@@ -409,30 +382,23 @@ func checkDuplicate(t *testing.T, f fixture) {
 	c := f.live(t, "agent:a", uuid.Nil())
 	again := c
 	again.Subject.Subject = "agent:b"
-	if err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: again, IssuedBy: issuedBy}); !errors.Is(err, limes.ErrAlreadyExists) {
-		t.Fatalf("second insert of %s: err = %v, want ErrAlreadyExists", c.ID, err)
-	}
-	if got, err := f.get(c.ID); err != nil || got.Subject.Subject != "agent:a" {
-		t.Fatalf("after a refused insert Get = %+v, %v; want the first record", got, err)
-	}
+	err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: again, IssuedBy: issuedBy})
+	expect.Must(t, errors.Is(err, limes.ErrAlreadyExists), "second insert of %s: err = %v, want ErrAlreadyExists", c.ID, err)
+	got, err := f.get(c.ID)
+	expect.Must(t, !(err != nil || got.Subject.Subject != "agent:a"), "after a refused insert Get = %+v, %v; want the first record", got, err)
 }
 
 func checkUnknown(t *testing.T, f fixture) {
 	for _, id := range []uuid.UUID{uuid.New(), uuid.Nil()} {
-		if _, err := f.get(id); !errors.Is(err, limes.ErrNotFound) {
-			t.Errorf("Get %s: err = %v, want ErrNotFound", id, err)
-		}
-		if f.revoked(t, id) {
-			t.Errorf("IsRevoked %s = true for an id not on record", id)
-		}
+		_, err := f.get(id)
+		expect.That(t, errors.Is(err, limes.ErrNotFound), "Get %s: err = %v, want ErrNotFound", id, err)
+		expect.That(t, !(f.revoked(t, id)), "IsRevoked %s = true for an id not on record", id)
 	}
-	if _, err := f.Store.Revoke(f.Ctx, limes.RevokeRequest{CapabilityID: uuid.New()}); !errors.Is(err, limes.ErrNotFound) {
-		t.Errorf("Revoke of an id not on record: err = %v, want ErrNotFound", err)
-	}
+	_, err := f.Store.Revoke(f.Ctx, limes.RevokeRequest{CapabilityID: uuid.New()})
+	expect.That(t, errors.Is(err, limes.ErrNotFound), "Revoke of an id not on record: err = %v, want ErrNotFound", err)
 	// The zero id names nothing: the caller's bug (RevokeRequest.Validate).
-	if _, err := f.Store.Revoke(f.Ctx, limes.RevokeRequest{}); !errors.Is(err, limes.ErrInvalidRequest) {
-		t.Errorf("Revoke naming no capability: err = %v, want ErrInvalidRequest", err)
-	}
+	_, err = f.Store.Revoke(f.Ctx, limes.RevokeRequest{})
+	expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "Revoke naming no capability: err = %v, want ErrInvalidRequest", err)
 }
 
 func checkRevoke(t *testing.T, f fixture) {
@@ -440,18 +406,13 @@ func checkRevoke(t *testing.T, f fixture) {
 	child := f.live(t, "agent:child", parent.ID)
 	grandchild := f.live(t, "agent:grandchild", child.ID)
 	other := f.live(t, "agent:other", uuid.Nil())
-	if r := f.revoke(t, parent.ID, false); r.AlreadyRevoked || r.PriorDisposition != limes.RecordDispositionActive {
-		t.Errorf("first revoke = %+v; want a new entry, active before", r)
-	}
+	r := f.revoke(t, parent.ID, false)
+	expect.That(t, !(r.AlreadyRevoked || r.PriorDisposition != limes.RecordDispositionActive), "first revoke = %+v; want a new entry, active before", r)
 	if r := f.revoke(t, parent.ID, false); !r.AlreadyRevoked || r.PriorDisposition != limes.RecordDispositionRevoked { // idempotent
 		t.Errorf("repeated revoke = %+v; want AlreadyRevoked, revoked before", r)
 	}
-	if !f.revoked(t, parent.ID) || !f.revoked(t, child.ID) {
-		t.Error("revoking a parent must stop it and its child")
-	}
-	if f.revoked(t, other.ID) {
-		t.Error("revoking one capability stopped an unrelated one")
-	}
+	expect.That(t, !(!f.revoked(t, parent.ID) || !f.revoked(t, child.ID)), "revoking a parent must stop it and its child")
+	expect.That(t, !(f.revoked(t, other.ID)), "revoking one capability stopped an unrelated one")
 	// Stopped through its parent, the child has no entry of its own, so its
 	// first revoke writes one.
 	if r := f.revoke(t, child.ID, false); r.AlreadyRevoked || r.Revocation.Cascaded || r.PriorDisposition != limes.RecordDispositionRevoked {
@@ -462,24 +423,18 @@ func checkRevoke(t *testing.T, f fixture) {
 	// An expired capability is expired before its revoke, which still
 	// writes its entry.
 	expired := f.insert(t, f.newCapability("agent:expired", uuid.Nil(), f.now.Add(-expiredAgo)))
-	if r := f.revoke(t, expired.ID, false); r.AlreadyRevoked || r.PriorDisposition != limes.RecordDispositionExpired {
-		t.Errorf("revoke of an expired capability = %+v; want a new entry, expired before", r)
-	}
-	if rev := f.record(t, expired.ID).Revocation; rev == nil {
-		t.Error("revoke of an expired capability wrote no entry")
-	}
+	r = f.revoke(t, expired.ID, false)
+	expect.That(t, !(r.AlreadyRevoked || r.PriorDisposition != limes.RecordDispositionExpired), "revoke of an expired capability = %+v; want a new entry, expired before", r)
+	rev := f.record(t, expired.ID).Revocation
+	expect.That(t, rev != nil, "revoke of an expired capability wrote no entry")
 	// A cascade over a capability already revoked keeps its entry, and
 	// those of its descendants that have one, and writes the others'.
-	r := f.revoke(t, parent.ID, true)
-	if !r.AlreadyRevoked || r.Revocation.Cascaded {
-		t.Errorf("cascade over a revoked capability = %+v; want AlreadyRevoked and the first, plain entry", r)
-	}
-	if rev := f.record(t, child.ID).Revocation; rev == nil || rev.Cascaded {
-		t.Errorf("child's own entry after the cascade = %+v; want it kept, not cascading", rev)
-	}
-	if rev := f.record(t, grandchild.ID).Revocation; rev == nil || !rev.Cascaded {
-		t.Errorf("grandchild after the cascade = %+v; want a cascading entry", rev)
-	}
+	r = f.revoke(t, parent.ID, true)
+	expect.That(t, !(!r.AlreadyRevoked || r.Revocation.Cascaded), "cascade over a revoked capability = %+v; want AlreadyRevoked and the first, plain entry", r)
+	rev = f.record(t, child.ID).Revocation
+	expect.That(t, !(rev == nil || rev.Cascaded), "child's own entry after the cascade = %+v; want it kept, not cascading", rev)
+	rev = f.record(t, grandchild.ID).Revocation
+	expect.That(t, !(rev == nil || !rev.Cascaded), "grandchild after the cascade = %+v; want a cascading entry", rev)
 }
 
 // Cascade writes an entry for each descendant, which ListByPrincipal shows:
@@ -496,9 +451,7 @@ func checkCascade(t *testing.T, f fixture) {
 	got := f.listAll(t, limes.ListByPrincipalRequest{
 		TenantID: f.Tenant, PrincipalType: limes.PrincipalTypeAgent, Subject: subject,
 	})
-	if !slices.Contains(got, plainChild.ID) || slices.Contains(got, cascadeChild.ID) {
-		t.Fatalf("listing hides %v; want only the child revoked by cascade (%s) hidden", got, cascadeChild.ID)
-	}
+	expect.Must(t, !(!slices.Contains(got, plainChild.ID) || slices.Contains(got, cascadeChild.ID)), "listing hides %v; want only the child revoked by cascade (%s) hidden", got, cascadeChild.ID)
 }
 
 // checkDeepChain holds a store to the whole delegation chain, not its first
@@ -510,9 +463,7 @@ func checkDeepChain(t *testing.T, f fixture) {
 	mid := f.live(t, "agent:mid", root.ID)
 	leaf := f.live(t, "agent:leaf", mid.ID)
 	f.revoke(t, root.ID, false)
-	if !f.revoked(t, leaf.ID) {
-		t.Error("revoking a root must stop its grandchild")
-	}
+	expect.That(t, f.revoked(t, leaf.ID), "revoking a root must stop its grandchild")
 
 	top := f.live(t, "agent:top", uuid.Nil())
 	from := f.live(t, "agent:from", top.ID)
@@ -522,14 +473,10 @@ func checkDeepChain(t *testing.T, f fixture) {
 	f.revoke(t, from.ID, true)
 	for _, c := range []limes.Capability{from, below, under} {
 		rec, err := f.Store.GetRecord(f.Ctx, c.ID)
-		if err != nil || rec.Revocation == nil {
-			t.Errorf("GetRecord(%s) = %+v, %v; want a revocation entry written by the cascade", c.Subject.Subject, rec.Revocation, err)
-		}
+		expect.That(t, !(err != nil || rec.Revocation == nil), "GetRecord(%s) = %+v, %v; want a revocation entry written by the cascade", c.Subject.Subject, rec.Revocation, err)
 	}
 	for _, c := range []limes.Capability{top, sibling} {
-		if f.revoked(t, c.ID) {
-			t.Errorf("a cascade from %s reached %s, which is not below it", from.Subject.Subject, c.Subject.Subject)
-		}
+		expect.That(t, !(f.revoked(t, c.ID)), "a cascade from %s reached %s, which is not below it", from.Subject.Subject, c.Subject.Subject)
 	}
 }
 
@@ -543,28 +490,20 @@ func checkPurge(t *testing.T, f fixture) {
 	f.revoke(t, live.ID, false)
 	got, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace})
 	const want = 2 // the two expired records
-	if err != nil || got.Purged != want {
-		t.Fatalf("Purge = %+v, %v; want %d records purged", got, err, want)
-	}
+	expect.Must(t, !(err != nil || got.Purged != want), "Purge = %+v, %v; want %d records purged", got, err, want)
 	for _, id := range []uuid.UUID{expired.ID, unrevoked.ID} {
-		if _, err := f.get(id); !errors.Is(err, limes.ErrNotFound) {
-			t.Errorf("an expired record outlived Purge: GetRecord = %v", err)
-		}
+		_, err := f.get(id)
+		expect.That(t, errors.Is(err, limes.ErrNotFound), "an expired record outlived Purge: GetRecord = %v", err)
 	}
-	if f.revoked(t, expired.ID) {
-		t.Error("a purged capability is still revoked")
-	}
+	expect.That(t, !(f.revoked(t, expired.ID)), "a purged capability is still revoked")
 	// An id not on record is not revoked whether or not its record is there,
 	// so only a second Insert of the id shows the record gone, not hidden.
-	if err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: unrevoked, IssuedBy: issuedBy}); err != nil {
-		t.Errorf("Insert of a purged record's id: %v, want it free again", err)
-	}
-	if _, err := f.get(live.ID); err != nil || !f.revoked(t, live.ID) {
-		t.Errorf("Purge must keep a live record and its revocation: %v", err)
-	}
-	if _, err := f.get(recent.ID); err != nil {
-		t.Errorf("Purge removed a record expired for less than ExpiredFor: %v", err)
-	}
+	err = f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: unrevoked, IssuedBy: issuedBy})
+	expect.That(t, err == nil, "Insert of a purged record's id: %v, want it free again", err)
+	_, err = f.get(live.ID)
+	expect.That(t, !(err != nil || !f.revoked(t, live.ID)), "Purge must keep a live record and its revocation: %v", err)
+	_, err = f.get(recent.ID)
+	expect.That(t, err == nil, "Purge removed a record expired for less than ExpiredFor: %v", err)
 }
 
 // Purge works in batches of Limit, so a housekeeping worker loops while a
@@ -575,21 +514,16 @@ func checkPurgeBatches(t *testing.T, f fixture) {
 		f.insert(t, f.newCapability("agent:old", uuid.Nil(), f.now.Add(-expiredAgo)))
 	}
 	first, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace, Limit: batch})
-	if err != nil || first.Purged != batch {
-		t.Fatalf("first batch = %+v, %v; want %d", first, err, batch)
-	}
+	expect.Must(t, !(err != nil || first.Purged != batch), "first batch = %+v, %v; want %d", first, err, batch)
 	second, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace, Limit: batch})
-	if err != nil || second.Purged != total-batch {
-		t.Fatalf("second batch = %+v, %v; want %d", second, err, total-batch)
-	}
+	expect.Must(t, !(err != nil || second.Purged != total-batch), "second batch = %+v, %v; want %d", second, err, total-batch)
 	for name, req := range map[string]limes.PurgeRequest{
 		"a negative limit":              {Limit: -1},
 		"a negative retention":          {ExpiredFor: -time.Second},
 		"a retention below the minimum": {ExpiredFor: limes.MinPurgeRetention - time.Second},
 	} {
-		if _, err := f.Store.Purge(f.Ctx, req); !errors.Is(err, limes.ErrInvalidRequest) {
-			t.Errorf("Purge with %s: err = %v, want ErrInvalidRequest", name, err)
-		}
+		_, err := f.Store.Purge(f.Ctx, req)
+		expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "Purge with %s: err = %v, want ErrInvalidRequest", name, err)
 	}
 }
 
@@ -600,9 +534,7 @@ func checkPurgeDefaultLimit(t *testing.T, f fixture) {
 		f.insert(t, f.newCapability("agent:old", uuid.Nil(), f.now.Add(-expiredAgo)))
 	}
 	got, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace})
-	if err != nil || got.Purged != limes.DefaultHousekeepingLimit {
-		t.Errorf("Purge with no limit = %+v, %v; want DefaultHousekeepingLimit (%d)", got, err, limes.DefaultHousekeepingLimit)
-	}
+	expect.That(t, !(err != nil || got.Purged != limes.DefaultHousekeepingLimit), "Purge with no limit = %+v, %v; want DefaultHousekeepingLimit (%d)", got, err, limes.DefaultHousekeepingLimit)
 }
 
 // checkRevocationOutlastsTime holds a store to keeping the revocation of a
@@ -617,12 +549,9 @@ func checkRevocationOutlastsTime(t *testing.T, f fixture) {
 	c := f.insert(t, f.newCapability("agent:long-lived", uuid.Nil(), f.now.Add(lives)))
 	f.revoke(t, c.ID, false)
 	f.Advance(passes)
-	if _, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{}); err != nil {
-		t.Fatal(err)
-	}
-	if !f.revoked(t, c.ID) {
-		t.Errorf("a live capability revoked %s ago is no longer revoked", passes)
-	}
+	_, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{})
+	expect.Must(t, err == nil, "%v", err)
+	expect.That(t, f.revoked(t, c.ID), "a live capability revoked %s ago is no longer revoked", passes)
 }
 
 // checkListLimits holds ListByPrincipal to its page sizes: DefaultListLimit
@@ -639,9 +568,7 @@ func checkListLimits(t *testing.T, f fixture) {
 		page, err := f.Store.ListByPrincipal(f.Ctx, limes.ListByPrincipalRequest{
 			TenantID: f.Tenant, PrincipalType: limes.PrincipalTypeAgent, Subject: subject, Limit: tc.limit,
 		})
-		if err != nil || len(page.Items) != tc.want || page.Next == "" {
-			t.Errorf("%s: %d items, next %q, %v; want %d and a next page", name, len(page.Items), page.Next, err, tc.want)
-		}
+		expect.That(t, !(err != nil || len(page.Items) != tc.want || page.Next == ""), "%s: %d items, next %q, %v; want %d and a next page", name, len(page.Items), page.Next, err, tc.want)
 	}
 }
 
@@ -656,9 +583,7 @@ func checkListFullLastPage(t *testing.T, f fixture) {
 	page, err := f.Store.ListByPrincipal(f.Ctx, limes.ListByPrincipalRequest{
 		TenantID: f.Tenant, PrincipalType: limes.PrincipalTypeAgent, Subject: subject, Limit: pageSize,
 	})
-	if err != nil || len(page.Items) != pageSize || page.Next != "" {
-		t.Errorf("an exactly full last page: %d items, next %q, %v; want %d and no next page", len(page.Items), page.Next, err, pageSize)
-	}
+	expect.That(t, !(err != nil || len(page.Items) != pageSize || page.Next != ""), "an exactly full last page: %d items, next %q, %v; want %d and no next page", len(page.Items), page.Next, err, pageSize)
 }
 
 // listAll pages through ListByPrincipal and returns the ids in the order read.
@@ -667,9 +592,7 @@ func (f fixture) listAll(t *testing.T, req limes.ListByPrincipalRequest) []uuid.
 	t.Helper()
 	var ids []uuid.UUID
 	for c, err := range limes.AllByPrincipal(f.Ctx, f.Store, req) {
-		if err != nil {
-			t.Fatalf("ListByPrincipal: %v", err)
-		}
+		expect.Must(t, err == nil, "ListByPrincipal: %v", err)
 		ids = append(ids, c.ID)
 	}
 	return ids
@@ -690,9 +613,7 @@ func checkListPages(t *testing.T, f fixture) {
 	for {
 		pagePage, err := f.Store.ListByPrincipal(f.Ctx, req)
 		page, next := pagePage.Items, pagePage.Next
-		if err != nil {
-			t.Fatalf("ListByPrincipal: %v", err)
-		}
+		expect.Must(t, err == nil, "ListByPrincipal: %v", err)
 		sizes = append(sizes, len(page))
 		for _, c := range page {
 			got = append(got, c.ID)
@@ -702,13 +623,9 @@ func checkListPages(t *testing.T, f fixture) {
 		}
 		req.Cursor = next
 	}
-	if !slices.Equal(sizes, []int{pageSize, pageSize, listed - 2*pageSize}) {
-		t.Errorf("page sizes = %v", sizes)
-	}
+	expect.That(t, slices.Equal(sizes, []int{pageSize, pageSize, listed - 2*pageSize}), "page sizes = %v", sizes)
 	slices.SortFunc(want, compareUUID)
-	if !slices.Equal(got, want) {
-		t.Errorf("listed %v, want every capability once in ascending id order %v", got, want)
-	}
+	expect.That(t, slices.Equal(got, want), "listed %v, want every capability once in ascending id order %v", got, want)
 }
 
 func checkListFilters(t *testing.T, f fixture) {
@@ -738,9 +655,7 @@ func checkListFilters(t *testing.T, f fixture) {
 		got := f.listAll(t, req)
 		slices.SortFunc(got, compareUUID)
 		slices.SortFunc(tc.want, compareUUID)
-		if !slices.Equal(got, tc.want) {
-			t.Errorf("%s: listed %v, want %v", tc.name, got, tc.want)
-		}
+		expect.That(t, slices.Equal(got, tc.want), "%s: listed %v, want %v", tc.name, got, tc.want)
 	}
 }
 
@@ -755,17 +670,14 @@ func checkListExpiryInstant(t *testing.T, f fixture) {
 	atNow := f.insert(t, f.newCapability(subject, uuid.Nil(), f.now))
 	justAfter := f.insert(t, f.newCapability(subject, uuid.Nil(), f.now.Add(timestampResolution)))
 	base := limes.ListByPrincipalRequest{TenantID: f.Tenant, PrincipalType: limes.PrincipalTypeAgent, Subject: subject}
-	if got := f.listAll(t, base); !slices.Equal(got, []uuid.UUID{justAfter.ID}) {
-		t.Errorf("listed %v, want only %s: %s expires at the store's now", got, justAfter.ID, atNow.ID)
-	}
-	base.IncludeExpired = true
 	got := f.listAll(t, base)
+	expect.That(t, slices.Equal(got, []uuid.UUID{justAfter.ID}), "listed %v, want only %s: %s expires at the store's now", got, justAfter.ID, atNow.ID)
+	base.IncludeExpired = true
+	got = f.listAll(t, base)
 	slices.SortFunc(got, compareUUID)
 	want := []uuid.UUID{atNow.ID, justAfter.ID}
 	slices.SortFunc(want, compareUUID)
-	if !slices.Equal(got, want) {
-		t.Errorf("listed with expired %v, want both %v", got, want)
-	}
+	expect.That(t, slices.Equal(got, want), "listed with expired %v, want both %v", got, want)
 }
 
 // checkInsertTenants holds a store that knows its tenants to minting only
@@ -777,12 +689,9 @@ func checkInsertTenants(t *testing.T, f fixture) {
 		t.Skip("Env.DeleteTenant is not set")
 	}
 	deleted, err := f.newTenant()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := f.DeleteTenant(deleted); err != nil {
-		t.Fatal(err)
-	}
+	expect.Must(t, err == nil, "%v", err)
+	err = f.DeleteTenant(deleted)
+	expect.Must(t, err == nil, "%v", err)
 	for _, tc := range []struct {
 		name   string
 		tenant uuid.UUID
@@ -793,12 +702,10 @@ func checkInsertTenants(t *testing.T, f fixture) {
 	} {
 		c := f.newCapability("agent:orphan", uuid.Nil(), f.now.Add(ttl))
 		c.Subject.TenantID = tc.tenant
-		if err := f.Store.Insert(f.tenantCtx(tc.tenant), limes.InsertRequest{Capability: c, IssuedBy: issuedBy}); !errors.Is(err, tc.want) {
-			t.Errorf("Insert for %s: err = %v, want %v", tc.name, err, tc.want)
-		}
-		if _, err := f.Store.GetRecord(f.tenantCtx(tc.tenant), c.ID); !errors.Is(err, limes.ErrNotFound) {
-			t.Errorf("GetRecord after an Insert for %s: err = %v, want ErrNotFound", tc.name, err)
-		}
+		err := f.Store.Insert(f.tenantCtx(tc.tenant), limes.InsertRequest{Capability: c, IssuedBy: issuedBy})
+		expect.That(t, errors.Is(err, tc.want), "Insert for %s: err = %v, want %v", tc.name, err, tc.want)
+		_, err = f.Store.GetRecord(f.tenantCtx(tc.tenant), c.ID)
+		expect.That(t, errors.Is(err, limes.ErrNotFound), "GetRecord after an Insert for %s: err = %v, want ErrNotFound", tc.name, err)
 	}
 }
 
@@ -807,19 +714,14 @@ func checkInsertTenants(t *testing.T, f fixture) {
 func checkListTenants(t *testing.T, f fixture) {
 	const subject = "agent:shared"
 	other, err := f.newTenant()
-	if err != nil {
-		t.Fatalf("NewTenant: %v", err)
-	}
+	expect.Must(t, err == nil, "NewTenant: %v", err)
 	mine := f.live(t, subject, uuid.Nil())
 	theirs := f.newCapability(subject, uuid.Nil(), f.now.Add(ttl))
 	theirs.Subject.TenantID = other
-	if err := f.Store.Insert(f.tenantCtx(other), limes.InsertRequest{Capability: theirs, IssuedBy: issuedBy}); err != nil {
-		t.Fatalf("insert for another tenant: %v", err)
-	}
+	err = f.Store.Insert(f.tenantCtx(other), limes.InsertRequest{Capability: theirs, IssuedBy: issuedBy})
+	expect.Must(t, err == nil, "insert for another tenant: %v", err)
 	got := f.listAll(t, limes.ListByPrincipalRequest{TenantID: f.Tenant, PrincipalType: limes.PrincipalTypeAgent, Subject: subject})
-	if !slices.Equal(got, []uuid.UUID{mine.ID}) {
-		t.Errorf("listed %v, want only this tenant's %v", got, mine.ID)
-	}
+	expect.That(t, slices.Equal(got, []uuid.UUID{mine.ID}), "listed %v, want only this tenant's %v", got, mine.ID)
 }
 
 func checkListMalformed(t *testing.T, f fixture) {
@@ -834,9 +736,8 @@ func checkListMalformed(t *testing.T, f fixture) {
 	} {
 		req := base
 		mutate(&req)
-		if _, err := f.Store.ListByPrincipal(f.Ctx, req); !errors.Is(err, limes.ErrInvalidRequest) {
-			t.Errorf("%s: err = %v, want ErrInvalidRequest", name, err)
-		}
+		_, err := f.Store.ListByPrincipal(f.Ctx, req)
+		expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "%s: err = %v, want ErrInvalidRequest", name, err)
 	}
 }
 
@@ -866,32 +767,23 @@ func checkBiscuit(t *testing.T, f fixture) {
 	isRevoked := func(ids ...[]byte) bool {
 		t.Helper()
 		r, err := store.IsBiscuitRevoked(f.Ctx, ids)
-		if err != nil {
-			t.Fatalf("IsBiscuitRevoked: %v", err)
-		}
+		expect.Must(t, err == nil, "IsBiscuitRevoked: %v", err)
 		return r
 	}
 
-	if err := revoke(uuid.New(), copyID); !errors.Is(err, limes.ErrNotFound) {
-		t.Errorf("a copy of an unknown capability: err = %v, want ErrNotFound", err)
-	}
-	if err := revoke(live.ID, nil); !errors.Is(err, limes.ErrInvalidRequest) {
-		t.Errorf("an empty revocation id: err = %v, want ErrInvalidRequest", err)
-	}
-	if _, err := store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{}); !errors.Is(err, limes.ErrInvalidRequest) {
-		t.Errorf("a request naming no copy: err = %v, want ErrInvalidRequest", err)
-	}
+	err := revoke(uuid.New(), copyID)
+	expect.That(t, errors.Is(err, limes.ErrNotFound), "a copy of an unknown capability: err = %v, want ErrNotFound", err)
+	err = revoke(live.ID, nil)
+	expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "an empty revocation id: err = %v, want ErrInvalidRequest", err)
+	_, err = store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{})
+	expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "a request naming no copy: err = %v, want ErrInvalidRequest", err)
 	// The first revoke writes the entry and reports it; a repeat writes
 	// nothing and reports the first.
 	var firstEntry limes.BiscuitRevocation
 	for i := range 2 {
 		r, err := store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(live.ID, copyID), Note: "test", Actor: "storetest"})
-		if err != nil {
-			t.Fatalf("RevokeBiscuit: %v", err)
-		}
-		if r.AlreadyRevoked != (i > 0) || r.Revocation.CapabilityID != live.ID || !bytes.Equal(r.Revocation.RevocationID, copyID) || r.Revocation.Note != "test" {
-			t.Errorf("RevokeBiscuit, time %d = %+v; want AlreadyRevoked %v and the first entry", i+1, r, i > 0)
-		}
+		expect.Must(t, err == nil, "RevokeBiscuit: %v", err)
+		expect.That(t, !(r.AlreadyRevoked != (i > 0) || r.Revocation.CapabilityID != live.ID || !bytes.Equal(r.Revocation.RevocationID, copyID) || r.Revocation.Note != "test"), "RevokeBiscuit, time %d = %+v; want AlreadyRevoked %v and the first entry", i+1, r, i > 0)
 		if i == 0 {
 			firstEntry = r.Revocation
 		} else if !r.Revocation.RevokedAt.Equal(firstEntry.RevokedAt) {
@@ -900,53 +792,36 @@ func checkBiscuit(t *testing.T, f fixture) {
 	}
 	// A copy attenuated from a revoked one carries the revoked id before its
 	// own: every id is looked up, not only the last.
-	if !isRevoked(otherID, copyID) || !isRevoked(copyID, otherID) || isRevoked(otherID) {
-		t.Error("IsBiscuitRevoked must hold for a token carrying a revoked id, wherever it is, and only then")
-	}
-	if _, err := store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{
+	expect.That(t, !(!isRevoked(otherID, copyID) || !isRevoked(copyID, otherID) || isRevoked(otherID)), "IsBiscuitRevoked must hold for a token carrying a revoked id, wherever it is, and only then")
+	_, err = store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{
 		Copy: biscuitCopy(live.ID, copyID), Note: "again", Actor: "someone-else",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})
+	expect.Must(t, err == nil, "%v", err)
 	got, err := store.GetBiscuitRevocation(f.Ctx, biscuitCopy(live.ID, copyID))
-	if err != nil || got.CapabilityID != live.ID || !bytes.Equal(got.RevocationID, copyID) ||
-		got.Note != "test" || got.Actor != "storetest" || got.RevokedAt.IsZero() || !got.RevokedAt.Equal(firstEntry.RevokedAt) {
-		t.Errorf("GetBiscuitRevocation = %+v, %v; want the first revoke of %s, as RevokeBiscuit reported it", got, err, live.ID)
-	}
-	if _, err := store.GetBiscuitRevocation(f.Ctx, biscuitCopy(live.ID, otherID)); !errors.Is(err, limes.ErrNotFound) {
-		t.Errorf("GetBiscuitRevocation of an id never revoked: err = %v, want ErrNotFound", err)
-	}
-	if _, err := store.GetBiscuitRevocation(f.Ctx, limes.BiscuitCopy{}); !errors.Is(err, limes.ErrInvalidRequest) {
-		t.Errorf("GetBiscuitRevocation naming no copy: err = %v, want ErrInvalidRequest", err)
-	}
-	if err := revoke(expired.ID, oldCopyID); err != nil {
-		t.Fatal(err)
-	}
+	expect.That(t, !(err != nil || got.CapabilityID != live.ID || !bytes.Equal(got.RevocationID, copyID) ||
+		got.Note != "test" || got.Actor != "storetest" || got.RevokedAt.IsZero() || !got.RevokedAt.Equal(firstEntry.RevokedAt)), "GetBiscuitRevocation = %+v, %v; want the first revoke of %s, as RevokeBiscuit reported it", got, err, live.ID)
+	_, err = store.GetBiscuitRevocation(f.Ctx, biscuitCopy(live.ID, otherID))
+	expect.That(t, errors.Is(err, limes.ErrNotFound), "GetBiscuitRevocation of an id never revoked: err = %v, want ErrNotFound", err)
+	_, err = store.GetBiscuitRevocation(f.Ctx, limes.BiscuitCopy{})
+	expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "GetBiscuitRevocation naming no copy: err = %v, want ErrInvalidRequest", err)
+	err = revoke(expired.ID, oldCopyID)
+	expect.Must(t, err == nil, "%v", err)
 	// The grafted copy is revoked under the expired capability first; the
 	// live capability's own revocation of the id is still its own.
-	if err := revoke(expired.ID, sharedID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{
+	err = revoke(expired.ID, sharedID)
+	expect.Must(t, err == nil, "%v", err)
+	_, err = store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{
 		Copy: biscuitCopy(live.ID, sharedID), Note: "live", Actor: "operator",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := store.GetBiscuitRevocation(f.Ctx, biscuitCopy(live.ID, sharedID)); err != nil || got.CapabilityID != live.ID || got.Note != "live" {
-		t.Errorf("GetBiscuitRevocation of the live capability's copy = %+v, %v; want its own revocation, not the expired one's", got, err)
-	}
-	if got, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace}); err != nil || got.Purged != 1 {
-		t.Fatalf("Purge = %+v, %v; want the expired capability's record", got, err)
-	}
-	if isRevoked(oldCopyID) || !isRevoked(copyID) {
-		t.Error("Purge must drop the expired capability's copy and keep the live one's")
-	}
-	if !isRevoked(sharedID) {
-		t.Error("Purge of one capability must keep another capability's revocation of the same id")
-	}
-	if _, err := store.GetBiscuitRevocation(f.Ctx, biscuitCopy(expired.ID, sharedID)); !errors.Is(err, limes.ErrNotFound) {
-		t.Errorf("GetBiscuitRevocation of the purged capability's copy: err = %v, want ErrNotFound", err)
-	}
+	})
+	expect.Must(t, err == nil, "%v", err)
+	got, err = store.GetBiscuitRevocation(f.Ctx, biscuitCopy(live.ID, sharedID))
+	expect.That(t, !(err != nil || got.CapabilityID != live.ID || got.Note != "live"), "GetBiscuitRevocation of the live capability's copy = %+v, %v; want its own revocation, not the expired one's", got, err)
+	purged, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace})
+	expect.Must(t, !(err != nil || purged.Purged != 1), "Purge = %+v, %v; want the expired capability's record", purged, err)
+	expect.That(t, !(isRevoked(oldCopyID) || !isRevoked(copyID)), "Purge must drop the expired capability's copy and keep the live one's")
+	expect.That(t, isRevoked(sharedID), "Purge of one capability must keep another capability's revocation of the same id")
+	_, err = store.GetBiscuitRevocation(f.Ctx, biscuitCopy(expired.ID, sharedID))
+	expect.That(t, errors.Is(err, limes.ErrNotFound), "GetBiscuitRevocation of the purged capability's copy: err = %v, want ErrNotFound", err)
 }
 
 // checkMaxDepth holds IsRevoked to the whole of a chain MaxDelegationDepth
@@ -959,16 +834,12 @@ func checkMaxDepth(t *testing.T, f fixture) {
 		leaf = f.live(t, "agent:link", leaf.ID)
 	}
 	f.revoke(t, root.ID, false)
-	if !f.revoked(t, leaf.ID) {
-		t.Errorf("revoking a root did not reach a capability %d delegations below it", limes.MaxDelegationDepth)
-	}
+	expect.That(t, f.revoked(t, leaf.ID), "revoking a root did not reach a capability %d delegations below it", limes.MaxDelegationDepth)
 	deeper := f.newCapability("agent:deeper", leaf.ID, f.now.Add(ttl))
-	if err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: deeper, IssuedBy: issuedBy}); !errors.Is(err, limes.ErrDelegationTooDeep) {
-		t.Errorf("Insert past MaxDelegationDepth: err = %v, want ErrDelegationTooDeep", err)
-	}
-	if _, err := f.get(deeper.ID); !errors.Is(err, limes.ErrNotFound) {
-		t.Errorf("a record Insert refused as too deep reads back: err = %v, want ErrNotFound", err)
-	}
+	err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: deeper, IssuedBy: issuedBy})
+	expect.That(t, errors.Is(err, limes.ErrDelegationTooDeep), "Insert past MaxDelegationDepth: err = %v, want ErrDelegationTooDeep", err)
+	_, err = f.get(deeper.ID)
+	expect.That(t, errors.Is(err, limes.ErrNotFound), "a record Insert refused as too deep reads back: err = %v, want ErrNotFound", err)
 }
 
 // checkMaxDepthCascade holds a cascade to every generation of a chain
@@ -985,9 +856,7 @@ func checkMaxDepthCascade(t *testing.T, f fixture) {
 	f.revoke(t, root.ID, true)
 	for depth, id := range links {
 		rec, err := f.Store.GetRecord(f.Ctx, id)
-		if err != nil || rec.Revocation == nil || !rec.Revocation.Cascaded {
-			t.Fatalf("the link %d delegations below a cascade: %v; want an entry of its own", depth+1, err)
-		}
+		expect.Must(t, !(err != nil || rec.Revocation == nil || !rec.Revocation.Cascaded), "the link %d delegations below a cascade: %v; want an entry of its own", depth+1, err)
 	}
 }
 
@@ -1006,25 +875,18 @@ func checkPurgeKeepsLineage(t *testing.T, f fixture) {
 	onRecord := func(id uuid.UUID) bool {
 		t.Helper()
 		_, err := f.Store.GetRecord(f.Ctx, id)
-		if err != nil && !errors.Is(err, limes.ErrNotFound) {
-			t.Fatal(err)
-		}
+		expect.Must(t, !(err != nil && !errors.Is(err, limes.ErrNotFound)), "%v", err)
 		return err == nil
 	}
 	for range chain {
-		if _, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace, Limit: 1}); err != nil {
-			t.Fatal(err)
-		}
+		_, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace, Limit: 1})
+		expect.Must(t, err == nil, "%v", err)
 		for i := 1; i < chain; i++ {
-			if onRecord(ids[i]) && !onRecord(ids[i-1]) {
-				t.Fatalf("Purge left link %d on record without its parent", i)
-			}
+			expect.Must(t, !(onRecord(ids[i]) && !onRecord(ids[i-1])), "Purge left link %d on record without its parent", i)
 		}
 	}
 	for i, id := range ids {
-		if onRecord(id) {
-			t.Errorf("link %d of an expired chain is still on record after %d batches of one", i, chain)
-		}
+		expect.That(t, !(onRecord(id)), "link %d of an expired chain is still on record after %d batches of one", i, chain)
 	}
 }
 
@@ -1042,9 +904,7 @@ func checkInsertKeepsLineage(t *testing.T, f fixture) {
 	unexpiring := f.newCapability("agent:unexpiring", parent.ID, time.Time{})
 	endlessRoot := f.newCapability("agent:endless", uuid.Nil(), time.Time{})
 	other, err := f.newTenant()
-	if err != nil {
-		t.Fatalf("NewTenant: %v", err)
-	}
+	expect.Must(t, err == nil, "NewTenant: %v", err)
 	// A lineage stays in one tenant, as Delegate keeps it: a store that scopes
 	// rows by tenant could not see the rest of a mixed one, and its IsRevoked
 	// walk would miss a revoked ancestor.
@@ -1072,15 +932,13 @@ func checkInsertKeepsLineage(t *testing.T, f fixture) {
 		"a child in another tenant":    {elsewhere, elsewhereRefusal},
 		"a child in another unit":      {otherUnit, limes.ErrUnitCodeMismatch},
 	} {
-		if err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: tc.c, IssuedBy: issuedBy}); !errors.Is(err, tc.want) {
-			t.Errorf("Insert of %s: err = %v, want %v", name, err, tc.want)
-		}
+		err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: tc.c, IssuedBy: issuedBy})
+		expect.That(t, errors.Is(err, tc.want), "Insert of %s: err = %v, want %v", name, err, tc.want)
 		if tc.c.ID == uuid.Nil() {
 			continue
 		}
-		if _, err := f.Store.GetRecord(f.Ctx, tc.c.ID); !errors.Is(err, limes.ErrNotFound) {
-			t.Errorf("GetRecord after a refused Insert of %s: err = %v, want ErrNotFound", name, err)
-		}
+		_, err = f.Store.GetRecord(f.Ctx, tc.c.ID)
+		expect.That(t, errors.Is(err, limes.ErrNotFound), "GetRecord after a refused Insert of %s: err = %v, want ErrNotFound", name, err)
 	}
 }
 
@@ -1092,15 +950,10 @@ func checkPurgeRetention(t *testing.T, f fixture) {
 	old := f.insert(t, f.newCapability("agent:old", uuid.Nil(), f.now.Add(-2*limes.MinPurgeRetention)))
 	f.revoke(t, recent.ID, false)
 	got, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{})
-	if err != nil || got.Purged != 1 {
-		t.Fatalf("Purge with the default retention = %+v, %v; want only the capability expired past it", got, err)
-	}
-	if !f.revoked(t, recent.ID) {
-		t.Error("Purge dropped the revocation of a capability expired for less than MinPurgeRetention")
-	}
-	if _, err := f.get(old.ID); !errors.Is(err, limes.ErrNotFound) {
-		t.Errorf("GetRecord of the capability expired past the retention: err = %v, want ErrNotFound", err)
-	}
+	expect.Must(t, !(err != nil || got.Purged != 1), "Purge with the default retention = %+v, %v; want only the capability expired past it", got, err)
+	expect.That(t, f.revoked(t, recent.ID), "Purge dropped the revocation of a capability expired for less than MinPurgeRetention")
+	_, err = f.get(old.ID)
+	expect.That(t, errors.Is(err, limes.ErrNotFound), "GetRecord of the capability expired past the retention: err = %v, want ErrNotFound", err)
 }
 
 // checkRecordIsItsOwn holds a store to an append-only record: neither the
@@ -1122,59 +975,44 @@ func checkRecordIsItsOwn(t *testing.T, f fixture) {
 	check := func(after string) {
 		t.Helper()
 		got, err := f.get(c.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if diff := diffCapabilities(got, want); diff != "" {
-			t.Errorf("the record changed after %s: %s", after, diff)
-		}
+		expect.Must(t, err == nil, "%v", err)
+		diff := diffCapabilities(got, want)
+		expect.That(t, diff == "", "the record changed after %s: %s", after, diff)
 	}
 	scribble(&c)
 	check("the inserted capability was changed")
 	got, err := f.get(c.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	expect.Must(t, err == nil, "%v", err)
 	scribble(&got)
 	check("a capability read back was changed")
 	page, err := f.Store.ListByPrincipal(f.Ctx, limes.ListByPrincipalRequest{TenantID: f.Tenant, PrincipalType: limes.PrincipalTypeAgent, Subject: subject})
-	if err != nil || len(page.Items) != 1 {
-		t.Fatalf("ListByPrincipal = %+v, %v; want the one capability", page.Items, err)
-	}
+	expect.Must(t, !(err != nil || len(page.Items) != 1), "ListByPrincipal = %+v, %v; want the one capability", page.Items, err)
 	scribble(&page.Items[0])
 	check("a capability listed was changed")
 
 	// Who issued it, and a Biscuit copy's revocation, are the store's too.
 	byAgent := limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: f.Tenant, Subject: "agent:issuer", Agent: &limes.AgentPrincipal{Model: "m"}}
 	issued := f.newCapability(subject, uuid.Nil(), f.now.Add(ttl))
-	if err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: issued, IssuedBy: byAgent}); err != nil {
-		t.Fatal(err)
-	}
+	err = f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: issued, IssuedBy: byAgent})
+	expect.Must(t, err == nil, "%v", err)
 	byAgent.Agent.Model = "scribbled"
 	r, err := f.Store.GetRecord(f.Ctx, issued.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	expect.Must(t, err == nil, "%v", err)
 	r.IssuedBy.Agent.Model = "scribbled"
-	if again, err := f.Store.GetRecord(f.Ctx, issued.ID); err != nil || again.IssuedBy.Agent == nil || again.IssuedBy.Agent.Model != "m" {
-		t.Errorf("IssuedBy after changing what was inserted and read = %+v, %v; want the agent model kept", again.IssuedBy.Agent, err)
-	}
+	again, err := f.Store.GetRecord(f.Ctx, issued.ID)
+	expect.That(t, !(err != nil || again.IssuedBy.Agent == nil || again.IssuedBy.Agent.Model != "m"), "IssuedBy after changing what was inserted and read = %+v, %v; want the agent model kept", again.IssuedBy.Agent, err)
 	store, ok := f.Store.(limes.BiscuitRevocationStore)
 	if !ok {
 		return
 	}
 	copyID := []byte("own-copy")
-	if _, err := store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(issued.ID, copyID)}); err != nil {
-		t.Fatal(err)
-	}
+	_, err = store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(issued.ID, copyID)})
+	expect.Must(t, err == nil, "%v", err)
 	rev, err := store.GetBiscuitRevocation(f.Ctx, biscuitCopy(issued.ID, copyID))
-	if err != nil {
-		t.Fatal(err)
-	}
+	expect.Must(t, err == nil, "%v", err)
 	rev.RevocationID[0] = 'X'
-	if again, err := store.GetBiscuitRevocation(f.Ctx, biscuitCopy(issued.ID, copyID)); err != nil || !bytes.Equal(again.RevocationID, copyID) {
-		t.Errorf("a Biscuit revocation after changing one read = %q, %v; want %q", again.RevocationID, err, copyID)
-	}
+	reread, err := store.GetBiscuitRevocation(f.Ctx, biscuitCopy(issued.ID, copyID))
+	expect.That(t, !(err != nil || !bytes.Equal(reread.RevocationID, copyID)), "a Biscuit revocation after changing one read = %q, %v; want %q", reread.RevocationID, err, copyID)
 }
 
 // A call naming Tenant, made under another tenant's context, is refused as
@@ -1185,35 +1023,27 @@ func checkScopeMismatch(t *testing.T, f fixture) {
 		t.Skip("Env.ScopesTenants not set")
 	}
 	other, err := f.newTenant()
-	if err != nil {
-		t.Fatalf("NewTenant: %v", err)
-	}
+	expect.Must(t, err == nil, "NewTenant: %v", err)
 	wrong := f.tenantCtx(other)
 	parent := f.live(t, "agent:parent", uuid.Nil())
 	for name, c := range map[string]limes.Capability{
 		"a root":            f.newCapability("agent:root", uuid.Nil(), f.now.Add(ttl)),
 		"a delegated child": f.newCapability("agent:child", parent.ID, parent.ExpiresAt),
 	} {
-		if err := f.Store.Insert(wrong, limes.InsertRequest{Capability: c, IssuedBy: issuedBy}); !errors.Is(err, limes.ErrScopeMismatch) {
-			t.Errorf("Insert of %s of Tenant under another tenant's context: err = %v, want ErrScopeMismatch", name, err)
-		}
-		if _, err := f.get(c.ID); !errors.Is(err, limes.ErrNotFound) {
-			t.Errorf("GetRecord of %s after a refused Insert: err = %v, want ErrNotFound", name, err)
-		}
+		err := f.Store.Insert(wrong, limes.InsertRequest{Capability: c, IssuedBy: issuedBy})
+		expect.That(t, errors.Is(err, limes.ErrScopeMismatch), "Insert of %s of Tenant under another tenant's context: err = %v, want ErrScopeMismatch", name, err)
+		_, err = f.get(c.ID)
+		expect.That(t, errors.Is(err, limes.ErrNotFound), "GetRecord of %s after a refused Insert: err = %v, want ErrNotFound", name, err)
 	}
-	if _, err := f.Store.ListByPrincipal(wrong, limes.ListByPrincipalRequest{
+	_, err = f.Store.ListByPrincipal(wrong, limes.ListByPrincipalRequest{
 		TenantID: f.Tenant, PrincipalType: parent.Subject.Type, Subject: parent.Subject.Subject,
-	}); !errors.Is(err, limes.ErrScopeMismatch) {
-		t.Errorf("ListByPrincipal of Tenant under another tenant's context: err = %v, want ErrScopeMismatch", err)
-	}
+	})
+	expect.That(t, errors.Is(err, limes.ErrScopeMismatch), "ListByPrincipal of Tenant under another tenant's context: err = %v, want ErrScopeMismatch", err)
 	// Revoke names no tenant, so its scope hides the record rather than
 	// refusing the call: not visible to the caller is not found.
-	if _, err := f.Store.Revoke(wrong, limes.RevokeRequest{CapabilityID: parent.ID, Actor: "storetest"}); !errors.Is(err, limes.ErrNotFound) {
-		t.Errorf("Revoke of Tenant's record under another tenant's context: err = %v, want ErrNotFound", err)
-	}
-	if f.revoked(t, parent.ID) {
-		t.Error("a Revoke under another tenant's context revoked the record")
-	}
+	_, err = f.Store.Revoke(wrong, limes.RevokeRequest{CapabilityID: parent.ID, Actor: "storetest"})
+	expect.That(t, errors.Is(err, limes.ErrNotFound), "Revoke of Tenant's record under another tenant's context: err = %v, want ErrNotFound", err)
+	expect.That(t, !f.revoked(t, parent.ID), "a Revoke under another tenant's context revoked the record")
 }
 
 // A read-only scope reads Tenant's records and writes none: every call that
@@ -1226,9 +1056,8 @@ func checkReadOnlyScope(t *testing.T, f fixture) {
 	}
 	live := f.live(t, "agent:live", uuid.Nil())
 	expired := f.insert(t, f.newCapability("agent:expired", uuid.Nil(), f.now.Add(-expiredAgo)))
-	if _, err := f.Store.GetRecord(ro, live.ID); err != nil {
-		t.Errorf("GetRecord under the read-only scope: %v", err)
-	}
+	_, err := f.Store.GetRecord(ro, live.ID)
+	expect.That(t, err == nil, "GetRecord under the read-only scope: %v", err)
 	fresh := f.newCapability("agent:fresh", uuid.Nil(), f.now.Add(ttl))
 	copyID := []byte("read-only-copy")
 	writes := map[string]func() error{
@@ -1253,23 +1082,17 @@ func checkReadOnlyScope(t *testing.T, f fixture) {
 		}
 	}
 	for name, write := range writes {
-		if err := write(); !errors.Is(err, limes.ErrScopeMismatch) {
-			t.Errorf("%s under the read-only scope: err = %v, want ErrScopeMismatch", name, err)
-		}
+		err := write()
+		expect.That(t, errors.Is(err, limes.ErrScopeMismatch), "%s under the read-only scope: err = %v, want ErrScopeMismatch", name, err)
 	}
-	if _, err := f.get(fresh.ID); !errors.Is(err, limes.ErrNotFound) {
-		t.Errorf("GetRecord after a refused Insert: err = %v, want ErrNotFound", err)
-	}
-	if f.revoked(t, live.ID) {
-		t.Error("a capability is revoked after a refused Revoke or erase")
-	}
-	if _, err := f.get(expired.ID); err != nil {
-		t.Errorf("an expired record after a refused Purge: %v", err)
-	}
+	_, err = f.get(fresh.ID)
+	expect.That(t, errors.Is(err, limes.ErrNotFound), "GetRecord after a refused Insert: err = %v, want ErrNotFound", err)
+	expect.That(t, !(f.revoked(t, live.ID)), "a capability is revoked after a refused Revoke or erase")
+	_, err = f.get(expired.ID)
+	expect.That(t, err == nil, "an expired record after a refused Purge: %v", err)
 	if withBiscuits {
-		if _, err := biscuits.GetBiscuitRevocation(f.Ctx, biscuitCopy(live.ID, copyID)); !errors.Is(err, limes.ErrNotFound) {
-			t.Errorf("GetBiscuitRevocation after a refused RevokeBiscuit: err = %v, want ErrNotFound", err)
-		}
+		_, err := biscuits.GetBiscuitRevocation(f.Ctx, biscuitCopy(live.ID, copyID))
+		expect.That(t, errors.Is(err, limes.ErrNotFound), "GetBiscuitRevocation after a refused RevokeBiscuit: err = %v, want ErrNotFound", err)
 	}
 }
 
@@ -1283,9 +1106,7 @@ func checkEraseTenant(t *testing.T, f fixture) {
 		t.Skip("the Store does not implement limes.TenantRecordEraser")
 	}
 	other, err := f.newTenant()
-	if err != nil {
-		t.Fatalf("NewTenant: %v", err)
-	}
+	expect.Must(t, err == nil, "NewTenant: %v", err)
 	root := f.live(t, "agent:root", uuid.Nil())
 	child := f.live(t, "agent:child", root.ID)
 	revoked := f.live(t, "agent:revoked", uuid.Nil())
@@ -1293,64 +1114,48 @@ func checkEraseTenant(t *testing.T, f fixture) {
 	copyID := []byte("erased-tenant-copy")
 	biscuits, withBiscuits := f.Store.(limes.BiscuitRevocationStore)
 	if withBiscuits {
-		if _, err := biscuits.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(child.ID, copyID)}); err != nil {
-			t.Fatalf("RevokeBiscuit: %v", err)
-		}
+		_, err := biscuits.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(child.ID, copyID)})
+		expect.Must(t, err == nil, "RevokeBiscuit: %v", err)
 	}
 	expired := f.insert(t, f.newCapability("agent:expired", uuid.Nil(), f.now.Add(-expiredAgo)))
 	expiredCopyID := []byte("erased-tenant-expired-copy")
 	if withBiscuits {
-		if _, err := biscuits.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(expired.ID, expiredCopyID)}); err != nil {
-			t.Fatalf("RevokeBiscuit of the expired record's copy: %v", err)
-		}
+		_, err := biscuits.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(expired.ID, expiredCopyID)})
+		expect.Must(t, err == nil, "RevokeBiscuit of the expired record's copy: %v", err)
 	}
 	// Expired, but not for MinPurgeRetention: a verifier may still take it.
 	recent := f.insert(t, f.newCapability("agent:recent", uuid.Nil(), f.now.Add(-limes.MinPurgeRetention/2)))
 	theirs := f.newCapability("agent:theirs", uuid.Nil(), f.now.Add(ttl))
 	theirs.Subject.TenantID = other
-	if err := f.Store.Insert(f.tenantCtx(other), limes.InsertRequest{Capability: theirs, IssuedBy: issuedBy}); err != nil {
-		t.Fatalf("Insert for another tenant: %v", err)
-	}
+	err = f.Store.Insert(f.tenantCtx(other), limes.InsertRequest{Capability: theirs, IssuedBy: issuedBy})
+	expect.Must(t, err == nil, "Insert for another tenant: %v", err)
 	req := limes.EraseTenantRequest{TenantID: f.Tenant, Note: "tenant removed", Actor: "storetest"}
 	if f.ScopesTenants {
-		if _, err := eraser.EraseTenantRecords(f.tenantCtx(other), req); !errors.Is(err, limes.ErrScopeMismatch) {
-			t.Errorf("EraseTenantRecords under another tenant's context: err = %v, want ErrScopeMismatch", err)
-		}
+		_, err := eraser.EraseTenantRecords(f.tenantCtx(other), req)
+		expect.That(t, errors.Is(err, limes.ErrScopeMismatch), "EraseTenantRecords under another tenant's context: err = %v, want ErrScopeMismatch", err)
 	}
-	if _, err := eraser.EraseTenantRecords(f.Ctx, limes.EraseTenantRequest{}); !errors.Is(err, limes.ErrInvalidRequest) {
-		t.Errorf("EraseTenantRecords naming no tenant: err = %v, want ErrInvalidRequest", err)
-	}
+	_, err = eraser.EraseTenantRecords(f.Ctx, limes.EraseTenantRequest{})
+	expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "EraseTenantRecords naming no tenant: err = %v, want ErrInvalidRequest", err)
 	got, err := eraser.EraseTenantRecords(f.Ctx, req)
 	want := limes.EraseTenantResult{Revoked: 4, Removed: 1, Kept: 4}
-	if err != nil || !reflect.DeepEqual(got, want) {
-		t.Fatalf("EraseTenantRecords = %+v, %v; want %+v", got, err, want)
-	}
+	expect.Must(t, !(err != nil || !reflect.DeepEqual(got, want)), "EraseTenantRecords = %+v, %v; want %+v", got, err, want)
 	for _, c := range []limes.Capability{root, child, revoked, recent} {
-		if !f.revoked(t, c.ID) {
-			t.Errorf("%s verifies after its tenant was erased", c.Subject.Subject)
-		}
+		expect.That(t, f.revoked(t, c.ID), "%s verifies after its tenant was erased", c.Subject.Subject)
 	}
 	r, err := f.Store.GetRecord(f.Ctx, root.ID)
-	if err != nil || r.Revocation == nil || r.Revocation.Note != req.Note || r.Revocation.Actor != req.Actor {
-		t.Errorf("the erased root's record = %+v, %v; want its revocation, noted as the request asks", r, err)
-	}
+	expect.That(t, !(err != nil || r.Revocation == nil || r.Revocation.Note != req.Note || r.Revocation.Actor != req.Actor), "the erased root's record = %+v, %v; want its revocation, noted as the request asks", r, err)
 	if withBiscuits {
-		if copyRevoked, err := biscuits.IsBiscuitRevoked(f.Ctx, [][]byte{copyID}); err != nil || !copyRevoked {
-			t.Errorf("IsBiscuitRevoked of a live child's copy after the erase = %v, %v; want revoked", copyRevoked, err)
-		}
-		if r, err := biscuits.GetBiscuitRevocation(f.Ctx, biscuitCopy(expired.ID, expiredCopyID)); !errors.Is(err, limes.ErrNotFound) {
-			t.Errorf("GetBiscuitRevocation of a removed record's copy = %+v, %v; want ErrNotFound, gone with its record", r, err)
-		}
+		copyRevoked, err := biscuits.IsBiscuitRevoked(f.Ctx, [][]byte{copyID})
+		expect.That(t, !(err != nil || !copyRevoked), "IsBiscuitRevoked of a live child's copy after the erase = %v, %v; want revoked", copyRevoked, err)
+		r, err := biscuits.GetBiscuitRevocation(f.Ctx, biscuitCopy(expired.ID, expiredCopyID))
+		expect.That(t, errors.Is(err, limes.ErrNotFound), "GetBiscuitRevocation of a removed record's copy = %+v, %v; want ErrNotFound, gone with its record", r, err)
 	}
-	if _, err := f.get(expired.ID); !errors.Is(err, limes.ErrNotFound) {
-		t.Errorf("GetRecord of a record Purge would take, after the erase: err = %v, want ErrNotFound", err)
-	}
-	if r, err := f.Store.GetRecord(f.tenantCtx(other), theirs.ID); err != nil || r.Revocation != nil {
-		t.Errorf("another tenant's record after the erase = %+v, %v; want it on record and not revoked", r, err)
-	}
-	if again, err := eraser.EraseTenantRecords(f.Ctx, req); err != nil || !reflect.DeepEqual(again, limes.EraseTenantResult{Kept: 4}) {
-		t.Errorf("EraseTenantRecords again = %+v, %v; want nothing revoked or removed", again, err)
-	}
+	_, err = f.get(expired.ID)
+	expect.That(t, errors.Is(err, limes.ErrNotFound), "GetRecord of a record Purge would take, after the erase: err = %v, want ErrNotFound", err)
+	r, err = f.Store.GetRecord(f.tenantCtx(other), theirs.ID)
+	expect.That(t, !(err != nil || r.Revocation != nil), "another tenant's record after the erase = %+v, %v; want it on record and not revoked", r, err)
+	again, err := eraser.EraseTenantRecords(f.Ctx, req)
+	expect.That(t, !(err != nil || !reflect.DeepEqual(again, limes.EraseTenantResult{Kept: 4})), "EraseTenantRecords again = %+v, %v; want nothing revoked or removed", again, err)
 }
 
 // censusWindow is the ExpiringWithin of the census checks: past the soonest
@@ -1387,18 +1192,13 @@ func censusFixture(t *testing.T, f fixture) uuid.UUID {
 	userRoot := f.insert(t, of(limes.PrincipalTypeUser, f.newCapability("user:root", uuid.Nil(), f.now.Add(ttl))))
 	userChild := f.insert(t, of(limes.PrincipalTypeUser, f.newCapability("user:child", userRoot.ID, f.now.Add(ttl))))
 	f.revoke(t, userRoot.ID, false)
-	if !f.revoked(t, userChild.ID) {
-		t.Fatal("a child of a revoked capability is not revoked")
-	}
+	expect.Must(t, f.revoked(t, userChild.ID), "a child of a revoked capability is not revoked")
 	other, err := f.newTenant()
-	if err != nil {
-		t.Fatalf("NewTenant: %v", err)
-	}
+	expect.Must(t, err == nil, "NewTenant: %v", err)
 	theirs := f.newCapability("agent:theirs", uuid.Nil(), f.now.Add(ttl))
 	theirs.Subject.TenantID = other
-	if err := f.Store.Insert(f.tenantCtx(other), limes.InsertRequest{Capability: theirs, IssuedBy: issuedBy}); err != nil {
-		t.Fatalf("Insert for another tenant: %v", err)
-	}
+	err = f.Store.Insert(f.tenantCtx(other), limes.InsertRequest{Capability: theirs, IssuedBy: issuedBy})
+	expect.Must(t, err == nil, "Insert for another tenant: %v", err)
 	return other
 }
 
@@ -1418,16 +1218,12 @@ func (f fixture) countAll(t *testing.T, ctx context.Context, req limes.CountReco
 	for {
 		fetched[req.Cursor] = true
 		page, err := f.Census.CountRecords(ctx, req)
-		if err != nil {
-			t.Fatalf("CountRecords(%+v): %v", req, err)
-		}
+		expect.Must(t, err == nil, "CountRecords(%+v): %v", req, err)
 		out = append(out, page.Items...)
 		if page.Next == "" {
 			return out
 		}
-		if fetched[page.Next] {
-			t.Fatalf("CountRecords handed back cursor %q again", page.Next)
-		}
+		expect.Must(t, !(fetched[page.Next]), "CountRecords handed back cursor %q again", page.Next)
 		req.Cursor = page.Next
 	}
 }
@@ -1439,19 +1235,16 @@ func checkCensusEdges(t *testing.T, f fixture) {
 		t.Skip("Env.Census or Env.Now not set")
 	}
 	mine := limes.CountRecordsRequest{TenantID: f.Tenant}
-	if got := f.countAll(t, f.Ctx, mine); len(got) != 0 {
-		t.Errorf("census of a tenant with no record = %+v, want an empty page", got)
-	}
+	got := f.countAll(t, f.Ctx, mine)
+	expect.That(t, len(got) == 0, "census of a tenant with no record = %+v, want an empty page", got)
 	live := f.live(t, "agent:copied", uuid.Nil())
 	if biscuits, ok := f.Store.(limes.BiscuitRevocationStore); ok {
-		if _, err := biscuits.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(live.ID, []byte("census-copy"))}); err != nil {
-			t.Fatalf("RevokeBiscuit: %v", err)
-		}
+		_, err := biscuits.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(live.ID, []byte("census-copy"))})
+		expect.Must(t, err == nil, "RevokeBiscuit: %v", err)
 	}
 	want := []limes.RecordCount{{Total: 1, Active: 1}}
-	if got := f.countAll(t, f.Ctx, mine); !reflect.DeepEqual(got, want) {
-		t.Errorf("census = %+v, want %+v", got, want)
-	}
+	got = f.countAll(t, f.Ctx, mine)
+	expect.That(t, reflect.DeepEqual(got, want), "census = %+v, want %+v", got, want)
 }
 
 // Each record counts under one disposition — revoked, through an ancestor
@@ -1465,9 +1258,8 @@ func checkCensus(t *testing.T, f fixture) {
 	other := censusFixture(t, f)
 	mine := limes.CountRecordsRequest{TenantID: f.Tenant, ExpiringWithin: censusWindow}
 	whole := limes.RecordCount{Total: 8, Active: 3, Expired: 2, Revoked: 3, Delegated: 2, ExpiringSoon: 2}
-	if got := f.countAll(t, f.Ctx, mine); !reflect.DeepEqual(got, []limes.RecordCount{whole}) {
-		t.Errorf("census of Tenant = %+v, want %+v", got, whole)
-	}
+	got := f.countAll(t, f.Ctx, mine)
+	expect.That(t, reflect.DeepEqual(got, []limes.RecordCount{whole}), "census of Tenant = %+v, want %+v", got, whole)
 	byType := mine
 	byType.ByPrincipalType = true
 	want := []limes.RecordCount{
@@ -1475,28 +1267,24 @@ func checkCensus(t *testing.T, f fixture) {
 		{PrincipalType: limes.PrincipalTypeService, Total: 2, Expired: 2},
 		{PrincipalType: limes.PrincipalTypeUser, Total: 2, Revoked: 2, Delegated: 1},
 	}
-	if got := f.countAll(t, f.Ctx, byType); !reflect.DeepEqual(got, want) {
-		t.Errorf("census of Tenant by principal type = %+v, want %+v", got, want)
-	}
+	got = f.countAll(t, f.Ctx, byType)
+	expect.That(t, reflect.DeepEqual(got, want), "census of Tenant by principal type = %+v, want %+v", got, want)
 	noWindow := mine
 	noWindow.ExpiringWithin = 0
-	if got := f.countAll(t, f.Ctx, noWindow); len(got) != 1 || got[0].ExpiringSoon != 0 {
-		t.Errorf("census with no window = %+v, want nothing expiring soon", got)
-	}
+	got = f.countAll(t, f.Ctx, noWindow)
+	expect.That(t, !(len(got) != 1 || got[0].ExpiringSoon != 0), "census with no window = %+v, want nothing expiring soon", got)
 
 	all := limes.CountRecordsRequest{AllTenants: true, ExpiringWithin: censusWindow, ByTenant: true}
 	mineByTenant, theirs := whole, limes.RecordCount{TenantID: other, Total: 1, Active: 1}
 	mineByTenant.TenantID = f.Tenant
 	want = []limes.RecordCount{mineByTenant, theirs}
 	slices.SortFunc(want, func(a, b limes.RecordCount) int { return bytes.Compare(a.TenantID[:], b.TenantID[:]) })
-	if got := f.countAll(t, f.allTenantsCtx(), all); !reflect.DeepEqual(got, want) {
-		t.Errorf("census of every tenant by tenant = %+v, want %+v", got, want)
-	}
+	got = f.countAll(t, f.allTenantsCtx(), all)
+	expect.That(t, reflect.DeepEqual(got, want), "census of every tenant by tenant = %+v, want %+v", got, want)
 	all.ByTenant = false
 	sum := limes.RecordCount{Total: 9, Active: 4, Expired: 2, Revoked: 3, Delegated: 2, ExpiringSoon: 2}
-	if got := f.countAll(t, f.allTenantsCtx(), all); !reflect.DeepEqual(got, []limes.RecordCount{sum}) {
-		t.Errorf("census of every tenant = %+v, want %+v", got, sum)
-	}
+	got = f.countAll(t, f.allTenantsCtx(), all)
+	expect.That(t, reflect.DeepEqual(got, []limes.RecordCount{sum}), "census of every tenant = %+v, want %+v", got, sum)
 }
 
 // A census pages in its order and hands the same rows a page at a time as
@@ -1510,13 +1298,10 @@ func checkCensusPages(t *testing.T, f fixture) {
 	req := limes.CountRecordsRequest{AllTenants: true, ExpiringWithin: censusWindow, ByTenant: true, ByPrincipalType: true}
 	whole := f.countAll(t, f.allTenantsCtx(), req)
 	const groups = 4 // Tenant's three principal types and the other tenant's agents
-	if len(whole) != groups {
-		t.Fatalf("census by tenant and principal type = %+v, want %d rows", whole, groups)
-	}
+	expect.Must(t, len(whole) == groups, "census by tenant and principal type = %+v, want %d rows", whole, groups)
 	req.Limit = 1
-	if paged := f.countAll(t, f.allTenantsCtx(), req); !reflect.DeepEqual(paged, whole) {
-		t.Errorf("census a row at a time = %+v, want %+v", paged, whole)
-	}
+	paged := f.countAll(t, f.allTenantsCtx(), req)
+	expect.That(t, reflect.DeepEqual(paged, whole), "census a row at a time = %+v, want %+v", paged, whole)
 	for name, bad := range map[string]limes.CountRecordsRequest{
 		"no tenant":         {},
 		"a tenant and all":  {TenantID: f.Tenant, AllTenants: true},
@@ -1524,19 +1309,16 @@ func checkCensusPages(t *testing.T, f fixture) {
 		"a negative limit":  {TenantID: f.Tenant, Limit: -1},
 		"a foreign cursor":  {TenantID: f.Tenant, Cursor: "not-a-cursor"},
 	} {
-		if _, err := f.Census.CountRecords(f.Ctx, bad); !errors.Is(err, limes.ErrInvalidRequest) {
-			t.Errorf("CountRecords with %s: err = %v, want ErrInvalidRequest", name, err)
-		}
+		_, err := f.Census.CountRecords(f.Ctx, bad)
+		expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "CountRecords with %s: err = %v, want ErrInvalidRequest", name, err)
 	}
 	if !f.ScopesTenants {
 		return
 	}
-	if _, err := f.Census.CountRecords(f.tenantCtx(other), limes.CountRecordsRequest{TenantID: f.Tenant}); !errors.Is(err, limes.ErrScopeMismatch) {
-		t.Errorf("CountRecords of Tenant under another tenant's context: err = %v, want ErrScopeMismatch", err)
-	}
-	if _, err := f.Census.CountRecords(f.Ctx, limes.CountRecordsRequest{AllTenants: true}); !errors.Is(err, limes.ErrScopeMismatch) {
-		t.Errorf("CountRecords of every tenant under one tenant's context: err = %v, want ErrScopeMismatch", err)
-	}
+	_, err := f.Census.CountRecords(f.tenantCtx(other), limes.CountRecordsRequest{TenantID: f.Tenant})
+	expect.That(t, errors.Is(err, limes.ErrScopeMismatch), "CountRecords of Tenant under another tenant's context: err = %v, want ErrScopeMismatch", err)
+	_, err = f.Census.CountRecords(f.Ctx, limes.CountRecordsRequest{AllTenants: true})
+	expect.That(t, errors.Is(err, limes.ErrScopeMismatch), "CountRecords of every tenant under one tenant's context: err = %v, want ErrScopeMismatch", err)
 }
 
 // checkRevocationLineage holds a store that names lineage
@@ -1553,27 +1335,21 @@ func checkRevocationLineage(t *testing.T, f fixture) {
 	root := f.live(t, "agent:lineage-root", uuid.Nil())
 	child := f.live(t, "agent:lineage-child", root.ID)
 	grandchild := f.live(t, "agent:lineage-grandchild", child.ID)
-	expect := func(what string, id uuid.UUID, ancestors []uuid.UUID) {
+	wantLineage := func(what string, id uuid.UUID, ancestors []uuid.UUID) {
 		t.Helper()
 		a, err := lineage.RevocationLineage(f.Ctx, id)
-		if err != nil {
-			t.Fatalf("%s: RevocationLineage: %v", what, err)
-		}
-		if revoked := f.revoked(t, id); a.Revoked != revoked {
-			t.Errorf("%s: RevocationLineage says revoked %v, IsRevoked %v", what, a.Revoked, revoked)
-		}
-		if !a.Revoked && !slices.Equal(a.Ancestors, ancestors) {
-			t.Errorf("%s: ancestors %v, want %v, nearest first", what, a.Ancestors, ancestors)
-		}
+		expect.Must(t, err == nil, "%s: RevocationLineage: %v", what, err)
+		revoked := f.revoked(t, id)
+		expect.That(t, a.Revoked == revoked, "%s: RevocationLineage says revoked %v, IsRevoked %v", what, a.Revoked, revoked)
+		expect.That(t, !(!a.Revoked && !slices.Equal(a.Ancestors, ancestors)), "%s: ancestors %v, want %v, nearest first", what, a.Ancestors, ancestors)
 	}
-	expect("a grandchild", grandchild.ID, []uuid.UUID{child.ID, root.ID})
-	expect("a child", child.ID, []uuid.UUID{root.ID})
-	expect("a root", root.ID, []uuid.UUID{})
+	wantLineage("a grandchild", grandchild.ID, []uuid.UUID{child.ID, root.ID})
+	wantLineage("a child", child.ID, []uuid.UUID{root.ID})
+	wantLineage("a root", root.ID, []uuid.UUID{})
 	f.revoke(t, child.ID, false)
-	expect("a grandchild under a revoked child", grandchild.ID, nil)
-	expect("the revoked child", child.ID, nil)
-	expect("a root above it", root.ID, []uuid.UUID{})
-	if _, err := lineage.RevocationLineage(f.Ctx, uuid.New()); !errors.Is(err, limes.ErrNotFound) {
-		t.Errorf("RevocationLineage of an id not on record: err = %v, want ErrNotFound", err)
-	}
+	wantLineage("a grandchild under a revoked child", grandchild.ID, nil)
+	wantLineage("the revoked child", child.ID, nil)
+	wantLineage("a root above it", root.ID, []uuid.UUID{})
+	_, err := lineage.RevocationLineage(f.Ctx, uuid.New())
+	expect.That(t, errors.Is(err, limes.ErrNotFound), "RevocationLineage of an id not on record: err = %v, want ErrNotFound", err)
 }
