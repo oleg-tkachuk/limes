@@ -104,7 +104,7 @@ func checkListRecords(t *testing.T, f fixture) {
 		expect.Must(t, err == nil, "GetRecord %s: %v", c.ID, err)
 		diff := diffCapabilities(l.Record.Capability, r.Capability)
 		expect.That(t, diff == "", "%s: listed a capability other than GetRecord's: %s", c.Subject.Subject, diff)
-		expect.That(t, !(!reflect.DeepEqual(l.Record.IssuedBy, r.IssuedBy) || !reflect.DeepEqual(l.Record.Revocation, r.Revocation)), "%s: listed issued by %+v, revocation %+v; GetRecord reads %+v, %+v", c.Subject.Subject, l.Record.IssuedBy, l.Record.Revocation, r.IssuedBy, r.Revocation)
+		expect.That(t, reflect.DeepEqual(l.Record.IssuedBy, r.IssuedBy) && reflect.DeepEqual(l.Record.Revocation, r.Revocation), "%s: listed issued by %+v, revocation %+v; GetRecord reads %+v, %+v", c.Subject.Subject, l.Record.IssuedBy, l.Record.Revocation, r.IssuedBy, r.Revocation)
 	}
 	if f.Census == nil {
 		return
@@ -203,7 +203,7 @@ func checkListRecordsPages(t *testing.T, f fixture) {
 			page, err := f.Lister.ListRecords(f.Ctx, req)
 			expect.Must(t, err == nil, "ListRecords: %v", err)
 			wantNext := limit < len(whole)
-			expect.That(t, !(len(page.Items) != min(limit, len(whole)) || (page.Next != "") != wantNext), "%s first page of %d: %d records, next %q; want %d and a next page %v", order, limit, len(page.Items), page.Next, min(limit, len(whole)), wantNext)
+			expect.That(t, len(page.Items) == min(limit, len(whole)) && (page.Next != "") == wantNext, "%s first page of %d: %d records, next %q; want %d and a next page %v", order, limit, len(page.Items), page.Next, min(limit, len(whole)), wantNext)
 		}
 	}
 	// A filter pages too: the active records a record at a time.
@@ -221,7 +221,7 @@ func checkListRecordsMalformed(t *testing.T, f fixture) {
 	f.skipUnlessLister(t)
 	censusFixture(t, f)
 	first, err := f.Lister.ListRecords(f.Ctx, limes.ListRecordsRequest{TenantID: f.Tenant, Limit: 1})
-	expect.Must(t, !(err != nil || first.Next == ""), "first page = %+v, %v; want a next page", first, err)
+	expect.Must(t, err == nil && first.Next != "", "first page = %+v, %v; want a next page", first, err)
 	for name, bad := range map[string]limes.ListRecordsRequest{
 		"no tenant":                 {},
 		"an unknown principal type": {TenantID: f.Tenant, PrincipalType: "robot"},
@@ -236,11 +236,11 @@ func checkListRecordsMalformed(t *testing.T, f fixture) {
 	} {
 		// Malformed, not a place in another listing.
 		_, err := f.Lister.ListRecords(f.Ctx, bad)
-		expect.That(t, !(!errors.Is(err, limes.ErrInvalidRequest) || errors.Is(err, limes.ErrCursorMismatch)), "ListRecords with %s: err = %v, want ErrInvalidRequest alone", name, err)
+		expect.That(t, errors.Is(err, limes.ErrInvalidRequest) && !errors.Is(err, limes.ErrCursorMismatch), "ListRecords with %s: err = %v, want ErrInvalidRequest alone", name, err)
 	}
 	// A place in the listing of the other way: both.
 	_, err = f.Lister.ListRecords(f.Ctx, limes.ListRecordsRequest{TenantID: f.Tenant, Cursor: first.Next, Order: limes.ListOrderDescending})
-	expect.That(t, !(!errors.Is(err, limes.ErrCursorMismatch) || !errors.Is(err, limes.ErrInvalidRequest)), "ListRecords with a cursor of the other way: err = %v, want ErrCursorMismatch, an ErrInvalidRequest", err)
+	expect.That(t, errors.Is(err, limes.ErrCursorMismatch) && errors.Is(err, limes.ErrInvalidRequest), "ListRecords with a cursor of the other way: err = %v, want ErrCursorMismatch, an ErrInvalidRequest", err)
 	if !f.ScopesTenants {
 		return
 	}
@@ -264,7 +264,7 @@ func checkListRecordsCursorFilters(t *testing.T, f fixture) {
 		Dispositions: []limes.RecordDisposition{active, revoked}, Limit: 1,
 	}
 	first, err := f.Lister.ListRecords(f.Ctx, req)
-	expect.Must(t, !(err != nil || first.Next == ""), "first page = %+v, %v; want a next page", first, err)
+	expect.Must(t, err == nil && first.Next != "", "first page = %+v, %v; want a next page", first, err)
 	req.Cursor = first.Next
 	for name, change := range map[string]func(*limes.ListRecordsRequest){
 		"another tenant":         func(r *limes.ListRecordsRequest) { r.TenantID = uuid.New() },
@@ -280,7 +280,7 @@ func checkListRecordsCursorFilters(t *testing.T, f fixture) {
 		other := req
 		change(&other)
 		_, err := f.Lister.ListRecords(f.Ctx, other)
-		expect.That(t, !(!errors.Is(err, limes.ErrCursorMismatch) || !errors.Is(err, limes.ErrInvalidRequest)), "ListRecords with the cursor and %s: err = %v, want ErrCursorMismatch, an ErrInvalidRequest", name, err)
+		expect.That(t, errors.Is(err, limes.ErrCursorMismatch) && errors.Is(err, limes.ErrInvalidRequest), "ListRecords with the cursor and %s: err = %v, want ErrCursorMismatch, an ErrInvalidRequest", name, err)
 	}
 	for name, dispositions := range map[string][]limes.RecordDisposition{
 		"the same filters":                  {active, revoked},
@@ -311,7 +311,7 @@ func checkGetRecordListing(t *testing.T, f fixture) {
 		diff := diffCapabilities(got.Record.Capability, want.Record.Capability)
 		expect.That(t, diff == "", "%s: a capability other than the listing's: %s", want.Record.Capability.Subject.Subject, diff)
 		expect.That(t, reflect.DeepEqual(got.StoppedBy, want.StoppedBy), "%s: stopped by %+v; the listing gives %+v", want.Record.Capability.Subject.Subject, got.StoppedBy, want.StoppedBy)
-		expect.That(t, !(got.Disposition != want.Disposition || !reflect.DeepEqual(got.Record.IssuedBy, want.Record.IssuedBy) || !reflect.DeepEqual(got.Record.Revocation, want.Record.Revocation)), "%s: disposition %q, issued by %+v, revocation %+v; the listing gives %q, %+v, %+v", want.Record.Capability.Subject.Subject, got.Disposition, got.Record.IssuedBy, got.Record.Revocation, want.Disposition, want.Record.IssuedBy, want.Record.Revocation)
+		expect.That(t, got.Disposition == want.Disposition && reflect.DeepEqual(got.Record.IssuedBy, want.Record.IssuedBy) && reflect.DeepEqual(got.Record.Revocation, want.Record.Revocation), "%s: disposition %q, issued by %+v, revocation %+v; the listing gives %q, %+v, %+v", want.Record.Capability.Subject.Subject, got.Disposition, got.Record.IssuedBy, got.Record.Revocation, want.Disposition, want.Record.IssuedBy, want.Record.Revocation)
 	}
 	_, err := reader.GetRecordListing(f.Ctx, uuid.New())
 	expect.That(t, errors.Is(err, limes.ErrNotFound), "GetRecordListing of an id not on record: err = %v, want ErrNotFound", err)
@@ -344,7 +344,7 @@ func checkListingStoppedBy(t *testing.T, f fixture) {
 				expect.That(t, (l.StoppedBy != nil) == (l.Disposition == limes.RecordDispositionRevoked), "%s: %s, stopped by %+v", id, l.Disposition, l.StoppedBy)
 				if reader, ok := f.Lister.(limes.RecordListingReader); ok {
 					got, err := reader.GetRecordListing(f.Ctx, id)
-					expect.That(t, !(err != nil || !reflect.DeepEqual(got.StoppedBy, l.StoppedBy)), "%s: GetRecordListing stopped by %+v, %v; the listing %+v", id, got.StoppedBy, err, l.StoppedBy)
+					expect.That(t, err == nil && reflect.DeepEqual(got.StoppedBy, l.StoppedBy), "%s: GetRecordListing stopped by %+v, %v; the listing %+v", id, got.StoppedBy, err, l.StoppedBy)
 				}
 				return l.StoppedBy
 			}
@@ -356,7 +356,7 @@ func checkListingStoppedBy(t *testing.T, f fixture) {
 		t.Helper()
 		got := stoppedBy(id)
 		want := f.record(t, by).Revocation
-		expect.That(t, !(got == nil || want == nil || got.CapabilityID != by || !sameRevocation(got.Revocation, *want)), "%s: stopped by %+v, want %s's entry %+v", name, got, by, want)
+		expect.That(t, got != nil && want != nil && got.CapabilityID == by && sameRevocation(got.Revocation, *want), "%s: stopped by %+v, want %s's entry %+v", name, got, by, want)
 	}
 	wantStop("its own entry", own.ID, own.ID)
 	wantStop("through its parent", parent.ID, grandparent.ID)

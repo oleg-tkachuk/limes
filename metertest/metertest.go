@@ -496,11 +496,11 @@ func checkTenantCountsBeforeACeiling(t *testing.T, env Env) {
 	err = reserve()
 	expect.Must(t, err == nil, "reserve: %v", err)
 	b, err := env.Usage.GetTenantBudget(env.Ctx, env.Tenant)
-	expect.Must(t, !(err != nil || b.SpentAmount != spent || b.ReservedAmount != held || !b.Ceiling.Unlimited || b.ResourceVersion != 0), "GetTenantBudget before any ceiling = %+v, %v; want %v spent, %v held, no ceiling, version 0", b, err, spent, held)
+	expect.Must(t, err == nil && b.SpentAmount == spent && b.ReservedAmount == held && b.Ceiling.Unlimited && b.ResourceVersion == 0, "GetTenantBudget before any ceiling = %+v, %v; want %v spent, %v held, no ceiling, version 0", b, err, spent, held)
 	set, err := env.Usage.SetTenantBudget(env.Ctx, meter.SetTenantBudgetRequest{
 		TenantID: env.Tenant, Ceiling: limes.BudgetCeiling{Max: ceiling, UnitCode: unit},
 	})
-	expect.Must(t, !(err != nil || set.SpentAmount != spent || set.ReservedAmount != held), "SetTenantBudget = %+v, %v; want the ceiling over %v spent and %v held", set, err, spent, held)
+	expect.Must(t, err == nil && set.SpentAmount == spent && set.ReservedAmount == held, "SetTenantBudget = %+v, %v; want the ceiling over %v spent and %v held", set, err, spent, held)
 	err = reserve()
 	expect.That(t, errors.Is(err, limes.ErrTenantBudgetExceeded), "a hold past the new ceiling: err = %v, want ErrTenantBudgetExceeded", err)
 	_, err = env.Usage.Charge(env.Ctx, meter.ChargeRequest{
@@ -514,25 +514,25 @@ func checkRejectionMovesNothing(t *testing.T, f fixture) {
 	ran := false
 	r, err := f.charge(meter.ChargeRequest{Amount: childBudget + one}, func(context.Context, meter.Charged) error { ran = true; return nil })
 	expect.Must(t, errors.Is(err, limes.ErrBudgetExceeded), "charge past the ceiling: err = %v, want ErrBudgetExceeded", err)
-	expect.That(t, !(r.TenantID != f.Tenant || r.UnitCode != unit), "a refusal's receipt names tenant %s in %q, want %s in %q", r.TenantID, r.UnitCode, f.Tenant, unit)
-	expect.Must(t, !(ran || f.spent(t, f.child) != 0 || f.spent(t, f.root) != 0 || f.tenantSpent(t) != 0), "a rejected charge moved something (callback ran: %v)", ran)
+	expect.That(t, r.TenantID == f.Tenant && r.UnitCode == unit, "a refusal's receipt names tenant %s in %q, want %s in %q", r.TenantID, r.UnitCode, f.Tenant, unit)
+	expect.Must(t, !ran && f.spent(t, f.child) == 0 && f.spent(t, f.root) == 0 && f.tenantSpent(t) == 0, "a rejected charge moved something (callback ran: %v)", ran)
 }
 
 func checkExternalRefChargesOnce(t *testing.T, f fixture) {
 	fanOuts := 0
 	onCharged := func(context.Context, meter.Charged) error { fanOuts++; return nil }
 	first, err := f.charge(meter.ChargeRequest{Amount: 2 * one, ExternalRef: "call-1"}, onCharged)
-	expect.Must(t, !(err != nil || first.Replayed), "first charge = %+v, %v", first, err)
+	expect.Must(t, err == nil && !first.Replayed, "first charge = %+v, %v", first, err)
 	again, err := f.charge(meter.ChargeRequest{Amount: 2 * one, ExternalRef: "call-1"}, onCharged)
-	expect.Must(t, !(err != nil || !again.Replayed || again.ChargeID != first.ChargeID || again.SpentAmount != 2*one), "repeated charge = %+v, %v; want a replay of %s at spend 2", again, err, first.ChargeID)
+	expect.Must(t, err == nil && again.Replayed && again.ChargeID == first.ChargeID && again.SpentAmount == 2*one, "repeated charge = %+v, %v; want a replay of %s at spend 2", again, err, first.ChargeID)
 	checkExternalRefConflicts(t, f, onCharged)
 	expect.That(t, fanOuts == 1, "onCharged ran %d times, want once", fanOuts)
 	// The name is per capability, and no name never deduplicates.
 	r, err := f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: f.root, budget: budgetOf(rootBudget)}), Amount: one, ExternalRef: "call-1"}, nil)
-	expect.That(t, !(err != nil || r.Replayed), "same ref on another capability = %+v, %v; want a fresh charge", r, err)
+	expect.That(t, err == nil && !r.Replayed, "same ref on another capability = %+v, %v; want a fresh charge", r, err)
 	for range 2 {
 		r, err := f.charge(meter.ChargeRequest{Amount: one}, nil)
-		expect.That(t, !(err != nil || r.Replayed), "charge without a ref = %+v, %v; want a fresh charge", r, err)
+		expect.That(t, err == nil && !r.Replayed, "charge without a ref = %+v, %v; want a fresh charge", r, err)
 	}
 	got := f.spent(t, f.child)
 	expect.That(t, got == 4*one, "child spent %v, want 2 + 1 + 1", got)
@@ -565,7 +565,7 @@ func checkExternalRefConflicts(t *testing.T, f fixture, onCharged func(context.C
 		r, err := f.Usage.Charge(f.Ctx, meter.ChargeRequest{Subject: subject, Amount: 2 * one, ExternalRef: "call-1"}, onCharged)
 		expect.That(t, errors.Is(err, want), "the ref again %s = %+v, %v; want %v", name, r, err, want)
 		// The conflict says which ref, not what the other charge was.
-		expect.That(t, !(err != nil && strings.Contains(err.Error(), f.Tenant.String())), "the ref again %s: the error names the first charge's tenant: %v", name, err)
+		expect.That(t, err == nil || !strings.Contains(err.Error(), f.Tenant.String()), "the ref again %s: the error names the first charge's tenant: %v", name, err)
 	}
 }
 
@@ -592,7 +592,7 @@ func checkExternalRefConcurrent(t *testing.T, f fixture) {
 		})
 	}
 	wg.Wait()
-	expect.Must(t, !(fresh != 1 || len(charges) != 1), "%d fresh charges over %d charge ids, want one of each", fresh, len(charges))
+	expect.Must(t, fresh == 1 && len(charges) == 1, "%d fresh charges over %d charge ids, want one of each", fresh, len(charges))
 	got := f.spent(t, f.root)
 	expect.That(t, got == 2*one, "root spent %v, want 2", got)
 }
@@ -615,7 +615,7 @@ func checkChargeByRef(t *testing.T, f fixture) {
 	}
 	expect.Must(t, err == nil && !got.At.IsZero() && reflect.DeepEqual(undated(got), want), "ChargeByRef = %+v, %v; want charge %s of 3 with 1 refunded, for %s by %s in %s", got, err, r.ChargeID, chargedOp, actor, f.Tenant)
 	byID, err := f.Usage.GetCharge(f.Ctx, r.ChargeID)
-	expect.That(t, !(err != nil || !reflect.DeepEqual(byID, got)), "GetCharge = %+v, %v; want what ChargeByRef read, %+v", byID, err, got)
+	expect.That(t, err == nil && reflect.DeepEqual(byID, got), "GetCharge = %+v, %v; want what ChargeByRef read, %+v", byID, err, got)
 	checkChargeLookupsMiss(t, f)
 }
 
@@ -667,7 +667,7 @@ func checkMalformed(t *testing.T, f fixture) {
 	// matches.
 	for name, amount := range map[string]limes.Nanos{"negative": -one, "past MaxNanos": limes.MaxNanos + 1} {
 		_, err := f.charge(meter.ChargeRequest{Amount: amount}, nil)
-		expect.That(t, !(!errors.Is(err, limes.ErrInvalidAmount) || !errors.Is(err, limes.ErrInvalidRequest)), "a charge of a %s amount: err = %v, want ErrInvalidAmount and ErrInvalidRequest", name, err)
+		expect.That(t, errors.Is(err, limes.ErrInvalidAmount) && errors.Is(err, limes.ErrInvalidRequest), "a charge of a %s amount: err = %v, want ErrInvalidAmount and ErrInvalidRequest", name, err)
 		_, err = f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: amount})
 		expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "a hold of a %s amount: err = %v, want ErrInvalidRequest", name, err)
 	}
@@ -700,7 +700,7 @@ func checkCounterOverflow(t *testing.T, f fixture) {
 	_, err = f.charge(meter.ChargeRequest{Subject: subject, Amount: limes.MaxNanos, Overrun: meter.OverrunPolicyRecord}, nil)
 	expect.Must(t, err == nil, "a charge of MaxNanos: %v", err)
 	_, err = f.charge(meter.ChargeRequest{Subject: subject, Amount: 1, Overrun: meter.OverrunPolicyRecord}, nil)
-	expect.That(t, !(!errors.Is(err, meter.ErrCounterOverflow) || errors.Is(err, limes.ErrInvalidRequest)), "a nano past MaxNanos on the counter: err = %v, want ErrCounterOverflow and not ErrInvalidRequest", err)
+	expect.That(t, errors.Is(err, meter.ErrCounterOverflow) && !errors.Is(err, limes.ErrInvalidRequest), "a nano past MaxNanos on the counter: err = %v, want ErrCounterOverflow and not ErrInvalidRequest", err)
 	got := f.spent(t, id)
 	expect.That(t, got == limes.MaxNanos, "spent %s after the overflow was refused, want %s", got, limes.MaxNanos)
 	// Each counter on its own: a fresh capability under no full one meets
@@ -728,7 +728,7 @@ func checkOverrunRecord(t *testing.T, f fixture) {
 	_, err := f.charge(meter.ChargeRequest{Amount: amount}, nil)
 	expect.Must(t, err != nil, "a rejecting charge past every ceiling was accepted")
 	r, err := f.charge(meter.ChargeRequest{Amount: amount, Overrun: meter.OverrunPolicyRecord}, nil)
-	expect.Must(t, !(err != nil || !r.Overrun || r.Replayed || r.SpentAmount != amount), "recording charge = %+v, %v; want %v spent, overrun", r, err, amount)
+	expect.Must(t, err == nil && r.Overrun && !r.Replayed && r.SpentAmount == amount, "recording charge = %+v, %v; want %v spent, overrun", r, err, amount)
 	got := f.spent(t, f.root)
 	expect.That(t, got == amount, "root spent %v, want %v", got, amount)
 	got = f.tenantSpent(t)
@@ -759,12 +759,12 @@ func checkSettle(t *testing.T, f fixture) {
 	_, err = settle(24*one, meter.OverrunPolicyReject)
 	expect.Must(t, errors.Is(err, limes.ErrBudgetExceeded), "rejecting settle past the ceiling: err = %v, want ErrBudgetExceeded", err)
 	r, err := settle(24*one, meter.OverrunPolicyRecord)
-	expect.Must(t, !(err != nil || !r.Overrun || r.SpentAmount != 24*one), "recording settle = %+v, %v; want 24 spent, overrun", r, err)
+	expect.Must(t, err == nil && r.Overrun && r.SpentAmount == 24*one, "recording settle = %+v, %v; want 24 spent, overrun", r, err)
 	u, err := f.Usage.GetUsage(f.Ctx, f.root)
-	expect.That(t, !(err != nil || u.ReservedAmount != 0), "root after settling = %+v, %v; want nothing held", u, err)
+	expect.That(t, err == nil && u.ReservedAmount == 0, "root after settling = %+v, %v; want nothing held", u, err)
 	// Replayed for the same amount, under any policy: the first receipt.
 	again, err := settle(24*one, meter.OverrunPolicyReject)
-	expect.That(t, !(err != nil || !again.Replayed || !again.Overrun || again.ChargeID != r.ChargeID || again.SpentAmount != 24*one), "settling again = %+v, %v; want a replay of %s", again, err, r.ChargeID)
+	expect.That(t, err == nil && again.Replayed && again.Overrun && again.ChargeID == r.ChargeID && again.SpentAmount == 24*one, "settling again = %+v, %v; want a replay of %s", again, err, r.ChargeID)
 	err = f.Usage.Release(f.Ctx, meter.ReleaseRequest{Subject: f.childSubject(), ReservationID: res.ID})
 	expect.That(t, err == nil, "releasing a settled reservation: %v", err)
 	onRoot := newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, budget: budgetOf(rootBudget), unit: unit})
@@ -802,9 +802,9 @@ func checkSettleOwner(t *testing.T, f fixture) {
 	// store that scopes tenants may refuse the call as out of scope instead.
 	elsewhere := newSubject(subjectSpec{capID: f.child, tenant: uuid.New(), budget: budgetOf(childBudget)})
 	_, err = f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: elsewhere, ReservationID: res.ID, Amount: one}, nil)
-	expect.That(t, !(!errors.Is(err, meter.ErrReservationNotFound) && !errors.Is(err, limes.ErrScopeMismatch)), "settling the child's hold under another tenant: err = %v, want ErrReservationNotFound or ErrScopeMismatch", err)
+	expect.That(t, errors.Is(err, meter.ErrReservationNotFound) || errors.Is(err, limes.ErrScopeMismatch), "settling the child's hold under another tenant: err = %v, want ErrReservationNotFound or ErrScopeMismatch", err)
 	u, err := f.Usage.GetUsage(f.Ctx, f.child)
-	expect.That(t, !(err != nil || u.ReservedAmount != 2*one || u.SpentAmount != 0), "child after a refused settle = %+v, %v; want 2 held, nothing spent", u, err)
+	expect.That(t, err == nil && u.ReservedAmount == 2*one && u.SpentAmount == 0, "child after a refused settle = %+v, %v; want 2 held, nothing spent", u, err)
 	_, err = f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: f.childSubject(), ReservationID: res.ID, Amount: one}, nil)
 	expect.Must(t, err == nil, "settling as the owner: %v", err)
 	r, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: stranger, ReservationID: res.ID, Amount: one}, nil)
@@ -828,7 +828,7 @@ func checkRefundAcrossReset(t *testing.T, f fixture) {
 	after, err := f.charge(meter.ChargeRequest{Amount: amount}, nil)
 	expect.Must(t, err == nil, "%v", err)
 	r, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: before.ChargeID, Remaining: true})
-	expect.Must(t, !(err != nil || r.Amount != amount), "refund of the earlier period's charge = %+v, %v; want %v", r, err, amount)
+	expect.Must(t, err == nil && r.Amount == amount, "refund of the earlier period's charge = %+v, %v; want %v", r, err, amount)
 	got := f.tenantSpent(t)
 	expect.That(t, got == amount, "tenant spent %v in the new period, want %v: the refund came out of a period that never counted it", got, amount)
 	got = f.spent(t, f.child)
@@ -860,7 +860,7 @@ func checkAncestorUnit(t *testing.T, f fixture) {
 	expect.Must(t, err == nil, "%v", err)
 	for name, id := range map[string]uuid.UUID{"charged": charged, "held": held} {
 		u, err := f.Usage.GetUsage(f.Ctx, id)
-		expect.That(t, !(err != nil || u.UnitCode != unit), "the parent of a %s child: usage %+v, %v; want counted in %q", name, u, err, unit)
+		expect.That(t, err == nil && u.UnitCode == unit, "the parent of a %s child: usage %+v, %v; want counted in %q", name, u, err, unit)
 	}
 }
 
@@ -872,7 +872,7 @@ func checkNoUnit(t *testing.T, f fixture) {
 	_, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: none})
 	expect.Must(t, err == nil, "Bump of a subject with no unit: %v", err)
 	u, err := f.Usage.GetUsage(f.Ctx, f.child)
-	expect.That(t, !(err != nil || u.UnitCode != "" || u.RequestCount != 1), "usage after a bump with no unit = %+v, %v; want one request in no unit", u, err)
+	expect.That(t, err == nil && u.UnitCode == "" && u.RequestCount == 1, "usage after a bump with no unit = %+v, %v; want one request in no unit", u, err)
 	for name, call := range map[string]func() error{
 		"Charge": func() error {
 			_, err := f.Usage.Charge(f.Ctx, meter.ChargeRequest{Subject: none, Amount: one}, nil)
@@ -893,7 +893,7 @@ func checkNoUnit(t *testing.T, f fixture) {
 	_, err = f.charge(meter.ChargeRequest{Amount: one}, nil)
 	expect.Must(t, err == nil, "charge in %s: %v", unit, err)
 	u, err = f.Usage.GetUsage(f.Ctx, f.child)
-	expect.That(t, !(err != nil || u.UnitCode != unit), "usage after a charge in %s = %+v, %v; want it counted in %s", unit, u, err, unit)
+	expect.That(t, err == nil && u.UnitCode == unit, "usage after a charge in %s = %+v, %v; want it counted in %s", unit, u, err, unit)
 }
 
 // checkTenantCeilingUnit holds a store to a tenant ceiling in the unit it
@@ -914,7 +914,7 @@ func checkTenantCeilingUnit(t *testing.T, f fixture) {
 	_, err := f.Usage.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Unlimited: true}})
 	expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "SetTenantBudget, an unlimited ceiling in no unit: err = %v, want ErrInvalidRequest", err)
 	b, err := f.Usage.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{Unlimited: true, UnitCode: otherUnit}})
-	expect.Must(t, !(err != nil || b.Ceiling.UnitCode != otherUnit), "SetTenantBudget in %s = %+v, %v; want a ceiling in it", otherUnit, b, err)
+	expect.Must(t, err == nil && b.Ceiling.UnitCode == otherUnit, "SetTenantBudget in %s = %+v, %v; want a ceiling in it", otherUnit, b, err)
 	_, err = f.Usage.Charge(ctx, meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant, unit: unit}), Amount: one}, nil)
 	expect.That(t, errors.Is(err, limes.ErrUnitCodeMismatch), "a charge in %s on a tenant ceiling in %s: err = %v, want ErrUnitCodeMismatch", unit, otherUnit, err)
 	_, err = f.Usage.Charge(ctx, meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant, unit: otherUnit}), Amount: one}, nil)
@@ -924,7 +924,7 @@ func checkTenantCeilingUnit(t *testing.T, f fixture) {
 	expect.Must(t, err == nil, "hold in %s: %v", otherUnit, err)
 	want := limes.BudgetCeiling{Unlimited: true, UnitCode: otherUnit}
 	b, err = f.Usage.GetTenantBudget(heldCtx, held)
-	expect.That(t, !(err != nil || b.Ceiling != want), "tenant budget after a first hold in %s = %+v, %v; want ceiling %s", otherUnit, b, err, want)
+	expect.That(t, err == nil && b.Ceiling == want, "tenant budget after a first hold in %s = %+v, %v; want ceiling %s", otherUnit, b, err, want)
 }
 
 // checkOneUnit holds a store to counting each counter in one unit: an amount
@@ -947,7 +947,7 @@ func checkOneUnit(t *testing.T, f fixture) {
 	other.Subject = newSubject(subjectSpec{capID: fresh, tenant: f.Tenant, unit: otherUnit})
 	_, err = f.Usage.Charge(f.Ctx, other, nil)
 	expect.That(t, errors.Is(err, limes.ErrUnitCodeMismatch), "a charge in %s under a %s tenant: err = %v, want ErrUnitCodeMismatch", otherUnit, unit, err)
-	expect.That(t, !(f.spent(t, f.child) != one || f.spent(t, fresh) != 0 || f.tenantSpent(t) != one), "a refused charge in another unit moved spend")
+	expect.That(t, f.spent(t, f.child) == one && f.spent(t, fresh) == 0 && f.tenantSpent(t) == one, "a refused charge in another unit moved spend")
 	b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
 	expect.Must(t, err == nil, "%v", err)
 	_, err = f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{
@@ -1017,7 +1017,7 @@ func checkHoldCreatesTenant(t *testing.T, f fixture) {
 	_, err = f.Usage.Reserve(f.tenantCtx(tenant), meter.ReserveRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant}), Amount: one})
 	expect.Must(t, err == nil, "%v", err)
 	b, err := f.Usage.GetTenantBudget(f.tenantCtx(tenant), tenant)
-	expect.That(t, !(err != nil || b.ReservedAmount != one), "a tenant whose first act is a hold: %+v, %v; want %v held", b, err, one)
+	expect.That(t, err == nil && b.ReservedAmount == one, "a tenant whose first act is a hold: %+v, %v; want %v held", b, err, one)
 }
 
 // checkSettleReplay holds a store to a settle replayed: the same receipt,
@@ -1031,17 +1031,17 @@ func checkSettleReplay(t *testing.T, f fixture) {
 	expect.Must(t, err == nil, "%v", err)
 	ran := false
 	again, err := f.Usage.Settle(f.Ctx, req, func(context.Context, meter.Charged) error { ran = true; return nil })
-	expect.That(t, !(err != nil || !again.Replayed || again.ChargeID != first.ChargeID || again.SpentAmount != first.SpentAmount), "a replayed settle = %+v, %v; want the first's receipt %+v, replayed", again, err, first)
+	expect.That(t, err == nil && again.Replayed && again.ChargeID == first.ChargeID && again.SpentAmount == first.SpentAmount, "a replayed settle = %+v, %v; want the first's receipt %+v, replayed", again, err, first)
 	expect.That(t, !(ran), "a replayed settle ran onCharged again")
 	// The reservation names one cost: settling it again for another amount
 	// is a conflict, not the first receipt, and moves nothing.
 	other := req
 	other.Amount = 2 * one
 	_, err = f.Usage.Settle(f.Ctx, other, func(context.Context, meter.Charged) error { ran = true; return nil })
-	expect.That(t, !(!errors.Is(err, meter.ErrSettleConflict) || !errors.Is(err, limes.ErrConflict)), "a settle replayed for another amount: err = %v, want ErrSettleConflict, matching ErrConflict", err)
-	expect.That(t, !(ran || f.spent(t, f.child) != one), "a settle replayed for another amount ran onCharged or moved spend to %v; want %v", f.spent(t, f.child), one)
+	expect.That(t, errors.Is(err, meter.ErrSettleConflict) && errors.Is(err, limes.ErrConflict), "a settle replayed for another amount: err = %v, want ErrSettleConflict, matching ErrConflict", err)
+	expect.That(t, !ran && f.spent(t, f.child) == one, "a settle replayed for another amount ran onCharged or moved spend to %v; want %v", f.spent(t, f.child), one)
 	charge, err := f.Usage.GetCharge(f.Ctx, first.ChargeID)
-	expect.That(t, !(err != nil || charge.Op != "llm" || charge.Actor != "agent"), "the settled charge = %+v, %v; want the hold's op and actor", charge, err)
+	expect.That(t, err == nil && charge.Op == "llm" && charge.Actor == "agent", "the settled charge = %+v, %v; want the hold's op and actor", charge, err)
 }
 
 // checkReleaseReturnsCopy holds a store to returning a hold to the copy it
@@ -1074,7 +1074,7 @@ func checkReleaseReturnsCopy(t *testing.T, f fixture) {
 		err = release(subject, r.ID)
 		expect.Must(t, err == nil, "%v", err)
 		got := f.copyUsage(t, reader, f.child, copyID)
-		expect.That(t, !(len(got) != 1 || got[0].ReservedAmount != 0), "the copy after %s = %+v; want nothing held", name, got)
+		expect.That(t, len(got) == 1 && got[0].ReservedAmount == 0, "the copy after %s = %+v; want nothing held", name, got)
 	}
 }
 
@@ -1086,7 +1086,7 @@ func checkRefusedBump(t *testing.T, f fixture) {
 	expect.Must(t, errors.Is(err, limes.ErrRequestLimitExceeded), "a bump past a frozen copy: err = %v, want ErrRequestLimitExceeded", err)
 	for name, id := range map[string]uuid.UUID{"capability": f.child, "root": f.root} {
 		u, err := f.Usage.GetUsage(f.Ctx, id)
-		expect.Must(t, !(err != nil && !errors.Is(err, meter.ErrUsageNotFound)), "%v", err)
+		expect.Must(t, err == nil || errors.Is(err, meter.ErrUsageNotFound), "%v", err)
 		expect.That(t, u.RequestCount == 0, "the %s counted %d requests after a refused bump, want 0", name, u.RequestCount)
 	}
 }
@@ -1121,7 +1121,7 @@ func checkRefundExactRemainder(t *testing.T, f fixture) {
 	_, err = refund(first)
 	expect.Must(t, err == nil, "%v", err)
 	got, err := refund(charged - first)
-	expect.That(t, !(err != nil || got.Amount != charged-first), "a refund of exactly what is left = %+v, %v; want %v refunded", got, err, charged-first)
+	expect.That(t, err == nil && got.Amount == charged-first, "a refund of exactly what is left = %+v, %v; want %v refunded", got, err, charged-first)
 	spent := f.spent(t, f.child)
 	expect.That(t, spent == 0, "spent %v after refunding the whole charge, want 0", spent)
 }
@@ -1164,9 +1164,9 @@ func checkReplayAfterRemoval(t *testing.T, f fixture) {
 	err = f.DeleteCapability(f.child)
 	expect.Must(t, err == nil, "%v", err)
 	got, err := f.Usage.Charge(f.Ctx, charge, nil)
-	expect.That(t, !(err != nil || !got.Replayed || got.ChargeID != charged.ChargeID), "a charge replayed after its capability is gone = %+v, %v; want the first receipt, replayed", got, err)
+	expect.That(t, err == nil && got.Replayed && got.ChargeID == charged.ChargeID, "a charge replayed after its capability is gone = %+v, %v; want the first receipt, replayed", got, err)
 	got, err = f.Usage.Settle(f.Ctx, settle, nil)
-	expect.That(t, !(err != nil || !got.Replayed || got.ChargeID != settled.ChargeID), "a settle replayed after its capability is gone = %+v, %v; want the first receipt, replayed", got, err)
+	expect.That(t, err == nil && got.Replayed && got.ChargeID == settled.ChargeID, "a settle replayed after its capability is gone = %+v, %v; want the first receipt, replayed", got, err)
 }
 
 // checkDeleteReleasesHolds holds a store to releasing what a reaped
@@ -1187,9 +1187,9 @@ func checkDeleteReleasesHolds(t *testing.T, f fixture) {
 	_, err = f.Usage.GetReservation(f.Ctx, res.ID)
 	expect.That(t, errors.Is(err, meter.ErrReservationNotFound), "the deleted capability's hold: err = %v, want ErrReservationNotFound", err)
 	u, err := f.Usage.GetUsage(f.Ctx, f.root)
-	expect.That(t, !(err != nil || u.ReservedAmount != 0), "root after deleting its child = %+v, %v; want nothing held", u, err)
+	expect.That(t, err == nil && u.ReservedAmount == 0, "root after deleting its child = %+v, %v; want nothing held", u, err)
 	b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
-	expect.That(t, !(err != nil || b.ReservedAmount != 0), "tenant after deleting the child = %+v, %v; want nothing held", b, err)
+	expect.That(t, err == nil && b.ReservedAmount == 0, "tenant after deleting the child = %+v, %v; want nothing held", b, err)
 }
 
 // GetTenantBudget, SetTenantBudget and ListTenantBudgets read one row; each
@@ -1202,13 +1202,13 @@ func checkTenantBudgetReads(t *testing.T, f fixture) {
 	})
 	expect.Must(t, err == nil, "%v", err)
 	got, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
-	expect.Must(t, !(err != nil || got.ReservedAmount != held || got.ResourceVersion == 0), "GetTenantBudget = %+v, %v; want %v held and a version", got, err, held)
+	expect.Must(t, err == nil && got.ReservedAmount == held && got.ResourceVersion != 0, "GetTenantBudget = %+v, %v; want %v held and a version", got, err, held)
 	set, err := f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{
 		TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: tenantBudget, UnitCode: unit}, ExpectedVersion: got.ResourceVersion,
 	})
 	// The version is an opaque token: a write changes it, and it is never 0
 	// once a ceiling is set — nothing says by how much it moves.
-	expect.That(t, !(err != nil || set.ReservedAmount != held || set.ResourceVersion == got.ResourceVersion || set.ResourceVersion == 0), "SetTenantBudget = %+v, %v; want %v held and a new version", set, err, held)
+	expect.That(t, err == nil && set.ReservedAmount == held && set.ResourceVersion != got.ResourceVersion && set.ResourceVersion != 0, "SetTenantBudget = %+v, %v; want %v held and a new version", set, err, held)
 	// Nothing is spent and the period is open-ended; every other field holds
 	// a value, so one the store does not keep reads back unset.
 	open := []string{"Ceiling.Unlimited", "SpentAmount", "PeriodEnd"}
@@ -1229,7 +1229,7 @@ func checkTenantBudgetReads(t *testing.T, f fixture) {
 	listed := listedPage.Items
 	expect.Must(t, err == nil, "%v", err)
 	i := slices.IndexFunc(listed, func(s meter.TenantBudget) bool { return s.TenantID == f.Tenant })
-	expect.Must(t, !(i < 0), "ListTenantBudgets left out the tenant: %+v", listed)
+	expect.Must(t, i >= 0, "ListTenantBudgets left out the tenant: %+v", listed)
 	diff := sameTenantBudget(listed[i], set)
 	expect.That(t, diff == "", "listed budget = %+v, SetTenantBudget returned %+v: %s", listed[i], set, diff)
 }
@@ -1296,7 +1296,7 @@ func checkHoldDatesTenantBudget(t *testing.T, f fixture) {
 	err = f.Usage.Release(f.Ctx, meter.ReleaseRequest{Subject: f.childSubject(), ReservationID: r.ID})
 	expect.Must(t, err == nil, "%v", err)
 	b, err = f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
-	expect.That(t, !(err != nil || !b.UpdatedAt.Equal(f.Now())), "after the release the aggregate is dated %s, %v; want %s", b.UpdatedAt, err, f.Now())
+	expect.That(t, err == nil && b.UpdatedAt.Equal(f.Now()), "after the release the aggregate is dated %s, %v; want %s", b.UpdatedAt, err, f.Now())
 }
 
 // checkHoldWithinCapability holds a store to ending a hold no later than its
@@ -1376,8 +1376,7 @@ func reserveUnder(t *testing.T, f fixture, copies []limes.CopyCeiling, capID uui
 // budget has a Max; every other field of the hold holds a value, so one the
 // store does not keep reads back unset.
 func checkReservedHold(t *testing.T, f fixture, first meter.Reservation, copies []limes.CopyCeiling) {
-	expect.That(t, !(first.CapabilityID != f.child || first.TenantID != f.Tenant || first.Amount != reservedHold ||
-		first.Op != "llm" || first.Actor != "agent" || len(first.Copies) != 1 || !sameCeiling(first.Copies[0].Budget, copies[0].Budget)), "Reserve returned %+v; want the whole hold, copies with their budgets alone", first)
+	expect.That(t, first.CapabilityID == f.child && first.TenantID == f.Tenant && first.Amount == reservedHold && first.Op == "llm" && first.Actor == "agent" && len(first.Copies) == 1 && sameCeiling(first.Copies[0].Budget, copies[0].Budget), "Reserve returned %+v; want the whole hold, copies with their budgets alone", first)
 	unset, want := fields.Unset(first), []string{"Copies[0].Budget.Unlimited"}
 	expect.That(t, slices.Equal(unset, want), "Reserve returned %+v with %v unset, want only %v", first, unset, want)
 	got, err := f.Usage.GetReservation(f.Ctx, first.ID)
@@ -1413,7 +1412,7 @@ func checkHoldSettledByItsCopy(t *testing.T, f fixture, first meter.Reservation,
 	_, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: byCopy, ReservationID: first.ID, Amount: reservedHold}, nil)
 	expect.Must(t, err == nil, "%v", err)
 	r, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: byCopy, ReservationID: first.ID, Amount: reservedHold}, nil)
-	expect.That(t, !(err != nil || !r.Replayed), "the copy settling its hold again = %+v, %v; want the replay", r, err)
+	expect.That(t, err == nil && r.Replayed, "the copy settling its hold again = %+v, %v; want the replay", r, err)
 	another := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: unit, copies: other})
 	_, err = f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: another, ReservationID: first.ID, Amount: reservedHold}, nil)
 	expect.That(t, errors.Is(err, meter.ErrReservationNotFound), "another copy settling a settled hold: err = %v, want ErrReservationNotFound, not the receipt", err)
@@ -1461,7 +1460,7 @@ func checkCopyCountersGo(t *testing.T, f fixture) {
 	}
 	deleted := []byte("copy-deleted")
 	got := counted(f.child, deleted)
-	expect.Must(t, !(len(got) != 1 || got[0].CapabilityID != f.child), "copy usage = %+v; want one copy counting for %s", got, f.child)
+	expect.Must(t, len(got) == 1 && got[0].CapabilityID == f.child, "copy usage = %+v; want one copy counting for %s", got, f.child)
 	err := f.Usage.DeleteUsage(f.Ctx, meter.DeleteUsageRequest{CapabilityID: f.child})
 	expect.Must(t, err == nil, "%v", err)
 	got = f.copyUsage(t, reader, f.child, deleted)
@@ -1520,7 +1519,7 @@ func checkCopySharedID(t *testing.T, f fixture) {
 	err = f.Usage.DeleteUsage(theirCtx, meter.DeleteUsageRequest{CapabilityID: theirCap})
 	expect.Must(t, err == nil, "%v", err)
 	got := f.copyUsage(t, reader, f.child, shared[0].RevocationID)
-	expect.That(t, !(len(got) != 1 || got[0].CapabilityID != f.child || got[0].RequestCount != requests || got[0].SpentAmount != one), "the copy after the other capability's refund and DeleteUsage = %+v; want %d request and %v spent, untouched", got, requests, one)
+	expect.That(t, len(got) == 1 && got[0].CapabilityID == f.child && got[0].RequestCount == requests && got[0].SpentAmount == one, "the copy after the other capability's refund and DeleteUsage = %+v; want %d request and %v spent, untouched", got, requests, one)
 	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: mine})
 	expect.That(t, errors.Is(err, limes.ErrRequestLimitExceeded), "a request past the copy's ceiling after the other capability's DeleteUsage: err = %v, want ErrRequestLimitExceeded", err)
 }
@@ -1551,13 +1550,13 @@ func checkCopyQuota(t *testing.T, f fixture) {
 	expect.Must(t, err == nil, "Bump of %d copies, the quota: %v", quota, err)
 	past := slices.Concat(full[:1], copies("past-", 1))
 	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: subject(past)})
-	expect.That(t, !(!errors.Is(err, meter.ErrCopyLimitExceeded) || !errors.Is(err, limes.ErrRequestLimitExceeded)), "Bump of a copy past the quota: err = %v, want ErrCopyLimitExceeded, matching ErrRequestLimitExceeded", err)
+	expect.That(t, errors.Is(err, meter.ErrCopyLimitExceeded) && errors.Is(err, limes.ErrRequestLimitExceeded), "Bump of a copy past the quota: err = %v, want ErrCopyLimitExceeded, matching ErrRequestLimitExceeded", err)
 	_, err = f.Usage.Charge(f.Ctx, meter.ChargeRequest{Subject: subject(past), Amount: one}, nil)
 	expect.That(t, errors.Is(err, meter.ErrCopyLimitExceeded), "Charge of a copy past the quota: err = %v, want ErrCopyLimitExceeded", err)
 	_, err = f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: subject(past), Amount: one})
 	expect.That(t, errors.Is(err, meter.ErrCopyLimitExceeded), "Reserve of a copy past the quota: err = %v, want ErrCopyLimitExceeded", err)
 	u, err := f.Usage.GetUsage(f.Ctx, capID)
-	expect.That(t, !(err != nil || u.RequestCount != 1 || u.SpentAmount != 0 || u.ReservedAmount != 0), "usage after the refused calls = %+v, %v; want only the first request counted", u, err)
+	expect.That(t, err == nil && u.RequestCount == 1 && u.SpentAmount == 0 && u.ReservedAmount == 0, "usage after the refused calls = %+v, %v; want only the first request counted", u, err)
 	_, err = f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: subject(full[:1])})
 	expect.That(t, err == nil, "Bump of a copy already counted, at the quota: %v", err)
 	err = f.Usage.DeleteUsage(f.Ctx, meter.DeleteUsageRequest{CapabilityID: capID})
@@ -1673,16 +1672,16 @@ func checkCopyOverrun(t *testing.T, f fixture) {
 	expect.Must(t, errors.Is(err, limes.ErrBudgetExceeded), "rejecting charge past the copy's budget: err = %v, want ErrBudgetExceeded", err)
 	// The copy is checked first, but its refusal must not leave the
 	// capability's chain charged.
-	expect.Must(t, !(f.spent(t, f.child) != 0 || f.spent(t, f.root) != 0 || f.tenantSpent(t) != 0), "a charge refused at the copy's budget moved the chain: child %v, root %v, tenant %v", f.spent(t, f.child), f.spent(t, f.root), f.tenantSpent(t))
+	expect.Must(t, f.spent(t, f.child) == 0 && f.spent(t, f.root) == 0 && f.tenantSpent(t) == 0, "a charge refused at the copy's budget moved the chain: child %v, root %v, tenant %v", f.spent(t, f.child), f.spent(t, f.root), f.tenantSpent(t))
 	r, err := f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{copies: copies}), Amount: 2 * one, Overrun: meter.OverrunPolicyRecord}, nil)
-	expect.Must(t, !(err != nil || !r.Overrun), "recording charge = %+v, %v; want an overrun", r, err)
+	expect.Must(t, err == nil && r.Overrun, "recording charge = %+v, %v; want an overrun", r, err)
 	reader, ok := f.Usage.(meter.CopyUsageReader)
 	if !ok {
 		return // a Meter that does not read copies back is checked no further
 	}
 	res, err := reader.CopyUsage(f.Ctx, meter.CopyUsageRequest{CapabilityID: f.child, RevocationIDs: [][]byte{copyID}})
 	got := res.Copies
-	expect.That(t, !(err != nil || len(got) != 1 || got[0].SpentAmount != 2*one), "copy usage = %+v, %v; want 2 spent", got, err)
+	expect.That(t, err == nil && len(got) == 1 && got[0].SpentAmount == 2*one, "copy usage = %+v, %v; want 2 spent", got, err)
 }
 
 // checkSumsExactly holds a store to exact amounts: a tenth and two tenths fit
@@ -1746,7 +1745,7 @@ func checkAncestorCeiling(t *testing.T, f fixture) {
 	// 15 + 15 is within each child's 20, past the root's 25.
 	_, err = f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: sibling}), Amount: 15 * one}, nil)
 	expect.Must(t, errors.Is(err, limes.ErrBudgetExceeded), "a sibling's charge past the root's ceiling: err = %v, want ErrBudgetExceeded", err)
-	expect.That(t, !(f.spent(t, sibling) != 0 || f.spent(t, f.root) != 15*one), "a charge refused by an ancestor's ceiling moved spend")
+	expect.That(t, f.spent(t, sibling) == 0 && f.spent(t, f.root) == 15*one, "a charge refused by an ancestor's ceiling moved spend")
 }
 
 // checkAncestorRequests holds Bump to an ancestor's request ceiling: a child
@@ -1814,7 +1813,7 @@ func checkStaleVersion(t *testing.T, f fixture) {
 	err = set(tenantBudget + 2*one)
 	expect.That(t, errors.Is(err, meter.ErrTenantBudgetVersionMismatch), "a write at a stale version: err = %v, want ErrTenantBudgetVersionMismatch", err)
 	got, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
-	expect.That(t, !(err != nil || got.Ceiling != (limes.BudgetCeiling{Max: tenantBudget + one, UnitCode: unit})), "after a stale write the ceiling = %v, %v; want %s", got.Ceiling, err, tenantBudget+one)
+	expect.That(t, err == nil && got.Ceiling == (limes.BudgetCeiling{Max: tenantBudget + one, UnitCode: unit}), "after a stale write the ceiling = %v, %v; want %s", got.Ceiling, err, tenantBudget+one)
 }
 
 // checkZeroCeilings holds a store to a ceiling of 0 allowing nothing — on
@@ -1835,7 +1834,7 @@ func checkZeroCeilings(t *testing.T, f fixture) {
 	expect.Must(t, err == nil, "%v", err)
 	_, err = f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: under}), Amount: cent}, nil)
 	expect.That(t, errors.Is(err, limes.ErrBudgetExceeded), "a charge under an ancestor's budget of 0: err = %v, want ErrBudgetExceeded", err)
-	expect.That(t, !(f.spent(t, f.child) != 0 || f.spent(t, under) != 0 || f.tenantSpent(t) != 0), "a charge refused by a ceiling of 0 moved spend")
+	expect.That(t, f.spent(t, f.child) == 0 && f.spent(t, under) == 0 && f.tenantSpent(t) == 0, "a charge refused by a ceiling of 0 moved spend")
 
 	b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
 	expect.Must(t, err == nil, "%v", err)
@@ -1854,10 +1853,10 @@ func checkRelease(t *testing.T, f fixture) {
 	expect.Must(t, err == nil, "%v", err)
 	for _, id := range []uuid.UUID{f.child, f.root} {
 		u, err := f.Usage.GetUsage(f.Ctx, id)
-		expect.That(t, !(err == nil && u.ReservedAmount != 0), "%s still holds %s after Release", id, u.ReservedAmount)
+		expect.That(t, err != nil || u.ReservedAmount == 0, "%s still holds %s after Release", id, u.ReservedAmount)
 	}
 	b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
-	expect.That(t, !(err != nil || b.ReservedAmount != 0), "the tenant still holds %s after Release, %v", b.ReservedAmount, err)
+	expect.That(t, err == nil && b.ReservedAmount == 0, "the tenant still holds %s after Release, %v", b.ReservedAmount, err)
 	_, err = f.charge(meter.ChargeRequest{Amount: 10 * one}, nil)
 	expect.That(t, err == nil, "a charge the released hold made room for: %v", err)
 }
@@ -1877,7 +1876,7 @@ func checkReleaseIsTheOwners(t *testing.T, f fixture) {
 		_, err := f.Usage.GetReservation(f.Ctx, r.ID)
 		expect.That(t, err == nil, "after a release by %s: GetReservation = %v, want the hold", by, err)
 		u, err := f.Usage.GetUsage(f.Ctx, f.child)
-		expect.That(t, !(err != nil || u.ReservedAmount != held), "after a release by %s: the child holds %+v, %v; want %s", by, u, err, held)
+		expect.That(t, err == nil && u.ReservedAmount == held, "after a release by %s: the child holds %+v, %v; want %s", by, u, err, held)
 	}
 	sibling := []limes.CopyCeiling{{RevocationID: []byte("sibling"), Budget: &limes.BudgetCeiling{Max: childBudget, UnitCode: unit}}}
 	for name, subject := range map[string]limes.MeterSubject{
@@ -1887,7 +1886,7 @@ func checkReleaseIsTheOwners(t *testing.T, f fixture) {
 		"no copy":            f.childSubject(),
 	} {
 		err := f.Usage.Release(f.Ctx, meter.ReleaseRequest{Subject: subject, ReservationID: r.ID})
-		expect.That(t, !(err != nil && !errors.Is(err, limes.ErrScopeMismatch)), "a release by %s: %v", name, err)
+		expect.That(t, err == nil || errors.Is(err, limes.ErrScopeMismatch), "a release by %s: %v", name, err)
 		stillHeld(name)
 	}
 	err = f.Usage.Release(f.Ctx, meter.ReleaseRequest{ReservationID: r.ID})
@@ -1898,7 +1897,7 @@ func checkReleaseIsTheOwners(t *testing.T, f fixture) {
 	_, err = f.Usage.GetReservation(f.Ctx, r.ID)
 	expect.That(t, errors.Is(err, meter.ErrReservationNotFound), "after the owner's release: GetReservation = %v, want ErrReservationNotFound", err)
 	u, err := f.Usage.GetUsage(f.Ctx, f.child)
-	expect.That(t, !(err != nil || u.ReservedAmount != 0), "after the owner's release: the child holds %+v, %v; want nothing", u, err)
+	expect.That(t, err == nil && u.ReservedAmount == 0, "after the owner's release: the child holds %+v, %v; want nothing", u, err)
 }
 
 // checkResetKeepsHolds holds a store to ResetSpend resetting the spend only:
@@ -1914,7 +1913,7 @@ func checkResetKeepsHolds(t *testing.T, f fixture) {
 	})
 	expect.Must(t, err == nil, "%v", err)
 	b, err = f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
-	expect.That(t, !(err != nil || b.ReservedAmount != held), "after a reset the tenant holds %s, %v; want %s", b.ReservedAmount, err, held)
+	expect.That(t, err == nil && b.ReservedAmount == held, "after a reset the tenant holds %s, %v; want %s", b.ReservedAmount, err, held)
 	other, err := f.newCapability(uuid.Nil(), unlimitedBudget)
 	expect.Must(t, err == nil, "%v", err)
 	// 10 held + 25 is past the tenant's 30.
@@ -1943,12 +1942,12 @@ func checkSettleAboveHold(t *testing.T, f fixture) {
 	r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: subject, Amount: childBudget - one})
 	expect.Must(t, err == nil, "%v", err)
 	got, err := f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: subject, ReservationID: r.ID, Amount: childBudget}, nil)
-	expect.Must(t, !(err != nil || got.Overrun), "settling the whole ceiling over a hold just under it = %+v, %v; want accepted, no overrun", got, err)
+	expect.Must(t, err == nil && !got.Overrun, "settling the whole ceiling over a hold just under it = %+v, %v; want accepted, no overrun", got, err)
 	spent := f.spent(t, f.child)
 	expect.That(t, spent == childBudget, "the child spent %s, want %s", spent, childBudget)
 	for _, id := range []uuid.UUID{f.child, f.root} {
 		u, err := f.Usage.GetUsage(f.Ctx, id)
-		expect.That(t, !(err != nil || u.ReservedAmount != 0), "%s holds %v after the settle, %v; want nothing", id, u.ReservedAmount, err)
+		expect.That(t, err == nil && u.ReservedAmount == 0, "%s holds %v after the settle, %v; want nothing", id, u.ReservedAmount, err)
 	}
 }
 
@@ -2043,7 +2042,7 @@ func checkUnclampedRanking(t *testing.T, f fixture) {
 		return slices.IndexFunc(page.Items, func(r meter.TenantBudget) bool { return r.TenantID == tenant })
 	}
 	fi, ni := at(further.tenant), at(nearer.tenant)
-	expect.That(t, !(fi < 0 || ni < 0 || fi > ni), "listed the tenant at 300%% at %d and the one at 200%% at %d; want the further first", fi, ni)
+	expect.That(t, fi >= 0 && ni >= 0 && fi <= ni, "listed the tenant at 300%% at %d and the one at 200%% at %d; want the further first", fi, ni)
 }
 
 // checkThresholdBoundary holds ThresholdBasisPoints to spent / max ≥
@@ -2109,7 +2108,7 @@ func checkExactRanking(t *testing.T, f fixture) {
 		return slices.IndexFunc(page.Items, func(r meter.TenantBudget) bool { return r.TenantID == tenant })
 	}
 	fi, ni := at(further.tenant), at(nearer.tenant)
-	expect.That(t, !(fi < 0 || ni < 0 || fi > ni), "listed a nano past a third at %d and a third at %d; want the further first", fi, ni)
+	expect.That(t, fi >= 0 && ni >= 0 && fi <= ni, "listed a nano past a third at %d and a third at %d; want the further first", fi, ni)
 }
 
 // checkHousekeepingBatches holds ReleaseExpired and PurgeOrphans to their
@@ -2125,7 +2124,7 @@ func checkHousekeepingBatches(t *testing.T, f fixture) {
 	}
 	f.Advance(time.Hour)
 	r, err := f.Usage.ReleaseExpired(f.Ctx, meter.ReleaseExpiredRequest{Limit: batch})
-	expect.That(t, !(err != nil || r.Released != batch), "ReleaseExpired with a limit of %d = %+v, %v", batch, r, err)
+	expect.That(t, err == nil && r.Released == batch, "ReleaseExpired with a limit of %d = %+v, %v", batch, r, err)
 	if f.DeleteCapability == nil {
 		return
 	}
@@ -2142,7 +2141,7 @@ func checkHousekeepingBatches(t *testing.T, f fixture) {
 		expect.Must(t, err == nil, "%v", err)
 	}
 	purged, err := f.Usage.PurgeOrphans(f.Ctx, meter.PurgeOrphansRequest{Limit: batch})
-	expect.That(t, !(err != nil || purged.Purged != batch), "PurgeOrphans with a limit of %d = %+v, %v", batch, purged, err)
+	expect.That(t, err == nil && purged.Purged == batch, "PurgeOrphans with a limit of %d = %+v, %v", batch, purged, err)
 }
 
 // checkCopySettleRefund holds a store's copy counters to following Settle and
@@ -2164,7 +2163,7 @@ func checkCopySettleRefund(t *testing.T, f fixture) {
 	expect.Must(t, err == nil, "%v", err)
 	res, err := reader.CopyUsage(f.Ctx, meter.CopyUsageRequest{CapabilityID: f.child, RevocationIDs: [][]byte{copyID}})
 	got := res.Copies
-	expect.That(t, !(err != nil || len(got) != 1 || got[0].SpentAmount != 2*one || got[0].ReservedAmount != 0), "the copy after a settle of 3 and a refund of 1 = %+v, %v; want 2 spent, nothing held", got, err)
+	expect.That(t, err == nil && len(got) == 1 && got[0].SpentAmount == 2*one && got[0].ReservedAmount == 0, "the copy after a settle of 3 and a refund of 1 = %+v, %v; want 2 spent, nothing held", got, err)
 }
 
 // checkTenantCeiling holds a store to the tenant aggregate: capabilities each
@@ -2177,7 +2176,7 @@ func checkTenantCeiling(t *testing.T, f fixture) {
 	// 20 + 20 is within each root's 25, past the tenant's 30.
 	_, err = f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: other, budget: budgetOf(rootBudget)}), Amount: 20 * one}, nil)
 	expect.Must(t, errors.Is(err, limes.ErrTenantBudgetExceeded), "a charge past the tenant's ceiling: err = %v, want ErrTenantBudgetExceeded", err)
-	expect.That(t, !(f.spent(t, other) != 0 || f.tenantSpent(t) != 20*one), "a charge refused by the tenant's ceiling moved spend")
+	expect.That(t, f.spent(t, other) == 0 && f.tenantSpent(t) == 20*one, "a charge refused by the tenant's ceiling moved spend")
 }
 
 // checkCallbackRollback holds a store to the atomicity of onCharged: its
@@ -2187,12 +2186,12 @@ func checkCallbackRollback(t *testing.T, f fixture) {
 	boom := errors.New("side effect failed")
 	_, err := f.charge(meter.ChargeRequest{Amount: one, ExternalRef: "call-1"}, func(context.Context, meter.Charged) error { return boom })
 	expect.Must(t, errors.Is(err, boom), "charge with a failing callback: err = %v, want the callback's", err)
-	expect.That(t, !(f.spent(t, f.child) != 0 || f.spent(t, f.root) != 0 || f.tenantSpent(t) != 0), "a charge whose callback failed moved spend")
+	expect.That(t, f.spent(t, f.child) == 0 && f.spent(t, f.root) == 0 && f.tenantSpent(t) == 0, "a charge whose callback failed moved spend")
 	_, err = f.Usage.ChargeByRef(f.Ctx, meter.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: "call-1"})
 	expect.That(t, errors.Is(err, meter.ErrChargeNotFound), "the failed charge's ref: err = %v, want ErrChargeNotFound", err)
 	// The ref is free again: a retry charges.
 	r, err := f.charge(meter.ChargeRequest{Amount: one, ExternalRef: "call-1"}, nil)
-	expect.That(t, !(err != nil || r.Replayed), "the retry = %+v, %v; want a fresh charge", r, err)
+	expect.That(t, err == nil && !r.Replayed, "the retry = %+v, %v; want a fresh charge", r, err)
 
 	res, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{
 		Subject: f.childSubject(),
@@ -2222,8 +2221,7 @@ func checkCallbackSeesTheReceipt(t *testing.T, f fixture) {
 	same := func(how string, got meter.ChargeReceipt) {
 		t.Helper()
 		expect.Must(t, runs == 1, "%s: onCharged ran %d times, want once", how, runs)
-		expect.That(t, !(seen.ChargeID == uuid.Nil() || seen.ChargeID != got.ChargeID || seen.SpentAmount != got.SpentAmount ||
-			seen.Overrun != got.Overrun || seen.Replayed || seen.TenantID != got.TenantID || seen.UnitCode != got.UnitCode), "%s: onCharged saw %+v, the call returned %+v", how, seen, got)
+		expect.That(t, seen.ChargeID != uuid.Nil() && seen.ChargeID == got.ChargeID && seen.SpentAmount == got.SpentAmount && seen.Overrun == got.Overrun && !seen.Replayed && seen.TenantID == got.TenantID && seen.UnitCode == got.UnitCode, "%s: onCharged saw %+v, the call returned %+v", how, seen, got)
 		runs = 0
 	}
 
@@ -2238,7 +2236,7 @@ func checkCallbackSeesTheReceipt(t *testing.T, f fixture) {
 	same("a settle", got)
 
 	got, err = f.charge(meter.ChargeRequest{Amount: childBudget, Overrun: meter.OverrunPolicyRecord}, onCharged)
-	expect.Must(t, !(err != nil || !got.Overrun), "a charge past the ceiling = %+v, %v; want it recorded as an overrun", got, err)
+	expect.Must(t, err == nil && got.Overrun, "a charge past the ceiling = %+v, %v; want it recorded as an overrun", got, err)
 	same("an overrun", got)
 }
 
@@ -2252,7 +2250,7 @@ func checkBump(t *testing.T, f fixture) {
 	}
 	for want := int64(1); want <= limit; want++ {
 		n, err := bump()
-		expect.Must(t, !(err != nil || n != want), "bump = %d, %v; want %d", n, err, want)
+		expect.Must(t, err == nil && n == want, "bump = %d, %v; want %d", n, err, want)
 	}
 	_, err := bump()
 	expect.Must(t, errors.Is(err, limes.ErrRequestLimitExceeded), "a bump past the limit: err = %v, want ErrRequestLimitExceeded", err)
@@ -2260,7 +2258,7 @@ func checkBump(t *testing.T, f fixture) {
 	// shows the counters in it rather than in none.
 	for _, id := range []uuid.UUID{f.child, f.root} {
 		u, err := f.Usage.GetUsage(f.Ctx, id)
-		expect.That(t, !(err != nil || u.RequestCount != limit || u.UnitCode != unit), "usage of %s = %+v, %v; want %d requests in %s", id, u, err, limit, unit)
+		expect.That(t, err == nil && u.RequestCount == limit && u.UnitCode == unit, "usage of %s = %+v, %v; want %d requests in %s", id, u, err, limit, unit)
 	}
 }
 
@@ -2269,28 +2267,34 @@ func checkBump(t *testing.T, f fixture) {
 func checkRefund(t *testing.T, f fixture) {
 	r, err := f.charge(meter.ChargeRequest{Amount: 3 * one}, nil)
 	expect.Must(t, err == nil, "%v", err)
-	expect.That(t, !(r.TenantID != f.Tenant || r.UnitCode != unit), "charge receipt names tenant %s in %q, want %s in %q", r.TenantID, r.UnitCode, f.Tenant, unit)
+	expect.That(t, r.TenantID == f.Tenant && r.UnitCode == unit, "charge receipt names tenant %s in %q, want %s in %q", r.TenantID, r.UnitCode, f.Tenant, unit)
 	refund := func(amount limes.Nanos) (meter.RefundReceipt, error) {
 		return f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Amount: amount})
 	}
 	got, err := refund(one)
-	expect.Must(t, !(err != nil || got.Amount != one || got.ChargeID != r.ChargeID ||
-		got.TenantID != f.Tenant || got.UnitCode != unit), "partial refund = %+v, %v; want 1 of charge %s, tenant %s in %q", got, err, r.ChargeID, f.Tenant, unit)
+	expect.Must(t, err == nil && got.Amount == one && got.ChargeID == r.ChargeID && got.TenantID == f.Tenant && got.UnitCode == unit, "partial refund = %+v, %v; want 1 of charge %s, tenant %s in %q", got, err, r.ChargeID, f.Tenant, unit)
 	_, err = refund(3 * one)
 	expect.That(t, errors.Is(err, meter.ErrRefundExceedsCharge), "refunding past what is left: err = %v, want ErrRefundExceedsCharge", err)
-	for name, req := range map[string]meter.RefundRequest{
-		"neither an amount nor Remaining": {ChargeID: r.ChargeID},
-		"an amount and Remaining":         {ChargeID: r.ChargeID, Amount: one, Remaining: true},
-	} {
-		_, err := f.Usage.Refund(f.Ctx, req)
-		expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "refund of %s: err = %v, want ErrInvalidRequest", name, err)
-	}
+	checkRefundRefusesMalformed(t, f, r.ChargeID)
 	for range 2 { // the rest, then nothing: a full refund is idempotent
 		_, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Remaining: true})
 		expect.Must(t, err == nil, "full refund: %v", err)
 	}
-	expect.That(t, !(f.spent(t, f.child) != 0 || f.spent(t, f.root) != 0 || f.tenantSpent(t) != 0), "a full refund left spend on a counter the charge moved")
-	_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: uuid.New(), Remaining: true})
+	expect.That(t, f.spent(t, f.child) == 0 && f.spent(t, f.root) == 0 && f.tenantSpent(t) == 0, "a full refund left spend on a counter the charge moved")
+}
+
+// checkRefundRefusesMalformed holds Refund to refusing a request naming
+// neither an amount nor Remaining, or both, as ErrInvalidRequest, and a
+// charge not on record as ErrChargeNotFound.
+func checkRefundRefusesMalformed(t *testing.T, f fixture, charge uuid.UUID) {
+	for name, req := range map[string]meter.RefundRequest{
+		"neither an amount nor Remaining": {ChargeID: charge},
+		"an amount and Remaining":         {ChargeID: charge, Amount: one, Remaining: true},
+	} {
+		_, err := f.Usage.Refund(f.Ctx, req)
+		expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "refund of %s: err = %v, want ErrInvalidRequest", name, err)
+	}
+	_, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: uuid.New(), Remaining: true})
 	expect.That(t, errors.Is(err, meter.ErrChargeNotFound), "refund of an unknown charge: err = %v, want ErrChargeNotFound", err)
 }
 
@@ -2336,7 +2340,7 @@ func checkExpiry(t *testing.T, f fixture) {
 	_, err = f.charge(meter.ChargeRequest{Amount: 10 * one}, nil)
 	expect.That(t, errors.Is(err, limes.ErrBudgetExceeded), "before ReleaseExpired the hold still counts: err = %v, want ErrBudgetExceeded", err)
 	r, err := f.Usage.ReleaseExpired(f.Ctx, meter.ReleaseExpiredRequest{})
-	expect.Must(t, !(err != nil || r.Released != 1), "ReleaseExpired = %+v, %v; want 1 released", r, err)
+	expect.Must(t, err == nil && r.Released == 1, "ReleaseExpired = %+v, %v; want 1 released", r, err)
 	_, err = f.Usage.GetReservation(f.Ctx, long.ID)
 	expect.That(t, err == nil, "ReleaseExpired released a hold that has not expired: %v", err)
 	_, err = f.charge(meter.ChargeRequest{Amount: 10 * one}, nil)
@@ -2352,10 +2356,10 @@ func checkListTenantBudgets(t *testing.T, f fixture) {
 	// does not advance fails here rather than looping forever.
 	const listed = 1 + tiedTenants + 2
 	order, all := listTenantBudgetsOneByOne(t, f, listed)
-	expect.Must(t, !(!all[f.Tenant] || !all[unlimited] || !all[frozen]), "paging skipped a tenant: %v", all)
+	expect.Must(t, all[f.Tenant] && all[unlimited] && all[frozen], "paging skipped a tenant: %v", all)
 	want := listed
 	expect.That(t, len(order) == want, "listed %d tenants, want %d", len(order), want)
-	expect.That(t, !(order[0].TenantID != frozen || order[len(order)-1].TenantID != unlimited), "listed %s first and %s last; want the ceiling of 0 %s first and the unlimited %s last", order[0].TenantID, order[len(order)-1].TenantID, frozen, unlimited)
+	expect.That(t, order[0].TenantID == frozen && order[len(order)-1].TenantID == unlimited, "listed %s first and %s last; want the ceiling of 0 %s first and the unlimited %s last", order[0].TenantID, order[len(order)-1].TenantID, frozen, unlimited)
 	checkRiskOrder(t, order)
 	checkAtOrPastFilter(t, f, frozen, unlimited)
 	checkUnlimitedFilter(t, f, unlimited)
@@ -2409,11 +2413,11 @@ func listTenantBudgetsOneByOne(t *testing.T, f fixture, listed int) ([]meter.Ten
 	var order []meter.TenantBudget
 	cursor := ""
 	for page := 0; ; page++ {
-		expect.Must(t, !(page > listed), "paging did not end after %d pages of one tenant each", listed)
+		expect.Must(t, page <= listed, "paging did not end after %d pages of one tenant each", listed)
 		pagePage, err := f.Usage.ListTenantBudgets(f.listCtx(), meter.ListTenantBudgetsRequest{Limit: 1, Cursor: cursor})
 		page, next := pagePage.Items, pagePage.Next
 		expect.Must(t, err == nil, "%v", err)
-		expect.Must(t, !(len(page) > 1), "a page of %d rows under a limit of 1", len(page))
+		expect.Must(t, len(page) <= 1, "a page of %d rows under a limit of 1", len(page))
 		for _, row := range page {
 			expect.That(t, !(all[row.TenantID]), "tenant %s listed twice while nothing was spent", row.TenantID)
 			all[row.TenantID] = true
@@ -2447,10 +2451,9 @@ func checkAtOrPastFilter(t *testing.T, f fixture, frozen, unlimited uuid.UUID) {
 	const half = 50
 	riskyPage, err := f.Usage.ListTenantBudgets(f.listCtx(), meter.ListTenantBudgetsRequest{Filter: meter.TenantBudgetFilterAtOrPast, ThresholdBasisPoints: half * basisPointsPerPercent})
 	risky := riskyPage.Items
-	expect.That(t, !(err != nil || len(risky) != 2 || risky[0].TenantID != frozen || risky[1].TenantID != f.Tenant || riskyPct(risky[1]) != half), "tenants at 50%% or more = %+v, %v; want %s, at a ceiling of 0, then %s at 50%%", risky, err, frozen, f.Tenant)
+	expect.That(t, err == nil && len(risky) == 2 && risky[0].TenantID == frozen && risky[1].TenantID == f.Tenant && riskyPct(risky[1]) == half, "tenants at 50%% or more = %+v, %v; want %s, at a ceiling of 0, then %s at 50%%", risky, err, frozen, f.Tenant)
 	ceiled, err := f.Usage.ListTenantBudgets(f.listCtx(), meter.ListTenantBudgetsRequest{Filter: meter.TenantBudgetFilterAtOrPast})
-	expect.That(t, !(err != nil || slices.ContainsFunc(ceiled.Items, func(s meter.TenantBudget) bool { return s.TenantID == unlimited }) ||
-		!slices.ContainsFunc(ceiled.Items, func(s meter.TenantBudget) bool { return s.TenantID == f.Tenant })), "tenants with a ceiling = %+v, %v; want %s and not %s", ceiled.Items, err, f.Tenant, unlimited)
+	expect.That(t, err == nil && !slices.ContainsFunc(ceiled.Items, func(s meter.TenantBudget) bool { return s.TenantID == unlimited }) && slices.ContainsFunc(ceiled.Items, func(s meter.TenantBudget) bool { return s.TenantID == f.Tenant }), "tenants with a ceiling = %+v, %v; want %s and not %s", ceiled.Items, err, f.Tenant, unlimited)
 }
 
 // checkUnlimitedFilter holds TenantBudgetFilterUnlimited to the tenants
@@ -2458,8 +2461,7 @@ func checkAtOrPastFilter(t *testing.T, f fixture, frozen, unlimited uuid.UUID) {
 func checkUnlimitedFilter(t *testing.T, f fixture, unlimited uuid.UUID) {
 	unlPage, err := f.Usage.ListTenantBudgets(f.listCtx(), meter.ListTenantBudgetsRequest{Filter: meter.TenantBudgetFilterUnlimited})
 	unl := unlPage.Items
-	expect.That(t, !(err != nil || slices.ContainsFunc(unl, func(s meter.TenantBudget) bool { return s.TenantID == f.Tenant }) ||
-		!slices.ContainsFunc(unl, func(s meter.TenantBudget) bool { return s.TenantID == unlimited })), "unlimited tenants = %+v, %v; want %s and not %s", unl, err, unlimited, f.Tenant)
+	expect.That(t, err == nil && !slices.ContainsFunc(unl, func(s meter.TenantBudget) bool { return s.TenantID == f.Tenant }) && slices.ContainsFunc(unl, func(s meter.TenantBudget) bool { return s.TenantID == unlimited }), "unlimited tenants = %+v, %v; want %s and not %s", unl, err, unlimited, f.Tenant)
 }
 
 // checkFiltersPaged holds each filter, paged one row at a time, to exactly
@@ -2484,7 +2486,7 @@ func checkFiltersPaged(t *testing.T, f fixture, order []meter.TenantBudget, unli
 		expect.That(t, slices.Equal(got, c.want), "tenants %s, a page of one at a time = %v, want %v", name, got, c.want)
 	}
 	named, err := f.Usage.ListTenantBudgets(f.listCtx(), meter.ListTenantBudgetsRequest{Filter: meter.TenantBudgetFilterAll, Limit: listed})
-	expect.Must(t, !(err != nil || len(named.Items) != len(order)), "every tenant, by name = %d rows, %v; want %d", len(named.Items), err, len(order))
+	expect.Must(t, err == nil && len(named.Items) == len(order), "every tenant, by name = %d rows, %v; want %d", len(named.Items), err, len(order))
 	for i, row := range named.Items {
 		expect.That(t, row.TenantID == order[i].TenantID, "every tenant, by name: row %d is %s, want %s as with no filter", i, row.TenantID, order[i].TenantID)
 	}
@@ -2497,7 +2499,7 @@ func listedOneByOne(t *testing.T, f fixture, req meter.ListTenantBudgetsRequest,
 	var got []uuid.UUID
 	req.Limit = 1
 	for page := 0; ; page++ {
-		expect.Must(t, !(page > pages), "paging %+v did not end after %d pages of one tenant each", req, pages)
+		expect.Must(t, page <= pages, "paging %+v did not end after %d pages of one tenant each", req, pages)
 		rows, err := f.Usage.ListTenantBudgets(f.listCtx(), req)
 		expect.Must(t, err == nil, "%v", err)
 		for _, row := range rows.Items {
@@ -2569,7 +2571,7 @@ func checkDefaultReservationTTL(t *testing.T, f fixture) {
 	}
 	defaulted, explicit := reserve(0), reserve(meter.DefaultReservationTTL)
 	gap := explicit.Sub(defaulted)
-	expect.That(t, !(gap < 0 || gap > clockSlack), "a hold with no TTL expires at %v, %v before one of DefaultReservationTTL; want within %v", defaulted, gap, clockSlack)
+	expect.That(t, gap >= 0 && gap <= clockSlack, "a hold with no TTL expires at %v, %v before one of DefaultReservationTTL; want within %v", defaulted, gap, clockSlack)
 }
 
 // checkReservationsPage holds a store to paging a capability's reservations
@@ -2664,11 +2666,11 @@ func checkPurgeOrphans(t *testing.T, f fixture) {
 	err = f.DeleteCapability(f.child)
 	expect.Must(t, err == nil, "%v", err)
 	got, err := f.Usage.PurgeOrphans(f.Ctx, meter.PurgeOrphansRequest{})
-	expect.Must(t, !(err != nil || got.Purged < 1), "PurgeOrphans = %+v, %v; want the removed capability's row", got, err)
+	expect.Must(t, err == nil && got.Purged >= 1, "PurgeOrphans = %+v, %v; want the removed capability's row", got, err)
 	_, err = f.Usage.GetUsage(f.Ctx, f.child)
 	expect.That(t, errors.Is(err, meter.ErrUsageNotFound), "the removed capability's usage outlived PurgeOrphans: %v", err)
 	u, err := f.Usage.GetUsage(f.Ctx, f.root)
-	expect.That(t, !(err != nil || u.ReservedAmount != 0), "the root still holds %v for its removed child, %v; want 0", u.ReservedAmount, err)
+	expect.That(t, err == nil && u.ReservedAmount == 0, "the root still holds %v for its removed child, %v; want 0", u.ReservedAmount, err)
 }
 
 // checkNotOnRecord holds a store to refusing a capability whose record is
@@ -2692,7 +2694,7 @@ func checkNotOnRecord(t *testing.T, f fixture) {
 	_, err = f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: subject, Amount: one})
 	expect.That(t, errors.Is(err, limes.ErrNotFound), "a hold of a capability not on record: err = %v, want ErrNotFound", err)
 	u, err := f.Usage.GetUsage(f.Ctx, f.root)
-	expect.That(t, !(err == nil && (u.SpentAmount != 0 || u.RequestCount != 0)), "the root counted %+v for a child not on record", u)
+	expect.That(t, err != nil || u.SpentAmount == 0 && u.RequestCount == 0, "the root counted %+v for a child not on record", u)
 }
 
 // riskyPct is a row's utilization, or -1 for a tenant with no ceiling, which
@@ -2756,9 +2758,9 @@ func checkPeriodEnd(t *testing.T, f fixture) {
 		set, err := f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{
 			TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: tenantBudget, UnitCode: unit}, PeriodEnd: want, ExpectedVersion: cur.ResourceVersion,
 		})
-		expect.Must(t, !(err != nil || !set.PeriodEnd.Equal(want)), "SetTenantBudget(PeriodEnd %v) = %v, %v", want, set.PeriodEnd, err)
+		expect.Must(t, err == nil && set.PeriodEnd.Equal(want), "SetTenantBudget(PeriodEnd %v) = %v, %v", want, set.PeriodEnd, err)
 		got, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
-		expect.That(t, !(err != nil || !got.PeriodEnd.Equal(want)), "GetTenantBudget after PeriodEnd %v = %v, %v", want, got.PeriodEnd, err)
+		expect.That(t, err == nil && got.PeriodEnd.Equal(want), "GetTenantBudget after PeriodEnd %v = %v, %v", want, got.PeriodEnd, err)
 	}
 }
 
@@ -2815,10 +2817,10 @@ func checkSettleWithinHold(t *testing.T, f fixture) {
 	expect.That(t, !(got.Overrun), "a settle below its hold reported an overrun")
 	for name, id := range map[string]uuid.UUID{"child": f.child, "root": f.root} {
 		u, err := f.Usage.GetUsage(f.Ctx, id)
-		expect.That(t, !(err != nil || u.ReservedAmount != one), "%s after the settle = %+v, %v; want only the other hold, %v", name, u, err, one)
+		expect.That(t, err == nil && u.ReservedAmount == one, "%s after the settle = %+v, %v; want only the other hold, %v", name, u, err, one)
 	}
 	b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
-	expect.That(t, !(err != nil || b.ReservedAmount != one), "tenant after the settle = %+v, %v; want only the other hold, %v", b, err, one)
+	expect.That(t, err == nil && b.ReservedAmount == one, "tenant after the settle = %+v, %v; want only the other hold, %v", b, err, one)
 	expect.That(t, f.spent(t, f.child) == actual, "child spent %v, want %v", f.spent(t, f.child), actual)
 
 	// A tenant ceiling lowered under a hold refuses nothing the hold covers.
@@ -3021,32 +3023,55 @@ func checkEraseTenantUsage(t *testing.T, f fixture) {
 	expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "EraseTenantUsage naming no tenant: err = %v, want ErrInvalidRequest", err)
 	err = eraser.EraseTenantUsage(f.Ctx, req)
 	expect.Must(t, err == nil, "EraseTenantUsage: %v", err)
+	checkTenantUsageGone(t, f, charged.ChargeID, held.ID, copyID)
+	checkOtherTenantUsageKept(t, f, theirCtx, other, theirCap, theirCharge.ChargeID)
+	checkMeteringAfterErase(t, f)
+	u, err := f.Usage.GetUsage(f.Ctx, f.child)
+	expect.That(t, errors.Is(err, meter.ErrUsageNotFound), "usage after metering an erased tenant = %+v, %v; want ErrUsageNotFound", u, err)
+	_, err = f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
+	expect.That(t, errors.Is(err, meter.ErrTenantBudgetNotFound), "GetTenantBudget after metering an erased tenant: err = %v, want ErrTenantBudgetNotFound", err)
+	_, err = f.Usage.Bump(theirCtx, meter.BumpRequest{Subject: theirSubject})
+	expect.That(t, err == nil, "another tenant's request after the erase: %v", err)
+}
+
+// checkTenantUsageGone holds an erase to leaving nothing of the tenant's
+// usage: its counters, its charge, under its ref too, its hold, its budget
+// and its copy's counters.
+func checkTenantUsageGone(t *testing.T, f fixture, charge, hold uuid.UUID, copyID []byte) {
 	for _, id := range []uuid.UUID{f.root, f.child} {
 		u, err := f.Usage.GetUsage(f.Ctx, id)
 		expect.That(t, errors.Is(err, meter.ErrUsageNotFound), "usage of %s after the erase = %+v, %v; want ErrUsageNotFound", id, u, err)
 	}
-	_, err = f.Usage.GetCharge(f.Ctx, charged.ChargeID)
+	_, err := f.Usage.GetCharge(f.Ctx, charge)
 	expect.That(t, errors.Is(err, meter.ErrChargeNotFound), "GetCharge after the erase: err = %v, want ErrChargeNotFound", err)
 	_, err = f.Usage.ChargeByRef(f.Ctx, meter.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: "erased"})
 	expect.That(t, errors.Is(err, meter.ErrChargeNotFound), "ChargeByRef after the erase: err = %v, want ErrChargeNotFound", err)
-	_, err = f.Usage.GetReservation(f.Ctx, held.ID)
+	_, err = f.Usage.GetReservation(f.Ctx, hold)
 	expect.That(t, errors.Is(err, meter.ErrReservationNotFound), "GetReservation after the erase: err = %v, want ErrReservationNotFound", err)
 	_, err = f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
 	expect.That(t, errors.Is(err, meter.ErrTenantBudgetNotFound), "GetTenantBudget after the erase: err = %v, want ErrTenantBudgetNotFound", err)
 	if copies, ok := f.Usage.(meter.CopyUsageReader); ok {
 		got, err := copies.CopyUsage(f.Ctx, meter.CopyUsageRequest{CapabilityID: f.child, RevocationIDs: [][]byte{copyID}})
-		expect.That(t, !(err != nil || len(got.Copies) != 0), "CopyUsage after the erase = %+v, %v; want no copy", got, err)
+		expect.That(t, err == nil && len(got.Copies) == 0, "CopyUsage after the erase = %+v, %v; want no copy", got, err)
 	}
+}
+
+// checkOtherTenantUsageKept holds an erase to leaving another tenant's
+// usage, charge and budget alone.
+func checkOtherTenantUsageKept(t *testing.T, f fixture, theirCtx context.Context, other, theirCap, theirCharge uuid.UUID) {
 	u, err := f.Usage.GetUsage(theirCtx, theirCap)
-	expect.That(t, !(err != nil || u.SpentAmount != one), "another tenant's usage after the erase = %+v, %v; want %v spent", u, err, one)
-	_, err = f.Usage.GetCharge(theirCtx, theirCharge.ChargeID)
+	expect.That(t, err == nil && u.SpentAmount == one, "another tenant's usage after the erase = %+v, %v; want %v spent", u, err, one)
+	_, err = f.Usage.GetCharge(theirCtx, theirCharge)
 	expect.That(t, err == nil, "another tenant's charge after the erase: %v", err)
 	b, err := f.Usage.GetTenantBudget(theirCtx, other)
-	expect.That(t, !(err != nil || b.SpentAmount != one), "another tenant's budget after the erase = %+v, %v; want %v spent", b, err, one)
+	expect.That(t, err == nil && b.SpentAmount == one, "another tenant's budget after the erase = %+v, %v; want %v spent", b, err, one)
+}
 
-	// A call made after the erase — a request verified before it, a late
-	// cost — counts nothing of the tenant again: its capabilities are
-	// still on record, revoked, but no row of it comes back.
+// checkMeteringAfterErase holds a call made after the erase — a request
+// verified before it, a late cost — to counting nothing of the tenant
+// again: its capabilities are still on record, revoked, but no row of it
+// comes back.
+func checkMeteringAfterErase(t *testing.T, f fixture) {
 	afterErase := map[string]func() error{
 		"Bump": func() error {
 			_, err := f.Usage.Bump(f.Ctx, meter.BumpRequest{Subject: f.childSubject()})
@@ -3073,14 +3098,8 @@ func checkEraseTenantUsage(t *testing.T, f fixture) {
 	}
 	for name, call := range afterErase {
 		err := call()
-		expect.That(t, !(!errors.Is(err, limes.ErrTenantErased) || !errors.Is(err, limes.ErrRevoked)), "%s after the erase: err = %v, want ErrTenantErased, matching ErrRevoked", name, err)
+		expect.That(t, errors.Is(err, limes.ErrTenantErased) && errors.Is(err, limes.ErrRevoked), "%s after the erase: err = %v, want ErrTenantErased, matching ErrRevoked", name, err)
 	}
-	u, err = f.Usage.GetUsage(f.Ctx, f.child)
-	expect.That(t, errors.Is(err, meter.ErrUsageNotFound), "usage after metering an erased tenant = %+v, %v; want ErrUsageNotFound", u, err)
-	_, err = f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
-	expect.That(t, errors.Is(err, meter.ErrTenantBudgetNotFound), "GetTenantBudget after metering an erased tenant: err = %v, want ErrTenantBudgetNotFound", err)
-	_, err = f.Usage.Bump(theirCtx, meter.BumpRequest{Subject: theirSubject})
-	expect.That(t, err == nil, "another tenant's request after the erase: %v", err)
 }
 
 // sumWindow is how far either side of a check's clock SumCharges looks when
@@ -3105,21 +3124,26 @@ func checkSumCharges(t *testing.T, f fixture) {
 	other := seedSumCharges(t, f)
 	from, to := f.sumPeriod()
 	checkSumChargesGrouped(t, f, from, to)
-	// The top one, then the rest after its cursor.
-	req := meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: to, GroupBy: []meter.ChargeDimension{meter.ChargeDimensionCapability}, Limit: 1}
-	first, err := f.Ledger.SumCharges(f.Ctx, req)
-	expect.Must(t, !(err != nil || len(first.Items) != 1 || first.Items[0].CapabilityID != f.root || first.Next == ""), "the first page of one = %+v, %v; want the root and a cursor", first, err)
-	req.Cursor = first.Next
-	second, err := f.Ledger.SumCharges(f.Ctx, req)
-	expect.That(t, !(err != nil || len(second.Items) != 1 || second.Items[0].CapabilityID != f.child || second.Next != ""), "the page after it = %+v, %v; want the child, and the last page", second, err)
+	checkSumChargesPaged(t, f, from, to)
 	// A period that ends before the charges holds none of them.
 	page, err := f.Ledger.SumCharges(f.Ctx, meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: from.Add(time.Second)})
-	expect.That(t, !(err != nil || len(page.Items) != 0), "SumCharges of a period before the charges = %+v, %v; want none", page, err)
+	expect.That(t, err == nil && len(page.Items) == 0, "SumCharges of a period before the charges = %+v, %v; want none", page, err)
 	checkSumChargesRefusesMalformed(t, f, from, to)
 	if f.ScopesTenants {
 		_, err := f.Ledger.SumCharges(f.tenantCtx(other), meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: to})
 		expect.That(t, errors.Is(err, limes.ErrScopeMismatch), "SumCharges under another tenant's context: err = %v, want ErrScopeMismatch", err)
 	}
+}
+
+// checkSumChargesPaged holds SumCharges to the top group, then the rest
+// after its cursor.
+func checkSumChargesPaged(t *testing.T, f fixture, from, to time.Time) {
+	req := meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: to, GroupBy: []meter.ChargeDimension{meter.ChargeDimensionCapability}, Limit: 1}
+	first, err := f.Ledger.SumCharges(f.Ctx, req)
+	expect.Must(t, err == nil && len(first.Items) == 1 && first.Items[0].CapabilityID == f.root && first.Next != "", "the first page of one = %+v, %v; want the root and a cursor", first, err)
+	req.Cursor = first.Next
+	second, err := f.Ledger.SumCharges(f.Ctx, req)
+	expect.That(t, err == nil && len(second.Items) == 1 && second.Items[0].CapabilityID == f.child && second.Next == "", "the page after it = %+v, %v; want the child, and the last page", second, err)
 }
 
 // seedSumCharges charges 7 to another tenant, which it returns, and to the
@@ -3272,7 +3296,7 @@ func sumEvery(t *testing.T, f fixture, from, to time.Time, req meter.SumChargesR
 func checkEachTenantSum(t *testing.T, f fixture, from, to time.Time, want []meter.ChargeSum) {
 	for _, w := range want {
 		page, err := f.Ledger.SumCharges(f.tenantCtx(w.TenantID), meter.SumChargesRequest{TenantID: w.TenantID, From: from, To: to})
-		expect.That(t, !(err != nil || len(page.Items) != 1 || page.Items[0].Charged != w.Charged || page.Items[0].Charges != w.Charges), "SumCharges of tenant %s = %+v, %v; want %s in %d charges, as across tenants", w.TenantID, page.Items, err, w.Charged, w.Charges)
+		expect.That(t, err == nil && len(page.Items) == 1 && page.Items[0].Charged == w.Charged && page.Items[0].Charges == w.Charges, "SumCharges of tenant %s = %+v, %v; want %s in %d charges, as across tenants", w.TenantID, page.Items, err, w.Charged, w.Charges)
 	}
 }
 
@@ -3319,7 +3343,7 @@ func checkAllChargeSums(t *testing.T, f fixture, from, to time.Time, tenants int
 		walked = append(walked, sum)
 	}
 	whole := sumEvery(t, f, from, to, meter.SumChargesRequest{GroupBy: req.GroupBy})
-	expect.That(t, !(len(whole) != tenants*2 || !reflect.DeepEqual(walked, whole)), "AllChargeSums a row at a time = %+v, want the page %+v", walked, whole)
+	expect.That(t, len(whole) == tenants*2 && reflect.DeepEqual(walked, whole), "AllChargeSums a row at a time = %+v, want the page %+v", walked, whole)
 }
 
 // SumCharges orders sums by amount, not by their digits: sums of different
@@ -3356,7 +3380,7 @@ func checkSumChargesOrderByAmount(t *testing.T, f fixture) {
 		t.Helper()
 		req.TenantID, req.From, req.To, req.GroupBy = f.Tenant, from, to, []meter.ChargeDimension{meter.ChargeDimensionActor}
 		page, err := f.Ledger.SumCharges(f.Ctx, req)
-		expect.That(t, !(err != nil || page.Next != "" || !sameSums(page.Items, want)), "SumCharges by %s = %+v, %q, %v; want %+v on one page", req.Bucket, page.Items, page.Next, err, want)
+		expect.That(t, err == nil && page.Next == "" && sameSums(page.Items, want), "SumCharges by %s = %+v, %q, %v; want %+v on one page", req.Bucket, page.Items, page.Next, err, want)
 		req.Limit = 1
 		var walked []meter.ChargeSum
 		for range len(want) + 1 {
@@ -3433,24 +3457,31 @@ func checkSumChargeBuckets(t *testing.T, f fixture) {
 			{BucketStart: before, UnitCode: unit, Charged: 2 * one, Charges: 1},
 			{BucketStart: midnight, UnitCode: unit, Charged: 3 * one, Charges: 1},
 		}
-		expect.That(t, !(err != nil || !sameSums(page.Items, want)), "SumCharges by %s = %+v, %v; want %+v", b, page.Items, err, want)
+		expect.That(t, err == nil && sameSums(page.Items, want), "SumCharges by %s = %+v, %v; want %+v", b, page.Items, err, want)
 	}
 	// No bucket, named or left zero, sums the period whole.
 	for _, b := range []meter.ChargeBucket{meter.ChargeBucketNone, 0} {
 		page, err := f.Ledger.SumCharges(f.Ctx, meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: to, Bucket: b})
 		want := []meter.ChargeSum{{UnitCode: unit, Charged: 5 * one, Charges: 2}}
-		expect.That(t, !(err != nil || !sameSums(page.Items, want)), "SumCharges by %s = %+v, %v; want %+v", b, page.Items, err, want)
+		expect.That(t, err == nil && sameSums(page.Items, want), "SumCharges by %s = %+v, %v; want %+v", b, page.Items, err, want)
 	}
+	checkMonthBuckets(t, f, from, to, midnight)
+}
+
+// checkMonthBuckets holds SumCharges by month to a bucket for the month
+// from starts in and one for the month of midnight.
+func checkMonthBuckets(t *testing.T, f fixture, from, to, midnight time.Time) {
 	page, err := f.Ledger.SumCharges(f.Ctx, meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: to, Bucket: meter.ChargeBucketMonth})
 	months := map[time.Time]bool{}
 	for _, s := range page.Items {
 		months[s.BucketStart] = true
 	}
+	y, m, _ := from.UTC().Date()
 	want := map[time.Time]bool{
 		time.Date(y, m, 1, 0, 0, 0, 0, time.UTC):                              true,
 		time.Date(midnight.Year(), midnight.Month(), 1, 0, 0, 0, 0, time.UTC): true,
 	}
-	expect.That(t, !(err != nil || !reflect.DeepEqual(months, want)), "SumCharges by month = %+v, %v; want the months %v", page.Items, err, want)
+	expect.That(t, err == nil && reflect.DeepEqual(months, want), "SumCharges by month = %+v, %v; want the months %v", page.Items, err, want)
 }
 
 // A week bucket is an ISO week: a charge a microsecond before Monday 00:00
@@ -3477,7 +3508,7 @@ func checkSumChargeWeeks(t *testing.T, f fixture) {
 		{BucketStart: monday.AddDate(0, 0, -7), UnitCode: unit, Charged: 2 * one, Charges: 1},
 		{BucketStart: monday, UnitCode: unit, Charged: 3 * one, Charges: 1},
 	}
-	expect.That(t, !(err != nil || !sameSums(page.Items, want)), "SumCharges by week = %+v, %v; want %+v", page.Items, err, want)
+	expect.That(t, err == nil && sameSums(page.Items, want), "SumCharges by week = %+v, %v; want %+v", page.Items, err, want)
 }
 
 // sameSums compares sums, their bucket starts as instants.
@@ -3501,7 +3532,7 @@ func checkSumChargesPeriodEdges(t *testing.T, f fixture) {
 		"To at the charge":   {at.Add(-time.Second), at, nil},
 	} {
 		page, err := f.Ledger.SumCharges(f.Ctx, meter.SumChargesRequest{TenantID: f.Tenant, From: tc.from, To: tc.to})
-		expect.That(t, !(err != nil || !sameSums(page.Items, tc.want)), "%s: SumCharges = %+v, %v; want %+v", name, page.Items, err, tc.want)
+		expect.That(t, err == nil && sameSums(page.Items, tc.want), "%s: SumCharges = %+v, %v; want %+v", name, page.Items, err, tc.want)
 	}
 }
 
@@ -3524,7 +3555,7 @@ func checkSumChargesLateRefund(t *testing.T, f fixture) {
 		TenantID: f.Tenant, From: from, To: midnight.Add(time.Second), Bucket: meter.ChargeBucketDay,
 	})
 	want := []meter.ChargeSum{{BucketStart: midnight.AddDate(0, 0, -1), UnitCode: unit, Charged: 3 * one, Refunded: one, Charges: 1}}
-	expect.That(t, !(err != nil || !sameSums(page.Items, want)), "SumCharges by day = %+v, %v; want %+v", page.Items, err, want)
+	expect.That(t, err == nil && sameSums(page.Items, want), "SumCharges by day = %+v, %v; want %+v", page.Items, err, want)
 }
 
 // A sum past MaxNanos is ErrCounterOverflow, never a wrapped or clipped
@@ -3553,7 +3584,7 @@ func checkSumChargesOverflow(t *testing.T, f fixture) {
 	expect.That(t, errors.Is(err, meter.ErrCounterOverflow), "SumCharges of the whole period = %+v, %v; want ErrCounterOverflow", page.Items, err)
 	req.GroupBy = []meter.ChargeDimension{meter.ChargeDimensionCapability}
 	page, err = f.Ledger.SumCharges(f.Ctx, req)
-	expect.Must(t, !(err != nil || len(page.Items) != charges), "SumCharges by capability = %+v, %v; want %d sums", page.Items, err, charges)
+	expect.Must(t, err == nil && len(page.Items) == charges, "SumCharges by capability = %+v, %v; want %d sums", page.Items, err, charges)
 	for _, s := range page.Items {
 		expect.That(t, s.Charged == limes.MaxNanos, "a capability's sum = %+v, want %v charged", s, limes.MaxNanos)
 	}
@@ -3565,7 +3596,7 @@ func checkTenantBudgetNotFound(t *testing.T, f fixture) {
 	other, err := f.newTenant()
 	expect.Must(t, err == nil, "NewTenant: %v", err)
 	b, err := f.Usage.GetTenantBudget(f.tenantCtx(other), other)
-	expect.That(t, !(!errors.Is(err, meter.ErrTenantBudgetNotFound) || !errors.Is(err, limes.ErrNotFound)), "GetTenantBudget of a tenant with no row = %+v, %v; want ErrTenantBudgetNotFound", b, err)
+	expect.That(t, errors.Is(err, meter.ErrTenantBudgetNotFound) && errors.Is(err, limes.ErrNotFound), "GetTenantBudget of a tenant with no row = %+v, %v; want ErrTenantBudgetNotFound", b, err)
 }
 
 func sameSums(got, want []meter.ChargeSum) bool {
@@ -3608,7 +3639,7 @@ func checkPurgeCharges(t *testing.T, f fixture) {
 	_, err := f.Usage.Settle(f.Ctx, p.settle, nil)
 	expect.That(t, errors.Is(err, meter.ErrReservationNotFound), "a settle of a hold whose charge is purged: err = %v, want ErrReservationNotFound", err)
 	page, err := f.Ledger.SumCharges(f.Ctx, meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: from.Add(3 * purgeStep)})
-	expect.That(t, !(err != nil || len(page.Items) != 0), "SumCharges of the purged charges' period = %+v, %v; want nothing", page.Items, err)
+	expect.That(t, err == nil && len(page.Items) == 0, "SumCharges of the purged charges' period = %+v, %v; want nothing", page.Items, err)
 }
 
 // purgedCharges are the charges checkPurgeCharges purges, a purgeStep
@@ -3666,7 +3697,7 @@ func chargeKept(t *testing.T, f fixture, what string, id uuid.UUID, want bool) {
 	t.Helper()
 	_, err := f.Usage.GetCharge(f.Ctx, id)
 	got := err == nil
-	expect.That(t, !(got != want || (!want && !errors.Is(err, meter.ErrChargeNotFound))), "%s: GetCharge = %v; want kept %v, or ErrChargeNotFound", what, err, want)
+	expect.That(t, got == want && (want || errors.Is(err, meter.ErrChargeNotFound)), "%s: GetCharge = %v; want kept %v, or ErrChargeNotFound", what, err, want)
 }
 
 // checkPurgeBatches holds PurgeCharges to keeping a charge exactly the
@@ -3690,7 +3721,7 @@ func checkPurgeBatches(t *testing.T, f fixture, housekeeping meter.LedgerHouseke
 	expect.That(t, n == 0, "a batch with nothing older purged %d", n)
 	chargeKept(t, f, "the settled charge, younger than the retention", p.settled.ChargeID, true)
 	got, err := f.Usage.Settle(f.Ctx, p.settle, nil)
-	expect.That(t, !(err != nil || !got.Replayed), "a settle replayed while its charge is kept = %+v, %v; want the receipt, replayed", got, err)
+	expect.That(t, err == nil && got.Replayed, "a settle replayed while its charge is kept = %+v, %v; want the receipt, replayed", got, err)
 }
 
 // checkPurgedPromises holds a purged charge's promises to going with it:
@@ -3701,7 +3732,7 @@ func checkPurgedPromises(t *testing.T, f fixture, p purgedCharges) {
 	expect.That(t, errors.Is(err, meter.ErrChargeNotFound), "ChargeByRef of a purged charge: err = %v, want ErrChargeNotFound", err)
 	// Its reference charges anew: a charge of its own, no replay.
 	again, err := f.charge(meter.ChargeRequest{Subject: f.childSubject(), Amount: one, ExternalRef: "purge-1"}, nil)
-	expect.That(t, !(err != nil || again.Replayed || again.ChargeID == p.first.ChargeID), "the purged charge's reference again = %+v, %v; want a new charge, not replayed", again, err)
+	expect.That(t, err == nil && !again.Replayed && again.ChargeID != p.first.ChargeID, "the purged charge's reference again = %+v, %v; want a new charge, not replayed", again, err)
 	if f.ScopesTenants {
 		_, err := f.Usage.GetCharge(p.otherCtx, p.otherCharge)
 		expect.That(t, err == nil, "another tenant's charge after a purge under Tenant's scope: %v; want it kept", err)
