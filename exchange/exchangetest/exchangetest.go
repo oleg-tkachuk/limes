@@ -48,25 +48,9 @@ func TestSubjectVerifier(t *testing.T, v exchange.SubjectVerifier, tokens Tokens
 	if tokens.Valid == nil {
 		t.Fatal("exchangetest: Tokens.Valid required")
 	}
-	t.Run("reads a valid token", func(t *testing.T) {
-		token, want := tokens.Valid(t)
-		got, err := v.VerifySubject(t.Context(), token)
-		if err != nil {
-			t.Fatalf("VerifySubject: %v", err)
-		}
-		if got.Issuer != want.Issuer || got.Subject != want.Subject || got.ClientID != want.ClientID ||
-			!slices.Equal(got.Audience, want.Audience) || !got.ExpiresAt.Equal(want.ExpiresAt) || got.JKT != want.JKT {
-			t.Errorf("subject %+v, want %+v", got, want)
-		}
-	})
+	t.Run("reads a valid token", func(t *testing.T) { testReadsValid(t, v, tokens.Valid) })
 	if tokens.Bound != nil {
-		t.Run("reads the binding", func(t *testing.T) {
-			token, jkt := tokens.Bound(t)
-			got, err := v.VerifySubject(t.Context(), token)
-			if err != nil || got.JKT != jkt {
-				t.Errorf("subject %+v, %v; want bound to %s", got, err, jkt)
-			}
-		})
+		t.Run("reads the binding", func(t *testing.T) { testReadsBinding(t, v, tokens.Bound) })
 	}
 	refusals := map[string]func(t *testing.T) string{
 		"refuses an expired token":         tokens.Expired,
@@ -77,13 +61,45 @@ func TestSubjectVerifier(t *testing.T, v exchange.SubjectVerifier, tokens Tokens
 		"refuses an empty token":           func(*testing.T) string { return "" },
 	}
 	for name, mint := range refusals {
-		t.Run(name, func(t *testing.T) {
-			if mint == nil {
-				t.Skip("exchangetest: no such token minted")
-			}
-			if _, err := v.VerifySubject(t.Context(), mint(t)); !errors.Is(err, exchange.ErrInvalidGrant) {
-				t.Errorf("err = %v, want exchange.ErrInvalidGrant", err)
-			}
-		})
+		t.Run(name, func(t *testing.T) { testRefuses(t, v, mint) })
+	}
+}
+
+// testReadsValid holds v to reading a valid token as the issuer wrote it.
+func testReadsValid(t *testing.T, v exchange.SubjectVerifier, valid func(t *testing.T) (string, exchange.Subject)) {
+	token, want := valid(t)
+	got, err := v.VerifySubject(t.Context(), token)
+	if err != nil {
+		t.Fatalf("VerifySubject: %v", err)
+	}
+	if !sameSubject(got, want) {
+		t.Errorf("subject %+v, want %+v", got, want)
+	}
+}
+
+// sameSubject reports whether got is want in every member the Exchanger
+// reads: issuer, subject, client, audience, expiry and binding.
+func sameSubject(got, want exchange.Subject) bool {
+	return got.Issuer == want.Issuer && got.Subject == want.Subject && got.ClientID == want.ClientID &&
+		slices.Equal(got.Audience, want.Audience) && got.ExpiresAt.Equal(want.ExpiresAt) && got.JKT == want.JKT
+}
+
+// testReadsBinding holds v to reading the key a bound token is bound to.
+func testReadsBinding(t *testing.T, v exchange.SubjectVerifier, bound func(t *testing.T) (string, string)) {
+	token, jkt := bound(t)
+	got, err := v.VerifySubject(t.Context(), token)
+	if err != nil || got.JKT != jkt {
+		t.Errorf("subject %+v, %v; want bound to %s", got, err, jkt)
+	}
+}
+
+// testRefuses holds v to refusing the token mint makes with
+// exchange.ErrInvalidGrant; a nil mint is skipped.
+func testRefuses(t *testing.T, v exchange.SubjectVerifier, mint func(t *testing.T) string) {
+	if mint == nil {
+		t.Skip("exchangetest: no such token minted")
+	}
+	if _, err := v.VerifySubject(t.Context(), mint(t)); !errors.Is(err, exchange.ErrInvalidGrant) {
+		t.Errorf("err = %v, want exchange.ErrInvalidGrant", err)
 	}
 }

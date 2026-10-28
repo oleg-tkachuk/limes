@@ -94,70 +94,26 @@ func (e *Exchanger) Narrow(ctx context.Context, req NarrowRequest) (Result, erro
 
 // narrow is Narrow, and the parent once verified, for the log.
 func (e *Exchanger) narrow(ctx context.Context, req NarrowRequest) (Result, limes.Capability, error) {
-	switch {
-	case e.cfg.Capabilities == nil:
-		return Result{}, limes.Capability{}, errNoNarrowing
-	case req.Client.ID == "":
-		return Result{}, limes.Capability{}, fmt.Errorf("%w: a client with an id", ErrInvalidClient)
-	case req.SubjectToken == "":
-		return Result{}, limes.Capability{}, fmt.Errorf("%w: subject_token required", ErrInvalidRequest)
-	case len(req.Resources) == 0 && len(req.Audiences) == 0:
-		return Result{}, limes.Capability{}, fmt.Errorf("%w: a resource or an audience required", ErrInvalidTarget)
+	if err := e.checkNarrowRequest(req); err != nil {
+		return Result{}, limes.Capability{}, err
 	}
-	// The proof is the parent's only when the parent is bound; Verify
-	// ignores it otherwise, and it is read again below as a token
-	// request's.
-	verified, err := e.cfg.Capabilities.Verify(ctx, limes.VerifyRequest{
-		Token: req.SubjectToken, Audience: e.cfg.CapabilityAudience, DPoP: req.DPoP,
-	})
+	verified, err := e.verifyParent(ctx, req)
 	if err != nil {
-		if isRefusal(err) {
-			return Result{}, limes.Capability{}, err
-		}
-		if errors.Is(err, limes.ErrUnauthenticated) {
-			return Result{}, limes.Capability{}, fmt.Errorf("%w: %w", ErrInvalidGrant, err)
-		}
-		return Result{}, limes.Capability{}, fmt.Errorf("exchange: verify subject capability: %w", err)
+		return Result{}, limes.Capability{}, err
 	}
 	parent := verified.Capability()
-	targets := append(slices.Clone(req.Resources), req.Audiences...)
-	for _, aud := range targets {
-		if !slices.Contains(parent.Audience, aud) {
-			return Result{}, parent, fmt.Errorf("%w: %q is outside the parent's audience", ErrInvalidTarget, aud)
-		}
+	targets := targetsOf(req.Resources, req.Audiences)
+	if err := withinParent(targets, parent.Audience); err != nil {
+		return Result{}, parent, err
 	}
-
-	var checked dpop.CheckedProof
-	rebind := parent.ConfirmationJKT == "" && req.DPoP.JWT != ""
-	if rebind {
-		if e.cfg.DPoP == nil {
-			return Result{}, parent, fmt.Errorf("%w: this endpoint binds no capability to a key", dpop.ErrInvalid)
-		}
-		if checked, err = e.cfg.DPoP.CheckTokenRequest(ctx, dpop.TokenRequest{Proof: req.DPoP, Holder: req.Client.ID}); err != nil {
-			return Result{}, parent, err
-		}
-	}
-
-	child, err := e.cfg.NarrowPolicy(ctx, Narrowing{
-		Parent: verified, Client: req.Client, Resources: slices.Clone(req.Resources), Audiences: slices.Clone(req.Audiences),
-		Scopes: slices.Clone(req.Scopes), AuthorizationDetails: slices.Clone(req.AuthorizationDetails),
-	})
+	checked, rebind, err := e.checkRebind(ctx, req, parent)
 	if err != nil {
 		return Result{}, parent, err
 	}
-	if len(child.Audience) == 0 {
-		child.Audience = targets
+	child, err := e.child(ctx, req, verified, targets)
+	if err != nil {
+		return Result{}, parent, err
 	}
-	for _, aud := range child.Audience {
-		if !slices.Contains(targets, aud) {
-			return Result{}, parent, fmt.Errorf("%w: audience %q was not asked for", errPolicy, aud)
-		}
-	}
-	if child.ConfirmationJKT != "" {
-		return Result{}, parent, fmt.Errorf("%w: it binds the capability itself", errPolicy)
-	}
-	child.Parent = verified
-
 	if rebind {
 		// Recorded before the child exists, as for an exchange.
 		if err := e.cfg.DPoP.Record(ctx, checked); err != nil {
@@ -167,16 +123,90 @@ func (e *Exchanger) narrow(ctx context.Context, req NarrowRequest) (Result, lime
 	}
 	minted, err := e.cfg.Issuer.Delegate(ctx, child)
 	if err != nil {
-		// A parent that may delegate nothing more (gone, too deep, or
-		// granted without OpShare) is the subject token's fault.
-		if errors.Is(err, limes.ErrUnauthenticated) || errors.Is(err, limes.ErrCaveatViolation) {
-			return Result{}, parent, fmt.Errorf("%w: %w", ErrInvalidGrant, err)
+		return Result{}, parent, delegateError(err)
+	}
+	return resultOf(minted), parent, nil
+}
+
+// checkNarrowRequest refuses a narrowing this exchanger does not do, or one
+// without a client, a subject token or a target.
+func (e *Exchanger) checkNarrowRequest(req NarrowRequest) error {
+	switch {
+	case e.cfg.Capabilities == nil:
+		return errNoNarrowing
+	case req.Client.ID == "":
+		return fmt.Errorf("%w: a client with an id", ErrInvalidClient)
+	case req.SubjectToken == "":
+		return fmt.Errorf("%w: subject_token required", ErrInvalidRequest)
+	}
+	return requireTarget(req.Resources, req.Audiences)
+}
+
+// verifyParent verifies the capability narrowed. The proof is the parent's
+// only when the parent is bound; Verify ignores it otherwise, and it is read
+// again as a token request's.
+func (e *Exchanger) verifyParent(ctx context.Context, req NarrowRequest) (limes.VerifiedCapability, error) {
+	verified, err := e.cfg.Capabilities.Verify(ctx, limes.VerifyRequest{
+		Token: req.SubjectToken, Audience: e.cfg.CapabilityAudience, DPoP: req.DPoP,
+	})
+	switch {
+	case err == nil, isRefusal(err):
+		return verified, err
+	case errors.Is(err, limes.ErrUnauthenticated):
+		return verified, fmt.Errorf("%w: %w", ErrInvalidGrant, err)
+	}
+	return verified, fmt.Errorf("exchange: verify subject capability: %w", err)
+}
+
+// withinParent refuses a target outside the parent's audience.
+func withinParent(targets, audience []string) error {
+	for _, aud := range targets {
+		if !slices.Contains(audience, aud) {
+			return fmt.Errorf("%w: %q is outside the parent's audience", ErrInvalidTarget, aud)
 		}
-		return Result{}, parent, fmt.Errorf("exchange: delegate: %w", err)
 	}
-	tokenType := TokenTypeBearer
-	if minted.Capability.ConfirmationJKT != "" {
-		tokenType = TokenTypeDPoP
+	return nil
+}
+
+// checkRebind checks the proof of a request binding an unbound parent's
+// child to a key, as a token request's; rebind reports whether it does.
+func (e *Exchanger) checkRebind(ctx context.Context, req NarrowRequest, parent limes.Capability) (checked dpop.CheckedProof, rebind bool, err error) {
+	if parent.ConfirmationJKT != "" || req.DPoP.JWT == "" {
+		return dpop.CheckedProof{}, false, nil
 	}
-	return Result{Capability: minted.Capability, Token: minted.Token, TokenType: tokenType}, parent, nil
+	if e.cfg.DPoP == nil {
+		return dpop.CheckedProof{}, false, fmt.Errorf("%w: this endpoint binds no capability to a key", dpop.ErrInvalid)
+	}
+	checked, err = e.cfg.DPoP.CheckTokenRequest(ctx, dpop.TokenRequest{Proof: req.DPoP, Holder: req.Client.ID})
+	if err != nil {
+		return dpop.CheckedProof{}, false, err
+	}
+	return checked, true, nil
+}
+
+// child is the delegation the narrowing policy asks of verified, held to
+// the request's targets.
+func (e *Exchanger) child(ctx context.Context, req NarrowRequest, verified limes.VerifiedCapability, targets []string) (limes.DelegateRequest, error) {
+	child, err := e.cfg.NarrowPolicy(ctx, Narrowing{
+		Parent: verified, Client: req.Client, Resources: slices.Clone(req.Resources), Audiences: slices.Clone(req.Audiences),
+		Scopes: slices.Clone(req.Scopes), AuthorizationDetails: slices.Clone(req.AuthorizationDetails),
+	})
+	if err != nil {
+		return limes.DelegateRequest{}, err
+	}
+	if child.Audience, err = holdPolicy(child.Audience, child.ConfirmationJKT, targets); err != nil {
+		return limes.DelegateRequest{}, err
+	}
+	child.Parent = verified
+	return child, nil
+}
+
+// delegateError is a Delegate failure as the exchange answers it: a parent
+// that may delegate nothing more (gone, too deep, or granted without
+// OpShare) is the subject token's fault; anything else is the server's.
+func delegateError(err error) error {
+	if errors.Is(err, limes.ErrUnauthenticated) || errors.Is(err, limes.ErrCaveatViolation) {
+		return fmt.Errorf("%w: %w", ErrInvalidGrant, err)
+	}
+	return fmt.Errorf("exchange: delegate: %w", err)
 }
