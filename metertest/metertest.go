@@ -519,21 +519,35 @@ func checkRejectionMovesNothing(t *testing.T, f fixture) {
 }
 
 func checkExternalRefChargesOnce(t *testing.T, f fixture) {
-	// copyRequests is the request ceiling of the copy below: any, as a
-	// charge counts no requests.
-	const copyRequests = 10
 	fanOuts := 0
 	onCharged := func(context.Context, meter.Charged) error { fanOuts++; return nil }
 	first, err := f.charge(meter.ChargeRequest{Amount: 2 * one, ExternalRef: "call-1"}, onCharged)
 	expect.Must(t, !(err != nil || first.Replayed), "first charge = %+v, %v", first, err)
 	again, err := f.charge(meter.ChargeRequest{Amount: 2 * one, ExternalRef: "call-1"}, onCharged)
 	expect.Must(t, !(err != nil || !again.Replayed || again.ChargeID != first.ChargeID || again.SpentAmount != 2*one), "repeated charge = %+v, %v; want a replay of %s at spend 2", again, err, first.ChargeID)
-	// The same name for a different cost is the caller's bug; replaying the
-	// first receipt would hide it.
+	checkExternalRefConflicts(t, f, onCharged)
+	expect.That(t, fanOuts == 1, "onCharged ran %d times, want once", fanOuts)
+	// The name is per capability, and no name never deduplicates.
+	r, err := f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: f.root, budget: budgetOf(rootBudget)}), Amount: one, ExternalRef: "call-1"}, nil)
+	expect.That(t, !(err != nil || r.Replayed), "same ref on another capability = %+v, %v; want a fresh charge", r, err)
+	for range 2 {
+		r, err := f.charge(meter.ChargeRequest{Amount: one}, nil)
+		expect.That(t, !(err != nil || r.Replayed), "charge without a ref = %+v, %v; want a fresh charge", r, err)
+	}
+	got := f.spent(t, f.child)
+	expect.That(t, got == 4*one, "child spent %v, want 2 + 1 + 1", got)
+}
+
+// checkExternalRefConflicts holds the ref charged once to conflicting with
+// another cost of the same name: another amount — replaying the first
+// receipt would hide the caller's bug — or the same amount in another unit,
+// for another tenant, or under another Biscuit copy.
+func checkExternalRefConflicts(t *testing.T, f fixture, onCharged func(context.Context, meter.Charged) error) {
+	// copyRequests is the request ceiling of the copy below: any, as a
+	// charge counts no requests.
+	const copyRequests = 10
 	r, err := f.charge(meter.ChargeRequest{Amount: 5 * one, ExternalRef: "call-1"}, onCharged)
 	expect.Must(t, errors.Is(err, meter.ErrExternalRefConflict), "the ref again for another amount = %+v, %v; want ErrExternalRefConflict", r, err)
-	// So is the same name for the same amount in another unit or for
-	// another tenant: it names another cost all the same.
 	for name, subject := range map[string]limes.MeterSubject{
 		"in another unit":    newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: otherUnit}),
 		"for another tenant": newSubject(subjectSpec{capID: f.child, tenant: uuid.New(), budget: budgetOf(childBudget)}),
@@ -553,16 +567,6 @@ func checkExternalRefChargesOnce(t *testing.T, f fixture) {
 		// The conflict says which ref, not what the other charge was.
 		expect.That(t, !(err != nil && strings.Contains(err.Error(), f.Tenant.String())), "the ref again %s: the error names the first charge's tenant: %v", name, err)
 	}
-	expect.That(t, fanOuts == 1, "onCharged ran %d times, want once", fanOuts)
-	// The name is per capability, and no name never deduplicates.
-	r, err = f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: f.root, budget: budgetOf(rootBudget)}), Amount: one, ExternalRef: "call-1"}, nil)
-	expect.That(t, !(err != nil || r.Replayed), "same ref on another capability = %+v, %v; want a fresh charge", r, err)
-	for range 2 {
-		r, err := f.charge(meter.ChargeRequest{Amount: one}, nil)
-		expect.That(t, !(err != nil || r.Replayed), "charge without a ref = %+v, %v; want a fresh charge", r, err)
-	}
-	got := f.spent(t, f.child)
-	expect.That(t, got == 4*one, "child spent %v, want 2 + 1 + 1", got)
 }
 
 func checkExternalRefConcurrent(t *testing.T, f fixture) {
@@ -605,17 +609,31 @@ func checkChargeByRef(t *testing.T, f fixture) {
 	_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Amount: one})
 	expect.Must(t, err == nil, "%v", err)
 	got, err := f.Usage.ChargeByRef(f.Ctx, meter.ChargeByRefRequest{CapabilityID: f.child, ExternalRef: "call-1"})
-	expect.Must(t, !(err != nil || got.ID != r.ChargeID || got.CapabilityID != f.child || got.Amount != 3*one ||
-		got.RefundedAmount != one || got.ExternalRef != "call-1" || got.UnitCode != unit || got.Overrun ||
-		got.TenantID != f.Tenant || got.Op != chargedOp || got.Actor != actor || got.At.IsZero()), "ChargeByRef = %+v, %v; want charge %s of 3 with 1 refunded, for %s by %s in %s", got, err, r.ChargeID, chargedOp, actor, f.Tenant)
+	want := meter.ChargeRecord{
+		ID: r.ChargeID, CapabilityID: f.child, TenantID: f.Tenant, Amount: 3 * one, RefundedAmount: one,
+		UnitCode: unit, ExternalRef: "call-1", Op: chargedOp, Actor: actor,
+	}
+	expect.Must(t, err == nil && !got.At.IsZero() && reflect.DeepEqual(undated(got), want), "ChargeByRef = %+v, %v; want charge %s of 3 with 1 refunded, for %s by %s in %s", got, err, r.ChargeID, chargedOp, actor, f.Tenant)
 	byID, err := f.Usage.GetCharge(f.Ctx, r.ChargeID)
 	expect.That(t, !(err != nil || !reflect.DeepEqual(byID, got)), "GetCharge = %+v, %v; want what ChargeByRef read, %+v", byID, err, got)
-	_, err = f.Usage.GetCharge(f.Ctx, uuid.New())
+	checkChargeLookupsMiss(t, f)
+}
+
+// undated is c without the time it was charged at.
+func undated(c meter.ChargeRecord) meter.ChargeRecord {
+	c.At = time.Time{}
+	return c
+}
+
+// checkChargeLookupsMiss holds GetCharge and ChargeByRef to ErrChargeNotFound
+// for a charge not there, and ChargeByRef to ErrInvalidRequest for a request
+// that names no charge: the caller's bug, not a charge missing
+// (ChargeByRefRequest.Validate).
+func checkChargeLookupsMiss(t *testing.T, f fixture) {
+	_, err := f.Usage.GetCharge(f.Ctx, uuid.New())
 	expect.That(t, errors.Is(err, meter.ErrChargeNotFound), "GetCharge of an unknown id: err = %v, want ErrChargeNotFound", err)
 	_, err = f.Usage.ChargeByRef(f.Ctx, meter.ChargeByRefRequest{CapabilityID: f.root, ExternalRef: "call-1"})
 	expect.That(t, errors.Is(err, meter.ErrChargeNotFound), "the ref on another capability: err = %v, want ErrChargeNotFound", err)
-	// A request that names no charge is the caller's bug, not a charge
-	// missing (ChargeByRefRequest.Validate).
 	for name, req := range map[string]meter.ChargeByRefRequest{
 		"an empty ref":  {CapabilityID: f.child},
 		"no capability": {ExternalRef: "call-1"},
@@ -3066,6 +3084,30 @@ func checkSumCharges(t *testing.T, f fixture) {
 	if f.Ledger == nil {
 		t.Skip("Env.Ledger not set")
 	}
+	other := seedSumCharges(t, f)
+	from, to := f.sumPeriod()
+	checkSumChargesGrouped(t, f, from, to)
+	// The top one, then the rest after its cursor.
+	req := meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: to, GroupBy: []meter.ChargeDimension{meter.ChargeDimensionCapability}, Limit: 1}
+	first, err := f.Ledger.SumCharges(f.Ctx, req)
+	expect.Must(t, !(err != nil || len(first.Items) != 1 || first.Items[0].CapabilityID != f.root || first.Next == ""), "the first page of one = %+v, %v; want the root and a cursor", first, err)
+	req.Cursor = first.Next
+	second, err := f.Ledger.SumCharges(f.Ctx, req)
+	expect.That(t, !(err != nil || len(second.Items) != 1 || second.Items[0].CapabilityID != f.child || second.Next != ""), "the page after it = %+v, %v; want the child, and the last page", second, err)
+	// A period that ends before the charges holds none of them.
+	page, err := f.Ledger.SumCharges(f.Ctx, meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: from.Add(time.Second)})
+	expect.That(t, !(err != nil || len(page.Items) != 0), "SumCharges of a period before the charges = %+v, %v; want none", page, err)
+	checkSumChargesRefusesMalformed(t, f, from, to)
+	if f.ScopesTenants {
+		_, err := f.Ledger.SumCharges(f.tenantCtx(other), meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: to})
+		expect.That(t, errors.Is(err, limes.ErrScopeMismatch), "SumCharges under another tenant's context: err = %v, want ErrScopeMismatch", err)
+	}
+}
+
+// seedSumCharges charges 7 to another tenant, which it returns, and to the
+// fixture's 2 by actor a, 3 by actor b with 1 refunded, and 6 on the root.
+func seedSumCharges(t *testing.T, f fixture) uuid.UUID {
+	t.Helper()
 	other, err := f.newTenant()
 	expect.Must(t, err == nil, "NewTenant: %v", err)
 	theirCap, err := f.NewCapability(CapabilitySpec{Tenant: other, Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget})
@@ -3085,14 +3127,12 @@ func checkSumCharges(t *testing.T, f fixture) {
 			expect.Must(t, err == nil, "refund: %v", err)
 		}
 	}
-	from, to := f.sumPeriod()
-	sums := func(req meter.SumChargesRequest) []meter.ChargeSum {
-		t.Helper()
-		req.TenantID, req.From, req.To = f.Tenant, from, to
-		page, err := f.Ledger.SumCharges(f.Ctx, req)
-		expect.Must(t, err == nil, "SumCharges(%+v): %v", req, err)
-		return page.Items
-	}
+	return other
+}
+
+// checkSumChargesGrouped holds SumCharges of the fixture's tenant to its
+// charges, whole and grouped by each dimension.
+func checkSumChargesGrouped(t *testing.T, f fixture, from, to time.Time) {
 	for name, tc := range map[string]struct {
 		req  meter.SumChargesRequest
 		want []meter.ChargeSum
@@ -3113,19 +3153,17 @@ func checkSumCharges(t *testing.T, f fixture) {
 			{UnitCode: unit, CapabilityID: f.child, Charged: 5 * one, Refunded: one, Charges: 2},
 		}},
 	} {
-		got := sums(tc.req)
-		expect.That(t, reflect.DeepEqual(got, tc.want), "%s: SumCharges = %+v, want %+v", name, got, tc.want)
+		req := tc.req
+		req.TenantID, req.From, req.To = f.Tenant, from, to
+		page, err := f.Ledger.SumCharges(f.Ctx, req)
+		expect.Must(t, err == nil, "SumCharges(%+v): %v", req, err)
+		expect.That(t, reflect.DeepEqual(page.Items, tc.want), "%s: SumCharges = %+v, want %+v", name, page.Items, tc.want)
 	}
-	// The top one, then the rest after its cursor.
-	req := meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: to, GroupBy: []meter.ChargeDimension{meter.ChargeDimensionCapability}, Limit: 1}
-	first, err := f.Ledger.SumCharges(f.Ctx, req)
-	expect.Must(t, !(err != nil || len(first.Items) != 1 || first.Items[0].CapabilityID != f.root || first.Next == ""), "the first page of one = %+v, %v; want the root and a cursor", first, err)
-	req.Cursor = first.Next
-	second, err := f.Ledger.SumCharges(f.Ctx, req)
-	expect.That(t, !(err != nil || len(second.Items) != 1 || second.Items[0].CapabilityID != f.child || second.Next != ""), "the page after it = %+v, %v; want the child, and the last page", second, err)
-	// A period that ends before the charges holds none of them.
-	page, err := f.Ledger.SumCharges(f.Ctx, meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: from.Add(time.Second)})
-	expect.That(t, !(err != nil || len(page.Items) != 0), "SumCharges of a period before the charges = %+v, %v; want none", page, err)
+}
+
+// checkSumChargesRefusesMalformed holds SumCharges to refusing a malformed
+// request as ErrInvalidRequest.
+func checkSumChargesRefusesMalformed(t *testing.T, f fixture, from, to time.Time) {
 	for name, bad := range map[string]meter.SumChargesRequest{
 		"no tenant":                       {From: from, To: to},
 		"a tenant and every tenant":       {TenantID: f.Tenant, AllTenants: true, From: from, To: to},
@@ -3145,10 +3183,6 @@ func checkSumCharges(t *testing.T, f fixture) {
 		_, err := f.Ledger.SumCharges(f.Ctx, bad)
 		expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "SumCharges with %s: err = %v, want ErrInvalidRequest", name, err)
 	}
-	if f.ScopesTenants {
-		_, err := f.Ledger.SumCharges(f.tenantCtx(other), meter.SumChargesRequest{TenantID: f.Tenant, From: from, To: to})
-		expect.That(t, errors.Is(err, limes.ErrScopeMismatch), "SumCharges under another tenant's context: err = %v, want ErrScopeMismatch", err)
-	}
 }
 
 // A sum across tenants is the sum of each tenant's: grouped by tenant it
@@ -3160,6 +3194,31 @@ func checkSumChargesAcrossTenants(t *testing.T, f fixture) {
 	if f.Ledger == nil {
 		t.Skip("Env.Ledger not set")
 	}
+	other, theirCap := seedSumChargesAcrossTenants(t, f)
+	from, to := f.sumPeriod()
+	byTenant := []meter.ChargeDimension{meter.ChargeDimensionTenant}
+	// Each tenant's sum on its own row, the largest first, as each one's
+	// own request gives it.
+	want := []meter.ChargeSum{
+		{UnitCode: unit, TenantID: other, Charged: 11 * one, Charges: 2},
+		{UnitCode: unit, TenantID: f.Tenant, Charged: 5 * one, Charges: 2},
+	}
+	got := sumEvery(t, f, from, to, meter.SumChargesRequest{GroupBy: byTenant})
+	expect.That(t, reflect.DeepEqual(got, want), "SumCharges across tenants by tenant = %+v, want %+v", got, want)
+	checkEachTenantSum(t, f, from, to, want)
+	checkSumFilters(t, f, from, to, other, theirCap)
+	checkAllChargeSums(t, f, from, to, len(want))
+	if f.ScopesTenants {
+		_, err := f.Ledger.SumCharges(f.tenantCtx(f.Tenant), meter.SumChargesRequest{AllTenants: true, From: from, To: to})
+		expect.That(t, errors.Is(err, limes.ErrScopeMismatch), "SumCharges across tenants under one tenant's context: err = %v, want ErrScopeMismatch", err)
+	}
+}
+
+// seedSumChargesAcrossTenants charges another tenant, which it returns
+// with its capability, 7 for get by actor c and 4 for put by actor a; and
+// the fixture's 2 for get by actor a and 3 for put by actor b.
+func seedSumChargesAcrossTenants(t *testing.T, f fixture) (uuid.UUID, uuid.UUID) {
+	t.Helper()
 	other, err := f.newTenant()
 	expect.Must(t, err == nil, "NewTenant: %v", err)
 	theirCap, err := f.NewCapability(CapabilitySpec{Tenant: other, Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget})
@@ -3179,27 +3238,29 @@ func checkSumChargesAcrossTenants(t *testing.T, f fixture) {
 		_, err := f.charge(c, nil)
 		expect.Must(t, err == nil, "charge: %v", err)
 	}
-	from, to := f.sumPeriod()
-	byTenant := []meter.ChargeDimension{meter.ChargeDimensionTenant}
-	every := func(req meter.SumChargesRequest) []meter.ChargeSum {
-		t.Helper()
-		req.AllTenants, req.From, req.To = true, from, to
-		page, err := f.Ledger.SumCharges(f.listCtx(), req)
-		expect.Must(t, err == nil, "SumCharges(%+v) across tenants: %v", req, err)
-		return page.Items
-	}
-	// Each tenant's sum on its own row, the largest first, as each one's
-	// own request gives it.
-	want := []meter.ChargeSum{
-		{UnitCode: unit, TenantID: other, Charged: 11 * one, Charges: 2},
-		{UnitCode: unit, TenantID: f.Tenant, Charged: 5 * one, Charges: 2},
-	}
-	got := every(meter.SumChargesRequest{GroupBy: byTenant})
-	expect.That(t, reflect.DeepEqual(got, want), "SumCharges across tenants by tenant = %+v, want %+v", got, want)
+	return other, theirCap
+}
+
+// sumEvery is SumCharges of req across every tenant, from to to.
+func sumEvery(t *testing.T, f fixture, from, to time.Time, req meter.SumChargesRequest) []meter.ChargeSum {
+	t.Helper()
+	req.AllTenants, req.From, req.To = true, from, to
+	page, err := f.Ledger.SumCharges(f.listCtx(), req)
+	expect.Must(t, err == nil, "SumCharges(%+v) across tenants: %v", req, err)
+	return page.Items
+}
+
+// checkEachTenantSum holds each tenant's own sum to its row across tenants.
+func checkEachTenantSum(t *testing.T, f fixture, from, to time.Time, want []meter.ChargeSum) {
 	for _, w := range want {
 		page, err := f.Ledger.SumCharges(f.tenantCtx(w.TenantID), meter.SumChargesRequest{TenantID: w.TenantID, From: from, To: to})
 		expect.That(t, !(err != nil || len(page.Items) != 1 || page.Items[0].Charged != w.Charged || page.Items[0].Charges != w.Charges), "SumCharges of tenant %s = %+v, %v; want %s in %d charges, as across tenants", w.TenantID, page.Items, err, w.Charged, w.Charges)
 	}
+}
+
+// checkSumFilters holds SumCharges across tenants to each filter.
+func checkSumFilters(t *testing.T, f fixture, from, to time.Time, other, theirCap uuid.UUID) {
+	byTenant := []meter.ChargeDimension{meter.ChargeDimensionTenant}
 	for name, tc := range map[string]struct {
 		req  meter.SumChargesRequest
 		want []meter.ChargeSum
@@ -3221,12 +3282,16 @@ func checkSumChargesAcrossTenants(t *testing.T, f fixture) {
 			{UnitCode: unit, TenantID: other, Charged: 11 * one, Charges: 2},
 		}},
 	} {
-		got := every(tc.req)
+		got := sumEvery(t, f, from, to, tc.req)
 		expect.That(t, reflect.DeepEqual(got, tc.want), "%s: SumCharges across tenants = %+v, want %+v", name, got, tc.want)
 	}
-	// A row at a time, across tenants and their operations, with two rows
-	// that differ by tenant alone: the tenants' puts, four each.
-	_, err = f.charge(meter.ChargeRequest{Amount: one, Op: limes.OpPut, Actor: "b"}, nil)
+}
+
+// checkAllChargeSums holds AllChargeSums, a row at a time across tenants
+// and their operations, to the whole page — with two rows that differ by
+// tenant alone: the tenants' puts, four each. tenants is how many charged.
+func checkAllChargeSums(t *testing.T, f fixture, from, to time.Time, tenants int) {
+	_, err := f.charge(meter.ChargeRequest{Amount: one, Op: limes.OpPut, Actor: "b"}, nil)
 	expect.Must(t, err == nil, "charge: %v", err)
 	req := meter.SumChargesRequest{AllTenants: true, From: from, To: to, Limit: 1,
 		GroupBy: []meter.ChargeDimension{meter.ChargeDimensionOp, meter.ChargeDimensionTenant}}
@@ -3235,12 +3300,8 @@ func checkSumChargesAcrossTenants(t *testing.T, f fixture) {
 		expect.Must(t, err == nil, "AllChargeSums across tenants: %v", err)
 		walked = append(walked, sum)
 	}
-	whole := every(meter.SumChargesRequest{GroupBy: req.GroupBy})
-	expect.That(t, !(len(whole) != len(want)*2 || !reflect.DeepEqual(walked, whole)), "AllChargeSums a row at a time = %+v, want the page %+v", walked, whole)
-	if f.ScopesTenants {
-		_, err := f.Ledger.SumCharges(f.tenantCtx(f.Tenant), meter.SumChargesRequest{AllTenants: true, From: from, To: to})
-		expect.That(t, errors.Is(err, limes.ErrScopeMismatch), "SumCharges across tenants under one tenant's context: err = %v, want ErrScopeMismatch", err)
-	}
+	whole := sumEvery(t, f, from, to, meter.SumChargesRequest{GroupBy: req.GroupBy})
+	expect.That(t, !(len(whole) != tenants*2 || !reflect.DeepEqual(walked, whole)), "AllChargeSums a row at a time = %+v, want the page %+v", walked, whole)
 }
 
 // SumCharges orders sums by amount, not by their digits: sums of different
