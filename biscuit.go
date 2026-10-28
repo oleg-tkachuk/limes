@@ -595,33 +595,40 @@ func (f blockFacts) narrow(cur Capability) Capability {
 // copyCeilingNarrows checks a copy's ceilings against every one already in
 // force on cur: the capability's own and each enclosing copy's.
 func copyCeilingNarrows(cur grant, c CopyCeiling) error {
-	// A nil axis is one this block left alone: the copy keeps no ceiling of
-	// its own there, and the ones above it still bound it. A block sets only
-	// a bound (readBlockFacts), never an Unlimited ceiling.
-	if r := c.Requests; r != nil {
-		if err := r.Validate(); err != nil {
-			return fmt.Errorf("copy %w", err)
-		}
-		if !r.Within(cur.Caveats.Requests) {
-			return fmt.Errorf("copy requests %s exceed the capability's %s", r, cur.Caveats.Requests)
-		}
-		for _, o := range cur.copies {
-			if o.Requests != nil && !r.Within(*o.Requests) {
-				return fmt.Errorf("copy requests %s exceed an enclosing copy's %s", r, o.Requests)
-			}
-		}
+	err := copyAxisNarrows("requests", c.Requests, cur.Caveats.Requests, cur.copies,
+		func(o CopyCeiling) *RequestCeiling { return o.Requests })
+	if err != nil {
+		return err
 	}
-	if b := c.Budget; b != nil {
-		if err := b.Validate(); err != nil {
-			return fmt.Errorf("copy %w", err)
-		}
-		if !b.Within(cur.Caveats.Budget) {
-			return fmt.Errorf("copy budget %s exceeds the capability's %s", b, cur.Caveats.Budget)
-		}
-		for _, o := range cur.copies {
-			if o.Budget != nil && !b.Within(*o.Budget) {
-				return fmt.Errorf("copy budget %s exceeds an enclosing copy's %s", b, o.Budget)
-			}
+	return copyAxisNarrows("budget", c.Budget, cur.Caveats.Budget, cur.copies,
+		func(o CopyCeiling) *BudgetCeiling { return o.Budget })
+}
+
+// ceiling is a limit on one axis of a copy: RequestCeiling or BudgetCeiling.
+type ceiling[C any] interface {
+	Validate() error
+	Within(outer C) bool
+	fmt.Stringer
+}
+
+// copyAxisNarrows checks a copy's ceiling c on one axis against the
+// capability's on it and each enclosing copy's, which of reads. A nil c is
+// an axis the block left alone: the copy keeps no ceiling of its own there,
+// and the ones above it still bound it. A block sets only a bound
+// (readBlockFacts), never an Unlimited ceiling.
+func copyAxisNarrows[C ceiling[C]](axis string, c *C, capability C, enclosing []CopyCeiling, of func(CopyCeiling) *C) error {
+	if c == nil {
+		return nil
+	}
+	if err := (*c).Validate(); err != nil {
+		return fmt.Errorf("copy %w", err)
+	}
+	if !(*c).Within(capability) {
+		return fmt.Errorf("copy %s %s exceeds the capability's %s", axis, *c, capability)
+	}
+	for _, o := range enclosing {
+		if outer := of(o); outer != nil && !(*c).Within(*outer) {
+			return fmt.Errorf("copy %s %s exceeds an enclosing copy's %s", axis, *c, *outer)
 		}
 	}
 	return nil
