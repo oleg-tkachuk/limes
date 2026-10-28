@@ -59,10 +59,7 @@ func TestRetiredButPublishedKeyStillVerifies(t *testing.T) {
 	oldPriv := ed25519.NewKeyFromSeed(goldenSeed[:])
 	oldPub := oldPriv.Public().(ed25519.PublicKey)
 
-	var newSeed [32]byte
-	copy(newSeed[:], goldenSeed[:])
-	newSeed[0] ^= 0xff
-	newPriv := ed25519.NewKeyFromSeed(newSeed[:])
+	newPriv := goldenKeyFlipped(0)
 	newPub := newPriv.Public().(ed25519.PublicKey)
 
 	// A token minted under the old key, before rotation.
@@ -99,20 +96,10 @@ func TestWithdrawnKeyStopsVerifying(t *testing.T) {
 	oldPriv := ed25519.NewKeyFromSeed(goldenSeed[:])
 	oldToken := mintToken(t, testIssuer(t, goldenKID, oldPriv, goldenClock))
 
-	var newSeed [32]byte
-	copy(newSeed[:], goldenSeed[:])
-	newSeed[0] ^= 0xff
-	newPub := ed25519.NewKeyFromSeed(newSeed[:]).Public().(ed25519.PublicKey)
+	newPub := goldenKeyFlipped(0).Public().(ed25519.PublicKey)
 
 	// The old kid is simply absent from the published set.
-	verifier, err := NewVerifier(VerifierConfig{
-		Keys:        staticKeys(t, map[string]ed25519.PublicKey{newKID: newPub}),
-		Revocations: revLookup{}, TrustedIssuers: []string{goldenIssuer}, Now: goldenClock,
-	})
-	if err != nil {
-		t.Fatalf("verifier: %v", err)
-	}
-	if _, err := verifier.Verify(context.Background(), VerifyRequest{Token: oldToken, Audience: goldenAudience}); err == nil {
+	if err := verifyGoldenUnder(t, oldToken, map[string]ed25519.PublicKey{newKID: newPub}); err == nil {
 		t.Fatal("a token under a withdrawn key must stop verifying")
 	}
 }
@@ -137,19 +124,8 @@ func TestForgedSignatureRejected(t *testing.T) {
 
 	// Publish a DIFFERENT key under the same kid — i.e. the token was signed
 	// by someone who is not the issuer we trust.
-	var otherSeed [32]byte
-	copy(otherSeed[:], goldenSeed[:])
-	otherSeed[31] ^= 0xff
-	otherPub := ed25519.NewKeyFromSeed(otherSeed[:]).Public().(ed25519.PublicKey)
-
-	verifier, err := NewVerifier(VerifierConfig{
-		Keys:        staticKeys(t, map[string]ed25519.PublicKey{goldenKID: otherPub}),
-		Revocations: revLookup{}, TrustedIssuers: []string{goldenIssuer}, Now: goldenClock,
-	})
-	if err != nil {
-		t.Fatalf("verifier: %v", err)
-	}
-	if _, err := verifier.Verify(context.Background(), VerifyRequest{Token: token, Audience: goldenAudience}); !errors.Is(err, ErrInvalidToken) {
+	otherPub := goldenKeyFlipped(len(goldenSeed) - 1).Public().(ed25519.PublicKey)
+	if err := verifyGoldenUnder(t, token, map[string]ed25519.PublicKey{goldenKID: otherPub}); !errors.Is(err, ErrInvalidToken) {
 		t.Fatalf("want ErrInvalidToken for a forged token, got %v", err)
 	}
 }
@@ -248,4 +224,27 @@ func TestSentinelsAreIndividuallyMatchable(t *testing.T) {
 			t.Errorf("%s does not survive wrapping", nameA)
 		}
 	}
+}
+
+// goldenKeyFlipped is the key of goldenSeed with its byte at i inverted: a
+// key that is not the golden issuer's.
+func goldenKeyFlipped(i int) ed25519.PrivateKey {
+	seed := goldenSeed
+	seed[i] ^= 0xff
+	return ed25519.NewKeyFromSeed(seed[:])
+}
+
+// verifyGoldenUnder verifies token, for the golden audience, with a verifier
+// that trusts the golden issuer and publishes keys alone.
+func verifyGoldenUnder(t *testing.T, token string, keys map[string]ed25519.PublicKey) error {
+	t.Helper()
+	verifier, err := NewVerifier(VerifierConfig{
+		Keys:        staticKeys(t, keys),
+		Revocations: revLookup{}, TrustedIssuers: []string{goldenIssuer}, Now: goldenClock,
+	})
+	if err != nil {
+		t.Fatalf("verifier: %v", err)
+	}
+	_, err = verifier.Verify(context.Background(), VerifyRequest{Token: token, Audience: goldenAudience})
+	return err
 }

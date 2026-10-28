@@ -174,25 +174,14 @@ func compareCounts(a, b countKey) int {
 }
 
 // encode is the cursor as CountRecords hands it out: opaque, URL-safe.
-func (k countKey) encode() string {
-	raw, err := json.Marshal(k)
-	if err != nil {
-		panic(err) // a struct of a uuid and a string always encodes
-	}
-	return base64.RawURLEncoding.EncodeToString(raw)
-}
+func (k countKey) encode() string { return encodeCursor(k) }
 
 // decodeCountCursor reads a cursor encode wrote; anything else is
 // ErrInvalidRequest.
 func decodeCountCursor(s string) (countKey, error) {
-	bad := fmt.Errorf("%w: memstore: record count cursor %q", limes.ErrInvalidRequest, s)
-	raw, err := base64.RawURLEncoding.DecodeString(s)
-	if err != nil {
-		return countKey{}, bad
-	}
 	var k countKey
-	if err := json.Unmarshal(raw, &k); err != nil {
-		return countKey{}, bad
+	if err := decodeCursor(s, &k); err != nil {
+		return countKey{}, fmt.Errorf("%w: memstore: record count cursor %q", limes.ErrInvalidRequest, s)
 	}
 	return k, nil
 }
@@ -347,24 +336,6 @@ func decodeListCursor(s string, req limes.ListRecordsRequest) (listCursor, error
 		return listCursor{}, fmt.Errorf("%w: memstore: record list cursor %q", limes.ErrCursorMismatch, s)
 	}
 	return k, nil
-}
-
-// encodeCursor is a cursor as the census hands it out: opaque, URL-safe.
-func encodeCursor(v any) string {
-	raw, err := json.Marshal(v)
-	if err != nil {
-		panic(err) // the cursors are structs of uuids, strings and integers
-	}
-	return base64.RawURLEncoding.EncodeToString(raw)
-}
-
-// decodeCursor reads a cursor encodeCursor wrote into v.
-func decodeCursor(s string, v any) error {
-	raw, err := base64.RawURLEncoding.DecodeString(s)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(raw, v)
 }
 
 var (

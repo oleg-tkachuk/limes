@@ -186,14 +186,7 @@ var errScopeNone = fmt.Errorf("%w: pgstore: the scope admits no tenant", limes.E
 // role: a call that acts on every row its scope reaches — a purge — would
 // otherwise find none and report doing nothing, call after call.
 func checkSchemaAdmitsAny(ctx context.Context, tx pgx.Tx) error {
-	var admits bool
-	if err := tx.QueryRow(ctx, sqlScopeAdmitsAny).Scan(&admits); err != nil {
-		return err
-	}
-	if !admits {
-		return errScopeNone
-	}
-	return nil
+	return checkSchemaAdmits(ctx, tx, sqlScopeAdmitsAny, errScopeNone)
 }
 
 // errScopeNotEvery is a call across every tenant made under a scope that
@@ -205,12 +198,18 @@ var errScopeNotEvery = fmt.Errorf("%w: pgstore: the scope does not admit every t
 // tenant, when row-level security binds its role: a call across every
 // tenant would otherwise count one tenant's rows as everyone's.
 func checkSchemaAdmitsEvery(ctx context.Context, tx pgx.Tx) error {
+	return checkSchemaAdmits(ctx, tx, sqlScopeAdmitsEvery, errScopeNotEvery)
+}
+
+// checkSchemaAdmits refuses with refusal a transaction for which query, one
+// of the sqlScopeAdmits queries, answers false.
+func checkSchemaAdmits(ctx context.Context, tx pgx.Tx, query string, refusal error) error {
 	var admits bool
-	if err := tx.QueryRow(ctx, sqlScopeAdmitsEvery).Scan(&admits); err != nil {
+	if err := tx.QueryRow(ctx, query).Scan(&admits); err != nil {
 		return err
 	}
 	if !admits {
-		return errScopeNotEvery
+		return refusal
 	}
 	return nil
 }

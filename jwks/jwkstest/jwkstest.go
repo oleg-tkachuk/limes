@@ -55,20 +55,12 @@ const (
 // Run runs every check as a subtest, each on a fresh Env from setup.
 func Run(t *testing.T, setup func(t *testing.T) Env) {
 	t.Helper()
-	checks := []struct {
-		name string
-		run  func(*testing.T, Env)
-	}{
-		{"AKnownKIDGivesItsKey", checkKnown},
-		{"AnUnknownKIDIsErrUnknownKID", checkUnknown},
-		{"ConcurrentLookupsAgree", checkConcurrent},
+	checks := []watchdog.Check[Env]{
+		{Name: "AKnownKIDGivesItsKey", Run: checkKnown},
+		{Name: "AnUnknownKIDIsErrUnknownKID", Run: checkUnknown},
+		{Name: "ConcurrentLookupsAgree", Run: checkConcurrent},
 	}
-	for _, c := range checks {
-		t.Run(c.name, func(t *testing.T) {
-			env := setup(t)
-			watchdog.Run(c.name, env.CheckTimeout, func() { c.run(t, env) })
-		})
-	}
+	watchdog.RunChecks(t, setup, func(e Env) time.Duration { return e.CheckTimeout }, checks)
 }
 
 func checkKnown(t *testing.T, e Env) {

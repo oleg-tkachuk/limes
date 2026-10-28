@@ -93,43 +93,27 @@ const (
 // ReplayEnv from setup.
 func RunReplayCache(t *testing.T, setup func(t *testing.T) ReplayEnv) {
 	t.Helper()
-	checks := []struct {
-		name string
-		run  func(*testing.T, ReplayEnv)
-	}{
-		{"AnIDIsNewOnceThenAReplay", checkReplay},
-		{"KeysAndIDsAreApart", checkApart},
-		{"AnIDIsRememberedUntilItExpires", checkRemembered},
-		{"AHolderPastItsShareIsRefused", checkShare},
-		{"AHoldersShareFreesOnceItsIDsExpire", checkShareFrees},
-		{"ConcurrentProofsLetOneThrough", checkConcurrentReplay},
+	checks := []watchdog.Check[ReplayEnv]{
+		{Name: "AnIDIsNewOnceThenAReplay", Run: checkReplay},
+		{Name: "KeysAndIDsAreApart", Run: checkApart},
+		{Name: "AnIDIsRememberedUntilItExpires", Run: checkRemembered},
+		{Name: "AHolderPastItsShareIsRefused", Run: checkShare},
+		{Name: "AHoldersShareFreesOnceItsIDsExpire", Run: checkShareFrees},
+		{Name: "ConcurrentProofsLetOneThrough", Run: checkConcurrentReplay},
 	}
-	for _, c := range checks {
-		t.Run(c.name, func(t *testing.T) {
-			env := setup(t)
-			watchdog.Run(c.name, env.CheckTimeout, func() { c.run(t, env) })
-		})
-	}
+	watchdog.RunChecks(t, setup, func(e ReplayEnv) time.Duration { return e.CheckTimeout }, checks)
 }
 
 // RunNonces runs every nonce check as a subtest, each on a fresh NoncesEnv
 // from setup.
 func RunNonces(t *testing.T, setup func(t *testing.T) NoncesEnv) {
 	t.Helper()
-	checks := []struct {
-		name string
-		run  func(*testing.T, NoncesEnv)
-	}{
-		{"AnIssuedNonceIsValid", checkIssued},
-		{"ANonceNeverIssuedIsNot", checkForeign},
-		{"ANonceExpires", checkExpiry},
+	checks := []watchdog.Check[NoncesEnv]{
+		{Name: "AnIssuedNonceIsValid", Run: checkIssued},
+		{Name: "ANonceNeverIssuedIsNot", Run: checkForeign},
+		{Name: "ANonceExpires", Run: checkExpiry},
 	}
-	for _, c := range checks {
-		t.Run(c.name, func(t *testing.T) {
-			env := setup(t)
-			watchdog.Run(c.name, env.CheckTimeout, func() { c.run(t, env) })
-		})
-	}
+	watchdog.RunChecks(t, setup, func(e NoncesEnv) time.Duration { return e.CheckTimeout }, checks)
 }
 
 func (e ReplayEnv) now() time.Time {

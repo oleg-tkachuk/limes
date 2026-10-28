@@ -9,6 +9,7 @@ package watchdog
 import (
 	"fmt"
 	"runtime"
+	"testing"
 	"time"
 )
 
@@ -20,6 +21,25 @@ const DefaultLimit = time.Minute
 // stackBuffer is how many bytes of goroutine stacks the dump keeps: enough
 // for the hundreds of goroutines a concurrent check leaves behind.
 const stackBuffer = 1 << 20
+
+// Check is one check of a contract suite: its subtest's name, and the check
+// run on the env the suite's setup gives.
+type Check[E any] struct {
+	Name string
+	Run  func(*testing.T, E)
+}
+
+// RunChecks runs each check as a subtest, in order, on an env of its own from
+// setup, under Run with the limit limitOf reads from that env.
+func RunChecks[E any](t *testing.T, setup func(*testing.T) E, limitOf func(E) time.Duration, checks []Check[E]) {
+	t.Helper()
+	for _, c := range checks {
+		t.Run(c.Name, func(t *testing.T) {
+			env := setup(t)
+			Run(c.Name, limitOf(env), func() { c.Run(t, env) })
+		})
+	}
+}
 
 // Run runs check, and panics with every goroutine's stack if it has not
 // returned within limit — DefaultLimit when limit is zero or negative. A

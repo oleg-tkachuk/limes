@@ -149,25 +149,14 @@ func scanCount(row pgx.CollectableRow) (limes.RecordCount, error) {
 }
 
 // encode is the cursor as CountRecords hands it out: opaque, URL-safe.
-func (c countCursor) encode() string {
-	raw, err := json.Marshal(c)
-	if err != nil {
-		panic(err) // a struct of a uuid and a string always encodes
-	}
-	return base64.RawURLEncoding.EncodeToString(raw)
-}
+func (c countCursor) encode() string { return encodeCursor(c) }
 
 // decodeCountCursor reads a cursor encode wrote; anything else is
 // ErrInvalidRequest.
 func decodeCountCursor(s string) (countCursor, error) {
-	bad := fmt.Errorf("%w: pgstore: record count cursor %q", limes.ErrInvalidRequest, s)
-	raw, err := base64.RawURLEncoding.DecodeString(s)
-	if err != nil {
-		return countCursor{}, bad
-	}
 	var c countCursor
-	if err := json.Unmarshal(raw, &c); err != nil {
-		return countCursor{}, bad
+	if err := decodeCursor(s, &c); err != nil {
+		return countCursor{}, fmt.Errorf("%w: pgstore: record count cursor %q", limes.ErrInvalidRequest, s)
 	}
 	return c, nil
 }
@@ -426,26 +415,13 @@ func scanListing(row pgx.CollectableRow) (limes.RecordListing, error) {
 // anything that is no cursor ErrInvalidRequest.
 func decodeListCursor(s string, req limes.ListRecordsRequest) (listCursor, error) {
 	var k listCursor
-	raw, err := base64.RawURLEncoding.DecodeString(s)
-	if err == nil {
-		err = json.Unmarshal(raw, &k)
-	}
-	if err != nil || k.After == uuid.Nil() {
+	if err := decodeCursor(s, &k); err != nil || k.After == uuid.Nil() {
 		return listCursor{}, fmt.Errorf("%w: pgstore: record list cursor %q", limes.ErrInvalidRequest, s)
 	}
 	if k.Order != req.Order || k.Filters != filtersKey(req) {
 		return listCursor{}, fmt.Errorf("%w: pgstore: record list cursor %q", limes.ErrCursorMismatch, s)
 	}
 	return k, nil
-}
-
-// encodeCursor is a cursor as the census hands it out: opaque, URL-safe.
-func encodeCursor(v any) string {
-	raw, err := json.Marshal(v)
-	if err != nil {
-		panic(err) // the cursors are structs of uuids, strings and integers
-	}
-	return base64.RawURLEncoding.EncodeToString(raw)
 }
 
 var (
