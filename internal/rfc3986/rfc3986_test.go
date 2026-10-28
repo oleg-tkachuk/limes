@@ -36,7 +36,8 @@ func TestNormalize(t *testing.T) {
 	}
 }
 
-// RFC 3986 §5.4's examples of remove_dot_segments.
+// RFC 3986 §5.4's examples of remove_dot_segments, and each rule of
+// §5.2.4 on its own.
 func TestRemoveDotSegments(t *testing.T) {
 	cases := map[string]string{
 		"/a/b/c/./../../g":   "/a/g",
@@ -50,6 +51,13 @@ func TestRemoveDotSegments(t *testing.T) {
 		"/b/c/./g/.":         "/b/c/g/",
 		"/b/c/g/./h":         "/b/c/g/h",
 		"/b/c/g/../h":        "/b/c/h",
+		// Each rule of §5.2.4 step 2 on its own: A's leading "../" and "./",
+		// C's trailing "/..", and D's lone "." and "..".
+		"../a":    "a",
+		"./a":     "a",
+		"/a/b/..": "/a/",
+		".":       "",
+		"..":      "",
 	}
 	for in, want := range cases {
 		if got := removeDotSegments(in); got != want {

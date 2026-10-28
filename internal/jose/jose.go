@@ -147,19 +147,29 @@ func (j JWK) PublicKey() (crypto.PublicKey, error) {
 	}
 	switch {
 	case j.Kty == KtyOKP && j.Crv == CrvEd25519:
-		if len(x) != ed25519.PublicKeySize {
-			return nil, errors.New("Ed25519 key wrong length")
-		}
-		return ed25519.PublicKey(x), nil
+		return ed25519Key(x)
 	case j.Kty == KtyEC && j.Crv == CrvP256:
-		y, err := UnB64(j.Y)
-		if err != nil || len(x) != P256CoordinateBytes || len(y) != P256CoordinateBytes {
-			return nil, errors.New("P-256 key malformed")
-		}
-		raw := append(append([]byte{uncompressedPoint}, x...), y...)
-		return ecdsa.ParseUncompressedPublicKey(elliptic.P256(), raw)
+		return p256Key(x, j.Y)
 	}
 	return nil, fmt.Errorf("unsupported JWK %s/%s", j.Kty, j.Crv)
+}
+
+// ed25519Key is the Ed25519 public key x.
+func ed25519Key(x []byte) (crypto.PublicKey, error) {
+	if len(x) != ed25519.PublicKeySize {
+		return nil, errors.New("Ed25519 key wrong length")
+	}
+	return ed25519.PublicKey(x), nil
+}
+
+// p256Key is the P-256 public key at x and the base64url y.
+func p256Key(x []byte, yB64 string) (crypto.PublicKey, error) {
+	y, err := UnB64(yB64)
+	if err != nil || len(x) != P256CoordinateBytes || len(y) != P256CoordinateBytes {
+		return nil, errors.New("P-256 key malformed")
+	}
+	raw := append(append([]byte{uncompressedPoint}, x...), y...)
+	return ecdsa.ParseUncompressedPublicKey(elliptic.P256(), raw)
 }
 
 // Ed25519Thumbprint is the RFC 7638 thumbprint of an Ed25519 key, which
