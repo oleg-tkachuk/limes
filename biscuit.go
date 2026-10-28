@@ -303,41 +303,59 @@ func openBiscuit(token string) (string, func(parent *grant) (*grant, [][]byte, e
 	// The chain is checked once the sealed token has named its root; the
 	// caller verifies that token first and hands back what it vouches for.
 	attenuate := func(parent *grant) (*grant, [][]byte, error) {
-		root, err := jose.UnB64(parent.biscuitRoot)
-		if err != nil || len(root) != ed25519.PublicKeySize {
-			return nil, nil, fmt.Errorf("%w: sealed token names no biscuit root", ErrInvalidToken)
-		}
-		var ids [][]byte
-		if err := guardBiscuit(func() error {
-			b, err := biscuit.Unmarshal(raw)
-			if err != nil {
-				return err
-			}
-			if _, err := b.Authorizer(ed25519.PublicKey(root)); err != nil {
-				return fmt.Errorf("biscuit chain: %w", err)
-			}
-			ids = b.RevocationIds()
-			return nil
-		}); err != nil {
-			return nil, nil, err
-		}
-		cur := grant{Capability: parent.Capability}
-		for i, blk := range blocks[1:] {
-			next, err := applyAttenuation(cur, blk, ids[i+1])
-			if err != nil {
-				return nil, nil, refuseToken(ErrBiscuitAttenuation, fmt.Errorf("block %d: %w", i+1, err))
-			}
-			cur = next
-		}
-		// Each block narrows what it was handed, but the result must still
-		// be caveats the issuer could have minted, under the sealed token's
-		// type.
-		if err := cur.Caveats.Validate(); err != nil {
-			return nil, nil, refuseToken(ErrBiscuitAttenuation, err)
-		}
-		return &cur, ids, nil
+		return attenuateSealed(raw, blocks, parent)
 	}
 	return inner, attenuate, nil
+}
+
+// attenuateSealed verifies a Biscuit's chain against the root parent, its
+// verified sealed token, names, then folds each attenuation block into
+// parent. It returns the result and the token's revocation ids, authority
+// first, read from the chain it verified.
+func attenuateSealed(raw []byte, blocks []decodedBlock, parent *grant) (*grant, [][]byte, error) {
+	ids, err := verifyBiscuitChain(raw, parent.biscuitRoot)
+	if err != nil {
+		return nil, nil, err
+	}
+	cur := grant{Capability: parent.Capability}
+	for i, blk := range blocks[1:] {
+		next, err := applyAttenuation(cur, blk, ids[i+1])
+		if err != nil {
+			return nil, nil, refuseToken(ErrBiscuitAttenuation, fmt.Errorf("block %d: %w", i+1, err))
+		}
+		cur = next
+	}
+	// Each block narrows what it was handed, but the result must still
+	// be caveats the issuer could have minted, under the sealed token's
+	// type.
+	if err := cur.Caveats.Validate(); err != nil {
+		return nil, nil, refuseToken(ErrBiscuitAttenuation, err)
+	}
+	return &cur, ids, nil
+}
+
+// verifyBiscuitChain verifies the signature chain of the Biscuit raw under
+// the root rootB64 names, and returns its revocation ids, authority first.
+func verifyBiscuitChain(raw []byte, rootB64 string) ([][]byte, error) {
+	root, err := jose.UnB64(rootB64)
+	if err != nil || len(root) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("%w: sealed token names no biscuit root", ErrInvalidToken)
+	}
+	var ids [][]byte
+	if err := guardBiscuit(func() error {
+		b, err := biscuit.Unmarshal(raw)
+		if err != nil {
+			return err
+		}
+		if _, err := b.Authorizer(ed25519.PublicKey(root)); err != nil {
+			return fmt.Errorf("biscuit chain: %w", err)
+		}
+		ids = b.RevocationIds()
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return ids, nil
 }
 
 // decodedBlock is one block, its symbols resolved.
@@ -368,41 +386,67 @@ func decodeBiscuitBlocks(c *pb.Biscuit) ([]decodedBlock, error) {
 	symbols := &datalog.SymbolTable{}
 	out := make([]decodedBlock, 0, len(signed))
 	for i, sb := range signed {
-		var blk pb.Block
-		if err := proto.Unmarshal(sb.GetBlock(), &blk); err != nil {
+		d, err := decodeBlock(sb, symbols)
+		if err != nil {
 			return nil, fmt.Errorf("block %d: %w", i, err)
-		}
-		*symbols = append(*symbols, blk.GetSymbols()...)
-		d := decodedBlock{others: len(blk.GetRulesV2()) + len(blk.GetChecksV2())}
-		for _, f := range blk.GetFactsV2() {
-			p := f.GetPredicate()
-			name, err := biscuitSymbol(*symbols, p.GetName())
-			if err != nil {
-				return nil, fmt.Errorf("block %d: fact name: %w", i, err)
-			}
-			if len(p.GetTerms()) != 1 {
-				return nil, fmt.Errorf("block %d: fact %s takes one term", i, name)
-			}
-			var term any
-			switch t := p.GetTerms()[0].GetContent().(type) {
-			case *pb.TermV2_String_:
-				s, err := biscuitSymbol(*symbols, t.String_)
-				if err != nil {
-					return nil, fmt.Errorf("block %d: fact %s: %w", i, name, err)
-				}
-				term = s
-			case *pb.TermV2_Date:
-				term = time.Unix(int64(t.Date), 0).UTC() //nolint:gosec // a Biscuit date is seconds since the epoch
-			case *pb.TermV2_Integer:
-				term = t.Integer
-			default:
-				return nil, fmt.Errorf("block %d: fact %s has an unsupported term", i, name)
-			}
-			d.facts = append(d.facts, decodedFact{name: name, term: term})
 		}
 		out = append(out, d)
 	}
 	return out, nil
+}
+
+// decodeBlock reads one block's facts, adding its symbols to symbols: a
+// block's symbols extend those of the blocks before it.
+func decodeBlock(sb *pb.SignedBlock, symbols *datalog.SymbolTable) (decodedBlock, error) {
+	var blk pb.Block
+	if err := proto.Unmarshal(sb.GetBlock(), &blk); err != nil {
+		return decodedBlock{}, err
+	}
+	*symbols = append(*symbols, blk.GetSymbols()...)
+	d := decodedBlock{others: len(blk.GetRulesV2()) + len(blk.GetChecksV2())}
+	for _, f := range blk.GetFactsV2() {
+		fact, err := decodeFact(f, *symbols)
+		if err != nil {
+			return decodedBlock{}, err
+		}
+		d.facts = append(d.facts, fact)
+	}
+	return d, nil
+}
+
+// decodeFact reads a fact of one term.
+func decodeFact(f *pb.FactV2, symbols datalog.SymbolTable) (decodedFact, error) {
+	p := f.GetPredicate()
+	name, err := biscuitSymbol(symbols, p.GetName())
+	if err != nil {
+		return decodedFact{}, fmt.Errorf("fact name: %w", err)
+	}
+	if len(p.GetTerms()) != 1 {
+		return decodedFact{}, fmt.Errorf("fact %s takes one term", name)
+	}
+	term, err := decodeTerm(name, p.GetTerms()[0], symbols)
+	if err != nil {
+		return decodedFact{}, err
+	}
+	return decodedFact{name: name, term: term}, nil
+}
+
+// decodeTerm reads the term of the fact named name: a string, a date or an
+// integer, the only terms the attenuation vocabulary takes.
+func decodeTerm(name string, t *pb.TermV2, symbols datalog.SymbolTable) (any, error) {
+	switch t := t.GetContent().(type) {
+	case *pb.TermV2_String_:
+		s, err := biscuitSymbol(symbols, t.String_)
+		if err != nil {
+			return nil, fmt.Errorf("fact %s: %w", name, err)
+		}
+		return s, nil
+	case *pb.TermV2_Date:
+		return time.Unix(int64(t.Date), 0).UTC(), nil //nolint:gosec // a Biscuit date is seconds since the epoch
+	case *pb.TermV2_Integer:
+		return t.Integer, nil
+	}
+	return nil, fmt.Errorf("fact %s has an unsupported term", name)
 }
 
 // sealedToken is the JWT the authority block carries.
