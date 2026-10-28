@@ -156,8 +156,9 @@ func TestCopyLimitsNeedMeterCopies(t *testing.T) {
 	}
 }
 
-// Attenuate refuses a negative limit; a block crafted by hand with a zero,
-// a negative or a non-integer limit is refused by the verifier.
+// Attenuate refuses a negative limit, or a binding that is no thumbprint; a
+// block crafted by hand with a zero, a negative or a non-integer limit is
+// refused by the verifier.
 func TestCopyLimitsMalformed(t *testing.T) {
 	v, _, root := limitedBiscuit(t)
 	for _, a := range []Attenuation{
@@ -168,6 +169,8 @@ func TestCopyLimitsMalformed(t *testing.T) {
 		// A copy spends in its capability's unit, which a block does not
 		// carry: one it names would not be the one enforced.
 		{Budget: &BudgetCeiling{Max: 1, UnitCode: "USD"}},
+		// A binding names a key by its thumbprint, or names none.
+		{ConfirmationJKT: "not a thumbprint"},
 	} {
 		// The holder's own call: a request error, not a token the verifier refused.
 		if _, err := Attenuate(root, a); !errors.Is(err, ErrInvalidRequest) || errors.Is(err, ErrBiscuitAttenuation) {

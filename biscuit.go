@@ -207,43 +207,13 @@ func Attenuate(token string, a Attenuation) (string, error) {
 	if attenuations := b.BlockCount(); attenuations >= MaxBiscuitBlocks {
 		return "", invalidRequest("the token already has %d attenuation blocks, MaxBiscuitBlocks", attenuations)
 	}
+	if err := checkAttenuation(a); err != nil {
+		return "", err
+	}
 	block := b.CreateBlock()
-	add := func(name string, term biscuit.Term) error {
-		return block.AddFact(biscuitFact(name, term))
-	}
 	var errs []error
-	for _, op := range a.Ops {
-		errs = append(errs, add(biscuitFactOp, biscuit.String(op)))
-	}
-	for _, p := range a.ResourcePrefixes {
-		errs = append(errs, add(biscuitFactResourcePrefix, biscuit.String(p)))
-	}
-	for _, u := range a.ResourceURIs {
-		errs = append(errs, add(biscuitFactResourceURI, biscuit.String(u)))
-	}
-	for _, p := range a.Audience {
-		errs = append(errs, add(biscuitFactPlane, biscuit.String(p)))
-	}
-	if !a.ExpiresAt.IsZero() {
-		errs = append(errs, add(biscuitFactExpires, biscuit.Date(a.ExpiresAt.UTC().Truncate(time.Second))))
-	}
-	if a.ConfirmationJKT != "" {
-		if err := validateThumbprint(a.ConfirmationJKT); err != nil {
-			return "", err
-		}
-		errs = append(errs, add(biscuitFactBind, biscuit.String(a.ConfirmationJKT)))
-	}
-	if r := a.Requests; r != nil {
-		if r.Unlimited || r.Validate() != nil {
-			return "", invalidRequest("a copy's request ceiling is a bound within 0..%d", int64(MaxIJSONInteger))
-		}
-		errs = append(errs, add(biscuitFactMaxRequests, biscuit.Integer(r.Max)))
-	}
-	if b := a.Budget; b != nil {
-		if b.Unlimited || b.Max.Validate() != nil || b.UnitCode != "" {
-			return "", invalidRequest("a copy's budget ceiling is a bound within 0..%s, in its capability's unit, which it does not name", MaxNanos)
-		}
-		errs = append(errs, add(biscuitFactMaxBudget, biscuit.Integer(b.Max)))
+	for _, fact := range attenuationFacts(a) {
+		errs = append(errs, block.AddFact(fact))
 	}
 	if err := errors.Join(errs...); err != nil {
 		return "", fmt.Errorf("limes: attenuation block: %w", err)
@@ -253,6 +223,63 @@ func Attenuate(token string, a Attenuation) (string, error) {
 		return "", fmt.Errorf("limes: append attenuation: %w", err)
 	}
 	return serializeBiscuit(next)
+}
+
+// checkAttenuation refuses an attenuation no block can carry: a binding
+// that is no thumbprint, or a copy limit that is not a bound.
+func checkAttenuation(a Attenuation) error {
+	if a.ConfirmationJKT != "" {
+		if err := validateThumbprint(a.ConfirmationJKT); err != nil {
+			return err
+		}
+	}
+	return checkCopyCeilings(a.Requests, a.Budget)
+}
+
+// checkCopyCeilings refuses a copy limit that is not a bound within range:
+// a copy only narrows. A budget names no unit: the copy counts in its
+// capability's.
+func checkCopyCeilings(r *RequestCeiling, b *BudgetCeiling) error {
+	if r != nil && (r.Unlimited || r.Validate() != nil) {
+		return invalidRequest("a copy's request ceiling is a bound within 0..%d", int64(MaxIJSONInteger))
+	}
+	if b != nil && (b.Unlimited || b.Max.Validate() != nil || b.UnitCode != "") {
+		return invalidRequest("a copy's budget ceiling is a bound within 0..%s, in its capability's unit, which it does not name", MaxNanos)
+	}
+	return nil
+}
+
+// attenuationFacts are the facts of the block that carries a, which
+// checkAttenuation accepted.
+func attenuationFacts(a Attenuation) []biscuit.Fact {
+	facts := slices.Concat(
+		stringFacts(biscuitFactOp, a.Ops),
+		stringFacts(biscuitFactResourcePrefix, a.ResourcePrefixes),
+		stringFacts(biscuitFactResourceURI, a.ResourceURIs),
+		stringFacts(biscuitFactPlane, a.Audience),
+	)
+	if !a.ExpiresAt.IsZero() {
+		facts = append(facts, biscuitFact(biscuitFactExpires, biscuit.Date(a.ExpiresAt.UTC().Truncate(time.Second))))
+	}
+	if a.ConfirmationJKT != "" {
+		facts = append(facts, biscuitFact(biscuitFactBind, biscuit.String(a.ConfirmationJKT)))
+	}
+	if a.Requests != nil {
+		facts = append(facts, biscuitFact(biscuitFactMaxRequests, biscuit.Integer(a.Requests.Max)))
+	}
+	if a.Budget != nil {
+		facts = append(facts, biscuitFact(biscuitFactMaxBudget, biscuit.Integer(a.Budget.Max)))
+	}
+	return facts
+}
+
+// stringFacts is one fact named name for each of values.
+func stringFacts[S ~string](name string, values []S) []biscuit.Fact {
+	facts := make([]biscuit.Fact, 0, len(values))
+	for _, v := range values {
+		facts = append(facts, biscuitFact(name, biscuit.String(v)))
+	}
+	return facts
 }
 
 // openBiscuit reads a Biscuit's sealed JWT and returns it with the function
