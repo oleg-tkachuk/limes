@@ -372,7 +372,7 @@ func TestNewVerifierRefusesANilRevocationCache(t *testing.T) {
 	}
 }
 
-// A nil pointer as VerifierConfig.Revocations or Keys is refused by
+// A nil pointer as VerifierConfig.Revocations, Keys or Biscuit.Revocations is refused by
 // NewVerifier, as no value is, rather than dereferenced at the first token.
 func TestNewVerifierRefusesTypedNilWiring(t *testing.T) {
 	var noCache *RevocationCache
@@ -384,6 +384,9 @@ func TestNewVerifierRefusesTypedNilWiring(t *testing.T) {
 		"a nil *RevocationCache": {Keys: keys, Revocations: noCache, TrustedIssuers: []string{goldenIssuer}},
 		"a nil store":            {Keys: keys, Revocations: noStore, TrustedIssuers: []string{goldenIssuer}},
 		"a nil *jwks.Static":     {Keys: noKeys, Revocations: c, TrustedIssuers: []string{goldenIssuer}},
+		"a nil store for Biscuits": {
+			Keys: keys, Revocations: c, TrustedIssuers: []string{goldenIssuer}, Biscuit: &BiscuitConfig{Revocations: noStore},
+		},
 	} {
 		if _, err := NewVerifier(cfg); err == nil {
 			t.Errorf("%s: accepted", name)

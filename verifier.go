@@ -190,15 +190,16 @@ func NewVerifier(cfg VerifierConfig) (*Verifier, error) {
 		b := *cfg.Biscuit // the caller's struct stays the caller's
 		cfg.Biscuit = &b
 	}
-	if cfg.Biscuit != nil && cfg.Biscuit.Revocations == nil {
-		return nil, errNoBiscuitRevocations
-	}
 	// A cache answers Biscuit questions only over an upstream for them: the
 	// type accepts the call either way, so the gap is refused here rather
-	// than at the first Biscuit presented.
+	// than at the first Biscuit presented. Any other nil lookup, a nil
+	// pointer included, is refused as none.
 	if cfg.Biscuit != nil {
 		if c, ok := cfg.Biscuit.Revocations.(*RevocationCache); ok && (c == nil || !c.answersBiscuits()) {
 			return nil, errNoBiscuitLookup
+		}
+		if isNilValue(cfg.Biscuit.Revocations) {
+			return nil, errNoBiscuitRevocations
 		}
 	}
 	if cfg.Now == nil {
