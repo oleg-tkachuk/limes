@@ -58,16 +58,18 @@ const DefaultMaxBodyBytes = 64 << 10
 
 // The RFC 6749 §5.2 error codes, with RFC 8707's and RFC 9449's.
 const (
-	codeInvalidRequest       = "invalid_request"
-	codeInvalidClient        = "invalid_client"
-	codeUnauthorizedClient   = "unauthorized_client"
-	codeInvalidGrant         = "invalid_grant"
-	codeInvalidTarget        = "invalid_target"
-	codeInvalidScope         = "invalid_scope"
-	codeUnsupportedGrantType = "unsupported_grant_type"
-	codeInvalidDPoPProof     = "invalid_dpop_proof"
-	codeUseDPoPNonce         = "use_dpop_nonce"
-	codeServerError          = "server_error"
+	codeInvalidRequest     = "invalid_request"
+	codeInvalidClient      = "invalid_client"
+	codeUnauthorizedClient = "unauthorized_client"
+	codeInvalidGrant       = "invalid_grant"
+	codeInvalidTarget      = "invalid_target"
+	codeInvalidScope       = "invalid_scope"
+	// codeInvalidAuthorizationDetails is RFC 9396 §5's.
+	codeInvalidAuthorizationDetails = "invalid_authorization_details"
+	codeUnsupportedGrantType        = "unsupported_grant_type"
+	codeInvalidDPoPProof            = "invalid_dpop_proof"
+	codeUseDPoPNonce                = "use_dpop_nonce"
+	codeServerError                 = "server_error"
 )
 
 // HandlerConfig configures a Handler.
@@ -121,12 +123,19 @@ func NewHandler(cfg HandlerConfig) (*Handler, error) {
 	return &Handler{cfg: cfg}, nil
 }
 
-// tokenResponse is a successful response (RFC 8693 §2.2.1).
+// tokenResponse is a successful response (RFC 8693 §2.2.1). Scope and
+// AuthorizationDetails state what was granted, when the request asked for
+// either: the scope as asked, which a policy that does not refuse it grants
+// in full, and the capability's caveats as one entry of
+// AuthorizationDetailsTypeCaveats (RFC 9396 §7), as introspection states
+// them.
 type tokenResponse struct {
-	AccessToken     string `json:"access_token"`
-	IssuedTokenType string `json:"issued_token_type"`
-	TokenType       string `json:"token_type"`
-	ExpiresIn       int64  `json:"expires_in"`
+	AccessToken          string            `json:"access_token"`
+	IssuedTokenType      string            `json:"issued_token_type"`
+	TokenType            string            `json:"token_type"`
+	ExpiresIn            int64             `json:"expires_in"`
+	Scope                string            `json:"scope,omitempty"`
+	AuthorizationDetails []json.RawMessage `json:"authorization_details,omitempty"`
 }
 
 // errorResponse is a refusal (RFC 6749 §5.2). The description is fixed per
@@ -160,10 +169,30 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.refuse(w, r, err)
 		return
 	}
-	expiresIn := int64(res.Capability.ExpiresAt.Sub(h.cfg.Exchanger.cfg.Now()).Round(time.Second) / time.Second)
-	h.write(w, http.StatusOK, tokenResponse{
-		AccessToken: res.Token, IssuedTokenType: IssuedTokenTypeCapability, TokenType: res.TokenType, ExpiresIn: expiresIn,
-	})
+	resp, err := h.response(req, res)
+	if err != nil {
+		h.cfg.Logger.ErrorContext(r.Context(), "exchange: encode granted caveats", slog.String("capability", res.Capability.ID.String()), slog.Any("error", err))
+		h.write(w, http.StatusInternalServerError, errorResponse{Error: codeServerError})
+		return
+	}
+	h.write(w, http.StatusOK, resp)
+}
+
+// response is the answer granting res for req.
+func (h *Handler) response(req Request, res Result) (tokenResponse, error) {
+	resp := tokenResponse{
+		AccessToken: res.Token, IssuedTokenType: IssuedTokenTypeCapability, TokenType: res.TokenType,
+		ExpiresIn: int64(res.Capability.ExpiresAt.Sub(h.cfg.Exchanger.cfg.Now()).Round(time.Second) / time.Second),
+		Scope:     strings.Join(req.Scopes, " "),
+	}
+	if len(req.AuthorizationDetails) > 0 {
+		detail, err := caveatsDetail(res.Capability.Caveats)
+		if err != nil {
+			return tokenResponse{}, err
+		}
+		resp.AuthorizationDetails = []json.RawMessage{detail}
+	}
+	return resp, nil
 }
 
 // readRequest reads and authenticates a token exchange request, and names
@@ -305,15 +334,22 @@ func checkTargets(form url.Values) error {
 	return nil
 }
 
-// checkDetails refuses authorization_details that is not a JSON array.
+// checkDetails refuses authorization_details that is not a JSON array of
+// objects, each naming its type (RFC 9396 §2).
 func checkDetails(form url.Values) error {
 	details := form.Get(paramAuthorizationDetails)
 	if details == "" {
 		return nil
 	}
-	var array []json.RawMessage
+	var array []map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(details), &array); err != nil {
-		return fmt.Errorf("%w: %s is not a JSON array", ErrInvalidRequest, paramAuthorizationDetails)
+		return fmt.Errorf("%w: %s is not a JSON array of objects", ErrInvalidAuthorizationDetails, paramAuthorizationDetails)
+	}
+	for i, detail := range array {
+		var typ string
+		if err := json.Unmarshal(detail[detailType], &typ); err != nil || typ == "" {
+			return fmt.Errorf("%w: entry %d names no %s", ErrInvalidAuthorizationDetails, i, detailType)
+		}
 	}
 	return nil
 }
@@ -336,6 +372,7 @@ var refusals = []struct {
 	{ErrInvalidGrant, http.StatusBadRequest, codeInvalidGrant, "The subject token was refused."},
 	{ErrInvalidTarget, http.StatusBadRequest, codeInvalidTarget, "The resource or audience was refused."},
 	{ErrInvalidScope, http.StatusBadRequest, codeInvalidScope, "The scope was refused."},
+	{ErrInvalidAuthorizationDetails, http.StatusBadRequest, codeInvalidAuthorizationDetails, "The authorization details were refused."},
 	{ErrInvalidRequest, http.StatusBadRequest, codeInvalidRequest, "The request is malformed."},
 }
 

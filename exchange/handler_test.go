@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -127,21 +128,25 @@ func TestHandlerRefusals(t *testing.T) {
 		status int
 		code   string
 	}{
-		"another grant":           {change(map[string][]string{paramGrantType: {"client_credentials"}}), nil, http.StatusBadRequest, codeUnsupportedGrantType},
-		"no grant":                {change(map[string][]string{paramGrantType: nil}), nil, http.StatusBadRequest, codeInvalidRequest},
-		"no subject token":        {change(map[string][]string{paramSubjectToken: nil}), nil, http.StatusBadRequest, codeInvalidRequest},
-		"another subject type":    {change(map[string][]string{paramSubjectTokenType: {"urn:ietf:params:oauth:token-type:id_token"}}), nil, http.StatusBadRequest, codeInvalidRequest},
-		"an actor token":          {change(map[string][]string{paramActorToken: {token}}), nil, http.StatusBadRequest, codeInvalidRequest},
-		"another requested type":  {change(map[string][]string{paramRequestedTokenType: {TokenTypeJWT}}), nil, http.StatusBadRequest, codeInvalidRequest},
-		"a scope twice":           {change(map[string][]string{paramScope: {"a", "b"}}), nil, http.StatusBadRequest, codeInvalidRequest},
-		"a relative resource":     {change(map[string][]string{paramResource: {"tools"}}), nil, http.StatusBadRequest, codeInvalidTarget},
-		"a resource fragment":     {change(map[string][]string{paramResource: {toolResource + "#x"}}), nil, http.StatusBadRequest, codeInvalidTarget},
-		"an empty fragment":       {change(map[string][]string{paramResource: {toolResource + "#"}}), nil, http.StatusBadRequest, codeInvalidTarget},
-		"an unparsable resource":  {change(map[string][]string{paramResource: {"https://[::1"}}), nil, http.StatusBadRequest, codeInvalidTarget},
-		"details not an array":    {change(map[string][]string{paramAuthorizationDetails: {`{"type":"x"}`}}), nil, http.StatusBadRequest, codeInvalidRequest},
-		"an unknown client":       {exchangeForm(token), http.Header{clientHeader: {"someone"}}, http.StatusUnauthorized, codeInvalidClient},
-		"a refused subject token": {change(map[string][]string{paramSubjectToken: {"a.b.c"}}), nil, http.StatusBadRequest, codeInvalidGrant},
-		"two DPoP headers":        {exchangeForm(token), http.Header{headerDPoP: {"a", "b"}}, http.StatusBadRequest, codeInvalidDPoPProof},
+		"another grant":               {change(map[string][]string{paramGrantType: {"client_credentials"}}), nil, http.StatusBadRequest, codeUnsupportedGrantType},
+		"no grant":                    {change(map[string][]string{paramGrantType: nil}), nil, http.StatusBadRequest, codeInvalidRequest},
+		"no subject token":            {change(map[string][]string{paramSubjectToken: nil}), nil, http.StatusBadRequest, codeInvalidRequest},
+		"another subject type":        {change(map[string][]string{paramSubjectTokenType: {"urn:ietf:params:oauth:token-type:id_token"}}), nil, http.StatusBadRequest, codeInvalidRequest},
+		"an actor token":              {change(map[string][]string{paramActorToken: {token}}), nil, http.StatusBadRequest, codeInvalidRequest},
+		"another requested type":      {change(map[string][]string{paramRequestedTokenType: {TokenTypeJWT}}), nil, http.StatusBadRequest, codeInvalidRequest},
+		"a scope twice":               {change(map[string][]string{paramScope: {"a", "b"}}), nil, http.StatusBadRequest, codeInvalidRequest},
+		"a relative resource":         {change(map[string][]string{paramResource: {"tools"}}), nil, http.StatusBadRequest, codeInvalidTarget},
+		"a resource fragment":         {change(map[string][]string{paramResource: {toolResource + "#x"}}), nil, http.StatusBadRequest, codeInvalidTarget},
+		"an empty fragment":           {change(map[string][]string{paramResource: {toolResource + "#"}}), nil, http.StatusBadRequest, codeInvalidTarget},
+		"an unparsable resource":      {change(map[string][]string{paramResource: {"https://[::1"}}), nil, http.StatusBadRequest, codeInvalidTarget},
+		"details not an array":        {change(map[string][]string{paramAuthorizationDetails: {`{"type":"x"}`}}), nil, http.StatusBadRequest, codeInvalidAuthorizationDetails},
+		"a detail not an object":      {change(map[string][]string{paramAuthorizationDetails: {`[1]`}}), nil, http.StatusBadRequest, codeInvalidAuthorizationDetails},
+		"a detail with no type":       {change(map[string][]string{paramAuthorizationDetails: {`[{"actions":["read"]}]`}}), nil, http.StatusBadRequest, codeInvalidAuthorizationDetails},
+		"a detail with an empty type": {change(map[string][]string{paramAuthorizationDetails: {`[{"type":""}]`}}), nil, http.StatusBadRequest, codeInvalidAuthorizationDetails},
+		"a detail with a number type": {change(map[string][]string{paramAuthorizationDetails: {`[{"type":1}]`}}), nil, http.StatusBadRequest, codeInvalidAuthorizationDetails},
+		"an unknown client":           {exchangeForm(token), http.Header{clientHeader: {"someone"}}, http.StatusUnauthorized, codeInvalidClient},
+		"a refused subject token":     {change(map[string][]string{paramSubjectToken: {"a.b.c"}}), nil, http.StatusBadRequest, codeInvalidGrant},
+		"two DPoP headers":            {exchangeForm(token), http.Header{headerDPoP: {"a", "b"}}, http.StatusBadRequest, codeInvalidDPoPProof},
 	}
 	for name, tc := range cases {
 		w := post(t, h, tc.form, tc.header)
@@ -153,6 +158,78 @@ func TestHandlerRefusals(t *testing.T) {
 		if strings.Contains(resp.Description, "exchange:") || w.Header().Get("Cache-Control") != cacheNoStore || w.Header().Get("Pragma") != pragmaNoCache {
 			t.Errorf("%s: description %q, headers %v", name, resp.Description, w.Header())
 		}
+	}
+}
+
+// A response states what was granted when the request asked: the scope as
+// asked, since a policy that does not refuse it grants it all (RFC 8693
+// §2.2.1), and the capability's caveats as the authorization_details
+// granted (RFC 9396 §7). A request that asked for neither gets neither.
+func TestHandlerAnswersWhatWasGranted(t *testing.T) {
+	f := newFixture(t, fixtureConfig{})
+	h := newHandler(t, f)
+	form := exchangeForm(f.idp.sign(t, TypeAccessToken, accessClaims()))
+	form.Set(paramScope, "tools:read tools:list")
+	form.Set(paramAuthorizationDetails, `[{"type":"https://tools.example.com/call","actions":["read"]}]`)
+	w := post(t, h, form, nil)
+	var resp struct {
+		Scope                string            `json:"scope"`
+		AuthorizationDetails []json.RawMessage `json:"authorization_details"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body)
+	}
+	want, err := caveatsDetail(limes.Caveats{Ops: []limes.Op{limes.OpGet}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Scope != "tools:read tools:list" || len(resp.AuthorizationDetails) != 1 || !jsonEqual(t, resp.AuthorizationDetails[0], want) {
+		t.Errorf("scope %q, authorization_details %s; want %s", resp.Scope, resp.AuthorizationDetails, want)
+	}
+	plain := post(t, h, exchangeForm(f.idp.sign(t, TypeAccessToken, accessClaims())), nil)
+	var body map[string]any
+	if err := json.Unmarshal(plain.Body.Bytes(), &body); err != nil || plain.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", plain.Code, plain.Body)
+	}
+	for _, member := range []string{paramScope, paramAuthorizationDetails} {
+		if _, ok := body[member]; ok {
+			t.Errorf("%s answered unasked: %s", member, plain.Body)
+		}
+	}
+}
+
+// jsonEqual reports whether a and b are the same JSON value.
+func jsonEqual(t *testing.T, a, b json.RawMessage) bool {
+	t.Helper()
+	var x, y any
+	if err := json.Unmarshal(a, &x); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &y); err != nil {
+		t.Fatal(err)
+	}
+	return reflect.DeepEqual(x, y)
+}
+
+// A policy refuses authorization_details it does not understand with
+// ErrInvalidAuthorizationDetails, answered invalid_authorization_details
+// (RFC 9396 §5) and logged as the client's refusal, at WARN.
+func TestHandlerAnswersAPolicyRefusingTheDetails(t *testing.T) {
+	refusing := func(context.Context, Grant) (limes.IssueRequest, error) {
+		return limes.IssueRequest{}, fmt.Errorf("type %q unknown: %w", "x", ErrInvalidAuthorizationDetails)
+	}
+	f := newFixture(t, fixtureConfig{policy: refusing})
+	logs := &records{}
+	f.ex.cfg.Logger = slog.New(logs)
+	form := exchangeForm(f.idp.sign(t, TypeAccessToken, accessClaims()))
+	form.Set(paramAuthorizationDetails, `[{"type":"x"}]`)
+	w := post(t, newHandler(t, f), form, nil)
+	var resp errorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != http.StatusBadRequest || resp.Error != codeInvalidAuthorizationDetails {
+		t.Errorf("status %d: %s", w.Code, w.Body)
+	}
+	if level, _ := logs.last(); level != slog.LevelWarn {
+		t.Errorf("logged %s, want WARN", level)
 	}
 }
 
