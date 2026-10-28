@@ -138,6 +138,12 @@ func (h *IntrospectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	case errors.Is(err, limes.ErrUnauthenticated):
 		log.WarnContext(r.Context(), "introspection: token inactive", slog.Any("reason", err))
 		writeJSON(w, http.StatusOK, introspection{Active: false}, log)
+	case errors.Is(err, limes.ErrCopyCountersNotMetered):
+		// A copy whose limits this verifier does not count is no token it
+		// vouches for, as Verify refuses it; answering it active would state
+		// the capability's wider limits as the copy's.
+		log.ErrorContext(r.Context(), "introspection: a copy's limits need a verifier with MeterCopies; answered inactive", slog.Any("reason", err))
+		writeJSON(w, http.StatusOK, introspection{Active: false}, log)
 	case err != nil:
 		// An outage must not read as a token gone inactive: the gateway
 		// would refuse every request as if every token were revoked.
@@ -145,7 +151,7 @@ func (h *IntrospectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: codeServerError}, log)
 	default:
 		c := got.Capability
-		detail, err := caveatsDetail(c.Caveats)
+		detail, err := caveatsDetail(effectiveCaveats(c.Caveats, got.Copies))
 		if err != nil {
 			log.ErrorContext(r.Context(), "introspection: encode caveats", slog.String("capability", c.ID.String()), slog.Any("error", err))
 			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: codeServerError}, log)
@@ -167,6 +173,22 @@ func (h *IntrospectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 			slog.String("capability", answer.ID), slog.String("token_type", answer.TokenType))
 		writeJSON(w, http.StatusOK, answer, log)
 	}
+}
+
+// effectiveCaveats are c with each request and budget ceiling lowered to the
+// tightest a copy's blocks set, so an answer about a Biscuit copy states no
+// more than the copy may spend. A copy's limit only narrows: it is never
+// Unlimited, and one above the capability's leaves the capability's.
+func effectiveCaveats(c limes.Caveats, copies []limes.CopyCeiling) limes.Caveats {
+	for _, cc := range copies {
+		if r := cc.Requests; r != nil && (c.Requests.Unlimited || r.Max < c.Requests.Max) {
+			c.Requests = limes.RequestCeiling{Max: r.Max}
+		}
+		if b := cc.Budget; b != nil && (c.Budget.Unlimited || b.Max < c.Budget.Max) {
+			c.Budget.Max, c.Budget.Unlimited = b.Max, false
+		}
+	}
+	return c
 }
 
 // caveatsDetail is c as an authorization_details entry: the members of the

@@ -411,7 +411,12 @@ type Introspection struct {
 	Capability Capability
 	// FromBiscuit reports that the token is a Biscuit.
 	FromBiscuit bool
-	_           noCompare
+	// Copies are the limits the token's Biscuit blocks set on this copy of
+	// the capability, as VerifiedCapability.Copies has them: a copy is held
+	// to these as well as to the capability's caveats. Empty for a JWT and a
+	// Biscuit whose blocks set none.
+	Copies []CopyCeiling
+	_      noCompare
 }
 
 // Introspect answers an introspection endpoint (RFC 7662) about a token a
@@ -422,9 +427,13 @@ type Introspection struct {
 // possession: a key-bound token is active though no key was proved, and the
 // answer says the token is bound, not that its presenter holds the key. A
 // token lifted out of the Biscuit it was sealed in is refused, as Verify
-// refuses it. A refusal is ErrUnauthenticated's family, which the endpoint
-// answers as inactive; any other error is the server's, such as a
-// revocation lookup that failed, and never reads as inactive.
+// refuses it. So is a Biscuit copy that sets request or budget limits of its
+// own, on a verifier without BiscuitConfig.MeterCopies: ErrCopyCountersNotMetered,
+// as Verify answers it; with MeterCopies, the answer carries those limits in
+// Introspection.Copies. A refusal of the token is ErrUnauthenticated's
+// family, which the endpoint answers as inactive; any other error is the
+// server's, such as a revocation lookup that failed, and never reads as
+// inactive.
 //
 // Introspect is no authorization: it yields no VerifiedCapability, so its
 // answer can be neither delegated from nor checked against a request.
@@ -436,7 +445,12 @@ func (v *Verifier) Introspect(ctx context.Context, token string) (Introspection,
 	if err := v.checkRevoked(ctx, cap, biscuitIDs); err != nil {
 		return Introspection{}, err
 	}
-	return Introspection{Capability: cap.Clone(), FromBiscuit: biscuitIDs != nil}, nil
+	// As Verify: a copy whose limits no Meter here counts is not vouched
+	// for, so no answer states it narrower in words than it is in effect.
+	if len(cap.copies) > 0 && !v.cfg.Biscuit.MeterCopies {
+		return Introspection{}, ErrCopyCountersNotMetered
+	}
+	return Introspection{Capability: cap.Clone(), FromBiscuit: biscuitIDs != nil, Copies: cap.copies}, nil
 }
 
 // DPoPNonce is the nonce to send in the DPoP-Nonce header — with a

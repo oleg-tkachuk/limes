@@ -125,3 +125,43 @@ func dpopKey(t *testing.T) (ed25519.PrivateKey, string) {
 	}
 	return key, jkt
 }
+
+// A Biscuit copy that sets limits of its own is introspected with them, on a
+// verifier that meters copies, and refused as Verify refuses it on one that
+// does not: no answer states the capability's wider limits as the copy's.
+func TestIntrospectHoldsACopyToItsLimits(t *testing.T) {
+	ctx := context.Background()
+	v, _, root := limitedBiscuit(t)
+	outer, err := Attenuate(root, Attenuation{Requests: &RequestCeiling{Max: 50}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inner, err := Attenuate(outer, Attenuation{Requests: &RequestCeiling{Max: 5}, Budget: &BudgetCeiling{Max: NanosPerUnit}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := v.Introspect(ctx, inner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.FromBiscuit || len(got.Copies) != 2 || got.Copies[0].Requests == nil || got.Copies[0].Requests.Max != 5 ||
+		got.Copies[0].Budget == nil || got.Copies[0].Budget.Max != NanosPerUnit || got.Copies[1].Requests.Max != 50 {
+		t.Errorf("introspected copies %+v, want the inner block's limits first", got.Copies)
+	}
+
+	_, unmetered, _, _, token := biscuitFixture(t)
+	limited, err := Attenuate(token, Attenuation{Requests: &RequestCeiling{Max: 5}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := unmetered.Introspect(ctx, limited); !errors.Is(err, ErrCopyCountersNotMetered) || errors.Is(err, ErrUnauthenticated) {
+		t.Errorf("a limited copy without MeterCopies: %v, want ErrCopyCountersNotMetered", err)
+	}
+	plain, err := Attenuate(token, Attenuation{Ops: []Op{OpGet}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := unmetered.Introspect(ctx, plain); err != nil || len(got.Copies) != 0 {
+		t.Errorf("a copy with no limits of its own: %+v, %v", got.Copies, err)
+	}
+}

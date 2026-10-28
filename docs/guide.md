@@ -1378,7 +1378,9 @@ and `exchange.IntrospectionHandler` serves that as an RFC 7662 endpoint for
 authenticated callers, with the caveats as an RFC 9396
 `authorization_details` entry. It checks no audience and no proof of possession,
 so its answer authorizes nothing: an active bound token is reported bound,
-with its key, not proved. A revocation store that cannot answer is the
+with its key, not proved. A Biscuit copy that sets request or budget limits of its
+own is answered with them (`Introspection.Copies`), or, on a verifier
+without `BiscuitConfig.MeterCopies`, refused as `Verify` refuses it. A revocation store that cannot answer is the
 endpoint's error, never an inactive token.
 
 ## Answer a refusal
