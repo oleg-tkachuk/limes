@@ -2,8 +2,6 @@ package pgstore
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
@@ -261,25 +259,14 @@ func sumOf(text string) (limes.Nanos, error) {
 }
 
 // encode is the cursor as SumCharges hands it out: opaque, URL-safe.
-func (c sumCursor) encode() string {
-	raw, err := json.Marshal(c)
-	if err != nil {
-		panic(err) // a struct of a time, an integer, strings and a uuid always encodes
-	}
-	return base64.RawURLEncoding.EncodeToString(raw)
-}
+func (c sumCursor) encode() string { return encodeCursor(c) }
 
 // decodeSumCursor reads a cursor encode wrote; anything else is
 // ErrInvalidRequest.
 func decodeSumCursor(s string) (sumCursor, error) {
-	bad := fmt.Errorf("%w: pgstore: charge sum cursor %q", limes.ErrInvalidRequest, s)
-	raw, err := base64.RawURLEncoding.DecodeString(s)
-	if err != nil {
-		return sumCursor{}, bad
-	}
 	var c sumCursor
-	if err := json.Unmarshal(raw, &c); err != nil || limes.Nanos(c.Charged).Validate() != nil {
-		return sumCursor{}, bad
+	if err := decodeCursor(s, &c); err != nil || limes.Nanos(c.Charged).Validate() != nil {
+		return sumCursor{}, fmt.Errorf("%w: pgstore: charge sum cursor %q", limes.ErrInvalidRequest, s)
 	}
 	return c, nil
 }
