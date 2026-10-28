@@ -197,3 +197,20 @@ func TestNewExchangerRefusesAnIncompleteConfig(t *testing.T) {
 		}
 	}
 }
+
+// A subject token with less than minTTL left mints nothing: the capability
+// would expire before it could be used. The exchanger's clock may run ahead
+// of the verifier's, which still accepted the token.
+func TestExchangeRefusesASubjectTokenAboutToExpire(t *testing.T) {
+	f := newFixture(t, fixtureConfig{})
+	claims := accessClaims()
+	claims[claimExpiry] = testNow.Add(minTTL).Unix()
+	f.ex.cfg.Now = func() time.Time { return testNow.Add(minTTL / 2) }
+	before := f.store.inserts.Load()
+	if _, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, TypeAccessToken, claims))); !errors.Is(err, ErrInvalidGrant) {
+		t.Fatalf("err = %v, want ErrInvalidGrant", err)
+	}
+	if n := f.store.inserts.Load(); n != before {
+		t.Errorf("issued %d", n-before)
+	}
+}

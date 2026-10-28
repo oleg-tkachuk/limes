@@ -231,3 +231,30 @@ func TestHandlerNarrows(t *testing.T) {
 		t.Errorf("the child does not verify: %v", err)
 	}
 }
+
+// An unbound parent's child is bound only through a proof this exchanger
+// checks: none is checked without a DPoP verifier, and one that fails is
+// refused, before anything is delegated.
+func TestNarrowRebindsOnlyThroughACheckedProof(t *testing.T) {
+	for name, tc := range map[string]struct {
+		fc    fixtureConfig
+		proof func(t *testing.T) dpop.Proof
+	}{
+		"no DPoP verifier": {fixtureConfig{narrow: true, noDPoP: true}, func(t *testing.T) dpop.Proof { return proof(t, clientKey(t), "") }},
+		"a proof that fails": {fixtureConfig{narrow: true}, func(*testing.T) dpop.Proof {
+			return dpop.Proof{JWT: "a.b.c", Method: http.MethodPost, URL: tokenEndpoint}
+		}},
+	} {
+		f := newFixture(t, tc.fc)
+		parent := parentFor(t, f, nil)
+		req := narrowing(parent.Token)
+		req.DPoP = tc.proof(t)
+		before := f.store.inserts.Load()
+		if _, err := f.ex.Narrow(t.Context(), req); !errors.Is(err, dpop.ErrInvalid) {
+			t.Errorf("%s: %v, want dpop.ErrInvalid", name, err)
+		}
+		if n := f.store.inserts.Load(); n != before {
+			t.Errorf("%s: delegated %d", name, n-before)
+		}
+	}
+}
