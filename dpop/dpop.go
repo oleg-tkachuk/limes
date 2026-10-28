@@ -45,6 +45,21 @@ import (
 // Header is the HTTP header a proof travels in.
 const Header = "DPoP"
 
+// SingleProof is the one proof among values, every Header field a request
+// carries — r.Header.Values(Header), or a gRPC metadata entry's values —
+// and "" for none. More than one is ErrInvalid: RFC 9449 §4.3 (1) allows
+// exactly one, so none of them is chosen.
+func SingleProof(values []string) (string, error) {
+	switch len(values) {
+	case 0:
+		return "", nil
+	case 1:
+		return values[0], nil
+	default:
+		return "", fmt.Errorf("%w: %d %s fields", ErrInvalid, len(values), Header)
+	}
+}
+
 // tokenType is the JWT "typ" of a proof.
 const tokenType = "dpop+jwt"
 

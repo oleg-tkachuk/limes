@@ -179,3 +179,27 @@ func TestAuthSchemeValidate(t *testing.T) {
 		}
 	}
 }
+
+// RFC 9449 §7.2 refuses a request presenting a token under two schemes, and
+// RFC 6750 §2 one presenting it more than once: more than one Authorization
+// field is a malformed request, whatever each says alone. One field reads as
+// ParseAuthorization reads it, and none is no credentials.
+func TestParseAuthorizationValues(t *testing.T) {
+	for name, tc := range map[string]struct {
+		values []string
+		scheme AuthScheme
+		token  string
+		want   error
+	}{
+		"none":                 {nil, AuthSchemeUnspecified, "", ErrNoCredentials},
+		"one":                  {[]string{"DPoP abc"}, AuthSchemeDPoP, "abc", nil},
+		"one malformed":        {[]string{"Bearer a b"}, AuthSchemeBearer, "", ErrMalformedAuthorization},
+		"two schemes":          {[]string{"Bearer abc", "DPoP abc"}, AuthSchemeUnspecified, "", ErrMalformedAuthorization},
+		"the same field twice": {[]string{"Bearer abc", "Bearer abc"}, AuthSchemeUnspecified, "", ErrMalformedAuthorization},
+	} {
+		scheme, token, err := ParseAuthorizationValues(tc.values)
+		if scheme != tc.scheme || token != tc.token || tc.want == nil && err != nil || tc.want != nil && !errors.Is(err, tc.want) {
+			t.Errorf("%s: = %q, %q, %v; want %q, %q, %v", name, scheme, token, err, tc.scheme, tc.token, tc.want)
+		}
+	}
+}

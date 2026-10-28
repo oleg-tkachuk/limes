@@ -99,6 +99,26 @@ func TestDPoPRefusesAProofWithCriticalExtensions(t *testing.T) {
 	}
 }
 
+// RFC 9449 §4.3 (1): a request carries at most one DPoP field; with more,
+// no proof is chosen from among them, and the request is refused.
+func TestSingleProof(t *testing.T) {
+	const proof, other = "a.b.c", "d.e.f"
+	for name, tc := range map[string]struct {
+		values []string
+		jwt    string
+		want   error
+	}{
+		"none": {nil, "", nil},
+		"one":  {[]string{proof}, proof, nil},
+		"two":  {[]string{proof, other}, "", ErrInvalid},
+	} {
+		jwt, err := SingleProof(tc.values)
+		if jwt != tc.jwt || tc.want == nil && err != nil || tc.want != nil && !errors.Is(err, tc.want) {
+			t.Errorf("%s: = %q, %v; want %q, %v", name, jwt, err, tc.jwt, tc.want)
+		}
+	}
+}
+
 // padS is an ES256 signature with a zero byte before s: the same r and s,
 // one byte too long.
 func padS(sig []byte) []byte {
