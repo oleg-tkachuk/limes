@@ -50,7 +50,7 @@ const (
 	headerWWWAuthenticate = "WWW-Authenticate"
 	// tokenSymbols are the characters besides letters and digits an RFC 9110
 	// §5.6.2 token may hold, as an authentication scheme is.
-	tokenSymbols = "!#$%&'*+-.^_`|~"
+	tokenSymbols = "!#$%&'*+-.^_`|~" //nolint:gosec // G101: the RFC 9110 tchar set, not a credential
 	// schemeEnd ends an Authorization header's scheme (RFC 9110 §11.4).
 	schemeEnd = " \t"
 	// cacheNoStore keeps a token response out of every cache (RFC 6749 §5.1).
