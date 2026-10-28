@@ -62,6 +62,14 @@ var errNoNarrowing = fmt.Errorf("%w: this exchange narrows no capabilities", Err
 // proof of possession, asks the policy, holds its answer to the request,
 // and delegates. A refusal is one of the errors above, or a dpop error for
 // the proof; every narrowing and refusal is logged.
+//
+// A bearer capability is narrowed for whichever authenticated client
+// presents it, as it would authorize whoever presents it: unlike Exchange,
+// Narrow does not hold the subject to the client, and Narrowing.Client is
+// the policy's to compare with the parent's ClientID where only the client
+// it was granted to may narrow it. A bound capability is narrowed only with
+// a proof by its key. The child keeps the parent's ClientID, the client the
+// grant began with, unless the policy names another.
 func (e *Exchanger) Narrow(ctx context.Context, req NarrowRequest) (Result, error) {
 	res, parent, err := e.narrow(ctx, req)
 	log := e.cfg.Logger.With(slog.String("client", req.Client.ID))
