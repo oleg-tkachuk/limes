@@ -147,6 +147,17 @@ type fixture struct {
 	now time.Time
 }
 
+// newFixture is a fixture on a fresh Env from setup, at the Env's clock, or
+// at the current time to the store's resolution when it has none.
+func newFixture(t *testing.T, setup func(t *testing.T) Env) fixture {
+	env := setup(t)
+	now := time.Now().UTC().Truncate(timestampResolution)
+	if env.Now != nil {
+		now = env.Now()
+	}
+	return fixture{Env: env, now: now}
+}
+
 // newCapability is a capability with every field set, so a store that drops
 // fixtureCopyQuota is the quota of copies the fixture's capabilities carry,
 // so that a store that drops it fails the round trip.
@@ -247,61 +258,49 @@ func sameRevocation(a, b limes.Revocation) bool {
 // Run runs every check as a subtest, each on a fresh Env from setup.
 func Run(t *testing.T, setup func(t *testing.T) Env) {
 	t.Helper()
-	checks := []struct {
-		name string
-		run  func(*testing.T, fixture)
-	}{
-		{"InsertReadsBack", checkRoundTrip},
-		{"InsertRefusesADuplicate", checkDuplicate},
-		{"ARecordIsNoCallersToChange", checkRecordIsItsOwn},
-		{"GetRecordReadsBackIssuanceAndRevocation", checkRecord},
-		{"UnknownIDs", checkUnknown},
-		{"RevokeIsIdempotentAndReachesDescendants", checkRevoke},
-		{"RevocationLineageAnswersAsIsRevoked", checkRevocationLineage},
-		{"CascadeRecordsEveryDescendant", checkCascade},
-		{"RevocationReachesEveryGeneration", checkDeepChain},
-		{"RevocationReachesTheDeepestChainAndInsertRefusesADeeperOne", checkMaxDepth},
-		{"CascadeRecordsTheDeepestChain", checkMaxDepthCascade},
-		{"PurgeDropsExpiredRecordsAndTheirEntries", checkPurge},
-		{"PurgeWorksInBatches", checkPurgeBatches},
-		{"PurgeTakesTheDefaultBatchWhenAskedForNone", checkPurgeDefaultLimit},
-		{"ARevocationOutlastsTimePassing", checkRevocationOutlastsTime},
-		{"ListByPrincipalClampsItsLimit", checkListLimits},
-		{"ListByPrincipalEndsOnAFullLastPage", checkListFullLastPage},
-		{"PurgeKeepsARevocationAVerifierMayStillNeed", checkPurgeRetention},
-		{"PurgeNeverLeavesAChildWithoutItsParent", checkPurgeKeepsLineage},
-		{"InsertRefusesABrokenLineage", checkInsertKeepsLineage},
-		{"ListByPrincipalPages", checkListPages},
-		{"ListByPrincipalFilters", checkListFilters},
-		{"ListByPrincipalExpiresAtTheInstant", checkListExpiryInstant},
-		{"ListByPrincipalRefusesAMalformedRequest", checkListMalformed},
-		{"ListByPrincipalKeepsTenantsApart", checkListTenants},
-		{"InsertRefusesATenantItCannotMintFor", checkInsertTenants},
-		{"BiscuitRevocation", checkBiscuit},
-		{"ACallScopedToAnotherTenantIsRefused", checkScopeMismatch},
-		{"AReadOnlyScopeWritesNothing", checkReadOnlyScope},
-		{"CensusCountsEachRecordOnce", checkCensus},
-		{"CensusPagesAndRefusesAMalformedRequest", checkCensusPages},
-		{"CensusCountsNoBiscuitCopyAndNoEmptyGroup", checkCensusEdges},
-		{"ListRecordsGivesEachRecordItsCensusDisposition", checkListRecords},
-		{"ListRecordsFilters", checkListRecordsFilters},
-		{"ListRecordsPagesBothWays", checkListRecordsPages},
-		{"ListRecordsRefusesAMalformedRequest", checkListRecordsMalformed},
-		{"ListRecordsRefusesACursorOfOtherFilters", checkListRecordsCursorFilters},
-		{"GetRecordListingIsTheListingOfTheRecord", checkGetRecordListing},
-		{"ListingNamesTheEntryThatRevokedARecord", checkListingStoppedBy},
-		{"EraseTenantRecordsKeepsWhatAVerifierStillNeeds", checkEraseTenant},
+	checks := []watchdog.Check[fixture]{
+		{Name: "InsertReadsBack", Run: checkRoundTrip},
+		{Name: "InsertRefusesADuplicate", Run: checkDuplicate},
+		{Name: "ARecordIsNoCallersToChange", Run: checkRecordIsItsOwn},
+		{Name: "GetRecordReadsBackIssuanceAndRevocation", Run: checkRecord},
+		{Name: "UnknownIDs", Run: checkUnknown},
+		{Name: "RevokeIsIdempotentAndReachesDescendants", Run: checkRevoke},
+		{Name: "RevocationLineageAnswersAsIsRevoked", Run: checkRevocationLineage},
+		{Name: "CascadeRecordsEveryDescendant", Run: checkCascade},
+		{Name: "RevocationReachesEveryGeneration", Run: checkDeepChain},
+		{Name: "RevocationReachesTheDeepestChainAndInsertRefusesADeeperOne", Run: checkMaxDepth},
+		{Name: "CascadeRecordsTheDeepestChain", Run: checkMaxDepthCascade},
+		{Name: "PurgeDropsExpiredRecordsAndTheirEntries", Run: checkPurge},
+		{Name: "PurgeWorksInBatches", Run: checkPurgeBatches},
+		{Name: "PurgeTakesTheDefaultBatchWhenAskedForNone", Run: checkPurgeDefaultLimit},
+		{Name: "ARevocationOutlastsTimePassing", Run: checkRevocationOutlastsTime},
+		{Name: "ListByPrincipalClampsItsLimit", Run: checkListLimits},
+		{Name: "ListByPrincipalEndsOnAFullLastPage", Run: checkListFullLastPage},
+		{Name: "PurgeKeepsARevocationAVerifierMayStillNeed", Run: checkPurgeRetention},
+		{Name: "PurgeNeverLeavesAChildWithoutItsParent", Run: checkPurgeKeepsLineage},
+		{Name: "InsertRefusesABrokenLineage", Run: checkInsertKeepsLineage},
+		{Name: "ListByPrincipalPages", Run: checkListPages},
+		{Name: "ListByPrincipalFilters", Run: checkListFilters},
+		{Name: "ListByPrincipalExpiresAtTheInstant", Run: checkListExpiryInstant},
+		{Name: "ListByPrincipalRefusesAMalformedRequest", Run: checkListMalformed},
+		{Name: "ListByPrincipalKeepsTenantsApart", Run: checkListTenants},
+		{Name: "InsertRefusesATenantItCannotMintFor", Run: checkInsertTenants},
+		{Name: "BiscuitRevocation", Run: checkBiscuit},
+		{Name: "ACallScopedToAnotherTenantIsRefused", Run: checkScopeMismatch},
+		{Name: "AReadOnlyScopeWritesNothing", Run: checkReadOnlyScope},
+		{Name: "CensusCountsEachRecordOnce", Run: checkCensus},
+		{Name: "CensusPagesAndRefusesAMalformedRequest", Run: checkCensusPages},
+		{Name: "CensusCountsNoBiscuitCopyAndNoEmptyGroup", Run: checkCensusEdges},
+		{Name: "ListRecordsGivesEachRecordItsCensusDisposition", Run: checkListRecords},
+		{Name: "ListRecordsFilters", Run: checkListRecordsFilters},
+		{Name: "ListRecordsPagesBothWays", Run: checkListRecordsPages},
+		{Name: "ListRecordsRefusesAMalformedRequest", Run: checkListRecordsMalformed},
+		{Name: "ListRecordsRefusesACursorOfOtherFilters", Run: checkListRecordsCursorFilters},
+		{Name: "GetRecordListingIsTheListingOfTheRecord", Run: checkGetRecordListing},
+		{Name: "ListingNamesTheEntryThatRevokedARecord", Run: checkListingStoppedBy},
+		{Name: "EraseTenantRecordsKeepsWhatAVerifierStillNeeds", Run: checkEraseTenant},
 	}
-	for _, c := range checks {
-		t.Run(c.name, func(t *testing.T) {
-			env := setup(t)
-			now := time.Now().UTC().Truncate(timestampResolution)
-			if env.Now != nil {
-				now = env.Now()
-			}
-			watchdog.Run(c.name, env.CheckTimeout, func() { c.run(t, fixture{Env: env, now: now}) })
-		})
-	}
+	watchdog.RunChecks(t, func(t *testing.T) fixture { return newFixture(t, setup) }, func(f fixture) time.Duration { return f.CheckTimeout }, checks)
 }
 
 func checkRoundTrip(t *testing.T, f fixture) {

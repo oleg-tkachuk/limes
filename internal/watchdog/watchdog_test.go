@@ -60,3 +60,31 @@ func TestEffectiveLimit(t *testing.T) {
 		}
 	}
 }
+
+// RunChecks runs each check as its own subtest, in order, each on an env of
+// its own from setup.
+func TestRunChecksGivesEachCheckItsOwnSubtestAndEnv(t *testing.T) {
+	type env struct{ n int }
+	setups := 0
+	var ran []string
+	record := func(t *testing.T, e *env) {
+		e.n++
+		ran = append(ran, t.Name())
+		if e.n != 1 {
+			t.Errorf("%s shares an env: %d checks on it", t.Name(), e.n)
+		}
+	}
+	limits := 0
+	limitOf := func(e *env) time.Duration {
+		limits++
+		if e.n != 0 {
+			t.Error("the limit was read from an env a check had used")
+		}
+		return limit
+	}
+	RunChecks(t, func(*testing.T) *env { setups++; return &env{} }, limitOf, []Check[*env]{{"First", record}, {"Second", record}})
+	want := []string{t.Name() + "/First", t.Name() + "/Second"}
+	if setups != len(want) || limits != len(want) || strings.Join(ran, ",") != strings.Join(want, ",") {
+		t.Errorf("%d setups, %d limits, ran %v; want %d each, %v", setups, limits, ran, len(want), want)
+	}
+}
