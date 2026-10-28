@@ -67,16 +67,31 @@ func (c Caveats) Check(req CheckRequest) error {
 	if err != nil {
 		return err
 	}
+	if err := c.checkReach(req); err != nil {
+		return err
+	}
+	return c.checkHandling(req, mutating)
+}
+
+// checkReach refuses an operation the caveats do not allow, or one on a
+// resource they do not reach.
+func (c Caveats) checkReach(req CheckRequest) error {
 	if !containsOp(c.Ops, req.Op) {
 		return fmt.Errorf("%w: %q not in %v", ErrOpNotAllowed, req.Op, c.Ops)
 	}
-	if !c.AllowsResource(req.Resource) {
-		if req.Resource == "" {
-			return fmt.Errorf("%w: operation %q is not bound to a resource, and the capability is resource-restricted",
-				ErrResourceNotAllowed, req.Op)
-		}
-		return fmt.Errorf("%w: %q", ErrResourceNotAllowed, req.Resource)
+	if c.AllowsResource(req.Resource) {
+		return nil
 	}
+	if req.Resource == "" {
+		return fmt.Errorf("%w: operation %q is not bound to a resource, and the capability is resource-restricted",
+			ErrResourceNotAllowed, req.Op)
+	}
+	return fmt.Errorf("%w: %q", ErrResourceNotAllowed, req.Resource)
+}
+
+// checkHandling refuses a mutating operation without the idempotency key
+// the caveats require, or a read of a tainted resource they do not allow.
+func (c Caveats) checkHandling(req CheckRequest, mutating bool) error {
 	if c.IdempotencyKeyRequired && mutating && !req.HasIdempotencyKey {
 		return fmt.Errorf("%w: mutating operation %q", ErrIdempotencyKeyRequired, req.Op)
 	}
