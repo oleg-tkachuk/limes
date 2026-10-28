@@ -27,9 +27,29 @@ func TestResponseFreshness(t *testing.T) {
 		{"public, max-age=60", "15", 45 * time.Second, true},
 		{`MAX-AGE="30"`, "", 30 * time.Second, true},
 		{"max-age=10", "60", 0, true},
+		// §5.1: of a list-valued Age, the first member.
+		{"max-age=60", "30, 40", 30 * time.Second, true},
+		{"max-age=60", " 15 ,", 45 * time.Second, true},
+		{"max-age=60", "x, 10", time.Minute, true},
 		{"no-cache", "", 0, true},
 		{"max-age=60, no-store", "", 0, true},
 		{"max-age=abc", "", 0, true},
+		// §5.2: a quoted value only between two quotes; one left open, or
+		// closed without opening, is invalid.
+		{`max-age="5`, "", 0, true},
+		{`max-age=5"`, "", 0, true},
+		{`max-age="60`, "", 0, true},
+		{`max-age=60"`, "", 0, true},
+		{`max-age="`, "", 0, true},
+		{`max-age=""`, "", 0, true},
+		// A comma inside a quoted string separates no directives.
+		{`ext="a,max-age=1", max-age=60`, "", time.Minute, true},
+		{`ext="x,no-store,y", max-age=60`, "", time.Minute, true},
+		{`ext="a\",max-age=1", max-age=60`, "", time.Minute, true},
+		// A quoted string never closed runs to the end of the field.
+		{`ext="a, max-age=60`, "", 0, false},
+		// RFC 9110 §5.6.1: empty members are allowed, leading one included.
+		{",max-age=60", "", time.Minute, true},
 		{"public", "", 0, false},
 		// RFC 9111 §4.2.1: the first max-age stands.
 		{"max-age=10, max-age=3600", "", 10 * time.Second, true},
@@ -221,19 +241,21 @@ func TestRemoteJWKSKeepsTheSetWhenNoKeyIsUsable(t *testing.T) {
 }
 
 // The Cache-Control a handler sends: DefaultMaxAge when it names none, and
-// max-age=0 only when told to revalidate.
+// no-cache only when told to revalidate — max-age=0 would still let a cache
+// serve the set stale (RFC 9111 §4.2.4). Remote reads each as served.
 func TestHandlerMaxAge(t *testing.T) {
 	keys := func() map[string]ed25519.PublicKey { return nil }
 	for name, tc := range map[string]struct {
-		cfg  HandlerConfig
-		want string
+		cfg   HandlerConfig
+		want  string
+		fresh time.Duration
 	}{
-		"none named": {HandlerConfig{Keys: keys}, fmt.Sprintf("public, max-age=%d", int64(DefaultMaxAge/time.Second))},
-		"revalidate": {HandlerConfig{Keys: keys, Revalidate: true}, "public, max-age=0"},
-		"a minute":   {HandlerConfig{Keys: keys, MaxAge: time.Minute}, "public, max-age=60"},
-		"a second":   {HandlerConfig{Keys: keys, MaxAge: time.Second}, "public, max-age=1"},
+		"none named": {HandlerConfig{Keys: keys}, fmt.Sprintf("public, max-age=%d", int64(DefaultMaxAge/time.Second)), DefaultMaxAge},
+		"revalidate": {HandlerConfig{Keys: keys, Revalidate: true}, "public, no-cache", 0},
+		"a minute":   {HandlerConfig{Keys: keys, MaxAge: time.Minute}, "public, max-age=60", time.Minute},
+		"a second":   {HandlerConfig{Keys: keys, MaxAge: time.Second}, "public, max-age=1", time.Second},
 		// Whole seconds, the fraction dropped.
-		"a second and a half": {HandlerConfig{Keys: keys, MaxAge: 1500 * time.Millisecond}, "public, max-age=1"},
+		"a second and a half": {HandlerConfig{Keys: keys, MaxAge: 1500 * time.Millisecond}, "public, max-age=1", time.Second},
 	} {
 		h, err := NewHandler(tc.cfg)
 		if err != nil {
@@ -243,6 +265,9 @@ func TestHandlerMaxAge(t *testing.T) {
 		h.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/jwks", nil))
 		if got := rec.Header().Get(httpx.HeaderCacheControl); got != tc.want {
 			t.Errorf("%s: Cache-Control = %q, want %q", name, got, tc.want)
+		}
+		if fresh, ok := responseFreshness(rec.Header()); fresh != tc.fresh || !ok {
+			t.Errorf("%s: read back as fresh for %v, %v; want %v", name, fresh, ok, tc.fresh)
 		}
 	}
 }
@@ -256,7 +281,7 @@ func TestConfigsRefuseNegatives(t *testing.T) {
 		"no keys":                   {},
 		"negative max-age":          {Keys: keys, MaxAge: -time.Second},
 		"max-age beside revalidate": {Keys: keys, MaxAge: time.Second, Revalidate: true},
-		// Served in whole seconds, it would read max-age=0: Revalidate's.
+		// Served in whole seconds, it would read max-age=0, stale at once.
 		"max-age under a second":  {Keys: keys, MaxAge: 500 * time.Millisecond},
 		"max-age of a nanosecond": {Keys: keys, MaxAge: time.Nanosecond},
 	} {

@@ -10,6 +10,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/json"
+	"encoding/json/jsontext"
 	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
@@ -43,15 +44,44 @@ type document struct {
 	Keys *[]entry `json:"keys"`
 }
 
+// received is a document as parse reads it: each entry kept as the JSON it
+// is, so one of a shape the reader does not support is skipped on its own
+// rather than failing the set (RFC 7517 §5).
+type received struct {
+	// Keys is nil as document's is.
+	Keys *[]jsontext.Value `json:"keys"`
+}
+
 // entry is one entry in the JWKS — exactly the fields needed to verify
-// an Ed25519 signature; we do not embed `use` or `key_ops` because
-// the kid + alg pair fully constrains use here.
+// an Ed25519 signature. Marshal writes no `use` or `key_ops`, as the kid +
+// alg pair fully constrains use here; parse reads them, so a key another
+// issuer publishes for something else is not used to verify (RFC 7517 §4.2,
+// §4.3).
 type entry struct {
-	Kty string `json:"kty"`           // "OKP"
-	Crv string `json:"crv"`           // "Ed25519"
-	Kid string `json:"kid"`           // matches jwtHeader.Kid
-	Alg string `json:"alg,omitempty"` // "Ed25519" (RFC 9864); "EdDSA" is read
-	X   string `json:"x"`             // base64url-encoded raw public key
+	Kty    string   `json:"kty"`               // "OKP"
+	Crv    string   `json:"crv"`               // "Ed25519"
+	Kid    string   `json:"kid"`               // matches jwtHeader.Kid
+	Alg    string   `json:"alg,omitempty"`     // "Ed25519" (RFC 9864); "EdDSA" is read
+	Use    string   `json:"use,omitempty"`     // "sig" or none to verify with
+	KeyOps []string `json:"key_ops,omitempty"` // "verify" among them, or none
+	X      string   `json:"x"`                 // base64url-encoded raw public key
+}
+
+// What an entry's use and key_ops name when its key verifies signatures
+// (RFC 7517 §4.2, §4.3).
+const (
+	useSignature = "sig"
+	opVerify     = "verify"
+)
+
+// verifies reports whether k's use and key_ops let it verify a signature:
+// each unset, or naming that use.
+func (k entry) verifies() bool {
+	if k.Use != "" && k.Use != useSignature {
+		return false
+	}
+	// An empty key_ops is set, and names no operation.
+	return k.KeyOps == nil || slices.Contains(k.KeyOps, opVerify)
 }
 
 // The names a key's entry may give its algorithm (RFC 9864): the alg the
@@ -110,13 +140,17 @@ func MarshalAlgorithms(keys map[string]ed25519.PublicKey, algs map[string]string
 }
 
 // Parse decodes a JWKS document into a kid → public key map. Entries
-// that are not Ed25519 (a future kty), that lack a kid, or whose key does
-// not decode to an Ed25519 public key are skipped rather than failing the
-// document: one malformed or foreign entry must not take every other key —
-// and so every token signed with them — out of service during a rotation.
-// Two entries naming one kid are both skipped. A document that is not JSON
-// at all, names a member twice, or has no "keys" array (RFC 7517 §5) is an
-// error: only `{"keys":[]}` withdraws every key.
+// that are not Ed25519 (a future kty), that lack a kid, whose use or
+// key_ops is not verifying signatures (RFC 7517 §4.2, §4.3), whose key does
+// not decode to an Ed25519 public key, or that are not of the shape a JWK
+// is read in — a member of another JSON type, no object at all — are skipped
+// rather than failing the document (RFC 7517 §5): one malformed or foreign
+// entry must not take every other key — and so every token signed with them
+// — out of service during a rotation. Two Ed25519 keys naming one kid are
+// both skipped; a kid an entry of another kind also names is not (§4.5).
+// A document that is not JSON at all, names a member twice, or has no
+// "keys" array (RFC 7517 §5) is an error: only `{"keys":[]}` withdraws
+// every key.
 func Parse(raw []byte) (map[string]ed25519.PublicKey, error) {
 	keys, _, err := parse(raw)
 	return keys, err
@@ -124,7 +158,7 @@ func Parse(raw []byte) (map[string]ed25519.PublicKey, error) {
 
 // parse is Parse, also reporting how many entries it skipped.
 func parse(raw []byte) (map[string]ed25519.PublicKey, int, error) {
-	var doc document
+	var doc received
 	// JSON's own rules: names in their exact case, none twice in one object.
 	if err := jsonv2.Unmarshal(raw, &doc); err != nil {
 		return nil, 0, fmt.Errorf("jwks: parse JWKS: %w", err)
@@ -133,38 +167,56 @@ func parse(raw []byte) (map[string]ed25519.PublicKey, int, error) {
 		return nil, 0, errors.New(`jwks: parse JWKS: no "keys" array`)
 	}
 	entries := *doc.Keys
-	out := make(map[string]ed25519.PublicKey, len(entries))
-	seen := make(map[string]int, len(entries)) // entries per kid
-	for _, k := range entries {
-		seen[k.Kid]++
-	}
+	keys := make([]usable, 0, len(entries))
+	named := make(map[string]int, len(entries)) // usable keys per kid
 	skipped := 0
-	for _, k := range entries {
-		key, ok := usableKey(k, seen[k.Kid])
+	for _, value := range entries {
+		k, ok := usableKey(value)
 		if !ok {
 			skipped++
 			continue
 		}
-		out[k.Kid] = key
+		keys = append(keys, k)
+		named[k.kid]++
+	}
+	out := make(map[string]ed25519.PublicKey, len(keys))
+	for _, k := range keys {
+		// A kid named by two usable keys is used for neither: which one
+		// signs is not for the reader to guess. An entry of another kind
+		// naming it too does not count (RFC 7517 §4.5): no token verifies
+		// under that one.
+		if named[k.kid] > 1 {
+			skipped++
+			continue
+		}
+		out[k.kid] = k.key
 	}
 	return out, skipped, nil
 }
 
-// usableKey is k's Ed25519 key, when k is one a verifier can use: an
-// Ed25519 key under a kid named by no other entry (named, the number of
-// entries naming it), for an algorithm that is Ed25519's, encoded as JOSE
+// usable is an entry's Ed25519 key under its kid.
+type usable struct {
+	kid string
+	key ed25519.PublicKey
+}
+
+// usableKey is value's Ed25519 key, when value is an entry a verifier can
+// use: an object whose members are each of their JSON type, for an Ed25519
+// key under a kid, for an algorithm that is Ed25519's, encoded as JOSE
 // encodes every member, once.
-func usableKey(k entry, named int) (ed25519.PublicKey, bool) {
-	// A kid named twice is used for neither key: which one signs is not
-	// for the reader to guess.
-	if k.Kty != jose.KtyOKP || k.Crv != jose.CrvEd25519 || k.Kid == "" || named > 1 || !ed25519Alg(k.Alg) {
-		return nil, false
+func usableKey(value jsontext.Value) (usable, bool) {
+	var k entry
+	if err := jsonv2.Unmarshal(value, &k); err != nil {
+		return usable{}, false
+	}
+	if k.Kty != jose.KtyOKP || k.Crv != jose.CrvEd25519 || k.Kid == "" || !ed25519Alg(k.Alg) || !k.verifies() {
+		return usable{}, false
 	}
 	decoded, err := jose.UnB64(k.X) // strict: one encoding per key, as every JOSE member
 	if err != nil || len(decoded) != ed25519.PublicKeySize {
-		return nil, false
+		return usable{}, false
 	}
-	return ed25519.PublicKey(decoded), true
+	return usable{kid: k.Kid, key: ed25519.PublicKey(decoded)}, true
 }
 
 // ed25519Alg reports whether alg names Ed25519, or nothing.
@@ -190,11 +242,14 @@ type HandlerConfig struct {
 	// Keep it below the time between publishing a new key and signing with
 	// it, and between withdrawing an old key and the end of its tokens'
 	// TTL. Served in whole seconds, the fraction dropped, so under a second
-	// it is refused: it would read as Revalidate's max-age=0. Zero:
-	// DefaultMaxAge.
+	// it is refused: it would read as max-age=0, which still lets a cache
+	// serve the set stale. Zero: DefaultMaxAge.
 	MaxAge time.Duration
-	// Revalidate tells clients to revalidate the set on every use
-	// (max-age=0) instead of keeping it for MaxAge, which it excludes.
+	// Revalidate tells clients to revalidate the set on every use instead of
+	// keeping it for MaxAge, which it excludes. It is served as no-cache
+	// (RFC 9111 §5.2.2.4), not max-age=0: a response stale at once may
+	// still be reused stale where a cache is allowed to (§4.2.4), and
+	// no-cache allows none. Remote reads either as fresh for no time.
 	Revalidate bool
 }
 
@@ -207,10 +262,10 @@ const DefaultMaxAge = DefaultRefreshInterval
 // with a strong ETag of its bytes that answers If-None-Match with 304
 // (RFC 9110 §13.1.2), and fresh for MaxAge.
 type Handler struct {
-	keys   func() map[string]ed25519.PublicKey
-	algs   func() map[string]string
-	maxAge time.Duration
-	log    *slog.Logger
+	keys         func() map[string]ed25519.PublicKey
+	algs         func() map[string]string
+	cacheControl string
+	log          *slog.Logger
 }
 
 // NewHandler builds a Handler serving cfg.Keys(), refusing no Keys, a
@@ -219,33 +274,35 @@ func NewHandler(cfg HandlerConfig) (*Handler, error) {
 	if cfg.Keys == nil {
 		return nil, errors.New("jwks: HandlerConfig.Keys required")
 	}
-	maxAge, err := cfg.maxAge()
+	cacheControl, err := cfg.cacheControl()
 	if err != nil {
 		return nil, err
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
-	return &Handler{keys: cfg.Keys, algs: cfg.Algorithms, maxAge: maxAge, log: cfg.Logger}, nil
+	return &Handler{keys: cfg.Keys, algs: cfg.Algorithms, cacheControl: cacheControl, log: cfg.Logger}, nil
 }
 
-// maxAge is the max-age the handler serves: 0 for Revalidate, MaxAge, or
-// DefaultMaxAge for none. It refuses a negative MaxAge or one under a
-// second, or a MaxAge beside Revalidate.
-func (cfg HandlerConfig) maxAge() (time.Duration, error) {
+// cacheControl is the Cache-Control the handler serves: no-cache for
+// Revalidate, else max-age of MaxAge, or of DefaultMaxAge for none. It
+// refuses a negative MaxAge or one under a second, or a MaxAge beside
+// Revalidate.
+func (cfg HandlerConfig) cacheControl() (string, error) {
+	maxAge := cfg.MaxAge
 	switch {
-	case cfg.MaxAge < 0:
-		return 0, fmt.Errorf("jwks: HandlerConfig.MaxAge %s is negative", cfg.MaxAge)
-	case cfg.MaxAge > 0 && cfg.MaxAge < time.Second:
-		return 0, fmt.Errorf("jwks: HandlerConfig.MaxAge %s is under a second, the unit of max-age", cfg.MaxAge)
-	case cfg.Revalidate && cfg.MaxAge != 0:
-		return 0, fmt.Errorf("jwks: HandlerConfig.MaxAge %s beside Revalidate", cfg.MaxAge)
+	case maxAge < 0:
+		return "", fmt.Errorf("jwks: HandlerConfig.MaxAge %s is negative", maxAge)
+	case maxAge > 0 && maxAge < time.Second:
+		return "", fmt.Errorf("jwks: HandlerConfig.MaxAge %s is under a second, the unit of max-age", maxAge)
+	case cfg.Revalidate && maxAge != 0:
+		return "", fmt.Errorf("jwks: HandlerConfig.MaxAge %s beside Revalidate", maxAge)
 	case cfg.Revalidate:
-		return 0, nil
-	case cfg.MaxAge == 0:
-		return DefaultMaxAge, nil
+		return fmt.Sprintf("%s, %s", httpx.DirectivePublic, httpx.DirectiveNoCache), nil
+	case maxAge == 0:
+		maxAge = DefaultMaxAge
 	}
-	return cfg.MaxAge, nil
+	return fmt.Sprintf("%s, %s=%d", httpx.DirectivePublic, httpx.DirectiveMaxAge, int64(maxAge/time.Second)), nil
 }
 
 // ServeHTTP answers GET and HEAD with the document, and anything else with
@@ -267,7 +324,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	etag := `"` + jose.B64(sum[:]) + `"`
 	header := w.Header()
 	header.Set(httpx.HeaderETag, etag)
-	header.Set(httpx.HeaderCacheControl, fmt.Sprintf("%s, %s=%d", httpx.DirectivePublic, httpx.DirectiveMaxAge, int64(h.maxAge/time.Second)))
+	header.Set(httpx.HeaderCacheControl, h.cacheControl)
 	if etagMatches(r.Header.Values(httpx.HeaderIfNoneMatch), etag) {
 		w.WriteHeader(http.StatusNotModified)
 		return
