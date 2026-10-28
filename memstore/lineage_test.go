@@ -49,9 +49,9 @@ func TestChildrenCannotSpendPastTheirParentsBudget(t *testing.T) {
 	s := newTestStore()
 	u := newTestUsage(s)
 	rootID, kids, tenant := tree(t, s,
-		limes.Caveats{Ops: []limes.Op{limes.OpGet}, Budget: limes.BudgetCeiling{Max: limes.MustParseAmount("25"), UnitCode: "USD"}},
+		limes.Caveats{Requests: limes.RequestCeiling{Unlimited: true}, Ops: []limes.Op{limes.OpGet}, Budget: limes.BudgetCeiling{Max: limes.MustParseAmount("25"), UnitCode: "USD"}},
 		2,
-		limes.Caveats{Ops: []limes.Op{limes.OpGet}, Budget: limes.BudgetCeiling{Max: limes.MustParseAmount("20"), UnitCode: "USD"}},
+		limes.Caveats{Requests: limes.RequestCeiling{Unlimited: true}, Ops: []limes.Op{limes.OpGet}, Budget: limes.BudgetCeiling{Max: limes.MustParseAmount("20"), UnitCode: "USD"}},
 	)
 
 	charge := func(id uuid.UUID, amount limes.Nanos) (meter.ChargeReceipt, error) {
@@ -142,7 +142,7 @@ func TestVerifierRejectsChildOfRevokedParent(t *testing.T) {
 		IssuedBy: limes.Principal{Subject: "op"},
 		Subject:  limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: uuid.New(), Subject: "orchestrator"},
 		Audience: []string{"data"},
-		Caveats:  limes.Caveats{Ops: []limes.Op{limes.OpGet, limes.OpShare}},
+		Caveats:  limes.Caveats{Requests: limes.RequestCeiling{Unlimited: true}, Ops: []limes.Op{limes.OpGet, limes.OpShare}},
 		TTL:      time.Hour,
 	})
 	parent, parentToken := parentResult.Capability, parentResult.Token

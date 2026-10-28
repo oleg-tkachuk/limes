@@ -31,7 +31,7 @@ func TestMatchResourceName(t *testing.T) {
 			t.Errorf("MatchResourceName(%q, %q) = %v, want %v", tc.prefix, tc.uri, got, tc.want)
 		}
 	}
-	c := Caveats{Ops: []Op{OpGet}, ResourceNamePrefixes: []string{"drafts/billing-"}}
+	c := Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}, ResourceNamePrefixes: []string{"drafts/billing-"}}
 	if !c.RestrictsResources() || !c.AllowsResource("drafts/billing-q3") || c.AllowsResource("drafts/hr") {
 		t.Error("name prefixes do not restrict the caveats to what they name")
 	}
@@ -42,7 +42,7 @@ func TestMatchResourceName(t *testing.T) {
 func TestNamePrefixCoverage(t *testing.T) {
 	type res struct{ prefixes, uris, names []string }
 	caveats := func(r res) Caveats {
-		return Caveats{Ops: []Op{OpGet}, ResourcePrefixes: r.prefixes, ResourceURIs: r.uris, ResourceNamePrefixes: r.names}
+		return Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}, ResourcePrefixes: r.prefixes, ResourceURIs: r.uris, ResourceNamePrefixes: r.names}
 	}
 	for _, tc := range []struct {
 		name          string
@@ -78,7 +78,7 @@ func TestNamePrefixCoverage(t *testing.T) {
 // UTF-8 sequence, which names no whole character.
 func TestValidateNamePrefixes(t *testing.T) {
 	for _, bad := range []string{"", "drafts/../hr-", "drafts/./x", "drafts/a%", "drafts/a%2", "drafts/\xc3", "drafts/\xe2\x82"} {
-		if err := (Caveats{Ops: []Op{OpGet}, ResourceNamePrefixes: []string{bad}}).Validate(); !errors.Is(err, ErrInvalidCaveats) {
+		if err := (Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}, ResourceNamePrefixes: []string{bad}}).Validate(); !errors.Is(err, ErrInvalidCaveats) {
 			t.Errorf("name prefix %q: %v, want ErrInvalidCaveats", bad, err)
 		}
 	}
@@ -90,7 +90,7 @@ func TestNamePrefixesTravelInTheToken(t *testing.T) {
 	req := IssueRequest{
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 		Audience: []string{audienceData}, TTL: time.Hour, ClientID: testClientID,
-		Caveats: Caveats{Ops: []Op{OpGet}, ResourceNamePrefixes: []string{"drafts/billing-"}},
+		Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}, ResourceNamePrefixes: []string{"drafts/billing-"}},
 	}
 	_, token, err := issuerOf(t, priv).issue(context.Background(), req)
 	if err != nil {
@@ -105,7 +105,7 @@ func TestNamePrefixesTravelInTheToken(t *testing.T) {
 // A Biscuit block that names resources replaces the name prefixes too, so
 // the copy is held to the block's resources alone.
 func TestBiscuitBlockReplacesNamePrefixes(t *testing.T) {
-	cur := Capability{Caveats: Caveats{Ops: []Op{OpGet}, ResourceNamePrefixes: []string{"drafts/billing-"}}}
+	cur := Capability{Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}, ResourceNamePrefixes: []string{"drafts/billing-"}}}
 	next := blockFacts{resources: true, prefixes: []string{"drafts/billing-q3"}}.narrow(cur)
 	if len(next.Caveats.ResourceNamePrefixes) != 0 || !slices.Equal(next.Caveats.ResourcePrefixes, []string{"drafts/billing-q3"}) {
 		t.Errorf("the copy keeps %+v", next.Caveats)
@@ -147,8 +147,8 @@ func FuzzNarrowingNeverWidens(f *testing.F) {
 	f.Add("a", "", "", "", "", "a", "ab")
 	f.Add("", "a/b", "", "", "", "a/b", "a/b/c")
 	f.Fuzz(func(t *testing.T, pp, pu, pn, cp, cu, cn, uri string) {
-		parent := Caveats{Ops: []Op{OpGet}, ResourcePrefixes: resourcesFrom(pp), ResourceURIs: resourcesFrom(pu), ResourceNamePrefixes: resourcesFrom(pn)}
-		child := Caveats{Ops: []Op{OpGet}, ResourcePrefixes: resourcesFrom(cp), ResourceURIs: resourcesFrom(cu), ResourceNamePrefixes: resourcesFrom(cn)}
+		parent := Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}, ResourcePrefixes: resourcesFrom(pp), ResourceURIs: resourcesFrom(pu), ResourceNamePrefixes: resourcesFrom(pn)}
+		child := Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}, ResourcePrefixes: resourcesFrom(cp), ResourceURIs: resourcesFrom(cu), ResourceNamePrefixes: resourcesFrom(cn)}
 		if narrowsResources(parent, child) != nil {
 			return
 		}
@@ -171,7 +171,7 @@ func FuzzNarrowingNeverWidens(f *testing.F) {
 // A name prefix ending on whole characters, escaped or not, is accepted.
 func TestNamePrefixesOfWholeCharacters(t *testing.T) {
 	for _, good := range []string{"drafts/a%2F", "drafts/caf\u00e9-", "drafts/100%25-", "drafts/a"} {
-		if err := (Caveats{Ops: []Op{OpGet}, ResourceNamePrefixes: []string{good}}).Validate(); err != nil {
+		if err := (Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}, ResourceNamePrefixes: []string{good}}).Validate(); err != nil {
 			t.Errorf("name prefix %q: %v", good, err)
 		}
 	}

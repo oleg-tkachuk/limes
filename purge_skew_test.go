@@ -52,7 +52,7 @@ func TestPurgeKeepsARevocationAcrossClockSkew(t *testing.T) {
 		ClientID: exampleClientID,
 		IssuedBy: limes.Principal{Subject: "op"},
 		Subject:  limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
-		Audience: []string{exampleAudience}, Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}}, TTL: time.Minute,
+		Audience: []string{exampleAudience}, Caveats: limes.Caveats{Requests: limes.RequestCeiling{Unlimited: true}, Ops: []limes.Op{limes.OpGet}}, TTL: time.Minute,
 	})
 	c, token := cResult.Capability, cResult.Token
 	if err != nil {

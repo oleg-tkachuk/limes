@@ -70,7 +70,7 @@ func TestTokenIsReadUnderItsSchema(t *testing.T) {
 			t.Errorf("%s: err = %v, want ErrInvalidToken", name, err)
 		}
 	}
-	if err := (Caveats{Ops: []Op{retiredV4Op}}).Validate(); !errors.Is(err, ErrInvalidCaveats) {
+	if err := (Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{retiredV4Op}}).Validate(); !errors.Is(err, ErrInvalidCaveats) {
 		t.Errorf("Validate of caveats naming %q: err = %v, want ErrInvalidCaveats", retiredV4Op, err)
 	}
 }
@@ -136,7 +136,7 @@ func signableCapability() Capability {
 	return Capability{
 		ID: uuid.New(), Issuer: "iss",
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "s"},
-		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}},
+		Audience: []string{audienceData}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}},
 		IssuedAt: now, ExpiresAt: now.Add(tokenTimeResolution), ClientID: testClientID,
 	}
 }

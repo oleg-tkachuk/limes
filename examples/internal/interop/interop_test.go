@@ -154,7 +154,7 @@ func (f *fixture) issue(t *testing.T, jkt string) limes.IssueResult {
 		Subject:  limes.Principal{Type: limes.PrincipalTypeService, TenantID: f.tenant, Subject: readerSubject},
 		Audience: []string{audience},
 		TTL:      tokenTTL,
-		Caveats:  limes.Caveats{Ops: []limes.Op{limes.OpGet}, ResourcePrefixes: []string{resourcePath}},
+		Caveats:  limes.Caveats{Requests: limes.RequestCeiling{Unlimited: true}, Ops: []limes.Op{limes.OpGet}, ResourcePrefixes: []string{resourcePath}},
 
 		ConfirmationJKT: jkt,
 	})

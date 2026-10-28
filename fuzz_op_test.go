@@ -117,7 +117,7 @@ func FuzzOpValidate(f *testing.F) {
 			Subject:  limes.Principal{Type: limes.PrincipalTypeService, TenantID: tenant, Subject: "svc"},
 			Audience: []string{fuzzOpAudience},
 			TTL:      time.Minute,
-			Caveats:  limes.Caveats{Ops: []limes.Op{op}},
+			Caveats:  limes.Caveats{Requests: limes.RequestCeiling{Unlimited: true}, Ops: []limes.Op{op}},
 		})
 		if err != nil {
 			if !errors.Is(issueErr, limes.ErrInvalidCaveats) {

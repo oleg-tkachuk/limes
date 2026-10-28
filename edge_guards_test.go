@@ -40,7 +40,7 @@ func mintToken(t *testing.T, iss *Issuer) string {
 			Type: PrincipalTypeService, TenantID: uuid.MustParse(goldenTenant), Subject: "svc",
 		},
 		Audience: []string{goldenAudience},
-		Caveats:  Caveats{Ops: []Op{OpGet}},
+		Caveats:  Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}},
 		TTL:      time.Hour,
 	})
 	if err != nil {
@@ -174,7 +174,7 @@ func TestUnitCodes(t *testing.T) {
 		if IsUnitCode(tc.in) != tc.ok {
 			t.Errorf("IsUnitCode(%q) = %v, want %v", tc.in, !tc.ok, tc.ok)
 		}
-		if err := (Caveats{Ops: []Op{OpGet}, Budget: BudgetCeiling{UnitCode: tc.in}}).Validate(); (err == nil) != tc.ok {
+		if err := (Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}, Budget: BudgetCeiling{UnitCode: tc.in}}).Validate(); (err == nil) != tc.ok {
 			t.Errorf("caveats in %q: err = %v, want ok=%v", tc.in, err, tc.ok)
 		}
 	}
@@ -182,7 +182,7 @@ func TestUnitCodes(t *testing.T) {
 	if IsUnitCode("") {
 		t.Error(`IsUnitCode("") must be false`)
 	}
-	if err := (Caveats{Ops: []Op{OpGet}}).Validate(); err != nil {
+	if err := (Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}}).Validate(); err != nil {
 		t.Errorf("caveats naming no unit: %v", err)
 	}
 }

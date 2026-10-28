@@ -37,7 +37,7 @@ func newTermsIssuer(t *testing.T, store IssuanceStore) *Issuer {
 // Issue and Delegate report the first of these that fails, in this order.
 func TestValidateTermsOrder(t *testing.T) {
 	okAudience := []string{"api"}
-	badCaveats := Caveats{Ops: []Op{""}}
+	badCaveats := Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{""}}
 	cases := []struct {
 		name     string
 		audience []string
@@ -45,10 +45,10 @@ func TestValidateTermsOrder(t *testing.T) {
 		jkt      string
 		want     error
 	}{
-		{"all valid", okAudience, Caveats{Ops: []Op{OpGet}}, "", nil},
+		{"all valid", okAudience, Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}}, "", nil},
 		{"audience first", nil, badCaveats, "x", validateAudience(nil)},
 		{"caveats before the binding", okAudience, badCaveats, "x", badCaveats.Validate()},
-		{"the binding", okAudience, Caveats{Ops: []Op{OpGet}}, "x", validateThumbprint("x")},
+		{"the binding", okAudience, Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}}, "x", validateThumbprint("x")},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -69,7 +69,7 @@ func TestMintCopiesTheRequest(t *testing.T) {
 	terms := grantTerms{
 		Subject:   Principal{Type: PrincipalTypeService, TenantID: uuid.New(), Subject: "svc"},
 		Audience:  []string{"api"},
-		Caveats:   Caveats{Ops: []Op{OpGet}},
+		Caveats:   Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}},
 		IssuedAt:  issuedAt,
 		ExpiresAt: issuedAt.Add(time.Hour),
 		ParentID:  parent,
@@ -94,7 +94,7 @@ func TestSignAndRecordNamesTheRecord(t *testing.T) {
 	iss := newTermsIssuer(t, failingInsert{newMemStore()})
 	c := iss.mint(grantTerms{
 		Subject:  Principal{Type: PrincipalTypeService, TenantID: uuid.New(), Subject: "svc"},
-		Audience: []string{"api"}, Caveats: Caveats{Ops: []Op{OpGet}},
+		Audience: []string{"api"}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}},
 		IssuedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour), ClientID: testClientID,
 	})
 	for _, what := range []string{"issuance", "delegation"} {

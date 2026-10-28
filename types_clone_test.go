@@ -10,7 +10,7 @@ func TestCapabilityCloneSharesNothing(t *testing.T) {
 	c := Capability{
 		Subject:  Principal{Type: PrincipalTypeAgent, Agent: &AgentPrincipal{Model: "m"}},
 		Audience: []string{"a"},
-		Caveats:  Caveats{Ops: []Op{OpGet}, ResourcePrefixes: []string{"p/"}, ResourceURIs: []string{"p/u"}, SourceIPCIDR: []string{netip.MustParsePrefix("10.0.0.0/8").String()}},
+		Caveats:  Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}, ResourcePrefixes: []string{"p/"}, ResourceURIs: []string{"p/u"}, SourceIPCIDR: []string{netip.MustParsePrefix("10.0.0.0/8").String()}},
 	}
 	d := c.Clone()
 	d.Subject.Agent.Model = "x"

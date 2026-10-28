@@ -23,7 +23,7 @@ func TestVerifyFailsClosedWhenRevocationCannotBeChecked(t *testing.T) {
 	_, token, err := issuer.issue(context.Background(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
-		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Minute,
+		Audience: []string{audienceData}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}}, TTL: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +93,7 @@ func TestNarrowsKeepsIdempotency(t *testing.T) {
 // that does: the check fails closed for a token minted before Validate
 // refused such an entry.
 func TestCheckSourceFailsClosedOnAnUnparsableNetwork(t *testing.T) {
-	c := Caveats{SourceIPCIDR: []string{"not a network"}}
+	c := Caveats{Requests: RequestCeiling{Unlimited: true}, SourceIPCIDR: []string{"not a network"}}
 	if err := c.CheckSource(netip.MustParseAddr("10.0.0.1")); !errors.Is(err, ErrSourceIPNotAllowed) {
 		t.Errorf("CheckSource with only an unparsable network: err = %v, want ErrSourceIPNotAllowed", err)
 	}

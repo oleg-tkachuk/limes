@@ -152,7 +152,7 @@ func TestJWXReadsWhomACapabilityActsFor(t *testing.T) {
 		ClientID: interopClient, OnBehalfOf: &user,
 		IssuedBy: limes.Principal{Type: limes.PrincipalTypeUser, TenantID: f.tenant, Subject: operatorSubject},
 		Subject:  limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: f.tenant, Subject: actingAgent},
-		Audience: []string{audience}, TTL: tokenTTL, Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet, limes.OpShare}},
+		Audience: []string{audience}, TTL: tokenTTL, Caveats: limes.Caveats{Requests: limes.RequestCeiling{Unlimited: true}, Ops: []limes.Op{limes.OpGet, limes.OpShare}},
 	})
 	if err != nil {
 		t.Fatal(err)

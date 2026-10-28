@@ -40,7 +40,7 @@ func exampleToken() (string, ed25519.PublicKey) {
 		Subject:  limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: uuid.New(), Subject: "research-agent"},
 		Audience: []string{"my-service"},
 		TTL:      15 * time.Minute,
-		Caveats:  limes.Caveats{Ops: []limes.Op{limes.OpGet}, ResourcePrefixes: []string{"corpus/public/"}},
+		Caveats:  limes.Caveats{Requests: limes.RequestCeiling{Unlimited: true}, Ops: []limes.Op{limes.OpGet}, ResourcePrefixes: []string{"corpus/public/"}},
 	})
 	if err != nil {
 		log.Fatal(err)

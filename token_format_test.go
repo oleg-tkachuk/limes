@@ -35,7 +35,7 @@ func issueClient(t *testing.T, issuer *Issuer, client string) (Capability, strin
 	t.Helper()
 	return issuer.issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
-		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet, OpShare}}, TTL: time.Hour, ClientID: client,
+		Audience: []string{audienceData}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet, OpShare}}, TTL: time.Hour, ClientID: client,
 	})
 }
 
@@ -155,7 +155,7 @@ func TestSubjectIsRequired(t *testing.T) {
 	issuer := issuerOf(t, priv)
 	_, _, err := issuer.issue(context.Background(), IssueRequest{
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeService, TenantID: uuid.New()},
-		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour, ClientID: testClientID,
+		Audience: []string{audienceData}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}}, TTL: time.Hour, ClientID: testClientID,
 	})
 	if !errors.Is(err, ErrInvalidRequest) {
 		t.Errorf("Issue with no subject: %v, want ErrInvalidRequest", err)

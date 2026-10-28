@@ -12,7 +12,7 @@ import (
 // ─── validation ────────────────────────────────────────────────────────────
 
 func TestCaveatsValidate(t *testing.T) {
-	ok := Caveats{Ops: []Op{OpGet, "tool:search"}, ResourcePrefixes: []string{"a/"}, Budget: BudgetCeiling{UnitCode: "EUR"}, SourceIPCIDR: []string{"10.0.0.0/8"}}
+	ok := Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet, "tool:search"}, ResourcePrefixes: []string{"a/"}, Budget: BudgetCeiling{UnitCode: "EUR"}, SourceIPCIDR: []string{"10.0.0.0/8"}}
 	if err := ok.Validate(); err != nil {
 		t.Fatalf("valid caveats rejected: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestIssueRejectsMalformedRequests(t *testing.T) {
 			IssuedBy: Principal{Subject: "op"},
 			Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
 			Audience: []string{"data"},
-			Caveats:  Caveats{Ops: []Op{OpGet}},
+			Caveats:  Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}},
 			TTL:      time.Minute,
 		}
 	}
@@ -95,11 +95,11 @@ func issueRoot(t *testing.T, issuer *Issuer, caveats Caveats) Capability {
 func TestDelegateInheritanceIsExplicit(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
-	parent := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet, OpShare}, Budget: BudgetCeiling{Max: MustParseAmount("25"), UnitCode: "USD"}})
+	parent := issueRoot(t, issuer, Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet, OpShare}, Budget: BudgetCeiling{Max: MustParseAmount("25"), UnitCode: "USD"}})
 
 	if _, _, err := issuer.delegate(ctx, DelegateRequest{
 		Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"},
-		Parent:  asVerified(parent), Caveats: Caveats{Budget: BudgetCeiling{Max: MustParseAmount("2")}},
+		Parent:  asVerified(parent), Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Budget: BudgetCeiling{Max: MustParseAmount("2")}},
 	}); !errors.Is(err, ErrInvalidCaveats) {
 		t.Fatalf("delegate with ops omitted = %v, want ErrInvalidCaveats", err)
 	}
@@ -119,17 +119,17 @@ func TestDelegateGivesAChildItsParentsUnit(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
 	const parentUnit = "EUR"
-	parent := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet, OpShare}, Budget: BudgetCeiling{Max: MustParseAmount("25"), UnitCode: parentUnit}})
+	parent := issueRoot(t, issuer, Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet, OpShare}, Budget: BudgetCeiling{Max: MustParseAmount("25"), UnitCode: parentUnit}})
 	for name, named := range map[string]string{"names none": "", "names the parent's": parentUnit} {
 		child, _, err := issuer.delegate(ctx, DelegateRequest{
 			Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"},
-			Parent:  asVerified(parent), Caveats: Caveats{Ops: []Op{OpGet}, Budget: BudgetCeiling{Max: MustParseAmount("2"), UnitCode: named}},
+			Parent:  asVerified(parent), Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}, Budget: BudgetCeiling{Max: MustParseAmount("2"), UnitCode: named}},
 		})
 		if err != nil || child.Caveats.Budget.UnitCode != parentUnit {
 			t.Errorf("a child that %s: unit %q, %v; want %q", name, child.Caveats.Budget.UnitCode, err, parentUnit)
 		}
 	}
-	unitless := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet, OpShare}})
+	unitless := issueRoot(t, issuer, Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet, OpShare}})
 	child, _, err := issuer.delegate(ctx, DelegateRequest{Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"}, Parent: asVerified(unitless), InheritCaveats: true})
 	if err != nil || child.Caveats.Budget.UnitCode != "" {
 		t.Errorf("a child of a parent with no unit: unit %q, %v; want none", child.Caveats.Budget.UnitCode, err)
@@ -144,7 +144,7 @@ const foreignIssuer = "someone-else"
 func TestDelegateRefusesRevokedOrExpiredParent(t *testing.T) {
 	issuer, _, store, _ := buildIssuerVerifier(t)
 	ctx := context.Background()
-	parent := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet, OpShare}})
+	parent := issueRoot(t, issuer, Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet, OpShare}})
 
 	expired := parent
 	expired.ExpiresAt = time.Now().Add(-time.Minute)
@@ -171,7 +171,7 @@ func TestIssuedIDsAreVersion7(t *testing.T) {
 	ctx := context.Background()
 	parent, _, err := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
-		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet, OpShare}}, TTL: time.Hour,
+		Audience: []string{audienceData}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet, OpShare}}, TTL: time.Hour,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -196,7 +196,7 @@ func TestMintingResults(t *testing.T) {
 	ctx := context.Background()
 	issued, err := issuer.Issue(ctx, IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
-		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet, OpShare}}, TTL: time.Hour,
+		Audience: []string{audienceData}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet, OpShare}}, TTL: time.Hour,
 	})
 	if err != nil || issued.Token == "" || issued.Capability.ID == uuid.Nil() {
 		t.Fatalf("Issue = %+v, %v; want a capability and its token", issued, err)
@@ -232,9 +232,9 @@ func TestDelegateRequiresOpShare(t *testing.T) {
 		"a parent without share": {[]Op{OpGet}, ErrOpNotAllowed},
 		"a parent with share":    {[]Op{OpGet, OpShare}, nil},
 	} {
-		parent := issueRoot(t, issuer, Caveats{Ops: tc.ops})
+		parent := issueRoot(t, issuer, Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: tc.ops})
 		before := len(store.caps)
-		_, err := issuer.Delegate(ctx, DelegateRequest{Parent: asVerified(parent), Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"}, Caveats: Caveats{Ops: []Op{OpGet}}})
+		_, err := issuer.Delegate(ctx, DelegateRequest{Parent: asVerified(parent), Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}}})
 		if tc.want == nil && err != nil || tc.want != nil && !errors.Is(err, tc.want) {
 			t.Errorf("%s: err = %v, want %v", name, err, tc.want)
 		}
@@ -251,7 +251,7 @@ func TestDelegateRequiresOpShare(t *testing.T) {
 func TestDelegationStartIsExact(t *testing.T) {
 	const fraction, earlier = 700 * time.Millisecond, 500 * time.Millisecond
 	second := time.Now().Truncate(time.Second)
-	parent := Capability{NotBefore: second.Add(fraction), ExpiresAt: second.Add(time.Hour), Caveats: Caveats{Ops: []Op{OpGet}}}
+	parent := Capability{NotBefore: second.Add(fraction), ExpiresAt: second.Add(time.Hour), Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}}}
 	for name, tc := range map[string]struct {
 		start time.Time
 		want  error
@@ -268,11 +268,11 @@ func TestDelegationStartIsExact(t *testing.T) {
 	}
 
 	issuer, _, _, _ := buildIssuerVerifier(t)
-	root := issueRoot(t, issuer, Caveats{Ops: []Op{OpGet, OpShare}})
+	root := issueRoot(t, issuer, Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet, OpShare}})
 	at := root.IssuedAt.Add(time.Second + fraction)
 	root.NotBefore = at.Add(-earlier) // within the second at is in
 	issuer.clock = func() time.Time { return at }
-	child, _, err := issuer.delegate(t.Context(), DelegateRequest{Parent: asVerified(root), Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"}, Caveats: Caveats{Ops: []Op{OpGet}}})
+	child, _, err := issuer.delegate(t.Context(), DelegateRequest{Parent: asVerified(root), Subject: Principal{Type: PrincipalTypeAgent, Subject: "child"}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}}})
 	if err != nil {
 		t.Fatalf("Delegate from a parent starting within the second: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestABudgetNeedsAUnit(t *testing.T) {
 		"no spend in a unit":     {BudgetCeiling{UnitCode: "EUR"}, true},
 		"a unit that is not one": {BudgetCeiling{UnitCode: "euro"}, false},
 	} {
-		err := (Caveats{Ops: []Op{OpGet}, Budget: tc.b}).Validate()
+		err := (Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}, Budget: tc.b}).Validate()
 		if tc.ok && err != nil {
 			t.Errorf("%s: %v", name, err)
 		}

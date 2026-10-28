@@ -17,7 +17,7 @@ func oversizedCaveats() Caveats {
 	for i := range uris {
 		uris[i] = fmt.Sprintf("corpus/item/%04d", i)
 	}
-	return Caveats{Ops: []Op{OpGet}, ResourceURIs: uris}
+	return Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}, ResourceURIs: uris}
 }
 
 // The issuer mints no token its verifiers would refuse unread, and records
@@ -48,7 +48,7 @@ func TestDelegateAndBiscuitRefuseATokenPastMaxTokenBytes(t *testing.T) {
 		IssuedBy: Principal{Subject: "op"},
 		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "agent"},
 		Audience: []string{audienceData},
-		Caveats:  Caveats{Ops: []Op{OpGet, OpShare}, ResourcePrefixes: []string{"corpus/"}},
+		Caveats:  Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet, OpShare}, ResourcePrefixes: []string{"corpus/"}},
 		TTL:      time.Minute,
 	})
 	if err != nil {

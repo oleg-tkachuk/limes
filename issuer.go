@@ -254,7 +254,20 @@ func validateTerms(audience []string, caveats Caveats, jkt string) error {
 	if err := caveats.Validate(); err != nil {
 		return err
 	}
+	if err := checkUsable(caveats.Requests); err != nil {
+		return err
+	}
 	return validateThumbprint(jkt)
+}
+
+// checkUsable refuses, as ErrInvalidCaveats, a capability whose request
+// ceiling allows no request: every meter refuses its first use, so nothing
+// can be done with it. Set Requests explicitly, Unlimited or a Max.
+func checkUsable(requests RequestCeiling) error {
+	if !requests.Unlimited && requests.Max == 0 {
+		return fmt.Errorf("%w: requests: a ceiling of no request leaves the capability unusable; set Max or Unlimited", ErrInvalidCaveats)
+	}
+	return nil
 }
 
 // grantTerms are the fields of a capability its request decides.

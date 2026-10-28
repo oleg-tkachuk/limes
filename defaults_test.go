@@ -168,7 +168,7 @@ func TestIssuerNeedsOnlyAnIssuanceStore(t *testing.T) {
 	}
 	c, _, err := issuer.issue(context.Background(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
-		Audience: []string{"data"}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Minute,
+		Audience: []string{"data"}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}}, TTL: time.Minute,
 	})
 	if err != nil || len(store.inserted) != 1 || store.inserted[0].Capability.ID != c.ID || store.inserted[0].IssuedBy.Subject != "op" {
 		t.Fatalf("Issue = %v; recorded %+v", err, store.inserted)
@@ -213,7 +213,7 @@ func TestIssuedTimesAreTheTokens(t *testing.T) {
 	nbf := at.Add(10 * time.Second) // also x.7s: rounds up
 	issued, err := issuer.Issue(t.Context(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
-		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour, NotBefore: nbf,
+		Audience: []string{audienceData}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}}, TTL: time.Hour, NotBefore: nbf,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -270,7 +270,7 @@ func TestIssueRefusesALifetimeUnderASecond(t *testing.T) {
 	issue := func(ttl time.Duration) error {
 		_, err := issuer.Issue(t.Context(), IssueRequest{ClientID: testClientID,
 			IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
-			Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: ttl,
+			Audience: []string{audienceData}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}}, TTL: ttl,
 		})
 		return err
 	}

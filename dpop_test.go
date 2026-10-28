@@ -53,7 +53,7 @@ func TestKeyBindingSurvivesTheTokenAndDelegation(t *testing.T) {
 
 	parent, token, err := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
-		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet, OpShare}}, TTL: time.Hour,
+		Audience: []string{audienceData}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet, OpShare}}, TTL: time.Hour,
 		ConfirmationJKT: jkt,
 	})
 	if err != nil {
@@ -89,7 +89,7 @@ func TestIssueRefusesAMalformedBinding(t *testing.T) {
 	issuer, _, _, _ := buildIssuerVerifier(t)
 	_, _, err := issuer.issue(context.Background(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
-		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour,
+		Audience: []string{audienceData}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}}, TTL: time.Hour,
 		ConfirmationJKT: "not-a-thumbprint",
 	})
 	if err == nil {
@@ -269,7 +269,7 @@ func TestRevokedCapabilitiesSpendNoReplayRoom(t *testing.T) {
 		jkt, _ := dpop.Thumbprint(key.Public())
 		c, tok, err := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
 			IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: tenant, Subject: "a"},
-			Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour, ConfirmationJKT: jkt,
+			Audience: []string{audienceData}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}}, TTL: time.Hour, ConfirmationJKT: jkt,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -307,7 +307,7 @@ func TestAProofIsCheckedBeforeRevocation(t *testing.T) {
 	jkt, _ := dpop.Thumbprint(boundKey.Public())
 	c, tok, err := issuer.issue(ctx, IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: Principal{Type: PrincipalTypeAgent, TenantID: uuid.New(), Subject: "a"},
-		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour, ConfirmationJKT: jkt,
+		Audience: []string{audienceData}, Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}}, TTL: time.Hour, ConfirmationJKT: jkt,
 	})
 	if err != nil {
 		t.Fatal(err)
