@@ -103,41 +103,60 @@ func lineage(ctx context.Context, tx pgx.Tx, capID uuid.UUID) ([]ancestor, error
 	if len(chain) > limes.MaxDelegationDepth+1 {
 		return nil, fmt.Errorf("%w: %s has more than %d ancestors", limes.ErrDelegationTooDeep, capID, limes.MaxDelegationDepth)
 	}
-	rows, err = tx.Query(ctx, sqlHoldRecords, chain)
+	held, err := holdRecords(ctx, tx, chain)
 	if err != nil {
-		return nil, err
-	}
-	held := map[uuid.UUID]ancestor{}
-	for rows.Next() {
-		var id uuid.UUID
-		var requests, budget, copies ceilingRecord
-		if err := rows.Scan(&id, &requests, &budget, &copies); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		held[id] = ancestor{
-			id:       id,
-			requests: limes.RequestCeiling{Max: requests.Max, Unlimited: requests.Unlimited},
-			budget:   limes.BudgetCeiling{Max: limes.Nanos(budget.Max), Unlimited: budget.Unlimited},
-			copies:   limes.CopyQuota{Max: copies.Max, Unlimited: copies.Unlimited},
-		}
-	}
-	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	if _, ok := held[capID]; !ok {
 		return nil, fmt.Errorf("%w: pgstore: capability %s is not on record", limes.ErrNotFound, capID)
 	}
-	// Nearest first, stopping at the first ancestor gone since the walk.
+	return nearestFirst(chain[1:], held), nil
+}
+
+// holdRecords reads the ceilings of chain's capabilities still on record.
+func holdRecords(ctx context.Context, tx pgx.Tx, chain []uuid.UUID) (map[uuid.UUID]ancestor, error) {
+	rows, err := tx.Query(ctx, sqlHoldRecords, chain)
+	if err != nil {
+		return nil, err
+	}
+	scanned, err := pgx.CollectRows(rows, scanAncestor)
+	if err != nil {
+		return nil, err
+	}
+	held := make(map[uuid.UUID]ancestor, len(scanned))
+	for _, a := range scanned {
+		held[a.id] = a
+	}
+	return held, nil
+}
+
+// scanAncestor reads one capability's ceilings.
+func scanAncestor(row pgx.CollectableRow) (ancestor, error) {
+	var id uuid.UUID
+	var requests, budget, copies ceilingRecord
+	if err := row.Scan(&id, &requests, &budget, &copies); err != nil {
+		return ancestor{}, err
+	}
+	return ancestor{
+		id:       id,
+		requests: limes.RequestCeiling{Max: requests.Max, Unlimited: requests.Unlimited},
+		budget:   limes.BudgetCeiling{Max: limes.Nanos(budget.Max), Unlimited: budget.Unlimited},
+		copies:   limes.CopyQuota{Max: copies.Max, Unlimited: copies.Unlimited},
+	}, nil
+}
+
+// nearestFirst is the ancestors of ids held, nearest first, stopping at the
+// first one gone since the walk.
+func nearestFirst(ids []uuid.UUID, held map[uuid.UUID]ancestor) []ancestor {
 	var out []ancestor
-	for _, id := range chain[1:] {
+	for _, id := range ids {
 		a, ok := held[id]
 		if !ok {
 			break
 		}
 		out = append(out, a)
 	}
-	return out, nil
+	return out
 }
 
 // usageRow is one capability's counters.
@@ -294,109 +313,163 @@ func lockTenant(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) (budgetRow, 
 // record stay absent.
 func lock(ctx context.Context, tx pgx.Tx, l lockRequest) (*counters, error) {
 	c := &counters{usage: map[uuid.UUID]*usageRow{}, copies: map[string]*copyRow{}}
-	if l.tenantID != uuid.Nil() {
-		if l.tenantUnit != "" {
-			if _, err := tx.Exec(ctx, sqlCreateTenant, l.tenantID, l.tenantUnit, l.now); err != nil {
-				return nil, err
-			}
-		}
-		b, err := lockTenant(ctx, tx, l.tenantID)
-		if err != nil {
-			return nil, err
-		}
-		c.tenant = b
+	if err := lockTenantOf(ctx, tx, l, c); err != nil {
+		return nil, err
 	}
-	if len(l.created) > 0 {
-		if _, err := tx.Exec(ctx, sqlCreateUsage, l.created, l.usageTenant); err != nil {
+	if err := lockUsageOf(ctx, tx, l, c); err != nil {
+		return nil, err
+	}
+	if len(l.copies) == 0 {
+		return c, nil
+	}
+	if l.createCopies {
+		if err := createCopies(ctx, tx, l, c); err != nil {
 			return nil, err
 		}
 	}
-	if ids := append(slices.Clone(l.created), l.existing...); len(ids) > 0 {
-		rows, err := tx.Query(ctx, sqlLockUsage, ids)
-		if err != nil {
-			return nil, err
-		}
-		for rows.Next() {
-			u := &usageRow{}
-			var spent, reserved int64
-			if err := rows.Scan(&u.id, &u.requests, &spent, &reserved, &u.unit, &u.copiesUnder); err != nil {
-				rows.Close()
-				return nil, err
-			}
-			u.spent, u.reserved = limes.Nanos(spent), limes.Nanos(reserved)
-			c.usage[u.id] = u
-		}
-		if err := rows.Err(); err != nil {
-			return nil, err
-		}
-		// A row created above that the transaction cannot see is another
-		// tenant's under the same id, which ON CONFLICT DO NOTHING left in
-		// place: refused, never counted as zero or written through nil.
-		for _, id := range l.created {
-			if _, ok := c.usage[id]; !ok {
-				return nil, fmt.Errorf("%w: %s", errCounterHidden, id)
-			}
-		}
-	}
-	if len(l.copies) > 0 {
-		if l.createCopies {
-			tag, err := tx.Exec(ctx, sqlCreateCopies, l.copies, l.copiesCapID, l.usageTenant)
-			if err != nil {
-				return nil, err
-			}
-			// Copies new to the capability count against its quota. The
-			// capability's usage row, locked above, keeps two calls from
-			// counting past it together.
-			if tag.RowsAffected() > 0 {
-				var counted int64
-				if err := tx.QueryRow(ctx, sqlCountCopies, l.copiesCapID).Scan(&counted); err != nil {
-					return nil, err
-				}
-				if counted > l.maxCopies {
-					return nil, fmt.Errorf("%w: capability %s would count %d, quota %d", meter.ErrCopyLimitExceeded, l.copiesCapID, counted, l.maxCopies)
-				}
-				// And each capability on the chain counts the copies of
-				// everything delegated from it against its own quota, on its
-				// usage row: locked above, it keeps two calls under one
-				// ancestor from counting past it together.
-				for _, q := range l.chainQuotas {
-					u, ok := c.usage[q.id]
-					if !ok {
-						return nil, fmt.Errorf("%w: %s", errCounterHidden, q.id)
-					}
-					u.copiesUnder += tag.RowsAffected()
-					if !q.quota.Admits(u.copiesUnder) {
-						return nil, fmt.Errorf("%w: capability %s and those delegated from it would count %d, quota %s", meter.ErrCopyLimitExceeded, q.id, u.copiesUnder, q.quota)
-					}
-				}
-			}
-		}
-		rows, err := tx.Query(ctx, sqlLockCopies, l.copiesCapID, l.copies)
-		if err != nil {
-			return nil, err
-		}
-		for rows.Next() {
-			r := &copyRow{}
-			var spent, reserved int64
-			if err := rows.Scan(&r.revocationID, &r.capID, &r.requests, &spent, &reserved); err != nil {
-				rows.Close()
-				return nil, err
-			}
-			r.spent, r.reserved = limes.Nanos(spent), limes.Nanos(reserved)
-			c.copies[string(r.revocationID)] = r
-		}
-		if err := rows.Err(); err != nil {
-			return nil, err
-		}
-		if l.createCopies {
-			for _, id := range l.copies {
-				if _, ok := c.copies[string(id)]; !ok {
-					return nil, fmt.Errorf("%w: copy %x of %s", errCounterHidden, id, l.copiesCapID)
-				}
-			}
-		}
+	if err := lockCopiesOf(ctx, tx, l, c); err != nil {
+		return nil, err
 	}
 	return c, nil
+}
+
+// lockTenantOf reads l's tenant aggregate into c, created first, without a
+// ceiling, when l names its unit; nothing when l names no tenant.
+func lockTenantOf(ctx context.Context, tx pgx.Tx, l lockRequest, c *counters) error {
+	if l.tenantID == uuid.Nil() {
+		return nil
+	}
+	if l.tenantUnit != "" {
+		if _, err := tx.Exec(ctx, sqlCreateTenant, l.tenantID, l.tenantUnit, l.now); err != nil {
+			return err
+		}
+	}
+	b, err := lockTenant(ctx, tx, l.tenantID)
+	if err != nil {
+		return err
+	}
+	c.tenant = b
+	return nil
+}
+
+// lockUsageOf reads the usage counters of l's ids into c, created first for
+// l.created. A row created that the transaction cannot see is another
+// tenant's under the same id, which ON CONFLICT DO NOTHING left in place:
+// refused, never counted as zero or written through nil.
+func lockUsageOf(ctx context.Context, tx pgx.Tx, l lockRequest, c *counters) error {
+	if len(l.created) > 0 {
+		if _, err := tx.Exec(ctx, sqlCreateUsage, l.created, l.usageTenant); err != nil {
+			return err
+		}
+	}
+	ids := append(slices.Clone(l.created), l.existing...)
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, sqlLockUsage, ids)
+	if err != nil {
+		return err
+	}
+	scanned, err := pgx.CollectRows(rows, scanUsage)
+	if err != nil {
+		return err
+	}
+	for _, u := range scanned {
+		c.usage[u.id] = u
+	}
+	for _, id := range l.created {
+		if _, ok := c.usage[id]; !ok {
+			return fmt.Errorf("%w: %s", errCounterHidden, id)
+		}
+	}
+	return nil
+}
+
+// scanUsage reads one locked usage counter.
+func scanUsage(row pgx.CollectableRow) (*usageRow, error) {
+	u := &usageRow{}
+	var spent, reserved int64
+	if err := row.Scan(&u.id, &u.requests, &spent, &reserved, &u.unit, &u.copiesUnder); err != nil {
+		return nil, err
+	}
+	u.spent, u.reserved = limes.Nanos(spent), limes.Nanos(reserved)
+	return u, nil
+}
+
+// createCopies creates the counters of l's copies under l.copiesCapID.
+// Copies new to the capability count against its quota, and each
+// capability on the chain counts the copies of everything delegated from it
+// against its own, on its usage row: locked above, it keeps two calls under
+// one ancestor from counting past it together.
+func createCopies(ctx context.Context, tx pgx.Tx, l lockRequest, c *counters) error {
+	tag, err := tx.Exec(ctx, sqlCreateCopies, l.copies, l.copiesCapID, l.usageTenant)
+	if err != nil {
+		return err
+	}
+	added := tag.RowsAffected()
+	if added == 0 {
+		return nil
+	}
+	var counted int64
+	if err := tx.QueryRow(ctx, sqlCountCopies, l.copiesCapID).Scan(&counted); err != nil {
+		return err
+	}
+	if counted > l.maxCopies {
+		return fmt.Errorf("%w: capability %s would count %d, quota %d", meter.ErrCopyLimitExceeded, l.copiesCapID, counted, l.maxCopies)
+	}
+	return countChainCopies(l, c, added)
+}
+
+// countChainCopies adds added copies to what each capability on l's chain
+// counts under it, refusing a count past its quota.
+func countChainCopies(l lockRequest, c *counters, added int64) error {
+	for _, q := range l.chainQuotas {
+		u, ok := c.usage[q.id]
+		if !ok {
+			return fmt.Errorf("%w: %s", errCounterHidden, q.id)
+		}
+		u.copiesUnder += added
+		if !q.quota.Admits(u.copiesUnder) {
+			return fmt.Errorf("%w: capability %s and those delegated from it would count %d, quota %s", meter.ErrCopyLimitExceeded, q.id, u.copiesUnder, q.quota)
+		}
+	}
+	return nil
+}
+
+// lockCopiesOf reads the counters of l's copies into c; when they were
+// created, one the transaction cannot see is refused.
+func lockCopiesOf(ctx context.Context, tx pgx.Tx, l lockRequest, c *counters) error {
+	rows, err := tx.Query(ctx, sqlLockCopies, l.copiesCapID, l.copies)
+	if err != nil {
+		return err
+	}
+	scanned, err := pgx.CollectRows(rows, scanCopy)
+	if err != nil {
+		return err
+	}
+	for _, r := range scanned {
+		c.copies[string(r.revocationID)] = r
+	}
+	if !l.createCopies {
+		return nil
+	}
+	for _, id := range l.copies {
+		if _, ok := c.copies[string(id)]; !ok {
+			return fmt.Errorf("%w: copy %x of %s", errCounterHidden, id, l.copiesCapID)
+		}
+	}
+	return nil
+}
+
+// scanCopy reads one locked copy counter.
+func scanCopy(row pgx.CollectableRow) (*copyRow, error) {
+	r := &copyRow{}
+	var spent, reserved int64
+	if err := row.Scan(&r.revocationID, &r.capID, &r.requests, &spent, &reserved); err != nil {
+		return nil, err
+	}
+	r.spent, r.reserved = limes.Nanos(spent), limes.Nanos(reserved)
+	return r, nil
 }
 
 // errCounterHidden is a counter row lock created that the transaction cannot

@@ -1,6 +1,7 @@
 package pgstore
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -25,61 +26,16 @@ func (s *UsageStore) Refund(ctx context.Context, req meter.RefundRequest) (meter
 	}
 	var receipt meter.RefundReceipt
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
-		// The charge is read once to learn which counters it debited, which
-		// are locked first, and locked last, as every call locks the ledger:
-		// an erase that holds the aggregate and deletes the charges does not
-		// meet a refund holding the charge and waiting for the aggregate.
-		e, ok, err := readEntry(ctx, tx, sqlChargeByID, req.ChargeID)
+		e, c, err := s.lockRefunded(ctx, tx, req.ChargeID)
 		if err != nil {
 			return err
-		}
-		if !ok {
-			return meter.ErrChargeNotFound
-		}
-		c, err := lock(ctx, tx, lockRequest{
-			now:      s.clock(),
-			tenantID: e.TenantID,
-			existing: append([]uuid.UUID{e.CapabilityID}, e.ancestors...),
-			copies:   e.copies, copiesCapID: e.CapabilityID,
-		})
-		if err != nil {
-			return err
-		}
-		e, ok, err = readEntry(ctx, tx, sqlChargeByID+` FOR UPDATE`, req.ChargeID)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return meter.ErrChargeNotFound
 		}
 		receipt = meter.RefundReceipt{ChargeID: e.ID, TenantID: e.TenantID, UnitCode: e.UnitCode}
-		remaining := e.Amount - e.RefundedAmount
-		amount := req.Amount
-		if req.Remaining {
-			amount = remaining
-		}
-		if amount > remaining {
-			return fmt.Errorf("%w: %v requested, %v of %v left", meter.ErrRefundExceedsCharge, amount, remaining, e.Amount)
-		}
-		if amount == 0 {
-			return nil
-		}
-		for _, u := range c.usage {
-			u.spent = max0(u.spent - amount)
-		}
-		// A charge of a period since closed is history: the current period's
-		// spend never counted it, so it has nothing to give back.
-		refundTenant := c.tenant.persisted && c.tenant.period == e.tenantPeriod
-		if refundTenant {
-			c.tenant.spent = max0(c.tenant.spent - amount)
-		}
-		for _, r := range c.copies {
-			r.spent = max0(r.spent - amount)
-		}
-		if err := c.write(ctx, tx, s.clock(), refundTenant); err != nil {
+		amount, err := refundAmount(e, req)
+		if err != nil || amount == 0 {
 			return err
 		}
-		if _, err := tx.Exec(ctx, sqlRefunded, e.ID, int64(amount)); err != nil {
+		if err := s.refund(ctx, tx, c, e, amount); err != nil {
 			return err
 		}
 		receipt.Amount = amount
@@ -89,6 +45,73 @@ func (s *UsageStore) Refund(ctx context.Context, req meter.RefundRequest) (meter
 		return meter.RefundReceipt{}, err
 	}
 	return receipt, nil
+}
+
+// lockRefunded reads the charge id and locks the counters it debited, then
+// the charge itself. It is read once to learn which counters those are,
+// which are locked first, and locked last, as every call locks the ledger:
+// an erase that holds the aggregate and deletes the charges does not meet a
+// refund holding the charge and waiting for the aggregate.
+func (s *UsageStore) lockRefunded(ctx context.Context, tx pgx.Tx, id uuid.UUID) (ledgerEntry, *counters, error) {
+	e, ok, err := readEntry(ctx, tx, sqlChargeByID, id)
+	if err != nil {
+		return ledgerEntry{}, nil, err
+	}
+	if !ok {
+		return ledgerEntry{}, nil, meter.ErrChargeNotFound
+	}
+	c, err := lock(ctx, tx, lockRequest{
+		now:      s.clock(),
+		tenantID: e.TenantID,
+		existing: append([]uuid.UUID{e.CapabilityID}, e.ancestors...),
+		copies:   e.copies, copiesCapID: e.CapabilityID,
+	})
+	if err != nil {
+		return ledgerEntry{}, nil, err
+	}
+	e, ok, err = readEntry(ctx, tx, sqlChargeByID+` FOR UPDATE`, id)
+	if err != nil {
+		return ledgerEntry{}, nil, err
+	}
+	if !ok {
+		return ledgerEntry{}, nil, meter.ErrChargeNotFound
+	}
+	return e, c, nil
+}
+
+// refundAmount is what req gives back of the charge e: all that is left of
+// it, or the amount asked for, which may not exceed that.
+func refundAmount(e ledgerEntry, req meter.RefundRequest) (limes.Nanos, error) {
+	remaining := e.Amount - e.RefundedAmount
+	if req.Remaining {
+		return remaining, nil
+	}
+	if req.Amount > remaining {
+		return 0, fmt.Errorf("%w: %v requested, %v of %v left", meter.ErrRefundExceedsCharge, req.Amount, remaining, e.Amount)
+	}
+	return req.Amount, nil
+}
+
+// refund gives amount of the charge e back to every counter in c that spent
+// it, and records it on the charge. A charge of a period since closed is
+// history: the current period's spend never counted it, so it has nothing
+// to give back.
+func (s *UsageStore) refund(ctx context.Context, tx pgx.Tx, c *counters, e ledgerEntry, amount limes.Nanos) error {
+	for _, u := range c.usage {
+		u.spent = max0(u.spent - amount)
+	}
+	refundTenant := c.tenant.persisted && c.tenant.period == e.tenantPeriod
+	if refundTenant {
+		c.tenant.spent = max0(c.tenant.spent - amount)
+	}
+	for _, r := range c.copies {
+		r.spent = max0(r.spent - amount)
+	}
+	if err := c.write(ctx, tx, s.clock(), refundTenant); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, sqlRefunded, e.ID, int64(amount))
+	return err
 }
 
 const sqlRefunded = `UPDATE limes.charges SET refunded = refunded + $2 WHERE id = $1`
@@ -330,59 +353,78 @@ func (s *UsageStore) SetTenantBudget(ctx context.Context, req meter.SetTenantBud
 	}
 	var out meter.TenantBudget
 	err := s.inTenantTx(ctx, req.TenantID, func(tx pgx.Tx) error {
-		if err := notErased(ctx, tx, req.TenantID); err != nil {
-			return err
-		}
-		// The aggregate is created, with no unit yet, before it is locked:
-		// locking a row that is not there locks nothing, and a first charge
-		// that created it meanwhile would be overwritten by the write below.
-		// Created here, the call waits for that charge and reads its counts.
-		if _, err := tx.Exec(ctx, sqlCreateTenant, req.TenantID, "", s.clock()); err != nil {
-			return err
-		}
-		b, err := lockTenant(ctx, tx, req.TenantID)
-		if err != nil {
-			return err
-		}
-		// A budget with no ceiling set yet expects version 0; an existing one
-		// its current version.
-		if req.ExpectedVersion != b.version {
-			return meter.ErrTenantBudgetVersionMismatch
-		}
-		// A ceiling that names no unit — the zero one — keeps the tenant's.
-		unit := req.Ceiling.UnitCode
-		if unit == "" {
-			unit = b.unit
-		}
-		// A reset closes the spend, never the holds still open in the old
-		// unit.
-		if b.persisted && b.unit != "" && unit != b.unit &&
-			(b.reserved > 0 || (b.spent > 0 && !req.ResetSpend)) {
-			return fmt.Errorf("%w: tenant %s has %s counted in %s",
-				limes.ErrUnitCodeMismatch, req.TenantID, b.spent+b.reserved, b.unit)
-		}
-		now := s.clock()
-		b.ceiling, b.unit, b.end = req.Ceiling, unit, nil
-		if !req.PeriodEnd.IsZero() {
-			end := req.PeriodEnd.UTC().Truncate(timeResolution)
-			b.end = &end
-		}
-		if req.ResetSpend {
-			b.spent, b.start = 0, now
-			b.period++
-		}
-		if b.start.IsZero() {
-			b.start = now
-		}
-		b.version++
-		c := &counters{tenant: b}
-		if err := c.write(ctx, tx, now, true); err != nil {
-			return err
-		}
-		out = c.tenant.budget()
-		return nil
+		var err error
+		out, err = s.setTenantBudget(ctx, tx, req)
+		return err
 	})
 	return out, err
+}
+
+// setTenantBudget is SetTenantBudget in tx.
+func (s *UsageStore) setTenantBudget(ctx context.Context, tx pgx.Tx, req meter.SetTenantBudgetRequest) (meter.TenantBudget, error) {
+	if err := notErased(ctx, tx, req.TenantID); err != nil {
+		return meter.TenantBudget{}, err
+	}
+	// The aggregate is created, with no unit yet, before it is locked:
+	// locking a row that is not there locks nothing, and a first charge
+	// that created it meanwhile would be overwritten by the write below.
+	// Created here, the call waits for that charge and reads its counts.
+	if _, err := tx.Exec(ctx, sqlCreateTenant, req.TenantID, "", s.clock()); err != nil {
+		return meter.TenantBudget{}, err
+	}
+	b, err := lockTenant(ctx, tx, req.TenantID)
+	if err != nil {
+		return meter.TenantBudget{}, err
+	}
+	// A budget with no ceiling set yet expects version 0; an existing one
+	// its current version.
+	if req.ExpectedVersion != b.version {
+		return meter.TenantBudget{}, meter.ErrTenantBudgetVersionMismatch
+	}
+	// A ceiling that names no unit — the zero one — keeps the tenant's.
+	unit := cmp.Or(req.Ceiling.UnitCode, b.unit)
+	if err := checkBudgetUnit(b, req, unit); err != nil {
+		return meter.TenantBudget{}, err
+	}
+	now := s.clock()
+	c := &counters{tenant: setBudget(b, req, unit, now)}
+	if err := c.write(ctx, tx, now, true); err != nil {
+		return meter.TenantBudget{}, err
+	}
+	return c.tenant.budget(), nil
+}
+
+// checkBudgetUnit refuses moving b to unit while it counts anything in
+// another. A reset closes the spend, never the holds still open in the old
+// unit.
+func checkBudgetUnit(b budgetRow, req meter.SetTenantBudgetRequest, unit string) error {
+	if !b.persisted || b.unit == "" || unit == b.unit {
+		return nil
+	}
+	if b.reserved > 0 || (b.spent > 0 && !req.ResetSpend) {
+		return fmt.Errorf("%w: tenant %s has %s counted in %s",
+			limes.ErrUnitCodeMismatch, req.TenantID, b.spent+b.reserved, b.unit)
+	}
+	return nil
+}
+
+// setBudget is b set as req asks, in unit, at now, at a new version: a
+// reset closes the spend and opens a period.
+func setBudget(b budgetRow, req meter.SetTenantBudgetRequest, unit string, now time.Time) budgetRow {
+	b.ceiling, b.unit, b.end = req.Ceiling, unit, nil
+	if !req.PeriodEnd.IsZero() {
+		end := req.PeriodEnd.UTC().Truncate(timeResolution)
+		b.end = &end
+	}
+	if req.ResetSpend {
+		b.spent, b.start = 0, now
+		b.period++
+	}
+	if b.start.IsZero() {
+		b.start = now
+	}
+	b.version++
+	return b
 }
 
 // The classes ListTenantBudgets ranks by: a ceiling of 0 allows nothing and
@@ -458,48 +500,60 @@ func (s *UsageStore) ListTenantBudgets(ctx context.Context, req meter.ListTenant
 	if err := req.Validate(); err != nil {
 		return limes.Page[meter.TenantBudget]{}, err
 	}
-	var after *tenantPlace
-	if req.Cursor != "" {
-		p, err := parseTenantPlace(req.Cursor)
-		if err != nil {
-			return limes.Page[meter.TenantBudget]{}, err
-		}
-		after = &p
+	after, err := tenantCursorArgs(req.Cursor)
+	if err != nil {
+		return limes.Page[meter.TenantBudget]{}, err
 	}
 	keep, err := keepOf(req.Filter)
 	if err != nil {
 		return limes.Page[meter.TenantBudget]{}, err
 	}
 	limit := limes.PageLimit(req.Limit)
-	var class *int
-	var spent, ceiling int64
-	var tenant uuid.UUID
-	if after != nil {
-		class, spent, ceiling, tenant = &after.class, int64(after.spent), int64(after.max), after.tenantID
-	}
 	var rows []budgetRow
 	// A list across tenants refuses a scope that admits fewer, as the
 	// census does: under it the page would read as every tenant's.
 	err = s.inEveryTenantReadTx(ctx, func(tx pgx.Tx) error {
-		r, err := tx.Query(ctx, sqlListTenants,
-			keep, req.ThresholdBasisPoints, meter.BasisPointsPerWhole,
-			class, spent, ceiling, tenant, limit+1, utilizationScale)
+		args := append([]any{keep, req.ThresholdBasisPoints, meter.BasisPointsPerWhole}, after...)
+		r, err := tx.Query(ctx, sqlListTenants, append(args, limit+1, utilizationScale)...)
 		if err != nil {
 			return err
 		}
-		rows, err = pgx.CollectRows(r, func(row pgx.CollectableRow) (budgetRow, error) {
-			var b budgetRow
-			var ceilingMax, spent, reserved int64
-			err := row.Scan(&b.tenantID, &ceilingMax, &b.ceiling.Unlimited, &spent, &reserved, &b.unit,
-				&b.start, &b.end, &b.updated, &b.version, &b.period)
-			b.ceiling.Max, b.spent, b.reserved, b.persisted = limes.Nanos(ceilingMax), limes.Nanos(spent), limes.Nanos(reserved), true
-			return b, err
-		})
+		rows, err = pgx.CollectRows(r, scanListedBudget)
 		return err
 	})
 	if err != nil {
 		return limes.Page[meter.TenantBudget]{}, err
 	}
+	return tenantBudgetPage(rows, limit), nil
+}
+
+// tenantCursorArgs is the place a tenant budget cursor names, as
+// sqlListTenants takes it: its class, nil for none, spent, ceiling and
+// tenant.
+func tenantCursorArgs(cursor string) ([]any, error) {
+	if cursor == "" {
+		return []any{(*int)(nil), int64(0), int64(0), uuid.Nil()}, nil
+	}
+	p, err := parseTenantPlace(cursor)
+	if err != nil {
+		return nil, err
+	}
+	return []any{&p.class, int64(p.spent), int64(p.max), p.tenantID}, nil
+}
+
+// scanListedBudget reads one listed tenant budget.
+func scanListedBudget(row pgx.CollectableRow) (budgetRow, error) {
+	var b budgetRow
+	var ceilingMax, spent, reserved int64
+	err := row.Scan(&b.tenantID, &ceilingMax, &b.ceiling.Unlimited, &spent, &reserved, &b.unit,
+		&b.start, &b.end, &b.updated, &b.version, &b.period)
+	b.ceiling.Max, b.spent, b.reserved, b.persisted = limes.Nanos(ceilingMax), limes.Nanos(spent), limes.Nanos(reserved), true
+	return b, err
+}
+
+// tenantBudgetPage is the first limit of rows, and the cursor past the last
+// when more follow.
+func tenantBudgetPage(rows []budgetRow, limit int) limes.Page[meter.TenantBudget] {
 	next := ""
 	if len(rows) > limit {
 		rows = rows[:limit]
@@ -509,7 +563,7 @@ func (s *UsageStore) ListTenantBudgets(ctx context.Context, req meter.ListTenant
 	for _, b := range rows {
 		out = append(out, b.budget())
 	}
-	return limes.Page[meter.TenantBudget]{Items: out, Next: next}, nil
+	return limes.Page[meter.TenantBudget]{Items: out, Next: next}
 }
 
 // tenantPlace is an aggregate's place in ListTenantBudgets' order, and the
@@ -561,19 +615,29 @@ func parseTenantPlace(s string) (tenantPlace, error) {
 	if len(fields) != tenantCursorFields {
 		return tenantPlace{}, bad
 	}
+	p, ok := readTenantPlace(fields)
+	if !ok {
+		return tenantPlace{}, bad
+	}
+	return p, nil
+}
+
+// readTenantPlace reads a cursor's fields — class, spent, ceiling, tenant —
+// refusing any out of range, or a ceiling its class contradicts.
+func readTenantPlace(fields []string) (tenantPlace, bool) {
 	class, err := strconv.Atoi(fields[0])
 	if err != nil || class < classZero || class > classUnlimited {
-		return tenantPlace{}, bad
+		return tenantPlace{}, false
 	}
 	spent, err1 := strconv.ParseInt(fields[1], 10, 64)
 	ceiling, err2 := strconv.ParseInt(fields[2], 10, 64)
 	tenant, err3 := uuid.Parse(fields[3])
-	if err1 != nil || err2 != nil || err3 != nil ||
+	if err := errors.Join(err1, err2, err3); err != nil ||
 		limes.Nanos(spent).Validate() != nil || limes.Nanos(ceiling).Validate() != nil ||
 		(class == classBounded) != (ceiling > 0) {
-		return tenantPlace{}, bad
+		return tenantPlace{}, false
 	}
-	return tenantPlace{class: class, spent: limes.Nanos(spent), max: limes.Nanos(ceiling), tenantID: tenant}, nil
+	return tenantPlace{class: class, spent: limes.Nanos(spent), max: limes.Nanos(ceiling), tenantID: tenant}, true
 }
 
 const (

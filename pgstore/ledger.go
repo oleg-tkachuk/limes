@@ -136,61 +136,20 @@ func (l *Ledger) SumCharges(ctx context.Context, req meter.SumChargesRequest) (l
 	if err := req.Validate(); err != nil {
 		return limes.Page[meter.ChargeSum]{}, err
 	}
-	field, bucketed, err := truncOf(req.Bucket)
+	q, err := sumQueryOf(req)
 	if err != nil {
 		return limes.Page[meter.ChargeSum]{}, err
 	}
-	var trunc *string
-	if bucketed {
-		trunc = &field
-	}
-	var after sumCursor
-	if req.Cursor != "" {
-		if after, err = decodeSumCursor(req.Cursor); err != nil {
-			return limes.Page[meter.ChargeSum]{}, err
-		}
-	}
-	limit := limes.PageLimit(req.Limit)
-	var tenant *uuid.UUID
-	if !req.AllTenants {
-		tenant = &req.TenantID
-	}
-	ops := make([]string, len(req.Filter.Ops))
-	for i, op := range req.Filter.Ops {
-		ops[i] = string(op)
-	}
 	var out []meter.ChargeSum
 	sum := func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, sqlSumCharges,
-			tenant, req.From, req.To, nonNil(req.Filter.Tenants), ops, nonNil(req.Filter.Actors), nonNil(req.Filter.Capabilities),
-			trunc, req.Groups(meter.ChargeDimensionTenant), req.Groups(meter.ChargeDimensionOp),
-			req.Groups(meter.ChargeDimensionActor), req.Groups(meter.ChargeDimensionCapability),
-			req.Cursor != "", after.Bucket, strconv.FormatInt(after.Charged, 10), after.Unit, after.Tenant, after.Op, after.Actor, after.CapID,
-			limit+1)
+		rows, err := tx.Query(ctx, sqlSumCharges, q.args...)
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
-		for rows.Next() {
-			var s meter.ChargeSum
-			var bucket time.Time
-			var op, charged, refunded string
-			if err := rows.Scan(&bucket, &s.UnitCode, &s.TenantID, &op, &s.Actor, &s.CapabilityID, &charged, &refunded, &s.Charges); err != nil {
-				return err
-			}
-			s.Op = limes.Op(op)
-			if s.Charged, err = sumOf(charged); err != nil {
-				return err
-			}
-			if s.Refunded, err = sumOf(refunded); err != nil {
-				return err
-			}
-			if bucketed {
-				s.BucketStart = bucket.UTC()
-			}
-			out = append(out, s)
-		}
-		return rows.Err()
+		out, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (meter.ChargeSum, error) {
+			return scanSum(row, q.bucketed)
+		})
+		return err
 	}
 	if req.AllTenants {
 		err = l.inEveryTenantReadTx(ctx, sum)
@@ -200,11 +159,77 @@ func (l *Ledger) SumCharges(ctx context.Context, req meter.SumChargesRequest) (l
 	if err != nil {
 		return limes.Page[meter.ChargeSum]{}, err
 	}
-	if len(out) <= limit {
+	if len(out) <= q.limit {
 		return limes.Page[meter.ChargeSum]{Items: out}, nil
 	}
-	out = out[:limit]
-	return limes.Page[meter.ChargeSum]{Items: out, Next: placeOfSum(out[len(out)-1], bucketed).encode()}, nil
+	out = out[:q.limit]
+	return limes.Page[meter.ChargeSum]{Items: out, Next: placeOfSum(out[len(out)-1], q.bucketed).encode()}, nil
+}
+
+// sumQuery is a SumChargesRequest as sqlSumCharges reads it: its arguments,
+// whether it buckets, and the page's limit.
+type sumQuery struct {
+	args     []any
+	bucketed bool
+	limit    int
+}
+
+// sumQueryOf is req's sumQuery, refusing a bucket or a cursor it cannot
+// read. A page asks for one row past its limit, to learn whether more
+// follow.
+func sumQueryOf(req meter.SumChargesRequest) (sumQuery, error) {
+	field, bucketed, err := truncOf(req.Bucket)
+	if err != nil {
+		return sumQuery{}, err
+	}
+	var trunc *string
+	if bucketed {
+		trunc = &field
+	}
+	var after sumCursor
+	if req.Cursor != "" {
+		if after, err = decodeSumCursor(req.Cursor); err != nil {
+			return sumQuery{}, err
+		}
+	}
+	var tenant *uuid.UUID
+	if !req.AllTenants {
+		tenant = &req.TenantID
+	}
+	ops := make([]string, len(req.Filter.Ops))
+	for i, op := range req.Filter.Ops {
+		ops[i] = string(op)
+	}
+	limit := limes.PageLimit(req.Limit)
+	return sumQuery{bucketed: bucketed, limit: limit, args: []any{
+		tenant, req.From, req.To, nonNil(req.Filter.Tenants), ops, nonNil(req.Filter.Actors), nonNil(req.Filter.Capabilities),
+		trunc, req.Groups(meter.ChargeDimensionTenant), req.Groups(meter.ChargeDimensionOp),
+		req.Groups(meter.ChargeDimensionActor), req.Groups(meter.ChargeDimensionCapability),
+		req.Cursor != "", after.Bucket, strconv.FormatInt(after.Charged, 10), after.Unit, after.Tenant, after.Op, after.Actor, after.CapID,
+		limit + 1,
+	}}, nil
+}
+
+// scanSum reads one group's sum; its bucket's start only when bucketed.
+func scanSum(row pgx.CollectableRow, bucketed bool) (meter.ChargeSum, error) {
+	var s meter.ChargeSum
+	var bucket time.Time
+	var op, charged, refunded string
+	if err := row.Scan(&bucket, &s.UnitCode, &s.TenantID, &op, &s.Actor, &s.CapabilityID, &charged, &refunded, &s.Charges); err != nil {
+		return meter.ChargeSum{}, err
+	}
+	s.Op = limes.Op(op)
+	var err error
+	if s.Charged, err = sumOf(charged); err != nil {
+		return meter.ChargeSum{}, err
+	}
+	if s.Refunded, err = sumOf(refunded); err != nil {
+		return meter.ChargeSum{}, err
+	}
+	if bucketed {
+		s.BucketStart = bucket.UTC()
+	}
+	return s, nil
 }
 
 // placeOfSum is s's place in the query's order. Its bucket is the one the
