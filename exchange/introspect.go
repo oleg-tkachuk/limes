@@ -33,7 +33,10 @@ type IntrospectionConfig struct {
 	Verifier *limes.Verifier
 	// Authenticate authenticates the resource server or gateway asking, as
 	// RFC 7662 §2.1 requires, so the endpoint is no oracle for whoever holds
-	// a token. An error refuses the request as ErrInvalidClient. Required.
+	// a token. An error that is or wraps ErrUnauthorizedClient refuses one
+	// authenticated but not allowed to introspect: 400 unauthorized_client.
+	// Any other error refuses it as ErrInvalidClient, answered as the token
+	// endpoint answers it (HandlerConfig.Authenticate). Required.
 	Authenticate func(r *http.Request) (Client, error)
 	// Audiences are the audiences of the tokens a client may learn about
 	// (RFC 7662 §4): a token whose aud names none of them is answered
@@ -138,7 +141,7 @@ func (h *IntrospectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	token, client, err := h.readRequest(w, r)
 	if err != nil {
 		log.WarnContext(r.Context(), "introspection request refused", slog.Any("error", err))
-		h.refuse(w, err)
+		h.refuse(w, r, err)
 		return
 	}
 	log = log.With(slog.String("client", client.ID))
@@ -255,17 +258,23 @@ func (h *IntrospectionHandler) readRequest(w http.ResponseWriter, r *http.Reques
 		return "", Client{}, fmt.Errorf("%w: %s required", ErrInvalidRequest, paramToken)
 	}
 	client, err := h.cfg.Authenticate(r)
-	if err != nil {
+	switch {
+	case errors.Is(err, ErrUnauthorizedClient):
+		return "", Client{}, err
+	case err != nil:
 		return "", Client{}, fmt.Errorf("%w: %w", ErrInvalidClient, err)
 	}
 	return token, client, nil
 }
 
 // refuse answers a request that could not be read or authenticated.
-func (h *IntrospectionHandler) refuse(w http.ResponseWriter, err error) {
+func (h *IntrospectionHandler) refuse(w http.ResponseWriter, r *http.Request, err error) {
 	status, code, description := http.StatusBadRequest, codeInvalidRequest, "The request is malformed."
-	if errors.Is(err, ErrInvalidClient) {
-		status, code, description = http.StatusUnauthorized, codeInvalidClient, "The client could not be authenticated."
+	switch {
+	case errors.Is(err, ErrUnauthorizedClient):
+		code, description = codeUnauthorizedClient, "The client may not introspect tokens."
+	case errors.Is(err, ErrInvalidClient):
+		status, code, description = challengeClient(w, r), codeInvalidClient, descriptionInvalidClient
 	}
 	writeJSON(w, status, errorResponse{Error: code, Description: description}, h.cfg.Logger)
 }

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -144,7 +145,7 @@ func TestHandlerRefusals(t *testing.T) {
 		"a detail with no type":       {change(map[string][]string{paramAuthorizationDetails: {`[{"actions":["read"]}]`}}), nil, http.StatusBadRequest, codeInvalidAuthorizationDetails},
 		"a detail with an empty type": {change(map[string][]string{paramAuthorizationDetails: {`[{"type":""}]`}}), nil, http.StatusBadRequest, codeInvalidAuthorizationDetails},
 		"a detail with a number type": {change(map[string][]string{paramAuthorizationDetails: {`[{"type":1}]`}}), nil, http.StatusBadRequest, codeInvalidAuthorizationDetails},
-		"an unknown client":           {exchangeForm(token), http.Header{clientHeader: {"someone"}}, http.StatusUnauthorized, codeInvalidClient},
+		"an unknown client":           {exchangeForm(token), http.Header{clientHeader: {"someone"}}, http.StatusBadRequest, codeInvalidClient},
 		"a refused subject token":     {change(map[string][]string{paramSubjectToken: {"a.b.c"}}), nil, http.StatusBadRequest, codeInvalidGrant},
 		"two DPoP headers":            {exchangeForm(token), http.Header{headerDPoP: {"a", "b"}}, http.StatusBadRequest, codeInvalidDPoPProof},
 	}
@@ -249,6 +250,58 @@ func TestHandlerTreatsAnEmptyParameterAsOmitted(t *testing.T) {
 	}
 }
 
+// basicCredentials are HTTP Basic credentials a client sends (RFC 7617).
+const basicCredentials = "Basic bWNwOnNlY3JldA=="
+
+// A client refused as not authenticated is answered 401 with a challenge
+// in the scheme it authenticated with (RFC 6749 §5.2), or, when it sent no
+// Authorization header, 400: a 401 must carry a challenge (RFC 9110
+// §15.5.2), and mTLS or a client assertion has none to give. Both
+// endpoints answer alike.
+func TestClientRefusalChallengesInTheClientsScheme(t *testing.T) {
+	f := newFixture(t, fixtureConfig{})
+	refusing := func(*http.Request) (Client, error) { return Client{}, errors.New("bad credentials") }
+	token, err := NewHandler(HandlerConfig{Exchanger: f.ex, EndpointURL: tokenEndpoint, Authenticate: refusing})
+	if err != nil {
+		t.Fatal(err)
+	}
+	introspection, err := NewIntrospectionHandler(IntrospectionConfig{Verifier: f.verifier, Authenticate: refusing})
+	if err != nil {
+		t.Fatal(err)
+	}
+	basic := `Basic realm="` + limes.DefaultRealm + `"`
+	for name, tc := range map[string]struct {
+		authorization []string
+		status        int
+		challenge     string
+	}{
+		"no Authorization":         {nil, http.StatusBadRequest, ""},
+		"Basic":                    {[]string{basicCredentials}, http.StatusUnauthorized, basic},
+		"Basic with no credential": {[]string{"Basic"}, http.StatusUnauthorized, basic},
+		"Basic after a tab":        {[]string{"Basic\tbWNw"}, http.StatusUnauthorized, basic},
+		"a lower-case scheme":      {[]string{"basic bWNw"}, http.StatusUnauthorized, `basic realm="` + limes.DefaultRealm + `"`},
+		"no scheme":                {[]string{" bWNw"}, http.StatusBadRequest, ""},
+		"not a token":              {[]string{"B@sic bWNw"}, http.StatusBadRequest, ""},
+	} {
+		for endpoint, h := range map[string]http.Handler{"token": token, "introspection": introspection} {
+			form := exchangeForm(f.idp.sign(t, TypeAccessToken, accessClaims()))
+			form.Set(paramToken, "a")
+			w := post(t, h, form, http.Header{headerAuthorization: tc.authorization})
+			var resp errorResponse
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != tc.status || resp.Error != codeInvalidClient {
+				t.Errorf("%s, %s: status %d, body %s; want %d %s", endpoint, name, w.Code, w.Body, tc.status, codeInvalidClient)
+			}
+			var want []string
+			if tc.challenge != "" {
+				want = []string{tc.challenge}
+			}
+			if got := w.Header().Values(headerWWWAuthenticate); !slices.Equal(got, want) {
+				t.Errorf("%s, %s: WWW-Authenticate %q, want %q", endpoint, name, got, tc.challenge)
+			}
+		}
+	}
+}
+
 // An authenticated client not allowed to exchange is answered
 // unauthorized_client (400), wrapped or not; any other error of
 // Authenticate stays invalid_client (401). Each refusal is logged at WARN
@@ -263,7 +316,7 @@ func TestHandlerTellsAnUnauthorizedClientFromAnUnauthenticatedOne(t *testing.T) 
 	}{
 		"the sentinel":         {ErrUnauthorizedClient, http.StatusBadRequest, codeUnauthorizedClient},
 		"the sentinel wrapped": {fmt.Errorf("client %s may not exchange: %w", mcpServer, ErrUnauthorizedClient), http.StatusBadRequest, codeUnauthorizedClient},
-		"a plain error":        {errors.New("bad assertion"), http.StatusUnauthorized, codeInvalidClient},
+		"a plain error":        {errors.New("bad credentials"), http.StatusUnauthorized, codeInvalidClient},
 	} {
 		logs := &records{}
 		h, err := NewHandler(HandlerConfig{
@@ -273,7 +326,7 @@ func TestHandlerTellsAnUnauthorizedClientFromAnUnauthenticatedOne(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		w := post(t, h, exchangeForm(token), nil)
+		w := post(t, h, exchangeForm(token), http.Header{headerAuthorization: {basicCredentials}})
 		var resp errorResponse
 		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != tc.status || resp.Error != tc.code {
 			t.Errorf("%s: status %d, body %s; want %d %s", name, w.Code, w.Body, tc.status, tc.code)

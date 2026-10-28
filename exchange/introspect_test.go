@@ -5,6 +5,8 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -164,6 +166,34 @@ func TestIntrospectionOutage(t *testing.T) {
 	}
 }
 
+// A resource server the endpoint authenticated but does not allow to
+// introspect is answered 400 unauthorized_client, wrapped or not, and logged
+// at WARN as a refusal (RFC 7662 §2.3, RFC 6749 §5.2).
+func TestIntrospectionTellsAnUnauthorizedClient(t *testing.T) {
+	f := newFixture(t, fixtureConfig{})
+	for name, refusal := range map[string]error{
+		"the sentinel":         ErrUnauthorizedClient,
+		"the sentinel wrapped": fmt.Errorf("%s may not introspect: %w", mcpServer, ErrUnauthorizedClient),
+	} {
+		logs := &records{}
+		h, err := NewIntrospectionHandler(IntrospectionConfig{
+			Verifier: f.verifier, Logger: slog.New(logs),
+			Authenticate: func(*http.Request) (Client, error) { return Client{}, refusal },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		w := post(t, h, url.Values{paramToken: {"a"}}, http.Header{headerAuthorization: {basicCredentials}})
+		var resp errorResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != http.StatusBadRequest || resp.Error != codeUnauthorizedClient {
+			t.Errorf("%s: status %d, body %s", name, w.Code, w.Body)
+		}
+		if level, _ := logs.last(); level != slog.LevelWarn || !logs.lastWraps(refusal) || logs.lastWraps(ErrInvalidClient) {
+			t.Errorf("%s logged %s", name, level)
+		}
+	}
+}
+
 // A request that is not a form POST naming one token, or comes from no
 // client the endpoint knows, is refused.
 func TestIntrospectionRefusals(t *testing.T) {
@@ -176,7 +206,7 @@ func TestIntrospectionRefusals(t *testing.T) {
 	}{
 		"no token":          {url.Values{}, nil, http.StatusBadRequest},
 		"a token twice":     {url.Values{paramToken: {"a", "b"}}, nil, http.StatusBadRequest},
-		"an unknown client": {url.Values{paramToken: {"a"}}, http.Header{clientHeader: {"someone"}}, http.StatusUnauthorized},
+		"an unknown client": {url.Values{paramToken: {"a"}}, http.Header{clientHeader: {"someone"}}, http.StatusBadRequest},
 	} {
 		if w := post(t, h, tc.form, tc.header); w.Code != tc.status {
 			t.Errorf("%s: status %d, want %d", name, w.Code, tc.status)
