@@ -161,14 +161,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // readRequest reads and authenticates a token exchange request, and names
 // the type of its subject token.
 func (h *Handler) readRequest(w http.ResponseWriter, r *http.Request) (Request, string, error) {
-	if media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || media != formContentType {
-		return Request{}, "", fmt.Errorf("%w: the body must be %s", ErrInvalidRequest, formContentType)
+	form, err := readForm(w, r, h.cfg.MaxBodyBytes)
+	if err != nil {
+		return Request{}, "", err
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, h.cfg.MaxBodyBytes)
-	if err := r.ParseForm(); err != nil {
-		return Request{}, "", fmt.Errorf("%w: %w", ErrInvalidRequest, err)
-	}
-	form := r.PostForm
 	if err := checkForm(form); err != nil {
 		return Request{}, "", err
 	}
@@ -176,32 +172,74 @@ func (h *Handler) readRequest(w http.ResponseWriter, r *http.Request) (Request, 
 	if err != nil {
 		return Request{}, "", fmt.Errorf("%w: %w", ErrInvalidClient, err)
 	}
+	proof, err := h.proofOf(r)
+	if err != nil {
+		return Request{}, "", err
+	}
 	req := Request{
 		Client: client, SubjectToken: form.Get(paramSubjectToken),
 		Resources: form[paramResource], Audiences: form[paramAudience], Scopes: strings.Fields(form.Get(paramScope)),
+		DPoP: proof,
 	}
 	if details := form.Get(paramAuthorizationDetails); details != "" {
 		req.AuthorizationDetails = json.RawMessage(details)
 	}
+	return req, form.Get(paramSubjectTokenType), nil
+}
+
+// readForm reads a request's form body, no larger than maxBytes, refusing
+// any other body.
+func readForm(w http.ResponseWriter, r *http.Request, maxBytes int64) (url.Values, error) {
+	if media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || media != formContentType {
+		return nil, fmt.Errorf("%w: the body must be %s", ErrInvalidRequest, formContentType)
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+	if err := r.ParseForm(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
+	}
+	return r.PostForm, nil
+}
+
+// proofOf is the request's DPoP proof, the zero Proof for none; more than
+// one is refused.
+func (h *Handler) proofOf(r *http.Request) (dpop.Proof, error) {
 	switch proofs := r.Header.Values(headerDPoP); len(proofs) {
 	case 0:
+		return dpop.Proof{}, nil
 	case 1:
-		req.DPoP = dpop.Proof{JWT: proofs[0], Method: r.Method, URL: h.cfg.EndpointURL}
+		return dpop.Proof{JWT: proofs[0], Method: r.Method, URL: h.cfg.EndpointURL}, nil
 	default:
-		return Request{}, "", fmt.Errorf("%w: %d DPoP headers", dpop.ErrInvalid, len(proofs))
+		return dpop.Proof{}, fmt.Errorf("%w: %d DPoP headers", dpop.ErrInvalid, len(proofs))
 	}
-	return req, form.Get(paramSubjectTokenType), nil
 }
 
 // checkForm checks a token exchange request's parameters, all but who sent
 // it: the grant, the subject token and its type, the targets, and what this
 // endpoint does not support.
 func checkForm(form url.Values) error {
+	for _, check := range []func(url.Values) error{
+		checkRepeats, checkGrantType, checkTokenTypes, checkTargets, checkDetails,
+	} {
+		if err := check(form); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkRepeats refuses a parameter sent more than once that may not be.
+func checkRepeats(form url.Values) error {
 	for name, values := range form {
 		if len(values) > 1 && !repeatable[name] {
 			return fmt.Errorf("%w: %s sent %d times", ErrInvalidRequest, name, len(values))
 		}
 	}
+	return nil
+}
+
+// checkGrantType refuses a grant other than token exchange, or one without
+// a subject token.
+func checkGrantType(form url.Values) error {
 	if grant := form.Get(paramGrantType); grant != GrantTypeTokenExchange {
 		if grant == "" {
 			return fmt.Errorf("%w: %s required", ErrInvalidRequest, paramGrantType)
@@ -211,6 +249,12 @@ func checkForm(form url.Values) error {
 	if form.Get(paramSubjectToken) == "" {
 		return fmt.Errorf("%w: %s required", ErrInvalidRequest, paramSubjectToken)
 	}
+	return nil
+}
+
+// checkTokenTypes refuses a subject token of a type this endpoint does not
+// exchange, an actor token, or a requested type it does not issue.
+func checkTokenTypes(form url.Values) error {
 	switch typ := form.Get(paramSubjectTokenType); typ {
 	case TokenTypeAccessToken, TokenTypeJWT, IssuedTokenTypeCapability:
 	default:
@@ -222,8 +266,13 @@ func checkForm(form url.Values) error {
 	if typ := form.Get(paramRequestedTokenType); typ != "" && typ != IssuedTokenTypeCapability {
 		return fmt.Errorf("%w: %s %q is not the capability this endpoint issues", ErrInvalidRequest, paramRequestedTokenType, typ)
 	}
+	return nil
+}
+
+// checkTargets refuses a resource that is no absolute URI without a
+// fragment (RFC 8707 §2), or an empty audience.
+func checkTargets(form url.Values) error {
 	for _, resource := range form[paramResource] {
-		// RFC 8707 §2: an absolute URI, with no fragment.
 		u, err := url.Parse(resource)
 		if err != nil || !u.IsAbs() || u.Fragment != "" || strings.Contains(resource, "#") {
 			return fmt.Errorf("%w: %s %q is not an absolute URI without a fragment", ErrInvalidTarget, paramResource, resource)
@@ -234,11 +283,18 @@ func checkForm(form url.Values) error {
 			return fmt.Errorf("%w: an empty %s", ErrInvalidTarget, paramAudience)
 		}
 	}
-	if details := form.Get(paramAuthorizationDetails); details != "" {
-		var array []json.RawMessage
-		if err := json.Unmarshal([]byte(details), &array); err != nil {
-			return fmt.Errorf("%w: %s is not a JSON array", ErrInvalidRequest, paramAuthorizationDetails)
-		}
+	return nil
+}
+
+// checkDetails refuses authorization_details that is not a JSON array.
+func checkDetails(form url.Values) error {
+	details := form.Get(paramAuthorizationDetails)
+	if details == "" {
+		return nil
+	}
+	var array []json.RawMessage
+	if err := json.Unmarshal([]byte(details), &array); err != nil {
+		return fmt.Errorf("%w: %s is not a JSON array", ErrInvalidRequest, paramAuthorizationDetails)
 	}
 	return nil
 }

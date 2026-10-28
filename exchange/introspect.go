@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"mime"
 	"net/http"
 	"slices"
 
@@ -228,12 +227,8 @@ func caveatsDetail(c limes.Caveats) (json.RawMessage, error) {
 // readRequest reads and authenticates an introspection request: its token,
 // and who asks. token_type_hint is read and ignored (§2.1).
 func (h *IntrospectionHandler) readRequest(w http.ResponseWriter, r *http.Request) (string, Client, error) {
-	if media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || media != formContentType {
-		return "", Client{}, fmt.Errorf("%w: the body must be %s", ErrInvalidRequest, formContentType)
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, h.cfg.MaxBodyBytes)
-	if err := r.ParseForm(); err != nil {
-		return "", Client{}, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
+	if _, err := readForm(w, r, h.cfg.MaxBodyBytes); err != nil {
+		return "", Client{}, err
 	}
 	for _, name := range []string{paramToken, paramTokenTypeHint} {
 		if len(r.PostForm[name]) > 1 {
