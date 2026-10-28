@@ -38,6 +38,14 @@ func (c *RevocationCache) IsBiscuitRevoked(ctx context.Context, revocationIDs []
 	if revoked || len(missing) == 0 {
 		return revoked, nil
 	}
+	return c.lookupBiscuitMisses(ctx, missing, epoch)
+}
+
+// lookupBiscuitMisses asks the upstream about the revocation ids the cache
+// does not hold, keyed missing, as one question: a single id under its own
+// key, several under the key of their set. A set found live seeds each id
+// live as of epoch.
+func (c *RevocationCache) lookupBiscuitMisses(ctx context.Context, missing []string, epoch uint64) (bool, error) {
 	ids := make([][]byte, len(missing))
 	for i, k := range missing {
 		ids[i] = []byte(k[len(idKeyPrefix):])

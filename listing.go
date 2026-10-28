@@ -164,7 +164,12 @@ func (r ListRecordsRequest) Validate() error {
 	case r.Limit < 0:
 		return invalidRequest("list records: limit %d is negative", r.Limit)
 	}
-	for _, d := range r.Dispositions {
+	return validateDispositions(r.Dispositions)
+}
+
+// validateDispositions refuses a disposition that is not one of the three.
+func validateDispositions(ds []RecordDisposition) error {
+	for _, d := range ds {
 		if d.Validate() != nil {
 			return invalidRequest("list records: disposition %q is not one of %q, %q, %q",
 				d, RecordDispositionActive, RecordDispositionExpired, RecordDispositionRevoked)
