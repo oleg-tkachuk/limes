@@ -353,32 +353,41 @@ func (s *Store) Insert(_ context.Context, req limes.InsertRequest) error {
 		return err
 	}
 	if c.ParentID != uuid.Nil() {
-		parent, ok := s.caps[c.ParentID]
-		if !ok {
-			return fmt.Errorf("%w: memstore: parent %s is not on record", limes.ErrInvalidRequest, c.ParentID)
-		}
-		if c.ExpiresAt.After(parent.ExpiresAt) {
-			return fmt.Errorf("%w: expires %s, after its parent %s", limes.ErrDelegationTooWide, c.ExpiresAt, parent.ExpiresAt)
-		}
-		if c.Subject.TenantID != parent.Subject.TenantID {
-			return fmt.Errorf("%w: tenant %s, not its parent's %s", limes.ErrDelegationTooWide, c.Subject.TenantID, parent.Subject.TenantID)
-		}
-		if c.Caveats.Budget.UnitCode != parent.Caveats.Budget.UnitCode {
-			return fmt.Errorf("%w: budget in %q, under a parent in %q", limes.ErrUnitCodeMismatch, c.Caveats.Budget.UnitCode, parent.Caveats.Budget.UnitCode)
-		}
-		// The child's ancestors are its parent and the parent's own.
-		ancestors, err := s.ancestorsLocked(c.ParentID)
-		if err != nil {
+		if err := s.checkChildLocked(c); err != nil {
 			return err
-		}
-		if len(ancestors) >= limes.MaxDelegationDepth {
-			return fmt.Errorf("%w: %s would have more than %d ancestors", limes.ErrDelegationTooDeep, c.ID, limes.MaxDelegationDepth)
 		}
 	}
 	// Copies in and out: the caller keeps its slices, and a record never
 	// changes after it is written.
 	s.caps[c.ID] = c.Clone()
 	s.issuedBy[c.ID] = issuedBy.Clone()
+	return nil
+}
+
+// checkChildLocked refuses a child its parent on record does not allow:
+// none on record, a later expiry, another tenant or budget unit, or a depth
+// past MaxDelegationDepth. s.mu must be held.
+func (s *Store) checkChildLocked(c limes.Capability) error {
+	parent, ok := s.caps[c.ParentID]
+	if !ok {
+		return fmt.Errorf("%w: memstore: parent %s is not on record", limes.ErrInvalidRequest, c.ParentID)
+	}
+	switch {
+	case c.ExpiresAt.After(parent.ExpiresAt):
+		return fmt.Errorf("%w: expires %s, after its parent %s", limes.ErrDelegationTooWide, c.ExpiresAt, parent.ExpiresAt)
+	case c.Subject.TenantID != parent.Subject.TenantID:
+		return fmt.Errorf("%w: tenant %s, not its parent's %s", limes.ErrDelegationTooWide, c.Subject.TenantID, parent.Subject.TenantID)
+	case c.Caveats.Budget.UnitCode != parent.Caveats.Budget.UnitCode:
+		return fmt.Errorf("%w: budget in %q, under a parent in %q", limes.ErrUnitCodeMismatch, c.Caveats.Budget.UnitCode, parent.Caveats.Budget.UnitCode)
+	}
+	// The child's ancestors are its parent and the parent's own.
+	ancestors, err := s.ancestorsLocked(c.ParentID)
+	if err != nil {
+		return err
+	}
+	if len(ancestors) >= limes.MaxDelegationDepth {
+		return fmt.Errorf("%w: %s would have more than %d ancestors", limes.ErrDelegationTooDeep, c.ID, limes.MaxDelegationDepth)
+	}
 	return nil
 }
 
@@ -737,12 +746,9 @@ func (s *Store) ListByPrincipal(_ context.Context, req limes.ListByPrincipalRequ
 	if err := req.Validate(); err != nil {
 		return limes.Page[limes.Capability]{}, err
 	}
-	var after uuid.UUID
-	if req.Cursor != "" {
-		var err error
-		if after, err = uuid.Parse(req.Cursor); err != nil {
-			return limes.Page[limes.Capability]{}, fmt.Errorf("%w: memstore: cursor %q", limes.ErrInvalidRequest, req.Cursor)
-		}
+	after, err := parseIDCursor(req.Cursor)
+	if err != nil {
+		return limes.Page[limes.Capability]{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -750,17 +756,9 @@ func (s *Store) ListByPrincipal(_ context.Context, req limes.ListByPrincipalRequ
 	now := s.nowFn()
 	out := make([]limes.Capability, 0, len(s.caps))
 	for id, c := range s.caps {
-		switch {
-		case c.Subject.TenantID != req.TenantID, c.Subject.Type != req.PrincipalType, c.Subject.Subject != req.Subject:
-			continue
-		case !req.IncludeExpired && !c.ExpiresAt.After(now):
-			continue
-		case !req.IncludeRevoked && s.isRevokedItselfLocked(id):
-			continue
-		case req.Cursor != "" && !uuidLess(after, id):
-			continue
+		if s.listsLocked(req, c, now) && (req.Cursor == "" || uuidLess(after, id)) {
+			out = append(out, c.Clone())
 		}
-		out = append(out, c.Clone())
 	}
 	// Ascending id, the order the cursor seeks in.
 	sort.Slice(out, func(i, j int) bool { return uuidLess(out[i].ID, out[j].ID) })
@@ -770,6 +768,31 @@ func (s *Store) ListByPrincipal(_ context.Context, req limes.ListByPrincipalRequ
 	}
 	out = out[:limit]
 	return limes.Page[limes.Capability]{Items: out, Next: out[len(out)-1].ID.String()}, nil
+}
+
+// parseIDCursor reads a listing cursor, the id the last page ended on; the
+// zero id for none.
+func parseIDCursor(cursor string) (uuid.UUID, error) {
+	if cursor == "" {
+		return uuid.Nil(), nil
+	}
+	after, err := uuid.Parse(cursor)
+	if err != nil {
+		return uuid.Nil(), fmt.Errorf("%w: memstore: cursor %q", limes.ErrInvalidRequest, cursor)
+	}
+	return after, nil
+}
+
+// listsLocked reports whether req lists c at now: its principal's, and
+// neither expired nor revoked unless req includes those. s.mu must be held.
+func (s *Store) listsLocked(req limes.ListByPrincipalRequest, c limes.Capability, now time.Time) bool {
+	switch {
+	case c.Subject.TenantID != req.TenantID, c.Subject.Type != req.PrincipalType, c.Subject.Subject != req.Subject:
+		return false
+	case !req.IncludeExpired && !c.ExpiresAt.After(now):
+		return false
+	}
+	return req.IncludeRevoked || !s.isRevokedItselfLocked(c.ID)
 }
 
 // percent turns a fraction into a percentage.
@@ -1637,18 +1660,37 @@ func (s *UsageStore) Refund(_ context.Context, req meter.RefundRequest) (meter.R
 	}
 	e := &s.ledger[i]
 	receipt := meter.RefundReceipt{ChargeID: e.ID, TenantID: e.TenantID, UnitCode: e.UnitCode}
-	remaining := e.Amount - e.RefundedAmount
-	amount := req.Amount
-	if req.Remaining {
-		amount = remaining
-	}
-	if amount > remaining {
-		return meter.RefundReceipt{}, fmt.Errorf("%w: %v requested, %v of %v left",
-			meter.ErrRefundExceedsCharge, amount, remaining, e.Amount)
+	amount, err := refundAmount(*e, req)
+	if err != nil {
+		return meter.RefundReceipt{}, err
 	}
 	if amount == 0 {
 		return receipt, nil
 	}
+	s.refundLocked(e, amount)
+	receipt.Amount = amount
+	return receipt, nil
+}
+
+// refundAmount is what req gives back of the charge e: all that is left of
+// it, or the amount asked for, which may not exceed that.
+func refundAmount(e ledgerEntry, req meter.RefundRequest) (limes.Nanos, error) {
+	remaining := e.Amount - e.RefundedAmount
+	if req.Remaining {
+		return remaining, nil
+	}
+	if req.Amount > remaining {
+		return 0, fmt.Errorf("%w: %v requested, %v of %v left",
+			meter.ErrRefundExceedsCharge, req.Amount, remaining, e.Amount)
+	}
+	return req.Amount, nil
+}
+
+// refundLocked gives amount of the charge e back to every counter that
+// spent it: the capability, its ancestors, its copies, and its tenant's
+// budget while the charge's period is still the current one. s.mu must be
+// held.
+func (s *UsageStore) refundLocked(e *ledgerEntry, amount limes.Nanos) {
 	for _, id := range append([]uuid.UUID{e.CapabilityID}, e.Ancestors...) {
 		if u, ok := s.usage[id]; ok {
 			u.SpentAmount = max0(u.SpentAmount - amount)
@@ -1670,8 +1712,6 @@ func (s *UsageStore) Refund(_ context.Context, req meter.RefundRequest) (meter.R
 		}
 	}
 	e.RefundedAmount += amount
-	receipt.Amount = amount
-	return receipt, nil
 }
 
 // GetUsage reads one capability's counters.
