@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -116,8 +117,30 @@ func TestSign_RejectsInvalid(t *testing.T) {
 		"reversed times":    {func(c *Capability) { c.ExpiresAt = c.IssuedAt.Add(-time.Minute) }, "ExpiresAt must be after"},
 		"no expiry":         {func(c *Capability) { c.IssuedAt, c.ExpiresAt = time.Time{}, time.Time{} }, "ExpiresAt must be after"},
 		"missing client id": {func(c *Capability) { c.ClientID = "" }, "ClientID"},
-		"inconsistent acting": {
+		"prior actors acting for itself": {
 			func(c *Capability) { c.PriorActors = []string{"agent"} }, "PriorActors need an OnBehalfOf",
+		},
+		"acting for another tenant": {
+			func(c *Capability) {
+				c.OnBehalfOf = &Principal{Type: PrincipalTypeUser, TenantID: uuid.New(), Subject: "u"}
+			},
+			"OnBehalfOf is of tenant",
+		},
+		"prior actors and no parent": {
+			func(c *Capability) { c.OnBehalfOf, c.PriorActors = onBehalfOfHolder(c), []string{"agent"} }, "PriorActors need a ParentID",
+		},
+		"an empty prior actor": {
+			func(c *Capability) {
+				c.OnBehalfOf, c.PriorActors, c.ParentID = onBehalfOfHolder(c), []string{""}, uuid.New()
+			},
+			"PriorActors are at most",
+		},
+		"prior actors past MaxDelegationDepth": {
+			func(c *Capability) {
+				c.OnBehalfOf, c.ParentID = onBehalfOfHolder(c), uuid.New()
+				c.PriorActors = slices.Repeat([]string{"agent"}, MaxDelegationDepth+1)
+			},
+			"PriorActors are at most",
 		},
 		"time beyond I-JSON": {
 			func(c *Capability) { c.ExpiresAt = time.Unix(MaxIJSONInteger+1, 0) }, "I-JSON",
@@ -479,6 +502,11 @@ func (k garbageKey) Public() crypto.PublicKey { return k.reported }
 
 func (garbageKey) Sign(io.Reader, []byte, crypto.SignerOpts) ([]byte, error) {
 	return make([]byte, ed25519.SignatureSize), nil
+}
+
+// onBehalfOfHolder is a user of c's tenant for c to act for.
+func onBehalfOfHolder(c *Capability) *Principal {
+	return &Principal{Type: PrincipalTypeUser, TenantID: c.Subject.TenantID, Subject: "user"}
 }
 
 // shortKey reports a real public key and returns a signature one byte short.
