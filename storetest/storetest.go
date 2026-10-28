@@ -753,74 +753,111 @@ func checkBiscuit(t *testing.T, f fixture) {
 	if !ok {
 		t.Skip("the store keeps no Biscuit revocations")
 	}
+	b := biscuitStore{f: f, store: store}
 	live := f.live(t, "agent:biscuit", uuid.Nil())
 	expired := f.insert(t, f.newCapability("agent:biscuit-old", uuid.Nil(), f.now.Add(-expiredAgo)))
-	copyID, oldCopyID, otherID := []byte("copy"), []byte("old-copy"), []byte("other")
-	// sharedID is one revocation id carried by chains of both capabilities:
-	// a Biscuit block's signature does not cover the block before it, so a
-	// holder of two Biscuits can graft one's block onto the other.
-	sharedID := []byte("grafted-copy")
-	revoke := func(capID uuid.UUID, id []byte) error {
-		_, err := store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(capID, id), Note: "test", Actor: "storetest"})
-		return err
-	}
-	isRevoked := func(ids ...[]byte) bool {
-		t.Helper()
-		r, err := store.IsBiscuitRevoked(f.Ctx, ids)
-		expect.Must(t, err == nil, "IsBiscuitRevoked: %v", err)
-		return r
-	}
-
-	err := revoke(uuid.New(), copyID)
-	expect.That(t, errors.Is(err, limes.ErrNotFound), "a copy of an unknown capability: err = %v, want ErrNotFound", err)
-	err = revoke(live.ID, nil)
-	expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "an empty revocation id: err = %v, want ErrInvalidRequest", err)
-	_, err = store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{})
-	expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "a request naming no copy: err = %v, want ErrInvalidRequest", err)
-	// The first revoke writes the entry and reports it; a repeat writes
-	// nothing and reports the first.
-	var firstEntry limes.BiscuitRevocation
-	for i := range 2 {
-		r, err := store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(live.ID, copyID), Note: "test", Actor: "storetest"})
-		expect.Must(t, err == nil, "RevokeBiscuit: %v", err)
-		expect.That(t, !(r.AlreadyRevoked != (i > 0) || r.Revocation.CapabilityID != live.ID || !bytes.Equal(r.Revocation.RevocationID, copyID) || r.Revocation.Note != "test"), "RevokeBiscuit, time %d = %+v; want AlreadyRevoked %v and the first entry", i+1, r, i > 0)
-		if i == 0 {
-			firstEntry = r.Revocation
-		} else if !r.Revocation.RevokedAt.Equal(firstEntry.RevokedAt) {
-			t.Errorf("a repeated RevokeBiscuit reported an entry of %s; the first was of %s", r.Revocation.RevokedAt, firstEntry.RevokedAt)
-		}
-	}
+	copyID, otherID := []byte("copy"), []byte("other")
+	checkBiscuitRefusals(t, b, live.ID, copyID)
+	first := checkBiscuitRevokedOnce(t, b, live.ID, copyID)
 	// A copy attenuated from a revoked one carries the revoked id before its
 	// own: every id is looked up, not only the last.
-	expect.That(t, !(!isRevoked(otherID, copyID) || !isRevoked(copyID, otherID) || isRevoked(otherID)), "IsBiscuitRevoked must hold for a token carrying a revoked id, wherever it is, and only then")
-	_, err = store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{
-		Copy: biscuitCopy(live.ID, copyID), Note: "again", Actor: "someone-else",
+	expect.That(t, !(!b.isRevoked(t, otherID, copyID) || !b.isRevoked(t, copyID, otherID) || b.isRevoked(t, otherID)), "IsBiscuitRevoked must hold for a token carrying a revoked id, wherever it is, and only then")
+	checkBiscuitReadBack(t, b, live.ID, copyID, otherID, first)
+	checkBiscuitPurge(t, b, live.ID, expired.ID, copyID)
+}
+
+// biscuitStore is the fixture's store as a BiscuitRevocationStore.
+type biscuitStore struct {
+	f     fixture
+	store limes.BiscuitRevocationStore
+}
+
+// revoke revokes the copy id of capID as the suite does.
+func (b biscuitStore) revoke(capID uuid.UUID, id []byte) error {
+	_, err := b.store.RevokeBiscuit(b.f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(capID, id), Note: "test", Actor: "storetest"})
+	return err
+}
+
+// isRevoked reports whether a token carrying ids is revoked.
+func (b biscuitStore) isRevoked(t *testing.T, ids ...[]byte) bool {
+	t.Helper()
+	r, err := b.store.IsBiscuitRevoked(b.f.Ctx, ids)
+	expect.Must(t, err == nil, "IsBiscuitRevoked: %v", err)
+	return r
+}
+
+// checkBiscuitRefusals holds RevokeBiscuit to refusing a copy of an unknown
+// capability as ErrNotFound, and an empty id or no copy as
+// ErrInvalidRequest.
+func checkBiscuitRefusals(t *testing.T, b biscuitStore, live uuid.UUID, copyID []byte) {
+	err := b.revoke(uuid.New(), copyID)
+	expect.That(t, errors.Is(err, limes.ErrNotFound), "a copy of an unknown capability: err = %v, want ErrNotFound", err)
+	err = b.revoke(live, nil)
+	expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "an empty revocation id: err = %v, want ErrInvalidRequest", err)
+	_, err = b.store.RevokeBiscuit(b.f.Ctx, limes.RevokeBiscuitRequest{})
+	expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "a request naming no copy: err = %v, want ErrInvalidRequest", err)
+}
+
+// checkBiscuitRevokedOnce holds RevokeBiscuit to writing the entry and
+// reporting it the first time, and to writing nothing and reporting the
+// first the second; it returns the first entry.
+func checkBiscuitRevokedOnce(t *testing.T, b biscuitStore, live uuid.UUID, copyID []byte) limes.BiscuitRevocation {
+	t.Helper()
+	var first limes.BiscuitRevocation
+	for i := range 2 {
+		r, err := b.store.RevokeBiscuit(b.f.Ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(live, copyID), Note: "test", Actor: "storetest"})
+		expect.Must(t, err == nil, "RevokeBiscuit: %v", err)
+		expect.That(t, !(r.AlreadyRevoked != (i > 0) || r.Revocation.CapabilityID != live || !bytes.Equal(r.Revocation.RevocationID, copyID) || r.Revocation.Note != "test"), "RevokeBiscuit, time %d = %+v; want AlreadyRevoked %v and the first entry", i+1, r, i > 0)
+		if i == 0 {
+			first = r.Revocation
+		} else if !r.Revocation.RevokedAt.Equal(first.RevokedAt) {
+			t.Errorf("a repeated RevokeBiscuit reported an entry of %s; the first was of %s", r.Revocation.RevokedAt, first.RevokedAt)
+		}
+	}
+	return first
+}
+
+// checkBiscuitReadBack holds GetBiscuitRevocation to the first revoke of a
+// copy, however often it was revoked since, and to refusing an id never
+// revoked or no copy.
+func checkBiscuitReadBack(t *testing.T, b biscuitStore, live uuid.UUID, copyID, otherID []byte, first limes.BiscuitRevocation) {
+	_, err := b.store.RevokeBiscuit(b.f.Ctx, limes.RevokeBiscuitRequest{
+		Copy: biscuitCopy(live, copyID), Note: "again", Actor: "someone-else",
 	})
 	expect.Must(t, err == nil, "%v", err)
-	got, err := store.GetBiscuitRevocation(f.Ctx, biscuitCopy(live.ID, copyID))
-	expect.That(t, !(err != nil || got.CapabilityID != live.ID || !bytes.Equal(got.RevocationID, copyID) ||
-		got.Note != "test" || got.Actor != "storetest" || got.RevokedAt.IsZero() || !got.RevokedAt.Equal(firstEntry.RevokedAt)), "GetBiscuitRevocation = %+v, %v; want the first revoke of %s, as RevokeBiscuit reported it", got, err, live.ID)
-	_, err = store.GetBiscuitRevocation(f.Ctx, biscuitCopy(live.ID, otherID))
+	got, err := b.store.GetBiscuitRevocation(b.f.Ctx, biscuitCopy(live, copyID))
+	expect.That(t, !(err != nil || got.CapabilityID != live || !bytes.Equal(got.RevocationID, copyID) ||
+		got.Note != "test" || got.Actor != "storetest" || got.RevokedAt.IsZero() || !got.RevokedAt.Equal(first.RevokedAt)), "GetBiscuitRevocation = %+v, %v; want the first revoke of %s, as RevokeBiscuit reported it", got, err, live)
+	_, err = b.store.GetBiscuitRevocation(b.f.Ctx, biscuitCopy(live, otherID))
 	expect.That(t, errors.Is(err, limes.ErrNotFound), "GetBiscuitRevocation of an id never revoked: err = %v, want ErrNotFound", err)
-	_, err = store.GetBiscuitRevocation(f.Ctx, limes.BiscuitCopy{})
+	_, err = b.store.GetBiscuitRevocation(b.f.Ctx, limes.BiscuitCopy{})
 	expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "GetBiscuitRevocation naming no copy: err = %v, want ErrInvalidRequest", err)
-	err = revoke(expired.ID, oldCopyID)
+}
+
+// checkBiscuitPurge holds Purge to dropping an expired capability's copy
+// revocations and keeping a live one's, even of the same id. sharedID is
+// one revocation id carried by chains of both capabilities: a Biscuit
+// block's signature does not cover the block before it, so a holder of two
+// Biscuits can graft one's block onto the other.
+func checkBiscuitPurge(t *testing.T, b biscuitStore, live, expired uuid.UUID, copyID []byte) {
+	oldCopyID, sharedID := []byte("old-copy"), []byte("grafted-copy")
+	err := b.revoke(expired, oldCopyID)
 	expect.Must(t, err == nil, "%v", err)
 	// The grafted copy is revoked under the expired capability first; the
 	// live capability's own revocation of the id is still its own.
-	err = revoke(expired.ID, sharedID)
+	err = b.revoke(expired, sharedID)
 	expect.Must(t, err == nil, "%v", err)
-	_, err = store.RevokeBiscuit(f.Ctx, limes.RevokeBiscuitRequest{
-		Copy: biscuitCopy(live.ID, sharedID), Note: "live", Actor: "operator",
+	_, err = b.store.RevokeBiscuit(b.f.Ctx, limes.RevokeBiscuitRequest{
+		Copy: biscuitCopy(live, sharedID), Note: "live", Actor: "operator",
 	})
 	expect.Must(t, err == nil, "%v", err)
-	got, err = store.GetBiscuitRevocation(f.Ctx, biscuitCopy(live.ID, sharedID))
-	expect.That(t, !(err != nil || got.CapabilityID != live.ID || got.Note != "live"), "GetBiscuitRevocation of the live capability's copy = %+v, %v; want its own revocation, not the expired one's", got, err)
-	purged, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace})
+	got, err := b.store.GetBiscuitRevocation(b.f.Ctx, biscuitCopy(live, sharedID))
+	expect.That(t, !(err != nil || got.CapabilityID != live || got.Note != "live"), "GetBiscuitRevocation of the live capability's copy = %+v, %v; want its own revocation, not the expired one's", got, err)
+	purged, err := b.f.Store.Purge(b.f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace})
 	expect.Must(t, !(err != nil || purged.Purged != 1), "Purge = %+v, %v; want the expired capability's record", purged, err)
-	expect.That(t, !(isRevoked(oldCopyID) || !isRevoked(copyID)), "Purge must drop the expired capability's copy and keep the live one's")
-	expect.That(t, isRevoked(sharedID), "Purge of one capability must keep another capability's revocation of the same id")
-	_, err = store.GetBiscuitRevocation(f.Ctx, biscuitCopy(expired.ID, sharedID))
+	expect.That(t, !(b.isRevoked(t, oldCopyID) || !b.isRevoked(t, copyID)), "Purge must drop the expired capability's copy and keep the live one's")
+	expect.That(t, b.isRevoked(t, sharedID), "Purge of one capability must keep another capability's revocation of the same id")
+	_, err = b.store.GetBiscuitRevocation(b.f.Ctx, biscuitCopy(expired, sharedID))
 	expect.That(t, errors.Is(err, limes.ErrNotFound), "GetBiscuitRevocation of the purged capability's copy: err = %v, want ErrNotFound", err)
 }
 

@@ -2310,6 +2310,25 @@ func checkExpiry(t *testing.T, f fixture) {
 // checkListTenantBudgets holds a store to ListTenantBudgets' order, filters
 // and paging: most at risk first, then by tenant id, a page at a time.
 func checkListTenantBudgets(t *testing.T, f fixture) {
+	checkListTenantBudgetsRefusesMalformed(t, f)
+	unlimited, frozen := seedListedTenants(t, f)
+	// One page per tenant listed, and one more to see the end: a cursor that
+	// does not advance fails here rather than looping forever.
+	const listed = 1 + tiedTenants + 2
+	order, all := listTenantBudgetsOneByOne(t, f, listed)
+	expect.Must(t, !(!all[f.Tenant] || !all[unlimited] || !all[frozen]), "paging skipped a tenant: %v", all)
+	want := listed
+	expect.That(t, len(order) == want, "listed %d tenants, want %d", len(order), want)
+	expect.That(t, !(order[0].TenantID != frozen || order[len(order)-1].TenantID != unlimited), "listed %s first and %s last; want the ceiling of 0 %s first and the unlimited %s last", order[0].TenantID, order[len(order)-1].TenantID, frozen, unlimited)
+	checkRiskOrder(t, order)
+	checkAtOrPastFilter(t, f, frozen, unlimited)
+	checkUnlimitedFilter(t, f, unlimited)
+	checkFiltersPaged(t, f, order, unlimited, listed)
+}
+
+// checkListTenantBudgetsRefusesMalformed holds ListTenantBudgets to refusing
+// a malformed request as ErrInvalidRequest.
+func checkListTenantBudgetsRefusesMalformed(t *testing.T, f fixture) {
 	for name, req := range map[string]meter.ListTenantBudgetsRequest{
 		"a negative limit":             {Limit: -1},
 		"a threshold past 100%":        {Filter: meter.TenantBudgetFilterAtOrPast, ThresholdBasisPoints: meter.BasisPointsPerWhole + 1},
@@ -2321,9 +2340,14 @@ func checkListTenantBudgets(t *testing.T, f fixture) {
 		_, err := f.Usage.ListTenantBudgets(f.listCtx(), req)
 		expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "ListTenantBudgets with %s: err = %v, want ErrInvalidRequest", name, err)
 	}
-	// The fixture's tenant has a ceiling of 30 and spends half of it; two
-	// more have ceilings and spend nothing, so they tie and their ids order
-	// them; and one more is unlimited.
+}
+
+// seedListedTenants gives the listing its tenants: the fixture's tenant has
+// a ceiling of 30 and spends half of it; tiedTenants more have ceilings and
+// spend nothing, so they tie and their ids order them; one more is
+// unlimited, and one has a ceiling of 0.
+func seedListedTenants(t *testing.T, f fixture) (unlimited, frozen uuid.UUID) {
+	t.Helper()
 	_, err := f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: f.root, budget: budgetOf(rootBudget)}), Amount: 15 * one}, nil)
 	expect.Must(t, err == nil, "%v", err)
 	newTenant := func(ceiling limes.BudgetCeiling) uuid.UUID {
@@ -2337,14 +2361,17 @@ func checkListTenantBudgets(t *testing.T, f fixture) {
 	for range tiedTenants {
 		newTenant(limes.BudgetCeiling{Max: tenantBudget})
 	}
-	unlimited := newTenant(unlimitedBudget)
-	frozen := newTenant(limes.BudgetCeiling{})
+	return newTenant(unlimitedBudget), newTenant(limes.BudgetCeiling{})
+}
+
+// listTenantBudgetsOneByOne lists every tenant budget a page of one at a
+// time, in the order listed, and the tenants seen, failing a page past
+// listed or a tenant listed twice.
+func listTenantBudgetsOneByOne(t *testing.T, f fixture, listed int) ([]meter.TenantBudget, map[uuid.UUID]bool) {
+	t.Helper()
 	all := map[uuid.UUID]bool{}
 	var order []meter.TenantBudget
 	cursor := ""
-	// One page per tenant listed, and one more to see the end: a cursor that
-	// does not advance fails here rather than looping forever.
-	const listed = 1 + tiedTenants + 2
 	for page := 0; ; page++ {
 		expect.Must(t, !(page > listed), "paging did not end after %d pages of one tenant each", listed)
 		pagePage, err := f.Usage.ListTenantBudgets(f.listCtx(), meter.ListTenantBudgetsRequest{Limit: 1, Cursor: cursor})
@@ -2357,14 +2384,15 @@ func checkListTenantBudgets(t *testing.T, f fixture) {
 			order = append(order, row)
 		}
 		if next == "" {
-			break
+			return order, all
 		}
 		cursor = next
 	}
-	expect.Must(t, !(!all[f.Tenant] || !all[unlimited] || !all[frozen]), "paging skipped a tenant: %v", all)
-	want := listed
-	expect.That(t, len(order) == want, "listed %d tenants, want %d", len(order), want)
-	expect.That(t, !(order[0].TenantID != frozen || order[len(order)-1].TenantID != unlimited), "listed %s first and %s last; want the ceiling of 0 %s first and the unlimited %s last", order[0].TenantID, order[len(order)-1].TenantID, frozen, unlimited)
+}
+
+// checkRiskOrder holds a listing to most at risk first, ties by ascending
+// tenant id.
+func checkRiskOrder(t *testing.T, order []meter.TenantBudget) {
 	for i := 1; i < len(order); i++ {
 		cur, prev := riskOf(order[i]), riskOf(order[i-1])
 		switch {
@@ -2374,21 +2402,35 @@ func checkListTenantBudgets(t *testing.T, f fixture) {
 			t.Errorf("row %d (%s) follows %s at the same risk; want ascending tenant id", i, order[i].TenantID, order[i-1].TenantID)
 		}
 	}
+}
+
+// checkAtOrPastFilter holds TenantBudgetFilterAtOrPast to the tenants at or
+// past its threshold, and at a threshold of 0 to every tenant with a
+// ceiling and none without.
+func checkAtOrPastFilter(t *testing.T, f fixture, frozen, unlimited uuid.UUID) {
 	const half = 50
 	riskyPage, err := f.Usage.ListTenantBudgets(f.listCtx(), meter.ListTenantBudgetsRequest{Filter: meter.TenantBudgetFilterAtOrPast, ThresholdBasisPoints: half * basisPointsPerPercent})
 	risky := riskyPage.Items
 	expect.That(t, !(err != nil || len(risky) != 2 || risky[0].TenantID != frozen || risky[1].TenantID != f.Tenant || riskyPct(risky[1]) != half), "tenants at 50%% or more = %+v, %v; want %s, at a ceiling of 0, then %s at 50%%", risky, err, frozen, f.Tenant)
-	// At a threshold of 0, every tenant with a ceiling and none without.
 	ceiled, err := f.Usage.ListTenantBudgets(f.listCtx(), meter.ListTenantBudgetsRequest{Filter: meter.TenantBudgetFilterAtOrPast})
 	expect.That(t, !(err != nil || slices.ContainsFunc(ceiled.Items, func(s meter.TenantBudget) bool { return s.TenantID == unlimited }) ||
 		!slices.ContainsFunc(ceiled.Items, func(s meter.TenantBudget) bool { return s.TenantID == f.Tenant })), "tenants with a ceiling = %+v, %v; want %s and not %s", ceiled.Items, err, f.Tenant, unlimited)
+}
+
+// checkUnlimitedFilter holds TenantBudgetFilterUnlimited to the tenants
+// without a ceiling.
+func checkUnlimitedFilter(t *testing.T, f fixture, unlimited uuid.UUID) {
 	unlPage, err := f.Usage.ListTenantBudgets(f.listCtx(), meter.ListTenantBudgetsRequest{Filter: meter.TenantBudgetFilterUnlimited})
 	unl := unlPage.Items
 	expect.That(t, !(err != nil || slices.ContainsFunc(unl, func(s meter.TenantBudget) bool { return s.TenantID == f.Tenant }) ||
 		!slices.ContainsFunc(unl, func(s meter.TenantBudget) bool { return s.TenantID == unlimited })), "unlimited tenants = %+v, %v; want %s and not %s", unl, err, unlimited, f.Tenant)
-	// Each filter, paged one row at a time, lists exactly its rows and in the
-	// order of the list with no filter: a store that maps a filter to the
-	// wrong rows, or loses it between pages, fails here.
+}
+
+// checkFiltersPaged holds each filter, paged one row at a time, to exactly
+// its rows and in the order of the list with no filter: a store that maps a
+// filter to the wrong rows, or loses it between pages, fails here. And
+// TenantBudgetFilterAll names the filter a request that names none takes.
+func checkFiltersPaged(t *testing.T, f fixture, order []meter.TenantBudget, unlimited uuid.UUID, listed int) {
 	var withCeiling []uuid.UUID
 	for _, row := range order {
 		if row.TenantID != unlimited {
@@ -2405,7 +2447,6 @@ func checkListTenantBudgets(t *testing.T, f fixture) {
 		got := listedOneByOne(t, f, c.req, listed)
 		expect.That(t, slices.Equal(got, c.want), "tenants %s, a page of one at a time = %v, want %v", name, got, c.want)
 	}
-	// TenantBudgetFilterAll names the filter a request that names none takes.
 	named, err := f.Usage.ListTenantBudgets(f.listCtx(), meter.ListTenantBudgetsRequest{Filter: meter.TenantBudgetFilterAll, Limit: listed})
 	expect.Must(t, !(err != nil || len(named.Items) != len(order)), "every tenant, by name = %d rows, %v; want %d", len(named.Items), err, len(order))
 	for i, row := range named.Items {
