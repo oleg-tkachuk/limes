@@ -46,7 +46,8 @@ type Narrowing struct {
 }
 
 // NarrowPolicy turns a narrowing into the child to delegate, or refuses it
-// with ErrInvalidTarget or ErrInvalidScope. Its DelegateRequest's Parent is
+// with ErrInvalidTarget, ErrInvalidScope or ErrInvalidAuthorizationDetails,
+// as a Policy does. Its DelegateRequest's Parent is
 // set by the Exchanger; its Audience must be drawn from the narrowing's
 // resources and audiences, or be empty to take them all; its
 // ConfirmationJKT must be empty. Issuer.Delegate holds the child to the

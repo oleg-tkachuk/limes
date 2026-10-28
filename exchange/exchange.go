@@ -14,9 +14,10 @@ import (
 )
 
 // The refusals of an exchange, one per RFC 6749 §5.2 error (and RFC 8707's
-// invalid_target) the token endpoint answers with. A Policy refuses with
-// ErrInvalidGrant, ErrInvalidTarget or ErrInvalidScope; any other error it
-// returns is the server's, answered as such.
+// invalid_target, RFC 9396's invalid_authorization_details) the token
+// endpoint answers with. A Policy refuses with ErrInvalidGrant,
+// ErrInvalidTarget, ErrInvalidScope or ErrInvalidAuthorizationDetails; any
+// other error it returns is the server's, answered as such.
 var (
 	// ErrInvalidRequest is a request missing a parameter or malformed.
 	ErrInvalidRequest = errors.New("exchange: invalid request")
@@ -34,6 +35,10 @@ var (
 	ErrInvalidTarget = errors.New("exchange: target refused")
 	// ErrInvalidScope is a scope the exchange will not grant.
 	ErrInvalidScope = errors.New("exchange: scope refused")
+	// ErrInvalidAuthorizationDetails is authorization_details the exchange
+	// will not grant: malformed, or of a type or content it does not
+	// understand (RFC 9396 §5).
+	ErrInvalidAuthorizationDetails = errors.New("exchange: authorization details refused")
 	// ErrUnsupportedGrantType is a token request for another grant.
 	ErrUnsupportedGrantType = errors.New("exchange: grant type unsupported")
 )
@@ -85,7 +90,11 @@ type Grant struct {
 }
 
 // Policy turns a grant into the capability to issue, or refuses it with
-// ErrInvalidGrant, ErrInvalidTarget or ErrInvalidScope. Its IssueRequest's
+// ErrInvalidGrant, ErrInvalidTarget, ErrInvalidScope or
+// ErrInvalidAuthorizationDetails. A grant it does not refuse grants every
+// scope asked, which the token endpoint answers as granted (RFC 8693
+// §2.2.1); it refuses authorization_details of a type it does not
+// understand (RFC 9396 §5). Its IssueRequest's
 // Audience must be drawn from the grant's resources and audiences, or be
 // empty to take them all; its ConfirmationJKT must be empty, the Exchanger
 // setting it from the proof; its TTL is capped at the subject token's
@@ -367,7 +376,8 @@ func (e *Exchanger) checkProof(ctx context.Context, req Request, subject Subject
 // server's failure.
 func isRefusal(err error) bool {
 	for _, refusal := range []error{
-		ErrInvalidRequest, ErrInvalidClient, ErrInvalidGrant, ErrInvalidTarget, ErrInvalidScope, ErrUnsupportedGrantType,
+		ErrInvalidRequest, ErrInvalidClient, ErrInvalidGrant, ErrInvalidTarget, ErrInvalidScope, ErrInvalidAuthorizationDetails,
+		ErrUnsupportedGrantType, ErrUnauthorizedClient,
 		dpop.ErrRequired, dpop.ErrInvalid, dpop.ErrReplayed, dpop.ErrNonceRequired,
 	} {
 		if errors.Is(err, refusal) {
