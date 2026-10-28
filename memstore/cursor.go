@@ -2,6 +2,7 @@ package memstore
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -47,17 +48,27 @@ func decodeTenantBudgetCursor(s string) (tenantBudgetCursor, error) {
 	if len(fields) != tenantBudgetCursorFields {
 		return tenantBudgetCursor{}, bad
 	}
+	c, ok := readTenantBudgetCursor(fields)
+	if !ok {
+		return tenantBudgetCursor{}, bad
+	}
+	return c, nil
+}
+
+// readTenantBudgetCursor reads a cursor's fields — class, spent, ceiling,
+// tenant — refusing any out of range, or a ceiling its class contradicts.
+func readTenantBudgetCursor(fields []string) (tenantBudgetCursor, bool) {
 	class, err := strconv.Atoi(fields[0])
 	if err != nil || class < int(classZero) || class > int(classUnlimited) {
-		return tenantBudgetCursor{}, bad
+		return tenantBudgetCursor{}, false
 	}
 	spent, err1 := strconv.ParseInt(fields[1], 10, 64)
 	ceiling, err2 := strconv.ParseInt(fields[2], 10, 64)
 	tenant, err3 := uuid.Parse(fields[3])
-	if err1 != nil || err2 != nil || err3 != nil ||
+	if err := errors.Join(err1, err2, err3); err != nil ||
 		limes.Nanos(spent).Validate() != nil || limes.Nanos(ceiling).Validate() != nil ||
 		(ceilingClass(class) == classBounded) != (ceiling > 0) {
-		return tenantBudgetCursor{}, bad
+		return tenantBudgetCursor{}, false
 	}
-	return tenantBudgetCursor{class: ceilingClass(class), spent: limes.Nanos(spent), max: limes.Nanos(ceiling), tenantID: tenant}, nil
+	return tenantBudgetCursor{class: ceilingClass(class), spent: limes.Nanos(spent), max: limes.Nanos(ceiling), tenantID: tenant}, true
 }

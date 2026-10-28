@@ -79,39 +79,52 @@ func (c *Census) count(req limes.CountRecordsRequest) ([]limes.RecordCount, erro
 		if err != nil {
 			return nil, err
 		}
-		var k countKey
-		if req.ByTenant {
-			k.Tenant = rec.Subject.TenantID
-		}
-		if req.ByPrincipalType {
-			k.Type = rec.Subject.Type
-		}
+		k := countGroupOf(req, rec)
 		g, ok := groups[k]
 		if !ok {
 			g = &limes.RecordCount{TenantID: k.Tenant, PrincipalType: k.Type}
 			groups[k] = g
 		}
-		g.Total++
-		if rec.ParentID != uuid.Nil() {
-			g.Delegated++
-		}
-		switch {
-		case revoked:
-			g.Revoked++
-		case expiredAt(rec.ExpiresAt, now):
-			g.Expired++
-		default:
-			g.Active++
-			if !rec.ExpiresAt.After(now.Add(req.ExpiringWithin)) {
-				g.ExpiringSoon++
-			}
-		}
+		tally(g, rec, revoked, now, req.ExpiringWithin)
 	}
 	out := make([]limes.RecordCount, 0, len(groups))
 	for _, g := range groups {
 		out = append(out, *g)
 	}
 	return out, nil
+}
+
+// countGroupOf is the group rec falls in: its tenant and its principal
+// type, each when req counts by it.
+func countGroupOf(req limes.CountRecordsRequest, rec limes.Capability) countKey {
+	var k countKey
+	if req.ByTenant {
+		k.Tenant = rec.Subject.TenantID
+	}
+	if req.ByPrincipalType {
+		k.Type = rec.Subject.Type
+	}
+	return k
+}
+
+// tally counts rec in g at now: delegated or not, and revoked, expired or
+// active — and expiring within expiringWithin.
+func tally(g *limes.RecordCount, rec limes.Capability, revoked bool, now time.Time, expiringWithin time.Duration) {
+	g.Total++
+	if rec.ParentID != uuid.Nil() {
+		g.Delegated++
+	}
+	switch {
+	case revoked:
+		g.Revoked++
+	case expiredAt(rec.ExpiresAt, now):
+		g.Expired++
+	default:
+		g.Active++
+		if !rec.ExpiresAt.After(now.Add(expiringWithin)) {
+			g.ExpiringSoon++
+		}
+	}
 }
 
 // expiredAt reports whether a record expiring at expiresAt is expired at

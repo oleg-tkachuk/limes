@@ -469,55 +469,113 @@ type presented struct {
 // check is Check and CheckTokenRequest: the proof p, counted against
 // holder, for a request presenting what.
 func (v *Verifier) check(ctx context.Context, p Proof, holder string, what presented) (CheckedProof, error) {
+	if err := v.checkPresented(p); err != nil {
+		return CheckedProof{}, err
+	}
+	thumb, claims, err := readProof(p.JWT, what)
+	if err != nil {
+		return CheckedProof{}, err
+	}
+	if err := checkForRequest(claims, p, what, v.cfg.MatchPathOnly); err != nil {
+		return CheckedProof{}, err
+	}
+	window := v.cfg.Window
+	iat, err := issuedWithin(claims.IAT, v.cfg.Now(), window)
+	if err != nil {
+		return CheckedProof{}, err
+	}
+	if err := v.checkNonce(ctx, claims.Nonce); err != nil {
+		return CheckedProof{}, err
+	}
+	// Remembered past the last instant it is accepted, by more than the
+	// cache's clock can lag the verifier's: at iat+window it is still
+	// accepted, and a cache that dropped it then would let it through again.
+	return CheckedProof{entry: ReplayEntry{
+		JKT: thumb, JTI: claims.JTI, Holder: holder, ExpiresAt: iat.Add(window).Add(ReplayClockSkew),
+	}}, nil
+}
+
+// checkPresented refuses a check by a Verifier NewVerifier did not make,
+// no proof at all, or one past MaxProofBytes.
+func (v *Verifier) checkPresented(p Proof) error {
 	if v == nil || v.cfg.Replay == nil {
-		return CheckedProof{}, errNoReplayCache // a Verifier not made by NewVerifier
+		return errNoReplayCache // a Verifier not made by NewVerifier
 	}
 	if p.JWT == "" {
-		return CheckedProof{}, ErrRequired
+		return ErrRequired
 	}
 	if len(p.JWT) > v.cfg.MaxProofBytes {
-		return CheckedProof{}, fmt.Errorf("%w: proof is %d bytes (limit %d)", ErrInvalid, len(p.JWT), v.cfg.MaxProofBytes)
+		return fmt.Errorf("%w: proof is %d bytes (limit %d)", ErrInvalid, len(p.JWT), v.cfg.MaxProofBytes)
 	}
-	window, now := v.cfg.Window, v.cfg.Now
+	return nil
+}
 
-	parts, err := jose.Split(p.JWT)
+// readProof reads a proof signed by the key its header carries, which must
+// be the one what is bound to unless it is a token request's, and returns
+// that key's thumbprint and the proof's claims.
+func readProof(jwt string, what presented) (string, proofClaims, error) {
+	parts, err := jose.Split(jwt)
 	if err != nil {
-		return CheckedProof{}, fmt.Errorf("%w: %w", ErrInvalid, err)
+		return "", proofClaims{}, fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
-	var header proofHeader
-	if err := decodeSegment(parts.Header, &header); err != nil || header.Typ != tokenType || header.JWK == nil {
-		return CheckedProof{}, fmt.Errorf("%w: header", ErrInvalid)
-	}
-	// RFC 9449 §4.3: the jwk must not contain a private key.
-	if jwkHasPrivateMember(parts.Header) {
-		return CheckedProof{}, fmt.Errorf("%w: jwk carries a private key", ErrInvalid)
-	}
-	thumb, err := header.JWK.Thumbprint()
+	header, err := readProofHeader(parts.Header)
 	if err != nil {
-		return CheckedProof{}, fmt.Errorf("%w: %w", ErrInvalid, err)
+		return "", proofClaims{}, err
 	}
-	if !what.tokenRequest && thumb != what.jkt {
-		return CheckedProof{}, fmt.Errorf("%w: key is not the one the capability is bound to", ErrInvalid)
-	}
-	pub, err := header.JWK.PublicKey()
+	thumb, pub, err := proofKey(header.JWK, what)
 	if err != nil {
-		return CheckedProof{}, fmt.Errorf("%w: %w", ErrInvalid, err)
+		return "", proofClaims{}, err
 	}
 	sig, err := jose.UnB64(parts.Signature)
 	if err != nil || !verifySignature(pub, header.Alg, []byte(parts.SigningInput()), sig) {
-		return CheckedProof{}, fmt.Errorf("%w: signature", ErrInvalid)
+		return "", proofClaims{}, fmt.Errorf("%w: signature", ErrInvalid)
 	}
-
 	var claims proofClaims
 	if err := decodeSegment(parts.Payload, &claims); err != nil || claims.JTI == "" || len(claims.JTI) > MaxJTIBytes {
-		return CheckedProof{}, fmt.Errorf("%w: claims", ErrInvalid)
+		return "", proofClaims{}, fmt.Errorf("%w: claims", ErrInvalid)
 	}
+	return thumb, claims, nil
+}
+
+// readProofHeader reads a proof's header: its type, and a public key.
+func readProofHeader(seg string) (proofHeader, error) {
+	var header proofHeader
+	if err := decodeSegment(seg, &header); err != nil || header.Typ != tokenType || header.JWK == nil {
+		return proofHeader{}, fmt.Errorf("%w: header", ErrInvalid)
+	}
+	// RFC 9449 §4.3: the jwk must not contain a private key.
+	if jwkHasPrivateMember(seg) {
+		return proofHeader{}, fmt.Errorf("%w: jwk carries a private key", ErrInvalid)
+	}
+	return header, nil
+}
+
+// proofKey is the thumbprint and public key of jwk, refused when it is not
+// the key what is bound to, unless it is a token request's.
+func proofKey(jwk *jose.JWK, what presented) (string, crypto.PublicKey, error) {
+	thumb, err := jwk.Thumbprint()
+	if err != nil {
+		return "", nil, fmt.Errorf("%w: %w", ErrInvalid, err)
+	}
+	if !what.tokenRequest && thumb != what.jkt {
+		return "", nil, fmt.Errorf("%w: key is not the one the capability is bound to", ErrInvalid)
+	}
+	pub, err := jwk.PublicKey()
+	if err != nil {
+		return "", nil, fmt.Errorf("%w: %w", ErrInvalid, err)
+	}
+	return thumb, pub, nil
+}
+
+// checkForRequest refuses a proof made for another request: another
+// method, another URL, or another token than what presents.
+func checkForRequest(claims proofClaims, p Proof, what presented, pathOnly bool) error {
 	// RFC 9110 §9.1: a method is case-sensitive.
 	if claims.HTM != p.Method {
-		return CheckedProof{}, fmt.Errorf("%w: method %q, proof names %q", ErrInvalid, p.Method, claims.HTM)
+		return fmt.Errorf("%w: method %q, proof names %q", ErrInvalid, p.Method, claims.HTM)
 	}
-	if !htuMatches(claims.HTU, p.URL, v.cfg.MatchPathOnly) {
-		return CheckedProof{}, fmt.Errorf("%w: URL does not match the proof's htu", ErrInvalid)
+	if !htuMatches(claims.HTU, p.URL, pathOnly) {
+		return fmt.Errorf("%w: URL does not match the proof's htu", ErrInvalid)
 	}
 	// A token request presents no access token, so its proof names none
 	// (RFC 9449 §4.2); one that does was made for a resource request.
@@ -526,31 +584,39 @@ func (v *Verifier) check(ctx context.Context, p Proof, holder string, what prese
 		wantATH = accessTokenHash(what.token)
 	}
 	if claims.ATH != wantATH {
-		return CheckedProof{}, fmt.Errorf("%w: proof is for another token", ErrInvalid)
+		return fmt.Errorf("%w: proof is for another token", ErrInvalid)
 	}
-	if math.IsNaN(claims.IAT) || math.IsInf(claims.IAT, 0) || math.Abs(claims.IAT) > jose.MaxIJSONInteger {
-		return CheckedProof{}, fmt.Errorf("%w: iat %v", ErrInvalid, claims.IAT)
+	return nil
+}
+
+// issuedWithin is the proof's iat, refused when it is no finite I-JSON
+// number or lies more than window either side of now.
+func issuedWithin(iatClaim float64, now time.Time, window time.Duration) (time.Time, error) {
+	if math.IsNaN(iatClaim) || math.IsInf(iatClaim, 0) || math.Abs(iatClaim) > jose.MaxIJSONInteger {
+		return time.Time{}, fmt.Errorf("%w: iat %v", ErrInvalid, iatClaim)
 	}
-	sec, frac := math.Modf(claims.IAT)
+	sec, frac := math.Modf(iatClaim)
 	iat := time.Unix(int64(sec), int64(frac*float64(time.Second)))
-	if d := now().Sub(iat); d > window || d < -window {
-		return CheckedProof{}, fmt.Errorf("%w: issued at %s, outside the %s window", ErrInvalid, iat.UTC(), window)
+	if d := now.Sub(iat); d > window || d < -window {
+		return time.Time{}, fmt.Errorf("%w: issued at %s, outside the %s window", ErrInvalid, iat.UTC(), window)
 	}
-	if v.cfg.Nonces != nil {
-		valid, err := v.cfg.Nonces.Valid(ctx, claims.Nonce)
-		if err != nil {
-			return CheckedProof{}, fmt.Errorf("dpop: nonce check: %w", err)
-		}
-		if !valid {
-			return CheckedProof{}, ErrNonceRequired
-		}
+	return iat, nil
+}
+
+// checkNonce refuses a proof without a nonce the server's Nonces accept,
+// when it has any.
+func (v *Verifier) checkNonce(ctx context.Context, nonce string) error {
+	if v.cfg.Nonces == nil {
+		return nil
 	}
-	// Remembered past the last instant it is accepted, by more than the
-	// cache's clock can lag the verifier's: at iat+window it is still
-	// accepted, and a cache that dropped it then would let it through again.
-	return CheckedProof{entry: ReplayEntry{
-		JKT: thumb, JTI: claims.JTI, Holder: holder, ExpiresAt: iat.Add(window).Add(ReplayClockSkew),
-	}}, nil
+	valid, err := v.cfg.Nonces.Valid(ctx, nonce)
+	if err != nil {
+		return fmt.Errorf("dpop: nonce check: %w", err)
+	}
+	if !valid {
+		return ErrNonceRequired
+	}
+	return nil
 }
 
 // Record records a proof Check accepted in the replay cache, refusing it
@@ -582,28 +648,36 @@ const rootPath = "/"
 
 func htuMatches(htu, requestURL string, pathOnly bool) bool {
 	if pathOnly {
-		// The proof's htu is still a URI a request could have been made to:
-		// absolute, with a host, normalised.
-		normalised, err := rfc3986.Normalize(htu)
-		if err != nil {
-			return false
-		}
-		got, err1 := url.Parse(normalised)
-		want, err2 := url.Parse(requestURL)
-		if err1 != nil || err2 != nil || want.EscapedPath() == "" {
-			return false
-		}
-		g, w := got.EscapedPath(), rfc3986.NormalizePath(want.EscapedPath())
-		// A proxy may mount the service under a prefix it strips before
-		// forwarding, so the client's path may carry segments the server
-		// never sees. The server's path must still be the whole tail, from a
-		// segment boundary — and name a segment: the root's tail is every
-		// path that ends in a slash.
-		return g == w || w != rootPath && strings.HasSuffix(g, w) && strings.HasPrefix(w, rootPath)
+		return htuPathMatches(htu, requestURL)
 	}
 	got, err1 := rfc3986.Normalize(htu)
 	want, err2 := rfc3986.Normalize(requestURL)
 	return err1 == nil && err2 == nil && got == want
+}
+
+// htuPathMatches is htuMatches under pathOnly: the proof's htu is still a
+// URI a request could have been made to — absolute, with a host,
+// normalised — and its path ends in the request's.
+func htuPathMatches(htu, requestURL string) bool {
+	normalised, err := rfc3986.Normalize(htu)
+	if err != nil {
+		return false
+	}
+	got, err1 := url.Parse(normalised)
+	want, err2 := url.Parse(requestURL)
+	if err1 != nil || err2 != nil || want.EscapedPath() == "" {
+		return false
+	}
+	return pathTailMatches(got.EscapedPath(), rfc3986.NormalizePath(want.EscapedPath()))
+}
+
+// pathTailMatches reports whether the server's path w is g, or its whole
+// tail from a segment boundary. A proxy may mount the service under a
+// prefix it strips before forwarding, so the client's path may carry
+// segments the server never sees. The tail must name a segment: the root's
+// tail is every path that ends in a slash.
+func pathTailMatches(g, w string) bool {
+	return g == w || w != rootPath && strings.HasSuffix(g, w) && strings.HasPrefix(w, rootPath)
 }
 
 func decodeSegment(seg string, v any) error {

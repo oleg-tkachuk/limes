@@ -68,13 +68,10 @@ type SumChargesRequest struct {
 // refuses, or one of tenants beside a single tenant; or a negative page
 // size.
 func (r SumChargesRequest) Validate() error {
+	if err := r.validateScope(); err != nil {
+		return err
+	}
 	switch {
-	case r.TenantID == uuid.Nil() && !r.AllTenants:
-		return invalidRequest("sum charges: a tenant id or AllTenants required")
-	case r.TenantID != uuid.Nil() && r.AllTenants:
-		return invalidRequest("sum charges: tenant id %s beside AllTenants", r.TenantID)
-	case r.TenantID != uuid.Nil() && len(r.Filter.Tenants) > 0:
-		return invalidRequest("sum charges: a tenant filter beside tenant id %s", r.TenantID)
 	case r.From.IsZero() || r.To.IsZero():
 		return invalidRequest("sum charges: From and To required")
 	case !r.From.Before(r.To):
@@ -85,8 +82,30 @@ func (r SumChargesRequest) Validate() error {
 	if err := r.Bucket.Validate(); err != nil {
 		return err
 	}
+	if err := validateGroupBy(r.GroupBy); err != nil {
+		return err
+	}
+	return r.Filter.Validate()
+}
+
+// validateScope refuses a request naming neither a tenant nor every tenant,
+// or a tenant beside every tenant or beside a tenant filter.
+func (r SumChargesRequest) validateScope() error {
+	switch {
+	case r.TenantID == uuid.Nil() && !r.AllTenants:
+		return invalidRequest("sum charges: a tenant id or AllTenants required")
+	case r.TenantID != uuid.Nil() && r.AllTenants:
+		return invalidRequest("sum charges: tenant id %s beside AllTenants", r.TenantID)
+	case r.TenantID != uuid.Nil() && len(r.Filter.Tenants) > 0:
+		return invalidRequest("sum charges: a tenant filter beside tenant id %s", r.TenantID)
+	}
+	return nil
+}
+
+// validateGroupBy refuses an unknown dimension, or one named twice.
+func validateGroupBy(dims []ChargeDimension) error {
 	seen := map[ChargeDimension]bool{}
-	for _, d := range r.GroupBy {
+	for _, d := range dims {
 		if err := d.Validate(); err != nil {
 			return err
 		}
@@ -95,7 +114,7 @@ func (r SumChargesRequest) Validate() error {
 		}
 		seen[d] = true
 	}
-	return r.Filter.Validate()
+	return nil
 }
 
 // Groups reports whether r groups the sums by d.

@@ -45,19 +45,31 @@ func Normalize(raw string) (string, error) {
 		return "", fmt.Errorf("%q: %w", raw, errUserinfo)
 	}
 	scheme := strings.ToLower(u.Scheme)
+	host, err := normalizeHost(u, scheme)
+	if err != nil {
+		return "", fmt.Errorf("%q: host: %w", raw, err)
+	}
+	return scheme + "://" + host + NormalizePath(u.EscapedPath()), nil
+}
+
+// normalizeHost is u's host, lowercase, with its port unless it is
+// scheme's default, an IPv6 literal in brackets.
+func normalizeHost(u *url.URL, scheme string) (string, error) {
 	host := strings.ToLower(u.Hostname())
 	// A host with a colon is an IPv6 literal, or it is no host at all.
-	if strings.Contains(host, ":") {
+	ipv6 := strings.Contains(host, ":")
+	if ipv6 {
 		if _, err := netip.ParseAddr(host); err != nil {
-			return "", fmt.Errorf("%q: host: %w", raw, err)
+			return "", err
 		}
 	}
 	if port := u.Port(); port != "" && port != defaultPorts[scheme] {
-		host = net.JoinHostPort(host, port)
-	} else if strings.Contains(host, ":") {
-		host = "[" + host + "]" // an IPv6 literal keeps its brackets
+		return net.JoinHostPort(host, port), nil
 	}
-	return scheme + "://" + host + NormalizePath(u.EscapedPath()), nil
+	if ipv6 {
+		return "[" + host + "]", nil // an IPv6 literal keeps its brackets
+	}
+	return host, nil
 }
 
 // NormalizePath is an escaped path with its percent-encodings normalised
@@ -126,40 +138,47 @@ func unhex(c byte) (byte, bool) {
 func removeDotSegments(in string) string {
 	var out []string // output buffer, as segments each starting with "/"
 	for in != "" {
-		switch {
-		case strings.HasPrefix(in, "../"):
-			in = in[len("../"):]
-		case strings.HasPrefix(in, "./"):
-			in = in[len("./"):]
-		case strings.HasPrefix(in, "/./"):
-			in = in[len("/."):]
-		case in == "/.":
-			in = "/"
-		case strings.HasPrefix(in, "/../"):
-			in = in[len("/.."):]
-			out = dropLast(out)
-		case in == "/..":
-			in = "/"
-			out = dropLast(out)
-		case in == "." || in == "..":
-			in = ""
-		default:
-			// Move the first segment, with its leading "/" if any, to out.
-			start := 0
-			if in[0] == '/' {
-				start = 1
-			}
-			end := strings.IndexByte(in[start:], '/')
-			if end < 0 {
-				end = len(in)
-			} else {
-				end += start
-			}
-			out = append(out, in[:end])
-			in = in[end:]
-		}
+		in, out = removeDotStep(in, out)
 	}
 	return strings.Join(out, "")
+}
+
+// removeDotStep is one step of RFC 3986 §5.2.4's loop: in and out after the
+// rule that applies to in's start.
+func removeDotStep(in string, out []string) (string, []string) {
+	switch {
+	case strings.HasPrefix(in, "../"):
+		return in[len("../"):], out
+	case strings.HasPrefix(in, "./"):
+		return in[len("./"):], out
+	case strings.HasPrefix(in, "/./"):
+		return in[len("/."):], out
+	case in == "/.":
+		return "/", out
+	case strings.HasPrefix(in, "/../"):
+		return in[len("/.."):], dropLast(out)
+	case in == "/..":
+		return "/", dropLast(out)
+	case in == "." || in == "..":
+		return "", out
+	}
+	seg, rest := firstSegment(in)
+	return rest, append(out, seg)
+}
+
+// firstSegment splits in's first segment, with its leading "/" if any,
+// from the rest.
+func firstSegment(in string) (string, string) {
+	start := 0
+	if in[0] == '/' {
+		start = 1
+	}
+	end := strings.IndexByte(in[start:], '/')
+	if end < 0 {
+		return in, ""
+	}
+	end += start
+	return in[:end], in[end:]
 }
 
 func dropLast(segments []string) []string {

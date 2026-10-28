@@ -79,42 +79,65 @@ func (l *Ledger) sum(req meter.SumChargesRequest) ([]meter.ChargeSum, error) {
 	defer l.usage.mu.Unlock()
 	groups := map[sumKey]*meter.ChargeSum{}
 	for _, e := range l.usage.ledger {
-		if !req.AllTenants && e.TenantID != req.TenantID || e.At.Before(req.From) || !e.At.Before(req.To) ||
-			!req.Filter.Admits(e.TenantID, e.Op, e.Actor, e.CapabilityID) {
+		if !sumAdmits(req, e) {
 			continue
 		}
-		k := sumKey{Bucket: req.Bucket.Start(e.At), Unit: e.UnitCode}
-		if req.Groups(meter.ChargeDimensionTenant) {
-			k.Tenant = e.TenantID
-		}
-		if req.Groups(meter.ChargeDimensionOp) {
-			k.Op = e.Op
-		}
-		if req.Groups(meter.ChargeDimensionActor) {
-			k.Actor = e.Actor
-		}
-		if req.Groups(meter.ChargeDimensionCapability) {
-			k.CapID = e.CapabilityID
-		}
+		k := sumKeyOf(req, e)
 		g, ok := groups[k]
 		if !ok {
 			g = &meter.ChargeSum{BucketStart: k.Bucket, UnitCode: k.Unit, TenantID: k.Tenant, Op: k.Op, Actor: k.Actor, CapabilityID: k.CapID}
 			groups[k] = g
 		}
-		var err error
-		if g.Charged, err = addSum(g.Charged, e.Amount); err != nil {
+		if err := addCharge(g, e); err != nil {
 			return nil, err
 		}
-		if g.Refunded, err = addSum(g.Refunded, e.RefundedAmount); err != nil {
-			return nil, err
-		}
-		g.Charges++
 	}
 	out := make([]meter.ChargeSum, 0, len(groups))
 	for _, g := range groups {
 		out = append(out, *g)
 	}
 	return out, nil
+}
+
+// sumAdmits reports whether req sums e: of its tenant, within its window,
+// and admitted by its filter.
+func sumAdmits(req meter.SumChargesRequest, e ledgerEntry) bool {
+	if !req.AllTenants && e.TenantID != req.TenantID || e.At.Before(req.From) || !e.At.Before(req.To) {
+		return false
+	}
+	return req.Filter.Admits(e.TenantID, e.Op, e.Actor, e.CapabilityID)
+}
+
+// sumKeyOf is the group e falls in: its bucket and unit, and each
+// dimension req groups by.
+func sumKeyOf(req meter.SumChargesRequest, e ledgerEntry) sumKey {
+	k := sumKey{Bucket: req.Bucket.Start(e.At), Unit: e.UnitCode}
+	if req.Groups(meter.ChargeDimensionTenant) {
+		k.Tenant = e.TenantID
+	}
+	if req.Groups(meter.ChargeDimensionOp) {
+		k.Op = e.Op
+	}
+	if req.Groups(meter.ChargeDimensionActor) {
+		k.Actor = e.Actor
+	}
+	if req.Groups(meter.ChargeDimensionCapability) {
+		k.CapID = e.CapabilityID
+	}
+	return k
+}
+
+// addCharge adds e to its group g, refusing a sum past MaxNanos.
+func addCharge(g *meter.ChargeSum, e ledgerEntry) error {
+	var err error
+	if g.Charged, err = addSum(g.Charged, e.Amount); err != nil {
+		return err
+	}
+	if g.Refunded, err = addSum(g.Refunded, e.RefundedAmount); err != nil {
+		return err
+	}
+	g.Charges++
+	return nil
 }
 
 // addSum is a + b, or ErrCounterOverflow past MaxNanos. Both are within it,

@@ -353,32 +353,41 @@ func (s *Store) Insert(_ context.Context, req limes.InsertRequest) error {
 		return err
 	}
 	if c.ParentID != uuid.Nil() {
-		parent, ok := s.caps[c.ParentID]
-		if !ok {
-			return fmt.Errorf("%w: memstore: parent %s is not on record", limes.ErrInvalidRequest, c.ParentID)
-		}
-		if c.ExpiresAt.After(parent.ExpiresAt) {
-			return fmt.Errorf("%w: expires %s, after its parent %s", limes.ErrDelegationTooWide, c.ExpiresAt, parent.ExpiresAt)
-		}
-		if c.Subject.TenantID != parent.Subject.TenantID {
-			return fmt.Errorf("%w: tenant %s, not its parent's %s", limes.ErrDelegationTooWide, c.Subject.TenantID, parent.Subject.TenantID)
-		}
-		if c.Caveats.Budget.UnitCode != parent.Caveats.Budget.UnitCode {
-			return fmt.Errorf("%w: budget in %q, under a parent in %q", limes.ErrUnitCodeMismatch, c.Caveats.Budget.UnitCode, parent.Caveats.Budget.UnitCode)
-		}
-		// The child's ancestors are its parent and the parent's own.
-		ancestors, err := s.ancestorsLocked(c.ParentID)
-		if err != nil {
+		if err := s.checkChildLocked(c); err != nil {
 			return err
-		}
-		if len(ancestors) >= limes.MaxDelegationDepth {
-			return fmt.Errorf("%w: %s would have more than %d ancestors", limes.ErrDelegationTooDeep, c.ID, limes.MaxDelegationDepth)
 		}
 	}
 	// Copies in and out: the caller keeps its slices, and a record never
 	// changes after it is written.
 	s.caps[c.ID] = c.Clone()
 	s.issuedBy[c.ID] = issuedBy.Clone()
+	return nil
+}
+
+// checkChildLocked refuses a child its parent on record does not allow:
+// none on record, a later expiry, another tenant or budget unit, or a depth
+// past MaxDelegationDepth. s.mu must be held.
+func (s *Store) checkChildLocked(c limes.Capability) error {
+	parent, ok := s.caps[c.ParentID]
+	if !ok {
+		return fmt.Errorf("%w: memstore: parent %s is not on record", limes.ErrInvalidRequest, c.ParentID)
+	}
+	switch {
+	case c.ExpiresAt.After(parent.ExpiresAt):
+		return fmt.Errorf("%w: expires %s, after its parent %s", limes.ErrDelegationTooWide, c.ExpiresAt, parent.ExpiresAt)
+	case c.Subject.TenantID != parent.Subject.TenantID:
+		return fmt.Errorf("%w: tenant %s, not its parent's %s", limes.ErrDelegationTooWide, c.Subject.TenantID, parent.Subject.TenantID)
+	case c.Caveats.Budget.UnitCode != parent.Caveats.Budget.UnitCode:
+		return fmt.Errorf("%w: budget in %q, under a parent in %q", limes.ErrUnitCodeMismatch, c.Caveats.Budget.UnitCode, parent.Caveats.Budget.UnitCode)
+	}
+	// The child's ancestors are its parent and the parent's own.
+	ancestors, err := s.ancestorsLocked(c.ParentID)
+	if err != nil {
+		return err
+	}
+	if len(ancestors) >= limes.MaxDelegationDepth {
+		return fmt.Errorf("%w: %s would have more than %d ancestors", limes.ErrDelegationTooDeep, c.ID, limes.MaxDelegationDepth)
+	}
 	return nil
 }
 
@@ -737,12 +746,9 @@ func (s *Store) ListByPrincipal(_ context.Context, req limes.ListByPrincipalRequ
 	if err := req.Validate(); err != nil {
 		return limes.Page[limes.Capability]{}, err
 	}
-	var after uuid.UUID
-	if req.Cursor != "" {
-		var err error
-		if after, err = uuid.Parse(req.Cursor); err != nil {
-			return limes.Page[limes.Capability]{}, fmt.Errorf("%w: memstore: cursor %q", limes.ErrInvalidRequest, req.Cursor)
-		}
+	after, err := parseIDCursor(req.Cursor)
+	if err != nil {
+		return limes.Page[limes.Capability]{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -750,17 +756,9 @@ func (s *Store) ListByPrincipal(_ context.Context, req limes.ListByPrincipalRequ
 	now := s.nowFn()
 	out := make([]limes.Capability, 0, len(s.caps))
 	for id, c := range s.caps {
-		switch {
-		case c.Subject.TenantID != req.TenantID, c.Subject.Type != req.PrincipalType, c.Subject.Subject != req.Subject:
-			continue
-		case !req.IncludeExpired && !c.ExpiresAt.After(now):
-			continue
-		case !req.IncludeRevoked && s.isRevokedItselfLocked(id):
-			continue
-		case req.Cursor != "" && !uuidLess(after, id):
-			continue
+		if s.listsLocked(req, c, now) && (req.Cursor == "" || uuidLess(after, id)) {
+			out = append(out, c.Clone())
 		}
-		out = append(out, c.Clone())
 	}
 	// Ascending id, the order the cursor seeks in.
 	sort.Slice(out, func(i, j int) bool { return uuidLess(out[i].ID, out[j].ID) })
@@ -770,6 +768,31 @@ func (s *Store) ListByPrincipal(_ context.Context, req limes.ListByPrincipalRequ
 	}
 	out = out[:limit]
 	return limes.Page[limes.Capability]{Items: out, Next: out[len(out)-1].ID.String()}, nil
+}
+
+// parseIDCursor reads a listing cursor, the id the last page ended on; the
+// zero id for none.
+func parseIDCursor(cursor string) (uuid.UUID, error) {
+	if cursor == "" {
+		return uuid.Nil(), nil
+	}
+	after, err := uuid.Parse(cursor)
+	if err != nil {
+		return uuid.Nil(), fmt.Errorf("%w: memstore: cursor %q", limes.ErrInvalidRequest, cursor)
+	}
+	return after, nil
+}
+
+// listsLocked reports whether req lists c at now: its principal's, and
+// neither expired nor revoked unless req includes those. s.mu must be held.
+func (s *Store) listsLocked(req limes.ListByPrincipalRequest, c limes.Capability, now time.Time) bool {
+	switch {
+	case c.Subject.TenantID != req.TenantID, c.Subject.Type != req.PrincipalType, c.Subject.Subject != req.Subject:
+		return false
+	case !req.IncludeExpired && !c.ExpiresAt.After(now):
+		return false
+	}
+	return req.IncludeRevoked || !s.isRevokedItselfLocked(c.ID)
 }
 
 // percent turns a fraction into a percentage.
@@ -808,7 +831,6 @@ func (s *UsageStore) Bump(_ context.Context, req meter.BumpRequest) (meter.BumpR
 	if err := req.Validate(); err != nil {
 		return meter.BumpReceipt{}, err
 	}
-	unit := req.Subject.UnitCode()
 	// The lineage is read under the usage lock, as DeleteUsage and PurgeOrphans
 	// take it: read before, an ancestor they dropped meanwhile would have
 	// its row written back.
@@ -824,43 +846,56 @@ func (s *UsageStore) Bump(_ context.Context, req meter.BumpRequest) (meter.BumpR
 	if err := s.admitCopiesLocked(req.Subject, ancestors); err != nil {
 		return meter.BumpReceipt{}, err
 	}
-	u := s.usage[req.Subject.CapabilityID()]
-	next := u.RequestCount + 1
-	for _, c := range req.Subject.Copies() {
-		if !c.AdmitsRequests(s.copies[copyKeyOf(req.Subject.CapabilityID(), c.RevocationID)].requests + 1) {
-			return meter.BumpReceipt{RequestCount: u.RequestCount}, fmt.Errorf("%w: copy %x", limes.ErrRequestLimitExceeded, c.RevocationID)
+	count := s.usage[req.Subject.CapabilityID()].RequestCount
+	if err := s.admitRequestLocked(req.Subject, ancestors); err != nil {
+		return meter.BumpReceipt{RequestCount: count}, err
+	}
+	s.countRequestLocked(req.Subject, ancestors)
+	return meter.BumpReceipt{RequestCount: count + 1}, nil
+}
+
+// admitRequestLocked refuses one more request of subject past a copy's,
+// its own or an ancestor's request ceiling. s.mu must be held.
+func (s *UsageStore) admitRequestLocked(subject limes.MeterSubject, ancestors []limes.Capability) error {
+	for _, c := range subject.Copies() {
+		if !c.AdmitsRequests(s.copies[copyKeyOf(subject.CapabilityID(), c.RevocationID)].requests + 1) {
+			return fmt.Errorf("%w: copy %x", limes.ErrRequestLimitExceeded, c.RevocationID)
 		}
 	}
-	if !req.Subject.Requests().Admits(next) {
-		return meter.BumpReceipt{RequestCount: u.RequestCount}, limes.ErrRequestLimitExceeded
+	if !subject.Requests().Admits(s.usage[subject.CapabilityID()].RequestCount + 1) {
+		return limes.ErrRequestLimitExceeded
 	}
 	for _, a := range ancestors {
 		if !a.Caveats.Requests.Admits(s.usage[a.ID].RequestCount + 1) {
-			return meter.BumpReceipt{RequestCount: u.RequestCount}, fmt.Errorf("%w: ancestor %s", limes.ErrRequestLimitExceeded, a.ID)
+			return fmt.Errorf("%w: ancestor %s", limes.ErrRequestLimitExceeded, a.ID)
 		}
 	}
+	return nil
+}
+
+// countRequestLocked counts one more request of subject on it, each
+// ancestor and each copy, and gives a counter that names no unit subject's.
+// s.mu must be held.
+func (s *UsageStore) countRequestLocked(subject limes.MeterSubject, ancestors []limes.Capability) {
+	unit := subject.UnitCode()
 	for _, a := range ancestors {
 		au := s.usage[a.ID]
 		au.CapabilityID = a.ID
 		au.RequestCount++
-		if au.UnitCode == "" {
-			au.UnitCode = unit
-		}
-		s.putUsageLocked(a.ID, req.Subject.TenantID(), au)
+		au.UnitCode = cmp.Or(au.UnitCode, unit)
+		s.putUsageLocked(a.ID, subject.TenantID(), au)
 	}
-	for _, c := range req.Subject.Copies() {
-		key := copyKeyOf(req.Subject.CapabilityID(), c.RevocationID)
+	for _, c := range subject.Copies() {
+		key := copyKeyOf(subject.CapabilityID(), c.RevocationID)
 		cc := s.copies[key]
 		cc.requests++
 		s.putCopyLocked(key, cc, ancestorIDs(ancestors))
 	}
-	u.CapabilityID = req.Subject.CapabilityID()
-	u.RequestCount = next
-	if u.UnitCode == "" {
-		u.UnitCode = unit
-	}
-	s.putUsageLocked(req.Subject.CapabilityID(), req.Subject.TenantID(), u)
-	return meter.BumpReceipt{RequestCount: next}, nil
+	u := s.usage[subject.CapabilityID()]
+	u.CapabilityID = subject.CapabilityID()
+	u.RequestCount++
+	u.UnitCode = cmp.Or(u.UnitCode, unit)
+	s.putUsageLocked(subject.CapabilityID(), subject.TenantID(), u)
 }
 
 // hold is one open reservation and every counter it holds against.
@@ -906,16 +941,8 @@ func (s *UsageStore) Charge(
 	// A replay is answered before the lineage is read: it moves nothing, so
 	// it needs no record, and a capability purged since still gets its
 	// receipt, as a settled hold does.
-	if req.ExternalRef != "" {
-		if e, ok := entryLocked(s, s.byRef, refKey{req.Subject.CapabilityID(), req.ExternalRef}); ok {
-			// Another copy charges its own counters, and the receipt is the
-			// first copy's, so it conflicts as another cost does. The error
-			// names the ref, never the other charge.
-			if e.Amount != req.Amount || e.UnitCode != unit || e.TenantID != req.Subject.TenantID() || !sameCopyIDs(e.Copies, req.Subject.Copies()) {
-				return meter.ChargeReceipt{}, fmt.Errorf("%w: %q", meter.ErrExternalRefConflict, req.ExternalRef)
-			}
-			return s.replayLocked(e), nil
-		}
+	if receipt, replayed, err := s.replayChargeLocked(req, unit); replayed {
+		return receipt, err
 	}
 	ancestors, err := s.lineage(req.Subject.CapabilityID())
 	if err != nil {
@@ -925,6 +952,25 @@ func (s *UsageStore) Charge(
 		return meter.ChargeReceipt{}, err
 	}
 	return s.chargeLocked(ctx, req, unit, ancestors, nil, onCharged)
+}
+
+// replayChargeLocked is the receipt of the charge req's ExternalRef already
+// names, replayed reporting whether there is one. Another copy charges its
+// own counters, and the receipt is the first copy's, so it conflicts as
+// another cost does; the error names the ref, never the other charge. s.mu
+// must be held.
+func (s *UsageStore) replayChargeLocked(req meter.ChargeRequest, unit string) (receipt meter.ChargeReceipt, replayed bool, err error) {
+	if req.ExternalRef == "" {
+		return meter.ChargeReceipt{}, false, nil
+	}
+	e, ok := entryLocked(s, s.byRef, refKey{req.Subject.CapabilityID(), req.ExternalRef})
+	if !ok {
+		return meter.ChargeReceipt{}, false, nil
+	}
+	if e.Amount != req.Amount || e.UnitCode != unit || e.TenantID != req.Subject.TenantID() || !sameCopyIDs(e.Copies, req.Subject.Copies()) {
+		return meter.ChargeReceipt{}, true, fmt.Errorf("%w: %q", meter.ErrExternalRefConflict, req.ExternalRef)
+	}
+	return s.replayLocked(e), true, nil
 }
 
 // ChargeByRef returns the charge a capability took under req.ExternalRef.
@@ -1048,15 +1094,15 @@ func (s *UsageStore) chargeLocked(
 	}
 
 	u := s.usage[req.Subject.CapabilityID()]
+	refused := meter.ChargeReceipt{SpentAmount: u.SpentAmount, TenantID: req.Subject.TenantID(), UnitCode: unit}
 	if err := s.checkCeilingsLocked(ceilingCheck{
 		amount: req.Amount, released: released, holders: holders, maxBudget: req.Subject.Budget(), unit: unit,
 		capID: req.Subject.CapabilityID(), tenantID: req.Subject.TenantID(), ancestors: ancestors, copies: req.Subject.Copies(),
 	}, crossed); err != nil {
-		return meter.ChargeReceipt{SpentAmount: u.SpentAmount, TenantID: req.Subject.TenantID(), UnitCode: unit}, err
+		return refused, err
 	}
-	stagedSpent := u.SpentAmount + req.Amount
 	receipt := meter.ChargeReceipt{
-		ChargeID: uuid.New(), SpentAmount: stagedSpent, Overrun: overrun, TenantID: req.Subject.TenantID(), UnitCode: unit,
+		ChargeID: uuid.New(), SpentAmount: u.SpentAmount + req.Amount, Overrun: overrun, TenantID: req.Subject.TenantID(), UnitCode: unit,
 	}
 
 	// the caller's side effect, on the caller's context — this store has no
@@ -1064,55 +1110,67 @@ func (s *UsageStore) chargeLocked(
 	if onCharged != nil {
 		if err := onCharged(ctx, meter.Charged{Receipt: receipt}); err != nil {
 			// Nothing has been published — nothing to compensate.
-			return meter.ChargeReceipt{SpentAmount: u.SpentAmount, TenantID: req.Subject.TenantID(), UnitCode: unit}, err
+			return refused, err
 		}
 	}
 
 	// ── commit: publish every staged mutation together ──
-	u.CapabilityID = req.Subject.CapabilityID()
-	u.SpentAmount = stagedSpent
+	s.spendLocked(req, unit, ancestors, holders, released)
+	s.appendLocked(ledgerEntry{
+		ID: receipt.ChargeID, CapabilityID: req.Subject.CapabilityID(), Ancestors: ancestorIDs(ancestors),
+		TenantID: req.Subject.TenantID(), Amount: req.Amount, UnitCode: unit,
+		Op: req.Op, Actor: req.Actor, At: s.nowFn(), Copies: copyIDsOf(req.Subject.Copies()),
+		ExternalRef: req.ExternalRef, ReservationID: reservationID, Overrun: overrun,
+		tenantPeriod: s.periods[req.Subject.TenantID()],
+	})
+	return receipt, nil
+}
+
+// spendLocked adds req's amount to every counter it is spent on — the
+// capability, its ancestors, its tenant and its copies — releasing what the
+// holders held of it. s.mu must be held.
+func (s *UsageStore) spendLocked(req meter.ChargeRequest, unit string, ancestors []limes.Capability, holders []uuid.UUID, released limes.Nanos) {
+	capID, tenantID := req.Subject.CapabilityID(), req.Subject.TenantID()
+	u := s.usage[capID]
+	u.CapabilityID = capID
+	u.SpentAmount += req.Amount
 	u.ReservedAmount = max0(u.ReservedAmount - released)
 	u.UnitCode = unit
-	s.putUsageLocked(req.Subject.CapabilityID(), req.Subject.TenantID(), u)
+	s.putUsageLocked(capID, tenantID, u)
 	for _, a := range ancestors {
 		au := s.usage[a.ID]
 		au.CapabilityID = a.ID
 		au.SpentAmount += req.Amount
-		if au.UnitCode == "" {
-			au.UnitCode = unit
-		}
-		s.putUsageLocked(a.ID, req.Subject.TenantID(), au)
+		au.UnitCode = cmp.Or(au.UnitCode, unit)
+		s.putUsageLocked(a.ID, tenantID, au)
 	}
 	for _, id := range holders {
 		if au, ok := s.usage[id]; ok {
 			au.ReservedAmount = max0(au.ReservedAmount - released)
-			s.putUsageLocked(id, req.Subject.TenantID(), au)
+			s.putUsageLocked(id, tenantID, au)
 		}
 	}
-	b := s.tenantLocked(req.Subject.TenantID(), unit)
+	b := s.tenantLocked(tenantID, unit)
 	b.SpentAmount += req.Amount
 	b.ReservedAmount = max0(b.ReservedAmount - released)
 	b.UpdatedAt = s.nowFn()
-	s.budgets[req.Subject.TenantID()] = b
-	copies := req.Subject.Copies()
-	copyIDs := make([][]byte, 0, len(copies))
-	for _, c := range copies {
-		key := copyKeyOf(req.Subject.CapabilityID(), c.RevocationID)
+	s.budgets[tenantID] = b
+	for _, c := range req.Subject.Copies() {
+		key := copyKeyOf(capID, c.RevocationID)
 		cc := s.copies[key]
 		cc.spent += req.Amount
 		cc.reserved = max0(cc.reserved - released)
 		s.putCopyLocked(key, cc, ancestorIDs(ancestors))
-		copyIDs = append(copyIDs, c.RevocationID)
 	}
-	entry := ledgerEntry{
-		ID: receipt.ChargeID, CapabilityID: req.Subject.CapabilityID(), Ancestors: ancestorIDs(ancestors),
-		TenantID: req.Subject.TenantID(), Amount: req.Amount, UnitCode: unit,
-		Op: req.Op, Actor: req.Actor, At: s.nowFn(), Copies: copyIDs,
-		ExternalRef: req.ExternalRef, ReservationID: reservationID, Overrun: overrun,
-		tenantPeriod: s.periods[req.Subject.TenantID()],
+}
+
+// copyIDsOf is the revocation ids of copies, in order.
+func copyIDsOf(copies []limes.CopyCeiling) [][]byte {
+	ids := make([][]byte, 0, len(copies))
+	for _, c := range copies {
+		ids = append(ids, c.RevocationID)
 	}
-	s.appendLocked(entry)
-	return receipt, nil
+	return ids
 }
 
 // tenantLocked returns the tenant's aggregate row, or a new one without a
@@ -1161,28 +1219,54 @@ func (s *UsageStore) checkCeilingsLocked(c ceilingCheck, crossed func(error) err
 	if err := s.checkRangeLocked(c); err != nil {
 		return err
 	}
-	// A settle at or below its hold adds nothing to a counter that holds it,
-	// so no ceiling there can refuse it — not even one crossed since the
-	// hold was made. Only the excess must fit. An ancestor that does not
-	// hold it takes the whole amount.
-	withinHold := c.amount <= c.released
+	if err := s.checkCopyCeilingsLocked(c, crossed); err != nil {
+		return err
+	}
+	if err := s.checkCapabilityCeilingLocked(c, crossed); err != nil {
+		return err
+	}
+	if err := s.checkAncestorCeilingsLocked(c, crossed); err != nil {
+		return err
+	}
+	return s.checkTenantCeilingLocked(c, crossed)
+}
+
+// withinHold reports whether c settles at or below its hold, which adds
+// nothing to a counter that holds it, so no ceiling there can refuse it —
+// not even one crossed since the hold was made. Only the excess must fit.
+// An ancestor that does not hold it takes the whole amount.
+func (c ceilingCheck) withinHold() bool { return c.amount <= c.released }
+
+// checkCopyCeilingsLocked measures c against each copy's budget, innermost
+// first. s.mu must be held.
+func (s *UsageStore) checkCopyCeilingsLocked(c ceilingCheck, crossed func(error) error) error {
+	if c.withinHold() {
+		return nil
+	}
 	for _, cp := range c.copies {
 		cc := s.copies[copyKeyOf(c.capID, cp.RevocationID)]
-		if withinHold {
-			continue
-		}
 		if !cp.AdmitsBudget(cc.spent + cc.reserved - c.released + c.amount) {
 			if err := crossed(fmt.Errorf("%w: copy %x", limes.ErrBudgetExceeded, cp.RevocationID)); err != nil {
 				return err
 			}
 		}
 	}
+	return nil
+}
+
+// checkCapabilityCeilingLocked measures c against the capability's own
+// budget. s.mu must be held.
+func (s *UsageStore) checkCapabilityCeilingLocked(c ceilingCheck, crossed func(error) error) error {
 	u := s.usage[c.capID]
-	if !withinHold && !c.maxBudget.Admits(u.SpentAmount+u.ReservedAmount-c.released+c.amount) {
-		if err := crossed(limes.ErrBudgetExceeded); err != nil {
-			return err
-		}
+	if c.withinHold() || c.maxBudget.Admits(u.SpentAmount+u.ReservedAmount-c.released+c.amount) {
+		return nil
 	}
+	return crossed(limes.ErrBudgetExceeded)
+}
+
+// checkAncestorCeilingsLocked measures c against each ancestor's budget,
+// less what that ancestor holds of it. s.mu must be held.
+func (s *UsageStore) checkAncestorCeilingsLocked(c ceilingCheck, crossed func(error) error) error {
 	for _, a := range c.ancestors {
 		au := s.usage[a.ID]
 		held := limes.Nanos(0)
@@ -1198,13 +1282,17 @@ func (s *UsageStore) checkCeilingsLocked(c ceilingCheck, crossed func(error) err
 			}
 		}
 	}
-	if b, ok := s.budgets[c.tenantID]; ok && !withinHold &&
-		!b.Ceiling.Admits(b.SpentAmount+c.amount+max0(b.ReservedAmount-c.released)) {
-		if err := crossed(limes.ErrTenantBudgetExceeded); err != nil {
-			return err
-		}
-	}
 	return nil
+}
+
+// checkTenantCeilingLocked measures c against its tenant's aggregate
+// budget, when it has one. s.mu must be held.
+func (s *UsageStore) checkTenantCeilingLocked(c ceilingCheck, crossed func(error) error) error {
+	b, ok := s.budgets[c.tenantID]
+	if !ok || c.withinHold() || b.Ceiling.Admits(b.SpentAmount+c.amount+max0(b.ReservedAmount-c.released)) {
+		return nil
+	}
+	return crossed(limes.ErrTenantBudgetExceeded)
 }
 
 // checkUnitsLocked refuses an amount in a unit other than one a counter it
@@ -1260,10 +1348,6 @@ func (s *UsageStore) Reserve(_ context.Context, req meter.ReserveRequest) (meter
 		return meter.Reservation{}, err
 	}
 	unit := req.Subject.UnitCode()
-	ttl := req.TTL
-	if ttl == 0 {
-		ttl = meter.DefaultReservationTTL
-	}
 	// The lineage is read under the usage lock, as DeleteUsage and PurgeOrphans
 	// take it: read before, an ancestor they dropped meanwhile would have
 	// its row written back.
@@ -1287,18 +1371,9 @@ func (s *UsageStore) Reserve(_ context.Context, req meter.ReserveRequest) (meter
 	}, refuse); err != nil {
 		return meter.Reservation{}, err
 	}
-
-	// A hold ends with its capability at the latest: past it no one can
-	// settle the hold, and it would keep the ancestors' budget held.
-	now := s.nowFn()
-	expires := now.Add(ttl)
-	capExpires := s.records.expiryOf(req.Subject.CapabilityID())
-	// A capability already expired could hold nothing anyone may settle.
-	if !capExpires.IsZero() && !capExpires.After(now) {
-		return meter.Reservation{}, limes.ErrExpired
-	}
-	if !capExpires.IsZero() && capExpires.Before(expires) {
-		expires = capExpires
+	expires, err := s.holdExpiry(req.Subject.CapabilityID(), cmp.Or(req.TTL, meter.DefaultReservationTTL))
+	if err != nil {
+		return meter.Reservation{}, err
 	}
 	h := hold{
 		id:    uuid.New(),
@@ -1309,6 +1384,26 @@ func (s *UsageStore) Reserve(_ context.Context, req meter.ReserveRequest) (meter
 	s.applyHoldLocked(h, +1)
 	s.holds[h.id] = h
 	return h.reservation(), nil
+}
+
+// holdExpiry is when a hold of capID made now for ttl ends: with its
+// capability at the latest, since past it no one can settle the hold, and
+// it would keep the ancestors' budget held. A capability already expired
+// could hold nothing anyone may settle.
+func (s *UsageStore) holdExpiry(capID uuid.UUID, ttl time.Duration) (time.Time, error) {
+	now := s.nowFn()
+	expires := now.Add(ttl)
+	capExpires := s.records.expiryOf(capID)
+	if capExpires.IsZero() {
+		return expires, nil
+	}
+	if !capExpires.After(now) {
+		return time.Time{}, limes.ErrExpired
+	}
+	if capExpires.Before(expires) {
+		return capExpires, nil
+	}
+	return expires, nil
 }
 
 // applyHoldLocked adds (sign +1) or removes (sign -1) a hold on every counter.
@@ -1357,28 +1452,56 @@ func (s *UsageStore) Settle(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	subject := req.Subject.CapabilityID()
 	h, ok := s.holds[req.ReservationID]
 	if !ok {
-		// A reservation of another capability or tenant, or settled under
-		// other copies, is none of this one's: its receipt is not this
-		// subject's to read back either.
-		if e, settled := entryLocked(s, s.byReservation, req.ReservationID); settled && e.CapabilityID == subject && e.TenantID == req.Subject.TenantID() && sameCopyIDs(e.Copies, req.Subject.Copies()) {
-			if e.Amount != req.Amount {
-				return meter.ChargeReceipt{}, fmt.Errorf("%w: %s", meter.ErrSettleConflict, req.ReservationID)
-			}
-			return s.replayLocked(e), nil
+		if receipt, settled, err := s.settledLocked(req); settled {
+			return receipt, err
 		}
-	}
-	if !ok || h.capID != subject || h.tenantID != req.Subject.TenantID() || !h.expires.After(s.nowFn()) || !sameCopies(h.copies, req.Subject.Copies()) {
 		return meter.ChargeReceipt{}, meter.ErrReservationNotFound
 	}
+	if !s.holdServesLocked(h, req.Subject) {
+		return meter.ChargeReceipt{}, meter.ErrReservationNotFound
+	}
+	return s.settleHoldLocked(ctx, req, h, onCharged)
+}
+
+// settledLocked is the receipt of req's reservation, settled already by the
+// same subject: settled reports whether it was, and a settle of another
+// amount conflicts. A reservation of another capability or tenant, or
+// settled under other copies, is none of this one's: its receipt is not this
+// subject's to read back either. s.mu must be held.
+func (s *UsageStore) settledLocked(req meter.SettleRequest) (receipt meter.ChargeReceipt, settled bool, err error) {
+	e, found := entryLocked(s, s.byReservation, req.ReservationID)
+	if !found || e.CapabilityID != req.Subject.CapabilityID() || e.TenantID != req.Subject.TenantID() || !sameCopyIDs(e.Copies, req.Subject.Copies()) {
+		return meter.ChargeReceipt{}, false, nil
+	}
+	if e.Amount != req.Amount {
+		return meter.ChargeReceipt{}, true, fmt.Errorf("%w: %s", meter.ErrSettleConflict, req.ReservationID)
+	}
+	return s.replayLocked(e), true, nil
+}
+
+// holdServesLocked reports whether h is a live hold of subject's, under
+// the copies subject presents. s.mu must be held.
+func (s *UsageStore) holdServesLocked(h hold, subject limes.MeterSubject) bool {
+	return h.capID == subject.CapabilityID() && h.tenantID == subject.TenantID() &&
+		h.expires.After(s.nowFn()) && sameCopies(h.copies, subject.Copies())
+}
+
+// settleHoldLocked charges req against the hold h it settles, and releases
+// the hold. The charge is the reservation's: its tenant, unit and the copy
+// limits it was made under, against the subject's own ceiling. s.mu must be
+// held.
+func (s *UsageStore) settleHoldLocked(
+	ctx context.Context,
+	req meter.SettleRequest,
+	h hold,
+	onCharged func(ctx context.Context, c meter.Charged) error,
+) (meter.ChargeReceipt, error) {
 	ancestors, err := s.lineage(h.capID)
 	if err != nil {
 		return meter.ChargeReceipt{}, err
 	}
-	// The charge is the reservation's: its tenant, unit and the copy limits
-	// it was made under, against the subject's own ceiling.
 	budget := req.Subject.Budget()
 	budget.UnitCode = h.unit
 	held := link.NewMeterSubject(link.MeterSubjectFields{
@@ -1567,18 +1690,37 @@ func (s *UsageStore) Refund(_ context.Context, req meter.RefundRequest) (meter.R
 	}
 	e := &s.ledger[i]
 	receipt := meter.RefundReceipt{ChargeID: e.ID, TenantID: e.TenantID, UnitCode: e.UnitCode}
-	remaining := e.Amount - e.RefundedAmount
-	amount := req.Amount
-	if req.Remaining {
-		amount = remaining
-	}
-	if amount > remaining {
-		return meter.RefundReceipt{}, fmt.Errorf("%w: %v requested, %v of %v left",
-			meter.ErrRefundExceedsCharge, amount, remaining, e.Amount)
+	amount, err := refundAmount(*e, req)
+	if err != nil {
+		return meter.RefundReceipt{}, err
 	}
 	if amount == 0 {
 		return receipt, nil
 	}
+	s.refundLocked(e, amount)
+	receipt.Amount = amount
+	return receipt, nil
+}
+
+// refundAmount is what req gives back of the charge e: all that is left of
+// it, or the amount asked for, which may not exceed that.
+func refundAmount(e ledgerEntry, req meter.RefundRequest) (limes.Nanos, error) {
+	remaining := e.Amount - e.RefundedAmount
+	if req.Remaining {
+		return remaining, nil
+	}
+	if req.Amount > remaining {
+		return 0, fmt.Errorf("%w: %v requested, %v of %v left",
+			meter.ErrRefundExceedsCharge, req.Amount, remaining, e.Amount)
+	}
+	return req.Amount, nil
+}
+
+// refundLocked gives amount of the charge e back to every counter that
+// spent it: the capability, its ancestors, its copies, and its tenant's
+// budget while the charge's period is still the current one. s.mu must be
+// held.
+func (s *UsageStore) refundLocked(e *ledgerEntry, amount limes.Nanos) {
 	for _, id := range append([]uuid.UUID{e.CapabilityID}, e.Ancestors...) {
 		if u, ok := s.usage[id]; ok {
 			u.SpentAmount = max0(u.SpentAmount - amount)
@@ -1600,8 +1742,6 @@ func (s *UsageStore) Refund(_ context.Context, req meter.RefundRequest) (meter.R
 		}
 	}
 	e.RefundedAmount += amount
-	receipt.Amount = amount
-	return receipt, nil
 }
 
 // GetUsage reads one capability's counters.
@@ -1655,33 +1795,42 @@ func (s *UsageStore) SetTenantBudget(_ context.Context, args meter.SetTenantBudg
 	if err := s.notErasedLocked(args.TenantID); err != nil {
 		return meter.TenantBudget{}, err
 	}
-
 	b, exists := s.budgets[args.TenantID]
-
 	// SetTenantBudgetRequest.ExpectedVersion's contract, held as every store
 	// must hold it, or tests pass against a memstore that permits writes a
 	// real store refuses. A missing budget expects version 0; an existing one
 	// expects its current version.
-	want := int64(0)
-	if exists {
-		want = b.ResourceVersion
-	}
-	if args.ExpectedVersion != want {
+	if args.ExpectedVersion != b.ResourceVersion {
 		return meter.TenantBudget{}, meter.ErrTenantBudgetVersionMismatch
 	}
-
 	// A ceiling that names no unit — the zero one — keeps the tenant's.
-	unit := args.Ceiling.UnitCode
-	if unit == "" {
-		unit = b.Ceiling.UnitCode
+	unit := cmp.Or(args.Ceiling.UnitCode, b.Ceiling.UnitCode)
+	if err := checkBudgetUnit(b, exists, args, unit); err != nil {
+		return meter.TenantBudget{}, err
 	}
-	// A reset closes the spend, never the holds still open in the old unit.
-	if have := b.Ceiling.UnitCode; exists && have != "" && unit != have &&
-		(b.ReservedAmount > 0 || (b.SpentAmount > 0 && !args.ResetSpend)) {
-		return meter.TenantBudget{}, fmt.Errorf("%w: tenant %s has %s counted in %s",
+	b = s.setBudgetLocked(b, args, unit)
+	s.budgets[args.TenantID] = b
+	return b, nil
+}
+
+// checkBudgetUnit refuses moving tenant budget b to unit while it counts
+// anything in another. A reset closes the spend, never the holds still open
+// in the old unit.
+func checkBudgetUnit(b meter.TenantBudget, exists bool, args meter.SetTenantBudgetRequest, unit string) error {
+	have := b.Ceiling.UnitCode
+	if !exists || have == "" || unit == have {
+		return nil
+	}
+	if b.ReservedAmount > 0 || (b.SpentAmount > 0 && !args.ResetSpend) {
+		return fmt.Errorf("%w: tenant %s has %s counted in %s",
 			limes.ErrUnitCodeMismatch, args.TenantID, b.SpentAmount+b.ReservedAmount, have)
 	}
+	return nil
+}
 
+// setBudgetLocked is b set as args asks, in unit, at a new version: a
+// reset closes the spend and opens a period. s.mu must be held.
+func (s *UsageStore) setBudgetLocked(b meter.TenantBudget, args meter.SetTenantBudgetRequest, unit string) meter.TenantBudget {
 	b.TenantID = args.TenantID
 	b.Ceiling = args.Ceiling
 	b.Ceiling.UnitCode = unit
@@ -1696,8 +1845,7 @@ func (s *UsageStore) SetTenantBudget(_ context.Context, args meter.SetTenantBudg
 	}
 	b.UpdatedAt = s.nowFn()
 	b.ResourceVersion++
-	s.budgets[args.TenantID] = b
-	return b, nil
+	return b
 }
 
 // ListTenantBudgets pages the tenants' aggregates, most at risk first.
@@ -1705,34 +1853,48 @@ func (s *UsageStore) ListTenantBudgets(_ context.Context, args meter.ListTenantB
 	if err := args.Validate(); err != nil {
 		return limes.Page[meter.TenantBudget]{}, err
 	}
-	var after *budgetRow
-	if args.Cursor != "" {
-		c, err := decodeTenantBudgetCursor(args.Cursor)
-		if err != nil {
-			return limes.Page[meter.TenantBudget]{}, err
-		}
-		after = &budgetRow{class: c.class, spent: c.spent, max: c.max, tenant: c.tenantID}
+	after, err := budgetRowAfter(args.Cursor)
+	if err != nil {
+		return limes.Page[meter.TenantBudget]{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	rows := s.budgetRowsLocked(args, after)
+	sort.Slice(rows, func(i, j int) bool { return rows[i].before(rows[j]) })
+	return budgetPage(rows, int(limes.PageLimit(args.Limit))), nil
+}
 
+// budgetRowAfter is the row a tenant budget cursor names, nil for none.
+func budgetRowAfter(cursor string) (*budgetRow, error) {
+	if cursor == "" {
+		return nil, nil
+	}
+	c, err := decodeTenantBudgetCursor(cursor)
+	if err != nil {
+		return nil, err
+	}
+	return &budgetRow{class: c.class, spent: c.spent, max: c.max, tenant: c.tenantID}, nil
+}
+
+// budgetRowsLocked is every budget args lists, past after when it is set.
+// s.mu must be held.
+func (s *UsageStore) budgetRowsLocked(args meter.ListTenantBudgetsRequest, after *budgetRow) []budgetRow {
 	rows := make([]budgetRow, 0, len(s.budgets))
 	for _, b := range s.budgets {
 		row := budgetRow{class: classOf(b.Ceiling), tenant: b.TenantID, budget: b}
 		if row.class == classBounded {
 			row.spent, row.max = b.SpentAmount, b.Ceiling.Max
 		}
-		if !listed(args, row) {
-			continue
+		if listed(args, row) && (after == nil || after.before(row)) {
+			rows = append(rows, row)
 		}
-		if after != nil && !after.before(row) {
-			continue
-		}
-		rows = append(rows, row)
 	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].before(rows[j]) })
+	return rows
+}
 
-	limit := int(limes.PageLimit(args.Limit))
+// budgetPage is the first limit of rows, sorted, and the cursor past the
+// last when more follow.
+func budgetPage(rows []budgetRow, limit int) limes.Page[meter.TenantBudget] {
 	next := ""
 	if len(rows) > limit {
 		rows = rows[:limit]
@@ -1743,7 +1905,7 @@ func (s *UsageStore) ListTenantBudgets(_ context.Context, args meter.ListTenantB
 	for _, r := range rows {
 		out = append(out, r.budget)
 	}
-	return limes.Page[meter.TenantBudget]{Items: out, Next: next}, nil
+	return limes.Page[meter.TenantBudget]{Items: out, Next: next}
 }
 
 // budgetRow is a tenant budget in ListTenantBudgets' order.
