@@ -138,24 +138,36 @@ func parse(raw []byte) (map[string]ed25519.PublicKey, int, error) {
 	}
 	skipped := 0
 	for _, k := range entries {
-		// A kid named twice is used for neither key: which one signs is not
-		// for the reader to guess.
-		if k.Kty != jose.KtyOKP || k.Crv != jose.CrvEd25519 || k.Kid == "" || seen[k.Kid] > 1 {
+		key, ok := usableKey(k, seen[k.Kid])
+		if !ok {
 			skipped++
 			continue
 		}
-		if k.Alg != "" && k.Alg != jose.AlgEd25519 && k.Alg != jose.AlgEdDSA {
-			skipped++
-			continue
-		}
-		decoded, err := jose.UnB64(k.X) // strict: one encoding per key, as every JOSE member
-		if err != nil || len(decoded) != ed25519.PublicKeySize {
-			skipped++
-			continue
-		}
-		out[k.Kid] = ed25519.PublicKey(decoded)
+		out[k.Kid] = key
 	}
 	return out, skipped, nil
+}
+
+// usableKey is k's Ed25519 key, when k is one a verifier can use: an
+// Ed25519 key under a kid named by no other entry (named, the number of
+// entries naming it), for an algorithm that is Ed25519's, encoded as JOSE
+// encodes every member, once.
+func usableKey(k entry, named int) (ed25519.PublicKey, bool) {
+	// A kid named twice is used for neither key: which one signs is not
+	// for the reader to guess.
+	if k.Kty != jose.KtyOKP || k.Crv != jose.CrvEd25519 || k.Kid == "" || named > 1 || !ed25519Alg(k.Alg) {
+		return nil, false
+	}
+	decoded, err := jose.UnB64(k.X) // strict: one encoding per key, as every JOSE member
+	if err != nil || len(decoded) != ed25519.PublicKeySize {
+		return nil, false
+	}
+	return ed25519.PublicKey(decoded), true
+}
+
+// ed25519Alg reports whether alg names Ed25519, or nothing.
+func ed25519Alg(alg string) bool {
+	return alg == "" || alg == jose.AlgEd25519 || alg == jose.AlgEdDSA
 }
 
 // HandlerConfig configures the handler that serves a key set.

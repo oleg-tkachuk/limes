@@ -1,6 +1,7 @@
 package jwks
 
 import (
+	"cmp"
 	"context"
 	"crypto/ed25519"
 	"errors"
@@ -110,7 +111,28 @@ func NewRemote(cfg RemoteConfig) (*Remote, error) {
 	if cfg.URL == "" {
 		return nil, errors.New("jwks: RemoteConfig.URL required")
 	}
-	u, err := url.Parse(cfg.URL)
+	u, err := parseRemoteURL(cfg.URL)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.RefreshInterval < 0 || cfg.MinRefreshInterval < 0 || cfg.MaxStale < 0 || cfg.MaxDocumentBytes < 0 {
+		return nil, errors.New("jwks: RemoteConfig intervals and MaxDocumentBytes must not be negative")
+	}
+	setRemoteDefaults(&cfg)
+	// A set past MaxStale before it is due a refresh would fail closed
+	// with no fetch having failed, and a refresh due inside the rate limit
+	// would wait it out anyway.
+	if cfg.MinRefreshInterval > cfg.RefreshInterval || cfg.RefreshInterval > cfg.MaxStale {
+		return nil, fmt.Errorf("jwks: RemoteConfig needs MinRefreshInterval (%s) ≤ RefreshInterval (%s) ≤ MaxStale (%s)",
+			cfg.MinRefreshInterval, cfg.RefreshInterval, cfg.MaxStale)
+	}
+	return &Remote{cfg: cfg, endpoint: u.Redacted(), fetching: make(chan struct{}, 1)}, nil
+}
+
+// parseRemoteURL reads the JWKS endpoint's URL, refusing one that is not
+// an https URL with a host.
+func parseRemoteURL(raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
 	if err != nil {
 		// A *url.Error quotes the whole URL, password and all: only the
 		// reason is kept.
@@ -122,36 +144,23 @@ func NewRemote(cfg RemoteConfig) (*Remote, error) {
 	if u.Scheme != schemeHTTPS || u.Host == "" {
 		return nil, fmt.Errorf("jwks: RemoteConfig.URL must be an %s URL, got %q", schemeHTTPS, u.Redacted())
 	}
-	if cfg.RefreshInterval < 0 || cfg.MinRefreshInterval < 0 || cfg.MaxStale < 0 || cfg.MaxDocumentBytes < 0 {
-		return nil, errors.New("jwks: RemoteConfig intervals and MaxDocumentBytes must not be negative")
-	}
+	return u, nil
+}
+
+// setRemoteDefaults gives cfg's unset members their defaults, and its
+// client the same-origin redirect policy.
+func setRemoteDefaults(cfg *RemoteConfig) {
 	if cfg.Client == nil {
 		cfg.Client = &http.Client{Timeout: DefaultFetchTimeout}
 	}
 	cfg.Client = sameOrigin(cfg.Client)
-	if cfg.RefreshInterval == 0 {
-		cfg.RefreshInterval = DefaultRefreshInterval
-	}
-	if cfg.MinRefreshInterval == 0 {
-		cfg.MinRefreshInterval = DefaultMinRefreshInterval
-	}
-	if cfg.MaxStale == 0 {
-		cfg.MaxStale = DefaultMaxStale
-	}
-	if cfg.MaxDocumentBytes == 0 {
-		cfg.MaxDocumentBytes = DefaultMaxDocumentBytes
-	}
+	cfg.RefreshInterval = cmp.Or(cfg.RefreshInterval, DefaultRefreshInterval)
+	cfg.MinRefreshInterval = cmp.Or(cfg.MinRefreshInterval, DefaultMinRefreshInterval)
+	cfg.MaxStale = cmp.Or(cfg.MaxStale, DefaultMaxStale)
+	cfg.MaxDocumentBytes = cmp.Or(cfg.MaxDocumentBytes, DefaultMaxDocumentBytes)
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	// A set past MaxStale before it is due a refresh would fail closed
-	// with no fetch having failed, and a refresh due inside the rate limit
-	// would wait it out anyway.
-	if cfg.MinRefreshInterval > cfg.RefreshInterval || cfg.RefreshInterval > cfg.MaxStale {
-		return nil, fmt.Errorf("jwks: RemoteConfig needs MinRefreshInterval (%s) ≤ RefreshInterval (%s) ≤ MaxStale (%s)",
-			cfg.MinRefreshInterval, cfg.RefreshInterval, cfg.MaxStale)
-	}
-	return &Remote{cfg: cfg, endpoint: u.Redacted(), fetching: make(chan struct{}, 1)}, nil
 }
 
 // sameOrigin is a shallow copy of c, so the caller's client is left as it
@@ -199,8 +208,14 @@ func (r *Remote) PublicKey(ctx context.Context, kid string) (ed25519.PublicKey, 
 		// than the token's. The context's error stays matchable.
 		return nil, fmt.Errorf("%w: %s: %w", ErrUnavailable, r.endpoint, err)
 	}
-	key, ok, fetchedAt, _ = r.lookup(kid)
+	return r.refreshedKey(kid)
+}
 
+// refreshedKey is kid's key from the set a refresh left: unavailable when
+// none is held within MaxStale, or when kid is missing while the endpoint
+// fails.
+func (r *Remote) refreshedKey(kid string) (ed25519.PublicKey, error) {
+	key, ok, fetchedAt, _ := r.lookup(kid)
 	r.mu.RLock()
 	lastErr := r.lastErr
 	r.mu.RUnlock()
@@ -340,14 +355,9 @@ const (
 )
 
 func (r *Remote) fetch(ctx context.Context, etag string) (keys map[string]ed25519.PublicKey, newETag string, header http.Header, notModified bool, err error) {
-	// The URL is the operator's configuration, not a request's input.
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.cfg.URL, nil) //nolint:gosec // G704: see above
+	req, err := r.request(ctx, etag)
 	if err != nil {
 		return nil, "", nil, false, err
-	}
-	req.Header.Set(httpx.HeaderAccept, acceptJWKSet)
-	if etag != "" {
-		req.Header.Set(httpx.HeaderIfNoneMatch, etag)
 	}
 	resp, err := r.cfg.Client.Do(req) //nolint:gosec // G704: the configured URL
 	if err != nil {
@@ -361,20 +371,43 @@ func (r *Remote) fetch(ctx context.Context, etag string) (keys map[string]ed2551
 	case resp.StatusCode != http.StatusOK:
 		return nil, "", nil, false, fmt.Errorf("JWKS fetch: HTTP %d", resp.StatusCode)
 	}
-	body, err := readCapped(resp.Body, r.cfg.MaxDocumentBytes)
+	keys, err = readKeys(resp.Body, r.cfg.MaxDocumentBytes)
 	if err != nil {
 		return nil, "", nil, false, err
-	}
-	keys, skipped, err := parse(body)
-	if err != nil {
-		return nil, "", nil, false, err
-	}
-	// Entries, none usable: a broken document, not a withdrawal of every
-	// key — failing the fetch keeps the last good set within MaxStale.
-	if len(keys) == 0 && skipped > 0 {
-		return nil, "", nil, false, fmt.Errorf("JWKS document has %d entries and no usable Ed25519 key", skipped)
 	}
 	return keys, resp.Header.Get(httpx.HeaderETag), resp.Header, false, nil
+}
+
+// request is the fetch of the JWKS, conditional on etag when it is set.
+func (r *Remote) request(ctx context.Context, etag string) (*http.Request, error) {
+	// The URL is the operator's configuration, not a request's input.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.cfg.URL, nil) //nolint:gosec // G704: see above
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set(httpx.HeaderAccept, acceptJWKSet)
+	if etag != "" {
+		req.Header.Set(httpx.HeaderIfNoneMatch, etag)
+	}
+	return req, nil
+}
+
+// readKeys reads a JWKS document of at most maxBytes, refusing one whose
+// entries hold no usable key: a broken document, not a withdrawal of every
+// key — failing the fetch keeps the last good set within MaxStale.
+func readKeys(body io.Reader, maxBytes int) (map[string]ed25519.PublicKey, error) {
+	raw, err := readCapped(body, maxBytes)
+	if err != nil {
+		return nil, err
+	}
+	keys, skipped, err := parse(raw)
+	if err != nil {
+		return nil, err
+	}
+	if len(keys) == 0 && skipped > 0 {
+		return nil, fmt.Errorf("JWKS document has %d entries and no usable Ed25519 key", skipped)
+	}
+	return keys, nil
 }
 
 // readCapped reads all of body, refusing more than maxBytes. It reads one
