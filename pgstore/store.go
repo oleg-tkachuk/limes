@@ -119,8 +119,7 @@ func childDepth(ctx context.Context, tx pgx.Tx, c limes.Capability) (int, *uuid.
 }
 
 // checkParent holds c's parent on record for the rest of tx and refuses a
-// child it cannot keep: under a parent not on record, outliving it (with no
-// expiry under a parent that has one included), in
+// child it cannot keep: under a parent not on record, outliving it, in
 // another tenant, or past limes.MaxDelegationDepth. It returns the parent's
 // depth.
 func checkParent(ctx context.Context, tx pgx.Tx, c limes.Capability) (int, error) {
@@ -158,16 +157,13 @@ func checkParent(ctx context.Context, tx pgx.Tx, c limes.Capability) (int, error
 }
 
 // checkUnderParent refuses a child its parent does not allow: a later
-// expiry, or none under one that expires — Purge could not drop the parent
-// while the child, which it never purges, still refers to it — another
-// tenant, or another budget unit: metering a child spends from every
-// ancestor, so the lineage counts in one unit.
+// expiry — Purge could not drop the parent while the child still refers to
+// it — another tenant, or another budget unit: metering a child spends
+// from every ancestor, so the lineage counts in one unit.
 func checkUnderParent(c, parent limes.Capability) error {
 	switch {
 	case c.ExpiresAt.After(parent.ExpiresAt):
 		return fmt.Errorf("%w: expires %s, after its parent %s", limes.ErrDelegationTooWide, c.ExpiresAt, parent.ExpiresAt)
-	case c.ExpiresAt.IsZero() && !parent.ExpiresAt.IsZero():
-		return fmt.Errorf("%w: never expires, under a parent expiring %s", limes.ErrDelegationTooWide, parent.ExpiresAt)
 	case c.Subject.TenantID != parent.Subject.TenantID:
 		return fmt.Errorf("%w: tenant %s, not its parent's %s", limes.ErrDelegationTooWide, c.Subject.TenantID, parent.Subject.TenantID)
 	case c.Caveats.Budget.UnitCode != parent.Caveats.Budget.UnitCode:
