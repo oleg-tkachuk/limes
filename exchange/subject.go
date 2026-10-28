@@ -33,7 +33,10 @@ type Subject struct {
 	// (RFC 9449 cnf.jkt); empty for a bearer token.
 	JKT string
 	// Claims are all of the token's claims, for a policy that reads one of
-	// its identity provider's own, such as an organisation.
+	// its identity provider's own, such as an organisation. It is also where
+	// a multi-tenant SubjectVerifier puts the tenant it resolved, under a
+	// key of its own, for the Policy to check and to set as the issued
+	// capability's Subject.TenantID: Subject names no tenant itself.
 	Claims map[string]any
 }
 

@@ -417,3 +417,28 @@ func TestNewHandlerRefusesAnIncompleteConfig(t *testing.T) {
 		}
 	}
 }
+
+// A form the caller parsed already, as a /token path serving several grants
+// does, is served from r.PostForm: the body is not read again, so the
+// Handler's MaxBodyBytes bounds nothing and the caller's bound applies.
+func TestHandlerServesAFormParsedBeforeIt(t *testing.T) {
+	f := newFixture(t, fixtureConfig{})
+	h, err := NewHandler(HandlerConfig{Exchanger: f.ex, EndpointURL: tokenEndpoint, MaxBodyBytes: 1,
+		Authenticate: func(*http.Request) (Client, error) { return client(), nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	form := exchangeForm(f.idp.sign(t, TypeAccessToken, accessClaims()))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, tokenEndpoint, strings.NewReader(form.Encode()))
+	r.Header.Set("Content-Type", formContentType)
+	r.Header.Set(clientHeader, mcpServer)
+	if err := r.ParseForm(); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Errorf("status %d: %s", w.Code, w.Body)
+	}
+}

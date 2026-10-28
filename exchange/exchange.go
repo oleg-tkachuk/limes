@@ -141,7 +141,10 @@ const minTTL = time.Second
 
 // Config configures an Exchanger.
 type Config struct {
-	// Issuer issues the capabilities. Required.
+	// Issuer issues the capabilities. Required. No request to a token
+	// endpoint names a tenant, so a store that scopes its rows by tenant
+	// must record each capability in its own: with pgstore, give the
+	// Issuer pgstore.ScopedIssuance(store).
 	Issuer *limes.Issuer
 	// Subjects verifies subject tokens. Required.
 	Subjects SubjectVerifier

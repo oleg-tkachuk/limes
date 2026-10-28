@@ -104,7 +104,12 @@ type HandlerConfig struct {
 	// EndpointURL is the token endpoint's URL as clients call it, which
 	// their DPoP proofs name (htu). Required when Exchanger checks DPoP.
 	EndpointURL string
-	// MaxBodyBytes bounds the request body. Zero: DefaultMaxBodyBytes.
+	// MaxBodyBytes bounds the request body the Handler reads. Zero:
+	// DefaultMaxBodyBytes. A request whose form the caller parsed already —
+	// one /token path serving several grants — is read from r.PostForm, its
+	// body left unread, so the caller's own bound is the one that applies;
+	// the Handler still checks its content type, and drops empty values
+	// from r.PostForm in place.
 	MaxBodyBytes int64
 	// Logger logs refusals of malformed requests; the Exchanger logs the
 	// rest. Nil: slog.Default().
