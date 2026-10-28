@@ -69,6 +69,11 @@ type VerifierConfig struct {
 	// trusted issuer. With several it is required, unless SharedKeys says otherwise:
 	// any trusted key signing for any trusted issuer is wrong for issuers
 	// that do not share a trust boundary, so it is never the default.
+	// One key signs for two issuers — a family of capabilities marked by
+	// an iss of its own — under two kids, each bound here to its issuer:
+	// two Issuers with the same key, each with its kid and IssuerName.
+	// SharedKeys would let any trusted key sign either iss, which defeats
+	// the mark.
 	KeyIssuers map[string]string
 
 	// SharedKeys lets every trusted key sign for every trusted issuer, for
