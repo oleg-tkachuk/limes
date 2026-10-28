@@ -26,14 +26,14 @@ import { parse } from "yaml";
 
 import { info, setOutput } from "./lib/actions.ts";
 import { requireEnv } from "./lib/env.ts";
-import { gitHubFor, type GitHub, type Job } from "./lib/github.ts";
+import { gitHubFor, type GitHub, type Job, type WorkflowRun } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
 import { retry, type RetryOptions } from "./lib/retry.ts";
 import { CI_WORKFLOW, COMPLETED, PASSING, SUCCESS } from "./lib/runs.ts";
 
 // REQUIRED_CHECK_JOB is the id of the job main requires, whose needs are the
 // jobs a merge stands on.
-const REQUIRED_CHECK_JOB = "checks";
+export const REQUIRED_CHECK_JOB = "checks";
 const RELEASE_BRANCH = "main";
 const PUSH_EVENT = "push";
 // OUTPUT_PASSED is the step output job-passed sets, OUTPUT_RUN_ID the one
@@ -91,15 +91,29 @@ export async function verdictOn(github: GitHub, repository: string, runId: numbe
   if (!COMMIT_ID.test(sha)) {
     return { problems: [`sha ${JSON.stringify(sha)} is not a commit id`], pending: false };
   }
-  const run = await github.workflowRun(runId);
+  const settled = runProblems(await github.workflowRun(runId), repository, sha);
+  const jobs = jobProblems(await github.runJobs(runId), required);
+  const problems = [...settled, ...jobs.problems];
+  return { problems, pending: settled.length === 0 && jobs.unfinished > 0 && jobs.unfinished === problems.length };
+}
+
+// runProblems are why run is not the CI run of a push of sha to the release
+// branch of repository.
+function runProblems(run: WorkflowRun, repository: string, sha: string): string[] {
+  const checks: [boolean, string][] = [
+    [run.path !== CI_WORKFLOW, `run is ${run.path}, not ${CI_WORKFLOW}`],
+    [run.event !== PUSH_EVENT, `run was triggered by ${run.event}, not ${PUSH_EVENT}`],
+    [run.headBranch !== RELEASE_BRANCH, `run is on ${run.headBranch}, not ${RELEASE_BRANCH}`],
+    [run.headSha !== sha, `run tested ${run.headSha}, not ${sha}`],
+    [run.repository !== repository, `run belongs to ${run.repository}`],
+  ];
+  return checks.filter(([wrong]) => wrong).map(([, problem]) => problem);
+}
+
+// jobProblems are why each of required, in jobs, has not passed, and how
+// many of them have not finished.
+function jobProblems(jobs: Job[], required: readonly string[]): { problems: string[]; unfinished: number } {
   const problems: string[] = [];
-  if (run.path !== CI_WORKFLOW) problems.push(`run is ${run.path}, not ${CI_WORKFLOW}`);
-  if (run.event !== PUSH_EVENT) problems.push(`run was triggered by ${run.event}, not ${PUSH_EVENT}`);
-  if (run.headBranch !== RELEASE_BRANCH) problems.push(`run is on ${run.headBranch}, not ${RELEASE_BRANCH}`);
-  if (run.headSha !== sha) problems.push(`run tested ${run.headSha}, not ${sha}`);
-  if (run.repository !== repository) problems.push(`run belongs to ${run.repository}`);
-  const settled = problems.length;
-  const jobs = await github.runJobs(runId);
   let unfinished = 0;
   for (const name of required) {
     const job = latestJob(jobs, name);
@@ -110,7 +124,7 @@ export async function verdictOn(github: GitHub, repository: string, runId: numbe
       problems.push(`job '${name}' ended as ${job.conclusion ?? "nothing"}`);
     }
   }
-  return { problems, pending: settled === 0 && unfinished > 0 && unfinished === problems.length };
+  return { problems, unfinished };
 }
 
 // RunPending is a run that does not vouch yet only because a job it needs
