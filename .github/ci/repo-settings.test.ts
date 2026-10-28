@@ -7,6 +7,7 @@ import { parse } from "yaml";
 
 import {
   ADMIN_ROLE_ID,
+  ENVIRONMENT_SECRETS,
   ENVIRONMENTS,
   GITHUB_ACTIONS_APP_ID,
   MAIN_REF,
@@ -17,6 +18,7 @@ import {
   TAGS_RULESET_NAME,
   admitOnly,
   mainRuleset,
+  misplacedSecrets,
   tagCreationRuleset,
   tagsRuleset,
   upsertRulesets,
@@ -52,6 +54,34 @@ test("every environment a workflow deploys to admits main alone", () => {
     }
   }
   assert.deepEqual([...used].sort(), [...ENVIRONMENTS].sort());
+});
+
+// A job reading an environment's secret outside that environment reads it
+// from the repository, where any branch's workflow can: every job that
+// names one deploys to its environment, and every one is read somewhere.
+test("every environment secret is read only by jobs deploying to its environment", () => {
+  const read = new Set<string>();
+  for (const w of workflows()) {
+    for (const [id, job] of Object.entries(w.jobs)) {
+      const env = job.environment === undefined ? undefined : typeof job.environment === "string" ? job.environment : job.environment.name;
+      for (const [, name] of JSON.stringify(job).matchAll(/secrets\.([A-Za-z0-9_]+)/g)) {
+        const want = ENVIRONMENT_SECRETS[name as string];
+        if (want === undefined) continue;
+        read.add(name as string);
+        assert.equal(env, want, `job ${id} reads ${name} outside the ${want} environment`);
+      }
+    }
+  }
+  assert.deepEqual([...read].sort(), Object.keys(ENVIRONMENT_SECRETS).sort());
+  for (const env of Object.values(ENVIRONMENT_SECRETS)) assert.ok(ENVIRONMENTS.includes(env), `${env} is no environment the run restricts`);
+});
+
+test("a repository secret that belongs in an environment is warned of, and only such a one", () => {
+  const lines = misplacedSecrets(["GH_PAT", "RELEASE_DEPLOY_KEY", "AUTOMERGE_TOKEN"]);
+  assert.equal(lines.length, 2);
+  assert.match(lines[0] ?? "", /RELEASE_DEPLOY_KEY .* release environment/);
+  assert.match(lines[1] ?? "", /AUTOMERGE_TOKEN .* automerge environment/);
+  assert.deepEqual(misplacedSecrets(["GH_PAT"]), []);
 });
 
 test("main is kept from deletion and force pushes, and takes a merged pull request whose check GitHub Actions passed", () => {

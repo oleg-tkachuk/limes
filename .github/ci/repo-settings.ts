@@ -15,9 +15,12 @@
 //   3. Enables private vulnerability reporting, whose form SECURITY.md and
 //      the issue forms send reporters to, and Dependabot alerts, which
 //      Renovate's vulnerabilityAlerts reads (renovate.json).
-//   4. Admits main alone to deploy to the automerge environment, whose
-//      AUTOMERGE_TOKEN only main's copy of a workflow may read
-//      (auto-merge.yaml). The secret itself is left alone.
+//   4. Admits main alone to deploy to the automerge and release
+//      environments, whose AUTOMERGE_TOKEN and RELEASE_DEPLOY_KEY only
+//      main's copy of a workflow may then read (auto-merge.yaml,
+//      release.yaml). The secrets themselves are left alone, but one still
+//      set on the repository, which any branch's workflow may read, is
+//      warned of.
 //   5. Creates or updates the ruleset on main: no deletion, no force push,
 //      every change through a pull request merged with a merge commit, and
 //      the "All checks passed" check required — reported by GitHub Actions
@@ -60,7 +63,16 @@ export const REQUIRED_CONTEXTS: readonly string[] = [REQUIRED_CHECK];
 
 // ENVIRONMENTS are the environments a workflow deploys to, each admitting
 // main alone; repo-settings.test.ts holds them to the workflows.
-export const ENVIRONMENTS: readonly string[] = ["automerge"];
+export const ENVIRONMENTS: readonly string[] = ["automerge", "release"];
+
+// ENVIRONMENT_SECRETS are the secrets a workflow may read only through the
+// environment named here: set on the repository instead, any branch's copy
+// of a workflow could read them, the environment notwithstanding.
+// repo-settings.test.ts holds every job reading one to its environment.
+export const ENVIRONMENT_SECRETS: Readonly<Record<string, string>> = {
+  AUTOMERGE_TOKEN: "automerge",
+  RELEASE_DEPLOY_KEY: "release",
+};
 
 // ADMIN_ROLE_ID is the built-in admin RepositoryRole: a repository outside an
 // organisation has no per-user actor, so this is how its owner is named.
@@ -233,6 +245,15 @@ export async function admitOnly(api: BranchPoliciesApi, environment: string, bra
   return report;
 }
 
+// misplacedSecrets are the ENVIRONMENT_SECRETS among repositorySecrets, the
+// names of the secrets set on the repository itself, each with a line
+// saying where it belongs.
+export function misplacedSecrets(repositorySecrets: readonly string[]): string[] {
+  return repositorySecrets
+    .filter((name) => Object.hasOwn(ENVIRONMENT_SECRETS, name))
+    .map((name) => `${name} is a repository secret, which any branch's workflow can read: set it on the ${ENVIRONMENT_SECRETS[name]} environment and delete it from the repository`);
+}
+
 // rulesetsOver is the RulesetsApi of repo through octokit.
 function rulesetsOver(octokit: Octokit, repo: Repo): RulesetsApi {
   return {
@@ -304,6 +325,12 @@ async function main(): Promise<void> {
   for (const environment of ENVIRONMENTS) {
     for (const line of await admitOnly(policies, environment, MAIN_BRANCH)) info(`    ${line}`);
   }
+
+  info("==> Secrets kept in their environments");
+  const { data: secrets } = await octokit.rest.actions.listRepoSecrets({ ...repo, per_page: 100 });
+  const misplaced = misplacedSecrets(secrets.secrets.map((s) => s.name));
+  for (const line of misplaced) warning(line);
+  if (misplaced.length === 0) info(`    none of ${Object.keys(ENVIRONMENT_SECRETS).join(", ")} is a repository secret`);
 
   info(`==> Rulesets for ${MAIN_BRANCH}, requiring ${REQUIRED_CONTEXTS.join(", ")}, and for ${RELEASE_TAG_REFS.join(" ")}`);
   for (const line of await upsertRulesets(rulesetsOver(octokit, repo), [mainRuleset(), tagsRuleset(), tagCreationRuleset()])) info(`    ${line}`);
