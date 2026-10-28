@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"cmp"
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"time"
@@ -170,25 +168,14 @@ func compareSums(a, b sumPlace) int {
 }
 
 // encode is the cursor as SumCharges hands it out: opaque, URL-safe.
-func (p sumPlace) encode() string {
-	raw, err := json.Marshal(p)
-	if err != nil {
-		panic(err) // a struct of strings, times, integers and a uuid always encodes
-	}
-	return base64.RawURLEncoding.EncodeToString(raw)
-}
+func (p sumPlace) encode() string { return encodeCursor(p) }
 
 // decodeSumCursor reads a cursor encode wrote; anything else is
 // ErrInvalidRequest.
 func decodeSumCursor(s string) (sumPlace, error) {
-	bad := fmt.Errorf("%w: memstore: charge sum cursor %q", limes.ErrInvalidRequest, s)
-	raw, err := base64.RawURLEncoding.DecodeString(s)
-	if err != nil {
-		return sumPlace{}, bad
-	}
 	var p sumPlace
-	if err := json.Unmarshal(raw, &p); err != nil || p.Charged.Validate() != nil {
-		return sumPlace{}, bad
+	if err := decodeCursor(s, &p); err != nil || p.Charged.Validate() != nil {
+		return sumPlace{}, fmt.Errorf("%w: memstore: charge sum cursor %q", limes.ErrInvalidRequest, s)
 	}
 	return p, nil
 }
