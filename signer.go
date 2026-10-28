@@ -451,65 +451,95 @@ func claimsOf(g grant) jwtClaims {
 
 // parseClaims reads a payload under the schema its limes_v names.
 func parseClaims(seg string) (*grant, error) {
+	claims, err := decodeClaims(seg)
+	if err != nil {
+		return nil, err
+	}
+	return grantOf(claims)
+}
+
+// decodeClaims decodes a payload strictly, refusing one of another format,
+// without a client_id, or with an integer outside I-JSON.
+func decodeClaims(seg string) (jwtClaims, error) {
 	raw, err := jose.UnB64(seg)
 	if err != nil {
-		return nil, fmt.Errorf("limes: decode claims: %w", err)
+		return jwtClaims{}, fmt.Errorf("limes: decode claims: %w", err)
 	}
 	var claims jwtClaims
 	if err := json.Unmarshal(raw, &claims, strictClaims); err != nil {
-		return nil, fmt.Errorf("limes: parse claims: %w", err)
+		return jwtClaims{}, fmt.Errorf("limes: parse claims: %w", err)
 	}
 	if claims.Format != formatV7 {
-		return nil, fmt.Errorf("limes: limes_v %d is not the format this package reads (%d)", claims.Format, formatV7)
+		return jwtClaims{}, fmt.Errorf("limes: limes_v %d is not the format this package reads (%d)", claims.Format, formatV7)
 	}
 	if claims.ClientID == "" {
-		return nil, errors.New("limes: a capability names its client_id (RFC 9068 §2.2)")
+		return jwtClaims{}, errors.New("limes: a capability names its client_id (RFC 9068 §2.2)")
 	}
-	if err := checkIJSONIntegers(claims); err != nil {
-		return nil, err
-	}
+	return claims, checkIJSONIntegers(claims)
+}
+
+// grantOf is the grant claims carry, refused when what they say of it
+// disagrees with itself.
+func grantOf(claims jwtClaims) (*grant, error) {
 	onBehalfOf, prior, err := readActing(claims)
 	if err != nil {
 		return nil, err
 	}
-
 	id, err := canonicalUUID("jti", claims.ID)
 	if err != nil {
 		return nil, err
 	}
-	cap := &Capability{
-		ID:        id,
-		Issuer:    claims.Issuer,
-		Audience:  claims.Audience,
-		Caveats:   claims.Caveats.caveats(),
-		IssuedAt:  time.Unix(claims.IssuedAt, 0).UTC(),
-		ExpiresAt: time.Unix(claims.ExpiresAt, 0).UTC(),
+	jkt, err := readConfirmation(claims.Confirmation)
+	if err != nil {
+		return nil, err
+	}
+	parentID, err := readParentID(claims.ParentID, prior)
+	if err != nil {
+		return nil, err
+	}
+	c := Capability{
+		ID:              id,
+		Issuer:          claims.Issuer,
+		Subject:         claims.Principal.principal(),
+		Audience:        claims.Audience,
+		Caveats:         claims.Caveats.caveats(),
+		IssuedAt:        time.Unix(claims.IssuedAt, 0).UTC(),
+		ExpiresAt:       time.Unix(claims.ExpiresAt, 0).UTC(),
+		ConfirmationJKT: jkt,
+		ClientID:        claims.ClientID,
+		OnBehalfOf:      onBehalfOf,
+		PriorActors:     prior,
+		ParentID:        parentID,
 	}
 	if claims.NotBefore != 0 {
-		cap.NotBefore = time.Unix(claims.NotBefore, 0).UTC()
+		c.NotBefore = time.Unix(claims.NotBefore, 0).UTC()
 	}
-	cap.Subject = claims.Principal.principal()
-	if claims.Confirmation != nil {
-		// A cnf the signer writes always names a key; an empty one would read
-		// as an unbound capability.
-		if claims.Confirmation.JKT == "" {
-			return nil, errors.New("limes: cnf names no jkt")
+	return &grant{Capability: c, biscuitRoot: claims.BiscuitRoot}, nil
+}
+
+// readConfirmation is the key a cnf binds the capability to, "" for none.
+func readConfirmation(cnf *cnfClaim) (string, error) {
+	if cnf == nil {
+		return "", nil
+	}
+	// A cnf the signer writes always names a key; an empty one would read
+	// as an unbound capability.
+	if cnf.JKT == "" {
+		return "", errors.New("limes: cnf names no jkt")
+	}
+	return cnf.JKT, nil
+}
+
+// readParentID reads limes_parent_id, which a capability with prior actors
+// must name: they are the holders it was delegated through.
+func readParentID(parentID string, prior []string) (uuid.UUID, error) {
+	if parentID == "" {
+		if len(prior) > 0 {
+			return uuid.Nil(), errors.New("limes: prior actors in act, and no limes_parent_id")
 		}
-		cap.ConfirmationJKT = claims.Confirmation.JKT
+		return uuid.Nil(), nil
 	}
-	cap.ClientID = claims.ClientID
-	cap.OnBehalfOf, cap.PriorActors = onBehalfOf, prior
-	if len(prior) > 0 && claims.ParentID == "" {
-		return nil, errors.New("limes: prior actors in act, and no limes_parent_id")
-	}
-	if claims.ParentID != "" {
-		pid, err := canonicalUUID("limes_parent_id", claims.ParentID)
-		if err != nil {
-			return nil, err
-		}
-		cap.ParentID = pid
-	}
-	return &grant{Capability: *cap, biscuitRoot: claims.BiscuitRoot}, nil
+	return canonicalUUID("limes_parent_id", parentID)
 }
 
 // checkActing refuses to sign what readActing would refuse to read.
