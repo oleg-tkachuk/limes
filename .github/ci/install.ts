@@ -48,12 +48,16 @@ export async function installWithRetries(dir: string, install: Install = npmCi, 
 }
 
 async function main(): Promise<void> {
-  const dirs = process.argv.slice(2);
+  await installAll(process.argv.slice(2), installWithRetries);
+}
+
+// installAll installs each of dirs with install, refusing none.
+export async function installAll(dirs: readonly string[], install: (dir: string) => Promise<void>): Promise<void> {
   if (dirs.length === 0) {
     throw new Error("usage: install.ts <dir>...");
   }
   for (const dir of dirs) {
-    await installWithRetries(dir);
+    await install(dir);
   }
 }
 

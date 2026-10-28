@@ -5,7 +5,7 @@ import { copyFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
-import { Check, Outcome, allPassed, checkModules, checkSummary, moduleCheck, type ModuleCheck } from "./check-modules.ts";
+import { allPassed, Check, checkModules, checkSummary, eventOf, moduleCheck, type ModuleCheck, Outcome } from "./check-modules.ts";
 
 const RELEASE = new URL("../release/", import.meta.url).pathname;
 
@@ -83,5 +83,26 @@ describe("checkModules", () => {
   test("an unknown check is refused", () => {
     assert.throws(() => moduleCheck("bogus", repo.dir, undefined, undefined), /usage/);
     assert.doesNotThrow(() => moduleCheck(Check.Markers, repo.dir, undefined, undefined));
+  });
+});
+
+describe("eventOf", () => {
+  const required = (vars: Record<string, string>) => (name: string) => {
+    const v = vars[name];
+    if (v === undefined) {
+      throw new Error(`${name} is not set`);
+    }
+    return v;
+  };
+  test("a pull request's event names its base and head", () => {
+    const vars = { EVENT: "pull_request", SHA: "abc", PR_BASE: "base", PR_HEAD: "head" };
+    assert.deepEqual(eventOf(required(vars), (n) => vars[n as keyof typeof vars]), { name: "pull_request", prBase: "base", prHead: "head", sha: "abc" });
+  });
+  test("a push's names none", () => {
+    const vars = { EVENT: "push", SHA: "abc" };
+    assert.deepEqual(eventOf(required(vars), () => undefined), { name: "push", prBase: "", prHead: "", sha: "abc" });
+  });
+  test("one without a sha is refused", () => {
+    assert.throws(() => eventOf(required({ EVENT: "push" }), () => undefined), /SHA is not set/);
   });
 });

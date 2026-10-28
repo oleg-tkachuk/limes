@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { test } from "node:test";
+import { describe, test } from "node:test";
 
 import { parse } from "yaml";
 
-import { floorOnLine, offFloor } from "./go-floor.ts";
+import { checkFloor, floorOnLine, offFloor } from "./go-floor.ts";
 
 const cases: [string, boolean, string, string][] = [
   ["a patch of a three-part directive", true, "1.26.9", "1.26.0"],
@@ -41,4 +41,15 @@ test("every tested module's directive is on one line", () => {
   const directive = (dir: string) => /^go (\S+)$/m.exec(readFileSync(new URL(`${dir}/go.mod`, root), "utf8"))?.[1] ?? "";
   const lines = new Set([".", "redisreplay", "otelmetric", "exchange"].map((d) => directive(d).split(".").slice(0, 2).join(".")));
   assert.equal(lines.size, 1);
+});
+
+describe("checkFloor", () => {
+  const directives: Record<string, string> = { ".": "1.27.0", exchange: "1.27.0", old: "1.26.0" };
+  const read = async (dir: string) => directives[dir] ?? "";
+  test("the root's directive by default", async () => assert.deepEqual(await checkFloor(["1.27.3"], read), undefined));
+  test("each module named", async () => assert.deepEqual(await checkFloor(["1.27.3", ".", "exchange"], read), undefined));
+  test("a module off the floor is named", async () => {
+    await assert.rejects(checkFloor(["1.27.3", "exchange", "old"], read), /of old \(go 1\.26\.0\)$/);
+  });
+  test("refuses no floor", async () => assert.rejects(checkFloor([], read), /usage: go-floor\.ts/));
 });

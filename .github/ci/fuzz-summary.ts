@@ -72,18 +72,34 @@ const NONE = "—";
 // fuzzSummary is the summary page section of target in pkg, whose step
 // ended in outcome.
 export function fuzzSummary(pkg: string, target: string, outcome: string, run: FuzzRun): string {
-  const passed = outcome === SUCCESS;
-  const result = passed ? "passed" : outcome === CANCELLED ? "cancelled" : "failed";
-  const row = [pkg, run.elapsed ?? NONE, run.executions?.toString() ?? NONE, run.interesting?.toString() ?? NONE, result];
+  const row = [pkg, run.elapsed ?? NONE, run.executions?.toString() ?? NONE, run.interesting?.toString() ?? NONE, fuzzResult(outcome)];
   const section = `### Fuzz ${target}\n\n${table(SUMMARY_HEADER, [row])}`;
-  if (passed || outcome === CANCELLED) {
+  if (outcome === SUCCESS || outcome === CANCELLED) {
     return section;
   }
+  return `${section}\n${failureNote(pkg, target, run)}`;
+}
+
+// fuzzResult names a fuzz job's outcome.
+function fuzzResult(outcome: string): string {
+  switch (outcome) {
+    case SUCCESS:
+      return "passed";
+    case CANCELLED:
+      return "cancelled";
+    default:
+      return "failed";
+  }
+}
+
+// failureNote says where a failed fuzz run's input is and how to run it
+// again, or that it failed before its search wrote one.
+function failureNote(pkg: string, target: string, run: FuzzRun): string {
   if (run.input === undefined) {
-    return `${section}\nIt failed before its search wrote an input: on its seed corpus, or before it began. See the log.\n`;
+    return "It failed before its search wrote an input: on its seed corpus, or before it began. See the log.\n";
   }
   const rerun = `${run.rerun ?? `go test -run=${target}`} ${pkg}`;
-  return `${section}\nThe failing input is \`${run.input}\`, under the package, in this run's artifact \`fuzz-${target}\`; committed there, it stays a regression test. To run it again:\n\n\`\`\`bash\n${rerun}\n\`\`\`\n`;
+  return `The failing input is \`${run.input}\`, under the package, in this run's artifact \`fuzz-${target}\`; committed there, it stays a regression test. To run it again:\n\n\`\`\`bash\n${rerun}\n\`\`\`\n`;
 }
 
 async function main(): Promise<void> {

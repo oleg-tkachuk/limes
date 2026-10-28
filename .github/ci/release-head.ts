@@ -91,17 +91,21 @@ export async function catchUp(cwd?: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const [command, sha = ""] = process.argv.slice(2);
-  switch (command) {
-    case Command.CatchUp:
-      await catchUp();
-      break;
-    case Command.Check:
-      break;
-    default:
-      throw new Error(`usage: release-head.ts ${Command.Check}|${Command.CatchUp} <dispatched-sha>`);
+  const { command, sha } = releaseHeadArgs(process.argv.slice(2));
+  if (command === Command.CatchUp) {
+    await catchUp();
   }
   setOutput(OUTPUT_RELEASE, String(await releasable(sha)));
+}
+
+// releaseHeadArgs reads the command and the dispatched sha from args,
+// refusing a command this script does not run.
+export function releaseHeadArgs(args: readonly string[]): { command: (typeof Command)[keyof typeof Command]; sha: string } {
+  const [command, sha = ""] = args;
+  if (command !== Command.Check && command !== Command.CatchUp) {
+    throw new Error(`usage: release-head.ts ${Command.Check}|${Command.CatchUp} <dispatched-sha>`);
+  }
+  return { command, sha };
 }
 
 if (import.meta.main) {

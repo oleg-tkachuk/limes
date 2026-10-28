@@ -6,7 +6,7 @@ import { after, before, describe, test } from "node:test";
 
 import { parse } from "yaml";
 
-import { ALL_GROUPS, Group, INERT, READ_BY_TESTS, OUTPUT_CODE, PUSH_EVENT, SCRIPTS_TASKS, VERIFY_GATE, candidateRange, changesSummary, checkedGroups, classify, reachedGroups, reachesCode, verifyTasks } from "./changes.ts";
+import { ALL_GROUPS, candidateRange, changesNotes, changesOutputs, changesSummary, checkedGroups, classify, Group, INERT, OUTPUT_CODE, OUTPUT_RELEVANT, OUTPUT_VERIFY_TASKS, PUSH_EVENT, reachedGroups, reachesCode, READ_BY_TESTS, SCRIPTS_TASKS, VERIFY_GATE, verifyTasks } from "./changes.ts";
 import { globToRegExp } from "./lib/glob.ts";
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
 
@@ -204,5 +204,33 @@ describe("verifyTasks", () => {
     for (const groups of all) {
       assert.ok([SCRIPTS_TASKS, VERIFY_GATE].includes(verifyTasks(groups)));
     }
+  });
+});
+
+describe("changesNotes", () => {
+  test("a push checks everything", () => {
+    assert.deepEqual(changesNotes(PUSH_EVENT, new Set(ALL_GROUPS)), ["a push to main checks everything, whatever its diff reaches", `reaches: ${ALL_GROUPS.join(", ")}`]);
+  });
+  test("documentation alone reaches none", () => {
+    assert.deepEqual(changesNotes("pull_request", new Set()), ["documentation only — the checks below will report as skipped"]);
+  });
+});
+
+describe("changesOutputs", () => {
+  test("names each group checked, and whether anything is", () => {
+    const [first] = ALL_GROUPS;
+    const groups = new Set(first === undefined ? [] : [first]);
+    const outputs = changesOutputs(groups, groups);
+    assert.equal(outputs[OUTPUT_RELEVANT], "true");
+    assert.equal(outputs[OUTPUT_CODE], "true");
+    for (const g of ALL_GROUPS) {
+      assert.equal(outputs[g], String(g === first));
+    }
+    assert.equal(typeof outputs[OUTPUT_VERIFY_TASKS], "string");
+  });
+  test("nothing reached, nothing checked", () => {
+    const outputs = changesOutputs(new Set(), new Set());
+    assert.equal(outputs[OUTPUT_RELEVANT], "false");
+    assert.equal(outputs[OUTPUT_CODE], "false");
   });
 });

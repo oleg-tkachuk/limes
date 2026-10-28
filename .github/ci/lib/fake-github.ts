@@ -1,7 +1,7 @@
 // A GitHub that answers from fixed data and records what it was asked, for
 // tests.
 
-import type { ChangedFile, GitHub, Job, NewRelease, OpenPullRequest, PullRequest, PullRequestRun, PullRequestText, RunState, WorkflowRun } from "./github.ts";
+import type { ChangedFile, Comparison, GitHub, Job, NewRelease, OpenPullRequest, PullRequest, PullRequestRun, PullRequestText, RunState, WorkflowRun } from "./github.ts";
 
 // FakeGitHub is the data a FakeGitHub answers with, and its log.
 export interface FakeData {
@@ -71,102 +71,132 @@ export function fakeData(): FakeData {
 
 // fakeGitHub answers from data.
 export function fakeGitHub(data: FakeData): GitHub {
-  return {
-    async pullRequest(number) {
-      data.calls.push(`pull ${number}`);
-      const pr = data.pulls.get(number);
-      if (pr === undefined) {
-        throw new Error(`no pull request ${number}`);
-      }
-      return pr;
-    },
-    async permission(login) {
-      data.calls.push(`permission ${login}`);
-      return data.permissions[login];
-    },
-    async compare(base, head) {
-      data.calls.push(`compare ${base}...${head}`);
-      const behindBy = data.behindBy[head];
-      if (behindBy === undefined) {
-        throw new Error(`cannot compare ${head}`);
-      }
-      return { behindBy, files: data.files[head] ?? [] };
-    },
-    async fileAt(path, ref) {
-      return data.contents[`${ref}:${path}`];
-    },
-    async merge(number, sha, message) {
-      data.calls.push(`merge ${number} ${sha}`);
-      if (data.mergeFails.has(number)) {
-        throw new Error("Head branch was modified");
-      }
-      data.merged.set(number, message);
-    },
-    async workflowRun(runId) {
-      const run = data.runs.get(runId);
-      if (run === undefined) {
-        throw new Error(`no run ${runId}`);
-      }
-      return run;
-    },
-    async runJobs(runId) {
-      return data.jobs.get(runId) ?? [];
-    },
-    async releaseExists(tag) {
-      return data.released.has(tag);
-    },
-    async publishRelease(release) {
-      if (!data.tags.has(release.tag)) {
-        throw new Error(`tag ${release.tag} is not in the repository`);
-      }
-      if (!data.released.has(release.tag)) {
-        data.published.push(release);
-        data.released.add(release.tag);
-      }
-    },
-    async sameRepoPullRequest(head) {
-      return data.pullsFrom.get(head);
-    },
-    async createPullRequest(head, base, text) {
-      data.createdPulls.push({ head, base, text });
-      const number = 100 + data.createdPulls.length;
-      data.pullsFrom.set(head, number);
-      return number;
-    },
-    async editPullRequest(number, text) {
-      data.editedPulls.push({ number, text });
-    },
-    async finishedRunsOf(workflow, branch, sha) {
-      return [...data.runs.entries()].filter(([, r]) => r.headSha === sha && r.headBranch === branch && r.path === workflow).map(([id]) => id).reverse();
-    },
-    async dispatch(eventType, payload) {
-      data.dispatched.push({ eventType, payload });
-    },
-    async latestRunOf() {
-      return data.mainRun;
-    },
-    async openPullRequestsInto() {
-      return data.open;
-    },
-    async pullRequestRuns(_workflow, headSha) {
-      return data.prRuns[headSha] ?? [];
-    },
-    async openIssueTitled(title) {
-      return [...data.issues.entries()].find(([, i]) => i.title === title)?.[0];
-    },
-    async createIssue(title, body) {
-      const number = 1000 + data.issues.size + data.closed.length;
-      data.issues.set(number, { title, body, comments: [] });
-      return number;
-    },
-    async commentOnIssue(number, body) {
-      data.issues.get(number)?.comments.push(body);
-    },
-    async closeIssue(number) {
-      data.issues.delete(number);
-      data.closed.push(number);
-    },
-  };
+  return new FakeGitHub(data);
+}
+
+// FakeGitHub is a GitHub answering from data, and recording what is asked
+// of it there.
+class FakeGitHub implements GitHub {
+  private readonly data: FakeData;
+
+  constructor(data: FakeData) {
+    this.data = data;
+  }
+
+  async pullRequest(number: number): Promise<PullRequest> {
+    this.data.calls.push(`pull ${number}`);
+    const pr = this.data.pulls.get(number);
+    if (pr === undefined) {
+      throw new Error(`no pull request ${number}`);
+    }
+    return pr;
+  }
+
+  async permission(login: string): Promise<string | undefined> {
+    this.data.calls.push(`permission ${login}`);
+    return this.data.permissions[login];
+  }
+
+  async compare(base: string, head: string): Promise<Comparison> {
+    this.data.calls.push(`compare ${base}...${head}`);
+    const behindBy = this.data.behindBy[head];
+    if (behindBy === undefined) {
+      throw new Error(`cannot compare ${head}`);
+    }
+    return { behindBy, files: this.data.files[head] ?? [] };
+  }
+
+  async fileAt(path: string, ref: string): Promise<string | undefined> {
+    return this.data.contents[`${ref}:${path}`];
+  }
+
+  async merge(number: number, sha: string, message: string): Promise<void> {
+    this.data.calls.push(`merge ${number} ${sha}`);
+    if (this.data.mergeFails.has(number)) {
+      throw new Error("Head branch was modified");
+    }
+    this.data.merged.set(number, message);
+  }
+
+  async workflowRun(runId: number): Promise<WorkflowRun> {
+    const run = this.data.runs.get(runId);
+    if (run === undefined) {
+      throw new Error(`no run ${runId}`);
+    }
+    return run;
+  }
+
+  async runJobs(runId: number): Promise<Job[]> {
+    return this.data.jobs.get(runId) ?? [];
+  }
+
+  async releaseExists(tag: string): Promise<boolean> {
+    return this.data.released.has(tag);
+  }
+
+  async publishRelease(release: NewRelease): Promise<void> {
+    if (!this.data.tags.has(release.tag)) {
+      throw new Error(`tag ${release.tag} is not in the repository`);
+    }
+    if (!this.data.released.has(release.tag)) {
+      this.data.published.push(release);
+      this.data.released.add(release.tag);
+    }
+  }
+
+  async sameRepoPullRequest(head: string): Promise<number | undefined> {
+    return this.data.pullsFrom.get(head);
+  }
+
+  async createPullRequest(head: string, base: string, text: PullRequestText): Promise<number> {
+    this.data.createdPulls.push({ head, base, text });
+    const number = 100 + this.data.createdPulls.length;
+    this.data.pullsFrom.set(head, number);
+    return number;
+  }
+
+  async editPullRequest(number: number, text: PullRequestText): Promise<void> {
+    this.data.editedPulls.push({ number, text });
+  }
+
+  async finishedRunsOf(workflow: string, branch: string, sha: string): Promise<number[]> {
+    return [...this.data.runs.entries()].filter(([, r]) => r.headSha === sha && r.headBranch === branch && r.path === workflow).map(([id]) => id).reverse();
+  }
+
+  async dispatch(eventType: string, payload: Record<string, string>): Promise<void> {
+    this.data.dispatched.push({ eventType, payload });
+  }
+
+  async latestRunOf(): Promise<RunState | undefined> {
+    return this.data.mainRun;
+  }
+
+  async openPullRequestsInto(): Promise<OpenPullRequest[]> {
+    return this.data.open;
+  }
+
+  async pullRequestRuns(_workflow: string, headSha: string): Promise<PullRequestRun[]> {
+    return this.data.prRuns[headSha] ?? [];
+  }
+
+  async openIssueTitled(title: string): Promise<number | undefined> {
+    return [...this.data.issues.entries()].find(([, i]) => i.title === title)?.[0];
+  }
+
+  async createIssue(title: string, body: string): Promise<number> {
+    const number = 1000 + this.data.issues.size + this.data.closed.length;
+    this.data.issues.set(number, { title, body, comments: [] });
+    return number;
+  }
+
+  async commentOnIssue(number: number, body: string): Promise<void> {
+    this.data.issues.get(number)?.comments.push(body);
+  }
+
+  async closeIssue(number: number): Promise<void> {
+    this.data.issues.delete(number);
+    this.data.closed.push(number);
+  }
 }
 
 // changed reads paths as a listing: `old>new` is a rename.

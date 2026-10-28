@@ -77,21 +77,33 @@ export async function pendingCommits(module: Module, rev: string, commits: Relea
   const from = await lastStableTag(module, rev, cwd);
   const range = from === undefined ? rev : `${from}..${rev}`;
   const hashes = lines(await git(["log", "--no-merges", "--format=%H", range], cwd));
-  const pending: Pending[] = [];
   const scope = module.table?.configFor(module.name);
+  const pending: Pending[] = [];
   for (const hash of hashes) {
-    if (scope !== undefined && !commits.touches(commits.changedPaths(cwd, hash), scope.scope)) {
-      continue;
+    const p = await pendingOf(hash, scope, commits, cwd);
+    if (p !== undefined) {
+      pending.push(p);
     }
-    const message = await git(["log", "-1", "--format=%B", hash], cwd);
-    const level = scope === undefined ? undefined : await commits.releaseType(scope.analyzer, hash, message);
-    if (level === null || level === undefined) {
-      continue;
-    }
-    const subject = message.split("\n")[0] ?? "";
-    pending.push({ hash, subject, type: typeOf(subject), breaking: messageMarksBreaking(message), level: level as Level });
   }
   return pending;
+}
+
+// pendingOf is the commit hash as it is pending in scope: none when it
+// touches nothing of scope, or its type cuts no release there.
+async function pendingOf(hash: string, scope: ReturnType<NonNullable<Module["table"]>["configFor"]> | undefined, commits: ReleaseCommits, cwd: string): Promise<Pending | undefined> {
+  if (scope === undefined) {
+    return undefined;
+  }
+  if (!commits.touches(commits.changedPaths(cwd, hash), scope.scope)) {
+    return undefined;
+  }
+  const message = await git(["log", "-1", "--format=%B", hash], cwd);
+  const level = await commits.releaseType(scope.analyzer, hash, message);
+  if (level === null || level === undefined) {
+    return undefined;
+  }
+  const subject = message.split("\n")[0] ?? "";
+  return { hash, subject, type: typeOf(subject), breaking: messageMarksBreaking(message), level: level as Level };
 }
 
 // Verdict is whether a module is due, and why.

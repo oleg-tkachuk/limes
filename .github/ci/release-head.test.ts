@@ -6,7 +6,7 @@ import { after, before, describe, test } from "node:test";
 
 import { git } from "./lib/git.ts";
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
-import { catchUp, releasable } from "./release-head.ts";
+import { catchUp, Command, releasable, releaseHeadArgs } from "./release-head.ts";
 
 describe("releasable", () => {
   let repo: TempRepo;
@@ -90,4 +90,12 @@ describe("catchUp", () => {
     await pusher.run("push", "--quiet", "origin", "main");
     assert.equal(await decide(), false);
   });
+});
+
+describe("releaseHeadArgs", () => {
+  test("a check of a dispatched sha", () => assert.deepEqual(releaseHeadArgs([Command.Check, "abc"]), { command: Command.Check, sha: "abc" }));
+  test("a catch-up names no sha", () => assert.deepEqual(releaseHeadArgs([Command.CatchUp]), { command: Command.CatchUp, sha: "" }));
+  for (const args of [[], ["release"]]) {
+    test(`refuses ${JSON.stringify(args)}`, () => assert.throws(() => releaseHeadArgs(args), /usage: release-head\.ts/));
+  }
 });
