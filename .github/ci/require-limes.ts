@@ -97,15 +97,54 @@ async function requiredLimes(dir: string): Promise<string | undefined> {
   return mod.Require?.find((r) => r.Path === LIMES_MODULE)?.Version;
 }
 
-// compareVersions orders two vX.Y.Z versions.
+// compareVersions orders two versions, vX.Y.Z with or without a
+// prerelease, by SemVer 2.0.0 §11: a prerelease comes before its release,
+// and two prereleases compare identifier by identifier — numbers as numbers,
+// before any alphanumeric one, which compare in ASCII order — the shorter
+// first when one is the other's prefix.
 export function compareVersions(a: string, b: string): number {
-  const parts = (v: string) => v.replace(/^v/, "").split(/[.-]/).slice(0, 3).map(Number);
-  const [pa, pb] = [parts(a), parts(b)];
-  for (let i = 0; i < 3; i++) {
-    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+  const va = parseVersion(a);
+  const vb = parseVersion(b);
+  const core = va.major - vb.major || va.minor - vb.minor || va.patch - vb.patch;
+  if (core !== 0) return core;
+  if (va.pre.length === 0 || vb.pre.length === 0) return vb.pre.length - va.pre.length;
+  for (const [i, id] of va.pre.entries()) {
+    const other = vb.pre[i];
+    if (other === undefined) return 1;
+    const d = compareIdentifiers(id, other);
     if (d !== 0) return d;
   }
-  return 0;
+  return va.pre.length - vb.pre.length;
+}
+
+// Version is a version's parts that order it; build metadata does not.
+interface Version {
+  major: number;
+  minor: number;
+  patch: number;
+  pre: string[];
+}
+
+// VERSION reads vX.Y.Z, its prerelease and its build metadata.
+const VERSION = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
+
+// parseVersion is v's parts, or a refusal of what is no version.
+function parseVersion(v: string): Version {
+  const m = VERSION.exec(v);
+  if (m === null) throw new Error(`${v} is not a version`);
+  const [, major = "", minor = "", patch = "", pre] = m;
+  return { major: Number(major), minor: Number(minor), patch: Number(patch), pre: pre ? pre.split(".") : [] };
+}
+
+// NUMERIC is a prerelease identifier of digits only.
+const NUMERIC = /^\d+$/;
+
+// compareIdentifiers orders two prerelease identifiers.
+function compareIdentifiers(a: string, b: string): number {
+  const [na, nb] = [NUMERIC.test(a), NUMERIC.test(b)];
+  if (na && nb) return Number(a) - Number(b);
+  if (na !== nb) return na ? -1 : 1;
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 // raise raises the module in dir to tag in the checkout, and says what it
