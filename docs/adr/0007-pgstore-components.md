@@ -48,13 +48,16 @@ at any minor.
      composes both, and `meter.UsageStore` composes it with the readers as
      it does today, so every implementation and caller of the full store is
      unchanged.
-   - `metertest` gains a suite per interface: `RunCounter`, `RunBudget`,
-     `RunReader`, `RunTenantBudgets`, `RunHousekeeping`, `RunLedger`. Each
-     takes an `Env` holding only what it checks; `NewCapability` and
-     `DeleteCapability` stay, since every suite records a lineage first.
-     `Run` runs all of them, and its `Env` keeps its shape.
-   - `storetest` is checked the same way and split only where a store can
-     implement one part without the other.
+   - `metertest.RunCounter` checks a `RequestCounter` through `Bump` alone,
+     with a `CounterEnv` that records capabilities but reads nothing back.
+     `Run` runs it too, and its `Env` keeps its shape.
+   - The budget methods get no suite of their own: a charge is checked by
+     reading what it counted, so a budget meter is checked with its readers,
+     as `Run` does. The ledger's checks already run only when
+     `Env.Ledger` is set.
+   - `storetest` stays one suite: `limes.Store` holds the records alone, and
+     its census and listing checks already run only when the `Env` sets
+     them.
    - This is the one part limes 1.0 waits on.
 2. **A budget that nothing meters is not refused.** A store typed as a
    `RequestCounter` has no `Charge` to call, so no spend passes through limes
