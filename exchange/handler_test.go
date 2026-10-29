@@ -152,7 +152,7 @@ func TestHandlerRefusals(t *testing.T) {
 	for name, tc := range cases {
 		w := post(t, h, tc.form, tc.header)
 		var resp errorResponse
-		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != tc.status || resp.Error != tc.code {
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != tc.status || resp.Code != tc.code {
 			t.Errorf("%s: status %d, body %s; want %d %s", name, w.Code, w.Body, tc.status, tc.code)
 			continue
 		}
@@ -226,7 +226,7 @@ func TestHandlerAnswersAPolicyRefusingTheDetails(t *testing.T) {
 	form.Set(paramAuthorizationDetails, `[{"type":"x"}]`)
 	w := post(t, newHandler(t, f), form, nil)
 	var resp errorResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != http.StatusBadRequest || resp.Error != codeInvalidAuthorizationDetails {
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != http.StatusBadRequest || resp.Code != codeInvalidAuthorizationDetails {
 		t.Errorf("status %d: %s", w.Code, w.Body)
 	}
 	if level, _ := logs.last(); level != slog.LevelWarn {
@@ -288,7 +288,7 @@ func TestClientRefusalChallengesInTheClientsScheme(t *testing.T) {
 			form.Set(paramToken, "a")
 			w := post(t, h, form, http.Header{headerAuthorization: tc.authorization})
 			var resp errorResponse
-			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != tc.status || resp.Error != codeInvalidClient {
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != tc.status || resp.Code != codeInvalidClient {
 				t.Errorf("%s, %s: status %d, body %s; want %d %s", endpoint, name, w.Code, w.Body, tc.status, codeInvalidClient)
 			}
 			var want []string
@@ -333,7 +333,7 @@ func TestHandlerTellsAnUnauthorizedClientFromAnUnauthenticatedOne(t *testing.T) 
 		}
 		w := post(t, h, exchangeForm(token), http.Header{headerAuthorization: {basicCredentials}})
 		var resp errorResponse
-		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != tc.status || resp.Error != tc.code {
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != tc.status || resp.Code != tc.code {
 			t.Errorf("%s: status %d, body %s; want %d %s", name, w.Code, w.Body, tc.status, tc.code)
 		}
 		if tc.code == codeServerError && (resp.Description != "" || strings.Contains(w.Body.String(), mcpServer)) {
@@ -383,7 +383,7 @@ func TestHandlerAsksForTheNonce(t *testing.T) {
 	w := post(t, h, form, http.Header{headerDPoP: {proof(t, key, "").JWT}})
 	var resp errorResponse
 	nonce := w.Header().Get(headerDPoPNonce)
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != http.StatusBadRequest || resp.Error != codeUseDPoPNonce || nonce == "" {
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != http.StatusBadRequest || resp.Code != codeUseDPoPNonce || nonce == "" {
 		t.Fatalf("status %d, nonce %q: %s", w.Code, nonce, w.Body)
 	}
 	if w := post(t, h, form, http.Header{headerDPoP: {proof(t, key, nonce).JWT}}); w.Code != http.StatusOK {

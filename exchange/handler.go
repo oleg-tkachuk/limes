@@ -164,9 +164,45 @@ type tokenResponse struct {
 // errorResponse is a refusal (RFC 6749 §5.2). The description is fixed per
 // code: an error's own text, which can name subjects and clients, stays in
 // the log.
-type errorResponse struct {
-	Error       string `json:"error"`
+type errorResponse = Error
+
+// Error is the RFC 6749 §5.2 error response an exchange refused with: what
+// the token endpoint answers, for an in-process Exchanger to answer alike
+// (ErrorOf, docs/errors.md).
+type Error struct {
+	// Status is the HTTP status. An invalid_client the endpoint answers
+	// 401 with a challenge in the client's scheme, and 400 when the client
+	// named none (RFC 9110 §15.5.2).
+	Status int `json:"-"`
+	// Code is the error code: RFC 6749 §5.2's, RFC 8707's invalid_target,
+	// RFC 9396's invalid_authorization_details, or RFC 9449's DPoP codes.
+	Code string `json:"error"`
+	// Description is a fixed, client-safe sentence; never the error's text.
 	Description string `json:"error_description,omitempty"`
+}
+
+// ErrorOf is the error response err, an exchange's refusal or failure, is
+// answered with, and false for an error that is none of the exchange's —
+// which the endpoint answers as server_error, 500. A use_dpop_nonce answer
+// carries a fresh nonce in the DPoP-Nonce header (RFC 9449 §8).
+func ErrorOf(err error) (Error, bool) {
+	for _, rule := range refusals {
+		if errors.Is(err, rule.err) {
+			return Error{Status: rule.status, Code: rule.code, Description: rule.description}, true
+		}
+	}
+	return Error{}, false
+}
+
+// ErrorCodes is every error code ErrorOf answers with, in a fixed order.
+func ErrorCodes() []string {
+	var out []string
+	for _, rule := range refusals {
+		if !slices.Contains(out, rule.code) {
+			out = append(out, rule.code)
+		}
+	}
+	return out
 }
 
 // ServeHTTP answers a token exchange request.
@@ -195,7 +231,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.response(req, res)
 	if err != nil {
 		h.cfg.Logger.ErrorContext(r.Context(), "exchange: encode granted caveats", slog.String("capability", res.Capability.ID.String()), slog.Any("error", err))
-		h.write(w, http.StatusInternalServerError, errorResponse{Error: codeServerError})
+		h.write(w, http.StatusInternalServerError, errorResponse{Code: codeServerError})
 		return
 	}
 	h.write(w, http.StatusOK, resp)
@@ -422,28 +458,26 @@ var refusals = []struct {
 	{ErrInvalidScope, http.StatusBadRequest, codeInvalidScope, "The scope was refused."},
 	{ErrInvalidAuthorizationDetails, http.StatusBadRequest, codeInvalidAuthorizationDetails, "The authorization details were refused."},
 	{ErrInvalidRequest, http.StatusBadRequest, codeInvalidRequest, "The request is malformed."},
+	{ErrServerError, http.StatusInternalServerError, codeServerError, "The server could not decide on the request."},
 }
 
 // refuse answers err.
 func (h *Handler) refuse(w http.ResponseWriter, r *http.Request, err error) {
-	for _, rule := range refusals {
-		if !errors.Is(err, rule.err) {
-			continue
-		}
-		status := rule.status
-		switch rule.code {
-		case codeUseDPoPNonce:
-			if !h.setNonce(w, r) {
-				h.write(w, http.StatusInternalServerError, errorResponse{Error: codeServerError})
-				return
-			}
-		case codeInvalidClient:
-			status = challengeClient(w, r)
-		}
-		h.write(w, status, errorResponse{Error: rule.code, Description: rule.description})
+	answer, ok := ErrorOf(err)
+	if !ok || answer.Code == codeServerError {
+		h.write(w, http.StatusInternalServerError, errorResponse{Code: codeServerError})
 		return
 	}
-	h.write(w, http.StatusInternalServerError, errorResponse{Error: codeServerError})
+	switch answer.Code {
+	case codeUseDPoPNonce:
+		if !h.setNonce(w, r) {
+			h.write(w, http.StatusInternalServerError, errorResponse{Code: codeServerError})
+			return
+		}
+	case codeInvalidClient:
+		answer.Status = challengeClient(w, r)
+	}
+	h.write(w, answer.Status, answer)
 }
 
 // setNonce sets the nonce a use_dpop_nonce answer carries, reporting false,

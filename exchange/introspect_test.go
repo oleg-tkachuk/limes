@@ -194,7 +194,7 @@ func TestIntrospectionTellsAnUnauthorizedClientAndAServerError(t *testing.T) {
 		}
 		w := post(t, h, url.Values{paramToken: {"a"}}, http.Header{headerAuthorization: {basicCredentials}})
 		var resp errorResponse
-		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != tc.status || resp.Error != tc.code {
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != tc.status || resp.Code != tc.code {
 			t.Errorf("%s: status %d, body %s", name, w.Code, w.Body)
 		}
 		if tc.code == codeServerError && resp.Description != "" {
