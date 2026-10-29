@@ -746,8 +746,24 @@ func formRefusal(err error) error {
 // family and the cause's text, but not the cause's own sentinels. A token
 // whose caveats do not validate is a refused token, not a malformed request
 // — matching ErrInvalidRequest as well would let a consumer answer it as the
-// server's fault.
-func refuseToken(family, err error) error { return fmt.Errorf("%w: %s", family, err.Error()) }
+// server's fault. A cause that names family already — a TokenForm's error
+// may — keeps its text, so the family is named once.
+func refuseToken(family, err error) error {
+	if errors.Is(err, family) {
+		return &tokenRefusal{family: family, msg: err.Error()}
+	}
+	return fmt.Errorf("%w: %s", family, err.Error())
+}
+
+// tokenRefusal is a refusal in family whose text is msg, a cause's that
+// already names the family.
+type tokenRefusal struct {
+	family error
+	msg    string
+}
+
+func (r *tokenRefusal) Error() string { return r.msg }
+func (r *tokenRefusal) Unwrap() error { return r.family }
 
 // proofRefusal is a dpop refusal as this module reads it: a refusal of the
 // credentials (ErrProofOfPossession, and so ErrUnauthenticated), with the
