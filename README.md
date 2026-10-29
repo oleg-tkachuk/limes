@@ -244,10 +244,27 @@ A nested module is tagged after the limes it needs, never with it: its
 `go.mod` must require a limes already released, so a root release's new API
 reaches `pgstore`, `otelmetric`, `redisreplay`, `exchange` or `biscuit` only
 with that module's next tag, cut once the `require limes` change merges. Pin
-each module by its own tag — `go get
-github.com/oleg-tkachuk/limes/pgstore@pgstore/vX.Y.Z`, which brings the limes
-it requires — never a root tag's commit; and to take a new root API into a
-store, wait for the store's tag that requires that release.
+each module by its own version — `go get
+github.com/oleg-tkachuk/limes/pgstore@vX.Y.Z`, which brings the limes it
+requires — never a root tag's commit; and to take a new root API into a
+store, wait for the store's tag that requires that release. Name the
+version, not the tag: `@pgstore/vX.Y.Z` is a revision of the repository to
+`go get`, which then resolves every module that could hold the package at
+that commit, the root among them, and downloads the root as a
+pseudo-version (`v1.0.0-rc.N.0.…-<commit>`) before it settles.
+
+To pin a candidate of 1.0, read its row in the [table of
+candidates](docs/migration.md#release-candidates-of-10) — the 0.x release
+whose API it carries, and each nested module's release cut with it, which
+CI holds to the tags — and require them together. For `v1.0.0-rc.19`:
+
+```bash
+go get github.com/oleg-tkachuk/limes@v1.0.0-rc.19 github.com/oleg-tkachuk/limes/pgstore@v0.47.0 github.com/oleg-tkachuk/limes/exchange@v0.9.2
+```
+
+Go selects the candidate over the 0.x release a nested module requires,
+since it orders every `v1.0.0-rc.N` above every 0.x, so a nested module's
+release goes only with a candidate at or above the row that lists it.
 
 The token wire format — claims, `typ: at+jwt` with `limes_v: 7`, the
 Biscuit facts — is a separate promise: a token is a credential that outlives
