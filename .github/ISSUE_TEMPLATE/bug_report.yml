@@ -21,6 +21,7 @@ body:
         - redisreplay
         - otelmetric
         - exchange
+        - biscuit
         - examples
         - docs
         - not sure
