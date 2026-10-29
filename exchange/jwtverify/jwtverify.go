@@ -34,9 +34,12 @@ const (
 	claimSubject  = "sub"
 	claimIssuedAt = "iat"
 	claimJWTID    = "jti"
-	claimScope    = "scope"
-	claimCnf      = "cnf"
-	cnfJKT        = "jkt"
+	// claimSessionID is the identity provider's session (OpenID Connect
+	// Back-Channel Logout §2.4).
+	claimSessionID = "sid"
+	claimScope     = "scope"
+	claimCnf       = "cnf"
+	cnfJKT         = "jkt"
 	// ClaimClientID is the claim RFC 9068 names the client in.
 	ClaimClientID = "client_id"
 )
@@ -263,6 +266,9 @@ func subjectOf(tok jwt.Token, clientIDClaim string) (exchange.Subject, error) {
 	if s.JKT, err = jktOf(tok); err != nil {
 		return exchange.Subject{}, err
 	}
+	if s.SessionID, err = sessionOf(tok); err != nil {
+		return exchange.Subject{}, err
+	}
 	s.Claims = claimsOf(tok)
 	return s, nil
 }
@@ -277,6 +283,18 @@ func scopesOf(tok jwt.Token) ([]string, error) {
 		return nil, fmt.Errorf("%w: %s is not a string", exchange.ErrInvalidGrant, claimScope)
 	}
 	return strings.Fields(scope), nil
+}
+
+// sessionOf is the token's sid, "" for none.
+func sessionOf(tok jwt.Token) (string, error) {
+	if !tok.Has(claimSessionID) {
+		return "", nil
+	}
+	var sid string
+	if err := tok.Get(claimSessionID, &sid); err != nil || sid == "" {
+		return "", fmt.Errorf("%w: %s is not a non-empty string", exchange.ErrInvalidGrant, claimSessionID)
+	}
+	return sid, nil
 }
 
 // jktOf is the DPoP key the token's cnf binds it to, "" for none.
