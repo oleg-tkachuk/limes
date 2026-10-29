@@ -14,7 +14,7 @@ replace github.com/oleg-tkachuk/limes => ../
 
 require (
 	github.com/eclipse-biscuit/biscuit-go/v2 v2.2.2
-	github.com/oleg-tkachuk/limes v0.134.0
+	github.com/oleg-tkachuk/limes v0.135.0
 	google.golang.org/protobuf v1.36.12
 )
 
