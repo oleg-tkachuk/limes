@@ -32,6 +32,9 @@ var wrappedHelpers = map[string]map[string]string{
 		"unmarshalCanonicalUUID": "", "parseHeader": "", "decodeClaims": "", "readConfirmation": "", "readParentID": "",
 		"readActing": "", "checkActingForItself": "", "readOnBehalfOf": "", "canonicalUUID": "",
 	},
+	"internal/errs/errs.go": {
+		"Errorf": "formats what its caller passes, which errguard checks at the caller",
+	},
 	"metertest/metertest.go": {
 		"checkCallbackRollback": "a conformance check's own fixture: the error a side effect fails with",
 	},
@@ -41,4 +44,10 @@ var wrappedHelpers = map[string]map[string]string{
 // (CodeOf, ProblemOf), but for the helpers listed above.
 func TestEveryErrorNamesASentinel(t *testing.T) {
 	errguard.Refuse(t, ".", wrappedHelpers)
+}
+
+// No error of the module names "limes: " twice: one wrapping another builds
+// its text with errs.Errorf.
+func TestNoErrorDoublesThePrefix(t *testing.T) {
+	errguard.RefuseDoubling(t, ".")
 }

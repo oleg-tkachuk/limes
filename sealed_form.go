@@ -11,6 +11,7 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/oleg-tkachuk/limes/internal/errs"
 	"github.com/oleg-tkachuk/limes/internal/jose"
 )
 
@@ -151,7 +152,7 @@ func (i *Issuer) seal(ctx context.Context, c Capability) (string, error) {
 		}
 		inner, err := i.signer.signGrant(ctx, grant{Capability: c, biscuitRoot: base64.RawURLEncoding.EncodeToString(root)})
 		if err != nil {
-			return "", fmt.Errorf("limes: sign sealed token: %w", err)
+			return "", errs.Errorf("limes: sign sealed token: %w", err)
 		}
 		return inner, nil
 	}

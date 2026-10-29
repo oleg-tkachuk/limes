@@ -17,6 +17,7 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/oleg-tkachuk/limes/internal/errs"
 	"github.com/oleg-tkachuk/limes/internal/jose"
 	"github.com/oleg-tkachuk/limes/internal/link"
 	"github.com/oleg-tkachuk/limes/jwks"
@@ -231,7 +232,7 @@ func unmarshalCanonicalUUID(dec *jsontext.Decoder, id *uuid.UUID) error {
 	s := tok.String()
 	parsed, err := uuid.Parse(s)
 	if err != nil {
-		return fmt.Errorf("limes: parse UUID: %w", err)
+		return errs.Errorf("limes: parse UUID: %w", err)
 	}
 	if parsed.String() != s {
 		return fmt.Errorf("limes: %q is not a canonical UUID", s)
@@ -321,11 +322,11 @@ func (s *Signer) signingInput(claims jwtClaims) (string, error) {
 	header := jwtHeader{Alg: string(s.alg), Kid: s.keyID, Typ: TokenType}
 	headerJSON, err := json.Marshal(header)
 	if err != nil {
-		return "", fmt.Errorf("limes: marshal header: %w", err)
+		return "", errs.Errorf("limes: marshal header: %w", err)
 	}
 	claimsJSON, err := json.Marshal(claims)
 	if err != nil {
-		return "", fmt.Errorf("limes: marshal claims: %w", err)
+		return "", errs.Errorf("limes: marshal claims: %w", err)
 	}
 	return strings.Join([]string{
 		base64.RawURLEncoding.EncodeToString(headerJSON),
@@ -346,7 +347,7 @@ func (s *Signer) signature(ctx context.Context, signingInput string) ([]byte, er
 		sig, err = s.key.open().Sign(rand.Reader, []byte(signingInput), crypto.Hash(0))
 	}
 	if err != nil {
-		return nil, fmt.Errorf("limes: sign: %w", err)
+		return nil, errs.Errorf("limes: sign: %w", err)
 	}
 	if len(sig) != ed25519.SignatureSize {
 		return nil, broken("limes: sign: an Ed25519 signature is %d bytes, not %d", ed25519.SignatureSize, len(sig))
@@ -398,11 +399,11 @@ var signingAlgorithms = []SigningAlgorithm{SigningAlgorithmEd25519, SigningAlgor
 func parseHeader(seg string) (jwtHeader, error) {
 	raw, err := jose.UnB64(seg)
 	if err != nil {
-		return jwtHeader{}, fmt.Errorf("limes: decode header: %w", err)
+		return jwtHeader{}, errs.Errorf("limes: decode header: %w", err)
 	}
 	var h jwtHeader
 	if err := json.Unmarshal(raw, &h, strictClaims); err != nil {
-		return jwtHeader{}, fmt.Errorf("limes: parse header: %w", err)
+		return jwtHeader{}, errs.Errorf("limes: parse header: %w", err)
 	}
 	// Either name of Ed25519: the fully-specified one of RFC 9864, or the
 	// polymorphic EdDSA it deprecates, which a signer writes for JOSE
@@ -463,11 +464,11 @@ func parseClaims(seg string) (*grant, error) {
 func decodeClaims(seg string) (jwtClaims, error) {
 	raw, err := jose.UnB64(seg)
 	if err != nil {
-		return jwtClaims{}, fmt.Errorf("limes: decode claims: %w", err)
+		return jwtClaims{}, errs.Errorf("limes: decode claims: %w", err)
 	}
 	var claims jwtClaims
 	if err := json.Unmarshal(raw, &claims, strictClaims); err != nil {
-		return jwtClaims{}, fmt.Errorf("limes: parse claims: %w", err)
+		return jwtClaims{}, errs.Errorf("limes: parse claims: %w", err)
 	}
 	if claims.Format != formatV7 {
 		return jwtClaims{}, fmt.Errorf("limes: limes_v %d is not the format this package reads (%d)", claims.Format, formatV7)
@@ -616,7 +617,7 @@ func readOnBehalfOf(claims jwtClaims) (*Principal, []string, error) {
 func canonicalUUID(claim, s string) (uuid.UUID, error) {
 	id, err := uuid.Parse(s)
 	if err != nil {
-		return uuid.Nil(), fmt.Errorf("limes: parse %s: %w", claim, err)
+		return uuid.Nil(), errs.Errorf("limes: parse %s: %w", claim, err)
 	}
 	if id == uuid.Nil() || id.String() != s {
 		return uuid.Nil(), fmt.Errorf("limes: %s %q is not a canonical UUID", claim, s)
@@ -645,7 +646,7 @@ func decodeToken(token string) (any, error) {
 
 func verifyParts(parts jose.Parts, pub ed25519.PublicKey) error {
 	if err := jose.VerifyEd25519(parts, pub); err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalidToken, err)
+		return errs.Errorf("%w: %w", ErrInvalidToken, err)
 	}
 	return nil
 }

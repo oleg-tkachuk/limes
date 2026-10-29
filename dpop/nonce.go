@@ -7,9 +7,9 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
-	"github.com/oleg-tkachuk/limes/internal/errs"
 	"time"
 
+	"github.com/oleg-tkachuk/limes/internal/errs"
 	"github.com/oleg-tkachuk/limes/internal/jose"
 )
 

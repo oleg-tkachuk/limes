@@ -14,6 +14,7 @@ import (
 	"uuid"
 
 	"github.com/oleg-tkachuk/limes/dpop"
+	"github.com/oleg-tkachuk/limes/internal/errs"
 	"github.com/oleg-tkachuk/limes/internal/jose"
 	"github.com/oleg-tkachuk/limes/jwks"
 )
@@ -497,7 +498,7 @@ func (v *Verifier) checkWindow(cap *grant) error {
 func (v *Verifier) checkRevoked(ctx context.Context, cap *grant, biscuitIDs [][]byte) error {
 	revoked, err := v.cfg.Revocations.IsRevoked(ctx, cap.ID)
 	if err != nil {
-		return fmt.Errorf("limes: revocation lookup: %w", err)
+		return errs.Errorf("limes: revocation lookup: %w", err)
 	}
 	if revoked {
 		return ErrRevoked
@@ -505,7 +506,7 @@ func (v *Verifier) checkRevoked(ctx context.Context, cap *grant, biscuitIDs [][]
 	if biscuitIDs != nil {
 		revoked, err := v.cfg.Biscuit.Revocations.IsBiscuitRevoked(ctx, biscuitIDs)
 		if err != nil {
-			return fmt.Errorf("limes: biscuit revocation lookup: %w", err)
+			return errs.Errorf("limes: biscuit revocation lookup: %w", err)
 		}
 		if revoked {
 			return ErrRevoked
@@ -661,9 +662,9 @@ func (v *Verifier) checkSignature(ctx context.Context, parts jose.Parts, kid str
 		// An unknown kid is the token's fault; a resolver that cannot
 		// answer — the issuer's keys out of reach, a store down — is ours.
 		if errors.Is(err, jwks.ErrUnknownKID) {
-			return fmt.Errorf("%w: kid %q: %w", ErrInvalidToken, kid, err)
+			return errs.Errorf("%w: kid %q: %w", ErrInvalidToken, kid, err)
 		}
-		return fmt.Errorf("limes: resolve kid %q: %w", kid, err)
+		return errs.Errorf("limes: resolve kid %q: %w", kid, err)
 	}
 	return verifyParts(parts, pub)
 }
@@ -720,7 +721,7 @@ func proofError(err error) error {
 	if isProofRefusal(err) {
 		return proofRefusal(err)
 	}
-	return fmt.Errorf("limes: proof of possession: %w", err)
+	return errs.Errorf("limes: proof of possession: %w", err)
 }
 
 func isProofRefusal(err error) bool {
@@ -752,7 +753,7 @@ func refuseToken(family, err error) error {
 	if errors.Is(err, family) {
 		return &tokenRefusal{family: family, msg: err.Error()}
 	}
-	return fmt.Errorf("%w: %s", family, err.Error())
+	return errs.Errorf("%w: %s", family, err.Error())
 }
 
 // tokenRefusal is a refusal in family whose text is msg, a cause's that
@@ -768,7 +769,7 @@ func (r *tokenRefusal) Unwrap() error { return r.family }
 // proofRefusal is a dpop refusal as this module reads it: a refusal of the
 // credentials (ErrProofOfPossession, and so ErrUnauthenticated), with the
 // dpop sentinel still matchable.
-func proofRefusal(err error) error { return fmt.Errorf("%w: %w", ErrProofOfPossession, err) }
+func proofRefusal(err error) error { return errs.Errorf("%w: %w", ErrProofOfPossession, err) }
 
 // VerifiedCapability is a capability a Verifier accepted. Only Verify
 // and Authorize make one, so a function that takes it — Issuer.Delegate —

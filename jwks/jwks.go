@@ -13,7 +13,6 @@ import (
 	"encoding/json/jsontext"
 	jsonv2 "encoding/json/v2"
 	"fmt"
-	"github.com/oleg-tkachuk/limes/internal/errs"
 	"log/slog"
 	"maps"
 	"net/http"
@@ -22,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oleg-tkachuk/limes/internal/errs"
 	"github.com/oleg-tkachuk/limes/internal/httpx"
 	"github.com/oleg-tkachuk/limes/internal/jose"
 )

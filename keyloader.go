@@ -4,9 +4,9 @@ import (
 	"crypto/ed25519"
 	"crypto/x509"
 	"encoding/pem"
-	"fmt"
 	"os"
 
+	"github.com/oleg-tkachuk/limes/internal/errs"
 	"github.com/oleg-tkachuk/limes/jwks"
 )
 
@@ -27,7 +27,7 @@ func loadPrivateKey(path string) (ed25519.PrivateKey, error) {
 	}
 	raw, err := os.ReadFile(path) // #nosec G304 — operator-supplied path
 	if err != nil {
-		return nil, fmt.Errorf("limes: read private key %q: %w", path, err)
+		return nil, errs.Errorf("limes: read private key %q: %w", path, err)
 	}
 	block, _ := pem.Decode(raw)
 	if block == nil {
@@ -39,7 +39,7 @@ func loadPrivateKey(path string) (ed25519.PrivateKey, error) {
 	}
 	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
-		return nil, fmt.Errorf("limes: parse PKCS#8 in %q: %w", path, err)
+		return nil, errs.Errorf("limes: parse PKCS#8 in %q: %w", path, err)
 	}
 	priv, ok := parsed.(ed25519.PrivateKey)
 	if !ok {
