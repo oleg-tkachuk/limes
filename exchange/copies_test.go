@@ -43,7 +43,7 @@ func limitedCopy(t *testing.T, f *fixture) string {
 		issue.Caveats.Requests = limes.RequestCeiling{Unlimited: true}
 		return issue, err
 	}
-	res, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, TypeAccessToken, accessClaims())))
+	res, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, typeAccessToken, accessClaims())))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -20,7 +20,7 @@ import (
 func parentFor(t *testing.T, f *fixture, key crypto.Signer) Result {
 	t.Helper()
 	f.ex.cfg.Policy = f.sharePolicy
-	req := request(f.idp.sign(t, TypeAccessToken, accessClaims()))
+	req := request(f.idp.sign(t, typeAccessToken, accessClaims()))
 	req.Resources = []string{toolResource, exchangeAudience}
 	if key != nil {
 		req.DPoP = proof(t, key, "")
@@ -136,12 +136,12 @@ func TestNarrowRefusals(t *testing.T) {
 	outside.Resources = []string{"https://elsewhere.example.com"}
 	noTarget := narrowing(parent.Token)
 	noTarget.Resources = nil
-	notForUs, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, TypeAccessToken, accessClaims())))
+	notForUs, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, typeAccessToken, accessClaims())))
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.ex.cfg.Policy = f.readPolicy
-	unshared, err := f.ex.Exchange(t.Context(), Request{Client: client(), SubjectToken: f.idp.sign(t, TypeAccessToken, accessClaims()), Resources: []string{toolResource, exchangeAudience}})
+	unshared, err := f.ex.Exchange(t.Context(), Request{Client: client(), SubjectToken: f.idp.sign(t, typeAccessToken, accessClaims()), Resources: []string{toolResource, exchangeAudience}})
 	if err != nil {
 		t.Fatal(err)
 	}

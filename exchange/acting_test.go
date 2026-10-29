@@ -25,7 +25,7 @@ func TestExchangeActsOnBehalfOfTheSubject(t *testing.T) {
 		issue.Subject = limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: f.tenant, Subject: actingAgent}
 		return issue, err
 	}
-	req := request(f.idp.sign(t, TypeAccessToken, accessClaims()))
+	req := request(f.idp.sign(t, typeAccessToken, accessClaims()))
 	req.Resources = []string{toolResource, exchangeAudience}
 	parent, err := f.ex.Exchange(t.Context(), req)
 	if err != nil {

@@ -3,6 +3,7 @@ package exchange
 import (
 	"context"
 	"errors"
+	"net/http"
 	"slices"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ import (
 // resource asked for, which a limes verifier accepts there.
 func TestExchangeIssuesACapability(t *testing.T) {
 	f := newFixture(t, fixtureConfig{})
-	res, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, TypeAccessToken, accessClaims())))
+	res, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, typeAccessToken, accessClaims())))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +39,7 @@ func TestExchangeCapsTheLifetimeAtTheSubjectToken(t *testing.T) {
 		issue.TTL = longer
 		return issue, err
 	}
-	res, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, TypeAccessToken, accessClaims())))
+	res, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, typeAccessToken, accessClaims())))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +66,7 @@ func TestExchangeHoldsThePolicyToTheRequest(t *testing.T) {
 				change(&issue)
 				return issue, err
 			}
-			_, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, TypeAccessToken, accessClaims())))
+			_, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, typeAccessToken, accessClaims())))
 			if !errors.Is(err, errPolicy) || isRefusal(err) {
 				t.Errorf("err = %v, want the policy's fault", err)
 			}
@@ -80,14 +81,14 @@ func TestExchangeHoldsThePolicyToTheRequest(t *testing.T) {
 // while it lives; a request must name a target.
 func TestExchangeRefusals(t *testing.T) {
 	f := newFixture(t, fixtureConfig{})
-	token := f.idp.sign(t, TypeAccessToken, accessClaims())
+	token := f.idp.sign(t, typeAccessToken, accessClaims())
 	elsewhere := request(token)
 	elsewhere.Client.SubjectAudiences = []string{"https://other-mcp.example.com"}
 	noTarget := request(token)
 	noTarget.Resources = nil
 	anonymous := request(token)
 	anonymous.Client = Client{}
-	expiring := request(f.idp.sign(t, TypeAccessToken, with(accessClaims(), map[string]any{claimExpiry: testNow.Add(time.Second / 2).Unix()})))
+	expiring := request(f.idp.sign(t, typeAccessToken, with(accessClaims(), map[string]any{claimExpiry: testNow.Add(time.Second / 2).Unix()})))
 	for name, tc := range map[string]struct {
 		req  Request
 		want error
@@ -111,7 +112,7 @@ func TestExchangeRefusals(t *testing.T) {
 func TestExchangeReturnsThePolicysRefusal(t *testing.T) {
 	f := newFixture(t, fixtureConfig{})
 	f.ex.cfg.Policy = func(context.Context, Grant) (limes.IssueRequest, error) { return limes.IssueRequest{}, ErrInvalidScope }
-	if _, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, TypeAccessToken, accessClaims()))); !errors.Is(err, ErrInvalidScope) {
+	if _, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, typeAccessToken, accessClaims()))); !errors.Is(err, ErrInvalidScope) {
 		t.Errorf("err = %v, want ErrInvalidScope", err)
 	}
 }
@@ -125,7 +126,7 @@ func TestExchangeBindsToTheProofKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := request(f.idp.sign(t, TypeAccessToken, accessClaims()))
+	req := request(f.idp.sign(t, typeAccessToken, accessClaims()))
 	req.DPoP = proof(t, key, "")
 	res, err := f.ex.Exchange(t.Context(), req)
 	if err != nil {
@@ -150,7 +151,7 @@ func TestExchangeHoldsABoundSubjectToItsKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token := f.idp.sign(t, TypeAccessToken, with(accessClaims(), map[string]any{claimCnf: map[string]any{cnfJKT: jkt}}))
+	token := f.idp.sign(t, typeAccessToken, with(accessClaims(), map[string]any{claimCnf: map[string]any{cnfJKT: jkt}}))
 	for name, tc := range map[string]struct {
 		proof dpop.Proof
 		want  error
@@ -175,7 +176,7 @@ func TestExchangeHoldsABoundSubjectToItsKey(t *testing.T) {
 // issue a bearer capability in its place.
 func TestExchangeWithoutDPoPRefusesAProof(t *testing.T) {
 	f := newFixture(t, fixtureConfig{noDPoP: true})
-	req := request(f.idp.sign(t, TypeAccessToken, accessClaims()))
+	req := request(f.idp.sign(t, typeAccessToken, accessClaims()))
 	req.DPoP = proof(t, clientKey(t), "")
 	if _, err := f.ex.Exchange(t.Context(), req); !errors.Is(err, dpop.ErrInvalid) {
 		t.Errorf("err = %v, want dpop.ErrInvalid", err)
@@ -207,10 +208,35 @@ func TestExchangeRefusesASubjectTokenAboutToExpire(t *testing.T) {
 	claims[claimExpiry] = testNow.Add(minTTL).Unix()
 	f.ex.cfg.Now = func() time.Time { return testNow.Add(minTTL / 2) }
 	before := f.store.inserts.Load()
-	if _, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, TypeAccessToken, claims))); !errors.Is(err, ErrInvalidGrant) {
+	if _, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, typeAccessToken, claims))); !errors.Is(err, ErrInvalidGrant) {
 		t.Fatalf("err = %v, want ErrInvalidGrant", err)
 	}
 	if n := f.store.inserts.Load(); n != before {
 		t.Errorf("issued %d", n-before)
+	}
+}
+
+// failingSubjects is a SubjectVerifier that cannot decide: its identity
+// provider's keys out of reach, say.
+type failingSubjects struct{}
+
+// errSubjectsDown is failingSubjects' error.
+var errSubjectsDown = errors.New("the identity provider's keys are out of reach")
+
+func (failingSubjects) VerifySubject(context.Context, string) (Subject, error) {
+	return Subject{}, errSubjectsDown
+}
+
+// A verifier that cannot decide is the server's failure: the exchange
+// answers it as one, and does not tell the client its token was refused.
+func TestASubjectVerifierFailureIsTheServers(t *testing.T) {
+	f := newFixture(t, fixtureConfig{})
+	f.ex.cfg.Subjects = failingSubjects{}
+	token := f.idp.sign(t, typeAccessToken, accessClaims())
+	if _, err := f.ex.Exchange(t.Context(), request(token)); !errors.Is(err, errSubjectsDown) || isRefusal(err) {
+		t.Errorf("err = %v, want the verifier's failure and no refusal of the client", err)
+	}
+	if w := post(t, newHandler(t, f), exchangeForm(token), nil); w.Code != http.StatusInternalServerError {
+		t.Errorf("status %d, want 500: %s", w.Code, w.Body)
 	}
 }

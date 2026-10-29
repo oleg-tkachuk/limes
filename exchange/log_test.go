@@ -60,7 +60,7 @@ func TestExchangeLogsEveryOutcome(t *testing.T) {
 	f := newFixture(t, fixtureConfig{})
 	logs := &records{}
 	f.ex.cfg.Logger = slog.New(logs)
-	token := f.idp.sign(t, TypeAccessToken, accessClaims())
+	token := f.idp.sign(t, typeAccessToken, accessClaims())
 	failing := func(context.Context, Grant) (limes.IssueRequest, error) {
 		return limes.IssueRequest{}, errors.New("down")
 	}

@@ -68,7 +68,7 @@ func post(t *testing.T, h http.Handler, form url.Values, header http.Header) *ht
 // accepts, in a response no cache keeps.
 func TestHandlerExchanges(t *testing.T) {
 	f := newFixture(t, fixtureConfig{})
-	w := post(t, newHandler(t, f), exchangeForm(f.idp.sign(t, TypeAccessToken, accessClaims())), nil)
+	w := post(t, newHandler(t, f), exchangeForm(f.idp.sign(t, typeAccessToken, accessClaims())), nil)
 	if w.Code != http.StatusOK || w.Header().Get("Cache-Control") != cacheNoStore || w.Header().Get("Pragma") != pragmaNoCache || w.Header().Get("Content-Type") != jsonContentType {
 		t.Fatalf("status %d, headers %v: %s", w.Code, w.Header(), w.Body)
 	}
@@ -88,7 +88,7 @@ func TestHandlerExchanges(t *testing.T) {
 func TestHandlerBindsToTheDPoPHeader(t *testing.T) {
 	f := newFixture(t, fixtureConfig{})
 	key := clientKey(t)
-	w := post(t, newHandler(t, f), exchangeForm(f.idp.sign(t, TypeAccessToken, accessClaims())), http.Header{headerDPoP: {proof(t, key, "").JWT}})
+	w := post(t, newHandler(t, f), exchangeForm(f.idp.sign(t, typeAccessToken, accessClaims())), http.Header{headerDPoP: {proof(t, key, "").JWT}})
 	var resp tokenResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != http.StatusOK || resp.TokenType != TokenTypeDPoP {
 		t.Fatalf("status %d: %s", w.Code, w.Body)
@@ -111,7 +111,7 @@ func TestHandlerBindsToTheDPoPHeader(t *testing.T) {
 func TestHandlerRefusals(t *testing.T) {
 	f := newFixture(t, fixtureConfig{})
 	h := newHandler(t, f)
-	token := f.idp.sign(t, TypeAccessToken, accessClaims())
+	token := f.idp.sign(t, typeAccessToken, accessClaims())
 	change := func(changes map[string][]string) url.Values {
 		form := exchangeForm(token)
 		for k, v := range changes {
@@ -169,7 +169,7 @@ func TestHandlerRefusals(t *testing.T) {
 func TestHandlerAnswersWhatWasGranted(t *testing.T) {
 	f := newFixture(t, fixtureConfig{})
 	h := newHandler(t, f)
-	form := exchangeForm(f.idp.sign(t, TypeAccessToken, accessClaims()))
+	form := exchangeForm(f.idp.sign(t, typeAccessToken, accessClaims()))
 	form.Set(paramScope, "tools:read tools:list")
 	form.Set(paramAuthorizationDetails, `[{"type":"https://tools.example.com/call","actions":["read"]}]`)
 	w := post(t, h, form, nil)
@@ -187,7 +187,7 @@ func TestHandlerAnswersWhatWasGranted(t *testing.T) {
 	if resp.Scope != "tools:read tools:list" || len(resp.AuthorizationDetails) != 1 || !jsonEqual(t, resp.AuthorizationDetails[0], want) {
 		t.Errorf("scope %q, authorization_details %s; want %s", resp.Scope, resp.AuthorizationDetails, want)
 	}
-	plain := post(t, h, exchangeForm(f.idp.sign(t, TypeAccessToken, accessClaims())), nil)
+	plain := post(t, h, exchangeForm(f.idp.sign(t, typeAccessToken, accessClaims())), nil)
 	var body map[string]any
 	if err := json.Unmarshal(plain.Body.Bytes(), &body); err != nil || plain.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", plain.Code, plain.Body)
@@ -222,7 +222,7 @@ func TestHandlerAnswersAPolicyRefusingTheDetails(t *testing.T) {
 	f := newFixture(t, fixtureConfig{policy: refusing})
 	logs := &records{}
 	f.ex.cfg.Logger = slog.New(logs)
-	form := exchangeForm(f.idp.sign(t, TypeAccessToken, accessClaims()))
+	form := exchangeForm(f.idp.sign(t, typeAccessToken, accessClaims()))
 	form.Set(paramAuthorizationDetails, `[{"type":"x"}]`)
 	w := post(t, newHandler(t, f), form, nil)
 	var resp errorResponse
@@ -242,7 +242,7 @@ func TestHandlerTreatsAnEmptyParameterAsOmitted(t *testing.T) {
 	for _, name := range []string{
 		paramAudience, paramResource, paramActorToken, paramActorTokenType, paramRequestedTokenType, paramScope, paramAuthorizationDetails,
 	} {
-		form := exchangeForm(f.idp.sign(t, TypeAccessToken, accessClaims()))
+		form := exchangeForm(f.idp.sign(t, typeAccessToken, accessClaims()))
 		form.Add(name, "")
 		if w := post(t, h, form, nil); w.Code != http.StatusOK {
 			t.Errorf("an empty %s: status %d: %s", name, w.Code, w.Body)
@@ -284,7 +284,7 @@ func TestClientRefusalChallengesInTheClientsScheme(t *testing.T) {
 		"not a token":              {[]string{"B@sic bWNw"}, http.StatusBadRequest, ""},
 	} {
 		for endpoint, h := range map[string]http.Handler{"token": token, "introspection": introspection} {
-			form := exchangeForm(f.idp.sign(t, TypeAccessToken, accessClaims()))
+			form := exchangeForm(f.idp.sign(t, typeAccessToken, accessClaims()))
 			form.Set(paramToken, "a")
 			w := post(t, h, form, http.Header{headerAuthorization: tc.authorization})
 			var resp errorResponse
@@ -309,7 +309,7 @@ func TestClientRefusalChallengesInTheClientsScheme(t *testing.T) {
 // authenticator's error, a server error at ERROR.
 func TestHandlerTellsAnUnauthorizedClientFromAnUnauthenticatedOne(t *testing.T) {
 	f := newFixture(t, fixtureConfig{})
-	token := f.idp.sign(t, TypeAccessToken, accessClaims())
+	token := f.idp.sign(t, typeAccessToken, accessClaims())
 	for name, tc := range map[string]struct {
 		err    error
 		status int
@@ -378,7 +378,7 @@ func TestHandlerReadsOnlyAFormPost(t *testing.T) {
 func TestHandlerAsksForTheNonce(t *testing.T) {
 	f := newFixture(t, fixtureConfig{nonces: true})
 	h := newHandler(t, f)
-	form := exchangeForm(f.idp.sign(t, TypeAccessToken, accessClaims()))
+	form := exchangeForm(f.idp.sign(t, typeAccessToken, accessClaims()))
 	key := clientKey(t)
 	w := post(t, h, form, http.Header{headerDPoP: {proof(t, key, "").JWT}})
 	var resp errorResponse
@@ -397,7 +397,7 @@ func TestHandlerHidesTheServersFailure(t *testing.T) {
 	f.ex.cfg.Policy = func(context.Context, Grant) (limes.IssueRequest, error) {
 		return limes.IssueRequest{}, errors.New("policy store down")
 	}
-	w := post(t, newHandler(t, f), exchangeForm(f.idp.sign(t, TypeAccessToken, accessClaims())), nil)
+	w := post(t, newHandler(t, f), exchangeForm(f.idp.sign(t, typeAccessToken, accessClaims())), nil)
 	if w.Code != http.StatusInternalServerError || strings.Contains(w.Body.String(), "down") {
 		t.Errorf("status %d: %s", w.Code, w.Body)
 	}
@@ -429,7 +429,7 @@ func TestHandlerServesAFormParsedBeforeIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	form := exchangeForm(f.idp.sign(t, TypeAccessToken, accessClaims()))
+	form := exchangeForm(f.idp.sign(t, typeAccessToken, accessClaims()))
 	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, tokenEndpoint, strings.NewReader(form.Encode()))
 	r.Header.Set("Content-Type", formContentType)
 	r.Header.Set(clientHeader, mcpServer)

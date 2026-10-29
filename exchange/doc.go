@@ -18,7 +18,8 @@
 // was issued to, and a DPoP proof binds the capability to the client's key
 // (RFC 9449 §5).
 //
-// JWTVerifier verifies JWT access tokens (RFC 9068) through jwx, the
-// library that implements the format: no identity provider's SDK covers
-// every provider.
+// Subject tokens are verified by a SubjectVerifier. exchange/jwtverify's
+// verifies JWT access tokens (RFC 9068) through jwx; a consumer with a JOSE
+// stack of its own implements SubjectVerifier on it instead, and this
+// package links no JOSE library (docs/adr/0010-exchange-jose-subpackage.md).
 package exchange

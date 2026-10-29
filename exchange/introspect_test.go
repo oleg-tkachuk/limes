@@ -58,11 +58,11 @@ func TestIntrospectionActive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bearer, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, TypeAccessToken, accessClaims())))
+	bearer, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, typeAccessToken, accessClaims())))
 	if err != nil {
 		t.Fatal(err)
 	}
-	boundReq := request(f.idp.sign(t, TypeAccessToken, accessClaims()))
+	boundReq := request(f.idp.sign(t, typeAccessToken, accessClaims()))
 	boundReq.DPoP = proof(t, key, "")
 	bound, err := f.ex.Exchange(t.Context(), boundReq)
 	if err != nil {
@@ -122,7 +122,7 @@ func checkCaveatsDetail(t *testing.T, name string, body map[string]any, caveats 
 func TestIntrospectionInactive(t *testing.T) {
 	f := newFixture(t, fixtureConfig{})
 	h := newIntrospection(t, f.verifier)
-	res, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, TypeAccessToken, accessClaims())))
+	res, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, typeAccessToken, accessClaims())))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func (failingRevocations) IsRevoked(context.Context, uuid.UUID) (bool, error) {
 // would read as every token revoked at once.
 func TestIntrospectionOutage(t *testing.T) {
 	f := newFixture(t, fixtureConfig{})
-	res, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, TypeAccessToken, accessClaims())))
+	res, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, typeAccessToken, accessClaims())))
 	if err != nil {
 		t.Fatal(err)
 	}

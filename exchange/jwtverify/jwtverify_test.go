@@ -1,10 +1,11 @@
-package exchange
+package jwtverify
 
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"errors"
+	"github.com/oleg-tkachuk/limes/exchange"
 	"slices"
 	"testing"
 
@@ -16,9 +17,9 @@ import (
 // tokens instead of RFC 9068's.
 const typJWT = "JWT"
 
-func newJWTVerifier(t *testing.T, cfg JWTVerifierConfig) *JWTVerifier {
+func newVerifier(t *testing.T, cfg Config) *Verifier {
 	t.Helper()
-	v, err := NewJWTVerifier(cfg)
+	v, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,9 +28,9 @@ func newJWTVerifier(t *testing.T, cfg JWTVerifierConfig) *JWTVerifier {
 
 // An RFC 9068 access token verifies, and its claims are read as the profile
 // defines them.
-func TestJWTVerifierReadsAnAccessToken(t *testing.T) {
+func TestVerifierReadsAnAccessToken(t *testing.T) {
 	p := newIDP(t)
-	v := newJWTVerifier(t, JWTVerifierConfig{Issuer: idpIssuer, Keys: StaticKeys(p.keys), Now: clock})
+	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: StaticKeys(p.keys), Now: clock})
 	claims := accessClaims()
 	for _, typ := range []string{TypeAccessToken, TypeAccessTokenMedia, "AT+JWT"} {
 		s, err := v.VerifySubject(t.Context(), p.sign(t, typ, claims))
@@ -46,9 +47,9 @@ func TestJWTVerifierReadsAnAccessToken(t *testing.T) {
 
 // Whatever RFC 9068 requires of an access token, and the verifier's own
 // issuer, keys, types and algorithms, a token lacking is refused.
-func TestJWTVerifierRefusals(t *testing.T) {
+func TestVerifierRefusals(t *testing.T) {
 	p, other := newIDP(t), newIDP(t)
-	v := newJWTVerifier(t, JWTVerifierConfig{Issuer: idpIssuer, Keys: StaticKeys(p.keys), Now: clock})
+	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: StaticKeys(p.keys), Now: clock})
 	claims := accessClaims()
 	cases := map[string]string{
 		"typ JWT":                p.sign(t, typJWT, claims),
@@ -66,27 +67,27 @@ func TestJWTVerifierRefusals(t *testing.T) {
 		cases["no "+claim] = p.sign(t, TypeAccessToken, with(claims, map[string]any{claim: nil}))
 	}
 	for name, token := range cases {
-		if _, err := v.VerifySubject(t.Context(), token); !errors.Is(err, ErrInvalidGrant) {
-			t.Errorf("%s: %v, want ErrInvalidGrant", name, err)
+		if _, err := v.VerifySubject(t.Context(), token); !errors.Is(err, exchange.ErrInvalidGrant) {
+			t.Errorf("%s: %v, want exchange.ErrInvalidGrant", name, err)
 		}
 	}
 }
 
 // The algorithms a verifier accepts are its config's, and only asymmetric
 // ones may be named.
-func TestJWTVerifierHoldsItsAlgorithms(t *testing.T) {
+func TestVerifierHoldsItsAlgorithms(t *testing.T) {
 	p := newIDP(t)
-	v := newJWTVerifier(t, JWTVerifierConfig{Issuer: idpIssuer, Keys: StaticKeys(p.keys), Now: clock, Algorithms: []string{jwa.ES256().String()}})
-	if _, err := v.VerifySubject(t.Context(), p.sign(t, TypeAccessToken, accessClaims())); !errors.Is(err, ErrInvalidGrant) {
+	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: StaticKeys(p.keys), Now: clock, Algorithms: []string{jwa.ES256().String()}})
+	if _, err := v.VerifySubject(t.Context(), p.sign(t, TypeAccessToken, accessClaims())); !errors.Is(err, exchange.ErrInvalidGrant) {
 		t.Errorf("an Ed25519 token at a verifier of ES256 alone: %v", err)
 	}
 	for _, alg := range []string{jwa.HS256().String(), jwa.NoSignature().String()} {
-		if _, err := NewJWTVerifier(JWTVerifierConfig{Issuer: idpIssuer, Keys: StaticKeys(p.keys), Algorithms: []string{alg}}); err == nil {
+		if _, err := New(Config{Issuer: idpIssuer, Keys: StaticKeys(p.keys), Algorithms: []string{alg}}); err == nil {
 			t.Errorf("a verifier accepting %s was built", alg)
 		}
 	}
-	for name, cfg := range map[string]JWTVerifierConfig{"no issuer": {Keys: StaticKeys(p.keys)}, "no keys": {Issuer: idpIssuer}} {
-		if _, err := NewJWTVerifier(cfg); err == nil {
+	for name, cfg := range map[string]Config{"no issuer": {Keys: StaticKeys(p.keys)}, "no keys": {Issuer: idpIssuer}} {
+		if _, err := New(cfg); err == nil {
 			t.Errorf("a verifier with %s was built", name)
 		}
 	}
@@ -94,10 +95,10 @@ func TestJWTVerifierHoldsItsAlgorithms(t *testing.T) {
 
 // A provider that types its tokens JWT and names the client in azp is read
 // once its config says so.
-func TestJWTVerifierReadsAProviderOfItsOwn(t *testing.T) {
+func TestVerifierReadsAProviderOfItsOwn(t *testing.T) {
 	p := newIDP(t)
 	const azp = "azp"
-	v := newJWTVerifier(t, JWTVerifierConfig{Issuer: idpIssuer, Keys: StaticKeys(p.keys), Now: clock, Types: []string{typJWT}, ClientIDClaim: azp})
+	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: StaticKeys(p.keys), Now: clock, Types: []string{typJWT}, ClientIDClaim: azp})
 	claims := with(accessClaims(), map[string]any{ClaimClientID: nil, azp: idpClient})
 	s, err := v.VerifySubject(t.Context(), p.sign(t, typJWT, claims))
 	if err != nil || s.ClientID != idpClient {
@@ -107,7 +108,7 @@ func TestJWTVerifierReadsAProviderOfItsOwn(t *testing.T) {
 
 // A token bound to a DPoP key names it; an ES256 identity provider is read
 // like an Ed25519 one.
-func TestJWTVerifierReadsTheBindingAndOtherAlgorithms(t *testing.T) {
+func TestVerifierReadsTheBindingAndOtherAlgorithms(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +126,7 @@ func TestJWTVerifierReadsTheBindingAndOtherAlgorithms(t *testing.T) {
 	if err := set.AddKey(pub); err != nil {
 		t.Fatal(err)
 	}
-	v := newJWTVerifier(t, JWTVerifierConfig{Issuer: idpIssuer, Keys: StaticKeys(set), Now: clock})
+	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: StaticKeys(set), Now: clock})
 	const jkt = "0ZcOCORZNYy-DWpqq30jZyJGHTN0d2HglBV3uiguA4I"
 	token := signWith(t, key, jwa.ES256(), TypeAccessToken, with(accessClaims(), map[string]any{claimCnf: map[string]any{cnfJKT: jkt}}))
 	s, err := v.VerifySubject(t.Context(), token)

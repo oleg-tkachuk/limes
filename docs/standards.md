@@ -253,7 +253,7 @@ exchanges an identity provider's access token for a capability
 ([ADR-0003](adr/0003-oauth-token-exchange.md)), in process (`Exchanger`) or
 at an RFC 8693 token endpoint (`Handler`):
 
-- **The subject token (RFC 9068).** `JWTVerifier` accepts an access token
+- **The subject token (RFC 9068).** `jwtverify.Verifier` accepts an access token
   of `typ: at+jwt` (or `application/at+jwt`), signed by an asymmetric
   algorithm under the identity provider's keys, from its issuer, live, and
   carrying every claim the profile requires: `iss`, `exp`, `aud`, `sub`,
@@ -326,8 +326,8 @@ at an RFC 8693 token endpoint (`Handler`):
   proof of possession is checked: the answer is no authorization, and
   `Introspect` yields nothing `Delegate` takes.
 
-*Held by* `TestJWTVerifierReadsAnAccessToken`, `TestJWTVerifierRefusals`,
-`TestJWTVerifierHoldsTheKeyToTheHeaderAlg`, `TestJWTVerifierLendsNoHMACSecret`,
+*Held by* `TestVerifierReadsAnAccessToken`, `TestVerifierRefusals`,
+`TestVerifierHoldsTheKeyToTheHeaderAlg`, `TestVerifierLendsNoHMACSecret`,
 `TestExchangeHoldsThePolicyToTheRequest`,
 `TestExchangeCapsTheLifetimeAtTheSubjectToken`, `TestExchangeRefusals`,
 `TestExchangeBindsToTheProofKey`, `TestExchangeHoldsABoundSubjectToItsKey`,

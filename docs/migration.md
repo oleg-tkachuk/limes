@@ -58,6 +58,29 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## exchange/v0.10.0
+
+- The JWT subject verifier moved to `github.com/oleg-tkachuk/limes/exchange/jwtverify`,
+  so package `exchange` links no JOSE library for a consumer that verifies
+  subject tokens on a stack of its own
+  ([ADR-0010](adr/0010-exchange-jose-subpackage.md)). `exchange.JWTVerifier`
+  is `jwtverify.Verifier`, `exchange.JWTVerifierConfig` is `jwtverify.Config`,
+  `exchange.NewJWTVerifier` is `jwtverify.New`, and `KeySource`,
+  `StaticKeys`, `CachedKeys`, `DefaultAlgorithms`, `TypeAccessToken`,
+  `TypeAccessTokenMedia` and `ClaimClientID` keep their names in `jwtverify`.
+
+  ```go
+  // Before
+  subjects, err := exchange.NewJWTVerifier(exchange.JWTVerifierConfig{
+  	Issuer: idp, Keys: exchange.CachedKeys(cache, jwksURL),
+  })
+
+  // After
+  subjects, err := jwtverify.New(jwtverify.Config{
+  	Issuer: idp, Keys: jwtverify.CachedKeys(cache, jwksURL),
+  })
+  ```
+
 ## v0.133.0
 
 - The Biscuit form moved to the module `github.com/oleg-tkachuk/limes/biscuit`,

@@ -18,7 +18,7 @@ import (
 // answers a token of another audience inactive, and one of its own active.
 func TestIntrospectionHoldsTheClientToItsAudiences(t *testing.T) {
 	f := newFixture(t, fixtureConfig{})
-	res, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, TypeAccessToken, accessClaims())))
+	res, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, typeAccessToken, accessClaims())))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestExchangeAnswersAPolicyGrantingNoRequestAsTheServers(t *testing.T) {
 	}})
 	logs := &records{}
 	f.ex.cfg.Logger = slog.New(logs)
-	w := post(t, newHandler(t, f), exchangeForm(f.idp.sign(t, TypeAccessToken, accessClaims())), nil)
+	w := post(t, newHandler(t, f), exchangeForm(f.idp.sign(t, typeAccessToken, accessClaims())), nil)
 	var resp errorResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != http.StatusInternalServerError || resp.Error != codeServerError {
 		t.Errorf("status %d: %s", w.Code, w.Body)

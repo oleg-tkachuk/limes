@@ -1,9 +1,10 @@
-package exchange
+package jwtverify
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/oleg-tkachuk/limes/exchange"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -19,21 +20,15 @@ type downKeys struct{}
 
 func (downKeys) Keys(context.Context) (jwk.Set, error) { return nil, errKeysDown }
 
-// Keys that cannot be had are the server's failure: the exchange answers it
-// as one, and does not tell the client its token was refused.
+// Keys that cannot be had are the server's failure: the verifier returns
+// the outage, not a refusal of the token, so the exchange answers it as
+// the server's (exchange's own tests hold it to that).
 func TestKeysOutageIsTheServers(t *testing.T) {
-	f := newFixture(t, fixtureConfig{})
-	v := newJWTVerifier(t, JWTVerifierConfig{Issuer: idpIssuer, Keys: downKeys{}, Now: clock})
-	token := f.idp.sign(t, TypeAccessToken, accessClaims())
-	if _, err := v.VerifySubject(t.Context(), token); !errors.Is(err, errKeysDown) || errors.Is(err, ErrInvalidGrant) {
+	p := newIDP(t)
+	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: downKeys{}, Now: clock})
+	token := p.sign(t, TypeAccessToken, accessClaims())
+	if _, err := v.VerifySubject(t.Context(), token); !errors.Is(err, errKeysDown) || errors.Is(err, exchange.ErrInvalidGrant) {
 		t.Errorf("err = %v, want the outage and no ErrInvalidGrant", err)
-	}
-	f.ex.cfg.Subjects = v
-	if _, err := f.ex.Exchange(t.Context(), request(token)); isRefusal(err) {
-		t.Errorf("err = %v, a refusal of the client", err)
-	}
-	if w := post(t, newHandler(t, f), exchangeForm(token), nil); w.Code != http.StatusInternalServerError {
-		t.Errorf("status %d, want 500: %s", w.Code, w.Body)
 	}
 }
 
@@ -59,12 +54,12 @@ func TestCachedKeys(t *testing.T) {
 	if err := cache.Register(ctx, srv.URL, jwk.WithWaitReady(true)); err != nil {
 		t.Fatal(err)
 	}
-	v := newJWTVerifier(t, JWTVerifierConfig{Issuer: idpIssuer, Keys: CachedKeys(cache, srv.URL), Now: clock})
+	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: CachedKeys(cache, srv.URL), Now: clock})
 	if _, err := v.VerifySubject(t.Context(), p.sign(t, TypeAccessToken, accessClaims())); err != nil {
 		t.Errorf("a token under the cached keys: %v", err)
 	}
-	unregistered := newJWTVerifier(t, JWTVerifierConfig{Issuer: idpIssuer, Keys: CachedKeys(cache, srv.URL+"/other"), Now: clock})
-	if _, err := unregistered.VerifySubject(t.Context(), p.sign(t, TypeAccessToken, accessClaims())); err == nil || errors.Is(err, ErrInvalidGrant) {
+	unregistered := newVerifier(t, Config{Issuer: idpIssuer, Keys: CachedKeys(cache, srv.URL+"/other"), Now: clock})
+	if _, err := unregistered.VerifySubject(t.Context(), p.sign(t, TypeAccessToken, accessClaims())); err == nil || errors.Is(err, exchange.ErrInvalidGrant) {
 		t.Errorf("keys never fetched: %v, want the server's error", err)
 	}
 }
