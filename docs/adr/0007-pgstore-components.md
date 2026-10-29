@@ -119,10 +119,17 @@ at any minor.
 6. **testcontainers leaves pgstore's go.mod.**
    - The tests stay in `package pgstore`: 42 of its 44 test files read its
      unexported code, so they cannot move to another module.
-   - They connect to a PostgreSQL named by an environment variable.
-   - A nested module that is never released, `tools/pgcontainer`, starts the
-     container and runs the tests against it; the task that runs pgstore's
-     tests calls it. testcontainers is required there alone.
+   - A nested module that is never released,
+     `pgstore/internal/pgcontainer`, starts the container and requires
+     testcontainers alone. `pgstore/internal/pgtest` runs it with `go run`
+     from each test binary's `TestMain`, reads the connection string it
+     writes, and asks it for a `pg_dump` by a line on its input; the
+     container goes when that input closes.
+   - So `go test ./...` in pgstore runs as before, and so does every task
+     and workflow that runs it. The launcher lives under `pgstore/` rather
+     than `tools/` so that a change to it runs pgstore's CI job.
+   - A test fails when pgstore's module graph holds testcontainers, docker
+     or moby again.
 7. **The boundaries are checked by tools.**
    - Nothing outside `pgstore/migrate` imports tern.
    - `pgstore` imports neither `pgstore/usage`, `pgstore/erase` nor
