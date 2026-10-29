@@ -23,6 +23,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/internal/errs"
 	"github.com/oleg-tkachuk/limes/internal/jose"
 )
 
@@ -78,16 +79,16 @@ func Attenuate(token string, a limes.Attenuation) (string, error) {
 		return "", err
 	}
 	block := b.CreateBlock()
-	var errs []error
+	var added []error
 	for _, fact := range attenuationFacts(a) {
-		errs = append(errs, block.AddFact(fact))
+		added = append(added, block.AddFact(fact))
 	}
-	if err := errors.Join(errs...); err != nil {
-		return "", fmt.Errorf("limes: attenuation block: %w", err)
+	if err := errors.Join(added...); err != nil {
+		return "", errs.Errorf("limes: attenuation block: %w", err)
 	}
 	next, err := b.Append(rand.Reader, block.Build())
 	if err != nil {
-		return "", fmt.Errorf("limes: append attenuation: %w", err)
+		return "", errs.Errorf("limes: append attenuation: %w", err)
 	}
 	return serializeBiscuit(next)
 }
@@ -135,7 +136,7 @@ type form struct{}
 func (form) Seal(ctx context.Context, sign func(ctx context.Context, root ed25519.PublicKey) (string, error)) (string, error) {
 	rootPub, rootPriv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		return "", fmt.Errorf("limes: biscuit root key: %w", err)
+		return "", errs.Errorf("limes: biscuit root key: %w", err)
 	}
 	inner, err := sign(ctx, rootPub)
 	if err != nil {
@@ -143,11 +144,11 @@ func (form) Seal(ctx context.Context, sign func(ctx context.Context, root ed2551
 	}
 	b := biscuitgo.NewBuilder(rootPriv)
 	if err := b.AddAuthorityFact(biscuitFact(biscuitFactCapability, biscuitgo.String(inner))); err != nil {
-		return "", fmt.Errorf("limes: biscuit authority: %w", err)
+		return "", errs.Errorf("limes: biscuit authority: %w", err)
 	}
 	token, err := b.Build()
 	if err != nil {
-		return "", fmt.Errorf("limes: build biscuit: %w", err)
+		return "", errs.Errorf("limes: build biscuit: %w", err)
 	}
 	return serializeBiscuit(token)
 }
@@ -486,7 +487,7 @@ func unB64Biscuit(token string) ([]byte, error) {
 func decodeBiscuitContainer(token string) ([]byte, *pb.Biscuit, error) {
 	raw, err := unB64Biscuit(token)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: biscuit encoding: %w", limes.ErrInvalidToken, err)
+		return nil, nil, errs.Errorf("%w: biscuit encoding: %w", limes.ErrInvalidToken, err)
 	}
 	var c pb.Biscuit
 	if err := proto.Unmarshal(raw, &c); err != nil || c.GetAuthority() == nil {
@@ -543,7 +544,7 @@ func guardBiscuit(f func() error) (err error) {
 func serializeBiscuit(b *biscuitgo.Biscuit) (string, error) {
 	raw, err := b.Serialize()
 	if err != nil {
-		return "", fmt.Errorf("limes: serialize biscuit: %w", err)
+		return "", errs.Errorf("limes: serialize biscuit: %w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
@@ -560,7 +561,7 @@ func isBiscuit(token string) bool {
 
 // refuse is err as a refusal of the token in family, as limes reads a
 // form's errors.
-func refuse(family, err error) error { return fmt.Errorf("%w: %s", family, err.Error()) }
+func refuse(family, err error) error { return errs.Errorf("%w: %s", family, err.Error()) }
 
 // invalidRequest is a malformed call: limes.ErrInvalidRequest.
 func invalidRequest(format string, args ...any) error {

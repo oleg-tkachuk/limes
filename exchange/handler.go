@@ -17,6 +17,7 @@ import (
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/dpop"
+	"github.com/oleg-tkachuk/limes/internal/errs"
 )
 
 // The token request's parameters and values (RFC 8693 §2.1, RFC 8707 §2,
@@ -291,7 +292,7 @@ func readForm(w http.ResponseWriter, r *http.Request, maxBytes int64) (url.Value
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 	if err := r.ParseForm(); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidRequest, err)
+		return nil, errs.Errorf("%w: %w", ErrInvalidRequest, err)
 	}
 	dropEmpty(r.PostForm)
 	return r.PostForm, nil
@@ -421,7 +422,7 @@ func authenticate(authenticate func(*http.Request) (Client, error), r *http.Requ
 	case errors.Is(err, ErrUnauthorizedClient), errors.Is(err, ErrServerError):
 		return Client{}, err
 	}
-	return Client{}, fmt.Errorf("%w: %w", ErrInvalidClient, err)
+	return Client{}, errs.Errorf("%w: %w", ErrInvalidClient, err)
 }
 
 // logRefusal logs err, the reason the endpoint named refuses r before it

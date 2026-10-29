@@ -34,3 +34,9 @@ func TestSentinelsHaveACode(t *testing.T) {
 		}
 	}
 }
+
+// No error of the module names "limes: " twice: one wrapping another builds
+// its text with errs.Errorf.
+func TestNoErrorDoublesThePrefix(t *testing.T) {
+	errguard.RefuseDoubling(t, ".", "internal/pgtest")
+}
