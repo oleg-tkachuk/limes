@@ -55,6 +55,7 @@ func storeEnv(t *testing.T, cfg Config, readOnly func(context.Context) context.C
 		ReadOnlyCtx:   readOnly(t.Context()),
 		Store:         store,
 		Exchanges:     store,
+		BulkRevoker:   store,
 		Tenant:        tenant,
 		NewTenant:     func() (uuid.UUID, error) { return newTenant(t), nil },
 		DeleteTenant: func(tenant uuid.UUID) error {
