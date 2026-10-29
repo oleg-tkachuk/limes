@@ -298,7 +298,7 @@ func TestRevocationCacheWithoutBiscuits(t *testing.T) {
 	}
 	_, err := NewVerifier(VerifierConfig{
 		Keys: staticKeys(t, map[string]ed25519.PublicKey{}), Revocations: c, TrustedIssuers: []string{goldenIssuer},
-		Biscuit: &BiscuitConfig{Revocations: c},
+		Biscuit: &BiscuitConfig{Revocations: c, Form: fakeForm{}},
 	})
 	if !errors.Is(err, errNoBiscuitLookup) {
 		t.Errorf("NewVerifier = %v, want errNoBiscuitLookup", err)
@@ -365,7 +365,7 @@ func TestNewVerifierRefusesANilRevocationCache(t *testing.T) {
 	c := newRevocationCache(t, RevocationCacheConfig{Capabilities: newMemStore(), TTL: cacheTTL})
 	_, err := NewVerifier(VerifierConfig{
 		Keys: staticKeys(t, map[string]ed25519.PublicKey{}), Revocations: c, TrustedIssuers: []string{goldenIssuer},
-		Biscuit: &BiscuitConfig{Revocations: none},
+		Biscuit: &BiscuitConfig{Revocations: none, Form: fakeForm{}},
 	})
 	if !errors.Is(err, errNoBiscuitLookup) {
 		t.Errorf("NewVerifier = %v, want errNoBiscuitLookup", err)
@@ -385,7 +385,7 @@ func TestNewVerifierRefusesTypedNilWiring(t *testing.T) {
 		"a nil store":            {Keys: keys, Revocations: noStore, TrustedIssuers: []string{goldenIssuer}},
 		"a nil *jwks.Static":     {Keys: noKeys, Revocations: c, TrustedIssuers: []string{goldenIssuer}},
 		"a nil store for Biscuits": {
-			Keys: keys, Revocations: c, TrustedIssuers: []string{goldenIssuer}, Biscuit: &BiscuitConfig{Revocations: noStore},
+			Keys: keys, Revocations: c, TrustedIssuers: []string{goldenIssuer}, Biscuit: &BiscuitConfig{Revocations: noStore, Form: fakeForm{}},
 		},
 		"no trusted issuer": {Keys: keys, Revocations: c},
 	} {

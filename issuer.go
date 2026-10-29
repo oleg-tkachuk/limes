@@ -66,8 +66,9 @@ type IssuerConfig struct {
 	// Now is the clock; tests override.
 	Now func() time.Time
 
-	// Biscuit is the form Issuer.Biscuit seals a capability in. Nil: the
-	// Biscuit form this module carries.
+	// Biscuit is the form Issuer.Biscuit seals a capability in:
+	// github.com/oleg-tkachuk/limes/biscuit's Form. Nil: Issuer.Biscuit
+	// refuses, and this issuer mints JWTs alone.
 	Biscuit TokenForm
 }
 
@@ -96,9 +97,6 @@ func NewIssuer(cfg IssuerConfig) (*Issuer, error) {
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
-	}
-	if cfg.Biscuit == nil {
-		cfg.Biscuit = biscuitForm{}
 	}
 	return &Issuer{
 		signer:        cfg.Signer,

@@ -53,7 +53,7 @@ func TestIntrospectActive(t *testing.T) {
 func TestIntrospectInactive(t *testing.T) {
 	issuer, v, store, cap, biscuitToken := biscuitFixture(t)
 	ctx := context.Background()
-	inner, _, err := biscuitForm{}.Open(biscuitToken)
+	inner, _, err := fakeForm{}.Open(biscuitToken)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,11 +132,11 @@ func dpopKey(t *testing.T) (ed25519.PrivateKey, string) {
 func TestIntrospectHoldsACopyToItsLimits(t *testing.T) {
 	ctx := context.Background()
 	v, _, root := limitedBiscuit(t)
-	outer, err := Attenuate(root, Attenuation{Requests: &RequestCeiling{Max: 50}})
+	outer, err := attenuate(root, Attenuation{Requests: &RequestCeiling{Max: 50}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	inner, err := Attenuate(outer, Attenuation{Requests: &RequestCeiling{Max: 5}, Budget: &BudgetCeiling{Max: NanosPerUnit}})
+	inner, err := attenuate(outer, Attenuation{Requests: &RequestCeiling{Max: 5}, Budget: &BudgetCeiling{Max: NanosPerUnit}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,14 +150,14 @@ func TestIntrospectHoldsACopyToItsLimits(t *testing.T) {
 	}
 
 	_, unmetered, _, _, token := biscuitFixture(t)
-	limited, err := Attenuate(token, Attenuation{Requests: &RequestCeiling{Max: 5}})
+	limited, err := attenuate(token, Attenuation{Requests: &RequestCeiling{Max: 5}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := unmetered.Introspect(ctx, limited); !errors.Is(err, ErrCopyCountersNotMetered) || errors.Is(err, ErrUnauthenticated) {
 		t.Errorf("a limited copy without MeterCopies: %v, want ErrCopyCountersNotMetered", err)
 	}
-	plain, err := Attenuate(token, Attenuation{Ops: []Op{OpGet}})
+	plain, err := attenuate(token, Attenuation{Ops: []Op{OpGet}})
 	if err != nil {
 		t.Fatal(err)
 	}

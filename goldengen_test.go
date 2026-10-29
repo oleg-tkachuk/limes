@@ -98,7 +98,7 @@ func TestGenerateGoldenToken(t *testing.T) {
 		t.Fatalf("signer: %v", err)
 	}
 
-	issuer, err := NewIssuer(IssuerConfig{
+	issuer, err := NewIssuer(IssuerConfig{Biscuit: fakeForm{},
 		Signer:     signer,
 		Store:      genStore{},
 		IssuerName: goldenIssuer,

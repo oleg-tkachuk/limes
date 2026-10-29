@@ -1,8 +1,11 @@
 package exchange
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
+	"encoding/base64"
+	"errors"
 	"net/url"
 	"testing"
 
@@ -23,7 +26,7 @@ func biscuitVerifier(t *testing.T, f *fixture, meter bool) *limes.Verifier {
 	}
 	v, err := limes.NewVerifier(limes.VerifierConfig{
 		Keys: keys, Revocations: f.store, TrustedIssuers: []string{limesIssuer}, Now: clock,
-		Biscuit: &limes.BiscuitConfig{Revocations: f.store, MeterCopies: meter},
+		Biscuit: &limes.BiscuitConfig{Revocations: f.store, Form: copyForm{}, MeterCopies: meter},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -52,11 +55,44 @@ func limitedCopy(t *testing.T, f *fixture) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	copied, err := limes.Attenuate(form.Token, limes.Attenuation{Requests: &limes.RequestCeiling{Max: copyRequests}})
+	return form.Token
+}
+
+// copyForm is a limes.TokenForm whose every token is one copy, limited to
+// copyRequests: what introspection answers of a copy is this module's to
+// test, the Biscuit encoding the biscuit module's. A token is its root key
+// and its sealed JWT, base64url; no signature is checked but the root's.
+type copyForm struct{}
+
+// The revocation ids of a copyForm token: the sealing block's, the copy's.
+var copyFormIDs = [][]byte{[]byte("sealed"), []byte("copy")}
+
+func (copyForm) Seal(ctx context.Context, sign func(context.Context, ed25519.PublicKey) (string, error)) (string, error) {
+	root, _, err := ed25519.GenerateKey(nil)
 	if err != nil {
-		t.Fatal(err)
+		return "", err
 	}
-	return copied
+	sealed, err := sign(ctx, root)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(append(root, sealed...)), nil
+}
+
+func (copyForm) Open(token string) (string, func(ed25519.PublicKey) (limes.Unsealed, error), error) {
+	raw, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil || len(raw) <= ed25519.PublicKeySize {
+		return "", nil, errors.New("not a copyForm token")
+	}
+	root, sealed := raw[:ed25519.PublicKeySize], string(raw[ed25519.PublicKeySize:])
+	unseal := func(named ed25519.PublicKey) (limes.Unsealed, error) {
+		if !bytes.Equal(named, root) {
+			return limes.Unsealed{}, errors.New("sealed under another root")
+		}
+		copyLimit := limes.Attenuation{Requests: &limes.RequestCeiling{Max: copyRequests}}
+		return limes.Unsealed{Blocks: []limes.Attenuation{copyLimit}, RevocationIDs: copyFormIDs}, nil
+	}
+	return sealed, unseal, nil
 }
 
 // A Biscuit copy that sets a request limit of its own is answered with that

@@ -1,9 +1,11 @@
-package limes
+package biscuit
 
 import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/oleg-tkachuk/limes"
 )
 
 // Every fact refuses a term of the wrong kind, and a block's facts combine
@@ -31,21 +33,16 @@ func TestReadBlockFacts(t *testing.T) {
 		}
 	}
 
-	bound := grant{Capability: Capability{ConfirmationJKT: strings.Repeat("B", 43)}}
-	if _, err := applyAttenuation(bound, Attenuation{ConfirmationJKT: jkt}, []byte("block")); err == nil {
-		t.Error("a block rebinding a bound token was applied, want refused")
-	}
-
 	f, err := readBlockFacts(decodedBlock{facts: []decodedFact{
 		fact(biscuitFactExpires, late), fact(biscuitFactExpires, early),
-		fact(biscuitFactOp, string(OpGet)), fact(biscuitFactOp, string(OpList)),
+		fact(biscuitFactOp, string(limes.OpGet)), fact(biscuitFactOp, string(limes.OpList)),
 		fact(biscuitFactMaxRequests, int64(9)), fact(biscuitFactMaxRequests, int64(3)),
 		fact(biscuitFactBind, jkt),
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !f.expires.Equal(early) || len(f.ops) != 2 || f.requests == nil || *f.requests != (RequestCeiling{Max: 3}) || f.bind != jkt {
+	if !f.expires.Equal(early) || len(f.ops) != 2 || f.requests == nil || *f.requests != (limes.RequestCeiling{Max: 3}) || f.bind != jkt {
 		t.Errorf("facts = %+v; want the earliest expiry, both ops, the last limit and the restated binding", f)
 	}
 }
@@ -54,7 +51,7 @@ func TestReadBlockFacts(t *testing.T) {
 // longer part of the vocabulary.
 func TestReadBlockFactsBudgetIsNanos(t *testing.T) {
 	f, err := readBlockFacts(decodedBlock{facts: []decodedFact{{name: biscuitFactMaxBudget, term: int64(1_500)}}})
-	if err != nil || f.budget == nil || *f.budget != (BudgetCeiling{Max: 1_500}) {
+	if err != nil || f.budget == nil || *f.budget != (limes.BudgetCeiling{Max: 1_500}) {
 		t.Errorf("budget = %v, %v; want 1500 nanos", f.budget, err)
 	}
 	if _, err := readBlockFacts(decodedBlock{facts: []decodedFact{{name: "limes_max_budget_micros", term: int64(1_500)}}}); err == nil {

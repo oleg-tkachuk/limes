@@ -129,7 +129,7 @@ func replayVerifier(t *testing.T, store *memStore, pub ed25519.PublicKey, maxEnt
 	t.Helper()
 	v, err := NewVerifier(VerifierConfig{
 		Keys: staticKeys(t, map[string]ed25519.PublicKey{testKID: pub}), Revocations: store,
-		TrustedIssuers: []string{"limes-test"}, Biscuit: &BiscuitConfig{Revocations: store},
+		TrustedIssuers: []string{"limes-test"}, Biscuit: &BiscuitConfig{Revocations: store, Form: fakeForm{}},
 		DPoP: newVerifier(t, dpop.VerifierConfig{Replay: newReplay(t, dpop.MemoryReplayCacheConfig{
 			EntriesPerHolder: replayShare, MaxEntries: maxEntries,
 		})}),
@@ -169,11 +169,11 @@ func newSiblingCopies(t *testing.T, other Attenuation) siblingCopies {
 	keys := dpopKeys(t)
 	s := siblingCopies{v: replayVerifier(t, store, pub, 10*replayShare), store: store, liveKey: keys["Ed25519"], otherKey: keys["P-256"]}
 	liveJKT, _ := dpop.Thumbprint(s.liveKey.Public())
-	if s.live, err = Attenuate(root, Attenuation{ConfirmationJKT: liveJKT}); err != nil {
+	if s.live, err = attenuate(root, Attenuation{ConfirmationJKT: liveJKT}); err != nil {
 		t.Fatal(err)
 	}
 	other.ConfirmationJKT, _ = dpop.Thumbprint(s.otherKey.Public())
-	if s.other, err = Attenuate(root, other); err != nil {
+	if s.other, err = attenuate(root, other); err != nil {
 		t.Fatal(err)
 	}
 	return s

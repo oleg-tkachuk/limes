@@ -1,4 +1,4 @@
-package limes
+package biscuit
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 
 	"github.com/eclipse-biscuit/biscuit-go/v2/datalog"
 	"github.com/eclipse-biscuit/biscuit-go/v2/pb"
+	"github.com/oleg-tkachuk/limes"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -59,19 +60,20 @@ func stringTerm(id uint64) *pb.TermV2 { return &pb.TermV2{Content: &pb.TermV2_St
 func integerTerm() *pb.TermV2 { return &pb.TermV2{Content: &pb.TermV2_Integer{Integer: 1}} }
 
 // verifyNoPanic is v.Verify of token, failing the test if it panics.
-func verifyNoPanic(t *testing.T, v *Verifier, token string) (err error) {
+func verifyNoPanic(t *testing.T, v *limes.Verifier, token string) (err error) {
 	t.Helper()
 	defer func() {
 		if r := recover(); r != nil {
 			t.Fatalf("Verify panicked: %v", r)
 		}
 	}()
-	_, err = v.Verify(context.Background(), VerifyRequest{Token: token, Audience: audienceData})
+	_, err = v.Verify(context.Background(), limes.VerifyRequest{Token: token, Audience: audienceData})
 	return err
 }
 
 func TestBiscuitRefusesASymbolOutsideBothTables(t *testing.T) {
-	_, v, _, _, _ := biscuitFixture(t)
+	s, _, _ := biscuitFixture(t)
+	v := s.verifier
 	defaults := uint64(len(datalog.DEFAULT_SYMBOLS))
 	table := uint64(datalog.OFFSET)
 	ids := map[string]uint64{
@@ -83,15 +85,15 @@ func TestBiscuitRefusesASymbolOutsideBothTables(t *testing.T) {
 	}
 	for name, id := range ids {
 		t.Run("name "+name, func(t *testing.T) {
-			if err := verifyNoPanic(t, v, forgedBiscuit(t, factBlock(id, integerTerm()))); !errors.Is(err, ErrInvalidToken) {
-				t.Fatalf("err = %v, want ErrInvalidToken", err)
+			if err := verifyNoPanic(t, v, forgedBiscuit(t, factBlock(id, integerTerm()))); !errors.Is(err, limes.ErrInvalidToken) {
+				t.Fatalf("err = %v, want limes.ErrInvalidToken", err)
 			}
 		})
 		t.Run("string term "+name, func(t *testing.T) {
 			blk := factBlock(table, stringTerm(id))
 			blk.Symbols = []string{biscuitFactCapability}
-			if err := verifyNoPanic(t, v, forgedBiscuit(t, blk)); !errors.Is(err, ErrInvalidToken) {
-				t.Fatalf("err = %v, want ErrInvalidToken", err)
+			if err := verifyNoPanic(t, v, forgedBiscuit(t, blk)); !errors.Is(err, limes.ErrInvalidToken) {
+				t.Fatalf("err = %v, want limes.ErrInvalidToken", err)
 			}
 		})
 	}
@@ -117,14 +119,11 @@ func withBiscuitProof(t *testing.T, token string, p *pb.Proof) string {
 }
 
 // A genuine Biscuit with its proof cut short is refused by every reader of a
-// Biscuit — Verify, BiscuitCopy and Attenuate — rather than handed to a
+// Biscuit — Verify, limes.BiscuitCopy and Attenuate — rather than handed to a
 // library that would panic on it.
 func TestBiscuitRefusesAMalformedProof(t *testing.T) {
-	issuer, v, _, cap, _ := biscuitFixture(t)
-	token, err := issuer.biscuit(context.Background(), asVerified(cap))
-	if err != nil {
-		t.Fatal(err)
-	}
+	s, _, token := biscuitFixture(t)
+	v := s.verifier
 	proofs := map[string]*pb.Proof{
 		"a short next secret":     {Content: &pb.Proof_NextSecret{NextSecret: []byte{1}}},
 		"a long next secret":      {Content: &pb.Proof_NextSecret{NextSecret: make([]byte, ed25519.SeedSize+1)}},
@@ -134,20 +133,20 @@ func TestBiscuitRefusesAMalformedProof(t *testing.T) {
 	for name, p := range proofs {
 		t.Run(name, func(t *testing.T) {
 			bad := withBiscuitProof(t, token, p)
-			if err := verifyNoPanic(t, v, bad); !errors.Is(err, ErrInvalidToken) {
-				t.Errorf("Verify: err = %v, want ErrInvalidToken", err)
+			if err := verifyNoPanic(t, v, bad); !errors.Is(err, limes.ErrInvalidToken) {
+				t.Errorf("Verify: err = %v, want limes.ErrInvalidToken", err)
 			}
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
-						t.Fatalf("BiscuitCopy or Attenuate panicked: %v", r)
+						t.Fatalf("limes.BiscuitCopy or Attenuate panicked: %v", r)
 					}
 				}()
-				if _, err := v.BiscuitCopy(context.Background(), bad); !errors.Is(err, ErrInvalidToken) {
-					t.Errorf("BiscuitCopy: err = %v, want ErrInvalidToken", err)
+				if _, err := v.BiscuitCopy(context.Background(), bad); !errors.Is(err, limes.ErrInvalidToken) {
+					t.Errorf("BiscuitCopy: err = %v, want limes.ErrInvalidToken", err)
 				}
-				if _, err := Attenuate(bad, Attenuation{Ops: []Op{OpGet}}); !errors.Is(err, ErrInvalidToken) {
-					t.Errorf("Attenuate: err = %v, want ErrInvalidToken", err)
+				if _, err := Attenuate(bad, limes.Attenuation{Ops: []limes.Op{limes.OpGet}}); !errors.Is(err, limes.ErrInvalidToken) {
+					t.Errorf("Attenuate: err = %v, want limes.ErrInvalidToken", err)
 				}
 			}()
 		})
@@ -157,19 +156,20 @@ func TestBiscuitRefusesAMalformedProof(t *testing.T) {
 // A chain stops at MaxBiscuitBlocks: Attenuate will not append past it, and
 // a verifier refuses a token that has, before looking any of its ids up.
 func TestBiscuitBlocksAreBounded(t *testing.T) {
-	_, v, _, _, token := biscuitFixture(t)
-	for i := range MaxBiscuitBlocks {
-		next, err := Attenuate(token, Attenuation{Ops: []Op{OpGet}})
+	s, _, token := biscuitFixture(t)
+	v := s.verifier
+	for i := range limes.MaxBiscuitBlocks {
+		next, err := Attenuate(token, limes.Attenuation{Ops: []limes.Op{limes.OpGet}})
 		if err != nil {
-			t.Fatalf("block %d of %d: %v", i+1, MaxBiscuitBlocks, err)
+			t.Fatalf("block %d of %d: %v", i+1, limes.MaxBiscuitBlocks, err)
 		}
 		token = next
 	}
-	if _, err := v.Verify(context.Background(), VerifyRequest{Token: token, Audience: audienceData}); err != nil {
-		t.Fatalf("a token of MaxBiscuitBlocks blocks: %v", err)
+	if _, err := v.Verify(context.Background(), limes.VerifyRequest{Token: token, Audience: audienceData}); err != nil {
+		t.Fatalf("a token of limes.MaxBiscuitBlocks blocks: %v", err)
 	}
-	if _, err := Attenuate(token, Attenuation{Ops: []Op{OpGet}}); !errors.Is(err, ErrInvalidRequest) {
-		t.Errorf("a block past MaxBiscuitBlocks: err = %v, want ErrInvalidRequest", err)
+	if _, err := Attenuate(token, limes.Attenuation{Ops: []limes.Op{limes.OpGet}}); !errors.Is(err, limes.ErrInvalidRequest) {
+		t.Errorf("a block past MaxBiscuitBlocks: err = %v, want limes.ErrInvalidRequest", err)
 	}
 	// One more block, appended as any holder could without Attenuate.
 	b, err := parseBiscuit(token)
@@ -184,7 +184,7 @@ func TestBiscuitBlocksAreBounded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v.Verify(context.Background(), VerifyRequest{Token: over, Audience: audienceData}); !errors.Is(err, ErrInvalidToken) {
-		t.Errorf("a token past MaxBiscuitBlocks: err = %v, want ErrInvalidToken", err)
+	if _, err := v.Verify(context.Background(), limes.VerifyRequest{Token: over, Audience: audienceData}); !errors.Is(err, limes.ErrInvalidToken) {
+		t.Errorf("a token past MaxBiscuitBlocks: err = %v, want limes.ErrInvalidToken", err)
 	}
 }

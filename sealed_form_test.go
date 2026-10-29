@@ -100,7 +100,7 @@ type form struct {
 
 func (f *form) Seal(ctx context.Context, sign func(context.Context, ed25519.PublicKey) (string, error)) (string, error) {
 	f.sealed++
-	return biscuitForm{}.Seal(ctx, func(ctx context.Context, root ed25519.PublicKey) (string, error) {
+	return fakeForm{}.Seal(ctx, func(ctx context.Context, root ed25519.PublicKey) (string, error) {
 		if f.root != nil {
 			root = f.root(root)
 		}
@@ -113,7 +113,7 @@ func (f *form) Open(token string) (string, func(ed25519.PublicKey) (Unsealed, er
 	if f.openErr != nil {
 		return "", nil, f.openErr
 	}
-	inner, unseal, err := biscuitForm{}.Open(token)
+	inner, unseal, err := fakeForm{}.Open(token)
 	if err != nil || f.unseal == nil {
 		return inner, unseal, err
 	}
@@ -145,7 +145,7 @@ func formFixture(t *testing.T, f *form) (*Verifier, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	narrowed, err := Attenuate(token, Attenuation{Ops: []Op{OpGet}})
+	narrowed, err := attenuate(token, Attenuation{Ops: []Op{OpGet}})
 	if err != nil {
 		t.Fatal(err)
 	}

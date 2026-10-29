@@ -15,8 +15,9 @@ import (
 // storage nor a particular database, so its RESOLVED dependency graph — not
 // its go.mod, a transitive pull disqualifies it just as much — may contain no
 // database driver, no object-storage SDK, no Redis client, which the
-// redisreplay module brings, and no OpenTelemetry, which the otelmetric module
-// brings for a consumer that wants it. The check lives in the module's own
+// redisreplay module brings, no OpenTelemetry, which the otelmetric module
+// brings for a consumer that wants it, and neither biscuit-go nor protobuf,
+// which the biscuit module brings for the Biscuit form. The check lives in the module's own
 // suite so that `task verify-all`, and through it CI, cannot run without it.
 
 // Labels for the properties, as the failure message states them.
@@ -25,6 +26,7 @@ const (
 	labelStorageSDK     = "an object-storage SDK"
 	labelTelemetry      = "OpenTelemetry"
 	labelRedisClient    = "a Redis client"
+	labelBiscuit        = "the Biscuit form, which the biscuit module brings"
 )
 
 // modulePath is this module's own import path. The live check
@@ -69,6 +71,8 @@ var forbiddenImports = []forbiddenImport{
 	{prefix: "github.com/gomodule/redigo", label: labelRedisClient},
 	{prefix: "github.com/valkey-io/valkey-go", label: labelRedisClient},
 	{prefix: "github.com/alicebob/miniredis", label: labelRedisClient},
+	{prefix: "github.com/eclipse-biscuit/biscuit-go", label: labelBiscuit},
+	{prefix: "google.golang.org/protobuf", label: labelBiscuit},
 }
 
 // dependencyViolation is one forbidden package found in the graph.

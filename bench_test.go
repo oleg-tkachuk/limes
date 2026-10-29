@@ -16,7 +16,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
-	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -34,9 +33,6 @@ const (
 	benchResource = "corpus/public/report.pdf"
 	benchUnit     = "USD"
 	benchTTL      = time.Hour
-	// benchBlocks is how many attenuation blocks the attenuated Biscuit
-	// carries beyond its authority block.
-	benchBlocks = 3
 	// benchProofMethod and benchProofURL are the request a proof is signed
 	// for.
 	benchProofMethod = "GET"
@@ -100,7 +96,7 @@ func newBenchEnv(b *testing.B, bound ed25519.PublicKey) benchEnv {
 	}
 	verifier, err := limes.NewVerifier(limes.VerifierConfig{
 		Keys: keys, Revocations: cache, TrustedIssuers: []string{benchIssuer},
-		Biscuit: &limes.BiscuitConfig{Revocations: cache}, DPoP: proofs,
+		DPoP: proofs,
 	})
 	if err != nil {
 		b.Fatal(err)
@@ -141,17 +137,6 @@ func BenchmarkIssue(b *testing.B) {
 	env := newBenchEnv(b, nil)
 	for b.Loop() {
 		if _, err := env.issuer.Issue(context.Background(), env.request); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-// Minting the Biscuit form of a capability the verifier accepted.
-func BenchmarkBiscuit(b *testing.B) {
-	env := newBenchEnv(b, nil)
-	req := limes.BiscuitRequest{Capability: env.verified}
-	for b.Loop() {
-		if _, err := env.issuer.Biscuit(context.Background(), req); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -218,56 +203,6 @@ func BenchmarkVerifyJWTWithDPoP(b *testing.B) {
 		}
 		req := limes.VerifyRequest{Token: env.token, Audience: benchAudience, DPoP: dpop.Proof{JWT: proof, Method: benchProofMethod, URL: benchProofURL}}
 		if _, err := env.verifier.Verify(ctx, req); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-// benchBiscuit is the Biscuit form of env's capability, attenuated by
-// blocks blocks.
-func benchBiscuit(b *testing.B, env benchEnv, blocks int) string {
-	b.Helper()
-	res, err := env.issuer.Biscuit(context.Background(), limes.BiscuitRequest{Capability: env.verified})
-	if err != nil {
-		b.Fatal(err)
-	}
-	// Each block narrows the one before: a prefix under its prefix.
-	token, prefix := res.Token, "corpus/public/"
-	for i := range blocks {
-		prefix += strconv.Itoa(i) + "/"
-		if token, err = limes.Attenuate(token, limes.Attenuation{ResourcePrefixes: []string{prefix}}); err != nil {
-			b.Fatal(err)
-		}
-	}
-	return token
-}
-
-func BenchmarkVerifyBiscuit(b *testing.B) {
-	env := newBenchEnv(b, nil)
-	req := limes.VerifyRequest{Token: benchBiscuit(b, env, 0), Audience: benchAudience}
-	for b.Loop() {
-		if _, err := env.verifier.Verify(context.Background(), req); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkVerifyBiscuitAttenuated(b *testing.B) {
-	env := newBenchEnv(b, nil)
-	req := limes.VerifyRequest{Token: benchBiscuit(b, env, benchBlocks), Audience: benchAudience}
-	for b.Loop() {
-		if _, err := env.verifier.Verify(context.Background(), req); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkAttenuate(b *testing.B) {
-	env := newBenchEnv(b, nil)
-	token := benchBiscuit(b, env, 0)
-	a := limes.Attenuation{ResourcePrefixes: []string{"corpus/public/2026/"}}
-	for b.Loop() {
-		if _, err := limes.Attenuate(token, a); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -353,15 +288,6 @@ func BenchmarkVerifyJWTWithDPoPParallel(b *testing.B) {
 			return err
 		}
 		_, err = env.verifier.Verify(ctx, limes.VerifyRequest{Token: env.token, Audience: benchAudience, DPoP: dpop.Proof{JWT: proof, Method: benchProofMethod, URL: benchProofURL}})
-		return err
-	})
-}
-
-func BenchmarkVerifyBiscuitParallel(b *testing.B) {
-	env := newBenchEnv(b, nil)
-	req := limes.VerifyRequest{Token: benchBiscuit(b, env, benchBlocks), Audience: benchAudience}
-	parallel(b, func() error {
-		_, err := env.verifier.Verify(context.Background(), req)
 		return err
 	})
 }

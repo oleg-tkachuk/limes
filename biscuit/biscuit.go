@@ -1,4 +1,10 @@
-package limes
+// Package biscuit is the Biscuit form of a limes capability token: a
+// Biscuit v3 whose authority block seals the JWT an issuer signed, and whose
+// attenuation blocks its holder appends offline (Attenuate). Give Form to
+// limes.IssuerConfig.Biscuit and limes.BiscuitConfig.Form. A module of its
+// own, so that a consumer of JWT capabilities alone resolves neither
+// biscuit-go nor protobuf (docs/adr/0008-biscuit-module.md).
+package biscuit
 
 import (
 	"context"
@@ -11,11 +17,12 @@ import (
 	"strings"
 	"time"
 
-	biscuit "github.com/eclipse-biscuit/biscuit-go/v2"
+	biscuitgo "github.com/eclipse-biscuit/biscuit-go/v2"
 	"github.com/eclipse-biscuit/biscuit-go/v2/datalog"
 	"github.com/eclipse-biscuit/biscuit-go/v2/pb"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/internal/jose"
 )
 
@@ -34,7 +41,7 @@ import (
 // fresh Biscuit without the attenuation. The JWT itself is refused when
 // presented alone.
 //
-// Attenuation blocks speak a fixed vocabulary of facts — the operations,
+// limes.Attenuation blocks speak a fixed vocabulary of facts — the operations,
 // resources, planes and expiry they allow, a key to bind to, and request and
 // budget limits of the copy's own — which the verifier folds into a narrower
 // Capability through Narrows, exactly as a server-side delegation is checked,
@@ -58,16 +65,16 @@ const (
 
 // Attenuate appends a block that narrows token. It needs no key and no
 // network; the result is a new token, and the input still works as before.
-func Attenuate(token string, a Attenuation) (string, error) {
+func Attenuate(token string, a limes.Attenuation) (string, error) {
 	b, err := parseBiscuit(token)
 	if err != nil {
 		return "", err
 	}
 	// BlockCount counts the attenuation blocks, not the authority.
-	if attenuations := b.BlockCount(); attenuations >= MaxBiscuitBlocks {
-		return "", invalidRequest("the token already has %d attenuation blocks, MaxBiscuitBlocks", attenuations)
+	if attenuations := b.BlockCount(); attenuations >= limes.MaxBiscuitBlocks {
+		return "", invalidRequest("the token already has %d attenuation blocks, limes.MaxBiscuitBlocks", attenuations)
 	}
-	if err := checkAttenuation(a); err != nil {
+	if err := a.Validate(); err != nil {
 		return "", err
 	}
 	block := b.CreateBlock()
@@ -87,7 +94,7 @@ func Attenuate(token string, a Attenuation) (string, error) {
 
 // attenuationFacts are the facts of the block that carries a, which
 // checkAttenuation accepted.
-func attenuationFacts(a Attenuation) []biscuit.Fact {
+func attenuationFacts(a limes.Attenuation) []biscuitgo.Fact {
 	facts := slices.Concat(
 		stringFacts(biscuitFactOp, a.Ops),
 		stringFacts(biscuitFactResourcePrefix, a.ResourcePrefixes),
@@ -95,37 +102,37 @@ func attenuationFacts(a Attenuation) []biscuit.Fact {
 		stringFacts(biscuitFactPlane, a.Audience),
 	)
 	if !a.ExpiresAt.IsZero() {
-		facts = append(facts, biscuitFact(biscuitFactExpires, biscuit.Date(a.ExpiresAt.UTC().Truncate(time.Second))))
+		facts = append(facts, biscuitFact(biscuitFactExpires, biscuitgo.Date(a.ExpiresAt.UTC().Truncate(time.Second))))
 	}
 	if a.ConfirmationJKT != "" {
-		facts = append(facts, biscuitFact(biscuitFactBind, biscuit.String(a.ConfirmationJKT)))
+		facts = append(facts, biscuitFact(biscuitFactBind, biscuitgo.String(a.ConfirmationJKT)))
 	}
 	if a.Requests != nil {
-		facts = append(facts, biscuitFact(biscuitFactMaxRequests, biscuit.Integer(a.Requests.Max)))
+		facts = append(facts, biscuitFact(biscuitFactMaxRequests, biscuitgo.Integer(a.Requests.Max)))
 	}
 	if a.Budget != nil {
-		facts = append(facts, biscuitFact(biscuitFactMaxBudget, biscuit.Integer(a.Budget.Max)))
+		facts = append(facts, biscuitFact(biscuitFactMaxBudget, biscuitgo.Integer(a.Budget.Max)))
 	}
 	return facts
 }
 
 // stringFacts is one fact named name for each of values.
-func stringFacts[S ~string](name string, values []S) []biscuit.Fact {
-	facts := make([]biscuit.Fact, 0, len(values))
+func stringFacts[S ~string](name string, values []S) []biscuitgo.Fact {
+	facts := make([]biscuitgo.Fact, 0, len(values))
 	for _, v := range values {
-		facts = append(facts, biscuitFact(name, biscuit.String(v)))
+		facts = append(facts, biscuitFact(name, biscuitgo.String(v)))
 	}
 	return facts
 }
 
-// biscuitForm is the Biscuit form of a capability token (TokenForm): a
+// form is the Biscuit form of a capability token (limes.TokenForm): a
 // Biscuit v3 whose authority block seals the JWT, and whose attenuation
 // blocks speak the vocabulary of facts above.
-type biscuitForm struct{}
+type form struct{}
 
 // Seal builds a Biscuit around the JWT sign returns for a fresh root key,
 // whose private half signs the authority block and is then dropped.
-func (biscuitForm) Seal(ctx context.Context, sign func(ctx context.Context, root ed25519.PublicKey) (string, error)) (string, error) {
+func (form) Seal(ctx context.Context, sign func(ctx context.Context, root ed25519.PublicKey) (string, error)) (string, error) {
 	rootPub, rootPriv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return "", fmt.Errorf("limes: biscuit root key: %w", err)
@@ -134,8 +141,8 @@ func (biscuitForm) Seal(ctx context.Context, sign func(ctx context.Context, root
 	if err != nil {
 		return "", err
 	}
-	b := biscuit.NewBuilder(rootPriv)
-	if err := b.AddAuthorityFact(biscuitFact(biscuitFactCapability, biscuit.String(inner))); err != nil {
+	b := biscuitgo.NewBuilder(rootPriv)
+	if err := b.AddAuthorityFact(biscuitFact(biscuitFactCapability, biscuitgo.String(inner))); err != nil {
 		return "", fmt.Errorf("limes: biscuit authority: %w", err)
 	}
 	token, err := b.Build()
@@ -148,23 +155,23 @@ func (biscuitForm) Seal(ctx context.Context, sign func(ctx context.Context, root
 // Open reads a Biscuit's sealed JWT and returns it with the function that
 // finishes reading the token once the caller has verified that JWT: the
 // signature chain under the root the JWT names, then each attenuation
-// block read as an Attenuation.
-func (biscuitForm) Open(token string) (string, func(root ed25519.PublicKey) (Unsealed, error), error) {
+// block read as an limes.Attenuation.
+func (form) Open(token string) (string, func(root ed25519.PublicKey) (limes.Unsealed, error), error) {
 	raw, container, err := decodeBiscuitContainer(token)
 	if err != nil {
 		return "", nil, err
 	}
 	blocks, err := decodeBiscuitBlocks(container)
 	if err != nil {
-		return "", nil, refuseToken(ErrInvalidToken, err)
+		return "", nil, refuse(limes.ErrInvalidToken, err)
 	}
 	inner, err := sealedToken(blocks[0])
 	if err != nil {
-		return "", nil, refuseToken(ErrInvalidToken, err)
+		return "", nil, refuse(limes.ErrInvalidToken, err)
 	}
 	// The chain is checked once the sealed token has named its root; the
 	// caller verifies that token first and hands back what it vouches for.
-	unseal := func(root ed25519.PublicKey) (Unsealed, error) {
+	unseal := func(root ed25519.PublicKey) (limes.Unsealed, error) {
 		return unsealBiscuit(raw, blocks, root)
 	}
 	return inner, unseal, nil
@@ -172,16 +179,16 @@ func (biscuitForm) Open(token string) (string, func(root ed25519.PublicKey) (Uns
 
 // unsealBiscuit verifies a Biscuit's chain under root and reads each of its
 // attenuation blocks.
-func unsealBiscuit(raw []byte, blocks []decodedBlock, root ed25519.PublicKey) (Unsealed, error) {
+func unsealBiscuit(raw []byte, blocks []decodedBlock, root ed25519.PublicKey) (limes.Unsealed, error) {
 	ids, err := verifyBiscuitChain(raw, root)
 	if err != nil {
-		return Unsealed{}, err
+		return limes.Unsealed{}, err
 	}
-	u := Unsealed{RevocationIDs: ids}
+	u := limes.Unsealed{RevocationIDs: ids}
 	for i, blk := range blocks[1:] {
 		f, err := readBlockFacts(blk)
 		if err != nil {
-			return Unsealed{}, refuseToken(ErrBiscuitAttenuation, fmt.Errorf("block %d: %w", i+1, err))
+			return limes.Unsealed{}, refuse(limes.ErrBiscuitAttenuation, fmt.Errorf("block %d: %w", i+1, err))
 		}
 		u.Blocks = append(u.Blocks, f.attenuation())
 	}
@@ -193,7 +200,7 @@ func unsealBiscuit(raw []byte, blocks []decodedBlock, root ed25519.PublicKey) (U
 func verifyBiscuitChain(raw []byte, root ed25519.PublicKey) ([][]byte, error) {
 	var ids [][]byte
 	if err := guardBiscuit(func() error {
-		b, err := biscuit.Unmarshal(raw)
+		b, err := biscuitgo.Unmarshal(raw)
 		if err != nil {
 			return err
 		}
@@ -222,8 +229,8 @@ type decodedFact struct {
 // decodeBiscuitBlocks reads every block's facts as data. The signatures are
 // not checked here — the caller does that before trusting anything read.
 func decodeBiscuitBlocks(c *pb.Biscuit) ([]decodedBlock, error) {
-	if n := len(c.GetBlocks()); n > MaxBiscuitBlocks {
-		return nil, fmt.Errorf("%d attenuation blocks, past MaxBiscuitBlocks (%d)", n, MaxBiscuitBlocks)
+	if n := len(c.GetBlocks()); n > limes.MaxBiscuitBlocks {
+		return nil, fmt.Errorf("%d attenuation blocks, past limes.MaxBiscuitBlocks (%d)", n, limes.MaxBiscuitBlocks)
 	}
 	signed := append([]*pb.SignedBlock{c.GetAuthority()}, c.GetBlocks()...)
 	symbols := &datalog.SymbolTable{}
@@ -308,15 +315,15 @@ func sealedToken(authority decodedBlock) (string, error) {
 // A fact the block repeats accumulates (ops, resources, planes), takes the
 // earliest value (expiry) or takes the last (binding, copy limits).
 type blockFacts struct {
-	ops            []Op
+	ops            []limes.Op
 	prefixes, uris []string
 	planes         []string
 	expires        time.Time
 	bind           string
 	// requests and budget are the copy ceilings the block set, nil for an
 	// axis it left alone.
-	requests *RequestCeiling
-	budget   *BudgetCeiling
+	requests *limes.RequestCeiling
+	budget   *limes.BudgetCeiling
 }
 
 // readBlockFacts reads blk's facts, refusing any outside the vocabulary or
@@ -359,7 +366,7 @@ func (f *blockFacts) readListed(fact decodedFact) error {
 		return fmt.Errorf("%s takes a string", fact.name)
 	}
 	if fact.name == biscuitFactOp {
-		f.ops = append(f.ops, Op(s))
+		f.ops = append(f.ops, limes.Op(s))
 	} else {
 		f.planes = append(f.planes, s)
 	}
@@ -397,7 +404,7 @@ func (f *blockFacts) readExpires(fact decodedFact) error {
 // may be bound to it is applyAttenuation's to decide.
 func (f *blockFacts) readBind(fact decodedFact) error {
 	s, ok := fact.term.(string)
-	if !ok || validateThumbprint(s) != nil {
+	if !ok || (limes.Attenuation{ConfirmationJKT: s}).Validate() != nil {
 		return errors.New("limes_bind takes a JWK thumbprint")
 	}
 	f.bind = s
@@ -411,36 +418,36 @@ func (f *blockFacts) readCeiling(fact decodedFact) error {
 		return fmt.Errorf("%s takes an integer of 0 or more", fact.name)
 	}
 	if fact.name == biscuitFactMaxRequests {
-		f.requests = &RequestCeiling{Max: n}
+		f.requests = &limes.RequestCeiling{Max: n}
 	} else {
-		f.budget = &BudgetCeiling{Max: Nanos(n)}
+		f.budget = &limes.BudgetCeiling{Max: limes.Nanos(n)}
 	}
 	return nil
 }
 
 // attenuation is what the block says, as the core folds it in.
-func (f blockFacts) attenuation() Attenuation {
-	return Attenuation{
+func (f blockFacts) attenuation() limes.Attenuation {
+	return limes.Attenuation{
 		Ops: f.ops, ResourcePrefixes: f.prefixes, ResourceURIs: f.uris, Audience: f.planes,
 		ExpiresAt: f.expires, ConfirmationJKT: f.bind, Requests: f.requests, Budget: f.budget,
 	}
 }
 
-func biscuitFact(name string, term biscuit.Term) biscuit.Fact {
-	return biscuit.Fact{Predicate: biscuit.Predicate{Name: name, IDs: []biscuit.Term{term}}}
+func biscuitFact(name string, term biscuitgo.Term) biscuitgo.Fact {
+	return biscuitgo.Fact{Predicate: biscuitgo.Predicate{Name: name, IDs: []biscuitgo.Term{term}}}
 }
 
-func parseBiscuit(token string) (*biscuit.Biscuit, error) {
+func parseBiscuit(token string) (*biscuitgo.Biscuit, error) {
 	if !isBiscuit(token) {
-		return nil, fmt.Errorf("%w: not a Biscuit token", ErrInvalidToken)
+		return nil, fmt.Errorf("%w: not a Biscuit token", limes.ErrInvalidToken)
 	}
 	raw, _, err := decodeBiscuitContainer(token)
 	if err != nil {
 		return nil, err
 	}
-	var b *biscuit.Biscuit
+	var b *biscuitgo.Biscuit
 	if err := guardBiscuit(func() error {
-		b, err = biscuit.Unmarshal(raw)
+		b, err = biscuitgo.Unmarshal(raw)
 		return err
 	}); err != nil {
 		return nil, err
@@ -479,23 +486,23 @@ func unB64Biscuit(token string) ([]byte, error) {
 func decodeBiscuitContainer(token string) ([]byte, *pb.Biscuit, error) {
 	raw, err := unB64Biscuit(token)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: biscuit encoding: %w", ErrInvalidToken, err)
+		return nil, nil, fmt.Errorf("%w: biscuit encoding: %w", limes.ErrInvalidToken, err)
 	}
 	var c pb.Biscuit
 	if err := proto.Unmarshal(raw, &c); err != nil || c.GetAuthority() == nil {
-		return nil, nil, fmt.Errorf("%w: biscuit container", ErrInvalidToken)
+		return nil, nil, fmt.Errorf("%w: biscuit container", limes.ErrInvalidToken)
 	}
 	switch p := c.GetProof().GetContent().(type) {
 	case *pb.Proof_NextSecret:
 		if len(p.NextSecret) != ed25519.SeedSize {
-			return nil, nil, fmt.Errorf("%w: biscuit proof secret is %d bytes, not %d", ErrInvalidToken, len(p.NextSecret), ed25519.SeedSize)
+			return nil, nil, fmt.Errorf("%w: biscuit proof secret is %d bytes, not %d", limes.ErrInvalidToken, len(p.NextSecret), ed25519.SeedSize)
 		}
 	case *pb.Proof_FinalSignature:
 		if len(p.FinalSignature) != ed25519.SignatureSize {
-			return nil, nil, fmt.Errorf("%w: biscuit final signature is %d bytes, not %d", ErrInvalidToken, len(p.FinalSignature), ed25519.SignatureSize)
+			return nil, nil, fmt.Errorf("%w: biscuit final signature is %d bytes, not %d", limes.ErrInvalidToken, len(p.FinalSignature), ed25519.SignatureSize)
 		}
 	default:
-		return nil, nil, fmt.Errorf("%w: biscuit proof has no content", ErrInvalidToken)
+		return nil, nil, fmt.Errorf("%w: biscuit proof has no content", limes.ErrInvalidToken)
 	}
 	return raw, &c, nil
 }
@@ -517,26 +524,45 @@ func biscuitSymbol(table datalog.SymbolTable, id uint64) (string, error) {
 }
 
 // guardBiscuit runs f, a call into biscuit-go over bytes the token's holder
-// chose, and returns its error as ErrInvalidToken — and a panic as one too.
+// chose, and returns its error as limes.ErrInvalidToken — and a panic as one too.
 // The container is checked before biscuit-go sees it, but biscuit-go also
 // decodes every block's rules, checks and expressions, which limes then
 // refuses; a token must never take the process down on the way there.
 func guardBiscuit(f func() error) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("%w: biscuit: %v", ErrInvalidToken, r)
+			err = fmt.Errorf("%w: biscuit: %v", limes.ErrInvalidToken, r)
 		}
 	}()
 	if err := f(); err != nil {
-		return refuseToken(ErrInvalidToken, err)
+		return refuse(limes.ErrInvalidToken, err)
 	}
 	return nil
 }
 
-func serializeBiscuit(b *biscuit.Biscuit) (string, error) {
+func serializeBiscuit(b *biscuitgo.Biscuit) (string, error) {
 	raw, err := b.Serialize()
 	if err != nil {
 		return "", fmt.Errorf("limes: serialize biscuit: %w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(raw), nil
+}
+
+// Form is the Biscuit form, for limes.IssuerConfig.Biscuit and
+// limes.BiscuitConfig.Form.
+func Form() limes.TokenForm { return form{} }
+
+// isBiscuit reports whether token is in the Biscuit form rather than a JWT:
+// a JWT has exactly two dots, base64url has none.
+func isBiscuit(token string) bool {
+	return token != "" && !strings.Contains(token, ".")
+}
+
+// refuse is err as a refusal of the token in family, as limes reads a
+// form's errors.
+func refuse(family, err error) error { return fmt.Errorf("%w: %s", family, err.Error()) }
+
+// invalidRequest is a malformed call: limes.ErrInvalidRequest.
+func invalidRequest(format string, args ...any) error {
+	return fmt.Errorf("%w: "+format, append([]any{limes.ErrInvalidRequest}, args...)...)
 }

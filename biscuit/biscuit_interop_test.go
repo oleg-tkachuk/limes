@@ -1,4 +1,4 @@
-package limes
+package biscuit
 
 import (
 	"context"
@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/oleg-tkachuk/limes"
 )
 
 // Blocks the reference implementation appended to the shared seed
@@ -28,11 +30,11 @@ const (
 )
 
 // foreignAttenuation is foreign.datalog, for Attenuate.
-var foreignAttenuation = Attenuation{
-	Ops:              []Op{OpGet},
+var foreignAttenuation = limes.Attenuation{
+	Ops:              []limes.Op{limes.OpGet},
 	ResourcePrefixes: []string{"corpus/public/"},
 	ExpiresAt:        goldenClock().Add(30 * time.Minute),
-	Requests:         &RequestCeiling{Max: foreignCopyRequests},
+	Requests:         &limes.RequestCeiling{Max: foreignCopyRequests},
 }
 
 // A block another implementation appended, holding facts of the profile,
@@ -40,7 +42,7 @@ var foreignAttenuation = Attenuation{
 func TestAForeignBlockIsReadAsLimesWrote(t *testing.T) {
 	v := goldenBiscuitVerifier(t)
 	ctx := context.Background()
-	foreign, err := v.Verify(ctx, VerifyRequest{Token: readBiscuitFixture(t, biscuitForeignFile), Audience: audienceData})
+	foreign, err := v.Verify(ctx, limes.VerifyRequest{Token: readBiscuitFixture(t, biscuitForeignFile), Audience: audienceData})
 	if err != nil {
 		t.Fatalf("a block biscuit-cli appended: %v", err)
 	}
@@ -48,7 +50,7 @@ func TestAForeignBlockIsReadAsLimesWrote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ours, err := v.Verify(ctx, VerifyRequest{Token: own, Audience: audienceData})
+	ours, err := v.Verify(ctx, limes.VerifyRequest{Token: own, Audience: audienceData})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,9 +68,9 @@ func TestAForeignBlockIsReadAsLimesWrote(t *testing.T) {
 // A check is Biscuit's language, which a limes verifier does not run: a
 // block holding one is refused, whoever appended it.
 func TestAForeignCheckIsRefused(t *testing.T) {
-	_, err := goldenBiscuitVerifier(t).Verify(context.Background(), VerifyRequest{Token: readBiscuitFixture(t, biscuitForeignCheckFile), Audience: audienceData})
-	if !errors.Is(err, ErrBiscuitAttenuation) {
-		t.Errorf("a block with a check: err = %v, want ErrBiscuitAttenuation", err)
+	_, err := goldenBiscuitVerifier(t).Verify(context.Background(), limes.VerifyRequest{Token: readBiscuitFixture(t, biscuitForeignCheckFile), Audience: audienceData})
+	if !errors.Is(err, limes.ErrBiscuitAttenuation) {
+		t.Errorf("a block with a check: err = %v, want limes.ErrBiscuitAttenuation", err)
 	}
 }
 

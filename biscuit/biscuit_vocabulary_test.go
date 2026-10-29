@@ -1,4 +1,4 @@
-package limes
+package biscuit
 
 import (
 	"crypto/sha256"
@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -68,13 +67,8 @@ func TestBiscuitVocabularyMatchesSharedSpec(t *testing.T) {
 	if v.Authority.Fact != biscuitFactCapability {
 		t.Errorf("authority fact = %q, want %q", v.Authority.Fact, biscuitFactCapability)
 	}
-	field, ok := reflect.TypeFor[jwtClaims]().FieldByName("BiscuitRoot")
-	if !ok {
-		t.Fatal("jwtClaims has no BiscuitRoot")
-	}
-	if claim, _, _ := strings.Cut(field.Tag.Get("json"), ","); v.Authority.RootClaim != claim {
-		t.Errorf("root claim = %q, want %q", v.Authority.RootClaim, claim)
-	}
+	// The root claim is the sealed JWT's: limes's own test holds it to
+	// this file.
 	wantTogether := [][]string{{biscuitFactResourcePrefix, biscuitFactResourceURI}}
 	if !reflect.DeepEqual(v.ReplaceTogether, wantTogether) {
 		t.Errorf("replace_together = %v, want %v", v.ReplaceTogether, wantTogether)

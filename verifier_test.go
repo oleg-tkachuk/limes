@@ -86,7 +86,7 @@ func buildIssuerVerifier(t *testing.T) (*Issuer, *Verifier, *memStore, ed25519.P
 		t.Fatalf("signer: %v", err)
 	}
 	store := newMemStore()
-	issuer, err := NewIssuer(IssuerConfig{
+	issuer, err := NewIssuer(IssuerConfig{Biscuit: fakeForm{},
 		Signer:     signer,
 		Store:      store,
 		IssuerName: "limes-test",
@@ -167,7 +167,7 @@ func TestVerify_Expired(t *testing.T) {
 	frozen := time.Date(2030, 1, 1, 12, 0, 0, 0, time.UTC)
 	clock := &mutableClock{now: frozen}
 
-	issuer, _ := NewIssuer(IssuerConfig{
+	issuer, _ := NewIssuer(IssuerConfig{Biscuit: fakeForm{},
 		Signer:     signer,
 		Store:      store,
 		IssuerName: "limes-test",
@@ -215,7 +215,7 @@ func TestVerify_UntrustedIssuer(t *testing.T) {
 	signer, _ := NewSigner(SignerConfig{KeyID: testKID, Key: SealKey(priv)})
 	store := newMemStore()
 
-	rogueIssuer, _ := NewIssuer(IssuerConfig{
+	rogueIssuer, _ := NewIssuer(IssuerConfig{Biscuit: fakeForm{},
 		Signer:     signer,
 		Store:      store,
 		IssuerName: "limes-rogue",
@@ -404,7 +404,7 @@ func TestDelegateRefusesAnyBiscuitCopy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	copyToken, err := Attenuate(token, Attenuation{Ops: []Op{OpGet}})
+	copyToken, err := attenuate(token, Attenuation{Ops: []Op{OpGet}})
 	if err != nil {
 		t.Fatal(err)
 	}

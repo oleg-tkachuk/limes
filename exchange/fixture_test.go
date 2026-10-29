@@ -181,7 +181,7 @@ func newFixture(t testing.TB, fc fixtureConfig) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	issuer, err := limes.NewIssuer(limes.IssuerConfig{Signer: signer, Store: f.store, IssuerName: limesIssuer, Now: clock})
+	issuer, err := limes.NewIssuer(limes.IssuerConfig{Signer: signer, Store: f.store, IssuerName: limesIssuer, Now: clock, Biscuit: copyForm{}})
 	if err != nil {
 		t.Fatal(err)
 	}

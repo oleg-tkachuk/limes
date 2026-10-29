@@ -1,4 +1,4 @@
-package limes
+package biscuit
 
 import (
 	"context"
@@ -13,6 +13,7 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/dpop"
 )
 
@@ -48,21 +49,9 @@ func readBiscuitFixture(t *testing.T, name string) string {
 	return strings.TrimSpace(string(raw))
 }
 
-func goldenBiscuitVerifier(t *testing.T) *Verifier {
+func goldenBiscuitVerifier(t *testing.T) *limes.Verifier {
 	t.Helper()
-	priv := ed25519.NewKeyFromSeed(goldenSeed[:])
-	v, err := NewVerifier(VerifierConfig{
-		Keys:           staticKeys(t, map[string]ed25519.PublicKey{goldenKID: priv.Public().(ed25519.PublicKey)}),
-		Revocations:    revLookup{},
-		TrustedIssuers: []string{goldenIssuer},
-		Now:            goldenClock,
-		Biscuit:        &BiscuitConfig{Revocations: revLookup{}, MeterCopies: true},
-		DPoP:           newVerifier(t, dpop.VerifierConfig{Replay: newReplay(t, dpop.MemoryReplayCacheConfig{}), Now: goldenClock}),
-	})
-	if err != nil {
-		t.Fatalf("verifier: %v", err)
-	}
-	return v
+	return goldenStack(t, nil).verifier
 }
 
 // TestGenerateBiscuitFixtures mints seed.biscuit and attenuates it into
@@ -72,35 +61,17 @@ func TestGenerateBiscuitFixtures(t *testing.T) {
 	if os.Getenv(biscuitWriteEnv) != biscuitWriteFlag {
 		t.Skipf("set %s=%s to (re)generate the fixtures", biscuitWriteEnv, biscuitWriteFlag)
 	}
-	signer, err := NewSigner(SignerConfig{KeyID: goldenKID, Key: SealKey(ed25519.NewKeyFromSeed(goldenSeed[:]))})
-	if err != nil {
-		t.Fatal(err)
-	}
-	issuer, err := NewIssuer(IssuerConfig{
-		Signer: signer, Store: genStore{}, IssuerName: goldenIssuer,
-		DefaultTTL: biscuitSeedTTL, Now: goldenClock,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	cap, _, err := issuer.issue(context.Background(), IssueRequest{ClientID: testClientID,
-		IssuedBy: Principal{Subject: "test-operator"},
-		Subject:  Principal{Type: PrincipalTypeAgent, TenantID: uuid.MustParse(goldenTenant), Subject: goldenSubject},
+	_, token := goldenStack(t, nil).seal(t, limes.IssueRequest{ClientID: testClientID,
+		IssuedBy: limes.Principal{Subject: "test-operator"},
+		Subject:  limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: uuid.MustParse(goldenTenant), Subject: goldenSubject},
 		Audience: []string{audienceData, audienceMCP},
-		Caveats: Caveats{
-			Ops: []Op{OpGet, OpList, OpPut, OpShare}, ResourcePrefixes: []string{"corpus/"},
-			Requests: RequestCeiling{Unlimited: true}, Budget: BudgetCeiling{Unlimited: true, UnitCode: "USD"},
-			Copies: CopyQuota{Max: biscuitSeedCopies},
+		Caveats: limes.Caveats{
+			Ops: []limes.Op{limes.OpGet, limes.OpList, limes.OpPut, limes.OpShare}, ResourcePrefixes: []string{"corpus/"},
+			Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true, UnitCode: "USD"},
+			Copies: limes.CopyQuota{Max: biscuitSeedCopies},
 		},
 		TTL: biscuitSeedTTL,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	token, err := issuer.biscuit(context.Background(), asVerified(cap))
-	if err != nil {
-		t.Fatal(err)
-	}
 	if err := os.WriteFile(biscuitFixturePath(biscuitSeedFile), []byte(token+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -110,14 +81,14 @@ func TestGenerateBiscuitFixtures(t *testing.T) {
 	if err != nil || jkt != c.Attenuate.BindJKT {
 		t.Fatalf("bind_jkt = %q, the thumbprint of bind_key_seed's key is %q (%v)", c.Attenuate.BindJKT, jkt, err)
 	}
-	attenuated, err := Attenuate(token, Attenuation{
+	attenuated, err := Attenuate(token, limes.Attenuation{
 		Ops:              c.Attenuate.Ops,
 		ResourcePrefixes: c.Attenuate.ResourcePrefixes,
 		Audience:         c.Attenuate.Planes,
 		ExpiresAt:        c.Attenuate.ExpiresAt,
 		ConfirmationJKT:  c.Attenuate.BindJKT,
-		Requests:         &RequestCeiling{Max: c.Attenuate.MaxRequests},
-		Budget:           &BudgetCeiling{Max: Nanos(c.Attenuate.MaxBudget)},
+		Requests:         &limes.RequestCeiling{Max: c.Attenuate.MaxRequests},
+		Budget:           &limes.BudgetCeiling{Max: limes.Nanos(c.Attenuate.MaxBudget)},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -149,27 +120,27 @@ func readBiscuitCase(t *testing.T) biscuitCase {
 
 type biscuitCase struct {
 	Attenuate struct {
-		Ops              []Op      `json:"ops"`
-		ResourcePrefixes []string  `json:"resource_prefixes"`
-		Planes           []string  `json:"planes"`
-		ExpiresAt        time.Time `json:"expires_at"`
-		BindJKT          string    `json:"bind_jkt"`
-		BindKeySeed      string    `json:"bind_key_seed"`
-		MaxRequests      int64     `json:"max_requests"`
-		MaxBudget        int64     `json:"max_budget_nanos"`
+		Ops              []limes.Op `json:"ops"`
+		ResourcePrefixes []string   `json:"resource_prefixes"`
+		Planes           []string   `json:"planes"`
+		ExpiresAt        time.Time  `json:"expires_at"`
+		BindJKT          string     `json:"bind_jkt"`
+		BindKeySeed      string     `json:"bind_key_seed"`
+		MaxRequests      int64      `json:"max_requests"`
+		MaxBudget        int64      `json:"max_budget_nanos"`
 	} `json:"attenuate"`
 	Expect struct {
-		Ops              []Op      `json:"ops"`
-		ResourcePrefixes []string  `json:"resource_prefixes"`
-		ResourceURIs     []string  `json:"resource_uris"`
-		Planes           []string  `json:"planes"`
-		ExpiresAt        time.Time `json:"expires_at"`
-		ConfirmationJKT  string    `json:"confirmation_jkt"`
-		CopyMaxRequests  int64     `json:"copy_max_requests"`
-		CopyMaxBudget    int64     `json:"copy_max_budget_nanos"`
-		CopyUnitCode     string    `json:"copy_unit_code"`
-		MaxCopies        int64     `json:"max_copies"`
-		UnlimitedCopies  bool      `json:"unlimited_copies"`
+		Ops              []limes.Op `json:"ops"`
+		ResourcePrefixes []string   `json:"resource_prefixes"`
+		ResourceURIs     []string   `json:"resource_uris"`
+		Planes           []string   `json:"planes"`
+		ExpiresAt        time.Time  `json:"expires_at"`
+		ConfirmationJKT  string     `json:"confirmation_jkt"`
+		CopyMaxRequests  int64      `json:"copy_max_requests"`
+		CopyMaxBudget    int64      `json:"copy_max_budget_nanos"`
+		CopyUnitCode     string     `json:"copy_unit_code"`
+		MaxCopies        int64      `json:"max_copies"`
+		UnlimitedCopies  bool       `json:"unlimited_copies"`
 	} `json:"expect"`
 }
 
@@ -180,7 +151,7 @@ func TestSharedAttenuationVerifies(t *testing.T) {
 	v := goldenBiscuitVerifier(t)
 	ctx := context.Background()
 
-	seed, err := v.Verify(ctx, VerifyRequest{Token: readBiscuitFixture(t, biscuitSeedFile), Audience: audienceMCP})
+	seed, err := v.Verify(ctx, limes.VerifyRequest{Token: readBiscuitFixture(t, biscuitSeedFile), Audience: audienceMCP})
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -215,15 +186,15 @@ func TestSharedAttenuationVerifies(t *testing.T) {
 	if got.Capability().ConfirmationJKT != want.ConfirmationJKT {
 		t.Errorf("ConfirmationJKT = %q, want %q", got.Capability().ConfirmationJKT, want.ConfirmationJKT)
 	}
-	if wantCopies := (CopyQuota{Max: want.MaxCopies, Unlimited: want.UnlimitedCopies}); got.Capability().Caveats.Copies != wantCopies {
-		t.Errorf("Caveats.Copies = %v, want %v", got.Capability().Caveats.Copies, wantCopies)
+	if wantCopies := (limes.CopyQuota{Max: want.MaxCopies, Unlimited: want.UnlimitedCopies}); got.Capability().Caveats.Copies != wantCopies {
+		t.Errorf("limes.Caveats.Copies = %v, want %v", got.Capability().Caveats.Copies, wantCopies)
 	}
-	if len(got.Copies()) != 1 || !ceilingIs(got.Copies()[0].Requests, RequestCeiling{Max: want.CopyMaxRequests}) ||
-		!ceilingIs(got.Copies()[0].Budget, BudgetCeiling{Max: Nanos(want.CopyMaxBudget), UnitCode: want.CopyUnitCode}) {
+	if len(got.Copies()) != 1 || !ceilingIs(got.Copies()[0].Requests, limes.RequestCeiling{Max: want.CopyMaxRequests}) ||
+		!ceilingIs(got.Copies()[0].Budget, limes.BudgetCeiling{Max: limes.Nanos(want.CopyMaxBudget), UnitCode: want.CopyUnitCode}) {
 		t.Errorf("Copies = %+v, want one with %d requests and %d nanos of %s",
 			got.Copies(), want.CopyMaxRequests, want.CopyMaxBudget, want.CopyUnitCode)
 	}
-	if _, err := v.Verify(ctx, VerifyRequest{Token: token, Audience: audienceMCP}); err == nil {
+	if _, err := v.Verify(ctx, limes.VerifyRequest{Token: token, Audience: audienceMCP}); err == nil {
 		t.Error("the plane the attenuation dropped is still accepted")
 	}
 }

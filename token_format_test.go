@@ -23,7 +23,7 @@ func issuerOf(t *testing.T, priv ed25519.PrivateKey) *Issuer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	issuer, err := NewIssuer(IssuerConfig{Signer: signer, Store: newMemStore(), IssuerName: "iss"})
+	issuer, err := NewIssuer(IssuerConfig{Biscuit: fakeForm{}, Signer: signer, Store: newMemStore(), IssuerName: "iss"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestClientIDDelegatesAndSeals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	v := verifierFor(t, pub, VerifierConfig{Biscuit: &BiscuitConfig{Revocations: revLookup{}}})
+	v := verifierFor(t, pub, VerifierConfig{Biscuit: &BiscuitConfig{Revocations: revLookup{}, Form: fakeForm{}}})
 	got, err := v.Verify(t.Context(), VerifyRequest{Token: sealed.Token, Audience: audienceData})
 	if err != nil || got.Capability().ClientID != testClientID {
 		t.Errorf("the Biscuit of a capability: client %q, %v", got.Capability().ClientID, err)

@@ -1,13 +1,8 @@
 package limes
 
 import (
-	"crypto/ed25519"
-	"os"
-	"strings"
 	"testing"
 	"time"
-
-	"github.com/eclipse-biscuit/biscuit-go/v2/pb"
 
 	"github.com/oleg-tkachuk/limes/internal/jose"
 )
@@ -30,36 +25,6 @@ func FuzzParseClaims(f *testing.F) {
 		if c.Caveats.Budget.Max < 0 || c.Caveats.Budget.Max > MaxNanos {
 			t.Fatalf("accepted a budget of %d", int64(c.Caveats.Budget.Max))
 		}
-	})
-}
-
-// FuzzOpenBiscuit holds the Biscuit reader to refusing, never panicking on,
-// a token it cannot read: both the part read before any signature is
-// checked, and the chain check that follows once a sealed token has named a
-// root.
-func FuzzOpenBiscuit(f *testing.F) {
-	f.Add("")
-	for _, name := range []string{biscuitSeedFile, biscuitAttenuatedFile} {
-		raw, err := os.ReadFile(biscuitFixturePath(name))
-		if err != nil {
-			f.Fatal(err)
-		}
-		f.Add(strings.TrimSpace(string(raw)))
-	}
-	// Two that once panicked: a symbol id with its top bit set, and a proof
-	// secret one byte long.
-	topBit := uint64(1) << 63
-	f.Add(forgedBiscuitToken(f, &pb.Block{FactsV2: []*pb.FactV2{{Predicate: &pb.PredicateV2{
-		Name: &topBit, Terms: []*pb.TermV2{{Content: &pb.TermV2_Integer{Integer: 1}}},
-	}}}}, make([]byte, ed25519.SeedSize)))
-	f.Add(forgedBiscuitToken(f, &pb.Block{}, []byte{1}))
-	anyRoot := ed25519.PublicKey(make([]byte, ed25519.PublicKeySize))
-	f.Fuzz(func(t *testing.T, token string) {
-		_, unseal, err := biscuitForm{}.Open(token)
-		if err != nil {
-			return
-		}
-		_, _ = unseal(anyRoot)
 	})
 }
 
@@ -88,48 +53,52 @@ func FuzzParseAuthorization(f *testing.F) {
 	})
 }
 
-// FuzzAttenuationBlock folds a block of fuzzer-chosen facts into a
-// capability, past the signature chain FuzzOpenBiscuit cannot forge: what it
-// accepts must narrow the capability it was folded into, and every copy
-// ceiling it adds must fit under the ones already in force.
-func FuzzAttenuationBlock(f *testing.F) {
-	f.Add(biscuitFactOp, string(OpGet), int64(0), int64(0))
-	f.Add(biscuitFactResourcePrefix, "corpus/public/", int64(0), int64(0))
-	f.Add(biscuitFactMaxRequests, "", int64(5), int64(0))
-	f.Add(biscuitFactMaxBudget, "", int64(1_000), int64(0))
-	f.Add(biscuitFactExpires, "", int64(0), int64(1_800_000_000))
-	f.Add(biscuitFactPlane, audienceData, int64(0), int64(0))
+// FuzzApplyAttenuation folds a fuzzer-chosen block into a capability, as
+// whatever form decoded it hands the block to the core: what it accepts
+// must narrow the capability, and every copy ceiling it adds must fit under
+// the ones already in force.
+func FuzzApplyAttenuation(f *testing.F) {
+	f.Add(string(OpGet), "", "", int64(-1), int64(-1), int64(0), false)
+	f.Add("", "corpus/public/", "", int64(-1), int64(-1), int64(0), false)
+	f.Add("", "", "", int64(5), int64(-1), int64(0), false)
+	f.Add("", "", "", int64(-1), int64(1_000), int64(0), true)
+	f.Add("", "", audienceData, int64(-1), int64(-1), int64(1_800_000_000), false)
 	start := time.Unix(1_800_000_000, 0).UTC()
 	parent := validCapability()
 	parent.IssuedAt, parent.NotBefore, parent.ExpiresAt = start, start, start.Add(time.Hour)
 	parent.Caveats.ResourcePrefixes = []string{"corpus/"}
 	parent.Caveats.Requests = RequestCeiling{Max: 10}
 	parent.Caveats.Budget = BudgetCeiling{Max: NanosPerUnit}
-	f.Fuzz(func(t *testing.T, name, s string, n, date int64) {
-		var term any
-		switch {
-		case s != "":
-			term = s
-		case date != 0:
-			term = time.Unix(date, 0).UTC()
-		default:
-			term = n
+	f.Fuzz(func(t *testing.T, op, prefix, plane string, requests, budget, expires int64, unlimited bool) {
+		var a Attenuation
+		if op != "" {
+			a.Ops = []Op{Op(op)}
 		}
-		blk := decodedBlock{facts: []decodedFact{{name: name, term: term}}}
-		f, err := readBlockFacts(blk)
-		if err != nil {
-			return
+		if prefix != "" {
+			a.ResourcePrefixes = []string{prefix}
 		}
-		next, err := applyAttenuation(grant{Capability: parent}, f.attenuation(), []byte("block"))
+		if plane != "" {
+			a.Audience = []string{plane}
+		}
+		if requests >= 0 {
+			a.Requests = &RequestCeiling{Max: requests, Unlimited: unlimited}
+		}
+		if budget >= 0 {
+			a.Budget = &BudgetCeiling{Max: Nanos(budget), Unlimited: unlimited}
+		}
+		if expires != 0 {
+			a.ExpiresAt = time.Unix(expires, 0).UTC()
+		}
+		next, err := applyAttenuation(grant{Capability: parent}, a, []byte("block"))
 		if err != nil {
 			return
 		}
 		if err := Narrows(parent, next.Capability); err != nil {
-			t.Fatalf("accepted %s=%v, which widens: %v", name, term, err)
+			t.Fatalf("accepted %+v, which widens: %v", a, err)
 		}
 		for _, c := range next.copies {
-			if c.Requests != nil && !c.Requests.Within(parent.Caveats.Requests) ||
-				c.Budget != nil && !c.Budget.Within(parent.Caveats.Budget) {
+			if c.Requests != nil && (c.Requests.Unlimited || !c.Requests.Within(parent.Caveats.Requests)) ||
+				c.Budget != nil && (c.Budget.Unlimited || !c.Budget.Within(parent.Caveats.Budget)) {
 				t.Fatalf("accepted a copy ceiling %+v past the capability's", c)
 			}
 		}

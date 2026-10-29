@@ -129,8 +129,8 @@ type BiscuitConfig struct {
 	// refuses every Biscuit at Verify instead.
 	Revocations BiscuitRevocationLookup
 
-	// Form reads the Biscuit form. Nil: the Biscuit form this module
-	// carries.
+	// Form reads the Biscuit form: github.com/oleg-tkachuk/limes/biscuit's
+	// Form. Required.
 	Form TokenForm
 
 	// MeterCopies admits Biscuits whose attenuation blocks set a copy's own
@@ -249,8 +249,8 @@ func biscuitConfig(b *BiscuitConfig) (*BiscuitConfig, error) {
 	if isNilValue(own.Revocations) {
 		return nil, errNoBiscuitRevocations
 	}
-	if own.Form == nil {
-		own.Form = biscuitForm{}
+	if isNilValue(own.Form) {
+		return nil, errNoBiscuitForm
 	}
 	return &own, nil
 }

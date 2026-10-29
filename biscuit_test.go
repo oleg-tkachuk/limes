@@ -3,16 +3,12 @@ package limes
 import (
 	"context"
 	"crypto/ed25519"
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	mathrand "math/rand/v2"
 	"slices"
 	"testing"
 	"time"
 	"uuid"
-
-	biscuit "github.com/eclipse-biscuit/biscuit-go/v2"
 
 	"github.com/oleg-tkachuk/limes/dpop"
 )
@@ -26,11 +22,12 @@ func biscuitFixture(t *testing.T) (*Issuer, *Verifier, *memStore, Capability, st
 func biscuitFixtureOf(t *testing.T, ops []Op) (*Issuer, *Verifier, *memStore, Capability, string) {
 	t.Helper()
 	issuer, _, store, pub := buildIssuerVerifier(t)
+	issuer.form = fakeForm{}
 	verifier, err := NewVerifier(VerifierConfig{
 		Keys:           staticKeys(t, map[string]ed25519.PublicKey{testKID: pub}),
 		Revocations:    store,
 		TrustedIssuers: []string{"limes-test"},
-		Biscuit:        &BiscuitConfig{Revocations: store},
+		Biscuit:        &BiscuitConfig{Revocations: store, Form: fakeForm{}},
 		DPoP:           newVerifier(t, dpop.VerifierConfig{Replay: newReplay(t, dpop.MemoryReplayCacheConfig{})}),
 	})
 	if err != nil {
@@ -74,7 +71,7 @@ func TestBiscuitVerifiesAsItsCapability(t *testing.T) {
 func TestBiscuitAttenuationNarrowsOffline(t *testing.T) {
 	_, v, _, cap, token := biscuitFixture(t)
 	soon := time.Now().Add(10 * time.Minute)
-	narrowed, err := Attenuate(token, Attenuation{
+	narrowed, err := attenuate(token, Attenuation{
 		Ops:              []Op{OpGet},
 		ResourcePrefixes: []string{"corpus/public/"},
 		Audience:         []string{audienceData},
@@ -107,7 +104,7 @@ func TestBiscuitAttenuationNarrowsOffline(t *testing.T) {
 	}
 
 	// A second block narrows further; the original still works as before.
-	again, err := Attenuate(narrowed, Attenuation{ResourceURIs: []string{"corpus/public/a.txt"}})
+	again, err := attenuate(narrowed, Attenuation{ResourceURIs: []string{"corpus/public/a.txt"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +118,7 @@ func TestBiscuitAttenuationNarrowsOffline(t *testing.T) {
 
 func TestBiscuitAttenuationExpiryIsEnforced(t *testing.T) {
 	_, v, _, _, token := biscuitFixture(t)
-	past, err := Attenuate(token, Attenuation{ExpiresAt: time.Now().Add(-time.Hour)})
+	past, err := attenuate(token, Attenuation{ExpiresAt: time.Now().Add(-time.Hour)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +137,7 @@ func TestBiscuitAttenuationCannotWiden(t *testing.T) {
 	}
 	for name, a := range cases {
 		t.Run(name, func(t *testing.T) {
-			wide, err := Attenuate(token, a)
+			wide, err := attenuate(token, a)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -160,122 +157,30 @@ func TestBiscuitAttenuationCannotWiden(t *testing.T) {
 	}
 }
 
-func TestBiscuitRefusesWhatItCannotEnforce(t *testing.T) {
-	_, v, _, _, token := biscuitFixture(t)
-	b, err := parseBiscuit(token)
-	if err != nil {
-		t.Fatal(err)
-	}
-	blk := b.CreateBlock()
-	if err := blk.AddCheck(biscuit.Check{Queries: []biscuit.Rule{{
-		Head: biscuit.Predicate{Name: "q", IDs: []biscuit.Term{biscuit.Variable("x")}},
-		Body: []biscuit.Predicate{{Name: "operation", IDs: []biscuit.Term{biscuit.Variable("x")}}},
-	}}}); err != nil {
-		t.Fatal(err)
-	}
-	withCheck, err := b.Append(rand.Reader, blk.Build())
-	if err != nil {
-		t.Fatal(err)
-	}
-	tok, _ := serializeBiscuit(withCheck)
-	if _, err := v.Verify(context.Background(), VerifyRequest{Token: tok, Audience: audienceData}); !errors.Is(err, ErrBiscuitAttenuation) {
-		t.Fatalf("datalog check: err = %v, want ErrBiscuitAttenuation", err)
-	}
-
-	b, _ = parseBiscuit(token)
-	blk = b.CreateBlock()
-	_ = blk.AddFact(biscuitFact("right", biscuit.String("everything")))
-	withFact, _ := b.Append(rand.Reader, blk.Build())
-	tok, _ = serializeBiscuit(withFact)
-	if _, err := v.Verify(context.Background(), VerifyRequest{Token: tok, Audience: audienceData}); !errors.Is(err, ErrBiscuitAttenuation) {
-		t.Fatalf("foreign fact: err = %v, want ErrBiscuitAttenuation", err)
-	}
-}
-
-func TestBiscuitCannotBeStrippedOrForged(t *testing.T) {
+// The sealed JWT is refused when lifted out of its Biscuit and presented
+// alone, and so is a Biscuit around an ordinary token, which names no root.
+// That no block can be stripped, and no token forged, is the biscuit
+// module's to show of its encoding.
+func TestASealedTokenStaysSealed(t *testing.T) {
 	issuer, v, _, cap, token := biscuitFixture(t)
-	narrowed, _ := Attenuate(token, Attenuation{Ops: []Op{OpGet}})
-
-	// The sealed JWT, lifted out of the attenuated Biscuit and presented
-	// alone, would carry the full parent — it is refused.
-	inner, _, err := biscuitForm{}.Open(narrowed)
+	narrowed, _ := attenuate(token, Attenuation{Ops: []Op{OpGet}})
+	inner, _, err := fakeForm{}.Open(narrowed)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := v.Verify(context.Background(), VerifyRequest{Token: inner, Audience: audienceData}); !errors.Is(err, ErrInvalidToken) {
 		t.Fatalf("sealed token alone: err = %v, want ErrInvalidToken", err)
 	}
-
-	// Re-wrapping that JWT in a Biscuit of one's own fails: its root is not
-	// the one the JWT vouches for.
-	_, priv, _ := ed25519.GenerateKey(rand.Reader)
-	bb := biscuit.NewBuilder(priv)
-	_ = bb.AddAuthorityFact(biscuitFact(biscuitFactCapability, biscuit.String(inner)))
-	forged, _ := bb.Build()
-	tok, _ := serializeBiscuit(forged)
-	if _, err := v.Verify(context.Background(), VerifyRequest{Token: tok, Audience: audienceData}); !errors.Is(err, ErrInvalidToken) {
-		t.Fatalf("re-wrapped: err = %v, want ErrInvalidToken", err)
-	}
-
-	// A Biscuit around an ordinary token (no root claim) is refused too.
 	_, plain, _ := issuer.issue(context.Background(), IssueRequest{ClientID: testClientID,
 		IssuedBy: Principal{Subject: "op"}, Subject: cap.Subject,
-		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}}, TTL: time.Hour,
+		Audience: []string{audienceData}, Caveats: Caveats{Ops: []Op{OpGet}, Requests: RequestCeiling{Unlimited: true}}, TTL: time.Hour,
 	})
-	bb = biscuit.NewBuilder(priv)
-	_ = bb.AddAuthorityFact(biscuitFact(biscuitFactCapability, biscuit.String(plain)))
-	wrapped, _ := bb.Build()
-	tok, _ = serializeBiscuit(wrapped)
-	if _, err := v.Verify(context.Background(), VerifyRequest{Token: tok, Audience: audienceData}); !errors.Is(err, ErrInvalidToken) {
-		t.Fatalf("wrapped plain token: err = %v, want ErrInvalidToken", err)
-	}
-
-	// Tampering with any byte breaks the chain.
-	raw, _ := base64.RawURLEncoding.DecodeString(narrowed)
-	raw[len(raw)-3] ^= 1
-	if _, err := v.Verify(context.Background(), VerifyRequest{Token: base64.RawURLEncoding.EncodeToString(raw), Audience: audienceData}); err == nil {
-		t.Fatal("tampered Biscuit accepted")
-	}
-}
-
-func TestBiscuitRevokedWithItsCapability(t *testing.T) {
-	_, v, store, cap, token := biscuitFixture(t)
-	narrowed, _ := Attenuate(token, Attenuation{Ops: []Op{OpGet}})
-	if _, err := store.Revoke(context.Background(), RevokeRequest{CapabilityID: cap.ID, Note: "test"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := v.Verify(context.Background(), VerifyRequest{Token: narrowed, Audience: audienceData}); !errors.Is(err, ErrRevoked) {
-		t.Fatalf("err = %v, want ErrRevoked", err)
-	}
-}
-
-func TestBiscuitOfflineBinding(t *testing.T) {
-	_, v, _, _, token := biscuitFixture(t)
-	keys := dpopKeys(t)
-	jkt, _ := dpop.Thumbprint(keys["Ed25519"].Public())
-	bound, err := Attenuate(token, Attenuation{ConfirmationJKT: jkt})
+	wrapped, err := encodeFake(fakeToken{Root: make([]byte, ed25519.PublicKeySize), Sealed: plain, IDs: [][]byte{fakeID()}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := v.Verify(context.Background(), VerifyRequest{Token: bound, Audience: audienceData}); !errors.Is(err, dpop.ErrRequired) {
-		t.Fatalf("bound offline, no proof: err = %v, want dpop.ErrRequired", err)
-	}
-	got, err := v.Verify(context.Background(), withProof(t.Context(), t, keys["Ed25519"], bound, audienceData, time.Now()))
-	if err != nil || got.Capability().ConfirmationJKT != jkt {
-		t.Fatalf("bound offline: %q, %v", got.Capability().ConfirmationJKT, err)
-	}
-	other, _ := dpop.Thumbprint(keys["P-256"].Public())
-	rebound, _ := Attenuate(bound, Attenuation{ConfirmationJKT: other})
-	if _, err := v.Verify(context.Background(), VerifyRequest{Token: rebound, Audience: audienceData}); !errors.Is(err, ErrBiscuitAttenuation) {
-		t.Fatalf("rebinding offline: err = %v, want ErrBiscuitAttenuation", err)
-	}
-}
-
-func TestVerifierRefusesBiscuitUnlessEnabled(t *testing.T) {
-	_, plainVerifier, _, _ := buildIssuerVerifier(t)
-	_, _, _, _, token := biscuitFixture(t)
-	if _, err := plainVerifier.Verify(context.Background(), VerifyRequest{Token: token, Audience: audienceData}); !errors.Is(err, ErrInvalidToken) {
-		t.Fatalf("err = %v, want ErrInvalidToken", err)
+	if _, err := v.Verify(context.Background(), VerifyRequest{Token: wrapped, Audience: audienceData}); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("wrapped plain token: err = %v, want ErrInvalidToken", err)
 	}
 }
 
@@ -317,7 +222,7 @@ func TestBiscuitAttenuationChainsNeverWiden(t *testing.T) {
 			if r.IntN(3) == 0 {
 				a.ExpiresAt = time.Now().Add(time.Duration(r.IntN(240)-60) * time.Minute)
 			}
-			next, err := Attenuate(tok, a)
+			next, err := attenuate(tok, a)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -391,7 +296,7 @@ func TestBiscuitNeedsNoOpShare(t *testing.T) {
 	issuer, v, _, cap, token := biscuitFixtureOf(t, []Op{OpGet})
 	const object = "corpus/public/a.txt"
 	soon := time.Now().Add(time.Minute).Truncate(time.Second)
-	narrowed, err := Attenuate(token, Attenuation{ResourceURIs: []string{object}, ExpiresAt: soon})
+	narrowed, err := attenuate(token, Attenuation{ResourceURIs: []string{object}, ExpiresAt: soon})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -410,5 +315,46 @@ func TestBiscuitNeedsNoOpShare(t *testing.T) {
 	})
 	if !errors.Is(err, ErrOpNotAllowed) {
 		t.Errorf("Delegate without OpShare: err = %v, want ErrOpNotAllowed", err)
+	}
+}
+
+func TestBiscuitRevokedWithItsCapability(t *testing.T) {
+	_, v, store, cap, token := biscuitFixture(t)
+	narrowed, _ := attenuate(token, Attenuation{Ops: []Op{OpGet}})
+	if _, err := store.Revoke(context.Background(), RevokeRequest{CapabilityID: cap.ID, Note: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.Verify(context.Background(), VerifyRequest{Token: narrowed, Audience: audienceData}); !errors.Is(err, ErrRevoked) {
+		t.Fatalf("err = %v, want ErrRevoked", err)
+	}
+}
+
+func TestBiscuitOfflineBinding(t *testing.T) {
+	_, v, _, _, token := biscuitFixture(t)
+	keys := dpopKeys(t)
+	jkt, _ := dpop.Thumbprint(keys["Ed25519"].Public())
+	bound, err := attenuate(token, Attenuation{ConfirmationJKT: jkt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.Verify(context.Background(), VerifyRequest{Token: bound, Audience: audienceData}); !errors.Is(err, dpop.ErrRequired) {
+		t.Fatalf("bound offline, no proof: err = %v, want dpop.ErrRequired", err)
+	}
+	got, err := v.Verify(context.Background(), withProof(t.Context(), t, keys["Ed25519"], bound, audienceData, time.Now()))
+	if err != nil || got.Capability().ConfirmationJKT != jkt {
+		t.Fatalf("bound offline: %q, %v", got.Capability().ConfirmationJKT, err)
+	}
+	other, _ := dpop.Thumbprint(keys["P-256"].Public())
+	rebound, _ := attenuate(bound, Attenuation{ConfirmationJKT: other})
+	if _, err := v.Verify(context.Background(), VerifyRequest{Token: rebound, Audience: audienceData}); !errors.Is(err, ErrBiscuitAttenuation) {
+		t.Fatalf("rebinding offline: err = %v, want ErrBiscuitAttenuation", err)
+	}
+}
+
+func TestVerifierRefusesBiscuitUnlessEnabled(t *testing.T) {
+	_, plainVerifier, _, _ := buildIssuerVerifier(t)
+	_, _, _, _, token := biscuitFixture(t)
+	if _, err := plainVerifier.Verify(context.Background(), VerifyRequest{Token: token, Audience: audienceData}); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("err = %v, want ErrInvalidToken", err)
 	}
 }

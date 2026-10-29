@@ -27,7 +27,7 @@ func newTermsIssuer(t *testing.T, store IssuanceStore) *Issuer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	iss, err := NewIssuer(IssuerConfig{Signer: signer, Store: store, IssuerName: goldenIssuer})
+	iss, err := NewIssuer(IssuerConfig{Biscuit: fakeForm{}, Signer: signer, Store: store, IssuerName: goldenIssuer})
 	if err != nil {
 		t.Fatal(err)
 	}

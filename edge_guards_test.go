@@ -22,7 +22,7 @@ func testIssuer(t *testing.T, kid string, priv ed25519.PrivateKey, now func() ti
 	if err != nil {
 		t.Fatalf("signer: %v", err)
 	}
-	iss, err := NewIssuer(IssuerConfig{
+	iss, err := NewIssuer(IssuerConfig{Biscuit: fakeForm{},
 		Signer: signer, Store: genStore{}, IssuerName: goldenIssuer,
 		DefaultTTL: time.Hour, Now: now,
 	})

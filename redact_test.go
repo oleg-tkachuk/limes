@@ -75,7 +75,7 @@ func TestCarriersOfASignerLeaveItsKeyOut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	issuer, err := NewIssuer(IssuerConfig{Signer: signer, Store: genStore{}, IssuerName: goldenIssuer})
+	issuer, err := NewIssuer(IssuerConfig{Biscuit: fakeForm{}, Signer: signer, Store: genStore{}, IssuerName: goldenIssuer})
 	if err != nil {
 		t.Fatal(err)
 	}

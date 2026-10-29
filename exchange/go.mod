@@ -20,7 +20,6 @@ require (
 
 require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1 // indirect
-	github.com/eclipse-biscuit/biscuit-go/v2 v2.2.2 // indirect
 	github.com/goccy/go-json v0.11.2 // indirect
 	github.com/lestrrat-go/blackmagic v1.0.4 // indirect
 	github.com/lestrrat-go/dsig v1.4.0 // indirect
@@ -31,5 +30,4 @@ require (
 	github.com/valyala/fastjson v1.6.10 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
-	google.golang.org/protobuf v1.36.12 // indirect
 )
