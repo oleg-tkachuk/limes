@@ -12,6 +12,7 @@ import (
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/dpop"
+	"github.com/oleg-tkachuk/limes/internal/errs"
 )
 
 // The refusals of an exchange, one per RFC 6749 §5.2 error (and RFC 8707's
@@ -336,7 +337,7 @@ func (e *Exchanger) reissue(ctx context.Context, id uuid.UUID, issue limes.Issue
 	again, err := e.cfg.Issuer.Reissue(ctx, id)
 	switch {
 	case errors.Is(err, limes.ErrRevoked), errors.Is(err, limes.ErrExpired):
-		return Result{}, fmt.Errorf("%w: the subject token's capability is no longer live: %w", ErrInvalidGrant, err)
+		return Result{}, errs.Errorf("%w: the subject token's capability is no longer live: %w", ErrInvalidGrant, err)
 	case err != nil:
 		return Result{}, fmt.Errorf("exchange: reissue: %w", err)
 	}

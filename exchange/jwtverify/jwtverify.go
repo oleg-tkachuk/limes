@@ -21,6 +21,7 @@ import (
 	"github.com/oleg-tkachuk/limes/exchange"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/internal/errs"
 )
 
 // The JWT access token profile (RFC 9068): the types §2.1 gives the header,
@@ -199,7 +200,7 @@ func (v *Verifier) VerifySubject(ctx context.Context, token string) (exchange.Su
 	}
 	tok, err := jwt.ParseString(token, opts...)
 	if err != nil {
-		return exchange.Subject{}, fmt.Errorf("%w: %w", exchange.ErrInvalidGrant, err)
+		return exchange.Subject{}, errs.Errorf("%w: %w", exchange.ErrInvalidGrant, err)
 	}
 	return subjectOf(tok, v.cfg.ClientIDClaim)
 }

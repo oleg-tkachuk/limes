@@ -11,6 +11,7 @@ import (
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/dpop"
+	"github.com/oleg-tkachuk/limes/internal/errs"
 )
 
 // NarrowRequest is an exchange of a capability for a narrower one, for a
@@ -154,7 +155,7 @@ func (e *Exchanger) verifyParent(ctx context.Context, req NarrowRequest) (limes.
 	case err == nil, isRefusal(err):
 		return verified, err
 	case errors.Is(err, limes.ErrUnauthenticated):
-		return verified, fmt.Errorf("%w: %w", ErrInvalidGrant, err)
+		return verified, errs.Errorf("%w: %w", ErrInvalidGrant, err)
 	}
 	return verified, fmt.Errorf("exchange: verify subject capability: %w", err)
 }
@@ -207,7 +208,7 @@ func (e *Exchanger) child(ctx context.Context, req NarrowRequest, verified limes
 // OpShare) is the subject token's fault; anything else is the server's.
 func delegateError(err error) error {
 	if errors.Is(err, limes.ErrUnauthenticated) || errors.Is(err, limes.ErrCaveatViolation) {
-		return fmt.Errorf("%w: %w", ErrInvalidGrant, err)
+		return errs.Errorf("%w: %w", ErrInvalidGrant, err)
 	}
 	return fmt.Errorf("exchange: delegate: %w", err)
 }
