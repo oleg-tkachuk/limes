@@ -20,10 +20,9 @@ import (
 
 // The database every test of the package runs against: one PostgreSQL
 // container (pgtest), migrated once, its tables emptied before each check.
-// Its owner, pgtest.OwnerUser, a superuser which row-level security never
-// binds, sets each check's rows up and empties the tables.
+// Its owner, a superuser which row-level security never binds, sets each
+// check's rows up and empties the tables.
 const (
-	databaseName = pgtest.Database
 	// migratorUser owns the schema, as a deployment's migration role does:
 	// no superuser, so the policies bind it (010_force_row_security.sql).
 	migratorUser     = "limes_migrator"
@@ -42,9 +41,11 @@ const (
 const createApp = `CREATE ROLE ` + appUser + ` LOGIN PASSWORD '` + appPassword + `'`
 
 // createMigrator creates migratorUser, free to create the store's schema in
-// the database.
-const createMigrator = `CREATE ROLE ` + migratorUser + ` LOGIN PASSWORD '` + migratorPassword + `';
-GRANT CREATE ON DATABASE ` + databaseName + ` TO ` + migratorUser
+// database db.
+func createMigrator(db string) string {
+	return `CREATE ROLE ` + migratorUser + ` LOGIN PASSWORD '` + migratorPassword + `';
+GRANT CREATE ON DATABASE ` + pgx.Identifier{db}.Sanitize() + ` TO ` + migratorUser
+}
 
 // The tenants a consumer keeps, as the tests stand one in: a table of their
 // own, read by Config.CheckTenant.
@@ -122,7 +123,7 @@ func run(m *testing.M) (int, error) {
 	if _, err := owner.Exec(ctx, createApp); err != nil {
 		return 0, err
 	}
-	if _, err := owner.Exec(ctx, createMigrator); err != nil {
+	if _, err := owner.Exec(ctx, createMigrator(pg.Database)); err != nil {
 		return 0, err
 	}
 	if migrator, err = poolAs(ctx, dsn, migratorUser, migratorPassword); err != nil {

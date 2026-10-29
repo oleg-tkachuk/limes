@@ -172,7 +172,7 @@ func TestStepsBuildTheSchemaRunBuilds(t *testing.T) {
 		t.Fatalf("Run after %d steps: %v", halfway, err)
 	}
 
-	want, err := pg.Dump(ctx, byRunDatabase)
+	want, err := pg.Dump(byRunDatabase)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestStepsBuildTheSchemaRunBuilds(t *testing.T) {
 		t.Fatalf("the dump of Run's schema holds no records table:\n%s", want)
 	}
 	for _, db := range []string{byStepsDatabase, halfwayDatabase} {
-		got, err := pg.Dump(ctx, db)
+		got, err := pg.Dump(db)
 		if err != nil {
 			t.Fatal(err)
 		}

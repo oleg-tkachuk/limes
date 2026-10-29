@@ -1,59 +1,102 @@
-// Package pgtest starts the PostgreSQL the tests of pgstore and its
-// packages run against, one container per test binary, and gives each a
-// database of its own where it needs one. Only tests import it.
+// Package pgtest gives the tests of pgstore and its packages the PostgreSQL
+// they run against, one container per test binary, and a database of its
+// own to each test that needs one. Only tests import it.
+//
+// The container is pgcontainer's, a module of its own beside this package
+// that pgtest runs with `go run`: testcontainers is required there, never
+// in pgstore's go.mod. It needs a running Docker and the go command.
 package pgtest
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/testcontainers/testcontainers-go"
-	tcexec "github.com/testcontainers/testcontainers-go/exec"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
-
-	"github.com/oleg-tkachuk/limes/pgstore/internal/pgschema"
 )
 
-// The container's PostgreSQL, its database and its own role, a superuser,
-// which row-level security never binds.
+// launcherDir is pgcontainer's directory, beside this package's.
+const launcherDir = "pgcontainer"
+
+// The lines of pgcontainer's protocol (its package doc).
 const (
-	// Image is the PostgreSQL the store is tested on.
-	Image         = "postgres:18.6-alpine"
-	OwnerUser     = "limes_owner"
-	OwnerPassword = "limes-owner-test"
-	Database      = "limes"
+	replyDSN    = "dsn"
+	requestDump = "dump"
+	replyOK     = "ok"
+	replyErr    = "err"
 )
 
 // Postgres is a running container.
 type Postgres struct {
-	container *postgres.PostgresContainer
-	// DSN reaches Database as OwnerUser.
+	cmd *exec.Cmd
+	in  io.WriteCloser
+	out *bufio.Reader
+	// mu keeps one request at a time on the protocol.
+	mu sync.Mutex
+	// DSN reaches Database as the container's owner, a superuser.
 	DSN string
+	// Database is the database DSN names.
+	Database string
 }
 
 // Start runs the container. Terminate it when the tests end, also when
-// Start returns an error: the container may be up.
+// Start returns an error: the launcher may be up.
 func Start(ctx context.Context) (*Postgres, error) {
-	c, err := postgres.Run(ctx, Image,
-		postgres.WithDatabase(Database),
-		postgres.WithUsername(OwnerUser),
-		postgres.WithPassword(OwnerPassword),
-		postgres.BasicWaitStrategies(),
-	)
-	p := &Postgres{container: c}
+	_, self, _, ok := runtime.Caller(0)
+	if !ok {
+		return &Postgres{}, errors.New("pgtest: cannot find its own source to run pgcontainer from")
+	}
+	cmd := exec.CommandContext(context.WithoutCancel(ctx), "go", "run", ".")
+	cmd.Dir = filepath.Join(filepath.Dir(self), "..", launcherDir)
+	cmd.Stderr = os.Stderr
+	p := &Postgres{cmd: cmd}
+	in, err := cmd.StdinPipe()
 	if err != nil {
 		return p, err
 	}
-	p.DSN, err = c.ConnectionString(ctx, "sslmode=disable")
-	return p, err
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return p, err
+	}
+	p.in, p.out = in, bufio.NewReader(out)
+	if err := cmd.Start(); err != nil {
+		return p, fmt.Errorf("pgtest: run pgcontainer: %w", err)
+	}
+	line, err := p.out.ReadString('\n')
+	if err != nil {
+		return p, fmt.Errorf("pgtest: pgcontainer gave no connection string: %w", err)
+	}
+	dsn, ok := strings.CutPrefix(strings.TrimSpace(line), replyDSN+" ")
+	if !ok {
+		return p, fmt.Errorf("pgtest: pgcontainer said %q, want a connection string", line)
+	}
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		return p, err
+	}
+	p.DSN, p.Database = dsn, cfg.Database
+	return p, nil
 }
 
-// Terminate stops and removes the container.
-func (p *Postgres) Terminate() { _ = testcontainers.TerminateContainer(p.container) }
+// Terminate ends the launcher, which ends the container.
+func (p *Postgres) Terminate() {
+	if p.in != nil {
+		_ = p.in.Close()
+	}
+	if p.cmd != nil && p.cmd.Process != nil {
+		_ = p.cmd.Wait()
+	}
+}
 
 // FreshConn is a connection, as the owner, to a database named name with no
 // schema in it, made for the test and dropped when it ends.
@@ -87,30 +130,37 @@ func (p *Postgres) FreshConn(t *testing.T, name string) *pgx.Conn {
 	return conn
 }
 
-// pgDumpRestrictPrefix starts the lines pg_dump writes around a dump with a
-// random key in them (\restrict and \unrestrict), which two dumps of one
+// pgDumpRestrictPrefix and pgDumpUnrestrictPrefix start the lines pg_dump
+// writes around a dump with a random key in them, which two dumps of one
 // schema never share.
-const pgDumpRestrictPrefix = `\restrict`
-
-// pgDumpUnrestrictPrefix is the closing one.
-const pgDumpUnrestrictPrefix = `\unrestrict`
+const (
+	pgDumpRestrictPrefix   = `\restrict`
+	pgDumpUnrestrictPrefix = `\unrestrict`
+)
 
 // Dump is the store's schema in database as pg_dump writes it, with its
 // privileges, without its owners or the random keys of the dump itself.
-func (p *Postgres) Dump(ctx context.Context, database string) (string, error) {
-	code, out, err := p.container.Exec(ctx, []string{
-		"pg_dump", "--schema-only", "--no-owner",
-		"--schema=" + pgschema.Name, "--username=" + OwnerUser, "--dbname=" + database,
-	}, tcexec.Multiplexed())
+func (p *Postgres) Dump(database string) (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, err := fmt.Fprintln(p.in, requestDump, database); err != nil {
+		return "", err
+	}
+	line, err := p.out.ReadString('\n')
 	if err != nil {
 		return "", err
 	}
-	raw, err := io.ReadAll(out)
+	verb, arg, _ := strings.Cut(strings.TrimSpace(line), " ")
+	if verb != replyOK {
+		return "", fmt.Errorf("pgtest: dump %s: %s", database, strings.TrimPrefix(strings.TrimSpace(line), replyErr+" "))
+	}
+	n, err := strconv.Atoi(arg)
 	if err != nil {
 		return "", err
 	}
-	if code != 0 {
-		return "", fmt.Errorf("pg_dump exited %d: %s", code, raw)
+	raw := make([]byte, n)
+	if _, err := io.ReadFull(p.out, raw); err != nil {
+		return "", err
 	}
 	var b strings.Builder
 	for line := range strings.Lines(string(raw)) {
