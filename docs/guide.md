@@ -130,6 +130,39 @@ so one bad entry does not take every other key out of service mid-rotation. Two
 Ed25519 keys naming one kid are both skipped: which one signs is not for the
 reader to guess. A document that is not JSON, or names a member twice, is refused.
 
+### Tell a capability from an identity provider's token
+
+A route that accepts both a capability and the identity provider's own
+access token cannot tell them apart by type: both are `at+jwt` (RFC 9068).
+`limes.HasLimesKeyID(token)` reads the header alone and answers whether
+its kid is in limes's namespace (`jwks.KeyIDPrefix`, `limes:`); route on it,
+and let the verifier it picks decide:
+
+```go
+if limes.HasLimesKeyID(token) {
+	vc, err := verifier.Verify(ctx, limes.VerifyRequest{Token: token, Audience: aud, DPoP: proof})
+	// …
+} else {
+	claims, err := oidcVerifier.Verify(ctx, token) // the provider's own verifier
+	// …
+}
+```
+
+It verifies nothing and is never an authorization decision — a forged token
+names any kid it likes — so each branch verifies in full. Routing cannot be
+turned into a way in:
+
+- **An access token sent to `Verifier.Verify` is refused before any key is
+  looked up.** A kid outside the namespace names no key a limes issuer signs
+  with (`NewSigner` refuses one).
+- **A token that names a limes kid still needs** a signature under a key the
+  verifier holds, a trusted issuer, and claims read strictly, `limes_v`
+  among them.
+- **The other way, a capability routed to the provider's verifier is
+  refused there,** since its issuer and keys are not the provider's.
+- **`inspect.Decode` is for tooling,** not routing: it reads the claims
+  without verifying them.
+
 ### Inspect a token without trusting it
 
 `inspect.Decode` reads a JWT's claims, refusing only one that is malformed or
