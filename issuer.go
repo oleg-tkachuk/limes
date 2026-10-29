@@ -183,6 +183,29 @@ func (i *Issuer) Issue(ctx context.Context, req IssueRequest) (IssueResult, erro
 	return result(i.issue(ctx, req))
 }
 
+// Reissue signs the capability on record under id again, and records
+// nothing: an exchange that issues one capability per subject token hands
+// it out again without keeping its token (ExchangeStore). The claims are the
+// record's, so under the same key the token is the one Issue returned. It
+// refuses an id not on record (ErrNotFound), a capability expired
+// (ErrExpired) or revoked (ErrRevoked), and an issuer whose store reads no
+// record (a RecordReader, as every Store is) with ErrInvalidRequest.
+func (i *Issuer) Reissue(ctx context.Context, id uuid.UUID) (IssueResult, error) {
+	records, ok := i.store.(RecordReader)
+	if !ok {
+		return IssueResult{}, invalidRequest("IssuerConfig.Store reads no record back (RecordReader), so nothing can be reissued")
+	}
+	rec, err := records.GetRecord(ctx, id)
+	if err != nil {
+		return IssueResult{}, fmt.Errorf("limes: reissue %s: %w", id, err)
+	}
+	if err := i.checkLive(ctx, rec.Capability, i.clock(), "reissue"); err != nil {
+		return IssueResult{}, err
+	}
+	token, err := i.sign(ctx, rec.Capability)
+	return result(rec.Capability, token, err)
+}
+
 // result is a minted capability and its token as an IssueResult.
 func result(c Capability, token string, err error) (IssueResult, error) {
 	if err != nil {

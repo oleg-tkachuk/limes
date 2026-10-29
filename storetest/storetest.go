@@ -106,6 +106,10 @@ type Env struct {
 	// Now, the checks of limes.RecordLister are skipped; without Census
 	// too, so are those that hold a listing to the census's counts.
 	Lister limes.RecordLister
+	// Exchanges records the capability exchanging a subject token issued,
+	// over the same records as Store. Optional: without it, the checks of
+	// limes.ExchangeStore are skipped.
+	Exchanges limes.ExchangeStore
 }
 
 // newTenant is another tenant, from NewTenant when the Env has one.
@@ -299,6 +303,9 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "GetRecordListingIsTheListingOfTheRecord", Run: checkGetRecordListing},
 		{Name: "ListingNamesTheEntryThatRevokedARecord", Run: checkListingStoppedBy},
 		{Name: "EraseTenantRecordsKeepsWhatAVerifierStillNeeds", Run: checkEraseTenant},
+		{Name: "ExchangeClaimsConvergeOnOneCapability", Run: checkExchangeClaims},
+		{Name: "ExchangeClaimsRefuseWhatIsNotOnRecord", Run: checkExchangeRefusals},
+		{Name: "PurgeTakesAnExchangeWithItsCapability", Run: checkExchangePurge},
 	}
 	watchdog.RunChecks(t, func(t *testing.T) fixture { return newFixture(t, setup) }, func(f fixture) time.Duration { return f.CheckTimeout }, checks)
 }
