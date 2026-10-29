@@ -77,19 +77,29 @@ at any minor.
      and holds it as a `meter.RequestCounter`.
    - `pgstore/erase` holds `EraseTenant`, the one call that spans records
      and usage.
-   - `pgstore/migrate` holds `Migrate`, tern and the embedded SQL, and only
-     a migration job imports it. A test there pins the number of its steps
-     to the constant `CheckSchema` expects.
+   - `pgstore/migrate` holds `Run` (what was `pgstore.Migrate`), tern and
+     the embedded SQL, and only a migration job imports it. A test there
+     pins the number of its steps to the constant `CheckSchema` expects,
+     which lives in `pgstore/internal/pgschema` with the other names both
+     packages spell, so neither imports the other.
    - The root keeps the moved constructors for one minor, as deprecated
-     wrappers.
+     wrappers, but for `Migrate`: a wrapper in the root would link tern
+     into every binary again, which is what the move removes.
 4. **One migration chain, and its SQL is readable without tern.**
    - The chain 001–021 and `limes.schema_version` stay as they are, so an
      existing database upgrades with the next migration as before.
-   - `migrate.Steps(opts)` returns each migration as SQL with the runtime
-     roles already substituted, and says which ones must run outside a
-     transaction (`CREATE INDEX CONCURRENTLY`). A consumer with a migration
-     tool of its own can apply them instead of running tern beside it.
-   - `Migrate` runs those same steps.
+   - `migrate.Steps()` returns each migration as tern renders it, and says
+     which ones must run outside a transaction (`CREATE INDEX
+     CONCURRENTLY`). A step's `SQL()` adds what `Run` does around it: read
+     committed and the scope of every tenant before it, the version recorded
+     after it. `migrate.Setup()` creates the schema and the version table,
+     and `migrate.Grants(roles)` the runtime roles' grants, which no
+     migration holds. A consumer with a migration tool of its own applies
+     those instead of running tern beside it, and `Run` can take over a
+     database migrated so.
+   - `Run` and `Steps` read the migrations through one loader, and a test
+     holds a schema built by either, or half by each, to the same
+     `pg_dump`.
 5. **Usage reads the records through a view.**
    - A new migration creates `limes.capability_lineage`: `id`, `parent_id`,
      `tenant_id`, `expires_at`, and the requests, budget and copies caveats.
