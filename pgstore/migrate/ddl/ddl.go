@@ -39,8 +39,9 @@ func Files() fs.FS { return migrationFiles }
 
 // Version is the last migration's: the version a schema is at once every
 // step has run, and the one pgstore.CheckSchema expects. A vendored copy
-// that a newer pgstore outgrew is behind it.
-const Version = pgschema.Version
+// that a newer pgstore outgrew is behind it. A function, not a constant, so
+// that a release adding a migration changes the value, not the API.
+func Version() int { return pgschema.Version }
 
 // The schema and its version table.
 const (

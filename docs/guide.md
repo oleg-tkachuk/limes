@@ -1176,7 +1176,7 @@ vendored copy falls behind when a pgstore upgrade brings a step: compare
 the files with `ddl.Steps()` in a test of the consumer's own, so the upgrade
 fails in CI, not in production, and a readiness check that runs
 `CheckSchema` answers `ErrSchemaMismatch`, with `ReadSchemaVersion` naming
-the applied version beside `ddl.Version`. Hold the result to the
+the applied version beside `ddl.Version()`. Hold the result to the
 conformance suites — `storetest.Run` and `metertest.Run` or
 `metertest.RunCounter` over the vendored schema, the consumer's own roles
 and its row-level security — which check the deployment, not only pgstore.
