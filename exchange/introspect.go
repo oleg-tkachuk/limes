@@ -161,7 +161,7 @@ func (h *IntrospectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		// An outage must not read as a token gone inactive: the gateway
 		// would refuse every request as if every token were revoked.
 		log.ErrorContext(r.Context(), "introspection failed", slog.Any("error", err))
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: codeServerError}, log)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Code: codeServerError}, log)
 	case !h.mayAsk(client, got.Capability.Audience):
 		log.WarnContext(r.Context(), "introspection: token for an audience the client may not ask about; answered inactive",
 			slog.String("capability", got.Capability.ID.String()))
@@ -188,7 +188,7 @@ func (h *IntrospectionHandler) answerActive(ctx context.Context, w http.Response
 	detail, err := caveatsDetail(effectiveCaveats(c.Caveats, got.Copies))
 	if err != nil {
 		log.ErrorContext(ctx, "introspection: encode caveats", slog.String("capability", c.ID.String()), slog.Any("error", err))
-		writeJSON(w, http.StatusInternalServerError, errorResponse{Error: codeServerError}, log)
+		writeJSON(w, http.StatusInternalServerError, errorResponse{Code: codeServerError}, log)
 		return
 	}
 	sub, actor := actingOf(c)
@@ -276,5 +276,5 @@ func (h *IntrospectionHandler) refuse(w http.ResponseWriter, r *http.Request, er
 	case errors.Is(err, ErrInvalidClient):
 		status, code, description = challengeClient(w, r), codeInvalidClient, descriptionInvalidClient
 	}
-	writeJSON(w, status, errorResponse{Error: code, Description: description}, h.cfg.Logger)
+	writeJSON(w, status, errorResponse{Code: code, Description: description}, h.cfg.Logger)
 }

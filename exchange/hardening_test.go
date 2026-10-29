@@ -52,7 +52,7 @@ func TestHandlerNarrowingWithoutItsOwnDPoP(t *testing.T) {
 	r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, tokenEndpoint, nil)
 	h.refuse(w, r, errors.Join(dpop.ErrNonceRequired))
 	var body errorResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || w.Code != http.StatusInternalServerError || body.Error != codeServerError {
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || w.Code != http.StatusInternalServerError || body.Code != codeServerError {
 		t.Errorf("status %d, body %s", w.Code, w.Body)
 	}
 }
@@ -98,7 +98,7 @@ func TestHandlerAnswersAFailingNonceStoreAsTheServers(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.refuse(w, httptest.NewRequestWithContext(t.Context(), http.MethodPost, tokenEndpoint, nil), dpop.ErrNonceRequired)
 	var body errorResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || w.Code != http.StatusInternalServerError || body.Error != codeServerError || w.Header().Get(headerDPoPNonce) != "" {
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || w.Code != http.StatusInternalServerError || body.Code != codeServerError || w.Header().Get(headerDPoPNonce) != "" {
 		t.Errorf("status %d, nonce %q, body %s", w.Code, w.Header().Get(headerDPoPNonce), w.Body)
 	}
 	if level, _ := logs.last(); level != slog.LevelError {
@@ -121,7 +121,7 @@ func TestExchangeAnswersAPolicyGrantingNoRequestAsTheServers(t *testing.T) {
 	f.ex.cfg.Logger = slog.New(logs)
 	w := post(t, newHandler(t, f), exchangeForm(f.idp.sign(t, typeAccessToken, accessClaims())), nil)
 	var resp errorResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != http.StatusInternalServerError || resp.Error != codeServerError {
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != http.StatusInternalServerError || resp.Code != codeServerError {
 		t.Errorf("status %d: %s", w.Code, w.Body)
 	}
 	if level, msg := logs.last(); level != slog.LevelError || msg != "exchange refused" || !logs.lastWraps(limes.ErrInvalidCaveats) {
