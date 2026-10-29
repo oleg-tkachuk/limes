@@ -2,7 +2,7 @@ package otelmetric
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
@@ -28,7 +28,7 @@ type meteringStore struct {
 // interfaces, and a test fails when the list misses one the store has.
 func Instrument(inner meter.UsageStore, opts ...Option) (meter.UsageStore, error) {
 	if inner == nil {
-		return nil, errors.New("limes: Instrument needs a meter.UsageStore")
+		return nil, fmt.Errorf("%w: otelmetric: Instrument needs a meter.UsageStore", limes.ErrInvalidConfig)
 	}
 	var cfg meteringConfig
 	for _, o := range opts {

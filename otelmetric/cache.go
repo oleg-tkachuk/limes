@@ -64,7 +64,7 @@ const (
 // have no tenant.
 func InstrumentRevocationCache(cache *limes.RevocationCache, opts ...Option) (metric.Registration, error) {
 	if cache == nil {
-		return nil, errors.New("otelmetric: InstrumentRevocationCache needs a cache")
+		return nil, fmt.Errorf("%w: otelmetric: InstrumentRevocationCache needs a cache", limes.ErrInvalidConfig)
 	}
 	var cfg meteringConfig
 	for _, opt := range opts {
