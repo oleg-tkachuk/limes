@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -14,6 +15,38 @@ import (
 var rlsTables = []string{
 	"capabilities", "revocations", "biscuit_revocations", "usage", "copy_usage",
 	"tenant_budgets", "charges", "reservations", "erased_tenants",
+}
+
+// unguardedTables are the tables of the schema row-level security does not
+// guard, each for its reason: the version table holds no tenant's data and
+// the runtime role only reads it; the DPoP replay table is read and written
+// before any tenant is known.
+var unguardedTables = []string{"schema_version", "dpop_seen_proofs"}
+
+// sqlSchemaTables lists the tables of schema $1.
+const sqlSchemaTables = `SELECT tablename FROM pg_tables WHERE schemaname = $1 ORDER BY tablename`
+
+// Every table of the schema is guarded, or named as unguarded with its
+// reason: a table a migration adds without row-level security fails here.
+func TestEveryTableIsGuardedOrNamed(t *testing.T) {
+	rows, err := owner.Query(t.Context(), sqlSchemaTables, schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tables, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range tables {
+		if !slices.Contains(rlsTables, table) && !slices.Contains(unguardedTables, table) {
+			t.Errorf("table %s is neither guarded by row-level security nor named unguarded", table)
+		}
+	}
+	for _, table := range append(slices.Clone(rlsTables), unguardedTables...) {
+		if !slices.Contains(tables, table) {
+			t.Errorf("table %s is named but the schema has none", table)
+		}
+	}
 }
 
 // sqlForced is whether row-level security binds the owner of table $2 of
