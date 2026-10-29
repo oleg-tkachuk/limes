@@ -19,8 +19,11 @@ const (
 	pgstorePath = "github.com/oleg-tkachuk/limes/pgstore"
 	migratePath = pgstorePath + "/migrate"
 	ddlPath     = migratePath + "/ddl"
-	// ddlAllowed is the one package of the module ddl may depend on.
+	// ddlAllowed are the packages ddl may depend on beside the standard
+	// library: pgstore's schema names, and limes's error families, which
+	// import nothing either.
 	ddlAllowed = pgstorePath + "/internal/pgschema"
+	ddlErrs    = "github.com/oleg-tkachuk/limes/internal/errs"
 	pgtestPath = pgstorePath + "/internal/pgtest"
 	ternPath   = "github.com/jackc/tern"
 )
@@ -45,7 +48,7 @@ func forbiddenDeps(pkg string, deps []string) []string {
 		switch {
 		case within(d, ternPath) && pkg != migratePath,
 			d == migratePath && pkg != migratePath,
-			pkg == ddlPath && !standardLibrary(d) && d != ddlAllowed:
+			pkg == ddlPath && !standardLibrary(d) && d != ddlAllowed && d != ddlErrs:
 			found = append(found, d)
 		}
 	}
@@ -72,7 +75,7 @@ func TestForbiddenDeps(t *testing.T) {
 		{pgstorePath, []string{"github.com/jackc/ternary"}, 0},
 		{migratePath, []string{tern}, 0},
 		{pgtestPath, []string{tern}, 1},
-		{ddlPath, []string{"fmt", "embed", ddlAllowed}, 0},
+		{ddlPath, []string{"fmt", "embed", ddlAllowed, ddlErrs}, 0},
 		{ddlPath, []string{"github.com/jackc/pgx/v5"}, 1},
 		{ddlPath, []string{tern}, 1},
 	} {

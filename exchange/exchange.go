@@ -53,7 +53,7 @@ var (
 
 // errPolicy is a policy that asked for more than the request allows: the
 // server's fault, never the client's.
-var errPolicy = errors.New("exchange: the policy's issue request exceeds the exchange")
+var errPolicy = fmt.Errorf("%w: exchange: the policy's issue request exceeds the exchange", ErrServerError)
 
 // Client is the client asking for the exchange, as the token endpoint
 // authenticated it, or as an in-process caller names itself.
@@ -201,13 +201,13 @@ type Exchanger struct {
 func NewExchanger(cfg Config) (*Exchanger, error) {
 	switch {
 	case cfg.Issuer == nil:
-		return nil, errors.New("exchange: Config.Issuer required")
+		return nil, fmt.Errorf("%w: exchange: Config.Issuer required", limes.ErrInvalidConfig)
 	case cfg.Subjects == nil:
-		return nil, errors.New("exchange: Config.Subjects required")
+		return nil, fmt.Errorf("%w: exchange: Config.Subjects required", limes.ErrInvalidConfig)
 	case cfg.Policy == nil:
-		return nil, errors.New("exchange: Config.Policy required")
+		return nil, fmt.Errorf("%w: exchange: Config.Policy required", limes.ErrInvalidConfig)
 	case (cfg.Capabilities != nil) != (cfg.CapabilityAudience != "") || (cfg.Capabilities != nil) != (cfg.NarrowPolicy != nil):
-		return nil, errors.New("exchange: Config.Capabilities, CapabilityAudience and NarrowPolicy go together")
+		return nil, fmt.Errorf("%w: exchange: Config.Capabilities, CapabilityAudience and NarrowPolicy go together", limes.ErrInvalidConfig)
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now

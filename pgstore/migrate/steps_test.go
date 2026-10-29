@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/pgstore/internal/pgschema"
 	"github.com/oleg-tkachuk/limes/pgstore/migrate/ddl"
 )
@@ -296,5 +297,12 @@ func TestStepIsDDLs(t *testing.T) {
 		if s.SQL() != d.SQL() || !slices.Equal(s.Statements(), d.Statements()) {
 			t.Errorf("%s: migrate.Step differs from ddl.Step", s.Name)
 		}
+	}
+}
+
+// A schema owned by another role is a deployment wired wrong: invalid_config.
+func TestErrSchemaOwnerHasACode(t *testing.T) {
+	if got, ok := limes.CodeOf(ErrSchemaOwner); !ok || got != limes.CodeInvalidConfig {
+		t.Errorf("CodeOf(ErrSchemaOwner) = %q, %v; want %q", got, ok, limes.CodeInvalidConfig)
 	}
 }

@@ -50,7 +50,6 @@ package redisreplay
 import (
 	"context"
 	_ "embed"
-	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -58,6 +57,8 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/oleg-tkachuk/limes/dpop"
+
+	"github.com/oleg-tkachuk/limes/internal/errs"
 )
 
 // DefaultKeyPrefix starts every key the cache writes when Config names no
@@ -89,7 +90,7 @@ type Cache struct {
 var _ dpop.ReplayCache = (*Cache)(nil)
 
 // errNoClient is a Config with no Client.
-var errNoClient = errors.New("redisreplay: Config.Client required")
+var errNoClient = fmt.Errorf("%w: redisreplay: Config.Client required", errs.ErrInvalidConfig)
 
 // New builds a Cache, refusing a Config with no Client or a negative share.
 func New(cfg Config) (*Cache, error) {
@@ -97,7 +98,7 @@ func New(cfg Config) (*Cache, error) {
 		return nil, errNoClient
 	}
 	if cfg.EntriesPerHolder < 0 {
-		return nil, fmt.Errorf("redisreplay: replay cache share of one holder %d is negative", cfg.EntriesPerHolder)
+		return nil, fmt.Errorf("%w: redisreplay: replay cache share of one holder %d is negative", errs.ErrInvalidConfig, cfg.EntriesPerHolder)
 	}
 	if cfg.KeyPrefix == "" {
 		cfg.KeyPrefix = DefaultKeyPrefix

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -479,7 +478,7 @@ func scanCopy(row pgx.CollectableRow) (*copyRow, error) {
 // errCounterHidden is a counter row lock created that the transaction cannot
 // see: one of another tenant holds the same id. Ids are random or signed, so
 // it means a store written outside pgstore, and the call is refused.
-var errCounterHidden = errors.New("pgstore: a counter row of the same id belongs to another tenant")
+var errCounterHidden = fmt.Errorf("%w: pgstore: a counter row of the same id belongs to another tenant", limes.ErrScopeMismatch)
 
 // lockRequest names what lock reads.
 type lockRequest struct {

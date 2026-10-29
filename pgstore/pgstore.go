@@ -131,7 +131,6 @@ package pgstore
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"reflect"
 	"time"
@@ -140,6 +139,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/oleg-tkachuk/limes/meter"
 	"github.com/oleg-tkachuk/limes/pgstore/internal/pgschema"
+
+	"github.com/oleg-tkachuk/limes"
 )
 
 // schema is the PostgreSQL schema every table of the store lives in.
@@ -216,7 +217,7 @@ type Config struct {
 
 // errNoDB is NewStore given a Config without a DB: none at all, or a nil
 // pool or connection, which is a DB that fails on its first call.
-var errNoDB = errors.New("pgstore: Config.DB required")
+var errNoDB = fmt.Errorf("%w: pgstore: Config.DB required", limes.ErrInvalidConfig)
 
 // isNil reports whether db is nil or holds a nil pointer, such as a
 // *pgxpool.Pool left unset: a non-nil DB that cannot serve a call.
@@ -261,7 +262,7 @@ func newConn(cfg Config) (conn, error) {
 	}
 	switch {
 	case cfg.MaxCopiesPerCapability < 0:
-		return conn{}, fmt.Errorf("pgstore: Config.MaxCopiesPerCapability %d is negative", cfg.MaxCopiesPerCapability)
+		return conn{}, fmt.Errorf("%w: pgstore: Config.MaxCopiesPerCapability %d is negative", limes.ErrInvalidConfig, cfg.MaxCopiesPerCapability)
 	case cfg.MaxCopiesPerCapability == 0:
 		cfg.MaxCopiesPerCapability = meter.DefaultMaxCopiesPerCapability
 	}

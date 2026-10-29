@@ -94,6 +94,17 @@ in a code where limes knows what it means (`keys_unavailable` for an
 issuer's keys out of reach), and as itself otherwise. `ProblemFor` answers
 that one as `internal`.
 
+The nested modules' own sentinels belong to these families, so each has
+their code:
+
+| Sentinel | Code |
+|---|---|
+| `pgstore.ErrSchemaMismatch` | `invalid_config` |
+| `pgstore.ErrRuntimeRole` | `invalid_config` |
+| `pgstore/migrate.ErrSchemaOwner` | `invalid_config` |
+| `pgstore.ErrChargeTransaction` | `invalid_request` |
+| `inspect.ErrInvalidKey` | `invalid_request` |
+
 ## Retrying
 
 - **A 5xx** is the server's to fix, or its upstream's.

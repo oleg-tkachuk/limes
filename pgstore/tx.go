@@ -2,12 +2,13 @@ package pgstore
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/oleg-tkachuk/limes"
 )
 
 // txKey keys the transaction a charge commits on in the context onCharged
@@ -17,7 +18,7 @@ type txKey struct{}
 // ErrChargeTransaction is onCharged committing or rolling back the charge's
 // transaction, which is the store's to end: the charge is written after
 // onCharged returns, on the same transaction.
-var ErrChargeTransaction = errors.New("pgstore: the charge's transaction is the store's to commit or roll back")
+var ErrChargeTransaction = fmt.Errorf("%w: pgstore: the charge's transaction is the store's to commit or roll back", limes.ErrInvalidRequest)
 
 // TxFrom returns the transaction a charge commits on, from the context
 // UsageStore.Charge and UsageStore.Settle hand onCharged: a write through it

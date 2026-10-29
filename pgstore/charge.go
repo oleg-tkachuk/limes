@@ -234,7 +234,7 @@ func (s *UsageStore) charge(ctx context.Context, tx pgx.Tx, req meter.ChargeRequ
 // errReplayedAfterLock rolls back a Charge that found its reference
 // committed by another delivery once it held the locks; Charge answers
 // with that delivery's receipt.
-var errReplayedAfterLock = errors.New("pgstore: charge replayed after its locks")
+var errReplayedAfterLock = fmt.Errorf("%w: pgstore: charge replayed after its locks", limes.ErrInternal)
 
 // lockCharge locks what spec moves: its tenant, the capability's and its
 // ancestors' counters, those of the ancestors holding the hold it settles,
