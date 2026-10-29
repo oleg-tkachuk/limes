@@ -1,4 +1,4 @@
-package pgstore
+package migrate
 
 import (
 	"context"
@@ -8,7 +8,9 @@ import (
 	"uuid"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/tern/v2/migrate"
+	tern "github.com/jackc/tern/v2/migrate"
+
+	"github.com/oleg-tkachuk/limes/pgstore/internal/pgschema"
 )
 
 // lastBeforeCopiesUnder is the schema version just before the migration
@@ -26,14 +28,14 @@ VALUES ($1, $2, $3, 'agent', 'agent', $4, '{}', '{}')`
 
 // beforeCopiesUnder is a fresh database migrated to just before the
 // migration under test, and the migrator that runs the rest.
-func beforeCopiesUnder(t *testing.T) (*pgx.Conn, *migrate.Migrator) {
+func beforeCopiesUnder(t *testing.T) (*pgx.Conn, *tern.Migrator) {
 	t.Helper()
 	conn := freshConn(t)
 	ctx := t.Context()
 	if _, err := conn.Exec(ctx, "CREATE SCHEMA "+pgx.Identifier{schema}.Sanitize()); err != nil {
 		t.Fatal(err)
 	}
-	m, err := migrate.NewMigrator(ctx, conn, versionTable)
+	m, err := tern.NewMigrator(ctx, conn, versionTable)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +65,7 @@ func TestCopiesUnderCountsTheCopiesAlreadyRecorded(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	seed(sqlSetSession, SettingAllTenants, SettingAllTenantsOn)
+	seed(sqlSetSession, pgschema.SettingAllTenants, pgschema.SettingAllTenantsOn)
 	seed(sqlSeedCapability, root, nil, tenant, 0)
 	seed(sqlSeedCapability, child, root, tenant, 1)
 	seed(sqlSeedCapability, grandchild, child, tenant, 2)
@@ -80,7 +82,7 @@ func TestCopiesUnderCountsTheCopiesAlreadyRecorded(t *testing.T) {
 	if err := runMigrations(ctx, conn, m); err != nil {
 		t.Fatal(err)
 	}
-	seed(sqlSetSession, SettingAllTenants, SettingAllTenantsOn)
+	seed(sqlSetSession, pgschema.SettingAllTenants, pgschema.SettingAllTenantsOn)
 	for id, want := range map[uuid.UUID]int64{root: 6, child: 5, grandchild: 3} {
 		var got int64
 		if err := conn.QueryRow(ctx, sqlReadUnder, id).Scan(&got); err != nil {
@@ -107,7 +109,7 @@ func TestCopiesUnderEndsOnAParentWrittenByHand(t *testing.T) {
 		sql  string
 		args []any
 	}{
-		{sqlSetSession, []any{SettingAllTenants, SettingAllTenantsOn}},
+		{sqlSetSession, []any{pgschema.SettingAllTenants, pgschema.SettingAllTenantsOn}},
 		{sqlSeedCapability, []any{looped, looped, tenant, 0}},
 		{sqlSeedUsage, []any{looped, tenant}},
 		{sqlSeedCopy, []any{[]byte{1}, looped, tenant}},
@@ -119,7 +121,7 @@ func TestCopiesUnderEndsOnAParentWrittenByHand(t *testing.T) {
 	if err := runMigrations(ctx, conn, m); err != nil {
 		t.Fatalf("the migration over a capability that is its own parent: %v", err)
 	}
-	if _, err := conn.Exec(ctx, sqlSetSession, SettingAllTenants, SettingAllTenantsOn); err != nil {
+	if _, err := conn.Exec(ctx, sqlSetSession, pgschema.SettingAllTenants, pgschema.SettingAllTenantsOn); err != nil {
 		t.Fatal(err)
 	}
 	var got int64

@@ -20,16 +20,9 @@ import (
 	"github.com/oleg-tkachuk/limes/pgstore"
 )
 
-// The environment variables the examples read their connection strings
-// from: one for the role that owns the schema, one for the role the stores
-// serve as.
-const (
-	ownerDSNEnv   = "LIMES_OWNER_DSN"
-	runtimeDSNEnv = "LIMES_DSN"
-)
-
-// runtimeRole is the role the stores serve as, which Migrate grants.
-const runtimeRole = "app"
+// runtimeDSNEnv is the environment variable the examples read the
+// connection string of the role the stores serve as from.
+const runtimeDSNEnv = "LIMES_DSN"
 
 // runtimePool is a pool of the role the stores serve as. A service keeps it
 // for as long as it runs, so the examples do not close it.
@@ -41,24 +34,10 @@ func runtimePool(ctx context.Context) *pgxpool.Pool {
 	return pool
 }
 
-func ExampleMigrate() {
+func ExampleCheckSchema() {
 	ctx := context.Background()
-	// The schema is created by the role that owns it, never by the role
-	// the stores serve as: that one must own nothing, or row-level
-	// security would not bind it.
-	owner, err := pgxpool.New(ctx, os.Getenv(ownerDSNEnv))
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = owner.AcquireFunc(ctx, func(c *pgxpool.Conn) error {
-		return pgstore.Migrate(ctx, c.Conn(), pgstore.MigrateOptions{RuntimeRoles: []string{runtimeRole}})
-	})
-	owner.Close()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// A readiness check, from the runtime role.
+	// A readiness check, from the runtime role, once pgstore/migrate has
+	// created the schema.
 	pool := runtimePool(ctx)
 	if err := pgstore.CheckSchema(ctx, pool); err != nil {
 		version, _ := pgstore.ReadSchemaVersion(ctx, pool)

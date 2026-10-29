@@ -69,7 +69,7 @@ flowchart LR
     end
 
     impl[("memstore · your own store")]
-    pg["<b>pgstore</b> (nested module)<br/>Store · BiscuitRevocationStore · erasers<br/>UsageStore · CopyUsageReader · Ledger · Census (count, list)<br/>Migrate · CheckSchema · EraseTenant<br/>WithTenant · WithAllTenants · WithAllTenantsReadOnly<br/>RevocationWatcher · row-level security"]
+    pg["<b>pgstore</b> (nested module)<br/>Store · BiscuitRevocationStore · erasers<br/>UsageStore · CopyUsageReader · Ledger · Census (count, list)<br/>CheckSchema · EraseTenant · migrate.Run, Steps<br/>WithTenant · WithAllTenants · WithAllTenantsReadOnly<br/>RevocationWatcher · row-level security"]
     rr["<b>redisreplay</b> (nested module)<br/>Cache: dpop.ReplayCache over Redis"]
     metering["<b>otelmetric</b> (nested module)<br/>Instrument: OTel counters · spend histogram<br/>InstrumentRevocationCache: cache Stats as observable counters and gauges<br/>WithMeterProvider · WithTenantAttribute"]
     pgdb{{"PostgreSQL"}}
@@ -995,11 +995,11 @@ tenant, before it reads a row, rather than answer as rows that are not there.
 A call that writes is refused so under a read-only scope: before the
 transaction under `WithAllTenantsReadOnly`, and once a `Config.Scope` of the
 consumer's has run when it set `limes.all_tenants` to `read`. Row-level security then binds every statement: `tenant_visible` for reads,
-`tenant_writable` for writes. It binds the table owner too; `Migrate` scopes
+`tenant_writable` for writes. It binds the table owner too; `migrate.Run` scopes
 each migration to every tenant and stops when it cannot. A superuser or a
 `BYPASSRLS` role is never bound, so `CheckSchema` refuses with
 `ErrRuntimeRole` a connection whose current, session or login role is one of
-those or owns anything in the schema. Only the `MigrateOptions.RuntimeRoles`
+those or owns anything in the schema. Only the `migrate.Options.RuntimeRoles`
 may execute the schema's functions. Every transaction is READ COMMITTED,
 whatever the database's default.
 

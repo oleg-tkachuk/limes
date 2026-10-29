@@ -8,9 +8,10 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/pgstore/internal/pgschema"
 )
 
-// The settings the row-level security policies read (migrations/
+// The settings the row-level security policies read (migrate/migrations/
 // 003_row_security.sql), each set local to one transaction. A Scope of the
 // consumer's (Config.Scope) that sets them is scoped as the package's own
 // is, and CheckSchemaScope reads them back.
@@ -21,8 +22,8 @@ const (
 	// SettingAllTenants is SettingAllTenantsOn in a transaction scoped to
 	// every tenant, and SettingAllTenantsRead in one that may read every
 	// tenant's rows and write none.
-	SettingAllTenants     = "limes.all_tenants"
-	SettingAllTenantsOn   = "on"
+	SettingAllTenants     = pgschema.SettingAllTenants
+	SettingAllTenantsOn   = pgschema.SettingAllTenantsOn
 	SettingAllTenantsRead = "read"
 )
 

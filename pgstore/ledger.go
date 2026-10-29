@@ -33,7 +33,7 @@ type Ledger struct {
 	conn
 }
 
-// NewLedger returns a ledger reader over cfg.DB, whose schema Migrate
+// NewLedger returns a ledger reader over cfg.DB, whose schema migrate.Run
 // created.
 func NewLedger(cfg Config) (*Ledger, error) {
 	c, err := newConn(cfg)
@@ -275,7 +275,7 @@ var _ meter.LedgerReader = (*Ledger)(nil)
 
 // sqlPurgeCharges removes the oldest charges taken before $1, at most $2 of
 // them, of the tenants the call's scope reaches, by charges_at
-// (migrations/011_ledger_indexes.sql), each then by its key: the batch as an
+// (migrate/migrations/011_ledger_indexes.sql), each then by its key: the batch as an
 // array, which the planner does not hash-join against the whole ledger. A
 // charge a refund holds is skipped, for a later batch, rather than waited
 // on.

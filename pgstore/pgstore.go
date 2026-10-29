@@ -9,11 +9,13 @@
 // suites, storetest and metertest, which is how a consumer knows it keeps
 // every rule a store must keep.
 //
-// Create the schema once, as the role that owns it, granting the role the
-// stores serve as; then build both stores over a pool of that role:
+// Create the schema once, as the role that owns it, with pgstore/migrate —
+// which a migration job alone imports, so a binary that serves links none of
+// it — granting the role the stores serve as; then build both stores over a
+// pool of that role:
 //
 //	err := ownerPool.AcquireFunc(ctx, func(c *pgxpool.Conn) error {
-//		return pgstore.Migrate(ctx, c.Conn(), pgstore.MigrateOptions{RuntimeRoles: []string{"app"}})
+//		return migrate.Run(ctx, c.Conn(), migrate.Options{RuntimeRoles: []string{"app"}})
 //	})
 //	records, err := pgstore.NewStore(pgstore.Config{DB: pool})
 //	usage, err := pgstore.NewUsageStore(pgstore.Config{DB: pool})
@@ -25,7 +27,7 @@
 // current role, the session's and the one the connection logged in as, since
 // a session opened as such a role can reset back to it — for a readiness
 // check; ReadSchemaVersion reports both versions and
-// needs only the SELECT that Migrate grants a runtime role.
+// needs only the SELECT that migrate.Run grants a runtime role.
 //
 // Every call runs in one READ COMMITTED transaction on one connection,
 // whatever the database's default — but for the two revocation checks, each
@@ -57,8 +59,8 @@
 // request, so each is one statement calling a function of the schema that
 // runs as the tables' owner and scopes itself to every tenant, read only,
 // for its own query — one round trip, no transaction. Only the roles
-// Migrate grants (MigrateOptions.RuntimeRoles) may execute the schema's
-// functions. Migrate runs as the
+// migrate.Run grants (migrate.Options.RuntimeRoles) may execute the schema's
+// functions. migrate.Run runs as the
 // owner, scoped to every tenant for its run; serve as a role that owns
 // nothing, which CheckSchema checks, so that no call can turn the policies
 // off. Config.CheckTenant lets a consumer that keeps its own
@@ -131,11 +133,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/oleg-tkachuk/limes/meter"
+	"github.com/oleg-tkachuk/limes/pgstore/internal/pgschema"
 )
 
-// schema is the PostgreSQL schema every table of the store lives in. The
-// migrations and every query spell it so; a mismatch fails each of them.
-const schema = "limes"
+// schema is the PostgreSQL schema every table of the store lives in.
+const schema = pgschema.Name
 
 // timeResolution is the finest a timestamptz column keeps. The store reads
 // its clock to it, so a time it writes reads back equal.
@@ -160,7 +162,7 @@ var txOptions = pgx.TxOptions{IsoLevel: pgx.ReadCommitted}
 
 // Config configures a store.
 type Config struct {
-	// DB is the database, its schema created by Migrate. Required: nil, or a
+	// DB is the database, its schema created by migrate.Run. Required: nil, or a
 	// nil pool or connection, is refused at construction.
 	DB DB
 	// Now is the store's clock. Nil: time.Now.

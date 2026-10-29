@@ -30,7 +30,7 @@ type UsageStore struct {
 	conn
 }
 
-// NewUsageStore returns a usage store over cfg.DB, whose schema Migrate
+// NewUsageStore returns a usage store over cfg.DB, whose schema migrate.Run
 // created.
 func NewUsageStore(cfg Config) (*UsageStore, error) {
 	c, err := newConn(cfg)
@@ -72,7 +72,7 @@ SELECT id FROM chain ORDER BY depth`
 	// sqlHoldRecords locks the records of a lineage for key share, in id
 	// order, so Purge cannot drop one while the call counts against it. Key
 	// share conflicts with that delete and not with the revoked flag a
-	// revocation sets (migrations/015_revoked_flag.sql): with FOR SHARE,
+	// revocation sets (migrate/migrations/015_revoked_flag.sql): with FOR SHARE,
 	// metered calls overlapping one another would hold a record without a
 	// gap, and its revoke's mark would wait behind them for as long.
 	sqlHoldRecords = `

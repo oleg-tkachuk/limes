@@ -19,7 +19,7 @@ type Store struct {
 	conn
 }
 
-// NewStore returns a store over cfg.DB, whose schema Migrate created.
+// NewStore returns a store over cfg.DB, whose schema migrate.Run created.
 func NewStore(cfg Config) (*Store, error) {
 	c, err := newConn(cfg)
 	if err != nil {
@@ -217,13 +217,13 @@ func (s *Store) GetRecord(ctx context.Context, id uuid.UUID) (limes.Record, erro
 	return rec, err
 }
 
-// sqlIsRevoked asks limes.is_revoked (migrations/004_revocation_checks.sql)
+// sqlIsRevoked asks limes.is_revoked (migrate/migrations/004_revocation_checks.sql)
 // in one statement, outside any transaction: one round trip on the path
 // every request takes.
 const sqlIsRevoked = `SELECT self, deepest, in_chain FROM limes.is_revoked($1, $2)`
 
 // sqlRevocationLineage asks limes.revocation_lineage
-// (migrations/018_revocation_lineage.sql), as sqlIsRevoked asks is_revoked.
+// (migrate/migrations/018_revocation_lineage.sql), as sqlIsRevoked asks is_revoked.
 const sqlRevocationLineage = `SELECT self, deepest, in_chain, ancestors, known FROM limes.revocation_lineage($1, $2)`
 
 // IsRevoked answers for the capability and every ancestor still on record,
@@ -253,8 +253,8 @@ func (s *Store) IsRevoked(ctx context.Context, id uuid.UUID) (bool, error) {
 // reads every tenant whatever the call's scope, so it names the ancestors'
 // ids, and whether an id is on record at all, to the role that calls it:
 // expose it to no one who may not learn another tenant's ids. Migration 020
-// dropped and recreated limes.revocation_lineage, and Migrate grants it only
-// to MigrateOptions.RuntimeRoles: an EXECUTE granted by hand to another role
+// dropped and recreated limes.revocation_lineage, and migrate.Run grants it only
+// to migrate.Options.RuntimeRoles: an EXECUTE granted by hand to another role
 // before then is gone and must be granted again.
 func (s *Store) RevocationLineage(ctx context.Context, id uuid.UUID) (limes.RevocationAnswer, error) {
 	var self, inChain, known bool
@@ -321,7 +321,7 @@ ON CONFLICT (capability_id) DO NOTHING`
 // Revoke writes the capability's revocation entry, and with CascadeChildren
 // one for every descendant. Each entry also marks its record, and every
 // record below it not marked already, revoked — the flag the census and the
-// listing read (migrations/015_revoked_flag.sql) — one UPDATE a generation,
+// listing read (migrate/migrations/015_revoked_flag.sql) — one UPDATE a generation,
 // by key and by parent, inside this transaction. It first takes the
 // tenant's revoke lock alone, which every insert of a child shares
 // (lockForRevoke): the revoke waits for the inserts and revokes of the

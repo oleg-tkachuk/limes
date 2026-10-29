@@ -1,4 +1,4 @@
-package pgstore
+package migrate
 
 import (
 	"context"
@@ -6,43 +6,16 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/tern/v2/migrate"
-)
+	tern "github.com/jackc/tern/v2/migrate"
 
-// The database and role the migration checks start from nothing in.
-const (
-	freshDatabase = "limes_fresh"
-	runtimeRole   = "limes_runtime"
-	// laterTable stands in for a table a later migration creates.
-	laterTable = schema + ".later"
+	"github.com/oleg-tkachuk/limes/pgstore/internal/pgschema"
 )
 
 // freshConn is a connection, as the owner, to a database of its own with no
 // schema in it, dropped when the test ends.
 func freshConn(t *testing.T) *pgx.Conn {
 	t.Helper()
-	ctx := t.Context()
-	db := pgx.Identifier{freshDatabase}.Sanitize()
-	if _, err := owner.Exec(ctx, "DROP DATABASE IF EXISTS "+db); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := owner.Exec(ctx, "CREATE DATABASE "+db); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := pgx.ParseConfig(ownerDSN)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.Database = freshDatabase
-	conn, err := pgx.ConnectConfig(ctx, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = conn.Close(context.Background())
-		_, _ = owner.Exec(context.Background(), "DROP DATABASE IF EXISTS "+db)
-	})
-	return conn
+	return pg.FreshConn(t, freshDatabase)
 }
 
 // The runtime roles get the schema, its tables and the tables of later
@@ -63,9 +36,9 @@ func TestMigrateGrantsTheRuntimeRoles(t *testing.T) {
 		_, _ = conn.Exec(context.Background(), "DROP OWNED BY "+role)
 		_, _ = owner.Exec(context.Background(), "DROP ROLE IF EXISTS "+role)
 	})
-	opts := MigrateOptions{RuntimeRoles: []string{runtimeRole}}
+	opts := Options{RuntimeRoles: []string{runtimeRole}}
 	for range 2 {
-		if err := Migrate(ctx, conn, opts); err != nil {
+		if err := Run(ctx, conn, opts); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
 	}
@@ -101,48 +74,11 @@ func TestMigrateGrantsTheRuntimeRoles(t *testing.T) {
 // A role with no name is refused, and nothing of the grant stays.
 func TestMigrateRefusesAnEmptyRole(t *testing.T) {
 	conn := freshConn(t)
-	if err := Migrate(t.Context(), conn, MigrateOptions{RuntimeRoles: []string{""}}); err == nil {
+	if err := Run(t.Context(), conn, Options{RuntimeRoles: []string{""}}); err == nil {
 		t.Fatal("Migrate with an empty role name: no error")
 	}
-	if err := Migrate(t.Context(), nil, MigrateOptions{}); err == nil {
+	if err := Run(t.Context(), nil, Options{}); err == nil {
 		t.Fatal("Migrate with no connection: no error")
-	}
-}
-
-// The schema's version reads back as the package expects once migrated, and
-// CheckSchema tells a schema behind or ahead of it, readable as the
-// runtime role.
-func TestCheckSchema(t *testing.T) {
-	ctx := t.Context()
-	v, err := ReadSchemaVersion(ctx, app)
-	if err != nil {
-		t.Fatalf("ReadSchemaVersion as the runtime role: %v", err)
-	}
-	if v.Applied == 0 || v.Applied != v.Expected {
-		t.Errorf("ReadSchemaVersion = %+v, want the migrations this package carries applied", v)
-	}
-	if err := CheckSchema(ctx, app); err != nil {
-		t.Errorf("CheckSchema as the runtime role: %v", err)
-	}
-	conn := freshConn(t)
-	// A database Migrate never ran in has no version table, nor even the
-	// schema: it is at version 0, which is a mismatch, not an outage.
-	if got, err := ReadSchemaVersion(ctx, conn); err != nil || got.Applied != 0 {
-		t.Errorf("ReadSchemaVersion before any Migrate = %+v, %v; want version 0", got, err)
-	}
-	if err := CheckSchema(ctx, conn); !errors.Is(err, ErrSchemaMismatch) {
-		t.Errorf("CheckSchema before any Migrate: err = %v, want ErrSchemaMismatch", err)
-	}
-	if err := Migrate(ctx, conn, MigrateOptions{}); err != nil {
-		t.Fatal(err)
-	}
-	for name, shift := range map[string]int{"behind": -1, "ahead": 1} {
-		if _, err := conn.Exec(ctx, `UPDATE `+versionTable+` SET version = $1`, v.Expected+shift); err != nil {
-			t.Fatal(err)
-		}
-		if err := CheckSchema(ctx, conn); !errors.Is(err, ErrSchemaMismatch) {
-			t.Errorf("CheckSchema of a schema %s: err = %v, want ErrSchemaMismatch", name, err)
-		}
 	}
 }
 
@@ -153,7 +89,7 @@ func TestMigrateRefusesARuntimeRoleThatIsNotOne(t *testing.T) {
 	conn := freshConn(t)
 	ctx := t.Context()
 	for _, role := range []string{"", "public", "PUBLIC", "Public", "app\x00role"} {
-		if err := Migrate(ctx, conn, MigrateOptions{RuntimeRoles: []string{role}}); err == nil {
+		if err := Run(ctx, conn, Options{RuntimeRoles: []string{role}}); err == nil {
 			t.Errorf("Migrate with runtime role %q: no error", role)
 		}
 	}
@@ -189,7 +125,7 @@ func TestMigrateRefusesASchemaAnotherRoleOwns(t *testing.T) {
 	if _, err := conn.Exec(ctx, "CREATE SCHEMA "+pgx.Identifier{schema}.Sanitize()+" AUTHORIZATION "+role); err != nil {
 		t.Fatal(err)
 	}
-	if err := Migrate(ctx, conn, MigrateOptions{}); !errors.Is(err, ErrSchemaOwner) {
+	if err := Run(ctx, conn, Options{}); !errors.Is(err, ErrSchemaOwner) {
 		t.Fatalf("Migrate into a schema %s owns: err = %v, want ErrSchemaOwner", intruderRole, err)
 	}
 }
@@ -207,7 +143,7 @@ const (
 func TestEveryMigrationRunsScopedToEveryTenant(t *testing.T) {
 	conn := freshConn(t)
 	ctx := t.Context()
-	m, err := migrate.NewMigrator(ctx, conn, probeVersionTable)
+	m, err := tern.NewMigrator(ctx, conn, probeVersionTable)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,8 +162,8 @@ func TestEveryMigrationRunsScopedToEveryTenant(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i, scope := range scopes {
-		if got := ptrText(scope); got != SettingAllTenantsOn {
-			t.Errorf("migration %d ran scoped to %q, want %q", i+2, got, SettingAllTenantsOn)
+		if got := ptrText(scope); got != pgschema.SettingAllTenantsOn {
+			t.Errorf("migration %d ran scoped to %q, want %q", i+2, got, pgschema.SettingAllTenantsOn)
 		}
 	}
 }
@@ -249,7 +185,7 @@ var errScopeRefused = errors.New("scope refused")
 func TestAMigrationThatCannotBeScopedDoesNotRun(t *testing.T) {
 	conn := freshConn(t)
 	ctx := t.Context()
-	m, err := migrate.NewMigratorEx(ctx, conn, probeVersionTable, &migrate.MigratorOptions{DisableTx: true})
+	m, err := tern.NewMigratorEx(ctx, conn, probeVersionTable, &tern.MigratorOptions{DisableTx: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +248,7 @@ func TestMigrationsRunReadCommitted(t *testing.T) {
 	if _, err := conn.Exec(ctx, sqlSessionRepeatableRead); err != nil {
 		t.Fatal(err)
 	}
-	m, err := migrate.NewMigrator(ctx, conn, isolationProbeVersionTable)
+	m, err := tern.NewMigrator(ctx, conn, isolationProbeVersionTable)
 	if err != nil {
 		t.Fatal(err)
 	}

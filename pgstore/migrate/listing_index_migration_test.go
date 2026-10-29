@@ -1,4 +1,4 @@
-package pgstore
+package migrate
 
 import (
 	"context"
@@ -7,7 +7,9 @@ import (
 	"uuid"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/tern/v2/migrate"
+	tern "github.com/jackc/tern/v2/migrate"
+
+	"github.com/oleg-tkachuk/limes/pgstore/internal/pgschema"
 )
 
 // lastBeforeListingIndexes is the schema version just before migration 014,
@@ -32,7 +34,7 @@ func TestMigrationFromBeforeTheListingIndexes(t *testing.T) {
 	if _, err := conn.Exec(ctx, "CREATE SCHEMA "+pgx.Identifier{schema}.Sanitize()); err != nil {
 		t.Fatal(err)
 	}
-	m, err := migrate.NewMigrator(ctx, conn, versionTable)
+	m, err := tern.NewMigrator(ctx, conn, versionTable)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +48,7 @@ func TestMigrationFromBeforeTheListingIndexes(t *testing.T) {
 	if err := migrateAllTenants(ctx, conn, func(ctx context.Context) error { return m.MigrateTo(ctx, lastBeforeListingIndexes) }); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := conn.Exec(ctx, sqlSetSession, SettingAllTenants, SettingAllTenantsOn); err != nil {
+	if _, err := conn.Exec(ctx, sqlSetSession, pgschema.SettingAllTenants, pgschema.SettingAllTenantsOn); err != nil {
 		t.Fatal(err)
 	}
 	tenant, root := uuid.New(), uuid.New()

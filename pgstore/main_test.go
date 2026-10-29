@@ -12,22 +12,18 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/pgstore/internal/pgtest"
+	"github.com/oleg-tkachuk/limes/pgstore/migrate"
 )
 
 // The database every test of the package runs against: one PostgreSQL
-// container, migrated once, its tables emptied before each check.
+// container (pgtest), migrated once, its tables emptied before each check.
+// Its owner, pgtest.OwnerUser, a superuser which row-level security never
+// binds, sets each check's rows up and empties the tables.
 const (
-	// postgresImage is the PostgreSQL the store is tested on.
-	postgresImage = "postgres:18.6-alpine"
-	// The container's own role, a superuser, which row-level security never
-	// binds: it sets each check's rows up and empties the tables.
-	ownerUser     = "limes_owner"
-	ownerPassword = "limes-owner-test"
-	databaseName  = "limes"
+	databaseName = pgtest.Database
 	// migratorUser owns the schema, as a deployment's migration role does:
 	// no superuser, so the policies bind it (010_force_row_security.sql).
 	migratorUser     = "limes_migrator"
@@ -42,7 +38,7 @@ const (
 	appPoolConns = 2
 )
 
-// createApp creates appUser, which Migrate grants as a runtime role.
+// createApp creates appUser, which migrate.Run grants as a runtime role.
 const createApp = `CREATE ROLE ` + appUser + ` LOGIN PASSWORD '` + appPassword + `'`
 
 // createMigrator creates migratorUser, free to create the store's schema in
@@ -90,6 +86,8 @@ func checkTenant(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error {
 const emptyTables = `TRUNCATE public.tenants, ` + schema + `.capabilities, ` + schema + `.usage, ` + schema + `.copy_usage, ` + schema + `.tenant_budgets, ` + schema + `.charges, ` + schema + `.reservations, ` + schema + `.erased_tenants CASCADE`
 
 var (
+	// pg is the container every test runs against.
+	pg *pgtest.Postgres
 	// owner is a pool as the owner role; app as appUser.
 	owner, app *pgxpool.Pool
 	// ownerDSN reaches the container's database as the owner.
@@ -109,20 +107,13 @@ func TestMain(m *testing.M) {
 
 func run(m *testing.M) (int, error) {
 	ctx := context.Background()
-	container, err := postgres.Run(ctx, postgresImage,
-		postgres.WithDatabase(databaseName),
-		postgres.WithUsername(ownerUser),
-		postgres.WithPassword(ownerPassword),
-		postgres.BasicWaitStrategies(),
-	)
-	defer func() { _ = testcontainers.TerminateContainer(container) }()
+	var err error
+	pg, err = pgtest.Start(ctx)
+	defer pg.Terminate()
 	if err != nil {
 		return 0, err
 	}
-	dsn, err := container.ConnectionString(ctx, "sslmode=disable")
-	if err != nil {
-		return 0, err
-	}
+	dsn := pg.DSN
 	ownerDSN = dsn
 	if owner, err = pgxpool.New(ctx, dsn); err != nil {
 		return 0, err
@@ -139,7 +130,7 @@ func run(m *testing.M) (int, error) {
 	}
 	defer migrator.Close()
 	err = migrator.AcquireFunc(ctx, func(c *pgxpool.Conn) error {
-		return Migrate(ctx, c.Conn(), MigrateOptions{RuntimeRoles: []string{appUser}})
+		return migrate.Run(ctx, c.Conn(), migrate.Options{RuntimeRoles: []string{appUser}})
 	})
 	if err != nil {
 		return 0, err
@@ -164,6 +155,9 @@ func poolAs(ctx context.Context, dsn, user, password string) (*pgxpool.Pool, err
 	cfg.MaxConns = appPoolConns
 	return pgxpool.NewWithConfig(ctx, cfg)
 }
+
+// sqlSetSession sets a setting for the rest of the session.
+const sqlSetSession = `SELECT set_config($1, $2, false)`
 
 // fresh empties the tables for a check of its own.
 func fresh(t *testing.T) {
