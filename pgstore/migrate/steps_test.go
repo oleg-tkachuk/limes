@@ -3,6 +3,7 @@ package migrate
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"uuid"
@@ -10,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/oleg-tkachuk/limes/pgstore/internal/pgschema"
+	"github.com/oleg-tkachuk/limes/pgstore/migrate/ddl"
 )
 
 // The steps are the migrations tern loads and Run runs, as tern renders
@@ -280,5 +282,19 @@ func TestGrantsRefusesARoleThatIsNotOne(t *testing.T) {
 	}
 	if stmts, err := Grants(nil); err != nil || len(stmts) != 0 {
 		t.Errorf("Grants(nil) = %v, %v; want nothing", stmts, err)
+	}
+}
+
+// Step's SQL and Statements are ddl's: migrate.Step is the same step.
+func TestStepIsDDLs(t *testing.T) {
+	steps, err := Steps()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range steps {
+		d := ddl.Step(s)
+		if s.SQL() != d.SQL() || !slices.Equal(s.Statements(), d.Statements()) {
+			t.Errorf("%s: migrate.Step differs from ddl.Step", s.Name)
+		}
 	}
 }

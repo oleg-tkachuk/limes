@@ -282,9 +282,28 @@ func grant(ctx context.Context, conn *pgx.Conn, roles []string) error {
 	return nil
 }
 
-// Step is one migration as a consumer's own migration tool applies it:
-// ddl.Step, which a program that vendors the SQL imports without tern.
-type Step = ddl.Step
+// Step is one migration as a consumer's own migration tool applies it, as
+// ddl.Step is, which a program that vendors the SQL imports without tern.
+type Step struct {
+	// Version is the schema's version once the step has run: tern's
+	// numbering, from one without a gap.
+	Version int
+	// Name is the migration's file name, such as "001_records.sql".
+	Name string
+	// Migration is the migration's SQL as tern renders and Run runs it.
+	// Apply SQL or Statements rather than this.
+	Migration string
+	// InTransaction says how to run the step: SQL as one transaction of its
+	// own; or, when false, Statements a statement at a time outside any
+	// transaction, as CREATE INDEX CONCURRENTLY needs.
+	InTransaction bool
+}
+
+// SQL is ddl.Step.SQL: what a tool applies for a transactional step.
+func (s Step) SQL() string { return ddl.Step(s).SQL() }
+
+// Statements is ddl.Step.Statements: the step as a tool sends it.
+func (s Step) Statements() []string { return ddl.Step(s).Statements() }
 
 // Setup is the SQL a consumer's tool runs once, before the first Step:
 // ddl.Setup.
@@ -292,4 +311,14 @@ func Setup() string { return ddl.Setup() }
 
 // Steps are the migrations Run runs, in order, for a consumer's own
 // migration tool to apply: ddl.Steps, the same migrations tern loads.
-func Steps() ([]Step, error) { return ddl.Steps() }
+func Steps() ([]Step, error) {
+	steps, err := ddl.Steps()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Step, len(steps))
+	for i, s := range steps {
+		out[i] = Step(s)
+	}
+	return out, nil
+}

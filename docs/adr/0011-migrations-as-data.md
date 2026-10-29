@@ -38,8 +38,11 @@ transaction.
    files, `Step`, `Setup`, `Steps`, `Grants` and `Version`.
    - It imports neither tern nor pgx. It needs the rule for quoting a
      PostgreSQL identifier, and a test holds that rule to pgx's.
-   - `migrate` keeps `Run`, which needs tern, and keeps its `Step`, `Setup`,
-     `Steps` and `Grants` as the same values from `ddl`. Nothing breaks.
+   - `migrate` keeps `Run`, which needs tern. It also keeps its `Setup`,
+     `Steps` and `Grants`, which return `ddl`'s values. `migrate.Step` stays
+     a type of its own, whose `SQL` and `Statements` are `ddl.Step`'s:
+     making it an alias would change its identity, which apidiff counts as a
+     break. Nothing breaks.
 2. **`Step.Statements()`** is a step as a tool sends it.
    - A non-transactional step gives each statement on its own, then the
      version record, to send one at a time outside a transaction.
