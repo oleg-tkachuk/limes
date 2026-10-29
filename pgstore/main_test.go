@@ -82,7 +82,7 @@ func checkTenant(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error {
 }
 
 // emptyTables empties every table of the store, as the owner.
-const emptyTables = `TRUNCATE public.tenants, ` + schema + `.capabilities, ` + schema + `.usage, ` + schema + `.copy_usage, ` + schema + `.tenant_budgets, ` + schema + `.charges, ` + schema + `.reservations, ` + schema + `.erased_tenants CASCADE`
+const emptyTables = `TRUNCATE public.tenants, ` + schema + `.capabilities, ` + schema + `.usage, ` + schema + `.copy_usage, ` + schema + `.tenant_budgets, ` + schema + `.charges, ` + schema + `.reservations, ` + schema + `.erased_tenants, ` + schema + `.dpop_seen_proofs CASCADE`
 
 var (
 	// pg is the container every test runs against.

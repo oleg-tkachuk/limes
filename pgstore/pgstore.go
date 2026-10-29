@@ -3,9 +3,10 @@
 // limes.RevocationLineageLookup for capability records and revocations,
 // meter.UsageStore and meter.CopyUsageReader for the meter,
 // meter.LedgerReader, limes.RecordCensus and limes.RecordLister for reports,
-// meter.LedgerHousekeeping for bounding the ledger, and
+// meter.LedgerHousekeeping for bounding the ledger,
 // limes.TenantRecordEraser and meter.TenantUsageEraser for removing a
-// tenant. It passes the module's own contract
+// tenant, and dpop.ReplayCache (ReplayCache) for DPoP proof ids shared by
+// every replica of a verifier. It passes the module's own contract
 // suites, storetest and metertest, which is how a consumer knows it keeps
 // every rule a store must keep.
 //
