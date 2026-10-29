@@ -24,4 +24,8 @@
 // verifies JWT access tokens (RFC 9068) through jwx; a consumer with a JOSE
 // stack of its own implements SubjectVerifier on it instead, and this
 // package links no JOSE library (docs/adr/0010-exchange-jose-subpackage.md).
+//
+// Every refusal is an RFC 6749 §5.2 error: [ErrorOf] gives the status and
+// code the Handler answers with, for a consumer that calls an Exchanger in
+// process, and [ErrorCodes] lists them.
 package exchange

@@ -13,7 +13,9 @@
 //     no implementation in the module could show that a failed side effect
 //     leaves counters unmutated.
 //
-// NewLedger reads a usage store's ledger as a meter.LedgerReader and purges
+// The record store is also a limes.BiscuitRevocationStore, a
+// limes.BulkRevoker and a limes.ExchangeStore. NewLedger reads a usage
+// store's ledger as a meter.LedgerReader and purges
 // it as a meter.LedgerHousekeeping, NewCensus
 // counts a record store's records as a limes.RecordCensus and lists them
 // as a limes.RecordLister, and the

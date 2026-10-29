@@ -38,10 +38,13 @@
 // [github.com/oleg-tkachuk/limes/inspect] reads a token without verifying
 // it, for tooling. memstore, storetest and metertest serve stores;
 // dpop/dpoptest and jwks/jwkstest check a replay cache, a nonce source and a
-// key resolver. Two modules of their own ship stores with a driver the root
-// module does not resolve: github.com/oleg-tkachuk/limes/pgstore, every store
-// contract over PostgreSQL, and github.com/oleg-tkachuk/limes/redisreplay, a
-// replay cache over Redis.
+// key resolver. Modules of their own carry what the root module does not
+// resolve: github.com/oleg-tkachuk/limes/pgstore, every store contract over
+// PostgreSQL; github.com/oleg-tkachuk/limes/redisreplay, a replay cache over
+// Redis; github.com/oleg-tkachuk/limes/otelmetric, OpenTelemetry
+// instruments; github.com/oleg-tkachuk/limes/exchange, OAuth 2.0 token
+// exchange (RFC 8693); and github.com/oleg-tkachuk/limes/biscuit, the
+// Biscuit form.
 //
 // # What you implement
 //
@@ -73,6 +76,8 @@
 // tenant's records with their dispositions and [RecordListingReader] to read
 // one with its disposition — [RecordReporter] is both, and the Census that
 // memstore.NewCensus and pgstore.NewCensus return serves all three —
+// [BulkRevoker] to revoke by user, client or identity-provider session,
+// [ExchangeStore] to exchange each subject token for one capability,
 // [TenantRecordEraser] to
 // remove a tenant, [dpop.ReplayCache] to share DPoP replay
 // state across replicas ([dpop.MemoryReplayCache] ships for one process), and
@@ -94,7 +99,10 @@
 // # Guarantees
 //
 // Rejections are matchable sentinels, so a consumer can map each to its own
-// transport status, or let Verifier.ErrorResponse map it to HTTP. A
+// transport status, or let Verifier.ErrorResponse map it to HTTP. Every
+// error the package returns has a stable [Code] ([CodeOf]), and [ProblemOf]
+// builds its RFC 9457 body for an API that is not a protected resource;
+// never match an error's text. A
 // charge rejected by any ceiling — a Biscuit copy's, the capability's, an
 // ancestor's, the tenant's — leaves every counter and the ledger unmutated, so retrying after
 // a rejection is safe. Delegation needs [OpShare] on the parent and can only

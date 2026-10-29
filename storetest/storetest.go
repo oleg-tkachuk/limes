@@ -25,7 +25,12 @@
 // with no record skipped or repeated, filters by principal type, subject,
 // subject prefix and disposition, gives each record the disposition the
 // census counts it under, and shows no other tenant's; when the lister is a
-// limes.RecordListingReader too, it reads each record as the listing gives it. A check that does not finish within Env.CheckTimeout stops the
+// limes.RecordListingReader too, it reads each record as the listing gives it.
+// When Env.BulkRevoker is set, each selector revokes exactly its
+// capabilities, a batch at a time, and a record's session reads back, a
+// child's its parent's. When Env.Exchanges is set, the first claim of a
+// subject token wins, racing ones included, and Purge drops it with its
+// capability. A check that does not finish within Env.CheckTimeout stops the
 // test binary with every goroutine's stack, naming the check.
 package storetest
 

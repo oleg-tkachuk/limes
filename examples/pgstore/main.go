@@ -32,8 +32,9 @@ const (
 	// postgresImage is the PostgreSQL the example runs on.
 	postgresImage = "postgres:18.6-alpine"
 	databaseName  = "limes"
-	// The owner role creates the schema; the app role is what a service
-	// connects as. It owns no table, so row-level security binds it.
+	// The owner role, the container's superuser, creates the schema; the
+	// app role is what a service connects as. It owns nothing, so no call it
+	// makes can turn the row-level security policies off.
 	ownerUser     = "limes_owner"
 	ownerPassword = "limes-owner-example" //nolint:gosec // G101: the password of a container the example starts and removes
 	appUser       = "limes_app"
@@ -105,7 +106,7 @@ func main() {
 	demo.Must(log, err, "records store")
 	usage, err := pgstore.NewUsageStore(pgstore.Config{DB: app})
 	demo.Must(log, err, "usage store")
-	log.Info("built the records and usage stores; the service role owns no table, so row-level security binds it",
+	log.Info("built the records and usage stores; the service role owns nothing, so it cannot turn row-level security off",
 		"connected as", appUser)
 
 	key, err := limes.GenerateKey()
@@ -187,8 +188,9 @@ func main() {
 	_, err = verifier.Verify(ctx, limes.VerifyRequest{Token: issued.Token, Audience: audience})
 	demo.Refused(log, err, limes.ErrRevoked, "verify the revoked token")
 
-	// As the owner, which row-level security does not bind: what the
-	// example left in the database.
+	// As the container's superuser, which row-level security does not bind
+	// (the schema forces it on the tables' owner): what the example left in
+	// the database.
 	var rows []any
 	for _, t := range []struct{ table, sql string }{
 		{"limes.capabilities", countCaps}, {"limes.charges", countCharge}, {"public.calls", countCalls},
@@ -197,7 +199,7 @@ func main() {
 		demo.Must(log, owner.QueryRow(ctx, t.sql).Scan(&n), "count "+t.table)
 		rows = append(rows, t.table, fmt.Sprintf("%d row(s)", n))
 	}
-	log.Info("what the example left in the database, read as the owner", rows...)
+	log.Info("what the example left in the database, read as the superuser", rows...)
 	log.Info("done: every step behaved as described")
 }
 

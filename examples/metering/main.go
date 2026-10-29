@@ -50,8 +50,7 @@ func main() {
 	demo.Must(log, err, "generate a signing key")
 	records, err := memstore.NewStore(memstore.StoreConfig{})
 	demo.Must(log, err, "records store")
-	// The in-memory store runs no transaction, so each charge passes a nil
-	// callback.
+	// With no side effect of our own, each charge passes a nil callback.
 	usage, err := memstore.NewUsageStore(memstore.UsageStoreConfig{Records: records})
 	demo.Must(log, err, "usage store")
 	signer, err := limes.NewSigner(limes.SignerConfig{KeyID: key.KeyID, Key: key.Private})
@@ -143,10 +142,7 @@ func main() {
 // logUsage logs what the meter holds for capability id.
 func logUsage(ctx context.Context, log *slog.Logger, usage meter.MeterReader, id uuid.UUID) {
 	u, err := usage.GetUsage(ctx, id)
-	if err != nil {
-		log.Info("the meter holds nothing for the capability yet", "capability", id, "error", err)
-		return
-	}
+	demo.Must(log, err, "read the capability's usage")
 	log.Info("what the meter holds for the capability now",
 		"requests", u.RequestCount, "spent", demo.Money(u.SpentAmount, unit), "held", demo.Money(u.ReservedAmount, unit))
 }

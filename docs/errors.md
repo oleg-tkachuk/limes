@@ -63,7 +63,7 @@ The body, for a capability that was revoked:
 
 | Member | |
 |---|---|
-| `type` | A URI ending in the refusal's `reason`, or in the code for an error that is no refusal (`limes.ProblemTypeURI`). |
+| `type` | A URI ending in the refusal's `reason`; for a refusal with none, in its family's type (`invalid-dpop-proof`, `invalid-token`, `insufficient-scope`, `conflict`); for an error that is no refusal, in its code (`limes.ProblemTypeURI`). |
 | `title` | Fixed per kind, safe to show. |
 | `status` | The HTTP status: the error's numeric code. |
 | `code` | The stable code (`limes.Code`): what a client branches on. |

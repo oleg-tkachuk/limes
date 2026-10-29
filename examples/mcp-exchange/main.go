@@ -3,7 +3,9 @@
 // authorization server through its protected resource metadata (RFC 9728),
 // presents the identity provider's access token, and the server exchanges
 // it for a capability to its tools (RFC 8693) and narrows that for a
-// sub-agent. Everything runs in this process, over TLS on loopback.
+// sub-agent. A second call with the same token gets the same capability:
+// each subject token is exchanged for one. Everything runs in this
+// process, over TLS on loopback.
 //
 //	go run ./mcp-exchange
 package main
@@ -124,7 +126,11 @@ type server struct {
 // capability to the tools, narrows that for the sub-agent that runs the
 // search, and has the tool authorize the sub-agent's call.
 func (s *server) serveMCP(w http.ResponseWriter, r *http.Request) {
-	metadataURL, _ := exchange.ResourceMetadataURL(s.resource)
+	metadataURL, err := exchange.ResourceMetadataURL(s.resource)
+	if err != nil {
+		http.Error(w, "resource metadata URL", http.StatusInternalServerError)
+		return
+	}
 	challenge := exchange.ResourceChallenge(metadataURL, []string{toolsScope})
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), bearer)
 	if !ok {
@@ -137,13 +143,17 @@ func (s *server) serveMCP(w http.ResponseWriter, r *http.Request) {
 		Client: self, SubjectToken: token, Resources: []string{toolsService, exchangeAudience},
 	})
 	if err != nil {
+		// The exchange's own error code says why; the client is told only
+		// that its token is not accepted here.
+		refusal, _ := exchange.ErrorOf(err)
+		s.log.Debug("the exchange refused the access token", "code", refusal.Code)
 		w.Header().Set("WWW-Authenticate", challenge)
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
 	s.log.Info("the MCP server exchanged the user's access token for a capability",
-		"capability", res.Capability.ID, "subject", res.Capability.Subject.Subject, "audience", res.Capability.Audience,
-		"expires", res.Capability.ExpiresAt.UTC().Format(time.RFC3339))
+		"capability", res.Capability.ID, "reissued", res.Reissued, "subject", res.Capability.Subject.Subject,
+		"audience", res.Capability.Audience, "expires", res.Capability.ExpiresAt.UTC().Format(time.RFC3339))
 	child, err := s.ex.Narrow(r.Context(), exchange.NarrowRequest{Client: self, SubjectToken: res.Token, Resources: []string{toolsService}})
 	if err != nil {
 		http.Error(w, "narrow", http.StatusInternalServerError)
@@ -156,10 +166,10 @@ func (s *server) serveMCP(w http.ResponseWriter, r *http.Request) {
 		Verify: limes.VerifyRequest{Token: child.Token, Audience: toolsService},
 		Check:  limes.CheckRequest{Op: limes.OpGet, Resource: toolResource},
 	}); err != nil {
-		http.Error(w, "tool refused", http.StatusForbidden)
+		limes.WriteErrorResponse(w, s.tools.ErrorResponse(r.Context(), err, limes.AuthSchemeBearer))
 		return
 	}
-	_, _ = fmt.Fprintf(w, "search ran for %s", res.Capability.Subject.Subject)
+	_, _ = fmt.Fprintf(w, "search ran for %s under capability %s", res.Capability.Subject.Subject, res.Capability.ID)
 }
 
 // policy gives the token's user the right to read the tools and to hand
@@ -216,7 +226,7 @@ func main() {
 	s.ex, err = exchange.NewExchanger(exchange.Config{
 		Issuer: issuer, Subjects: subjects, Policy: s.policy,
 		Capabilities: verifier, CapabilityAudience: exchangeAudience, NarrowPolicy: s.narrowPolicy,
-		Logger: slog.New(slog.DiscardHandler),
+		Exchanges: records, Logger: slog.New(slog.DiscardHandler),
 	})
 	must(err, "exchanger")
 	metadata, err := exchange.NewResourceMetadataHandler(exchange.ResourceMetadata{
@@ -253,6 +263,15 @@ func main() {
 	}
 	log.Info("the tool call succeeded on the sub-agent's capability", "answer", resp.body)
 
+	// 3b. The same token again: the same capability, signed again from its
+	// record, so calling more often grants no more requests.
+	again, err := call(ctx, client, s.resource, token)
+	must(err, "call again with the same access token")
+	if again.status != http.StatusOK || again.body != resp.body {
+		must(fmt.Errorf("status %d: %s, then %s", again.status, resp.body, again.body), "one capability per access token")
+	}
+	log.Info("a second call with the same token ran under the same capability", "answer", again.body)
+
 	// 4. A token issued for another resource is not accepted.
 	elsewhere, err := provider.accessToken("https://other-mcp.example.com")
 	must(err, "access token for another server")
@@ -262,6 +281,7 @@ func main() {
 		err = errUnauthorized
 	}
 	demo.Refused(log, err, errUnauthorized, "a token issued for another MCP server")
+	log.Info("done: every step behaved as described")
 }
 
 // reply is an MCP server's answer, read whole.

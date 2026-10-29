@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -285,6 +286,9 @@ func TestDelegate_NarrowsAndPersists(t *testing.T) {
 	}
 }
 
+// errorPrefix opens the text of every error the package returns.
+const errorPrefix = "limes: "
+
 // TestDelegate_RejectsWidening confirms the issuer enforces narrowing
 // at issuance — a misuse fails before any token is emitted.
 func TestDelegate_RejectsWidening(t *testing.T) {
@@ -308,6 +312,9 @@ func TestDelegate_RejectsWidening(t *testing.T) {
 	})
 	if !errors.Is(err, ErrDelegationTooWide) {
 		t.Fatalf("expected ErrDelegationTooWide, got %v", err)
+	}
+	if n := strings.Count(err.Error(), errorPrefix); n != 1 {
+		t.Fatalf("%q names %q %d times, want once", err, errorPrefix, n)
 	}
 }
 
