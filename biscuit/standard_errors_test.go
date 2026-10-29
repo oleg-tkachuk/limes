@@ -23,3 +23,9 @@ var wrappedHelpers = map[string]map[string]string{
 func TestEveryErrorNamesASentinel(t *testing.T) {
 	errguard.Refuse(t, ".", wrappedHelpers)
 }
+
+// No error of the module names "limes: " twice: one wrapping another builds
+// its text with errs.Errorf.
+func TestNoErrorDoublesThePrefix(t *testing.T) {
+	errguard.RefuseDoubling(t, ".")
+}
