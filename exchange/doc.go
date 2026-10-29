@@ -16,7 +16,9 @@
 // drawn from the resources and audiences asked for, it ends no later than
 // the subject token, a subject token is accepted only from the client it
 // was issued to, and a DPoP proof binds the capability to the client's key
-// (RFC 9449 §5).
+// (RFC 9449 §5). Config.Exchanges issues one capability per subject token,
+// for a service that exchanges where it receives the token
+// (docs/adr/0009-one-capability-per-subject-token.md).
 //
 // Subject tokens are verified by a SubjectVerifier. exchange/jwtverify's
 // verifies JWT access tokens (RFC 9068) through jwx; a consumer with a JOSE

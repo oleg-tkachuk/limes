@@ -160,6 +160,8 @@ type fixtureConfig struct {
 	narrow bool
 	// capabilityNonces has the capabilities' verifier require DPoP nonces.
 	capabilityNonces bool
+	// onePerToken issues one capability per subject token (Config.Exchanges).
+	onePerToken bool
 }
 
 func newFixture(t testing.TB, fc fixtureConfig) *fixture {
@@ -227,6 +229,9 @@ func newFixture(t testing.TB, fc fixtureConfig) *fixture {
 		Keys: keys, Revocations: mem, TrustedIssuers: []string{limesIssuer}, Now: clock, DPoP: proofs,
 	}); err != nil {
 		t.Fatal(err)
+	}
+	if fc.onePerToken {
+		cfg.Exchanges = f.store
 	}
 	if fc.narrow {
 		cfg.Capabilities, cfg.CapabilityAudience, cfg.NarrowPolicy = f.verifier, exchangeAudience, f.narrowPolicy

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"slices"
 	"time"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/dpop"
@@ -108,9 +109,9 @@ type Grant struct {
 // remaining lifetime. Nothing is granted that the policy did not choose:
 // there is no default policy. A subject token may be exchanged again and
 // again until it expires, each exchange issuing a capability of its own,
-// with ceilings of its own: a policy that grants a budget per user, not
-// per exchange, keys it on Grant.Subject (its Issuer and Subject, or its
-// ID for one capability per subject token). Set both ceilings explicitly:
+// with ceilings of its own, unless Config.Exchanges issues one capability
+// per subject token: a policy that grants a budget per user, not per
+// exchange, keys it on Grant.Subject (its Issuer and Subject). Set both ceilings explicitly:
 // Caveats.Requests to a Max or Unlimited, since Issue refuses a capability
 // no request can use and the exchange answers that as the server's
 // failure; Caveats.Budget to what it may spend, the zero budget being none.
@@ -123,6 +124,9 @@ type Result struct {
 	// TokenType is how the capability is presented: TokenTypeDPoP when bound
 	// to a key, else TokenTypeBearer (RFC 9449 §5, RFC 6750).
 	TokenType string
+	// Reissued reports that the capability is the one an earlier exchange
+	// of the same subject token issued (Config.Exchanges).
+	Reissued bool
 }
 
 // The token types of an exchange's response.
@@ -164,6 +168,23 @@ type Config struct {
 	Capabilities       *limes.Verifier
 	CapabilityAudience string
 	NarrowPolicy       NarrowPolicy
+	// Exchanges, when set, makes the Exchanger issue one capability per
+	// subject token, by its issuer and jti within the tenant the policy
+	// names (docs/adr/0009-one-capability-per-subject-token.md): the first
+	// exchange issues and records it; every later one, from any replica,
+	// hands the same capability back, its token signed again from the
+	// record (limes.Issuer.Reissue), so its ceilings are counted once. In
+	// this mode a subject token without a jti is refused; an exchange of a
+	// capability revoked or expired is refused, never issued anew; one with
+	// a proof by another key than the capability is bound to, or none for a
+	// bound one, or one for a bearer one, is refused; one asking for other
+	// targets than the capability's audience is refused; and a policy that
+	// names no TTL gets the subject token's remaining lifetime, not
+	// DefaultTTL. The policy still runs on every exchange: it names the
+	// tenant. Nil: every exchange issues a capability of its own. The
+	// Issuer's store must read records back (limes.RecordReader), as every
+	// limes.Store does.
+	Exchanges limes.ExchangeStore
 	// Now is the clock. Nil: time.Now.
 	Now func() time.Time
 	// Logger logs every exchange and refusal. Nil: slog.Default().
@@ -220,6 +241,7 @@ func (e *Exchanger) Exchange(ctx context.Context, req Request) (Result, error) {
 		slog.String("capability", res.Capability.ID.String()),
 		slog.Any("audience", res.Capability.Audience),
 		slog.String("token_type", res.TokenType),
+		slog.Bool("reissued", res.Reissued),
 		slog.Time("expires_at", res.Capability.ExpiresAt))
 	return res, nil
 }
@@ -233,6 +255,9 @@ func (e *Exchanger) exchange(ctx context.Context, req Request) (Result, Subject,
 	if err != nil {
 		return Result{}, subject, err
 	}
+	if e.cfg.Exchanges != nil && subject.ID == "" {
+		return Result{}, subject, fmt.Errorf("%w: no jti, and each subject token is exchanged for one capability", ErrInvalidGrant)
+	}
 	checked, bound, err := e.checkProof(ctx, req, subject)
 	if err != nil {
 		return Result{}, subject, err
@@ -242,18 +267,96 @@ func (e *Exchanger) exchange(ctx context.Context, req Request) (Result, Subject,
 		return Result{}, subject, err
 	}
 	if bound {
+		issue.ConfirmationJKT = checked.JKT()
+	}
+	key := limes.ExchangeKey{TenantID: issue.Subject.TenantID, Issuer: subject.Issuer, TokenID: subject.ID}
+	if e.cfg.Exchanges != nil {
+		res, found, err := e.exchangedBefore(ctx, key, issue)
+		if err != nil || found {
+			if err == nil && bound {
+				err = e.cfg.DPoP.Record(ctx, checked)
+			}
+			return res, subject, err
+		}
+	}
+	if bound {
 		// Recorded only now, once everything else passed, and before the
 		// capability exists: a replayed proof never mints one.
 		if err := e.cfg.DPoP.Record(ctx, checked); err != nil {
 			return Result{}, subject, err
 		}
-		issue.ConfirmationJKT = checked.JKT()
 	}
 	minted, err := e.cfg.Issuer.Issue(ctx, issue)
 	if err != nil {
 		return Result{}, subject, fmt.Errorf("exchange: issue: %w", err)
 	}
-	return resultOf(minted), subject, nil
+	if e.cfg.Exchanges == nil {
+		return resultOf(minted), subject, nil
+	}
+	res, err := e.claim(ctx, key, issue, minted)
+	return res, subject, err
+}
+
+// exchangedBefore is the capability an earlier exchange of the subject
+// token issued under key, reissued, with found true; found is false when
+// there is none.
+func (e *Exchanger) exchangedBefore(ctx context.Context, key limes.ExchangeKey, issue limes.IssueRequest) (Result, bool, error) {
+	id, err := e.cfg.Exchanges.ExchangedFor(ctx, key)
+	if errors.Is(err, limes.ErrNotFound) {
+		return Result{}, false, nil
+	}
+	if err != nil {
+		return Result{}, false, fmt.Errorf("exchange: the earlier exchange of the subject token: %w", err)
+	}
+	res, err := e.reissue(ctx, id, issue)
+	return res, true, err
+}
+
+// claim records minted as the capability of key. When another exchange of
+// the same subject token claimed key first, its capability is reissued and
+// minted is left to expire: its token never left this process, so nothing
+// can present it.
+func (e *Exchanger) claim(ctx context.Context, key limes.ExchangeKey, issue limes.IssueRequest, minted limes.IssueResult) (Result, error) {
+	recorded, claimed, err := e.cfg.Exchanges.ClaimExchange(ctx, key, minted.Capability.ID)
+	if err != nil {
+		return Result{}, fmt.Errorf("exchange: record the exchange of the subject token: %w", err)
+	}
+	if claimed {
+		return resultOf(minted), nil
+	}
+	e.cfg.Logger.InfoContext(ctx, "exchange lost a race for its subject token; the capability it issued is left to expire unused",
+		slog.String("capability", minted.Capability.ID.String()), slog.String("winner", recorded.String()))
+	return e.reissue(ctx, recorded, issue)
+}
+
+// reissue hands back the capability id an earlier exchange issued, held to
+// this exchange: live, bound to the key this request proves, if any, and
+// for no audience beyond this request's targets.
+func (e *Exchanger) reissue(ctx context.Context, id uuid.UUID, issue limes.IssueRequest) (Result, error) {
+	again, err := e.cfg.Issuer.Reissue(ctx, id)
+	switch {
+	case errors.Is(err, limes.ErrRevoked), errors.Is(err, limes.ErrExpired):
+		return Result{}, fmt.Errorf("%w: the subject token's capability is no longer live: %w", ErrInvalidGrant, err)
+	case err != nil:
+		return Result{}, fmt.Errorf("exchange: reissue: %w", err)
+	}
+	c := again.Capability
+	if c.ConfirmationJKT != issue.ConfirmationJKT {
+		return Result{}, fmt.Errorf("%w: the subject token's capability is bound to another key than this request proves, or to none", ErrInvalidGrant)
+	}
+	if !slices.Equal(sortedCopy(c.Audience), sortedCopy(issue.Audience)) {
+		return Result{}, fmt.Errorf("%w: the subject token's capability is for %q, not %q", ErrInvalidTarget, c.Audience, issue.Audience)
+	}
+	res := resultOf(again)
+	res.Reissued = true
+	return res, nil
+}
+
+// sortedCopy is s sorted, s left as it is.
+func sortedCopy(s []string) []string {
+	out := slices.Clone(s)
+	slices.Sort(out)
+	return out
 }
 
 // checkExchangeRequest refuses an exchange without a client that may present
@@ -324,6 +427,11 @@ func (e *Exchanger) grant(ctx context.Context, req Request, subject Subject, rem
 	}
 	if issue.TTL == 0 {
 		issue.TTL = DefaultTTL
+		if e.cfg.Exchanges != nil {
+			// One capability per subject token: one shorter than the token
+			// would leave the rest of its life refused.
+			issue.TTL = remaining
+		}
 	}
 	issue.TTL = min(issue.TTL, remaining)
 	return issue, nil
