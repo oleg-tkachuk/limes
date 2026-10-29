@@ -78,6 +78,10 @@ type Store struct {
 	// Purge drops the mapping with its record.
 	exchanges   map[limes.ExchangeKey]uuid.UUID
 	exchangedBy map[uuid.UUID]limes.ExchangeKey
+
+	// sessions is the identity provider's session each capability was
+	// issued under, when it names one (limes.InsertRequest.Session).
+	sessions map[uuid.UUID]string
 }
 
 // UsageStore implements meter.UsageStore — request and spend counters. It
@@ -284,6 +288,7 @@ func NewStore(cfg StoreConfig) (*Store, error) {
 		erased:        map[uuid.UUID]struct{}{},
 		exchanges:     map[limes.ExchangeKey]uuid.UUID{},
 		exchangedBy:   map[uuid.UUID]limes.ExchangeKey{},
+		sessions:      map[uuid.UUID]string{},
 	}, nil
 }
 
@@ -369,6 +374,10 @@ func (s *Store) Insert(_ context.Context, req limes.InsertRequest) error {
 	// changes after it is written.
 	s.caps[c.ID] = c.Clone()
 	s.issuedBy[c.ID] = issuedBy.Clone()
+	// A child takes its parent's session.
+	if session := cmp.Or(req.Session, s.sessions[c.ParentID]); session != "" {
+		s.sessions[c.ID] = session
+	}
 	return nil
 }
 
@@ -407,7 +416,7 @@ func (s *Store) GetRecord(_ context.Context, id uuid.UUID) (limes.Record, error)
 	if !ok {
 		return limes.Record{}, limes.ErrNotFound
 	}
-	rec := limes.Record{Capability: c.Clone(), IssuedBy: s.issuedBy[id].Clone()}
+	rec := limes.Record{Capability: c.Clone(), IssuedBy: s.issuedBy[id].Clone(), Session: s.sessions[id]}
 	if r, ok := s.revoked[id]; ok {
 		rec.Revocation = &r
 	}
@@ -682,6 +691,7 @@ func (s *Store) Purge(_ context.Context, req limes.PurgeRequest) (limes.PurgeRes
 		delete(s.issuedBy, c.ID)
 		s.forgetCopyRevocationsLocked(c.ID)
 		s.forgetExchangeLocked(c.ID)
+		delete(s.sessions, c.ID)
 	}
 	return limes.PurgeResult{Purged: int64(len(due))}, nil
 }
@@ -717,6 +727,7 @@ func (s *Store) EraseTenantRecords(_ context.Context, req limes.EraseTenantReque
 		delete(s.issuedBy, id)
 		s.forgetCopyRevocationsLocked(id)
 		s.forgetExchangeLocked(id)
+		delete(s.sessions, id)
 		out.Removed++
 	}
 	return out, nil

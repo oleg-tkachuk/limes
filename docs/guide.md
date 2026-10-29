@@ -895,6 +895,45 @@ a `Clear` asked for, though both count in `Clears`.
 A consumer that revokes often keeps every answer it did not touch, where
 `Clear` would make the next check of each id ask the store again.
 
+### Revoke a user, a client or a session
+
+The events an operator acts on name no capability: a user leaves, a client
+is compromised, the identity provider ends a session. A store that is a
+`limes.BulkRevoker` — memstore's and pgstore's are — revokes every
+capability of one tenant that matches a selector. The selectors are:
+
+- `Subject`, the principal a capability authorises;
+- `OnBehalfOf`, every agent acting for a user;
+- `ClientID`;
+- `Session`, the identity provider's session it was issued under.
+
+Given together, they must all match.
+
+```go
+req := limes.RevokeMatchingRequest{TenantID: tenant, Session: sid, Note: "IdP logout", Actor: "backchannel-logout"}
+for {
+	res, err := records.RevokeMatching(ctx, req) // pgstore: under pgstore.WithTenant(ctx, tenant)
+	if err != nil || !res.More {
+		break
+	}
+}
+```
+
+- **Each call writes an entry for at most `Limit` capabilities** (default
+  `DefaultHousekeepingLimit`) that have none, in id order. It says whether
+  the batch was full, so no transaction holds a tenant's rows for long.
+- **Descendants stop through their lineage,** as with `Revoke`.
+- **A capability issued while the loop runs** — by a client still holding
+  a token that can delegate — is caught by another pass. Run one after the
+  identity provider has stopped issuing for the session.
+- **The session is issuance metadata, never a claim.** `IssueRequest.Session`
+  records it, `Record.Session` reads it back, and every delegation takes its
+  parent's. An `exchange.Exchanger` records the subject token's `sid`. A
+  capability issued with no session is reached by subject or client
+  instead.
+- **An OIDC back-channel logout** endpoint verifies the provider's logout
+  token, then runs the loop above with its `sid`.
+
 Choose the TTL from how often one token is verified, not from a request
 burst. The two-second default serves the requests of one HTTP exchange; an
 agent that calls a tool once per model step, seconds or minutes apart,

@@ -98,7 +98,7 @@ func TestSignAndRecordNamesTheRecord(t *testing.T) {
 		IssuedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour), ClientID: testClientID,
 	})
 	for _, what := range []string{"issuance", "delegation"} {
-		token, err := iss.signAndRecord(t.Context(), c, Principal{Subject: "op"}, what)
+		token, err := iss.signAndRecord(t.Context(), c, Principal{Subject: "op"}, "", what)
 		if token != "" || !errors.Is(err, errInsert) || !strings.Contains(err.Error(), "persist "+what) {
 			t.Errorf("signAndRecord(%s) = %q, %v; want no token and the store's error naming %s", what, token, err, what)
 		}
