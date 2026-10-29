@@ -1,5 +1,5 @@
 // Command quickstart is the README's walkthrough as a runnable program:
-// issue → verify → delegate → charge → revoke, against the in-memory
+// issue → authorize → delegate → meter → revoke, against the in-memory
 // reference store.
 //
 // It deliberately mentions no object storage and no database. If this program
