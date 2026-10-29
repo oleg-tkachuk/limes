@@ -33,7 +33,17 @@ type Site struct {
 }
 
 // Bare is every bare construction in files, which it parses.
-func Bare(files []string) ([]Site, error) {
+func Bare(files []string) ([]Site, error) { return find(files, bareCall) }
+
+// Doubling is every fmt.Errorf in files whose text would name the module's
+// prefix twice: a format that opens with it and wraps an error, which may
+// open with it too, one that wraps two, or one that quotes an error's text.
+// errs.Errorf names it once.
+func Doubling(files []string) ([]Site, error) { return find(files, doublingCall) }
+
+// find is every call in files that match reports, outside the declarations
+// of exported sentinels.
+func find(files []string, match func(*ast.CallExpr) bool) ([]Site, error) {
 	var sites []Site
 	fset := token.NewFileSet()
 	for _, f := range files {
@@ -48,7 +58,7 @@ func Bare(files []string) ([]Site, error) {
 					continue
 				}
 				ast.Inspect(node, func(n ast.Node) bool {
-					if call, ok := n.(*ast.CallExpr); ok && bareCall(call) {
+					if call, ok := n.(*ast.CallExpr); ok && match(call) {
 						sites = append(sites, Site{File: filepath.ToSlash(f), Func: name, Line: fset.Position(call.Pos()).Line})
 					}
 					return true
@@ -89,21 +99,63 @@ func unitName(node ast.Node) (string, bool) {
 	return "(package)", false
 }
 
-// bareCall reports whether call is errors.New, or fmt.Errorf with a format
-// that wraps no error.
-func bareCall(call *ast.CallExpr) bool {
+// modulePrefix opens the text of every error the root module returns.
+const modulePrefix = "limes: "
+
+// errorMethod is the method that gives an error's text.
+const errorMethod = "Error"
+
+// doublingCall reports whether call is an fmt.Errorf whose literal format
+// opens with modulePrefix and wraps, or wraps more than once, or that
+// quotes an error's text.
+func doublingCall(call *ast.CallExpr) bool {
+	if !isCall(call, "fmt", "Errorf") || len(call.Args) == 0 {
+		return false
+	}
+	for _, arg := range call.Args[1:] {
+		if quotesError(arg) {
+			return true
+		}
+	}
+	lit, ok := leftmostLiteral(call.Args[0])
+	if !ok {
+		return false
+	}
+	format, err := strconv.Unquote(lit.Value)
+	if err != nil {
+		return false
+	}
+	wraps := strings.Count(format, wrapVerb)
+	return wraps > 1 || wraps == 1 && strings.HasPrefix(format, modulePrefix)
+}
+
+// quotesError reports whether arg is x.Error(), the text of an error.
+func quotesError(arg ast.Expr) bool {
+	call, ok := arg.(*ast.CallExpr)
+	if !ok || len(call.Args) != 0 {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	return ok && sel.Sel.Name == errorMethod
+}
+
+// isCall reports whether call is pkg.name(…).
+func isCall(call *ast.CallExpr, pkg, name string) bool {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok {
 		return false
 	}
-	pkg, ok := sel.X.(*ast.Ident)
-	if !ok {
-		return false
-	}
+	id, ok := sel.X.(*ast.Ident)
+	return ok && id.Name == pkg && sel.Sel.Name == name
+}
+
+// bareCall reports whether call is errors.New, or fmt.Errorf with a format
+// that wraps no error.
+func bareCall(call *ast.CallExpr) bool {
 	switch {
-	case pkg.Name == "errors" && sel.Sel.Name == "New":
+	case isCall(call, "errors", "New"):
 		return true
-	case pkg.Name == "fmt" && sel.Sel.Name == "Errorf":
+	case isCall(call, "fmt", "Errorf"):
 		if len(call.Args) == 0 {
 			return true
 		}
@@ -219,5 +271,25 @@ func Refuse(t testing.TB, root string, wrapped map[string]map[string]string, ski
 				t.Errorf("%s: %s is listed as a wrapped helper and constructs no bare error: drop it", file, fn)
 			}
 		}
+	}
+}
+
+// RefuseDoubling fails t for every fmt.Errorf in the module rooted at root
+// whose text would name its prefix twice (Doubling).
+func RefuseDoubling(t testing.TB, root string, skip ...string) {
+	t.Helper()
+	files, err := Sources(root, skip...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, f := range files {
+		files[i] = filepath.Join(root, f)
+	}
+	sites, err := Doubling(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range sites {
+		t.Errorf("%s:%d (%s) may name %q twice: build it with errs.Errorf", s.File, s.Line, s.Func, modulePrefix)
 	}
 }

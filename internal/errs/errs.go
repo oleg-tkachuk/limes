@@ -32,11 +32,40 @@ func Config(format string, args ...any) error { return wrap(ErrInvalidConfig, fo
 // Broken is an ErrInternal saying which invariant broke.
 func Broken(format string, args ...any) error { return wrap(ErrInternal, format, args) }
 
-// modulePrefix opens the family's text, so a message that opens with it
-// too is not named twice.
+// modulePrefix opens the text of every error the module returns, and is
+// named once in it however many of them one error wraps.
 const modulePrefix = "limes: "
 
 // wrap is family, then the message format makes of args.
 func wrap(family error, format string, args []any) error {
-	return fmt.Errorf("%w: %s", family, strings.TrimPrefix(fmt.Sprintf(format, args...), modulePrefix))
+	return Errorf("%w: %s", family, fmt.Sprintf(format, args...))
+}
+
+// Errorf is fmt.Errorf, its text naming modulePrefix once: the first time,
+// wherever the format or a wrapped error names it. errors.Is and errors.As
+// see what fmt.Errorf would wrap.
+func Errorf(format string, args ...any) error {
+	err := fmt.Errorf(format, args...)
+	return &prefixedOnce{msg: prefixOnce(err.Error()), err: err}
+}
+
+// prefixedOnce is an error whose text names modulePrefix once.
+type prefixedOnce struct {
+	msg string
+	err error
+}
+
+func (e *prefixedOnce) Error() string { return e.msg }
+
+// Unwrap is what fmt.Errorf built, which wraps the format's %w operands.
+func (e *prefixedOnce) Unwrap() error { return e.err }
+
+// prefixOnce is msg with every modulePrefix after the first removed.
+func prefixOnce(msg string) string {
+	first := strings.Index(msg, modulePrefix)
+	if first < 0 {
+		return msg
+	}
+	rest := first + len(modulePrefix)
+	return msg[:rest] + strings.ReplaceAll(msg[rest:], modulePrefix, "")
 }
