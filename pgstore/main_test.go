@@ -12,22 +12,17 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/pgstore/internal/pgtest"
 )
 
 // The database every test of the package runs against: one PostgreSQL
-// container, migrated once, its tables emptied before each check.
+// container (pgtest), migrated once, its tables emptied before each check.
+// Its owner, pgtest.OwnerUser, a superuser which row-level security never
+// binds, sets each check's rows up and empties the tables.
 const (
-	// postgresImage is the PostgreSQL the store is tested on.
-	postgresImage = "postgres:18.6-alpine"
-	// The container's own role, a superuser, which row-level security never
-	// binds: it sets each check's rows up and empties the tables.
-	ownerUser     = "limes_owner"
-	ownerPassword = "limes-owner-test"
-	databaseName  = "limes"
+	databaseName = pgtest.Database
 	// migratorUser owns the schema, as a deployment's migration role does:
 	// no superuser, so the policies bind it (010_force_row_security.sql).
 	migratorUser     = "limes_migrator"
@@ -109,20 +104,12 @@ func TestMain(m *testing.M) {
 
 func run(m *testing.M) (int, error) {
 	ctx := context.Background()
-	container, err := postgres.Run(ctx, postgresImage,
-		postgres.WithDatabase(databaseName),
-		postgres.WithUsername(ownerUser),
-		postgres.WithPassword(ownerPassword),
-		postgres.BasicWaitStrategies(),
-	)
-	defer func() { _ = testcontainers.TerminateContainer(container) }()
+	pg, err := pgtest.Start(ctx)
+	defer pg.Terminate()
 	if err != nil {
 		return 0, err
 	}
-	dsn, err := container.ConnectionString(ctx, "sslmode=disable")
-	if err != nil {
-		return 0, err
-	}
+	dsn := pg.DSN
 	ownerDSN = dsn
 	if owner, err = pgxpool.New(ctx, dsn); err != nil {
 		return 0, err

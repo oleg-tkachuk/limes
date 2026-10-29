@@ -131,11 +131,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/oleg-tkachuk/limes/meter"
+	"github.com/oleg-tkachuk/limes/pgstore/internal/pgschema"
 )
 
-// schema is the PostgreSQL schema every table of the store lives in. The
-// migrations and every query spell it so; a mismatch fails each of them.
-const schema = "limes"
+// schema is the PostgreSQL schema every table of the store lives in.
+const schema = pgschema.Name
 
 // timeResolution is the finest a timestamptz column keeps. The store reads
 // its clock to it, so a time it writes reads back equal.
