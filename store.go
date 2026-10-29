@@ -71,6 +71,11 @@ const MaxDelegationDepth = 64
 type InsertRequest struct {
 	Capability Capability
 	IssuedBy   Principal
+	// Session is the identity provider's session the capability was issued
+	// under, such as an OIDC sid: issuance metadata, beside IssuedBy, never
+	// a claim, which BulkRevoker revokes by. Empty for none. A child has
+	// none of its own: the store records its parent's.
+	Session string
 }
 
 // Validate refuses, as ErrInvalidRequest, a capability with no id — nothing
@@ -83,6 +88,8 @@ func (r InsertRequest) Validate() error {
 		return invalidRequest("insert: the capability has no id")
 	case r.Capability.ExpiresAt.IsZero():
 		return invalidRequest("insert: capability %s never expires", r.Capability.ID)
+	case r.Capability.ParentID != uuid.Nil() && r.Session != "":
+		return invalidRequest("insert: child %s names a session; it takes its parent's", r.Capability.ID)
 	}
 	return nil
 }
@@ -163,6 +170,10 @@ type Record struct {
 	Capability Capability
 	// IssuedBy is the principal Insert was given.
 	IssuedBy Principal
+	// Session is the identity provider's session on record: the one Insert
+	// was given, or for a child its parent's. Empty for none, and for a
+	// store that records none.
+	Session string
 	// Revocation is the capability's own revocation entry; nil when it has
 	// none. A capability stopped only through an ancestor has none — ask
 	// IsRevoked whether it verifies.

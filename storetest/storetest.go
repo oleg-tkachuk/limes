@@ -110,6 +110,11 @@ type Env struct {
 	// over the same records as Store. Optional: without it, the checks of
 	// limes.ExchangeStore are skipped.
 	Exchanges limes.ExchangeStore
+	// BulkRevoker revokes by subject, client or session over the same
+	// records as Store, which then records each capability's session.
+	// Optional: without it, the checks of limes.BulkRevoker and of sessions
+	// on record are skipped.
+	BulkRevoker limes.BulkRevoker
 }
 
 // newTenant is another tenant, from NewTenant when the Env has one.
@@ -306,6 +311,10 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "ExchangeClaimsConvergeOnOneCapability", Run: checkExchangeClaims},
 		{Name: "ExchangeClaimsRefuseWhatIsNotOnRecord", Run: checkExchangeRefusals},
 		{Name: "PurgeTakesAnExchangeWithItsCapability", Run: checkExchangePurge},
+		{Name: "ASessionIsRecordedAndAChildTakesItsParents", Run: checkSessionOnRecord},
+		{Name: "RevokeMatchingRevokesEverySelectorsCapabilities", Run: checkRevokeMatching},
+		{Name: "RevokeMatchingWorksInBatches", Run: checkRevokeMatchingBatches},
+		{Name: "RevokeMatchingRefusesAMalformedRequest", Run: checkRevokeMatchingMalformed},
 	}
 	watchdog.RunChecks(t, func(t *testing.T) fixture { return newFixture(t, setup) }, func(f fixture) time.Duration { return f.CheckTimeout }, checks)
 }
