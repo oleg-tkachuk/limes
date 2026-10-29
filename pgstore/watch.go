@@ -90,7 +90,7 @@ type RevocationWatcher struct {
 }
 
 // errNegativeHeartbeat is a RevocationWatcher with a negative Heartbeat.
-var errNegativeHeartbeat = errors.New("pgstore: RevocationWatcher.Heartbeat is negative")
+var errNegativeHeartbeat = fmt.Errorf("%w: pgstore: RevocationWatcher.Heartbeat is negative", limes.ErrInvalidConfig)
 
 // heartbeat is the Heartbeat in force.
 func (w RevocationWatcher) heartbeat() time.Duration {
@@ -101,7 +101,7 @@ func (w RevocationWatcher) heartbeat() time.Duration {
 }
 
 // errNoConnect is a RevocationWatcher with no Connect.
-var errNoConnect = errors.New("pgstore: RevocationWatcher.Connect required")
+var errNoConnect = fmt.Errorf("%w: pgstore: RevocationWatcher.Connect required", limes.ErrInvalidConfig)
 
 // Run watches until ctx ends, and returns its error.
 func (w RevocationWatcher) Run(ctx context.Context) error {
@@ -167,7 +167,7 @@ func (w RevocationWatcher) listen(ctx context.Context, signals []*limes.Revocati
 }
 
 // errQuiet is a wait for a notification that heard none within its bound.
-var errQuiet = errors.New("pgstore: no notification within the heartbeat")
+var errQuiet = fmt.Errorf("%w: pgstore: no notification within the heartbeat", limes.ErrInternal)
 
 // waitForNotification waits on conn for a notification for at most beat;
 // errQuiet when none came. pgx ends a wait by a deadline on the socket,

@@ -19,6 +19,8 @@ import (
 
 	"github.com/oleg-tkachuk/limes/pgstore/internal/pgschema"
 	"github.com/oleg-tkachuk/limes/pgstore/migrate/ddl"
+
+	"github.com/oleg-tkachuk/limes"
 )
 
 // migrationFiles are the migrations ddl carries, under migrationsDir.
@@ -91,7 +93,7 @@ type Options struct {
 //	})
 func Run(ctx context.Context, conn *pgx.Conn, opts Options) error {
 	if conn == nil {
-		return errors.New("migrate: a connection is required")
+		return fmt.Errorf("%w: migrate: a connection is required", limes.ErrInvalidRequest)
 	}
 	if err := ddl.CheckRuntimeRoles(opts.RuntimeRoles); err != nil {
 		return fmt.Errorf("migrate: %w", err)
@@ -245,7 +247,7 @@ func migrateAllTenants(ctx context.Context, conn *pgx.Conn, run func(context.Con
 
 // ErrSchemaOwner is Run finding the store's schema owned by another role
 // than the one it runs as.
-var ErrSchemaOwner = errors.New("migrate: the schema belongs to another role")
+var ErrSchemaOwner = fmt.Errorf("%w: migrate: the schema belongs to another role", limes.ErrInvalidConfig)
 
 // sqlSchemaOwned is whether the role migrating owns the schema named $1.
 const sqlSchemaOwned = `SELECT pg_get_userbyid(nspowner) = current_user FROM pg_namespace WHERE nspname = $1`

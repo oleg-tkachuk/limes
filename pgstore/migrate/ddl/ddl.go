@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/oleg-tkachuk/limes/internal/errs"
 	"github.com/oleg-tkachuk/limes/pgstore/internal/pgschema"
 )
 
@@ -171,7 +172,7 @@ func Steps() ([]Step, error) {
 	slices.SortFunc(steps, func(a, b Step) int { return a.Version - b.Version })
 	for i, s := range steps {
 		if s.Version != i+1 {
-			return nil, fmt.Errorf("ddl: migration %s is number %d, want %d: the numbers have a gap", s.Name, s.Version, i+1)
+			return nil, errs.Broken("ddl: migration %s is number %d, want %d: the numbers have a gap", s.Name, s.Version, i+1)
 		}
 	}
 	return steps, nil
@@ -192,11 +193,11 @@ func CheckRuntimeRoles(roles []string) error {
 	for _, r := range roles {
 		switch {
 		case r == "":
-			return fmt.Errorf("ddl: an empty runtime role name")
+			return errs.Config("ddl: an empty runtime role name")
 		case strings.EqualFold(r, publicRole):
-			return fmt.Errorf("ddl: runtime role %q names every role", r)
+			return errs.Config("ddl: runtime role %q names every role", r)
 		case strings.ContainsRune(r, 0):
-			return fmt.Errorf("ddl: runtime role %q holds a NUL", r)
+			return errs.Config("ddl: runtime role %q holds a NUL", r)
 		}
 	}
 	return nil

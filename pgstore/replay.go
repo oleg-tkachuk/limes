@@ -2,7 +2,6 @@ package pgstore
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -10,6 +9,8 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/oleg-tkachuk/limes/dpop"
+
+	"github.com/oleg-tkachuk/limes"
 )
 
 // ReplayCache is a dpop.ReplayCache over PostgreSQL: one table,
@@ -62,7 +63,7 @@ type ReplayConfig struct {
 const DefaultReplayPurgeBatch = 10_000
 
 // errNoReplayDB is a ReplayConfig with no DB.
-var errNoReplayDB = errors.New("pgstore: ReplayConfig.DB required")
+var errNoReplayDB = fmt.Errorf("%w: pgstore: ReplayConfig.DB required", limes.ErrInvalidConfig)
 
 // NewReplayCache builds a ReplayCache, refusing a config with no DB or a
 // negative share.
@@ -71,7 +72,7 @@ func NewReplayCache(cfg ReplayConfig) (*ReplayCache, error) {
 		return nil, errNoReplayDB
 	}
 	if cfg.EntriesPerHolder < 0 {
-		return nil, fmt.Errorf("pgstore: replay cache share of one holder %d is negative", cfg.EntriesPerHolder)
+		return nil, fmt.Errorf("%w: pgstore: replay cache share of one holder %d is negative", limes.ErrInvalidConfig, cfg.EntriesPerHolder)
 	}
 	if cfg.EntriesPerHolder == 0 {
 		cfg.EntriesPerHolder = dpop.DefaultReplayEntriesPerHolder

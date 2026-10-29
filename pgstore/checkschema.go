@@ -8,6 +8,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/oleg-tkachuk/limes/pgstore/internal/pgschema"
+
+	"github.com/oleg-tkachuk/limes"
 )
 
 // versionTable is the table pgstore/migrate records the schema's version in.
@@ -16,7 +18,7 @@ const versionTable = pgschema.VersionTable
 // ErrSchemaMismatch is CheckSchema finding a schema at another version than
 // the one this version of the package queries: behind it, migrate.Run has not
 // run; ahead of it, a later version of the package migrated.
-var ErrSchemaMismatch = errors.New("pgstore: schema version mismatch")
+var ErrSchemaMismatch = fmt.Errorf("%w: pgstore: schema version mismatch", limes.ErrInvalidConfig)
 
 // SchemaVersion is the schema's version as the database has it and as this
 // version of the package needs it.
@@ -62,7 +64,7 @@ func ReadSchemaVersion(ctx context.Context, db DB) (SchemaVersion, error) {
 // in it, which may turn it off or replace what enforces it — that role
 // itself, or one it can act as (SET ROLE) or inherits from. The owner
 // migrates; a role that owns nothing serves (migrate.Options.RuntimeRoles).
-var ErrRuntimeRole = errors.New("pgstore: the store is served by a role row-level security does not hold")
+var ErrRuntimeRole = fmt.Errorf("%w: pgstore: the store is served by a role row-level security does not hold", limes.ErrInvalidConfig)
 
 // sqlRuntimeRole reads what CheckSchema refuses of the role the store is
 // served by — each through membership, which takes in the role itself and
