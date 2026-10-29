@@ -1,3 +1,5 @@
+![Lemon legionaries guard the limes wall; a lime holding a forged "scope: *, budget: ∞" token is turned away with "Halt! Narrower only, citizen."](docs/assets/banner.png)
+
 # limes
 
 [![ci](https://github.com/oleg-tkachuk/limes/actions/workflows/ci.yaml/badge.svg?branch=main)](https://github.com/oleg-tkachuk/limes/actions/workflows/ci.yaml)
