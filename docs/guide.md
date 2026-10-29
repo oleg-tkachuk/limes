@@ -1661,6 +1661,17 @@ for your own wire format, and `Reason.Permanent()` whether the
 same request with the same capability can ever succeed, so a caller knows to
 stop rather than retry. The full table is in [diagrams.md](diagrams.md#answering-a-refusal).
 
+The body also carries the error's `code`, a stable name for any error limes
+returns, not only a refusal. An API of your own that is not a protected
+resource — an admin endpoint that revokes, a billing call that settles —
+answers an error limes returned with `limes.ProblemOf(err)` (or
+`meter.ProblemOf(err)` for the meter's calls): the same RFC 9457 body, with
+the status a store's not-found (404), conflict (409) or erased tenant (401)
+deserves rather than 500. Its text is never a contract: branch on the
+sentinel with `errors.Is`, put the code on the wire, and never strip
+`limes: ` from a message. [errors.md](errors.md) lists every code, its
+status, its sentinel and how to retry.
+
 ## Defaults
 
 | Setting | Default |

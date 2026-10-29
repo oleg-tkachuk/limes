@@ -145,6 +145,8 @@ describe("classify", () => {
 describe("paths a test reads", () => {
   test("the README reaches the examples, whose test runs its walkthrough", () =>
     assert.deepEqual([...reachedGroups(["README.md"])], [Group.Examples]));
+  test("the error reference reaches the root and the exchange, whose tests hold it to the codes", () =>
+    assert.deepEqual([...reachedGroups(["docs/errors.md"])].sort(), [Group.Exchange, Group.Root].sort()));
   test("other documentation still reaches nothing", () => assert.equal(reachedGroups(["docs/guide.md", "pgstore/README.md"]).size, 0));
   test("every inert path a Go test names is listed", () => {
     const root = join(import.meta.dirname, "..", "..");

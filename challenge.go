@@ -63,7 +63,10 @@ type Problem struct {
 	// the stable name a client branches on, which the Type URI ends with.
 	// Empty for a refusal with none.
 	Reason Reason `json:"reason,omitempty"`
-	_      noCompare
+	// Code is the error's Code, an extension member: its Reason, or the
+	// narrower code Reason folds into it (docs/errors.md).
+	Code Code `json:"code,omitempty"`
+	_    noCompare
 }
 
 // ErrorResponse is how to answer a refused request.
@@ -129,6 +132,9 @@ func (v *Verifier) ErrorResponse(ctx context.Context, err error, scheme AuthSche
 		kind = string(rule.reason)
 	}
 	resp := answer(r, kind, rule.reason)
+	if ok {
+		resp.Problem.Code, _ = CodeOf(err)
+	}
 	if r.code == "" && !r.bare {
 		return resp
 	}
