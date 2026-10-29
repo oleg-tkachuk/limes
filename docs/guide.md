@@ -1034,6 +1034,28 @@ usage, _ := pgstore.NewUsageStore(pgstore.Config{DB: pool})
 _, err = records.Revoke(pgstore.WithTenant(ctx, tenant), limes.RevokeRequest{CapabilityID: id})
 ```
 
+**One schema, named `limes`, whatever a consumer uses.** pgstore creates
+every table its stores read, budgets, ledger and holds among them, for a
+consumer that counts requests alone as for one that charges. A table a
+consumer never writes costs a catalog entry and nothing per call:
+- `Bump` reads the subject's records and their lineage;
+- it writes `usage` and `copy_usage`;
+- it reads the erase mark;
+- it never touches `tenant_budgets`, `charges` or `reservations`;
+- no trigger fires on those three, and autovacuum passes over a table with
+  no writes.
+
+A counter-only profile of the schema would fork the migrations and their
+version numbers. `CheckSchema` and the conformance suites would then answer
+two schemas, so there is none.
+
+The name is fixed on purpose. Every function, policy and migration names
+`limes.` outright, and the functions pin their `search_path`
+(007_pin_catalog_names.sql). That way, a table or function a role creates
+earlier in a path never stands in for pgstore's. A configurable name would
+make every one of those statements a template. A consumer keeps its own
+tables in a schema of its own beside it.
+
 `Config.DB` is a `pgstore.DB` — `BeginTx` and `QueryRow`, which
 `*pgxpool.Pool` and `*pgx.Conn` implement. Every transaction the store opens
 is READ COMMITTED, whatever the database's default, so a call that waited on
