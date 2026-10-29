@@ -29,6 +29,10 @@
 // check; ReadSchemaVersion reports both versions and
 // needs only the SELECT that migrate.Run grants a runtime role.
 //
+// The schema needs PostgreSQL 15 or later: the meter reads the records
+// through a view that runs as its caller (security_invoker), so their
+// row-level security binds it as it binds a read of the table.
+//
 // Every call runs in one READ COMMITTED transaction on one connection,
 // whatever the database's default — but for the two revocation checks, each
 // a single statement (see Tenants) — and every time it

@@ -51,15 +51,19 @@ type ancestor struct {
 	copies limes.CopyQuota
 }
 
+// lineageView is what the meter and the erase read of the records
+// (migrate/migrations/022_capability_lineage.sql), never the records table.
+const lineageView = schema + ".capability_lineage"
+
 const (
 	// sqlLineage walks up from $1 to one ancestor past $2
 	// (limes.MaxDelegationDepth), nearest first.
 	sqlLineage = `
 WITH RECURSIVE chain (id, parent_id, depth) AS (
-    SELECT id, parent_id, 0 FROM limes.capabilities WHERE id = $1
+    SELECT id, parent_id, 0 FROM ` + lineageView + ` WHERE id = $1
   UNION ALL
     SELECT c.id, c.parent_id, chain.depth + 1
-    FROM limes.capabilities c
+    FROM ` + lineageView + ` c
     JOIN chain ON c.id = chain.parent_id
     WHERE chain.depth <= $2
 )
@@ -67,18 +71,18 @@ SELECT id FROM chain ORDER BY depth`
 
 	// sqlCapabilityExpiry reads when a capability's record expires, NULL for
 	// one that never does.
-	sqlCapabilityExpiry = `SELECT expires_at FROM limes.capabilities WHERE id = $1`
+	sqlCapabilityExpiry = `SELECT expires_at FROM ` + lineageView + ` WHERE id = $1`
 
 	// sqlHoldRecords locks the records of a lineage for key share, in id
-	// order, so Purge cannot drop one while the call counts against it. Key
+	// order, so Purge cannot drop one while the call counts against it: the
+	// view is a plain projection, so the lock reaches the record rows. Key
 	// share conflicts with that delete and not with the revoked flag a
 	// revocation sets (migrate/migrations/015_revoked_flag.sql): with FOR SHARE,
 	// metered calls overlapping one another would hold a record without a
 	// gap, and its revoke's mark would wait behind them for as long.
 	sqlHoldRecords = `
-SELECT id, capability -> 'caveats' -> 'requests', capability -> 'caveats' -> 'budget',
-       coalesce(capability -> 'caveats' -> 'copies', '{}'::jsonb)
-FROM limes.capabilities
+SELECT id, requests, budget, copies
+FROM ` + lineageView + `
 WHERE id = ANY ($1)
 ORDER BY id
 FOR KEY SHARE`
