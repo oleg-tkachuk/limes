@@ -43,10 +43,11 @@ case errors.Is(err, limes.ErrProofOfPossession): // no valid proof that the bear
 case errors.Is(err, limes.ErrInvalidToken): // forged, or not this verifier's to accept
 case errors.Is(err, jwks.ErrUnavailable):  // the issuer's keys out of reach: the server's trouble, not the token's
 }
-// Every refusal of the token or its proof — and ParseAuthorization's
+// Every refusal Verify or Authorize returns — and ParseAuthorizationValues's
 // ErrNoCredentials — also matches ErrUnauthenticated: the one check for
-// "answer 401". ErrMalformedAuthorization does not: it is a bad request,
-// and matches ErrInvalidRequest.
+// "answer 401". SingleProof's dpop.ErrInvalid does not, though ErrorResponse
+// answers it 401. ErrMalformedAuthorization does not either: it is a bad
+// request, and matches ErrInvalidRequest.
 ```
 
 `Verify` and `Authorize` return a `VerifiedCapability`: what the token
@@ -63,7 +64,8 @@ there is no operation to check, such as before a delegation.
 Verification is **local** — the signature is checked against the resolved key,
 with no round trip to the issuer, and nothing in the claims is read until it
 has. Every rejection is a distinct sentinel; map each to whatever status your
-transport uses, or let `ErrorResponse` answer it the HTTP way (below).
+transport uses, or let `ErrorResponse` answer it the HTTP way: status, challenge and an
+RFC 9457 body carrying the error's code ([Answer a refusal](#answer-a-refusal)).
 
 The token must be typed `at+jwt` (`limes.TokenType`), signed under a kid in
 limes's namespace (`jwks.KeyIDPrefix`), with `limes_v` the format the
@@ -80,26 +82,24 @@ none twice and none in another case, and may be at most
 or, for issuers that do share one trust boundary, `SharedKeys: true`; a
 verifier trusting several issuers with neither is refused — an empty map
 binds nothing, the same as none — and so is one setting both.
-Verifiers running apart from the issuer resolve keys with
-`jwks.Remote`. It fetches the issuer's JWKS on first use, keeps it as
-long as the response's `Cache-Control` allows within `MinRefreshInterval`
-(10s) and `RefreshInterval` (5m), revalidates by ETag, picks up a rotated-in
-kid on first sight (at most once per `MinRefreshInterval`). A known key from
-a set past its freshness but within `MaxStale` is served at once and the set
-refreshed behind it, so a slow endpoint delays no request. A fetch runs apart
-from the caller, bounded by `jwks.DefaultFetchTimeout`; a caller that gives up
-waiting with no usable set gets `jwks.ErrUnavailable`, and so does a kid the
-held set lacks while the endpoint is failing — it may be one rotated in since,
-so it is not refused as unknown. It fails closed
-with `jwks.ErrUnavailable` when it has never fetched a set, or once the last
-good set is older than `MaxStale` (1h). A document whose entries are all
-unusable counts as a failed fetch, so the last good set stays in service
-rather than every key being withdrawn at once. `jwks.ErrUnavailable` is the
-server's fault, not the token's, so it matches no `ErrUnauthenticated`
-sentinel. The URL must be `https`, and a redirect to another scheme or host
-is not followed: whoever answers the fetch chooses the keys every token is
-checked against. The three intervals must
-nest, or construction fails:
+Verifiers running apart from the issuer resolve keys with `jwks.Remote`.
+It fetches the issuer's JWKS on first use, keeps it as `Cache-Control`
+allows within `MinRefreshInterval` (10s) and `RefreshInterval` (5m),
+revalidates by ETag, and picks up a new kid on first sight (at most once per
+`MinRefreshInterval`). A known key past freshness but within `MaxStale` (1h)
+is served at once and refreshed behind it, so a slow endpoint delays no
+request. A fetch runs apart from the caller, bounded by
+`jwks.DefaultFetchTimeout`.
+
+It returns `jwks.ErrUnavailable` — the server's fault, matching no
+`ErrUnauthenticated` sentinel — when it holds no set within `MaxStale`, when
+a caller gives up waiting with none, and for a kid the held set lacks while
+the endpoint is failing (it may be one rotated in since). A document with no
+usable entry counts as a failed fetch, so the last good set stays in
+service. The URL must be `https`, and a redirect off its origin is not
+followed: whoever answers the fetch chooses the keys every token is checked
+against. The intervals must nest (`MinRefreshInterval` ≤ `RefreshInterval`
+≤ `MaxStale`):
 
 ```go
 keys, err := jwks.NewRemote(jwks.RemoteConfig{
@@ -109,6 +109,12 @@ verifier, err := limes.NewVerifier(limes.VerifierConfig{
     Keys: keys, Revocations: revocations, TrustedIssuers: []string{"my-issuer"},
 })
 ```
+
+Every constructor in this guide — `NewVerifier`, `jwks.NewRemote`,
+`jwks.NewHandler`, `dpop.NewVerifier`, `dpop.NewHMACNonces`,
+`redisreplay.New`, `pgstore.NewReplayCache`, `otelmetric.Instrument` among
+them — refuses a config it cannot work with as `limes.ErrInvalidConfig`
+(code `invalid_config`, 500): the deployment's to fix, not the caller's.
 
 The issuer serves that document with `jwks.NewHandler` — `application/jwk-set+json`,
 a strong ETag answering `If-None-Match` with 304, `Cache-Control: public,
@@ -128,7 +134,8 @@ reads one back, for a resolver of your own. It skips an entry it cannot use — 
 a malformed key, a member of the wrong JSON type — rather than refusing the set,
 so one bad entry does not take every other key out of service mid-rotation. Two
 Ed25519 keys naming one kid are both skipped: which one signs is not for the
-reader to guess. A document that is not JSON, or names a member twice, is refused.
+reader to guess. A document that is not JSON, names a member twice, or has no
+`"keys"` array is refused; only `{"keys":[]}` withdraws every key.
 
 ### Tell a capability from an identity provider's token
 
@@ -140,7 +147,10 @@ and let the verifier it picks decide:
 
 ```go
 if limes.HasLimesKeyID(token) {
-	vc, err := verifier.Verify(ctx, limes.VerifyRequest{Token: token, Audience: aud, DPoP: proof})
+	vc, err := verifier.Verify(ctx, limes.VerifyRequest{
+		Token: token, Scheme: scheme, Audience: aud,
+		DPoP: dpop.Proof{JWT: proof, Method: r.Method, URL: requestURL},
+	})
 	// …
 } else {
 	claims, err := oidcVerifier.Verify(ctx, token) // the provider's own verifier
@@ -330,7 +340,7 @@ Behind several replicas, give the `dpop.Verifier` server nonces, with the same
 key on every replica:
 
 ```go
-nonces, err := dpop.NewHMACNonces(dpop.HMACNoncesConfig{Keys: dpop.SealNonceKeys(key)}) // key ≥ 32 bytes
+nonces, err := dpop.NewHMACNonces(dpop.HMACNoncesConfig{Keys: dpop.SealNonceKeys(key)}) // at least dpop.HMACNonceKeyBytes
 proofs, err := dpop.NewVerifier(dpop.VerifierConfig{Replay: replay, Nonces: nonces})
 ```
 
@@ -374,7 +384,7 @@ minute by default) of the verifier's clock, or seen before; every refusal
 matches `ErrProofOfPossession` as `Verify` returns it, and still matches its
 `dpop` sentinel. A replay cache or nonce store that cannot answer is an outage
 instead, its own error, never a refused proof. `dpop.MemoryReplayCache` is in-process and bounded
-— 100 000 ids, and `dpop.DefaultReplayEntriesPerHolder` (1 000) per
+— `dpop.DefaultReplayCacheEntries` (100 000) ids, and `dpop.DefaultReplayEntriesPerHolder` (1 000) per
 capability, so one capability, whatever keys its copies are bound to, cannot
 fill it and lock the others out; full, it refuses
 rather than forgets:
@@ -671,7 +681,7 @@ while a batch comes back full (`DefaultHousekeepingLimit` unless set). Settling
 the zero reservation id, a hold of another capability than the subject's, or
 one made under other Biscuit copies than the subject carries, is
 `ErrReservationNotFound`: a hold is settled by the copy that made it. The receipt names the
-charge's tenant and unit, on a refusal too, so a caller can attribute it from
+charge's tenant and unit, on a refusal by a ceiling or by the callback too, so a caller can attribute it from
 the receipt alone. `GetReservation` reads a hold back while it
 still counts — open, or expired and not yet released — and is
 `ErrReservationNotFound` once settled or released; `ListReservations` pages a
@@ -741,7 +751,9 @@ A reporter with no token in hand takes the subject from the capability's
 stored record (`StoredMeterSubject`, which reads it through a `RecordReader`, as any `Store` is one), as the meter
 already reads every ancestor's ceiling. A price that is not known yet is not a price of zero: hold the estimate and
 settle when it is known, or let the hold lapse and count against the ceilings
-until `ReleaseExpired` runs.
+until `ReleaseExpired` runs. `Reserve` refuses a capability whose record has
+expired (`ErrExpired`); a cost reported after that is charged with
+`OverrunPolicyRecord`.
 
 ## Observe the meter
 
@@ -772,17 +784,17 @@ included — carries the subject's tenant.
 
 Much of each contract lives in request fields and in which sentinel comes
 back, so a store that gets one wrong still compiles. Run the module's checks
-from your store's tests — `storetest` for a `Store` (and a
-`BiscuitRevocationStore`), `metertest` for a `UsageStore`, `jwkstest` for a
-`KeyResolver`, and `dpoptest` for a `dpop.ReplayCache` or `dpop.Nonces`.
-`storetest` checks more than the compiler sees, added from v0.113.0 to
-v0.125.0: a revoke reports its entry as `GetRecord` reads it back, at the
-store's precision, and `RevokeResult.PriorDisposition`; it writes an entry
-for an expired capability too; a cursor of another listing or another tenant
-is `ErrCursorMismatch`; a Biscuit revoke reports `RevokeBiscuitResult`; a
-`RevocationLineage` answers as `IsRevoked` does; and a lister fills
-`RecordListing.StoppedBy`. A store that passed before fails these until it
-does:
+from your store's tests — `storetest.Run` for a `Store` (and a
+`BiscuitRevocationStore`), `metertest.Run` for a `UsageStore` and
+`metertest.RunCounter` for a store that is a `RequestCounter` alone,
+`jwks/jwkstest.Run` for a `KeyResolver`, and `dpop/dpoptest.RunReplayCache`
+and `RunNonces` for a `dpop.ReplayCache` or `dpop.Nonces`. `storetest.Env`
+also takes `Census`, `Lister`, `Exchanges` and `BulkRevoker`, each turning
+on the checks of that interface. The suites check more than the compiler
+sees — what a revoke reports, a cursor of another listing, Biscuit
+revocations, lineage answers, a listing's `StoppedBy` — so a store that
+passed an earlier release may fail a later one; [migration.md](migration.md)
+lists each addition:
 
 ```go
 func TestMeterContract(t *testing.T) {
@@ -795,7 +807,7 @@ func TestMeterContract(t *testing.T) {
 ```
 
 `Ctx` is the context of every call for `Tenant`. `NewCapability` records each
-spec's ceilings and its quota of copies (`CapabilitySpec.Copies`) on the
+spec's ceilings and its quota of copies (`spec.CopyQuota()`: a nil `Copies` is unlimited) on the
 record, as the `Meter` reads an ancestor's from it. `MaxCopiesPerCapability`
 names the bound the store was built with; without it, the check of that bound
 is skipped. A store that refers to its
@@ -814,9 +826,7 @@ on the checks of a `LedgerReader`; with `Now` (the store's clock) and
 `TenantCtx` and `Advance`, so one setup can serve both suites, plus `Now` (the
 store's clock, for the checks at an expiry's exact instant) and
 `DeleteTenant` (moves a tenant to the trash, for the `ErrUnknownTenant` and
-`ErrTenantDeleted` checks). Both suites take `ScopesTenants` for a store that
-keeps tenants apart by the call's context: a call naming one tenant under
-another's scope must then be `ErrScopeMismatch`. Both take `ReadOnlyCtx` too,
+`ErrTenantDeleted` checks). Both take `ScopesTenants` and `ReadOnlyCtx`,
 a context that reads every tenant's rows and writes none: the suites then
 check that every write under it is `ErrScopeMismatch`, changes nothing and,
 in `metertest`, runs no `onCharged`.
@@ -839,7 +849,8 @@ compiles and runs everything it ran before.
 `memstore` and `pgstore` run the same checks from their own tests — `pgstore`
 against PostgreSQL in a container, as a role that owns no table, on a pool of
 two connections — `dpop` and `jwks` run theirs against their shipped
-implementations, and `redisreplay` runs `dpoptest` against Redis.
+implementations, and `redisreplay` and `pgstore` run `dpoptest` against
+their replay caches.
 
 `otelmetric.Instrument` wraps a `meter.UsageStore` and keeps every interface of `meter` the
 store implements — the optional `CopyUsageReader` and `TenantUsageEraser`. A decorator of your
@@ -895,45 +906,6 @@ a `Clear` asked for, though both count in `Clears`.
 A consumer that revokes often keeps every answer it did not touch, where
 `Clear` would make the next check of each id ask the store again.
 
-### Revoke a user, a client or a session
-
-The events an operator acts on name no capability: a user leaves, a client
-is compromised, the identity provider ends a session. A store that is a
-`limes.BulkRevoker` — memstore's and pgstore's are — revokes every
-capability of one tenant that matches a selector. The selectors are:
-
-- `Subject`, the principal a capability authorises;
-- `OnBehalfOf`, every agent acting for a user;
-- `ClientID`;
-- `Session`, the identity provider's session it was issued under.
-
-Given together, they must all match.
-
-```go
-req := limes.RevokeMatchingRequest{TenantID: tenant, Session: sid, Note: "IdP logout", Actor: "backchannel-logout"}
-for {
-	res, err := records.RevokeMatching(ctx, req) // pgstore: under pgstore.WithTenant(ctx, tenant)
-	if err != nil || !res.More {
-		break
-	}
-}
-```
-
-- **Each call writes an entry for at most `Limit` capabilities** (default
-  `DefaultHousekeepingLimit`) that have none, in id order. It says whether
-  the batch was full, so no transaction holds a tenant's rows for long.
-- **Descendants stop through their lineage,** as with `Revoke`.
-- **A capability issued while the loop runs** — by a client still holding
-  a token that can delegate — is caught by another pass. Run one after the
-  identity provider has stopped issuing for the session.
-- **The session is issuance metadata, never a claim.** `IssueRequest.Session`
-  records it, `Record.Session` reads it back, and every delegation takes its
-  parent's. An `exchange.Exchanger` records the subject token's `sid`. A
-  capability issued with no session is reached by subject or client
-  instead.
-- **An OIDC back-channel logout** endpoint verifies the provider's logout
-  token, then runs the loop above with its `sid`.
-
 Choose the TTL from how often one token is verified, not from a request
 burst. The two-second default serves the requests of one HTTP exchange; an
 agent that calls a tool once per model step, seconds or minutes apart,
@@ -960,12 +932,8 @@ before raising the bound, as does closing the one signal that kept it on
 `TTL`. `SyncedTTL` is at most `MaxRevocationCacheSyncedTTL`, a day: a
 signal that listens and still carries nothing cannot keep an answer past
 it. `Stats().Synced` says which bound is in force,
-`Syncs` counts the watchers' connections, and a `Close` that left every
-open signal listening, each a clear; `SyncsLost` and `LastSyncLoss`
-their losses, and `Signals` the notifications they passed on —
-`SignalsWhole` those that named no id and cleared whole. Of `Clears`, what
-`Syncs`, `SignalsWhole` and `ClearsWithoutLineage` do not account for is
-the consumer's own. A cache no signal is open on serves for `TTL` alone,
+the other fields count the watchers' connections, their losses and the
+notifications they passed on (see `RevocationCacheStats`). A cache no signal is open on serves for `TTL` alone,
 as before. A cache fed by more than one watcher — one per database, say —
 holds `SyncedTTL` only while every one of their signals listens; one
 started later is not waited for, so start them together. Build the cache with `NewRevocationCache` over your store, as
@@ -1022,11 +990,8 @@ Revoking a capability revokes everything delegated from it, with or
 without the flag: `IsRevoked` answers for the whole chain. `CascadeChildren`
 also writes a revocation entry per descendant, so the audit trail names each
 capability that was stopped. A chain is at most `MaxDelegationDepth` (64)
-ancestors deep: `Store.Insert` refuses a child past it as `ErrDelegationTooDeep`,
-writing nothing, so `Delegate` returns that error and no token
-(`ErrDelegationTooDeep` matches `ErrRevoked`, and so answers as 401); a store
-answers a deeper chain, written before `Insert` refused one, with that error — read as revoked — rather
-than walk part of it and miss a revocation at its root.
+ancestors deep; past it `Delegate` returns `ErrDelegationTooDeep`, a kind of
+`ErrRevoked` (401), and no token.
 
 Records do not stay forever. A housekeeping job calls
 `Store.Purge(ctx, limes.PurgeRequest{ExpiredFor: retention})` on a timer, and
@@ -1051,11 +1016,53 @@ any `Leeway` up to `MaxLeeway`, and `Purge` any `ExpiredFor` from
 `MinPurgeRetention` up. Where clocks may drift further apart than
 `PurgeClockSkew`, keep revocations longer by passing a longer `ExpiredFor`.
 
+### Revoke a user, a client or a session
+
+The events an operator acts on name no capability: a user leaves, a client
+is compromised, the identity provider ends a session. A store that is a
+`limes.BulkRevoker` — memstore's and pgstore's are — revokes every
+capability of one tenant that matches a selector. The selectors are:
+
+- `Subject`, the principal a capability authorises;
+- `OnBehalfOf`, every agent acting for a user;
+- `ClientID`;
+- `Session`, the identity provider's session it was issued under.
+
+Given together, they must all match. `TenantID` and at least one selector
+are required ([ADR-0013](adr/0013-bulk-revocation.md)).
+
+```go
+req := limes.RevokeMatchingRequest{TenantID: tenant, Session: sid, Note: "IdP logout", Actor: "backchannel-logout"}
+for {
+	res, err := records.RevokeMatching(ctx, req) // pgstore: under pgstore.WithTenant(ctx, tenant)
+	if err != nil || !res.More {
+		break
+	}
+}
+```
+
+- **Each call writes an entry for at most `Limit` capabilities** (default
+  `DefaultHousekeepingLimit`) that have none, in id order. It reports the
+  entries written (`Revoked`) and whether the batch was full (`More`), so
+  no transaction holds a tenant's rows for long.
+- **Descendants stop through their lineage,** as with `Revoke`.
+- **A capability issued while the loop runs** — by a client still holding
+  a token that can delegate — is caught by another pass. Run one after the
+  identity provider has stopped issuing for the session.
+- **The session is issuance metadata, never a claim.** `IssueRequest.Session`
+  records it, `Record.Session` reads it back, and every delegation takes its
+  parent's. An `exchange.Exchanger` records the subject token's `sid`. A
+  capability issued with no session is reached by subject or client
+  instead. In pgstore, records written before migration 025 carry no
+  session (their client and on-behalf-of are backfilled).
+- **An OIDC back-channel logout** endpoint verifies the provider's logout
+  token, then runs the loop above with its `sid`.
+
 ## Bring your own storage
 
 On PostgreSQL, take `pgstore` (`github.com/oleg-tkachuk/limes/pgstore`, a
 module of its own): it implements every contract below but `KeyResolver` and
-the DPoP stores, passes `storetest` and `metertest`, and keeps tenants apart
+`dpop.Nonces`, passes `storetest` and `metertest`, and keeps tenants apart
 with row-level security. It needs PostgreSQL 15 or later.
 
 ```go
@@ -1106,7 +1113,7 @@ A role that does not own the tables sees only the rows of the tenant a call
 is scoped to, and none when it is scoped to no tenant; the revocation checks
 see every tenant, as the verifier asks them before it knows the token's. A
 call whose request names its tenant — `Insert`, `ListByPrincipal`, `Bump`,
-`Charge`, `Reserve`, `Settle`, `Release`, `GetTenantBudget`, `SetTenantBudget`, the
+`RevokeMatching`, `Charge`, `Reserve`, `Settle`, `Release`, `GetTenantBudget`, `SetTenantBudget`, the
 tenant erasers, `Ledger.SumCharges`, `Census.ListRecords` and `Census.CountRecords` for one tenant —
 under a
 scope that does not admit that tenant returns `ErrScopeMismatch`, never
@@ -1167,13 +1174,7 @@ it and `migrate.Run` can take over from it. Each migration that runs in a
 transaction runs `READ COMMITTED`, whatever the role's, the database's or the
 session's default. Every migration that builds
 an index on an existing table builds it `CONCURRENTLY`, outside a
-transaction, and holds no writes, so a `migrate.Run` at startup holds none.
-Migration 014, which pgstore v0.31.0 brought for `Census.ListRecords`, did
-not at first: earlier pgstore releases built its three indexes
-with a plain `CREATE INDEX`, which held writes to `limes.capabilities` and
-`limes.revocations` for some seconds on a million records.
-A store still at migration 13 skips that by upgrading straight to a release
-whose 014 builds `CONCURRENTLY`; one past 14 has the indexes already. `CheckSchema` tells a readiness
+transaction, and holds no writes, so a `migrate.Run` at startup holds none. `CheckSchema` tells a readiness
 check whether the schema is at the version the package queries, returning
 `ErrSchemaMismatch` when it is not — behind, `migrate.Run` has not run; ahead, a
 later pgstore migrated; `ReadSchemaVersion` reports both numbers (`Applied`,
@@ -1195,7 +1196,7 @@ as files once per pgstore upgrade, and checks them in:
 
 ```go
 steps, err := ddl.Steps()
-// 000_limes_setup.sql: ddl.Setup()
+// limes_000_setup.sql: ddl.Setup()
 for _, s := range steps {
 	body := s.SQL() // a transactional step: one file, one transaction
 	if !s.InTransaction {
@@ -1203,7 +1204,7 @@ for _, s := range steps {
 		// under this directive; another tool has its own.
 		body = "-- atlas:txmode none\n\n" + strings.Join(s.Statements(), "\n")
 	}
-	// write body to fmt.Sprintf("%03d_limes_%s", s.Version, s.Name)
+	// write body to "limes_" + s.Name (s.Name is such as 001_records.sql)
 }
 grants, err := ddl.Grants([]string{"app"}) // last, one transaction
 ```
@@ -1224,7 +1225,9 @@ Elsewhere, implement these and you are done:
 
 | Interface | Stores | Transactions needed? |
 |---|---|---|
-| `Store` = `IssuanceStore` + admin | Capability records + revocations; an `Issuer` needs only `IssuanceStore` (`Insert`, `IsRevoked`) | No |
+| `Store` = `IssuanceStore` + admin | Capability records + revocations; an `Issuer` needs only `IssuanceStore` (`Insert`, `IsRevoked`), and a `RecordReader` too to `Reissue` | No |
+| `BulkRevoker` | Revokes a tenant's capabilities by subject, on-behalf-of, client or session (optional; `storetest` checks it through `Env.BulkRevoker`) | No |
+| `ExchangeStore` | Which capability each subject token was exchanged for (only for `exchange.Config.Exchanges`; `storetest` checks it through `Env.Exchanges`) | No |
 | `BiscuitRevocationStore` | Revoked Biscuit copies (only if you accept Biscuits) | No |
 | `meter.CopyUsageReader` | Reads Biscuit copies' own counters (only to show them) | No |
 | `meter.LedgerReader` | Sums a tenant's charges for billing and reports (optional; a type of its own beside `meter.UsageStore`) | No |
@@ -1395,14 +1398,12 @@ record `Purge` has not taken yet, is refused `ErrTenantErased` (a kind of
 `ErrRevoked`) by `Bump`, `Charge`, `Reserve` and `SetTenantBudget` rather
 than counted again, and `Insert` refuses a new record of the tenant, which
 the erase's revocation would have missed. `PurgeOrphans` forgets the mark
-once none of the tenant's records is left.
+once none of the tenant's records is left; run between the two calls below,
+it lets a new root record in, which the records' erase then revokes.
 
 Called apart, `EraseTenantUsage` goes first and `EraseTenantRecords` second:
 the mark the first sets makes `Insert` refuse the tenant, so every record
 the second finds is every record there will be, and it revokes them all.
-`PurgeOrphans` forgets the mark once none of the tenant's records is left;
-run between the two calls, it lets a new root record in, which the
-records' erase then revokes with the rest.
 The other way round, a record inserted between the two calls is on record
 after the records' erase, unrevoked, and its token goes on verifying. In
 `pgstore`, `Store.EraseTenant` does both in one transaction and runs a
@@ -1430,10 +1431,7 @@ ancestors still on record as `ErrDelegationTooDeep`, writing nothing:
 deeper than the walk reaches. It should tell a missing tenant
 from a failure: return
 `ErrUnknownTenant` for a tenant it does not hold and `ErrTenantDeleted` for one
-in the trash. A store whose usage store erases tenants
-(`meter.TenantUsageEraser`) refuses a record of a tenant marked erased with
-`ErrTenantErased`, a kind of `ErrRevoked`, until `PurgeOrphans` forgets the
-mark. A store that keeps each tenant's rows apart by the call's
+in the trash. A store that keeps each tenant's rows apart by the call's
 context returns `ErrScopeMismatch` for a call scoped to another tenant than
 the one its request names, rather than answer as if the rows were not there. `Issue` and `Delegate` pass them through, wrapped, beside
 `ErrInvalidRequest`, which every check on the request itself matches — a
@@ -1629,6 +1627,12 @@ mapping, `limes.exchanges`, goes with each capability's record.
 `exchangetest.TestOnePerToken` checks an Exchanger in this mode over a
 consumer's own store, roles and row-level security.
 
+An `Exchanger` called in process answers a refusal as the endpoint does with
+`exchange.ErrorOf(err)`: the RFC 6749 §5.2 `Error` (`Status`, `Code`, a fixed
+`Description`), and false for an error none of the exchange's, which the
+endpoint answers `server_error`, 500. `exchange.ErrorCodes()` lists every
+code ([errors.md](errors.md#the-exchanges-codes)).
+
 ## Answer a refusal
 
 `ErrorResponse` turns any error `Verify`, `Authorize` or the `Meter` returns
@@ -1682,11 +1686,11 @@ status, its sentinel and how to retry.
 | `VerifierConfig.Leeway` bound | `MaxLeeway`, 5 minutes |
 | `VerifierConfig.Realm` | `DefaultRealm`, `limes` |
 | `jwks.HandlerConfig.MaxAge` | `jwks.DefaultMaxAge`, 5 minutes; `HandlerConfig.Revalidate: true` for `no-cache` |
-| `ListByPrincipalRequest.Limit` · `ListTenantBudgetsRequest.Limit` · `ListReservationsRequest.Limit` · `SumChargesRequest.Limit` · `CountRecordsRequest.Limit` · `ListRecordsRequest.Limit` | `DefaultListLimit` 50, at most `MaxListLimit` 500 |
-| `PurgeRequest` · `ReleaseExpiredRequest` · `PurgeOrphansRequest` | `DefaultHousekeepingLimit` 1 000 a batch; `PurgeRequest.ExpiredFor` `MinPurgeRetention`, 6 minutes, and no less |
+| `ListByPrincipalRequest.Limit` · `meter.ListTenantBudgetsRequest.Limit` · `meter.ListReservationsRequest.Limit` · `meter.SumChargesRequest.Limit` · `CountRecordsRequest.Limit` · `ListRecordsRequest.Limit` | `DefaultListLimit` 50, at most `MaxListLimit` 500 |
+| `PurgeRequest` · `RevokeMatchingRequest` · `meter.ReleaseExpiredRequest` · `meter.PurgeOrphansRequest` | `DefaultHousekeepingLimit` 1 000 a batch; `PurgeRequest.ExpiredFor` `MinPurgeRetention`, 6 minutes, and no less |
 | `meter.PurgeChargesRequest` | `DefaultHousekeepingLimit` 1 000 a batch; `OlderThan` `meter.MinChargeRetention`, 401 days, and no less |
 | `MaxDelegationDepth` · `MaxBiscuitBlocks` | 64 ancestors · 32 attenuation blocks |
-| `CopyUsageRequest.RevocationIDs` | at most `MaxCopyUsageIDs`, 500, of one `CapabilityID` |
+| `meter.CopyUsageRequest.RevocationIDs` | at most `meter.MaxCopyUsageIDs`, 500, of one `CapabilityID` |
 | `RevocationCacheConfig` | `DefaultRevocationCacheTTL` 2 seconds · `DefaultRevocationCacheEntries` 100 000 of each kind, capabilities and Biscuit copies, spread over shards with a lock each — past the bound the oldest of the shard is dropped, the oldest of all in a cache of fewer than 512 entries, which is one shard; `SyncedTTL` is `TTL` unless set, from `TTL` to `MaxRevocationCacheSyncedTTL`, 24 hours; a negative TTL or bound is refused — for no cache, give the verifier the store itself |
 | `pgstore.RevocationWatcher.Heartbeat` | `pgstore.DefaultWatchHeartbeat`, 30 seconds; negative is refused |
 | `jwks.RemoteConfig` | `jwks.DefaultFetchTimeout` 10s · `DefaultRefreshInterval` 5m · `DefaultMinRefreshInterval` 10s · `DefaultMaxStale` 1h · `DefaultMaxDocumentBytes` 1 MiB |
@@ -1704,5 +1708,5 @@ status, its sentinel and how to retry.
 | `meter.MaxExternalRefBytes` | 200 |
 | `MaxNanos` | just under a billion units |
 | `MaxIJSONInteger` | 2^53 − 1, for every integer in a token |
-| `CheckTimeout` of every conformance suite's env (`storetest.Env`, `metertest.Env`, `jwkstest.Env`, `dpoptest.ReplayEnv`, `dpoptest.NoncesEnv`) | `DefaultCheckTimeout`, 1 minute a check |
+| `CheckTimeout` of every conformance suite's env (`storetest.Env`, `metertest.Env`, `metertest.CounterEnv`, `jwkstest.Env`, `dpoptest.ReplayEnv`, `dpoptest.NoncesEnv`) | `DefaultCheckTimeout`, 1 minute a check |
 
