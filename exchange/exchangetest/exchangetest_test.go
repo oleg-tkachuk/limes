@@ -28,6 +28,8 @@ const (
 	audience = "https://mcp.example.com"
 	subject  = "user-1"
 	lifetime = 5 * time.Minute
+	// sessionID is the identity provider's session a token names.
+	sessionID = "idp-session-1"
 	// jkt is a DPoP key's thumbprint the bound token names.
 	jkt = "0ZcOCORZNYy-DWpqq30jZyJGHTN0d2HglBV3uiguA4I"
 )
@@ -117,6 +119,9 @@ func TestJWTVerifierKeepsTheContract(t *testing.T) {
 		NoClient:    func(t *testing.T) string { return p.sign(t, map[string]any{"client_id": nil}) },
 		Bound: func(t *testing.T) (string, string) {
 			return p.sign(t, map[string]any{"cnf": map[string]any{"jkt": jkt}}), jkt
+		},
+		Session: func(t *testing.T) (string, string) {
+			return p.sign(t, map[string]any{"sid": sessionID}), sessionID
 		},
 	})
 }

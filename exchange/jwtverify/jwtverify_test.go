@@ -134,3 +134,23 @@ func TestVerifierReadsTheBindingAndOtherAlgorithms(t *testing.T) {
 		t.Errorf("subject %+v, %v; want bound to %s", s, err, jkt)
 	}
 }
+
+// A token's sid is read as the session; one that is not a non-empty string
+// is refused rather than dropped, so a session's capabilities are never
+// recorded under none.
+func TestVerifierReadsTheSession(t *testing.T) {
+	p := newIDP(t)
+	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: StaticKeys(p.keys), Now: clock})
+	got, err := v.VerifySubject(t.Context(), p.sign(t, TypeAccessToken, with(accessClaims(), map[string]any{claimSessionID: "sid-1"})))
+	if err != nil || got.SessionID != "sid-1" {
+		t.Errorf("subject %+v, %v; want session sid-1", got, err)
+	}
+	if got, err := v.VerifySubject(t.Context(), p.sign(t, TypeAccessToken, accessClaims())); err != nil || got.SessionID != "" {
+		t.Errorf("a token without a sid: %+v, %v; want no session", got, err)
+	}
+	for _, bad := range []any{"", 7} {
+		if _, err := v.VerifySubject(t.Context(), p.sign(t, TypeAccessToken, with(accessClaims(), map[string]any{claimSessionID: bad}))); !errors.Is(err, exchange.ErrInvalidGrant) {
+			t.Errorf("sid %v: err = %v, want ErrInvalidGrant", bad, err)
+		}
+	}
+}

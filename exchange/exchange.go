@@ -414,6 +414,11 @@ func (e *Exchanger) grant(ctx context.Context, req Request, subject Subject, rem
 	if issue.Audience, err = holdPolicy(issue.Audience, issue.ConfirmationJKT, targetsOf(req.Resources, req.Audiences)); err != nil {
 		return limes.IssueRequest{}, err
 	}
+	// The identity provider's session is the capability's, unless the
+	// policy names another, so ending the session revokes it.
+	if issue.Session == "" {
+		issue.Session = subject.SessionID
+	}
 	// The client the identity provider issued the subject token to is the
 	// capability's, unless the policy names another.
 	if issue.ClientID == "" {

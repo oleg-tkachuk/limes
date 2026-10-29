@@ -23,6 +23,12 @@ type Subject struct {
 	// JKT is the RFC 7638 thumbprint of the key the token is bound to
 	// (RFC 9449 cnf.jkt); empty for a bearer token.
 	JKT string
+	// SessionID is the identity provider's session the token was issued
+	// in, its sid (OpenID Connect Back-Channel Logout §2.4); empty for none.
+	// The Exchanger records it beside the capability
+	// (limes.IssueRequest.Session), so ending the session revokes what was
+	// exchanged in it (limes.BulkRevoker).
+	SessionID string
 	// Claims are all of the token's claims, for a policy that reads one of
 	// its identity provider's own, such as an organisation. It is also where
 	// a multi-tenant SubjectVerifier puts the tenant it resolved, under a

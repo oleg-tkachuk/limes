@@ -25,6 +25,7 @@ const (
 	claimCnf        = "cnf"
 	cnfJKT          = "jkt"
 	claimClientID   = "client_id"
+	claimSessionID  = "sid"
 )
 
 // testSubjects is the tests' SubjectVerifier: their identity provider's
@@ -64,6 +65,7 @@ func (v testSubjects) VerifySubject(_ context.Context, token string) (Subject, e
 	if cnf, ok := claims[claimCnf].(map[string]any); ok {
 		s.JKT, _ = cnf[cnfJKT].(string)
 	}
+	s.SessionID, _ = claims[claimSessionID].(string)
 	iat, _ := claims[claimIssuedAt].(float64)
 	exp, _ := claims[claimExpiry].(float64)
 	s.IssuedAt, s.ExpiresAt = time.Unix(int64(iat), 0), time.Unix(int64(exp), 0)

@@ -37,6 +37,9 @@ type Tokens struct {
 	NoClient func(t *testing.T) string
 	// Bound is a token bound to a DPoP key, and that key's thumbprint.
 	Bound func(t *testing.T) (token, jkt string)
+	// Session is a token issued in an identity provider's session, and the
+	// session's id, which the verifier reads as Subject.SessionID.
+	Session func(t *testing.T) (token, sid string)
 }
 
 // TestSubjectVerifier holds v to what the Exchanger relies on: it reads a
@@ -51,6 +54,15 @@ func TestSubjectVerifier(t *testing.T, v exchange.SubjectVerifier, tokens Tokens
 	t.Run("reads a valid token", func(t *testing.T) { testReadsValid(t, v, tokens.Valid) })
 	if tokens.Bound != nil {
 		t.Run("reads the binding", func(t *testing.T) { testReadsBinding(t, v, tokens.Bound) })
+	}
+	if tokens.Session != nil {
+		t.Run("reads the session", func(t *testing.T) {
+			token, sid := tokens.Session(t)
+			got, err := v.VerifySubject(t.Context(), token)
+			if err != nil || got.SessionID != sid {
+				t.Errorf("subject %+v, %v; want session %q", got, err, sid)
+			}
+		})
 	}
 	refusals := map[string]func(t *testing.T) string{
 		"refuses an expired token":         tokens.Expired,

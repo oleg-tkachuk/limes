@@ -266,7 +266,11 @@ at an RFC 8693 token endpoint (`Handler`):
   config. A token bound otherwise than by a DPoP key (`cnf` without `jkt`,
   or with more) is refused: a bearer capability would drop the binding.
   Keys its `KeySource` cannot give, the identity provider's JWKS never
-  fetched, are the server's failure, not a refusal of the token.
+  fetched, are the server's failure, not a refusal of the token. Its `sid`,
+  the session of OpenID Connect Back-Channel Logout §2.4, is read as the
+  subject's session and recorded beside the capability, so a logout token
+  for the session revokes what was exchanged in it
+  ([ADR-0013](adr/0013-bulk-revocation.md)).
   `exchangetest.TestSubjectVerifier` holds a verifier of one's own to the
   same contract.
 - **The audience.** A subject token is accepted only when its `aud` names
