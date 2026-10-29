@@ -2,7 +2,7 @@ package limes
 
 import (
 	"errors"
-	"fmt"
+	"github.com/oleg-tkachuk/limes/internal/errs"
 )
 
 // Errors exposed to callers, which switch on them with errors.Is. A
@@ -104,7 +104,18 @@ var (
 	// maps the whole family to its "bad request" without listing it. A
 	// request that is well formed but asks for more than is allowed has its
 	// own sentinel instead: ErrDelegationTooWide, ErrUnitCodeMismatch.
-	ErrInvalidRequest = errors.New("limes: invalid request")
+	ErrInvalidRequest = errs.ErrInvalidRequest
+	// ErrInvalidConfig is a component wired wrong: a constructor given a
+	// config it cannot work with (a required field missing, a negative
+	// bound), a key of another kind, or a dependency missing. Nothing was
+	// built or done. It is the deployment's to fix, not the caller's, and is
+	// answered 500 (docs/errors.md).
+	ErrInvalidConfig = errs.ErrInvalidConfig
+	// ErrInternal is an invariant of the module broken: a signature its own
+	// key does not verify, a store answering otherwise than its contract
+	// says. It is answered 500, the error's text, for the server's log,
+	// naming what broke.
+	ErrInternal = errs.ErrInternal
 	// ErrUnknownTenant is an issuance for a tenant that does not exist —
 	// typically one whose provisioning has not finished. The Store returns it.
 	ErrUnknownTenant = errors.New("limes: unknown tenant")
@@ -141,6 +152,10 @@ func (e *familyError) Is(target error) bool {
 }
 
 // invalidRequest is an ErrInvalidRequest saying what was wrong.
-func invalidRequest(format string, args ...any) error {
-	return fmt.Errorf("%w: "+format, append([]any{ErrInvalidRequest}, args...)...)
-}
+func invalidRequest(format string, args ...any) error { return errs.Request(format, args...) }
+
+// invalidConfig is an ErrInvalidConfig saying what was wrong.
+func invalidConfig(format string, args ...any) error { return errs.Config(format, args...) }
+
+// broken is an ErrInternal saying which invariant broke.
+func broken(format string, args ...any) error { return errs.Broken(format, args...) }

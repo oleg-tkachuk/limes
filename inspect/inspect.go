@@ -6,7 +6,6 @@ package inspect
 
 import (
 	"crypto/ed25519"
-	"errors"
 	"fmt"
 
 	"github.com/oleg-tkachuk/limes"
@@ -28,8 +27,9 @@ func checkSize(token string) error {
 }
 
 // ErrInvalidKey is VerifySignature handed a key that is no Ed25519 public
-// key: the caller's mistake, which says nothing about the token.
-var ErrInvalidKey = errors.New("inspect: not an Ed25519 public key")
+// key: the caller's mistake, which says nothing about the token; it matches
+// limes.ErrInvalidRequest.
+var ErrInvalidKey = fmt.Errorf("%w: inspect: not an Ed25519 public key", limes.ErrInvalidRequest)
 
 // Decode reads a compact token's claims without checking its signature. A
 // token it cannot read — one whose header names another alg than Ed25519

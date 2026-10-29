@@ -2,7 +2,6 @@ package limes
 
 import (
 	"context"
-	"errors"
 	"strconv"
 	"strings"
 )
@@ -10,7 +9,7 @@ import (
 // errNoBiscuitLookup is the answer of a RevocationCache built without
 // RevocationCacheConfig.Biscuits to a Biscuit question: no answer, so the
 // copy is refused rather than taken as live.
-var errNoBiscuitLookup = errors.New("limes: RevocationCacheConfig.Biscuits is not set; the cache answers no Biscuit question")
+var errNoBiscuitLookup = invalidConfig("limes: RevocationCacheConfig.Biscuits is not set; the cache answers no Biscuit question")
 
 // answersBiscuits reports whether the cache has an upstream for Biscuit
 // questions.

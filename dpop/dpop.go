@@ -21,6 +21,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"github.com/oleg-tkachuk/limes/internal/errs"
 	"io"
 	"math"
 	"math/big"
@@ -152,7 +153,7 @@ type proofClaims struct {
 func publicJWK(pub crypto.PublicKey) (jose.JWK, error) {
 	j, err := jose.PublicJWK(pub)
 	if err != nil {
-		return jose.JWK{}, fmt.Errorf("dpop: key: %w", err)
+		return jose.JWK{}, fmt.Errorf("%w: dpop: key: %w", errs.ErrInvalidRequest, err)
 	}
 	return j, nil
 }
@@ -203,7 +204,7 @@ type contextSigner interface {
 // given ctx, so a slow or cancelled remote signature is bounded by it.
 func Sign(ctx context.Context, key crypto.Signer, req SignRequest) (string, error) {
 	if req.IssuedAt.IsZero() {
-		return "", errors.New("dpop: SignRequest.IssuedAt required")
+		return "", errs.Request("dpop: SignRequest.IssuedAt required")
 	}
 	jwk, err := publicJWK(key.Public())
 	if err != nil {
@@ -260,14 +261,14 @@ func signProof(ctx context.Context, key crypto.Signer, input []byte) ([]byte, er
 		}
 		var rs struct{ R, S *big.Int }
 		if rest, err := asn1.Unmarshal(der, &rs); err != nil || len(rest) > 0 {
-			return nil, errors.New("dpop: sign: malformed ECDSA signature")
+			return nil, errs.Broken("dpop: sign: malformed ECDSA signature")
 		}
 		sig := make([]byte, es256SignatureBytes)
 		rs.R.FillBytes(sig[:jose.P256CoordinateBytes])
 		rs.S.FillBytes(sig[jose.P256CoordinateBytes:])
 		return sig, nil
 	}
-	return nil, fmt.Errorf("dpop: unsupported DPoP key type %T", key.Public())
+	return nil, errs.Request("dpop: unsupported DPoP key type %T", key.Public())
 }
 
 func verifySignature(pub crypto.PublicKey, alg string, input, sig []byte) bool {
@@ -291,7 +292,7 @@ func verifySignature(pub crypto.PublicKey, alg string, input, sig []byte) bool {
 func canonicalHTU(raw string) (string, error) {
 	htu, err := rfc3986.Normalize(raw)
 	if err != nil {
-		return "", fmt.Errorf("dpop: htu: %w", err)
+		return "", fmt.Errorf("%w: dpop: htu: %w", errs.ErrInvalidRequest, err)
 	}
 	return htu, nil
 }
@@ -390,10 +391,10 @@ func NewVerifier(cfg VerifierConfig) (*Verifier, error) {
 		return nil, errNoReplayCache
 	}
 	if cfg.Window < 0 {
-		return nil, fmt.Errorf("dpop: Window %s is negative", cfg.Window)
+		return nil, errs.Config("dpop: Window %s is negative", cfg.Window)
 	}
 	if cfg.MaxProofBytes < 0 {
-		return nil, fmt.Errorf("dpop: MaxProofBytes %d is negative", cfg.MaxProofBytes)
+		return nil, errs.Config("dpop: MaxProofBytes %d is negative", cfg.MaxProofBytes)
 	}
 	if cfg.Window == 0 {
 		cfg.Window = DefaultWindow
@@ -414,7 +415,7 @@ func SigningAlgorithms() []string { return []string{jose.AlgEd25519, jose.AlgES2
 
 // errNoReplayCache is a Verifier with no ReplayCache: a captured proof
 // would be good for its whole window.
-var errNoReplayCache = errors.New("dpop: VerifierConfig.Replay required")
+var errNoReplayCache = errs.Config("dpop: VerifierConfig.Replay required")
 
 // Nonce is the nonce to send in the DPoP-Nonce header, empty when the
 // verifier issues none.
@@ -450,7 +451,7 @@ type CheckedProof struct {
 func (p CheckedProof) JKT() string { return p.entry.JKT }
 
 // errNotChecked is a CheckedProof Check did not make.
-var errNotChecked = errors.New("dpop: CheckedProof not made by Check")
+var errNotChecked = errs.Request("dpop: CheckedProof not made by Check")
 
 // Check is everything Verify checks but whether the proof's jti is new: it
 // records nothing in the replay cache. A caller with checks of its own to
@@ -459,10 +460,10 @@ var errNotChecked = errors.New("dpop: CheckedProof not made by Check")
 // request that is otherwise accepted, and the cheap refusals come first.
 func (v *Verifier) Check(ctx context.Context, req Request) (CheckedProof, error) {
 	if req.Token == "" {
-		return CheckedProof{}, errors.New("dpop: Request.Token required")
+		return CheckedProof{}, errs.Request("dpop: Request.Token required")
 	}
 	if req.Holder == "" {
-		return CheckedProof{}, errors.New("dpop: Request.Holder required")
+		return CheckedProof{}, errs.Request("dpop: Request.Holder required")
 	}
 	return v.check(ctx, req.Proof, req.Holder, presented{token: req.Token, jkt: req.JKT})
 }
@@ -484,7 +485,7 @@ type TokenRequest struct {
 // own checks pass.
 func (v *Verifier) CheckTokenRequest(ctx context.Context, req TokenRequest) (CheckedProof, error) {
 	if req.Holder == "" {
-		return CheckedProof{}, errors.New("dpop: TokenRequest.Holder required")
+		return CheckedProof{}, errs.Request("dpop: TokenRequest.Holder required")
 	}
 	return v.check(ctx, req.Proof, req.Holder, presented{tokenRequest: true})
 }
@@ -785,7 +786,7 @@ type MemoryReplayCacheConfig struct {
 // or a holder's share larger than the whole cache.
 func NewMemoryReplayCache(cfg MemoryReplayCacheConfig) (*MemoryReplayCache, error) {
 	if cfg.MaxEntries < 0 || cfg.EntriesPerHolder < 0 {
-		return nil, fmt.Errorf("dpop: replay cache bounds %d, %d are negative", cfg.MaxEntries, cfg.EntriesPerHolder)
+		return nil, errs.Config("dpop: replay cache bounds %d, %d are negative", cfg.MaxEntries, cfg.EntriesPerHolder)
 	}
 	if cfg.MaxEntries == 0 {
 		cfg.MaxEntries = DefaultReplayCacheEntries
@@ -794,7 +795,7 @@ func NewMemoryReplayCache(cfg MemoryReplayCacheConfig) (*MemoryReplayCache, erro
 	case cfg.EntriesPerHolder == 0:
 		cfg.EntriesPerHolder = min(DefaultReplayEntriesPerHolder, cfg.MaxEntries)
 	case cfg.EntriesPerHolder > cfg.MaxEntries:
-		return nil, fmt.Errorf("dpop: replay cache share of one holder %d is larger than the cache, %d", cfg.EntriesPerHolder, cfg.MaxEntries)
+		return nil, errs.Config("dpop: replay cache share of one holder %d is larger than the cache, %d", cfg.EntriesPerHolder, cfg.MaxEntries)
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now

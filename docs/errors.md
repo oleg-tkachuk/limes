@@ -34,11 +34,14 @@ answers as its own failure, 500:
 ```go
 p, ok := meter.ProblemOf(err)
 if !ok {
-	p = limes.Problem{Type: "about:blank", Title: "Internal error", Status: http.StatusInternalServerError}
+	p = limes.ProblemFor(err) // an error not limes's: internal, 500
 }
 // HTTP: write p as application/problem+json with p.Status.
 // Another transport: carry p.Code, and p.Status as its numeric class.
 ```
+
+`limes.ProblemFor(err)` never reports false: an error that is not limes's —
+a database's, a consumer's own — is `internal`, 500.
 
 **The token endpoint** (`exchange.Handler`) answers in RFC 6749 §5.2's
 format: `error`, `error_description`, and a status. An `Exchanger` called
@@ -67,6 +70,29 @@ The body, for a capability that was revoked:
 | `reason` | For a refusal of a presented capability, its `limes.Reason`, which can be wider than the code: `tenant_erased` and `delegation_too_deep` are reported as `revoked`. |
 
 There is no `detail`: an error's own text is not shown to the client.
+
+## Every component
+
+Every error a component of limes returns is one of the codes below, or
+wraps one. That holds for the root module, `dpop`, `jwks`, `meter`,
+`inspect`, `memstore`, `pgstore` and `pgstore/migrate`, `redisreplay`,
+`otelmetric`, `exchange` and `exchange/jwtverify`, and `biscuit`.
+
+- **Constructors** refuse a config they cannot work with as
+  `invalid_config`: a required field missing, a negative bound, a key of
+  another kind.
+- **A call malformed in itself** is `invalid_request`.
+- **An invariant broken inside limes** is `internal`.
+- **Each refusal** has its own code.
+
+Each module's tests hold it to this: a test finds every error the
+module's sources construct, and refuses one that names no sentinel. The
+only exceptions are the few decoding helpers whose every caller wraps them
+in a family, and each module's test lists those by name. An error from a
+dependency — a database driver, an HTTP client — reaches a caller wrapped
+in a code where limes knows what it means (`keys_unavailable` for an
+issuer's keys out of reach), and as itself otherwise. `ProblemFor` answers
+that one as `internal`.
 
 ## Retrying
 
@@ -126,11 +152,13 @@ can prove its own mapping covers them all.
 | `not_found` | 404 | `limes.ErrNotFound` |  |  | Not found |
 | `unknown_tenant` | 404 | `limes.ErrUnknownTenant` |  |  | The tenant is unknown |
 | `tenant_deleted` | 410 | `limes.ErrTenantDeleted` |  |  | The tenant is deleted |
-| `scope_mismatch` | 403 | `limes.ErrScopeMismatch` |  |  | The call is scoped to another tenant than its request names |
+| `scope_mismatch` | 500 | `limes.ErrScopeMismatch` |  |  | The call is scoped to another tenant than its request names |
 | `proof_unsupported` | 500 | `limes.ErrProofUnsupported` |  |  | The capability is bound to a key and no proof is checked |
 | `no_revocation_lineage` | 502 | `limes.ErrNoRevocationLineage` |  |  | The revocation upstream names no lineage |
 | `copy_counters_not_metered` | 500 | `limes.ErrCopyCountersNotMetered` |  |  | Copy limits need a verifier that meters copies |
 | `cursor_repeated` | 502 | `limes.ErrCursorRepeated` |  |  | The store returned a cursor already fetched |
+| `invalid_config` | 500 | `limes.ErrInvalidConfig` |  |  | The server is misconfigured |
+| `internal` | 500 | `limes.ErrInternal` |  |  | Internal error |
 
 ## The meter's codes
 

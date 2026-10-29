@@ -32,7 +32,6 @@ import (
 	"bytes"
 	"cmp"
 	"context"
-	"errors"
 	"fmt"
 	"maps"
 	"math/big"
@@ -314,14 +313,14 @@ type UsageStoreConfig struct {
 //	memstore.NewUsageStore(memstore.UsageStoreConfig{Records: records})
 func NewUsageStore(cfg UsageStoreConfig) (*UsageStore, error) {
 	if cfg.Records == nil {
-		return nil, errors.New("memstore: UsageStoreConfig.Records required")
+		return nil, fmt.Errorf("%w: memstore: UsageStoreConfig.Records required", limes.ErrInvalidConfig)
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
 	switch {
 	case cfg.MaxCopiesPerCapability < 0:
-		return nil, fmt.Errorf("memstore: UsageStoreConfig.MaxCopiesPerCapability %d is negative", cfg.MaxCopiesPerCapability)
+		return nil, fmt.Errorf("%w: memstore: UsageStoreConfig.MaxCopiesPerCapability %d is negative", limes.ErrInvalidConfig, cfg.MaxCopiesPerCapability)
 	case cfg.MaxCopiesPerCapability == 0:
 		cfg.MaxCopiesPerCapability = meter.DefaultMaxCopiesPerCapability
 	}

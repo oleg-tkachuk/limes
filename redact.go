@@ -4,7 +4,6 @@ import (
 	"crypto"
 	"crypto/ed25519"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -102,7 +101,7 @@ func (k SealedKey) Public() crypto.PublicKey {
 func (k SealedKey) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, error) {
 	s := k.usable()
 	if s == nil {
-		return nil, errors.New("limes: a SealedKey holding no usable key")
+		return nil, invalidConfig("limes: a SealedKey holding no usable key")
 	}
 	return s.Sign(rand, digest, opts)
 }

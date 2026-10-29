@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
-	"fmt"
+	"github.com/oleg-tkachuk/limes/internal/errs"
 	"slices"
 	"sync"
 )
@@ -48,9 +48,9 @@ func NewStatic(cfg StaticConfig) (*Static, error) {
 func validateKey(kid string, key ed25519.PublicKey) error {
 	switch {
 	case kid == "":
-		return errors.New("jwks: a key needs a kid")
+		return errs.Config("jwks: a key needs a kid")
 	case len(key) != ed25519.PublicKeySize:
-		return fmt.Errorf("jwks: key %q is %d bytes, not an Ed25519 public key's %d", kid, len(key), ed25519.PublicKeySize)
+		return errs.Config("jwks: key %q is %d bytes, not an Ed25519 public key's %d", kid, len(key), ed25519.PublicKeySize)
 	}
 	return nil
 }

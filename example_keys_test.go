@@ -108,7 +108,7 @@ func ExampleNewSigner() {
 	fmt.Println(err)
 	// Output:
 	// <nil> true
-	// limes: SignerConfig.KeyID "k1" is not a limes kid ("limes:" and a name)
+	// limes: invalid configuration: SignerConfig.KeyID "k1" is not a limes kid ("limes:" and a name)
 }
 
 func ExampleSignerConfig_LogValue() {

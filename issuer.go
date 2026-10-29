@@ -3,7 +3,6 @@ package limes
 import (
 	"context"
 	"crypto/ed25519"
-	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -75,22 +74,22 @@ type IssuerConfig struct {
 // NewIssuer validates wiring and returns a ready Issuer.
 func NewIssuer(cfg IssuerConfig) (*Issuer, error) {
 	if cfg.Signer == nil {
-		return nil, errors.New("limes: IssuerConfig.Signer required")
+		return nil, invalidConfig("limes: IssuerConfig.Signer required")
 	}
 	if cfg.Store == nil {
-		return nil, errors.New("limes: IssuerConfig.Store required")
+		return nil, invalidConfig("limes: IssuerConfig.Store required")
 	}
 	if cfg.IssuerName == "" {
-		return nil, errors.New("limes: IssuerConfig.IssuerName required")
+		return nil, invalidConfig("limes: IssuerConfig.IssuerName required")
 	}
 	if cfg.DefaultTTL < 0 {
-		return nil, fmt.Errorf("limes: IssuerConfig.DefaultTTL %s is negative", cfg.DefaultTTL)
+		return nil, invalidConfig("limes: IssuerConfig.DefaultTTL %s is negative", cfg.DefaultTTL)
 	}
 	if cfg.DefaultTTL == 0 {
 		cfg.DefaultTTL = DefaultIssueTTL
 	}
 	if cfg.MaxTokenBytes < 0 {
-		return nil, fmt.Errorf("limes: IssuerConfig.MaxTokenBytes %d is negative", cfg.MaxTokenBytes)
+		return nil, invalidConfig("limes: IssuerConfig.MaxTokenBytes %d is negative", cfg.MaxTokenBytes)
 	}
 	if cfg.MaxTokenBytes == 0 {
 		cfg.MaxTokenBytes = DefaultMaxTokenBytes

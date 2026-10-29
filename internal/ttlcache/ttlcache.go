@@ -12,6 +12,7 @@ package ttlcache
 import (
 	"context"
 	"errors"
+	"github.com/oleg-tkachuk/limes/internal/errs"
 	"hash/maphash"
 	"math/rand/v2"
 	"sync"
@@ -129,7 +130,7 @@ type lookupCall[K comparable] struct {
 
 // errLookupAbandoned is what callers sharing a lookup receive when it ended
 // without an answer — it panicked — rather than a "not revoked" nobody gave.
-var errLookupAbandoned = errors.New("limes: revocation lookup ended without an answer")
+var errLookupAbandoned = errs.Broken("revocation lookup ended without an answer")
 
 // New is an empty cache running on cfg. MaxEntries is shared out among the
 // shards, so together they never hold more.

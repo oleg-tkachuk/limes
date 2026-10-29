@@ -140,14 +140,14 @@ func (i *Issuer) checkSealable(ctx context.Context, vc VerifiedCapability) error
 }
 
 // errNoIssuerForm is Issuer.Biscuit on an issuer given no form to seal in.
-var errNoIssuerForm = errors.New("limes: IssuerConfig.Biscuit required: github.com/oleg-tkachuk/limes/biscuit's Form")
+var errNoIssuerForm = invalidConfig("limes: IssuerConfig.Biscuit required: github.com/oleg-tkachuk/limes/biscuit's Form")
 
 // seal is c's sealed form: the form chooses the root key its token's
 // signature chain starts from, and the issuer signs c naming it.
 func (i *Issuer) seal(ctx context.Context, c Capability) (string, error) {
 	sign := func(ctx context.Context, root ed25519.PublicKey) (string, error) {
 		if len(root) != ed25519.PublicKeySize {
-			return "", fmt.Errorf("limes: a sealed form's root key is %d bytes, not %d", len(root), ed25519.PublicKeySize)
+			return "", broken("limes: a sealed form's root key is %d bytes, not %d", len(root), ed25519.PublicKeySize)
 		}
 		inner, err := i.signer.signGrant(ctx, grant{Capability: c, biscuitRoot: base64.RawURLEncoding.EncodeToString(root)})
 		if err != nil {

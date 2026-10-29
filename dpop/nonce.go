@@ -7,7 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
-	"fmt"
+	"github.com/oleg-tkachuk/limes/internal/errs"
 	"time"
 
 	"github.com/oleg-tkachuk/limes/internal/jose"
@@ -95,15 +95,15 @@ type HMACNoncesConfig struct {
 func NewHMACNonces(cfg HMACNoncesConfig) (*HMACNonces, error) {
 	given := cfg.Keys.k.get()
 	if len(given) == 0 {
-		return nil, errors.New("dpop: HMACNonces needs a key")
+		return nil, errs.Config("dpop: HMACNonces needs a key")
 	}
 	for i, k := range given {
 		if len(k) < HMACNonceKeyBytes {
-			return nil, fmt.Errorf("dpop: HMACNonces key %d is %d bytes, at least %d", i, len(k), HMACNonceKeyBytes)
+			return nil, errs.Config("dpop: HMACNonces key %d is %d bytes, at least %d", i, len(k), HMACNonceKeyBytes)
 		}
 	}
 	if cfg.Lifetime < 0 {
-		return nil, fmt.Errorf("dpop: nonce lifetime %s is negative", cfg.Lifetime)
+		return nil, errs.Config("dpop: nonce lifetime %s is negative", cfg.Lifetime)
 	}
 	if cfg.Lifetime == 0 {
 		cfg.Lifetime = DefaultNonceLifetime
@@ -116,7 +116,7 @@ func NewHMACNonces(cfg HMACNoncesConfig) (*HMACNonces, error) {
 
 // errNoNonceKey is Nonce of an HMACNonces holding no key: the zero value,
 // not one NewHMACNonces made.
-var errNoNonceKey = errors.New("dpop: HMACNonces holds no key; make it with NewHMACNonces")
+var errNoNonceKey = errs.Config("dpop: HMACNonces holds no key; make it with NewHMACNonces")
 
 // Nonce implements Nonces. The zero HMACNonces holds no key and issues none.
 func (n *HMACNonces) Nonce(context.Context) (string, error) {
