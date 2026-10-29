@@ -13,24 +13,36 @@ process.
 ## Contract boundary
 
 The module ships the primitive and its contracts; the consumer supplies the
-storage behind them, or takes one of the stores this repository ships:
-`memstore` in memory, and the nested modules `pgstore`, every store contract
-over PostgreSQL with row-level security, `redisreplay`, a
-`dpop.ReplayCache` over Redis, and `otelmetric`, OpenTelemetry instruments
-around a `meter.UsageStore` and a `RevocationCache`. Each nested module has its own `go.mod` and its own tag
-line, so the root module's dependency graph stays free of a driver and of
-OpenTelemetry.
-The two Biscuit contracts are needed only by a consumer that accepts the
-Biscuit form, `dpop.ReplayCache` and `dpop.Nonces` only by one that binds
-capabilities to keys, `RevocationLineageLookup` only by one whose
-`RevocationCache` should drop only what a revocation outdates,
-`meter.LedgerReader` only by one that bills or reports from the
-charges ledger, `meter.LedgerHousekeeping` only by one that bounds it, `RecordCensus`, `RecordLister` and `RecordListingReader` only by one that reports on records, and the two tenant erasers only by one that removes a tenant. `storetest`, `metertest`, `dpop/dpoptest` and
-`jwks/jwkstest` check an implementation against its contract from its own
-tests — the Biscuit and copy contracts too, when the store under test
-implements them — and bound every check by their env's `CheckTimeout`
-(`dpoptest`'s `ReplayEnv` and `NoncesEnv`, the others' `Env`), so a store that
-deadlocks fails the check instead of hanging the run.
+storage behind them, or takes a store this repository ships: `memstore` in
+memory, or one of the nested modules, each with its own `go.mod` and tag
+line so the root module resolves no driver, SDK or Biscuit library:
+
+- `pgstore` — every store contract over PostgreSQL, with row-level security;
+- `redisreplay` — a `dpop.ReplayCache` over Redis;
+- `otelmetric` — OpenTelemetry instruments around a `meter.UsageStore` and a
+  `RevocationCache`;
+- `exchange` — OAuth 2.0 token exchange (RFC 8693) in front of an `Issuer`;
+- `biscuit` — the Biscuit form and offline `Attenuate`.
+
+Only `Store`, `KeyResolver` and, to meter, `meter.UsageStore` are needed by
+every consumer. The rest are optional:
+
+| Contract | Needed by a consumer that |
+|---|---|
+| `BiscuitRevocationStore`, `meter.CopyUsageReader` | accepts the Biscuit form |
+| `dpop.ReplayCache`, `dpop.Nonces` | binds capabilities to keys |
+| `RevocationLineageLookup` | wants its `RevocationCache` to drop only what a revocation outdates |
+| `meter.LedgerReader`, `meter.LedgerHousekeeping` | bills or reports from the charges ledger, and bounds it |
+| `RecordCensus`, `RecordLister`, `RecordListingReader` | reports on records |
+| `BulkRevoker` | revokes by user, client or session |
+| `ExchangeStore` | exchanges each subject token for one capability |
+| `TenantRecordEraser`, `meter.TenantUsageEraser` | removes a tenant |
+
+`storetest`, `metertest`, `dpop/dpoptest` and `jwks/jwkstest` check an
+implementation against its contract from its own tests, the optional ones
+included when the store implements them, and bound every check by
+`CheckTimeout`, so a store that deadlocks fails the check instead of
+hanging the run.
 
 ```mermaid
 flowchart LR
@@ -38,13 +50,12 @@ flowchart LR
 
     subgraph mod ["limes (this module)"]
         direction TB
-        issuer["<b>Issuer</b><br/>Issue · Delegate · Biscuit"]
+        issuer["<b>Issuer</b><br/>Issue · Delegate · Reissue · Biscuit"]
         signer["<b>Signer</b><br/>NewSigner · SealKey → SealedKey · JWT Ed25519"]
         narrows["<b>Narrows</b><br/>child ⊆ parent"]
-        verifier["<b>Verifier</b><br/>Authorize · Verify · BiscuitCopy<br/>ErrorResponse · DPoPNonce"]
+        verifier["<b>Verifier</b><br/>Authorize · Verify · Introspect · BiscuitCopy<br/>ErrorResponse · DPoPNonce"]
         caveats["<b>Caveats</b><br/>Check · CheckSource · AllowsResource"]
         cache["RevocationCache<br/>capabilities · Biscuit copies<br/>TTL · bounded per kind · single-flight<br/>sharded, a hit read-locked<br/>NewSignal · Clear · ClearRevoked · Sweep · Stats<br/>TTL, or SyncedTTL while its signals listen"]
-        attenuate["<b>Attenuate</b><br/>offline · no key"]
         static["jwks.Static<br/>SetKey · RemoveKey"]
         remote["jwks.Remote<br/>ETag · Cache-Control · MaxStale<br/>held keys served, refreshed behind"]
         dpop["dpop.Verifier<br/>VerifierConfig.DPoP · dpop.Sign"]
@@ -66,10 +77,12 @@ flowchart LR
         census["<b>RecordCensus</b><br/>CountRecords(CountRecordsRequest) → Page[RecordCount]<br/>one tenant or all · by tenant · principal type<br/>active · expired · revoked · delegated · expiring soon"]
         lister["<b>RecordLister · RecordListingReader</b><br/>ListRecords(ListRecordsRequest) → Page[RecordListing]<br/>one tenant · by principal type · subject · prefix · disposition<br/>oldest or newest first<br/>a cursor holds its tenant, order and filters (ErrCursorMismatch)<br/>GetRecordListing(id) → RecordListing"]
         erasers["<b>TenantRecordEraser · meter.TenantUsageEraser</b><br/>EraseTenantRecords · EraseTenantUsage"]
+        bulk["<b>BulkRevoker · ExchangeStore</b><br/>RevokeMatching · ExchangedFor · ClaimExchange"]
     end
 
     impl[("memstore · your own store")]
-    pg["<b>pgstore</b> (nested module)<br/>Store · BiscuitRevocationStore · erasers<br/>UsageStore · CopyUsageReader · Ledger · Census (count, list)<br/>CheckSchema · EraseTenant · migrate.Run, Steps<br/>WithTenant · WithAllTenants · WithAllTenantsReadOnly<br/>RevocationWatcher · row-level security"]
+    attenuate["<b>biscuit</b> (nested module)<br/>Form: a TokenForm · Attenuate offline, no key"]
+    pg["<b>pgstore</b> (nested module)<br/>Store · BiscuitRevocationStore · erasers<br/>UsageStore · CopyUsageReader · Ledger · Census (count, list)<br/>CheckSchema · EraseTenant · migrate.Run, Steps<br/>WithTenant · WithAllTenants · WithAllTenantsReadOnly<br/>ScopedIssuance · ScopedExchanges<br/>RevocationWatcher · row-level security"]
     rr["<b>redisreplay</b> (nested module)<br/>Cache: dpop.ReplayCache over Redis"]
     metering["<b>otelmetric</b> (nested module)<br/>Instrument: OTel counters · spend histogram<br/>InstrumentRevocationCache: cache Stats as observable counters and gauges<br/>WithMeterProvider · WithTenantAttribute"]
     pgdb{{"PostgreSQL"}}
@@ -114,6 +127,7 @@ flowchart LR
     suites -. "check" .-> census
     suites -. "check" .-> lister
     suites -. "check" .-> erasers
+    suites -. "check" .-> bulk
     store --> impl
     usage --> impl
     brev --> impl
@@ -122,6 +136,7 @@ flowchart LR
     census --> impl
     lister --> impl
     erasers --> impl
+    bulk --> impl
     pg -. "implements" .-> store
     pg -. "implements" .-> usage
     pg -. "implements" .-> brev
@@ -130,6 +145,7 @@ flowchart LR
     pg -. "implements" .-> census
     pg -. "implements" .-> lister
     pg -. "implements" .-> erasers
+    pg -. "implements" .-> bulk
     pg --> pgdb
     rr -. "implements" .-> replay
     rr --> redis
@@ -142,7 +158,7 @@ flowchart LR
     class caller client
     class issuer,signer,narrows,verifier,caveats role
     class cache,metering,static,remote,attenuate,dpop,suites,jwksh,nonce,pg,rr optional
-    class store,usage,keys,impl,brev,cusage,replay,nonces,ledger,census,lister,erasers store
+    class store,usage,keys,impl,brev,cusage,replay,nonces,ledger,census,lister,erasers,bulk store
     class jwks,otel,pgdb,redis external
 ```
 
@@ -179,7 +195,7 @@ sequenceDiagram
     Op->>I: Issue(IssueRequest)
     I->>I: Caveats.Validate · TTL → ExpiresAt, after IssuedAt
     I->>I: sign with the Signer, within MaxTokenBytes
-    I->>St: Store.Insert(InsertRequest{cap, IssuedBy}) — ErrTenantErased once the tenant's usage is erased
+    I->>St: Store.Insert(InsertRequest{cap, IssuedBy, Session}) — ErrTenantErased once the tenant's usage is erased
     I-->>O: token
 
     O->>I: Delegate(DelegateRequest{Parent: Verify(token), Caveats})
@@ -230,10 +246,10 @@ flowchart TB
     pre{"token and audience set"}
     size{"len ≤ MaxTokenBytes"}
     form{"a Biscuit?"}
-    hdr{"header: strict parse<br/>alg = Ed25519 · typ = at+jwt · kid limes:…"}
+    hdr{"header: strict parse<br/>alg Ed25519 or EdDSA · typ = at+jwt · kid limes:…"}
     key{"KeyResolver.PublicKey(kid)"}
     sig{"Ed25519 signature"}
-    claims{"claims: strict parse — no unknown or duplicate member<br/>integers within ±(2^53 − 1) · sub = principal's subject"}
+    claims{"claims: strict parse — no unknown or duplicate member<br/>limes_v · client_id · integers within ±(2^53 − 1)<br/>sub = the principal's, or limes_on_behalf_of's (act = the principal)"}
     iss{"iss ∈ TrustedIssuers<br/>KeyIssuers[kid] = iss, when KeyIssuers is set"}
     tenant{"Subject.TenantID set<br/>Subject.Validate · Caveats.Validate"}
     sealed{"names no Biscuit root, limes_bsk<br/>(not lifted out of a Biscuit)"}
@@ -259,7 +275,7 @@ flowchart TB
     unsup["ErrProofUnsupported<br/>(500, the deployment's fault)"]
     keysDown["jwks.ErrUnavailable<br/>(503, the server's fault)"]
     outage["the store's, resolver's, replay cache's<br/>or nonce source's error, wrapped (500)"]
-    revoked["ErrRevoked"]
+    revoked["ErrRevoked<br/>ErrDelegationTooDeep included"]
     unmetered["ErrCopyCountersNotMetered<br/>(500, the deployment's fault)"]
     violation["ErrCaveatViolation<br/>ErrOpNotAllowed · ErrResourceNotAllowed · …"]
     biscuit["the Biscuit path below"]
@@ -290,6 +306,7 @@ flowchart TB
     pop -- no --> dpopErr
     pop -- "cannot answer" --> outage
     rev -- yes --> revoked
+    rev -- "chain past MaxDelegationDepth" --> revoked
     rev -- "lookup fails" --> outage
     brev -- yes --> revoked
     brev -- "lookup fails" --> outage
@@ -337,14 +354,16 @@ flowchart TB
     auth{"container decodes · ≤ MaxBiscuitBlocks blocks<br/>authority block: exactly one<br/>limes_capability fact, no rules, no checks"}
     sealed{"the sealed token: header · key · signature<br/>claims · issuer · tenant — and it names a root, limes_bsk"}
     chain{"signature chain verifies<br/>against that root"}
+    vocab{"every block: only limes_* facts<br/>no rules · no checks"}
+    shape{"≤ MaxBiscuitBlocks<br/>one revocation id per block"}
     subgraph fold ["each attenuation block, in order"]
         direction TB
-        vocab{"only limes_* facts<br/>no rules · no checks · no rebinding"}
+        rebind{"Attenuation.Validate<br/>a bound token not rebound"}
         narrow{"Narrows(cur, next)<br/>ops · resources · planes · expiry · binding"}
         lim{"sets limes_max_requests /<br/>limes_max_budget_nanos?"}
         fit{"within the capability's limit<br/>and every enclosing copy's"}
         copies["VerifiedCapability.Copies gains a CopyCeiling<br/>{RevocationID, Requests, Budget}, innermost first<br/>an axis the block left alone stays nil"]
-        vocab -- yes --> narrow -- yes --> lim
+        rebind -- yes --> narrow -- yes --> lim
         lim -- yes --> fit -- yes --> copies
     end
     cval{"folded caveats<br/>Caveats.Validate"}
@@ -361,11 +380,11 @@ flowchart TB
     unmetered["ErrCopyCountersNotMetered"]
     revoked["ErrRevoked"]
 
-    tok --> on -- yes --> auth -- yes --> sealed -- yes --> chain -- yes --> vocab
+    tok --> on -- yes --> auth -- yes --> sealed -- yes --> chain -- yes --> vocab -- yes --> shape -- yes --> rebind
     lim -- no --> cval
     copies --> cval
-    copies -. "next block" .-> vocab
-    lim -. "next block" .-> vocab
+    copies -. "next block" .-> rebind
+    lim -. "next block" .-> rebind
     cval -- yes --> post
     post --> rev
     auth -- no --> bad
@@ -374,6 +393,8 @@ flowchart TB
     on -- no --> bad
     chain -- no --> bad
     vocab -- no --> att
+    shape -- no --> att
+    rebind -- no --> att
     narrow -- widens --> att
     fit -- no --> att
     cval -- no --> att
@@ -386,7 +407,7 @@ flowchart TB
     classDef store fill:#FEF3C7,stroke:#D97706,color:#78350F
     classDef external fill:#FCE7F3,stroke:#DB2777,color:#831843
     class tok,ok client
-    class on,auth,sealed,chain,vocab,narrow,lim,meter,fit,copies,cval,post,cav role
+    class on,auth,sealed,chain,vocab,shape,rebind,narrow,lim,meter,fit,copies,cval,post,cav role
     class rev,brev,rec store
     class bad,att,unmetered,revoked external
 ```
@@ -492,6 +513,43 @@ error code beside a `Bearer` one, and every `DPoP` challenge it answers
 carries `algs`. A challenge with an error code also carries
 `error_description`, the refusal's fixed title — never the error's own. Every
 challenge ends with `realm="…"`: `VerifierConfig.Realm`, or `DefaultRealm`.
+
+Any error limes returns has a `Code` too, a refusal or not. `ProblemOf`
+builds the RFC 9457 body for an API that is not a protected resource;
+`ErrorResponse` answers only refusals, and anything else as 500:
+
+```mermaid
+flowchart TB
+    err(["an error limes returned"])
+    cr{"CodeOf: first codeRules match"}
+    rr{"a refusal?"}
+    pRef["ProblemOf: the refusal's status and title<br/>reason · code · type"]
+    pCode["ProblemOf: the code's status and title<br/>400 · 401 · 403 · 404 · 409 · 410 · 500 · 502"]
+    pInt["ProblemFor: 500 internal"]
+    er(["Verifier.ErrorResponse"])
+    rr2{"a refusal?"}
+    resp["the table above:<br/>status · challenge · DPoP-Nonce"]
+    i500["500 internal, no challenge"]
+    out(["WriteErrorResponse<br/>application/problem+json · no-store"])
+
+    err --> cr -- yes --> rr
+    cr -- "no: not limes's" --> pInt
+    rr -- yes --> pRef
+    rr -- no --> pCode
+    er --> rr2 -- yes --> resp --> out
+    rr2 -- no --> i500 --> out
+
+    classDef client fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E
+    classDef role fill:#DCFCE7,stroke:#16A34A,color:#14532D
+    classDef optional fill:#F1F5F9,stroke:#64748B,color:#334155,stroke-dasharray:5 4
+    classDef store fill:#FEF3C7,stroke:#D97706,color:#78350F
+    classDef external fill:#FCE7F3,stroke:#DB2777,color:#831843
+    class err,er,out client
+    class cr,rr,pRef,pCode,rr2,resp role
+    class pInt,i500 external
+```
+
+[errors.md](errors.md) lists every code with its status and sentinel.
 
 ## What the bearer may do
 
@@ -970,21 +1028,47 @@ knows the token's. A revocation entry is deleted with its record, so once
 `Purge` reaps an ancestor the walk no longer reaches it — by then it has
 expired, and so has every descendant.
 
-A verifier that runs apart from the issuer resolves keys with
-`jwks.Remote`. It asks for `application/jwk-set+json` (then `application/json`), keeps a set as
-long as the response's `Cache-Control` says — `max-age` less `Age`, zero for
-`no-cache` or `no-store` — within `MinRefreshInterval` and `RefreshInterval`
-(`RefreshInterval` when the response says nothing), revalidates with an ETag,
-refetches on an unknown kid at most once per `MinRefreshInterval`, and fails
-closed with `jwks.ErrUnavailable` when it has never fetched a set, or once the
-last good set is older than `MaxStale`. A known kid from a set past its
-freshness but within `MaxStale` is served at once, its refresh started behind
-the caller; an unknown kid while the endpoint is failing, or a caller that
-gives up waiting with no set to serve, is `jwks.ErrUnavailable` too. Keys are
-handed out as copies. A document with entries but no usable
-Ed25519 key counts as a failed fetch, so the last good set stays in service;
-two entries under one kid are both dropped. The issuer serves the set with `jwks.NewHandler`: a strong ETag
-answering `If-None-Match` with 304, and `Cache-Control: public, max-age`.
+A verifier apart from the issuer resolves keys with `jwks.Remote`; its
+caching and failure modes are in the [guide](guide.md#authorize-every-call).
+
+## Revoking by user, client or session
+
+A `BulkRevoker` revokes, in batches, every capability of one tenant that
+matches a selector. The session is recorded at issuance — an `Exchanger`
+takes it from the subject token's `sid`, a child from its parent — and is
+never a claim.
+
+```mermaid
+flowchart LR
+    sess["IssueRequest.Session<br/>exchange: the subject token's sid<br/>a child: its parent's"]
+    req(["RevokeMatchingRequest{TenantID,<br/>Subject · OnBehalfOf · ClientID · Session,<br/>Note, Actor, Limit}"])
+    val{"TenantID and a selector set<br/>Limit ≥ 0"}
+    scope{"pgstore: the scope<br/>admits TenantID"}
+    sel["the tenant's capabilities matching every selector<br/>with no revocation entry of their own<br/>id order · at most Limit (DefaultHousekeepingLimit)"]
+    write["a revocation entry each · Note · Actor"]
+    desc["descendants stop through<br/>IsRevoked's lineage walk"]
+    res(["RevokeMatchingResult{Revoked, More}"])
+    inval["ErrInvalidRequest"]
+    mism["ErrScopeMismatch"]
+
+    req --> val -- yes --> scope -- yes --> sel --> write --> res
+    sess -. "Session selector" .-> sel
+    write -.-> desc
+    res -. "More: call again" .-> req
+    val -- no --> inval
+    scope -- no --> mism
+
+    classDef client fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E
+    classDef role fill:#DCFCE7,stroke:#16A34A,color:#14532D
+    classDef optional fill:#F1F5F9,stroke:#64748B,color:#334155,stroke-dasharray:5 4
+    classDef store fill:#FEF3C7,stroke:#D97706,color:#78350F
+    classDef external fill:#FCE7F3,stroke:#DB2777,color:#831843
+    class req,res client
+    class val,scope role
+    class sess,desc optional
+    class sel,write store
+    class inval,mism external
+```
 
 ## pgstore: a call under its tenant's scope
 
@@ -1009,7 +1093,7 @@ flowchart TB
     ro{"the call writes,<br/>under WithAllTenantsReadOnly"}
     begin["DB.BeginTx: READ COMMITTED · Config.Scope(ctx, tx)<br/>default ScopeFromContext: set_config, local to the transaction<br/>limes.tenant_id = id · limes.all_tenants = on · = read"]
     roset{"the call writes, under a Config.Scope of the consumer's<br/>that set limes.all_tenants = read (one SELECT)"}
-    named{"the request names a tenant<br/>Insert · ListByPrincipal · Bump · Charge · Reserve · Settle · Release<br/>Get/SetTenantBudget · erasers · SumCharges · CountRecords · ListRecords"}
+    named{"the request names a tenant<br/>Insert · ListByPrincipal · Bump · Charge · Reserve · Settle · Release<br/>Get/SetTenantBudget · erasers · SumCharges · CountRecords · ListRecords<br/>RevokeMatching · ExchangedFor · ClaimExchange"}
     check{"Config.CheckScope admits it<br/>default: the context's scope is every tenant or that one;<br/>none: CheckSchemaScope asks the database"}
     rls["statements under row-level security<br/>read: tenant_visible — all_tenants on or read, or tenant_id matches<br/>write: tenant_writable — all_tenants on, or tenant_id matches"]
     commit(["COMMIT"])
@@ -1099,3 +1183,54 @@ mark it sets makes `Insert` refuse the tenant with `ErrTenantErased`, so
 all. The other way round, a record inserted between the two calls stays on
 record unrevoked. `PurgeOrphans` forgets the mark once none of the tenant's
 records is left.
+
+## Token exchange
+
+`exchange.Exchanger` turns an identity provider's access token into a
+capability (RFC 8693); `exchange.Handler` serves it as a token endpoint.
+With `Config.Exchanges` set, each subject token yields one capability,
+signed again from its record on a repeat exchange.
+
+```mermaid
+flowchart TB
+    req(["Request{Client, SubjectToken, Resources, Audiences}"])
+    subj{"SubjectVerifier.VerifySubject<br/>aud names one of Client.SubjectAudiences"}
+    jti{"Exchanges set → the token has a jti"}
+    proof{"DPoP proof, if any<br/>a bound subject token: proved by its key"}
+    pol{"Policy(Grant) → IssueRequest<br/>audience within the targets<br/>Session · ClientID from the subject token<br/>TTL ≤ the subject token's remaining life"}
+    before{"ExchangedFor(ExchangeKey{TenantID, Issuer, jti})"}
+    reissue{"Issuer.Reissue(id)<br/>live · same binding · same audience"}
+    issue["Issuer.Issue"]
+    claim{"ClaimExchange(key, id)"}
+    ok(["Result{Capability, Token, Reissued}"])
+    grant["ErrInvalidGrant"]
+    target["ErrInvalidTarget"]
+    dpopErr["invalid_dpop_proof"]
+    refused["the policy's refusal"]
+
+    req --> subj -- ok --> jti -- ok --> proof -- ok --> pol -- ok --> before
+    before -- found --> reissue -- ok --> ok
+    before -- "not found, or no ExchangeStore" --> issue --> claim -- "claimed, or no ExchangeStore" --> ok
+    claim -- "another exchange claimed first" --> reissue
+    subj -- no --> grant
+    jti -- no --> grant
+    proof -- no --> dpopErr
+    pol -- no --> refused
+    reissue -- "revoked · expired · another key" --> grant
+    reissue -- "another audience" --> target
+
+    classDef client fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E
+    classDef role fill:#DCFCE7,stroke:#16A34A,color:#14532D
+    classDef optional fill:#F1F5F9,stroke:#64748B,color:#334155,stroke-dasharray:5 4
+    classDef store fill:#FEF3C7,stroke:#D97706,color:#78350F
+    classDef external fill:#FCE7F3,stroke:#DB2777,color:#831843
+    class req,ok client
+    class subj,jti,proof,pol,issue role
+    class before,reissue,claim store
+    class grant,target,dpopErr,refused external
+```
+
+`ErrorOf` maps each refusal to the RFC 6749 §5.2 error the endpoint
+answers; [errors.md](errors.md#the-exchanges-codes) lists them. A
+capability presented as the subject token (`IssuedTokenTypeCapability`)
+goes to `Exchanger.Narrow` instead, which verifies it and delegates.
