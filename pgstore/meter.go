@@ -52,7 +52,7 @@ type ancestor struct {
 }
 
 // lineageView is what the meter and the erase read of the records
-// (migrate/migrations/022_capability_lineage.sql), never the records table.
+// (migrate/ddl/migrations/022_capability_lineage.sql), never the records table.
 const lineageView = schema + ".capability_lineage"
 
 const (
@@ -77,7 +77,7 @@ SELECT id FROM chain ORDER BY depth`
 	// order, so Purge cannot drop one while the call counts against it: the
 	// view is a plain projection, so the lock reaches the record rows. Key
 	// share conflicts with that delete and not with the revoked flag a
-	// revocation sets (migrate/migrations/015_revoked_flag.sql): with FOR SHARE,
+	// revocation sets (migrate/ddl/migrations/015_revoked_flag.sql): with FOR SHARE,
 	// metered calls overlapping one another would hold a record without a
 	// gap, and its revoke's mark would wait behind them for as long.
 	sqlHoldRecords = `

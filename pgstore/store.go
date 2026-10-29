@@ -217,13 +217,13 @@ func (s *Store) GetRecord(ctx context.Context, id uuid.UUID) (limes.Record, erro
 	return rec, err
 }
 
-// sqlIsRevoked asks limes.is_revoked (migrate/migrations/004_revocation_checks.sql)
+// sqlIsRevoked asks limes.is_revoked (migrate/ddl/migrations/004_revocation_checks.sql)
 // in one statement, outside any transaction: one round trip on the path
 // every request takes.
 const sqlIsRevoked = `SELECT self, deepest, in_chain FROM limes.is_revoked($1, $2)`
 
 // sqlRevocationLineage asks limes.revocation_lineage
-// (migrate/migrations/018_revocation_lineage.sql), as sqlIsRevoked asks is_revoked.
+// (migrate/ddl/migrations/018_revocation_lineage.sql), as sqlIsRevoked asks is_revoked.
 const sqlRevocationLineage = `SELECT self, deepest, in_chain, ancestors, known FROM limes.revocation_lineage($1, $2)`
 
 // IsRevoked answers for the capability and every ancestor still on record,
@@ -321,7 +321,7 @@ ON CONFLICT (capability_id) DO NOTHING`
 // Revoke writes the capability's revocation entry, and with CascadeChildren
 // one for every descendant. Each entry also marks its record, and every
 // record below it not marked already, revoked — the flag the census and the
-// listing read (migrate/migrations/015_revoked_flag.sql) — one UPDATE a generation,
+// listing read (migrate/ddl/migrations/015_revoked_flag.sql) — one UPDATE a generation,
 // by key and by parent, inside this transaction. It first takes the
 // tenant's revoke lock alone, which every insert of a child shares
 // (lockForRevoke): the revoke waits for the inserts and revokes of the

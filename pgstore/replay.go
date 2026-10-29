@@ -86,7 +86,7 @@ func NewReplayCache(cfg ReplayConfig) (*ReplayCache, error) {
 }
 
 // replayTable is where the cache keeps proof ids
-// (migrate/migrations/023_dpop_seen_proofs.sql).
+// (migrate/ddl/migrations/023_dpop_seen_proofs.sql).
 const replayTable = schema + ".dpop_seen_proofs"
 
 // replayLockClass is the first key of the advisory lock that makes one

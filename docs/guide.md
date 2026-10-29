@@ -1059,9 +1059,15 @@ version table. Run it before any migration of yours that
 refers to its tables. It holds the advisory lock every `tern` migration
 takes, which is reentrant per session: a consumer migrating with `tern` calls
 `migrate.Run` on the connection its own run holds. A consumer with another
-migration tool gives it `migrate.Steps` instead: `migrate.Setup` once, each
-step's `SQL()` in a transaction of its own, or a statement at a time outside
-one where `InTransaction` is false, then `migrate.Grants`. Each step scopes
+migration tool gives it the steps instead, from `pgstore/migrate/ddl`, which
+links no `tern` and no driver: `ddl.Setup` once, each step's `SQL()` in a
+transaction of its own, or its `Statements()` a statement at a time outside
+one where `InTransaction` is false, then `ddl.Grants` (`migrate.Steps`,
+`migrate.Setup` and `migrate.Grants` are the same values). Two transactional
+steps never share a transaction: each opens by setting the transaction `READ
+COMMITTED`, which PostgreSQL takes only as a transaction's first statement,
+and which migration 016 needs, since it reads each level of records by the
+next statement's snapshot. Each step scopes
 itself as `migrate.Run` would and records its version, so `CheckSchema` reads
 it and `migrate.Run` can take over from it. Each migration that runs in a
 transaction runs `READ COMMITTED`, whatever the role's, the database's or the
@@ -1088,6 +1094,37 @@ sets the schema's own settings, `pgstore.SettingTenant` and
 to `SettingAllTenantsRead` gets the read-only refusal of
 `WithAllTenantsReadOnly`: a call that writes under it returns
 `ErrScopeMismatch` and changes nothing.
+
+**Vendoring the schema into a migration tool.** A consumer whose own tool
+(Atlas, golang-migrate, Flyway) applies its schema writes pgstore's steps out
+as files once per pgstore upgrade, and checks them in:
+
+```go
+steps, err := ddl.Steps()
+// 000_limes_setup.sql: ddl.Setup()
+for _, s := range steps {
+	body := s.SQL() // a transactional step: one file, one transaction
+	if !s.InTransaction {
+		// Atlas runs a file statement by statement outside a transaction
+		// under this directive; another tool has its own.
+		body = "-- atlas:txmode none\n\n" + strings.Join(s.Statements(), "\n")
+	}
+	// write body to fmt.Sprintf("%03d_limes_%s", s.Version, s.Name)
+}
+grants, err := ddl.Grants([]string{"app"}) // last, one transaction
+```
+
+Every statement handed over ends with `;`, and a step's last statement
+records its version in `limes.schema_version`, so `pgstore.CheckSchema`
+reads where the database is and `migrate.Run` can take over from it. A
+vendored copy falls behind when a pgstore upgrade brings a step: compare
+the files with `ddl.Steps()` in a test of the consumer's own, so the upgrade
+fails in CI, not in production, and a readiness check that runs
+`CheckSchema` answers `ErrSchemaMismatch`, with `ReadSchemaVersion` naming
+the applied version beside `ddl.Version`. Hold the result to the
+conformance suites — `storetest.Run` and `metertest.Run` or
+`metertest.RunCounter` over the vendored schema, the consumer's own roles
+and its row-level security — which check the deployment, not only pgstore.
 
 Elsewhere, implement these and you are done:
 

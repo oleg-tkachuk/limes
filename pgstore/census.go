@@ -20,7 +20,7 @@ import (
 // A record's revoked column says whether it is revoked, itself or through
 // an ancestor still on record, as IsRevoked's walk up answers it: a
 // revocation entry marks its record and every record below it, and a record
-// inserted under a marked one is marked (migrate/migrations/015_revoked_flag.sql).
+// inserted under a marked one is marked (migrate/ddl/migrations/015_revoked_flag.sql).
 // The census and ListRecords read it, so neither walks the revocations.
 
 // Census implements limes.RecordCensus, limes.RecordLister and
@@ -236,7 +236,7 @@ func (c *Census) GetRecordListing(ctx context.Context, id uuid.UUID) (limes.Reco
 
 // dispositionWhere is each disposition as a condition on a record's own
 // columns at $2, so that a listing of some dispositions reads the index of
-// the revoked flag they have (migrate/migrations/017_revoked_indexes.sql).
+// the revoked flag they have (migrate/ddl/migrations/017_revoked_indexes.sql).
 var dispositionWhere = map[limes.RecordDisposition]string{
 	limes.RecordDispositionActive:  "(NOT c.revoked AND c.expires_at > $2)",
 	limes.RecordDispositionExpired: "(NOT c.revoked AND (c.expires_at IS NULL OR c.expires_at <= $2))",

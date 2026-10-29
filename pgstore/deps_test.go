@@ -7,7 +7,9 @@ import (
 )
 
 // A binary that serves links what it serves with: the migrations and tern
-// only in a migration job, which imports pgstore/migrate. Checked over every
+// only in a migration job, which imports pgstore/migrate; a program that
+// vendors the migrations' SQL imports pgstore/migrate/ddl, which links
+// nothing but the standard library and pgstore's own schema names. Checked over every
 // package of the module, as `go list` resolves each one's dependencies, not
 // as its imports read. The test container is not in the module's graph at
 // all: pgtest runs it from a module of its own (internal/pgcontainer).
@@ -16,8 +18,11 @@ import (
 const (
 	pgstorePath = "github.com/oleg-tkachuk/limes/pgstore"
 	migratePath = pgstorePath + "/migrate"
-	pgtestPath  = pgstorePath + "/internal/pgtest"
-	ternPath    = "github.com/jackc/tern"
+	ddlPath     = migratePath + "/ddl"
+	// ddlAllowed is the one package of the module ddl may depend on.
+	ddlAllowed = pgstorePath + "/internal/pgschema"
+	pgtestPath = pgstorePath + "/internal/pgtest"
+	ternPath   = "github.com/jackc/tern"
 )
 
 // containerModules are what the test container brings, which no consumer
@@ -32,17 +37,26 @@ const depsFormat = `{{.ImportPath}}{{range .Deps}} {{.}}{{end}}`
 func within(path, prefix string) bool { return path == prefix || strings.HasPrefix(path, prefix+"/") }
 
 // forbiddenDeps is what each package of the module may not depend on: tern
-// and pgstore/migrate outside pgstore/migrate.
+// and pgstore/migrate outside pgstore/migrate, and anything but the
+// standard library and pgschema in pgstore/migrate/ddl.
 func forbiddenDeps(pkg string, deps []string) []string {
 	var found []string
 	for _, d := range deps {
 		switch {
 		case within(d, ternPath) && pkg != migratePath,
-			d == migratePath && pkg != migratePath:
+			d == migratePath && pkg != migratePath,
+			pkg == ddlPath && !standardLibrary(d) && d != ddlAllowed:
 			found = append(found, d)
 		}
 	}
 	return found
+}
+
+// standardLibrary reports whether path is a package of Go's standard
+// library: its first element holds no dot, as a module path's does.
+func standardLibrary(path string) bool {
+	first, _, _ := strings.Cut(path, "/")
+	return !strings.Contains(first, ".")
 }
 
 func TestForbiddenDeps(t *testing.T) {
@@ -58,6 +72,9 @@ func TestForbiddenDeps(t *testing.T) {
 		{pgstorePath, []string{"github.com/jackc/ternary"}, 0},
 		{migratePath, []string{tern}, 0},
 		{pgtestPath, []string{tern}, 1},
+		{ddlPath, []string{"fmt", "embed", ddlAllowed}, 0},
+		{ddlPath, []string{"github.com/jackc/pgx/v5"}, 1},
+		{ddlPath, []string{tern}, 1},
 	} {
 		if got := forbiddenDeps(tc.pkg, tc.deps); len(got) != tc.want {
 			t.Errorf("forbiddenDeps(%s, %v) = %v, want %d", tc.pkg, tc.deps, got, tc.want)
@@ -81,7 +98,7 @@ func TestNoPackageLinksWhatItDoesNotRun(t *testing.T) {
 			t.Errorf("%s depends on %v", fields[0], found)
 		}
 	}
-	for _, p := range []string{pgstorePath, migratePath, pgtestPath} {
+	for _, p := range []string{pgstorePath, migratePath, ddlPath, pgtestPath} {
 		if !seen[p] {
 			t.Errorf("go list did not list %s: the check read no graph", p)
 		}
