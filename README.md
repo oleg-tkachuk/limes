@@ -56,8 +56,10 @@ go get github.com/oleg-tkachuk/limes@latest
 limes needs Go 1.27 or later: its identifiers are the standard library's
 `uuid.UUID`.
 
-`pgstore`, `otelmetric`, `redisreplay` and `exchange` are modules of their
-own, on tag lines of their own: pin each by its tag, as [Versioning](#versioning) says.
+`pgstore`, `otelmetric`, `redisreplay`, `exchange` and `biscuit` are modules
+of their own, on tag lines of their own: pin each by its tag, as
+[Versioning](#versioning) says. The Biscuit form is in `biscuit`: a verifier
+or issuer that reads or seals it sets `biscuit.Form()` in its config.
 
 ## Five minutes
 
@@ -227,24 +229,25 @@ from main as it is; limes stays on 0.x on main until the release that cuts
 pre-release's may. The nested modules have no such candidates: they stay on
 0.x past limes's 1.0.
 
-`redisreplay`, `pgstore`, `otelmetric` and `exchange` are modules of their
-own, each with a release line of its own — `redisreplay/vX.Y.Z`,
-`pgstore/vX.Y.Z`, `otelmetric/vX.Y.Z`, `exchange/vX.Y.Z` — cut by the same
-rules from the commits that touch it, plus one: a module's own `build`
-commit, such as `build(pgstore): bump pgx`, is a patch of it, and is released
-at once; so is the release workflow's `build(nested): require limes vX.Y.Z in …`,
-for each module whose `go.mod` it raises. A
-commit releases, by its type, each module whose files it changes; one scoped
-`pgstore`, `redisreplay`, `otelmetric` or `exchange` never releases limes,
+`redisreplay`, `pgstore`, `otelmetric`, `exchange` and `biscuit` are modules
+of their own, each with a release line of its own — `redisreplay/vX.Y.Z`,
+`pgstore/vX.Y.Z`, `otelmetric/vX.Y.Z`, `exchange/vX.Y.Z`, `biscuit/vX.Y.Z` —
+cut by the same rules from the commits that touch it, plus one: a module's own
+`build` commit, such as `build(pgstore): bump pgx`, is a patch of it, and is
+released at once; so is the release workflow's `build(nested): require limes
+vX.Y.Z in …`, for each module whose `go.mod` it raises. A commit releases, by
+its type, each module whose files it changes; one scoped `pgstore`,
+`redisreplay`, `otelmetric`, `exchange` or `biscuit` never releases limes,
 breaking or not.
 
 A nested module is tagged after the limes it needs, never with it: its
 `go.mod` must require a limes already released, so a root release's new API
-reaches `pgstore`, `otelmetric`, `redisreplay` or `exchange` only with that module's next
-tag, cut once the `require limes` change merges. Pin each module by its own
-tag — `go get github.com/oleg-tkachuk/limes/pgstore@pgstore/vX.Y.Z`, which
-brings the limes it requires — never a root tag's commit; and to take a new
-root API into a store, wait for the store's tag that requires that release.
+reaches `pgstore`, `otelmetric`, `redisreplay`, `exchange` or `biscuit` only
+with that module's next tag, cut once the `require limes` change merges. Pin
+each module by its own tag — `go get
+github.com/oleg-tkachuk/limes/pgstore@pgstore/vX.Y.Z`, which brings the limes
+it requires — never a root tag's commit; and to take a new root API into a
+store, wait for the store's tag that requires that release.
 
 The token wire format — claims, `typ: at+jwt` with `limes_v: 7`, the
 Biscuit facts — is a separate promise: a token is a credential that outlives
