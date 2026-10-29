@@ -371,20 +371,27 @@ require server nonces.
 of the same capability (Biscuit v3) can be narrowed by whoever holds it, with
 no key and no network, and a narrowing can never be undone. An agent in
 another language narrows it with any Biscuit library, writing the facts
-[biscuit-profile.md](biscuit-profile.md) lists:
+[biscuit-profile.md](biscuit-profile.md) lists.
+
+The form is the module `github.com/oleg-tkachuk/limes/biscuit`, so a service
+of JWT capabilities alone resolves neither biscuit-go nor protobuf. Give
+`biscuit.Form()` to both sides: `IssuerConfig.Biscuit` and
+`BiscuitConfig.Form`.
 
 ```go
 // granted: what the verifier accepted from the capability's JWT
 full, _ := issuer.Biscuit(ctx, limes.BiscuitRequest{Capability: granted}) // same ID, caveats and expiry
 
 // An agent, offline, hands a worker a smaller token:
-worker, _ := limes.Attenuate(full.Token, limes.Attenuation{
+worker, _ := biscuit.Attenuate(full.Token, limes.Attenuation{
     Ops:              []limes.Op{limes.OpGet},
     ResourcePrefixes: []string{"corpus/public/"},
     ExpiresAt:        time.Now().Add(10 * time.Minute),
 })
 
 // A verifier built with a VerifierConfig.Biscuit returns the narrowed capability.
+// verifier, _ := limes.NewVerifier(limes.VerifierConfig{ /* … */
+//     Biscuit: &limes.BiscuitConfig{Revocations: cache, Form: biscuit.Form()}})
 granted, err := verifier.Verify(ctx, limes.VerifyRequest{Token: worker, Audience: "my-service"})
 ```
 

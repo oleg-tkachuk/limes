@@ -14,6 +14,16 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## v0.133.0
+
+- The Biscuit form moved to the module `github.com/oleg-tkachuk/limes/biscuit`,
+  so limes no longer requires biscuit-go or protobuf. Tokens do not change.
+  - `limes.Attenuate` is `biscuit.Attenuate`.
+  - `BiscuitConfig.Form` is required: set it to `biscuit.Form()`. Without it
+    `NewVerifier` refuses the config.
+  - `IssuerConfig.Biscuit` names the form `Issuer.Biscuit` seals in: set it to
+    `biscuit.Form()`. Without it `Issuer.Biscuit` refuses.
+
 ## pgstore/v0.45.0
 
 - pgstore needs PostgreSQL 15 or later. Migration 022 creates

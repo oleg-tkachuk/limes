@@ -117,8 +117,8 @@ limes_max_requests(50);
 Rules and checks (`check if …`, `allow if …`) are the Biscuit language a
 limes verifier does not run, and it refuses a token holding one: write facts
 only. `TestAForeignBlockIsReadAsLimesWrote` and `TestAForeignCheckIsRefused`
-(biscuit_interop_test.go) hold limes to this with blocks biscuit-cli appended
-to the shared seed (testdata/biscuit/).
+(biscuit/biscuit_interop_test.go) hold limes to this with blocks biscuit-cli
+appended to the shared seed (biscuit/testdata/biscuit/).
 
 ## Versioning
 

@@ -132,5 +132,9 @@ and after 1.0 the field cannot move.
   facts. Tokens issued before the move verify after it.
 - The new module needs a seed tag before the change that adds it merges,
   and a row in `.github/release/modules.cjs`.
-- docs/biscuit-profile.md moves with the module, and docs/standards.md points
-  to it.
+- docs/biscuit-profile.md stays among the docs, and points at the module's
+  interop tests and the fixtures it shares with SDKs, which move to
+  `biscuit/testdata`: an SDK that copies them reads them from there.
+- The core's tests of what a Biscuit grants run on a form of their own with
+  no signatures, so the root resolves no biscuit-go even for its tests; the
+  module tests the encoding, the chain and the interop fixtures.
