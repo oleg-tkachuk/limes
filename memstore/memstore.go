@@ -72,6 +72,12 @@ type Store struct {
 	// (EraseTenantUsage): nothing of them is recorded or counted again
 	// until PurgeOrphans finds none of their records left.
 	erased map[uuid.UUID]struct{}
+
+	// exchanges is the capability each subject token's exchange issued
+	// (limes.ExchangeStore), and exchangedBy each such capability's key, so
+	// Purge drops the mapping with its record.
+	exchanges   map[limes.ExchangeKey]uuid.UUID
+	exchangedBy map[uuid.UUID]limes.ExchangeKey
 }
 
 // UsageStore implements meter.UsageStore — request and spend counters. It
@@ -276,6 +282,8 @@ func NewStore(cfg StoreConfig) (*Store, error) {
 		revokedCopies: map[copyKey]limes.BiscuitRevocation{},
 		revokedIDs:    map[string]int{},
 		erased:        map[uuid.UUID]struct{}{},
+		exchanges:     map[limes.ExchangeKey]uuid.UUID{},
+		exchangedBy:   map[uuid.UUID]limes.ExchangeKey{},
 	}, nil
 }
 
@@ -673,6 +681,7 @@ func (s *Store) Purge(_ context.Context, req limes.PurgeRequest) (limes.PurgeRes
 		delete(s.revoked, c.ID)
 		delete(s.issuedBy, c.ID)
 		s.forgetCopyRevocationsLocked(c.ID)
+		s.forgetExchangeLocked(c.ID)
 	}
 	return limes.PurgeResult{Purged: int64(len(due))}, nil
 }
@@ -707,6 +716,7 @@ func (s *Store) EraseTenantRecords(_ context.Context, req limes.EraseTenantReque
 		delete(s.revoked, id)
 		delete(s.issuedBy, id)
 		s.forgetCopyRevocationsLocked(id)
+		s.forgetExchangeLocked(id)
 		out.Removed++
 	}
 	return out, nil
