@@ -945,9 +945,10 @@ the DPoP stores, passes `storetest` and `metertest`, and keeps tenants apart
 with row-level security.
 
 ```go
-// As the owner of the schema, granting the role the stores serve as.
+// In the migration job, as the owner of the schema, granting the role the
+// stores serve as (github.com/oleg-tkachuk/limes/pgstore/migrate).
 err := ownerPool.AcquireFunc(ctx, func(c *pgxpool.Conn) error {
-    return pgstore.Migrate(ctx, c.Conn(), pgstore.MigrateOptions{RuntimeRoles: []string{"app"}})
+    return migrate.Run(ctx, c.Conn(), migrate.Options{RuntimeRoles: []string{"app"}})
 })
 records, _ := pgstore.NewStore(pgstore.Config{DB: pool})
 usage, _ := pgstore.NewUsageStore(pgstore.Config{DB: pool})
@@ -997,8 +998,11 @@ the transaction, and `onCharged` runs while the lock is held, so keep it
 short; a tenant that needs more is served by fewer, larger charges — a
 `Reserve` settled once for many units of work — not by a setting.
 
-Run `Migrate` as the role that owns the schema and serve as another one. The
-policies bind the owner too (`FORCE ROW LEVEL SECURITY`), and `Migrate` scopes
+The schema is created and upgraded by `pgstore/migrate`, which only a
+migration job imports: a binary that serves links neither the migrations nor
+`tern`. Run `migrate.Run` as the role that owns the schema and serve as
+another one. The policies bind the owner too (`FORCE ROW LEVEL SECURITY`), and
+`migrate.Run` scopes
 each migration of its run to every tenant — one whose scope cannot be set
 closes the connection, so it never runs unscoped and the run fails; but the
 owner may turn them off, and a superuser or a role with `BYPASSRLS` is never
@@ -1006,17 +1010,22 @@ bound, so `CheckSchema` refuses a pool of any of the three — or of a role
 owning anything in the schema, or able to act as one of these — with
 `ErrRuntimeRole`. It checks the session's role and the role the connection
 logged in as as well as the current one, since a session that switched with
-`SET ROLE` or `SET SESSION AUTHORIZATION` can switch back. `MigrateOptions.RuntimeRoles` grants the
+`SET ROLE` or `SET SESSION AUTHORIZATION` can switch back. `migrate.Options.RuntimeRoles` grants the
 serving roles the schema, its tables and the tables of later versions, the
 schema's functions — which no other role may call — and only reads of the
 version table. Run it before any migration of yours that
 refers to its tables. It holds the advisory lock every `tern` migration
 takes, which is reentrant per session: a consumer migrating with `tern` calls
-`Migrate` on the connection its own run holds. Each migration that runs in a
+`migrate.Run` on the connection its own run holds. A consumer with another
+migration tool gives it `migrate.Steps` instead: `migrate.Setup` once, each
+step's `SQL()` in a transaction of its own, or a statement at a time outside
+one where `InTransaction` is false, then `migrate.Grants`. Each step scopes
+itself as `migrate.Run` would and records its version, so `CheckSchema` reads
+it and `migrate.Run` can take over from it. Each migration that runs in a
 transaction runs `READ COMMITTED`, whatever the role's, the database's or the
 session's default. Every migration that builds
 an index on an existing table builds it `CONCURRENTLY`, outside a
-transaction, and holds no writes, so a `Migrate` at startup holds none.
+transaction, and holds no writes, so a `migrate.Run` at startup holds none.
 Migration 014, which pgstore v0.31.0 brought for `Census.ListRecords`, did
 not at first: earlier pgstore releases built its three indexes
 with a plain `CREATE INDEX`, which held writes to `limes.capabilities` and
@@ -1024,7 +1033,7 @@ with a plain `CREATE INDEX`, which held writes to `limes.capabilities` and
 A store still at migration 13 skips that by upgrading straight to a release
 whose 014 builds `CONCURRENTLY`; one past 14 has the indexes already. `CheckSchema` tells a readiness
 check whether the schema is at the version the package queries, returning
-`ErrSchemaMismatch` when it is not — behind, `Migrate` has not run; ahead, a
+`ErrSchemaMismatch` when it is not — behind, `migrate.Run` has not run; ahead, a
 later pgstore migrated; `ReadSchemaVersion` reports both numbers (`Applied`,
 `Expected`), with no more than SELECT on the version table. `Config.CheckTenant` runs in `Insert`'s
 transaction, so a consumer that keeps its own tenants answers

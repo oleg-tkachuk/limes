@@ -1,4 +1,4 @@
-package pgstore
+package migrate
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/tern/v2/migrate"
+	tern "github.com/jackc/tern/v2/migrate"
 )
 
 // lockedThrough is the last migration that may build an index on a table an
@@ -232,9 +232,9 @@ CREATE UNIQUE INDEX CONCURRENTLY indexed_id ON public.indexed (id);`
 
 // indexedMigrator is a migrator of the indexed table and its index, on
 // probeVersionTable.
-func indexedMigrator(t *testing.T, conn *pgx.Conn, build string) *migrate.Migrator {
+func indexedMigrator(t *testing.T, conn *pgx.Conn, build string) *tern.Migrator {
 	t.Helper()
-	m, err := migrate.NewMigrator(t.Context(), conn, probeVersionTable)
+	m, err := tern.NewMigrator(t.Context(), conn, probeVersionTable)
 	if err != nil {
 		t.Fatal(err)
 	}

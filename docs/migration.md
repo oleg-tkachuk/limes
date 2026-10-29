@@ -14,6 +14,15 @@ release it cuts: the minor after the newest tag. CI refuses a breaking marker
 whose change leaves this file alone. From v1.0.0 on no change may break the
 API, and this file stops growing.
 
+## pgstore/v0.44.0
+
+- The migrations moved to `github.com/oleg-tkachuk/limes/pgstore/migrate`,
+  which only a migration job imports, so a binary that serves links neither
+  them nor `tern`. `pgstore.Migrate` is `migrate.Run`, `pgstore.MigrateOptions`
+  is `migrate.Options`, and `pgstore.ErrSchemaOwner` is `migrate.ErrSchemaOwner`.
+  `CheckSchema` and `ReadSchemaVersion` stay in `pgstore`. A database migrated
+  before needs nothing: the migrations and the version table are the same.
+
 ## v0.131.0
 
 - One token format: every capability is an RFC 9068 access token, typed

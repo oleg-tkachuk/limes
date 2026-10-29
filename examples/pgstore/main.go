@@ -25,6 +25,7 @@ import (
 	"github.com/oleg-tkachuk/limes/jwks"
 	"github.com/oleg-tkachuk/limes/meter"
 	"github.com/oleg-tkachuk/limes/pgstore"
+	"github.com/oleg-tkachuk/limes/pgstore/migrate"
 )
 
 const (
@@ -85,7 +86,7 @@ func main() {
 	_, err = owner.Exec(ctx, createApp)
 	demo.Must(log, err, "create the app role")
 	err = owner.AcquireFunc(ctx, func(c *pgxpool.Conn) error {
-		return pgstore.Migrate(ctx, c.Conn(), pgstore.MigrateOptions{RuntimeRoles: []string{appUser}})
+		return migrate.Run(ctx, c.Conn(), migrate.Options{RuntimeRoles: []string{appUser}})
 	})
 	demo.Must(log, err, "migrate")
 	_, err = owner.Exec(ctx, createCalls)

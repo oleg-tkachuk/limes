@@ -173,61 +173,6 @@ func TestCheckSchemaRefusesARoleTheyDoNotHold(t *testing.T) {
 	}
 }
 
-// Migrate scopes its run to every tenant and hands the session back with the
-// scope it had.
-func TestMigrateRestoresTheSessionScope(t *testing.T) {
-	ctx := t.Context()
-	err := migrator.AcquireFunc(ctx, func(c *pgxpool.Conn) error {
-		if _, err := c.Exec(ctx, sqlSetSession, SettingAllTenants, SettingAllTenantsRead); err != nil {
-			return err
-		}
-		if err := Migrate(ctx, c.Conn(), MigrateOptions{}); err != nil {
-			return err
-		}
-		var scope string
-		if err := c.QueryRow(ctx, sqlSettingNow, SettingAllTenants).Scan(&scope); err != nil {
-			return err
-		}
-		if scope != SettingAllTenantsRead {
-			t.Errorf("the session's scope after Migrate = %q, want %q as before", scope, SettingAllTenantsRead)
-		}
-		_, err := c.Exec(ctx, sqlSetSession, SettingAllTenants, settingUnset)
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-// A run whose context ends before Migrate puts the session's scope back
-// still puts it back: the connection is the caller's, and a pool would hand
-// it on scoped to every tenant.
-func TestMigrateRestoresTheScopeWhenTheContextEnds(t *testing.T) {
-	err := migrator.AcquireFunc(t.Context(), func(c *pgxpool.Conn) error {
-		if _, err := c.Exec(t.Context(), sqlSetSession, SettingAllTenants, SettingAllTenantsRead); err != nil {
-			return err
-		}
-		ctx, cancel := context.WithCancel(t.Context())
-		defer cancel()
-		cancelled := func(context.Context) error { cancel(); return nil }
-		if err := migrateAllTenants(ctx, c.Conn(), cancelled); err != nil {
-			return err
-		}
-		var scope string
-		if err := c.QueryRow(t.Context(), sqlSettingNow, SettingAllTenants).Scan(&scope); err != nil {
-			return err
-		}
-		if scope != SettingAllTenantsRead {
-			t.Errorf("the session's scope after a run its context ended in = %q, want %q as before", scope, SettingAllTenantsRead)
-		}
-		_, err := c.Exec(t.Context(), sqlSetSession, SettingAllTenants, settingUnset)
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
 // sqlSchemaFunctions lists every function of schema $1 by its signature.
 const sqlSchemaFunctions = `SELECT p.oid::regprocedure::text FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = $1`
 

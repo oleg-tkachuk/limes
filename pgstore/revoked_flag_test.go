@@ -2,8 +2,6 @@ package pgstore
 
 import (
 	"context"
-	"io/fs"
-	"path"
 	"testing"
 	"time"
 	"uuid"
@@ -12,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/pgstore/migrate"
 )
 
 // sqlFlagDrift is every record whose revoked column says other than
@@ -86,6 +85,13 @@ func TestTheRevokedFlagFollowsEveryRevocation(t *testing.T) {
 	}
 }
 
+// markRevokedVersion is the migration that marks the records revoked
+// before 015's triggers, and markRevokedName its file.
+const (
+	markRevokedVersion = 16
+	markRevokedName    = "016_mark_revoked.sql"
+)
+
 // 016 marks the records revoked before 015's triggers: every record with
 // an entry and every record below one, and no other.
 func TestMigrationMarksTheRecordsRevokedBefore(t *testing.T) {
@@ -108,11 +114,15 @@ func TestMigrationMarksTheRecordsRevokedBefore(t *testing.T) {
 	if _, err := owner.Exec(t.Context(), `UPDATE limes.capabilities SET revoked = false`); err != nil {
 		t.Fatal(err)
 	}
-	backfill, err := fs.ReadFile(migrationFiles, path.Join(migrationsDir, "016_mark_revoked.sql"))
+	steps, err := migrate.Steps()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := owner.Exec(t.Context(), string(backfill)); err != nil {
+	backfill := steps[markRevokedVersion-1]
+	if backfill.Name != markRevokedName {
+		t.Fatalf("step %d is %s, want %s", markRevokedVersion, backfill.Name, markRevokedName)
+	}
+	if _, err := owner.Exec(t.Context(), backfill.Migration); err != nil {
 		t.Fatalf("016: %v", err)
 	}
 	for i, id := range ids {

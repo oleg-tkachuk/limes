@@ -11,7 +11,7 @@ import (
 	"github.com/oleg-tkachuk/limes/pgstore/internal/pgschema"
 )
 
-// The settings the row-level security policies read (migrations/
+// The settings the row-level security policies read (migrate/migrations/
 // 003_row_security.sql), each set local to one transaction. A Scope of the
 // consumer's (Config.Scope) that sets them is scoped as the package's own
 // is, and CheckSchemaScope reads them back.

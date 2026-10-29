@@ -15,7 +15,7 @@ import (
 )
 
 // RevocationChannel is the channel the schema notifies on every statement
-// that writes a revocation (migrations/006_revocation_notify.sql spells it
+// that writes a revocation (migrate/migrations/006_revocation_notify.sql spells it
 // too, and a test holds the two to one name).
 const RevocationChannel = "limes_revocations"
 
@@ -32,7 +32,7 @@ const (
 )
 
 // MaxNotifiedRevocations is the most capability ids one notification names
-// (migrations/021_notify_unseen_revocations.sql spells it too, and a test holds
+// (migrate/migrations/021_notify_unseen_revocations.sql spells it too, and a test holds
 // the two to one number): past it, the notification names none, and a cache
 // is cleared whole.
 const MaxNotifiedRevocations = 100
