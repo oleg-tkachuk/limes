@@ -81,7 +81,9 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 - `limes.capability_lineage` keeps no rows of its own, but it has a
   `tenant_id` column. A tool that finds the tables holding a tenant's rows
   in `information_schema.columns` should keep to those whose
-  `information_schema.tables.table_type` is `BASE TABLE`.
+  `information_schema.tables.table_type` is `BASE TABLE`. From
+  pgstore/v0.47.0, `pgstore.TenantTables` lists them, with what
+  `Store.EraseTenant` does to each.
 
 ## pgstore/v0.44.0
 
