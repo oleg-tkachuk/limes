@@ -2,7 +2,6 @@ package exchange
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -89,7 +88,7 @@ func NewResourceMetadataHandler(md ResourceMetadata) (http.Handler, error) {
 		return nil, err
 	}
 	if len(md.AuthorizationServers) == 0 {
-		return nil, errors.New("exchange: ResourceMetadata.AuthorizationServers required")
+		return nil, fmt.Errorf("%w: exchange: ResourceMetadata.AuthorizationServers required", limes.ErrInvalidConfig)
 	}
 	for _, issuer := range md.AuthorizationServers {
 		if err := checkIssuer("ResourceMetadata.AuthorizationServers", issuer); err != nil {
@@ -212,7 +211,7 @@ func quote(s string) string {
 func checkHTTPSURL(name, raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != schemeHTTPS || u.Host == "" || u.Fragment != "" || strings.Contains(raw, "#") {
-		return fmt.Errorf("exchange: %s %q is not an https URL without a fragment", name, raw)
+		return fmt.Errorf("%w: exchange: %s %q is not an https URL without a fragment", limes.ErrInvalidConfig, name, raw)
 	}
 	return nil
 }
@@ -224,7 +223,7 @@ func checkIssuer(name, raw string) error {
 		return err
 	}
 	if u, _ := url.Parse(raw); u.RawQuery != "" || strings.Contains(raw, "?") {
-		return fmt.Errorf("exchange: %s %q has a query", name, raw)
+		return fmt.Errorf("%w: exchange: %s %q has a query", limes.ErrInvalidConfig, name, raw)
 	}
 	return nil
 }

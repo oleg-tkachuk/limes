@@ -63,11 +63,11 @@ type IntrospectionHandler struct {
 func NewIntrospectionHandler(cfg IntrospectionConfig) (*IntrospectionHandler, error) {
 	switch {
 	case cfg.Verifier == nil:
-		return nil, errors.New("exchange: IntrospectionConfig.Verifier required")
+		return nil, fmt.Errorf("%w: exchange: IntrospectionConfig.Verifier required", limes.ErrInvalidConfig)
 	case cfg.Authenticate == nil:
-		return nil, errors.New("exchange: IntrospectionConfig.Authenticate required")
+		return nil, fmt.Errorf("%w: exchange: IntrospectionConfig.Authenticate required", limes.ErrInvalidConfig)
 	case cfg.MaxBodyBytes < 0:
-		return nil, errors.New("exchange: IntrospectionConfig.MaxBodyBytes is negative")
+		return nil, fmt.Errorf("%w: exchange: IntrospectionConfig.MaxBodyBytes is negative", limes.ErrInvalidConfig)
 	}
 	if cfg.MaxBodyBytes == 0 {
 		cfg.MaxBodyBytes = DefaultMaxBodyBytes

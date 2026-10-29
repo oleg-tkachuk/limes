@@ -8,7 +8,6 @@ package jwtverify
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -20,6 +19,8 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwt"
 
 	"github.com/oleg-tkachuk/limes/exchange"
+
+	"github.com/oleg-tkachuk/limes"
 )
 
 // The JWT access token profile (RFC 9068): the types §2.1 gives the header,
@@ -135,10 +136,10 @@ type Verifier struct {
 // no keys, or one accepting a symmetric algorithm.
 func New(cfg Config) (*Verifier, error) {
 	if cfg.Issuer == "" {
-		return nil, errors.New("jwtverify: Config.Issuer required")
+		return nil, fmt.Errorf("%w: jwtverify: Config.Issuer required", limes.ErrInvalidConfig)
 	}
 	if cfg.Keys == nil {
-		return nil, errors.New("jwtverify: Config.Keys required")
+		return nil, fmt.Errorf("%w: jwtverify: Config.Keys required", limes.ErrInvalidConfig)
 	}
 	if len(cfg.Types) == 0 {
 		cfg.Types = []string{TypeAccessToken, TypeAccessTokenMedia}
@@ -151,7 +152,7 @@ func New(cfg Config) (*Verifier, error) {
 	}
 	for _, alg := range cfg.Algorithms {
 		if !slices.Contains(DefaultAlgorithms, alg) {
-			return nil, fmt.Errorf("jwtverify: Config.Algorithms names %q, which is not one of %q", alg, DefaultAlgorithms)
+			return nil, fmt.Errorf("%w: jwtverify: Config.Algorithms names %q, which is not one of %q", limes.ErrInvalidConfig, alg, DefaultAlgorithms)
 		}
 	}
 	if cfg.Now == nil {

@@ -127,15 +127,15 @@ type Handler struct {
 func NewHandler(cfg HandlerConfig) (*Handler, error) {
 	switch {
 	case cfg.Exchanger == nil:
-		return nil, errors.New("exchange: HandlerConfig.Exchanger required")
+		return nil, fmt.Errorf("%w: exchange: HandlerConfig.Exchanger required", limes.ErrInvalidConfig)
 	case cfg.Authenticate == nil:
-		return nil, errors.New("exchange: HandlerConfig.Authenticate required")
+		return nil, fmt.Errorf("%w: exchange: HandlerConfig.Authenticate required", limes.ErrInvalidConfig)
 	case (cfg.Exchanger.cfg.DPoP != nil || cfg.Exchanger.cfg.Capabilities != nil) && cfg.EndpointURL == "":
 		// A bound capability is narrowed with a proof over it, which its
 		// verifier checks against this URL.
-		return nil, errors.New("exchange: HandlerConfig.EndpointURL required to check DPoP proofs")
+		return nil, fmt.Errorf("%w: exchange: HandlerConfig.EndpointURL required to check DPoP proofs", limes.ErrInvalidConfig)
 	case cfg.MaxBodyBytes < 0:
-		return nil, errors.New("exchange: HandlerConfig.MaxBodyBytes is negative")
+		return nil, fmt.Errorf("%w: exchange: HandlerConfig.MaxBodyBytes is negative", limes.ErrInvalidConfig)
 	}
 	if cfg.MaxBodyBytes == 0 {
 		cfg.MaxBodyBytes = DefaultMaxBodyBytes
