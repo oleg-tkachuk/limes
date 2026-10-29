@@ -2,6 +2,7 @@ package limes
 
 import (
 	"errors"
+
 	"github.com/oleg-tkachuk/limes/internal/errs"
 )
 

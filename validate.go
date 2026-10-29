@@ -6,6 +6,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/oleg-tkachuk/limes/internal/errs"
 )
 
 // ErrInvalidCaveats is returned when a caveat bag is malformed: a budget
@@ -131,13 +133,13 @@ func validResources(kind string, values []string) error {
 // validateLimits refuses a request, budget or copy ceiling out of range.
 func (c Caveats) validateLimits() error {
 	if err := c.Requests.Validate(); err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalidCaveats, err)
+		return errs.Errorf("%w: %w", ErrInvalidCaveats, err)
 	}
 	if err := c.Budget.Validate(); err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalidCaveats, err)
+		return errs.Errorf("%w: %w", ErrInvalidCaveats, err)
 	}
 	if err := c.Copies.Validate(); err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalidCaveats, err)
+		return errs.Errorf("%w: %w", ErrInvalidCaveats, err)
 	}
 	return nil
 }
@@ -148,7 +150,7 @@ func validateSourceIPCIDRs(cidrs []string) error {
 	for _, cidr := range cidrs {
 		p, err := netip.ParsePrefix(cidr)
 		if err != nil {
-			return fmt.Errorf("%w: source_ip_cidr %q: %w", ErrInvalidCaveats, cidr, err)
+			return errs.Errorf("%w: source_ip_cidr %q: %w", ErrInvalidCaveats, cidr, err)
 		}
 		// CheckSource unmaps the client's address, so an IPv4-mapped IPv6
 		// prefix would admit no client at all: write it as IPv4.

@@ -41,7 +41,7 @@ func (m *memStore) GetRecord(_ context.Context, id uuid.UUID) (Record, error) {
 	m.getCalls.Add(1)
 	c, ok := m.caps[id]
 	if !ok {
-		return Record{}, errors.New("not found")
+		return Record{}, ErrNotFound
 	}
 	return Record{Capability: c}, nil
 }

@@ -21,7 +21,6 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"github.com/oleg-tkachuk/limes/internal/errs"
 	"io"
 	"math"
 	"math/big"
@@ -31,6 +30,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/oleg-tkachuk/limes/internal/errs"
 	"github.com/oleg-tkachuk/limes/internal/jose"
 	"github.com/oleg-tkachuk/limes/internal/rfc3986"
 )
@@ -153,7 +153,7 @@ type proofClaims struct {
 func publicJWK(pub crypto.PublicKey) (jose.JWK, error) {
 	j, err := jose.PublicJWK(pub)
 	if err != nil {
-		return jose.JWK{}, fmt.Errorf("%w: dpop: key: %w", errs.ErrInvalidRequest, err)
+		return jose.JWK{}, errs.Errorf("%w: dpop: key: %w", errs.ErrInvalidRequest, err)
 	}
 	return j, nil
 }
@@ -292,7 +292,7 @@ func verifySignature(pub crypto.PublicKey, alg string, input, sig []byte) bool {
 func canonicalHTU(raw string) (string, error) {
 	htu, err := rfc3986.Normalize(raw)
 	if err != nil {
-		return "", fmt.Errorf("%w: dpop: htu: %w", errs.ErrInvalidRequest, err)
+		return "", errs.Errorf("%w: dpop: htu: %w", errs.ErrInvalidRequest, err)
 	}
 	return htu, nil
 }
@@ -548,7 +548,7 @@ func (v *Verifier) checkPresented(p Proof) error {
 func readProof(jwt string, what presented) (string, proofClaims, error) {
 	parts, err := jose.Split(jwt)
 	if err != nil {
-		return "", proofClaims{}, fmt.Errorf("%w: %w", ErrInvalid, err)
+		return "", proofClaims{}, errs.Errorf("%w: %w", ErrInvalid, err)
 	}
 	header, err := readProofHeader(parts.Header)
 	if err != nil {
@@ -592,14 +592,14 @@ func readProofHeader(seg string) (proofHeader, error) {
 func proofKey(jwk *jose.JWK, what presented) (string, crypto.PublicKey, error) {
 	thumb, err := jwk.Thumbprint()
 	if err != nil {
-		return "", nil, fmt.Errorf("%w: %w", ErrInvalid, err)
+		return "", nil, errs.Errorf("%w: %w", ErrInvalid, err)
 	}
 	if !what.tokenRequest && thumb != what.jkt {
 		return "", nil, fmt.Errorf("%w: key is not the one the capability is bound to", ErrInvalid)
 	}
 	pub, err := jwk.PublicKey()
 	if err != nil {
-		return "", nil, fmt.Errorf("%w: %w", ErrInvalid, err)
+		return "", nil, errs.Errorf("%w: %w", ErrInvalid, err)
 	}
 	return thumb, pub, nil
 }

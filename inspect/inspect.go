@@ -8,6 +8,8 @@ import (
 	"crypto/ed25519"
 	"fmt"
 
+	"github.com/oleg-tkachuk/limes/internal/errs"
+
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/internal/jose"
 	"github.com/oleg-tkachuk/limes/internal/link"
@@ -41,7 +43,7 @@ func Decode(token string) (limes.Capability, error) {
 	}
 	c, err := link.DecodeToken(token)
 	if err != nil {
-		return limes.Capability{}, fmt.Errorf("%w: %w", limes.ErrInvalidToken, err)
+		return limes.Capability{}, errs.Errorf("%w: %w", limes.ErrInvalidToken, err)
 	}
 	return c.(limes.Capability), nil
 }
@@ -59,10 +61,10 @@ func VerifySignature(token string, pub ed25519.PublicKey) error {
 	}
 	parts, err := jose.Split(token)
 	if err != nil {
-		return fmt.Errorf("%w: %w", limes.ErrInvalidToken, err)
+		return errs.Errorf("%w: %w", limes.ErrInvalidToken, err)
 	}
 	if err := jose.VerifyEd25519(parts, pub); err != nil {
-		return fmt.Errorf("%w: %w", limes.ErrInvalidToken, err)
+		return errs.Errorf("%w: %w", limes.ErrInvalidToken, err)
 	}
 	return nil
 }

@@ -4,9 +4,10 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
-	"github.com/oleg-tkachuk/limes/internal/errs"
 	"slices"
 	"sync"
+
+	"github.com/oleg-tkachuk/limes/internal/errs"
 )
 
 // ErrUnknownKID is the typed not-found return from KeyResolver. The

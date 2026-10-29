@@ -5,6 +5,8 @@ import (
 	"net/netip"
 	"slices"
 	"time"
+
+	"github.com/oleg-tkachuk/limes/internal/errs"
 )
 
 // Narrows reports whether `child` is a narrowing of `parent`: every operation
@@ -206,7 +208,7 @@ func narrowsSourceIP(parent, child []string) error {
 	for _, c := range child {
 		cp, err := netip.ParsePrefix(c)
 		if err != nil {
-			return fmt.Errorf("%w: child CIDR %q: %w", ErrDelegationTooWide, c, err)
+			return errs.Errorf("%w: child CIDR %q: %w", ErrDelegationTooWide, c, err)
 		}
 		if !slices.ContainsFunc(parent, func(p string) bool {
 			pp, err := netip.ParsePrefix(p)

@@ -9,6 +9,7 @@ import (
 	"uuid"
 
 	"github.com/oleg-tkachuk/limes/dpop"
+	"github.com/oleg-tkachuk/limes/internal/errs"
 	"github.com/oleg-tkachuk/limes/jwks"
 )
 
@@ -122,7 +123,7 @@ func (i *Issuer) fits(token string) error {
 func (i *Issuer) sign(ctx context.Context, c Capability) (string, error) {
 	token, err := i.signer.sign(ctx, c)
 	if err != nil {
-		return "", fmt.Errorf("limes: sign: %w", err)
+		return "", errs.Errorf("limes: sign: %w", err)
 	}
 	if err := i.fits(token); err != nil {
 		return "", err
@@ -202,7 +203,7 @@ func (i *Issuer) Reissue(ctx context.Context, id uuid.UUID) (IssueResult, error)
 	}
 	rec, err := records.GetRecord(ctx, id)
 	if err != nil {
-		return IssueResult{}, fmt.Errorf("limes: reissue %s: %w", id, err)
+		return IssueResult{}, errs.Errorf("limes: reissue %s: %w", id, err)
 	}
 	if err := i.checkLive(ctx, rec.Capability, i.clock(), "reissue"); err != nil {
 		return IssueResult{}, err
@@ -354,7 +355,7 @@ func (i *Issuer) signAndRecord(ctx context.Context, c Capability, issuedBy Princ
 		return "", err
 	}
 	if err := i.store.Insert(ctx, InsertRequest{Capability: c, IssuedBy: issuedBy, Session: session}); err != nil {
-		return "", fmt.Errorf("limes: persist %s: %w", what, err)
+		return "", errs.Errorf("limes: persist %s: %w", what, err)
 	}
 	return token, nil
 }
@@ -502,7 +503,7 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 	// is still caught here, before a token no verifier would accept leaves:
 	// the walk reaches past the bound only from a chain too deep.
 	if _, err := i.store.IsRevoked(ctx, child.ID); err != nil {
-		return Capability{}, "", fmt.Errorf("limes: delegate from parent %s: %w", parent.ID, err)
+		return Capability{}, "", errs.Errorf("limes: delegate from parent %s: %w", parent.ID, err)
 	}
 	return child, token, nil
 }
@@ -581,14 +582,14 @@ func checkChildRun(a *AgentPrincipal, parentRun uuid.UUID) error {
 // revoked.
 func (i *Issuer) checkLive(ctx context.Context, c Capability, now time.Time, what string) error {
 	if !now.Before(c.ExpiresAt) {
-		return fmt.Errorf("limes: %s %s: %w", what, c.ID, ErrExpired)
+		return errs.Errorf("limes: %s %s: %w", what, c.ID, ErrExpired)
 	}
 	revoked, err := i.store.IsRevoked(ctx, c.ID)
 	if err != nil {
-		return fmt.Errorf("limes: %s %s: revocation lookup: %w", what, c.ID, err)
+		return errs.Errorf("limes: %s %s: revocation lookup: %w", what, c.ID, err)
 	}
 	if revoked {
-		return fmt.Errorf("limes: %s %s: %w", what, c.ID, ErrRevoked)
+		return errs.Errorf("limes: %s %s: %w", what, c.ID, ErrRevoked)
 	}
 	return nil
 }
@@ -667,7 +668,7 @@ func actingOf(parent Capability) (Principal, []string) {
 func GenerateKey() (SigningKey, error) {
 	pub, priv, err := ed25519.GenerateKey(nil)
 	if err != nil {
-		return SigningKey{}, fmt.Errorf("limes: generate key: %w", err)
+		return SigningKey{}, errs.Errorf("limes: generate key: %w", err)
 	}
 	key := SigningKey{KeyID: jwks.KeyID(pub), Private: SealKey(priv)}
 	// SealKey keeps a copy; the key is held there alone.
