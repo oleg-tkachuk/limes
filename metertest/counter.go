@@ -114,17 +114,33 @@ func (e CounterEnv) bump(ctx context.Context, spec subjectSpec) (int64, error) {
 	return r.RequestCount, err
 }
 
+// admitted holds a bump, what, to having been admitted with the
+// capability's count at want. Each is a check of its own, so that a store
+// that admits the bump at a wrong count fails as one that refuses it does.
+func admitted(t *testing.T, what string, n int64, err error, want int64) {
+	t.Helper()
+	expect.Must(t, err == nil, "%s: %v, want it admitted", what, err)
+	expect.That(t, n == want, "%s counted %d requests, want %d", what, n, want)
+}
+
+// refused holds a bump, what, to ErrRequestLimitExceeded, with the
+// capability's count left at want.
+func refused(t *testing.T, what string, n int64, err error, want int64) {
+	t.Helper()
+	expect.That(t, errors.Is(err, limes.ErrRequestLimitExceeded), "%s: err = %v, want ErrRequestLimitExceeded", what, err)
+	expect.That(t, n == want, "%s left the count at %d, want %d", what, n, want)
+}
+
 func checkCounterOwnCeiling(t *testing.T, e CounterEnv) {
 	id := e.record(t, uuid.Nil(), unlimitedRequests)
 	spec := subjectSpec{capID: id, requests: requestsOf(counterRequestLimit)}
 	for want := int64(1); want <= counterRequestLimit; want++ {
 		n, err := e.bump(e.Ctx, spec)
-		expect.Must(t, err == nil && n == want, "bump = %d, %v; want %d", n, err, want)
+		admitted(t, "a bump within the ceiling", n, err, want)
 	}
 	for range counterRequestLimit {
 		n, err := e.bump(e.Ctx, spec)
-		expect.That(t, errors.Is(err, limes.ErrRequestLimitExceeded) && n == counterRequestLimit,
-			"a bump past the ceiling = %d, %v; want ErrRequestLimitExceeded at %d", n, err, counterRequestLimit)
+		refused(t, "a bump past the ceiling", n, err, counterRequestLimit)
 	}
 }
 
@@ -133,7 +149,7 @@ func checkCounterAncestor(t *testing.T, e CounterEnv) {
 	children := []uuid.UUID{e.record(t, root, unlimitedRequests), e.record(t, root, unlimitedRequests)}
 	for _, child := range children {
 		n, err := e.bump(e.Ctx, subjectSpec{capID: child})
-		expect.Must(t, err == nil && n == 1, "a child's first bump = %d, %v; want 1", n, err)
+		admitted(t, "a child's first bump", n, err, 1)
 	}
 	for _, child := range children {
 		_, err := e.bump(e.Ctx, subjectSpec{capID: child})
@@ -159,11 +175,11 @@ func checkCounterCopy(t *testing.T, e CounterEnv) {
 		return []limes.CopyCeiling{{RevocationID: []byte(name), Requests: &limes.RequestCeiling{Max: 1}}}
 	}
 	n, err := e.bump(e.Ctx, subjectSpec{capID: id, copies: copyOf("first")})
-	expect.Must(t, err == nil && n == 1, "a copy's first bump = %d, %v; want 1", n, err)
+	admitted(t, "a copy's first bump", n, err, 1)
 	_, err = e.bump(e.Ctx, subjectSpec{capID: id, copies: copyOf("first")})
 	expect.That(t, errors.Is(err, limes.ErrRequestLimitExceeded), "a bump past the copy's ceiling: err = %v, want ErrRequestLimitExceeded", err)
 	n, err = e.bump(e.Ctx, subjectSpec{capID: id, copies: copyOf("second")})
-	expect.That(t, err == nil && n == 2, "a sibling copy's bump = %d, %v; want 2, the capability counting both", n, err)
+	admitted(t, "a sibling copy's bump, the capability counting both", n, err, 2)
 }
 
 func checkCounterRefusalCountsNothing(t *testing.T, e CounterEnv) {
@@ -171,9 +187,9 @@ func checkCounterRefusalCountsNothing(t *testing.T, e CounterEnv) {
 	child := e.record(t, root, unlimitedRequests)
 	frozen := []limes.CopyCeiling{{RevocationID: []byte("frozen"), Requests: &limes.RequestCeiling{}}}
 	n, err := e.bump(e.Ctx, subjectSpec{capID: child, copies: frozen})
-	expect.Must(t, errors.Is(err, limes.ErrRequestLimitExceeded) && n == 0, "a bump past a frozen copy = %d, %v; want ErrRequestLimitExceeded at 0", n, err)
+	refused(t, "a bump past a frozen copy", n, err, 0)
 	n, err = e.bump(e.Ctx, subjectSpec{capID: child})
-	expect.That(t, err == nil && n == 1, "a bump after a refused one = %d, %v; want 1, the root's one request still free", n, err)
+	admitted(t, "a bump after a refused one, the root's one request still free", n, err, 1)
 }
 
 func checkCounterConcurrent(t *testing.T, e CounterEnv) {
@@ -206,7 +222,7 @@ func checkCounterConcurrent(t *testing.T, e CounterEnv) {
 func checkCounterZeroCeiling(t *testing.T, e CounterEnv) {
 	id := e.record(t, uuid.Nil(), unlimitedRequests)
 	n, err := e.bump(e.Ctx, subjectSpec{capID: id, requests: requestsOf(0)})
-	expect.That(t, errors.Is(err, limes.ErrRequestLimitExceeded) && n == 0, "a bump under the zero ceiling = %d, %v; want ErrRequestLimitExceeded at 0", n, err)
+	refused(t, "a bump under the zero ceiling", n, err, 0)
 }
 
 func checkCounterZeroSubject(t *testing.T, e CounterEnv) {
@@ -240,7 +256,7 @@ func checkCounterAncestorRemoved(t *testing.T, e CounterEnv) {
 	expect.Must(t, errors.Is(err, limes.ErrRequestLimitExceeded), "a bump past the root's ceiling: err = %v, want ErrRequestLimitExceeded", err)
 	expect.Must(t, e.DeleteCapability(root) == nil, "delete the root's record")
 	n, err := e.bump(e.Ctx, subjectSpec{capID: child})
-	expect.That(t, err == nil && n == 2, "a bump once the root is removed = %d, %v; want 2", n, err)
+	admitted(t, "a bump once the root is removed", n, err, 2)
 }
 
 func checkCounterScopeMismatch(t *testing.T, e CounterEnv) {
@@ -261,7 +277,7 @@ func checkCounterScopeMismatch(t *testing.T, e CounterEnv) {
 	_, err := e.bump(wrong, subjectSpec{capID: id})
 	expect.That(t, errors.Is(err, limes.ErrScopeMismatch), "a bump under another tenant's scope: err = %v, want ErrScopeMismatch", err)
 	n, err := e.bump(e.Ctx, subjectSpec{capID: id})
-	expect.That(t, err == nil && n == 1, "a bump after one refused for its scope = %d, %v; want 1", n, err)
+	admitted(t, "a bump after one refused for its scope", n, err, 1)
 }
 
 func checkCounterReadOnly(t *testing.T, e CounterEnv) {
@@ -272,5 +288,5 @@ func checkCounterReadOnly(t *testing.T, e CounterEnv) {
 	_, err := e.bump(e.ReadOnlyCtx, subjectSpec{capID: id})
 	expect.That(t, errors.Is(err, limes.ErrScopeMismatch), "a bump under a read-only scope: err = %v, want ErrScopeMismatch", err)
 	n, err := e.bump(e.Ctx, subjectSpec{capID: id})
-	expect.That(t, err == nil && n == 1, "a bump after one refused as read-only = %d, %v; want 1", n, err)
+	admitted(t, "a bump after one refused as read-only", n, err, 1)
 }

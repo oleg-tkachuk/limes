@@ -3,8 +3,6 @@ package pgstore
 import (
 	"context"
 	"errors"
-	"fmt"
-	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -97,14 +95,7 @@ var (
 	migrator *pgxpool.Pool
 )
 
-func TestMain(m *testing.M) {
-	code, err := run(m)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "pgstore tests need a running Docker for their PostgreSQL:", err)
-		os.Exit(1)
-	}
-	os.Exit(code)
-}
+func TestMain(m *testing.M) { pgtest.Exit(run(m)) }
 
 func run(m *testing.M) (int, error) {
 	ctx := context.Background()
