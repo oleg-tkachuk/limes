@@ -1446,6 +1446,53 @@ own is answered with them (`Introspection.Copies`), or, on a verifier
 without `BiscuitConfig.MeterCopies`, refused as `Verify` refuses it. A revocation store that cannot answer is the
 endpoint's error, never an inactive token.
 
+## Exchange an identity provider's token
+
+`exchange.Exchanger` trades an access token from the client's identity
+provider for a capability (RFC 8693, [ADR-0003](adr/0003-oauth-token-exchange.md)).
+It verifies the token through a `SubjectVerifier`. `exchange/jwtverify`
+supplies one over jwx for RFC 9068 access tokens; a service that already
+verifies its provider's tokens, on go-oidc and go-jose say, implements
+`SubjectVerifier` on that stack instead, and package `exchange` links no JOSE
+library of its own ([ADR-0010](adr/0010-exchange-jose-subpackage.md)).
+`exchangetest.TestSubjectVerifier` holds such a verifier to the contract.
+
+By default each exchange issues a capability of its own, with ceilings of
+its own: right for a client that exchanges once and keeps the result. A
+service that exchanges where it receives the token — an MCP server that
+exchanges per request, or once per replica — would multiply the ceilings
+the policy meant for the token. `exchange.Config.Exchanges` issues one
+capability per subject token instead
+([ADR-0009](adr/0009-one-capability-per-subject-token.md)):
+
+```go
+ex, err := exchange.NewExchanger(exchange.Config{
+	Issuer: issuer, Subjects: subjects, Policy: policy,
+	Exchanges: store, // a limes.ExchangeStore: memstore's, or pgstore's
+})
+```
+
+- The store keeps which capability a subject token's issuer and `jti`, in
+  the tenant the policy names, was exchanged for — the id, never a token.
+  The token is signed again from the record (`Issuer.Reissue`), so under the
+  same key every exchange of one subject token returns the same token, and
+  nothing stored can be replayed as a bearer.
+- Exchanges racing across replicas converge on one capability. A capability
+  revoked or expired is refused, never issued anew; a token without a `jti`
+  is refused.
+- A capability bound by DPoP stays bound to the first exchange's key:
+  replicas that exchange one token share that key, or exchange as bearer
+  within one trust domain. An exchange asking for another audience than the
+  capability's is refused.
+- A policy that names no TTL gives the capability the subject token's
+  remaining life, not `DefaultTTL`; one that names a shorter TTL leaves the
+  rest of the token's life refused.
+- The policy runs on every exchange, since it names the tenant.
+
+`storetest` checks an `ExchangeStore` through `Env.Exchanges`, and
+`exchangetest.TestOnePerToken` checks an Exchanger in this mode over a
+consumer's own store, roles and row-level security.
+
 ## Answer a refusal
 
 `ErrorResponse` turns any error `Verify`, `Authorize` or the `Meter` returns

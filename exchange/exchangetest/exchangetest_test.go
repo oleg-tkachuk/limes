@@ -1,9 +1,11 @@
 package exchangetest_test
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"log/slog"
 	"testing"
 	"time"
 	"uuid"
@@ -12,9 +14,11 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/lestrrat-go/jwx/v3/jws"
 
+	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/exchange"
 	"github.com/oleg-tkachuk/limes/exchange/exchangetest"
 	"github.com/oleg-tkachuk/limes/exchange/jwtverify"
+	"github.com/oleg-tkachuk/limes/memstore"
 )
 
 const (
@@ -113,6 +117,66 @@ func TestJWTVerifierKeepsTheContract(t *testing.T) {
 		NoClient:    func(t *testing.T) string { return p.sign(t, map[string]any{"client_id": nil}) },
 		Bound: func(t *testing.T) (string, string) {
 			return p.sign(t, map[string]any{"cnf": map[string]any{"jkt": jkt}}), jkt
+		},
+	})
+}
+
+// resource is the target the one-per-token exchanges ask for.
+const resource = "https://tools.example.com"
+
+// The module's own Exchanger, over memstore, keeps the one-per-token
+// contract it sets for others.
+func TestOnePerTokenOverMemstore(t *testing.T) {
+	p := newProvider(t)
+	clock := func() time.Time { return now }
+	subjects, err := jwtverify.New(jwtverify.Config{Issuer: issuer, Keys: jwtverify.StaticKeys(p.keys), Now: clock})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := memstore.NewStore(memstore.StoreConfig{Now: clock})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := limes.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := limes.NewSigner(limes.SignerConfig{KeyID: key.KeyID, Key: key.Private})
+	if err != nil {
+		t.Fatal(err)
+	}
+	iss, err := limes.NewIssuer(limes.IssuerConfig{Signer: signer, Store: store, IssuerName: "limes-exchange", Now: clock})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenant := uuid.New()
+	ex, err := exchange.NewExchanger(exchange.Config{
+		Issuer: iss, Subjects: subjects, Exchanges: store, Now: clock, Logger: slog.New(slog.DiscardHandler),
+		Policy: func(_ context.Context, g exchange.Grant) (limes.IssueRequest, error) {
+			return limes.IssueRequest{
+				IssuedBy: limes.Principal{Type: limes.PrincipalTypeService, Subject: audience},
+				Subject:  limes.Principal{Type: limes.PrincipalTypeUser, TenantID: tenant, Subject: g.Subject.Subject},
+				Caveats:  limes.Caveats{Requests: limes.RequestCeiling{Max: 1}, Ops: []limes.Op{limes.OpGet}},
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exchangeOf := func(token string) exchange.Request {
+		return exchange.Request{
+			Client:       exchange.Client{ID: audience, SubjectAudiences: []string{audience}},
+			SubjectToken: token, Resources: []string{resource},
+		}
+	}
+	exchangetest.TestOnePerToken(t, exchangetest.OnePerToken{
+		Exchanger: ex,
+		Request:   func(t *testing.T) exchange.Request { return exchangeOf(p.sign(t, nil)) },
+		NoJTI:     func(t *testing.T) exchange.Request { return exchangeOf(p.sign(t, map[string]any{"jti": nil})) },
+		Revoke: func(t *testing.T, id uuid.UUID) {
+			if _, err := store.Revoke(t.Context(), limes.RevokeRequest{CapabilityID: id}); err != nil {
+				t.Fatal(err)
+			}
 		},
 	})
 }
