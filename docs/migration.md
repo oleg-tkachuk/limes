@@ -58,6 +58,18 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## pgstore/v0.48.0
+
+- `pgstore/migrate/ddl` is new in this release, and its `Version` is a
+  function, `ddl.Version()`, not a constant: a release that adds a migration
+  then changes its value, never the API. No release before this one has the
+  package, so nothing that compiled against a release breaks.
+
+  ```go
+  // A test of the consumer's own, holding its vendored copy to pgstore's.
+  if len(vendored) != ddl.Version() { /* a step is missing */ }
+  ```
+
 ## exchange/v0.10.0
 
 - The JWT subject verifier moved to `github.com/oleg-tkachuk/limes/exchange/jwtverify`,

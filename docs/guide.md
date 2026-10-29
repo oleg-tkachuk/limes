@@ -1176,7 +1176,7 @@ vendored copy falls behind when a pgstore upgrade brings a step: compare
 the files with `ddl.Steps()` in a test of the consumer's own, so the upgrade
 fails in CI, not in production, and a readiness check that runs
 `CheckSchema` answers `ErrSchemaMismatch`, with `ReadSchemaVersion` naming
-the applied version beside `ddl.Version`. Hold the result to the
+the applied version beside `ddl.Version()`. Hold the result to the
 conformance suites — `storetest.Run` and `metertest.Run` or
 `metertest.RunCounter` over the vendored schema, the consumer's own roles
 and its row-level security — which check the deployment, not only pgstore.
@@ -1560,7 +1560,7 @@ capability per subject token instead
 ```go
 ex, err := exchange.NewExchanger(exchange.Config{
 	Issuer: issuer, Subjects: subjects, Policy: policy,
-	Exchanges: store, // a limes.ExchangeStore: memstore's, or pgstore's
+	Exchanges: store, // a limes.ExchangeStore: memstore's, or pgstore.ScopedExchanges(store)
 })
 ```
 
@@ -1581,6 +1581,11 @@ ex, err := exchange.NewExchanger(exchange.Config{
   rest of the token's life refused.
 - The policy runs on every exchange, since it names the tenant.
 
+Behind a token endpoint, whose requests name no tenant, pgstore's store is
+wired as `pgstore.ScopedExchanges(store)`, beside
+`pgstore.ScopedIssuance(store)` for the Issuer; each scopes its calls to
+the tenant the key or the record names, and the table that holds the
+mapping, `limes.exchanges`, goes with each capability's record.
 `storetest` checks an `ExchangeStore` through `Env.Exchanges`, and
 `exchangetest.TestOnePerToken` checks an Exchanger in this mode over a
 consumer's own store, roles and row-level security.

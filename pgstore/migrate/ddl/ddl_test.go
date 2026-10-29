@@ -33,8 +33,8 @@ func TestStepsAreTheMigrationFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(steps) != len(files) || len(steps) != Version {
-		t.Fatalf("%d steps from %d files; Version is %d", len(steps), len(files), Version)
+	if len(steps) != len(files) || len(steps) != Version() {
+		t.Fatalf("%d steps from %d files; Version is %d", len(steps), len(files), Version())
 	}
 	for i, s := range steps {
 		raw, err := fs.ReadFile(Files(), files[i])

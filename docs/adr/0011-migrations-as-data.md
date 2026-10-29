@@ -35,7 +35,7 @@ transaction.
 ## Decision
 
 1. **`pgstore/migrate/ddl`** holds the migrations as data: the embedded
-   files, `Step`, `Setup`, `Steps`, `Grants` and `Version`.
+   files, `Step`, `Setup`, `Steps`, `Grants` and `Version()`, a function so that a release adding a migration changes its value, never the API.
    - It imports neither tern nor pgx. It needs the rule for quoting a
      PostgreSQL identifier, and a test holds that rule to pgx's.
    - `migrate` keeps `Run`, which needs tern. It also keeps its `Setup`,
@@ -57,7 +57,7 @@ transaction.
    - setup, steps and grants;
    - Atlas's `-- atlas:txmode none` for a non-transactional step;
    - how to find a step the vendored copy is missing, by comparing the
-     version table against `ddl.Version`.
+     version table against `ddl.Version()`.
 
 ## Consequences
 
