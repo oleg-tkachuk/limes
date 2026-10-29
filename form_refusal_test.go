@@ -81,7 +81,7 @@ func TestFormRefusalNamesItsFamilyOnce(t *testing.T) {
 			if errors.Is(err, errFormOwn) {
 				t.Errorf("err = %v still matches the form's own sentinel", err)
 			}
-			if c.family == ErrInvalidToken && errors.Is(err, ErrBiscuitAttenuation) {
+			if !errors.Is(c.family, ErrBiscuitAttenuation) && errors.Is(err, ErrBiscuitAttenuation) {
 				t.Errorf("err = %v matches ErrBiscuitAttenuation", err)
 			}
 			if err.Error() != c.message {
