@@ -12,7 +12,8 @@ import (
 
 // UsageStore is everything a consumer implements for runtime accounting. It
 // is the union of narrower contracts so that code which only meters (an
-// interceptor, a handler) can depend on Meter alone, a reporter on
+// interceptor, a handler) can depend on Meter alone — on RequestCounter
+// when it counts requests and spends nothing — a reporter on
 // MeterReader, and code which only administers tenant ceilings on
 // TenantBudgets.
 type UsageStore interface {
@@ -24,8 +25,9 @@ type UsageStore interface {
 
 // Meter enforces the request and budget ceilings (Caveats.Requests,
 // Caveats.Budget) and keeps the
-// charges ledger. Separated from Store so the issuance / revocation surface
-// stays focused on identity, not runtime state.
+// charges ledger: a RequestCounter and a BudgetMeter together. Separated
+// from Store so the issuance / revocation surface stays focused on identity,
+// not runtime state.
 //
 // # Delegation trees
 //
@@ -84,12 +86,29 @@ type UsageStore interface {
 // another — which a large pool under a light load never shows. Run metertest
 // against a pool of one or two connections to catch it.
 type Meter interface {
+	RequestCounter
+	BudgetMeter
+}
+
+// RequestCounter enforces the request ceilings (Caveats.Requests) alone, as
+// Meter describes them: on the capability, on each ancestor still on record
+// and on each Biscuit copy. Code that spends nothing through limes depends
+// on it alone, and metertest.RunCounter checks a store against it.
+//
+// It does not enforce Caveats.Budget. A capability whose cost is spent
+// outside limes, beside a store held only as a RequestCounter, has no budget
+// limes checks; meter its spend with a BudgetMeter.
+type RequestCounter interface {
 	// Bump increments the request counter of the capability and of
 	// each ancestor, and returns the capability's new count. When any
 	// ceiling in the chain would be crossed it returns
 	// ErrRequestLimitExceeded and nothing is mutated.
 	Bump(ctx context.Context, req BumpRequest) (BumpReceipt, error)
+}
 
+// BudgetMeter enforces the budget ceilings (Caveats.Budget, a tenant's
+// aggregate ceiling) and keeps the charges ledger, as Meter describes them.
+type BudgetMeter interface {
 	// Charge adds req.Amount to the spend counters of the capability, of
 	// each ancestor and of the tenant aggregate, writes one charges-ledger
 	// row, and runs onCharged — ALL atomically. Checks, in order:

@@ -57,6 +57,34 @@ func TestMeterContract(t *testing.T) {
 	})
 }
 
+// counterOnly is a store that counts requests and does nothing else: the
+// usage store seen through meter.RequestCounter alone.
+type counterOnly struct{ meter.RequestCounter }
+
+// RunCounter needs nothing of a store but Bump.
+func TestCounterContract(t *testing.T) {
+	metertest.RunCounter(t, func(t *testing.T) metertest.CounterEnv {
+		t.Helper()
+		records := newTestStore()
+		tenant := uuid.New()
+		usage := mustUsage(t, UsageStoreConfig{Records: records})
+		return metertest.CounterEnv{
+			Ctx:              context.Background(),
+			Counter:          counterOnly{usage},
+			Tenant:           tenant,
+			DeleteCapability: removeRecord(records),
+			NewCapability: func(spec metertest.CapabilitySpec) (uuid.UUID, error) {
+				c := limes.Capability{
+					ID: uuid.New(), ParentID: spec.Parent, ExpiresAt: contractExpiry,
+					Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: cmp.Or(spec.Tenant, tenant), Subject: "agent"},
+					Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: spec.Requests, Budget: spec.Budget, Copies: spec.CopyQuota()},
+				}
+				return c.ID, records.Insert(context.Background(), limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "issuer"}})
+			},
+		}
+	})
+}
+
 // listScope marks the context ListCtx hands out, so the test can tell it was
 // the one ListTenantBudgets ran under.
 type listScope struct{}
