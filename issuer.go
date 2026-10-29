@@ -489,7 +489,7 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 		return Capability{}, "", err
 	}
 	if err := Narrows(parent, child); err != nil {
-		return Capability{}, "", fmt.Errorf("limes: delegate %w", err)
+		return Capability{}, "", err
 	}
 	// A delegation is requested by whoever holds the parent — that is not a
 	// caller-supplied fact, it is what delegation means, so it is derived
