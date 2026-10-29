@@ -22,6 +22,10 @@ API, and this file stops growing.
   is `migrate.Options`, and `pgstore.ErrSchemaOwner` is `migrate.ErrSchemaOwner`.
   `CheckSchema` and `ReadSchemaVersion` stay in `pgstore`. A database migrated
   before needs nothing: the migrations and the version table are the same.
+- pgstore needs PostgreSQL 15 or later. Migration 022 creates
+  `limes.capability_lineage`, a view that runs as its caller
+  (`security_invoker`), which the meter and the erase read the records
+  through; it fails on an earlier PostgreSQL.
 
 ## v0.131.0
 

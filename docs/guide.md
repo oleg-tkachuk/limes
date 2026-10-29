@@ -942,7 +942,7 @@ any `Leeway` up to `MaxLeeway`, and `Purge` any `ExpiredFor` from
 On PostgreSQL, take `pgstore` (`github.com/oleg-tkachuk/limes/pgstore`, a
 module of its own): it implements every contract below but `KeyResolver` and
 the DPoP stores, passes `storetest` and `metertest`, and keeps tenants apart
-with row-level security.
+with row-level security. It needs PostgreSQL 15 or later.
 
 ```go
 // In the migration job, as the owner of the schema, granting the role the
