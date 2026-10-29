@@ -10,7 +10,7 @@ import { isReleaseTag, isStableReleaseTag, newReleaseTag, previousTag, proxyInfo
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
 import { withoutWorkflowCommands } from "./lib/actions.ts";
 import { releaseCommits } from "./lib/modules.ts";
-import { ALL_MODULES, candidateNotesBody, Channel, GATED, gateOf, GATES, type Release, releaseAll, releaseOptions, semanticReleaseCommand, unchangedSince } from "./release.ts";
+import { ALL_MODULES, candidateNotesBody, Channel, GATED, gateOf, GATES, type Release, releaseAll, releaseOptions, SEED_VERSION, semanticReleaseCommand, unchangedSince } from "./release.ts";
 import { sinceCandidate } from "./lib/prerelease.ts";
 
 const REPO = "oleg-tkachuk/limes";
@@ -237,6 +237,27 @@ describe("releaseAll", () => {
         ["pgstore/v0.1.0", false, "notes of pgstore/v0.1.0\n"],
       ],
     );
+  });
+
+  // A nested module no tag names yet has its line seeded on the commit that
+  // added its go.mod, so semantic-release counts from v0.1.0 rather than
+  // cutting 1.0.0; a module tagged already, one with no go.mod, and the root
+  // are left as they are.
+  test("an untagged nested module's line is seeded where its go.mod arrived", async () => {
+    const seed = `biscuit/${SEED_VERSION}`;
+    mkdirSync(join(repo.dir, "biscuit"), { recursive: true });
+    writeFileSync(join(repo.dir, "biscuit", "go.mod"), "module example.com/biscuit\n");
+    await repo.run("add", "biscuit/go.mod");
+    const added = await repo.commit("feat(biscuit): add the module");
+    await repo.commit("build(biscuit): require limes v0.2.0");
+    await releaseAll(release());
+    assert.ok(data.tags.has(seed), [...data.tags].join(", "));
+    assert.equal((await repo.run("rev-list", "-n", "1", seed)).trim(), added);
+    assert.ok(![...data.tags].some((t) => t.startsWith("pgstore/") || t.startsWith(`${SEED_VERSION}`)), [...data.tags].join(", "));
+
+    data.tags.clear();
+    await releaseAll(release());
+    assert.equal(data.tags.size, 0, "a seeded line is seeded once");
   });
 
   test("a gated module waits while its CI job did not pass", async () => {

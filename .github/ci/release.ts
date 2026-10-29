@@ -114,7 +114,7 @@ export interface Release {
   nextMajor: boolean;
   policy: Policy;
   commits: ReleaseCommits;
-  // pushTag pushes a tag made on the checked-out commit.
+  // pushTag pushes a tag made in the checkout.
   pushTag(tag: string): Promise<void>;
 }
 
@@ -189,8 +189,38 @@ export function unchangedSince(last: string): string {
 // for: the nested modules stay on 0.x past limes's 1.0.
 const NEXT_MAJOR_MODULE = ROOT_MODULE;
 
+// SEED_VERSION is where a nested module's release line starts: semantic-
+// release cuts a module with no tag as 1.0.0, which major-guard refuses.
+export const SEED_VERSION = "v0.1.0";
+
+// GO_MOD is the file whose first commit holds a module.
+const GO_MOD = "go.mod";
+
+// seedLine starts the release line of a nested module no tag names yet,
+// with a SEED_VERSION tag on the commit that added its go.mod, pushed with
+// the deploy key, which alone may create a release tag. It returns the tag,
+// or undefined for the root module, one already tagged, or one whose go.mod
+// no commit added.
+export async function seedLine(r: Release, module: Module): Promise<string | undefined> {
+  if (module.name === ROOT_MODULE || (await git(["tag", "--list", `${module.prefix}v*`], r.root)).trim() !== "") {
+    return undefined;
+  }
+  const added = (await git(["log", "--diff-filter=A", "--format=%H", "--", join(module.dir, GO_MOD)], r.root)).trim().split("\n").at(-1);
+  if (!added) {
+    return undefined;
+  }
+  const tag = `${module.prefix}${SEED_VERSION}`;
+  await git(["tag", tag, added], r.root);
+  await r.pushTag(tag);
+  return tag;
+}
+
 // releaseModule releases one module, and says what it did.
 export async function releaseModule(r: Release, module: Module, before: readonly string[]): Promise<Outcome> {
+  const seeded = await seedLine(r, module);
+  if (seeded !== undefined) {
+    info(`${module.name}: release line seeded with ${seeded}`);
+  }
   const gate = GATES[module.name];
   if (gate !== undefined && !(await r.gatePassed(gate))) {
     return { note: `'${gate}' did not pass; not released this run` };

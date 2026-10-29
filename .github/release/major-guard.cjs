@@ -9,9 +9,10 @@
 // takes, rather than only on the pull request.
 //
 // A module with no release tag yet would be released as 1.0.0, semantic-
-// release's first version, which promises a stable API by accident. Its
-// release line starts from a tag pushed by hand instead, and this refuses to
-// start it for one.
+// release's first version, which promises a stable API by accident. The
+// release run seeds its line with a v0.1.0 tag on the commit that added its
+// go.mod (.github/ci/release.ts, seedLine), and this refuses to start it
+// without one.
 
 const fs = require("node:fs");
 const path = require("node:path");
