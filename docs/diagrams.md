@@ -393,7 +393,7 @@ flowchart TB
     on -- no --> bad
     chain -- no --> bad
     vocab -- no --> att
-    shape -- no --> att
+    shape -- no --> bad
     rebind -- no --> att
     narrow -- widens --> att
     fit -- no --> att
@@ -524,7 +524,7 @@ flowchart TB
     cr{"CodeOf: first codeRules match"}
     rr{"a refusal?"}
     pRef["ProblemOf: the refusal's status and title<br/>reason · code · type"]
-    pCode["ProblemOf: the code's status and title<br/>400 · 401 · 403 · 404 · 409 · 410 · 500 · 502"]
+    pCode["ProblemOf: the code's status and title<br/>400 · 401 · 403 · 404 · 410 · 500 · 502"]
     pInt["ProblemFor: 500 internal"]
     er(["Verifier.ErrorResponse"])
     rr2{"a refusal?"}
