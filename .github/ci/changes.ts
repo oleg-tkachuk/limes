@@ -56,6 +56,7 @@ export const Group = {
   Redisreplay: "redisreplay",
   Otelmetric: "otelmetric",
   Exchange: "exchange",
+  Biscuit: "biscuit",
   Examples: "examples",
   // Scripts is the TypeScript the workflows run and the release tooling.
   Scripts: "scripts",
@@ -69,6 +70,7 @@ export const GROUP_DIRS: Readonly<Record<Exclude<Group, typeof Group.Root>, read
   redisreplay: ["redisreplay/"],
   otelmetric: ["otelmetric/"],
   exchange: ["exchange/"],
+  biscuit: ["biscuit/"],
   examples: ["examples/"],
   scripts: [".github/ci/", ".github/release/"],
 };

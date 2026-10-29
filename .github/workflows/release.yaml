@@ -35,7 +35,7 @@ on:
       module:
         description: The module to release, or all of them (.github/release/modules.cjs)
         type: choice
-        options: [all, limes, redisreplay, pgstore, otelmetric, exchange]
+        options: [all, limes, redisreplay, pgstore, otelmetric, exchange, biscuit]
         default: all
       next_major:
         description: With the prerelease channel, a candidate of limes's next major (v1.0.0-rc.N) rather than of its next version

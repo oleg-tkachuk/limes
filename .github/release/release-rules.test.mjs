@@ -54,6 +54,10 @@ const moduleCases = {
     ["feat(exchange): add a handler", null],
     ["feat(exchange)!: rename a policy field", null],
     ["build(exchange): require limes v0.64.0", null],
+    // And biscuit.
+    ["feat(biscuit): add a fact", null],
+    ["feat(biscuit)!: rename a fact", null],
+    ["build(biscuit): require limes v0.64.0", null],
     // The one commit raising every nested module's requirement, too, under
     // either scope it has had.
     ["build(nested): require limes v0.64.0 in pgstore and otelmetric", null],
@@ -88,6 +92,12 @@ const moduleCases = {
     ["build(exchange): require limes v0.64.0", "patch"],
     ["build(pgstore): require limes v0.64.0", null],
     ["build(nested): require limes v0.64.0 in pgstore and exchange", "patch"],
+    ["build(limes): require limes v0.64.0", "patch"],
+  ],
+  [modules.BISCUIT_MODULE]: [
+    ["build(biscuit): require limes v0.64.0", "patch"],
+    ["build(pgstore): require limes v0.64.0", null],
+    ["build(nested): require limes v0.64.0 in pgstore and biscuit", "patch"],
     ["build(limes): require limes v0.64.0", "patch"],
   ],
 };

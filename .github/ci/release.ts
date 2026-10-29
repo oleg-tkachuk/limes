@@ -53,7 +53,7 @@ export const OUTPUT_LIMES_TAG = "limes-tag";
 // it. Each is released only once its tests against the limes its go.mod
 // requires passed in the dispatching run: ci.yaml's released-limes job, one
 // matrix entry per module.
-export const GATED: readonly string[] = ["pgstore", "redisreplay", "otelmetric", "exchange"];
+export const GATED: readonly string[] = ["pgstore", "redisreplay", "otelmetric", "exchange", "biscuit"];
 // gateOf is the name of the released-limes job of module, as GitHub names
 // a matrix job whose name holds no matrix value: ci.yaml's name, then the
 // module in parentheses.

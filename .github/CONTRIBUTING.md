@@ -18,7 +18,7 @@ runs gofmt, `go mod tidy` and `go mod verify`, golangci-lint, `go vet` of a
 the type check and tests of the TypeScript the workflows run (`.github/ci`), the release-rule,
 release-notes, major-guard and
 module-commits tests, the gates of `redisreplay` (its tests on miniredis
-included), `otelmetric` and `exchange`, the static checks of `pgstore` and the examples that need no
+included), `otelmetric`, `exchange` and `biscuit`, the static checks of `pgstore` and the examples that need no
 database, run end to end — the same task CI runs. It
 needs no database and no container; it does need the network, for the shared
 Taskfile include, `go mod verify` and govulncheck's database.
@@ -42,7 +42,7 @@ builds again. A constraint that needs an index (`PRIMARY KEY`, `UNIQUE`,
 `TestMigrationsBuildIndexesWithoutALock` holds every migration after 013 to
 this.
 
-Every nested module — `pgstore`, `redisreplay`, `otelmetric`, `exchange` — builds against
+Every nested module — `pgstore`, `redisreplay`, `otelmetric`, `exchange`, `biscuit` — builds against
 the limes of the same commit, through the replace in its `go.mod`, so CI runs
 its tests twice. Against that limes they are part of the required check: limes
 may not break a nested module. Against the limes its `go.mod` requires, which

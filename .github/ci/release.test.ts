@@ -256,13 +256,14 @@ describe("releaseAll", () => {
     failedGates = new Set([gateOf("redisreplay")]);
     next = {
       limes: "v0.2.0", redisreplay: "redisreplay/v0.1.0", pgstore: "pgstore/v0.1.0", otelmetric: "otelmetric/v0.1.0", exchange: "exchange/v0.1.0",
+      biscuit: "biscuit/v0.1.1",
     };
     await releaseAll(release());
     assert.deepEqual(
       data.published.map((r) => r.tag),
-      ["v0.2.0", "pgstore/v0.1.0", "otelmetric/v0.1.0", "exchange/v0.1.0"],
+      ["v0.2.0", "pgstore/v0.1.0", "otelmetric/v0.1.0", "exchange/v0.1.0", "biscuit/v0.1.1"],
     );
-    assert.deepEqual([...GATED].sort(), ["exchange", "otelmetric", "pgstore", "redisreplay"]);
+    assert.deepEqual([...GATED].sort(), ["biscuit", "exchange", "otelmetric", "pgstore", "redisreplay"]);
   });
 
   test("the run's summary says what happened to each module", async () => {

@@ -68,6 +68,7 @@ jobs:
       redisreplay: ${{ steps.filter.outputs.redisreplay }}
       otelmetric: ${{ steps.filter.outputs.otelmetric }}
       exchange: ${{ steps.filter.outputs.exchange }}
+      biscuit: ${{ steps.filter.outputs.biscuit }}
       examples: ${{ steps.filter.outputs.examples }}
       scripts: ${{ steps.filter.outputs.scripts }}
       verify-tasks: ${{ steps.filter.outputs.verify-tasks }}
@@ -174,7 +175,8 @@ jobs:
     if: >-
       needs.changes.outputs.root == 'true' || needs.changes.outputs.pgstore == 'true' ||
       needs.changes.outputs.redisreplay == 'true' || needs.changes.outputs.otelmetric == 'true' ||
-      needs.changes.outputs.exchange == 'true' || needs.changes.outputs.examples == 'true'
+      needs.changes.outputs.exchange == 'true' || needs.changes.outputs.biscuit == 'true' ||
+      needs.changes.outputs.examples == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
@@ -360,7 +362,7 @@ jobs:
       # Each module's result gates its own release alone.
       fail-fast: false
       matrix:
-        module: [pgstore, redisreplay, otelmetric, exchange]
+        module: [pgstore, redisreplay, otelmetric, exchange, biscuit]
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -478,7 +480,8 @@ jobs:
     needs: [changes]
     if: >-
       needs.changes.outputs.root == 'true' || needs.changes.outputs.redisreplay == 'true' ||
-      needs.changes.outputs.otelmetric == 'true' || needs.changes.outputs.exchange == 'true'
+      needs.changes.outputs.otelmetric == 'true' || needs.changes.outputs.exchange == 'true' ||
+      needs.changes.outputs.biscuit == 'true'
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
@@ -512,7 +515,7 @@ jobs:
       # Every module this job tests, by the directory its steps run in:
       # go-floor.test.ts pins the list to them.
       - name: Require GO_FLOOR_VERSION to match each go directive
-        run: node .github/ci/go-floor.ts "$GO_FLOOR_VERSION" . redisreplay otelmetric exchange
+        run: node .github/ci/go-floor.ts "$GO_FLOOR_VERSION" . redisreplay otelmetric exchange biscuit
 
       - name: go vet
         run: go vet ./...
@@ -545,6 +548,14 @@ jobs:
         working-directory: exchange
         run: go test -race ./...
 
+      - name: go vet biscuit
+        working-directory: biscuit
+        run: go vet ./...
+
+      - name: go test biscuit
+        working-directory: biscuit
+        run: go test -race ./...
+
       - name: Save the Go caches
         if: success()
         uses: ./.github/actions/go-cache
@@ -570,7 +581,7 @@ jobs:
       github.event_name != 'workflow_dispatch' &&
       (needs.changes.outputs.root == 'true' || needs.changes.outputs.pgstore == 'true' || needs.changes.outputs.redisreplay == 'true' ||
        needs.changes.outputs.otelmetric == 'true' || needs.changes.outputs.exchange == 'true' ||
-       needs.changes.outputs.scripts == 'true')
+       needs.changes.outputs.biscuit == 'true' || needs.changes.outputs.scripts == 'true')
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
