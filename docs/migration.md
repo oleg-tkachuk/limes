@@ -65,6 +65,12 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
     `NewVerifier` refuses the config.
   - `IssuerConfig.Biscuit` names the form `Issuer.Biscuit` seals in: set it to
     `biscuit.Form()`. Without it `Issuer.Biscuit` refuses.
+- The Biscuit fixtures moved with the form: `testdata/biscuit_vocabulary.json`
+  and `testdata/biscuit/` are `biscuit/testdata/biscuit_vocabulary.json` and
+  `biscuit/testdata/biscuit/`, under
+  `go list -m -f '{{.Dir}}' github.com/oleg-tkachuk/limes/biscuit`. They are
+  the cases an SDK in another language tests a copy of, and stay supported:
+  this module is their source.
 
 ## pgstore/v0.45.0
 
