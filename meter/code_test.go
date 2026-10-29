@@ -125,7 +125,7 @@ var docRow = regexp.MustCompile("(?m)^\\| `([a-z_]+)` \\| ([0-9]{3}) \\|")
 // docs/errors.md lists every code of the meter's with the status ProblemOf
 // answers it with.
 func TestErrorsDocListsEveryMeterCode(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "docs", "errors.md"))
+	raw, err := os.ReadFile("../docs/errors.md")
 	if err != nil {
 		t.Fatal(err)
 	}
