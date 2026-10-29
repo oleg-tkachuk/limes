@@ -10,9 +10,12 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"testing"
 )
 
 // sentinelPrefix opens the name of an exported sentinel, which is where a
@@ -125,6 +128,96 @@ func leftmostLiteral(e ast.Expr) (*ast.BasicLit, bool) {
 			e = x.X
 		default:
 			return nil, false
+		}
+	}
+}
+
+// moduleFile marks a directory as a module of its own, checked by its own
+// test.
+const moduleFile = "go.mod"
+
+// testSuffix ends a test file's name.
+const testSuffix = "_test.go"
+
+// Sources are the non-test Go files of the module rooted at root, every
+// nested module, testdata and hidden directory left out, and every
+// directory whose path, from root, starts with one of skip.
+func Sources(root string, skip ...string) ([]string, error) {
+	var files []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if d.IsDir() {
+			if rel == "." {
+				return nil
+			}
+			if strings.HasPrefix(d.Name(), ".") || d.Name() == "testdata" || hasPrefix(rel, skip) {
+				return filepath.SkipDir
+			}
+			if _, err := os.Stat(filepath.Join(path, moduleFile)); err == nil {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(rel, ".go") && !strings.HasSuffix(rel, testSuffix) {
+			files = append(files, rel)
+		}
+		return nil
+	})
+	return files, err
+}
+
+// hasPrefix reports whether path is, or is under, one of dirs.
+func hasPrefix(path string, dirs []string) bool {
+	for _, d := range dirs {
+		if path == d || strings.HasPrefix(path, d+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// Refuse fails t for every bare construction in the module rooted at root
+// but those wrapped lists — file, then function, then why every caller
+// wraps it — and for a listed one that constructs none.
+func Refuse(t testing.TB, root string, wrapped map[string]map[string]string, skip ...string) {
+	t.Helper()
+	files, err := Sources(root, skip...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := make([]string, len(files))
+	for i, f := range files {
+		full[i] = filepath.Join(root, f)
+	}
+	sites, err := Bare(full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	used := map[string]bool{}
+	for _, s := range sites {
+		rel, err := filepath.Rel(root, s.File)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rel = filepath.ToSlash(rel)
+		if _, ok := wrapped[rel][s.Func]; ok {
+			used[rel+":"+s.Func] = true
+			continue
+		}
+		t.Errorf("%s:%d (%s) constructs an error that names no sentinel: wrap limes.ErrInvalidRequest, ErrInvalidConfig, ErrInternal or the refusal it is", rel, s.Line, s.Func)
+	}
+	for file, funcs := range wrapped {
+		for fn := range funcs {
+			if !used[file+":"+fn] {
+				t.Errorf("%s: %s is listed as a wrapped helper and constructs no bare error: drop it", file, fn)
+			}
 		}
 	}
 }
