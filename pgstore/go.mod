@@ -20,7 +20,7 @@ retract v0.1.0
 require (
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/jackc/tern/v2 v2.4.3
-	github.com/oleg-tkachuk/limes v0.134.0
+	github.com/oleg-tkachuk/limes v0.135.0
 )
 
 require (
