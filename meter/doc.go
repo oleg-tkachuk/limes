@@ -9,7 +9,9 @@
 // [limes.ErrBudgetExceeded], [limes.ErrTenantBudgetExceeded] — are limes's,
 // so [limes.Verifier.ErrorResponse] answers a metering refusal as it answers
 // a verification one. A call for a tenant whose usage was erased is refused
-// with [limes.ErrTenantErased], a kind of [limes.ErrRevoked].
+// with [limes.ErrTenantErased], a kind of [limes.ErrRevoked]. [CodeOf] and
+// [ProblemOf] give every error of the meter's its stable code and RFC 9457
+// body, as limes.CodeOf and limes.ProblemOf do for limes's.
 //
 // # What you implement
 //

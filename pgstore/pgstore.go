@@ -1,6 +1,7 @@
 // Package pgstore is the reference implementation of the limes storage
-// contracts over PostgreSQL: limes.Store, limes.BiscuitRevocationStore and
-// limes.RevocationLineageLookup for capability records and revocations,
+// contracts over PostgreSQL: limes.Store, limes.BiscuitRevocationStore,
+// limes.RevocationLineageLookup and limes.BulkRevoker for capability records
+// and revocations, limes.ExchangeStore for token exchange,
 // meter.UsageStore and meter.CopyUsageReader for the meter,
 // meter.LedgerReader, limes.RecordCensus and limes.RecordLister for reports,
 // meter.LedgerHousekeeping for bounding the ledger,

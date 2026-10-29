@@ -123,7 +123,7 @@ if _, err := usage.Charge(ctx, meter.ChargeRequest{
 ```
 
 `IssueRequest` requires `Subject` with its `TenantID`, `IssuedBy` (a
-`Subject` at least), `Audience` and `Caveats`; `TTL` defaults to fifteen
+`Subject` at least), `ClientID`, `Audience` and `Caveats`; `TTL` defaults to fifteen
 minutes. `issued.Token` is what the agent carries; `issued.Capability` is the
 record you keep for audit. `verifier.ErrorResponse(ctx, err, limes.AuthSchemeBearer)`
 turns a refusal into the HTTP status, `WWW-Authenticate` challenge and problem
@@ -137,14 +137,15 @@ own, pgstore included, logging what happens.
 | Feature | What it does |
 |---|---|
 | **Verify** | Local Ed25519 JWT verification (`alg: Ed25519`, RFC 9864, or the `EdDSA` older JOSE libraries know) against a resolved key — static, or an issuer's JWKS fetched by `jwks.Remote`, which revalidates by ETag and honours `Cache-Control`. Claims are read strictly: no unknown or duplicate member, integers within I-JSON's range. Rejections match sentinel errors (`errors.Is`) in families — `ErrUnauthenticated` over `ErrInvalidToken` and `ErrProofOfPossession` — and kinds that must not tell an attacker which check failed share `ErrInvalidToken`. |
-| **Enforce** | `Authorize` verifies and checks every stateless caveat in one call: allowed ops, resource prefixes matched at `/` boundaries (a `.` or `..` segment never matches), idempotency keys for writes, tainted reads, source networks. Request and budget limits are the `Meter`'s. |
+| **Enforce** | `Authorize` verifies and checks every stateless caveat in one call: allowed ops, resource prefixes matched at `/` boundaries (a `.` or `..` segment never matches), exact URIs (`ResourceURIs`) and string name prefixes (`ResourceNamePrefixes`), idempotency keys for writes, tainted reads, source networks. Request and budget limits are the `Meter`'s. |
 | **Delegate** | `Issuer.Delegate` issues a child that may only be narrower — operations, resources, limits and audience; anything wider is `ErrDelegationTooWide`. Its validity window is fitted inside the parent's: a TTL past the parent's expiry is clipped to it, and a `NotBefore` before the parent's start is raised to it. The child counts in the parent's unit; naming another is `ErrUnitCodeMismatch`, a conflict (`ErrConflict`, 409). The parent must allow `OpShare`, or the delegation is `ErrOpNotAllowed`, and an expired or revoked parent delegates nothing. |
 | **Attenuate offline** | The Biscuit v3 form of a capability can be narrowed by its holder with no key and no network; each copy can get its own limits — as many copies with limits as the quota signed in the token (`Caveats.Copies`) allows across the delegation chain — and be revoked on its own. |
 | **Bind to a key** | RFC 9449 DPoP: `Verify` refuses a key-bound capability without a fresh proof from that key, and, given the scheme it came under, one not presented under `DPoP`; server nonces (`dpop.HMACNonces`) work across replicas without shared state. |
 | **Meter** | Requests count against the capability, every ancestor and each Biscuit copy with limits presented; spend against those and the tenant, atomically with your own side effect. Each copy with limits of its own counts against the copy quota of the capability and of every ancestor. Reserve an estimate, settle the actual cost, refund a charge. Amounts are exact integers of billionths of an ISO 4217 unit. `otelmetric.Instrument`, a module of its own, adds OpenTelemetry instruments. |
-| **Revoke** | One call stops a capability and everything delegated from it; verifiers learn of it within a cache TTL, or at once on `ClearRevoked`, which drops only the answers that revocation outdates and which `pgstore.RevocationWatcher` reaches through a `RevocationSignal` on each revocation it can name, clearing the cache whole otherwise; `otelmetric.InstrumentRevocationCache` exports the cache's counts. |
+| **Revoke** | One call stops a capability and everything delegated from it; verifiers learn of it within a cache TTL, or at once on `ClearRevoked`, which drops only the answers that revocation outdates and which `pgstore.RevocationWatcher` reaches through a `RevocationSignal` on each revocation it can name, clearing the cache whole otherwise; `otelmetric.InstrumentRevocationCache` exports the cache's counts. `BulkRevoker.RevokeMatching` revokes a tenant's capabilities by user, client or identity-provider session, in batches. |
 | **Report** | `LedgerReader.SumCharges` sums the charges of one tenant or of every tenant over a period by unit, whole or by UTC hour, day, ISO week or month, grouped by any of tenant, operation, actor and capability and filtered by them, the largest first. `RecordCensus.CountRecords` counts capability records — active, expired, revoked, delegated, expiring soon — for one tenant or all, by tenant and principal type. `RecordLister.ListRecords` lists one tenant's records, each with its disposition by the census's rules, filtered by principal type, subject or subject prefix and disposition, oldest or newest first; `RecordListingReader.GetRecordListing` reads one record with its disposition by the same rules. |
-| **Answer refusals** | `ErrorResponse` maps a refusal to its status, an RFC 6750 / RFC 9449 `WWW-Authenticate` challenge and an RFC 9457 problem body, without the error's own text. |
+| **Exchange** | `exchange` turns an identity provider's access token into a capability (RFC 8693), one per subject token, in process or at a token endpoint; `HasLimesKeyID` tells a capability from the provider's token on a route that takes both. |
+| **Answer errors** | `ErrorResponse` maps a refusal to its status, an RFC 6750 / RFC 9449 `WWW-Authenticate` challenge and an RFC 9457 problem body, without the error's own text. Every error has a stable code (`CodeOf`); `ProblemOf`, `meter.ProblemOf` and `exchange.ErrorOf` answer it on any other API. |
 
 You implement `Store` and a `KeyResolver`, which `jwks.Static` and
 `jwks.Remote` already are, and, to meter, `meter.UsageStore` — or use
@@ -157,14 +158,15 @@ callback's context — so it can commit together with, say, an outbox write.
 The transaction stays the store's: the callback writes through it and never
 commits or rolls it back (`pgstore.ErrChargeTransaction`), and it closes when
 the callback returns.
-Optional contracts serve one feature each: `RevocationLineageLookup` so a
-`RevocationCache` drops only what a revocation outdates, `BiscuitRevocationStore` and
-`meter.CopyUsageReader` for Biscuit copies, `meter.LedgerReader` for billing
-reads and `meter.LedgerHousekeeping` to remove charges past their retention, `RecordCensus` for a census of records, `RecordLister` to list a
-tenant's records and `RecordListingReader` to read one — `RecordReporter`
-is both, and `memstore.NewCensus` and `pgstore.NewCensus` return the one
-`Census` that serves all three — and `TenantRecordEraser` and
-`meter.TenantUsageEraser` to remove a tenant.
+Optional contracts serve one feature each:
+
+- `RevocationLineageLookup` — a `RevocationCache` drops only what a revocation outdates;
+- `BiscuitRevocationStore`, `meter.CopyUsageReader` — Biscuit copies;
+- `meter.LedgerReader`, `meter.LedgerHousekeeping` — billing reads, and charges past their retention removed;
+- `RecordCensus`, `RecordLister`, `RecordListingReader` — reports on records (`memstore.NewCensus` and `pgstore.NewCensus` return a `Census` that is all three);
+- `BulkRevoker` — revocation by user, client or session;
+- `ExchangeStore` — one capability per exchanged subject token;
+- `TenantRecordEraser`, `meter.TenantUsageEraser` — a tenant removed.
 
 ## Guarantees
 
@@ -182,7 +184,8 @@ is both, and `memstore.NewCensus` and `pgstore.NewCensus` return the one
 - **The token format is pinned.** Golden fixtures in `testdata/` fail CI on any
   wire-format drift, because tokens outlive deployments.
 - **No hidden dependencies.** `isolation_test.go` fails if a database driver,
-  an object-storage SDK, a Redis client or OpenTelemetry enters the resolved
+  an object-storage SDK, a Redis client, OpenTelemetry, a JOSE library,
+biscuit-go or protobuf enters the resolved
   dependency graph.
 - **The root module's tests need nothing**: no database, no network, no
   container. `pgstore`'s run against PostgreSQL in a container, and
@@ -202,9 +205,10 @@ PostgreSQL on the same host, and one tenant's charges commit one at a time —
 the price of a tenant ceiling that is never crossed — so some 350–700 a
 second for one tenant, while different tenants' run side by side.
 
-The benchmarks behind these numbers are `bench_test.go` and
-`pgstore/bench_test.go`, beside `otelmetric/bench_test.go` for what the
-instruments add; a weekly workflow runs them on this commit and on the
+The benchmarks behind these numbers are `bench_test.go`,
+`biscuit/bench_test.go` and `pgstore/bench_test.go`, beside
+`otelmetric/bench_test.go` for what the instruments add; a weekly workflow
+runs all but the Biscuit's on this commit and on the
 newest release, taking turns on one runner, and soaks `pgstore` under
 concurrent workers ([CONTRIBUTING](.github/CONTRIBUTING.md)).
 
@@ -256,10 +260,10 @@ pseudo-version (`v1.0.0-rc.N.0.…-<commit>`) before it settles.
 To pin a candidate of 1.0, read its row in the [table of
 candidates](docs/migration.md#release-candidates-of-10) — the 0.x release
 whose API it carries, and each nested module's release cut with it, which
-CI holds to the tags — and require them together. For `v1.0.0-rc.19`:
+CI holds to the tags — and require them together. For `v1.0.0-rc.21`:
 
 ```bash
-go get github.com/oleg-tkachuk/limes@v1.0.0-rc.19 github.com/oleg-tkachuk/limes/pgstore@v0.47.0 github.com/oleg-tkachuk/limes/exchange@v0.9.2
+go get github.com/oleg-tkachuk/limes@v1.0.0-rc.21 github.com/oleg-tkachuk/limes/pgstore@v0.50.0 github.com/oleg-tkachuk/limes/exchange@v0.14.0
 ```
 
 Go selects the candidate over the 0.x release a nested module requires,
@@ -277,7 +281,8 @@ refused during the change. Tokens are signed with Ed25519 throughout 1.x,
 under a kid in limes's namespace (`jwks.KeyIDPrefix`); another algorithm
 would be another format, never a runtime choice.
 
-The conformance suites — `storetest`, `metertest`, `dpoptest`, `jwkstest` —
+The conformance suites — `storetest`, `metertest`, `dpoptest`, `jwkstest`,
+`exchangetest` —
 may gain checks in any release: a check of a promise the contract already
 made is the suite finding a bug in a store, not a break of the API. An `Env`
 written for an earlier release still compiles; a new optional field skips
@@ -287,11 +292,12 @@ its checks while unset.
 
 | Document | Covers |
 |----------|--------|
-| [docs/guide.md](docs/guide.md) | each concern in turn: verification, caveats, delegation, DPoP, Biscuit, metering, revocation, storage contracts, key rotation |
+| [docs/guide.md](docs/guide.md) | each concern in turn: verification, caveats, delegation, DPoP, Biscuit, metering, revocation, storage contracts, key rotation, token exchange |
 | [docs/errors.md](docs/errors.md) | every error's stable code, HTTP status and format (RFC 6750, RFC 9449, RFC 9457, RFC 6749), and when to retry |
 | [docs/standards.md](docs/standards.md) | the RFCs implemented — JWT, DPoP, JWKS, HTTP challenges and problem details — the choices made within them, and the OAuth standards deliberately left out |
-| [docs/diagrams.md](docs/diagrams.md) | the contract boundary, a capability's lifecycle, the verification gates, delegation, Biscuit copies, the charge path, revocation |
-| [docs/migration.md](docs/migration.md) | every breaking change from v0.3.0 on, of limes and of pgstore, release by release, as what it was and what it is now |
+| [docs/diagrams.md](docs/diagrams.md) | the contract boundary, a capability's lifecycle, the verification gates, error answers, delegation, Biscuit copies, the charge path, revocation, token exchange |
+| [docs/biscuit-profile.md](docs/biscuit-profile.md) | how a capability travels in a Biscuit, and what a holder may append with any Biscuit implementation |
+| [docs/migration.md](docs/migration.md) | the release candidates of 1.0, and every breaking change from v0.3.0 on, of limes and of each nested module, as what it was and what it is now |
 | [docs/api-review-v1.md](docs/api-review-v1.md) | the review of the API before 1.0: each finding, the decision taken and whether it is done |
 | [docs/adr/](docs/adr/) | architecture decision records: what was decided about the code behind the API, and why |
 | [CONTRIBUTING.md](.github/CONTRIBUTING.md) | building, testing and how a change lands |
@@ -307,13 +313,14 @@ its checks while unset.
 | [dpop/](dpop) | proof of possession (RFC 9449): signing and checking proofs, replay cache, server nonces |
 | [inspect/](inspect) | reading a token without verifying it, for tooling |
 | [memstore/](memstore) | the in-memory reference implementation of every storage contract |
-| [pgstore/](pgstore) | the reference PostgreSQL store, a module of its own: `Store`, `BiscuitRevocationStore`, `meter.UsageStore`, `meter.CopyUsageReader`, a `Ledger`, a `Census` and both tenant erasers under row-level security per tenant, with `EraseTenant` and a `RevocationWatcher`; held to storetest and metertest; released as `pgstore/vX.Y.Z` |
+| [pgstore/](pgstore) | the reference PostgreSQL store, a module of its own: `Store`, `BiscuitRevocationStore`, `BulkRevoker`, `ExchangeStore`, `meter.UsageStore`, `meter.CopyUsageReader`, a `Ledger`, a `Census`, both tenant erasers and a `dpop.ReplayCache` under row-level security per tenant, with `EraseTenant` and a `RevocationWatcher`; its schema applied by `pgstore/migrate`, or handed to your own migration tool as SQL by `pgstore/migrate/ddl`; held to storetest and metertest; released as `pgstore/vX.Y.Z` |
 | [redisreplay/](redisreplay) | a `dpop.ReplayCache` over Redis, a module of its own, for verifiers behind several replicas; released as `redisreplay/vX.Y.Z` |
 | [otelmetric/](otelmetric) | OpenTelemetry instruments around a `meter.UsageStore` and a `RevocationCache`, a module of its own so limes resolves no OpenTelemetry; released as `otelmetric/vX.Y.Z` |
-| [exchange/](exchange) | OAuth 2.0 Token Exchange (RFC 8693): an identity provider's access token (RFC 9068) exchanged for a capability, in process or at a token endpoint, under a policy of the consumer's, a capability narrowed for a sub-agent, an RFC 7662 introspection endpoint, and the RFC 9728 and RFC 8414 metadata an MCP server and the exchange publish; a module of its own so limes resolves no JOSE library; released as `exchange/vX.Y.Z` |
-| [internal/](internal) | the module's own shared packages, not importable from outside it: JOSE pieces (`jose`), HTTP header names (`httpx`), RFC 3986 URI normalisation (`rfc3986`), access to unexported root internals for sibling packages (`link`), the sharded TTL cache behind `RevocationCache` (`ttlcache`), and field coverage and per-check deadlines for the conformance suites (`fields`, `watchdog`) |
+| [exchange/](exchange) | OAuth 2.0 Token Exchange (RFC 8693): an identity provider's access token (RFC 9068) exchanged for a capability, in process or at a token endpoint, under a policy of the consumer's, a capability narrowed for a sub-agent, an RFC 7662 introspection endpoint, and the RFC 9728 and RFC 8414 metadata an MCP server and the exchange publish; `exchange/jwtverify` verifies an RFC 9068 subject token, apart so a consumer with its own verifier links no JOSE library; a module of its own; released as `exchange/vX.Y.Z` |
+| [biscuit/](biscuit) | the Biscuit v3 form (`biscuit.Form()`) and offline `Attenuate`, a module of its own so limes resolves neither biscuit-go nor protobuf; released as `biscuit/vX.Y.Z` |
+| [internal/](internal) | the module's own shared packages, not importable from outside it: JOSE pieces (`jose`), HTTP header names (`httpx`), RFC 3986 URI normalisation (`rfc3986`), access to unexported root internals for sibling packages (`link`), the sharded TTL cache behind `RevocationCache` (`ttlcache`), the error families (`errs`) and the check that every error names one (`errguard`), and, for the conformance suites, expectations, field coverage and per-check deadlines (`expect`, `fields`, `watchdog`) |
 | [storetest/](storetest), [metertest/](metertest), [dpop/dpoptest](dpop/dpoptest), [jwks/jwkstest](jwks/jwkstest), [exchange/exchangetest](exchange/exchangetest) | conformance suites to run from your own implementation's tests |
-| [examples/](examples) | runnable programs: the five-minute walkthrough (`quickstart`), and one topic each, logging every step to stdout — issuing and verifying, delegation, metering, and pgstore over PostgreSQL; a module of its own, never released. The Go documentation of every package but the conformance suites `metertest`, `jwkstest` and `dpoptest` carries `Example` functions for its calls; pgstore's compile without a database and do not run |
+| [examples/](examples) | runnable programs: the five-minute walkthrough (`quickstart`), and one topic each, logging every step to stdout — issuing and verifying, delegation, metering, an MCP server behind token exchange, and pgstore over PostgreSQL; a module of its own, never released. Most packages' Go documentation carries `Example` functions for their calls; pgstore's compile without a database and do not run |
 | [testdata/](testdata) | golden tokens, and the Biscuit vocabulary and cases shared with SDKs in other languages |
 | [tools/](tools) | the developer tools, pinned in modules of their own and run with `go tool -modfile=tools/go.mod` (yq: `tools/yq/go.mod`, golangci-lint: `tools/golangci-lint/go.mod`) |
 
