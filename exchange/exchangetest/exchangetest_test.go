@@ -14,6 +14,7 @@ import (
 
 	"github.com/oleg-tkachuk/limes/exchange"
 	"github.com/oleg-tkachuk/limes/exchange/exchangetest"
+	"github.com/oleg-tkachuk/limes/exchange/jwtverify"
 )
 
 const (
@@ -78,7 +79,7 @@ func (p provider) sign(t *testing.T, changes map[string]any) string {
 		t.Fatal(err)
 	}
 	headers := jws.NewHeaders()
-	if err := headers.Set(jws.TypeKey, exchange.TypeAccessToken); err != nil {
+	if err := headers.Set(jws.TypeKey, jwtverify.TypeAccessToken); err != nil {
 		t.Fatal(err)
 	}
 	if err := headers.Set(jws.KeyIDKey, kid); err != nil {
@@ -94,8 +95,8 @@ func (p provider) sign(t *testing.T, changes map[string]any) string {
 // The module's own JWTVerifier keeps the contract it sets for others.
 func TestJWTVerifierKeepsTheContract(t *testing.T) {
 	p, other := newProvider(t), newProvider(t)
-	v, err := exchange.NewJWTVerifier(exchange.JWTVerifierConfig{
-		Issuer: issuer, Keys: exchange.StaticKeys(p.keys), Now: func() time.Time { return now },
+	v, err := jwtverify.New(jwtverify.Config{
+		Issuer: issuer, Keys: jwtverify.StaticKeys(p.keys), Now: func() time.Time { return now },
 	})
 	if err != nil {
 		t.Fatal(err)

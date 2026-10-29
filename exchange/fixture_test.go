@@ -80,7 +80,7 @@ func newIDP(t testing.TB) *idp {
 // issued at testNow.
 func accessClaims() map[string]any {
 	return map[string]any{
-		claimIssuer: idpIssuer, claimSubject: userSubject, claimAudience: mcpServer, ClaimClientID: idpClient,
+		claimIssuer: idpIssuer, claimSubject: userSubject, claimAudience: mcpServer, claimClientID: idpClient,
 		claimIssuedAt: testNow.Unix(), claimExpiry: testNow.Add(subjectTTL).Unix(), claimJWTID: uuid.New().String(),
 		claimScope: "tools:read tools:write",
 	}
@@ -185,11 +185,7 @@ func newFixture(t testing.TB, fc fixtureConfig) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	subjects, err := NewJWTVerifier(JWTVerifierConfig{Issuer: idpIssuer, Keys: StaticKeys(f.idp.keys), Now: clock})
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg := Config{Issuer: issuer, Subjects: subjects, Policy: fc.policy, Now: clock, Logger: slog.New(slog.DiscardHandler)}
+	cfg := Config{Issuer: issuer, Subjects: testSubjects{idp: f.idp}, Policy: fc.policy, Now: clock, Logger: slog.New(slog.DiscardHandler)}
 	if !fc.noDPoP {
 		replay, err := dpop.NewMemoryReplayCache(dpop.MemoryReplayCacheConfig{})
 		if err != nil {

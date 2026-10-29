@@ -30,6 +30,7 @@ import (
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/examples/internal/demo"
 	"github.com/oleg-tkachuk/limes/exchange"
+	"github.com/oleg-tkachuk/limes/exchange/jwtverify"
 	"github.com/oleg-tkachuk/limes/jwks"
 	"github.com/oleg-tkachuk/limes/memstore"
 )
@@ -101,7 +102,7 @@ func (p *idp) accessToken(audience string) (string, error) {
 		return "", err
 	}
 	headers := jws.NewHeaders()
-	for name, value := range map[string]any{jws.TypeKey: exchange.TypeAccessToken, jws.KeyIDKey: idpKID} {
+	for name, value := range map[string]any{jws.TypeKey: jwtverify.TypeAccessToken, jws.KeyIDKey: idpKID} {
 		if err := headers.Set(name, value); err != nil {
 			return "", err
 		}
@@ -204,7 +205,7 @@ func main() {
 	must(err, "key set")
 	verifier, err := limes.NewVerifier(limes.VerifierConfig{Keys: keys, Revocations: records, TrustedIssuers: []string{limesIssuer}})
 	must(err, "verifier")
-	subjects, err := exchange.NewJWTVerifier(exchange.JWTVerifierConfig{Issuer: idpIssuer, Keys: exchange.StaticKeys(provider.keys)})
+	subjects, err := jwtverify.New(jwtverify.Config{Issuer: idpIssuer, Keys: jwtverify.StaticKeys(provider.keys)})
 	must(err, "subject verifier")
 
 	s := &server{tools: verifier, log: log, tenant: uuid.New()}
