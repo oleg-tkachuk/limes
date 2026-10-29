@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
+	"github.com/oleg-tkachuk/limes/internal/errs"
 	"io"
 	"math"
 	"net/http"
@@ -109,21 +110,21 @@ type Remote struct {
 // PublicKey call does, so constructing a verifier never blocks on the network.
 func NewRemote(cfg RemoteConfig) (*Remote, error) {
 	if cfg.URL == "" {
-		return nil, errors.New("jwks: RemoteConfig.URL required")
+		return nil, errs.Config("jwks: RemoteConfig.URL required")
 	}
 	u, err := parseRemoteURL(cfg.URL)
 	if err != nil {
 		return nil, err
 	}
 	if cfg.RefreshInterval < 0 || cfg.MinRefreshInterval < 0 || cfg.MaxStale < 0 || cfg.MaxDocumentBytes < 0 {
-		return nil, errors.New("jwks: RemoteConfig intervals and MaxDocumentBytes must not be negative")
+		return nil, errs.Config("jwks: RemoteConfig intervals and MaxDocumentBytes must not be negative")
 	}
 	setRemoteDefaults(&cfg)
 	// A set past MaxStale before it is due a refresh would fail closed
 	// with no fetch having failed, and a refresh due inside the rate limit
 	// would wait it out anyway.
 	if cfg.MinRefreshInterval > cfg.RefreshInterval || cfg.RefreshInterval > cfg.MaxStale {
-		return nil, fmt.Errorf("jwks: RemoteConfig needs MinRefreshInterval (%s) ≤ RefreshInterval (%s) ≤ MaxStale (%s)",
+		return nil, errs.Config("jwks: RemoteConfig needs MinRefreshInterval (%s) ≤ RefreshInterval (%s) ≤ MaxStale (%s)",
 			cfg.MinRefreshInterval, cfg.RefreshInterval, cfg.MaxStale)
 	}
 	return &Remote{cfg: cfg, endpoint: u.Redacted(), fetching: make(chan struct{}, 1)}, nil
@@ -142,7 +143,7 @@ func parseRemoteURL(raw string) (*url.URL, error) {
 		return nil, fmt.Errorf("jwks: RemoteConfig.URL: %w", err)
 	}
 	if u.Scheme != schemeHTTPS || u.Host == "" {
-		return nil, fmt.Errorf("jwks: RemoteConfig.URL must be an %s URL, got %q", schemeHTTPS, u.Redacted())
+		return nil, errs.Config("jwks: RemoteConfig.URL must be an %s URL, got %q", schemeHTTPS, u.Redacted())
 	}
 	return u, nil
 }

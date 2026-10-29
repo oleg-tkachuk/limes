@@ -4,7 +4,6 @@ import (
 	"crypto/ed25519"
 	"crypto/x509"
 	"encoding/pem"
-	"errors"
 	"fmt"
 	"os"
 
@@ -24,7 +23,7 @@ const pemTypePrivateKey = "PRIVATE KEY"
 // format is loud rather than read one way here and another there.
 func loadPrivateKey(path string) (ed25519.PrivateKey, error) {
 	if path == "" {
-		return nil, errors.New("limes: empty private key path")
+		return nil, invalidConfig("limes: empty private key path")
 	}
 	raw, err := os.ReadFile(path) // #nosec G304 — operator-supplied path
 	if err != nil {
@@ -32,10 +31,10 @@ func loadPrivateKey(path string) (ed25519.PrivateKey, error) {
 	}
 	block, _ := pem.Decode(raw)
 	if block == nil {
-		return nil, fmt.Errorf("limes: %q is not PEM-encoded", path)
+		return nil, invalidConfig("limes: %q is not PEM-encoded", path)
 	}
 	if block.Type != pemTypePrivateKey {
-		return nil, fmt.Errorf("limes: %q has PEM type %q (want PRIVATE KEY)",
+		return nil, invalidConfig("limes: %q has PEM type %q (want PRIVATE KEY)",
 			path, block.Type)
 	}
 	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
@@ -44,7 +43,7 @@ func loadPrivateKey(path string) (ed25519.PrivateKey, error) {
 	}
 	priv, ok := parsed.(ed25519.PrivateKey)
 	if !ok {
-		return nil, fmt.Errorf("limes: %q holds %T, not ed25519.PrivateKey",
+		return nil, invalidConfig("limes: %q holds %T, not ed25519.PrivateKey",
 			path, parsed)
 	}
 	return priv, nil

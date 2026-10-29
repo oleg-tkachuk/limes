@@ -178,12 +178,12 @@ type RevocationCacheConfig struct {
 // verifier directly.
 func NewRevocationCache(cfg RevocationCacheConfig) (*RevocationCache, error) {
 	if isNilValue(cfg.Capabilities) {
-		return nil, errors.New("limes: RevocationCacheConfig.Capabilities required")
+		return nil, invalidConfig("limes: RevocationCacheConfig.Capabilities required")
 	}
 	// An interface holding a nil pointer is not nil: unchecked, it would read
 	// as an upstream here and panic at the first Biscuit presented.
 	if cfg.Biscuits != nil && isNilValue(cfg.Biscuits) {
-		return nil, errors.New("limes: RevocationCacheConfig.Biscuits holds a nil value")
+		return nil, invalidConfig("limes: RevocationCacheConfig.Biscuits holds a nil value")
 	}
 	c, err := newCacheConfig(cfg.TTL, cfg.MaxEntries, cfg.Now)
 	if err != nil {
@@ -215,9 +215,9 @@ func syncedTTL(synced, ttl time.Duration) (time.Duration, error) {
 	case synced == 0:
 		return ttl, nil
 	case synced < ttl:
-		return 0, fmt.Errorf("limes: cache SyncedTTL %s is shorter than its TTL %s", synced, ttl)
+		return 0, invalidConfig("limes: cache SyncedTTL %s is shorter than its TTL %s", synced, ttl)
 	case synced > MaxRevocationCacheSyncedTTL:
-		return 0, fmt.Errorf("limes: cache SyncedTTL %s is longer than %s", synced, MaxRevocationCacheSyncedTTL)
+		return 0, invalidConfig("limes: cache SyncedTTL %s is longer than %s", synced, MaxRevocationCacheSyncedTTL)
 	}
 	return synced, nil
 }
@@ -241,10 +241,10 @@ func isNilValue(v any) bool {
 // refuses the negative ones.
 func newCacheConfig(ttl time.Duration, maxEntries int, now func() time.Time) (ttlcache.Config, error) {
 	if ttl < 0 {
-		return ttlcache.Config{}, fmt.Errorf("limes: cache TTL %s is negative", ttl)
+		return ttlcache.Config{}, invalidConfig("limes: cache TTL %s is negative", ttl)
 	}
 	if maxEntries < 0 {
-		return ttlcache.Config{}, fmt.Errorf("limes: cache bound %d is negative", maxEntries)
+		return ttlcache.Config{}, invalidConfig("limes: cache bound %d is negative", maxEntries)
 	}
 	if ttl == 0 {
 		ttl = DefaultRevocationCacheTTL

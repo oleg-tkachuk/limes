@@ -70,6 +70,8 @@ const (
 	CodeNoRevocationLineage    Code = "no_revocation_lineage"
 	CodeCopyCountersNotMetered Code = "copy_counters_not_metered"
 	CodeCursorRepeated         Code = "cursor_repeated"
+	CodeInvalidConfig          Code = "invalid_config"
+	CodeInternal               Code = "internal"
 )
 
 // codeRule is one sentinel's code and, for one no refusal rule answers, the
@@ -130,13 +132,15 @@ var codeRules = []codeRule{
 	{ErrNotFound, CodeNotFound, http.StatusNotFound, "Not found"},
 	{ErrUnknownTenant, CodeUnknownTenant, http.StatusNotFound, "The tenant is unknown"},
 	{ErrTenantDeleted, CodeTenantDeleted, http.StatusGone, "The tenant is deleted"},
-	{ErrScopeMismatch, CodeScopeMismatch, http.StatusForbidden, "The call is scoped to another tenant than its request names"},
+	{ErrScopeMismatch, CodeScopeMismatch, http.StatusInternalServerError, "The call is scoped to another tenant than its request names"},
 
 	// The server's configuration or its upstream: its own to fix.
 	{ErrProofUnsupported, CodeProofUnsupported, http.StatusInternalServerError, "The capability is bound to a key and no proof is checked"},
 	{ErrNoRevocationLineage, CodeNoRevocationLineage, http.StatusBadGateway, "The revocation upstream names no lineage"},
 	{ErrCopyCountersNotMetered, CodeCopyCountersNotMetered, http.StatusInternalServerError, "Copy limits need a verifier that meters copies"},
 	{ErrCursorRepeated, CodeCursorRepeated, http.StatusBadGateway, "The store returned a cursor already fetched"},
+	{ErrInvalidConfig, CodeInvalidConfig, http.StatusInternalServerError, "The server is misconfigured"},
+	{ErrInternal, CodeInternal, http.StatusInternalServerError, internalTitle},
 }
 
 // codeRuleFor is the first code rule err matches.
@@ -175,6 +179,20 @@ func Codes() []Code {
 // ProblemTypeURI is the RFC 9457 type URI of the problem a code, or a
 // refusal's Reason, names.
 func ProblemTypeURI(kind string) string { return problemTypeBase + kind }
+
+// ProblemFor is ProblemOf for any error: one that is not limes's — a
+// store's own failure, a consumer's — is answered as internal, 500, so every
+// error a consumer passes has a code and a body.
+func ProblemFor(err error) Problem {
+	if p, ok := ProblemOf(err); ok {
+		return p
+	}
+	return Problem{Type: ProblemTypeURI(string(CodeInternal)), Title: internalTitle, Status: http.StatusInternalServerError, Code: CodeInternal}
+}
+
+// internalTitle is the title of a problem with no more to say than that the
+// server failed.
+const internalTitle = "Internal error"
 
 // ProblemOf is the RFC 9457 problem details of err, an error limes returned,
 // for a consumer's own API, whatever its transport: its type URI, a fixed

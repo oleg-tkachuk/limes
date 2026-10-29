@@ -85,6 +85,7 @@ var sentinels = map[string]error{
 	"..ErrCursorRepeated": ErrCursorRepeated, "..ErrCopyCountersNotMetered": ErrCopyCountersNotMetered,
 	"..ErrBiscuitAttenuation": ErrBiscuitAttenuation, "..ErrNotFound": ErrNotFound, "..ErrConflict": ErrConflict,
 	"..ErrAlreadyExists": ErrAlreadyExists, "..ErrInvalidCaveats": ErrInvalidCaveats,
+	"..ErrInvalidConfig": ErrInvalidConfig, "..ErrInternal": ErrInternal,
 	"dpop.ErrRequired": dpop.ErrRequired, "dpop.ErrInvalid": dpop.ErrInvalid, "dpop.ErrReplayed": dpop.ErrReplayed,
 	"dpop.ErrNonceRequired": dpop.ErrNonceRequired,
 	"jwks.ErrUnavailable":   jwks.ErrUnavailable, "jwks.ErrUnknownKID": jwks.ErrUnknownKID,
@@ -178,7 +179,7 @@ func TestProblemOf(t *testing.T) {
 		"an erased tenant": {ErrTenantErased, http.StatusUnauthorized, CodeTenantErased},
 		"invalid caveats":  {invalidRequest("x"), http.StatusBadRequest, CodeInvalidRequest},
 		"a deleted tenant": {ErrTenantDeleted, http.StatusGone, CodeTenantDeleted},
-		"a scope mismatch": {ErrScopeMismatch, http.StatusForbidden, CodeScopeMismatch},
+		"a scope mismatch": {ErrScopeMismatch, http.StatusInternalServerError, CodeScopeMismatch},
 		"already exists":   {ErrAlreadyExists, http.StatusConflict, CodeAlreadyExists},
 		"a revoked parent": {fmt.Errorf("delegate: %w", ErrRevoked), http.StatusUnauthorized, CodeRevoked},
 	} {
@@ -247,6 +248,19 @@ func TestErrorsDocListsEveryCode(t *testing.T) {
 		p, _ := ProblemOf(r.sentinel)
 		if got, ok := doc[string(r.code)]; !ok || got != p.Status {
 			t.Errorf("%s lists %q with status %d (listed %v); ProblemOf answers %d", errorsDoc, r.code, got, ok, p.Status)
+		}
+	}
+}
+
+// ProblemFor answers every error: limes's as ProblemOf does, any other as
+// internal.
+func TestProblemFor(t *testing.T) {
+	if p := ProblemFor(ErrNotFound); p.Code != CodeNotFound || p.Status != http.StatusNotFound {
+		t.Errorf("ProblemFor(ErrNotFound) = %+v", p)
+	}
+	for _, err := range []error{errors.New("connection reset"), nil} {
+		if p := ProblemFor(err); p.Code != CodeInternal || p.Status != http.StatusInternalServerError || p.Title == "" {
+			t.Errorf("ProblemFor(%v) = %+v, want internal", err, p)
 		}
 	}
 }

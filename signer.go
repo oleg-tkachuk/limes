@@ -70,23 +70,23 @@ type ContextSigner interface {
 // key that is not Ed25519.
 func NewSigner(cfg SignerConfig) (*Signer, error) {
 	if !jwks.IsKeyID(cfg.KeyID) {
-		return nil, fmt.Errorf("limes: SignerConfig.KeyID %q is not a limes kid (%q and a name)", cfg.KeyID, jwks.KeyIDPrefix)
+		return nil, invalidConfig("limes: SignerConfig.KeyID %q is not a limes kid (%q and a name)", cfg.KeyID, jwks.KeyIDPrefix)
 	}
 	key := cfg.Key.signer()
 	if key == nil {
-		return nil, errors.New("limes: SignerConfig.Key required")
+		return nil, invalidConfig("limes: SignerConfig.Key required")
 	}
 	// An ed25519.PrivateKey of the wrong length panics in Public.
 	if k, ok := key.(ed25519.PrivateKey); ok && len(k) != ed25519.PrivateKeySize {
-		return nil, fmt.Errorf("limes: SignerConfig.Key is %d bytes, not an Ed25519 private key's %d", len(k), ed25519.PrivateKeySize)
+		return nil, invalidConfig("limes: SignerConfig.Key is %d bytes, not an Ed25519 private key's %d", len(k), ed25519.PrivateKeySize)
 	}
 	pub, ok := key.Public().(ed25519.PublicKey)
 	if !ok || len(pub) != ed25519.PublicKeySize {
-		return nil, fmt.Errorf("limes: SignerConfig.Key must be Ed25519, not %T", key.Public())
+		return nil, invalidConfig("limes: SignerConfig.Key must be Ed25519, not %T", key.Public())
 	}
 	alg := cmp.Or(cfg.Algorithm, SigningAlgorithmEd25519)
 	if !slices.Contains(signingAlgorithms, alg) {
-		return nil, fmt.Errorf("limes: SignerConfig.Algorithm %q is not one of %q", alg, signingAlgorithms)
+		return nil, invalidConfig("limes: SignerConfig.Algorithm %q is not one of %q", alg, signingAlgorithms)
 	}
 	return &Signer{keyID: cfg.KeyID, key: cfg.Key.s, pub: [ed25519.PublicKeySize]byte(pub), alg: alg}, nil
 }
@@ -197,7 +197,7 @@ func checkIJSONIntegers(c jwtClaims) error {
 		{claimMaxRequests, c.Caveats.MaxRequests},
 	} {
 		if claim.n < -MaxIJSONInteger || claim.n > MaxIJSONInteger {
-			return fmt.Errorf("limes: %s %d is outside the I-JSON integer range (RFC 7493)", claim.name, claim.n)
+			return invalidRequest("limes: %s %d is outside the I-JSON integer range (RFC 7493)", claim.name, claim.n)
 		}
 	}
 	return nil
@@ -290,7 +290,7 @@ func checkSignable(c Capability) error {
 		return err
 	}
 	if c.ExpiresAt.Before(c.IssuedAt) || c.ExpiresAt.IsZero() {
-		return errors.New("limes: ExpiresAt must be after IssuedAt")
+		return invalidRequest("limes: ExpiresAt must be after IssuedAt")
 	}
 	return checkActing(c)
 }
@@ -299,18 +299,18 @@ func checkSignable(c Capability) error {
 func checkRequired(c Capability) error {
 	switch {
 	case c.ID == uuid.Nil():
-		return errors.New("limes: ID required")
+		return invalidRequest("limes: ID required")
 	case c.Issuer == "":
-		return errors.New("limes: Issuer required")
+		return invalidRequest("limes: Issuer required")
 	case c.Subject.TenantID == uuid.Nil():
-		return errors.New("limes: Subject.TenantID required")
+		return invalidRequest("limes: Subject.TenantID required")
 	case c.Subject.Subject == "":
-		return errors.New("limes: Subject.Subject required (RFC 9068 sub)")
+		return invalidRequest("limes: Subject.Subject required (RFC 9068 sub)")
 	case len(c.Caveats.Ops) == 0:
-		return errors.New("limes: at least one Op required")
+		return invalidRequest("limes: at least one Op required")
 	case c.ClientID == "":
 		// RFC 9068 makes client_id required of an at+jwt: none is invented.
-		return errors.New("limes: a capability needs a ClientID (RFC 9068 client_id)")
+		return invalidRequest("limes: a capability needs a ClientID (RFC 9068 client_id)")
 	}
 	return nil
 }
@@ -349,14 +349,14 @@ func (s *Signer) signature(ctx context.Context, signingInput string) ([]byte, er
 		return nil, fmt.Errorf("limes: sign: %w", err)
 	}
 	if len(sig) != ed25519.SignatureSize {
-		return nil, fmt.Errorf("limes: sign: an Ed25519 signature is %d bytes, not %d", ed25519.SignatureSize, len(sig))
+		return nil, broken("limes: sign: an Ed25519 signature is %d bytes, not %d", ed25519.SignatureSize, len(sig))
 	}
 	// A key held elsewhere — a KMS, an HSM — may sign with another key than
 	// the one it reports, or return bytes that are no signature at all:
 	// a token carrying either would be refused by every verifier, and
 	// recorded as issued.
 	if !ed25519.Verify(s.pub[:], []byte(signingInput), sig) {
-		return nil, errors.New("limes: sign: the signature does not verify under the key's public key")
+		return nil, broken("limes: sign: the signature does not verify under the key's public key")
 	}
 	return sig, nil
 }
@@ -546,7 +546,7 @@ func readParentID(parentID string, prior []string) (uuid.UUID, error) {
 func checkActing(c Capability) error {
 	if c.OnBehalfOf == nil {
 		if len(c.PriorActors) > 0 {
-			return errors.New("limes: PriorActors need an OnBehalfOf")
+			return invalidRequest("limes: PriorActors need an OnBehalfOf")
 		}
 		return nil
 	}
@@ -554,10 +554,10 @@ func checkActing(c Capability) error {
 		return err
 	}
 	if len(c.PriorActors) > 0 && c.ParentID == uuid.Nil() {
-		return errors.New("limes: PriorActors need a ParentID")
+		return invalidRequest("limes: PriorActors need a ParentID")
 	}
 	if len(c.PriorActors) > MaxDelegationDepth || slices.Contains(c.PriorActors, "") {
-		return fmt.Errorf("limes: PriorActors are at most %d subjects, none empty", MaxDelegationDepth)
+		return invalidRequest("limes: PriorActors are at most %d subjects, none empty", MaxDelegationDepth)
 	}
 	return nil
 }

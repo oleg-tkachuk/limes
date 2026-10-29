@@ -223,11 +223,11 @@ func checkVerifierWiring(cfg VerifierConfig) error {
 	// here and panic at the first token verified.
 	switch {
 	case isNilValue(cfg.Keys):
-		return errors.New("limes: VerifierConfig.Keys required")
+		return invalidConfig("limes: VerifierConfig.Keys required")
 	case isNilValue(cfg.Revocations):
-		return errors.New("limes: VerifierConfig.Revocations required")
+		return invalidConfig("limes: VerifierConfig.Revocations required")
 	case len(cfg.TrustedIssuers) == 0:
-		return errors.New("limes: VerifierConfig.TrustedIssuers required")
+		return invalidConfig("limes: VerifierConfig.TrustedIssuers required")
 	}
 	return nil
 }
@@ -259,11 +259,11 @@ func biscuitConfig(b *BiscuitConfig) (*BiscuitConfig, error) {
 // gives an unset one DefaultLeeway.
 func setLeeway(cfg *VerifierConfig) error {
 	if cfg.Leeway < 0 || cfg.Leeway > MaxLeeway {
-		return fmt.Errorf("limes: VerifierConfig.Leeway %s is outside 0..%s", cfg.Leeway, MaxLeeway)
+		return invalidConfig("limes: VerifierConfig.Leeway %s is outside 0..%s", cfg.Leeway, MaxLeeway)
 	}
 	switch {
 	case cfg.NoLeeway && cfg.Leeway != 0:
-		return fmt.Errorf("limes: VerifierConfig.Leeway %s beside NoLeeway", cfg.Leeway)
+		return invalidConfig("limes: VerifierConfig.Leeway %s beside NoLeeway", cfg.Leeway)
 	case cfg.NoLeeway:
 		// Leeway stays 0: the window is exact.
 	case cfg.Leeway == 0:
@@ -276,7 +276,7 @@ func setLeeway(cfg *VerifierConfig) error {
 // DefaultMaxTokenBytes.
 func setMaxTokenBytes(cfg *VerifierConfig) error {
 	if cfg.MaxTokenBytes < 0 {
-		return fmt.Errorf("limes: VerifierConfig.MaxTokenBytes %d is negative", cfg.MaxTokenBytes)
+		return invalidConfig("limes: VerifierConfig.MaxTokenBytes %d is negative", cfg.MaxTokenBytes)
 	}
 	if cfg.MaxTokenBytes == 0 {
 		cfg.MaxTokenBytes = DefaultMaxTokenBytes
@@ -288,7 +288,7 @@ func setMaxTokenBytes(cfg *VerifierConfig) error {
 // DefaultRealm.
 func setRealm(cfg *VerifierConfig) error {
 	if strings.ContainsFunc(cfg.Realm, func(r rune) bool { return !authParamChar(r) }) {
-		return fmt.Errorf("limes: VerifierConfig.Realm %q holds a character RFC 6750 does not allow", cfg.Realm)
+		return invalidConfig("limes: VerifierConfig.Realm %q holds a character RFC 6750 does not allow", cfg.Realm)
 	}
 	if cfg.Realm == "" {
 		cfg.Realm = DefaultRealm
@@ -301,9 +301,9 @@ func setRealm(cfg *VerifierConfig) error {
 func setKeyIssuers(cfg *VerifierConfig) error {
 	switch {
 	case len(cfg.KeyIssuers) > 0 && cfg.SharedKeys:
-		return errors.New("limes: VerifierConfig.KeyIssuers and SharedKeys exclude each other")
+		return invalidConfig("limes: VerifierConfig.KeyIssuers and SharedKeys exclude each other")
 	case len(cfg.TrustedIssuers) > 1 && len(cfg.KeyIssuers) == 0 && !cfg.SharedKeys:
-		return errors.New("limes: VerifierConfig trusts several issuers; bind each kid to one (KeyIssuers) or set SharedKeys")
+		return invalidConfig("limes: VerifierConfig trusts several issuers; bind each kid to one (KeyIssuers) or set SharedKeys")
 	}
 	cfg.KeyIssuers = maps.Clone(cfg.KeyIssuers)
 	if len(cfg.KeyIssuers) == 0 {

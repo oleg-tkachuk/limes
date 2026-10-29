@@ -2,7 +2,6 @@ package limes
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -154,8 +153,8 @@ func init() {
 
 // errNoBiscuitRevocations is returned by NewVerifier when Biscuits
 // are accepted with nothing to check their copies against.
-var errNoBiscuitRevocations = errors.New("limes: VerifierConfig.Biscuit.Revocations required")
+var errNoBiscuitRevocations = invalidConfig("limes: VerifierConfig.Biscuit.Revocations required")
 
 // errNoBiscuitForm is returned by NewVerifier when Biscuits are accepted
 // with no form to read them.
-var errNoBiscuitForm = errors.New("limes: VerifierConfig.Biscuit.Form required: github.com/oleg-tkachuk/limes/biscuit's Form")
+var errNoBiscuitForm = invalidConfig("limes: VerifierConfig.Biscuit.Form required: github.com/oleg-tkachuk/limes/biscuit's Form")

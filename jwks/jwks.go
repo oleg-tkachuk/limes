@@ -12,8 +12,8 @@ import (
 	"encoding/json"
 	"encoding/json/jsontext"
 	jsonv2 "encoding/json/v2"
-	"errors"
 	"fmt"
+	"github.com/oleg-tkachuk/limes/internal/errs"
 	"log/slog"
 	"maps"
 	"net/http"
@@ -112,17 +112,17 @@ func Marshal(keys map[string]ed25519.PublicKey) ([]byte, error) {
 func MarshalAlgorithms(keys map[string]ed25519.PublicKey, algs map[string]string) ([]byte, error) {
 	for kid, alg := range algs {
 		if _, ok := keys[kid]; !ok {
-			return nil, fmt.Errorf("jwks: an algorithm for %q, which is no key of the set", kid)
+			return nil, errs.Request("jwks: an algorithm for %q, which is no key of the set", kid)
 		}
 		if !slices.Contains(algorithms, alg) {
-			return nil, fmt.Errorf("jwks: algorithm %q for %q is not one of %q", alg, kid, algorithms)
+			return nil, errs.Request("jwks: algorithm %q for %q is not one of %q", alg, kid, algorithms)
 		}
 	}
 	entries := make([]entry, 0, len(keys))
 	for _, kid := range slices.Sorted(maps.Keys(keys)) {
 		pub := keys[kid]
 		if len(pub) != ed25519.PublicKeySize {
-			return nil, fmt.Errorf("jwks: public key %q wrong size for Ed25519", kid)
+			return nil, errs.Request("jwks: public key %q wrong size for Ed25519", kid)
 		}
 		alg, ok := algs[kid]
 		if !ok {
@@ -164,7 +164,7 @@ func parse(raw []byte) (map[string]ed25519.PublicKey, int, error) {
 		return nil, 0, fmt.Errorf("jwks: parse JWKS: %w", err)
 	}
 	if doc.Keys == nil {
-		return nil, 0, errors.New(`jwks: parse JWKS: no "keys" array`)
+		return nil, 0, errs.Request(`jwks: parse JWKS: no "keys" array`)
 	}
 	entries := *doc.Keys
 	keys := make([]usable, 0, len(entries))
@@ -272,7 +272,7 @@ type Handler struct {
 // negative MaxAge or one under a second, or a MaxAge beside Revalidate.
 func NewHandler(cfg HandlerConfig) (*Handler, error) {
 	if cfg.Keys == nil {
-		return nil, errors.New("jwks: HandlerConfig.Keys required")
+		return nil, errs.Config("jwks: HandlerConfig.Keys required")
 	}
 	cacheControl, err := cfg.cacheControl()
 	if err != nil {
@@ -292,11 +292,11 @@ func (cfg HandlerConfig) cacheControl() (string, error) {
 	maxAge := cfg.MaxAge
 	switch {
 	case maxAge < 0:
-		return "", fmt.Errorf("jwks: HandlerConfig.MaxAge %s is negative", maxAge)
+		return "", errs.Config("jwks: HandlerConfig.MaxAge %s is negative", maxAge)
 	case maxAge > 0 && maxAge < time.Second:
-		return "", fmt.Errorf("jwks: HandlerConfig.MaxAge %s is under a second, the unit of max-age", maxAge)
+		return "", errs.Config("jwks: HandlerConfig.MaxAge %s is under a second, the unit of max-age", maxAge)
 	case cfg.Revalidate && maxAge != 0:
-		return "", fmt.Errorf("jwks: HandlerConfig.MaxAge %s beside Revalidate", maxAge)
+		return "", errs.Config("jwks: HandlerConfig.MaxAge %s beside Revalidate", maxAge)
 	case cfg.Revalidate:
 		return fmt.Sprintf("%s, %s", httpx.DirectivePublic, httpx.DirectiveNoCache), nil
 	case maxAge == 0:

@@ -100,6 +100,8 @@ var sentinelMatrix = map[string]sentinelCase{
 	"ErrTenantDeleted":       {ErrTenantDeleted, nil, "", http.StatusInternalServerError},
 	"ErrScopeMismatch":       {ErrScopeMismatch, nil, "", http.StatusInternalServerError},
 	"ErrProofUnsupported":    {ErrProofUnsupported, nil, "", http.StatusInternalServerError},
+	"ErrInvalidConfig":       {ErrInvalidConfig, nil, "", http.StatusInternalServerError},
+	"ErrInternal":            {ErrInternal, nil, "", http.StatusInternalServerError},
 	"ErrCursorRepeated":      {ErrCursorRepeated, nil, "", http.StatusInternalServerError},
 	"ErrNoRevocationLineage": {ErrNoRevocationLineage, nil, "", http.StatusInternalServerError},
 }
