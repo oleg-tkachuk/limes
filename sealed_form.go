@@ -20,6 +20,11 @@ import (
 // encoding and verifies its signatures; the core keeps what a narrowing may
 // do. Every block a form hands back is checked as the holder's input
 // (Attenuation, Narrows), whatever form decoded it.
+//
+// A form's error refuses the token as ErrBiscuitAttenuation when it wraps
+// that sentinel, and as ErrInvalidToken otherwise. The form need not wrap
+// either: an error that does keeps its text, one that does not gets the
+// family's prefixed, and the family is named once either way.
 type TokenForm interface {
 	// Seal builds a token around the JWT sign returns for the root key the
 	// form chose, whose private half signs the token's first block and is
