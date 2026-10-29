@@ -115,7 +115,7 @@ func TestBiscuitProofIsOverTheBiscuit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inner, _, err := openBiscuit(bound)
+	inner, _, err := biscuitForm{}.Open(bound)
 	if err != nil {
 		t.Fatal(err)
 	}

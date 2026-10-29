@@ -32,6 +32,8 @@ type Issuer struct {
 	issuerName    string
 	defaultTTL    time.Duration
 	maxTokenBytes int
+	// form seals a capability in the Biscuit form (Biscuit).
+	form TokenForm
 }
 
 // DefaultIssueTTL is IssuerConfig.DefaultTTL when it is zero.
@@ -63,6 +65,10 @@ type IssuerConfig struct {
 
 	// Now is the clock; tests override.
 	Now func() time.Time
+
+	// Biscuit is the form Issuer.Biscuit seals a capability in. Nil: the
+	// Biscuit form this module carries.
+	Biscuit TokenForm
 }
 
 // NewIssuer validates wiring and returns a ready Issuer.
@@ -91,6 +97,9 @@ func NewIssuer(cfg IssuerConfig) (*Issuer, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
+	if cfg.Biscuit == nil {
+		cfg.Biscuit = biscuitForm{}
+	}
 	return &Issuer{
 		signer:        cfg.Signer,
 		store:         cfg.Store,
@@ -98,6 +107,7 @@ func NewIssuer(cfg IssuerConfig) (*Issuer, error) {
 		issuerName:    cfg.IssuerName,
 		defaultTTL:    cfg.DefaultTTL,
 		maxTokenBytes: cfg.MaxTokenBytes,
+		form:          cfg.Biscuit,
 	}, nil
 }
 

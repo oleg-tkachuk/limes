@@ -129,6 +129,10 @@ type BiscuitConfig struct {
 	// refuses every Biscuit at Verify instead.
 	Revocations BiscuitRevocationLookup
 
+	// Form reads the Biscuit form. Nil: the Biscuit form this module
+	// carries.
+	Form TokenForm
+
 	// MeterCopies admits Biscuits whose attenuation blocks set a copy's own
 	// request or budget limits (Attenuation.Requests, Attenuation.Budget).
 	// Set it only when the Meter that enforces caveats counts
@@ -244,6 +248,9 @@ func biscuitConfig(b *BiscuitConfig) (*BiscuitConfig, error) {
 	}
 	if isNilValue(own.Revocations) {
 		return nil, errNoBiscuitRevocations
+	}
+	if own.Form == nil {
+		own.Form = biscuitForm{}
 	}
 	return &own, nil
 }
@@ -587,9 +594,9 @@ func (v *Verifier) Authorize(ctx context.Context, req AuthorizeRequest) (Verifie
 // Biscuit grants, copy limits included, and its revocation ids, authority
 // first.
 func (v *Verifier) verifyBiscuit(ctx context.Context, token string) (*grant, [][]byte, error) {
-	inner, attenuate, err := openBiscuit(token)
+	inner, unseal, err := v.cfg.Biscuit.Form.Open(token)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, formRefusal(err)
 	}
 	sealed, err := v.verifySigned(ctx, inner)
 	if err != nil {
@@ -598,7 +605,15 @@ func (v *Verifier) verifyBiscuit(ctx context.Context, token string) (*grant, [][
 	if sealed.biscuitRoot == "" {
 		return nil, nil, fmt.Errorf("%w: biscuit seals an ordinary token", ErrInvalidToken)
 	}
-	return attenuate(sealed)
+	root, err := sealedRoot(sealed)
+	if err != nil {
+		return nil, nil, err
+	}
+	u, err := unseal(root)
+	if err != nil {
+		return nil, nil, formRefusal(err)
+	}
+	return unsealedGrant(sealed, u)
 }
 
 // verifySigned checks a compact JWT's header, signature, issuer and tenant —
@@ -715,6 +730,16 @@ func isProofRefusal(err error) bool {
 		}
 	}
 	return false
+}
+
+// formRefusal is a TokenForm's error as a refusal of the token, by
+// refuseToken: ErrBiscuitAttenuation when the form says a block is at fault,
+// ErrInvalidToken otherwise.
+func formRefusal(err error) error {
+	if errors.Is(err, ErrBiscuitAttenuation) {
+		return refuseToken(ErrBiscuitAttenuation, err)
+	}
+	return refuseToken(ErrInvalidToken, err)
 }
 
 // refuseToken is err as a refusal of the presented token in family: the

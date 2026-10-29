@@ -106,7 +106,7 @@ func TestNamePrefixesTravelInTheToken(t *testing.T) {
 // the copy is held to the block's resources alone.
 func TestBiscuitBlockReplacesNamePrefixes(t *testing.T) {
 	cur := Capability{Caveats: Caveats{Requests: RequestCeiling{Unlimited: true}, Ops: []Op{OpGet}, ResourceNamePrefixes: []string{"drafts/billing-"}}}
-	next := blockFacts{resources: true, prefixes: []string{"drafts/billing-q3"}}.narrow(cur)
+	next := Attenuation{ResourcePrefixes: []string{"drafts/billing-q3"}}.narrow(cur)
 	if len(next.Caveats.ResourceNamePrefixes) != 0 || !slices.Equal(next.Caveats.ResourcePrefixes, []string{"drafts/billing-q3"}) {
 		t.Errorf("the copy keeps %+v", next.Caveats)
 	}

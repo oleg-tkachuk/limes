@@ -2,7 +2,6 @@ package limes
 
 import (
 	"crypto/ed25519"
-	"encoding/base64"
 	"os"
 	"strings"
 	"testing"
@@ -54,13 +53,13 @@ func FuzzOpenBiscuit(f *testing.F) {
 		Name: &topBit, Terms: []*pb.TermV2{{Content: &pb.TermV2_Integer{Integer: 1}}},
 	}}}}, make([]byte, ed25519.SeedSize)))
 	f.Add(forgedBiscuitToken(f, &pb.Block{}, []byte{1}))
-	anyRoot := base64.RawURLEncoding.EncodeToString(make([]byte, ed25519.PublicKeySize))
+	anyRoot := ed25519.PublicKey(make([]byte, ed25519.PublicKeySize))
 	f.Fuzz(func(t *testing.T, token string) {
-		_, attenuate, err := openBiscuit(token)
+		_, unseal, err := biscuitForm{}.Open(token)
 		if err != nil {
 			return
 		}
-		_, _, _ = attenuate(&grant{biscuitRoot: anyRoot})
+		_, _ = unseal(anyRoot)
 	})
 }
 
@@ -117,7 +116,11 @@ func FuzzAttenuationBlock(f *testing.F) {
 			term = n
 		}
 		blk := decodedBlock{facts: []decodedFact{{name: name, term: term}}}
-		next, err := applyAttenuation(grant{Capability: parent}, blk, []byte("block"))
+		f, err := readBlockFacts(blk)
+		if err != nil {
+			return
+		}
+		next, err := applyAttenuation(grant{Capability: parent}, f.attenuation(), []byte("block"))
 		if err != nil {
 			return
 		}
