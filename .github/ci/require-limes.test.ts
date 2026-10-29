@@ -36,6 +36,23 @@ test("compareVersions", () => {
   assert.ok(compareVersions("v0.1.0", "v0.2.0") < 0);
 });
 
+// A release candidate comes before its release and after every lower
+// version, as SemVer 2.0.0 §11 orders them: a module that requires
+// v1.0.0-rc.16 is raised to v1.0.0, and to rc.17, but not to v0.133.0.
+test("compareVersions orders a prerelease below its release", () => {
+  assert.ok(compareVersions("v1.0.0-rc.16", "v1.0.0") < 0);
+  assert.ok(compareVersions("v1.0.0", "v1.0.0-rc.16") > 0);
+  assert.ok(compareVersions("v1.0.0-rc.16", "v1.0.0-rc.17") < 0);
+  assert.ok(compareVersions("v1.0.0-rc.9", "v1.0.0-rc.10") < 0, "numeric identifiers compare as numbers");
+  assert.equal(compareVersions("v1.0.0-rc.16", "v1.0.0-rc.16"), 0);
+  assert.ok(compareVersions("v1.0.0-rc.16", "v0.133.0") > 0);
+  assert.ok(compareVersions("v1.0.0-rc", "v1.0.0-rc.1") < 0, "a shorter prerelease comes first");
+  assert.ok(compareVersions("v1.0.0-alpha", "v1.0.0-rc") < 0, "alphanumeric identifiers compare in ASCII order");
+  assert.ok(compareVersions("v1.0.0-rc.1", "v1.0.0-rc.alpha") < 0, "a numeric identifier comes before an alphanumeric one");
+  assert.equal(compareVersions("v1.0.0+build.1", "v1.0.0"), 0, "build metadata does not order");
+  assert.throws(() => compareVersions("v1.0", "v1.0.0"), /not a version/);
+});
+
 // The scope of the commit is the one the nested modules' release rules
 // release as a patch: another would merge and release none of them.
 test("the commit's scope is the one the release cuts a patch of", () => {
