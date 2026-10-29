@@ -17,7 +17,8 @@ the test that holds it there.
 | [RFC 9111](https://www.rfc-editor.org/rfc/rfc9111) | How long a fetched JWK Set stays fresh | `jwks.Remote` |
 | [RFC 9562](https://www.rfc-editor.org/rfc/rfc9562) | UUIDv7 capability ids | `Issuer.Issue` |
 | [RFC 8693](https://www.rfc-editor.org/rfc/rfc8693), [RFC 8707](https://www.rfc-editor.org/rfc/rfc8707), [RFC 9068](https://www.rfc-editor.org/rfc/rfc9068), [RFC 9396](https://www.rfc-editor.org/rfc/rfc9396), [RFC 9728](https://www.rfc-editor.org/rfc/rfc9728), [RFC 8414](https://www.rfc-editor.org/rfc/rfc8414) | An identity provider's access token exchanged for a capability, and the metadata an MCP server and the exchange publish | `exchange.Exchanger`, `exchange.Handler`, `exchange.NewResourceMetadataHandler` |
-| [RFC 4648](https://www.rfc-editor.org/rfc/rfc4648) §5 | base64url without padding, everywhere | token segments, JWKS, DPoP, nonces |
+| [RFC 7662](https://www.rfc-editor.org/rfc/rfc7662) | Introspection of a capability for a gateway | `exchange.NewIntrospectionHandler` |
+| [RFC 4648](https://www.rfc-editor.org/rfc/rfc4648) §5 | base64url without padding, everywhere but a Biscuit container, which is also read padded | token segments, JWKS, DPoP, nonces |
 | ISO 4217 | Budget units | `IsUnitCode` |
 
 ## The token
@@ -28,8 +29,8 @@ validators of that profile read it. The algorithm is fixed by the verifier
 rather than read from the token (§3.1), and `iss` and `aud` are always
 checked (§3.8, §3.9). The type names no format, so the claim `limes_v: 7`
 does, and the claims are read strictly under it: a token without `limes_v`
-7, a `client_id`, a `sub` and every `limes_` claim, or with a member the
-format does not define, is refused. Every id in the claims (`jti`, `limes_parent_id`, a tenant, a run) is read
+7, a `client_id` and a `sub`, or with a member the format does not define,
+is refused. Every id in the claims (`jti`, `limes_parent_id`, a tenant, a run) is read
 only in the canonical spelling the signer writes.
 
 RFC 8725 §3.11's explicit typing kept other JWTs signed by the same key from
@@ -214,12 +215,13 @@ the values keep to the characters RFC 6750 §3 allows. *Held by*
 **RFC 7517, RFC 8037, RFC 7638.** `jwks.Marshal` writes a JWK Set of OKP
 Ed25519 keys; `jwks.Parse` skips an entry it cannot use rather than refuse the
 set, and uses no key whose kid two entries name; a document that is not JSON,
-or names a member twice, is refused. `jwks.KeyID` makes a key's kid its RFC 7638 thumbprint, which any JOSE
-tool computes alike.
+or names a member twice, is refused. `jwks.KeyID` makes a key's kid `limes:` (`jwks.KeyIDPrefix`) followed by
+its RFC 7638 thumbprint, which any JOSE tool computes alike.
 
 **Serving and fetching (RFC 7517 §8.5, RFC 9110 §13, RFC 9111).**
 `jwks.NewHandler` serves a set as `application/jwk-set+json`, with a strong ETag
-answering `If-None-Match` with 304 and `Cache-Control: max-age`.
+answering `If-None-Match` with 304 and `Cache-Control: max-age`, or
+`no-cache` under `HandlerConfig.Revalidate`.
 `jwks.Remote` asks for that media type first, revalidates by ETag, and
 keeps a set as long as the response's `max-age` less its `Age` says — never
 longer than `RefreshInterval`, never shorter than `MinRefreshInterval`;
@@ -291,7 +293,7 @@ at an RFC 8693 token endpoint (`Handler`):
 - **The response.** A capability, `issued_token_type` its URI,
   `token_type` `DPoP` when bound and `Bearer` otherwise; `Cache-Control:
   no-store`. A refusal is RFC 6749 §5.2's JSON with RFC 8707's
-  `invalid_target` and RFC 9449's `invalid_dpop_proof` and
+  `invalid_target`, RFC 9396's `invalid_authorization_details` and RFC 9449's `invalid_dpop_proof` and
   `use_dpop_nonce`, and a fixed description per code.
 - **Proof of possession (RFC 9449 §5).** A proof binds the capability to its
   key, through `dpop.Verifier.CheckTokenRequest`, recorded before the
