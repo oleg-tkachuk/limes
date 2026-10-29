@@ -30,6 +30,9 @@ vars:
   # The reference PostgreSQL store, a module of its own: `./...` from the
   # root does not reach it.
   PGSTORE_DIR: pgstore
+  # The PostgreSQL container pgstore's tests run against, a module of its own
+  # so that testcontainers stays out of pgstore's go.mod (pgstore/internal/pgtest).
+  PGCONTAINER_DIR: pgstore/internal/pgcontainer
   # The runnable examples, a module of their own since one of them uses
   # pgstore and its driver.
   EXAMPLES_DIR: examples
@@ -123,13 +126,21 @@ tasks:
       - go tool -modfile=../{{.TOOLS_MODFILE}} govulncheck ./...
 
   verify:pgstore:
-    desc: "pgstore, its own module: go mod tidy/verify, go vet and govulncheck — what needs no database; test:pgstore runs its tests"
+    desc: "pgstore, its own module, and the container module its tests run: go mod tidy/verify, go vet and govulncheck — what needs no database; test:pgstore runs its tests"
     dir: '{{.PGSTORE_DIR}}'
     cmds:
       - go mod tidy -diff
       - go mod verify
       - go vet ./...
       - go tool -modfile=../{{.TOOLS_MODFILE}} govulncheck ./...
+      - cmd: go mod tidy -diff
+        dir: '{{.PGCONTAINER_DIR}}'
+      - cmd: go mod verify
+        dir: '{{.PGCONTAINER_DIR}}'
+      - cmd: go vet ./...
+        dir: '{{.PGCONTAINER_DIR}}'
+      - cmd: go tool -modfile={{.ROOT_DIR}}/{{.TOOLS_MODFILE}} govulncheck ./...
+        dir: '{{.PGCONTAINER_DIR}}'
 
   verify:examples:
     desc: "The examples module: go mod tidy/verify, go vet, its tests, and every example that needs no database, run to the end — each exits non-zero on a step that does not do what it says"
@@ -224,7 +235,7 @@ tasks:
     desc: "golangci-lint over every module, the root and each nested one — ./... at the root does not reach a nested module"
     cmds:
       - task: lint
-      - for: ['{{.REDISREPLAY_DIR}}', '{{.OTELMETRIC_DIR}}', '{{.EXCHANGE_DIR}}', '{{.PGSTORE_DIR}}', '{{.EXAMPLES_DIR}}']
+      - for: ['{{.REDISREPLAY_DIR}}', '{{.OTELMETRIC_DIR}}', '{{.EXCHANGE_DIR}}', '{{.PGSTORE_DIR}}', '{{.PGCONTAINER_DIR}}', '{{.EXAMPLES_DIR}}']
         task: lint:module
         vars:
           DIR: '{{.ITEM}}'
@@ -234,7 +245,7 @@ tasks:
     desc: "golangci-lint over the nested module in DIR, with the root's configuration"
     dir: '{{.DIR}}'
     cmds:
-      - go tool -modfile=../{{.GOLANGCI_LINT_MODFILE}} golangci-lint run --config ../.golangci.yml ./...
+      - go tool -modfile={{.ROOT_DIR}}/{{.GOLANGCI_LINT_MODFILE}} golangci-lint run --config {{.ROOT_DIR}}/.golangci.yml ./...
 
   lint:
     desc: "golangci-lint over the module, the version tools/golangci-lint pins — the one CI runs; flags go after --, as in task lint -- --concurrency 1"
