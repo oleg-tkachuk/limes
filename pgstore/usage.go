@@ -670,7 +670,7 @@ SELECT id FROM (
     UNION
     SELECT capability_id FROM limes.reservations
 ) o
-WHERE NOT EXISTS (SELECT 1 FROM limes.capabilities c WHERE c.id = o.id)
+WHERE NOT EXISTS (SELECT 1 FROM ` + lineageView + ` c WHERE c.id = o.id)
 ORDER BY id
 LIMIT $1`
 

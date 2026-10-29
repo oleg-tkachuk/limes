@@ -47,7 +47,7 @@ ON CONFLICT (tenant_id) DO NOTHING`
 	// records is left: no capability of it can be metered any more.
 	sqlForgetErased = `
 DELETE FROM limes.erased_tenants e
-WHERE NOT EXISTS (SELECT 1 FROM limes.capabilities c WHERE c.tenant_id = e.tenant_id)`
+WHERE NOT EXISTS (SELECT 1 FROM ` + lineageView + ` c WHERE c.tenant_id = e.tenant_id)`
 )
 
 // markErased takes the tenant's erase lock and marks it erased, first in an

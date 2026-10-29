@@ -110,8 +110,12 @@ at any minor.
      security of `limes.capabilities` binds the caller, not the view's
      owner. This needs PostgreSQL 15 or later, which pgstore then states as
      its minimum.
-   - `pgstore/usage` and `pgstore/erase` read only the view. `rls_test` and
-     `force_rls_test` cover it.
+   - `pgstore/usage` and `pgstore/erase` read only the view. A test holds
+     the view to each tenant's rows, for the runtime role and the owner, and
+     a `FOR KEY SHARE` through it to the record row; another fails on any
+     query of the usage files that names `limes.capabilities`. Until the
+     packages split, the erase's statements of its own records stay on the
+     table, as the records' own.
 6. **testcontainers leaves pgstore's go.mod.**
    - The tests stay in `package pgstore`: 42 of its 44 test files read its
      unexported code, so they cannot move to another module.
