@@ -41,7 +41,10 @@ if !ok {
 ```
 
 **The token endpoint** (`exchange.Handler`) answers in RFC 6749 §5.2's
-format: `error`, `error_description`, and a status.
+format: `error`, `error_description`, and a status. An `Exchanger` called
+in process answers alike with `exchange.ErrorOf(err)`, which reports false
+for an error that is none of the exchange's: answer it `server_error`, 500
+(see [the exchange's codes](#the-exchanges-codes)).
 
 The body, for a capability that was revoked:
 
@@ -145,3 +148,24 @@ can prove its own mapping covers them all.
 | `tenant_budget_version_mismatch` | 409 | `meter.ErrTenantBudgetVersionMismatch` |  |  | The tenant budget changed since it was read |
 | `external_ref_conflict` | 409 | `meter.ErrExternalRefConflict` |  |  | The external reference names another charge |
 | `settle_conflict` | 409 | `meter.ErrSettleConflict` |  |  | The reservation was settled for another amount |
+
+## The exchange's codes
+
+`exchange.ErrorOf` and `exchange.ErrorCodes` answer an exchange's refusals
+in RFC 6749 §5.2's format, as the token endpoint does. The codes are RFC
+6749's, RFC 8707's `invalid_target`, RFC 9396's
+`invalid_authorization_details` and RFC 9449's DPoP codes.
+
+| Code | HTTP | Sentinel | Description |
+|---|---|---|---|
+| `use_dpop_nonce` | 400 | `dpop.ErrNonceRequired` | The DPoP proof must carry the server's nonce; a fresh one goes in `DPoP-Nonce`. |
+| `invalid_dpop_proof` | 400 | `dpop.ErrRequired`, `dpop.ErrInvalid`, `dpop.ErrReplayed` | The DPoP proof is required, invalid, or used before. |
+| `unauthorized_client` | 400 | `exchange.ErrUnauthorizedClient` | The client may not exchange tokens. |
+| `invalid_client` | 401 | `exchange.ErrInvalidClient` | The client could not be authenticated; challenged in the scheme it used, or 400 when it named none. |
+| `unsupported_grant_type` | 400 | `exchange.ErrUnsupportedGrantType` | Only token exchange is supported. |
+| `invalid_grant` | 400 | `exchange.ErrInvalidGrant` | The subject token was refused. |
+| `invalid_target` | 400 | `exchange.ErrInvalidTarget` | The resource or audience was refused. |
+| `invalid_scope` | 400 | `exchange.ErrInvalidScope` | The scope was refused. |
+| `invalid_authorization_details` | 400 | `exchange.ErrInvalidAuthorizationDetails` | The authorization details were refused. |
+| `invalid_request` | 400 | `exchange.ErrInvalidRequest` | The request is malformed. |
+| `server_error` | 500 | `exchange.ErrServerError` | The server could not decide on the request. |
