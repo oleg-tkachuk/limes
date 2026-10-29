@@ -69,7 +69,7 @@ func TestSignerWritesTheConfiguredAlgorithm(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		issuer, err := NewIssuer(IssuerConfig{Signer: signer, Store: newMemStore(), IssuerName: goldenIssuer})
+		issuer, err := NewIssuer(IssuerConfig{Biscuit: fakeForm{}, Signer: signer, Store: newMemStore(), IssuerName: goldenIssuer})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -29,9 +29,9 @@ func revokeCopy(t *testing.T, v *Verifier, store *memStore, token string) Biscui
 func TestRevokingABiscuitCopy(t *testing.T) {
 	_, v, store, cap, root := biscuitFixture(t)
 	ctx := context.Background()
-	mid, _ := Attenuate(root, Attenuation{Ops: []Op{OpGet, OpList}})
-	leaf, _ := Attenuate(mid, Attenuation{Ops: []Op{OpGet}})
-	sibling, _ := Attenuate(root, Attenuation{Ops: []Op{OpPut}})
+	mid, _ := attenuate(root, Attenuation{Ops: []Op{OpGet, OpList}})
+	leaf, _ := attenuate(mid, Attenuation{Ops: []Op{OpGet}})
+	sibling, _ := attenuate(root, Attenuation{Ops: []Op{OpPut}})
 
 	got := revokeCopy(t, v, store, mid)
 	if got.CapabilityID() != cap.ID {
@@ -73,7 +73,7 @@ func TestRevokingTheRootBiscuitLeavesTheJWT(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	narrowed, _ := Attenuate(root, Attenuation{Audience: []string{audienceData}})
+	narrowed, _ := attenuate(root, Attenuation{Audience: []string{audienceData}})
 
 	revokeCopy(t, v, store, root)
 
@@ -90,7 +90,7 @@ func TestRevokingTheRootBiscuitLeavesTheJWT(t *testing.T) {
 func TestBiscuitCopyNamesTheLastBlock(t *testing.T) {
 	_, v, _, _, root := biscuitFixture(t)
 	ctx := context.Background()
-	mid, _ := Attenuate(root, Attenuation{Ops: []Op{OpGet}})
+	mid, _ := attenuate(root, Attenuation{Ops: []Op{OpGet}})
 
 	rootCopy, err := v.BiscuitCopy(ctx, root)
 	if err != nil {
@@ -100,11 +100,7 @@ func TestBiscuitCopyNamesTheLastBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := parseBiscuit(mid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ids := b.RevocationIds()
+	ids := fakeIDs(t, mid)
 	if len(ids) != 2 || !bytes.Equal(ids[0], rootCopy.RevocationID()) || !bytes.Equal(ids[1], midCopy.RevocationID()) {
 		t.Fatalf("ids %x; root copy %x, mid copy %x", ids, rootCopy.RevocationID(), midCopy.RevocationID())
 	}
@@ -162,46 +158,6 @@ func TestBiscuitCopyIgnoresExpiryAndRevocation(t *testing.T) {
 	}
 }
 
-// The shared attenuated token is refused once the copy it was attenuated from
-// is revoked: it carries the same ids the server lists.
-func TestSharedAttenuationRevokedThroughItsSeed(t *testing.T) {
-	ctx := context.Background()
-	copies := map[string]bool{}
-	v := goldenBiscuitVerifier(t)
-	v.cfg.Biscuit.Revocations = biscuitLookupFunc(func(ids [][]byte) bool {
-		for _, id := range ids {
-			if copies[string(id)] {
-				return true
-			}
-		}
-		return false
-	})
-	seed := readBiscuitFixture(t, biscuitSeedFile)
-	attenuated := readBiscuitFixture(t, biscuitAttenuatedFile)
-	seedCopy, err := v.BiscuitCopy(ctx, seed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	attCopy, err := v.BiscuitCopy(ctx, attenuated)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if attCopy.CapabilityID() != seedCopy.CapabilityID() || bytes.Equal(attCopy.RevocationID(), seedCopy.RevocationID()) {
-		t.Fatalf("attenuated copy %+v, seed copy %+v", attCopy, seedCopy)
-	}
-	copies[string(seedCopy.RevocationID())] = true
-	req := withProof(t.Context(), t, readBiscuitCase(t).bindKey(t), attenuated, audienceData, goldenClock())
-	if _, err := v.Verify(ctx, req); !errors.Is(err, ErrRevoked) {
-		t.Fatalf("err = %v, want ErrRevoked", err)
-	}
-}
-
-type biscuitLookupFunc func([][]byte) bool
-
-func (f biscuitLookupFunc) IsBiscuitRevoked(_ context.Context, ids [][]byte) (bool, error) {
-	return f(ids), nil
-}
-
 type failingBiscuitLookup struct{ err error }
 
 func (f failingBiscuitLookup) IsBiscuitRevoked(context.Context, [][]byte) (bool, error) {
@@ -241,7 +197,7 @@ func TestVerifierNeedsBiscuitRevocationsToAcceptBiscuits(t *testing.T) {
 // passed changes nothing the verifier does.
 func TestVerifierKeepsItsOwnBiscuitConfig(t *testing.T) {
 	pub, _, _ := ed25519.GenerateKey(nil)
-	biscuit := &BiscuitConfig{Revocations: revLookup{}}
+	biscuit := &BiscuitConfig{Revocations: revLookup{}, Form: fakeForm{}}
 	v, err := NewVerifier(VerifierConfig{
 		Keys:           staticKeys(t, map[string]ed25519.PublicKey{testKID: pub}),
 		Revocations:    revLookup{},

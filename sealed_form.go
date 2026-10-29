@@ -102,6 +102,9 @@ type BiscuitResult struct {
 
 // biscuit is Biscuit, returning the token alone.
 func (i *Issuer) biscuit(ctx context.Context, vc VerifiedCapability) (string, error) {
+	if i.form == nil {
+		return "", errNoIssuerForm
+	}
 	if err := i.checkSealable(ctx, vc); err != nil {
 		return "", err
 	}
@@ -130,6 +133,9 @@ func (i *Issuer) checkSealable(ctx context.Context, vc VerifiedCapability) error
 	}
 	return i.checkLive(ctx, c, i.clock(), "biscuit of")
 }
+
+// errNoIssuerForm is Issuer.Biscuit on an issuer given no form to seal in.
+var errNoIssuerForm = errors.New("limes: IssuerConfig.Biscuit required: github.com/oleg-tkachuk/limes/biscuit's Form")
 
 // seal is c's sealed form: the form chooses the root key its token's
 // signature chain starts from, and the issuer signs c naming it.
@@ -176,9 +182,10 @@ type Attenuation struct {
 	Budget   *BudgetCeiling
 }
 
-// checkAttenuation refuses an attenuation no block can carry: a binding
-// that is no thumbprint, or a copy limit that is not a bound.
-func checkAttenuation(a Attenuation) error {
+// Validate refuses an attenuation no block can carry: a binding that is no
+// thumbprint, or a copy limit that is not a bound. The verifier refuses
+// such a block whatever form carried it.
+func (a Attenuation) Validate() error {
 	if a.ConfirmationJKT != "" {
 		if err := validateThumbprint(a.ConfirmationJKT); err != nil {
 			return err
@@ -206,7 +213,7 @@ func checkCopyCeilings(r *RequestCeiling, b *BudgetCeiling) error {
 // the token's holder: it is checked here as Attenuate checks it, whatever
 // form decoded it.
 func applyAttenuation(cur grant, a Attenuation, id []byte) (grant, error) {
-	if err := checkAttenuation(a); err != nil {
+	if err := a.Validate(); err != nil {
 		return cur, err
 	}
 	if a.ConfirmationJKT != "" && cur.ConfirmationJKT != "" && a.ConfirmationJKT != cur.ConfirmationJKT {

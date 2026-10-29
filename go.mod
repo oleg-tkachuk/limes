@@ -17,8 +17,4 @@ go 1.27.0
 
 toolchain go1.27.3
 
-require (
-	github.com/eclipse-biscuit/biscuit-go/v2 v2.2.2
-	golang.org/x/text v0.43.0
-	google.golang.org/protobuf v1.36.12
-)
+require golang.org/x/text v0.43.0

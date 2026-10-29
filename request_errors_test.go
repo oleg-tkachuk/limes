@@ -79,7 +79,7 @@ func TestIssueKeepsTheStoreErrorApartFromTheRequest(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			iss, err := NewIssuer(IssuerConfig{Signer: signer, Store: failingStore{err: tc.err}, IssuerName: goldenIssuer, DefaultTTL: time.Hour})
+			iss, err := NewIssuer(IssuerConfig{Biscuit: fakeForm{}, Signer: signer, Store: failingStore{err: tc.err}, IssuerName: goldenIssuer, DefaultTTL: time.Hour})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -137,7 +137,7 @@ func TestDerivingKeepsTheStoreErrorApart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	iss, err := NewIssuer(IssuerConfig{
+	iss, err := NewIssuer(IssuerConfig{Biscuit: fakeForm{},
 		Signer: signer, Store: revocationOutageStore{err: outage}, IssuerName: goldenIssuer, DefaultTTL: time.Hour,
 	})
 	if err != nil {

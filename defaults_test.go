@@ -21,7 +21,7 @@ func TestConfigDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	iss, err := NewIssuer(IssuerConfig{Signer: signer, Store: newMemStore(), IssuerName: goldenIssuer})
+	iss, err := NewIssuer(IssuerConfig{Biscuit: fakeForm{}, Signer: signer, Store: newMemStore(), IssuerName: goldenIssuer})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,10 +58,10 @@ func TestConfigRefusesNegatives(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := NewIssuer(IssuerConfig{Signer: signer, Store: newMemStore(), IssuerName: goldenIssuer, DefaultTTL: -time.Minute}); err == nil {
+	if _, err := NewIssuer(IssuerConfig{Biscuit: fakeForm{}, Signer: signer, Store: newMemStore(), IssuerName: goldenIssuer, DefaultTTL: -time.Minute}); err == nil {
 		t.Error("NewIssuer accepted a negative DefaultTTL")
 	}
-	if _, err := NewIssuer(IssuerConfig{Signer: signer, Store: newMemStore(), IssuerName: goldenIssuer, MaxTokenBytes: -1}); err == nil {
+	if _, err := NewIssuer(IssuerConfig{Biscuit: fakeForm{}, Signer: signer, Store: newMemStore(), IssuerName: goldenIssuer, MaxTokenBytes: -1}); err == nil {
 		t.Error("NewIssuer accepted a negative MaxTokenBytes")
 	}
 
@@ -162,7 +162,7 @@ func TestIssuerNeedsOnlyAnIssuanceStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := &issuanceOnly{}
-	issuer, err := NewIssuer(IssuerConfig{Signer: signer, Store: store, IssuerName: goldenIssuer})
+	issuer, err := NewIssuer(IssuerConfig{Biscuit: fakeForm{}, Signer: signer, Store: store, IssuerName: goldenIssuer})
 	if err != nil {
 		t.Fatal(err)
 	}

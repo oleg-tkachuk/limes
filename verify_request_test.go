@@ -111,11 +111,11 @@ func TestBiscuitProofIsOverTheBiscuit(t *testing.T) {
 	_, v, _, _, token := biscuitFixture(t)
 	key := dpopKeys(t)["Ed25519"]
 	jkt, _ := dpop.Thumbprint(key.Public())
-	bound, err := Attenuate(token, Attenuation{ConfirmationJKT: jkt})
+	bound, err := attenuate(token, Attenuation{ConfirmationJKT: jkt})
 	if err != nil {
 		t.Fatal(err)
 	}
-	inner, _, err := biscuitForm{}.Open(bound)
+	inner, _, err := fakeForm{}.Open(bound)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,13 +3,10 @@ package limes
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"errors"
 	"testing"
 	"time"
 	"uuid"
-
-	biscuit "github.com/eclipse-biscuit/biscuit-go/v2"
 )
 
 // Limits of the capability the copy tests narrow from.
@@ -46,11 +43,7 @@ func limitedBiscuit(t *testing.T) (*Verifier, Capability, string) {
 
 func lastRevocationID(t *testing.T, token string) []byte {
 	t.Helper()
-	b, err := parseBiscuit(token)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ids := b.RevocationIds()
+	ids := fakeIDs(t, token)
 	return ids[len(ids)-1]
 }
 
@@ -60,12 +53,12 @@ func lastRevocationID(t *testing.T, token string) []byte {
 func TestCopyLimitsArriveAsCopies(t *testing.T) {
 	v, cap, root := limitedBiscuit(t)
 	ctx := context.Background()
-	outer, err := Attenuate(root, Attenuation{Requests: &RequestCeiling{Max: 50}, Budget: &BudgetCeiling{Max: 4 * NanosPerUnit}})
+	outer, err := attenuate(root, Attenuation{Requests: &RequestCeiling{Max: 50}, Budget: &BudgetCeiling{Max: 4 * NanosPerUnit}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	plain, _ := Attenuate(outer, Attenuation{Ops: []Op{OpGet}}) // sets no limit
-	inner, _ := Attenuate(plain, Attenuation{Requests: &RequestCeiling{Max: 10}})
+	plain, _ := attenuate(outer, Attenuation{Ops: []Op{OpGet}}) // sets no limit
+	inner, _ := attenuate(plain, Attenuation{Requests: &RequestCeiling{Max: 10}})
 
 	got, err := v.Verify(ctx, VerifyRequest{Token: inner, Audience: audienceData})
 	if err != nil {
@@ -100,7 +93,7 @@ func TestCopyLimitsArriveAsCopies(t *testing.T) {
 func TestCopyLimitsNarrow(t *testing.T) {
 	v, _, root := limitedBiscuit(t)
 	ctx := context.Background()
-	outer, _ := Attenuate(root, Attenuation{Requests: &RequestCeiling{Max: 50}, Budget: &BudgetCeiling{Max: 4 * NanosPerUnit}})
+	outer, _ := attenuate(root, Attenuation{Requests: &RequestCeiling{Max: 50}, Budget: &BudgetCeiling{Max: 4 * NanosPerUnit}})
 
 	for name, tc := range map[string]struct {
 		from string
@@ -116,7 +109,7 @@ func TestCopyLimitsNarrow(t *testing.T) {
 		"budget beyond the enclosing copy's":   {outer, Attenuation{Budget: &BudgetCeiling{Max: 4*NanosPerUnit + 1}}, false},
 	} {
 		t.Run(name, func(t *testing.T) {
-			tok, err := Attenuate(tc.from, tc.a)
+			tok, err := attenuate(tc.from, tc.a)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -133,7 +126,7 @@ func TestCopyLimitsNarrow(t *testing.T) {
 	// The fixture capability has no limits: any positive copy limit fits.
 	_, unlimited, _, _, token := biscuitFixture(t)
 	unlimited.cfg.Biscuit.MeterCopies = true
-	tok, _ := Attenuate(token, Attenuation{Requests: &RequestCeiling{Max: 1 << 40}, Budget: &BudgetCeiling{Max: MaxNanos}})
+	tok, _ := attenuate(token, Attenuation{Requests: &RequestCeiling{Max: 1 << 40}, Budget: &BudgetCeiling{Max: MaxNanos}})
 	if _, err := unlimited.Verify(ctx, VerifyRequest{Token: tok, Audience: audienceData}); err != nil {
 		t.Fatalf("under no limit: %v", err)
 	}
@@ -145,12 +138,12 @@ func TestCopyLimitsNeedMeterCopies(t *testing.T) {
 	v, _, root := limitedBiscuit(t)
 	v.cfg.Biscuit.MeterCopies = false
 	ctx := context.Background()
-	limited, _ := Attenuate(root, Attenuation{Requests: &RequestCeiling{Max: 5}})
+	limited, _ := attenuate(root, Attenuation{Requests: &RequestCeiling{Max: 5}})
 	_, err := v.Verify(ctx, VerifyRequest{Token: limited, Audience: audienceData})
 	if !errors.Is(err, ErrCopyCountersNotMetered) || errors.Is(err, ErrInvalidToken) {
 		t.Fatalf("err = %v, want ErrCopyCountersNotMetered and not ErrInvalidToken", err)
 	}
-	plain, _ := Attenuate(root, Attenuation{Ops: []Op{OpGet}})
+	plain, _ := attenuate(root, Attenuation{Ops: []Op{OpGet}})
 	if _, err := v.Verify(ctx, VerifyRequest{Token: plain, Audience: audienceData}); err != nil {
 		t.Fatalf("a copy without limits: %v", err)
 	}
@@ -173,28 +166,20 @@ func TestCopyLimitsMalformed(t *testing.T) {
 		{ConfirmationJKT: "not a thumbprint"},
 	} {
 		// The holder's own call: a request error, not a token the verifier refused.
-		if _, err := Attenuate(root, a); !errors.Is(err, ErrInvalidRequest) || errors.Is(err, ErrBiscuitAttenuation) {
-			t.Errorf("Attenuate(%+v): err = %v", a, err)
+		if _, err := attenuate(root, a); !errors.Is(err, ErrInvalidRequest) || errors.Is(err, ErrBiscuitAttenuation) {
+			t.Errorf("attenuate(%+v): err = %v", a, err)
 		}
 	}
-	for name, term := range map[string]biscuit.Term{
-		"negative": biscuit.Integer(-3),
-		"a string": biscuit.String("10"),
+	// The same, appended by the holder unchecked: the verifier refuses each
+	// block as an attenuation it cannot honour.
+	for _, a := range []Attenuation{
+		{Requests: &RequestCeiling{Max: -1}},
+		{Requests: &RequestCeiling{Unlimited: true}}, {Budget: &BudgetCeiling{Unlimited: true}},
+		{Budget: &BudgetCeiling{Max: 1, UnitCode: "USD"}},
 	} {
-		for _, fact := range []string{biscuitFactMaxRequests, biscuitFactMaxBudget} {
-			b, _ := parseBiscuit(root)
-			blk := b.CreateBlock()
-			if err := blk.AddFact(biscuitFact(fact, term)); err != nil {
-				t.Fatal(err)
-			}
-			next, err := b.Append(rand.Reader, blk.Build())
-			if err != nil {
-				t.Fatal(err)
-			}
-			tok, _ := serializeBiscuit(next)
-			if _, err := v.Verify(context.Background(), VerifyRequest{Token: tok, Audience: audienceData}); !errors.Is(err, ErrBiscuitAttenuation) {
-				t.Errorf("%s %s: err = %v, want ErrBiscuitAttenuation", fact, name, err)
-			}
+		tok := fakeAppend(t, root, a)
+		if _, err := v.Verify(context.Background(), VerifyRequest{Token: tok, Audience: audienceData}); !errors.Is(err, ErrBiscuitAttenuation) {
+			t.Errorf("%+v appended unchecked: err = %v, want ErrBiscuitAttenuation", a, err)
 		}
 	}
 }
@@ -223,8 +208,8 @@ func TestCopiesAreNeverSigned(t *testing.T) {
 func TestBiscuitCopyNamesItsLimits(t *testing.T) {
 	v, _, root := limitedBiscuit(t)
 	v.cfg.Biscuit.MeterCopies = false
-	outer, _ := Attenuate(root, Attenuation{Requests: &RequestCeiling{Max: 50}})
-	inner, _ := Attenuate(outer, Attenuation{Budget: &BudgetCeiling{Max: NanosPerUnit}})
+	outer, _ := attenuate(root, Attenuation{Requests: &RequestCeiling{Max: 50}})
+	inner, _ := attenuate(outer, Attenuation{Budget: &BudgetCeiling{Max: NanosPerUnit}})
 
 	got, err := v.BiscuitCopy(context.Background(), inner)
 	if err != nil {
@@ -250,11 +235,11 @@ func TestBiscuitCopySetsTheAxisItsEncloserLeft(t *testing.T) {
 		"requests under a budget": {Attenuation{Budget: &BudgetCeiling{Max: NanosPerUnit}}, Attenuation{Requests: &RequestCeiling{Max: requests}}},
 		"a budget under requests": {Attenuation{Requests: &RequestCeiling{Max: requests}}, Attenuation{Budget: &BudgetCeiling{Max: NanosPerUnit}}},
 	} {
-		outer, err := Attenuate(root, tc.outer)
+		outer, err := attenuate(root, tc.outer)
 		if err != nil {
 			t.Fatal(err)
 		}
-		inner, err := Attenuate(outer, tc.inner)
+		inner, err := attenuate(outer, tc.inner)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -271,7 +256,7 @@ func ceilingIs[T comparable](got *T, want T) bool { return got != nil && *got ==
 func TestACopyCanBeFrozen(t *testing.T) {
 	_, v, _, _, token := biscuitFixture(t)
 	v.cfg.Biscuit.MeterCopies = true
-	frozen, err := Attenuate(token, Attenuation{Requests: &RequestCeiling{}, Budget: &BudgetCeiling{}})
+	frozen, err := attenuate(token, Attenuation{Requests: &RequestCeiling{}, Budget: &BudgetCeiling{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,11 +280,11 @@ func TestCopyLimitsAreRefusedLast(t *testing.T) {
 	v, _, root := limitedBiscuit(t)
 	v.cfg.Biscuit.MeterCopies = false
 	ctx := context.Background()
-	limited, err := Attenuate(root, Attenuation{Requests: &RequestCeiling{}})
+	limited, err := attenuate(root, Attenuation{Requests: &RequestCeiling{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	widened, err := Attenuate(limited, Attenuation{Ops: []Op{OpDelete}})
+	widened, err := attenuate(limited, Attenuation{Ops: []Op{OpDelete}})
 	if err != nil {
 		t.Fatal(err)
 	}

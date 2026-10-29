@@ -71,7 +71,6 @@ func newExampleStack() exampleStack {
 		Keys:           exampleKeys(kid, pub),
 		Revocations:    records,
 		TrustedIssuers: []string{exampleIssuerName},
-		Biscuit:        &limes.BiscuitConfig{Revocations: records},
 		DPoP:           proofs,
 	})
 	if err != nil {
@@ -221,31 +220,6 @@ func ExampleIssuer_Delegate() {
 	// Output:
 	// <nil> true
 	// true
-}
-
-func ExampleAttenuate() {
-	ctx := context.Background()
-	s := newExampleStack()
-	c, token := s.issue()
-
-	fullResult, err := s.issuer.Biscuit(context.Background(), limes.BiscuitRequest{Capability: s.verified(token)})
-	full := fullResult.Token
-	if err != nil {
-		log.Fatal(err)
-	}
-	// The holder narrows it offline: no key, no network.
-	narrow, err := limes.Attenuate(full, limes.Attenuation{
-		Ops:              []limes.Op{limes.OpGet},
-		ResourcePrefixes: []string{"corpus/public/2026/"},
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	got, err := s.verifier.Verify(ctx, limes.VerifyRequest{Token: narrow, Audience: exampleAudience})
-	fmt.Println(err, got.Capability().ID == c.ID, got.Capability().Caveats.Ops, got.Capability().Caveats.ResourcePrefixes)
-	// Output:
-	// <nil> true [get] [corpus/public/2026/]
 }
 
 func Example_proofOfPossession() {

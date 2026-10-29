@@ -392,7 +392,7 @@ func TestIssuerSignsUnderTheCallersContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	issuer, err := NewIssuer(IssuerConfig{Signer: signer, Store: newMemStore(), IssuerName: "limes-test"})
+	issuer, err := NewIssuer(IssuerConfig{Biscuit: fakeForm{}, Signer: signer, Store: newMemStore(), IssuerName: "limes-test"})
 	if err != nil {
 		t.Fatal(err)
 	}

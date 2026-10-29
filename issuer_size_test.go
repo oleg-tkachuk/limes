@@ -68,7 +68,7 @@ func TestDelegateAndBiscuitRefuseATokenPastMaxTokenBytes(t *testing.T) {
 		t.Error("a refused delegation recorded the child")
 	}
 
-	small, err := NewIssuer(IssuerConfig{Signer: issuer.signer, Store: store, IssuerName: issuer.issuerName, MaxTokenBytes: len(token)})
+	small, err := NewIssuer(IssuerConfig{Biscuit: fakeForm{}, Signer: issuer.signer, Store: store, IssuerName: issuer.issuerName, MaxTokenBytes: len(token)})
 	if err != nil {
 		t.Fatal(err)
 	}
