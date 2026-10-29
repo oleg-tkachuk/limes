@@ -3,7 +3,6 @@ package migrate
 import (
 	"context"
 	"fmt"
-	"io/fs"
 	"strings"
 	"testing"
 	"uuid"
@@ -13,61 +12,28 @@ import (
 	"github.com/oleg-tkachuk/limes/pgstore/internal/pgschema"
 )
 
-// The steps are the embedded migrations, numbered from one as tern numbers
-// them, the last at the version pgstore queries, each outside a transaction
-// exactly when its file asks tern for that.
-func TestStepsAreTheEmbeddedMigrations(t *testing.T) {
+// The steps are the migrations tern loads and Run runs, as tern renders
+// them: ddl reads the files by tern's rule, and the two never drift.
+func TestStepsAreWhatTernLoads(t *testing.T) {
 	steps, err := Steps()
 	if err != nil {
 		t.Fatal(err)
 	}
-	files, err := fs.Glob(migrationFiles, migrationsDir+"/*.sql")
+	m, err := loadMigrations(t.Context(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(steps) != len(files) || len(steps) != pgschema.Version {
-		t.Fatalf("%d steps from %d files; pgschema.Version is %d", len(steps), len(files), pgschema.Version)
+	if len(steps) != len(m.Migrations) || len(steps) != pgschema.Version {
+		t.Fatalf("%d steps, %d migrations tern loads; pgschema.Version is %d", len(steps), len(m.Migrations), pgschema.Version)
 	}
 	for i, s := range steps {
-		raw, err := fs.ReadFile(migrationFiles, files[i])
-		if err != nil {
-			t.Fatal(err)
+		mg := m.Migrations[i]
+		if s.Version != int(mg.Sequence) || s.Name != mg.Name || s.Migration != mg.UpSQL {
+			t.Errorf("step %d is %d %s; tern loads %d %s, or another text", i, s.Version, s.Name, mg.Sequence, mg.Name)
 		}
-		if s.Version != i+1 || !strings.HasSuffix(files[i], "/"+s.Name) {
-			t.Errorf("step %d is version %d, %s; want version %d, %s", i, s.Version, s.Name, i+1, files[i])
-		}
-		if want := !strings.Contains(string(raw), disableTx); s.InTransaction != want {
+		if want := !strings.Contains(mg.UpSQL, disableTx); s.InTransaction != want {
 			t.Errorf("%s: InTransaction %v, want %v", s.Name, s.InTransaction, want)
 		}
-		if strings.TrimSpace(string(raw)) != s.Migration {
-			t.Errorf("%s: Migration is not the file as tern reads it", s.Name)
-		}
-	}
-}
-
-// Step.SQL records the step's version after the migration, and runs a
-// step in a transaction read committed and scoped to every tenant first.
-func TestStepSQL(t *testing.T) {
-	in := Step{Version: 7, Migration: "SELECT 1", InTransaction: true}
-	out := Step{Version: 8, Migration: "SELECT 2", InTransaction: false}
-	for _, tc := range []struct {
-		step   Step
-		prefix string
-		suffix string
-	}{
-		{in, sqlReadCommitted, "UPDATE " + versionTable + " SET version = 7"},
-		{out, "SELECT 2", "UPDATE " + versionTable + " SET version = 8"},
-	} {
-		sql := tc.step.SQL()
-		if !strings.HasPrefix(sql, tc.prefix) || !strings.HasSuffix(sql, tc.suffix) || !strings.Contains(sql, tc.step.Migration) {
-			t.Errorf("Step%+v.SQL() = %q, want it to begin %q, hold the migration, and end %q", tc.step, sql, tc.prefix, tc.suffix)
-		}
-	}
-	if !strings.Contains(in.SQL(), "'"+pgschema.SettingAllTenants+"', '"+pgschema.SettingAllTenantsOn+"', true") {
-		t.Errorf("a step in a transaction is not scoped to every tenant: %q", in.SQL())
-	}
-	if strings.Contains(out.SQL(), pgschema.SettingAllTenants) || strings.Contains(out.SQL(), sqlReadCommitted) {
-		t.Errorf("a step outside a transaction sets what only a transaction holds: %q", out.SQL())
 	}
 }
 
@@ -89,7 +55,7 @@ func applySteps(t *testing.T, conn *pgx.Conn, steps []Step) {
 	ctx := t.Context()
 	for _, s := range steps {
 		if !s.InTransaction {
-			for _, stmt := range statements(s.SQL()) {
+			for _, stmt := range s.Statements() {
 				if _, err := conn.Exec(ctx, stmt); err != nil {
 					t.Fatalf("%s: %v", s.Name, err)
 				}

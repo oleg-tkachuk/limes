@@ -275,7 +275,7 @@ var _ meter.LedgerReader = (*Ledger)(nil)
 
 // sqlPurgeCharges removes the oldest charges taken before $1, at most $2 of
 // them, of the tenants the call's scope reaches, by charges_at
-// (migrate/migrations/011_ledger_indexes.sql), each then by its key: the batch as an
+// (migrate/ddl/migrations/011_ledger_indexes.sql), each then by its key: the batch as an
 // array, which the planner does not hash-join against the whole ledger. A
 // charge a refund holds is skipped, for a later batch, rather than waited
 // on.

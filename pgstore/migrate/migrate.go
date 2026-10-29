@@ -3,30 +3,29 @@
 // with github.com/jackc/tern, which a binary that only serves never links.
 //
 // Run migrates a database itself. A consumer with a migration tool of its
-// own applies Steps and Grants with that tool instead.
+// own applies Steps and Grants with that tool instead, from pgstore/migrate/ddl,
+// which holds them without tern.
 package migrate
 
 import (
 	"context"
-	"embed"
 	"errors"
 	"fmt"
 	"io/fs"
-	"regexp"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	tern "github.com/jackc/tern/v2/migrate"
 
 	"github.com/oleg-tkachuk/limes/pgstore/internal/pgschema"
+	"github.com/oleg-tkachuk/limes/pgstore/migrate/ddl"
 )
 
-//go:embed migrations/*.sql
-var migrationFiles embed.FS
+// migrationFiles are the migrations ddl carries, under migrationsDir.
+var migrationFiles = ddl.Files()
 
 // migrationsDir is where migrationFiles keeps the migrations.
-const migrationsDir = "migrations"
+const migrationsDir = ddl.MigrationsDir
 
 // The schema and its version table, as pgstore reads them.
 const (
@@ -94,7 +93,7 @@ func Run(ctx context.Context, conn *pgx.Conn, opts Options) error {
 	if conn == nil {
 		return errors.New("migrate: a connection is required")
 	}
-	if err := checkRuntimeRoles(opts.RuntimeRoles); err != nil {
+	if err := ddl.CheckRuntimeRoles(opts.RuntimeRoles); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
 	if err := ownSchema(ctx, conn); err != nil {
@@ -251,54 +250,13 @@ var ErrSchemaOwner = errors.New("migrate: the schema belongs to another role")
 // sqlSchemaOwned is whether the role migrating owns the schema named $1.
 const sqlSchemaOwned = `SELECT pg_get_userbyid(nspowner) = current_user FROM pg_namespace WHERE nspname = $1`
 
-// publicRole is the name PostgreSQL reads as every role there is, quoted or
-// not, in a GRANT.
-const publicRole = "public"
-
-// checkRuntimeRoles refuses a runtime role that is not one role: an empty
-// name, "public" in any case, which would grant every role, and a name with
-// a NUL, which the identifier quoting drops, granting another role than the
-// one named.
-func checkRuntimeRoles(roles []string) error {
-	for _, r := range roles {
-		switch {
-		case r == "":
-			return errors.New("an empty runtime role name")
-		case strings.EqualFold(r, publicRole):
-			return fmt.Errorf("runtime role %q names every role", r)
-		case strings.ContainsRune(r, 0):
-			return fmt.Errorf("runtime role %q holds a NUL", r)
-		}
-	}
-	return nil
-}
-
 // Grants are the statements that give each runtime role what the stores
 // need of the schema (Options.RuntimeRoles), for a consumer that applies
-// Steps with a tool of its own: run them in one transaction after the last
-// step, and again after each later one, as Run does. It refuses a name that
-// is not one role: an empty one, "public", or one holding a NUL.
+// Steps with a tool of its own: ddl.Grants.
 func Grants(roles []string) ([]string, error) {
-	if err := checkRuntimeRoles(roles); err != nil {
+	stmts, err := ddl.Grants(roles)
+	if err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
-	}
-	schemaName := pgx.Identifier{schema}.Sanitize()
-	versions := pgx.Identifier{schema, versionTableName}.Sanitize()
-	var stmts []string
-	for _, r := range roles {
-		role := pgx.Identifier{r}.Sanitize()
-		stmts = append(stmts,
-			"GRANT USAGE ON SCHEMA "+schemaName+" TO "+role,
-			"GRANT "+tablePrivileges+" ON ALL TABLES IN SCHEMA "+schemaName+" TO "+role,
-			// The version table is the migrator's; a runtime role only
-			// reads it.
-			"REVOKE "+tablePrivileges+" ON "+versions+" FROM "+role,
-			"GRANT SELECT ON "+versions+" TO "+role,
-			// The schema's functions: the policies' scope checks and the
-			// revocation checks, which no other role may call.
-			"GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA "+schemaName+" TO "+role,
-			"ALTER DEFAULT PRIVILEGES IN SCHEMA "+schemaName+" GRANT "+tablePrivileges+" ON TABLES TO "+role,
-		)
 	}
 	return stmts, nil
 }
@@ -324,78 +282,14 @@ func grant(ctx context.Context, conn *pgx.Conn, roles []string) error {
 	return nil
 }
 
-// tablePrivileges are what a runtime role may do to a table of the store.
-const tablePrivileges = "SELECT, INSERT, UPDATE, DELETE"
+// Step is one migration as a consumer's own migration tool applies it:
+// ddl.Step, which a program that vendors the SQL imports without tern.
+type Step = ddl.Step
 
-// Step is one migration as a consumer's own migration tool applies it.
-type Step struct {
-	// Version is the schema's version once the step has run: tern's
-	// numbering, from one without a gap.
-	Version int
-	// Name is the migration's file name, such as "001_records.sql".
-	Name string
-	// Migration is the migration's SQL as tern renders and Run runs it.
-	// Apply SQL rather than this.
-	Migration string
-	// InTransaction says how to run SQL: as one transaction, SQL its first
-	// statements; or, when false, a statement at a time outside any
-	// transaction, as CREATE INDEX CONCURRENTLY needs.
-	InTransaction bool
-}
-
-// SQL is what a tool applies for the step: Migration, preceded, in a
-// transaction, by what Run runs as each migration starts — read committed,
-// scoped to every tenant for that transaction, without which a migration
-// that moves rows sees none under the forced row-level security — and
-// followed by recording Version in the version table, so pgstore.CheckSchema
-// reads it and Run carries on from it.
-func (s Step) SQL() string {
-	record := fmt.Sprintf("UPDATE %s SET version = %d", versionTable, s.Version)
-	if !s.InTransaction {
-		return s.Migration + stepSeparator + record
-	}
-	return stepPrelude + s.Migration + stepSeparator + record
-}
-
-// stepSeparator ends a migration's last statement before the one Step.SQL
-// adds, whether or not the migration ends it itself.
-const stepSeparator = "\n;\n"
-
-// disableTxPattern is the line by which a migration asks tern to run it
-// outside a transaction, a statement at a time; tern matches it as a whole
-// line.
-var disableTxPattern = regexp.MustCompile(`(?m)^---- tern: disable-tx ----$`)
-
-// sqlSetupVersion creates the schema and the version table at version 0,
-// as Run's tern does before the first migration.
-const sqlSetupVersion = `CREATE SCHEMA IF NOT EXISTS ` + schema + `;
-CREATE TABLE IF NOT EXISTS ` + versionTable + `(version int4 NOT NULL PRIMARY KEY);
-INSERT INTO ` + versionTable + `(version) SELECT 0 WHERE 0 = (SELECT count(*) FROM ` + versionTable + `)`
-
-// Setup is the SQL a consumer's tool runs once, before the first Step: it
-// creates the schema and the version table Run would. Run it as the role
-// that owns the schema and applies the steps.
-func Setup() string { return sqlSetupVersion }
-
-// stepPrelude begins a step run in a transaction: what Run's OnStart runs
-// as each migration starts.
-var stepPrelude = sqlReadCommitted + ";\nSELECT set_config('" + pgschema.SettingAllTenants + "', '" + pgschema.SettingAllTenantsOn + "', true);\n"
+// Setup is the SQL a consumer's tool runs once, before the first Step:
+// ddl.Setup.
+func Setup() string { return ddl.Setup() }
 
 // Steps are the migrations Run runs, in order, for a consumer's own
-// migration tool to apply: Setup first, then the SQL of each step not yet
-// applied, then Grants. The tool keeps its own record of what it applied;
-// the steps keep pgstore's (Step.SQL).
-func Steps() ([]Step, error) {
-	m, err := loadMigrations(context.Background(), nil)
-	if err != nil {
-		return nil, err
-	}
-	steps := make([]Step, 0, len(m.Migrations))
-	for _, mg := range m.Migrations {
-		steps = append(steps, Step{
-			Version: int(mg.Sequence), Name: mg.Name, Migration: mg.UpSQL,
-			InTransaction: !disableTxPattern.MatchString(mg.UpSQL),
-		})
-	}
-	return steps, nil
-}
+// migration tool to apply: ddl.Steps, the same migrations tern loads.
+func Steps() ([]Step, error) { return ddl.Steps() }
