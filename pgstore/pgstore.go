@@ -106,7 +106,8 @@
 // forgets the mark once none of the tenant's records is left. The records it
 // keeps stay revoked until Purge takes them: an id not
 // on record is not revoked, so a token whose record went early would verify
-// again.
+// again. TenantTables lists the tables that hold a tenant's rows, and what
+// the erase does to each.
 //
 // # Throughput
 //
