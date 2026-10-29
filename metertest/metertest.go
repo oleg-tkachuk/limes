@@ -9,6 +9,9 @@
 //		metertest.Run(t, func(t *testing.T) metertest.Env { … })
 //	}
 //
+// A store that counts requests and spends nothing, a meter.RequestCounter,
+// runs RunCounter instead: the checks of Bump alone, which Run runs too.
+//
 // The checks cover what a charge does at its ceilings and when it arrives
 // again: rejection that moves nothing — by a Biscuit copy's, the capability's,
 // an ancestor's or the tenant's ceiling, by a failed onCharged, under
@@ -452,6 +455,9 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "TenantAggregateCountsBeforeACeiling", Run: checkTenantCountsBeforeACeiling},
 	}
 	watchdog.RunChecks(t, setup, func(e Env) time.Duration { return e.CheckTimeout }, bare)
+	t.Run("Counter", func(t *testing.T) {
+		RunCounter(t, func(t *testing.T) CounterEnv { return setup(t).counterEnv() })
+	})
 }
 
 // checkTenantCountsBeforeACeiling holds a store to counting the tenant
