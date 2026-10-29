@@ -9,10 +9,52 @@ Names are those of the release that changed them. A name changed again later
 appears again under that later release: to cross several releases, read
 upwards from the one you are on.
 
-A pull request that marks a break adds its entry at the top, under the
-release it cuts: the minor after the newest tag. CI refuses a breaking marker
-whose change leaves this file alone. From v1.0.0 on no change may break the
-API, and this file stops growing.
+A pull request that marks a break adds its entry above the newest one,
+under the release it cuts: the minor after the newest tag. CI refuses a
+breaking marker whose change leaves this file alone. From v1.0.0 on no
+change may break the API, and this file stops growing.
+
+## Release candidates of 1.0
+
+limes stays on 0.x on `main` until the release that cuts 1.0, so every entry
+below is filed under the 0.x release that made the change. A candidate,
+`v1.0.0-rc.N`, tags `main` as it is: its API is that of the newest 0.x
+release before it. The table names that release for each candidate, and
+each nested module's release on `main` when the candidate was cut. A `+`
+marks a candidate cut between two 0.x releases: it holds additions the next
+release made and none of its breaks, since an entry lands with its break.
+Cutting a candidate adds its row, at the top of the table.
+
+The nested modules require a 0.x release of limes, never a candidate. A
+build that requires a candidate as well selects the candidate, since Go
+orders every `v1.0.0-rc.N` above every 0.x, so require a nested module's
+release only with a candidate at or above the row that lists it.
+
+To move between two candidates, read the entries after the releases your
+row names, up to and including those of the row you move to: limes's under
+`vX.Y.Z`, a nested module's under `<module>/vX.Y.Z`. From rc.14 to rc.18,
+that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
+
+| Candidate | limes | pgstore | redisreplay | otelmetric | exchange | biscuit |
+|---|---|---|---|---|---|---|
+| `rc.18` | `v0.133.1` | `v0.46.1` | `v0.2.12` | `v0.10.12` | `v0.9.2` | `v0.1.2` |
+| `rc.17` | `v0.133.0` | `v0.46.0` | `v0.2.11` | `v0.10.11` | `v0.9.1` | `v0.1.1` |
+| `rc.16` | `v0.132.1`+ | `v0.45.0` | `v0.2.10` | `v0.10.9` | `v0.9.0` | — |
+| `rc.15` | `v0.132.1`+ | `v0.45.0` | `v0.2.10` | `v0.10.9` | `v0.9.0` | — |
+| `rc.14` | `v0.132.1` | `v0.43.0` | `v0.2.9` | `v0.10.8` | `v0.8.1` | — |
+| `rc.13` | `v0.132.0` | `v0.42.2` | `v0.2.8` | `v0.10.7` | `v0.8.0` | — |
+| `rc.12` | `v0.131.2`+ | `v0.42.2` | `v0.2.8` | `v0.10.7` | `v0.6.0` | — |
+| `rc.11` | `v0.131.2` | `v0.42.2` | `v0.2.8` | `v0.10.7` | `v0.6.0` | — |
+| `rc.10` | `v0.131.0` | `v0.42.0` | `v0.2.6` | `v0.10.5` | `v0.5.0` | — |
+| `rc.9` | `v0.129.0` | `v0.41.1` | `v0.2.4` | `v0.10.3` | `v0.3.0` | — |
+| `rc.8` | `v0.127.0`+ | `v0.40.1` | `v0.2.2` | `v0.10.1` | `v0.2.0` | — |
+| `rc.7` | `v0.127.0` | `v0.40.1` | `v0.2.2` | `v0.10.1` | `v0.1.1` | — |
+| `rc.6` | `v0.127.0` | `v0.40.1` | `v0.2.2` | `v0.10.1` | `v0.1.1` | — |
+| `rc.5` | `v0.126.0`+ | `v0.40.0` | `v0.2.1` | `v0.10.0` | — | — |
+| `rc.4` | `v0.125.1`+ | `v0.39.4` | `v0.1.74` | `v0.9.3` | — | — |
+| `rc.3` | `v0.125.1` | `v0.39.3` | `v0.1.74` | `v0.9.3` | — | — |
+| `rc.2` | `v0.123.0` | `v0.39.0` | `v0.1.71` | `v0.8.0` | — | — |
+| `rc.1` | `v0.117.0` | `v0.35.1` | `v0.1.65` | `v0.6.2` | — | — |
 
 ## v0.133.0
 
@@ -23,6 +65,12 @@ API, and this file stops growing.
     `NewVerifier` refuses the config.
   - `IssuerConfig.Biscuit` names the form `Issuer.Biscuit` seals in: set it to
     `biscuit.Form()`. Without it `Issuer.Biscuit` refuses.
+- The Biscuit fixtures moved with the form: `testdata/biscuit_vocabulary.json`
+  and `testdata/biscuit/` are `biscuit/testdata/biscuit_vocabulary.json` and
+  `biscuit/testdata/biscuit/`, under
+  `go list -m -f '{{.Dir}}' github.com/oleg-tkachuk/limes/biscuit`. They are
+  the cases an SDK in another language tests a copy of, and stay supported:
+  this module is their source.
 
 ## pgstore/v0.45.0
 
@@ -30,6 +78,10 @@ API, and this file stops growing.
   `limes.capability_lineage`, a view that runs as its caller
   (`security_invoker`), which the meter and the erase read the records
   through; it fails on an earlier PostgreSQL.
+- `limes.capability_lineage` keeps no rows of its own, but it has a
+  `tenant_id` column. A tool that finds the tables holding a tenant's rows
+  in `information_schema.columns` should keep to those whose
+  `information_schema.tables.table_type` is `BASE TABLE`.
 
 ## pgstore/v0.44.0
 
