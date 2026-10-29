@@ -198,7 +198,7 @@ func TestBiscuitCannotBeStrippedOrForged(t *testing.T) {
 
 	// The sealed JWT, lifted out of the attenuated Biscuit and presented
 	// alone, would carry the full parent — it is refused.
-	inner, _, err := openBiscuit(narrowed)
+	inner, _, err := biscuitForm{}.Open(narrowed)
 	if err != nil {
 		t.Fatal(err)
 	}

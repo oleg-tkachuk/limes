@@ -53,7 +53,7 @@ func TestIntrospectActive(t *testing.T) {
 func TestIntrospectInactive(t *testing.T) {
 	issuer, v, store, cap, biscuitToken := biscuitFixture(t)
 	ctx := context.Background()
-	inner, _, err := openBiscuit(biscuitToken)
+	inner, _, err := biscuitForm{}.Open(biscuitToken)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -26,13 +26,14 @@ func TestReadBlockFacts(t *testing.T) {
 		"unknown fact":          {facts: []decodedFact{fact("limes_admin", "yes")}},
 	}
 	for name, blk := range refused {
-		if _, err := readBlockFacts(blk, ""); err == nil {
+		if _, err := readBlockFacts(blk); err == nil {
 			t.Errorf("%s: read, want refused", name)
 		}
 	}
 
-	if _, err := readBlockFacts(decodedBlock{facts: []decodedFact{fact(biscuitFactBind, jkt)}}, strings.Repeat("B", 43)); err == nil {
-		t.Error("a block rebinding a bound token was read, want refused")
+	bound := grant{Capability: Capability{ConfirmationJKT: strings.Repeat("B", 43)}}
+	if _, err := applyAttenuation(bound, Attenuation{ConfirmationJKT: jkt}, []byte("block")); err == nil {
+		t.Error("a block rebinding a bound token was applied, want refused")
 	}
 
 	f, err := readBlockFacts(decodedBlock{facts: []decodedFact{
@@ -40,7 +41,7 @@ func TestReadBlockFacts(t *testing.T) {
 		fact(biscuitFactOp, string(OpGet)), fact(biscuitFactOp, string(OpList)),
 		fact(biscuitFactMaxRequests, int64(9)), fact(biscuitFactMaxRequests, int64(3)),
 		fact(biscuitFactBind, jkt),
-	}}, jkt)
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,11 +53,11 @@ func TestReadBlockFacts(t *testing.T) {
 // A copy's budget is nanos; the micros fact Biscuits carried before is no
 // longer part of the vocabulary.
 func TestReadBlockFactsBudgetIsNanos(t *testing.T) {
-	f, err := readBlockFacts(decodedBlock{facts: []decodedFact{{name: biscuitFactMaxBudget, term: int64(1_500)}}}, "")
+	f, err := readBlockFacts(decodedBlock{facts: []decodedFact{{name: biscuitFactMaxBudget, term: int64(1_500)}}})
 	if err != nil || f.budget == nil || *f.budget != (BudgetCeiling{Max: 1_500}) {
 		t.Errorf("budget = %v, %v; want 1500 nanos", f.budget, err)
 	}
-	if _, err := readBlockFacts(decodedBlock{facts: []decodedFact{{name: "limes_max_budget_micros", term: int64(1_500)}}}, ""); err == nil {
+	if _, err := readBlockFacts(decodedBlock{facts: []decodedFact{{name: "limes_max_budget_micros", term: int64(1_500)}}}); err == nil {
 		t.Error("the micros budget fact was read")
 	}
 }
