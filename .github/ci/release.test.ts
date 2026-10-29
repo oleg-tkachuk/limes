@@ -164,6 +164,7 @@ describe("releaseAll", () => {
   // failedGates are the gating jobs that did not pass, beside gatesPassing.
   let failedGates: Set<string>;
   let rootTag: string | undefined;
+  let majorCandidate: string | undefined;
   let failing: string | undefined;
   let noCandidateNotes = false;
 
@@ -181,6 +182,7 @@ describe("releaseAll", () => {
     gatesPassing = true;
     failedGates = new Set();
     rootTag = undefined;
+    majorCandidate = undefined;
     failing = undefined;
     noCandidateNotes = false;
   });
@@ -212,6 +214,9 @@ describe("releaseAll", () => {
       notesDir,
       onRootTag: (tag) => {
         rootTag = tag;
+      },
+      onMajorCandidate: (tag) => {
+        majorCandidate = tag;
       },
       channel: Channel.Release,
       only: undefined,
@@ -484,11 +489,14 @@ describe("releaseAll", () => {
         return data.published.filter((r) => r.prerelease === true).map((r) => r.tag);
       };
       assert.deepEqual(await major(), ["v1.0.0-rc.1"]);
+      assert.equal(majorCandidate, "v1.0.0-rc.1", "the candidate is told, for its row in the migration guide");
       repo.write("x.go", "// b\n");
       await repo.commit("feat!: break the API before 1.0");
       assert.deepEqual(await major(), ["v1.0.0-rc.1", "v1.0.0-rc.2"]);
       // The next release by the rules on main is still 0.x.
+      majorCandidate = undefined;
       assert.deepEqual(await candidate(), ["v1.0.0-rc.1", "v1.0.0-rc.2", "v0.2.0-rc.1"]);
+      assert.equal(majorCandidate, undefined, "a candidate of the next version is no candidate of the next major");
     });
     // A candidate of the next major is cut beside the releases main goes on
     // making: its notes start from the candidate before it, naming the

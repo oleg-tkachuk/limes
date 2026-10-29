@@ -85,6 +85,9 @@ jobs:
       # The root module's release tag this run pushed or published; empty
       # when none.
       limes-tag: ${{ steps.modules.outputs.limes-tag }}
+      # The candidate of limes's next major this run published; empty when
+      # none.
+      limes-candidate: ${{ steps.modules.outputs.limes-candidate }}
     steps:
       # No persist-credentials: false — semantic-release pushes the tag it
       # creates, so this is the one checkout here that needs its credentials.
@@ -236,3 +239,41 @@ jobs:
           GIT_COMMITTER_NAME: github-actions[bot]
           GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
         run: node .github/ci/require-limes.ts "$LIMES_TAG"
+
+  # A candidate of limes's next major is followed by one pull request that
+  # adds its row to the table of candidates in docs/migration.md, which CI
+  # holds to the tags: until it merges, a pull request cut after the
+  # candidate fails that check. It acts through AUTOMERGE_TOKEN, as
+  # require-released-limes does and for the same reason. See
+  # .github/ci/candidates.ts.
+  propose-candidate-row:
+    name: Propose the candidate's row in the migration guide
+    needs: release
+    if: needs.release.outputs.limes-candidate != ''
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    # AUTOMERGE_TOKEN lives in this environment, which only main may deploy to
+    # (auto-merge.yaml).
+    environment: automerge
+    permissions:
+      contents: read # the checkout; the push and the pull request act through AUTOMERGE_TOKEN
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Every release tag, which the table's rows are read from.
+          fetch-depth: 0
+
+      - name: Set up the CI scripts
+        uses: ./.github/actions/setup-ci
+
+      - name: Propose the candidate's row
+        env:
+          GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
+          LIMES_CANDIDATE: ${{ needs.release.outputs.limes-candidate }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: node .github/ci/candidates.ts propose "$LIMES_CANDIDATE"

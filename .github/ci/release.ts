@@ -27,7 +27,9 @@
 // The root module's tag is set as the step output `limes-tag` as soon as it
 // is known, before it is published: a re-run publishing a tag an earlier
 // attempt pushed finds it only while it has no release, and the nested
-// modules are proposed their requirement of it all the same.
+// modules are proposed their requirement of it all the same. A candidate of
+// the next major is set as `limes-candidate` once published, and its row in
+// the migration guide is proposed (candidates.ts).
 
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -48,6 +50,9 @@ import { jobPassed, runIdOf } from "./ci-run.ts";
 // OUTPUT_LIMES_TAG is the step output the job proposing the nested modules'
 // requirement reads.
 export const OUTPUT_LIMES_TAG = "limes-tag";
+// OUTPUT_LIMES_CANDIDATE is the step output the job proposing the
+// candidate's row in the migration guide reads (candidates.ts).
+export const OUTPUT_LIMES_CANDIDATE = "limes-candidate";
 // GATED are the nested modules that build against the limes of the same
 // commit through a replace, so a change to limes one must follow lands with
 // it. Each is released only once its tests against the limes its go.mod
@@ -102,6 +107,9 @@ export interface Release {
   notesDir: string;
   // onRootTag is told the root module's tag, before it is published.
   onRootTag(tag: string): void;
+  // onMajorCandidate is told the tag of a candidate of the next major, once
+  // it is published.
+  onMajorCandidate(tag: string): void;
   channel: Channel;
   // only names the one module to release; undefined for every one.
   only: string | undefined;
@@ -164,6 +172,9 @@ export async function prereleaseModule(r: Release, module: Module): Promise<Outc
   await r.pushTag(tag);
   await publish(r.github, tag, module.prefix, notes, false, r.root, true, previous);
   await warmGoProxy(tag, r.repository, r.fetchInfo);
+  if (r.nextMajor) {
+    r.onMajorCandidate(tag);
+  }
   return { tag, note: "release candidate published" };
 }
 
@@ -403,6 +414,7 @@ async function releaseFrom(repository: string, token: string, push: string): Pro
     fetchInfo: (url) => fetch(url),
     notesDir: requireEnv("RUNNER_TEMP"),
     onRootTag: (tag) => setOutput(OUTPUT_LIMES_TAG, tag),
+    onMajorCandidate: (tag) => setOutput(OUTPUT_LIMES_CANDIDATE, tag),
   });
   return ok;
 }
