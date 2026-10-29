@@ -10,7 +10,7 @@ import type { Module } from "./modules.ts";
 export const RC = "rc";
 // STABLE_MAJOR is the first major whose line keeps its API: a major past it
 // needs a new module path (major-guard.cjs), so no candidate is cut for one.
-const STABLE_MAJOR = 1;
+export const STABLE_MAJOR = 1;
 
 // LEVEL_ORDER ranks the levels, highest first.
 const LEVEL_ORDER: readonly Level[] = [Level.Major, Level.Minor, Level.Patch];

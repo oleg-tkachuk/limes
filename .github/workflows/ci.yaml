@@ -676,6 +676,12 @@ jobs:
           SHA: ${{ github.sha }}
         run: node .github/ci/check-modules.ts markers
 
+      # The table of limes's 1.0 candidates in docs/migration.md, every row
+      # read from the tags reachable from this commit. See
+      # .github/ci/candidates.ts.
+      - name: Hold the table of candidates to the tags
+        run: node .github/ci/candidates.ts check
+
   # Two jobs over the same files, and the halves do not overlap. actionlint
   # covers whether a workflow is correct at all — schema, expression syntax,
   # `needs:` naming a job that exists, and shellcheck over every `run:` block.
