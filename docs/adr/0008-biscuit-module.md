@@ -40,7 +40,7 @@ limes 1.0 freezes the root's API, so the seam has to be cut before then.
 1. **A nested module, `github.com/oleg-tkachuk/limes/biscuit`,** holds
    everything that reads or writes a Biscuit, and is the only module that
    requires biscuit-go:
-   - sealing a capability (`biscuit.Seal`, which is `Issuer.Biscuit` today);
+   - building a Biscuit around a sealed JWT, and reading one back;
    - `biscuit.Attenuate`;
    - decoding a token and verifying its signature chain;
    - the fact vocabulary;
@@ -61,20 +61,31 @@ limes 1.0 freezes the root's API, so the seam has to be cut before then.
 
    So the rule that a copy only narrows stays in the core, under the core's
    tests, and the stores need no new import.
-3. **The seam is a form the verifier is given.**
-   - `VerifierConfig.Biscuit` takes, beside its revocation lookup and its
-     metering, a `SealedForm` the core defines:
-     - `Open(token) (inner string, unseal func(root ed25519.PublicKey) (Unsealed, error), err error)`;
-     - `Unsealed` holds each block as an `Attenuation` and the token's
-       revocation ids, authority first.
-   - The core verifies the inner JWT, hands the module the root key that
-     JWT names, and folds the blocks in itself. `biscuit.Form()` returns the
-     implementation.
-   - A token with no `.` and no form configured is refused as it is today.
-4. **The issuer signs the sealed JWT through a core call.** That call is
-   `Issuer.SealedToken(ctx, vc, root)`. It keeps today's checks of what may
-   be sealed (one this issuer issued, not read from a Biscuit, live), so the
-   module cannot widen a capability. It returns the JWT that names `root`.
+3. **The seam is a `TokenForm` the core defines, given to both sides.**
+   - `Seal(ctx, sign func(ctx, root ed25519.PublicKey) (string, error)) (string, error)`:
+     the form chooses the root key, the core signs the JWT naming it, and
+     the form builds the token around that JWT.
+   - `Open(token) (sealed string, unseal func(root ed25519.PublicKey) (Unsealed, error), err error)`.
+     `Unsealed` holds each block as an `Attenuation`, and the token's
+     revocation ids, the sealing block's first.
+   - `IssuerConfig.Biscuit` and `BiscuitConfig.Form` take it. `biscuit.Form()`
+     returns the implementation.
+   - The core verifies the sealed JWT, hands the form the root key that JWT
+     names, and folds the blocks in itself.
+   - What `unseal` returns is the token holder's input. The core refuses:
+     - more than `MaxBiscuitBlocks` blocks;
+     - revocation ids that are not one per block plus the sealing one, or
+       one that is empty;
+     - any block that `Attenuate` would refuse.
+
+     A form's error becomes `ErrBiscuitAttenuation` or `ErrInvalidToken`,
+     never the form's own sentinels.
+   - A token with no `.` and no form configured is refused, as it is today.
+4. **`Issuer.Biscuit` stays in the core.** It keeps the checks of what may
+   be sealed (one this issuer issued, not read from a Biscuit, live) and the
+   token size limit, so a form cannot widen a capability. It seals through
+   the form `IssuerConfig.Biscuit` names, and refuses a root key that is not
+   an Ed25519 public key.
 5. **Enforced by tools.** `isolation_test.go` adds biscuit-go and protobuf
    to what the root module may not resolve. The biscuit module's own suite
    runs the vocabulary, malformed-token and interop tests, against the core
@@ -109,11 +120,14 @@ and after 1.0 the field cannot move.
 
 ## Consequences
 
-- A consumer that accepts Biscuits sets
-  `VerifierConfig.Biscuit.Form = biscuit.Form()`.
-  - It calls `biscuit.Seal` and `biscuit.Attenuate` where it called
-    `Issuer.Biscuit` and `limes.Attenuate`.
-  - `docs/migration.md` lists the renames.
+- A consumer that accepts Biscuits sets `BiscuitConfig.Form` and
+  `IssuerConfig.Biscuit` to `biscuit.Form()`, and calls `biscuit.Attenuate`
+  where it called `limes.Attenuate`. `docs/migration.md` lists the change.
+- It ships in two steps.
+  - First the seam, in the root, with the Biscuit form still in the tree as
+    the default when no form is given, and a limes release carrying it.
+  - Then the module: it requires that release, and the root drops the form,
+    `Attenuate` and the two dependencies.
 - Tokens do not change: the same Biscuit, the same sealed JWT, the same
   facts. Tokens issued before the move verify after it.
 - The new module needs a seed tag before the change that adds it merges,
