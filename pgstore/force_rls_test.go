@@ -11,10 +11,17 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// rlsTables are the tables row-level security guards.
-var rlsTables = []string{
-	"capabilities", "revocations", "biscuit_revocations", "usage", "copy_usage",
-	"tenant_budgets", "charges", "reservations", "erased_tenants",
+// rlsTables are the tables row-level security guards: those that hold
+// tenants' rows.
+var rlsTables = tenantTableNames()
+
+// tenantTableNames are the names TenantTables lists.
+func tenantTableNames() []string {
+	var names []string
+	for _, t := range TenantTables() {
+		names = append(names, t.Name)
+	}
+	return names
 }
 
 // unguardedTables are the tables of the schema row-level security does not
