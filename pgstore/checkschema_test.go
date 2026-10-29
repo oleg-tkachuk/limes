@@ -4,20 +4,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/oleg-tkachuk/limes/pgstore/migrate"
 )
 
 // freshDatabase is the database a check that needs no schema starts in.
 const freshDatabase = "limes_fresh"
-
-// freshConn is a connection, as the owner, to a database of its own with no
-// schema in it, dropped when the test ends.
-func freshConn(t *testing.T) *pgx.Conn {
-	t.Helper()
-	return pg.FreshConn(t, freshDatabase)
-}
 
 // The schema's version reads back as the package expects once migrated, and
 // CheckSchema tells a schema behind or ahead of it, readable as the
@@ -34,7 +25,7 @@ func TestCheckSchema(t *testing.T) {
 	if err := CheckSchema(ctx, app); err != nil {
 		t.Errorf("CheckSchema as the runtime role: %v", err)
 	}
-	conn := freshConn(t)
+	conn := pg.FreshConn(t, freshDatabase)
 	// A database Migrate never ran in has no version table, nor even the
 	// schema: it is at version 0, which is a mismatch, not an outage.
 	if got, err := ReadSchemaVersion(ctx, conn); err != nil || got.Applied != 0 {

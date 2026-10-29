@@ -88,6 +88,20 @@ func Start(ctx context.Context) (*Postgres, error) {
 	return p, nil
 }
 
+// Exit ends a test binary whose TestMain ran its tests over a container:
+// with code, or, when err says the container could not be had, with that
+// and a failure.
+func Exit(code int, err error) {
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "the tests need a running Docker for their PostgreSQL:", err)
+		os.Exit(exitNoContainer)
+	}
+	os.Exit(code)
+}
+
+// exitNoContainer is a test binary's status when it had no container.
+const exitNoContainer = 1
+
 // Terminate ends the launcher, which ends the container.
 func (p *Postgres) Terminate() {
 	if p.in != nil {
@@ -146,22 +160,35 @@ func (p *Postgres) Dump(database string) (string, error) {
 	if _, err := fmt.Fprintln(p.in, requestDump, database); err != nil {
 		return "", err
 	}
+	raw, err := p.readReply()
+	if err != nil {
+		return "", fmt.Errorf("pgtest: dump %s: %w", database, err)
+	}
+	return withoutDumpKeys(raw), nil
+}
+
+// readReply reads pgcontainer's answer to a request: "ok <n>" and n bytes,
+// or "err <message>".
+func (p *Postgres) readReply() ([]byte, error) {
 	line, err := p.out.ReadString('\n')
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	verb, arg, _ := strings.Cut(strings.TrimSpace(line), " ")
 	if verb != replyOK {
-		return "", fmt.Errorf("pgtest: dump %s: %s", database, strings.TrimPrefix(strings.TrimSpace(line), replyErr+" "))
+		return nil, errors.New(strings.TrimPrefix(strings.TrimSpace(line), replyErr+" "))
 	}
 	n, err := strconv.Atoi(arg)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	raw := make([]byte, n)
-	if _, err := io.ReadFull(p.out, raw); err != nil {
-		return "", err
-	}
+	_, err = io.ReadFull(p.out, raw)
+	return raw, err
+}
+
+// withoutDumpKeys is a dump without the lines that carry its random key.
+func withoutDumpKeys(raw []byte) string {
 	var b strings.Builder
 	for line := range strings.Lines(string(raw)) {
 		if strings.HasPrefix(line, pgDumpRestrictPrefix) || strings.HasPrefix(line, pgDumpUnrestrictPrefix) {
@@ -169,5 +196,5 @@ func (p *Postgres) Dump(database string) (string, error) {
 		}
 		b.WriteString(line)
 	}
-	return b.String(), nil
+	return b.String()
 }

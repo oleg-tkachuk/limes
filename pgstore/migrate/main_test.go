@@ -2,8 +2,6 @@ package migrate
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -28,14 +26,7 @@ var (
 	ownerDSN string
 )
 
-func TestMain(m *testing.M) {
-	code, err := run(m)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "pgstore/migrate tests need a running Docker for their PostgreSQL:", err)
-		os.Exit(1)
-	}
-	os.Exit(code)
-}
+func TestMain(m *testing.M) { pgtest.Exit(run(m)) }
 
 func run(m *testing.M) (int, error) {
 	ctx := context.Background()
