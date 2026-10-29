@@ -130,7 +130,7 @@ var docRow = regexp.MustCompile("(?m)^\\| `([a-z_]+)` \\| ([0-9]{3}) \\|")
 // docs/errors.md lists every error the exchange answers with, with its
 // status.
 func TestErrorsDocListsEveryExchangeError(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "docs", "errors.md"))
+	raw, err := os.ReadFile("../docs/errors.md")
 	if err != nil {
 		t.Fatal(err)
 	}
