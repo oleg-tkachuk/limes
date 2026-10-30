@@ -1032,18 +1032,19 @@ expired, and so has every descendant.
 A verifier apart from the issuer resolves keys with `jwks.Remote`; its
 caching and failure modes are in the [guide](guide.md#authorize-every-call).
 
-## Revoking by user, client or session
+## Revoking by user, client, session or agent run
 
 A `BulkRevoker` revokes, in batches, every capability of one tenant — or,
 by client or session, of every tenant — that matches a selector. The
-session is recorded at issuance — an `Exchanger`
-takes it from the subject token's `sid`, a child from its parent — and is
-never a claim.
+session is recorded at issuance — an `Exchanger` takes it from the subject
+token's `sid`, a child from its parent — and is never a claim. A
+`meter.MatchingReleaser` then releases, tenant by tenant, the holds the
+revocation stopped, which would otherwise count until they expire.
 
 ```mermaid
 flowchart LR
     sess["IssueRequest.Session<br/>exchange: the subject token's sid<br/>a child: its parent's"]
-    req(["RevokeMatchingRequest{TenantID or AllTenants,<br/>Subject · OnBehalfOf · ClientID · Session,<br/>Note, Actor, Limit}"])
+    req(["RevokeMatchingRequest{TenantID or AllTenants,<br/>Subject · OnBehalfOf · ClientID · Session · RunID,<br/>Note, Actor, Limit}"])
     val{"TenantID or AllTenants, not both · a selector<br/>AllTenants: ClientID · Session alone<br/>Limit ≥ 0"}
     scope{"pgstore: the scope admits TenantID<br/>AllTenants: WithAllTenants"}
     sel["the capabilities matching every selector<br/>with no revocation entry of their own<br/>tenant, id order · at most Limit (DefaultHousekeepingLimit)<br/>AllTenants: those of the first 16 tenants"]
@@ -1053,8 +1054,10 @@ flowchart LR
     res(["RevokeMatchingResult{Revoked, Tenants, More}"])
     inval["ErrInvalidRequest"]
     mism["ErrScopeMismatch"]
+    release["meter.MatchingReleaser.ReleaseMatching<br/>in each of Tenants, the same selectors<br/>open holds of revoked matches and their descendants<br/>a live capability's hold kept"]
 
     req --> val -- yes --> scope -- yes --> sel --> lock --> write --> res
+    res -. "then, to free the budget at once" .-> release
     sess -. "Session selector" .-> sel
     write -.-> desc
     res -. "More: call again" .-> req
@@ -1068,7 +1071,7 @@ flowchart LR
     classDef external fill:#FCE7F3,stroke:#DB2777,color:#831843
     class req,res client
     class val,scope role
-    class sess,desc optional
+    class sess,desc,release optional
     class sel,lock,write store
     class inval,mism external
 ```
