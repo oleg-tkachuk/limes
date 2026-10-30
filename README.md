@@ -1,4 +1,4 @@
-![Lemon legionaries guard the limes wall; a lime holding a forged "scope: *, budget: ∞" token is turned away with "Halt! Narrower only, citizen."](docs/assets/banner.png)
+![Lemon legionaries guard the limes wall; a lime holding a forged "scope: *, budget: ∞" token is turned away with "Halt! Narrower only, citizen."](docs/assets/social-preview@2x.png)
 
 # limes
 
