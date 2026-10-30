@@ -265,3 +265,70 @@ func TestCensusAcrossTenantsBySelectorReadsByIndex(t *testing.T) {
 		}
 	}
 }
+
+// sqlSeedRuns records, as the owner, planRecords records of tenant $1, one
+// in planEvery of them of agent run $2, the rest of runs of their own, and
+// revokes half of them.
+const sqlSeedRuns = `
+INSERT INTO limes.capabilities (id, parent_id, tenant_id, principal_type, subject, expires_at, depth, capability, issued_by, run_id)
+SELECT uuidv7(), NULL, $1, 'agent', 'subject:' || i, $3::timestamptz + interval '1 hour', 0, '{}', '{}',
+       CASE WHEN i % $5::int = 0 THEN $2::uuid ELSE gen_random_uuid() END
+FROM generate_series(1, $4::int) i;
+
+INSERT INTO limes.revocations (capability_id, tenant_id, revoked_at, note, actor, cascaded)
+SELECT id, tenant_id, $3::timestamptz, 'plan', 'test', false
+FROM limes.capabilities WHERE hashtext(id::text) % 2 = 0;
+
+ANALYZE limes.capabilities;
+ANALYZE limes.revocations`
+
+// A revocation by agent run, and its preview, read a tenant of tens of
+// thousands of records through migration 030's index.
+func TestRevokeByRunReadsByIndex(t *testing.T) {
+	fresh(t)
+	now := time.Now().UTC()
+	tenant, run := newTenant(t), uuid.New()
+	if _, err := owner.Exec(t.Context(), sqlSeedRuns, pgx.QueryExecModeSimpleProtocol, tenant, run, now, planRecords, planEvery); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	records, err := NewStore(Config{DB: app, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	census, err := NewCensus(Config{DB: app, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithTenant(t.Context(), tenant)
+	revokeSQL, revokeArgs := revokeMatchingSQL(limes.RevokeMatchingRequest{TenantID: tenant, RunID: run}, now)
+	countReq := limes.CountRecordsRequest{TenantID: tenant, RunID: run}
+	countArgs, err := census.countArgs(countReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	countSQLText, countArgs := countSQL(countReq, append(countArgs, limes.PageLimit(0)+1))
+	listSQL, listArgs := listRecordsSQL(limes.ListRecordsRequest{TenantID: tenant, RunID: run}, now, nil, limes.PageLimit(0)+1)
+	for name, q := range map[string]struct {
+		sql  string
+		args []any
+	}{
+		"the revocation": {revokeSQL, revokeArgs},
+		"the count":      {countSQLText, countArgs},
+		"the listing":    {listSQL, listArgs},
+	} {
+		var plan []byte
+		err := records.inTx(ctx, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, "EXPLAIN (FORMAT JSON) "+q.sql, q.args...).Scan(&plan)
+		})
+		if err != nil {
+			t.Fatalf("%s: EXPLAIN: %v", name, err)
+		}
+		var nodes []map[string]any
+		if err := json.Unmarshal(plan, &nodes); err != nil {
+			t.Fatalf("%s: plan: %v", name, err)
+		}
+		if scans := seqScans(nodes[0]["Plan"].(map[string]any)); slices.Contains(scans, "capabilities") {
+			t.Errorf("%s scans the records sequentially:\n%s", name, plan)
+		}
+	}
+}

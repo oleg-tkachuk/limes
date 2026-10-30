@@ -43,9 +43,9 @@ const (
 	sqlInsertCapability = `
 INSERT INTO limes.capabilities
     (id, parent_id, tenant_id, principal_type, subject, expires_at, depth, capability, issued_by,
-     client_id, on_behalf_of, session)
+     client_id, on_behalf_of, session, run_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-        COALESCE($12, (SELECT p.session FROM limes.capabilities p WHERE p.id = $2)))`
+        COALESCE($12, (SELECT p.session FROM limes.capabilities p WHERE p.id = $2)), $13)`
 )
 
 // Insert records req.Capability and who asked for it. The parent must be on
@@ -104,10 +104,14 @@ func (s *Store) insert(ctx context.Context, tx pgx.Tx, c limes.Capability, capab
 	if c.OnBehalfOf != nil {
 		onBehalfOf = c.OnBehalfOf.Subject
 	}
+	var run *uuid.UUID
+	if c.Subject.Agent != nil && c.Subject.Agent.RunID != uuid.Nil() {
+		run = &c.Subject.Agent.RunID
+	}
 	_, err = tx.Exec(ctx, sqlInsertCapability,
 		c.ID, parentID, c.Subject.TenantID, string(c.Subject.Type), c.Subject.Subject,
 		nullTime(c.ExpiresAt), depth, capability, issuedBy,
-		nullString(c.ClientID), nullString(onBehalfOf), nullString(session))
+		nullString(c.ClientID), nullString(onBehalfOf), nullString(session), run)
 	return err
 }
 
