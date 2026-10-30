@@ -139,6 +139,10 @@ type Env struct {
 	// limes.ErrScopeMismatch, runs no onCharged and changes nothing.
 	// Optional: without it, the checks of that are skipped.
 	ReadOnlyCtx context.Context
+	// Revoke revokes the record of a capability NewCapability recorded, as
+	// Store.Revoke does. Optional: without it, or when Usage is no
+	// meter.MatchingReleaser, the checks of ReleaseMatching are skipped.
+	Revoke func(id uuid.UUID) error
 }
 
 // CapabilitySpec is a capability Env.NewCapability records: its parent and
@@ -156,6 +160,9 @@ type CapabilitySpec struct {
 	// Copies is its quota of Biscuit copies; nil is Unlimited. CopyQuota
 	// reads it as the record should hold it.
 	Copies *limes.CopyQuota
+	// ClientID is the client it is granted to, which the record holds as
+	// Capability.ClientID; empty for none.
+	ClientID string
 }
 
 // CopyQuota is the quota of copies the record holds: Copies, or Unlimited
@@ -358,6 +365,9 @@ func (f fixture) tenantSpent(t *testing.T) limes.Nanos {
 func Run(t *testing.T, setup func(t *testing.T) Env) {
 	t.Helper()
 	checks := []watchdog.Check[fixture]{
+		{Name: "ReleaseMatchingReleasesTheHoldsOfRevokedMatches", Run: checkReleaseMatching},
+		{Name: "ReleaseMatchingWorksInBatches", Run: checkReleaseMatchingBatches},
+		{Name: "ReleaseMatchingRefusesAMalformedRequest", Run: checkReleaseMatchingMalformed},
 		{Name: "RejectionMovesNothing", Run: checkRejectionMovesNothing},
 		{Name: "ExternalRefChargesOnce", Run: checkExternalRefChargesOnce},
 		{Name: "ExternalRefChargesOnceConcurrently", Run: checkExternalRefConcurrent},
