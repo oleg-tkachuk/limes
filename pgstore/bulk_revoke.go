@@ -87,8 +87,14 @@ const maxTenantsPerBatch = 16
 // selectorsSQL is the conditions of req's selectors, numbered from the
 // arguments in args, and args with their values.
 func selectorsSQL(req limes.RevokeMatchingRequest, args []any) (string, []any) {
+	return selectorConditionsSQL(req.Subject, req.OnBehalfOf, req.ClientID, req.Session, req.RunID, args)
+}
+
+// selectorConditionsSQL is a condition on capabilities c for each selector
+// set, numbered from the arguments in args, and args with their values.
+func selectorConditionsSQL(subject, onBehalfOf, clientID, session string, run uuid.UUID, args []any) (string, []any) {
 	var where strings.Builder
-	for _, sel := range selectorConditions(req.Subject, req.OnBehalfOf, req.ClientID, req.Session, req.RunID) {
+	for _, sel := range selectorConditions(subject, onBehalfOf, clientID, session, run) {
 		args = append(args, sel.value)
 		where.WriteString("\n      AND " + sel.column + " = $" + strconv.Itoa(len(args)))
 	}
