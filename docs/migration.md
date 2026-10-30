@@ -62,6 +62,15 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## pgstore/v0.52.0
+
+- The schema is at version 28: migration 028 notifies a statement's
+  revocations in parts of `MaxNotifiedRevocations` (100) ids, up to
+  `MaxNotifiedRevocationsPerStatement` (1 000), where 021 cleared every
+  cache whole past 100. `migrate.Run` applies it; a consumer that vendors
+  the schema applies step 028 before this release. A watcher of your own
+  reads each notification as before: a list of ids, or none.
+
 ## pgstore/v0.51.0
 
 - The schema is at version 27: migration 027 indexes the records by client

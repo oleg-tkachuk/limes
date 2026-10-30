@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -63,7 +64,8 @@ const root = -1
 // A revocation notifies with the ids a cache must drop answers for: the
 // capability revoked, the top of a cascade alone, nothing for a capability
 // whose parent was revoked before, and no id — clear whole — for a Biscuit
-// copy's revocation or past MaxNotifiedRevocations ids.
+// copy's revocation or past MaxNotifiedRevocationsPerStatement ids. Up to
+// that, a statement's ids come in notifications of MaxNotifiedRevocations.
 func TestRevocationNotificationNamesWhatItOutdates(t *testing.T) {
 	f := newTenantFixture(t)
 	next := notifications(t)
@@ -102,22 +104,35 @@ func TestRevocationNotificationNamesWhatItOutdates(t *testing.T) {
 		t.Fatal(err)
 	}
 	expect("a Biscuit copy", "")
-	for _, n := range []int{MaxNotifiedRevocations, MaxNotifiedRevocations + 1} {
+	for _, n := range []int{MaxNotifiedRevocationsPerStatement, MaxNotifiedRevocationsPerStatement + 1} {
 		roots := f.tree(t, slices.Repeat([]int{root}, n)...)
 		if _, err := owner.Exec(t.Context(), `
 INSERT INTO limes.revocations (capability_id, tenant_id, revoked_at, note, actor, cascaded)
 SELECT id, $2, now(), 'many', 'test', false FROM unnest($1::uuid[]) id`, roots, f.mine); err != nil {
 			t.Fatal(err)
 		}
-		got, ok := next()
-		named := strings.Fields(got)
-		switch {
-		case !ok:
-			t.Errorf("%d revoked at once: no notification", n)
-		case n <= MaxNotifiedRevocations && len(named) != n:
-			t.Errorf("%d revoked at once: %d ids named", n, len(named))
-		case n > MaxNotifiedRevocations && got != "":
-			t.Errorf("%d revoked at once: %d ids named, want none", n, len(named))
+		if n > MaxNotifiedRevocationsPerStatement {
+			expect(fmt.Sprintf("%d revoked at once", n), "")
+			continue
+		}
+		var named []string
+		for len(named) < n {
+			got, ok := next()
+			if !ok || got == "" {
+				t.Fatalf("%d revoked at once: %d ids named, then %q (%v)", n, len(named), got, ok)
+			}
+			ids := strings.Fields(got)
+			if len(ids) > MaxNotifiedRevocations {
+				t.Errorf("%d revoked at once: one notification names %d ids, past %d", n, len(ids), MaxNotifiedRevocations)
+			}
+			named = append(named, ids...)
+		}
+		slices.Sort(named)
+		if want := sortedStrings(roots); !slices.Equal(named, want) {
+			t.Errorf("%d revoked at once: named %d ids, not the %d revoked", n, len(named), len(want))
+		}
+		if extra, ok := next(); ok {
+			t.Errorf("%d revoked at once: then notified %q too", n, extra)
 		}
 	}
 }
@@ -370,5 +385,74 @@ func TestRevocationCacheKeepsNoAnswerForAnUnknownID(t *testing.T) {
 	}
 	if st := cache.Stats().Capabilities; st.Entries != 0 || st.Hits != 0 {
 		t.Errorf("Stats = %+v; want nothing kept for an id not on record", st)
+	}
+}
+
+// sortedStrings is ids as text, sorted.
+func sortedStrings(ids []uuid.UUID) []string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = id.String()
+	}
+	slices.Sort(out)
+	return out
+}
+
+// bulkBatch is how many capabilities the bulk revocation check revokes in
+// one batch: past one notification's ids, within
+// MaxNotifiedRevocationsPerStatement.
+const bulkBatch = MaxNotifiedRevocations + MaxNotifiedRevocations/2
+
+// A batch of RevokeMatching past one notification's ids reaches the cache
+// in parts, each dropping what it names: the cache is never cleared whole,
+// and an unrelated capability's answer stays.
+func TestRevocationWatcherKeepsAnswersThroughABulkRevocation(t *testing.T) {
+	f := newTenantFixture(t)
+	cache, err := limes.NewRevocationCache(limes.RevocationCacheConfig{Capabilities: f.records, TTL: cacheTTL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go func() { _ = RevocationWatcher{Connect: connectApp, Caches: []Clearer{cache}}.Run(ctx) }()
+	await := func(cond func(limes.RevocationCacheStats) bool, what string) {
+		t.Helper()
+		deadline := time.Now().Add(watchWait)
+		for !cond(cache.Stats()) {
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: not within %s", what, watchWait)
+			}
+			time.Sleep(watchQuiet / 10)
+		}
+	}
+	await(func(st limes.RevocationCacheStats) bool { return st.Clears == 1 }, "the clear once listening")
+	client := "client-" + uuid.New().String()
+	tenantCtx := WithTenant(t.Context(), f.mine)
+	for range bulkBatch {
+		c := f.capability(f.mine)
+		c.ClientID = client
+		if err := f.records.Insert(tenantCtx, limes.InsertRequest{Capability: c}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unrelated := f.tree(t, root)[0]
+	if revoked, err := cache.IsRevoked(t.Context(), unrelated); err != nil || revoked {
+		t.Fatalf("IsRevoked %s = %v, %v", unrelated, revoked, err)
+	}
+	got, err := f.records.RevokeMatching(tenantCtx, limes.RevokeMatchingRequest{TenantID: f.mine, ClientID: client})
+	if err != nil || got.Revoked != bulkBatch {
+		t.Fatalf("RevokeMatching = %+v, %v; want %d revoked", got, err, bulkBatch)
+	}
+	parts := (bulkBatch + MaxNotifiedRevocations - 1) / MaxNotifiedRevocations
+	await(func(st limes.RevocationCacheStats) bool { return st.Signals >= uint64(parts) }, "every part of the batch")
+	before := cache.Stats().Capabilities
+	if revoked, err := cache.IsRevoked(t.Context(), unrelated); err != nil || revoked {
+		t.Errorf("the unrelated capability = %v, %v; want live", revoked, err)
+	}
+	if after := cache.Stats().Capabilities; after.Hits-before.Hits != 1 {
+		t.Errorf("the unrelated capability was looked up again: the bulk revocation cleared its answer")
+	}
+	if st := cache.Stats(); st.Clears != 1 || st.SignalsWhole != 0 {
+		t.Errorf("%d clears, %d signals clearing whole; want only the clear once listening", st.Clears, st.SignalsWhole)
 	}
 }

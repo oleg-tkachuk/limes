@@ -31,11 +31,21 @@ const (
 	DefaultWatchHeartbeat = 30 * time.Second
 )
 
-// MaxNotifiedRevocations is the most capability ids one notification names
-// (migrate/ddl/migrations/021_notify_unseen_revocations.sql spells it too, and a test holds
-// the two to one number): past it, the notification names none, and a cache
-// is cleared whole.
-const MaxNotifiedRevocations = 100
+// The bounds of the ids a statement's revocations are notified with
+// (migrate/ddl/migrations/028_notify_revocations_in_parts.sql spells both
+// too, and a test holds the two to one number each).
+const (
+	// MaxNotifiedRevocations is the most capability ids one notification
+	// names: a hundred ids are some 3.7 KB of a payload PostgreSQL bounds
+	// at 8000 bytes.
+	MaxNotifiedRevocations = 100
+	// MaxNotifiedRevocationsPerStatement is the most capability ids one
+	// statement's notifications name, MaxNotifiedRevocations at a time:
+	// past it, one notification names none, and a cache is cleared whole.
+	// It is limes.DefaultHousekeepingLimit, so a batch of RevokeMatching at
+	// its default limit drops only what it outdates.
+	MaxNotifiedRevocationsPerStatement = limes.DefaultHousekeepingLimit
+)
 
 // Clearer is a cache the watcher clears: limes.RevocationCache is.
 type Clearer interface {
@@ -55,7 +65,8 @@ type RevokedClearer interface {
 // RevokedClearer, when the notification names the capabilities revoked —
 // or clears it whole: a cache that is no RevokedClearer, a notification
 // that names none (a Biscuit copy's revocation, a statement revoking more
-// than MaxNotifiedRevocations capabilities that no ancestor's id covers),
+// than MaxNotifiedRevocationsPerStatement capabilities that no ancestor's
+// id covers),
 // and after each connection it opens, since a revocation made while it was
 // not listening sent a notification it never heard. A cache that is a
 // limes.RevocationSignalTarget is told instead, through a

@@ -982,10 +982,13 @@ A statement that writes no new revocation entry notifies nothing, and one
 that revokes only capabilities whose parent was revoked before names none of
 them and notifies nothing either: their answers were outdated by the
 parent's. A cascade names its top capability alone, whose descendants'
-answers name it. A Biscuit copy's revocation, a statement naming more
-than `pgstore.MaxNotifiedRevocations` (100) capabilities, and one revoking
-a capability the writer's row-level security hides (migration 021) notify
-with no id, and the watcher clears whole.
+answers name it. A statement's ids come `pgstore.MaxNotifiedRevocations`
+(100) to a notification, so a batch of `RevokeMatching` at its default
+limit drops only what it outdates (migration 028). A Biscuit copy's
+revocation, a statement naming more than
+`pgstore.MaxNotifiedRevocationsPerStatement` (1 000) capabilities, and one
+revoking a capability the writer's row-level security hides (migration 021)
+notify with no id, and the watcher clears whole.
 Revoking a capability revokes everything delegated from it, with or
 without the flag: `IsRevoked` answers for the whole chain. `CascadeChildren`
 also writes a revocation entry per descendant, so the audit trail names each

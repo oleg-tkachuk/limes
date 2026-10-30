@@ -992,8 +992,9 @@ only adds the per-descendant entries that name each stopped capability. Without
 a revocation signal, a verifier learns of a revocation within the cache TTL;
 `pgstore`'s schema notifies a channel on every statement that writes a
 revocation, naming each capability revoked whose parent has no revocation
-entry, up to `MaxNotifiedRevocations` (100); a Biscuit copy's revocation, a
-statement past that bound, or one revoking a capability the writer's
+entry, `MaxNotifiedRevocations` (100) to a notification and up to
+`MaxNotifiedRevocationsPerStatement` (1 000) in all; a Biscuit copy's
+revocation, a statement past that bound, or one revoking a capability the writer's
 row-level security hides names none, and a statement whose capabilities'
 parents were all revoked before notifies nothing. Its `RevocationWatcher`
 passes them to each cache's `RevocationSignal` on each notification —
@@ -1151,7 +1152,7 @@ flowchart TB
     holds["lock the tenant's holds, in id order"]
     revlock["take the tenant's revoke lock alone<br/>(an Insert of a child shares it)"]
     recs["lock its records, in id order"]
-    revoke["revoke every record not revoked yet<br/>(the notify trigger names the revoked roots: watchers ClearRevoked them,<br/>or Clear past MaxNotifiedRevocations)"]
+    revoke["revoke every record not revoked yet<br/>(the notify trigger names the revoked roots: watchers ClearRevoked them,<br/>or Clear past MaxNotifiedRevocationsPerStatement)"]
     remove["remove the records Purge would:<br/>expired before now − MinPurgeRetention"]
     kept["count the records kept: revoked, until Purge takes them"]
     usage["lock aggregate · counters · copies' counters<br/>delete holds · tenant budget · usage · copy usage · charges"]
