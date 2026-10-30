@@ -63,6 +63,31 @@ func checkSessionOnRecord(t *testing.T, f fixture) {
 	expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "a child naming a session of its own: %v, want ErrInvalidRequest", err)
 	none := f.live(t, "agent:none", uuid.Nil())
 	expect.That(t, f.record(t, none.ID).Session == "", "a capability issued under no session reads back %q", f.record(t, none.ID).Session)
+	f.checkListedSessions(t, map[uuid.UUID]string{parent.ID: bulkSession, child.ID: bulkSession, none.ID: ""})
+}
+
+// checkListedSessions holds the listing to GetRecord: each record of want
+// lists with its session, through ListRecords and, when the Lister is a
+// limes.RecordListingReader, GetRecordListing too.
+func (f fixture) checkListedSessions(t *testing.T, want map[uuid.UUID]string) {
+	t.Helper()
+	if f.Lister == nil || f.Now == nil {
+		return
+	}
+	listed := map[uuid.UUID]string{}
+	for _, l := range f.listRecordsAll(t, limes.ListRecordsRequest{TenantID: f.Tenant}) {
+		listed[l.Record.Capability.ID] = l.Record.Session
+	}
+	reader, reads := f.Lister.(limes.RecordListingReader)
+	for id, session := range want {
+		got, ok := listed[id]
+		expect.That(t, ok && got == session, "ListRecords gives %s session %q (listed %v), want %q", id, got, ok, session)
+		if !reads {
+			continue
+		}
+		l, err := reader.GetRecordListing(f.Ctx, id)
+		expect.That(t, err == nil && l.Record.Session == session, "GetRecordListing %s = session %q, %v; want %q", id, l.Record.Session, err, session)
+	}
 }
 
 // Each selector revokes exactly its capabilities, given together they must
