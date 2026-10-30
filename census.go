@@ -53,6 +53,11 @@ type CountRecordsRequest struct {
 	// ByTenant and ByPrincipalType group the counts by the record's tenant
 	// and by its subject's principal type as well.
 	ByTenant, ByPrincipalType bool
+	// Subject, OnBehalfOf, ClientID and Session count only the records
+	// that match each one set, as RevokeMatching selects them, so a count
+	// previews a revocation and audits one after. Every one is taken with
+	// AllTenants, Subject and OnBehalfOf too: a count changes nothing.
+	Subject, OnBehalfOf, ClientID, Session string
 	// Limit is the page size; see PageLimit. Negative is refused.
 	Limit int
 	// Cursor is the one the previous page returned; empty for the first.

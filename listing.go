@@ -137,6 +137,10 @@ type ListRecordsRequest struct {
 	// SubjectPrefix those whose subject starts with it, bytewise; at most
 	// one of them. Empty, every subject's.
 	Subject, SubjectPrefix string
+	// OnBehalfOf, ClientID and Session list only the records that match
+	// each one set, as RevokeMatching selects them: a listing of what a
+	// revocation would revoke, or did.
+	OnBehalfOf, ClientID, Session string
 	// Dispositions lists the records of any of these dispositions; empty,
 	// every record.
 	Dispositions []RecordDisposition

@@ -276,6 +276,9 @@ func checkListRecordsCursorFilters(t *testing.T, f fixture) {
 		"another disposition":    func(r *limes.ListRecordsRequest) { r.Dispositions = []limes.RecordDisposition{active, expired} },
 		"one disposition fewer":  func(r *limes.ListRecordsRequest) { r.Dispositions = []limes.RecordDisposition{active} },
 		"every disposition":      func(r *limes.ListRecordsRequest) { r.Dispositions = nil },
+		"a client":               func(r *limes.ListRecordsRequest) { r.ClientID = "client" },
+		"a session":              func(r *limes.ListRecordsRequest) { r.Session = "sid" },
+		"an on-behalf-of":        func(r *limes.ListRecordsRequest) { r.OnBehalfOf = "user" },
 	} {
 		other := req
 		change(&other)

@@ -86,10 +86,7 @@ const maxTenantsPerBatch = 16
 // arguments in args, and args with their values.
 func selectorsSQL(req limes.RevokeMatchingRequest, args []any) (string, []any) {
 	var where strings.Builder
-	for _, sel := range []struct{ column, value string }{
-		{columnSubject, req.Subject}, {columnOnBehalfOf, req.OnBehalfOf},
-		{columnClientID, req.ClientID}, {columnSession, req.Session},
-	} {
+	for _, sel := range selectorConditions(req.Subject, req.OnBehalfOf, req.ClientID, req.Session) {
 		if sel.value == "" {
 			continue
 		}
