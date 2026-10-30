@@ -1058,6 +1058,11 @@ for {
   session (their client and on-behalf-of are backfilled).
 - **An OIDC back-channel logout** endpoint verifies the provider's logout
   token, then runs the loop above with its `sid`.
+- **Preview it, and audit it after.** `CountRecordsRequest` and
+  `ListRecordsRequest` take the same selectors — `Subject`, `OnBehalfOf`,
+  `ClientID`, `Session` — so a count names what a revocation would reach,
+  tenant by tenant with `AllTenants` and `ByTenant`, and a listing names
+  each record; run again after, the same count reports them revoked.
 
 A client registered once at an authorization server that serves many
 tenants holds capabilities in each of them, and so may a session. Deleting
