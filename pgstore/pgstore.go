@@ -344,6 +344,18 @@ func (c conn) inEveryTenantReadTx(ctx context.Context, fn func(pgx.Tx) error) er
 	})
 }
 
+// inEveryTenantTx is inTx for a write across every tenant: a read-only
+// scope is refused as inTx refuses it, and one that admits fewer than every
+// tenant before fn reads a row.
+func (c conn) inEveryTenantTx(ctx context.Context, fn func(pgx.Tx) error) error {
+	return c.inTx(ctx, func(tx pgx.Tx) error {
+		if err := c.checkEvery(ctx, tx); err != nil {
+			return err
+		}
+		return fn(tx)
+	})
+}
+
 // admitting is fn, run once the call's scope admits tenant.
 func (c conn) admitting(ctx context.Context, tenant uuid.UUID, fn func(pgx.Tx) error) func(pgx.Tx) error {
 	return func(tx pgx.Tx) error {

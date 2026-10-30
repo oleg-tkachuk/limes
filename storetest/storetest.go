@@ -27,8 +27,9 @@
 // census counts it under, and shows no other tenant's; when the lister is a
 // limes.RecordListingReader too, it reads each record as the listing gives it.
 // When Env.BulkRevoker is set, each selector revokes exactly its
-// capabilities, a batch at a time, and a record's session reads back, a
-// child's its parent's. When Env.Exchanges is set, the first claim of a
+// capabilities, a batch at a time, in one tenant or, by client or session,
+// in every tenant under Env.AllTenantsCtx alone, and a record's session reads
+// back, a child's its parent's. When Env.Exchanges is set, the first claim of a
 // subject token wins, racing ones included, and Purge drops it with its
 // capability. A check that does not finish within Env.CheckTimeout stops the
 // test binary with every goroutine's stack, naming the check.
@@ -120,6 +121,11 @@ type Env struct {
 	// Optional: without it, the checks of limes.BulkRevoker and of sessions
 	// on record are skipped.
 	BulkRevoker limes.BulkRevoker
+	// AllTenantsCtx is a context scoped to writing every tenant's rows, as
+	// housekeeping is (pgstore.WithAllTenants), for a revocation across
+	// tenants. Optional: without it, Ctx, but for a store that scopes
+	// tenants, whose checks of that are then skipped.
+	AllTenantsCtx context.Context
 }
 
 // newTenant is another tenant, from NewTenant when the Env has one.
@@ -320,6 +326,9 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "RevokeMatchingRevokesEverySelectorsCapabilities", Run: checkRevokeMatching},
 		{Name: "RevokeMatchingWorksInBatches", Run: checkRevokeMatchingBatches},
 		{Name: "RevokeMatchingRefusesAMalformedRequest", Run: checkRevokeMatchingMalformed},
+		{Name: "RevokeMatchingAcrossTenantsRevokesTheClientsAndSessionsCapabilities", Run: checkRevokeMatchingAllTenants},
+		{Name: "RevokeMatchingAcrossTenantsWorksInBatches", Run: checkRevokeMatchingAllTenantsBatches},
+		{Name: "RevokeMatchingAcrossTenantsNeedsEveryTenantsScope", Run: checkRevokeMatchingAllTenantsScope},
 	}
 	watchdog.RunChecks(t, func(t *testing.T) fixture { return newFixture(t, setup) }, func(f fixture) time.Duration { return f.CheckTimeout }, checks)
 }

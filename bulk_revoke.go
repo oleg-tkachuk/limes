@@ -6,13 +6,21 @@ import (
 	"uuid"
 )
 
-// RevokeMatchingRequest names the capabilities of one tenant to revoke
-// together (docs/adr/0013-bulk-revocation.md): every one on record that
+// RevokeMatchingRequest names the capabilities of one tenant, or of every
+// tenant, to revoke together (docs/adr/0013-bulk-revocation.md,
+// docs/adr/0014-bulk-revocation-across-tenants.md): every one on record that
 // matches each selector given — at least one — and has no revocation entry
 // of its own yet.
 type RevokeMatchingRequest struct {
-	// TenantID is the tenant whose capabilities are revoked. Required.
+	// TenantID is the tenant whose capabilities are revoked; AllTenants
+	// revokes in every tenant instead. Exactly one of them is required.
 	TenantID uuid.UUID
+	// AllTenants matches capabilities in every tenant, by ClientID and
+	// Session alone: an authorization server's client and an identity
+	// provider's session are named by the issuer, which knows no tenant, so
+	// one may hold capabilities in many. Subject and OnBehalfOf name a
+	// principal only within its tenant, and are refused beside it.
+	AllTenants bool
 	// Subject matches a capability's Subject.Subject, the principal it
 	// authorises: a user who leaves, an agent retired.
 	Subject string
@@ -32,14 +40,18 @@ type RevokeMatchingRequest struct {
 	Limit int
 }
 
-// Validate refuses a request with no tenant, no selector, or a negative
-// limit.
+// Validate refuses a request with neither a tenant nor AllTenants, or both,
+// no selector, a selector AllTenants does not take, or a negative limit.
 func (r RevokeMatchingRequest) Validate() error {
 	switch {
-	case r.TenantID == uuid.Nil():
-		return invalidRequest("revoke matching: no tenant")
+	case r.TenantID == uuid.Nil() && !r.AllTenants:
+		return invalidRequest("revoke matching: a tenant id or AllTenants required")
+	case r.TenantID != uuid.Nil() && r.AllTenants:
+		return invalidRequest("revoke matching: tenant id %s beside AllTenants", r.TenantID)
 	case r.Subject == "" && r.OnBehalfOf == "" && r.ClientID == "" && r.Session == "":
 		return invalidRequest("revoke matching: no selector; name a subject, an on-behalf-of, a client or a session")
+	case r.AllTenants && (r.Subject != "" || r.OnBehalfOf != ""):
+		return invalidRequest("revoke matching: AllTenants matches by client or session alone; a subject is a principal of one tenant")
 	case r.Limit < 0:
 		return invalidRequest("revoke matching: limit %d is negative", r.Limit)
 	}
@@ -58,6 +70,10 @@ func (r RevokeMatchingRequest) BatchLimit() int {
 type RevokeMatchingResult struct {
 	// Revoked counts the revocation entries the call wrote.
 	Revoked int64
+	// Tenants are the tenants the call wrote entries in, in ascending
+	// order, for an audit per tenant: the request's alone, or none, without
+	// AllTenants.
+	Tenants []uuid.UUID
 	// More reports a full batch: more may match, so call again until it is
 	// false. A capability issued meanwhile, by a client still holding a
 	// token that can mint one, is caught by the next call.
@@ -66,16 +82,19 @@ type RevokeMatchingResult struct {
 }
 
 // BulkRevoker revokes every capability of a tenant that matches a subject,
-// an on-behalf-of, a client or a session, in batches, as Revoke revokes one:
+// an on-behalf-of, a client or a session — or of every tenant that matches
+// a client or a session — in batches, as Revoke revokes one:
 // an entry for each that has none, and every descendant stopped through its
 // lineage. A store that records sessions (InsertRequest.Session) implements
 // it; memstore and pgstore do.
 type BulkRevoker interface {
 	// RevokeMatching writes a revocation entry, not cascaded, for at most
-	// req.BatchLimit() capabilities of req.TenantID that match every
-	// selector req names and have no entry of their own, in id order, and
-	// reports how many and whether the batch was full. It refuses what
-	// RevokeMatchingRequest.Validate refuses, and a call scoped to another
-	// tenant as ErrScopeMismatch.
+	// req.BatchLimit() capabilities of req.TenantID — or, with AllTenants,
+	// of every tenant — that match every selector req names and have no
+	// entry of their own, in order of tenant and id, and reports how many,
+	// in which tenants, and whether more may match. It refuses what
+	// RevokeMatchingRequest.Validate refuses, a call scoped to another
+	// tenant, and an AllTenants call under a scope that does not admit
+	// writing every tenant, as ErrScopeMismatch.
 	RevokeMatching(ctx context.Context, req RevokeMatchingRequest) (RevokeMatchingResult, error)
 }

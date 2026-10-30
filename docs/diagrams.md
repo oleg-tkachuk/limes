@@ -1033,25 +1033,27 @@ caching and failure modes are in the [guide](guide.md#authorize-every-call).
 
 ## Revoking by user, client or session
 
-A `BulkRevoker` revokes, in batches, every capability of one tenant that
-matches a selector. The session is recorded at issuance — an `Exchanger`
+A `BulkRevoker` revokes, in batches, every capability of one tenant — or,
+by client or session, of every tenant — that matches a selector. The
+session is recorded at issuance — an `Exchanger`
 takes it from the subject token's `sid`, a child from its parent — and is
 never a claim.
 
 ```mermaid
 flowchart LR
     sess["IssueRequest.Session<br/>exchange: the subject token's sid<br/>a child: its parent's"]
-    req(["RevokeMatchingRequest{TenantID,<br/>Subject · OnBehalfOf · ClientID · Session,<br/>Note, Actor, Limit}"])
-    val{"TenantID and a selector set<br/>Limit ≥ 0"}
-    scope{"pgstore: the scope<br/>admits TenantID"}
-    sel["the tenant's capabilities matching every selector<br/>with no revocation entry of their own<br/>id order · at most Limit (DefaultHousekeepingLimit)"]
-    write["a revocation entry each · Note · Actor"]
+    req(["RevokeMatchingRequest{TenantID or AllTenants,<br/>Subject · OnBehalfOf · ClientID · Session,<br/>Note, Actor, Limit}"])
+    val{"TenantID or AllTenants, not both · a selector<br/>AllTenants: ClientID · Session alone<br/>Limit ≥ 0"}
+    scope{"pgstore: the scope admits TenantID<br/>AllTenants: WithAllTenants"}
+    sel["the capabilities matching every selector<br/>with no revocation entry of their own<br/>tenant, id order · at most Limit (DefaultHousekeepingLimit)<br/>AllTenants: those of the first 16 tenants"]
+    lock["pgstore: each tenant's revoke lock, in order"]
+    write["a revocation entry each, in its tenant · Note · Actor"]
     desc["descendants stop through<br/>IsRevoked's lineage walk"]
-    res(["RevokeMatchingResult{Revoked, More}"])
+    res(["RevokeMatchingResult{Revoked, Tenants, More}"])
     inval["ErrInvalidRequest"]
     mism["ErrScopeMismatch"]
 
-    req --> val -- yes --> scope -- yes --> sel --> write --> res
+    req --> val -- yes --> scope -- yes --> sel --> lock --> write --> res
     sess -. "Session selector" .-> sel
     write -.-> desc
     res -. "More: call again" .-> req
@@ -1066,7 +1068,7 @@ flowchart LR
     class req,res client
     class val,scope role
     class sess,desc optional
-    class sel,write store
+    class sel,lock,write store
     class inval,mism external
 ```
 

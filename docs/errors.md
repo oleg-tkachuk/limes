@@ -81,7 +81,12 @@ wraps one. That holds for the root module, `dpop`, `jwks`, `meter`,
 - **Constructors** refuse a config they cannot work with as
   `invalid_config`: a required field missing, a negative bound, a key of
   another kind.
-- **A call malformed in itself** is `invalid_request`.
+- **A call malformed in itself** is `invalid_request`: among them a
+  `RevokeMatchingRequest` naming both a tenant and `AllTenants`, or
+  neither, or a subject beside `AllTenants`.
+- **A call under a narrower scope than it needs** is `scope_mismatch`:
+  another tenant's, a read-only scope for a write, or one tenant's for a
+  call across every tenant (`AllTenants`).
 - **An invariant broken inside limes** is `internal`.
 - **Each refusal** has its own code.
 
