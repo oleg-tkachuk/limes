@@ -45,9 +45,13 @@ func TestMeterContract(t *testing.T) {
 			Tenant:                 tenant,
 			Advance:                func(d time.Duration) { offset.Add(int64(d)) },
 			DeleteCapability:       removeRecord(records),
+			Revoke: func(id uuid.UUID) error {
+				_, err := records.Revoke(context.Background(), limes.RevokeRequest{CapabilityID: id})
+				return err
+			},
 			NewCapability: func(spec metertest.CapabilitySpec) (uuid.UUID, error) {
 				c := limes.Capability{
-					ID: uuid.New(), ParentID: spec.Parent, ExpiresAt: contractExpiry,
+					ID: uuid.New(), ParentID: spec.Parent, ExpiresAt: contractExpiry, ClientID: spec.ClientID,
 					Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: cmp.Or(spec.Tenant, tenant), Subject: "agent"},
 					Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: spec.Requests, Budget: spec.Budget, Copies: spec.CopyQuota()},
 				}

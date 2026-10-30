@@ -86,9 +86,13 @@ func meterEnv(t *testing.T, cfg Config, readOnly func(context.Context) context.C
 			_, err := owner.Exec(context.Background(), deleteRecord, id)
 			return err
 		},
+		Revoke: func(id uuid.UUID) error {
+			_, err := records.Revoke(WithAllTenants(t.Context()), limes.RevokeRequest{CapabilityID: id})
+			return err
+		},
 		NewCapability: func(spec metertest.CapabilitySpec) (uuid.UUID, error) {
 			c := limes.Capability{
-				ID: uuid.New(), ParentID: spec.Parent, ExpiresAt: expiry,
+				ID: uuid.New(), ParentID: spec.Parent, ExpiresAt: expiry, ClientID: spec.ClientID,
 				Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: cmp.Or(spec.Tenant, tenant), Subject: "agent"},
 				Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: spec.Requests, Budget: spec.Budget, Copies: spec.CopyQuota()},
 			}
