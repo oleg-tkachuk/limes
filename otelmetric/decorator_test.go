@@ -117,6 +117,15 @@ func TestInstrumentForwardsEveryInterfaceTheStoreImplements(t *testing.T) {
 			meter.UsageStore
 			meter.TenantUsageEraser
 		}{inner, inner},
+		"MatchingReleaser alone": struct {
+			meter.UsageStore
+			meter.MatchingReleaser
+		}{inner, inner},
+		"CopyUsageReader and MatchingReleaser": struct {
+			meter.UsageStore
+			meter.CopyUsageReader
+			meter.MatchingReleaser
+		}{inner, inner, inner},
 		"none": struct{ meter.UsageStore }{inner},
 	}
 	checked := map[string]bool{}

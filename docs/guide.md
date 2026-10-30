@@ -853,7 +853,7 @@ implementations, and `redisreplay` and `pgstore` run `dpoptest` against
 their replay caches.
 
 `otelmetric.Instrument` wraps a `meter.UsageStore` and keeps every interface of `meter` the
-store implements — the optional `CopyUsageReader` and `TenantUsageEraser`. A decorator of your
+store implements — the optional `CopyUsageReader`, `TenantUsageEraser` and `MatchingReleaser`. A decorator of your
 own should do the same: assert each optional interface on the store it wraps
 and forward it, or a caller checking for it finds it gone.
 
