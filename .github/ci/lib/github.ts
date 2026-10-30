@@ -132,6 +132,9 @@ export interface GitHub {
   workflowRun(runId: number): Promise<WorkflowRun>;
   runJobs(runId: number): Promise<Job[]>;
   releaseExists(tag: string): Promise<boolean>;
+  // releaseNotes is the body of tag's GitHub release, or undefined when the
+  // tag has none.
+  releaseNotes(tag: string): Promise<string | undefined>;
   // publishRelease publishes a release of a tag the repository holds; one
   // published already, by a call whose answer was lost, stands.
   publishRelease(release: NewRelease): Promise<void>;
@@ -275,6 +278,18 @@ class OctokitGitHub implements GitHub {
 
   async releaseExists(tag: string): Promise<boolean> {
     return existsBy(() => this.octokit.rest.repos.getReleaseByTag({ ...this.repo, tag }));
+  }
+
+  async releaseNotes(tag: string): Promise<string | undefined> {
+    try {
+      const { data } = await this.octokit.rest.repos.getReleaseByTag({ ...this.repo, tag });
+      return data.body ?? "";
+    } catch (err) {
+      if (statusOf(err) === NOT_FOUND) {
+        return undefined;
+      }
+      throw err;
+    }
   }
 
   async publishRelease(release: NewRelease): Promise<void> {

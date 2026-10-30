@@ -682,6 +682,11 @@ jobs:
       - name: Hold the table of candidates to the tags
         run: node .github/ci/candidates.ts check
 
+      # Each module's CHANGELOG.md: every entry a release tag reachable from
+      # this commit, newest first. See .github/ci/changelog.ts.
+      - name: Hold the changelogs to the tags
+        run: node .github/ci/changelog.ts check
+
   # Two jobs over the same files, and the halves do not overlap. actionlint
   # covers whether a workflow is correct at all — schema, expression syntax,
   # `needs:` naming a job that exists, and shellcheck over every `run:` block.

@@ -165,6 +165,7 @@ describe("releaseAll", () => {
   let failedGates: Set<string>;
   let rootTag: string | undefined;
   let majorCandidate: string | undefined;
+  let released: string[];
   let failing: string | undefined;
   let noCandidateNotes = false;
 
@@ -183,6 +184,7 @@ describe("releaseAll", () => {
     failedGates = new Set();
     rootTag = undefined;
     majorCandidate = undefined;
+    released = [];
     failing = undefined;
     noCandidateNotes = false;
   });
@@ -218,6 +220,9 @@ describe("releaseAll", () => {
       onMajorCandidate: (tag) => {
         majorCandidate = tag;
       },
+      onReleased: (tag) => {
+        released.push(tag);
+      },
       channel: Channel.Release,
       only: undefined,
       manual: true,
@@ -234,6 +239,7 @@ describe("releaseAll", () => {
     next = { limes: "v0.2.0", redisreplay: "redisreplay/v0.1.0", pgstore: "pgstore/v0.1.0" };
     assert.equal(await releaseAll(release()), true);
     assert.equal(rootTag, "v0.2.0");
+    assert.deepEqual(released, ["v0.2.0", "redisreplay/v0.1.0", "pgstore/v0.1.0"]);
     assert.deepEqual(
       data.published.map((r) => [r.tag, r.latest, r.notes]),
       [
@@ -497,6 +503,7 @@ describe("releaseAll", () => {
       majorCandidate = undefined;
       assert.deepEqual(await candidate(), ["v1.0.0-rc.1", "v1.0.0-rc.2", "v0.2.0-rc.1"]);
       assert.equal(majorCandidate, undefined, "a candidate of the next version is no candidate of the next major");
+      assert.deepEqual(released, [], "a candidate is no release, so no changelog entry");
     });
     // A candidate of the next major is cut beside the releases main goes on
     // making: its notes start from the candidate before it, naming the
