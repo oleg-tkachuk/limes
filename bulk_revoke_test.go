@@ -23,6 +23,8 @@ func TestRevokeMatchingRequestValidate(t *testing.T) {
 		{"every tenant with no selector", RevokeMatchingRequest{AllTenants: true}, false},
 		{"every tenant by subject", RevokeMatchingRequest{AllTenants: true, ClientID: "client", Subject: "user"}, false},
 		{"every tenant by on-behalf-of", RevokeMatchingRequest{AllTenants: true, OnBehalfOf: "user"}, false},
+		{"a tenant by agent run", RevokeMatchingRequest{TenantID: tenant, RunID: uuid.New()}, true},
+		{"every tenant by agent run", RevokeMatchingRequest{AllTenants: true, ClientID: "client", RunID: uuid.New()}, false},
 		{"a negative limit", RevokeMatchingRequest{TenantID: tenant, Subject: "user", Limit: -1}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

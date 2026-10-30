@@ -55,9 +55,12 @@ type CountRecordsRequest struct {
 	ByTenant, ByPrincipalType bool
 	// Subject, OnBehalfOf, ClientID and Session count only the records
 	// that match each one set, as RevokeMatching selects them, so a count
-	// previews a revocation and audits one after. Every one is taken with
-	// AllTenants, Subject and OnBehalfOf too: a count changes nothing.
+	// previews a revocation and audits one after. Every one, RunID's too, is
+	// taken with AllTenants: a count changes nothing.
 	Subject, OnBehalfOf, ClientID, Session string
+	// RunID counts only the records of that agent run, as RevokeMatching
+	// selects them.
+	RunID uuid.UUID
 	// Limit is the page size; see PageLimit. Negative is refused.
 	Limit int
 	// Cursor is the one the previous page returned; empty for the first.

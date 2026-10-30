@@ -73,7 +73,7 @@ func (c *Census) count(req limes.CountRecordsRequest) ([]limes.RecordCount, erro
 	groups := map[countKey]*limes.RecordCount{}
 	for id, rec := range s.caps {
 		if !req.AllTenants && rec.Subject.TenantID != req.TenantID ||
-			!s.selectedLocked(rec, selectors{subject: req.Subject, onBehalfOf: req.OnBehalfOf, clientID: req.ClientID, session: req.Session}) {
+			!s.selectedLocked(rec, selectors{subject: req.Subject, onBehalfOf: req.OnBehalfOf, clientID: req.ClientID, session: req.Session, runID: req.RunID}) {
 			continue
 		}
 		revoked, err := s.revokedLocked(id)
@@ -196,14 +196,15 @@ type listCursor struct {
 }
 
 // filtersKey names the filters of req: its tenant, principal type,
-// subject, subject prefix, on-behalf-of, client, session and dispositions,
-// these in any order and repeated or not. A cursor holds it, so one handed
-// back with other filters — or for another tenant — is refused rather than
-// paged on from its id under them, which would be neither listing.
+// subject, subject prefix, on-behalf-of, client, session, agent run and
+// dispositions, these in any order and repeated or not. A cursor holds it,
+// so one handed back with other filters — or for another tenant — is
+// refused rather than paged on from its id under them, which would be
+// neither listing.
 func filtersKey(req limes.ListRecordsRequest) string {
 	dispositions := slices.Clone(req.Dispositions)
 	slices.Sort(dispositions)
-	raw, err := json.Marshal([]any{req.TenantID, req.PrincipalType, req.Subject, req.SubjectPrefix, slices.Compact(dispositions), req.OnBehalfOf, req.ClientID, req.Session})
+	raw, err := json.Marshal([]any{req.TenantID, req.PrincipalType, req.Subject, req.SubjectPrefix, slices.Compact(dispositions), req.OnBehalfOf, req.ClientID, req.Session, req.RunID})
 	if err != nil {
 		panic(err) // strings and a list of strings always encode
 	}
@@ -269,7 +270,7 @@ func (c *Census) list(req limes.ListRecordsRequest, past func(uuid.UUID) bool) (
 			req.PrincipalType != limes.PrincipalTypeUnspecified && rec.Subject.Type != req.PrincipalType,
 			req.Subject != "" && rec.Subject.Subject != req.Subject,
 			!strings.HasPrefix(rec.Subject.Subject, req.SubjectPrefix),
-			!s.selectedLocked(rec, selectors{onBehalfOf: req.OnBehalfOf, clientID: req.ClientID, session: req.Session}),
+			!s.selectedLocked(rec, selectors{onBehalfOf: req.OnBehalfOf, clientID: req.ClientID, session: req.Session, runID: req.RunID}),
 			!past(id):
 			continue
 		}

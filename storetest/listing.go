@@ -279,6 +279,7 @@ func checkListRecordsCursorFilters(t *testing.T, f fixture) {
 		"a client":               func(r *limes.ListRecordsRequest) { r.ClientID = "client" },
 		"a session":              func(r *limes.ListRecordsRequest) { r.Session = "sid" },
 		"an on-behalf-of":        func(r *limes.ListRecordsRequest) { r.OnBehalfOf = "user" },
+		"an agent run":           func(r *limes.ListRecordsRequest) { r.RunID = uuid.New() },
 	} {
 		other := req
 		change(&other)

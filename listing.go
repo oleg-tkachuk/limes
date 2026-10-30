@@ -141,6 +141,9 @@ type ListRecordsRequest struct {
 	// each one set, as RevokeMatching selects them: a listing of what a
 	// revocation would revoke, or did.
 	OnBehalfOf, ClientID, Session string
+	// RunID lists only the records of that agent run, as RevokeMatching
+	// selects them.
+	RunID uuid.UUID
 	// Dispositions lists the records of any of these dispositions; empty,
 	// every record.
 	Dispositions []RecordDisposition
