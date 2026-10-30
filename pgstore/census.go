@@ -234,7 +234,7 @@ WHERE c.tenant_id = $1`
 // IsRevoked's does: a parent_id written by hand into a cycle would
 // otherwise walk for ever.
 var sqlRecordListing = fmt.Sprintf(`
-SELECT c.capability, c.issued_by, v.revoked_at, v.note, v.actor, v.cascaded, CASE
+SELECT c.capability, c.issued_by, c.session, v.revoked_at, v.note, v.actor, v.cascaded, CASE
     WHEN c.revoked THEN 'revoked'
     WHEN c.expires_at IS NULL OR c.expires_at <= $2 THEN 'expired'
     ELSE 'active'
@@ -428,6 +428,7 @@ func (c *Census) ListRecords(ctx context.Context, req limes.ListRecordsRequest) 
 // scanListing reads one row of sqlListRecords.
 func scanListing(row pgx.CollectableRow) (limes.RecordListing, error) {
 	var capability, issuedBy []byte
+	var session *string
 	var revokedAt *time.Time
 	var note, actor *string
 	var cascaded *bool
@@ -436,7 +437,7 @@ func scanListing(row pgx.CollectableRow) (limes.RecordListing, error) {
 	var ancestorAt *time.Time
 	var ancestorNote, ancestorActor *string
 	var ancestorCascaded *bool
-	if err := row.Scan(&capability, &issuedBy, &revokedAt, &note, &actor, &cascaded, &disposition,
+	if err := row.Scan(&capability, &issuedBy, &session, &revokedAt, &note, &actor, &cascaded, &disposition,
 		&ancestor, &ancestorAt, &ancestorNote, &ancestorActor, &ancestorCascaded); err != nil {
 		return limes.RecordListing{}, err
 	}
@@ -449,6 +450,9 @@ func scanListing(row pgx.CollectableRow) (limes.RecordListing, error) {
 		return limes.RecordListing{}, err
 	}
 	l := limes.RecordListing{Record: limes.Record{Capability: c, IssuedBy: p}, Disposition: limes.RecordDisposition(disposition)}
+	if session != nil {
+		l.Record.Session = *session
+	}
 	if revokedAt != nil {
 		l.Record.Revocation = &limes.Revocation{RevokedAt: *revokedAt, Note: *note, Actor: *actor, Cascaded: *cascaded}
 	}
