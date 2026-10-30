@@ -1,7 +1,10 @@
 package storetest
 
 import (
+	"bytes"
+	"context"
 	"errors"
+	"slices"
 	"testing"
 	"uuid"
 
@@ -89,7 +92,12 @@ func checkRevokeMatching(t *testing.T, f fixture) {
 		tc.req.TenantID, tc.req.Note, tc.req.Actor = f.Tenant, "storetest", "storetest"
 		got, err := f.BulkRevoker.RevokeMatching(f.Ctx, tc.req)
 		expect.Must(t, err == nil, "%s: RevokeMatching: %v", name, err)
-		expect.That(t, got.Revoked == int64(len(tc.want)) && !got.More, "%s: RevokeMatching = %+v, want %d revoked and no more", name, got, len(tc.want))
+		var tenants []uuid.UUID
+		if len(tc.want) > 0 {
+			tenants = []uuid.UUID{f.Tenant}
+		}
+		expect.That(t, got.Revoked == int64(len(tc.want)) && !got.More && slices.Equal(got.Tenants, tenants),
+			"%s: RevokeMatching = %+v, want %d revoked in %v and no more", name, got, len(tc.want), tenants)
 		for _, id := range tc.want {
 			expect.That(t, f.ownEntry(t, id), "%s: %s has no entry of its own", name, id)
 		}
@@ -132,9 +140,12 @@ func checkRevokeMatchingBatches(t *testing.T, f fixture) {
 func checkRevokeMatchingMalformed(t *testing.T, f fixture) {
 	f.requireBulkRevoker(t)
 	for name, req := range map[string]limes.RevokeMatchingRequest{
-		"no tenant":        {Subject: "user"},
-		"no selector":      {TenantID: f.Tenant},
-		"a negative limit": {TenantID: f.Tenant, Subject: "user", Limit: -1},
+		"no tenant":                    {Subject: "user"},
+		"no selector":                  {TenantID: f.Tenant},
+		"a negative limit":             {TenantID: f.Tenant, Subject: "user", Limit: -1},
+		"a tenant beside every tenant": {TenantID: f.Tenant, AllTenants: true, ClientID: "client"},
+		"every tenant by subject":      {AllTenants: true, ClientID: "client", Subject: "user"},
+		"every tenant by on-behalf-of": {AllTenants: true, OnBehalfOf: "user"},
 	} {
 		_, err := f.BulkRevoker.RevokeMatching(f.Ctx, req)
 		expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "%s: %v, want ErrInvalidRequest", name, err)
@@ -146,4 +157,143 @@ func checkRevokeMatchingMalformed(t *testing.T, f fixture) {
 	expect.Must(t, err == nil, "NewTenant: %v", err)
 	_, err = f.BulkRevoker.RevokeMatching(f.Ctx, limes.RevokeMatchingRequest{TenantID: other, Subject: "user"})
 	expect.That(t, errors.Is(err, limes.ErrScopeMismatch), "a call scoped to another tenant: %v, want ErrScopeMismatch", err)
+}
+
+// writeAllTenantsCtx is the context a revocation across every tenant runs
+// under, skipping the check where the store scopes tenants and the Env
+// names none.
+func (f fixture) writeAllTenantsCtx(t *testing.T) context.Context {
+	t.Helper()
+	switch {
+	case f.AllTenantsCtx != nil:
+		return f.AllTenantsCtx
+	case f.ScopesTenants:
+		t.Skip("Env.AllTenantsCtx not set")
+	}
+	return f.Ctx
+}
+
+// insertIn records a root capability of tenant under session, changed by
+// change.
+func (f fixture) insertIn(t *testing.T, tenant uuid.UUID, session string, change func(*limes.Capability)) limes.Capability {
+	t.Helper()
+	c := f.newCapability("agent:anywhere", uuid.Nil(), f.now.Add(ttl))
+	c.Subject.TenantID = tenant
+	if change != nil {
+		change(&c)
+	}
+	err := f.Store.Insert(f.tenantCtx(tenant), limes.InsertRequest{Capability: c, IssuedBy: issuedBy, Session: session})
+	expect.Must(t, err == nil, "insert %s for tenant %s: %v", c.ID, tenant, err)
+	return c
+}
+
+// sortedTenants is tenants in ascending order, as RevokeMatchingResult
+// gives them.
+func sortedTenants(tenants ...uuid.UUID) []uuid.UUID {
+	out := slices.Clone(tenants)
+	slices.SortFunc(out, func(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) })
+	return out
+}
+
+// A client's capabilities in two tenants are revoked by one call across
+// tenants, and so are a session's; another client's and another session's
+// stay live in both. Each selector is a fresh name, as a store's other
+// tenants may hold capabilities under the fixed ones.
+func checkRevokeMatchingAllTenants(t *testing.T, f fixture) {
+	f.requireBulkRevoker(t)
+	all := f.writeAllTenantsCtx(t)
+	other, err := f.newTenant()
+	expect.Must(t, err == nil, "NewTenant: %v", err)
+	client, otherClient := "client-"+uuid.New().String(), "client-"+uuid.New().String()
+	session, otherSession := "sid-"+uuid.New().String(), "sid-"+uuid.New().String()
+	byClient := func(id string) func(*limes.Capability) { return func(c *limes.Capability) { c.ClientID = id } }
+	for name, tc := range map[string]struct {
+		req        limes.RevokeMatchingRequest
+		mine, kept func(tenant uuid.UUID) limes.Capability
+	}{
+		"a client": {
+			limes.RevokeMatchingRequest{AllTenants: true, ClientID: client},
+			func(tenant uuid.UUID) limes.Capability { return f.insertIn(t, tenant, "", byClient(client)) },
+			func(tenant uuid.UUID) limes.Capability { return f.insertIn(t, tenant, "", byClient(otherClient)) },
+		},
+		"a session": {
+			limes.RevokeMatchingRequest{AllTenants: true, Session: session},
+			func(tenant uuid.UUID) limes.Capability { return f.insertIn(t, tenant, session, nil) },
+			func(tenant uuid.UUID) limes.Capability { return f.insertIn(t, tenant, otherSession, nil) },
+		},
+	} {
+		ours, theirs := tc.mine(f.Tenant), tc.mine(other)
+		keptOurs, keptTheirs := tc.kept(f.Tenant), tc.kept(other)
+		tc.req.Note, tc.req.Actor = "storetest", "storetest"
+		got, err := f.BulkRevoker.RevokeMatching(all, tc.req)
+		expect.Must(t, err == nil, "%s: RevokeMatching across tenants: %v", name, err)
+		want := sortedTenants(f.Tenant, other)
+		expect.That(t, got.Revoked == 2 && !got.More && slices.Equal(got.Tenants, want),
+			"%s: RevokeMatching across tenants = %+v, want 2 revoked in %v and no more", name, got, want)
+		for _, id := range []uuid.UUID{ours.ID, theirs.ID} {
+			expect.That(t, f.revoked(t, id), "%s: %s still verifies", name, id)
+		}
+		for _, id := range []uuid.UUID{keptOurs.ID, keptTheirs.ID} {
+			expect.That(t, !f.revoked(t, id), "%s: %s, another's, is revoked", name, id)
+		}
+		again, err := f.BulkRevoker.RevokeMatching(all, tc.req)
+		expect.That(t, err == nil && again.Revoked == 0 && len(again.Tenants) == 0 && !again.More,
+			"%s: a second call = %+v, %v; want nothing left", name, again, err)
+	}
+}
+
+// Across tenants too, a batch revokes at most Limit and says when more may
+// match, and the loop ends with every match in every tenant revoked.
+func checkRevokeMatchingAllTenantsBatches(t *testing.T, f fixture) {
+	f.requireBulkRevoker(t)
+	all := f.writeAllTenantsCtx(t)
+	other, err := f.newTenant()
+	expect.Must(t, err == nil, "NewTenant: %v", err)
+	client := "client-" + uuid.New().String()
+	var ids []uuid.UUID
+	for i := range revokeAllMatches {
+		tenant := f.Tenant
+		if i%2 == 1 {
+			tenant = other
+		}
+		ids = append(ids, f.insertIn(t, tenant, "", func(c *limes.Capability) { c.ClientID = client }).ID)
+	}
+	req := limes.RevokeMatchingRequest{AllTenants: true, ClientID: client, Limit: revokeAllBatch}
+	var total int64
+	for calls := 0; ; calls++ {
+		expect.Must(t, calls <= revokeAllMatches, "RevokeMatching across tenants never reported the last batch")
+		got, err := f.BulkRevoker.RevokeMatching(all, req)
+		expect.Must(t, err == nil, "RevokeMatching across tenants: %v", err)
+		expect.That(t, got.Revoked <= revokeAllBatch, "a batch revoked %d, past its limit %d", got.Revoked, revokeAllBatch)
+		total += got.Revoked
+		if !got.More {
+			break
+		}
+	}
+	expect.That(t, total == revokeAllMatches, "the batches revoked %d, want %d", total, revokeAllMatches)
+	for _, id := range ids {
+		expect.That(t, f.revoked(t, id), "%s still verifies once the loop ended", id)
+	}
+}
+
+// A store that scopes tenants refuses a revocation across tenants under a
+// scope admitting one tenant, or reading alone, as out of scope, and
+// revokes nothing.
+func checkRevokeMatchingAllTenantsScope(t *testing.T, f fixture) {
+	f.requireBulkRevoker(t)
+	if !f.ScopesTenants {
+		t.Skip("Env.ScopesTenants not set")
+	}
+	client := "client-" + uuid.New().String()
+	c := f.insertIn(t, f.Tenant, "", func(c *limes.Capability) { c.ClientID = client })
+	req := limes.RevokeMatchingRequest{AllTenants: true, ClientID: client}
+	scopes := map[string]context.Context{"one tenant's scope": f.Ctx}
+	if f.ReadOnlyCtx != nil {
+		scopes["a read-only scope"] = f.ReadOnlyCtx
+	}
+	for name, ctx := range scopes {
+		_, err := f.BulkRevoker.RevokeMatching(ctx, req)
+		expect.That(t, errors.Is(err, limes.ErrScopeMismatch), "%s: %v, want ErrScopeMismatch", name, err)
+	}
+	expect.That(t, !f.revoked(t, c.ID), "a refused revocation across tenants revoked %s", c.ID)
 }
