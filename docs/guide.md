@@ -1029,7 +1029,9 @@ capability of one tenant that matches a selector. The selectors are:
 - `Subject`, the principal a capability authorises;
 - `OnBehalfOf`, every agent acting for a user;
 - `ClientID`;
-- `Session`, the identity provider's session it was issued under.
+- `Session`, the identity provider's session it was issued under;
+- `RunID`, the agent run it was issued to (`Subject.Agent.RunID`): a run
+  gone wrong, whose capabilities issued apart share no lineage.
 
 Given together, they must all match. At least one selector is required, and
 either `TenantID` or `AllTenants` ([ADR-0013](adr/0013-bulk-revocation.md)).
@@ -1063,7 +1065,7 @@ for {
   token, then runs the loop above with its `sid`.
 - **Preview it, and audit it after.** `CountRecordsRequest` and
   `ListRecordsRequest` take the same selectors — `Subject`, `OnBehalfOf`,
-  `ClientID`, `Session` — so a count names what a revocation would reach,
+  `ClientID`, `Session`, `RunID` — so a count names what a revocation would reach,
   tenant by tenant with `AllTenants` and `ByTenant`, and a listing names
   each record; run again after, the same count reports them revoked.
 
@@ -1087,8 +1089,8 @@ for {
 ```
 
 - **Across tenants only `ClientID` and `Session` select:** a subject names
-  a principal of one tenant, so `Subject` and `OnBehalfOf` beside
-  `AllTenants` are `ErrInvalidRequest`.
+  a principal of one tenant, and the consumer mints run ids, so `Subject`,
+  `OnBehalfOf` and `RunID` beside `AllTenants` are `ErrInvalidRequest`.
 - **pgstore refuses a narrower scope** — one tenant's, or
   `WithAllTenantsReadOnly` — as `ErrScopeMismatch`.
 - **A batch writes in at most 16 tenants,** each under the revoke lock a

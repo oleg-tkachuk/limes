@@ -77,6 +77,8 @@ func checkRevokeMatching(t *testing.T, f fixture) {
 		c.OnBehalfOf = &limes.Principal{Type: limes.PrincipalTypeUser, TenantID: f.Tenant, Subject: bulkOnBehalfOf}
 	})
 	bySubject := f.insertWith(t, "user:leaving", "", nil)
+	run := uuid.New()
+	byRun := f.insertWith(t, "agent:run", "", func(c *limes.Capability) { c.Subject.Agent.RunID = run })
 	untouched := f.insertWith(t, "agent:d", otherSession, nil)
 	already := f.insertWith(t, "user:leaving", "", nil)
 	first := f.revoke(t, already.ID, false)
@@ -88,6 +90,7 @@ func checkRevokeMatching(t *testing.T, f fixture) {
 		"a client":       {limes.RevokeMatchingRequest{ClientID: bulkClient}, []uuid.UUID{byClient.ID}},
 		"an on-behalf":   {limes.RevokeMatchingRequest{OnBehalfOf: bulkOnBehalfOf}, []uuid.UUID{byOnBehalf.ID}},
 		"a subject":      {limes.RevokeMatchingRequest{Subject: "user:leaving"}, []uuid.UUID{bySubject.ID}},
+		"an agent run":   {limes.RevokeMatchingRequest{RunID: run}, []uuid.UUID{byRun.ID}},
 		"all must match": {limes.RevokeMatchingRequest{Subject: "agent:d", Session: bulkSession}, nil},
 	} {
 		tc.req.TenantID, tc.req.Note, tc.req.Actor = f.Tenant, "storetest", "storetest"
@@ -147,6 +150,7 @@ func checkRevokeMatchingMalformed(t *testing.T, f fixture) {
 		"a tenant beside every tenant": {TenantID: f.Tenant, AllTenants: true, ClientID: "client"},
 		"every tenant by subject":      {AllTenants: true, ClientID: "client", Subject: "user"},
 		"every tenant by on-behalf-of": {AllTenants: true, OnBehalfOf: "user"},
+		"every tenant by agent run":    {AllTenants: true, ClientID: "client", RunID: uuid.New()},
 	} {
 		_, err := f.BulkRevoker.RevokeMatching(f.Ctx, req)
 		expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "%s: %v, want ErrInvalidRequest", name, err)
@@ -321,6 +325,8 @@ func checkRevokeMatchingPreview(t *testing.T, f fixture) {
 		c.OnBehalfOf = &limes.Principal{Type: limes.PrincipalTypeUser, TenantID: f.Tenant, Subject: onBehalfOf}
 	})
 	bySubject := f.insertIn(t, f.Tenant, "", func(c *limes.Capability) { c.Subject.Subject = subject })
+	run := uuid.New()
+	byRun := f.insertIn(t, f.Tenant, "", func(c *limes.Capability) { c.Subject.Agent.RunID = run })
 	f.insertIn(t, f.Tenant, "", nil)
 	theirs := f.insertIn(t, other, "", byClient)
 	for name, tc := range map[string]struct {
@@ -347,6 +353,11 @@ func checkRevokeMatchingPreview(t *testing.T, f fixture) {
 			limes.CountRecordsRequest{TenantID: f.Tenant, Subject: subject},
 			limes.ListRecordsRequest{TenantID: f.Tenant, Subject: subject},
 			[]uuid.UUID{bySubject.ID},
+		},
+		"an agent run": {
+			limes.CountRecordsRequest{TenantID: f.Tenant, RunID: run},
+			limes.ListRecordsRequest{TenantID: f.Tenant, RunID: run},
+			[]uuid.UUID{byRun.ID},
 		},
 		"a client and a session": {
 			limes.CountRecordsRequest{TenantID: f.Tenant, ClientID: client, Session: session},

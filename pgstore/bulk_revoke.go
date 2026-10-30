@@ -21,6 +21,8 @@ const (
 	columnOnBehalfOf = "c.on_behalf_of"
 	columnClientID   = "c.client_id"
 	columnSession    = "c.session"
+	// columnRunID is the agent run's (migrate/ddl/migrations/029_revoke_by_run.sql).
+	columnRunID = "c.run_id"
 )
 
 // sqlRevokeMatchingHead and sqlRevokeMatchingTail surround the selectors:
@@ -86,10 +88,7 @@ const maxTenantsPerBatch = 16
 // arguments in args, and args with their values.
 func selectorsSQL(req limes.RevokeMatchingRequest, args []any) (string, []any) {
 	var where strings.Builder
-	for _, sel := range selectorConditions(req.Subject, req.OnBehalfOf, req.ClientID, req.Session) {
-		if sel.value == "" {
-			continue
-		}
+	for _, sel := range selectorConditions(req.Subject, req.OnBehalfOf, req.ClientID, req.Session, req.RunID) {
 		args = append(args, sel.value)
 		where.WriteString("\n      AND " + sel.column + " = $" + strconv.Itoa(len(args)))
 	}

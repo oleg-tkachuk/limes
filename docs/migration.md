@@ -64,12 +64,16 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 
 ## pgstore/v0.52.0
 
-- The schema is at version 28: migration 028 notifies a statement's
-  revocations in parts of `MaxNotifiedRevocations` (100) ids, up to
+- The schema is at version 30. Migration 029 adds the agent run each record
+  was issued to, filled in from its document, and 030 indexes it
+  `CONCURRENTLY`, for a revocation by `RunID`.
+- Migration 028 notifies a statement's revocations in parts of
+  `MaxNotifiedRevocations` (100) ids, up to
   `MaxNotifiedRevocationsPerStatement` (1 000), where 021 cleared every
-  cache whole past 100. `migrate.Run` applies it; a consumer that vendors
-  the schema applies step 028 before this release. A watcher of your own
-  reads each notification as before: a list of ids, or none.
+  cache whole past 100. A watcher of your own reads each notification as
+  before: a list of ids, or none.
+- `migrate.Run` applies the three; a consumer that vendors the schema
+  applies steps 028 to 030 before this release.
 
 ## pgstore/v0.51.0
 

@@ -33,6 +33,11 @@ type RevokeMatchingRequest struct {
 	// issued under (InsertRequest.Session): one the provider ended, by OIDC
 	// back-channel logout say.
 	Session string
+	// RunID matches the agent run a capability was issued to
+	// (Capability.Subject.Agent.RunID): a run gone wrong, whose capabilities
+	// issued apart share no lineage. The consumer mints run ids, so they name
+	// a run within its tenant alone, and AllTenants refuses it.
+	RunID uuid.UUID
 	// Note and Actor are stored for audit, as on RevokeRequest.
 	Note, Actor string
 	// Limit bounds the capabilities one call revokes. Zero:
@@ -48,10 +53,10 @@ func (r RevokeMatchingRequest) Validate() error {
 		return invalidRequest("revoke matching: a tenant id or AllTenants required")
 	case r.TenantID != uuid.Nil() && r.AllTenants:
 		return invalidRequest("revoke matching: tenant id %s beside AllTenants", r.TenantID)
-	case r.Subject == "" && r.OnBehalfOf == "" && r.ClientID == "" && r.Session == "":
-		return invalidRequest("revoke matching: no selector; name a subject, an on-behalf-of, a client or a session")
-	case r.AllTenants && (r.Subject != "" || r.OnBehalfOf != ""):
-		return invalidRequest("revoke matching: AllTenants matches by client or session alone; a subject is a principal of one tenant")
+	case r.Subject == "" && r.OnBehalfOf == "" && r.ClientID == "" && r.Session == "" && r.RunID == uuid.Nil():
+		return invalidRequest("revoke matching: no selector; name a subject, an on-behalf-of, a client, a session or an agent run")
+	case r.AllTenants && (r.Subject != "" || r.OnBehalfOf != "" || r.RunID != uuid.Nil()):
+		return invalidRequest("revoke matching: AllTenants matches by client or session alone; a subject or an agent run names one tenant's")
 	case r.Limit < 0:
 		return invalidRequest("revoke matching: limit %d is negative", r.Limit)
 	}
@@ -82,8 +87,8 @@ type RevokeMatchingResult struct {
 }
 
 // BulkRevoker revokes every capability of a tenant that matches a subject,
-// an on-behalf-of, a client or a session — or of every tenant that matches
-// a client or a session — in batches, as Revoke revokes one:
+// an on-behalf-of, a client, a session or an agent run — or of every tenant
+// that matches a client or a session — in batches, as Revoke revokes one:
 // an entry for each that has none, and every descendant stopped through its
 // lineage. A store that records sessions (InsertRequest.Session) implements
 // it; memstore and pgstore do.

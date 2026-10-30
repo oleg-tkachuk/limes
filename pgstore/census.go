@@ -121,13 +121,29 @@ func (c *Census) CountRecords(ctx context.Context, req limes.CountRecordsRequest
 	return limes.Page[limes.RecordCount]{Items: out, Next: countCursor{Tenant: last.TenantID, Type: string(last.PrincipalType)}.encode()}, nil
 }
 
-// selectorConditions are the columns of each selector, in the order its
-// condition is added, and req's value of each.
-func selectorConditions(subject, onBehalfOf, clientID, session string) []struct{ column, value string } {
-	return []struct{ column, value string }{
+// selector is one selector's condition: its column, and the value it must
+// hold.
+type selector struct {
+	column string
+	value  any
+}
+
+// selectorConditions are the selectors set, in the order their conditions
+// are added: a selector left empty matches every record.
+func selectorConditions(subject, onBehalfOf, clientID, session string, run uuid.UUID) []selector {
+	var out []selector
+	for _, s := range []struct{ column, value string }{
 		{columnSubject, subject}, {columnOnBehalfOf, onBehalfOf},
 		{columnClientID, clientID}, {columnSession, session},
+	} {
+		if s.value != "" {
+			out = append(out, selector{s.column, s.value})
+		}
 	}
+	if run != uuid.Nil() {
+		out = append(out, selector{columnRunID, run})
+	}
+	return out
 }
 
 // countSQL is the count req asks for, its arguments args — countArgs' and
@@ -143,10 +159,8 @@ func countSQL(req limes.CountRecordsRequest, args []any) (string, []any) {
 	} else {
 		w.q.WriteString("\n      AND c.tenant_id = $1")
 	}
-	for _, sel := range selectorConditions(req.Subject, req.OnBehalfOf, req.ClientID, req.Session) {
-		if sel.value != "" {
-			w.and(sel.column+" = $%d", sel.value)
-		}
+	for _, sel := range selectorConditions(req.Subject, req.OnBehalfOf, req.ClientID, req.Session, req.RunID) {
+		w.and(sel.column+" = $%d", sel.value)
 	}
 	w.q.WriteString(sqlCountRecordsTail)
 	return w.q.String(), w.args
@@ -294,10 +308,8 @@ func listRecordsSQL(req limes.ListRecordsRequest, now time.Time, after *uuid.UUI
 	if req.SubjectPrefix != "" {
 		w.and("starts_with(c.subject, $%d)", req.SubjectPrefix)
 	}
-	for _, sel := range selectorConditions("", req.OnBehalfOf, req.ClientID, req.Session) {
-		if sel.value != "" {
-			w.and(sel.column+" = $%d", sel.value)
-		}
+	for _, sel := range selectorConditions("", req.OnBehalfOf, req.ClientID, req.Session, req.RunID) {
+		w.and(sel.column+" = $%d", sel.value)
 	}
 	if len(req.Dispositions) > 0 {
 		fmt.Fprintf(&w.q, "\n  AND %s", dispositionsWhere(req))
@@ -361,14 +373,15 @@ type listCursor struct {
 }
 
 // filtersKey names the filters of req: its tenant, principal type,
-// subject, subject prefix, on-behalf-of, client, session and dispositions,
-// these in any order and repeated or not. A cursor holds it, so one handed
-// back with other filters — or for another tenant — is refused rather than
-// paged on from its id under them, which would be neither listing.
+// subject, subject prefix, on-behalf-of, client, session, agent run and
+// dispositions, these in any order and repeated or not. A cursor holds it,
+// so one handed back with other filters — or for another tenant — is
+// refused rather than paged on from its id under them, which would be
+// neither listing.
 func filtersKey(req limes.ListRecordsRequest) string {
 	dispositions := slices.Clone(req.Dispositions)
 	slices.Sort(dispositions)
-	raw, err := json.Marshal([]any{req.TenantID, req.PrincipalType, req.Subject, req.SubjectPrefix, slices.Compact(dispositions), req.OnBehalfOf, req.ClientID, req.Session})
+	raw, err := json.Marshal([]any{req.TenantID, req.PrincipalType, req.Subject, req.SubjectPrefix, slices.Compact(dispositions), req.OnBehalfOf, req.ClientID, req.Session, req.RunID})
 	if err != nil {
 		panic(err) // strings and a list of strings always encode
 	}
