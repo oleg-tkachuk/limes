@@ -1028,8 +1028,8 @@ capability of one tenant that matches a selector. The selectors are:
 - `ClientID`;
 - `Session`, the identity provider's session it was issued under.
 
-Given together, they must all match. `TenantID` and at least one selector
-are required ([ADR-0013](adr/0013-bulk-revocation.md)).
+Given together, they must all match. At least one selector is required, and
+either `TenantID` or `AllTenants` ([ADR-0013](adr/0013-bulk-revocation.md)).
 
 ```go
 req := limes.RevokeMatchingRequest{TenantID: tenant, Session: sid, Note: "IdP logout", Actor: "backchannel-logout"}
@@ -1042,9 +1042,10 @@ for {
 ```
 
 - **Each call writes an entry for at most `Limit` capabilities** (default
-  `DefaultHousekeepingLimit`) that have none, in id order. It reports the
-  entries written (`Revoked`) and whether the batch was full (`More`), so
-  no transaction holds a tenant's rows for long.
+  `DefaultHousekeepingLimit`) that have none, in order of tenant and id. It
+  reports the entries written (`Revoked`), the tenants it wrote in
+  (`Tenants`) and whether more may match (`More`), so no transaction holds
+  a tenant's rows for long.
 - **Descendants stop through their lineage,** as with `Revoke`.
 - **A capability issued while the loop runs** — by a client still holding
   a token that can delegate — is caught by another pass. Run one after the
@@ -1057,6 +1058,35 @@ for {
   session (their client and on-behalf-of are backfilled).
 - **An OIDC back-channel logout** endpoint verifies the provider's logout
   token, then runs the loop above with its `sid`.
+
+A client registered once at an authorization server that serves many
+tenants holds capabilities in each of them, and so may a session. Deleting
+the client revokes them all with `AllTenants`, under a scope that writes
+every tenant ([ADR-0014](adr/0014-bulk-revocation-across-tenants.md)):
+
+```go
+for {
+	res, err := store.RevokeMatching(pgstore.WithAllTenants(ctx), limes.RevokeMatchingRequest{
+		AllTenants: true, ClientID: id, Note: "client deleted", Actor: operator,
+	})
+	if err != nil {
+		return err
+	}
+	if !res.More {
+		break
+	}
+}
+```
+
+- **Across tenants only `ClientID` and `Session` select:** a subject names
+  a principal of one tenant, so `Subject` and `OnBehalfOf` beside
+  `AllTenants` are `ErrInvalidRequest`.
+- **pgstore refuses a narrower scope** — one tenant's, or
+  `WithAllTenantsReadOnly` — as `ErrScopeMismatch`.
+- **A batch writes in at most 16 tenants,** each under the revoke lock a
+  revoke in that tenant takes, so a delegation there waits for it as for
+  any revoke. A client with capabilities in many tenants takes a call per
+  16 of them.
 
 ## Bring your own storage
 

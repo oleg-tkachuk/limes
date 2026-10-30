@@ -62,6 +62,49 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## pgstore/v0.51.0
+
+- The schema is at version 27: migration 027 indexes the records by client
+  and by session ahead of the tenant, for a revocation across tenants, and
+  builds the indexes `CONCURRENTLY`. `migrate.Run` applies it; a consumer
+  that vendors the schema (`ddl.Steps()`) writes out step 027 and applies it
+  before this release, whose `CheckSchema` refuses version 26 as
+  `ErrSchemaMismatch`.
+- `RevokeMatching` takes `AllTenants` under `WithAllTenants` alone, and
+  refuses a narrower scope as `limes.ErrScopeMismatch`
+  ([ADR-0014](adr/0014-bulk-revocation-across-tenants.md)). Deleting a
+  client revokes its capabilities in every tenant:
+
+  ```go
+  for {
+  	res, err := store.RevokeMatching(pgstore.WithAllTenants(ctx), limes.RevokeMatchingRequest{
+  		AllTenants: true, ClientID: id, Note: "client deleted", Actor: operator,
+  	})
+  	if err != nil {
+  		return err
+  	}
+  	if !res.More {
+  		break
+  	}
+  }
+  ```
+
+## v0.140.0
+
+- `RevokeMatchingRequest.AllTenants` revokes by `ClientID` or `Session` in
+  every tenant, and `RevokeMatchingResult.Tenants` names the tenants a call
+  wrote in. Nothing that compiled breaks, but a `BulkRevoker` of your own
+  now fails `storetest` until it honours `AllTenants`: give the suite
+  `Env.AllTenantsCtx` when the store scopes tenants.
+
+  ```go
+  // Before: one tenant at a time, from a list of tenants of your own.
+  store.RevokeMatching(ctx, limes.RevokeMatchingRequest{TenantID: tenant, ClientID: id})
+
+  // After: every tenant, in batches.
+  store.RevokeMatching(ctx, limes.RevokeMatchingRequest{AllTenants: true, ClientID: id})
+  ```
+
 ## pgstore/v0.48.0
 
 - `pgstore/migrate/ddl` is new in this release, and its `Version` is a
