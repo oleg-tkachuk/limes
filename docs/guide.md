@@ -1063,6 +1063,15 @@ for {
   session (their client and on-behalf-of are backfilled).
 - **An OIDC back-channel logout** endpoint verifies the provider's logout
   token, then runs the loop above with its `sid`.
+- **Release the holds it stopped.** A revoked capability's open holds
+  keep counting against the ceilings until they expire, since a cost
+  reserved may still settle. A usage store that is a
+  `meter.MatchingReleaser` — memstore's and pgstore's are — releases them
+  at once: `ReleaseMatching` with the same selectors and a tenant releases
+  the holds of revoked matches and of everything delegated from them, never
+  a live capability's ([ADR-0015](adr/0015-release-matching-holds.md)).
+  After a revocation across tenants, run it in each tenant
+  `RevokeMatchingResult.Tenants` named.
 - **Preview it, and audit it after.** `CountRecordsRequest` and
   `ListRecordsRequest` take the same selectors — `Subject`, `OnBehalfOf`,
   `ClientID`, `Session`, `RunID` — so a count names what a revocation would reach,
@@ -1276,6 +1285,7 @@ Elsewhere, implement these and you are done:
 | `RecordListingReader` | Reads one record with its disposition, by the rules `RecordLister` and `RecordCensus` share (optional; a type of its own beside `RecordLister`) | No |
 | `RecordReporter` = `RecordLister` + `RecordListingReader` | Lists a tenant's records and reads one; `memstore.NewCensus` and `pgstore.NewCensus` return a `Census` that is both, and a `RecordCensus` | No |
 | `TenantRecordEraser`, `meter.TenantUsageEraser` | Erase a tenant's records and usage (optional) | No |
+| `meter.MatchingReleaser` | Releases the holds of capabilities a bulk revocation stopped (optional; `metertest` checks it through `Env.Revoke`) | No |
 | `meter.UsageStore` = `Meter` + `MeterReader` + `TenantBudgets` + `UsageHousekeeping` (only to meter) | Request and spend counters, the charges ledger, tenant ceilings; `DeleteUsage` and `PurgeOrphans` release a reaped capability's holds | Only for atomic side effects |
 | `KeyResolver` | Public verification keys; an unknown kid is `jwks.ErrUnknownKID`, the token's fault (`ErrInvalidToken`), and any other error the resolver's own (`jwks.Static` and `jwks.Remote` ship; `jwkstest` checks yours) | No |
 | `dpop.ReplayCache` | DPoP proof ids seen, per key, each counted against its holder: `Seen(ctx, dpop.ReplayEntry)` reports a holder past its share as seen, and returns an error when its store cannot answer — an outage, not a refused proof (only for key-bound tokens; `dpop.MemoryReplayCache` ships for one process — behind several replicas, `pgstore.ReplayCache` ships one over PostgreSQL and the `redisreplay` module one over Redis, or implement it over another shared store) | No |
