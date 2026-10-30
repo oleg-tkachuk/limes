@@ -29,7 +29,8 @@
 // When Env.BulkRevoker is set, each selector revokes exactly its
 // capabilities, a batch at a time, in one tenant or, by client or session,
 // in every tenant under Env.AllTenantsCtx alone, and a record's session reads
-// back, a child's its parent's. When Env.Exchanges is set, the first claim of a
+// back, a child's its parent's; with Env.Census and Env.Lister too, a count
+// and a listing by the same selectors name what it revokes. When Env.Exchanges is set, the first claim of a
 // subject token wins, racing ones included, and Purge drops it with its
 // capability. A check that does not finish within Env.CheckTimeout stops the
 // test binary with every goroutine's stack, naming the check.
@@ -329,6 +330,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "RevokeMatchingAcrossTenantsRevokesTheClientsAndSessionsCapabilities", Run: checkRevokeMatchingAllTenants},
 		{Name: "RevokeMatchingAcrossTenantsWorksInBatches", Run: checkRevokeMatchingAllTenantsBatches},
 		{Name: "RevokeMatchingAcrossTenantsNeedsEveryTenantsScope", Run: checkRevokeMatchingAllTenantsScope},
+		{Name: "CensusAndListingPreviewRevokeMatching", Run: checkRevokeMatchingPreview},
 	}
 	watchdog.RunChecks(t, func(t *testing.T) fixture { return newFixture(t, setup) }, func(f fixture) time.Duration { return f.CheckTimeout }, checks)
 }

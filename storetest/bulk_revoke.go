@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"maps"
 	"slices"
 	"testing"
 	"uuid"
@@ -296,4 +297,91 @@ func checkRevokeMatchingAllTenantsScope(t *testing.T, f fixture) {
 		expect.That(t, errors.Is(err, limes.ErrScopeMismatch), "%s: %v, want ErrScopeMismatch", name, err)
 	}
 	expect.That(t, !f.revoked(t, c.ID), "a refused revocation across tenants revoked %s", c.ID)
+}
+
+// The census and the listing filter by the selectors RevokeMatching takes,
+// so they preview it: a count and a listing by client, session, on-behalf-of
+// or subject name the capabilities RevokeMatching then revokes, and a count
+// across tenants by client names each tenant's. Each selector is a fresh
+// name, as a store's other tenants may hold capabilities under the fixed
+// ones.
+func checkRevokeMatchingPreview(t *testing.T, f fixture) {
+	f.requireBulkRevoker(t)
+	if f.Census == nil || f.Lister == nil || f.Now == nil {
+		t.Skip("Env.Census, Env.Lister or Env.Now not set")
+	}
+	other, err := f.newTenant()
+	expect.Must(t, err == nil, "NewTenant: %v", err)
+	client, session := "client-"+uuid.New().String(), "sid-"+uuid.New().String()
+	onBehalfOf, subject := "user-"+uuid.New().String(), "agent-"+uuid.New().String()
+	byClient := func(c *limes.Capability) { c.ClientID = client }
+	bySessionAndClient := f.insertIn(t, f.Tenant, session, byClient)
+	byClientAlone := f.insertIn(t, f.Tenant, "", byClient)
+	byOnBehalfOf := f.insertIn(t, f.Tenant, "", func(c *limes.Capability) {
+		c.OnBehalfOf = &limes.Principal{Type: limes.PrincipalTypeUser, TenantID: f.Tenant, Subject: onBehalfOf}
+	})
+	bySubject := f.insertIn(t, f.Tenant, "", func(c *limes.Capability) { c.Subject.Subject = subject })
+	f.insertIn(t, f.Tenant, "", nil)
+	theirs := f.insertIn(t, other, "", byClient)
+	for name, tc := range map[string]struct {
+		count limes.CountRecordsRequest
+		list  limes.ListRecordsRequest
+		want  []uuid.UUID
+	}{
+		"a client": {
+			limes.CountRecordsRequest{TenantID: f.Tenant, ClientID: client},
+			limes.ListRecordsRequest{TenantID: f.Tenant, ClientID: client},
+			[]uuid.UUID{bySessionAndClient.ID, byClientAlone.ID},
+		},
+		"a session": {
+			limes.CountRecordsRequest{TenantID: f.Tenant, Session: session},
+			limes.ListRecordsRequest{TenantID: f.Tenant, Session: session},
+			[]uuid.UUID{bySessionAndClient.ID},
+		},
+		"an on-behalf-of": {
+			limes.CountRecordsRequest{TenantID: f.Tenant, OnBehalfOf: onBehalfOf},
+			limes.ListRecordsRequest{TenantID: f.Tenant, OnBehalfOf: onBehalfOf},
+			[]uuid.UUID{byOnBehalfOf.ID},
+		},
+		"a subject": {
+			limes.CountRecordsRequest{TenantID: f.Tenant, Subject: subject},
+			limes.ListRecordsRequest{TenantID: f.Tenant, Subject: subject},
+			[]uuid.UUID{bySubject.ID},
+		},
+		"a client and a session": {
+			limes.CountRecordsRequest{TenantID: f.Tenant, ClientID: client, Session: session},
+			limes.ListRecordsRequest{TenantID: f.Tenant, ClientID: client, Session: session},
+			[]uuid.UUID{bySessionAndClient.ID},
+		},
+	} {
+		counts := f.countAll(t, f.Ctx, tc.count)
+		total := int64(0)
+		if len(counts) == 1 {
+			total = counts[0].Total
+		}
+		expect.That(t, total == int64(len(tc.want)), "%s: census = %+v, want %d records", name, counts, len(tc.want))
+		var listed []uuid.UUID
+		for _, l := range f.listRecordsAll(t, tc.list) {
+			listed = append(listed, l.Record.Capability.ID)
+		}
+		expect.That(t, sameIDs(listed, tc.want), "%s: listed %v, want %v", name, listed, tc.want)
+	}
+	across := f.countAll(t, f.allTenantsCtx(), limes.CountRecordsRequest{AllTenants: true, ByTenant: true, ClientID: client})
+	want := map[uuid.UUID]int64{f.Tenant: 2, other: 1}
+	got := map[uuid.UUID]int64{}
+	for _, n := range across {
+		got[n.TenantID] = n.Total
+	}
+	expect.That(t, maps.Equal(got, want), "census across tenants by client = %v, want %v", got, want)
+	revoked, err := f.BulkRevoker.RevokeMatching(f.Ctx, limes.RevokeMatchingRequest{TenantID: f.Tenant, ClientID: client})
+	expect.Must(t, err == nil, "RevokeMatching: %v", err)
+	expect.That(t, revoked.Revoked == want[f.Tenant], "RevokeMatching revoked %d, the census previewed %d", revoked.Revoked, want[f.Tenant])
+	after := f.countAll(t, f.Ctx, limes.CountRecordsRequest{TenantID: f.Tenant, ClientID: client})
+	expect.That(t, len(after) == 1 && after[0].Revoked == want[f.Tenant], "census by client after the revocation = %+v, want %d revoked", after, want[f.Tenant])
+	expect.That(t, !f.revoked(t, theirs.ID), "a revocation in Tenant revoked another tenant's capability")
+}
+
+// sameIDs reports whether a and b hold the same ids, in any order.
+func sameIDs(a, b []uuid.UUID) bool {
+	return slices.Equal(sortedTenants(a...), sortedTenants(b...))
 }
