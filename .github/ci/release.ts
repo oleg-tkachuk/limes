@@ -29,7 +29,9 @@
 // attempt pushed finds it only while it has no release, and the nested
 // modules are proposed their requirement of it all the same. A candidate of
 // the next major is set as `limes-candidate` once published, and its row in
-// the migration guide is proposed (candidates.ts).
+// the migration guide is proposed (candidates.ts). Every release
+// published sets `released`, and the modules' changelogs are proposed their
+// new entries (changelog.ts).
 
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -53,6 +55,9 @@ export const OUTPUT_LIMES_TAG = "limes-tag";
 // OUTPUT_LIMES_CANDIDATE is the step output the job proposing the
 // candidate's row in the migration guide reads (candidates.ts).
 export const OUTPUT_LIMES_CANDIDATE = "limes-candidate";
+// OUTPUT_RELEASED is the step output the job proposing the changelogs' new
+// entries reads: true once a release of any module is published.
+export const OUTPUT_RELEASED = "released";
 // GATED are the nested modules that build against the limes of the same
 // commit through a replace, so a change to limes one must follow lands with
 // it. Each is released only once its tests against the limes its go.mod
@@ -110,6 +115,8 @@ export interface Release {
   // onMajorCandidate is told the tag of a candidate of the next major, once
   // it is published.
   onMajorCandidate(tag: string): void;
+  // onReleased is told each module's release tag, once it is published.
+  onReleased(tag: string): void;
   channel: Channel;
   // only names the one module to release; undefined for every one.
   only: string | undefined;
@@ -266,6 +273,7 @@ async function releaseDue(r: Release, module: Module, before: readonly string[])
   // GitHub decides which root release is Latest, as it always has; a nested
   // module's is never it.
   await publish(r.github, tag, module.prefix, notesFrom(notesFile), module.name === ROOT_MODULE, r.root);
+  r.onReleased(tag);
   await warmGoProxy(tag, r.repository, r.fetchInfo);
   return { tag, note: r.manual ? "released by hand" : "released" };
 }
@@ -415,6 +423,7 @@ async function releaseFrom(repository: string, token: string, push: string): Pro
     notesDir: requireEnv("RUNNER_TEMP"),
     onRootTag: (tag) => setOutput(OUTPUT_LIMES_TAG, tag),
     onMajorCandidate: (tag) => setOutput(OUTPUT_LIMES_CANDIDATE, tag),
+    onReleased: () => setOutput(OUTPUT_RELEASED, String(true)),
   });
   return ok;
 }

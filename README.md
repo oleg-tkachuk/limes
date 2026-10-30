@@ -221,7 +221,9 @@ Releases are `vX.Y.Z` tags, cut from Conventional Commits on `main` once CI
 has passed: `feat` is a minor; `fix`, `perf` and `security` a patch. The module
 is pre-1.0, so a breaking change is a minor too — **the Go API may change
 between minor versions**; read the release notes, which list breaking changes
-first, before bumping.
+first, before bumping. Each module's `CHANGELOG.md` gathers them —
+[CHANGELOG.md](CHANGELOG.md) for limes, `<module>/CHANGELOG.md` for a nested
+one — written after each release from its notes.
 
 A release is not cut for every merge. It is cut once enough commits have
 gathered since the last one — three that cut a minor, or five that cut a

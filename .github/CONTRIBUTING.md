@@ -128,6 +128,10 @@ fails nothing, a soak whose counters drift fails it.
 - Commit subjects follow [Conventional Commits](https://www.conventionalcommits.org):
   the release is computed from them (`feat` a minor; `fix`, `perf` and
   `security` a patch; pre-1.0 a breaking change a minor), so a non-conforming subject releases nothing.
+  Each module's `CHANGELOG.md` is written from its releases' notes: after a
+  release, the release workflow opens a `docs(changelog): …` pull request
+  adding the new entries, and CI holds every entry to a release tag. Nobody
+  edits a changelog by hand (`.github/ci/changelog.ts`).
 - A change that breaks the Go API is marked breaking — `type!:` or a
   `BREAKING CHANGE:` footer — in one of its commits. CI's **API compatibility**
   job compares the pull request's API with its base using apidiff and fails an

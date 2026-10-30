@@ -22,6 +22,8 @@ export interface FakeData {
   // this fake was asked to publish; tags, the tags the repository holds.
   released: Set<string>;
   published: NewRelease[];
+  // notes are the bodies of releases by tag, each one released.
+  notes: Record<string, string>;
   tags: Set<string>;
   // pullsFrom are the open same-repository pull requests by head branch;
   // created and edited log what was asked.
@@ -54,6 +56,7 @@ export function fakeData(): FakeData {
     jobs: new Map(),
     released: new Set(),
     published: [],
+    notes: {},
     tags: new Set(),
     pullsFrom: new Map(),
     createdPulls: [],
@@ -132,6 +135,11 @@ class FakeGitHub implements GitHub {
 
   async releaseExists(tag: string): Promise<boolean> {
     return this.data.released.has(tag);
+  }
+
+  async releaseNotes(tag: string): Promise<string | undefined> {
+    this.data.calls.push(`releaseNotes ${tag}`);
+    return this.data.notes[tag] ?? (this.data.released.has(tag) ? "" : undefined);
   }
 
   async publishRelease(release: NewRelease): Promise<void> {

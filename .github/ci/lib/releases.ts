@@ -51,7 +51,7 @@ export async function newReleaseTag(github: GitHub, before: readonly string[], p
 
 // releaseTagsBelow is the module's release tags reachable from rev that
 // name no prerelease, newest first: a prerelease run publishes its own.
-async function releaseTagsBelow(rev: string, prefix: string, cwd?: string): Promise<string[]> {
+export async function releaseTagsBelow(rev: string, prefix: string, cwd?: string): Promise<string[]> {
   const tags = lines(await git(["tag", "--merged", rev, "--list", `${prefix}v[0-9]*`, "--sort=-v:refname"], cwd));
   return tags.filter((t) => isStableReleaseTag(t, prefix));
 }
