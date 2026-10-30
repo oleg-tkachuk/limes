@@ -224,3 +224,44 @@ func TestFirstTenantsCutsAtTheBound(t *testing.T) {
 		t.Errorf("firstTenants of one tenant = %d ids in %d tenants, cut %v; want 2 in 1, not cut", len(ids), len(tenants), cut)
 	}
 }
+
+// A census across tenants by client or by session — the preview of a
+// revocation across tenants — reads the records through an index, as the
+// revocation's selection does.
+func TestCensusAcrossTenantsBySelectorReadsByIndex(t *testing.T) {
+	fresh(t)
+	now := time.Now().UTC()
+	client, session := "client-"+uuid.New().String(), "sid-"+uuid.New().String()
+	if _, err := owner.Exec(t.Context(), sqlSeedEveryTenant, pgx.QueryExecModeSimpleProtocol, now, client, session, planRecords, planEvery); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	census, err := NewCensus(Config{DB: app, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithAllTenantsReadOnly(t.Context())
+	for name, req := range map[string]limes.CountRecordsRequest{
+		"by client":  {AllTenants: true, ByTenant: true, ClientID: client},
+		"by session": {AllTenants: true, ByTenant: true, Session: session},
+	} {
+		args, err := census.countArgs(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sql, args := countSQL(req, append(args, limes.PageLimit(0)+1))
+		var plan []byte
+		err = census.inEveryTenantReadTx(ctx, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, "EXPLAIN (FORMAT JSON) "+sql, args...).Scan(&plan)
+		})
+		if err != nil {
+			t.Fatalf("%s: EXPLAIN: %v", name, err)
+		}
+		var nodes []map[string]any
+		if err := json.Unmarshal(plan, &nodes); err != nil {
+			t.Fatalf("%s: plan: %v", name, err)
+		}
+		if scans := seqScans(nodes[0]["Plan"].(map[string]any)); len(scans) > 0 {
+			t.Errorf("%s: the census scans %v sequentially:\n%s", name, scans, plan)
+		}
+	}
+}

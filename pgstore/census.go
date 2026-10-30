@@ -40,8 +40,10 @@ func NewCensus(cfg Config) (*Census, error) {
 	return &Census{c}, nil
 }
 
-// sqlCountRecords counts the records of tenant $1 — of every tenant the
-// scope admits when NULL — grouped by tenant ($2) and principal type ($3),
+// sqlCountRecordsHead and sqlCountRecordsTail surround the conditions of
+// a count (countSQL): of tenant $1 alone, unless the count is of every
+// tenant the scope admits, and of each selector set. They count the
+// records grouped by tenant ($2) and principal type ($3),
 // at $4 with the window ending at $5, then pages them past the cursor's
 // place ($6, a flag, then $7 and $8) in CountRecords' order: tenant, then
 // principal type, each ascending bytewise. A group not named is one value —
@@ -49,7 +51,7 @@ func NewCensus(cfg Config) (*Census, error) {
 //
 // A disposition is one of revoked, then expired — no expiry, or not after
 // $4 — then active.
-const sqlCountRecords = `
+const sqlCountRecordsHead = `
 WITH counts AS (
     SELECT
         CASE WHEN $2::boolean THEN c.tenant_id ELSE '00000000-0000-0000-0000-000000000000'::uuid END AS tenant_id,
@@ -61,7 +63,9 @@ WITH counts AS (
         count(*) FILTER (WHERE c.parent_id IS NOT NULL) AS delegated,
         count(*) FILTER (WHERE NOT c.revoked AND c.expires_at > $4 AND c.expires_at <= $5) AS expiring_soon
     FROM ` + schema + `.capabilities c
-    WHERE $1::uuid IS NULL OR c.tenant_id = $1
+    WHERE true`
+
+const sqlCountRecordsTail = `
     GROUP BY 1, 2
 )
 SELECT tenant_id, principal_type, total, active, expired, revoked, delegated, expiring_soon
@@ -93,7 +97,8 @@ func (c *Census) CountRecords(ctx context.Context, req limes.CountRecordsRequest
 	limit := limes.PageLimit(req.Limit)
 	var out []limes.RecordCount
 	count := func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, sqlCountRecords, append(args, limit+1)...)
+		query, args := countSQL(req, append(args, limit+1))
+		rows, err := tx.Query(ctx, query, args...)
 		if err != nil {
 			return err
 		}
@@ -116,7 +121,38 @@ func (c *Census) CountRecords(ctx context.Context, req limes.CountRecordsRequest
 	return limes.Page[limes.RecordCount]{Items: out, Next: countCursor{Tenant: last.TenantID, Type: string(last.PrincipalType)}.encode()}, nil
 }
 
-// countArgs is req as sqlCountRecords takes it, all but the limit,
+// selectorConditions are the columns of each selector, in the order its
+// condition is added, and req's value of each.
+func selectorConditions(subject, onBehalfOf, clientID, session string) []struct{ column, value string } {
+	return []struct{ column, value string }{
+		{columnSubject, subject}, {columnOnBehalfOf, onBehalfOf},
+		{columnClientID, clientID}, {columnSession, session},
+	}
+}
+
+// countSQL is the count req asks for, its arguments args — countArgs' and
+// the limit — then a condition's each: the tenant's, unless every tenant's
+// is counted, and each selector's set, so each shape of count is a plan of
+// its own, as listRecordsSQL's are.
+func countSQL(req limes.CountRecordsRequest, args []any) (string, []any) {
+	w := &whereBuilder{args: args}
+	w.q.WriteString(sqlCountRecordsHead)
+	if req.AllTenants {
+		// $1 is NULL then, and named still, so its type is known.
+		w.q.WriteString("\n      AND $1::uuid IS NULL")
+	} else {
+		w.q.WriteString("\n      AND c.tenant_id = $1")
+	}
+	for _, sel := range selectorConditions(req.Subject, req.OnBehalfOf, req.ClientID, req.Session) {
+		if sel.value != "" {
+			w.and(sel.column+" = $%d", sel.value)
+		}
+	}
+	w.q.WriteString(sqlCountRecordsTail)
+	return w.q.String(), w.args
+}
+
+// countArgs is req as sqlCountRecordsHead takes it, all but the limit,
 // refusing a cursor it cannot read.
 func (c *Census) countArgs(req limes.CountRecordsRequest) ([]any, error) {
 	var after countCursor
@@ -258,6 +294,11 @@ func listRecordsSQL(req limes.ListRecordsRequest, now time.Time, after *uuid.UUI
 	if req.SubjectPrefix != "" {
 		w.and("starts_with(c.subject, $%d)", req.SubjectPrefix)
 	}
+	for _, sel := range selectorConditions("", req.OnBehalfOf, req.ClientID, req.Session) {
+		if sel.value != "" {
+			w.and(sel.column+" = $%d", sel.value)
+		}
+	}
 	if len(req.Dispositions) > 0 {
 		fmt.Fprintf(&w.q, "\n  AND %s", dispositionsWhere(req))
 	}
@@ -320,14 +361,14 @@ type listCursor struct {
 }
 
 // filtersKey names the filters of req: its tenant, principal type,
-// subject, subject prefix and dispositions, these in any order and repeated
-// or not. A cursor holds it, so one handed back with other filters — or for
-// another tenant — is refused rather than paged on from its id under them,
-// which would be neither listing.
+// subject, subject prefix, on-behalf-of, client, session and dispositions,
+// these in any order and repeated or not. A cursor holds it, so one handed
+// back with other filters — or for another tenant — is refused rather than
+// paged on from its id under them, which would be neither listing.
 func filtersKey(req limes.ListRecordsRequest) string {
 	dispositions := slices.Clone(req.Dispositions)
 	slices.Sort(dispositions)
-	raw, err := json.Marshal([]any{req.TenantID, req.PrincipalType, req.Subject, req.SubjectPrefix, slices.Compact(dispositions)})
+	raw, err := json.Marshal([]any{req.TenantID, req.PrincipalType, req.Subject, req.SubjectPrefix, slices.Compact(dispositions), req.OnBehalfOf, req.ClientID, req.Session})
 	if err != nil {
 		panic(err) // strings and a list of strings always encode
 	}
