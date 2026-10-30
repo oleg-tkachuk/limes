@@ -304,7 +304,7 @@ func (s *Store) listingLocked(id uuid.UUID, now time.Time) (limes.RecordListing,
 	if err != nil {
 		return limes.RecordListing{}, err
 	}
-	r := limes.Record{Capability: rec.Clone(), IssuedBy: s.issuedBy[id].Clone()}
+	r := limes.Record{Capability: rec.Clone(), IssuedBy: s.issuedBy[id].Clone(), Session: s.sessions[id]}
 	if entry, ok := s.revoked[id]; ok {
 		r.Revocation = &entry
 	}
