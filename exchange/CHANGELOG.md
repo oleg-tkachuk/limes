@@ -2,6 +2,12 @@
 
 Every release of the exchange module, newest first, from its release notes. Written by .github/ci/changelog.ts after each release; not edited by hand.
 
+## [0.15.2](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.15.1...exchange%2Fv0.15.2) (2026-10-31)
+
+### Dependencies
+
+* **nested:** require limes v0.143.0 in redisreplay, pgstore, otelmetric, exchange and biscuit ([d5ea9e8](https://github.com/oleg-tkachuk/limes/commit/d5ea9e8020b4e8fabdcd05828fca8d62e416d349))
+
 ## [0.15.1](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.15.0...exchange%2Fv0.15.1) (2026-10-31)
 
 ### Dependencies
