@@ -4,13 +4,6 @@
 # commit SHAs, no workflow input reaches a shell, and every job asks for the
 # narrowest token it needs.
 rules:
-  artipacked:
-    ignore:
-      # release.yaml is the one checkout in this repository that genuinely
-      # needs its credentials: semantic-release pushes the tag it creates.
-      # Every other checkout sets persist-credentials: false, which is what
-      # this audit asks for.
-      - release.yaml
   dangerous-triggers:
     ignore:
       # auto-merge.yaml decides whether a pull request may merge on its own,

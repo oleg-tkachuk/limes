@@ -44,28 +44,21 @@ this.
 
 Every nested module — `pgstore`, `redisreplay`, `otelmetric`, `exchange`, `biscuit` — builds against
 the limes of the same commit, through the replace in its `go.mod`, so CI runs
-its tests twice. Against that limes they are part of the required check: limes
-may not break a nested module. Against the limes its `go.mod` requires, which
-is what a consumer's build resolves (`task test:pinned MODULE=<module>`, the
-job **Released limes (&lt;module&gt;)**), they gate that module's release
-instead: a run in which they fail releases the other modules and holds that
-one back. That job runs on pushes to `main` alone, whose results the release
-reads; on a pull request run it by hand.
+its tests against it, as part of the required check: limes may not break a
+nested module. So a limes change that a nested module must follow — a value
+pgstore names exhaustively, such as a `ChargeBucket`, or an API the module
+calls — lands with the module in one pull request.
 
-So a limes change that a nested module must follow — a value pgstore names
-exhaustively, such as a `ChargeBucket`, or an API the module calls — lands
-with the module in one pull request. The released-limes job of its merge fails,
-as nothing released has the change yet; the release then releases limes, and
-the release workflow opens one pull request raising every nested module's
-requirement to that release (`build(nested): require limes vX.Y.Z in …`, merged
-once green). Its merge passes the job and releases each module it raised
-with every change the module held: a `build(nested)` commit — `build(limes)`
-before it was renamed — is a patch of each nested module whose files it
-changes, so the raised requirement is released
-even when nothing else waits. A red released-limes job holds no merge: main
-is judged by its required check alone. A module change
-that needs a limes already released raises the requirement in its own
-`go.mod`.
+Every module is released from one commit
+([ADR-0016](../docs/adr/0016-one-release-commit.md)). After a green push to
+`main`, the release workflow proposes one release pull request
+(`chore(release): …`, merged once green, or by hand for a major): it raises
+every nested module's requirement of limes to the limes it releases, so each
+is released with it, and adds each module's changelog entry. Its merge
+commit is tagged for every module at once, so a nested module requires the
+limes tagged beside it. `task test:pinned MODULE=<module>` still runs a
+module's tests against the limes its `go.mod` requires, as a consumer's build
+resolves it.
 
 `redisreplay`'s contract against a real Redis runs apart too, at the address
 `LIMES_REDIS_ADDR` names (`host:port`); miniredis runs another Lua, so this is

@@ -28,10 +28,8 @@ export const REQUIRED_CHECK = "All checks passed";
 // requiredConclusion is what a CI run says about its branch: how its
 // REQUIRED_CHECK ended, or the run's own conclusion when that job did not
 // finish — a run that never started it, or was cancelled before it. A job
-// outside the check fails the run without breaking the branch: a
-// released-limes gate is red from a limes release until the nested modules
-// require it, and the pull request raising their requirement must not wait
-// for a green main it is the one to bring.
+// outside the check, such as a benchmark, fails the run without breaking the
+// branch.
 export async function requiredConclusion(github: Pick<GitHub, "runJobs">, run: { id: number; conclusion: string }): Promise<string> {
   const check = (await github.runJobs(run.id)).filter((j) => j.name === REQUIRED_CHECK).at(-1);
   return check?.status === COMPLETED && check.conclusion !== undefined ? check.conclusion : run.conclusion;

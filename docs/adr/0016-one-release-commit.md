@@ -1,6 +1,6 @@
 # ADR-0016: Every module released from one release commit
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-31
 **Deciders:** Oleg Tkachuk
 
@@ -124,4 +124,6 @@ Each step is one pull request, tested in `.github/ci` before it is wired:
    `require-limes.ts`.
 5. Candidates: the nested modules' releases in the prerelease's notes,
    the table and `candidates.ts` removed.
-6. `changelog.ts check` made strict.
+6. `changelog.ts check` made strict: a release tag without an entry
+   refused. Its other half — the newest entry may name the release still to
+   be tagged — lands with step 4, which needs it.

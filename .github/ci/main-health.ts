@@ -5,7 +5,7 @@
 //
 // auto-merge.yaml runs this from main when ci.yaml completes on a push to
 // main. A run is read by its required check (requiredConclusion): a job
-// outside it — a released-limes gate — says nothing about main. A run that
+// outside it says nothing about main. A run that
 // failed opens an issue titled RED_ISSUE, or comments on the
 // one still open, so a broken main is seen, not only read in a log; while it
 // is red, merge-green merges nothing. A run that passed closes that issue and

@@ -10,7 +10,7 @@ import { isReleaseTag, isStableReleaseTag, newReleaseTag, previousTag, proxyInfo
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
 import { withoutWorkflowCommands } from "./lib/actions.ts";
 import { releaseCommits } from "./lib/modules.ts";
-import { ALL_MODULES, candidateNotesBody, Channel, GATED, gateOf, GATES, type Release, releaseAll, releaseOptions, SEED_VERSION, semanticReleaseCommand, unchangedSince } from "./release.ts";
+import { ALL_MODULES, candidateNotesBody, Channel, type Release, releaseAll, releaseOptions, semanticReleaseCommand, unchangedSince } from "./release.ts";
 import { sinceCandidate } from "./lib/prerelease.ts";
 
 const REPO = "oleg-tkachuk/limes";
@@ -158,15 +158,7 @@ describe("releaseAll", () => {
   let repo: TempRepo;
   let data: FakeData;
   let notesDir: string;
-  // next is the tag each module's semantic-release pushes this run, if any.
-  let next: Record<string, string | undefined>;
-  let gatesPassing: boolean;
-  // failedGates are the gating jobs that did not pass, beside gatesPassing.
-  let failedGates: Set<string>;
-  let rootTag: string | undefined;
   let majorCandidate: string | undefined;
-  let released: string[];
-  let failing: string | undefined;
   let noCandidateNotes = false;
 
   before(async () => {
@@ -179,13 +171,7 @@ describe("releaseAll", () => {
     copyFileSync(join(RELEASE, "modules.cjs"), join(repo.dir, ".github/release/modules.cjs"));
     await repo.commit("feat: start");
     data = fakeData();
-    next = {};
-    gatesPassing = true;
-    failedGates = new Set();
-    rootTag = undefined;
     majorCandidate = undefined;
-    released = [];
-    failing = undefined;
     noCandidateNotes = false;
   });
   afterEach(() => repo.cleanup());
@@ -195,255 +181,24 @@ describe("releaseAll", () => {
       github: fakeGitHub(data),
       repository: REPO,
       root: repo.dir,
-      async runSemanticRelease(module: Module, notesFile: string) {
-        if (module.name === failing) {
-          throw new Error("semantic-release failed");
-        }
-        const tag = next[module.name];
-        if (tag !== undefined) {
-          await repo.run("tag", tag);
-          data.tags.add(tag);
-          writeFileSync(notesFile, `notes of ${tag}\n`);
-        }
-      },
       async candidateNotes(module: Module, notesFile: string) {
         if (!noCandidateNotes) {
           writeFileSync(notesFile, `${CANDIDATE_NOTES} of ${module.name}\n`);
         }
       },
-      gatePassed: async (job) => gatesPassing && !failedGates.has(job),
       fetchInfo: async () => ({ ok: true, status: 200 }),
       notesDir,
-      onRootTag: (tag) => {
-        rootTag = tag;
-      },
       onMajorCandidate: (tag) => {
         majorCandidate = tag;
       },
-      onReleased: (tag) => {
-        released.push(tag);
-      },
-      channel: Channel.Release,
       only: undefined,
-      manual: true,
       nextMajor: false,
-      policy: { minorCommits: 3, patchCommits: 5, immediateTypes: ["security", "build"] },
       commits: releaseCommits(),
       pushTag: async (tag) => {
         data.tags.add(tag);
       },
     };
   }
-
-  test("each module releases its own tag, the root's marked Latest", async () => {
-    next = { limes: "v0.2.0", redisreplay: "redisreplay/v0.1.0", pgstore: "pgstore/v0.1.0" };
-    assert.equal(await releaseAll(release()), true);
-    assert.equal(rootTag, "v0.2.0");
-    assert.deepEqual(released, ["v0.2.0", "redisreplay/v0.1.0", "pgstore/v0.1.0"]);
-    assert.deepEqual(
-      data.published.map((r) => [r.tag, r.latest, r.notes]),
-      [
-        ["v0.2.0", true, "notes of v0.2.0\n"],
-        ["redisreplay/v0.1.0", false, "notes of redisreplay/v0.1.0\n"],
-        ["pgstore/v0.1.0", false, "notes of pgstore/v0.1.0\n"],
-      ],
-    );
-  });
-
-  // A nested module no tag names yet has its line seeded on the commit that
-  // added its go.mod, so semantic-release counts from v0.1.0 rather than
-  // cutting 1.0.0; a module tagged already, one with no go.mod, and the root
-  // are left as they are.
-  test("an untagged nested module's line is seeded where its go.mod arrived", async () => {
-    const seed = `biscuit/${SEED_VERSION}`;
-    mkdirSync(join(repo.dir, "biscuit"), { recursive: true });
-    writeFileSync(join(repo.dir, "biscuit", "go.mod"), "module example.com/biscuit\n");
-    await repo.run("add", "biscuit/go.mod");
-    const added = await repo.commit("feat(biscuit): add the module");
-    await repo.commit("build(biscuit): require limes v0.2.0");
-    await releaseAll(release());
-    assert.ok(data.tags.has(seed), [...data.tags].join(", "));
-    assert.equal((await repo.run("rev-list", "-n", "1", seed)).trim(), added);
-    assert.ok(![...data.tags].some((t) => t.startsWith("pgstore/") || t.startsWith(`${SEED_VERSION}`)), [...data.tags].join(", "));
-
-    data.tags.clear();
-    await releaseAll(release());
-    assert.equal(data.tags.size, 0, "a seeded line is seeded once");
-  });
-
-  test("a gated module waits while its CI job did not pass", async () => {
-    gatesPassing = false;
-    next = { limes: "v0.2.0", pgstore: "pgstore/v0.1.0" };
-    await releaseAll(release());
-    assert.deepEqual(
-      data.published.map((r) => r.tag),
-      ["v0.2.0"],
-    );
-    assert.ok(GATES.pgstore !== undefined);
-  });
-
-  // Every nested module is gated, each by its own job: one failing holds
-  // back that module alone.
-  test("each gated module waits for its own CI job alone", async () => {
-    failedGates = new Set([gateOf("redisreplay")]);
-    next = {
-      limes: "v0.2.0", redisreplay: "redisreplay/v0.1.0", pgstore: "pgstore/v0.1.0", otelmetric: "otelmetric/v0.1.0", exchange: "exchange/v0.1.0",
-      biscuit: "biscuit/v0.1.1",
-    };
-    await releaseAll(release());
-    assert.deepEqual(
-      data.published.map((r) => r.tag),
-      ["v0.2.0", "pgstore/v0.1.0", "otelmetric/v0.1.0", "exchange/v0.1.0", "biscuit/v0.1.1"],
-    );
-    assert.deepEqual([...GATED].sort(), ["biscuit", "exchange", "otelmetric", "pgstore", "redisreplay"]);
-  });
-
-  test("the run's summary says what happened to each module", async () => {
-    const page = join(notesDir, "summary.md");
-    process.env.GITHUB_STEP_SUMMARY = page;
-    try {
-      next = { limes: "v0.2.0" };
-      gatesPassing = false;
-      await releaseAll(release());
-    } finally {
-      delete process.env.GITHUB_STEP_SUMMARY;
-    }
-    const { readFileSync } = await import("node:fs");
-    const summary = readFileSync(page, "utf8");
-    assert.match(summary, /\| limes \| v0\.2\.0 \| released by hand \|/);
-    assert.match(summary, /\| pgstore \|  \| 'Released limes \(pgstore\)' did not pass; not released this run \|/);
-    assert.match(summary, /\| redisreplay \|  \| 'Released limes \(redisreplay\)' did not pass; not released this run \|/);
-  });
-
-  // A run by hand that released nothing says so as an annotation, naming
-  // each module's last release; one that released something does not.
-  async function noticesOf(run: () => Promise<unknown>): Promise<string[]> {
-    const printed: string[] = [];
-    const log = console.log;
-    console.log = (line: string) => void printed.push(line);
-    try {
-      await run();
-    } finally {
-      console.log = log;
-    }
-    return printed.filter((l) => l.startsWith("notice: ") || l.startsWith("::notice::"));
-  }
-  test("a run by hand that released nothing says so", async () => {
-    await repo.run("tag", "v0.1.0");
-    data.released.add("v0.1.0");
-    const notices = await noticesOf(() => releaseAll({ ...release(), channel: Channel.Prerelease }));
-    assert.equal(notices.length, 1, notices.join("\n"));
-    assert.match(notices[0] ?? "", /nothing pre-released: limes: no commit since v0\.1\.0 cuts a release, so no candidate/);
-  });
-  test("a run by hand that released something says nothing more", async () => {
-    next = { limes: "v0.2.0" };
-    assert.deepEqual(await noticesOf(() => releaseAll(release())), []);
-  });
-  test("a run nobody asked for that released nothing says nothing more", async () => {
-    assert.deepEqual(await noticesOf(() => releaseAll({ ...release(), manual: false })), []);
-  });
-
-  test("no release due publishes nothing", async () => {
-    assert.equal(await releaseAll(release()), true);
-    assert.deepEqual(data.published, []);
-    assert.equal(rootTag, undefined);
-  });
-
-  test("one module failing leaves the others released, and fails the run", async () => {
-    failing = "limes";
-    next = { redisreplay: "redisreplay/v0.1.0" };
-    assert.equal(await releaseAll(release()), false);
-    assert.deepEqual(
-      data.published.map((r) => r.tag),
-      ["redisreplay/v0.1.0"],
-    );
-  });
-
-  test("a tag an earlier run left behind is published, never as Latest", async () => {
-    await repo.run("tag", "v0.1.0");
-    data.tags.add("v0.1.0");
-    await repo.commit("fix: later");
-    assert.equal(await releaseAll(release()), true);
-    assert.deepEqual(
-      data.published.map((r) => [r.tag, r.latest, r.previousTag]),
-      [["v0.1.0", false, undefined]],
-    );
-  });
-
-  test("the root's tag is known before its release is published", async () => {
-    next = { limes: "v0.2.0" };
-    const r = release();
-    const publishRelease = r.github.publishRelease.bind(r.github);
-    r.github.publishRelease = async (rel) => {
-      assert.equal(rootTag, rel.tag);
-      return publishRelease(rel);
-    };
-    await releaseAll(r);
-  });
-
-  // A release nobody asked for waits for the policy's thresholds.
-  describe("by the policy", () => {
-    async function commits(...subjects: string[]): Promise<void> {
-      for (const subject of subjects) {
-        repo.write("x.go", `// ${subject}\n`);
-        await repo.commit(subject);
-      }
-    }
-    async function released(): Promise<boolean> {
-      next = { limes: "v0.2.0" };
-      await releaseAll({ ...release(), manual: false });
-      return data.published.some((r) => r.tag === "v0.2.0");
-    }
-    beforeEach(async () => {
-      await repo.run("tag", "v0.1.0");
-      data.released.add("v0.1.0");
-    });
-
-    test("two features are not due", async () => {
-      await commits("feat: a", "feat: b", "docs: c");
-      assert.equal(await released(), false);
-    });
-    test("three features are", async () => {
-      await commits("feat: a", "feat: b", "feat: c");
-      assert.equal(await released(), true);
-    });
-    test("four fixes are not due", async () => {
-      await commits("fix: a", "fix: b", "perf: c", "fix: d");
-      assert.equal(await released(), false);
-    });
-    test("five fixes are", async () => {
-      await commits("fix: a", "fix: b", "perf: c", "fix: d", "fix: e");
-      assert.equal(await released(), true);
-    });
-    test("a security fix is released at once", async () => {
-      await commits("security: seal");
-      assert.equal(await released(), true);
-    });
-    test("a breaking change is released at once", async () => {
-      await commits("feat!: change");
-      assert.equal(await released(), true);
-    });
-    test("commits before the last release are not counted", async () => {
-      await commits("feat: a", "feat: b");
-      await repo.run("tag", "v0.1.1");
-      data.released.add("v0.1.1");
-      await commits("feat: c");
-      assert.equal(await released(), false);
-    });
-    test("a merge commit does not count its pull request twice", async () => {
-      await repo.run("checkout", "--quiet", "-b", "topic");
-      await commits("feat: a", "feat: b");
-      await repo.run("checkout", "--quiet", "main");
-      await repo.run("-c", "user.name=t", "-c", "user.email=t@example.invalid", "merge", "--quiet", "--no-ff", "-m", "feat: a and b", "topic");
-      assert.equal(await released(), false);
-    });
-    test("a release by hand ignores the thresholds", async () => {
-      await commits("fix: a");
-      next = { limes: "v0.1.1" };
-      await releaseAll({ ...release(), manual: true });
-      assert.deepEqual(data.published.map((r) => r.tag), ["v0.1.1"]);
-    });
-  });
 
   describe("release candidates", () => {
     beforeEach(async () => {
@@ -452,7 +207,7 @@ describe("releaseAll", () => {
       data.tags.add("v0.1.0");
     });
     async function candidate(only = "limes"): Promise<string[]> {
-      await releaseAll({ ...release(), channel: Channel.Prerelease, only });
+      await releaseAll({ ...release(), only });
       return data.published.filter((r) => r.prerelease === true).map((r) => r.tag);
     }
 
@@ -473,7 +228,7 @@ describe("releaseAll", () => {
       const log = console.log;
       console.log = (line: string) => void printed.push(line);
       try {
-        assert.equal(await releaseAll({ ...release(), channel: Channel.Prerelease, only: "limes" }), false);
+        assert.equal(await releaseAll({ ...release(), only: "limes" }), false);
       } finally {
         console.log = log;
       }
@@ -491,7 +246,7 @@ describe("releaseAll", () => {
       repo.write("x.go", "// a\n");
       await repo.commit("fix: a");
       const major = async () => {
-        await releaseAll({ ...release(), channel: Channel.Prerelease, only: "limes", nextMajor: true });
+        await releaseAll({ ...release(), only: "limes", nextMajor: true });
         return data.published.filter((r) => r.prerelease === true).map((r) => r.tag);
       };
       assert.deepEqual(await major(), ["v1.0.0-rc.1"]);
@@ -503,7 +258,6 @@ describe("releaseAll", () => {
       majorCandidate = undefined;
       assert.deepEqual(await candidate(), ["v1.0.0-rc.1", "v1.0.0-rc.2", "v0.2.0-rc.1"]);
       assert.equal(majorCandidate, undefined, "a candidate of the next version is no candidate of the next major");
-      assert.deepEqual(released, [], "a candidate is no release, so no changelog entry");
     });
     // A candidate of the next major is cut beside the releases main goes on
     // making: its notes start from the candidate before it, naming the
@@ -511,7 +265,7 @@ describe("releaseAll", () => {
     // candidate, not since the last release.
     test("a candidate of the next major tells what changed since the one before", async () => {
       const major = async () => {
-        await releaseAll({ ...release(), channel: Channel.Prerelease, only: "limes", nextMajor: true });
+        await releaseAll({ ...release(), only: "limes", nextMajor: true });
         return data.published.filter((r) => r.prerelease === true);
       };
       repo.write("x.go", "// a\n");
@@ -550,15 +304,14 @@ describe("releaseAll", () => {
     });
     test("a candidate of the next major with nothing pending is the last release's code", async () => {
       noCandidateNotes = true;
-      assert.equal(await releaseAll({ ...release(), channel: Channel.Prerelease, only: "limes", nextMajor: true }), true);
+      assert.equal(await releaseAll({ ...release(), only: "limes", nextMajor: true }), true);
       assert.deepEqual(data.published.map((r) => [r.tag, r.notes]), [["v1.0.0-rc.1", unchangedSince("v0.1.0")]]);
     });
     test("a candidate of the next major is limes's alone, and a prerelease", async () => {
       repo.write("x.go", "// a\n");
       await repo.commit("fix: a");
-      await releaseAll({ ...release(), channel: Channel.Prerelease, nextMajor: true });
+      await releaseAll({ ...release(), nextMajor: true });
       assert.deepEqual(data.published.map((r) => r.tag), ["v1.0.0-rc.1"]);
-      await assert.rejects(releaseAll({ ...release(), nextMajor: true }), /prerelease/);
     });
     test("a candidate's notes drop the heading naming the version by main's rules", () => {
       const notes = "## [0.2.0](https://github.com/o/r/compare/v0.1.0...v0.2.0) (2026-10-24)\n\n### Features\n\n* a\n";
@@ -582,7 +335,7 @@ describe("releaseAll", () => {
       assert.equal(await lastStableTag(selectModule(repo.dir), "HEAD", repo.dir), "v0.1.0");
     });
     test("an unknown module is refused", async () => {
-      await assert.rejects(releaseAll({ ...release(), channel: Channel.Prerelease, only: "nope" }));
+      await assert.rejects(releaseAll({ ...release(), only: "nope" }));
     });
   });
 });
@@ -633,34 +386,37 @@ test("semantic-release pushes to the URL release.ts hands it", async () => {
   }
 });
 
-// The release step has the deploy key, by the name release.ts reads, from
-// the secret of the same name.
-test("release.yaml hands the release its deploy key", async () => {
+// The steps that push tags have the deploy key, by the name they read,
+// from the secret of the same name.
+test("release.yaml hands the tag and the candidates their deploy key", async () => {
   const { readFileSync } = await import("node:fs");
   const { parse } = await import("yaml");
   const { DEPLOY_KEY_ENV } = await import("./lib/deploy-key.ts");
   const workflow = parse(readFileSync(new URL("../workflows/release.yaml", import.meta.url), "utf8")) as {
     jobs: Record<string, { steps: { id?: string; env?: Record<string, string> }[] }>;
   };
-  const step = Object.values(workflow.jobs).flatMap((j) => j.steps).find((s) => s.id === "modules");
-  assert.equal(step?.env?.[DEPLOY_KEY_ENV], `\${{ secrets.${DEPLOY_KEY_ENV} }}`);
+  for (const id of ["tag", "candidates"]) {
+    const step = Object.values(workflow.jobs).flatMap((j) => j.steps).find((s) => s.id === id);
+    assert.equal(step?.env?.[DEPLOY_KEY_ENV], `\${{ secrets.${DEPLOY_KEY_ENV} }}`, id);
+  }
 });
 
 describe("releaseOptions", () => {
   const envOf = (vars: Record<string, string>) => (name: string) => vars[name];
-  test("a run that names nothing releases every module on the release channel", () => {
-    assert.deepEqual(releaseOptions(envOf({})), { channel: Channel.Release, manual: false, nextMajor: false, only: undefined });
+  const byHand = { CHANNEL: Channel.Prerelease, MANUAL: "true" };
+  test("a candidate of every module", () => {
+    assert.deepEqual(releaseOptions(envOf(byHand)), { nextMajor: false, only: undefined });
   });
   test("a run by hand of one module's candidate of the next major", () => {
-    assert.deepEqual(releaseOptions(envOf({ CHANNEL: Channel.Prerelease, MANUAL: "true", NEXT_MAJOR: "true", MODULE: "limes" })), {
-      channel: Channel.Prerelease, manual: true, nextMajor: true, only: "limes",
-    });
+    assert.deepEqual(releaseOptions(envOf({ ...byHand, NEXT_MAJOR: "true", MODULE: "limes" })), { nextMajor: true, only: "limes" });
   });
   test("every module, named as such", () => {
-    assert.equal(releaseOptions(envOf({ MODULE: ALL_MODULES })).only, undefined);
+    assert.equal(releaseOptions(envOf({ ...byHand, MODULE: ALL_MODULES })).only, undefined);
   });
-  test("refuses a channel it does not cut", () => {
-    assert.throws(() => releaseOptions(envOf({ CHANNEL: "nightly" })), /neither release nor prerelease/);
+  test("refuses a release, which release-plan.ts proposes, and any other channel", () => {
+    assert.throws(() => releaseOptions(envOf({ ...byHand, CHANNEL: Channel.Release })), /candidates alone/);
+    assert.throws(() => releaseOptions(envOf({ MANUAL: "true" })), /candidates alone/);
+    assert.throws(() => releaseOptions(envOf({ ...byHand, CHANNEL: "nightly" })), /candidates alone/);
   });
   test("refuses a prerelease not cut by hand", () => {
     assert.throws(() => releaseOptions(envOf({ CHANNEL: Channel.Prerelease })), /by hand only/);

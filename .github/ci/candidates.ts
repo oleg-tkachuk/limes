@@ -14,7 +14,7 @@
 // write rewrites it so. propose, run after a candidate is cut, commits the
 // rewritten table on BRANCH cut from main and opens or updates its pull
 // request, which auto-merge.yaml merges once green. Without GH_TOKEN it
-// warns and does nothing, as require-limes.ts does, and for the same reason.
+// warns and does nothing, as release-plan.ts does, and for the same reason.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";

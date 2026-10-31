@@ -1,26 +1,16 @@
 import assert from "node:assert/strict";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { after, afterEach, before, beforeEach, describe, test } from "node:test";
+import { afterEach, beforeEach, describe, test } from "node:test";
 
-import { BRANCH, CHANGELOG, GENERATED_MARKER, TITLE, addEntry, checkChangelog, entryVersion, newestEntry, entryFrom, parseEntries, preamble, proposalTitle, proposeEntries, releaseURL, writeAll, writeChangelog, type Context } from "./changelog.ts";
+import { CHANGELOG, GENERATED_MARKER, TITLE, addEntry, checkChangelog, entryVersion, newestEntry, entryFrom, parseEntries, preamble, releaseURL, writeAll, writeChangelog } from "./changelog.ts";
 import { fakeData, fakeGitHub, type FakeData } from "./lib/fake-github.ts";
-import { git } from "./lib/git.ts";
 import { selectModule } from "./lib/modules.ts";
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
 
 const RELEASE = new URL("../release", import.meta.url).pathname;
 const REPOSITORY = "example/limes";
 const PGSTORE = "pgstore";
-
-// GIT_IDENTITY lets propose commit with no identity of the machine's.
-const GIT_IDENTITY: Record<string, string> = {
-  GIT_AUTHOR_NAME: "test",
-  GIT_AUTHOR_EMAIL: "test@example.com",
-  GIT_COMMITTER_NAME: "test",
-  GIT_COMMITTER_EMAIL: "test@example.com",
-};
 
 // notes is a release's body as GitHub publishes it: semantic-release's notes
 // of version with one feature, then GitHub's generated list.
@@ -135,9 +125,18 @@ describe("the changelogs", () => {
     assert.match(await checkChangelog(repo.dir, selectModule(repo.dir, PGSTORE), "HEAD"), /lists 0 releases/);
   });
 
+  // A release pull request adds the entry of the release it plans before
+  // the release is tagged: the newest entry, above every release.
+  test("check passes a newest entry above every release, still to be tagged", async () => {
+    repo.write(CHANGELOG, `${TITLE}\n\n## [0.9.0](a)\n\n## [0.2.0](b)\n`);
+    assert.match(await checkChangelog(repo.dir, selectModule(repo.dir), "HEAD"), /0\.9\.0 still to be tagged/);
+  });
+
   test("check refuses an entry that is no tag, or out of order", async () => {
-    repo.write(CHANGELOG, `${TITLE}\n\n## [0.9.0](a)\n`);
-    await assert.rejects(checkChangelog(repo.dir, selectModule(repo.dir), "HEAD"), /lists 0\.9\.0, no release tag v0\.9\.0 is reachable/);
+    repo.write(CHANGELOG, `${TITLE}\n\n## [0.1.5](a)\n`);
+    await assert.rejects(checkChangelog(repo.dir, selectModule(repo.dir), "HEAD"), /lists 0\.1\.5, no release tag v0\.1\.5 is reachable/);
+    repo.write(CHANGELOG, `${TITLE}\n\n## [0.9.0](a)\n\n## [0.8.0](b)\n`);
+    await assert.rejects(checkChangelog(repo.dir, selectModule(repo.dir), "HEAD"), /lists 0\.8\.0, no release tag v0\.8\.0 is reachable/);
     repo.write(CHANGELOG, `${TITLE}\n\n## [0.1.0](a)\n\n## [0.2.0](b)\n`);
     await assert.rejects(checkChangelog(repo.dir, selectModule(repo.dir), "HEAD"), /lists 0\.2\.0, out of order/);
   });
@@ -171,87 +170,5 @@ describe("addEntry", () => {
   test("entryVersion reads the heading's version", () => {
     assert.equal(entryVersion("## [1.2.3](x) (2026-10-31)\n\n* a"), "1.2.3");
     assert.equal(entryVersion("* a"), undefined);
-  });
-});
-
-describe("proposalTitle", () => {
-  test("names a few tags, and counts more", () => {
-    assert.equal(proposalTitle(["v0.2.0", "pgstore/v0.3.1"]), "docs(changelog): add v0.2.0, pgstore/v0.3.1");
-    assert.equal(proposalTitle(["v4", "v3", "v2", "v1"]), "docs(changelog): add 4 releases");
-  });
-});
-
-describe("proposeEntries", () => {
-  let work: string;
-  let repo: TempRepo;
-  let data: FakeData;
-  const saved: Record<string, string | undefined> = {};
-
-  before(() => {
-    for (const [k, v] of Object.entries(GIT_IDENTITY)) {
-      saved[k] = process.env[k];
-      process.env[k] = v;
-    }
-  });
-  after(() => {
-    for (const [k, v] of Object.entries(saved)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  });
-
-  // A checkout of main whose origin is a bare repository beside it, with a
-  // release tagged on the remote alone.
-  beforeEach(async () => {
-    work = mkdtempSync(join(tmpdir(), "limes-changelog-"));
-    const origin = join(work, "origin.git");
-    await git(["init", "--quiet", "--bare", "--initial-branch=main", origin]);
-    repo = await tempRepo();
-    await repo.run("remote", "add", "origin", origin);
-    mkdirSync(join(repo.dir, ".github/release"), { recursive: true });
-    copyFileSync(join(RELEASE, "modules.cjs"), join(repo.dir, ".github/release/modules.cjs"));
-    repo.write("go.mod", "module example.com/limes\n");
-    await repo.commit("init");
-    await repo.run("tag", "v0.1.0");
-    await repo.run("push", "--quiet", "origin", "main", "v0.1.0");
-    await repo.run("tag", "--delete", "v0.1.0");
-    data = fakeData();
-    data.notes["v0.1.0"] = notes("0.1.0", "first");
-  });
-  afterEach(() => {
-    repo.cleanup();
-    rmSync(work, { recursive: true, force: true });
-  });
-
-  function ctx(): Context {
-    return {
-      github: fakeGitHub(data),
-      repository: REPOSITORY,
-      root: repo.dir,
-      push: async (branch) => void (await repo.run("push", "--quiet", "--force", "origin", `HEAD:refs/heads/${branch}`)),
-    };
-  }
-
-  test("commits the new entries on its branch and opens a pull request", async () => {
-    assert.equal(await proposeEntries(ctx()), 101);
-    assert.deepEqual(data.createdPulls.map((p) => [p.head, p.base, p.text.title]), [[BRANCH, "main", proposalTitle(["v0.1.0"])]]);
-    assert.equal((await repo.run("log", "-1", "--format=%s", `origin/${BRANCH}`)).trim(), proposalTitle(["v0.1.0"]));
-    assert.deepEqual(headings(await repo.run("show", `origin/${BRANCH}:${CHANGELOG}`)), ["0.1.0"]);
-  });
-
-  test("updates the pull request still open", async () => {
-    data.pullsFrom.set(BRANCH, 7);
-    assert.equal(await proposeEntries(ctx()), 7);
-    assert.deepEqual(data.createdPulls, []);
-    assert.deepEqual(data.editedPulls.map((p) => p.number), [7]);
-  });
-
-  test("proposes nothing when main's changelogs lack no entry", async () => {
-    await repo.run("fetch", "--quiet", "--tags", "origin");
-    await writeAll(ctx(), "HEAD");
-    await repo.commit("docs: the changelog");
-    await repo.run("push", "--quiet", "origin", "main");
-    assert.equal(await proposeEntries(ctx()), undefined);
-    assert.deepEqual(data.createdPulls, []);
   });
 });

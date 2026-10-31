@@ -58,8 +58,9 @@ const OTELMETRIC_RELEASES_NOTHING = { scope: OTELMETRIC_MODULE, release: false }
 const EXCHANGE_RELEASES_NOTHING = { scope: EXCHANGE_MODULE, release: false };
 const BISCUIT_RELEASES_NOTHING = { scope: BISCUIT_MODULE, release: false };
 
-// LIMES_REQUIREMENT_SCOPE scopes the build change that raises the nested
-// modules' requirement of limes (.github/ci/require-limes.ts), and
+// LIMES_REQUIREMENT_SCOPE scopes a build change that raises the nested
+// modules' requirement of limes by hand — the release pull request raises
+// it in its own commit (.github/ci/release-plan.ts) —, and
 // FORMER_REQUIREMENT_SCOPE the one it had before, released alike so a
 // change committed under it still releases. The root module's rules leave
 // both to the preset, where build releases nothing.

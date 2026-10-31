@@ -64,15 +64,14 @@ const moduleCases = {
     ["build(limes): require limes v0.64.0", null],
   ],
   // A nested module's own build change is a patch of it: the go.mod its users
-  // resolve has changed. The first is the subject .github/ci/require-limes.ts
-  // commits, which once merged and released nothing.
+  // resolve has changed. The first is a subject once committed for one
+  // module, which merged and released nothing.
   [modules.REDISREPLAY_MODULE]: [
     ["build(redisreplay): require limes v0.64.0", "patch"],
     ["build(redisreplay): bump go-redis", "patch"],
     ["build(pgstore): require limes v0.64.0", null],
-    // The subject require-limes.ts commits now, for every nested module at
-    // once: module-commits.cjs hands it to the modules whose directory it
-    // changes.
+    // A build change raising every nested module's requirement at once:
+    // module-commits.cjs hands it to the modules whose directory it changes.
     ["build(nested): require limes v0.64.0 in pgstore and otelmetric", "patch"],
     ["build(limes): require limes v0.64.0", "patch"],
   ],

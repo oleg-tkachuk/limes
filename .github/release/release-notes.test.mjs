@@ -66,8 +66,8 @@ const UNSCOPED_BUILD_SUBJECT = "build the module with a newer Go";
 const presetNotes = (cs) => generateNotes({ preset: config.notes.preset }, { ...context, commits: cs });
 for (const name of Object.keys(MODULES)) {
   const moduleNotes = (cs) => generateNotes(configFor(name).notes, { ...context, commits: cs });
-  // The module's own scope, and the one require-limes.ts commits for every
-  // nested module at once.
+  // The module's own scope, and the one a build change raising every nested
+  // module's requirement at once is scoped to.
   for (const scope of [name === ROOT_MODULE ? REDISREPLAY_MODULE : name, LIMES_REQUIREMENT_SCOPE, FORMER_REQUIREMENT_SCOPE]) {
     const build = [
       { hash: "5555555", message: `build(${scope}): ${REQUIRE_SUBJECT}` },

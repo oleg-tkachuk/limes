@@ -84,6 +84,13 @@ export const OUTPUT_RELEVANT = "relevant";
 // OUTPUT_CODE says the diff itself reaches more than documentation, whatever
 // the run checks; ci.yaml's dispatch-release reads it.
 export const OUTPUT_CODE = "code";
+// OUTPUT_CHANGELOGS says the diff changes a module's changelog, which is how a
+// release pull request's merge looks, whatever else it reaches: the release
+// it planned is tagged once dispatch-release, which reads it, dispatches the
+// release (docs/adr/0016-one-release-commit.md).
+export const OUTPUT_CHANGELOGS = "changelogs";
+// CHANGELOGS are every module's changelog, as a path filter spells them.
+const CHANGELOGS = "**/CHANGELOG.md";
 // PUSH_EVENT is the event of a run on main after a merge or a push.
 export const PUSH_EVENT = "push";
 export const OUTPUT_VERIFY_TASKS = "verify-tasks";
@@ -163,17 +170,34 @@ export function candidateRange(env: DiffEnv): Range | undefined {
   return { from, to };
 }
 
-// classify is the groups the change reaches: of every path of the diff the
-// event names, or every group when there is no diff this clone can take.
-export async function classify(env: DiffEnv, cwd?: string): Promise<Set<Group>> {
+// diffPaths is every path of the diff the event names, or undefined when
+// there is no diff this clone can take.
+async function diffPaths(env: DiffEnv, cwd?: string): Promise<string[] | undefined> {
   const range = candidateRange(env);
   if (range === undefined || !(await hasCommit(range.from, cwd))) {
     info(`no usable base (${range?.from ?? env.before ?? "none"}) — running everything`);
-    return new Set(ALL_GROUPS);
+    return undefined;
   }
   const paths = await changedPaths(range.from, range.to, cwd);
   info(paths.join("\n"));
-  return reachedGroups(paths);
+  return paths;
+}
+
+// Classified is what a change reaches: its groups, and whether it changes a
+// changelog.
+export interface Classified {
+  groups: Set<Group>;
+  changelogs: boolean;
+}
+
+// classify is what the change reaches: of every path of the diff the event
+// names, or everything when there is no diff this clone can take.
+export async function classify(env: DiffEnv, cwd?: string): Promise<Classified> {
+  const paths = await diffPaths(env, cwd);
+  if (paths === undefined) {
+    return { groups: new Set(ALL_GROUPS), changelogs: true };
+  }
+  return { groups: reachedGroups(paths), changelogs: paths.some((p) => matchesAny(p, [CHANGELOGS])) };
 }
 
 // checkedGroups is the groups a run of event checks, given those its diff
@@ -202,7 +226,7 @@ export function changesSummary(event: string | undefined, reached: ReadonlySet<G
 }
 
 async function main(): Promise<void> {
-  const reached = await classify({
+  const { groups: reached, changelogs } = await classify({
     base: optionalEnv("BASE"),
     head: optionalEnv("HEAD"),
     before: optionalEnv("BEFORE"),
@@ -211,7 +235,7 @@ async function main(): Promise<void> {
   const event = optionalEnv("EVENT");
   const groups = checkedGroups(event, reached);
   changesNotes(event, groups).forEach((note) => info(note));
-  Object.entries(changesOutputs(reached, groups)).forEach(([name, value]) => setOutput(name, value));
+  Object.entries(changesOutputs(reached, groups, changelogs)).forEach(([name, value]) => setOutput(name, value));
   summarize(changesSummary(event, reached, groups));
 }
 
@@ -225,11 +249,13 @@ export function changesNotes(event: string | undefined, groups: ReadonlySet<Grou
 }
 
 // changesOutputs are the step's outputs: whether anything is checked,
-// whether code is reached, each group checked, and the verify tasks.
-export function changesOutputs(reached: ReadonlySet<Group>, groups: ReadonlySet<Group>): Record<string, string> {
+// whether code is reached, whether a changelog changed, each group checked,
+// and the verify tasks.
+export function changesOutputs(reached: ReadonlySet<Group>, groups: ReadonlySet<Group>, changelogs: boolean): Record<string, string> {
   const outputs: Record<string, string> = {
     [OUTPUT_RELEVANT]: String(groups.size > 0),
     [OUTPUT_CODE]: String(reached.size > 0),
+    [OUTPUT_CHANGELOGS]: String(changelogs),
   };
   for (const group of ALL_GROUPS) {
     outputs[group] = String(groups.has(group));

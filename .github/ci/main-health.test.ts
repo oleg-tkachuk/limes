@@ -88,7 +88,7 @@ describe("a red main", () => {
     data.mainRun = red;
     data.jobs.set(red.id, [
       { name: "All checks passed", status: "completed", conclusion: "success" },
-      { name: "Released limes (pgstore)", status: "completed", conclusion: "failure" },
+      { name: "Benchmarks", status: "completed", conclusion: "failure" },
     ]);
     const [decision] = await mergeGreen(fakeGitHub(data), SHA, JSON.stringify([{ number: 7 }]));
     assert.equal(decision?.merged, true);

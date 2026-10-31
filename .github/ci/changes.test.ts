@@ -6,7 +6,7 @@ import { after, before, describe, test } from "node:test";
 
 import { parse } from "yaml";
 
-import { ALL_GROUPS, candidateRange, changesNotes, changesOutputs, changesSummary, checkedGroups, classify, Group, INERT, OUTPUT_CODE, OUTPUT_RELEVANT, OUTPUT_VERIFY_TASKS, PUSH_EVENT, reachedGroups, reachesCode, READ_BY_TESTS, SCRIPTS_TASKS, VERIFY_GATE, verifyTasks } from "./changes.ts";
+import { ALL_GROUPS, candidateRange, changesNotes, changesOutputs, changesSummary, checkedGroups, classify, Group, INERT, OUTPUT_CHANGELOGS, OUTPUT_CODE, OUTPUT_RELEVANT, OUTPUT_VERIFY_TASKS, PUSH_EVENT, reachedGroups, reachesCode, READ_BY_TESTS, SCRIPTS_TASKS, VERIFY_GATE, verifyTasks } from "./changes.ts";
 import { globToRegExp } from "./lib/glob.ts";
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
 
@@ -75,7 +75,8 @@ test("ci.yaml tells the changes step its event and dispatches on the diff", () =
   const step = ci.jobs.changes?.steps?.find((s) => s.id === "filter");
   assert.equal(step?.env?.EVENT, "${{ github.event_name }}");
   assert.ok(ci.jobs.changes?.outputs?.[OUTPUT_CODE] !== undefined);
-  assert.match(ci.jobs["dispatch-release"]?.if ?? "", new RegExp(`needs\\.changes\\.outputs\\.${OUTPUT_CODE} == 'true'`));
+  assert.ok(ci.jobs.changes?.outputs?.[OUTPUT_CHANGELOGS] !== undefined);
+  assert.match(ci.jobs["dispatch-release"]?.if ?? "", new RegExp(`needs\\.changes\\.outputs\\.${OUTPUT_CODE} == 'true' \\|\\| needs\\.changes\\.outputs\\.${OUTPUT_CHANGELOGS} == 'true'`));
 });
 
 test("a push that created the branch names no diff", () => {
@@ -118,6 +119,8 @@ describe("classify", () => {
     sha.moved = await repo.commit("moved");
     await repo.run("mv", "m.go", "m.md");
     sha.renamed = await repo.commit("renamed");
+    repo.write("pgstore/CHANGELOG.md", "# Changelog\n");
+    sha.changelog = await repo.commit("chore(release): pgstore/v0.1.1");
   });
   after(() => repo.cleanup());
 
@@ -135,9 +138,17 @@ describe("classify", () => {
     ["a run by hand, with no diff", () => ({ after: sha.docs }), true],
   ];
   for (const [name, env, want] of cases) {
-    test(name, async () => assert.equal((await classify(env(), repo.dir)).size > 0, want));
+    test(name, async () => assert.equal((await classify(env(), repo.dir)).groups.size > 0, want));
   }
-  test("no diff reaches every group", async () => assert.deepEqual([...(await classify({ after: sha.docs }, repo.dir))].sort(), [...ALL_GROUPS].sort()));
+  test("no diff reaches every group", async () => assert.deepEqual([...(await classify({ after: sha.docs }, repo.dir)).groups].sort(), [...ALL_GROUPS].sort()));
+  // A release pull request's merge changes a changelog, which reaches no
+  // group but releases.
+  test("a changelog changed is said so, documentation or not", async () => {
+    const merged = await classify({ before: sha.renamed, after: sha.changelog }, repo.dir);
+    assert.deepEqual([merged.groups.size, merged.changelogs], [0, true]);
+    assert.equal((await classify({ before: sha.base, after: sha.docs }, repo.dir)).changelogs, false);
+    assert.equal((await classify({ after: sha.docs }, repo.dir)).changelogs, true, "no diff: anything may have changed");
+  });
 });
 
 // A file of INERT that a test reads is no documentation to the checks: a
@@ -223,16 +234,17 @@ describe("changesOutputs", () => {
   test("names each group checked, and whether anything is", () => {
     const [first] = ALL_GROUPS;
     const groups = new Set(first === undefined ? [] : [first]);
-    const outputs = changesOutputs(groups, groups);
+    const outputs = changesOutputs(groups, groups, true);
     assert.equal(outputs[OUTPUT_RELEVANT], "true");
     assert.equal(outputs[OUTPUT_CODE], "true");
+    assert.equal(outputs[OUTPUT_CHANGELOGS], "true");
     for (const g of ALL_GROUPS) {
       assert.equal(outputs[g], String(g === first));
     }
     assert.equal(typeof outputs[OUTPUT_VERIFY_TASKS], "string");
   });
   test("nothing reached, nothing checked", () => {
-    const outputs = changesOutputs(new Set(), new Set());
+    const outputs = changesOutputs(new Set(), new Set(), false);
     assert.equal(outputs[OUTPUT_RELEVANT], "false");
     assert.equal(outputs[OUTPUT_CODE], "false");
   });
