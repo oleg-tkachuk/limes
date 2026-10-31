@@ -81,8 +81,7 @@ release's deploy key creates a release tag (`repo-settings.ts`). Both stay.
    its tag, so `changelog.ts check` holds each module's changelog to one
    rule, the one the tag step reads: every stable tag reachable from HEAD
    but a module's first has an entry, and every entry names such a tag but
-   the newest, which
-   may be the release still to be tagged.
+   the newest, which may be the release still to be tagged.
 
 ## Consequences
 
