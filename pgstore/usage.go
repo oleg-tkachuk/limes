@@ -169,23 +169,47 @@ WHERE capability_id = $1
 ORDER BY expires_at, id
 LIMIT $4`
 
+// sqlListTenantHolds pages a tenant's holds in sqlListHolds' order.
+const sqlListTenantHolds = `
+SELECT ` + sqlHoldColumns + ` FROM limes.reservations
+WHERE tenant_id = $1
+  AND ($2::timestamptz IS NULL OR (expires_at, id) > ($2, $3))
+ORDER BY expires_at, id
+LIMIT $4`
+
 // ListReservations returns the capability's own holds a page at a time.
 func (s *UsageStore) ListReservations(ctx context.Context, req meter.ListReservationsRequest) (limes.Page[meter.Reservation], error) {
 	if err := req.Validate(); err != nil {
 		return limes.Page[meter.Reservation]{}, err
 	}
+	return s.listHolds(ctx, s.inReadTx, sqlListHolds, req.CapabilityID, req.Cursor, req.Limit)
+}
+
+// ListTenantReservations implements meter.TenantReservationLister: the
+// tenant's holds a page at a time, read under a scope that admits it.
+func (s *UsageStore) ListTenantReservations(ctx context.Context, req meter.ListTenantReservationsRequest) (limes.Page[meter.Reservation], error) {
+	if err := req.Validate(); err != nil {
+		return limes.Page[meter.Reservation]{}, err
+	}
+	inTx := func(ctx context.Context, fn func(pgx.Tx) error) error { return s.inTenantReadTx(ctx, req.TenantID, fn) }
+	return s.listHolds(ctx, inTx, sqlListTenantHolds, req.TenantID, req.Cursor, req.Limit)
+}
+
+// listHolds is a page, past cursor, of the holds query selects by key,
+// read in a transaction inTx opens.
+func (s *UsageStore) listHolds(ctx context.Context, inTx func(context.Context, func(pgx.Tx) error) error, query string, key uuid.UUID, cursor string, pageLimit int) (limes.Page[meter.Reservation], error) {
 	var after holdPlace
-	if req.Cursor != "" {
-		p, err := parseHoldPlace(req.Cursor)
+	if cursor != "" {
+		p, err := parseHoldPlace(cursor)
 		if err != nil {
 			return limes.Page[meter.Reservation]{}, err
 		}
 		after = p
 	}
-	limit := limes.PageLimit(req.Limit)
+	limit := limes.PageLimit(pageLimit)
 	var holds []hold
-	err := s.inReadTx(ctx, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, sqlListHolds, req.CapabilityID, after.expiresOrNil(), after.id, limit+1)
+	err := inTx(ctx, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, query, key, after.expiresOrNil(), after.id, limit+1)
 		if err != nil {
 			return err
 		}
@@ -862,3 +886,5 @@ var (
 	_ meter.UsageStore      = (*UsageStore)(nil)
 	_ meter.CopyUsageReader = (*UsageStore)(nil)
 )
+
+var _ meter.TenantReservationLister = (*UsageStore)(nil)
