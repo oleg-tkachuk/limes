@@ -2,6 +2,12 @@
 
 Every release of the biscuit module, newest first, from its release notes. Written by .github/ci/changelog.ts after each release; not edited by hand.
 
+## [0.1.13](https://github.com/oleg-tkachuk/limes/compare/biscuit%2Fv0.1.12...biscuit%2Fv0.1.13) (2026-10-31)
+
+### Dependencies
+
+* **nested:** require limes v0.143.0 in redisreplay, pgstore, otelmetric, exchange and biscuit ([d5ea9e8](https://github.com/oleg-tkachuk/limes/commit/d5ea9e8020b4e8fabdcd05828fca8d62e416d349))
+
 ## [0.1.12](https://github.com/oleg-tkachuk/limes/compare/biscuit%2Fv0.1.11...biscuit%2Fv0.1.12) (2026-10-31)
 
 ### Dependencies

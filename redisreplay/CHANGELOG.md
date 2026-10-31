@@ -2,6 +2,12 @@
 
 Every release of the redisreplay module, newest first, from its release notes. Written by .github/ci/changelog.ts after each release; not edited by hand.
 
+## [0.3.6](https://github.com/oleg-tkachuk/limes/compare/redisreplay%2Fv0.3.5...redisreplay%2Fv0.3.6) (2026-10-31)
+
+### Dependencies
+
+* **nested:** require limes v0.143.0 in redisreplay, pgstore, otelmetric, exchange and biscuit ([d5ea9e8](https://github.com/oleg-tkachuk/limes/commit/d5ea9e8020b4e8fabdcd05828fca8d62e416d349))
+
 ## [0.3.5](https://github.com/oleg-tkachuk/limes/compare/redisreplay%2Fv0.3.4...redisreplay%2Fv0.3.5) (2026-10-31)
 
 ### Dependencies
