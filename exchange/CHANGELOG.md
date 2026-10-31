@@ -2,6 +2,12 @@
 
 Every release of the exchange module, newest first, from its release notes. Written by .github/ci/changelog.ts after each release; not edited by hand.
 
+## [0.15.0](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.14.4...exchange%2Fv0.15.0) (2026-10-31)
+
+### Features
+
+* **exchange:** tell the client its token was exchanged already ([20365d3](https://github.com/oleg-tkachuk/limes/commit/20365d3d9994f0217a99c62e48332ad4775beea4))
+
 ## [0.14.4](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.14.3...exchange%2Fv0.14.4) (2026-10-30)
 
 ### Dependencies
