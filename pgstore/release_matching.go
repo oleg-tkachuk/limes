@@ -2,6 +2,8 @@ package pgstore
 
 import (
 	"context"
+	"strconv"
+	"uuid"
 
 	"github.com/jackc/pgx/v5"
 
@@ -9,7 +11,7 @@ import (
 )
 
 // sqlMatchingHoldsHead and sqlMatchingHoldsTail surround the selectors of
-// ReleaseMatching (selectorsSQL, on the capability c): tenant $1's open
+// ReleaseMatching (selectorsSQL and CapabilityID, on the capability c): tenant $1's open
 // holds — every tenant's, $1 being NULL — a batch of $2 in id order, each
 // of a revoked capability h that is c, or was delegated from it — a hold's
 // ancestors are those it holds against, in its own tenant — locked in id
@@ -50,6 +52,10 @@ func (s *UsageStore) ReleaseMatching(ctx context.Context, req meter.ReleaseMatch
 		inTx = func(fn func(pgx.Tx) error) error { return s.inTenantTx(ctx, req.TenantID, fn) }
 	}
 	where, args := selectorConditionsSQL(req.Subject, req.OnBehalfOf, req.ClientID, req.Session, req.RunID, []any{tenant, limit})
+	if req.CapabilityID != uuid.Nil() {
+		args = append(args, req.CapabilityID)
+		where += "\n      AND c.id = $" + strconv.Itoa(len(args))
+	}
 	var res meter.ReleaseMatchingResult
 	err := inTx(func(tx pgx.Tx) error {
 		holds, err := collectHolds(ctx, tx, sqlMatchingHoldsHead+where+sqlMatchingHoldsTail, args...)
