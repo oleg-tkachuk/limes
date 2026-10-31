@@ -853,7 +853,7 @@ implementations, and `redisreplay` and `pgstore` run `dpoptest` against
 their replay caches.
 
 `otelmetric.Instrument` wraps a `meter.UsageStore` and keeps every interface of `meter` the
-store implements — the optional `CopyUsageReader`, `TenantUsageEraser` and `MatchingReleaser`. A decorator of your
+store implements — the optional `CopyUsageReader`, `TenantUsageEraser`, `MatchingReleaser` and `TenantReservationLister`. A decorator of your
 own should do the same: assert each optional interface on the store it wraps
 and forward it, or a caller checking for it finds it gone.
 
@@ -1073,7 +1073,10 @@ for {
   capability's ([ADR-0015](adr/0015-release-matching-holds.md)). Run it
   with the revocation's own request: it finds what is revoked, not what
   this call revoked, so a release that failed is retried as it was, though
-  the revocation, repeated, revokes nothing.
+  the revocation, repeated, revokes nothing. What the holds keep is read
+  before and after: `TenantBudget.ReservedAmount` and
+  `Usage.ReservedAmount` sum it, and a `meter.TenantReservationLister`
+  lists a tenant's holds one by one.
 - **Preview it, and audit it after.** `CountRecordsRequest` and
   `ListRecordsRequest` take the same selectors — `Subject`, `OnBehalfOf`,
   `ClientID`, `Session`, `RunID` — so a count names what a revocation would reach,
@@ -1288,6 +1291,7 @@ Elsewhere, implement these and you are done:
 | `RecordReporter` = `RecordLister` + `RecordListingReader` | Lists a tenant's records and reads one; `memstore.NewCensus` and `pgstore.NewCensus` return a `Census` that is both, and a `RecordCensus` | No |
 | `TenantRecordEraser`, `meter.TenantUsageEraser` | Erase a tenant's records and usage (optional) | No |
 | `meter.MatchingReleaser` | Releases the holds of capabilities a bulk revocation stopped (optional; `metertest` checks it through `Env.Revoke`) | No |
+| `meter.TenantReservationLister` | Lists the holds that make up a tenant's `ReservedAmount`, soonest to expire first (optional) | No |
 | `meter.UsageStore` = `Meter` + `MeterReader` + `TenantBudgets` + `UsageHousekeeping` (only to meter) | Request and spend counters, the charges ledger, tenant ceilings; `DeleteUsage` and `PurgeOrphans` release a reaped capability's holds | Only for atomic side effects |
 | `KeyResolver` | Public verification keys; an unknown kid is `jwks.ErrUnknownKID`, the token's fault (`ErrInvalidToken`), and any other error the resolver's own (`jwks.Static` and `jwks.Remote` ship; `jwkstest` checks yours) | No |
 | `dpop.ReplayCache` | DPoP proof ids seen, per key, each counted against its holder: `Seen(ctx, dpop.ReplayEntry)` reports a holder past its share as seen, and returns an error when its store cannot answer — an outage, not a refused proof (only for key-bound tokens; `dpop.MemoryReplayCache` ships for one process — behind several replicas, `pgstore.ReplayCache` ships one over PostgreSQL and the `redisreplay` module one over Redis, or implement it over another shared store) | No |

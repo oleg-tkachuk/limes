@@ -23,10 +23,13 @@ type meteringStore struct {
 // another, and carry no tenant unless WithTenantAttribute asks for it.
 //
 // The result implements every interface of this package that inner does —
-// the optional meter.CopyUsageReader, meter.TenantUsageEraser and
-// meter.MatchingReleaser — so wrapping a store never hides what it can do. A
-// decorator forwards a fixed list of optional interfaces, and a test fails
-// when the list misses one the store has.
+// the optional meter.CopyUsageReader, meter.TenantUsageEraser,
+// meter.MatchingReleaser and meter.TenantReservationLister — so wrapping a
+// store never hides what it can do. A decorator forwards a fixed list of
+// optional interfaces (internal/optionalgen), and a test fails when the list
+// misses one the store has.
+//
+//go:generate go run ./internal/optionalgen/gen
 func Instrument(inner meter.UsageStore, opts ...Option) (meter.UsageStore, error) {
 	if inner == nil {
 		return nil, fmt.Errorf("%w: otelmetric: Instrument needs a meter.UsageStore", limes.ErrInvalidConfig)
@@ -40,58 +43,6 @@ func Instrument(inner meter.UsageStore, opts ...Option) (meter.UsageStore, error
 		return nil, err
 	}
 	return withOptional(&meteringStore{inner: inner, in: in}, inner), nil
-}
-
-// withOptional is m, which wraps inner, implementing each optional
-// interface inner does, and none it does not: one case per mix.
-func withOptional(m *meteringStore, inner meter.UsageStore) meter.UsageStore {
-	reader, reads := inner.(meter.CopyUsageReader)
-	eraser, erases := inner.(meter.TenantUsageEraser)
-	releaser, releases := inner.(meter.MatchingReleaser)
-	r, e, l := copyUsageReader{reader}, tenantUsageEraser{eraser}, matchingReleaser{releaser}
-	switch {
-	case reads && erases && releases:
-		return &struct {
-			*meteringStore
-			copyUsageReader
-			tenantUsageEraser
-			matchingReleaser
-		}{m, r, e, l}
-	case reads && erases:
-		return &struct {
-			*meteringStore
-			copyUsageReader
-			tenantUsageEraser
-		}{m, r, e}
-	case reads && releases:
-		return &struct {
-			*meteringStore
-			copyUsageReader
-			matchingReleaser
-		}{m, r, l}
-	case erases && releases:
-		return &struct {
-			*meteringStore
-			tenantUsageEraser
-			matchingReleaser
-		}{m, e, l}
-	case reads:
-		return &struct {
-			*meteringStore
-			copyUsageReader
-		}{m, r}
-	case erases:
-		return &struct {
-			*meteringStore
-			tenantUsageEraser
-		}{m, e}
-	case releases:
-		return &struct {
-			*meteringStore
-			matchingReleaser
-		}{m, l}
-	}
-	return m
 }
 
 // copyUsageReader forwards CopyUsage. Reading moves nothing, so it emits no
@@ -122,6 +73,16 @@ type matchingReleaser struct {
 
 func (l matchingReleaser) ReleaseMatching(ctx context.Context, req meter.ReleaseMatchingRequest) (meter.ReleaseMatchingResult, error) {
 	return l.releaser.ReleaseMatching(ctx, req)
+}
+
+// tenantReservationLister forwards ListTenantReservations. Reading moves
+// nothing, so it emits no metric.
+type tenantReservationLister struct {
+	lister meter.TenantReservationLister
+}
+
+func (l tenantReservationLister) ListTenantReservations(ctx context.Context, req meter.ListTenantReservationsRequest) (limes.Page[meter.Reservation], error) {
+	return l.lister.ListTenantReservations(ctx, req)
 }
 
 // Bump emits limes.request.bumps.
