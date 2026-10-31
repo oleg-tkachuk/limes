@@ -49,8 +49,10 @@ const ENTRY_HEADING = /^## \[([0-9]+\.[0-9]+\.[0-9]+)\]/;
 const TOP_HEADING = /^# \[/;
 // BRANCH is the branch propose commits on.
 export const BRANCH = "docs/changelog";
-// TITLE_TAGS is how many tags a proposal's title names; more are counted.
+// TITLE_TAGS is how many tags a title names; more are counted.
 const TITLE_TAGS = 3;
+// CHANGELOGS are every module's changelog, as git add takes them.
+export const CHANGELOGS = `:(glob)**/${CHANGELOG}`;
 const REMOTE = "origin";
 
 // changelogPath is module's changelog, from the checkout's root.
@@ -226,8 +228,12 @@ export async function writeAll(w: Writer, rev: string): Promise<string[]> {
 // proposalTitle is the subject of the commit, and the title of the pull
 // request, adding tags' entries.
 export function proposalTitle(tags: readonly string[]): string {
-  const named = tags.length <= TITLE_TAGS ? tags.join(", ") : `${tags.length} releases`;
-  return `docs(changelog): add ${named}`;
+  return `docs(changelog): add ${namingTags(tags)}`;
+}
+
+// namingTags names tags in a title: a few by name, more by their count.
+export function namingTags(tags: readonly string[]): string {
+  return tags.length <= TITLE_TAGS ? tags.join(", ") : `${tags.length} releases`;
 }
 
 // Context is where a proposal runs and how it pushes.
@@ -247,7 +253,7 @@ export async function proposeEntries(ctx: Context): Promise<number | undefined> 
     return undefined;
   }
   const title = proposalTitle(added);
-  await git(["add", "--all", "--", `:(glob)**/${CHANGELOG}`], ctx.root);
+  await git(["add", "--all", "--", CHANGELOGS], ctx.root);
   await git(["commit", "--quiet", "-m", title], ctx.root);
   await ctx.push(BRANCH);
   const text = { title, body: `Adds the release notes of ${added.join(", ")} to the modules' changelogs, as their GitHub releases publish them.` };

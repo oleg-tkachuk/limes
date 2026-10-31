@@ -117,6 +117,11 @@ Each step is one pull request, tested in `.github/ci` before it is wired:
    versions and notes are compared with those the old flow cut.
 4. `release.yaml` and `ci.yaml` switched to them; `require-limes.ts`,
    `changelog.ts propose`, the `released-limes` job and `GATES` removed.
+   With them: the tag step seeds a new nested module's release line, as
+   `release.ts` does now; the plan marks a release pull request that cuts
+   a major so `auto-merge.yaml` leaves it, by a label, not a `!` the
+   breaking-marker guards would read; and `pushAs` moves out of
+   `require-limes.ts`.
 5. Candidates: the nested modules' releases in the prerelease's notes,
    the table and `candidates.ts` removed.
 6. `changelog.ts check` made strict.

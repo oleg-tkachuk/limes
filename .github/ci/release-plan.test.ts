@@ -10,7 +10,7 @@ import { git } from "./lib/git.ts";
 import { LIMES_MODULE } from "./lib/go-modules.ts";
 import { releaseCommits, type Module } from "./lib/modules.ts";
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
-import { BRANCH, DEPENDENCIES_HEADING, planReleases, proposeRelease, releaseTitle, type Planner } from "./release-plan.ts";
+import { BRANCH, DEPENDENCIES_HEADING, planReleases, proposeRelease, releaseTitle, withDependency, type Planner } from "./release-plan.ts";
 
 const RELEASE = new URL("../release", import.meta.url).pathname;
 const REPOSITORY = "example/limes";
@@ -153,6 +153,20 @@ describe("the release plan", () => {
     assert.equal(plan[1]?.major, false);
   });
 
+  test("withDependency adds to a Dependencies section there is, or adds one last", () => {
+    const line = "* require limes v0.2.0";
+    assert.equal(withDependency("## [0.1.1](a)\n\n### Bug Fixes\n\n* a fix\n", line), `## [0.1.1](a)\n\n### Bug Fixes\n\n* a fix\n\n${DEPENDENCIES_HEADING}\n\n${line}\n`);
+    assert.equal(
+      withDependency(`## [0.1.1](a)\n\n${DEPENDENCIES_HEADING}\n\n* bump x\n\n### Bug Fixes\n\n* a fix\n`, line),
+      `## [0.1.1](a)\n\n${DEPENDENCIES_HEADING}\n\n${line}\n* bump x\n\n### Bug Fixes\n\n* a fix\n`,
+    );
+  });
+
+  test("a nested module whose go.mod go cannot read fails the plan", async () => {
+    repo.write(`${OTELMETRIC}/go.mod`, "not a go.mod\n");
+    await assert.rejects(planReleases(planner()), /go mod edit -json failed/);
+  });
+
   test("releaseTitle names a few tags, and counts more", () => {
     assert.equal(releaseTitle(["v0.2.0", "pgstore/v0.1.1"]), "chore(release): v0.2.0, pgstore/v0.1.1");
     assert.equal(releaseTitle(["v4", "v3", "v2", "v1"]), "chore(release): 4 releases");
@@ -178,13 +192,13 @@ describe("the release plan", () => {
       assert.equal(await git(["diff", "--name-only", "main", BRANCH, "--", OTELMETRIC], origin), "");
     });
 
-    test("the pull request still open is updated, and a major is said to wait for a merge by hand", async () => {
+    test("the pull request still open is updated, and a major is said so", async () => {
       dryRuns.limes = "# [1.0.0](https://example.com/compare) (2026-10-31)\n\n* broke\n";
       data.pullsFrom.set(BRANCH, 7);
       const proposed = await proposeRelease(ctx());
       assert.deepEqual(proposed, { pullRequest: 7, major: true });
       assert.deepEqual(data.createdPulls, []);
-      assert.match(data.editedPulls[0]?.text.body ?? "", /major/);
+      assert.match(data.editedPulls[0]?.text.body ?? "", /cuts a major/);
     });
 
     test("nothing due proposes nothing", async () => {

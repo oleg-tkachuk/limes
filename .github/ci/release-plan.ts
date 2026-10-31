@@ -19,7 +19,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { addEntry, entryFrom, entryVersion } from "./changelog.ts";
+import { CHANGELOGS, addEntry, entryFrom, entryVersion, namingTags } from "./changelog.ts";
 import { info } from "./lib/actions.ts";
 import { git } from "./lib/git.ts";
 import { type GitHub, type PullRequestText } from "./lib/github.ts";
@@ -27,7 +27,7 @@ import { FOLLOWERS, compareVersions, raise, requiredLimes, tidyFollowers } from 
 import { ROOT_MODULE, releasedModules, selectModule, type Module, type ReleaseCommits } from "./lib/modules.ts";
 import { nextVersion, parseVersion } from "./lib/prerelease.ts";
 import { Level, isDue, lastStableTag, pendingCommits, type Policy } from "./lib/release-policy.ts";
-import { BASE_BRANCH } from "./require-limes.ts";
+import { BASE_BRANCH } from "./merge-policy.ts";
 
 // BRANCH is the branch the release pull request is proposed from.
 export const BRANCH = "release/next";
@@ -36,12 +36,8 @@ const RELEASE_SCOPE = "release";
 // DEPENDENCIES_HEADING opens the section of an entry that names the limes a
 // nested module now requires, as semantic-release's notes title it.
 export const DEPENDENCIES_HEADING = "### Dependencies";
-// TITLE_TAGS is how many tags a title names; more are counted.
-const TITLE_TAGS = 3;
 const GO_MOD = "go.mod";
 const GO_SUM = "go.sum";
-// CHANGELOGS are every module's changelog, as git add takes them.
-const CHANGELOGS = ":(glob)**/CHANGELOG.md";
 
 // Planned is one module's release in a plan.
 export interface Planned {
@@ -130,13 +126,15 @@ async function raiseNested(p: Planner, plan: Planned[], names: readonly string[]
 }
 
 // requiredLimesOf is the limes module requires, undefined when it requires
-// none or has no go.mod in the checkout.
+// none or has no go.mod in the checkout. A go.mod go cannot read fails the
+// plan: read as requiring nothing, its module would be left behind.
 async function requiredLimesOf(root: string, module: Module): Promise<string | undefined> {
-  try {
-    return await requiredLimes(join(root, module.dir));
-  } catch {
+  const dir = join(root, module.dir);
+  if (!existsSync(join(dir, GO_MOD))) {
+    info(`${module.name}: no ${GO_MOD} in the checkout`);
     return undefined;
   }
+  return requiredLimes(dir);
 }
 
 // planned is module's release with notes.
@@ -179,8 +177,7 @@ export function withDependency(entry: string, line: string): string {
 // releaseTitle is the subject of the release commit, and the title of its
 // pull request, naming tags.
 export function releaseTitle(tags: readonly string[]): string {
-  const named = tags.length <= TITLE_TAGS ? tags.join(", ") : `${tags.length} releases`;
-  return `chore(${RELEASE_SCOPE}): ${named}`;
+  return `chore(${RELEASE_SCOPE}): ${namingTags(tags)}`;
 }
 
 // writePlan writes plan in the checkout at root: each raised requirement,
@@ -237,8 +234,8 @@ export async function proposeRelease(ctx: Proposer): Promise<Proposed | undefine
 // releaseBody is the release pull request's description of plan.
 function releaseBody(plan: readonly Planned[], major: boolean): string {
   const tags = plan.map((m) => `- ${m.tag}${m.raise ? " (requires the limes above)" : ""}`).join("\n");
-  const merge = major ? "It cuts a major, so it waits for a merge by hand." : "auto-merge.yaml merges it once green.";
-  return `Releases, once merged, every module below from the merge commit (docs/adr/0016-one-release-commit.md). ${merge}\n\n${tags}`;
+  const merge = major ? " It cuts a major." : "";
+  return `Releases, once merged, every module below from the merge commit (docs/adr/0016-one-release-commit.md).${merge}\n\n${tags}`;
 }
 
 // openOrUpdate proposes text on BRANCH: the open pull request from it,
