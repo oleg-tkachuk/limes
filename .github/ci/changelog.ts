@@ -16,8 +16,9 @@
 // reads the newest entry as the release to tag (release-tag.ts). check, run
 // by CI, holds every file to the tags with no network: each entry names a
 // release tag reachable from HEAD, newest first, once — but the newest, which
-// may be the release a release pull request plans, above every tag. An entry
-// missing is not refused. write adds every missing entry, reading the release's notes
+// may be the release a release pull request plans, above every tag — and
+// every release has its entry, but the module's first, which starts its line
+// with no notes. write adds every missing entry, reading the release's notes
 // from GitHub, and leaves the entries already written as they are: it
 // repairs a changelog by hand.
 
@@ -159,9 +160,10 @@ export function addEntry(root: string, module: Module, entry: string): void {
 }
 
 // checkChangelog refuses module's changelog when an entry names no release
-// tag reachable from rev, or the entries are not newest first. The newest
-// entry alone may name a version no tag names yet, above every release: the
-// release a release pull request plans, which its merge has tagged.
+// tag reachable from rev, the entries are not newest first, or a release but
+// the module's first has no entry. The newest entry alone may name a version
+// no tag names yet, above every release: the release a release pull request
+// plans, which its merge has tagged.
 export async function checkChangelog(root: string, module: Module, rev: string): Promise<string> {
   const path = changelogPath(module);
   const versions = [...readEntries(root, module).keys()];
@@ -177,8 +179,14 @@ export async function checkChangelog(root: string, module: Module, rev: string):
     }
     at = found + 1;
   }
-  const missing = tags.filter((t) => !versions.includes(t)).length;
-  return `${path} lists ${versions.length} releases, each a tag, newest first${missing === 0 ? "" : `; ${missing} still to be written`}${pending === undefined ? "" : `; ${pending} still to be tagged`}`;
+  // tags is newest first: its last is the module's first release, which
+  // starts its line with no notes (lib/seed.ts).
+  const missing = tags.slice(0, -1).filter((t) => !versions.includes(t));
+  if (missing.length > 0) {
+    const named = missing.map((v) => `${module.prefix}v${v}`).join(", ");
+    throw new Error(`${path}: ${named} has no entry, though each is written before its tag; node .github/ci/changelog.ts write adds it from its GitHub release`);
+  }
+  return `${path} lists ${versions.length} releases, each a tag, newest first${pending === undefined ? "" : `; ${pending} still to be tagged`}`;
 }
 
 // Writer is what writing a changelog reads releases' notes from.

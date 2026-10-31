@@ -114,14 +114,19 @@ describe("the changelogs", () => {
     assert.deepEqual(headings(read(CHANGELOG)), ["0.1.0"]);
   });
 
-  test("check passes entries that are tags, newest first, some still missing", async () => {
+  // Each entry is written before its tag, so a release with none was cut
+  // around the release pull request.
+  test("check refuses a release with no entry", async () => {
     await writeAll(writer(), "HEAD");
     await repo.commit("feat: third");
     await repo.run("tag", "v0.3.0");
-    assert.match(await checkChangelog(repo.dir, selectModule(repo.dir), "HEAD"), /lists 2 releases.*1 still to be written/);
+    await assert.rejects(checkChangelog(repo.dir, selectModule(repo.dir), "HEAD"), /v0\.3\.0 has no entry/);
   });
 
-  test("check passes a module with no changelog yet", async () => {
+  // A module's first tag starts its line with no notes (lib/seed.ts).
+  test("check passes a module's first release with no entry", async () => {
+    repo.write(CHANGELOG, `${TITLE}\n\n## [0.2.0](b)\n`);
+    assert.match(await checkChangelog(repo.dir, selectModule(repo.dir), "HEAD"), /lists 1 releases, each a tag, newest first$/);
     assert.match(await checkChangelog(repo.dir, selectModule(repo.dir, PGSTORE), "HEAD"), /lists 0 releases/);
   });
 
