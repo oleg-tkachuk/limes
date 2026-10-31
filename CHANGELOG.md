@@ -2,6 +2,13 @@
 
 Every release of the limes module, newest first, from its release notes. Written by .github/ci/changelog.ts after each release; not edited by hand.
 
+## [0.142.0](https://github.com/oleg-tkachuk/limes/compare/v0.141.1...v0.142.0) (2026-10-31)
+
+### Features
+
+* **meter:** list a tenant's open reservations ([9b51b3f](https://github.com/oleg-tkachuk/limes/commit/9b51b3feedfaeca823ab7169a03aaee77d225bf7))
+* **meter:** release the holds of revoked matches in every tenant ([a044361](https://github.com/oleg-tkachuk/limes/commit/a0443614d3a90f57d67e5968d0f3244cf5597c07))
+
 ## [0.141.1](https://github.com/oleg-tkachuk/limes/compare/v0.141.0...v0.141.1) (2026-10-30)
 
 ### Bug Fixes
