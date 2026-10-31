@@ -19,20 +19,21 @@ change may break the API, and this file stops growing.
 limes stays on 0.x on `main` until the release that cuts 1.0, so every entry
 below is filed under the 0.x release that made the change. A candidate,
 `v1.0.0-rc.N`, tags `main` as it is: its API is that of the newest 0.x
-release before it. The table names that release for each candidate, and
-each nested module's release on `main` when the candidate was cut. A `+`
-marks a candidate cut between two 0.x releases: it holds additions the next
-release made and none of its breaks, since an entry lands with its break.
-The release run that cuts a candidate proposes its row, and CI holds the
-table to the tags (`.github/ci/candidates.ts`).
+release before it. Each candidate's
+[GitHub release](https://github.com/oleg-tkachuk/limes/releases?q=v1.0.0-rc&expanded=true)
+names that release under **API**, and each nested module's release on
+`main` when the candidate was cut. A `+` marks a candidate cut between two
+0.x releases: it holds additions the next release made and none of its
+breaks, since an entry lands with its break. The table below holds the same
+for the candidates up to rc.27, cut before their releases named it.
 
 The nested modules require a 0.x release of limes, never a candidate. A
 build that requires a candidate as well selects the candidate, since Go
 orders every `v1.0.0-rc.N` above every 0.x, so require a nested module's
-release only with a candidate at or above the row that lists it.
+release only with a candidate at or above the one that names it.
 
 To move between two candidates, read the entries after the releases your
-row names, up to and including those of the row you move to: limes's under
+candidate names, up to and including those of the one you move to: limes's under
 `vX.Y.Z`, a nested module's under `<module>/vX.Y.Z`. From rc.14 to rc.18,
 that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 

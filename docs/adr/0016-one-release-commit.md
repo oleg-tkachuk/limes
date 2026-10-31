@@ -74,7 +74,8 @@ release's deploy key creates a release tag (`repo-settings.ts`). Both stay.
 4. **A candidate needs no commit.** A prerelease tags main's head as now.
    Its GitHub release lists each nested module's release at that commit,
    which the migration guide's table holds now; the guide links to the
-   prereleases instead, and `candidates.ts` goes.
+   prereleases instead, keeping the table of the candidates cut before, and
+   `candidates.ts` goes.
 
 5. **The changelogs are checked strictly.** Every entry is written before
    its tag, so `changelog.ts check` holds each module's changelog to one
@@ -89,7 +90,7 @@ release's deploy key creates a release tag (`repo-settings.ts`). Both stay.
   pull request but the release one, and main is never red waiting for a
   release.
 - **Removed:** `require-limes.ts` and its job, `changelog.ts propose` and
-  its job, `candidates.ts` and the table, the `released-limes` CI job,
+  its job, `candidates.ts` and the table's upkeep, the `released-limes` CI job,
   `GATES` and `requiredConclusion`'s exception for it, and `build` in the
   policy's `immediateTypes`. `release.ts` keeps
   publishing, the Go proxy warm-up and the policy, and loses its own
@@ -123,7 +124,7 @@ Each step is one pull request, tested in `.github/ci` before it is wired:
    breaking-marker guards would read; and `pushAs` moves out of
    `require-limes.ts`.
 5. Candidates: the nested modules' releases in the prerelease's notes,
-   the table and `candidates.ts` removed.
+   `candidates.ts` removed, the table kept for the candidates before.
 6. `changelog.ts check` made strict: a release tag without an entry
    refused. Its other half — the newest entry may name the release still to
    be tagged — lands with step 4, which needs it.

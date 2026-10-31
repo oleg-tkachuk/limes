@@ -12,6 +12,7 @@ import { withoutWorkflowCommands } from "./lib/actions.ts";
 import { releaseCommits } from "./lib/modules.ts";
 import { ALL_MODULES, candidateNotesBody, Channel, type Release, releaseAll, releaseOptions, semanticReleaseCommand, unchangedSince } from "./release.ts";
 import { sinceCandidate } from "./lib/prerelease.ts";
+import { API_HEADING } from "./lib/candidate-releases.ts";
 
 const REPO = "oleg-tkachuk/limes";
 const RELEASE = new URL("../release/", import.meta.url).pathname;
@@ -158,7 +159,6 @@ describe("releaseAll", () => {
   let repo: TempRepo;
   let data: FakeData;
   let notesDir: string;
-  let majorCandidate: string | undefined;
   let noCandidateNotes = false;
 
   before(async () => {
@@ -171,7 +171,6 @@ describe("releaseAll", () => {
     copyFileSync(join(RELEASE, "modules.cjs"), join(repo.dir, ".github/release/modules.cjs"));
     await repo.commit("feat: start");
     data = fakeData();
-    majorCandidate = undefined;
     noCandidateNotes = false;
   });
   afterEach(() => repo.cleanup());
@@ -188,9 +187,6 @@ describe("releaseAll", () => {
       },
       fetchInfo: async () => ({ ok: true, status: 200 }),
       notesDir,
-      onMajorCandidate: (tag) => {
-        majorCandidate = tag;
-      },
       only: undefined,
       nextMajor: false,
       commits: releaseCommits(),
@@ -250,14 +246,17 @@ describe("releaseAll", () => {
         return data.published.filter((r) => r.prerelease === true).map((r) => r.tag);
       };
       assert.deepEqual(await major(), ["v1.0.0-rc.1"]);
-      assert.equal(majorCandidate, "v1.0.0-rc.1", "the candidate is told, for its row in the migration guide");
+      // Its notes say whose API it is: limes's release before it, past which
+      // the fix goes (+), and the nested modules', none released here.
+      const rc1 = data.published.find((r) => r.tag === "v1.0.0-rc.1")?.notes ?? "";
+      assert.match(rc1, /\| limes \| redisreplay \| pgstore \| otelmetric \| exchange \| biscuit \|/);
+      assert.match(rc1, /\| `v0\.1\.0`\+ \| — \| — \| — \| — \| — \|/);
       repo.write("x.go", "// b\n");
       await repo.commit("feat!: break the API before 1.0");
       assert.deepEqual(await major(), ["v1.0.0-rc.1", "v1.0.0-rc.2"]);
       // The next release by the rules on main is still 0.x.
-      majorCandidate = undefined;
       assert.deepEqual(await candidate(), ["v1.0.0-rc.1", "v1.0.0-rc.2", "v0.2.0-rc.1"]);
-      assert.equal(majorCandidate, undefined, "a candidate of the next version is no candidate of the next major");
+      assert.doesNotMatch(data.published.find((r) => r.tag === "v0.2.0-rc.1")?.notes ?? "", /\| limes \|/, "a candidate of the next version names no API");
     });
     // A candidate of the next major is cut beside the releases main goes on
     // making: its notes start from the candidate before it, naming the
@@ -273,7 +272,7 @@ describe("releaseAll", () => {
       const [first] = await major();
       assert.equal(first?.tag, "v1.0.0-rc.1");
       assert.equal(first?.previousTag, "v0.1.0");
-      assert.equal(first?.notes, `${CANDIDATE_NOTES} of limes\n`);
+      assert.ok(first?.notes.startsWith(`${CANDIDATE_NOTES} of limes\n\n${API_HEADING}`), first?.notes);
       for (const [file, subject, tag] of [["y.go", "feat: b", "v0.2.0"], ["z.go", "fix: c", "v0.2.1"]] as const) {
         repo.write(file, "// x\n");
         await repo.commit(subject);
@@ -284,10 +283,7 @@ describe("releaseAll", () => {
       const second = (await major())[1];
       assert.equal(second?.tag, "v1.0.0-rc.2");
       assert.equal(second?.previousTag, "v1.0.0-rc.1");
-      assert.equal(
-        second?.notes,
-        `${sinceCandidate("v1.0.0-rc.1", ["v0.2.0", "v0.2.1"], REPO)}${unchangedSince("v0.2.1")}`,
-      );
+      assert.ok(second?.notes.startsWith(`${sinceCandidate("v1.0.0-rc.1", ["v0.2.0", "v0.2.1"], REPO)}${unchangedSince("v0.2.1")}\n${API_HEADING}`), second?.notes);
       assert.match(second?.notes ?? "", /^Since v1\.0\.0-rc\.1: \[v0\.2\.0\]\(https:\/\/github\.com\/oleg-tkachuk\/limes\/releases\/tag\/v0\.2\.0\), \[v0\.2\.1\]/);
     });
     test("a candidate after one with no release between adds nothing before its notes", async () => {
@@ -305,7 +301,9 @@ describe("releaseAll", () => {
     test("a candidate of the next major with nothing pending is the last release's code", async () => {
       noCandidateNotes = true;
       assert.equal(await releaseAll({ ...release(), only: "limes", nextMajor: true }), true);
-      assert.deepEqual(data.published.map((r) => [r.tag, r.notes]), [["v1.0.0-rc.1", unchangedSince("v0.1.0")]]);
+      assert.deepEqual(data.published.map((r) => r.tag), ["v1.0.0-rc.1"]);
+      assert.ok(data.published[0]?.notes.startsWith(`${unchangedSince("v0.1.0")}\n${API_HEADING}`), data.published[0]?.notes);
+      assert.match(data.published[0]?.notes ?? "", /\| `v0\.1\.0` \|/, "the last release's code, so no +");
     });
     test("a candidate of the next major is limes's alone, and a prerelease", async () => {
       repo.write("x.go", "// a\n");
