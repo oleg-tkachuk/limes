@@ -2,6 +2,16 @@
 
 Every release of the otelmetric module, newest first, from its release notes. Written by .github/ci/changelog.ts after each release; not edited by hand.
 
+## [0.13.0](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.12.1...otelmetric%2Fv0.13.0) (2026-10-31)
+
+### Features
+
+* **otelmetric:** forward TenantReservationLister ([331ee99](https://github.com/oleg-tkachuk/limes/commit/331ee99097e536ec53659daa26af3ffaa3ec0b50))
+
+### Dependencies
+
+* **nested:** require limes v0.142.0 in redisreplay, pgstore, otelmetric, exchange and biscuit ([0f40a43](https://github.com/oleg-tkachuk/limes/commit/0f40a43e956e53350e48a54252f842f8f4251f44))
+
 ## [0.12.1](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.12.0...otelmetric%2Fv0.12.1) (2026-10-30)
 
 ### Dependencies

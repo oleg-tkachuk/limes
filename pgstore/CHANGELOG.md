@@ -2,6 +2,17 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by .github/ci/changelog.ts after each release; not edited by hand.
 
+## [0.53.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.52.1...pgstore%2Fv0.53.0) (2026-10-31)
+
+### Features
+
+* **pgstore:** list a tenant's open reservations ([4cf503f](https://github.com/oleg-tkachuk/limes/commit/4cf503f001aece65e093026488b8e135544394c8))
+* **pgstore:** release the holds of revoked matches in every tenant ([27a87f6](https://github.com/oleg-tkachuk/limes/commit/27a87f6bf19bb4003b266ccd8e2f9ff534a025e9))
+
+### Dependencies
+
+* **nested:** require limes v0.142.0 in redisreplay, pgstore, otelmetric, exchange and biscuit ([0f40a43](https://github.com/oleg-tkachuk/limes/commit/0f40a43e956e53350e48a54252f842f8f4251f44))
+
 ## [0.52.1](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.52.0...pgstore%2Fv0.52.1) (2026-10-30)
 
 ### Dependencies
