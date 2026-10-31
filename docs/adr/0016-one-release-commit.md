@@ -37,7 +37,7 @@ release's deploy key creates a release tag (`repo-settings.ts`). Both stay.
 ## Decision
 
 1. **One release pull request carries every module's release.** A plan
-   step (`release.ts plan`) runs where a release run starts now: after a
+   step (`release-plan.ts`) runs where a release run starts now: after a
    green push, for the modules the policy finds due
    (`release-policy.json`), or by hand for those named. For each module it
    runs semantic-release as a dry run, for the next version and its notes
@@ -56,7 +56,7 @@ release's deploy key creates a release tag (`repo-settings.ts`). Both stay.
    maintainer's merge. A `chore` commit releases nothing itself.
 
 2. **The merge commit is tagged, every module at once.** After CI passes
-   on main, a tag step (`release.ts tag`) runs first, then the plan, in the
+   on main, a tag step (`release-tag.ts`) runs first, then the plan, in the
    same run: the plan counts commits from the tags the step has just cut.
    The step finds the release pull request's merge commit and tags, with the deploy key, each module whose changelog
    opens with an entry no tag names yet: the changelog is the manifest of
@@ -112,7 +112,7 @@ release's deploy key creates a release tag (`repo-settings.ts`). Both stay.
 Each step is one pull request, tested in `.github/ci` before it is wired:
 
 1. This ADR.
-2. `release.ts plan` and `release.ts tag`, with tests, not yet called.
+2. `release-plan.ts` and `release-tag.ts`, with tests, not yet called.
 3. The plan run in shadow beside the old flow, for one real release: its
    versions and notes are compared with those the old flow cut.
 4. `release.yaml` and `ci.yaml` switched to them; `require-limes.ts`,
