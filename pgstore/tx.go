@@ -228,4 +228,7 @@ func (b closedBatch) Query() (pgx.Rows, error)         { return nil, b.err }
 func (b closedBatch) QueryRow() pgx.Row                { return closedRow(b) }
 func (b closedBatch) Close() error                     { return b.err }
 
+// Tx is nil: the batch never ran, so it began no transaction.
+func (b closedBatch) Tx() pgx.Tx { return nil }
+
 var _ pgx.Tx = (*callbackTx)(nil)
