@@ -2,6 +2,12 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by .github/ci/changelog.ts after each release; not edited by hand.
 
+## [0.54.1](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.54.0...pgstore%2Fv0.54.1) (2026-10-31)
+
+### Bug Fixes
+
+* **pgstore:** implement pgx.BatchResults.Tx ([b575e73](https://github.com/oleg-tkachuk/limes/commit/b575e7329a05aa36255b8fd1528302734042ac1c))
+
 ## [0.54.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.53.0...pgstore%2Fv0.54.0) (2026-10-31)
 
 ### Features
