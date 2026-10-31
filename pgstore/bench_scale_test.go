@@ -158,12 +158,18 @@ func reportRoundTrips(b *testing.B, sent *atomic.Int64) func() {
 // database is rtt longer, and the count of chunks the client has sent.
 func latencyPool(b testing.TB, rtt time.Duration) (*pgxpool.Pool, *atomic.Int64) {
 	b.Helper()
+	return latencyPoolOf(b, rtt, int32(runtime.GOMAXPROCS(0)+1))
+}
+
+// latencyPoolOf is latencyPool with at most conns connections.
+func latencyPoolOf(b testing.TB, rtt time.Duration, conns int32) (*pgxpool.Pool, *atomic.Int64) {
+	b.Helper()
 	cfg, err := pgxpool.ParseConfig(ownerDSN)
 	if err != nil {
 		b.Fatal(err)
 	}
 	cfg.ConnConfig.User, cfg.ConnConfig.Password = appUser, appPassword
-	cfg.MaxConns = int32(runtime.GOMAXPROCS(0) + 1)
+	cfg.MaxConns = conns
 	sent := new(atomic.Int64)
 	addr := delayProxy(b, net.JoinHostPort(cfg.ConnConfig.Host, strconv.Itoa(int(cfg.ConnConfig.Port))), rtt/2, sent)
 	host, port, err := net.SplitHostPort(addr)

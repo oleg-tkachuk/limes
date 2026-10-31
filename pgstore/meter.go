@@ -359,6 +359,10 @@ type counters struct {
 	tenant budgetRow
 	usage  map[uuid.UUID]*usageRow
 	copies map[string]*copyRow
+	// replay is the charge on record under the lock request's replayRef
+	// once the locks were held, when replayed.
+	replay   ledgerEntry
+	replayed bool
 }
 
 // usageOf is the counters of id, zero when it has none.
@@ -413,21 +417,39 @@ func lock(ctx context.Context, tx pgx.Tx, l lockRequest) (*counters, error) {
 
 // lockTenantOf reads l's tenant aggregate into c, created first, without a
 // ceiling, when l names its unit; nothing when l names no tenant.
+//
+// The aggregate is created, locked and read, and the replay looked up
+// after it, in one batch.
 func lockTenantOf(ctx context.Context, tx pgx.Tx, l lockRequest, c *counters) error {
 	if l.tenantID == uuid.Nil() {
 		return nil
 	}
+	b := &pgx.Batch{}
 	if l.tenantUnit != "" {
-		if _, err := tx.Exec(ctx, sqlCreateTenant, l.tenantID, l.tenantUnit, l.now); err != nil {
+		b.Queue(sqlCreateTenant, l.tenantID, l.tenantUnit, l.now)
+	}
+	b.Queue(sqlLockTenant, l.tenantID)
+	if l.replayRef != "" {
+		b.Queue(sqlChargeByRef, l.replayCapID, l.replayRef)
+	}
+	br := tx.SendBatch(ctx, b)
+	err := func() error {
+		if l.tenantUnit != "" {
+			if _, err := br.Exec(); err != nil {
+				return err
+			}
+		}
+		t, err := scanTenant(br.QueryRow(), l.tenantID)
+		if err != nil {
 			return err
 		}
-	}
-	b, err := lockTenant(ctx, tx, l.tenantID)
-	if err != nil {
+		c.tenant = t
+		if l.replayRef != "" {
+			c.replay, c.replayed, err = scanEntry(br.QueryRow())
+		}
 		return err
-	}
-	c.tenant = b
-	return nil
+	}()
+	return errors.Join(err, br.Close())
 }
 
 // lockUsageOf reads the usage counters of l's ids into c, created first for
@@ -444,19 +466,10 @@ func lockTenantOf(ctx context.Context, tx pgx.Tx, l lockRequest, c *counters) er
 func lockUsageOf(ctx context.Context, tx pgx.Tx, l lockRequest, c *counters) error {
 	ids := append(slices.Clone(l.created), l.existing...)
 	for attempt := 1; ; attempt++ {
-		if len(l.created) > 0 {
-			if _, err := tx.Exec(ctx, sqlCreateUsage, l.created, l.usageTenant); err != nil {
-				return err
-			}
-		}
 		if len(ids) == 0 {
 			return nil
 		}
-		rows, err := tx.Query(ctx, sqlLockUsage, ids)
-		if err != nil {
-			return err
-		}
-		scanned, err := pgx.CollectRows(rows, scanUsage)
+		scanned, err := createAndLockUsage(ctx, tx, l, ids)
 		if err != nil {
 			return err
 		}
@@ -471,6 +484,30 @@ func lockUsageOf(ctx context.Context, tx pgx.Tx, l lockRequest, c *counters) err
 			return fmt.Errorf("%w: %s", errCounterHidden, missing[0])
 		}
 	}
+}
+
+// createAndLockUsage creates l.created's counters if missing and locks
+// those of ids, in one batch.
+func createAndLockUsage(ctx context.Context, tx pgx.Tx, l lockRequest, ids []uuid.UUID) ([]*usageRow, error) {
+	b := &pgx.Batch{}
+	if len(l.created) > 0 {
+		b.Queue(sqlCreateUsage, l.created, l.usageTenant)
+	}
+	b.Queue(sqlLockUsage, ids)
+	br := tx.SendBatch(ctx, b)
+	scanned, err := func() ([]*usageRow, error) {
+		if len(l.created) > 0 {
+			if _, err := br.Exec(); err != nil {
+				return nil, err
+			}
+		}
+		rows, err := br.Query()
+		if err != nil {
+			return nil, err
+		}
+		return pgx.CollectRows(rows, scanUsage)
+	}()
+	return scanned, errors.Join(err, br.Close())
 }
 
 // usageCreateAttempts is how many times lockUsageOf creates and locks a
@@ -593,6 +630,11 @@ type lockRequest struct {
 	// chainQuotas are the quotas of copiesCapID and its ancestors, each
 	// counting the copies of its whole subtree on its usage row.
 	chainQuotas []chainQuota
+	// replayCapID's charge under replayRef is read once every lock is held,
+	// with the tenant's aggregate, when replayRef is set: one committed while
+	// the call waited for them.
+	replayCapID uuid.UUID
+	replayRef   string
 }
 
 // chainQuota is one capability's quota of copies, over its subtree.
@@ -611,17 +653,17 @@ func quotasOf(self uuid.UUID, quota limes.CopyQuota, ancestors []ancestor) []cha
 	return out
 }
 
-// write stores every counter c holds, as it now stands.
-func (c *counters) write(ctx context.Context, tx pgx.Tx, now time.Time, writeTenant bool) error {
+// write stores every counter c holds, as it now stands — the tenant's
+// aggregate with writeTenant — and then the statements then, in one batch.
+func (c *counters) write(ctx context.Context, tx pgx.Tx, now time.Time, writeTenant bool, then ...heldStmt) error {
+	b := &pgx.Batch{}
 	if writeTenant {
-		b := c.tenant
-		b.updated = now
-		if _, err := tx.Exec(ctx, sqlWriteTenant,
-			b.tenantID, int64(b.ceiling.Max), b.ceiling.Unlimited, int64(b.spent), int64(b.reserved), b.unit,
-			b.start, b.end, b.updated, b.version, b.period); err != nil {
-			return err
-		}
-		c.tenant = b
+		t := c.tenant
+		t.updated = now
+		b.Queue(sqlWriteTenant,
+			t.tenantID, int64(t.ceiling.Max), t.ceiling.Unlimited, int64(t.spent), int64(t.reserved), t.unit,
+			t.start, t.end, t.updated, t.version, t.period)
+		c.tenant = t
 	}
 	if len(c.usage) > 0 {
 		var ids []uuid.UUID
@@ -635,9 +677,7 @@ func (c *counters) write(ctx context.Context, tx pgx.Tx, now time.Time, writeTen
 			units = append(units, u.unit)
 			copiesUnder = append(copiesUnder, u.copiesUnder)
 		}
-		if _, err := tx.Exec(ctx, sqlWriteUsage, ids, requests, spent, reserved, units, copiesUnder); err != nil {
-			return err
-		}
+		b.Queue(sqlWriteUsage, ids, requests, spent, reserved, units, copiesUnder)
 	}
 	if len(c.copies) > 0 {
 		var ids [][]byte
@@ -650,11 +690,22 @@ func (c *counters) write(ctx context.Context, tx pgx.Tx, now time.Time, writeTen
 			spent = append(spent, int64(r.spent))
 			reserved = append(reserved, int64(r.reserved))
 		}
-		if _, err := tx.Exec(ctx, sqlWriteCopies, ids, caps, requests, spent, reserved); err != nil {
-			return err
+		b.Queue(sqlWriteCopies, ids, caps, requests, spent, reserved)
+	}
+	for _, st := range then {
+		b.Queue(st.sql, st.args...)
+	}
+	if b.Len() == 0 {
+		return nil
+	}
+	br := tx.SendBatch(ctx, b)
+	var err error
+	for range b.Len() {
+		if _, err = br.Exec(); err != nil {
+			break
 		}
 	}
-	return nil
+	return errors.Join(err, br.Close())
 }
 
 // copyIDs are the revocation ids of copies, in order.
