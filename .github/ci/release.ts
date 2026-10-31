@@ -48,6 +48,7 @@ import { isDue, lastStableTag, loadPolicy, pendingCommits, type Policy } from ".
 import { newReleaseTag, notesFrom, publish, publishLeftBehind, tagsOnHead, warmGoProxy, type Fetch } from "./lib/releases.ts";
 import { runInherited } from "./lib/spawn.ts";
 import { jobPassed, runIdOf } from "./ci-run.ts";
+import { planInShadow, reportShadow } from "./release-shadow.ts";
 
 // OUTPUT_LIMES_TAG is the step output the job proposing the nested modules'
 // requirement reads.
@@ -408,24 +409,59 @@ async function releaseFrom(repository: string, token: string, push: string): Pro
   const runId = runIdOf(requireEnv("CI_RUN"));
   const github = gitHubFor(token, repository);
   const root = (await git(["rev-parse", "--show-toplevel"])).trim();
+  const options = releaseOptions(optionalEnv);
+  const policy = loadPolicy(root);
+  const commits = releaseCommits();
+  const notesDir = requireEnv("RUNNER_TEMP");
+  const dryRun = semanticRelease(root, token, [DRY_RUN_ARG]);
+  // The plan of ADR-0016 in shadow, made before anything is tagged: its dry
+  // runs read what is pending since the last release.
+  const shadow = options.channel === Channel.Release ? await planInShadow({ ...options, root, repository, policy, commits, today: today(), dryRun: shadowDryRun(dryRun, notesDir) }) : undefined;
+  const before = await tagsOnHead(root);
   const ok = await releaseAll({
-    ...releaseOptions(optionalEnv),
-    policy: loadPolicy(root),
-    commits: releaseCommits(),
+    ...options,
+    policy,
+    commits,
     pushTag: async (tag) => void (await git(["push", "--quiet", push, `refs/tags/${tag}`], root)),
     github,
     repository,
     root,
     runSemanticRelease: semanticRelease(root, token),
-    candidateNotes: semanticRelease(root, token, [DRY_RUN_ARG]),
+    candidateNotes: dryRun,
     gatePassed: (job) => jobPassed(github, runId, job),
     fetchInfo: (url) => fetch(url),
-    notesDir: requireEnv("RUNNER_TEMP"),
+    notesDir,
     onRootTag: (tag) => setOutput(OUTPUT_LIMES_TAG, tag),
     onMajorCandidate: (tag) => setOutput(OUTPUT_LIMES_CANDIDATE, tag),
     onReleased: () => setOutput(OUTPUT_RELEASED, String(true)),
   });
+  if (shadow !== undefined) {
+    reportShadow(shadow, (await tagsOnHead(root)).filter((t) => !before.includes(t)));
+  }
   return ok;
+}
+
+// SHADOW_NOTES_PREFIX names the file a dry run of the plan in shadow writes
+// a module's notes to, apart from those the release itself writes.
+const SHADOW_NOTES_PREFIX = "shadow-notes-";
+
+// shadowDryRun is the plan's dry run of a module through dryRun: the notes
+// it writes, or undefined when it writes none.
+function shadowDryRun(dryRun: Release["candidateNotes"], notesDir: string): (module: Module) => Promise<string | undefined> {
+  return async (module) => {
+    const file = join(notesDir, `${SHADOW_NOTES_PREFIX}${module.name}.md`);
+    rmSync(file, { force: true });
+    await dryRun(module, file);
+    return existsSync(file) ? notesFrom(file) : undefined;
+  };
+}
+
+// ISO_DATE_LENGTH is the length of YYYY-MM-DD at the start of an ISO time.
+const ISO_DATE_LENGTH = 10;
+
+// today is the date, UTC, as notes print it.
+function today(): string {
+  return new Date().toISOString().slice(0, ISO_DATE_LENGTH);
 }
 
 // ReleaseOptions are what a run asks of the release: its channel, whether
