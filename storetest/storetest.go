@@ -319,6 +319,8 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "ListRecordsRefusesACursorOfOtherFilters", Run: checkListRecordsCursorFilters},
 		{Name: "GetRecordListingIsTheListingOfTheRecord", Run: checkGetRecordListing},
 		{Name: "ListingNamesTheEntryThatRevokedARecord", Run: checkListingStoppedBy},
+		{Name: "ListRecordsAcrossTenantsInOneOrder", Run: checkListRecordsAllTenants},
+		{Name: "ListRecordsAcrossTenantsRefusesWhatIsNotItsOwn", Run: checkListRecordsAllTenantsRefusals},
 		{Name: "EraseTenantRecordsKeepsWhatAVerifierStillNeeds", Run: checkEraseTenant},
 		{Name: "ExchangeClaimsConvergeOnOneCapability", Run: checkExchangeClaims},
 		{Name: "ExchangeClaimsRefuseWhatIsNotOnRecord", Run: checkExchangeRefusals},

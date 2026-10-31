@@ -7,10 +7,10 @@ import (
 	"uuid"
 )
 
-// RecordLister lists one tenant's capability records a page at a time, each
-// with its disposition, for an operator's view of them: every record of the
-// tenant, or those of a principal type, a subject or a subject prefix, and of
-// the dispositions it asks for, oldest or newest first. It is a type of its
+// RecordLister lists one tenant's capability records a page at a time, or
+// every tenant's, each with its disposition, for an operator's view of them:
+// every record, or those of a principal type, a subject or a subject prefix,
+// and of the dispositions it asks for, oldest or newest first. It is a type of its
 // own beside Store, as RecordCensus is: a reporter holds it, an issuer does
 // not. memstore's and pgstore's Census are each one; storetest checks it when
 // its Env sets one.
@@ -24,14 +24,21 @@ import (
 // between two of them. A Biscuit copy's revocation changes no record's
 // disposition (RecordDisposition).
 type RecordLister interface {
-	// ListRecords returns one page of req.TenantID's records, in id order —
-	// ascending, or descending with ListOrderDescending: a capability's id
-	// is a UUIDv7, so that is newest first — at most Limit of them, and the
-	// cursor of the next page, empty on the last. The cursor is the store's
+	// ListRecords returns one page of req.TenantID's records — or, with
+	// req.AllTenants, of every tenant's together — in id order: ascending,
+	// or descending with ListOrderDescending: a capability's id is a
+	// UUIDv7, so that is newest first. At most Limit of them, and the
+	// cursor of the next page, empty on the last. Each record names its
+	// tenant, Record.Capability.Subject.TenantID, and its disposition is
+	// the one its own tenant's listing gives it. The cursor is the store's
 	// own and opaque, and holds the order and the filters it was handed out
-	// for: a cursor of the other order, or of another tenant, principal
-	// type, subject, subject prefix or set of dispositions, is refused with
-	// ErrCursorMismatch.
+	// for: a cursor of the other order, or of another tenant, of every
+	// tenant where a tenant's listing is asked for or the other way round,
+	// or of another principal type, subject, subject prefix or set of
+	// dispositions, is refused with ErrCursorMismatch. A listing of every
+	// tenant needs a scope admitting every tenant's reads — in pgstore,
+	// WithAllTenantsReadOnly or WithAllTenants — and is refused with
+	// ErrScopeMismatch under a narrower one, never narrowed to it.
 	ListRecords(ctx context.Context, req ListRecordsRequest) (Page[RecordListing], error)
 }
 
@@ -125,11 +132,18 @@ func (o ListOrder) Validate() error {
 	return nil
 }
 
-// ListRecordsRequest asks for one page of a tenant's records. Every filter
-// but TenantID is optional, and the ones set must all hold.
+// ListRecordsRequest asks for one page of a tenant's records, or of every
+// tenant's. Every filter but the tenant is optional, and the ones set must
+// all hold, across tenants as within one.
 type ListRecordsRequest struct {
-	// TenantID is the tenant whose records are listed; required.
+	// TenantID is the tenant whose records are listed; AllTenants lists
+	// every tenant's instead. Exactly one of the two is required.
 	TenantID uuid.UUID
+	// AllTenants lists every tenant's records in one id order, as
+	// RevokeMatchingRequest.AllTenants revokes across them: a platform
+	// operator's index. It needs a scope admitting every tenant's reads
+	// (RecordLister).
+	AllTenants bool
 	// PrincipalType lists the records issued to principals of that type;
 	// unspecified, every type's.
 	PrincipalType PrincipalType
@@ -155,13 +169,16 @@ type ListRecordsRequest struct {
 	Limit int
 }
 
-// Validate refuses a request that names no tenant, an unknown principal
-// type, both a subject and a subject prefix, an unknown disposition or
-// order, or a negative page size. Every error matches ErrInvalidRequest.
+// Validate refuses a request that names neither a tenant nor AllTenants,
+// or both, an unknown principal type, both a subject and a subject prefix,
+// an unknown disposition or order, or a negative page size. Every error
+// matches ErrInvalidRequest.
 func (r ListRecordsRequest) Validate() error {
 	switch {
-	case r.TenantID == uuid.Nil():
-		return invalidRequest("list records: tenant id required")
+	case r.TenantID == uuid.Nil() && !r.AllTenants:
+		return invalidRequest("list records: a tenant id or AllTenants required")
+	case r.TenantID != uuid.Nil() && r.AllTenants:
+		return invalidRequest("list records: tenant id %s beside AllTenants", r.TenantID)
 	case r.PrincipalType != PrincipalTypeUnspecified && r.PrincipalType.Validate() != nil:
 		return invalidRequest("list records: principal type %q is not a principal kind", r.PrincipalType)
 	case r.Subject != "" && r.SubjectPrefix != "":

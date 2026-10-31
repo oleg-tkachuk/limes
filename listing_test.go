@@ -23,6 +23,8 @@ func TestListRecordsRequestValidate(t *testing.T) {
 		}, true},
 		"a subject":                 {ListRecordsRequest{TenantID: tenant, Subject: "agent:a"}, true},
 		"no tenant":                 {ListRecordsRequest{Subject: "agent:a"}, false},
+		"every tenant":              {ListRecordsRequest{AllTenants: true, Subject: "agent:a", Order: ListOrderDescending}, true},
+		"a tenant and every tenant": {ListRecordsRequest{TenantID: tenant, AllTenants: true}, false},
 		"an unknown principal type": {ListRecordsRequest{TenantID: tenant, PrincipalType: "robot"}, false},
 		"a subject and a prefix":    {ListRecordsRequest{TenantID: tenant, Subject: "agent:a", SubjectPrefix: "agent:"}, false},
 		"an unknown disposition":    {ListRecordsRequest{TenantID: tenant, Dispositions: []RecordDisposition{RecordDispositionActive, "lost"}}, false},

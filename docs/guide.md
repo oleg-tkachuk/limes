@@ -1375,13 +1375,22 @@ is revoked is still active, as its JWT still verifies. A revoked one also
 carries `StoppedBy`, the entry that revoked it and whose it is: its own, or
 that of the nearest ancestor with one, so a record stopped through an
 ancestor still says when and why. pgstore walks up to that ancestor a
-parent at a time by key, for those records alone. So a caller
+parent at a time by key, for those records alone. With `AllTenants` in
+place of `TenantID` — exactly one of the two — `ListRecords` lists every
+tenant's records together in the same id order, every filter applying
+across them: a platform operator's index, each record naming its tenant
+in `Record.Capability.Subject.TenantID`, with the disposition its own
+tenant's listing gives it. pgstore lists every tenant under
+`WithAllTenantsReadOnly` or `WithAllTenants`, by its primary key, and a
+narrower scope is `ErrScopeMismatch`, never a listing of that tenant
+alone. So a caller
 shows each record's state with no further read, and at one instant the
 records of each disposition in a full listing number what `CountRecords`
 counts. Each page is read on its own, though: a walk of many pages is no
 snapshot, and a record may expire or be revoked between two of them. The
 cursor is opaque and holds the order, the tenant and the filters it was
-handed out for; one of the other order, of another tenant or of other
+handed out for; one of the other order, of another tenant — of every
+tenant in a tenant's listing, or the other way round — or of other
 filters — a caller that changes them starts from the first page — is
 `ErrCursorMismatch`, a kind of `ErrInvalidRequest`, and any the lister did
 not hand out is `ErrInvalidRequest`.
