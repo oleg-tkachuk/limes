@@ -2,6 +2,12 @@
 
 Every release of the limes module, newest first, from its release notes. Written by .github/ci/changelog.ts after each release; not edited by hand.
 
+## [0.144.0](https://github.com/oleg-tkachuk/limes/compare/v0.143.0...v0.144.0) (2026-10-31)
+
+### Features
+
+* list every tenant's capability records in one order ([045a6e6](https://github.com/oleg-tkachuk/limes/commit/045a6e64f7081b15f898c3a0de4780a38e77ea26))
+
 ## [0.143.0](https://github.com/oleg-tkachuk/limes/compare/v0.142.0...v0.143.0) (2026-10-31)
 
 ### Features

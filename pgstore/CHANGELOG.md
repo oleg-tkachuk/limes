@@ -2,6 +2,17 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by .github/ci/changelog.ts after each release; not edited by hand.
 
+## [0.55.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.54.1...pgstore%2Fv0.55.0) (2026-10-31)
+
+### Features
+
+* **pgstore:** list every tenant's capability records under the all-tenants scope ([5f5c254](https://github.com/oleg-tkachuk/limes/commit/5f5c254c7512e588219a4324545fc9256d43862f))
+
+### Dependencies
+
+* require limes v0.144.0
+
+
 ## [0.54.1](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.54.0...pgstore%2Fv0.54.1) (2026-10-31)
 
 ### Bug Fixes
