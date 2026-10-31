@@ -18,6 +18,8 @@ func TestReleaseMatchingRequestValidate(t *testing.T) {
 		{"a tenant by client", ReleaseMatchingRequest{TenantID: tenant, ClientID: "client"}, true},
 		{"a tenant by every selector", ReleaseMatchingRequest{TenantID: tenant, Subject: "s", OnBehalfOf: "u", ClientID: "c", Session: "sid", RunID: uuid.New()}, true},
 		{"a tenant by agent run", ReleaseMatchingRequest{TenantID: tenant, RunID: uuid.New()}, true},
+		{"a tenant by capability", ReleaseMatchingRequest{TenantID: tenant, CapabilityID: uuid.New()}, true},
+		{"every tenant by capability", ReleaseMatchingRequest{AllTenants: true, CapabilityID: uuid.New()}, false},
 		{"no tenant", ReleaseMatchingRequest{ClientID: "client"}, false},
 		{"no selector", ReleaseMatchingRequest{TenantID: tenant}, false},
 		{"a negative limit", ReleaseMatchingRequest{TenantID: tenant, ClientID: "client", Limit: -1}, false},

@@ -18,7 +18,7 @@ func (s *UsageStore) ReleaseMatching(_ context.Context, req meter.ReleaseMatchin
 	if err := req.Validate(); err != nil {
 		return meter.ReleaseMatchingResult{}, err
 	}
-	sel := selectors{subject: req.Subject, onBehalfOf: req.OnBehalfOf, clientID: req.ClientID, session: req.Session, runID: req.RunID}
+	sel := selectors{subject: req.Subject, onBehalfOf: req.OnBehalfOf, clientID: req.ClientID, session: req.Session, runID: req.RunID, capID: req.CapabilityID}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var due []hold

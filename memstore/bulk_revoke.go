@@ -59,6 +59,8 @@ func (s *Store) matchesLocked(c limes.Capability, req limes.RevokeMatchingReques
 type selectors struct {
 	subject, onBehalfOf, clientID, session string
 	runID                                  uuid.UUID
+	// capID is meter.ReleaseMatchingRequest.CapabilityID.
+	capID uuid.UUID
 }
 
 // selectedLocked reports whether c matches every selector in sel that is
@@ -72,7 +74,8 @@ func (s *Store) selectedLocked(c limes.Capability, sel selectors) bool {
 	if c.Subject.Agent != nil {
 		run = c.Subject.Agent.RunID
 	}
-	return (sel.runID == uuid.Nil() || run == sel.runID) &&
+	return (sel.capID == uuid.Nil() || c.ID == sel.capID) &&
+		(sel.runID == uuid.Nil() || run == sel.runID) &&
 		(sel.subject == "" || c.Subject.Subject == sel.subject) &&
 		(sel.onBehalfOf == "" || onBehalfOf == sel.onBehalfOf) &&
 		(sel.clientID == "" || c.ClientID == sel.clientID) &&

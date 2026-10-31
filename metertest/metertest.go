@@ -374,6 +374,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "ReleaseMatchingWorksInBatches", Run: checkReleaseMatchingBatches},
 		{Name: "ReleaseMatchingRefusesAMalformedRequest", Run: checkReleaseMatchingMalformed},
 		{Name: "ReleaseMatchingReleasesInEveryTenant", Run: checkReleaseMatchingAllTenants},
+		{Name: "ReleaseMatchingReleasesOneCapability", Run: checkReleaseMatchingByCapability},
 		{Name: "ListTenantReservationsListsTheTenantsHolds", Run: checkListTenantReservations},
 		{Name: "ListTenantReservationsRefusesAMalformedRequest", Run: checkListTenantReservationsRefuses},
 		{Name: "RejectionMovesNothing", Run: checkRejectionMovesNothing},
