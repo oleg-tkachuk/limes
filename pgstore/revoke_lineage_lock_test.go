@@ -14,7 +14,7 @@ import (
 // wait until the test ends.
 const revokeBehindLineageBound = 2 * time.Second
 
-// A metered call holds its lineage's records (sqlHoldRecords) until it
+// A metered call holds its lineage's records (sqlLineageHeld) until it
 // commits. A revoke of one of them does not wait for it: were it to, calls
 // overlapping one another would hold the record without a gap, and its
 // bearer could keep the revoke from ever being written.
@@ -31,7 +31,7 @@ func TestRevokeDoesNotWaitForAMeteredLineage(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = held.Rollback(context.WithoutCancel(t.Context())) }()
-	if _, err := held.Exec(t.Context(), sqlHoldRecords, []uuid.UUID{c.ID}); err != nil {
+	if _, err := held.Exec(t.Context(), sqlLineageHeld, c.ID, limes.MaxDelegationDepth); err != nil {
 		t.Fatal(err)
 	}
 	revokeCtx, cancel := context.WithTimeout(ctx, revokeBehindLineageBound)
