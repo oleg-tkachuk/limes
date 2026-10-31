@@ -80,8 +80,8 @@ release's deploy key creates a release tag (`repo-settings.ts`). Both stay.
 5. **The changelogs are checked strictly.** Every entry is written before
    its tag, so `changelog.ts check` holds each module's changelog to one
    rule, the one the tag step reads: every stable tag reachable from HEAD
-   has an entry, and every entry names such a tag but the newest, which
-   may be the release still to be tagged.
+   but a module's first has an entry, and every entry names such a tag but
+   the newest, which may be the release still to be tagged.
 
 ## Consequences
 
@@ -126,5 +126,6 @@ Each step is one pull request, tested in `.github/ci` before it is wired:
 5. Candidates: the nested modules' releases in the prerelease's notes,
    `candidates.ts` removed, the table kept for the candidates before.
 6. `changelog.ts check` made strict: a release tag without an entry
-   refused. Its other half — the newest entry may name the release still to
-   be tagged — lands with step 4, which needs it.
+   refused, but a module's first, which seeding cuts with no notes. Its
+   other half — the newest entry may name the release still to be tagged —
+   lands with step 4, which needs it.
