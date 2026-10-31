@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, afterEach, before, beforeEach, describe, test } from "node:test";
 
-import { BRANCH, CHANGELOG, GENERATED_MARKER, TITLE, checkChangelog, entryFrom, parseEntries, preamble, proposalTitle, proposeEntries, releaseURL, writeAll, writeChangelog, type Context } from "./changelog.ts";
+import { BRANCH, CHANGELOG, GENERATED_MARKER, TITLE, addEntry, checkChangelog, entryVersion, newestEntry, entryFrom, parseEntries, preamble, proposalTitle, proposeEntries, releaseURL, writeAll, writeChangelog, type Context } from "./changelog.ts";
 import { fakeData, fakeGitHub, type FakeData } from "./lib/fake-github.ts";
 import { git } from "./lib/git.ts";
 import { selectModule } from "./lib/modules.ts";
@@ -140,6 +140,37 @@ describe("the changelogs", () => {
     await assert.rejects(checkChangelog(repo.dir, selectModule(repo.dir), "HEAD"), /lists 0\.9\.0, no release tag v0\.9\.0 is reachable/);
     repo.write(CHANGELOG, `${TITLE}\n\n## [0.1.0](a)\n\n## [0.2.0](b)\n`);
     await assert.rejects(checkChangelog(repo.dir, selectModule(repo.dir), "HEAD"), /lists 0\.2\.0, out of order/);
+  });
+});
+
+describe("addEntry", () => {
+  let repo: TempRepo;
+  beforeEach(async () => {
+    repo = await seeded();
+  });
+  afterEach(() => repo.cleanup());
+
+  test("starts a changelog, then puts each entry first", () => {
+    const module = selectModule(repo.dir);
+    assert.equal(newestEntry(repo.dir, module), undefined);
+    addEntry(repo.dir, module, "## [0.1.0](a)\n\n* one");
+    addEntry(repo.dir, module, "## [0.2.0](b)\n\n* two");
+    assert.equal(newestEntry(repo.dir, module), "## [0.2.0](b)\n\n* two");
+    const text = readFileSync(join(repo.dir, CHANGELOG), "utf8");
+    assert.ok(text.startsWith(preamble(module)));
+    assert.deepEqual(headings(text), ["0.2.0", "0.1.0"]);
+  });
+
+  test("refuses an entry with no version, or one listed already", () => {
+    const module = selectModule(repo.dir);
+    assert.throws(() => addEntry(repo.dir, module, "* no heading"), /names no version/);
+    addEntry(repo.dir, module, "## [0.1.0](a)");
+    assert.throws(() => addEntry(repo.dir, module, "## [0.1.0](b)"), /lists 0\.1\.0 already/);
+  });
+
+  test("entryVersion reads the heading's version", () => {
+    assert.equal(entryVersion("## [1.2.3](x) (2026-10-31)\n\n* a"), "1.2.3");
+    assert.equal(entryVersion("* a"), undefined);
   });
 });
 

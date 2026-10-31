@@ -49,8 +49,10 @@ const ENTRY_HEADING = /^## \[([0-9]+\.[0-9]+\.[0-9]+)\]/;
 const TOP_HEADING = /^# \[/;
 // BRANCH is the branch propose commits on.
 export const BRANCH = "docs/changelog";
-// TITLE_TAGS is how many tags a proposal's title names; more are counted.
+// TITLE_TAGS is how many tags a title names; more are counted.
 const TITLE_TAGS = 3;
+// CHANGELOGS are every module's changelog, as git add takes them.
+export const CHANGELOGS = `:(glob)**/${CHANGELOG}`;
 const REMOTE = "origin";
 
 // changelogPath is module's changelog, from the checkout's root.
@@ -134,6 +136,32 @@ function readEntries(root: string, module: Module): Entries {
   }
 }
 
+// entryVersion is the version an entry's heading names, if it opens with
+// one.
+export function entryVersion(entry: string): string | undefined {
+  return ENTRY_HEADING.exec(entry)?.[1];
+}
+
+// newestEntry is the first entry of module's changelog at root, if any.
+export function newestEntry(root: string, module: Module): string | undefined {
+  return readEntries(root, module).values().next().value;
+}
+
+// addEntry puts entry first in module's changelog at root, starting the
+// changelog when there is none, and refuses an entry with no version
+// heading or with a version the changelog lists already.
+export function addEntry(root: string, module: Module, entry: string): void {
+  const version = entryVersion(entry);
+  if (version === undefined) {
+    throw new Error(`${changelogPath(module)}: the entry names no version: ${JSON.stringify(entry.split("\n")[0])}`);
+  }
+  const have = readEntries(root, module);
+  if (have.has(version)) {
+    throw new Error(`${changelogPath(module)} lists ${version} already`);
+  }
+  writeFileSync(join(root, changelogPath(module)), render(module, new Map([[version, entry], ...have])));
+}
+
 // checkChangelog refuses module's changelog when an entry names no release
 // tag reachable from rev, or the entries are not newest first.
 export async function checkChangelog(root: string, module: Module, rev: string): Promise<string> {
@@ -200,8 +228,12 @@ export async function writeAll(w: Writer, rev: string): Promise<string[]> {
 // proposalTitle is the subject of the commit, and the title of the pull
 // request, adding tags' entries.
 export function proposalTitle(tags: readonly string[]): string {
-  const named = tags.length <= TITLE_TAGS ? tags.join(", ") : `${tags.length} releases`;
-  return `docs(changelog): add ${named}`;
+  return `docs(changelog): add ${namingTags(tags)}`;
+}
+
+// namingTags names tags in a title: a few by name, more by their count.
+export function namingTags(tags: readonly string[]): string {
+  return tags.length <= TITLE_TAGS ? tags.join(", ") : `${tags.length} releases`;
 }
 
 // Context is where a proposal runs and how it pushes.
@@ -221,7 +253,7 @@ export async function proposeEntries(ctx: Context): Promise<number | undefined> 
     return undefined;
   }
   const title = proposalTitle(added);
-  await git(["add", "--all", "--", `:(glob)**/${CHANGELOG}`], ctx.root);
+  await git(["add", "--all", "--", CHANGELOGS], ctx.root);
   await git(["commit", "--quiet", "-m", title], ctx.root);
   await ctx.push(BRANCH);
   const text = { title, body: `Adds the release notes of ${added.join(", ")} to the modules' changelogs, as their GitHub releases publish them.` };
