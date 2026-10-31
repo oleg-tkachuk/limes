@@ -80,6 +80,7 @@ func meterEnv(t *testing.T, cfg Config, readOnly func(context.Context) context.C
 		NewTenant:              func() (uuid.UUID, error) { return uuid.New(), nil },
 		TenantCtx:              func(tenant uuid.UUID) context.Context { return WithTenant(t.Context(), tenant) },
 		ListCtx:                WithAllTenantsReadOnly(t.Context()),
+		AllTenantsCtx:          WithAllTenants(t.Context()),
 		ReadOnlyCtx:            readOnly(t.Context()),
 		Advance:                clock.Advance,
 		DeleteCapability: func(id uuid.UUID) error {
