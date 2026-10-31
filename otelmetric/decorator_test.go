@@ -126,6 +126,15 @@ func TestInstrumentForwardsEveryInterfaceTheStoreImplements(t *testing.T) {
 			meter.CopyUsageReader
 			meter.MatchingReleaser
 		}{inner, inner, inner},
+		"TenantReservationLister alone": struct {
+			meter.UsageStore
+			meter.TenantReservationLister
+		}{inner, inner},
+		"MatchingReleaser and TenantReservationLister": struct {
+			meter.UsageStore
+			meter.MatchingReleaser
+			meter.TenantReservationLister
+		}{inner, inner, inner},
 		"none": struct{ meter.UsageStore }{inner},
 	}
 	checked := map[string]bool{}
@@ -147,7 +156,7 @@ func TestInstrumentForwardsEveryInterfaceTheStoreImplements(t *testing.T) {
 		}
 	}
 	// The rule is only pinned if it reaches the optional interfaces.
-	for _, optional := range []string{"CopyUsageReader", "TenantUsageEraser"} {
+	for _, optional := range []string{"CopyUsageReader", "TenantUsageEraser", "MatchingReleaser", "TenantReservationLister"} {
 		if !checked[optional] {
 			t.Errorf("no store checked implements %s", optional)
 		}
