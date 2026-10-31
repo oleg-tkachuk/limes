@@ -28,15 +28,15 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { error, info, summarize, table, warning } from "./lib/actions.ts";
-import { execute } from "./lib/exec.ts";
 import { optionalEnv, requireEnv } from "./lib/env.ts";
 import { git } from "./lib/git.ts";
 import { type GitHub, gitHubFor, type PullRequestText } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
 import { ROOT_MODULE, releasedModules, selectModule } from "./lib/modules.ts";
+import { pushAs } from "./lib/push.ts";
 import { FOLLOWERS, LIMES_MODULE, compareVersions, goEnv, raise, tidyFollowers } from "./lib/go-modules.ts";
 
-export { FOLLOWERS, LIMES_MODULE, compareVersions, goEnv };
+export { FOLLOWERS, LIMES_MODULE, compareVersions, goEnv, pushAs };
 
 
 // BRANCH is the branch the requirement is proposed on, for every nested
@@ -51,8 +51,6 @@ export const LIMES_REQUIREMENT_SCOPE = "nested";
 export const BASE_BRANCH = "main";
 const REMOTE = "origin";
 const RELEASE_TAG = /^v[0-9]+\.[0-9]+\.[0-9]+$/;
-// GITHUB_HOST is where the push authenticates.
-const GITHUB_HOST = "https://github.com/";
 
 // Proposal is what a run did with the pull request.
 export const Proposal = { Opened: "opened", Updated: "updated", Unchanged: "unchanged" } as const;
@@ -186,19 +184,6 @@ export function nestedModuleDirs(root: string): string[] {
   return releasedModules(root)
     .filter((m) => m !== ROOT_MODULE)
     .map((name) => selectModule(root, name).dir);
-}
-
-// pushAs pushes with token, given to git through the environment of the
-// push alone: no credential is written to a config file, and none reaches
-// an argument list.
-export function pushAs(token: string, repository: string, root: string): Context["push"] {
-  const header = `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
-  return async (branch) => {
-    await execute("git", ["push", "--quiet", "--force", `${GITHUB_HOST}${repository}.git`, `HEAD:refs/heads/${branch}`], {
-      cwd: root,
-      env: { ...process.env, GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: `http.${GITHUB_HOST}.extraheader`, GIT_CONFIG_VALUE_0: header },
-    });
-  };
 }
 
 async function main(): Promise<boolean> {

@@ -1,6 +1,8 @@
 // The release pull request: every module due a release, released from one
 // commit (docs/adr/0016-one-release-commit.md).
 //
+// Usage: GH_TOKEN=… GITHUB_REPOSITORY=… RUNNER_TEMP=… [MANUAL=true] [MODULE=all|<name>] node release-plan.ts
+//
 // planReleases finds, on the checked-out commit, each module the policy
 // finds due — or, by hand, each one asked for — and its next version and
 // notes from a semantic-release dry run, which must run on main, so the plan
@@ -14,19 +16,29 @@
 // commit — each raised requirement, the followers tidied, each entry first
 // in its module's changelog — in one commit, and opens or updates its pull
 // request. The commit is a chore, which releases nothing itself; tagging its
-// merge is release-tag.ts's. Nothing here calls them yet.
+// merge is release-tag.ts's. A plan that cuts a major is opened, or made, a
+// draft, which merge-green.ts leaves for the maintainer.
+//
+// It acts through GH_TOKEN, AUTOMERGE_TOKEN in release.yaml: a branch pushed
+// with the workflow's own token would start no CI. Without it, it warns and
+// does nothing. semantic-release's dry runs read the same token.
 
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 import { CHANGELOGS, addEntry, entryFrom, entryVersion, namingTags } from "./changelog.ts";
-import { info } from "./lib/actions.ts";
+import { info, summarize, warning } from "./lib/actions.ts";
+import { optionalEnv, requireEnv } from "./lib/env.ts";
 import { git } from "./lib/git.ts";
-import { type GitHub, type PullRequestText } from "./lib/github.ts";
+import { gitHubFor, type GitHub, type PullRequestText } from "./lib/github.ts";
+import { runMain } from "./lib/main.ts";
+import { pushAs } from "./lib/push.ts";
+import { DRY_RUN_ARG, semanticRelease } from "./lib/semantic-release.ts";
 import { FOLLOWERS, compareVersions, raise, requiredLimes, tidyFollowers } from "./lib/go-modules.ts";
-import { ROOT_MODULE, releasedModules, selectModule, type Module, type ReleaseCommits } from "./lib/modules.ts";
+import { ROOT_MODULE, releaseCommits, releasedModules, selectModule, type Module, type ReleaseCommits } from "./lib/modules.ts";
 import { nextVersion, parseVersion } from "./lib/prerelease.ts";
-import { Level, isDue, lastStableTag, pendingCommits, type Policy } from "./lib/release-policy.ts";
+import { notesFrom } from "./lib/releases.ts";
+import { Level, isDue, lastStableTag, loadPolicy, pendingCommits, type Policy } from "./lib/release-policy.ts";
 import { BASE_BRANCH } from "./merge-policy.ts";
 
 // BRANCH is the branch the release pull request is proposed from.
@@ -227,7 +239,9 @@ export async function proposeRelease(ctx: Proposer): Promise<Proposed | undefine
   await git(["commit", "--quiet", "-m", title], ctx.root);
   await ctx.push(BRANCH);
   const major = plan.some((m) => m.major);
-  const text = { title, body: releaseBody(plan, major) };
+  // A major is opened, or made, a draft: merge-green.ts leaves it for the
+  // maintainer to merge.
+  const text = { title, body: releaseBody(plan, major), draft: major };
   return { pullRequest: await openOrUpdate(ctx.github, text), major };
 }
 
@@ -250,4 +264,59 @@ async function openOrUpdate(github: GitHub, text: PullRequestText): Promise<numb
   const number = await github.createPullRequest(BRANCH, BASE_BRANCH, text);
   info(`opened #${number}: ${text.title}`);
   return number;
+}
+
+// DRY_RUN_NOTES_PREFIX names the file a plan's dry run writes a module's
+// notes to, apart from those a release writes.
+const DRY_RUN_NOTES_PREFIX = "plan-notes-";
+
+// dryRunNotes is the plan's dry run of a module through run, which writes
+// the notes of module's next release to a file, or none: the notes, or
+// undefined when it writes none.
+export function dryRunNotes(run: (module: Module, notesFile: string) => Promise<void>, notesDir: string): Planner["dryRun"] {
+  return async (module) => {
+    const file = join(notesDir, `${DRY_RUN_NOTES_PREFIX}${module.name}.md`);
+    rmSync(file, { force: true });
+    await run(module, file);
+    return existsSync(file) ? notesFrom(file) : undefined;
+  };
+}
+
+// ISO_DATE_LENGTH is the length of YYYY-MM-DD at the start of an ISO time.
+const ISO_DATE_LENGTH = 10;
+
+// today is the date, UTC, as notes print it.
+export function today(): string {
+  return new Date().toISOString().slice(0, ISO_DATE_LENGTH);
+}
+
+// ALL_MODULES plans every module.
+const ALL_MODULES = "all";
+
+async function main(): Promise<void> {
+  const token = optionalEnv("GH_TOKEN");
+  if (token === undefined) {
+    warning("AUTOMERGE_TOKEN is not set; no release is proposed (see release.yaml)");
+    return;
+  }
+  const repository = requireEnv("GITHUB_REPOSITORY");
+  const root = (await git(["rev-parse", "--show-toplevel"])).trim();
+  const module = optionalEnv("MODULE") ?? ALL_MODULES;
+  const proposed = await proposeRelease({
+    root,
+    repository,
+    policy: loadPolicy(root),
+    commits: releaseCommits(),
+    manual: optionalEnv("MANUAL") === "true",
+    only: module === ALL_MODULES ? undefined : module,
+    today: today(),
+    dryRun: dryRunNotes(semanticRelease(root, token, [DRY_RUN_ARG]), requireEnv("RUNNER_TEMP")),
+    github: gitHubFor(token, repository),
+    push: pushAs(token, repository, root),
+  });
+  summarize(`### Release proposed\n\n${proposed === undefined ? "Nothing is due." : `#${proposed.pullRequest}${proposed.major ? ", a draft: it cuts a major" : ""}.`}`);
+}
+
+if (import.meta.main) {
+  await runMain(main);
 }

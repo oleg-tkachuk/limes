@@ -96,6 +96,14 @@ describe("tagReleases", () => {
     assert.deepEqual(data.published, []);
   });
 
+  test("starts the release line of a nested module no tag names yet, on the commit that added its go.mod", async () => {
+    repo.write("biscuit/go.mod", "module example.com/limes/biscuit\n");
+    const added = await repo.commit("feat(biscuit): a new module");
+    await tagReleases(tagger());
+    assert.ok(data.tags.has("biscuit/v0.1.0"), [...data.tags].join(", "));
+    assert.equal(await tagged("biscuit/v0.1.0"), added);
+  });
+
   test("refuses an entry no newer than the module's last release", async () => {
     await repo.run("tag", "v0.3.0", "HEAD~1");
     await assert.rejects(tagReleases(tagger()), /0\.2\.0 is not past v0\.3\.0/);
