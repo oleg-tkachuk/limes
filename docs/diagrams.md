@@ -1038,8 +1038,10 @@ A `BulkRevoker` revokes, in batches, every capability of one tenant — or,
 by client or session, of every tenant — that matches a selector. The
 session is recorded at issuance — an `Exchanger` takes it from the subject
 token's `sid`, a child from its parent — and is never a claim. A
-`meter.MatchingReleaser` then releases, tenant by tenant, the holds the
-revocation stopped, which would otherwise count until they expire.
+`meter.MatchingReleaser` then releases the holds the revocation stopped,
+which would otherwise count until they expire, by the same selectors: in
+one tenant, or by client or session in every tenant, so a release retried
+after its revocation went through needs no list of tenants.
 
 ```mermaid
 flowchart LR
@@ -1054,7 +1056,7 @@ flowchart LR
     res(["RevokeMatchingResult{Revoked, Tenants, More}"])
     inval["ErrInvalidRequest"]
     mism["ErrScopeMismatch"]
-    release["meter.MatchingReleaser.ReleaseMatching<br/>in each of Tenants, the same selectors<br/>open holds of revoked matches and their descendants<br/>a live capability's hold kept"]
+    release["meter.MatchingReleaser.ReleaseMatching<br/>TenantID or AllTenants, the same selectors<br/>open holds of revoked matches and their descendants<br/>a live capability's hold kept"]
 
     req --> val -- yes --> scope -- yes --> sel --> lock --> write --> res
     res -. "then, to free the budget at once" .-> release

@@ -1067,11 +1067,13 @@ for {
   keep counting against the ceilings until they expire, since a cost
   reserved may still settle. A usage store that is a
   `meter.MatchingReleaser` — memstore's and pgstore's are — releases them
-  at once: `ReleaseMatching` with the same selectors and a tenant releases
-  the holds of revoked matches and of everything delegated from them, never
-  a live capability's ([ADR-0015](adr/0015-release-matching-holds.md)).
-  After a revocation across tenants, run it in each tenant
-  `RevokeMatchingResult.Tenants` named.
+  at once: `ReleaseMatching` with the same selectors and a tenant — or
+  `AllTenants`, by client or session — releases the holds of revoked
+  matches and of everything delegated from them, never a live
+  capability's ([ADR-0015](adr/0015-release-matching-holds.md)). Run it
+  with the revocation's own request: it finds what is revoked, not what
+  this call revoked, so a release that failed is retried as it was, though
+  the revocation, repeated, revokes nothing.
 - **Preview it, and audit it after.** `CountRecordsRequest` and
   `ListRecordsRequest` take the same selectors — `Subject`, `OnBehalfOf`,
   `ClientID`, `Session`, `RunID` — so a count names what a revocation would reach,

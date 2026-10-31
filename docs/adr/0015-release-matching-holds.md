@@ -30,10 +30,16 @@ knows no such cost will come, and wants the tenant's budget back now.
    ancestors it holds against, so a hold is released when its capability
    or one of those matches, as the revocation reaches descendants through
    the lineage.
-4. **One tenant per call.** A revocation across tenants reports the
-   tenants it wrote in (`RevokeMatchingResult.Tenants`); the operator
-   releases in each. That keeps every call under one tenant's scope and
-   lock order, as `ReleaseExpired`'s releases are.
+4. **One tenant per call, or every tenant.** `TenantID` releases in one
+   tenant, under its scope. `AllTenants` releases in every tenant, by
+   `ClientID` and `Session` alone, as `RevokeMatchingRequest.AllTenants`
+   revokes, and pgstore runs it only under `WithAllTenants`.
+   `ReleaseMatchingResult.Tenants` names the tenants a hold was released
+   in. A release keyed to the tenants a revocation reported could not be
+   retried: once the revocation went through, repeating it revokes
+   nothing and reports no tenant, and the holds would count until they
+   expired. The release selects what is revoked, so it needs no such
+   list.
 5. **Batches, as every bulk call.** `Limit` bounds a call; `More` says a
    batch was full.
 6. **memstore and pgstore implement it, and `metertest` checks it** when
@@ -44,7 +50,12 @@ knows no such cost will come, and wants the tenant's budget back now.
 ## Consequences
 
 - **Deleting a client frees its tenants' budgets in two loops,**
-  revocation then release, with no wait for the holds' expiry.
+  revocation then release, each under `AllTenants`, with no wait for the
+  holds' expiry; either loop is retried as it was.
+- **Across tenants, pgstore selects from every open hold,** whose
+  number the holds' expiry keeps small: no index leads with the client.
+  The batch's counters are row locks, so it needs no bound on its tenants,
+  as a revocation's advisory locks do.
 - **A cost that was in flight is lost** if its hold is released before it
   settles: `Settle` then finds no hold. The operator chooses the release;
   `ReleaseExpired` alone never makes that choice.

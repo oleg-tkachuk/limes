@@ -6,14 +6,20 @@ import (
 )
 
 // ReleaseMatchingRequest names the holds ReleaseMatching releases: those of
-// the revoked capabilities of one tenant that match each selector set, by
-// the rules limes.RevokeMatchingRequest selects by, and of every capability
-// delegated from one (docs/adr/0015-release-matching-holds.md).
+// the revoked capabilities of one tenant, or of every tenant, that match
+// each selector set, by the rules limes.RevokeMatchingRequest selects by,
+// and of every capability delegated from one
+// (docs/adr/0015-release-matching-holds.md).
 type ReleaseMatchingRequest struct {
-	// TenantID is the tenant whose holds are released. Required: a
-	// revocation across tenants reports the tenants it wrote in
-	// (limes.RevokeMatchingResult.Tenants), one call each.
+	// TenantID is the tenant whose holds are released; AllTenants releases
+	// them in every tenant instead. Exactly one of the two is required.
 	TenantID uuid.UUID
+	// AllTenants releases the holds in every tenant, by ClientID and Session
+	// alone, as limes.RevokeMatchingRequest.AllTenants revokes. It names no
+	// tenant, so a call after a revocation across tenants needs no list of
+	// the tenants it wrote in: one whose release failed is retried as it
+	// was, though the revocation, repeated, revokes nothing.
+	AllTenants bool
 	// Subject, OnBehalfOf, ClientID, Session and RunID select as on
 	// limes.RevokeMatchingRequest; at least one is required.
 	Subject, OnBehalfOf, ClientID, Session string
@@ -23,14 +29,19 @@ type ReleaseMatchingRequest struct {
 	Limit int
 }
 
-// Validate refuses a request with no tenant, no selector, or a negative
-// limit, as ErrInvalidRequest.
+// Validate refuses, as ErrInvalidRequest, a request with neither a tenant
+// nor AllTenants, or both, no selector, a selector AllTenants does not take,
+// or a negative limit.
 func (r ReleaseMatchingRequest) Validate() error {
 	switch {
-	case r.TenantID == uuid.Nil():
-		return invalidRequest("release matching: no tenant")
+	case r.TenantID == uuid.Nil() && !r.AllTenants:
+		return invalidRequest("release matching: a tenant id or AllTenants required")
+	case r.TenantID != uuid.Nil() && r.AllTenants:
+		return invalidRequest("release matching: tenant id %s beside AllTenants", r.TenantID)
 	case r.Subject == "" && r.OnBehalfOf == "" && r.ClientID == "" && r.Session == "" && r.RunID == uuid.Nil():
 		return invalidRequest("release matching: no selector; name a subject, an on-behalf-of, a client, a session or an agent run")
+	case r.AllTenants && (r.Subject != "" || r.OnBehalfOf != "" || r.RunID != uuid.Nil()):
+		return invalidRequest("release matching: AllTenants matches by client or session alone; a subject or an agent run names one tenant's")
 	}
 	return validateHousekeepingLimit("release matching", r.Limit)
 }
@@ -39,6 +50,9 @@ func (r ReleaseMatchingRequest) Validate() error {
 type ReleaseMatchingResult struct {
 	// Released counts the holds the call released.
 	Released int64
+	// Tenants are the tenants the call released holds in, ascending: the
+	// request's alone, or, with AllTenants, each one a hold was in.
+	Tenants []uuid.UUID
 	// More reports a full batch: more may match, so call again until it is
 	// false.
 	More bool
@@ -57,6 +71,8 @@ type MatchingReleaser interface {
 	// tenant as Release does, and reports how many and whether the batch
 	// was full. A hold of a live capability is never released: its cost may
 	// still come. It refuses what ReleaseMatchingRequest.Validate refuses,
-	// and a call scoped to another tenant as limes.ErrScopeMismatch.
+	// a call scoped to another tenant as limes.ErrScopeMismatch, and an
+	// AllTenants call under a scope that does not admit writing every
+	// tenant as limes.ErrScopeMismatch too.
 	ReleaseMatching(ctx context.Context, req ReleaseMatchingRequest) (ReleaseMatchingResult, error)
 }

@@ -143,6 +143,11 @@ type Env struct {
 	// Store.Revoke does. Optional: without it, or when Usage is no
 	// meter.MatchingReleaser, the checks of ReleaseMatching are skipped.
 	Revoke func(id uuid.UUID) error
+	// AllTenantsCtx is a context scoped to writing every tenant's rows, as
+	// housekeeping is (pgstore.WithAllTenants), for a release across
+	// tenants. Optional: without it, Ctx, but for a store that scopes
+	// tenants, whose checks of that are then skipped.
+	AllTenantsCtx context.Context
 }
 
 // CapabilitySpec is a capability Env.NewCapability records: its parent and
@@ -368,6 +373,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "ReleaseMatchingReleasesTheHoldsOfRevokedMatches", Run: checkReleaseMatching},
 		{Name: "ReleaseMatchingWorksInBatches", Run: checkReleaseMatchingBatches},
 		{Name: "ReleaseMatchingRefusesAMalformedRequest", Run: checkReleaseMatchingMalformed},
+		{Name: "ReleaseMatchingReleasesInEveryTenant", Run: checkReleaseMatchingAllTenants},
 		{Name: "RejectionMovesNothing", Run: checkRejectionMovesNothing},
 		{Name: "ExternalRefChargesOnce", Run: checkExternalRefChargesOnce},
 		{Name: "ExternalRefChargesOnceConcurrently", Run: checkExternalRefConcurrent},
