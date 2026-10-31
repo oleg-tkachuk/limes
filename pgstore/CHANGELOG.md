@@ -2,6 +2,22 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.56.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.55.0...pgstore%2Fv0.56.0) (2026-10-31)
+
+### Features
+
+* **pgstore:** lock a tenant's aggregate after the counters ([9719714](https://github.com/oleg-tkachuk/limes/commit/97197148ca4ead19655e6f09bda85f95fd0968aa))
+
+### Bug Fixes
+
+* **ci:** keep one blank line between changelog entries ([2731a80](https://github.com/oleg-tkachuk/limes/commit/2731a809301ea41dfa670e5db138a93b01488c13))
+
+### Performance Improvements
+
+* **pgstore:** lock and write a meter call's counters in batches ([df88713](https://github.com/oleg-tkachuk/limes/commit/df887136d37546cc57122dec2724d497662b9f32))
+* **pgstore:** read a meter call's prelude in one batch ([089da44](https://github.com/oleg-tkachuk/limes/commit/089da44aef6a9c70838514970da27efa950a0739))
+* **pgstore:** send a scope's statements with the call's first ([abd480f](https://github.com/oleg-tkachuk/limes/commit/abd480f512e5970292dc4e3cb344294e76a6f918))
+
 ## [0.55.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.54.1...pgstore%2Fv0.55.0) (2026-10-31)
 
 ### Features
