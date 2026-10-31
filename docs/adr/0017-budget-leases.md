@@ -29,7 +29,13 @@ The proxy oversleeps its setting: `IsRevoked`, one round trip, shows each
 round trip took about 1.9 ms and 3.5 ms longer, not 1 ms and 2 ms. The
 throughput conclusion holds at either latency.
 
-`Charge` makes 16 round trips and `Bump` 10, whatever the chain's depth
+After ADR-0018, `Charge` makes 6 round trips and holds the aggregate for
+three: one tenant's charges from every processor take 4.0 ms each at the
++1 ms setting (≈250/s) and 9.1 ms at +2 ms (≈110/s), instead of 21 and 86.
+The queue remains, shorter: its length is now three round trips per
+charge, which a lease takes off the path entirely.
+
+Before it, `Charge` made 16 round trips and `Bump` 10, whatever the chain's depth
 (1 to 64); `IsRevoked` makes one. A deeper chain costs rows, not round trips:
 `Charge` takes 2.7 ms at depth 1 and 7.0 ms at depth 64. The tenant's
 aggregate is locked for most of a charge's round trips, so its throughput

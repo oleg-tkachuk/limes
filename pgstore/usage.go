@@ -109,11 +109,7 @@ func (s *UsageStore) refund(ctx context.Context, tx pgx.Tx, c *counters, e ledge
 	for _, r := range c.copies {
 		r.spent = max0(r.spent - amount)
 	}
-	if err := c.write(ctx, tx, s.clock(), refundTenant); err != nil {
-		return err
-	}
-	_, err := tx.Exec(ctx, sqlRefunded, e.ID, int64(amount))
-	return err
+	return c.write(ctx, tx, s.clock(), refundTenant, heldStmt{sql: sqlRefunded, args: []any{e.ID, int64(amount)}})
 }
 
 const sqlRefunded = `UPDATE limes.charges SET refunded = refunded + $2 WHERE id = $1`
@@ -357,9 +353,15 @@ FROM limes.tenant_budgets WHERE tenant_id = $1`
 
 // readTenant reads one aggregate with query, sqlGetTenant or sqlLockTenant.
 func readTenant(ctx context.Context, tx pgx.Tx, query string, tenantID uuid.UUID) (budgetRow, error) {
+	return scanTenant(tx.QueryRow(ctx, query, tenantID), tenantID)
+}
+
+// scanTenant reads one aggregate of tenantID from row; an unpersisted one
+// when there is none.
+func scanTenant(row pgx.Row, tenantID uuid.UUID) (budgetRow, error) {
 	b := budgetRow{tenantID: tenantID}
 	var ceilingMax, spent, reserved int64
-	err := tx.QueryRow(ctx, query, tenantID).Scan(
+	err := row.Scan(
 		&b.tenantID, &ceilingMax, &b.ceiling.Unlimited, &spent, &reserved, &b.unit,
 		&b.start, &b.end, &b.updated, &b.version, &b.period)
 	if errors.Is(err, pgx.ErrNoRows) {

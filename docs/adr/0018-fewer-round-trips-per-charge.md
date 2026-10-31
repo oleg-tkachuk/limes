@@ -1,6 +1,6 @@
 # ADR-0018: Fewer round trips per charge
 
-**Status:** Proposed
+**Status:** Accepted, amended by its rollout (below)
 **Date:** 2026-10-31
 **Deciders:** Oleg Tkachuk
 **Relates to:** [ADR-0007](0007-pgstore-components.md), [ADR-0017](0017-budget-leases.md)
@@ -160,6 +160,25 @@ same ones A removes by grouping.
    A counter that was on record when a call created it can now be deleted
    while the call waits for its lock, so the call creates it again
    (`lockUsageOf`).
-4. The write batch with `COMMIT`, and `onCharged` placed before it.
+4. Batches for the locks and the writes: the counters created and locked
+   in one; the tenant's aggregate created and locked, with the replay
+   looked up again under the locks, in one; every counter, the aggregate
+   and the ledger row, the hold or the refund written in one. `Charge`
+   takes 6 round trips, `Bump` 5 and `Reserve` 7; the aggregate is held for
+   three. One tenant's charges from every processor, at the +2 ms setting,
+   take 9.1 ms each instead of 86.
 5. The migration guide's note on the rolling upgrade, and the benchmarks'
    figures in ADR-0017.
+
+What the rollout did not do, and why:
+
+- **No conditional write of the aggregate (Decision 2).** It would move
+  the ceiling's check, the period's rollover, `OverrunPolicyRecord`'s
+  overrun and a settlement's release into SQL, a second implementation of
+  rules that are Go's, and memstore's, for one round trip more. Measured
+  against what remains, not worth it; Option B stays the step after, if
+  ever needed.
+- **`BEGIN` and `COMMIT` stay their own round trips.** `Config.DB` offers
+  `BeginTx` and `QueryRow` alone, so pgstore cannot send either in a batch
+  without a type of its own beside it: a change to the exported surface,
+  for two round trips, left for when the surface is next reopened.

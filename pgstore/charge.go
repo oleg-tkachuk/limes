@@ -161,22 +161,9 @@ func replay(ctx context.Context, tx pgx.Tx, e ledgerEntry) (meter.ChargeReceipt,
 	}, nil
 }
 
-// replayByRef answers a charge whose (capability, ExternalRef) is already in
-// the ledger: its receipt again, or ErrExternalRefConflict when it names
-// another cost.
-func replayByRef(ctx context.Context, tx pgx.Tx, req meter.ChargeRequest, unit string) (meter.ChargeReceipt, bool, error) {
-	if req.ExternalRef == "" {
-		return meter.ChargeReceipt{}, false, nil
-	}
-	e, ok, err := readEntry(ctx, tx, sqlChargeByRef, req.Subject.CapabilityID(), req.ExternalRef)
-	if err != nil || !ok {
-		return meter.ChargeReceipt{}, false, err
-	}
-	return receiptOfRef(ctx, tx, req, unit, e)
-}
-
-// receiptOfRef is the receipt of e, req's reference found on record, or
-// ErrExternalRefConflict when e is another cost.
+// receiptOfRef answers a charge whose (capability, ExternalRef) is already
+// in the ledger as e: its receipt again, or ErrExternalRefConflict when e
+// names another cost.
 func receiptOfRef(ctx context.Context, tx pgx.Tx, req meter.ChargeRequest, unit string, e ledgerEntry) (meter.ChargeReceipt, bool, error) {
 	// Another copy charges its own counters, and the receipt is the first
 	// copy's, so it conflicts as another cost does. The error names the ref,
@@ -230,6 +217,7 @@ func (s *UsageStore) charge(ctx context.Context, tx pgx.Tx, req meter.ChargeRequ
 		capID: req.Subject.CapabilityID(), tenantID: req.Subject.TenantID(), budget: req.Subject.Budget(),
 		unit: unit, copies: req.Subject.Copies(), copyQuota: req.Subject.CopyQuota(), amount: req.Amount, op: req.Op, actor: req.Actor,
 		externalRef: req.ExternalRef, overrun: req.Overrun, ancestors: ancestors,
+		replayAfterLock: req.ExternalRef != "",
 	}
 	c, err := s.lockCharge(ctx, tx, spec)
 	if err != nil {
@@ -239,7 +227,8 @@ func (s *UsageStore) charge(ctx context.Context, tx pgx.Tx, req meter.ChargeRequ
 	// one waited for the locks. Its receipt is the answer, and what locking
 	// made here — counters, a copy recorded again after its counters were
 	// dropped — is rolled back: a replay moves nothing.
-	if r, replayed, err := replayByRef(ctx, tx, req, unit); replayed || err != nil {
+	if c.replayed {
+		r, _, err := receiptOfRef(ctx, tx, req, unit, c.replay)
 		return r, cmp.Or(err, errReplayedAfterLock)
 	}
 	return s.commitCharge(ctx, tx, c, spec, onCharged)
@@ -265,6 +254,9 @@ func (s *UsageStore) lockCharge(ctx context.Context, tx pgx.Tx, spec chargeSpec)
 	if spec.settling != nil {
 		l.existing = spec.settling.ancestors
 	}
+	if spec.replayAfterLock {
+		l.replayCapID, l.replayRef = spec.capID, spec.externalRef
+	}
 	return lock(ctx, tx, l)
 }
 
@@ -288,6 +280,9 @@ type chargeSpec struct {
 	ancestors []ancestor
 	// settling is the hold the charge settles; nil for a direct charge.
 	settling *hold
+	// replayAfterLock reads the charge on record under externalRef once
+	// the locks are held (lockRequest.replayRef).
+	replayAfterLock bool
 }
 
 // commitCharge checks every ceiling against c and, when all admit the
@@ -326,12 +321,11 @@ func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, s
 	}
 	spend(c, spec, holders, released)
 	now := s.clock()
-	if err := c.write(ctx, tx, now, true); err != nil {
-		return refused, err
-	}
-	if _, err := tx.Exec(ctx, sqlInsertCharge,
+	insert := heldStmt{sql: sqlInsertCharge, args: []any{
 		receipt.ChargeID, spec.capID, spec.tenantID, int64(spec.amount), spec.unit, string(spec.op), spec.actor, now,
-		ancestorIDs(spec.ancestors), copyIDs(spec.copies), spec.externalRef, reservationID, overrun, c.tenant.period); err != nil {
+		ancestorIDs(spec.ancestors), copyIDs(spec.copies), spec.externalRef, reservationID, overrun, c.tenant.period,
+	}}
+	if err := c.write(ctx, tx, now, true, insert); err != nil {
 		return refused, err
 	}
 	return receipt, nil
@@ -633,11 +627,10 @@ func (s *UsageStore) reserve(ctx context.Context, tx pgx.Tx, req meter.ReserveRe
 		expires: expires.Truncate(timeResolution),
 	}
 	applyHold(c, h, +1)
-	if err := c.write(ctx, tx, now, true); err != nil {
-		return meter.Reservation{}, err
-	}
-	if _, err := tx.Exec(ctx, sqlInsertHold,
-		h.id, h.capID, h.tenantID, h.ancestors, int64(h.amount), h.unit, string(h.op), h.actor, copies, h.expires); err != nil {
+	insert := heldStmt{sql: sqlInsertHold, args: []any{
+		h.id, h.capID, h.tenantID, h.ancestors, int64(h.amount), h.unit, string(h.op), h.actor, copies, h.expires,
+	}}
+	if err := c.write(ctx, tx, now, true, insert); err != nil {
 		return meter.Reservation{}, err
 	}
 	return h.reservation(), nil
@@ -805,9 +798,5 @@ func (s *UsageStore) releaseHold(ctx context.Context, tx pgx.Tx, h hold) error {
 		return err
 	}
 	applyHold(c, h, -1)
-	if err := c.write(ctx, tx, s.clock(), c.tenant.persisted); err != nil {
-		return err
-	}
-	_, err = tx.Exec(ctx, sqlDeleteHold, h.id)
-	return err
+	return c.write(ctx, tx, s.clock(), c.tenant.persisted, heldStmt{sql: sqlDeleteHold, args: []any{h.id}})
 }
