@@ -1,6 +1,6 @@
 # ADR-0016: Every module released from one release commit
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-10-31
 **Deciders:** Oleg Tkachuk
 
