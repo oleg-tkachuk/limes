@@ -3,14 +3,18 @@ name: Release
 # Dispatched by ci.yaml once the checks on a push to main have passed, and
 # run by hand from main.
 #
-# A run CI dispatched releases a module only once the commits since its last
-# release are due by .github/release/release-policy.json: enough of them, by
-# the level each cuts, or one that is released at once. A run by hand
-# releases whatever is pending, or with the prerelease channel tags a release
-# candidate, vX.Y.Z-rc.N — with next_major, one of limes's next major,
-# v1.0.0-rc.N, whose API may still break before 1.0 —; either may name one
-# module. Every run, by hand
-# too, releases only a commit a CI run on main passed.
+# Every module is released from one commit (docs/adr/0016-one-release-commit.md).
+# A run first tags each release a merged release pull request planned: the
+# newest entry of a module's CHANGELOG.md that no tag names yet. It then
+# proposes the next release pull request: each module whose commits since its
+# last release are due by .github/release/release-policy.json — enough of
+# them, by the level each cuts, or one that is released at once —, or, by
+# hand, whatever is pending, its changelog entry written and every nested
+# module that requires limes raised to the limes it releases. A run by hand
+# with the prerelease channel instead tags a release candidate, vX.Y.Z-rc.N —
+# with next_major, one of limes's next major, v1.0.0-rc.N, whose API may still
+# break before 1.0 —; either may name one module. Every run, by hand too,
+# acts only on a commit a CI run on main passed.
 #
 # A release is a vX.Y.Z tag — the Go proxy reads the tag, so nothing else is
 # published — and the GitHub release that announces it. A nested module's tag
@@ -79,20 +83,18 @@ jobs:
     # to (repo-settings.ts): no other branch's copy of a workflow can read it.
     environment: release
     permissions:
-      contents: write # semantic-release pushes the tag; the API publishes the release
+      contents: write # the API publishes the release; the deploy key pushes the tag
       actions: read # the dispatching CI run and its jobs
     outputs:
-      # The root module's release tag this run pushed or published; empty
-      # when none.
-      limes-tag: ${{ steps.modules.outputs.limes-tag }}
       # The candidate of limes's next major this run published; empty when
       # none.
-      limes-candidate: ${{ steps.modules.outputs.limes-candidate }}
-      # true once a release of any module is published; empty when none.
-      released: ${{ steps.modules.outputs.released }}
+      limes-candidate: ${{ steps.candidates.outputs.limes-candidate }}
+      # true once the run found its commit releasable; the next release is
+      # then proposed.
+      releasable: ${{ steps.catchup.outputs.release }}
     steps:
-      # No persist-credentials: false — semantic-release pushes the tag it
-      # creates, so this is the one checkout here that needs its credentials.
+      # No credentials kept: every tag is pushed over SSH with the deploy key,
+      # and main is fetched from a public repository.
       #
       # Deliberately no `ref:`. A repository_dispatch run checks out the head
       # of the default branch, which is a BRANCH — and semantic-release has to
@@ -101,7 +103,8 @@ jobs:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # semantic-release derives the next version from the commit history.
+          persist-credentials: false
+          # The tags, and the commits they and the changelogs are read from.
           fetch-depth: 0
 
       # Node, the CI scripts and the semantic-release that
@@ -165,51 +168,54 @@ jobs:
           SHA: ${{ github.event.client_payload.sha || github.sha }}
         run: node .github/ci/release-head.ts catch-up "$SHA"
 
-      # Every module, each on its own line from the commits that touch it
-      # (.github/release/modules.cjs): its tag computed and pushed by the
-      # pinned semantic-release, its GitHub release published — the notes
-      # generated from the commits, breaking changes first, then GitHub's list
-      # of merged pull requests since its previous tag (.github/release.yml) —
-      # and the Go proxy told of it. A nested module waits for its tests
-      # against the released limes to have passed in the dispatching run.
-      # Then every tag an earlier run pushed and left unpublished is
-      # published. semantic-
-      # release logs every commit message it reads, and this step holds a
-      # write token: no line of that log may act as a workflow command. See
-      # .github/ci/release.ts.
-      - name: Release every module
-        id: modules
-        if: steps.catchup.outputs.release == 'true'
+      # The releases a merged release pull request planned, each tagged on
+      # the commit that merged it with the deploy key, published with its
+      # changelog entry as its notes, and the Go proxy told of it; a nested
+      # module no tag names yet has its release line started first. See
+      # .github/ci/release-tag.ts.
+      - name: Tag the planned releases
+        id: tag
+        if: steps.catchup.outputs.release == 'true' && (inputs.channel || 'release') == 'release'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # The deploy key every tag is pushed with: the one actor the
           # release-tag-creation ruleset lets create a release tag
           # (.github/ci/lib/deploy-key.ts, repo-settings.ts).
           RELEASE_DEPLOY_KEY: ${{ secrets.RELEASE_DEPLOY_KEY }}
-          CI_RUN: ${{ github.event.client_payload.ci_run_id || steps.find.outputs.run-id }}
-          # Set by hand; a dispatched run releases by the policy.
-          CHANNEL: ${{ inputs.channel || 'release' }}
+        run: node .github/ci/release-tag.ts
+
+      # A release candidate of each module asked for, from main's head: the
+      # notes of a semantic-release dry run, which logs every commit message
+      # it reads while this step holds a write token, so no line of that log
+      # may act as a workflow command. See .github/ci/release.ts.
+      - name: Cut the release candidates
+        id: candidates
+        if: steps.catchup.outputs.release == 'true' && inputs.channel == 'prerelease'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_DEPLOY_KEY: ${{ secrets.RELEASE_DEPLOY_KEY }}
+          CHANNEL: ${{ inputs.channel }}
           MODULE: ${{ inputs.module || 'all' }}
           MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
           NEXT_MAJOR: ${{ inputs.next_major || false }}
         run: node .github/ci/release.ts
 
-  # Each limes release is followed by one pull request that raises every
-  # nested module's requirement to it: pgstore is released only once its
-  # tests pass against the limes it requires, so its release waits for that
-  # merge. It acts through AUTOMERGE_TOKEN, never GITHUB_TOKEN: a branch
-  # pushed with GITHUB_TOKEN would get no CI, and its pull request would wait
-  # forever on its required check (auto-merge.yaml, which then merges it).
-  # Without the secret it warns and does nothing. See
-  # .github/ci/require-limes.ts.
-  require-released-limes:
-    name: Propose the nested modules' requirement of the released limes
+  # After the tags, the next release pull request: one commit raising each
+  # nested module's requirement of limes and adding each changelog entry,
+  # from the semantic-release dry runs of main's head. A pull request that
+  # cuts a major is a draft, which auto-merge.yaml leaves for a person. It
+  # acts through AUTOMERGE_TOKEN, never GITHUB_TOKEN: a branch pushed with
+  # GITHUB_TOKEN would get no CI, and its pull request would wait forever on
+  # its required check (auto-merge.yaml, which then merges it). Without the
+  # secret it warns and does nothing. See .github/ci/release-plan.ts.
+  propose-release:
+    name: Propose the next release
     needs: release
-    if: needs.release.outputs.limes-tag != ''
+    if: needs.release.outputs.releasable == 'true' && (inputs.channel || 'release') == 'release'
     runs-on: ubuntu-26.04
-    timeout-minutes: 10
-    # AUTOMERGE_TOKEN lives in this environment, which only main may deploy to
-    # (auto-merge.yaml).
+    timeout-minutes: 15
+    # AUTOMERGE_TOKEN lives in this environment, which only main may deploy
+    # to (auto-merge.yaml).
     environment: automerge
     permissions:
       contents: read # the checkout; the push and the pull request act through AUTOMERGE_TOKEN
@@ -218,6 +224,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # Every commit and tag: the dry runs count from each module's last
+          # release, which the job before may have just tagged.
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -229,24 +238,25 @@ jobs:
 
       - name: Set up the CI scripts
         uses: ./.github/actions/setup-ci
+        with:
+          release-tooling: true
 
-      # One pull request for every nested module; one module's failure leaves
-      # it out, the others proposed, and fails the step.
-      - name: Propose the nested modules' requirement
+      - name: Propose the next release
         env:
           GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
-          LIMES_TAG: ${{ needs.release.outputs.limes-tag }}
+          MODULE: ${{ inputs.module || 'all' }}
+          MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
           GIT_AUTHOR_NAME: github-actions[bot]
           GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
           GIT_COMMITTER_NAME: github-actions[bot]
           GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
-        run: node .github/ci/require-limes.ts "$LIMES_TAG"
+        run: node .github/ci/release-plan.ts
 
   # A candidate of limes's next major is followed by one pull request that
   # adds its row to the table of candidates in docs/migration.md, which CI
   # holds to the tags: until it merges, a pull request cut after the
   # candidate fails that check. It acts through AUTOMERGE_TOKEN, as
-  # require-released-limes does and for the same reason. See
+  # propose-release does and for the same reason. See
   # .github/ci/candidates.ts.
   propose-candidate-row:
     name: Propose the candidate's row in the migration guide
@@ -279,39 +289,3 @@ jobs:
           GIT_COMMITTER_NAME: github-actions[bot]
           GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
         run: node .github/ci/candidates.ts propose "$LIMES_CANDIDATE"
-
-  # Each run that published a release is followed by one pull request that
-  # adds the new entries to the modules' CHANGELOG.md, read from the
-  # releases' notes; CI holds each changelog to the tags. It acts through
-  # AUTOMERGE_TOKEN, as require-released-limes does and for the same reason.
-  # See .github/ci/changelog.ts.
-  propose-changelog-entries:
-    name: Propose the changelogs' new entries
-    needs: release
-    if: needs.release.outputs.released == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 10
-    # AUTOMERGE_TOKEN lives in this environment, which only main may deploy to
-    # (auto-merge.yaml).
-    environment: automerge
-    permissions:
-      contents: read # the checkout; the push and the pull request act through AUTOMERGE_TOKEN
-    steps:
-      - name: Check out
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          # Every release tag, which the entries are read for.
-          fetch-depth: 0
-
-      - name: Set up the CI scripts
-        uses: ./.github/actions/setup-ci
-
-      - name: Propose the changelogs' new entries
-        env:
-          GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
-          GIT_AUTHOR_NAME: github-actions[bot]
-          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
-          GIT_COMMITTER_NAME: github-actions[bot]
-          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
-        run: node .github/ci/changelog.ts propose

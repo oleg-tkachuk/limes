@@ -14,7 +14,6 @@ import { parse } from "yaml";
 import { GROUP_DIRS, Group } from "./changes.ts";
 import { ROOT_MODULE, releasedModules, selectModule } from "./lib/modules.ts";
 import { CI_WORKFLOW } from "./lib/runs.ts";
-import { GATED } from "./release.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..");
 const TASKFILE = "Taskfile.yaml";
@@ -55,10 +54,6 @@ test("ci.yaml's changes job sets an output for every group", () => {
   for (const group of Object.values(Group)) {
     assert.ok(outputs.includes(group), `no output ${group}`);
   }
-});
-
-test("every nested module's release is gated", () => {
-  assert.deepEqual([...GATED].sort(), nested.map((m) => m.name).sort());
 });
 
 test(`${LINT_ALL} lints every nested module`, () => {

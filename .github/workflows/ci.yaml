@@ -63,6 +63,7 @@ jobs:
     outputs:
       relevant: ${{ steps.filter.outputs.relevant }}
       code: ${{ steps.filter.outputs.code }}
+      changelogs: ${{ steps.filter.outputs.changelogs }}
       root: ${{ steps.filter.outputs.root }}
       pgstore: ${{ steps.filter.outputs.pgstore }}
       redisreplay: ${{ steps.filter.outputs.redisreplay }}
@@ -324,84 +325,6 @@ jobs:
         with:
           mode: save
           job: examples-pgstore
-          go-version: ${{ steps.go.outputs.go-version }}
-          cache-hit: ${{ steps.go-cache.outputs.cache-hit }}
-          primary-key: ${{ steps.go-cache.outputs.cache-primary-key }}
-
-  # Each nested module's tests against the limes its go.mod requires, which
-  # is what a consumer's build resolves; every other job builds it against the
-  # limes of the same commit, through the replace in its go.mod. This gates
-  # the module's release, not a merge: a change to limes that a module must
-  # follow lands with the module in one pull request, which fails here until
-  # limes is released and require-limes.ts raises the module's requirement.
-  # Until then release.yaml releases limes and holds the module back, so no
-  # module is published that a consumer cannot build. The modules are
-  # release.ts's GATED; ci-run.test.ts pins the two lists together.
-  #
-  # It runs on every push to main, whatever the push changed: release.yaml
-  # reads its result to decide whether a module's pending commits may go out,
-  # and a run that skipped it would let through a module an earlier run held
-  # back. It runs on no pull request: no merge and no release reads a pull
-  # request's result, and there it fails whenever main, or the pull request,
-  # holds a limes change a module follows that is not released yet — as a
-  # change that lands with its module does until the next release. A pull
-  # request's author runs it by hand: task test:pinned MODULE=<module>.
-  #
-  # Its name holds no matrix value: GitHub adds the module to it, as
-  # "Released limes (pgstore)", and a job skipped before its matrix expands,
-  # as on a pull request, would show an expression in its name unexpanded.
-  released-limes:
-    name: Released limes
-    needs: [changes]
-    if: github.event_name == 'push' && needs.changes.outputs.relevant == 'true'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 20
-    permissions:
-      contents: read
-    strategy:
-      # Each module's result gates its own release alone.
-      fail-fast: false
-      matrix:
-        module: [pgstore, redisreplay, otelmetric, exchange, biscuit]
-    steps:
-      - name: Check out
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Set up Go
-        id: go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: ${{ matrix.module }}/go.mod
-          cache: false
-
-      - name: Restore the Go caches
-        id: go-cache
-        uses: ./.github/actions/go-cache
-        with:
-          mode: restore
-          job: pinned-${{ matrix.module }}
-          go-version: ${{ steps.go.outputs.go-version }}
-
-      - name: Set up Task
-        uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
-        with:
-          version: ${{ env.TASK_VERSION }}
-          checksum: ${{ env.TASK_SHA256 }}
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: task test:pinned
-        env:
-          MODULE: ${{ matrix.module }}
-        run: task --yes test:pinned MODULE="$MODULE"
-
-      - name: Save the Go caches
-        if: success()
-        uses: ./.github/actions/go-cache
-        with:
-          mode: save
-          job: pinned-${{ matrix.module }}
           go-version: ${{ steps.go.outputs.go-version }}
           cache-hit: ${{ steps.go-cache.outputs.cache-hit }}
           primary-key: ${{ steps.go-cache.outputs.cache-primary-key }}
@@ -772,22 +695,22 @@ jobs:
         run: node .github/ci/checks.ts
 
   # It waits for the one required check, which stands for every job a merge
-  # needs, and for released-limes, whose results release.yaml reads to decide
-  # each nested module alone (.github/ci/release.ts), so a release never
-  # starts before they are known.
+  # needs.
   dispatch-release:
     name: Dispatch release
-    needs: [changes, checks, released-limes]
+    needs: [changes, checks]
     # Not for a documentation-only push (`code`, its diff, not what the run
-    # checked): its code is byte-identical to the commit before it. Its commits are not lost — semantic-release counts them
-    # in the next release, and a release dispatched by the code commit before
-    # it releases past it (.github/ci/release-head.ts).
+    # checked): its code is byte-identical to the commit before it. Its
+    # commits are not lost — the next release counts them, and a release
+    # dispatched by the code commit before it releases past it
+    # (.github/ci/release-head.ts). A changed changelog is the exception: it
+    # is a release pull request's merge, whose releases are then tagged
+    # (`changelogs`, docs/adr/0016-one-release-commit.md).
     if: >-
       always() &&
-      needs.changes.outputs.code == 'true' &&
+      (needs.changes.outputs.code == 'true' || needs.changes.outputs.changelogs == 'true') &&
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
-      needs.checks.result == 'success' &&
-      needs.released-limes.result != 'cancelled'
+      needs.checks.result == 'success'
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:

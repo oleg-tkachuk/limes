@@ -9,6 +9,7 @@ import { fakeData, fakeGitHub, type FakeData } from "./lib/fake-github.ts";
 import { git } from "./lib/git.ts";
 import { LIMES_MODULE } from "./lib/go-modules.ts";
 import { releaseCommits, type Module } from "./lib/modules.ts";
+import type { Policy } from "./lib/release-policy.ts";
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
 import { BRANCH, DEPENDENCIES_HEADING, planReleases, proposeRelease, releaseTitle, withDependency, type Planner } from "./release-plan.ts";
 
@@ -95,7 +96,7 @@ describe("the release plan", () => {
     rmSync(work, { recursive: true, force: true });
   });
 
-  function planner(policy = EVERY_COMMIT_DUE, manual = false, only?: string): Planner {
+  function planner(policy: Policy = EVERY_COMMIT_DUE, manual = false, only?: string): Planner {
     return {
       root: repo.dir,
       repository: REPOSITORY,
@@ -151,6 +152,60 @@ describe("the release plan", () => {
     assert.equal(plan[0]?.tag, "v1.0.0");
     assert.equal(plan[0]?.major, true);
     assert.equal(plan[1]?.major, false);
+  });
+
+  // A release nobody asked for waits for the policy's thresholds; the
+  // checkout holds one feature since v0.1.0 already.
+  describe("by the policy", () => {
+    const POLICY = { minorCommits: 3, patchCommits: 5, immediateTypes: ["security"] };
+    async function commits(...subjects: string[]): Promise<void> {
+      for (const subject of subjects) {
+        repo.write("x.go", `// ${subject}\n`);
+        await repo.commit(subject);
+      }
+    }
+    const due = async () => (await planReleases(planner(POLICY))).some((p) => p.module.name === "limes");
+
+    test("two features are not due", async () => {
+      await commits("feat: b", "docs: c");
+      assert.equal(await due(), false);
+    });
+    test("three features are", async () => {
+      await commits("feat: b", "feat: c");
+      assert.equal(await due(), true);
+    });
+    test("four fixes are not due", async () => {
+      await commits("fix: a", "fix: b", "perf: c", "fix: d");
+      assert.equal(await due(), false);
+    });
+    test("five fixes are", async () => {
+      await commits("fix: a", "fix: b", "perf: c", "fix: d", "fix: e");
+      assert.equal(await due(), true);
+    });
+    test("a security fix is released at once", async () => {
+      await commits("security: seal");
+      assert.equal(await due(), true);
+    });
+    test("a breaking change is released at once", async () => {
+      await commits("feat!: change");
+      assert.equal(await due(), true);
+    });
+    test("commits before the last release are not counted", async () => {
+      await commits("feat: b");
+      await repo.run("tag", "v0.1.1");
+      await commits("feat: c");
+      assert.equal(await due(), false);
+    });
+    test("a merge commit does not count its pull request twice", async () => {
+      await repo.run("checkout", "--quiet", "-b", "topic");
+      await commits("feat: b");
+      await repo.run("checkout", "--quiet", "main");
+      await repo.run("-c", "user.name=t", "-c", "user.email=t@example.invalid", "merge", "--quiet", "--no-ff", "-m", "feat: b again", "topic");
+      assert.equal(await due(), false);
+    });
+    test("a run by hand ignores the thresholds", async () => {
+      assert.equal((await planReleases(planner(NEVER_DUE, true))).some((p) => p.module.name === "limes"), true);
+    });
   });
 
   test("withDependency adds to a Dependencies section there is, or adds one last", () => {

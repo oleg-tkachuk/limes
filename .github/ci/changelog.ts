@@ -1,7 +1,7 @@
 // Each module's CHANGELOG.md, written from its releases.
 //
 // Usage: node changelog.ts check
-//        GH_TOKEN=… GITHUB_REPOSITORY=… node changelog.ts write | propose
+//        GH_TOKEN=… GITHUB_REPOSITORY=… node changelog.ts write
 //
 // A module's changelog is in its directory, beside its go.mod, so the Go
 // proxy's copy of a release carries it. It holds one entry per release
@@ -11,29 +11,25 @@
 // that list spans the whole repository, not the module. A release published
 // with no such notes gets its heading and a link to the release.
 //
-// No entry is written by hand. check, run by CI, holds every file to the
-// tags with no network: each entry names a release tag reachable from HEAD,
-// newest first, once. An entry missing is not refused — a pull request cut
-// after a release does not have it until the proposal below merges. write
-// adds every missing entry, reading the release's notes from GitHub, and
-// leaves the entries already written as they are. propose, run after a
-// release, commits what write adds on BRANCH cut from main and opens or
-// updates its pull request, which auto-merge.yaml merges once green; a docs
-// commit releases nothing, so the merge cuts no release of its own. Without
-// GH_TOKEN it warns and does nothing, as require-limes.ts does.
+// Each entry is written by release-plan.ts in the release pull request,
+// before its tag, from the notes of semantic-release's dry run; the tag step
+// reads the newest entry as the release to tag (release-tag.ts). check, run
+// by CI, holds every file to the tags with no network: each entry names a
+// release tag reachable from HEAD, newest first, once. An entry missing is
+// not refused. write adds every missing entry, reading the release's notes
+// from GitHub, and leaves the entries already written as they are: it
+// repairs a changelog by hand.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { info, warning } from "./lib/actions.ts";
-import { optionalEnv, requireEnv } from "./lib/env.ts";
+import { info } from "./lib/actions.ts";
+import { requireEnv } from "./lib/env.ts";
 import { git } from "./lib/git.ts";
 import { type GitHub, gitHubFor } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
 import { type Module, releasedModules, selectModule } from "./lib/modules.ts";
 import { releaseTagsBelow } from "./lib/releases.ts";
-import { pushAs } from "./lib/push.ts";
-import { BASE_BRANCH } from "./merge-policy.ts";
 
 // CHANGELOG is the file's name in every module's directory.
 export const CHANGELOG = "CHANGELOG.md";
@@ -48,13 +44,10 @@ const ENTRY_HEADING = /^## \[([0-9]+\.[0-9]+\.[0-9]+)\]/;
 // TOP_HEADING is a heading semantic-release may open the notes with at the
 // top level, which the changelog's TITLE holds: it becomes an entry's.
 const TOP_HEADING = /^# \[/;
-// BRANCH is the branch propose commits on.
-export const BRANCH = "docs/changelog";
 // TITLE_TAGS is how many tags a title names; more are counted.
 const TITLE_TAGS = 3;
 // CHANGELOGS are every module's changelog, as git add takes them.
 export const CHANGELOGS = `:(glob)**/${CHANGELOG}`;
-const REMOTE = "origin";
 
 // changelogPath is module's changelog, from the checkout's root.
 export function changelogPath(module: Module): string {
@@ -226,48 +219,13 @@ export async function writeAll(w: Writer, rev: string): Promise<string[]> {
   return added;
 }
 
-// proposalTitle is the subject of the commit, and the title of the pull
-// request, adding tags' entries.
-export function proposalTitle(tags: readonly string[]): string {
-  return `docs(changelog): add ${namingTags(tags)}`;
-}
-
 // namingTags names tags in a title: a few by name, more by their count.
 export function namingTags(tags: readonly string[]): string {
   return tags.length <= TITLE_TAGS ? tags.join(", ") : `${tags.length} releases`;
 }
 
-// Context is where a proposal runs and how it pushes.
-export interface Context extends Writer {
-  push(branch: string): Promise<void>;
-}
-
-// proposeEntries commits every changelog with the entries it lacks on
-// BRANCH, cut from main as the remote has it now with every tag, and opens
-// or updates its pull request: undefined when main's changelogs lack none.
-export async function proposeEntries(ctx: Context): Promise<number | undefined> {
-  await git(["fetch", "--quiet", "--tags", REMOTE, BASE_BRANCH], ctx.root);
-  await git(["switch", "--quiet", "--discard-changes", "-C", BRANCH, `${REMOTE}/${BASE_BRANCH}`], ctx.root);
-  const added = await writeAll(ctx, "HEAD");
-  if (added.length === 0) {
-    info("every changelog lists every published release already");
-    return undefined;
-  }
-  const title = proposalTitle(added);
-  await git(["add", "--all", "--", CHANGELOGS], ctx.root);
-  await git(["commit", "--quiet", "-m", title], ctx.root);
-  await ctx.push(BRANCH);
-  const text = { title, body: `Adds the release notes of ${added.join(", ")} to the modules' changelogs, as their GitHub releases publish them.` };
-  const open = await ctx.github.sameRepoPullRequest(BRANCH, BASE_BRANCH);
-  if (open !== undefined) {
-    await ctx.github.editPullRequest(open, text);
-    return open;
-  }
-  return ctx.github.createPullRequest(BRANCH, BASE_BRANCH, text);
-}
-
 // Command names what a run does.
-export const Command = { Check: "check", Write: "write", Propose: "propose" } as const;
+export const Command = { Check: "check", Write: "write" } as const;
 
 async function main(): Promise<void> {
   const [command] = process.argv.slice(2);
@@ -282,19 +240,6 @@ async function main(): Promise<void> {
       const repository = requireEnv("GITHUB_REPOSITORY");
       const added = await writeAll({ github: gitHubFor(requireEnv("GH_TOKEN"), repository), repository, root }, "HEAD");
       info(added.length === 0 ? "every changelog lists every published release already" : `added ${added.join(", ")}`);
-      return;
-    }
-    case Command.Propose: {
-      const token = optionalEnv("GH_TOKEN");
-      if (token === undefined) {
-        warning("AUTOMERGE_TOKEN is not set; the changelogs' new entries are not proposed (see release.yaml)");
-        return;
-      }
-      const repository = requireEnv("GITHUB_REPOSITORY");
-      const number = await proposeEntries({ github: gitHubFor(token, repository), repository, root, push: pushAs(token, repository, root) });
-      if (number !== undefined) {
-        info(`proposed the changelogs' new entries in #${number}`);
-      }
       return;
     }
     default:

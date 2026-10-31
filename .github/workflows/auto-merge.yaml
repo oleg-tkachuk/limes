@@ -7,8 +7,8 @@ name: Auto-merge
 # and a second run; a change that only breaks beside another is caught by the
 # CI run of main itself after the merge. While that run's required check is
 # red, an issue says so and nothing is merged; once main is green again, what
-# waited is merged (the main job below). A job outside the check — a
-# released-limes gate — fails the run without holding a merge.
+# waited is merged (the main job below). A job outside the check fails the
+# run without holding a merge.
 #
 # The merge acts through AUTOMERGE_TOKEN — a fine-grained token or GitHub App
 # token with Contents and Pull requests write on this repository, and

@@ -36,7 +36,7 @@ test("the required check is ci.yaml's checks job", () => {
 
 test("requiredConclusion reads a run by its required check", async () => {
   const jobsOf = (jobs: Job[]) => ({ runJobs: async () => jobs });
-  const gate = { name: "Released limes (pgstore)", status: "completed", conclusion: "failure" };
+  const gate = { name: "Benchmarks", status: "completed", conclusion: "failure" };
   const check = (conclusion: string, status = "completed"): Job => ({ name: REQUIRED_CHECK, status, conclusion });
   const run = { id: 1, conclusion: "failure" };
   assert.equal(await requiredConclusion(jobsOf([gate, check("success")]), run), "success");

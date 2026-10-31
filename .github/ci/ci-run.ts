@@ -1,8 +1,7 @@
 // What the CI run that dispatched a release says: whether it vouches for the
-// commit, and whether one of its jobs passed.
+// commit.
 //
 // Usage: GH_TOKEN=… GITHUB_REPOSITORY=… node ci-run.ts vouches <run-id> <sha>
-//        GH_TOKEN=… GITHUB_REPOSITORY=… node ci-run.ts job-passed <run-id> <job-name>
 //        GH_TOKEN=… GITHUB_REPOSITORY=… node ci-run.ts find <sha>
 //
 // vouches fails unless the run is ci.yaml's, on a push to main, in this
@@ -10,15 +9,11 @@
 // was skipped: the payload of a repository_dispatch is its sender's to
 // write, so only the API's answer about the run it names is trusted. A job
 // that reads as unfinished is asked about again before that fails.
-// job-passed sets the step output `passed`: true for a job that passed or was
-// skipped, false for one that failed; one missing or unfinished is an error.
 // find sets the step output `run-id` to the newest finished push run of
 // ci.yaml on main for sha that vouches for it, as vouches asks, for a release
 // asked for by hand, which no CI run dispatched; none is an error. A run is
-// not asked to have passed whole: a job outside the required check — a
-// released-limes gate, red while a nested module follows a limes not yet
-// released — fails the run without stopping a release, which reads that job
-// on its own.
+// not asked to have passed whole: a job outside the required check fails the
+// run without stopping a release.
 
 import { readFileSync } from "node:fs";
 
@@ -29,20 +24,18 @@ import { requireEnv } from "./lib/env.ts";
 import { gitHubFor, type GitHub, type Job, type WorkflowRun } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
 import { retry, type RetryOptions } from "./lib/retry.ts";
-import { CI_WORKFLOW, COMPLETED, PASSING, SUCCESS } from "./lib/runs.ts";
+import { CI_WORKFLOW, COMPLETED, PASSING } from "./lib/runs.ts";
 
 // REQUIRED_CHECK_JOB is the id of the job main requires, whose needs are the
 // jobs a merge stands on.
 export const REQUIRED_CHECK_JOB = "checks";
 const RELEASE_BRANCH = "main";
 const PUSH_EVENT = "push";
-// OUTPUT_PASSED is the step output job-passed sets, OUTPUT_RUN_ID the one
-// find sets.
-export const OUTPUT_PASSED = "passed";
+// OUTPUT_RUN_ID is the step output find sets.
 export const OUTPUT_RUN_ID = "run-id";
 
 // Command names what a step asks.
-export const Command = { Vouches: "vouches", JobPassed: "job-passed", Find: "find" } as const;
+export const Command = { Vouches: "vouches", Find: "find" } as const;
 
 // requiredJobs is the name of every job the required check needs, as the
 // workflow text ci.yaml declares them: a job's name, or its id without one.
@@ -151,25 +144,6 @@ export async function vouch(github: GitHub, repository: string, runId: number, s
   );
 }
 
-// jobPassed reports whether the job named name ran and passed; one missing
-// or unfinished is an error.
-export async function jobPassed(github: GitHub, runId: number, name: string): Promise<boolean> {
-  if (name === "") {
-    throw new Error("no job name");
-  }
-  const job = latestJob(await github.runJobs(runId), name);
-  if (job === undefined || job.status !== COMPLETED) {
-    throw new Error(`job '${name}' of CI run ${runId} is ${job?.status ?? "missing"}`);
-  }
-  // A gate passes only by running: a push run checks everything
-  // (changes.ts), so a skipped gate means the run tested nothing it needs.
-  if (job.conclusion !== SUCCESS) {
-    info(`job '${name}' of CI run ${runId} ended as ${job.conclusion ?? "nothing"}`);
-    return false;
-  }
-  return true;
-}
-
 // passedRunFor is the newest finished push run of ci.yaml on main for sha
 // that vouches for it: every job of required passed or was skipped.
 export async function passedRunFor(github: GitHub, repository: string, sha: string, required: readonly string[]): Promise<number> {
@@ -198,7 +172,6 @@ async function main(): Promise<void> {
       await vouch(github, repository, runId, arg, required());
       info(`CI run ${runId} passed for ${arg}`);
     },
-    [Command.JobPassed]: async () => setOutput(OUTPUT_PASSED, String(await jobPassed(github, runIdOf(runText), arg))),
   };
   await commands[command]();
 }
@@ -211,7 +184,7 @@ export type CiRunCommand = (typeof Command)[keyof typeof Command];
 export function ciRunArgs(args: readonly string[]): { command: CiRunCommand; runText: string; arg: string } {
   const [command, runText = "", arg = ""] = args;
   if (!Object.values(Command).includes(command as CiRunCommand)) {
-    throw new Error(`usage: ci-run.ts ${Command.Vouches}|${Command.JobPassed} <run-id> <sha|job> | ${Command.Find} <sha>`);
+    throw new Error(`usage: ci-run.ts ${Command.Vouches} <run-id> <sha> | ${Command.Find} <sha>`);
   }
   return { command: command as CiRunCommand, runText, arg };
 }
