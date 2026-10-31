@@ -92,6 +92,58 @@ func TestListRecordsReadsByIndex(t *testing.T) {
 	}
 }
 
+// A listing across every tenant reads the records in id order by an index
+// too, whatever its filters: a page is no sequential scan of every
+// tenant's records, under the runtime role's row-level security.
+func TestListRecordsAcrossTenantsReadsByIndex(t *testing.T) {
+	fresh(t)
+	mine, theirs := newTenant(t), newTenant(t)
+	now := time.Now().UTC()
+	if _, err := owner.Exec(t.Context(), seedListing, pgx.QueryExecModeSimpleProtocol, mine, theirs, now, planListed); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	census, err := NewCensus(Config{DB: app, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := uuid.NewV7()
+	active := []limes.RecordDisposition{limes.RecordDispositionActive}
+	for name, req := range map[string]limes.ListRecordsRequest{
+		"every tenant":                {},
+		"every tenant, newest first":  {Order: limes.ListOrderDescending},
+		"active, newest first":        {Dispositions: active, Order: limes.ListOrderDescending},
+		"a principal type":            {PrincipalType: limes.PrincipalTypeAgent, Order: limes.ListOrderDescending},
+		"a subject":                   {Subject: "subject:7"},
+		"a subject prefix":            {SubjectPrefix: "subject:19", Dispositions: active, Order: limes.ListOrderDescending},
+		"revoked":                     {Dispositions: []limes.RecordDisposition{limes.RecordDispositionRevoked}},
+		"a type and a subject, paged": {PrincipalType: limes.PrincipalTypeService, Subject: "subject:5", Order: limes.ListOrderDescending, Cursor: "after"},
+		"every tenant, paged":         {Cursor: "after"},
+	} {
+		req.AllTenants = true
+		var cursor *uuid.UUID
+		if req.Cursor != "" {
+			cursor = &after
+		}
+		query, args := listRecordsSQL(req, now, cursor, limes.DefaultListLimit+1)
+		var plan []byte
+		err := census.inEveryTenantReadTx(WithAllTenantsReadOnly(t.Context()), func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), "EXPLAIN (FORMAT JSON) "+query, args...).Scan(&plan)
+		})
+		if err != nil {
+			t.Fatalf("%s: EXPLAIN: %v", name, err)
+		}
+		var nodes []map[string]any
+		if err := json.Unmarshal(plan, &nodes); err != nil {
+			t.Fatalf("%s: plan: %v", name, err)
+		}
+		for _, scan := range seqScans(nodes[0]["Plan"].(map[string]any)) {
+			if strings.HasPrefix(scan, "capabilities") || strings.HasPrefix(scan, "revocations") {
+				t.Errorf("%s: a sequential scan of %s:\n%s", name, scan, plan)
+			}
+		}
+	}
+}
+
 // seqScans is the relations a plan node, or a node under it, scans
 // sequentially.
 func seqScans(node map[string]any) []string {

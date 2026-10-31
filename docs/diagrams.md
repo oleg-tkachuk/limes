@@ -75,7 +75,7 @@ flowchart LR
         nonces["<b>dpop.Nonces</b><br/>Nonce · Valid"]
         ledger["<b>meter.LedgerReader · meter.LedgerHousekeeping</b><br/>SumCharges(SumChargesRequest) → Page[ChargeSum]<br/>one tenant or every tenant · by unit · bucket none/hour/day/week/month<br/>GroupBy tenant · op · actor · capability · Filter<br/>PurgeCharges(PurgeChargesRequest) → PurgeChargesResult"]
         census["<b>RecordCensus</b><br/>CountRecords(CountRecordsRequest) → Page[RecordCount]<br/>one tenant or all · by tenant · principal type<br/>active · expired · revoked · delegated · expiring soon"]
-        lister["<b>RecordLister · RecordListingReader</b><br/>ListRecords(ListRecordsRequest) → Page[RecordListing]<br/>one tenant · by principal type · subject · prefix · disposition<br/>oldest or newest first<br/>a cursor holds its tenant, order and filters (ErrCursorMismatch)<br/>GetRecordListing(id) → RecordListing"]
+        lister["<b>RecordLister · RecordListingReader</b><br/>ListRecords(ListRecordsRequest) → Page[RecordListing]<br/>one tenant or AllTenants · by principal type · subject · prefix · disposition<br/>oldest or newest first<br/>a cursor holds its tenant, order and filters (ErrCursorMismatch)<br/>GetRecordListing(id) → RecordListing"]
         erasers["<b>TenantRecordEraser · meter.TenantUsageEraser</b><br/>EraseTenantRecords · EraseTenantUsage"]
         bulk["<b>BulkRevoker · ExchangeStore</b><br/>RevokeMatching · ExchangedFor · ClaimExchange"]
     end

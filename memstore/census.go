@@ -197,14 +197,20 @@ type listCursor struct {
 
 // filtersKey names the filters of req: its tenant, principal type,
 // subject, subject prefix, on-behalf-of, client, session, agent run and
-// dispositions, these in any order and repeated or not. A cursor holds it,
-// so one handed back with other filters — or for another tenant — is
-// refused rather than paged on from its id under them, which would be
-// neither listing.
+// dispositions, these in any order and repeated or not, and AllTenants. A
+// cursor holds it, so one handed back with other filters — or for another
+// tenant, or for every tenant where one is asked for — is refused rather
+// than paged on from its id under them, which would be neither listing.
+// AllTenants is named only when set, so a tenant's cursor handed out
+// before it existed still pages.
 func filtersKey(req limes.ListRecordsRequest) string {
 	dispositions := slices.Clone(req.Dispositions)
 	slices.Sort(dispositions)
-	raw, err := json.Marshal([]any{req.TenantID, req.PrincipalType, req.Subject, req.SubjectPrefix, slices.Compact(dispositions), req.OnBehalfOf, req.ClientID, req.Session, req.RunID})
+	key := []any{req.TenantID, req.PrincipalType, req.Subject, req.SubjectPrefix, slices.Compact(dispositions), req.OnBehalfOf, req.ClientID, req.Session, req.RunID}
+	if req.AllTenants {
+		key = append(key, req.AllTenants)
+	}
+	raw, err := json.Marshal(key)
 	if err != nil {
 		panic(err) // strings and a list of strings always encode
 	}
@@ -212,7 +218,8 @@ func filtersKey(req limes.ListRecordsRequest) string {
 	return base64.RawURLEncoding.EncodeToString(sum[:16])
 }
 
-// ListRecords implements limes.RecordLister.
+// ListRecords implements limes.RecordLister; memstore keeps no tenant
+// apart, so a listing of every tenant needs no scope.
 func (c *Census) ListRecords(_ context.Context, req limes.ListRecordsRequest) (limes.Page[limes.RecordListing], error) {
 	if err := req.Validate(); err != nil {
 		return limes.Page[limes.RecordListing]{}, err
@@ -266,7 +273,7 @@ func (c *Census) list(req limes.ListRecordsRequest, past func(uuid.UUID) bool) (
 	out := []limes.RecordListing{}
 	for id, rec := range s.caps {
 		switch {
-		case rec.Subject.TenantID != req.TenantID,
+		case !req.AllTenants && rec.Subject.TenantID != req.TenantID,
 			req.PrincipalType != limes.PrincipalTypeUnspecified && rec.Subject.Type != req.PrincipalType,
 			req.Subject != "" && rec.Subject.Subject != req.Subject,
 			!strings.HasPrefix(rec.Subject.Subject, req.SubjectPrefix),

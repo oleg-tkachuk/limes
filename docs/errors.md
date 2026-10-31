@@ -85,7 +85,8 @@ wraps one. That holds for the root module, `dpop`, `jwks`, `meter`,
   `RevokeMatchingRequest` naming both a tenant and `AllTenants`, or
   neither, or a subject, an on-behalf-of or an agent run beside
   `AllTenants`; a `ReleaseMatchingRequest` the same, or with a capability
-  beside `AllTenants`; and either naming no selector.
+  beside `AllTenants`; and either naming no selector; and a
+  `ListRecordsRequest` naming both a tenant and `AllTenants`, or neither.
 - **A call under a narrower scope than it needs** is `scope_mismatch`:
   another tenant's, a read-only scope for a write, or one tenant's for a
   call across every tenant (`AllTenants`).
