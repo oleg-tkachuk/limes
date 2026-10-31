@@ -1581,9 +1581,24 @@ func (s *UsageStore) ListReservations(_ context.Context, req meter.ListReservati
 	if err := req.Validate(); err != nil {
 		return limes.Page[meter.Reservation]{}, err
 	}
+	return s.listHolds(req.Cursor, req.Limit, func(h hold) bool { return h.capID == req.CapabilityID })
+}
+
+// ListTenantReservations implements meter.TenantReservationLister: the
+// tenant's holds, soonest to expire first.
+func (s *UsageStore) ListTenantReservations(_ context.Context, req meter.ListTenantReservationsRequest) (limes.Page[meter.Reservation], error) {
+	if err := req.Validate(); err != nil {
+		return limes.Page[meter.Reservation]{}, err
+	}
+	return s.listHolds(req.Cursor, req.Limit, func(h hold) bool { return h.tenantID == req.TenantID })
+}
+
+// listHolds is a page, past cursor, of the holds of which admits, soonest
+// to expire first, ties by id.
+func (s *UsageStore) listHolds(cursor string, pageLimit int, admits func(hold) bool) (limes.Page[meter.Reservation], error) {
 	var after *reservationPlace
-	if req.Cursor != "" {
-		p, err := parseReservationPlace(req.Cursor)
+	if cursor != "" {
+		p, err := parseReservationPlace(cursor)
 		if err != nil {
 			return limes.Page[meter.Reservation]{}, err
 		}
@@ -1593,13 +1608,13 @@ func (s *UsageStore) ListReservations(_ context.Context, req meter.ListReservati
 	defer s.mu.Unlock()
 	out := []meter.Reservation{}
 	for _, h := range s.holds {
-		if h.capID == req.CapabilityID && (after == nil || after.before(placeOf(h.reservation()))) {
+		if admits(h) && (after == nil || after.before(placeOf(h.reservation()))) {
 			out = append(out, h.reservation())
 		}
 	}
 	// Soonest to expire first, ties by id.
 	sort.Slice(out, func(i, j int) bool { return placeOf(out[i]).before(placeOf(out[j])) })
-	limit := int(limes.PageLimit(req.Limit))
+	limit := int(limes.PageLimit(pageLimit))
 	if len(out) <= limit {
 		return limes.Page[meter.Reservation]{Items: out}, nil
 	}
@@ -2159,4 +2174,7 @@ var (
 	_ meter.TenantUsageEraser       = (*UsageStore)(nil)
 )
 
-var _ meter.CopyUsageReader = (*UsageStore)(nil)
+var (
+	_ meter.CopyUsageReader         = (*UsageStore)(nil)
+	_ meter.TenantReservationLister = (*UsageStore)(nil)
+)
