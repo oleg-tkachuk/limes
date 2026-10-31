@@ -2,6 +2,12 @@
 
 Every release of the limes module, newest first, from its release notes. Written by .github/ci/changelog.ts after each release; not edited by hand.
 
+## [0.143.0](https://github.com/oleg-tkachuk/limes/compare/v0.142.0...v0.143.0) (2026-10-31)
+
+### Features
+
+* **meter:** release the holds of one revoked capability ([0e07d7e](https://github.com/oleg-tkachuk/limes/commit/0e07d7ea60781657d6511b63ac098a0290e5233f))
+
 ## [0.142.0](https://github.com/oleg-tkachuk/limes/compare/v0.141.1...v0.142.0) (2026-10-31)
 
 ### Features
