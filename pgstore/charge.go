@@ -36,10 +36,7 @@ func (s *UsageStore) Bump(ctx context.Context, req meter.BumpRequest) (meter.Bum
 // bump is Bump in tx: the subject's request count after this request, or,
 // refused once its counters are locked, the count before it.
 func (s *UsageStore) bump(ctx context.Context, tx pgx.Tx, subject limes.MeterSubject) (int64, error) {
-	if err := notErased(ctx, tx, subject.TenantID()); err != nil {
-		return 0, err
-	}
-	ancestors, err := lineage(ctx, tx, subject.CapabilityID())
+	ancestors, err := readLineage(ctx, tx, subject.TenantID(), subject.CapabilityID())
 	if err != nil {
 		return 0, err
 	}
@@ -127,10 +124,15 @@ type ledgerEntry struct {
 
 // readEntry reads the one ledger row query names, if there is one.
 func readEntry(ctx context.Context, tx pgx.Tx, query string, args ...any) (ledgerEntry, bool, error) {
+	return scanEntry(tx.QueryRow(ctx, query, args...))
+}
+
+// scanEntry reads the one ledger row of row, if there is one.
+func scanEntry(row pgx.Row) (ledgerEntry, bool, error) {
 	var e ledgerEntry
 	var amount, refunded int64
 	var op string
-	err := tx.QueryRow(ctx, query, args...).Scan(
+	err := row.Scan(
 		&e.ID, &e.CapabilityID, &e.TenantID, &amount, &refunded, &e.UnitCode, &e.ExternalRef, &e.Overrun,
 		&op, &e.Actor, &e.At, &e.ancestors, &e.copies, &e.reservationID, &e.tenantPeriod)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -168,6 +170,12 @@ func replayByRef(ctx context.Context, tx pgx.Tx, req meter.ChargeRequest, unit s
 	if err != nil || !ok {
 		return meter.ChargeReceipt{}, false, err
 	}
+	return receiptOfRef(ctx, tx, req, unit, e)
+}
+
+// receiptOfRef is the receipt of e, req's reference found on record, or
+// ErrExternalRefConflict when e is another cost.
+func receiptOfRef(ctx context.Context, tx pgx.Tx, req meter.ChargeRequest, unit string, e ledgerEntry) (meter.ChargeReceipt, bool, error) {
 	// Another copy charges its own counters, and the receipt is the first
 	// copy's, so it conflicts as another cost does. The error names the ref,
 	// never the other charge.
@@ -202,13 +210,15 @@ func (s *UsageStore) charge(ctx context.Context, tx pgx.Tx, req meter.ChargeRequ
 	// A replay is answered before the lineage is read: it moves nothing,
 	// so it needs no record, and a capability purged since still gets its
 	// receipt, as a settled hold does.
-	if err := notErased(ctx, tx, req.Subject.TenantID()); err != nil {
+	p, err := readPrelude(ctx, tx, req.Subject.TenantID(), req.Subject.CapabilityID(), req.ExternalRef)
+	if err != nil {
 		return meter.ChargeReceipt{}, err
 	}
-	if r, replayed, err := replayByRef(ctx, tx, req, unit); replayed || err != nil {
+	if p.replayed {
+		r, _, err := receiptOfRef(ctx, tx, req, unit, p.replay)
 		return r, err
 	}
-	ancestors, err := lineage(ctx, tx, req.Subject.CapabilityID())
+	ancestors, err := p.ancestors, p.lineageErr
 	if err != nil {
 		return meter.ChargeReceipt{}, err
 	}
@@ -589,10 +599,7 @@ func (s *UsageStore) Reserve(ctx context.Context, req meter.ReserveRequest) (met
 // reserve is Reserve in tx, copies the encoded copies the hold is under.
 func (s *UsageStore) reserve(ctx context.Context, tx pgx.Tx, req meter.ReserveRequest, copies []byte) (meter.Reservation, error) {
 	subject, unit := req.Subject, req.Subject.UnitCode()
-	if err := notErased(ctx, tx, subject.TenantID()); err != nil {
-		return meter.Reservation{}, err
-	}
-	ancestors, err := lineage(ctx, tx, subject.CapabilityID())
+	ancestors, err := readLineage(ctx, tx, subject.TenantID(), subject.CapabilityID())
 	if err != nil {
 		return meter.Reservation{}, err
 	}

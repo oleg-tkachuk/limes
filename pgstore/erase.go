@@ -2,6 +2,7 @@ package pgstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 	"uuid"
@@ -63,17 +64,24 @@ func markErased(ctx context.Context, tx pgx.Tx, tenant uuid.UUID, now time.Time)
 // notErased shares the tenant's erase lock and refuses a tenant marked
 // erased, first in a meter call's transaction.
 func notErased(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error {
-	if _, err := tx.Exec(ctx, sqlShareTenantLock, eraseLockClass, tenant); err != nil {
-		return err
-	}
-	var erased bool
-	if err := tx.QueryRow(ctx, sqlIsErased, tenant).Scan(&erased); err != nil {
-		return err
-	}
-	if erased {
-		return fmt.Errorf("%w: %s", limes.ErrTenantErased, tenant)
-	}
-	return nil
+	b := &pgx.Batch{}
+	b.Queue(sqlShareTenantLock, eraseLockClass, tenant)
+	b.Queue(sqlIsErased, tenant)
+	br := tx.SendBatch(ctx, b)
+	err := func() error {
+		if _, err := br.Exec(); err != nil {
+			return err
+		}
+		var erased bool
+		if err := br.QueryRow().Scan(&erased); err != nil {
+			return err
+		}
+		if erased {
+			return fmt.Errorf("%w: %s", limes.ErrTenantErased, tenant)
+		}
+		return nil
+	}()
+	return errors.Join(err, br.Close())
 }
 
 // The statements of an erase, in the order the meter locks: a tenant's

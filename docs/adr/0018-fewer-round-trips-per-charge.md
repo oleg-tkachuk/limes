@@ -146,8 +146,13 @@ same ones A removes by grouping.
 ## Rollout
 
 1. This ADR.
-2. The read batch (`BEGIN` to the lineage) for every call, the order
-   unchanged: no contract moves, and the scale benchmarks measure it.
+2. The read batch for every call, the order unchanged: the scope's
+   statements go with each transaction's first, and a meter call sends the
+   erase lock, the erased check, the replay's lookup and the lineage held
+   (now one statement) in one batch. `Charge` went from 16 round trips to
+   11, `Bump` from 10 to 6, `Reserve` to 13, held by `TestMeterRoundTrips`.
+   `BEGIN` stays its own round trip: `Config.DB` offers `BeginTx` alone,
+   so sending it in a batch waits for step 4, with `COMMIT`.
 3. The lock order changed and the tenant's aggregate written last, with
    the deadlock retry, for every call at once.
 4. The write batch with `COMMIT`, and `onCharged` placed before it.
