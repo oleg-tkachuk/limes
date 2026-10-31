@@ -224,6 +224,13 @@ func decodeCountCursor(s string) (countCursor, error) {
 var sqlListRecords = sqlRecordListing + `
 WHERE c.tenant_id = $1`
 
+// sqlListEveryTenantsRecords is sqlListRecords across every tenant: $1, no
+// tenant, keeps the arguments in place. A page reads the primary key in id
+// order, the filters applied on the way, rather than every tenant's rows
+// sorted; no index leads with a filter but the tenant.
+var sqlListEveryTenantsRecords = sqlRecordListing + `
+WHERE $1::uuid IS NULL`
+
 // sqlRecordListing is a record listing's columns, from capabilities c and
 // its own revocation entry, its disposition at $2, and for a record revoked
 // only through an ancestor the entry of the nearest ancestor that has one:
@@ -293,12 +300,24 @@ var dispositionWhere = map[limes.RecordDisposition]string{
 	limes.RecordDispositionRevoked: "c.revoked",
 }
 
-// listRecordsSQL is sqlListRecords with req's filters, past the cursor's id
-// after when it is not nil, ordered and limited, and its arguments: the
-// tenant, now, then each filter's in turn.
+// listRecordsSQL is sqlListRecords — or sqlListEveryTenantsRecords, with
+// AllTenants — with req's filters, past the cursor's id after when it is
+// not nil, ordered and limited, and its arguments: the tenant, none across
+// every tenant, now, then each filter's in turn.
 func listRecordsSQL(req limes.ListRecordsRequest, now time.Time, after *uuid.UUID, limit int) (string, []any) {
+	if req.AllTenants {
+		w := &whereBuilder{args: []any{nil, now}}
+		w.q.WriteString(sqlListEveryTenantsRecords)
+		return w.filtered(req, after, limit)
+	}
 	w := &whereBuilder{args: []any{req.TenantID, now}}
 	w.q.WriteString(sqlListRecords)
+	return w.filtered(req, after, limit)
+}
+
+// filtered is the query w began with req's filters, past after, ordered and
+// limited, and its arguments.
+func (w *whereBuilder) filtered(req limes.ListRecordsRequest, after *uuid.UUID, limit int) (string, []any) {
 	if req.PrincipalType != limes.PrincipalTypeUnspecified {
 		w.and("c.principal_type = $%d", string(req.PrincipalType))
 	}
@@ -374,14 +393,20 @@ type listCursor struct {
 
 // filtersKey names the filters of req: its tenant, principal type,
 // subject, subject prefix, on-behalf-of, client, session, agent run and
-// dispositions, these in any order and repeated or not. A cursor holds it,
-// so one handed back with other filters — or for another tenant — is
-// refused rather than paged on from its id under them, which would be
-// neither listing.
+// dispositions, these in any order and repeated or not, and AllTenants. A
+// cursor holds it, so one handed back with other filters — or for another
+// tenant, or for every tenant where one is asked for — is refused rather
+// than paged on from its id under them, which would be neither listing.
+// AllTenants is named only when set, so a tenant's cursor handed out
+// before it existed still pages.
 func filtersKey(req limes.ListRecordsRequest) string {
 	dispositions := slices.Clone(req.Dispositions)
 	slices.Sort(dispositions)
-	raw, err := json.Marshal([]any{req.TenantID, req.PrincipalType, req.Subject, req.SubjectPrefix, slices.Compact(dispositions), req.OnBehalfOf, req.ClientID, req.Session, req.RunID})
+	key := []any{req.TenantID, req.PrincipalType, req.Subject, req.SubjectPrefix, slices.Compact(dispositions), req.OnBehalfOf, req.ClientID, req.Session, req.RunID}
+	if req.AllTenants {
+		key = append(key, req.AllTenants)
+	}
+	raw, err := json.Marshal(key)
 	if err != nil {
 		panic(err) // strings and a list of strings always encode
 	}
@@ -390,7 +415,10 @@ func filtersKey(req limes.ListRecordsRequest) string {
 }
 
 // ListRecords implements limes.RecordLister in one transaction, scoped to
-// the tenant the request names (Config.CheckScope), as ListByPrincipal is.
+// the tenant the request names (Config.CheckScope), as ListByPrincipal is —
+// or, with AllTenants, to reading every tenant (WithAllTenantsReadOnly or
+// WithAllTenants), as CountRecords across them is: a narrower scope is
+// refused with limes.ErrScopeMismatch, never narrowed to its tenant.
 func (c *Census) ListRecords(ctx context.Context, req limes.ListRecordsRequest) (limes.Page[limes.RecordListing], error) {
 	if err := req.Validate(); err != nil {
 		return limes.Page[limes.RecordListing]{}, err
@@ -406,14 +434,20 @@ func (c *Census) ListRecords(ctx context.Context, req limes.ListRecordsRequest) 
 	limit := limes.PageLimit(req.Limit)
 	query, args := listRecordsSQL(req, c.clock(), after, limit+1)
 	out := []limes.RecordListing{}
-	err := c.inTenantReadTx(ctx, req.TenantID, func(tx pgx.Tx) error {
+	list := func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, query, args...)
 		if err != nil {
 			return err
 		}
 		out, err = pgx.CollectRows(rows, scanListing)
 		return err
-	})
+	}
+	var err error
+	if req.AllTenants {
+		err = c.inEveryTenantReadTx(ctx, list)
+	} else {
+		err = c.inTenantReadTx(ctx, req.TenantID, list)
+	}
 	if err != nil {
 		return limes.Page[limes.RecordListing]{}, err
 	}
