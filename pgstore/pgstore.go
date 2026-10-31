@@ -133,6 +133,7 @@ package pgstore
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"time"
 	"uuid"
@@ -216,6 +217,10 @@ type Config struct {
 	// since the store cannot tell what its policies admit; a Scope that sets
 	// the schema's own settings passes CheckSchemaScope here.
 	CheckScope func(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error
+	// Logger logs what a store does that its caller does not see: a meter
+	// call retried after PostgreSQL aborted it to break a deadlock. Nil:
+	// slog.Default().
+	Logger *slog.Logger
 	// MaxCopiesPerCapability is how many Biscuit copies the usage store
 	// counts for one capability (meter.Meter, "Copies of a Biscuit"). Zero:
 	// meter.DefaultMaxCopiesPerCapability; negative is refused. The record
@@ -259,6 +264,8 @@ type conn struct {
 	checkEvery func(ctx context.Context, tx pgx.Tx) error
 	// maxCopies is Config.MaxCopiesPerCapability, its default applied.
 	maxCopies int64
+	// log is Config.Logger, its default applied.
+	log *slog.Logger
 }
 
 func newConn(cfg Config) (conn, error) {
@@ -267,6 +274,9 @@ func newConn(cfg Config) (conn, error) {
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
+	}
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
 	}
 	switch {
 	case cfg.MaxCopiesPerCapability < 0:
@@ -287,6 +297,7 @@ func newConn(cfg Config) (conn, error) {
 		checkTenant: cfg.CheckTenant, checkScope: cfg.CheckScope,
 		checkReadOnly: checkReadOnly, checkEvery: checkEvery,
 		maxCopies: int64(cfg.MaxCopiesPerCapability),
+		log:       cfg.Logger,
 	}, nil
 }
 

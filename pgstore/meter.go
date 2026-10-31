@@ -383,28 +383,29 @@ func lockTenant(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) (budgetRow, 
 	return readTenant(ctx, tx, sqlLockTenant, tenantID)
 }
 
-// lock reads, for update and in the one order every call takes, the tenant's
-// aggregate — created first, without a ceiling, when create names a unit —
-// then the counters of ids, created first for created, and the counters of
-// copies, created first under capID. Counters of ids not created and not on
-// record stay absent.
+// lock reads, for update and in the one order every call takes, the
+// counters of ids, created first for created, the counters of copies,
+// created first under capID, and last the tenant's aggregate — created
+// first, without a ceiling, when create names a unit — which every call of
+// the tenant waits on, so it is held for as little of the call as it can be
+// (docs/adr/0018-fewer-round-trips-per-charge.md). Counters of ids not
+// created and not on record stay absent.
 func lock(ctx context.Context, tx pgx.Tx, l lockRequest) (*counters, error) {
 	c := &counters{usage: map[uuid.UUID]*usageRow{}, copies: map[string]*copyRow{}}
-	if err := lockTenantOf(ctx, tx, l, c); err != nil {
-		return nil, err
-	}
 	if err := lockUsageOf(ctx, tx, l, c); err != nil {
 		return nil, err
 	}
-	if len(l.copies) == 0 {
-		return c, nil
-	}
-	if l.createCopies {
-		if err := createCopies(ctx, tx, l, c); err != nil {
+	if len(l.copies) > 0 {
+		if l.createCopies {
+			if err := createCopies(ctx, tx, l, c); err != nil {
+				return nil, err
+			}
+		}
+		if err := lockCopiesOf(ctx, tx, l, c); err != nil {
 			return nil, err
 		}
 	}
-	if err := lockCopiesOf(ctx, tx, l, c); err != nil {
+	if err := lockTenantOf(ctx, tx, l, c); err != nil {
 		return nil, err
 	}
 	return c, nil
@@ -433,34 +434,48 @@ func lockTenantOf(ctx context.Context, tx pgx.Tx, l lockRequest, c *counters) er
 // l.created. A row created that the transaction cannot see is another
 // tenant's under the same id, which ON CONFLICT DO NOTHING left in place:
 // refused, never counted as zero or written through nil.
+//
+// A row of l.created that was on record when the call created it is not
+// locked by that insert, and a DeleteUsage or PurgeOrphans that held it can
+// delete it while the call waits for its lock: it is then created again, as
+// the call would have created it had it come after them, at most
+// usageCreateAttempts times. A row the call inserts itself is locked by the
+// insert, so the second attempt holds.
 func lockUsageOf(ctx context.Context, tx pgx.Tx, l lockRequest, c *counters) error {
-	if len(l.created) > 0 {
-		if _, err := tx.Exec(ctx, sqlCreateUsage, l.created, l.usageTenant); err != nil {
+	ids := append(slices.Clone(l.created), l.existing...)
+	for attempt := 1; ; attempt++ {
+		if len(l.created) > 0 {
+			if _, err := tx.Exec(ctx, sqlCreateUsage, l.created, l.usageTenant); err != nil {
+				return err
+			}
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		rows, err := tx.Query(ctx, sqlLockUsage, ids)
+		if err != nil {
 			return err
 		}
-	}
-	ids := append(slices.Clone(l.created), l.existing...)
-	if len(ids) == 0 {
-		return nil
-	}
-	rows, err := tx.Query(ctx, sqlLockUsage, ids)
-	if err != nil {
-		return err
-	}
-	scanned, err := pgx.CollectRows(rows, scanUsage)
-	if err != nil {
-		return err
-	}
-	for _, u := range scanned {
-		c.usage[u.id] = u
-	}
-	for _, id := range l.created {
-		if _, ok := c.usage[id]; !ok {
-			return fmt.Errorf("%w: %s", errCounterHidden, id)
+		scanned, err := pgx.CollectRows(rows, scanUsage)
+		if err != nil {
+			return err
+		}
+		for _, u := range scanned {
+			c.usage[u.id] = u
+		}
+		missing := slices.DeleteFunc(slices.Clone(l.created), func(id uuid.UUID) bool { _, ok := c.usage[id]; return ok })
+		if len(missing) == 0 {
+			return nil
+		}
+		if attempt == usageCreateAttempts {
+			return fmt.Errorf("%w: %s", errCounterHidden, missing[0])
 		}
 	}
-	return nil
 }
+
+// usageCreateAttempts is how many times lockUsageOf creates and locks a
+// call's counters before it reads one still missing as another tenant's.
+const usageCreateAttempts = 2
 
 // scanUsage reads one locked usage counter.
 func scanUsage(row pgx.CollectableRow) (*usageRow, error) {

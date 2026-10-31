@@ -22,10 +22,12 @@ func (s *UsageStore) Bump(ctx context.Context, req meter.BumpRequest) (meter.Bum
 		return meter.BumpReceipt{}, err
 	}
 	var receipt meter.BumpReceipt
-	err := s.inTenantTx(ctx, req.Subject.TenantID(), func(tx pgx.Tx) error {
-		var err error
-		receipt.RequestCount, err = s.bump(ctx, tx, req.Subject)
-		return err
+	err := s.retryDeadlock(ctx, retriedBump, func() error {
+		return s.inTenantTx(ctx, req.Subject.TenantID(), func(tx pgx.Tx) error {
+			var err error
+			receipt.RequestCount, err = s.bump(ctx, tx, req.Subject)
+			return err
+		})
 	})
 	if err != nil {
 		return meter.BumpReceipt{RequestCount: receipt.RequestCount}, err
@@ -193,10 +195,12 @@ func (s *UsageStore) Charge(ctx context.Context, req meter.ChargeRequest, onChar
 		return meter.ChargeReceipt{}, err
 	}
 	var receipt meter.ChargeReceipt
-	err := s.inTenantTx(ctx, req.Subject.TenantID(), func(tx pgx.Tx) error {
-		var err error
-		receipt, err = s.charge(ctx, tx, req, onCharged)
-		return err
+	err := s.retryDeadlock(ctx, retriedCharge, func() error {
+		return s.inTenantTx(ctx, req.Subject.TenantID(), func(tx pgx.Tx) error {
+			var err error
+			receipt, err = s.charge(ctx, tx, req, onCharged)
+			return err
+		})
 	})
 	if errors.Is(err, errReplayedAfterLock) {
 		return receipt, nil
@@ -588,10 +592,12 @@ func (s *UsageStore) Reserve(ctx context.Context, req meter.ReserveRequest) (met
 		return meter.Reservation{}, err
 	}
 	var out meter.Reservation
-	err = s.inTenantTx(ctx, req.Subject.TenantID(), func(tx pgx.Tx) error {
-		var err error
-		out, err = s.reserve(ctx, tx, req, copies)
-		return err
+	err = s.retryDeadlock(ctx, retriedReserve, func() error {
+		return s.inTenantTx(ctx, req.Subject.TenantID(), func(tx pgx.Tx) error {
+			var err error
+			out, err = s.reserve(ctx, tx, req, copies)
+			return err
+		})
 	})
 	return out, err
 }
@@ -691,20 +697,22 @@ func (s *UsageStore) Settle(ctx context.Context, req meter.SettleRequest, onChar
 		return meter.ChargeReceipt{}, meter.ErrReservationNotFound
 	}
 	var receipt meter.ChargeReceipt
-	err := s.inTenantTx(ctx, req.Subject.TenantID(), func(tx pgx.Tx) error {
-		h, err := scanHold(tx.QueryRow(ctx, sqlLockHold, req.ReservationID))
-		if errors.Is(err, pgx.ErrNoRows) {
-			receipt, err = settled(ctx, tx, req)
+	err := s.retryDeadlock(ctx, retriedSettle, func() error {
+		return s.inTenantTx(ctx, req.Subject.TenantID(), func(tx pgx.Tx) error {
+			h, err := scanHold(tx.QueryRow(ctx, sqlLockHold, req.ReservationID))
+			if errors.Is(err, pgx.ErrNoRows) {
+				receipt, err = settled(ctx, tx, req)
+				return err
+			}
+			if err != nil {
+				return err
+			}
+			if !s.holdServes(h, req.Subject) {
+				return meter.ErrReservationNotFound
+			}
+			receipt, err = s.settleHold(ctx, tx, req, h, onCharged)
 			return err
-		}
-		if err != nil {
-			return err
-		}
-		if !s.holdServes(h, req.Subject) {
-			return meter.ErrReservationNotFound
-		}
-		receipt, err = s.settleHold(ctx, tx, req, h, onCharged)
-		return err
+		})
 	})
 	return receipt, err
 }
@@ -767,18 +775,20 @@ func (s *UsageStore) Release(ctx context.Context, req meter.ReleaseRequest) erro
 		return err
 	}
 	subject := req.Subject
-	return s.inTenantTx(ctx, subject.TenantID(), func(tx pgx.Tx) error {
-		h, err := scanHold(tx.QueryRow(ctx, sqlLockHold, req.ReservationID))
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if h.capID != subject.CapabilityID() || h.tenantID != subject.TenantID() || !sameCopyIDs(copyIDs(h.copies), subject.Copies()) {
-			return nil
-		}
-		return s.releaseHold(ctx, tx, h)
+	return s.retryDeadlock(ctx, retriedRelease, func() error {
+		return s.inTenantTx(ctx, subject.TenantID(), func(tx pgx.Tx) error {
+			h, err := scanHold(tx.QueryRow(ctx, sqlLockHold, req.ReservationID))
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if h.capID != subject.CapabilityID() || h.tenantID != subject.TenantID() || !sameCopyIDs(copyIDs(h.copies), subject.Copies()) {
+				return nil
+			}
+			return s.releaseHold(ctx, tx, h)
+		})
 	})
 }
 
