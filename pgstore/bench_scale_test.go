@@ -189,11 +189,13 @@ func latencyPool(b *testing.B, rtt time.Duration) (*pgxpool.Pool, *atomic.Int64)
 // benchmark ends.
 func delayProxy(b *testing.B, target string, oneWay time.Duration, sent *atomic.Int64) string {
 	b.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ctx, cancel := context.WithCancel(context.Background())
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
 	if err != nil {
+		cancel()
 		b.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	var conns sync.Map
 	var nextConn atomic.Int64
