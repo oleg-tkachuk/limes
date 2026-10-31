@@ -1073,7 +1073,9 @@ for {
   capability's ([ADR-0015](adr/0015-release-matching-holds.md)). Run it
   with the revocation's own request: it finds what is revoked, not what
   this call revoked, so a release that failed is retried as it was, though
-  the revocation, repeated, revokes nothing. What the holds keep is read
+  the revocation, repeated, revokes nothing. After a `Revoke` of one
+  capability, `CapabilityID` and its tenant release its holds and those
+  of its descendants. What the holds keep is read
   before and after: `TenantBudget.ReservedAmount` and
   `Usage.ReservedAmount` sum it, and a `meter.TenantReservationLister`
   lists a tenant's holds one by one.

@@ -88,6 +88,27 @@ func checkReleaseMatching(t *testing.T, f fixture) {
 	expect.That(t, err == nil && again.Released == 0 && !again.More && len(again.Tenants) == 0, "a second call = %+v, %v; want nothing left", again, err)
 }
 
+// With CapabilityID the holds of that revoked capability, and of one
+// delegated from it, are released; another revoked capability of the same
+// client keeps its hold, and a live capability named releases nothing.
+func checkReleaseMatchingByCapability(t *testing.T, f fixture) {
+	r := f.releaser(t)
+	client := "client-" + uuid.New().String()
+	revoked, revokedHold := f.heldCapability(t, uuid.Nil(), client)
+	_, childHold := f.heldCapability(t, revoked, "")
+	sibling, siblingHold := f.heldCapability(t, uuid.Nil(), client)
+	live, liveHold := f.heldCapability(t, uuid.Nil(), client)
+	expect.Must(t, f.Revoke(revoked) == nil && f.Revoke(sibling) == nil, "revoke")
+	got, err := r.ReleaseMatching(f.Ctx, meter.ReleaseMatchingRequest{TenantID: f.Tenant, CapabilityID: revoked})
+	expect.Must(t, err == nil, "ReleaseMatching: %v", err)
+	expect.That(t, got.Released == 2 && !got.More, "ReleaseMatching = %+v, want the capability's hold and its child's, and no more", got)
+	expect.That(t, !f.open(t, revokedHold) && !f.open(t, childHold), "a hold of the named capability or of its child still counts")
+	expect.That(t, f.open(t, siblingHold), "the hold of another revoked capability of the client was released")
+	got, err = r.ReleaseMatching(f.Ctx, meter.ReleaseMatchingRequest{TenantID: f.Tenant, CapabilityID: live})
+	expect.That(t, err == nil && got.Released == 0, "ReleaseMatching of a live capability = %+v, %v; want nothing released", got, err)
+	expect.That(t, f.open(t, liveHold), "the hold of a live capability was released")
+}
+
 // allTenantsCtx is the context a release across tenants runs under, and
 // whether the Env gives one: a store that scopes tenants needs its own.
 func (f fixture) allTenantsCtx() (context.Context, bool) {
@@ -169,6 +190,7 @@ func checkReleaseMatchingMalformed(t *testing.T, f fixture) {
 		"a negative limit":             {TenantID: f.Tenant, ClientID: "client", Limit: -1},
 		"a tenant beside every tenant": {TenantID: f.Tenant, AllTenants: true, ClientID: "client"},
 		"every tenant by subject":      {AllTenants: true, Subject: "subject"},
+		"every tenant by capability":   {AllTenants: true, CapabilityID: uuid.New()},
 	} {
 		_, err := r.ReleaseMatching(f.Ctx, req)
 		expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "%s: %v, want ErrInvalidRequest", name, err)

@@ -21,7 +21,8 @@ knows no such cost will come, and wants the tenant's budget back now.
 1. **`meter.MatchingReleaser`**, an optional interface beside
    `UsageStore`, with `ReleaseMatching(ctx, ReleaseMatchingRequest)`. The
    request takes the selectors of `RevokeMatchingRequest` — subject,
-   on-behalf-of, client, session, agent run — a tenant and a limit.
+   on-behalf-of, client, session, agent run — a tenant and a limit, and
+   `CapabilityID`, which names the one capability a `Revoke` stopped.
 2. **It releases only holds of revoked capabilities.** A live match's
    hold is left: releasing it would drop a reservation a cost may still
    settle, and stop nothing. Run after `RevokeMatching`, it finishes what

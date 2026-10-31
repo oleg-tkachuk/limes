@@ -1056,7 +1056,7 @@ flowchart LR
     res(["RevokeMatchingResult{Revoked, Tenants, More}"])
     inval["ErrInvalidRequest"]
     mism["ErrScopeMismatch"]
-    release["meter.MatchingReleaser.ReleaseMatching<br/>TenantID or AllTenants, the same selectors<br/>open holds of revoked matches and their descendants<br/>a live capability's hold kept"]
+    release["meter.MatchingReleaser.ReleaseMatching<br/>TenantID or AllTenants, the same selectors or CapabilityID<br/>open holds of revoked matches and their descendants<br/>a live capability's hold kept"]
 
     req --> val -- yes --> scope -- yes --> sel --> lock --> write --> res
     res -. "then, to free the budget at once" .-> release
