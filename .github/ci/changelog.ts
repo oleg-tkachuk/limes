@@ -15,8 +15,9 @@
 // before its tag, from the notes of semantic-release's dry run; the tag step
 // reads the newest entry as the release to tag (release-tag.ts). check, run
 // by CI, holds every file to the tags with no network: each entry names a
-// release tag reachable from HEAD, newest first, once. An entry missing is
-// not refused. write adds every missing entry, reading the release's notes
+// release tag reachable from HEAD, newest first, once — but the newest, which
+// may be the release a release pull request plans, above every tag. An entry
+// missing is not refused. write adds every missing entry, reading the release's notes
 // from GitHub, and leaves the entries already written as they are: it
 // repairs a changelog by hand.
 
@@ -26,6 +27,7 @@ import { join } from "node:path";
 import { info } from "./lib/actions.ts";
 import { requireEnv } from "./lib/env.ts";
 import { git } from "./lib/git.ts";
+import { compareVersions } from "./lib/go-modules.ts";
 import { type GitHub, gitHubFor } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
 import { type Module, releasedModules, selectModule } from "./lib/modules.ts";
@@ -157,13 +159,17 @@ export function addEntry(root: string, module: Module, entry: string): void {
 }
 
 // checkChangelog refuses module's changelog when an entry names no release
-// tag reachable from rev, or the entries are not newest first.
+// tag reachable from rev, or the entries are not newest first. The newest
+// entry alone may name a version no tag names yet, above every release: the
+// release a release pull request plans, which its merge has tagged.
 export async function checkChangelog(root: string, module: Module, rev: string): Promise<string> {
   const path = changelogPath(module);
   const versions = [...readEntries(root, module).keys()];
   const tags = (await releaseTagsBelow(rev, module.prefix, root)).map((t) => versionOf(module, t));
+  const [newest] = versions;
+  const pending = newest !== undefined && !tags.includes(newest) && (tags[0] === undefined || compareVersions(newest, tags[0]) > 0) ? newest : undefined;
   let at = 0;
-  for (const version of versions) {
+  for (const version of pending === undefined ? versions : versions.slice(1)) {
     const found = tags.indexOf(version, at);
     if (found < 0) {
       const reason = tags.includes(version) ? "out of order: the newest release goes first" : `no release tag ${module.prefix}v${version} is reachable from ${rev}`;
@@ -172,7 +178,7 @@ export async function checkChangelog(root: string, module: Module, rev: string):
     at = found + 1;
   }
   const missing = tags.filter((t) => !versions.includes(t)).length;
-  return `${path} lists ${versions.length} releases, each a tag, newest first${missing === 0 ? "" : `; ${missing} still to be written`}`;
+  return `${path} lists ${versions.length} releases, each a tag, newest first${missing === 0 ? "" : `; ${missing} still to be written`}${pending === undefined ? "" : `; ${pending} still to be tagged`}`;
 }
 
 // Writer is what writing a changelog reads releases' notes from.

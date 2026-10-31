@@ -125,9 +125,18 @@ describe("the changelogs", () => {
     assert.match(await checkChangelog(repo.dir, selectModule(repo.dir, PGSTORE), "HEAD"), /lists 0 releases/);
   });
 
+  // A release pull request adds the entry of the release it plans before
+  // the release is tagged: the newest entry, above every release.
+  test("check passes a newest entry above every release, still to be tagged", async () => {
+    repo.write(CHANGELOG, `${TITLE}\n\n## [0.9.0](a)\n\n## [0.2.0](b)\n`);
+    assert.match(await checkChangelog(repo.dir, selectModule(repo.dir), "HEAD"), /0\.9\.0 still to be tagged/);
+  });
+
   test("check refuses an entry that is no tag, or out of order", async () => {
-    repo.write(CHANGELOG, `${TITLE}\n\n## [0.9.0](a)\n`);
-    await assert.rejects(checkChangelog(repo.dir, selectModule(repo.dir), "HEAD"), /lists 0\.9\.0, no release tag v0\.9\.0 is reachable/);
+    repo.write(CHANGELOG, `${TITLE}\n\n## [0.1.5](a)\n`);
+    await assert.rejects(checkChangelog(repo.dir, selectModule(repo.dir), "HEAD"), /lists 0\.1\.5, no release tag v0\.1\.5 is reachable/);
+    repo.write(CHANGELOG, `${TITLE}\n\n## [0.9.0](a)\n\n## [0.8.0](b)\n`);
+    await assert.rejects(checkChangelog(repo.dir, selectModule(repo.dir), "HEAD"), /lists 0\.8\.0, no release tag v0\.8\.0 is reachable/);
     repo.write(CHANGELOG, `${TITLE}\n\n## [0.1.0](a)\n\n## [0.2.0](b)\n`);
     await assert.rejects(checkChangelog(repo.dir, selectModule(repo.dir), "HEAD"), /lists 0\.2\.0, out of order/);
   });
