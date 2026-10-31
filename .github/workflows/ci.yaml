@@ -599,12 +599,6 @@ jobs:
           SHA: ${{ github.sha }}
         run: node .github/ci/check-modules.ts markers
 
-      # The table of limes's 1.0 candidates in docs/migration.md, every row
-      # read from the tags reachable from this commit. See
-      # .github/ci/candidates.ts.
-      - name: Hold the table of candidates to the tags
-        run: node .github/ci/candidates.ts check
-
       # Each module's CHANGELOG.md: every entry a release tag reachable from
       # this commit, newest first. See .github/ci/changelog.ts.
       - name: Hold the changelogs to the tags

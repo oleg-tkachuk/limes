@@ -12,16 +12,16 @@
 // the notes of the release the candidate stands for; the tag is pushed with
 // the deploy key, which alone may create a release tag, published as a
 // prerelease and the Go proxy told of it. With NEXT_MAJOR it is a candidate
-// of limes's next major, v1.0.0-rc.N, set as the step output
-// `limes-candidate` once published, whose row in the migration guide is
-// then proposed (candidates.ts). One module's failure leaves the others cut,
+// of limes's next major, v1.0.0-rc.N, whose notes end with the 0.x releases
+// it stands on (lib/candidate-releases.ts). One module's failure leaves the
+// others cut,
 // and fails the run. Last, every recent tag an earlier run pushed and never
 // published is published.
 
 import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
-import { error, info, notice, setOutput, summarize, table } from "./lib/actions.ts";
+import { error, info, notice, summarize, table } from "./lib/actions.ts";
 import { withDeployKey } from "./lib/deploy-key.ts";
 import { optionalEnv, requireEnv } from "./lib/env.ts";
 import { git } from "./lib/git.ts";
@@ -32,13 +32,11 @@ import { candidateTag, previousCandidate, RC, releasesSince, sinceCandidate } fr
 import { lastStableTag, pendingCommits } from "./lib/release-policy.ts";
 import { notesFrom, publish, publishLeftBehind, warmGoProxy, type Fetch } from "./lib/releases.ts";
 import { seedLine } from "./lib/seed.ts";
+import { candidateReleases } from "./lib/candidate-releases.ts";
 import { DRY_RUN_ARG, PUSH_URL_ENV, semanticRelease, semanticReleaseCommand } from "./lib/semantic-release.ts";
 
 export { PUSH_URL_ENV, semanticReleaseCommand };
 
-// OUTPUT_LIMES_CANDIDATE is the step output the job proposing the
-// candidate's row in the migration guide reads (candidates.ts).
-export const OUTPUT_LIMES_CANDIDATE = "limes-candidate";
 // Channel is what a run by hand asks for: a release, which release-plan.ts
 // proposes, or release candidates, which this cuts.
 export const Channel = { Release: "release", Prerelease: "prerelease" } as const;
@@ -58,9 +56,6 @@ export interface Release {
   candidateNotes(module: Module, notesFile: string): Promise<void>;
   fetchInfo: Fetch;
   notesDir: string;
-  // onMajorCandidate is told the tag of a candidate of the next major, once
-  // it is published.
-  onMajorCandidate(tag: string): void;
   // only names the one module to cut a candidate of; undefined for every one.
   only: string | undefined;
   // nextMajor: a candidate of limes's next major, v1.0.0-rc.N, rather than
@@ -115,13 +110,15 @@ export async function prereleaseModule(r: Release, module: Module): Promise<Outc
   if (previous !== undefined) {
     notes = sinceCandidate(previous, await releasesSince(previous, module.prefix, r.root), r.repository) + notes;
   }
+  // A candidate of the next major names, last, the 0.x releases it stands
+  // on.
+  if (r.nextMajor) {
+    notes = `${notes}\n${await candidateReleases(r.root, "HEAD")}`;
+  }
   await git(["tag", tag], r.root);
   await r.pushTag(tag);
   await publish(r.github, tag, module.prefix, notes, false, r.root, true, previous);
   await warmGoProxy(tag, r.repository, r.fetchInfo);
-  if (r.nextMajor) {
-    r.onMajorCandidate(tag);
-  }
   return { tag, note: "release candidate published" };
 }
 
@@ -245,7 +242,6 @@ async function main(): Promise<boolean> {
       candidateNotes: semanticRelease(root, token, [DRY_RUN_ARG]),
       fetchInfo: (url) => fetch(url),
       notesDir: requireEnv("RUNNER_TEMP"),
-      onMajorCandidate: (tag) => setOutput(OUTPUT_LIMES_CANDIDATE, tag),
     });
   });
 }
