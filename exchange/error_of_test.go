@@ -25,7 +25,7 @@ var exchangeSentinels = map[string]error{
 	"ErrUnauthorizedClient": ErrUnauthorizedClient, "ErrServerError": ErrServerError,
 	"ErrInvalidGrant": ErrInvalidGrant, "ErrInvalidTarget": ErrInvalidTarget,
 	"ErrInvalidScope": ErrInvalidScope, "ErrInvalidAuthorizationDetails": ErrInvalidAuthorizationDetails,
-	"ErrUnsupportedGrantType": ErrUnsupportedGrantType,
+	"ErrUnsupportedGrantType": ErrUnsupportedGrantType, "ErrTargetExchanged": ErrTargetExchanged,
 }
 
 // declaredSentinels are the exported Err variables this package's non-test
@@ -106,11 +106,12 @@ func TestErrorOf(t *testing.T) {
 		status int
 		code   string
 	}{
-		"a refused subject token": {ErrInvalidGrant, http.StatusBadRequest, codeInvalidGrant},
-		"another target":          {fmt.Errorf("x: %w", ErrInvalidTarget), http.StatusBadRequest, codeInvalidTarget},
-		"a client unknown":        {ErrInvalidClient, http.StatusUnauthorized, codeInvalidClient},
-		"a nonce required":        {dpop.ErrNonceRequired, http.StatusBadRequest, codeUseDPoPNonce},
-		"the server failing":      {ErrServerError, http.StatusInternalServerError, codeServerError},
+		"a refused subject token":   {ErrInvalidGrant, http.StatusBadRequest, codeInvalidGrant},
+		"another target":            {fmt.Errorf("x: %w", ErrInvalidTarget), http.StatusBadRequest, codeInvalidTarget},
+		"a token exchanged already": {fmt.Errorf("x: %w", ErrTargetExchanged), http.StatusBadRequest, codeInvalidTarget},
+		"a client unknown":          {ErrInvalidClient, http.StatusUnauthorized, codeInvalidClient},
+		"a nonce required":          {dpop.ErrNonceRequired, http.StatusBadRequest, codeUseDPoPNonce},
+		"the server failing":        {ErrServerError, http.StatusInternalServerError, codeServerError},
 	} {
 		if got, ok := ErrorOf(tc.err); !ok || got.Status != tc.status || got.Code != tc.code {
 			t.Errorf("%s: ErrorOf = %+v, %v; want %d %s", name, got, ok, tc.status, tc.code)

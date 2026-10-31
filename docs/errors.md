@@ -211,6 +211,7 @@ in RFC 6749 §5.2's format, as the token endpoint does. The codes are RFC
 | `unsupported_grant_type` | 400 | `exchange.ErrUnsupportedGrantType` | Only token exchange is supported. |
 | `invalid_grant` | 400 | `exchange.ErrInvalidGrant` | The subject token was refused. |
 | `invalid_target` | 400 | `exchange.ErrInvalidTarget` | The resource or audience was refused. |
+| `invalid_target` | 400 | `exchange.ErrTargetExchanged` | The subject token was exchanged already, for another resource or audience: one capability per subject token (`Config.Exchanges`). |
 | `invalid_scope` | 400 | `exchange.ErrInvalidScope` | The scope was refused. |
 | `invalid_authorization_details` | 400 | `exchange.ErrInvalidAuthorizationDetails` | The authorization details were refused. |
 | `invalid_request` | 400 | `exchange.ErrInvalidRequest` | The request is malformed. |
