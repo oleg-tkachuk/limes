@@ -59,7 +59,7 @@ export function changelogPath(module: Module): string {
 
 // preamble is what module's changelog opens with, ahead of its entries.
 export function preamble(module: Module): string {
-  return `${TITLE}\n\nEvery release of the ${module.name} module, newest first, from its release notes. Written by .github/ci/changelog.ts after each release; not edited by hand.\n`;
+  return `${TITLE}\n\nEvery release of the ${module.name} module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.\n`;
 }
 
 // versionOf is the version tag names, without module's prefix and the v.
@@ -144,10 +144,11 @@ export function newestEntry(root: string, module: Module): string | undefined {
   return readEntries(root, module).values().next().value;
 }
 
-// addEntry puts entry first in module's changelog at root, starting the
-// changelog when there is none, and refuses an entry with no version
+// addEntry puts entry first in module's changelog at root, trimmed as every
+// entry is, starting the changelog when there is none, and refuses an entry with no version
 // heading or with a version the changelog lists already.
 export function addEntry(root: string, module: Module, entry: string): void {
+  entry = entry.trim();
   const version = entryVersion(entry);
   if (version === undefined) {
     throw new Error(`${changelogPath(module)}: the entry names no version: ${JSON.stringify(entry.split("\n")[0])}`);

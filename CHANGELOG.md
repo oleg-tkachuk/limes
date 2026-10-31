@@ -1,6 +1,6 @@
 # Changelog
 
-Every release of the limes module, newest first, from its release notes. Written by .github/ci/changelog.ts after each release; not edited by hand.
+Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
 ## [0.144.0](https://github.com/oleg-tkachuk/limes/compare/v0.143.0...v0.144.0) (2026-10-31)
 
