@@ -1,13 +1,12 @@
 # Changelog
 
-Every release of the redisreplay module, newest first, from its release notes. Written by .github/ci/changelog.ts after each release; not edited by hand.
+Every release of the redisreplay module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
 ## [0.3.7](https://github.com/oleg-tkachuk/limes/compare/redisreplay%2Fv0.3.6...redisreplay%2Fv0.3.7) (2026-10-31)
 
 ### Dependencies
 
 * require limes v0.144.0
-
 
 ## [0.3.6](https://github.com/oleg-tkachuk/limes/compare/redisreplay%2Fv0.3.5...redisreplay%2Fv0.3.6) (2026-10-31)
 

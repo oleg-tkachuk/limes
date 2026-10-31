@@ -165,6 +165,15 @@ describe("addEntry", () => {
     assert.deepEqual(headings(text), ["0.2.0", "0.1.0"]);
   });
 
+  // A plan's entry ends with a newline, as notes do; the changelog keeps one
+  // blank line between entries all the same.
+  test("keeps one blank line after an entry that ends with newlines", () => {
+    const module = selectModule(repo.dir);
+    addEntry(repo.dir, module, "## [0.1.0](a)\n\n* one\n");
+    addEntry(repo.dir, module, "## [0.2.0](b)\n\n### Dependencies\n\n* require limes v0.2.0\n\n");
+    assert.match(readFileSync(join(repo.dir, CHANGELOG), "utf8"), /\* require limes v0\.2\.0\n\n## \[0\.1\.0\]\(a\)\n\n\* one\n$/);
+  });
+
   test("refuses an entry with no version, or one listed already", () => {
     const module = selectModule(repo.dir);
     assert.throws(() => addEntry(repo.dir, module, "* no heading"), /names no version/);
