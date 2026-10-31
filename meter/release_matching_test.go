@@ -21,6 +21,14 @@ func TestReleaseMatchingRequestValidate(t *testing.T) {
 		{"no tenant", ReleaseMatchingRequest{ClientID: "client"}, false},
 		{"no selector", ReleaseMatchingRequest{TenantID: tenant}, false},
 		{"a negative limit", ReleaseMatchingRequest{TenantID: tenant, ClientID: "client", Limit: -1}, false},
+		{"every tenant by client", ReleaseMatchingRequest{AllTenants: true, ClientID: "client"}, true},
+		{"every tenant by session", ReleaseMatchingRequest{AllTenants: true, Session: "sid"}, true},
+		{"every tenant by client and session", ReleaseMatchingRequest{AllTenants: true, ClientID: "client", Session: "sid"}, true},
+		{"a tenant beside every tenant", ReleaseMatchingRequest{TenantID: tenant, AllTenants: true, ClientID: "client"}, false},
+		{"every tenant with no selector", ReleaseMatchingRequest{AllTenants: true}, false},
+		{"every tenant by subject", ReleaseMatchingRequest{AllTenants: true, ClientID: "client", Subject: "s"}, false},
+		{"every tenant by on-behalf-of", ReleaseMatchingRequest{AllTenants: true, OnBehalfOf: "u"}, false},
+		{"every tenant by agent run", ReleaseMatchingRequest{AllTenants: true, Session: "sid", RunID: uuid.New()}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.req.Validate()

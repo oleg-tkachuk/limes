@@ -11,8 +11,9 @@ import (
 )
 
 // ReleaseMatching implements meter.MatchingReleaser: under the store's lock,
-// the open holds, in id order, of tenant's revoked capabilities that match
-// req's selectors or were delegated from one that does, at most a batch.
+// the open holds, in id order, of the revoked capabilities of req's tenant —
+// or of every tenant, with AllTenants — that match req's selectors or were
+// delegated from one that does, at most a batch.
 func (s *UsageStore) ReleaseMatching(_ context.Context, req meter.ReleaseMatchingRequest) (meter.ReleaseMatchingResult, error) {
 	if err := req.Validate(); err != nil {
 		return meter.ReleaseMatchingResult{}, err
@@ -22,7 +23,7 @@ func (s *UsageStore) ReleaseMatching(_ context.Context, req meter.ReleaseMatchin
 	defer s.mu.Unlock()
 	var due []hold
 	for _, h := range s.holds {
-		if h.tenantID == req.TenantID && s.records.revokedUnderMatch(h.capID, sel) {
+		if (req.AllTenants || h.tenantID == req.TenantID) && s.records.revokedUnderMatch(h.capID, sel) {
 			due = append(due, h)
 		}
 	}
@@ -32,11 +33,13 @@ func (s *UsageStore) ReleaseMatching(_ context.Context, req meter.ReleaseMatchin
 	if len(due) > limit {
 		due = due[:limit]
 	}
+	var tenants []uuid.UUID
 	for _, h := range due {
 		s.applyHoldLocked(h, -1)
 		delete(s.holds, h.id)
+		tenants = append(tenants, h.tenantID)
 	}
-	return meter.ReleaseMatchingResult{Released: int64(len(due)), More: more}, nil
+	return meter.ReleaseMatchingResult{Released: int64(len(due)), More: more, Tenants: sortedTenants(tenants)}, nil
 }
 
 // revokedUnderMatch reports whether id is on record and revoked, and it or
@@ -62,3 +65,12 @@ func (s *Store) revokedUnderMatch(id uuid.UUID, sel selectors) bool {
 }
 
 var _ meter.MatchingReleaser = (*UsageStore)(nil)
+
+// sortedTenants is ids ascending, each once; nil for none.
+func sortedTenants(ids []uuid.UUID) []uuid.UUID {
+	if len(ids) == 0 {
+		return nil
+	}
+	slices.SortFunc(ids, func(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) })
+	return slices.Compact(ids)
+}
