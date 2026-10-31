@@ -156,7 +156,7 @@ func reportRoundTrips(b *testing.B, sent *atomic.Int64) func() {
 // latencyPool is benchPool through a proxy that holds each chunk of the
 // conversation for half of rtt each way, so every round trip to the
 // database is rtt longer, and the count of chunks the client has sent.
-func latencyPool(b *testing.B, rtt time.Duration) (*pgxpool.Pool, *atomic.Int64) {
+func latencyPool(b testing.TB, rtt time.Duration) (*pgxpool.Pool, *atomic.Int64) {
 	b.Helper()
 	cfg, err := pgxpool.ParseConfig(ownerDSN)
 	if err != nil {
@@ -187,7 +187,7 @@ func latencyPool(b *testing.B, rtt time.Duration) (*pgxpool.Pool, *atomic.Int64)
 // target, holding every chunk read for oneWay before writing it on, in each
 // direction, and counting in sent the chunks clients send; it stops when the
 // benchmark ends.
-func delayProxy(b *testing.B, target string, oneWay time.Duration, sent *atomic.Int64) string {
+func delayProxy(b testing.TB, target string, oneWay time.Duration, sent *atomic.Int64) string {
 	b.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	var lc net.ListenConfig

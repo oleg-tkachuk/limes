@@ -182,6 +182,13 @@ type Config struct {
 	// its settings here (set_config(…, true), local to the transaction). An
 	// error from it ends the call.
 	//
+	// What it sends with tx.Exec goes with the call's first statement, in
+	// one batch, so it costs no round trip of its own: such an Exec returns
+	// an empty command tag and no error at once, and a statement of it that
+	// fails fails that first statement as the scope's error. A query it
+	// sends with Query or QueryRow is sent as before, what it executed
+	// first going with it.
+	//
 	// A Scope of the consumer's that scopes a call to reading every tenant
 	// sets limes.all_tenants to 'read', as WithAllTenantsReadOnly does: a
 	// call that writes then reads the setting back once Scope has run, and
@@ -310,12 +317,17 @@ func (c conn) inTx(ctx context.Context, fn func(pgx.Tx) error) error {
 
 // inReadTx runs fn, a call that only reads, in one transaction, scoped
 // first.
+// The statements the scope executes go with the call's first statement
+// (deferTx), so the scope costs no round trip of its own.
 func (c conn) inReadTx(ctx context.Context, fn func(pgx.Tx) error) error {
 	return pgx.BeginTxFunc(ctx, c.db, txOptions, func(tx pgx.Tx) error {
-		if err := c.scope(ctx, tx); err != nil {
-			return fmt.Errorf("pgstore: scope: %w", err)
+		deferred := &deferTx{Tx: tx, deferring: true}
+		err := c.scope(ctx, deferred)
+		deferred.deferring = false
+		if err != nil {
+			return errScope(err)
 		}
-		return fn(tx)
+		return fn(deferred)
 	})
 }
 

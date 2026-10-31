@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -72,19 +73,29 @@ SELECT id FROM chain ORDER BY depth`
 	// one that never does.
 	sqlCapabilityExpiry = `SELECT expires_at FROM ` + lineageView + ` WHERE id = $1`
 
-	// sqlHoldRecords locks the records of a lineage for key share, in id
-	// order, so Purge cannot drop one while the call counts against it: the
-	// view is a plain projection, so the lock reaches the record rows. Key
-	// share conflicts with that delete and not with the revoked flag a
-	// revocation sets (migrate/ddl/migrations/015_revoked_flag.sql): with FOR SHARE,
-	// metered calls overlapping one another would hold a record without a
-	// gap, and its revoke's mark would wait behind them for as long.
-	sqlHoldRecords = `
-SELECT id, requests, budget, copies
-FROM ` + lineageView + `
-WHERE id = ANY ($1)
-ORDER BY id
-FOR KEY SHARE`
+	// sqlLineageHeld is sqlLineage's chain, each record on it locked for
+	// key share, in id order, so Purge cannot drop one while the call counts
+	// against it, with its depth and ceilings: the walk and the lock in one
+	// statement. The view is a plain projection, so the lock reaches the
+	// record rows. Key share conflicts with that delete and not with the
+	// revoked flag a revocation sets (migrate/ddl/migrations/015_revoked_flag.sql):
+	// with FOR SHARE, metered calls overlapping one another would hold a
+	// record without a gap, and its revoke's mark would wait behind them for
+	// as long. A record deleted between the walk and its lock is not
+	// returned, and the chain is cut there (heldLineage).
+	sqlLineageHeld = `
+WITH RECURSIVE chain (id, parent_id, depth) AS (
+    SELECT id, parent_id, 0 FROM ` + lineageView + ` WHERE id = $1
+  UNION ALL
+    SELECT c.id, c.parent_id, chain.depth + 1
+    FROM ` + lineageView + ` c
+    JOIN chain ON c.id = chain.parent_id
+    WHERE chain.depth <= $2
+)
+SELECT l.id, chain.depth, l.requests, l.budget, l.copies
+FROM ` + lineageView + ` l JOIN chain ON l.id = chain.id
+ORDER BY l.id
+FOR KEY SHARE OF l`
 )
 
 // lineage returns capID's ancestors still on record, nearest first, holding
@@ -92,74 +103,137 @@ FOR KEY SHARE`
 // record: with no record its ancestors cannot be read, and metering it alone
 // would let it spend past every live ancestor's ceiling.
 func lineage(ctx context.Context, tx pgx.Tx, capID uuid.UUID) ([]ancestor, error) {
-	rows, err := tx.Query(ctx, sqlLineage, capID, limes.MaxDelegationDepth)
+	rows, err := tx.Query(ctx, sqlLineageHeld, capID, limes.MaxDelegationDepth)
 	if err != nil {
 		return nil, err
 	}
-	chain, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+	held, err := pgx.CollectRows(rows, scanHeldAncestor)
 	if err != nil {
 		return nil, err
 	}
-	if len(chain) == 0 {
-		return nil, fmt.Errorf("%w: pgstore: capability %s is not on record", limes.ErrNotFound, capID)
+	return heldLineage(capID, held)
+}
+
+// prelude is what a meter call reads before it locks a counter, in one
+// batch (readPrelude).
+type prelude struct {
+	// ancestors is the lineage, nearest first, and lineageErr why it could
+	// not be read: a call that answers a replay needs neither.
+	ancestors  []ancestor
+	lineageErr error
+	// replay is the charge on record under the call's reference, when
+	// replayed.
+	replay   ledgerEntry
+	replayed bool
+}
+
+// readPrelude shares tenant's erase lock and refuses it erased, reads the
+// charge on record under capID's ref, when ref is not empty, and capID's
+// lineage holding its records, in one batch: what notErased, a replay's
+// lookup and lineage read one at a time.
+func readPrelude(ctx context.Context, tx pgx.Tx, tenant, capID uuid.UUID, ref string) (prelude, error) {
+	b := &pgx.Batch{}
+	b.Queue(sqlShareTenantLock, eraseLockClass, tenant)
+	b.Queue(sqlIsErased, tenant)
+	if ref != "" {
+		b.Queue(sqlChargeByRef, capID, ref)
 	}
-	if len(chain) > limes.MaxDelegationDepth+1 {
+	b.Queue(sqlLineageHeld, capID, limes.MaxDelegationDepth)
+	br := tx.SendBatch(ctx, b)
+	p, err := readPreludeResults(br, tenant, capID, ref)
+	return p, errors.Join(err, br.Close())
+}
+
+// readPreludeResults reads readPrelude's batch from br.
+func readPreludeResults(br pgx.BatchResults, tenant, capID uuid.UUID, ref string) (prelude, error) {
+	var p prelude
+	if _, err := br.Exec(); err != nil {
+		return p, err
+	}
+	var erased bool
+	if err := br.QueryRow().Scan(&erased); err != nil {
+		return p, err
+	}
+	if erased {
+		return p, fmt.Errorf("%w: %s", limes.ErrTenantErased, tenant)
+	}
+	if ref != "" {
+		var err error
+		if p.replay, p.replayed, err = scanEntry(br.QueryRow()); err != nil {
+			return p, err
+		}
+	}
+	rows, err := br.Query()
+	if err != nil {
+		return p, err
+	}
+	held, err := pgx.CollectRows(rows, scanHeldAncestor)
+	if err != nil {
+		return p, err
+	}
+	p.ancestors, p.lineageErr = heldLineage(capID, held)
+	return p, nil
+}
+
+// readLineage is readPrelude with no reference: tenant not erased, and
+// capID's lineage.
+func readLineage(ctx context.Context, tx pgx.Tx, tenant, capID uuid.UUID) ([]ancestor, error) {
+	p, err := readPrelude(ctx, tx, tenant, capID, "")
+	if err != nil {
+		return nil, err
+	}
+	return p.ancestors, p.lineageErr
+}
+
+// heldLineage is capID's ancestors among held, sqlLineageHeld's rows,
+// nearest first, cut at the first depth not held, or ErrNotFound when capID
+// itself is not, and ErrDelegationTooDeep past limes.MaxDelegationDepth.
+func heldLineage(capID uuid.UUID, held []heldAncestor) ([]ancestor, error) {
+	if len(held) > limes.MaxDelegationDepth+1 {
 		return nil, fmt.Errorf("%w: %s has more than %d ancestors", limes.ErrDelegationTooDeep, capID, limes.MaxDelegationDepth)
 	}
-	held, err := holdRecords(ctx, tx, chain)
-	if err != nil {
-		return nil, err
+	byDepth := make(map[int]ancestor, len(held))
+	for _, h := range held {
+		byDepth[h.depth] = h.ancestor
 	}
-	if _, ok := held[capID]; !ok {
+	if self, ok := byDepth[0]; !ok || self.id != capID {
 		return nil, fmt.Errorf("%w: pgstore: capability %s is not on record", limes.ErrNotFound, capID)
 	}
-	return nearestFirst(chain[1:], held), nil
+	var out []ancestor
+	for depth := 1; ; depth++ {
+		a, ok := byDepth[depth]
+		if !ok {
+			return out, nil
+		}
+		out = append(out, a)
+	}
 }
 
-// holdRecords reads the ceilings of chain's capabilities still on record.
-func holdRecords(ctx context.Context, tx pgx.Tx, chain []uuid.UUID) (map[uuid.UUID]ancestor, error) {
-	rows, err := tx.Query(ctx, sqlHoldRecords, chain)
-	if err != nil {
-		return nil, err
-	}
-	scanned, err := pgx.CollectRows(rows, scanAncestor)
-	if err != nil {
-		return nil, err
-	}
-	held := make(map[uuid.UUID]ancestor, len(scanned))
-	for _, a := range scanned {
-		held[a.id] = a
-	}
-	return held, nil
+// heldAncestor is one row of sqlLineageHeld.
+type heldAncestor struct {
+	ancestor
+	depth int
 }
 
-// scanAncestor reads one capability's ceilings.
-func scanAncestor(row pgx.CollectableRow) (ancestor, error) {
+// scanHeldAncestor reads one row of sqlLineageHeld.
+func scanHeldAncestor(row pgx.CollectableRow) (heldAncestor, error) {
 	var id uuid.UUID
+	var depth int
 	var requests, budget, copies ceilingRecord
-	if err := row.Scan(&id, &requests, &budget, &copies); err != nil {
-		return ancestor{}, err
+	if err := row.Scan(&id, &depth, &requests, &budget, &copies); err != nil {
+		return heldAncestor{}, err
 	}
+	return heldAncestor{ancestor: ancestorOf(id, requests, budget, copies), depth: depth}, nil
+}
+
+// ancestorOf is a capability's ceilings as its record holds them.
+func ancestorOf(id uuid.UUID, requests, budget, copies ceilingRecord) ancestor {
 	return ancestor{
 		id:       id,
 		requests: limes.RequestCeiling{Max: requests.Max, Unlimited: requests.Unlimited},
 		budget:   limes.BudgetCeiling{Max: limes.Nanos(budget.Max), Unlimited: budget.Unlimited},
 		copies:   limes.CopyQuota{Max: copies.Max, Unlimited: copies.Unlimited},
-	}, nil
-}
-
-// nearestFirst is the ancestors of ids held, nearest first, stopping at the
-// first one gone since the walk.
-func nearestFirst(ids []uuid.UUID, held map[uuid.UUID]ancestor) []ancestor {
-	var out []ancestor
-	for _, id := range ids {
-		a, ok := held[id]
-		if !ok {
-			break
-		}
-		out = append(out, a)
 	}
-	return out
 }
 
 // usageRow is one capability's counters.
