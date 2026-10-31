@@ -134,6 +134,32 @@ function readEntries(root: string, module: Module): Entries {
   }
 }
 
+// entryVersion is the version an entry's heading names, if it opens with
+// one.
+export function entryVersion(entry: string): string | undefined {
+  return ENTRY_HEADING.exec(entry)?.[1];
+}
+
+// newestEntry is the first entry of module's changelog at root, if any.
+export function newestEntry(root: string, module: Module): string | undefined {
+  return readEntries(root, module).values().next().value;
+}
+
+// addEntry puts entry first in module's changelog at root, starting the
+// changelog when there is none, and refuses an entry with no version
+// heading or with a version the changelog lists already.
+export function addEntry(root: string, module: Module, entry: string): void {
+  const version = entryVersion(entry);
+  if (version === undefined) {
+    throw new Error(`${changelogPath(module)}: the entry names no version: ${JSON.stringify(entry.split("\n")[0])}`);
+  }
+  const have = readEntries(root, module);
+  if (have.has(version)) {
+    throw new Error(`${changelogPath(module)} lists ${version} already`);
+  }
+  writeFileSync(join(root, changelogPath(module)), render(module, new Map([[version, entry], ...have])));
+}
+
 // checkChangelog refuses module's changelog when an entry names no release
 // tag reachable from rev, or the entries are not newest first.
 export async function checkChangelog(root: string, module: Module, rev: string): Promise<string> {
