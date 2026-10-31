@@ -184,6 +184,7 @@ describe("the release plan", () => {
     test("one commit on its branch raises the requirement and adds each entry, and one pull request names the tags", async () => {
       const proposed = await proposeRelease(ctx());
       assert.equal(proposed?.pullRequest, 101);
+      assert.equal(data.createdPulls[0]?.text.draft, false, "a release with no major is ready to merge");
       assert.deepEqual(data.createdPulls.map((p) => [p.head, p.base, p.text.title]), [[BRANCH, "main", releaseTitle(["v0.2.0", `${PGSTORE}/v0.1.1`])]]);
       assert.equal((await git(["rev-list", "--count", `main..${BRANCH}`], origin)).trim(), "1");
       assert.match(await git(["show", `${BRANCH}:${PGSTORE}/go.mod`], origin), new RegExp(`require ${LIMES_MODULE.replaceAll(".", "\\.")} v0\\.2\\.0`));
@@ -199,6 +200,7 @@ describe("the release plan", () => {
       assert.deepEqual(proposed, { pullRequest: 7, major: true });
       assert.deepEqual(data.createdPulls, []);
       assert.match(data.editedPulls[0]?.text.body ?? "", /cuts a major/);
+      assert.equal(data.editedPulls[0]?.text.draft, true, "a major is held as a draft, which merge-green leaves");
     });
 
     test("nothing due proposes nothing", async () => {

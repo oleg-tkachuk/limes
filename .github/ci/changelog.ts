@@ -32,7 +32,8 @@ import { type GitHub, gitHubFor } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
 import { type Module, releasedModules, selectModule } from "./lib/modules.ts";
 import { releaseTagsBelow } from "./lib/releases.ts";
-import { BASE_BRANCH, pushAs } from "./require-limes.ts";
+import { pushAs } from "./lib/push.ts";
+import { BASE_BRANCH } from "./merge-policy.ts";
 
 // CHANGELOG is the file's name in every module's directory.
 export const CHANGELOG = "CHANGELOG.md";

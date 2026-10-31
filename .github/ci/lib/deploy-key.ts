@@ -3,8 +3,10 @@
 // create a release tag while every person and token is refused
 // (repo-settings.ts, tagCreationRuleset).
 
-import { writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
+import { requireEnv } from "./env.ts";
 
 // DEPLOY_KEY_ENV carries the deploy key's private half, from the
 // RELEASE_DEPLOY_KEY secret (release.yaml).
@@ -54,4 +56,23 @@ export function useDeployKey(key: string, dir: string): string {
     "-o",
     "StrictHostKeyChecking=yes",
   ].join(" ");
+}
+
+// SSH_DIR_PREFIX names the directory the deploy key is written to, under
+// the runner's temporary directory.
+const SSH_DIR_PREFIX = "release-ssh-";
+
+// withDeployKey runs fn with every push over SSH with the deploy key, which
+// alone may create a release tag (repo-settings.ts), handing it repository's
+// push URL. The key's text leaves the environment before any child process
+// starts, and its file is removed once fn is done.
+export async function withDeployKey<T>(repository: string, fn: (push: string) => Promise<T>): Promise<T> {
+  const sshDir = mkdtempSync(join(requireEnv("RUNNER_TEMP"), SSH_DIR_PREFIX));
+  process.env.GIT_SSH_COMMAND = useDeployKey(requireEnv(DEPLOY_KEY_ENV), sshDir);
+  delete process.env[DEPLOY_KEY_ENV];
+  try {
+    return await fn(pushUrl(repository));
+  } finally {
+    rmSync(sshDir, { recursive: true, force: true });
+  }
 }

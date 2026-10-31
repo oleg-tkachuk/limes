@@ -88,6 +88,9 @@ export interface NewRelease {
 export interface PullRequestText {
   title: string;
   body: string;
+  // draft opens the pull request as a draft, or makes an open one a draft:
+  // merge-green.ts leaves a draft for a person. Absent, it is left as it is.
+  draft?: boolean;
 }
 
 // RunState is the newest finished run of a workflow: its id, how it ended,
@@ -201,6 +204,9 @@ function workflowFile(workflow: string): string {
 }
 
 // OctokitGitHub is the GitHub of repo through octokit's REST API.
+// CONVERT_TO_DRAFT makes an open pull request a draft.
+const CONVERT_TO_DRAFT = "mutation($id: ID!) { convertPullRequestToDraft(input: { pullRequestId: $id }) { clientMutationId } }";
+
 class OctokitGitHub implements GitHub {
   private readonly octokit: Octokit;
   private readonly repo: Repo;
@@ -325,12 +331,16 @@ class OctokitGitHub implements GitHub {
   }
 
   async createPullRequest(head: string, base: string, text: PullRequestText): Promise<number> {
-    const { data } = await this.octokit.rest.pulls.create({ ...this.repo, head, base, title: text.title, body: text.body });
+    const { data } = await this.octokit.rest.pulls.create({ ...this.repo, head, base, title: text.title, body: text.body, draft: text.draft ?? false });
     return data.number;
   }
 
   async editPullRequest(number: number, text: PullRequestText): Promise<void> {
-    await this.octokit.rest.pulls.update({ ...this.repo, pull_number: number, title: text.title, body: text.body });
+    const { data } = await this.octokit.rest.pulls.update({ ...this.repo, pull_number: number, title: text.title, body: text.body });
+    // The REST API cannot make an open pull request a draft; GraphQL can.
+    if (text.draft === true && !(data.draft ?? false)) {
+      await this.octokit.graphql(CONVERT_TO_DRAFT, { id: data.node_id });
+    }
   }
 
   async finishedRunsOf(workflow: string, branch: string, sha: string): Promise<number[]> {

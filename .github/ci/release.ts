@@ -33,11 +33,10 @@
 // published sets `released`, and the modules' changelogs are proposed their
 // new entries (changelog.ts).
 
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
-import { DEPLOY_KEY_ENV, pushUrl, useDeployKey } from "./lib/deploy-key.ts";
-import { error, info, notice, setOutput, summarize, table, withoutWorkflowCommands } from "./lib/actions.ts";
+import { error, info, notice, setOutput, summarize, table } from "./lib/actions.ts";
 import { optionalEnv, requireEnv } from "./lib/env.ts";
 import { git } from "./lib/git.ts";
 import { gitHubFor, type GitHub } from "./lib/github.ts";
@@ -46,8 +45,15 @@ import { ROOT_MODULE, releaseCommits, releasedModules, selectModule, type Module
 import { candidateTag, previousCandidate, RC, releasesSince, sinceCandidate } from "./lib/prerelease.ts";
 import { isDue, lastStableTag, loadPolicy, pendingCommits, type Policy } from "./lib/release-policy.ts";
 import { newReleaseTag, notesFrom, publish, publishLeftBehind, tagsOnHead, warmGoProxy, type Fetch } from "./lib/releases.ts";
-import { runInherited } from "./lib/spawn.ts";
 import { jobPassed, runIdOf } from "./ci-run.ts";
+import { DRY_RUN_ARG, PUSH_URL_ENV, semanticRelease, semanticReleaseCommand } from "./lib/semantic-release.ts";
+import { withDeployKey } from "./lib/deploy-key.ts";
+import { dryRunNotes, today } from "./release-plan.ts";
+
+export { PUSH_URL_ENV, semanticReleaseCommand };
+import { SEED_VERSION, seedLine } from "./lib/seed.ts";
+
+export { SEED_VERSION };
 import { planInShadow, reportShadow } from "./release-shadow.ts";
 
 // OUTPUT_LIMES_TAG is the step output the job proposing the nested modules'
@@ -79,21 +85,6 @@ export const Channel = { Release: "release", Prerelease: "prerelease" } as const
 export type Channel = (typeof Channel)[keyof typeof Channel];
 // ALL_MODULES releases every module.
 export const ALL_MODULES = "all";
-// PUSH_URL_ENV hands semantic-release the URL it pushes a tag to:
-// modules.cjs reads it as repositoryUrl, and release.test.ts holds the two
-// to one name.
-export const PUSH_URL_ENV = "RELEASE_PUSH_URL";
-// SSH_DIR_PREFIX names the directory the deploy key is written to, under
-// the runner's temporary directory.
-const SSH_DIR_PREFIX = "release-ssh-";
-
-// RELEASE_DIR is where semantic-release runs, beside its config and lockfile.
-const RELEASE_DIR = ".github/release";
-// MODULE_ENV picks the module semantic-release releases (modules.cjs).
-const MODULE_ENV = "RELEASE_MODULE";
-// NOTES_ENV names the file release-notes-file.cjs writes the notes to.
-const NOTES_ENV = "RELEASE_NOTES_FILE";
-
 // Release is everything one run needs, its effects injected so a test can
 // stand in for semantic-release, GitHub and the Go proxy.
 export interface Release {
@@ -208,35 +199,9 @@ export function unchangedSince(last: string): string {
 // for: the nested modules stay on 0.x past limes's 1.0.
 const NEXT_MAJOR_MODULE = ROOT_MODULE;
 
-// SEED_VERSION is where a nested module's release line starts: semantic-
-// release cuts a module with no tag as 1.0.0, which major-guard refuses.
-export const SEED_VERSION = "v0.1.0";
-
-// GO_MOD is the file whose first commit holds a module.
-const GO_MOD = "go.mod";
-
-// seedLine starts the release line of a nested module no tag names yet,
-// with a SEED_VERSION tag on the commit that added its go.mod, pushed with
-// the deploy key, which alone may create a release tag. It returns the tag,
-// or undefined for the root module, one already tagged, or one whose go.mod
-// no commit added.
-export async function seedLine(r: Release, module: Module): Promise<string | undefined> {
-  if (module.name === ROOT_MODULE || (await git(["tag", "--list", `${module.prefix}v*`], r.root)).trim() !== "") {
-    return undefined;
-  }
-  const added = (await git(["log", "--diff-filter=A", "--format=%H", "--", join(module.dir, GO_MOD)], r.root)).trim().split("\n").at(-1);
-  if (!added) {
-    return undefined;
-  }
-  const tag = `${module.prefix}${SEED_VERSION}`;
-  await git(["tag", tag, added], r.root);
-  await r.pushTag(tag);
-  return tag;
-}
-
 // releaseModule releases one module, and says what it did.
 export async function releaseModule(r: Release, module: Module, before: readonly string[]): Promise<Outcome> {
-  const seeded = await seedLine(r, module);
+  const seeded = await seedLine(r.root, module, r.pushTag);
   if (seeded !== undefined) {
     info(`${module.name}: release line seeded with ${seeded}`);
   }
@@ -353,56 +318,13 @@ function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-// SEMANTIC_RELEASE_BIN is the pinned semantic-release's executable, as npm
-// ci installs it beside the release tooling's lockfile.
-const SEMANTIC_RELEASE_BIN = ["node_modules", ".bin", "semantic-release"];
-// SEMANTIC_RELEASE_ARGS run it outside the CI it would otherwise detect, and
-// DRY_RUN_ARG without tagging: a candidate's notes.
-const SEMANTIC_RELEASE_ARGS = ["--no-ci"];
-const DRY_RUN_ARG = "--dry-run";
-
-// semanticReleaseCommand is the command that runs the pinned semantic-release
-// in root's checkout: its installed executable, never npx, which would fetch
-// one from the registry were it missing.
-export function semanticReleaseCommand(root: string): [string, string[]] {
-  return [join(root, RELEASE_DIR, ...SEMANTIC_RELEASE_BIN), [...SEMANTIC_RELEASE_ARGS]];
-}
-
-// semanticRelease runs the pinned semantic-release for module, with the
-// runner reading no workflow command from its log: it logs every commit
-// message it reads, and this job holds a write token.
-function semanticRelease(root: string, token: string, extra: readonly string[] = []): Release["runSemanticRelease"] {
-  const [file, args] = semanticReleaseCommand(root);
-  return (module, notesFile) =>
-    withoutWorkflowCommands(() =>
-      runInherited(file, [...args, ...extra], {
-        cwd: join(root, RELEASE_DIR),
-        env: {
-          ...process.env,
-          GITHUB_TOKEN: token,
-          [NOTES_ENV]: notesFile,
-          ...(module.name === ROOT_MODULE ? {} : { [MODULE_ENV]: module.name }),
-        },
-      }),
-    );
-}
-
 async function main(): Promise<boolean> {
   const repository = requireEnv("GITHUB_REPOSITORY");
   const token = requireEnv("GH_TOKEN");
-  // Every tag goes over SSH with the deploy key, which alone may create a
-  // release tag (repo-settings.ts); the key's text leaves the environment
-  // before any child process starts.
-  const sshDir = mkdtempSync(join(requireEnv("RUNNER_TEMP"), SSH_DIR_PREFIX));
-  process.env.GIT_SSH_COMMAND = useDeployKey(requireEnv(DEPLOY_KEY_ENV), sshDir);
-  delete process.env[DEPLOY_KEY_ENV];
-  const push = pushUrl(repository);
-  process.env[PUSH_URL_ENV] = push;
-  try {
-    return await releaseFrom(repository, token, push);
-  } finally {
-    rmSync(sshDir, { recursive: true, force: true });
-  }
+  return withDeployKey(repository, (push) => {
+    process.env[PUSH_URL_ENV] = push;
+    return releaseFrom(repository, token, push);
+  });
 }
 
 async function releaseFrom(repository: string, token: string, push: string): Promise<boolean> {
@@ -416,7 +338,7 @@ async function releaseFrom(repository: string, token: string, push: string): Pro
   const dryRun = semanticRelease(root, token, [DRY_RUN_ARG]);
   // The plan of ADR-0016 in shadow, made before anything is tagged: its dry
   // runs read what is pending since the last release.
-  const shadow = options.channel === Channel.Release ? await planInShadow({ ...options, root, repository, policy, commits, today: today(), dryRun: shadowDryRun(dryRun, notesDir) }) : undefined;
+  const shadow = options.channel === Channel.Release ? await planInShadow({ ...options, root, repository, policy, commits, today: today(), dryRun: dryRunNotes(dryRun, notesDir) }) : undefined;
   const before = await tagsOnHead(root);
   const ok = await releaseAll({
     ...options,
@@ -439,29 +361,6 @@ async function releaseFrom(repository: string, token: string, push: string): Pro
     reportShadow(shadow, (await tagsOnHead(root)).filter((t) => !before.includes(t)));
   }
   return ok;
-}
-
-// SHADOW_NOTES_PREFIX names the file a dry run of the plan in shadow writes
-// a module's notes to, apart from those the release itself writes.
-const SHADOW_NOTES_PREFIX = "shadow-notes-";
-
-// shadowDryRun is the plan's dry run of a module through dryRun: the notes
-// it writes, or undefined when it writes none.
-function shadowDryRun(dryRun: Release["candidateNotes"], notesDir: string): (module: Module) => Promise<string | undefined> {
-  return async (module) => {
-    const file = join(notesDir, `${SHADOW_NOTES_PREFIX}${module.name}.md`);
-    rmSync(file, { force: true });
-    await dryRun(module, file);
-    return existsSync(file) ? notesFrom(file) : undefined;
-  };
-}
-
-// ISO_DATE_LENGTH is the length of YYYY-MM-DD at the start of an ISO time.
-const ISO_DATE_LENGTH = 10;
-
-// today is the date, UTC, as notes print it.
-function today(): string {
-  return new Date().toISOString().slice(0, ISO_DATE_LENGTH);
 }
 
 // ReleaseOptions are what a run asks of the release: its channel, whether

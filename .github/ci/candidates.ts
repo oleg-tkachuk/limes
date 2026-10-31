@@ -27,7 +27,8 @@ import { runMain } from "./lib/main.ts";
 import { ROOT_MODULE, releaseLine, releasedModules, selectModule } from "./lib/modules.ts";
 import { RC, STABLE_MAJOR } from "./lib/prerelease.ts";
 import { MIGRATION_GUIDE } from "./release-checks.ts";
-import { BASE_BRANCH, pushAs } from "./require-limes.ts";
+import { pushAs } from "./lib/push.ts";
+import { BASE_BRANCH } from "./merge-policy.ts";
 
 // CANDIDATE_VERSION is the version every candidate of limes's 1.0 is of,
 // up to its prerelease, and CANDIDATE_PREFIX starts its tag up to the number.
