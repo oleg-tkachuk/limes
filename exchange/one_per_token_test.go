@@ -3,6 +3,7 @@ package exchange
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -44,6 +45,30 @@ func TestOneCapabilityPerSubjectToken(t *testing.T) {
 	other, err := f.ex.Exchange(t.Context(), request(f.idp.sign(t, typeAccessToken, accessClaims())))
 	if err != nil || other.Capability.ID == first.Capability.ID || other.Reissued {
 		t.Errorf("another subject token = %s, reissued %v, %v; want a capability of its own", other.Capability.ID, other.Reissued, err)
+	}
+}
+
+// Exchanged again for other targets, a subject token is refused with
+// ErrTargetExchanged, and the client is told why rather than only that the
+// target was refused.
+func TestASecondExchangeForOtherTargetsSaysSo(t *testing.T) {
+	f := newFixture(t, fixtureConfig{onePerToken: true, noDPoP: true})
+	token := f.idp.sign(t, typeAccessToken, accessClaims())
+	wide := request(token)
+	wide.Resources = []string{toolResource, exchangeAudience}
+	if _, err := f.ex.Exchange(t.Context(), wide); err != nil {
+		t.Fatal(err)
+	}
+	_, err := f.ex.Exchange(t.Context(), request(token))
+	if !errors.Is(err, ErrTargetExchanged) || !errors.Is(err, ErrInvalidTarget) {
+		t.Fatalf("a second exchange for fewer targets: %v, want ErrTargetExchanged, an ErrInvalidTarget", err)
+	}
+	answer, ok := ErrorOf(err)
+	if !ok || answer.Code != codeInvalidTarget || !strings.Contains(answer.Description, "exchanged already") {
+		t.Errorf("ErrorOf = %+v, %v; want invalid_target saying the token was exchanged already", answer, ok)
+	}
+	if _, err := f.ex.Exchange(t.Context(), wide); err != nil {
+		t.Errorf("the first targets again: %v, want the first capability", err)
 	}
 }
 

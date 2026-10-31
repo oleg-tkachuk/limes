@@ -455,6 +455,9 @@ var refusals = []struct {
 	{ErrInvalidClient, http.StatusUnauthorized, codeInvalidClient, descriptionInvalidClient},
 	{ErrUnsupportedGrantType, http.StatusBadRequest, codeUnsupportedGrantType, "Only token exchange is supported."},
 	{ErrInvalidGrant, http.StatusBadRequest, codeInvalidGrant, "The subject token was refused."},
+	// Ahead of ErrInvalidTarget, which it wraps: the first rule that matches
+	// answers.
+	{ErrTargetExchanged, http.StatusBadRequest, codeInvalidTarget, "The subject token was exchanged already, for another resource or audience."},
 	{ErrInvalidTarget, http.StatusBadRequest, codeInvalidTarget, "The resource or audience was refused."},
 	{ErrInvalidScope, http.StatusBadRequest, codeInvalidScope, "The scope was refused."},
 	{ErrInvalidAuthorizationDetails, http.StatusBadRequest, codeInvalidAuthorizationDetails, "The authorization details were refused."},

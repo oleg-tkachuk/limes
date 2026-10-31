@@ -42,6 +42,13 @@ var (
 	// ErrInvalidTarget is a resource or audience the exchange will not
 	// issue for.
 	ErrInvalidTarget = errors.New("exchange: target refused")
+	// ErrTargetExchanged is an ErrInvalidTarget of its own: under
+	// Config.Exchanges' one capability per subject token, a token
+	// exchanged already for other resources or audiences, whose capability
+	// a second exchange cannot widen or narrow. The client is told so
+	// rather than the target refused, and exchanges the token for its first
+	// targets, or another token.
+	ErrTargetExchanged = fmt.Errorf("%w: the subject token was exchanged already for other targets", ErrInvalidTarget)
 	// ErrInvalidScope is a scope the exchange will not grant.
 	ErrInvalidScope = errors.New("exchange: scope refused")
 	// ErrInvalidAuthorizationDetails is authorization_details the exchange
@@ -346,7 +353,7 @@ func (e *Exchanger) reissue(ctx context.Context, id uuid.UUID, issue limes.Issue
 		return Result{}, fmt.Errorf("%w: the subject token's capability is bound to another key than this request proves, or to none", ErrInvalidGrant)
 	}
 	if !slices.Equal(sortedCopy(c.Audience), sortedCopy(issue.Audience)) {
-		return Result{}, fmt.Errorf("%w: the subject token's capability is for %q, not %q", ErrInvalidTarget, c.Audience, issue.Audience)
+		return Result{}, fmt.Errorf("%w: its capability is for %q, not %q", ErrTargetExchanged, c.Audience, issue.Audience)
 	}
 	res := resultOf(again)
 	res.Reissued = true
