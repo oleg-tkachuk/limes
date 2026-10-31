@@ -153,8 +153,13 @@ same ones A removes by grouping.
    11, `Bump` from 10 to 6, `Reserve` to 13, held by `TestMeterRoundTrips`.
    `BEGIN` stays its own round trip: `Config.DB` offers `BeginTx` alone,
    so sending it in a batch waits for step 4, with `COMMIT`.
-3. The lock order changed and the tenant's aggregate written last, with
-   the deadlock retry, for every call at once.
+3. The lock order changed, the tenant's aggregate locked after the
+   counters and copies by every call, with the deadlock retry: the
+   aggregate is held from its lock to `COMMIT`, five round trips of
+   `Charge`'s eleven, not eight. Its conditional write waits for step 4.
+   A counter that was on record when a call created it can now be deleted
+   while the call waits for its lock, so the call creates it again
+   (`lockUsageOf`).
 4. The write batch with `COMMIT`, and `onCharged` placed before it.
 5. The migration guide's note on the rolling upgrade, and the benchmarks'
    figures in ADR-0017.

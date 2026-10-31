@@ -85,8 +85,8 @@ func notErased(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error {
 }
 
 // The statements of an erase, in the order the meter locks: a tenant's
-// holds, its records in id order, its aggregate, its counters in id order,
-// its copies' counters, then the ledger, which a refund locks last too. Each
+// holds, its records in id order, its counters in id order, its copies'
+// counters, its aggregate, then the ledger, which a refund locks last too. Each
 // lock is taken before a row is written, so an erase and a meter call never
 // wait on each other in a cycle.
 const (
@@ -229,7 +229,7 @@ func (s *UsageStore) EraseTenantUsage(ctx context.Context, req meter.EraseTenant
 // removes them and the ledger.
 func eraseUsage(ctx context.Context, tx pgx.Tx, req meter.EraseTenantUsageRequest) error {
 	steps := []string{
-		sqlLockTenantHolds, sqlLockTenant, sqlLockTenantUsage, sqlLockTenantCopies,
+		sqlLockTenantHolds, sqlLockTenantUsage, sqlLockTenantCopies, sqlLockTenant,
 		sqlDeleteTenantHolds, sqlDeleteTenantBudget, sqlDeleteTenantUsage, sqlDeleteTenantCopies, sqlDeleteTenantCharges,
 	}
 	for _, sql := range steps {

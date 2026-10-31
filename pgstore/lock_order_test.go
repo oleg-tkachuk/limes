@@ -4,24 +4,15 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"sync"
 	"testing"
 	"time"
 	"uuid"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/oleg-tkachuk/limes/meter"
 )
-
-// sqlDeadlockDetected is PostgreSQL's code for a transaction it aborted to
-// break a cycle of waits.
-const sqlDeadlockDetected = "40P01"
-
-// isDeadlock reports whether err is PostgreSQL breaking a deadlock.
-func isDeadlock(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == sqlDeadlockDetected
-}
 
 // awaitLockWait returns once some session waits on a lock: the call under
 // test has taken what it takes first and is blocked behind the other side.
@@ -160,5 +151,113 @@ func TestReleaseExpiredLocksHoldsInIDOrder(t *testing.T) {
 	}
 	if err := <-done; err != nil {
 		t.Errorf("ReleaseExpired: %v", err)
+	}
+}
+
+// A call locks a tenant's aggregate after the counters and copies it moves
+// (docs/adr/0018-fewer-round-trips-per-charge.md): one that holds a counter
+// and then locks the aggregate does not meet a Charge, a Reserve or a
+// Release holding the aggregate and waiting for the counter.
+func TestTheTenantsAggregateIsLockedLast(t *testing.T) {
+	for name, call := range map[string]func(f tenantFixture, ctx context.Context, hold uuid.UUID) error{
+		"Charge": func(f tenantFixture, ctx context.Context, hold uuid.UUID) error {
+			_, err := f.usage.Charge(ctx, meter.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}, nil)
+			return err
+		},
+		"Reserve": func(f tenantFixture, ctx context.Context, hold uuid.UUID) error {
+			_, err := f.usage.Reserve(ctx, meter.ReserveRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1})
+			return err
+		},
+		"Release": func(f tenantFixture, ctx context.Context, hold uuid.UUID) error {
+			return f.usage.Release(ctx, meter.ReleaseRequest{Subject: meterSubject(f.child.ID, f.mine), ReservationID: hold})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newTenantFixture(t)
+			mine := WithTenant(context.Background(), f.mine)
+			// The counters and the aggregate exist before the race: the
+			// call locks rows, not their absence.
+			if _, err := f.usage.Charge(mine, meter.ChargeRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1}, nil); err != nil {
+				t.Fatal(err)
+			}
+			held, err := f.usage.Reserve(mine, meter.ReserveRequest{Subject: meterSubject(f.child.ID, f.mine), Amount: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			other := otherSide(t)
+			if _, err := other.Exec(context.Background(), `SELECT 1 FROM `+schema+`.usage WHERE capability_id = $1 FOR UPDATE`, f.child.ID); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() { done <- call(f, mine, held.ID) }()
+			awaitLockWait(t)
+			if _, err := other.Exec(context.Background(), `SELECT 1 FROM `+schema+`.tenant_budgets WHERE tenant_id = $1 FOR UPDATE`, f.mine); err != nil {
+				t.Fatalf("the other call locking the aggregate after the counter: %v", err)
+			}
+			if err := other.Commit(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-done; err != nil {
+				t.Errorf("%s once the other call committed: %v", name, err)
+			}
+		})
+	}
+}
+
+// logRecords is a slog handler that keeps what it is handed.
+type logRecords struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (h *logRecords) Enabled(context.Context, slog.Level) bool { return true }
+func (h *logRecords) WithAttrs([]slog.Attr) slog.Handler       { return h }
+func (h *logRecords) WithGroup(string) slog.Handler            { return h }
+func (h *logRecords) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, r)
+	return nil
+}
+
+// A Charge that PostgreSQL aborts to break a deadlock with a call of the
+// order before — the tenant's aggregate first, then a counter — is run
+// again once that call is done, and says so: what a rolling upgrade from
+// that order meets.
+func TestAChargeDeadlockedByTheOldOrderIsRetried(t *testing.T) {
+	f := newTenantFixture(t)
+	mine := WithTenant(context.Background(), f.mine)
+	subject := meterSubject(f.child.ID, f.mine)
+	if _, err := f.usage.Charge(mine, meter.ChargeRequest{Subject: subject, Amount: 1}, nil); err != nil {
+		t.Fatal(err)
+	}
+	logged := &logRecords{}
+	usage, err := NewUsageStore(Config{DB: app, Now: f.clock.Now, Logger: slog.New(logged)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := otherSide(t)
+	if _, err := old.Exec(context.Background(), `SELECT 1 FROM `+schema+`.tenant_budgets WHERE tenant_id = $1 FOR UPDATE`, f.mine); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := usage.Charge(mine, meter.ChargeRequest{Subject: subject, Amount: 1}, nil)
+		done <- err
+	}()
+	awaitLockWait(t)
+	if _, err := old.Exec(context.Background(), `SELECT 1 FROM `+schema+`.usage WHERE capability_id = $1 FOR UPDATE`, f.child.ID); err != nil {
+		t.Fatalf("the old order's call locking the counter: %v", err)
+	}
+	if err := old.Commit(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Charge deadlocked by the old order: %v, want it retried", err)
+	}
+	logged.mu.Lock()
+	defer logged.mu.Unlock()
+	if len(logged.records) != 1 || logged.records[0].Level != slog.LevelWarn {
+		t.Errorf("logged %d records, want one warning of the retry", len(logged.records))
 	}
 }

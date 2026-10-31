@@ -25,21 +25,23 @@ func (s *UsageStore) Refund(ctx context.Context, req meter.RefundRequest) (meter
 		return meter.RefundReceipt{}, err
 	}
 	var receipt meter.RefundReceipt
-	err := s.inTx(ctx, func(tx pgx.Tx) error {
-		e, c, err := s.lockRefunded(ctx, tx, req.ChargeID)
-		if err != nil {
-			return err
-		}
-		receipt = meter.RefundReceipt{ChargeID: e.ID, TenantID: e.TenantID, UnitCode: e.UnitCode}
-		amount, err := refundAmount(e, req)
-		if err != nil || amount == 0 {
-			return err
-		}
-		if err := s.refund(ctx, tx, c, e, amount); err != nil {
-			return err
-		}
-		receipt.Amount = amount
-		return nil
+	err := s.retryDeadlock(ctx, retriedRefund, func() error {
+		return s.inTx(ctx, func(tx pgx.Tx) error {
+			e, c, err := s.lockRefunded(ctx, tx, req.ChargeID)
+			if err != nil {
+				return err
+			}
+			receipt = meter.RefundReceipt{ChargeID: e.ID, TenantID: e.TenantID, UnitCode: e.UnitCode}
+			amount, err := refundAmount(e, req)
+			if err != nil || amount == 0 {
+				return err
+			}
+			if err := s.refund(ctx, tx, c, e, amount); err != nil {
+				return err
+			}
+			receipt.Amount = amount
+			return nil
+		})
 	})
 	if err != nil {
 		return meter.RefundReceipt{}, err
@@ -767,9 +769,10 @@ func (s *UsageStore) releaseHolds(ctx context.Context, tx pgx.Tx, holds []hold) 
 }
 
 // lockReleased locks every counter releasing holds writes, before any is
-// written, in the one order every call takes: the tenants' aggregates in
-// tenant id order, then the counters of every capability the holds are on
-// or under, together, in capability id order, then each capability's copies.
+// written, in the one order every call takes: the counters of every
+// capability the holds are on or under, together, in capability id order,
+// then each capability's copies, then the tenants' aggregates in tenant id
+// order.
 // Locked hold by hold instead, each hold's would be in order and the
 // transaction's would not: one hold's root, then another's middle, against
 // a call that holds the middle and waits for the root.
@@ -782,11 +785,6 @@ func lockReleased(ctx context.Context, tx pgx.Tx, holds []hold) error {
 		counters = append(counters, h.ancestors...)
 		copies[h.capID] = append(copies[h.capID], copyIDs(h.copies)...)
 	}
-	for _, t := range sortedUnique(tenants) {
-		if _, err := lockTenant(ctx, tx, t); err != nil {
-			return err
-		}
-	}
 	if err := drain(tx.Query(ctx, sqlLockUsage, sortedUnique(counters))); err != nil {
 		return err
 	}
@@ -795,6 +793,11 @@ func lockReleased(ctx context.Context, tx pgx.Tx, holds []hold) error {
 			if err := drain(tx.Query(ctx, sqlLockCopies, capID, ids)); err != nil {
 				return err
 			}
+		}
+	}
+	for _, t := range sortedUnique(tenants) {
+		if _, err := lockTenant(ctx, tx, t); err != nil {
+			return err
 		}
 	}
 	return nil

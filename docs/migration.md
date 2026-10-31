@@ -67,8 +67,16 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
-## pgstore/v0.55.1
+## pgstore/v0.56.0
 
+- Every call that writes counters now locks a tenant's aggregate after the
+  counters and copies it moves, not before them. During a rolling upgrade
+  from a release that took it first, a call of each version can deadlock;
+  PostgreSQL aborts one, and pgstore runs that meter call again once,
+  logging a warning through the new `Config.Logger` (`slog.Default()` when
+  nil). A consumer whose `onCharged` acts outside the database makes that
+  action idempotent, as it already must for a charge its own caller
+  retries.
 - A `Config.Scope` of the consumer's: what it sends with `tx.Exec` now goes
   with the call's first statement, in one batch. Such an `Exec` returns an
   empty command tag and no error at once, and a statement of it that fails
