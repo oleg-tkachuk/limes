@@ -2,6 +2,7 @@ package limes
 
 import (
 	"errors"
+	"math"
 	"testing"
 )
 
@@ -173,5 +174,28 @@ func TestCopyQuota(t *testing.T) {
 	}
 	if five.String() != "5" || unlimited.String() != unlimitedText {
 		t.Errorf("String = %q, %q; want 5 and %q", five, unlimited, unlimitedText)
+	}
+}
+
+// AdmitsMore admits n more requests on top of used within the ceiling, and
+// refuses whatever the ceiling a total int64 cannot count, which a plain
+// sum would wrap below it.
+func TestRequestCeilingAdmitsMore(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		ceiling RequestCeiling
+		used, n int64
+		want    bool
+	}{
+		{"within", RequestCeiling{Max: 10}, 4, 6, true},
+		{"past", RequestCeiling{Max: 10}, 4, 7, false},
+		{"none more", RequestCeiling{Max: 10}, 10, 0, true},
+		{"wrapping past a bound", RequestCeiling{Max: 10}, 1, math.MaxInt64, false},
+		{"wrapping under no bound", RequestCeiling{Unlimited: true}, 1, math.MaxInt64, false},
+		{"the most a counter holds", RequestCeiling{Unlimited: true}, 1, math.MaxInt64 - 1, true},
+	} {
+		if got := tc.ceiling.AdmitsMore(tc.used, tc.n); got != tc.want {
+			t.Errorf("%s: %+v.AdmitsMore(%d, %d) = %v, want %v", tc.name, tc.ceiling, tc.used, tc.n, got, tc.want)
+		}
 	}
 }

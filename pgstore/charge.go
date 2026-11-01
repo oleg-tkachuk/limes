@@ -93,11 +93,11 @@ func admitRequest(c *counters, subject limes.MeterSubject, ancestors []ancestor)
 // made.
 func admitRequests(c *counters, subject limes.MeterSubject, ancestors []ancestor, n int64) error {
 	used := func(id uuid.UUID) int64 { u := c.usageOf(id); return u.requests + u.reservedRequests }
-	if !subject.Requests().Admits(used(subject.CapabilityID()) + n) {
+	if !subject.Requests().AdmitsMore(used(subject.CapabilityID()), n) {
 		return limes.ErrRequestLimitExceeded
 	}
 	for _, a := range ancestors {
-		if !a.requests.Admits(used(a.id) + n) {
+		if !a.requests.AdmitsMore(used(a.id), n) {
 			return fmt.Errorf("%w: ancestor %s", limes.ErrRequestLimitExceeded, a.id)
 		}
 	}

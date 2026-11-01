@@ -2,6 +2,7 @@ package metertest
 
 import (
 	"errors"
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -241,4 +242,20 @@ func checkRequestLeaseConcurrency(t *testing.T, f fixture) {
 	r := f.usageOf(t, root)
 	expect.That(t, total == share*leaseWorkers, "the children made %d requests under leases of %d each, want every one", total, share)
 	expect.That(t, r.RequestCount == total && r.ReservedRequests == 0, "the root once every lease settled = %+v, want %d requests and nothing held", r, total)
+}
+
+// A lease of more requests than a counter can hold is refused, after a
+// request made as before it: its total cannot be counted, so no ceiling
+// may admit it, and nothing is held.
+func checkRequestLeaseThatCannotBeCountedIsRefused(t *testing.T, f fixture) {
+	l := f.leaser(t)
+	c := f.newRequestChain(t)
+	child := f.requestSubject(c.child, requestChild)
+	expect.Must(t, f.bump(child) == nil, "first bump")
+	_, err := l.Lease(f.Ctx, meter.LeaseRequest{Subject: child, Requests: math.MaxInt64})
+	expect.That(t, errors.Is(err, limes.ErrRequestLimitExceeded), "Lease of MaxInt64 requests after one made: %v, want ErrRequestLimitExceeded", err)
+	for _, id := range []uuid.UUID{c.child, c.root} {
+		u := f.usageOf(t, id)
+		expect.That(t, u.RequestCount == 1 && u.ReservedRequests == 0, "%s after the refused lease = %+v, want 1 made and none held", id, u)
+	}
 }
