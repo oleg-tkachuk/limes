@@ -215,3 +215,28 @@ no requests no `Bump`.
    housekeeping settling expired and revoked leases; the scale benchmarks
    extended to charges under leases.
 5. `otelmetric` forwards `Leaser`; the guide documents choosing a lease.
+
+## Measured
+
+`task bench:pgstore:scale` on a laptop against PostgreSQL 18.6 in a local
+container, the client on one processor, median of three runs of 2 s.
+Eight sub-agents, each a child of one root, charge and bump at once
+(`BenchmarkOneRoot`); a round trip of +1 or +2 ms stands for a database
+in the same zone or one zone away:
+
+| Added round trip | `Charge`, no lease | `Charge`, each child leasing | `Bump`, no lease | `Bump`, each child leasing |
+| --- | --- | --- | --- | --- |
+| none | 557/s | 1 718/s | 852/s | 1 928/s |
+| +1 ms | 172/s | 505/s | 261/s | 849/s |
+| +2 ms | 87/s | 289/s | 137/s | 468/s |
+
+So the root stops being the row every sub-agent queues on: a lease of its
+own gives each child three times the charges, and up to three and a half
+times the bumps, of a chain that locks the root on every call.
+
+A leaseholder alone, with no other caller (`BenchmarkChainDepth`), gains
+only what it no longer locks: a leased charge at depth 1 takes 0.94 ms
+against 1.79 ms. Deep chains gain nothing. A charge under a lease still
+reads the whole lineage to find the lease, so at depth 64 it takes 7.5 ms
+against 5.4 ms without one: past a few levels, a lease buys freedom from
+contention, not speed.
