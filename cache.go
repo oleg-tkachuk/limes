@@ -190,7 +190,8 @@ type RevocationCacheConfig struct {
 	// availability through a short outage of the store; ErrNotFound, an
 	// answer, is never covered, nor a caller whose context ended; nor, while
 	// a revoked answer dropped to make room (MaxEntries) would still be
-	// kept, a live answer about a delegated capability. A
+	// kept, a live answer about a delegated capability or about a Biscuit's
+	// revocation ids asked together. A
 	// Biscuit is covered when its revocation ids are asked about together
 	// as before. Negative, or longer than MaxRevocationCacheStale, is
 	// refused.

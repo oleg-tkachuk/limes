@@ -1018,9 +1018,10 @@ holds then goes unseen while it is down, for `MaxStale` at most, which
 `MaxRevocationCacheStale`, an hour, bounds. `ErrNotFound` is the store's
 answer and is never covered, nor a caller whose context ended. A
 revocation the cache learned is not undone by a stale answer: a live
-answer covering a capability revoked since is served revoked, and while a
-revoked answer the cache dropped to make room would still be kept, a stale
-live answer about a delegated capability is not served at all. Stale
+answer covering a capability or revocation id revoked since is served
+revoked, and while a revoked answer the cache dropped to make room would
+still be kept, a stale live answer about a delegated capability, or about a
+Biscuit's revocation ids asked together, is not served at all. Stale
 answers make room before any fresh one does, and `Clear` and
 `ClearRevoked` drop them with the rest. Point the store a `RevocationCache` reads, and the watcher's
 connection, at the primary, not at a read replica. A standby applies a revocation after
