@@ -935,10 +935,10 @@ func (s *UsageStore) DeleteUsage(ctx context.Context, req meter.DeleteUsageReque
 			return nil
 		})
 	}
-	if err := s.settledThen(ctx, settledDeleteUsage, settle, drop); err != nil {
-		return err
-	}
-	return s.forgetLeaseAncestors(ctx, []uuid.UUID{req.CapabilityID})
+	// No lease is left to forget the capability: the drop refused one held
+	// against it (sqlLeasedBelow), and one opened since holds against the
+	// counters restarted for it, which its settlement must reach.
+	return s.settledThen(ctx, settledDeleteUsage, settle, drop)
 }
 
 // PurgeOrphans drops the counters of capabilities no longer on record, as
