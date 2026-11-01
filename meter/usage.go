@@ -267,7 +267,10 @@ type TenantBudgets interface {
 	// SetTenantBudgetRequest.Validate refuses — a ceiling outside
 	// 0..MaxNanos is ErrInvalidAmount — and changes nothing. A ceiling in a
 	// unit other than the row's returns ErrUnitCodeMismatch while anything
-	// is held in the old unit, or spent in it and not reset.
+	// is held in the old unit, or spent in it and not reset. A reset settles
+	// the tenant's leases first; a store that cannot keep new ones out
+	// meanwhile may refuse it as limes.ErrConflict, changing nothing, and
+	// the caller tries again.
 	SetTenantBudget(ctx context.Context, req SetTenantBudgetRequest) (TenantBudget, error)
 
 	// ListTenantBudgets returns tenant budget rows; a consumer joins its
@@ -325,7 +328,10 @@ type UsageHousekeeping interface {
 	// capability's open reservations first,
 	// returning their holds to its ancestors and its tenant: nothing could
 	// settle or release them afterwards. A capability with no row is no
-	// error: there is nothing to drop. It refuses what
+	// error: there is nothing to drop. It settles the leases of the
+	// capability and of those below it first; a store that cannot keep new
+	// ones out meanwhile may refuse it as limes.ErrConflict, dropping
+	// nothing, and the caller tries again. It refuses what
 	// DeleteUsageRequest.Validate refuses.
 	DeleteUsage(ctx context.Context, req DeleteUsageRequest) error
 
