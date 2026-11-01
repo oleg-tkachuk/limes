@@ -1468,6 +1468,24 @@ a second rule beside the store's, and the store's clock is its own.
 checks that each record reads as its listing gives it, when the `Env.Lister`
 is one.
 
+To keep reports off the primary, build pgstore's `Census` and `Ledger` over
+a pool of a read replica — a hot standby, whose every transaction is
+read-only — and the stores over the primary's. Every report reads only:
+`CountRecords`, `ListRecords` and `GetRecordListing` of one tenant or every
+tenant, and `SumCharges`. A replica answers as of its lag, so a report may
+miss the last charges and revocations; nothing a request is decided on
+reads it. `PurgeCharges` writes, so the worker that runs it holds a
+`Ledger` over the primary; on a replica it fails as a read-only
+transaction. The scope is set per transaction, as on the primary, so
+`WithTenant` and `WithAllTenantsReadOnly` work there unchanged.
+
+```go
+records, _ := pgstore.NewStore(pgstore.Config{DB: primary})
+census, _ := pgstore.NewCensus(pgstore.Config{DB: replica})
+ledger, _ := pgstore.NewLedger(pgstore.Config{DB: replica}) // SumCharges
+purger, _ := pgstore.NewLedger(pgstore.Config{DB: primary}) // PurgeCharges
+```
+
 To test a report, backdate its charges through the store's clock, never by
 writing a store's tables, whose columns are the store's own and change
 without notice. A charge carries the store's time (`ChargeRecord.At`), so
