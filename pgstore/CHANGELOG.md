@@ -2,6 +2,24 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.59.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.58.0...pgstore%2Fv0.59.0) (2026-11-01)
+
+### ⚠ BREAKING CHANGES
+
+* **pgstore:** UsageStore.Lease refuses with meter.ErrLeasingDisabled
+  unless Config.Leases is set; set it once every instance runs pgstore/v0.58.0
+  or later.
+
+### Features
+
+* **pgstore:** open leases only once Config.Leases is set ([cd6ec8d](https://github.com/oleg-tkachuk/limes/commit/cd6ec8dce810958561d8692f747bc2a08567e7ac))
+
+### Bug Fixes
+
+* **pgstore:** refuse a request lease whose count cannot be held ([80ebb00](https://github.com/oleg-tkachuk/limes/commit/80ebb00930e9da1d1d41f4f87a597e7b409b5983))
+* **pgstore:** settle a lease opened before a reset or a drop ([247c7e0](https://github.com/oleg-tkachuk/limes/commit/247c7e0e69fb001c5348a283f0280e3803bd3d5d))
+* **pgstore:** sweep every revoked lease and hold of a match ([464835d](https://github.com/oleg-tkachuk/limes/commit/464835d66601ab9d901efc4cf09b7de4f429ca28))
+
 ## [0.58.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.57.0...pgstore%2Fv0.58.0) (2026-11-01)
 
 ### Features
