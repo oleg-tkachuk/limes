@@ -75,10 +75,9 @@ type Store struct {
 	erased map[uuid.UUID]struct{}
 
 	// exchanges is the capability each subject token's exchange issued
-	// (limes.ExchangeStore), and exchangedBy each such capability's key, so
-	// Purge drops the mapping with its record.
-	exchanges   map[limes.ExchangeKey]uuid.UUID
-	exchangedBy map[uuid.UUID]limes.ExchangeKey
+	// (limes.ExchangeStore), keyed by exchangeKeyOf, until Purge or an erase
+	// finds the token expired past its retention.
+	exchanges map[limes.ExchangeKey]exchange
 
 	// sessions is the identity provider's session each capability was
 	// issued under, when it names one (limes.InsertRequest.Session).
@@ -293,8 +292,7 @@ func NewStore(cfg StoreConfig) (*Store, error) {
 		revokedCopies: map[copyKey]limes.BiscuitRevocation{},
 		revokedIDs:    map[string]int{},
 		erased:        map[uuid.UUID]struct{}{},
-		exchanges:     map[limes.ExchangeKey]uuid.UUID{},
-		exchangedBy:   map[uuid.UUID]limes.ExchangeKey{},
+		exchanges:     map[limes.ExchangeKey]exchange{},
 		sessions:      map[uuid.UUID]string{},
 	}, nil
 }
@@ -698,9 +696,9 @@ func (s *Store) Purge(_ context.Context, req limes.PurgeRequest) (limes.PurgeRes
 		delete(s.revoked, c.ID)
 		delete(s.issuedBy, c.ID)
 		s.forgetCopyRevocationsLocked(c.ID)
-		s.forgetExchangeLocked(c.ID)
 		delete(s.sessions, c.ID)
 	}
+	s.forgetExchangesLocked(func(limes.ExchangeKey) bool { return true }, cutoff)
 	return limes.PurgeResult{Purged: int64(len(due))}, nil
 }
 
@@ -734,10 +732,10 @@ func (s *Store) EraseTenantRecords(_ context.Context, req limes.EraseTenantReque
 		delete(s.revoked, id)
 		delete(s.issuedBy, id)
 		s.forgetCopyRevocationsLocked(id)
-		s.forgetExchangeLocked(id)
 		delete(s.sessions, id)
 		out.Removed++
 	}
+	s.forgetExchangesLocked(func(k limes.ExchangeKey) bool { return k.TenantID == req.TenantID }, cutoff)
 	return out, nil
 }
 

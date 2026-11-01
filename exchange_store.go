@@ -2,6 +2,7 @@ package limes
 
 import (
 	"context"
+	"time"
 	"uuid"
 )
 
@@ -12,6 +13,22 @@ type ExchangeKey struct {
 	TenantID uuid.UUID
 	// Issuer is the subject token's iss, and TokenID its jti.
 	Issuer, TokenID string
+	// TokenExpiresAt is the subject token's exp: ClaimExchange keeps the
+	// record until then, whatever becomes of its capability, since the
+	// token can be presented again until then. ExchangedFor ignores it.
+	TokenExpiresAt time.Time
+}
+
+// ValidateClaim refuses what Validate refuses, and a key that names no
+// TokenExpiresAt.
+func (k ExchangeKey) ValidateClaim() error {
+	if err := k.Validate(); err != nil {
+		return err
+	}
+	if k.TokenExpiresAt.IsZero() {
+		return invalidRequest("ExchangeKey.TokenExpiresAt required to claim")
+	}
+	return nil
 }
 
 // Validate refuses a key without a tenant, an issuer or a token id.
@@ -41,7 +58,10 @@ type ExchangeStore interface {
 	// records nothing and returns that one with claimed false, so concurrent
 	// claims of one key converge on one id. id must be on record in key's
 	// tenant: ErrNotFound for one that is not, or is another tenant's. The
-	// mapping goes with its capability when Purge removes it. It refuses
-	// what ExchangeKey.Validate refuses.
+	// record outlives its capability: Purge and an erase remove it only once
+	// key.TokenExpiresAt is past their retention, so a token exchanged once
+	// is never exchanged afresh while it can still be presented, and its
+	// capability purged answers as gone (Issuer.Reissue: ErrNotFound). It
+	// refuses what ExchangeKey.ValidateClaim refuses.
 	ClaimExchange(ctx context.Context, key ExchangeKey, id uuid.UUID) (recorded uuid.UUID, claimed bool, err error)
 }

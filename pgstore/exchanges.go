@@ -10,7 +10,8 @@ import (
 	"github.com/oleg-tkachuk/limes"
 )
 
-// The statements of limes.ExchangeStore (migrate/ddl/migrations/024_exchanges.sql).
+// The statements of limes.ExchangeStore (migrate/ddl/migrations/024_exchanges.sql,
+// 035_exchanges_outlive_capabilities.sql).
 const (
 	sqlExchangedFor = `
 SELECT capability_id FROM limes.exchanges WHERE tenant_id = $1 AND issuer = $2 AND token_id = $3`
@@ -24,7 +25,7 @@ SELECT capability_id FROM limes.exchanges WHERE tenant_id = $1 AND issuer = $2 A
 	// nothing, and the next statement, by its own snapshot, reads the row
 	// that won.
 	sqlClaimExchange = `
-INSERT INTO limes.exchanges (tenant_id, issuer, token_id, capability_id) VALUES ($1, $2, $3, $4)
+INSERT INTO limes.exchanges (tenant_id, issuer, token_id, capability_id, token_expires_at) VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (tenant_id, issuer, token_id) DO NOTHING
 RETURNING capability_id`
 )
@@ -50,7 +51,7 @@ func (s *Store) ExchangedFor(ctx context.Context, key limes.ExchangeKey) (uuid.U
 // the store opens is READ COMMITTED, which is what lets a claim that lost
 // a race read the winner's row.
 func (s *Store) ClaimExchange(ctx context.Context, key limes.ExchangeKey, id uuid.UUID) (uuid.UUID, bool, error) {
-	if err := key.Validate(); err != nil {
+	if err := key.ValidateClaim(); err != nil {
 		return uuid.Nil(), false, err
 	}
 	var (
@@ -65,7 +66,7 @@ func (s *Store) ClaimExchange(ctx context.Context, key limes.ExchangeKey, id uui
 		if !known {
 			return limes.ErrNotFound
 		}
-		err := tx.QueryRow(ctx, sqlClaimExchange, key.TenantID, key.Issuer, key.TokenID, id).Scan(&recorded)
+		err := tx.QueryRow(ctx, sqlClaimExchange, key.TenantID, key.Issuer, key.TokenID, id, key.TokenExpiresAt).Scan(&recorded)
 		if err == nil {
 			claimed = true
 			return nil

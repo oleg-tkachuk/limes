@@ -30,7 +30,10 @@ token's `jti`, with a lock across replicas.
    - `ExchangedFor` reads the mapping.
    - `ClaimExchange` records it unless the key holds one already. Concurrent
      claims of one key, from any replica, converge on one id.
-   - The mapping goes with its capability when Purge removes it.
+   - The mapping outlives its capability: it is kept until the subject
+     token expires (`ExchangeKey.TokenExpiresAt`), and Purge or an erase
+     removes it only once that is past their retention. A token whose
+     capability was purged is refused, not exchanged afresh.
 
 3. **The token is signed again from the record.** `Issuer.Reissue` reads
    the capability on record, refuses it once it is expired or revoked, and
