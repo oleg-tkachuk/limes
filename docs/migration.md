@@ -67,6 +67,24 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## pgstore/v0.60.0
+
+- The schema is at version 36. Migration 035 keeps an exchange's record
+  past its capability's, until its subject token expires, and gives the
+  records already there their capability's expiry; 036 indexes them by
+  that expiry, `CONCURRENTLY`. `migrate.Run` applies both; a consumer that
+  vendors the schema applies steps 035 and 036 before this release.
+- `Store.Purge` also removes the exchanges whose subject tokens expired
+  past the retention, and no longer takes one with its capability.
+
+## v0.147.0
+
+- `ExchangeKey.TokenExpiresAt` is the subject token's expiry, and
+  `ExchangeStore.ClaimExchange` refuses a key without it
+  (`ExchangeKey.ValidateClaim`). A store of your own keeps the record until
+  then, whatever becomes of its capability: a token exchanged once is not
+  exchanged afresh while it can still be presented.
+
 ## pgstore/v0.59.0
 
 - `UsageStore.Lease` refuses with `meter.ErrLeasingDisabled` unless the new

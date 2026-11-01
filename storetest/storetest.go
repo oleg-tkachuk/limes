@@ -324,7 +324,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "EraseTenantRecordsKeepsWhatAVerifierStillNeeds", Run: checkEraseTenant},
 		{Name: "ExchangeClaimsConvergeOnOneCapability", Run: checkExchangeClaims},
 		{Name: "ExchangeClaimsRefuseWhatIsNotOnRecord", Run: checkExchangeRefusals},
-		{Name: "PurgeTakesAnExchangeWithItsCapability", Run: checkExchangePurge},
+		{Name: "PurgeKeepsAnExchangeWhileItsTokenLives", Run: checkExchangePurge},
 		{Name: "ASessionIsRecordedAndAChildTakesItsParents", Run: checkSessionOnRecord},
 		{Name: "RevokeMatchingRevokesEverySelectorsCapabilities", Run: checkRevokeMatching},
 		{Name: "RevokeMatchingWorksInBatches", Run: checkRevokeMatchingBatches},

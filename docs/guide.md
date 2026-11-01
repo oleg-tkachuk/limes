@@ -1780,7 +1780,8 @@ Behind a token endpoint, whose requests name no tenant, pgstore's store is
 wired as `pgstore.ScopedExchanges(store)`, beside
 `pgstore.ScopedIssuance(store)` for the Issuer; each scopes its calls to
 the tenant the key or the record names, and the table that holds the
-mapping, `limes.exchanges`, goes with each capability's record.
+mapping, `limes.exchanges`, keeps each one until its subject token expires,
+past its capability's record.
 `storetest` checks an `ExchangeStore` through `Env.Exchanges`, and
 `exchangetest.TestOnePerToken` checks an Exchanger in this mode over a
 consumer's own store, roles and row-level security.
