@@ -74,6 +74,14 @@ func (s *UsageStore) ReleaseMatching(ctx context.Context, req meter.ReleaseMatch
 	if err != nil {
 		return meter.ReleaseMatchingResult{}, err
 	}
+	settled, err := s.settleEach(ctx, inTx, sqlMatchingLeasesHead+where+sqlMatchingLeasesTail, args...)
+	if err != nil {
+		return meter.ReleaseMatchingResult{}, err
+	}
+	res.SettledLeases = int64(len(settled))
+	for _, h := range settled {
+		res.Tenants = append(res.Tenants, h.tenantID)
+	}
 	if len(res.Tenants) > 0 {
 		res.Tenants = sortedUnique(res.Tenants)
 	}

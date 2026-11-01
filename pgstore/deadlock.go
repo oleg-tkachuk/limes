@@ -24,12 +24,14 @@ const logKeyOp = "op"
 
 // The meter calls retryDeadlock retries, as a log line names them.
 const (
-	retriedBump    = "Bump"
-	retriedCharge  = "Charge"
-	retriedReserve = "Reserve"
-	retriedSettle  = "Settle"
-	retriedRelease = "Release"
-	retriedRefund  = "Refund"
+	retriedBump        = "Bump"
+	retriedCharge      = "Charge"
+	retriedReserve     = "Reserve"
+	retriedSettle      = "Settle"
+	retriedRelease     = "Release"
+	retriedRefund      = "Refund"
+	retriedLease       = "Lease"
+	retriedSettleLease = "SettleLease"
 )
 
 // retryDeadlock runs call, a meter call's whole transaction, and runs it

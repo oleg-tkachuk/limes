@@ -67,11 +67,21 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## pgstore/v0.57.0
+
+- The schema is at version 33. Migration 032 adds a lease's columns to
+  `limes.usage` and `limes.charges`; 033 indexes the leases by their end,
+  `CONCURRENTLY`. `migrate.Run` applies both; a consumer that vendors the
+  schema applies steps 032 and 033 before this release.
+- `UsageStore` is a `meter.Leaser`. `ReleaseExpired`, `ReleaseMatching`,
+  `DeleteUsage`, `PurgeOrphans` and a `SetTenantBudget` that resets the
+  spend settle the leases they reach, each in a transaction of its own.
+
 ## v0.145.0
 
 - `meter.Leaser`, an optional interface of a usage store, leases a
-  capability budget of its chain (ADR-0017); memstore implements it,
-  pgstore does not yet. Additive: a store that is not one, and a capability
+  capability budget of its chain (ADR-0017); memstore and pgstore implement
+  it. Additive: a store that is not one, and a capability
   that leases nothing, are metered as before.
 - `meter.ReleaseExpiredResult` and `meter.ReleaseMatchingResult` gain
   `SettledLeases`, zero for a store that is no `Leaser`.
