@@ -2,6 +2,17 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.148.0](https://github.com/oleg-tkachuk/limes/compare/v0.147.0...v0.148.0) (2026-11-01)
+
+### ⚠ BREAKING CHANGES
+
+* ExchangeKey gains TokenExpiresAt, which ClaimExchange
+  requires; an ExchangeStore of your own keeps the record until then.
+
+### Bug Fixes
+
+* keep an exchange's record while its subject token lives ([46eaf1a](https://github.com/oleg-tkachuk/limes/commit/46eaf1a1d751a3dfa96e5d7056627f0db43769d0))
+
 ## [0.147.0](https://github.com/oleg-tkachuk/limes/compare/v0.146.0...v0.147.0) (2026-11-01)
 
 ### Features

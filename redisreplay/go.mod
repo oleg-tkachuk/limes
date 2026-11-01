@@ -13,7 +13,7 @@ replace github.com/oleg-tkachuk/limes => ../
 
 require (
 	github.com/alicebob/miniredis/v2 v2.40.0
-	github.com/oleg-tkachuk/limes v0.147.0
+	github.com/oleg-tkachuk/limes v0.148.0
 	github.com/redis/go-redis/v9 v9.23.0
 )
 

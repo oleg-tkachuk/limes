@@ -2,6 +2,16 @@
 
 Every release of the exchange module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.15.7](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.15.6...exchange%2Fv0.15.7) (2026-11-01)
+
+### Bug Fixes
+
+* **exchange:** refuse a subject token whose capability was purged ([fe81dc3](https://github.com/oleg-tkachuk/limes/commit/fe81dc3b4d476f2fed5c66970509123048c901bb))
+
+### Dependencies
+
+* require limes v0.148.0
+
 ## [0.15.6](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.15.5...exchange%2Fv0.15.6) (2026-11-01)
 
 ### Dependencies
