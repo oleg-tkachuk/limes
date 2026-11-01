@@ -203,3 +203,89 @@ func checkReleaseMatchingMalformed(t *testing.T, f fixture) {
 	_, err = r.ReleaseMatching(f.Ctx, meter.ReleaseMatchingRequest{TenantID: other, ClientID: "client"})
 	expect.That(t, errors.Is(err, limes.ErrScopeMismatch), "a call scoped to another tenant: %v, want ErrScopeMismatch", err)
 }
+
+// leasedIn records a capability of client under parent, with no ceiling of
+// its own, and leases it heldEach; it returns the capability.
+func (f fixture) leasedIn(t *testing.T, l meter.Leaser, parent uuid.UUID, client string) uuid.UUID {
+	t.Helper()
+	id, err := f.NewCapability(CapabilitySpec{Parent: parent, Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget, ClientID: client})
+	expect.Must(t, err == nil, "record a capability: %v", err)
+	f.lease(t, l, newSubject(subjectSpec{capID: id, tenant: f.Tenant, unit: unit}), heldEach)
+	return id
+}
+
+// leaseOpen reports whether id still holds a lease.
+func (f fixture) leaseOpen(t *testing.T, l meter.Leaser, id uuid.UUID) bool {
+	t.Helper()
+	_, err := l.GetLease(f.Ctx, id)
+	expect.Must(t, err == nil || errors.Is(err, meter.ErrLeaseNotFound), "GetLease %s: %v", id, err)
+	return err == nil
+}
+
+// A batch settles at most Limit leases too, and says so: the loop ends with
+// every lease of a revoked match settled and nothing left held, holds or
+// none beside them.
+func checkReleaseMatchingSettlesLeasesInBatches(t *testing.T, f fixture) {
+	r, l := f.releaser(t), f.leaser(t)
+	const leases, batch = 3, 2
+	client := "client-" + uuid.New().String()
+	root, err := f.NewCapability(CapabilitySpec{Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget, ClientID: client})
+	expect.Must(t, err == nil, "root: %v", err)
+	var leased []uuid.UUID
+	for range leases {
+		leased = append(leased, f.leasedIn(t, l, root, ""))
+	}
+	expect.Must(t, f.Revoke(root) == nil, "revoke")
+	var total int64
+	for calls := 0; ; calls++ {
+		expect.Must(t, calls <= leases, "ReleaseMatching never reported the last batch")
+		got, err := r.ReleaseMatching(f.Ctx, meter.ReleaseMatchingRequest{TenantID: f.Tenant, ClientID: client, Limit: batch})
+		expect.Must(t, err == nil, "ReleaseMatching: %v", err)
+		expect.That(t, got.SettledLeases <= batch, "a batch settled %d leases, past its limit %d", got.SettledLeases, batch)
+		total += got.SettledLeases
+		if !got.More {
+			break
+		}
+	}
+	expect.That(t, total == leases, "the batches settled %d leases, want %d", total, leases)
+	for _, id := range leased {
+		expect.That(t, !f.leaseOpen(t, l, id), "the lease of %s outlived the sweep", id)
+	}
+	expect.That(t, f.usageOf(t, root).ReservedAmount == 0, "the root holds %v after the sweep, want nothing", f.usageOf(t, root).ReservedAmount)
+}
+
+// A lease under a match is settled when the match is revoked, even once
+// the match's own counters went: what matches is the delegation tree,
+// whichever of its capabilities still have counters.
+func checkReleaseMatchingSettlesALeaseUnderAForgottenAncestor(t *testing.T, f fixture) {
+	r, l := f.releaser(t), f.leaser(t)
+	client := "client-" + uuid.New().String()
+	root, err := f.NewCapability(CapabilitySpec{Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget})
+	expect.Must(t, err == nil, "root: %v", err)
+	match, err := f.NewCapability(CapabilitySpec{Parent: root, Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget, ClientID: client})
+	expect.Must(t, err == nil, "match: %v", err)
+	holder := f.leasedIn(t, l, match, "")
+	expect.Must(t, f.Usage.DeleteUsage(f.Ctx, meter.DeleteUsageRequest{CapabilityID: match}) == nil, "DeleteUsage of the match")
+	expect.Must(t, f.Revoke(match) == nil, "revoke")
+	got, err := r.ReleaseMatching(f.Ctx, meter.ReleaseMatchingRequest{TenantID: f.Tenant, ClientID: client})
+	expect.That(t, err == nil && got.SettledLeases == 1, "ReleaseMatching = %+v, %v; want the holder's lease settled", got, err)
+	expect.That(t, !f.leaseOpen(t, l, holder), "the lease under the revoked match outlived the sweep")
+	expect.That(t, f.usageOf(t, root).ReservedAmount == 0, "the root holds %v after the sweep, want nothing", f.usageOf(t, root).ReservedAmount)
+}
+
+// A hold under a match is released when the match is revoked, even once
+// the match's own counters went, as a lease is settled.
+func checkReleaseMatchingReleasesAHoldUnderAForgottenAncestor(t *testing.T, f fixture) {
+	r := f.releaser(t)
+	client := "client-" + uuid.New().String()
+	root, err := f.NewCapability(CapabilitySpec{Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget})
+	expect.Must(t, err == nil, "root: %v", err)
+	match, err := f.NewCapability(CapabilitySpec{Parent: root, Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget, ClientID: client})
+	expect.Must(t, err == nil, "match: %v", err)
+	_, hold := f.heldCapability(t, match, "")
+	expect.Must(t, f.Usage.DeleteUsage(f.Ctx, meter.DeleteUsageRequest{CapabilityID: match}) == nil, "DeleteUsage of the match")
+	expect.Must(t, f.Revoke(match) == nil, "revoke")
+	got, err := r.ReleaseMatching(f.Ctx, meter.ReleaseMatchingRequest{TenantID: f.Tenant, ClientID: client})
+	expect.That(t, err == nil && got.Released == 1, "ReleaseMatching = %+v, %v; want the hold released", got, err)
+	expect.That(t, !f.open(t, hold), "the hold under the revoked match outlived the sweep")
+}
