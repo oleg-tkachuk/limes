@@ -215,6 +215,9 @@ no requests no `Bump`.
    housekeeping settling expired and revoked leases; the scale benchmarks
    extended to charges under leases.
 5. `otelmetric` forwards `Leaser`; the guide documents choosing a lease.
+6. pgstore opens leases only once its operator sets `Config.Leases`: a
+   release that knows no leases, serving beside one that opens them during
+   a rolling upgrade, would read none of their state.
 
 ## Measured
 

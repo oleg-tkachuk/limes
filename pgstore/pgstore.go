@@ -221,6 +221,14 @@ type Config struct {
 	// call retried after PostgreSQL aborted it to break a deadlock. Nil:
 	// slog.Default().
 	Logger *slog.Logger
+	// Leases lets the usage store open leases (meter.Leaser.Lease). False,
+	// Lease refuses with meter.ErrLeasingDisabled; leases already open are
+	// still charged under and settled. A release that knows no leases, or
+	// only some of them, reads none of their state, so set it once every
+	// instance writing the database runs this release or a later one, and
+	// clear it, then settle every lease, before going back to an older one
+	// (docs/migration.md).
+	Leases bool
 	// MaxCopiesPerCapability is how many Biscuit copies the usage store
 	// counts for one capability (meter.Meter, "Copies of a Biscuit"). Zero:
 	// meter.DefaultMaxCopiesPerCapability; negative is refused. The record
@@ -262,6 +270,8 @@ type conn struct {
 	// checkEvery refuses, in a call across every tenant, a scope that
 	// admits fewer.
 	checkEvery func(ctx context.Context, tx pgx.Tx) error
+	// leases is Config.Leases.
+	leases bool
 	// maxCopies is Config.MaxCopiesPerCapability, its default applied.
 	maxCopies int64
 	// log is Config.Logger, its default applied.
@@ -296,6 +306,7 @@ func newConn(cfg Config) (conn, error) {
 		db: cfg.DB, now: cfg.Now, scope: cfg.Scope,
 		checkTenant: cfg.CheckTenant, checkScope: cfg.CheckScope,
 		checkReadOnly: checkReadOnly, checkEvery: checkEvery,
+		leases:    cfg.Leases,
 		maxCopies: int64(cfg.MaxCopiesPerCapability),
 		log:       cfg.Logger,
 	}, nil

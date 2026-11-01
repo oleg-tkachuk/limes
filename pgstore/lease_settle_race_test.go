@@ -69,10 +69,10 @@ func newSettleRaceFixture(t *testing.T) *settleRaceFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.hooked, err = NewUsageStore(Config{DB: f.db, Logger: slog.New(slog.NewTextHandler(&f.logs, nil))}); err != nil {
+	if f.hooked, err = NewUsageStore(Config{DB: f.db, Leases: true, Logger: slog.New(slog.NewTextHandler(&f.logs, nil))}); err != nil {
 		t.Fatal(err)
 	}
-	if f.other, err = NewUsageStore(Config{DB: app}); err != nil {
+	if f.other, err = NewUsageStore(Config{DB: app, Leases: true}); err != nil {
 		t.Fatal(err)
 	}
 	f.ctx = WithTenant(t.Context(), f.tenant)

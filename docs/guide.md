@@ -768,6 +768,13 @@ leaser := usage.(meter.Leaser)
 lease, err := leaser.Lease(ctx, meter.LeaseRequest{Subject: sub.MeterSubject(), Amount: limes.MustParseAmount("2.00")})
 ```
 
+pgstore opens leases only with `Config.Leases` set: a release that knows
+none reads none of their state, so set it once every instance writing the
+database runs one that does, and clear it, then settle every lease, before
+going back (the [migration notes](migration.md)). Without it `Lease` is
+`meter.ErrLeasingDisabled`, and a caller charges without one; leases
+already open are still charged under and settled.
+
 `Lease` holds the amount against every ancestor and the tenant at once,
 checking every ceiling as a `Reserve` of it would. From then on, a `Charge`
 of the leaseholder, or of a capability delegated from it, with the default
