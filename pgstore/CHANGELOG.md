@@ -2,6 +2,16 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.58.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.57.0...pgstore%2Fv0.58.0) (2026-11-01)
+
+### Features
+
+* **pgstore:** lease requests beside budget ([e2a3bb5](https://github.com/oleg-tkachuk/limes/commit/e2a3bb52cf7a635d8dca0852933f0c94813f30e8))
+
+### Dependencies
+
+* require limes v0.146.0
+
 ## [0.57.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.56.0...pgstore%2Fv0.57.0) (2026-11-01)
 
 ### Features

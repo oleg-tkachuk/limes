@@ -2,6 +2,16 @@
 
 Every release of the otelmetric module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.15.0](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.14.0...otelmetric%2Fv0.15.0) (2026-11-01)
+
+### Features
+
+* **otelmetric:** report the revocation cache's stale answers ([d2b4bda](https://github.com/oleg-tkachuk/limes/commit/d2b4bdae0d10d696785dbaf4178c307bcaa2e264))
+
+### Dependencies
+
+* require limes v0.146.0
+
 ## [0.14.0](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.13.2...otelmetric%2Fv0.14.0) (2026-11-01)
 
 ### Features
