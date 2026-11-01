@@ -2,6 +2,17 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.61.2](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.61.1...pgstore%2Fv0.61.2) (2026-11-01)
+
+### Bug Fixes
+
+* **pgstore:** keep a lease opened past DeleteUsage on its ancestor ([61bdd1a](https://github.com/oleg-tkachuk/limes/commit/61bdd1a433501068faee384bdbea2ad4491ab8d3))
+* **pgstore:** settle leases in the reset's and the drop's own transaction ([66c5bbd](https://github.com/oleg-tkachuk/limes/commit/66c5bbd4d78d23c38a4ebe371d20db9aa516ab07))
+
+### Dependencies
+
+* require limes v0.148.2
+
 ## [0.61.1](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.61.0...pgstore%2Fv0.61.1) (2026-11-01)
 
 ### Dependencies
