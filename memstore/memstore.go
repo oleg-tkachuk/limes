@@ -907,11 +907,11 @@ func (s *UsageStore) admitRequestLocked(subject limes.MeterSubject, ancestors []
 // as made. s.mu must be held.
 func (s *UsageStore) admitRequestsLocked(subject limes.MeterSubject, ancestors []limes.Capability, n int64) error {
 	used := func(id uuid.UUID) int64 { u := s.usage[id]; return u.RequestCount + u.ReservedRequests }
-	if !subject.Requests().Admits(used(subject.CapabilityID()) + n) {
+	if !subject.Requests().AdmitsMore(used(subject.CapabilityID()), n) {
 		return limes.ErrRequestLimitExceeded
 	}
 	for _, a := range ancestors {
-		if !a.Caveats.Requests.Admits(used(a.ID) + n) {
+		if !a.Caveats.Requests.AdmitsMore(used(a.ID), n) {
 			return fmt.Errorf("%w: ancestor %s", limes.ErrRequestLimitExceeded, a.ID)
 		}
 	}

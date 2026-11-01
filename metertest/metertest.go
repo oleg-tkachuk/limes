@@ -383,6 +383,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "LeaseIsSettledByAReset", Run: checkLeaseIsSettledByAReset},
 		{Name: "RequestLeaseStopsBumpsAtTheLeaseholder", Run: checkRequestLeaseStopsBumpsAtTheLeaseholder},
 		{Name: "RequestLeaseIsHeldToEveryCeiling", Run: checkRequestLeaseIsHeldToEveryCeiling},
+		{Name: "RequestLeaseThatCannotBeCountedIsRefused", Run: checkRequestLeaseThatCannotBeCountedIsRefused},
 		{Name: "RequestLeaseIsHeldAgainstASibling", Run: checkRequestLeaseIsHeldAgainstASibling},
 		{Name: "RequestLeaseIsExhaustedAndToppedUp", Run: checkRequestLeaseIsExhaustedAndToppedUp},
 		{Name: "LeaseCoversOnlyWhatItHolds", Run: checkLeaseCoversOnlyWhatItHolds},

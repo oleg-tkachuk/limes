@@ -1,6 +1,9 @@
 package limes
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 // A ceiling bounds what a capability, a copy of one or a tenant may use.
 // Its zero value is a ceiling of nothing — no request, no spend — so a bound
@@ -103,6 +106,13 @@ func (c BudgetCeiling) permitsSpend() bool { return c.Unlimited || c.Max > 0 }
 
 // Admits reports whether n requests in all stay under the ceiling.
 func (c RequestCeiling) Admits(n int64) bool { return c.Unlimited || n <= c.Max }
+
+// AdmitsMore reports whether n more requests on top of used stay under the
+// ceiling. A total that int64 cannot hold is refused whatever the ceiling:
+// summed, it would wrap below any of them.
+func (c RequestCeiling) AdmitsMore(used, n int64) bool {
+	return n <= math.MaxInt64-used && c.Admits(used+n)
+}
 
 // Admits reports whether amount spent in all stays under the ceiling.
 func (c BudgetCeiling) Admits(amount Nanos) bool { return c.Unlimited || amount <= c.Max }
