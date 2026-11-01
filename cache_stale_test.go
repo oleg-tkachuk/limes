@@ -237,3 +237,32 @@ func TestRevocationCacheKeepsARevokedIDOverAStaleSet(t *testing.T) {
 		t.Errorf("{a,b} over a failure = %v, %v; want revoked, as the cache saw b", revoked, err)
 	}
 }
+
+// evictingBound holds the revoked id, the set and one of its ids, so seeding
+// the set's other id pushes out the oldest: the revoked answer.
+const evictingBound = 3
+
+// A revoked answer the cache let go to make room fails a stale live answer
+// about a set of ids, as it fails a delegated capability's: the cache can no
+// longer tell whether the set held the revocation it lost.
+func TestRevocationCacheFailsAStaleSetOnceARevocationWasEvicted(t *testing.T) {
+	up := &idUpstream{revoked: map[string]bool{}}
+	clk := &stepClock{now: time.Unix(0, 0)}
+	c := newRevocationCache(t, RevocationCacheConfig{
+		Capabilities: &flakyUpstream{}, Biscuits: up, TTL: cacheTTL, MaxStale: cacheMaxStale, MaxEntries: evictingBound, Now: clk.Now,
+	})
+	a, b, revoked := []byte("a"), []byte("b"), []byte("c")
+	up.set(string(revoked), nil)
+	if got, err := c.IsBiscuitRevoked(t.Context(), [][]byte{revoked}); err != nil || !got {
+		t.Fatalf("{c} = %v, %v; want revoked", got, err)
+	}
+	// The set's answer and its seeded ids push c's revoked answer out.
+	if got, err := c.IsBiscuitRevoked(t.Context(), [][]byte{a, b}); err != nil || got {
+		t.Fatalf("{a,b} = %v, %v; want live", got, err)
+	}
+	clk.advance(cacheTTL + time.Second)
+	up.set("", errUpstreamDown)
+	if got, err := c.IsBiscuitRevoked(t.Context(), [][]byte{a, b}); !errors.Is(err, errUpstreamDown) {
+		t.Errorf("{a,b} over a failure once a revoked answer was evicted = %v, %v; want the failure", got, err)
+	}
+}

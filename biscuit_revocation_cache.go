@@ -50,11 +50,16 @@ func (c *RevocationCache) lookupBiscuitMisses(ctx context.Context, missing []str
 		ids[i] = []byte(k[len(idKeyPrefix):])
 	}
 	key := missing[0]
+	// A set's answer covers its ids: tagged with them, a stale live answer
+	// yields to one held revoked and fails while one let go to make room
+	// would still be kept (ttlcache.staleOr), as a delegated capability's.
+	var tags []string
 	if len(missing) > 1 {
-		key = setKey(ids)
+		key, tags = setKey(ids), missing
 	}
-	revoked, at, err := c.copies.Get(ctx, key, func(ctx context.Context) (bool, error) {
-		return c.biscuits.IsBiscuitRevoked(ctx, ids)
+	revoked, at, err := c.copies.GetTagged(ctx, key, func(ctx context.Context) (bool, []string, error) {
+		revoked, err := c.biscuits.IsBiscuitRevoked(ctx, ids)
+		return revoked, tags, err
 	})
 	// A live answer about the set, stale over a failure, does not undo the
 	// revocation of one of its ids that the cache read since.
