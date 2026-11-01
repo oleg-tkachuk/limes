@@ -76,6 +76,11 @@ const (
 	// which, counting back from the latest.
 	diffStepSettle
 	diffStepRevoke
+	// diffStepPurgeCharges ages the ledger past the retention, at most
+	// diffMaxAgings times a script, and purges every charge due.
+	diffStepPurgeCharges
+	// diffStepEraseOther charges another tenant and erases its usage.
+	diffStepEraseOther
 	diffSteps
 )
 
@@ -93,7 +98,12 @@ const (
 	// diffStepAdvance moves the clock; diffLife how long the tree lives.
 	diffTTL     = 3 * time.Minute
 	diffAdvance = time.Minute
-	diffLife    = 24 * time.Hour
+	// diffMaxAgings bounds how often diffStepPurgeCharges ages the clock
+	// past meter.MinChargeRetention, a year and more, so the tree outlives
+	// the script.
+	diffMaxAgings = 2
+	diffAging     = meter.MinChargeRetention + diffAdvance
+	diffLife      = 24*time.Hour + diffMaxAgings*diffAging
 )
 
 // diffSide is one store under the script: its records and its meter, the
@@ -105,7 +115,11 @@ type diffSide struct {
 		meter.UsageStore
 		meter.Leaser
 	}
-	ctx     context.Context
+	ledger meter.LedgerHousekeeping
+	eraser meter.TenantUsageEraser
+	ctx    context.Context
+	// scoped is the context a call about another tenant runs under.
+	scoped  func(tenant uuid.UUID) context.Context
 	charges []uuid.UUID
 	holds   []uuid.UUID
 }
@@ -160,6 +174,8 @@ func FuzzDifferential(f *testing.F) {
 		step(diffStepAdvance, 0, 1), step(diffStepAdvance, 0, 1), step(diffStepReleaseExpired, 0, 1)))
 	f.Add(script(step(diffStepCharge, diffGrandchild, 8), step(diffStepRevoke, diffChildA, 1), step(diffStepCharge, diffGrandchild, 2),
 		step(diffStepLease, diffChildB, 3), step(diffStepDeleteUsage, diffChildB, 1), step(diffStepRefund, 0, 1)))
+	f.Add(script(step(diffStepCharge, diffChildA, 4), step(diffStepDeleteUsage, diffChildA, 1), step(diffStepCharge, diffChildA, 6),
+		step(diffStepEraseOther, 0, 1), step(diffStepRefund, 0, 2), step(diffStepPurgeCharges, 0, 1), step(diffStepRefund, 0, 1)))
 	f.Fuzz(func(t *testing.T, script []byte) {
 		if len(script) > diffMaxSteps*diffStepSize {
 			script = script[:diffMaxSteps*diffStepSize]
@@ -175,18 +191,42 @@ func FuzzDifferential(f *testing.F) {
 				t.Fatalf("%s: tenant budget: %v", side.name, err)
 			}
 		}
+		agings := 0
 		for i := 0; i+diffStepSize <= len(script); i += diffStepSize {
 			at, arg := i/diffStepSize, int(script[i+1])
 			node := arg & diffNodeMask
 			amount := int64(arg>>diffNodeBits)&diffAmountMask + 1
 			s := int(script[i]) % diffSteps
-			if s == diffStepAdvance {
+			switch {
+			case s == diffStepAdvance:
 				clock.Advance(diffAdvance)
 				continue
+			case s == diffStepPurgeCharges && agings < diffMaxAgings:
+				clock.Advance(diffAging)
+				agings++
+			}
+			var other, otherCap uuid.UUID
+			if s == diffStepEraseOther {
+				other, otherCap = newTenant(t), uuid.New()
 			}
 			var outcomes [2]string
+			var purged [2]int64
 			for j, side := range sides {
-				outcomes[j] = outcome(diffApply(side, s, subjects[node], ids[node], tenant, amount))
+				var err error
+				switch s {
+				case diffStepPurgeCharges:
+					var res meter.PurgeChargesResult
+					res, err = side.ledger.PurgeCharges(side.ctx, meter.PurgeChargesRequest{})
+					purged[j] = res.Purged
+				case diffStepEraseOther:
+					err = diffEraseOther(side, other, otherCap, clock.Now().Add(diffLife))
+				default:
+					err = diffApply(side, s, subjects[node], ids[node], tenant, amount)
+				}
+				outcomes[j] = outcome(err)
+			}
+			if purged[0] != purged[1] {
+				t.Fatalf("step %d: purged %s %d, %s %d", at, sides[0].name, purged[0], sides[1].name, purged[1])
 			}
 			if outcomes[0] != outcomes[1] {
 				t.Fatalf("step %d (%d on %d, %d): %s %s, %s %s", at, s, node, amount, sides[0].name, outcomes[0], sides[1].name, outcomes[1])
@@ -207,7 +247,12 @@ func pgSide(t *testing.T, tenant uuid.UUID, clock *fakeClock) *diffSide {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &diffSide{name: "pgstore", records: records, usage: usage, ctx: WithTenant(context.Background(), tenant)}
+	ledger, err := NewLedger(Config{DB: app, Now: clock.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scoped := func(tenant uuid.UUID) context.Context { return WithTenant(context.Background(), tenant) }
+	return &diffSide{name: "pgstore", records: records, usage: usage, ledger: ledger, eraser: usage, ctx: scoped(tenant), scoped: scoped}
 }
 
 // memSide is a memstore on clock.
@@ -221,7 +266,10 @@ func memSide(t *testing.T, clock *fakeClock) *diffSide {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &diffSide{name: "memstore", records: records, usage: usage, ctx: context.Background()}
+	return &diffSide{
+		name: "memstore", records: records, usage: usage, ledger: memstore.NewLedger(usage), eraser: usage, ctx: context.Background(),
+		scoped: func(uuid.UUID) context.Context { return context.Background() },
+	}
 }
 
 // diffRecordTree records diffTree in every side under tenant, each
@@ -253,6 +301,28 @@ func diffRecordTree(t *testing.T, sides [2]*diffSide, tenant uuid.UUID, expires 
 		}).(limes.MeterSubject)
 	}
 	return subjects, ids
+}
+
+// diffEraseOther records a capability of tenant other on side, charges it,
+// and erases that tenant's usage.
+func diffEraseOther(side *diffSide, other, capID uuid.UUID, expires time.Time) error {
+	ctx := side.scoped(other)
+	budget := limes.BudgetCeiling{Unlimited: true, UnitCode: testUnit}
+	c := limes.Capability{
+		ID: capID, ExpiresAt: expires.Truncate(time.Second),
+		Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: other, Subject: "agent"},
+		Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: budget},
+	}
+	if err := side.records.Insert(ctx, limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "issuer"}}); err != nil {
+		return err
+	}
+	subject := link.NewMeterSubject(link.MeterSubjectFields{
+		CapabilityID: capID, TenantID: other, Requests: limes.RequestCeiling{Unlimited: true}, Budget: budget,
+	}).(limes.MeterSubject)
+	if _, err := side.usage.Charge(ctx, meter.ChargeRequest{Subject: subject, Amount: diffUnit}, nil); err != nil {
+		return err
+	}
+	return side.eraser.EraseTenantUsage(ctx, meter.EraseTenantUsageRequest{TenantID: other})
 }
 
 // diffApply runs step s on side and returns its error.

@@ -364,6 +364,24 @@ func (c *Cache[K]) countHit() {
 	c.hits[rand.Uint32()%hitStripes].n.Add(1) //nolint:gosec // G404: picks a stripe to spread contention, nothing to guess
 }
 
+// SeedRevoked caches key as revoked, as an answer about a question that
+// spans it, read now, in epoch, said; nothing when a clear has happened
+// since. A revoked answer is never undone, so it replaces whatever key held.
+func (c *Cache[K]) SeedRevoked(key K, epoch uint64) {
+	s := c.shardOf(key)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Checked under the shard's lock: a clear empties the shard under it,
+	// after counting itself.
+	if c.epoch.Load() != epoch {
+		return
+	}
+	now := c.cfg.Now()
+	c.noteLost(s.makeRoomLocked(now, c.TTL(), c.keep()))
+	s.entries[key] = cacheEntry[K]{revoked: true, at: now}
+	s.order = append(s.order, queued[K]{key: key, at: now})
+}
+
 // SeedLive caches keys as not revoked, as an answer about them all read at
 // at, in epoch, said; nothing when a clear has happened since or the answer
 // is no longer fresh. Seeded as read now, keys would outlive an answer

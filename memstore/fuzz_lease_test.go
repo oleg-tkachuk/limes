@@ -62,6 +62,13 @@ const (
 	// leaseStepAudit settles every lease and holds each counter to the
 	// model's, so a drift is caught at the step that made it.
 	leaseStepAudit
+	// leaseStepPurgeCharges ages the ledger past the retention, at most
+	// leaseFuzzMaxAgings times a script, and purges at most the amount of
+	// charges from it.
+	leaseStepPurgeCharges
+	// leaseStepEraseOther charges another tenant and erases its usage: the
+	// ledger is rebuilt around this tenant's charges.
+	leaseStepEraseOther
 	leaseSteps
 )
 
@@ -78,18 +85,26 @@ const (
 	// leaseStepAdvance moves the clock: a few steps end a lease.
 	leaseFuzzTTL     = 3 * time.Minute
 	leaseFuzzAdvance = time.Minute
-	leaseFuzzLife    = 24 * time.Hour
+	// leaseFuzzMaxAgings bounds how often leaseStepPurgeCharges ages the
+	// clock past meter.MinChargeRetention, a year and more, so the tree,
+	// living leaseFuzzLife, outlives the script.
+	leaseFuzzMaxAgings = 4
+	leaseFuzzAging     = meter.MinChargeRetention + leaseFuzzAdvance
+	leaseFuzzLife      = 24*time.Hour + leaseFuzzMaxAgings*leaseFuzzAging
 )
 
 // leaseCharge is a charge the model saw taken: its node, what is left of it
-// to refund, and the counters it debited — each node's epoch and the
-// tenant's period as they were when it was taken.
+// to refund, the counters it debited — each node's epoch and the tenant's
+// period as they were when it was taken — when, and whether a purge of the
+// ledger may have taken it since.
 type leaseCharge struct {
-	id     uuid.UUID
-	node   int
-	left   int64
-	epochs [leaseNodes]int
-	period int
+	id        uuid.UUID
+	node      int
+	left      int64
+	epochs    [leaseNodes]int
+	period    int
+	at        time.Time
+	mayBeGone bool
 }
 
 // leaseModel is what the store must count, from the meter's contract
@@ -115,12 +130,12 @@ func chain(node int) []int {
 	return nodes
 }
 
-func (m *leaseModel) charge(id uuid.UUID, node int, amount int64) {
+func (m *leaseModel) charge(id uuid.UUID, node int, amount int64, at time.Time) {
 	for _, n := range chain(node) {
 		m.spent[n] += amount
 	}
 	m.tenantSpent += amount
-	m.charges = append(m.charges, leaseCharge{id: id, node: node, left: amount, epochs: m.epochs, period: m.period})
+	m.charges = append(m.charges, leaseCharge{id: id, node: node, left: amount, epochs: m.epochs, period: m.period, at: at})
 }
 
 func (m *leaseModel) bump(node int) {
@@ -193,6 +208,13 @@ func FuzzLeases(f *testing.F) {
 	// A lease of a child, its root's counters dropped, a charge of the
 	// child: the root counts it, restarted.
 	f.Add(script(step(leaseStepLease, leaseChildB, 5), step(leaseStepDeleteUsage, leaseRoot, 1), step(leaseStepCharge, leaseChildB, 5)))
+	// A charge, its counters restarted and charged again, the ledger
+	// purged of nothing yet due and rebuilt by another tenant's erase,
+	// then the first charge refunded; then aged and purged, and refunded
+	// again.
+	f.Add(script(step(leaseStepCharge, leaseChildA, 4), step(leaseStepDeleteUsage, leaseChildA, 1), step(leaseStepCharge, leaseChildA, 6),
+		step(leaseStepEraseOther, 0, 1), step(leaseStepRefund, leaseChildA, 2), step(leaseStepAudit, 0, 1),
+		step(leaseStepPurgeCharges, 0, 1), step(leaseStepRefund, leaseChildA, 1), step(leaseStepAudit, 0, 1)))
 	f.Fuzz(func(t *testing.T, script []byte) {
 		if len(script) > leaseFuzzMaxSteps*leaseStepSize {
 			script = script[:leaseFuzzMaxSteps*leaseStepSize]
@@ -207,6 +229,8 @@ func FuzzLeases(f *testing.F) {
 			t.Fatal(err)
 		}
 		subjects, ids := recordLeaseTree(ctx, t, u, tenant, now.Add(leaseFuzzLife))
+		ledger := NewLedger(u)
+		agings := 0
 		var m leaseModel
 		for i := 0; i+leaseStepSize <= len(script); i += leaseStepSize {
 			at := i / leaseStepSize
@@ -220,7 +244,7 @@ func FuzzLeases(f *testing.F) {
 				req := meter.ChargeRequest{Subject: subject, Amount: limes.Nanos(amount) * unit, ExternalRef: uuid.New().String()}
 				var r meter.ChargeReceipt
 				if r, err = u.Charge(ctx, req, nil); err == nil {
-					m.charge(r.ChargeID, node, amount)
+					m.charge(r.ChargeID, node, amount, now)
 					if s == leaseStepChargeTwice {
 						// A replay moves nothing.
 						if r, err := u.Charge(ctx, req, nil); err != nil || !r.Replayed {
@@ -260,12 +284,40 @@ func FuzzLeases(f *testing.F) {
 				}
 				c := &m.charges[len(m.charges)-1-int(amount-1)%len(m.charges)]
 				r, err := u.Refund(ctx, meter.RefundRequest{ChargeID: c.id, Remaining: true})
+				if c.mayBeGone && errors.Is(err, meter.ErrChargeNotFound) {
+					// Purged: nothing to give back, and nothing changes.
+					c.left = 0
+					break
+				}
 				if err != nil || r.Amount != limes.Nanos(c.left)*unit {
 					t.Fatalf("step %d: refund of %d left = %+v, %v", at, c.left, r, err)
 				}
 				m.refund(c)
 			case leaseStepAudit:
 				auditLeases(ctx, t, u, tenant, subjects, ids, &m, at)
+			case leaseStepPurgeCharges:
+				if agings < leaseFuzzMaxAgings {
+					now = now.Add(leaseFuzzAging)
+					agings++
+				}
+				res, err := ledger.PurgeCharges(ctx, meter.PurgeChargesRequest{Limit: int(amount)})
+				if err != nil {
+					t.Fatalf("step %d: PurgeCharges: %v", at, err)
+				}
+				cutoff, due := now.Add(-meter.MinChargeRetention), int64(0)
+				for i := range m.charges {
+					if m.charges[i].at.Before(cutoff) && !m.charges[i].mayBeGone {
+						m.charges[i].mayBeGone = true
+					}
+					if m.charges[i].at.Before(cutoff) {
+						due++
+					}
+				}
+				if res.Purged > amount || res.Purged > due {
+					t.Fatalf("step %d: PurgeCharges = %+v, past the limit %d or the %d charges due", at, res, amount, due)
+				}
+			case leaseStepEraseOther:
+				eraseAnotherTenant(ctx, t, u, now.Add(leaseFuzzLife), at)
 			}
 			if err != nil && !isLeaseRefusal(err) {
 				t.Fatalf("step %d: %v", at, err)
@@ -298,6 +350,30 @@ func auditLeases(ctx context.Context, t *testing.T, u *UsageStore, tenant uuid.U
 	}
 	if b.SpentAmount != limes.Nanos(m.tenantSpent)*unit || b.ReservedAmount != 0 {
 		t.Fatalf("step %d: tenant settled: %+v; want %d spent in the period, nothing reserved", step, b, m.tenantSpent)
+	}
+}
+
+// eraseAnotherTenant records a capability of a new tenant, charges it, and
+// erases that tenant's usage, which rebuilds the ledger around every other
+// tenant's charges.
+func eraseAnotherTenant(ctx context.Context, t *testing.T, u *UsageStore, expires time.Time, step int) {
+	t.Helper()
+	other := uuid.New()
+	budget := limes.BudgetCeiling{Unlimited: true, UnitCode: defaultTestUnit}
+	c := limes.Capability{
+		ID: uuid.New(), ExpiresAt: expires,
+		Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: other, Subject: "agent"},
+		Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Budget: budget},
+	}
+	if err := u.records.Insert(ctx, limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "issuer"}}); err != nil {
+		t.Fatalf("step %d: another tenant's capability: %v", step, err)
+	}
+	subject := newSubject(subjectSpec{capID: c.ID, tenant: other, budget: &budget})
+	if _, err := u.Charge(ctx, meter.ChargeRequest{Subject: subject, Amount: unit}, nil); err != nil {
+		t.Fatalf("step %d: another tenant's charge: %v", step, err)
+	}
+	if err := u.EraseTenantUsage(ctx, meter.EraseTenantUsageRequest{TenantID: other}); err != nil {
+		t.Fatalf("step %d: EraseTenantUsage: %v", step, err)
 	}
 }
 
