@@ -107,6 +107,127 @@ func BenchmarkChainDepth(b *testing.B) {
 				}
 			}
 		})
+		// Under a lease of its own the leaf counts only itself, at any depth.
+		f.leaseAll(b, leaf)
+		b.Run(fmt.Sprintf("op=ChargeLeased/depth=%d", depth), func(b *testing.B) {
+			n := 0
+			defer reportRoundTrips(b, sent)()
+			for b.Loop() {
+				n++
+				if _, err := f.usage.Charge(ctx, meter.ChargeRequest{Subject: leaf, Amount: 1, ExternalRef: strconv.Itoa(n)}, nil); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+		b.Run(fmt.Sprintf("op=BumpLeased/depth=%d", depth), func(b *testing.B) {
+			defer reportRoundTrips(b, sent)()
+			for b.Loop() {
+				if _, err := f.usage.Bump(ctx, meter.BumpRequest{Subject: leaf}); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// benchSubAgents is how many sub-agents of one root charge at once in
+// BenchmarkOneRoot: goroutines, each waiting on its own transaction, so they
+// contend on the database whatever GOMAXPROCS is.
+const benchSubAgents = 8
+
+// Charge and Bump from benchSubAgents sub-agents at once, each a child of
+// its own under one root, as an orchestrator's are: without leases every
+// call locks the root's counters and they queue there; with each child
+// under a lease of its own none does (docs/adr/0017-budget-leases.md). Over
+// each of scaleRTTs.
+func BenchmarkOneRoot(b *testing.B) {
+	skipUnlessScale(b)
+	for _, rtt := range scaleRTTs {
+		for _, leased := range []bool{false, true} {
+			pool, _ := latencyPoolOf(b, rtt, benchSubAgents+1)
+			f := newBenchFixtureOver(b, pool)
+			children := f.childrenOfOneRoot(b, benchSubAgents)
+			if leased {
+				f.leaseAll(b, children...)
+			}
+			var seq atomic.Int64
+			b.Run(fmt.Sprintf("op=Charge/leased=%t/rtt=%s", leased, rtt), func(b *testing.B) {
+				concurrently(b, children, func(leaf limes.MeterSubject) error {
+					return chargeLeaf(b, f, leaf, int(seq.Add(1)))
+				})
+			})
+			b.Run(fmt.Sprintf("op=Bump/leased=%t/rtt=%s", leased, rtt), func(b *testing.B) {
+				concurrently(b, children, func(leaf limes.MeterSubject) error {
+					_, err := f.usage.Bump(WithTenant(b.Context(), f.tenant), meter.BumpRequest{Subject: leaf})
+					return err
+				})
+			})
+		}
+	}
+}
+
+// childrenOfOneRoot records a root of f's tenant and n children of it, and
+// returns the children as a meter sees them.
+func (f benchFixture) childrenOfOneRoot(b *testing.B, n int) []limes.MeterSubject {
+	b.Helper()
+	ctx := WithTenant(b.Context(), f.tenant)
+	expiry := time.Now().Add(benchTTL)
+	caveats := limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true, UnitCode: testUnit}}
+	root := limes.Capability{
+		ID: uuid.New(), ExpiresAt: expiry, Caveats: caveats,
+		Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: f.tenant, Subject: "agent:root"},
+	}
+	if err := f.records.Insert(ctx, limes.InsertRequest{Capability: root}); err != nil {
+		b.Fatal(err)
+	}
+	children := make([]limes.MeterSubject, n)
+	for i := range children {
+		c := limes.Capability{
+			ID: uuid.New(), ParentID: root.ID, ExpiresAt: expiry, Caveats: caveats,
+			Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: f.tenant, Subject: "agent:" + strconv.Itoa(i)},
+		}
+		if err := f.records.Insert(ctx, limes.InsertRequest{Capability: c}); err != nil {
+			b.Fatal(err)
+		}
+		children[i] = meterSubject(c.ID, f.tenant)
+	}
+	return children
+}
+
+// concurrently runs op b.N times in all, from a goroutine for each of
+// leaves, each on its own leaf, reporting the first error.
+func concurrently(b *testing.B, leaves []limes.MeterSubject, op func(leaf limes.MeterSubject) error) {
+	b.Helper()
+	var left atomic.Int64
+	left.Store(int64(b.N))
+	var wg sync.WaitGroup
+	b.ResetTimer()
+	for _, leaf := range leaves {
+		wg.Go(func() {
+			for left.Add(-1) >= 0 {
+				if err := op(leaf); err != nil {
+					b.Error(err)
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
+}
+
+// benchLeaseRequests is what each leaf of the leased benchmarks leases in
+// requests: past any run's bumps.
+const benchLeaseRequests = int64(1) << 50
+
+// leaseAll leases each of leaves benchLease and benchLeaseRequests, a lease
+// of its own.
+func (f benchFixture) leaseAll(b *testing.B, leaves ...limes.MeterSubject) {
+	b.Helper()
+	ctx := WithTenant(b.Context(), f.tenant)
+	for _, leaf := range leaves {
+		if _, err := f.usage.Lease(ctx, meter.LeaseRequest{Subject: leaf, Amount: benchLease, Requests: benchLeaseRequests, TTL: benchTTL}); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 

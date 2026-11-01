@@ -219,12 +219,12 @@ tasks:
       - node .github/ci/bench.ts pgstore
 
   bench:pgstore:scale:
-    desc: "pgstore's Charge, Bump and IsRevoked at chain depths 1 to 64 and with 0, 1 and 2 ms added to every round trip to PostgreSQL (bench_scale_test.go) — needs a running Docker; takes minutes"
+    desc: "pgstore's Charge, Bump and IsRevoked at chain depths 1 to 64, with and without a lease, sub-agents of one root with and without leases, and with 0, 1 and 2 ms added to every round trip to PostgreSQL (bench_scale_test.go) — needs a running Docker; takes minutes"
     dir: '{{.PGSTORE_DIR}}'
     env:
       LIMES_BENCH_SCALE: "1"
     cmds:
-      - go test -run '^$' -bench 'ChainDepth|RoundTrip' -benchtime 2s -timeout 30m .
+      - go test -run '^$' -bench 'ChainDepth|RoundTrip|OneRoot' -benchtime 2s -timeout 30m .
 
   bench:limes:
     desc: "limes's benchmarks on this commit beside the newest limes release, compared by benchstat — needs the release's tag"
