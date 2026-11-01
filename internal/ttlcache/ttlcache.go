@@ -235,6 +235,11 @@ func (c *Cache[K]) staleOr(ctx context.Context, s *shard[K], key K, revoked bool
 	if c.cfg.OnStale != nil {
 		c.cfg.OnStale(e.at, err)
 	}
+	// A live answer covers its tags too; one the cache holds revoked, read
+	// since, is not undone by it.
+	if !e.revoked && c.HeldRevoked(e.tags) {
+		return true, e.at, nil
+	}
 	return e.revoked, e.at, nil
 }
 
