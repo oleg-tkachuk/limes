@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"time"
 	"uuid"
 
@@ -67,6 +68,23 @@ WITH RECURSIVE chain (id, parent_id, depth) AS (
     JOIN chain ON c.id = chain.parent_id
     WHERE chain.depth <= $2
 )`
+
+// sqlChainUp is the ids of the capability column names and of each
+// ancestor on record above it, up to one past limes.MaxDelegationDepth: a
+// subquery that may name a column of the query around it, which a
+// parameter of sqlChain's cannot.
+func sqlChainUp(column string) string {
+	return `
+        WITH RECURSIVE up (id, parent_id, depth) AS (
+            SELECT id, parent_id, 0 FROM ` + lineageView + ` WHERE id = ` + column + `
+          UNION ALL
+            SELECT l.id, l.parent_id, up.depth + 1
+            FROM ` + lineageView + ` l
+            JOIN up ON l.id = up.parent_id
+            WHERE up.depth <= ` + strconv.Itoa(limes.MaxDelegationDepth) + `
+        )
+        SELECT id FROM up`
+}
 
 const (
 	// sqlLineage walks up from $1 to one ancestor past $2

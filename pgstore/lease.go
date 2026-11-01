@@ -135,17 +135,6 @@ LIMIT $2`
 
 	// sqlOrphanLeases are the leases of capabilities no longer on record, at
 	// most $1.
-	// sqlMatchingLeasesHead and sqlMatchingLeasesTail surround the selectors
-	// of ReleaseMatching, on the capability c: the leases of tenant $1 —
-	// every tenant's, $1 being NULL — at most $2, each of a revoked
-	// capability that is c or was delegated from it.
-	sqlMatchingLeasesHead = `
-SELECT u.capability_id, u.tenant_id FROM limes.usage u
-JOIN limes.capabilities h ON h.id = u.capability_id
-WHERE u.lease_id IS NOT NULL AND ($1::uuid IS NULL OR u.tenant_id = $1) AND h.revoked
-  AND EXISTS (
-    SELECT 1 FROM limes.capabilities c
-    WHERE c.id = ANY (u.capability_id || u.lease_ancestors) AND c.tenant_id = u.tenant_id`
 	sqlMatchingLeasesTail = `)
 ORDER BY u.capability_id
 LIMIT $2`
@@ -547,15 +536,28 @@ func (s *UsageStore) settleLease(ctx context.Context, tx pgx.Tx, capID uuid.UUID
 	return leaseView(capID, tenantID, unit, l), nil
 }
 
+// sqlMatchingLeasesHead and sqlMatchingLeasesTail surround the selectors of
+// ReleaseMatching, on the capability c: the leases of tenant $1 — every
+// tenant's, $1 being NULL — at most $2, each of a revoked capability that
+// is c or was delegated from it, over the delegation tree on record rather
+// than lease_ancestors, which drops the capabilities whose counters went.
+var sqlMatchingLeasesHead = `
+SELECT u.capability_id, u.tenant_id FROM limes.usage u
+JOIN limes.capabilities h ON h.id = u.capability_id
+WHERE u.lease_id IS NOT NULL AND ($1::uuid IS NULL OR u.tenant_id = $1) AND h.revoked
+  AND EXISTS (
+    SELECT 1 FROM limes.capabilities c
+    WHERE c.id IN (` + sqlChainUp("u.capability_id") + `) AND c.tenant_id = u.tenant_id`
+
 // leaseholder is a capability holding a lease, and its tenant.
 type leaseholder struct {
 	capID, tenantID uuid.UUID
 }
 
 // settleEach settles the lease of each holder query names, each in a
-// transaction of its own, and returns those it settled: one settled
-// meanwhile is no error.
-func (s *UsageStore) settleEach(ctx context.Context, inTx func(func(pgx.Tx) error) error, query string, args ...any) ([]leaseholder, error) {
+// transaction of its own, and returns those it settled, and how many query
+// named: one settled meanwhile is no error.
+func (s *UsageStore) settleEach(ctx context.Context, inTx func(func(pgx.Tx) error) error, query string, args ...any) ([]leaseholder, int, error) {
 	var holders []leaseholder
 	err := inTx(func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, query, args...)
@@ -569,7 +571,7 @@ func (s *UsageStore) settleEach(ctx context.Context, inTx func(func(pgx.Tx) erro
 		return err
 	})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	var settled []leaseholder
 	for _, h := range holders {
@@ -577,11 +579,11 @@ func (s *UsageStore) settleEach(ctx context.Context, inTx func(func(pgx.Tx) erro
 			if errors.Is(err, meter.ErrLeaseNotFound) {
 				continue
 			}
-			return settled, err
+			return settled, len(holders), err
 		}
 		settled = append(settled, h)
 	}
-	return settled, nil
+	return settled, len(holders), nil
 }
 
 // refundLeased gives amount of e, a charge taken under a lease still open,
