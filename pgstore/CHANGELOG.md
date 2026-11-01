@@ -2,6 +2,17 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.57.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.56.0...pgstore%2Fv0.57.0) (2026-11-01)
+
+### Features
+
+* **pgstore:** add the lease columns and their expiry index ([188c673](https://github.com/oleg-tkachuk/limes/commit/188c6738084b5f8d6788b504da17a138f5fbc545))
+* **pgstore:** lease a capability budget of its chain ([71a1dd0](https://github.com/oleg-tkachuk/limes/commit/71a1dd0c294106e4d021fb77d80ac69888c2090c))
+
+### Dependencies
+
+* require limes v0.145.0
+
 ## [0.56.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.55.0...pgstore%2Fv0.56.0) (2026-10-31)
 
 ### Features

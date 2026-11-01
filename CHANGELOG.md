@@ -2,6 +2,20 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.145.0](https://github.com/oleg-tkachuk/limes/compare/v0.144.0...v0.145.0) (2026-11-01)
+
+### Features
+
+* **cache:** bound a stale revocation answer over an upstream outage ([175b16b](https://github.com/oleg-tkachuk/limes/commit/175b16b1c29279892bb0fc3e52e686947a957af3))
+* **memstore:** charge a Biscuit copy through the whole chain under a lease ([96d0aab](https://github.com/oleg-tkachuk/limes/commit/96d0aabe1ed82247b4497fc708d5ef6f918f0b08))
+* **memstore:** charge under a lease up to the leaseholder ([01f7fa5](https://github.com/oleg-tkachuk/limes/commit/01f7fa527e9ce135b773ca4ba8a37bf1ef30f4ef))
+* **meter:** lease a capability budget of its chain ([b816796](https://github.com/oleg-tkachuk/limes/commit/b816796884fe2df70ff11f586034a7f23e798fea))
+* **ttlcache:** serve a stale answer over a failed lookup ([0baddf1](https://github.com/oleg-tkachuk/limes/commit/0baddf182275e3c3a537ecdc6ffd3209b1a300a9))
+
+### Bug Fixes
+
+* **ci:** keep one blank line between changelog entries ([2731a80](https://github.com/oleg-tkachuk/limes/commit/2731a809301ea41dfa670e5db138a93b01488c13))
+
 ## [0.144.0](https://github.com/oleg-tkachuk/limes/compare/v0.143.0...v0.144.0) (2026-10-31)
 
 ### Features

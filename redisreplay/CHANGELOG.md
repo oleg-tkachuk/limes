@@ -2,6 +2,16 @@
 
 Every release of the redisreplay module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.3.8](https://github.com/oleg-tkachuk/limes/compare/redisreplay%2Fv0.3.7...redisreplay%2Fv0.3.8) (2026-11-01)
+
+### Bug Fixes
+
+* **ci:** keep one blank line between changelog entries ([2731a80](https://github.com/oleg-tkachuk/limes/commit/2731a809301ea41dfa670e5db138a93b01488c13))
+
+### Dependencies
+
+* require limes v0.145.0
+
 ## [0.3.7](https://github.com/oleg-tkachuk/limes/compare/redisreplay%2Fv0.3.6...redisreplay%2Fv0.3.7) (2026-10-31)
 
 ### Dependencies
