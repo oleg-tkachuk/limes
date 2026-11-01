@@ -28,6 +28,7 @@ var Optional = []Interface{
 	{Name: "TenantUsageEraser", Forwarder: "tenantUsageEraser"},
 	{Name: "MatchingReleaser", Forwarder: "matchingReleaser"},
 	{Name: "TenantReservationLister", Forwarder: "tenantReservationLister"},
+	{Name: "Leaser", Forwarder: "leaser"},
 }
 
 // File is the generated file's name in otelmetric.

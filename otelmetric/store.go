@@ -85,6 +85,25 @@ func (l tenantReservationLister) ListTenantReservations(ctx context.Context, req
 	return l.lister.ListTenantReservations(ctx, req)
 }
 
+// leaser forwards Lease, GetLease and SettleLease. A lease moves budget
+// from the chain to the leaseholder, not spend: the charges under it are
+// Charge's, which emits them, so it emits nothing itself.
+type leaser struct {
+	leases meter.Leaser
+}
+
+func (l leaser) Lease(ctx context.Context, req meter.LeaseRequest) (meter.Lease, error) {
+	return l.leases.Lease(ctx, req)
+}
+
+func (l leaser) GetLease(ctx context.Context, capID uuid.UUID) (meter.Lease, error) {
+	return l.leases.GetLease(ctx, capID)
+}
+
+func (l leaser) SettleLease(ctx context.Context, req meter.SettleLeaseRequest) (meter.Lease, error) {
+	return l.leases.SettleLease(ctx, req)
+}
+
 // Bump emits limes.request.bumps.
 func (s *meteringStore) Bump(ctx context.Context, req meter.BumpRequest) (meter.BumpReceipt, error) {
 	receipt, err := s.inner.Bump(ctx, req)
