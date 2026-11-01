@@ -477,6 +477,8 @@ func (s *UsageStore) settleLocked(ctx context.Context, tx pgx.Tx, op string, l l
 		switch {
 		case errors.Is(err, meter.ErrLeaseNotFound):
 		case errors.Is(err, errLeaseMoved):
+			// Not while tx holds every counter the leases are on, which the
+			// callers take first; kept should a caller lock less.
 			return errLeaseOpened
 		case err != nil:
 			return err
@@ -506,9 +508,10 @@ func (s *UsageStore) setTenantBudget(ctx context.Context, tx pgx.Tx, req meter.S
 	}
 	// Every lease locks the aggregate once it exists, so none opens between
 	// this check and the reset's commit; one that committed before the
-	// leases were locked is seen here. One of requests alone at a tenant
-	// with no aggregate yet locks nothing and may still open; it is settled
-	// before an amount is added to it (UsageStore.lease).
+	// leases were locked is seen here, and the reset runs again. At a tenant
+	// with no aggregate yet, whose first reset this is, a lease of requests
+	// alone locks nothing and can open at any point of the transaction; it
+	// too is seen here, and once the reset commits the aggregate exists.
 	if req.ResetSpend {
 		var leased bool
 		if err := tx.QueryRow(ctx, sqlTenantLeased, req.TenantID).Scan(&leased); err != nil {
