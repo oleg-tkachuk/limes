@@ -2,6 +2,12 @@
 
 Every release of the redisreplay module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.3.14](https://github.com/oleg-tkachuk/limes/compare/redisreplay%2Fv0.3.13...redisreplay%2Fv0.3.14) (2026-11-01)
+
+### Dependencies
+
+* require limes v0.148.3
+
 ## [0.3.13](https://github.com/oleg-tkachuk/limes/compare/redisreplay%2Fv0.3.12...redisreplay%2Fv0.3.13) (2026-11-01)
 
 ### Dependencies
