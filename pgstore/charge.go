@@ -22,13 +22,20 @@ func (s *UsageStore) Bump(ctx context.Context, req meter.BumpRequest) (meter.Bum
 		return meter.BumpReceipt{}, err
 	}
 	var receipt meter.BumpReceipt
-	err := s.retryDeadlock(ctx, retriedBump, func() error {
-		return s.inTenantTx(ctx, req.Subject.TenantID(), func(tx pgx.Tx) error {
-			var err error
-			receipt.RequestCount, err = s.bump(ctx, tx, req.Subject)
-			return err
+	attempt := func() error {
+		return s.retryDeadlock(ctx, retriedBump, func() error {
+			return s.inTenantTx(ctx, req.Subject.TenantID(), func(tx pgx.Tx) error {
+				var err error
+				receipt.RequestCount, err = s.bump(ctx, tx, req.Subject)
+				return err
+			})
 		})
-	})
+	}
+	err := attempt()
+	// A lease that moved between its read and its lock is read afresh.
+	if errors.Is(err, errLeaseMoved) {
+		err = attempt()
+	}
 	if err != nil {
 		return meter.BumpReceipt{RequestCount: receipt.RequestCount}, err
 	}
@@ -38,9 +45,20 @@ func (s *UsageStore) Bump(ctx context.Context, req meter.BumpRequest) (meter.Bum
 // bump is Bump in tx: the subject's request count after this request, or,
 // refused once its counters are locked, the count before it.
 func (s *UsageStore) bump(ctx context.Context, tx pgx.Tx, subject limes.MeterSubject) (int64, error) {
-	ancestors, err := readLineage(ctx, tx, subject.TenantID(), subject.CapabilityID())
+	// A bump of a Biscuit copy, whose quota counts on every ancestor's row,
+	// goes through the whole chain, as a charge of one does.
+	p, err := readPrelude(ctx, tx, subject.TenantID(), subject.CapabilityID(), "", len(subject.Copies()) == 0)
 	if err != nil {
 		return 0, err
+	}
+	ancestors, err := p.ancestors, p.lineageErr
+	if err != nil {
+		return 0, err
+	}
+	// Under a lease of its own or an ancestor's that holds requests, the
+	// bump stops at the leaseholder (docs/adr/0017-budget-leases.md).
+	if holder, below, ok := leaseFor(subject.CapabilityID(), ancestors, p.leases, s.clock(), leaseState.coversBumps); ok {
+		return s.bumpLeased(ctx, tx, subject, ancestors, below, holder, p.leases[holder])
 	}
 	c, err := lock(ctx, tx, lockRequest{
 		now:     s.clock(),
@@ -67,11 +85,19 @@ func admitRequest(c *counters, subject limes.MeterSubject, ancestors []ancestor)
 			return fmt.Errorf("%w: copy %x", limes.ErrRequestLimitExceeded, cp.RevocationID)
 		}
 	}
-	if !subject.Requests().Admits(c.usage[subject.CapabilityID()].requests + 1) {
+	return admitRequests(c, subject, ancestors, 1)
+}
+
+// admitRequests refuses n more requests of subject past its own or an
+// ancestor's request ceiling, the requests leases hold of each counted as
+// made.
+func admitRequests(c *counters, subject limes.MeterSubject, ancestors []ancestor, n int64) error {
+	used := func(id uuid.UUID) int64 { u := c.usageOf(id); return u.requests + u.reservedRequests }
+	if !subject.Requests().Admits(used(subject.CapabilityID()) + n) {
 		return limes.ErrRequestLimitExceeded
 	}
 	for _, a := range ancestors {
-		if !a.requests.Admits(c.usageOf(a.id).requests + 1) {
+		if !a.requests.Admits(used(a.id) + n) {
 			return fmt.Errorf("%w: ancestor %s", limes.ErrRequestLimitExceeded, a.id)
 		}
 	}
@@ -225,7 +251,7 @@ func (s *UsageStore) charge(ctx context.Context, tx pgx.Tx, req meter.ChargeRequ
 	}
 	// Under a lease of its own or an ancestor's, the charge stops at the
 	// leaseholder (docs/adr/0017-budget-leases.md).
-	if holder, below, ok := leaseFor(req.Subject.CapabilityID(), ancestors, p.leases, s.clock()); ok {
+	if holder, below, ok := leaseFor(req.Subject.CapabilityID(), ancestors, p.leases, s.clock(), leaseState.coversCharges); ok {
 		return s.chargeLeased(ctx, tx, req, unit, ancestors, below, holder, p.leases[holder], onCharged)
 	}
 	spec := chargeSpec{

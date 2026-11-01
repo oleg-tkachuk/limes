@@ -267,6 +267,9 @@ type usageRow struct {
 	// copiesUnder counts the copies of the capability and of those
 	// delegated from it.
 	copiesUnder int64
+	// reservedRequests is what the leases of the capability, and of those
+	// below it, hold of its requests.
+	reservedRequests int64
 	// lease is the lease the capability holds, none when its id is nil.
 	lease leaseState
 }
@@ -316,8 +319,8 @@ SELECT id, $2 FROM unnest($1::uuid[]) AS id ORDER BY id
 ON CONFLICT (capability_id) DO NOTHING`
 
 	sqlLockUsage = `
-SELECT capability_id, request_count, spent, reserved, unit_code, copies_under,
-       lease_id, lease_amount, lease_spent, lease_expires, lease_ancestors, lease_period
+SELECT capability_id, request_count, spent, reserved, unit_code, copies_under, reserved_requests,
+       ` + sqlLeaseColumns + `
 FROM limes.usage WHERE capability_id = ANY ($1)
 ORDER BY capability_id
 FOR UPDATE`
@@ -325,9 +328,9 @@ FOR UPDATE`
 	sqlWriteUsage = `
 UPDATE limes.usage u
 SET request_count = v.request_count, spent = v.spent, reserved = v.reserved, unit_code = v.unit_code,
-    copies_under = v.copies_under
-FROM unnest($1::uuid[], $2::bigint[], $3::bigint[], $4::bigint[], $5::text[], $6::bigint[])
-    AS v (capability_id, request_count, spent, reserved, unit_code, copies_under)
+    copies_under = v.copies_under, reserved_requests = v.reserved_requests
+FROM unnest($1::uuid[], $2::bigint[], $3::bigint[], $4::bigint[], $5::text[], $6::bigint[], $7::bigint[])
+    AS v (capability_id, request_count, spent, reserved, unit_code, copies_under, reserved_requests)
 WHERE u.capability_id = v.capability_id`
 
 	sqlCreateCopies = `
@@ -543,7 +546,7 @@ func scanUsage(row pgx.CollectableRow) (*usageRow, error) {
 	u := &usageRow{}
 	var spent, reserved int64
 	var l leaseColumns
-	if err := row.Scan(append([]any{&u.id, &u.requests, &spent, &reserved, &u.unit, &u.copiesUnder}, l.dest()...)...); err != nil {
+	if err := row.Scan(append([]any{&u.id, &u.requests, &spent, &reserved, &u.unit, &u.copiesUnder, &u.reservedRequests}, l.dest()...)...); err != nil {
 		return nil, err
 	}
 	u.spent, u.reserved, u.lease = limes.Nanos(spent), limes.Nanos(reserved), l.state()
@@ -692,7 +695,7 @@ func (c *counters) write(ctx context.Context, tx pgx.Tx, now time.Time, writeTen
 	}
 	if len(c.usage) > 0 {
 		var ids []uuid.UUID
-		var requests, spent, reserved, copiesUnder []int64
+		var requests, spent, reserved, copiesUnder, reservedRequests []int64
 		var units []string
 		for _, u := range c.usage {
 			ids = append(ids, u.id)
@@ -701,8 +704,9 @@ func (c *counters) write(ctx context.Context, tx pgx.Tx, now time.Time, writeTen
 			reserved = append(reserved, int64(u.reserved))
 			units = append(units, u.unit)
 			copiesUnder = append(copiesUnder, u.copiesUnder)
+			reservedRequests = append(reservedRequests, u.reservedRequests)
 		}
-		b.Queue(sqlWriteUsage, ids, requests, spent, reserved, units, copiesUnder)
+		b.Queue(sqlWriteUsage, ids, requests, spent, reserved, units, copiesUnder, reservedRequests)
 	}
 	if len(c.copies) > 0 {
 		var ids [][]byte

@@ -279,14 +279,14 @@ func parseHoldPlace(cursor string) (holdPlace, error) {
 	return holdPlace{expires: time.Unix(sec, usec*int64(time.Microsecond)).UTC(), id: id}, nil
 }
 
-const sqlGetUsage = `SELECT request_count, spent, reserved, unit_code FROM limes.usage WHERE capability_id = $1`
+const sqlGetUsage = `SELECT request_count, spent, reserved, unit_code, reserved_requests FROM limes.usage WHERE capability_id = $1`
 
 // GetUsage returns a capability's counters, its children's included.
 func (s *UsageStore) GetUsage(ctx context.Context, capID uuid.UUID) (meter.Usage, error) {
 	u := meter.Usage{CapabilityID: capID}
 	err := s.inReadTx(ctx, func(tx pgx.Tx) error {
 		var spent, reserved int64
-		err := tx.QueryRow(ctx, sqlGetUsage, capID).Scan(&u.RequestCount, &spent, &reserved, &u.UnitCode)
+		err := tx.QueryRow(ctx, sqlGetUsage, capID).Scan(&u.RequestCount, &spent, &reserved, &u.UnitCode, &u.ReservedRequests)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return meter.ErrUsageNotFound
 		}

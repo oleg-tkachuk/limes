@@ -74,6 +74,12 @@ var ErrSettleConflict error = &familyError{"limes: reservation already settled f
 // ErrBudgetExceeded: the budget the capability may spend now is used.
 var ErrLeaseExhausted error = &familyError{"limes: lease exhausted", limes.ErrBudgetExceeded}
 
+// ErrLeaseRequestsExhausted — a Bump under a lease would take it past the
+// requests it holds. The caller leases more (Leaser.Lease) and bumps again.
+// Matches ErrRequestLimitExceeded: the requests the capability may make now
+// are used.
+var ErrLeaseRequestsExhausted error = &familyError{"limes: lease requests exhausted", limes.ErrRequestLimitExceeded}
+
 // ErrLeaseNotFound — GetLease or SettleLease named a capability that holds
 // no lease.
 var ErrLeaseNotFound error = &familyError{"limes: lease not found", limes.ErrNotFound}

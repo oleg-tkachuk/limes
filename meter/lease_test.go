@@ -27,6 +27,9 @@ func TestLeaseRequestValidate(t *testing.T) {
 		"an amount":         {LeaseRequest{Subject: subject, Amount: 1}, true},
 		"a TTL":             {LeaseRequest{Subject: subject, Amount: 1, TTL: DefaultLeaseTTL}, true},
 		"no amount":         {LeaseRequest{Subject: subject}, false},
+		"requests alone":    {LeaseRequest{Subject: subject, Requests: 1}, true},
+		"both":              {LeaseRequest{Subject: subject, Amount: 1, Requests: 1}, true},
+		"negative requests": {LeaseRequest{Subject: subject, Amount: 1, Requests: -1}, false},
 		"a negative amount": {LeaseRequest{Subject: subject, Amount: -1}, false},
 		"past MaxNanos":     {LeaseRequest{Subject: subject, Amount: limes.MaxNanos + 1}, false},
 		"a negative TTL":    {LeaseRequest{Subject: subject, Amount: 1, TTL: -1}, false},
@@ -49,7 +52,11 @@ func TestSettleLeaseRequestValidate(t *testing.T) {
 }
 
 func TestLeaseRemaining(t *testing.T) {
-	if got := (Lease{Amount: 10, Spent: 3}).Remaining(); got != 7 {
+	l := Lease{Amount: 10, Spent: 3, Requests: 5, RequestsSpent: 2}
+	if got := l.Remaining(); got != 7 {
 		t.Errorf("Remaining = %v, want 7", got)
+	}
+	if got := l.RequestsRemaining(); got != 3 {
+		t.Errorf("RequestsRemaining = %v, want 3", got)
 	}
 }

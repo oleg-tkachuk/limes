@@ -12,19 +12,21 @@ import (
 	"github.com/oleg-tkachuk/limes/meter"
 )
 
-// lease is budget a capability holds of its chain (meter.Leaser): amount
-// held against its own counters, each of ancestors and its tenant's, of
-// which spent is spent.
+// lease is budget and requests a capability holds of its chain
+// (meter.Leaser): amount held against its own counters, each of ancestors
+// and its tenant's, of which spent is spent, and requests held against its
+// own and each of ancestors, of which requestsSpent are made.
 type lease struct {
 	id              uuid.UUID
 	capID, tenantID uuid.UUID
 	// ancestors are those the lease is held against, nearest first, as the
 	// lineage stood when it opened; one dropped since is forgotten
 	// (forgetAncestorLocked).
-	ancestors     []uuid.UUID
-	unit          string
-	amount, spent limes.Nanos
-	expires       time.Time
+	ancestors               []uuid.UUID
+	unit                    string
+	amount, spent           limes.Nanos
+	requests, requestsSpent int64
+	expires                 time.Time
 	// period is the tenant's accounting period the lease opened in: its
 	// spend is the period's, and a reset settles it first.
 	period uint64
@@ -34,7 +36,8 @@ type lease struct {
 func (l lease) view() meter.Lease {
 	return meter.Lease{
 		ID: l.id, CapabilityID: l.capID, TenantID: l.tenantID, UnitCode: l.unit,
-		Amount: l.amount, Spent: l.spent, ExpiresAt: l.expires,
+		Amount: l.amount, Spent: l.spent, Requests: l.requests, RequestsSpent: l.requestsSpent,
+		ExpiresAt: l.expires,
 	}
 }
 
@@ -77,6 +80,9 @@ func (s *UsageStore) Lease(_ context.Context, req meter.LeaseRequest) (meter.Lea
 	}, refuse); err != nil {
 		return meter.Lease{}, err
 	}
+	if err := s.admitRequestsLocked(subject, ancestors, req.Requests); err != nil {
+		return meter.Lease{}, err
+	}
 	expires, err := s.holdExpiry(capID, cmp.Or(req.TTL, meter.DefaultLeaseTTL))
 	if err != nil {
 		return meter.Lease{}, err
@@ -89,10 +95,14 @@ func (s *UsageStore) Lease(_ context.Context, req meter.LeaseRequest) (meter.Lea
 		}
 	}
 	l.amount += req.Amount
+	l.requests += req.Requests
 	if expires.After(l.expires) {
 		l.expires = expires
 	}
-	s.reserveLeaseLocked(l, req.Amount, +1)
+	if req.Amount > 0 {
+		s.reserveLeaseLocked(l, req.Amount, +1)
+	}
+	s.holdLeaseRequestsLocked(l, req.Requests)
 	s.leases[capID] = l
 	return l.view(), nil
 }
@@ -111,6 +121,18 @@ func (s *UsageStore) reserveLeaseLocked(l lease, amount, sign limes.Nanos) {
 	b.ReservedAmount = max0(b.ReservedAmount + sign*amount)
 	b.UpdatedAt = s.nowFn()
 	s.budgets[l.tenantID] = b
+}
+
+// holdLeaseRequestsLocked holds n more requests of l on its capability and
+// its ancestors. s.mu must be held.
+func (s *UsageStore) holdLeaseRequestsLocked(l lease, n int64) {
+	for _, id := range append([]uuid.UUID{l.capID}, l.ancestors...) {
+		u := s.usage[id]
+		u.CapabilityID = id
+		u.ReservedRequests += n
+		u.UnitCode = cmp.Or(u.UnitCode, l.unit)
+		s.putUsageLocked(id, l.tenantID, u)
+	}
 }
 
 // GetLease implements meter.Leaser.
@@ -141,17 +163,21 @@ func (s *UsageStore) SettleLease(_ context.Context, req meter.SettleLeaseRequest
 
 // settleLeaseLocked ends l: what it spent is charged to its ancestors and
 // its tenant — the tenant's while the lease's period is still the current
-// one — and what it holds is released from them and from its capability,
-// which spent its share as it was charged. s.mu must be held.
+// one — and the requests it made counted on its ancestors; what it holds
+// is released from them and from its capability, which spent its share,
+// and counted its requests, as they were made. s.mu must be held.
 func (s *UsageStore) settleLeaseLocked(l lease) {
 	if u, ok := s.usage[l.capID]; ok {
 		u.ReservedAmount = max0(u.ReservedAmount - l.Remaining())
+		u.ReservedRequests = max(u.ReservedRequests-l.requestsRemaining(), 0)
 		s.putUsageLocked(l.capID, l.tenantID, u)
 	}
 	for _, id := range l.ancestors {
 		if u, ok := s.usage[id]; ok {
 			u.ReservedAmount = max0(u.ReservedAmount - l.amount)
 			u.SpentAmount += l.spent
+			u.ReservedRequests = max(u.ReservedRequests-l.requests, 0)
+			u.RequestCount += l.requestsSpent
 			s.putUsageLocked(id, l.tenantID, u)
 		}
 	}
@@ -171,6 +197,16 @@ func (l lease) Remaining() limes.Nanos {
 	return l.amount - l.spent
 }
 
+// requestsRemaining is how many requests l can still be bumped.
+func (l lease) requestsRemaining() int64 {
+	return l.requests - l.requestsSpent
+}
+
+// coversCharges and coversBumps report whether l holds budget, or
+// requests, for a charge or a bump to go under.
+func (l lease) coversCharges() bool { return l.amount > 0 }
+func (l lease) coversBumps() bool   { return l.requests > 0 }
+
 // settleLeasesLocked settles every lease due says. s.mu must be held.
 func (s *UsageStore) settleLeasesLocked(due func(lease) bool) int64 {
 	var settled int64
@@ -183,21 +219,61 @@ func (s *UsageStore) settleLeasesLocked(due func(lease) bool) int64 {
 	return settled
 }
 
-// leaseFor is the open lease a charge of capID with ancestors goes under:
-// capID's own, or its nearest ancestor's, and how many of the ancestors are
-// below the leaseholder; none when no capability on the chain holds one.
-// s.mu must be held.
-func (s *UsageStore) leaseFor(capID uuid.UUID, ancestors []limes.Capability) (lease, int, bool) {
+// leaseFor is the open lease a charge or a bump of capID with ancestors
+// goes under: capID's own, or its nearest ancestor's, and how many of the
+// ancestors are below the leaseholder; none when no capability on the
+// chain holds one, or the nearest one does not cover the call. s.mu must
+// be held.
+func (s *UsageStore) leaseFor(capID uuid.UUID, ancestors []limes.Capability, covers func(lease) bool) (lease, int, bool) {
 	now := s.nowFn()
 	if l, ok := s.leases[capID]; ok && l.openAt(now) {
-		return l, 0, true
+		return l, 0, covers(l)
 	}
 	for i, a := range ancestors {
 		if l, ok := s.leases[a.ID]; ok && l.openAt(now) {
-			return l, i, true
+			return l, i, covers(l)
 		}
 	}
 	return lease{}, 0, false
+}
+
+// bumpLeasedLocked counts one request of subject under l: on the
+// capability and the ancestors below the leaseholder as a bump does, on
+// the leaseholder and the lease's balance, and on nothing above it. below
+// are the ancestors between the capability and the leaseholder. s.mu must
+// be held.
+func (s *UsageStore) bumpLeasedLocked(subject limes.MeterSubject, below []limes.Capability, l lease) (meter.BumpReceipt, error) {
+	capID, tenantID := subject.CapabilityID(), subject.TenantID()
+	held := capID == l.capID
+	count := s.usage[capID].RequestCount
+	// The leaseholder's own ceiling admitted the lease; a capability below
+	// it is held to its own, and so is every ancestor between them.
+	if !held {
+		if err := s.admitRequestsLocked(subject, below, 1); err != nil {
+			return meter.BumpReceipt{RequestCount: count}, err
+		}
+	}
+	if l.requestsSpent >= l.requests {
+		return meter.BumpReceipt{RequestCount: count}, fmt.Errorf("%w: %d of %d made", meter.ErrLeaseRequestsExhausted, l.requestsSpent, l.requests)
+	}
+	unit := subject.UnitCode()
+	ids := append([]uuid.UUID{capID}, ancestorIDs(below)...)
+	if !held {
+		ids = append(ids, l.capID)
+	}
+	for _, id := range ids {
+		u := s.usage[id]
+		u.CapabilityID = id
+		u.RequestCount++
+		u.UnitCode = cmp.Or(u.UnitCode, unit)
+		s.putUsageLocked(id, tenantID, u)
+	}
+	hu := s.usage[l.capID]
+	hu.ReservedRequests = max(hu.ReservedRequests-1, 0)
+	s.putUsageLocked(l.capID, tenantID, hu)
+	l.requestsSpent++
+	s.leases[l.capID] = l
+	return meter.BumpReceipt{RequestCount: count + 1}, nil
 }
 
 // chargeLeasedLocked charges req under l: the capability and the ancestors

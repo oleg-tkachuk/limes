@@ -875,6 +875,14 @@ func (s *UsageStore) Bump(_ context.Context, req meter.BumpRequest) (meter.BumpR
 	if err := s.admitCopiesLocked(req.Subject, ancestors); err != nil {
 		return meter.BumpReceipt{}, err
 	}
+	// Under a lease of its own or an ancestor's that holds requests, a bump
+	// stops at the leaseholder; one that counts a Biscuit copy goes through
+	// the whole chain, as a charge of one does.
+	if len(req.Subject.Copies()) == 0 {
+		if l, below, ok := s.leaseFor(req.Subject.CapabilityID(), ancestors, lease.coversBumps); ok {
+			return s.bumpLeasedLocked(req.Subject, ancestors[:below], l)
+		}
+	}
 	count := s.usage[req.Subject.CapabilityID()].RequestCount
 	if err := s.admitRequestLocked(req.Subject, ancestors); err != nil {
 		return meter.BumpReceipt{RequestCount: count}, err
@@ -891,11 +899,19 @@ func (s *UsageStore) admitRequestLocked(subject limes.MeterSubject, ancestors []
 			return fmt.Errorf("%w: copy %x", limes.ErrRequestLimitExceeded, c.RevocationID)
 		}
 	}
-	if !subject.Requests().Admits(s.usage[subject.CapabilityID()].RequestCount + 1) {
+	return s.admitRequestsLocked(subject, ancestors, 1)
+}
+
+// admitRequestsLocked refuses n more requests of subject past its own or
+// an ancestor's request ceiling, the requests leases hold of each counted
+// as made. s.mu must be held.
+func (s *UsageStore) admitRequestsLocked(subject limes.MeterSubject, ancestors []limes.Capability, n int64) error {
+	used := func(id uuid.UUID) int64 { u := s.usage[id]; return u.RequestCount + u.ReservedRequests }
+	if !subject.Requests().Admits(used(subject.CapabilityID()) + n) {
 		return limes.ErrRequestLimitExceeded
 	}
 	for _, a := range ancestors {
-		if !a.Caveats.Requests.Admits(s.usage[a.ID].RequestCount + 1) {
+		if !a.Caveats.Requests.Admits(used(a.ID) + n) {
 			return fmt.Errorf("%w: ancestor %s", limes.ErrRequestLimitExceeded, a.ID)
 		}
 	}
@@ -985,7 +1001,7 @@ func (s *UsageStore) Charge(
 	// that counts a Biscuit copy — whose quota counts on every ancestor —
 	// goes through the whole chain, which the lease holds budget of too.
 	if req.Overrun != meter.OverrunPolicyRecord && len(req.Subject.Copies()) == 0 {
-		if l, below, ok := s.leaseFor(req.Subject.CapabilityID(), ancestors); ok {
+		if l, below, ok := s.leaseFor(req.Subject.CapabilityID(), ancestors, lease.coversCharges); ok {
 			return s.chargeLeasedLocked(ctx, req, unit, ancestors, ancestors[:below], l, onCharged)
 		}
 	}
