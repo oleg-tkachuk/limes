@@ -423,10 +423,12 @@ func (s *UsageStore) setTenantBudget(ctx context.Context, tx pgx.Tx, req meter.S
 	}
 	// A lease of an amount locks the aggregate too, so one opened since the
 	// tenant's leases were settled is seen here, and none opens before the
-	// reset commits.
+	// reset commits. One of requests alone, which locks no aggregate, may
+	// still open after this check; it is settled before an amount is added
+	// to it (UsageStore.lease).
 	if req.ResetSpend {
 		var leased bool
-		if err := tx.QueryRow(ctx, sqlTenantAmountLeased, req.TenantID).Scan(&leased); err != nil {
+		if err := tx.QueryRow(ctx, sqlTenantLeased, req.TenantID).Scan(&leased); err != nil {
 			return meter.TenantBudget{}, err
 		}
 		if leased {
@@ -738,9 +740,8 @@ LIMIT $1`
 	// sqlUsageLeft is whether any counters of $1 remain.
 	sqlUsageLeft = `SELECT EXISTS (SELECT 1 FROM limes.usage WHERE capability_id = ANY ($1))`
 
-	// sqlTenantAmountLeased is whether tenant $1 has a lease of an amount
-	// open, which holds budget of its aggregate.
-	sqlTenantAmountLeased = `SELECT EXISTS (SELECT 1 FROM limes.usage WHERE tenant_id = $1 AND lease_id IS NOT NULL AND lease_amount > 0)`
+	// sqlTenantLeased is whether tenant $1 has a lease open.
+	sqlTenantLeased = `SELECT EXISTS (SELECT 1 FROM limes.usage WHERE tenant_id = $1 AND lease_id IS NOT NULL)`
 
 	sqlDeleteCopies = `DELETE FROM limes.copy_usage WHERE capability_id = ANY ($1)`
 

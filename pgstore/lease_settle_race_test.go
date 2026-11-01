@@ -178,3 +178,37 @@ func TestResetGivesUpOnLeasesThatKeepOpening(t *testing.T) {
 		t.Errorf("the tenant after the refused reset = %+v, %v; want version %d kept", b, err, f.version)
 	}
 }
+
+// settleRaceRequests is what the requests-only lease of the reset race
+// holds.
+const settleRaceRequests = 5
+
+// A lease of requests alone opened while a reset settles the tenant's
+// leases does not carry the closed period into the next: topped up with an
+// amount, what it spends is the new period's, so the tenant's ceiling holds.
+func TestResetKeepsARequestsLeaseOutOfTheNextPeriod(t *testing.T) {
+	f := newSettleRaceFixture(t)
+	f.db.at = txOwnCall
+	f.db.hook = func() {
+		if _, err := f.other.Lease(f.ctx, meter.LeaseRequest{Subject: f.a, Requests: settleRaceRequests}); err != nil {
+			t.Errorf("Lease of requests in the window: %v", err)
+		}
+	}
+	if _, err := f.hooked.SetTenantBudget(f.ctx, meter.SetTenantBudgetRequest{
+		TenantID: f.tenant, Ceiling: limes.BudgetCeiling{Max: settleRaceCeiling, UnitCode: testUnit}, ResetSpend: true, ExpectedVersion: f.version,
+	}); err != nil {
+		t.Fatalf("SetTenantBudget: %v", err)
+	}
+	if _, err := f.other.Lease(f.ctx, meter.LeaseRequest{Subject: f.a, Amount: settleRaceCeiling}); err != nil {
+		t.Fatalf("Lease of an amount after the reset: %v", err)
+	}
+	if _, err := f.other.Charge(f.ctx, meter.ChargeRequest{Subject: f.a, Amount: settleRaceCeiling}, nil); err != nil {
+		t.Fatalf("Charge under the lease: %v", err)
+	}
+	if _, err := f.other.SettleLease(f.ctx, meter.SettleLeaseRequest{Subject: f.a}); err != nil {
+		t.Fatalf("SettleLease: %v", err)
+	}
+	if _, err := f.other.Charge(f.ctx, meter.ChargeRequest{Subject: f.b, Amount: settleRaceCeiling}, nil); !errors.Is(err, limes.ErrTenantBudgetExceeded) {
+		t.Errorf("a charge past the new period's ceiling: %v, want ErrTenantBudgetExceeded", err)
+	}
+}

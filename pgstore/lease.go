@@ -393,7 +393,11 @@ func (s *UsageStore) lease(ctx context.Context, tx pgx.Tx, req meter.LeaseReques
 		}
 	}
 	self := c.usage[capID]
-	if self.lease.held() && (!self.lease.openAt(now) || !slices.Equal(self.lease.ancestors, ancestorIDs(ancestors))) {
+	// A lease opened in a period the tenant has since closed is settled
+	// before an amount is added: what it spends from now on is this
+	// period's, and settlement counts a lease's spend in its own period.
+	closed := req.Amount > 0 && self.lease.period != c.tenant.period
+	if self.lease.held() && (!self.lease.openAt(now) || !slices.Equal(self.lease.ancestors, ancestorIDs(ancestors)) || closed) {
 		return meter.Lease{}, errLeaseStale
 	}
 	refuse := func(err error) error { return err }
