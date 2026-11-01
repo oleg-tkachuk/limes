@@ -304,6 +304,24 @@ func (c *Cache[K]) Cached(keys []K) (revoked bool, missing []K, epoch uint64) {
 	return false, missing, epoch
 }
 
+// HeldRevoked reports whether the cache holds a revoked answer about any of
+// keys, fresh or kept past the TTL for MaxStale: no revocation is undone, so
+// a stale live answer about a question that spans one of them must not
+// stand for it.
+func (c *Cache[K]) HeldRevoked(keys []K) bool {
+	now, keep := c.cfg.Now(), c.keep()
+	for _, k := range keys {
+		s := c.shardOf(k)
+		s.mu.RLock()
+		e, ok := s.entries[k]
+		s.mu.RUnlock()
+		if ok && e.revoked && now.Before(e.at.Add(keep)) {
+			return true
+		}
+	}
+	return false
+}
+
 // countHit counts a question answered from the cache.
 func (c *Cache[K]) countHit() {
 	c.hits[rand.Uint32()%hitStripes].n.Add(1) //nolint:gosec // G404: picks a stripe to spread contention, nothing to guess

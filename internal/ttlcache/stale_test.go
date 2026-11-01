@@ -194,3 +194,27 @@ func TestAStaleAnswerMakesRoomBeforeAFreshOne(t *testing.T) {
 		t.Errorf("%d evictions, want none: a stale answer is not live", ev)
 	}
 }
+
+// HeldRevoked finds a revoked answer about any key while it is kept, fresh
+// or stale, and none past TTL and MaxStale or about a live one.
+func TestHeldRevokedSeesARevokedAnswerWhileKept(t *testing.T) {
+	c, clk, _ := staleCache(10)
+	var calls atomic.Int32
+	if _, _, err := c.Get(t.Context(), "revoked", counted(true, &calls)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := c.Get(t.Context(), "live", counted(false, &calls)); err != nil {
+		t.Fatal(err)
+	}
+	if !c.HeldRevoked([]string{"live", "revoked"}) || c.HeldRevoked([]string{"live", "unknown"}) {
+		t.Error("fresh: HeldRevoked does not tell the revoked key from the live and unknown ones")
+	}
+	clk.advance(testTTL + testMaxStale - time.Second)
+	if !c.HeldRevoked([]string{"revoked"}) {
+		t.Error("stale: HeldRevoked dropped a revoked answer still kept")
+	}
+	clk.advance(time.Second)
+	if c.HeldRevoked([]string{"revoked"}) {
+		t.Error("past TTL and MaxStale: HeldRevoked still sees the revoked answer")
+	}
+}
