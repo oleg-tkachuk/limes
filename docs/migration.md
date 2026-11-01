@@ -67,6 +67,18 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## v0.145.0
+
+- `meter.Leaser`, an optional interface of a usage store, leases a
+  capability budget of its chain (ADR-0017); memstore implements it,
+  pgstore does not yet. Additive: a store that is not one, and a capability
+  that leases nothing, are metered as before.
+- `meter.ReleaseExpiredResult` and `meter.ReleaseMatchingResult` gain
+  `SettledLeases`, zero for a store that is no `Leaser`.
+- `meter.ErrLeaseExhausted` (a kind of `ErrBudgetExceeded`),
+  `ErrLeaseNotFound` and `ErrLeaseNested` are new sentinels, with codes
+  `lease_exhausted`, `lease_not_found` and `lease_nested`.
+
 ## pgstore/v0.56.0
 
 - Every call that writes counters now locks a tenant's aggregate after the

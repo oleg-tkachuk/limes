@@ -39,7 +39,14 @@ func (s *UsageStore) ReleaseMatching(_ context.Context, req meter.ReleaseMatchin
 		delete(s.holds, h.id)
 		tenants = append(tenants, h.tenantID)
 	}
-	return meter.ReleaseMatchingResult{Released: int64(len(due)), More: more, Tenants: sortedTenants(tenants)}, nil
+	settled := s.settleLeasesLocked(func(l lease) bool {
+		if (req.AllTenants || l.tenantID == req.TenantID) && s.records.revokedUnderMatch(l.capID, sel) {
+			tenants = append(tenants, l.tenantID)
+			return true
+		}
+		return false
+	})
+	return meter.ReleaseMatchingResult{Released: int64(len(due)), SettledLeases: settled, More: more, Tenants: sortedTenants(tenants)}, nil
 }
 
 // revokedUnderMatch reports whether id is on record and revoked, and it or
