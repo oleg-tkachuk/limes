@@ -2,6 +2,7 @@ package jwks
 
 import (
 	"crypto/ed25519"
+	"maps"
 	"net/http"
 	"testing"
 	"time"
@@ -17,7 +18,8 @@ import (
 const fuzzKID = "fuzz-key"
 
 // FuzzParseJWKS holds jwks.Parse to keys a verifier can use: every key it
-// returns is an Ed25519 public key under a kid.
+// returns is an Ed25519 public key under a kid, and the keys it returns,
+// published again by Marshal, read back as the same set.
 func FuzzParseJWKS(f *testing.F) {
 	pub := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize)).Public().(ed25519.PublicKey)
 	doc, err := Marshal(map[string]ed25519.PublicKey{fuzzKID: pub})
@@ -35,6 +37,14 @@ func FuzzParseJWKS(f *testing.F) {
 			if kid == "" || len(k) != ed25519.PublicKeySize {
 				t.Fatalf("kid %q with a %d-byte key", kid, len(k))
 			}
+		}
+		doc, err := Marshal(keys)
+		if err != nil {
+			t.Fatalf("the keys of %s do not publish: %v", raw, err)
+		}
+		back, err := Parse(doc)
+		if err != nil || !maps.EqualFunc(back, keys, func(a, b ed25519.PublicKey) bool { return a.Equal(b) }) {
+			t.Fatalf("%s, published again as %s, reads back as %v, %v", raw, doc, back, err)
 		}
 	})
 }

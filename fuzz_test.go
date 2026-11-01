@@ -1,6 +1,9 @@
 package limes
 
 import (
+	"bytes"
+	"encoding/json/v2"
+	"errors"
 	"testing"
 	"time"
 
@@ -12,7 +15,9 @@ import (
 // the code after it relies on.
 
 // FuzzParseClaims holds the claims reader to its strictness: whatever it
-// accepts names a capability, and its sub is its principal's.
+// accepts names a capability within the budget's bounds, and is what the
+// signer writes for it: written again by claimsOf, it reads back as the
+// same grant, so a token means one thing whichever side reads it.
 func FuzzParseClaims(f *testing.F) {
 	f.Add([]byte(`{"iss":"i","sub":"s","aud":["data"],"iat":1,"exp":2,"jti":"0190a5c3-0000-7000-8000-000000000000","limes_principal":{"tenant_id":"11111111-1111-1111-1111-111111111111","subject":"s"},"limes_caveats":{"ops":["get"],"max_budget":"1.5"},"client_id":"c","limes_v":7}`))
 	f.Add([]byte(`{"iss":"a","iss":"b"}`))
@@ -24,6 +29,27 @@ func FuzzParseClaims(f *testing.F) {
 		}
 		if c.Caveats.Budget.Max < 0 || c.Caveats.Budget.Max > MaxNanos {
 			t.Fatalf("accepted a budget of %d", int64(c.Caveats.Budget.Max))
+		}
+		again, err := json.Marshal(claimsOf(*c))
+		if err != nil {
+			t.Fatalf("claims of %+v do not encode: %v", c.Capability, err)
+		}
+		back, err := parseClaims(jose.B64(again))
+		if err != nil {
+			t.Fatalf("%s, written again as %s, is refused: %v", raw, again, err)
+		}
+		// Compared as JSON writes them, where a nil list and an empty one
+		// are one value, as they are to every check of a capability.
+		was, err1 := json.Marshal(c.Capability)
+		now, err2 := json.Marshal(back.Capability)
+		if err := errors.Join(err1, err2); err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(was, now) || back.biscuitRoot != c.biscuitRoot {
+			t.Fatalf("%s, written again as %s, reads back as\n%s\nnot\n%s", raw, again, now, was)
+		}
+		if twice, err := json.Marshal(claimsOf(*back)); err != nil || !bytes.Equal(twice, again) {
+			t.Fatalf("%s written a second time as %s, not %s: %v", raw, twice, again, err)
 		}
 	})
 }
