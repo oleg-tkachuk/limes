@@ -56,6 +56,20 @@ type Config struct {
 	MaxEntries int
 	// Now is the clock.
 	Now func() time.Time
+
+	// MaxStale is how long past the TTL an answer is kept to stand in for
+	// a lookup that fails: Get serves it, as read when it was, in place of
+	// the failure. 0: an answer is served for the TTL only, and a failure
+	// returned. A stale answer makes room before any fresh one does.
+	MaxStale time.Duration
+	// Answers reports an error a lookup returns as the upstream's answer
+	// about the key, which no stale answer stands in for — not on record,
+	// say — rather than a failure to give one. Nil: every error is a
+	// failure. A caller whose own context has ended is given its error.
+	Answers func(err error) bool
+	// OnStale is told of every stale answer served: when it was read, and
+	// the failure it stands in for. Nil: nothing is.
+	OnStale func(at time.Time, cause error)
 }
 
 // Cache caches a yes/no answer per key for a TTL. The zero value is not
@@ -97,8 +111,10 @@ type shard[K comparable] struct {
 	// it and the upstream lookups run for them; evictions the live entries
 	// it dropped to stay within its bound, under mu.
 	misses, lookups atomic.Uint64
-	evictions       uint64
-	_               [cacheLine]byte
+	// stale counts the stale answers served in place of a failed lookup.
+	stale     atomic.Uint64
+	evictions uint64
+	_         [cacheLine]byte
 }
 
 type cacheEntry[K comparable] struct {
@@ -162,6 +178,10 @@ func (c *Cache[K]) SetTTL(ttl time.Duration) { c.ttl.Store(int64(ttl)) }
 // fresh reports whether an answer read at at may be served at now.
 func (c *Cache[K]) fresh(at, now time.Time) bool { return now.Before(at.Add(c.TTL())) }
 
+// keep is how long an answer is kept: the TTL in force, and MaxStale past
+// it to stand in for a failed lookup.
+func (c *Cache[K]) keep() time.Duration { return c.TTL() + c.cfg.MaxStale }
+
 // shardOf is the shard key belongs to.
 func (c *Cache[K]) shardOf(key K) *shard[K] {
 	return c.shards[maphash.Comparable(c.seed, key)%uint64(len(c.shards))]
@@ -190,7 +210,32 @@ func (c *Cache[K]) GetTagged(ctx context.Context, key K, lookup func(context.Con
 		return e.revoked, e.at, nil
 	}
 	s.misses.Add(1)
-	return c.get(ctx, s, key, lookup)
+	revoked, at, err := c.get(ctx, s, key, lookup)
+	if err != nil {
+		return c.staleOr(ctx, s, key, revoked, at, err)
+	}
+	return revoked, at, nil
+}
+
+// staleOr serves the answer key had before its lookup failed with err, if
+// it is no older than the TTL and MaxStale, and otherwise returns the
+// lookup's result: err is the upstream's answer, the caller has gone, or
+// there is no such answer.
+func (c *Cache[K]) staleOr(ctx context.Context, s *shard[K], key K, revoked bool, at time.Time, err error) (bool, time.Time, error) {
+	if c.cfg.MaxStale == 0 || ctx.Err() != nil || (c.cfg.Answers != nil && c.cfg.Answers(err)) {
+		return revoked, at, err
+	}
+	s.mu.RLock()
+	e, ok := s.entries[key]
+	s.mu.RUnlock()
+	if !ok || !c.cfg.Now().Before(e.at.Add(c.keep())) {
+		return revoked, at, err
+	}
+	s.stale.Add(1)
+	if c.cfg.OnStale != nil {
+		c.cfg.OnStale(e.at, err)
+	}
+	return e.revoked, e.at, nil
 }
 
 // get is Get past its first read, counting nothing more: a waiter that asks
@@ -274,7 +319,7 @@ func (c *Cache[K]) SeedLive(keys []K, epoch uint64, at time.Time) {
 	if !c.fresh(at, now) {
 		return
 	}
-	ttl := c.TTL()
+	ttl, keep := c.TTL(), c.keep()
 	for _, k := range keys {
 		s := c.shardOf(k)
 		s.mu.Lock()
@@ -286,7 +331,7 @@ func (c *Cache[K]) SeedLive(keys []K, epoch uint64, at time.Time) {
 		}
 		_, inflight := s.inflight[k]
 		if e, ok := s.entries[k]; !inflight && (!ok || !c.fresh(e.at, now)) {
-			s.makeRoomLocked(now, ttl)
+			s.makeRoomLocked(now, ttl, keep)
 			s.entries[k] = cacheEntry[K]{at: at}
 			s.order = append(s.order, queued[K]{key: k, at: at})
 		}
@@ -303,7 +348,7 @@ func (c *Cache[K]) finish(s *shard[K], key K, call *lookupCall[K], epoch uint64)
 	}
 	if call.err == nil && c.epoch.Load() == epoch {
 		now := c.cfg.Now()
-		s.makeRoomLocked(now, c.TTL())
+		s.makeRoomLocked(now, c.TTL(), c.keep())
 		s.entries[key] = cacheEntry[K]{revoked: call.revoked, at: now, tags: call.tags}
 		s.order = append(s.order, queued[K]{key: key, at: now})
 	}
@@ -316,13 +361,14 @@ func (c *Cache[K]) finish(s *shard[K], key K, call *lookupCall[K], epoch uint64)
 // Forget, or by a key cached again — are dropped.
 const orderSlack = 2
 
-// makeRoomLocked keeps the shard under its share of MaxEntries: expired
-// entries go first — those the expiry order reaches, then any other, such
-// as an id seeded behind a later answer — and, if that frees nothing, the
-// oldest live one does.
-func (s *shard[K]) makeRoomLocked(now time.Time, ttl time.Duration) {
+// makeRoomLocked keeps the shard under its share of MaxEntries: entries
+// past keep go first, those the expiry order reaches; then every one past
+// ttl, stale ones kept to stand in for a failed lookup among them, wherever
+// its place, such as an id seeded behind a later answer; and, if that frees
+// nothing, the oldest live one does.
+func (s *shard[K]) makeRoomLocked(now time.Time, ttl, keep time.Duration) {
 	s.compactLocked()
-	s.sweepLocked(now, ttl)
+	s.sweepLocked(now, keep)
 	if len(s.entries) >= s.maxEntries {
 		s.dropExpiredLocked(now, ttl)
 	}
@@ -456,9 +502,10 @@ func (c *Cache[K]) Forget(keys []K) int {
 	return dropped
 }
 
-// Sweep drops every expired entry and returns how many it dropped.
+// Sweep drops every entry past the TTL and MaxStale, and returns how many
+// it dropped.
 func (c *Cache[K]) Sweep() int {
-	now, ttl := c.cfg.Now(), c.TTL()
+	now, ttl := c.cfg.Now(), c.keep()
 	dropped := 0
 	for _, s := range c.shards {
 		s.mu.Lock()
@@ -502,6 +549,8 @@ type Stats struct {
 	Lookups uint64
 	// Evictions counts the live entries dropped to stay within MaxEntries.
 	Evictions uint64
+	// Stale counts the stale answers served in place of a failed lookup.
+	Stale uint64
 	// Entries is Len.
 	Entries int
 }
@@ -516,6 +565,7 @@ func (c *Cache[K]) Stats() Stats {
 		s.mu.RLock()
 		st.Misses += s.misses.Load()
 		st.Lookups += s.lookups.Load()
+		st.Stale += s.stale.Load()
 		st.Evictions += s.evictions
 		st.Entries += len(s.entries)
 		s.mu.RUnlock()
