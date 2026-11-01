@@ -2,6 +2,12 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.146.0](https://github.com/oleg-tkachuk/limes/compare/v0.145.0...v0.146.0) (2026-11-01)
+
+### Features
+
+* **meter:** lease requests beside budget ([a614010](https://github.com/oleg-tkachuk/limes/commit/a61401075876f638117f7d48e8ae2a5e0784030a))
+
 ## [0.145.0](https://github.com/oleg-tkachuk/limes/compare/v0.144.0...v0.145.0) (2026-11-01)
 
 ### Features
