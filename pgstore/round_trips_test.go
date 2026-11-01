@@ -15,13 +15,20 @@ import (
 // lineage held; one creating and locking the counters; one creating and
 // locking the tenant's aggregate, a replay looked up again under the locks;
 // one writing them all and the ledger row or the hold; COMMIT. Reserve
-// reads its capability's expiry beside them. A change that sends one more
+// reads its capability's expiry beside them. A Bump under a lease locks
+// the counters up to the leaseholder and no tenant's aggregate, as a Bump
+// does, so it makes as many. A change that sends one more
 // is a change to the tenant's throughput across a network, and fails here.
 const (
-	chargeRoundTrips  = 6
-	bumpRoundTrips    = 5
-	reserveRoundTrips = 7
+	chargeRoundTrips     = 6
+	bumpRoundTrips       = 5
+	reserveRoundTrips    = 7
+	leasedBumpRoundTrips = 5
 )
+
+// roundTripLeasedRequests is how many requests the leased leaf holds: more
+// than the calls make.
+const roundTripLeasedRequests = 10
 
 // roundTripConns is the one connection the calls share: pgx prepares a
 // statement the first time a connection runs it, a round trip the calls
@@ -46,21 +53,11 @@ func TestMeterRoundTrips(t *testing.T) {
 	}
 	tenant := uuid.New()
 	ctx := WithTenant(t.Context(), tenant)
-	expiry := time.Now().Add(time.Hour)
-	var leaf uuid.UUID
-	parent := uuid.Nil()
-	for i := range roundTripChainDepth {
-		c := limes.Capability{
-			ID: uuid.New(), ParentID: parent, ExpiresAt: expiry,
-			Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: tenant, Subject: "agent:" + string(rune('a'+i))},
-			Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true, UnitCode: testUnit}},
-		}
-		if err := records.Insert(ctx, limes.InsertRequest{Capability: c}); err != nil {
-			t.Fatal(err)
-		}
-		parent, leaf = c.ID, c.ID
+	subject := meterSubject(roundTripChain(t, records, tenant), tenant)
+	leased := meterSubject(roundTripChain(t, records, tenant), tenant)
+	if _, err := usage.Lease(ctx, meter.LeaseRequest{Subject: leased, Requests: roundTripLeasedRequests}); err != nil {
+		t.Fatal(err)
 	}
-	subject := meterSubject(leaf, tenant)
 	calls := map[string]struct {
 		want int64
 		call func() error
@@ -75,6 +72,10 @@ func TestMeterRoundTrips(t *testing.T) {
 		}},
 		"Reserve": {reserveRoundTrips, func() error {
 			_, err := usage.Reserve(ctx, meter.ReserveRequest{Subject: subject, Amount: 1})
+			return err
+		}},
+		"Bump under a lease": {leasedBumpRoundTrips, func() error {
+			_, err := usage.Bump(ctx, meter.BumpRequest{Subject: leased})
 			return err
 		}},
 	}
@@ -94,4 +95,31 @@ func TestMeterRoundTrips(t *testing.T) {
 			t.Errorf("%s made %d round trips, want %d", name, got, tc.want)
 		}
 	}
+	// Warmed and counted, both bumps of the leased leaf went under its lease.
+	const leasedBumps = 2
+	if l, err := usage.GetLease(ctx, leased.CapabilityID()); err != nil || l.RequestsSpent != leasedBumps {
+		t.Errorf("the leased leaf's lease = %+v, %v; want %d requests made under it", l, err, leasedBumps)
+	}
+}
+
+// roundTripChain records a chain roundTripChainDepth deep in tenant, with
+// no ceilings, and returns its leaf.
+func roundTripChain(t *testing.T, records *Store, tenant uuid.UUID) uuid.UUID {
+	t.Helper()
+	ctx := WithTenant(t.Context(), tenant)
+	expiry := time.Now().Add(time.Hour)
+	var leaf uuid.UUID
+	parent := uuid.Nil()
+	for i := range roundTripChainDepth {
+		c := limes.Capability{
+			ID: uuid.New(), ParentID: parent, ExpiresAt: expiry,
+			Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: tenant, Subject: "agent:" + string(rune('a'+i))},
+			Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true, UnitCode: testUnit}},
+		}
+		if err := records.Insert(ctx, limes.InsertRequest{Capability: c}); err != nil {
+			t.Fatal(err)
+		}
+		parent, leaf = c.ID, c.ID
+	}
+	return leaf
 }

@@ -15,16 +15,18 @@ import (
 	"github.com/oleg-tkachuk/limes/meter"
 )
 
-// leaseState is a usage row's lease (migrate/ddl/migrations/032_leases.sql),
-// none when its id is nil: amount held against the row's counters, each of
-// ancestors and the tenant's, of which spent is spent, opened in the
-// tenant's period.
+// leaseState is a usage row's lease (migrate/ddl/migrations/032_leases.sql
+// and 034_lease_requests.sql), none when its id is nil: amount held against
+// the row's counters, each of ancestors and the tenant's, of which spent is
+// spent, and requests held against the row's and each of ancestors, of
+// which requestsSpent are made, opened in the tenant's period.
 type leaseState struct {
-	id            uuid.UUID
-	amount, spent limes.Nanos
-	expires       time.Time
-	ancestors     []uuid.UUID
-	period        int64
+	id                      uuid.UUID
+	amount, spent           limes.Nanos
+	requests, requestsSpent int64
+	expires                 time.Time
+	ancestors               []uuid.UUID
+	period                  int64
 }
 
 // held reports whether l is a lease, open or expired.
@@ -36,20 +38,30 @@ func (l leaseState) openAt(now time.Time) bool { return l.held() && l.expires.Af
 // remaining is what l can still be charged.
 func (l leaseState) remaining() limes.Nanos { return l.amount - l.spent }
 
+// requestsRemaining is how many requests l can still be bumped.
+func (l leaseState) requestsRemaining() int64 { return l.requests - l.requestsSpent }
+
+// coversCharges and coversBumps report whether l holds budget, or
+// requests, for a charge or a bump to go under.
+func (l leaseState) coversCharges() bool { return l.amount > 0 }
+func (l leaseState) coversBumps() bool   { return l.requests > 0 }
+
 // leaseColumns is a lease as the usage table holds it, its columns nullable.
 type leaseColumns struct {
-	id        *uuid.UUID
-	amount    int64
-	spent     int64
-	expires   *time.Time
-	ancestors []uuid.UUID
-	period    int64
+	id            *uuid.UUID
+	amount        int64
+	spent         int64
+	expires       *time.Time
+	ancestors     []uuid.UUID
+	period        int64
+	requests      int64
+	requestsSpent int64
 }
 
 // dest is where a row's lease columns scan, in the order the statements
 // select them.
 func (l *leaseColumns) dest() []any {
-	return []any{&l.id, &l.amount, &l.spent, &l.expires, &l.ancestors, &l.period}
+	return []any{&l.id, &l.amount, &l.spent, &l.expires, &l.ancestors, &l.period, &l.requests, &l.requestsSpent}
 }
 
 // state is l as a leaseState.
@@ -57,7 +69,10 @@ func (l leaseColumns) state() leaseState {
 	if l.id == nil {
 		return leaseState{}
 	}
-	s := leaseState{id: *l.id, amount: limes.Nanos(l.amount), spent: limes.Nanos(l.spent), ancestors: l.ancestors, period: l.period}
+	s := leaseState{
+		id: *l.id, amount: limes.Nanos(l.amount), spent: limes.Nanos(l.spent),
+		requests: l.requests, requestsSpent: l.requestsSpent, ancestors: l.ancestors, period: l.period,
+	}
 	if l.expires != nil {
 		s.expires = *l.expires
 	}
@@ -65,7 +80,7 @@ func (l leaseColumns) state() leaseState {
 }
 
 // sqlLeaseColumns are the lease's columns, in leaseColumns.dest's order.
-const sqlLeaseColumns = `lease_id, lease_amount, lease_spent, lease_expires, lease_ancestors, lease_period`
+const sqlLeaseColumns = `lease_id, lease_amount, lease_spent, lease_expires, lease_ancestors, lease_period, lease_requests, lease_requests_spent`
 
 const (
 	// sqlLeasesOnChain is the lease of each capability on $1's chain that
@@ -85,18 +100,24 @@ FROM limes.usage WHERE capability_id = $1 AND lease_id IS NOT NULL`
 	// sqlSetLease writes $1's lease; its row is locked.
 	sqlSetLease = `
 UPDATE limes.usage
-SET lease_id = $2, lease_amount = $3, lease_spent = $4, lease_expires = $5, lease_ancestors = $6, lease_period = $7
+SET lease_id = $2, lease_amount = $3, lease_spent = $4, lease_expires = $5, lease_ancestors = $6, lease_period = $7,
+    lease_requests = $8, lease_requests_spent = $9
 WHERE capability_id = $1`
 
 	// sqlClearLease ends $1's lease; its row is locked.
 	sqlClearLease = `
 UPDATE limes.usage
-SET lease_id = NULL, lease_amount = 0, lease_spent = 0, lease_expires = NULL, lease_ancestors = '{}', lease_period = 0
+SET lease_id = NULL, lease_amount = 0, lease_spent = 0, lease_expires = NULL, lease_ancestors = '{}', lease_period = 0,
+    lease_requests = 0, lease_requests_spent = 0
 WHERE capability_id = $1`
 
 	// sqlLeaseSpent adds $2 to what $1's lease $3 spent; its row is
 	// locked.
 	sqlLeaseSpent = `UPDATE limes.usage SET lease_spent = lease_spent + $2 WHERE capability_id = $1 AND lease_id = $3`
+
+	// sqlLeaseRequestMade counts one request made under $1's lease $2; its
+	// row is locked.
+	sqlLeaseRequestMade = `UPDATE limes.usage SET lease_requests_spent = lease_requests_spent + 1 WHERE capability_id = $1 AND lease_id = $2`
 
 	// sqlDueLeases are the leases past their end at $1, soonest first, at
 	// most $2, with their tenants (migration 033's index).
@@ -171,19 +192,58 @@ func leasable(req meter.ChargeRequest) bool {
 	return req.Overrun != meter.OverrunPolicyRecord && len(req.Subject.Copies()) == 0
 }
 
-// leaseFor is the lease a charge of capID with ancestors goes under, of
-// leases, at now: capID's own, or its nearest ancestor's, and how many of the
-// ancestors are below the leaseholder.
-func leaseFor(capID uuid.UUID, ancestors []ancestor, leases map[uuid.UUID]leaseState, now time.Time) (uuid.UUID, int, bool) {
-	if leases[capID].openAt(now) {
-		return capID, 0, true
+// leaseFor is the lease a charge or a bump of capID with ancestors goes
+// under, of leases, at now: capID's own, or its nearest ancestor's, and how
+// many of the ancestors are below the leaseholder; none when the nearest
+// open one does not cover the call.
+func leaseFor(capID uuid.UUID, ancestors []ancestor, leases map[uuid.UUID]leaseState, now time.Time, covers func(leaseState) bool) (uuid.UUID, int, bool) {
+	if l := leases[capID]; l.openAt(now) {
+		return capID, 0, covers(l)
 	}
 	for i, a := range ancestors {
-		if leases[a.id].openAt(now) {
-			return a.id, i, true
+		if l := leases[a.id]; l.openAt(now) {
+			return a.id, i, covers(l)
 		}
 	}
 	return uuid.Nil(), 0, false
+}
+
+// bumpLeased is bump under holder's lease, seen read before the lock: the
+// capability's counter and those of the ancestors below the leaseholder
+// are locked and counted as a bump counts them, the leaseholder's and its
+// lease's balance with them, and nothing above. It returns the
+// capability's request count after the bump, or before it when refused.
+func (s *UsageStore) bumpLeased(ctx context.Context, tx pgx.Tx, subject limes.MeterSubject, ancestors []ancestor, below int, holder uuid.UUID, seen leaseState) (int64, error) {
+	capID := subject.CapabilityID()
+	isHolder := capID == holder
+	l := lockRequest{now: s.clock(), created: append([]uuid.UUID{capID}, ancestorIDs(ancestors[:below])...), usageTenant: subject.TenantID()}
+	if !isHolder {
+		l.existing = []uuid.UUID{holder}
+	}
+	c, err := lock(ctx, tx, l)
+	if err != nil {
+		return 0, err
+	}
+	now := s.clock()
+	h, ok := c.usage[holder]
+	if !ok || h.lease.id != seen.id || !h.lease.openAt(now) || !h.lease.coversBumps() {
+		return 0, errLeaseMoved
+	}
+	count := c.usageOf(capID).requests
+	// The leaseholder's own ceiling admitted the lease; a capability below
+	// it is held to its own, and so is every ancestor between them.
+	if !isHolder {
+		if err := admitRequests(c, subject, ancestors[:below], 1); err != nil {
+			return count, err
+		}
+	}
+	if h.lease.requestsRemaining() <= 0 {
+		return count, fmt.Errorf("%w: %d of %d made", meter.ErrLeaseRequestsExhausted, h.lease.requestsSpent, h.lease.requests)
+	}
+	countRequest(c, subject.UnitCode())
+	h.reservedRequests = max(h.reservedRequests-1, 0)
+	made := heldStmt{sql: sqlLeaseRequestMade, args: []any{holder, h.lease.id}}
+	return count + 1, c.write(ctx, tx, now, false, made)
 }
 
 // errLeaseMoved is a lease read before its row was locked that was settled,
@@ -323,7 +383,13 @@ func (s *UsageStore) lease(ctx context.Context, tx pgx.Tx, req meter.LeaseReques
 	}
 	now := s.clock()
 	held := append([]uuid.UUID{capID}, ancestorIDs(ancestors)...)
-	c, err := lock(ctx, tx, lockRequest{now: now, tenantID: tenantID, tenantUnit: unit, created: held, usageTenant: tenantID})
+	// The tenant's aggregate is locked for its period; a lease of requests
+	// alone, which holds none of its budget, does not create it.
+	locks := lockRequest{now: now, tenantID: tenantID, created: held, usageTenant: tenantID}
+	if req.Amount > 0 {
+		locks.tenantUnit = unit
+	}
+	c, err := lock(ctx, tx, locks)
 	if err != nil {
 		return meter.Lease{}, err
 	}
@@ -340,6 +406,9 @@ func (s *UsageStore) lease(ctx context.Context, tx pgx.Tx, req meter.LeaseReques
 	if err := checkCeilings(c, ceilingCheck{amount: req.Amount, budget: subject.Budget(), unit: unit, capID: capID, ancestors: ancestors}, refuse); err != nil {
 		return meter.Lease{}, err
 	}
+	if err := admitRequests(c, subject, ancestors, req.Requests); err != nil {
+		return meter.Lease{}, err
+	}
 	expires, err := holdExpiry(ctx, tx, capID, now, cmp.Or(req.TTL, meter.DefaultLeaseTTL))
 	if err != nil {
 		return meter.Lease{}, err
@@ -349,17 +418,21 @@ func (s *UsageStore) lease(ctx context.Context, tx pgx.Tx, req meter.LeaseReques
 		l = leaseState{id: uuid.New(), ancestors: ancestorIDs(ancestors), period: c.tenant.period}
 	}
 	l.amount += req.Amount
+	l.requests += req.Requests
 	if expires = expires.Truncate(timeResolution); expires.After(l.expires) {
 		l.expires = expires
 	}
 	for _, id := range held {
 		u := c.usage[id]
 		u.reserved += req.Amount
+		u.reservedRequests += req.Requests
 		u.unit = cmp.Or(u.unit, unit)
 	}
+	// A lease of requests alone holds nothing of the tenant's, whose
+	// aggregate it leaves as it is.
 	c.tenant.reserved += req.Amount
-	set := heldStmt{sql: sqlSetLease, args: []any{capID, l.id, int64(l.amount), int64(l.spent), l.expires, l.ancestors, l.period}}
-	if err := c.write(ctx, tx, now, true, set); err != nil {
+	set := heldStmt{sql: sqlSetLease, args: []any{capID, l.id, int64(l.amount), int64(l.spent), l.expires, l.ancestors, l.period, l.requests, l.requestsSpent}}
+	if err := c.write(ctx, tx, now, req.Amount > 0, set); err != nil {
 		return meter.Lease{}, err
 	}
 	return leaseView(capID, tenantID, unit, l), nil
@@ -367,7 +440,10 @@ func (s *UsageStore) lease(ctx context.Context, tx pgx.Tx, req meter.LeaseReques
 
 // leaseView is l as meter.Lease gives it.
 func leaseView(capID, tenantID uuid.UUID, unit string, l leaseState) meter.Lease {
-	return meter.Lease{ID: l.id, CapabilityID: capID, TenantID: tenantID, UnitCode: unit, Amount: l.amount, Spent: l.spent, ExpiresAt: l.expires}
+	return meter.Lease{
+		ID: l.id, CapabilityID: capID, TenantID: tenantID, UnitCode: unit, Amount: l.amount, Spent: l.spent,
+		Requests: l.requests, RequestsSpent: l.requestsSpent, ExpiresAt: l.expires,
+	}
 }
 
 // GetLease implements meter.Leaser, read under the call's scope.
@@ -420,8 +496,9 @@ func (s *UsageStore) settle(ctx context.Context, capID, tenantID uuid.UUID) (met
 
 // settleLease ends capID's lease in tx: what it spent is charged to its
 // ancestors and its tenant — the tenant's while the lease's period is still
-// the current one — and what it holds is released from them and from its
-// capability, which spent its share as it was charged. The lease is read,
+// the current one — and the requests it made counted on its ancestors; what
+// it holds is released from them and from its capability, which spent its
+// share, and counted its requests, as they were made. The lease is read,
 // then its counters locked in the one order every call takes and the
 // tenant's aggregate last, and errLeaseMoved returned should it have moved
 // between.
@@ -448,10 +525,13 @@ func (s *UsageStore) settleLease(ctx context.Context, tx pgx.Tx, capID uuid.UUID
 	}
 	l := self.lease
 	self.reserved = max0(self.reserved - l.remaining())
+	self.reservedRequests = max(self.reservedRequests-l.requestsRemaining(), 0)
 	for _, id := range l.ancestors {
 		if u, ok := c.usage[id]; ok {
 			u.reserved = max0(u.reserved - l.amount)
 			u.spent += l.spent
+			u.reservedRequests = max(u.reservedRequests-l.requests, 0)
+			u.requests += l.requestsSpent
 		}
 	}
 	if c.tenant.persisted {

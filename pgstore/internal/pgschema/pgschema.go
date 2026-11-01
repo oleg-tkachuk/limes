@@ -18,7 +18,7 @@ const (
 // Version is the last migration pgstore/migrate carries, and so the version
 // the stores query: tern numbers the migrations from one without a gap.
 // pgstore/migrate's tests hold it to the migrations it embeds.
-const Version = 33
+const Version = 34
 
 // SettingAllTenants is the setting the row-level security policies read as
 // "every tenant is in scope" when it holds SettingAllTenantsOn.
