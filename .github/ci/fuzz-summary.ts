@@ -1,6 +1,6 @@
 // Put one fuzz target's run on the run's summary page.
 //
-// Usage: PACKAGE=… TARGET=… OUTCOME=… node fuzz-summary.ts <log>
+// Usage: MODULE=… PACKAGE=… TARGET=… OUTCOME=… node fuzz-summary.ts <log>
 //
 // fuzz.yaml runs `go test -fuzz` for one target into <log>, then this, whatever
 // the run's outcome (the step's, success or failure): how long the target
@@ -8,11 +8,12 @@
 // read from the last progress line go prints — and, for a failure, the input
 // go wrote and the command that runs it again, which go prints too. A target
 // that failed before its search began, on its seed corpus, wrote no input,
-// and says so.
+// and says so. MODULE is the directory of the target's module, where go ran.
 
 import { readFileSync } from "node:fs";
 
 import { summarize, table } from "./lib/actions.ts";
+import { ROOT_DIR } from "./fuzz-targets.ts";
 import { requireEnv } from "./lib/env.ts";
 import { runMain } from "./lib/main.ts";
 
@@ -71,13 +72,13 @@ const NONE = "—";
 
 // fuzzSummary is the summary page section of target in pkg, whose step
 // ended in outcome.
-export function fuzzSummary(pkg: string, target: string, outcome: string, run: FuzzRun): string {
+export function fuzzSummary(pkg: string, target: string, outcome: string, run: FuzzRun, module: string = ROOT_DIR): string {
   const row = [pkg, run.elapsed ?? NONE, run.executions?.toString() ?? NONE, run.interesting?.toString() ?? NONE, fuzzResult(outcome)];
   const section = `### Fuzz ${target}\n\n${table(SUMMARY_HEADER, [row])}`;
   if (outcome === SUCCESS || outcome === CANCELLED) {
     return section;
   }
-  return `${section}\n${failureNote(pkg, target, run)}`;
+  return `${section}\n${failureNote(pkg, target, run, module)}`;
 }
 
 // fuzzResult names a fuzz job's outcome.
@@ -94,11 +95,12 @@ function fuzzResult(outcome: string): string {
 
 // failureNote says where a failed fuzz run's input is and how to run it
 // again, or that it failed before its search wrote one.
-function failureNote(pkg: string, target: string, run: FuzzRun): string {
+function failureNote(pkg: string, target: string, run: FuzzRun, module: string): string {
   if (run.input === undefined) {
     return "It failed before its search wrote an input: on its seed corpus, or before it began. See the log.\n";
   }
-  const rerun = `${run.rerun ?? `go test -run=${target}`} ${pkg}`;
+  const command = `${run.rerun ?? `go test -run=${target}`} ${pkg}`;
+  const rerun = module === ROOT_DIR ? command : `cd ${module} && ${command}`;
   return `The failing input is \`${run.input}\`, under the package, in this run's artifact \`fuzz-${target}\`; committed there, it stays a regression test. To run it again:\n\n\`\`\`bash\n${rerun}\n\`\`\`\n`;
 }
 
@@ -108,7 +110,7 @@ async function main(): Promise<void> {
     throw new Error("usage: fuzz-summary.ts <log>");
   }
   const pkg = requireEnv("PACKAGE");
-  summarize(fuzzSummary(pkg, requireEnv("TARGET"), requireEnv("OUTCOME"), parseFuzzLog(readFileSync(logFile, "utf8"))));
+  summarize(fuzzSummary(pkg, requireEnv("TARGET"), requireEnv("OUTCOME"), parseFuzzLog(readFileSync(logFile, "utf8")), requireEnv("MODULE")));
 }
 
 if (import.meta.main) {
