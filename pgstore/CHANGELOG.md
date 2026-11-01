@@ -2,6 +2,17 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.61.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.60.0...pgstore%2Fv0.61.0) (2026-11-01)
+
+### ⚠ BREAKING CHANGES
+
+* **pgstore:** leave a counter restarted since a charge out of its refund
+
+### Bug Fixes
+
+* **pgstore:** leave a counter restarted since a charge out of its refund ([bc7cef1](https://github.com/oleg-tkachuk/limes/commit/bc7cef1dd9df92d818d7c34c6720e0262e9abd67))
+* **pgstore:** settle the leases below a capability whose counters go ([1718d45](https://github.com/oleg-tkachuk/limes/commit/1718d45625e3030ff650ff5fe347273186301c80))
+
 ## [0.60.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.59.1...pgstore%2Fv0.60.0) (2026-11-01)
 
 ### ⚠ BREAKING CHANGES
