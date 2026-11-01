@@ -38,10 +38,11 @@ func (d *beforeTxDB) BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, e
 
 // The transactions of a SetTenantBudget that resets, and of a DeleteUsage,
 // when no lease is open: the read of the leases to settle first, then the
-// call's own.
+// call's own, and then whatever DeleteUsage runs once its counters are gone.
 const (
 	txLeasesRead = 1
 	txOwnCall    = 2
+	txAfterDrop  = 3
 )
 
 // settleRaceCeiling is the tenant's ceiling of the race tests, and what they
@@ -210,5 +211,41 @@ func TestResetKeepsARequestsLeaseOutOfTheNextPeriod(t *testing.T) {
 	}
 	if _, err := f.other.Charge(f.ctx, meter.ChargeRequest{Subject: f.b, Amount: settleRaceCeiling}, nil); !errors.Is(err, limes.ErrTenantBudgetExceeded) {
 		t.Errorf("a charge past the new period's ceiling: %v, want ErrTenantBudgetExceeded", err)
+	}
+}
+
+// settleRaceSpent is what the lease opened past DeleteUsage spends.
+const settleRaceSpent = settleRaceCeiling / 2
+
+// A lease opened right after DeleteUsage dropped an ancestor's counters
+// holds against the counters restarted for it, and is settled against them:
+// the root holds nothing of it once settled and is charged what it spent.
+func TestALeaseOpenedPastDeleteUsageSettlesOnTheRestartedCounters(t *testing.T) {
+	f := newSettleRaceFixture(t)
+	opened := false
+	f.db.at = txAfterDrop
+	f.db.hook = func() {
+		opened = true
+		if _, err := f.other.Lease(f.ctx, meter.LeaseRequest{Subject: f.a, Amount: settleRaceCeiling}); err != nil {
+			t.Errorf("Lease past the drop: %v", err)
+		}
+	}
+	if err := f.hooked.DeleteUsage(f.ctx, meter.DeleteUsageRequest{CapabilityID: f.root}); err != nil {
+		t.Fatalf("DeleteUsage: %v", err)
+	}
+	if !opened {
+		// DeleteUsage ran no transaction past its drop: the lease opens
+		// as soon as it returns.
+		f.db.hook()
+	}
+	if _, err := f.other.Charge(f.ctx, meter.ChargeRequest{Subject: f.a, Amount: settleRaceSpent}, nil); err != nil {
+		t.Fatalf("Charge under the lease: %v", err)
+	}
+	if _, err := f.other.SettleLease(f.ctx, meter.SettleLeaseRequest{Subject: f.a}); err != nil {
+		t.Fatalf("SettleLease: %v", err)
+	}
+	root, err := f.other.GetUsage(f.ctx, f.root)
+	if err != nil || root.ReservedAmount != 0 || root.SpentAmount != settleRaceSpent {
+		t.Errorf("the root once the lease settled = %+v, %v; want %v spent and nothing held", root, err, settleRaceSpent)
 	}
 }
