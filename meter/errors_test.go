@@ -54,6 +54,7 @@ var sentinelMatrix = map[string]sentinelCase{
 	"ErrExternalRefConflict":         {ErrExternalRefConflict, []string{famConflict}, "", http.StatusConflict},
 	"ErrSettleConflict":              {ErrSettleConflict, []string{famConflict}, "", http.StatusConflict},
 	"ErrLeaseExhausted":              {ErrLeaseExhausted, []string{famBudget}, limes.ReasonBudgetExceeded, http.StatusForbidden},
+	"ErrLeaseRequestsExhausted":      {ErrLeaseRequestsExhausted, []string{famRequestLimit}, limes.ReasonRequestLimitExceeded, http.StatusForbidden},
 	"ErrLeaseNotFound":               {ErrLeaseNotFound, []string{famNotFound}, "", http.StatusInternalServerError},
 	"ErrLeaseNested":                 {ErrLeaseNested, []string{famConflict}, "", http.StatusConflict},
 	"ErrTenantBudgetVersionMismatch": {ErrTenantBudgetVersionMismatch, []string{famConflict}, "", http.StatusConflict},

@@ -20,6 +20,7 @@ const (
 	CodeExternalRefConflict         limes.Code = "external_ref_conflict"
 	CodeSettleConflict              limes.Code = "settle_conflict"
 	CodeLeaseExhausted              limes.Code = "lease_exhausted"
+	CodeLeaseRequestsExhausted      limes.Code = "lease_requests_exhausted"
 	CodeLeaseNotFound               limes.Code = "lease_not_found"
 	CodeLeaseNested                 limes.Code = "lease_nested"
 )
@@ -46,6 +47,7 @@ var codeRules = []codeRule{
 	{ErrExternalRefConflict, CodeExternalRefConflict, http.StatusConflict, "The external reference names another charge"},
 	{ErrSettleConflict, CodeSettleConflict, http.StatusConflict, "The reservation was settled for another amount"},
 	{ErrLeaseExhausted, CodeLeaseExhausted, 0, ""},
+	{ErrLeaseRequestsExhausted, CodeLeaseRequestsExhausted, 0, ""},
 	{ErrLeaseNotFound, CodeLeaseNotFound, http.StatusNotFound, "The capability holds no lease"},
 	{ErrLeaseNested, CodeLeaseNested, http.StatusConflict, "An ancestor of the capability holds a lease"},
 }

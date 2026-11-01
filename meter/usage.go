@@ -777,6 +777,11 @@ type Usage struct {
 	// ReservedAmount is held by open reservations (its subtree's, for a
 	// capability with delegated children).
 	ReservedAmount limes.Nanos
+	// ReservedRequests is held by open leases (Leaser): the requests a
+	// lease of the capability's, or of one below it, holds and has not yet
+	// made, or not yet settled. A Bump not under a lease counts them
+	// against the ceiling as made.
+	ReservedRequests int64
 	// UnitCode is the unit the counters count in: the subject's, recorded
 	// by the first Bump, Charge or Reserve of a subject that names one, so
 	// a capability that has only been bumped reads its unit too. Empty
