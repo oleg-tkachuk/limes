@@ -2,6 +2,21 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.60.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.59.1...pgstore%2Fv0.60.0) (2026-11-01)
+
+### ⚠ BREAKING CHANGES
+
+* **pgstore:** the schema is at version 36; migrations 035 and 036 keep
+  limes.exchanges rows until their subject tokens expire.
+
+### Bug Fixes
+
+* **pgstore:** keep an exchange's record past its capability ([fc052a0](https://github.com/oleg-tkachuk/limes/commit/fc052a0e64924f796e869f27096f7333fd61994f))
+
+### Dependencies
+
+* require limes v0.148.0
+
 ## [0.59.1](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.59.0...pgstore%2Fv0.59.1) (2026-11-01)
 
 ### Bug Fixes
