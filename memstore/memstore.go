@@ -1111,9 +1111,29 @@ func (s *UsageStore) dropUsageLocked(capID uuid.UUID) {
 	delete(s.born, capID)
 }
 
-// appendLocked adds entry to the ledger and its indexes. s.mu must be held.
+// appendLocked numbers a new charge and adds it to the ledger and its
+// indexes. s.mu must be held.
 func (s *UsageStore) appendLocked(entry ledgerEntry) {
 	entry.seq = s.nextSeqLocked()
+	s.indexLocked(entry)
+}
+
+// rebuildLedgerLocked makes kept the ledger, each charge keeping the number
+// it was taken at: a refund reads it to tell the counters that counted the
+// charge from those restarted since. s.mu must be held.
+func (s *UsageStore) rebuildLedgerLocked(kept []ledgerEntry) {
+	s.ledger = nil
+	clear(s.byCharge)
+	clear(s.byRef)
+	clear(s.byReservation)
+	for _, e := range kept {
+		s.indexLocked(e)
+	}
+}
+
+// indexLocked adds entry, as numbered, to the ledger and its indexes. s.mu
+// must be held.
+func (s *UsageStore) indexLocked(entry ledgerEntry) {
 	i := len(s.ledger)
 	s.ledger = append(s.ledger, entry)
 	s.byCharge[entry.ID] = i
@@ -2171,14 +2191,7 @@ func (s *UsageStore) EraseTenantUsage(_ context.Context, req meter.EraseTenantUs
 			s.dropUsageLocked(id)
 		}
 	}
-	ledger := slices.DeleteFunc(s.ledger, func(e ledgerEntry) bool { return e.TenantID == tenant })
-	s.ledger = nil
-	clear(s.byCharge)
-	clear(s.byRef)
-	clear(s.byReservation)
-	for _, e := range ledger {
-		s.appendLocked(e)
-	}
+	s.rebuildLedgerLocked(slices.DeleteFunc(s.ledger, func(e ledgerEntry) bool { return e.TenantID == tenant }))
 	delete(s.budgets, tenant)
 	delete(s.periods, tenant)
 	s.records.markErased(tenant)
