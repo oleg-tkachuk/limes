@@ -218,3 +218,21 @@ func TestHeldRevokedSeesARevokedAnswerWhileKept(t *testing.T) {
 		t.Error("past TTL and MaxStale: HeldRevoked still sees the revoked answer")
 	}
 }
+
+// A stale live answer does not stand over a revoked answer the cache holds
+// for one of its tags, read since: what the answer covered is revoked.
+func TestAStaleAnswerYieldsToARevokedTag(t *testing.T) {
+	c, clk, _ := staleCache(10)
+	var calls atomic.Int32
+	if _, _, err := c.GetTagged(t.Context(), "child", tagged(false, &calls, "parent")); err != nil {
+		t.Fatal(err)
+	}
+	clk.advance(testTTL)
+	if revoked, _, err := c.Get(t.Context(), "parent", counted(true, &calls)); err != nil || !revoked {
+		t.Fatalf("parent = %v, %v; want revoked", revoked, err)
+	}
+	revoked, _, err := c.GetTagged(t.Context(), "child", func(context.Context) (bool, []string, error) { return false, nil, errDown })
+	if err != nil || !revoked {
+		t.Errorf("child over a failure = %v, %v; want revoked, as the cache holds its parent revoked", revoked, err)
+	}
+}
