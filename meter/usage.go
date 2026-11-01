@@ -163,6 +163,8 @@ type BudgetMeter interface {
 	// closed (SetTenantBudget with ResetSpend) is refunded to the
 	// capability, its ancestors and its copies, but not to the tenant
 	// aggregate: the current period never counted it.
+	// Likewise a counter restarted since the charge (DeleteUsage on a
+	// capability still on record) never counted it, and is left alone.
 	//
 	// For a cost only known afterwards, prefer Reserve/Settle: a
 	// reservation lapses on its own if the caller never settles it, where

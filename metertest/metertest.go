@@ -413,6 +413,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "SettleOfAnotherCapabilitysHoldIsNotFound", Run: checkSettleOwner},
 		{Name: "SettleWithinTheHoldPassesACrossedCeiling", Run: checkSettleWithinHold},
 		{Name: "RefundOfAClosedPeriodLeavesTheTenantPeriod", Run: checkRefundAcrossReset},
+		{Name: "ARefundLeavesACounterRestartedSinceItsCharge", Run: checkRefundAfterRestart},
 		{Name: "EveryCounterKeepsOneUnit", Run: checkOneUnit},
 		{Name: "AnAncestorCountsInTheUnitOfItsChildren", Run: checkAncestorUnit},
 		{Name: "ASubjectWithNoUnitCountsRequestsAlone", Run: checkNoUnit},
@@ -872,6 +873,54 @@ func checkRefundAcrossReset(t *testing.T, f fixture) {
 	expect.Must(t, err == nil, "%v", err)
 	got = f.tenantSpent(t)
 	expect.That(t, got == 0, "tenant spent %v after refunding the new period's charge, want 0", got)
+}
+
+// checkRefundAfterRestart holds a store to refunding a charge only to the
+// counters that counted it: DeleteUsage restarts a capability's counters,
+// and its copies', from zero, so a refund of a charge taken before must
+// leave them, as a refund of a closed period leaves the tenant's spend; a
+// counter that counted the charge still takes it back.
+func checkRefundAfterRestart(t *testing.T, f fixture) {
+	copyID := []byte("copy-restarted")
+	copies := []limes.CopyCeiling{{RevocationID: copyID, Budget: &limes.BudgetCeiling{Max: childBudget, UnitCode: unit}}}
+	subject := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), copies: copies})
+	charge := func(amount limes.Nanos) meter.ChargeReceipt {
+		t.Helper()
+		r, err := f.Usage.Charge(f.Ctx, meter.ChargeRequest{Subject: subject, Amount: amount}, nil)
+		expect.Must(t, err == nil, "%v", err)
+		return r
+	}
+	refund := func(r meter.ChargeReceipt, amount limes.Nanos) {
+		t.Helper()
+		got, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Remaining: true})
+		expect.Must(t, err == nil && got.Amount == amount, "refund = %+v, %v; want %v", got, err, amount)
+	}
+	restart := func(id uuid.UUID) {
+		t.Helper()
+		expect.Must(t, f.Usage.DeleteUsage(f.Ctx, meter.DeleteUsageRequest{CapabilityID: id}) == nil, "DeleteUsage")
+	}
+	counted := func(when string, root, child, copied, tenant limes.Nanos) {
+		t.Helper()
+		expect.That(t, f.spent(t, f.root) == root, "%s: root spent %v, want %v", when, f.spent(t, f.root), root)
+		expect.That(t, f.spent(t, f.child) == child, "%s: child spent %v, want %v", when, f.spent(t, f.child), child)
+		expect.That(t, f.tenantSpent(t) == tenant, "%s: tenant spent %v, want %v", when, f.tenantSpent(t), tenant)
+		if reader, ok := f.Usage.(meter.CopyUsageReader); ok {
+			var spent limes.Nanos
+			if got := f.copyUsage(t, reader, f.child, copyID); len(got) == 1 {
+				spent = got[0].SpentAmount
+			}
+			expect.That(t, spent == copied, "%s: copy spent %v, want %v", when, spent, copied)
+		}
+	}
+	first := charge(4 * one)
+	restart(f.root)
+	second := charge(2 * one)
+	refund(first, 4*one)
+	counted("a refund past the root's restart", 2*one, 2*one, 2*one, 2*one)
+	restart(f.child)
+	charge(3 * one)
+	refund(second, 2*one)
+	counted("a refund past the child's restart", 3*one, 3*one, 3*one, 3*one)
 }
 
 // checkAncestorUnit holds a store to giving an ancestor counted only through
