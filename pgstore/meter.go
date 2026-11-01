@@ -55,6 +55,19 @@ type ancestor struct {
 // (migrate/ddl/migrations/022_capability_lineage.sql), never the records table.
 const lineageView = schema + ".capability_lineage"
 
+// sqlChain is the chain of $1 up to one ancestor past $2
+// (limes.MaxDelegationDepth), each with its depth: what sqlLineageHeld and
+// sqlLeasesOnChain read.
+const sqlChain = `
+WITH RECURSIVE chain (id, parent_id, depth) AS (
+    SELECT id, parent_id, 0 FROM ` + lineageView + ` WHERE id = $1
+  UNION ALL
+    SELECT c.id, c.parent_id, chain.depth + 1
+    FROM ` + lineageView + ` c
+    JOIN chain ON c.id = chain.parent_id
+    WHERE chain.depth <= $2
+)`
+
 const (
 	// sqlLineage walks up from $1 to one ancestor past $2
 	// (limes.MaxDelegationDepth), nearest first.
@@ -83,15 +96,7 @@ SELECT id FROM chain ORDER BY depth`
 	// record without a gap, and its revoke's mark would wait behind them for
 	// as long. A record deleted between the walk and its lock is not
 	// returned, and the chain is cut there (heldLineage).
-	sqlLineageHeld = `
-WITH RECURSIVE chain (id, parent_id, depth) AS (
-    SELECT id, parent_id, 0 FROM ` + lineageView + ` WHERE id = $1
-  UNION ALL
-    SELECT c.id, c.parent_id, chain.depth + 1
-    FROM ` + lineageView + ` c
-    JOIN chain ON c.id = chain.parent_id
-    WHERE chain.depth <= $2
-)
+	sqlLineageHeld = sqlChain + `
 SELECT l.id, chain.depth, l.requests, l.budget, l.copies
 FROM ` + lineageView + ` l JOIN chain ON l.id = chain.id
 ORDER BY l.id
@@ -125,13 +130,16 @@ type prelude struct {
 	// replayed.
 	replay   ledgerEntry
 	replayed bool
+	// leases are the leases held on the chain, by capability, when the
+	// prelude was asked for them: read, not locked.
+	leases map[uuid.UUID]leaseState
 }
 
 // readPrelude shares tenant's erase lock and refuses it erased, reads the
 // charge on record under capID's ref, when ref is not empty, and capID's
 // lineage holding its records, in one batch: what notErased, a replay's
 // lookup and lineage read one at a time.
-func readPrelude(ctx context.Context, tx pgx.Tx, tenant, capID uuid.UUID, ref string) (prelude, error) {
+func readPrelude(ctx context.Context, tx pgx.Tx, tenant, capID uuid.UUID, ref string, leases bool) (prelude, error) {
 	b := &pgx.Batch{}
 	b.Queue(sqlShareTenantLock, eraseLockClass, tenant)
 	b.Queue(sqlIsErased, tenant)
@@ -139,13 +147,16 @@ func readPrelude(ctx context.Context, tx pgx.Tx, tenant, capID uuid.UUID, ref st
 		b.Queue(sqlChargeByRef, capID, ref)
 	}
 	b.Queue(sqlLineageHeld, capID, limes.MaxDelegationDepth)
+	if leases {
+		b.Queue(sqlLeasesOnChain, capID, limes.MaxDelegationDepth)
+	}
 	br := tx.SendBatch(ctx, b)
-	p, err := readPreludeResults(br, tenant, capID, ref)
+	p, err := readPreludeResults(br, tenant, capID, ref, leases)
 	return p, errors.Join(err, br.Close())
 }
 
 // readPreludeResults reads readPrelude's batch from br.
-func readPreludeResults(br pgx.BatchResults, tenant, capID uuid.UUID, ref string) (prelude, error) {
+func readPreludeResults(br pgx.BatchResults, tenant, capID uuid.UUID, ref string, leases bool) (prelude, error) {
 	var p prelude
 	if _, err := br.Exec(); err != nil {
 		return p, err
@@ -172,13 +183,23 @@ func readPreludeResults(br pgx.BatchResults, tenant, capID uuid.UUID, ref string
 		return p, err
 	}
 	p.ancestors, p.lineageErr = heldLineage(capID, held)
+	if leases {
+		rows, err := br.Query()
+		if err != nil {
+			return p, err
+		}
+		p.leases, err = collectLeases(rows)
+		if err != nil {
+			return p, err
+		}
+	}
 	return p, nil
 }
 
 // readLineage is readPrelude with no reference: tenant not erased, and
 // capID's lineage.
 func readLineage(ctx context.Context, tx pgx.Tx, tenant, capID uuid.UUID) ([]ancestor, error) {
-	p, err := readPrelude(ctx, tx, tenant, capID, "")
+	p, err := readPrelude(ctx, tx, tenant, capID, "", false)
 	if err != nil {
 		return nil, err
 	}
@@ -246,6 +267,8 @@ type usageRow struct {
 	// copiesUnder counts the copies of the capability and of those
 	// delegated from it.
 	copiesUnder int64
+	// lease is the lease the capability holds, none when its id is nil.
+	lease leaseState
 }
 
 // copyRow is one Biscuit copy's counters.
@@ -293,7 +316,8 @@ SELECT id, $2 FROM unnest($1::uuid[]) AS id ORDER BY id
 ON CONFLICT (capability_id) DO NOTHING`
 
 	sqlLockUsage = `
-SELECT capability_id, request_count, spent, reserved, unit_code, copies_under
+SELECT capability_id, request_count, spent, reserved, unit_code, copies_under,
+       lease_id, lease_amount, lease_spent, lease_expires, lease_ancestors, lease_period
 FROM limes.usage WHERE capability_id = ANY ($1)
 ORDER BY capability_id
 FOR UPDATE`
@@ -518,10 +542,11 @@ const usageCreateAttempts = 2
 func scanUsage(row pgx.CollectableRow) (*usageRow, error) {
 	u := &usageRow{}
 	var spent, reserved int64
-	if err := row.Scan(&u.id, &u.requests, &spent, &reserved, &u.unit, &u.copiesUnder); err != nil {
+	var l leaseColumns
+	if err := row.Scan(append([]any{&u.id, &u.requests, &spent, &reserved, &u.unit, &u.copiesUnder}, l.dest()...)...); err != nil {
 		return nil, err
 	}
-	u.spent, u.reserved = limes.Nanos(spent), limes.Nanos(reserved)
+	u.spent, u.reserved, u.lease = limes.Nanos(spent), limes.Nanos(reserved), l.state()
 	return u, nil
 }
 

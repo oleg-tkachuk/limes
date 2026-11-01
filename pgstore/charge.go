@@ -93,24 +93,24 @@ func countRequest(c *counters, unit string) {
 const (
 	sqlChargeByRef = `
 SELECT id, capability_id, tenant_id, amount, refunded, unit_code, external_ref, overrun, op, actor, at,
-       ancestors, copies, reservation_id, tenant_period
+       ancestors, copies, reservation_id, tenant_period, lease_id, lease_holder
 FROM limes.charges WHERE capability_id = $1 AND external_ref = $2 AND external_ref <> ''`
 
 	sqlChargeByID = `
 SELECT id, capability_id, tenant_id, amount, refunded, unit_code, external_ref, overrun, op, actor, at,
-       ancestors, copies, reservation_id, tenant_period
+       ancestors, copies, reservation_id, tenant_period, lease_id, lease_holder
 FROM limes.charges WHERE id = $1`
 
 	sqlChargeByReservation = `
 SELECT id, capability_id, tenant_id, amount, refunded, unit_code, external_ref, overrun, op, actor, at,
-       ancestors, copies, reservation_id, tenant_period
+       ancestors, copies, reservation_id, tenant_period, lease_id, lease_holder
 FROM limes.charges WHERE reservation_id = $1`
 
 	sqlInsertCharge = `
 INSERT INTO limes.charges
     (id, capability_id, tenant_id, amount, unit_code, op, actor, at, ancestors, copies,
-     external_ref, reservation_id, overrun, tenant_period)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`
+     external_ref, reservation_id, overrun, tenant_period, lease_id, lease_holder)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`
 
 	sqlSpent = `SELECT spent FROM limes.usage WHERE capability_id = $1`
 )
@@ -122,6 +122,9 @@ type ledgerEntry struct {
 	copies        [][]byte
 	reservationID *uuid.UUID
 	tenantPeriod  int64
+	// leaseID is the lease the charge was taken under, and leaseHolder its
+	// capability; nil for a charge of the whole chain.
+	leaseID, leaseHolder *uuid.UUID
 }
 
 // readEntry reads the one ledger row query names, if there is one.
@@ -136,7 +139,7 @@ func scanEntry(row pgx.Row) (ledgerEntry, bool, error) {
 	var op string
 	err := row.Scan(
 		&e.ID, &e.CapabilityID, &e.TenantID, &amount, &refunded, &e.UnitCode, &e.ExternalRef, &e.Overrun,
-		&op, &e.Actor, &e.At, &e.ancestors, &e.copies, &e.reservationID, &e.tenantPeriod)
+		&op, &e.Actor, &e.At, &e.ancestors, &e.copies, &e.reservationID, &e.tenantPeriod, &e.leaseID, &e.leaseHolder)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ledgerEntry{}, false, nil
 	}
@@ -182,13 +185,20 @@ func (s *UsageStore) Charge(ctx context.Context, req meter.ChargeRequest, onChar
 		return meter.ChargeReceipt{}, err
 	}
 	var receipt meter.ChargeReceipt
-	err := s.retryDeadlock(ctx, retriedCharge, func() error {
-		return s.inTenantTx(ctx, req.Subject.TenantID(), func(tx pgx.Tx) error {
-			var err error
-			receipt, err = s.charge(ctx, tx, req, onCharged)
-			return err
+	attempt := func() error {
+		return s.retryDeadlock(ctx, retriedCharge, func() error {
+			return s.inTenantTx(ctx, req.Subject.TenantID(), func(tx pgx.Tx) error {
+				var err error
+				receipt, err = s.charge(ctx, tx, req, onCharged)
+				return err
+			})
 		})
-	})
+	}
+	err := attempt()
+	// A lease that moved between its read and its lock is read afresh.
+	if errors.Is(err, errLeaseMoved) {
+		err = attempt()
+	}
 	if errors.Is(err, errReplayedAfterLock) {
 		return receipt, nil
 	}
@@ -201,7 +211,7 @@ func (s *UsageStore) charge(ctx context.Context, tx pgx.Tx, req meter.ChargeRequ
 	// A replay is answered before the lineage is read: it moves nothing,
 	// so it needs no record, and a capability purged since still gets its
 	// receipt, as a settled hold does.
-	p, err := readPrelude(ctx, tx, req.Subject.TenantID(), req.Subject.CapabilityID(), req.ExternalRef)
+	p, err := readPrelude(ctx, tx, req.Subject.TenantID(), req.Subject.CapabilityID(), req.ExternalRef, leasable(req))
 	if err != nil {
 		return meter.ChargeReceipt{}, err
 	}
@@ -212,6 +222,11 @@ func (s *UsageStore) charge(ctx context.Context, tx pgx.Tx, req meter.ChargeRequ
 	ancestors, err := p.ancestors, p.lineageErr
 	if err != nil {
 		return meter.ChargeReceipt{}, err
+	}
+	// Under a lease of its own or an ancestor's, the charge stops at the
+	// leaseholder (docs/adr/0017-budget-leases.md).
+	if holder, below, ok := leaseFor(req.Subject.CapabilityID(), ancestors, p.leases, s.clock()); ok {
+		return s.chargeLeased(ctx, tx, req, unit, ancestors, below, holder, p.leases[holder], onCharged)
 	}
 	spec := chargeSpec{
 		capID: req.Subject.CapabilityID(), tenantID: req.Subject.TenantID(), budget: req.Subject.Budget(),
@@ -323,7 +338,7 @@ func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, s
 	now := s.clock()
 	insert := heldStmt{sql: sqlInsertCharge, args: []any{
 		receipt.ChargeID, spec.capID, spec.tenantID, int64(spec.amount), spec.unit, string(spec.op), spec.actor, now,
-		ancestorIDs(spec.ancestors), copyIDs(spec.copies), spec.externalRef, reservationID, overrun, c.tenant.period,
+		ancestorIDs(spec.ancestors), copyIDs(spec.copies), spec.externalRef, reservationID, overrun, c.tenant.period, nil, nil,
 	}}
 	if err := c.write(ctx, tx, now, true, insert); err != nil {
 		return refused, err

@@ -132,6 +132,9 @@ func BenchmarkRoundTrip(b *testing.B) {
 		b.Run(fmt.Sprintf("op=ChargeParallel/rtt=%s", rtt), func(b *testing.B) {
 			parallelLeaves(b, f, false, func(leaf limes.MeterSubject, n int) error { return chargeLeaf(b, f, leaf, n) })
 		})
+		b.Run(fmt.Sprintf("op=ChargeLeasedParallel/rtt=%s", rtt), func(b *testing.B) {
+			parallelLeasedLeaves(b, f)
+		})
 		b.Run(fmt.Sprintf("op=IsRevoked/rtt=%s", rtt), func(b *testing.B) {
 			id := f.chain[len(f.chain)-1].ID
 			defer reportRoundTrips(b, sent)()
@@ -278,4 +281,36 @@ func delayCopy(dst, src net.Conn, oneWay time.Duration, read *atomic.Int64) {
 			return
 		}
 	}
+}
+
+// benchLease is what each leaf of the leased benchmark leases: past any
+// run's charges.
+const benchLease = limes.Nanos(1) << 50
+
+// parallelLeasedLeaves is parallelLeaves's charges of one tenant, each leaf
+// under a lease of its own: they queue on no row they share
+// (docs/adr/0017-budget-leases.md).
+func parallelLeasedLeaves(b *testing.B, f benchFixture) {
+	b.Helper()
+	leaves := make([]limes.MeterSubject, runtime.GOMAXPROCS(0))
+	ctx := WithTenant(b.Context(), f.tenant)
+	for i := range leaves {
+		chain := f.newChainOf(b, f.tenant)
+		leaves[i] = meterSubject(chain[len(chain)-1].ID, f.tenant)
+		if _, err := f.usage.Lease(ctx, meter.LeaseRequest{Subject: leaves[i], Amount: benchLease, TTL: benchTTL}); err != nil {
+			b.Fatal(err)
+		}
+	}
+	var next atomic.Int64
+	b.RunParallel(func(pb *testing.PB) {
+		leaf := leaves[int(next.Add(1)-1)%len(leaves)]
+		n := 0
+		for pb.Next() {
+			n++
+			if err := chargeLeaf(b, f, leaf, n); err != nil {
+				b.Error(err)
+				return
+			}
+		}
+	})
 }

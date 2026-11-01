@@ -981,9 +981,10 @@ func (s *UsageStore) Charge(
 		return meter.ChargeReceipt{}, err
 	}
 	// Under a lease of its own or an ancestor's, a charge that refuses past
-	// a ceiling stops at the leaseholder; one that records an overrun goes
-	// through the whole chain, which the lease holds budget of too.
-	if req.Overrun != meter.OverrunPolicyRecord {
+	// a ceiling stops at the leaseholder; one that records an overrun, or
+	// that counts a Biscuit copy — whose quota counts on every ancestor —
+	// goes through the whole chain, which the lease holds budget of too.
+	if req.Overrun != meter.OverrunPolicyRecord && len(req.Subject.Copies()) == 0 {
 		if l, below, ok := s.leaseFor(req.Subject.CapabilityID(), ancestors); ok {
 			return s.chargeLeasedLocked(ctx, req, unit, ancestors, ancestors[:below], l, onCharged)
 		}

@@ -98,8 +98,9 @@ func (l Lease) Remaining() limes.Nanos {
 //     capability, or of its nearest ancestor that holds one, while the
 //     lease is open and unexpired; a charge it cannot cover is refused
 //     with ErrLeaseExhausted, and the caller leases more.
-//   - A Charge with OverrunPolicyRecord, and Reserve, Settle and Release,
-//     go through the whole chain.
+//   - A Charge with OverrunPolicyRecord, a Charge of a Biscuit copy with
+//     limits of its own — whose quota counts on every ancestor — and
+//     Reserve, Settle and Release, go through the whole chain.
 //   - A capability whose ancestor holds an open lease cannot lease
 //     (ErrLeaseNested): a lease is drawn from the whole chain.
 //

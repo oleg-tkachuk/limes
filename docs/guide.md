@@ -759,7 +759,7 @@ expired (`ErrExpired`); a cost reported after that is charged with
 
 Every charge locks the counters of the whole chain and the tenant's
 aggregate, so the charges of many sub-agents under one orchestrator queue on
-the same rows. A usage store that is a `meter.Leaser` — memstore's is — lets
+the same rows. A usage store that is a `meter.Leaser` — memstore's and pgstore's are — lets
 a capability hold part of its chain's budget in advance
 ([ADR-0017](adr/0017-budget-leases.md)):
 
@@ -785,7 +785,8 @@ Until it is settled, an ancestor's `GetUsage` and the tenant's aggregate show
 the lease as reserved and its spend not yet; the ledger, and `SumCharges`,
 have every charge at once. A capability whose ancestor holds a lease cannot
 lease one of its own (`meter.ErrLeaseNested`). A charge that records an
-overrun, and `Reserve`, `Settle` and `Release`, go through the whole chain
+overrun, one of a Biscuit copy with limits of its own, and `Reserve`,
+`Settle` and `Release`, go through the whole chain
 under a lease as without one — the lease holds its share of every ceiling,
 so they stay correct, only not faster. Lease a few minutes of a sub-agent's
 expected spend, and top it up when half is gone.

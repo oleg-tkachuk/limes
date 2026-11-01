@@ -99,6 +99,9 @@ func refundAmount(e ledgerEntry, req meter.RefundRequest) (limes.Nanos, error) {
 // history: the current period's spend never counted it, so it has nothing
 // to give back.
 func (s *UsageStore) refund(ctx context.Context, tx pgx.Tx, c *counters, e ledgerEntry, amount limes.Nanos) error {
+	if leased, err := s.refundLeased(ctx, tx, c, e, amount); leased || err != nil {
+		return err
+	}
 	for _, u := range c.usage {
 		u.spent = max0(u.spent - amount)
 	}
@@ -378,6 +381,14 @@ func scanTenant(row pgx.Row, tenantID uuid.UUID) (budgetRow, error) {
 func (s *UsageStore) SetTenantBudget(ctx context.Context, req meter.SetTenantBudgetRequest) (meter.TenantBudget, error) {
 	if err := req.Validate(); err != nil {
 		return meter.TenantBudget{}, err
+	}
+	// A reset closes the period: what the tenant's leases spent is the
+	// closing period's, so they are settled into it first, each in a
+	// transaction of its own.
+	if req.ResetSpend {
+		if _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTenantReadTx(ctx, req.TenantID, fn) }, sqlTenantLeases, req.TenantID); err != nil {
+			return meter.TenantBudget{}, err
+		}
 	}
 	var out meter.TenantBudget
 	err := s.inTenantTx(ctx, req.TenantID, func(tx pgx.Tx) error {
@@ -738,7 +749,9 @@ func (s *UsageStore) ReleaseExpired(ctx context.Context, req meter.ReleaseExpire
 	if err != nil {
 		return meter.ReleaseExpiredResult{}, err
 	}
-	return meter.ReleaseExpiredResult{Released: released}, nil
+	settled, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTx(ctx, fn) }, sqlDueLeases, s.clock(), limit)
+	res := meter.ReleaseExpiredResult{Released: released, SettledLeases: int64(len(settled))}
+	return res, err
 }
 
 func collectHolds(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]hold, error) {
@@ -830,9 +843,17 @@ func (s *UsageStore) DeleteUsage(ctx context.Context, req meter.DeleteUsageReque
 	if err := req.Validate(); err != nil {
 		return err
 	}
-	return s.inTx(ctx, func(tx pgx.Tx) error {
+	// Its lease first, in a transaction of its own: the ancestors and the
+	// tenant it holds budget of are charged and released.
+	if _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTx(ctx, fn) }, sqlLeaseOf, req.CapabilityID); err != nil {
+		return err
+	}
+	if err := s.inTx(ctx, func(tx pgx.Tx) error {
 		return s.dropUsage(ctx, tx, []uuid.UUID{req.CapabilityID})
-	})
+	}); err != nil {
+		return err
+	}
+	return s.forgetLeaseAncestors(ctx, []uuid.UUID{req.CapabilityID})
 }
 
 // PurgeOrphans drops the counters of capabilities no longer on record, as
@@ -842,7 +863,12 @@ func (s *UsageStore) PurgeOrphans(ctx context.Context, req meter.PurgeOrphansReq
 		return meter.PurgeOrphansResult{}, err
 	}
 	limit := meter.HousekeepingLimit(req.Limit)
+	// The orphans' leases first, each in a transaction of its own.
+	if _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTx(ctx, fn) }, sqlOrphanLeases, limit); err != nil {
+		return meter.PurgeOrphansResult{}, err
+	}
 	var purged int64
+	var dropped []uuid.UUID
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, sqlForgetErased); err != nil {
 			return err
@@ -855,7 +881,7 @@ func (s *UsageStore) PurgeOrphans(ctx context.Context, req meter.PurgeOrphansReq
 		if err != nil {
 			return err
 		}
-		purged = int64(len(ids))
+		purged, dropped = int64(len(ids)), ids
 		if len(ids) == 0 {
 			return nil
 		}
@@ -863,6 +889,9 @@ func (s *UsageStore) PurgeOrphans(ctx context.Context, req meter.PurgeOrphansReq
 	})
 	if err != nil {
 		return meter.PurgeOrphansResult{}, err
+	}
+	if err := s.forgetLeaseAncestors(ctx, dropped); err != nil {
+		return meter.PurgeOrphansResult{Purged: purged}, err
 	}
 	return meter.PurgeOrphansResult{Purged: purged}, nil
 }

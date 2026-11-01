@@ -164,8 +164,9 @@ every ceiling and stays correct, conservatively. So:
 
 - **A `Charge` with `OverrunPolicyReject`** is the one path charged under a
   lease (Decision 2).
-- **A `Charge` with `OverrunPolicyRecord`, `Reserve`, `Settle` and
-  `Release`** go through the whole chain.
+- **A `Charge` with `OverrunPolicyRecord`, a `Charge` of a Biscuit copy
+  with limits of its own — whose quota counts on every ancestor's row —
+  `Reserve`, `Settle` and `Release`** go through the whole chain.
 - **Leases do not nest** (Decision 4 deferred): `Lease` under an ancestor
   holding an open lease is `meter.ErrLeaseNested`. A descendant may lease
   under a capability that does not hold one; its settlement charges the
@@ -176,6 +177,12 @@ every ceiling and stays correct, conservatively. So:
   the tenant's spend the tenant's, into the period it closes.
 - **A charge under a lease records it on the ledger**, so `Refund` returns
   it to the lease while it is open and to the chain once it is settled.
+- **pgstore keeps a lease on its holder's usage row** (migration 032), so
+  it is locked with the counters in the order every call takes; the
+  housekeeping calls settle leases each in a transaction of their own.
+  One tenant's charges from every processor, each under a lease of its
+  own, at the +2 ms setting take 2.3 ms each, against 10.8 without leases
+  and 86 before ADR-0018.
 
 ## Rollout
 
