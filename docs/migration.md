@@ -67,13 +67,27 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## pgstore/v0.58.0
+
+- The schema is at version 34. Migration 034 adds a lease's requests and
+  `reserved_requests` to `limes.usage`. `migrate.Run` applies it; a
+  consumer that vendors the schema applies step 034 before this release.
+
+## v0.146.0
+
+- A lease holds requests as well (`LeaseRequest.Requests`,
+  `Lease.Requests` and `RequestsSpent`), and `meter.Usage` gains
+  `ReservedRequests`, which a `Bump` outside a lease counts as made. A
+  `RequestCounter` of your own that is a `Leaser` counts them too.
+- `meter.ErrLeaseRequestsExhausted` (a kind of `ErrRequestLimitExceeded`)
+  is a new sentinel, with code `lease_requests_exhausted`.
+
 ## pgstore/v0.57.0
 
-- The schema is at version 34. Migration 032 adds a lease's columns to
+- The schema is at version 33. Migration 032 adds a lease's columns to
   `limes.usage` and `limes.charges`; 033 indexes the leases by their end,
-  `CONCURRENTLY`; 034 adds a lease's requests and `reserved_requests` to
-  `limes.usage`. `migrate.Run` applies them; a consumer that vendors the
-  schema applies steps 032 to 034 before this release.
+  `CONCURRENTLY`. `migrate.Run` applies both; a consumer that vendors the
+  schema applies steps 032 and 033 before this release.
 - `UsageStore` is a `meter.Leaser`. `ReleaseExpired`, `ReleaseMatching`,
   `DeleteUsage`, `PurgeOrphans` and a `SetTenantBudget` that resets the
   spend settle the leases they reach, each in a transaction of its own.
@@ -87,14 +101,8 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 - `meter.ReleaseExpiredResult` and `meter.ReleaseMatchingResult` gain
   `SettledLeases`, zero for a store that is no `Leaser`.
 - `meter.ErrLeaseExhausted` (a kind of `ErrBudgetExceeded`),
-  `ErrLeaseRequestsExhausted` (a kind of `ErrRequestLimitExceeded`),
   `ErrLeaseNotFound` and `ErrLeaseNested` are new sentinels, with codes
-  `lease_exhausted`, `lease_requests_exhausted`, `lease_not_found` and
-  `lease_nested`.
-- A lease holds requests as well (`LeaseRequest.Requests`,
-  `Lease.Requests` and `RequestsSpent`), and `meter.Usage` gains
-  `ReservedRequests`, which a `Bump` outside a lease counts as made. A
-  `RequestCounter` of your own that is a `Leaser` counts them too.
+  `lease_exhausted`, `lease_not_found` and `lease_nested`.
 
 ## pgstore/v0.56.0
 
