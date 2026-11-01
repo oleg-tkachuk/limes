@@ -2,6 +2,20 @@
 
 Every release of the otelmetric module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.14.0](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.13.2...otelmetric%2Fv0.14.0) (2026-11-01)
+
+### Features
+
+* **otelmetric:** forward meter.Leaser ([cc4c35a](https://github.com/oleg-tkachuk/limes/commit/cc4c35aa7606b59692dd0f9ad8481e26e22919f7))
+
+### Bug Fixes
+
+* **ci:** keep one blank line between changelog entries ([2731a80](https://github.com/oleg-tkachuk/limes/commit/2731a809301ea41dfa670e5db138a93b01488c13))
+
+### Dependencies
+
+* require limes v0.145.0
+
 ## [0.13.2](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.13.1...otelmetric%2Fv0.13.2) (2026-10-31)
 
 ### Dependencies
