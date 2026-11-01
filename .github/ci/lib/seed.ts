@@ -13,15 +13,17 @@ export const SEED_VERSION = "v0.1.0";
 const GO_MOD = "go.mod";
 
 // seedLine starts the release line of a nested module no tag names yet,
-// with a SEED_VERSION tag on the commit that added its go.mod, pushed with
-// the deploy key, which alone may create a release tag. It returns the tag,
-// or undefined for the root module, one already tagged, or one whose go.mod
+// with a SEED_VERSION tag on the commit on main's first-parent line that
+// added its go.mod — the merge that brought it, never a commit of the
+// branch it came on, whose tree nobody reviewed — pushed with the deploy
+// key, which alone may create a release tag. It returns the tag, or
+// undefined for the root module, one already tagged, or one whose go.mod
 // no commit added.
 export async function seedLine(root: string, module: Module, pushTag: (tag: string) => Promise<void>): Promise<string | undefined> {
   if (module.name === ROOT_MODULE || (await git(["tag", "--list", `${module.prefix}v*`], root)).trim() !== "") {
     return undefined;
   }
-  const added = (await git(["log", "--diff-filter=A", "--format=%H", "--", join(module.dir, GO_MOD)], root)).trim().split("\n").at(-1);
+  const added = (await git(["log", "--first-parent", "--diff-filter=A", "--format=%H", "-1", "HEAD", "--", join(module.dir, GO_MOD)], root)).trim();
   if (!added) {
     return undefined;
   }
