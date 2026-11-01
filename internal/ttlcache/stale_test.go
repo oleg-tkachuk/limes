@@ -236,3 +236,28 @@ func TestAStaleAnswerYieldsToARevokedTag(t *testing.T) {
 		t.Errorf("child over a failure = %v, %v; want revoked, as the cache holds its parent revoked", revoked, err)
 	}
 }
+
+// A revoked answer pushed out to make room, while it would still have been
+// kept, takes the stale live answers with it: the cache no longer knows
+// which of their tags it answered, so a failed lookup fails rather than
+// undo the revocation.
+func TestAnEvictedRevocationFailsAStaleTaggedAnswer(t *testing.T) {
+	const bound = 2
+	c, clk, _ := staleCache(bound)
+	var calls atomic.Int32
+	if revoked, _, err := c.Get(t.Context(), "parent", counted(true, &calls)); err != nil || !revoked {
+		t.Fatalf("parent = %v, %v; want revoked", revoked, err)
+	}
+	if _, _, err := c.GetTagged(t.Context(), "child", tagged(false, &calls, "parent")); err != nil {
+		t.Fatal(err)
+	}
+	// A third key makes room: the parent's answer, the oldest, goes.
+	if _, _, err := c.Get(t.Context(), "other", counted(false, &calls)); err != nil {
+		t.Fatal(err)
+	}
+	clk.advance(testTTL)
+	revoked, _, err := c.GetTagged(t.Context(), "child", func(context.Context) (bool, []string, error) { return false, nil, errDown })
+	if !errors.Is(err, errDown) {
+		t.Errorf("child over a failure = %v, %v; want the failure, as the cache let its parent's revocation go", revoked, err)
+	}
+}
