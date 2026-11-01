@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"strconv"
@@ -382,20 +383,25 @@ func (s *UsageStore) SetTenantBudget(ctx context.Context, req meter.SetTenantBud
 	if err := req.Validate(); err != nil {
 		return meter.TenantBudget{}, err
 	}
+	var out meter.TenantBudget
+	set := func() error {
+		return s.inTenantTx(ctx, req.TenantID, func(tx pgx.Tx) error {
+			var err error
+			out, err = s.setTenantBudget(ctx, tx, req)
+			return err
+		})
+	}
+	if !req.ResetSpend {
+		return out, set()
+	}
 	// A reset closes the period: what the tenant's leases spent is the
 	// closing period's, so they are settled into it first, each in a
-	// transaction of its own.
-	if req.ResetSpend {
-		if _, _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTenantReadTx(ctx, req.TenantID, fn) }, sqlTenantLeases, req.TenantID); err != nil {
-			return meter.TenantBudget{}, err
-		}
-	}
-	var out meter.TenantBudget
-	err := s.inTenantTx(ctx, req.TenantID, func(tx pgx.Tx) error {
-		var err error
-		out, err = s.setTenantBudget(ctx, tx, req)
+	// transaction of its own, and again should one open before the reset.
+	settle := func() error {
+		_, _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTenantReadTx(ctx, req.TenantID, fn) }, sqlTenantLeases, req.TenantID)
 		return err
-	})
+	}
+	err := s.settledThen(ctx, settledReset, settle, set)
 	return out, err
 }
 
@@ -414,6 +420,18 @@ func (s *UsageStore) setTenantBudget(ctx context.Context, tx pgx.Tx, req meter.S
 	b, err := lockTenant(ctx, tx, req.TenantID)
 	if err != nil {
 		return meter.TenantBudget{}, err
+	}
+	// A lease of an amount locks the aggregate too, so one opened since the
+	// tenant's leases were settled is seen here, and none opens before the
+	// reset commits.
+	if req.ResetSpend {
+		var leased bool
+		if err := tx.QueryRow(ctx, sqlTenantAmountLeased, req.TenantID).Scan(&leased); err != nil {
+			return meter.TenantBudget{}, err
+		}
+		if leased {
+			return meter.TenantBudget{}, errLeaseOpened
+		}
 	}
 	// A budget with no ceiling set yet expects version 0; an existing one
 	// its current version.
@@ -713,7 +731,16 @@ WHERE NOT EXISTS (SELECT 1 FROM ` + lineageView + ` c WHERE c.id = o.id)
 ORDER BY id
 LIMIT $1`
 
-	sqlDeleteUsage = `DELETE FROM limes.usage WHERE capability_id = ANY ($1)`
+	// sqlDeleteUsage drops the counters of $1 that hold no lease; one that
+	// does waits for its lease's settlement (dropUsage).
+	sqlDeleteUsage = `DELETE FROM limes.usage WHERE capability_id = ANY ($1) AND lease_id IS NULL`
+
+	// sqlUsageLeft is whether any counters of $1 remain.
+	sqlUsageLeft = `SELECT EXISTS (SELECT 1 FROM limes.usage WHERE capability_id = ANY ($1))`
+
+	// sqlTenantAmountLeased is whether tenant $1 has a lease of an amount
+	// open, which holds budget of its aggregate.
+	sqlTenantAmountLeased = `SELECT EXISTS (SELECT 1 FROM limes.usage WHERE tenant_id = $1 AND lease_id IS NOT NULL AND lease_amount > 0)`
 
 	sqlDeleteCopies = `DELETE FROM limes.copy_usage WHERE capability_id = ANY ($1)`
 
@@ -837,6 +864,42 @@ func drain(rows pgx.Rows, err error) error {
 	return rows.Err()
 }
 
+// settleAttempts bounds how often a call that settles leases before it acts
+// settles them again, for leases opened in between.
+const settleAttempts = 3
+
+// errLeaseOpened is a call's own transaction finding a lease opened since
+// the call settled the leases before it.
+var errLeaseOpened = fmt.Errorf("%w: pgstore: a lease was opened after the leases were settled", limes.ErrInternal)
+
+// The calls settledThen runs, as a log line names them.
+const (
+	settledReset        = "SetTenantBudget"
+	settledDeleteUsage  = "DeleteUsage"
+	settledPurgeOrphans = "PurgeOrphans"
+)
+
+// settledThen runs settle, which settles the leases op must not outlive,
+// then act, op's own transaction; when act finds a lease opened in
+// between, it has rolled back, and both run again, at most settleAttempts
+// times in all. Past them the call is refused as limes.ErrConflict.
+func (s *UsageStore) settledThen(ctx context.Context, op string, settle, act func() error) error {
+	for attempt := 1; ; attempt++ {
+		if err := settle(); err != nil {
+			return err
+		}
+		err := act()
+		if !errors.Is(err, errLeaseOpened) {
+			return err
+		}
+		if attempt == settleAttempts {
+			s.log.ErrorContext(ctx, "pgstore: leases kept opening while a call settled them", slog.String(logKeyOp, op), slog.Int(logKeyAttempts, attempt))
+			return fmt.Errorf("%w: %s: leases kept opening while it settled them", limes.ErrConflict, op)
+		}
+		s.log.WarnContext(ctx, "pgstore: settling a lease opened while a call settled them", slog.String(logKeyOp, op), slog.Int(logKeyAttempts, attempt))
+	}
+}
+
 // DeleteUsage drops a capability's counters and its copies', releasing its
 // holds first: nothing could settle or release them once it is gone.
 func (s *UsageStore) DeleteUsage(ctx context.Context, req meter.DeleteUsageRequest) error {
@@ -844,13 +907,18 @@ func (s *UsageStore) DeleteUsage(ctx context.Context, req meter.DeleteUsageReque
 		return err
 	}
 	// Its lease first, in a transaction of its own: the ancestors and the
-	// tenant it holds budget of are charged and released.
-	if _, _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTx(ctx, fn) }, sqlLeaseOf, req.CapabilityID); err != nil {
+	// tenant it holds budget of are charged and released. Again should one
+	// open before the counters go.
+	settle := func() error {
+		_, _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTx(ctx, fn) }, sqlLeaseOf, req.CapabilityID)
 		return err
 	}
-	if err := s.inTx(ctx, func(tx pgx.Tx) error {
-		return s.dropUsage(ctx, tx, []uuid.UUID{req.CapabilityID})
-	}); err != nil {
+	drop := func() error {
+		return s.inTx(ctx, func(tx pgx.Tx) error {
+			return s.dropUsage(ctx, tx, []uuid.UUID{req.CapabilityID})
+		})
+	}
+	if err := s.settledThen(ctx, settledDeleteUsage, settle, drop); err != nil {
 		return err
 	}
 	return s.forgetLeaseAncestors(ctx, []uuid.UUID{req.CapabilityID})
@@ -863,30 +931,20 @@ func (s *UsageStore) PurgeOrphans(ctx context.Context, req meter.PurgeOrphansReq
 		return meter.PurgeOrphansResult{}, err
 	}
 	limit := meter.HousekeepingLimit(req.Limit)
-	// The orphans' leases first, each in a transaction of its own.
-	if _, _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTx(ctx, fn) }, sqlOrphanLeases, limit); err != nil {
-		return meter.PurgeOrphansResult{}, err
+	// The orphans' leases first, each in a transaction of its own, and
+	// again should one open before their counters go.
+	settle := func() error {
+		_, _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTx(ctx, fn) }, sqlOrphanLeases, limit)
+		return err
 	}
 	var purged int64
 	var dropped []uuid.UUID
-	err := s.inTx(ctx, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, sqlForgetErased); err != nil {
-			return err
-		}
-		rows, err := tx.Query(ctx, sqlOrphans, limit)
-		if err != nil {
-			return err
-		}
-		ids, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
-		if err != nil {
-			return err
-		}
-		purged, dropped = int64(len(ids)), ids
-		if len(ids) == 0 {
-			return nil
-		}
-		return s.dropUsage(ctx, tx, ids)
-	})
+	drop := func() error {
+		return s.inTx(ctx, func(tx pgx.Tx) error {
+			return s.dropOrphans(ctx, tx, limit, &purged, &dropped)
+		})
+	}
+	err := s.settledThen(ctx, settledPurgeOrphans, settle, drop)
 	if err != nil {
 		return meter.PurgeOrphansResult{}, err
 	}
@@ -894,6 +952,27 @@ func (s *UsageStore) PurgeOrphans(ctx context.Context, req meter.PurgeOrphansReq
 		return meter.PurgeOrphansResult{Purged: purged}, err
 	}
 	return meter.PurgeOrphansResult{Purged: purged}, nil
+}
+
+// dropOrphans drops the counters of at most limit capabilities no longer
+// on record in tx, and says how many and which.
+func (s *UsageStore) dropOrphans(ctx context.Context, tx pgx.Tx, limit int, purged *int64, dropped *[]uuid.UUID) error {
+	if _, err := tx.Exec(ctx, sqlForgetErased); err != nil {
+		return err
+	}
+	rows, err := tx.Query(ctx, sqlOrphans, limit)
+	if err != nil {
+		return err
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+	if err != nil {
+		return err
+	}
+	*purged, *dropped = int64(len(ids)), ids
+	if len(ids) == 0 {
+		return nil
+	}
+	return s.dropUsage(ctx, tx, ids)
 }
 
 // dropUsage releases the holds of ids — first, as releasing one writes its
@@ -912,6 +991,15 @@ func (s *UsageStore) dropUsage(ctx context.Context, tx pgx.Tx, ids []uuid.UUID) 
 		if _, err := tx.Exec(ctx, q, ids); err != nil {
 			return err
 		}
+	}
+	// sqlDeleteUsage keeps a row holding a lease, which only one opened
+	// since its settlement can: settled first, it must not go unsettled.
+	var leased bool
+	if err := tx.QueryRow(ctx, sqlUsageLeft, ids).Scan(&leased); err != nil {
+		return err
+	}
+	if leased {
+		return errLeaseOpened
 	}
 	return nil
 }

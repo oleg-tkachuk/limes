@@ -22,6 +22,9 @@ func isDeadlock(err error) bool {
 // below.
 const logKeyOp = "op"
 
+// logKeyAttempts is how many times a call has run, as a log line counts.
+const logKeyAttempts = "attempts"
+
 // The meter calls retryDeadlock retries, as a log line names them.
 const (
 	retriedBump        = "Bump"
