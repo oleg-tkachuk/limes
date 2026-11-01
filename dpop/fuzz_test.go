@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -76,7 +77,8 @@ func FuzzHMACNonceValid(f *testing.F) {
 // FuzzDPoPClaims signs whatever header and claims the fuzzer writes with the
 // key the capability is bound to, so the reader past the thumbprint — claims,
 // method, URL, iat, ath — is what is fuzzed. Whatever it accepts must name
-// the request's method, the token's hash and a time inside the window.
+// the request's method, the token's hash and a time inside the window, and
+// is accepted once: presented again, it is refused as a replay.
 func FuzzDPoPClaims(f *testing.F) {
 	now := time.Unix(1_800_000_000, 0)
 	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{2}, ed25519.SeedSize))
@@ -111,8 +113,13 @@ func FuzzDPoPClaims(f *testing.F) {
 		p := input + "." + jose.B64(ed25519.Sign(key, []byte(input)))
 		checkTokenRequest(t, p, claims, jkt, now)
 		v := newVerifier(t, VerifierConfig{Replay: newReplay(t, MemoryReplayCacheConfig{}), Now: func() time.Time { return now }})
-		if err := v.Verify(context.Background(), Request{Proof: Proof{JWT: p, Method: dpopMethod, URL: dpopURL}, Token: "tok", JKT: jkt, Holder: testHolder}); err != nil {
+		req := Request{Proof: Proof{JWT: p, Method: dpopMethod, URL: dpopURL}, Token: "tok", JKT: jkt, Holder: testHolder}
+		if err := v.Verify(context.Background(), req); err != nil {
 			return
+		}
+		// A proof is good once: presented again, it is a replay.
+		if err := v.Verify(context.Background(), req); !errors.Is(err, ErrReplayed) {
+			t.Fatalf("an accepted proof presented again: %v, want ErrReplayed", err)
 		}
 		var c proofClaims
 		if err := decodeSegment(jose.B64([]byte(claims)), &c); err != nil {
