@@ -104,14 +104,18 @@ func (s *UsageStore) refund(ctx context.Context, tx pgx.Tx, c *counters, e ledge
 		return err
 	}
 	for _, u := range c.usage {
-		u.spent = max0(u.spent - amount)
+		if e.counted(u.born) {
+			u.spent = max0(u.spent - amount)
+		}
 	}
 	refundTenant := c.tenant.persisted && c.tenant.period == e.tenantPeriod
 	if refundTenant {
 		c.tenant.spent = max0(c.tenant.spent - amount)
 	}
 	for _, r := range c.copies {
-		r.spent = max0(r.spent - amount)
+		if e.counted(r.born) {
+			r.spent = max0(r.spent - amount)
+		}
 	}
 	return c.write(ctx, tx, s.clock(), refundTenant, heldStmt{sql: sqlRefunded, args: []any{e.ID, int64(amount)}})
 }
@@ -907,16 +911,28 @@ func (s *UsageStore) DeleteUsage(ctx context.Context, req meter.DeleteUsageReque
 	if err := req.Validate(); err != nil {
 		return err
 	}
-	// Its lease first, in a transaction of its own: the ancestors and the
-	// tenant it holds budget of are charged and released. Again should one
-	// open before the counters go.
+	// Its lease and those below it first, in a transaction of their own:
+	// the ancestors and the tenant they hold budget of are charged and
+	// released, and none is left charging under a hold the restarted
+	// counters no longer keep. Again should one open before the counters go.
 	settle := func() error {
-		_, _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTx(ctx, fn) }, sqlLeaseOf, req.CapabilityID)
+		_, _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTx(ctx, fn) }, sqlLeasesFrom, req.CapabilityID)
 		return err
 	}
 	drop := func() error {
 		return s.inTx(ctx, func(tx pgx.Tx) error {
-			return s.dropUsage(ctx, tx, []uuid.UUID{req.CapabilityID})
+			ids := []uuid.UUID{req.CapabilityID}
+			if err := s.dropUsage(ctx, tx, ids); err != nil {
+				return err
+			}
+			var below bool
+			if err := tx.QueryRow(ctx, sqlLeasedBelow, ids).Scan(&below); err != nil {
+				return err
+			}
+			if below {
+				return errLeaseOpened
+			}
+			return nil
 		})
 	}
 	if err := s.settledThen(ctx, settledDeleteUsage, settle, drop); err != nil {

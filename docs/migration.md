@@ -67,6 +67,16 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## pgstore/v0.61.0
+
+- The schema is at version 37. Migration 037 numbers the counter rows and
+  the charges from one sequence, so a refund leaves a counter `DeleteUsage`
+  restarted after the charge; the rows already there count as older than
+  every charge already taken. `migrate.Run` applies it; a consumer that
+  vendors the schema applies step 037 before this release, and runs
+  `ddl.Grants` again: a runtime role now needs `USAGE` on the schema's
+  sequences.
+
 ## pgstore/v0.60.0
 
 - The schema is at version 36. Migration 035 keeps an exchange's record

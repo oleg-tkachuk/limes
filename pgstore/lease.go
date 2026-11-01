@@ -131,8 +131,15 @@ LIMIT $2`
 	// sqlTenantLeases are the leases of tenant $1.
 	sqlTenantLeases = `SELECT capability_id, tenant_id FROM limes.usage WHERE tenant_id = $1 AND lease_id IS NOT NULL ORDER BY capability_id`
 
-	// sqlLeaseOf is $1's lease and tenant, when it holds one.
-	sqlLeaseOf = `SELECT capability_id, tenant_id FROM limes.usage WHERE capability_id = $1 AND lease_id IS NOT NULL`
+	// sqlLeasesFrom are the leases of $1 and of those below it, with their
+	// tenants.
+	sqlLeasesFrom = `
+SELECT capability_id, tenant_id FROM limes.usage
+WHERE lease_id IS NOT NULL AND (capability_id = $1 OR lease_ancestors && ARRAY[$1::uuid])
+ORDER BY capability_id`
+
+	// sqlLeasedBelow is whether a lease is held against any of $1.
+	sqlLeasedBelow = `SELECT EXISTS (SELECT 1 FROM limes.usage WHERE lease_id IS NOT NULL AND lease_ancestors && $1)`
 
 	// sqlOrphanLeases are the leases of capabilities no longer on record, at
 	// most $1.
@@ -614,7 +621,7 @@ func (s *UsageStore) refundLeased(ctx context.Context, tx pgx.Tx, c *counters, e
 	}
 	only := &counters{usage: map[uuid.UUID]*usageRow{}, copies: map[string]*copyRow{}}
 	for _, id := range ids {
-		if u, ok := c.usage[id]; ok {
+		if u, ok := c.usage[id]; ok && e.counted(u.born) {
 			u.spent = max0(u.spent - amount)
 			only.usage[id] = u
 		}

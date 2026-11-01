@@ -368,7 +368,7 @@ func (s *UsageStore) refundLeasedLocked(e *ledgerEntry, amount limes.Nanos) bool
 		ids = append(ids, e.Ancestors[:slices.Index(e.Ancestors, l.capID)+1]...)
 	}
 	for _, id := range ids {
-		if u, ok := s.usage[id]; ok {
+		if u, ok := s.usage[id]; ok && s.countedLocked(id, e) {
 			u.SpentAmount = max0(u.SpentAmount - amount)
 			if id == l.capID {
 				u.ReservedAmount += amount
@@ -380,7 +380,7 @@ func (s *UsageStore) refundLeasedLocked(e *ledgerEntry, amount limes.Nanos) bool
 	s.leases[l.capID] = l
 	for _, id := range e.Copies {
 		key := copyKeyOf(e.CapabilityID, id)
-		if cc, ok := s.copies[key]; ok {
+		if cc, ok := s.copies[key]; ok && cc.born < e.seq {
 			cc.spent = max0(cc.spent - amount)
 			s.putCopyLocked(key, cc, nil)
 		}

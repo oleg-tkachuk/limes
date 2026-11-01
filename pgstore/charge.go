@@ -119,17 +119,17 @@ func countRequest(c *counters, unit string) {
 const (
 	sqlChargeByRef = `
 SELECT id, capability_id, tenant_id, amount, refunded, unit_code, external_ref, overrun, op, actor, at,
-       ancestors, copies, reservation_id, tenant_period, lease_id, lease_holder
+       ancestors, copies, reservation_id, tenant_period, lease_id, lease_holder, seq
 FROM limes.charges WHERE capability_id = $1 AND external_ref = $2 AND external_ref <> ''`
 
 	sqlChargeByID = `
 SELECT id, capability_id, tenant_id, amount, refunded, unit_code, external_ref, overrun, op, actor, at,
-       ancestors, copies, reservation_id, tenant_period, lease_id, lease_holder
+       ancestors, copies, reservation_id, tenant_period, lease_id, lease_holder, seq
 FROM limes.charges WHERE id = $1`
 
 	sqlChargeByReservation = `
 SELECT id, capability_id, tenant_id, amount, refunded, unit_code, external_ref, overrun, op, actor, at,
-       ancestors, copies, reservation_id, tenant_period, lease_id, lease_holder
+       ancestors, copies, reservation_id, tenant_period, lease_id, lease_holder, seq
 FROM limes.charges WHERE reservation_id = $1`
 
 	sqlInsertCharge = `
@@ -151,6 +151,14 @@ type ledgerEntry struct {
 	// leaseID is the lease the charge was taken under, and leaseHolder its
 	// capability; nil for a charge of the whole chain.
 	leaseID, leaseHolder *uuid.UUID
+	// seq numbers the charge among the counter rows (migration 037): a row
+	// born after it never counted it.
+	seq int64
+}
+
+// counted reports whether a counter row born at born counted e.
+func (e ledgerEntry) counted(born int64) bool {
+	return born < e.seq
 }
 
 // readEntry reads the one ledger row query names, if there is one.
@@ -165,7 +173,7 @@ func scanEntry(row pgx.Row) (ledgerEntry, bool, error) {
 	var op string
 	err := row.Scan(
 		&e.ID, &e.CapabilityID, &e.TenantID, &amount, &refunded, &e.UnitCode, &e.ExternalRef, &e.Overrun,
-		&op, &e.Actor, &e.At, &e.ancestors, &e.copies, &e.reservationID, &e.tenantPeriod, &e.leaseID, &e.leaseHolder)
+		&op, &e.Actor, &e.At, &e.ancestors, &e.copies, &e.reservationID, &e.tenantPeriod, &e.leaseID, &e.leaseHolder, &e.seq)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ledgerEntry{}, false, nil
 	}

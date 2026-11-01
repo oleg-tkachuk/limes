@@ -124,6 +124,26 @@ type UsageStore struct {
 	// ResetSpend starts the next one. A ledger entry records the period it
 	// was counted in, so a refund leaves a later period's spend alone.
 	periods map[uuid.UUID]uint64
+
+	// seq numbers counter rows and charges in the order they come to be:
+	// born is the number each usage row began at, copyCounter.born each
+	// copy's, ledgerEntry.seq each charge's. A row born after a charge —
+	// restarted by DeleteUsage since — never counted it, so a refund of it
+	// leaves that row alone.
+	seq  uint64
+	born map[uuid.UUID]uint64
+}
+
+// nextSeqLocked is the next number of s.seq. s.mu must be held.
+func (s *UsageStore) nextSeqLocked() uint64 {
+	s.seq++
+	return s.seq
+}
+
+// countedLocked reports whether capID's usage row counted e: it began
+// before e was charged. s.mu must be held.
+func (s *UsageStore) countedLocked(capID uuid.UUID, e *ledgerEntry) bool {
+	return s.born[capID] < e.seq
 }
 
 // refKey is what ChargeRequest.ExternalRef makes a charge idempotent on.
@@ -203,6 +223,7 @@ func (s *UsageStore) admitCopiesLocked(subject limes.MeterSubject, ancestors []l
 // shorter than the one admitted. s.mu must be held.
 func (s *UsageStore) putCopyLocked(key copyKey, cc copyCounter, ancestors []uuid.UUID) {
 	if !hasKey(s.copies, key) {
+		cc.born = s.nextSeqLocked()
 		s.copyCount[key.capID]++
 		s.copiesUnder[key.capID]++
 		for _, id := range ancestors {
@@ -225,6 +246,8 @@ type copyCounter struct {
 	requests int64
 	spent    limes.Nanos
 	reserved limes.Nanos
+	// born is the UsageStore.seq number the counter began at.
+	born uint64
 }
 
 // ledgerEntry records one committed charge.
@@ -256,6 +279,8 @@ type ledgerEntry struct {
 	// tenantPeriod is the tenant's accounting period the charge was counted
 	// in (UsageStore.periods).
 	tenantPeriod uint64
+	// seq is the UsageStore.seq number the charge was taken at.
+	seq uint64
 	// leaseID is the lease the charge was taken under, and leaseHolder its
 	// capability; uuid.Nil() for a charge of the whole chain.
 	leaseID, leaseHolder uuid.UUID
@@ -342,6 +367,7 @@ func NewUsageStore(cfg UsageStoreConfig) (*UsageStore, error) {
 
 		copiesUnder: map[uuid.UUID]int64{},
 		periods:     map[uuid.UUID]uint64{},
+		born:        map[uuid.UUID]uint64{},
 
 		byCharge:      map[uuid.UUID]int{},
 		byRef:         map[refKey]int{},
@@ -1071,6 +1097,9 @@ func entryLocked[K comparable](s *UsageStore, index map[K]int, key K) (ledgerEnt
 
 // putUsageLocked writes capID's usage row, of tenant. s.mu must be held.
 func (s *UsageStore) putUsageLocked(capID, tenant uuid.UUID, u meter.Usage) {
+	if !hasKey(s.usage, capID) {
+		s.born[capID] = s.nextSeqLocked()
+	}
 	s.usage[capID] = u
 	s.tenantOf[capID] = tenant
 }
@@ -1079,10 +1108,12 @@ func (s *UsageStore) putUsageLocked(capID, tenant uuid.UUID, u meter.Usage) {
 func (s *UsageStore) dropUsageLocked(capID uuid.UUID) {
 	delete(s.usage, capID)
 	delete(s.tenantOf, capID)
+	delete(s.born, capID)
 }
 
 // appendLocked adds entry to the ledger and its indexes. s.mu must be held.
 func (s *UsageStore) appendLocked(entry ledgerEntry) {
+	entry.seq = s.nextSeqLocked()
 	i := len(s.ledger)
 	s.ledger = append(s.ledger, entry)
 	s.byCharge[entry.ID] = i
@@ -1793,7 +1824,7 @@ func (s *UsageStore) refundLocked(e *ledgerEntry, amount limes.Nanos) {
 		return
 	}
 	for _, id := range append([]uuid.UUID{e.CapabilityID}, e.Ancestors...) {
-		if u, ok := s.usage[id]; ok {
+		if u, ok := s.usage[id]; ok && s.countedLocked(id, e) {
 			u.SpentAmount = max0(u.SpentAmount - amount)
 			s.putUsageLocked(id, e.TenantID, u)
 		}
@@ -1807,7 +1838,7 @@ func (s *UsageStore) refundLocked(e *ledgerEntry, amount limes.Nanos) {
 	}
 	for _, id := range e.Copies {
 		key := copyKeyOf(e.CapabilityID, id)
-		if cc, ok := s.copies[key]; ok {
+		if cc, ok := s.copies[key]; ok && cc.born < e.seq {
 			cc.spent = max0(cc.spent - amount)
 			s.putCopyLocked(key, cc, nil)
 		}
@@ -2094,7 +2125,9 @@ func (s *UsageStore) DeleteUsage(_ context.Context, req meter.DeleteUsageRequest
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.releaseHoldsLocked(func(id uuid.UUID) bool { return id == capID })
-	s.settleLeasesLocked(func(l lease) bool { return l.capID == capID })
+	// The leases below it too: each holds against its chain, and one left
+	// open would charge under a hold the restarted counters no longer keep.
+	s.settleLeasesLocked(func(l lease) bool { return l.capID == capID || slices.Contains(l.ancestors, capID) })
 	s.dropUsageLocked(capID)
 	s.dropCopiesLocked(func(id uuid.UUID) bool { return id == capID })
 	s.forgetAncestorLocked(func(id uuid.UUID) bool { return id == capID })
