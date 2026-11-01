@@ -20,6 +20,11 @@ func leaseSubject(capID, tenant uuid.UUID) limes.MeterSubject {
 
 func TestLeaseRequestValidate(t *testing.T) {
 	subject := leaseSubject(uuid.New(), uuid.New())
+	copySubject := link.NewMeterSubject(link.MeterSubjectFields{
+		CapabilityID: uuid.New(), TenantID: uuid.New(),
+		Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true, UnitCode: "USD"},
+		Copies: []limes.CopyCeiling{{RevocationID: []byte("copy"), Budget: &limes.BudgetCeiling{Max: 1, UnitCode: "USD"}}},
+	}).(limes.MeterSubject)
 	for name, tc := range map[string]struct {
 		req LeaseRequest
 		ok  bool
@@ -34,6 +39,7 @@ func TestLeaseRequestValidate(t *testing.T) {
 		"past MaxNanos":     {LeaseRequest{Subject: subject, Amount: limes.MaxNanos + 1}, false},
 		"a negative TTL":    {LeaseRequest{Subject: subject, Amount: 1, TTL: -1}, false},
 		"no subject":        {LeaseRequest{Amount: 1}, false},
+		"a Biscuit copy":    {LeaseRequest{Subject: copySubject, Amount: 1}, false},
 	} {
 		err := tc.req.Validate()
 		if tc.ok != (err == nil) || (err != nil && !errors.Is(err, limes.ErrInvalidRequest) && !errors.Is(err, limes.ErrInvalidAmount)) {

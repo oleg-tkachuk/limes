@@ -784,7 +784,9 @@ revoked, `DeleteUsage` and `PurgeOrphans` before its counters go, and a
 Until it is settled, an ancestor's `GetUsage` and the tenant's aggregate show
 the lease as reserved and its spend not yet; the ledger, and `SumCharges`,
 have every charge at once. A capability whose ancestor holds a lease cannot
-lease one of its own (`meter.ErrLeaseNested`). A charge that records an
+lease one of its own (`meter.ErrLeaseNested`), and a Biscuit copy cannot
+lease at all (`limes.ErrInvalidRequest`): lease for the capability it was
+attenuated from instead. A charge that records an
 overrun, one of a Biscuit copy with limits of its own, and `Reserve`,
 `Settle` and `Release`, go through the whole chain
 under a lease as without one — the lease holds its share of every ceiling,

@@ -300,3 +300,18 @@ func checkLeaseIsSettledByAReset(t *testing.T, f fixture) {
 	expect.That(t, b.SpentAmount == 0 && b.ReservedAmount == 0, "the tenant after a reset = %v spent, %v held; want a new period holding nothing", b.SpentAmount, b.ReservedAmount)
 	expect.That(t, f.usageOf(t, f.root).SpentAmount == leaseCharge, "the root spent %v once the lease settled by the reset, want %v", f.usageOf(t, f.root).SpentAmount, leaseCharge)
 }
+
+// A Biscuit copy leases nothing: what it charges and bumps goes through the
+// whole chain, which a lease would hold beyond the copy's own ceilings, so
+// a lease of one is refused, as a Reserve past those ceilings is, and
+// nothing is held.
+func checkLeaseOfACopyIsRefused(t *testing.T, f fixture) {
+	l := f.leaser(t)
+	copies := []limes.CopyCeiling{{RevocationID: []byte("leasing-copy"), Budget: &limes.BudgetCeiling{Max: one, UnitCode: unit}}}
+	subject := newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), copies: copies})
+	_, err := l.Lease(f.Ctx, meter.LeaseRequest{Subject: subject, Amount: leased})
+	expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "Lease of a copy = %v, want ErrInvalidRequest", err)
+	for _, id := range []uuid.UUID{f.child, f.root} {
+		expect.That(t, f.usageOf(t, id).ReservedAmount == 0, "%s holds %v after a copy's refused lease, want nothing", id, f.usageOf(t, id).ReservedAmount)
+	}
+}

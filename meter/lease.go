@@ -31,7 +31,9 @@ type LeaseRequest struct {
 
 // Validate refuses an amount out of range, negative requests, a lease of
 // no amount and no requests, a subject that names no capability, no tenant
-// or no unit, or an unknown unit, and a negative TTL.
+// or no unit, or an unknown unit, a Biscuit copy, and a negative TTL. A
+// copy's charges and bumps never go under a lease, so a lease of one would
+// hold its chain's budget past the copy's own ceilings.
 func (r LeaseRequest) Validate() error {
 	if err := r.Amount.Validate(); err != nil {
 		return err
@@ -44,6 +46,9 @@ func (r LeaseRequest) Validate() error {
 	}
 	if err := r.Subject.ValidateAmounts(); err != nil {
 		return err
+	}
+	if len(r.Subject.Copies()) > 0 {
+		return invalidRequest("lease of a Biscuit copy of %s", r.Subject.CapabilityID())
 	}
 	if r.TTL < 0 {
 		return invalidRequest("lease TTL %s is negative", r.TTL)
@@ -125,6 +130,9 @@ func (l Lease) RequestsRemaining() int64 {
 //     one, and Reserve, Settle and Release, go through the whole chain.
 //   - A capability whose ancestor holds an open lease cannot lease
 //     (ErrLeaseNested): a lease is drawn from the whole chain.
+//   - A Biscuit copy cannot lease (ErrInvalidRequest): none of its calls
+//     go under a lease, which would hold its chain's budget past the
+//     copy's own ceilings.
 //
 // A lease is settled — its spend charged to every ancestor and the tenant,
 // its requests counted on every ancestor, the rest released — by SettleLease, by ReleaseExpired once it expired,
