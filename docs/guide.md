@@ -791,6 +791,23 @@ under a lease as without one — the lease holds its share of every ceiling,
 so they stay correct, only not faster. Lease a few minutes of a sub-agent's
 expected spend, and top it up when half is gone.
 
+A lease holds requests too, for a sub-agent whose every call is a `Bump`:
+
+```go
+lease, err := leaser.Lease(ctx, meter.LeaseRequest{Subject: sub.MeterSubject(), Requests: 100})
+```
+
+`Requests` are held against every ancestor's request ceiling at once, and
+shown in their `GetUsage` as `ReservedRequests`, which a `Bump` outside
+the lease counts as made. A `Bump` of the leaseholder, or of a capability
+delegated from it, then counts only up to the leaseholder; one the lease has
+no requests left for is `meter.ErrLeaseRequestsExhausted`, a kind of
+`ErrRequestLimitExceeded`. Settled, the requests it made are counted on the
+ancestors and the rest released. One lease may hold both an amount and
+requests, each covering only its own calls: a lease of no amount covers no
+`Charge`, and one of no requests no `Bump`. A `Bump` of a Biscuit copy with
+limits of its own goes through the whole chain, as a charge of one does.
+
 ## Observe the meter
 
 `otelmetric.Instrument`, from the nested module

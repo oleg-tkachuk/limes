@@ -152,8 +152,8 @@ but it does not remove the ceiling of one row.
   statement, or a pipelined batch, from 16 round trips toward one or two,
   with no change to any contract. It shortens every lock, a lease's
   settlement among them, and its benchmarks are the ones above.
-- **The same lease answers `Bump`** in a later step: a request lease of N
-  requests, counted on the leaseholder's row alone.
+- **The same lease answers `Bump`**: a lease of N requests, counted on the
+  rows up to the leaseholder alone (see "Request leases").
 
 ## The first version
 
@@ -183,6 +183,22 @@ every ceiling and stays correct, conservatively. So:
   One tenant's charges from every processor, each under a lease of its
   own, at the +2 ms setting take 2.3 ms each, against 10.8 without leases
   and 86 before ADR-0018.
+
+## Request leases
+
+A lease holds requests beside its amount (`LeaseRequest.Requests`), on the
+same row and settled by the same paths. Its requests are held against every
+ancestor in a counter of their own, `ReservedRequests`, rather than counted
+in `RequestCount`, which stays the requests actually made; a `Bump` outside
+the lease counts them as made, so it stays correct as a charge outside one
+does. A `Bump` under the lease counts on the capability, the ancestors below
+the leaseholder and the leaseholder, and is refused past the lease with
+`meter.ErrLeaseRequestsExhausted`, a kind of `ErrRequestLimitExceeded`. The
+tenant has no request ceiling, so a lease of requests alone touches no
+aggregate. A `Bump` of a Biscuit copy with limits of its own goes through
+the whole chain, for the reason a charge of one does. Each half of a lease
+covers its own calls only: a lease of no amount covers no `Charge`, one of
+no requests no `Bump`.
 
 ## Rollout
 
