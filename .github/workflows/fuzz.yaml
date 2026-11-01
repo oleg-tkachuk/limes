@@ -23,8 +23,9 @@ env:
   FUZZ_TIME: 10m
 
 jobs:
-  # The targets, read from the code, so a new one is fuzzed without an edit
-  # here.
+  # The targets, read from the code of every module the repository
+  # releases (.github/ci/fuzz-targets.ts), so a new one is fuzzed without an
+  # edit here.
   targets:
     name: List the fuzz targets
     runs-on: ubuntu-26.04
@@ -45,26 +46,12 @@ jobs:
           go-version-file: go.mod
           cache: false
 
+      - name: Set up the CI scripts
+        uses: ./.github/actions/setup-ci
+
       - name: List
         id: list
-        run: |
-          set -euo pipefail
-          # -fuzz takes one package at a time, so each target travels with
-          # the package it lives in.
-          # A package that fails to list fails the job; one with no target
-          # lists none.
-          targets="$(
-            for pkg in $(go list ./...); do
-              listed="$(go test -list '^Fuzz' "$pkg")"
-              { grep '^Fuzz' <<<"$listed" || true; } | sed "s#^#${pkg} #"
-            done | jq -Rnc '[inputs | split(" ") | {package: .[0], target: .[1]}]'
-          )"
-          if [ "$targets" = "[]" ]; then
-            echo "::error::no fuzz targets found" >&2
-            exit 1
-          fi
-          printf 'targets=%s\n' "$targets" >>"$GITHUB_OUTPUT"
-          printf '%s\n' "$targets"
+        run: node .github/ci/fuzz-targets.ts
 
   fuzz:
     name: Fuzz ${{ matrix.fuzz.target }}
@@ -95,6 +82,7 @@ jobs:
       # Into the log as it runs, and into a file the summary reads.
       - name: Fuzz
         id: fuzz
+        working-directory: ${{ matrix.fuzz.module }}
         env:
           PACKAGE: ${{ matrix.fuzz.package }}
           TARGET: ${{ matrix.fuzz.target }}
@@ -105,6 +93,7 @@ jobs:
       - name: Summarize
         if: always() && steps.fuzz.outcome != 'skipped'
         env:
+          MODULE: ${{ matrix.fuzz.module }}
           PACKAGE: ${{ matrix.fuzz.package }}
           TARGET: ${{ matrix.fuzz.target }}
           OUTCOME: ${{ steps.fuzz.outcome }}

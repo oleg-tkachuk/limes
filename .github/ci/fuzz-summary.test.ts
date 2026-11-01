@@ -3,6 +3,9 @@ import { describe, test } from "node:test";
 
 import { CANCELLED, SUCCESS, fuzzSummary, parseFuzzLog } from "./fuzz-summary.ts";
 
+// NESTED_MODULE is a nested module's directory, as fuzz.yaml passes it.
+const NESTED_MODULE = "biscuit";
+
 const PKG = "github.com/oleg-tkachuk/limes/internal/ttlcache";
 const TARGET = "FuzzCounters";
 
@@ -63,6 +66,10 @@ describe("fuzzSummary", () => {
     assert.match(page, /`testdata\/fuzz\/FuzzCounters\/310637d0c4244160`/);
     assert.match(page, /artifact `fuzz-FuzzCounters`/);
     assert.match(page, new RegExp(`\`\`\`bash\\ngo test -run=FuzzCounters/310637d0c4244160 ${PKG.replaceAll(".", "\\.")}\\n\`\`\``));
+  });
+  test("a failing input of a nested module, run again in its directory", () => {
+    const page = fuzzSummary(PKG, TARGET, "failure", parseFuzzLog(FAILED), NESTED_MODULE);
+    assert.match(page, new RegExp(`\`\`\`bash\\ncd ${NESTED_MODULE} && go test -run=FuzzCounters/310637d0c4244160 `));
   });
   test("a cancelled search: neither passed nor failed, and no failure to explain", () => {
     const page = fuzzSummary(PKG, TARGET, CANCELLED, parseFuzzLog(PASSED));
