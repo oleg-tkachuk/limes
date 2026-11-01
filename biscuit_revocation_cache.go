@@ -56,6 +56,11 @@ func (c *RevocationCache) lookupBiscuitMisses(ctx context.Context, missing []str
 	revoked, at, err := c.copies.Get(ctx, key, func(ctx context.Context) (bool, error) {
 		return c.biscuits.IsBiscuitRevoked(ctx, ids)
 	})
+	// A live answer about the set, stale over a failure, does not undo the
+	// revocation of one of its ids that the cache read since.
+	if err == nil && !revoked && len(missing) > 1 && c.copies.HeldRevoked(missing) {
+		return true, nil
+	}
 	if err == nil && !revoked && len(missing) > 1 {
 		c.copies.SeedLive(missing, epoch, at)
 	}

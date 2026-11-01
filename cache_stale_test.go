@@ -176,3 +176,64 @@ func TestRevocationCacheRefusesABadMaxStale(t *testing.T) {
 		}
 	}
 }
+
+// idUpstream answers a set of Biscuit revocation ids revoked when any of
+// them is among revoked, or fails with err.
+type idUpstream struct {
+	mu      sync.Mutex
+	revoked map[string]bool
+	err     error
+}
+
+func (u *idUpstream) IsBiscuitRevoked(_ context.Context, ids [][]byte) (bool, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.err != nil {
+		return false, u.err
+	}
+	for _, id := range ids {
+		if u.revoked[string(id)] {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (u *idUpstream) set(revoked string, err error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if revoked != "" {
+		u.revoked[revoked] = true
+	}
+	u.err = err
+}
+
+// A token the cache saw revoked stays revoked over a failure: a stale live
+// answer about the set of its ids does not stand for the revoked answer the
+// cache holds about one of them, read since.
+func TestRevocationCacheKeepsARevokedIDOverAStaleSet(t *testing.T) {
+	up := &idUpstream{revoked: map[string]bool{}}
+	c, clk, _ := staleCache(t, &flakyUpstream{}, up)
+	a, b, sibling := []byte("a"), []byte("b"), []byte("c")
+	ask := func(ids ...[]byte) (bool, error) { return c.IsBiscuitRevoked(t.Context(), ids) }
+	if revoked, err := ask(a, b); err != nil || revoked {
+		t.Fatalf("{a,b} = %v, %v; want live", revoked, err)
+	}
+	// Past the TTL, b is revoked; a sibling copy keeps a fresh, so the
+	// next question about {a,b} asks about b alone.
+	clk.advance(cacheTTL + time.Second)
+	up.set(string(b), nil)
+	if revoked, err := ask(a, sibling); err != nil || revoked {
+		t.Fatalf("{a,c} = %v, %v; want live", revoked, err)
+	}
+	if revoked, err := ask(a, b); err != nil || !revoked {
+		t.Fatalf("{a,b} once b is revoked = %v, %v; want revoked", revoked, err)
+	}
+	// Past the TTL again the upstream fails: the set's stale live answer
+	// must not undo b's revocation.
+	clk.advance(cacheTTL + time.Second)
+	up.set("", errUpstreamDown)
+	if revoked, err := ask(a, b); err != nil || !revoked {
+		t.Errorf("{a,b} over a failure = %v, %v; want revoked, as the cache saw b", revoked, err)
+	}
+}
