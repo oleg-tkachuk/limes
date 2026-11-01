@@ -104,14 +104,18 @@ func (s *UsageStore) refund(ctx context.Context, tx pgx.Tx, c *counters, e ledge
 		return err
 	}
 	for _, u := range c.usage {
-		u.spent = max0(u.spent - amount)
+		if e.counted(u.born) {
+			u.spent = max0(u.spent - amount)
+		}
 	}
 	refundTenant := c.tenant.persisted && c.tenant.period == e.tenantPeriod
 	if refundTenant {
 		c.tenant.spent = max0(c.tenant.spent - amount)
 	}
 	for _, r := range c.copies {
-		r.spent = max0(r.spent - amount)
+		if e.counted(r.born) {
+			r.spent = max0(r.spent - amount)
+		}
 	}
 	return c.write(ctx, tx, s.clock(), refundTenant, heldStmt{sql: sqlRefunded, args: []any{e.ID, int64(amount)}})
 }

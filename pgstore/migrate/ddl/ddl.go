@@ -181,6 +181,10 @@ func Steps() ([]Step, error) {
 // tablePrivileges are what a runtime role may do to a table of the store.
 const tablePrivileges = "SELECT, INSERT, UPDATE, DELETE"
 
+// sequencePrivileges are what a runtime role may do to a sequence of the
+// store: draw from it, as a column's default does.
+const sequencePrivileges = "USAGE"
+
 // publicRole is the name PostgreSQL reads as every role there is, quoted or
 // not, in a GRANT.
 const publicRole = "public"
@@ -218,8 +222,9 @@ func quoteIdentifier(parts ...string) string {
 
 // Grants are the statements that give each runtime role what the stores
 // need of the schema: USAGE on it, SELECT, INSERT, UPDATE and DELETE on its
-// tables, SELECT alone on the version table, EXECUTE on its functions, and
-// the same on every table a later step creates. Run them in one transaction
+// tables, SELECT alone on the version table, EXECUTE on its functions,
+// USAGE on its sequences, which the counters' defaults draw from, and the
+// same on every table and sequence a later step creates. Run them in one transaction
 // after the last step, and again after each later one. It refuses a name
 // that is not one role (CheckRuntimeRoles).
 func Grants(roles []string) ([]string, error) {
@@ -241,7 +246,9 @@ func Grants(roles []string) ([]string, error) {
 			// The schema's functions: the policies' scope checks and the
 			// revocation checks, which no other role may call.
 			"GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA "+schemaName+" TO "+role,
+			"GRANT "+sequencePrivileges+" ON ALL SEQUENCES IN SCHEMA "+schemaName+" TO "+role,
 			"ALTER DEFAULT PRIVILEGES IN SCHEMA "+schemaName+" GRANT "+tablePrivileges+" ON TABLES TO "+role,
+			"ALTER DEFAULT PRIVILEGES IN SCHEMA "+schemaName+" GRANT "+sequencePrivileges+" ON SEQUENCES TO "+role,
 		)
 	}
 	return stmts, nil

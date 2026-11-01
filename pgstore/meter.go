@@ -290,6 +290,8 @@ type usageRow struct {
 	reservedRequests int64
 	// lease is the lease the capability holds, none when its id is nil.
 	lease leaseState
+	// born numbers the row among the charges (migration 037).
+	born int64
 }
 
 // copyRow is one Biscuit copy's counters.
@@ -299,6 +301,8 @@ type copyRow struct {
 	requests     int64
 	spent        limes.Nanos
 	reserved     limes.Nanos
+	// born numbers the row among the charges (migration 037).
+	born int64
 }
 
 // budgetRow is a tenant aggregate.
@@ -337,7 +341,7 @@ SELECT id, $2 FROM unnest($1::uuid[]) AS id ORDER BY id
 ON CONFLICT (capability_id) DO NOTHING`
 
 	sqlLockUsage = `
-SELECT capability_id, request_count, spent, reserved, unit_code, copies_under, reserved_requests,
+SELECT capability_id, request_count, spent, reserved, unit_code, copies_under, reserved_requests, born,
        ` + sqlLeaseColumns + `
 FROM limes.usage WHERE capability_id = ANY ($1)
 ORDER BY capability_id
@@ -359,7 +363,7 @@ ON CONFLICT (capability_id, revocation_id) DO NOTHING`
 	sqlCountCopies = `SELECT count(*) FROM limes.copy_usage WHERE capability_id = $1`
 
 	sqlLockCopies = `
-SELECT revocation_id, capability_id, request_count, spent, reserved
+SELECT revocation_id, capability_id, request_count, spent, reserved, born
 FROM limes.copy_usage WHERE capability_id = $1 AND revocation_id = ANY ($2)
 ORDER BY revocation_id
 FOR UPDATE`
@@ -564,7 +568,7 @@ func scanUsage(row pgx.CollectableRow) (*usageRow, error) {
 	u := &usageRow{}
 	var spent, reserved int64
 	var l leaseColumns
-	if err := row.Scan(append([]any{&u.id, &u.requests, &spent, &reserved, &u.unit, &u.copiesUnder, &u.reservedRequests}, l.dest()...)...); err != nil {
+	if err := row.Scan(append([]any{&u.id, &u.requests, &spent, &reserved, &u.unit, &u.copiesUnder, &u.reservedRequests, &u.born}, l.dest()...)...); err != nil {
 		return nil, err
 	}
 	u.spent, u.reserved, u.lease = limes.Nanos(spent), limes.Nanos(reserved), l.state()
@@ -640,7 +644,7 @@ func lockCopiesOf(ctx context.Context, tx pgx.Tx, l lockRequest, c *counters) er
 func scanCopy(row pgx.CollectableRow) (*copyRow, error) {
 	r := &copyRow{}
 	var spent, reserved int64
-	if err := row.Scan(&r.revocationID, &r.capID, &r.requests, &spent, &reserved); err != nil {
+	if err := row.Scan(&r.revocationID, &r.capID, &r.requests, &spent, &reserved, &r.born); err != nil {
 		return nil, err
 	}
 	r.spent, r.reserved = limes.Nanos(spent), limes.Nanos(reserved)

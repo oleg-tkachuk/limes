@@ -614,7 +614,7 @@ func (s *UsageStore) refundLeased(ctx context.Context, tx pgx.Tx, c *counters, e
 	}
 	only := &counters{usage: map[uuid.UUID]*usageRow{}, copies: map[string]*copyRow{}}
 	for _, id := range ids {
-		if u, ok := c.usage[id]; ok {
+		if u, ok := c.usage[id]; ok && e.counted(u.born) {
 			u.spent = max0(u.spent - amount)
 			only.usage[id] = u
 		}
