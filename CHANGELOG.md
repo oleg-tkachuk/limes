@@ -2,6 +2,13 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.148.2](https://github.com/oleg-tkachuk/limes/compare/v0.148.1...v0.148.2) (2026-11-01)
+
+### Bug Fixes
+
+* **cache:** tag a Biscuit set's answer with its revocation ids ([27302e6](https://github.com/oleg-tkachuk/limes/commit/27302e69d74b8d9ef5315a363901899df76546b6))
+* **memstore:** keep a charge's number through ledger housekeeping ([079aadd](https://github.com/oleg-tkachuk/limes/commit/079aadd7fad12947977ed26f7aae238b19af8b8c))
+
 ## [0.148.1](https://github.com/oleg-tkachuk/limes/compare/v0.148.0...v0.148.1) (2026-11-01)
 
 ### Bug Fixes
