@@ -2,6 +2,14 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.148.1](https://github.com/oleg-tkachuk/limes/compare/v0.148.0...v0.148.1) (2026-11-01)
+
+### Bug Fixes
+
+* **cache:** fail a stale tagged answer once a revocation was evicted ([10f79ed](https://github.com/oleg-tkachuk/limes/commit/10f79ed2a460bad1827fe2157ca2af9f00611958))
+* **memstore:** leave a counter restarted since a charge out of its refund ([8fd8125](https://github.com/oleg-tkachuk/limes/commit/8fd8125e6c16d2a35173544cb9242fd0e550253d))
+* **memstore:** settle the leases below a capability whose counters go ([7462180](https://github.com/oleg-tkachuk/limes/commit/7462180dfa16dee9f3535d40fb6f55186295580f))
+
 ## [0.148.0](https://github.com/oleg-tkachuk/limes/compare/v0.147.0...v0.148.0) (2026-11-01)
 
 ### ⚠ BREAKING CHANGES
