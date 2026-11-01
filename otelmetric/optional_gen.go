@@ -12,11 +12,22 @@ func withOptional(m *meteringStore, inner meter.UsageStore) meter.UsageStore {
 	inner1, is1 := inner.(meter.TenantUsageEraser)
 	inner2, is2 := inner.(meter.MatchingReleaser)
 	inner3, is3 := inner.(meter.TenantReservationLister)
+	inner4, is4 := inner.(meter.Leaser)
 	f0 := copyUsageReader{inner0}
 	f1 := tenantUsageEraser{inner1}
 	f2 := matchingReleaser{inner2}
 	f3 := tenantReservationLister{inner3}
+	f4 := leaser{inner4}
 	switch {
+	case is0 && is1 && is2 && is3 && is4:
+		return &struct {
+			*meteringStore
+			copyUsageReader
+			tenantUsageEraser
+			matchingReleaser
+			tenantReservationLister
+			leaser
+		}{m, f0, f1, f2, f3, f4}
 	case is0 && is1 && is2 && is3:
 		return &struct {
 			*meteringStore
@@ -25,6 +36,38 @@ func withOptional(m *meteringStore, inner meter.UsageStore) meter.UsageStore {
 			matchingReleaser
 			tenantReservationLister
 		}{m, f0, f1, f2, f3}
+	case is0 && is1 && is2 && is4:
+		return &struct {
+			*meteringStore
+			copyUsageReader
+			tenantUsageEraser
+			matchingReleaser
+			leaser
+		}{m, f0, f1, f2, f4}
+	case is0 && is1 && is3 && is4:
+		return &struct {
+			*meteringStore
+			copyUsageReader
+			tenantUsageEraser
+			tenantReservationLister
+			leaser
+		}{m, f0, f1, f3, f4}
+	case is0 && is2 && is3 && is4:
+		return &struct {
+			*meteringStore
+			copyUsageReader
+			matchingReleaser
+			tenantReservationLister
+			leaser
+		}{m, f0, f2, f3, f4}
+	case is1 && is2 && is3 && is4:
+		return &struct {
+			*meteringStore
+			tenantUsageEraser
+			matchingReleaser
+			tenantReservationLister
+			leaser
+		}{m, f1, f2, f3, f4}
 	case is0 && is1 && is2:
 		return &struct {
 			*meteringStore
@@ -39,6 +82,13 @@ func withOptional(m *meteringStore, inner meter.UsageStore) meter.UsageStore {
 			tenantUsageEraser
 			tenantReservationLister
 		}{m, f0, f1, f3}
+	case is0 && is1 && is4:
+		return &struct {
+			*meteringStore
+			copyUsageReader
+			tenantUsageEraser
+			leaser
+		}{m, f0, f1, f4}
 	case is0 && is2 && is3:
 		return &struct {
 			*meteringStore
@@ -46,6 +96,20 @@ func withOptional(m *meteringStore, inner meter.UsageStore) meter.UsageStore {
 			matchingReleaser
 			tenantReservationLister
 		}{m, f0, f2, f3}
+	case is0 && is2 && is4:
+		return &struct {
+			*meteringStore
+			copyUsageReader
+			matchingReleaser
+			leaser
+		}{m, f0, f2, f4}
+	case is0 && is3 && is4:
+		return &struct {
+			*meteringStore
+			copyUsageReader
+			tenantReservationLister
+			leaser
+		}{m, f0, f3, f4}
 	case is1 && is2 && is3:
 		return &struct {
 			*meteringStore
@@ -53,6 +117,27 @@ func withOptional(m *meteringStore, inner meter.UsageStore) meter.UsageStore {
 			matchingReleaser
 			tenantReservationLister
 		}{m, f1, f2, f3}
+	case is1 && is2 && is4:
+		return &struct {
+			*meteringStore
+			tenantUsageEraser
+			matchingReleaser
+			leaser
+		}{m, f1, f2, f4}
+	case is1 && is3 && is4:
+		return &struct {
+			*meteringStore
+			tenantUsageEraser
+			tenantReservationLister
+			leaser
+		}{m, f1, f3, f4}
+	case is2 && is3 && is4:
+		return &struct {
+			*meteringStore
+			matchingReleaser
+			tenantReservationLister
+			leaser
+		}{m, f2, f3, f4}
 	case is0 && is1:
 		return &struct {
 			*meteringStore
@@ -71,6 +156,12 @@ func withOptional(m *meteringStore, inner meter.UsageStore) meter.UsageStore {
 			copyUsageReader
 			tenantReservationLister
 		}{m, f0, f3}
+	case is0 && is4:
+		return &struct {
+			*meteringStore
+			copyUsageReader
+			leaser
+		}{m, f0, f4}
 	case is1 && is2:
 		return &struct {
 			*meteringStore
@@ -83,12 +174,30 @@ func withOptional(m *meteringStore, inner meter.UsageStore) meter.UsageStore {
 			tenantUsageEraser
 			tenantReservationLister
 		}{m, f1, f3}
+	case is1 && is4:
+		return &struct {
+			*meteringStore
+			tenantUsageEraser
+			leaser
+		}{m, f1, f4}
 	case is2 && is3:
 		return &struct {
 			*meteringStore
 			matchingReleaser
 			tenantReservationLister
 		}{m, f2, f3}
+	case is2 && is4:
+		return &struct {
+			*meteringStore
+			matchingReleaser
+			leaser
+		}{m, f2, f4}
+	case is3 && is4:
+		return &struct {
+			*meteringStore
+			tenantReservationLister
+			leaser
+		}{m, f3, f4}
 	case is0:
 		return &struct {
 			*meteringStore
@@ -109,6 +218,11 @@ func withOptional(m *meteringStore, inner meter.UsageStore) meter.UsageStore {
 			*meteringStore
 			tenantReservationLister
 		}{m, f3}
+	case is4:
+		return &struct {
+			*meteringStore
+			leaser
+		}{m, f4}
 	}
 	return m
 }

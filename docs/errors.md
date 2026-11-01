@@ -195,6 +195,9 @@ can prove its own mapping covers them all.
 | `tenant_budget_version_mismatch` | 409 | `meter.ErrTenantBudgetVersionMismatch` |  |  | The tenant budget changed since it was read |
 | `external_ref_conflict` | 409 | `meter.ErrExternalRefConflict` |  |  | The external reference names another charge |
 | `settle_conflict` | 409 | `meter.ErrSettleConflict` |  |  | The reservation was settled for another amount |
+| `lease_exhausted` | 403 | `meter.ErrLeaseExhausted` | `budget_exceeded` (permanent) |  | The token's request or budget limit is exhausted |
+| `lease_not_found` | 404 | `meter.ErrLeaseNotFound` |  |  | The capability holds no lease |
+| `lease_nested` | 409 | `meter.ErrLeaseNested` |  |  | An ancestor of the capability holds a lease |
 
 ## The exchange's codes
 

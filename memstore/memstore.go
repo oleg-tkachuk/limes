@@ -103,7 +103,10 @@ type UsageStore struct {
 	byReservation map[uuid.UUID]int
 	records       *Store // lineage and ceilings of ancestors
 	holds         map[uuid.UUID]hold
-	nowFn         func() time.Time
+	// leases are the budget each leaseholder holds of its chain, by its
+	// capability (meter.Leaser).
+	leases map[uuid.UUID]lease
+	nowFn  func() time.Time
 
 	// copies counts each Biscuit copy that set limits of its own, by its
 	// capability and its block's revocation id; at most maxCopies of one
@@ -254,6 +257,9 @@ type ledgerEntry struct {
 	// tenantPeriod is the tenant's accounting period the charge was counted
 	// in (UsageStore.periods).
 	tenantPeriod uint64
+	// leaseID is the lease the charge was taken under, and leaseHolder its
+	// capability; uuid.Nil() for a charge of the whole chain.
+	leaseID, leaseHolder uuid.UUID
 }
 
 // StoreConfig configures a Store.
@@ -332,6 +338,7 @@ func NewUsageStore(cfg UsageStoreConfig) (*UsageStore, error) {
 		tenantOf:  map[uuid.UUID]uuid.UUID{},
 		budgets:   map[uuid.UUID]meter.TenantBudget{},
 		holds:     map[uuid.UUID]hold{},
+		leases:    map[uuid.UUID]lease{},
 		copies:    map[copyKey]copyCounter{},
 		copyCount: map[uuid.UUID]int64{},
 
@@ -972,6 +979,14 @@ func (s *UsageStore) Charge(
 	}
 	if err := s.admitCopiesLocked(req.Subject, ancestors); err != nil {
 		return meter.ChargeReceipt{}, err
+	}
+	// Under a lease of its own or an ancestor's, a charge that refuses past
+	// a ceiling stops at the leaseholder; one that records an overrun goes
+	// through the whole chain, which the lease holds budget of too.
+	if req.Overrun != meter.OverrunPolicyRecord {
+		if l, below, ok := s.leaseFor(req.Subject.CapabilityID(), ancestors); ok {
+			return s.chargeLeasedLocked(ctx, req, unit, ancestors, ancestors[:below], l, onCharged)
+		}
 	}
 	return s.chargeLocked(ctx, req, unit, ancestors, nil, onCharged)
 }
@@ -1710,7 +1725,8 @@ func (s *UsageStore) ReleaseExpired(_ context.Context, req meter.ReleaseExpiredR
 		s.applyHoldLocked(h, -1)
 		delete(s.holds, h.id)
 	}
-	return meter.ReleaseExpiredResult{Released: int64(len(due))}, nil
+	settled := s.settleLeasesLocked(func(l lease) bool { return !l.openAt(now) })
+	return meter.ReleaseExpiredResult{Released: int64(len(due)), SettledLeases: settled}, nil
 }
 
 // Refund returns spend from one ledger entry to the counters it debited.
@@ -1758,6 +1774,9 @@ func refundAmount(e ledgerEntry, req meter.RefundRequest) (limes.Nanos, error) {
 // budget while the charge's period is still the current one. s.mu must be
 // held.
 func (s *UsageStore) refundLocked(e *ledgerEntry, amount limes.Nanos) {
+	if s.refundLeasedLocked(e, amount) {
+		return
+	}
 	for _, id := range append([]uuid.UUID{e.CapabilityID}, e.Ancestors...) {
 		if u, ok := s.usage[id]; ok {
 			u.SpentAmount = max0(u.SpentAmount - amount)
@@ -1831,6 +1850,11 @@ func (s *UsageStore) SetTenantBudget(_ context.Context, args meter.SetTenantBudg
 	defer s.mu.Unlock()
 	if err := s.notErasedLocked(args.TenantID); err != nil {
 		return meter.TenantBudget{}, err
+	}
+	// A reset closes the period: what the tenant's leases spent is the
+	// closing period's, so they are settled into it first.
+	if args.ResetSpend {
+		s.settleLeasesLocked(func(l lease) bool { return l.tenantID == args.TenantID })
 	}
 	b, exists := s.budgets[args.TenantID]
 	// SetTenantBudgetRequest.ExpectedVersion's contract, held as every store
@@ -2055,6 +2079,7 @@ func (s *UsageStore) DeleteUsage(_ context.Context, req meter.DeleteUsageRequest
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.releaseHoldsLocked(func(id uuid.UUID) bool { return id == capID })
+	s.settleLeasesLocked(func(l lease) bool { return l.capID == capID })
 	s.dropUsageLocked(capID)
 	s.dropCopiesLocked(func(id uuid.UUID) bool { return id == capID })
 	s.forgetAncestorLocked(func(id uuid.UUID) bool { return id == capID })
@@ -2072,6 +2097,12 @@ func (s *UsageStore) forgetAncestorLocked(gone func(uuid.UUID) bool) {
 			s.holds[id] = h
 		}
 	}
+	for id, l := range s.leases {
+		if slices.ContainsFunc(l.ancestors, gone) {
+			l.ancestors = slices.DeleteFunc(slices.Clone(l.ancestors), gone)
+			s.leases[id] = l
+		}
+	}
 }
 
 // EraseTenantUsage implements meter.TenantUsageEraser: it drops the
@@ -2085,6 +2116,7 @@ func (s *UsageStore) EraseTenantUsage(_ context.Context, req meter.EraseTenantUs
 	defer s.mu.Unlock()
 	mine := func(capID uuid.UUID) bool { return s.tenantOf[capID] == tenant }
 	maps.DeleteFunc(s.holds, func(_ uuid.UUID, h hold) bool { return h.tenantID == tenant })
+	maps.DeleteFunc(s.leases, func(_ uuid.UUID, l lease) bool { return l.tenantID == tenant })
 	s.dropCopiesLocked(mine)
 	for id := range s.usage {
 		if mine(id) {
@@ -2134,6 +2166,11 @@ func (s *UsageStore) PurgeOrphans(_ context.Context, req meter.PurgeOrphansReque
 			orphans[h.capID] = true
 		}
 	}
+	for _, l := range s.leases {
+		if gone(l.capID) {
+			orphans[l.capID] = true
+		}
+	}
 	ids := slices.SortedFunc(maps.Keys(orphans), func(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) })
 	if len(ids) > limit {
 		ids = ids[:limit]
@@ -2145,6 +2182,7 @@ func (s *UsageStore) PurgeOrphans(_ context.Context, req meter.PurgeOrphansReque
 	// Holds first: releasing one writes its ancestors' rows, which a later
 	// batch purges if they are orphans too.
 	s.releaseHoldsLocked(func(id uuid.UUID) bool { return batch[id] })
+	s.settleLeasesLocked(func(l lease) bool { return batch[l.capID] })
 	for id := range batch {
 		s.dropUsageLocked(id)
 	}

@@ -55,6 +55,9 @@ func (r ReleaseMatchingRequest) Validate() error {
 type ReleaseMatchingResult struct {
 	// Released counts the holds the call released.
 	Released int64
+	// SettledLeases counts the leases of matching revoked capabilities the
+	// call settled (Leaser).
+	SettledLeases int64
 	// Tenants are the tenants the call released holds in, ascending: the
 	// request's alone, or, with AllTenants, each one a hold was in.
 	Tenants []uuid.UUID

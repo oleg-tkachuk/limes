@@ -155,6 +155,28 @@ but it does not remove the ceiling of one row.
 - **The same lease answers `Bump`** in a later step: a request lease of N
   requests, counted on the leaseholder's row alone.
 
+## The first version
+
+memstore and the `meter` contract land first. Every path the first version
+does not teach about leases goes through the whole chain, as before: the
+lease's amount is reserved on that chain, so such a path counts it against
+every ceiling and stays correct, conservatively. So:
+
+- **A `Charge` with `OverrunPolicyReject`** is the one path charged under a
+  lease (Decision 2).
+- **A `Charge` with `OverrunPolicyRecord`, `Reserve`, `Settle` and
+  `Release`** go through the whole chain.
+- **Leases do not nest** (Decision 4 deferred): `Lease` under an ancestor
+  holding an open lease is `meter.ErrLeaseNested`. A descendant may lease
+  under a capability that does not hold one; its settlement charges the
+  whole chain above it.
+- **Housekeeping settles leases**: `ReleaseExpired` the expired ones,
+  `ReleaseMatching` those of revoked matches, `DeleteUsage` and
+  `PurgeOrphans` a leaseholder's before its counters go, and a reset of
+  the tenant's spend the tenant's, into the period it closes.
+- **A charge under a lease records it on the ledger**, so `Refund` returns
+  it to the lease while it is open and to the chain once it is settled.
+
 ## Rollout
 
 1. This ADR.

@@ -370,6 +370,17 @@ func (f fixture) tenantSpent(t *testing.T) limes.Nanos {
 func Run(t *testing.T, setup func(t *testing.T) Env) {
 	t.Helper()
 	checks := []watchdog.Check[fixture]{
+		{Name: "LeaseStopsChargesAtTheLeaseholder", Run: checkLeaseStopsChargesAtTheLeaseholder},
+		{Name: "LeaseIsHeldToEveryCeiling", Run: checkLeaseIsHeldToEveryCeiling},
+		{Name: "LeaseIsExhaustedAndToppedUp", Run: checkLeaseExhaustedAndToppedUp},
+		{Name: "LeaseIsNotNested", Run: checkLeaseIsNotNested},
+		{Name: "LeaseCoversDescendants", Run: checkLeaseCoversDescendants},
+		{Name: "LeaseRefundGoesWhereTheChargeWent", Run: checkLeaseRefund},
+		{Name: "LeaseIsBypassedByHoldsAndOverruns", Run: checkLeaseIsBypassedByHoldsAndOverruns},
+		{Name: "LeaseExpiresIntoTheChain", Run: checkLeaseExpires},
+		{Name: "LeaseIsSettledBeforeItsCountersGo", Run: checkLeaseIsSettledBeforeItsCountersGo},
+		{Name: "LeasesUnderOneRootStayUnderItsCeiling", Run: checkLeaseConcurrency},
+		{Name: "LeaseIsSettledByAReset", Run: checkLeaseIsSettledByAReset},
 		{Name: "ReleaseMatchingReleasesTheHoldsOfRevokedMatches", Run: checkReleaseMatching},
 		{Name: "ReleaseMatchingWorksInBatches", Run: checkReleaseMatchingBatches},
 		{Name: "ReleaseMatchingRefusesAMalformedRequest", Run: checkReleaseMatchingMalformed},

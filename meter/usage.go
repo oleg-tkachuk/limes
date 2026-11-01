@@ -984,7 +984,9 @@ func HousekeepingLimit(limit int) int {
 // ReleaseExpiredResult is what one ReleaseExpired released.
 type ReleaseExpiredResult struct {
 	Released int64
-	_        noCompare
+	// SettledLeases counts the expired leases the call settled (Leaser).
+	SettledLeases int64
+	_             noCompare
 }
 
 // ChargeByRefRequest names one charge by the reference it was taken under.

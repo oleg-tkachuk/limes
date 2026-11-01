@@ -69,6 +69,20 @@ var ErrExternalRefConflict error = &familyError{"limes: external ref already nam
 // ErrExternalRefConflict does.
 var ErrSettleConflict error = &familyError{"limes: reservation already settled for a different amount", limes.ErrConflict}
 
+// ErrLeaseExhausted — a Charge under a lease would take it past what it
+// holds. The caller leases more (Leaser.Lease) and charges again. Matches
+// ErrBudgetExceeded: the budget the capability may spend now is used.
+var ErrLeaseExhausted error = &familyError{"limes: lease exhausted", limes.ErrBudgetExceeded}
+
+// ErrLeaseNotFound — GetLease or SettleLease named a capability that holds
+// no lease.
+var ErrLeaseNotFound error = &familyError{"limes: lease not found", limes.ErrNotFound}
+
+// ErrLeaseNested — Lease named a capability whose ancestor holds an open
+// lease: a lease is drawn from the whole chain, and the ancestor's already
+// holds part of it. Matches ErrConflict.
+var ErrLeaseNested error = &familyError{"limes: an ancestor holds a lease", limes.ErrConflict}
+
 // familyError is a sentinel with a name of its own that also matches the
 // family it belongs to, and that family's own, as limes's sentinels do.
 type familyError struct {
