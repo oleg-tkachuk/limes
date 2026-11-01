@@ -213,6 +213,14 @@ tasks:
       # -timeout bounds the soak past any duration the weekly run asks for.
       - go test -tags soak -count=1 -run '^TestSoak$' -timeout 3h -v .
 
+  test:pgstore:differential:
+    desc: "pgstore and memstore run one fuzzed script of meter and record calls side by side for FUZZ_TIME (default 5m), every outcome and counter compared after each step — needs a running Docker"
+    dir: '{{.PGSTORE_DIR}}'
+    vars:
+      FUZZ_TIME: '{{.FUZZ_TIME | default "5m"}}'
+    cmds:
+      - go test -tags differential -run '^$' -fuzz '^FuzzDifferential$' -fuzztime '{{.FUZZ_TIME}}' -parallel 1 .
+
   bench:pgstore:
     desc: "pgstore's benchmarks on this commit beside the newest pgstore release, compared by benchstat — needs a running Docker and the release's tag"
     cmds:
