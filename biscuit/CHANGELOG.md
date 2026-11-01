@@ -2,6 +2,12 @@
 
 Every release of the biscuit module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.1.17](https://github.com/oleg-tkachuk/limes/compare/biscuit%2Fv0.1.16...biscuit%2Fv0.1.17) (2026-11-01)
+
+### Dependencies
+
+* require limes v0.147.0
+
 ## [0.1.16](https://github.com/oleg-tkachuk/limes/compare/biscuit%2Fv0.1.15...biscuit%2Fv0.1.16) (2026-11-01)
 
 ### Dependencies

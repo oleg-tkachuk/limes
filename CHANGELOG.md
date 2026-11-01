@@ -2,6 +2,20 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.147.0](https://github.com/oleg-tkachuk/limes/compare/v0.146.0...v0.147.0) (2026-11-01)
+
+### Features
+
+* **meter:** add ErrLeasingDisabled for a store that opens no lease yet ([761bb79](https://github.com/oleg-tkachuk/limes/commit/761bb79b901d88769ec56e9031e0e13fd78c7b63))
+
+### Bug Fixes
+
+* **cache:** keep a held revoked ancestor over a stale lineage answer ([4dd8326](https://github.com/oleg-tkachuk/limes/commit/4dd832659947cd0b86ad5e1a91d090302ee8e28e))
+* **cache:** keep a held revoked id over a stale set answer ([bce5372](https://github.com/oleg-tkachuk/limes/commit/bce5372d060517c5a7ef2ae8c369a0294489ca9e))
+* **memstore:** settle the leases of revoked matches in batches ([0687dd0](https://github.com/oleg-tkachuk/limes/commit/0687dd0f82abb7dad8f472d041873fb18deaea9a))
+* **meter:** refuse a lease of a Biscuit copy ([e827b74](https://github.com/oleg-tkachuk/limes/commit/e827b743cf60d283aeca131088b4598a735d2561))
+* **meter:** refuse a request lease whose count cannot be held ([86f2e07](https://github.com/oleg-tkachuk/limes/commit/86f2e079a6ce953ec7886f8068d49ae268f80abb))
+
 ## [0.146.0](https://github.com/oleg-tkachuk/limes/compare/v0.145.0...v0.146.0) (2026-11-01)
 
 ### Features
