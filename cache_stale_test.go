@@ -266,3 +266,61 @@ func TestRevocationCacheFailsAStaleSetOnceARevocationWasEvicted(t *testing.T) {
 		t.Errorf("{a,b} over a failure once a revoked answer was evicted = %v, %v; want the failure", got, err)
 	}
 }
+
+// A revocation learned through a set's answer is not undone by a stale
+// live answer about one of its ids: asked again over a failure, the set
+// stays revoked though its other id was read live since.
+func TestRevocationCacheKeepsARevokedSetOverAStaleID(t *testing.T) {
+	up := &idUpstream{revoked: map[string]bool{}}
+	c, clk, _ := staleCache(t, &flakyUpstream{}, up)
+	a, b := []byte("a"), []byte("b")
+	ask := func(ids ...[]byte) (bool, error) { return c.IsBiscuitRevoked(t.Context(), ids) }
+	if revoked, err := ask(b); err != nil || revoked {
+		t.Fatalf("{b} = %v, %v; want live", revoked, err)
+	}
+	// Past the TTL, b is revoked and learned through the set {a,b}; a is
+	// then read live alone, so the next {a,b} asks about b alone.
+	clk.advance(cacheTTL)
+	up.set(string(b), nil)
+	if revoked, err := ask(a, b); err != nil || !revoked {
+		t.Fatalf("{a,b} once b is revoked = %v, %v; want revoked", revoked, err)
+	}
+	if revoked, err := ask(a); err != nil || revoked {
+		t.Fatalf("{a} = %v, %v; want live", revoked, err)
+	}
+	up.set("", errUpstreamDown)
+	if revoked, err := ask(a, b); err != nil || !revoked {
+		t.Errorf("{a,b} over a failure = %v, %v; want revoked, as the cache saw the set revoked", revoked, err)
+	}
+}
+
+// A revocation learned when only some of a copy's ids were asked upstream
+// holds for the copy: asked again over a failure, it stays revoked though
+// each id but the revoked one was read live since.
+func TestRevocationCacheKeepsACopyRevokedThroughItsMissingIDs(t *testing.T) {
+	up := &idUpstream{revoked: map[string]bool{}}
+	c, clk, _ := staleCache(t, &flakyUpstream{}, up)
+	a, b, last := []byte("a"), []byte("b"), []byte("c")
+	ask := func(ids ...[]byte) (bool, error) { return c.IsBiscuitRevoked(t.Context(), ids) }
+	if revoked, err := ask(a, b, last); err != nil || revoked {
+		t.Fatalf("{a,b,c} = %v, %v; want live", revoked, err)
+	}
+	// Past the TTL b is revoked. a is read live alone, so {a,b,c} asks the
+	// upstream about {b,c} only, and is answered revoked; c is then read
+	// live alone, so the next {a,b,c} asks about b alone.
+	clk.advance(cacheTTL)
+	up.set(string(b), nil)
+	if revoked, err := ask(a); err != nil || revoked {
+		t.Fatalf("{a} = %v, %v; want live", revoked, err)
+	}
+	if revoked, err := ask(a, b, last); err != nil || !revoked {
+		t.Fatalf("{a,b,c} once b is revoked = %v, %v; want revoked", revoked, err)
+	}
+	if revoked, err := ask(last); err != nil || revoked {
+		t.Fatalf("{c} = %v, %v; want live", revoked, err)
+	}
+	up.set("", errUpstreamDown)
+	if revoked, err := ask(a, b, last); err != nil || !revoked {
+		t.Errorf("{a,b,c} over a failure = %v, %v; want revoked, as the cache saw the copy revoked", revoked, err)
+	}
+}

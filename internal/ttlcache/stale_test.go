@@ -261,3 +261,24 @@ func TestAnEvictedRevocationFailsAStaleTaggedAnswer(t *testing.T) {
 		t.Errorf("child over a failure = %v, %v; want the failure, as the cache let its parent's revocation go", revoked, err)
 	}
 }
+
+// SeedRevoked caches a revoked answer a question that spans the key gave,
+// over a live one it held, unless a clear happened since its epoch.
+func TestSeedRevokedHoldsTheKeyRevoked(t *testing.T) {
+	c, _, _ := staleCache(10)
+	var calls atomic.Int32
+	if _, _, err := c.Get(t.Context(), "set", counted(false, &calls)); err != nil {
+		t.Fatal(err)
+	}
+	_, _, epoch := c.Cached([]string{"set"})
+	c.SeedRevoked("set", epoch)
+	if !c.HeldRevoked([]string{"set"}) {
+		t.Error("the seeded key is not held revoked")
+	}
+	_, _, epoch = c.Cached([]string{"other"})
+	c.Clear()
+	c.SeedRevoked("other", epoch)
+	if c.HeldRevoked([]string{"other"}) {
+		t.Error("a key seeded with an epoch a clear passed is held revoked")
+	}
+}

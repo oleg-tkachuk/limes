@@ -22,8 +22,9 @@ func (c *RevocationCache) answersBiscuits() bool { return c.biscuits != nil }
 // attenuated from stay cached, so a fresh attenuation — which anyone holding
 // a copy can make offline — costs one lookup for its new block, and a token
 // of blocks the cache has never seen one lookup in all, not one per block. A "live" answer is then
-// cached for each of them; a "revoked" one for that set alone, as upstream
-// does not say which id it is. An upstream error is returned and never
+// cached for each of them; a "revoked" one for that set and for the token's
+// own ids, as upstream does not say which id it is, and it holds for every
+// copy attenuated from the token. An upstream error is returned and never
 // cached.
 func (c *RevocationCache) IsBiscuitRevoked(ctx context.Context, revocationIDs [][]byte) (bool, error) {
 	if !c.answersBiscuits() {
@@ -34,10 +35,34 @@ func (c *RevocationCache) IsBiscuitRevoked(ctx context.Context, revocationIDs []
 		keys[i] = idKey(id)
 	}
 	revoked, missing, epoch := c.copies.Cached(keys)
-	if revoked || len(missing) == 0 {
-		return revoked, nil
+	if !revoked && len(missing) > 0 {
+		var err error
+		if revoked, err = c.lookupBiscuitMisses(ctx, missing, epoch); err != nil {
+			return revoked, err
+		}
+		// Revoked through the ids asked upstream, part of the copy's: the
+		// copy is revoked as a whole, kept under its own key.
+		if revoked && len(missing) < len(keys) && len(keys) > 1 {
+			c.copies.SeedRevoked(setKey(revocationIDs), epoch)
+		}
 	}
-	return c.lookupBiscuitMisses(ctx, missing, epoch)
+	if !revoked && c.heldRevokedCopy(revocationIDs) {
+		return true, nil
+	}
+	return revoked, nil
+}
+
+// heldRevokedCopy reports whether the cache holds a revoked answer about
+// this copy, or a copy it was attenuated from: their ids, authority first,
+// are a prefix of its. No revocation the cache learned is undone by a live
+// answer about the ids it asked since, fresh or stale.
+func (c *RevocationCache) heldRevokedCopy(revocationIDs [][]byte) bool {
+	for n := len(revocationIDs); n > 1; n-- {
+		if c.copies.HeldRevoked([]string{setKey(revocationIDs[:n])}) {
+			return true
+		}
+	}
+	return false
 }
 
 // lookupBiscuitMisses asks the upstream about the revocation ids the cache
