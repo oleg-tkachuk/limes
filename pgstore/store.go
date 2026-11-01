@@ -444,7 +444,13 @@ WITH due AS (
 )
 DELETE FROM limes.capabilities c USING locked WHERE c.id = locked.id`
 
-// Purge removes the capabilities expired for longer than the retention.
+// sqlPurgeExchanges drops the exchanges whose subject tokens expired before
+// $1: none of those tokens can be presented again.
+const sqlPurgeExchanges = `DELETE FROM limes.exchanges WHERE token_expires_at < $1`
+
+// Purge removes the capabilities expired for longer than the retention, and
+// the exchanges whose subject tokens did: an exchange outlives its capability
+// while its token can be presented (limes.ExchangeStore).
 func (s *Store) Purge(ctx context.Context, req limes.PurgeRequest) (limes.PurgeResult, error) {
 	if err := req.Validate(); err != nil {
 		return limes.PurgeResult{}, err
@@ -454,9 +460,14 @@ func (s *Store) Purge(ctx context.Context, req limes.PurgeRequest) (limes.PurgeR
 		limit = limes.DefaultHousekeepingLimit
 	}
 	var purged int64
+	cutoff := s.clock().Add(-req.Retention())
 	err := s.inTx(ctx, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, sqlPurge, s.clock().Add(-req.Retention()), limit)
+		tag, err := tx.Exec(ctx, sqlPurge, cutoff, limit)
+		if err != nil {
+			return err
+		}
 		purged = tag.RowsAffected()
+		_, err = tx.Exec(ctx, sqlPurgeExchanges, cutoff)
 		return err
 	})
 	if err != nil {

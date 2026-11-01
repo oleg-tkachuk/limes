@@ -63,7 +63,7 @@ func TestReissueThroughScopedIssuance(t *testing.T) {
 func TestScopedExchanges(t *testing.T) {
 	f := newTenantFixture(t)
 	ctx := context.Background()
-	key := limes.ExchangeKey{TenantID: f.mine, Issuer: "https://idp.example", TokenID: "jti-1"}
+	key := limes.ExchangeKey{TenantID: f.mine, Issuer: "https://idp.example", TokenID: "jti-1", TokenExpiresAt: time.Now().Add(time.Hour)}
 	if _, _, err := f.records.ClaimExchange(ctx, key, f.child.ID); err == nil {
 		t.Error("a claim with no tenant in the context went through the store's own scope check")
 	}
@@ -75,7 +75,7 @@ func TestScopedExchanges(t *testing.T) {
 	if got, err := scoped.ExchangedFor(ctx, key); err != nil || got != f.child.ID {
 		t.Errorf("ExchangedFor = %s, %v; want %s", got, err, f.child.ID)
 	}
-	other := limes.ExchangeKey{TenantID: f.theirs, Issuer: key.Issuer, TokenID: key.TokenID}
+	other := limes.ExchangeKey{TenantID: f.theirs, Issuer: key.Issuer, TokenID: key.TokenID, TokenExpiresAt: key.TokenExpiresAt}
 	if _, err := scoped.ExchangedFor(ctx, other); !errors.Is(err, limes.ErrNotFound) {
 		t.Errorf("the same token in another tenant: %v, want ErrNotFound", err)
 	}
