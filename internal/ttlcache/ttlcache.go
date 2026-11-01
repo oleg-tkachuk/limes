@@ -419,7 +419,11 @@ func (c *Cache[K]) finish(s *shard[K], key K, call *lookupCall[K], epoch uint64)
 	if s.inflight[key] == call {
 		delete(s.inflight, key)
 	}
-	if call.err == nil && c.epoch.Load() == epoch {
+	// A live answer read before a revocation the cache learned while the
+	// lookup ran does not replace it: no revocation is undone.
+	held, ok := s.entries[key]
+	undoes := ok && held.revoked && !call.revoked && !held.at.Before(call.at)
+	if call.err == nil && c.epoch.Load() == epoch && !undoes {
 		now := c.cfg.Now()
 		c.noteLost(s.makeRoomLocked(now, c.TTL(), c.keep()))
 		s.entries[key] = cacheEntry[K]{revoked: call.revoked, at: now, tags: call.tags}
