@@ -18,6 +18,7 @@ import (
 // The limes families a meter sentinel may belong to, as errors.Is reads them.
 const (
 	famRequestLimit = "RequestLimitExceeded"
+	famBudget       = "BudgetExceeded"
 	famNotFound     = "NotFound"
 	famConflict     = "Conflict"
 	famRequest      = "InvalidRequest"
@@ -25,6 +26,7 @@ const (
 
 var families = map[string]error{
 	famRequestLimit: limes.ErrRequestLimitExceeded,
+	famBudget:       limes.ErrBudgetExceeded,
 	famNotFound:     limes.ErrNotFound,
 	famConflict:     limes.ErrConflict,
 	famRequest:      limes.ErrInvalidRequest,
@@ -51,6 +53,9 @@ var sentinelMatrix = map[string]sentinelCase{
 	"ErrTenantBudgetNotFound":        {ErrTenantBudgetNotFound, []string{famNotFound}, "", http.StatusInternalServerError},
 	"ErrExternalRefConflict":         {ErrExternalRefConflict, []string{famConflict}, "", http.StatusConflict},
 	"ErrSettleConflict":              {ErrSettleConflict, []string{famConflict}, "", http.StatusConflict},
+	"ErrLeaseExhausted":              {ErrLeaseExhausted, []string{famBudget}, limes.ReasonBudgetExceeded, http.StatusForbidden},
+	"ErrLeaseNotFound":               {ErrLeaseNotFound, []string{famNotFound}, "", http.StatusInternalServerError},
+	"ErrLeaseNested":                 {ErrLeaseNested, []string{famConflict}, "", http.StatusConflict},
 	"ErrTenantBudgetVersionMismatch": {ErrTenantBudgetVersionMismatch, []string{famConflict}, "", http.StatusConflict},
 	"ErrCounterOverflow":             {ErrCounterOverflow, nil, "", http.StatusInternalServerError},
 	"ErrRefundExceedsCharge":         {ErrRefundExceedsCharge, nil, "", http.StatusInternalServerError},

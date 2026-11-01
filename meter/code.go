@@ -19,6 +19,9 @@ const (
 	CodeTenantBudgetVersionMismatch limes.Code = "tenant_budget_version_mismatch"
 	CodeExternalRefConflict         limes.Code = "external_ref_conflict"
 	CodeSettleConflict              limes.Code = "settle_conflict"
+	CodeLeaseExhausted              limes.Code = "lease_exhausted"
+	CodeLeaseNotFound               limes.Code = "lease_not_found"
+	CodeLeaseNested                 limes.Code = "lease_nested"
 )
 
 // codeRule is one of the meter's sentinels, its code and, for one limes
@@ -42,6 +45,9 @@ var codeRules = []codeRule{
 	{ErrTenantBudgetVersionMismatch, CodeTenantBudgetVersionMismatch, http.StatusConflict, "The tenant budget changed since it was read"},
 	{ErrExternalRefConflict, CodeExternalRefConflict, http.StatusConflict, "The external reference names another charge"},
 	{ErrSettleConflict, CodeSettleConflict, http.StatusConflict, "The reservation was settled for another amount"},
+	{ErrLeaseExhausted, CodeLeaseExhausted, 0, ""},
+	{ErrLeaseNotFound, CodeLeaseNotFound, http.StatusNotFound, "The capability holds no lease"},
+	{ErrLeaseNested, CodeLeaseNested, http.StatusConflict, "An ancestor of the capability holds a lease"},
 }
 
 // codeRuleFor is the meter's rule err matches.
