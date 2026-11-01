@@ -208,16 +208,13 @@ func (l *Ledger) PurgeCharges(_ context.Context, req meter.PurgeChargesRequest) 
 	for _, i := range due {
 		gone[i] = true
 	}
-	kept := s.ledger
-	s.ledger = nil
-	clear(s.byCharge)
-	clear(s.byRef)
-	clear(s.byReservation)
-	for i, e := range kept {
+	kept := make([]ledgerEntry, 0, len(s.ledger)-len(due))
+	for i, e := range s.ledger {
 		if !gone[i] {
-			s.appendLocked(e)
+			kept = append(kept, e)
 		}
 	}
+	s.rebuildLedgerLocked(kept)
 	return meter.PurgeChargesResult{Purged: int64(len(due))}, nil
 }
 

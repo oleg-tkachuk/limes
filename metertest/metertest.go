@@ -415,6 +415,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "SettleWithinTheHoldPassesACrossedCeiling", Run: checkSettleWithinHold},
 		{Name: "RefundOfAClosedPeriodLeavesTheTenantPeriod", Run: checkRefundAcrossReset},
 		{Name: "ARefundLeavesACounterRestartedSinceItsCharge", Run: checkRefundAfterRestart},
+		{Name: "ARefundLeavesARestartedCounterAcrossLedgerHousekeeping", Run: checkRefundAfterRestartAcrossHousekeeping},
 		{Name: "EveryCounterKeepsOneUnit", Run: checkOneUnit},
 		{Name: "AnAncestorCountsInTheUnitOfItsChildren", Run: checkAncestorUnit},
 		{Name: "ASubjectWithNoUnitCountsRequestsAlone", Run: checkNoUnit},
@@ -922,6 +923,61 @@ func checkRefundAfterRestart(t *testing.T, f fixture) {
 	charge(3 * one)
 	refund(second, 2*one)
 	counted("a refund past the child's restart", 3*one, 3*one, 3*one, 3*one)
+}
+
+// checkRefundAfterRestartAcrossHousekeeping holds a store to keeping which
+// counters a charge was counted on through its ledger's housekeeping: a
+// purge of other charges, or the erase of another tenant, leaves a charge
+// taken before a restart of its capability's counters as it was, so its
+// refund still leaves the restarted counters alone.
+func checkRefundAfterRestartAcrossHousekeeping(t *testing.T, f fixture) {
+	const before, after = 4 * one, 6 * one
+	// restartedThen charges the child, restarts its counters, charges it
+	// again and runs housekeeping; the refund of the first charge must
+	// leave the restarted counters with the second charge alone.
+	restartedThen := func(t *testing.T, housekeeping func(t *testing.T)) {
+		t.Helper()
+		first, err := f.charge(meter.ChargeRequest{Amount: before}, nil)
+		expect.Must(t, err == nil, "%v", err)
+		expect.Must(t, f.Usage.DeleteUsage(f.Ctx, meter.DeleteUsageRequest{CapabilityID: f.child}) == nil, "DeleteUsage")
+		_, err = f.charge(meter.ChargeRequest{Amount: after}, nil)
+		expect.Must(t, err == nil, "%v", err)
+		housekeeping(t)
+		r, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: first.ChargeID, Remaining: true})
+		expect.Must(t, err == nil && r.Amount == before, "refund = %+v, %v; want %v", r, err, before)
+		got := f.spent(t, f.child)
+		expect.That(t, got == after, "child spent %v after the refund, want %v: the refund reached the counters restarted since its charge", got, after)
+	}
+	t.Run("PurgeCharges", func(t *testing.T) {
+		purger, ok := f.Ledger.(meter.LedgerHousekeeping)
+		if !ok || f.Advance == nil {
+			t.Skip("Env.Ledger is no meter.LedgerHousekeeping, or Env.Advance is not set")
+		}
+		// An aged charge of the root, the one the purge takes.
+		_, err := f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, budget: budgetOf(rootBudget)}), Amount: one}, nil)
+		expect.Must(t, err == nil, "%v", err)
+		f.Advance(meter.MinChargeRetention + purgeStep)
+		restartedThen(t, func(t *testing.T) {
+			res, err := purger.PurgeCharges(f.Ctx, meter.PurgeChargesRequest{Limit: 1})
+			expect.Must(t, err == nil && res.Purged == 1, "PurgeCharges = %+v, %v; want the aged charge purged", res, err)
+		})
+	})
+	t.Run("EraseTenantUsage", func(t *testing.T) {
+		eraser, ok := f.Usage.(meter.TenantUsageEraser)
+		if !ok {
+			t.Skip("the UsageStore does not implement meter.TenantUsageEraser")
+		}
+		tenant, err := f.newTenant()
+		expect.Must(t, err == nil, "%v", err)
+		theirs, err := f.NewCapability(CapabilitySpec{Tenant: tenant, Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget})
+		expect.Must(t, err == nil, "%v", err)
+		theirCtx := f.tenantCtx(tenant)
+		_, err = f.Usage.Charge(theirCtx, meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: theirs, tenant: tenant}), Amount: one}, nil)
+		expect.Must(t, err == nil, "%v", err)
+		restartedThen(t, func(t *testing.T) {
+			expect.Must(t, eraser.EraseTenantUsage(theirCtx, meter.EraseTenantUsageRequest{TenantID: tenant}) == nil, "EraseTenantUsage")
+		})
+	})
 }
 
 // checkAncestorUnit holds a store to giving an ancestor counted only through
