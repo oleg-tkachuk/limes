@@ -26,7 +26,7 @@ var meterSentinels = map[string]error{
 	"ErrCopyLimitExceeded": ErrCopyLimitExceeded, "ErrUsageNotFound": ErrUsageNotFound,
 	"ErrTenantBudgetNotFound": ErrTenantBudgetNotFound, "ErrTenantBudgetVersionMismatch": ErrTenantBudgetVersionMismatch,
 	"ErrExternalRefConflict": ErrExternalRefConflict, "ErrSettleConflict": ErrSettleConflict,
-	"ErrLeaseExhausted": ErrLeaseExhausted, "ErrLeaseRequestsExhausted": ErrLeaseRequestsExhausted, "ErrLeaseNotFound": ErrLeaseNotFound, "ErrLeaseNested": ErrLeaseNested,
+	"ErrLeaseExhausted": ErrLeaseExhausted, "ErrLeaseRequestsExhausted": ErrLeaseRequestsExhausted, "ErrLeaseNotFound": ErrLeaseNotFound, "ErrLeaseNested": ErrLeaseNested, "ErrLeasingDisabled": ErrLeasingDisabled,
 }
 
 // declaredSentinels are the exported Err variables this package's

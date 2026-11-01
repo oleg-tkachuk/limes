@@ -52,7 +52,7 @@ func meterEnv(t *testing.T, cfg Config, readOnly func(context.Context) context.C
 	t.Helper()
 	fresh(t)
 	clock := newFakeClock()
-	cfg.DB, cfg.Now, cfg.MaxCopiesPerCapability = app, clock.Now, contractCopyQuota
+	cfg.DB, cfg.Now, cfg.MaxCopiesPerCapability, cfg.Leases = app, clock.Now, contractCopyQuota, true
 	records, err := NewStore(cfg)
 	if err != nil {
 		t.Fatal(err)

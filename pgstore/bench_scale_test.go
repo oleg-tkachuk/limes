@@ -78,7 +78,7 @@ func BenchmarkChainDepth(b *testing.B) {
 			b.Fatalf("empty the tables: %v", err)
 		}
 		pool, sent := latencyPool(b, 0)
-		f := newBenchFixtureOver(b, pool)
+		f := newBenchFixtureOver(b, pool).leasing(b, pool)
 		leaf, id := f.chainOfDepth(b, depth)
 		ctx := WithTenant(b.Context(), f.tenant)
 		b.Run(fmt.Sprintf("op=Charge/depth=%d", depth), func(b *testing.B) {
@@ -145,7 +145,7 @@ func BenchmarkOneRoot(b *testing.B) {
 	for _, rtt := range scaleRTTs {
 		for _, leased := range []bool{false, true} {
 			pool, _ := latencyPoolOf(b, rtt, benchSubAgents+1)
-			f := newBenchFixtureOver(b, pool)
+			f := newBenchFixtureOver(b, pool).leasing(b, pool)
 			children := f.childrenOfOneRoot(b, benchSubAgents)
 			if leased {
 				f.leaseAll(b, children...)
@@ -238,7 +238,7 @@ func BenchmarkRoundTrip(b *testing.B) {
 	skipUnlessScale(b)
 	for _, rtt := range scaleRTTs {
 		pool, sent := latencyPool(b, rtt)
-		f := newBenchFixtureOver(b, pool)
+		f := newBenchFixtureOver(b, pool).leasing(b, pool)
 		ctx := WithTenant(b.Context(), f.tenant)
 		b.Run(fmt.Sprintf("op=Charge/rtt=%s", rtt), func(b *testing.B) {
 			n := 0
@@ -402,6 +402,17 @@ func delayCopy(dst, src net.Conn, oneWay time.Duration, read *atomic.Int64) {
 			return
 		}
 	}
+}
+
+// leasing is f with a usage store over db that leases (Config.Leases):
+// bench_test.go's fixture keeps to the Config the newest release has.
+func (f benchFixture) leasing(b *testing.B, db *pgxpool.Pool) benchFixture {
+	b.Helper()
+	var err error
+	if f.usage, err = NewUsageStore(Config{DB: db, Leases: true}); err != nil {
+		b.Fatal(err)
+	}
+	return f
 }
 
 // benchLease is what each leaf of the leased benchmark leases: past any

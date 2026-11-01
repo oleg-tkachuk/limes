@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"time"
 	"uuid"
@@ -341,6 +342,10 @@ func admitLeased(c *counters, req meter.ChargeRequest, unit string, below []ance
 func (s *UsageStore) Lease(ctx context.Context, req meter.LeaseRequest) (meter.Lease, error) {
 	if err := req.Validate(); err != nil {
 		return meter.Lease{}, err
+	}
+	if !s.leases {
+		s.log.WarnContext(ctx, "pgstore: lease refused: Config.Leases is not set", slog.String(logKeyOp, retriedLease))
+		return meter.Lease{}, meter.ErrLeasingDisabled
 	}
 	var out meter.Lease
 	open := func() error {
