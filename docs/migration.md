@@ -86,6 +86,23 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   vendors the schema applies steps 035 and 036 before this release.
 - `Store.Purge` also removes the exchanges whose subject tokens expired
   past the retention, and no longer takes one with its capability.
+- A record already there kept only its capability's expiry, which a policy
+  that shortened the TTL set before its subject token's: once that expiry
+  is past the retention, `Store.Purge` drops the record while the token can
+  still be presented, and the token is exchanged afresh. Where a policy
+  shortened the TTL, widen them once, as the schema owner, in one
+  transaction as migration 035 does (the table has no update policy), with
+  the longest lifetime of a subject token you accept (24 hours below); it only keeps
+  records longer:
+
+  ```sql
+  BEGIN;
+  ALTER TABLE limes.exchanges NO FORCE ROW LEVEL SECURITY;
+  UPDATE limes.exchanges
+  SET token_expires_at = greatest(token_expires_at, now() + interval '24 hours');
+  ALTER TABLE limes.exchanges FORCE ROW LEVEL SECURITY;
+  COMMIT;
+  ```
 
 ## v0.147.0
 

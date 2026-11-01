@@ -85,5 +85,10 @@ token's `jti`, with a lock across replicas.
   tenant the key is scoped by. A policy with side effects runs again.
 - **A losing race leaves an orphan record** that expires on its own and is
   never presented.
+- **A record from before pgstore/v0.60.0 knows only its capability's
+  expiry.** Migration 035 had no subject-token expiry to give it, so a
+  record whose policy shortened the TTL can be purged while its token can
+  still be presented, until that token expires; docs/migration.md gives
+  the statement that widens those records.
 - **`Issuer.Reissue` signs any live capability on record.** Whoever holds
   the Issuer could already issue one; Reissue gives that holder nothing new.
