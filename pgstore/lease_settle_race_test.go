@@ -27,23 +27,37 @@ type beforeTxDB struct {
 	hook  func()
 	// every runs hook before each transaction instead, at none.
 	every bool
+	// fired counts the times hook ran, so a check knows it met the call.
+	fired atomic.Int64
 }
 
 func (d *beforeTxDB) BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error) {
 	if n := d.count.Add(1); d.every || n == d.at {
+		d.fired.Add(1)
 		d.hook()
 	}
 	return d.DB.BeginTx(ctx, opts)
 }
 
-// The transactions of a SetTenantBudget that resets, and of a DeleteUsage,
-// when no lease is open: the read of the leases to settle first, then the
-// call's own, and then whatever DeleteUsage runs once its counters are gone.
+// txReset is the one transaction of a SetTenantBudget that resets: it
+// settles the tenant's leases itself.
+const txReset = 1
+
+// The transactions of a DeleteUsage: its own, which settles the leases from
+// the capability down, and whatever it runs once its counters are gone.
 const (
-	txLeasesRead = 1
-	txOwnCall    = 2
-	txAfterDrop  = 3
+	txDeleteUsage = 1
+	txAfterDrop   = 2
 )
+
+// mustHaveMet fails unless the hook ran: a check whose lease never opened
+// proves nothing.
+func (f *settleRaceFixture) mustHaveMet(t *testing.T) {
+	t.Helper()
+	if f.db.fired.Load() == 0 {
+		t.Fatal("the hook never ran: the call ran fewer transactions than the check assumes")
+	}
+}
 
 // settleRaceCeiling is the tenant's ceiling of the race tests, and what they
 // lease and charge.
@@ -111,17 +125,18 @@ func (f *settleRaceFixture) leaseBefore(t *testing.T, at int64) {
 	}
 }
 
-// A lease opened while a reset settles the tenant's leases does not stay
-// open into the period the reset opens: it is settled into the one it
-// closes, so the new period's charges are held to the ceiling.
-func TestResetSettlesALeaseOpenedWhileItSettles(t *testing.T) {
+// A lease opened just before a reset does not stay open into the period
+// the reset opens: it is settled into the one it closes, so the new
+// period's charges are held to the ceiling.
+func TestResetSettlesALeaseOpenedBeforeIt(t *testing.T) {
 	f := newSettleRaceFixture(t)
-	f.leaseBefore(t, txOwnCall)
+	f.leaseBefore(t, txReset)
 	if _, err := f.hooked.SetTenantBudget(f.ctx, meter.SetTenantBudgetRequest{
 		TenantID: f.tenant, Ceiling: limes.BudgetCeiling{Max: settleRaceCeiling, UnitCode: testUnit}, ResetSpend: true, ExpectedVersion: f.version,
 	}); err != nil {
 		t.Fatalf("SetTenantBudget: %v", err)
 	}
+	f.mustHaveMet(t)
 	if _, err := f.other.GetLease(f.ctx, f.a.CapabilityID()); !errors.Is(err, meter.ErrLeaseNotFound) {
 		t.Fatalf("the lease opened during the reset is open past it: %v", err)
 	}
@@ -133,15 +148,15 @@ func TestResetSettlesALeaseOpenedWhileItSettles(t *testing.T) {
 	}
 }
 
-// A lease opened while DeleteUsage settles the capability's lease is not
-// dropped with its counters: it is settled first, so no reservation is
-// left that nothing could release.
-func TestDeleteUsageSettlesALeaseOpenedWhileItSettles(t *testing.T) {
+// A lease opened just before DeleteUsage is not dropped with its counters:
+// it is settled first, so no reservation is left that nothing could release.
+func TestDeleteUsageSettlesALeaseOpenedBeforeIt(t *testing.T) {
 	f := newSettleRaceFixture(t)
-	f.leaseBefore(t, txOwnCall)
+	f.leaseBefore(t, txDeleteUsage)
 	if err := f.hooked.DeleteUsage(f.ctx, meter.DeleteUsageRequest{CapabilityID: f.a.CapabilityID()}); err != nil {
 		t.Fatalf("DeleteUsage: %v", err)
 	}
+	f.mustHaveMet(t)
 	root, err := f.other.GetUsage(f.ctx, f.root)
 	if err != nil || root.ReservedAmount != 0 {
 		t.Errorf("the root after DeleteUsage = %+v, %v; want nothing held", root, err)
@@ -152,31 +167,59 @@ func TestDeleteUsageSettlesALeaseOpenedWhileItSettles(t *testing.T) {
 	}
 }
 
-// A lease opened again before each of a reset's own transactions makes it
-// settle again, a bounded number of times, each logged; then the reset is
-// refused as a conflict, having reset nothing.
-func TestResetGivesUpOnLeasesThatKeepOpening(t *testing.T) {
+// A lease opened before every transaction of a reset does not keep it from
+// the period's close, even at a tenant spent to its ceiling, where a lease of
+// requests alone still opens: the reset settles the tenant's leases in its
+// own transaction, which every lease opening meanwhile waits for.
+func TestResetSettlesLeasesThatKeepOpening(t *testing.T) {
+	f := newSettleRaceFixture(t)
+	if _, err := f.other.Charge(f.ctx, meter.ChargeRequest{Subject: f.b, Amount: settleRaceCeiling}, nil); err != nil {
+		t.Fatalf("Charge to the ceiling: %v", err)
+	}
+	f.db.every = true
+	f.db.hook = func() {
+		if _, err := f.other.Lease(f.ctx, meter.LeaseRequest{Subject: f.a, Requests: 1}); err != nil {
+			t.Errorf("Lease of requests before a transaction: %v", err)
+		}
+	}
+	b, err := f.hooked.SetTenantBudget(f.ctx, meter.SetTenantBudgetRequest{
+		TenantID: f.tenant, Ceiling: limes.BudgetCeiling{Max: settleRaceCeiling, UnitCode: testUnit}, ResetSpend: true, ExpectedVersion: f.version,
+	})
+	f.db.every = false
+	f.mustHaveMet(t)
+	if err != nil || b.SpentAmount != 0 || b.ResourceVersion != f.version+1 {
+		t.Fatalf("SetTenantBudget under leases that keep opening = %+v, %v; want the period reset", b, err)
+	}
+	if logs := f.logs.String(); strings.Contains(logs, "level=WARN") || strings.Contains(logs, "level=ERROR") {
+		t.Errorf("logs = %q, want the reset to settle and act at once", logs)
+	}
+	if _, err := f.other.GetLease(f.ctx, f.a.CapabilityID()); !errors.Is(err, meter.ErrLeaseNotFound) {
+		t.Errorf("the lease opened before the reset is open past it: %v", err)
+	}
+}
+
+// A lease opened below a capability before every transaction of
+// DeleteUsage does not keep its counters from going: the drop settles the
+// leases from the capability down in its own transaction.
+func TestDeleteUsageSettlesLeasesThatKeepOpening(t *testing.T) {
 	f := newSettleRaceFixture(t)
 	f.db.every = true
 	f.db.hook = func() {
-		if _, err := f.other.Lease(f.ctx, meter.LeaseRequest{Subject: f.a, Amount: 1}); err != nil {
-			t.Errorf("Lease before a transaction: %v", err)
+		if _, err := f.other.Lease(f.ctx, meter.LeaseRequest{Subject: f.a, Requests: 1}); err != nil {
+			t.Errorf("Lease of requests before a transaction: %v", err)
 		}
 	}
-	_, err := f.hooked.SetTenantBudget(f.ctx, meter.SetTenantBudgetRequest{
-		TenantID: f.tenant, Ceiling: limes.BudgetCeiling{Max: settleRaceCeiling, UnitCode: testUnit}, ResetSpend: true, ExpectedVersion: f.version,
-	})
-	if !errors.Is(err, limes.ErrConflict) {
-		t.Fatalf("SetTenantBudget under leases that keep opening: %v, want ErrConflict", err)
-	}
-	logs := f.logs.String()
-	if strings.Count(logs, "level=WARN") != settleAttempts-1 || !strings.Contains(logs, "level=ERROR") || !strings.Contains(logs, settledReset) {
-		t.Errorf("logs = %q, want a warning for each attempt settled again and an error naming the call", logs)
-	}
+	err := f.hooked.DeleteUsage(f.ctx, meter.DeleteUsageRequest{CapabilityID: f.root})
 	f.db.every = false
-	b, err := f.other.GetTenantBudget(f.ctx, f.tenant)
-	if err != nil || b.ResourceVersion != f.version {
-		t.Errorf("the tenant after the refused reset = %+v, %v; want version %d kept", b, err, f.version)
+	f.mustHaveMet(t)
+	if err != nil {
+		t.Fatalf("DeleteUsage under leases that keep opening: %v, want the counters dropped", err)
+	}
+	if logs := f.logs.String(); strings.Contains(logs, "level=WARN") || strings.Contains(logs, "level=ERROR") {
+		t.Errorf("logs = %q, want the drop to settle and act at once", logs)
+	}
+	if _, err := f.other.GetLease(f.ctx, f.a.CapabilityID()); !errors.Is(err, meter.ErrLeaseNotFound) {
+		t.Errorf("the lease opened below before the drop is open past it: %v", err)
 	}
 }
 
@@ -184,12 +227,12 @@ func TestResetGivesUpOnLeasesThatKeepOpening(t *testing.T) {
 // holds.
 const settleRaceRequests = 5
 
-// A lease of requests alone opened while a reset settles the tenant's
-// leases does not carry the closed period into the next: topped up with an
+// A lease of requests alone opened just before a reset does not carry the
+// closed period into the next: topped up with an
 // amount, what it spends is the new period's, so the tenant's ceiling holds.
 func TestResetKeepsARequestsLeaseOutOfTheNextPeriod(t *testing.T) {
 	f := newSettleRaceFixture(t)
-	f.db.at = txOwnCall
+	f.db.at = txReset
 	f.db.hook = func() {
 		if _, err := f.other.Lease(f.ctx, meter.LeaseRequest{Subject: f.a, Requests: settleRaceRequests}); err != nil {
 			t.Errorf("Lease of requests in the window: %v", err)
@@ -200,6 +243,7 @@ func TestResetKeepsARequestsLeaseOutOfTheNextPeriod(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetTenantBudget: %v", err)
 	}
+	f.mustHaveMet(t)
 	if _, err := f.other.Lease(f.ctx, meter.LeaseRequest{Subject: f.a, Amount: settleRaceCeiling}); err != nil {
 		t.Fatalf("Lease of an amount after the reset: %v", err)
 	}

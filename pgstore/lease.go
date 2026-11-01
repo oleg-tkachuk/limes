@@ -128,13 +128,12 @@ WHERE lease_id IS NOT NULL AND lease_expires <= $1
 ORDER BY lease_expires, capability_id
 LIMIT $2`
 
-	// sqlTenantLeases are the leases of tenant $1.
-	sqlTenantLeases = `SELECT capability_id, tenant_id FROM limes.usage WHERE tenant_id = $1 AND lease_id IS NOT NULL ORDER BY capability_id`
+	// sqlTenantLeases are the leaseholders of tenant $1.
+	sqlTenantLeases = `SELECT capability_id FROM limes.usage WHERE tenant_id = $1 AND lease_id IS NOT NULL ORDER BY capability_id`
 
-	// sqlLeasesFrom are the leases of $1 and of those below it, with their
-	// tenants.
+	// sqlLeasesFrom are the leaseholders $1 and those below it.
 	sqlLeasesFrom = `
-SELECT capability_id, tenant_id FROM limes.usage
+SELECT capability_id FROM limes.usage
 WHERE lease_id IS NOT NULL AND (capability_id = $1 OR lease_ancestors && ARRAY[$1::uuid])
 ORDER BY capability_id`
 

@@ -390,6 +390,15 @@ func (s *UsageStore) SetTenantBudget(ctx context.Context, req meter.SetTenantBud
 	var out meter.TenantBudget
 	set := func() error {
 		return s.inTenantTx(ctx, req.TenantID, func(tx pgx.Tx) error {
+			// A reset closes the period: what the tenant's leases spent is
+			// the closing period's, so they are settled into it first, in
+			// the reset's own transaction, which a lease opening meanwhile
+			// waits for rather than slipping in between.
+			if req.ResetSpend {
+				if err := s.settleTenantLeases(ctx, tx, req.TenantID); err != nil {
+					return err
+				}
+			}
 			var err error
 			out, err = s.setTenantBudget(ctx, tx, req)
 			return err
@@ -398,15 +407,85 @@ func (s *UsageStore) SetTenantBudget(ctx context.Context, req meter.SetTenantBud
 	if !req.ResetSpend {
 		return out, set()
 	}
-	// A reset closes the period: what the tenant's leases spent is the
-	// closing period's, so they are settled into it first, each in a
-	// transaction of its own, and again should one open before the reset.
-	settle := func() error {
-		_, _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTenantReadTx(ctx, req.TenantID, fn) }, sqlTenantLeases, req.TenantID)
+	err := s.settledThen(ctx, settledReset, settledNothing, set)
+	return out, err
+}
+
+// settledNothing is the settle step of a call that settles in its own
+// transaction (settledThen).
+func settledNothing() error { return nil }
+
+// settleTenantLeases settles every open lease of tenant in tx, their
+// counters and the tenant's aggregate locked first, together.
+func (s *UsageStore) settleTenantLeases(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error {
+	leases, err := readLeases(ctx, tx, sqlTenantLeases, tenant)
+	if err != nil || len(leases.holders) == 0 {
 		return err
 	}
-	err := s.settledThen(ctx, settledReset, settle, set)
-	return out, err
+	if _, err := lock(ctx, tx, lockRequest{now: s.clock(), tenantID: tenant, existing: leases.counters}); err != nil {
+		return err
+	}
+	return s.settleLocked(ctx, tx, settledReset, leases)
+}
+
+// leasesToSettle are the leases a call settles in its own transaction:
+// their holders, and the counters and tenant aggregates settling them
+// writes, which the call locks with its own, together, in the order every
+// call takes. A lease that opens meanwhile waits for the call; one that
+// opened between the read of the leases and the lock is found by the
+// call's check, and the call runs again (errLeaseOpened).
+type leasesToSettle struct {
+	holders, counters, tenants []uuid.UUID
+}
+
+// readLeases reads the leaseholders query names with arg, and what settling
+// each writes.
+func readLeases(ctx context.Context, tx pgx.Tx, query string, arg any) (leasesToSettle, error) {
+	var l leasesToSettle
+	rows, err := tx.Query(ctx, query, arg)
+	if err != nil {
+		return l, err
+	}
+	holders, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+	if err != nil {
+		return l, err
+	}
+	for _, holder := range holders {
+		var tenant uuid.UUID
+		var unit string
+		var read leaseColumns
+		err := tx.QueryRow(ctx, sqlReadLease, holder).Scan(append([]any{&tenant, &unit}, read.dest()...)...)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return l, err
+		}
+		l.holders = append(l.holders, holder)
+		l.counters = append(append(l.counters, holder), read.state().ancestors...)
+		l.tenants = append(l.tenants, tenant)
+	}
+	return l, nil
+}
+
+// settleLocked settles l's leases in tx, which holds every lock settling
+// them takes, and logs how many it settled for op.
+func (s *UsageStore) settleLocked(ctx context.Context, tx pgx.Tx, op string, l leasesToSettle) error {
+	settled := 0
+	for _, holder := range l.holders {
+		_, err := s.settleLease(ctx, tx, holder)
+		switch {
+		case errors.Is(err, meter.ErrLeaseNotFound):
+		case errors.Is(err, errLeaseMoved):
+			return errLeaseOpened
+		case err != nil:
+			return err
+		default:
+			settled++
+		}
+	}
+	s.log.InfoContext(ctx, "pgstore: settled the leases a call must not leave open", slog.String(logKeyOp, op), slog.Int(logKeyLeases, settled))
+	return nil
 }
 
 // setTenantBudget is SetTenantBudget in tx.
@@ -425,11 +504,11 @@ func (s *UsageStore) setTenantBudget(ctx context.Context, tx pgx.Tx, req meter.S
 	if err != nil {
 		return meter.TenantBudget{}, err
 	}
-	// A lease of an amount locks the aggregate too, so one opened since the
-	// tenant's leases were settled is seen here, and none opens before the
-	// reset commits. One of requests alone, which locks no aggregate, may
-	// still open after this check; it is settled before an amount is added
-	// to it (UsageStore.lease).
+	// Every lease locks the aggregate once it exists, so none opens between
+	// this check and the reset's commit; one that committed before the
+	// leases were locked is seen here. One of requests alone at a tenant
+	// with no aggregate yet locks nothing and may still open; it is settled
+	// before an amount is added to it (UsageStore.lease).
 	if req.ResetSpend {
 		var leased bool
 		if err := tx.QueryRow(ctx, sqlTenantLeased, req.TenantID).Scan(&leased); err != nil {
@@ -804,7 +883,7 @@ func (s *UsageStore) releaseHolds(ctx context.Context, tx pgx.Tx, holds []hold) 
 		}
 		return slices.Compare(a.id[:], b.id[:])
 	})
-	if err := lockReleased(ctx, tx, holds); err != nil {
+	if err := lockReleased(ctx, tx, holds, leasesToSettle{}); err != nil {
 		return err
 	}
 	for _, h := range holds {
@@ -823,8 +902,8 @@ func (s *UsageStore) releaseHolds(ctx context.Context, tx pgx.Tx, holds []hold) 
 // Locked hold by hold instead, each hold's would be in order and the
 // transaction's would not: one hold's root, then another's middle, against
 // a call that holds the middle and waits for the root.
-func lockReleased(ctx context.Context, tx pgx.Tx, holds []hold) error {
-	var tenants, counters []uuid.UUID
+func lockReleased(ctx context.Context, tx pgx.Tx, holds []hold, leases leasesToSettle) error {
+	tenants, counters := slices.Clone(leases.tenants), slices.Clone(leases.counters)
 	copies := map[uuid.UUID][][]byte{}
 	for _, h := range holds {
 		tenants = append(tenants, h.tenantID)
@@ -869,6 +948,9 @@ func drain(rows pgx.Rows, err error) error {
 	return rows.Err()
 }
 
+// logKeyLeases is how many leases a call settled, as a log line counts.
+const logKeyLeases = "leases"
+
 // settleAttempts bounds how often a call that settles leases before it acts
 // settles them again, for leases opened in between.
 const settleAttempts = 3
@@ -911,18 +993,19 @@ func (s *UsageStore) DeleteUsage(ctx context.Context, req meter.DeleteUsageReque
 	if err := req.Validate(); err != nil {
 		return err
 	}
-	// Its lease and those below it first, in a transaction of their own:
-	// the ancestors and the tenant they hold budget of are charged and
-	// released, and none is left charging under a hold the restarted
-	// counters no longer keep. Again should one open before the counters go.
-	settle := func() error {
-		_, _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTx(ctx, fn) }, sqlLeasesFrom, req.CapabilityID)
-		return err
-	}
+	// Its lease and those below it are settled in the drop's own
+	// transaction: the ancestors and the tenant they hold budget of are
+	// charged and released, none is left charging under a hold the
+	// restarted counters no longer keep, and a lease opening meanwhile
+	// waits for the drop rather than slipping in between.
 	drop := func() error {
 		return s.inTx(ctx, func(tx pgx.Tx) error {
 			ids := []uuid.UUID{req.CapabilityID}
-			if err := s.dropUsage(ctx, tx, ids); err != nil {
+			leases, err := readLeases(ctx, tx, sqlLeasesFrom, req.CapabilityID)
+			if err != nil {
+				return err
+			}
+			if err := s.dropUsage(ctx, tx, ids, leases); err != nil {
 				return err
 			}
 			var below bool
@@ -938,7 +1021,7 @@ func (s *UsageStore) DeleteUsage(ctx context.Context, req meter.DeleteUsageReque
 	// No lease is left to forget the capability: the drop refused one held
 	// against it (sqlLeasedBelow), and one opened since holds against the
 	// counters restarted for it, which its settlement must reach.
-	return s.settledThen(ctx, settledDeleteUsage, settle, drop)
+	return s.settledThen(ctx, settledDeleteUsage, settledNothing, drop)
 }
 
 // PurgeOrphans drops the counters of capabilities no longer on record, as
@@ -989,18 +1072,27 @@ func (s *UsageStore) dropOrphans(ctx context.Context, tx pgx.Tx, limit int, purg
 	if len(ids) == 0 {
 		return nil
 	}
-	return s.dropUsage(ctx, tx, ids)
+	return s.dropUsage(ctx, tx, ids, leasesToSettle{})
 }
 
-// dropUsage releases the holds of ids — first, as releasing one writes its
-// ancestors' counters — then drops their counters and their copies', and
-// strikes them from the ancestors of the holds that remain.
-func (s *UsageStore) dropUsage(ctx context.Context, tx pgx.Tx, ids []uuid.UUID) error {
+// dropUsage settles leases and releases the holds of ids — first, as each
+// writes its ancestors' counters, all of which it locks together first —
+// then drops their counters and their copies', and strikes them from the
+// ancestors of the holds that remain.
+func (s *UsageStore) dropUsage(ctx context.Context, tx pgx.Tx, ids []uuid.UUID, leases leasesToSettle) error {
 	locked, err := collectHolds(ctx, tx, sqlHoldsNaming, ids)
 	if err != nil {
 		return err
 	}
 	holds := slices.DeleteFunc(locked, func(h hold) bool { return !slices.Contains(ids, h.capID) })
+	if len(leases.holders) > 0 {
+		if err := lockReleased(ctx, tx, holds, leases); err != nil {
+			return err
+		}
+		if err := s.settleLocked(ctx, tx, settledDeleteUsage, leases); err != nil {
+			return err
+		}
+	}
 	if err := s.releaseHolds(ctx, tx, holds); err != nil {
 		return err
 	}
