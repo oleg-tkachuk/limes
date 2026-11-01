@@ -22,6 +22,7 @@ const (
 	famNotFound     = "NotFound"
 	famConflict     = "Conflict"
 	famRequest      = "InvalidRequest"
+	famConfig       = "InvalidConfig"
 )
 
 var families = map[string]error{
@@ -30,6 +31,7 @@ var families = map[string]error{
 	famNotFound:     limes.ErrNotFound,
 	famConflict:     limes.ErrConflict,
 	famRequest:      limes.ErrInvalidRequest,
+	famConfig:       limes.ErrInvalidConfig,
 }
 
 // sentinelCase is one exported sentinel: the families it matches, the
@@ -57,6 +59,7 @@ var sentinelMatrix = map[string]sentinelCase{
 	"ErrLeaseRequestsExhausted":      {ErrLeaseRequestsExhausted, []string{famRequestLimit}, limes.ReasonRequestLimitExceeded, http.StatusForbidden},
 	"ErrLeaseNotFound":               {ErrLeaseNotFound, []string{famNotFound}, "", http.StatusInternalServerError},
 	"ErrLeaseNested":                 {ErrLeaseNested, []string{famConflict}, "", http.StatusConflict},
+	"ErrLeasingDisabled":             {ErrLeasingDisabled, []string{famConfig}, "", http.StatusInternalServerError},
 	"ErrTenantBudgetVersionMismatch": {ErrTenantBudgetVersionMismatch, []string{famConflict}, "", http.StatusConflict},
 	"ErrCounterOverflow":             {ErrCounterOverflow, nil, "", http.StatusInternalServerError},
 	"ErrRefundExceedsCharge":         {ErrRefundExceedsCharge, nil, "", http.StatusInternalServerError},

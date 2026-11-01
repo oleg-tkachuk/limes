@@ -23,6 +23,7 @@ const (
 	CodeLeaseRequestsExhausted      limes.Code = "lease_requests_exhausted"
 	CodeLeaseNotFound               limes.Code = "lease_not_found"
 	CodeLeaseNested                 limes.Code = "lease_nested"
+	CodeLeasingDisabled             limes.Code = "leasing_disabled"
 )
 
 // codeRule is one of the meter's sentinels, its code and, for one limes
@@ -50,6 +51,7 @@ var codeRules = []codeRule{
 	{ErrLeaseRequestsExhausted, CodeLeaseRequestsExhausted, 0, ""},
 	{ErrLeaseNotFound, CodeLeaseNotFound, http.StatusNotFound, "The capability holds no lease"},
 	{ErrLeaseNested, CodeLeaseNested, http.StatusConflict, "An ancestor of the capability holds a lease"},
+	{ErrLeasingDisabled, CodeLeasingDisabled, http.StatusInternalServerError, "Leasing is not enabled on the store"},
 }
 
 // codeRuleFor is the meter's rule err matches.
