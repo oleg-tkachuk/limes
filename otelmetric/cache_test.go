@@ -2,6 +2,8 @@ package otelmetric_test
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"testing"
 	"time"
 	"uuid"
@@ -32,6 +34,7 @@ const (
 	metricLastSyncLoss    = "limes.revocation_cache.last_sync_loss_time"
 	metricSignals         = "limes.revocation_cache.signals"
 	metricSignalsWhole    = "limes.revocation_cache.signals_whole"
+	metricCacheStale      = "limes.revocation_cache.stale"
 	attrKind              = "limes.revocation_cache.kind"
 	kindCapability        = "capability"
 	kindBiscuit           = "biscuit"
@@ -222,6 +225,79 @@ func TestInstrumentRevocationCacheUnits(t *testing.T) {
 	for name, want := range map[string]string{metricLineage: "", metricSynced: "", metricLastSyncLoss: "s"} {
 		if got := units[name]; got != want {
 			t.Errorf("%s unit = %q, want %q", name, got, want)
+		}
+	}
+}
+
+// Stale-test timings: an answer outlives staleTestTTL, and stands in for a
+// failing upstream for up to staleTestMaxStale past it.
+const (
+	staleTestTTL      = time.Minute
+	staleTestMaxStale = 10 * time.Minute
+)
+
+var errUpstreamDown = errors.New("upstream down")
+
+// failingUpstream answers not revoked until down, then fails every
+// question of either kind.
+type failingUpstream struct{ down bool }
+
+func (f *failingUpstream) answer() (bool, error) {
+	if f.down {
+		return false, errUpstreamDown
+	}
+	return false, nil
+}
+
+func (f *failingUpstream) IsRevoked(context.Context, uuid.UUID) (bool, error) { return f.answer() }
+
+func (f *failingUpstream) IsBiscuitRevoked(context.Context, [][]byte) (bool, error) {
+	return f.answer()
+}
+
+// The stale answers served over a failing upstream reach the provider by
+// kind.
+func TestInstrumentRevocationCacheReportsStaleAnswers(t *testing.T) {
+	ctx := context.Background()
+	upstream := &failingUpstream{}
+	now := time.Now()
+	cache, err := limes.NewRevocationCache(limes.RevocationCacheConfig{
+		Capabilities: upstream, Biscuits: upstream,
+		TTL: staleTestTTL, MaxStale: staleTestMaxStale,
+		Logger: slog.New(slog.DiscardHandler),
+		Now:    func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := sdkmetric.NewManualReader()
+	if _, err := otelmetric.InstrumentRevocationCache(cache, otelmetric.WithMeterProvider(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)))); err != nil {
+		t.Fatal(err)
+	}
+	id, ids := uuid.New(), [][]byte{[]byte("a")}
+	if _, err := cache.IsRevoked(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cache.IsBiscuitRevoked(ctx, ids); err != nil {
+		t.Fatal(err)
+	}
+	if got := collected(t, reader); valueAt(got[metricCacheStale], attrKind, kindCapability) != 0 {
+		t.Errorf("%s before any outage = %+v, want 0", metricCacheStale, got[metricCacheStale])
+	}
+	upstream.down = true
+	now = now.Add(staleTestTTL + time.Second)
+	for range 2 {
+		if _, err := cache.IsRevoked(ctx, id); err != nil {
+			t.Fatalf("IsRevoked over the outage: %v", err)
+		}
+	}
+	if _, err := cache.IsBiscuitRevoked(ctx, ids); err != nil {
+		t.Fatalf("IsBiscuitRevoked over the outage: %v", err)
+	}
+	got := collected(t, reader)
+	for kind, want := range map[string]float64{kindCapability: 2, kindBiscuit: 1} {
+		if v := valueAt(got[metricCacheStale], attrKind, kind); v != want {
+			t.Errorf("%s{kind=%s} = %v, want %v", metricCacheStale, kind, v, want)
 		}
 	}
 }

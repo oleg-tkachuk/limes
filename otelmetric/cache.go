@@ -15,7 +15,7 @@ import (
 
 // OpenTelemetry instruments of a limes.RevocationCache
 // (InstrumentRevocationCache), read from its Stats when the provider
-// collects. Hits, misses, lookups, evictions and entries carry
+// collects. Hits, misses, lookups, evictions, stale answers and entries carry
 // limes.revocation_cache.kind: capability for IsRevoked, biscuit for
 // IsBiscuitRevoked; the clears and the revocation signals' instruments are
 // of the whole cache and carry none.
@@ -27,7 +27,10 @@ const (
 	metricCacheLookups   = "limes.revocation_cache.lookups"
 	metricCacheEvictions = "limes.revocation_cache.evictions"
 	metricCacheEntries   = "limes.revocation_cache.entries"
-	metricCacheClears    = "limes.revocation_cache.clears"
+	// metricCacheStale counts the stale answers served in place of a
+	// failing upstream (limes.RevocationCacheConfig.MaxStale).
+	metricCacheStale  = "limes.revocation_cache.stale"
+	metricCacheClears = "limes.revocation_cache.clears"
 	// metricCacheNarrowClears counts the narrow clears, which drop only
 	// the answers a revocation outdates.
 	metricCacheNarrowClears = "limes.revocation_cache.narrow_clears"
@@ -76,8 +79,9 @@ func InstrumentRevocationCache(cache *limes.RevocationCache, opts ...Option) (me
 	}
 	meter := provider.Meter(instrumentationScope)
 	var (
-		errs                                                   [15]error
+		errs                                                   [16]error
 		hits, misses, lookups, evictions, clears, narrowClears metric.Int64ObservableCounter
+		stale                                                  metric.Int64ObservableCounter
 		clearsWithoutLineage, syncs, syncsLost, signals, whole metric.Int64ObservableCounter
 		entries, lineage, synced, lastSyncLoss                 metric.Int64ObservableGauge
 	)
@@ -111,6 +115,8 @@ func InstrumentRevocationCache(cache *limes.RevocationCache, opts ...Option) (me
 		metric.WithDescription("Revocation notifications passed on through RevocationSignal.Revoked and RevokedAll."))
 	whole, errs[14] = meter.Int64ObservableCounter(metricCacheSignalsWhole,
 		metric.WithDescription("Revocation notifications that named no capability and cleared the cache whole."))
+	stale, errs[15] = meter.Int64ObservableCounter(metricCacheStale,
+		metric.WithDescription("Stale answers served in place of a failing upstream, by kind: growing, revocations may go unseen."))
 	if err := errors.Join(errs[:]...); err != nil {
 		return nil, fmt.Errorf("otelmetric: cache instruments: %w", err)
 	}
@@ -129,6 +135,7 @@ func InstrumentRevocationCache(cache *limes.RevocationCache, opts ...Option) (me
 			o.ObserveInt64(misses, saturated(c.Misses), k.attrs)
 			o.ObserveInt64(lookups, saturated(c.Lookups), k.attrs)
 			o.ObserveInt64(evictions, saturated(c.Evictions), k.attrs)
+			o.ObserveInt64(stale, saturated(c.Stale), k.attrs)
 			o.ObserveInt64(entries, int64(c.Entries), k.attrs)
 		}
 		o.ObserveInt64(clears, saturated(st.Clears))
@@ -144,7 +151,7 @@ func InstrumentRevocationCache(cache *limes.RevocationCache, opts ...Option) (me
 		o.ObserveInt64(signals, saturated(st.Signals))
 		o.ObserveInt64(whole, saturated(st.SignalsWhole))
 		return nil
-	}, hits, misses, lookups, evictions, entries, clears, narrowClears,
+	}, hits, misses, lookups, evictions, stale, entries, clears, narrowClears,
 		clearsWithoutLineage, lineage, synced, syncs, syncsLost, lastSyncLoss, signals, whole)
 	if err != nil {
 		return nil, fmt.Errorf("otelmetric: cache callback: %w", err)

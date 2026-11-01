@@ -121,6 +121,7 @@ func ExampleInstrumentRevocationCache() {
 	// limes.revocation_cache.narrow_clears
 	// limes.revocation_cache.signals
 	// limes.revocation_cache.signals_whole
+	// limes.revocation_cache.stale
 	// limes.revocation_cache.synced
 	// limes.revocation_cache.syncs
 	// limes.revocation_cache.syncs_lost
