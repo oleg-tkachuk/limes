@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -68,6 +69,17 @@ const DefaultRevocationCacheTTL = 2 * time.Second
 // source never sends — leaves a revocation unseen for as long as the bound
 // in force, so even a synced cache asks again within a day.
 const MaxRevocationCacheSyncedTTL = 24 * time.Hour
+
+// MaxRevocationCacheStale bounds RevocationCacheConfig.MaxStale. A stale
+// answer leaves a revocation unseen while the upstream is down, so an
+// outage longer than this is one the cache fails closed through.
+const MaxRevocationCacheStale = time.Hour
+
+// Kinds of answer a stale-answer warning names (RevocationCacheConfig.Logger).
+const (
+	staleKindCapability = "capability"
+	staleKindBiscuit    = "biscuit"
+)
 
 // DefaultRevocationCacheEntries bounds the cache. Past it, the oldest entry
 // makes room for the new one: a flood of distinct ids costs extra lookups and
@@ -169,6 +181,20 @@ type RevocationCacheConfig struct {
 	// full cache of chains 64 deep holds some 100 MB of them at the default
 	// bound, against 32 to 80 bytes for chains two to five deep.
 	MaxEntries int
+	// MaxStale is how long past the TTL in force an answer stands in for
+	// an upstream that fails: the question is answered as it was then, in
+	// place of the failure, counted (RevocationCacheCounts.Stale) and
+	// logged. Zero: never, the cache failing closed — every failure
+	// returned, as a verifier refuses on it. A revocation the upstream
+	// holds goes unseen for as long, so it trades revocation latency for
+	// availability through a short outage of the store; ErrNotFound, an
+	// answer, is never covered, nor a caller whose context ended. A
+	// Biscuit is covered when its revocation ids are asked about together
+	// as before. Negative, or longer than MaxRevocationCacheStale, is
+	// refused.
+	MaxStale time.Duration
+	// Logger logs every stale answer served, at WARN. Nil: slog.Default().
+	Logger *slog.Logger
 	// Now is the clock. Nil: time.Now.
 	Now func() time.Time
 }
@@ -197,12 +223,19 @@ func NewRevocationCache(cfg RevocationCacheConfig) (*RevocationCache, error) {
 	if cfg.RequireLineage && lineage == nil {
 		return nil, fmt.Errorf("%w: %T", ErrNoRevocationLineage, cfg.Capabilities)
 	}
+	if err := setMaxStale(&c, cfg.MaxStale); err != nil {
+		return nil, err
+	}
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &RevocationCache{
 		capabilities: cfg.Capabilities,
 		lineage:      lineage,
 		biscuits:     cfg.Biscuits,
-		caps:         ttlcache.New[uuid.UUID](c),
-		copies:       ttlcache.New[string](c),
+		caps:         ttlcache.New[uuid.UUID](withStaleLog(c, logger, staleKindCapability)),
+		copies:       ttlcache.New[string](withStaleLog(c, logger, staleKindBiscuit)),
 		ttl:          c.TTL,
 		syncedTTL:    synced,
 	}, nil
@@ -220,6 +253,33 @@ func syncedTTL(synced, ttl time.Duration) (time.Duration, error) {
 		return 0, invalidConfig("limes: cache SyncedTTL %s is longer than %s", synced, MaxRevocationCacheSyncedTTL)
 	}
 	return synced, nil
+}
+
+// setMaxStale sets c to serve a stale answer up to maxStale past its TTL
+// over an upstream's failure, an ErrNotFound or ErrInvalidRequest being
+// the upstream's answer rather than one; it refuses a negative maxStale
+// or one past MaxRevocationCacheStale.
+func setMaxStale(c *ttlcache.Config, maxStale time.Duration) error {
+	switch {
+	case maxStale < 0:
+		return invalidConfig("limes: cache MaxStale %s is negative", maxStale)
+	case maxStale > MaxRevocationCacheStale:
+		return invalidConfig("limes: cache MaxStale %s is longer than %s", maxStale, MaxRevocationCacheStale)
+	}
+	c.MaxStale = maxStale
+	c.Answers = func(err error) bool { return errors.Is(err, ErrNotFound) || errors.Is(err, ErrInvalidRequest) }
+	return nil
+}
+
+// withStaleLog is c logging every stale answer it serves, of kind, to
+// logger.
+func withStaleLog(c ttlcache.Config, logger *slog.Logger, kind string) ttlcache.Config {
+	now := c.Now
+	c.OnStale = func(at time.Time, cause error) {
+		logger.Warn("limes: revocation upstream failed; serving a stale cached answer",
+			slog.String("kind", kind), slog.Duration("age", now().Sub(at)), slog.Any("error", cause))
+	}
+	return c
 }
 
 // isNilValue reports whether v is nil, or an interface holding a nil
@@ -523,6 +583,10 @@ type RevocationCacheCounts struct {
 	// RevocationCacheConfig.MaxEntries: a count that keeps growing says
 	// the bound is too small for the ids in use.
 	Evictions uint64
+	// Stale counts the stale answers served in place of an upstream's
+	// failure (RevocationCacheConfig.MaxStale): growing, the upstream is
+	// failing and revocations may go unseen.
+	Stale uint64
 	// Entries is how many answers the cache holds, fresh or not yet
 	// swept.
 	Entries int
@@ -557,5 +621,5 @@ func (c *RevocationCache) Stats() RevocationCacheStats {
 }
 
 func countsOf(st ttlcache.Stats) RevocationCacheCounts {
-	return RevocationCacheCounts{Hits: st.Hits, Misses: st.Misses, Lookups: st.Lookups, Evictions: st.Evictions, Entries: st.Entries}
+	return RevocationCacheCounts{Hits: st.Hits, Misses: st.Misses, Lookups: st.Lookups, Evictions: st.Evictions, Stale: st.Stale, Entries: st.Entries}
 }

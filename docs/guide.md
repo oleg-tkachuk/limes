@@ -980,7 +980,18 @@ upstream lookups those ran (`Lookups`, fewer when concurrent misses share
 one), the live answers dropped to stay within the bound (`Evictions`, which
 growing says `MaxEntries` is too small), the answers held (`Entries`), and
 the `Clears` and `NarrowClears`; `otelmetric.InstrumentRevocationCache`
-exports them. Point the store a `RevocationCache` reads, and the watcher's
+exports them.
+
+The cache fails closed: an upstream that fails is a failed check, and the
+verifier refuses. `MaxStale` trades that for availability through a short
+outage of the store: an answer past its TTL is kept as long again as
+`MaxStale`, and stands in for a lookup that fails — answered as it was,
+counted in `Stale`, logged at WARN through `Logger`. A revocation the store
+holds then goes unseen while it is down, for `MaxStale` at most, which
+`MaxRevocationCacheStale`, an hour, bounds. `ErrNotFound` is the store's
+answer and is never covered, nor a caller whose context ended; stale
+answers make room before any fresh one does, and `Clear` and
+`ClearRevoked` drop them with the rest. Point the store a `RevocationCache` reads, and the watcher's
 connection, at the primary, not at a read replica. A standby applies a revocation after
 the primary commits it and notifies, so a cache cleared by the notification
 can read "not revoked" from a standby still behind and keep it for its
@@ -1793,7 +1804,7 @@ status, its sentinel and how to retry.
 | `meter.PurgeChargesRequest` | `DefaultHousekeepingLimit` 1 000 a batch; `OlderThan` `meter.MinChargeRetention`, 401 days, and no less |
 | `MaxDelegationDepth` · `MaxBiscuitBlocks` | 64 ancestors · 32 attenuation blocks |
 | `meter.CopyUsageRequest.RevocationIDs` | at most `meter.MaxCopyUsageIDs`, 500, of one `CapabilityID` |
-| `RevocationCacheConfig` | `DefaultRevocationCacheTTL` 2 seconds · `DefaultRevocationCacheEntries` 100 000 of each kind, capabilities and Biscuit copies, spread over shards with a lock each — past the bound the oldest of the shard is dropped, the oldest of all in a cache of fewer than 512 entries, which is one shard; `SyncedTTL` is `TTL` unless set, from `TTL` to `MaxRevocationCacheSyncedTTL`, 24 hours; a negative TTL or bound is refused — for no cache, give the verifier the store itself |
+| `RevocationCacheConfig` | `DefaultRevocationCacheTTL` 2 seconds · `DefaultRevocationCacheEntries` 100 000 of each kind, capabilities and Biscuit copies, spread over shards with a lock each — past the bound the oldest of the shard is dropped, the oldest of all in a cache of fewer than 512 entries, which is one shard; `SyncedTTL` is `TTL` unless set, from `TTL` to `MaxRevocationCacheSyncedTTL`, 24 hours; `MaxStale` 0, failing closed, at most `MaxRevocationCacheStale`, an hour; a negative TTL or bound is refused — for no cache, give the verifier the store itself |
 | `pgstore.RevocationWatcher.Heartbeat` | `pgstore.DefaultWatchHeartbeat`, 30 seconds; negative is refused |
 | `jwks.RemoteConfig` | `jwks.DefaultFetchTimeout` 10s · `DefaultRefreshInterval` 5m · `DefaultMinRefreshInterval` 10s · `DefaultMaxStale` 1h · `DefaultMaxDocumentBytes` 1 MiB |
 | `dpop.VerifierConfig.Window` | `dpop.DefaultWindow`, 1 minute; a proof's id is remembered for `Window` plus `dpop.ReplayClockSkew`, 5 seconds |
