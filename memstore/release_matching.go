@@ -13,7 +13,8 @@ import (
 // ReleaseMatching implements meter.MatchingReleaser: under the store's lock,
 // the open holds, in id order, of the revoked capabilities of req's tenant —
 // or of every tenant, with AllTenants — that match req's selectors or were
-// delegated from one that does, at most a batch.
+// delegated from one that does, at most a batch; then their leases, in
+// holder order, at most a batch too.
 func (s *UsageStore) ReleaseMatching(_ context.Context, req meter.ReleaseMatchingRequest) (meter.ReleaseMatchingResult, error) {
 	if err := req.Validate(); err != nil {
 		return meter.ReleaseMatchingResult{}, err
@@ -39,14 +40,22 @@ func (s *UsageStore) ReleaseMatching(_ context.Context, req meter.ReleaseMatchin
 		delete(s.holds, h.id)
 		tenants = append(tenants, h.tenantID)
 	}
-	settled := s.settleLeasesLocked(func(l lease) bool {
+	var leases []lease
+	for _, l := range s.leases {
 		if (req.AllTenants || l.tenantID == req.TenantID) && s.records.revokedUnderMatch(l.capID, sel) {
-			tenants = append(tenants, l.tenantID)
-			return true
+			leases = append(leases, l)
 		}
-		return false
-	})
-	return meter.ReleaseMatchingResult{Released: int64(len(due)), SettledLeases: settled, More: more, Tenants: sortedTenants(tenants)}, nil
+	}
+	slices.SortFunc(leases, func(a, b lease) int { return bytes.Compare(a.capID[:], b.capID[:]) })
+	more = more || len(leases) >= limit
+	if len(leases) > limit {
+		leases = leases[:limit]
+	}
+	for _, l := range leases {
+		s.settleLeaseLocked(l)
+		tenants = append(tenants, l.tenantID)
+	}
+	return meter.ReleaseMatchingResult{Released: int64(len(due)), SettledLeases: int64(len(leases)), More: more, Tenants: sortedTenants(tenants)}, nil
 }
 
 // revokedUnderMatch reports whether id is on record and revoked, and it or

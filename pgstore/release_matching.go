@@ -13,11 +13,11 @@ import (
 // sqlMatchingHoldsHead and sqlMatchingHoldsTail surround the selectors of
 // ReleaseMatching (selectorsSQL and CapabilityID, on the capability c): tenant $1's open
 // holds — every tenant's, $1 being NULL — a batch of $2 in id order, each
-// of a revoked capability h that is c, or was delegated from it — a hold's
-// ancestors are those it holds against, in its own tenant — locked in id
-// order, the order every call that locks several takes.
-const (
-	sqlMatchingHoldsHead = `
+// of a revoked capability h that is c, or was delegated from it, in its own
+// tenant — over the delegation tree on record rather than a hold's
+// ancestors, which drop the capabilities whose counters went — locked in
+// id order, the order every call that locks several takes.
+var sqlMatchingHoldsHead = `
 SELECT ` + sqlHoldColumns + ` FROM limes.reservations
 WHERE id IN (
     SELECT r.id FROM limes.reservations r
@@ -25,13 +25,13 @@ WHERE id IN (
     WHERE ($1::uuid IS NULL OR r.tenant_id = $1) AND h.revoked
       AND EXISTS (
         SELECT 1 FROM limes.capabilities c
-        WHERE c.id = ANY (r.capability_id || r.ancestors) AND c.tenant_id = r.tenant_id`
-	sqlMatchingHoldsTail = `)
+        WHERE c.id IN (` + sqlChainUp("r.capability_id") + `) AND c.tenant_id = r.tenant_id`
+
+const sqlMatchingHoldsTail = `)
     ORDER BY r.id
     LIMIT $2)
 ORDER BY id
 FOR UPDATE`
-)
 
 // ReleaseMatching implements meter.MatchingReleaser in one transaction
 // scoped to the request's tenant (Config.CheckScope) — or, with AllTenants,
@@ -74,7 +74,7 @@ func (s *UsageStore) ReleaseMatching(ctx context.Context, req meter.ReleaseMatch
 	if err != nil {
 		return meter.ReleaseMatchingResult{}, err
 	}
-	settled, err := s.settleEach(ctx, inTx, sqlMatchingLeasesHead+where+sqlMatchingLeasesTail, args...)
+	settled, named, err := s.settleEach(ctx, inTx, sqlMatchingLeasesHead+where+sqlMatchingLeasesTail, args...)
 	if err != nil {
 		return meter.ReleaseMatchingResult{}, err
 	}
@@ -85,7 +85,8 @@ func (s *UsageStore) ReleaseMatching(ctx context.Context, req meter.ReleaseMatch
 	if len(res.Tenants) > 0 {
 		res.Tenants = sortedUnique(res.Tenants)
 	}
-	res.More = res.Released >= int64(limit)
+	// Either batch full, more may match.
+	res.More = res.Released >= int64(limit) || named >= limit
 	return res, nil
 }
 

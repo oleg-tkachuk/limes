@@ -386,7 +386,7 @@ func (s *UsageStore) SetTenantBudget(ctx context.Context, req meter.SetTenantBud
 	// closing period's, so they are settled into it first, each in a
 	// transaction of its own.
 	if req.ResetSpend {
-		if _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTenantReadTx(ctx, req.TenantID, fn) }, sqlTenantLeases, req.TenantID); err != nil {
+		if _, _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTenantReadTx(ctx, req.TenantID, fn) }, sqlTenantLeases, req.TenantID); err != nil {
 			return meter.TenantBudget{}, err
 		}
 	}
@@ -749,7 +749,7 @@ func (s *UsageStore) ReleaseExpired(ctx context.Context, req meter.ReleaseExpire
 	if err != nil {
 		return meter.ReleaseExpiredResult{}, err
 	}
-	settled, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTx(ctx, fn) }, sqlDueLeases, s.clock(), limit)
+	settled, _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTx(ctx, fn) }, sqlDueLeases, s.clock(), limit)
 	res := meter.ReleaseExpiredResult{Released: released, SettledLeases: int64(len(settled))}
 	return res, err
 }
@@ -845,7 +845,7 @@ func (s *UsageStore) DeleteUsage(ctx context.Context, req meter.DeleteUsageReque
 	}
 	// Its lease first, in a transaction of its own: the ancestors and the
 	// tenant it holds budget of are charged and released.
-	if _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTx(ctx, fn) }, sqlLeaseOf, req.CapabilityID); err != nil {
+	if _, _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTx(ctx, fn) }, sqlLeaseOf, req.CapabilityID); err != nil {
 		return err
 	}
 	if err := s.inTx(ctx, func(tx pgx.Tx) error {
@@ -864,7 +864,7 @@ func (s *UsageStore) PurgeOrphans(ctx context.Context, req meter.PurgeOrphansReq
 	}
 	limit := meter.HousekeepingLimit(req.Limit)
 	// The orphans' leases first, each in a transaction of its own.
-	if _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTx(ctx, fn) }, sqlOrphanLeases, limit); err != nil {
+	if _, _, err := s.settleEach(ctx, func(fn func(pgx.Tx) error) error { return s.inTx(ctx, fn) }, sqlOrphanLeases, limit); err != nil {
 		return meter.PurgeOrphansResult{}, err
 	}
 	var purged int64
