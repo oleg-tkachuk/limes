@@ -2,6 +2,16 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.59.1](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.59.0...pgstore%2Fv0.59.1) (2026-11-01)
+
+### Bug Fixes
+
+* **pgstore:** settle a lease of a closed period before adding an amount ([00920d5](https://github.com/oleg-tkachuk/limes/commit/00920d5d0b06325d4d43f4b842df55441e50028c))
+
+### Dependencies
+
+* require limes v0.147.0
+
 ## [0.59.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.58.0...pgstore%2Fv0.59.0) (2026-11-01)
 
 ### ⚠ BREAKING CHANGES
