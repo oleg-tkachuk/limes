@@ -282,3 +282,29 @@ func TestSeedRevokedHoldsTheKeyRevoked(t *testing.T) {
 		t.Error("a key seeded with an epoch a clear passed is held revoked")
 	}
 }
+
+// A lookup that read the upstream before a revocation the cache learned
+// meanwhile does not undo it when it finishes: its caller gets the live
+// answer it read, and the cache keeps the revoked one.
+func TestALateLiveReadKeepsARevokedAnswer(t *testing.T) {
+	c, _, _ := staleCache(10)
+	started, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _, _ = c.Get(t.Context(), "copy", func(context.Context) (bool, error) {
+			close(started)
+			<-release
+			return false, nil
+		})
+	}()
+	<-started
+	_, _, epoch := c.Cached([]string{"other"})
+	c.SeedRevoked("copy", epoch)
+	close(release)
+	<-done
+	var calls atomic.Int32
+	revoked, _, err := c.Get(t.Context(), "copy", counted(false, &calls))
+	if err != nil || !revoked || calls.Load() != 0 {
+		t.Errorf("copy after the late live read = %v, %v (%d lookups); want the revoked answer kept", revoked, err, calls.Load())
+	}
+}
