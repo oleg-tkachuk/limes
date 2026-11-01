@@ -167,6 +167,9 @@ every ceiling and stays correct, conservatively. So:
 - **A `Charge` with `OverrunPolicyRecord`, a `Charge` of a Biscuit copy
   with limits of its own — whose quota counts on every ancestor's row —
   `Reserve`, `Settle` and `Release`** go through the whole chain.
+- **A Biscuit copy does not lease**: `Lease` of a copy's subject is
+  `limes.ErrInvalidRequest`. None of its calls go under a lease, so one
+  would only hold the chain's budget past the copy's own ceilings.
 - **Leases do not nest** (Decision 4 deferred): `Lease` under an ancestor
   holding an open lease is `meter.ErrLeaseNested`. A descendant may lease
   under a capability that does not hold one; its settlement charges the

@@ -389,6 +389,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "LeaseCoversOnlyWhatItHolds", Run: checkLeaseCoversOnlyWhatItHolds},
 		{Name: "RequestLeaseCoversDescendants", Run: checkRequestLeaseCoversDescendants},
 		{Name: "RequestLeaseIsBypassedByCopies", Run: checkRequestLeaseIsBypassedByCopies},
+		{Name: "LeaseOfACopyIsRefused", Run: checkLeaseOfACopyIsRefused},
 		{Name: "RequestLeaseExpiresIntoTheChain", Run: checkRequestLeaseExpires},
 		{Name: "RequestLeasesUnderOneRootStayUnderItsCeiling", Run: checkRequestLeaseConcurrency},
 		{Name: "ReleaseMatchingReleasesTheHoldsOfRevokedMatches", Run: checkReleaseMatching},
