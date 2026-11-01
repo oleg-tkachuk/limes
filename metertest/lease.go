@@ -239,6 +239,28 @@ func checkLeaseIsSettledBeforeItsCountersGo(t *testing.T, f fixture) {
 	expect.That(t, f.tenantOf(t).ReservedAmount == 0, "the tenant still holds the lease of counters gone")
 }
 
+// An ancestor's counters dropped settle the leases below it first, as a
+// reset settles the tenant's: a lease holds against its chain, and one left
+// open past the restart would charge under a hold the ancestor no longer
+// keeps, past the ancestor's ceiling.
+func checkLeaseIsSettledBeforeAnAncestorsCountersGo(t *testing.T, f fixture) {
+	l := f.leaser(t)
+	child := f.childSubject()
+	f.lease(t, l, child, leased)
+	_, err := f.chargeOf(child, leaseCharge)
+	expect.Must(t, err == nil, "charge: %v", err)
+	expect.Must(t, f.Usage.DeleteUsage(f.Ctx, meter.DeleteUsageRequest{CapabilityID: f.root}) == nil, "DeleteUsage")
+	_, err = l.GetLease(f.Ctx, f.child)
+	expect.That(t, errors.Is(err, meter.ErrLeaseNotFound), "the child's lease once the root's counters went: %v, want ErrLeaseNotFound", err)
+	expect.That(t, f.tenantOf(t).SpentAmount == leaseCharge && f.tenantOf(t).ReservedAmount == 0, "the tenant once the root's counters went = %+v, want %v spent and nothing held", f.tenantOf(t), leaseCharge)
+	// The root, restarted, takes its whole ceiling; the child may then
+	// spend nothing more of it.
+	_, err = f.chargeOf(newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, budget: budgetOf(rootBudget)}), rootBudget)
+	expect.Must(t, err == nil, "the restarted root's whole ceiling: %v", err)
+	_, err = f.chargeOf(child, one)
+	expect.That(t, errors.Is(err, limes.ErrBudgetExceeded), "a child's charge past its restarted root's ceiling: %v, want ErrBudgetExceeded", err)
+}
+
 // leaseWorkers is how many children charge under leases of their own at
 // once in checkLeaseConcurrency.
 const leaseWorkers = 4

@@ -379,6 +379,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "LeaseIsBypassedByHoldsAndOverruns", Run: checkLeaseIsBypassedByHoldsAndOverruns},
 		{Name: "LeaseExpiresIntoTheChain", Run: checkLeaseExpires},
 		{Name: "LeaseIsSettledBeforeItsCountersGo", Run: checkLeaseIsSettledBeforeItsCountersGo},
+		{Name: "ALeaseIsSettledBeforeAnAncestorsCountersGo", Run: checkLeaseIsSettledBeforeAnAncestorsCountersGo},
 		{Name: "LeasesUnderOneRootStayUnderItsCeiling", Run: checkLeaseConcurrency},
 		{Name: "LeaseIsSettledByAReset", Run: checkLeaseIsSettledByAReset},
 		{Name: "RequestLeaseStopsBumpsAtTheLeaseholder", Run: checkRequestLeaseStopsBumpsAtTheLeaseholder},

@@ -254,9 +254,10 @@ func checkReleaseMatchingSettlesLeasesInBatches(t *testing.T, f fixture) {
 	expect.That(t, f.usageOf(t, root).ReservedAmount == 0, "the root holds %v after the sweep, want nothing", f.usageOf(t, root).ReservedAmount)
 }
 
-// A lease under a match is settled when the match is revoked, even once
-// the match's own counters went: what matches is the delegation tree,
-// whichever of its capabilities still have counters.
+// A lease under a match whose own counters went was settled with them
+// (DeleteUsage settles the leases below the counters it drops), so the
+// sweep of the match's revocation finds none open, and the root holds
+// nothing of it.
 func checkReleaseMatchingSettlesALeaseUnderAForgottenAncestor(t *testing.T, f fixture) {
 	r, l := f.releaser(t), f.leaser(t)
 	client := "client-" + uuid.New().String()
@@ -268,7 +269,7 @@ func checkReleaseMatchingSettlesALeaseUnderAForgottenAncestor(t *testing.T, f fi
 	expect.Must(t, f.Usage.DeleteUsage(f.Ctx, meter.DeleteUsageRequest{CapabilityID: match}) == nil, "DeleteUsage of the match")
 	expect.Must(t, f.Revoke(match) == nil, "revoke")
 	got, err := r.ReleaseMatching(f.Ctx, meter.ReleaseMatchingRequest{TenantID: f.Tenant, ClientID: client})
-	expect.That(t, err == nil && got.SettledLeases == 1, "ReleaseMatching = %+v, %v; want the holder's lease settled", got, err)
+	expect.That(t, err == nil && got.SettledLeases == 0, "ReleaseMatching = %+v, %v; want no lease left to settle", got, err)
 	expect.That(t, !f.leaseOpen(t, l, holder), "the lease under the revoked match outlived the sweep")
 	expect.That(t, f.usageOf(t, root).ReservedAmount == 0, "the root holds %v after the sweep, want nothing", f.usageOf(t, root).ReservedAmount)
 }

@@ -2125,7 +2125,9 @@ func (s *UsageStore) DeleteUsage(_ context.Context, req meter.DeleteUsageRequest
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.releaseHoldsLocked(func(id uuid.UUID) bool { return id == capID })
-	s.settleLeasesLocked(func(l lease) bool { return l.capID == capID })
+	// The leases below it too: each holds against its chain, and one left
+	// open would charge under a hold the restarted counters no longer keep.
+	s.settleLeasesLocked(func(l lease) bool { return l.capID == capID || slices.Contains(l.ancestors, capID) })
 	s.dropUsageLocked(capID)
 	s.dropCopiesLocked(func(id uuid.UUID) bool { return id == capID })
 	s.forgetAncestorLocked(func(id uuid.UUID) bool { return id == capID })

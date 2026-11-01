@@ -137,7 +137,8 @@ func (l Lease) RequestsRemaining() int64 {
 // A lease is settled — its spend charged to every ancestor and the tenant,
 // its requests counted on every ancestor, the rest released — by SettleLease, by ReleaseExpired once it expired,
 // by ReleaseMatching once its capability is revoked, by DeleteUsage and
-// PurgeOrphans before its counters go, and by a SetTenantBudget that
+// PurgeOrphans before its counters go, by DeleteUsage before an
+// ancestor's go — the hold it keeps on them goes with them — and by a SetTenantBudget that
 // resets the spend, before it does. A Refund of a charge taken under a
 // lease returns it to the lease while it is open, and to the chain once
 // it is settled.
