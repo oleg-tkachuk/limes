@@ -87,6 +87,32 @@ type Cache[K comparable] struct {
 	// hits counts the questions answered from the cache, on a stripe each
 	// caller picks at random.
 	hits [hitStripes]stripe
+	// lostUntil is until when, in nanoseconds of the clock, a revoked
+	// answer dropped to make room would still have been kept; 0 for none.
+	// Until then a stale live answer with tags fails rather than stand: the
+	// cache cannot tell whether one of them was the revocation it let go.
+	lostUntil atomic.Int64
+}
+
+// noteLost records that a revoked answer kept until until was dropped to
+// make room.
+func (c *Cache[K]) noteLost(until time.Time) {
+	if until.IsZero() {
+		return
+	}
+	for n := until.UnixNano(); ; {
+		cur := c.lostUntil.Load()
+		if cur >= n || c.lostUntil.CompareAndSwap(cur, n) {
+			return
+		}
+	}
+}
+
+// revocationLost reports whether a revoked answer dropped to make room
+// would still be kept at now.
+func (c *Cache[K]) revocationLost(now time.Time) bool {
+	until := c.lostUntil.Load()
+	return until != 0 && now.UnixNano() < until
 }
 
 // shard is the entries, lookups and expiry order of the keys that hash to
@@ -228,7 +254,13 @@ func (c *Cache[K]) staleOr(ctx context.Context, s *shard[K], key K, revoked bool
 	s.mu.RLock()
 	e, ok := s.entries[key]
 	s.mu.RUnlock()
-	if !ok || !c.cfg.Now().Before(e.at.Add(c.keep())) {
+	now := c.cfg.Now()
+	if !ok || !now.Before(e.at.Add(c.keep())) {
+		return revoked, at, err
+	}
+	// A live answer covers its tags; with a revocation let go to make room,
+	// the cache cannot say it still does.
+	if !e.revoked && len(e.tags) > 0 && c.revocationLost(now) {
 		return revoked, at, err
 	}
 	s.stale.Add(1)
@@ -354,7 +386,7 @@ func (c *Cache[K]) SeedLive(keys []K, epoch uint64, at time.Time) {
 		}
 		_, inflight := s.inflight[k]
 		if e, ok := s.entries[k]; !inflight && (!ok || !c.fresh(e.at, now)) {
-			s.makeRoomLocked(now, ttl, keep)
+			c.noteLost(s.makeRoomLocked(now, ttl, keep))
 			s.entries[k] = cacheEntry[K]{at: at}
 			s.order = append(s.order, queued[K]{key: k, at: at})
 		}
@@ -371,7 +403,7 @@ func (c *Cache[K]) finish(s *shard[K], key K, call *lookupCall[K], epoch uint64)
 	}
 	if call.err == nil && c.epoch.Load() == epoch {
 		now := c.cfg.Now()
-		s.makeRoomLocked(now, c.TTL(), c.keep())
+		c.noteLost(s.makeRoomLocked(now, c.TTL(), c.keep()))
 		s.entries[key] = cacheEntry[K]{revoked: call.revoked, at: now, tags: call.tags}
 		s.order = append(s.order, queued[K]{key: key, at: now})
 	}
@@ -388,31 +420,44 @@ const orderSlack = 2
 // past keep go first, those the expiry order reaches; then every one past
 // ttl, stale ones kept to stand in for a failed lookup among them, wherever
 // its place, such as an id seeded behind a later answer; and, if that frees
-// nothing, the oldest live one does.
-func (s *shard[K]) makeRoomLocked(now time.Time, ttl, keep time.Duration) {
+// nothing, the oldest live one does. It returns until when the latest
+// revoked answer it dropped would still have been kept, zero for none.
+func (s *shard[K]) makeRoomLocked(now time.Time, ttl, keep time.Duration) time.Time {
+	var lost time.Time
+	drop := func(e cacheEntry[K]) {
+		if until := e.at.Add(keep); e.revoked && now.Before(until) && until.After(lost) {
+			lost = until
+		}
+	}
 	s.compactLocked()
 	s.sweepLocked(now, keep)
 	if len(s.entries) >= s.maxEntries {
-		s.dropExpiredLocked(now, ttl)
+		s.dropExpiredLocked(now, ttl, drop)
 	}
 	for len(s.entries) >= s.maxEntries {
-		before := len(s.entries)
-		if !s.popLocked() {
-			return
+		if len(s.order) == 0 {
+			return lost
 		}
-		if len(s.entries) < before {
+		q := s.order[0]
+		e, ok := s.entries[q.key]
+		s.popLocked()
+		if ok && e.at.Equal(q.at) {
+			drop(e)
 			s.evictions++
 		}
 	}
+	return lost
 }
 
 // dropExpiredLocked drops every expired entry, wherever its place in the
 // order: one seeded with an older answer's time sits behind later places,
-// where sweepLocked does not reach it. It returns how many it dropped.
-func (s *shard[K]) dropExpiredLocked(now time.Time, ttl time.Duration) int {
+// where sweepLocked does not reach it. Each one it drops is handed to
+// dropping first; it returns how many.
+func (s *shard[K]) dropExpiredLocked(now time.Time, ttl time.Duration, dropping func(cacheEntry[K])) int {
 	dropped := 0
 	for key, e := range s.entries {
 		if !now.Before(e.at.Add(ttl)) {
+			dropping(e)
 			delete(s.entries, key)
 			dropped++
 		}

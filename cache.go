@@ -188,7 +188,9 @@ type RevocationCacheConfig struct {
 	// returned, as a verifier refuses on it. A revocation the upstream
 	// holds goes unseen for as long, so it trades revocation latency for
 	// availability through a short outage of the store; ErrNotFound, an
-	// answer, is never covered, nor a caller whose context ended. A
+	// answer, is never covered, nor a caller whose context ended; nor, while
+	// a revoked answer dropped to make room (MaxEntries) would still be
+	// kept, a live answer about a delegated capability. A
 	// Biscuit is covered when its revocation ids are asked about together
 	// as before. Negative, or longer than MaxRevocationCacheStale, is
 	// refused.
