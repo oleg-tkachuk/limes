@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 	"uuid"
@@ -28,6 +29,11 @@ const (
 	audience = "https://mcp.example.com"
 	subject  = "user-1"
 	lifetime = 5 * time.Minute
+	// longLifetime is the life of the one-per-token suite's subject tokens,
+	// and shortTTL its policy's: a capability expires, and is purged, while
+	// its subject token can still be presented.
+	longLifetime = time.Hour
+	shortTTL     = time.Minute
 	// sessionID is the identity provider's session a token names.
 	sessionID = "idp-session-1"
 	// jkt is a DPoP key's thumbprint the bound token names.
@@ -133,7 +139,15 @@ const resource = "https://tools.example.com"
 // contract it sets for others.
 func TestOnePerTokenOverMemstore(t *testing.T) {
 	p := newProvider(t)
-	clock := func() time.Time { return now }
+	var (
+		mu      sync.Mutex
+		elapsed time.Duration
+	)
+	clock := func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		return now.Add(elapsed)
+	}
 	subjects, err := jwtverify.New(jwtverify.Config{Issuer: issuer, Keys: jwtverify.StaticKeys(p.keys), Now: clock})
 	if err != nil {
 		t.Fatal(err)
@@ -162,6 +176,7 @@ func TestOnePerTokenOverMemstore(t *testing.T) {
 				IssuedBy: limes.Principal{Type: limes.PrincipalTypeService, Subject: audience},
 				Subject:  limes.Principal{Type: limes.PrincipalTypeUser, TenantID: tenant, Subject: g.Subject.Subject},
 				Caveats:  limes.Caveats{Requests: limes.RequestCeiling{Max: 1}, Ops: []limes.Op{limes.OpGet}},
+				TTL:      shortTTL,
 			}, nil
 		},
 	})
@@ -176,10 +191,20 @@ func TestOnePerTokenOverMemstore(t *testing.T) {
 	}
 	exchangetest.TestOnePerToken(t, exchangetest.OnePerToken{
 		Exchanger: ex,
-		Request:   func(t *testing.T) exchange.Request { return exchangeOf(p.sign(t, nil)) },
-		NoJTI:     func(t *testing.T) exchange.Request { return exchangeOf(p.sign(t, map[string]any{"jti": nil})) },
+		Request: func(t *testing.T) exchange.Request {
+			return exchangeOf(p.sign(t, map[string]any{"exp": clock().Add(longLifetime).Unix()}))
+		},
+		NoJTI: func(t *testing.T) exchange.Request { return exchangeOf(p.sign(t, map[string]any{"jti": nil})) },
 		Revoke: func(t *testing.T, id uuid.UUID) {
 			if _, err := store.Revoke(t.Context(), limes.RevokeRequest{CapabilityID: id}); err != nil {
+				t.Fatal(err)
+			}
+		},
+		Purge: func(t *testing.T) {
+			mu.Lock()
+			elapsed += shortTTL + limes.MinPurgeRetention + time.Minute
+			mu.Unlock()
+			if _, err := store.Purge(t.Context(), limes.PurgeRequest{}); err != nil {
 				t.Fatal(err)
 			}
 		},

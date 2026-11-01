@@ -277,7 +277,7 @@ func (e *Exchanger) exchange(ctx context.Context, req Request) (Result, Subject,
 	if bound {
 		issue.ConfirmationJKT = checked.JKT()
 	}
-	key := limes.ExchangeKey{TenantID: issue.Subject.TenantID, Issuer: subject.Issuer, TokenID: subject.ID}
+	key := limes.ExchangeKey{TenantID: issue.Subject.TenantID, Issuer: subject.Issuer, TokenID: subject.ID, TokenExpiresAt: subject.ExpiresAt}
 	if e.cfg.Exchanges != nil {
 		res, found, err := e.exchangedBefore(ctx, key, issue)
 		if err != nil || found {
@@ -343,7 +343,9 @@ func (e *Exchanger) claim(ctx context.Context, key limes.ExchangeKey, issue lime
 func (e *Exchanger) reissue(ctx context.Context, id uuid.UUID, issue limes.IssueRequest) (Result, error) {
 	again, err := e.cfg.Issuer.Reissue(ctx, id)
 	switch {
-	case errors.Is(err, limes.ErrRevoked), errors.Is(err, limes.ErrExpired):
+	// Not on record: Purge took the capability the subject token was
+	// exchanged for, its token still presentable; it is not issued anew.
+	case errors.Is(err, limes.ErrRevoked), errors.Is(err, limes.ErrExpired), errors.Is(err, limes.ErrNotFound):
 		return Result{}, errs.Errorf("%w: the subject token's capability is no longer live: %w", ErrInvalidGrant, err)
 	case err != nil:
 		return Result{}, fmt.Errorf("exchange: reissue: %w", err)

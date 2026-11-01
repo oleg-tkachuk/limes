@@ -27,6 +27,11 @@ type OnePerToken struct {
 	NoJTI func(t *testing.T) exchange.Request
 	// Revoke revokes the capability id, as the consumer's operators do.
 	Revoke func(t *testing.T, id uuid.UUID)
+	// Purge moves the clock past the capabilities' expiry, while the
+	// subject tokens Request signs are still live, and purges what expired,
+	// as the consumer's housekeeping does: the policy names a TTL shorter
+	// than the subject token's.
+	Purge func(t *testing.T)
 }
 
 // TestOnePerToken holds an Exchanger in one-capability-per-token mode to
@@ -45,6 +50,12 @@ func TestOnePerToken(t *testing.T, env OnePerToken) {
 			t.Skip("exchangetest: OnePerToken.Revoke not set")
 		}
 		testRevoked(t, env)
+	})
+	t.Run("a revoked exchange is not issued again once purged", func(t *testing.T) {
+		if env.Revoke == nil || env.Purge == nil {
+			t.Skip("exchangetest: OnePerToken.Revoke or Purge not set")
+		}
+		testRevokedPurged(t, env)
 	})
 	t.Run("a token without a jti is refused", func(t *testing.T) {
 		if env.NoJTI == nil {
@@ -105,5 +116,18 @@ func testRevoked(t *testing.T, env OnePerToken) {
 	env.Revoke(t, first.Capability.ID)
 	if _, err := env.Exchanger.Exchange(t.Context(), req); !errors.Is(err, exchange.ErrInvalidGrant) {
 		t.Errorf("an exchange of a revoked capability's token: err = %v, want exchange.ErrInvalidGrant", err)
+	}
+}
+
+func testRevokedPurged(t *testing.T, env OnePerToken) {
+	req := env.Request(t)
+	first, err := env.Exchanger.Exchange(t.Context(), req)
+	if err != nil {
+		t.Fatalf("first exchange: %v", err)
+	}
+	env.Revoke(t, first.Capability.ID)
+	env.Purge(t)
+	if again, err := env.Exchanger.Exchange(t.Context(), req); !errors.Is(err, exchange.ErrInvalidGrant) {
+		t.Errorf("an exchange of a revoked, purged capability's token = %s, %v; want exchange.ErrInvalidGrant", again.Capability.ID, err)
 	}
 }
