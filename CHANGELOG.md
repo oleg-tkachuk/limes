@@ -2,6 +2,13 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.151.0](https://github.com/oleg-tkachuk/limes/compare/v0.150.0...v0.151.0) (2026-11-02)
+
+### Features
+
+* answer a code's category without an error ([dfd3508](https://github.com/oleg-tkachuk/limes/commit/dfd35087aa05df85e113db0514c989b14a142d1e))
+* **meter:** add As, an optional interface or a startup error ([f0f4ed5](https://github.com/oleg-tkachuk/limes/commit/f0f4ed5d57d478c1aabc991247eeabc7129ce8b3))
+
 ## [0.150.0](https://github.com/oleg-tkachuk/limes/compare/v0.149.0...v0.150.0) (2026-11-02)
 
 ### ⚠ BREAKING CHANGES
