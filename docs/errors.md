@@ -127,79 +127,100 @@ their code:
 `limes.Codes()` and `meter.Codes()` list every code, so a consumer's test
 can prove its own mapping covers them all.
 
+## Categories
+
+Every code belongs to one `limes.Category`, the last column of the tables
+below: what the caller does about it. A consumer whose transport has fewer
+codes than limes maps the eight categories, read with `limes.CategoryOf(err)`
+or `meter.CategoryOf(err)`, rather than every code:
+
+| Category | Meaning |
+|---|---|
+| `unauthenticated` | The credential is missing, malformed, unproven or no longer good: present another. |
+| `denied` | The credential is good and does not allow the request. |
+| `exhausted` | A request, budget, copy or lease limit refused it, or a counter has no room left. |
+| `invalid` | The request itself is wrong: sent again unchanged, it fails again. |
+| `not_found` | What the request names is not on record. |
+| `conflict` | The request disagrees with what is on record: read it again, and decide. |
+| `unavailable` | An upstream did not answer: retry later. |
+| `internal` | The server's configuration or a store failed: the server's to fix. |
+
+The status stays the finer answer: within `exhausted`, a permanent refusal
+(`request_limit_exceeded`) never lifts while a budget can.
+
 ## limes's codes
 
-| Code | HTTP | Sentinel | `reason` | Challenge `error` | Title |
-|---|---|---|---|---|---|
-| `malformed_authorization` | 400 | `limes.ErrMalformedAuthorization` | `malformed_authorization` (permanent) | `invalid_request` | The Authorization header is malformed |
-| `no_credentials` | 401 | `limes.ErrNoCredentials` | `no_credentials` |  | Credentials are required |
-| `keys_unavailable` | 503 | `jwks.ErrUnavailable` | `keys_unavailable` |  | The issuer's keys cannot be fetched |
-| `nonce_required` | 401 | `dpop.ErrNonceRequired` | `nonce_required` | `use_dpop_nonce` | A DPoP proof with the server's nonce is required |
-| `proof_required` | 401 | `dpop.ErrRequired` | `proof_required` | `invalid_dpop_proof` | The DPoP proof is missing or invalid |
-| `proof_invalid` | 401 | `dpop.ErrInvalid` | `proof_invalid` | `invalid_dpop_proof` | The DPoP proof is missing or invalid |
-| `proof_replayed` | 401 | `dpop.ErrReplayed` | `proof_replayed` | `invalid_dpop_proof` | The DPoP proof is missing or invalid |
-| `auth_scheme_mismatch` | 401 | `limes.ErrAuthSchemeMismatch` | `auth_scheme_mismatch` | `invalid_token` | The access token is invalid |
-| `proof_of_possession` | 401 | `limes.ErrProofOfPossession` |  | `invalid_dpop_proof` | The DPoP proof is missing or invalid |
-| `biscuit_attenuation` | 401 | `limes.ErrBiscuitAttenuation` | `biscuit_attenuation` (permanent) | `invalid_token` | The access token is invalid |
-| `invalid_token` | 401 | `limes.ErrInvalidToken` | `invalid_token` (permanent) | `invalid_token` | The access token is invalid |
-| `expired` | 401 | `limes.ErrExpired` | `expired` (permanent) | `invalid_token` | The access token is invalid |
-| `not_yet_valid` | 401 | `limes.ErrNotYetValid` | `not_yet_valid` | `invalid_token` | The access token is invalid |
-| `tenant_erased` | 401 | `limes.ErrTenantErased` | `revoked` (permanent) | `invalid_token` | The access token is invalid |
-| `delegation_too_deep` | 401 | `limes.ErrDelegationTooDeep` | `revoked` (permanent) | `invalid_token` | The access token is invalid |
-| `revoked` | 401 | `limes.ErrRevoked` | `revoked` (permanent) | `invalid_token` | The access token is invalid |
-| `audience_mismatch` | 401 | `limes.ErrAudienceMismatch` | `audience_mismatch` (permanent) | `invalid_token` | The access token is invalid |
-| `unauthenticated` | 401 | `limes.ErrUnauthenticated` |  | `invalid_token` | The access token is invalid |
-| `op_not_allowed` | 403 | `limes.ErrOpNotAllowed` | `op_not_allowed` (permanent) | `insufficient_scope` | The token does not allow this request |
-| `resource_not_allowed` | 403 | `limes.ErrResourceNotAllowed` | `resource_not_allowed` (permanent) | `insufficient_scope` | The token does not allow this request |
-| `source_ip_not_allowed` | 403 | `limes.ErrSourceIPNotAllowed` | `source_ip_not_allowed` (permanent) | `insufficient_scope` | The token does not allow this request |
-| `idempotency_key_required` | 403 | `limes.ErrIdempotencyKeyRequired` | `idempotency_key_required` | `insufficient_scope` | The token does not allow this request |
-| `tainted_read_not_allowed` | 403 | `limes.ErrTaintedReadNotAllowed` | `tainted_read_not_allowed` | `insufficient_scope` | The token does not allow this request |
-| `caveat_violation` | 403 | `limes.ErrCaveatViolation` |  | `insufficient_scope` | The token does not allow this request |
-| `request_limit_exceeded` | 403 | `limes.ErrRequestLimitExceeded` | `request_limit_exceeded` (permanent) |  | The token's request or budget limit is exhausted |
-| `budget_exceeded` | 403 | `limes.ErrBudgetExceeded` | `budget_exceeded` |  | The token's request or budget limit is exhausted |
-| `tenant_budget_exceeded` | 403 | `limes.ErrTenantBudgetExceeded` | `tenant_budget_exceeded` |  | The token's request or budget limit is exhausted |
-| `unit_code_mismatch` | 409 | `limes.ErrUnitCodeMismatch` |  |  | The request conflicts with what is on record |
-| `already_exists` | 409 | `limes.ErrAlreadyExists` |  |  | The request conflicts with what is on record |
-| `conflict` | 409 | `limes.ErrConflict` |  |  | The request conflicts with what is on record |
-| `invalid_caveats` | 400 | `limes.ErrInvalidCaveats` |  |  | The caveats are invalid |
-| `invalid_amount` | 400 | `limes.ErrInvalidAmount` |  |  | The amount is invalid |
-| `effect_conflict` | 400 | `limes.ErrEffectConflict` |  |  | The declared effect conflicts with the operation |
-| `cursor_mismatch` | 400 | `limes.ErrCursorMismatch` |  |  | The cursor is of another listing |
-| `invalid_request` | 400 | `limes.ErrInvalidRequest` |  |  | The request is invalid |
-| `delegation_too_wide` | 403 | `limes.ErrDelegationTooWide` |  |  | The delegation asks for more than its parent holds |
-| `unknown_kid` | 401 | `jwks.ErrUnknownKID` |  |  | The key id names no key |
-| `not_found` | 404 | `limes.ErrNotFound` |  |  | Not found |
-| `unknown_tenant` | 404 | `limes.ErrUnknownTenant` |  |  | The tenant is unknown |
-| `tenant_deleted` | 410 | `limes.ErrTenantDeleted` |  |  | The tenant is deleted |
-| `scope_mismatch` | 500 | `limes.ErrScopeMismatch` |  |  | The call is scoped to another tenant than its request names |
-| `proof_unsupported` | 500 | `limes.ErrProofUnsupported` |  |  | The capability is bound to a key and no proof is checked |
-| `no_revocation_lineage` | 502 | `limes.ErrNoRevocationLineage` |  |  | The revocation upstream names no lineage |
-| `copy_counters_not_metered` | 500 | `limes.ErrCopyCountersNotMetered` |  |  | Copy limits need a verifier that meters copies |
-| `cursor_repeated` | 502 | `limes.ErrCursorRepeated` |  |  | The store returned a cursor already fetched |
-| `invalid_config` | 500 | `limes.ErrInvalidConfig` |  |  | The server is misconfigured |
-| `internal` | 500 | `limes.ErrInternal` |  |  | Internal error |
+| Code | HTTP | Sentinel | `reason` | Challenge `error` | Title | Category |
+|---|---|---|---|---|---|---|
+| `malformed_authorization` | 400 | `limes.ErrMalformedAuthorization` | `malformed_authorization` (permanent) | `invalid_request` | The Authorization header is malformed | `unauthenticated` |
+| `no_credentials` | 401 | `limes.ErrNoCredentials` | `no_credentials` |  | Credentials are required | `unauthenticated` |
+| `keys_unavailable` | 503 | `jwks.ErrUnavailable` | `keys_unavailable` |  | The issuer's keys cannot be fetched | `unavailable` |
+| `nonce_required` | 401 | `dpop.ErrNonceRequired` | `nonce_required` | `use_dpop_nonce` | A DPoP proof with the server's nonce is required | `unauthenticated` |
+| `proof_required` | 401 | `dpop.ErrRequired` | `proof_required` | `invalid_dpop_proof` | The DPoP proof is missing or invalid | `unauthenticated` |
+| `proof_invalid` | 401 | `dpop.ErrInvalid` | `proof_invalid` | `invalid_dpop_proof` | The DPoP proof is missing or invalid | `unauthenticated` |
+| `proof_replayed` | 401 | `dpop.ErrReplayed` | `proof_replayed` | `invalid_dpop_proof` | The DPoP proof is missing or invalid | `unauthenticated` |
+| `auth_scheme_mismatch` | 401 | `limes.ErrAuthSchemeMismatch` | `auth_scheme_mismatch` | `invalid_token` | The access token is invalid | `unauthenticated` |
+| `proof_of_possession` | 401 | `limes.ErrProofOfPossession` |  | `invalid_dpop_proof` | The DPoP proof is missing or invalid | `unauthenticated` |
+| `biscuit_attenuation` | 401 | `limes.ErrBiscuitAttenuation` | `biscuit_attenuation` (permanent) | `invalid_token` | The access token is invalid | `unauthenticated` |
+| `invalid_token` | 401 | `limes.ErrInvalidToken` | `invalid_token` (permanent) | `invalid_token` | The access token is invalid | `unauthenticated` |
+| `expired` | 401 | `limes.ErrExpired` | `expired` (permanent) | `invalid_token` | The access token is invalid | `unauthenticated` |
+| `not_yet_valid` | 401 | `limes.ErrNotYetValid` | `not_yet_valid` | `invalid_token` | The access token is invalid | `unauthenticated` |
+| `tenant_erased` | 401 | `limes.ErrTenantErased` | `revoked` (permanent) | `invalid_token` | The access token is invalid | `unauthenticated` |
+| `delegation_too_deep` | 401 | `limes.ErrDelegationTooDeep` | `revoked` (permanent) | `invalid_token` | The access token is invalid | `unauthenticated` |
+| `revoked` | 401 | `limes.ErrRevoked` | `revoked` (permanent) | `invalid_token` | The access token is invalid | `unauthenticated` |
+| `audience_mismatch` | 401 | `limes.ErrAudienceMismatch` | `audience_mismatch` (permanent) | `invalid_token` | The access token is invalid | `unauthenticated` |
+| `unauthenticated` | 401 | `limes.ErrUnauthenticated` |  | `invalid_token` | The access token is invalid | `unauthenticated` |
+| `op_not_allowed` | 403 | `limes.ErrOpNotAllowed` | `op_not_allowed` (permanent) | `insufficient_scope` | The token does not allow this request | `denied` |
+| `resource_not_allowed` | 403 | `limes.ErrResourceNotAllowed` | `resource_not_allowed` (permanent) | `insufficient_scope` | The token does not allow this request | `denied` |
+| `source_ip_not_allowed` | 403 | `limes.ErrSourceIPNotAllowed` | `source_ip_not_allowed` (permanent) | `insufficient_scope` | The token does not allow this request | `denied` |
+| `idempotency_key_required` | 403 | `limes.ErrIdempotencyKeyRequired` | `idempotency_key_required` | `insufficient_scope` | The token does not allow this request | `denied` |
+| `tainted_read_not_allowed` | 403 | `limes.ErrTaintedReadNotAllowed` | `tainted_read_not_allowed` | `insufficient_scope` | The token does not allow this request | `denied` |
+| `caveat_violation` | 403 | `limes.ErrCaveatViolation` |  | `insufficient_scope` | The token does not allow this request | `denied` |
+| `request_limit_exceeded` | 403 | `limes.ErrRequestLimitExceeded` | `request_limit_exceeded` (permanent) |  | The token's request or budget limit is exhausted | `exhausted` |
+| `budget_exceeded` | 403 | `limes.ErrBudgetExceeded` | `budget_exceeded` |  | The token's request or budget limit is exhausted | `exhausted` |
+| `tenant_budget_exceeded` | 403 | `limes.ErrTenantBudgetExceeded` | `tenant_budget_exceeded` |  | The token's request or budget limit is exhausted | `exhausted` |
+| `unit_code_mismatch` | 409 | `limes.ErrUnitCodeMismatch` |  |  | The request conflicts with what is on record | `invalid` |
+| `already_exists` | 409 | `limes.ErrAlreadyExists` |  |  | The request conflicts with what is on record | `conflict` |
+| `conflict` | 409 | `limes.ErrConflict` |  |  | The request conflicts with what is on record | `conflict` |
+| `invalid_caveats` | 400 | `limes.ErrInvalidCaveats` |  |  | The caveats are invalid | `invalid` |
+| `invalid_amount` | 400 | `limes.ErrInvalidAmount` |  |  | The amount is invalid | `invalid` |
+| `effect_conflict` | 400 | `limes.ErrEffectConflict` |  |  | The declared effect conflicts with the operation | `invalid` |
+| `cursor_mismatch` | 400 | `limes.ErrCursorMismatch` |  |  | The cursor is of another listing | `invalid` |
+| `invalid_request` | 400 | `limes.ErrInvalidRequest` |  |  | The request is invalid | `invalid` |
+| `delegation_too_wide` | 403 | `limes.ErrDelegationTooWide` |  |  | The delegation asks for more than its parent holds | `denied` |
+| `unknown_kid` | 401 | `jwks.ErrUnknownKID` |  |  | The key id names no key | `unauthenticated` |
+| `not_found` | 404 | `limes.ErrNotFound` |  |  | Not found | `not_found` |
+| `unknown_tenant` | 404 | `limes.ErrUnknownTenant` |  |  | The tenant is unknown | `not_found` |
+| `tenant_deleted` | 410 | `limes.ErrTenantDeleted` |  |  | The tenant is deleted | `not_found` |
+| `scope_mismatch` | 500 | `limes.ErrScopeMismatch` |  |  | The call is scoped to another tenant than its request names | `internal` |
+| `proof_unsupported` | 500 | `limes.ErrProofUnsupported` |  |  | The capability is bound to a key and no proof is checked | `internal` |
+| `no_revocation_lineage` | 502 | `limes.ErrNoRevocationLineage` |  |  | The revocation upstream names no lineage | `internal` |
+| `copy_counters_not_metered` | 500 | `limes.ErrCopyCountersNotMetered` |  |  | Copy limits need a verifier that meters copies | `internal` |
+| `cursor_repeated` | 502 | `limes.ErrCursorRepeated` |  |  | The store returned a cursor already fetched | `internal` |
+| `invalid_config` | 500 | `limes.ErrInvalidConfig` |  |  | The server is misconfigured | `internal` |
+| `internal` | 500 | `limes.ErrInternal` |  |  | Internal error | `internal` |
 
 ## The meter's codes
 
 `meter.ProblemOf` and `meter.CodeOf` add these to limes's.
 
-| Code | HTTP | Sentinel | `reason` | Challenge `error` | Title |
-|---|---|---|---|---|---|
-| `copy_limit_exceeded` | 403 | `meter.ErrCopyLimitExceeded` | `request_limit_exceeded` (permanent) |  | The token's request or budget limit is exhausted |
-| `counter_overflow` | 409 | `meter.ErrCounterOverflow` |  |  | The counter has no room for the amount |
-| `charge_not_found` | 404 | `meter.ErrChargeNotFound` |  |  | The charge is not on record |
-| `refund_exceeds_charge` | 409 | `meter.ErrRefundExceedsCharge` |  |  | The refund exceeds what the charge took |
-| `reservation_not_found` | 404 | `meter.ErrReservationNotFound` |  |  | The reservation is not on record, released or expired |
-| `usage_not_found` | 404 | `meter.ErrUsageNotFound` |  |  | The capability has no usage on record |
-| `tenant_budget_not_found` | 404 | `meter.ErrTenantBudgetNotFound` |  |  | The tenant has no budget on record |
-| `tenant_budget_version_mismatch` | 409 | `meter.ErrTenantBudgetVersionMismatch` |  |  | The tenant budget changed since it was read |
-| `external_ref_conflict` | 409 | `meter.ErrExternalRefConflict` |  |  | The external reference names another charge |
-| `settle_conflict` | 409 | `meter.ErrSettleConflict` |  |  | The reservation was settled for another amount |
-| `lease_exhausted` | 403 | `meter.ErrLeaseExhausted` | `budget_exceeded` (permanent) |  | The token's request or budget limit is exhausted |
-| `lease_requests_exhausted` | 403 | `meter.ErrLeaseRequestsExhausted` | `request_limit_exceeded` (permanent) |  | The token's request or budget limit is exhausted |
-| `lease_not_found` | 404 | `meter.ErrLeaseNotFound` |  |  | The capability holds no lease |
-| `lease_nested` | 409 | `meter.ErrLeaseNested` |  |  | An ancestor of the capability holds a lease |
-| `leasing_disabled` | 500 | `meter.ErrLeasingDisabled` |  |  | Leasing is not enabled on the store |
+| Code | HTTP | Sentinel | `reason` | Challenge `error` | Title | Category |
+|---|---|---|---|---|---|---|
+| `copy_limit_exceeded` | 403 | `meter.ErrCopyLimitExceeded` | `request_limit_exceeded` (permanent) |  | The token's request or budget limit is exhausted | `exhausted` |
+| `counter_overflow` | 409 | `meter.ErrCounterOverflow` |  |  | The counter has no room for the amount | `exhausted` |
+| `charge_not_found` | 404 | `meter.ErrChargeNotFound` |  |  | The charge is not on record | `not_found` |
+| `refund_exceeds_charge` | 409 | `meter.ErrRefundExceedsCharge` |  |  | The refund exceeds what the charge took | `invalid` |
+| `reservation_not_found` | 404 | `meter.ErrReservationNotFound` |  |  | The reservation is not on record, released or expired | `not_found` |
+| `usage_not_found` | 404 | `meter.ErrUsageNotFound` |  |  | The capability has no usage on record | `not_found` |
+| `tenant_budget_not_found` | 404 | `meter.ErrTenantBudgetNotFound` |  |  | The tenant has no budget on record | `not_found` |
+| `tenant_budget_version_mismatch` | 409 | `meter.ErrTenantBudgetVersionMismatch` |  |  | The tenant budget changed since it was read | `conflict` |
+| `external_ref_conflict` | 409 | `meter.ErrExternalRefConflict` |  |  | The external reference names another charge | `conflict` |
+| `settle_conflict` | 409 | `meter.ErrSettleConflict` |  |  | The reservation was settled for another amount | `conflict` |
+| `lease_exhausted` | 403 | `meter.ErrLeaseExhausted` | `budget_exceeded` (permanent) |  | The token's request or budget limit is exhausted | `exhausted` |
+| `lease_requests_exhausted` | 403 | `meter.ErrLeaseRequestsExhausted` | `request_limit_exceeded` (permanent) |  | The token's request or budget limit is exhausted | `exhausted` |
+| `lease_not_found` | 404 | `meter.ErrLeaseNotFound` |  |  | The capability holds no lease | `not_found` |
+| `lease_nested` | 409 | `meter.ErrLeaseNested` |  |  | An ancestor of the capability holds a lease | `conflict` |
+| `leasing_disabled` | 500 | `meter.ErrLeasingDisabled` |  |  | Leasing is not enabled on the store | `internal` |
 
 ## The exchange's codes
 

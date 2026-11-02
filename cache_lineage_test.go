@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
 )
@@ -56,4 +57,31 @@ func newRevocationCache(t testing.TB, cfg limes.RevocationCacheConfig) *limes.Re
 		t.Fatal(err)
 	}
 	return c
+}
+
+// Below names an ancestor on the answer's list, and nothing else: not the
+// capability itself, not an id the answer never read, and nothing under a
+// revoked answer, which names no ancestors.
+func TestRevocationAnswerBelow(t *testing.T) {
+	parent, grandparent, other := uuid.New(), uuid.New(), uuid.New()
+	live := limes.RevocationAnswer{Ancestors: []uuid.UUID{parent, grandparent}}
+	cases := []struct {
+		name     string
+		answer   limes.RevocationAnswer
+		ancestor uuid.UUID
+		want     bool
+	}{
+		{name: "the nearest ancestor", answer: live, ancestor: parent, want: true},
+		{name: "a farther ancestor", answer: live, ancestor: grandparent, want: true},
+		{name: "an id the answer never read", answer: live, ancestor: other},
+		{name: "a root", answer: limes.RevocationAnswer{Ancestors: []uuid.UUID{}}, ancestor: parent},
+		{name: "a revoked answer", answer: limes.RevocationAnswer{Revoked: true}, ancestor: parent},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.answer.Below(tc.ancestor); got != tc.want {
+				t.Fatalf("Below(%v) = %v, want %v", tc.ancestor, got, tc.want)
+			}
+		})
+	}
 }
