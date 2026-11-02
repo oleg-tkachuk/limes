@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -49,6 +50,13 @@ type RevocationAnswer struct {
 	// answer needs none, as no revocation is undone.
 	Ancestors []uuid.UUID
 	_         noCompare
+}
+
+// Below reports whether the answer names ancestor among the capability's
+// ancestors still on record. A revoked answer names none, so it is false
+// there, as it is for an ancestor no longer on record.
+func (a RevocationAnswer) Below(ancestor uuid.UUID) bool {
+	return slices.Contains(a.Ancestors, ancestor)
 }
 
 // ErrNoRevocationLineage is NewRevocationCache refusing, under
