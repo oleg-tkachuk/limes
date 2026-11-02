@@ -25,7 +25,8 @@ const (
 	// CategoryConflict — the request disagrees with what is on record: read
 	// it again, and decide.
 	CategoryConflict Category = "conflict"
-	// CategoryUnavailable — an upstream did not answer: retry later.
+	// CategoryUnavailable — a dependency failed on this request — did not
+	// answer, or answered a page it had already given: retry later.
 	CategoryUnavailable Category = "unavailable"
 	// CategoryInternal — the server's configuration or a store failed: the
 	// server's to fix.

@@ -50,12 +50,32 @@ func TestLeaseRefusedWhileLeasingIsDisabled(t *testing.T) {
 	if u, err := off.GetUsage(ctx, subject.CapabilityID()); err == nil && u.ReservedAmount != 0 {
 		t.Errorf("a refused lease held %v", u.ReservedAmount)
 	}
+	if _, err := meter.As[meter.Leaser](off); !errors.Is(err, limes.ErrInvalidConfig) {
+		t.Errorf("As[Leaser] of a store with leases off = %v, want ErrInvalidConfig", err)
+	}
 	on, err := NewUsageStore(Config{DB: app})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := on.Lease(ctx, meter.LeaseRequest{Subject: subject, Amount: gateLeased}); err != nil {
 		t.Fatalf("Lease of a store by default: %v", err)
+	}
+	if _, err := meter.As[meter.Leaser](on); err != nil {
+		t.Errorf("As[Leaser] of a store by default = %v", err)
+	}
+}
+
+// The store says leases are off exactly when Config.DisableLeases is set,
+// and every other feature on.
+func TestFeatureEnabledFollowsDisableLeases(t *testing.T) {
+	for _, leases := range []bool{true, false} {
+		s := &UsageStore{conn{leases: leases}}
+		for _, f := range meter.AllFeatures() {
+			want := f != meter.FeatureLeases || leases
+			if got := s.FeatureEnabled(f); got != want {
+				t.Errorf("leases %v: FeatureEnabled(%s) = %v, want %v", leases, f, got, want)
+			}
+		}
 	}
 }
 

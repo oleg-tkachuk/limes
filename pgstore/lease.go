@@ -644,4 +644,13 @@ func (s *UsageStore) forgetLeaseAncestors(ctx context.Context, ids []uuid.UUID) 
 	})
 }
 
-var _ meter.Leaser = (*UsageStore)(nil)
+// FeatureEnabled implements meter.FeatureGate: every feature the store
+// implements is on, but leases with Config.DisableLeases set.
+func (s *UsageStore) FeatureEnabled(f meter.Feature) bool {
+	return f != meter.FeatureLeases || s.leases
+}
+
+var (
+	_ meter.Leaser      = (*UsageStore)(nil)
+	_ meter.FeatureGate = (*UsageStore)(nil)
+)
