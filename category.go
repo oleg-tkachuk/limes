@@ -46,3 +46,15 @@ func CategoryOf(err error) (Category, bool) {
 	r, ok := codeRuleFor(err)
 	return r.category, ok
 }
+
+// CategoryOfCode returns code's category, and false for a code that is none
+// of this package's; meter.CategoryOfCode knows the meter's codes too. A
+// consumer proving its own mapping of codes reads it beside Codes.
+func CategoryOfCode(code Code) (Category, bool) {
+	for _, r := range codeRules {
+		if r.code == code {
+			return r.category, true
+		}
+	}
+	return "", false
+}

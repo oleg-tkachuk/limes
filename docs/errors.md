@@ -148,6 +148,20 @@ or `meter.CategoryOf(err)`, rather than every code:
 The status stays the finer answer: within `exhausted`, a permanent refusal
 (`request_limit_exceeded`) never lifts while a budget can.
 
+`limes.CategoryOfCode(code)` and `meter.CategoryOfCode(code)` answer a
+code's category without an error to hand, so a test of a consumer's own
+mapping walks `Codes()` and checks each pair.
+
+A category says what retrying would do, not how bad the failure is.
+`no_revocation_lineage` is `internal`: only `NewRevocationCache` returns
+it, at startup, for an upstream that names no lineage, and no retry
+changes that upstream. `unavailable` is kept for an upstream that may
+answer the next time (`keys_unavailable`). Every `unauthenticated` code is
+a credential no longer good or never proven — expired, revoked, a bad
+proof — which another credential may pass; a transport whose codes keep
+those apart from a lack of permission maps them to its own
+unauthenticated code, not to its permission-denied one.
+
 ## limes's codes
 
 | Code | HTTP | Sentinel | `reason` | Challenge `error` | Title | Category |
