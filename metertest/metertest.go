@@ -380,6 +380,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "LeaseExpiresIntoTheChain", Run: checkLeaseExpires},
 		{Name: "LeaseIsSettledBeforeItsCountersGo", Run: checkLeaseIsSettledBeforeItsCountersGo},
 		{Name: "ALeaseIsSettledBeforeAnAncestorsCountersGo", Run: checkLeaseIsSettledBeforeAnAncestorsCountersGo},
+		{Name: "ALeasedChargesRefundLeavesCountersRestartedSince", Run: checkLeaseRefundAfterRestart},
 		{Name: "LeasesUnderOneRootStayUnderItsCeiling", Run: checkLeaseConcurrency},
 		{Name: "LeaseIsSettledByAReset", Run: checkLeaseIsSettledByAReset},
 		{Name: "RequestLeaseStopsBumpsAtTheLeaseholder", Run: checkRequestLeaseStopsBumpsAtTheLeaseholder},
