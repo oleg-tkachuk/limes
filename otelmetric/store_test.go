@@ -27,6 +27,8 @@ const (
 	metricRefundAmount    = "limes.refund.amount"
 	metricReservations    = "limes.reservation.decisions"
 	attrOutcome           = "limes.outcome"
+	attrScope             = "limes.scope"
+	scopeCopy             = "copy"
 	attrUnit              = "limes.unit_code"
 	attrTenant            = "limes.tenant_id"
 )
@@ -503,6 +505,9 @@ func TestMeteringLabelsLimitRefusals(t *testing.T) {
 		}
 		if got := valueAt(ps, attrOutcome, "error"); got != 0 {
 			t.Errorf("%s error = %v, want 0", name, got)
+		}
+		if got := valueAt(ps, attrScope, scopeCopy); got != 1 {
+			t.Errorf("%s refusals in scope copy = %v, want 1", name, got)
 		}
 	}
 }

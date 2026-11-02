@@ -8,7 +8,17 @@
 // ceiling under meter.OverrunPolicyRecord; budget_exceeded;
 // tenant_budget_exceeded; request_limit_exceeded, a request limit or a
 // Biscuit copy past its quota (meter.ErrCopyLimitExceeded), on a Bump,
-// Charge, Settle or Reserve alike; and error.
+// Charge, Settle or Reserve alike; and error. A refusal for a limit also
+// carries limes.scope, which ceiling refused it: capability (its own or an
+// ancestor's), lease, copy or tenant.
+//
+// The instruments: limes.charge.amount and limes.refund.amount, by
+// limes.unit_code; limes.charge.decisions (charges and settles),
+// limes.reservation.decisions and limes.request.bumps, by limes.outcome and
+// limes.scope; and limes.charge.current_spend, a histogram of a
+// capability's spend after each charge, by limes.unit_code. A request limit
+// refuses on limes.request.bumps, and a budget on the decisions: an alert on
+// every limit reads both, by limes.scope.
 //
 //	usage, err := otelmetric.Instrument(store,
 //		otelmetric.WithMeterProvider(provider), // default: the global provider

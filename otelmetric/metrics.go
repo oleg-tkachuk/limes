@@ -25,6 +25,8 @@ import (
 //     meaningful per unit: summing USD and EUR is not a number, so every
 //     amount carries its unit and no instrument has a fixed unit of its own.
 //   - limes.outcome is one of the outcome* constants below.
+//   - limes.scope, on a refusal for a limit only, is one of the scope*
+//     constants below: which ceiling refused it.
 //
 // Every key is under limes., so none meets another library's outcome or
 // tenant_id on the same series.
@@ -45,6 +47,7 @@ const (
 // Attribute keys.
 const (
 	attrOutcome  = "limes.outcome"
+	attrScope    = "limes.scope"
 	attrTenantID = "limes.tenant_id"
 	attrUnitCode = "limes.unit_code"
 )
@@ -68,6 +71,46 @@ const (
 	// failed onCharged, a store error.
 	outcomeError = "error"
 )
+
+// Scopes of a refusal for a limit: where the ceiling that refused it sits.
+const (
+	// scopeCapability — the capability's ceiling or an ancestor's.
+	scopeCapability = "capability"
+	// scopeLease — the lease the capability, or an ancestor, holds.
+	scopeLease = "lease"
+	// scopeCopy — a Biscuit copy's quota.
+	scopeCopy = "copy"
+	// scopeTenant — the tenant aggregate.
+	scopeTenant = "tenant"
+)
+
+// refusalScope is which ceiling refused err, and false for an error that is
+// no refusal for a limit. The narrower sentinels come first: each matches
+// the wider family a capability's own refusal is.
+func refusalScope(err error) (string, bool) {
+	switch {
+	case errors.Is(err, meter.ErrLeaseExhausted), errors.Is(err, meter.ErrLeaseRequestsExhausted):
+		return scopeLease, true
+	case errors.Is(err, meter.ErrCopyLimitExceeded):
+		return scopeCopy, true
+	case errors.Is(err, limes.ErrTenantBudgetExceeded):
+		return scopeTenant, true
+	case errors.Is(err, limes.ErrBudgetExceeded), errors.Is(err, limes.ErrRequestLimitExceeded):
+		return scopeCapability, true
+	default:
+		return "", false
+	}
+}
+
+// outcomeAttrs is the attributes of an attempt's outcome: limes.outcome,
+// and limes.scope when a limit refused it.
+func outcomeAttrs(outcome string, err error) []attribute.KeyValue {
+	kv := []attribute.KeyValue{attribute.String(attrOutcome, outcome)}
+	if scope, ok := refusalScope(err); ok {
+		kv = append(kv, attribute.String(attrScope, scope))
+	}
+	return kv
+}
 
 // Option configures Instrument.
 type Option func(*meteringConfig)
@@ -160,7 +203,7 @@ func chargeOutcome(receipt meter.ChargeReceipt, err error) string {
 // that boundary.
 func (in *meteringInstruments) recordCharge(ctx context.Context, tenantID uuid.UUID, amount limes.Nanos, receipt meter.ChargeReceipt, err error) {
 	outcome := chargeOutcome(receipt, err)
-	in.chargeDecisions.Add(ctx, 1, in.attrs(tenantID, attribute.String(attrOutcome, outcome)))
+	in.chargeDecisions.Add(ctx, 1, in.attrs(tenantID, outcomeAttrs(outcome, err)...))
 	if err != nil {
 		return
 	}
@@ -178,7 +221,7 @@ func (in *meteringInstruments) recordBump(ctx context.Context, tenantID uuid.UUI
 	case err != nil:
 		outcome = outcomeError
 	}
-	in.requestBumps.Add(ctx, 1, in.attrs(tenantID, attribute.String(attrOutcome, outcome)))
+	in.requestBumps.Add(ctx, 1, in.attrs(tenantID, outcomeAttrs(outcome, err)...))
 }
 
 // recordRefund counts one committed refund, in the charge's unit.
@@ -189,5 +232,5 @@ func (in *meteringInstruments) recordRefund(ctx context.Context, r meter.RefundR
 // recordReservation counts one Reserve attempt.
 func (in *meteringInstruments) recordReservation(ctx context.Context, tenantID uuid.UUID, err error) {
 	outcome := chargeOutcome(meter.ChargeReceipt{}, err)
-	in.reservations.Add(ctx, 1, in.attrs(tenantID, attribute.String(attrOutcome, outcome)))
+	in.reservations.Add(ctx, 1, in.attrs(tenantID, outcomeAttrs(outcome, err)...))
 }
