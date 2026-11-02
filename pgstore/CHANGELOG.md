@@ -2,6 +2,20 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.62.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.61.5...pgstore%2Fv0.62.0) (2026-11-02)
+
+### ⚠ BREAKING CHANGES
+
+* **pgstore:** take the token expiry as ClaimExchange's argument
+
+### Features
+
+* **pgstore:** take the token expiry as ClaimExchange's argument ([116e80e](https://github.com/oleg-tkachuk/limes/commit/116e80edd64fc8d91190a1e192896e81bf352ca3))
+
+### Dependencies
+
+* require limes v0.150.0
+
 ## [0.61.5](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.61.4...pgstore%2Fv0.61.5) (2026-11-02)
 
 ### Dependencies
