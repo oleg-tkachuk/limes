@@ -393,7 +393,7 @@ test("release.yaml hands the tag and the candidates their deploy key", async () 
   const workflow = parse(readFileSync(new URL("../workflows/release.yaml", import.meta.url), "utf8")) as {
     jobs: Record<string, { steps: { id?: string; env?: Record<string, string> }[] }>;
   };
-  for (const id of ["tag", "candidates"]) {
+  for (const id of ["tag", "candidates", "follow"]) {
     const step = Object.values(workflow.jobs).flatMap((j) => j.steps).find((s) => s.id === id);
     assert.equal(step?.env?.[DEPLOY_KEY_ENV], `\${{ secrets.${DEPLOY_KEY_ENV} }}`, id);
   }
@@ -416,7 +416,14 @@ describe("releaseOptions", () => {
     assert.throws(() => releaseOptions(envOf({ MANUAL: "true" })), /candidates alone/);
     assert.throws(() => releaseOptions(envOf({ ...byHand, CHANNEL: "nightly" })), /candidates alone/);
   });
-  test("refuses a prerelease not cut by hand", () => {
-    assert.throws(() => releaseOptions(envOf({ CHANNEL: Channel.Prerelease })), /by hand only/);
+  test("refuses a prerelease neither cut by hand nor following a release", () => {
+    assert.throws(() => releaseOptions(envOf({ CHANNEL: Channel.Prerelease })), /by hand, or after a release of limes, only/);
+    assert.throws(() => releaseOptions(envOf({ CHANNEL: Channel.Prerelease, FOLLOW_RELEASE: "false" })), /by hand, or after a release of limes, only/);
+  });
+  test("a candidate following a release is of limes's next major alone, whatever else is asked", () => {
+    const follow = { CHANNEL: Channel.Prerelease, FOLLOW_RELEASE: "true" };
+    assert.deepEqual(releaseOptions(envOf(follow)), { nextMajor: true, only: "limes" });
+    assert.deepEqual(releaseOptions(envOf({ ...follow, MODULE: "pgstore", NEXT_MAJOR: "false" })), { nextMajor: true, only: "limes" });
+    assert.throws(() => releaseOptions(envOf({ ...follow, CHANNEL: Channel.Release })), /candidates alone/);
   });
 });

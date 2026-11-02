@@ -14,9 +14,15 @@
 // yet has its release line started first (lib/seed.ts), so the plan that
 // follows counts its commits from there. Last, the releases an earlier run
 // tagged and never published are published.
+//
+// A release of limes while a line of candidates of its next major is open
+// sets the step output follow-candidate, and release.yaml cuts the next
+// candidate after it: Go orders every v1.0.0-rc.N above every 0.x, so a
+// build that requires a candidate would never select the release, and a
+// fix in it would reach no one on the candidates.
 
 import { changelogPath, entryVersion, newestEntry } from "./changelog.ts";
-import { info, notice, summarize } from "./lib/actions.ts";
+import { info, notice, setOutput, summarize } from "./lib/actions.ts";
 import { withDeployKey } from "./lib/deploy-key.ts";
 import { requireEnv } from "./lib/env.ts";
 import { git } from "./lib/git.ts";
@@ -24,6 +30,7 @@ import { gitHubFor, type GitHub } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
 import { compareVersions } from "./lib/go-modules.ts";
 import { ROOT_MODULE, releasedModules, selectModule, type Module } from "./lib/modules.ts";
+import { candidateLineOpen } from "./lib/prerelease.ts";
 import { lastStableTag } from "./lib/release-policy.ts";
 import { publish, publishLeftBehind, warmGoProxy, type Fetch } from "./lib/releases.ts";
 import { seedLine } from "./lib/seed.ts";
@@ -103,6 +110,20 @@ export async function tagReleases(t: Tagger): Promise<string[]> {
   return planned.map((p) => p.tag);
 }
 
+// OUTPUT_FOLLOW_CANDIDATE is the step output that has release.yaml cut a
+// candidate of limes's next major after the releases tagged.
+export const OUTPUT_FOLLOW_CANDIDATE = "follow-candidate";
+
+// followWithCandidate reports whether the tags cut include a release of
+// limes while a line of candidates of its next major is open.
+export async function followWithCandidate(tags: readonly string[], root: string): Promise<boolean> {
+  const limes = selectModule(root, ROOT_MODULE);
+  if (!tags.some((t) => t.startsWith(`${limes.prefix}v`) && !t.includes("/"))) {
+    return false;
+  }
+  return candidateLineOpen(limes, root);
+}
+
 async function main(): Promise<void> {
   const repository = requireEnv("GITHUB_REPOSITORY");
   const github = gitHubFor(requireEnv("GH_TOKEN"), repository);
@@ -113,6 +134,11 @@ async function main(): Promise<void> {
   if (tags.length === 0) {
     notice("no release planned is waiting for its tag");
   }
+  const follow = await followWithCandidate(tags, root);
+  if (follow) {
+    info("limes released while its candidates of the next major are open: the next candidate follows");
+  }
+  setOutput(OUTPUT_FOLLOW_CANDIDATE, String(follow));
   summarize(`### Releases tagged\n\n${tags.length === 0 ? "None." : tags.map((t) => `- ${t}`).join("\n")}`);
 }
 

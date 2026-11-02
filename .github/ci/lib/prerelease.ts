@@ -1,5 +1,6 @@
 // A release candidate of a module: the version its next release would be,
-// tagged -rc.N on the checked-out commit, by hand only.
+// tagged -rc.N on the checked-out commit, by hand — or, of limes's next
+// major, after each release of limes while that line is open.
 
 import { git, lines } from "./git.ts";
 import { isStableReleaseTag } from "./releases.ts";
@@ -76,6 +77,16 @@ export async function candidateTag(module: Module, pending: readonly Pending[], 
     throw new Error(`${module.name} has no release yet to cut a candidate after`);
   }
   return nextCandidate(module, nextVersion(parseVersion(last, module.prefix), level), cwd);
+}
+
+// candidateLineOpen reports whether module has a line of candidates of its
+// next major open: a vN.0.0-rc.M of STABLE_MAJOR tagged, and vN.0.0 not yet.
+export async function candidateLineOpen(module: Module, cwd: string): Promise<boolean> {
+  const version = `${module.prefix}v${STABLE_MAJOR}.0.0`;
+  if ((await git(["tag", "--list", version], cwd)).trim() !== "") {
+    return false;
+  }
+  return lines(await git(["tag", "--list", `${version}-${RC}.*`], cwd)).length > 0;
 }
 
 // candidateBase is tag's version and prerelease identifier, up to its

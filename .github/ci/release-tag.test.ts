@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 import { CHANGELOG, TITLE } from "./changelog.ts";
 import { fakeData, fakeGitHub, type FakeData } from "./lib/fake-github.ts";
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
-import { tagReleases, type Tagger } from "./release-tag.ts";
+import { followWithCandidate, tagReleases, type Tagger } from "./release-tag.ts";
 
 const RELEASE = new URL("../release", import.meta.url).pathname;
 const REPOSITORY = "example/limes";
@@ -107,5 +107,24 @@ describe("tagReleases", () => {
   test("refuses an entry no newer than the module's last release", async () => {
     await repo.run("tag", "v0.3.0", "HEAD~1");
     await assert.rejects(tagReleases(tagger()), /0\.2\.0 is not past v0\.3\.0/);
+  });
+
+  test("a release of limes is followed by a candidate while its next major's line is open", async () => {
+    await repo.run("tag", "v1.0.0-rc.1", "HEAD~1");
+    assert.equal(await followWithCandidate(await tagReleases(tagger()), repo.dir), true);
+  });
+
+  test("no candidate follows with no line of the next major, or once it is released", async () => {
+    const tags = await tagReleases(tagger());
+    assert.equal(await followWithCandidate(tags, repo.dir), false);
+    await repo.run("tag", "v1.0.0-rc.1", "HEAD~1");
+    await repo.run("tag", "v1.0.0", "HEAD");
+    assert.equal(await followWithCandidate(tags, repo.dir), false);
+  });
+
+  test("no candidate follows a release of a nested module alone", async () => {
+    await repo.run("tag", "v1.0.0-rc.1", "HEAD~1");
+    assert.equal(await followWithCandidate([`${PGSTORE}/v0.1.1`], repo.dir), false);
+    assert.equal(await followWithCandidate([], repo.dir), false);
   });
 });

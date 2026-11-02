@@ -1,9 +1,11 @@
 // Cut a release candidate of a module, by hand: the version its next release
 // would be, tagged -rc.N on main's head and published as a GitHub
-// prerelease.
+// prerelease. With FOLLOW_RELEASE, the next candidate of limes's next major
+// after a release of limes (release-tag.ts, followWithCandidate).
 //
 // Usage: GH_TOKEN=… GITHUB_REPOSITORY=… RELEASE_DEPLOY_KEY=… RUNNER_TEMP=…
 //        CHANNEL=prerelease MANUAL=true [MODULE=all|<name>] [NEXT_MAJOR=true] node release.ts
+//        CHANNEL=prerelease FOLLOW_RELEASE=true node release.ts
 //
 // A release is not cut here: release-plan.ts proposes it and release-tag.ts
 // tags it (docs/adr/0016-one-release-commit.md). A candidate needs no commit,
@@ -251,15 +253,19 @@ async function main(): Promise<boolean> {
 export type ReleaseOptions = Pick<Release, "nextMajor" | "only">;
 
 // releaseOptions reads a run's ReleaseOptions from env (CHANNEL, MANUAL,
-// NEXT_MAJOR, MODULE), refusing any channel but the prerelease one, and a
-// candidate not cut by hand.
+// NEXT_MAJOR, MODULE, FOLLOW_RELEASE), refusing any channel but the
+// prerelease one, and a candidate neither cut by hand nor following a
+// release. One following a release is of limes's next major alone.
 export function releaseOptions(env: (name: string) => string | undefined): ReleaseOptions {
   const channel = env("CHANNEL");
   if (channel !== Channel.Prerelease) {
     throw new Error(`CHANNEL ${channel ?? "unset"}: release.ts cuts candidates alone; a release goes through release-plan.ts and release-tag.ts`);
   }
+  if (env("FOLLOW_RELEASE") === "true") {
+    return { nextMajor: true, only: NEXT_MAJOR_MODULE };
+  }
   if (env("MANUAL") !== "true") {
-    throw new Error("a prerelease is cut by hand only");
+    throw new Error("a prerelease is cut by hand, or after a release of limes, only");
   }
   const module = env("MODULE") ?? ALL_MODULES;
   return { nextMajor: env("NEXT_MAJOR") === "true", only: module === ALL_MODULES ? undefined : module };
