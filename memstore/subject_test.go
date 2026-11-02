@@ -28,8 +28,12 @@ type subjectSpec struct {
 	copyQuota *limes.CopyQuota
 }
 
-// defaultTestUnit is the unit of a subject whose spec names none.
-const defaultTestUnit = "USD"
+// defaultTestUnit is the unit of a subject whose spec names none;
+// otherTestUnit is one it is not.
+const (
+	defaultTestUnit = "USD"
+	otherTestUnit   = "EUR"
+)
 
 // newSubject is the MeterSubject a verified capability with spec's parts
 // would give, so a test can meter against ceilings no issuer signed.

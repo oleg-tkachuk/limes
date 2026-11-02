@@ -72,6 +72,12 @@ func TestListTenantBudgets(t *testing.T) {
 			}
 		})
 	}
+	// A page that holds the last tenant is the last page, full as it is.
+	every := []uuid.UUID{over, half, low, unlimited}
+	whole, err := u.ListTenantBudgets(ctx, meter.ListTenantBudgetsRequest{Limit: len(every)})
+	if err != nil || len(whole.Items) != len(every) || whole.Next != "" {
+		t.Errorf("a page of exactly every tenant = %d items, next %q, %v; want %d and no next page", len(whole.Items), whole.Next, err, len(every))
+	}
 	page, _ := u.ListTenantBudgets(ctx, meter.ListTenantBudgetsRequest{Limit: 1})
 	got := page.Items
 	if pct, limited := got[0].Utilization(); !limited || pct != percent {

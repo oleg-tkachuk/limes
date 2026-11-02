@@ -50,6 +50,8 @@ func TestReservationCursorRoundTripsAndRefusesGarbage(t *testing.T) {
 	id := uuid.New()
 	for _, at := range []time.Time{
 		time.Unix(0, 1),
+		// On the second: a hold made by a clock that reads whole seconds.
+		time.Unix(1_800_000_000, 0),
 		time.Date(2026, time.October, 12, 9, 30, 0, 123456789, time.UTC),
 		time.Date(2318, time.January, 1, 0, 0, 0, 999999999, time.UTC),
 	} {

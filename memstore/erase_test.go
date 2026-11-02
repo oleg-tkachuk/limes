@@ -1,8 +1,10 @@
 package memstore
 
 import (
+	"context"
 	"errors"
 	"testing"
+	"time"
 	"uuid"
 
 	"github.com/oleg-tkachuk/limes"
@@ -43,5 +45,51 @@ func TestPurgeOrphansForgetsAnErasedTenantWithNoRecordLeft(t *testing.T) {
 	}
 	if err := insert(); err != nil {
 		t.Fatalf("Insert once no record of the tenant is left: %v", err)
+	}
+}
+
+// exchangeExpiredAgo is how long before now the subject tokens of the
+// erase check expired: past MinPurgeRetention, the retention an erase
+// applies.
+const exchangeExpiredAgo = 2 * limes.MinPurgeRetention
+
+// An erase forgets its tenant's exchanges of tokens expired past the
+// retention, whether or not their capabilities stay on record, and leaves
+// another tenant's to Purge. memstore's own: pgstore keeps every exchange
+// until Purge, which the ExchangeStore contract allows as well.
+func TestEraseForgetsOnlyItsTenantsSpentExchanges(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore()
+	mine, theirs := uuid.New(), uuid.New()
+	key := func(tenant uuid.UUID, token string) limes.ExchangeKey {
+		return limes.ExchangeKey{TenantID: tenant, Issuer: "https://idp.example", TokenID: token, TokenExpiresAt: time.Now().Add(-exchangeExpiredAgo)}
+	}
+	claims := map[limes.ExchangeKey]uuid.UUID{}
+	for _, tenant := range []uuid.UUID{mine, theirs} {
+		c := mkCap(uuid.New(), uuid.Nil(), tenant, "agent")
+		if err := s.Insert(ctx, limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "op"}}); err != nil {
+			t.Fatal(err)
+		}
+		k := key(tenant, "jti-"+tenant.String())
+		if _, claimed, err := s.ClaimExchange(ctx, k, c.ID); err != nil || !claimed {
+			t.Fatalf("claim for tenant %s: %v, %v", tenant, claimed, err)
+		}
+		claims[k] = c.ID
+	}
+	if _, err := s.EraseTenantRecords(ctx, limes.EraseTenantRequest{TenantID: mine}); err != nil {
+		t.Fatal(err)
+	}
+	for k, id := range claims {
+		got, err := s.ExchangedFor(ctx, k)
+		switch k.TenantID {
+		case mine:
+			if !errors.Is(err, limes.ErrNotFound) {
+				t.Errorf("the erased tenant's exchange of an expired token = %s, %v; want ErrNotFound", got, err)
+			}
+		default:
+			if err != nil || got != id {
+				t.Errorf("another tenant's exchange of an expired token after the erase = %s, %v; want %s kept", got, err, id)
+			}
+		}
 	}
 }
