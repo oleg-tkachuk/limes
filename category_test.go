@@ -39,6 +39,8 @@ func TestCategoryOf(t *testing.T) {
 		{ErrNotFound, CategoryNotFound},
 		{ErrConflict, CategoryConflict},
 		{jwks.ErrUnavailable, CategoryUnavailable},
+		{ErrCursorRepeated, CategoryUnavailable},
+		{ErrNoRevocationLineage, CategoryInternal},
 		{ErrInvalidConfig, CategoryInternal},
 		{fmt.Errorf("charging: %w", ErrTenantBudgetExceeded), CategoryExhausted},
 	}

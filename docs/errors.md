@@ -142,7 +142,7 @@ or `meter.CategoryOf(err)`, rather than every code:
 | `invalid` | The request itself is wrong: sent again unchanged, it fails again. |
 | `not_found` | What the request names is not on record. |
 | `conflict` | The request disagrees with what is on record: read it again, and decide. |
-| `unavailable` | An upstream did not answer: retry later. |
+| `unavailable` | A dependency failed on this request — did not answer, or answered a page it had already given: retry later. |
 | `internal` | The server's configuration or a store failed: the server's to fix. |
 
 The status stays the finer answer: within `exhausted`, a permanent refusal
@@ -155,8 +155,11 @@ mapping walks `Codes()` and checks each pair.
 A category says what retrying would do, not how bad the failure is.
 `no_revocation_lineage` is `internal`: only `NewRevocationCache` returns
 it, at startup, for an upstream that names no lineage, and no retry
-changes that upstream. `unavailable` is kept for an upstream that may
-answer the next time (`keys_unavailable`). Every `unauthenticated` code is
+changes that upstream: it never answers a request. `unavailable` is a
+dependency that failed on this request and may answer the next time: the
+issuer's keys (`keys_unavailable`), or a store whose pages handed back a
+cursor already fetched (`cursor_repeated`), which a walk begun again can
+get past once whatever moved its listing settles. Every `unauthenticated` code is
 a credential no longer good or never proven — expired, revoked, a bad
 proof — which another credential may pass; a transport whose codes keep
 those apart from a lack of permission maps them to its own
@@ -210,7 +213,7 @@ unauthenticated code, not to its permission-denied one.
 | `proof_unsupported` | 500 | `limes.ErrProofUnsupported` |  |  | The capability is bound to a key and no proof is checked | `internal` |
 | `no_revocation_lineage` | 502 | `limes.ErrNoRevocationLineage` |  |  | The revocation upstream names no lineage | `internal` |
 | `copy_counters_not_metered` | 500 | `limes.ErrCopyCountersNotMetered` |  |  | Copy limits need a verifier that meters copies | `internal` |
-| `cursor_repeated` | 502 | `limes.ErrCursorRepeated` |  |  | The store returned a cursor already fetched | `internal` |
+| `cursor_repeated` | 502 | `limes.ErrCursorRepeated` |  |  | The store returned a cursor already fetched | `unavailable` |
 | `invalid_config` | 500 | `limes.ErrInvalidConfig` |  |  | The server is misconfigured | `internal` |
 | `internal` | 500 | `limes.ErrInternal` |  |  | Internal error | `internal` |
 
