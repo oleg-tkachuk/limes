@@ -99,8 +99,8 @@ func TestEraseTenantDoesWhatTenantTablesSay(t *testing.T) {
 	if _, err := f.records.RevokeBiscuit(ctx, limes.RevokeBiscuitRequest{Copy: biscuitCopy(t, f.child.ID, []byte("erased-copy"))}); err != nil {
 		t.Fatal(err)
 	}
-	key := limes.ExchangeKey{TenantID: f.mine, Issuer: "https://idp.example", TokenID: "erased-exchange", TokenExpiresAt: time.Now().Add(time.Hour)}
-	if _, _, err := f.records.ClaimExchange(ctx, key, f.child.ID); err != nil {
+	key := limes.ExchangeKey{TenantID: f.mine, Issuer: "https://idp.example", TokenID: "erased-exchange"}
+	if _, _, err := f.records.ClaimExchange(ctx, key, time.Now().Add(time.Hour), f.child.ID); err != nil {
 		t.Fatal(err)
 	}
 	erased := eraseAndCount(t, f)
