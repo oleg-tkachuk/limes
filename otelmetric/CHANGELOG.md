@@ -2,6 +2,16 @@
 
 Every release of the otelmetric module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.17.0](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.16.2...otelmetric%2Fv0.17.0) (2026-11-02)
+
+### Features
+
+* **otelmetric:** forward a store's feature gate ([6a987cc](https://github.com/oleg-tkachuk/limes/commit/6a987cc461495b7fc18be72fe9dea451bd471eff))
+
+### Dependencies
+
+* require limes v0.152.0
+
 ## [0.16.2](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.16.1...otelmetric%2Fv0.16.2) (2026-11-02)
 
 ### Dependencies

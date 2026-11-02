@@ -2,6 +2,17 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.152.0](https://github.com/oleg-tkachuk/limes/compare/v0.151.0...v0.152.0) (2026-11-02)
+
+### Features
+
+* add limes.As and AsAll for the record store's optional interfaces ([9a29f46](https://github.com/oleg-tkachuk/limes/commit/9a29f469d68f534773f50a0058b3e15ea57e8d42))
+* **meter:** let a store's configuration turn a feature off, and add AsAll ([5452bcb](https://github.com/oleg-tkachuk/limes/commit/5452bcb2f95d7a9c9210b4bdcb08271abb4a071b))
+
+### Bug Fixes
+
+* categorise cursor_repeated as unavailable ([a2f7f68](https://github.com/oleg-tkachuk/limes/commit/a2f7f68c1299062e8a93bfe52431a5e0783e1602))
+
 ## [0.151.0](https://github.com/oleg-tkachuk/limes/compare/v0.150.0...v0.151.0) (2026-11-02)
 
 ### Features
