@@ -331,6 +331,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "RevokeMatchingRefusesAMalformedRequest", Run: checkRevokeMatchingMalformed},
 		{Name: "RevokeMatchingAcrossTenantsRevokesTheClientsAndSessionsCapabilities", Run: checkRevokeMatchingAllTenants},
 		{Name: "RevokeMatchingAcrossTenantsWorksInBatches", Run: checkRevokeMatchingAllTenantsBatches},
+		{Name: "RevokeMatchingAcrossTenantsGoesInTenantOrder", Run: checkRevokeMatchingAllTenantsOrder},
 		{Name: "RevokeMatchingAcrossTenantsNeedsEveryTenantsScope", Run: checkRevokeMatchingAllTenantsScope},
 		{Name: "CensusAndListingPreviewRevokeMatching", Run: checkRevokeMatchingPreview},
 	}
@@ -1290,6 +1291,9 @@ func checkErasedBiscuits(t *testing.T, f fixture, e erasedTenant) {
 	expect.That(t, err == nil && copyRevoked, "IsBiscuitRevoked of a live child's copy after the erase = %v, %v; want revoked", copyRevoked, err)
 	r, err := e.biscuits.GetBiscuitRevocation(f.Ctx, biscuitCopy(e.expired.ID, e.expiredCopyID))
 	expect.That(t, errors.Is(err, limes.ErrNotFound), "GetBiscuitRevocation of a removed record's copy = %+v, %v; want ErrNotFound, gone with its record", r, err)
+	// A removed record takes its own copies' revocations, and no other's.
+	_, err = e.biscuits.GetBiscuitRevocation(f.Ctx, biscuitCopy(e.child.ID, e.copyID))
+	expect.That(t, err == nil, "GetBiscuitRevocation of a kept child's copy after the erase: %v, want it on record", err)
 }
 
 // censusWindow is the ExpiringWithin of the census checks: past the soonest

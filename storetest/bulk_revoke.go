@@ -306,6 +306,53 @@ func checkRevokeMatchingAllTenantsBatches(t *testing.T, f fixture) {
 	}
 }
 
+// The first bytes the order check gives the capability ids of the lower
+// tenant and of the higher: the lower tenant's ids sort last, the higher
+// tenant's first.
+const (
+	lastIDByte  = 0xff
+	firstIDByte = 0x00
+)
+
+// Across tenants a batch takes the matches in order of tenant, then id: the
+// lower tenant's, with the highest ids, go before the higher tenant's, with
+// the lowest; and a batch that ends on the last match still says more may
+// match.
+func checkRevokeMatchingAllTenantsOrder(t *testing.T, f fixture) {
+	f.requireBulkRevoker(t)
+	all := f.writeAllTenantsCtx(t)
+	other, err := f.newTenant()
+	expect.Must(t, err == nil, "NewTenant: %v", err)
+	tenants := sortedTenants(f.Tenant, other)
+	lower, higher := tenants[0], tenants[1]
+	client := "client-" + uuid.New().String()
+	withID := func(first byte) func(*limes.Capability) {
+		return func(c *limes.Capability) { c.ClientID, c.ID[0] = client, first }
+	}
+	var lowers, highers []uuid.UUID
+	for range revokeAllBatch {
+		lowers = append(lowers, f.insertIn(t, lower, "", withID(lastIDByte)).ID)
+		highers = append(highers, f.insertIn(t, higher, "", withID(firstIDByte)).ID)
+	}
+	req := limes.RevokeMatchingRequest{AllTenants: true, ClientID: client, Limit: revokeAllBatch}
+	got, err := f.BulkRevoker.RevokeMatching(all, req)
+	expect.Must(t, err == nil, "RevokeMatching across tenants: %v", err)
+	expect.That(t, got.Revoked == revokeAllBatch && got.More && slices.Equal(got.Tenants, []uuid.UUID{lower}),
+		"the first batch = %+v, want %d revoked in the lower tenant %s and more reported", got, revokeAllBatch, lower)
+	for _, id := range lowers {
+		expect.That(t, f.revoked(t, id), "the lower tenant's %s verifies after the first batch", id)
+	}
+	for _, id := range highers {
+		expect.That(t, !f.revoked(t, id), "the higher tenant's %s was revoked by the first batch", id)
+	}
+	got, err = f.BulkRevoker.RevokeMatching(all, req)
+	expect.Must(t, err == nil, "RevokeMatching across tenants: %v", err)
+	expect.That(t, got.Revoked == revokeAllBatch && got.More && slices.Equal(got.Tenants, []uuid.UUID{higher}),
+		"the second batch = %+v, want %d revoked in the higher tenant %s and more reported", got, revokeAllBatch, higher)
+	got, err = f.BulkRevoker.RevokeMatching(all, req)
+	expect.That(t, err == nil && got.Revoked == 0 && !got.More, "the call after the last full batch = %+v, %v; want nothing left", got, err)
+}
+
 // A store that scopes tenants refuses a revocation across tenants under a
 // scope admitting one tenant, or reading alone, as out of scope, and
 // revokes nothing.
