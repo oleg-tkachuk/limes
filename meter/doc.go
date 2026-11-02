@@ -26,10 +26,12 @@
 // [LedgerHousekeeping] to remove charges past [MinChargeRetention], and
 // [TenantUsageEraser] to remove a tenant. memstore ships them in memory,
 // pgstore over PostgreSQL, and metertest checks any implementation.
-// [Features] names the optional ones a store implements, and [Require]
+// [Features] names the optional ones a store implements and has on — a
+// [FeatureGate] says which its configuration turned off — and [Require]
 // refuses at startup a store, or a decorator over one, that lacks one the
 // consumer uses; [As] does so and hands back the interface, as
-// meter.As[meter.Leaser](store).
+// meter.As[meter.Leaser](store), and [AsAll] does it for several at once,
+// naming every one missing.
 //
 // # Transactions
 //
