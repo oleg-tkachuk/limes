@@ -26,32 +26,33 @@ const (
 	CodeLeasingDisabled             limes.Code = "leasing_disabled"
 )
 
-// codeRule is one of the meter's sentinels, its code and, for one limes
-// does not answer as a refusal, its HTTP status and title.
+// codeRule is one of the meter's sentinels, its code, its category and, for
+// one limes does not answer as a refusal, its HTTP status and title.
 type codeRule struct {
 	sentinel error
 	code     limes.Code
 	status   int
 	title    string
+	category limes.Category
 }
 
 // codeRules is the one table CodeOf and ProblemOf read.
 var codeRules = []codeRule{
-	{ErrCopyLimitExceeded, CodeCopyLimitExceeded, 0, ""},
-	{ErrCounterOverflow, CodeCounterOverflow, http.StatusConflict, "The counter has no room for the amount"},
-	{ErrChargeNotFound, CodeChargeNotFound, http.StatusNotFound, "The charge is not on record"},
-	{ErrRefundExceedsCharge, CodeRefundExceedsCharge, http.StatusConflict, "The refund exceeds what the charge took"},
-	{ErrReservationNotFound, CodeReservationNotFound, http.StatusNotFound, "The reservation is not on record, released or expired"},
-	{ErrUsageNotFound, CodeUsageNotFound, http.StatusNotFound, "The capability has no usage on record"},
-	{ErrTenantBudgetNotFound, CodeTenantBudgetNotFound, http.StatusNotFound, "The tenant has no budget on record"},
-	{ErrTenantBudgetVersionMismatch, CodeTenantBudgetVersionMismatch, http.StatusConflict, "The tenant budget changed since it was read"},
-	{ErrExternalRefConflict, CodeExternalRefConflict, http.StatusConflict, "The external reference names another charge"},
-	{ErrSettleConflict, CodeSettleConflict, http.StatusConflict, "The reservation was settled for another amount"},
-	{ErrLeaseExhausted, CodeLeaseExhausted, 0, ""},
-	{ErrLeaseRequestsExhausted, CodeLeaseRequestsExhausted, 0, ""},
-	{ErrLeaseNotFound, CodeLeaseNotFound, http.StatusNotFound, "The capability holds no lease"},
-	{ErrLeaseNested, CodeLeaseNested, http.StatusConflict, "An ancestor of the capability holds a lease"},
-	{ErrLeasingDisabled, CodeLeasingDisabled, http.StatusInternalServerError, "Leasing is not enabled on the store"},
+	{ErrCopyLimitExceeded, CodeCopyLimitExceeded, 0, "", limes.CategoryExhausted},
+	{ErrCounterOverflow, CodeCounterOverflow, http.StatusConflict, "The counter has no room for the amount", limes.CategoryExhausted},
+	{ErrChargeNotFound, CodeChargeNotFound, http.StatusNotFound, "The charge is not on record", limes.CategoryNotFound},
+	{ErrRefundExceedsCharge, CodeRefundExceedsCharge, http.StatusConflict, "The refund exceeds what the charge took", limes.CategoryInvalid},
+	{ErrReservationNotFound, CodeReservationNotFound, http.StatusNotFound, "The reservation is not on record, released or expired", limes.CategoryNotFound},
+	{ErrUsageNotFound, CodeUsageNotFound, http.StatusNotFound, "The capability has no usage on record", limes.CategoryNotFound},
+	{ErrTenantBudgetNotFound, CodeTenantBudgetNotFound, http.StatusNotFound, "The tenant has no budget on record", limes.CategoryNotFound},
+	{ErrTenantBudgetVersionMismatch, CodeTenantBudgetVersionMismatch, http.StatusConflict, "The tenant budget changed since it was read", limes.CategoryConflict},
+	{ErrExternalRefConflict, CodeExternalRefConflict, http.StatusConflict, "The external reference names another charge", limes.CategoryConflict},
+	{ErrSettleConflict, CodeSettleConflict, http.StatusConflict, "The reservation was settled for another amount", limes.CategoryConflict},
+	{ErrLeaseExhausted, CodeLeaseExhausted, 0, "", limes.CategoryExhausted},
+	{ErrLeaseRequestsExhausted, CodeLeaseRequestsExhausted, 0, "", limes.CategoryExhausted},
+	{ErrLeaseNotFound, CodeLeaseNotFound, http.StatusNotFound, "The capability holds no lease", limes.CategoryNotFound},
+	{ErrLeaseNested, CodeLeaseNested, http.StatusConflict, "An ancestor of the capability holds a lease", limes.CategoryConflict},
+	{ErrLeasingDisabled, CodeLeasingDisabled, http.StatusInternalServerError, "Leasing is not enabled on the store", limes.CategoryInternal},
 }
 
 // codeRuleFor is the meter's rule err matches.
@@ -73,6 +74,15 @@ func CodeOf(err error) (limes.Code, bool) {
 		return r.code, true
 	}
 	return limes.CodeOf(err)
+}
+
+// CategoryOf is err's category: the meter's own code's, or
+// limes.CategoryOf's.
+func CategoryOf(err error) (limes.Category, bool) {
+	if r, ok := codeRuleFor(err); ok {
+		return r.category, true
+	}
+	return limes.CategoryOf(err)
 }
 
 // Codes is every code the meter adds to limes.Codes, in a fixed order.

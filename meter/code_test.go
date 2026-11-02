@@ -141,3 +141,43 @@ func TestErrorsDocListsEveryMeterCode(t *testing.T) {
 		}
 	}
 }
+
+// Every code of the meter's has one of limes's categories, and CategoryOf
+// answers it, through a wrap too; limes's codes it answers as limes does.
+func TestEveryMeterCodeHasACategory(t *testing.T) {
+	for _, r := range codeRules {
+		if !slices.Contains(limes.Categories(), r.category) {
+			t.Errorf("%s has category %q, none of limes.Categories()", r.code, r.category)
+		}
+		if got, ok := CategoryOf(fmt.Errorf("metering: %w", r.sentinel)); !ok || got != r.category {
+			t.Errorf("CategoryOf(%v) = %q, %v; want %q", r.sentinel, got, ok, r.category)
+		}
+	}
+	if got, ok := CategoryOf(limes.ErrRevoked); !ok || got != limes.CategoryUnauthenticated {
+		t.Errorf("CategoryOf(limes.ErrRevoked) = %q, %v; want %q", got, ok, limes.CategoryUnauthenticated)
+	}
+	if got, ok := CategoryOf(errors.New("connection reset")); ok {
+		t.Errorf("CategoryOf of an error not limes's = %q, want none", got)
+	}
+}
+
+// docCategory reads a row of docs/errors.md's code tables: its code and, in
+// the last column, its category.
+var docCategory = regexp.MustCompile("(?m)^\\| `([a-z_]+)` \\| [0-9]{3} \\| .* \\| `([a-z_]+)` \\|$")
+
+// docs/errors.md lists every code of the meter's with its category.
+func TestErrorsDocListsEveryMeterCategory(t *testing.T) {
+	raw, err := os.ReadFile("../docs/errors.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := map[string]string{}
+	for _, m := range docCategory.FindAllStringSubmatch(string(raw), -1) {
+		doc[m[1]] = m[2]
+	}
+	for _, r := range codeRules {
+		if got := doc[string(r.code)]; got != string(r.category) {
+			t.Errorf("docs/errors.md lists %q in category %q; the code table says %q", r.code, got, r.category)
+		}
+	}
+}
