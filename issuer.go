@@ -467,6 +467,11 @@ type DelegateRequest struct {
 // OpShare — the right to delegate — is ErrOpNotAllowed: delegating is the
 // share operation, and a capability granted without it may not have the
 // issuer mint a new principal any part of it.
+//
+// A child is metered under its parent: every request and charge the child
+// makes also counts against the parent and each ancestor (meter), so one
+// request of the child is one more on the parent's counter as well, and a
+// parent's limits bound everything delegated from it.
 func (i *Issuer) Delegate(ctx context.Context, req DelegateRequest) (IssueResult, error) {
 	return result(i.delegate(ctx, req))
 }
