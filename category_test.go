@@ -100,3 +100,25 @@ func TestEveryGatewayStatusIsUnavailable(t *testing.T) {
 		}
 	}
 }
+
+// ReasonOfCode answers every code as ReasonOf answers its sentinel: a
+// refusal its reason, a wider one where the reason folds it, and no reason
+// for an error that is no refusal or a code limes does not define.
+func TestReasonOfCode(t *testing.T) {
+	for _, r := range codeRules {
+		want, wantOK := ReasonOf(r.sentinel)
+		if got, ok := ReasonOfCode(r.code); got != want || ok != wantOK {
+			t.Errorf("ReasonOfCode(%q) = %q, %v; want %q, %v", r.code, got, ok, want, wantOK)
+		}
+	}
+	for code, want := range map[Code]Reason{CodeRevoked: ReasonRevoked, CodeTenantErased: ReasonRevoked, CodeExpired: ReasonExpired} {
+		if got, ok := ReasonOfCode(code); !ok || got != want {
+			t.Errorf("ReasonOfCode(%q) = %q, %v; want %q", code, got, ok, want)
+		}
+	}
+	for _, code := range []Code{CodeNotFound, "no_such_code"} {
+		if got, ok := ReasonOfCode(code); ok {
+			t.Errorf("ReasonOfCode(%q) = %q, want none", code, got)
+		}
+	}
+}

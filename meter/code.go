@@ -87,6 +87,18 @@ func CategoryOf(err error) (limes.Category, bool) {
 	return limes.CategoryOf(err)
 }
 
+// ReasonOfCode is the reason a refusal with code is challenged with: the
+// meter's own code's — copy_limit_exceeded is request_limit_exceeded — or
+// limes.ReasonOfCode's, and false for a code that is no refusal.
+func ReasonOfCode(code limes.Code) (limes.Reason, bool) {
+	for _, r := range codeRules {
+		if r.code == code {
+			return limes.ReasonOf(r.sentinel)
+		}
+	}
+	return limes.ReasonOfCode(code)
+}
+
 // CategoryOfCode is code's category: the meter's own code's, or
 // limes.CategoryOfCode's.
 func CategoryOfCode(code limes.Code) (limes.Category, bool) {

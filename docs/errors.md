@@ -122,15 +122,17 @@ from the error with one call:
 |---|---|---|
 | Sentinel, `limes.Err…` | `errors.Is` | Branching in Go. Families nest: `meter.ErrLeaseExhausted` is also `limes.ErrBudgetExceeded`. |
 | Code, `limes.Code` | `limes.CodeOf`, `meter.CodeOf` | The wire: the one stable name of every error, which a client branches on. |
-| Reason, `limes.Reason` | `limes.ReasonOf` | A refusal of a presented capability only: why, as RFC 6750 and RFC 9449 challenge it, and whether it is permanent (`Reason.Permanent`). |
+| Reason, `limes.Reason` | `limes.ReasonOf`, `limes.ReasonOfCode` | A refusal of a presented capability only: why, as RFC 6750 and RFC 9449 challenge it, and whether it is permanent (`Reason.Permanent`). |
 | Category, `limes.Category` | `limes.CategoryOf`, `meter.CategoryOf` | What the caller does about it, for a transport with fewer codes than limes. |
 
 A refusal's code is its reason, but where the reason folds several codes
 into one: `tenant_erased` and `delegation_too_deep` are refused as
 `revoked`, `copy_limit_exceeded` and `lease_requests_exhausted` as
-`request_limit_exceeded`, `lease_exhausted` as `budget_exceeded`. So the
-reason cannot be derived from a code alone without that table, and a code
-cannot be derived from a reason at all: send the code, and the reason
+`request_limit_exceeded`, `lease_exhausted` as `budget_exceeded`.
+`limes.ReasonOfCode(code)` and `meter.ReasonOfCode(code)` read that table,
+so a consumer holding only a code — mapping it, or filling an error detail
+— gets the reason without the error; a code cannot be derived from a
+reason, since one reason stands for several. Send the code, and the reason
 beside it where a challenge or an error detail wants one. An error that is
 no refusal — `not_found`, `conflict` — has a code and a category and no
 reason.
