@@ -3,6 +3,7 @@ package limes
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"regexp"
 	"slices"
@@ -40,7 +41,7 @@ func TestCategoryOf(t *testing.T) {
 		{ErrConflict, CategoryConflict},
 		{jwks.ErrUnavailable, CategoryUnavailable},
 		{ErrCursorRepeated, CategoryUnavailable},
-		{ErrNoRevocationLineage, CategoryInternal},
+		{ErrNoRevocationLineage, CategoryUnavailable},
 		{ErrInvalidConfig, CategoryInternal},
 		{fmt.Errorf("charging: %w", ErrTenantBudgetExceeded), CategoryExhausted},
 	}
@@ -85,5 +86,17 @@ func TestCategoryOfCode(t *testing.T) {
 	}
 	if got, ok := CategoryOfCode("no_such_code"); ok {
 		t.Errorf("CategoryOfCode of an unknown code = %q, want none", got)
+	}
+}
+
+// A category agrees with the status: every error answered 502 or 503 is a
+// dependency that failed, unavailable.
+func TestEveryGatewayStatusIsUnavailable(t *testing.T) {
+	for _, r := range codeRules {
+		p, _ := ProblemOf(r.sentinel)
+		gateway := p.Status == http.StatusBadGateway || p.Status == http.StatusServiceUnavailable
+		if gateway != (r.category == CategoryUnavailable) {
+			t.Errorf("%s answers %d in category %q", r.code, p.Status, r.category)
+		}
 	}
 }
