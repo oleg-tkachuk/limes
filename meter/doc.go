@@ -28,7 +28,8 @@
 // pgstore over PostgreSQL, and metertest checks any implementation.
 // [Features] names the optional ones a store implements, and [Require]
 // refuses at startup a store, or a decorator over one, that lacks one the
-// consumer uses.
+// consumer uses; [As] does so and hands back the interface, as
+// meter.As[meter.Leaser](store).
 //
 // # Transactions
 //

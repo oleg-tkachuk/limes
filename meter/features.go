@@ -2,6 +2,7 @@ package meter
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -88,4 +89,15 @@ func Require(s UsageStore, want ...Feature) error {
 		return fmt.Errorf("%w: the usage store lacks %s", limes.ErrInvalidConfig, strings.Join(missing, ", "))
 	}
 	return nil
+}
+
+// As is s as the optional interface T — meter.As[meter.Leaser](store) —
+// or limes.ErrInvalidConfig naming T when s does not implement it: Require
+// and the type assertion after it, in one call.
+func As[T any](s UsageStore) (T, error) {
+	if t, ok := s.(T); ok {
+		return t, nil
+	}
+	var zero T
+	return zero, fmt.Errorf("%w: the usage store is no %s", limes.ErrInvalidConfig, reflect.TypeFor[T]())
 }
