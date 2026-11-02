@@ -20,27 +20,33 @@ func (both) Write() {}
 
 var errBad = errors.New("bad request")
 
-// Absence names an interface v is not, or is with it turned off, and
-// nothing for one v is with it on.
-func TestAbsence(t *testing.T) {
+// Check tells an interface v is not from one v is with it turned off, and
+// passes one v is with it on.
+func TestCheck(t *testing.T) {
 	readerType := reflect.TypeFor[reader]()
 	off := func(iface reflect.Type) bool { return iface != readerType }
 	cases := []struct {
 		name    string
 		v       any
 		enabled Enabled
-		want    string
+		ok      bool
+		want    Absent
+		named   string
 	}{
-		{"implemented, no gate", both{}, nil, ""},
-		{"implemented and on", both{}, func(reflect.Type) bool { return true }, ""},
-		{"implemented and off", both{}, off, fmt.Sprintf("%s (off by its configuration)", readerType)},
-		{"not implemented", plain{}, nil, readerType.String()},
-		{"nil", nil, nil, readerType.String()},
+		{"implemented, no gate", both{}, nil, true, Absent{}, ""},
+		{"implemented and on", both{}, func(reflect.Type) bool { return true }, true, Absent{}, ""},
+		{"implemented and off", both{}, off, false, Absent{Iface: readerType, Disabled: true}, fmt.Sprintf("%s (off by its configuration)", readerType)},
+		{"not implemented", plain{}, nil, false, Absent{Iface: readerType}, readerType.String()},
+		{"nil", nil, nil, false, Absent{Iface: readerType}, readerType.String()},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := Absence(tc.v, readerType, tc.enabled); got != tc.want {
-				t.Fatalf("Absence = %q, want %q", got, tc.want)
+			got, ok := Check(tc.v, readerType, tc.enabled)
+			if ok != tc.ok || got != tc.want {
+				t.Fatalf("Check = %+v, %v; want %+v, %v", got, ok, tc.want, tc.ok)
+			}
+			if !ok && got.String() != tc.named {
+				t.Errorf("String = %q, want %q", got, tc.named)
 			}
 		})
 	}
@@ -57,7 +63,7 @@ func TestAssign(t *testing.T) {
 	}
 	r, w = nil, nil
 	missing, err = Assign(plain{}, nil, errBad, &r, &w)
-	want := []string{reflect.TypeFor[reader]().String(), reflect.TypeFor[writer]().String()}
+	want := []Absent{{Iface: reflect.TypeFor[reader]()}, {Iface: reflect.TypeFor[writer]()}}
 	if err != nil || !slices.Equal(missing, want) || r != nil || w != nil {
 		t.Fatalf("Assign(plain) = %v, %v; want %v and nothing set", missing, err, want)
 	}

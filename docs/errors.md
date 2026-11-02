@@ -260,6 +260,7 @@ unauthenticated code, not to its permission-denied one.
 | `lease_not_found` | 404 | `meter.ErrLeaseNotFound` |  |  | The capability holds no lease | `not_found` |
 | `lease_nested` | 409 | `meter.ErrLeaseNested` |  |  | An ancestor of the capability holds a lease | `conflict` |
 | `leasing_disabled` | 500 | `meter.ErrLeasingDisabled` |  |  | Leasing is not enabled on the store | `internal` |
+| `feature_disabled` | 500 | `meter.ErrFeatureDisabled` |  |  | A feature is disabled by the store's configuration | `internal` |
 
 ## The exchange's codes
 

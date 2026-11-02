@@ -1,6 +1,7 @@
 package meter
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -86,40 +87,43 @@ func Features(s UsageStore) []Feature {
 	var out []Feature
 	enabled := enabledBy(s)
 	for _, c := range featureChecks {
-		if optional.Absence(s, c.iface, enabled) == "" {
+		if _, ok := optional.Check(s, c.iface, enabled); ok {
 			out = append(out, c.feature)
 		}
 	}
 	return out
 }
 
-// Require refuses, with limes.ErrInvalidConfig naming each feature missing
-// or turned off, a store without every feature in want: a consumer calls it
-// once at startup with the features it uses, so a store or decorator that
-// dropped one fails there rather than on the first call that needs it.
+// Require refuses a store without every feature in want, naming each: one
+// it does not implement is limes.ErrInvalidConfig, one its configuration
+// turned off ErrFeatureDisabled (which is limes.ErrInvalidConfig too), so a
+// caller tells a build that dropped a feature from a deployment that turned
+// it off. A consumer calls it once at startup with the features it uses.
 func Require(s UsageStore, want ...Feature) error {
 	for _, w := range want {
 		if !slices.ContainsFunc(featureChecks, func(c featureCheck) bool { return c.feature == w }) {
 			return invalidRequest("unknown feature %q", w)
 		}
 	}
-	var missing []string
+	var absent []optional.Absent
+	var names []string
 	enabled := enabledBy(s)
 	for _, c := range featureChecks {
 		if !slices.Contains(want, c.feature) {
 			continue
 		}
-		if why := optional.Absence(s, c.iface, enabled); why != "" {
-			missing = append(missing, fmt.Sprintf("%s: %s", c.feature, why))
+		if a, ok := optional.Check(s, c.iface, enabled); !ok {
+			absent = append(absent, a)
+			names = append(names, fmt.Sprintf("%s: %s", c.feature, a))
 		}
 	}
-	return lacking(missing)
+	return lacking(absent, names)
 }
 
-// As is s as the optional interface T — meter.As[meter.Leaser](store) — or
-// limes.ErrInvalidConfig naming T when s is not one, or its configuration
-// turned T's feature off: Require and the type assertion after it, in one
-// call.
+// As is s as the optional interface T — meter.As[meter.Leaser](store) — or,
+// as Require refuses, limes.ErrInvalidConfig naming T when s is not one and
+// ErrFeatureDisabled when its configuration turned T's feature off: Require
+// and the type assertion after it, in one call.
 func As[T any](s UsageStore) (T, error) {
 	var t T
 	if err := AsAll(s, &t); err != nil {
@@ -128,24 +132,43 @@ func As[T any](s UsageStore) (T, error) {
 	return t, nil
 }
 
-// AsAll sets each target, a pointer to an optional interface, to s, or
-// refuses with limes.ErrInvalidConfig naming every one s is not or has
-// turned off — one call at startup for every interface a consumer uses. A
-// target that is no pointer to an interface is limes.ErrInvalidRequest, and
-// none is set.
+// AsAll sets each target, a pointer to an optional interface, to s, and
+// refuses as Require does, naming every one s is not or has turned off —
+// one call at startup for every interface a consumer uses. Each target it
+// refuses is left as it was, nil for a fresh variable, so its error is
+// always checked. Whether a target is a pointer to an interface is known
+// only when it runs: one that is not is limes.ErrInvalidRequest, and none
+// is set.
 func AsAll(s UsageStore, targets ...any) error {
-	missing, err := optional.Assign(s, enabledBy(s), limes.ErrInvalidRequest, targets...)
+	absent, err := optional.Assign(s, enabledBy(s), limes.ErrInvalidRequest, targets...)
 	if err != nil {
 		return err
 	}
-	return lacking(missing)
+	names := make([]string, len(absent))
+	for i, a := range absent {
+		names[i] = a.String()
+	}
+	return lacking(absent, names)
 }
 
-// lacking is limes.ErrInvalidConfig naming why each of missing is, or nil
-// for none.
-func lacking(missing []string) error {
-	if len(missing) == 0 {
-		return nil
+// lacking refuses what absent holds, each named as names says: those not
+// implemented as limes.ErrInvalidConfig, those turned off as
+// ErrFeatureDisabled, both joined when there are both; nil for none.
+func lacking(absent []optional.Absent, names []string) error {
+	var missing, disabled []string
+	for i, a := range absent {
+		if a.Disabled {
+			disabled = append(disabled, names[i])
+		} else {
+			missing = append(missing, names[i])
+		}
 	}
-	return fmt.Errorf("%w: the usage store lacks %s", limes.ErrInvalidConfig, strings.Join(missing, ", "))
+	var errs []error
+	if len(missing) > 0 {
+		errs = append(errs, fmt.Errorf("%w: the usage store lacks %s", limes.ErrInvalidConfig, strings.Join(missing, ", ")))
+	}
+	if len(disabled) > 0 {
+		errs = append(errs, fmt.Errorf("%w: the usage store has %s", ErrFeatureDisabled, strings.Join(disabled, ", ")))
+	}
+	return errors.Join(errs...)
 }

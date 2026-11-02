@@ -107,14 +107,27 @@ func TestAFeatureTurnedOffIsMissing(t *testing.T) {
 	if _, ok := any(gated).(meter.Leaser); !ok {
 		t.Fatal("the gated store is no Leaser: the test checks nothing")
 	}
+	if _, ok := any(gated).(meter.CopyUsageReader); ok {
+		t.Fatal("the gated store is a CopyUsageReader: the test checks nothing")
+	}
 	if got := meter.Features(gated); slices.Contains(got, meter.FeatureLeases) {
 		t.Errorf("Features = %v, names leases turned off", got)
 	}
-	if err := meter.Require(gated, meter.FeatureLeases); !errors.Is(err, limes.ErrInvalidConfig) || !strings.Contains(err.Error(), "off by its configuration") {
-		t.Errorf("Require(leases) = %v, want ErrInvalidConfig saying leases are off", err)
+	if err := meter.Require(gated, meter.FeatureLeases); !errors.Is(err, meter.ErrFeatureDisabled) || !errors.Is(err, limes.ErrInvalidConfig) || !strings.Contains(err.Error(), "off by its configuration") {
+		t.Errorf("Require(leases) = %v, want ErrFeatureDisabled saying leases are off", err)
 	}
-	if l, err := meter.As[meter.Leaser](gated); !errors.Is(err, limes.ErrInvalidConfig) || l != nil {
-		t.Errorf("As[Leaser] = %v, %v; want ErrInvalidConfig", l, err)
+	if l, err := meter.As[meter.Leaser](gated); !errors.Is(err, meter.ErrFeatureDisabled) || l != nil {
+		t.Errorf("As[Leaser] = %v, %v; want ErrFeatureDisabled", l, err)
+	}
+	// Turned off and not implemented are told apart, and both reported.
+	var copies meter.CopyUsageReader
+	var leaser meter.Leaser
+	err := meter.AsAll(gated, &copies, &leaser)
+	if !errors.Is(err, meter.ErrFeatureDisabled) || !strings.Contains(err.Error(), "meter.CopyUsageReader") {
+		t.Errorf("AsAll of a store lacking one and turning off another = %v; want both named, ErrFeatureDisabled among them", err)
+	}
+	if _, err := meter.As[meter.CopyUsageReader](gated); errors.Is(err, meter.ErrFeatureDisabled) || !errors.Is(err, limes.ErrInvalidConfig) {
+		t.Errorf("As of an interface not implemented = %v; want ErrInvalidConfig and not ErrFeatureDisabled", err)
 	}
 }
 

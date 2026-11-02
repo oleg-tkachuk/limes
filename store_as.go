@@ -25,12 +25,16 @@ func As[T any](s Store) (T, error) {
 // call at startup for every interface a consumer uses. A target that is no
 // pointer to an interface is ErrInvalidRequest, and none is set.
 func AsAll(s Store, targets ...any) error {
-	missing, err := optional.Assign(s, nil, ErrInvalidRequest, targets...)
+	absent, err := optional.Assign(s, nil, ErrInvalidRequest, targets...)
 	if err != nil {
 		return err
 	}
-	if len(missing) > 0 {
-		return fmt.Errorf("%w: the record store lacks %s", ErrInvalidConfig, strings.Join(missing, ", "))
+	if len(absent) > 0 {
+		names := make([]string, len(absent))
+		for i, a := range absent {
+			names[i] = a.String()
+		}
+		return fmt.Errorf("%w: the record store lacks %s", ErrInvalidConfig, strings.Join(names, ", "))
 	}
 	return nil
 }
