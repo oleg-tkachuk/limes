@@ -7,12 +7,15 @@ import (
 	"strings"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/internal/optional"
 )
 
 // Feature names an optional interface a UsageStore may implement beside the
 // ones it must. A caller reaches each by a type assertion, so a store, or a
 // decorator over one, that leaves one out turns its feature off with no
-// error until it is used; Require refuses that at startup instead.
+// error until it is used; Require, As and AsAll refuse that at startup
+// instead, and a store's FeatureGate says which its configuration turned
+// off.
 type Feature string
 
 // The features.
@@ -31,19 +34,41 @@ const (
 	FeatureLeases Feature = "leases"
 )
 
-// featureCheck is a feature and whether a store implements it.
+// FeatureGate is a UsageStore whose configuration can turn off a feature it
+// implements — pgstore's leases, Config.DisableLeases — saying which are on.
+// A decorator forwards it. A store that is no FeatureGate has every feature
+// it implements on.
+type FeatureGate interface {
+	FeatureEnabled(f Feature) bool
+}
+
+// featureCheck is a feature and the interface a store implements it by.
 type featureCheck struct {
 	feature Feature
-	has     func(UsageStore) bool
+	iface   reflect.Type
 }
 
 // featureChecks is every feature, in a fixed order.
 var featureChecks = []featureCheck{
-	{FeatureCopyUsage, func(s UsageStore) bool { _, ok := s.(CopyUsageReader); return ok }},
-	{FeatureTenantUsageErase, func(s UsageStore) bool { _, ok := s.(TenantUsageEraser); return ok }},
-	{FeatureMatchingRelease, func(s UsageStore) bool { _, ok := s.(MatchingReleaser); return ok }},
-	{FeatureTenantReservations, func(s UsageStore) bool { _, ok := s.(TenantReservationLister); return ok }},
-	{FeatureLeases, func(s UsageStore) bool { _, ok := s.(Leaser); return ok }},
+	{FeatureCopyUsage, reflect.TypeFor[CopyUsageReader]()},
+	{FeatureTenantUsageErase, reflect.TypeFor[TenantUsageEraser]()},
+	{FeatureMatchingRelease, reflect.TypeFor[MatchingReleaser]()},
+	{FeatureTenantReservations, reflect.TypeFor[TenantReservationLister]()},
+	{FeatureLeases, reflect.TypeFor[Leaser]()},
+}
+
+// enabledBy is whether s's configuration has on the feature an interface
+// serves: every interface no feature names, and every one of a store that
+// is no FeatureGate, is.
+func enabledBy(s UsageStore) optional.Enabled {
+	gate, ok := s.(FeatureGate)
+	if !ok {
+		return nil
+	}
+	return func(iface reflect.Type) bool {
+		i := slices.IndexFunc(featureChecks, func(c featureCheck) bool { return c.iface == iface })
+		return i < 0 || gate.FeatureEnabled(featureChecks[i].feature)
+	}
 }
 
 // AllFeatures returns every feature, in a fixed order.
@@ -55,22 +80,21 @@ func AllFeatures() []Feature {
 	return out
 }
 
-// Features returns the features s implements, in AllFeatures' order. A
-// store that implements an interface can still refuse its calls by
-// configuration — pgstore's leases, ErrLeasingDisabled — which this does
-// not see.
+// Features returns the features s implements and its configuration has on
+// (FeatureGate), in AllFeatures' order.
 func Features(s UsageStore) []Feature {
 	var out []Feature
+	enabled := enabledBy(s)
 	for _, c := range featureChecks {
-		if c.has(s) {
+		if optional.Absence(s, c.iface, enabled) == "" {
 			out = append(out, c.feature)
 		}
 	}
 	return out
 }
 
-// Require refuses, with limes.ErrInvalidConfig naming what is missing, a
-// store that does not implement every feature in want: a consumer calls it
+// Require refuses, with limes.ErrInvalidConfig naming each feature missing
+// or turned off, a store without every feature in want: a consumer calls it
 // once at startup with the features it uses, so a store or decorator that
 // dropped one fails there rather than on the first call that needs it.
 func Require(s UsageStore, want ...Feature) error {
@@ -80,24 +104,48 @@ func Require(s UsageStore, want ...Feature) error {
 		}
 	}
 	var missing []string
+	enabled := enabledBy(s)
 	for _, c := range featureChecks {
-		if slices.Contains(want, c.feature) && !c.has(s) {
-			missing = append(missing, string(c.feature))
+		if !slices.Contains(want, c.feature) {
+			continue
+		}
+		if why := optional.Absence(s, c.iface, enabled); why != "" {
+			missing = append(missing, fmt.Sprintf("%s: %s", c.feature, why))
 		}
 	}
-	if len(missing) > 0 {
-		return fmt.Errorf("%w: the usage store lacks %s", limes.ErrInvalidConfig, strings.Join(missing, ", "))
-	}
-	return nil
+	return lacking(missing)
 }
 
-// As is s as the optional interface T — meter.As[meter.Leaser](store) —
-// or limes.ErrInvalidConfig naming T when s does not implement it: Require
-// and the type assertion after it, in one call.
+// As is s as the optional interface T — meter.As[meter.Leaser](store) — or
+// limes.ErrInvalidConfig naming T when s is not one, or its configuration
+// turned T's feature off: Require and the type assertion after it, in one
+// call.
 func As[T any](s UsageStore) (T, error) {
-	if t, ok := s.(T); ok {
-		return t, nil
+	var t T
+	if err := AsAll(s, &t); err != nil {
+		return t, err
 	}
-	var zero T
-	return zero, fmt.Errorf("%w: the usage store is no %s", limes.ErrInvalidConfig, reflect.TypeFor[T]())
+	return t, nil
+}
+
+// AsAll sets each target, a pointer to an optional interface, to s, or
+// refuses with limes.ErrInvalidConfig naming every one s is not or has
+// turned off — one call at startup for every interface a consumer uses. A
+// target that is no pointer to an interface is limes.ErrInvalidRequest, and
+// none is set.
+func AsAll(s UsageStore, targets ...any) error {
+	missing, err := optional.Assign(s, enabledBy(s), limes.ErrInvalidRequest, targets...)
+	if err != nil {
+		return err
+	}
+	return lacking(missing)
+}
+
+// lacking is limes.ErrInvalidConfig naming why each of missing is, or nil
+// for none.
+func lacking(missing []string) error {
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: the usage store lacks %s", limes.ErrInvalidConfig, strings.Join(missing, ", "))
 }
