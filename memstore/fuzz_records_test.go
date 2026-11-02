@@ -117,7 +117,7 @@ func FuzzRecords(f *testing.F) {
 		var nodes []recordNode
 		var tokens [recordFuzzTokens]recordToken
 		key := func(i int) limes.ExchangeKey {
-			return limes.ExchangeKey{TenantID: tenant, Issuer: recordFuzzIssuer, TokenID: string(rune('a' + i)), TokenExpiresAt: tokens[i].expires}
+			return limes.ExchangeKey{TenantID: tenant, Issuer: recordFuzzIssuer, TokenID: string(rune('a' + i))}
 		}
 		for i := 0; i+recordStepSize <= len(script); i += recordStepSize {
 			at, arg := i/recordStepSize, int(script[i+1])
@@ -142,11 +142,10 @@ func FuzzRecords(f *testing.F) {
 				// A claim names the token's expiry: the first claim's
 				// stands while its record does.
 				expires := now.Add(time.Duration(arg>>recordArgTopShift&recordArgTopMask) * recordFuzzUnit)
-				k := key(i)
-				if !tok.claimed || tok.mayBeGone {
-					k.TokenExpiresAt = expires
+				if tok.claimed && !tok.mayBeGone {
+					expires = tok.expires
 				}
-				got, claimed, err := s.ClaimExchange(ctx, k, nodes[n].id)
+				got, claimed, err := s.ClaimExchange(ctx, key(i), expires, nodes[n].id)
 				switch {
 				case !nodes[n].onRecord:
 					if !errors.Is(err, limes.ErrNotFound) {

@@ -62,7 +62,7 @@ func TestEraseForgetsOnlyItsTenantsSpentExchanges(t *testing.T) {
 	s := newTestStore()
 	mine, theirs := uuid.New(), uuid.New()
 	key := func(tenant uuid.UUID, token string) limes.ExchangeKey {
-		return limes.ExchangeKey{TenantID: tenant, Issuer: "https://idp.example", TokenID: token, TokenExpiresAt: time.Now().Add(-exchangeExpiredAgo)}
+		return limes.ExchangeKey{TenantID: tenant, Issuer: "https://idp.example", TokenID: token}
 	}
 	claims := map[limes.ExchangeKey]uuid.UUID{}
 	for _, tenant := range []uuid.UUID{mine, theirs} {
@@ -71,7 +71,7 @@ func TestEraseForgetsOnlyItsTenantsSpentExchanges(t *testing.T) {
 			t.Fatal(err)
 		}
 		k := key(tenant, "jti-"+tenant.String())
-		if _, claimed, err := s.ClaimExchange(ctx, k, c.ID); err != nil || !claimed {
+		if _, claimed, err := s.ClaimExchange(ctx, k, time.Now().Add(-exchangeExpiredAgo), c.ID); err != nil || !claimed {
 			t.Fatalf("claim for tenant %s: %v, %v", tenant, claimed, err)
 		}
 		claims[k] = c.ID

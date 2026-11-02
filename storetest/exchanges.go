@@ -22,11 +22,14 @@ const exchangeIssuer = "https://idp.example"
 // exchange checks live: past every capability they are exchanged for.
 const exchangeTokenLife = 24 * time.Hour
 
-// exchangeKey is a key of f's tenant for the subject token jti, which
-// expires exchangeTokenLife from now.
+// exchangeKey is a key of f's tenant for the subject token jti.
 func (f fixture) exchangeKey(jti string) limes.ExchangeKey {
-	return limes.ExchangeKey{TenantID: f.Tenant, Issuer: exchangeIssuer, TokenID: jti, TokenExpiresAt: f.now.Add(exchangeTokenLife)}
+	return limes.ExchangeKey{TenantID: f.Tenant, Issuer: exchangeIssuer, TokenID: jti}
 }
+
+// tokenExpiry is when the subject tokens of the exchange checks expire:
+// exchangeTokenLife from now.
+func (f fixture) tokenExpiry() time.Time { return f.now.Add(exchangeTokenLife) }
 
 // requireExchanges skips a check of limes.ExchangeStore without one.
 func (f fixture) requireExchanges(t *testing.T) {
@@ -44,9 +47,9 @@ func checkExchangeClaims(t *testing.T, f fixture) {
 	_, err := f.Exchanges.ExchangedFor(f.Ctx, key)
 	expect.Must(t, errors.Is(err, limes.ErrNotFound), "ExchangedFor of a key never claimed: %v, want ErrNotFound", err)
 	first, second := f.live(t, "agent:first", uuid.Nil()), f.live(t, "agent:second", uuid.Nil())
-	got, claimed, err := f.Exchanges.ClaimExchange(f.Ctx, key, first.ID)
+	got, claimed, err := f.Exchanges.ClaimExchange(f.Ctx, key, f.tokenExpiry(), first.ID)
 	expect.Must(t, err == nil && claimed && got == first.ID, "first claim = %s, %v, %v; want %s claimed", got, claimed, err, first.ID)
-	got, claimed, err = f.Exchanges.ClaimExchange(f.Ctx, key, second.ID)
+	got, claimed, err = f.Exchanges.ClaimExchange(f.Ctx, key, f.tokenExpiry(), second.ID)
 	expect.Must(t, err == nil && !claimed && got == first.ID, "second claim = %s, %v, %v; want %s, not claimed", got, claimed, err, first.ID)
 	got, err = f.Exchanges.ExchangedFor(f.Ctx, key)
 	expect.Must(t, err == nil && got == first.ID, "ExchangedFor = %s, %v; want %s", got, err, first.ID)
@@ -66,7 +69,7 @@ func checkExchangeClaims(t *testing.T, f fixture) {
 	)
 	for _, id := range ids {
 		wg.Go(func() {
-			got, claimed, err := f.Exchanges.ClaimExchange(f.Ctx, raced, id)
+			got, claimed, err := f.Exchanges.ClaimExchange(f.Ctx, raced, f.tokenExpiry(), id)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -88,27 +91,25 @@ func checkExchangeClaims(t *testing.T, f fixture) {
 func checkExchangeRefusals(t *testing.T, f fixture) {
 	f.requireExchanges(t)
 	live := f.live(t, "agent:claimed", uuid.Nil())
-	_, _, err := f.Exchanges.ClaimExchange(f.Ctx, f.exchangeKey("jti-unknown"), uuid.New())
+	_, _, err := f.Exchanges.ClaimExchange(f.Ctx, f.exchangeKey("jti-unknown"), f.tokenExpiry(), uuid.New())
 	expect.That(t, errors.Is(err, limes.ErrNotFound), "a claim of an id not on record: %v, want ErrNotFound", err)
 	other, err := f.newTenant()
 	expect.Must(t, err == nil, "NewTenant: %v", err)
 	foreign := f.exchangeKey("jti-foreign")
 	foreign.TenantID = other
-	_, _, err = f.Exchanges.ClaimExchange(f.tenantCtx(other), foreign, live.ID)
+	_, _, err = f.Exchanges.ClaimExchange(f.tenantCtx(other), foreign, f.tokenExpiry(), live.ID)
 	expect.That(t, errors.Is(err, limes.ErrNotFound), "a claim in another tenant than the capability's: %v, want ErrNotFound", err)
 	for name, key := range map[string]limes.ExchangeKey{
 		"no tenant":   {Issuer: exchangeIssuer, TokenID: "jti"},
 		"no issuer":   {TenantID: f.Tenant, TokenID: "jti"},
 		"no token id": {TenantID: f.Tenant, Issuer: exchangeIssuer},
 	} {
-		_, _, err := f.Exchanges.ClaimExchange(f.Ctx, key, live.ID)
+		_, _, err := f.Exchanges.ClaimExchange(f.Ctx, key, f.tokenExpiry(), live.ID)
 		expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "%s: ClaimExchange = %v, want ErrInvalidRequest", name, err)
 		_, err = f.Exchanges.ExchangedFor(f.Ctx, key)
 		expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "%s: ExchangedFor = %v, want ErrInvalidRequest", name, err)
 	}
-	noExpiry := f.exchangeKey("jti-no-expiry")
-	noExpiry.TokenExpiresAt = time.Time{}
-	_, _, err = f.Exchanges.ClaimExchange(f.Ctx, noExpiry, live.ID)
+	_, _, err = f.Exchanges.ClaimExchange(f.Ctx, f.exchangeKey("jti-no-expiry"), time.Time{}, live.ID)
 	expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "a claim naming no token expiry: %v, want ErrInvalidRequest", err)
 }
 
@@ -120,17 +121,20 @@ func checkExchangePurge(t *testing.T, f fixture) {
 	held := f.insert(t, f.newCapability("agent:old", uuid.Nil(), f.now.Add(-expiredAgo)))
 	spent := f.insert(t, f.newCapability("agent:older", uuid.Nil(), f.now.Add(-expiredAgo)))
 	kept, gone := f.exchangeKey("jti-presentable"), f.exchangeKey("jti-expired")
-	gone.TokenExpiresAt = f.now.Add(-expiredAgo)
-	for key, id := range map[limes.ExchangeKey]uuid.UUID{kept: held.ID, gone: spent.ID} {
-		_, claimed, err := f.Exchanges.ClaimExchange(f.Ctx, key, id)
-		expect.Must(t, err == nil && claimed, "claim %s: %v, %v", key.TokenID, claimed, err)
+	for _, c := range []struct {
+		key     limes.ExchangeKey
+		expires time.Time
+		id      uuid.UUID
+	}{{kept, f.tokenExpiry(), held.ID}, {gone, f.now.Add(-expiredAgo), spent.ID}} {
+		_, claimed, err := f.Exchanges.ClaimExchange(f.Ctx, c.key, c.expires, c.id)
+		expect.Must(t, err == nil && claimed, "claim %s: %v, %v", c.key.TokenID, claimed, err)
 	}
 	purged, err := f.Store.Purge(f.Ctx, limes.PurgeRequest{ExpiredFor: purgeGrace})
 	expect.Must(t, err == nil && purged.Purged >= 2, "Purge = %+v, %v; want both capabilities purged", purged, err)
 	got, err := f.Exchanges.ExchangedFor(f.Ctx, kept)
 	expect.That(t, err == nil && got == held.ID, "the exchange of a token still presentable = %s, %v; want %s kept past its capability", got, err, held.ID)
 	again := f.live(t, "agent:again", uuid.Nil())
-	got, claimed, err := f.Exchanges.ClaimExchange(f.Ctx, kept, again.ID)
+	got, claimed, err := f.Exchanges.ClaimExchange(f.Ctx, kept, f.tokenExpiry(), again.ID)
 	expect.That(t, err == nil && !claimed && got == held.ID, "a claim of that token again = %s, %v, %v; want %s, not claimed", got, claimed, err, held.ID)
 	_, err = f.Exchanges.ExchangedFor(f.Ctx, gone)
 	expect.That(t, errors.Is(err, limes.ErrNotFound), "the exchange of an expired token: %v, want ErrNotFound", err)

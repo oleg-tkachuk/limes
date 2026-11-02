@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 	"errors"
+	"time"
 	"uuid"
 
 	"github.com/jackc/pgx/v5"
@@ -50,8 +51,8 @@ func (s *Store) ExchangedFor(ctx context.Context, key limes.ExchangeKey) (uuid.U
 // as every call naming a tenant is (Config.CheckScope). Every transaction
 // the store opens is READ COMMITTED, which is what lets a claim that lost
 // a race read the winner's row.
-func (s *Store) ClaimExchange(ctx context.Context, key limes.ExchangeKey, id uuid.UUID) (uuid.UUID, bool, error) {
-	if err := key.ValidateClaim(); err != nil {
+func (s *Store) ClaimExchange(ctx context.Context, key limes.ExchangeKey, tokenExpiresAt time.Time, id uuid.UUID) (uuid.UUID, bool, error) {
+	if err := key.ValidateClaim(tokenExpiresAt); err != nil {
 		return uuid.Nil(), false, err
 	}
 	var (
@@ -66,7 +67,7 @@ func (s *Store) ClaimExchange(ctx context.Context, key limes.ExchangeKey, id uui
 		if !known {
 			return limes.ErrNotFound
 		}
-		err := tx.QueryRow(ctx, sqlClaimExchange, key.TenantID, key.Issuer, key.TokenID, id, key.TokenExpiresAt).Scan(&recorded)
+		err := tx.QueryRow(ctx, sqlClaimExchange, key.TenantID, key.Issuer, key.TokenID, id, tokenExpiresAt).Scan(&recorded)
 		if err == nil {
 			claimed = true
 			return nil
@@ -95,8 +96,8 @@ func (e scopedExchanges) ExchangedFor(ctx context.Context, key limes.ExchangeKey
 	return e.s.ExchangedFor(WithTenant(ctx, key.TenantID), key)
 }
 
-func (e scopedExchanges) ClaimExchange(ctx context.Context, key limes.ExchangeKey, id uuid.UUID) (uuid.UUID, bool, error) {
-	return e.s.ClaimExchange(WithTenant(ctx, key.TenantID), key, id)
+func (e scopedExchanges) ClaimExchange(ctx context.Context, key limes.ExchangeKey, tokenExpiresAt time.Time, id uuid.UUID) (uuid.UUID, bool, error) {
+	return e.s.ClaimExchange(WithTenant(ctx, key.TenantID), key, tokenExpiresAt, id)
 }
 
 var (
