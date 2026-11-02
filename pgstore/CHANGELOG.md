@@ -2,6 +2,16 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.63.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.62.0...pgstore%2Fv0.63.0) (2026-11-02)
+
+### ⚠ BREAKING CHANGES
+
+* **pgstore:** open leases unless Config.DisableLeases is set
+
+### Features
+
+* **pgstore:** open leases unless Config.DisableLeases is set ([3a3a4a6](https://github.com/oleg-tkachuk/limes/commit/3a3a4a697bf00cb163ccfd123e9fff529b91710e))
+
 ## [0.62.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.61.5...pgstore%2Fv0.62.0) (2026-11-02)
 
 ### ⚠ BREAKING CHANGES
