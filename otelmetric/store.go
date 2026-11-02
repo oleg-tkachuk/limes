@@ -24,8 +24,9 @@ type meteringStore struct {
 //
 // The result implements every interface of this package that inner does —
 // the optional meter.CopyUsageReader, meter.TenantUsageEraser,
-// meter.MatchingReleaser and meter.TenantReservationLister — so wrapping a
-// store never hides what it can do. A decorator forwards a fixed list of
+// meter.MatchingReleaser, meter.TenantReservationLister and meter.Leaser —
+// and forwards meter.FeatureGate, so wrapping a store never hides what it
+// can do, nor turns on what its configuration turned off. A decorator forwards a fixed list of
 // optional interfaces (internal/optionalgen), and a test fails when the list
 // misses one the store has.
 //
@@ -44,6 +45,14 @@ func Instrument(inner meter.UsageStore, opts ...Option) (meter.UsageStore, error
 	}
 	return withOptional(&meteringStore{inner: inner, in: in}, inner), nil
 }
+
+// featureGate forwards FeatureEnabled, so wrapping a store whose
+// configuration turned a feature off does not turn it back on.
+type featureGate struct {
+	gate meter.FeatureGate
+}
+
+func (g featureGate) FeatureEnabled(f meter.Feature) bool { return g.gate.FeatureEnabled(f) }
 
 // copyUsageReader forwards CopyUsage. Reading moves nothing, so it emits no
 // metric.

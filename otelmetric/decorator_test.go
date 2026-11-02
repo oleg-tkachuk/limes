@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -176,4 +177,40 @@ func newMemstoreRecords(t *testing.T) *memstore.Store {
 		t.Fatal(err)
 	}
 	return records
+}
+
+// gatedUsage is a usage store whose configuration turned leases off.
+type gatedUsage struct {
+	meter.UsageStore
+	meter.Leaser
+}
+
+func (gatedUsage) FeatureEnabled(f meter.Feature) bool { return f != meter.FeatureLeases }
+
+// Wrapping a store keeps what its configuration turned off off, and a store
+// that is no gate has every feature it implements on.
+func TestInstrumentForwardsTheFeatureGate(t *testing.T) {
+	records, err := memstore.NewStore(memstore.StoreConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inner, err := memstore.NewUsageStore(memstore.UsageStoreConfig{Records: records})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		store  meter.UsageStore
+		leases bool
+	}{
+		"gated":   {gatedUsage{inner, inner}, false},
+		"no gate": {inner, true},
+	} {
+		wrapped, err := otelmetric.Instrument(tc.store)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := slices.Contains(meter.Features(wrapped), meter.FeatureLeases); got != tc.leases {
+			t.Errorf("%s: Features of the wrapped store name leases %v, want %v", name, got, tc.leases)
+		}
+	}
 }
