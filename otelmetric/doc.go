@@ -16,9 +16,11 @@
 // limes.unit_code; limes.charge.decisions (charges and settles),
 // limes.reservation.decisions and limes.request.bumps, by limes.outcome and
 // limes.scope; and limes.charge.current_spend, a histogram of a
-// capability's spend after each charge, by limes.unit_code. A request limit
-// refuses on limes.request.bumps, and a budget on the decisions: an alert on
-// every limit reads both, by limes.scope.
+// capability's spend after each charge, by limes.unit_code. A limit refuses
+// on whichever counter the call it refused counts on — a Bump on
+// limes.request.bumps, a Charge or Settle on limes.charge.decisions, a
+// Reserve on limes.reservation.decisions — so an alert on every limit reads
+// all three, by limes.scope.
 //
 //	usage, err := otelmetric.Instrument(store,
 //		otelmetric.WithMeterProvider(provider), // default: the global provider

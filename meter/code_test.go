@@ -181,3 +181,22 @@ func TestErrorsDocListsEveryMeterCategory(t *testing.T) {
 		}
 	}
 }
+
+// CategoryOfCode answers the meter's codes as CategoryOf answers their
+// sentinels, limes's as limes does, and false for any other.
+func TestMeterCategoryOfCode(t *testing.T) {
+	for _, r := range codeRules {
+		if got, ok := CategoryOfCode(r.code); !ok || got != r.category {
+			t.Errorf("CategoryOfCode(%q) = %q, %v; want %q", r.code, got, ok, r.category)
+		}
+	}
+	for _, code := range limes.Codes() {
+		want, _ := limes.CategoryOfCode(code)
+		if got, ok := CategoryOfCode(code); !ok || got != want {
+			t.Errorf("CategoryOfCode(%q) = %q, %v; want limes's %q", code, got, ok, want)
+		}
+	}
+	if got, ok := CategoryOfCode("no_such_code"); ok {
+		t.Errorf("CategoryOfCode of an unknown code = %q, want none", got)
+	}
+}

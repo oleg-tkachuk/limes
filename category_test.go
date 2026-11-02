@@ -70,3 +70,18 @@ func TestErrorsDocListsEveryCategory(t *testing.T) {
 		}
 	}
 }
+
+// CategoryOfCode answers every code as CategoryOf answers its sentinel, so
+// a consumer can map codes without an error to hand, and false for a code
+// limes does not define.
+func TestCategoryOfCode(t *testing.T) {
+	for _, r := range codeRules {
+		want, _ := CategoryOf(r.sentinel)
+		if got, ok := CategoryOfCode(r.code); !ok || got != want {
+			t.Errorf("CategoryOfCode(%q) = %q, %v; want %q", r.code, got, ok, want)
+		}
+	}
+	if got, ok := CategoryOfCode("no_such_code"); ok {
+		t.Errorf("CategoryOfCode of an unknown code = %q, want none", got)
+	}
+}

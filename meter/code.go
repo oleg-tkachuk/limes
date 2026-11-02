@@ -85,6 +85,17 @@ func CategoryOf(err error) (limes.Category, bool) {
 	return limes.CategoryOf(err)
 }
 
+// CategoryOfCode is code's category: the meter's own code's, or
+// limes.CategoryOfCode's.
+func CategoryOfCode(code limes.Code) (limes.Category, bool) {
+	for _, r := range codeRules {
+		if r.code == code {
+			return r.category, true
+		}
+	}
+	return limes.CategoryOfCode(code)
+}
+
 // Codes is every code the meter adds to limes.Codes, in a fixed order.
 func Codes() []limes.Code {
 	out := make([]limes.Code, len(codeRules))
