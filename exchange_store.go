@@ -13,20 +13,16 @@ type ExchangeKey struct {
 	TenantID uuid.UUID
 	// Issuer is the subject token's iss, and TokenID its jti.
 	Issuer, TokenID string
-	// TokenExpiresAt is the subject token's exp: ClaimExchange keeps the
-	// record until then, whatever becomes of its capability, since the
-	// token can be presented again until then. ExchangedFor ignores it.
-	TokenExpiresAt time.Time
 }
 
-// ValidateClaim refuses what Validate refuses, and a key that names no
-// TokenExpiresAt.
-func (k ExchangeKey) ValidateClaim() error {
+// ValidateClaim refuses what Validate refuses, and a claim whose
+// tokenExpiresAt, the subject token's exp, is unset.
+func (k ExchangeKey) ValidateClaim(tokenExpiresAt time.Time) error {
 	if err := k.Validate(); err != nil {
 		return err
 	}
-	if k.TokenExpiresAt.IsZero() {
-		return invalidRequest("ExchangeKey.TokenExpiresAt required to claim")
+	if tokenExpiresAt.IsZero() {
+		return invalidRequest("ClaimExchange's tokenExpiresAt required")
 	}
 	return nil
 }
@@ -53,15 +49,18 @@ type ExchangeStore interface {
 	// there is none. It refuses what ExchangeKey.Validate refuses.
 	ExchangedFor(ctx context.Context, key ExchangeKey) (uuid.UUID, error)
 
-	// ClaimExchange records id as the capability issued for key, and
+	// ClaimExchange records id as the capability issued for key, whose
+	// subject token expires at tokenExpiresAt (its exp), and
 	// returns it with claimed true. When key holds a capability already it
 	// records nothing and returns that one with claimed false, so concurrent
 	// claims of one key converge on one id. id must be on record in key's
 	// tenant: ErrNotFound for one that is not, or is another tenant's. The
 	// record outlives its capability: Purge and an erase remove it only once
-	// key.TokenExpiresAt is past their retention, so a token exchanged once
+	// tokenExpiresAt is past their retention, so a token exchanged once
 	// is never exchanged afresh while it can still be presented, and its
 	// capability purged answers as gone (Issuer.Reissue: ErrNotFound). It
-	// refuses what ExchangeKey.ValidateClaim refuses.
-	ClaimExchange(ctx context.Context, key ExchangeKey, id uuid.UUID) (recorded uuid.UUID, claimed bool, err error)
+	// refuses what ExchangeKey.ValidateClaim refuses: the expiry is an
+	// argument of its own, rather than a field of key, so no caller can
+	// leave it out unseen.
+	ClaimExchange(ctx context.Context, key ExchangeKey, tokenExpiresAt time.Time, id uuid.UUID) (recorded uuid.UUID, claimed bool, err error)
 }

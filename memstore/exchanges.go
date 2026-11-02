@@ -15,7 +15,7 @@ func (s *Store) ExchangedFor(_ context.Context, key limes.ExchangeKey) (uuid.UUI
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	e, ok := s.exchanges[exchangeKeyOf(key)]
+	e, ok := s.exchanges[key]
 	if !ok {
 		return uuid.Nil(), limes.ErrNotFound
 	}
@@ -24,8 +24,8 @@ func (s *Store) ExchangedFor(_ context.Context, key limes.ExchangeKey) (uuid.UUI
 
 // ClaimExchange implements limes.ExchangeStore: under the store's lock, the
 // first claim of a key is the one every later claim gets back.
-func (s *Store) ClaimExchange(_ context.Context, key limes.ExchangeKey, id uuid.UUID) (uuid.UUID, bool, error) {
-	if err := key.ValidateClaim(); err != nil {
+func (s *Store) ClaimExchange(_ context.Context, key limes.ExchangeKey, tokenExpiresAt time.Time, id uuid.UUID) (uuid.UUID, bool, error) {
+	if err := key.ValidateClaim(tokenExpiresAt); err != nil {
 		return uuid.Nil(), false, err
 	}
 	s.mu.Lock()
@@ -33,10 +33,10 @@ func (s *Store) ClaimExchange(_ context.Context, key limes.ExchangeKey, id uuid.
 	if c, ok := s.caps[id]; !ok || c.Subject.TenantID != key.TenantID {
 		return uuid.Nil(), false, limes.ErrNotFound
 	}
-	if recorded, ok := s.exchanges[exchangeKeyOf(key)]; ok {
+	if recorded, ok := s.exchanges[key]; ok {
 		return recorded.id, false, nil
 	}
-	s.exchanges[exchangeKeyOf(key)] = exchange{id: id, tokenExpiresAt: key.TokenExpiresAt}
+	s.exchanges[key] = exchange{id: id, tokenExpiresAt: tokenExpiresAt}
 	return id, true, nil
 }
 
@@ -45,12 +45,6 @@ func (s *Store) ClaimExchange(_ context.Context, key limes.ExchangeKey, id uuid.
 type exchange struct {
 	id             uuid.UUID
 	tokenExpiresAt time.Time
-}
-
-// exchangeKeyOf is key as the store holds it: without TokenExpiresAt,
-// which ExchangedFor does not name.
-func exchangeKeyOf(key limes.ExchangeKey) limes.ExchangeKey {
-	return limes.ExchangeKey{TenantID: key.TenantID, Issuer: key.Issuer, TokenID: key.TokenID}
 }
 
 // forgetExchangesLocked drops the exchanges of the keys whose tokens

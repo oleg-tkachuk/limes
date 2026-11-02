@@ -75,7 +75,7 @@ type Store struct {
 	erased map[uuid.UUID]struct{}
 
 	// exchanges is the capability each subject token's exchange issued
-	// (limes.ExchangeStore), keyed by exchangeKeyOf, until Purge or an erase
+	// (limes.ExchangeStore), keyed by its ExchangeKey, until Purge or an erase
 	// finds the token expired past its retention.
 	exchanges map[limes.ExchangeKey]exchange
 
