@@ -277,7 +277,7 @@ func (e *Exchanger) exchange(ctx context.Context, req Request) (Result, Subject,
 	if bound {
 		issue.ConfirmationJKT = checked.JKT()
 	}
-	key := limes.ExchangeKey{TenantID: issue.Subject.TenantID, Issuer: subject.Issuer, TokenID: subject.ID, TokenExpiresAt: subject.ExpiresAt}
+	key := limes.ExchangeKey{TenantID: issue.Subject.TenantID, Issuer: subject.Issuer, TokenID: subject.ID}
 	if e.cfg.Exchanges != nil {
 		res, found, err := e.exchangedBefore(ctx, key, issue)
 		if err != nil || found {
@@ -301,7 +301,7 @@ func (e *Exchanger) exchange(ctx context.Context, req Request) (Result, Subject,
 	if e.cfg.Exchanges == nil {
 		return resultOf(minted), subject, nil
 	}
-	res, err := e.claim(ctx, key, issue, minted)
+	res, err := e.claim(ctx, key, subject.ExpiresAt, issue, minted)
 	return res, subject, err
 }
 
@@ -320,12 +320,13 @@ func (e *Exchanger) exchangedBefore(ctx context.Context, key limes.ExchangeKey, 
 	return res, true, err
 }
 
-// claim records minted as the capability of key. When another exchange of
+// claim records minted as the capability of key, whose subject token
+// expires at tokenExpiresAt. When another exchange of
 // the same subject token claimed key first, its capability is reissued and
 // minted is left to expire: its token never left this process, so nothing
 // can present it.
-func (e *Exchanger) claim(ctx context.Context, key limes.ExchangeKey, issue limes.IssueRequest, minted limes.IssueResult) (Result, error) {
-	recorded, claimed, err := e.cfg.Exchanges.ClaimExchange(ctx, key, minted.Capability.ID)
+func (e *Exchanger) claim(ctx context.Context, key limes.ExchangeKey, tokenExpiresAt time.Time, issue limes.IssueRequest, minted limes.IssueResult) (Result, error) {
+	recorded, claimed, err := e.cfg.Exchanges.ClaimExchange(ctx, key, tokenExpiresAt, minted.Capability.ID)
 	if err != nil {
 		return Result{}, fmt.Errorf("exchange: record the exchange of the subject token: %w", err)
 	}
