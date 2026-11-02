@@ -96,6 +96,12 @@ var ErrLeaseNested error = &familyError{"limes: an ancestor holds a lease", lime
 // limes.ErrInvalidConfig.
 var ErrLeasingDisabled error = &familyError{"limes: leasing is not enabled", limes.ErrInvalidConfig}
 
+// ErrFeatureDisabled — a store implements a feature its configuration
+// turned off (FeatureGate): Require, As and AsAll refuse it so, apart from
+// a feature the store lacks, which is a build to fix rather than a mode to
+// run in. Matches limes.ErrInvalidConfig.
+var ErrFeatureDisabled error = &familyError{"limes: feature disabled by the store's configuration", limes.ErrInvalidConfig}
+
 // familyError is a sentinel with a name of its own that also matches the
 // family it belongs to, and that family's own, as limes's sentinels do.
 type familyError struct {

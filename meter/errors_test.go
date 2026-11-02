@@ -60,6 +60,7 @@ var sentinelMatrix = map[string]sentinelCase{
 	"ErrLeaseNotFound":               {ErrLeaseNotFound, []string{famNotFound}, "", http.StatusInternalServerError},
 	"ErrLeaseNested":                 {ErrLeaseNested, []string{famConflict}, "", http.StatusConflict},
 	"ErrLeasingDisabled":             {ErrLeasingDisabled, []string{famConfig}, "", http.StatusInternalServerError},
+	"ErrFeatureDisabled":             {ErrFeatureDisabled, []string{famConfig}, "", http.StatusInternalServerError},
 	"ErrTenantBudgetVersionMismatch": {ErrTenantBudgetVersionMismatch, []string{famConflict}, "", http.StatusConflict},
 	"ErrCounterOverflow":             {ErrCounterOverflow, nil, "", http.StatusInternalServerError},
 	"ErrRefundExceedsCharge":         {ErrRefundExceedsCharge, nil, "", http.StatusInternalServerError},

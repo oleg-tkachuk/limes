@@ -22,15 +22,21 @@ func As[T any](s Store) (T, error) {
 
 // AsAll sets each target, a pointer to an optional interface beside Store,
 // to s, or refuses with ErrInvalidConfig naming every one s is not — one
-// call at startup for every interface a consumer uses. A target that is no
-// pointer to an interface is ErrInvalidRequest, and none is set.
+// call at startup for every interface a consumer uses. Each target it
+// refuses is left as it was, nil for a fresh variable, so its error is
+// always checked. Whether a target is a pointer to an interface is known
+// only when it runs: one that is not is ErrInvalidRequest, and none is set.
 func AsAll(s Store, targets ...any) error {
-	missing, err := optional.Assign(s, nil, ErrInvalidRequest, targets...)
+	absent, err := optional.Assign(s, nil, ErrInvalidRequest, targets...)
 	if err != nil {
 		return err
 	}
-	if len(missing) > 0 {
-		return fmt.Errorf("%w: the record store lacks %s", ErrInvalidConfig, strings.Join(missing, ", "))
+	if len(absent) > 0 {
+		names := make([]string, len(absent))
+		for i, a := range absent {
+			names[i] = a.String()
+		}
+		return fmt.Errorf("%w: the record store lacks %s", ErrInvalidConfig, strings.Join(names, ", "))
 	}
 	return nil
 }

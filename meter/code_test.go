@@ -26,7 +26,7 @@ var meterSentinels = map[string]error{
 	"ErrCopyLimitExceeded": ErrCopyLimitExceeded, "ErrUsageNotFound": ErrUsageNotFound,
 	"ErrTenantBudgetNotFound": ErrTenantBudgetNotFound, "ErrTenantBudgetVersionMismatch": ErrTenantBudgetVersionMismatch,
 	"ErrExternalRefConflict": ErrExternalRefConflict, "ErrSettleConflict": ErrSettleConflict,
-	"ErrLeaseExhausted": ErrLeaseExhausted, "ErrLeaseRequestsExhausted": ErrLeaseRequestsExhausted, "ErrLeaseNotFound": ErrLeaseNotFound, "ErrLeaseNested": ErrLeaseNested, "ErrLeasingDisabled": ErrLeasingDisabled,
+	"ErrLeaseExhausted": ErrLeaseExhausted, "ErrLeaseRequestsExhausted": ErrLeaseRequestsExhausted, "ErrLeaseNotFound": ErrLeaseNotFound, "ErrLeaseNested": ErrLeaseNested, "ErrLeasingDisabled": ErrLeasingDisabled, "ErrFeatureDisabled": ErrFeatureDisabled,
 }
 
 // declaredSentinels are the exported Err variables this package's
@@ -198,5 +198,25 @@ func TestMeterCategoryOfCode(t *testing.T) {
 	}
 	if got, ok := CategoryOfCode("no_such_code"); ok {
 		t.Errorf("CategoryOfCode of an unknown code = %q, want none", got)
+	}
+}
+
+// ReasonOfCode answers the meter's refusals with the reason they fold into,
+// limes's codes as limes does, and no reason for any other.
+func TestMeterReasonOfCode(t *testing.T) {
+	for code, want := range map[limes.Code]limes.Reason{
+		CodeCopyLimitExceeded:      limes.ReasonRequestLimitExceeded,
+		CodeLeaseExhausted:         limes.ReasonBudgetExceeded,
+		CodeLeaseRequestsExhausted: limes.ReasonRequestLimitExceeded,
+		limes.CodeRevoked:          limes.ReasonRevoked,
+	} {
+		if got, ok := ReasonOfCode(code); !ok || got != want {
+			t.Errorf("ReasonOfCode(%q) = %q, %v; want %q", code, got, ok, want)
+		}
+	}
+	for _, code := range []limes.Code{CodeChargeNotFound, CodeFeatureDisabled, "no_such_code"} {
+		if got, ok := ReasonOfCode(code); ok {
+			t.Errorf("ReasonOfCode(%q) = %q, want none", code, got)
+		}
 	}
 }

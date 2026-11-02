@@ -124,6 +124,19 @@ func ReasonOf(err error) (Reason, bool) {
 	return rule.reason, true
 }
 
+// ReasonOfCode returns the reason a refusal with code is challenged with —
+// its own name, or the wider one it is folded into, as tenant_erased into
+// revoked — and false for a code that is no refusal, such as not_found;
+// meter.ReasonOfCode knows the meter's codes too.
+func ReasonOfCode(code Code) (Reason, bool) {
+	for _, r := range codeRules {
+		if r.code == code {
+			return ReasonOf(r.sentinel)
+		}
+	}
+	return "", false
+}
+
 // Permanent reports whether a refusal for r stands for as long as the
 // capability does: the same request with the same capability will be refused
 // again, whatever happens elsewhere, so a caller stops rather than retries.

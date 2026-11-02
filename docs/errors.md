@@ -122,15 +122,17 @@ from the error with one call:
 |---|---|---|
 | Sentinel, `limes.Err…` | `errors.Is` | Branching in Go. Families nest: `meter.ErrLeaseExhausted` is also `limes.ErrBudgetExceeded`. |
 | Code, `limes.Code` | `limes.CodeOf`, `meter.CodeOf` | The wire: the one stable name of every error, which a client branches on. |
-| Reason, `limes.Reason` | `limes.ReasonOf` | A refusal of a presented capability only: why, as RFC 6750 and RFC 9449 challenge it, and whether it is permanent (`Reason.Permanent`). |
+| Reason, `limes.Reason` | `limes.ReasonOf`, `limes.ReasonOfCode` | A refusal of a presented capability only: why, as RFC 6750 and RFC 9449 challenge it, and whether it is permanent (`Reason.Permanent`). |
 | Category, `limes.Category` | `limes.CategoryOf`, `meter.CategoryOf` | What the caller does about it, for a transport with fewer codes than limes. |
 
 A refusal's code is its reason, but where the reason folds several codes
 into one: `tenant_erased` and `delegation_too_deep` are refused as
 `revoked`, `copy_limit_exceeded` and `lease_requests_exhausted` as
-`request_limit_exceeded`, `lease_exhausted` as `budget_exceeded`. So the
-reason cannot be derived from a code alone without that table, and a code
-cannot be derived from a reason at all: send the code, and the reason
+`request_limit_exceeded`, `lease_exhausted` as `budget_exceeded`.
+`limes.ReasonOfCode(code)` and `meter.ReasonOfCode(code)` read that table,
+so a consumer holding only a code — mapping it, or filling an error detail
+— gets the reason without the error; a code cannot be derived from a
+reason, since one reason stands for several. Send the code, and the reason
 beside it where a challenge or an error detail wants one. An error that is
 no refusal — `not_found`, `conflict` — has a code and a category and no
 reason.
@@ -174,14 +176,14 @@ The status stays the finer answer: within `exhausted`, a permanent refusal
 code's category without an error to hand, so a test of a consumer's own
 mapping walks `Codes()` and checks each pair.
 
-A category says what retrying would do, not how bad the failure is.
-`no_revocation_lineage` is `internal`: only `NewRevocationCache` returns
-it, at startup, for an upstream that names no lineage, and no retry
-changes that upstream: it never answers a request. `unavailable` is a
-dependency that failed on this request and may answer the next time: the
-issuer's keys (`keys_unavailable`), or a store whose pages handed back a
-cursor already fetched (`cursor_repeated`), which a walk begun again can
-get past once whatever moved its listing settles. Every `unauthenticated` code is
+A category says what retrying would do, not how bad the failure is, and
+agrees with the status: every 502 and 503 is `unavailable`, a dependency
+that failed and may answer the next time — the issuer's keys
+(`keys_unavailable`), a store whose pages handed back a cursor already
+fetched (`cursor_repeated`), which a walk begun again can get past once
+whatever moved its listing settles, and a revocation upstream that names
+no lineage (`no_revocation_lineage`), which `NewRevocationCache` refuses
+at startup until the upstream it is given does. Every `unauthenticated` code is
 a credential no longer good or never proven — expired, revoked, a bad
 proof — which another credential may pass; a transport whose codes keep
 those apart from a lack of permission maps them to its own
@@ -233,7 +235,7 @@ unauthenticated code, not to its permission-denied one.
 | `tenant_deleted` | 410 | `limes.ErrTenantDeleted` |  |  | The tenant is deleted | `not_found` |
 | `scope_mismatch` | 500 | `limes.ErrScopeMismatch` |  |  | The call is scoped to another tenant than its request names | `internal` |
 | `proof_unsupported` | 500 | `limes.ErrProofUnsupported` |  |  | The capability is bound to a key and no proof is checked | `internal` |
-| `no_revocation_lineage` | 502 | `limes.ErrNoRevocationLineage` |  |  | The revocation upstream names no lineage | `internal` |
+| `no_revocation_lineage` | 502 | `limes.ErrNoRevocationLineage` |  |  | The revocation upstream names no lineage | `unavailable` |
 | `copy_counters_not_metered` | 500 | `limes.ErrCopyCountersNotMetered` |  |  | Copy limits need a verifier that meters copies | `internal` |
 | `cursor_repeated` | 502 | `limes.ErrCursorRepeated` |  |  | The store returned a cursor already fetched | `unavailable` |
 | `invalid_config` | 500 | `limes.ErrInvalidConfig` |  |  | The server is misconfigured | `internal` |
@@ -260,6 +262,7 @@ unauthenticated code, not to its permission-denied one.
 | `lease_not_found` | 404 | `meter.ErrLeaseNotFound` |  |  | The capability holds no lease | `not_found` |
 | `lease_nested` | 409 | `meter.ErrLeaseNested` |  |  | An ancestor of the capability holds a lease | `conflict` |
 | `leasing_disabled` | 500 | `meter.ErrLeasingDisabled` |  |  | Leasing is not enabled on the store | `internal` |
+| `feature_disabled` | 500 | `meter.ErrFeatureDisabled` |  |  | A feature is disabled by the store's configuration | `internal` |
 
 ## The exchange's codes
 

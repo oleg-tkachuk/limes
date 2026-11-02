@@ -24,6 +24,7 @@ const (
 	CodeLeaseNotFound               limes.Code = "lease_not_found"
 	CodeLeaseNested                 limes.Code = "lease_nested"
 	CodeLeasingDisabled             limes.Code = "leasing_disabled"
+	CodeFeatureDisabled             limes.Code = "feature_disabled"
 )
 
 // codeRule is one of the meter's sentinels, its code, its category and, for
@@ -53,6 +54,7 @@ var codeRules = []codeRule{
 	{ErrLeaseNotFound, CodeLeaseNotFound, http.StatusNotFound, "The capability holds no lease", limes.CategoryNotFound},
 	{ErrLeaseNested, CodeLeaseNested, http.StatusConflict, "An ancestor of the capability holds a lease", limes.CategoryConflict},
 	{ErrLeasingDisabled, CodeLeasingDisabled, http.StatusInternalServerError, "Leasing is not enabled on the store", limes.CategoryInternal},
+	{ErrFeatureDisabled, CodeFeatureDisabled, http.StatusInternalServerError, "A feature is disabled by the store's configuration", limes.CategoryInternal},
 }
 
 // codeRuleFor is the meter's rule err matches.
@@ -83,6 +85,18 @@ func CategoryOf(err error) (limes.Category, bool) {
 		return r.category, true
 	}
 	return limes.CategoryOf(err)
+}
+
+// ReasonOfCode is the reason a refusal with code is challenged with: the
+// meter's own code's — copy_limit_exceeded is request_limit_exceeded — or
+// limes.ReasonOfCode's, and false for a code that is no refusal.
+func ReasonOfCode(code limes.Code) (limes.Reason, bool) {
+	for _, r := range codeRules {
+		if r.code == code {
+			return limes.ReasonOf(r.sentinel)
+		}
+	}
+	return limes.ReasonOfCode(code)
 }
 
 // CategoryOfCode is code's category: the meter's own code's, or
