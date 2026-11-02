@@ -2,6 +2,16 @@
 
 Every release of the otelmetric module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.16.0](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.15.6...otelmetric%2Fv0.16.0) (2026-11-02)
+
+### Features
+
+* **otelmetric:** label a limit's refusal with the ceiling that refused it ([71da15f](https://github.com/oleg-tkachuk/limes/commit/71da15fe06b4a6e47efd661227a37a0130c7743c))
+
+### Dependencies
+
+* require limes v0.149.0
+
 ## [0.15.6](https://github.com/oleg-tkachuk/limes/compare/otelmetric%2Fv0.15.5...otelmetric%2Fv0.15.6) (2026-11-02)
 
 ### Dependencies

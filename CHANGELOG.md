@@ -2,6 +2,14 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.149.0](https://github.com/oleg-tkachuk/limes/compare/v0.148.4...v0.149.0) (2026-11-02)
+
+### Features
+
+* add RevocationAnswer.Below ([98670d6](https://github.com/oleg-tkachuk/limes/commit/98670d64d0eb8d142e8df0e612e4a7d836f57c8d))
+* give every error code a category ([b4c6d9d](https://github.com/oleg-tkachuk/limes/commit/b4c6d9d356813c160c67110d1e1129cfbab3e7de))
+* **meter:** name a store's optional features and require them ([c7117f6](https://github.com/oleg-tkachuk/limes/commit/c7117f61c9687fe259245a8e6c12b9ac82a21df2))
+
 ## [0.148.4](https://github.com/oleg-tkachuk/limes/compare/v0.148.3...v0.148.4) (2026-11-02)
 
 ### Bug Fixes
