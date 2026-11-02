@@ -2,6 +2,12 @@
 
 Every release of the exchange module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.15.13](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.15.12...exchange%2Fv0.15.13) (2026-11-02)
+
+### Dependencies
+
+* require limes v0.150.0
+
 ## [0.15.12](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.15.11...exchange%2Fv0.15.12) (2026-11-02)
 
 ### Dependencies

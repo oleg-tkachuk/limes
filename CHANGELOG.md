@@ -2,6 +2,20 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.150.0](https://github.com/oleg-tkachuk/limes/compare/v0.149.0...v0.150.0) (2026-11-02)
+
+### ⚠ BREAKING CHANGES
+
+* take the subject token's expiry as ClaimExchange's argument
+
+### Features
+
+* take the subject token's expiry as ClaimExchange's argument ([c64bfb4](https://github.com/oleg-tkachuk/limes/commit/c64bfb47807d252d36b3a42d54c24f24800d03cd))
+
+### Bug Fixes
+
+* **dpop:** keep a host's escapes escaped when normalising a URI ([0ded263](https://github.com/oleg-tkachuk/limes/commit/0ded263c964e55565ec1e43c612b0c014823a71b))
+
 ## [0.149.0](https://github.com/oleg-tkachuk/limes/compare/v0.148.4...v0.149.0) (2026-11-02)
 
 ### Features
