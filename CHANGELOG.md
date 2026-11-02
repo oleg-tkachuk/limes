@@ -2,6 +2,17 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.153.0](https://github.com/oleg-tkachuk/limes/compare/v0.152.0...v0.153.0) (2026-11-02)
+
+### Features
+
+* **meter:** refuse a feature turned off as ErrFeatureDisabled ([95131a1](https://github.com/oleg-tkachuk/limes/commit/95131a12f5e5f6430fbaf1cfad0dc95954ae2ccb))
+* read a refusal's reason from its code ([649773e](https://github.com/oleg-tkachuk/limes/commit/649773ec2fdcd47949b02fd718282eb9a57cb4ae))
+
+### Bug Fixes
+
+* categorise no_revocation_lineage as unavailable ([fbcfcc0](https://github.com/oleg-tkachuk/limes/commit/fbcfcc00490cfd008da74f9b5bbb15bb64a6119f))
+
 ## [0.152.0](https://github.com/oleg-tkachuk/limes/compare/v0.151.0...v0.152.0) (2026-11-02)
 
 ### Features
