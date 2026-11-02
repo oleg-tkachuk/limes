@@ -49,7 +49,14 @@ func Normalize(raw string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%q: host: %w", raw, err)
 	}
-	return scheme + "://" + host + NormalizePath(u.EscapedPath()), nil
+	return scheme + "://" + escapeHost(host) + NormalizePath(u.EscapedPath()), nil
+}
+
+// escapeHost is host as a URI writes it. net/url hands a host back decoded,
+// so a byte only an escape can carry — the "%" of "%25", an IPv6 zone's —
+// is escaped again, or the result would not parse.
+func escapeHost(host string) string {
+	return strings.TrimPrefix((&url.URL{Host: host}).String(), "//")
 }
 
 // normalizeHost is u's host, lowercase, with its port unless it is

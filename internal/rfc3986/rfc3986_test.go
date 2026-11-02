@@ -23,6 +23,10 @@ func TestNormalize(t *testing.T) {
 		"https://api.example.com/caf%c3%a9":  "https://api.example.com/caf%C3%A9",
 		"https://api.example.com/../../a":    "https://api.example.com/a",
 		"https://api.example.com/a/b/..":     "https://api.example.com/a/",
+		// A host's escapes stay escapes: net/url hands the host back
+		// decoded, and a bare "%" in it would not parse again.
+		"A://%25":                        "a://%25/",
+		"https://[fe80::1%25en0]:8443/a": "https://[fe80::1%25en0]:8443/a",
 	}
 	for in, want := range cases {
 		if got, err := Normalize(in); err != nil || got != want {
@@ -72,6 +76,7 @@ func FuzzNormalize(f *testing.F) {
 	for _, s := range []string{"https://A.example:443/a/./b/../%7e?q#f", "http://[::1]:80", "https://h/%zz/.."} {
 		f.Add(s)
 	}
+	f.Add("A://%25")
 	f.Fuzz(func(t *testing.T, raw string) {
 		once, err := Normalize(raw)
 		if err != nil {
