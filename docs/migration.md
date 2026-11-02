@@ -19,7 +19,9 @@ change may break the API, and this file stops growing.
 limes stays on 0.x on `main` until the release that cuts 1.0, so every entry
 below is filed under the 0.x release that made the change. A candidate,
 `v1.0.0-rc.N`, tags `main` as it is: its API is that of the newest 0.x
-release before it. Each candidate's
+release before it. One is cut after every 0.x release of limes, and by
+hand between them, so a build on the candidates gets each release's fixes:
+Go selects a candidate over any 0.x release. Each candidate's
 [GitHub release](https://github.com/oleg-tkachuk/limes/releases?q=v1.0.0-rc&expanded=true)
 names that release under **API**, and each nested module's release on
 `main` when the candidate was cut. A `+` marks a candidate cut between two

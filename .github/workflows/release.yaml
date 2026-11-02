@@ -13,7 +13,8 @@ name: Release
 # module that requires limes raised to the limes it releases. A run by hand
 # with the prerelease channel instead tags a release candidate, vX.Y.Z-rc.N —
 # with next_major, one of limes's next major, v1.0.0-rc.N, whose API may still
-# break before 1.0 —; either may name one module. Every run, by hand too,
+# break before 1.0 —; either may name one module. While that line is open,
+# every release of limes is followed by its next candidate. Every run, by hand too,
 # acts only on a commit a CI run on main passed.
 #
 # A release is a vX.Y.Z tag — the Go proxy reads the tag, so nothing else is
@@ -195,6 +196,20 @@ jobs:
           MODULE: ${{ inputs.module || 'all' }}
           MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
           NEXT_MAJOR: ${{ inputs.next_major || false }}
+        run: node .github/ci/release.ts
+
+      # While limes's 1.0 is a line of candidates, each release of limes is
+      # followed by the next one, from main's head: Go orders every
+      # v1.0.0-rc.N above every 0.x, so a build requiring a candidate would
+      # never get the release's fixes otherwise. See .github/ci/release-tag.ts.
+      - name: Cut the next candidate of 1.0 after a release of limes
+        id: follow
+        if: steps.tag.outputs.follow-candidate == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_DEPLOY_KEY: ${{ secrets.RELEASE_DEPLOY_KEY }}
+          CHANNEL: prerelease
+          FOLLOW_RELEASE: "true"
         run: node .github/ci/release.ts
 
   # After the tags, the next release pull request: one commit raising each
