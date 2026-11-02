@@ -248,7 +248,7 @@ func pgSide(t *testing.T, tenant uuid.UUID, clock *fakeClock) *diffSide {
 	if err != nil {
 		t.Fatal(err)
 	}
-	usage, err := NewUsageStore(Config{DB: app, Leases: true, Now: clock.Now})
+	usage, err := NewUsageStore(Config{DB: app, Now: clock.Now})
 	if err != nil {
 		t.Fatal(err)
 	}

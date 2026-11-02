@@ -47,7 +47,7 @@ func TestMeterRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	usage, err := NewUsageStore(Config{DB: pool, Leases: true})
+	usage, err := NewUsageStore(Config{DB: pool})
 	if err != nil {
 		t.Fatal(err)
 	}

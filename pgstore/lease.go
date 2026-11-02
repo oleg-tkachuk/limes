@@ -350,7 +350,7 @@ func (s *UsageStore) Lease(ctx context.Context, req meter.LeaseRequest) (meter.L
 		return meter.Lease{}, err
 	}
 	if !s.leases {
-		s.log.WarnContext(ctx, "pgstore: lease refused: Config.Leases is not set", slog.String(logKeyOp, retriedLease))
+		s.log.WarnContext(ctx, "pgstore: lease refused: Config.DisableLeases is set", slog.String(logKeyOp, retriedLease))
 		return meter.Lease{}, meter.ErrLeasingDisabled
 	}
 	var out meter.Lease
