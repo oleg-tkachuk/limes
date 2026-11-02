@@ -84,6 +84,15 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   records already there their capability's expiry; 036 indexes them by
   that expiry, `CONCURRENTLY`. `migrate.Run` applies both; a consumer that
   vendors the schema applies steps 035 and 036 before this release.
+- Between the migration and the last replica on this release, an older
+  replica fails every exchange: it records one without `token_expires_at`,
+  which 035 makes `NOT NULL`, so its `ClaimExchange` errors and the
+  capability it already issued is left to expire unused. A replica whose
+  readiness runs `CheckSchema` leaves rotation at the migration, which it
+  refuses as `ErrSchemaMismatch`; route exchanges away from any other
+  until it runs this release. Its `Store.Purge` no longer takes exchanges
+  with their capabilities once 035 drops the foreign key; this release's
+  `Purge` removes them.
 - `Store.Purge` also removes the exchanges whose subject tokens expired
   past the retention, and no longer takes one with its capability.
 - A record already there kept only its capability's expiry, which a policy
