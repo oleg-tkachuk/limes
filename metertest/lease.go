@@ -1,6 +1,7 @@
 package metertest
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"testing"
@@ -75,8 +76,9 @@ func checkLeaseStopsChargesAtTheLeaseholder(t *testing.T, f fixture) {
 		expect.That(t, f.usageOf(t, id).ReservedAmount == leased, "%s holds %v once leased, want %v", id, f.usageOf(t, id).ReservedAmount, leased)
 	}
 	expect.That(t, f.tenantOf(t).ReservedAmount == leased, "the tenant holds %v once leased, want %v", f.tenantOf(t).ReservedAmount, leased)
-	_, err := f.chargeOf(child, leaseCharge)
+	receipt, err := f.chargeOf(child, leaseCharge)
 	expect.Must(t, err == nil, "Charge under the lease: %v", err)
+	expect.That(t, receipt.SpentAmount == leaseCharge, "the receipt of a charge under the lease reads %v spent, want %v", receipt.SpentAmount, leaseCharge)
 	c, r, b := f.usageOf(t, f.child), f.usageOf(t, f.root), f.tenantOf(t)
 	expect.That(t, c.SpentAmount == leaseCharge && c.ReservedAmount == leased-leaseCharge, "the child after a charge under its lease = %+v, want %v spent and %v held", c, leaseCharge, leased-leaseCharge)
 	expect.That(t, r.SpentAmount == 0 && r.ReservedAmount == leased, "the root after a charge under the child's lease = %+v, want nothing spent and the lease held", r)
@@ -380,4 +382,234 @@ func checkLeaseOfACopyIsRefused(t *testing.T, f fixture) {
 	for _, id := range []uuid.UUID{f.child, f.root} {
 		expect.That(t, f.usageOf(t, id).ReservedAmount == 0, "%s holds %v after a copy's refused lease, want nothing", id, f.usageOf(t, id).ReservedAmount)
 	}
+}
+
+// The requests the narrowest leases and ceilings of the lease checks hold:
+// the least lease of requests there is, and the request ceiling of a child
+// bumping under its root's lease.
+const (
+	leastRequests  int64 = 1
+	narrowRequests int64 = 1
+)
+
+// rootSubjectOf is the fixture's root as a verified capability would give
+// it, with a request ceiling of requests.
+func (f fixture) rootSubjectOf(requests int64) limes.MeterSubject {
+	return newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, budget: budgetOf(rootBudget), requests: requestsOf(requests)})
+}
+
+// childSubjectOf is the fixture's child with a request ceiling of requests.
+func (f fixture) childSubjectOf(requests int64) limes.MeterSubject {
+	return newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), requests: requestsOf(requests)})
+}
+
+// A lease past its end covers nothing below it: a capability under the
+// expired leaseholder charges through the whole chain, the tenant with it,
+// and leases on its own.
+func checkAnExpiredLeaseCoversNothingBelow(t *testing.T, f fixture) {
+	l := f.leaser(t)
+	if f.Advance == nil {
+		t.Skip("Env.Advance not set")
+	}
+	const ttl = time.Minute
+	_, err := l.Lease(f.Ctx, meter.LeaseRequest{Subject: newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, budget: budgetOf(rootBudget)}), Amount: leased, TTL: ttl})
+	expect.Must(t, err == nil, "the root's Lease: %v", err)
+	f.Advance(2 * ttl)
+	child := f.childSubject()
+	_, err = f.chargeOf(child, leaseCharge)
+	expect.Must(t, err == nil, "the child's charge past the root's lease's end: %v", err)
+	expect.That(t, f.tenantOf(t).SpentAmount == leaseCharge, "the tenant spent %v of a charge past the root's lease's end, want %v", f.tenantOf(t).SpentAmount, leaseCharge)
+	_, err = l.Lease(f.Ctx, meter.LeaseRequest{Subject: child, Amount: leased})
+	expect.That(t, err == nil, "the child's lease under the root's expired one: %v", err)
+}
+
+// Under an ancestor's lease a capability is held to its own ceilings, as
+// without one: past the child's budget, or its requests, a charge or a bump
+// is refused though the root's lease has room for it.
+func checkALeaseHoldsADescendantToItsOwnCeilings(t *testing.T, f fixture) {
+	l := f.leaser(t)
+	_, err := l.Lease(f.Ctx, meter.LeaseRequest{Subject: f.rootSubjectOf(requestRoot), Amount: rootBudget, Requests: requestRoot})
+	expect.Must(t, err == nil, "the root's Lease: %v", err)
+	child := f.childSubjectOf(narrowRequests)
+	_, err = f.chargeOf(child, childBudget+one)
+	expect.That(t, errors.Is(err, limes.ErrBudgetExceeded) && !errors.Is(err, meter.ErrLeaseExhausted), "a charge past the child's budget under the root's lease: %v, want ErrBudgetExceeded, not ErrLeaseExhausted", err)
+	for range narrowRequests {
+		expect.Must(t, f.bump(child) == nil, "a bump within the child's requests")
+	}
+	err = f.bump(child)
+	expect.That(t, errors.Is(err, limes.ErrRequestLimitExceeded) && !errors.Is(err, meter.ErrLeaseRequestsExhausted), "a bump past the child's requests under the root's lease: %v, want ErrRequestLimitExceeded, not ErrLeaseRequestsExhausted", err)
+	open, err := l.GetLease(f.Ctx, f.root)
+	expect.That(t, err == nil && open.Spent == 0 && open.RequestsSpent == narrowRequests, "the root's lease after the refusals = %+v, %v; want nothing spent and %d requests made", open, err, narrowRequests)
+}
+
+// A lease of a capability's whole ceiling is its to spend: the ceiling
+// admitted the lease, so every charge and bump under it is admitted.
+func checkALeaseOfTheWholeCeilingIsSpendable(t *testing.T, f fixture) {
+	l := f.leaser(t)
+	child := f.childSubjectOf(requestChild)
+	_, err := l.Lease(f.Ctx, meter.LeaseRequest{Subject: child, Amount: childBudget, Requests: requestChild})
+	expect.Must(t, err == nil, "a Lease of the child's whole ceilings: %v", err)
+	_, err = f.chargeOf(child, childBudget)
+	expect.That(t, err == nil, "a charge of the whole lease: %v", err)
+	for i := range requestChild {
+		expect.That(t, f.bump(child) == nil, "bump %d of the whole lease", i)
+	}
+	open, err := l.GetLease(f.Ctx, f.child)
+	expect.That(t, err == nil && open.Spent == childBudget && open.RequestsSpent == requestChild, "the lease spent whole = %+v, %v; want %v and %d requests spent", open, err, childBudget, requestChild)
+}
+
+// The least lease there is holds and covers as any other: a nano and a
+// request leased are held on the chain, a charge of the nano and a bump go
+// under it and stop at the leaseholder, which holds nothing once both are
+// spent.
+func checkTheLeastLeaseCovers(t *testing.T, f fixture) {
+	l := f.leaser(t)
+	child := f.childSubjectOf(requestChild)
+	_, err := l.Lease(f.Ctx, meter.LeaseRequest{Subject: child, Amount: nano, Requests: leastRequests})
+	expect.Must(t, err == nil, "a Lease of a nano and a request: %v", err)
+	r := f.usageOf(t, f.root)
+	expect.That(t, r.ReservedAmount == nano && r.ReservedRequests == leastRequests, "the root under the least lease = %+v, want a nano and a request held", r)
+	_, err = f.chargeOf(child, nano)
+	expect.Must(t, err == nil, "a charge of the nano leased: %v", err)
+	expect.Must(t, f.bump(child) == nil, "a bump of the request leased")
+	expect.That(t, f.tenantOf(t).SpentAmount == 0 && f.usageOf(t, f.root).RequestCount == 0, "a charge or a bump under the least lease went past the leaseholder")
+	c := f.usageOf(t, f.child)
+	expect.That(t, c.SpentAmount == nano && c.RequestCount == leastRequests && c.ReservedAmount == 0 && c.ReservedRequests == 0, "the leaseholder with its least lease spent = %+v, want a nano and a request spent and nothing held", c)
+	open, err := l.GetLease(f.Ctx, f.child)
+	expect.That(t, err == nil && open.Spent == nano && open.RequestsSpent == leastRequests, "the least lease spent = %+v, %v; want a nano and a request spent", open, err)
+}
+
+// A refund of a descendant's charge under an open lease goes back, once, to
+// the descendant, the leaseholder and the lease's balance, and to nothing
+// above; one of a charge taken before the descendant's counters restarted
+// leaves the restarted counters alone.
+func checkLeaseRefundOfADescendantsCharge(t *testing.T, f fixture) {
+	l := f.leaser(t)
+	f.lease(t, l, f.childSubject(), leased)
+	grandchild, err := f.newCapability(f.child, unlimitedBudget)
+	expect.Must(t, err == nil, "grandchild: %v", err)
+	below := newSubject(subjectSpec{capID: grandchild, tenant: f.Tenant})
+	charge := func(amount limes.Nanos) meter.ChargeReceipt {
+		t.Helper()
+		r, err := f.chargeOf(below, amount)
+		expect.Must(t, err == nil, "the grandchild's charge: %v", err)
+		return r
+	}
+	refund := func(r meter.ChargeReceipt) {
+		t.Helper()
+		_, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Remaining: true})
+		expect.Must(t, err == nil, "refund: %v", err)
+	}
+	first, second := charge(leaseCharge), charge(leaseCharge)
+	refund(first)
+	expect.That(t, f.usageOf(t, grandchild).SpentAmount == leaseCharge, "the grandchild spent %v once one of its two charges was refunded, want %v", f.usageOf(t, grandchild).SpentAmount, leaseCharge)
+	c := f.usageOf(t, f.child)
+	expect.That(t, c.SpentAmount == leaseCharge && c.ReservedAmount == leased-leaseCharge, "the leaseholder after a refund of its grandchild's charge = %+v, want %v spent and %v held", c, leaseCharge, leased-leaseCharge)
+	open, err := l.GetLease(f.Ctx, f.child)
+	expect.That(t, err == nil && open.Spent == leaseCharge, "the lease after the refund = %+v, %v; want %v spent", open, err, leaseCharge)
+	expect.That(t, f.usageOf(t, f.root).SpentAmount == 0 && f.tenantOf(t).SpentAmount == 0, "a refund under the child's lease reached the root or the tenant")
+	expect.Must(t, f.Usage.DeleteUsage(f.Ctx, meter.DeleteUsageRequest{CapabilityID: grandchild}) == nil, "DeleteUsage of the grandchild")
+	charge(one)
+	refund(second)
+	expect.That(t, f.usageOf(t, grandchild).SpentAmount == one, "the grandchild's restarted counters spent %v after a refund of a charge before the restart, want %v", f.usageOf(t, grandchild).SpentAmount, one)
+	expect.That(t, f.usageOf(t, f.child).SpentAmount == one, "the leaseholder spent %v after the second refund, want %v", f.usageOf(t, f.child).SpentAmount, one)
+}
+
+// A refund of a charge whose lease was settled goes back to the chain the
+// settlement charged, even once the capability has leased again: the new
+// lease neither spent it nor takes it.
+func checkLeaseRefundSkipsALeaseOpenedSince(t *testing.T, f fixture) {
+	l := f.leaser(t)
+	child := f.childSubject()
+	f.lease(t, l, child, leased)
+	charged, err := f.chargeOf(child, leaseCharge)
+	expect.Must(t, err == nil, "charge: %v", err)
+	_, err = l.SettleLease(f.Ctx, meter.SettleLeaseRequest{Subject: child})
+	expect.Must(t, err == nil, "settle: %v", err)
+	f.lease(t, l, child, leased)
+	_, err = f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: charged.ChargeID, Remaining: true})
+	expect.Must(t, err == nil, "refund: %v", err)
+	for name, got := range map[string]limes.Nanos{"the child": f.usageOf(t, f.child).SpentAmount, "the root": f.usageOf(t, f.root).SpentAmount, "the tenant": f.tenantOf(t).SpentAmount} {
+		expect.That(t, got == 0, "%s spent %v after a refund of the settled lease's charge, want nothing", name, got)
+	}
+	expect.That(t, f.usageOf(t, f.child).ReservedAmount == leased, "the child holds %v under its new lease after the refund, want %v", f.usageOf(t, f.child).ReservedAmount, leased)
+	open, err := l.GetLease(f.Ctx, f.child)
+	expect.That(t, err == nil && open.Spent == 0 && open.Amount == leased, "the new lease after the refund = %+v, %v; want %v leased and nothing spent", open, err, leased)
+}
+
+// A lease above a descendant's settles only what it holds itself: the
+// ancestor keeps holding what the descendant's lease holds of it, budget
+// and requests.
+func checkALeaseAboveAnotherSettlesOnlyItsOwn(t *testing.T, f fixture) {
+	l := f.leaser(t)
+	_, err := l.Lease(f.Ctx, meter.LeaseRequest{Subject: f.childSubjectOf(requestChild), Amount: leased, Requests: requestLeased})
+	expect.Must(t, err == nil, "the child's Lease: %v", err)
+	root := f.rootSubjectOf(requestRoot)
+	_, err = l.Lease(f.Ctx, meter.LeaseRequest{Subject: root, Amount: leased, Requests: requestLeased})
+	expect.Must(t, err == nil, "the root's Lease above the child's: %v", err)
+	_, err = f.chargeOf(root, leaseCharge)
+	expect.Must(t, err == nil, "the root's charge under its lease: %v", err)
+	expect.Must(t, f.bump(root) == nil, "the root's bump under its lease")
+	_, err = l.SettleLease(f.Ctx, meter.SettleLeaseRequest{Subject: root})
+	expect.Must(t, err == nil, "the root's SettleLease: %v", err)
+	r := f.usageOf(t, f.root)
+	expect.That(t, r.ReservedAmount == leased && r.ReservedRequests == requestLeased, "the root once its own lease settled = %+v, want the child's lease, %v and %d requests, still held", r, leased, requestLeased)
+	expect.That(t, r.SpentAmount == leaseCharge && r.RequestCount == 1, "the root once its own lease settled = %+v, want %v and a request spent", r, leaseCharge)
+}
+
+// SettleLease settles only the lease of its subject's capability in the
+// subject's tenant: the leaseholder named under another tenant finds none,
+// and the lease stays open.
+func checkLeaseIsSettledOnlyInItsTenant(t *testing.T, f fixture) {
+	l := f.leaser(t)
+	f.lease(t, l, f.childSubject(), leased)
+	elsewhere := newSubject(subjectSpec{capID: f.child, tenant: uuid.New(), budget: budgetOf(childBudget)})
+	_, err := l.SettleLease(f.Ctx, meter.SettleLeaseRequest{Subject: elsewhere})
+	expect.That(t, errors.Is(err, meter.ErrLeaseNotFound) || errors.Is(err, limes.ErrScopeMismatch), "SettleLease of the child under another tenant: %v, want ErrLeaseNotFound or ErrScopeMismatch", err)
+	open, err := l.GetLease(f.Ctx, f.child)
+	expect.That(t, err == nil && open.Amount == leased, "the child's lease after a settle under another tenant = %+v, %v; want it open", open, err)
+}
+
+// An erase of the tenant's usage ends the tenant's leases and no other
+// tenant's.
+func checkEraseTenantUsageEndsOnlyItsLeases(t *testing.T, f fixture) {
+	l := f.leaser(t)
+	eraser, ok := f.Usage.(meter.TenantUsageEraser)
+	if !ok {
+		t.Skip("the UsageStore does not implement meter.TenantUsageEraser")
+	}
+	other, err := f.newTenant()
+	expect.Must(t, err == nil, "NewTenant: %v", err)
+	theirCap, err := f.NewCapability(CapabilitySpec{Tenant: other, Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget})
+	expect.Must(t, err == nil, "capability of another tenant: %v", err)
+	theirCtx := f.tenantCtx(other)
+	_, err = l.Lease(theirCtx, meter.LeaseRequest{Subject: newSubject(subjectSpec{capID: theirCap, tenant: other}), Amount: leased})
+	expect.Must(t, err == nil, "another tenant's Lease: %v", err)
+	f.lease(t, l, f.childSubject(), leased)
+	expect.Must(t, eraser.EraseTenantUsage(f.Ctx, meter.EraseTenantUsageRequest{TenantID: f.Tenant}) == nil, "EraseTenantUsage")
+	_, err = l.GetLease(f.Ctx, f.child)
+	expect.That(t, errors.Is(err, meter.ErrLeaseNotFound), "the erased tenant's lease: %v, want ErrLeaseNotFound", err)
+	theirs, err := l.GetLease(theirCtx, theirCap)
+	expect.That(t, err == nil && theirs.Amount == leased, "another tenant's lease after the erase = %+v, %v; want it open", theirs, err)
+}
+
+// A charge under a lease runs onCharged as one without does: a callback
+// that succeeds sees the charge through, one that fails is returned as it
+// is, and the charge moves neither the counters nor the lease.
+func checkALeasedChargeRunsOnCharged(t *testing.T, f fixture) {
+	l := f.leaser(t)
+	child := f.childSubject()
+	f.lease(t, l, child, leased)
+	var seen meter.ChargeReceipt
+	r, err := f.Usage.Charge(f.Ctx, meter.ChargeRequest{Subject: child, Amount: leaseCharge}, func(_ context.Context, c meter.Charged) error {
+		seen = c.Receipt
+		return nil
+	})
+	expect.Must(t, err == nil && r.ChargeID != uuid.Nil() && seen.ChargeID == r.ChargeID, "a leased charge with a callback = %+v, %v; the callback saw %+v", r, err, seen)
+	boom := errors.New("side effect failed")
+	_, err = f.Usage.Charge(f.Ctx, meter.ChargeRequest{Subject: child, Amount: leaseCharge}, func(context.Context, meter.Charged) error { return boom })
+	expect.That(t, errors.Is(err, boom), "a leased charge with a failing callback: err = %v, want the callback's", err)
+	open, err := l.GetLease(f.Ctx, f.child)
+	expect.That(t, err == nil && open.Spent == leaseCharge, "the lease after a failed callback = %+v, %v; want %v spent", open, err, leaseCharge)
+	expect.That(t, f.usageOf(t, f.child).SpentAmount == leaseCharge, "the child spent %v after a failed callback, want %v", f.usageOf(t, f.child).SpentAmount, leaseCharge)
 }

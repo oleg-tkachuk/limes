@@ -38,6 +38,9 @@ var wrappedHelpers = map[string]map[string]string{
 	"metertest/metertest.go": {
 		"checkCallbackRollback": "a conformance check's own fixture: the error a side effect fails with",
 	},
+	"metertest/lease.go": {
+		"checkALeasedChargeRunsOnCharged": "a conformance check's own fixture: the error a side effect fails with",
+	},
 }
 
 // Every error this module constructs names a sentinel, so it has a code

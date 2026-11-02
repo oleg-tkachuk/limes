@@ -259,3 +259,18 @@ func checkRequestLeaseThatCannotBeCountedIsRefused(t *testing.T, f fixture) {
 		expect.That(t, u.RequestCount == 1 && u.ReservedRequests == 0, "%s after the refused lease = %+v, want 1 made and none held", id, u)
 	}
 }
+
+// A lease of requests alone holds none of a tenant's budget, so it creates
+// no budget for a tenant that has none.
+func checkARequestLeaseCreatesNoTenantBudget(t *testing.T, f fixture) {
+	l := f.leaser(t)
+	tenant, err := f.newTenant()
+	expect.Must(t, err == nil, "NewTenant: %v", err)
+	id, err := f.NewCapability(CapabilitySpec{Tenant: tenant, Requests: limes.RequestCeiling{Max: requestRoot}, Budget: unlimitedBudget})
+	expect.Must(t, err == nil, "capability of a tenant with no budget: %v", err)
+	ctx := f.tenantCtx(tenant)
+	_, err = l.Lease(ctx, meter.LeaseRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant, requests: requestsOf(requestRoot)}), Requests: requestLeased})
+	expect.Must(t, err == nil, "a Lease of requests alone: %v", err)
+	_, err = f.Usage.GetTenantBudget(ctx, tenant)
+	expect.That(t, errors.Is(err, meter.ErrTenantBudgetNotFound), "the tenant's budget after a lease of requests alone: %v, want ErrTenantBudgetNotFound", err)
+}

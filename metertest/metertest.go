@@ -220,9 +220,11 @@ func (e Env) listCtx() context.Context {
 // The ceilings every check works under: a root, a child narrower than it,
 // and a tenant aggregate between the two sums.
 const (
-	// one is one unit; cent a hundredth of one.
+	// one is one unit; cent a hundredth of one; nano the least amount
+	// there is.
 	one  limes.Nanos = limes.NanosPerUnit
 	cent             = one / 100
+	nano limes.Nanos = 1
 
 	rootBudget   = 25 * one
 	childBudget  = 20 * one
@@ -394,6 +396,18 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "LeaseOfACopyIsRefused", Run: checkLeaseOfACopyIsRefused},
 		{Name: "RequestLeaseExpiresIntoTheChain", Run: checkRequestLeaseExpires},
 		{Name: "RequestLeasesUnderOneRootStayUnderItsCeiling", Run: checkRequestLeaseConcurrency},
+		{Name: "AnExpiredLeaseCoversNothingBelow", Run: checkAnExpiredLeaseCoversNothingBelow},
+		{Name: "ALeaseHoldsADescendantToItsOwnCeilings", Run: checkALeaseHoldsADescendantToItsOwnCeilings},
+		{Name: "ALeaseOfTheWholeCeilingIsSpendable", Run: checkALeaseOfTheWholeCeilingIsSpendable},
+		{Name: "TheLeastLeaseCovers", Run: checkTheLeastLeaseCovers},
+		{Name: "LeaseRefundOfADescendantsChargeGoesToTheLeaseholder", Run: checkLeaseRefundOfADescendantsCharge},
+		{Name: "LeaseRefundSkipsALeaseOpenedSince", Run: checkLeaseRefundSkipsALeaseOpenedSince},
+		{Name: "ALeaseAboveAnotherSettlesOnlyItsOwn", Run: checkALeaseAboveAnotherSettlesOnlyItsOwn},
+		{Name: "LeaseIsSettledOnlyInItsTenant", Run: checkLeaseIsSettledOnlyInItsTenant},
+		{Name: "EraseTenantUsageEndsOnlyItsLeases", Run: checkEraseTenantUsageEndsOnlyItsLeases},
+		{Name: "ALeasedChargeRunsOnCharged", Run: checkALeasedChargeRunsOnCharged},
+		{Name: "ARequestLeaseCreatesNoTenantBudget", Run: checkARequestLeaseCreatesNoTenantBudget},
+		{Name: "TenantUnitMovesOnlyWhileNothingCounts", Run: checkTenantUnitMovesOnlyWhileNothingCounts},
 		{Name: "ReleaseMatchingReleasesTheHoldsOfRevokedMatches", Run: checkReleaseMatching},
 		{Name: "ReleaseMatchingWorksInBatches", Run: checkReleaseMatchingBatches},
 		{Name: "ReleaseMatchingSettlesLeasesInBatches", Run: checkReleaseMatchingSettlesLeasesInBatches},
@@ -402,6 +416,8 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "ReleaseMatchingRefusesAMalformedRequest", Run: checkReleaseMatchingMalformed},
 		{Name: "ReleaseMatchingReleasesInEveryTenant", Run: checkReleaseMatchingAllTenants},
 		{Name: "ReleaseMatchingReleasesOneCapability", Run: checkReleaseMatchingByCapability},
+		{Name: "ReleaseMatchingReportsAFullBatch", Run: checkReleaseMatchingReportsAFullBatch},
+		{Name: "ReleaseMatchingLeavesAHoldOffRecord", Run: checkReleaseMatchingLeavesAHoldOffRecord},
 		{Name: "ListTenantReservationsListsTheTenantsHolds", Run: checkListTenantReservations},
 		{Name: "ListTenantReservationsRefusesAMalformedRequest", Run: checkListTenantReservationsRefuses},
 		{Name: "RejectionMovesNothing", Run: checkRejectionMovesNothing},
@@ -758,6 +774,10 @@ func checkCounterOverflow(t *testing.T, f fixture) {
 	expect.Must(t, err == nil, "%v", err)
 	_, err = f.charge(meter.ChargeRequest{Subject: newSubject(subjectSpec{capID: child}), Amount: 1, Overrun: meter.OverrunPolicyRecord}, nil)
 	expect.That(t, errors.Is(err, meter.ErrCounterOverflow), "a nano past MaxNanos on the parent alone: err = %v, want ErrCounterOverflow", err)
+	// With the tenant reset, the full capability's own counter is the only
+	// one left without room.
+	_, err = f.charge(meter.ChargeRequest{Subject: subject, Amount: nano, Overrun: meter.OverrunPolicyRecord}, nil)
+	expect.That(t, errors.Is(err, meter.ErrCounterOverflow), "a nano past MaxNanos on the capability's own counter alone: err = %v, want ErrCounterOverflow", err)
 }
 
 func checkOverrunRecord(t *testing.T, f fixture) {
@@ -1129,7 +1149,6 @@ func checkSettleAfterAncestorDropped(t *testing.T, f fixture) {
 // checkExactCeilings holds a store to an ancestor's and a tenant's ceiling
 // to the nano: a charge reaching one exactly is admitted, a nano more is not.
 func checkExactCeilings(t *testing.T, f fixture) {
-	const nano limes.Nanos = 1
 	under, err := f.newCapability(f.root, unlimitedBudget)
 	expect.Must(t, err == nil, "%v", err)
 	charge := func(capID uuid.UUID, amount limes.Nanos) error {
@@ -1234,24 +1253,28 @@ func checkRefusedBump(t *testing.T, f fixture) {
 
 // checkRangeCountsHolds holds a store to the counter range with what is held
 // counted: holds summing past MaxNanos would leave a counter it cannot
-// keep, so the one that would is ErrCounterOverflow.
+// keep, so the one that would is ErrCounterOverflow. A settle of the full
+// hold for all of it fits: what the hold releases makes the room it spends.
 func checkRangeCountsHolds(t *testing.T, f fixture) {
 	tenant, err := f.newTenant()
 	expect.Must(t, err == nil, "%v", err)
 	id, err := f.NewCapability(CapabilitySpec{Tenant: tenant, Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget})
 	expect.Must(t, err == nil, "%v", err)
-	reserve := func(amount limes.Nanos) error {
-		_, err := f.Usage.Reserve(f.tenantCtx(tenant), meter.ReserveRequest{Subject: newSubject(subjectSpec{capID: id, tenant: tenant}), Amount: amount})
-		return err
+	subject := newSubject(subjectSpec{capID: id, tenant: tenant})
+	reserve := func(amount limes.Nanos) (meter.Reservation, error) {
+		return f.Usage.Reserve(f.tenantCtx(tenant), meter.ReserveRequest{Subject: subject, Amount: amount})
 	}
-	err = reserve(limes.MaxNanos)
+	full, err := reserve(limes.MaxNanos)
 	expect.Must(t, err == nil, "%v", err)
-	err = reserve(1)
+	_, err = reserve(1)
 	expect.That(t, errors.Is(err, meter.ErrCounterOverflow), "a hold past MaxNanos held: err = %v, want ErrCounterOverflow", err)
+	_, err = f.Usage.Settle(f.tenantCtx(tenant), meter.SettleRequest{Subject: subject, ReservationID: full.ID, Amount: limes.MaxNanos}, nil)
+	expect.That(t, err == nil, "a settle of a hold of MaxNanos for all of it: %v", err)
 }
 
 // checkRefundExactRemainder holds a store to a refund of an Amount exactly
-// what is left of the charge: it is refunded whole, not refused.
+// what is left of the charge: it is refunded whole, not refused; and to a
+// refund of a single nano, which is refunded as any other amount.
 func checkRefundExactRemainder(t *testing.T, f fixture) {
 	const charged, first = 3 * one, one
 	receipt, err := f.charge(meter.ChargeRequest{Amount: charged}, nil)
@@ -1261,8 +1284,10 @@ func checkRefundExactRemainder(t *testing.T, f fixture) {
 	}
 	_, err = refund(first)
 	expect.Must(t, err == nil, "%v", err)
-	got, err := refund(charged - first)
-	expect.That(t, err == nil && got.Amount == charged-first, "a refund of exactly what is left = %+v, %v; want %v refunded", got, err, charged-first)
+	got, err := refund(nano)
+	expect.That(t, err == nil && got.Amount == nano, "a refund of a nano = %+v, %v; want a nano refunded", got, err)
+	got, err = refund(charged - first - nano)
+	expect.That(t, err == nil && got.Amount == charged-first-nano, "a refund of exactly what is left = %+v, %v; want %v refunded", got, err, charged-first-nano)
 	spent := f.spent(t, f.child)
 	expect.That(t, spent == 0, "spent %v after refunding the whole charge, want 0", spent)
 }
@@ -2021,10 +2046,11 @@ func checkReleaseIsTheOwners(t *testing.T, f fixture) {
 	}
 	sibling := []limes.CopyCeiling{{RevocationID: []byte("sibling"), Budget: &limes.BudgetCeiling{Max: childBudget, UnitCode: unit}}}
 	for name, subject := range map[string]limes.MeterSubject{
-		"another capability": newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, budget: budgetOf(rootBudget), unit: unit}),
-		"another tenant":     newSubject(subjectSpec{capID: f.child, tenant: uuid.New(), budget: budgetOf(childBudget), unit: unit, copies: copies}),
-		"another copy":       newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: unit, copies: sibling}),
-		"no copy":            f.childSubject(),
+		"another capability":               newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, budget: budgetOf(rootBudget), unit: unit}),
+		"another capability with the copy": newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, budget: budgetOf(rootBudget), unit: unit, copies: copies}),
+		"another tenant":                   newSubject(subjectSpec{capID: f.child, tenant: uuid.New(), budget: budgetOf(childBudget), unit: unit, copies: copies}),
+		"another copy":                     newSubject(subjectSpec{capID: f.child, tenant: f.Tenant, budget: budgetOf(childBudget), unit: unit, copies: sibling}),
+		"no copy":                          f.childSubject(),
 	} {
 		err := f.Usage.Release(f.Ctx, meter.ReleaseRequest{Subject: subject, ReservationID: r.ID})
 		expect.That(t, err == nil || errors.Is(err, limes.ErrScopeMismatch), "a release by %s: %v", name, err)
@@ -2124,6 +2150,32 @@ func checkUnitWithHolds(t *testing.T, f fixture) {
 		TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: tenantBudget, UnitCode: otherUnit}, ResetSpend: true, ExpectedVersion: b.ResourceVersion,
 	})
 	expect.That(t, errors.Is(err, limes.ErrUnitCodeMismatch), "a unit change with a hold open: err = %v, want ErrUnitCodeMismatch", err)
+}
+
+// checkTenantUnitMovesOnlyWhileNothingCounts holds a store to moving a
+// tenant's unit while nothing is counted in it, with no reset, and to
+// keeping it while a single nano is held, or spent and not reset.
+func checkTenantUnitMovesOnlyWhileNothingCounts(t *testing.T, f fixture) {
+	move := func(to string, reset bool) error {
+		t.Helper()
+		b, err := f.Usage.GetTenantBudget(f.Ctx, f.Tenant)
+		expect.Must(t, err == nil, "%v", err)
+		_, err = f.Usage.SetTenantBudget(f.Ctx, meter.SetTenantBudgetRequest{
+			TenantID: f.Tenant, Ceiling: limes.BudgetCeiling{Max: tenantBudget, UnitCode: to}, ResetSpend: reset, ExpectedVersion: b.ResourceVersion,
+		})
+		return err
+	}
+	expect.That(t, move(otherUnit, false) == nil, "a unit change with nothing counted was refused")
+	expect.Must(t, move(unit, false) == nil, "a unit change back with nothing counted was refused")
+	held, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: nano})
+	expect.Must(t, err == nil, "%v", err)
+	err = move(otherUnit, true)
+	expect.That(t, errors.Is(err, limes.ErrUnitCodeMismatch), "a unit change with a nano held: err = %v, want ErrUnitCodeMismatch", err)
+	expect.Must(t, f.Usage.Release(f.Ctx, meter.ReleaseRequest{Subject: f.childSubject(), ReservationID: held.ID}) == nil, "Release")
+	_, err = f.charge(meter.ChargeRequest{Amount: nano}, nil)
+	expect.Must(t, err == nil, "%v", err)
+	err = move(otherUnit, false)
+	expect.That(t, errors.Is(err, limes.ErrUnitCodeMismatch), "a unit change with a nano spent and no reset: err = %v, want ErrUnitCodeMismatch", err)
 }
 
 // checkChainUnits holds a store to every counter on the chain keeping its
@@ -2748,7 +2800,10 @@ func checkReservationsPage(t *testing.T, f fixture) {
 		cursor = page.Next
 	}
 	expect.That(t, slices.Equal(got, want), "paged one at a time, the holds = %v, want %v soonest first", got, want)
-	_, err := f.Usage.ListReservations(f.Ctx, meter.ListReservationsRequest{CapabilityID: f.child, Limit: -1})
+	// A page that holds the last one is the last page, full as it is.
+	whole, err := f.Usage.ListReservations(f.Ctx, meter.ListReservationsRequest{CapabilityID: f.child, Limit: holds})
+	expect.That(t, err == nil && len(whole.Items) == holds && whole.Next == "", "a page of exactly every hold = %d items, next %q, %v; want %d and no next page", len(whole.Items), whole.Next, err, holds)
+	_, err = f.Usage.ListReservations(f.Ctx, meter.ListReservationsRequest{CapabilityID: f.child, Limit: -1})
 	expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "ListReservations with a negative limit: err = %v, want ErrInvalidRequest", err)
 }
 

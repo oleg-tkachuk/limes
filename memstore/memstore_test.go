@@ -170,6 +170,34 @@ func TestSetTenantBudgetAssumesNoUnit(t *testing.T) {
 	}
 }
 
+// A tenant frozen in no unit takes the unit of the first amount recorded
+// against it, and refuses an amount in another after it.
+func TestAFrozenTenantTakesTheUnitOfItsFirstAmount(t *testing.T) {
+	ctx := context.Background()
+	u := newTestUsage(newTestStore())
+	tenant := uuid.New()
+	if _, err := u.SetTenantBudget(ctx, meter.SetTenantBudgetRequest{TenantID: tenant, Ceiling: limes.BudgetCeiling{}}); err != nil {
+		t.Fatalf("SetTenantBudget: %v", err)
+	}
+	record := func(unitCode string) error {
+		_, err := u.Charge(ctx, meter.ChargeRequest{
+			Subject: recordedSubject(ctx, t, u, subjectSpec{capID: uuid.New(), tenant: tenant, unit: unitCode}),
+			Amount:  unit, Overrun: meter.OverrunPolicyRecord,
+		}, nil)
+		return err
+	}
+	if err := record(defaultTestUnit); err != nil {
+		t.Fatalf("an overrun recorded on a frozen tenant: %v", err)
+	}
+	b, err := u.GetTenantBudget(ctx, tenant)
+	if err != nil || b.Ceiling.UnitCode != defaultTestUnit {
+		t.Errorf("the frozen tenant after its first amount = %+v, %v; want it counted in %s", b, err, defaultTestUnit)
+	}
+	if err := record(otherTestUnit); !errors.Is(err, limes.ErrUnitCodeMismatch) {
+		t.Errorf("an amount in %s on a tenant counting in %s: err = %v, want ErrUnitCodeMismatch", otherTestUnit, defaultTestUnit, err)
+	}
+}
+
 func TestRefundReturnsSpendToEveryCounterOnce(t *testing.T) {
 	ctx := context.Background()
 	u := newTestUsage(newTestStore())

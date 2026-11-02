@@ -235,6 +235,7 @@ func checkReleaseMatchingSettlesLeasesInBatches(t *testing.T, f fixture) {
 	for range leases {
 		leased = append(leased, f.leasedIn(t, l, root, ""))
 	}
+	live := f.leasedIn(t, l, uuid.Nil(), "")
 	expect.Must(t, f.Revoke(root) == nil, "revoke")
 	var total int64
 	for calls := 0; ; calls++ {
@@ -252,6 +253,60 @@ func checkReleaseMatchingSettlesLeasesInBatches(t *testing.T, f fixture) {
 		expect.That(t, !f.leaseOpen(t, l, id), "the lease of %s outlived the sweep", id)
 	}
 	expect.That(t, f.usageOf(t, root).ReservedAmount == 0, "the root holds %v after the sweep, want nothing", f.usageOf(t, root).ReservedAmount)
+	expect.That(t, f.leaseOpen(t, l, live), "the lease of a live capability was settled by the sweep")
+}
+
+// A batch that ends on the last match is full all the same, and says more
+// may match, for holds and for leases alike; the next call finds none.
+func checkReleaseMatchingReportsAFullBatch(t *testing.T, f fixture) {
+	r, l := f.releaser(t), f.leaser(t)
+	const batch = 2
+	sweep := func(client string) meter.ReleaseMatchingResult {
+		t.Helper()
+		got, err := r.ReleaseMatching(f.Ctx, meter.ReleaseMatchingRequest{TenantID: f.Tenant, ClientID: client, Limit: batch})
+		expect.Must(t, err == nil, "ReleaseMatching: %v", err)
+		return got
+	}
+	held := "client-" + uuid.New().String()
+	root, _ := f.heldCapability(t, uuid.Nil(), held)
+	for range batch - 1 {
+		f.heldCapability(t, root, "")
+	}
+	expect.Must(t, f.Revoke(root) == nil, "revoke")
+	got := sweep(held)
+	expect.That(t, got.Released == batch && got.More, "ReleaseMatching of exactly a batch of holds = %+v, want %d released and more reported", got, batch)
+	got = sweep(held)
+	expect.That(t, got.Released == 0 && !got.More, "the call after the full batch = %+v, want nothing left", got)
+	leasing := "client-" + uuid.New().String()
+	top, err := f.NewCapability(CapabilitySpec{Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget, ClientID: leasing})
+	expect.Must(t, err == nil, "root: %v", err)
+	for range batch {
+		f.leasedIn(t, l, top, "")
+	}
+	expect.Must(t, f.Revoke(top) == nil, "revoke")
+	got = sweep(leasing)
+	expect.That(t, got.SettledLeases == batch && got.More, "ReleaseMatching of exactly a batch of leases = %+v, want %d settled and more reported", got, batch)
+	got = sweep(leasing)
+	expect.That(t, got.SettledLeases == 0 && !got.More, "the call after the full batch of leases = %+v, want nothing left", got)
+}
+
+// A hold of a capability no longer on record is left to PurgeOrphans:
+// ReleaseMatching cannot walk its lineage to the match, and a hold kept
+// errs towards refusing spend.
+func checkReleaseMatchingLeavesAHoldOffRecord(t *testing.T, f fixture) {
+	r := f.releaser(t)
+	if f.DeleteCapability == nil {
+		t.Skip("Env.DeleteCapability not set")
+	}
+	client := "client-" + uuid.New().String()
+	match, matchHold := f.heldCapability(t, uuid.Nil(), client)
+	gone, goneHold := f.heldCapability(t, match, "")
+	expect.Must(t, f.Revoke(match) == nil, "revoke")
+	expect.Must(t, f.DeleteCapability(gone) == nil, "DeleteCapability")
+	got, err := r.ReleaseMatching(f.Ctx, meter.ReleaseMatchingRequest{TenantID: f.Tenant, ClientID: client})
+	expect.That(t, err == nil && got.Released == 1, "ReleaseMatching = %+v, %v; want the match's hold alone released", got, err)
+	expect.That(t, !f.open(t, matchHold), "the hold of the revoked match outlived the sweep")
+	expect.That(t, f.open(t, goneHold), "the hold of a capability off record was released")
 }
 
 // A lease under a match whose own counters went was settled with them
@@ -288,5 +343,6 @@ func checkReleaseMatchingReleasesAHoldUnderAForgottenAncestor(t *testing.T, f fi
 	expect.Must(t, f.Revoke(match) == nil, "revoke")
 	got, err := r.ReleaseMatching(f.Ctx, meter.ReleaseMatchingRequest{TenantID: f.Tenant, ClientID: client})
 	expect.That(t, err == nil && got.Released == 1, "ReleaseMatching = %+v, %v; want the hold released", got, err)
+	expect.That(t, slices.Equal(got.Tenants, []uuid.UUID{f.Tenant}), "ReleaseMatching of one hold released in %v, want the request's tenant", got.Tenants)
 	expect.That(t, !f.open(t, hold), "the hold under the revoked match outlived the sweep")
 }
