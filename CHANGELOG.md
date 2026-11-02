@@ -2,6 +2,12 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.148.4](https://github.com/oleg-tkachuk/limes/compare/v0.148.3...v0.148.4) (2026-11-02)
+
+### Bug Fixes
+
+* **cache:** keep a revocation learned while a lookup ran ([c9b7dbf](https://github.com/oleg-tkachuk/limes/commit/c9b7dbf9a724a768f806d31be5d68fa82e4ce44c))
+
 ## [0.148.3](https://github.com/oleg-tkachuk/limes/compare/v0.148.2...v0.148.3) (2026-11-01)
 
 ### Bug Fixes
