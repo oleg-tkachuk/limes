@@ -261,6 +261,50 @@ func checkLeaseIsSettledBeforeAnAncestorsCountersGo(t *testing.T, f fixture) {
 	expect.That(t, errors.Is(err, limes.ErrBudgetExceeded), "a child's charge past its restarted root's ceiling: %v, want ErrBudgetExceeded", err)
 }
 
+// A refund of a charge taken under a lease that DeleteUsage settled leaves
+// the counters restarted since alone, as a refund of a charge taken without
+// one does: the settlement charged the chain before they restarted, so the
+// refund goes back to the counters that are still the ones it charged.
+func checkLeaseRefundAfterRestart(t *testing.T, f fixture) {
+	l := f.leaser(t)
+	child := f.childSubject()
+	charge := func(amount limes.Nanos) meter.ChargeReceipt {
+		t.Helper()
+		r, err := f.chargeOf(child, amount)
+		expect.Must(t, err == nil, "charge: %v", err)
+		return r
+	}
+	restart := func(id uuid.UUID) {
+		t.Helper()
+		expect.Must(t, f.Usage.DeleteUsage(f.Ctx, meter.DeleteUsageRequest{CapabilityID: id}) == nil, "DeleteUsage")
+	}
+	refund := func(r meter.ChargeReceipt) {
+		t.Helper()
+		got, err := f.Usage.Refund(f.Ctx, meter.RefundRequest{ChargeID: r.ChargeID, Remaining: true})
+		expect.Must(t, err == nil && got.Amount == leaseCharge, "refund = %+v, %v; want %v", got, err, leaseCharge)
+	}
+	counted := func(when string, root, child, tenant limes.Nanos) {
+		t.Helper()
+		expect.That(t, f.spent(t, f.root) == root, "%s: root spent %v, want %v", when, f.spent(t, f.root), root)
+		expect.That(t, f.spent(t, f.child) == child, "%s: child spent %v, want %v", when, f.spent(t, f.child), child)
+		expect.That(t, f.tenantSpent(t) == tenant, "%s: tenant spent %v, want %v", when, f.tenantSpent(t), tenant)
+		expect.That(t, f.tenantOf(t).ReservedAmount == 0, "%s: the tenant still holds a lease", when)
+	}
+	f.lease(t, l, child, leased)
+	first := charge(leaseCharge)
+	restart(f.root)
+	charge(one)
+	counted("the root restarted under its child's lease", one, leaseCharge+one, leaseCharge+one)
+	refund(first)
+	counted("a refund of a leased charge past the root's restart", one, one, one)
+	f.lease(t, l, child, leased)
+	second := charge(leaseCharge)
+	restart(f.child)
+	counted("the leaseholder restarted", one+leaseCharge, 0, one+leaseCharge)
+	refund(second)
+	counted("a refund of a leased charge past the leaseholder's restart", one, 0, one)
+}
+
 // leaseWorkers is how many children charge under leases of their own at
 // once in checkLeaseConcurrency.
 const leaseWorkers = 4

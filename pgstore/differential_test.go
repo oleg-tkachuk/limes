@@ -176,6 +176,11 @@ func FuzzDifferential(f *testing.F) {
 		step(diffStepLease, diffChildB, 3), step(diffStepDeleteUsage, diffChildB, 1), step(diffStepRefund, 0, 1)))
 	f.Add(script(step(diffStepCharge, diffChildA, 4), step(diffStepDeleteUsage, diffChildA, 1), step(diffStepCharge, diffChildA, 6),
 		step(diffStepEraseOther, 0, 1), step(diffStepRefund, 0, 2), step(diffStepPurgeCharges, 0, 1), step(diffStepRefund, 0, 1)))
+	// Leased charges refunded once DeleteUsage settled their lease and
+	// restarted the root, then the leaseholder.
+	f.Add(script(step(diffStepLease, diffGrandchild, 8), step(diffStepCharge, diffGrandchild, 3), step(diffStepDeleteUsage, diffRoot, 1),
+		step(diffStepCharge, diffGrandchild, 1), step(diffStepRefund, 0, 2), step(diffStepLease, diffGrandchild, 8),
+		step(diffStepCharge, diffGrandchild, 3), step(diffStepDeleteUsage, diffGrandchild, 1), step(diffStepRefund, 0, 1)))
 	f.Fuzz(func(t *testing.T, script []byte) {
 		if len(script) > diffMaxSteps*diffStepSize {
 			script = script[:diffMaxSteps*diffStepSize]
