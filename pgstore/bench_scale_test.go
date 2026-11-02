@@ -404,12 +404,13 @@ func delayCopy(dst, src net.Conn, oneWay time.Duration, read *atomic.Int64) {
 	}
 }
 
-// leasing is f with a usage store over db that leases (Config.Leases):
-// bench_test.go's fixture keeps to the Config the newest release has.
+// leasing is f with a usage store over db that leases, as one does by
+// default: bench_test.go's fixture keeps to the Config the newest release
+// has.
 func (f benchFixture) leasing(b *testing.B, db *pgxpool.Pool) benchFixture {
 	b.Helper()
 	var err error
-	if f.usage, err = NewUsageStore(Config{DB: db, Leases: true}); err != nil {
+	if f.usage, err = NewUsageStore(Config{DB: db}); err != nil {
 		b.Fatal(err)
 	}
 	return f

@@ -217,7 +217,9 @@ no requests no `Bump`.
 5. `otelmetric` forwards `Leaser`; the guide documents choosing a lease.
 6. pgstore opens leases only once its operator sets `Config.Leases`: a
    release that knows no leases, serving beside one that opens them during
-   a rolling upgrade, would read none of their state.
+   a rolling upgrade, would read none of their state. Once every supported
+   release knew leases, the default turned: pgstore opens them unless
+   `Config.DisableLeases` is set, as memstore always has.
 
 ## Measured
 

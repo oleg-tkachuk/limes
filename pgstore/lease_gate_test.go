@@ -33,30 +33,29 @@ func leaseholderOf(t *testing.T) limes.MeterSubject {
 	return meterSubject(c.ID, tenant)
 }
 
-// A store whose Config does not enable leasing opens no lease, so a
-// release that knows nothing of leases can serve beside it; one that does
-// opens it.
-func TestLeaseRefusedUntilLeasingIsEnabled(t *testing.T) {
+// A store whose Config disables leasing opens no lease, so a release that
+// knows nothing of leases can serve beside it; by default a store opens it.
+func TestLeaseRefusedWhileLeasingIsDisabled(t *testing.T) {
 	fresh(t)
 	subject := leaseholderOf(t)
 	ctx := WithTenant(t.Context(), subject.TenantID())
-	off, err := NewUsageStore(Config{DB: app})
+	off, err := NewUsageStore(Config{DB: app, DisableLeases: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = off.Lease(ctx, meter.LeaseRequest{Subject: subject, Amount: gateLeased})
 	if !errors.Is(err, meter.ErrLeasingDisabled) || !errors.Is(err, limes.ErrInvalidConfig) {
-		t.Fatalf("Lease without Config.Leases = %v, want ErrLeasingDisabled", err)
+		t.Fatalf("Lease with Config.DisableLeases = %v, want ErrLeasingDisabled", err)
 	}
 	if u, err := off.GetUsage(ctx, subject.CapabilityID()); err == nil && u.ReservedAmount != 0 {
 		t.Errorf("a refused lease held %v", u.ReservedAmount)
 	}
-	on, err := NewUsageStore(Config{DB: app, Leases: true})
+	on, err := NewUsageStore(Config{DB: app})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := on.Lease(ctx, meter.LeaseRequest{Subject: subject, Amount: gateLeased}); err != nil {
-		t.Fatalf("Lease with Config.Leases: %v", err)
+		t.Fatalf("Lease of a store by default: %v", err)
 	}
 }
 
@@ -67,14 +66,14 @@ func TestLeasesOpenAreSettledWithLeasingDisabled(t *testing.T) {
 	fresh(t)
 	subject := leaseholderOf(t)
 	ctx := WithTenant(t.Context(), subject.TenantID())
-	on, err := NewUsageStore(Config{DB: app, Leases: true})
+	on, err := NewUsageStore(Config{DB: app})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := on.Lease(ctx, meter.LeaseRequest{Subject: subject, Amount: gateLeased}); err != nil {
 		t.Fatal(err)
 	}
-	off, err := NewUsageStore(Config{DB: app})
+	off, err := NewUsageStore(Config{DB: app, DisableLeases: true})
 	if err != nil {
 		t.Fatal(err)
 	}
