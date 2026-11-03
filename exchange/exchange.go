@@ -12,6 +12,7 @@ import (
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/dpop"
+	"github.com/oleg-tkachuk/limes/internal/errcode"
 	"github.com/oleg-tkachuk/limes/internal/errs"
 )
 
@@ -19,29 +20,31 @@ import (
 // invalid_target, RFC 9396's invalid_authorization_details) the token
 // endpoint answers with. A Policy refuses with ErrInvalidGrant,
 // ErrInvalidTarget, ErrInvalidScope or ErrInvalidAuthorizationDetails; any
-// other error it returns is the server's, answered as such.
+// other error it returns is the server's, answered as such. Each names its
+// limes.Code, so limes.CodeOf, CategoryOf and ProblemOf answer it as the
+// endpoint does, ahead of any limes error it wraps.
 var (
 	// ErrInvalidRequest is a request missing a parameter or malformed.
-	ErrInvalidRequest = errors.New("exchange: invalid request")
+	ErrInvalidRequest error = &codedError{"exchange: invalid request", limes.CodeInvalidRequest}
 	// ErrInvalidClient is a client the endpoint could not authenticate.
-	ErrInvalidClient = errors.New("exchange: client not authenticated")
+	ErrInvalidClient error = &codedError{"exchange: client not authenticated", limes.CodeInvalidClient}
 	// ErrUnauthorizedClient is a client the endpoint authenticated that may
 	// not use it. HandlerConfig.Authenticate and
 	// IntrospectionConfig.Authenticate return it, wrapped or not, to refuse
 	// such a client.
-	ErrUnauthorizedClient = errors.New("exchange: client not authorized to exchange")
+	ErrUnauthorizedClient error = &codedError{"exchange: client not authorized to exchange", limes.CodeUnauthorizedClient}
 	// ErrServerError is the server failing to decide on a client: its
 	// client store unreachable, say. HandlerConfig.Authenticate and
 	// IntrospectionConfig.Authenticate return it, wrapped or not, so that
 	// the endpoint answers 500 server_error, logged at ERROR, rather than
 	// tell the client its credentials are wrong (RFC 6749 §5.2).
-	ErrServerError = errors.New("exchange: server error")
+	ErrServerError error = &codedError{"exchange: server error", limes.CodeServerError}
 	// ErrInvalidGrant is a subject token refused: not genuine, expired, or
 	// not one the client may present.
-	ErrInvalidGrant = errors.New("exchange: subject token refused")
+	ErrInvalidGrant error = &codedError{"exchange: subject token refused", limes.CodeInvalidGrant}
 	// ErrInvalidTarget is a resource or audience the exchange will not
 	// issue for.
-	ErrInvalidTarget = errors.New("exchange: target refused")
+	ErrInvalidTarget error = &codedError{"exchange: target refused", limes.CodeInvalidTarget}
 	// ErrTargetExchanged is an ErrInvalidTarget of its own: under
 	// Config.Exchanges' one capability per subject token, a token
 	// exchanged already for other resources or audiences, whose capability
@@ -50,14 +53,28 @@ var (
 	// targets, or another token.
 	ErrTargetExchanged = fmt.Errorf("%w: the subject token was exchanged already for other targets", ErrInvalidTarget)
 	// ErrInvalidScope is a scope the exchange will not grant.
-	ErrInvalidScope = errors.New("exchange: scope refused")
+	ErrInvalidScope error = &codedError{"exchange: scope refused", limes.CodeInvalidScope}
 	// ErrInvalidAuthorizationDetails is authorization_details the exchange
 	// will not grant: malformed, or of a type or content it does not
 	// understand (RFC 9396 §5).
-	ErrInvalidAuthorizationDetails = errors.New("exchange: authorization details refused")
+	ErrInvalidAuthorizationDetails error = &codedError{"exchange: authorization details refused", limes.CodeInvalidAuthorizationDetails}
 	// ErrUnsupportedGrantType is a token request for another grant.
-	ErrUnsupportedGrantType = errors.New("exchange: grant type unsupported")
+	ErrUnsupportedGrantType error = &codedError{"exchange: grant type unsupported", limes.CodeUnsupportedGrantType}
 )
+
+// codedError is a sentinel that names its limes.Code, by which limes
+// answers it (errcode.Coded).
+type codedError struct {
+	msg  string
+	code limes.Code
+}
+
+func (e *codedError) Error() string { return e.msg }
+
+// LimesErrorCode is the sentinel's code, which limes answers it by.
+func (e *codedError) LimesErrorCode() string { return string(e.code) }
+
+var _ errcode.Coded = (*codedError)(nil)
 
 // errPolicy is a policy that asked for more than the request allows: the
 // server's fault, never the client's.
