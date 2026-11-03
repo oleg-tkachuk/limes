@@ -29,6 +29,10 @@ Any of these breaks a consumer:
 - removing or renaming an exported name, or changing its signature;
 - removing an error code, or answering one with another HTTP status,
   category or reason;
+- answering an error with another code, a nested module's error among
+  them: `limes.CodeOf` and its kin are limes's functions, so the break is
+  limes's, and marked on the root module's commit, even when the change
+  that causes it is a nested module's;
 - changing a default;
 - moving the line between what a documented function accepts and what it
   refuses, either way: refusing what it accepted, or accepting what it

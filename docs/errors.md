@@ -190,21 +190,27 @@ after it was written; adding one is not a break
 never as one fixed code: a client's error stays the client's.
 
 A code answered with another status or category is a break, and it still
-compiles. `limestest` turns it into a failing test of the consumer's:
+compiles. `limestest` turns it into a failing test of the consumer's: it
+pins what the consumer's own transport answers each code with, and walks
+the codes of the origins the consumer runs (`limes.CodesOf`):
 
 ```go
 func TestErrorContract(t *testing.T) {
+	codes := slices.Concat(limes.CodesOf(limes.OriginLimes), limes.CodesOf(limes.OriginMeter))
 	// Pinned from the first failing run, which names every entry.
-	limestest.CheckCodes(t, map[limes.Code]limestest.Answer{
-		"revoked": {Status: 401, Category: "unauthenticated"},
+	limestest.CheckMapping(t, codes, map[limes.Code]connect.Code{
+		"revoked": connect.CodeUnauthenticated,
 		// …
-	})
+	}, connectCodeOf)
 	limestest.CheckCategories(t, func(c limes.Category) bool {
-		_, ok := transportCodes[c]
+		_, ok := connectCodes[c]
 		return ok
 	})
 }
 ```
+
+`limestest.CheckCodes` is the same check of every code against its HTTP
+status and category, for a consumer that answers in HTTP's terms.
 
 A category says what retrying would do, not how bad the failure is, and
 agrees with the status: every 502 and 503 is `unavailable`, a dependency
@@ -306,15 +312,13 @@ in RFC 6749 §5.2's format, as the token endpoint does. The codes are RFC
 They are limes's codes too: each sentinel of the exchange names its own,
 so `limes.CodeOf`, `limes.CategoryOf` and `limes.ProblemOf` answer an
 exchange's error as the endpoint does — with the same code and status,
-ahead of any limes error it wraps — and `limes.Codes()` lists them. One
-mapping of the categories covers the exchange. The DPoP codes are the
-endpoint's alone: in process, `dpop.ErrRequired` and its kin are limes's
-proof codes, in the same category.
+ahead of any limes error it wraps — and `limes.Codes()` lists them, as
+`limes.CodesOf(limes.OriginExchange)` does alone. One mapping of the
+categories covers the exchange. A consumer that runs no exchange never
+meets these codes, and may leave them out of a check of its own mapping.
 
 | Code | HTTP | Sentinel | Description | Category |
 |---|---|---|---|---|
-| `use_dpop_nonce` | 400 | `dpop.ErrNonceRequired` | The DPoP proof must carry the server's nonce; a fresh one goes in `DPoP-Nonce`. | `unauthenticated` |
-| `invalid_dpop_proof` | 400 | `dpop.ErrRequired`, `dpop.ErrInvalid`, `dpop.ErrReplayed` | The DPoP proof is required, invalid, or used before. | `unauthenticated` |
 | `unauthorized_client` | 400 | `exchange.ErrUnauthorizedClient` | The client may not exchange tokens. | `denied` |
 | `invalid_client` | 401 | `exchange.ErrInvalidClient` | The client could not be authenticated; challenged in the scheme it used, or 400 when it named none. | `unauthenticated` |
 | `unsupported_grant_type` | 400 | `exchange.ErrUnsupportedGrantType` | Only token exchange is supported. | `invalid` |
@@ -325,3 +329,13 @@ proof codes, in the same category.
 | `invalid_authorization_details` | 400 | `exchange.ErrInvalidAuthorizationDetails` | The authorization details were refused. | `denied` |
 | `invalid_request` | 400 | `exchange.ErrInvalidRequest` | The request is malformed. | `invalid` |
 | `server_error` | 500 | `exchange.ErrServerError` | The server could not decide on the request. | `internal` |
+
+The endpoint answers a refused proof with RFC 9449's codes,
+`dpop.ErrorCodeUseNonce` and `dpop.ErrorCodeInvalidProof`. They are no
+`limes.Code`: in process, `dpop.ErrRequired` and its kin are limes's proof
+codes, `unauthenticated`, above.
+
+| Code | HTTP | Sentinel | Description |
+|---|---|---|---|
+| `use_dpop_nonce` | 400 | `dpop.ErrNonceRequired` | The DPoP proof must carry the server's nonce; a fresh one goes in `DPoP-Nonce`. |
+| `invalid_dpop_proof` | 400 | `dpop.ErrRequired`, `dpop.ErrInvalid`, `dpop.ErrReplayed` | The DPoP proof is required, invalid, or used before. |
