@@ -44,8 +44,8 @@ const (
 	codeInvalidRequest    = "invalid_request"
 	codeInvalidToken      = "invalid_token"
 	codeInsufficientScope = "insufficient_scope"
-	codeInvalidDPoPProof  = "invalid_dpop_proof"
-	codeUseDPoPNonce      = "use_dpop_nonce"
+	codeInvalidDPoPProof  = dpop.ErrorCodeInvalidProof
+	codeUseDPoPNonce      = dpop.ErrorCodeUseNonce
 )
 
 // Problem is an RFC 9457 problem details object.

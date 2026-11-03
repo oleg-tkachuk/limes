@@ -46,6 +46,15 @@ import (
 // Header is the HTTP header a proof travels in.
 const Header = "DPoP"
 
+// The error codes RFC 9449 gives a refused proof, on the wire of a resource
+// server's challenge (§7.1) and of a token endpoint's response (§5, §8).
+const (
+	// ErrorCodeInvalidProof answers ErrRequired, ErrInvalid and ErrReplayed.
+	ErrorCodeInvalidProof = "invalid_dpop_proof"
+	// ErrorCodeUseNonce answers ErrNonceRequired.
+	ErrorCodeUseNonce = "use_dpop_nonce"
+)
+
 // SingleProof is the one proof among values, every Header field a request
 // carries — r.Header.Values(Header), or a gRPC metadata entry's values —
 // and "" for none. More than one is ErrInvalid: RFC 9449 §4.3 (1) allows
