@@ -142,7 +142,7 @@ try {
   }
 
   // The release each commit cuts, by the module's own rules: a breaking
-  // change is a minor before 1.0, a dependency bump a patch of the nested
+  // change is a major on the v1 line, a dependency bump a patch of the nested
   // module, and a change scoped to another module none of the root.
   const types = [
     [root, "feat: add", "minor"],
