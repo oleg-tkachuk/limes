@@ -31,6 +31,10 @@ Every release of the limes module, newest first, from its release notes. Written
 
 ## [0.157.0](https://github.com/oleg-tkachuk/limes/compare/v0.156.0...v0.157.0) (2026-11-03)
 
+### ⚠ BREAKING CHANGES
+
+* limes.CodeOf, CategoryOf and ProblemOf answer an exchange's error by the exchange's own code, ahead of a limes error it wraps: `invalid_grant` 400 where it was the wrapped `revoked` 401. Marked at first in exchange/v0.16.0 alone; see v0.158.0 and docs/migration.md.
+
 ### Features
 
 * answer the exchange's codes as limes's own ([58eee31](https://github.com/oleg-tkachuk/limes/commit/58eee316698061f746c258fdc8e7fd2b6f5bd853))
@@ -39,7 +43,8 @@ Every release of the limes module, newest first, from its release notes. Written
 
 ### Codes
 
-* added: `invalid_authorization_details`, `invalid_client`, `invalid_dpop_proof`, `invalid_grant`, `invalid_scope`, `invalid_target`, `server_error`, `unauthorized_client`, `unsupported_grant_type`, `use_dpop_nonce`
+* added: `invalid_authorization_details`, `invalid_client`, `invalid_grant`, `invalid_scope`, `invalid_target`, `server_error`, `unauthorized_client`, `unsupported_grant_type`
+* listed here at first, and no `limes.Code`: `invalid_dpop_proof`, `use_dpop_nonce`, the token endpoint's RFC 9449 codes (`dpop.ErrorCodeInvalidProof`, `dpop.ErrorCodeUseNonce` from v0.158.0)
 
 ### Contract
 
