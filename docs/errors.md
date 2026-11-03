@@ -148,8 +148,9 @@ reason.
 - **A 409** is a request that disagrees with what is on record: read it
   again, and decide.
 
-`limes.Codes()` and `meter.Codes()` list every code, so a consumer's test
-can prove its own mapping covers them all. A code's status, category and
+`limes.Codes()` and `meter.Codes()` list every code, and
+`meter.AllCodes()` lists both in one, so a consumer's test can prove its
+own mapping covers them all. A code's status, category and
 reason are part of the contract ([compatibility.md](compatibility.md)):
 changing one is a break, marked and listed in the release notes, and these
 tables are what CI compares.
@@ -179,7 +180,7 @@ The status stays the finer answer: within `exhausted`, a permanent refusal
 
 `limes.CategoryOfCode(code)` and `meter.CategoryOfCode(code)` answer a
 code's category without an error to hand, so a test of a consumer's own
-mapping walks `Codes()` and checks each pair.
+mapping walks `meter.AllCodes()` and checks each pair.
 
 A category says what retrying would do, not how bad the failure is, and
 agrees with the status: every 502 and 503 is `unavailable`, a dependency
