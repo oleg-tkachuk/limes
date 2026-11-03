@@ -71,8 +71,8 @@ var repeatable = map[string]bool{paramResource: true, paramAudience: true}
 const DefaultMaxBodyBytes = 64 << 10
 
 // The RFC 6749 §5.2 error codes, with RFC 8707's, RFC 9396 §5's and RFC
-// 9449's: limes's codes of the same names, but the DPoP ones, which limes
-// answers by its own proof codes.
+// 9449's: limes's codes of the same names, and dpop's for a proof, which
+// limes answers by its own proof codes.
 const (
 	codeInvalidRequest              = string(limes.CodeInvalidRequest)
 	codeInvalidClient               = string(limes.CodeInvalidClient)
@@ -82,8 +82,8 @@ const (
 	codeInvalidScope                = string(limes.CodeInvalidScope)
 	codeInvalidAuthorizationDetails = string(limes.CodeInvalidAuthorizationDetails)
 	codeUnsupportedGrantType        = string(limes.CodeUnsupportedGrantType)
-	codeInvalidDPoPProof            = "invalid_dpop_proof"
-	codeUseDPoPNonce                = "use_dpop_nonce"
+	codeInvalidDPoPProof            = dpop.ErrorCodeInvalidProof
+	codeUseDPoPNonce                = dpop.ErrorCodeUseNonce
 	codeServerError                 = string(limes.CodeServerError)
 )
 
