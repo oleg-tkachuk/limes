@@ -9,7 +9,10 @@ It covers every module of the repository alike: limes, pgstore,
 redisreplay, otelmetric, exchange and biscuit.
 
 - **The Go API** of every module: its exported names, their signatures,
-  and the types they take and return.
+  and the types they take and return. A signature is the contract whole,
+  as the Go module tooling compares it: a function taken as a value has
+  its type, so a parameter made variadic, or one added at the end, breaks
+  that use even where every call still compiles.
 - **The error contract** ([errors.md](errors.md)): every code, the HTTP
   status it is answered with, its category, and the reason a refusal is
   challenged with.
@@ -74,5 +77,7 @@ by its tests alone.
 Every module reaches v1 together with limes, and from then on gives the
 same promise: no break lands on the v1 line of any of them. A name that is to go is marked
 `// Deprecated:` with what replaces it, and stays, working, for the whole
-of v1; it goes only with v2, under a new module path. An error code keeps
+of v1; it goes only with v2, under a new module path. A signature does not
+change on v1 either: a new form of a function is a new function beside
+it. An error code keeps
 its status, category and reason for the whole of v1.
