@@ -1,6 +1,6 @@
 # ADR-0016: Every module released from one release commit
 
-**Status:** Accepted
+**Status:** Accepted, amended on 2026-11-03 (below)
 **Date:** 2026-10-31
 **Deciders:** Oleg Tkachuk
 
@@ -107,6 +107,7 @@ release's deploy key creates a release tag (`repo-settings.ts`). Both stay.
 - **A nested module with nothing of its own is still released** when limes
   is, for its requirement, as now. Fewer modules would mean fewer such
   releases; which modules earn their own `go.mod` is outside this ADR.
+  Amended below: no longer.
 
 ## Rollout
 
@@ -129,3 +130,19 @@ Each step is one pull request, tested in `.github/ci` before it is wired:
    refused, but a module's first, which seeding cuts with no notes. Its
    other half — the newest entry may name the release still to be tagged —
    lands with step 4, which needs it.
+
+## Amendment, 2026-11-03
+
+Raising every nested module with each limes release released `exchange`
+twelve times over nine candidates, nearly every time with nothing but its
+requirement in the notes: a release a consumer must read to learn it changed
+nothing. Such a release buys no compatibility. A nested module whose files
+are unchanged since its last release is the code CI has just built and
+tested against this limes, through the `replace`, and a consumer's build
+selects the newer limes whatever the module requires.
+
+So the plan raises a nested module only when one of its files changed since
+its last release, as a patch when none of its commits is due, as before. One
+unchanged keeps its requirement, which stays below the limes the changelog
+last names, as point 3 holds it. When limes reaches v1.0.0, every nested
+module still on 0.x follows it to its own v1.0.0, changed or not.
