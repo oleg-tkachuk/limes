@@ -14,7 +14,8 @@ redisreplay, otelmetric, exchange and biscuit.
   status it is answered with, its category, and the reason a refusal is
   challenged with.
 - **Defaults**: what a zero `Config` field, or an option left unset, does;
-  [defaults.md](defaults.md) lists every `Config` field.
+  [defaults.md](defaults.md) lists every `Config` field and every
+  `Default…` constant's value.
 - **Documented behaviour**: what a function's comment says it accepts,
   refuses and returns. A function that passed an input and now refuses it
   has changed, even when its signature has not.
@@ -38,9 +39,9 @@ These do not:
 
 - adding a name, a code, a category, a field whose zero value keeps the
   old behaviour, or an option;
-- rewording an error's text, which is never a contract. A row of
-  [defaults.md](defaults.md) is compared word for word, so rewording one
-  counts as a change.
+- rewording an error's text, which is never a contract, or the prose of a
+  row of [defaults.md](defaults.md): CI compares its Default and Value
+  columns alone.
 
 A consumer must therefore map a code or a category it does not know, as
 its own default, rather than fail on it.
