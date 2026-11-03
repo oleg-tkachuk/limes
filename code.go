@@ -222,6 +222,59 @@ var exchangeCodeRules = []codeRule{
 // meter's: what a code alone is looked up in.
 var allCodeRules = slices.Concat(codeRules, exchangeCodeRules, meterCodeRules)
 
+// Origin is where a code comes from: the package whose errors it names. A
+// consumer that does not run a component maps its codes as a formality, and
+// may leave them out of a check of its own mapping (CodesOf).
+type Origin string
+
+// The origins.
+const (
+	// OriginLimes — the root package and the packages it answers for:
+	// verifying and checking a capability, its stores, dpop and jwks.
+	OriginLimes Origin = "limes"
+	// OriginExchange — module exchange, the token endpoint and an
+	// Exchanger in process; a consumer that verifies tokens alone never
+	// meets them.
+	OriginExchange Origin = "exchange"
+	// OriginMeter — package meter and the usage stores.
+	OriginMeter Origin = "meter"
+)
+
+// Origins returns every origin, in the order Codes lists their codes.
+func Origins() []Origin { return []Origin{OriginLimes, OriginExchange, OriginMeter} }
+
+// rulesOf are origin's code rules; none for an origin that is none of
+// Origins.
+func rulesOf(origin Origin) []codeRule {
+	switch origin {
+	case OriginLimes:
+		return codeRules
+	case OriginExchange:
+		return exchangeCodeRules
+	case OriginMeter:
+		return meterCodeRules
+	}
+	return nil
+}
+
+// CodesOf returns the codes of origin, in Codes' order, and none for an
+// origin that is none of Origins: a consumer that runs no exchange checks
+// its mapping of CodesOf(OriginLimes) and CodesOf(OriginMeter).
+func CodesOf(origin Origin) []Code {
+	return codesIn(rulesOf(origin))
+}
+
+// codesIn are the codes of rules, each once.
+func codesIn(rules []codeRule) []Code {
+	out := make([]Code, 0, len(rules))
+	for _, r := range rules {
+		if !slices.Contains(out, r.code) {
+			out = append(out, r.code)
+		}
+	}
+	return out
+}
+
 // codeRuleOf is code's rule.
 func codeRuleOf(code Code) (codeRule, bool) {
 	for _, r := range allCodeRules {
@@ -264,13 +317,7 @@ func CodeOf(err error) (Code, bool) {
 // meter's among them, in a fixed order, so a consumer can prove its own
 // mapping covers them all.
 func Codes() []Code {
-	out := make([]Code, 0, len(allCodeRules))
-	for _, r := range allCodeRules {
-		if !slices.Contains(out, r.code) {
-			out = append(out, r.code)
-		}
-	}
-	return out
+	return codesIn(allCodeRules)
 }
 
 // ProblemTypeURI is the RFC 9457 type URI of the problem a code, or a

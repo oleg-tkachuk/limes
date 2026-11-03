@@ -55,17 +55,11 @@ func TestCheckCodes(t *testing.T) {
 			func(m map[limes.Code]limestest.Answer) {
 				m[limes.CodeRevoked] = limestest.Answer{Status: http.StatusUnauthorized, Category: limes.CategoryUnavailable}
 			},
-			[]string{`"revoked" with status 401, category "unauthenticated"; pinned 401, "unavailable"`},
-		},
-		"a status changed": {
-			func(m map[limes.Code]limestest.Answer) {
-				m[limes.CodeNotFound] = limestest.Answer{Status: http.StatusGone, Category: limes.CategoryNotFound}
-			},
-			[]string{`"not_found" with status 404, category "not_found"; pinned 410, "not_found"`},
+			[]string{`"revoked" is answered limestest.Answer{Status:401, Category:"unauthenticated"}; pinned limestest.Answer{Status:401, Category:"unavailable"}`},
 		},
 		"a code not pinned": {
 			func(m map[limes.Code]limestest.Answer) { delete(m, limes.CodeChargeNotFound) },
-			[]string{`"charge_not_found", which is not pinned; pin it, mapped: "charge_not_found": {Status: 404, Category: "not_found"},`},
+			[]string{`"charge_not_found" is not pinned; pin it, mapped: "charge_not_found": limestest.Answer{Status:404, Category:"not_found"},`},
 		},
 		"a code limes no longer answers": {
 			func(m map[limes.Code]limestest.Answer) { m["gone_code"] = limestest.Answer{} },
@@ -74,17 +68,84 @@ func TestCheckCodes(t *testing.T) {
 	} {
 		pinned := current()
 		tc.edit(pinned)
-		got := checkCodes(t, pinned)
-		if len(got) != len(tc.want) {
-			t.Errorf("%s: reported %q, want %d", name, got, len(tc.want))
-			continue
-		}
-		for i, want := range tc.want {
-			if !strings.Contains(got[i], want) {
-				t.Errorf("%s: reported %q, want it to say %q", name, got[i], want)
-			}
+		assertReported(t, name, checkCodes(t, pinned), tc.want)
+	}
+}
+
+// assertReported fails t unless got says each of want, in order.
+func assertReported(t *testing.T, name string, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Errorf("%s: reported %q, want %d", name, got, len(want))
+		return
+	}
+	for i, w := range want {
+		if !strings.Contains(got[i], w) {
+			t.Errorf("%s: reported %q, want it to say %q", name, got[i], w)
 		}
 	}
+}
+
+// transportCode is a transport's own code, as a consumer's RPC framework
+// has them.
+type transportCode int
+
+// The transport's codes this test maps to.
+const (
+	transportOther transportCode = iota
+	transportUnauthenticated
+	transportNotFound
+)
+
+// toTransport is a consumer's mapping, by category.
+func toTransport(code limes.Code) transportCode {
+	switch c, _ := limes.CategoryOfCode(code); c {
+	case limes.CategoryUnauthenticated:
+		return transportUnauthenticated
+	case limes.CategoryNotFound:
+		return transportNotFound
+	default:
+		return transportOther
+	}
+}
+
+func TestCheckMapping(t *testing.T) {
+	codes := limes.CodesOf(limes.OriginLimes)
+	pinned := map[limes.Code]transportCode{}
+	for _, c := range codes {
+		pinned[c] = toTransport(c)
+	}
+	check := func(pinned map[limes.Code]transportCode, answer func(limes.Code) transportCode) []string {
+		r := &recorder{TB: t}
+		limestest.CheckMapping(r, codes, pinned, answer)
+		return r.errors
+	}
+	if got := check(pinned, toTransport); len(got) != 0 {
+		t.Fatalf("the mapping as pinned: %q", got)
+	}
+	if pinned[limes.CodeRevoked] != transportUnauthenticated || pinned[limes.CodeNotFound] != transportNotFound {
+		t.Fatalf("the mapping pins revoked %v, not_found %v", pinned[limes.CodeRevoked], pinned[limes.CodeNotFound])
+	}
+	moved := func(code limes.Code) transportCode {
+		if code == limes.CodeRevoked {
+			return transportOther
+		}
+		return toTransport(code)
+	}
+	assertReported(t, "a code the mapping answers otherwise", check(pinned, moved),
+		[]string{`"revoked" is answered 0; pinned 1: map it anew, then pin "revoked": 0,`})
+
+	without := maps.Clone(pinned)
+	delete(without, limes.CodeNotFound)
+	assertReported(t, "a code not pinned", check(without, toTransport), []string{`"not_found" is not pinned; pin it, mapped: "not_found": 2,`})
+
+	outside := maps.Clone(pinned)
+	outside[limes.CodeInvalidGrant] = transportUnauthenticated
+	outside["gone_code"] = transportOther
+	assertReported(t, "codes pinned outside codes", check(outside, toTransport), []string{
+		`"gone_code" is pinned, and limes no longer answers it`,
+		`"invalid_grant" is pinned, and not among the codes checked`,
+	})
 }
 
 func TestCheckCategories(t *testing.T) {

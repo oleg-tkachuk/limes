@@ -328,3 +328,32 @@ func TestAnErrorNamingItsCode(t *testing.T) {
 		}
 	}
 }
+
+// The origins split Codes: each code comes from one, and together they hold
+// every code in Codes' order.
+func TestCodesOf(t *testing.T) {
+	var all []Code
+	for _, origin := range Origins() {
+		codes := CodesOf(origin)
+		if len(codes) == 0 {
+			t.Errorf("CodesOf(%q) is empty", origin)
+		}
+		for _, c := range codes {
+			if slices.Contains(all, c) {
+				t.Errorf("%q comes from two origins", c)
+			}
+		}
+		all = append(all, codes...)
+	}
+	if !slices.Equal(all, Codes()) {
+		t.Errorf("the origins' codes %q; Codes() %q", all, Codes())
+	}
+	for origin, code := range map[Origin]Code{OriginLimes: CodeRevoked, OriginMeter: CodeLeaseNested, OriginExchange: CodeInvalidGrant} {
+		if !slices.Contains(CodesOf(origin), code) {
+			t.Errorf("CodesOf(%q) lacks %q", origin, code)
+		}
+	}
+	if got := CodesOf("no_such_origin"); len(got) != 0 {
+		t.Errorf("CodesOf(no_such_origin) = %q, want none", got)
+	}
+}

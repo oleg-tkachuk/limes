@@ -70,6 +70,17 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## v0.158.0
+
+- `limes.CodeOf`, `CategoryOf` and `ProblemOf` changed in v0.157.0, which
+  marked the break in exchange/v0.16.0 alone: they answer an exchange's
+  error by the exchange's own code, `invalid_grant` 400 where it was the
+  limes error it wraps, `revoked` 401 (see exchange/v0.16.0 below).
+- `use_dpop_nonce` and `invalid_dpop_proof`, which v0.157.0's notes listed
+  as codes added, are no `limes.Code`: they are the token endpoint's RFC
+  9449 codes, now `dpop.ErrorCodeUseNonce` and `dpop.ErrorCodeInvalidProof`.
+  A mapping that pinned them drops them.
+
 ## exchange/v0.16.0
 
 - limes's functions answer the exchange's errors as their own: each
