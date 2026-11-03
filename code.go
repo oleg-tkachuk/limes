@@ -257,11 +257,17 @@ func rulesOf(origin Origin) []codeRule {
 	return nil
 }
 
-// CodesOf returns the codes of origin, in Codes' order, and none for an
+// CodesOf returns the codes of origins, in Codes' order, and none for an
 // origin that is none of Origins: a consumer that runs no exchange checks
-// its mapping of CodesOf(OriginLimes) and CodesOf(OriginMeter).
-func CodesOf(origin Origin) []Code {
-	return codesIn(rulesOf(origin))
+// its mapping of CodesOf(OriginLimes, OriginMeter).
+func CodesOf(origins ...Origin) []Code {
+	var rules []codeRule
+	for _, origin := range Origins() {
+		if slices.Contains(origins, origin) {
+			rules = append(rules, rulesOf(origin)...)
+		}
+	}
+	return codesIn(rules)
 }
 
 // codesIn are the codes of rules, each once.
