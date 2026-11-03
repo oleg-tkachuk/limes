@@ -97,6 +97,18 @@ const (
 	transportNotFound
 )
 
+// String names the code, as an RPC framework's codes do.
+func (c transportCode) String() string {
+	switch c {
+	case transportUnauthenticated:
+		return "unauthenticated"
+	case transportNotFound:
+		return "not_found"
+	default:
+		return "other"
+	}
+}
+
 // toTransport is a consumer's mapping, by category.
 func toTransport(code limes.Code) transportCode {
 	switch c, _ := limes.CategoryOfCode(code); c {
@@ -133,11 +145,11 @@ func TestCheckMapping(t *testing.T) {
 		return toTransport(code)
 	}
 	assertReported(t, "a code the mapping answers otherwise", check(pinned, moved),
-		[]string{`"revoked" is answered 0; pinned 1: map it anew, then pin "revoked": 0,`})
+		[]string{`"revoked" is answered 0 /* other */; pinned 1 /* unauthenticated */: map it anew, then pin "revoked": 0 /* other */,`})
 
 	without := maps.Clone(pinned)
 	delete(without, limes.CodeNotFound)
-	assertReported(t, "a code not pinned", check(without, toTransport), []string{`"not_found" is not pinned; pin it, mapped: "not_found": 2,`})
+	assertReported(t, "a code not pinned", check(without, toTransport), []string{`"not_found" is not pinned; pin it, mapped: "not_found": 2 /* not_found */,`})
 
 	outside := maps.Clone(pinned)
 	outside[limes.CodeInvalidGrant] = transportUnauthenticated
@@ -166,5 +178,20 @@ func TestCheckCategories(t *testing.T) {
 	got := check(without)
 	if len(got) != 1 || !strings.Contains(got[0], `category "precondition"`) {
 		t.Errorf("a mapping without precondition: reported %q", got)
+	}
+}
+
+// wireName is a transport's code that is a string already, and names itself.
+type wireName string
+
+func (w wireName) String() string { return string(w) }
+
+// A code that is a string reads as itself, without its name repeated.
+func TestCheckMappingNamesAStringOnce(t *testing.T) {
+	r := &recorder{TB: t}
+	limestest.CheckMapping(r, []limes.Code{limes.CodeRevoked}, map[limes.Code]wireName{}, func(limes.Code) wireName { return "unauthenticated" })
+	assertReported(t, "a string code not pinned", r.errors, []string{`pin it, mapped: "revoked": "unauthenticated",`})
+	if len(r.errors) == 1 && strings.Contains(r.errors[0], "/*") {
+		t.Errorf("reported %q: its name beside a string", r.errors[0])
 	}
 }
