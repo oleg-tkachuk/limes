@@ -2,24 +2,26 @@
 // error contract it was written against (docs/compatibility.md). A code
 // answered with another status or category is a break, yet it compiles: a
 // consumer mapping categories onto its transport goes on building, and
-// answers otherwise. Pin the answers the mapping was written for, and a
-// limes that answers otherwise fails the consumer's test instead of its
-// traffic:
+// answers otherwise. Pin what the consumer's own transport answers each
+// code with, and a limes that makes it answer otherwise fails the
+// consumer's test instead of its traffic:
 //
 //	func TestErrorContract(t *testing.T) {
-//		limestest.CheckCodes(t, pinned)
-//		limestest.CheckCategories(t, func(c limes.Category) bool {
-//			_, ok := transportCodes[c]
-//			return ok
+//		codes := slices.Concat(limes.CodesOf(limes.OriginLimes), limes.CodesOf(limes.OriginMeter))
+//		limestest.CheckMapping(t, codes, map[limes.Code]connect.Code{
+//			"revoked": connect.CodeUnauthenticated,
+//			// …
+//		}, func(c limes.Code) connect.Code {
+//			p, _ := limes.ProblemOfCode(c)
+//			return connectCode(p)
 //		})
 //	}
 //
-// CheckCodes names each entry to pin in Go's own syntax, so the first
-// failing run writes the table.
+// CheckCodes is CheckMapping of every code to its HTTP status and
+// category, for a consumer that answers in HTTP's terms.
 package limestest
 
 import (
-	"fmt"
 	"slices"
 	"sort"
 	"testing"
@@ -27,7 +29,42 @@ import (
 	"github.com/oleg-tkachuk/limes"
 )
 
-// Answer is how limes answers a code: what a consumer's mapping reads.
+// CheckMapping fails t for every way the consumer's answer to codes differs
+// from pinned, its record of the answers its mapping was written to give: a
+// code of codes answer maps otherwise than pinned, a code of codes not
+// pinned, and a code pinned that is none of codes — which limes no longer
+// answers, or the consumer left out of codes. Each failure names the entry
+// to pin, so the first failing run writes the table.
+func CheckMapping[T comparable](t testing.TB, codes []limes.Code, pinned map[limes.Code]T, answer func(limes.Code) T) {
+	t.Helper()
+	for _, code := range codes {
+		got := answer(code)
+		want, ok := pinned[code]
+		switch {
+		case !ok:
+			t.Errorf("limestest: %q is not pinned; pin it, mapped: %q: %#v,", code, code, got)
+		case want != got:
+			t.Errorf("limestest: %q is answered %#v; pinned %#v: map it anew, then pin %q: %#v,", code, got, want, code, got)
+		}
+	}
+	answered := limes.Codes()
+	var extra []string
+	for code := range pinned {
+		if !slices.Contains(codes, code) {
+			extra = append(extra, string(code))
+		}
+	}
+	sort.Strings(extra)
+	for _, code := range extra {
+		if slices.Contains(answered, limes.Code(code)) {
+			t.Errorf("limestest: %q is pinned, and not among the codes checked", code)
+		} else {
+			t.Errorf("limestest: %q is pinned, and limes no longer answers it", code)
+		}
+	}
+}
+
+// Answer is how limes answers a code in HTTP's terms.
 type Answer struct {
 	// Status is the HTTP status, Problem.Status.
 	Status int
@@ -35,41 +72,17 @@ type Answer struct {
 	Category limes.Category
 }
 
-// CheckCodes fails t for every way limes's codes, the meter's among them,
-// differ from pinned, the consumer's record of the ones its mapping was
-// written against: a code limes answers with another status or category
-// than pinned, a code limes answers that is not pinned, and a code pinned
-// that limes no longer answers.
+// CheckCodes is CheckMapping of every code limes answers, the meter's and
+// the exchange's among them, to its Answer.
 func CheckCodes(t testing.TB, pinned map[limes.Code]Answer) {
 	t.Helper()
-	codes := limes.Codes()
-	for _, code := range codes {
-		p, _ := limes.ProblemOfCode(code)
-		got := Answer{Status: p.Status, Category: p.Category}
-		want, ok := pinned[code]
-		switch {
-		case !ok:
-			t.Errorf("limestest: limes answers %q, which is not pinned; pin it, mapped: %s", code, entry(code, got))
-		case want != got:
-			t.Errorf("limestest: limes answers %q with status %d, category %q; pinned %d, %q: map it anew, then pin %s",
-				code, got.Status, got.Category, want.Status, want.Category, entry(code, got))
-		}
-	}
-	var gone []string
-	for code := range pinned {
-		if !slices.Contains(codes, code) {
-			gone = append(gone, string(code))
-		}
-	}
-	sort.Strings(gone)
-	for _, code := range gone {
-		t.Errorf("limestest: %q is pinned, and limes no longer answers it", code)
-	}
+	CheckMapping(t, limes.Codes(), pinned, answerOf)
 }
 
-// entry is the pinned table's entry for code answered as a.
-func entry(code limes.Code, a Answer) string {
-	return fmt.Sprintf("%q: {Status: %d, Category: %q},", code, a.Status, a.Category)
+// answerOf is code's Answer.
+func answerOf(code limes.Code) Answer {
+	p, _ := limes.ProblemOfCode(code)
+	return Answer{Status: p.Status, Category: p.Category}
 }
 
 // CheckCategories fails t for every category of limes.Categories() that
