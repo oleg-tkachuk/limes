@@ -145,7 +145,7 @@ func FuzzRecords(f *testing.F) {
 				if tok.claimed && !tok.mayBeGone {
 					expires = tok.expires
 				}
-				got, claimed, err := s.ClaimExchange(ctx, key(i), expires, nodes[n].id)
+				got, claimed, err := s.ClaimExchange(ctx, limes.ClaimExchangeRequest{Key: key(i), TokenExpiresAt: expires, CapabilityID: nodes[n].id})
 				switch {
 				case !nodes[n].onRecord:
 					if !errors.Is(err, limes.ErrNotFound) {
