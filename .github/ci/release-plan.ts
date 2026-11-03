@@ -7,9 +7,13 @@
 // finds due — or, by hand, each one asked for — and its next version and
 // notes from a semantic-release dry run, which must run on main, so the plan
 // is made before any branch is cut. When limes is in the plan, each nested
-// module that requires an older limes is raised to it and released with
-// it: with its own notes, when it has commits that release, or as a patch
-// whose notes are the requirement alone. When limes reaches v1.0.0, every
+// module that requires an older limes and whose files changed since its last
+// release is raised to it and released with it: with its own notes, when it
+// has commits that release, or as a patch whose notes are the requirement
+// alone. One unchanged since is left as it is: its last release is the code
+// CI has just built against this limes, so it needs none to work with it,
+// and a consumer's build selects the newer limes anyway. When limes reaches
+// v1.0.0, every
 // nested module still on 0.x reaches its v1.0.0 with it, its own notes, if
 // any, under that version: one stable line for the whole repository
 // (docs/compatibility.md). Each planned release's notes are its changelog
@@ -35,7 +39,7 @@ import { codeChanges, withCodeChanges } from "./lib/codes.ts";
 import { contractChanges, withContractChanges } from "./lib/contract.ts";
 import { defaultChanges, withDefaultChanges } from "./lib/defaults.ts";
 import { optionalEnv, requireEnv } from "./lib/env.ts";
-import { git } from "./lib/git.ts";
+import { changedPaths, git } from "./lib/git.ts";
 import { gitHubFor, type GitHub, type PullRequestText } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
 import { pushAs } from "./lib/push.ts";
@@ -166,7 +170,8 @@ function withHeading(head: string, notes: string | undefined): string {
 }
 
 // raiseNested adds to plan every nested module of names that requires a
-// limes older than tag, its requirement raised to it.
+// limes older than tag and changed since its last release, its requirement
+// raised to it.
 async function raiseNested(p: Planner, plan: Planned[], names: readonly string[], tag: string): Promise<void> {
   for (const name of names.filter((n) => n !== ROOT_MODULE)) {
     const module = selectModule(p.root, name);
@@ -181,11 +186,27 @@ async function raiseNested(p: Planner, plan: Planned[], names: readonly string[]
       known.raise = true;
       continue;
     }
+    if (!(await changedSinceRelease(p, module))) {
+      info(`${name}: requires limes ${required}, and nothing of it changed since its last release: not raised`);
+      continue;
+    }
     const notes = (await p.dryRun(module)) ?? (await patchNotes(p, module));
     const entry = await planned(p, module, notes, true);
     entry.entry = withDependency(entry.entry, line);
     plan.push(entry);
   }
+}
+
+// changedSinceRelease reports whether any file of module differs between
+// its last release and the checked-out commit; true for a module with no
+// release yet, or one the module table gives no scope.
+async function changedSinceRelease(p: Planner, module: Module): Promise<boolean> {
+  const last = await lastStableTag(module, "HEAD", p.root);
+  const scope = module.table?.configFor(module.name)?.scope;
+  if (last === undefined || scope === undefined) {
+    return true;
+  }
+  return p.commits.touches(await changedPaths(last, "HEAD", p.root), scope);
 }
 
 // requiredLimesOf is the limes module requires, undefined when it requires

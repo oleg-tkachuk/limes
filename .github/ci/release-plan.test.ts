@@ -112,7 +112,9 @@ describe("the release plan", () => {
     };
   }
 
-  test("a due limes raises every nested module that requires it, one with nothing of its own as a patch", async () => {
+  test("a due limes raises every nested module that requires it and changed since its release, one with nothing of its own due as a patch", async () => {
+    repo.write(`${PGSTORE}/pgstore_test.go`, "package pgstore\n");
+    await repo.commit(`test(${PGSTORE}): a test`);
     const plan = await planReleases(planner());
     assert.deepEqual(
       plan.map((p) => [p.tag, p.raise]),
@@ -165,7 +167,17 @@ describe("the release plan", () => {
     assert.ok(entry.endsWith(`${CONTRACT_HEADING}\n\n* make defaults contract\n`), entry);
   });
 
+  test("a due limes leaves a nested module that changed nothing since its release as it is", async () => {
+    const plan = await planReleases(planner());
+    assert.deepEqual(
+      plan.map((p) => p.tag),
+      ["v0.2.0"],
+    );
+  });
+
   test("a nested module with notes of its own keeps them, with the requirement added", async () => {
+    repo.write(`${PGSTORE}/feature.go`, "package pgstore\n");
+    await repo.commit(`feat(${PGSTORE}): a store feature`);
     dryRuns.pgstore = notes("0.2.0", "a store feature");
     const plan = await planReleases(planner());
     const pgstore = plan.find((p) => p.module.name === PGSTORE);
@@ -218,7 +230,15 @@ describe("the release plan", () => {
     await repo.run("tag", `${PGSTORE}/v1.0.0`);
     await repo.run("tag", "--delete", `${OTELMETRIC}/v0.1.0`);
     dryRuns.limes = "# [1.0.0](https://example.com/compare) (2026-10-31)\n\n* broke\n";
-    // pgstore is raised to the new limes, as on any release of it: a patch.
+    // pgstore changed nothing since its release, so stays as it is; one
+    // that changed is raised to the new limes, as on any release of it: a
+    // patch.
+    assert.deepEqual(
+      (await planReleases(planner(NEVER_DUE, true, "limes"))).map((p) => [p.tag, p.major]),
+      [["v1.0.0", true]],
+    );
+    repo.write(`${PGSTORE}/pgstore_test.go`, "package pgstore\n");
+    await repo.commit(`test(${PGSTORE}): a test`);
     const plan = await planReleases(planner(NEVER_DUE, true, "limes"));
     assert.deepEqual(
       plan.map((p) => [p.tag, p.major]),
@@ -317,6 +337,9 @@ describe("the release plan", () => {
     }
 
     test("one commit on its branch raises the requirement and adds each entry, and one pull request names the tags", async () => {
+      repo.write(`${PGSTORE}/pgstore_test.go`, "package pgstore\n");
+      await repo.commit(`test(${PGSTORE}): a test`);
+      await repo.run("push", "--quiet", "origin", "main");
       const proposed = await proposeRelease(ctx());
       assert.equal(proposed?.pullRequest, 101);
       assert.equal(data.createdPulls[0]?.text.draft, false, "a release with no major is ready to merge");

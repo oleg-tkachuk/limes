@@ -53,10 +53,11 @@ Every module is released from one commit
 ([ADR-0016](../docs/adr/0016-one-release-commit.md)). After a green push to
 `main`, the release workflow proposes one release pull request
 (`chore(release): …`, merged once green, or by hand for a major): it raises
-every nested module's requirement of limes to the limes it releases, so each
-is released with it, and adds each module's changelog entry. Its merge
-commit is tagged for every module at once, so a nested module requires the
-limes tagged beside it. `task test:pinned MODULE=<module>` still runs a
+the requirement of limes of every nested module changed since its last
+release to the limes it releases, so each is released with it, and adds
+each module's changelog entry. Its merge commit is tagged for every module
+at once, so a nested module released requires the limes tagged beside it;
+one unchanged keeps the release CI has just tested against that limes. `task test:pinned MODULE=<module>` still runs a
 module's tests against the limes its `go.mod` requires, as a consumer's build
 resolves it.
 
