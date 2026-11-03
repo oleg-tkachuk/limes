@@ -132,7 +132,7 @@ func TestSentinelMatrixIsComplete(t *testing.T) {
 func TestSentinelsAreIndividuallyMatchable(t *testing.T) {
 	for nameA, a := range sentinelMatrix {
 		for nameB, b := range sentinelMatrix {
-			declared := slices.ContainsFunc(a.families, func(f string) bool { return families[f] == b.err })
+			declared := slices.ContainsFunc(a.families, func(f string) bool { return errors.Is(families[f], b.err) })
 			if nameA != nameB && !declared && errors.Is(a.err, b.err) {
 				t.Errorf("%s matches %s — they must stay distinguishable", nameA, nameB)
 			}
