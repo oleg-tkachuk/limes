@@ -2,6 +2,26 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.155.0](https://github.com/oleg-tkachuk/limes/compare/v0.154.0...v0.155.0) (2026-11-03)
+
+### ⚠ BREAKING CHANGES
+
+* already_exists, refund_exceeds_charge and
+  malformed_authorization change category; docs/migration.md lists them
+  and the moves since v0.152.0.
+* take a ClaimExchangeRequest in ClaimExchange
+
+### Features
+
+* give already_exists a category, and recategorise two codes ([19fbc22](https://github.com/oleg-tkachuk/limes/commit/19fbc22c70cba19c97ea07a969708c65ab3de6f9))
+* take a ClaimExchangeRequest in ClaimExchange ([a7a190d](https://github.com/oleg-tkachuk/limes/commit/a7a190db043e13f2a43273a979b45d6ae0c0615e))
+
+### Codes
+
+* changed: `already_exists` — category conflict → already_exists
+* changed: `malformed_authorization` — category unauthenticated → invalid
+* changed: `refund_exceeds_charge` — category invalid → precondition
+
 ## [0.154.0](https://github.com/oleg-tkachuk/limes/compare/v0.153.0...v0.154.0) (2026-11-03)
 
 ### Features

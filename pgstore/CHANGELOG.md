@@ -2,6 +2,20 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.65.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.64.2...pgstore%2Fv0.65.0) (2026-11-03)
+
+### ⚠ BREAKING CHANGES
+
+* **pgstore:** take a ClaimExchangeRequest in ClaimExchange
+
+### Features
+
+* **pgstore:** take a ClaimExchangeRequest in ClaimExchange ([00267d4](https://github.com/oleg-tkachuk/limes/commit/00267d40f4218a09e253d9b2cdf13e623a59d8b2))
+
+### Dependencies
+
+* require limes v0.155.0
+
 ## [0.64.2](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.64.1...pgstore%2Fv0.64.2) (2026-11-03)
 
 ### Dependencies
