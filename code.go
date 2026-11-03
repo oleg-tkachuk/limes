@@ -89,7 +89,7 @@ type codeRule struct {
 // error matches decides, so each family's members come before its root.
 var codeRules = []codeRule{
 	// Answered as refusals.
-	{ErrMalformedAuthorization, CodeMalformedAuthorization, 0, "", CategoryUnauthenticated},
+	{ErrMalformedAuthorization, CodeMalformedAuthorization, 0, "", CategoryInvalid},
 	{ErrNoCredentials, CodeNoCredentials, 0, "", CategoryUnauthenticated},
 	{jwks.ErrUnavailable, CodeKeysUnavailable, 0, "", CategoryUnavailable},
 	{dpop.ErrNonceRequired, CodeNonceRequired, 0, "", CategoryUnauthenticated},
@@ -117,7 +117,7 @@ var codeRules = []codeRule{
 	{ErrBudgetExceeded, CodeBudgetExceeded, 0, "", CategoryExhausted},
 	{ErrTenantBudgetExceeded, CodeTenantBudgetExceeded, 0, "", CategoryExhausted},
 	{ErrUnitCodeMismatch, CodeUnitCodeMismatch, 0, "", CategoryPrecondition},
-	{ErrAlreadyExists, CodeAlreadyExists, 0, "", CategoryConflict},
+	{ErrAlreadyExists, CodeAlreadyExists, 0, "", CategoryAlreadyExists},
 	{ErrConflict, CodeConflict, 0, "", CategoryConflict},
 
 	// The caller's request.

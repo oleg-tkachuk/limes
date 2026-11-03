@@ -8,8 +8,9 @@ type Category string
 
 // The categories.
 const (
-	// CategoryUnauthenticated — the credential is missing, malformed,
-	// unproven or no longer good: present another.
+	// CategoryUnauthenticated — the credential is missing, unproven or no
+	// longer good: present another. One the request carries malformed is
+	// CategoryInvalid.
 	CategoryUnauthenticated Category = "unauthenticated"
 	// CategoryDenied — the credential is good and does not allow the
 	// request.
@@ -25,6 +26,9 @@ const (
 	// CategoryConflict — the request disagrees with what is on record: read
 	// it again, and decide.
 	CategoryConflict Category = "conflict"
+	// CategoryAlreadyExists — what the request would create is on record
+	// already: read it rather than create it again.
+	CategoryAlreadyExists Category = "already_exists"
 	// CategoryPrecondition — the request is well formed, and the state it
 	// needs is not there: the store's configuration, the ledger or another
 	// capability's lease. Sent again it fails again until that state
@@ -42,7 +46,7 @@ const (
 func Categories() []Category {
 	return []Category{
 		CategoryUnauthenticated, CategoryDenied, CategoryExhausted, CategoryInvalid,
-		CategoryNotFound, CategoryConflict, CategoryPrecondition, CategoryUnavailable, CategoryInternal,
+		CategoryNotFound, CategoryConflict, CategoryAlreadyExists, CategoryPrecondition, CategoryUnavailable, CategoryInternal,
 	}
 }
 
