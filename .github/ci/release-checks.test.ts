@@ -173,6 +173,46 @@ function readFileSafe(path: string): string {
   }
 }
 
+describe("markerCheck over the wire contract", () => {
+  let repo: TempRepo;
+  // table is docs/errors.md with one table of limes's codes, as rows of
+  // code, status and category.
+  const table = (rows: [string, string, string][]) =>
+    `## limes's codes\n\n${rows.map(([c, s, k]) => `| \`${c}\` | ${s} | x | \`${k}\` |`).join("\n")}\n`;
+  before(async () => {
+    repo = await tempRepo();
+    mkdirSync(join(repo.dir, "docs"), { recursive: true });
+    writeFileSync(join(repo.dir, "docs/errors.md"), table([["already_exists", "409", "conflict"], ["gone", "404", "not_found"]]));
+    await repo.commit("feat: start");
+    await repo.run("tag", "v0.9.0", "main");
+  });
+  after(() => repo.cleanup());
+
+  // check writes rows as the errors table on a branch off main, in one
+  // commit of message — with a migration entry when migration is set — and
+  // runs the check of main..case.
+  async function check(rows: [string, string, string][], message: string, migration = false): Promise<string> {
+    await repo.run("checkout", "--quiet", "-B", "case", "main");
+    writeFileSync(join(repo.dir, "docs/errors.md"), table(rows));
+    if (migration) {
+      writeFileSync(join(repo.dir, "docs/migration.md"), `${message}\n`);
+    }
+    await repo.commit(message);
+    const verdict = await markerCheck(selectModule(repo.dir), "main", "case", undefined, commits, repo.dir);
+    await repo.run("checkout", "--quiet", "main");
+    return verdict.ok ? "ok" : verdict.message;
+  }
+
+  test("a code recategorised, restatused or removed needs a marker; one added does not", async () => {
+    const kept: [string, string, string] = ["gone", "404", "not_found"];
+    assert.match(await check([["already_exists", "409", "already_exists"], kept], "fix: recategorise"), /category conflict → already_exists/);
+    assert.match(await check([["already_exists", "400", "conflict"], kept], "fix: restatus"), /status 409 → 400/);
+    assert.match(await check([["already_exists", "409", "conflict"]], "fix: drop a code"), /`gone` removed/);
+    assert.equal(await check([["already_exists", "409", "already_exists"], kept], "fix!: recategorise", true), "ok");
+    assert.equal(await check([["already_exists", "409", "conflict"], kept, ["new_code", "500", "internal"]], "feat: add a code"), "ok");
+  });
+});
+
 describe("markerCheck over two modules", () => {
   let repo: TempRepo;
   before(async () => {
