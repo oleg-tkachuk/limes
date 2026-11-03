@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"sort"
@@ -101,8 +102,12 @@ func TestLimesKnowsEveryMeterCode(t *testing.T) {
 		if got, ok := limes.CategoryOfCode(s.code); !ok || got != category {
 			t.Errorf("limes.CategoryOfCode(%q) = %q, %v; want %q, as CategoryOf answers", s.code, got, ok, category)
 		}
-		if p, ok := limes.ProblemOf(wrapped); !ok || p.Code != s.code || p.Status == 0 {
-			t.Errorf("limes.ProblemOf(%s) = %+v, %v; want code %q", name, p, ok, s.code)
+		p, ok := limes.ProblemOf(wrapped)
+		if !ok || p.Code != s.code || p.Category != category || p.Status == 0 {
+			t.Errorf("limes.ProblemOf(%s) = %+v, %v; want code %q, category %q", name, p, ok, s.code, category)
+		}
+		if got, ok := limes.ProblemOfCode(s.code); !ok || !reflect.DeepEqual(got, p) {
+			t.Errorf("limes.ProblemOfCode(%q) = %+v, %v; want %+v, as ProblemOf answers", s.code, got, ok, p)
 		}
 		if !slices.Contains(codes, s.code) {
 			t.Errorf("limes.Codes() lacks %q", s.code)

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"sort"
@@ -158,12 +159,13 @@ func TestProblemOf(t *testing.T) {
 			continue
 		}
 		code, _ := CodeOf(err)
-		if p.Code != code || p.Detail != "" || p.Status == 0 || p.Title == "" {
-			t.Errorf("%s: problem %+v; want code %q, a status and a title, no detail", name, p, code)
+		category, _ := CategoryOf(err)
+		if p.Code != code || p.Category != category || p.Detail != "" || p.Status == 0 || p.Title == "" {
+			t.Errorf("%s: problem %+v; want code %q, category %q, a status and a title, no detail", name, p, code, category)
 		}
 		if _, refused := ruleFor(err); refused {
 			want := v.ErrorResponse(context.Background(), err, AuthSchemeBearer).Problem
-			if p.Type != want.Type || p.Title != want.Title || p.Status != want.Status || p.Reason != want.Reason || p.Code != want.Code {
+			if p.Type != want.Type || p.Title != want.Title || p.Status != want.Status || p.Reason != want.Reason || p.Code != want.Code || p.Category != want.Category {
 				t.Errorf("%s: ProblemOf %+v, ErrorResponse %+v", name, p, want)
 			}
 		} else if p.Type != ProblemTypeURI(string(code)) {
@@ -212,8 +214,32 @@ func TestProblemWritesItsCode(t *testing.T) {
 	if err := json.Unmarshal(raw, &body); err != nil || body["code"] != string(CodeNotFound) || body["status"] != float64(http.StatusNotFound) {
 		t.Errorf("body = %s, %v", raw, err)
 	}
+	if body["category"] != string(CategoryNotFound) {
+		t.Errorf("body = %s: want category %q", raw, CategoryNotFound)
+	}
 	if _, ok := body["detail"]; ok {
 		t.Errorf("body = %s: a detail", raw)
+	}
+}
+
+// ProblemOfCode answers a code as ProblemOf answers an error with it, and
+// false for a code that is none of limes's.
+func TestProblemOfCode(t *testing.T) {
+	for _, r := range codeRules {
+		want, _ := ProblemOf(r.sentinel)
+		if got, ok := ProblemOfCode(r.code); !ok || !reflect.DeepEqual(got, want) {
+			t.Errorf("ProblemOfCode(%q) = %+v, %v; ProblemOf answers %+v", r.code, got, ok, want)
+		}
+	}
+	for _, code := range Codes() {
+		p, ok := ProblemOfCode(code)
+		category, _ := CategoryOfCode(code)
+		if !ok || p.Code != code || p.Category != category || p.Status == 0 || p.Title == "" {
+			t.Errorf("ProblemOfCode(%q) = %+v, %v; want its code, category %q, a status and a title", code, p, ok, category)
+		}
+	}
+	if p, ok := ProblemOfCode("no_such_code"); ok {
+		t.Errorf("ProblemOfCode(no_such_code) = %+v, want none", p)
 	}
 }
 
@@ -259,7 +285,7 @@ func TestProblemFor(t *testing.T) {
 		t.Errorf("ProblemFor(ErrNotFound) = %+v", p)
 	}
 	for _, err := range []error{errors.New("connection reset"), nil} {
-		if p := ProblemFor(err); p.Code != CodeInternal || p.Status != http.StatusInternalServerError || p.Title == "" {
+		if p := ProblemFor(err); p.Code != CodeInternal || p.Category != CategoryInternal || p.Status != http.StatusInternalServerError || p.Title == "" {
 			t.Errorf("ProblemFor(%v) = %+v, want internal", err, p)
 		}
 	}
