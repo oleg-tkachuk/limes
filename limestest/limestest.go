@@ -36,9 +36,13 @@ import (
 // code of codes answer maps otherwise than pinned, a code of codes not
 // pinned, and a code pinned that is none of codes — which limes no longer
 // answers, or the consumer left out of codes. Each failure names the entry
-// to pin, so the first failing run writes the table.
+// to pin, so the first failing run writes the table. No codes at all fails
+// too: a check of none proves nothing.
 func CheckMapping[T comparable](t testing.TB, codes []limes.Code, pinned map[limes.Code]T, answer func(limes.Code) T) {
 	t.Helper()
+	if len(codes) == 0 {
+		t.Errorf("limestest: no codes to check")
+	}
 	for _, code := range codes {
 		got := answer(code)
 		want, ok := pinned[code]
