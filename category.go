@@ -51,20 +51,16 @@ func Categories() []Category {
 }
 
 // CategoryOf returns err's category, and false when err is no error of
-// limes's, as CodeOf does; meter.CategoryOf knows the meter's codes too.
+// limes's, as CodeOf does. The meter's errors are limes's: one registry
+// answers every code.
 func CategoryOf(err error) (Category, bool) {
 	r, ok := codeRuleFor(err)
 	return r.category, ok
 }
 
 // CategoryOfCode returns code's category, and false for a code that is none
-// of this package's; meter.CategoryOfCode knows the meter's codes too. A
-// consumer proving its own mapping of codes reads it beside Codes.
+// of this package's, the meter's among them. A consumer proving its own mapping of codes reads it beside Codes.
 func CategoryOfCode(code Code) (Category, bool) {
-	for _, r := range codeRules {
-		if r.code == code {
-			return r.category, true
-		}
-	}
-	return "", false
+	r, ok := codeRuleOf(code)
+	return r.category, ok
 }

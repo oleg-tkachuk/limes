@@ -26,13 +26,13 @@ place.
 
 **Any other API of the consumer's** — an admin endpoint that revokes, a
 billing call that settles — answers an error limes returned with
-`limes.ProblemOf(err)`, or `meter.ProblemOf(err)` for the meter's calls,
-which knows the meter's codes as well. Each gives the same RFC 9457 body
-and reports false for an error that is not limes's, which the consumer
-answers as its own failure, 500:
+`limes.ProblemOf(err)`, which knows the meter's codes as well: there is one
+registry of codes. It gives the RFC 9457 body and reports false for an
+error that is not limes's, which the consumer answers as its own failure,
+500:
 
 ```go
-p, ok := meter.ProblemOf(err)
+p, ok := limes.ProblemOf(err)
 if !ok {
 	p = limes.ProblemFor(err) // an error not limes's: internal, 500
 }
@@ -121,15 +121,15 @@ from the error with one call:
 | | Read with | For |
 |---|---|---|
 | Sentinel, `limes.Err…` | `errors.Is` | Branching in Go. Families nest: `meter.ErrLeaseExhausted` is also `limes.ErrBudgetExceeded`. |
-| Code, `limes.Code` | `limes.CodeOf`, `meter.CodeOf` | The wire: the one stable name of every error, which a client branches on. |
+| Code, `limes.Code` | `limes.CodeOf` | The wire: the one stable name of every error, which a client branches on. |
 | Reason, `limes.Reason` | `limes.ReasonOf`, `limes.ReasonOfCode` | A refusal of a presented capability only: why, as RFC 6750 and RFC 9449 challenge it, and whether it is permanent (`Reason.Permanent`). |
-| Category, `limes.Category` | `limes.CategoryOf`, `meter.CategoryOf` | What the caller does about it, for a transport with fewer codes than limes. |
+| Category, `limes.Category` | `limes.CategoryOf` | What the caller does about it, for a transport with fewer codes than limes. |
 
 A refusal's code is its reason, but where the reason folds several codes
 into one: `tenant_erased` and `delegation_too_deep` are refused as
 `revoked`, `copy_limit_exceeded` and `lease_requests_exhausted` as
 `request_limit_exceeded`, `lease_exhausted` as `budget_exceeded`.
-`limes.ReasonOfCode(code)` and `meter.ReasonOfCode(code)` read that table,
+`limes.ReasonOfCode(code)` reads that table,
 so a consumer holding only a code — mapping it, or filling an error detail
 — gets the reason without the error; a code cannot be derived from a
 reason, since one reason stands for several. Send the code, and the reason
@@ -148,9 +148,8 @@ reason.
 - **A 409** is a request that disagrees with what is on record: read it
   again, and decide.
 
-`limes.Codes()` and `meter.Codes()` list every code, and
-`meter.AllCodes()` lists both in one, so a consumer's test can prove its
-own mapping covers them all. A code's status, category and
+`limes.Codes()` lists every code, the meter's among them, so a consumer's
+test can prove its own mapping covers them all. A code's status, category and
 reason are part of the contract ([compatibility.md](compatibility.md)):
 changing one is a break, marked and listed in the release notes, and these
 tables are what CI compares.
@@ -159,8 +158,8 @@ tables are what CI compares.
 
 Every code belongs to one `limes.Category`, the last column of the tables
 below: what the caller does about it. A consumer whose transport has fewer
-codes than limes maps the ten categories, read with `limes.CategoryOf(err)`
-or `meter.CategoryOf(err)`, rather than every code:
+codes than limes maps the ten categories, read with `limes.CategoryOf(err)`,
+rather than every code:
 
 | Category | Meaning |
 |---|---|
@@ -178,9 +177,9 @@ or `meter.CategoryOf(err)`, rather than every code:
 The status stays the finer answer: within `exhausted`, a permanent refusal
 (`request_limit_exceeded`) never lifts while a budget can.
 
-`limes.CategoryOfCode(code)` and `meter.CategoryOfCode(code)` answer a
-code's category without an error to hand, so a test of a consumer's own
-mapping walks `meter.AllCodes()` and checks each pair.
+`limes.CategoryOfCode(code)` answers a code's category without an error to
+hand, so a test of a consumer's own mapping walks `limes.Codes()` and
+checks each pair.
 
 A category says what retrying would do, not how bad the failure is, and
 agrees with the status: every 502 and 503 is `unavailable`, a dependency
@@ -249,7 +248,9 @@ unauthenticated code, not to its permission-denied one.
 
 ## The meter's codes
 
-`meter.ProblemOf` and `meter.CodeOf` add these to limes's.
+The meter's sentinels name their codes, and limes's functions answer them
+as their own: `limes.CodeOf`, `limes.CategoryOf`, `limes.ProblemOf` and
+`limes.Codes` know every one.
 
 | Code | HTTP | Sentinel | `reason` | Challenge `error` | Title | Category |
 |---|---|---|---|---|---|---|

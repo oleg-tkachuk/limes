@@ -1,143 +1,25 @@
 package meter
 
-import (
-	"errors"
-	"net/http"
+import "github.com/oleg-tkachuk/limes"
 
-	"github.com/oleg-tkachuk/limes"
-)
-
-// The codes of the meter's own sentinels (docs/errors.md), beside limes's.
+// The codes of the meter's own sentinels (docs/errors.md), which limes
+// answers as its own: limes.CodeOf, limes.CategoryOf, limes.ProblemOf and
+// limes.Codes know every one of them.
 const (
-	CodeCounterOverflow             limes.Code = "counter_overflow"
-	CodeChargeNotFound              limes.Code = "charge_not_found"
-	CodeRefundExceedsCharge         limes.Code = "refund_exceeds_charge"
-	CodeReservationNotFound         limes.Code = "reservation_not_found"
-	CodeCopyLimitExceeded           limes.Code = "copy_limit_exceeded"
-	CodeUsageNotFound               limes.Code = "usage_not_found"
-	CodeTenantBudgetNotFound        limes.Code = "tenant_budget_not_found"
-	CodeTenantBudgetVersionMismatch limes.Code = "tenant_budget_version_mismatch"
-	CodeExternalRefConflict         limes.Code = "external_ref_conflict"
-	CodeSettleConflict              limes.Code = "settle_conflict"
-	CodeLeaseExhausted              limes.Code = "lease_exhausted"
-	CodeLeaseRequestsExhausted      limes.Code = "lease_requests_exhausted"
-	CodeLeaseNotFound               limes.Code = "lease_not_found"
-	CodeLeaseNested                 limes.Code = "lease_nested"
-	CodeLeasingDisabled             limes.Code = "leasing_disabled"
-	CodeFeatureDisabled             limes.Code = "feature_disabled"
+	CodeCounterOverflow             = limes.CodeCounterOverflow
+	CodeChargeNotFound              = limes.CodeChargeNotFound
+	CodeRefundExceedsCharge         = limes.CodeRefundExceedsCharge
+	CodeReservationNotFound         = limes.CodeReservationNotFound
+	CodeCopyLimitExceeded           = limes.CodeCopyLimitExceeded
+	CodeUsageNotFound               = limes.CodeUsageNotFound
+	CodeTenantBudgetNotFound        = limes.CodeTenantBudgetNotFound
+	CodeTenantBudgetVersionMismatch = limes.CodeTenantBudgetVersionMismatch
+	CodeExternalRefConflict         = limes.CodeExternalRefConflict
+	CodeSettleConflict              = limes.CodeSettleConflict
+	CodeLeaseExhausted              = limes.CodeLeaseExhausted
+	CodeLeaseRequestsExhausted      = limes.CodeLeaseRequestsExhausted
+	CodeLeaseNotFound               = limes.CodeLeaseNotFound
+	CodeLeaseNested                 = limes.CodeLeaseNested
+	CodeLeasingDisabled             = limes.CodeLeasingDisabled
+	CodeFeatureDisabled             = limes.CodeFeatureDisabled
 )
-
-// codeRule is one of the meter's sentinels, its code, its category and, for
-// one limes does not answer as a refusal, its HTTP status and title.
-type codeRule struct {
-	sentinel error
-	code     limes.Code
-	status   int
-	title    string
-	category limes.Category
-}
-
-// codeRules is the one table CodeOf and ProblemOf read.
-var codeRules = []codeRule{
-	{ErrCopyLimitExceeded, CodeCopyLimitExceeded, 0, "", limes.CategoryExhausted},
-	{ErrCounterOverflow, CodeCounterOverflow, http.StatusConflict, "The counter has no room for the amount", limes.CategoryPrecondition},
-	{ErrChargeNotFound, CodeChargeNotFound, http.StatusNotFound, "The charge is not on record", limes.CategoryNotFound},
-	{ErrRefundExceedsCharge, CodeRefundExceedsCharge, http.StatusConflict, "The refund exceeds what the charge took", limes.CategoryPrecondition},
-	{ErrReservationNotFound, CodeReservationNotFound, http.StatusNotFound, "The reservation is not on record, released or expired", limes.CategoryNotFound},
-	{ErrUsageNotFound, CodeUsageNotFound, http.StatusNotFound, "The capability has no usage on record", limes.CategoryNotFound},
-	{ErrTenantBudgetNotFound, CodeTenantBudgetNotFound, http.StatusNotFound, "The tenant has no budget on record", limes.CategoryNotFound},
-	{ErrTenantBudgetVersionMismatch, CodeTenantBudgetVersionMismatch, http.StatusConflict, "The tenant budget changed since it was read", limes.CategoryConflict},
-	{ErrExternalRefConflict, CodeExternalRefConflict, http.StatusConflict, "The external reference names another charge", limes.CategoryConflict},
-	{ErrSettleConflict, CodeSettleConflict, http.StatusConflict, "The reservation was settled for another amount", limes.CategoryConflict},
-	{ErrLeaseExhausted, CodeLeaseExhausted, 0, "", limes.CategoryExhausted},
-	{ErrLeaseRequestsExhausted, CodeLeaseRequestsExhausted, 0, "", limes.CategoryExhausted},
-	{ErrLeaseNotFound, CodeLeaseNotFound, http.StatusNotFound, "The capability holds no lease", limes.CategoryNotFound},
-	{ErrLeaseNested, CodeLeaseNested, http.StatusConflict, "An ancestor of the capability holds a lease", limes.CategoryPrecondition},
-	{ErrLeasingDisabled, CodeLeasingDisabled, http.StatusInternalServerError, "Leasing is not enabled on the store", limes.CategoryPrecondition},
-	{ErrFeatureDisabled, CodeFeatureDisabled, http.StatusInternalServerError, "A feature is disabled by the store's configuration", limes.CategoryPrecondition},
-}
-
-// codeRuleFor is the meter's rule err matches.
-func codeRuleFor(err error) (codeRule, bool) {
-	if err == nil {
-		return codeRule{}, false
-	}
-	for _, r := range codeRules {
-		if errors.Is(err, r.sentinel) {
-			return r, true
-		}
-	}
-	return codeRule{}, false
-}
-
-// CodeOf is err's code: the meter's own, or limes.CodeOf's.
-func CodeOf(err error) (limes.Code, bool) {
-	if r, ok := codeRuleFor(err); ok {
-		return r.code, true
-	}
-	return limes.CodeOf(err)
-}
-
-// CategoryOf is err's category: the meter's own code's, or
-// limes.CategoryOf's.
-func CategoryOf(err error) (limes.Category, bool) {
-	if r, ok := codeRuleFor(err); ok {
-		return r.category, true
-	}
-	return limes.CategoryOf(err)
-}
-
-// ReasonOfCode is the reason a refusal with code is challenged with: the
-// meter's own code's — copy_limit_exceeded is request_limit_exceeded — or
-// limes.ReasonOfCode's, and false for a code that is no refusal.
-func ReasonOfCode(code limes.Code) (limes.Reason, bool) {
-	for _, r := range codeRules {
-		if r.code == code {
-			return limes.ReasonOf(r.sentinel)
-		}
-	}
-	return limes.ReasonOfCode(code)
-}
-
-// CategoryOfCode is code's category: the meter's own code's, or
-// limes.CategoryOfCode's.
-func CategoryOfCode(code limes.Code) (limes.Category, bool) {
-	for _, r := range codeRules {
-		if r.code == code {
-			return r.category, true
-		}
-	}
-	return limes.CategoryOfCode(code)
-}
-
-// Codes is every code the meter adds to limes.Codes, in a fixed order.
-func Codes() []limes.Code {
-	out := make([]limes.Code, len(codeRules))
-	for i, r := range codeRules {
-		out[i] = r.code
-	}
-	return out
-}
-
-// AllCodes is every code a consumer of limes and the meter can see:
-// limes.Codes, then Codes, so one list proves a mapping covers them all.
-func AllCodes() []limes.Code {
-	return append(limes.Codes(), Codes()...)
-}
-
-// ProblemOf is limes.ProblemOf with the meter's own codes: an error the
-// meter returned, as RFC 9457 problem details. A refusal keeps the answer
-// limes gives it, its code the meter's; any other of the meter's sentinels
-// has its own status, and a type ending in its code.
-func ProblemOf(err error) (limes.Problem, bool) {
-	r, ok := codeRuleFor(err)
-	if !ok {
-		return limes.ProblemOf(err)
-	}
-	p, known := limes.ProblemOf(err)
-	if !known || r.status != 0 {
-		p = limes.Problem{Type: limes.ProblemTypeURI(string(r.code)), Title: r.title, Status: r.status}
-	}
-	p.Code = r.code
-	return p, true
-}
