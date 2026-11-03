@@ -14,7 +14,8 @@ redisreplay, otelmetric, exchange and biscuit.
   status it is answered with, its category, and the reason a refusal is
   challenged with.
 - **Defaults**: what a zero `Config` field, or an option left unset, does;
-  [defaults.md](defaults.md) lists every `Config` field.
+  [defaults.md](defaults.md) lists every `Config` field and every
+  `Default…` constant's value.
 - **Documented behaviour**: what a function's comment says it accepts,
   refuses and returns. A function that passed an input and now refuses it
   has changed, even when its signature has not.
@@ -38,9 +39,9 @@ These do not:
 
 - adding a name, a code, a category, a field whose zero value keeps the
   old behaviour, or an option;
-- rewording an error's text, which is never a contract. A row of
-  [defaults.md](defaults.md) is compared word for word, so rewording one
-  counts as a change.
+- rewording an error's text, which is never a contract, or the prose of a
+  row of [defaults.md](defaults.md): CI compares its Default and Value
+  columns alone.
 
 A consumer must therefore map a code or a category it does not know, as
 its own default, rather than fail on it.
@@ -51,8 +52,8 @@ A break is allowed, and announced three ways: the commit is marked
 breaking (`!` or a `BREAKING CHANGE:` footer), which cuts a minor release;
 [migration.md](migration.md) says what it was and what it is; and the
 release notes list it, with every error code added, removed or answered
-otherwise under **Codes**, and every default changed or removed under
-**Defaults**. CI holds the first two to the change: a Go API break, a change
+otherwise under **Codes**, every default changed or removed under
+**Defaults**, and every change to this policy under **Contract**. CI holds the first two to the change: a Go API break, a change
 to the error contract in [errors.md](errors.md), or a change to a default in
 [defaults.md](defaults.md), with no marker fails, and so does a marker with
 no migration entry. What a documented function accepts and refuses is held

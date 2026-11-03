@@ -13,6 +13,7 @@ import type { Policy } from "./lib/release-policy.ts";
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
 import { BRANCH, DEPENDENCIES_HEADING, planReleases, proposeRelease, releaseTitle, withDependency, type Planner } from "./release-plan.ts";
 import { CODES_HEADING, ERRORS_DOC } from "./lib/codes.ts";
+import { CONTRACT_DOCS, CONTRACT_HEADING } from "./lib/contract.ts";
 import { DEFAULTS_DOC, DEFAULTS_HEADING } from "./lib/defaults.ts";
 
 const RELEASE = new URL("../release", import.meta.url).pathname;
@@ -140,16 +141,28 @@ describe("the release plan", () => {
   });
 
   test("a module's entry names its defaults changed since its last release, and none when there are none", async () => {
-    const table = (zero: string) => `## limes\n\n| \`limes.C\` | \`F\` | ${zero} |\n`;
-    repo.write(DEFAULTS_DOC, table("Off."));
+    const table = (value: string) => `## limes\n\n| \`limes.C\` | \`F\` | ${value} | Prose. |\n`;
+    repo.write(DEFAULTS_DOC, table("off"));
     await repo.commit("docs: defaults");
     await repo.run("tag", "--force", "v0.1.0");
     const unchanged = (await planReleases(planner()))[0]?.entry ?? "";
     assert.ok(!unchanged.includes(DEFAULTS_HEADING), unchanged);
-    repo.write(DEFAULTS_DOC, table("On."));
+    repo.write(DEFAULTS_DOC, table("on"));
     await repo.commit("feat!: turn it on");
     const entry = (await planReleases(planner()))[0]?.entry ?? "";
-    assert.ok(entry.includes(`${DEFAULTS_HEADING}\n\n* changed: \`limes.C.F\` — Off. → On.\n`), entry);
+    assert.ok(entry.includes(`${DEFAULTS_HEADING}\n\n* changed: \`limes.C.F\` — off → on\n`), entry);
+  });
+
+  test("limes's entry names the changes to the compatibility policy since its last release", async () => {
+    const [policy = ""] = CONTRACT_DOCS;
+    repo.write(policy, "start");
+    await repo.commit("docs: policy");
+    await repo.run("tag", "--force", "v0.1.0");
+    assert.ok(!((await planReleases(planner()))[0]?.entry ?? "").includes(CONTRACT_HEADING));
+    repo.write(policy, "defaults are contract");
+    await repo.commit("feat: make defaults contract");
+    const entry = (await planReleases(planner()))[0]?.entry ?? "";
+    assert.ok(entry.endsWith(`${CONTRACT_HEADING}\n\n* make defaults contract\n`), entry);
   });
 
   test("a nested module with notes of its own keeps them, with the requirement added", async () => {

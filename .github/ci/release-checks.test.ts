@@ -216,12 +216,12 @@ describe("markerCheck over the wire contract", () => {
 describe("markerCheck over the defaults", () => {
   let repo: TempRepo;
   // table is docs/defaults.md with the root module's section, as rows of
-  // field and what its zero does.
+  // field and its Default cell.
   const table = (rows: [string, string][]) =>
-    `## limes\n\n${rows.map(([f, z]) => `| \`limes.VerifierConfig\` | \`${f}\` | ${z} |`).join("\n")}\n`;
+    `## limes\n\n${rows.map(([f, v]) => `| \`limes.VerifierConfig\` | \`${f}\` | ${v} | Prose. |`).join("\n")}\n`;
   const start: [string, string][] = [
-    ["Leeway", "30 seconds."],
-    ["NoLeeway", "Off."],
+    ["Leeway", "`DefaultLeeway`"],
+    ["NoLeeway", "off"],
   ];
   before(async () => {
     repo = await tempRepo();
@@ -245,10 +245,10 @@ describe("markerCheck over the defaults", () => {
   }
 
   test("a default changed or removed needs a marker; a field added does not", async () => {
-    assert.match(await check([["Leeway", "1 minute."], ["NoLeeway", "Off."]], "fix: widen the leeway"), /defaults change.*`limes.VerifierConfig.Leeway` — 30 seconds. → 1 minute./);
-    assert.match(await check([["Leeway", "30 seconds."]], "fix: drop a field"), /`limes.VerifierConfig.NoLeeway` removed/);
-    assert.equal(await check([["Leeway", "1 minute."], ["NoLeeway", "Off."]], "fix!: widen the leeway", true), "ok");
-    assert.equal(await check([...start, ["Realm", "limes."]], "feat: a realm"), "ok");
+    assert.match(await check([["Leeway", "none"], ["NoLeeway", "off"]], "fix: drop the leeway"), /defaults change.*`limes.VerifierConfig.Leeway` — `DefaultLeeway` → none/);
+    assert.match(await check([["Leeway", "`DefaultLeeway`"]], "fix: drop a field"), /`limes.VerifierConfig.NoLeeway` removed/);
+    assert.equal(await check([["Leeway", "none"], ["NoLeeway", "off"]], "fix!: drop the leeway", true), "ok");
+    assert.equal(await check([...start, ["Realm", "`DefaultRealm`"]], "feat: a realm"), "ok");
   });
 });
 

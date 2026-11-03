@@ -1,8 +1,10 @@
-// What a module's Config fields do at their zero value, as a release of it
-// changes them — for its notes and for the check that such a change is
-// marked breaking (docs/compatibility.md). docs/defaults.md lists every
-// field under its module's section, which a Go test holds it to, so a
-// module's defaults at two revisions are its section's rows at each.
+// What a module's Config fields do at their zero value, and its Default…
+// constants' values, as a release of it changes them — for its notes and for
+// the check that such a change is marked breaking (docs/compatibility.md).
+// docs/defaults.md lists every field and constant under its module's
+// section, which a Go test holds it to, so a module's defaults at two
+// revisions are its section's rows at each: a field's Default cell and a
+// constant's Value, never the prose beside them, which may be reworded.
 
 import { info } from "./actions.ts";
 import { git } from "./git.ts";
@@ -11,8 +13,11 @@ import { git } from "./git.ts";
 export const DEFAULTS_DOC = "docs/defaults.md";
 // SECTION opens a module's table, named as the module is.
 const SECTION = /^## (\S+)$/;
-// ROW is a row of it: the package's Config, its field, and what zero does.
-const ROW = /^\| `([a-z]+\.[A-Z]\w*)` \| `([A-Z]\w*)` \| (.+) \|$/;
+// ROW is a field's row: the package's Config, its field, the value or word
+// its zero stands for, and prose.
+const ROW = /^\| `([a-z]+\.[A-Z]\w*)` \| `([A-Z]\w*)` \| (.+?) \| .*\|$/;
+// CONSTANT_ROW is a constant's row: package.Default…, and its value.
+const CONSTANT_ROW = /^\| `([a-z]+\.Default[A-Z]\w*)` \| `([^`]+)` \|$/;
 // DEFAULTS_HEADING heads the section of a release's notes naming them.
 export const DEFAULTS_HEADING = "### Defaults";
 
@@ -34,7 +39,8 @@ export interface DefaultChanges {
 const NO_CHANGES: DefaultChanges = { added: [], removed: [], changed: [] };
 
 // defaultsIn is each field module's section of doc lists, as Config.Field,
-// with what its zero does.
+// with its Default cell, and each constant, as package.Default…, with its
+// value. A doc of rows in no form of these, as one older than them, has none.
 export function defaultsIn(doc: string, module: string): Map<string, string> {
   const out = new Map<string, string>();
   let section = "";
@@ -44,9 +50,16 @@ export function defaultsIn(doc: string, module: string): Map<string, string> {
       section = heading[1] ?? "";
       continue;
     }
+    if (section !== module) {
+      continue;
+    }
     const row = ROW.exec(line);
-    if (section === module && row !== null) {
+    if (row !== null) {
       out.set(`${row[1]}.${row[2]}`, row[3] ?? "");
+    }
+    const constant = CONSTANT_ROW.exec(line);
+    if (constant !== null) {
+      out.set(constant[1] ?? "", constant[2] ?? "");
     }
   }
   return out;

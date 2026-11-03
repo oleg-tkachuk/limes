@@ -1,145 +1,189 @@
 # Defaults
 
-What each field of every `Config` does when it is left at its zero value.
-These are part of the contract ([compatibility.md](compatibility.md)):
-changing what a zero field does is a break, marked and listed in the
-release notes, and these tables are what CI compares between releases.
+What each field of every `Config` does when it is left at its zero value,
+and the value of every `Default…` constant, options' among them (such as
+the pgstore watcher's heartbeat). These are part of the contract
+([compatibility.md](compatibility.md)): changing what a zero field does, or
+a constant's value, is a break, marked and listed in the release notes.
 
 A test holds the tables to the code: every exported field of every exported
-`…Config` struct has its row, and every `Default…` constant a row names is
-declared in that package. "Required" means the zero value is refused when
-the value is built.
+`…Config` struct has its row, every exported `Default…` constant of a
+package a consumer's code imports has its row with its value as declared,
+and every `Default…` constant a row names is declared in that package.
+Test-helper packages (`…test`) are left out: their constants tune tests.
 
-The last column is compared verbatim between releases: rewording a row
-reads as a change, and needs the breaking marker as one does. Options'
-defaults (such as the pgstore watcher's heartbeat) are not tabulated here;
-their `Default…` constants carry them.
+CI compares two columns between releases: a field's **Default** — the
+value it stands for, or one of `required` (zero is refused when the value
+is built), `off`, `on`, `none` and `refused` — and a constant's **Value**.
+The **Zero value** column is prose, free to be reworded; a change of
+behaviour that keeps the Default cell must change the cell all the same,
+or be marked breaking by hand.
 
 ## limes
 
-| Config | Field | Zero value |
-|---|---|---|
-| `limes.IssuerConfig` | `Signer` | Required. |
-| `limes.IssuerConfig` | `Store` | Required. |
-| `limes.IssuerConfig` | `IssuerName` | Required. |
-| `limes.IssuerConfig` | `DefaultTTL` | `DefaultIssueTTL`, 15 minutes. |
-| `limes.IssuerConfig` | `MaxTokenBytes` | `DefaultMaxTokenBytes`, 16 KiB. |
-| `limes.IssuerConfig` | `Now` | `time.Now`. |
-| `limes.IssuerConfig` | `Biscuit` | `Issuer.Biscuit` refuses: the issuer mints JWTs alone. |
-| `limes.RevocationCacheConfig` | `Capabilities` | Required. |
-| `limes.RevocationCacheConfig` | `RequireLineage` | Off: a lookup with no lineage is taken, and the cache clears whole on every `ClearRevoked`. |
-| `limes.RevocationCacheConfig` | `Biscuits` | Every Biscuit question is refused. |
-| `limes.RevocationCacheConfig` | `TTL` | `DefaultRevocationCacheTTL`, 2 seconds. |
-| `limes.RevocationCacheConfig` | `SyncedTTL` | `TTL`. |
-| `limes.RevocationCacheConfig` | `MaxEntries` | `DefaultRevocationCacheEntries`, 100 000 per kind of answer. |
-| `limes.RevocationCacheConfig` | `MaxStale` | Never: the cache fails closed. |
-| `limes.RevocationCacheConfig` | `Logger` | `slog.Default()`. |
-| `limes.RevocationCacheConfig` | `Now` | `time.Now`. |
-| `limes.VerifierConfig` | `Keys` | Required. |
-| `limes.VerifierConfig` | `Revocations` | Required. |
-| `limes.VerifierConfig` | `TrustedIssuers` | Required. |
-| `limes.VerifierConfig` | `KeyIssuers` | No kid is bound: taken with one trusted issuer, refused with several unless `SharedKeys` is set. |
-| `limes.VerifierConfig` | `SharedKeys` | Off. |
-| `limes.VerifierConfig` | `Now` | `time.Now`. |
-| `limes.VerifierConfig` | `Leeway` | `DefaultLeeway`, 30 seconds. |
-| `limes.VerifierConfig` | `NoLeeway` | Off: `Leeway` applies. |
-| `limes.VerifierConfig` | `MaxTokenBytes` | `DefaultMaxTokenBytes`, 16 KiB. |
-| `limes.VerifierConfig` | `Biscuit` | A Biscuit is refused like any malformed token. |
-| `limes.VerifierConfig` | `DPoP` | Every key-bound capability is refused with `ErrProofUnsupported`. |
-| `limes.VerifierConfig` | `Realm` | `DefaultRealm`, `limes`. |
-| `limes.VerifierConfig` | `Logger` | `slog.Default()`. |
-| `limes.BiscuitConfig` | `Revocations` | Required. |
-| `limes.BiscuitConfig` | `Form` | Required. |
-| `limes.BiscuitConfig` | `MeterCopies` | Off: a Biscuit setting a copy's own limits is refused with `ErrCopyCountersNotMetered`. |
-| `limes.SignerConfig` | `KeyID` | Required. |
-| `limes.SignerConfig` | `Key` | Required. |
-| `limes.SignerConfig` | `Algorithm` | `SigningAlgorithmEd25519`. |
-| `dpop.VerifierConfig` | `Window` | `DefaultWindow`, 1 minute. |
-| `dpop.VerifierConfig` | `Replay` | Required. |
-| `dpop.VerifierConfig` | `Now` | `time.Now`. |
-| `dpop.VerifierConfig` | `Nonces` | No nonce is required. |
-| `dpop.VerifierConfig` | `MaxProofBytes` | `DefaultMaxProofBytes`, 4 KiB. |
-| `dpop.VerifierConfig` | `MatchPathOnly` | Off: the whole URL is compared. |
-| `dpop.MemoryReplayCacheConfig` | `MaxEntries` | `DefaultReplayCacheEntries`, 100 000. |
-| `dpop.MemoryReplayCacheConfig` | `EntriesPerHolder` | `DefaultReplayEntriesPerHolder`, 1 000, or `MaxEntries` when smaller. |
-| `dpop.MemoryReplayCacheConfig` | `Now` | `time.Now`. |
-| `dpop.HMACNoncesConfig` | `Keys` | Required. |
-| `dpop.HMACNoncesConfig` | `Lifetime` | `DefaultNonceLifetime`, 5 minutes. |
-| `dpop.HMACNoncesConfig` | `Now` | `time.Now`. |
-| `jwks.HandlerConfig` | `Keys` | Required. |
-| `jwks.HandlerConfig` | `Algorithms` | Every key's entry names `AlgorithmEd25519`. |
-| `jwks.HandlerConfig` | `Logger` | `slog.Default()`. |
-| `jwks.HandlerConfig` | `MaxAge` | `DefaultMaxAge`, 5 minutes. |
-| `jwks.HandlerConfig` | `Revalidate` | Off: clients keep the set for `MaxAge`. |
-| `jwks.RemoteConfig` | `URL` | Required. |
-| `jwks.RemoteConfig` | `Client` | A client with a `DefaultFetchTimeout` (10 seconds) timeout. |
-| `jwks.RemoteConfig` | `RefreshInterval` | `DefaultRefreshInterval`, 5 minutes. |
-| `jwks.RemoteConfig` | `MinRefreshInterval` | `DefaultMinRefreshInterval`, 10 seconds. |
-| `jwks.RemoteConfig` | `MaxStale` | `DefaultMaxStale`, 1 hour. |
-| `jwks.RemoteConfig` | `MaxDocumentBytes` | `DefaultMaxDocumentBytes`, 1 MiB. |
-| `jwks.RemoteConfig` | `Now` | `time.Now`. |
-| `jwks.StaticConfig` | `Keys` | An empty set: every kid is unknown. |
-| `memstore.StoreConfig` | `Now` | `time.Now`. |
-| `memstore.UsageStoreConfig` | `Records` | Required. |
-| `memstore.UsageStoreConfig` | `Now` | `time.Now`. |
-| `memstore.UsageStoreConfig` | `MaxCopiesPerCapability` | `meter.DefaultMaxCopiesPerCapability`, 1 024. |
+| Config | Field | Default | Zero value |
+|---|---|---|---|
+| `limes.IssuerConfig` | `Signer` | required |  |
+| `limes.IssuerConfig` | `Store` | required |  |
+| `limes.IssuerConfig` | `IssuerName` | required |  |
+| `limes.IssuerConfig` | `DefaultTTL` | `DefaultIssueTTL` |  |
+| `limes.IssuerConfig` | `MaxTokenBytes` | `DefaultMaxTokenBytes` |  |
+| `limes.IssuerConfig` | `Now` | `time.Now` |  |
+| `limes.IssuerConfig` | `Biscuit` | refused | `Issuer.Biscuit` refuses: the issuer mints JWTs alone. |
+| `limes.RevocationCacheConfig` | `Capabilities` | required |  |
+| `limes.RevocationCacheConfig` | `RequireLineage` | off | A lookup with no lineage is taken, and the cache clears whole on every `ClearRevoked`. |
+| `limes.RevocationCacheConfig` | `Biscuits` | refused | Every Biscuit question is refused. |
+| `limes.RevocationCacheConfig` | `TTL` | `DefaultRevocationCacheTTL` |  |
+| `limes.RevocationCacheConfig` | `SyncedTTL` | `TTL` |  |
+| `limes.RevocationCacheConfig` | `MaxEntries` | `DefaultRevocationCacheEntries` |  |
+| `limes.RevocationCacheConfig` | `MaxStale` | none | Never: the cache fails closed. |
+| `limes.RevocationCacheConfig` | `Logger` | `slog.Default()` |  |
+| `limes.RevocationCacheConfig` | `Now` | `time.Now` |  |
+| `limes.VerifierConfig` | `Keys` | required |  |
+| `limes.VerifierConfig` | `Revocations` | required |  |
+| `limes.VerifierConfig` | `TrustedIssuers` | required |  |
+| `limes.VerifierConfig` | `KeyIssuers` | none | No kid is bound: taken with one trusted issuer, refused with several unless `SharedKeys` is set. |
+| `limes.VerifierConfig` | `SharedKeys` | off |  |
+| `limes.VerifierConfig` | `Now` | `time.Now` |  |
+| `limes.VerifierConfig` | `Leeway` | `DefaultLeeway` |  |
+| `limes.VerifierConfig` | `NoLeeway` | off | `Leeway` applies. |
+| `limes.VerifierConfig` | `MaxTokenBytes` | `DefaultMaxTokenBytes` |  |
+| `limes.VerifierConfig` | `Biscuit` | refused | A Biscuit is refused like any malformed token. |
+| `limes.VerifierConfig` | `DPoP` | refused | Every key-bound capability is refused with `ErrProofUnsupported`. |
+| `limes.VerifierConfig` | `Realm` | `DefaultRealm` |  |
+| `limes.VerifierConfig` | `Logger` | `slog.Default()` |  |
+| `limes.BiscuitConfig` | `Revocations` | required |  |
+| `limes.BiscuitConfig` | `Form` | required |  |
+| `limes.BiscuitConfig` | `MeterCopies` | off | A Biscuit setting a copy's own limits is refused with `ErrCopyCountersNotMetered`. |
+| `limes.SignerConfig` | `KeyID` | required |  |
+| `limes.SignerConfig` | `Key` | required |  |
+| `limes.SignerConfig` | `Algorithm` | `SigningAlgorithmEd25519` |  |
+| `dpop.VerifierConfig` | `Window` | `DefaultWindow` |  |
+| `dpop.VerifierConfig` | `Replay` | required |  |
+| `dpop.VerifierConfig` | `Now` | `time.Now` |  |
+| `dpop.VerifierConfig` | `Nonces` | none | No nonce is required. |
+| `dpop.VerifierConfig` | `MaxProofBytes` | `DefaultMaxProofBytes` |  |
+| `dpop.VerifierConfig` | `MatchPathOnly` | off | The whole URL is compared. |
+| `dpop.MemoryReplayCacheConfig` | `MaxEntries` | `DefaultReplayCacheEntries` |  |
+| `dpop.MemoryReplayCacheConfig` | `EntriesPerHolder` | `DefaultReplayEntriesPerHolder` | Or `MaxEntries` when smaller. |
+| `dpop.MemoryReplayCacheConfig` | `Now` | `time.Now` |  |
+| `dpop.HMACNoncesConfig` | `Keys` | required |  |
+| `dpop.HMACNoncesConfig` | `Lifetime` | `DefaultNonceLifetime` |  |
+| `dpop.HMACNoncesConfig` | `Now` | `time.Now` |  |
+| `jwks.HandlerConfig` | `Keys` | required |  |
+| `jwks.HandlerConfig` | `Algorithms` | `AlgorithmEd25519` | Every key's entry names it. |
+| `jwks.HandlerConfig` | `Logger` | `slog.Default()` |  |
+| `jwks.HandlerConfig` | `MaxAge` | `DefaultMaxAge` |  |
+| `jwks.HandlerConfig` | `Revalidate` | off | Clients keep the set for `MaxAge`. |
+| `jwks.RemoteConfig` | `URL` | required |  |
+| `jwks.RemoteConfig` | `Client` | `DefaultFetchTimeout` | A client with that timeout. |
+| `jwks.RemoteConfig` | `RefreshInterval` | `DefaultRefreshInterval` |  |
+| `jwks.RemoteConfig` | `MinRefreshInterval` | `DefaultMinRefreshInterval` |  |
+| `jwks.RemoteConfig` | `MaxStale` | `DefaultMaxStale` |  |
+| `jwks.RemoteConfig` | `MaxDocumentBytes` | `DefaultMaxDocumentBytes` |  |
+| `jwks.RemoteConfig` | `Now` | `time.Now` |  |
+| `jwks.StaticConfig` | `Keys` | none | An empty set: every kid is unknown. |
+| `memstore.StoreConfig` | `Now` | `time.Now` |  |
+| `memstore.UsageStoreConfig` | `Records` | required |  |
+| `memstore.UsageStoreConfig` | `Now` | `time.Now` |  |
+| `memstore.UsageStoreConfig` | `MaxCopiesPerCapability` | `meter.DefaultMaxCopiesPerCapability` |  |
+
+| Constant | Value |
+|---|---|
+| `dpop.DefaultMaxProofBytes` | `4 << 10` |
+| `dpop.DefaultNonceLifetime` | `5 * time.Minute` |
+| `dpop.DefaultReplayCacheEntries` | `100_000` |
+| `dpop.DefaultReplayEntriesPerHolder` | `1_000` |
+| `dpop.DefaultWindow` | `time.Minute` |
+| `jwks.DefaultFetchTimeout` | `10 * time.Second` |
+| `jwks.DefaultMaxAge` | `DefaultRefreshInterval` |
+| `jwks.DefaultMaxDocumentBytes` | `1 << 20` |
+| `jwks.DefaultMaxStale` | `time.Hour` |
+| `jwks.DefaultMinRefreshInterval` | `10 * time.Second` |
+| `jwks.DefaultRefreshInterval` | `5 * time.Minute` |
+| `limes.DefaultHousekeepingLimit` | `1_000` |
+| `limes.DefaultIssueTTL` | `15 * time.Minute` |
+| `limes.DefaultLeeway` | `30 * time.Second` |
+| `limes.DefaultListLimit` | `50` |
+| `limes.DefaultMaxTokenBytes` | `16 << 10` |
+| `limes.DefaultRealm` | `"limes"` |
+| `limes.DefaultRevocationCacheEntries` | `100_000` |
+| `limes.DefaultRevocationCacheTTL` | `2 * time.Second` |
+| `meter.DefaultLeaseTTL` | `5 * time.Minute` |
+| `meter.DefaultMaxCopiesPerCapability` | `1024` |
+| `meter.DefaultReservationTTL` | `5 * time.Minute` |
 
 ## pgstore
 
-| Config | Field | Zero value |
-|---|---|---|
-| `pgstore.Config` | `DB` | Required. |
-| `pgstore.Config` | `Now` | `time.Now`. |
-| `pgstore.Config` | `Scope` | `ScopeFromContext`: the schema's own policies, from `WithTenant`, `WithAllTenants` and `WithAllTenantsReadOnly`. |
-| `pgstore.Config` | `CheckTenant` | Every tenant is one the store can mint for. |
-| `pgstore.Config` | `CheckScope` | Under the default `Scope`, `CheckSchemaScope`; beside a `Scope` of the consumer's, no check. |
-| `pgstore.Config` | `Logger` | `slog.Default()`. |
-| `pgstore.Config` | `DisableLeases` | Off: the usage store opens leases, and reports `meter.FeatureLeases` enabled. |
-| `pgstore.Config` | `MaxCopiesPerCapability` | `meter.DefaultMaxCopiesPerCapability`, 1 024. |
-| `pgstore.ReplayConfig` | `DB` | Required. |
-| `pgstore.ReplayConfig` | `EntriesPerHolder` | `dpop.DefaultReplayEntriesPerHolder`, 1 000. |
-| `pgstore.ReplayConfig` | `Now` | `time.Now`. |
-| `pgstore.ReplayConfig` | `Logger` | `slog.Default()`. |
+| Config | Field | Default | Zero value |
+|---|---|---|---|
+| `pgstore.Config` | `DB` | required |  |
+| `pgstore.Config` | `Now` | `time.Now` |  |
+| `pgstore.Config` | `Scope` | `ScopeFromContext` | The schema's own policies, from `WithTenant`, `WithAllTenants` and `WithAllTenantsReadOnly`. |
+| `pgstore.Config` | `CheckTenant` | none | Every tenant is one the store can mint for. |
+| `pgstore.Config` | `CheckScope` | `CheckSchemaScope` | Under the default `Scope`; beside a `Scope` of the consumer's, no check. |
+| `pgstore.Config` | `Logger` | `slog.Default()` |  |
+| `pgstore.Config` | `DisableLeases` | off | The usage store opens leases, and reports `meter.FeatureLeases` enabled. |
+| `pgstore.Config` | `MaxCopiesPerCapability` | `meter.DefaultMaxCopiesPerCapability` |  |
+| `pgstore.ReplayConfig` | `DB` | required |  |
+| `pgstore.ReplayConfig` | `EntriesPerHolder` | `dpop.DefaultReplayEntriesPerHolder` |  |
+| `pgstore.ReplayConfig` | `Now` | `time.Now` |  |
+| `pgstore.ReplayConfig` | `Logger` | `slog.Default()` |  |
+
+| Constant | Value |
+|---|---|
+| `pgstore.DefaultReplayPurgeBatch` | `10_000` |
+| `pgstore.DefaultWatchHeartbeat` | `30 * time.Second` |
 
 ## redisreplay
 
-| Config | Field | Zero value |
-|---|---|---|
-| `redisreplay.Config` | `Client` | Required. |
-| `redisreplay.Config` | `KeyPrefix` | `DefaultKeyPrefix`, `limes:dpop:replay:`. |
-| `redisreplay.Config` | `EntriesPerHolder` | `dpop.DefaultReplayEntriesPerHolder`, 1 000. |
-| `redisreplay.Config` | `Now` | `time.Now`. |
+| Config | Field | Default | Zero value |
+|---|---|---|---|
+| `redisreplay.Config` | `Client` | required |  |
+| `redisreplay.Config` | `KeyPrefix` | `DefaultKeyPrefix` |  |
+| `redisreplay.Config` | `EntriesPerHolder` | `dpop.DefaultReplayEntriesPerHolder` |  |
+| `redisreplay.Config` | `Now` | `time.Now` |  |
+
+| Constant | Value |
+|---|---|
+| `redisreplay.DefaultKeyPrefix` | `"limes:dpop:replay:"` |
 
 ## exchange
 
-| Config | Field | Zero value |
-|---|---|---|
-| `exchange.Config` | `Issuer` | Required. |
-| `exchange.Config` | `Subjects` | Required. |
-| `exchange.Config` | `Policy` | Required. |
-| `exchange.Config` | `DPoP` | Every request with a proof is refused. |
-| `exchange.Config` | `Capabilities` | No capability is narrowed; set with `CapabilityAudience` and `NarrowPolicy`, or none of them. |
-| `exchange.Config` | `CapabilityAudience` | As `Capabilities`. |
-| `exchange.Config` | `NarrowPolicy` | As `Capabilities`. |
-| `exchange.Config` | `Exchanges` | Every exchange issues a capability of its own. |
-| `exchange.Config` | `Now` | `time.Now`. |
-| `exchange.Config` | `Logger` | `slog.Default()`. |
-| `exchange.HandlerConfig` | `Exchanger` | Required. |
-| `exchange.HandlerConfig` | `Authenticate` | Required. |
-| `exchange.HandlerConfig` | `EndpointURL` | Required when the `Exchanger` checks DPoP. |
-| `exchange.HandlerConfig` | `MaxBodyBytes` | `DefaultMaxBodyBytes`, 64 KiB. |
-| `exchange.HandlerConfig` | `Logger` | `slog.Default()`. |
-| `exchange.IntrospectionConfig` | `Verifier` | Required. |
-| `exchange.IntrospectionConfig` | `Authenticate` | Required. |
-| `exchange.IntrospectionConfig` | `Audiences` | Any authenticated client learns about any token. |
-| `exchange.IntrospectionConfig` | `MaxBodyBytes` | `DefaultMaxBodyBytes`, 64 KiB. |
-| `exchange.IntrospectionConfig` | `Logger` | `slog.Default()`. |
-| `jwtverify.Config` | `Issuer` | Required. |
-| `jwtverify.Config` | `Keys` | Required. |
-| `jwtverify.Config` | `Types` | `TypeAccessToken` and `TypeAccessTokenMedia`. |
-| `jwtverify.Config` | `ClientIDClaim` | `ClaimClientID`. |
-| `jwtverify.Config` | `Algorithms` | `DefaultAlgorithms`. |
-| `jwtverify.Config` | `ClockSkew` | None: exp, nbf and iat are held to the clock exactly. |
-| `jwtverify.Config` | `Now` | `time.Now`. |
+| Config | Field | Default | Zero value |
+|---|---|---|---|
+| `exchange.Config` | `Issuer` | required |  |
+| `exchange.Config` | `Subjects` | required |  |
+| `exchange.Config` | `Policy` | required |  |
+| `exchange.Config` | `DPoP` | refused | Every request with a proof is refused. |
+| `exchange.Config` | `Capabilities` | none | No capability is narrowed; set with `CapabilityAudience` and `NarrowPolicy`, or none of them. |
+| `exchange.Config` | `CapabilityAudience` | none | As `Capabilities`. |
+| `exchange.Config` | `NarrowPolicy` | none | As `Capabilities`. |
+| `exchange.Config` | `Exchanges` | none | Every exchange issues a capability of its own. |
+| `exchange.Config` | `Now` | `time.Now` |  |
+| `exchange.Config` | `Logger` | `slog.Default()` |  |
+| `exchange.HandlerConfig` | `Exchanger` | required |  |
+| `exchange.HandlerConfig` | `Authenticate` | required |  |
+| `exchange.HandlerConfig` | `EndpointURL` | required | When the `Exchanger` checks DPoP. |
+| `exchange.HandlerConfig` | `MaxBodyBytes` | `DefaultMaxBodyBytes` |  |
+| `exchange.HandlerConfig` | `Logger` | `slog.Default()` |  |
+| `exchange.IntrospectionConfig` | `Verifier` | required |  |
+| `exchange.IntrospectionConfig` | `Authenticate` | required |  |
+| `exchange.IntrospectionConfig` | `Audiences` | none | Any authenticated client learns about any token. |
+| `exchange.IntrospectionConfig` | `MaxBodyBytes` | `DefaultMaxBodyBytes` |  |
+| `exchange.IntrospectionConfig` | `Logger` | `slog.Default()` |  |
+| `jwtverify.Config` | `Issuer` | required |  |
+| `jwtverify.Config` | `Keys` | required |  |
+| `jwtverify.Config` | `Types` | `TypeAccessToken`, `TypeAccessTokenMedia` |  |
+| `jwtverify.Config` | `ClientIDClaim` | `ClaimClientID` |  |
+| `jwtverify.Config` | `Algorithms` | `DefaultAlgorithms` |  |
+| `jwtverify.Config` | `ClockSkew` | none | exp, nbf and iat are held to the clock exactly. |
+| `jwtverify.Config` | `Now` | `time.Now` |  |
+
+| Constant | Value |
+|---|---|
+| `exchange.DefaultMaxBodyBytes` | `64 << 10` |
+| `exchange.DefaultTTL` | `15 * time.Minute` |
+| `jwtverify.DefaultAlgorithms` | `[]string{"RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512", "EdDSA", "Ed25519"}` |
 
 otelmetric and biscuit take no `Config`.

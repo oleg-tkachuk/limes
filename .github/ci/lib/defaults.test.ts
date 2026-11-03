@@ -13,24 +13,48 @@ import {
 } from "./defaults.ts";
 import { tempRepo } from "./temp-repo.ts";
 
-// Row is a defaults table row: package.Config, field, what zero does.
-type Row = [config: string, field: string, zero: string];
+// Row is a defaults table row: package.Config, field, the Default cell, and
+// prose.
+type Row = [config: string, field: string, value: string, prose?: string];
 
-// doc is a defaults.md with a section of rows per module.
-function doc(sections: Record<string, Row[]>): string {
-  const table = (rows: Row[]) => rows.map(([c, f, z]) => `| \`${c}\` | \`${f}\` | ${z} |`).join("\n");
-  const body = Object.entries(sections).map(([module, rows]) => `## ${module}\n\n| Config | Field | Zero value |\n|---|---|---|\n${table(rows)}\n`);
-  return `# Defaults\n\n| \`x.NotAConfig\` | \`Above\` | any section |\n\n${body.join("\n")}`;
+// doc is a defaults.md with a section of rows per module, and of constants,
+// as package.Default… and value, when given.
+function doc(sections: Record<string, Row[]>, constants: Record<string, [string, string][]> = {}): string {
+  const table = (rows: Row[]) => rows.map(([c, f, v, p]) => `| \`${c}\` | \`${f}\` | ${v} | ${p ?? ""} |`).join("\n");
+  const values = (rows: [string, string][] = []) => rows.map(([c, v]) => `| \`${c}\` | \`${v}\` |`).join("\n");
+  const body = Object.entries(sections).map(
+    ([module, rows]) =>
+      `## ${module}\n\n| Config | Field | Default | Zero value |\n|---|---|---|---|\n${table(rows)}\n\n| Constant | Value |\n|---|---|\n${values(constants[module])}\n`,
+  );
+  return `# Defaults\n\n| \`x.NotAConfig\` | \`Above\` | any | section |\n\n${body.join("\n")}`;
 }
 
 describe("defaultsIn", () => {
-  const d = doc({
-    limes: [["limes.VerifierConfig", "Leeway", "`DefaultLeeway`, 30 seconds."]],
-    pgstore: [["pgstore.Config", "DisableLeases", "Off: leases open."]],
-  });
+  const d = doc(
+    {
+      limes: [["limes.VerifierConfig", "Leeway", "`DefaultLeeway`"]],
+      pgstore: [["pgstore.Config", "DisableLeases", "off", "Leases open."]],
+    },
+    { limes: [["limes.DefaultLeeway", "30 * time.Second"]] },
+  );
   test("reads the rows of one module's section, and none of another's or above", () => {
-    assert.deepEqual([...defaultsIn(d, "pgstore")], [["pgstore.Config.DisableLeases", "Off: leases open."]]);
-    assert.deepEqual([...defaultsIn(d, "limes")], [["limes.VerifierConfig.Leeway", "`DefaultLeeway`, 30 seconds."]]);
+    assert.deepEqual([...defaultsIn(d, "pgstore")], [["pgstore.Config.DisableLeases", "off"]]);
+    assert.deepEqual(
+      [...defaultsIn(d, "limes")],
+      [
+        ["limes.VerifierConfig.Leeway", "`DefaultLeeway`"],
+        ["limes.DefaultLeeway", "30 * time.Second"],
+      ],
+    );
+  });
+  test("reads a field's Default cell, not its prose", () => {
+    const reworded = doc({ pgstore: [["pgstore.Config", "DisableLeases", "off", "The store opens leases."]] });
+    assert.equal(breaksDefaults(compareDefaults(defaultsIn(d, "pgstore"), defaultsIn(reworded, "pgstore"))), false);
+  });
+  test("reads no row of a doc older than the Default column, so the first compare with one breaks nothing", () => {
+    const old = "## pgstore\n\n| Config | Field | Zero value |\n|---|---|---|\n| `pgstore.Config` | `DisableLeases` | Off: leases open. |\n";
+    assert.equal(defaultsIn(old, "pgstore").size, 0);
+    assert.equal(breaksDefaults(compareDefaults(defaultsIn(old, "pgstore"), defaultsIn(d, "pgstore"))), false);
   });
   test("reads nothing for a module with no section", () => {
     assert.equal(defaultsIn(d, "biscuit").size, 0);
@@ -80,13 +104,16 @@ test("defaultChanges compares a module's rows at two revisions, and finds none b
     repo.write("README.md", "start");
     await repo.commit("start");
     await repo.run("tag", "v0.1.0");
-    repo.write(DEFAULTS_DOC, doc({ limes: [["limes.C", "A", "x"]], pgstore: [["pgstore.Config", "DisableLeases", "Off."]] }));
+    repo.write(DEFAULTS_DOC, doc({ limes: [["limes.C", "A", "x"]], pgstore: [["pgstore.Config", "DisableLeases", "off"]] }, { pgstore: [["pgstore.DefaultWatchHeartbeat", "30 * time.Second"]] }));
     await repo.commit("docs");
     await repo.run("tag", "v0.2.0");
-    repo.write(DEFAULTS_DOC, doc({ limes: [["limes.C", "A", "y"]], pgstore: [["pgstore.Config", "DisableLeases", "On."]] }));
+    repo.write(DEFAULTS_DOC, doc({ limes: [["limes.C", "A", "y"]], pgstore: [["pgstore.Config", "DisableLeases", "on"]] }, { pgstore: [["pgstore.DefaultWatchHeartbeat", "20 * time.Second"]] }));
     await repo.commit("defaults");
     const pgstore = await defaultChanges(repo.dir, "pgstore", "v0.2.0", "HEAD");
-    assert.deepEqual(pgstore.changed.map(describeDefaultChange), ["`pgstore.Config.DisableLeases` — Off. → On."]);
+    assert.deepEqual(pgstore.changed.map(describeDefaultChange), [
+      "`pgstore.Config.DisableLeases` — off → on",
+      "`pgstore.DefaultWatchHeartbeat` — 30 * time.Second → 20 * time.Second",
+    ]);
     assert.equal(breaksDefaults(await defaultChanges(repo.dir, "pgstore", "v0.1.0", "HEAD")), false);
   } finally {
     repo.cleanup();
