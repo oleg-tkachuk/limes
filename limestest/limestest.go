@@ -7,7 +7,7 @@
 // consumer's test instead of its traffic:
 //
 //	func TestErrorContract(t *testing.T) {
-//		codes := slices.Concat(limes.CodesOf(limes.OriginLimes), limes.CodesOf(limes.OriginMeter))
+//		codes := limes.CodesOf(limes.OriginLimes, limes.OriginMeter)
 //		limestest.CheckMapping(t, codes, map[limes.Code]connect.Code{
 //			"revoked": connect.CodeUnauthenticated,
 //			// …
@@ -22,6 +22,8 @@
 package limestest
 
 import (
+	"fmt"
+	"reflect"
 	"slices"
 	"sort"
 	"testing"
@@ -42,9 +44,9 @@ func CheckMapping[T comparable](t testing.TB, codes []limes.Code, pinned map[lim
 		want, ok := pinned[code]
 		switch {
 		case !ok:
-			t.Errorf("limestest: %q is not pinned; pin it, mapped: %q: %#v,", code, code, got)
+			t.Errorf("limestest: %q is not pinned; pin it, mapped: %q: %s,", code, code, literal(got))
 		case want != got:
-			t.Errorf("limestest: %q is answered %#v; pinned %#v: map it anew, then pin %q: %#v,", code, got, want, code, got)
+			t.Errorf("limestest: %q is answered %s; pinned %s: map it anew, then pin %q: %s,", code, literal(got), literal(want), code, literal(got))
 		}
 	}
 	answered := limes.Codes()
@@ -62,6 +64,16 @@ func CheckMapping[T comparable](t testing.TB, codes []limes.Code, pinned map[lim
 			t.Errorf("limestest: %q is pinned, and limes no longer answers it", code)
 		}
 	}
+}
+
+// literal is v in Go's syntax and, for a v that is no string and names
+// itself (fmt.Stringer), its name beside it: a transport's codes are
+// integers, whose literal alone says nothing.
+func literal[T any](v T) string {
+	if named, ok := any(v).(fmt.Stringer); ok && reflect.ValueOf(v).Kind() != reflect.String {
+		return fmt.Sprintf("%#v /* %s */", v, named.String())
+	}
+	return fmt.Sprintf("%#v", v)
 }
 
 // Answer is how limes answers a code in HTTP's terms.

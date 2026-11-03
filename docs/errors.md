@@ -192,11 +192,13 @@ never as one fixed code: a client's error stays the client's.
 A code answered with another status or category is a break, and it still
 compiles. `limestest` turns it into a failing test of the consumer's: it
 pins what the consumer's own transport answers each code with, and walks
-the codes of the origins the consumer runs (`limes.CodesOf`):
+the codes of the origins the consumer runs (`limes.CodesOf`). A failure
+names the entry to pin, in Go's syntax, with a code that names itself
+(`fmt.Stringer`) named beside its number:
 
 ```go
 func TestErrorContract(t *testing.T) {
-	codes := slices.Concat(limes.CodesOf(limes.OriginLimes), limes.CodesOf(limes.OriginMeter))
+	codes := limes.CodesOf(limes.OriginLimes, limes.OriginMeter)
 	// Pinned from the first failing run, which names every entry.
 	limestest.CheckMapping(t, codes, map[limes.Code]connect.Code{
 		"revoked": connect.CodeUnauthenticated,

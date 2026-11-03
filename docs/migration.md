@@ -70,6 +70,13 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## v0.159.0
+
+- `limes.CodesOf` takes any number of origins: a call with one still
+  compiles, and `slices.Concat(limes.CodesOf(a), limes.CodesOf(b))` is
+  `limes.CodesOf(a, b)`. Only `CodesOf` taken as a value of type
+  `func(limes.Origin) []limes.Code` stops compiling.
+
 ## v0.158.0
 
 - `limes.CodeOf`, `CategoryOf` and `ProblemOf` changed in v0.157.0, which

@@ -356,4 +356,13 @@ func TestCodesOf(t *testing.T) {
 	if got := CodesOf("no_such_origin"); len(got) != 0 {
 		t.Errorf("CodesOf(no_such_origin) = %q, want none", got)
 	}
+	if got := CodesOf(); len(got) != 0 {
+		t.Errorf("CodesOf() = %q, want none", got)
+	}
+	if got, want := CodesOf(OriginMeter, OriginLimes), slices.Concat(CodesOf(OriginLimes), CodesOf(OriginMeter)); !slices.Equal(got, want) {
+		t.Errorf("CodesOf(meter, limes) = %q; want limes's then the meter's, in Codes' order", got)
+	}
+	if got := CodesOf(Origins()...); !slices.Equal(got, Codes()) {
+		t.Errorf("CodesOf(Origins()...) = %q; want Codes()", got)
+	}
 }
