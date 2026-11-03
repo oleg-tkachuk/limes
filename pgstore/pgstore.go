@@ -223,10 +223,13 @@ type Config struct {
 	Logger *slog.Logger
 	// DisableLeases stops the usage store opening leases
 	// (meter.Leaser.Lease): Lease refuses with meter.ErrLeasingDisabled,
-	// while leases already open are still charged under and settled. A
-	// release before pgstore/v0.58.0 reads none of a lease's state, so set
-	// it while one still writes the database, and before going back to one,
-	// then settle every lease (docs/migration.md).
+	// while leases already open are still charged under and settled. Unset,
+	// a lease is opened only when Lease asks for one; a store that opens
+	// none pays one statement per charge and bump a lease could cover, a
+	// read of the chain's leases in the batch the call sends already, set
+	// or not. A release before pgstore/v0.58.0 reads none of a lease's
+	// state, so set it while one still writes the database, and before
+	// going back to one, then settle every lease (docs/migration.md).
 	DisableLeases bool
 	// MaxCopiesPerCapability is how many Biscuit copies the usage store
 	// counts for one capability (meter.Meter, "Copies of a Biscuit"). Zero:
