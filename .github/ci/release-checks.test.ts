@@ -19,6 +19,10 @@ const NESTED = "redisreplay";
 // line.
 const PRE_STABLE_LINE = "      BREAKING_IS_A_MINOR_BEFORE_1_0,";
 const ROOT_FIRST_RULE = "      SECURITY_IS_A_PATCH,";
+// NESTED_RULES opens the nested modules' rules; NESTED_PRE_STABLE_RULES, the
+// same with the pre-1.0 rule.
+const NESTED_RULES = "return [SECURITY_IS_A_PATCH, buildIsAPatch(name)";
+const NESTED_PRE_STABLE_RULES = "return [SECURITY_IS_A_PATCH, BREAKING_IS_A_MINOR_BEFORE_1_0, buildIsAPatch(name)";
 
 const commits = releaseCommits();
 
@@ -31,15 +35,16 @@ function copyRelease(dir: string, files: string[] = ["modules.cjs", "release.con
   }
 }
 
-// withPreStableRoot gives the copied table the root module's pre-1.0 rule
-// back if it has none: these cases are about where a marker counts for a
+// withPreStable gives the copied table every module's pre-1.0 rule back
+// where it has none: these cases are about where a marker counts for a
 // module before 1.0.
-function withPreStableRoot(dir: string): void {
+function withPreStable(dir: string): void {
   const path = join(dir, ".github/release/modules.cjs");
-  const table = readFileSync(path, "utf8");
+  let table = readFileSync(path, "utf8");
   if (!table.includes(PRE_STABLE_LINE)) {
-    writeFileSync(path, table.replace(`${ROOT_FIRST_RULE}\n`, `${ROOT_FIRST_RULE}\n${PRE_STABLE_LINE}\n`));
+    table = table.replace(`${ROOT_FIRST_RULE}\n`, `${ROOT_FIRST_RULE}\n${PRE_STABLE_LINE}\n`);
   }
+  writeFileSync(path, table.replace(NESTED_RULES, NESTED_PRE_STABLE_RULES));
 }
 
 describe("checkRange", () => {
@@ -123,7 +128,7 @@ describe("markerCheck", () => {
 
   test("the root module's own rules decide, from the module table", async () => {
     copyRelease(repo.dir);
-    withPreStableRoot(repo.dir);
+    withPreStable(repo.dir);
     await repo.commit("build: release from the module table");
     assert.equal(await check(["feat!: change"], { migration: true }), true, "the pre-1.0 rule in the module table");
     const table = join(repo.dir, ".github/release/modules.cjs");
@@ -257,7 +262,7 @@ describe("markerCheck over two modules", () => {
   before(async () => {
     repo = await tempRepo();
     copyRelease(repo.dir);
-    withPreStableRoot(repo.dir);
+    withPreStable(repo.dir);
     repo.write("README.md", "");
     repo.write(`${NESTED}/README.md`, "");
     await repo.commit("feat: start");
@@ -421,7 +426,7 @@ describe("apiBreakCheck over two modules", () => {
   before(async () => {
     repo = await tempRepo();
     copyRelease(repo.dir, ["modules.cjs"]);
-    withPreStableRoot(repo.dir);
+    withPreStable(repo.dir);
     repo.write("go.mod", "module example.com/m\n\ngo 1.26\n");
     repo.write("m.go", "package m\n\nfunc A() {}\n");
     await repo.commit("feat: add A");

@@ -218,10 +218,10 @@ concurrent workers ([CONTRIBUTING](.github/CONTRIBUTING.md)).
 ## Versioning
 
 Releases are `vX.Y.Z` tags, cut from Conventional Commits on `main` once CI
-has passed: `feat` is a minor; `fix`, `perf` and `security` a patch. The module
-is pre-1.0, so a breaking change is a minor too — **the Go API may change
-between minor versions**; read the release notes, which list breaking changes
-first, before bumping. Each module's `CHANGELOG.md` gathers them —
+has passed: `feat` is a minor; `fix`, `perf` and `security` a patch. From
+1.0.0 every module's API is stable ([docs/compatibility.md](docs/compatibility.md)):
+no change on the v1 line breaks a caller, and CI refuses one that would. A
+breaking change would be a v2 under its own module path. Each module's `CHANGELOG.md` gathers them —
 [CHANGELOG.md](CHANGELOG.md) for limes, `<module>/CHANGELOG.md` for a nested
 one — written after each release from its notes.
 
@@ -232,11 +232,10 @@ patch — or at once for a breaking change or a `security` fix
 or whenever the Release workflow is run by hand. Run by hand with the
 `prerelease` channel, it tags a release candidate, `vX.Y.Z-rc.N`, of what the
 next release would be, published with the notes that release would have.
-With `next_major` as well, it tags a candidate of limes's 1.0, `v1.0.0-rc.N`,
-from main as it is; limes stays on 0.x on main until the release that cuts
-1.0, so its API may still break between two such candidates, as a
-pre-release's may. The nested modules have no such candidates: they stay on
-0.x past limes's 1.0.
+With `next_major` as well, it tagged the candidates of limes's 1.0,
+`v1.0.0-rc.N`, while limes was on 0.x; on the v1 line there is no next major
+to cut a candidate of, a v2 being a new module path. The release that cut
+limes 1.0.0 took every nested module to its own v1.0.0 with it.
 
 `redisreplay`, `pgstore`, `otelmetric`, `exchange` and `biscuit` are modules
 of their own, each with a release line of its own — `redisreplay/vX.Y.Z`,

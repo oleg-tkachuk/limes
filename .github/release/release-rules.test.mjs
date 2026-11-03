@@ -20,9 +20,11 @@ const cases = [
   ["fix: repair a check", "patch"],
   ["perf: verify faster", "patch"],
   ["security: refuse a forged proof", "patch"],
-  // Pre-1.0, a breaking change is a minor.
-  ["feat!: rename a request field", "minor"],
-  ["fix: drop a field\n\nBREAKING CHANGE: the field is gone", "minor"],
+  // On the v1 line a breaking change is a major, which the marker check
+  // (.github/ci/release-checks.ts) keeps off the line and major-guard.cjs
+  // refuses should one get through.
+  ["feat!: rename a request field", "major"],
+  ["fix: drop a field\n\nBREAKING CHANGE: the field is gone", "major"],
   ["docs: explain a thing", null],
   ["chore: tidy", null],
   ["refactor: move a thing", null],
