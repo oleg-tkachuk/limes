@@ -44,3 +44,18 @@ test("the weekly soak runs the command test:pgstore:soak runs", () => {
   assert.deepEqual([step?.run], task);
   assert.equal(step?.["working-directory"], "pgstore");
 });
+
+// TASK_DEFAULT_REMOTE_TIMEOUT_SECONDS is Task's own bound on fetching a
+// remote Taskfile, which a clone from a CI runner sometimes passes.
+const TASK_DEFAULT_REMOTE_TIMEOUT_SECONDS = 10;
+// DURATION is a Go duration of one unit: what .taskrc.yml's timeout reads.
+const DURATION = /^(\d+)(s|m|h)$/;
+const SECONDS_PER: Record<string, number> = { s: 1, m: 60, h: 3600 };
+
+test("the shared library's fetch may take longer than Task's default", () => {
+  const rc = parse(readFileSync(join(import.meta.dirname, "..", "..", ".taskrc.yml"), "utf8")) as { remote?: { timeout?: string } };
+  const match = DURATION.exec(rc.remote?.timeout ?? "");
+  assert.ok(match, `remote.timeout ${JSON.stringify(rc.remote?.timeout)} is no duration of one unit`);
+  const [, amount = "", unit = ""] = match;
+  assert.ok(Number(amount) * (SECONDS_PER[unit] ?? 0) > TASK_DEFAULT_REMOTE_TIMEOUT_SECONDS, `remote.timeout ${rc.remote?.timeout} is not above Task's default`);
+});

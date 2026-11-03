@@ -1,0 +1,6 @@
+# Task's own settings, read by every `task` run from this checkout.
+remote:
+  # The time a fetch of the shared task library (TASKLIB in Taskfile.yaml)
+  # may take. Task's default, 10s, is below what a clone from a CI runner
+  # sometimes takes, and a clone it cuts short fails the whole job.
+  timeout: 2m
