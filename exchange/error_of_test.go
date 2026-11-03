@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"sort"
@@ -172,8 +173,12 @@ func TestLimesKnowsEveryExchangeCode(t *testing.T) {
 		if !ok || !slices.Contains(limes.Categories(), category) {
 			t.Errorf("limes.CategoryOf(%s) = %q, %v; want one of limes.Categories()", name, category, ok)
 		}
-		if p, ok := limes.ProblemOf(wrapped); !ok || string(p.Code) != want.Code || p.Status != want.Status || p.Title == "" {
-			t.Errorf("limes.ProblemOf(%s) = %+v, %v; want code %q, status %d", name, p, ok, want.Code, want.Status)
+		p, ok := limes.ProblemOf(wrapped)
+		if !ok || string(p.Code) != want.Code || p.Category != category || p.Status != want.Status || p.Title == "" {
+			t.Errorf("limes.ProblemOf(%s) = %+v, %v; want code %q, category %q, status %d", name, p, ok, want.Code, category, want.Status)
+		}
+		if got, ok := limes.ProblemOfCode(p.Code); !ok || !reflect.DeepEqual(got, p) {
+			t.Errorf("limes.ProblemOfCode(%q) = %+v, %v; want %+v, as ProblemOf answers", p.Code, got, ok, p)
 		}
 		if !slices.Contains(codes, limes.Code(want.Code)) {
 			t.Errorf("limes.Codes() lacks %q", want.Code)
