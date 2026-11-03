@@ -100,7 +100,7 @@ func TestEraseTenantDoesWhatTenantTablesSay(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := limes.ExchangeKey{TenantID: f.mine, Issuer: "https://idp.example", TokenID: "erased-exchange"}
-	if _, _, err := f.records.ClaimExchange(ctx, key, time.Now().Add(time.Hour), f.child.ID); err != nil {
+	if _, _, err := f.records.ClaimExchange(ctx, limes.ClaimExchangeRequest{Key: key, TokenExpiresAt: time.Now().Add(time.Hour), CapabilityID: f.child.ID}); err != nil {
 		t.Fatal(err)
 	}
 	erased := eraseAndCount(t, f)
