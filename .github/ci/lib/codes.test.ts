@@ -27,6 +27,11 @@ describe("contractIn", () => {
       ],
     );
   });
+  test("reads no row of a table without a category column: a wire code that is no limes code", () => {
+    const wire = "\n\n| Code | HTTP | Sentinel | Description |\n|---|---|---|---|\n| `use_dpop_nonce` | 400 | `dpop.ErrNonceRequired` | A fresh nonce goes in `DPoP-Nonce`. |\n";
+    const got = contractIn(doc([["revoked", "401", "unauthenticated"]], [], []) + wire);
+    assert.deepEqual([...got.keys()], ["revoked"]);
+  });
   test("reads nothing from a document with no code tables", () => {
     assert.equal(contractIn("# Errors\n").size, 0);
   });
