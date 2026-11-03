@@ -2,6 +2,17 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.156.0](https://github.com/oleg-tkachuk/limes/compare/v0.155.0...v0.156.0) (2026-11-03)
+
+### ⚠ BREAKING CHANGES
+
+* limes.CodeOf, CategoryOf, ProblemOf and Codes answer the meter's codes; meter.CodeOf, CategoryOf, CategoryOfCode, ReasonOfCode, ProblemOf, Codes and AllCodes are gone.
+
+### Features
+
+* answer the meter's codes from limes's one registry ([3ddc8b4](https://github.com/oleg-tkachuk/limes/commit/3ddc8b4d9cbb58c96ac3e759abbca53aff4f8c05))
+* **meter:** list every code with AllCodes ([5a28a22](https://github.com/oleg-tkachuk/limes/commit/5a28a223afbcccd64e256da90f756137f2663a39))
+
 ## [0.155.0](https://github.com/oleg-tkachuk/limes/compare/v0.154.0...v0.155.0) (2026-11-03)
 
 ### ⚠ BREAKING CHANGES
