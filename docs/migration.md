@@ -9,6 +9,7 @@ Names are those of the release that changed them. A name changed again later
 appears again under that later release: to cross several releases, read
 upwards from the one you are on.
 
+What counts as a break is set out in [compatibility.md](compatibility.md).
 A pull request that marks a break adds its entry above the newest one,
 under the release it cuts: the minor after the newest tag. CI refuses a
 breaking marker whose change leaves this file alone. From v1.0.0 on no

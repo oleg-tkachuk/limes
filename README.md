@@ -302,6 +302,7 @@ its checks while unset.
 | [docs/standards.md](docs/standards.md) | the RFCs implemented — JWT, DPoP, JWKS, HTTP challenges and problem details — the choices made within them, and the OAuth standards deliberately left out |
 | [docs/diagrams.md](docs/diagrams.md) | the contract boundary, a capability's lifecycle, the verification gates, error answers, delegation, Biscuit copies, the charge path, revocation, token exchange |
 | [docs/biscuit-profile.md](docs/biscuit-profile.md) | how a capability travels in a Biscuit, and what a holder may append with any Biscuit implementation |
+| [docs/compatibility.md](docs/compatibility.md) | what a release promises — the Go API, the error codes with their status and category, defaults, documented behaviour — what breaks it, and how a break is announced before and after 1.0 |
 | [docs/migration.md](docs/migration.md) | the release candidates of 1.0, and every breaking change from v0.3.0 on, of limes and of each nested module, as what it was and what it is now |
 | [docs/api-review-v1.md](docs/api-review-v1.md) | the review of the API before 1.0: each finding, the decision taken and whether it is done |
 | [docs/adr/](docs/adr/) | architecture decision records: what was decided about the code behind the API, and why |

@@ -149,7 +149,10 @@ reason.
   again, and decide.
 
 `limes.Codes()` and `meter.Codes()` list every code, so a consumer's test
-can prove its own mapping covers them all.
+can prove its own mapping covers them all. A code's status, category and
+reason are part of the contract ([compatibility.md](compatibility.md)):
+changing one is a break, marked and listed in the release notes, and these
+tables are what CI compares.
 
 ## Categories
 
