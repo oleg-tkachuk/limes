@@ -2,6 +2,14 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.154.0](https://github.com/oleg-tkachuk/limes/compare/v0.153.0...v0.154.0) (2026-11-03)
+
+### Features
+
+* add the precondition category ([fa646ba](https://github.com/oleg-tkachuk/limes/commit/fa646bacca74c84a76b31e4a01d5c18240f7b3b9))
+* **meter:** add AsOptional for a feature a consumer runs without ([e4bb5fa](https://github.com/oleg-tkachuk/limes/commit/e4bb5fa9696fe3d7b2be1705e55ba403e236c846))
+* **meter:** let ErrLeasingDisabled match ErrFeatureDisabled ([9f87785](https://github.com/oleg-tkachuk/limes/commit/9f87785f004dd9e210a8faf4b4dc6e3ec585754f))
+
 ## [0.153.0](https://github.com/oleg-tkachuk/limes/compare/v0.152.0...v0.153.0) (2026-11-02)
 
 ### Features
