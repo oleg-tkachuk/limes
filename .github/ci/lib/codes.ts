@@ -2,18 +2,18 @@
 // another HTTP status, another category — for its notes and for the check
 // that a change to them is marked breaking: a consumer that pins the codes
 // on its wire reads the contract change there. docs/errors.md lists every
-// code of limes and of its meter with its status and category, which the Go
-// tests hold it to, so the contract of two revisions is its tables at each.
+// code of limes, of its meter and of the exchange with its status and
+// category, which the Go tests hold it to, so the contract of two revisions
+// is its tables at each.
 
 import { info } from "./actions.ts";
 import { git } from "./git.ts";
 
 // ERRORS_DOC is the document that lists every code.
 export const ERRORS_DOC = "docs/errors.md";
-// FIRST_TABLE opens the tables of limes's own codes and the meter's;
-// AFTER_TABLES, the exchange's, which its own module releases.
+// FIRST_TABLE opens the tables of the codes: limes's own, the meter's and
+// the exchange's, which limes answers alike.
 const FIRST_TABLE = "## limes's codes";
-const AFTER_TABLES = "## The exchange's codes";
 // CODE_ROW is a row of those tables: its code, its HTTP status and, in the
 // last column, its category.
 const CODE_ROW = /^\| `([a-z_]+)` \| ([0-9]{3}) \|.*\| `([a-z_]+)` \|$/gm;
@@ -44,7 +44,7 @@ export interface CodeChanges {
 // NO_CHANGES is a comparison that found nothing.
 const NO_CHANGES: CodeChanges = { added: [], removed: [], changed: [] };
 
-// contractIn is each code the tables of limes and its meter in doc list,
+// contractIn is each code the tables in doc list, from FIRST_TABLE on,
 // with its answer.
 export function contractIn(doc: string): Map<string, Answer> {
   const out = new Map<string, Answer>();
@@ -52,8 +52,7 @@ export function contractIn(doc: string): Map<string, Answer> {
   if (start < 0) {
     return out;
   }
-  const end = doc.indexOf(AFTER_TABLES, start);
-  for (const [, code, status, category] of doc.slice(start, end < 0 ? undefined : end).matchAll(CODE_ROW)) {
+  for (const [, code, status, category] of doc.slice(start).matchAll(CODE_ROW)) {
     if (code !== undefined && status !== undefined && category !== undefined) {
       out.set(code, { status, category });
     }
