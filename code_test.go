@@ -121,7 +121,7 @@ func TestEverySentinelHasACode(t *testing.T) {
 // rule names a status exactly when no refusal rule answers its sentinel.
 func TestCodesAreWhole(t *testing.T) {
 	seen := map[Code]bool{}
-	for _, r := range codeRules {
+	for _, r := range allCodeRules {
 		if seen[r.code] {
 			t.Errorf("code %q names two sentinels", r.code)
 		}
@@ -139,8 +139,8 @@ func TestCodesAreWhole(t *testing.T) {
 			t.Errorf("Reason %q is no Code", reason)
 		}
 	}
-	if len(Codes()) != len(codeRules) {
-		t.Errorf("Codes() lists %d, want %d", len(Codes()), len(codeRules))
+	if len(Codes()) != len(allCodeRules) {
+		t.Errorf("Codes() lists %d, want %d", len(Codes()), len(allCodeRules))
 	}
 }
 
@@ -261,6 +261,44 @@ func TestProblemFor(t *testing.T) {
 	for _, err := range []error{errors.New("connection reset"), nil} {
 		if p := ProblemFor(err); p.Code != CodeInternal || p.Status != http.StatusInternalServerError || p.Title == "" {
 			t.Errorf("ProblemFor(%v) = %+v, want internal", err, p)
+		}
+	}
+}
+
+// coded is an error of another package naming its own code, as the meter's
+// sentinels do, in the family family.
+type coded struct {
+	code   Code
+	family error
+}
+
+func (c coded) Error() string          { return string(c.code) }
+func (c coded) LimesErrorCode() string { return string(c.code) }
+func (c coded) Is(target error) bool   { return errors.Is(c.family, target) }
+
+// An error naming its own code is answered by that code's rule, ahead of
+// the family it belongs to; one naming a code limes does not know is
+// answered by its family, as any other error is.
+func TestAnErrorNamingItsCode(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err      error
+		code     Code
+		category Category
+		status   int
+	}{
+		"a code of the meter's":      {fmt.Errorf("wrapped: %w", coded{CodeChargeNotFound, ErrNotFound}), CodeChargeNotFound, CategoryNotFound, http.StatusNotFound},
+		"a status of its own":        {coded{CodeLeaseNested, ErrConflict}, CodeLeaseNested, CategoryPrecondition, http.StatusConflict},
+		"a refusal of the meter's":   {coded{CodeLeaseExhausted, ErrBudgetExceeded}, CodeLeaseExhausted, CategoryExhausted, http.StatusForbidden},
+		"a code limes does not know": {coded{"no_such_code", ErrNotFound}, CodeNotFound, CategoryNotFound, http.StatusNotFound},
+	} {
+		if got, ok := CodeOf(tc.err); !ok || got != tc.code {
+			t.Errorf("%s: CodeOf = %q, %v; want %q", name, got, ok, tc.code)
+		}
+		if got, ok := CategoryOf(tc.err); !ok || got != tc.category {
+			t.Errorf("%s: CategoryOf = %q, %v; want %q", name, got, ok, tc.category)
+		}
+		if p, ok := ProblemOf(tc.err); !ok || p.Code != tc.code || p.Status != tc.status {
+			t.Errorf("%s: ProblemOf = %+v, %v; want code %q, status %d", name, p, ok, tc.code, tc.status)
 		}
 	}
 }

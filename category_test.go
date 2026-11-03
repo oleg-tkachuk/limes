@@ -19,7 +19,7 @@ var docCategory = regexp.MustCompile("(?m)^\\| `([a-z_]+)` \\| [0-9]{3} \\| .* \
 // Every code has one of the categories, so a consumer mapping the categories
 // maps every error; a new code without one fails here.
 func TestEveryCodeHasACategory(t *testing.T) {
-	for _, r := range codeRules {
+	for _, r := range allCodeRules {
 		if !slices.Contains(Categories(), r.category) {
 			t.Errorf("%s has category %q, none of Categories()", r.code, r.category)
 		}

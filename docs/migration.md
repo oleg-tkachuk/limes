@@ -70,6 +70,23 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## v0.156.0
+
+- One registry of codes: limes's functions answer the meter's errors as
+  their own. `limes.CodeOf(meter.ErrChargeNotFound)` is `charge_not_found`
+  where it was `not_found`, `limes.CategoryOf(meter.ErrRefundExceedsCharge)`
+  is `precondition` where it was none, and `limes.ProblemOf` gives the
+  meter's codes, titles and statuses; `Verifier.ErrorResponse` puts
+  `copy_limit_exceeded`, `lease_exhausted` and `lease_requests_exhausted`
+  in its body's `code` where it put the reason they fold into.
+  `limes.Codes()` lists the meter's codes after limes's own.
+- `meter.CodeOf`, `meter.CategoryOf`, `meter.CategoryOfCode`,
+  `meter.ReasonOfCode`, `meter.ProblemOf`, `meter.Codes` and
+  `meter.AllCodes` are gone: call the `limes.` function of the same name;
+  `append(limes.Codes(), meter.Codes()...)` is `limes.Codes()`. The meter's
+  `Code…` constants stay, the same values as limes's new
+  `limes.Code…` constants of the same names.
+
 ## pgstore/v0.65.0
 
 - `Store.ClaimExchange`, and the store `ScopedExchanges` returns, take a

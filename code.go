@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/oleg-tkachuk/limes/dpop"
+	"github.com/oleg-tkachuk/limes/internal/errcode"
 	"github.com/oleg-tkachuk/limes/jwks"
 )
 
@@ -72,6 +73,27 @@ const (
 	CodeCursorRepeated         Code = "cursor_repeated"
 	CodeInvalidConfig          Code = "invalid_config"
 	CodeInternal               Code = "internal"
+)
+
+// The codes of package meter's sentinels, which this package answers as its
+// own (docs/errors.md, "The meter's codes").
+const (
+	CodeCounterOverflow             Code = "counter_overflow"
+	CodeChargeNotFound              Code = "charge_not_found"
+	CodeRefundExceedsCharge         Code = "refund_exceeds_charge"
+	CodeReservationNotFound         Code = "reservation_not_found"
+	CodeCopyLimitExceeded           Code = "copy_limit_exceeded"
+	CodeUsageNotFound               Code = "usage_not_found"
+	CodeTenantBudgetNotFound        Code = "tenant_budget_not_found"
+	CodeTenantBudgetVersionMismatch Code = "tenant_budget_version_mismatch"
+	CodeExternalRefConflict         Code = "external_ref_conflict"
+	CodeSettleConflict              Code = "settle_conflict"
+	CodeLeaseExhausted              Code = "lease_exhausted"
+	CodeLeaseRequestsExhausted      Code = "lease_requests_exhausted"
+	CodeLeaseNotFound               Code = "lease_not_found"
+	CodeLeaseNested                 Code = "lease_nested"
+	CodeLeasingDisabled             Code = "leasing_disabled"
+	CodeFeatureDisabled             Code = "feature_disabled"
 )
 
 // codeRule is one sentinel's code, its Category and, for one no refusal rule
@@ -144,10 +166,54 @@ var codeRules = []codeRule{
 	{ErrInternal, CodeInternal, http.StatusInternalServerError, internalTitle, CategoryInternal},
 }
 
-// codeRuleFor is the first code rule err matches.
+// meterCodeRules answer the meter's sentinels, which name their own code
+// (errcode.Coded) since this package cannot name them. A refusal's sentinel
+// is the limes family it is refused as, which gives its Reason; another's is
+// nil, and its own status answers it.
+var meterCodeRules = []codeRule{
+	{ErrRequestLimitExceeded, CodeCopyLimitExceeded, 0, "", CategoryExhausted},
+	{nil, CodeCounterOverflow, http.StatusConflict, "The counter has no room for the amount", CategoryPrecondition},
+	{nil, CodeChargeNotFound, http.StatusNotFound, "The charge is not on record", CategoryNotFound},
+	{nil, CodeRefundExceedsCharge, http.StatusConflict, "The refund exceeds what the charge took", CategoryPrecondition},
+	{nil, CodeReservationNotFound, http.StatusNotFound, "The reservation is not on record, released or expired", CategoryNotFound},
+	{nil, CodeUsageNotFound, http.StatusNotFound, "The capability has no usage on record", CategoryNotFound},
+	{nil, CodeTenantBudgetNotFound, http.StatusNotFound, "The tenant has no budget on record", CategoryNotFound},
+	{nil, CodeTenantBudgetVersionMismatch, http.StatusConflict, "The tenant budget changed since it was read", CategoryConflict},
+	{nil, CodeExternalRefConflict, http.StatusConflict, "The external reference names another charge", CategoryConflict},
+	{nil, CodeSettleConflict, http.StatusConflict, "The reservation was settled for another amount", CategoryConflict},
+	{ErrBudgetExceeded, CodeLeaseExhausted, 0, "", CategoryExhausted},
+	{ErrRequestLimitExceeded, CodeLeaseRequestsExhausted, 0, "", CategoryExhausted},
+	{nil, CodeLeaseNotFound, http.StatusNotFound, "The capability holds no lease", CategoryNotFound},
+	{nil, CodeLeaseNested, http.StatusConflict, "An ancestor of the capability holds a lease", CategoryPrecondition},
+	{nil, CodeLeasingDisabled, http.StatusInternalServerError, "Leasing is not enabled on the store", CategoryPrecondition},
+	{nil, CodeFeatureDisabled, http.StatusInternalServerError, "A feature is disabled by the store's configuration", CategoryPrecondition},
+}
+
+// allCodeRules is every code's rule, limes's then the meter's: what a code
+// alone is looked up in.
+var allCodeRules = slices.Concat(codeRules, meterCodeRules)
+
+// codeRuleOf is code's rule.
+func codeRuleOf(code Code) (codeRule, bool) {
+	for _, r := range allCodeRules {
+		if r.code == code {
+			return r, true
+		}
+	}
+	return codeRule{}, false
+}
+
+// codeRuleFor is the rule of the code err names itself, a meter sentinel's,
+// or else the first code rule err matches.
 func codeRuleFor(err error) (codeRule, bool) {
 	if err == nil {
 		return codeRule{}, false
+	}
+	var coded errcode.Coded
+	if errors.As(err, &coded) {
+		if r, ok := codeRuleOf(Code(coded.LimesErrorCode())); ok {
+			return r, true
+		}
 	}
 	for _, r := range codeRules {
 		if errors.Is(err, r.sentinel) {
@@ -165,11 +231,11 @@ func CodeOf(err error) (Code, bool) {
 	return r.code, ok
 }
 
-// Codes returns every code this package defines, in a fixed order, so a
-// consumer can prove its own mapping covers them all.
+// Codes returns every code this package answers, the meter's among them,
+// in a fixed order, so a consumer can prove its own mapping covers them all.
 func Codes() []Code {
-	out := make([]Code, 0, len(codeRules))
-	for _, r := range codeRules {
+	out := make([]Code, 0, len(allCodeRules))
+	for _, r := range allCodeRules {
 		if !slices.Contains(out, r.code) {
 			out = append(out, r.code)
 		}
@@ -207,7 +273,9 @@ func ProblemOf(err error) (Problem, bool) {
 	if !ok {
 		return Problem{}, false
 	}
-	if rr, refused := ruleFor(err); refused {
+	// A refusal is answered as one, unless its code has a status of its
+	// own: a meter sentinel in a refusal's family that is no refusal.
+	if rr, refused := ruleFor(err); refused && cr.status == 0 {
 		kind := rr.answer.slug
 		if rr.reason != "" {
 			kind = string(rr.reason)

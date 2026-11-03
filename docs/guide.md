@@ -1832,8 +1832,8 @@ stop rather than retry. The full table is in [diagrams.md](diagrams.md#answering
 The body also carries the error's `code`, a stable name for any error limes
 returns, not only a refusal. An API of your own that is not a protected
 resource — an admin endpoint that revokes, a billing call that settles —
-answers an error limes returned with `limes.ProblemOf(err)` (or
-`meter.ProblemOf(err)` for the meter's calls): the same RFC 9457 body, with
+answers an error limes returned with `limes.ProblemOf(err)`, the meter's
+among them: the same RFC 9457 body, with
 the status a store's not-found (404), conflict (409) or erased tenant (401)
 deserves rather than 500. Its text is never a contract: branch on the
 sentinel with `errors.Is`, put the code on the wire, and never strip
