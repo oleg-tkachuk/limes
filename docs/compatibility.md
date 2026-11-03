@@ -52,8 +52,8 @@ A break is allowed, and announced three ways: the commit is marked
 breaking (`!` or a `BREAKING CHANGE:` footer), which cuts a minor release;
 [migration.md](migration.md) says what it was and what it is; and the
 release notes list it, with every error code added, removed or answered
-otherwise under **Codes**, and every default changed or removed under
-**Defaults**. CI holds the first two to the change: a Go API break, a change
+otherwise under **Codes**, every default changed or removed under
+**Defaults**, and every change to this policy under **Contract**. CI holds the first two to the change: a Go API break, a change
 to the error contract in [errors.md](errors.md), or a change to a default in
 [defaults.md](defaults.md), with no marker fails, and so does a marker with
 no migration entry. What a documented function accepts and refuses is held

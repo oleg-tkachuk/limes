@@ -32,6 +32,7 @@ import { join } from "node:path";
 import { CHANGELOGS, addEntry, entryFrom, entryVersion, namingTags } from "./changelog.ts";
 import { info, summarize, warning } from "./lib/actions.ts";
 import { codeChanges, withCodeChanges } from "./lib/codes.ts";
+import { contractChanges, withContractChanges } from "./lib/contract.ts";
 import { defaultChanges, withDefaultChanges } from "./lib/defaults.ts";
 import { optionalEnv, requireEnv } from "./lib/env.ts";
 import { git } from "./lib/git.ts";
@@ -118,6 +119,9 @@ export async function planReleases(p: Planner): Promise<Planned[]> {
       const changes = await codeChanges(p.root, last, "HEAD");
       info(`${ROOT_MODULE}: codes since ${last}: added ${changes.added.length}, removed ${changes.removed.length}, answered otherwise ${changes.changed.length}`);
       limes.entry = withCodeChanges(limes.entry, changes);
+      const contract = await contractChanges(p.root, last, "HEAD");
+      info(`${ROOT_MODULE}: changes to the compatibility policy since ${last}: ${contract.length}`);
+      limes.entry = withContractChanges(limes.entry, contract);
     }
     if (limes.major) {
       await followToStable(p, plan, names);
