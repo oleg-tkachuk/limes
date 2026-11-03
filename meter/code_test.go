@@ -231,3 +231,21 @@ func TestMeterPreconditions(t *testing.T) {
 		}
 	}
 }
+
+// AllCodes is limes's codes, then the meter's, each once.
+func TestAllCodes(t *testing.T) {
+	all := AllCodes()
+	if want := append(limes.Codes(), Codes()...); !slices.Equal(all, want) {
+		t.Fatalf("AllCodes() = %q, want limes.Codes() then Codes(): %q", all, want)
+	}
+	seen := map[limes.Code]bool{}
+	for _, code := range all {
+		if seen[code] {
+			t.Errorf("AllCodes() lists %q twice", code)
+		}
+		seen[code] = true
+		if _, ok := CategoryOfCode(code); !ok {
+			t.Errorf("CategoryOfCode(%q) knows no category", code)
+		}
+	}
+}

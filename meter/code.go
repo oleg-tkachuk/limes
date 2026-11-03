@@ -119,6 +119,12 @@ func Codes() []limes.Code {
 	return out
 }
 
+// AllCodes is every code a consumer of limes and the meter can see:
+// limes.Codes, then Codes, so one list proves a mapping covers them all.
+func AllCodes() []limes.Code {
+	return append(limes.Codes(), Codes()...)
+}
+
 // ProblemOf is limes.ProblemOf with the meter's own codes: an error the
 // meter returned, as RFC 9457 problem details. A refusal keeps the answer
 // limes gives it, its code the meter's; any other of the meter's sentinels
