@@ -2,6 +2,33 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.158.0](https://github.com/oleg-tkachuk/limes/compare/v0.157.0...v0.158.0) (2026-11-03)
+
+### ⚠ BREAKING CHANGES
+
+* use_dpop_nonce and invalid_dpop_proof, listed as codes
+  added in v0.157.0, are no limes.Code. v0.157.0 also changed what
+  limes.CodeOf answers an exchange's error with, marked only in
+  exchange/v0.16.0: its own code, ahead of a limes error it wraps.
+
+### Features
+
+* **dpop:** name RFC 9449's error codes ([dd1aef8](https://github.com/oleg-tkachuk/limes/commit/dd1aef839ff6df6080e014b2510b4f0c6895fdb0))
+* **limestest:** pin the consumer's own answer to each code ([3584024](https://github.com/oleg-tkachuk/limes/commit/3584024eb09a0d5fe3072aa47d92fac420793ac3))
+* list the codes of each origin ([f342ed6](https://github.com/oleg-tkachuk/limes/commit/f342ed624f1c436405c3004cefb7b5343d29a681))
+
+### Documentation
+
+* keep the endpoint's DPoP codes out of limes's code tables ([2dd49a5](https://github.com/oleg-tkachuk/limes/commit/2dd49a51a5b3fd9866c951aef245442df21f1fec))
+
+### Codes
+
+* removed: `invalid_dpop_proof`, `use_dpop_nonce`
+
+### Contract
+
+* keep the endpoint's DPoP codes out of limes's code tables
+
 ## [0.157.0](https://github.com/oleg-tkachuk/limes/compare/v0.156.0...v0.157.0) (2026-11-03)
 
 ### Features
