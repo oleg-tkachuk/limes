@@ -70,20 +70,21 @@ var repeatable = map[string]bool{paramResource: true, paramAudience: true}
 // kilobytes.
 const DefaultMaxBodyBytes = 64 << 10
 
-// The RFC 6749 §5.2 error codes, with RFC 8707's and RFC 9449's.
+// The RFC 6749 §5.2 error codes, with RFC 8707's, RFC 9396 §5's and RFC
+// 9449's: limes's codes of the same names, but the DPoP ones, which limes
+// answers by its own proof codes.
 const (
-	codeInvalidRequest     = "invalid_request"
-	codeInvalidClient      = "invalid_client"
-	codeUnauthorizedClient = "unauthorized_client"
-	codeInvalidGrant       = "invalid_grant"
-	codeInvalidTarget      = "invalid_target"
-	codeInvalidScope       = "invalid_scope"
-	// codeInvalidAuthorizationDetails is RFC 9396 §5's.
-	codeInvalidAuthorizationDetails = "invalid_authorization_details"
-	codeUnsupportedGrantType        = "unsupported_grant_type"
+	codeInvalidRequest              = string(limes.CodeInvalidRequest)
+	codeInvalidClient               = string(limes.CodeInvalidClient)
+	codeUnauthorizedClient          = string(limes.CodeUnauthorizedClient)
+	codeInvalidGrant                = string(limes.CodeInvalidGrant)
+	codeInvalidTarget               = string(limes.CodeInvalidTarget)
+	codeInvalidScope                = string(limes.CodeInvalidScope)
+	codeInvalidAuthorizationDetails = string(limes.CodeInvalidAuthorizationDetails)
+	codeUnsupportedGrantType        = string(limes.CodeUnsupportedGrantType)
 	codeInvalidDPoPProof            = "invalid_dpop_proof"
 	codeUseDPoPNonce                = "use_dpop_nonce"
-	codeServerError                 = "server_error"
+	codeServerError                 = string(limes.CodeServerError)
 )
 
 // HandlerConfig configures a Handler.

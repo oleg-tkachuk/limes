@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"sort"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/dpop"
 )
 
@@ -154,3 +156,61 @@ func TestErrorsDocListsEveryExchangeError(t *testing.T) {
 
 // exchangeSection heads the exchange's table in docs/errors.md.
 const exchangeSection = "## The exchange's codes"
+
+// Every sentinel of the exchange has a code of limes's own, which limes's
+// functions answer — through a wrap, and ahead of a limes error it wraps —
+// with the status and code ErrorOf answers, so one mapping of limes's
+// categories covers the exchange.
+func TestLimesKnowsEveryExchangeCode(t *testing.T) {
+	codes := limes.Codes()
+	for name, err := range exchangeSentinels {
+		wrapped := fmt.Errorf("exchanging: %w: %w", err, limes.ErrRevoked)
+		want, _ := ErrorOf(err)
+		if got, ok := limes.CodeOf(wrapped); !ok || string(got) != want.Code {
+			t.Errorf("limes.CodeOf(%s) = %q, %v; want %q, as ErrorOf answers", name, got, ok, want.Code)
+		}
+		category, ok := limes.CategoryOf(wrapped)
+		if !ok || !slices.Contains(limes.Categories(), category) {
+			t.Errorf("limes.CategoryOf(%s) = %q, %v; want one of limes.Categories()", name, category, ok)
+		}
+		p, ok := limes.ProblemOf(wrapped)
+		if !ok || string(p.Code) != want.Code || p.Category != category || p.Status != want.Status || p.Title == "" {
+			t.Errorf("limes.ProblemOf(%s) = %+v, %v; want code %q, category %q, status %d", name, p, ok, want.Code, category, want.Status)
+		}
+		if got, ok := limes.ProblemOfCode(p.Code); !ok || !reflect.DeepEqual(got, p) {
+			t.Errorf("limes.ProblemOfCode(%q) = %+v, %v; want %+v, as ProblemOf answers", p.Code, got, ok, p)
+		}
+		if !slices.Contains(codes, limes.Code(want.Code)) {
+			t.Errorf("limes.Codes() lacks %q", want.Code)
+		}
+	}
+}
+
+// docCategory reads a row of docs/errors.md's code tables: its code and, in
+// the last column, its category.
+var docCategory = regexp.MustCompile("(?m)^\\| `([a-z_]+)` \\| [0-9]{3} \\| .* \\| `([a-z_]+)` \\|$")
+
+// docs/errors.md lists every error the exchange answers with in the
+// category limes answers it in.
+func TestErrorsDocListsEveryExchangeCategory(t *testing.T) {
+	raw, err := os.ReadFile("../docs/errors.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	section := string(raw)
+	if i := strings.Index(section, exchangeSection); i >= 0 {
+		section = section[i:]
+	} else {
+		t.Fatalf("docs/errors.md has no %q section", exchangeSection)
+	}
+	doc := map[string]string{}
+	for _, m := range docCategory.FindAllStringSubmatch(section, -1) {
+		doc[m[1]] = m[2]
+	}
+	for _, rule := range refusals {
+		want, _ := limes.CategoryOf(rule.err)
+		if got := doc[rule.code]; got != string(want) {
+			t.Errorf("docs/errors.md lists %q in category %q; limes.CategoryOf says %q", rule.code, got, want)
+		}
+	}
+}

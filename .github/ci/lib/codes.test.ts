@@ -16,11 +16,12 @@ function doc(limes: Row[], meter: Row[], exchange: Row[]): string {
 const answer = (status: string, category: string): Answer => ({ status, category });
 
 describe("contractIn", () => {
-  test("reads each code of limes's and the meter's tables with its answer, and neither the exchange's nor anything above", () => {
-    const got = contractIn(doc([["revoked", "401", "unauthenticated"]], [["lease_nested", "409", "precondition"]], [["invalid_grant", "400", "invalid"]]));
+  test("reads each code of limes's, the meter's and the exchange's tables with its answer, and nothing above", () => {
+    const got = contractIn(doc([["revoked", "401", "unauthenticated"]], [["lease_nested", "409", "precondition"]], [["invalid_grant", "400", "unauthenticated"]]));
     assert.deepEqual(
       [...got].sort(),
       [
+        ["invalid_grant", answer("400", "unauthenticated")],
         ["lease_nested", answer("409", "precondition")],
         ["revoked", answer("401", "unauthenticated")],
       ],
@@ -85,7 +86,7 @@ test("codeChanges compares the tables at two revisions, and finds none before th
     repo.write(ERRORS_DOC, doc([["revoked", "401", "unauthenticated"]], [["lease_nested", "409", "precondition"], ["feature_disabled", "500", "precondition"]], [["new_exchange_code", "400", "invalid"]]));
     await repo.commit("codes");
     const changes = await codeChanges(repo.dir, "v0.2.0", "HEAD");
-    assert.deepEqual([changes.added, changes.removed, changes.changed.map(describeChange)], [["feature_disabled"], ["gone_code"], ["`lease_nested` — category conflict → precondition"]]);
+    assert.deepEqual([changes.added, changes.removed, changes.changed.map(describeChange)], [["feature_disabled", "new_exchange_code"], ["gone_code"], ["`lease_nested` — category conflict → precondition"]]);
     assert.equal(breaksWire(await codeChanges(repo.dir, "v0.1.0", "HEAD")), false);
   } finally {
     repo.cleanup();
