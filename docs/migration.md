@@ -70,8 +70,19 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## pgstore/v0.65.0
+
+- `Store.ClaimExchange`, and the store `ScopedExchanges` returns, take a
+  `limes.ClaimExchangeRequest`, as `limes.ExchangeStore` does from
+  v0.155.0.
+
 ## v0.155.0
 
+- `ExchangeStore.ClaimExchange(ctx, key, tokenExpiresAt, id)` is
+  `ClaimExchange(ctx, limes.ClaimExchangeRequest{Key, TokenExpiresAt,
+  CapabilityID})`, as the other stores' calls take a request; its
+  `Validate` replaces `ExchangeKey.ValidateClaim`. A store of your own
+  reads the three from the request.
 - Codes moved to another category (`limes.CategoryOf`, `limes.CategoryOfCode`):
   `already_exists` from `conflict` to the new `already_exists`;
   `refund_exceeds_charge` from `invalid` to `precondition`;
