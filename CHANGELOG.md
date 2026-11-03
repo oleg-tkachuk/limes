@@ -2,6 +2,24 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.157.0](https://github.com/oleg-tkachuk/limes/compare/v0.156.0...v0.157.0) (2026-11-03)
+
+### Features
+
+* answer the exchange's codes as limes's own ([58eee31](https://github.com/oleg-tkachuk/limes/commit/58eee316698061f746c258fdc8e7fd2b6f5bd853))
+* carry a code's category in its problem, and answer a code's problem ([a4bce96](https://github.com/oleg-tkachuk/limes/commit/a4bce9694f1c59547a0c1fa3f4d8b3f16bdb1d86))
+* **limestest:** hold a consumer's error mapping to the codes it pinned ([fd60ed1](https://github.com/oleg-tkachuk/limes/commit/fd60ed13779c8997a9eeeb231e1e5e69c4e15f7b))
+
+### Codes
+
+* added: `invalid_authorization_details`, `invalid_client`, `invalid_dpop_proof`, `invalid_grant`, `invalid_scope`, `invalid_target`, `server_error`, `unauthorized_client`, `unsupported_grant_type`, `use_dpop_nonce`
+
+### Contract
+
+* tabulate default constants and a machine default column
+* list changes to the compatibility policy in limes's notes
+* hold a consumer's error mapping to the codes it pinned
+
 ## [0.156.0](https://github.com/oleg-tkachuk/limes/compare/v0.155.0...v0.156.0) (2026-11-03)
 
 ### ⚠ BREAKING CHANGES
