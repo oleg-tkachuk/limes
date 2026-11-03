@@ -96,6 +96,21 @@ const (
 	CodeFeatureDisabled             Code = "feature_disabled"
 )
 
+// The codes of package exchange's sentinels, which this package answers as
+// its own (docs/errors.md, "The exchange's codes"): the names RFC 6749
+// §5.2, RFC 8707 and RFC 9396 give them, which the token endpoint answers
+// with. exchange.ErrInvalidRequest is CodeInvalidRequest.
+const (
+	CodeInvalidClient               Code = "invalid_client"
+	CodeUnauthorizedClient          Code = "unauthorized_client"
+	CodeUnsupportedGrantType        Code = "unsupported_grant_type"
+	CodeInvalidGrant                Code = "invalid_grant"
+	CodeInvalidTarget               Code = "invalid_target"
+	CodeInvalidScope                Code = "invalid_scope"
+	CodeInvalidAuthorizationDetails Code = "invalid_authorization_details"
+	CodeServerError                 Code = "server_error"
+)
+
 // codeRule is one sentinel's code, its Category and, for one no refusal rule
 // answers, the HTTP status and title of its problem; a refusal's are
 // refusalRules', so ProblemOf and ErrorResponse answer it alike.
@@ -189,9 +204,23 @@ var meterCodeRules = []codeRule{
 	{nil, CodeFeatureDisabled, http.StatusInternalServerError, "A feature is disabled by the store's configuration", CategoryPrecondition},
 }
 
-// allCodeRules is every code's rule, limes's then the meter's: what a code
-// alone is looked up in.
-var allCodeRules = slices.Concat(codeRules, meterCodeRules)
+// exchangeCodeRules answer the exchange's sentinels, which name their own
+// code as the meter's do, each with the status the token endpoint answers
+// it with.
+var exchangeCodeRules = []codeRule{
+	{nil, CodeInvalidClient, http.StatusUnauthorized, "The client is not authenticated", CategoryUnauthenticated},
+	{nil, CodeUnauthorizedClient, http.StatusBadRequest, "The client may not exchange tokens", CategoryDenied},
+	{nil, CodeUnsupportedGrantType, http.StatusBadRequest, "The grant type is not supported", CategoryInvalid},
+	{nil, CodeInvalidGrant, http.StatusBadRequest, "The subject token was refused", CategoryUnauthenticated},
+	{nil, CodeInvalidTarget, http.StatusBadRequest, "The resource or audience was refused", CategoryDenied},
+	{nil, CodeInvalidScope, http.StatusBadRequest, "The scope was refused", CategoryDenied},
+	{nil, CodeInvalidAuthorizationDetails, http.StatusBadRequest, "The authorization details were refused", CategoryDenied},
+	{nil, CodeServerError, http.StatusInternalServerError, "The server could not decide on the request", CategoryInternal},
+}
+
+// allCodeRules is every code's rule, limes's, the exchange's, then the
+// meter's: what a code alone is looked up in.
+var allCodeRules = slices.Concat(codeRules, exchangeCodeRules, meterCodeRules)
 
 // codeRuleOf is code's rule.
 func codeRuleOf(code Code) (codeRule, bool) {
@@ -231,8 +260,9 @@ func CodeOf(err error) (Code, bool) {
 	return r.code, ok
 }
 
-// Codes returns every code this package answers, the meter's among them,
-// in a fixed order, so a consumer can prove its own mapping covers them all.
+// Codes returns every code this package answers, the exchange's and the
+// meter's among them, in a fixed order, so a consumer can prove its own
+// mapping covers them all.
 func Codes() []Code {
 	out := make([]Code, 0, len(allCodeRules))
 	for _, r := range allCodeRules {

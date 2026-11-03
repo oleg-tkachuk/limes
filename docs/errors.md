@@ -26,8 +26,8 @@ place.
 
 **Any other API of the consumer's** — an admin endpoint that revokes, a
 billing call that settles — answers an error limes returned with
-`limes.ProblemOf(err)`, which knows the meter's codes as well: there is one
-registry of codes. It gives the RFC 9457 body and reports false for an
+`limes.ProblemOf(err)`, which knows the meter's and the exchange's codes as
+well: there is one registry of codes. It gives the RFC 9457 body and reports false for an
 error that is not limes's, which the consumer answers as its own failure,
 500:
 
@@ -150,9 +150,9 @@ reason.
 - **A 409** is a request that disagrees with what is on record: read it
   again, and decide.
 
-`limes.Codes()` lists every code, the meter's among them, so a consumer's
-test can prove its own mapping covers them all (`limestest`, under
-[Categories](#categories)). A code's status, category and
+`limes.Codes()` lists every code, the meter's and the exchange's among
+them, so a consumer's test can prove its own mapping covers them all
+(`limestest`, under [Categories](#categories)). A code's status, category and
 reason are part of the contract ([compatibility.md](compatibility.md)):
 changing one is a break, marked and listed in the release notes, and these
 tables are what CI compares.
@@ -303,17 +303,25 @@ in RFC 6749 §5.2's format, as the token endpoint does. The codes are RFC
 6749's, RFC 8707's `invalid_target`, RFC 9396's
 `invalid_authorization_details` and RFC 9449's DPoP codes.
 
-| Code | HTTP | Sentinel | Description |
-|---|---|---|---|
-| `use_dpop_nonce` | 400 | `dpop.ErrNonceRequired` | The DPoP proof must carry the server's nonce; a fresh one goes in `DPoP-Nonce`. |
-| `invalid_dpop_proof` | 400 | `dpop.ErrRequired`, `dpop.ErrInvalid`, `dpop.ErrReplayed` | The DPoP proof is required, invalid, or used before. |
-| `unauthorized_client` | 400 | `exchange.ErrUnauthorizedClient` | The client may not exchange tokens. |
-| `invalid_client` | 401 | `exchange.ErrInvalidClient` | The client could not be authenticated; challenged in the scheme it used, or 400 when it named none. |
-| `unsupported_grant_type` | 400 | `exchange.ErrUnsupportedGrantType` | Only token exchange is supported. |
-| `invalid_grant` | 400 | `exchange.ErrInvalidGrant` | The subject token was refused. |
-| `invalid_target` | 400 | `exchange.ErrInvalidTarget` | The resource or audience was refused. |
-| `invalid_target` | 400 | `exchange.ErrTargetExchanged` | The subject token was exchanged already, for another resource or audience: one capability per subject token (`Config.Exchanges`). |
-| `invalid_scope` | 400 | `exchange.ErrInvalidScope` | The scope was refused. |
-| `invalid_authorization_details` | 400 | `exchange.ErrInvalidAuthorizationDetails` | The authorization details were refused. |
-| `invalid_request` | 400 | `exchange.ErrInvalidRequest` | The request is malformed. |
-| `server_error` | 500 | `exchange.ErrServerError` | The server could not decide on the request. |
+They are limes's codes too: each sentinel of the exchange names its own,
+so `limes.CodeOf`, `limes.CategoryOf` and `limes.ProblemOf` answer an
+exchange's error as the endpoint does — with the same code and status,
+ahead of any limes error it wraps — and `limes.Codes()` lists them. One
+mapping of the categories covers the exchange. The DPoP codes are the
+endpoint's alone: in process, `dpop.ErrRequired` and its kin are limes's
+proof codes, in the same category.
+
+| Code | HTTP | Sentinel | Description | Category |
+|---|---|---|---|---|
+| `use_dpop_nonce` | 400 | `dpop.ErrNonceRequired` | The DPoP proof must carry the server's nonce; a fresh one goes in `DPoP-Nonce`. | `unauthenticated` |
+| `invalid_dpop_proof` | 400 | `dpop.ErrRequired`, `dpop.ErrInvalid`, `dpop.ErrReplayed` | The DPoP proof is required, invalid, or used before. | `unauthenticated` |
+| `unauthorized_client` | 400 | `exchange.ErrUnauthorizedClient` | The client may not exchange tokens. | `denied` |
+| `invalid_client` | 401 | `exchange.ErrInvalidClient` | The client could not be authenticated; challenged in the scheme it used, or 400 when it named none. | `unauthenticated` |
+| `unsupported_grant_type` | 400 | `exchange.ErrUnsupportedGrantType` | Only token exchange is supported. | `invalid` |
+| `invalid_grant` | 400 | `exchange.ErrInvalidGrant` | The subject token was refused. | `unauthenticated` |
+| `invalid_target` | 400 | `exchange.ErrInvalidTarget` | The resource or audience was refused. | `denied` |
+| `invalid_target` | 400 | `exchange.ErrTargetExchanged` | The subject token was exchanged already, for another resource or audience: one capability per subject token (`Config.Exchanges`). | `denied` |
+| `invalid_scope` | 400 | `exchange.ErrInvalidScope` | The scope was refused. | `denied` |
+| `invalid_authorization_details` | 400 | `exchange.ErrInvalidAuthorizationDetails` | The authorization details were refused. | `denied` |
+| `invalid_request` | 400 | `exchange.ErrInvalidRequest` | The request is malformed. | `invalid` |
+| `server_error` | 500 | `exchange.ErrServerError` | The server could not decide on the request. | `internal` |
