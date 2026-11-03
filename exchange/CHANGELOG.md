@@ -2,6 +2,21 @@
 
 Every release of the exchange module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.16.0](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.15.19...exchange%2Fv0.16.0) (2026-11-03)
+
+### ⚠ BREAKING CHANGES
+
+* **exchange:** limes.CodeOf, CategoryOf and ProblemOf answer an
+  exchange's error by its own code, ahead of a limes error it wraps.
+
+### Features
+
+* **exchange:** name each sentinel's limes code ([78171aa](https://github.com/oleg-tkachuk/limes/commit/78171aac2952f7c413e23adce64c0b59e2b0b22f))
+
+### Dependencies
+
+* require limes v0.157.0
+
 ## [0.15.19](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.15.18...exchange%2Fv0.15.19) (2026-11-03)
 
 ### Dependencies
