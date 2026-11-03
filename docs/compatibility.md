@@ -43,8 +43,14 @@ These do not:
   row of [defaults.md](defaults.md): CI compares its Default and Value
   columns alone.
 
-A consumer must therefore map a code or a category it does not know, as
-its own default, rather than fail on it.
+A consumer must therefore map a code or a category it does not know
+rather than fail on it, and the default to map it by is its status:
+`Problem.Status`, which every code has. A mapping of the categories
+answers one added after it was written from that status, so a refused
+request is never answered as a success, nor a client's error as the
+server's. [`limestest`](../limestest) holds a consumer's mapping to the
+codes and categories it was written against, so a code answered otherwise,
+or a category added, fails the consumer's tests rather than its traffic.
 
 ## Before 1.0
 

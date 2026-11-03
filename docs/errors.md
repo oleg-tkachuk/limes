@@ -151,7 +151,8 @@ reason.
   again, and decide.
 
 `limes.Codes()` lists every code, the meter's among them, so a consumer's
-test can prove its own mapping covers them all. A code's status, category and
+test can prove its own mapping covers them all (`limestest`, under
+[Categories](#categories)). A code's status, category and
 reason are part of the contract ([compatibility.md](compatibility.md)):
 changing one is a break, marked and listed in the release notes, and these
 tables are what CI compares.
@@ -180,9 +181,30 @@ The status stays the finer answer: within `exhausted`, a permanent refusal
 (`request_limit_exceeded`) never lifts while a budget can.
 
 `limes.CategoryOfCode(code)` answers a code's category, and
-`limes.ProblemOfCode(code)` its whole problem, without an error to hand,
-so a test of a consumer's own mapping walks `limes.Codes()` and checks
-each pair.
+`limes.ProblemOfCode(code)` its whole problem, without an error to hand.
+
+A mapping of the categories has a default branch, for a category added
+after it was written; adding one is not a break
+([compatibility.md](compatibility.md)). That branch answers from
+`Problem.Status`, the error's own HTTP status, never as a success and
+never as one fixed code: a client's error stays the client's.
+
+A code answered with another status or category is a break, and it still
+compiles. `limestest` turns it into a failing test of the consumer's:
+
+```go
+func TestErrorContract(t *testing.T) {
+	// Pinned from the first failing run, which names every entry.
+	limestest.CheckCodes(t, map[limes.Code]limestest.Answer{
+		"revoked": {Status: 401, Category: "unauthenticated"},
+		// …
+	})
+	limestest.CheckCategories(t, func(c limes.Category) bool {
+		_, ok := transportCodes[c]
+		return ok
+	})
+}
+```
 
 A category says what retrying would do, not how bad the failure is, and
 agrees with the status: every 502 and 503 is `unavailable`, a dependency

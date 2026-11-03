@@ -36,9 +36,10 @@
 // spend against a capability's ceilings and keeps the charges ledger; a
 // consumer that only verifies tokens never imports it.
 // [github.com/oleg-tkachuk/limes/inspect] reads a token without verifying
-// it, for tooling. memstore, storetest and metertest serve stores;
-// dpop/dpoptest and jwks/jwkstest check a replay cache, a nonce source and a
-// key resolver. Modules of their own carry what the root module does not
+// it, for tooling. limestest holds a consumer's mapping of the error codes
+// to the ones it was written against. memstore, storetest and metertest
+// serve stores; dpop/dpoptest and jwks/jwkstest check a replay cache, a
+// nonce source and a key resolver. Modules of their own carry what the root module does not
 // resolve: github.com/oleg-tkachuk/limes/pgstore, every store contract over
 // PostgreSQL; github.com/oleg-tkachuk/limes/redisreplay, a replay cache over
 // Redis; github.com/oleg-tkachuk/limes/otelmetric, OpenTelemetry
