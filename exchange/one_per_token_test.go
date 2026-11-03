@@ -108,7 +108,7 @@ func (lostRace) ExchangedFor(context.Context, limes.ExchangeKey) (uuid.UUID, err
 	return uuid.Nil(), limes.ErrNotFound
 }
 
-func (l lostRace) ClaimExchange(context.Context, limes.ExchangeKey, time.Time, uuid.UUID) (uuid.UUID, bool, error) {
+func (l lostRace) ClaimExchange(context.Context, limes.ClaimExchangeRequest) (uuid.UUID, bool, error) {
 	return l.winner, false, nil
 }
 
