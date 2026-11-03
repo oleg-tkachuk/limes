@@ -123,7 +123,7 @@ or be marked breaking by hand.
 | `pgstore.Config` | `CheckTenant` | none | Every tenant is one the store can mint for. |
 | `pgstore.Config` | `CheckScope` | `CheckSchemaScope` | Under the default `Scope`; beside a `Scope` of the consumer's, no check. |
 | `pgstore.Config` | `Logger` | `slog.Default()` |  |
-| `pgstore.Config` | `DisableLeases` | off | The usage store opens leases, and reports `meter.FeatureLeases` enabled. |
+| `pgstore.Config` | `DisableLeases` | off | The usage store opens a lease when `meter.Leaser.Lease` asks for one, never of itself, and reports `meter.FeatureLeases` enabled. A store that opens none pays one statement per charge and bump a lease could cover, a read of the chain's leases, in the batch the call sends already: no round trip. Set, the read stays, since leases already open are still charged under. |
 | `pgstore.Config` | `MaxCopiesPerCapability` | `meter.DefaultMaxCopiesPerCapability` |  |
 | `pgstore.ReplayConfig` | `DB` | required |  |
 | `pgstore.ReplayConfig` | `EntriesPerHolder` | `dpop.DefaultReplayEntriesPerHolder` |  |
