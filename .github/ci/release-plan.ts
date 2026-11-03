@@ -9,8 +9,11 @@
 // is made before any branch is cut. When limes is in the plan, each nested
 // module that requires an older limes is raised to it and released with
 // it: with its own notes, when it has commits that release, or as a patch
-// whose notes are the requirement alone. Each planned release's notes are
-// its changelog entry.
+// whose notes are the requirement alone. When limes reaches v1.0.0, every
+// nested module still on 0.x reaches its v1.0.0 with it, its own notes, if
+// any, under that version: one stable line for the whole repository
+// (docs/compatibility.md). Each planned release's notes are its changelog
+// entry.
 //
 // proposeRelease writes the plan on BRANCH, cut from the checked-out
 // commit — each raised requirement, the followers tidied, each entry first
@@ -38,7 +41,7 @@ import { pushAs } from "./lib/push.ts";
 import { DRY_RUN_ARG, semanticRelease } from "./lib/semantic-release.ts";
 import { FOLLOWERS, compareVersions, raise, requiredLimes, tidyFollowers } from "./lib/go-modules.ts";
 import { ROOT_MODULE, releaseCommits, releasedModules, selectModule, type Module, type ReleaseCommits } from "./lib/modules.ts";
-import { nextVersion, parseVersion } from "./lib/prerelease.ts";
+import { STABLE_MAJOR, nextVersion, parseVersion } from "./lib/prerelease.ts";
 import { notesFrom } from "./lib/releases.ts";
 import { Level, isDue, lastStableTag, loadPolicy, pendingCommits, type Policy } from "./lib/release-policy.ts";
 import { BASE_BRANCH } from "./merge-policy.ts";
@@ -116,10 +119,46 @@ export async function planReleases(p: Planner): Promise<Planned[]> {
       info(`${ROOT_MODULE}: codes since ${last}: added ${changes.added.length}, removed ${changes.removed.length}, answered otherwise ${changes.changed.length}`);
       limes.entry = withCodeChanges(limes.entry, changes);
     }
+    if (limes.major) {
+      await followToStable(p, plan, names);
+    }
     await raiseNested(p, plan, names, limes.tag);
   }
   const order = (m: Planned) => names.indexOf(m.module.name);
   return plan.sort((a, b) => order(a) - order(b));
+}
+
+// followToStable plans every nested module of names whose last release is
+// below STABLE_MAJOR at STABLE_MAJOR.0.0, with the notes its own commits
+// have, or none; one with no release yet is left to have its line seeded.
+async function followToStable(p: Planner, plan: Planned[], names: readonly string[]): Promise<void> {
+  for (const name of names.filter((n) => n !== ROOT_MODULE)) {
+    const module = selectModule(p.root, name);
+    const last = await lastStableTag(module, "HEAD", p.root);
+    if (last === undefined || parseVersion(last, module.prefix).major >= STABLE_MAJOR) {
+      continue;
+    }
+    const own = await p.dryRun(module);
+    const notes = withHeading(heading(p, module, last, nextVersion(parseVersion(last, module.prefix), Level.Major)), own);
+    const stable = await planned(p, module, notes, false);
+    info(`${name}: follows limes to ${stable.tag}`);
+    const at = plan.findIndex((m) => m.module.name === name);
+    if (at < 0) {
+      plan.push(stable);
+    } else {
+      plan[at] = stable;
+    }
+  }
+}
+
+// withHeading is notes under head in place of their own heading; head alone
+// when there are none.
+function withHeading(head: string, notes: string | undefined): string {
+  if (notes === undefined) {
+    return head;
+  }
+  const body = notes.trimStart().split("\n").slice(1).join("\n").trim();
+  return body === "" ? head : `${head}\n${body}\n`;
 }
 
 // raiseNested adds to plan every nested module of names that requires a
@@ -183,7 +222,12 @@ async function patchNotes(p: Planner, module: Module): Promise<string> {
   if (last === undefined) {
     throw new Error(`${module.name} has no release to cut a patch of`);
   }
-  const version = nextVersion(parseVersion(last, module.prefix), Level.Patch);
+  return heading(p, module, last, nextVersion(parseVersion(last, module.prefix), Level.Patch));
+}
+
+// heading is the heading of module's release of version past last, in
+// semantic-release's form.
+function heading(p: Planner, module: Module, last: string, version: string): string {
   const compare = `https://github.com/${p.repository}/compare/${encodeURIComponent(last)}...${encodeURIComponent(`${module.prefix}v${version}`)}`;
   return `## [${version}](${compare}) (${p.today})\n`;
 }
