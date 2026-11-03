@@ -10,6 +10,11 @@ A test holds the tables to the code: every exported field of every exported
 declared in that package. "Required" means the zero value is refused when
 the value is built.
 
+The last column is compared verbatim between releases: rewording a row
+reads as a change, and needs the breaking marker as one does. Options'
+defaults (such as the pgstore watcher's heartbeat) are not tabulated here;
+their `Default…` constants carry them.
+
 ## limes
 
 | Config | Field | Zero value |
