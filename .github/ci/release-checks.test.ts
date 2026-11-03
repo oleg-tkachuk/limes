@@ -213,6 +213,45 @@ describe("markerCheck over the wire contract", () => {
   });
 });
 
+describe("markerCheck over the defaults", () => {
+  let repo: TempRepo;
+  // table is docs/defaults.md with the root module's section, as rows of
+  // field and what its zero does.
+  const table = (rows: [string, string][]) =>
+    `## limes\n\n${rows.map(([f, z]) => `| \`limes.VerifierConfig\` | \`${f}\` | ${z} |`).join("\n")}\n`;
+  const start: [string, string][] = [
+    ["Leeway", "30 seconds."],
+    ["NoLeeway", "Off."],
+  ];
+  before(async () => {
+    repo = await tempRepo();
+    mkdirSync(join(repo.dir, "docs"), { recursive: true });
+    writeFileSync(join(repo.dir, "docs/defaults.md"), table(start));
+    await repo.commit("feat: start");
+    await repo.run("tag", "v0.9.0", "main");
+  });
+  after(() => repo.cleanup());
+
+  async function check(rows: [string, string][], message: string, migration = false): Promise<string> {
+    await repo.run("checkout", "--quiet", "-B", "case", "main");
+    writeFileSync(join(repo.dir, "docs/defaults.md"), table(rows));
+    if (migration) {
+      writeFileSync(join(repo.dir, "docs/migration.md"), `${message}\n`);
+    }
+    await repo.commit(message);
+    const verdict = await markerCheck(selectModule(repo.dir), "main", "case", undefined, commits, repo.dir);
+    await repo.run("checkout", "--quiet", "main");
+    return verdict.ok ? "ok" : verdict.message;
+  }
+
+  test("a default changed or removed needs a marker; a field added does not", async () => {
+    assert.match(await check([["Leeway", "1 minute."], ["NoLeeway", "Off."]], "fix: widen the leeway"), /defaults change.*`limes.VerifierConfig.Leeway` — 30 seconds. → 1 minute./);
+    assert.match(await check([["Leeway", "30 seconds."]], "fix: drop a field"), /`limes.VerifierConfig.NoLeeway` removed/);
+    assert.equal(await check([["Leeway", "1 minute."], ["NoLeeway", "Off."]], "fix!: widen the leeway", true), "ok");
+    assert.equal(await check([...start, ["Realm", "limes."]], "feat: a realm"), "ok");
+  });
+});
+
 describe("markerCheck over two modules", () => {
   let repo: TempRepo;
   before(async () => {

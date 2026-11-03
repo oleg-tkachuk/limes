@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { breaksWire, codeChanges, describeChange } from "./lib/codes.ts";
+import { breaksDefaults, defaultChanges, describeDefaultChange } from "./lib/defaults.ts";
 import { execute } from "./lib/exec.ts";
 import { git, lines } from "./lib/git.ts";
 import { marksBreaking, titleMarksBreaking } from "./lib/markers.ts";
@@ -63,6 +64,17 @@ async function wireBreaks(module: Module, from: string, head: string, cwd: strin
   return [...changes.removed.map((c) => `\`${c}\` removed`), ...changes.changed.map(describeChange)];
 }
 
+// defaultBreaks names each change from from to head to what the module's
+// Config fields do at zero that breaks a consumer leaving them so — a field
+// removed, or doing otherwise (docs/defaults.md).
+async function defaultBreaks(module: Module, from: string, head: string, cwd: string): Promise<string[]> {
+  const changes = await defaultChanges(cwd, module.name, from, head);
+  if (!breaksDefaults(changes)) {
+    return [];
+  }
+  return [...changes.removed.map((f) => `\`${f}\` removed`), ...changes.changed.map(describeDefaultChange)];
+}
+
 // changesFile reports whether path differs between from and to.
 async function changesFile(from: string, to: string, path: string, cwd: string): Promise<boolean> {
   return lines(await git(["diff", "--name-only", from, to, "--", path], cwd)).length > 0;
@@ -77,9 +89,9 @@ async function changesFile(from: string, to: string, path: string, cwd: string):
 // describes leaves every consumer to rebuild it from the diff. A change to
 // limes's error codes that breaks a consumer pinning them — a code removed,
 // or answered with another status or category (docs/compatibility.md) — is
-// a break whether or not the Go API changes, so it needs the marker too. A
-// title that
-// reads as a footer in the merge commit's body marks a break no commit of the
+// a break whether or not the Go API changes, so it needs the marker too;
+// so does a change to what one of the module's Config fields does at zero
+// (docs/defaults.md). A title that reads as a footer in the merge commit's body marks a break no commit of the
 // change carries: refused on any line, as the commits' markers are what a
 // break is declared with.
 export async function markerCheck(
@@ -98,9 +110,13 @@ export async function markerCheck(
   const line = (await releaseLine(module, from, cwd)) ?? "no release";
   const marked = await marksBreaking(module, from, head, commits, cwd);
   const wire = await wireBreaks(module, from, head, cwd);
+  const defaults = await defaultBreaks(module, from, head, cwd);
   if (!(await stableAt(module, from, cwd))) {
     if (wire.length > 0 && !marked) {
       return { ok: false, message: `${name}: error codes change on the wire with no commit marking a break: ${wire.join("; ")}` };
+    }
+    if (defaults.length > 0 && !marked) {
+      return { ok: false, message: `${name}: defaults change with no commit marking a break: ${defaults.join("; ")}` };
     }
     if (marked && !(await changesFile(from, head, MIGRATION_GUIDE, cwd))) {
       return { ok: false, message: `${name}: a commit marks a break, and ${MIGRATION_GUIDE} has no entry for it` };
@@ -115,6 +131,9 @@ export async function markerCheck(
   }
   if (wire.length > 0) {
     return { ok: false, message: `${name}: error codes change on the wire on a stable line (${line}): ${wire.join("; ")}` };
+  }
+  if (defaults.length > 0) {
+    return { ok: false, message: `${name}: defaults change on a stable line (${line}): ${defaults.join("; ")}` };
   }
   return { ok: true, message: `${name}: no breaking marker on the stable line (${line})` };
 }

@@ -13,6 +13,7 @@ import type { Policy } from "./lib/release-policy.ts";
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
 import { BRANCH, DEPENDENCIES_HEADING, planReleases, proposeRelease, releaseTitle, withDependency, type Planner } from "./release-plan.ts";
 import { CODES_HEADING, ERRORS_DOC } from "./lib/codes.ts";
+import { DEFAULTS_DOC, DEFAULTS_HEADING } from "./lib/defaults.ts";
 
 const RELEASE = new URL("../release", import.meta.url).pathname;
 const REPOSITORY = "example/limes";
@@ -136,6 +137,19 @@ describe("the release plan", () => {
     await repo.commit("feat: a code");
     const entry = (await planReleases(planner()))[0]?.entry ?? "";
     assert.ok(entry.endsWith(`${CODES_HEADING}\n\n* added: \`new_code\`\n* removed: \`gone\`\n`), entry);
+  });
+
+  test("a module's entry names its defaults changed since its last release, and none when there are none", async () => {
+    const table = (zero: string) => `## limes\n\n| \`limes.C\` | \`F\` | ${zero} |\n`;
+    repo.write(DEFAULTS_DOC, table("Off."));
+    await repo.commit("docs: defaults");
+    await repo.run("tag", "--force", "v0.1.0");
+    const unchanged = (await planReleases(planner()))[0]?.entry ?? "";
+    assert.ok(!unchanged.includes(DEFAULTS_HEADING), unchanged);
+    repo.write(DEFAULTS_DOC, table("On."));
+    await repo.commit("feat!: turn it on");
+    const entry = (await planReleases(planner()))[0]?.entry ?? "";
+    assert.ok(entry.includes(`${DEFAULTS_HEADING}\n\n* changed: \`limes.C.F\` — Off. → On.\n`), entry);
   });
 
   test("a nested module with notes of its own keeps them, with the requirement added", async () => {
