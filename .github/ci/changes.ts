@@ -123,13 +123,16 @@ export function reachesCode(paths: readonly string[]): boolean {
 
 // READ_BY_TESTS are the inert-looking paths a test reads, with the groups
 // whose checks run those tests: the README's five-minute walkthrough runs as
-// examples/internal/readme's test, and docs/errors.md is held to the codes
-// by the root's tests (the meter's among them) and the exchange's.
+// examples/internal/readme's test, docs/errors.md is held to the codes
+// by the root's tests (the meter's among them) and the exchange's, and
+// docs/defaults.md to every module's Config fields by the root's, which the
+// Verify gate runs for a change to any module.
 // changes.test.ts fails when a test reads a path of INERT that is not listed
 // here.
 export const READ_BY_TESTS: Readonly<Record<string, readonly Group[]>> = {
   "README.md": [Group.Examples],
   "docs/errors.md": [Group.Root, Group.Exchange],
+  "docs/defaults.md": [Group.Root],
 };
 
 // groupsOf is the groups one path reaches.
