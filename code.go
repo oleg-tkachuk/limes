@@ -224,27 +224,33 @@ var allCodeRules = slices.Concat(codeRules, exchangeCodeRules, meterCodeRules)
 
 // Origin is where a code comes from: the package whose errors it names. A
 // consumer that does not run a component maps its codes as a formality, and
-// may leave them out of a check of its own mapping (CodesOf).
-type Origin string
+// may leave them out of a check of its own mapping (CodesOf). It is one of
+// the Origin… values: no other can be spelled, so a misspelt origin does not
+// compile. The zero Origin is none, and has no codes.
+type Origin struct {
+	name string
+}
 
 // The origins.
-const (
+var (
 	// OriginLimes — the root package and the packages it answers for:
 	// verifying and checking a capability, its stores, dpop and jwks.
-	OriginLimes Origin = "limes"
+	OriginLimes = Origin{"limes"}
 	// OriginExchange — module exchange, the token endpoint and an
 	// Exchanger in process; a consumer that verifies tokens alone never
 	// meets them.
-	OriginExchange Origin = "exchange"
+	OriginExchange = Origin{"exchange"}
 	// OriginMeter — package meter and the usage stores.
-	OriginMeter Origin = "meter"
+	OriginMeter = Origin{"meter"}
 )
+
+// String is the origin's name: the package its codes come from.
+func (o Origin) String() string { return o.name }
 
 // Origins returns every origin, in the order Codes lists their codes.
 func Origins() []Origin { return []Origin{OriginLimes, OriginExchange, OriginMeter} }
 
-// rulesOf are origin's code rules; none for an origin that is none of
-// Origins.
+// rulesOf are origin's code rules; none for the zero Origin.
 func rulesOf(origin Origin) []codeRule {
 	switch origin {
 	case OriginLimes:
@@ -257,10 +263,12 @@ func rulesOf(origin Origin) []codeRule {
 	return nil
 }
 
-// CodesOf returns the codes of origins, in Codes' order, and none for an
-// origin that is none of Origins: a consumer that runs no exchange checks
-// its mapping of CodesOf(OriginLimes, OriginMeter).
-func CodesOf(origins ...Origin) []Code {
+// CodesOf returns the codes of first and rest, in Codes' order: a consumer
+// that runs no exchange checks its mapping of CodesOf(OriginLimes,
+// OriginMeter). It takes one origin at least, since none would read as
+// every code, which Codes is.
+func CodesOf(first Origin, rest ...Origin) []Code {
+	origins := append([]Origin{first}, rest...)
 	var rules []codeRule
 	for _, origin := range Origins() {
 		if slices.Contains(origins, origin) {
