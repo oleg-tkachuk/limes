@@ -23,15 +23,19 @@ const (
 	famConflict     = "Conflict"
 	famRequest      = "InvalidRequest"
 	famConfig       = "InvalidConfig"
+	// famFeatureDisabled is the meter's own family: a call refused for a
+	// feature turned off matches it, as As refuses that store at startup.
+	famFeatureDisabled = "FeatureDisabled"
 )
 
 var families = map[string]error{
-	famRequestLimit: limes.ErrRequestLimitExceeded,
-	famBudget:       limes.ErrBudgetExceeded,
-	famNotFound:     limes.ErrNotFound,
-	famConflict:     limes.ErrConflict,
-	famRequest:      limes.ErrInvalidRequest,
-	famConfig:       limes.ErrInvalidConfig,
+	famRequestLimit:    limes.ErrRequestLimitExceeded,
+	famBudget:          limes.ErrBudgetExceeded,
+	famNotFound:        limes.ErrNotFound,
+	famConflict:        limes.ErrConflict,
+	famRequest:         limes.ErrInvalidRequest,
+	famConfig:          limes.ErrInvalidConfig,
+	famFeatureDisabled: ErrFeatureDisabled,
 }
 
 // sentinelCase is one exported sentinel: the families it matches, the
@@ -59,8 +63,8 @@ var sentinelMatrix = map[string]sentinelCase{
 	"ErrLeaseRequestsExhausted":      {ErrLeaseRequestsExhausted, []string{famRequestLimit}, limes.ReasonRequestLimitExceeded, http.StatusForbidden},
 	"ErrLeaseNotFound":               {ErrLeaseNotFound, []string{famNotFound}, "", http.StatusInternalServerError},
 	"ErrLeaseNested":                 {ErrLeaseNested, []string{famConflict}, "", http.StatusConflict},
-	"ErrLeasingDisabled":             {ErrLeasingDisabled, []string{famConfig}, "", http.StatusInternalServerError},
-	"ErrFeatureDisabled":             {ErrFeatureDisabled, []string{famConfig}, "", http.StatusInternalServerError},
+	"ErrLeasingDisabled":             {ErrLeasingDisabled, []string{famConfig, famFeatureDisabled}, "", http.StatusInternalServerError},
+	"ErrFeatureDisabled":             {ErrFeatureDisabled, []string{famConfig, famFeatureDisabled}, "", http.StatusInternalServerError},
 	"ErrTenantBudgetVersionMismatch": {ErrTenantBudgetVersionMismatch, []string{famConflict}, "", http.StatusConflict},
 	"ErrCounterOverflow":             {ErrCounterOverflow, nil, "", http.StatusInternalServerError},
 	"ErrRefundExceedsCharge":         {ErrRefundExceedsCharge, nil, "", http.StatusInternalServerError},
@@ -123,11 +127,13 @@ func TestSentinelMatrixIsComplete(t *testing.T) {
 	}
 }
 
-// No sentinel of the package matches another, and each survives wrapping.
+// No sentinel of the package matches another but a family it declares, and
+// each survives wrapping.
 func TestSentinelsAreIndividuallyMatchable(t *testing.T) {
 	for nameA, a := range sentinelMatrix {
 		for nameB, b := range sentinelMatrix {
-			if nameA != nameB && errors.Is(a.err, b.err) {
+			declared := slices.ContainsFunc(a.families, func(f string) bool { return errors.Is(families[f], b.err) })
+			if nameA != nameB && !declared && errors.Is(a.err, b.err) {
 				t.Errorf("%s matches %s — they must stay distinguishable", nameA, nameB)
 			}
 		}

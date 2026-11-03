@@ -151,3 +151,19 @@ func TestAsAll(t *testing.T) {
 		t.Errorf("AsAll with a target no pointer = %v, leaser %v; want ErrInvalidRequest and nothing set", err, leaser)
 	}
 }
+
+// AsOptional hands back an interface the store has on, nothing and no error
+// for one its configuration turned off, and As's error for one it lacks.
+func TestAsOptional(t *testing.T) {
+	full := fullStore(t)
+	if l, on, err := meter.AsOptional[meter.Leaser](full); err != nil || !on || l == nil {
+		t.Errorf("AsOptional[Leaser](memstore) = %v, %v, %v; want the store, on", l, on, err)
+	}
+	gated := gatedStore{full, full.(meter.Leaser)}
+	if l, on, err := meter.AsOptional[meter.Leaser](gated); err != nil || on || l != nil {
+		t.Errorf("AsOptional[Leaser] turned off = %v, %v, %v; want nothing, off, no error", l, on, err)
+	}
+	if c, on, err := meter.AsOptional[meter.CopyUsageReader](gated); !errors.Is(err, limes.ErrInvalidConfig) || errors.Is(err, meter.ErrFeatureDisabled) || on || c != nil {
+		t.Errorf("AsOptional of an interface not implemented = %v, %v, %v; want ErrInvalidConfig", c, on, err)
+	}
+}

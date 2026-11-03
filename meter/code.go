@@ -40,7 +40,7 @@ type codeRule struct {
 // codeRules is the one table CodeOf and ProblemOf read.
 var codeRules = []codeRule{
 	{ErrCopyLimitExceeded, CodeCopyLimitExceeded, 0, "", limes.CategoryExhausted},
-	{ErrCounterOverflow, CodeCounterOverflow, http.StatusConflict, "The counter has no room for the amount", limes.CategoryExhausted},
+	{ErrCounterOverflow, CodeCounterOverflow, http.StatusConflict, "The counter has no room for the amount", limes.CategoryPrecondition},
 	{ErrChargeNotFound, CodeChargeNotFound, http.StatusNotFound, "The charge is not on record", limes.CategoryNotFound},
 	{ErrRefundExceedsCharge, CodeRefundExceedsCharge, http.StatusConflict, "The refund exceeds what the charge took", limes.CategoryInvalid},
 	{ErrReservationNotFound, CodeReservationNotFound, http.StatusNotFound, "The reservation is not on record, released or expired", limes.CategoryNotFound},
@@ -52,9 +52,9 @@ var codeRules = []codeRule{
 	{ErrLeaseExhausted, CodeLeaseExhausted, 0, "", limes.CategoryExhausted},
 	{ErrLeaseRequestsExhausted, CodeLeaseRequestsExhausted, 0, "", limes.CategoryExhausted},
 	{ErrLeaseNotFound, CodeLeaseNotFound, http.StatusNotFound, "The capability holds no lease", limes.CategoryNotFound},
-	{ErrLeaseNested, CodeLeaseNested, http.StatusConflict, "An ancestor of the capability holds a lease", limes.CategoryConflict},
-	{ErrLeasingDisabled, CodeLeasingDisabled, http.StatusInternalServerError, "Leasing is not enabled on the store", limes.CategoryInternal},
-	{ErrFeatureDisabled, CodeFeatureDisabled, http.StatusInternalServerError, "A feature is disabled by the store's configuration", limes.CategoryInternal},
+	{ErrLeaseNested, CodeLeaseNested, http.StatusConflict, "An ancestor of the capability holds a lease", limes.CategoryPrecondition},
+	{ErrLeasingDisabled, CodeLeasingDisabled, http.StatusInternalServerError, "Leasing is not enabled on the store", limes.CategoryPrecondition},
+	{ErrFeatureDisabled, CodeFeatureDisabled, http.StatusInternalServerError, "A feature is disabled by the store's configuration", limes.CategoryPrecondition},
 }
 
 // codeRuleFor is the meter's rule err matches.

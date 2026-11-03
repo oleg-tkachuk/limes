@@ -12,6 +12,7 @@ import { releaseCommits, type Module } from "./lib/modules.ts";
 import type { Policy } from "./lib/release-policy.ts";
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
 import { BRANCH, DEPENDENCIES_HEADING, planReleases, proposeRelease, releaseTitle, withDependency, type Planner } from "./release-plan.ts";
+import { CODES_HEADING, ERRORS_DOC } from "./lib/codes.ts";
 
 const RELEASE = new URL("../release", import.meta.url).pathname;
 const REPOSITORY = "example/limes";
@@ -122,6 +123,19 @@ describe("the release plan", () => {
     assert.equal(entryVersion(pgstore), "0.1.1");
     assert.match(pgstore, new RegExp(`compare/${PGSTORE}%2Fv0\\.1\\.0\\.\\.\\.${PGSTORE}%2Fv0\\.1\\.1\\) \\(${TODAY}\\)`));
     assert.match(pgstore, new RegExp(`${DEPENDENCIES_HEADING}\\n\\n\\* require limes v0\\.2\\.0\\n$`));
+  });
+
+  test("limes's entry names the codes added and removed since its last release, and none when there are none", async () => {
+    const table = (codes: string[]) => `## limes's codes\n\n${codes.map((c) => `| \`${c}\` | 400 | x |`).join("\n")}\n`;
+    repo.write(ERRORS_DOC, table(["kept", "gone"]));
+    await repo.commit("docs: codes");
+    await repo.run("tag", "--force", "v0.1.0");
+    const unchanged = (await planReleases(planner()))[0]?.entry ?? "";
+    assert.ok(!unchanged.includes(CODES_HEADING), unchanged);
+    repo.write(ERRORS_DOC, table(["kept", "new_code"]));
+    await repo.commit("feat: a code");
+    const entry = (await planReleases(planner()))[0]?.entry ?? "";
+    assert.ok(entry.endsWith(`${CODES_HEADING}\n\n* added: \`new_code\`\n* removed: \`gone\`\n`), entry);
   });
 
   test("a nested module with notes of its own keeps them, with the requirement added", async () => {

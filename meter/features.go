@@ -124,12 +124,35 @@ func Require(s UsageStore, want ...Feature) error {
 // as Require refuses, limes.ErrInvalidConfig naming T when s is not one and
 // ErrFeatureDisabled when its configuration turned T's feature off: Require
 // and the type assertion after it, in one call.
+//
+// ErrFeatureDisabled matches limes.ErrInvalidConfig too, so a caller that
+// stops its start on a build without the interface but runs on without a
+// feature turned off checks ErrFeatureDisabled first; AsOptional does that
+// for it.
 func As[T any](s UsageStore) (T, error) {
 	var t T
 	if err := AsAll(s, &t); err != nil {
 		return t, err
 	}
 	return t, nil
+}
+
+// AsOptional is As for a feature a consumer runs without when the store's
+// configuration turned it off: s as T with enabled true; the zero T, false
+// and no error when it is off; and As's error when s is not T at all, a
+// build to fix. One call beside AsAll for the features it needs:
+//
+//	leaser, leasing, err := meter.AsOptional[meter.Leaser](store)
+func AsOptional[T any](s UsageStore) (t T, enabled bool, err error) {
+	t, err = As[T](s)
+	switch {
+	case err == nil:
+		return t, true, nil
+	case errors.Is(err, ErrFeatureDisabled):
+		return t, false, nil
+	default:
+		return t, false, err
+	}
 }
 
 // AsAll sets each target, a pointer to an optional interface, to s, and

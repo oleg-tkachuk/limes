@@ -28,6 +28,7 @@ import { join } from "node:path";
 
 import { CHANGELOGS, addEntry, entryFrom, entryVersion, namingTags } from "./changelog.ts";
 import { info, summarize, warning } from "./lib/actions.ts";
+import { codeChanges, withCodeChanges } from "./lib/codes.ts";
 import { optionalEnv, requireEnv } from "./lib/env.ts";
 import { git } from "./lib/git.ts";
 import { gitHubFor, type GitHub, type PullRequestText } from "./lib/github.ts";
@@ -108,6 +109,12 @@ export async function planReleases(p: Planner): Promise<Planned[]> {
   }
   const limes = plan.find((m) => m.module.name === ROOT_MODULE);
   if (limes !== undefined) {
+    const last = await lastStableTag(limes.module, "HEAD", p.root);
+    if (last !== undefined) {
+      const changes = await codeChanges(p.root, last, "HEAD");
+      info(`${ROOT_MODULE}: codes added since ${last}: ${changes.added.join(", ") || "none"}; removed: ${changes.removed.join(", ") || "none"}`);
+      limes.entry = withCodeChanges(limes.entry, changes);
+    }
     await raiseNested(p, plan, names, limes.tag);
   }
   const order = (m: Planned) => names.indexOf(m.module.name);

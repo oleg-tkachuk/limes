@@ -155,17 +155,18 @@ can prove its own mapping covers them all.
 
 Every code belongs to one `limes.Category`, the last column of the tables
 below: what the caller does about it. A consumer whose transport has fewer
-codes than limes maps the eight categories, read with `limes.CategoryOf(err)`
+codes than limes maps the nine categories, read with `limes.CategoryOf(err)`
 or `meter.CategoryOf(err)`, rather than every code:
 
 | Category | Meaning |
 |---|---|
 | `unauthenticated` | The credential is missing, malformed, unproven or no longer good: present another. |
 | `denied` | The credential is good and does not allow the request. |
-| `exhausted` | A request, budget, copy or lease limit refused it, or a counter has no room left. |
+| `exhausted` | A request, budget, copy or lease limit refused it. |
 | `invalid` | The request itself is wrong: sent again unchanged, it fails again. |
 | `not_found` | What the request names is not on record. |
 | `conflict` | The request disagrees with what is on record: read it again, and decide. |
+| `precondition` | The request is well formed, and the state it needs is not there — the store's configuration, the ledger, another capability's lease: it fails again until that state changes. |
 | `unavailable` | A dependency failed on this request — did not answer, or answered a page it had already given: retry later. |
 | `internal` | The server's configuration or a store failed: the server's to fix. |
 
@@ -220,7 +221,7 @@ unauthenticated code, not to its permission-denied one.
 | `request_limit_exceeded` | 403 | `limes.ErrRequestLimitExceeded` | `request_limit_exceeded` (permanent) |  | The token's request or budget limit is exhausted | `exhausted` |
 | `budget_exceeded` | 403 | `limes.ErrBudgetExceeded` | `budget_exceeded` |  | The token's request or budget limit is exhausted | `exhausted` |
 | `tenant_budget_exceeded` | 403 | `limes.ErrTenantBudgetExceeded` | `tenant_budget_exceeded` |  | The token's request or budget limit is exhausted | `exhausted` |
-| `unit_code_mismatch` | 409 | `limes.ErrUnitCodeMismatch` |  |  | The request conflicts with what is on record | `invalid` |
+| `unit_code_mismatch` | 409 | `limes.ErrUnitCodeMismatch` |  |  | The request conflicts with what is on record | `precondition` |
 | `already_exists` | 409 | `limes.ErrAlreadyExists` |  |  | The request conflicts with what is on record | `conflict` |
 | `conflict` | 409 | `limes.ErrConflict` |  |  | The request conflicts with what is on record | `conflict` |
 | `invalid_caveats` | 400 | `limes.ErrInvalidCaveats` |  |  | The caveats are invalid | `invalid` |
@@ -234,7 +235,7 @@ unauthenticated code, not to its permission-denied one.
 | `unknown_tenant` | 404 | `limes.ErrUnknownTenant` |  |  | The tenant is unknown | `not_found` |
 | `tenant_deleted` | 410 | `limes.ErrTenantDeleted` |  |  | The tenant is deleted | `not_found` |
 | `scope_mismatch` | 500 | `limes.ErrScopeMismatch` |  |  | The call is scoped to another tenant than its request names | `internal` |
-| `proof_unsupported` | 500 | `limes.ErrProofUnsupported` |  |  | The capability is bound to a key and no proof is checked | `internal` |
+| `proof_unsupported` | 500 | `limes.ErrProofUnsupported` |  |  | The capability is bound to a key and no proof is checked | `precondition` |
 | `no_revocation_lineage` | 502 | `limes.ErrNoRevocationLineage` |  |  | The revocation upstream names no lineage | `unavailable` |
 | `copy_counters_not_metered` | 500 | `limes.ErrCopyCountersNotMetered` |  |  | Copy limits need a verifier that meters copies | `internal` |
 | `cursor_repeated` | 502 | `limes.ErrCursorRepeated` |  |  | The store returned a cursor already fetched | `unavailable` |
@@ -248,7 +249,7 @@ unauthenticated code, not to its permission-denied one.
 | Code | HTTP | Sentinel | `reason` | Challenge `error` | Title | Category |
 |---|---|---|---|---|---|---|
 | `copy_limit_exceeded` | 403 | `meter.ErrCopyLimitExceeded` | `request_limit_exceeded` (permanent) |  | The token's request or budget limit is exhausted | `exhausted` |
-| `counter_overflow` | 409 | `meter.ErrCounterOverflow` |  |  | The counter has no room for the amount | `exhausted` |
+| `counter_overflow` | 409 | `meter.ErrCounterOverflow` |  |  | The counter has no room for the amount | `precondition` |
 | `charge_not_found` | 404 | `meter.ErrChargeNotFound` |  |  | The charge is not on record | `not_found` |
 | `refund_exceeds_charge` | 409 | `meter.ErrRefundExceedsCharge` |  |  | The refund exceeds what the charge took | `invalid` |
 | `reservation_not_found` | 404 | `meter.ErrReservationNotFound` |  |  | The reservation is not on record, released or expired | `not_found` |
@@ -260,9 +261,9 @@ unauthenticated code, not to its permission-denied one.
 | `lease_exhausted` | 403 | `meter.ErrLeaseExhausted` | `budget_exceeded` (permanent) |  | The token's request or budget limit is exhausted | `exhausted` |
 | `lease_requests_exhausted` | 403 | `meter.ErrLeaseRequestsExhausted` | `request_limit_exceeded` (permanent) |  | The token's request or budget limit is exhausted | `exhausted` |
 | `lease_not_found` | 404 | `meter.ErrLeaseNotFound` |  |  | The capability holds no lease | `not_found` |
-| `lease_nested` | 409 | `meter.ErrLeaseNested` |  |  | An ancestor of the capability holds a lease | `conflict` |
-| `leasing_disabled` | 500 | `meter.ErrLeasingDisabled` |  |  | Leasing is not enabled on the store | `internal` |
-| `feature_disabled` | 500 | `meter.ErrFeatureDisabled` |  |  | A feature is disabled by the store's configuration | `internal` |
+| `lease_nested` | 409 | `meter.ErrLeaseNested` |  |  | An ancestor of the capability holds a lease | `precondition` |
+| `leasing_disabled` | 500 | `meter.ErrLeasingDisabled` |  |  | Leasing is not enabled on the store | `precondition` |
+| `feature_disabled` | 500 | `meter.ErrFeatureDisabled` |  |  | A feature is disabled by the store's configuration | `precondition` |
 
 ## The exchange's codes
 
