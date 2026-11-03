@@ -179,7 +179,46 @@ describe("the release plan", () => {
     const plan = await planReleases(planner());
     assert.equal(plan[0]?.tag, "v1.0.0");
     assert.equal(plan[0]?.major, true);
-    assert.equal(plan[1]?.major, false);
+  });
+
+  test("limes reaching v1.0.0 takes every nested module on 0.x to its v1.0.0, keeping its own notes", async () => {
+    dryRuns.limes = "# [1.0.0](https://example.com/compare) (2026-10-31)\n\n* broke\n";
+    dryRuns.pgstore = notes("0.2.0", "a store feature");
+    const plan = await planReleases(planner(NEVER_DUE, true));
+    assert.deepEqual(
+      plan.map((p) => [p.tag, p.major, p.raise]),
+      [
+        ["v1.0.0", true, false],
+        [`${PGSTORE}/v1.0.0`, true, true],
+        [`${OTELMETRIC}/v1.0.0`, true, false],
+      ],
+    );
+    const pgstore = plan[1]?.entry ?? "";
+    assert.equal(entryVersion(pgstore), "1.0.0");
+    assert.match(pgstore, new RegExp(`compare/${PGSTORE}%2Fv0\\.1\\.0\\.\\.\\.${PGSTORE}%2Fv1\\.0\\.0\\) \\(${TODAY}\\)`));
+    assert.match(pgstore, /### Features\n\n\* a store feature\n/);
+    assert.match(pgstore, new RegExp(`${DEPENDENCIES_HEADING}\\n\\n\\* require limes v1\\.0\\.0\\n$`));
+    assert.equal(plan[2]?.entry.trim(), `## [1.0.0](https://github.com/${REPOSITORY}/compare/${OTELMETRIC}%2Fv0.1.0...${OTELMETRIC}%2Fv1.0.0) (${TODAY})`);
+  });
+
+  test("a nested module already on its stable line, or with no release, does not follow limes", async () => {
+    await repo.run("tag", `${PGSTORE}/v1.0.0`);
+    await repo.run("tag", "--delete", `${OTELMETRIC}/v0.1.0`);
+    dryRuns.limes = "# [1.0.0](https://example.com/compare) (2026-10-31)\n\n* broke\n";
+    // pgstore is raised to the new limes, as on any release of it: a patch.
+    const plan = await planReleases(planner(NEVER_DUE, true, "limes"));
+    assert.deepEqual(
+      plan.map((p) => [p.tag, p.major]),
+      [
+        ["v1.0.0", true],
+        [`${PGSTORE}/v1.0.1`, false],
+      ],
+    );
+  });
+
+  test("a minor of limes takes no nested module to v1.0.0", async () => {
+    const plan = await planReleases(planner(NEVER_DUE, true));
+    assert.ok(plan.every((p) => !p.tag.endsWith("v1.0.0")), plan.map((p) => p.tag).join(", "));
   });
 
   // A release nobody asked for waits for the policy's thresholds; the

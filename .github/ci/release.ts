@@ -143,7 +143,8 @@ export function unchangedSince(last: string): string {
 }
 
 // NEXT_MAJOR_MODULE is the one module a candidate of the next major is cut
-// for: the nested modules stay on 0.x past limes's 1.0.
+// for: the nested modules stay on 0.x until the plan that releases limes
+// v1.0.0 takes each to its own v1.0.0 (release-plan.ts).
 const NEXT_MAJOR_MODULE = ROOT_MODULE;
 
 // releaseModule cuts one module's candidate, and says what it did.

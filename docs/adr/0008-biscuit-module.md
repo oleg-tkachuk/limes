@@ -47,7 +47,7 @@ limes 1.0 freezes the root's API, so the seam has to be cut before then.
    - the cross-language interop tests.
 
    It is released on its own tag line, like the other nested modules, and
-   stays 0.x past limes 1.0.
+   reaches v1 together with limes 1.0 (docs/compatibility.md).
 2. **The core keeps what does not depend on the encoding:**
    - `Attenuation` and the narrowing it does: folding a block into a
      `Capability` through `Narrows`, and the copy ceilings;
