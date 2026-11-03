@@ -15,7 +15,7 @@ const (
 	// request.
 	CategoryDenied Category = "denied"
 	// CategoryExhausted — a request, budget, copy or lease limit refused
-	// it, or a counter has no room left.
+	// it.
 	CategoryExhausted Category = "exhausted"
 	// CategoryInvalid — the request itself is wrong: sent again unchanged,
 	// it fails again.
@@ -25,6 +25,11 @@ const (
 	// CategoryConflict — the request disagrees with what is on record: read
 	// it again, and decide.
 	CategoryConflict Category = "conflict"
+	// CategoryPrecondition — the request is well formed, and the state it
+	// needs is not there: the store's configuration, the ledger or another
+	// capability's lease. Sent again it fails again until that state
+	// changes, which is no retry's to change.
+	CategoryPrecondition Category = "precondition"
 	// CategoryUnavailable — a dependency failed on this request — did not
 	// answer, or answered a page it had already given: retry later.
 	CategoryUnavailable Category = "unavailable"
@@ -37,7 +42,7 @@ const (
 func Categories() []Category {
 	return []Category{
 		CategoryUnauthenticated, CategoryDenied, CategoryExhausted, CategoryInvalid,
-		CategoryNotFound, CategoryConflict, CategoryUnavailable, CategoryInternal,
+		CategoryNotFound, CategoryConflict, CategoryPrecondition, CategoryUnavailable, CategoryInternal,
 	}
 }
 

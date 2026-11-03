@@ -116,7 +116,7 @@ var codeRules = []codeRule{
 	{ErrRequestLimitExceeded, CodeRequestLimitExceeded, 0, "", CategoryExhausted},
 	{ErrBudgetExceeded, CodeBudgetExceeded, 0, "", CategoryExhausted},
 	{ErrTenantBudgetExceeded, CodeTenantBudgetExceeded, 0, "", CategoryExhausted},
-	{ErrUnitCodeMismatch, CodeUnitCodeMismatch, 0, "", CategoryInvalid},
+	{ErrUnitCodeMismatch, CodeUnitCodeMismatch, 0, "", CategoryPrecondition},
 	{ErrAlreadyExists, CodeAlreadyExists, 0, "", CategoryConflict},
 	{ErrConflict, CodeConflict, 0, "", CategoryConflict},
 
@@ -136,7 +136,7 @@ var codeRules = []codeRule{
 	{ErrScopeMismatch, CodeScopeMismatch, http.StatusInternalServerError, "The call is scoped to another tenant than its request names", CategoryInternal},
 
 	// The server's configuration or its upstream: its own to fix.
-	{ErrProofUnsupported, CodeProofUnsupported, http.StatusInternalServerError, "The capability is bound to a key and no proof is checked", CategoryInternal},
+	{ErrProofUnsupported, CodeProofUnsupported, http.StatusInternalServerError, "The capability is bound to a key and no proof is checked", CategoryPrecondition},
 	{ErrNoRevocationLineage, CodeNoRevocationLineage, http.StatusBadGateway, "The revocation upstream names no lineage", CategoryUnavailable},
 	{ErrCopyCountersNotMetered, CodeCopyCountersNotMetered, http.StatusInternalServerError, "Copy limits need a verifier that meters copies", CategoryInternal},
 	{ErrCursorRepeated, CodeCursorRepeated, http.StatusBadGateway, "The store returned a cursor already fetched", CategoryUnavailable},

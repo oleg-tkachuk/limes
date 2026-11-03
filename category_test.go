@@ -39,6 +39,8 @@ func TestCategoryOf(t *testing.T) {
 		{ErrInvalidRequest, CategoryInvalid},
 		{ErrNotFound, CategoryNotFound},
 		{ErrConflict, CategoryConflict},
+		{ErrUnitCodeMismatch, CategoryPrecondition},
+		{ErrProofUnsupported, CategoryPrecondition},
 		{jwks.ErrUnavailable, CategoryUnavailable},
 		{ErrCursorRepeated, CategoryUnavailable},
 		{ErrNoRevocationLineage, CategoryUnavailable},
