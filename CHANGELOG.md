@@ -2,6 +2,22 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.160.0](https://github.com/oleg-tkachuk/limes/compare/v0.159.0...v0.160.0) (2026-11-03)
+
+### ⚠ BREAKING CHANGES
+
+* limes.Origin is a struct whose values are the Origin…
+  variables; CodesOf takes one origin at least.
+
+### Features
+
+* **limestest:** fail a mapping check given no codes ([872a722](https://github.com/oleg-tkachuk/limes/commit/872a7227f8067f0819954de6d47516ebd99ff238))
+* spell an origin only as one of its values, and ask CodesOf for one ([53997e0](https://github.com/oleg-tkachuk/limes/commit/53997e0e5a4dec85b10ab4e12a89b1ab4e06963b))
+
+### Contract
+
+* hold a signature whole as the contract, on v1 too
+
 ## [0.159.0](https://github.com/oleg-tkachuk/limes/compare/v0.158.0...v0.159.0) (2026-11-03)
 
 ### ⚠ BREAKING CHANGES
