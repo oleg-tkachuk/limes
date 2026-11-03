@@ -208,9 +208,13 @@ func TestErrorsDocListsEveryExchangeCategory(t *testing.T) {
 		doc[m[1]] = m[2]
 	}
 	for _, rule := range refusals {
+		_, coded := limes.ProblemOfCode(limes.Code(rule.code))
 		want, _ := limes.CategoryOf(rule.err)
-		if got := doc[rule.code]; got != string(want) {
+		switch got, listed := doc[rule.code]; {
+		case coded && got != string(want):
 			t.Errorf("docs/errors.md lists %q in category %q; limes.CategoryOf says %q", rule.code, got, want)
+		case !coded && listed:
+			t.Errorf("docs/errors.md lists %q, no limes.Code, in category %q: it would join limes's contract", rule.code, got)
 		}
 	}
 }
