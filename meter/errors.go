@@ -89,18 +89,19 @@ var ErrLeaseNotFound error = &familyError{"limes: lease not found", limes.ErrNot
 // holds part of it. Matches ErrConflict.
 var ErrLeaseNested error = &familyError{"limes: an ancestor holds a lease", limes.ErrConflict}
 
-// ErrLeasingDisabled — Lease of a store whose operator disabled leasing
-// (pgstore's Config.DisableLeases) while an instance writing its database
-// runs a release that knows no leases. The caller charges without one.
-// Leases already open are still charged under and settled. Matches
-// limes.ErrInvalidConfig.
-var ErrLeasingDisabled error = &familyError{"limes: leasing is not enabled", limes.ErrInvalidConfig}
-
 // ErrFeatureDisabled — a store implements a feature its configuration
 // turned off (FeatureGate): Require, As and AsAll refuse it so, apart from
 // a feature the store lacks, which is a build to fix rather than a mode to
 // run in. Matches limes.ErrInvalidConfig.
 var ErrFeatureDisabled error = &familyError{"limes: feature disabled by the store's configuration", limes.ErrInvalidConfig}
+
+// ErrLeasingDisabled — Lease of a store whose operator disabled leasing
+// (pgstore's Config.DisableLeases) while an instance writing its database
+// runs a release that knows no leases. The caller charges without one.
+// Leases already open are still charged under and settled. Matches
+// ErrFeatureDisabled, as As refuses the same store at startup, and so
+// limes.ErrInvalidConfig.
+var ErrLeasingDisabled error = &familyError{"limes: leasing is not enabled", ErrFeatureDisabled}
 
 // familyError is a sentinel with a name of its own that also matches the
 // family it belongs to, and that family's own, as limes's sentinels do.
