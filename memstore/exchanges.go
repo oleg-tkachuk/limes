@@ -24,10 +24,11 @@ func (s *Store) ExchangedFor(_ context.Context, key limes.ExchangeKey) (uuid.UUI
 
 // ClaimExchange implements limes.ExchangeStore: under the store's lock, the
 // first claim of a key is the one every later claim gets back.
-func (s *Store) ClaimExchange(_ context.Context, key limes.ExchangeKey, tokenExpiresAt time.Time, id uuid.UUID) (uuid.UUID, bool, error) {
-	if err := key.ValidateClaim(tokenExpiresAt); err != nil {
+func (s *Store) ClaimExchange(_ context.Context, req limes.ClaimExchangeRequest) (uuid.UUID, bool, error) {
+	if err := req.Validate(); err != nil {
 		return uuid.Nil(), false, err
 	}
+	key, id := req.Key, req.CapabilityID
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if c, ok := s.caps[id]; !ok || c.Subject.TenantID != key.TenantID {
@@ -36,7 +37,7 @@ func (s *Store) ClaimExchange(_ context.Context, key limes.ExchangeKey, tokenExp
 	if recorded, ok := s.exchanges[key]; ok {
 		return recorded.id, false, nil
 	}
-	s.exchanges[key] = exchange{id: id, tokenExpiresAt: tokenExpiresAt}
+	s.exchanges[key] = exchange{id: id, tokenExpiresAt: req.TokenExpiresAt}
 	return id, true, nil
 }
 

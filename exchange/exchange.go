@@ -326,7 +326,7 @@ func (e *Exchanger) exchangedBefore(ctx context.Context, key limes.ExchangeKey, 
 // minted is left to expire: its token never left this process, so nothing
 // can present it.
 func (e *Exchanger) claim(ctx context.Context, key limes.ExchangeKey, tokenExpiresAt time.Time, issue limes.IssueRequest, minted limes.IssueResult) (Result, error) {
-	recorded, claimed, err := e.cfg.Exchanges.ClaimExchange(ctx, key, tokenExpiresAt, minted.Capability.ID)
+	recorded, claimed, err := e.cfg.Exchanges.ClaimExchange(ctx, limes.ClaimExchangeRequest{Key: key, TokenExpiresAt: tokenExpiresAt, CapabilityID: minted.Capability.ID})
 	if err != nil {
 		return Result{}, fmt.Errorf("exchange: record the exchange of the subject token: %w", err)
 	}

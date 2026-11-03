@@ -31,7 +31,7 @@ token's `jti`, with a lock across replicas.
    - `ClaimExchange` records it unless the key holds one already. Concurrent
      claims of one key, from any replica, converge on one id.
    - The mapping outlives its capability: it is kept until the subject
-     token expires (`ClaimExchange`'s `tokenExpiresAt`), and Purge or an erase
+     token expires (`ClaimExchangeRequest.TokenExpiresAt`), and Purge or an erase
      removes it only once that is past their retention. A token whose
      capability was purged is refused, not exchanged afresh.
 

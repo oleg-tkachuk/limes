@@ -7,6 +7,7 @@ import { access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { breaksWire, codeChanges, describeChange } from "./lib/codes.ts";
 import { execute } from "./lib/exec.ts";
 import { git, lines } from "./lib/git.ts";
 import { marksBreaking, titleMarksBreaking } from "./lib/markers.ts";
@@ -47,6 +48,21 @@ async function mergeBase(base: string, head: string, cwd: string): Promise<strin
   return (await git(["merge-base", base, head], cwd)).trim();
 }
 
+// wireBreaks names each change to limes's error codes from from to head
+// that breaks a consumer pinning them — a code removed, or answered with
+// another status or category — and none for a nested module, whose codes
+// are not in that contract.
+async function wireBreaks(module: Module, from: string, head: string, cwd: string): Promise<string[]> {
+  if (module.dir !== "") {
+    return [];
+  }
+  const changes = await codeChanges(cwd, from, head);
+  if (!breaksWire(changes)) {
+    return [];
+  }
+  return [...changes.removed.map((c) => `\`${c}\` removed`), ...changes.changed.map(describeChange)];
+}
+
 // changesFile reports whether path differs between from and to.
 async function changesFile(from: string, to: string, path: string, cwd: string): Promise<boolean> {
   return lines(await git(["diff", "--name-only", from, to, "--", path], cwd)).length > 0;
@@ -58,7 +74,11 @@ async function changesFile(from: string, to: string, path: string, cwd: string):
 // the Go proxy ignores without a /vN module path, and every release after it
 // would be refused (major-guard.cjs). Before v1.0.0 a marker cuts a minor,
 // and passes when the change also edits the migration guide: a break no entry
-// describes leaves every consumer to rebuild it from the diff. A title that
+// describes leaves every consumer to rebuild it from the diff. A change to
+// limes's error codes that breaks a consumer pinning them — a code removed,
+// or answered with another status or category (docs/compatibility.md) — is
+// a break whether or not the Go API changes, so it needs the marker too. A
+// title that
 // reads as a footer in the merge commit's body marks a break no commit of the
 // change carries: refused on any line, as the commits' markers are what a
 // break is declared with.
@@ -76,17 +96,25 @@ export async function markerCheck(
   }
   const from = await mergeBase(base, head, cwd);
   const line = (await releaseLine(module, from, cwd)) ?? "no release";
+  const marked = await marksBreaking(module, from, head, commits, cwd);
+  const wire = await wireBreaks(module, from, head, cwd);
   if (!(await stableAt(module, from, cwd))) {
-    if ((await marksBreaking(module, from, head, commits, cwd)) && !(await changesFile(from, head, MIGRATION_GUIDE, cwd))) {
+    if (wire.length > 0 && !marked) {
+      return { ok: false, message: `${name}: error codes change on the wire with no commit marking a break: ${wire.join("; ")}` };
+    }
+    if (marked && !(await changesFile(from, head, MIGRATION_GUIDE, cwd))) {
       return { ok: false, message: `${name}: a commit marks a break, and ${MIGRATION_GUIDE} has no entry for it` };
     }
     return { ok: true, message: `${name}: no stable release line yet (${line}); breaking markers cut a minor` };
   }
-  if (await marksBreaking(module, from, head, commits, cwd)) {
+  if (marked) {
     return {
       ok: false,
       message: `${name}: a commit marks a break on a stable line (${line}), which would tag a major the Go proxy ignores without a module path move`,
     };
+  }
+  if (wire.length > 0) {
+    return { ok: false, message: `${name}: error codes change on the wire on a stable line (${line}): ${wire.join("; ")}` };
   }
   return { ok: true, message: `${name}: no breaking marker on the stable line (${line})` };
 }

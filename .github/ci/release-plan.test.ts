@@ -126,7 +126,7 @@ describe("the release plan", () => {
   });
 
   test("limes's entry names the codes added and removed since its last release, and none when there are none", async () => {
-    const table = (codes: string[]) => `## limes's codes\n\n${codes.map((c) => `| \`${c}\` | 400 | x |`).join("\n")}\n`;
+    const table = (codes: string[]) => `## limes's codes\n\n${codes.map((c) => `| \`${c}\` | 400 | x | \`invalid\` |`).join("\n")}\n`;
     repo.write(ERRORS_DOC, table(["kept", "gone"]));
     await repo.commit("docs: codes");
     await repo.run("tag", "--force", "v0.1.0");

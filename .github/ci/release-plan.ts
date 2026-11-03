@@ -112,7 +112,7 @@ export async function planReleases(p: Planner): Promise<Planned[]> {
     const last = await lastStableTag(limes.module, "HEAD", p.root);
     if (last !== undefined) {
       const changes = await codeChanges(p.root, last, "HEAD");
-      info(`${ROOT_MODULE}: codes added since ${last}: ${changes.added.join(", ") || "none"}; removed: ${changes.removed.join(", ") || "none"}`);
+      info(`${ROOT_MODULE}: codes since ${last}: added ${changes.added.length}, removed ${changes.removed.length}, answered otherwise ${changes.changed.length}`);
       limes.entry = withCodeChanges(limes.entry, changes);
     }
     await raiseNested(p, plan, names, limes.tag);

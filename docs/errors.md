@@ -149,23 +149,27 @@ reason.
   again, and decide.
 
 `limes.Codes()` and `meter.Codes()` list every code, so a consumer's test
-can prove its own mapping covers them all.
+can prove its own mapping covers them all. A code's status, category and
+reason are part of the contract ([compatibility.md](compatibility.md)):
+changing one is a break, marked and listed in the release notes, and these
+tables are what CI compares.
 
 ## Categories
 
 Every code belongs to one `limes.Category`, the last column of the tables
 below: what the caller does about it. A consumer whose transport has fewer
-codes than limes maps the nine categories, read with `limes.CategoryOf(err)`
+codes than limes maps the ten categories, read with `limes.CategoryOf(err)`
 or `meter.CategoryOf(err)`, rather than every code:
 
 | Category | Meaning |
 |---|---|
-| `unauthenticated` | The credential is missing, malformed, unproven or no longer good: present another. |
+| `unauthenticated` | The credential is missing, unproven or no longer good: present another. A malformed one is `invalid`. |
 | `denied` | The credential is good and does not allow the request. |
 | `exhausted` | A request, budget, copy or lease limit refused it. |
 | `invalid` | The request itself is wrong: sent again unchanged, it fails again. |
 | `not_found` | What the request names is not on record. |
 | `conflict` | The request disagrees with what is on record: read it again, and decide. |
+| `already_exists` | What the request would create is on record already: read it rather than create it again. |
 | `precondition` | The request is well formed, and the state it needs is not there — the store's configuration, the ledger, another capability's lease: it fails again until that state changes. |
 | `unavailable` | A dependency failed on this request — did not answer, or answered a page it had already given: retry later. |
 | `internal` | The server's configuration or a store failed: the server's to fix. |
@@ -194,7 +198,7 @@ unauthenticated code, not to its permission-denied one.
 
 | Code | HTTP | Sentinel | `reason` | Challenge `error` | Title | Category |
 |---|---|---|---|---|---|---|
-| `malformed_authorization` | 400 | `limes.ErrMalformedAuthorization` | `malformed_authorization` (permanent) | `invalid_request` | The Authorization header is malformed | `unauthenticated` |
+| `malformed_authorization` | 400 | `limes.ErrMalformedAuthorization` | `malformed_authorization` (permanent) | `invalid_request` | The Authorization header is malformed | `invalid` |
 | `no_credentials` | 401 | `limes.ErrNoCredentials` | `no_credentials` |  | Credentials are required | `unauthenticated` |
 | `keys_unavailable` | 503 | `jwks.ErrUnavailable` | `keys_unavailable` |  | The issuer's keys cannot be fetched | `unavailable` |
 | `nonce_required` | 401 | `dpop.ErrNonceRequired` | `nonce_required` | `use_dpop_nonce` | A DPoP proof with the server's nonce is required | `unauthenticated` |
@@ -222,7 +226,7 @@ unauthenticated code, not to its permission-denied one.
 | `budget_exceeded` | 403 | `limes.ErrBudgetExceeded` | `budget_exceeded` |  | The token's request or budget limit is exhausted | `exhausted` |
 | `tenant_budget_exceeded` | 403 | `limes.ErrTenantBudgetExceeded` | `tenant_budget_exceeded` |  | The token's request or budget limit is exhausted | `exhausted` |
 | `unit_code_mismatch` | 409 | `limes.ErrUnitCodeMismatch` |  |  | The request conflicts with what is on record | `precondition` |
-| `already_exists` | 409 | `limes.ErrAlreadyExists` |  |  | The request conflicts with what is on record | `conflict` |
+| `already_exists` | 409 | `limes.ErrAlreadyExists` |  |  | The request conflicts with what is on record | `already_exists` |
 | `conflict` | 409 | `limes.ErrConflict` |  |  | The request conflicts with what is on record | `conflict` |
 | `invalid_caveats` | 400 | `limes.ErrInvalidCaveats` |  |  | The caveats are invalid | `invalid` |
 | `invalid_amount` | 400 | `limes.ErrInvalidAmount` |  |  | The amount is invalid | `invalid` |
@@ -251,7 +255,7 @@ unauthenticated code, not to its permission-denied one.
 | `copy_limit_exceeded` | 403 | `meter.ErrCopyLimitExceeded` | `request_limit_exceeded` (permanent) |  | The token's request or budget limit is exhausted | `exhausted` |
 | `counter_overflow` | 409 | `meter.ErrCounterOverflow` |  |  | The counter has no room for the amount | `precondition` |
 | `charge_not_found` | 404 | `meter.ErrChargeNotFound` |  |  | The charge is not on record | `not_found` |
-| `refund_exceeds_charge` | 409 | `meter.ErrRefundExceedsCharge` |  |  | The refund exceeds what the charge took | `invalid` |
+| `refund_exceeds_charge` | 409 | `meter.ErrRefundExceedsCharge` |  |  | The refund exceeds what the charge took | `precondition` |
 | `reservation_not_found` | 404 | `meter.ErrReservationNotFound` |  |  | The reservation is not on record, released or expired | `not_found` |
 | `usage_not_found` | 404 | `meter.ErrUsageNotFound` |  |  | The capability has no usage on record | `not_found` |
 | `tenant_budget_not_found` | 404 | `meter.ErrTenantBudgetNotFound` |  |  | The tenant has no budget on record | `not_found` |

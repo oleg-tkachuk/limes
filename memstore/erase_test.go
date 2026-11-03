@@ -71,7 +71,7 @@ func TestEraseForgetsOnlyItsTenantsSpentExchanges(t *testing.T) {
 			t.Fatal(err)
 		}
 		k := key(tenant, "jti-"+tenant.String())
-		if _, claimed, err := s.ClaimExchange(ctx, k, time.Now().Add(-exchangeExpiredAgo), c.ID); err != nil || !claimed {
+		if _, claimed, err := s.ClaimExchange(ctx, limes.ClaimExchangeRequest{Key: k, TokenExpiresAt: time.Now().Add(-exchangeExpiredAgo), CapabilityID: c.ID}); err != nil || !claimed {
 			t.Fatalf("claim for tenant %s: %v, %v", tenant, claimed, err)
 		}
 		claims[k] = c.ID

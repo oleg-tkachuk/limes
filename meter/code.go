@@ -42,7 +42,7 @@ var codeRules = []codeRule{
 	{ErrCopyLimitExceeded, CodeCopyLimitExceeded, 0, "", limes.CategoryExhausted},
 	{ErrCounterOverflow, CodeCounterOverflow, http.StatusConflict, "The counter has no room for the amount", limes.CategoryPrecondition},
 	{ErrChargeNotFound, CodeChargeNotFound, http.StatusNotFound, "The charge is not on record", limes.CategoryNotFound},
-	{ErrRefundExceedsCharge, CodeRefundExceedsCharge, http.StatusConflict, "The refund exceeds what the charge took", limes.CategoryInvalid},
+	{ErrRefundExceedsCharge, CodeRefundExceedsCharge, http.StatusConflict, "The refund exceeds what the charge took", limes.CategoryPrecondition},
 	{ErrReservationNotFound, CodeReservationNotFound, http.StatusNotFound, "The reservation is not on record, released or expired", limes.CategoryNotFound},
 	{ErrUsageNotFound, CodeUsageNotFound, http.StatusNotFound, "The capability has no usage on record", limes.CategoryNotFound},
 	{ErrTenantBudgetNotFound, CodeTenantBudgetNotFound, http.StatusNotFound, "The tenant has no budget on record", limes.CategoryNotFound},

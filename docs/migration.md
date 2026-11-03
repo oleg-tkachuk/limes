@@ -9,6 +9,7 @@ Names are those of the release that changed them. A name changed again later
 appears again under that later release: to cross several releases, read
 upwards from the one you are on.
 
+What counts as a break is set out in [compatibility.md](compatibility.md).
 A pull request that marks a break adds its entry above the newest one,
 under the release it cuts: the minor after the newest tag. CI refuses a
 breaking marker whose change leaves this file alone. From v1.0.0 on no
@@ -69,8 +70,42 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## pgstore/v0.65.0
+
+- `Store.ClaimExchange`, and the store `ScopedExchanges` returns, take a
+  `limes.ClaimExchangeRequest`, as `limes.ExchangeStore` does from
+  v0.155.0.
+
+## v0.155.0
+
+- `ExchangeStore.ClaimExchange(ctx, key, tokenExpiresAt, id)` is
+  `ClaimExchange(ctx, limes.ClaimExchangeRequest{Key, TokenExpiresAt,
+  CapabilityID})`, as the other stores' calls take a request; its
+  `Validate` replaces `ExchangeKey.ValidateClaim`. A store of your own
+  reads the three from the request.
+- Codes moved to another category (`limes.CategoryOf`, `limes.CategoryOfCode`):
+  `already_exists` from `conflict` to the new `already_exists`;
+  `refund_exceeds_charge` from `invalid` to `precondition`;
+  `malformed_authorization` from `unauthenticated` to `invalid`. A
+  consumer mapping categories onto its transport sends these codes with
+  another status of its own; the HTTP status limes answers is unchanged.
+
+## v0.154.0
+
+- Codes moved to the new `precondition` category: `unit_code_mismatch`
+  from `invalid`; `proof_unsupported`, `leasing_disabled` and
+  `feature_disabled` from `internal`; `counter_overflow` from `exhausted`;
+  `lease_nested` from `conflict`. `meter.ErrLeasingDisabled` also matches
+  `meter.ErrFeatureDisabled`.
+
+## v0.153.0
+
+- `no_revocation_lineage` moved from `internal` to `unavailable`, as every
+  code answered 502 or 503 is.
+
 ## v0.152.0
 
+- `cursor_repeated` moved from `internal` to `unavailable`.
 - `meter.As`, `meter.Require` and `meter.Features` read the store's
   configuration (`meter.FeatureGate`): a feature it implements and turned
   off is refused, or left out, where before it passed. pgstore with

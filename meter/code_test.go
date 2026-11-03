@@ -225,7 +225,7 @@ func TestMeterReasonOfCode(t *testing.T) {
 // a lease above, leasing turned off — is a precondition, apart from a limit
 // refusing it and from a bad request.
 func TestMeterPreconditions(t *testing.T) {
-	for _, err := range []error{ErrCounterOverflow, ErrLeaseNested, ErrLeasingDisabled, ErrFeatureDisabled} {
+	for _, err := range []error{ErrCounterOverflow, ErrRefundExceedsCharge, ErrLeaseNested, ErrLeasingDisabled, ErrFeatureDisabled} {
 		if got, ok := CategoryOf(err); !ok || got != limes.CategoryPrecondition {
 			t.Errorf("CategoryOf(%v) = %q, %v; want precondition", err, got, ok)
 		}
