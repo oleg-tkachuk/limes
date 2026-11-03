@@ -57,7 +57,8 @@ The body, for a capability that was revoked:
   "title": "The access token is invalid",
   "status": 401,
   "reason": "revoked",
-  "code": "revoked"
+  "code": "revoked",
+  "category": "unauthenticated"
 }
 ```
 
@@ -67,6 +68,7 @@ The body, for a capability that was revoked:
 | `title` | Fixed per kind, safe to show. |
 | `status` | The HTTP status: the error's numeric code. |
 | `code` | The stable code (`limes.Code`): what a client branches on. |
+| `category` | The code's `limes.Category`: what the caller does about it. |
 | `reason` | For a refusal of a presented capability, its `limes.Reason`, which can be wider than the code: `tenant_erased` and `delegation_too_deep` are reported as `revoked`. |
 
 There is no `detail`: an error's own text is not shown to the client.
@@ -123,7 +125,7 @@ from the error with one call:
 | Sentinel, `limes.Err…` | `errors.Is` | Branching in Go. Families nest: `meter.ErrLeaseExhausted` is also `limes.ErrBudgetExceeded`. |
 | Code, `limes.Code` | `limes.CodeOf` | The wire: the one stable name of every error, which a client branches on. |
 | Reason, `limes.Reason` | `limes.ReasonOf`, `limes.ReasonOfCode` | A refusal of a presented capability only: why, as RFC 6750 and RFC 9449 challenge it, and whether it is permanent (`Reason.Permanent`). |
-| Category, `limes.Category` | `limes.CategoryOf` | What the caller does about it, for a transport with fewer codes than limes. |
+| Category, `limes.Category` | `limes.CategoryOf`, `Problem.Category` | What the caller does about it, for a transport with fewer codes than limes. |
 
 A refusal's code is its reason, but where the reason folds several codes
 into one: `tenant_erased` and `delegation_too_deep` are refused as
@@ -149,7 +151,8 @@ reason.
   again, and decide.
 
 `limes.Codes()` lists every code, the meter's among them, so a consumer's
-test can prove its own mapping covers them all. A code's status, category and
+test can prove its own mapping covers them all (`limestest`, under
+[Categories](#categories)). A code's status, category and
 reason are part of the contract ([compatibility.md](compatibility.md)):
 changing one is a break, marked and listed in the release notes, and these
 tables are what CI compares.
@@ -177,9 +180,31 @@ rather than every code:
 The status stays the finer answer: within `exhausted`, a permanent refusal
 (`request_limit_exceeded`) never lifts while a budget can.
 
-`limes.CategoryOfCode(code)` answers a code's category without an error to
-hand, so a test of a consumer's own mapping walks `limes.Codes()` and
-checks each pair.
+`limes.CategoryOfCode(code)` answers a code's category, and
+`limes.ProblemOfCode(code)` its whole problem, without an error to hand.
+
+A mapping of the categories has a default branch, for a category added
+after it was written; adding one is not a break
+([compatibility.md](compatibility.md)). That branch answers from
+`Problem.Status`, the error's own HTTP status, never as a success and
+never as one fixed code: a client's error stays the client's.
+
+A code answered with another status or category is a break, and it still
+compiles. `limestest` turns it into a failing test of the consumer's:
+
+```go
+func TestErrorContract(t *testing.T) {
+	// Pinned from the first failing run, which names every entry.
+	limestest.CheckCodes(t, map[limes.Code]limestest.Answer{
+		"revoked": {Status: 401, Category: "unauthenticated"},
+		// …
+	})
+	limestest.CheckCategories(t, func(c limes.Category) bool {
+		_, ok := transportCodes[c]
+		return ok
+	})
+}
+```
 
 A category says what retrying would do, not how bad the failure is, and
 agrees with the status: every 502 and 503 is `unavailable`, a dependency

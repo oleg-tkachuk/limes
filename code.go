@@ -254,7 +254,7 @@ func ProblemFor(err error) Problem {
 	if p, ok := ProblemOf(err); ok {
 		return p
 	}
-	return Problem{Type: ProblemTypeURI(string(CodeInternal)), Title: internalTitle, Status: http.StatusInternalServerError, Code: CodeInternal}
+	return Problem{Type: ProblemTypeURI(string(CodeInternal)), Title: internalTitle, Status: http.StatusInternalServerError, Code: CodeInternal, Category: CategoryInternal}
 }
 
 // internalTitle is the title of a problem with no more to say than that the
@@ -263,7 +263,8 @@ const internalTitle = "Internal error"
 
 // ProblemOf is the RFC 9457 problem details of err, an error limes returned,
 // for a consumer's own API, whatever its transport: its type URI, a fixed
-// title, its HTTP status, its code and, for a refusal, its Reason. A
+// title, its HTTP status, its code, its category and, for a refusal, its
+// Reason. A
 // refusal's is the body Verifier.ErrorResponse writes. It carries no detail:
 // an error's text can name kids, issuers or stores, which is for the
 // server's log. False for an error that is not limes's: answer that as the
@@ -281,8 +282,31 @@ func ProblemOf(err error) (Problem, bool) {
 			kind = string(rr.reason)
 		}
 		p := answer(rr.answer, kind, rr.reason).Problem
-		p.Code = cr.code
+		p.Code, p.Category = cr.code, cr.category
 		return p, true
 	}
-	return Problem{Type: ProblemTypeURI(string(cr.code)), Title: cr.title, Status: cr.status, Code: cr.code}, true
+	return problemOfRule(cr), true
+}
+
+// problemOfRule is the problem of a code with a status of its own.
+func problemOfRule(r codeRule) Problem {
+	return Problem{Type: ProblemTypeURI(string(r.code)), Title: r.title, Status: r.status, Code: r.code, Category: r.category}
+}
+
+// ProblemOfCode is the problem ProblemOf answers an error with code with,
+// and false for a code that is none of this package's, the meter's among
+// them: a consumer holding only a code, or pinning the contract its mapping
+// was written against (limestest), reads it without an error to hand.
+func ProblemOfCode(code Code) (Problem, bool) {
+	r, ok := codeRuleOf(code)
+	if !ok {
+		return Problem{}, false
+	}
+	if r.status != 0 {
+		return problemOfRule(r), true
+	}
+	// A refusal's code: answered as the family it is refused as.
+	p, _ := ProblemOf(r.sentinel)
+	p.Code, p.Category = r.code, r.category
+	return p, true
 }

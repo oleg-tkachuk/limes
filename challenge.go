@@ -66,7 +66,11 @@ type Problem struct {
 	// Code is the error's Code, an extension member: its Reason, or the
 	// narrower code Reason folds into it (docs/errors.md).
 	Code Code `json:"code,omitempty"`
-	_    noCompare
+	// Category is the Code's Category, an extension member: what the caller
+	// does about the error, for a consumer mapping its transport from the
+	// problem alone.
+	Category Category `json:"category,omitempty"`
+	_        noCompare
 }
 
 // ErrorResponse is how to answer a refused request.
@@ -134,6 +138,7 @@ func (v *Verifier) ErrorResponse(ctx context.Context, err error, scheme AuthSche
 	resp := answer(r, kind, rule.reason)
 	if ok {
 		resp.Problem.Code, _ = CodeOf(err)
+		resp.Problem.Category, _ = CategoryOf(err)
 	}
 	if r.code == "" && !r.bare {
 		return resp
