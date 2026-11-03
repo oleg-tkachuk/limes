@@ -195,3 +195,17 @@ func TestCheckMappingNamesAStringOnce(t *testing.T) {
 		t.Errorf("reported %q: its name beside a string", r.errors[0])
 	}
 }
+
+// A check of no codes fails, whatever is pinned.
+func TestCheckMappingOfNoCodes(t *testing.T) {
+	for name, pinned := range map[string]map[limes.Code]transportCode{
+		"nothing pinned": {},
+		"a code pinned":  {limes.CodeRevoked: transportUnauthenticated},
+	} {
+		r := &recorder{TB: t}
+		limestest.CheckMapping(r, nil, pinned, toTransport)
+		if len(r.errors) == 0 || !strings.Contains(r.errors[0], "no codes to check") {
+			t.Errorf("%s: reported %q, want no codes to check first", name, r.errors)
+		}
+	}
+}
