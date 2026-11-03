@@ -11,7 +11,7 @@ Every release of the limes module, newest first, from its release notes. Written
 
 ### Features
 
-* **limestest:** name a transport code beside its number in a hint ([b2cb68b](https://github.com/oleg-tkachuk/limes/commit/b2cb68b1d0e4ca42f8afdd6cbd589d783747a3ad)), references [#v](https://github.com/oleg-tkachuk/limes/issues/v)
+* **limestest:** name a transport code beside its number in a hint ([b2cb68b](https://github.com/oleg-tkachuk/limes/commit/b2cb68b1d0e4ca42f8afdd6cbd589d783747a3ad))
 * take any number of origins in CodesOf ([3fc67d3](https://github.com/oleg-tkachuk/limes/commit/3fc67d3b41d228a0d6ccc3070482e79c4007513a))
 
 ## [0.158.0](https://github.com/oleg-tkachuk/limes/compare/v0.157.0...v0.158.0) (2026-11-03)
