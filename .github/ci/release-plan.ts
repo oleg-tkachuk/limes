@@ -29,6 +29,7 @@ import { join } from "node:path";
 import { CHANGELOGS, addEntry, entryFrom, entryVersion, namingTags } from "./changelog.ts";
 import { info, summarize, warning } from "./lib/actions.ts";
 import { codeChanges, withCodeChanges } from "./lib/codes.ts";
+import { defaultChanges, withDefaultChanges } from "./lib/defaults.ts";
 import { optionalEnv, requireEnv } from "./lib/env.ts";
 import { git } from "./lib/git.ts";
 import { gitHubFor, type GitHub, type PullRequestText } from "./lib/github.ts";
@@ -156,9 +157,10 @@ async function requiredLimesOf(root: string, module: Module): Promise<string | u
   return requiredLimes(dir);
 }
 
-// planned is module's release with notes.
+// planned is module's release with notes, which name every default of it
+// changed since its last release.
 async function planned(p: Planner, module: Module, notes: string, raise: boolean): Promise<Planned> {
-  const entry = entryFrom(notes, "", "");
+  let entry = entryFrom(notes, "", "");
   const version = entryVersion(entry);
   if (version === undefined) {
     throw new Error(`${module.name}: the dry run's notes name no version: ${JSON.stringify(notes.split("\n")[0])}`);
@@ -166,6 +168,11 @@ async function planned(p: Planner, module: Module, notes: string, raise: boolean
   const tag = `${module.prefix}v${version}`;
   const last = await lastStableTag(module, "HEAD", p.root);
   const major = last !== undefined && parseVersion(last, module.prefix).major < parseVersion(tag, module.prefix).major;
+  if (last !== undefined) {
+    const changes = await defaultChanges(p.root, module.name, last, "HEAD");
+    info(`${module.name}: defaults since ${last}: removed ${changes.removed.length}, changed ${changes.changed.length}`);
+    entry = withDefaultChanges(entry, changes);
+  }
   return { module, tag, entry, raise, major };
 }
 

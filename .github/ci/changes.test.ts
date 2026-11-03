@@ -158,6 +158,8 @@ describe("paths a test reads", () => {
     assert.deepEqual([...reachedGroups(["README.md"])], [Group.Examples]));
   test("the error reference reaches the root and the exchange, whose tests hold it to the codes", () =>
     assert.deepEqual([...reachedGroups(["docs/errors.md"])].sort(), [Group.Exchange, Group.Root].sort()));
+  test("the defaults reference reaches the root, whose test holds it to every Config", () =>
+    assert.deepEqual([...reachedGroups(["docs/defaults.md"])], [Group.Root]));
   test("other documentation still reaches nothing", () => assert.equal(reachedGroups(["docs/guide.md", "pgstore/README.md"]).size, 0));
   test("every inert path a Go test names is listed", () => {
     const root = join(import.meta.dirname, "..", "..");
