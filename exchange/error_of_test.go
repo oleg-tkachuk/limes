@@ -218,3 +218,16 @@ func TestErrorsDocListsEveryExchangeCategory(t *testing.T) {
 		}
 	}
 }
+
+// Every error ErrorOf answers, the proof refusals among them, has a limes
+// code and a category, so a consumer maps an exchange's errors by
+// limes.ProblemOf alone, and reads ErrorOf only for the RFC 6749 body.
+func TestEveryErrorOfHasALimesCategory(t *testing.T) {
+	for _, rule := range refusals {
+		wrapped := fmt.Errorf("exchanging: %w", rule.err)
+		p, ok := limes.ProblemOf(wrapped)
+		if !ok || p.Code == "" || !slices.Contains(limes.Categories(), p.Category) || !slices.Contains(limes.Codes(), p.Code) {
+			t.Errorf("%s (%v): limes.ProblemOf = %+v, %v; want a code of limes.Codes() and a category", rule.code, rule.err, p, ok)
+		}
+	}
+}
