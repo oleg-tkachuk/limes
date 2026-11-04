@@ -227,7 +227,9 @@ type Origin struct {
 	name string
 }
 
-// The origins.
+// The origins. They are variables only because a struct cannot be a
+// constant: never assign one, since the table of origins keeps the values
+// they had when the package was initialised.
 var (
 	// OriginLimes — the root package and the packages it answers for:
 	// verifying and checking a capability, its stores, dpop and jwks.
