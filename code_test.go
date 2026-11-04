@@ -329,50 +329,25 @@ func TestAnErrorNamingItsCode(t *testing.T) {
 	}
 }
 
-// The origins split Codes: each code comes from one, and together they hold
-// every code in Codes' order.
-func TestCodesOf(t *testing.T) {
-	var all []Code
-	for _, origin := range Origins() {
-		codes := CodesOf(origin)
-		if len(codes) == 0 {
-			t.Errorf("CodesOf(%q) is empty", origin)
-		}
-		for _, c := range codes {
-			if slices.Contains(all, c) {
-				t.Errorf("%q comes from two origins", c)
-			}
-		}
-		all = append(all, codes...)
+// The exchange's codes are some of Codes, in its order, and none of
+// limes's own or the meter's.
+func TestExchangeCodes(t *testing.T) {
+	codes := ExchangeCodes()
+	if len(codes) == 0 || !slices.Contains(codes, CodeInvalidGrant) {
+		t.Fatalf("ExchangeCodes() = %q, want invalid_grant among them", codes)
 	}
-	if !slices.Equal(all, Codes()) {
-		t.Errorf("the origins' codes %q; Codes() %q", all, Codes())
-	}
-	for origin, code := range map[Origin]Code{OriginLimes(): CodeRevoked, OriginMeter(): CodeLeaseNested, OriginExchange(): CodeInvalidGrant} {
-		if !slices.Contains(CodesOf(origin), code) {
-			t.Errorf("CodesOf(%q) lacks %q", origin, code)
+	var inOrder []Code
+	for _, c := range Codes() {
+		if slices.Contains(codes, c) {
+			inOrder = append(inOrder, c)
 		}
 	}
-	if got := CodesOf(nil); len(got) != 0 {
-		t.Errorf("CodesOf(nil) = %q, want none", got)
+	if !slices.Equal(inOrder, codes) {
+		t.Errorf("ExchangeCodes() = %q; Codes() lists them as %q", codes, inOrder)
 	}
-	for _, origin := range Origins() {
-		if origin.String() == "" {
-			t.Errorf("an origin %v without a name", origin)
+	for _, c := range []Code{CodeRevoked, CodeInvalidRequest, CodeLeaseNested} {
+		if slices.Contains(codes, c) {
+			t.Errorf("ExchangeCodes() holds %q, none of the exchange's own", c)
 		}
-	}
-	if got, want := CodesOf(OriginMeter(), OriginLimes(), OriginMeter()), slices.Concat(CodesOf(OriginLimes()), CodesOf(OriginMeter())); !slices.Equal(got, want) {
-		t.Errorf("CodesOf(meter, limes, meter) = %q; want limes's then the meter's once, in Codes' order", got)
-	}
-	if got := CodesOf(OriginLimes(), OriginExchange(), OriginMeter()); !slices.Equal(got, Codes()) {
-		t.Errorf("CodesOf(every origin) = %q; want Codes()", got)
-	}
-	if OriginLimes() != OriginLimes() || OriginLimes() == OriginMeter() {
-		t.Error("an origin is not one value, or two are the same")
-	}
-	listed := Origins()
-	listed[0] = OriginMeter()
-	if Origins()[0] != OriginLimes() {
-		t.Error("Origins() hands out the table itself")
 	}
 }

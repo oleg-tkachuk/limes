@@ -70,6 +70,17 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## v0.162.0
+
+- `limes.Origin`, `Origins`, `CodesOf`, `OriginLimes`, `OriginExchange` and
+  `OriginMeter` are gone. `limes.ExchangeCodes()` lists the exchange's
+  codes, and a check leaves them out with an option:
+  `limestest.CheckMapping(t, pinned, answer, limestest.WithoutExchange())`.
+- `limestest.CheckMapping` walks `limes.Codes()` itself, so it no longer
+  takes a list of codes: `CheckMapping(t, codes, pinned, answer)` is
+  `CheckMapping(t, pinned, answer, opts...)`. `CheckCodes` takes the same
+  options.
+
 ## v0.161.0
 
 - The origins are functions: `limes.OriginLimes()`, `OriginExchange()` and
