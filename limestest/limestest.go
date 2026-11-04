@@ -25,18 +25,26 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/internal/link"
 )
 
-// Option loosens a check, each in one way a consumer asks for by name: one
-// per component a consumer may not run, whose codes it leaves out, and one
-// that takes a code limes adds by the category it joins. None leaves out a
-// code alone. With none, a check walks every code, and a code limes adds
-// fails it until it is pinned: that default is the strictest there is, and
-// no option will change it.
+// Option loosens a check, each in one way a consumer asks for by name. They
+// are of two kinds, which do different things:
+//
+//   - Without… choose the codes a check walks: each leaves out the codes of
+//     one component the consumer does not run. They narrow what is checked,
+//     and check the rest as strictly.
+//   - Accept… loosen how a code walked and not pinned is judged:
+//     AcceptNewByCategory passes such a code that the consumer answers as
+//     its category. It checks every code, and fails on fewer.
+//
+// None leaves out a code alone. With none, a check walks every code, and a
+// code limes adds fails it until it is pinned: that default is the
+// strictest there is, and no option will change it.
 type Option func(*checked)
 
 // checked is how a check is loosened: the codes it leaves out, and whether
@@ -67,13 +75,18 @@ func WithoutMeter() Option {
 	return func(c *checked) { c.leaveOut(link.MeterCodes()) }
 }
 
-// NewCodesByCategory takes a code that is not pinned when the consumer
+// AcceptNewByCategory passes a code that is not pinned when the consumer
 // answers it as it answers every code pinned in its category, and there is
 // one: a code limes adds to a category the consumer maps whole then passes,
 // while a pinned code moved to another category still fails, as does a code
 // in a category with none pinned, or one whose pinned codes are answered
-// apart. The check logs each code it takes so, to pin.
-func NewCodesByCategory() Option {
+// apart.
+//
+// A code it passes so fails nothing, and the check names it only in its
+// log, in one line, which go test shows with -v alone: a green run without
+// it says nothing of the table falling behind. Run the check with -v, or
+// now and then without this option, to pin the codes it took.
+func AcceptNewByCategory() Option {
 	return func(c *checked) { c.byCategory = true }
 }
 
@@ -112,20 +125,22 @@ func asItsCategory[T comparable](code limes.Code, got T, codes []limes.Code, pin
 // CheckMapping fails t for every way the consumer's answer to limes's codes
 // — every one, but those opts leave out — differs from pinned, its record of
 // the answers its mapping was written to give: a code answer maps otherwise
-// than pinned, a code not pinned — unless NewCodesByCategory takes it — and
-// a code pinned that is not checked: which limes no longer answers, or opts
-// left out. Each failure names the
-// entry to pin, so the first failing run writes the table.
+// than pinned, a code not pinned — unless AcceptNewByCategory passes it —
+// and a code pinned that is not checked: which limes no longer answers, or
+// opts left out. Each failure names the entry to pin, so the first failing
+// run writes the table; failures come in the order of their codes' names,
+// which no release changes.
 func CheckMapping[T comparable](t testing.TB, pinned map[limes.Code]T, answer func(limes.Code) T, opts ...Option) {
 	t.Helper()
 	c := settings(opts)
 	codes := c.codesIn()
-	for _, code := range codes {
+	var accepted []string
+	for _, code := range slices.Sorted(slices.Values(codes)) {
 		got := answer(code)
 		want, ok := pinned[code]
 		switch {
 		case !ok && c.byCategory && asItsCategory(code, got, codes, pinned):
-			t.Logf("limestest: %q is not pinned, and is answered as its category is; pin it: %q: %s,", code, code, literal(got))
+			accepted = append(accepted, fmt.Sprintf("%q: %s,", code, literal(got)))
 		case !ok:
 			t.Errorf("limestest: %q is not pinned; pin it, mapped: %q: %s,", code, code, literal(got))
 		case want != got:
@@ -146,6 +161,9 @@ func CheckMapping[T comparable](t testing.TB, pinned map[limes.Code]T, answer fu
 		} else {
 			t.Errorf("limestest: %q is pinned, and limes no longer answers it", code)
 		}
+	}
+	if len(accepted) > 0 {
+		t.Logf("limestest: %d codes not pinned, passed as their categories are answered; pin them: %s", len(accepted), strings.Join(accepted, " "))
 	}
 }
 

@@ -16,9 +16,14 @@ import (
 type recorder struct {
 	testing.TB
 	errors []string
+	logs   []string
 }
 
 func (r *recorder) Helper() {}
+
+func (r *recorder) Logf(format string, args ...any) {
+	r.logs = append(r.logs, fmt.Sprintf(format, args...))
+}
 
 func (r *recorder) Errorf(format string, args ...any) {
 	r.errors = append(r.errors, fmt.Sprintf(format, args...))
@@ -268,9 +273,9 @@ func TestOptionsLeaveOutTheirComponent(t *testing.T) {
 	}
 }
 
-// NewCodesByCategory takes a code not pinned when its category's pinned
+// AcceptNewByCategory passes a code not pinned when its category's pinned
 // codes are answered as it is, and no other.
-func TestNewCodesByCategory(t *testing.T) {
+func TestAcceptNewByCategory(t *testing.T) {
 	full := map[limes.Code]transportCode{}
 	for _, c := range limes.Codes() {
 		full[c] = toTransport(c)
@@ -289,7 +294,7 @@ func TestNewCodesByCategory(t *testing.T) {
 
 	added := maps.Clone(full)
 	delete(added, limes.CodeOpNotAllowed)
-	if got := check(added, toTransport, limestest.NewCodesByCategory()); len(got) != 0 {
+	if got := check(added, toTransport, limestest.AcceptNewByCategory()); len(got) != 0 {
 		t.Errorf("a code added to a category mapped whole: reported %q", got)
 	}
 	assertReported(t, "the same, without the option", check(added, toTransport), []string{`"op_not_allowed" is not pinned`})
@@ -300,14 +305,14 @@ func TestNewCodesByCategory(t *testing.T) {
 		}
 		return toTransport(code)
 	}
-	assertReported(t, "a pinned code answered otherwise", check(full, moved, limestest.NewCodesByCategory()),
+	assertReported(t, "a pinned code answered otherwise", check(full, moved, limestest.AcceptNewByCategory()),
 		[]string{`"revoked" is answered 0 /* other */; pinned 1 /* unauthenticated */`})
 
 	lone := maps.Clone(full)
 	for _, c := range ofCategory(limes.CategoryNotFound) {
 		delete(lone, c)
 	}
-	if got := check(lone, toTransport, limestest.NewCodesByCategory()); len(got) != len(ofCategory(limes.CategoryNotFound)) {
+	if got := check(lone, toTransport, limestest.AcceptNewByCategory()); len(got) != len(ofCategory(limes.CategoryNotFound)) {
 		t.Errorf("a category with no code pinned: reported %q, want each of its %d codes", got, len(ofCategory(limes.CategoryNotFound)))
 	}
 
@@ -322,6 +327,48 @@ func TestNewCodesByCategory(t *testing.T) {
 		}
 		return toTransport(code)
 	}
-	assertReported(t, "a category whose pinned codes are answered apart", check(apart, answerApart, limestest.NewCodesByCategory()),
+	assertReported(t, "a category whose pinned codes are answered apart", check(apart, answerApart, limestest.AcceptNewByCategory()),
 		[]string{`"op_not_allowed" is not pinned`})
+}
+
+// The codes AcceptNewByCategory passes are named in one log line, which
+// counts them, and in none when it passes none.
+func TestAcceptNewByCategoryLogsOneLine(t *testing.T) {
+	pinned := map[limes.Code]transportCode{}
+	for _, c := range limes.Codes() {
+		pinned[c] = toTransport(c)
+	}
+	r := &recorder{TB: t}
+	limestest.CheckMapping(r, pinned, toTransport, limestest.AcceptNewByCategory())
+	if len(r.logs) != 0 {
+		t.Errorf("nothing passed by category: logged %q", r.logs)
+	}
+	delete(pinned, limes.CodeOpNotAllowed)
+	delete(pinned, limes.CodeResourceNotAllowed)
+	r = &recorder{TB: t}
+	limestest.CheckMapping(r, pinned, toTransport, limestest.AcceptNewByCategory())
+	if len(r.errors) != 0 || len(r.logs) != 1 {
+		t.Fatalf("two codes passed by category: reported %q, logged %q", r.errors, r.logs)
+	}
+	for _, want := range []string{"2 codes not pinned", `"op_not_allowed": 0 /* other */,`, `"resource_not_allowed": 0 /* other */,`} {
+		if !strings.Contains(r.logs[0], want) {
+			t.Errorf("logged %q, want it to say %q", r.logs[0], want)
+		}
+	}
+}
+
+// Failures come in the order of their codes' names, not of Codes().
+func TestCheckMappingReportsInCodeOrder(t *testing.T) {
+	r := &recorder{TB: t}
+	limestest.CheckMapping(r, map[limes.Code]transportCode{}, toTransport)
+	var named []string
+	for _, e := range r.errors {
+		if _, rest, ok := strings.Cut(e, `limestest: "`); ok {
+			code, _, _ := strings.Cut(rest, `"`)
+			named = append(named, code)
+		}
+	}
+	if len(named) != len(limes.Codes()) || !slices.IsSorted(named) {
+		t.Errorf("failures name %q, want every code, sorted", named)
+	}
 }
