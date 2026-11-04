@@ -2,6 +2,16 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.164.0](https://github.com/oleg-tkachuk/limes/compare/v0.163.0...v0.164.0) (2026-11-04)
+
+### Features
+
+* **limestest:** take a new code by the category it joins ([b381969](https://github.com/oleg-tkachuk/limes/commit/b381969b6b9934366ef5b82dbc6386819f725f81))
+
+### Contract
+
+* settle no signature before 1.0, and no order of Codes
+
 ## [0.163.0](https://github.com/oleg-tkachuk/limes/compare/v0.162.0...v0.163.0) (2026-11-04)
 
 ### ⚠ BREAKING CHANGES
