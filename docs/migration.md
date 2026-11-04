@@ -70,6 +70,12 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## v0.165.0
+
+- `limestest.NewCodesByCategory()` is `limestest.AcceptNewByCategory()`:
+  it loosens a check rather than makes a value, and logs the codes it
+  passed in one line.
+
 ## v0.163.0
 
 - `limes.ExchangeCodes` is gone: which component a code comes from matters

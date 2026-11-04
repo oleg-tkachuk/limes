@@ -197,9 +197,12 @@ exchange's (`limestest.WithoutExchange`), the meter's
 (`limestest.WithoutMeter`). Every code is checked by default, so a code
 limes adds fails the check until it is pinned; no option leaves out a code
 alone. A consumer that maps categories whole takes a code limes adds by
-its category with `limestest.NewCodesByCategory()`: such a code passes
+its category with `limestest.AcceptNewByCategory()`: such a code passes
 when the consumer answers it as it answers every code pinned in that
-category, while a pinned code moved to another category still fails. A
+category, while a pinned code moved to another category still fails. That
+option is no filter, as `Without…` are: it judges every code more
+leniently, and names the codes it passed only in the test's log, which
+`go test -v` alone shows. A
 failure
 names the entry to pin, in Go's syntax, with a code that names itself
 (`fmt.Stringer`) named beside its number:
