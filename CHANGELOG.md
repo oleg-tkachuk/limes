@@ -2,6 +2,18 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.163.0](https://github.com/oleg-tkachuk/limes/compare/v0.162.0...v0.163.0) (2026-11-04)
+
+### ⚠ BREAKING CHANGES
+
+* limes.ExchangeCodes is gone; limestest.WithoutExchange
+  leaves the exchange's codes out of a check.
+
+### Features
+
+* keep which component a code comes from out of the root's API ([6bea9ea](https://github.com/oleg-tkachuk/limes/commit/6bea9ea884270b3df2f97d05c9d0eb71f9a390da))
+* **limestest:** leave the meter's codes out with WithoutMeter ([2eed464](https://github.com/oleg-tkachuk/limes/commit/2eed4642da2dfab9e55c2ae79f33603cdc4e5bf0))
+
 ## [0.162.0](https://github.com/oleg-tkachuk/limes/compare/v0.161.0...v0.162.0) (2026-11-04)
 
 ### ⚠ BREAKING CHANGES
