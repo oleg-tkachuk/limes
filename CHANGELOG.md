@@ -2,6 +2,20 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.162.0](https://github.com/oleg-tkachuk/limes/compare/v0.161.0...v0.162.0) (2026-11-04)
+
+### ⚠ BREAKING CHANGES
+
+* **limestest:** CheckMapping no longer takes the codes to check; it walks
+  limes.Codes(), less those its options leave out (WithoutExchange).
+* limes.Origin, Origins, CodesOf and the Origin… functions
+  are gone; limes.ExchangeCodes lists the exchange's codes.
+
+### Features
+
+* **limestest:** walk every code, and leave the exchange's out by an option ([1f25270](https://github.com/oleg-tkachuk/limes/commit/1f252706320be65aacbaf75649db2543c6e37583))
+* list the exchange's codes in place of origins ([54ac232](https://github.com/oleg-tkachuk/limes/commit/54ac23244b9d6c33850f7b76495f1ebff4fa28c2))
+
 ## [0.161.0](https://github.com/oleg-tkachuk/limes/compare/v0.160.0...v0.161.0) (2026-11-04)
 
 ### ⚠ BREAKING CHANGES
