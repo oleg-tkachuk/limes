@@ -2,6 +2,17 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.161.0](https://github.com/oleg-tkachuk/limes/compare/v0.160.0...v0.161.0) (2026-11-04)
+
+### ⚠ BREAKING CHANGES
+
+* limes.OriginLimes, OriginExchange and OriginMeter are
+  functions; limes.Origin is an interface, and Origin{} no longer compiles.
+
+### Features
+
+* give the origins by functions, as an interface no package can implement ([9ac2888](https://github.com/oleg-tkachuk/limes/commit/9ac2888a6885b3c2f929e8c4ada4d1cd33a4c39e))
+
 ## [0.160.0](https://github.com/oleg-tkachuk/limes/compare/v0.159.0...v0.160.0) (2026-11-03)
 
 ### ⚠ BREAKING CHANGES
