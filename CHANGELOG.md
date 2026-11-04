@@ -2,6 +2,16 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.165.0](https://github.com/oleg-tkachuk/limes/compare/v0.164.0...v0.165.0) (2026-11-04)
+
+### ⚠ BREAKING CHANGES
+
+* **limestest:** limestest.NewCodesByCategory is AcceptNewByCategory.
+
+### Features
+
+* **limestest:** call the category option AcceptNewByCategory, and sort a check's failures ([1c9d94c](https://github.com/oleg-tkachuk/limes/commit/1c9d94cbacfdb5e10052e42e924c1db01366f373))
+
 ## [0.164.0](https://github.com/oleg-tkachuk/limes/compare/v0.163.0...v0.164.0) (2026-11-04)
 
 ### Features
