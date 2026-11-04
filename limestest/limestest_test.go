@@ -267,3 +267,61 @@ func TestOptionsLeaveOutTheirComponent(t *testing.T) {
 		}
 	}
 }
+
+// NewCodesByCategory takes a code not pinned when its category's pinned
+// codes are answered as it is, and no other.
+func TestNewCodesByCategory(t *testing.T) {
+	full := map[limes.Code]transportCode{}
+	for _, c := range limes.Codes() {
+		full[c] = toTransport(c)
+	}
+	check := func(pinned map[limes.Code]transportCode, answer func(limes.Code) transportCode, opts ...limestest.Option) []string {
+		r := &recorder{TB: t}
+		limestest.CheckMapping(r, pinned, answer, opts...)
+		return r.errors
+	}
+	ofCategory := func(category limes.Category) []limes.Code {
+		return slices.DeleteFunc(limes.Codes(), func(c limes.Code) bool { got, _ := limes.CategoryOfCode(c); return got != category })
+	}
+	if denied := ofCategory(limes.CategoryDenied); len(denied) < 2 {
+		t.Fatalf("denied has %d codes, the test needs two", len(denied))
+	}
+
+	added := maps.Clone(full)
+	delete(added, limes.CodeOpNotAllowed)
+	if got := check(added, toTransport, limestest.NewCodesByCategory()); len(got) != 0 {
+		t.Errorf("a code added to a category mapped whole: reported %q", got)
+	}
+	assertReported(t, "the same, without the option", check(added, toTransport), []string{`"op_not_allowed" is not pinned`})
+
+	moved := func(code limes.Code) transportCode {
+		if code == limes.CodeRevoked {
+			return transportOther
+		}
+		return toTransport(code)
+	}
+	assertReported(t, "a pinned code answered otherwise", check(full, moved, limestest.NewCodesByCategory()),
+		[]string{`"revoked" is answered 0 /* other */; pinned 1 /* unauthenticated */`})
+
+	lone := maps.Clone(full)
+	for _, c := range ofCategory(limes.CategoryNotFound) {
+		delete(lone, c)
+	}
+	if got := check(lone, toTransport, limestest.NewCodesByCategory()); len(got) != len(ofCategory(limes.CategoryNotFound)) {
+		t.Errorf("a category with no code pinned: reported %q, want each of its %d codes", got, len(ofCategory(limes.CategoryNotFound)))
+	}
+
+	apart := maps.Clone(full)
+	delete(apart, limes.CodeOpNotAllowed)
+	denied := ofCategory(limes.CategoryDenied)
+	other := denied[slices.IndexFunc(denied, func(c limes.Code) bool { return c != limes.CodeOpNotAllowed })]
+	apart[other] = transportUnauthenticated
+	answerApart := func(code limes.Code) transportCode {
+		if code == other {
+			return transportUnauthenticated
+		}
+		return toTransport(code)
+	}
+	assertReported(t, "a category whose pinned codes are answered apart", check(apart, answerApart, limestest.NewCodesByCategory()),
+		[]string{`"op_not_allowed" is not pinned`})
+}
