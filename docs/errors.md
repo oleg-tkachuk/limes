@@ -196,7 +196,11 @@ every code but those of a component the consumer does not run — the
 exchange's (`limestest.WithoutExchange`), the meter's
 (`limestest.WithoutMeter`). Every code is checked by default, so a code
 limes adds fails the check until it is pinned; no option leaves out a code
-alone. A failure
+alone. A consumer that maps categories whole takes a code limes adds by
+its category with `limestest.NewCodesByCategory()`: such a code passes
+when the consumer answers it as it answers every code pinned in that
+category, while a pinned code moved to another category still fails. A
+failure
 names the entry to pin, in Go's syntax, with a code that names itself
 (`fmt.Stringer`) named beside its number:
 
@@ -339,8 +343,15 @@ and may leave them out of a check of its own mapping
 
 The endpoint answers a refused proof with RFC 9449's codes,
 `dpop.ErrorCodeUseNonce` and `dpop.ErrorCodeInvalidProof`. They are no
-`limes.Code`: in process, `dpop.ErrRequired` and its kin are limes's proof
-codes, `unauthenticated`, above.
+`limes.Code`, and need no mapping of their own: the errors behind them,
+`dpop.ErrRequired` and its kin, are limes's proof codes (`proof_required`,
+`proof_invalid`, `proof_replayed`, `nonce_required`), all
+`unauthenticated`, which `limes.Codes()` lists and `limestest` checks. A
+service that serves the token endpoint itself maps every error by
+`limes.ProblemOf(err).Category`, as any other, and reads
+`exchange.ErrorOf(err)` only for the RFC 6749 body it writes; its tests
+pin `limes.Codes()`, and `exchange.ErrorCodes()` is the endpoint's wire,
+not a second list to map.
 
 | Code | HTTP | Sentinel | Description |
 |---|---|---|---|
