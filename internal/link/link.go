@@ -1,7 +1,7 @@
 // Package link lets the module's own packages reach what the root does not
-// export: limes/inspect the token reader, and metertest, storetest, memstore
+// export: limes/inspect the token reader, metertest, storetest, memstore
 // and the tests of memstore and pgstore the constructors of a MeterSubject and
-// a BiscuitCopy. The
+// a BiscuitCopy, and limestest the codes of each optional component. The
 // root sets each as it initialises, which is before any code of theirs runs:
 // each imports the root.
 package link
@@ -33,3 +33,9 @@ var NewMeterSubject func(MeterSubjectFields) any
 // against copies no verifier read. The root sets it as it initialises;
 // outside the module only Verifier.BiscuitCopy makes one.
 var NewBiscuitCopy func(capabilityID uuid.UUID, revocationID []byte) any
+
+// ExchangeCodes and MeterCodes are the codes of the exchange's errors and of
+// the meter's, each a limes.Code's string, in limes.Codes' order: what
+// limestest leaves out of a check for a consumer that runs neither. The root
+// sets them as it initialises.
+var ExchangeCodes, MeterCodes func() []string
