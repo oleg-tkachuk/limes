@@ -122,7 +122,7 @@ func toTransport(code limes.Code) transportCode {
 }
 
 func TestCheckMapping(t *testing.T) {
-	codes := limes.CodesOf(limes.OriginLimes)
+	codes := limes.CodesOf(limes.OriginLimes())
 	pinned := map[limes.Code]transportCode{}
 	for _, c := range codes {
 		pinned[c] = toTransport(c)

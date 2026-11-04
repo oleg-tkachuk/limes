@@ -70,6 +70,13 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## v0.161.0
+
+- The origins are functions: `limes.OriginLimes()`, `OriginExchange()` and
+  `OriginMeter()`, where they were variables any package could assign.
+  `limes.Origin` is an interface no other package can implement, so
+  `limes.Origin{}` no longer compiles; a nil `Origin` has no codes.
+
 ## v0.160.0
 
 - `limes.Origin` is a struct, and its values are `limes.OriginLimes`,
