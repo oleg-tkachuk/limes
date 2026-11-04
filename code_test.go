@@ -361,8 +361,8 @@ func TestCodesOf(t *testing.T) {
 			t.Errorf("an origin %v without a name", origin)
 		}
 	}
-	if got, want := CodesOf(OriginMeter, OriginLimes), slices.Concat(CodesOf(OriginLimes), CodesOf(OriginMeter)); !slices.Equal(got, want) {
-		t.Errorf("CodesOf(meter, limes) = %q; want limes's then the meter's, in Codes' order", got)
+	if got, want := CodesOf(OriginMeter, OriginLimes, OriginMeter), slices.Concat(CodesOf(OriginLimes), CodesOf(OriginMeter)); !slices.Equal(got, want) {
+		t.Errorf("CodesOf(meter, limes, meter) = %q; want limes's then the meter's once, in Codes' order", got)
 	}
 	if got := CodesOf(OriginLimes, OriginExchange, OriginMeter); !slices.Equal(got, Codes()) {
 		t.Errorf("CodesOf(every origin) = %q; want Codes()", got)
