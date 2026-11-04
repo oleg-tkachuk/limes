@@ -7,14 +7,13 @@
 // consumer's test instead of its traffic:
 //
 //	func TestErrorContract(t *testing.T) {
-//		codes := limes.CodesOf(limes.OriginLimes(), limes.OriginMeter())
-//		limestest.CheckMapping(t, codes, map[limes.Code]connect.Code{
+//		limestest.CheckMapping(t, map[limes.Code]connect.Code{
 //			"revoked": connect.CodeUnauthenticated,
 //			// …
 //		}, func(c limes.Code) connect.Code {
 //			p, _ := limes.ProblemOfCode(c)
 //			return connectCode(p)
-//		})
+//		}, limestest.WithoutExchange())
 //	}
 //
 // CheckCodes is CheckMapping of every code to its HTTP status and
@@ -31,18 +30,39 @@ import (
 	"github.com/oleg-tkachuk/limes"
 )
 
-// CheckMapping fails t for every way the consumer's answer to codes differs
-// from pinned, its record of the answers its mapping was written to give: a
-// code of codes answer maps otherwise than pinned, a code of codes not
-// pinned, and a code pinned that is none of codes — which limes no longer
-// answers, or the consumer left out of codes. Each failure names the entry
-// to pin, so the first failing run writes the table. No codes at all fails
-// too: a check of none proves nothing.
-func CheckMapping[T comparable](t testing.TB, codes []limes.Code, pinned map[limes.Code]T, answer func(limes.Code) T) {
-	t.Helper()
-	if len(codes) == 0 {
-		t.Errorf("limestest: no codes to check")
+// Option narrows the codes a check walks.
+type Option func(*checked)
+
+// checked is the codes a check walks, and those it leaves out.
+type checked struct {
+	without []limes.Code
+}
+
+// WithoutExchange leaves the exchange's codes (limes.ExchangeCodes) out of
+// a check, for a consumer that runs no exchange: it never meets them, and
+// pins none.
+func WithoutExchange() Option {
+	return func(c *checked) { c.without = append(c.without, limes.ExchangeCodes()...) }
+}
+
+// codesFor are the codes of limes.Codes that opts leave in.
+func codesFor(opts []Option) []limes.Code {
+	var c checked
+	for _, opt := range opts {
+		opt(&c)
 	}
+	return slices.DeleteFunc(limes.Codes(), func(code limes.Code) bool { return slices.Contains(c.without, code) })
+}
+
+// CheckMapping fails t for every way the consumer's answer to limes's codes
+// — every one, but those opts leave out — differs from pinned, its record of
+// the answers its mapping was written to give: a code answer maps otherwise
+// than pinned, a code not pinned, and a code pinned that is not checked —
+// which limes no longer answers, or opts left out. Each failure names the
+// entry to pin, so the first failing run writes the table.
+func CheckMapping[T comparable](t testing.TB, pinned map[limes.Code]T, answer func(limes.Code) T, opts ...Option) {
+	t.Helper()
+	codes := codesFor(opts)
 	for _, code := range codes {
 		got := answer(code)
 		want, ok := pinned[code]
@@ -63,7 +83,7 @@ func CheckMapping[T comparable](t testing.TB, codes []limes.Code, pinned map[lim
 	sort.Strings(extra)
 	for _, code := range extra {
 		if slices.Contains(answered, limes.Code(code)) {
-			t.Errorf("limestest: %q is pinned, and not among the codes checked", code)
+			t.Errorf("limestest: %q is pinned, and the check leaves it out", code)
 		} else {
 			t.Errorf("limestest: %q is pinned, and limes no longer answers it", code)
 		}
@@ -88,11 +108,11 @@ type Answer struct {
 	Category limes.Category
 }
 
-// CheckCodes is CheckMapping of every code limes answers, the meter's and
-// the exchange's among them, to its Answer.
-func CheckCodes(t testing.TB, pinned map[limes.Code]Answer) {
+// CheckCodes is CheckMapping of limes's codes, the meter's and the
+// exchange's among them but for those opts leave out, to their Answer.
+func CheckCodes(t testing.TB, pinned map[limes.Code]Answer, opts ...Option) {
 	t.Helper()
-	CheckMapping(t, limes.Codes(), pinned, answerOf)
+	CheckMapping(t, pinned, answerOf, opts...)
 }
 
 // answerOf is code's Answer.
