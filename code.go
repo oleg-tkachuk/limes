@@ -218,81 +218,15 @@ var exchangeCodeRules = []codeRule{
 	{nil, CodeServerError, http.StatusInternalServerError, "The server could not decide on the request", CategoryInternal},
 }
 
-// Origin is where a code comes from: the package whose errors it names. A
-// consumer that does not run a component maps its codes as a formality, and
-// may leave them out of a check of its own mapping (CodesOf). An Origin is
-// one of OriginLimes, OriginExchange and OriginMeter: its method set holds
-// an unexported method, so no other package can make one, and functions
-// rather than variables give them, so none can be assigned another. A nil
-// Origin is none, and has no codes.
-type Origin interface {
-	// String is the origin's name: the package its codes come from.
-	String() string
-	// codeRules are the origin's code rules.
-	codeRules() []codeRule
-}
+// allCodeRules is every code's rule, limes's, the exchange's, then the
+// meter's: what a code alone is looked up in.
+var allCodeRules = slices.Concat(codeRules, exchangeCodeRules, meterCodeRules)
 
-// origin is an Origin of this package's table.
-type origin struct {
-	name  string
-	rules []codeRule
-}
-
-func (o *origin) String() string        { return o.name }
-func (o *origin) codeRules() []codeRule { return o.rules }
-
-// The origins, each one value for the life of the process.
-var (
-	originLimes    = &origin{"limes", codeRules}
-	originExchange = &origin{"exchange", exchangeCodeRules}
-	originMeter    = &origin{"meter", meterCodeRules}
-)
-
-// OriginLimes is the root package and the packages it answers for:
-// verifying and checking a capability, its stores, dpop and jwks.
-func OriginLimes() Origin { return originLimes }
-
-// OriginExchange is module exchange, the token endpoint and an Exchanger in
-// process; a consumer that verifies tokens alone never meets its codes.
-func OriginExchange() Origin { return originExchange }
-
-// OriginMeter is package meter and the usage stores.
-func OriginMeter() Origin { return originMeter }
-
-// origins is every origin, in the order Codes lists their codes: the one
-// table Origins, CodesOf and Codes read, so an origin added has its codes
-// wherever it is listed.
-var origins = []Origin{originLimes, originExchange, originMeter}
-
-// allCodeRules is every code's rule, in origins' order: what a code alone
-// is looked up in.
-var allCodeRules = func() []codeRule {
-	var out []codeRule
-	for _, o := range origins {
-		out = append(out, o.codeRules()...)
-	}
-	return out
-}()
-
-// Origins returns every origin, in the order Codes lists their codes.
-func Origins() []Origin { return slices.Clone(origins) }
-
-// CodesOf returns the codes of first and rest: a consumer that runs no
-// exchange checks its mapping of CodesOf(OriginLimes(), OriginMeter()).
-// Each code comes once, in Codes' order — the origins in Origins' order,
-// however they are passed, and one passed twice counted once. It takes one
-// origin at least, since none would read as every code, which Codes is; a
-// nil Origin has none.
-func CodesOf(first Origin, rest ...Origin) []Code {
-	asked := append([]Origin{first}, rest...)
-	var rules []codeRule
-	for _, o := range origins {
-		if slices.Contains(asked, o) {
-			rules = append(rules, o.codeRules()...)
-		}
-	}
-	return codesIn(rules)
-}
+// ExchangeCodes returns the exchange's codes, in Codes' order: those of
+// module exchange's errors, which a consumer that runs no exchange never
+// meets, and maps as a formality, or leaves out of a check of its own
+// mapping (limestest.WithoutExchange).
+func ExchangeCodes() []Code { return codesIn(exchangeCodeRules) }
 
 // codesIn are the codes of rules, each once.
 func codesIn(rules []codeRule) []Code {
