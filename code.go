@@ -290,8 +290,9 @@ func CodeOf(err error) (Code, bool) {
 }
 
 // Codes returns every code this package answers, the exchange's and the
-// meter's among them, in a fixed order, so a consumer can prove its own
-// mapping covers them all.
+// meter's among them, each once, so a consumer can prove its own mapping
+// covers them all. The order is fixed within a release, and no contract:
+// it may change in any release.
 func Codes() []Code {
 	return codesIn(allCodeRules)
 }

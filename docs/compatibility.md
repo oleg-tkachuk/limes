@@ -15,7 +15,8 @@ redisreplay, otelmetric, exchange and biscuit.
   that use even where every call still compiles.
 - **The error contract** ([errors.md](errors.md)): every code, the HTTP
   status it is answered with, its category, and the reason a refusal is
-  challenged with.
+  challenged with. Which codes `limes.Codes()` lists is contract; the
+  order it lists them in is not, and may change in any release.
 - **Defaults**: what a zero `Config` field, or an option left unset, does;
   [defaults.md](defaults.md) lists every `Config` field and every
   `Default…` constant's value.
@@ -71,6 +72,13 @@ to the error contract in [errors.md](errors.md), or a change to a default in
 [defaults.md](defaults.md), with no marker fails, and so does a marker with
 no migration entry. What a documented function accepts and refuses is held
 by its tests alone.
+
+Until v1.0.0 no signature is settled: any exported name of any module may
+change in a minor release, marked so. That holds between the candidates
+of 1.0 too, since a candidate is the newest 0.x release's API: read the
+migration guide from the release one names to the release the next one
+names. A consumer that holds a function as a value, rather than calls it,
+meets such a change even where every call still compiles.
 
 ## From 1.0
 
