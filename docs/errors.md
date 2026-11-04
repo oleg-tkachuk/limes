@@ -192,8 +192,11 @@ never as one fixed code: a client's error stays the client's.
 A code answered with another status or category is a break, and it still
 compiles. `limestest` turns it into a failing test of the consumer's: it
 pins what the consumer's own transport answers each code with, over
-every code but those it leaves out — the exchange's, for a consumer that
-runs none (`limestest.WithoutExchange`). A failure
+every code but those of a component the consumer does not run — the
+exchange's (`limestest.WithoutExchange`), the meter's
+(`limestest.WithoutMeter`). Every code is checked by default, so a code
+limes adds fails the check until it is pinned; no option leaves out a code
+alone. A failure
 names the entry to pin, in Go's syntax, with a code that names itself
 (`fmt.Stringer`) named beside its number:
 
@@ -283,7 +286,9 @@ unauthenticated code, not to its permission-denied one.
 
 The meter's sentinels name their codes, and limes's functions answer them
 as their own: `limes.CodeOf`, `limes.CategoryOf`, `limes.ProblemOf` and
-`limes.Codes` know every one.
+`limes.Codes` know every one. A consumer that meters nothing never meets
+them, and may leave them out of a check of its own mapping
+(`limestest.WithoutMeter`).
 
 | Code | HTTP | Sentinel | `reason` | Challenge `error` | Title | Category |
 |---|---|---|---|---|---|---|
@@ -314,9 +319,8 @@ in RFC 6749 §5.2's format, as the token endpoint does. The codes are RFC
 They are limes's codes too: each sentinel of the exchange names its own,
 so `limes.CodeOf`, `limes.CategoryOf` and `limes.ProblemOf` answer an
 exchange's error as the endpoint does — with the same code and status,
-ahead of any limes error it wraps — and `limes.Codes()` lists them, as
-`limes.ExchangeCodes()` does alone. One mapping of the categories covers
-the exchange. A consumer that runs no exchange never meets these codes,
+ahead of any limes error it wraps — and `limes.Codes()` lists them. One
+mapping of the categories covers the exchange. A consumer that runs no exchange never meets these codes,
 and may leave them out of a check of its own mapping
 (`limestest.WithoutExchange`).
 

@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/oleg-tkachuk/limes/dpop"
+	"github.com/oleg-tkachuk/limes/internal/link"
 	"github.com/oleg-tkachuk/limes/jwks"
 )
 
@@ -329,25 +330,41 @@ func TestAnErrorNamingItsCode(t *testing.T) {
 	}
 }
 
-// The exchange's codes are some of Codes, in its order, and none of
-// limes's own or the meter's.
-func TestExchangeCodes(t *testing.T) {
-	codes := ExchangeCodes()
-	if len(codes) == 0 || !slices.Contains(codes, CodeInvalidGrant) {
-		t.Fatalf("ExchangeCodes() = %q, want invalid_grant among them", codes)
-	}
-	var inOrder []Code
-	for _, c := range Codes() {
-		if slices.Contains(codes, c) {
-			inOrder = append(inOrder, c)
+// The codes of each optional component are some of Codes, in its order,
+// apart from each other and from limes's own.
+func TestComponentCodes(t *testing.T) {
+	for name, tc := range map[string]struct {
+		codes func() []string
+		has   Code
+	}{
+		"exchange": {link.ExchangeCodes, CodeInvalidGrant},
+		"meter":    {link.MeterCodes, CodeLeaseNested},
+	} {
+		var codes []Code
+		for _, c := range tc.codes() {
+			codes = append(codes, Code(c))
+		}
+		if !slices.Contains(codes, tc.has) {
+			t.Errorf("%s's codes %q lack %q", name, codes, tc.has)
+		}
+		var inOrder []Code
+		for _, c := range Codes() {
+			if slices.Contains(codes, c) {
+				inOrder = append(inOrder, c)
+			}
+		}
+		if !slices.Equal(inOrder, codes) {
+			t.Errorf("%s's codes %q; Codes() lists them as %q", name, codes, inOrder)
+		}
+		for _, c := range []Code{CodeRevoked, CodeInvalidRequest} {
+			if slices.Contains(codes, c) {
+				t.Errorf("%s's codes hold %q, one of limes's own", name, c)
+			}
 		}
 	}
-	if !slices.Equal(inOrder, codes) {
-		t.Errorf("ExchangeCodes() = %q; Codes() lists them as %q", codes, inOrder)
-	}
-	for _, c := range []Code{CodeRevoked, CodeInvalidRequest, CodeLeaseNested} {
-		if slices.Contains(codes, c) {
-			t.Errorf("ExchangeCodes() holds %q, none of the exchange's own", c)
+	for _, c := range link.ExchangeCodes() {
+		if slices.Contains(link.MeterCodes(), c) {
+			t.Errorf("%q is both the exchange's and the meter's", c)
 		}
 	}
 }

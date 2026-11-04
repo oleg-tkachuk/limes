@@ -7,6 +7,7 @@ import (
 
 	"github.com/oleg-tkachuk/limes/dpop"
 	"github.com/oleg-tkachuk/limes/internal/errcode"
+	"github.com/oleg-tkachuk/limes/internal/link"
 	"github.com/oleg-tkachuk/limes/jwks"
 )
 
@@ -222,11 +223,22 @@ var exchangeCodeRules = []codeRule{
 // meter's: what a code alone is looked up in.
 var allCodeRules = slices.Concat(codeRules, exchangeCodeRules, meterCodeRules)
 
-// ExchangeCodes returns the exchange's codes, in Codes' order: those of
-// module exchange's errors, which a consumer that runs no exchange never
-// meets, and maps as a formality, or leaves out of a check of its own
-// mapping (limestest.WithoutExchange).
-func ExchangeCodes() []Code { return codesIn(exchangeCodeRules) }
+// namesOf are the codes of rules, each once, as strings.
+func namesOf(rules []codeRule) []string {
+	var out []string
+	for _, c := range codesIn(rules) {
+		out = append(out, string(c))
+	}
+	return out
+}
+
+// The codes of the optional components, for limestest alone: which
+// component a code comes from matters only to a check of a consumer's
+// mapping, never to the mapping itself.
+func init() {
+	link.ExchangeCodes = func() []string { return namesOf(exchangeCodeRules) }
+	link.MeterCodes = func() []string { return namesOf(meterCodeRules) }
+}
 
 // codesIn are the codes of rules, each once.
 func codesIn(rules []codeRule) []Code {
