@@ -28,21 +28,40 @@ import (
 	"testing"
 
 	"github.com/oleg-tkachuk/limes"
+	"github.com/oleg-tkachuk/limes/internal/link"
 )
 
-// Option narrows the codes a check walks.
+// Option narrows the codes a check walks. There is one for each component
+// a consumer may not run, and none for a code alone: a check walks every
+// code it does not leave out by component, so a code limes adds fails it
+// until it is pinned. That default is the strictest there is, and no option
+// will change it.
 type Option func(*checked)
 
-// checked is the codes a check walks, and those it leaves out.
+// checked is the codes a check leaves out.
 type checked struct {
 	without []limes.Code
 }
 
-// WithoutExchange leaves the exchange's codes (limes.ExchangeCodes) out of
-// a check, for a consumer that runs no exchange: it never meets them, and
-// pins none.
+// leaveOut adds codes, strings of limes.Code, to those a check leaves out.
+func (c *checked) leaveOut(codes []string) {
+	for _, code := range codes {
+		c.without = append(c.without, limes.Code(code))
+	}
+}
+
+// WithoutExchange leaves the exchange's codes out of a check, for a
+// consumer that runs no exchange (module exchange): it never meets them,
+// and pins none.
 func WithoutExchange() Option {
-	return func(c *checked) { c.without = append(c.without, limes.ExchangeCodes()...) }
+	return func(c *checked) { c.leaveOut(link.ExchangeCodes()) }
+}
+
+// WithoutMeter leaves the meter's codes out of a check, for a consumer
+// that meters nothing (package meter, a usage store): it never meets them,
+// and pins none.
+func WithoutMeter() Option {
+	return func(c *checked) { c.leaveOut(link.MeterCodes()) }
 }
 
 // codesFor are the codes of limes.Codes that opts leave in.

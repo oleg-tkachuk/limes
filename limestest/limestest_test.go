@@ -125,7 +125,7 @@ func toTransport(code limes.Code) transportCode {
 func TestCheckMapping(t *testing.T) {
 	pinned := map[limes.Code]transportCode{}
 	for _, c := range limes.Codes() {
-		if !slices.Contains(limes.ExchangeCodes(), c) {
+		if !slices.Contains(exchangeCodes, c) {
 			pinned[c] = toTransport(c)
 		}
 	}
@@ -214,5 +214,56 @@ func TestCheckMappingNamesAStringOnce(t *testing.T) {
 	assertReported(t, "a string code not pinned", r.errors, []string{`pin it, mapped: "revoked": "unauthenticated",`})
 	if len(r.errors) == 1 && strings.Contains(r.errors[0], "/*") {
 		t.Errorf("reported %q: its name beside a string", r.errors[0])
+	}
+}
+
+// exchangeCodes are the exchange's codes, as docs/errors.md lists them.
+var exchangeCodes = []limes.Code{
+	limes.CodeInvalidClient, limes.CodeUnauthorizedClient, limes.CodeUnsupportedGrantType, limes.CodeInvalidGrant,
+	limes.CodeInvalidTarget, limes.CodeInvalidScope, limes.CodeInvalidAuthorizationDetails, limes.CodeServerError,
+}
+
+// Each option leaves its component's codes out, and its alone; both leave
+// out both.
+func TestOptionsLeaveOutTheirComponent(t *testing.T) {
+	// unpinnedOf are the codes a check of pinned with opts names as not
+	// pinned, when nothing is.
+	unpinnedOf := func(opts ...limestest.Option) []limes.Code {
+		r := &recorder{TB: t}
+		limestest.CheckMapping(r, map[limes.Code]transportCode{}, toTransport, opts...)
+		var out []limes.Code
+		for _, c := range limes.Codes() {
+			for _, e := range r.errors {
+				if strings.HasPrefix(e, fmt.Sprintf("limestest: %q is not pinned", c)) {
+					out = append(out, c)
+				}
+			}
+		}
+		return out
+	}
+	all := unpinnedOf()
+	if !slices.Equal(all, limes.Codes()) {
+		t.Fatalf("no option: %d codes checked, want every one of %d", len(all), len(limes.Codes()))
+	}
+	for name, tc := range map[string]struct {
+		opts []limestest.Option
+		gone []limes.Code
+		kept []limes.Code
+	}{
+		"without the exchange": {[]limestest.Option{limestest.WithoutExchange()}, exchangeCodes, []limes.Code{limes.CodeLeaseNested, limes.CodeRevoked}},
+		"without the meter":    {[]limestest.Option{limestest.WithoutMeter()}, []limes.Code{limes.CodeLeaseNested, limes.CodeChargeNotFound}, []limes.Code{limes.CodeInvalidGrant, limes.CodeRevoked}},
+		"without both":         {[]limestest.Option{limestest.WithoutExchange(), limestest.WithoutMeter()}, append([]limes.Code{limes.CodeLeaseNested}, exchangeCodes...), []limes.Code{limes.CodeRevoked, limes.CodeInvalidRequest}},
+	} {
+		got := unpinnedOf(tc.opts...)
+		for _, c := range tc.gone {
+			if slices.Contains(got, c) {
+				t.Errorf("%s: %q is checked", name, c)
+			}
+		}
+		for _, c := range tc.kept {
+			if !slices.Contains(got, c) {
+				t.Errorf("%s: %q is left out", name, c)
+			}
+		}
 	}
 }
