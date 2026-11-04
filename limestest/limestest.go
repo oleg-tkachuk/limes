@@ -7,7 +7,7 @@
 // consumer's test instead of its traffic:
 //
 //	func TestErrorContract(t *testing.T) {
-//		codes := limes.CodesOf(limes.OriginLimes, limes.OriginMeter)
+//		codes := limes.CodesOf(limes.OriginLimes(), limes.OriginMeter())
 //		limestest.CheckMapping(t, codes, map[limes.Code]connect.Code{
 //			"revoked": connect.CodeUnauthenticated,
 //			// …

@@ -198,7 +198,7 @@ names the entry to pin, in Go's syntax, with a code that names itself
 
 ```go
 func TestErrorContract(t *testing.T) {
-	codes := limes.CodesOf(limes.OriginLimes, limes.OriginMeter)
+	codes := limes.CodesOf(limes.OriginLimes(), limes.OriginMeter())
 	// Pinned from the first failing run, which names every entry.
 	limestest.CheckMapping(t, codes, map[limes.Code]connect.Code{
 		"revoked": connect.CodeUnauthenticated,
@@ -315,7 +315,7 @@ They are limes's codes too: each sentinel of the exchange names its own,
 so `limes.CodeOf`, `limes.CategoryOf` and `limes.ProblemOf` answer an
 exchange's error as the endpoint does — with the same code and status,
 ahead of any limes error it wraps — and `limes.Codes()` lists them, as
-`limes.CodesOf(limes.OriginExchange)` does alone. One mapping of the
+`limes.CodesOf(limes.OriginExchange())` does alone. One mapping of the
 categories covers the exchange. A consumer that runs no exchange never
 meets these codes, and may leave them out of a check of its own mapping.
 
