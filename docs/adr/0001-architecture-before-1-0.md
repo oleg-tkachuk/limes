@@ -1,6 +1,6 @@
 # ADR-0001: Consolidate the architecture behind the frozen layout
 
-**Status:** Accepted
+**Status:** Accepted, amended on 2026-11-05 (below)
 **Date:** 2026-10-20
 **Deciders:** Oleg Tkachuk
 
@@ -181,3 +181,20 @@ freeze allows now and names the rest, so the API items can be decided before
    one's release (`GATED` in `.github/ci/release.ts`).
 2. **API items.** Should item 5 land before 1.0, or wait for v2? **Decided on
    2026-10-20: before 1.0**, in v0.109.0.
+
+## Amendment, 2026-11-05
+
+[ADR-0016](0016-one-release-commit.md) removed the release machinery this
+ADR relies on: `require-limes.ts`, the `released-limes` CI job and `GATED`
+in `.github/ci/release.ts`. Every nested module still builds against the
+limes of its commit through its `replace`, as open question 1 decided, but
+no job against the released limes gates its release any more. The Context's
+CI row, item 7's reason and item 11's `require-limes.ts` describe the
+machinery as it was.
+
+[ADR-0008](0008-biscuit-module.md) moved the Biscuit form — its encoding
+and biscuit-go — to the nested module `biscuit`, which the root reaches
+through the `TokenForm` interface (`sealed_form.go`; `IssuerConfig.Biscuit`,
+`BiscuitConfig.Form`). `Issuer.Biscuit` and `Verifier.BiscuitCopy` stay on
+the root. Option B's argument that Biscuit cannot leave the root no longer
+describes the code.

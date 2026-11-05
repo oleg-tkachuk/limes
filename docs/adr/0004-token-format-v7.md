@@ -1,6 +1,6 @@
 # ADR-0004: A capability format that is an RFC 9068 access token
 
-**Status:** Accepted, amended by [ADR-0005](0005-acting-on-behalf.md) and [ADR-0006](0006-one-token-format.md)
+**Status:** Accepted, amended by [ADR-0005](0005-acting-on-behalf.md), superseded in part by [ADR-0006](0006-one-token-format.md) (below)
 **Date:** 2026-10-27
 **Deciders:** Oleg Tkachuk
 
@@ -90,3 +90,12 @@ claims, which is every access token not minted as a capability.
   `typ` before.
 - Format changes planned for 1.0, such as the resource name prefixes, land
   in v7 alone, which has the members for them.
+
+## Amendment, 2026-11-05
+
+[ADR-0006](0006-one-token-format.md) replaced the two formats with one:
+every capability is an `at+jwt` with `limes_v: 7`. v6, `TokenTypeV7`,
+`VerifierConfig.AcceptTokenTypes` and `SignerConfig.TokenType` are removed,
+and decision 3's rollout no longer applies. The interop test is now
+`TestACapabilityIsAnRFC9068AccessToken`
+(`examples/internal/interop/rfc9068_test.go`).

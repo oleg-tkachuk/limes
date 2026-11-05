@@ -41,8 +41,8 @@ Two different things are at stake, and only one of them is frozen:
 
 ## Decision
 
-Before 1.0, state the windows in the contracts, and leave the mechanism to a
-minor:
+Before 1.0, state the windows in the contracts, and ship the mechanism that
+bounds the ledger:
 
 1. Reword the promises of `Charge` (with `ExternalRef`), `Settle` and `Refund`
    to hold **while the charge is in the ledger**, and say that a ledger may
@@ -77,18 +77,16 @@ The guide says the ledger grows, and how to delete old rows in SQL.
 **Pros:** no code. **Cons:** every consumer works out the same constraints
 alone, and the contracts keep promising what a deletion breaks.
 
-### Option B: reword the contracts now, purge in a minor (chosen)
+### Option B: reword the contracts and ship the purge before 1.0 (chosen)
 
 | Dimension | Assessment |
 |---|---|
-| Complexity | Low now (wording, one constant); medium later (one optional interface, two stores, metertest) |
+| Complexity | Medium: wording, one constant, one optional interface, two stores, metertest |
 | Risk to 1.0 | None: no signature changes |
 | Reversibility | The window can be widened in any minor; only narrowing would break |
 
-**Pros:** the frozen part is settled before the freeze; the mechanism lands
-when a consumer needs it, tested by the shared suite. **Cons:** until it
-lands, a consumer who must bound the table still writes its own deletion,
-now at least against a contract that allows it.
+**Pros:** the frozen part is settled before the freeze; the mechanism is
+tested by the shared suite. **Cons:** more work before 1.0.
 
 ### Option C: partition `limes.charges` by time in pgstore
 
@@ -123,15 +121,14 @@ The discriminating force is the freeze, and it falls on the promises, not on
 the mechanism. Option A keeps a promise every deletion breaks; option C
 breaks idempotency to save delete cost; option D solves reports, which are
 not the problem. Option B settles the one thing 1.0 makes expensive — what a
-consumer may rely on — and defers what any minor can add.
+consumer may rely on — and ships the purge that keeps to it.
 
 ## Consequences
 
 - The contracts of `Charge`, `Settle` and `Refund` name the ledger as their
   window; the guide says the ledger grows until a store purges it, and that
   a deletion of one's own must respect `MinChargeRetention` too.
-- `metertest` gains no check until the purge lands; then it checks the
-  window from both sides.
+- `metertest` checks the window from both sides.
 - To revisit: option C, if batched purges cannot keep up; option D, if a
   consumer needs exact sums past the retention inside limes.
 

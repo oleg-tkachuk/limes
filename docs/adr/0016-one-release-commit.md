@@ -1,6 +1,6 @@
 # ADR-0016: Every module released from one release commit
 
-**Status:** Accepted, amended on 2026-11-03 (below)
+**Status:** Accepted, amended on 2026-11-03 and 2026-11-05 (below)
 **Date:** 2026-10-31
 **Deciders:** Oleg Tkachuk
 
@@ -146,3 +146,19 @@ its last release, as a patch when none of its commits is due, as before. One
 unchanged keeps its requirement, which stays below the limes the changelog
 last names, as point 3 holds it. When limes reaches v1.0.0, every nested
 module still on 0.x follows it to its own v1.0.0, changed or not.
+
+## Amendment, 2026-11-05
+
+Point 3's check is `checkRequirement` in `.github/ci/changelog.ts`, run by
+`changelog.ts check`: a nested module's requirement of limes is a release
+of limes reachable from the commit, or the one the root changelog's newest
+entry plans.
+
+A release pull request that cuts a major is opened, or made, a draft
+(`release-plan.ts`), which `merge-green.ts` leaves for the maintainer; no
+label marks it, as rollout step 4 planned.
+
+While a line of candidates of limes's next major is open, each release of
+limes is followed by the next candidate: `release-tag.ts` sets the step
+output `follow-candidate` (`followWithCandidate`), and `release.yaml` cuts
+the candidate after the tags.

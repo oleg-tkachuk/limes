@@ -1,6 +1,6 @@
 # ADR-0017: Budget leases for delegated capabilities
 
-**Status:** Proposed
+**Status:** Accepted, first version implemented (below); decision 4 (nested leases) not implemented
 **Date:** 2026-10-31
 **Deciders:** Oleg Tkachuk
 **Relates to:** [ADR-0007](0007-pgstore-components.md), [ADR-0015](0015-release-matching-holds.md)
@@ -245,3 +245,18 @@ against 1.79 ms. Deep chains gain nothing. A charge under a lease still
 reads the whole lineage to find the lease, so at depth 64 it takes 7.5 ms
 against 5.4 ms without one: past a few levels, a lease buys freedom from
 contention, not speed.
+
+## Amendment, 2026-11-05
+
+The first version is implemented and on by default: `meter.Leaser`,
+memstore's and pgstore's leases (migrations 032 to 034), forwarded by
+`otelmetric`; pgstore opens leases unless `Config.DisableLeases` is set.
+Decision 4 remains open: `Lease` under an ancestor holding an open lease is
+refused with `meter.ErrLeaseNested`.
+
+A charge the lease balance does not cover is refused with
+`meter.ErrLeaseExhausted`, a kind of `limes.ErrBudgetExceeded`, rather than
+with `limes.ErrBudgetExceeded` itself (decision 2).
+
+ADR-0018 took `Charge` from 16 round trips to 6, not "toward one or two"
+as the Consequences expected (`pgstore/round_trips_test.go`).

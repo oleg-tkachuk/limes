@@ -1,6 +1,6 @@
 # ADR-0013: Revoking every capability of a subject, a client or a session
 
-**Status:** Accepted
+**Status:** Accepted, amended by [ADR-0014](0014-bulk-revocation-across-tenants.md) and on 2026-11-05 (below)
 **Date:** 2026-10-29
 **Deciders:** Oleg Tkachuk
 **Relates to:** [ADR-0003](0003-oauth-token-exchange.md)
@@ -72,3 +72,18 @@ deferred revoking by session because no capability records its session.
 - **`Record` gains a field and `InsertRequest` gains one.** A store of the
   consumer's own that ignores `Session` keeps working, but revokes nothing
   by it. `storetest` says so when its `BulkRevoker` is set.
+
+## Amendment, 2026-11-05
+
+[ADR-0014](0014-bulk-revocation-across-tenants.md) added
+`RevokeMatchingRequest.AllTenants`, which matches in every tenant by
+`ClientID` and `Session` alone.
+
+The selectors are five: `Subject`, `ClientID`, `Session`, `OnBehalfOf` and
+`RunID` (`bulk_revoke.go`). `RunID` is a column of its own, `run_id`
+(pgstore migrations 029 and 030).
+
+pgstore's indexes are `(tenant_id, X, id)`, in id order for the batches,
+not `(tenant_id, X)` (migrations 026 and 030). Those on `client_id`,
+`on_behalf_of`, `session` and `run_id` are partial, `WHERE X IS NOT NULL`;
+the one on `subject` is not.
