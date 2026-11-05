@@ -70,6 +70,28 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## exchange/v0.17.0
+
+- `jwtverify.KeySource` is a struct, where it was an interface returning a
+  `jwk.Set`, and no name of `jwtverify` takes or returns a jwx type, so the
+  exchange module's v1 line does not follow jwx's major versions.
+  `StaticKeys` takes the identity provider's JWK Set document and returns
+  an error; `CachedKeys(cache, url)` is `RemoteKeys(ctx, url, client)`,
+  which keeps its own cache until `ctx` is done. `Config.Keys` is a
+  `*KeySource`:
+
+  ```go
+  // before
+  cache, _ := jwk.NewCache(ctx, httprc.NewClient())
+  _ = cache.Register(ctx, jwksURL)
+  v, err := jwtverify.New(jwtverify.Config{Issuer: idp, Keys: jwtverify.CachedKeys(cache, jwksURL)})
+  // after
+  keys, err := jwtverify.RemoteKeys(ctx, jwksURL, nil)
+  v, err := jwtverify.New(jwtverify.Config{Issuer: idp, Keys: keys})
+  ```
+
+  A `KeySource` of your own goes: hand `StaticKeys` the document it served.
+
 ## pgstore/v0.66.0
 
 - The schema is at version 38. Migration 038 appends to the view
