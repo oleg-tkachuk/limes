@@ -21,10 +21,10 @@ var sqlMatchingHoldsHead = `
 SELECT ` + sqlHoldColumns + ` FROM limes.reservations
 WHERE id IN (
     SELECT r.id FROM limes.reservations r
-    JOIN limes.capabilities h ON h.id = r.capability_id
+    JOIN ` + lineageView + ` h ON h.id = r.capability_id
     WHERE ($1::uuid IS NULL OR r.tenant_id = $1) AND h.revoked
       AND EXISTS (
-        SELECT 1 FROM limes.capabilities c
+        SELECT 1 FROM ` + lineageView + ` c
         WHERE c.id IN (` + sqlChainUp("r.capability_id") + `) AND c.tenant_id = r.tenant_id`
 
 const sqlMatchingHoldsTail = `)

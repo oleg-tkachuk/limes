@@ -1,6 +1,6 @@
 # ADR-0007: Split the meter by what a consumer uses, and pgstore along it
 
-**Status:** Accepted
+**Status:** Accepted, amended on 2026-11-05 (decision 5)
 **Date:** 2026-10-29
 **Deciders:** Oleg Tkachuk
 **Relates to:** [ADR-0001](0001-architecture-before-1-0.md)
@@ -107,7 +107,9 @@ at any minor.
      owner. This needs PostgreSQL 15 or later, which pgstore then states as
      its minimum.
    - The meter, the ledger, the charges and the erase's step that forgets
-     an erased tenant read only the view. A test holds the view to each
+     an erased tenant read only the view. Migration 038 appends `revoked` and the
+     bulk revocation's selectors, so the leases and `ReleaseMatching` read
+     it too (amended 2026-11-05). A test holds the view to each
      tenant's rows, for the runtime role and the owner, and a
      `FOR KEY SHARE` through it to the record row; another fails on any
      query of the usage files that names `limes.capabilities`. The erase's
