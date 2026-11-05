@@ -73,7 +73,7 @@ func (c *Census) count(req limes.CountRecordsRequest) ([]limes.RecordCount, erro
 	groups := map[countKey]*limes.RecordCount{}
 	for id, rec := range s.caps {
 		if !req.AllTenants && rec.Subject.TenantID != req.TenantID ||
-			!s.selectedLocked(rec, selectors{subject: req.Subject, onBehalfOf: req.OnBehalfOf, clientID: req.ClientID, session: req.Session, runID: req.RunID}) {
+			!s.selectedLocked(rec, selectors{subject: req.Subject, onBehalfOf: req.OnBehalfOf, clientID: req.ClientID, session: req.Session, subjectIssuer: req.SubjectIssuer, runID: req.RunID}) {
 			continue
 		}
 		revoked, err := s.revokedLocked(id)
@@ -201,14 +201,17 @@ type listCursor struct {
 // cursor holds it, so one handed back with other filters — or for another
 // tenant, or for every tenant where one is asked for — is refused rather
 // than paged on from its id under them, which would be neither listing.
-// AllTenants is named only when set, so a tenant's cursor handed out
-// before it existed still pages.
+// AllTenants and the subject issuer are named only when set, so a tenant's
+// cursor handed out before they existed still pages.
 func filtersKey(req limes.ListRecordsRequest) string {
 	dispositions := slices.Clone(req.Dispositions)
 	slices.Sort(dispositions)
 	key := []any{req.TenantID, req.PrincipalType, req.Subject, req.SubjectPrefix, slices.Compact(dispositions), req.OnBehalfOf, req.ClientID, req.Session, req.RunID}
 	if req.AllTenants {
 		key = append(key, req.AllTenants)
+	}
+	if req.SubjectIssuer != "" {
+		key = append(key, req.SubjectIssuer)
 	}
 	raw, err := json.Marshal(key)
 	if err != nil {
@@ -277,7 +280,7 @@ func (c *Census) list(req limes.ListRecordsRequest, past func(uuid.UUID) bool) (
 			req.PrincipalType != limes.PrincipalTypeUnspecified && rec.Subject.Type != req.PrincipalType,
 			req.Subject != "" && rec.Subject.Subject != req.Subject,
 			!strings.HasPrefix(rec.Subject.Subject, req.SubjectPrefix),
-			!s.selectedLocked(rec, selectors{onBehalfOf: req.OnBehalfOf, clientID: req.ClientID, session: req.Session, runID: req.RunID}),
+			!s.selectedLocked(rec, selectors{onBehalfOf: req.OnBehalfOf, clientID: req.ClientID, session: req.Session, subjectIssuer: req.SubjectIssuer, runID: req.RunID}),
 			!past(id):
 			continue
 		}
@@ -311,7 +314,7 @@ func (s *Store) listingLocked(id uuid.UUID, now time.Time) (limes.RecordListing,
 	if err != nil {
 		return limes.RecordListing{}, err
 	}
-	r := limes.Record{Capability: rec.Clone(), IssuedBy: s.issuedBy[id].Clone(), Session: s.sessions[id]}
+	r := limes.Record{Capability: rec.Clone(), IssuedBy: s.issuedBy[id].Clone(), Session: s.sessions[id], SubjectIssuer: s.subjectIssuers[id]}
 	if entry, ok := s.revoked[id]; ok {
 		r.Revocation = &entry
 	}

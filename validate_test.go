@@ -282,18 +282,25 @@ func TestDelegationStartIsExact(t *testing.T) {
 }
 
 // An insert names the capability it records, and one that expires: the zero
-// id and no expiry are refused.
+// id and no expiry are refused, and so is a child naming the issuance
+// metadata it takes from its parent.
 func TestInsertRequestValidate(t *testing.T) {
 	expires := time.Now().Add(time.Hour)
+	child := Capability{ID: uuid.New(), ParentID: uuid.New(), ExpiresAt: expires}
 	for name, tc := range map[string]struct {
-		c  Capability
-		ok bool
+		req InsertRequest
+		ok  bool
 	}{
-		"an id and an expiry": {Capability{ID: uuid.New(), ExpiresAt: expires}, true},
-		"no id":               {Capability{ExpiresAt: expires}, false},
-		"no expiry":           {Capability{ID: uuid.New()}, false},
+		"an id and an expiry": {InsertRequest{Capability: Capability{ID: uuid.New(), ExpiresAt: expires}}, true},
+		"no id":               {InsertRequest{Capability: Capability{ExpiresAt: expires}}, false},
+		"no expiry":           {InsertRequest{Capability: Capability{ID: uuid.New()}}, false},
+		"a root's session and subject issuer": {InsertRequest{
+			Capability: Capability{ID: uuid.New(), ExpiresAt: expires}, Session: "sid", SubjectIssuer: "https://idp.example",
+		}, true},
+		"a child's own session":        {InsertRequest{Capability: child, Session: "sid"}, false},
+		"a child's own subject issuer": {InsertRequest{Capability: child, SubjectIssuer: "https://idp.example"}, false},
 	} {
-		err := (InsertRequest{Capability: tc.c}).Validate()
+		err := tc.req.Validate()
 		if tc.ok && err != nil {
 			t.Errorf("an insert with %s: %v", name, err)
 		}

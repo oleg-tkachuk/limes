@@ -27,10 +27,11 @@ func TestFixturesSetEveryField(t *testing.T) {
 }
 
 // checkRecord reads back a Record's capability, its issuer and its
-// revocation, and checkSessionOnRecord its session; a field the module adds
-// to Record needs a check of its own.
+// revocation, checkSessionOnRecord its session and
+// checkSubjectIssuerOnRecord its subject issuer; a field the module adds to
+// Record needs a check of its own.
 func TestRecordFieldsAreChecked(t *testing.T) {
-	want := []string{"Capability", "IssuedBy", "Session", "Revocation"}
+	want := []string{"Capability", "IssuedBy", "Session", "SubjectIssuer", "Revocation"}
 	if got := fields.Names[limes.Record](); !slices.Equal(got, want) {
 		t.Errorf("limes.Record has fields %q; checkRecord reads back %q", got, want)
 	}

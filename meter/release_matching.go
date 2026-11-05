@@ -14,17 +14,18 @@ type ReleaseMatchingRequest struct {
 	// TenantID is the tenant whose holds are released; AllTenants releases
 	// them in every tenant instead. Exactly one of the two is required.
 	TenantID uuid.UUID
-	// AllTenants releases the holds in every tenant, by ClientID and Session
-	// alone, as limes.RevokeMatchingRequest.AllTenants revokes. It names no
+	// AllTenants releases the holds in every tenant, by ClientID, Session
+	// and SubjectIssuer alone, as limes.RevokeMatchingRequest.AllTenants
+	// revokes. It names no
 	// tenant, so a call after a revocation across tenants needs no list of
 	// the tenants it wrote in: one whose release failed is retried as it
 	// was, though the revocation, repeated, revokes nothing.
 	AllTenants bool
-	// Subject, OnBehalfOf, ClientID, Session and RunID select as on
-	// limes.RevokeMatchingRequest; at least one of them or CapabilityID is
-	// required.
-	Subject, OnBehalfOf, ClientID, Session string
-	RunID                                  uuid.UUID
+	// Subject, OnBehalfOf, ClientID, Session, SubjectIssuer and RunID
+	// select as on limes.RevokeMatchingRequest; at least one of them or
+	// CapabilityID is required.
+	Subject, OnBehalfOf, ClientID, Session, SubjectIssuer string
+	RunID                                                 uuid.UUID
 	// CapabilityID selects one capability by its id, as after
 	// limes.Revoker.Revoke of that one: its holds and those of the
 	// capabilities delegated from it. It names one tenant's.
@@ -43,10 +44,10 @@ func (r ReleaseMatchingRequest) Validate() error {
 		return invalidRequest("release matching: a tenant id or AllTenants required")
 	case r.TenantID != uuid.Nil() && r.AllTenants:
 		return invalidRequest("release matching: tenant id %s beside AllTenants", r.TenantID)
-	case r.Subject == "" && r.OnBehalfOf == "" && r.ClientID == "" && r.Session == "" && r.RunID == uuid.Nil() && r.CapabilityID == uuid.Nil():
-		return invalidRequest("release matching: no selector; name a subject, an on-behalf-of, a client, a session, an agent run or a capability")
+	case r.Subject == "" && r.OnBehalfOf == "" && r.ClientID == "" && r.Session == "" && r.SubjectIssuer == "" && r.RunID == uuid.Nil() && r.CapabilityID == uuid.Nil():
+		return invalidRequest("release matching: no selector; name a subject, an on-behalf-of, a client, a session, a subject issuer, an agent run or a capability")
 	case r.AllTenants && (r.Subject != "" || r.OnBehalfOf != "" || r.RunID != uuid.Nil() || r.CapabilityID != uuid.Nil()):
-		return invalidRequest("release matching: AllTenants matches by client or session alone; a subject, an agent run or a capability names one tenant's")
+		return invalidRequest("release matching: AllTenants matches by client, session or subject issuer alone; a subject, an agent run or a capability names one tenant's")
 	}
 	return validateHousekeepingLimit("release matching", r.Limit)
 }

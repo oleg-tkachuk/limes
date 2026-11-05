@@ -15,11 +15,13 @@ type RevokeMatchingRequest struct {
 	// TenantID is the tenant whose capabilities are revoked; AllTenants
 	// revokes in every tenant instead. Exactly one of them is required.
 	TenantID uuid.UUID
-	// AllTenants matches capabilities in every tenant, by ClientID and
-	// Session alone: an authorization server's client and an identity
-	// provider's session are named by the issuer, which knows no tenant, so
-	// one may hold capabilities in many. Subject and OnBehalfOf name a
-	// principal only within its tenant, and are refused beside it.
+	// AllTenants matches capabilities in every tenant, by ClientID,
+	// Session and SubjectIssuer alone: an authorization server's client and
+	// an identity provider's session are named by the issuer, which knows no
+	// tenant, so one may hold capabilities in many. Subject and OnBehalfOf
+	// name a principal only within its tenant, and are refused beside it.
+	// Where more than one identity provider issues subject tokens, two may
+	// name the same client or session: SubjectIssuer tells them apart.
 	AllTenants bool
 	// Subject matches a capability's Subject.Subject, the principal it
 	// authorises: a user who leaves, an agent retired.
@@ -38,6 +40,13 @@ type RevokeMatchingRequest struct {
 	// issued apart share no lineage. The consumer mints run ids, so they name
 	// a run within its tenant alone, and AllTenants refuses it.
 	RunID uuid.UUID
+	// SubjectIssuer matches the issuer of the token a capability's subject
+	// was authenticated by (InsertRequest.SubjectIssuer): with ClientID or
+	// Session, one identity provider's client or session where another names
+	// the same; alone, every capability of a provider removed. Empty
+	// matches any issuer, and none: a capability recorded without one is
+	// reached only that way.
+	SubjectIssuer string
 	// Note and Actor are stored for audit, as on RevokeRequest.
 	Note, Actor string
 	// Limit bounds the capabilities one call revokes. Zero:
@@ -53,10 +62,10 @@ func (r RevokeMatchingRequest) Validate() error {
 		return invalidRequest("revoke matching: a tenant id or AllTenants required")
 	case r.TenantID != uuid.Nil() && r.AllTenants:
 		return invalidRequest("revoke matching: tenant id %s beside AllTenants", r.TenantID)
-	case r.Subject == "" && r.OnBehalfOf == "" && r.ClientID == "" && r.Session == "" && r.RunID == uuid.Nil():
-		return invalidRequest("revoke matching: no selector; name a subject, an on-behalf-of, a client, a session or an agent run")
+	case r.Subject == "" && r.OnBehalfOf == "" && r.ClientID == "" && r.Session == "" && r.RunID == uuid.Nil() && r.SubjectIssuer == "":
+		return invalidRequest("revoke matching: no selector; name a subject, an on-behalf-of, a client, a session, an agent run or a subject issuer")
 	case r.AllTenants && (r.Subject != "" || r.OnBehalfOf != "" || r.RunID != uuid.Nil()):
-		return invalidRequest("revoke matching: AllTenants matches by client or session alone; a subject or an agent run names one tenant's")
+		return invalidRequest("revoke matching: AllTenants matches by client, session or subject issuer alone; a subject or an agent run names one tenant's")
 	case r.Limit < 0:
 		return invalidRequest("revoke matching: limit %d is negative", r.Limit)
 	}
@@ -87,11 +96,12 @@ type RevokeMatchingResult struct {
 }
 
 // BulkRevoker revokes every capability of a tenant that matches a subject,
-// an on-behalf-of, a client, a session or an agent run — or of every tenant
-// that matches a client or a session — in batches, as Revoke revokes one:
+// an on-behalf-of, a client, a session, an agent run or a subject issuer —
+// or of every tenant that matches a client, a session or a subject issuer —
+// in batches, as Revoke revokes one:
 // an entry for each that has none, and every descendant stopped through its
-// lineage. A store that records sessions (InsertRequest.Session) implements
-// it; memstore and pgstore do.
+// lineage. A store that records sessions and subject issuers
+// (InsertRequest.Session, InsertRequest.SubjectIssuer) implements it; memstore and pgstore do.
 type BulkRevoker interface {
 	// RevokeMatching writes a revocation entry, not cascaded, for at most
 	// req.BatchLimit() capabilities of req.TenantID — or, with AllTenants,

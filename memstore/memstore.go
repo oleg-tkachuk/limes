@@ -82,6 +82,9 @@ type Store struct {
 	// sessions is the identity provider's session each capability was
 	// issued under, when it names one (limes.InsertRequest.Session).
 	sessions map[uuid.UUID]string
+	// subjectIssuers is the issuer of the subject token each capability was
+	// issued for, when it names one (limes.InsertRequest.SubjectIssuer).
+	subjectIssuers map[uuid.UUID]string
 }
 
 // UsageStore implements meter.UsageStore — request and spend counters. It
@@ -314,11 +317,12 @@ func NewStore(cfg StoreConfig) (*Store, error) {
 		revoked:  map[uuid.UUID]limes.Revocation{},
 		nowFn:    wallClock(cfg.Now),
 
-		revokedCopies: map[copyKey]limes.BiscuitRevocation{},
-		revokedIDs:    map[string]int{},
-		erased:        map[uuid.UUID]struct{}{},
-		exchanges:     map[limes.ExchangeKey]exchange{},
-		sessions:      map[uuid.UUID]string{},
+		revokedCopies:  map[copyKey]limes.BiscuitRevocation{},
+		revokedIDs:     map[string]int{},
+		erased:         map[uuid.UUID]struct{}{},
+		exchanges:      map[limes.ExchangeKey]exchange{},
+		sessions:       map[uuid.UUID]string{},
+		subjectIssuers: map[uuid.UUID]string{},
 	}, nil
 }
 
@@ -406,9 +410,12 @@ func (s *Store) Insert(_ context.Context, req limes.InsertRequest) error {
 	// changes after it is written.
 	s.caps[c.ID] = c.Clone()
 	s.issuedBy[c.ID] = issuedBy.Clone()
-	// A child takes its parent's session.
+	// A child takes its parent's session and subject issuer.
 	if session := cmp.Or(req.Session, s.sessions[c.ParentID]); session != "" {
 		s.sessions[c.ID] = session
+	}
+	if issuer := cmp.Or(req.SubjectIssuer, s.subjectIssuers[c.ParentID]); issuer != "" {
+		s.subjectIssuers[c.ID] = issuer
 	}
 	return nil
 }
@@ -448,7 +455,7 @@ func (s *Store) GetRecord(_ context.Context, id uuid.UUID) (limes.Record, error)
 	if !ok {
 		return limes.Record{}, limes.ErrNotFound
 	}
-	rec := limes.Record{Capability: c.Clone(), IssuedBy: s.issuedBy[id].Clone(), Session: s.sessions[id]}
+	rec := limes.Record{Capability: c.Clone(), IssuedBy: s.issuedBy[id].Clone(), Session: s.sessions[id], SubjectIssuer: s.subjectIssuers[id]}
 	if r, ok := s.revoked[id]; ok {
 		rec.Revocation = &r
 	}
@@ -723,6 +730,7 @@ func (s *Store) Purge(_ context.Context, req limes.PurgeRequest) (limes.PurgeRes
 		delete(s.issuedBy, c.ID)
 		s.forgetCopyRevocationsLocked(c.ID)
 		delete(s.sessions, c.ID)
+		delete(s.subjectIssuers, c.ID)
 	}
 	s.forgetExchangesLocked(func(limes.ExchangeKey) bool { return true }, cutoff)
 	return limes.PurgeResult{Purged: int64(len(due))}, nil
@@ -759,6 +767,7 @@ func (s *Store) EraseTenantRecords(_ context.Context, req limes.EraseTenantReque
 		delete(s.issuedBy, id)
 		s.forgetCopyRevocationsLocked(id)
 		delete(s.sessions, id)
+		delete(s.subjectIssuers, id)
 		out.Removed++
 	}
 	s.forgetExchangesLocked(func(k limes.ExchangeKey) bool { return k.TenantID == req.TenantID }, cutoff)

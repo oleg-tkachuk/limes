@@ -51,14 +51,14 @@ func (s *Store) RevokeMatching(_ context.Context, req limes.RevokeMatchingReques
 // AllTenants, matches every selector req names. s.mu must be held.
 func (s *Store) matchesLocked(c limes.Capability, req limes.RevokeMatchingRequest) bool {
 	return (req.AllTenants || c.Subject.TenantID == req.TenantID) &&
-		s.selectedLocked(c, selectors{subject: req.Subject, onBehalfOf: req.OnBehalfOf, clientID: req.ClientID, session: req.Session, runID: req.RunID})
+		s.selectedLocked(c, selectors{subject: req.Subject, onBehalfOf: req.OnBehalfOf, clientID: req.ClientID, session: req.Session, subjectIssuer: req.SubjectIssuer, runID: req.RunID})
 }
 
 // selectors are what RevokeMatching selects capabilities by, and the census
 // and the listing filter by: each set one must match.
 type selectors struct {
-	subject, onBehalfOf, clientID, session string
-	runID                                  uuid.UUID
+	subject, onBehalfOf, clientID, session, subjectIssuer string
+	runID                                                 uuid.UUID
 	// capID is meter.ReleaseMatchingRequest.CapabilityID.
 	capID uuid.UUID
 }
@@ -79,7 +79,8 @@ func (s *Store) selectedLocked(c limes.Capability, sel selectors) bool {
 		(sel.subject == "" || c.Subject.Subject == sel.subject) &&
 		(sel.onBehalfOf == "" || onBehalfOf == sel.onBehalfOf) &&
 		(sel.clientID == "" || c.ClientID == sel.clientID) &&
-		(sel.session == "" || s.sessions[c.ID] == sel.session)
+		(sel.session == "" || s.sessions[c.ID] == sel.session) &&
+		(sel.subjectIssuer == "" || s.subjectIssuers[c.ID] == sel.subjectIssuer)
 }
 
 var _ limes.BulkRevoker = (*Store)(nil)

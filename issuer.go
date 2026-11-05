@@ -165,6 +165,13 @@ type IssueRequest struct {
 	// capability of a session can be revoked together (BulkRevoker). Its
 	// delegations take it. Empty for none.
 	Session string
+	// SubjectIssuer is the issuer of the token the subject was authenticated
+	// by, such as the iss of the token the capability was exchanged for: the
+	// identity provider ClientID and Session were named by. Recorded beside
+	// the capability as Session is, never a claim, so a bulk revocation tells
+	// two providers' clients and sessions apart (BulkRevoker). Its
+	// delegations take it. Empty for none.
+	SubjectIssuer string
 }
 
 // parentRunOf is the run a capability of p delegates from: an agent's RunID,
@@ -242,7 +249,7 @@ func (i *Issuer) issue(ctx context.Context, req IssueRequest) (Capability, strin
 		return Capability{}, "", err
 	}
 
-	token, err := i.signAndRecord(ctx, cap, req.IssuedBy, req.Session, "issuance")
+	token, err := i.signAndRecord(ctx, cap, InsertRequest{IssuedBy: req.IssuedBy, Session: req.Session, SubjectIssuer: req.SubjectIssuer}, "issuance")
 	if err != nil {
 		return Capability{}, "", err
 	}
@@ -345,16 +352,17 @@ func (i *Issuer) mint(t grantTerms) Capability {
 	}
 }
 
-// signAndRecord signs c and records it as issued by issuedBy, and returns
-// its token. Signed first: a capability whose token cannot be minted, or
-// would be too long to use, is never recorded. what names the record in an
-// error from the store.
-func (i *Issuer) signAndRecord(ctx context.Context, c Capability, issuedBy Principal, session, what string) (string, error) {
+// signAndRecord signs c and records it with the issuance metadata of
+// issuance, whose Capability it sets, and returns its token. Signed first: a
+// capability whose token cannot be minted, or would be too long to use, is
+// never recorded. what names the record in an error from the store.
+func (i *Issuer) signAndRecord(ctx context.Context, c Capability, issuance InsertRequest, what string) (string, error) {
 	token, err := i.sign(ctx, c)
 	if err != nil {
 		return "", err
 	}
-	if err := i.store.Insert(ctx, InsertRequest{Capability: c, IssuedBy: issuedBy, Session: session}); err != nil {
+	issuance.Capability = c
+	if err := i.store.Insert(ctx, issuance); err != nil {
 		return "", errs.Errorf("limes: persist %s: %w", what, err)
 	}
 	return token, nil
@@ -500,7 +508,7 @@ func (i *Issuer) delegate(ctx context.Context, req DelegateRequest) (Capability,
 	// A delegation is requested by whoever holds the parent — that is not a
 	// caller-supplied fact, it is what delegation means, so it is derived
 	// rather than accepted as an argument.
-	token, err := i.signAndRecord(ctx, child, parent.Subject, "", "delegation")
+	token, err := i.signAndRecord(ctx, child, InsertRequest{IssuedBy: parent.Subject}, "delegation")
 	if err != nil {
 		return Capability{}, "", err
 	}

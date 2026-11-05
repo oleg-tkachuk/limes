@@ -21,6 +21,10 @@ const (
 	bulkOnBehalfOf   = "user:on-behalf"
 	revokeAllBatch   = 2
 	revokeAllMatches = 5
+	// bulkIdP and otherIdP are two identity providers, the issuers of the
+	// subject tokens capabilities were exchanged for.
+	bulkIdP  = "https://idp-one.example"
+	otherIdP = "https://idp-two.example"
 )
 
 // requireBulkRevoker skips a check of limes.BulkRevoker without one.
@@ -66,6 +70,40 @@ func checkSessionOnRecord(t *testing.T, f fixture) {
 	f.checkListedSessions(t, map[uuid.UUID]string{parent.ID: bulkSession, child.ID: bulkSession, none.ID: ""})
 }
 
+// The subject issuer Insert is given reads back with the record, through
+// GetRecord and the listing; a child takes its parent's, and a child naming
+// one of its own is refused.
+func checkSubjectIssuerOnRecord(t *testing.T, f fixture) {
+	f.requireBulkRevoker(t)
+	parent := f.insertIssued(t, f.Tenant, bulkSession, bulkIdP, nil)
+	expect.That(t, f.record(t, parent.ID).SubjectIssuer == bulkIdP, "the subject issuer read back = %q, want %q", f.record(t, parent.ID).SubjectIssuer, bulkIdP)
+	child := f.newCapability("agent:child", parent.ID, f.now.Add(ttl))
+	expect.Must(t, f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: child, IssuedBy: issuedBy}) == nil, "insert the child")
+	expect.That(t, f.record(t, child.ID).SubjectIssuer == bulkIdP, "the child's subject issuer = %q, want its parent's %q", f.record(t, child.ID).SubjectIssuer, bulkIdP)
+	stray := f.newCapability("agent:stray", parent.ID, f.now.Add(ttl))
+	err := f.Store.Insert(f.Ctx, limes.InsertRequest{Capability: stray, IssuedBy: issuedBy, SubjectIssuer: otherIdP})
+	expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "a child naming a subject issuer of its own: %v, want ErrInvalidRequest", err)
+	none := f.live(t, "agent:none", uuid.Nil())
+	expect.That(t, f.record(t, none.ID).SubjectIssuer == "", "a capability issued with no subject issuer reads back %q", f.record(t, none.ID).SubjectIssuer)
+	if f.Lister == nil || f.Now == nil {
+		return
+	}
+	want := map[uuid.UUID]string{parent.ID: bulkIdP, child.ID: bulkIdP, none.ID: ""}
+	reader, reads := f.Lister.(limes.RecordListingReader)
+	listed := map[uuid.UUID]string{}
+	for _, l := range f.listRecordsAll(t, limes.ListRecordsRequest{TenantID: f.Tenant}) {
+		listed[l.Record.Capability.ID] = l.Record.SubjectIssuer
+	}
+	for id, issuer := range want {
+		got, ok := listed[id]
+		expect.That(t, ok && got == issuer, "ListRecords gives %s subject issuer %q (listed %v), want %q", id, got, ok, issuer)
+		if reads {
+			l, err := reader.GetRecordListing(f.Ctx, id)
+			expect.That(t, err == nil && l.Record.SubjectIssuer == issuer, "GetRecordListing %s = subject issuer %q, %v; want %q", id, l.Record.SubjectIssuer, err, issuer)
+		}
+	}
+}
+
 // checkListedSessions holds the listing to GetRecord: each record of want
 // lists with its session, through ListRecords and, when the Lister is a
 // limes.RecordListingReader, GetRecordListing too.
@@ -104,6 +142,7 @@ func checkRevokeMatching(t *testing.T, f fixture) {
 	bySubject := f.insertWith(t, "user:leaving", "", nil)
 	run := uuid.New()
 	byRun := f.insertWith(t, "agent:run", "", func(c *limes.Capability) { c.Subject.Agent.RunID = run })
+	byIssuer := f.insertIssued(t, f.Tenant, "", bulkIdP, nil)
 	untouched := f.insertWith(t, "agent:d", otherSession, nil)
 	already := f.insertWith(t, "user:leaving", "", nil)
 	first := f.revoke(t, already.ID, false)
@@ -111,12 +150,13 @@ func checkRevokeMatching(t *testing.T, f fixture) {
 		req  limes.RevokeMatchingRequest
 		want []uuid.UUID
 	}{
-		"a session":      {limes.RevokeMatchingRequest{Session: bulkSession}, []uuid.UUID{bySession.ID, child.ID}},
-		"a client":       {limes.RevokeMatchingRequest{ClientID: bulkClient}, []uuid.UUID{byClient.ID}},
-		"an on-behalf":   {limes.RevokeMatchingRequest{OnBehalfOf: bulkOnBehalfOf}, []uuid.UUID{byOnBehalf.ID}},
-		"a subject":      {limes.RevokeMatchingRequest{Subject: "user:leaving"}, []uuid.UUID{bySubject.ID}},
-		"an agent run":   {limes.RevokeMatchingRequest{RunID: run}, []uuid.UUID{byRun.ID}},
-		"all must match": {limes.RevokeMatchingRequest{Subject: "agent:d", Session: bulkSession}, nil},
+		"a session":        {limes.RevokeMatchingRequest{Session: bulkSession}, []uuid.UUID{bySession.ID, child.ID}},
+		"a client":         {limes.RevokeMatchingRequest{ClientID: bulkClient}, []uuid.UUID{byClient.ID}},
+		"an on-behalf":     {limes.RevokeMatchingRequest{OnBehalfOf: bulkOnBehalfOf}, []uuid.UUID{byOnBehalf.ID}},
+		"a subject":        {limes.RevokeMatchingRequest{Subject: "user:leaving"}, []uuid.UUID{bySubject.ID}},
+		"an agent run":     {limes.RevokeMatchingRequest{RunID: run}, []uuid.UUID{byRun.ID}},
+		"a subject issuer": {limes.RevokeMatchingRequest{SubjectIssuer: bulkIdP}, []uuid.UUID{byIssuer.ID}},
+		"all must match":   {limes.RevokeMatchingRequest{Subject: "agent:d", Session: bulkSession}, nil},
 	} {
 		tc.req.TenantID, tc.req.Note, tc.req.Actor = f.Tenant, "storetest", "storetest"
 		got, err := f.BulkRevoker.RevokeMatching(f.Ctx, tc.req)
@@ -169,13 +209,14 @@ func checkRevokeMatchingBatches(t *testing.T, f fixture) {
 func checkRevokeMatchingMalformed(t *testing.T, f fixture) {
 	f.requireBulkRevoker(t)
 	for name, req := range map[string]limes.RevokeMatchingRequest{
-		"no tenant":                    {Subject: "user"},
-		"no selector":                  {TenantID: f.Tenant},
-		"a negative limit":             {TenantID: f.Tenant, Subject: "user", Limit: -1},
-		"a tenant beside every tenant": {TenantID: f.Tenant, AllTenants: true, ClientID: "client"},
-		"every tenant by subject":      {AllTenants: true, ClientID: "client", Subject: "user"},
-		"every tenant by on-behalf-of": {AllTenants: true, OnBehalfOf: "user"},
-		"every tenant by agent run":    {AllTenants: true, ClientID: "client", RunID: uuid.New()},
+		"no tenant":                             {Subject: "user"},
+		"no selector":                           {TenantID: f.Tenant},
+		"a negative limit":                      {TenantID: f.Tenant, Subject: "user", Limit: -1},
+		"a tenant beside every tenant":          {TenantID: f.Tenant, AllTenants: true, ClientID: "client"},
+		"every tenant by subject":               {AllTenants: true, ClientID: "client", Subject: "user"},
+		"every tenant by on-behalf-of":          {AllTenants: true, OnBehalfOf: "user"},
+		"every tenant by agent run":             {AllTenants: true, ClientID: "client", RunID: uuid.New()},
+		"every tenant by subject of one issuer": {AllTenants: true, Subject: "user", SubjectIssuer: bulkIdP},
 	} {
 		_, err := f.BulkRevoker.RevokeMatching(f.Ctx, req)
 		expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "%s: %v, want ErrInvalidRequest", name, err)
@@ -207,12 +248,19 @@ func (f fixture) writeAllTenantsCtx(t *testing.T) context.Context {
 // change.
 func (f fixture) insertIn(t *testing.T, tenant uuid.UUID, session string, change func(*limes.Capability)) limes.Capability {
 	t.Helper()
+	return f.insertIssued(t, tenant, session, "", change)
+}
+
+// insertIssued records a root capability of tenant under session, its
+// subject token issued by subjectIssuer, changed by change.
+func (f fixture) insertIssued(t *testing.T, tenant uuid.UUID, session, subjectIssuer string, change func(*limes.Capability)) limes.Capability {
+	t.Helper()
 	c := f.newCapability("agent:anywhere", uuid.Nil(), f.now.Add(ttl))
 	c.Subject.TenantID = tenant
 	if change != nil {
 		change(&c)
 	}
-	err := f.Store.Insert(f.tenantCtx(tenant), limes.InsertRequest{Capability: c, IssuedBy: issuedBy, Session: session})
+	err := f.Store.Insert(f.tenantCtx(tenant), limes.InsertRequest{Capability: c, IssuedBy: issuedBy, Session: session, SubjectIssuer: subjectIssuer})
 	expect.Must(t, err == nil, "insert %s for tenant %s: %v", c.ID, tenant, err)
 	return c
 }
@@ -226,8 +274,10 @@ func sortedTenants(tenants ...uuid.UUID) []uuid.UUID {
 }
 
 // A client's capabilities in two tenants are revoked by one call across
-// tenants, and so are a session's; another client's and another session's
-// stay live in both. Each selector is a fresh name, as a store's other
+// tenants, and so are a session's and an identity provider's; another
+// client's, another session's and another provider's stay live in both,
+// a provider's that shares the client or the session among them when the
+// call names the subject issuer. Each selector is a fresh name, as a store's other
 // tenants may hold capabilities under the fixed ones.
 func checkRevokeMatchingAllTenants(t *testing.T, f fixture) {
 	f.requireBulkRevoker(t)
@@ -236,6 +286,8 @@ func checkRevokeMatchingAllTenants(t *testing.T, f fixture) {
 	expect.Must(t, err == nil, "NewTenant: %v", err)
 	client, otherClient := "client-"+uuid.New().String(), "client-"+uuid.New().String()
 	session, otherSession := "sid-"+uuid.New().String(), "sid-"+uuid.New().String()
+	sharedClient, sharedSession := "client-"+uuid.New().String(), "sid-"+uuid.New().String()
+	issuer, otherIssuer, loneIssuer := "https://"+uuid.New().String()+".example", "https://"+uuid.New().String()+".example", "https://"+uuid.New().String()+".example"
 	byClient := func(id string) func(*limes.Capability) { return func(c *limes.Capability) { c.ClientID = id } }
 	for name, tc := range map[string]struct {
 		req        limes.RevokeMatchingRequest
@@ -250,6 +302,29 @@ func checkRevokeMatchingAllTenants(t *testing.T, f fixture) {
 			limes.RevokeMatchingRequest{AllTenants: true, Session: session},
 			func(tenant uuid.UUID) limes.Capability { return f.insertIn(t, tenant, session, nil) },
 			func(tenant uuid.UUID) limes.Capability { return f.insertIn(t, tenant, otherSession, nil) },
+		},
+		// Two identity providers name the same client and the same session:
+		// the subject issuer tells them apart.
+		"a client of one issuer": {
+			limes.RevokeMatchingRequest{AllTenants: true, ClientID: sharedClient, SubjectIssuer: issuer},
+			func(tenant uuid.UUID) limes.Capability {
+				return f.insertIssued(t, tenant, "", issuer, byClient(sharedClient))
+			},
+			func(tenant uuid.UUID) limes.Capability {
+				return f.insertIssued(t, tenant, "", otherIssuer, byClient(sharedClient))
+			},
+		},
+		"a session of one issuer": {
+			limes.RevokeMatchingRequest{AllTenants: true, Session: sharedSession, SubjectIssuer: issuer},
+			func(tenant uuid.UUID) limes.Capability { return f.insertIssued(t, tenant, sharedSession, issuer, nil) },
+			func(tenant uuid.UUID) limes.Capability {
+				return f.insertIssued(t, tenant, sharedSession, otherIssuer, nil)
+			},
+		},
+		"an issuer": {
+			limes.RevokeMatchingRequest{AllTenants: true, SubjectIssuer: loneIssuer},
+			func(tenant uuid.UUID) limes.Capability { return f.insertIssued(t, tenant, "", loneIssuer, nil) },
+			func(tenant uuid.UUID) limes.Capability { return f.insertIssued(t, tenant, "", otherIssuer, nil) },
 		},
 	} {
 		ours, theirs := tc.mine(f.Tenant), tc.mine(other)
@@ -399,6 +474,8 @@ func checkRevokeMatchingPreview(t *testing.T, f fixture) {
 	bySubject := f.insertIn(t, f.Tenant, "", func(c *limes.Capability) { c.Subject.Subject = subject })
 	run := uuid.New()
 	byRun := f.insertIn(t, f.Tenant, "", func(c *limes.Capability) { c.Subject.Agent.RunID = run })
+	issuer := "https://" + uuid.New().String() + ".example"
+	byIssuerAndClient := f.insertIssued(t, f.Tenant, "", issuer, byClient)
 	f.insertIn(t, f.Tenant, "", nil)
 	theirs := f.insertIn(t, other, "", byClient)
 	for name, tc := range map[string]struct {
@@ -409,7 +486,12 @@ func checkRevokeMatchingPreview(t *testing.T, f fixture) {
 		"a client": {
 			limes.CountRecordsRequest{TenantID: f.Tenant, ClientID: client},
 			limes.ListRecordsRequest{TenantID: f.Tenant, ClientID: client},
-			[]uuid.UUID{bySessionAndClient.ID, byClientAlone.ID},
+			[]uuid.UUID{bySessionAndClient.ID, byClientAlone.ID, byIssuerAndClient.ID},
+		},
+		"a client of one issuer": {
+			limes.CountRecordsRequest{TenantID: f.Tenant, ClientID: client, SubjectIssuer: issuer},
+			limes.ListRecordsRequest{TenantID: f.Tenant, ClientID: client, SubjectIssuer: issuer},
+			[]uuid.UUID{byIssuerAndClient.ID},
 		},
 		"a session": {
 			limes.CountRecordsRequest{TenantID: f.Tenant, Session: session},
@@ -450,7 +532,7 @@ func checkRevokeMatchingPreview(t *testing.T, f fixture) {
 		expect.That(t, sameIDs(listed, tc.want), "%s: listed %v, want %v", name, listed, tc.want)
 	}
 	across := f.countAll(t, f.allTenantsCtx(), limes.CountRecordsRequest{AllTenants: true, ByTenant: true, ClientID: client})
-	want := map[uuid.UUID]int64{f.Tenant: 2, other: 1}
+	want := map[uuid.UUID]int64{f.Tenant: 3, other: 1}
 	got := map[uuid.UUID]int64{}
 	for _, n := range across {
 		got[n.TenantID] = n.Total
