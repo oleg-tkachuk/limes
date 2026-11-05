@@ -2,6 +2,16 @@
 
 Every release of the exchange module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.17.0](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.16.2...exchange%2Fv0.17.0) (2026-11-05)
+
+### ⚠ BREAKING CHANGES
+
+* **exchange:** name no jwx type in jwtverify's key API
+
+### Features
+
+* **exchange:** name no jwx type in jwtverify's key API ([3de087a](https://github.com/oleg-tkachuk/limes/commit/3de087adede829c65042806ceff3bc77e780191c))
+
 ## [0.16.2](https://github.com/oleg-tkachuk/limes/compare/exchange%2Fv0.16.1...exchange%2Fv0.16.2) (2026-11-04)
 
 ### Dependencies
