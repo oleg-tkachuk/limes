@@ -101,3 +101,9 @@ recorded capability's audience must be the same set as this exchange's
 `exchange/exchange.go`); a narrower or a wider request is refused alike.
 The refusal is `exchange.ErrTargetExchanged`, which wraps
 `ErrInvalidTarget`, so the token endpoint still answers `invalid_target`.
+
+Kept for v1 (decided 2026-11-06). A hit reissues the recorded capability
+itself, so answering a narrower request with it would hand out more than
+was asked; a client that wants less narrows the capability it holds
+(`Exchanger.Narrow`, a `subject_token_type` of
+`exchange.IssuedTokenTypeCapability`).

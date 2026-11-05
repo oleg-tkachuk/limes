@@ -109,3 +109,7 @@ in short:
 - **`limestest`** pins a consumer's mapping to that contract:
   `CheckMapping`, `CheckCodes`, `CheckCategories`, with the options
   `WithoutExchange`, `WithoutMeter` and `AcceptNewByCategory`.
+- **A problem type resolves.** Since v0.166.0 a type URI is
+  `https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#<type>`,
+  an anchor of the errors document's "Problem types" index, which
+  `problem_types_test.go` holds to every type limes answers with.
