@@ -272,7 +272,10 @@ at an RFC 8693 token endpoint (`Handler`):
   the session of OpenID Connect Back-Channel Logout §2.4, is read as the
   subject's session and recorded beside the capability, so a logout token
   for the session revokes what was exchanged in it
-  ([ADR-0013](adr/0013-bulk-revocation.md)).
+  ([ADR-0013](adr/0013-bulk-revocation.md)). Its `iss` is recorded there
+  too, as the subject issuer, so a logout token, which names its issuer,
+  revokes that provider's session and not another's of the same `sid`
+  ([ADR-0014](adr/0014-bulk-revocation-across-tenants.md)).
   `exchangetest.TestSubjectVerifier` holds a verifier of one's own to the
   same contract.
 - **The audience.** A subject token is accepted only when its `aud` names
