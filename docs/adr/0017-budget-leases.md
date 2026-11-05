@@ -1,6 +1,6 @@
 # ADR-0017: Budget leases for delegated capabilities
 
-**Status:** Accepted, first version implemented (below); decision 4 (nested leases) not implemented
+**Status:** Accepted, first version implemented (below); decision 4 (nested leases) deferred to an opt-in
 **Date:** 2026-10-31
 **Deciders:** Oleg Tkachuk
 **Relates to:** [ADR-0007](0007-pgstore-components.md), [ADR-0015](0015-release-matching-holds.md)
@@ -251,8 +251,19 @@ contention, not speed.
 The first version is implemented and on by default: `meter.Leaser`,
 memstore's and pgstore's leases (migrations 032 to 034), forwarded by
 `otelmetric`; pgstore opens leases unless `Config.DisableLeases` is set.
-Decision 4 remains open: `Lease` under an ancestor holding an open lease is
-refused with `meter.ErrLeaseNested`.
+Decision 4 is deferred, and 1.0 does not wait on it:
+
+- `Lease` under an ancestor holding an open lease is refused with
+  `meter.ErrLeaseNested`, and stays so for the whole of v1 for a request
+  that does not ask otherwise.
+- The descendants of a leaseholder already charge and bump under its lease,
+  locking nothing above it; what nesting adds is a lease of their own out
+  of its balance, so their charges stop locking the leaseholder's row too.
+- Nesting, if it comes on v1, comes in a minor as a `LeaseRequest` field
+  whose zero value keeps the refusal: an addition, not a break
+  ([compatibility.md](../compatibility.md)). A request that sets it is
+  drawn from the nearest leaseholder's balance and settled back into it,
+  as decision 4 describes.
 
 A charge the lease balance does not cover is refused with
 `meter.ErrLeaseExhausted`, a kind of `limes.ErrBudgetExceeded`, rather than

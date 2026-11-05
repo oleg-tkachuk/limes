@@ -129,7 +129,9 @@ func (l Lease) RequestsRemaining() int64 {
 //     limits of its own — whose quota counts on every ancestor — a Bump of
 //     one, and Reserve, Settle and Release, go through the whole chain.
 //   - A capability whose ancestor holds an open lease cannot lease
-//     (ErrLeaseNested): a lease is drawn from the whole chain.
+//     (ErrLeaseNested): a lease is drawn from the whole chain. A later
+//     minor may let a request opt in to a lease drawn from the ancestor's
+//     instead; without that, this refusal holds for all of v1.
 //   - A Biscuit copy cannot lease (ErrInvalidRequest): none of its calls
 //     go under a lease, which would hold its chain's budget past the
 //     copy's own ceilings.
