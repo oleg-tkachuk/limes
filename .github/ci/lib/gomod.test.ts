@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { changesBeyondRequirements, commentStart, statementsBeyondRequirements } from "./gomod.ts";
+import { changesBeyondRequirements, commentStart, requiredVersion, statementsBeyondRequirements } from "./gomod.ts";
 
 const BASE = `// A module.
 module example.com/nested
@@ -64,4 +64,12 @@ describe("commentStart", () => {
   for (const [name, line, want] of cases) {
     test(name, () => assert.equal(commentStart(line), want));
   }
+});
+
+describe("requiredVersion", () => {
+  test("reads a requirement in a block", () => assert.equal(requiredVersion(BASE, "example.com/root"), "v0.108.3"));
+  test("reads a requirement on a line of its own", () => assert.equal(requiredVersion(BASE, "golang.org/x/sys"), "v0.49.0"));
+  test("is undefined for a module not required", () => assert.equal(requiredVersion(BASE, "example.com/other"), undefined));
+  test("reads no requirement out of a replace", () => assert.equal(requiredVersion("replace (\n\texample.com/root v1.0.0 => ../\n)\n", "example.com/root"), undefined));
+  test("ignores a commented-out requirement", () => assert.equal(requiredVersion("// require example.com/root v9.0.0\n", "example.com/root"), undefined));
 });

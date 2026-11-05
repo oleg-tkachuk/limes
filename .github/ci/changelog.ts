@@ -21,6 +21,13 @@
 // with no notes. write adds every missing entry, reading the release's notes
 // from GitHub, and leaves the entries already written as they are: it
 // repairs a changelog by hand.
+//
+// check also holds each nested module's requirement of limes to a release
+// of limes reachable from HEAD, or to the release the root changelog's
+// newest entry plans: the limes tagged on the same commit as the nested
+// release (docs/adr/0016-one-release-commit.md). CI builds a nested module
+// against this commit through its replace, so only this check stops it
+// from requiring a limes the module proxy will never serve.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -28,10 +35,11 @@ import { join } from "node:path";
 import { info } from "./lib/actions.ts";
 import { requireEnv } from "./lib/env.ts";
 import { git } from "./lib/git.ts";
-import { compareVersions } from "./lib/go-modules.ts";
+import { LIMES_MODULE, compareVersions } from "./lib/go-modules.ts";
+import { requiredVersion } from "./lib/gomod.ts";
 import { type GitHub, gitHubFor } from "./lib/github.ts";
 import { runMain } from "./lib/main.ts";
-import { type Module, releasedModules, selectModule } from "./lib/modules.ts";
+import { type Module, ROOT_MODULE, releasedModules, selectModule } from "./lib/modules.ts";
 import { releaseTagsBelow } from "./lib/releases.ts";
 
 // CHANGELOG is the file's name in every module's directory.
@@ -190,6 +198,33 @@ export async function checkChangelog(root: string, module: Module, rev: string):
   return `${path} lists ${versions.length} releases, each a tag, newest first${pending === undefined ? "" : `; ${pending} still to be tagged`}`;
 }
 
+// GO_MOD is the file a module's requirements are in, in its directory.
+const GO_MOD = "go.mod";
+// VERSION_PREFIX starts a version as a go.mod spells it.
+const VERSION_PREFIX = "v";
+
+// checkRequirement refuses a nested module whose go.mod requires a limes
+// that is neither a release of limes reachable from rev nor the release the
+// root changelog's newest entry plans above them: a pseudo-version, a
+// prerelease, or a release still to be cut.
+export async function checkRequirement(root: string, module: Module, rev: string): Promise<string> {
+  const path = join(module.dir, GO_MOD);
+  const required = requiredVersion(readFileSync(join(root, path), "utf8"), LIMES_MODULE);
+  if (required === undefined) {
+    return `${path} requires no limes`;
+  }
+  const limes = selectModule(root, ROOT_MODULE);
+  const releases = (await releaseTagsBelow(rev, limes.prefix, root)).map((t) => versionOf(limes, t));
+  const [newest] = readEntries(root, limes).keys();
+  const planned = newest !== undefined && !releases.includes(newest) && (releases[0] === undefined || compareVersions(newest, releases[0]) > 0) ? newest : undefined;
+  const version = required.startsWith(VERSION_PREFIX) ? required.slice(VERSION_PREFIX.length) : required;
+  if (releases.includes(version) || version === planned) {
+    return `${path} requires limes ${required}, ${version === planned ? "the release this change plans" : "a release"}`;
+  }
+  const newestNamed = planned ?? releases[0];
+  throw new Error(`${path} requires limes ${required}, which is no release of limes reachable from ${rev}${newestNamed === undefined ? "" : ` (the newest is ${VERSION_PREFIX}${newestNamed})`}: a nested module requires a released limes, or the one its release pull request plans`);
+}
+
 // Writer is what writing a changelog reads releases' notes from.
 export interface Writer {
   github: GitHub;
@@ -248,7 +283,11 @@ async function main(): Promise<void> {
   switch (command) {
     case Command.Check:
       for (const name of releasedModules(root)) {
-        info(await checkChangelog(root, selectModule(root, name), "HEAD"));
+        const module = selectModule(root, name);
+        info(await checkChangelog(root, module, "HEAD"));
+        if (name !== ROOT_MODULE) {
+          info(await checkRequirement(root, module, "HEAD"));
+        }
       }
       return;
     case Command.Write: {
