@@ -94,7 +94,7 @@ func TestVerifierHoldsTheKeyToTheHeaderAlg(t *testing.T) {
 	addKey(t, p.keys, p384.Public(), kidP384, nil)
 	addKey(t, p.keys, rsaKey.Public(), kidRSA256, jwa.RS256())
 	addKey(t, p.keys, edNoAlg.Public(), kidNoAlg, nil)
-	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: StaticKeys(p.keys), Now: clock})
+	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: staticKeys(t, p.keys), Now: clock})
 	claims := accessClaims()
 	header := func(alg, kid string) map[string]any {
 		return map[string]any{"alg": alg, "kid": kid, "typ": TypeAccessToken}
@@ -145,7 +145,7 @@ func TestVerifierLendsNoHMACSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	addKey(t, p.keys, secret, kidHS256, jwa.HS256())
-	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: StaticKeys(p.keys), Now: clock})
+	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: staticKeys(t, p.keys), Now: clock})
 	for _, alg := range []string{"RS256", "ES256", "EdDSA"} {
 		token := rawJWS(t, map[string]any{"alg": alg, "kid": kidHS256, "typ": TypeAccessToken}, accessClaims(),
 			func(in []byte) []byte { m := hmac.New(sha256.New, secret); m.Write(in); return m.Sum(nil) })

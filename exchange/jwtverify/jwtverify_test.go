@@ -30,7 +30,7 @@ func newVerifier(t *testing.T, cfg Config) *Verifier {
 // defines them.
 func TestVerifierReadsAnAccessToken(t *testing.T) {
 	p := newIDP(t)
-	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: StaticKeys(p.keys), Now: clock})
+	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: staticKeys(t, p.keys), Now: clock})
 	claims := accessClaims()
 	for _, typ := range []string{TypeAccessToken, TypeAccessTokenMedia, "AT+JWT"} {
 		s, err := v.VerifySubject(t.Context(), p.sign(t, typ, claims))
@@ -49,7 +49,7 @@ func TestVerifierReadsAnAccessToken(t *testing.T) {
 // issuer, keys, types and algorithms, a token lacking is refused.
 func TestVerifierRefusals(t *testing.T) {
 	p, other := newIDP(t), newIDP(t)
-	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: StaticKeys(p.keys), Now: clock})
+	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: staticKeys(t, p.keys), Now: clock})
 	claims := accessClaims()
 	cases := map[string]string{
 		"typ JWT":                p.sign(t, typJWT, claims),
@@ -77,16 +77,16 @@ func TestVerifierRefusals(t *testing.T) {
 // ones may be named.
 func TestVerifierHoldsItsAlgorithms(t *testing.T) {
 	p := newIDP(t)
-	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: StaticKeys(p.keys), Now: clock, Algorithms: []string{jwa.ES256().String()}})
+	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: staticKeys(t, p.keys), Now: clock, Algorithms: []string{jwa.ES256().String()}})
 	if _, err := v.VerifySubject(t.Context(), p.sign(t, TypeAccessToken, accessClaims())); !errors.Is(err, exchange.ErrInvalidGrant) {
 		t.Errorf("an Ed25519 token at a verifier of ES256 alone: %v", err)
 	}
 	for _, alg := range []string{jwa.HS256().String(), jwa.NoSignature().String()} {
-		if _, err := New(Config{Issuer: idpIssuer, Keys: StaticKeys(p.keys), Algorithms: []string{alg}}); err == nil {
+		if _, err := New(Config{Issuer: idpIssuer, Keys: staticKeys(t, p.keys), Algorithms: []string{alg}}); err == nil {
 			t.Errorf("a verifier accepting %s was built", alg)
 		}
 	}
-	for name, cfg := range map[string]Config{"no issuer": {Keys: StaticKeys(p.keys)}, "no keys": {Issuer: idpIssuer}} {
+	for name, cfg := range map[string]Config{"no issuer": {Keys: staticKeys(t, p.keys)}, "no keys": {Issuer: idpIssuer}} {
 		if _, err := New(cfg); err == nil {
 			t.Errorf("a verifier with %s was built", name)
 		}
@@ -98,7 +98,7 @@ func TestVerifierHoldsItsAlgorithms(t *testing.T) {
 func TestVerifierReadsAProviderOfItsOwn(t *testing.T) {
 	p := newIDP(t)
 	const azp = "azp"
-	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: StaticKeys(p.keys), Now: clock, Types: []string{typJWT}, ClientIDClaim: azp})
+	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: staticKeys(t, p.keys), Now: clock, Types: []string{typJWT}, ClientIDClaim: azp})
 	claims := with(accessClaims(), map[string]any{ClaimClientID: nil, azp: idpClient})
 	s, err := v.VerifySubject(t.Context(), p.sign(t, typJWT, claims))
 	if err != nil || s.ClientID != idpClient {
@@ -126,7 +126,7 @@ func TestVerifierReadsTheBindingAndOtherAlgorithms(t *testing.T) {
 	if err := set.AddKey(pub); err != nil {
 		t.Fatal(err)
 	}
-	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: StaticKeys(set), Now: clock})
+	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: staticKeys(t, set), Now: clock})
 	const jkt = "0ZcOCORZNYy-DWpqq30jZyJGHTN0d2HglBV3uiguA4I"
 	token := signWith(t, key, jwa.ES256(), TypeAccessToken, with(accessClaims(), map[string]any{claimCnf: map[string]any{cnfJKT: jkt}}))
 	s, err := v.VerifySubject(t.Context(), token)
@@ -140,7 +140,7 @@ func TestVerifierReadsTheBindingAndOtherAlgorithms(t *testing.T) {
 // recorded under none.
 func TestVerifierReadsTheSession(t *testing.T) {
 	p := newIDP(t)
-	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: StaticKeys(p.keys), Now: clock})
+	v := newVerifier(t, Config{Issuer: idpIssuer, Keys: staticKeys(t, p.keys), Now: clock})
 	got, err := v.VerifySubject(t.Context(), p.sign(t, TypeAccessToken, with(accessClaims(), map[string]any{claimSessionID: "sid-1"})))
 	if err != nil || got.SessionID != "sid-1" {
 		t.Errorf("subject %+v, %v; want session sid-1", got, err)

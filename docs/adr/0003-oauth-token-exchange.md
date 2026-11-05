@@ -189,7 +189,8 @@ Later ADRs changed what this one states:
   and [ADR-0006](0006-one-token-format.md) made every capability an `at+jwt`
   (`limes.TokenType`, `signer.go`), so the exchange issues one, not
   `limes-cap-v6+jwt`. Its `issued_token_type` is still
-  `exchange.IssuedTokenTypeCapability`.
+  `exchange.IssuedTokenTypeCapability`, kept for v1 by
+  [ADR-0020](0020-exchange-before-1-0.md).
 - **The JWT subject verifier moved.** [ADR-0010](0010-exchange-jose-subpackage.md)
   moved `JWTVerifier` and its key sources to `exchange/jwtverify`
   (`jwtverify.Verifier`); package `exchange` keeps `SubjectVerifier` and

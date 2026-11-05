@@ -9,10 +9,12 @@ package jwtverify
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/lestrrat-go/httprc/v3"
 	"github.com/lestrrat-go/jwx/v3/jwa"
 	"github.com/lestrrat-go/jwx/v3/jwk"
 	"github.com/lestrrat-go/jwx/v3/jws"
@@ -73,9 +75,9 @@ type Config struct {
 	// Issuer is the identity provider's issuer identifier, which a token's
 	// iss must equal. Required.
 	Issuer string
-	// Keys are the identity provider's public keys: CachedKeys over its JWKS
+	// Keys are the identity provider's public keys: RemoteKeys over its JWKS
 	// URL keeps them fresh. Required.
-	Keys KeySource
+	Keys *KeySource
 	// Types are the header types accepted, compared without regard to case.
 	// Empty: TypeAccessToken and TypeAccessTokenMedia, as RFC 9068 requires.
 	// A provider that types its access tokens otherwise ("JWT") is accepted
@@ -95,36 +97,52 @@ type Config struct {
 // KeySource gives the identity provider's current public keys, or an error
 // when it has none to give: its JWKS out of reach and never fetched. That is
 // the server's failure, answered as one, never a refusal of the token.
-type KeySource interface {
-	Keys(ctx context.Context) (jwk.Set, error)
+// StaticKeys and RemoteKeys make one. It names no type of the JOSE library
+// the verifier reads keys with, so that library can change major version
+// without changing this package's API.
+type KeySource struct {
+	keys func(ctx context.Context) (jwk.Set, error)
 }
 
-// staticKeys is a KeySource of a fixed set.
-type staticKeys struct{ set jwk.Set }
-
-func (k staticKeys) Keys(context.Context) (jwk.Set, error) { return k.set, nil }
-
-// StaticKeys is a KeySource of a fixed key set.
-func StaticKeys(set jwk.Set) KeySource { return staticKeys{set: set} }
-
-// cachedKeys is a KeySource over a jwk.Cache.
-type cachedKeys struct {
-	cache *jwk.Cache
-	url   string
-}
-
-func (k cachedKeys) Keys(ctx context.Context) (jwk.Set, error) {
-	set, err := k.cache.Lookup(ctx, k.url)
+// StaticKeys is a KeySource of the fixed key set jwks, a JWK Set document
+// (RFC 7517 §5). A document that is no JWK Set is refused with
+// limes.ErrInvalidConfig.
+func StaticKeys(jwks []byte) (*KeySource, error) {
+	set, err := jwk.Parse(jwks)
 	if err != nil {
-		return nil, fmt.Errorf("jwtverify: the identity provider's keys at %s: %w", k.url, err)
+		return nil, errs.Errorf("%w: jwtverify: StaticKeys: %w", limes.ErrInvalidConfig, err)
 	}
-	return set, nil
+	return &KeySource{keys: func(context.Context) (jwk.Set, error) { return set, nil }}, nil
 }
 
-// CachedKeys is a KeySource over cache, which keeps the JWKS at url fresh;
-// url must be registered with it (jwk.Cache.Register). A set fetched once is
-// served while the endpoint is out of reach; one never fetched is an error.
-func CachedKeys(cache *jwk.Cache, url string) KeySource { return cachedKeys{cache: cache, url: url} }
+// RemoteKeys is a KeySource of the JWK Set at url, fetched in the
+// background and kept fresh until ctx is done. client fetches it; nil: a
+// default client with a request timeout. It does not wait
+// for the first fetch: until one succeeds, the keys are an error (the
+// server's); a set fetched once is served while url is out of reach.
+func RemoteKeys(ctx context.Context, url string, client *http.Client) (*KeySource, error) {
+	if url == "" {
+		return nil, fmt.Errorf("%w: jwtverify: RemoteKeys: url required", limes.ErrInvalidConfig)
+	}
+	cache, err := jwk.NewCache(ctx, httprc.NewClient())
+	if err != nil {
+		return nil, fmt.Errorf("jwtverify: RemoteKeys: %w", err)
+	}
+	opts := []jwk.RegisterOption{jwk.WithWaitReady(false)}
+	if client != nil {
+		opts = append(opts, jwk.WithHTTPClient(client))
+	}
+	if err := cache.Register(ctx, url, opts...); err != nil {
+		return nil, errs.Errorf("%w: jwtverify: RemoteKeys %s: %w", limes.ErrInvalidConfig, url, err)
+	}
+	return &KeySource{keys: func(ctx context.Context) (jwk.Set, error) {
+		set, err := cache.Lookup(ctx, url)
+		if err != nil {
+			return nil, fmt.Errorf("jwtverify: the identity provider's keys at %s: %w", url, err)
+		}
+		return set, nil
+	}}, nil
+}
 
 // Verifier is the exchange.SubjectVerifier for JWT access tokens (RFC 9068),
 // verified through jwx: the library that implements the format, as no
@@ -182,7 +200,7 @@ func (v *Verifier) VerifySubject(ctx context.Context, token string) (exchange.Su
 	if !slices.Contains(v.cfg.Algorithms, alg.String()) {
 		return exchange.Subject{}, fmt.Errorf("%w: alg %q is not one of %q", exchange.ErrInvalidGrant, alg, v.cfg.Algorithms)
 	}
-	keys, err := v.cfg.Keys.Keys(ctx)
+	keys, err := v.cfg.Keys.keys(ctx)
 	if err != nil {
 		return exchange.Subject{}, err
 	}

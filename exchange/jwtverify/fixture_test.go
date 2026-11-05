@@ -64,6 +64,21 @@ func newIDP(t testing.TB) *idp {
 	return &idp{key: key, keys: set}
 }
 
+// staticKeys is a KeySource of set, through its JWK Set document as a
+// consumer hands it to StaticKeys.
+func staticKeys(t testing.TB, set jwk.Set) *KeySource {
+	t.Helper()
+	doc, err := json.Marshal(set)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys, err := StaticKeys(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return keys
+}
+
 // accessClaims are an RFC 9068 access token's claims, issued at testNow.
 func accessClaims() map[string]any {
 	return map[string]any{

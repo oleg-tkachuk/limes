@@ -104,11 +104,25 @@ func (p provider) sign(t *testing.T, changes map[string]any) string {
 	return string(token)
 }
 
+// staticKeys is a jwtverify.KeySource of set, through its JWK Set document.
+func staticKeys(t testing.TB, set jwk.Set) *jwtverify.KeySource {
+	t.Helper()
+	doc, err := json.Marshal(set)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys, err := jwtverify.StaticKeys(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return keys
+}
+
 // The module's own JWTVerifier keeps the contract it sets for others.
 func TestJWTVerifierKeepsTheContract(t *testing.T) {
 	p, other := newProvider(t), newProvider(t)
 	v, err := jwtverify.New(jwtverify.Config{
-		Issuer: issuer, Keys: jwtverify.StaticKeys(p.keys), Now: func() time.Time { return now },
+		Issuer: issuer, Keys: staticKeys(t, p.keys), Now: func() time.Time { return now },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -148,7 +162,7 @@ func TestOnePerTokenOverMemstore(t *testing.T) {
 		defer mu.Unlock()
 		return now.Add(elapsed)
 	}
-	subjects, err := jwtverify.New(jwtverify.Config{Issuer: issuer, Keys: jwtverify.StaticKeys(p.keys), Now: clock})
+	subjects, err := jwtverify.New(jwtverify.Config{Issuer: issuer, Keys: staticKeys(t, p.keys), Now: clock})
 	if err != nil {
 		t.Fatal(err)
 	}
