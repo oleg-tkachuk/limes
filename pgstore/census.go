@@ -128,20 +128,29 @@ type selector struct {
 	value  any
 }
 
-// selectorConditions are the selectors set, in the order their conditions
-// are added: a selector left empty matches every record.
-func selectorConditions(subject, onBehalfOf, clientID, session string, run uuid.UUID) []selector {
+// selection is the values the bulk revocation's selectors take, as each
+// request that selects by them names them: one left empty matches every
+// record.
+type selection struct {
+	subject, onBehalfOf, clientID, session, subjectIssuer string
+	run                                                   uuid.UUID
+}
+
+// selectorConditions are the selectors of sel set, in the order their
+// conditions are added.
+func selectorConditions(sel selection) []selector {
 	var out []selector
 	for _, s := range []struct{ column, value string }{
-		{columnSubject, subject}, {columnOnBehalfOf, onBehalfOf},
-		{columnClientID, clientID}, {columnSession, session},
+		{columnSubject, sel.subject}, {columnOnBehalfOf, sel.onBehalfOf},
+		{columnClientID, sel.clientID}, {columnSession, sel.session},
+		{columnSubjectIssuer, sel.subjectIssuer},
 	} {
 		if s.value != "" {
 			out = append(out, selector{s.column, s.value})
 		}
 	}
-	if run != uuid.Nil() {
-		out = append(out, selector{columnRunID, run})
+	if sel.run != uuid.Nil() {
+		out = append(out, selector{columnRunID, sel.run})
 	}
 	return out
 }
@@ -159,7 +168,10 @@ func countSQL(req limes.CountRecordsRequest, args []any) (string, []any) {
 	} else {
 		w.q.WriteString("\n      AND c.tenant_id = $1")
 	}
-	for _, sel := range selectorConditions(req.Subject, req.OnBehalfOf, req.ClientID, req.Session, req.RunID) {
+	for _, sel := range selectorConditions(selection{
+		subject: req.Subject, onBehalfOf: req.OnBehalfOf, clientID: req.ClientID,
+		session: req.Session, subjectIssuer: req.SubjectIssuer, run: req.RunID,
+	}) {
 		w.and(sel.column+" = $%d", sel.value)
 	}
 	w.q.WriteString(sqlCountRecordsTail)
@@ -241,7 +253,7 @@ WHERE $1::uuid IS NULL`
 // IsRevoked's does: a parent_id written by hand into a cycle would
 // otherwise walk for ever.
 var sqlRecordListing = fmt.Sprintf(`
-SELECT c.capability, c.issued_by, c.session, v.revoked_at, v.note, v.actor, v.cascaded, CASE
+SELECT c.capability, c.issued_by, c.session, c.subject_issuer, v.revoked_at, v.note, v.actor, v.cascaded, CASE
     WHEN c.revoked THEN 'revoked'
     WHEN c.expires_at IS NULL OR c.expires_at <= $2 THEN 'expired'
     ELSE 'active'
@@ -327,7 +339,10 @@ func (w *whereBuilder) filtered(req limes.ListRecordsRequest, after *uuid.UUID, 
 	if req.SubjectPrefix != "" {
 		w.and("starts_with(c.subject, $%d)", req.SubjectPrefix)
 	}
-	for _, sel := range selectorConditions("", req.OnBehalfOf, req.ClientID, req.Session, req.RunID) {
+	for _, sel := range selectorConditions(selection{
+		onBehalfOf: req.OnBehalfOf, clientID: req.ClientID, session: req.Session,
+		subjectIssuer: req.SubjectIssuer, run: req.RunID,
+	}) {
 		w.and(sel.column+" = $%d", sel.value)
 	}
 	if len(req.Dispositions) > 0 {
@@ -397,14 +412,17 @@ type listCursor struct {
 // cursor holds it, so one handed back with other filters — or for another
 // tenant, or for every tenant where one is asked for — is refused rather
 // than paged on from its id under them, which would be neither listing.
-// AllTenants is named only when set, so a tenant's cursor handed out
-// before it existed still pages.
+// AllTenants and the subject issuer are named only when set, so a tenant's
+// cursor handed out before they existed still pages.
 func filtersKey(req limes.ListRecordsRequest) string {
 	dispositions := slices.Clone(req.Dispositions)
 	slices.Sort(dispositions)
 	key := []any{req.TenantID, req.PrincipalType, req.Subject, req.SubjectPrefix, slices.Compact(dispositions), req.OnBehalfOf, req.ClientID, req.Session, req.RunID}
 	if req.AllTenants {
 		key = append(key, req.AllTenants)
+	}
+	if req.SubjectIssuer != "" {
+		key = append(key, req.SubjectIssuer)
 	}
 	raw, err := json.Marshal(key)
 	if err != nil {
@@ -462,7 +480,7 @@ func (c *Census) ListRecords(ctx context.Context, req limes.ListRecordsRequest) 
 // scanListing reads one row of sqlListRecords.
 func scanListing(row pgx.CollectableRow) (limes.RecordListing, error) {
 	var capability, issuedBy []byte
-	var session *string
+	var session, subjectIssuer *string
 	var revokedAt *time.Time
 	var note, actor *string
 	var cascaded *bool
@@ -471,7 +489,7 @@ func scanListing(row pgx.CollectableRow) (limes.RecordListing, error) {
 	var ancestorAt *time.Time
 	var ancestorNote, ancestorActor *string
 	var ancestorCascaded *bool
-	if err := row.Scan(&capability, &issuedBy, &session, &revokedAt, &note, &actor, &cascaded, &disposition,
+	if err := row.Scan(&capability, &issuedBy, &session, &subjectIssuer, &revokedAt, &note, &actor, &cascaded, &disposition,
 		&ancestor, &ancestorAt, &ancestorNote, &ancestorActor, &ancestorCascaded); err != nil {
 		return limes.RecordListing{}, err
 	}
@@ -486,6 +504,9 @@ func scanListing(row pgx.CollectableRow) (limes.RecordListing, error) {
 	l := limes.RecordListing{Record: limes.Record{Capability: c, IssuedBy: p}, Disposition: limes.RecordDisposition(disposition)}
 	if session != nil {
 		l.Record.Session = *session
+	}
+	if subjectIssuer != nil {
+		l.Record.SubjectIssuer = *subjectIssuer
 	}
 	if revokedAt != nil {
 		l.Record.Revocation = &limes.Revocation{RevokedAt: *revokedAt, Note: *note, Actor: *actor, Cascaded: *cascaded}

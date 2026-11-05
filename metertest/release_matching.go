@@ -157,6 +157,39 @@ func checkReleaseMatchingAllTenants(t *testing.T, f fixture) {
 	expect.That(t, err == nil && again.Released == 0 && len(again.Tenants) == 0, "a second call = %+v, %v; want nothing left", again, err)
 }
 
+// Two identity providers name the same client: a release across tenants
+// by the client and one provider's subject issuer releases the holds of
+// that provider's revoked capabilities alone.
+func checkReleaseMatchingBySubjectIssuer(t *testing.T, f fixture) {
+	r := f.releaser(t)
+	ctx, ok := f.allTenantsCtx()
+	if !ok {
+		t.Skip("the store scopes tenants and Env.AllTenantsCtx is not set")
+	}
+	client := "client-" + uuid.New().String()
+	issuer, otherIssuer := "https://"+uuid.New().String()+".example", "https://"+uuid.New().String()+".example"
+	held := func(subjectIssuer string) (uuid.UUID, uuid.UUID) {
+		t.Helper()
+		id, err := f.NewCapability(CapabilitySpec{
+			Requests: limes.RequestCeiling{Unlimited: true}, Budget: unlimitedBudget, ClientID: client, SubjectIssuer: subjectIssuer,
+		})
+		expect.Must(t, err == nil, "record a capability: %v", err)
+		hold, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{
+			Subject: newSubject(subjectSpec{capID: id, tenant: f.Tenant, unit: unit}), Amount: heldEach,
+		})
+		expect.Must(t, err == nil, "reserve: %v", err)
+		return id, hold.ID
+	}
+	mine, mineHold := held(issuer)
+	theirs, theirsHold := held(otherIssuer)
+	expect.Must(t, f.Revoke(mine) == nil && f.Revoke(theirs) == nil, "revoke")
+	got, err := r.ReleaseMatching(ctx, meter.ReleaseMatchingRequest{AllTenants: true, ClientID: client, SubjectIssuer: issuer})
+	expect.Must(t, err == nil, "ReleaseMatching: %v", err)
+	expect.That(t, got.Released == 1 && !got.More, "ReleaseMatching = %+v, want the one provider's hold", got)
+	expect.That(t, !f.open(t, mineHold), "the hold of the named provider's revoked capability still counts")
+	expect.That(t, f.open(t, theirsHold), "the hold of the other provider's revoked capability of the same client was released")
+}
+
 // A batch releases at most Limit and says when more may match; the loop
 // ends with every hold released.
 func checkReleaseMatchingBatches(t *testing.T, f fixture) {
@@ -185,12 +218,13 @@ func checkReleaseMatchingBatches(t *testing.T, f fixture) {
 func checkReleaseMatchingMalformed(t *testing.T, f fixture) {
 	r := f.releaser(t)
 	for name, req := range map[string]meter.ReleaseMatchingRequest{
-		"no tenant":                    {ClientID: "client"},
-		"no selector":                  {TenantID: f.Tenant},
-		"a negative limit":             {TenantID: f.Tenant, ClientID: "client", Limit: -1},
-		"a tenant beside every tenant": {TenantID: f.Tenant, AllTenants: true, ClientID: "client"},
-		"every tenant by subject":      {AllTenants: true, Subject: "subject"},
-		"every tenant by capability":   {AllTenants: true, CapabilityID: uuid.New()},
+		"no tenant":                             {ClientID: "client"},
+		"no selector":                           {TenantID: f.Tenant},
+		"a negative limit":                      {TenantID: f.Tenant, ClientID: "client", Limit: -1},
+		"a tenant beside every tenant":          {TenantID: f.Tenant, AllTenants: true, ClientID: "client"},
+		"every tenant by subject":               {AllTenants: true, Subject: "subject"},
+		"every tenant by capability":            {AllTenants: true, CapabilityID: uuid.New()},
+		"every tenant by subject of one issuer": {AllTenants: true, Subject: "subject", SubjectIssuer: "https://idp.example"},
 	} {
 		_, err := r.ReleaseMatching(f.Ctx, req)
 		expect.That(t, errors.Is(err, limes.ErrInvalidRequest), "%s: %v, want ErrInvalidRequest", name, err)

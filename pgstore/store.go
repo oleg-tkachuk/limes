@@ -38,14 +38,16 @@ const (
 	// child is on record.
 	sqlLockParent = `SELECT depth, capability FROM limes.capabilities WHERE id = $1 FOR SHARE`
 
-	// sqlInsertCapability records a child with its parent's session, which
-	// it takes rather than names (limes.InsertRequest.Session).
+	// sqlInsertCapability records a child with its parent's session and
+	// subject issuer, which it takes rather than names
+	// (limes.InsertRequest.Session, limes.InsertRequest.SubjectIssuer).
 	sqlInsertCapability = `
 INSERT INTO limes.capabilities
     (id, parent_id, tenant_id, principal_type, subject, expires_at, depth, capability, issued_by,
-     client_id, on_behalf_of, session, run_id)
+     client_id, on_behalf_of, session, run_id, subject_issuer)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-        COALESCE($12, (SELECT p.session FROM limes.capabilities p WHERE p.id = $2)), $13)`
+        COALESCE($12, (SELECT p.session FROM limes.capabilities p WHERE p.id = $2)), $13,
+        COALESCE($14, (SELECT p.subject_issuer FROM limes.capabilities p WHERE p.id = $2)))`
 )
 
 // Insert records req.Capability and who asked for it. The parent must be on
@@ -67,7 +69,7 @@ func (s *Store) Insert(ctx context.Context, req limes.InsertRequest) error {
 		return err
 	}
 	err = s.inTenantTx(ctx, c.Subject.TenantID, func(tx pgx.Tx) error {
-		return s.insert(ctx, tx, c, capability, issuedBy, req.Session)
+		return s.insert(ctx, tx, c, capability, issuedBy, req)
 	})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
@@ -76,9 +78,9 @@ func (s *Store) Insert(ctx context.Context, req limes.InsertRequest) error {
 	return err
 }
 
-// insert is Insert in tx, c encoded as capability and its issuer as
+// insert is Insert of req in tx, c encoded as capability and its issuer as
 // issuedBy.
-func (s *Store) insert(ctx context.Context, tx pgx.Tx, c limes.Capability, capability, issuedBy []byte, session string) error {
+func (s *Store) insert(ctx context.Context, tx pgx.Tx, c limes.Capability, capability, issuedBy []byte, req limes.InsertRequest) error {
 	// Shares the tenant's erase lock: an erase that commits first is
 	// seen, one that comes after waits for this insert.
 	if err := notErased(ctx, tx, c.Subject.TenantID); err != nil {
@@ -111,7 +113,7 @@ func (s *Store) insert(ctx context.Context, tx pgx.Tx, c limes.Capability, capab
 	_, err = tx.Exec(ctx, sqlInsertCapability,
 		c.ID, parentID, c.Subject.TenantID, string(c.Subject.Type), c.Subject.Subject,
 		nullTime(c.ExpiresAt), depth, capability, issuedBy,
-		nullString(c.ClientID), nullString(onBehalfOf), nullString(session), run)
+		nullString(c.ClientID), nullString(onBehalfOf), nullString(req.Session), run, nullString(req.SubjectIssuer))
 	return err
 }
 
@@ -203,7 +205,7 @@ func nullString(s string) *string {
 }
 
 const sqlGetRecord = `
-SELECT c.capability, c.issued_by, c.session, r.revoked_at, r.note, r.actor, r.cascaded
+SELECT c.capability, c.issued_by, c.session, c.subject_issuer, r.revoked_at, r.note, r.actor, r.cascaded
 FROM limes.capabilities c
 LEFT JOIN limes.revocations r ON r.capability_id = c.id
 WHERE c.id = $1`
@@ -216,8 +218,8 @@ func (s *Store) GetRecord(ctx context.Context, id uuid.UUID) (limes.Record, erro
 		var revokedAt *time.Time
 		var note, actor *string
 		var cascaded *bool
-		var session *string
-		if err := tx.QueryRow(ctx, sqlGetRecord, id).Scan(&capability, &issuedBy, &session, &revokedAt, &note, &actor, &cascaded); err != nil {
+		var session, subjectIssuer *string
+		if err := tx.QueryRow(ctx, sqlGetRecord, id).Scan(&capability, &issuedBy, &session, &subjectIssuer, &revokedAt, &note, &actor, &cascaded); err != nil {
 			return err
 		}
 		c, err := decodeCapability(capability)
@@ -231,6 +233,9 @@ func (s *Store) GetRecord(ctx context.Context, id uuid.UUID) (limes.Record, erro
 		rec = limes.Record{Capability: c, IssuedBy: p}
 		if session != nil {
 			rec.Session = *session
+		}
+		if subjectIssuer != nil {
+			rec.SubjectIssuer = *subjectIssuer
 		}
 		if revokedAt != nil {
 			rec.Revocation = &limes.Revocation{RevokedAt: *revokedAt, Note: *note, Actor: *actor, Cascaded: *cascaded}

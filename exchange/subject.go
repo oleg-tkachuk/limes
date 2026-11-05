@@ -8,7 +8,10 @@ import (
 // Subject is a subject token a SubjectVerifier accepted: who it names, for
 // which client, and until when.
 type Subject struct {
-	// Issuer and Subject are the token's iss and sub.
+	// Issuer and Subject are the token's iss and sub. The Exchanger
+	// records Issuer beside the capability (limes.IssueRequest.SubjectIssuer),
+	// so a bulk revocation by ClientID or SessionID names the identity
+	// provider that issued them (limes.BulkRevoker).
 	Issuer, Subject string
 	// ClientID is the client the token was issued to.
 	ClientID string

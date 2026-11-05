@@ -76,6 +76,11 @@ type InsertRequest struct {
 	// a claim, which BulkRevoker revokes by. Empty for none. A child has
 	// none of its own: the store records its parent's.
 	Session string
+	// SubjectIssuer is the issuer of the token the subject was authenticated
+	// by (IssueRequest.SubjectIssuer): issuance metadata, as Session is,
+	// which BulkRevoker revokes by. Empty for none. A child has none of its
+	// own: the store records its parent's.
+	SubjectIssuer string
 }
 
 // Validate refuses, as ErrInvalidRequest, a capability with no id — nothing
@@ -90,6 +95,8 @@ func (r InsertRequest) Validate() error {
 		return invalidRequest("insert: capability %s never expires", r.Capability.ID)
 	case r.Capability.ParentID != uuid.Nil() && r.Session != "":
 		return invalidRequest("insert: child %s names a session; it takes its parent's", r.Capability.ID)
+	case r.Capability.ParentID != uuid.Nil() && r.SubjectIssuer != "":
+		return invalidRequest("insert: child %s names a subject issuer; it takes its parent's", r.Capability.ID)
 	}
 	return nil
 }
@@ -174,6 +181,10 @@ type Record struct {
 	// was given, or for a child its parent's. Empty for none, and for a
 	// store that records none.
 	Session string
+	// SubjectIssuer is the subject token's issuer on record, as Session is:
+	// the one Insert was given, or for a child its parent's. Empty for none,
+	// and for a store that records none.
+	SubjectIssuer string
 	// Revocation is the capability's own revocation entry; nil when it has
 	// none. A capability stopped only through an ancestor has none — ask
 	// IsRevoked whether it verifies.

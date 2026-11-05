@@ -53,7 +53,8 @@ func TestLineageSelectorsAppendToTheView(t *testing.T) {
 		"id", "parent_id", "tenant_id", "expires_at", "requests", "budget", "copies",
 		"revoked", "subject", "on_behalf_of", "client_id", "session", "run_id",
 	}
-	if !slices.Equal(got, want) {
-		t.Errorf("%s columns = %v, want %v", lineageViewName, got, want)
+	// A later step may append more (039), never move these.
+	if len(got) < len(want) || !slices.Equal(got[:len(want)], want) {
+		t.Errorf("%s columns = %v, want them to begin %v", lineageViewName, got, want)
 	}
 }

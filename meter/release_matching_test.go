@@ -31,6 +31,10 @@ func TestReleaseMatchingRequestValidate(t *testing.T) {
 		{"every tenant by subject", ReleaseMatchingRequest{AllTenants: true, ClientID: "client", Subject: "s"}, false},
 		{"every tenant by on-behalf-of", ReleaseMatchingRequest{AllTenants: true, OnBehalfOf: "u"}, false},
 		{"every tenant by agent run", ReleaseMatchingRequest{AllTenants: true, Session: "sid", RunID: uuid.New()}, false},
+		{"a tenant by subject issuer", ReleaseMatchingRequest{TenantID: tenant, SubjectIssuer: "https://idp.example"}, true},
+		{"every tenant by subject issuer", ReleaseMatchingRequest{AllTenants: true, SubjectIssuer: "https://idp.example"}, true},
+		{"every tenant by client of one issuer", ReleaseMatchingRequest{AllTenants: true, ClientID: "client", SubjectIssuer: "https://idp.example"}, true},
+		{"every tenant by subject of one issuer", ReleaseMatchingRequest{AllTenants: true, Subject: "s", SubjectIssuer: "https://idp.example"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.req.Validate()

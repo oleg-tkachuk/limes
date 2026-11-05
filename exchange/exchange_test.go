@@ -49,8 +49,8 @@ func TestExchangeCapsTheLifetimeAtTheSubjectToken(t *testing.T) {
 }
 
 // A policy that asks for more than the request allows, an audience nobody
-// asked for or a binding of its own, issues nothing, and the failure is the
-// server's.
+// asked for, a binding of its own or another identity provider than the
+// subject token's, issues nothing, and the failure is the server's.
 func TestExchangeHoldsThePolicyToTheRequest(t *testing.T) {
 	for name, change := range map[string]func(*limes.IssueRequest){
 		"another audience": func(r *limes.IssueRequest) { r.Audience = []string{toolResource, "https://elsewhere.example.com"} },
@@ -58,6 +58,7 @@ func TestExchangeHoldsThePolicyToTheRequest(t *testing.T) {
 		"another to act for": func(r *limes.IssueRequest) {
 			r.OnBehalfOf = &limes.Principal{Type: limes.PrincipalTypeUser, TenantID: r.Subject.TenantID, Subject: "someone-else"}
 		},
+		"another subject issuer": func(r *limes.IssueRequest) { r.SubjectIssuer = "https://elsewhere.example.com" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t, fixtureConfig{})

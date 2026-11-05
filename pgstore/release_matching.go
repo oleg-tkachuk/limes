@@ -51,7 +51,10 @@ func (s *UsageStore) ReleaseMatching(ctx context.Context, req meter.ReleaseMatch
 		tenant = req.TenantID
 		inTx = func(fn func(pgx.Tx) error) error { return s.inTenantTx(ctx, req.TenantID, fn) }
 	}
-	where, args := selectorConditionsSQL(req.Subject, req.OnBehalfOf, req.ClientID, req.Session, req.RunID, []any{tenant, limit})
+	where, args := selectorConditionsSQL(selection{
+		subject: req.Subject, onBehalfOf: req.OnBehalfOf, clientID: req.ClientID,
+		session: req.Session, subjectIssuer: req.SubjectIssuer, run: req.RunID,
+	}, []any{tenant, limit})
 	if req.CapabilityID != uuid.Nil() {
 		args = append(args, req.CapabilityID)
 		where += "\n      AND c.id = $" + strconv.Itoa(len(args))

@@ -168,6 +168,10 @@ type CapabilitySpec struct {
 	// ClientID is the client it is granted to, which the record holds as
 	// Capability.ClientID; empty for none.
 	ClientID string
+	// SubjectIssuer is the issuer of the subject token it was exchanged for,
+	// which the record holds as limes.InsertRequest.SubjectIssuer; empty for
+	// none. A child takes its parent's.
+	SubjectIssuer string
 }
 
 // CopyQuota is the quota of copies the record holds: Copies, or Unlimited
@@ -415,6 +419,7 @@ func Run(t *testing.T, setup func(t *testing.T) Env) {
 		{Name: "ReleaseMatchingReleasesAHoldUnderAForgottenAncestor", Run: checkReleaseMatchingReleasesAHoldUnderAForgottenAncestor},
 		{Name: "ReleaseMatchingRefusesAMalformedRequest", Run: checkReleaseMatchingMalformed},
 		{Name: "ReleaseMatchingReleasesInEveryTenant", Run: checkReleaseMatchingAllTenants},
+		{Name: "ReleaseMatchingTellsSubjectIssuersApart", Run: checkReleaseMatchingBySubjectIssuer},
 		{Name: "ReleaseMatchingReleasesOneCapability", Run: checkReleaseMatchingByCapability},
 		{Name: "ReleaseMatchingReportsAFullBatch", Run: checkReleaseMatchingReportsAFullBatch},
 		{Name: "ReleaseMatchingLeavesAHoldOffRecord", Run: checkReleaseMatchingLeavesAHoldOffRecord},

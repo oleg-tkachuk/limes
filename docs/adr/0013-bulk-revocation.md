@@ -1,6 +1,6 @@
 # ADR-0013: Revoking every capability of a subject, a client or a session
 
-**Status:** Accepted, amended by [ADR-0014](0014-bulk-revocation-across-tenants.md) and on 2026-11-05 (below)
+**Status:** Accepted, amended by [ADR-0014](0014-bulk-revocation-across-tenants.md) and on 2026-11-05 and 2026-11-06 (below)
 **Date:** 2026-10-29
 **Deciders:** Oleg Tkachuk
 **Relates to:** [ADR-0003](0003-oauth-token-exchange.md)
@@ -87,3 +87,15 @@ pgstore's indexes are `(tenant_id, X, id)`, in id order for the batches,
 not `(tenant_id, X)` (migrations 026 and 030). Those on `client_id`,
 `on_behalf_of`, `session` and `run_id` are partial, `WHERE X IS NOT NULL`;
 the one on `subject` is not.
+
+## Amendment, 2026-11-06
+
+A sixth selector, `SubjectIssuer`, matches the identity provider that
+issued the subject token a capability was exchanged for
+([ADR-0014](0014-bulk-revocation-across-tenants.md), amendment of
+2026-11-06). It is issuance metadata as the session is (decision 2):
+`IssueRequest.SubjectIssuer` and `InsertRequest.SubjectIssuer` record it,
+`Record.SubjectIssuer` reads it back, a child takes its parent's and may
+name none of its own, and the token's wire format does not change. The
+Exchanger records the subject token's `iss` (decision 3). pgstore stores
+it in `subject_issuer` (migrations 039 and 040).

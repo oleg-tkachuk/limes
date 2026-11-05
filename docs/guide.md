@@ -1109,7 +1109,10 @@ capability of one tenant that matches a selector. The selectors are:
 - `ClientID`;
 - `Session`, the identity provider's session it was issued under;
 - `RunID`, the agent run it was issued to (`Subject.Agent.RunID`): a run
-  gone wrong, whose capabilities issued apart share no lineage.
+  gone wrong, whose capabilities issued apart share no lineage;
+- `SubjectIssuer`, the identity provider its subject was authenticated by:
+  beside `ClientID` or `Session`, one provider's where another names the
+  same; alone, every capability of a provider removed.
 
 Given together, they must all match. At least one selector is required, and
 either `TenantID` or `AllTenants` ([ADR-0013](adr/0013-bulk-revocation.md)).
@@ -1139,6 +1142,13 @@ for {
   capability issued with no session is reached by subject or client
   instead. In pgstore, records written before migration 025 carry no
   session (their client and on-behalf-of are backfilled).
+- **So is the subject issuer.** `IssueRequest.SubjectIssuer` records it,
+  `Record.SubjectIssuer` reads it back, and every delegation takes its
+  parent's. An `exchange.Exchanger` records the subject token's `iss`,
+  and refuses a policy naming another. Empty in a request matches any
+  issuer, and none. In pgstore, migration 039 backfills it for the
+  capabilities an `ExchangeStore` recorded an exchange of, and their
+  delegations; any other record written before carries none.
 - **An OIDC back-channel logout** endpoint verifies the provider's logout
   token, then runs the loop above with its `sid`.
 - **Release the holds it stopped.** A revoked capability's open holds
@@ -1146,7 +1156,7 @@ for {
   reserved may still settle. A usage store that is a
   `meter.MatchingReleaser` — memstore's and pgstore's are — releases them
   at once: `ReleaseMatching` with the same selectors and a tenant — or
-  `AllTenants`, by client or session — releases the holds of revoked
+  `AllTenants`, by client, session or subject issuer — releases the holds of revoked
   matches and of everything delegated from them, never a live
   capability's ([ADR-0015](adr/0015-release-matching-holds.md)). Run it
   with the revocation's own request: it finds what is revoked, not what
@@ -1159,7 +1169,7 @@ for {
   lists a tenant's holds one by one.
 - **Preview it, and audit it after.** `CountRecordsRequest` and
   `ListRecordsRequest` take the same selectors — `Subject`, `OnBehalfOf`,
-  `ClientID`, `Session`, `RunID` — so a count names what a revocation would reach,
+  `ClientID`, `Session`, `SubjectIssuer`, `RunID` — so a count names what a revocation would reach,
   tenant by tenant with `AllTenants` and `ByTenant`, and a listing names
   each record; run again after, the same count reports them revoked.
 
@@ -1182,9 +1192,14 @@ for {
 }
 ```
 
-- **Across tenants only `ClientID` and `Session` select:** a subject names
-  a principal of one tenant, and the consumer mints run ids, so `Subject`,
-  `OnBehalfOf` and `RunID` beside `AllTenants` are `ErrInvalidRequest`.
+- **Across tenants only `ClientID`, `Session` and `SubjectIssuer` select:**
+  a subject names a principal of one tenant, and the consumer mints run
+  ids, so `Subject`, `OnBehalfOf` and `RunID` beside `AllTenants` are
+  `ErrInvalidRequest`.
+- **With more than one identity provider, name the issuer.** Two providers
+  may register a client of the same id, or reuse a `sid`; without
+  `SubjectIssuer` a call by client or session revokes both providers'.
+  An OIDC back-channel logout token carries its provider's `iss`: pass it.
 - **pgstore refuses a narrower scope** — one tenant's, or
   `WithAllTenantsReadOnly` — as `ErrScopeMismatch`.
 - **A batch writes in at most 16 tenants,** each under the revoke lock a
@@ -1360,7 +1375,7 @@ Elsewhere, implement these and you are done:
 | Interface | Stores | Transactions needed? |
 |---|---|---|
 | `Store` = `IssuanceStore` + admin | Capability records + revocations; an `Issuer` needs only `IssuanceStore` (`Insert`, `IsRevoked`), and a `RecordReader` too to `Reissue` | No |
-| `BulkRevoker` | Revokes a tenant's capabilities by subject, on-behalf-of, client or session (optional; `storetest` checks it through `Env.BulkRevoker`) | No |
+| `BulkRevoker` | Revokes a tenant's capabilities by subject, on-behalf-of, client, session, agent run or subject issuer (optional; `storetest` checks it through `Env.BulkRevoker`) | No |
 | `ExchangeStore` | Which capability each subject token was exchanged for (only for `exchange.Config.Exchanges`; `storetest` checks it through `Env.Exchanges`) | No |
 | `BiscuitRevocationStore` | Revoked Biscuit copies (only if you accept Biscuits) | No |
 | `meter.CopyUsageReader` | Reads Biscuit copies' own counters (only to show them) | No |

@@ -53,11 +53,11 @@ type CountRecordsRequest struct {
 	// ByTenant and ByPrincipalType group the counts by the record's tenant
 	// and by its subject's principal type as well.
 	ByTenant, ByPrincipalType bool
-	// Subject, OnBehalfOf, ClientID and Session count only the records
-	// that match each one set, as RevokeMatching selects them, so a count
-	// previews a revocation and audits one after. Every one, RunID's too, is
-	// taken with AllTenants: a count changes nothing.
-	Subject, OnBehalfOf, ClientID, Session string
+	// Subject, OnBehalfOf, ClientID, Session and SubjectIssuer count only
+	// the records that match each one set, as RevokeMatching selects them,
+	// so a count previews a revocation and audits one after. Every one,
+	// RunID's too, is taken with AllTenants: a count changes nothing.
+	Subject, OnBehalfOf, ClientID, Session, SubjectIssuer string
 	// RunID counts only the records of that agent run, as RevokeMatching
 	// selects them.
 	RunID uuid.UUID
