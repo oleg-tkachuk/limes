@@ -215,7 +215,11 @@ func main() {
 	must(err, "key set")
 	verifier, err := limes.NewVerifier(limes.VerifierConfig{Keys: keys, Revocations: records, TrustedIssuers: []string{limesIssuer}})
 	must(err, "verifier")
-	subjects, err := jwtverify.New(jwtverify.Config{Issuer: idpIssuer, Keys: jwtverify.StaticKeys(provider.keys)})
+	jwksDoc, err := json.Marshal(provider.keys)
+	must(err, "identity provider's key set")
+	idpKeys, err := jwtverify.StaticKeys(jwksDoc)
+	must(err, "identity provider's keys")
+	subjects, err := jwtverify.New(jwtverify.Config{Issuer: idpIssuer, Keys: idpKeys})
 	must(err, "subject verifier")
 
 	s := &server{tools: verifier, log: log, tenant: uuid.New()}
