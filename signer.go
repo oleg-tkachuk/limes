@@ -377,7 +377,8 @@ func (s *Signer) signature(ctx context.Context, signingInput string) ([]byte, er
 const TokenType = "at+jwt" //nolint:gosec // G101: a JWT type label, not a credential
 
 // formatV7 is the limes_v of a capability token. A later format under the
-// same type would be read by dispatching on it.
+// same type is read by dispatching on it, and v7 stays read for all of 1.x
+// (docs/adr/0019-token-formats-in-1x.md).
 const formatV7 = 7
 
 // SigningAlgorithm is the JWS alg a token names: Ed25519, by either of its

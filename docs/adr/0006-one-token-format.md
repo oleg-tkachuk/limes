@@ -1,6 +1,6 @@
 # ADR-0006: One token format, under a limes kid
 
-**Status:** Accepted
+**Status:** Accepted, amended by [ADR-0019](0019-token-formats-in-1x.md)
 **Date:** 2026-10-27
 **Deciders:** Oleg Tkachuk
 **Amends:** [ADR-0004](0004-token-format-v7.md)

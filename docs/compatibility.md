@@ -40,11 +40,17 @@ Any of these breaks a consumer:
 - changing a default;
 - moving the line between what a documented function accepts and what it
   refuses, either way: refusing what it accepted, or accepting what it
-  refused;
-- a stored or signed form an earlier release cannot read.
+  refused — but for a new token format, below;
+- a stored form, or a form signed by default, that an earlier release
+  cannot read.
 
 These do not:
 
+- a verifier reading a token format, a `limes_v`, it refused before. Every
+  format a release reads stays read for the whole of the major, and a
+  signer writes a new one only when its configuration names it, so
+  verifiers are upgraded first and issuers opted in after
+  ([ADR-0019](adr/0019-token-formats-in-1x.md));
 - adding a name, a code, a category, a field whose zero value keeps the
   old behaviour, or an option;
 - rewording an error's text, which is never a contract, or the prose of a

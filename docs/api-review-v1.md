@@ -19,8 +19,8 @@ compatibility is not a constraint before 1.0.
 
 | # | Question | Decision | Why |
 |---|---|---|---|
-| 1 | Wire format through 1.x | `VerifierConfig.AcceptTokenTypes` and `SignerConfig.TokenType`; 1.0 reads one format, v6 (round three retired v4, v0.104.0 v5), so a later one ships in a minor: verifiers first, then issuers. | Versioned format with a controlled migration. Reading unknown claims leniently is refused: a caveat a verifier does not know is one it does not enforce. |
-| 2 | Token algorithm | Ed25519 only for 1.x; another algorithm is another `typ`. | No runtime algorithm choice (RFC 8725); versioning the protocol replaces algorithm agility, and decision 1 carries the version. |
+| 1 | Wire format through 1.x | 1.0 reads one format, `at+jwt` with `limes_v: 7` (ADR-0006). A later one ships in a minor: verifiers read it with no configuration, then issuers opt in through a `SignerConfig` field whose zero value keeps v7; every format read stays read for all of 1.x (ADR-0019). | Versioned format with a controlled migration. Reading unknown claims leniently is refused: a caveat a verifier does not know is one it does not enforce. |
+| 2 | Token algorithm | Ed25519 only for 1.x; another algorithm is another `limes_v`. | No runtime algorithm choice (RFC 8725); versioning the protocol replaces algorithm agility, and decision 1 carries the version. |
 | 3 | What `Delegate` trusts | `Verify` returns a `VerifiedCapability` with unexported fields, and `Delegate` accepts only that type. | "Parse, don't validate": the compiler, not a doc comment, guarantees the parent was verified; a token's caveats are immutable, so no store read is needed beyond the revocation check `Delegate` already makes. |
 | 4 | Proof-of-possession errors | A family of their own, `ErrProofOfPossession`, beside `ErrInvalidSignature` — renamed `ErrInvalidToken`, which it always meant, RFC 6750's `invalid_token` — and both under an umbrella `ErrUnauthenticated`. | `errors.Is` asserts identity: a missing or replayed proof is not an invalid signature. The overlap needed `reasonAliases`, made table order load-bearing and once made a nonce challenge read as permanent. |
 | 5 | `Decode`, `VerifySignature` | A subpackage, `limes/inspect`. | A debugging tool kept apart from the API that authorises, as `net/http/httputil` is from `net/http`. |
@@ -93,9 +93,8 @@ Keep — implementers need them, as memstore shows: `PageLimit`,
 and, since the meter moved, `meter.ValidateExternalRef`,
 `meter.MaxExternalRefBytes` and `meter.DefaultReservationTTL`.
 
-**Done:** every name above is unexported or gone except `TokenType`, which
-P5 (b) brought back as the type of `AcceptTokenTypes`: a verifier names the
-formats it accepts, so the value is part of the contract; and
+**Done:** every name above is unexported or gone except `TokenType`, now
+the constant `"at+jwt"`, the JWT type of every capability (ADR-0006); and
 `DPoPSigningAlgorithms`, now `dpop.SigningAlgorithms`, exported because the
 root's challenges advertise it. `PublicJWK` and `JWK`
 live in `internal/jose`, `Decode` and `VerifySignature` in `inspect`,
@@ -152,17 +151,18 @@ with a default or a check, concrete return types, a `Now` field for the clock;
 functional options only for decorators. **Done:** one option type,
 `otelmetric.Option`, for the one decorator.
 
-**P5 — wire format.** Decided: (b), decision 1. The verifier reads claims strictly and
-accepts one `typ`, so any new caveat or Biscuit fact is refused by every
-deployed verifier.
+**P5 — wire format.** Decided: decision 1. The verifier reads claims
+strictly, so any new caveat or Biscuit fact is a new format, which every
+deployed verifier refuses until it is upgraded.
 - (a) Freeze the claim set and the Biscuit vocabulary for all of 1.x; a new
   caveat means v2.
-- (b) `VerifierConfig.AcceptTokenTypes`, so a new format ships in a minor:
-  verifiers first, then issuers. Recommended. **Done:**
-  `VerifierConfig.AcceptTokenTypes` and `SignerConfig.TokenType`. v5 shipped
-  that way in round three and v4 was then retired; v6 replaced v5 in v0.104.0
-  (`Caveats.Copies`), so `TokenTypeV6` is the one format every 1.x verifier
-  accepts.
+- (b) Let a new format ship in a minor: verifiers first, then issuers.
+  Chosen. v5 and v6 shipped that way, under `VerifierConfig.AcceptTokenTypes`
+  and `SignerConfig.TokenType`; ADR-0006 left one format, v7, and removed
+  both options. ADR-0019 sets the rule for 1.x: a verifier reads a new
+  `limes_v` with no configuration, which compatibility.md does not count as
+  a break; an issuer writes it only when a `SignerConfig` field added with
+  it names it; v7 stays read for the whole of 1.x.
 
 **P6 — cutting 1.0.** Remove `BREAKING_IS_A_MINOR_BEFORE_1_0` from the root module's rules in
 `.github/release/modules.cjs` — `pgstore`, `redisreplay` and `otelmetric`
@@ -273,6 +273,6 @@ three (section 9) after them; step 8 waits for the release decision.
    (decision 6); `MeterSubject` (T1).
 6. **Data types** — names, `AuthorizeRequest` fields, limits and optional
    times, enums (T3–T5, T7).
-7. **Wire format** — `AcceptTokenTypes` (decision 1), unexported wire structs
+7. **Wire format** — one format and the rule for a later one (decision 1), unexported wire structs
    (T6), Ed25519-only stated (decision 2).
 8. **1.0** — P6; P7 is already in place.
