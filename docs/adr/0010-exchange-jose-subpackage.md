@@ -1,6 +1,6 @@
 # ADR-0010: The JWT subject verifier in a package of its own
 
-**Status:** Accepted, amended on 2026-11-05 (below)
+**Status:** Accepted, amended on 2026-11-05 (below) and by [ADR-0020](0020-exchange-before-1-0.md)
 **Date:** 2026-10-29
 **Deciders:** Oleg Tkachuk
 **Relates to:** [ADR-0003](0003-oauth-token-exchange.md), [ADR-0007](0007-pgstore-components.md)
@@ -64,7 +64,7 @@ with the Exchanger it needs.
 
 The split is by package, not by module. `exchange/go.mod` still requires
 `lestrrat-go/jwx/v3` and `lestrrat-go/httprc/v3`, so a consumer that
-links neither still resolves both. `jwtverify`'s API exposes jwx's types:
-`KeySource.Keys` returns a `jwk.Set`, `StaticKeys` takes one and
-`CachedKeys` takes a `*jwk.Cache`. The exchange module's v1 line therefore
-follows jwx v3.
+links neither still resolves both. `jwtverify`'s API exposed jwx's types until
+[ADR-0020](0020-exchange-before-1-0.md) hid them: `KeySource` is a struct,
+`StaticKeys` takes a JWK Set document and `RemoteKeys` a URL, so the
+exchange module's v1 line does not follow jwx's majors.
