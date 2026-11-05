@@ -2,6 +2,16 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.67.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.66.1...pgstore%2Fv0.67.0) (2026-11-05)
+
+### ⚠ BREAKING CHANGES
+
+* **pgstore:** pgstore.Acquirer is replaced by pgstore.ConnLender.
+
+### Bug Fixes
+
+* **pgstore:** batch only on a pool, a conn or an explicit ConnLender ([007bbc9](https://github.com/oleg-tkachuk/limes/commit/007bbc9df16d29fdfc28fe237c23def4195e5ec0))
+
 ## [0.66.1](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.66.0...pgstore%2Fv0.66.1) (2026-11-05)
 
 ### Dependencies
