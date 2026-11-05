@@ -2,6 +2,16 @@
 
 Every release of the pgstore module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.66.0](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.65.2...pgstore%2Fv0.66.0) (2026-11-05)
+
+### ⚠ BREAKING CHANGES
+
+* **pgstore:** read the records ReleaseMatching selects through the lineage view
+
+### Bug Fixes
+
+* **pgstore:** read the records ReleaseMatching selects through the lineage view ([0bf43b6](https://github.com/oleg-tkachuk/limes/commit/0bf43b6acefc40c8405c2a7f090abaa3e4242ba5))
+
 ## [0.65.2](https://github.com/oleg-tkachuk/limes/compare/pgstore%2Fv0.65.1...pgstore%2Fv0.65.2) (2026-11-03)
 
 ### Dependencies
