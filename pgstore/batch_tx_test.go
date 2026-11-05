@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -289,8 +290,10 @@ func TestTheStoreLogsHowItOpensTransactions(t *testing.T) {
 		db   DB
 		want string
 	}{
-		{app, txPathAcquired},
+		{app, txPathPool},
 		{pc.Conn(), txPathConn},
+		{lender{app}, txPathLender},
+		{&embeddingPool{Pool: app}, txPathSeparate},
 		{beginOnly{app}, txPathSeparate},
 	} {
 		var buf bytes.Buffer
@@ -302,3 +305,51 @@ func TestTheStoreLogsHowItOpensTransactions(t *testing.T) {
 		}
 	}
 }
+
+// embeddingPool is a wrapper of one's own that embeds a pool, and so has its
+// Acquire, and overrides BeginTx, as one that sets session state per
+// transaction does.
+type embeddingPool struct {
+	*pgxpool.Pool
+	begun atomic.Int64
+}
+
+func (e *embeddingPool) BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error) {
+	e.begun.Add(1)
+	return e.Pool.BeginTx(ctx, opts)
+}
+
+// A wrapper that embeds a pool keeps its own BeginTx for every transaction:
+// embedding gives it the pool's methods, not the batched path.
+func TestAWrapperEmbeddingAPoolKeepsItsBeginTx(t *testing.T) {
+	f := newTenantFixture(t)
+	db := &embeddingPool{Pool: app}
+	usage, err := NewUsageStore(Config{DB: db, Now: f.clock.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mine := WithTenant(t.Context(), f.mine)
+	subject := meterSubject(f.child.ID, f.mine)
+	const calls = 3
+	for range calls {
+		if _, err := usage.Charge(mine, meter.ChargeRequest{Subject: subject, Amount: 1}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := db.begun.Load(); got != calls {
+		t.Errorf("the wrapper's BeginTx ran %d times for %d charges, want once each", got, calls)
+	}
+}
+
+// lender is a wrapper of one's own that opts in to batching (ConnLender).
+type lender struct{ pool *pgxpool.Pool }
+
+func (l lender) BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error) {
+	return l.pool.BeginTx(ctx, opts)
+}
+
+func (l lender) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return l.pool.QueryRow(ctx, sql, args...)
+}
+
+func (l lender) LendConn(ctx context.Context) (*pgxpool.Conn, error) { return l.pool.Acquire(ctx) }
