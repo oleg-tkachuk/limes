@@ -106,9 +106,10 @@ func isLockNotAvailable(err error) bool {
 	return ok && pgErr.Code == lockNotAvailable
 }
 
-// The files of the meter, the ledger and the charges: they read the
-// records only through the view.
-var usageFiles = []string{"charge.go", "ledger.go", "meter.go", "usage.go"}
+// The files of the meter, the ledger, the charges, the leases and the
+// release of what a bulk revocation left: they read the records only
+// through the view.
+var usageFiles = []string{"charge.go", "lease.go", "ledger.go", "meter.go", "release_matching.go", "usage.go"}
 
 // recordsTable is the records table as a query names it.
 var recordsTable = regexp.MustCompile("limes\\.capabilities\\b|schema\\s*\\+\\s*`\\.capabilities\\b")

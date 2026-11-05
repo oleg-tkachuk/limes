@@ -558,10 +558,10 @@ func (s *UsageStore) settleLease(ctx context.Context, tx pgx.Tx, capID uuid.UUID
 // than lease_ancestors, which drops the capabilities whose counters went.
 var sqlMatchingLeasesHead = `
 SELECT u.capability_id, u.tenant_id FROM limes.usage u
-JOIN limes.capabilities h ON h.id = u.capability_id
+JOIN ` + lineageView + ` h ON h.id = u.capability_id
 WHERE u.lease_id IS NOT NULL AND ($1::uuid IS NULL OR u.tenant_id = $1) AND h.revoked
   AND EXISTS (
-    SELECT 1 FROM limes.capabilities c
+    SELECT 1 FROM ` + lineageView + ` c
     WHERE c.id IN (` + sqlChainUp("u.capability_id") + `) AND c.tenant_id = u.tenant_id`
 
 // leaseholder is a capability holding a lease, and its tenant.
