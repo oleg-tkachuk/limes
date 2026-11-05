@@ -218,6 +218,13 @@ both reading the line through `.github/ci/lib/modules.ts`, and
   the schema's owner too (FORCE), `CheckSchema` refuses a pool they do not
   hold (`ErrRuntimeRole`), and since pgstore/v0.26.0 only
   `MigrateOptions.RuntimeRoles` may call the schema's functions.
+- `BEGIN` and `COMMIT` in a call's batches. **Done** before 1.0, first
+  deferred as an addition after it (ADR-0018): `pgstore.DB` stays
+  `BeginTx` and `QueryRow`, and a `Config.DB` that lends a connection —
+  `pgstore.Acquirer`, which `*pgxpool.Pool` implements, or a `*pgx.Conn`,
+  found by type assertion — runs each call on one, `BEGIN` going with its
+  first batch and a meter call's `COMMIT` with its last. `Charge` takes 4
+  round trips, `Bump` 3, `Reserve` 5; a `DB` of one's own keeps 6, 5 and 7.
 
 ## 9. Round three
 

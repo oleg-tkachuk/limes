@@ -169,6 +169,19 @@ same ones A removes by grouping.
    take 9.1 ms each instead of 86.
 5. The migration guide's note on the rolling upgrade, and the benchmarks'
    figures in ADR-0017.
+6. `BEGIN` and `COMMIT` in the batches, before 1.0 (2026-11-06). `DB`
+   stays `BeginTx` and `QueryRow`; pgstore finds by type assertion a
+   `Config.DB` that lends a connection — `Acquirer`, which `*pgxpool.Pool`
+   implements as it is, or a `*pgx.Conn` — and runs each call on one.
+   `BEGIN` goes with the call's first batch (pgx's `Batch.BeginTx`); a
+   meter call's `COMMIT` goes at the end of its write batch, its tag read
+   back: a `COMMIT` answered `ROLLBACK`, or not reached because a statement
+   before it failed, is not a success, and the connection is rolled back
+   before it is given back. Every other call saves the `BEGIN`. A pool's
+   own `SendBatch` is not used: its connection is the pool's to release
+   when the transaction ends, and a `COMMIT` sent in a batch does not end
+   it. `Charge` takes 4 round trips, `Bump` 3, `Reserve` 5; the aggregate
+   is held for two.
 
 What the rollout did not do, and why:
 
@@ -178,17 +191,16 @@ What the rollout did not do, and why:
   rules that are Go's, and memstore's, for one round trip more. Measured
   against what remains, not worth it; Option B stays the step after, if
   ever needed.
-- **`BEGIN` and `COMMIT` stay their own round trips.** `Config.DB` offers
-  `BeginTx` and `QueryRow` alone, so pgstore cannot send either in a batch
-  without a type of its own beside it: a change to the exported surface,
-  for two round trips. Decided on 2026-11-05: `DB` stays as it is for v1.
-  When built, batching them comes as an optional interface pgstore finds
-  on `Config.DB` by type assertion, which `*pgxpool.Pool` and `*pgx.Conn`
-  implement: an addition on v1, not a break. A `DB` of one's own that does
-  not implement it keeps today's round trips.
+- **`DB` itself did not change.** Decided on 2026-11-05 that it stays
+  `BeginTx` and `QueryRow` for v1; step 6 adds `Acquirer` beside it,
+  found by type assertion, rather than a method on it. A `DB` of one's own
+  that is neither an `Acquirer` nor a `*pgx.Conn` keeps step 4's round
+  trips. `Settle` deletes its hold after the write batch, so its `COMMIT`
+  stays a round trip of its own.
 
-The figures in force are step 4's, pinned by `pgstore/round_trips_test.go`:
-`Charge` 6 round trips, `Bump` 5, `Reserve` 7 and a `Bump` under a lease 5,
-whatever the depth; a `Charge` holds the tenant's aggregate for three. They
-replace the three round trips of decisions 1 and 6, Option A and the
+The figures in force are step 6's, pinned by `pgstore/round_trips_test.go`:
+`Charge` 4 round trips, `Bump` 3, `Reserve` 5 and a `Bump` under a lease 3,
+whatever the depth, on a `Config.DB` that lends a connection; 6, 5, 7 and 5
+on one that does not. A `Charge` holds the tenant's aggregate for two.
+They replace the three round trips of decisions 1 and 6, Option A and the
 Consequences.

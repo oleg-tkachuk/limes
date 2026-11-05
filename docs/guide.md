@@ -1243,6 +1243,16 @@ a lock reads what committed meanwhile; a `DB` of your own passes on the
 `pgx.TxOptions` it is given, or the store runs at the database's default
 isolation.
 
+A `*pgxpool.Pool` or a `*pgx.Conn` also saves each call its `BEGIN` and a
+meter call its `COMMIT`: the store finds, by type assertion, that it can
+run the call on a connection of its own — a pool's through
+`pgstore.Acquirer`, its `Acquire` method — and sends `BEGIN` with the
+call's first statement and `COMMIT` with the last, so a `Charge` takes four
+round trips and a `Bump` three. Its `BeginTx` then serves no call. A `DB` of
+your own that wraps a pool implements `Acquirer` to keep that; one that
+does not runs every transaction through its `BeginTx`, `BEGIN` and `COMMIT`
+a round trip each. The store logs which it took when it is constructed.
+
 A role that does not own the tables sees only the rows of the tenant a call
 is scoped to, and none when it is scoped to no tenant; the revocation checks
 see every tenant, as the verifier asks them before it knows the token's. A
