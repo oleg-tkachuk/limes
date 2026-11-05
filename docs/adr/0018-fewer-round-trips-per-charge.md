@@ -1,6 +1,6 @@
 # ADR-0018: Fewer round trips per charge
 
-**Status:** Accepted, amended by its rollout (below)
+**Status:** Accepted, amended by its rollout and on 2026-11-05 (below)
 **Date:** 2026-10-31
 **Deciders:** Oleg Tkachuk
 **Relates to:** [ADR-0007](0007-pgstore-components.md), [ADR-0017](0017-budget-leases.md)
@@ -181,7 +181,11 @@ What the rollout did not do, and why:
 - **`BEGIN` and `COMMIT` stay their own round trips.** `Config.DB` offers
   `BeginTx` and `QueryRow` alone, so pgstore cannot send either in a batch
   without a type of its own beside it: a change to the exported surface,
-  for two round trips, left for when the surface is next reopened.
+  for two round trips. Decided on 2026-11-05: `DB` stays as it is for v1.
+  When built, batching them comes as an optional interface pgstore finds
+  on `Config.DB` by type assertion, which `*pgxpool.Pool` and `*pgx.Conn`
+  implement: an addition on v1, not a break. A `DB` of one's own that does
+  not implement it keeps today's round trips.
 
 The figures in force are step 4's, pinned by `pgstore/round_trips_test.go`:
 `Charge` 6 round trips, `Bump` 5, `Reserve` 7 and a `Bump` under a lease 5,
