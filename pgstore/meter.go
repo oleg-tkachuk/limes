@@ -707,6 +707,18 @@ func quotasOf(self uuid.UUID, quota limes.CopyQuota, ancestors []ancestor) []cha
 // write stores every counter c holds, as it now stands — the tenant's
 // aggregate with writeTenant — and then the statements then, in one batch.
 func (c *counters) write(ctx context.Context, tx pgx.Tx, now time.Time, writeTenant bool, then ...heldStmt) error {
+	return c.writeBatch(ctx, tx, now, writeTenant, false, then)
+}
+
+// writeLast is write as the call's last statement: its batch carries the
+// call's COMMIT when tx can send it there (queueCommit), and tx takes no
+// statement after it.
+func (c *counters) writeLast(ctx context.Context, tx pgx.Tx, now time.Time, writeTenant bool, then ...heldStmt) error {
+	return c.writeBatch(ctx, tx, now, writeTenant, true, then)
+}
+
+// writeBatch is write, COMMIT queued after it when last.
+func (c *counters) writeBatch(ctx context.Context, tx pgx.Tx, now time.Time, writeTenant, last bool, then []heldStmt) error {
 	b := &pgx.Batch{}
 	if writeTenant {
 		t := c.tenant
@@ -750,9 +762,15 @@ func (c *counters) write(ctx context.Context, tx pgx.Tx, now time.Time, writeTen
 	if b.Len() == 0 {
 		return nil
 	}
+	// COMMIT's result is read by Close, which fails the batch when it did
+	// not commit.
+	writes := b.Len()
+	if last {
+		queueCommit(tx, b)
+	}
 	br := tx.SendBatch(ctx, b)
 	var err error
-	for range b.Len() {
+	for range writes {
 		if _, err = br.Exec(); err != nil {
 			break
 		}

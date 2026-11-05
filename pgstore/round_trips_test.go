@@ -1,30 +1,40 @@
 package pgstore
 
 import (
+	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 	"uuid"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/oleg-tkachuk/limes"
 	"github.com/oleg-tkachuk/limes/meter"
 )
 
-// The round trips each meter call makes, on a chain of any depth
-// (docs/adr/0018-fewer-round-trips-per-charge.md): BEGIN; one batch of the
-// scope, the erase lock, the erased check, a replay's lookup and the
-// lineage held; one creating and locking the counters; one creating and
-// locking the tenant's aggregate, a replay looked up again under the locks;
-// one writing them all and the ledger row or the hold; COMMIT. Reserve
-// reads its capability's expiry beside them. A Bump under a lease locks
-// the counters up to the leaseholder and no tenant's aggregate, as a Bump
-// does, so it makes as many. A change that sends one more
-// is a change to the tenant's throughput across a network, and fails here.
+// The round trips each meter call makes, on a chain of any depth, when
+// Config.DB lends the call a connection of its own
+// (docs/adr/0018-fewer-round-trips-per-charge.md): one batch of BEGIN, the
+// scope, the erase lock, the erased check, a replay's lookup and the lineage
+// held; one creating and locking the counters; one creating and locking the
+// tenant's aggregate, a replay looked up again under the locks; one writing
+// them all and the ledger row or the hold, then COMMIT. Reserve reads its
+// capability's expiry beside them. A Bump under a lease locks the counters
+// up to the leaseholder and no tenant's aggregate, as a Bump does, so it
+// makes as many. A change that sends one more is a change to the tenant's
+// throughput across a network, and fails here.
 const (
-	chargeRoundTrips     = 6
-	bumpRoundTrips       = 5
-	reserveRoundTrips    = 7
-	leasedBumpRoundTrips = 5
+	chargeRoundTrips     = 4
+	bumpRoundTrips       = 3
+	reserveRoundTrips    = 5
+	leasedBumpRoundTrips = 3
 )
+
+// separateTxRoundTrips is what a DB that lends no connection adds to each
+// call: BEGIN and COMMIT, each a round trip of its own.
+const separateTxRoundTrips = 2
 
 // roundTripLeasedRequests is how many requests the leased leaf holds: more
 // than the calls make.
@@ -39,15 +49,54 @@ const roundTripConns = 1
 const roundTripChainDepth = 3
 
 // Charge, Bump and Reserve make the round trips their constants name, on
-// the leaf of a chain.
+// the leaf of a chain, through a pool.
 func TestMeterRoundTrips(t *testing.T) {
-	fresh(t)
 	pool, sent := latencyPoolOf(t, 0, roundTripConns)
-	records, err := NewStore(Config{DB: pool})
+	meterRoundTrips(t, pool, sent, 0)
+}
+
+// On a *pgx.Conn, BEGIN and COMMIT go in the calls' batches as they do on
+// a pool.
+func TestMeterRoundTripsOnAConn(t *testing.T) {
+	pool, sent := latencyPoolOf(t, 0, roundTripConns)
+	pc, err := pool.Acquire(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	usage, err := NewUsageStore(Config{DB: pool})
+	conn := pc.Hijack()
+	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	meterRoundTrips(t, conn, sent, 0)
+}
+
+// A DB of one's own that lends no connection keeps BEGIN and COMMIT a round
+// trip each.
+func TestMeterRoundTripsOnASeparateTxDB(t *testing.T) {
+	pool, sent := latencyPoolOf(t, 0, roundTripConns)
+	meterRoundTrips(t, beginOnly{pool}, sent, separateTxRoundTrips)
+}
+
+// beginOnly is a DB of one's own: its pool's BeginTx and QueryRow, nothing
+// else.
+type beginOnly struct{ pool *pgxpool.Pool }
+
+func (b beginOnly) BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error) {
+	return b.pool.BeginTx(ctx, opts)
+}
+
+func (b beginOnly) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return b.pool.QueryRow(ctx, sql, args...)
+}
+
+// meterRoundTrips checks the meter calls on db make the round trips their
+// constants name and extra more, as sent counts them.
+func meterRoundTrips(t *testing.T, db DB, sent *atomic.Int64, extra int64) {
+	t.Helper()
+	fresh(t)
+	records, err := NewStore(Config{DB: db})
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage, err := NewUsageStore(Config{DB: db})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,8 +140,8 @@ func TestMeterRoundTrips(t *testing.T) {
 		if err := tc.call(); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		if got := sent.Load() - before; got != tc.want {
-			t.Errorf("%s made %d round trips, want %d", name, got, tc.want)
+		if got, want := sent.Load()-before, tc.want+extra; got != want {
+			t.Errorf("%s made %d round trips, want %d", name, got, want)
 		}
 	}
 	// Warmed and counted, both bumps of the leased leaf went under its lease.

@@ -269,5 +269,7 @@ A charge the lease balance does not cover is refused with
 `meter.ErrLeaseExhausted`, a kind of `limes.ErrBudgetExceeded`, rather than
 with `limes.ErrBudgetExceeded` itself (decision 2).
 
-ADR-0018 took `Charge` from 16 round trips to 6, not "toward one or two"
-as the Consequences expected (`pgstore/round_trips_test.go`).
+ADR-0018 took `Charge` from 16 round trips to 6, then to 4 with `BEGIN`
+and `COMMIT` in its batches, not "toward one or two" as the Consequences
+expected (`pgstore/round_trips_test.go`). The figures above were measured
+at 6.
