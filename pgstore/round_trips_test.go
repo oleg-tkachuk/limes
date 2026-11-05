@@ -68,6 +68,20 @@ func TestMeterRoundTripsOnAConn(t *testing.T) {
 	meterRoundTrips(t, conn, sent, 0)
 }
 
+// A DB of one's own that lends its connections (ConnLender) batches as a
+// pool does.
+func TestMeterRoundTripsOnAConnLender(t *testing.T) {
+	pool, sent := latencyPoolOf(t, 0, roundTripConns)
+	meterRoundTrips(t, lender{pool}, sent, 0)
+}
+
+// A wrapper that embeds a pool keeps BEGIN and COMMIT a round trip each,
+// its own BeginTx opening every transaction.
+func TestMeterRoundTripsOnAWrapperEmbeddingAPool(t *testing.T) {
+	pool, sent := latencyPoolOf(t, 0, roundTripConns)
+	meterRoundTrips(t, &embeddingPool{Pool: pool}, sent, separateTxRoundTrips)
+}
+
 // A DB of one's own that lends no connection keeps BEGIN and COMMIT a round
 // trip each.
 func TestMeterRoundTripsOnASeparateTxDB(t *testing.T) {

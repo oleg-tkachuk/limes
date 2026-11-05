@@ -171,8 +171,12 @@ same ones A removes by grouping.
    figures in ADR-0017.
 6. `BEGIN` and `COMMIT` in the batches, before 1.0 (2026-11-06). `DB`
    stays `BeginTx` and `QueryRow`; pgstore finds by type assertion a
-   `Config.DB` that lends a connection — `Acquirer`, which `*pgxpool.Pool`
-   implements as it is, or a `*pgx.Conn` — and runs each call on one.
+   `Config.DB` that is a `*pgxpool.Pool` or a `*pgx.Conn`, or a type of
+   one's own that opts in through `ConnLender`, and runs each call on a
+   connection of its own. The pool is matched by its exact type: a wrapper
+   that embeds one, and overrides `BeginTx` to set session state, would
+   otherwise have it bypassed without a word, so it keeps step 4's path
+   unless it implements `ConnLender`, whose method no pgx type has.
    `BEGIN` goes with the call's first batch (pgx's `Batch.BeginTx`); a
    meter call's `COMMIT` goes at the end of its write batch, its tag read
    back: a `COMMIT` answered `ROLLBACK`, or not reached because a statement
@@ -192,9 +196,9 @@ What the rollout did not do, and why:
   against what remains, not worth it; Option B stays the step after, if
   ever needed.
 - **`DB` itself did not change.** Decided on 2026-11-05 that it stays
-  `BeginTx` and `QueryRow` for v1; step 6 adds `Acquirer` beside it,
+  `BeginTx` and `QueryRow` for v1; step 6 adds `ConnLender` beside it,
   found by type assertion, rather than a method on it. A `DB` of one's own
-  that is neither an `Acquirer` nor a `*pgx.Conn` keeps step 4's round
+  that does not implement `ConnLender` keeps step 4's round
   trips. `Settle` deletes its hold after the write batch, so its `COMMIT`
   stays a round trip of its own.
 

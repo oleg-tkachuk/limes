@@ -81,6 +81,11 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   indexes it, built `CONCURRENTLY`. `migrate.Run` applies both; a
   consumer that vendors the schema applies steps 039 and 040 before this
   release.
+- `pgstore.Acquirer` is gone, for `pgstore.ConnLender`: a `Config.DB` of
+  your own opts in to `BEGIN` and `COMMIT` in a call's batches by
+  implementing `LendConn(ctx) (*pgxpool.Conn, error)`. `*pgxpool.Pool` and
+  `*pgx.Conn` batch as they are; a type that embeds a pool no longer does,
+  and its own `BeginTx` opens every transaction again.
 
 ## v0.166.0
 

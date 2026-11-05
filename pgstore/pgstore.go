@@ -160,27 +160,32 @@ const timeResolution = time.Microsecond
 // isolation, which txOptions exists to override. It stays these two methods
 // for all of v1.
 //
-// A DB that is a *pgx.Conn, or implements Acquirer as *pgxpool.Pool does —
-// both found by type assertion — runs each call on a connection of its own
+// A DB that is a *pgxpool.Pool or a *pgx.Conn, or implements ConnLender —
+// each found by type assertion — runs each call on a connection of its own
 // and sends BEGIN with the call's first statement, and a meter call's COMMIT
 // with its last batch: no round trip of their own
 // (docs/adr/0018-fewer-round-trips-per-charge.md). Its BeginTx then serves
 // no call. Any other DB has each transaction opened by BeginTx and
-// committed by the transaction's Commit, a round trip each.
+// committed by the transaction's Commit, a round trip each: a type of your
+// own that embeds a *pgxpool.Pool among them, so a BeginTx it overrides is
+// always called.
 type DB interface {
 	BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-// Acquirer is a DB that lends a connection for one call, as *pgxpool.Pool
-// does. A Config.DB that implements it, found there by type assertion, has
-// each call acquire a connection, send BEGIN and COMMIT in the call's
-// batches on it (DB), and release it once the transaction has ended: rolled
-// back first when it failed, so it goes back to the pool outside a
-// transaction. A wrapper of a pool implements it to keep those round trips
-// saved.
-type Acquirer interface {
-	Acquire(ctx context.Context) (*pgxpool.Conn, error)
+// ConnLender is a DB of your own that lends a connection from a pool for
+// one call, opting in to sending BEGIN and COMMIT in the call's batches
+// (DB). A Config.DB that implements it, found there by type assertion, has
+// each call take a connection with LendConn, send its statements on it, and
+// release it once the transaction has ended: rolled back first when it
+// failed, so it goes back to the pool outside a transaction. Its BeginTx
+// then serves no call that LendConn served: a wrapper that sets session
+// state or traces in BeginTx does it on the lent connection instead, or
+// does not implement ConnLender. No pgx type has the method, so a type
+// that embeds a *pgxpool.Pool does not implement it by accident.
+type ConnLender interface {
+	LendConn(ctx context.Context) (*pgxpool.Conn, error)
 }
 
 // txBeginner opens a call's transaction: Config.DB itself, or lendingDB
@@ -206,11 +211,26 @@ func (l lendingDB) BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, err
 	return &deferTx{lent: conn, release: release, opts: opts}, nil
 }
 
+// lendFrom lends the connection acquire takes from a pool, given back by
+// releasing it.
+func lendFrom(acquire func(context.Context) (*pgxpool.Conn, error)) func(context.Context) (*pgx.Conn, func(), error) {
+	return func(ctx context.Context) (*pgx.Conn, func(), error) {
+		c, err := acquire(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		return c.Conn(), c.Release, nil
+	}
+}
+
 // The ways a store opens its transactions, as its construction logs them.
 const (
-	// txPathAcquired is BEGIN and COMMIT in a call's batches, on a
-	// connection Config.DB lends (Acquirer).
-	txPathAcquired = "batched-acquired"
+	// txPathPool is BEGIN and COMMIT in a call's batches, on a connection
+	// acquired from Config.DB, a *pgxpool.Pool.
+	txPathPool = "batched-pool"
+	// txPathLender is BEGIN and COMMIT in a call's batches, on a connection
+	// Config.DB lends (ConnLender).
+	txPathLender = "batched-lender"
 	// txPathConn is BEGIN and COMMIT in a call's batches, on Config.DB
 	// itself, a *pgx.Conn.
 	txPathConn = "batched-conn"
@@ -232,14 +252,10 @@ func txBeginnerOf(db DB) (txBeginner, string) {
 	switch d := db.(type) {
 	case *pgx.Conn:
 		return lendingDB{lend: func(context.Context) (*pgx.Conn, func(), error) { return d, nil, nil }}, txPathConn
-	case Acquirer:
-		return lendingDB{lend: func(ctx context.Context) (*pgx.Conn, func(), error) {
-			c, err := d.Acquire(ctx)
-			if err != nil {
-				return nil, nil, err
-			}
-			return c.Conn(), c.Release, nil
-		}}, txPathAcquired
+	case *pgxpool.Pool:
+		return lendingDB{lend: lendFrom(d.Acquire)}, txPathPool
+	case ConnLender:
+		return lendingDB{lend: lendFrom(d.LendConn)}, txPathLender
 	default:
 		return db, txPathSeparate
 	}

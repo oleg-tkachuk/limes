@@ -220,9 +220,9 @@ both reading the line through `.github/ci/lib/modules.ts`, and
   `MigrateOptions.RuntimeRoles` may call the schema's functions.
 - `BEGIN` and `COMMIT` in a call's batches. **Done** before 1.0, first
   deferred as an addition after it (ADR-0018): `pgstore.DB` stays
-  `BeginTx` and `QueryRow`, and a `Config.DB` that lends a connection —
-  `pgstore.Acquirer`, which `*pgxpool.Pool` implements, or a `*pgx.Conn`,
-  found by type assertion — runs each call on one, `BEGIN` going with its
+  `BeginTx` and `QueryRow`, and a `Config.DB` that is a `*pgxpool.Pool` or
+  a `*pgx.Conn`, or opts in through `pgstore.ConnLender`, found by type
+  assertion, runs each call on a connection of its own, `BEGIN` going with its
   first batch and a meter call's `COMMIT` with its last. `Charge` takes 4
   round trips, `Bump` 3, `Reserve` 5; a `DB` of one's own keeps 6, 5 and 7.
 
