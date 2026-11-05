@@ -69,7 +69,10 @@ Decision 3 is implemented over the capability records' lineage, not the
 ancestors a hold names: a hold is released when its capability, or one
 that capability was delegated from on record, matches. The ancestors a
 hold names leave out those whose counters were deleted
-(`pgstore/release_matching.go`, `memstore/release_matching.go`).
+(`pgstore/release_matching.go`, `memstore/release_matching.go`). pgstore
+reads those records through `limes.capability_lineage`, which migration
+038 extends with `revoked` and the bulk revocation's selectors
+([ADR-0007](0007-pgstore-components.md)).
 
 `ReleaseMatching` also settles the open leases of matching revoked
 capabilities ([ADR-0017](0017-budget-leases.md)), in a pass of its own
