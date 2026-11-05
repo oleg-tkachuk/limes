@@ -28,3 +28,13 @@ func TestFiltersKeyOfATenantIsUnchanged(t *testing.T) {
 		t.Error("filtersKey does not tell a listing of every tenant from one of no tenant")
 	}
 }
+
+// A subject issuer is a filter of its own: a cursor handed out without one
+// is refused with it.
+func TestFiltersKeyNamesTheSubjectIssuer(t *testing.T) {
+	withIssuer := pinnedTenantRequest
+	withIssuer.SubjectIssuer = "https://idp.example"
+	if filtersKey(withIssuer) == pinnedTenantKey {
+		t.Error("filtersKey does not tell a listing by subject issuer from one without")
+	}
+}

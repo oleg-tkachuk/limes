@@ -23,6 +23,9 @@ const (
 	columnSession    = "c.session"
 	// columnRunID is the agent run's (migrate/ddl/migrations/029_revoke_by_run.sql).
 	columnRunID = "c.run_id"
+	// columnSubjectIssuer is the subject token's issuer's
+	// (migrate/ddl/migrations/039_subject_issuer.sql).
+	columnSubjectIssuer = "c.subject_issuer"
 )
 
 // sqlRevokeMatchingHead and sqlRevokeMatchingTail surround the selectors:
@@ -87,14 +90,18 @@ const maxTenantsPerBatch = 16
 // selectorsSQL is the conditions of req's selectors, numbered from the
 // arguments in args, and args with their values.
 func selectorsSQL(req limes.RevokeMatchingRequest, args []any) (string, []any) {
-	return selectorConditionsSQL(req.Subject, req.OnBehalfOf, req.ClientID, req.Session, req.RunID, args)
+	return selectorConditionsSQL(selection{
+		subject: req.Subject, onBehalfOf: req.OnBehalfOf, clientID: req.ClientID,
+		session: req.Session, subjectIssuer: req.SubjectIssuer, run: req.RunID,
+	}, args)
 }
 
 // selectorConditionsSQL is a condition on capabilities c for each selector
-// set, numbered from the arguments in args, and args with their values.
-func selectorConditionsSQL(subject, onBehalfOf, clientID, session string, run uuid.UUID, args []any) (string, []any) {
+// of sel set, numbered from the arguments in args, and args with their
+// values.
+func selectorConditionsSQL(sel selection, args []any) (string, []any) {
 	var where strings.Builder
-	for _, sel := range selectorConditions(subject, onBehalfOf, clientID, session, run) {
+	for _, sel := range selectorConditions(sel) {
 		args = append(args, sel.value)
 		where.WriteString("\n      AND " + sel.column + " = $" + strconv.Itoa(len(args)))
 	}
