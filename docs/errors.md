@@ -53,7 +53,7 @@ The body, for a capability that was revoked:
 
 ```json
 {
-  "type": "https://github.com/oleg-tkachuk/limes/problems/revoked",
+  "type": "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#revoked",
   "title": "The access token is invalid",
   "status": 401,
   "reason": "revoked",
@@ -64,7 +64,7 @@ The body, for a capability that was revoked:
 
 | Member | |
 |---|---|
-| `type` | A URI ending in the refusal's `reason`; for a refusal with none, in its family's type (`invalid-dpop-proof`, `invalid-token`, `insufficient-scope`, `conflict`); for an error that is no refusal, in its code (`limes.ProblemTypeURI`). |
+| `type` | This document, at the refusal's `reason`; for a refusal with none, at its family's type; for an error that is no refusal, at its code (`limes.ProblemTypeURI`). Each is an anchor of [Problem types](#problem-types), so the URI resolves to what it names. |
 | `title` | Fixed per kind, safe to show. |
 | `status` | The HTTP status: the error's numeric code. |
 | `code` | The stable code (`limes.Code`): what a client branches on. |
@@ -72,6 +72,7 @@ The body, for a capability that was revoked:
 | `reason` | For a refusal of a presented capability, its `limes.Reason`, which can be wider than the code: `tenant_erased` and `delegation_too_deep` are reported as `revoked`. |
 
 There is no `detail`: an error's own text is not shown to the client.
+
 
 ## Every component
 
@@ -360,3 +361,94 @@ not a second list to map.
 |---|---|---|---|
 | `use_dpop_nonce` | 400 | `dpop.ErrNonceRequired` | The DPoP proof must carry the server's nonce; a fresh one goes in `DPoP-Nonce`. |
 | `invalid_dpop_proof` | 400 | `dpop.ErrRequired`, `dpop.ErrInvalid`, `dpop.ErrReplayed` | The DPoP proof is required, invalid, or used before. |
+
+## Problem types
+
+Every problem type URI is this document's address and a fragment, the
+type's name, which is an anchor below: a code's row says where the code is
+described, and a refusal with no `reason` is typed by its family. Each
+type means the same for the whole of v1.
+
+| Type | HTTP | Described in |
+|---|---|---|
+| <a id="malformed_authorization"></a>`malformed_authorization` | 400 | [limes's codes](#limess-codes) |
+| <a id="no_credentials"></a>`no_credentials` | 401 | [limes's codes](#limess-codes) |
+| <a id="keys_unavailable"></a>`keys_unavailable` | 503 | [limes's codes](#limess-codes) |
+| <a id="nonce_required"></a>`nonce_required` | 401 | [limes's codes](#limess-codes) |
+| <a id="proof_required"></a>`proof_required` | 401 | [limes's codes](#limess-codes) |
+| <a id="proof_invalid"></a>`proof_invalid` | 401 | [limes's codes](#limess-codes) |
+| <a id="proof_replayed"></a>`proof_replayed` | 401 | [limes's codes](#limess-codes) |
+| <a id="auth_scheme_mismatch"></a>`auth_scheme_mismatch` | 401 | [limes's codes](#limess-codes) |
+| <a id="proof_of_possession"></a>`proof_of_possession` | 401 | [limes's codes](#limess-codes) |
+| <a id="biscuit_attenuation"></a>`biscuit_attenuation` | 401 | [limes's codes](#limess-codes) |
+| <a id="invalid_token"></a>`invalid_token` | 401 | [limes's codes](#limess-codes) |
+| <a id="expired"></a>`expired` | 401 | [limes's codes](#limess-codes) |
+| <a id="not_yet_valid"></a>`not_yet_valid` | 401 | [limes's codes](#limess-codes) |
+| <a id="tenant_erased"></a>`tenant_erased` | 401 | [limes's codes](#limess-codes) |
+| <a id="delegation_too_deep"></a>`delegation_too_deep` | 401 | [limes's codes](#limess-codes) |
+| <a id="revoked"></a>`revoked` | 401 | [limes's codes](#limess-codes) |
+| <a id="audience_mismatch"></a>`audience_mismatch` | 401 | [limes's codes](#limess-codes) |
+| <a id="unauthenticated"></a>`unauthenticated` | 401 | [limes's codes](#limess-codes) |
+| <a id="op_not_allowed"></a>`op_not_allowed` | 403 | [limes's codes](#limess-codes) |
+| <a id="resource_not_allowed"></a>`resource_not_allowed` | 403 | [limes's codes](#limess-codes) |
+| <a id="source_ip_not_allowed"></a>`source_ip_not_allowed` | 403 | [limes's codes](#limess-codes) |
+| <a id="idempotency_key_required"></a>`idempotency_key_required` | 403 | [limes's codes](#limess-codes) |
+| <a id="tainted_read_not_allowed"></a>`tainted_read_not_allowed` | 403 | [limes's codes](#limess-codes) |
+| <a id="caveat_violation"></a>`caveat_violation` | 403 | [limes's codes](#limess-codes) |
+| <a id="request_limit_exceeded"></a>`request_limit_exceeded` | 403 | [limes's codes](#limess-codes) |
+| <a id="budget_exceeded"></a>`budget_exceeded` | 403 | [limes's codes](#limess-codes) |
+| <a id="tenant_budget_exceeded"></a>`tenant_budget_exceeded` | 403 | [limes's codes](#limess-codes) |
+| <a id="unit_code_mismatch"></a>`unit_code_mismatch` | 409 | [limes's codes](#limess-codes) |
+| <a id="already_exists"></a>`already_exists` | 409 | [limes's codes](#limess-codes) |
+| <a id="conflict"></a>`conflict` | 409 | [limes's codes](#limess-codes) |
+| <a id="invalid_caveats"></a>`invalid_caveats` | 400 | [limes's codes](#limess-codes) |
+| <a id="invalid_amount"></a>`invalid_amount` | 400 | [limes's codes](#limess-codes) |
+| <a id="effect_conflict"></a>`effect_conflict` | 400 | [limes's codes](#limess-codes) |
+| <a id="cursor_mismatch"></a>`cursor_mismatch` | 400 | [limes's codes](#limess-codes) |
+| <a id="invalid_request"></a>`invalid_request` | 400 | [limes's codes](#limess-codes) |
+| <a id="delegation_too_wide"></a>`delegation_too_wide` | 403 | [limes's codes](#limess-codes) |
+| <a id="unknown_kid"></a>`unknown_kid` | 401 | [limes's codes](#limess-codes) |
+| <a id="not_found"></a>`not_found` | 404 | [limes's codes](#limess-codes) |
+| <a id="unknown_tenant"></a>`unknown_tenant` | 404 | [limes's codes](#limess-codes) |
+| <a id="tenant_deleted"></a>`tenant_deleted` | 410 | [limes's codes](#limess-codes) |
+| <a id="scope_mismatch"></a>`scope_mismatch` | 500 | [limes's codes](#limess-codes) |
+| <a id="proof_unsupported"></a>`proof_unsupported` | 500 | [limes's codes](#limess-codes) |
+| <a id="no_revocation_lineage"></a>`no_revocation_lineage` | 502 | [limes's codes](#limess-codes) |
+| <a id="copy_counters_not_metered"></a>`copy_counters_not_metered` | 500 | [limes's codes](#limess-codes) |
+| <a id="cursor_repeated"></a>`cursor_repeated` | 502 | [limes's codes](#limess-codes) |
+| <a id="invalid_config"></a>`invalid_config` | 500 | [limes's codes](#limess-codes) |
+| <a id="internal"></a>`internal` | 500 | [limes's codes](#limess-codes) |
+| <a id="copy_limit_exceeded"></a>`copy_limit_exceeded` | 403 | [The meter's codes](#the-meters-codes) |
+| <a id="counter_overflow"></a>`counter_overflow` | 409 | [The meter's codes](#the-meters-codes) |
+| <a id="charge_not_found"></a>`charge_not_found` | 404 | [The meter's codes](#the-meters-codes) |
+| <a id="refund_exceeds_charge"></a>`refund_exceeds_charge` | 409 | [The meter's codes](#the-meters-codes) |
+| <a id="reservation_not_found"></a>`reservation_not_found` | 404 | [The meter's codes](#the-meters-codes) |
+| <a id="usage_not_found"></a>`usage_not_found` | 404 | [The meter's codes](#the-meters-codes) |
+| <a id="tenant_budget_not_found"></a>`tenant_budget_not_found` | 404 | [The meter's codes](#the-meters-codes) |
+| <a id="tenant_budget_version_mismatch"></a>`tenant_budget_version_mismatch` | 409 | [The meter's codes](#the-meters-codes) |
+| <a id="external_ref_conflict"></a>`external_ref_conflict` | 409 | [The meter's codes](#the-meters-codes) |
+| <a id="settle_conflict"></a>`settle_conflict` | 409 | [The meter's codes](#the-meters-codes) |
+| <a id="lease_exhausted"></a>`lease_exhausted` | 403 | [The meter's codes](#the-meters-codes) |
+| <a id="lease_requests_exhausted"></a>`lease_requests_exhausted` | 403 | [The meter's codes](#the-meters-codes) |
+| <a id="lease_not_found"></a>`lease_not_found` | 404 | [The meter's codes](#the-meters-codes) |
+| <a id="lease_nested"></a>`lease_nested` | 409 | [The meter's codes](#the-meters-codes) |
+| <a id="leasing_disabled"></a>`leasing_disabled` | 500 | [The meter's codes](#the-meters-codes) |
+| <a id="feature_disabled"></a>`feature_disabled` | 500 | [The meter's codes](#the-meters-codes) |
+| <a id="unauthorized_client"></a>`unauthorized_client` | 400 | [The exchange's codes](#the-exchanges-codes) |
+| <a id="invalid_client"></a>`invalid_client` | 401 | [The exchange's codes](#the-exchanges-codes) |
+| <a id="unsupported_grant_type"></a>`unsupported_grant_type` | 400 | [The exchange's codes](#the-exchanges-codes) |
+| <a id="invalid_grant"></a>`invalid_grant` | 400 | [The exchange's codes](#the-exchanges-codes) |
+| <a id="invalid_target"></a>`invalid_target` | 400 | [The exchange's codes](#the-exchanges-codes) |
+| <a id="invalid_scope"></a>`invalid_scope` | 400 | [The exchange's codes](#the-exchanges-codes) |
+| <a id="invalid_authorization_details"></a>`invalid_authorization_details` | 400 | [The exchange's codes](#the-exchanges-codes) |
+| <a id="server_error"></a>`server_error` | 500 | [The exchange's codes](#the-exchanges-codes) |
+| <a id="use_dpop_nonce"></a>`use_dpop_nonce` | 400 | [The exchange's codes](#the-exchanges-codes) |
+| <a id="invalid_dpop_proof"></a>`invalid_dpop_proof` | 400 | [The exchange's codes](#the-exchanges-codes) |
+| <a id="keys-unavailable"></a>`keys-unavailable` | 503 | A refusal with no `reason`: The issuer's keys cannot be fetched |
+| <a id="malformed-authorization"></a>`malformed-authorization` | 400 | A refusal with no `reason`: The Authorization header is malformed |
+| <a id="no-credentials"></a>`no-credentials` | 401 | A refusal with no `reason`: Credentials are required |
+| <a id="dpop-nonce-required"></a>`dpop-nonce-required` | 401 | A refusal with no `reason`: A DPoP proof with the server's nonce is required |
+| <a id="invalid-dpop-proof"></a>`invalid-dpop-proof` | 401 | A refusal with no `reason`: The DPoP proof is missing or invalid |
+| <a id="invalid-token"></a>`invalid-token` | 401 | A refusal with no `reason`: The access token is invalid |
+| <a id="insufficient-scope"></a>`insufficient-scope` | 403 | A refusal with no `reason`: The token does not allow this request |
+| <a id="budget-exhausted"></a>`budget-exhausted` | 403 | A refusal with no `reason`: The token's request or budget limit is exhausted |

@@ -70,6 +70,15 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## v0.166.0
+
+- A problem type URI is `https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#<type>`,
+  where it was `https://github.com/oleg-tkachuk/limes/problems/<type>`:
+  the same type names, now under an address that resolves to the row
+  describing each (docs/errors.md, "Problem types"). A client that
+  compares `type` against a literal compares against the new prefix, or
+  better, branches on `code`; `limes.ProblemTypeURI` returns the new form.
+
 ## exchange/v0.17.0
 
 - `jwtverify.KeySource` is a struct, where it was an interface returning a
