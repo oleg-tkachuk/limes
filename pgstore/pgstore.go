@@ -139,6 +139,7 @@ import (
 	"uuid"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/oleg-tkachuk/limes/meter"
 	"github.com/oleg-tkachuk/limes/pgstore/internal/pgschema"
 
@@ -157,12 +158,91 @@ const timeResolution = time.Microsecond
 // implement it. A DB of your own opens each transaction with the options it
 // is given: one that drops them leaves the store at the database's default
 // isolation, which txOptions exists to override. It stays these two methods
-// for all of v1: sending BEGIN and COMMIT in a call's batches, if it comes,
-// comes as an optional interface found on it by type assertion
-// (docs/adr/0018-fewer-round-trips-per-charge.md).
+// for all of v1.
+//
+// A DB that is a *pgx.Conn, or implements Acquirer as *pgxpool.Pool does —
+// both found by type assertion — runs each call on a connection of its own
+// and sends BEGIN with the call's first statement, and a meter call's COMMIT
+// with its last batch: no round trip of their own
+// (docs/adr/0018-fewer-round-trips-per-charge.md). Its BeginTx then serves
+// no call. Any other DB has each transaction opened by BeginTx and
+// committed by the transaction's Commit, a round trip each.
 type DB interface {
 	BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// Acquirer is a DB that lends a connection for one call, as *pgxpool.Pool
+// does. A Config.DB that implements it, found there by type assertion, has
+// each call acquire a connection, send BEGIN and COMMIT in the call's
+// batches on it (DB), and release it once the transaction has ended: rolled
+// back first when it failed, so it goes back to the pool outside a
+// transaction. A wrapper of a pool implements it to keep those round trips
+// saved.
+type Acquirer interface {
+	Acquire(ctx context.Context) (*pgxpool.Conn, error)
+}
+
+// txBeginner opens a call's transaction: Config.DB itself, or lendingDB
+// over it.
+type txBeginner interface {
+	BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error)
+}
+
+// lendingDB opens a call's transaction on a connection lent to the call,
+// begun by its first batch: a *deferTx that holds BEGIN back.
+type lendingDB struct {
+	// lend is the call's connection, and the func that gives it back, nil
+	// when it is not the store's to give back.
+	lend func(ctx context.Context) (*pgx.Conn, func(), error)
+}
+
+// BeginTx lends the call a connection and sends nothing yet.
+func (l lendingDB) BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error) {
+	conn, release, err := l.lend(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &deferTx{lent: conn, release: release, opts: opts}, nil
+}
+
+// The ways a store opens its transactions, as its construction logs them.
+const (
+	// txPathAcquired is BEGIN and COMMIT in a call's batches, on a
+	// connection Config.DB lends (Acquirer).
+	txPathAcquired = "batched-acquired"
+	// txPathConn is BEGIN and COMMIT in a call's batches, on Config.DB
+	// itself, a *pgx.Conn.
+	txPathConn = "batched-conn"
+	// txPathSeparate is BEGIN and COMMIT a round trip each, through
+	// Config.DB's BeginTx.
+	txPathSeparate = "separate"
+)
+
+// logKeyTxPath names the way a store opens its transactions, one of the
+// txPath values.
+const logKeyTxPath = "tx_path"
+
+// logKeyDBType is the Go type of Config.DB, as a log line names it.
+const logKeyDBType = "db_type"
+
+// txBeginnerOf is how a store opens its transactions on db, and the path
+// that is.
+func txBeginnerOf(db DB) (txBeginner, string) {
+	switch d := db.(type) {
+	case *pgx.Conn:
+		return lendingDB{lend: func(context.Context) (*pgx.Conn, func(), error) { return d, nil, nil }}, txPathConn
+	case Acquirer:
+		return lendingDB{lend: func(ctx context.Context) (*pgx.Conn, func(), error) {
+			c, err := d.Acquire(ctx)
+			if err != nil {
+				return nil, nil, err
+			}
+			return c.Conn(), c.Release, nil
+		}}, txPathAcquired
+	default:
+		return db, txPathSeparate
+	}
 }
 
 // txOptions are those of every transaction the store opens. READ COMMITTED
@@ -263,7 +343,9 @@ func isNil(db DB) bool {
 // conn is what every store of the package shares: the database, the clock
 // and the scope.
 type conn struct {
-	db          DB
+	db DB
+	// txs opens each call's transaction (txBeginnerOf).
+	txs         txBeginner
 	now         func() time.Time
 	scope       func(ctx context.Context, tx pgx.Tx) error
 	checkTenant func(ctx context.Context, tx pgx.Tx, tenant uuid.UUID) error
@@ -299,6 +381,9 @@ func newConn(cfg Config) (conn, error) {
 	case cfg.MaxCopiesPerCapability == 0:
 		cfg.MaxCopiesPerCapability = meter.DefaultMaxCopiesPerCapability
 	}
+	txs, path := txBeginnerOf(cfg.DB)
+	cfg.Logger.Info("pgstore: opening transactions",
+		slog.String(logKeyTxPath, path), slog.String(logKeyDBType, fmt.Sprintf("%T", cfg.DB)))
 	checkReadOnly, checkEvery := checkSchemaReadOnly, checkSchemaAdmitsEvery
 	if cfg.CheckScope == nil && cfg.Scope == nil {
 		cfg.CheckScope = checkContextScope
@@ -308,7 +393,7 @@ func newConn(cfg Config) (conn, error) {
 		checkReadOnly, checkEvery = nil, checkContextAdmitsEvery
 	}
 	return conn{
-		db: cfg.DB, now: cfg.Now, scope: cfg.Scope,
+		db: cfg.DB, txs: txs, now: cfg.Now, scope: cfg.Scope,
 		checkTenant: cfg.CheckTenant, checkScope: cfg.CheckScope,
 		checkReadOnly: checkReadOnly, checkEvery: checkEvery,
 		leases:    !cfg.DisableLeases,
@@ -345,10 +430,15 @@ func (c conn) inTx(ctx context.Context, fn func(pgx.Tx) error) error {
 // inReadTx runs fn, a call that only reads, in one transaction, scoped
 // first.
 // The statements the scope executes go with the call's first statement
-// (deferTx), so the scope costs no round trip of its own.
+// (deferTx), so the scope costs no round trip of its own; so does BEGIN on a
+// connection lent to the call (lendingDB).
 func (c conn) inReadTx(ctx context.Context, fn func(pgx.Tx) error) error {
-	return pgx.BeginTxFunc(ctx, c.db, txOptions, func(tx pgx.Tx) error {
-		deferred := &deferTx{Tx: tx, deferring: true}
+	return pgx.BeginTxFunc(ctx, c.txs, txOptions, func(tx pgx.Tx) error {
+		deferred, ok := tx.(*deferTx)
+		if !ok {
+			deferred = &deferTx{Tx: tx}
+		}
+		deferred.deferring = true
 		err := c.scope(ctx, deferred)
 		deferred.deferring = false
 		if err != nil {

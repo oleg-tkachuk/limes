@@ -74,7 +74,7 @@ func (s *UsageStore) bump(ctx context.Context, tx pgx.Tx, subject limes.MeterSub
 		return count, err
 	}
 	countRequest(c, subject.UnitCode())
-	return count + 1, c.write(ctx, tx, s.clock(), false)
+	return count + 1, c.writeLast(ctx, tx, s.clock(), false)
 }
 
 // admitRequest refuses one more request of subject past a copy's, its own
@@ -280,7 +280,7 @@ func (s *UsageStore) charge(ctx context.Context, tx pgx.Tx, req meter.ChargeRequ
 		r, _, err := receiptOfRef(ctx, tx, req, unit, c.replay)
 		return r, cmp.Or(err, errReplayedAfterLock)
 	}
-	return s.commitCharge(ctx, tx, c, spec, onCharged)
+	return s.commitCharge(ctx, tx, c, spec, true, onCharged)
 }
 
 // errReplayedAfterLock rolls back a Charge that found its reference
@@ -338,8 +338,8 @@ type chargeSpec struct {
 // charge, runs onCharged and writes it, with the release of the hold it
 // settles. The charge is spent on the lineage as it stands; the hold is
 // released from the ancestors that hold it, which a row dropped since may
-// have left.
-func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, spec chargeSpec, onCharged func(context.Context, meter.Charged) error) (meter.ChargeReceipt, error) {
+// have left. last is the write the call's last statement (writeLast).
+func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, spec chargeSpec, last bool, onCharged func(context.Context, meter.Charged) error) (meter.ChargeReceipt, error) {
 	var released limes.Nanos
 	var holders []uuid.UUID
 	var reservationID *uuid.UUID
@@ -374,7 +374,7 @@ func (s *UsageStore) commitCharge(ctx context.Context, tx pgx.Tx, c *counters, s
 		receipt.ChargeID, spec.capID, spec.tenantID, int64(spec.amount), spec.unit, string(spec.op), spec.actor, now,
 		ancestorIDs(spec.ancestors), copyIDs(spec.copies), spec.externalRef, reservationID, overrun, c.tenant.period, nil, nil,
 	}}
-	if err := c.write(ctx, tx, now, true, insert); err != nil {
+	if err := c.writeBatch(ctx, tx, now, true, last, []heldStmt{insert}); err != nil {
 		return refused, err
 	}
 	return receipt, nil
@@ -679,7 +679,7 @@ func (s *UsageStore) reserve(ctx context.Context, tx pgx.Tx, req meter.ReserveRe
 	insert := heldStmt{sql: sqlInsertHold, args: []any{
 		h.id, h.capID, h.tenantID, h.ancestors, int64(h.amount), h.unit, string(h.op), h.actor, copies, h.expires,
 	}}
-	if err := c.write(ctx, tx, now, true, insert); err != nil {
+	if err := c.writeLast(ctx, tx, now, true, insert); err != nil {
 		return meter.Reservation{}, err
 	}
 	return h.reservation(), nil
@@ -801,7 +801,7 @@ func (s *UsageStore) settleHold(ctx context.Context, tx pgx.Tx, req meter.Settle
 	if err != nil {
 		return meter.ChargeReceipt{}, err
 	}
-	receipt, err := s.commitCharge(ctx, tx, c, spec, onCharged)
+	receipt, err := s.commitCharge(ctx, tx, c, spec, false, onCharged)
 	if err != nil {
 		return receipt, err
 	}

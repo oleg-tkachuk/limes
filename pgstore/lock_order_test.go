@@ -255,9 +255,21 @@ func TestAChargeDeadlockedByTheOldOrderIsRetried(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("Charge deadlocked by the old order: %v, want it retried", err)
 	}
-	logged.mu.Lock()
-	defer logged.mu.Unlock()
-	if len(logged.records) != 1 || logged.records[0].Level != slog.LevelWarn {
-		t.Errorf("logged %d records, want one warning of the retry", len(logged.records))
+	if warnings := logged.atLeast(slog.LevelWarn); len(warnings) != 1 {
+		t.Errorf("logged %d warnings, want one of the retry", len(warnings))
 	}
+}
+
+// atLeast is what h kept at level or above: a store logs how it opens its
+// transactions, at INFO, when it is constructed.
+func (h *logRecords) atLeast(level slog.Level) []slog.Record {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var out []slog.Record
+	for _, r := range h.records {
+		if r.Level >= level {
+			out = append(out, r)
+		}
+	}
+	return out
 }

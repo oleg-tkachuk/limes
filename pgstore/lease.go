@@ -239,7 +239,7 @@ func (s *UsageStore) bumpLeased(ctx context.Context, tx pgx.Tx, subject limes.Me
 	countRequest(c, subject.UnitCode())
 	h.reservedRequests = max(h.reservedRequests-1, 0)
 	made := heldStmt{sql: sqlLeaseRequestMade, args: []any{holder, h.lease.id}}
-	return count + 1, c.write(ctx, tx, now, false, made)
+	return count + 1, c.writeLast(ctx, tx, now, false, made)
 }
 
 // errLeaseMoved is a lease read before its row was locked that was settled,
@@ -306,7 +306,7 @@ func (s *UsageStore) chargeLeased(ctx context.Context, tx pgx.Tx, req meter.Char
 		ancestorIDs(ancestors), [][]byte{}, req.ExternalRef, nil, false, h.lease.period, h.lease.id, holder,
 	}}
 	spentUnder := heldStmt{sql: sqlLeaseSpent, args: []any{holder, int64(req.Amount), h.lease.id}}
-	if err := c.write(ctx, tx, now, false, insert, spentUnder); err != nil {
+	if err := c.writeLast(ctx, tx, now, false, insert, spentUnder); err != nil {
 		return refused, err
 	}
 	return receipt, nil

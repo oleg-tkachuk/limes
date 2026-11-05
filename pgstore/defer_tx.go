@@ -16,10 +16,32 @@ import (
 // while the scope runs; a scope that queries runs as before, what it held
 // back going first. A held-back statement's error is the scope's, returned
 // by the statement it went with, before that one runs.
+//
+// On a connection lent to the call (lendingDB), BEGIN is held back too: the
+// transaction is begun by the call's first batch (pgx.Batch.BeginTx), and a
+// call that sends nothing begins none. A meter call's last batch can carry
+// COMMIT as well (queueCommit).
 type deferTx struct {
+	// Tx is the transaction once begun; nil while BEGIN is held back.
 	pgx.Tx
 	deferring bool
 	held      []heldStmt
+	// lent is the connection the call has to itself, when BEGIN goes with
+	// its first statement; nil for a transaction DB.BeginTx began.
+	lent *pgx.Conn
+	// release gives lent back, once the transaction has ended; nil for a
+	// connection that is not the store's to give back.
+	release func()
+	// opts are those BEGIN begins the transaction with.
+	opts pgx.TxOptions
+	// commitQueued is COMMIT queued at the end of the call's last batch,
+	// and committed its tag read back as COMMIT.
+	commitQueued, committed bool
+	// ended is the transaction over for the call's statements: its last
+	// batch sent, or the transaction committed or rolled back.
+	ended bool
+	// finished is Commit or Rollback done, and lent given back.
+	finished bool
 }
 
 // heldStmt is one statement a scope executed, not sent yet.
@@ -28,11 +50,39 @@ type heldStmt struct {
 	args []any
 }
 
+// sqlCommit ends a meter call's transaction in its last batch.
+const sqlCommit = "COMMIT"
+
+// tagCommit is the command tag of a COMMIT that committed. PostgreSQL
+// answers COMMIT in an aborted transaction with the tag ROLLBACK and no
+// error.
+const tagCommit = "COMMIT"
+
+// txStatusIdle is the transaction status PostgreSQL reports of a connection
+// outside a transaction block (ReadyForQuery 'I').
+const txStatusIdle = 'I'
+
+// errNotCommitted is a COMMIT that went with a call's last batch and did
+// not commit.
+var errNotCommitted = fmt.Errorf("pgstore: the call's transaction did not commit: %w", pgx.ErrTxCommitRollback)
+
 // errScope wraps a held-back statement's error as inReadTx wraps the
 // scope's.
 func errScope(err error) error {
 	return fmt.Errorf("pgstore: scope: %w", err)
 }
+
+// errBegin wraps the error of a BEGIN sent with the call's first batch.
+func errBegin(err error) error {
+	return fmt.Errorf("pgstore: begin: %w", err)
+}
+
+// begun reports whether the transaction has been begun on the database.
+func (t *deferTx) begun() bool { return t.Tx != nil }
+
+// pending reports whether a statement sent now must carry something before
+// it: BEGIN, or what the scope held back.
+func (t *deferTx) pending() bool { return !t.begun() || len(t.held) > 0 }
 
 // take is what is held back, and holds nothing more.
 func (t *deferTx) take() []heldStmt {
@@ -41,21 +91,42 @@ func (t *deferTx) take() []heldStmt {
 	return h
 }
 
-// with is a batch of held, then the queries of b, if any.
-func with(held []heldStmt, b *pgx.Batch) *pgx.Batch {
+// send sends b, if any, after BEGIN when the transaction is not begun yet
+// and after what is held back: results that read theirs first.
+func (t *deferTx) send(ctx context.Context, b *pgx.Batch) pgx.BatchResults {
+	held := t.take()
+	begin := !t.begun()
 	out := &pgx.Batch{}
+	if begin {
+		out.BeginTx(t.opts)
+	}
 	for _, h := range held {
 		out.Queue(h.sql, h.args...)
 	}
 	if b != nil {
 		out.QueuedQueries = append(out.QueuedQueries, b.QueuedQueries...)
 	}
-	return out
+	var br pgx.BatchResults
+	if begin {
+		br = t.lent.SendBatch(ctx, out)
+		t.Tx = br.Tx()
+	} else {
+		br = t.Tx.SendBatch(ctx, out)
+	}
+	if t.commitQueued {
+		t.ended = true
+	}
+	return &drainedResults{BatchResults: br, begin: begin, held: len(held)}
 }
 
-// drainHeld reads the results of n held-back statements from br, the scope's
-// error if one failed.
-func drainHeld(br pgx.BatchResults, n int) error {
+// drainHeld reads the results of BEGIN, when begin, and of n held-back
+// statements from br: BEGIN's error, or the scope's if one failed.
+func drainHeld(br pgx.BatchResults, begin bool, n int) error {
+	if begin {
+		if _, err := br.Exec(); err != nil {
+			return errBegin(err)
+		}
+	}
 	for range n {
 		if _, err := br.Exec(); err != nil {
 			return errScope(err)
@@ -64,50 +135,71 @@ func drainHeld(br pgx.BatchResults, n int) error {
 	return nil
 }
 
-// flush sends what is held back on its own.
+// flush sends what is held back, BEGIN among it, on its own.
 func (t *deferTx) flush(ctx context.Context) error {
-	held := t.take()
-	if len(held) == 0 {
+	if !t.pending() {
 		return nil
 	}
-	br := t.Tx.SendBatch(ctx, with(held, nil))
-	err := drainHeld(br, len(held))
-	return errors.Join(err, br.Close())
+	return t.send(ctx, nil).Close()
+}
+
+// queueCommit queues COMMIT at the end of b, the call's last batch, on a
+// lent connection: once b is sent the transaction is over, and Commit
+// reports whether its COMMIT committed. It reports false, queuing nothing,
+// on a transaction DB.BeginTx began, whose Commit sends COMMIT itself.
+func (t *deferTx) queueCommit(b *pgx.Batch) bool {
+	if t.lent == nil || t.ended {
+		return false
+	}
+	b.Queue(sqlCommit).Exec(func(tag pgconn.CommandTag) error {
+		if tag.String() != tagCommit {
+			return fmt.Errorf("%w (tag %q)", errNotCommitted, tag.String())
+		}
+		t.committed = true
+		return nil
+	})
+	t.commitQueued = true
+	return true
+}
+
+// queueCommit queues COMMIT at the end of b when tx can send it there
+// (deferTx.queueCommit).
+func queueCommit(tx pgx.Tx, b *pgx.Batch) bool {
+	d, ok := tx.(*deferTx)
+	return ok && d.queueCommit(b)
 }
 
 // Exec holds sql back while the scope runs, and otherwise sends it with
 // what is held back.
 func (t *deferTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	if t.ended {
+		return pgconn.CommandTag{}, pgx.ErrTxClosed
+	}
 	if t.deferring {
 		t.held = append(t.held, heldStmt{sql: sql, args: args})
 		return pgconn.CommandTag{}, nil
 	}
-	held := t.take()
-	if len(held) == 0 {
+	if !t.pending() {
 		return t.Tx.Exec(ctx, sql, args...)
 	}
-	b := with(held, nil)
+	b := &pgx.Batch{}
 	b.Queue(sql, args...)
-	br := t.Tx.SendBatch(ctx, b)
-	if err := drainHeld(br, len(held)); err != nil {
-		return pgconn.CommandTag{}, errors.Join(err, br.Close())
-	}
+	br := t.send(ctx, b)
 	tag, err := br.Exec()
 	return tag, errors.Join(err, br.Close())
 }
 
 // Query sends sql with what is held back.
 func (t *deferTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
-	held := t.take()
-	if len(held) == 0 {
+	if t.ended {
+		return nil, pgx.ErrTxClosed
+	}
+	if !t.pending() {
 		return t.Tx.Query(ctx, sql, args...)
 	}
-	b := with(held, nil)
+	b := &pgx.Batch{}
 	b.Queue(sql, args...)
-	br := t.Tx.SendBatch(ctx, b)
-	if err := drainHeld(br, len(held)); err != nil {
-		return nil, errors.Join(err, br.Close())
-	}
+	br := t.send(ctx, b)
 	rows, err := br.Query()
 	if err != nil {
 		return nil, errors.Join(err, br.Close())
@@ -117,30 +209,38 @@ func (t *deferTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows,
 
 // QueryRow sends sql with what is held back.
 func (t *deferTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
-	held := t.take()
-	if len(held) == 0 {
+	if t.ended {
+		return errRow{pgx.ErrTxClosed}
+	}
+	if !t.pending() {
 		return t.Tx.QueryRow(ctx, sql, args...)
 	}
-	b := with(held, nil)
+	b := &pgx.Batch{}
 	b.Queue(sql, args...)
-	br := t.Tx.SendBatch(ctx, b)
-	if err := drainHeld(br, len(held)); err != nil {
-		return errRow{errors.Join(err, br.Close())}
-	}
+	br := t.send(ctx, b)
 	return &batchRow{row: br.QueryRow(), br: br}
 }
 
 // SendBatch sends b with what is held back, first.
 func (t *deferTx) SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResults {
-	held := t.take()
-	if len(held) == 0 {
-		return t.Tx.SendBatch(ctx, b)
+	if t.ended {
+		return closedBatch{pgx.ErrTxClosed}
 	}
-	return &drainedResults{BatchResults: t.Tx.SendBatch(ctx, with(held, b)), held: len(held)}
+	if !t.pending() {
+		results := t.Tx.SendBatch(ctx, b)
+		if t.commitQueued {
+			t.ended = true
+		}
+		return results
+	}
+	return t.send(ctx, b)
 }
 
 // CopyFrom sends what is held back, then copies.
 func (t *deferTx) CopyFrom(ctx context.Context, table pgx.Identifier, cols []string, src pgx.CopyFromSource) (int64, error) {
+	if t.ended {
+		return 0, pgx.ErrTxClosed
+	}
 	if err := t.flush(ctx); err != nil {
 		return 0, err
 	}
@@ -149,6 +249,9 @@ func (t *deferTx) CopyFrom(ctx context.Context, table pgx.Identifier, cols []str
 
 // Prepare sends what is held back, then prepares.
 func (t *deferTx) Prepare(ctx context.Context, name, sql string) (*pgconn.StatementDescription, error) {
+	if t.ended {
+		return nil, pgx.ErrTxClosed
+	}
 	if err := t.flush(ctx); err != nil {
 		return nil, err
 	}
@@ -157,17 +260,92 @@ func (t *deferTx) Prepare(ctx context.Context, name, sql string) (*pgconn.Statem
 
 // Begin sends what is held back, then begins a savepoint.
 func (t *deferTx) Begin(ctx context.Context) (pgx.Tx, error) {
+	if t.ended {
+		return nil, pgx.ErrTxClosed
+	}
 	if err := t.flush(ctx); err != nil {
 		return nil, err
 	}
 	return t.Tx.Begin(ctx)
 }
 
+// LargeObjects is the transaction's large objects, BEGIN sent first when
+// it is held back. LargeObjects takes no context, so it is sent with none.
+func (t *deferTx) LargeObjects() pgx.LargeObjects {
+	if !t.begun() {
+		_ = t.flush(context.Background()) // a failed BEGIN leaves t.Tx closed: its calls fail
+	}
+	return t.Tx.LargeObjects()
+}
+
+// Conn is the transaction's connection: the lent one while BEGIN is held
+// back.
+func (t *deferTx) Conn() *pgx.Conn {
+	if !t.begun() {
+		return t.lent
+	}
+	return t.Tx.Conn()
+}
+
 // Commit commits: what is held back scopes nothing the transaction did, so
-// it is not sent.
+// it is not sent. On a lent connection, a transaction never begun commits
+// nothing and sends nothing, and one whose COMMIT went with its last batch
+// sends nothing more and reports whether it committed.
 func (t *deferTx) Commit(ctx context.Context) error {
 	t.held = nil
+	if t.lent == nil {
+		return t.Tx.Commit(ctx)
+	}
+	if t.finished {
+		return pgx.ErrTxClosed
+	}
+	switch {
+	case t.commitQueued && t.committed:
+		t.finish()
+		return nil
+	case t.commitQueued:
+		return errors.Join(errNotCommitted, t.rollback(ctx))
+	case !t.begun():
+		t.finish()
+		return nil
+	}
+	defer t.finish()
 	return t.Tx.Commit(ctx)
+}
+
+// Rollback rolls back. On a lent connection it sends nothing for a
+// transaction never begun, or one the database has ended already: its
+// COMMIT went with the last batch, or its BEGIN failed.
+func (t *deferTx) Rollback(ctx context.Context) error {
+	t.held = nil
+	if t.lent == nil {
+		return t.Tx.Rollback(ctx)
+	}
+	if t.finished {
+		return pgx.ErrTxClosed
+	}
+	return t.rollback(ctx)
+}
+
+// rollback sends ROLLBACK when the lent connection is still in a
+// transaction — open, or aborted by a statement that failed — so it goes
+// back clean, then gives the connection back.
+func (t *deferTx) rollback(ctx context.Context) error {
+	defer t.finish()
+	if !t.begun() || t.lent.PgConn().TxStatus() == txStatusIdle {
+		return nil
+	}
+	return t.Tx.Rollback(ctx)
+}
+
+// finish ends the transaction for the call and gives the lent connection
+// back, once.
+func (t *deferTx) finish() {
+	t.ended, t.finished = true, true
+	if release := t.release; release != nil {
+		t.release = nil
+		release()
+	}
 }
 
 // batchRows is the rows of a query sent in a batch, which closes the batch
@@ -215,18 +393,21 @@ type errRow struct{ err error }
 
 func (r errRow) Scan(...any) error { return r.err }
 
-// drainedResults is a batch's results whose first held statements are the
-// scope's, read before any of the caller's.
+// drainedResults is a batch's results whose first statements are BEGIN,
+// when begin, and the scope's held ones, read before any of the caller's.
 type drainedResults struct {
 	pgx.BatchResults
-	held int
-	err  error
+	begin bool
+	held  int
+	err   error
 }
 
-// ready reads the held statements' results the first time it is called.
+// ready reads BEGIN's and the held statements' results the first time it
+// is called.
 func (d *drainedResults) ready() error {
-	if d.held > 0 {
-		d.err, d.held = drainHeld(d.BatchResults, d.held), 0
+	if d.begin || d.held > 0 {
+		d.err = drainHeld(d.BatchResults, d.begin, d.held)
+		d.begin, d.held = false, 0
 	}
 	return d.err
 }
