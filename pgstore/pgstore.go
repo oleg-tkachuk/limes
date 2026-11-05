@@ -156,7 +156,10 @@ const timeResolution = time.Microsecond
 // and a single statement for a revocation check. *pgxpool.Pool and *pgx.Conn
 // implement it. A DB of your own opens each transaction with the options it
 // is given: one that drops them leaves the store at the database's default
-// isolation, which txOptions exists to override.
+// isolation, which txOptions exists to override. It stays these two methods
+// for all of v1: sending BEGIN and COMMIT in a call's batches, if it comes,
+// comes as an optional interface found on it by type assertion
+// (docs/adr/0018-fewer-round-trips-per-charge.md).
 type DB interface {
 	BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
