@@ -28,8 +28,11 @@ const headerWWWAuthenticate = "WWW-Authenticate"
 // mediaTypeProblem is RFC 9457 §3's media type for problem details.
 const mediaTypeProblem = "application/problem+json"
 
-// problemTypeBase prefixes the problem type URIs this module defines.
-const problemTypeBase = "https://github.com/oleg-tkachuk/limes/problems/"
+// problemTypeBase prefixes the problem type URIs this module defines: each
+// is an anchor of docs/errors.md, which says what the type means, so the URI
+// resolves to it (RFC 9457 §3.1.1). problem_types_test.go holds every type
+// to an anchor there.
+const problemTypeBase = "https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#"
 
 // Challenge parameters of RFC 6750 §3 and RFC 9449 §7.1.
 const (

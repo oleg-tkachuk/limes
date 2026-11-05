@@ -55,7 +55,7 @@ func ExampleWriteErrorResponse() {
 	fmt.Print(rec.Body.String())
 	// Output:
 	// 403 application/problem+json
-	// {"type":"https://github.com/oleg-tkachuk/limes/problems/op_not_allowed","title":"The token does not allow this request","status":403,"reason":"op_not_allowed","code":"op_not_allowed","category":"denied"}
+	// {"type":"https://github.com/oleg-tkachuk/limes/blob/main/docs/errors.md#op_not_allowed","title":"The token does not allow this request","status":403,"reason":"op_not_allowed","code":"op_not_allowed","category":"denied"}
 }
 
 func ExampleReasonOf() {
