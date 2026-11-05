@@ -1,6 +1,6 @@
 # ADR-0009: One capability per subject token, on request
 
-**Status:** Accepted
+**Status:** Accepted, amended on 2026-11-05 (below)
 **Date:** 2026-10-29
 **Deciders:** Oleg Tkachuk
 **Relates to:** [ADR-0003](0003-oauth-token-exchange.md)
@@ -92,3 +92,12 @@ token's `jti`, with a lock across replicas.
   the statement that widens those records.
 - **`Issuer.Reissue` signs any live capability on record.** Whoever holds
   the Issuer could already issue one; Reissue gives that holder nothing new.
+
+## Amendment, 2026-11-05
+
+Decision 4's audience rule is stricter as implemented. On a hit, the
+recorded capability's audience must be the same set as this exchange's
+`IssueRequest.Audience`, compared sorted (`Exchanger.reissue`,
+`exchange/exchange.go`); a narrower or a wider request is refused alike.
+The refusal is `exchange.ErrTargetExchanged`, which wraps
+`ErrInvalidTarget`, so the token endpoint still answers `invalid_target`.

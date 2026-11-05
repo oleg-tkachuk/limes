@@ -1,6 +1,6 @@
 # ADR-0003: Bridge OAuth to capabilities by token exchange
 
-**Status:** Accepted
+**Status:** Accepted, amended on 2026-11-05 (below)
 **Date:** 2026-10-27
 **Deciders:** Oleg Tkachuk
 
@@ -180,3 +180,23 @@ them.
    (decision 4).
 6. [x] `exchangetest`: a contract suite for `SubjectVerifier`
    implementations other than `JWTVerifier`.
+
+## Amendment, 2026-11-05
+
+Later ADRs changed what this one states:
+
+- **Capabilities are RFC 9068 access tokens.** [ADR-0004](0004-token-format-v7.md)
+  and [ADR-0006](0006-one-token-format.md) made every capability an `at+jwt`
+  (`limes.TokenType`, `signer.go`), so the exchange issues one, not
+  `limes-cap-v6+jwt`. Its `issued_token_type` is still
+  `exchange.IssuedTokenTypeCapability`.
+- **The JWT subject verifier moved.** [ADR-0010](0010-exchange-jose-subpackage.md)
+  moved `JWTVerifier` and its key sources to `exchange/jwtverify`
+  (`jwtverify.Verifier`); package `exchange` keeps `SubjectVerifier` and
+  imports no JOSE library.
+- **The root API changed for the exchange.** [ADR-0009](0009-one-capability-per-subject-token.md)
+  added `limes.ExchangeStore` and `Issuer.Reissue`, and
+  [ADR-0013](0013-bulk-revocation.md) added `IssueRequest.Session`, so
+  Option A's "Root API unchanged" no longer holds.
+- **Revocation per identity-provider session is done.** ADR-0013 records
+  the session with each capability and revokes by it (`limes.BulkRevoker`).

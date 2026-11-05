@@ -1,6 +1,6 @@
 # ADR-0012: A stable code and a problem details body for every error
 
-**Status:** Accepted
+**Status:** Accepted, amended on 2026-11-05 (below)
 **Date:** 2026-10-29
 **Deciders:** Oleg Tkachuk
 **Relates to:** [ADR-0003](0003-oauth-token-exchange.md)
@@ -78,3 +78,34 @@ them onto its framework in one place.
   no change.
 - `meter.ProblemOf` and `exchange.ErrorOf` are each module's to keep in
   step with its sentinels, held there by the same kind of test.
+
+## Amendment, 2026-11-05
+
+The registry grew past this decision. [docs/errors.md](../errors.md) and
+[docs/compatibility.md](../compatibility.md) are the current authority;
+in short:
+
+- **One registry, in the root module.** The meter's and the exchange's
+  codes are registered in `code.go` beside limes's own; `meter/code.go`
+  re-exports the meter's as aliases, and a sentinel of a package limes
+  cannot import names its code through `internal/errcode.Coded`.
+  `meter.ProblemOf` does not exist: `limes.ProblemOf` answers every code.
+  `exchange.ErrorOf` remains, for RFC 6749 §5.2.
+- **More reads of the registry.** `Codes()`, `CodeOf`, `ProblemOf`,
+  `ProblemFor` (any error, an unknown one as `internal`), `ProblemOfCode`
+  and `ProblemTypeURI`.
+- **Categories.** `limes.Category` (`category.go`: `unauthenticated`,
+  `denied`, `exhausted`, `invalid`, `not_found`, `conflict`,
+  `already_exists`, `precondition`, `unavailable`, `internal`) is what a
+  caller does about a code; every code has one. `Categories()`,
+  `CategoryOf`, `CategoryOfCode`, and `Problem.Category` on the wire.
+- **A refusal's problem type ends in its reason, not its code.** A folded
+  refusal such as `tenant_erased` has the type `…/problems/revoked` and
+  carries its own code in `code`; an error that is no refusal has a type
+  ending in its code.
+- **The contract is wider than "codes are never renamed".** Each code's
+  HTTP status, category and reason are contract, and which codes `Codes()`
+  lists; removing a code or answering one otherwise is a break.
+- **`limestest`** pins a consumer's mapping to that contract:
+  `CheckMapping`, `CheckCodes`, `CheckCategories`, with the options
+  `WithoutExchange`, `WithoutMeter` and `AcceptNewByCategory`.

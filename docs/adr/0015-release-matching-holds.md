@@ -1,6 +1,6 @@
 # ADR-0015: Releasing the holds of a bulk revocation at once
 
-**Status:** Accepted
+**Status:** Accepted, amended on 2026-11-05 (below)
 **Date:** 2026-10-30
 **Deciders:** Oleg Tkachuk
 **Relates to:** [ADR-0013](0013-bulk-revocation.md), [ADR-0014](0014-bulk-revocation-across-tenants.md)
@@ -62,3 +62,16 @@ knows no such cost will come, and wants the tenant's budget back now.
   `ReleaseExpired` alone never makes that choice.
 - **A usage store of the consumer's own** compiles as before and is not
   held to the new checks unless it implements `MatchingReleaser`.
+
+## Amendment, 2026-11-05
+
+Decision 3 is implemented over the capability records' lineage, not the
+ancestors a hold names: a hold is released when its capability, or one
+that capability was delegated from on record, matches. The ancestors a
+hold names leave out those whose counters were deleted
+(`pgstore/release_matching.go`, `memstore/release_matching.go`).
+
+`ReleaseMatching` also settles the open leases of matching revoked
+capabilities ([ADR-0017](0017-budget-leases.md)), in a pass of its own
+after the holds, batched by the same limit, and counts them in
+`ReleaseMatchingResult.SettledLeases` (`meter/release_matching.go`).

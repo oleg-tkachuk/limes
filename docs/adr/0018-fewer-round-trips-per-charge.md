@@ -182,3 +182,9 @@ What the rollout did not do, and why:
   `BeginTx` and `QueryRow` alone, so pgstore cannot send either in a batch
   without a type of its own beside it: a change to the exported surface,
   for two round trips, left for when the surface is next reopened.
+
+The figures in force are step 4's, pinned by `pgstore/round_trips_test.go`:
+`Charge` 6 round trips, `Bump` 5, `Reserve` 7 and a `Bump` under a lease 5,
+whatever the depth; a `Charge` holds the tenant's aggregate for three. They
+replace the three round trips of decisions 1 and 6, Option A and the
+Consequences.

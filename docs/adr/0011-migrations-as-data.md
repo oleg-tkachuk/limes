@@ -1,6 +1,6 @@
 # ADR-0011: pgstore's migrations as data, for a migration tool of the consumer's
 
-**Status:** Accepted
+**Status:** Accepted, amended on 2026-11-05 (below)
 **Date:** 2026-10-29
 **Deciders:** Oleg Tkachuk
 **Relates to:** [ADR-0007](0007-pgstore-components.md)
@@ -68,3 +68,12 @@ transaction.
 - **`ddl.Steps` reads the files by tern's naming rule** (`NNN_name.sql`, no
   gap). A test holds its output equal to what tern loads, so the two never
   drift.
+
+## Amendment, 2026-11-05
+
+`ddl` imports two packages beside the standard library:
+`limes/internal/errs` and `pgstore/internal/pgschema`
+(`pgstore/migrate/ddl/ddl.go`), each of which imports the standard library
+alone. A consumer that vendors the SQL links `ddl`, those two and the
+standard library. `pgstore/deps_test.go` allows exactly these and refuses
+pgx and tern.
