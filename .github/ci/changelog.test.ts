@@ -3,8 +3,9 @@ import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 
-import { CHANGELOG, GENERATED_MARKER, TITLE, addEntry, checkChangelog, entryVersion, newestEntry, entryFrom, parseEntries, preamble, releaseURL, writeAll, writeChangelog } from "./changelog.ts";
+import { CHANGELOG, GENERATED_MARKER, TITLE, addEntry, checkChangelog, checkRequirement, entryVersion, newestEntry, entryFrom, parseEntries, preamble, releaseURL, writeAll, writeChangelog } from "./changelog.ts";
 import { fakeData, fakeGitHub, type FakeData } from "./lib/fake-github.ts";
+import { LIMES_MODULE } from "./lib/go-modules.ts";
 import { selectModule } from "./lib/modules.ts";
 import { tempRepo, type TempRepo } from "./lib/temp-repo.ts";
 
@@ -144,6 +145,54 @@ describe("the changelogs", () => {
     await assert.rejects(checkChangelog(repo.dir, selectModule(repo.dir), "HEAD"), /lists 0\.8\.0, no release tag v0\.8\.0 is reachable/);
     repo.write(CHANGELOG, `${TITLE}\n\n## [0.1.0](a)\n\n## [0.2.0](b)\n`);
     await assert.rejects(checkChangelog(repo.dir, selectModule(repo.dir), "HEAD"), /lists 0\.2\.0, out of order/);
+  });
+});
+
+describe("checkRequirement", () => {
+  let repo: TempRepo;
+
+  beforeEach(async () => {
+    repo = await seeded();
+  });
+  afterEach(() => repo.cleanup());
+
+  const requiring = (version: string) => repo.write(`${PGSTORE}/go.mod`, `module example.com/limes/pgstore\n\nrequire ${LIMES_MODULE} ${version}\n\nreplace ${LIMES_MODULE} => ../\n`);
+  const check = () => checkRequirement(repo.dir, selectModule(repo.dir, PGSTORE), "HEAD");
+
+  test("passes a release of limes", async () => {
+    requiring("v0.1.0");
+    assert.match(await check(), /requires limes v0\.1\.0, a release$/);
+  });
+
+  // A release pull request raises the requirement to the limes it plans,
+  // tagged on the same commit when it merges.
+  test("passes the release the root changelog plans", async () => {
+    repo.write(CHANGELOG, `${TITLE}\n\n## [0.3.0](a)\n\n## [0.2.0](b)\n`);
+    requiring("v0.3.0");
+    assert.match(await check(), /the release this change plans$/);
+  });
+
+  test("passes a module that requires no limes", async () => {
+    assert.match(await check(), /requires no limes$/);
+  });
+
+  test("refuses a limes still to be released", async () => {
+    requiring("v0.3.0");
+    await assert.rejects(check(), /requires limes v0\.3\.0, which is no release of limes reachable from HEAD \(the newest is v0\.2\.0\)/);
+  });
+
+  test("refuses a prerelease and a pseudo-version", async () => {
+    requiring("v0.3.0-rc.1");
+    await assert.rejects(check(), /v0\.3\.0-rc\.1, which is no release/);
+    requiring("v0.2.1-0.20261105120000-abcdefabcdef");
+    await assert.rejects(check(), /which is no release/);
+  });
+
+  // Only the newest entry may plan a release, and only above every tag.
+  test("refuses a version an older entry names", async () => {
+    repo.write(CHANGELOG, `${TITLE}\n\n## [0.2.0](a)\n\n## [0.1.5](b)\n`);
+    requiring("v0.1.5");
+    await assert.rejects(check(), /which is no release/);
   });
 });
 

@@ -100,3 +100,33 @@ export function changesBeyondRequirements(before: string, after: string): boolea
   const b = statementsBeyondRequirements(after);
   return a.length !== b.length || a.some((s, i) => s !== b[i]);
 }
+
+// requiredVersion is the version the go.mod text requires of the module at
+// path, if it requires it: from a require line or a require block.
+export function requiredVersion(text: string, path: string): string | undefined {
+  let block: string | undefined;
+  for (const raw of text.split("\n")) {
+    const line = statementOf(raw);
+    if (line === "") {
+      continue;
+    }
+    if (block !== undefined) {
+      if (line === BLOCK_CLOSE) {
+        block = undefined;
+      } else if (block === REQUIRE) {
+        const [module, version] = line.split(" ");
+        if (module === path) {
+          return version;
+        }
+      }
+      continue;
+    }
+    const [keyword = "", ...rest] = line.split(" ");
+    if (rest.length === 1 && rest[0] === BLOCK_OPEN) {
+      block = keyword;
+    } else if (keyword === REQUIRE && rest[0] === path) {
+      return rest[1];
+    }
+  }
+  return undefined;
+}

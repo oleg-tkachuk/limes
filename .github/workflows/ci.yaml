@@ -600,8 +600,9 @@ jobs:
         run: node .github/ci/check-modules.ts markers
 
       # Each module's CHANGELOG.md: every entry a release tag reachable from
-      # this commit, newest first. See .github/ci/changelog.ts.
-      - name: Hold the changelogs to the tags
+      # this commit, newest first; and each nested module's requirement of
+      # limes, a release of it. See .github/ci/changelog.ts.
+      - name: Hold the changelogs and the nested requirements to the tags
         run: node .github/ci/changelog.ts check
 
   # Two jobs over the same files, and the halves do not overlap. actionlint
