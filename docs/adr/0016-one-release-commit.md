@@ -149,6 +149,11 @@ module still on 0.x follows it to its own v1.0.0, changed or not.
 
 ## Amendment, 2026-11-05
 
+Point 3's check is `checkRequirement` in `.github/ci/changelog.ts`, run by
+`changelog.ts check`: a nested module's requirement of limes is a release
+of limes reachable from the commit, or the one the root changelog's newest
+entry plans.
+
 A release pull request that cuts a major is opened, or made, a draft
 (`release-plan.ts`), which `merge-green.ts` leaves for the maintainer; no
 label marks it, as rollout step 4 planned.
