@@ -23,9 +23,10 @@ import (
 // records a Store over the same database keeps.
 //
 // Every call locks what it changes in one order — holds by id, then the
-// tenant aggregate, then the capabilities' counters by id, then the copies'
-// by revocation id, then the ledger — so two calls never wait on each other
-// in a cycle. onCharged
+// capabilities' counters by id, then the copies' by revocation id, then the
+// tenant aggregate, then the ledger — so two calls never wait on each other
+// in a cycle (lock_order_test.go; docs/adr/0018-fewer-round-trips-per-charge.md).
+// onCharged
 // runs on the call's own transaction: it is the pgx.Tx it is handed.
 type UsageStore struct {
 	conn
