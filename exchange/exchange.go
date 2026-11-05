@@ -447,6 +447,17 @@ func (e *Exchanger) grant(ctx context.Context, req Request, subject Subject, rem
 	if issue.Session == "" {
 		issue.Session = subject.SessionID
 	}
+	// The identity provider that issued the subject token is the one its
+	// client and session were named by: recorded with them, so a bulk
+	// revocation tells two providers' alike-named ones apart. A policy
+	// naming another would record a provider that issued nothing here.
+	switch issue.SubjectIssuer {
+	case "":
+		issue.SubjectIssuer = subject.Issuer
+	case subject.Issuer:
+	default:
+		return limes.IssueRequest{}, fmt.Errorf("%w: it names subject issuer %q, not the subject token's %q", errPolicy, issue.SubjectIssuer, subject.Issuer)
+	}
 	// The client the identity provider issued the subject token to is the
 	// capability's, unless the policy names another.
 	if issue.ClientID == "" {
