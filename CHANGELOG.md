@@ -2,6 +2,20 @@
 
 Every release of the limes module, newest first, from its release notes. Written by the release pull request before each release is tagged (.github/ci/release-plan.ts); not edited by hand.
 
+## [0.166.0](https://github.com/oleg-tkachuk/limes/compare/v0.165.0...v0.166.0) (2026-11-05)
+
+### ⚠ BREAKING CHANGES
+
+* point every problem type at its row in docs/errors.md
+
+### Features
+
+* point every problem type at its row in docs/errors.md ([473c3a6](https://github.com/oleg-tkachuk/limes/commit/473c3a6da00a2a887b1ee7724c1890d3c5ec1270))
+
+### Contract
+
+* let a minor teach verifiers a new token format
+
 ## [0.165.0](https://github.com/oleg-tkachuk/limes/compare/v0.164.0...v0.165.0) (2026-11-04)
 
 ### ⚠ BREAKING CHANGES
