@@ -1,6 +1,6 @@
 # ADR-0002: Bound the charges ledger before 1.0
 
-**Status:** Accepted
+**Status:** Accepted, amended on 2026-11-05 (below)
 **Date:** 2026-10-24
 **Deciders:** Oleg Tkachuk
 
@@ -141,3 +141,17 @@ consumer may rely on — and ships the purge that keeps to it.
 2. [x] Before 1.0 (decided on 2026-10-24): `meter.LedgerHousekeeping` with
    `PurgeCharges`, memstore and pgstore implementations, `metertest` checks
    of the window, a pgstore plan test that the purge reads by `at`.
+
+## Amendment, 2026-11-05
+
+`MinChargeRetention` stays 401 days for the whole of v1, and Option B's
+"widened in any minor" does not hold: under
+[compatibility.md](../compatibility.md) a higher floor refuses an
+`OlderThan` that was accepted and changes `PurgeChargesRequest`'s default,
+and a lower one accepts what was refused and narrows the promises of
+`ExternalRef`, `Refund` and `SumCharges`. Each is a break.
+
+A ledger that must keep charges longer passes a longer `OlderThan`; nothing
+in limes needs to change for it. A floor of a store's own, shorter or
+longer, could come on v1 as a store configuration field whose zero value
+keeps `MinChargeRetention`: an addition, not a break.

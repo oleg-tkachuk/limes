@@ -316,7 +316,9 @@ const (
 // ledger may remove a charge older than its retention, which is no shorter
 // than this, and those promises then lapse for it. Removing charges by hand
 // is held to it too. Erasing a tenant (TenantUsageEraser) is not: it removes
-// every charge of the tenant, whatever its age.
+// every charge of the tenant, whatever its age. Its value holds for all of
+// v1: raising or lowering it moves what PurgeCharges accepts
+// (docs/adr/0002-ledger-retention.md).
 const MinChargeRetention = billingYear + disputeWindow
 
 // UsageHousekeeping reclaims usage rows of capabilities that are gone.
