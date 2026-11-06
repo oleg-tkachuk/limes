@@ -26,39 +26,60 @@ var contractExpiry = time.Now().Add(contractTTL)
 const contractCopyQuota = 16
 
 func TestMeterContract(t *testing.T) {
+	metertest.Run(t, contractEnv)
+}
+
+// A store whose expiry runs on a clock other than the one Now and Advance
+// read — as pgstore's does on the database's — hands that clock to the
+// checks of expiry through ExpiryNow and AdvanceExpiry, and they run on it.
+func TestMeterContractOnAnExpiryClock(t *testing.T) {
+	var advanced atomic.Int64 // how many times a check moved the expiry clock
 	metertest.Run(t, func(t *testing.T) metertest.Env {
 		t.Helper()
-		records := newTestStore()
-		tenant := uuid.New()
-		// The clock stands still but for Advance, so holds made together
-		// expire together.
-		start := time.Now()
-		var offset atomic.Int64 // how far Advance has moved the clock
-		now := func() time.Time { return start.Add(time.Duration(offset.Load())) }
-		usage := mustUsage(t, UsageStoreConfig{Records: records, Now: now, MaxCopiesPerCapability: contractCopyQuota})
-		return metertest.Env{
-			MaxCopiesPerCapability: contractCopyQuota,
-			Ctx:                    context.Background(),
-			Usage:                  usage,
-			Ledger:                 NewLedger(usage),
-			Now:                    now,
-			Tenant:                 tenant,
-			Advance:                func(d time.Duration) { offset.Add(int64(d)) },
-			DeleteCapability:       removeRecord(records),
-			Revoke: func(id uuid.UUID) error {
-				_, err := records.Revoke(context.Background(), limes.RevokeRequest{CapabilityID: id})
-				return err
-			},
-			NewCapability: func(spec metertest.CapabilitySpec) (uuid.UUID, error) {
-				c := limes.Capability{
-					ID: uuid.New(), ParentID: spec.Parent, ExpiresAt: contractExpiry, ClientID: spec.ClientID,
-					Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: cmp.Or(spec.Tenant, tenant), Subject: "agent"},
-					Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: spec.Requests, Budget: spec.Budget, Copies: spec.CopyQuota()},
-				}
-				return c.ID, records.Insert(context.Background(), limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "issuer"}, SubjectIssuer: spec.SubjectIssuer})
-			},
-		}
+		env := contractEnv(t)
+		now, advance := env.Now, env.Advance
+		env.Now, env.Advance = nil, nil
+		env.ExpiryNow = now
+		env.AdvanceExpiry = func(d time.Duration) { advanced.Add(1); advance(d) }
+		return env
 	})
+	if advanced.Load() == 0 {
+		t.Error("no check moved Env.AdvanceExpiry")
+	}
+}
+
+// contractEnv is a fresh store for one check of the contract, on a clock
+// that stands still but for Advance, so holds made together expire together.
+func contractEnv(t *testing.T) metertest.Env {
+	t.Helper()
+	records := newTestStore()
+	tenant := uuid.New()
+	start := time.Now()
+	var offset atomic.Int64 // how far Advance has moved the clock
+	now := func() time.Time { return start.Add(time.Duration(offset.Load())) }
+	usage := mustUsage(t, UsageStoreConfig{Records: records, Now: now, MaxCopiesPerCapability: contractCopyQuota})
+	return metertest.Env{
+		MaxCopiesPerCapability: contractCopyQuota,
+		Ctx:                    context.Background(),
+		Usage:                  usage,
+		Ledger:                 NewLedger(usage),
+		Now:                    now,
+		Tenant:                 tenant,
+		Advance:                func(d time.Duration) { offset.Add(int64(d)) },
+		DeleteCapability:       removeRecord(records),
+		Revoke: func(id uuid.UUID) error {
+			_, err := records.Revoke(context.Background(), limes.RevokeRequest{CapabilityID: id})
+			return err
+		},
+		NewCapability: func(spec metertest.CapabilitySpec) (uuid.UUID, error) {
+			c := limes.Capability{
+				ID: uuid.New(), ParentID: spec.Parent, ExpiresAt: contractExpiry, ClientID: spec.ClientID,
+				Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: cmp.Or(spec.Tenant, tenant), Subject: "agent"},
+				Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: spec.Requests, Budget: spec.Budget, Copies: spec.CopyQuota()},
+			}
+			return c.ID, records.Insert(context.Background(), limes.InsertRequest{Capability: c, IssuedBy: limes.Principal{Subject: "issuer"}, SubjectIssuer: spec.SubjectIssuer})
+		},
+	}
 }
 
 // counterOnly is a store that counts requests and does nothing else: the

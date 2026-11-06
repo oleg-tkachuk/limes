@@ -43,10 +43,21 @@
 // clock, now(), the time its transaction began. The replicas of a service
 // share the database and not their clocks: one running ahead would release
 // another's live holds as expired, or refuse their Settle with
-// meter.ErrReservationNotFound. A hold's expiry is then the database's time
-// plus its TTL, and Settle, Reserve, Lease, a charge or a bump under a lease
-// and ReleaseExpired decide by it. With Config.Now set, that clock decides
-// expiry too, as a test that moves it needs.
+// meter.ErrReservationNotFound. One clock writes and compares a hold's
+// lifetime — its expiry is the database's time plus its TTL, and Settle,
+// Reserve, Lease, a charge or a bump under a lease and ReleaseExpired decide
+// by it. With Config.Now set, that clock decides expiry too, as a test that
+// moves it needs.
+//
+// A capability's expiry is another clock's: the issuer's, which wrote it,
+// and whether the token has expired is its verifier's to decide, by its own
+// clock and leeway. The store does not decide it again by its clock. It ends
+// a hold or a lease no later than the capability's expiry plus a grace —
+// limes.MaxLeeway, the widest leeway a verifier gives, and
+// limes.PurgeClockSkew, how far behind the store's its clock may run — and
+// refuses Reserve and Lease with limes.ErrExpired only past that, where no
+// verifier could still accept the token and its record may be purged
+// (limes.MinPurgeRetention).
 //
 // Charge and Settle hand onCharged the charge's transaction, which TxFrom
 // reads from its context, so a write of the consumer's commits with the
@@ -281,6 +292,8 @@ type Config struct {
 	DB DB
 	// Now is the store's clock. Nil: time.Now, and the database's clock,
 	// now(), for holds' and leases' expiry (see the package documentation).
+	// A capability's expiry is its verifier's to decide by its own clock:
+	// the store refuses one only past the grace a verifier's leeway takes.
 	Now func() time.Time
 	// Scope runs first in every transaction the store opens, with the call's
 	// context, and sets what row-level security policies read: nil is

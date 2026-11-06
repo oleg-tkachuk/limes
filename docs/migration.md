@@ -70,6 +70,19 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
 | `rc.2` | `v0.123.0` | `v0.1.71` | `v0.39.0` | `v0.8.0` | — | — |
 | `rc.1` | `v0.117.0` | `v0.1.65` | `v0.35.1` | `v0.6.2` | — | — |
 
+## pgstore/v0.70.0
+
+- `UsageStore.Reserve` and `Lease` refuse a capability with
+  `limes.ErrExpired` only once the store's clock is past its record's
+  expiry by `limes.MaxLeeway` plus `limes.PurgeClockSkew`, where they
+  refused it from the expiry on, and a hold or a lease ends at that later
+  instant at the latest, where it ended with the record. The record's
+  expiry is the issuer's clock and the store's another — the database's,
+  with `Config.Now` nil — so a token a verifier still accepted within its
+  leeway was refused, or held until an instant already past. A consumer
+  that relied on the store to refuse an expired token checks it at the
+  verifier, as `Verify` does.
+
 ## exchange/v0.21.0
 
 - An empty `Decision.Scopes` or `NarrowDecision.Scopes` grants no scope,

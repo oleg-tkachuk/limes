@@ -702,7 +702,9 @@ budget. `Settle` charges the actual cost in place of the hold; above the hold,
 the excess must fit, or the hold stays for you to settle lower or `Release`.
 A hold never settled lapses after its TTL (`DefaultReservationTTL`, five
 minutes, unless the request says), or when its capability expires, if that
-comes sooner. Revoking the capability does not end it: the cost may already be
+comes sooner — in `pgstore`, up to `limes.MaxLeeway` plus
+`limes.PurgeClockSkew` past it, the most a verifier's leeway and clock may
+still accept the token for. Revoking the capability does not end it: the cost may already be
 incurred, and it can still be settled until then. Run `ReleaseExpired` on a timer, again
 while a batch comes back full (`DefaultHousekeepingLimit` unless set). Settling
 the zero reservation id, a hold of another capability than the subject's, or
@@ -779,7 +781,8 @@ stored record (`StoredMeterSubject`, which reads it through a `RecordReader`, as
 already reads every ancestor's ceiling. A price that is not known yet is not a price of zero: hold the estimate and
 settle when it is known, or let the hold lapse and count against the ceilings
 until `ReleaseExpired` runs. `Reserve` refuses a capability whose record has
-expired (`ErrExpired`); a cost reported after that is charged with
+expired (`ErrExpired`) — `pgstore` only once no verifier could still accept
+its token, as above; a cost reported after that is charged with
 `OverrunPolicyRecord`.
 
 ## Retrying a lost answer
@@ -1002,7 +1005,11 @@ Without them the checks that need a second tenant use a random id and `Ctx`.
 `PurgeOrphans` checks; some remove an ancestor whose children stay, so a store
 whose records refer to their parent unhooks the children first. `Ledger` turns
 on the checks of a `LedgerReader`; with `Now` (the store's clock) and
-`Advance` as well, the checks of its UTC buckets. `storetest.Env` takes the same `NewTenant`,
+`Advance` as well, the checks of its UTC buckets. A store that measures
+expiry by a clock other than its own — `pgstore`'s, with no `Config.Now`,
+by the database's — sets `ExpiryNow` and `AdvanceExpiry` to read and move
+that one: the checks of expiry run on it, and with `Now` and `Advance`
+unset, those that need the store's own clock to move are skipped. `storetest.Env` takes the same `NewTenant`,
 `TenantCtx` and `Advance`, so one setup can serve both suites, plus `Now` (the
 store's clock, for the checks at an expiry's exact instant) and
 `DeleteTenant` (moves a tenant to the trash, for the `ErrUnknownTenant` and
@@ -1482,7 +1489,13 @@ either followed by `BEGIN`) is refused with `ErrChargeTransaction` and
 begins is its own to end. Every time it writes comes from `Config.Now`; with
 `Config.Now` nil, holds' and leases' expiry is measured by the database's
 clock, `now()` as the call's transaction began, so replicas whose clocks
-drift apart agree on which holds are live.
+drift apart agree on which holds are live. A capability's expiry is not
+the store's to decide: the issuer's clock wrote it, and the verifier
+decides it by its own clock and leeway. The store ends a hold or a lease
+no later than that expiry plus `limes.MaxLeeway` and
+`limes.PurgeClockSkew`, and refuses `Reserve` and `Lease` with `ErrExpired`
+only past it — when no verifier could still accept the token, and its
+record may be purged (`limes.MinPurgeRetention`).
 
 A tenant's ceiling is exact because every call that moves its spend or holds
 — `Charge`, `Reserve`, `Settle`, `Refund`, `Release`, `ReleaseExpired`,

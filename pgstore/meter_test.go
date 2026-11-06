@@ -46,13 +46,40 @@ func TestMeterContractUnderAConsumersScope(t *testing.T) {
 // usage store is built with: above every check's own copies.
 const contractCopyQuota = 16
 
+// The contract holds on the database's clock, as a store built with no
+// Config.Now measures holds' and leases' expiry: the checks of expiry move
+// it (dbClock), and those that need the store's own clock to move are
+// skipped, that clock being time.Now.
+func TestMeterContractOnTheDatabasesClock(t *testing.T) {
+	metertest.Run(t, func(t *testing.T) metertest.Env {
+		t.Helper()
+		clock := newDBClock(t)
+		env := contractEnv(t, Config{DB: clocked}, WithAllTenantsReadOnly, time.Now().Add(contractTTL))
+		env.ExpiryNow, env.AdvanceExpiry = clock.Now, clock.Shift
+		return env
+	})
+}
+
 // meterEnv is the contract's Env over stores of cfg's scope, readOnly giving the
-// context that scope reads as reading every tenant.
+// context that scope reads as reading every tenant, on a clock of the test's
+// that stands still but for Advance.
 func meterEnv(t *testing.T, cfg Config, readOnly func(context.Context) context.Context) metertest.Env {
 	t.Helper()
-	fresh(t)
 	clock := newFakeClock()
-	cfg.DB, cfg.Now, cfg.MaxCopiesPerCapability = app, clock.Now, contractCopyQuota
+	cfg.DB, cfg.Now = app, clock.Now
+	env := contractEnv(t, cfg, readOnly, clock.Now().Add(contractTTL))
+	env.Now, env.Advance = clock.Now, clock.Advance
+	return env
+}
+
+// contractEnv is the contract's Env over stores of cfg, readOnly giving the
+// context cfg's scope reads as reading every tenant, every capability
+// expiring at expiry: one instant, so a child never outlives its parent by
+// the time between their inserts. It leaves the clocks to its caller.
+func contractEnv(t *testing.T, cfg Config, readOnly func(context.Context) context.Context, expiry time.Time) metertest.Env {
+	t.Helper()
+	fresh(t)
+	cfg.MaxCopiesPerCapability = contractCopyQuota
 	records, err := NewStore(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -62,9 +89,6 @@ func meterEnv(t *testing.T, cfg Config, readOnly func(context.Context) context.C
 		t.Fatal(err)
 	}
 	tenant := uuid.New()
-	// One expiry for every capability, so a child never outlives its
-	// parent by the time between their inserts.
-	expiry := clock.Now().Add(contractTTL)
 	ledger, err := NewLedger(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -75,14 +99,12 @@ func meterEnv(t *testing.T, cfg Config, readOnly func(context.Context) context.C
 		ScopesTenants:          true,
 		Usage:                  usage,
 		Ledger:                 ledger,
-		Now:                    clock.Now,
 		Tenant:                 tenant,
 		NewTenant:              func() (uuid.UUID, error) { return uuid.New(), nil },
 		TenantCtx:              func(tenant uuid.UUID) context.Context { return WithTenant(t.Context(), tenant) },
 		ListCtx:                WithAllTenantsReadOnly(t.Context()),
 		AllTenantsCtx:          WithAllTenants(t.Context()),
 		ReadOnlyCtx:            readOnly(t.Context()),
-		Advance:                clock.Advance,
 		DeleteCapability: func(id uuid.UUID) error {
 			_, err := owner.Exec(context.Background(), deleteRecord, id)
 			return err

@@ -24,8 +24,9 @@ type LeaseRequest struct {
 	// amount and no requests.
 	Requests int64
 	// TTL is how long the lease lasts unless settled, at most until its
-	// capability expires; a lease topped up lasts until the later of its
-	// end and this one. 0 = DefaultLeaseTTL; negative is ErrInvalidRequest.
+	// capability expires, as a hold's (Meter.Reserve); a lease topped up
+	// lasts until the later of its end and this one. 0 = DefaultLeaseTTL;
+	// negative is ErrInvalidRequest.
 	TTL time.Duration
 }
 

@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 	"errors"
+	"maps"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -93,6 +94,9 @@ var (
 	ownerDSN string
 	// migrator is a pool as migratorUser, the schema's owner.
 	migrator *pgxpool.Pool
+	// clocked is a pool as appUser whose sessions' now() is the clock a
+	// test moves (dbClock).
+	clocked *pgxpool.Pool
 )
 
 func TestMain(m *testing.M) { pgtest.Exit(run(m)) }
@@ -134,17 +138,31 @@ func run(m *testing.M) (int, error) {
 		return 0, err
 	}
 	defer app.Close()
+	if _, err := owner.Exec(ctx, sqlCreateDBClock); err != nil {
+		return 0, err
+	}
+	if clocked, err = poolWith(ctx, dsn, appUser, appPassword, map[string]string{searchPathParam: dbClockPath}); err != nil {
+		return 0, err
+	}
+	defer clocked.Close()
 	return m.Run(), nil
 }
 
 // poolAs is a pool of appPoolConns connections to dsn's database as user.
 func poolAs(ctx context.Context, dsn, user, password string) (*pgxpool.Pool, error) {
+	return poolWith(ctx, dsn, user, password, nil)
+}
+
+// poolWith is poolAs whose sessions start with the run-time parameters
+// params.
+func poolWith(ctx context.Context, dsn, user, password string, params map[string]string) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		return nil, err
 	}
 	cfg.ConnConfig.User, cfg.ConnConfig.Password = user, password
 	cfg.MaxConns = appPoolConns
+	maps.Copy(cfg.ConnConfig.RuntimeParams, params)
 	return pgxpool.NewWithConfig(ctx, cfg)
 }
 

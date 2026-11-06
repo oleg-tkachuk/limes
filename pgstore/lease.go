@@ -412,7 +412,7 @@ func (s *UsageStore) lease(ctx context.Context, tx pgx.Tx, req meter.LeaseReques
 	if err := admitRequests(c, subject, ancestors, req.Requests); err != nil {
 		return meter.Lease{}, err
 	}
-	expires, err := holdExpiry(ctx, tx, capID, asOf, cmp.Or(req.TTL, meter.DefaultLeaseTTL))
+	expires, err := s.holdExpiry(ctx, tx, retriedLease, capID, asOf, cmp.Or(req.TTL, meter.DefaultLeaseTTL))
 	if err != nil {
 		return meter.Lease{}, err
 	}

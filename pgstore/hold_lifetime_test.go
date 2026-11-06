@@ -10,12 +10,13 @@ import (
 	"github.com/oleg-tkachuk/limes/meter"
 )
 
-// A hold ends with its capability at the latest. A revoked capability's
+// A hold ends with its capability at the latest — its record's expiry and
+// the grace a verifier's leeway takes past it. A revoked capability's
 // hold still counts until then, and can still be settled: a cost already
 // incurred belongs in the ledger. ReleaseExpired takes it only once it
 // expires.
 func TestAHoldEndsWithItsCapability(t *testing.T) {
-	// farTTL outlives the capability the fixture records.
+	// farTTL outlives the capability the fixture records, and the grace.
 	const farTTL = 24 * time.Hour
 	f := newTenantFixture(t)
 	mine := WithTenant(context.Background(), f.mine)
@@ -35,8 +36,8 @@ func TestAHoldEndsWithItsCapability(t *testing.T) {
 		return r
 	}
 	settled, left := reserve(), reserve()
-	if want := c.ExpiresAt.Truncate(timeResolution); !settled.ExpiresAt.Equal(want) {
-		t.Errorf("a hold asked for %s expires at %s, want its capability's expiry %s", farTTL, settled.ExpiresAt, want)
+	if want := c.ExpiresAt.Add(capabilityExpiryGrace).Truncate(timeResolution); !settled.ExpiresAt.Equal(want) {
+		t.Errorf("a hold asked for %s expires at %s, want its capability's expiry and the grace, %s", farTTL, settled.ExpiresAt, want)
 	}
 	if _, err := f.records.Revoke(mine, limes.RevokeRequest{CapabilityID: c.ID}); err != nil {
 		t.Fatal(err)
