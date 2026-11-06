@@ -173,27 +173,27 @@ func (s *server) serveMCP(w http.ResponseWriter, r *http.Request) {
 }
 
 // policy gives the token's user the right to read the tools and to hand
-// that on to a sub-agent.
-func (s *server) policy(_ context.Context, g exchange.Grant) (limes.IssueRequest, error) {
-	return limes.IssueRequest{
+// that on to a sub-agent, and every scope asked.
+func (s *server) policy(_ context.Context, g exchange.Grant) (exchange.Decision, error) {
+	return exchange.Decision{Issue: limes.IssueRequest{
 		IssuedBy: limes.Principal{Type: limes.PrincipalTypeService, Subject: s.resource},
 		Subject:  limes.Principal{Type: limes.PrincipalTypeUser, TenantID: s.tenant, Subject: g.Subject.Subject},
 		Caveats: limes.Caveats{
 			Ops: []limes.Op{limes.OpGet, limes.OpShare}, ResourcePrefixes: []string{"tools/"},
 			Requests: limes.RequestCeiling{Max: userRequests},
 		},
-	}, nil
+	}}, nil
 }
 
 // narrowPolicy gives the sub-agent the search alone.
-func (s *server) narrowPolicy(context.Context, exchange.Narrowing) (limes.DelegateRequest, error) {
-	return limes.DelegateRequest{
+func (s *server) narrowPolicy(context.Context, exchange.Narrowing) (exchange.NarrowDecision, error) {
+	return exchange.NarrowDecision{Delegate: limes.DelegateRequest{
 		Subject: limes.Principal{Type: limes.PrincipalTypeAgent, Subject: subAgent},
 		Caveats: limes.Caveats{
 			Ops: []limes.Op{limes.OpGet}, ResourcePrefixes: []string{toolResource},
 			Requests: limes.RequestCeiling{Max: subAgentRequests},
 		},
-	}, nil
+	}}, nil
 }
 
 func main() {
