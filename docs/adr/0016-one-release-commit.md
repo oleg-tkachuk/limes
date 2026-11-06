@@ -1,6 +1,6 @@
 # ADR-0016: Every module released from one release commit
 
-**Status:** Accepted, amended on 2026-11-03 and 2026-11-05 (below)
+**Status:** Accepted, amended on 2026-11-03, 2026-11-05 and 2026-11-06 (below)
 **Date:** 2026-10-31
 **Deciders:** Oleg Tkachuk
 
@@ -162,3 +162,28 @@ While a line of candidates of limes's next major is open, each release of
 limes is followed by the next candidate: `release-tag.ts` sets the step
 output `follow-candidate` (`followWithCandidate`), and `release.yaml` cuts
 the candidate after the tags.
+
+## Amendment, 2026-11-06: Stale plans
+
+The consequence above, a commit merged between the plan and the merge, was
+read as a gap in the notes alone. It is a gap in the versions too: a
+`fix(pgstore)!:` merged after a plan of `pgstore/v0.69.1`, before the
+release pull request, was tagged as that patch, since the tag goes on the
+merge, whatever merged before it. main does not require a pull request to
+be up to date, and must not, for `auto-merge.yaml`'s sake.
+
+A plan's base is the parent of the one release commit on `release/next`. A
+commit on main past it is staling (`.github/ci/lib/stale-plan.ts`) when it
+releases a module the plan releases, or makes one the plan leaves out due;
+documentation, chores and a module short of due are not. Two layers act on
+it:
+
+1. **The pull request is held.** `release-stale.yaml` runs on every push to
+   main and makes a stale release pull request a draft, with a comment
+   naming the commits (`release-stale.ts`). The next plan, after main's CI
+   passes, makes it ready again unless it cuts a major, or unless main has
+   moved past that plan too; the draft is now the plan's to set.
+2. **The merge is refused.** `release-tag.ts` judges each merge it would
+   tag: the release commit's parent against the merge's first parent. A
+   stale one tags nothing and fails the run naming the commits and the
+   versions; the release merge is reverted, and the next plan counts them.

@@ -24,7 +24,13 @@
 // in its module's changelog — in one commit, and opens or updates its pull
 // request. The commit is a chore, which releases nothing itself; tagging its
 // merge is release-tag.ts's. A plan that cuts a major is opened, or made, a
-// draft, which merge-green.ts leaves for the maintainer.
+// draft, which merge-green.ts leaves for the maintainer. Any other is opened,
+// or made, ready for review: release-stale.ts makes the pull request a draft
+// while main is past its plan, and this plan is the one that counts main.
+// Unless main has moved again by the time it is proposed: it is fetched, and
+// a plan already stale against it (lib/stale-plan.ts) stays a draft for the
+// next run to make again. The draft is the plan's to set: one a person made
+// a draft by hand is made ready by the next plan of no major.
 //
 // It acts through GH_TOKEN, AUTOMERGE_TOKEN in release.yaml: a branch pushed
 // with the workflow's own token would start no CI. Without it, it warns and
@@ -49,10 +55,13 @@ import { ROOT_MODULE, releaseCommits, releasedModules, selectModule, type Module
 import { STABLE_MAJOR, nextVersion, parseVersion } from "./lib/prerelease.ts";
 import { notesFrom } from "./lib/releases.ts";
 import { Level, isDue, lastStableTag, loadPolicy, pendingCommits, type Policy } from "./lib/release-policy.ts";
+import { RELEASE_BRANCH, planBaseOf, short, staleLines, staleModules, type Staled } from "./lib/stale-plan.ts";
 import { BASE_BRANCH } from "./merge-policy.ts";
 
 // BRANCH is the branch the release pull request is proposed from.
-export const BRANCH = "release/next";
+export const BRANCH = RELEASE_BRANCH;
+// REMOTE is where main is fetched from to judge a plan just made.
+const REMOTE = "origin";
 // RELEASE_SCOPE scopes the release commit and its pull request's title.
 const RELEASE_SCOPE = "release";
 // DEPENDENCIES_HEADING opens the section of an entry that names the limes a
@@ -298,11 +307,13 @@ export interface Proposer extends Planner {
   push(branch: string): Promise<void>;
 }
 
-// Proposed is the release pull request a run opened or updated, and whether
-// it cuts a major, which waits for the maintainer's merge.
+// Proposed is the release pull request a run opened or updated, whether it
+// cuts a major, which waits for the maintainer's merge, and whether main
+// moved past it while it was made, which leaves it a draft.
 export interface Proposed {
   pullRequest: number;
   major: boolean;
+  stale: boolean;
 }
 
 // proposeRelease commits the plan of the checked-out commit on BRANCH and
@@ -322,10 +333,34 @@ export async function proposeRelease(ctx: Proposer): Promise<Proposed | undefine
   await git(["commit", "--quiet", "-m", title], ctx.root);
   await ctx.push(BRANCH);
   const major = plan.some((m) => m.major);
+  const staled = await staleSincePlan(ctx);
+  const stale = staled === undefined || staled.length > 0;
   // A major is opened, or made, a draft: merge-green.ts leaves it for the
-  // maintainer to merge.
-  const text = { title, body: releaseBody(plan, major), draft: major };
-  return { pullRequest: await openOrUpdate(ctx.github, text), major };
+  // maintainer to merge. So is a plan main has moved past already; any
+  // other is made ready.
+  const text = { title, body: releaseBody(plan, major), draft: major || stale };
+  return { pullRequest: await openOrUpdate(ctx.github, text), major, stale };
+}
+
+// staleSincePlan is what stales the plan just committed on BRANCH against
+// main as the remote holds it now; undefined when its base is not in main's
+// history, which a plan cannot be judged against either.
+async function staleSincePlan(ctx: Proposer): Promise<Staled[] | undefined> {
+  await git(["fetch", "--quiet", REMOTE, BASE_BRANCH], ctx.root);
+  const head = (await git(["rev-parse", "FETCH_HEAD"], ctx.root)).trim();
+  const release = (await git(["rev-parse", "HEAD"], ctx.root)).trim();
+  const based = await planBaseOf(release, head, ctx.root);
+  if (based.base === undefined) {
+    warning(`${based.unknown}: the release pull request is left a draft`);
+    return undefined;
+  }
+  const staled = await staleModules({ root: ctx.root, release, base: based.base, head, commits: ctx.commits, policy: ctx.policy });
+  if (staled.length === 0) {
+    info(`${BASE_BRANCH} is at ${short(head)}; the plan, from ${short(based.base)}, is current`);
+  } else {
+    info(`${BASE_BRANCH} moved to ${short(head)} past the plan, from ${short(based.base)}; the release pull request is left a draft for the next plan:\n${staleLines(staled).join("\n")}`);
+  }
+  return staled;
 }
 
 // releaseBody is the release pull request's description of plan.
@@ -376,6 +411,14 @@ export function today(): string {
 // ALL_MODULES plans every module.
 const ALL_MODULES = "all";
 
+// draftNote is why a proposed release pull request is a draft, if it is.
+function draftNote(p: Proposed): string {
+  if (p.major) {
+    return ", a draft: it cuts a major";
+  }
+  return p.stale ? ", a draft: main moved past its plan, which the next run makes again" : "";
+}
+
 async function main(): Promise<void> {
   const token = optionalEnv("GH_TOKEN");
   if (token === undefined) {
@@ -397,7 +440,7 @@ async function main(): Promise<void> {
     github: gitHubFor(token, repository),
     push: pushAs(token, repository, root),
   });
-  summarize(`### Release proposed\n\n${proposed === undefined ? "Nothing is due." : `#${proposed.pullRequest}${proposed.major ? ", a draft: it cuts a major" : ""}.`}`);
+  summarize(`### Release proposed\n\n${proposed === undefined ? "Nothing is due." : `#${proposed.pullRequest}${draftNote(proposed)}.`}`);
 }
 
 if (import.meta.main) {
