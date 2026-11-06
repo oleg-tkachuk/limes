@@ -128,7 +128,7 @@ or be marked breaking by hand.
 | `pgstore.Config` | `DisableLeases` | off | The usage store opens a lease when `meter.Leaser.Lease` asks for one, never of itself, and reports `meter.FeatureLeases` enabled. A store that opens none pays one statement per charge and bump a lease could cover, a read of the chain's leases, in the batch the call sends already: no round trip. Set, the read stays, since leases already open are still charged under. |
 | `pgstore.Config` | `MaxCopiesPerCapability` | `meter.DefaultMaxCopiesPerCapability` |  |
 | `pgstore.ReplayConfig` | `DB` | required |  |
-| `pgstore.ReplayConfig` | `EntriesPerHolder` | `dpop.DefaultReplayEntriesPerHolder` |  |
+| `pgstore.ReplayConfig` | `EntriesPerHolder` | `dpop.DefaultReplayEntriesPerHolder` | Caps one holder at `EntriesPerHolder / (Window + ReplayClockSkew)` proofs a second: about 15 with the defaults. |
 | `pgstore.ReplayConfig` | `Now` | `time.Now` |  |
 | `pgstore.ReplayConfig` | `Logger` | `slog.Default()` |  |
 
@@ -143,8 +143,9 @@ or be marked breaking by hand.
 |---|---|---|---|
 | `redisreplay.Config` | `Client` | required |  |
 | `redisreplay.Config` | `KeyPrefix` | `DefaultKeyPrefix` |  |
-| `redisreplay.Config` | `EntriesPerHolder` | `dpop.DefaultReplayEntriesPerHolder` |  |
+| `redisreplay.Config` | `EntriesPerHolder` | `dpop.DefaultReplayEntriesPerHolder` | Caps one holder at `EntriesPerHolder / (Window + ReplayClockSkew)` proofs a second: about 15 with the defaults. |
 | `redisreplay.Config` | `Now` | `time.Now` |  |
+| `redisreplay.Config` | `Logger` | `slog.Default()` |  |
 
 | Constant | Value |
 |---|---|

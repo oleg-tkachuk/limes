@@ -400,7 +400,8 @@ replay, err := redisreplay.New(redisreplay.Config{Client: rdb}) // any redis.Uni
 
 It keeps one sorted set per capability, so one call is one atomic script on
 one key, Redis Cluster included, and it decides what is live by the
-verifier's clock, never the server's. Run it with `maxmemory-policy
+verifier's clock, never the server's. A holder refused for its share,
+unlike a replay, is logged at WARN (`Config.Logger`). Run it with `maxmemory-policy
 noeviction`: full, Redis refuses the write and the check fails as an outage,
 its own error and never a refused proof, where an eviction policy would
 forget a live id. Redis replicates asynchronously, so

@@ -78,6 +78,9 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   `limes.charges` is. `migrate.Run` applies it and grants it to the runtime
   roles; a consumer that vendors the schema applies step 041, and its
   grants, before this release.
+- `ReplayCache.Seen` refuses an id of a holder past its share with
+  `(false, err)`, `err` wrapping `dpop.ErrReplayQuota`, where it returned
+  `(true, nil)`, as for a replay. It still logs the holder at WARN.
 
 ## exchange/v0.18.0
 
@@ -94,6 +97,19 @@ that is `v0.133.0`, `pgstore/v0.44.0` and `pgstore/v0.45.0`.
   register them with limes, which no longer holds a table of them: this
   release needs limes `v0.167.0` or later, and limes `v0.167.0` needs this
   release to answer the exchange's codes.
+- A token request whose client has no room left in the replay cache is
+  answered 429 `temporarily_unavailable`, where it was 400
+  `invalid_dpop_proof` "used before": `exchange.ErrorOf` and
+  `exchange.ErrorCodes` name the new code. The holder at the token
+  endpoint is the client, so with the defaults one client passes about 15
+  DPoP-bound exchanges a second ([guide](guide.md#the-replay-caches-share-caps-a-holders-rate)).
+
+## redisreplay/v0.4.0
+
+- `Cache.Seen` refuses an id of a holder past its share with
+  `(false, err)`, `err` wrapping `dpop.ErrReplayQuota`, where it returned
+  `(true, nil)`, as for a replay, and logs the holder at WARN through the
+  new `Config.Logger`.
 
 ## v0.167.0
 

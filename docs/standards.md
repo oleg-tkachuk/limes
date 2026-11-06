@@ -196,6 +196,7 @@ answers alike, and `WriteErrorResponse` writes them:
 | the issuer's JWKS never fetched, unreachable past `MaxStale`, or lacking the token's kid while the endpoint fails | 503 | none |
 | a caveat refuses the operation | 403 | `error="insufficient_scope"` |
 | a request or budget limit is exhausted | 403 | none |
+| more DPoP proofs from one holder inside the replay window than the cache keeps room for (`dpop.ErrReplayQuota`) | 429 | none |
 | a well-formed request that disagrees with what is on record (`ErrConflict`: `ErrAlreadyExists`, `ErrUnitCodeMismatch`, `meter.ErrExternalRefConflict`, `meter.ErrSettleConflict`, `meter.ErrTenantBudgetVersionMismatch`) | 409 | none |
 | anything else — an outage, or a key-bound token at a verifier with no DPoP (`ErrProofUnsupported`) | 500 | none |
 
@@ -297,7 +298,10 @@ at an RFC 8693 token endpoint (`Handler`):
   `token_type` `DPoP` when bound and `Bearer` otherwise; `Cache-Control:
   no-store`. A refusal is RFC 6749 §5.2's JSON with RFC 8707's
   `invalid_target`, RFC 9396's `invalid_authorization_details` and RFC 9449's `invalid_dpop_proof` and
-  `use_dpop_nonce`, and a fixed description per code.
+  `use_dpop_nonce`, and a fixed description per code. A client past its
+  share of the replay cache gets 429 and `temporarily_unavailable`, RFC
+  6749 §4.1.2.1's code borrowed from the authorization endpoint, since RFC
+  9449 names none.
 - **Proof of possession (RFC 9449 §5).** A proof binds the capability to its
   key, through `dpop.Verifier.CheckTokenRequest`, recorded before the
   capability is issued; a subject token bound to a key is exchanged only with
