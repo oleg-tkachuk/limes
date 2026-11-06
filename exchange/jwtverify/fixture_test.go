@@ -36,13 +36,18 @@ var testNow = time.Unix(1_800_000_000, 0)
 
 func clock() time.Time { return testNow }
 
-// idp is an identity provider: a key and the key set it publishes.
+// idp is an identity provider: a key, its kid, and the key set it
+// publishes.
 type idp struct {
 	key  ed25519.PrivateKey
+	kid  string
 	keys jwk.Set
 }
 
-func newIDP(t testing.TB) *idp {
+func newIDP(t testing.TB) *idp { return newIDPKey(t, idpKID) }
+
+// newIDPKey is an identity provider signing under kid.
+func newIDPKey(t testing.TB, kid string) *idp {
 	t.Helper()
 	_, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -52,7 +57,7 @@ func newIDP(t testing.TB) *idp {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, value := range map[string]any{jwk.KeyIDKey: idpKID, jwk.AlgorithmKey: jwa.EdDSAEd25519()} {
+	for name, value := range map[string]any{jwk.KeyIDKey: kid, jwk.AlgorithmKey: jwa.EdDSAEd25519()} {
 		if err := pub.Set(name, value); err != nil {
 			t.Fatal(err)
 		}
@@ -61,7 +66,7 @@ func newIDP(t testing.TB) *idp {
 	if err := set.AddKey(pub); err != nil {
 		t.Fatal(err)
 	}
-	return &idp{key: key, keys: set}
+	return &idp{key: key, kid: kid, keys: set}
 }
 
 // staticKeys is a KeySource of set, through its JWK Set document as a
@@ -91,18 +96,24 @@ func accessClaims() map[string]any {
 // sign is claims signed by the identity provider under typ.
 func (p *idp) sign(t testing.TB, typ string, claims map[string]any) string {
 	t.Helper()
-	return signWith(t, p.key, jwa.EdDSAEd25519(), typ, claims)
+	return signWithKID(t, p.key, jwa.EdDSAEd25519(), typ, p.kid, claims)
 }
 
 // signWith is claims signed by key under alg and typ, with the provider's kid.
 func signWith(t testing.TB, key crypto.Signer, alg jwa.SignatureAlgorithm, typ string, claims map[string]any) string {
+	t.Helper()
+	return signWithKID(t, key, alg, typ, idpKID, claims)
+}
+
+// signWithKID is claims signed by key under alg and typ, naming kid.
+func signWithKID(t testing.TB, key crypto.Signer, alg jwa.SignatureAlgorithm, typ, kid string, claims map[string]any) string {
 	t.Helper()
 	payload, err := json.Marshal(claims)
 	if err != nil {
 		t.Fatal(err)
 	}
 	headers := jws.NewHeaders()
-	for name, value := range map[string]any{jws.TypeKey: typ, jws.KeyIDKey: idpKID} {
+	for name, value := range map[string]any{jws.TypeKey: typ, jws.KeyIDKey: kid} {
 		if err := headers.Set(name, value); err != nil {
 			t.Fatal(err)
 		}
