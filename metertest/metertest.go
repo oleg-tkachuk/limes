@@ -122,6 +122,17 @@ type Env struct {
 	// time buckets, of a hold ending with its capability and of a hold
 	// dating the tenant budget are skipped.
 	Now func() time.Time
+	// ExpiryNow and AdvanceExpiry read and move the clock the store
+	// measures holds' and leases' expiry by, where that is not the clock Now
+	// and Advance read and move: pgstore's, built with no clock of its own,
+	// measures them by the database's. The checks of expiry — a hold's and a
+	// lease's, ReleaseExpired, a hold ending with its capability — use them;
+	// ExpiryNow may run on while a check runs. Optional: without them, Now
+	// and Advance. An Env that sets them and leaves Now and Advance unset
+	// runs the checks of expiry on that clock and skips those that need the
+	// store's own clock to move.
+	ExpiryNow     func() time.Time
+	AdvanceExpiry func(d time.Duration)
 	// ScopesTenants reports that the store keeps each tenant's rows apart
 	// by the call's context, TenantCtx giving each tenant's: a call whose
 	// request names one tenant, made under another tenant's context, is
@@ -254,6 +265,24 @@ const (
 type fixture struct {
 	Env
 	root, child uuid.UUID
+}
+
+// expiryNow reads the clock the store measures expiry by (Env.ExpiryNow),
+// nil when the Env reads none.
+func (f fixture) expiryNow() func() time.Time {
+	if f.ExpiryNow != nil {
+		return f.ExpiryNow
+	}
+	return f.Now
+}
+
+// advanceExpiry moves the clock the store measures expiry by
+// (Env.AdvanceExpiry), nil when the Env moves none.
+func (f fixture) advanceExpiry() func(d time.Duration) {
+	if f.AdvanceExpiry != nil {
+		return f.AdvanceExpiry
+	}
+	return f.Advance
 }
 
 func newFixture(t *testing.T, setup func(t *testing.T) Env) fixture {
@@ -1236,12 +1265,12 @@ func checkReleaseReturnsCopy(t *testing.T, f fixture) {
 			return f.Usage.Release(f.Ctx, meter.ReleaseRequest{Subject: subject, ReservationID: id})
 		},
 		"ReleaseExpired": func(limes.MeterSubject, uuid.UUID) error {
-			f.Advance(2 * ttl)
+			f.advanceExpiry()(2 * ttl)
 			_, err := f.Usage.ReleaseExpired(f.Ctx, meter.ReleaseExpiredRequest{})
 			return err
 		},
 	} {
-		if name == "ReleaseExpired" && f.Advance == nil {
+		if name == "ReleaseExpired" && f.advanceExpiry() == nil {
 			continue
 		}
 		copyID := []byte("copy-" + name)
@@ -1483,25 +1512,27 @@ func checkHoldDatesTenantBudget(t *testing.T, f fixture) {
 	expect.That(t, err == nil && b.UpdatedAt.Equal(f.Now()), "after the release the aggregate is dated %s, %v; want %s", b.UpdatedAt, err, f.Now())
 }
 
-// checkHoldWithinCapability holds a store to ending a hold no later than its
-// capability: a TTL past the capability's expiry is cut to it, so a hold no
+// checkHoldWithinCapability holds a store to ending a hold with its
+// capability: a TTL past the capability's expiry is cut to it — or to the
+// leeway past it a verifier may still accept the token for — so a hold no
 // one can settle any more does not keep the ancestors' and the tenant's
 // budget held.
 func checkHoldWithinCapability(t *testing.T, f fixture) {
-	if f.Now == nil {
-		t.Skip("Env.Now not set")
+	now, advance := f.expiryNow(), f.advanceExpiry()
+	if now == nil {
+		t.Skip("Env.Now and Env.ExpiryNow not set")
 	}
 	// farTTL outlives any capability an Env records.
 	const farTTL = 100 * 365 * 24 * time.Hour
 	r, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: one, TTL: farTTL})
 	expect.Must(t, err == nil, "%v", err)
-	expect.That(t, r.ExpiresAt.Before(f.Now().Add(farTTL)), "a hold asked for %s expires at %s, past its capability", farTTL, r.ExpiresAt)
-	if f.Advance == nil {
+	expect.That(t, r.ExpiresAt.Before(now().Add(farTTL)), "a hold asked for %s expires at %s, past its capability", farTTL, r.ExpiresAt)
+	if advance == nil {
 		return // the record's expiry needs a clock the check can move
 	}
 	// Past its record's expiry a capability — still on record, a late cost
 	// names it — holds nothing: no one could settle the hold.
-	f.Advance(farTTL)
+	advance(farTTL)
 	_, err = f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: one})
 	expect.That(t, errors.Is(err, limes.ErrExpired), "Reserve for a capability past its expiry: err = %v, want ErrExpired", err)
 }
@@ -2326,15 +2357,16 @@ func checkExactRanking(t *testing.T, f fixture) {
 // checkHousekeepingBatches holds ReleaseExpired and PurgeOrphans to their
 // Limit: a batch of one does one.
 func checkHousekeepingBatches(t *testing.T, f fixture) {
-	if f.Advance == nil {
-		t.Skip("Env.Advance is not set")
+	advance := f.advanceExpiry()
+	if advance == nil {
+		t.Skip("Env.Advance and Env.AdvanceExpiry are not set")
 	}
 	const rows, batch = 2, 1
 	for range rows {
 		_, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{Subject: f.childSubject(), Amount: one, TTL: time.Minute})
 		expect.Must(t, err == nil, "%v", err)
 	}
-	f.Advance(time.Hour)
+	advance(time.Hour)
 	r, err := f.Usage.ReleaseExpired(f.Ctx, meter.ReleaseExpiredRequest{Limit: batch})
 	expect.That(t, err == nil && r.Released == batch, "ReleaseExpired with a limit of %d = %+v, %v", batch, r, err)
 	if f.DeleteCapability == nil {
@@ -2529,8 +2561,9 @@ func checkHoldBlocksCharge(t *testing.T, f fixture) {
 // checkExpiry holds a store to letting a reservation lapse: past its TTL it
 // cannot be settled, still counts until ReleaseExpired runs, and then does not.
 func checkExpiry(t *testing.T, f fixture) {
-	if f.Advance == nil {
-		t.Skip("Env.Advance is not set")
+	advance := f.advanceExpiry()
+	if advance == nil {
+		t.Skip("Env.Advance and Env.AdvanceExpiry are not set")
 	}
 	const ttl = time.Minute
 	res, err := f.Usage.Reserve(f.Ctx, meter.ReserveRequest{
@@ -2546,7 +2579,7 @@ func checkExpiry(t *testing.T, f fixture) {
 		TTL:     time.Hour,
 	})
 	expect.Must(t, err == nil, "%v", err)
-	f.Advance(2 * ttl)
+	advance(2 * ttl)
 	_, err = f.Usage.Settle(f.Ctx, meter.SettleRequest{Subject: f.childSubject(), ReservationID: res.ID, Amount: one}, nil)
 	expect.That(t, errors.Is(err, meter.ErrReservationNotFound), "settling an expired reservation: err = %v, want ErrReservationNotFound", err)
 	_, err = f.Usage.GetReservation(f.Ctx, res.ID)

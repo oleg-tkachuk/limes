@@ -190,8 +190,9 @@ func checkRequestLeaseIsBypassedByCopies(t *testing.T, f fixture) {
 // ReleaseExpired settles it, counting what it made on the root.
 func checkRequestLeaseExpires(t *testing.T, f fixture) {
 	l := f.leaser(t)
-	if f.Advance == nil {
-		t.Skip("Env.Advance not set")
+	advance := f.advanceExpiry()
+	if advance == nil {
+		t.Skip("Env.Advance and Env.AdvanceExpiry not set")
 	}
 	const ttl = time.Minute
 	c := f.newRequestChain(t)
@@ -199,7 +200,7 @@ func checkRequestLeaseExpires(t *testing.T, f fixture) {
 	_, err := l.Lease(f.Ctx, meter.LeaseRequest{Subject: child, Requests: requestLeased, TTL: ttl})
 	expect.Must(t, err == nil, "Lease: %v", err)
 	expect.Must(t, f.bump(child) == nil, "a bump under the lease")
-	f.Advance(2 * ttl)
+	advance(2 * ttl)
 	expect.Must(t, f.bump(child) == nil, "a bump past the lease's end")
 	expect.That(t, f.usageOf(t, c.root).RequestCount == 1, "the root counted %d past the lease's end, want 1", f.usageOf(t, c.root).RequestCount)
 	res, err := f.Usage.ReleaseExpired(f.Ctx, meter.ReleaseExpiredRequest{})

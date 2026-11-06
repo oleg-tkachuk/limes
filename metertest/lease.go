@@ -211,14 +211,15 @@ func checkLeaseIsBypassedByHoldsAndOverruns(t *testing.T, f fixture) {
 // and ReleaseExpired settles it.
 func checkLeaseExpires(t *testing.T, f fixture) {
 	l := f.leaser(t)
-	if f.Advance == nil {
-		t.Skip("Env.Advance not set")
+	advance := f.advanceExpiry()
+	if advance == nil {
+		t.Skip("Env.Advance and Env.AdvanceExpiry not set")
 	}
 	const ttl = time.Minute
 	child := f.childSubject()
 	_, err := l.Lease(f.Ctx, meter.LeaseRequest{Subject: child, Amount: leased, TTL: ttl})
 	expect.Must(t, err == nil, "Lease: %v", err)
-	f.Advance(2 * ttl)
+	advance(2 * ttl)
 	_, err = f.chargeOf(child, one)
 	expect.Must(t, err == nil, "a charge past the lease's end: %v", err)
 	expect.That(t, f.usageOf(t, f.root).SpentAmount == one, "the root spent %v past the lease's end, want %v", f.usageOf(t, f.root).SpentAmount, one)
@@ -408,13 +409,14 @@ func (f fixture) childSubjectOf(requests int64) limes.MeterSubject {
 // and leases on its own.
 func checkAnExpiredLeaseCoversNothingBelow(t *testing.T, f fixture) {
 	l := f.leaser(t)
-	if f.Advance == nil {
-		t.Skip("Env.Advance not set")
+	advance := f.advanceExpiry()
+	if advance == nil {
+		t.Skip("Env.Advance and Env.AdvanceExpiry not set")
 	}
 	const ttl = time.Minute
 	_, err := l.Lease(f.Ctx, meter.LeaseRequest{Subject: newSubject(subjectSpec{capID: f.root, tenant: f.Tenant, budget: budgetOf(rootBudget)}), Amount: leased, TTL: ttl})
 	expect.Must(t, err == nil, "the root's Lease: %v", err)
-	f.Advance(2 * ttl)
+	advance(2 * ttl)
 	child := f.childSubject()
 	_, err = f.chargeOf(child, leaseCharge)
 	expect.Must(t, err == nil, "the child's charge past the root's lease's end: %v", err)
