@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"time"
@@ -744,44 +745,66 @@ func (c *counters) writeLast(ctx context.Context, tx pgx.Tx, now time.Time, writ
 
 // writeBatch is write, COMMIT queued after it when last.
 func (c *counters) writeBatch(ctx context.Context, tx pgx.Tx, now time.Time, writeTenant, last bool, then []heldStmt) error {
-	b := &pgx.Batch{}
+	var writes []heldStmt
 	if writeTenant {
-		t := c.tenant
-		t.updated = now
-		b.Queue(sqlWriteTenant,
-			t.tenantID, int64(t.ceiling.Max), t.ceiling.Unlimited, int64(t.spent), int64(t.reserved), t.unit,
-			t.start, t.end, t.updated, t.version, t.period)
-		c.tenant = t
+		c.tenant.updated = now
+		writes = append(writes, writeTenantStmt(c.tenant))
 	}
 	if len(c.usage) > 0 {
-		var ids []uuid.UUID
-		var requests, spent, reserved, copiesUnder, reservedRequests []int64
-		var units []string
-		for _, u := range c.usage {
-			ids = append(ids, u.id)
-			requests = append(requests, u.requests)
-			spent = append(spent, int64(u.spent))
-			reserved = append(reserved, int64(u.reserved))
-			units = append(units, u.unit)
-			copiesUnder = append(copiesUnder, u.copiesUnder)
-			reservedRequests = append(reservedRequests, u.reservedRequests)
-		}
-		b.Queue(sqlWriteUsage, ids, requests, spent, reserved, units, copiesUnder, reservedRequests)
+		writes = append(writes, writeUsageStmt(slices.Collect(maps.Values(c.usage))))
 	}
 	if len(c.copies) > 0 {
-		var ids [][]byte
-		var caps []uuid.UUID
-		var requests, spent, reserved []int64
-		for _, r := range c.copies {
-			ids = append(ids, r.revocationID)
-			caps = append(caps, r.capID)
-			requests = append(requests, r.requests)
-			spent = append(spent, int64(r.spent))
-			reserved = append(reserved, int64(r.reserved))
-		}
-		b.Queue(sqlWriteCopies, ids, caps, requests, spent, reserved)
+		writes = append(writes, writeCopiesStmt(slices.Collect(maps.Values(c.copies))))
 	}
-	for _, st := range then {
+	return sendWrites(ctx, tx, append(writes, then...), last)
+}
+
+// writeTenantStmt writes the tenant's aggregate t.
+func writeTenantStmt(t budgetRow) heldStmt {
+	return heldStmt{sql: sqlWriteTenant, args: []any{
+		t.tenantID, int64(t.ceiling.Max), t.ceiling.Unlimited, int64(t.spent), int64(t.reserved), t.unit,
+		t.start, t.end, t.updated, t.version, t.period,
+	}}
+}
+
+// writeUsageStmt writes the usage counters rows, in one statement.
+func writeUsageStmt(rows []*usageRow) heldStmt {
+	var ids []uuid.UUID
+	var requests, spent, reserved, copiesUnder, reservedRequests []int64
+	var units []string
+	for _, u := range rows {
+		ids = append(ids, u.id)
+		requests = append(requests, u.requests)
+		spent = append(spent, int64(u.spent))
+		reserved = append(reserved, int64(u.reserved))
+		units = append(units, u.unit)
+		copiesUnder = append(copiesUnder, u.copiesUnder)
+		reservedRequests = append(reservedRequests, u.reservedRequests)
+	}
+	return heldStmt{sql: sqlWriteUsage, args: []any{ids, requests, spent, reserved, units, copiesUnder, reservedRequests}}
+}
+
+// writeCopiesStmt writes the copy counters rows, of any capability, in one
+// statement.
+func writeCopiesStmt(rows []*copyRow) heldStmt {
+	var ids [][]byte
+	var caps []uuid.UUID
+	var requests, spent, reserved []int64
+	for _, r := range rows {
+		ids = append(ids, r.revocationID)
+		caps = append(caps, r.capID)
+		requests = append(requests, r.requests)
+		spent = append(spent, int64(r.spent))
+		reserved = append(reserved, int64(r.reserved))
+	}
+	return heldStmt{sql: sqlWriteCopies, args: []any{ids, caps, requests, spent, reserved}}
+}
+
+// sendWrites sends stmts in one batch, COMMIT queued after them when last
+// and tx can send it there (queueCommit); none sends nothing.
+func sendWrites(ctx context.Context, tx pgx.Tx, stmts []heldStmt, last bool) error {
+	b := &pgx.Batch{}
+	for _, st := range stmts {
 		b.Queue(st.sql, st.args...)
 	}
 	if b.Len() == 0 {

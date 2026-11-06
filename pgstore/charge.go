@@ -931,15 +931,14 @@ func (s *UsageStore) Release(ctx context.Context, req meter.ReleaseRequest) erro
 			if h.capID != subject.CapabilityID() || h.tenantID != subject.TenantID() || !sameCopyIDs(copyIDs(h.copies), subject.Copies()) {
 				return nil
 			}
-			return s.releaseHold(ctx, tx, h, true)
+			return s.releaseHold(ctx, tx, h)
 		})
 	})
 }
 
 // releaseHold returns h to every counter that still holds it and deletes
-// it; the hold's row is locked. last is the write the call's last statement
-// (writeLast).
-func (s *UsageStore) releaseHold(ctx context.Context, tx pgx.Tx, h hold, last bool) error {
+// it, in the call's last write (writeLast); the hold's row is locked.
+func (s *UsageStore) releaseHold(ctx context.Context, tx pgx.Tx, h hold) error {
 	c, err := lock(ctx, tx, lockRequest{
 		now:      s.clock(),
 		tenantID: h.tenantID,
@@ -950,5 +949,5 @@ func (s *UsageStore) releaseHold(ctx context.Context, tx pgx.Tx, h hold, last bo
 		return err
 	}
 	applyHold(c, h, -1)
-	return c.writeBatch(ctx, tx, s.clock(), c.tenant.persisted, last, []heldStmt{{sql: sqlDeleteHold, args: []any{h.id}}})
+	return c.writeLast(ctx, tx, s.clock(), c.tenant.persisted, heldStmt{sql: sqlDeleteHold, args: []any{h.id}})
 }

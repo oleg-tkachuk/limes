@@ -953,7 +953,7 @@ func (s *UsageStore) ReleaseExpired(ctx context.Context, req meter.ReleaseExpire
 		if err != nil {
 			return err
 		}
-		if err := s.releaseHolds(ctx, tx, holds); err != nil {
+		if err := s.releaseHolds(ctx, tx, holds, true); err != nil {
 			return err
 		}
 		released = int64(len(holds))
@@ -975,60 +975,145 @@ func collectHolds(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (hold, error) { return scanHold(row) })
 }
 
-// releaseHolds releases each of holds, locked, tenant by tenant in id order,
-// the order every call locks aggregates in. Every counter the releases write
-// is locked first, together (lockReleased).
-func (s *UsageStore) releaseHolds(ctx context.Context, tx pgx.Tx, holds []hold) error {
-	slices.SortFunc(holds, func(a, b hold) int {
-		if c := slices.Compare(a.tenantID[:], b.tenantID[:]); c != 0 {
-			return c
-		}
-		return slices.Compare(a.id[:], b.id[:])
-	})
-	if err := lockReleased(ctx, tx, holds, leasesToSettle{}); err != nil {
+// releaseHolds releases each of holds, locked, from every counter that
+// still holds it, and deletes them: every counter the releases write is
+// locked and read together first (lockReleased), the releases summed in
+// memory, and all of it written in one batch, with COMMIT when last — a
+// batch of any size takes as many round trips as one hold.
+func (s *UsageStore) releaseHolds(ctx context.Context, tx pgx.Tx, holds []hold, last bool) error {
+	if len(holds) == 0 {
+		return nil
+	}
+	r, err := lockReleased(ctx, tx, holds, leasesToSettle{})
+	if err != nil {
 		return err
 	}
+	ids := make([]uuid.UUID, 0, len(holds))
 	for _, h := range holds {
-		if err := s.releaseHold(ctx, tx, h, false); err != nil {
-			return err
-		}
+		r.release(h)
+		ids = append(ids, h.id)
 	}
-	return nil
+	return sendWrites(ctx, tx, append(r.writes(s.clock()), heldStmt{sql: sqlDeleteHolds, args: []any{ids}}), last)
 }
 
-// lockReleased locks every counter releasing holds writes, before any is
-// written, in the one order every call takes: the counters of every
-// capability the holds are on or under, together, in capability id order,
-// then each capability's copies, then the tenants' aggregates in tenant id
-// order.
+// sqlDeleteHolds deletes the holds $1.
+const sqlDeleteHolds = `DELETE FROM limes.reservations WHERE id = ANY ($1)`
+
+// releasedRows are the counters releasing holds writes, as lockReleased
+// read them.
+type releasedRows struct {
+	usage map[uuid.UUID]*usageRow
+	// copies are by capability, then revocation id.
+	copies  map[uuid.UUID]map[string]*copyRow
+	tenants map[uuid.UUID]*budgetRow
+}
+
+// release returns h to every counter of r that still holds it, as
+// releaseHold returns it to its own.
+func (r *releasedRows) release(h hold) {
+	c := &counters{usage: r.usage, copies: r.copies[h.capID]}
+	t, ok := r.tenants[h.tenantID]
+	if ok {
+		c.tenant = *t
+	}
+	applyHold(c, h, -1)
+	if ok {
+		*t = c.tenant
+	}
+}
+
+// writes are the statements that write r, at now: every usage and copy
+// counter, and the aggregate of each tenant that has one.
+func (r *releasedRows) writes(now time.Time) []heldStmt {
+	var out []heldStmt
+	for _, id := range sortedUnique(slices.Collect(maps.Keys(r.tenants))) {
+		if t := r.tenants[id]; t.persisted {
+			t.updated = now
+			out = append(out, writeTenantStmt(*t))
+		}
+	}
+	if len(r.usage) > 0 {
+		out = append(out, writeUsageStmt(slices.Collect(maps.Values(r.usage))))
+	}
+	var copies []*copyRow
+	for _, byID := range r.copies {
+		copies = append(copies, slices.Collect(maps.Values(byID))...)
+	}
+	if len(copies) > 0 {
+		out = append(out, writeCopiesStmt(copies))
+	}
+	return out
+}
+
+// lockReleased locks and reads every counter releasing holds writes, and
+// those of leases, before any is written, in one batch and in the one order
+// every call takes: the counters of every capability the holds are on or
+// under, together, in capability id order, then each capability's copies,
+// then the tenants' aggregates in tenant id order.
 // Locked hold by hold instead, each hold's would be in order and the
 // transaction's would not: one hold's root, then another's middle, against
 // a call that holds the middle and waits for the root.
-func lockReleased(ctx context.Context, tx pgx.Tx, holds []hold, leases leasesToSettle) error {
-	tenants, counters := slices.Clone(leases.tenants), slices.Clone(leases.counters)
+func lockReleased(ctx context.Context, tx pgx.Tx, holds []hold, leases leasesToSettle) (*releasedRows, error) {
+	tenants, counterIDs := slices.Clone(leases.tenants), slices.Clone(leases.counters)
 	copies := map[uuid.UUID][][]byte{}
 	for _, h := range holds {
 		tenants = append(tenants, h.tenantID)
-		counters = append(counters, h.capID)
-		counters = append(counters, h.ancestors...)
+		counterIDs = append(counterIDs, h.capID)
+		counterIDs = append(counterIDs, h.ancestors...)
 		copies[h.capID] = append(copies[h.capID], copyIDs(h.copies)...)
 	}
-	if err := drain(tx.Query(ctx, sqlLockUsage, sortedUnique(counters))); err != nil {
-		return err
+	copyCaps := slices.DeleteFunc(sortedUnique(slices.Collect(maps.Keys(copies))), func(id uuid.UUID) bool { return len(copies[id]) == 0 })
+	tenants = sortedUnique(tenants)
+	b := &pgx.Batch{}
+	b.Queue(sqlLockUsage, sortedUnique(counterIDs))
+	for _, capID := range copyCaps {
+		b.Queue(sqlLockCopies, capID, copies[capID])
 	}
-	for _, capID := range sortedUnique(slices.Collect(maps.Keys(copies))) {
-		if ids := copies[capID]; len(ids) > 0 {
-			if err := drain(tx.Query(ctx, sqlLockCopies, capID, ids)); err != nil {
-				return err
-			}
+	for _, t := range tenants {
+		b.Queue(sqlLockTenant, t)
+	}
+	br := tx.SendBatch(ctx, b)
+	r, err := readReleased(br, copyCaps, tenants)
+	return r, errors.Join(err, br.Close())
+}
+
+// readReleased reads lockReleased's batch from br.
+func readReleased(br pgx.BatchResults, copyCaps, tenants []uuid.UUID) (*releasedRows, error) {
+	r := &releasedRows{usage: map[uuid.UUID]*usageRow{}, copies: map[uuid.UUID]map[string]*copyRow{}, tenants: map[uuid.UUID]*budgetRow{}}
+	rows, err := br.Query()
+	if err != nil {
+		return nil, err
+	}
+	usage, err := pgx.CollectRows(rows, scanUsage)
+	if err != nil {
+		return nil, err
+	}
+	for _, u := range usage {
+		r.usage[u.id] = u
+	}
+	for _, capID := range copyCaps {
+		rows, err := br.Query()
+		if err != nil {
+			return nil, err
 		}
-	}
-	for _, t := range sortedUnique(tenants) {
-		if _, err := lockTenant(ctx, tx, t); err != nil {
-			return err
+		scanned, err := pgx.CollectRows(rows, scanCopy)
+		if err != nil {
+			return nil, err
 		}
+		byID := map[string]*copyRow{}
+		for _, c := range scanned {
+			byID[string(c.revocationID)] = c
+		}
+		r.copies[capID] = byID
 	}
-	return nil
+	for _, id := range tenants {
+		t, err := scanTenant(br.QueryRow(), id)
+		if err != nil {
+			return nil, err
+		}
+		r.tenants[id] = &t
+	}
+	return r, nil
 }
 
 // sortedUnique is ids in id order, each once.
@@ -1036,18 +1121,6 @@ func sortedUnique(ids []uuid.UUID) []uuid.UUID {
 	ids = slices.Clone(ids)
 	slices.SortFunc(ids, func(a, b uuid.UUID) int { return slices.Compare(a[:], b[:]) })
 	return slices.Compact(ids)
-}
-
-// drain reads every row a locking query returns, which is when it holds
-// their locks, and reports its error.
-func drain(rows pgx.Rows, err error) error {
-	if err != nil {
-		return err
-	}
-	for rows.Next() {
-	}
-	rows.Close()
-	return rows.Err()
 }
 
 // logKeyLeases is how many leases a call settled, as a log line counts.
@@ -1188,14 +1261,14 @@ func (s *UsageStore) dropUsage(ctx context.Context, tx pgx.Tx, ids []uuid.UUID, 
 	}
 	holds := slices.DeleteFunc(locked, func(h hold) bool { return !slices.Contains(ids, h.capID) })
 	if len(leases.holders) > 0 {
-		if err := lockReleased(ctx, tx, holds, leases); err != nil {
+		if _, err := lockReleased(ctx, tx, holds, leases); err != nil {
 			return err
 		}
 		if err := s.settleLocked(ctx, tx, settledDeleteUsage, leases); err != nil {
 			return err
 		}
 	}
-	if err := s.releaseHolds(ctx, tx, holds); err != nil {
+	if err := s.releaseHolds(ctx, tx, holds, false); err != nil {
 		return err
 	}
 	for _, q := range []string{sqlDeleteUsage, sqlDeleteCopies, sqlForgetAncestors} {

@@ -237,20 +237,31 @@ func noopCharged(context.Context, meter.Charged) error { return nil }
 // no ceilings, and returns its leaf.
 func roundTripChain(t *testing.T, records *Store, tenant uuid.UUID) uuid.UUID {
 	t.Helper()
+	chain := recordChain(t, records, tenant)
+	return chain[len(chain)-1]
+}
+
+// recordChain records a chain roundTripChainDepth deep in tenant, with no
+// ceilings, and returns its ids, root first.
+func recordChain(t *testing.T, records *Store, tenant uuid.UUID) []uuid.UUID {
+	t.Helper()
 	ctx := WithTenant(t.Context(), tenant)
 	expiry := time.Now().Add(time.Hour)
-	var leaf uuid.UUID
+	var chain []uuid.UUID
 	parent := uuid.Nil()
 	for i := range roundTripChainDepth {
 		c := limes.Capability{
 			ID: uuid.New(), ParentID: parent, ExpiresAt: expiry,
 			Subject: limes.Principal{Type: limes.PrincipalTypeAgent, TenantID: tenant, Subject: "agent:" + string(rune('a'+i))},
-			Caveats: limes.Caveats{Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true, UnitCode: testUnit}},
+			Caveats: limes.Caveats{
+				Ops: []limes.Op{limes.OpGet}, Requests: limes.RequestCeiling{Unlimited: true}, Budget: limes.BudgetCeiling{Unlimited: true, UnitCode: testUnit},
+				Copies: limes.CopyQuota{Unlimited: true},
+			},
 		}
 		if err := records.Insert(ctx, limes.InsertRequest{Capability: c}); err != nil {
 			t.Fatal(err)
 		}
-		parent, leaf = c.ID, c.ID
+		parent, chain = c.ID, append(chain, c.ID)
 	}
-	return leaf
+	return chain
 }
