@@ -380,3 +380,36 @@ func BenchmarkIssueParallel(b *testing.B) {
 		return err
 	})
 }
+
+// benchBiscuitIDSize is the size of one Biscuit block's revocation id: an
+// Ed25519 signature.
+const benchBiscuitIDSize = ed25519.SignatureSize
+
+// liveCopies answers every Biscuit copy live.
+type liveCopies struct{}
+
+func (liveCopies) IsBiscuitRevoked(context.Context, [][]byte) (bool, error) { return false, nil }
+
+// A Biscuit copy of MaxBiscuitBlocks blocks, every revocation id of which
+// the cache holds live: the check a verifier runs on each request bearing it.
+func BenchmarkRevocationCacheBiscuitHit(b *testing.B) {
+	env := newBenchEnv(b, nil)
+	cache, err := limes.NewRevocationCache(limes.RevocationCacheConfig{Capabilities: env.cache, Biscuits: liveCopies{}})
+	if err != nil {
+		b.Fatal(err)
+	}
+	ids := make([][]byte, limes.MaxBiscuitBlocks)
+	for i := range ids {
+		ids[i] = make([]byte, benchBiscuitIDSize)
+		ids[i][0] = byte(i)
+	}
+	ctx := context.Background()
+	if _, err := cache.IsBiscuitRevoked(ctx, ids); err != nil {
+		b.Fatal(err)
+	}
+	for b.Loop() {
+		if revoked, err := cache.IsBiscuitRevoked(ctx, ids); err != nil || revoked {
+			b.Fatal(revoked, err)
+		}
+	}
+}

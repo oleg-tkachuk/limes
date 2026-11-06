@@ -197,10 +197,9 @@ type RevocationCacheConfig struct {
 	// MaxEntries bounds each kind of answer on its own — about a
 	// capability, about one not on record, about a Biscuit — so a flood of
 	// one never evicts another. Zero: DefaultRevocationCacheEntries. A Biscuit
-	// answer is one entry per revocation id, and one per set of ids asked
-	// about together, whose key holds every id of the set — up to
-	// MaxBiscuitBlocks+1 block signatures: size memory for MaxEntries times
-	// the largest such key, not one id. Over a RevocationLineageLookup a
+	// answer is one entry per revocation id, keyed by the id, a block
+	// signature, and one per set of ids asked about together, keyed by a
+	// SHA-256 digest of the set, whatever its size. Over a RevocationLineageLookup a
 	// capability's "not revoked" answer keeps its ancestors' ids beside it,
 	// up to MaxDelegationDepth of them: about 16 bytes per generation, so a
 	// full cache of chains 64 deep holds some 100 MB of them at the default
