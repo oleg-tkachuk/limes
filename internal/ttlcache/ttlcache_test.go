@@ -567,3 +567,68 @@ func TestAnExpiredSeedMakesRoomBeforeALiveEntry(t *testing.T) {
 		t.Errorf("the live entry was dropped: %d lookups after, %v", calls.Load()-before, err)
 	}
 }
+
+// An answer is fresh for the TTL from when its lookup began, not from when
+// it ended: a lookup that takes half the TTL leaves half of it to serve.
+func TestAnAnswerAgesFromItsLookupsStart(t *testing.T) {
+	c, clk := newCache(10)
+	var calls atomic.Int32
+	slow := func(context.Context) (bool, error) {
+		calls.Add(1)
+		clk.advance(testTTL / 2)
+		return false, nil
+	}
+	start := clk.Now()
+	if _, at, err := c.Get(t.Context(), "a", slow); err != nil || !at.Equal(start) {
+		t.Fatalf("Get = %s, %v; want the answer read at %s", at, err, start)
+	}
+	if _, at, err := c.Get(t.Context(), "a", slow); err != nil || calls.Load() != 1 || !at.Equal(start) {
+		t.Fatalf("a hit = %s, %v after %d lookups; want the answer read at %s", at, err, calls.Load(), start)
+	}
+	clk.advance(testTTL / 2)
+	if _, _, err := c.Get(t.Context(), "a", counted(false, &calls)); err != nil || calls.Load() != 2 {
+		t.Errorf("a TTL after the lookup began: %d lookups, %v; want the answer read again", calls.Load(), err)
+	}
+}
+
+// An answer read before others queued while its lookup ran is placed
+// behind them, by when it was read: Sweep drops it once it expires, and
+// it makes room before them.
+func TestALongLookupIsQueuedByWhenItBegan(t *testing.T) {
+	for name, full := range map[string]bool{"swept": false, "making room": true} {
+		t.Run(name, func(t *testing.T) {
+			bound := 10
+			if full {
+				bound = 2
+			}
+			c, clk := newCache(bound)
+			var calls atomic.Int32
+			slow := func(ctx context.Context) (bool, error) {
+				// Another answer is cached while this lookup runs.
+				clk.advance(testTTL / 2)
+				if _, _, err := c.Get(ctx, "quick", counted(false, &calls)); err != nil {
+					t.Error(err)
+				}
+				return false, nil
+			}
+			if _, _, err := c.Get(t.Context(), "slow", slow); err != nil {
+				t.Fatal(err)
+			}
+			clk.advance(testTTL / 2)
+			if full {
+				if _, _, err := c.Get(t.Context(), "new", counted(false, &calls)); err != nil {
+					t.Fatal(err)
+				}
+				if st := c.Stats(); st.Evictions != 0 || st.Entries != 2 {
+					t.Errorf("Stats = %+v; want the expired slow answer to make room, no eviction", st)
+				}
+			} else if n := c.Sweep(); n != 1 {
+				t.Errorf("Sweep dropped %d, want the slow answer, expired behind the quick one", n)
+			}
+			before := calls.Load()
+			if _, _, err := c.Get(t.Context(), "quick", counted(false, &calls)); err != nil || calls.Load() != before {
+				t.Errorf("the quick answer was dropped: %d lookups, %v", calls.Load()-before, err)
+			}
+		})
+	}
+}

@@ -15,6 +15,7 @@ import (
 	"github.com/oleg-tkachuk/limes/internal/errs"
 	"hash/maphash"
 	"math/rand/v2"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -125,13 +126,16 @@ type shard[K comparable] struct {
 	maxEntries int
 	entries    map[K]cacheEntry[K]
 	inflight   map[K]*lookupCall[K]
-	// order holds the entries in the order they were cached, which every
-	// entry being judged by one TTL makes the order they expire in, but for
-	// an id seeded from a set's answer, which expires with that answer: sweeping
-	// stops at the first place not yet expired, so such an id is dropped a
-	// little late, and never served past its expiry. A key Forget dropped
-	// can be cached again before its old place expires: that place then
-	// names an entry no longer its own, and dropping it leaves the new one.
+	// order holds the entries' places sorted by when each answer was read,
+	// oldest first, which every entry being judged by one TTL makes the
+	// order they expire in: sweeping stops at the first place not yet
+	// expired, and making room takes the head, so neither walks the
+	// entries. An answer is read when its lookup began, so one that ran
+	// long, or an id seeded from a set's answer, is placed behind the later
+	// places already queued (enqueueLocked): no further back than the
+	// answers cached while it ran. A key Forget dropped can be cached again
+	// before its old place expires: that place then names an entry no
+	// longer its own, and dropping it leaves the new one.
 	order []queued[K]
 	// misses and lookups count the shard's questions not answered from
 	// it and the upstream lookups run for them; evictions the live entries
@@ -145,9 +149,11 @@ type shard[K comparable] struct {
 
 type cacheEntry[K comparable] struct {
 	revoked bool
-	// at is when the answer was cached — when its lookup finished, or, for
-	// an id seeded from a set's answer, when that set's lookup began:
-	// fresh until the TTL in force has passed since.
+	// at is when the answer was read — when its lookup began, or, for an
+	// id seeded from a set's answer, when that set's lookup began: fresh
+	// until the TTL in force has passed since. Counted from the start, an
+	// answer is never served longer than the TTL after the upstream was
+	// asked, however long it took to answer.
 	at time.Time
 	// tags are the keys a "not revoked" answer also covers, which Forget
 	// drops it with (GetTagged).
@@ -165,8 +171,8 @@ type lookupCall[K comparable] struct {
 	revoked bool
 	tags    []K
 	err     error
-	// at is when the lookup started, no later than the entry finish caches:
-	// its answer is fresh until the TTL in force has passed since.
+	// at is when the lookup started, the time finish caches its answer at:
+	// it is fresh until the TTL in force has passed since.
 	at time.Time
 }
 
@@ -379,7 +385,7 @@ func (c *Cache[K]) SeedRevoked(key K, epoch uint64) {
 	now := c.cfg.Now()
 	c.noteLost(s.makeRoomLocked(now, c.TTL(), c.keep()))
 	s.entries[key] = cacheEntry[K]{revoked: true, at: now}
-	s.order = append(s.order, queued[K]{key: key, at: now})
+	s.enqueueLocked(key, now)
 }
 
 // SeedLive caches keys as not revoked, as an answer about them all read at
@@ -406,7 +412,7 @@ func (c *Cache[K]) SeedLive(keys []K, epoch uint64, at time.Time) {
 		if e, ok := s.entries[k]; !inflight && (!ok || !c.fresh(e.at, now)) {
 			c.noteLost(s.makeRoomLocked(now, ttl, keep))
 			s.entries[k] = cacheEntry[K]{at: at}
-			s.order = append(s.order, queued[K]{key: k, at: at})
+			s.enqueueLocked(k, at)
 		}
 		s.mu.Unlock()
 	}
@@ -424,10 +430,9 @@ func (c *Cache[K]) finish(s *shard[K], key K, call *lookupCall[K], epoch uint64)
 	held, ok := s.entries[key]
 	undoes := ok && held.revoked && !call.revoked && !held.at.Before(call.at)
 	if call.err == nil && c.epoch.Load() == epoch && !undoes {
-		now := c.cfg.Now()
-		c.noteLost(s.makeRoomLocked(now, c.TTL(), c.keep()))
-		s.entries[key] = cacheEntry[K]{revoked: call.revoked, at: now, tags: call.tags}
-		s.order = append(s.order, queued[K]{key: key, at: now})
+		c.noteLost(s.makeRoomLocked(c.cfg.Now(), c.TTL(), c.keep()))
+		s.entries[key] = cacheEntry[K]{revoked: call.revoked, at: call.at, tags: call.tags}
+		s.enqueueLocked(key, call.at)
 	}
 	s.mu.Unlock()
 	close(call.done)
@@ -439,23 +444,16 @@ func (c *Cache[K]) finish(s *shard[K], key K, call *lookupCall[K], epoch uint64)
 const orderSlack = 2
 
 // makeRoomLocked keeps the shard under its share of MaxEntries: entries
-// past keep go first, those the expiry order reaches; then every one past
-// ttl, stale ones kept to stand in for a failed lookup among them, wherever
-// its place, such as an id seeded behind a later answer; and, if that frees
-// nothing, the oldest live one does. It returns until when the latest
-// revoked answer it dropped would still have been kept, zero for none.
+// past keep go first; then the oldest, which the order holds at its head —
+// one past ttl, a stale one kept to stand in for a failed lookup, before
+// any live one, which is counted an eviction. Each step takes the head of
+// the order, so making room costs no walk of the entries. It returns until
+// when the latest revoked answer it dropped would still have been kept,
+// zero for none.
 func (s *shard[K]) makeRoomLocked(now time.Time, ttl, keep time.Duration) time.Time {
 	var lost time.Time
-	drop := func(e cacheEntry[K]) {
-		if until := e.at.Add(keep); e.revoked && now.Before(until) && until.After(lost) {
-			lost = until
-		}
-	}
 	s.compactLocked()
 	s.sweepLocked(now, keep)
-	if len(s.entries) >= s.maxEntries {
-		s.dropExpiredLocked(now, ttl, drop)
-	}
 	for len(s.entries) >= s.maxEntries {
 		if len(s.order) == 0 {
 			return lost
@@ -463,28 +461,29 @@ func (s *shard[K]) makeRoomLocked(now time.Time, ttl, keep time.Duration) time.T
 		q := s.order[0]
 		e, ok := s.entries[q.key]
 		s.popLocked()
-		if ok && e.at.Equal(q.at) {
-			drop(e)
+		if !ok || !e.at.Equal(q.at) {
+			continue
+		}
+		if until := e.at.Add(keep); e.revoked && now.Before(until) && until.After(lost) {
+			lost = until
+		}
+		if now.Before(e.at.Add(ttl)) {
 			s.evictions++
 		}
 	}
 	return lost
 }
 
-// dropExpiredLocked drops every expired entry, wherever its place in the
-// order: one seeded with an older answer's time sits behind later places,
-// where sweepLocked does not reach it. Each one it drops is handed to
-// dropping first; it returns how many.
-func (s *shard[K]) dropExpiredLocked(now time.Time, ttl time.Duration, dropping func(cacheEntry[K])) int {
-	dropped := 0
-	for key, e := range s.entries {
-		if !now.Before(e.at.Add(ttl)) {
-			dropping(e)
-			delete(s.entries, key)
-			dropped++
-		}
+// enqueueLocked places key, read at at, in the order: behind every place
+// read no later, ahead of those read after it. A lookup's answer is read
+// when it began, so it goes behind no more places than were queued while
+// it ran; most go at the tail.
+func (s *shard[K]) enqueueLocked(key K, at time.Time) {
+	i := len(s.order)
+	for i > 0 && s.order[i-1].at.After(at) {
+		i--
 	}
-	return dropped
+	s.order = slices.Insert(s.order, i, queued[K]{key: key, at: at})
 }
 
 // compactLocked drops the places of the expiry order no entry owns, once
